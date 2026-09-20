@@ -221,15 +221,32 @@
     },
     {
       "files": [
-        // 9) Issue #2736: server.ts:803 `await import('./src/lib/tmux/read-mode')` trips the
-        // tmux dynamic-import selector (#1922 §4 D4, DR4-005). The comment at server.ts:794-801
-        // says a static import breaks Next's AsyncLocalStorage bootstrap and kills the first
-        // request, so this is NOT fixable by hoisting. Parked at "warn" to unblock `eslint .`;
-        // Issue #2738 decides what it becomes.
+        // 9) Issue #2738 / §4 D4: the ONE exemption from the tmux dynamic-import selector
+        // (#1922, DR4-005). `server.ts:803` reaches `initReadMode` through
+        // `await import('./src/lib/tmux/read-mode')` because a top-level static import
+        // perturbs Next's AsyncLocalStorage bootstrap under `tsx server.ts` and the first
+        // request that compiles middleware then dies (server.ts:794-801, read-mode.ts:392-398,
+        // docs/design/1623-tmux-reading-mode.md D1). Hoisting is not the fix either: the static
+        // form would need a `no-restricted-imports` allowlist ADDITION, which the same §4 D4
+        // forbids. So `no-restricted-syntax` is RE-DECLARED here — never "off", which would take
+        // the i18n (#1271) and `require()` detectors down with it — as the root array minus the
+        // `ImportExpression` selector, byte-identical otherwise and still at "error".
+        // Additions to this override are forbidden; deletion only. Pinned by
+        // tests/unit/guards/tmux-import-allowlist.test.ts (DYNAMIC_TMUX_IMPORT_EXEMPT).
         "server.ts"
       ],
       "rules": {
-        "no-restricted-syntax": "warn"
+        "no-restricted-syntax": [
+          "error",
+          {
+            "selector": ":matches(:matches(:matches(Program, ExportNamedDeclaration) > VariableDeclaration > VariableDeclarator, :matches(Program, ExportNamedDeclaration) > VariableDeclaration > VariableDeclarator > TSAsExpression) > :matches(ArrayExpression, ObjectExpression), :matches(:matches(Program, ExportNamedDeclaration) > VariableDeclaration > VariableDeclarator, :matches(Program, ExportNamedDeclaration) > VariableDeclaration > VariableDeclarator > TSAsExpression) > :matches(ArrayExpression, ObjectExpression) > ObjectExpression, :matches(:matches(Program, ExportNamedDeclaration) > VariableDeclaration > VariableDeclarator, :matches(Program, ExportNamedDeclaration) > VariableDeclaration > VariableDeclarator > TSAsExpression) > :matches(ArrayExpression, ObjectExpression) > Property > ObjectExpression, :matches(:matches(Program, ExportNamedDeclaration) > VariableDeclaration > VariableDeclarator, :matches(Program, ExportNamedDeclaration) > VariableDeclaration > VariableDeclarator > TSAsExpression) > :matches(ArrayExpression, ObjectExpression) > ObjectExpression > Property > ObjectExpression, :matches(:matches(Program, ExportNamedDeclaration) > VariableDeclaration > VariableDeclarator, :matches(Program, ExportNamedDeclaration) > VariableDeclaration > VariableDeclarator > TSAsExpression) > :matches(ArrayExpression, ObjectExpression) > Property > ArrayExpression > ObjectExpression) > Property[key.name=/^(label|title|description|placeholder|ariaLabel|tooltip|subtitle|heading)$/][value.type='Literal'][value.value=/[A-Za-z]/]",
+            "message": "i18n: モジュールスコープの const に表示文言が直書きされています。この位置では useTranslations() の t() を呼べないため英語が固定されます。`labelKey: 'nav.home'` のようにキーを持たせ、描画時に t(labelKey) で解決してください。技術的な値・キーコード表記など翻訳対象外の場合のみ eslint-disable-next-line に理由を添えて抑止してください (Issue #1271)。"
+          },
+          {
+            "selector": "CallExpression[callee.name='require'][arguments.0.value=/(^|\\/)tmux(\\/|$)/]",
+            "message": "Issue #1922 (§4 D4, DR4-005): ESLint 8's core no-restricted-imports only sees static import / export ... from, so a dynamic import() or require() of src/lib/tmux/** would slip past it. Same rule as the static form: go through the CLITool gateway or captureSessionOutput. There is no allowlist for this one - keep it at zero."
+          }
+        ]
       }
     }
   ]
