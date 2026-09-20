@@ -199,6 +199,9 @@ Claude 担当の #2734（4 ファイル）で、その原因も**起票時の前
 
 どちらもワーカー起因ではないので、3-4 の再指示回数には数えない。
 
+**新規 worktree では信頼ダイアログがほぼ必ず出る**（2026-09-20 の run、#2770 で実測）ので、
+exit 99 を受けたら**待たずにまず画面を見る**。手順は 3-1 の「冷間起動の失敗」に書いてある。
+
 判定の背景（2026-09-17 のパイロット、#2595 / PR #2602）: テスト 1 ファイル・原因と確定仕様あり・
 受入基準がすべて自動、という Issue を Antigravity に回したところ、作業ルールをすべて守って
 実装は 5 分で終わった。Antigravity は `.claude/commands` を読まないので、`/pm-auto-issue2dev`
@@ -646,8 +649,22 @@ send の後に task が `cliToolId` / `instanceId` = 担当に紐づいている
 必要な手順は goal に書き下す（2-4-2）。
 
 - **冷間起動の失敗**: send が exit 99 で、stderr に `prompt not ready` と出たら、メッセージは送られていない
-  （Codex / Command Code で実測。Antigravity は #2478 以降のパイロットでは起きていない）。
-  約 2 分待ってから 1 回だけ再送する。再送では task が作り直されるので、tasks.tsv の task id を差し替える。
+  （Codex / Command Code で実測。Antigravity は 2026-09-20 の run、#2770 で再発）。
+  **待つ前に画面を見る。** 待ってから再送する手順だと、新規 worktree でほぼ必ず出る信頼ダイアログに
+  2 分を払ったうえで 2 回目も同じ exit 99 になる（#2770 で実測）。
+
+  ```bash
+  SCREEN=$(commandmatedev capture "$WT" --instance "$AGENT" --pane --tail 30)
+  ```
+
+  | 画面 | 対応 |
+  |---|---|
+  | 信頼ダイアログ（`Do you trust the contents of this project?`） | `tmux send-keys -t "=mcbd-<agent>-<worktree-id>:" Enter` で確定 → **待たずに再送** |
+  | 既にプロンプト（入力欄の枠が出ている） | **待たずに再送**（送信枠に間に合わなかっただけ） |
+  | まだ起動中（バナーも入力欄も無い） | 約 2 分待ってから 1 回だけ再送する |
+
+  再送では task が作り直されるので、tasks.tsv の task id を差し替える。
+  再送も exit 99 なら、もう一度画面を見る（同じ表で分岐する）。再指示回数には数えない（3-4）。
 
 - **スラッシュコマンドは CommandMate リポジトリの worktree でのみ有効**。外部リポジトリの worker に
   送ると `Unknown command` で無反応になる（send は exit 0、composer も空なので気づけない）。
@@ -1266,7 +1283,7 @@ summary.md の末尾に「振り分けの改善案」節を書き、完了報告
 | 検証不合格（exit 20） | `verify --json` で失敗ゲートを特定し、先にワーカー起因かを判定（3-4）。ワーカー起因なら再指示。上限2回で、Antigravity 担当は Claude（opus）へ切替（3-5）、Claude（sonnet）担当は opus へ格上げ（3-5b）、Claude（opus）担当は人間へエスカレーション |
 | env-clean だけが FAIL（exit 20） | `capture --prompts` と違反項目の時刻で帰属を判定。ワーカー起因でなければ合格扱いにし、根拠を PR と summary に書く（3-4） |
 | 作業証跡ゼロ（exit 21） | captureでcomposer未確定・権限プロンプト・未起動を切り分け（Phase 3-4） |
-| send が exit 99（`prompt not ready`） | 未送信。約 2 分後に 1 回だけ再送し、task id を差し替える（3-1） |
+| send が exit 99（`prompt not ready`） | 未送信。**待つ前に capture で画面を見て**、信頼ダイアログ / 既にプロンプト / まだ起動中で分岐する（3-1 の表）。task id は再送のたびに差し替える |
 | Antigravity がアンケート画面で停止 | `tmux send-keys -t "mcbd-antigravity-$WT" -l -- 0` で閉じる（3-4） |
 | monitor が Antigravity を `IDLE` / `NOT_STARTED` と表示 | #2606 以降は agy 用の目印で読むので、生成中なら `GENERATING` になる。それでも出るのは、capture の `--json` にペインの行が無いポーリング。task 状態と `capture --prompts` で判断する（3-2） |
 | 契約エラー（send が exit 2） | 契約の全エラーが一度に出るので、`docs/design/task-contract.md` と突き合わせて修正し再送 |
