@@ -1,0 +1,32 @@
+# demo-video transcript template — the Claude turn `claude-intake.cast` appends (Issue #2833)
+#
+# One Claude Code session turn in the JSONL dialect
+# src/lib/hooks/sources/claude/transcript.ts reads, shaped like
+# claude-delegate.jsonl: the operator's prompt (`origin.kind: human`,
+# `promptSource: typed` — the markers #2196 requires before a `user` row is
+# written), TWO tool rounds, and the closing assistant record
+# (`stop_reason: end_turn` with prose — what #2264 requires before the turn may
+# be written). fake-agent.sh's `@transcript` row appends every non-comment line
+# to the file named by --transcript, replacing {{NOW}} {{TURN}} {{SESSION_ID}}
+# {{CWD}} {{WORKTREE}} {{MESSAGE}} {{EXEC_OUTPUT}} at replay time.
+#
+# Two rounds rather than one, because they are the beat the cut is about: the
+# half-formed thought the phone sent becomes a task contract FIRST (`Write`,
+# the `.commandmate/tasks/*.yaml` shape the contract reader parses), and only
+# then is handed to a second agent (`Bash`, the `commandmate ask … --instance
+# codex` the cassette's `@exec` really runs). The chat surface draws them as
+# the trailing tool-activity section (#2234), which the scene opens by seeding
+# `commandmate:chatShowToolActivity`.
+#
+# The last record's text is the Markdown the chat surface renders; the
+# `[Header.tsx](src/components/layout/Header.tsx)` link is what becomes a
+# ChatFileLink (#2345), and the phone taps it. What the link says about the
+# file is what the file says: the seed's Header.tsx carries
+# `aria-label="Toggle dark mode"` on the toggle. No personal path: `cwd` is the
+# seed worktree.
+{"parentUuid": null, "isSidechain": false, "type": "user", "message": {"role": "user", "content": "{{MESSAGE}}"}, "uuid": "{{TURN}}", "timestamp": "{{NOW}}", "permissionMode": "default", "origin": {"kind": "human"}, "promptSource": "typed", "userType": "external", "entrypoint": "cli", "cwd": "{{CWD}}", "sessionId": "{{SESSION_ID}}", "version": "2.1.261", "gitBranch": "feature/demo-dark-mode"}
+{"parentUuid": "{{TURN}}", "isSidechain": false, "message": {"model": "claude-opus-5", "id": "msg-a1-{{TURN}}", "type": "message", "role": "assistant", "content": [{"type": "text", "text": "Before anyone touches the code, I'll write down what you actually want as a task."}, {"type": "tool_use", "id": "toolu-1-{{TURN}}", "name": "Write", "input": {"file_path": ".commandmate/tasks/toggle-label.yaml", "content": "version: 1\ntitle: \"Give the header theme toggle a visible label\"\ngoal: |\n  The toggle is a bare glyph, so it reads as decoration.\n  Give it a label it announces itself with.\nscope:\n  allow:\n    - \"src/**\"\n    - \"test/**\"\nverify:\n  gates:\n    - unit\n"}}], "stop_reason": "tool_use"}, "type": "assistant", "uuid": "a1-{{TURN}}", "timestamp": "{{NOW}}", "userType": "external", "entrypoint": "cli", "cwd": "{{CWD}}", "sessionId": "{{SESSION_ID}}", "version": "2.1.261", "gitBranch": "feature/demo-dark-mode"}
+{"parentUuid": "a1-{{TURN}}", "isSidechain": false, "type": "user", "message": {"role": "user", "content": [{"tool_use_id": "toolu-1-{{TURN}}", "type": "tool_result", "content": "Wrote .commandmate/tasks/toggle-label.yaml (14 lines)", "is_error": false}]}, "uuid": "r1-{{TURN}}", "timestamp": "{{NOW}}", "sourceToolAssistantUUID": "a1-{{TURN}}", "userType": "external", "entrypoint": "cli", "cwd": "{{CWD}}", "sessionId": "{{SESSION_ID}}", "version": "2.1.261", "gitBranch": "feature/demo-dark-mode"}
+{"parentUuid": "r1-{{TURN}}", "isSidechain": false, "message": {"model": "claude-opus-5", "id": "msg-a2-{{TURN}}", "type": "message", "role": "assistant", "content": [{"type": "text", "text": "Handing it to Codex so it runs while you are away."}, {"type": "tool_use", "id": "toolu-2-{{TURN}}", "name": "Bash", "input": {"command": "commandmate ask {{WORKTREE}} --instance codex \"Give the header toggle a visible label. Keep it inside src/ and link the file in your reply.\" --json", "description": "Hand the task to Codex"}}], "stop_reason": "tool_use"}, "type": "assistant", "uuid": "a2-{{TURN}}", "timestamp": "{{NOW}}", "userType": "external", "entrypoint": "cli", "cwd": "{{CWD}}", "sessionId": "{{SESSION_ID}}", "version": "2.1.261", "gitBranch": "feature/demo-dark-mode"}
+{"parentUuid": "a2-{{TURN}}", "isSidechain": false, "type": "user", "message": {"role": "user", "content": [{"tool_use_id": "toolu-2-{{TURN}}", "type": "tool_result", "content": "{{EXEC_OUTPUT}}", "is_error": false}]}, "uuid": "r2-{{TURN}}", "timestamp": "{{NOW}}", "sourceToolAssistantUUID": "a2-{{TURN}}", "userType": "external", "entrypoint": "cli", "cwd": "{{CWD}}", "sessionId": "{{SESSION_ID}}", "version": "2.1.261", "gitBranch": "feature/demo-dark-mode"}
+{"parentUuid": "r2-{{TURN}}", "isSidechain": false, "message": {"model": "claude-opus-5", "id": "msg-a3-{{TURN}}", "type": "message", "role": "assistant", "content": [{"type": "text", "text": "Filed it as a task and handed the work to Codex.\n\nThe control is the ◐ button in [Header.tsx](src/components/layout/Header.tsx). It now carries `aria-label=\"Toggle dark mode\"`, so it names itself instead of sitting there as a glyph.\n\nHave a look when you are back."}], "stop_reason": "end_turn"}, "type": "assistant", "uuid": "a3-{{TURN}}", "timestamp": "{{NOW}}", "userType": "external", "entrypoint": "cli", "cwd": "{{CWD}}", "sessionId": "{{SESSION_ID}}", "version": "2.1.261", "gitBranch": "feature/demo-dark-mode"}

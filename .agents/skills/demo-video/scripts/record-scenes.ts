@@ -753,6 +753,19 @@ export const DELEGATE_ASK_MESSAGE = 'Ask Codex to review the dark mode toggle in
 export const MOBILE_APPROVE_MESSAGE = 'Run the unit tests and tell me if the header is ready to merge.';
 
 /**
+ * What the phone types in `idea-to-change` (Issue #2833): a half-formed
+ * complaint, not a specification. The cut is about the distance between
+ * noticing something and starting on it, so the operator's line has to be the
+ * kind of thing that normally ends its life in a notes app — writing it down
+ * as a task is the agent's first move, not the operator's.
+ *
+ * One line, for the same reason `MOBILE_APPROVE_MESSAGE` is: the transcript
+ * template writes `{{MESSAGE}}`, and the chat surface shows it as the question
+ * the turn answers.
+ */
+export const IDEA_MESSAGE = 'The theme toggle is easy to miss. I keep hunting for it.';
+
+/**
  * Sidebar collapsed, so the repository tab strip is on screen (it is the
  * collapsed sidebar's navigation, shown by default only while collapsed —
  * `shouldShowRepositoryTabBar`).
@@ -1694,6 +1707,72 @@ export const SCENES: Scene[] = [
       await viewer.waitFor({ state: 'visible', timeout: options.timeoutMs });
       await viewer.getByTestId('copy-content-button').waitFor({ state: 'visible', timeout: options.timeoutMs });
       await page.waitForTimeout(1800);
+    },
+  },
+  // ------------------------------------------- idea -> change, one screen ----
+  {
+    id: 'idea-to-change',
+    title: 'One line from the phone becomes a task, a hand-off and a file to open',
+    viewport: 'mobile',
+    seedStorage: (options) => ({
+      ...chatSurfaceStorage(options.worktreeId),
+      // The two tool rows ARE the subject — the thought written down as a task
+      // contract, then handed to a second agent — so the trailing tool-activity
+      // section is open when the reply lands. Folded is the product's default
+      // (#2284): right for reading, wrong for filming this.
+      [CHAT_TOOL_ACTIVITY_STORAGE_KEY]: 'true',
+    }),
+    // Nothing is sent off camera: the send is the first half of the take. All
+    // `prepare` guarantees is an agent that is alive and not already busy, so
+    // the line the phone types starts a turn instead of queueing behind one.
+    prepare: ({ baseUrl, options }) =>
+      waitForWorktree(
+        baseUrl,
+        { id: options.worktreeId, path: options.worktreePath },
+        (worktree) => worktree.isSessionRunning === true && worktree.isProcessing !== true,
+        'idle with a live agent session',
+        options.timeoutMs,
+      ).then(() => undefined),
+    run: async ({ page, baseUrl, options }) => {
+      await gotoLocalized(page, `${baseUrl}/worktrees/${options.worktreeId}?${CHAT_VIEW_QUERY}`, options.locale);
+      // The session row (#2357) resolved means the phone has the session behind
+      // the surface, so the composer under it is wired to something.
+      await page.getByTestId('mobile-session-model').waitFor({ state: 'visible', timeout: options.timeoutMs });
+      const composer = page.getByTestId('message-input-textarea');
+      await composer.waitFor({ state: 'visible', timeout: options.timeoutMs });
+      // The opening beat is the screen BEFORE the thought — the branch as it
+      // was left, composer empty.
+      await page.waitForTimeout(1500);
+
+      await composer.click();
+      await composer.pressSequentially(IDEA_MESSAGE, { delay: 45 });
+      await page.getByTestId('send-message-button').click();
+
+      // Read from the server, so the footage cannot claim a turn the product
+      // never started.
+      await waitForWorktree(
+        baseUrl,
+        { id: options.worktreeId, path: options.worktreePath },
+        (worktree) => worktree.isProcessing === true,
+        'generating',
+        options.timeoutMs,
+      );
+      await dismissQueuedBusyToast(page);
+      await page.waitForTimeout(2500);
+
+      // Waiting on the link rather than on `isProcessing` going false, because
+      // the transcript is what the phone renders and it arrives WITH the reply:
+      // the link being on screen is the same event as the turn being readable.
+      const link = lastFileLink(page);
+      await link.waitFor({ state: 'visible', timeout: options.timeoutMs });
+      await link.scrollIntoViewIfNeeded();
+      await page.waitForTimeout(2000);
+      await link.click();
+
+      const viewer = page.getByTestId('modal-panel');
+      await viewer.waitFor({ state: 'visible', timeout: options.timeoutMs });
+      await viewer.getByTestId('copy-content-button').waitFor({ state: 'visible', timeout: options.timeoutMs });
+      await page.waitForTimeout(2500);
     },
   },
 ];

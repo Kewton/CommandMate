@@ -1,0 +1,51 @@
+# demo-video fake-agent cassette — Claude Code TUI, the intake side (Issue #2833)
+#
+# Format: <delayMs>|@input|@exec|@transcript|@hook <TAB> <payload>
+#   - payload is expanded with `printf %b` (\e, \n, \t, \\)
+#   - `{{INPUT}}` / `{{TASK}}` are the message CommandMate sent; `{{WORKTREE}}`
+#     is --worktree
+#   - the turn is two tool rows rather than one, because that is the beat the
+#     cut is about: the half-formed thought the phone sent is written down as a
+#     task contract FIRST (`Write(.commandmate/tasks/toggle-label.yaml)`, the
+#     shape src/lib/contract reads), and only then handed to a second agent
+#   - `@exec` REALLY runs `commandmate ask … --instance codex … --json` in the
+#     pane (with CM_PORT from --port), so the product's send → wait → History
+#     code path runs unchanged and only the LLMs are replaced: the codex pane is
+#     codex-review.cast, and the reply `ask` prints is codex-review.jsonl's
+#     final_answer read back out of History
+#   - `@transcript` appends transcripts/claude-intake.jsonl to the file named by
+#     --transcript, stamped at replay time, BEFORE the ready frame — the poller
+#     reads the transcript the moment it judges the turn finished
+#   - `@hook UserPromptSubmit` / `@hook Stop` report the turn's two ends to the
+#     demo server the way Claude Code's own hooks do
+#   - the reply frame is held 8 s after `Stop`, so the loop back to the idle
+#     banner lands after the poller's 5 s capture cache has seen the reply
+#
+# Provenance: the frames reuse claude-delegate.cast's captures (real
+# `tmux capture-pane` frames of a Claude Code session, sanitised) and keep its
+# anchors verbatim:
+#   running -> "esc to interrupt" (CLAUDE_INTERRUPT_HINT_PATTERN) and the
+#              spinner+U+2026 line (CLAUDE_THINKING_PATTERN)
+#   ready   -> a line starting with U+276F (CLAUDE_PROMPT_PATTERN) plus a
+#              200-char U+2500 separator (CLAUDE_SEPARATOR_PATTERN)
+# Stripping the ANSI or shortening the separator breaks real detection, so do
+# not "tidy" this file.
+#
+# The running frame is on screen for the whole `@exec` (however long codex
+# takes), and the `ask` output lands BELOW it for the instant before the next
+# row repaints — keep the running anchors within the last 15 lines of the frame
+# above the tool row, as here, so a capture taken in that instant still reads
+# as running.
+
+0	\e[2J\e[3J\e[H\e[38;5;246m✻ Welcome to \e[1mClaude Code\e[0m\e[38;5;246m · demo fixture\e[39m\n\n\e[38;5;244m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\e[39m\n\e[38;5;246m❯ \e[39m\n\e[38;5;244m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\e[39m\n  \e[38;5;246m⏸ manual mode on · ? for shortcuts · ← for agents\e[39m\n
+@input	\e[2J\e[3J\e[H\e[38;5;246m❯\e[39m {{TASK}}\n\n\n\n\e[1m\e[38;5;220m✳\e[0m \e[38;5;220mCascading… \e[38;5;246m(3s · ↓0.6k tokens)\e[39m\n\e[38;5;244m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\e[39m\n\e[38;5;246m❯ \e[39m\n\e[38;5;244m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\e[39m\n  \e[38;5;246m⏸ manual mode on · esc to interrupt · ← for agents\e[39m\n
+@hook	UserPromptSubmit
+1600	\e[2J\e[3J\e[H\e[38;5;246m❯\e[39m {{TASK}}\n\n\e[38;5;114m⏺\e[39m Write(\e[1m.commandmate/tasks/toggle-label.yaml\e[0m)\n\e[38;5;246m  ⎿ 14 lines\e[39m\n\n\e[1m\e[38;5;220m✻\e[0m \e[38;5;220mFiling the task… \e[38;5;246m(6s · ↓1.1k tokens)\e[39m\n\e[38;5;244m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\e[39m\n\e[38;5;246m❯ \e[39m\n\e[38;5;244m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\e[39m\n  \e[38;5;246m⏸ manual mode on · esc to interrupt · ← for agents\e[39m\n
+2200	\e[2J\e[3J\e[H\e[38;5;246m❯\e[39m {{TASK}}\n\n\e[38;5;114m⏺\e[39m Write(\e[1m.commandmate/tasks/toggle-label.yaml\e[0m)\n\e[38;5;246m  ⎿ 14 lines\e[39m\n\n\e[38;5;114m⏺\e[39m Bash(commandmate ask {{WORKTREE}} --instance codex "Give the header toggle a visible label. Keep it inside src/ and link the file in your reply." --json)\n\e[38;5;246m  ⎿ Waiting for codex…\e[39m\n\n\e[1m\e[38;5;220m✦\e[0m \e[38;5;220mDelegating… \e[38;5;246m(11s · ↓1.4k tokens)\e[39m\n\e[38;5;244m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\e[39m\n\e[38;5;246m❯ \e[39m\n\e[38;5;244m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\e[39m\n  \e[38;5;246m⏸ manual mode on · esc to interrupt · ← for agents\e[39m\n
+@exec	commandmate ask {{WORKTREE}} --instance codex "Give the header toggle a visible label. Keep it inside src/ and link the file in your reply." --json
+0	\e[2J\e[3J\e[H\e[38;5;246m❯\e[39m {{TASK}}\n\n\e[38;5;114m⏺\e[39m Write(\e[1m.commandmate/tasks/toggle-label.yaml\e[0m)\n\e[38;5;246m  ⎿ 14 lines\e[39m\n\n\e[38;5;114m⏺\e[39m Bash(commandmate ask {{WORKTREE}} --instance codex "Give the header toggle a visible label. Keep it inside src/ and link the file in your reply." --json)\n\e[38;5;246m  ⎿ Waiting for codex…\e[39m\n\n\e[1m\e[38;5;220m✦\e[0m \e[38;5;220mDelegating… \e[38;5;246m(23s · ↓1.4k tokens)\e[39m\n\e[38;5;244m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\e[39m\n\e[38;5;246m❯ \e[39m\n\e[38;5;244m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\e[39m\n  \e[38;5;246m⏸ manual mode on · esc to interrupt · ← for agents\e[39m\n
+1200	\e[2J\e[3J\e[H\e[38;5;246m❯\e[39m {{TASK}}\n\n\e[38;5;114m⏺\e[39m Write(\e[1m.commandmate/tasks/toggle-label.yaml\e[0m)\n\e[38;5;246m  ⎿ 14 lines\e[39m\n\n\e[38;5;114m⏺\e[39m Bash(commandmate ask {{WORKTREE}} --instance codex "Give the header toggle a visible label. Keep it inside src/ and link the file in your reply." --json)\n\e[38;5;246m  ⎿ {"source":"chat","reply":"Added the label to the header toggle. …"}\e[39m\n\n\e[1m\e[38;5;220m⣷\e[0m \e[38;5;220mSummarising… \e[38;5;246m(29s · ↓2.6k tokens)\e[39m\n\e[38;5;244m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\e[39m\n\e[38;5;246m❯ \e[39m\n\e[38;5;244m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\e[39m\n  \e[38;5;246m⏸ manual mode on · esc to interrupt · ← for agents\e[39m\n
+@transcript	transcripts/claude-intake.jsonl
+2600	\e[2J\e[3J\e[H\e[38;5;246m❯\e[39m {{TASK}}\n\n\e[38;5;114m⏺\e[39m Write(\e[1m.commandmate/tasks/toggle-label.yaml\e[0m)\n\e[38;5;246m  ⎿ 14 lines\e[39m\n\n\e[38;5;114m⏺\e[39m Bash(commandmate ask {{WORKTREE}} --instance codex "Give the header toggle a visible label. Keep it inside src/ and link the file in your reply." --json)\n\e[38;5;246m  ⎿ {"source":"chat","reply":"Added the label to the header toggle. …"}\e[39m\n\n\e[38;5;114m⏺\e[39m Filed it as .commandmate/tasks/toggle-label.yaml and handed the work to Codex.\n\n  The control is the ◐ button in \e[1msrc/components/layout/Header.tsx\e[0m. It now carries\n  aria-label="Toggle dark mode", so it names itself instead of sitting there as a glyph.\n\n  Have a look when you are back.\n\e[38;5;244m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\e[39m\n\e[38;5;246m❯ \e[39m\n\e[38;5;244m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\e[39m\n  \e[38;5;246m⏸ manual mode on · ? for shortcuts · ← for agents\e[39m\n
+@hook	Stop
+8000	\e[2J\e[3J\e[H\e[38;5;246m❯\e[39m {{TASK}}\n\n\e[38;5;114m⏺\e[39m Write(\e[1m.commandmate/tasks/toggle-label.yaml\e[0m)\n\e[38;5;246m  ⎿ 14 lines\e[39m\n\n\e[38;5;114m⏺\e[39m Bash(commandmate ask {{WORKTREE}} --instance codex "Give the header toggle a visible label. Keep it inside src/ and link the file in your reply." --json)\n\e[38;5;246m  ⎿ {"source":"chat","reply":"Added the label to the header toggle. …"}\e[39m\n\n\e[38;5;114m⏺\e[39m Filed it as .commandmate/tasks/toggle-label.yaml and handed the work to Codex.\n\n  The control is the ◐ button in \e[1msrc/components/layout/Header.tsx\e[0m. It now carries\n  aria-label="Toggle dark mode", so it names itself instead of sitting there as a glyph.\n\n  Have a look when you are back.\n\e[38;5;244m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\e[39m\n\e[38;5;246m❯ \e[39m\n\e[38;5;244m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\e[39m\n  \e[38;5;246m⏸ manual mode on · ? for shortcuts · ← for agents\e[39m\n

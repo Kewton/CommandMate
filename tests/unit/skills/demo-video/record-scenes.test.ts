@@ -25,6 +25,7 @@ import {
   DEFAULT_VIEWPORT,
   DELEGATE_ASK_MESSAGE,
   DEMO_CATALOG_SKILL_ID,
+  IDEA_MESSAGE,
   MOBILE_APPROVE_MESSAGE,
   MOBILE_VIEWPORT,
   SCENES,
@@ -252,6 +253,8 @@ describe('SCENES', () => {
       'reply-file-link',
       'mobile-approve',
       'mobile-file-link',
+      // Issue #2833: idea -> change, on one phone screen.
+      'idea-to-change',
     ]);
   });
 
@@ -323,6 +326,7 @@ describe('SCENES', () => {
       'respond-from-mobile',
       'mobile-approve',
       'mobile-file-link',
+      'idea-to-change',
     ]);
   });
 });
@@ -395,6 +399,7 @@ describe('the #2381 hero scenes', () => {
     // adopt the `/send` row.
     expect(DELEGATE_ASK_MESSAGE).not.toMatch(/\n/);
     expect(MOBILE_APPROVE_MESSAGE).not.toMatch(/\n/);
+    expect(IDEA_MESSAGE).not.toMatch(/\n/);
     expect(DELEGATE_ASK_MESSAGE).toMatch(/Codex/);
   });
 
@@ -1329,5 +1334,73 @@ describe('the seed carries what the #1810 scenes read', () => {
     expect(envUp).toContain('skills/cmate-verify');
     // Both install roots, byte-identically, because that is how it ships.
     expect(envUp).toContain('for skill_root in .claude .agents');
+  });
+});
+
+/**
+ * The idea -> change cut (Issue #2833). One phone screen carries five beats,
+ * and two of them are only on screen because of what this scene seeds and what
+ * its cassette pairs with.
+ */
+describe('the #2833 idea-to-change scene', () => {
+  const SKILL_DIR = path.resolve(__dirname, '../../../../.claude/skills/demo-video');
+  const scene = SCENES.find((s) => s.id === 'idea-to-change')! as BrowserScene;
+  const state = (): DemoState =>
+    ({
+      baseUrl: 'http://127.0.0.1:3399',
+      videoDir: '/tmp/videos',
+      CM_DEMO_SEED_REPO: `${SEED_ROOT}/cmdemo-app`,
+      CM_DEMO_SEED_REPO_2: `${SEED_ROOT}/cmdemo-docs`,
+      CM_DEMO_AGENTS: 'claude,codex,antigravity,opencode,command-code',
+    }) as DemoState;
+
+  it('opens the phone on the chat surface with tool activity unfolded', () => {
+    const seeded = scene.seedStorage!(
+      { ...parseRecordArgs(ARGS, {}), worktreeId: 'wt-dark-mode' },
+      state(),
+    );
+    expect(seeded[`${SURFACE_MODE_STORAGE_KEY_PREFIX}wt-dark-mode-mobile`]).toBe('chat');
+    // The two tool rows are the beat; folded (the product default, #2284) they
+    // would need a tap the cut has no room for.
+    expect(seeded[CHAT_TOOL_ACTIVITY_STORAGE_KEY]).toBe('true');
+  });
+
+  it('sends a complaint rather than a specification', () => {
+    // Writing it down as a task is the agent's first move in the cassette, so
+    // the operator's line must not already be one.
+    expect(IDEA_MESSAGE).not.toMatch(/\.commandmate|task|issue/i);
+  });
+
+  it('pairs the intake cassette with the transcript that renders its two tool rows', () => {
+    const cassette = fs.readFileSync(path.join(SKILL_DIR, 'fixtures/claude-intake.cast'), 'utf8');
+    expect(cassette).toContain('@transcript\ttranscripts/claude-intake.jsonl');
+    // The hand-off is really run, not painted: the codex pane answers it.
+    expect(cassette).toContain('@exec\tcommandmate ask {{WORKTREE}} --instance codex');
+
+    const turn = fs
+      .readFileSync(path.join(SKILL_DIR, 'fixtures/transcripts/claude-intake.jsonl'), 'utf8')
+      .split('\n')
+      .filter((line) => line.trim() !== '' && !line.startsWith('#'))
+      .map((line) => JSON.parse(line) as { message?: { content?: unknown; stop_reason?: string } });
+
+    const toolNames = turn
+      .flatMap((row) => (Array.isArray(row.message?.content) ? row.message.content : []))
+      .filter((part: { type?: string }) => part.type === 'tool_use')
+      .map((part: { name?: string }) => part.name);
+    expect(toolNames).toEqual(['Write', 'Bash']);
+
+    // The turn may only be written once it is closed (#2264), and the last
+    // record's Markdown is what the phone taps.
+    const last = turn[turn.length - 1];
+    expect(last.message?.stop_reason).toBe('end_turn');
+    const text = (last.message?.content as { text?: string }[])[0].text ?? '';
+    expect(text).toContain('[Header.tsx](src/components/layout/Header.tsx)');
+    // What the reply says about the file is what the file says.
+    expect(text).toContain('aria-label="Toggle dark mode"');
+  });
+
+  it('films the file the reply links to, seeded with the label the reply names', () => {
+    const envUp = fs.readFileSync(path.join(SKILL_DIR, 'scripts/env-up.sh'), 'utf8');
+    expect(envUp).toContain('aria-label="Toggle dark mode"');
   });
 });
