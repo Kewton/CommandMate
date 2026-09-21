@@ -144,49 +144,51 @@ export const ANTIGRAVITY_VERIFIED_AGAINST = {
  * dialog frames above, and no 1.53.1 frame was added to the fixture directory,
  * so the condition in the previous paragraph is still unmet.
  *
- * ## Not advanced by Issue #2754 either — and that Issue is why
+ * ## Held back by Issue #2754, advanced to 1.54.1 by Issue #2773
  *
  * #2754 finally did the probe the paragraph above asked for: a live **1.54.1**
  * session on a private tmux socket at 200x1000, twenty-six captures in
- * `tests/fixtures/command-code-askuserquestion-2754/`, and every key in the
- * screen's footer sent ONE AT A TIME with a capture on each side of it. By the
- * letter of that paragraph the stamp could move to 1.54.1. It does not, because
- * what the probe measured is that **the rules still do not answer for 1.54.1**.
+ * `tests/fixtures/command-code-askuserquestion-2754/` (`capturedAt` is the day
+ * that probe ran, 2026-09-20), and every key in the screen's footer sent ONE AT
+ * A TIME with a capture on each side of it. By the letter of that paragraph the
+ * stamp could have moved then. It did not, because what the probe measured was
+ * that **the rules did not answer for 1.54.1**: nine of the 26 captures came out
+ * wrong, and six of those published `ready` / `input_prompt` for a live,
+ * unanswered question — #2521's 偽完了 on a real capture. Stamping 1.54.1 over
+ * frames the rules demonstrably misread would have made the probe report a
+ * measurement that said the opposite of what was measured — the fail-open
+ * version of the #2304 precedent rather than an application of it.
  *
- * One of the two defects it found has since been fixed. **#2753** added
- * `COMMAND_CODE_TAB_ANSWERED_MARKERS` (`✔`, U+2714) after the probe showed that
- * a strip like `✔ Party size | ● Update scope | ◯ Review` failed
- * `isCommandCodeQuestionTabRow` outright, so one answered question took eight of
- * these frames — seven checkbox screens and a single-select — out of the reader
- * and into the generic parser, which answered them as single-select lists with
- * `[ ] ` still on the labels. Those eight now read correctly.
+ * The defects it found were closed one Issue at a time:
  *
- * What the probe measured that is STILL true on this build:
+ *  - **#2753** added `COMMAND_CODE_TAB_ANSWERED_MARKERS` (`✔`, U+2714), so a
+ *    strip like `✔ Party size | ● Update scope | ◯ Review` passes
+ *    `isCommandCodeQuestionTabRow` and eight frames left the generic parser;
+ *  - **#2755** closed the rest: (a) a `❯` outside the option list (`❯ Submit`,
+ *    `❯ Next`, `❯ notes:`) is named `cursor-outside-options` and hands the human
+ *    the screen instead of publishing `ready`; (b) the Review page is named
+ *    `review-page` and publishes no payload, so its default can no longer COMMIT
+ *    the answers; (c) checkbox lists (`1. [ ] …` / `Submit`) are read as
+ *    multi-select with the box off the label and the 1.54.1 footer off the last
+ *    option.
  *
- *  - **the cursor can leave the option list.** 1.54.1 draws `❯ Submit`,
- *    `❯ Next` and, after `n`, `❯ notes:` — and the region reading counts
- *    cursors inside the numbered run, so six captures of a live, unanswered
- *    question publish `ready` / `input_prompt`, i.e. #2521's 偽完了 on a real
- *    capture rather than on the synthetic frame it was argued from;
- *  - **the Review page is answerable by accident.** Enter on `❯ Submit` opens a
- *    second confirm (`❯ 1. Submit` / `2. Cancel`), which the generic parser
- *    reads as a two-option prompt whose default COMMITS the human's answers;
- *  - **the new footer lands inside the last option's label** on both frames the
- *    reader does read, because 1.53.0 drew nothing under the option run and the
- *    tail walk folds whatever follows it. The footer is also drawn only when the
- *    call carries MORE THAN ONE question, so it is not usable as a marker either.
+ * **The stamp moved to 1.54.1 because all twenty-six frames now read correctly**
+ * (`askuserquestion-1541-2754.test.ts` pins each): fifteen publish an answerable
+ * payload, six are `cursor-outside-options` and two are `review-page` (both
+ * decline on purpose — a human is sent to the screen, Auto-Yes has nothing to
+ * send), two are `ready` because the question is gone, and one is `running`
+ * because it was caught mid-turn. False completions went from six to zero.
+ * The rules were re-read off THESE frames, so 1.54.1 is the build they were read
+ * off — not the build that happens to be installed. `getDetectorFreshness`
+ * compares this stamp with the CLI installed now and will say `stale` once that
+ * is newer, which is the probe doing its job.
  *
  * This stamp answers "which build were these rules read off", and
- * {@link getDetectorFreshness} turns it into "are they current". Moving it to
- * 1.54.1 while nine of the twenty-six captures are still misread would make the
- * probe say the rules were measured against a build they demonstrably misread —
- * the fail-open version of the #2304 precedent rather than an application of it.
- * Advance it when #2755 re-reads the rules off those frames, to the version
- * whose frames the new rules were read from.
+ * {@link getDetectorFreshness} turns it into "are they current".
  */
 export const COMMAND_CODE_VERIFIED_AGAINST = {
-  version: '1.40.1',
-  capturedAt: '2026-09-03',
+  version: '1.54.1',
+  capturedAt: '2026-09-20',
   paneGeometry: '200x1000',
 } as const;
 
