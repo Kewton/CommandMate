@@ -35,7 +35,7 @@ describe('引用されたフッタ文言でフレームが切れない (Issue 27
   });
 
   it('引用行より下のエージェントの出力も残る', () => {
-    // 引用行そのものは「古いフッタ」として切り捨てられる（下に新しいアンカーがあるときの既存挙動）。
+    // #2776 以降、文中の引用はフッタと見なされないので引用行そのものも残る（tui-frame-footer-2776.test.ts が固定）。
     expect(normalizeTuiFrameForDetection(frame())).toContain('DONE: must 0 件 / should 2 件');
   });
 
