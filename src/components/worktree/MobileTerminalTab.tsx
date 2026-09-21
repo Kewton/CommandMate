@@ -181,6 +181,15 @@ const MOBILE_SURFACE_SEGMENTS: readonly {
   { mode: 'chat', labelKey: 'surfaceMode.chat', icon: MessageSquare },
 ] as const;
 
+/**
+ * Issue #2823: where both search bars start on the phone — 64px below the top
+ * of the terminal region, 6px below the surface pill. The pill is 50px tall at
+ * `top-2`, so its bottom is 58px down; with the session row it is at `top-9`
+ * but the region is 28px (`h-7`) lower too, so it is 58px either way. At
+ * `top-2` the bars opened under the pill (`z-30`), hiding "next" and "close".
+ */
+const MOBILE_SEARCH_BAR_TOP_CLASS = 'top-16';
+
 // ============================================================================
 // The session row's model source (Issue #2357)
 // ============================================================================
@@ -557,6 +566,10 @@ const MobileChatSurface = memo(function MobileChatSurface({
         // top-right icons, so the transcript draws none and the pill carries
         // the tool-activity toggle instead.
         hideCornerControls: true,
+        // Issue #2823: with the icon gone, search opens from the "More
+        // actions" sheet (`chat-search-open`), and the bar opens below the pill.
+        openSearchOnWindowEvent: true,
+        searchBarTopClassName: MOBILE_SEARCH_BAR_TOP_CLASS,
       }}
     />
   );
@@ -1037,6 +1050,7 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
             compactTuiLayoutPadding={compactTuiLayoutPadding}
             preservePaintedPanelRows={preservePaintedPanelRows}
             wrapMode={mobileWrapMode}
+            searchBarTopClassName={MOBILE_SEARCH_BAR_TOP_CLASS}
           />
         )}
       </div>

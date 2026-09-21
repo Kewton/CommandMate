@@ -390,6 +390,13 @@ export interface ChatSurfaceHistoryProps {
    * pill covers that corner and carries the tool-activity toggle itself).
    */
   hideCornerControls?: boolean;
+  /**
+   * Issue #2823: forwarded to `ChatTranscript` — open its search on the window
+   * event `chat-search-open`. Only the phone passes it (`MobileTerminalTab`).
+   */
+  openSearchOnWindowEvent?: boolean;
+  /** Issue #2823: forwarded to `ChatTranscript` — the top offset class of its top-right strip. */
+  searchBarTopClassName?: string;
 }
 
 export interface ChatSurfaceProps {

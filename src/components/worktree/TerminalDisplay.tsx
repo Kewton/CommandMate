@@ -86,6 +86,12 @@ export interface TerminalDisplayProps {
    * caller's `text-xs` would silently lose.
    */
   density?: TerminalDisplayDensity;
+  /**
+   * Issue #2823: the search bar's top offset class. Replaces the default
+   * `top-2` (two `top-*` classes resolve by stylesheet order, as `density`
+   * notes). The phone passes a lower one so the bar opens below its pill.
+   */
+  searchBarTopClassName?: string;
   /** Additional CSS classes */
   className?: string;
 }
@@ -134,6 +140,7 @@ export const TerminalDisplay = memo(function TerminalDisplay({
   preservePaintedPanelRows = false,
   wrapMode = 'viewport',
   density = 'regular',
+  searchBarTopClassName = 'top-2',
   className = '',
 }: TerminalDisplayProps) {
   // Issue #2445: the two #842 placeholders were the last Japanese string literals
@@ -382,7 +389,7 @@ export const TerminalDisplay = memo(function TerminalDisplay({
     <div className="relative h-full flex flex-col">
       {/* [Issue #47] Terminal search bar overlay */}
       {isSearchOpen && (
-        <div className="absolute top-2 right-2 z-10">
+        <div className={`absolute ${searchBarTopClassName} right-2 z-10`}>
           <TerminalSearchBar
             query={searchQuery}
             onQueryChange={setSearchQuery}
