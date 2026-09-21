@@ -24,9 +24,10 @@
  *
  * Every highlighted row is one span, byte-identical in shape to the 0.146.0 –
  * 0.153.2 captures, and every one of the five screens reads `waiting`. One idle
- * frame outside the table reads `running` for a reason unrelated to the row
- * rule; it is pinned below as a finding, not fixed, and it is why
- * `CODEX_VERIFIED_AGAINST` was not advanced to 0.155.1.
+ * frame outside the table read `running` for a reason unrelated to the row
+ * rule; #2808 pinned it as a finding and held `CODEX_VERIFIED_AGAINST` back.
+ * Issue #2818 fixed it (the titled status bar is now a boundary) and advanced
+ * the stamp — see the last block below and `codex-thread-title-bar-2818.test.ts`.
  *
  * @vitest-environment node
  */
@@ -38,6 +39,7 @@ import { detectSessionStatus, SELECTION_LIST_REASONS } from '@/lib/detection/sta
 import {
   CODEX_STATUS_BAR_PATTERN,
   CODEX_THINKING_PATTERN,
+  CODEX_TRAILED_STATUS_BAR_PATTERN,
   stripAnsi,
 } from '@/lib/detection/cli-patterns';
 import { STATUS_REASON } from '@/lib/detection/status-reason';
@@ -307,17 +309,18 @@ describe('[#2808] the shape the Issue feared would be read as the composer', () 
 });
 
 // ---------------------------------------------------------------------------
-// Outside the table: a finding, pinned rather than fixed.
+// Outside the table: #2808's finding, fixed by Issue #2818.
 // ---------------------------------------------------------------------------
 
-describe('[#2808] finding: an idle frame after a declined approval reads `running`', () => {
+describe('[#2808 → #2818] an idle frame after a declined approval reads `ready`', () => {
   /**
    * The operator pressed Esc on the approval, codex printed `■ Conversation
    * interrupted` and went back to its composer — an idle session. #2798's row
-   * rule reads it correctly; the status does not. The Issue's instruction for a
-   * misread is to report it and not change the rules, so this block pins what
-   * the detector says TODAY and why. When the rule is fixed in its own Issue,
-   * the `running` expectation below is the one to flip.
+   * rule read it correctly; the status did not: #2808 pinned `running` here
+   * because the bar carries the thread's title after the path, the boundary
+   * was lost, and branch D's 15-row tail reached the declined command's `• Ran`
+   * row. #2818 made the titled bar a boundary, so the rows between the bar and
+   * the composer are windowed exactly as they are under an untitled bar.
    */
   const NAME = 'idle-after-declined-approval';
   const STATUS_BAR_ROW = 25;
@@ -329,23 +332,29 @@ describe('[#2808] finding: an idle frame after a declined approval reads `runnin
     expect(readCodexDialogFrame(frame, lines, end)).toBeNull();
   });
 
-  it('the status is `running` / `thinking_indicator` (the misread)', () => {
+  it('the status is `ready` / `input_prompt` (was `running` / `thinking_indicator`)', () => {
     const result = detectSessionStatus(read(NAME), 'codex');
-    expect(result.status).toBe('running');
-    expect(result.reason).toBe(STATUS_REASON.THINKING_INDICATOR);
+    expect(result.status).toBe('ready');
+    expect(result.reason).toBe(STATUS_REASON.INPUT_PROMPT);
+    expect(result.hasActivePrompt).toBe(false);
+    // Auto-Yes hands the detector a stripped capture; it must read the same.
+    expect(detectSessionStatus(stripAnsi(read(NAME)), 'codex').status).toBe('ready');
   });
 
-  it('because the status bar carries a thread title after the path, and the bar pattern wants the path last', () => {
+  it('the bar carries a thread title after the path, which only the trailed pattern accepts', () => {
     const bar = stripAnsi(read(NAME).split('\n')[STATUS_BAR_ROW]);
     expect(bar).toMatch(/ · Run touch probe\.txt$/);
     expect(CODEX_STATUS_BAR_PATTERN.test(bar)).toBe(false);
-    // The same session's bar before any thread had a title is recognised.
-    expect(CODEX_STATUS_BAR_PATTERN.test(stripAnsi(read('idle-composer').split('\n')[12]))).toBe(true);
-    // With no bar, the tail window reaches the lingering record of the declined command.
+    expect(CODEX_TRAILED_STATUS_BAR_PATTERN.test(bar)).toBe(true);
+    // The same session's bar before any thread had a title is the other shape.
+    const untitledBar = stripAnsi(read('idle-composer').split('\n')[12]);
+    expect(CODEX_STATUS_BAR_PATTERN.test(untitledBar)).toBe(true);
+    expect(CODEX_TRAILED_STATUS_BAR_PATTERN.test(untitledBar)).toBe(false);
+    // The declined command's record is still in the frame; it is simply no longer read.
     expect(CODEX_THINKING_PATTERN.test(stripAnsi(read(NAME).split('\n')[17]))).toBe(true);
   });
 
-  it('taking the thread title off the bar is enough to read it `ready`', () => {
+  it('reads the same with the thread title taken off the bar', () => {
     const frame = read(NAME);
     const bar = frame.split('\n')[STATUS_BAR_ROW];
     const untitled = bar.replace(/ · \x1b\[0m\x1b\[38;2;156;222;211mRun touch probe\.txt\x1b\[39m$/, '');
@@ -355,9 +364,11 @@ describe('[#2808] finding: an idle frame after a declined approval reads `runnin
     expect(result.reason).toBe(STATUS_REASON.INPUT_PROMPT);
   });
 
-  it('holds the detector-wide stamp back while this frame is misread', () => {
+  it('lets the detector-wide stamp advance to 0.155.1', () => {
     // `CODEX_VERIFIED_AGAINST` claims the rules answer for the build it names.
-    // Advance it to 0.155.1 only once the frame above reads `ready`.
-    expect(CODEX_VERIFIED_AGAINST.version).toBe('0.148.0');
+    // #2808 held it at 0.148.0 while the frame above was misread.
+    expect(CODEX_VERIFIED_AGAINST.version).toBe('0.155.1');
+    expect(CODEX_VERIFIED_AGAINST.capturedAt).toBe('2026-09-21');
+    expect(CODEX_VERIFIED_AGAINST.paneGeometry).toBe('200x1000');
   });
 });

@@ -665,6 +665,45 @@ export const CODEX_PAGER_FOOTER_PATTERN =
 export const CODEX_STATUS_BAR_PATTERN = /^\s*\S.*·\s*~?\/\S*\s*$/;
 
 /**
+ * Codex status bar with something drawn AFTER the path (Issue #2818) — the
+ * second shape `findCodexFooterBoundary` in `tools/codex/detect.ts` accepts.
+ *
+ * From codex 0.154.0 on, the bar stops ending in the path once the first turn
+ * has named the thread, and Plan mode adds a right-aligned badge:
+ *
+ * ```text
+ *   gpt-5.6-terra low · /private/var/…/repo · Run touch probe.txt
+ *   gpt-6-astra medium · ~/uat3-…/sandbox-repo                    Plan mode (shift+tab to cycle)
+ * ```
+ *
+ * {@link CODEX_STATUS_BAR_PATTERN} wants the path last, so every such frame had
+ * no boundary and fell to the detector's bar-independent branch D (#1150's
+ * safety net). That branch reads the 15-row tail, and on an idle frame the tail
+ * still holds the finished turn's `• Ran …` record — which is how an idle
+ * session read `running` (#2808's `idle-after-declined-approval.txt`; #2818
+ * reproduced it on a turn that simply ran one command and answered).
+ *
+ * Kept a SEPARATE pattern rather than a widened {@link CODEX_STATUS_BAR_PATTERN}
+ * so the change stays on the one reader it was measured for: that pattern is
+ * also the stripped-capture landmark of {@link findCodexChromeStart} and the
+ * value reader's first test in `model-info-extractor.ts`, neither of which
+ * this Issue measured.
+ *
+ * The shape is the one `CODEX_STATUS_BAR_WITH_TRAILER_PATTERN`
+ * (`model-info-extractor.ts`, #2592) reads values off, written out here rather
+ * than imported: that module's rule is that it must never be the reason this
+ * boundary moves. Head segment, `·`, a path, then EITHER a further `·`
+ * segment OR a column gap (two spaces) before right-aligned text. `[^·]*` puts
+ * the path right after the FIRST `·`, so codex's in-flight row (`• Working (…)
+ * · 1 background terminal running · /ps to view`) is not a bar — its first `·`
+ * is followed by a count, not a path.
+ *
+ * Single-line, no /g, no nested quantifiers (ReDoS-safe), as above.
+ */
+export const CODEX_TRAILED_STATUS_BAR_PATTERN =
+  /^\s*\S[^·]*·\s*~?\/\S*(?:\s*·[^\n]*|[^\S\n]{2,}\S[^\n]*)$/;
+
+/**
  * How far above the last non-blank row {@link findCodexChromeStart} looks for the
  * composer.
  *
