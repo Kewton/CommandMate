@@ -13,8 +13,13 @@ const CLAUDE_PICKER_FOOTER_PATTERN = /Enter\s+to\s+select\b.*\bnavigate\b/i;
 
 // A prompt/thinking/input anchor below a footer means that footer belongs to an
 // older frame. Task-panel rows intentionally do not match these patterns.
+// `›` (U+203A) is codex's composer glyph. Without it, a line anywhere in the
+// transcript that merely QUOTES a picker footer truncates the frame at that
+// line and the live composer below it is discarded — the agent then reads as
+// `running` / `default` forever (Issue 2774). The other six tools draw
+// `>` or `❯`, so this class is what they are already covered by.
 const CLAUDE_LOWER_INTERACTIVE_ANCHOR =
-  /^\s*[>❯]\s*(?:\d{1,2}[.)])?|esc\s+to\s+interrupt|[✻✽✶✢✳⦿◉●⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]\s+.+…/i;
+  /^\s*[>❯›]\s*(?:\d{1,2}[.)])?|esc\s+to\s+interrupt|[✻✽✶✢✳⦿◉●⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]\s+.+…/i;
 
 function isClaudeFooter(line: string): boolean {
   return CLAUDE_PROMPT_FOOTER_PATTERN.test(line) || CLAUDE_PICKER_FOOTER_PATTERN.test(line);
