@@ -59,7 +59,7 @@
 'use client';
 
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { X } from 'lucide-react';
+import { Keyboard, X } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
 import type { AgentInstance, CLIToolType } from '@/lib/cli-tools/types';
 import { isAnswerablePromptData, type LivePromptData } from '@/types/models';
@@ -123,6 +123,29 @@ import {
   writeSurfaceMode,
 } from '@/config/surface-mode-config';
 import { Tooltip } from '@/components/common/Tooltip';
+
+/**
+ * Composer-row width at or above which the direct-input toggle prints its
+ * label beside its icon (Issue #2797).
+ *
+ * The container is `MessageInput`'s input row (`@container`), as for #2597's
+ * `AGENT_MODE_NOTATION_MIN_CONTAINER_PX`, so the answer follows the pane. The
+ * classes on the toggle MUST spell the same value as literals — the label's
+ * `inline` and the button's `px-2`, both under the 520px container variant:
+ * Tailwind scans source text. (Not written out in full here, because a class
+ * spelled in a comment is a class Tailwind generates, and that would hide an
+ * interpolated one from `tests/e2e/composer-two-row-2598.spec.ts`.)
+ *
+ * The label has to fit beside the widest toolbar content without taking any of
+ * it: codex's mode control with its caution, 323px of start group, needs 463px
+ * of row once the labelled toggle (96px) and the interrupt button are beside
+ * it. 520 leaves a margin for copy that runs longer, and still labels the
+ * one-split pane (910px of row). Below it — the two-split pane, the 2x2 grid
+ * and every three-split pane — the toggle is its icon (24px), named by
+ * `aria-label` and `title`. See the footer's `directInputSlot` for the
+ * measurements.
+ */
+export const DIRECT_INPUT_LABEL_MIN_CONTAINER_PX = 520;
 
 /**
  * Issue #756: props are grouped into domain types. `TerminalSplitPaneContent`
@@ -1156,70 +1179,89 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
           }
           // Issue #1080: per-split Auto-Yes toggle now lives in the composer's
           // bottom meta row instead of its own full-width footer row.
-          // Issue #2766: the direct-input toggle rides the SAME slot as
-          // Auto-Yes rather than getting one of its own. `autoYesSlot` is a
-          // `ReactNode`, so a Fragment carries both, and it goes AFTER the
-          // Auto-Yes toggle so the switch keeps the left edge of the strip
-          // (`composer-auto-yes` scrolls sideways; whatever is first is what
-          // stays painted in a narrow pane).
-          //
-          // ## Why the toggle disappears between 420px and 520px of meta row
-          //
-          // #2598's budget is one line of meta row, and the row's Auto-Yes half
-          // is what pays for anything added to it. Measured in Chromium at
-          // 1440x900 (tests/e2e/composer-two-row-2598.spec.ts, `MEASURE-2598`):
-          //
-          //   | item                               | width |
-          //   |------------------------------------|-------|
-          //   | hints (`@min-[420px]`) + its gap   | 195px |
-          //   | Auto-Yes ON, copilot / antigravity | 216 / 236px |
-          //   | this toggle + its gap              |  87px |
-          //
-          // So a row that draws the hints needs 195 + 236 + 87 = 518px before a
-          // second control fits beside a full Auto-Yes. Below that the strip
-          // scrolls, and the e2e asserts the Auto-Yes control is NOT clipped
-          // wherever the hints are drawn — the two-split pane and every pane of
-          // the 2x2 grid are 431px of row, which is exactly the band where the
-          // hints have already taken the room.
-          //
-          // Hence `@min-[420px]:hidden @min-[520px]:inline-flex` over a base
-          // `inline-flex`: drawn below 420 (no hints, the strip is the whole
-          // row — a 3-split pane keeps the toggle), yielded to the hints in the
-          // band, and drawn again once the row can carry all three. Raising
-          // COMPOSER_HINTS_MIN_CONTAINER_PX instead would be the other way to
-          // free the band, but that constant is `MessageInput`'s and the e2e
-          // pins the hints ON at two splits.
-          //
-          // Keep the two literals as literals: Tailwind scans source text, so
-          // an interpolated class generates no CSS and the toggle would be
-          // drawn at every width (the #2131 rule, restated in composer-layout).
           autoYesSlot={
-            <>
-              <AutoYesToggle
-                enabled={autoYesEnabled}
-                expiresAt={autoYesExpiresAt ?? null}
-                onToggle={onAutoYesToggle}
-                lastAutoResponse={lastAutoResponse ?? null}
-                cliToolName={cliToolId}
-                inline
-              />
-              <button
-                type="button"
-                data-testid="direct-input-toggle"
-                aria-pressed={directInputOpen}
-                aria-label={directInputToggleAria}
-                title={directInputToggleAria}
-                disabled={!terminal.isRunning}
-                onClick={handleDirectInputToggle}
-                className={`shrink-0 inline-flex @min-[420px]:hidden @min-[520px]:inline-flex items-center h-[22px] px-2 rounded-md border text-[11px] font-medium leading-none transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
-                  directInputOpen
-                    ? 'bg-info-subtle border-info-border text-info-foreground'
-                    : 'bg-surface border-border text-muted-foreground hover:bg-muted'
-                }`}
-              >
+            <AutoYesToggle
+              enabled={autoYesEnabled}
+              expiresAt={autoYesExpiresAt ?? null}
+              onToggle={onAutoYesToggle}
+              lastAutoResponse={lastAutoResponse ?? null}
+              cliToolName={cliToolId}
+              inline
+            />
+          }
+          // Issue #2766 / #2797: the direct-input toggle, in the toolbar's end
+          // group beside the interrupt button — see `directInputSlot`.
+          //
+          // ## Why not the meta row (where #2766 put it)
+          //
+          // #2598's budget is one line of meta row, and in the two-split pane
+          // and every pane of the 2x2 grid (431px of row) the hints and a full
+          // Auto-Yes had already spent it: 195 + 236 of 431px, against the 87px
+          // this toggle needed. So #2766 hid it there. The three-split panes
+          // were short of it too, less visibly: the toggle sat at the END of
+          // the Auto-Yes half, which scrolls sideways, so a narrow pane drew
+          // it and scrolled it out of sight. How much of the 78px toggle was
+          // painted, in Chromium at 1440x900 (measured with
+          // tests/e2e/composer-two-row-2598.spec.ts before this change):
+          //
+          //   | row   | Auto-Yes off | Auto-Yes on  |
+          //   |-------|--------------|--------------|
+          //   | 174px | 10px         | 0            |
+          //   | 228px | 63px         | 4px          |
+          //   | 271px | whole        | 47–51px      |
+          //   | 411px | whole        | whole        |
+          //   | 431px | not drawn    | not drawn    |
+          //
+          // The toolbar's end group is on screen at every width, and it sits
+          // directly under the bar this opens.
+          //
+          // ## What it costs the toolbar
+          //
+          // Nothing where the pane is wide enough. The toolbar's start group
+          // takes whatever the end group leaves, and its natural content —
+          // attach (36px) + gap + mode control — is 189px for claude and 323px
+          // for codex, whose control carries its #2592 caution. The toggle is
+          // an icon (24px + 4px gap) below DIRECT_INPUT_LABEL_MIN_CONTAINER_PX
+          // and prints its label from there up:
+          //
+          //   | row   | start group gets | codex needs | claude needs |
+          //   |-------|------------------|-------------|--------------|
+          //   | 431px | 363px (icon)     | 323px       | 189px        |
+          //   | 910px | 769px (label)    | 323px       | 189px        |
+          //
+          // Measured as `MEASURE-2797`. The two narrowest three-split panes had
+          // no slack before this toggle came (the 174px row's start group was
+          // exactly attach + claude's 94px control, the 271px row's exactly
+          // attach + codex's 191px), so there the mode control gives 28px up:
+          // its chip and caution truncate, by #2597's design — claude's chip in
+          // the 174px row down to its padding — while the mode button stays
+          // whole. Of the two, the chip is what the pane can spare: the button
+          // still names the mode in its `aria-label`, and nothing else on the
+          // pane stands in for this toggle.
+          //
+          // Keep the literals as literals: Tailwind scans source text, so an
+          // interpolated class generates no CSS and the label would be hidden
+          // at every width (the #2131 rule, restated in composer-layout).
+          directInputSlot={
+            <button
+              type="button"
+              data-testid="direct-input-toggle"
+              aria-pressed={directInputOpen}
+              aria-label={directInputToggleAria}
+              title={directInputToggleAria}
+              disabled={!terminal.isRunning}
+              onClick={handleDirectInputToggle}
+              className={`shrink-0 inline-flex items-center gap-1 h-[22px] px-1 @min-[520px]:px-2 rounded-md border text-[11px] font-medium leading-none whitespace-nowrap transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                directInputOpen
+                  ? 'bg-info-subtle border-info-border text-info-foreground'
+                  : 'bg-surface border-border text-muted-foreground hover:bg-muted'
+              }`}
+            >
+              <Keyboard size={14} aria-hidden="true" className="shrink-0" />
+              <span className="hidden @min-[520px]:inline" data-testid="direct-input-toggle-label">
                 {directInputToggleLabel}
-              </button>
-            </>
+              </span>
+            </button>
           }
         />
       </div>
