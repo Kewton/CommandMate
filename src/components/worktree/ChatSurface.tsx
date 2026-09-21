@@ -384,6 +384,12 @@ export interface ChatSurfaceHistoryProps {
   onRetryPending?: (tempId: string) => void;
   onDiscardPending?: (tempId: string) => void;
   splitIndex?: number;
+  /**
+   * Issue #2821: forwarded to `ChatTranscript` — draw none of its top-right
+   * icon buttons. Only the phone passes it (`MobileTerminalTab`, whose surface
+   * pill covers that corner and carries the tool-activity toggle itself).
+   */
+  hideCornerControls?: boolean;
 }
 
 export interface ChatSurfaceProps {
