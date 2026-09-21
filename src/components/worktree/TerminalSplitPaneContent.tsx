@@ -108,6 +108,7 @@ import {
 } from '@/config/composer-height';
 import { worktreeApi } from '@/lib/api-client';
 import { buildPromptResponseBody } from '@/lib/prompt-response-body-builder';
+import { readSelectionListShape } from '@/lib/detection/selection-shape';
 import { readPromptDecisionId } from '@/components/worktree/prompt-decision-id';
 import { getCliToolDisplayName, getInstanceLabel } from '@/lib/cli-tools/types';
 import type {
@@ -681,6 +682,13 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   // than becoming "the footer happens to be drawing the nav pad".
   const isSelectionListFrame = terminal.isSelectionListActive;
   const showNav = isSelectionListFrame && !isChatSurface;
+  // The same rule as ChatSurface (Issue #2793): on Command Code's plan
+  // review, `Enter` runs the focused action, and the pad cannot show focus.
+  // Read off `terminal.output`, the frame the chat surface's card reads (#2809).
+  const hideNavEnterKey = useMemo(
+    () => showNav && readSelectionListShape(terminal.output).offersPlanApprove === true,
+    [showNav, terminal.output],
+  );
   // Issue #2406: "this pane's agent is generating right now". The merged status
   // verdict is the only field that answers that question -- `terminal.isRunning`
   // has meant "a tmux session exists and is healthy" since Issue #2238, so it is
@@ -1034,6 +1042,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
             instanceId={resolvedInstanceId}
             onKeysSent={refresh}
             showPagerKeys={terminal.isPagerActive}
+            hideEnterKey={hideNavEnterKey}
           />
         ) : null}
         {showEscapeHatch ? (
@@ -1275,6 +1284,8 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
     ),
     [
       showNav,
+      // Issue #2809: the pad's Enter gate on a plan review.
+      hideNavEnterKey,
       showPrompt,
       showEscapeHatch,
       showUnsentComposerBar,
