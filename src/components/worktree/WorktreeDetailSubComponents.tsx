@@ -130,6 +130,28 @@ export function deriveWorktreeStatus(
 }
 
 /**
+ * Whether the worktree-level dot {@link deriveWorktreeStatus} produced should be
+ * drawn as "cannot tell" (Issue #2775 for the PC header, shared with the phone
+ * header by Issue #2810).
+ *
+ * `cliTool` must be the tool `deriveWorktreeStatus` was given: the dot reads
+ * that tool's per-CLI entry, so the flag is read from the same entry rather
+ * than from a second source that could disagree with the dot it annotates.
+ * `resolveUnclassifiedDot` re-checks `ready`, so an `error`, a `waiting` or a
+ * `running` dot is never redrawn by this.
+ */
+export function isWorktreeStatusUnclassified(
+  status: WorktreeStatus,
+  sessionStatusByCli: Worktree['sessionStatusByCli'],
+  cliTool: CLIToolType | undefined
+): boolean {
+  return resolveUnclassifiedDot(
+    status,
+    isUnclassifiedCliStatus(cliTool ? sessionStatusByCli?.[cliTool] : undefined)
+  );
+}
+
+/**
  * The one string every surface shows for "what is this agent running on"
  * (Issue #1783 model, #1784 effort).
  *
@@ -1027,12 +1049,12 @@ export const DesktopHeader = memo(function DesktopHeader({
 
   // Issue #2775: the worktree-level dot draws "cannot tell" for a `ready` that
   // no rule actually read. `status` is `deriveWorktreeStatus`'s, which reads the
-  // per-CLI entry of the active tab — the active instance's tool — so the flag
-  // is read from that same entry rather than from a second source that could
-  // disagree with the dot it annotates.
-  const statusUnclassified = resolveUnclassifiedDot(
+  // per-CLI entry of the active tab — the active instance's tool. Issue #2810:
+  // the phone header asks the same question through the same helper.
+  const statusUnclassified = isWorktreeStatusUnclassified(
     status,
-    isUnclassifiedCliStatus(activeInstance ? sessionStatusByCli?.[activeInstance.cliTool] : undefined)
+    sessionStatusByCli,
+    activeInstance?.cliTool
   );
 
   const handleAgentDragStart = useCallback(

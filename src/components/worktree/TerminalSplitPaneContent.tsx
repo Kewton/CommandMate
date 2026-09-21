@@ -108,6 +108,7 @@ import {
 } from '@/config/composer-height';
 import { worktreeApi } from '@/lib/api-client';
 import { buildPromptResponseBody } from '@/lib/prompt-response-body-builder';
+import { readSelectionListShape } from '@/lib/detection/selection-shape';
 import { readPromptDecisionId } from '@/components/worktree/prompt-decision-id';
 import { getCliToolDisplayName, getInstanceLabel } from '@/lib/cli-tools/types';
 import type {
@@ -224,6 +225,7 @@ export interface TerminalSplitPaneContentProps extends TerminalSplitPaneCoreProp
    * `TerminalSplitPane`, which draws the "cannot tell" ring for it. Declared
    * here rather than in `TerminalSplitPaneCoreProps` for the reason
    * {@link agentModel} gives; omitting it renders exactly what it did before.
+   * Issue #2810: also keeps the composer's "Queued (session busy)" toast off.
    */
   cliStatusUnclassified?: boolean;
   /**
@@ -680,13 +682,26 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   // than becoming "the footer happens to be drawing the nav pad".
   const isSelectionListFrame = terminal.isSelectionListActive;
   const showNav = isSelectionListFrame && !isChatSurface;
+  // The same rule as ChatSurface (Issue #2793): on Command Code's plan
+  // review, `Enter` runs the focused action, and the pad cannot show focus.
+  // Read off `terminal.output`, the frame the chat surface's card reads (#2809).
+  const hideNavEnterKey = useMemo(
+    () => showNav && readSelectionListShape(terminal.output).offersPlanApprove === true,
+    [showNav, terminal.output],
+  );
   // Issue #2406: "this pane's agent is generating right now". The merged status
   // verdict is the only field that answers that question -- `terminal.isRunning`
   // has meant "a tmux session exists and is healthy" since Issue #2238, so it is
   // true for an agent sitting idle at its prompt. Same expression `ChatSurface`
   // gates its in-flight bubble on (`live.sessionStatus === 'running'`), so both
   // halves of the split read one verdict.
-  const isGenerating = terminal.sessionStatus === 'running';
+  //
+  // Issue #2810: except for a pane whose title bar reads "cannot tell"
+  // (`cliStatusUnclassified`, i.e. `isUnclassifiedCliStatus` of the entry the
+  // phone's composer reads its `isProcessing` from). That `running` is the
+  // detector's floor, not an observation of a turn, so the toast does not call
+  // the session busy — the same answer the phone gives since Issue #2775.
+  const isGenerating = terminal.sessionStatus === 'running' && !cliStatusUnclassified;
   // Issue #2755: Auto-Yes hides the answer panel, because the poller is
   // supposed to be answering instead — and on a CHECKBOX question it is
   // measured never to answer at all (`resolveBaseAnswer` returns null: a digit
@@ -1027,6 +1042,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
             instanceId={resolvedInstanceId}
             onKeysSent={refresh}
             showPagerKeys={terminal.isPagerActive}
+            hideEnterKey={hideNavEnterKey}
           />
         ) : null}
         {showEscapeHatch ? (
@@ -1268,6 +1284,8 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
     ),
     [
       showNav,
+      // Issue #2809: the pad's Enter gate on a plan review.
+      hideNavEnterKey,
       showPrompt,
       showEscapeHatch,
       showUnsentComposerBar,
