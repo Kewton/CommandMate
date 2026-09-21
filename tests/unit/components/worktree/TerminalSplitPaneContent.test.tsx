@@ -1580,4 +1580,75 @@ describe('TerminalSplitPaneContent', () => {
       expect(showToast).not.toHaveBeenCalled();
     });
   });
+
+  /**
+   * Issue #2810 (B1): a pane whose title bar reads "cannot tell" does not call
+   * the session busy either. The phone stopped doing so with #2775 — its
+   * composer reads the list API's `isProcessing`, which an unreadable frame no
+   * longer raises — while PC's split kept gating the toast on its own poller's
+   * `sessionStatus === 'running'`, the detector's floor for that frame.
+   *
+   * `cliStatusUnclassified` is `isUnclassifiedCliStatus` of the same entry the
+   * phone reads (`WorktreeDetailDesktop`); the poller still says `running`, so
+   * the case below is exactly the frame that used to toast.
+   */
+  describe('queued-send toast gate: unclassified pane (Issue #2810)', () => {
+    const QUEUED = 'Queued (session busy)';
+
+    function renderRunning(cliStatusUnclassified: boolean, showToast: (m: string, t?: string) => void) {
+      mockFetch.mockImplementation(() =>
+        okJson({
+          isRunning: true,
+          fullOutput: 'codex body (running)',
+          thinking: false,
+          sessionStatus: 'running',
+          sessionStatusReason: 'default',
+          isUnclassifiedActive: true,
+        }),
+      );
+
+      return render(
+        <TerminalSplitPaneContent
+          worktreeId="w-1"
+          splitIndex={0}
+          cliToolId="codex"
+          availableInstances={[inst('codex')]}
+          onInstanceChange={vi.fn()}
+          onFocus={vi.fn()}
+          autoYes={{ onToggle: vi.fn() }}
+          history={{ showToast }}
+          cliStatus="ready"
+          cliStatusUnclassified={cliStatusUnclassified}
+        />,
+      );
+    }
+
+    it('does NOT toast when the title bar reads "cannot tell"', async () => {
+      const showToast = vi.fn();
+      renderRunning(true, showToast);
+
+      // The poll has landed with `running`, so this is the frame that toasted.
+      await waitFor(() =>
+        expect(screen.getByTestId('terminal-output').textContent).toBe('codex body (running)'),
+      );
+      expect(screen.getByTestId('message-input-0').getAttribute('data-is-processing')).toBe('false');
+
+      fireEvent.click(screen.getByTestId('message-input-send-0'));
+
+      expect(showToast).not.toHaveBeenCalled();
+    });
+
+    it('the same frame still toasts on a pane the list API has not flagged', async () => {
+      const showToast = vi.fn();
+      renderRunning(false, showToast);
+
+      await waitFor(() =>
+        expect(screen.getByTestId('message-input-0').getAttribute('data-is-processing')).toBe('true'),
+      );
+
+      fireEvent.click(screen.getByTestId('message-input-send-0'));
+
+      expect(showToast).toHaveBeenCalledWith(expect.stringContaining(QUEUED), 'warning');
+    });
+  });
 });

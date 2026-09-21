@@ -28,7 +28,12 @@ import { SessionTileGrid, SessionsViewModeSelector } from '@/components/sessions
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { useSessionsViewMode } from '@/hooks/useSessionsViewMode';
 import { useWorktreesCacheContext } from '@/components/providers/WorktreesCacheProvider';
-import { deriveCliStatus } from '@/types/sidebar';
+import { deriveCliStatus, isUnclassifiedCliStatus } from '@/types/sidebar';
+import {
+  UNCLASSIFIED_STATUS_DOT_CLASS,
+  UNCLASSIFIED_STATUS_LABEL_KEY,
+  resolveUnclassifiedDot,
+} from '@/components/sidebar/BranchStatusIndicator';
 import { isWorkingStatus } from '@/lib/agent-status-display';
 import { getCliToolDisplayName } from '@/lib/cli-tools/types';
 import {
@@ -100,11 +105,33 @@ const DEFAULT_STATUS_PRIORITY = 4;
  * in status-colors.ts, so the tooltip translates without a second source of
  * truth for these labels (Issue #1305, following #1277). `label` is the CLI
  * tool's display name (e.g. "Claude"), a proper noun that is not translated.
+ *
+ * Issue #2810: `unclassified` draws the "cannot tell" ring and word the
+ * Sessions tile (#2775) draws, in place of the `ready` underneath.
  */
-function CliDot({ status, label }: { status: BranchStatus; label: string }) {
+function CliDot({
+  status,
+  label,
+  unclassified,
+}: {
+  status: BranchStatus;
+  label: string;
+  /** `status` is a `ready` nothing actually read (`isUnclassifiedCliStatus`). */
+  unclassified?: boolean;
+}) {
   const tCommon = useTranslations('common');
-  const title = `${label}: ${tCommon(`status.${status}`)}`;
-  return <StatusDot status={status} size="md" label={title} />;
+  // `resolveUnclassifiedDot` re-checks `ready`, so no working dot is redrawn.
+  const showUnclassified = resolveUnclassifiedDot(status, unclassified);
+  const title = `${label}: ${tCommon(showUnclassified ? UNCLASSIFIED_STATUS_LABEL_KEY : `status.${status}`)}`;
+  return (
+    <StatusDot
+      status={status}
+      size="md"
+      label={title}
+      className={showUnclassified ? UNCLASSIFIED_STATUS_DOT_CLASS : undefined}
+      data-unclassified={showUnclassified ? 'true' : undefined}
+    />
+  );
 }
 
 /** Whether any selected agent is actively working (running/generating). */
@@ -380,11 +407,21 @@ export default function SessionsPage() {
                   // [Issue #1078] Only actively-working agents (running/waiting)
                   // get a labelled chip; the idle group collapses to a "+N" counter
                   // so a working session is never buried under a row of gray dots.
-                  const agentStatuses = agents.map((agent) => ({
-                    agent,
-                    status: deriveCliStatus(wt.sessionStatusByCli?.[agent]),
-                  }));
-                  const workingAgents = agentStatuses.filter((a) => isWorkingStatus(a.status));
+                  // Issue #2810: an agent whose frame no rule could read gets a
+                  // chip too, drawn as "cannot tell". Folded into the counter it
+                  // would be one more gray dot — the pane a human should look at,
+                  // hidden among the ones they can ignore.
+                  const agentStatuses = agents.map((agent) => {
+                    const entry = wt.sessionStatusByCli?.[agent];
+                    return {
+                      agent,
+                      status: deriveCliStatus(entry),
+                      unclassified: isUnclassifiedCliStatus(entry),
+                    };
+                  });
+                  const workingAgents = agentStatuses.filter(
+                    (a) => isWorkingStatus(a.status) || a.unclassified
+                  );
                   const idleCount = agentStatuses.length - workingAgents.length;
                   // [Issue #1051] Active (running) cards get an accent border +
                   // subtle glow so a working session stands out at a glance.
@@ -416,9 +453,13 @@ export default function SessionsPage() {
 
                         {/* [Issue #1078] Working agents as labelled chips; idle group collapsed */}
                         <div className="flex items-center gap-2 ml-4 flex-shrink-0" data-testid={`session-agents-${wt.id}`}>
-                          {workingAgents.map(({ agent, status }) => (
+                          {workingAgents.map(({ agent, status, unclassified }) => (
                             <div key={agent} className="flex items-center gap-1" data-testid={`session-agent-${agent}`}>
-                              <CliDot status={status} label={getCliToolDisplayName(agent)} />
+                              <CliDot
+                                status={status}
+                                label={getCliToolDisplayName(agent)}
+                                unclassified={unclassified}
+                              />
                               <span className="text-xs text-muted-foreground">
                                 {getCliToolDisplayName(agent)}
                               </span>

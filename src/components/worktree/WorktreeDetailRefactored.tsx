@@ -70,6 +70,7 @@ const MarkdownEditor = dynamic(
 import {
   LoadingIndicator,
   ErrorDisplay,
+  isWorktreeStatusUnclassified,
 } from '@/components/worktree/WorktreeDetailSubComponents';
 import { MobileContent } from '@/components/worktree/WorktreeDetailMobile';
 import { WorktreeDetailDesktop } from '@/components/worktree/WorktreeDetailDesktop';
@@ -592,7 +593,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   // verdict PC's split reads off its own poller as `sessionStatus === 'running'`,
   // except when no rule could read the frame (Issue #2775): that `running` is
   // the detector's floor, and it no longer raises the "queued behind a busy
-  // agent" toast here.
+  // agent" toast here — nor, since Issue #2810, on PC's split.
   const activeSessionProcessing =
     (worktree?.sessionStatusByInstance?.[activeInstanceId] ?? worktree?.sessionStatusByCli?.[activeCliTab])
       ?.isProcessing ?? false;
@@ -759,6 +760,13 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                 worktreeName={worktreeName}
                 repositoryName={worktree?.repositoryName}
                 status={worktreeStatus}
+                // Issue #2810: the PC header's "cannot tell" question, asked of
+                // the entry `worktreeStatus` was derived from (`activeCliTab`).
+                statusUnclassified={isWorktreeStatusUnclassified(
+                  worktreeStatus,
+                  worktree?.sessionStatusByCli,
+                  activeCliTab
+                )}
                 gitStatus={worktree?.gitStatus}
                 onMenuClick={openMobileDrawer}
               />
