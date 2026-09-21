@@ -225,6 +225,7 @@ export interface TerminalSplitPaneContentProps extends TerminalSplitPaneCoreProp
    * `TerminalSplitPane`, which draws the "cannot tell" ring for it. Declared
    * here rather than in `TerminalSplitPaneCoreProps` for the reason
    * {@link agentModel} gives; omitting it renders exactly what it did before.
+   * Issue #2810: also keeps the composer's "Queued (session busy)" toast off.
    */
   cliStatusUnclassified?: boolean;
   /**
@@ -694,7 +695,13 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   // true for an agent sitting idle at its prompt. Same expression `ChatSurface`
   // gates its in-flight bubble on (`live.sessionStatus === 'running'`), so both
   // halves of the split read one verdict.
-  const isGenerating = terminal.sessionStatus === 'running';
+  //
+  // Issue #2810: except for a pane whose title bar reads "cannot tell"
+  // (`cliStatusUnclassified`, i.e. `isUnclassifiedCliStatus` of the entry the
+  // phone's composer reads its `isProcessing` from). That `running` is the
+  // detector's floor, not an observation of a turn, so the toast does not call
+  // the session busy — the same answer the phone gives since Issue #2775.
+  const isGenerating = terminal.sessionStatus === 'running' && !cliStatusUnclassified;
   // Issue #2755: Auto-Yes hides the answer panel, because the poller is
   // supposed to be answering instead — and on a CHECKBOX question it is
   // measured never to answer at all (`resolveBaseAnswer` returns null: a digit
