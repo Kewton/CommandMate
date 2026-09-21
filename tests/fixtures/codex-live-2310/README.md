@@ -60,15 +60,20 @@ This is the measurement the rules rest on. `cat -v`, with `^[` for ESC:
 | `dialog-experimental-toggles.txt` | `^[[1m^[[38;5;6m› [ ] Network proxy                Apply network proxy…^[[0m` | option — bold label |
 | `dialog-keymap-editor.txt` | `^[[1m^[[38;5;6m› Global       - Open Agents                unbound^[[0m` | option — bold label |
 | `dialog-permissions-picker.txt` | `^[[1m^[[38;5;6m› 1. Ask for approval (current)  Codex can read and edit…^[[0m` | option — bold label |
-| `dialog-trust-directory.txt` | `^[[38;5;6m› 1. Yes, continue^[[39m` | option — **not bold**; recognised by the coloured glyph |
+| `dialog-trust-directory.txt` | `^[[38;5;6m› 1. Yes, continue^[[39m` | option — **not bold**; recognised because the glyph's colour runs on into the label (one span) |
 | `idle-composer.txt` | `^[[1m›^[[0m ^[[2mAsk Codex to do anything^[[0m` | composer — bold glyph, plain (dim) label |
 | `turn-running.txt` row 13 | `^[[1;2m› ^[[0mRun the shell command: sleep 25…` | transcript echo — dim glyph |
 | `turn-running.txt` row 21 | `^[[1m›^[[0m ^[[2mAsk Codex to do anything^[[0m` | composer — the bottom-most `›`, which is why the frame reads `running` and not `waiting` |
 
 `dialog-trust-directory.txt` is why the rule recognises an option **positively**
-(bold label OR coloured glyph) instead of defining it as "not the composer": its
-option row is neither bold nor dim, so a rule phrased the other way round would
-have to guess, and guessing wrong on an idle composer is the expensive direction.
+(bold label OR a label drawn in the glyph's own colour) instead of defining it as
+"not the composer": its option row is neither bold nor dim, so a rule phrased the
+other way round would have to guess, and guessing wrong on an idle composer is the
+expensive direction. A coloured glyph on its own stopped being enough in #2798:
+codex 0.155.1 colours the composer's glyph too, but resets right after it, so the
+colour never reaches the composer's label (`tests/fixtures/codex-idle-composer-0155/`).
+The 0.155.1 re-capture of this screen and the other dialogs is in
+`tests/fixtures/codex-dialogs-0155/` (#2808); the option rows did not change.
 
 ## Neither leaking list is numbered
 

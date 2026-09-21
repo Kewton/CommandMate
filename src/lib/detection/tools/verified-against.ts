@@ -32,7 +32,22 @@ export const CLAUDE_VERIFIED_AGAINST = {
   paneGeometry: '200x1000',
 } as const;
 
-/** codex-cli these rules were read off (#1628 / #1829 / #1890 fixtures). */
+/**
+ * codex-cli these rules were read off (#1628 / #1829 / #1890 fixtures).
+ *
+ * ## Not advanced by Issue #2808
+ *
+ * #2808 re-captured codex **0.155.1** on a private tmux socket at 200x1000
+ * (`tests/fixtures/codex-dialogs-0155/`, 2026-09-21): the command approval,
+ * `/model`, `/experimental`, `/keymap` and the directory-trust screen all read
+ * `waiting`, each highlighted row the same one-span shape as the 0.146.0-0.153.2
+ * captures, and the idle composers read `ready`. The stamp still stays here because one frame of the
+ * same probe is misread: the idle composer after a declined approval reads
+ * `running`, since the status bar carries a thread title after the path, which
+ * `CODEX_STATUS_BAR_PATTERN` does not accept, and the tail window then reaches
+ * the declined command's lingering `• Ran` row. `codex-dialogs-0155-2808.test.ts`
+ * pins that frame; advance this stamp once it reads `ready`.
+ */
 export const CODEX_VERIFIED_AGAINST = {
   version: '0.148.0',
   capturedAt: '2026-08-15',

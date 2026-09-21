@@ -739,9 +739,11 @@ const CODEX_CHROME_GLYPH_ROW_PATTERN = /^›(\s|$)/;
  * the list silently stopped matching the thing it was written for. Issue #2310
  * measured what actually separates codex's three uses of `›` (U+203A), and it is
  * the SGR attributes, not the text: the composer glyph is bold (`ESC[1m›`), a
- * transcript echo is dim (`ESC[1;2m›`), a dialog option carries a coloured glyph
- * or a bold label. {@link readCodexGlyphRowKind} is that measurement, and this
- * reader is one of its callers.
+ * transcript echo is dim (`ESC[1;2m›`), a dialog option carries a bold label or
+ * a label drawn in the glyph's own colour (one span — since #2798 a coloured
+ * glyph alone is not enough, because 0.155.1 colours the composer's glyph too).
+ * {@link readCodexGlyphRowKind} is that measurement, and this reader is one of
+ * its callers.
  *
  * `-1` is returned for a frame whose bottom-most `›` is an option row: codex
  * replaces the composer with the dialog, so there is no chrome to trim and the
