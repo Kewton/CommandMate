@@ -59,6 +59,12 @@ import { PC_DISPLAY_SIZE_ORDER } from '@/hooks/usePcDisplaySize';
 import { useLocaleSwitch } from '@/hooks/useLocaleSwitch';
 import { repositoryApi } from '@/lib/api-client';
 import { StatusDot, type StatusDotStatus } from '@/components/ui/StatusDot';
+import {
+  UNCLASSIFIED_STATUS_DOT_CLASS,
+  UNCLASSIFIED_STATUS_LABEL_KEY,
+  resolveUnclassifiedDot,
+} from '@/components/sidebar/BranchStatusIndicator';
+import { isUnclassifiedCliStatus } from '@/types/sidebar';
 import { Kbd } from '@/components/ui/Kbd';
 import { useToast } from '@/components/common/Toast';
 import { buildDelegationBrief } from '@/lib/cli/command-reference';
@@ -183,6 +189,35 @@ function worktreeStatus(wt: Worktree): StatusDotStatus {
   if (wt.isProcessing) return 'running';
   if (wt.isSessionRunning) return 'ready';
   return 'idle';
+}
+
+/**
+ * A worktree row's status dot (Issue #1051), drawn as "cannot tell" when its
+ * `ready` is only `ready` because an agent's frame could not be read
+ * (Issue #2810, the ring and word #2775 gave the sidebar).
+ *
+ * The worktree-level flags above carry no trace of an unreadable frame — it
+ * raises none of them — so the per-CLI entries are asked, through
+ * `isUnclassifiedCliStatus`. `resolveUnclassifiedDot` then keeps the sidebar's
+ * precedence: waiting > running > cannot tell > ready. A waiting or a working
+ * agent elsewhere in the worktree is a reading, and a reading outranks it.
+ */
+function WorktreeStatusDot({ worktree, className }: { worktree: Worktree; className?: string }) {
+  const tCommon = useTranslations('common');
+  const status = worktreeStatus(worktree);
+  const unclassified = resolveUnclassifiedDot(
+    status,
+    Object.values(worktree.sessionStatusByCli ?? {}).some((entry) => isUnclassifiedCliStatus(entry))
+  );
+  return (
+    <StatusDot
+      status={status}
+      size="sm"
+      label={unclassified ? tCommon(UNCLASSIFIED_STATUS_LABEL_KEY) : undefined}
+      className={cn(className, unclassified && UNCLASSIFIED_STATUS_DOT_CLASS)}
+      data-unclassified={unclassified ? 'true' : undefined}
+    />
+  );
 }
 
 /** Sort: running sessions first, then most-recently-updated. */
@@ -733,11 +768,7 @@ export function CommandPalette() {
                       {repo}
                     </span>
                   )}
-                  <StatusDot
-                    status={worktreeStatus(wt)}
-                    size="sm"
-                    className={repo ? 'ml-2' : 'ml-auto'}
-                  />
+                  <WorktreeStatusDot worktree={wt} className={repo ? 'ml-2' : 'ml-auto'} />
                 </>
               ),
               onSelect: () =>
@@ -921,11 +952,7 @@ export function CommandPalette() {
                                 aria-hidden="true"
                               />
                               <span className="truncate">{branch}</span>
-                              <StatusDot
-                                status={worktreeStatus(wt)}
-                                size="sm"
-                                className="ml-auto"
-                              />
+                              <WorktreeStatusDot worktree={wt} className="ml-auto" />
                             </Command.Item>
                           );
                         })}

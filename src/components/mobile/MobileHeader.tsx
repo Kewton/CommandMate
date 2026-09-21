@@ -15,6 +15,10 @@
  * screen, hence the button.
  *
  * Issue #2653: 左上はサイドバー（ブランチ一覧）を開くボタン。Home ボタンは削除
+ *
+ * Issue #2810: the status dot draws "cannot tell" — the ring the PC header draws
+ * (Issue #2775) — when the caller says its `ready` is a fallback for a frame no
+ * rule could read.
  */
 
 'use client';
@@ -24,6 +28,11 @@ import { useTranslations } from 'next-intl';
 import { type WorktreeStatusType } from '@/config/status-colors';
 import { Button } from '@/components/ui';
 import { StatusDot } from '@/components/ui/StatusDot';
+import {
+  UNCLASSIFIED_STATUS_DOT_CLASS,
+  UNCLASSIFIED_STATUS_LABEL_KEY,
+  resolveUnclassifiedDot,
+} from '@/components/sidebar/BranchStatusIndicator';
 import { useCommandPalette } from '@/contexts/CommandPaletteContext';
 import { truncateString } from '@/lib/utils';
 import type { GitStatus } from '@/types/models';
@@ -43,6 +52,12 @@ export interface MobileHeaderProps {
   repositoryName?: string;
   /** Current status */
   status: WorktreeStatus;
+  /**
+   * Issue #2810: `status` is a `ready` nothing actually read — the caller's
+   * `isWorktreeStatusUnclassified`, the same answer the PC header draws from.
+   * Ignored for every status but `ready`; omitting it renders what it did before.
+   */
+  statusUnclassified?: boolean;
   /** Git status for branch display (Issue #111) */
   gitStatus?: GitStatus;
   /** Optional callback for the top-left button that opens the sidebar (branch list) drawer */
@@ -103,6 +118,7 @@ export function MobileHeader({
   worktreeName,
   repositoryName,
   status,
+  statusUnclassified,
   gitStatus,
   onMenuClick,
 }: MobileHeaderProps) {
@@ -115,6 +131,9 @@ export function MobileHeader({
   // Issue #2395: the context defaults to a no-op, so this header still renders
   // (and unit-tests) with no provider above it.
   const { setOpen: setCommandPaletteOpen } = useCommandPalette();
+  // Issue #2810: StatusDot would label this dot "Ready", the one word the
+  // "cannot tell" look exists to avoid, so the label is resolved here.
+  const showUnclassified = resolveUnclassifiedDot(status, statusUnclassified);
 
   return (
     <header
@@ -147,7 +166,9 @@ export function MobileHeader({
             data-testid="status-indicator"
             status={status}
             size="sm"
-            className="mr-2"
+            label={showUnclassified ? t(UNCLASSIFIED_STATUS_LABEL_KEY) : undefined}
+            className={showUnclassified ? `mr-2 ${UNCLASSIFIED_STATUS_DOT_CLASS}` : 'mr-2'}
+            data-unclassified={showUnclassified ? 'true' : undefined}
           />
 
           {/* Worktree name and repository */}

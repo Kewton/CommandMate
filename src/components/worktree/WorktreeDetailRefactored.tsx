@@ -74,6 +74,7 @@ const MarkdownEditor = dynamic(
 import {
   LoadingIndicator,
   ErrorDisplay,
+  isWorktreeStatusUnclassified,
 } from '@/components/worktree/WorktreeDetailSubComponents';
 import { MobileContent } from '@/components/worktree/WorktreeDetailMobile';
 import { WorktreeDetailDesktop } from '@/components/worktree/WorktreeDetailDesktop';
@@ -389,6 +390,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     isReconnecting,
     isSelectionListActive,
     isPagerActive,
+    offersPlanApprove,
     // Issue #2592: the composer's permission-mode control reads these. The
     // phone's composer is docked outside `MobileTerminalTab` — which owns the
     // pane hook the PC split reads the same facts from — so they come off this
@@ -644,7 +646,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   // verdict PC's split reads off its own poller as `sessionStatus === 'running'`,
   // except when no rule could read the frame (Issue #2775): that `running` is
   // the detector's floor, and it no longer raises the "queued behind a busy
-  // agent" toast here.
+  // agent" toast here — nor, since Issue #2810, on PC's split.
   const activeSessionProcessing =
     (worktree?.sessionStatusByInstance?.[activeInstanceId] ?? worktree?.sessionStatusByCli?.[activeCliTab])
       ?.isProcessing ?? false;
@@ -811,6 +813,13 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                 worktreeName={worktreeName}
                 repositoryName={worktree?.repositoryName}
                 status={worktreeStatus}
+                // Issue #2810: the PC header's "cannot tell" question, asked of
+                // the entry `worktreeStatus` was derived from (`activeCliTab`).
+                statusUnclassified={isWorktreeStatusUnclassified(
+                  worktreeStatus,
+                  worktree?.sessionStatusByCli,
+                  activeCliTab
+                )}
                 gitStatus={worktree?.gitStatus}
                 onMenuClick={openMobileDrawer}
               />
@@ -1030,6 +1039,8 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                     instanceId={activeInstanceId}
                     onKeysSent={fetchCurrentOutput}
                     showPagerKeys={isPagerActive}
+                    // Issue #2809: no `Enter` on a plan review (see ChatSurface, #2793).
+                    hideEnterKey={offersPlanApprove}
                   />
                 </div>
               )}
