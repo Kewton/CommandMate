@@ -140,9 +140,54 @@ interface Scenario {
   autoYes: boolean;
   prompt: null | { multiSelect: boolean };
   selectionList: boolean;
+  /** The worktree has a task row, so the verification strip is drawn (Issue #2824). */
+  hasTask: boolean;
+  /** The worktree's branch differs from its initial one, so the mismatch alert is drawn (Issue #2824). */
+  branchMismatch: boolean;
 }
 let scenario: Scenario;
 let directInputPosts: Array<{ cliToolId: string; events: unknown[]; instanceId?: string }>;
+
+/** `GET /tasks?limit=1` row for `scenario.hasTask` (Issue #2824). */
+const TASK_ROW = {
+  id: 'task-2799',
+  worktreeId: WORKTREE_ID,
+  cliToolId: 'claude',
+  instanceId: 'claude',
+  title: 'Issue #2799: direct input',
+  goal: 'goal',
+  contractPath: '.commandmate/tasks/issue-2799.yaml',
+  contract: {
+    version: 1,
+    title: 'Issue #2799: direct input',
+    goal: 'goal',
+    scope: { allow: ['src/**'], deny: [] },
+    verify: { gates: ['lint'], gateDefinitions: [] },
+    autoYes: { mode: null, allowPromptTypes: [], denyPatterns: [] },
+    success: {
+      requireWorkEvidence: true,
+      requireScopeClean: true,
+      requireCommit: false,
+      requireEnvClean: false,
+      autoVerifyOnStop: false,
+    },
+  },
+  status: 'succeeded',
+  lastVerificationRunId: null,
+  createdAt: '2026-09-21T06:04:23.075Z',
+  updatedAt: '2026-09-21T07:29:36.969Z',
+  startedAt: '2026-09-21T06:04:26.451Z',
+  finishedAt: '2026-09-21T07:29:36.969Z',
+};
+
+/** `gitStatus` for `scenario.branchMismatch` (Issue #2824). */
+const MISMATCHED_GIT_STATUS = {
+  currentBranch: 'main',
+  initialBranch: 'feature/2799',
+  isBranchMismatch: true,
+  commitHash: 'abc1234',
+  isDirty: false,
+};
 
 function jsonResponse(body: unknown, status = 200): Response {
   return {
@@ -203,6 +248,10 @@ function installFetch(): void {
         );
       }
       if (u.includes('/messages')) return Promise.resolve(jsonResponse([]));
+      if (u.includes('/tasks')) {
+        return Promise.resolve(jsonResponse({ tasks: scenario.hasTask ? [TASK_ROW] : [] }));
+      }
+      if (u.includes('/verify/runs')) return Promise.resolve(jsonResponse({ runs: [] }));
       return Promise.resolve(
         jsonResponse({
           id: WORKTREE_ID,
@@ -219,6 +268,7 @@ function installFetch(): void {
             claude: { isRunning: scenario.claudeRunning, isWaitingForResponse: false, isProcessing: false },
             codex: { isRunning: true, isWaitingForResponse: false, isProcessing: false },
           },
+          ...(scenario.branchMismatch ? { gitStatus: MISMATCHED_GIT_STATUS } : {}),
         }),
       );
     }),
@@ -229,7 +279,14 @@ beforeEach(() => {
   window.localStorage.clear();
   window.sessionStorage.clear();
   window.history.replaceState({}, '', `/worktrees/${WORKTREE_ID}`);
-  scenario = { claudeRunning: true, autoYes: false, prompt: null, selectionList: false };
+  scenario = {
+    claudeRunning: true,
+    autoYes: false,
+    prompt: null,
+    selectionList: false,
+    hasTask: false,
+    branchMismatch: false,
+  };
   directInputPosts = [];
   useTerminalPanePollingMock.mockReturnValue({
     terminal: {
@@ -507,5 +564,31 @@ describe('[#2799 §8] the prompt sheet stands down for the mode', () => {
 
     fireEvent.click(screen.getByTestId('direct-input-close'));
     expect(screen.getByTestId('mobile-prompt-sheet')).toBeInTheDocument();
+  });
+});
+
+describe('[#2824] the bands above <main> stand aside while the keyboard is open', () => {
+  it('hides the verification strip while open, and brings it back on 閉じる', async () => {
+    scenario.hasTask = true;
+    await renderScreen();
+    await screen.findByTestId('verification-status-chip');
+
+    await openKeyboard();
+    expect(screen.queryByTestId('verification-status-chip')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('direct-input-close'));
+    expect(await screen.findByTestId('verification-status-chip')).toBeInTheDocument();
+  });
+
+  it('hides the branch-mismatch alert while open, and brings it back on 閉じる', async () => {
+    scenario.branchMismatch = true;
+    await renderScreen();
+    await screen.findByTestId('branch-mismatch-alert');
+
+    await openKeyboard();
+    expect(screen.queryByTestId('branch-mismatch-alert')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('direct-input-close'));
+    expect(await screen.findByTestId('branch-mismatch-alert')).toBeInTheDocument();
   });
 });

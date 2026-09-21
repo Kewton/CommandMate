@@ -579,3 +579,27 @@ describe('[#2799 §7] press feedback', () => {
     expect(within(a).queryByTestId('direct-key-bubble')).not.toBeInTheDocument();
   });
 });
+
+describe('[#2824] touch-action', () => {
+  it('every key is touch-action: none, so a moving finger is never taken over as a pan', () => {
+    renderKeyboard();
+    fireEvent.click(screen.getByTestId('direct-input-toggle-chars'));
+    const keys = [
+      ...screen.getByTestId('direct-input-special-keys').querySelectorAll('button'),
+      ...screen.getByTestId('direct-input-char-panel').querySelectorAll('button'),
+    ];
+    expect(keys.length).toBeGreaterThanOrEqual(50);
+    for (const key of keys) {
+      const id = key.getAttribute('data-testid') ?? '(no testid)';
+      expect(key.className, id).toContain('touch-none');
+      expect(key.className, id).not.toContain('touch-manipulation');
+    }
+  });
+
+  it('the confirm-row buttons keep touch-action: manipulation (plain taps)', () => {
+    renderKeyboard();
+    for (const id of ['direct-input-toggle-chars', 'direct-input-send', 'direct-input-close']) {
+      expect(screen.getByTestId(id).className, id).toContain('touch-manipulation');
+    }
+  });
+});
