@@ -194,9 +194,18 @@ const COL_SPAN_CLASS: Readonly<Record<number, string>> = {
   4: 'col-span-4',
 };
 
-/** The key's hit area: the whole grid cell, 44px tall, no gap to its neighbours. */
+/**
+ * The key's hit area: the whole grid cell, 44px tall, no gap to its neighbours.
+ *
+ * `touch-none`, not `touch-manipulation` (Issue #2824): `manipulation` still lets
+ * the browser pan, so a finger that moves on a key is taken over as a scroll —
+ * `pointercancel`, nothing staged. That killed BS's upward swipe (the only way
+ * to stage DEL) and a long-press repeat whose finger drifts. Nothing on the
+ * keyboard scrolls, and `none` rules out double-tap zoom too (§7.3). The
+ * confirm row keeps `manipulation`: its buttons are plain taps.
+ */
 const KEY_BUTTON_CLASS =
-  'relative flex h-11 min-w-0 items-stretch p-0.5 touch-manipulation select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring';
+  'relative flex h-11 min-w-0 items-stretch p-0.5 touch-none select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring';
 
 /** A confirm-row button: 44px on both axes (#1127). */
 const ROW_BUTTON_CLASS =
