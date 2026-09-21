@@ -75,6 +75,7 @@ function testIdsIn(el: HTMLElement): string[] {
 }
 
 const modeSlot = <div data-testid="fake-agent-mode">mode</div>;
+const directInputSlot = <button type="button" data-testid="fake-direct-input">direct</button>;
 
 let originalScrollHeight: PropertyDescriptor | undefined;
 function mockScrollHeight(value: number) {
@@ -133,6 +134,24 @@ describe('MessageInput two-row layout (Issue #2598)', () => {
       expect(screen.queryByTestId('mobile-command-button')).toBeNull();
     });
 
+    it('holds the direct-input slot in the end group, before the interrupt button (#2797)', () => {
+      render(<MessageInput {...defaultProps} agentModeSlot={modeSlot} directInputSlot={directInputSlot} />);
+      // The end group never shrinks and never scrolls, so what is in it is on
+      // screen at every pane width; the start group and the meta row are not.
+      expect(testIdsIn(screen.getByTestId('composer-toolbar-end'))).toEqual([
+        'fake-direct-input',
+        'interrupt-button',
+      ]);
+      expect(within(screen.getByTestId('composer-toolbar-start')).queryByTestId('fake-direct-input')).toBeNull();
+      expect(within(screen.getByTestId('composer-meta-row')).queryByTestId('fake-direct-input')).toBeNull();
+      expect(screen.getAllByTestId('fake-direct-input')).toHaveLength(1);
+    });
+
+    it('draws nothing beside the interrupt button without a direct-input slot', () => {
+      render(<MessageInput {...defaultProps} agentModeSlot={modeSlot} />);
+      expect(testIdsIn(screen.getByTestId('composer-toolbar-end'))).toEqual(['interrupt-button']);
+    });
+
     it('bottom-aligns the send button with a tall textarea, and never wraps the Auto-Yes label', () => {
       render(<MessageInput {...defaultProps} autoYesSlot={<span>auto</span>} />);
       expect(screen.getByTestId('composer-textarea-row').className).toContain('items-end');
@@ -187,6 +206,18 @@ describe('MessageInput two-row layout (Issue #2598)', () => {
       expect(screen.queryByTestId('composer-toolbar-start')).toBeNull();
       expect(screen.queryByTestId('composer-toolbar-end')).toBeNull();
       expect(screen.getByTestId('composer-textarea-row').className).toContain('items-center');
+    });
+
+    it('puts a direct-input slot in line, before the interrupt button (#2797)', () => {
+      render(<MessageInput {...defaultProps} agentModeSlot={modeSlot} directInputSlot={directInputSlot} />);
+      const direct = Array.from(toolbar().children).map(c => c.getAttribute('data-testid'));
+      expect(direct).toEqual([
+        'mobile-command-button',
+        'attach-image-button',
+        'fake-agent-mode',
+        'fake-direct-input',
+        'interrupt-button',
+      ]);
     });
 
     it('keeps the meta row a plain row (Auto-Yes only, no hints, no container)', () => {
