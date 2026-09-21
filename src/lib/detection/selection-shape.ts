@@ -211,9 +211,87 @@ export const DISMISSABLE_PANEL_FOOTER_PATTERN =
  * Swept against every fixture in `tests/fixtures` and
  * `tests/unit/lib/detection/fixtures` when this was written (300 files): the
  * only match is the plan review capture itself.
+ *
+ * ## The `❯` either row may carry (Issue #2793)
+ *
+ * `↓` past the plan's last line moves the focus onto the ACTION list, and the
+ * focused action is drawn with a `❯ ` in front of it and two spaces before its
+ * key (`tests/fixtures/command-code-plan-review-2763/`, 1.58.0):
+ *
+ *     ❯ Approve  ctrl+a   executes the plan        ← `plan-review-action-focus-approve.txt`
+ *     Cancel esc
+ *
+ *     Approve ctrl+a   executes the plan · comments go along as notes
+ *     ❯ Cancel  esc                                ← `plan-review-long-scrolled-cancel-focused.txt`
+ *
+ * Without the optional `❯ ` this pattern missed both frames, and they went on to
+ * the composer check, where `COMMAND_CODE_PROMPT_PATTERN` (`^❯(\s*$|\s+\S)`)
+ * read the cursor row as the composer and published `ready` / `input_prompt`:
+ * `wait` exited 0 on a plan nobody had approved — #2754's `❯`-outside-the-list
+ * family. It is also the frame on which `Enter` EXECUTES the focused action, so
+ * missing it here would also have left the chat surface's `Enter` on screen
+ * (see {@link SelectionListShape.offersPlanApprove}). Only `❯`, and only as a
+ * prefix: `❯ ` + the row is the one measured spelling of a focused action.
+ * Re-swept over the same two directories with the widened pattern: every match
+ * is still a `command-code-plan-review-*` capture, which
+ * `command-code-plan-review-2793.test.ts` keeps pinned.
  */
 export const COMMAND_CODE_PLAN_REVIEW_FOOTER =
-  /^\s*Approve\s+ctrl\+a\b[^\n]*\n\s*Cancel\s+esc\s*$/im;
+  /^\s*(?:❯ +)?Approve\s+ctrl\+a\b[^\n]*\n\s*(?:❯ +)?Cancel\s+esc\s*$/im;
+
+/**
+ * The radio row `ctrl+a` puts in place of the action list when comments are
+ * pending (Issue #2793).
+ *
+ * Measured on 1.58.0 (`tests/fixtures/command-code-plan-review-2763/`): with
+ * zero comments `ctrl+a` approves at once, and with one or more it first asks
+ * what to do with them. The three action rows are replaced by ONE row, and the
+ * selected side is `(•)`, the other `( )` — readable without the ANSI:
+ *
+ *     Approve (•) with 4 comments as notes ( ) original plan · discard comments
+ *
+ * `comments?` because the badge above it is measured in both numbers
+ * (`1 pending comment` / `4 pending comments`); the radio itself was captured
+ * with four.
+ */
+export const COMMAND_CODE_PLAN_APPROVE_CHOICE_ROW =
+  /^\s*Approve\s+\([• ]\)\s+with\s+\d+\s+comments?\s+as\s+notes\s+\([• ]\)\s+original\s+plan\b/im;
+
+/**
+ * The hint bar under {@link COMMAND_CODE_PLAN_APPROVE_CHOICE_ROW}, verbatim
+ * `←/→ choose · enter confirm · esc back`.
+ *
+ * Anchored to the LAST row of the text it is tested against (no `m` flag: `$` is
+ * the end of the input), because that is where the overlay draws every one of
+ * its five measured hint bars, and because it is what keeps a transcript that
+ * QUOTES this screen from matching — the composer is always drawn below a
+ * transcript, so there the quote is never the last row.
+ */
+export const COMMAND_CODE_PLAN_APPROVE_CHOICE_FOOTER =
+  /(?:^|\n)[ \t]*←\/→\s+choose\s*·\s*enter\s+confirm\s*·\s*esc\s+back\s*$/i;
+
+/**
+ * Whether this tail is the approve-with-comments confirmation (Issue #2793).
+ *
+ * BOTH rows, for the reason {@link COMMAND_CODE_PLAN_REVIEW_FOOTER} gives for
+ * its two: either half alone is a sentence something else could print. Not
+ * adjacent — `Editor exited with code 127` and a blank row sit between them on
+ * both captures — so each is tested on its own.
+ *
+ * Deliberately NOT folded into {@link COMMAND_CODE_PLAN_REVIEW_FOOTER}, and
+ * therefore not {@link SelectionListShape.offersPlanApprove}: on this screen
+ * `enter` is the documented CONFIRM of an approval the human already started
+ * with `ctrl+a`, so the chat surface must keep its `Enter`, and what `ctrl+a`
+ * does here was not measured.
+ *
+ * @param tail - the frame's last rows, ANSI stripped, last content row last
+ */
+export function isCommandCodePlanApproveChoice(tail: string): boolean {
+  return (
+    COMMAND_CODE_PLAN_APPROVE_CHOICE_ROW.test(tail) &&
+    COMMAND_CODE_PLAN_APPROVE_CHOICE_FOOTER.test(tail)
+  );
+}
 
 /**
  * How many rows from the end of the content the dismiss footer is looked for.
@@ -951,6 +1029,8 @@ export interface SelectionListShape {
   /**
    * The footer is Command Code's plan review (Issue #2761): `ctrl+a` approves,
    * and EVERY typed character — digits included — becomes a comment on the plan.
+   * Issue #2793: `Enter` is not safe either — with the action list focused it
+   * runs `❯ Approve` — so the chat surface drops it from the arrow pad.
    */
   offersPlanApprove: boolean;
 }
