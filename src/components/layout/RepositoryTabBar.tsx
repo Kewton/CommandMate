@@ -73,9 +73,15 @@ import {
   countWaitingBranches,
   filterWorktreesByVisibility,
   generateRepositoryColor,
+  isGroupUnclassified,
   orderBranchGroups,
 } from '@/lib/sidebar-utils';
 import type { BranchGroup } from '@/lib/sidebar-utils';
+import {
+  resolveUnclassifiedDot,
+  UNCLASSIFIED_STATUS_DOT_CLASS,
+  UNCLASSIFIED_STATUS_LABEL_KEY,
+} from '@/components/sidebar/BranchStatusIndicator';
 import { SIDEBAR_STATUS_CONFIG } from '@/config/status-colors';
 import { Z_INDEX } from '@/config/z-index';
 
@@ -543,11 +549,12 @@ const RepositoryTab = memo(function RepositoryTab({
 }) {
   const t = useTranslations('common');
   const status = aggregateGroupStatus(group.branches);
+  const unclassified = resolveUnclassifiedDot(status, isGroupUnclassified(group.branches));
   const waitingCount = countWaitingBranches(group.branches);
   // The status vocabulary is `SIDEBAR_STATUS_CONFIG`'s, so the tab and the
   // sidebar say the same word for the same state (Issue #1304 keeps these as
   // dictionary keys because the config is module scope, where t() cannot run).
-  const statusLabel = t(SIDEBAR_STATUS_CONFIG[status].labelKey);
+  const statusLabel = t(unclassified ? UNCLASSIFIED_STATUS_LABEL_KEY : SIDEBAR_STATUS_CONFIG[status].labelKey);
 
   return (
     <button
@@ -590,6 +597,7 @@ const RepositoryTab = memo(function RepositoryTab({
         status={status}
         size="sm"
         label={statusLabel}
+        className={unclassified ? UNCLASSIFIED_STATUS_DOT_CLASS : undefined}
         data-testid="repository-tab-status"
       />
       {waitingCount > 0 && (
@@ -748,6 +756,7 @@ function OverflowMenu({
       <div className="overflow-y-auto py-1" style={{ maxHeight: 'inherit' }}>
         {groups.map((group) => {
           const status = aggregateGroupStatus(group.branches);
+          const unclassified = resolveUnclassifiedDot(status, isGroupUnclassified(group.branches));
           return (
             <button
               key={group.repositoryName}
@@ -771,7 +780,8 @@ function OverflowMenu({
               <StatusDot
                 status={status}
                 size="sm"
-                label={t(SIDEBAR_STATUS_CONFIG[status].labelKey)}
+                label={t(unclassified ? UNCLASSIFIED_STATUS_LABEL_KEY : SIDEBAR_STATUS_CONFIG[status].labelKey)}
+                className={unclassified ? UNCLASSIFIED_STATUS_DOT_CLASS : undefined}
               />
               <span className="tabular-nums text-xs text-sidebar-muted">
                 {group.branches.length}

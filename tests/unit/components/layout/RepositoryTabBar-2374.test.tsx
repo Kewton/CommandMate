@@ -72,6 +72,7 @@ import { ToastProvider } from '@/components/common/Toast';
 import { SidebarProvider, useSidebarContext } from '@/contexts/SidebarContext';
 import { WorktreeSelectionProvider } from '@/contexts/WorktreeSelectionContext';
 import { SIDEBAR_GROUP_ORDER_CACHE_STORAGE_KEY } from '@/lib/sidebar-utils';
+import { UNCLASSIFIED_STATUS_DOT_CLASS } from '@/components/sidebar/BranchStatusIndicator';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -377,6 +378,110 @@ describe('RepositoryTabBar (Issue #2374)', () => {
         .getAllByTestId('repository-tab')
         .find((tab) => tab.getAttribute('data-repository') === 'alpha-app')!;
       expect(within(alpha).queryByTestId('repository-tab-attention-count')).toBeNull();
+    });
+
+    it('draws tab dot and overflow dot as unclassified for unclassified-only repository (Issue #2822)', async () => {
+      const unclassifiedWorktrees: Worktree[] = [
+        worktree({
+          id: 'unclass-main',
+          name: 'main',
+          repositoryPath: '/repos/unclass',
+          repositoryName: 'unclass-repo',
+          sessionStatusByInstance: {
+            codex: {
+              isRunning: true,
+              isWaitingForResponse: false,
+              isProcessing: false,
+              isUnclassified: true,
+            },
+          },
+        }),
+        worktree({
+          id: 'mixed-wt1',
+          name: 'main',
+          repositoryPath: '/repos/mixed',
+          repositoryName: 'mixed-repo',
+          sessionStatusByInstance: {
+            codex: {
+              isRunning: true,
+              isWaitingForResponse: false,
+              isProcessing: false,
+              isUnclassified: true,
+            },
+          },
+        }),
+        worktree({
+          id: 'mixed-wt2',
+          name: 'feature',
+          repositoryPath: '/repos/mixed',
+          repositoryName: 'mixed-repo',
+          sessionStatusByInstance: {
+            claude: {
+              isRunning: true,
+              isWaitingForResponse: false,
+              isProcessing: true,
+            },
+          },
+        }),
+      ];
+
+      (worktreeApi.getAll as ReturnType<typeof vi.fn>).mockResolvedValue({
+        worktrees: unclassifiedWorktrees,
+        repositories: [],
+      });
+      (worktreeApi.getById as ReturnType<typeof vi.fn>).mockResolvedValue(unclassifiedWorktrees[0]);
+
+      renderStrip();
+      await waitFor(() => expect(tabNames()).toHaveLength(2));
+
+      const unclassTab = screen
+        .getAllByTestId('repository-tab')
+        .find((tab) => tab.getAttribute('data-repository') === 'unclass-repo')!;
+      const unclassDot = within(unclassTab).getByTestId('repository-tab-status');
+
+      // Unclassified-only repository tab dot has UNCLASSIFIED_STATUS_DOT_CLASS and unknown label
+      for (const cls of UNCLASSIFIED_STATUS_DOT_CLASS.split(' ')) {
+        expect(unclassDot.className).toContain(cls);
+      }
+      expect(unclassDot).toHaveAttribute('aria-label', 'common.status.unknown');
+
+      // Mixed repository (unclassified + running) tab dot prioritizes running
+      const mixedTab = screen
+        .getAllByTestId('repository-tab')
+        .find((tab) => tab.getAttribute('data-repository') === 'mixed-repo')!;
+      const mixedDot = within(mixedTab).getByTestId('repository-tab-status');
+      expect(mixedDot.className).not.toContain('bg-transparent');
+      expect(mixedDot.className).toContain('bg-success');
+      expect(mixedDot).toHaveAttribute('aria-label', 'common.status.running');
+
+      // Overflow menu dots
+      const strip = screen.getByTestId('repository-tab-strip');
+      Object.defineProperty(strip, 'scrollWidth', { value: 1200, configurable: true });
+      Object.defineProperty(strip, 'clientWidth', { value: 400, configurable: true });
+      act(() => {
+        window.dispatchEvent(new Event('resize'));
+      });
+
+      fireEvent.click(screen.getByTestId('repository-tab-overflow'));
+      const menu = screen.getByTestId('repository-tab-overflow-menu');
+      const overflowItems = within(menu).getAllByTestId('repository-tab-overflow-item');
+
+      const unclassOverflow = overflowItems.find(
+        (item) => item.getAttribute('data-repository') === 'unclass-repo'
+      )!;
+      const unclassOverflowDot = unclassOverflow.querySelector('span.rounded-full') as HTMLElement;
+      for (const cls of UNCLASSIFIED_STATUS_DOT_CLASS.split(' ')) {
+        expect(unclassOverflowDot.className).toContain(cls);
+      }
+      expect(unclassOverflowDot).toHaveAttribute('aria-label', 'common.status.unknown');
+
+      const mixedOverflow = overflowItems.find(
+        (item) => item.getAttribute('data-repository') === 'mixed-repo'
+      )!;
+      const mixedOverflowDot = mixedOverflow.querySelector('span.rounded-full') as HTMLElement;
+      expect(mixedOverflowDot.className).not.toContain('bg-transparent');
+      expect(mixedOverflowDot.className).toContain('bg-success');
+      expect(mixedOverflowDot).toHaveAttribute('aria-label', 'common.status.running');
     });
   });
 

@@ -51,6 +51,11 @@ import { CSS } from '@dnd-kit/utilities';
 import { useWorktreeSelection } from '@/contexts/WorktreeSelectionContext';
 import { useSidebarContext } from '@/contexts/SidebarContext';
 import { BranchListItem } from '@/components/sidebar/BranchListItem';
+import {
+  resolveUnclassifiedDot,
+  UNCLASSIFIED_STATUS_DOT_CLASS,
+  UNCLASSIFIED_STATUS_LABEL_KEY,
+} from '@/components/sidebar/BranchStatusIndicator';
 import { SortSelector } from '@/components/sidebar/SortSelector';
 import { Button, GroupIcon, Input, Skeleton, StatusDot } from '@/components/ui';
 import { Tooltip } from '@/components/common/Tooltip';
@@ -974,7 +979,8 @@ const SessionListItem = memo(function SessionListItem({
   onClick: (row: SessionRow) => void;
 }) {
   const t = useTranslations('common');
-  const statusLabel = t(`status.${row.status}`);
+  const unclassified = resolveUnclassifiedDot(row.status, row.unclassified);
+  const statusLabel = t(unclassified ? UNCLASSIFIED_STATUS_LABEL_KEY : `status.${row.status}`);
 
   return (
     <button
@@ -991,6 +997,7 @@ const SessionListItem = memo(function SessionListItem({
         status={row.status}
         size="lg"
         label={row.exited ? `${statusLabel} (${t('branchItem.agentExited')})` : statusLabel}
+        className={unclassified ? UNCLASSIFIED_STATUS_DOT_CLASS : undefined}
       />
       <span className="min-w-0 flex-1">
         <span className="block truncate text-sm font-semibold text-sidebar-foreground">{row.label}</span>

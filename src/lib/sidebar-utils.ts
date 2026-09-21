@@ -4,7 +4,7 @@
  * Provides sorting functionality for sidebar branch list
  */
 
-import { aggregateCliStatus } from '@/types/sidebar';
+import { aggregateCliStatus, isBranchUnclassified } from '@/types/sidebar';
 import type { SidebarBranchItem, BranchStatus } from '@/types/sidebar';
 
 /**
@@ -340,6 +340,26 @@ export function aggregateGroupStatus(
 }
 
 /**
+ * Whether a repository's ONE aggregated dot should read "cannot tell" — the
+ * group-level twin of `isBranchUnclassified` (Issue #2775).
+ *
+ * True when the fold-down status is `ready` and at least one branch that made
+ * it `ready` is only `ready` because a frame could not be read. The precedence
+ * is the sidebar row's: waiting > running > generating > cannot-tell > ready >
+ * idle.
+ *
+ * @param branches - Branches belonging to one repository
+ */
+export function isGroupUnclassified(branches: ReadonlyArray<SidebarBranchItem>): boolean {
+  if (aggregateGroupStatus(branches) !== 'ready') return false;
+  return branches.some(
+    (branch) =>
+      resolveBranchStatus(branch) === 'ready' &&
+      isBranchUnclassified(branch.cliStatus, branch.unclassifiedInstanceIds)
+  );
+}
+
+/**
  * How many of a repository's branches are waiting for the user (Issue #2374).
  *
  * Counts BRANCHES, not agent instances, matching `useAttentionCount`'s rule:
@@ -542,6 +562,12 @@ export interface SessionRow {
   lastActivity?: Date | string;
   /** The tmux session is there but the agent is gone (Issue #2070). */
   exited: boolean;
+  /**
+   * This instance's `ready` is a fallback for a frame nothing could read
+   * (Issue #2775). Present (and `true`) only for such a row, so rows of every
+   * other instance keep exactly the shape they had.
+   */
+  unclassified?: true;
 }
 
 /**
@@ -560,6 +586,7 @@ export function buildSessionRows(items: ReadonlyArray<SidebarBranchItem>): Sessi
   const rows: SessionRow[] = [];
   for (const item of items) {
     const exitedIds = new Set(item.exitedInstanceIds ?? []);
+    const unclassifiedIds = new Set(item.unclassifiedInstanceIds ?? []);
     for (const [instanceId, status] of Object.entries(item.cliStatus ?? {})) {
       rows.push({
         key: `${item.id}:${instanceId}`,
@@ -571,6 +598,8 @@ export function buildSessionRows(items: ReadonlyArray<SidebarBranchItem>): Sessi
         repositoryName: item.repositoryName,
         lastActivity: item.lastActivity,
         exited: exitedIds.has(instanceId),
+        // Issue #2775: only a `ready` can be a fallback (see isBranchUnclassified).
+        ...(status === 'ready' && unclassifiedIds.has(instanceId) ? { unclassified: true as const } : {}),
       });
     }
   }
