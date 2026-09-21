@@ -12,10 +12,10 @@
 
 | 案 | 採否 | 一言で |
 |---|---|---|
-| (a) 行アンカー — **行頭側** | **採る** | 実キャプチャの本物のフッタ 35 行（claude 19・command-code 16）は、すべて前が空白だけ（生キャプチャでは空白＋SGR）。実キャプチャの引用 17 行は、すべて前に可視文字を持つ |
-| (a) 行アンカー — 行末側（`\s*$`） | 採らない | 本物のフッタ 35 行中 30 行が、一致部分の後ろにキーヒントの続き（` · Esc to cancel` など）を持つ |
-| (b) 探索範囲を画面下部に限る | 採らない | 生の行番号では本物のフッタは**上端側**（L25–L108 / 1001）。非空行で数えると本物（下に 0–7 行）と引用（下に 4–31 行）が重なる |
-| (c) 捨てる量に上限 | 採らない | 本物のフッタが捨てる生の行数（893–976）は 2774 の誤爆（963）と同じ大きさ。非空行では本物（0–7）と引用（2774 fixture で 5）が重なる |
+| (a) 行アンカー — **行頭側** | **採る** | 実キャプチャの本物のフッタ 37 行（claude 21・command-code 16）は、すべて前が空白だけ（生キャプチャでは空白＋SGR）。実キャプチャの引用 17 行は、すべて前に可視文字を持つ |
+| (a) 行アンカー — 行末側（`\s*$`） | 採らない | 本物のフッタ 37 行中 31 行が、一致部分の後ろにキーヒントの続き（` · Esc to cancel` など）を持つ |
+| (b) 探索範囲を画面下部に限る | 採らない | 生の行番号では本物のフッタは**上端側**（L24–L108 / 1001）。非空行で数えると本物（下に 0–7 行）と引用（下に 4–31 行）が重なる |
+| (c) 捨てる量に上限 | 採らない | 本物のフッタが捨てる生の行数（893–977）は 2774 の誤爆（963）と同じ大きさ。非空行では本物（0–7）と引用（2774 fixture で 5）が重なる |
 
 実装は 2 つのパターンの先頭に `^(?:\s|\x1b\[[0-9;]*m)*` を足しただけ（`CLAUDE_LOWER_INTERACTIVE_ANCHOR` は変えていない）。
 
@@ -34,6 +34,30 @@
 本番サーバへの影響: codex のグローバル hook（`~/.codex/hooks.json`）は採取中も稼働中の CommandMate サーバへ
 `session_start` / `user_prompt_submit` / `stop` を送ったが、サーバは `agent-event-unresolved-target`
 （使い捨てディレクトリは登録 worktree ではない）として捨てており、どのセッションの状態も変えていない。
+
+### 追加採取（Issue 2811）
+
+2776 で未測だった 2 画面のうち、claude の task panel は上と同じ手順で採り直した。
+agy の通常画面は private HOME で起動できず、今回も採れていない。
+
+| 項目 | 値 |
+|---|---|
+| 日時 | 2026-09-21 15:11–15:14 JST |
+| tmux | 専用ソケット `tmux -L footer-probe-2`（3.5a、`-f /dev/null`）。セッションは `probe-claude` の 1 本だけ。本人の既定サーバと `mcbd-*` には触れていない（既定サーバのセッション名一覧は採取の前後で同一）。claude を `/exit` で閉じた時点でセッションが 0 本になりサーバも終わったので、残ったソケットファイル（自分が作ったもの）を削除 |
+| 画面 / 取り方 | 上と同じ（200x1000、`capture-pane -p -e -S -1000 -E -`） |
+| 作業ディレクトリ | `mktemp -d` の使い捨て git リポジトリ（`a.ts` と `README.md`）。採取後に削除 |
+| claude | claude-cli 2.1.278。`CLAUDE_CODE_ENABLE_TODO_TOOLS=1 claude --permission-mode default --model haiku`（Haiku 4.5）をペインのコマンドとして直接起動（シェル行は無い） |
+| agy | agy 1.2.7。private HOME で起動すると認証を求められ、通常画面まで進めなかった（下の「他ツールの通常フレーム」） |
+| private HOME | claude は**なし**: private HOME でも private `CLAUDE_CONFIG_DIR` でも `Not logged in · Please run /login` で起動できなかった。agy は**あり**（`HOME="$(mktemp -d)"`） |
+
+2.1.278 で task panel を出せた理由: 2.1.278 に同梱の changelog に「task-tracking ツール（TaskCreate/Get/Update/List, TodoWrite）は
+Claude 3.x・Opus 4.0–4.7・Sonnet 4.0–4.6・Haiku 4.5 にだけ出す。それ以外のモデルでは `CLAUDE_CODE_ENABLE_TODO_TOOLS=1` を設定する」とある。
+2776 の採取で使えなかったのはこの条件によると考えられる（当時のモデルは記録に無い）。今回は Haiku 4.5 と環境変数の両方を満たした。
+
+本物の `$HOME` への影響: claude は本物の `~/.claude` で動かしたので、次が残った（元に戻していない）。
+`~/.claude.json` に使い捨てディレクトリの project 行（trust の承諾を含む）、`~/.claude/projects/` に使い捨てディレクトリの
+transcript 1 本、`~/.claude/tasks/<session id>/` に TaskCreate の 3 件（`~/.claude/tasks/` 自体がこの採取で新しくできた）。
+`$HOME` 直下と `~/.commandmate` 直下のエントリ、`~/.gemini/trustedFolders.json`（sha256 `1718ce02…`）は前後で同一。
 
 ---
 
@@ -55,6 +79,8 @@
 | 2 | `tests/fixtures/tui-frame-footer-2776/claude-2.1.278-askuserquestion-picker.txt` | claude 2.1.278 | L30 / 1001 | 前: 空白、後: ` · Esc to cancel` | 下 971（非空 0） |
 | 5 | `tests/fixtures/tui-frame-footer-2776/claude-2.1.278-picker-below-quoted-footers.txt` | claude 2.1.278 | L92 / 1001 | 前: 空白、後: ` · Esc to cancel` | 下 909（非空 0） |
 | 5 | `tests/fixtures/tui-frame-footer-2776/claude-2.1.278-approval-below-quoted-footers.txt` | claude 2.1.278 | L102 / 1001 | 前: 空白、後: なし | 下 899（非空 0） |
+| 3 | `tests/fixtures/tui-frame-footer-2776/claude-2.1.278-bash-approval-task-panel.txt`（Issue 2811） | claude 2.1.278 | L24 / 1001 | 前: 空白、後: なし | 下 977（非空 4 = task panel、L997–L1000） |
+| 3 | `tests/fixtures/tui-frame-footer-2776/claude-2.1.278-askuserquestion-task-panel.txt`（Issue 2811） | claude 2.1.278 | L32 / 1001 | 前: 空白、後: ` · Esc to cancel` | 下 969（非空 4 = task panel、L997–L1000） |
 | 1 | `tests/fixtures/canary/permission-dialog.raw.txt`（既存・実キャプチャ） | claude 2.1.223 | L34 / 1001 | 前: 空白、後: なし | 下 967（非空 0） |
 | 2 | `tests/fixtures/claude-live-2486/tabs-q1.txt`（既存・実キャプチャ） | claude 2.1.268 | L28 / 1001 | 前: 空白、後: ` · Esc to cancel` | 下 973（非空 0） |
 | 2 | `tests/fixtures/claude-live-2486/preview-q1.txt`（既存・実キャプチャ） | claude 2.1.268 | L43 / 1001 | 前: 空白、後: ` · n to add notes · Esc to cancel` | 下 958（非空 0） |
@@ -66,9 +92,12 @@
 
 - **session-diff HUD**: 2.1.278 では**フッタの下ではなく画面の右側**に出た（`claude-2.1.278-*-quoted-footers.txt` の列 111–200・行 2–10、
   `1 file changed +1 -1 ✕`）。フッタより下を捨てる量には効かない（上表の 2.1.278 の行は全部「非空 0」）
-- **task panel**: **未測**。このセッションでは TaskCreate / TodoWrite が使えず（claude 自身が「どちらも利用できない」と返答）、
-  パネルを出せなかった。合成はせず、上表の 2.1.223 / 2.1.240 の実キャプチャ（非空 4 / 7）を「フッタ以降を捨てる」が
-  本来想定していた量の実測として使う
+- **task panel**: Issue 2811 で実測（上表の `claude-2.1.278-*-task-panel.txt` 2 本。2776 の採取では TaskCreate / TodoWrite が
+  使えず未測だった）。2.1.278 でも task panel（`3 tasks (0 done, 1 in progress, 2 open)` と 3 行）は**フッタの下**に出るが、
+  フッタの直下ではなく**ペインの最下部**（L997–L1000 / 1001、フッタとの間は空行）に描かれた。
+  フッタ行は Bash 確認・picker とも行頭にあり（前は空白だけ。生キャプチャでは空白＋SGR / SGR だけ）、行頭アンカーのまま本物として採用される。
+  task panel の 4 行は `CLAUDE_LOWER_INTERACTIVE_ANCHOR` に当たらないので「下を捨てる」分岐で切り落とされる。
+  旧版の実キャプチャ（2.1.223 の非空 4、2.1.240 の非空 7）と同じ挙動で、行頭アンカーを支持しない画面は無かった
 
 ### 引用（採取表 #5 と、既存 fixture に在ったもの）
 
@@ -91,7 +120,7 @@
 |---|---|---|
 | `tests/fixtures/tui-frame-footer-2776/codex-0.155.1-idle-after-turn.txt` | codex 0.155.1 | 0 |
 | `tests/fixtures/tui-frame-footer-2776/command-code-1.58.0-idle-after-turn.txt` | command-code 1.58.0 | 0 |
-| antigravity | agy 1.2.7 | **未測**（trust の承諾・拒否がどちらも既存の `~/.gemini/trustedFolders.json` に書かれうるため採取しなかった。下の走査の 38 ファイルで代える） |
+| antigravity | agy 1.2.7 | **未測**。2776: trust の承諾・拒否がどちらも既存の `~/.gemini/trustedFolders.json` に書かれうるため採取しなかった。Issue 2811: private HOME（`HOME="$(mktemp -d)"`）で起動すると `Authentication required. Please visit the URL to log in:`（Google OAuth の URL）で止まり、通常画面に進めなかった（`agy -p` で確認。資格情報は本物の `~/.gemini` 側にあり、private HOME へは写していない）。下の走査の 38 ファイルで代える |
 
 `tests/fixtures/` と `tests/unit/lib/detection/fixtures/` の全体走査（パスに `codex` / `command-code` / `antigravity` / `agy` を含む
 ファイル。`.txt` `.capture` `.log` は本文、`.json` `.jsonl` は文字列の葉、`.ts` は export した文字列と引数 0 の関数の戻り値）:
@@ -113,8 +142,8 @@ command-code の 16 行は `command-code-askuserquestion-2753/multiselect-answer
 
 ### (a) 行アンカー — 行頭側を採る
 
-- **支持した実測**: 走査で見つかった実キャプチャの本物のフッタ 35 行 — claude 19 行（2.1.223 の canary 6、2.1.240 の 1708 1、
-  2.1.268 の 2486 7、2.1.278 の本採取 5。表はそのうち 10 行）と command-code 16 行 — は、すべて一致部分の前が空白だけ。
+- **支持した実測**: 走査で見つかった実キャプチャの本物のフッタ 37 行 — claude 21 行（2.1.223 の canary 6、2.1.240 の 1708 1、
+  2.1.268 の 2486 7、2.1.278 の本採取 5 と Issue 2811 の 2。表はそのうち 12 行）と command-code 16 行 — は、すべて一致部分の前が空白だけ。
   生キャプチャでは `' \x1b[38;5;246mEsc to cancel…'` のように空白と SGR 1 個が前に来る（`claude-2.1.278-bash-approval.txt` L25）。
   実キャプチャの引用 17 行（claude 2.1.278 の 3 本 × 4 行、codex・command-code 各 2 行、copilot 1 行）と 2774 の合成 1 行は、
   すべて前に可視文字（`「`、`「フッタ: `、`- Approval footer: `、`navigate · `）を持つ。
@@ -126,10 +155,10 @@ command-code の 16 行は `command-code-askuserquestion-2753/multiselect-answer
 
 ### (a) 行アンカー — 行末側は採らない
 
-- **支持しなかった実測**: 本物のフッタ 35 行中 30 行は一致部分の後ろに続きがある
+- **支持しなかった実測**: 本物のフッタ 37 行中 31 行は一致部分の後ろに続きがある
   （claude の picker は ` · Esc to cancel` / ` · n to add notes · Esc to cancel` / ` · n to add notes · Tab to switch questions · Esc …`、
   2.1.240 の確認は ` · ctrl+e to explain`、command-code は ` | 1-9 quick select | n notes | c chat | Esc to cancel`）。
-  行は全部フッタだが、今のパターンは行の一部しか書いていないので `\s*$` を足すとこの 30 行が外れる
+  行は全部フッタだが、今のパターンは行の一部しか書いていないので `\s*$` を足すとこの 31 行が外れる
 - 行末まで書くにはキーヒントの文法（実測だけで尾が 5 通りある）を列挙する必要があり、実測に無い形は推測になる。
   しかも行頭側だけで実測の引用はすべて外れるので、行末側で新たに外せる実測の引用は無い
 - 例外は合成の `reply-quotes-dialog-wording.txt`（2457）: 返答の本文が行頭からフッタ文言を書き、後ろに ` · ctrl+e to explain がフッタです。`
@@ -139,10 +168,10 @@ command-code の 16 行は `command-code-askuserquestion-2753/multiselect-answer
 
 ### (b) 探索範囲を画面下部に限る — 採らない
 
-- **生の行番号**: 表の本物のフッタは L25 / L28 / L30 / L34 / L38 / L43 / L58 / L92 / L102 / L108（全 1001 行）。
+- **生の行番号**: 表の本物のフッタは L24 / L25 / L28 / L30 / L32 / L34 / L38 / L43 / L58 / L92 / L102 / L108（全 1001 行）。
   claude は 1000 行ペインの**上端側**にダイアログを描き、その下の約 900 行は空行（task panel があれば最下部）。
   Issue の前提「本物のフッタは画面の下部に描かれる」は生の行番号では成り立たず、2774 実例の誤認行 L39 と同じ帯に入る
-- **非空行で数えた末尾からの距離**（`contentLines` の末尾何行か）: 本物は 0 / 4 / 7（4 と 7 は旧版の task panel）。
+- **非空行で数えた末尾からの距離**（`contentLines` の末尾何行か）: 本物は 0 / 4 / 7（4 と 7 は task panel。4 は 2.1.223 と 2.1.278、7 は 2.1.240）。
   引用は 4 / 5 / 7 / 8 / 10 / 12 / 14 / 15 と 18 以上（codex の実採取 L43 は下に 4 行、2774 fixture は 5 行、command-code は 7 行）。
   task panel を残すには N ≥ 7 が要り、その N では codex・2774・command-code の引用が探索範囲に入る。
   割合で数えても同じ行の並びなので同じ重なりになる
@@ -150,10 +179,10 @@ command-code の 16 行は `command-code-askuserquestion-2753/multiselect-answer
 
 ### (c) 捨てる量に上限を置く — 採らない
 
-- **生の行数**: 本物のフッタが捨てる行数は 893–976（ほぼ空行）。2774 実例の 963 と同じ大きさで、上限で区別できない
-- **非空行**: 本物が「下を捨てる」量は 0（2.1.278 の全採取）、4 / 7（旧版の task panel）。一方 2774 fixture の引用は
+- **生の行数**: 本物のフッタが捨てる行数は 893–977（ほぼ空行）。2774 実例の 963 と同じ大きさで、上限で区別できない
+- **非空行**: 本物が「下を捨てる」量は 0（2.1.278 の task panel なしの採取）、4 / 7（task panel。2.1.278 と 2.1.223 が 4、2.1.240 が 7）。一方 2774 fixture の引用は
   `›` を消して「下を捨てる」分岐に入れても非空 5 行しか捨てない。本物の範囲に収まるので上限では止まらない
-- 2.1.278 の task panel は未測で、パネルの高さ（タスク数・展開表示）に上限がある根拠を実測で持てなかった。
+- 2.1.278 の task panel は Issue 2811 で実測したが、採れたのは 3 タスクの 1 形（非空 4 行）だけで、パネルの高さ（タスク数・展開表示）に上限がある根拠は実測で持てていない。
   低い上限は #1708（task panel の行が選択肢として読まれる）を再発させる
 - 「上を捨てる」分岐（下に新しい対話がある）で捨てる量は、古いフレームの上側全部という設計なので上限と相容れない
 
@@ -161,7 +190,7 @@ command-code の 16 行は `command-code-askuserquestion-2753/multiselect-answer
 
 ## 変更の影響
 
-- 本物のフッタ 35 行: 判定・捨てる行数ともに変わらない（上表と走査）
+- 本物のフッタ 37 行（Issue 2811 で足した 2 行を含む）: 判定・捨てる行数ともに変わらない（上表と走査）
 - 変わるのは引用を含むフレームだけで、どれも「捨てていた行を捨てなくなる」方向:
   claude 2.1.278 の idle（非空 46 行）、codex 0.155.1（29）、command-code 1.58.0（15）、2774 fixture（20）、copilot 1895（45）
 - 既存の detection スイート（`CI=true npx vitest run tests/unit/detection tests/unit/lib/detection tests/unit/lib/chat`）は
@@ -177,3 +206,8 @@ command-code の 16 行は `command-code-askuserquestion-2753/multiselect-answer
 | `^\s*` だけにする（SGR を許さない） | 1 / 16 | 生のキャプチャで同じ行がフッタになる。detection スイート＋関連 5 本（2497 件）では赤 0 |
 
 どちらも元に戻したあと 16 / 16 緑。
+
+Issue 2811 で task panel の 2 本を足して 20 件になった。`src/` は書き換えず、変異させた
+`tui-detection-frame.ts` の写しを vitest の alias で差し替えて同じ 2 変異を掛け直すと、赤は **10 / 20・1 / 20** で上と同じテスト
+（足した 4 件は引用を含まないフレームなので、行頭アンカーの有無では判定が変わらない）。足した件が空振りしていないことは、
+3 つ目の変異「フッタより下を捨てずに全行を残す」で確かめた: 赤 5 / 20（足した 4 件と旧版の task panel 1 件）。
