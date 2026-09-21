@@ -24,6 +24,11 @@
  *
  * No opencode process is involved: `/api/` is mocked in the browser, which is
  * enough because the strip's gate is two fields on `/current-output`.
+ *
+ * The >250px floor below is the floor OUTSIDE the direct-input mode (#2799).
+ * While the phone's direct-input keyboard is open the quick keys are hidden and
+ * the floors are 200px / 120px instead; `mobile-direct-input-keyboard-2799.spec.ts`
+ * measures those, and re-checks this one after the mode is closed.
  */
 
 import { test, expect } from '@playwright/test';

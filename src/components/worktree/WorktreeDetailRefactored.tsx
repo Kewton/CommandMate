@@ -16,7 +16,7 @@
 
 'use client';
 
-import React, { memo, useCallback, useMemo, useState } from 'react';
+import React, { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { useTranslations } from 'next-intl';
 import { MoreHorizontal } from 'lucide-react';
@@ -25,7 +25,11 @@ import { MobileHeader } from '@/components/mobile/MobileHeader';
 import { StatusDot } from '@/components/ui/StatusDot';
 import { MobileTabBar } from '@/components/mobile/MobileTabBar';
 import { MobilePromptSheet } from '@/components/mobile/MobilePromptSheet';
-import { MobileTerminalActionsSheet } from '@/components/mobile/MobileTerminalActionsSheet';
+import {
+  MobileTerminalActionsSheet,
+  type DirectInputUnavailableReason,
+} from '@/components/mobile/MobileTerminalActionsSheet';
+import { MobileDirectInputKeyboard } from '@/components/mobile/MobileDirectInputKeyboard';
 import { ErrorBoundary } from '@/components/error/ErrorBoundary';
 import { MessageInput } from '@/components/worktree/MessageInput';
 import type { ShowToast } from '@/types/markdown-editor';
@@ -533,6 +537,62 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     [worktree?.path, handleFilePathClick],
   );
 
+  // Issue #960: derive the active session's running state per-instance優先
+  // （PC版と整合）so the End button and MessageInput reflect the selected
+  // instance rather than the per-CLI aggregate. Falls back to the per-CLI map
+  // for backward compat (single-instance / legacy configs).
+  const activeSessionRunning =
+    (worktree?.sessionStatusByInstance?.[activeInstanceId] ?? worktree?.sessionStatusByCli?.[activeCliTab])
+      ?.isRunning ?? false;
+
+  // --------------------------------------------------------------------------
+  // Issue #2799: the phone's direct-input keyboard
+  // --------------------------------------------------------------------------
+  // The last way out of a frame the detector cannot read, so it is gated on
+  // WHERE the user is, never on a detection flag (a prompt may well be up):
+  // the Terminal tab, the terminal surface (chat does not draw the frame the
+  // keys are aimed at), and a running session (the route 404s without one).
+  // The first reason that applies is the one the actions sheet shows.
+  const [directInputOpen, setDirectInputOpen] = useState(false);
+  const directInputUnavailableReason: DirectInputUnavailableReason | null =
+    activeTab !== 'terminal'
+      ? 'tab'
+      : mobileSurfaceMode === 'chat'
+        ? 'chat'
+        : !activeSessionRunning
+          ? 'session'
+          : null;
+  /**
+   * The keyboard is on screen. Gated on the same conditions as the sheet row,
+   * so the render never shows it against a target or surface it was not opened
+   * for, even in the one render before the effects below close the mode.
+   */
+  const showDirectInputKeyboard = directInputOpen && directInputUnavailableReason === null;
+
+  // Close — and so discard the staged keys, which live in the keyboard — when
+  // the target changes. The instance tabs stay visible while the keyboard is
+  // open, and staged keys carried across a switch would reach another agent.
+  // Same rule as PC's `DirectInputBar` (#2766, `TerminalSplitPaneContent`).
+  useEffect(() => {
+    setDirectInputOpen(false);
+  }, [worktreeId, activeCliTab, activeInstanceId]);
+
+  // Close when the session goes away. Its own effect, not the one above: in one
+  // effect keyed on both, a session coming BACK would close the mode too.
+  useEffect(() => {
+    if (!activeSessionRunning) setDirectInputOpen(false);
+  }, [activeSessionRunning]);
+
+  // Close on leaving the Terminal tab, and on the chat surface. The latter is
+  // defensive — the surface pill is locked while the keyboard is open — but
+  // the surface is also restored from localStorage.
+  useEffect(() => {
+    if (activeTab !== 'terminal' || mobileSurfaceMode === 'chat') setDirectInputOpen(false);
+  }, [activeTab, mobileSurfaceMode]);
+
+  const openDirectInput = useCallback(() => setDirectInputOpen(true), []);
+  const closeDirectInput = useCallback(() => setDirectInputOpen(false), []);
+
   // Render
   // ========================================================================
 
@@ -575,14 +635,6 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   // focused split / Dropdown selection changes while the dialog is open. Falls
   // back to the active instance label when no target is set (dialog closed).
   const killDialogLabel = killTarget?.label ?? activeInstanceLabel;
-
-  // Issue #960: derive the active session's running state per-instance優先
-  // （PC版と整合）so the End button and MessageInput reflect the selected
-  // instance rather than the per-CLI aggregate. Falls back to the per-CLI map
-  // for backward compat (single-instance / legacy configs).
-  const activeSessionRunning =
-    (worktree?.sessionStatusByInstance?.[activeInstanceId] ?? worktree?.sessionStatusByCli?.[activeCliTab])
-      ?.isRunning ?? false;
 
   // Issue #2406: the generating verdict for the same instance, kept beside
   // `activeSessionRunning` because the composer needs BOTH and they answer
@@ -933,6 +985,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                 verification={verification}
                 toolsSubTabRequest={toolsSubTabRequest}
                 onSurfaceModeChange={setMobileSurfaceMode}
+                directInputOpen={showDirectInputKeyboard}
               />
             </main>
 
@@ -948,7 +1001,28 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                   required: `activeTab` because the mode only describes the
                   terminal tab (History / Files / Tools keep the docked pad), and
                   `mobileSurfaceMode` because that is which half of it is on. */}
-              {isSelectionListActive && !isMobileChatSurface && (
+              {/* Issue #2799: the direct-input keyboard, docked HERE rather than
+                  in the terminal tab. `<main>` above scrolls (the keyboard would
+                  scroll with it) and carries the #1128 tab swipe, whose 32px edge
+                  bands overlap ESC / TAB / PGUP / PGDN at 360px — a sideways
+                  mis-tap would switch tabs and, by the rule above, throw the
+                  staged keys away. Pointer capture does not stop the swipe: it
+                  reads touch events. While it is open it stands in for the
+                  navigation pad (unmounted — it holds no state) and the
+                  composer (hidden, NOT unmounted: see below). */}
+              {showDirectInputKeyboard ? (
+                <MobileDirectInputKeyboard
+                  // Keyed on the target, so staged keys can never outlive it —
+                  // not even for the one render before the close effect runs.
+                  key={`${worktreeId}:${activeCliTab}:${activeInstanceId}`}
+                  worktreeId={worktreeId}
+                  cliToolId={activeCliTab}
+                  instanceId={activeInstanceId}
+                  onKeysSent={fetchCurrentOutput}
+                  onClose={closeDirectInput}
+                />
+              ) : null}
+              {isSelectionListActive && !isMobileChatSurface && !showDirectInputKeyboard && (
                 <div className="px-2 pt-1 border-b border-border">
                   <NavigationButtons
                     worktreeId={worktreeId}
@@ -959,7 +1033,19 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                   />
                 </div>
               )}
-              <div className="p-2">
+              {/* Issue #2799: hidden with `display:none` while the keyboard is
+                  open — never unmounted. `MessageInput` saves its draft 500ms
+                  after the last keystroke and drops the pending save on unmount,
+                  so unmounting it would lose what was typed just before. Not
+                  `opacity-0` / `h-0` either: those keep it in the tab order (so
+                  `aria-hidden` would be a real ARIA violation) and take height.
+                  Nothing re-measures the textarea while it is hidden: its height
+                  effect runs on a value change, and a hidden textarea gets none. */}
+              <div
+                className={showDirectInputKeyboard ? 'p-2 hidden' : 'p-2'}
+                aria-hidden={showDirectInputKeyboard ? true : undefined}
+                data-testid="mobile-composer-wrapper"
+              >
                 {/* Issue #2213: `MobileComposer` is `MessageInput` plus the one line
                     that reads the screen's registered optimistic send. It has to be a
                     child component because that read is a hook and the provider is
@@ -1030,8 +1116,15 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
 
             {/* Issue #2755: a checkbox question is shown whatever Auto-Yes is
                 doing — it is the one prompt Auto-Yes is measured never to
-                answer, so hiding it left the screen answerable by nobody. */}
-            {(!autoYesEnabled || isMultiSelectPrompt(state.prompt.data)) && (
+                answer, so hiding it left the screen answerable by nobody.
+                Issue #2799: EXCEPT while the direct-input keyboard is open. The
+                sheet is a full-screen overlay with a focus trap; drawn over the
+                keyboard it would block the one way out that does not depend on
+                detection, on the strength of a detection. This deliberately
+                narrows #2755 for the duration of the mode — not a regression to
+                "fix": the tab bar's prompt badge (`hasPrompt`) stays up, and
+                `閉じる` brings the sheet straight back. */}
+            {!showDirectInputKeyboard && (!autoYesEnabled || isMultiSelectPrompt(state.prompt.data)) && (
               <MobilePromptSheet
                 promptData={state.prompt.data}
                 visible={state.prompt.visible}
@@ -1051,6 +1144,8 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
               onSearch={() => window.dispatchEvent(new CustomEvent('terminal-search-open'))}
               onEnd={openActiveKillConfirm}
               endDisabled={!activeSessionRunning}
+              onDirectInput={openDirectInput}
+              directInputUnavailableReason={directInputUnavailableReason}
             />
 
             {/* Issue #1519: single mobile file screen — markdown viewing and editing

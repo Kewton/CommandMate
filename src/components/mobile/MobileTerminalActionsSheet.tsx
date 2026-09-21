@@ -19,13 +19,23 @@
  * The row is present unconditionally, empty note or not: it is the only way to
  * WRITE a first note on a phone, and a control that appears only once you have
  * used it cannot be discovered.
+ *
+ * Issue #2799 adds "Direct input" — the phone's on-screen keyboard for frames
+ * the detection layer cannot read. It sits BEFORE "End session", so the
+ * destructive action stays last (and the focus-trap test's "last button" stays
+ * a pressable one). It can be unavailable — not on the Terminal tab, the chat
+ * surface is showing, or no session is running — and then it stays in the list
+ * with the reason under it, `aria-disabled` rather than `disabled` so it keeps
+ * its place in the focus order and the reason stays readable, and the handler
+ * refuses the tap as well. The caller decides the reason; this sheet only draws
+ * it. Both props are optional, and without `onDirectInput` the row is absent.
  */
 
 'use client';
 
 import React, { useCallback, useEffect, useId } from 'react';
 import { useTranslations } from 'next-intl';
-import { Search, LogOut, StickyNote } from 'lucide-react';
+import { Search, LogOut, StickyNote, Keyboard } from 'lucide-react';
 import { useFocusTrap } from '@/hooks/useFocusTrap';
 import { SESSION_NOTE_OPEN_EVENT } from '@/components/worktree/TerminalSplitPane';
 
@@ -40,7 +50,30 @@ export interface MobileTerminalActionsSheetProps {
   onEnd: () => void;
   /** When true, the End action is unavailable (no running session). */
   endDisabled?: boolean;
+  /**
+   * Issue #2799: open the direct-input keyboard. The sheet closes first, as for
+   * every other row. Omitted → no "Direct input" row.
+   */
+  onDirectInput?: () => void;
+  /**
+   * Issue #2799: why "Direct input" cannot be used right now, or `null` / omitted
+   * when it can. The row is drawn unavailable with the matching reason.
+   */
+  directInputUnavailableReason?: DirectInputUnavailableReason | null;
 }
+
+/**
+ * Why the direct-input row is unavailable (Issue #2799), in the order the caller
+ * checks them: the Terminal tab is not showing, the chat surface is, or no
+ * session is running (the route 404s without one).
+ */
+export type DirectInputUnavailableReason = 'tab' | 'chat' | 'session';
+
+const DIRECT_INPUT_REASON_KEY: Readonly<Record<DirectInputUnavailableReason, string>> = {
+  tab: 'directInputKeyboard.unavailableTab',
+  chat: 'directInputKeyboard.unavailableChat',
+  session: 'directInputKeyboard.unavailableSession',
+};
 
 /**
  * Bottom action sheet for mobile terminal secondary actions.
@@ -51,9 +84,12 @@ export function MobileTerminalActionsSheet({
   onSearch,
   onEnd,
   endDisabled = false,
+  onDirectInput,
+  directInputUnavailableReason = null,
 }: MobileTerminalActionsSheetProps) {
   const t = useTranslations('worktree');
   const labelId = useId();
+  const directInputReasonId = useId();
 
   // [Issue #1127] Keep keyboard focus inside the sheet while open (shared
   // useFocusTrap); pairs with the existing Escape/backdrop dismiss paths.
@@ -74,6 +110,14 @@ export function MobileTerminalActionsSheet({
     window.dispatchEvent(new CustomEvent(SESSION_NOTE_OPEN_EVENT));
     onClose();
   }, [onClose]);
+
+  // Issue #2799: refused here as well as drawn unavailable — `aria-disabled`
+  // alone does not stop a tap.
+  const handleDirectInput = useCallback(() => {
+    if (!onDirectInput || directInputUnavailableReason !== null) return;
+    onClose();
+    onDirectInput();
+  }, [onDirectInput, directInputUnavailableReason, onClose]);
 
   // Dismiss on Escape while the sheet is open (parity with the backdrop-tap /
   // action-button close paths for this role="dialog" aria-modal surface).
@@ -136,6 +180,42 @@ export function MobileTerminalActionsSheet({
             <StickyNote size={18} aria-hidden="true" className="text-muted-foreground" />
             {t('sessionNote.menuItem')}
           </button>
+          {onDirectInput ? (
+            <button
+              type="button"
+              data-testid="actions-sheet-direct-input"
+              onClick={handleDirectInput}
+              // Named by the label alone; the reason is its description.
+              aria-label={t('directInputKeyboard.menuItem')}
+              aria-disabled={directInputUnavailableReason !== null ? true : undefined}
+              aria-describedby={directInputUnavailableReason !== null ? directInputReasonId : undefined}
+              className={`flex w-full items-center gap-3 rounded-lg px-3 py-3 text-left text-sm text-foreground transition-colors touch-manipulation ${
+                directInputUnavailableReason !== null ? '' : 'hover:bg-muted'
+              }`}
+            >
+              {/* Unavailable dims the icon and the label only: the reason under
+                  them is the one thing to read, so it keeps full contrast. */}
+              <Keyboard
+                size={18}
+                aria-hidden="true"
+                className={`shrink-0 text-muted-foreground ${directInputUnavailableReason !== null ? 'opacity-40' : ''}`}
+              />
+              <span className="flex min-w-0 flex-col">
+                <span className={directInputUnavailableReason !== null ? 'opacity-40' : undefined}>
+                  {t('directInputKeyboard.menuItem')}
+                </span>
+                {directInputUnavailableReason !== null ? (
+                  <span
+                    id={directInputReasonId}
+                    data-testid="actions-sheet-direct-input-reason"
+                    className="text-xs text-muted-foreground"
+                  >
+                    {t(DIRECT_INPUT_REASON_KEY[directInputUnavailableReason])}
+                  </span>
+                ) : null}
+              </span>
+            </button>
+          ) : null}
           <button
             type="button"
             data-testid="actions-sheet-end"
