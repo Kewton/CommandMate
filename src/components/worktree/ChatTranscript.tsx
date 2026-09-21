@@ -162,10 +162,7 @@ import {
 } from '@/lib/chat/chat-transcript-view';
 import { isToolApprovalMessage } from '@/lib/chat/chat-tool-approvals';
 import { resolveChatSearchNamespace } from '@/lib/chat/chat-search-namespace';
-import {
-  readChatToolActivityPreference,
-  writeChatToolActivityPreference,
-} from '@/lib/chat/chat-tool-activity';
+import { useChatToolActivityPreference } from '@/lib/chat/chat-tool-activity';
 import {
   CHAT_BUBBLE_ASSISTANT_CLASS,
   CHAT_BUBBLE_MARKDOWN_BODY_CLASS,
@@ -419,6 +416,18 @@ export interface ChatTranscriptProps {
    * `scrollTop`. See {@link ChatTranscriptScrollControls}.
    */
   onScrollControlsChange?: (controls: ChatTranscriptScrollControls | null) => void;
+  /**
+   * Issue #2821: draw none of the top-right icon buttons — the tool-activity
+   * toggle and the search toggle.
+   *
+   * For a mount whose parent owns that corner: on the phone, `MobileTerminalTab`
+   * floats its surface pill over exactly these 28px icons, so they could be
+   * neither seen nor pressed, and the pill carries the tool-activity toggle
+   * instead. The search BAR is not affected: while search is open it is drawn
+   * whatever this says, so a parent that opens search another way still gets
+   * the bar. Omit (the default) everywhere else.
+   */
+  hideCornerControls?: boolean;
 }
 
 // ============================================================================
@@ -665,6 +674,7 @@ export const ChatTranscript = memo(function ChatTranscript({
   liveTurn = null,
   sessionEnded = false,
   onScrollControlsChange,
+  hideCornerControls = false,
 }: ChatTranscriptProps) {
   const t = useTranslations('worktree');
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -863,20 +873,15 @@ export const ChatTranscript = memo(function ChatTranscript({
   // ---------------------------------------------------------------
   // Tool activity (Issue #2284)
   // ---------------------------------------------------------------
-  // One verdict for the whole column, remembered per browser. Read lazily on
+  // One verdict for the whole column, remembered per browser. Read during the
   // first render rather than in an effect, which is `useHistoryFilters`'
   // pattern for `commandmate:showArchived`: an effect would paint every chip
   // closed and then open them, and the reader's own preference is not a thing
   // to flicker through.
-  const [showToolActivity, setShowToolActivity] = useState<boolean>(
-    readChatToolActivityPreference,
-  );
-
-  const toggleToolActivity = useCallback(() => {
-    const next = !showToolActivity;
-    setShowToolActivity(next);
-    writeChatToolActivityPreference(next);
-  }, [showToolActivity]);
+  //
+  // [#2821] Read from the page-wide store rather than held per mount, so the
+  // PC's side-by-side transcripts and the phone's pill button all move together.
+  const [showToolActivity, toggleToolActivity] = useChatToolActivityPreference();
 
   const toolActivityValue = useMemo<ChatToolActivityState>(
     () => ({ showAll: showToolActivity }),
@@ -1512,9 +1517,14 @@ export const ChatTranscript = memo(function ChatTranscript({
           the bar is what pushes it off the pane. Nothing is lost by yielding —
           a search hit opens the chips in its own row anyway (see
           `searchHitMessageIds`), which is the only reason to want them open
-          while searching. */}
+          while searching.
+
+          [#2821] `hideCornerControls` withdraws both icons (the phone's surface
+          pill sits on top of them and carries the tool-activity toggle
+          itself). The search bar still renders whenever search is open, so the
+          strip stays the one place the bar lives. */}
       <div className="pointer-events-none absolute right-2 top-2 z-10 flex items-start justify-end gap-1">
-        {!isSearchOpen && (
+        {!isSearchOpen && !hideCornerControls && (
           <div className="pointer-events-auto">
             <button
               type="button"
@@ -1543,33 +1553,35 @@ export const ChatTranscript = memo(function ChatTranscript({
             </button>
           </div>
         )}
-        <div className="pointer-events-auto">
-          {isSearchOpen ? (
-            <HistorySearchBar
-              query={searchQuery}
-              onQueryChange={setSearchQuery}
-              matchCount={matchCount}
-              currentIndex={currentIndex}
-              onNext={nextMatch}
-              onPrev={prevMatch}
-              onClose={closeSearch}
-              isAtMaxMatches={isAtMaxMatches}
-              onCompositionStart={onCompositionStart}
-              onCompositionEnd={onCompositionEnd}
-            />
-          ) : (
-            <button
-              type="button"
-              data-testid="chat-transcript-search-toggle"
-              onClick={openSearch}
-              aria-label={t('chatTranscript.openSearch')}
-              title={t('chatTranscript.openSearch')}
-              className="rounded-full border border-border bg-surface-2/80 p-1.5 text-muted-foreground shadow-sm backdrop-blur transition-colors hover:bg-muted hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring touch-manipulation"
-            >
-              <Search size={14} aria-hidden="true" />
-            </button>
-          )}
-        </div>
+        {(isSearchOpen || !hideCornerControls) && (
+          <div className="pointer-events-auto">
+            {isSearchOpen ? (
+              <HistorySearchBar
+                query={searchQuery}
+                onQueryChange={setSearchQuery}
+                matchCount={matchCount}
+                currentIndex={currentIndex}
+                onNext={nextMatch}
+                onPrev={prevMatch}
+                onClose={closeSearch}
+                isAtMaxMatches={isAtMaxMatches}
+                onCompositionStart={onCompositionStart}
+                onCompositionEnd={onCompositionEnd}
+              />
+            ) : (
+              <button
+                type="button"
+                data-testid="chat-transcript-search-toggle"
+                onClick={openSearch}
+                aria-label={t('chatTranscript.openSearch')}
+                title={t('chatTranscript.openSearch')}
+                className="rounded-full border border-border bg-surface-2/80 p-1.5 text-muted-foreground shadow-sm backdrop-blur transition-colors hover:bg-muted hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring touch-manipulation"
+              >
+                <Search size={14} aria-hidden="true" />
+              </button>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
