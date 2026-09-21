@@ -385,6 +385,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     isReconnecting,
     isSelectionListActive,
     isPagerActive,
+    offersPlanApprove,
     // Issue #2592: the composer's permission-mode control reads these. The
     // phone's composer is docked outside `MobileTerminalTab` — which owns the
     // pane hook the PC split reads the same facts from — so they come off this
@@ -956,6 +957,8 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                     instanceId={activeInstanceId}
                     onKeysSent={fetchCurrentOutput}
                     showPagerKeys={isPagerActive}
+                    // Issue #2809: no `Enter` on a plan review (see ChatSurface, #2793).
+                    hideEnterKey={offersPlanApprove}
                   />
                 </div>
               )}
