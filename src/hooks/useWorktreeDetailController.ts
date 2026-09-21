@@ -43,6 +43,7 @@ import { useToast } from '@/components/common/Toast';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
 import { useAutoYes } from '@/hooks/useAutoYes';
 import { buildPromptResponseBody } from '@/lib/prompt-response-body-builder';
+import { readSelectionListShape } from '@/lib/detection/selection-shape';
 import { useAppUpdate } from '@/contexts/AppUpdateContext';
 import { type AutoYesToggleParams } from '@/components/worktree/AutoYesToggle';
 import type { AutoYesStopReason } from '@/config/auto-yes-config';
@@ -330,6 +331,10 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   const [isSelectionListActive, setIsSelectionListActive] = useState(false);
   // Issue #1017: Track Codex pager/edit-previous mode (drives pager keys on mobile)
   const [isPagerActive, setIsPagerActive] = useState(false);
+  // Issue #2809: the frame is Command Code's plan review, where `Enter` runs the
+  // focused action — so the phone's docked pad drops it, as ChatSurface's does
+  // (#2793). Only the boolean is kept: the frame itself is not mirrored (#736).
+  const [offersPlanApprove, setOffersPlanApprove] = useState(false);
   // Issue #2592: what the phone's composer needs to decide whether the
   // permission-mode button may be pressed, and what to put on its chip. The four
   // flags below are the SAME frame facts the PC split reads off its own pane
@@ -782,6 +787,10 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       setIsSelectionListActive(data.isSelectionListActive ?? false);
       // Issue #1017: Update Codex pager/edit-previous mode from server
       setIsPagerActive(data.isPagerActive ?? false);
+      // Issue #2809: read with the function the chat surface's card uses.
+      setOffersPlanApprove(
+        readSelectionListShape(data.realtimeSnippet || data.fullOutput).offersPlanApprove,
+      );
       // Issue #2592: the mode itself and the three remaining gate inputs.
       // Absent fields read as "nothing is on screen" / "no frame has landed",
       // which is what every other flag above already does — and `agentMode`
@@ -1035,6 +1044,7 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       actions.clearMessages();
       actions.clearPrompt();
       setIsSelectionListActive(false);
+      setOffersPlanApprove(false);
       // Fetch fresh data for the new tab
       void fetchMessages();
       void fetchCurrentOutput();
@@ -1955,6 +1965,8 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     isReconnecting,
     isSelectionListActive,
     isPagerActive,
+    // Issue #2809: the docked pad's Enter gate on a plan review.
+    offersPlanApprove,
     // Issue #2592: the phone composer's permission-mode control.
     isDismissablePanelActive,
     isUnclassifiedActive,
