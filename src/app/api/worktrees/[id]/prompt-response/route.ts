@@ -25,6 +25,7 @@ import {
   PromptAnswerRejectedError,
   FreeTextAnswerRejectedError,
   FreeTextAtChoiceOnlyPromptError,
+  MultiSelectAnswerRejectedError,
 } from '@/lib/prompt-answer-sender';
 import { resolvePromptAnswer, PromptAnswerResolutionError, type AnswerResolution } from '@/lib/prompt-answer-semantic';
 import { getAskUserQuestion } from '@/lib/session/agent-event-state';
@@ -74,8 +75,55 @@ const COMMAND_CODE_UNSUPPORTED_QUESTION_MESSAGE =
   'A Command Code question is on screen, but its option list could not be read, so no key was ' +
   'sent. Answer it in the terminal, or retry once the screen has settled.';
 
+/**
+ * The reason code for a checkbox answer this route would not let through
+ * (Issue #2755).
+ *
+ * Distinct from the sender's {@link MULTI_SELECT_NOT_COMMITTED_REASON}, which
+ * means "keys may have been sent and the question was not submitted". This one
+ * is the stronger promise the Issue asks for: **nothing at all was sent**,
+ * because the screen the answer was aimed at could not be re-verified.
+ */
+const MULTI_SELECT_UNVERIFIED_REASON = 'multi_select_unverified';
+
+/**
+ * Why a checkbox answer was refused before any key (Issue #2755 確定仕様 5).
+ *
+ * Every other answer on this route keeps the #1699 policy — a capture that
+ * fails is logged and the manual answer goes through anyway, because blocking
+ * it takes away the operator's only way out. A checkbox answer cannot have that
+ * policy: it is a SET, and the keys that deliver it are toggles computed
+ * against the boxes that are ticked right now. Sent at a screen nobody could
+ * re-read, the same request turns boxes OFF as readily as on. So this is the
+ * one answer shape where "could not verify" means "send nothing".
+ */
+const MULTI_SELECT_UNVERIFIED_MESSAGES: Record<string, string> = {
+  'capture-failed':
+    'The screen could not be re-read, so no key was sent. A checkbox answer is delivered as toggles '
+    + 'against the boxes that are ticked right now, and sending it blind could untick what you meant to keep. '
+    + 'Retry once the pane responds, or answer it in the terminal.',
+  // Defence in depth: `judgePromptResponse` above already refuses a frame with
+  // no prompt on it (`prompt_no_longer_active`, sending nothing), so this is
+  // the narrower case it cannot see — a prompt that was read but carries no
+  // payload to range-check the numbers against.
+  'prompt-gone':
+    'The question is no longer on screen, so no key was sent.',
+};
+
 interface PromptResponseRequest {
   answer?: string;
+  /**
+   * Issue #2755: the option numbers to tick on a CHECKBOX question.
+   *
+   * The explicit spelling of a multi-select answer, and the reason a one-item
+   * one (`[2]`) can never be confused with a single-select `answer: "2"`: the
+   * field itself says which of the two the caller means. `answer: "1,3"` is
+   * accepted as well — `commandmate respond <id> "1,3"` has one positional
+   * argument and no way to send an array — and a comma is unambiguous on its
+   * own. Both are normalised to the same ascending, de-duplicated set before
+   * anything is verified or sent.
+   */
+  answers?: number[];
   /** Issue #1681: explicitly select the prompt's default option (`respond --default`). */
   useDefault?: boolean;
   cliTool?: string;
@@ -87,6 +135,46 @@ interface PromptResponseRequest {
   defaultOptionNumber?: number;
   /** Issue #616: Submit mode from client-side detection (fallback when promptCheck fails) */
   submitMode?: string;
+}
+
+/**
+ * The requested selection SET, when this request is a checkbox answer
+ * (Issue #2755 確定仕様 5).
+ *
+ * Shape only — whether the screen is really a checkbox question, and whether
+ * the numbers exist on it, are decided later against the FRESH frame. Returns
+ * `null` for every request that is not a multi-select answer, which is the
+ * pre-#2755 path byte for byte.
+ */
+function parseSelectionSet(
+  body: PromptResponseRequest,
+): { ok: true; numbers: number[] } | { ok: false; error: string } | null {
+  const { answers, answer } = body;
+  if (answers !== undefined) {
+    if (
+      !Array.isArray(answers) ||
+      answers.length === 0 ||
+      answers.some((n) => typeof n !== 'number' || !Number.isInteger(n) || n < 1)
+    ) {
+      return { ok: false, error: 'answers must be a non-empty array of positive integers' };
+    }
+    if (answer !== undefined) {
+      return { ok: false, error: 'answer and answers are mutually exclusive' };
+    }
+    if (body.useDefault === true) {
+      return { ok: false, error: 'answers and useDefault are mutually exclusive' };
+    }
+    return { ok: true, numbers: [...new Set(answers)].sort((a, b) => a - b) };
+  }
+  if (typeof answer !== 'string' || !answer.includes(',')) return null;
+  if (!/^\s*\d+(?:\s*,\s*\d+)*\s*$/.test(answer)) {
+    return { ok: false, error: 'A comma-separated answer must be option numbers, e.g. "1,3"' };
+  }
+  const numbers = answer.split(',').map((part) => Number(part.trim()));
+  if (numbers.some((n) => !Number.isInteger(n) || n < 1)) {
+    return { ok: false, error: 'A comma-separated answer must be option numbers, e.g. "1,3"' };
+  }
+  return { ok: true, numbers: [...new Set(numbers)].sort((a, b) => a - b) };
 }
 
 export async function POST(
@@ -107,12 +195,23 @@ export async function POST(
     const { answer, cliTool: cliToolParam, instanceId: instanceParam, promptType: bodyPromptType, defaultOptionNumber: bodyDefaultOptionNumber, submitMode: bodySubmitMode } = body;
     const useDefault = body.useDefault === true;
 
+    // Issue #2755: is this a checkbox answer, and is its SHAPE usable? Decided
+    // here, above every other validation, because the two branches below need
+    // different things of the same fields — `answers: [2]` has no `answer` at
+    // all, and `answer: "1,3"` must not reach `resolvePromptAnswer`, which
+    // would pass it through as free text.
+    const selection = parseSelectionSet(body);
+    if (selection !== null && !selection.ok) {
+      return NextResponse.json({ error: selection.error }, { status: 400 });
+    }
+    const selectionNumbers = selection === null ? null : selection.numbers;
+
     // Issue #616: Allowlist validation for submitMode
     const validSubmitMode: SubmitMode | undefined =
       isValidSubmitMode(bodySubmitMode) ? bodySubmitMode : undefined;
 
     // Validation (Issue #1681: exactly one of answer / useDefault)
-    if (!answer && !useDefault) {
+    if (!answer && !useDefault && selectionNumbers === null) {
       return NextResponse.json(
         { error: 'answer is required' },
         { status: 400 }
@@ -244,6 +343,11 @@ export async function POST(
     // guard below has to know it about the frame that was actually verified, not
     // about a screen that may have moved on.
     let isCommandCodeQuestion = false;
+    // Issue #2755: whether the re-verification below could not be done at all.
+    // Every other answer keeps the #1699 policy of carrying on (see the catch),
+    // and a checkbox answer is the one exception — see
+    // {@link MULTI_SELECT_UNVERIFIED_MESSAGES}.
+    let verificationFailed = false;
     try {
       const currentOutput = await captureSessionOutputFresh(id, cliToolId, undefined, instanceId);
       verifiedFrame = currentOutput;
@@ -338,6 +442,7 @@ export async function POST(
       }
     } catch {
       // If capture fails, proceed with caution - don't block manual responses
+      verificationFailed = true;
       logger.warn('failed-to-verify-prompt');
     }
 
@@ -354,6 +459,62 @@ export async function POST(
         : null;
     const effectivePromptData = structuredPromptData ?? promptCheck?.promptData;
 
+    // Issue #2755 確定仕様 5: a checkbox answer is judged here, against the
+    // frame that was just re-verified, and is refused with NOTHING sent unless
+    // all four hold — the capture worked, a prompt is still up, it is still a
+    // checkbox question, and every number is on it. The refusals are ordered
+    // most-general first so the operator is told the true reason rather than
+    // "out of range" for a screen that is no longer there.
+    let selectionResolution: AnswerResolution | null = null;
+    if (selectionNumbers !== null) {
+      const refuse = (
+        detail: keyof typeof MULTI_SELECT_UNVERIFIED_MESSAGES,
+      ): NextResponse => {
+        logger.info('prompt-response-refused', {
+          worktreeId: id,
+          cliToolId,
+          instanceId,
+          reason: MULTI_SELECT_UNVERIFIED_REASON,
+          detail,
+        });
+        return NextResponse.json({
+          success: false,
+          reason: MULTI_SELECT_UNVERIFIED_REASON,
+          message: MULTI_SELECT_UNVERIFIED_MESSAGES[detail],
+          answer: selectionNumbers.join(','),
+        });
+      };
+
+      if (verificationFailed || promptCheck === null) return refuse('capture-failed');
+      if (!promptCheck.isPrompt || !effectivePromptData) return refuse('prompt-gone');
+      if (
+        effectivePromptData.type !== 'multiple_choice' ||
+        effectivePromptData.multiSelect !== true
+      ) {
+        // A single-select prompt handed a list of numbers. 400 rather than the
+        // refusal body above: the request itself is wrong for this screen, and
+        // 確定仕様 5 asks for it by name.
+        return NextResponse.json(
+          {
+            error:
+              'That prompt takes one option, not a list. Answer with a single option number.',
+          },
+          { status: 400 },
+        );
+      }
+      const valid = new Set(effectivePromptData.options.map((option) => option.number));
+      const outOfRange = selectionNumbers.filter((n) => !valid.has(n));
+      if (outOfRange.length > 0) {
+        return NextResponse.json(
+          {
+            error: `Invalid choice: ${outOfRange.join(', ')}. Valid options are: ${[...valid].join(', ')}`,
+          },
+          { status: 400 },
+        );
+      }
+      selectionResolution = { input: selectionNumbers.join(',') };
+    }
+
     // With the agent's own option list in hand, an answer can be judged before
     // any key is sent: a number outside the list cannot be right, and a word
     // that matches no label cannot be resolved. This is where `respond <id> no`
@@ -362,7 +523,7 @@ export async function POST(
     // whatever is highlighted.
     let effectiveAnswer = answer;
     let structuredResolution: AnswerResolution['resolved'];
-    if (structuredPromptData && !useDefault && answer !== undefined) {
+    if (selectionResolution === null && structuredPromptData && !useDefault && answer !== undefined) {
       const checked = resolveAskUserQuestionAnswer(structuredPromptData, answer);
       if (!checked.ok) {
         logger.info('prompt-response-refused', {
@@ -388,7 +549,11 @@ export async function POST(
     // answers are refused without sending anything.
     let resolution: AnswerResolution;
     try {
-      resolution = resolvePromptAnswer({
+      // Issue #2755: a verified selection set bypasses this resolution. It is
+      // neither a semantic answer nor free text — `resolvePromptAnswer` would
+      // hand `"1,3"` straight back as text, which is exactly what the guards
+      // downstream are built to refuse.
+      resolution = selectionResolution ?? resolvePromptAnswer({
         answer: effectiveAnswer,
         useDefault,
         promptData: effectivePromptData,
@@ -487,6 +652,28 @@ export async function POST(
       // before a key, so the dialog is still up and the operator can answer it
       // with the option number. They share a reason code on purpose; what
       // differs is only the evidence each can log.
+      // Issue #2755: the checkbox arm gave up. Unlike the three above it does
+      // not always promise an untouched pane — ticking boxes is the first half
+      // of this answer — so `keysSent` is logged and the message says which of
+      // the two the operator is looking at. What it does promise is that the
+      // question was never submitted, which is why this is a refusal and not a
+      // 500.
+      if (error instanceof MultiSelectAnswerRejectedError) {
+        logger.info('prompt-response-refused', {
+          worktreeId: id,
+          cliToolId,
+          instanceId,
+          reason: error.reason,
+          stage: error.stage,
+          keysSent: error.keysSent,
+        });
+        return NextResponse.json({
+          success: false,
+          reason: error.reason,
+          message: error.message,
+          answer: resolution.input,
+        });
+      }
       if (error instanceof FreeTextAnswerRejectedError || error instanceof FreeTextAtChoiceOnlyPromptError) {
         logger.info('prompt-response-refused', {
           worktreeId: id,

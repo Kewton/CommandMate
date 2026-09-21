@@ -147,6 +147,68 @@ describe('resolvePromptAnswer — semantic yes/no on multiple_choice', () => {
       .toThrow(PromptAnswerResolutionError);
   });
 
+  describe('a checkbox payload whose labels no longer carry the box (Issue #2755)', () => {
+    /**
+     * Command Code's reader strips `[ ] ` / `[x] ` off the label and reports
+     * the state as `multiSelect` / `checked`. The guard above reads the LABEL,
+     * so on that payload it silently stopped firing — `respond <id> yes` would
+     * have gone back to being text at a screen where Enter toggles a box. The
+     * flag is what refuses it now; the label pattern stays for claude's and
+     * agy's checkbox menus, which reach here through the generic parser with
+     * the brackets still on.
+     */
+    const commandCodeCheckbox: PromptData = {
+      type: 'multiple_choice',
+      question: 'Which caches should I clear?',
+      multiSelect: true,
+      options: [
+        { number: 1, label: 'node_modules', isDefault: true, checked: false },
+        { number: 2, label: 'dist', isDefault: false, checked: true },
+      ],
+      status: 'pending',
+    };
+
+    it('refuses `respond yes` with nothing to send', () => {
+      expect(() => resolvePromptAnswer({ answer: 'yes', promptData: commandCodeCheckbox }))
+        .toThrow(PromptAnswerResolutionError);
+    });
+
+    it('refuses `respond no` as well', () => {
+      expect(() => resolvePromptAnswer({ answer: 'no', promptData: commandCodeCheckbox }))
+        .toThrow(PromptAnswerResolutionError);
+    });
+
+    it('refuses `respond --default`', () => {
+      // The `❯` on this screen is a CURSOR — the row a key would toggle — not a
+      // pre-selected answer. #2754 caught the consequence on a real capture:
+      // the cursor was resting on an already-ticked box, so "answer the
+      // default" would have UNticked the human's own choice.
+      expect(() => resolvePromptAnswer({ useDefault: true, promptData: commandCodeCheckbox }))
+        .toThrow(PromptAnswerResolutionError);
+    });
+
+    it('points at the answer that does work', () => {
+      // The message is what the operator sees from `commandmate respond`, so
+      // it has to name the shape that is accepted.
+      for (const params of [
+        { answer: 'yes', promptData: commandCodeCheckbox },
+        { useDefault: true, promptData: commandCodeCheckbox },
+      ]) {
+        expect(() => resolvePromptAnswer(params)).toThrow(/"1,3"/);
+      }
+    });
+
+    it('leaves the same options alone without the flag', () => {
+      const { multiSelect: _multiSelect, ...singleSelect } = commandCodeCheckbox as {
+        multiSelect?: boolean;
+      } & Extract<PromptData, { type: 'multiple_choice' }>;
+      expect(resolvePromptAnswer({ useDefault: true, promptData: singleSelect })).toEqual({
+        input: '1',
+        resolved: { via: 'default', optionNumber: 1, optionLabel: 'node_modules' },
+      });
+    });
+  });
+
   it('throws when detection failed but the client claims multiple_choice (labels unknown)', () => {
     expect(() => resolvePromptAnswer({
       answer: 'no',

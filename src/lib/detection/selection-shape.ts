@@ -193,6 +193,107 @@ export const DISMISSABLE_PANEL_FOOTER_PATTERN =
   /^\s*(?:press|hit|type)?\s*(?:<)?esc(?:ape)?(?:>)?\s+to\s+(?:close|dismiss|exit)\b[\s.·•]*$/im;
 
 /**
+ * The two footer rows of Command Code's plan review overlay (Issue #2761).
+ *
+ * Measured on 1.58.0 at 200x1000. The overlay is a rule, a `Plan review: <title>
+ * · <path> · v1` header, the plan with a line-number gutter, a second rule, a
+ * ` REVIEW ` badge and then, verbatim:
+ *
+ *     Approve ctrl+a   executes the plan
+ *     Cancel esc
+ *
+ * BOTH rows, adjacent, because each half alone is weak: `Cancel esc` is two
+ * words any picker might print, and `Approve` is a word an agent writes in a
+ * plan. Multi-line on purpose — it is tested against a joined tail
+ * (`NormalizedFrame.lastLines`, or the tail {@link readSelectionListShape}
+ * builds), never against a single row.
+ *
+ * Swept against every fixture in `tests/fixtures` and
+ * `tests/unit/lib/detection/fixtures` when this was written (300 files): the
+ * only match is the plan review capture itself.
+ *
+ * ## The `❯` either row may carry (Issue #2793)
+ *
+ * `↓` past the plan's last line moves the focus onto the ACTION list, and the
+ * focused action is drawn with a `❯ ` in front of it and two spaces before its
+ * key (`tests/fixtures/command-code-plan-review-2763/`, 1.58.0):
+ *
+ *     ❯ Approve  ctrl+a   executes the plan        ← `plan-review-action-focus-approve.txt`
+ *     Cancel esc
+ *
+ *     Approve ctrl+a   executes the plan · comments go along as notes
+ *     ❯ Cancel  esc                                ← `plan-review-long-scrolled-cancel-focused.txt`
+ *
+ * Without the optional `❯ ` this pattern missed both frames, and they went on to
+ * the composer check, where `COMMAND_CODE_PROMPT_PATTERN` (`^❯(\s*$|\s+\S)`)
+ * read the cursor row as the composer and published `ready` / `input_prompt`:
+ * `wait` exited 0 on a plan nobody had approved — #2754's `❯`-outside-the-list
+ * family. It is also the frame on which `Enter` EXECUTES the focused action, so
+ * missing it here would also have left the chat surface's `Enter` on screen
+ * (see {@link SelectionListShape.offersPlanApprove}). Only `❯`, and only as a
+ * prefix: `❯ ` + the row is the one measured spelling of a focused action.
+ * Re-swept over the same two directories with the widened pattern: every match
+ * is still a `command-code-plan-review-*` capture, which
+ * `command-code-plan-review-2793.test.ts` keeps pinned.
+ */
+export const COMMAND_CODE_PLAN_REVIEW_FOOTER =
+  /^\s*(?:❯ +)?Approve\s+ctrl\+a\b[^\n]*\n\s*(?:❯ +)?Cancel\s+esc\s*$/im;
+
+/**
+ * The radio row `ctrl+a` puts in place of the action list when comments are
+ * pending (Issue #2793).
+ *
+ * Measured on 1.58.0 (`tests/fixtures/command-code-plan-review-2763/`): with
+ * zero comments `ctrl+a` approves at once, and with one or more it first asks
+ * what to do with them. The three action rows are replaced by ONE row, and the
+ * selected side is `(•)`, the other `( )` — readable without the ANSI:
+ *
+ *     Approve (•) with 4 comments as notes ( ) original plan · discard comments
+ *
+ * `comments?` because the badge above it is measured in both numbers
+ * (`1 pending comment` / `4 pending comments`); the radio itself was captured
+ * with four.
+ */
+export const COMMAND_CODE_PLAN_APPROVE_CHOICE_ROW =
+  /^\s*Approve\s+\([• ]\)\s+with\s+\d+\s+comments?\s+as\s+notes\s+\([• ]\)\s+original\s+plan\b/im;
+
+/**
+ * The hint bar under {@link COMMAND_CODE_PLAN_APPROVE_CHOICE_ROW}, verbatim
+ * `←/→ choose · enter confirm · esc back`.
+ *
+ * Anchored to the LAST row of the text it is tested against (no `m` flag: `$` is
+ * the end of the input), because that is where the overlay draws every one of
+ * its five measured hint bars, and because it is what keeps a transcript that
+ * QUOTES this screen from matching — the composer is always drawn below a
+ * transcript, so there the quote is never the last row.
+ */
+export const COMMAND_CODE_PLAN_APPROVE_CHOICE_FOOTER =
+  /(?:^|\n)[ \t]*←\/→\s+choose\s*·\s*enter\s+confirm\s*·\s*esc\s+back\s*$/i;
+
+/**
+ * Whether this tail is the approve-with-comments confirmation (Issue #2793).
+ *
+ * BOTH rows, for the reason {@link COMMAND_CODE_PLAN_REVIEW_FOOTER} gives for
+ * its two: either half alone is a sentence something else could print. Not
+ * adjacent — `Editor exited with code 127` and a blank row sit between them on
+ * both captures — so each is tested on its own.
+ *
+ * Deliberately NOT folded into {@link COMMAND_CODE_PLAN_REVIEW_FOOTER}, and
+ * therefore not {@link SelectionListShape.offersPlanApprove}: on this screen
+ * `enter` is the documented CONFIRM of an approval the human already started
+ * with `ctrl+a`, so the chat surface must keep its `Enter`, and what `ctrl+a`
+ * does here was not measured.
+ *
+ * @param tail - the frame's last rows, ANSI stripped, last content row last
+ */
+export function isCommandCodePlanApproveChoice(tail: string): boolean {
+  return (
+    COMMAND_CODE_PLAN_APPROVE_CHOICE_ROW.test(tail) &&
+    COMMAND_CODE_PLAN_APPROVE_CHOICE_FOOTER.test(tail)
+  );
+}
+
+/**
  * How many rows from the end of the content the dismiss footer is looked for.
  *
  * The same 15-row tail the detection chain hands a tool module as
@@ -282,10 +383,26 @@ const COMMAND_CODE_CURSOR_GLYPH = '❯';
 const COMMAND_CODE_TAB_SELECTED_MARKERS = '●◉⦿';
 /** The hollow half of {@link COMMAND_CODE_TAB_SELECTED_MARKERS}'s pair. */
 const COMMAND_CODE_TAB_UNSELECTED_MARKERS = '◯○◌⚪';
+/**
+ * The ANSWERED half, measured on 1.54.1 (Issue #2753).
+ *
+ * A multi-question `AskUserQuestion` keeps one tab per question and marks the
+ * ones already answered: `✔ Party size | ✔ Rental car | ● Update scope | ◯ Review`.
+ * Before this family existed the whole strip failed the cell test, the reader answered
+ * `none`, and the generic parser read the checkbox list under it as a single
+ * select — see the Issue for the capture.
+ *
+ * U+2714 and nothing else. `✓` (U+2713) and `☑` (U+2611) are the shapes a check
+ * mark could take; neither has been seen on a pane, and this reading is shared
+ * with `ChatSurface` and `extractCommandCodeSelectionListFrame`, which run for
+ * EVERY tool — so an unmeasured glyph here widens what other tools' frames can
+ * be claimed as this screen.
+ */
+const COMMAND_CODE_TAB_ANSWERED_MARKERS = '✔';
 
 /** One `<marker> <label>` cell of the tab strip. */
 const COMMAND_CODE_TAB_SEGMENT_PATTERN = new RegExp(
-  `^\\s*([${COMMAND_CODE_TAB_SELECTED_MARKERS}${COMMAND_CODE_TAB_UNSELECTED_MARKERS}])\\s+\\S`,
+  `^\\s*([${COMMAND_CODE_TAB_SELECTED_MARKERS}${COMMAND_CODE_TAB_UNSELECTED_MARKERS}${COMMAND_CODE_TAB_ANSWERED_MARKERS}])\\s+\\S`,
 );
 
 /**
@@ -298,22 +415,25 @@ const COMMAND_CODE_TAB_SEGMENT_PATTERN = new RegExp(
  *    the structure and the one prose never has in this position;
  *  - **every cell is `<marker> <label>`.** A row that is a strip for its first
  *    cell and prose for its second is prose;
- *  - **at least one filled marker and at least one hollow one.** A tab strip
+ *  - **at least one filled marker, and at least one other cell.** A tab strip
  *    says which tab has the screen. A row of identical bullets does not, and
- *    `● one | ● two` is exactly the list-with-a-pipe this rules out.
+ *    `● one | ● two` is exactly the list-with-a-pipe this rules out. The other
+ *    cell may be hollow (not answered yet) or the `✔` of an answered tab
+ *    (measured on 1.54.1 — Issue #2753); what may not be missing is the filled
+ *    one, so `✔ one | ✔ two` is still refused.
  */
 function isCommandCodeQuestionTabRow(line: string): boolean {
   const segments = line.split('|');
   if (segments.length < 2) return false;
   let selected = 0;
-  let unselected = 0;
+  let others = 0;
   for (const segment of segments) {
     const match = COMMAND_CODE_TAB_SEGMENT_PATTERN.exec(segment);
     if (match === null) return false;
     if (COMMAND_CODE_TAB_SELECTED_MARKERS.includes(match[1])) selected += 1;
-    else unselected += 1;
+    else others += 1;
   }
-  return selected > 0 && unselected > 0;
+  return selected > 0 && others > 0;
 }
 
 /**
@@ -356,8 +476,20 @@ export interface CommandCodeQuestionRegion {
   readonly lastLineIndex: number;
   /** The tab strip — the region's first non-blank row. */
   readonly tabLineIndex: number;
-  /** The option row carrying the one cursor glyph. */
+  /** The row carrying the one cursor glyph. */
   readonly cursorLineIndex: number;
+  /**
+   * Whether {@link cursorLineIndex} is one of the NUMBERED rows (Issue #2755).
+   *
+   * False on the three rows 1.54.1 lets the `❯` rest on outside the list —
+   * `Submit`, `Next` and the `notes:` input `n` opens. The region is still this
+   * screen, and saying so is what stopped six measured captures being published
+   * as finished turns (#2521's 偽完了); what it is NOT is an answerable reading,
+   * because a digit sent while the cursor is off the list does nothing at all.
+   * `tools/command-code/dialog.ts` declines those frames to the manual-operation
+   * fallback rather than to `ready`.
+   */
+  readonly cursorOnOptionRow: boolean;
   /** How many options the question draws: 2…{@link MAX_OPTION_NUMBER}. */
   readonly optionCount: number;
 }
@@ -413,9 +545,13 @@ export interface CommandCodeQuestionRegion {
  *  3. the options are a STRICT run `1.` … `N.`, 2 ≤ N ≤ {@link
  *     MAX_OPTION_NUMBER}. A gap, a repeat or a list that starts at `2` is not
  *     this screen;
- *  4. exactly one {@link COMMAND_CODE_CURSOR_GLYPH} in the region, and it is on
- *     an option row. Two cursors means two screens — typically a composer's own
- *     `❯` under the dialog — and none means the highlight is elsewhere;
+ *  4. exactly one {@link COMMAND_CODE_CURSOR_GLYPH} in the region. Two cursors
+ *     means two screens — typically a composer's own `❯` under the dialog — and
+ *     none means the highlight is elsewhere. Issue #2755 dropped the "and it is
+ *     on an option row" half: 1.54.1 parks the cursor on `Submit`, on `Next` and
+ *     on the `notes:` row, and refusing those frames published six measured
+ *     captures of a live question as finished turns. WHERE it sits is reported
+ *     as {@link CommandCodeQuestionRegion.cursorOnOptionRow} instead;
  *  5. no filter box, no `/model` footer, no dismiss-only footer and no other
  *     turn's UI in the region ({@link FILTER_INPUT_PATTERN},
  *     {@link COMMAND_CODE_SELECTION_LIST_FOOTER},
@@ -479,6 +615,7 @@ export function readCommandCodeQuestionRegion(
     lastLineIndex: screen.lastLineIndex,
     tabLineIndex: screen.tabLineIndex,
     cursorLineIndex: screen.cursorLineIndex,
+    cursorOnOptionRow: screen.cursorOnOptionRow,
     optionCount: screen.numbers.length,
   };
 }
@@ -512,16 +649,138 @@ export function readCommandCodeQuestionRegion(
  * Every structural condition stays: the last qualifying rule row, a genuine tab
  * strip as the first row under it ({@link isCommandCodeQuestionTabRow} — one
  * filled marker, one hollow, `|`-separated), a non-blank question body before
- * the first option, at least two numbered rows, at least one `❯` ON one of them,
+ * the first option, at least two numbered rows, at least one `❯` in the region,
  * and none of the pickers, panels or other-turn UI the other branches own. An
  * assistant answering in a numbered list carries none of that, and a frame with
- * one option or with the `❯` on a composer row is still `false` — the two cases
- * #2521 recorded as "the highlight is elsewhere".
+ * one option is still `false`.
+ *
+ * Issue #2755 no longer requires that `❯` to be ON a numbered row — see
+ * condition 4 of {@link readCommandCodeQuestionRegion} for why, and
+ * {@link CommandCodeQuestionRegion.cursorOnOptionRow} for what is reported
+ * instead.
  *
  * @param frame - a raw `capture-pane -p -e` frame, ANSI intact (CRLF tolerated)
  */
 export function hasCommandCodeQuestionChrome(frame: string | null | undefined): boolean {
   return scanCommandCodeQuestionScreen(frame) !== null;
+}
+
+/**
+ * The Review page's own three rows, measured on 1.54.1 (Issue #2755 §7).
+ *
+ * `Enter` on the `Submit` row does not send the answers — it opens a SECOND
+ * screen:
+ *
+ *     ✔ Update scope | ● Review
+ *
+ *     1. Which files should I update?
+ *        calc.js
+ *
+ *     ❯ 1. Submit
+ *       2. Cancel
+ *
+ *     ← to go back and edit
+ *
+ * ## Why this needs a reading of its own
+ *
+ * Because it is a real numbered list under a real tab strip, and the GENERIC
+ * parser answers it: a two-option `multiple_choice` whose default is `Submit`.
+ * The default answer on that payload does not pick anything — it COMMITS
+ * whatever the human has ticked so far, from a payload nobody meant to expose,
+ * which is #1928's shape one screen later. Auto-Yes fires on defaults.
+ *
+ * Words rather than structure, and deliberately: the two numbered rows are
+ * `Submit` and `Cancel`, which is the same shape as any other two-option
+ * question. What separates this page from a question is only what it SAYS, so
+ * all three rows are required together — the confirm pair AND the back hint —
+ * and the whole thing is anchored inside a recognised question region. A screen
+ * that carries two of the three keeps every verdict it had.
+ *
+ * The cursor glyph is optional on both numbered rows: it rests on `1. Submit`
+ * when the page is reached by `Enter`, and the Issue is explicit that a pattern
+ * decided on the bare word would miss it.
+ */
+const COMMAND_CODE_REVIEW_SUBMIT_ROW_PATTERN =
+  /^[^\S\n]*(?:\u276F[^\S\n]*)?1[.)][^\S\n]+Submit[^\S\n]*$/im;
+/** The `Cancel` half of {@link COMMAND_CODE_REVIEW_SUBMIT_ROW_PATTERN}'s pair. */
+const COMMAND_CODE_REVIEW_CANCEL_ROW_PATTERN =
+  /^[^\S\n]*(?:\u276F[^\S\n]*)?2[.)][^\S\n]+Cancel[^\S\n]*$/im;
+/** The footer only the Review page draws. */
+const COMMAND_CODE_REVIEW_BACK_HINT_PATTERN =
+  /^[^\S\n]*\u2190[^\S\n]+to[^\S\n]+go[^\S\n]+back[^\S\n]+and[^\S\n]+edit[^\S\n]*$/im;
+
+/**
+ * The warning the Review page carries when it was reached with answers missing.
+ *
+ * Measured from the undocumented `d`, which ends a multi-select from any row:
+ * `⚠ You have not answered all questions` over a `No answer`. Issue #2755 §7
+ * requires that such a page is never read as "answered", which is why the
+ * predicate below reports it rather than hiding it.
+ */
+const COMMAND_CODE_REVIEW_UNANSWERED_PATTERN =
+  /have\s+not\s+answered\s+all\s+questions/i;
+
+/** What a frame's Review page says, when one is on it (Issue #2755). */
+export interface CommandCodeReviewPage {
+  /** True when `⚠ You have not answered all questions` is on the page. */
+  readonly hasUnansweredWarning: boolean;
+  /** True when the `❯` rests on `1. Submit`, i.e. an Enter would commit. */
+  readonly cursorOnSubmit: boolean;
+}
+
+/**
+ * Read Command Code's `AskUserQuestion` Review page, if this frame is one
+ * (Issue #2755 §7).
+ *
+ * The same region {@link readCommandCodeQuestionRegion} works on — last rule
+ * row, tab strip as the first row under it — plus the three rows above. The
+ * question-shaped conditions are deliberately NOT applied: this page has no
+ * question body of its own on the `Submit`/`Cancel` spelling (the answers sit
+ * where the question would), and it draws `1.` twice, so the strict reading
+ * declines it for a numbering reason that says nothing about what it is.
+ *
+ * `null` for everything else, so no existing verdict moves except the two
+ * captures this is about.
+ *
+ * @param frame - a raw `capture-pane -p -e` frame, ANSI intact (CRLF tolerated)
+ */
+export function readCommandCodeReviewPage(
+  frame: string | null | undefined,
+): CommandCodeReviewPage | null {
+  if (!frame) return null;
+  const lines = frame.replace(/\r\n/g, '\n').split('\n').map(stripAnsi);
+
+  let last = lines.length - 1;
+  while (last >= 0 && lines[last].trim() === '') last -= 1;
+  if (last < 1) return null;
+
+  let ruleLineIndex = -1;
+  for (let i = last - 1; i >= 0; i -= 1) {
+    const row = lines[i].trim();
+    if (row.length < COMMAND_CODE_RULE_MIN_COLUMNS) continue;
+    if (!COMMAND_CODE_RULE_ROW_PATTERN.test(row)) continue;
+    ruleLineIndex = i;
+    break;
+  }
+  if (ruleLineIndex < 0) return null;
+
+  const region = lines.slice(ruleLineIndex + 1, last + 1);
+  const tabOffset = region.findIndex((line) => line.trim() !== '');
+  if (tabOffset < 0) return null;
+  if (!isCommandCodeQuestionTabRow(region[tabOffset])) return null;
+
+  const body = region.join('\n');
+  if (!COMMAND_CODE_REVIEW_SUBMIT_ROW_PATTERN.test(body)) return null;
+  if (!COMMAND_CODE_REVIEW_CANCEL_ROW_PATTERN.test(body)) return null;
+  if (!COMMAND_CODE_REVIEW_BACK_HINT_PATTERN.test(body)) return null;
+
+  const submitRow = region.find((row) =>
+    COMMAND_CODE_REVIEW_SUBMIT_ROW_PATTERN.test(row),
+  );
+  return {
+    hasUnansweredWarning: COMMAND_CODE_REVIEW_UNANSWERED_PATTERN.test(body),
+    cursorOnSubmit: submitRow !== undefined && submitRow.includes(COMMAND_CODE_CURSOR_GLYPH),
+  };
 }
 
 /** What {@link scanCommandCodeQuestionScreen} read off one frame. */
@@ -534,8 +793,10 @@ interface CommandCodeQuestionScreen {
   readonly numbers: readonly number[];
   /** How many {@link COMMAND_CODE_CURSOR_GLYPH} the region carries. */
   readonly cursorCount: number;
-  /** The LAST option row carrying a cursor. */
+  /** The LAST row carrying a cursor — an option row or not (Issue #2755). */
   readonly cursorLineIndex: number;
+  /** Whether {@link cursorLineIndex} is a numbered row (Issue #2755). */
+  readonly cursorOnOptionRow: boolean;
 }
 
 /**
@@ -610,16 +871,37 @@ function scanCommandCodeQuestionScreen(
     return null;
   }
 
-  // 4. A cursor, on an option row.
+  // 4. A cursor, somewhere in the region.
+  //
+  // Issue #2755 removed the second half of this condition ("and it is on an
+  // option row"). 1.54.1 lets the `❯` leave the list — onto `Submit`, onto
+  // `Next`, onto the `notes:` input — and requiring it on a numbered row made
+  // six measured captures of a LIVE question fall through to the composer
+  // check, which answers `ready` off the dialog's own `❯` row and makes `wait`
+  // exit 0 on a pane that is asking a human a question (#2521's 偽完了, §8).
+  //
+  // The generalisation is deliberate and is stated in the Issue: the condition
+  // is "the `❯` is outside the list", NOT the word `Submit`. Adding the three
+  // measured labels would have to be re-opened for the fourth, and 1.54.1
+  // already draws three. Where the cursor sits is reported instead, in
+  // {@link CommandCodeQuestionScreen.cursorOnOptionRow}, and the reader decides
+  // what a screen it cannot answer is worth.
+  //
+  // Nothing else about the reading moved, so a frame that is not a question
+  // screen is refused by exactly the conditions that refused it before: the last
+  // rule row, a genuine tab strip as its first row, a question body, two or more
+  // numbered rows, and none of the pickers or panels the other branches own.
   let cursorCount = 0;
   let cursorOffset = -1;
+  let cursorOnOptionRow = false;
   for (let i = 0; i < region.length; i += 1) {
     const inRow = region[i].split(COMMAND_CODE_CURSOR_GLYPH).length - 1;
     if (inRow === 0) continue;
     cursorCount += inRow;
-    if (OPTION_ROW_PATTERN.test(region[i])) cursorOffset = i;
+    cursorOffset = i;
+    cursorOnOptionRow = OPTION_ROW_PATTERN.test(region[i]);
   }
-  if (cursorCount === 0 || cursorOffset < 0) return null;
+  if (cursorCount === 0) return null;
 
   return {
     ruleLineIndex,
@@ -629,6 +911,7 @@ function scanCommandCodeQuestionScreen(
     numbers,
     cursorCount,
     cursorLineIndex: ruleLineIndex + 1 + cursorOffset,
+    cursorOnOptionRow,
   };
 }
 
@@ -743,6 +1026,13 @@ export interface SelectionListShape {
   commitsDefaultOnEnter: boolean;
   /** A search/filter box is on the dialog, so a typed character is not a choice. */
   hasFilterInput: boolean;
+  /**
+   * The footer is Command Code's plan review (Issue #2761): `ctrl+a` approves,
+   * and EVERY typed character — digits included — becomes a comment on the plan.
+   * Issue #2793: `Enter` is not safe either — with the action list focused it
+   * runs `❯ Approve` — so the chat surface drops it from the arrow pad.
+   */
+  offersPlanApprove: boolean;
 }
 
 /** The reading for a frame that carries no dialog at all. */
@@ -751,6 +1041,7 @@ const EMPTY_SHAPE: SelectionListShape = {
   offersSessionScope: false,
   commitsDefaultOnEnter: false,
   hasFilterInput: false,
+  offersPlanApprove: false,
 };
 
 /** The last {@link SELECTION_SHAPE_TAIL_LINE_COUNT} rows that carry content. */
@@ -807,13 +1098,14 @@ export function readSelectionListShape(frame: string | null | undefined): Select
     offersSessionScope: SESSION_SCOPE_FOOTER_PATTERN.test(tail),
     commitsDefaultOnEnter: SET_AS_DEFAULT_FOOTER_PATTERN.test(tail),
     hasFilterInput: FILTER_INPUT_PATTERN.test(tail),
+    offersPlanApprove: COMMAND_CODE_PLAN_REVIEW_FOOTER.test(tail),
   };
 }
 
 /**
  * Whether the card may draw a `1`…`N` row for this shape.
  *
- * Two refusals, both measured rather than defensive:
+ * Three refusals, all measured rather than defensive:
  *
  *  - **a session-scope footer.** On claude's `/model` a number key commits AND
  *    rewrites the global default in one press (probed live on 2.1.260), so a
@@ -822,7 +1114,14 @@ export function readSelectionListShape(frame: string | null | undefined): Select
  *  - **a filter input.** copilot's `/model` and Command Code's picker put a
  *    focused search box on the dialog, where a `4` is four characters of a
  *    query and not the fourth model.
+ *  - **a plan review.** Every character typed there is a comment on the plan,
+ *    and the plan's own text is full of `1.` `2.` rows.
  */
 export function shouldOfferOptionNumbers(shape: SelectionListShape): boolean {
-  return shape.optionCount > 0 && !shape.offersSessionScope && !shape.hasFilterInput;
+  return (
+    shape.optionCount > 0 &&
+    !shape.offersSessionScope &&
+    !shape.hasFilterInput &&
+    !shape.offersPlanApprove
+  );
 }

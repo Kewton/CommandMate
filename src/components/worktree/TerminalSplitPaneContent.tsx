@@ -59,10 +59,10 @@
 'use client';
 
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { X } from 'lucide-react';
+import { Keyboard, X } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
 import type { AgentInstance, CLIToolType } from '@/lib/cli-tools/types';
-import { isAnswerablePromptData } from '@/types/models';
+import { isAnswerablePromptData, type LivePromptData } from '@/types/models';
 import { TerminalSplitPane } from '@/components/worktree/TerminalSplitPane';
 import {
   formatAgentModelLabel,
@@ -77,6 +77,7 @@ import { TerminalEscapeHatch } from '@/components/worktree/TerminalEscapeHatch';
 import { OpencodeQuickKeys } from '@/components/worktree/OpencodeQuickKeys';
 import { AgentModeControl } from '@/components/worktree/AgentModeControl';
 import { UnsentComposerBar, hasUnsentComposerText } from '@/components/worktree/UnsentComposerBar';
+import { DirectInputBar } from '@/components/worktree/DirectInputBar';
 import {
   OpencodeSidebarNotice,
   hasOpenCodeSidebarObstruction,
@@ -107,6 +108,7 @@ import {
 } from '@/config/composer-height';
 import { worktreeApi } from '@/lib/api-client';
 import { buildPromptResponseBody } from '@/lib/prompt-response-body-builder';
+import { readSelectionListShape } from '@/lib/detection/selection-shape';
 import { readPromptDecisionId } from '@/components/worktree/prompt-decision-id';
 import { getCliToolDisplayName, getInstanceLabel } from '@/lib/cli-tools/types';
 import type {
@@ -124,12 +126,51 @@ import {
 import { Tooltip } from '@/components/common/Tooltip';
 
 /**
+ * Composer-row width at or above which the direct-input toggle prints its
+ * label beside its icon (Issue #2797).
+ *
+ * The container is `MessageInput`'s input row (`@container`), as for #2597's
+ * `AGENT_MODE_NOTATION_MIN_CONTAINER_PX`, so the answer follows the pane. The
+ * classes on the toggle MUST spell the same value as literals — the label's
+ * `inline` and the button's `px-2`, both under the 520px container variant:
+ * Tailwind scans source text. (Not written out in full here, because a class
+ * spelled in a comment is a class Tailwind generates, and that would hide an
+ * interpolated one from `tests/e2e/composer-two-row-2598.spec.ts`.)
+ *
+ * The label has to fit beside the widest toolbar content without taking any of
+ * it: codex's mode control with its caution, 323px of start group, needs 463px
+ * of row once the labelled toggle (96px) and the interrupt button are beside
+ * it. 520 leaves a margin for copy that runs longer, and still labels the
+ * one-split pane (910px of row). Below it — the two-split pane, the 2x2 grid
+ * and every three-split pane — the toggle is its icon (24px), named by
+ * `aria-label` and `title`. See the footer's `directInputSlot` for the
+ * measurements.
+ */
+export const DIRECT_INPUT_LABEL_MIN_CONTAINER_PX = 520;
+
+/**
  * Issue #756: props are grouped into domain types. `TerminalSplitPaneContent`
  * keeps the split identity/status (via `TerminalSplitPaneCoreProps`) plus a few
  * direct wiring props, and nests Auto-Yes (`autoYes`) and the embedded
  * HistoryPane (`history`) under their own domain objects. This drops the direct
  * prop count to 13 (<= 15) with no behavior change.
  */
+/**
+ * Is this a CHECKBOX question? (Issue #2755)
+ *
+ * The one prompt shape Auto-Yes is measured never to answer: a number ticks a
+ * box and the confirm is a separate row, so `resolveBaseAnswer` returns null
+ * for it rather than send half an answer. That makes it the one shape whose
+ * answer UI must stay visible while Auto-Yes is ON — hiding it left a live
+ * question that could be answered neither automatically nor by hand.
+ *
+ * Restated per surface rather than shared, like {@link optionTakesTypedText}
+ * next door: these are 'use client' modules and suites mock them apart.
+ */
+function isMultiSelectPrompt(promptData: LivePromptData | null | undefined): boolean {
+  return promptData?.type === 'multiple_choice' && promptData.multiSelect === true;
+}
+
 export interface TerminalSplitPaneContentProps extends TerminalSplitPaneCoreProps {
   /** Issue #869: instances selectable for this split (excludes other-split instances; includes own). */
   availableInstances: AgentInstance[];
@@ -179,6 +220,15 @@ export interface TerminalSplitPaneContentProps extends TerminalSplitPaneCoreProp
    */
   agentModel?: string | null;
   /**
+   * Issue #2775: `cliStatus` is a `ready` that no rule actually read — the
+   * server flagged the frame unclassified. Passed straight to
+   * `TerminalSplitPane`, which draws the "cannot tell" ring for it. Declared
+   * here rather than in `TerminalSplitPaneCoreProps` for the reason
+   * {@link agentModel} gives; omitting it renders exactly what it did before.
+   * Issue #2810: also keeps the composer's "Queued (session busy)" toast off.
+   */
+  cliStatusUnclassified?: boolean;
+  /**
    * Issue #2042: published when this split's agent changes what it says about
    * its own session (persona / cost / context), so the surfaces above — the
    * desktop header's instance pills — can show it too.
@@ -219,6 +269,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   onInsertConsumed,
   onMessageSent,
   cliStatus = 'idle',
+  cliStatusUnclassified = false,
   autoYes,
   history,
   onDropInstance,
@@ -388,6 +439,42 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
     instanceId: resolvedInstanceId,
     enabled: !disabled,
   });
+
+  // Issue #2766: direct-input mode. Deliberately NOT hung off `showNav` /
+  // `showEscapeHatch` / `showPrompt` — every one of those is a detection
+  // verdict, and this mode exists for the frames detection cannot read. It is
+  // therefore available on both surfaces and under every combination of flags.
+  const [directInputOpen, setDirectInputOpen] = useState(false);
+
+  // Close when this pane starts pointing somewhere else. The bar holds focus
+  // and swallows keys; carrying it across a worktree / tool / instance change
+  // would type the next thing the user presses into a different agent.
+  useEffect(() => {
+    setDirectInputOpen(false);
+  }, [worktreeId, cliToolId, resolvedInstanceId]);
+
+  // Close when the session goes away. The route 404s without a tmux session, so
+  // an open bar would answer every keystroke with the error line; separate from
+  // the effect above so a session coming back up does not close it.
+  useEffect(() => {
+    if (!terminal.isRunning) setDirectInputOpen(false);
+  }, [terminal.isRunning]);
+
+  // Resolved out here, not inside `footerSlot`. `t` is a fresh closure on every
+  // render (next-intl's, and the suite's mock), so listing IT as a dependency
+  // would re-run the footer memo every render and quietly turn the memo into
+  // dead weight — and, worse, make a MISSING dependency undetectable by test.
+  // These are strings: the dependency array compares them by value.
+  const directInputToggleLabel = t('directInput.toggle');
+  const directInputToggleAria = t('directInput.toggleAria');
+
+  const handleDirectInputToggle = useCallback(() => {
+    setDirectInputOpen((open) => !open);
+  }, []);
+
+  const handleDirectInputClose = useCallback(() => {
+    setDirectInputOpen(false);
+  }, []);
 
   // Issue #744: this split's OWN message history, fetched independently by its
   // cliToolId. `state.messages` in the parent is server-filtered to the active
@@ -595,14 +682,34 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   // than becoming "the footer happens to be drawing the nav pad".
   const isSelectionListFrame = terminal.isSelectionListActive;
   const showNav = isSelectionListFrame && !isChatSurface;
+  // The same rule as ChatSurface (Issue #2793): on Command Code's plan
+  // review, `Enter` runs the focused action, and the pad cannot show focus.
+  // Read off `terminal.output`, the frame the chat surface's card reads (#2809).
+  const hideNavEnterKey = useMemo(
+    () => showNav && readSelectionListShape(terminal.output).offersPlanApprove === true,
+    [showNav, terminal.output],
+  );
   // Issue #2406: "this pane's agent is generating right now". The merged status
   // verdict is the only field that answers that question -- `terminal.isRunning`
   // has meant "a tmux session exists and is healthy" since Issue #2238, so it is
   // true for an agent sitting idle at its prompt. Same expression `ChatSurface`
   // gates its in-flight bubble on (`live.sessionStatus === 'running'`), so both
   // halves of the split read one verdict.
-  const isGenerating = terminal.sessionStatus === 'running';
-  const showPrompt = prompt.visible && !autoYesEnabled;
+  //
+  // Issue #2810: except for a pane whose title bar reads "cannot tell"
+  // (`cliStatusUnclassified`, i.e. `isUnclassifiedCliStatus` of the entry the
+  // phone's composer reads its `isProcessing` from). That `running` is the
+  // detector's floor, not an observation of a turn, so the toast does not call
+  // the session busy — the same answer the phone gives since Issue #2775.
+  const isGenerating = terminal.sessionStatus === 'running' && !cliStatusUnclassified;
+  // Issue #2755: Auto-Yes hides the answer panel, because the poller is
+  // supposed to be answering instead — and on a CHECKBOX question it is
+  // measured never to answer at all (`resolveBaseAnswer` returns null: a digit
+  // ticks a box and the confirm is a separate row, so a default is half an
+  // answer). Hiding the panel there left a screen nobody could answer, by hand
+  // or automatically, until the operator turned Auto-Yes off. So a multi-select
+  // prompt is shown whatever Auto-Yes is doing; nothing is auto-sent either way.
+  const showPrompt = prompt.visible && (!autoYesEnabled || isMultiSelectPrompt(prompt.data));
   // Issue #1932: the approval this pane's dialog addresses, when the payload
   // names one. Null for every scraper-read prompt and for every source that
   // publishes no per-decision id, which is what keeps those on the pane path.
@@ -935,6 +1042,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
             instanceId={resolvedInstanceId}
             onKeysSent={refresh}
             showPagerKeys={terminal.isPagerActive}
+            hideEnterKey={hideNavEnterKey}
           />
         ) : null}
         {showEscapeHatch ? (
@@ -1014,6 +1122,20 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
           diff={agentSession.diff}
           disabled={!terminal.isRunning}
         />
+        {/* Issue #2766: directly above the composer, because the two are the
+            same gesture seen twice -- one types at the agent, the other types
+            at its pane -- and a user who has just failed to get through with a
+            message finds the way in on the next row rather than in a menu.
+            Gated on `directInputOpen` ALONE: no detection flag, by design. */}
+        {directInputOpen ? (
+          <DirectInputBar
+            worktreeId={worktreeId}
+            cliToolId={cliToolId}
+            instanceId={resolvedInstanceId}
+            onKeysSent={refresh}
+            onClose={handleDirectInputClose}
+          />
+        ) : null}
         <MessageInput
           worktreeId={worktreeId}
           onMessageSent={handleMessageSent}
@@ -1083,11 +1205,87 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
               inline
             />
           }
+          // Issue #2766 / #2797: the direct-input toggle, in the toolbar's end
+          // group beside the interrupt button — see `directInputSlot`.
+          //
+          // ## Why not the meta row (where #2766 put it)
+          //
+          // #2598's budget is one line of meta row, and in the two-split pane
+          // and every pane of the 2x2 grid (431px of row) the hints and a full
+          // Auto-Yes had already spent it: 195 + 236 of 431px, against the 87px
+          // this toggle needed. So #2766 hid it there. The three-split panes
+          // were short of it too, less visibly: the toggle sat at the END of
+          // the Auto-Yes half, which scrolls sideways, so a narrow pane drew
+          // it and scrolled it out of sight. How much of the 78px toggle was
+          // painted, in Chromium at 1440x900 (measured with
+          // tests/e2e/composer-two-row-2598.spec.ts before this change):
+          //
+          //   | row   | Auto-Yes off | Auto-Yes on  |
+          //   |-------|--------------|--------------|
+          //   | 174px | 10px         | 0            |
+          //   | 228px | 63px         | 4px          |
+          //   | 271px | whole        | 47–51px      |
+          //   | 411px | whole        | whole        |
+          //   | 431px | not drawn    | not drawn    |
+          //
+          // The toolbar's end group is on screen at every width, and it sits
+          // directly under the bar this opens.
+          //
+          // ## What it costs the toolbar
+          //
+          // Nothing where the pane is wide enough. The toolbar's start group
+          // takes whatever the end group leaves, and its natural content —
+          // attach (36px) + gap + mode control — is 189px for claude and 323px
+          // for codex, whose control carries its #2592 caution. The toggle is
+          // an icon (24px + 4px gap) below DIRECT_INPUT_LABEL_MIN_CONTAINER_PX
+          // and prints its label from there up:
+          //
+          //   | row   | start group gets | codex needs | claude needs |
+          //   |-------|------------------|-------------|--------------|
+          //   | 431px | 363px (icon)     | 323px       | 189px        |
+          //   | 910px | 769px (label)    | 323px       | 189px        |
+          //
+          // Measured as `MEASURE-2797`. The two narrowest three-split panes had
+          // no slack before this toggle came (the 174px row's start group was
+          // exactly attach + claude's 94px control, the 271px row's exactly
+          // attach + codex's 191px), so there the mode control gives 28px up:
+          // its chip and caution truncate, by #2597's design — claude's chip in
+          // the 174px row down to its padding — while the mode button stays
+          // whole. Of the two, the chip is what the pane can spare: the button
+          // still names the mode in its `aria-label`, and nothing else on the
+          // pane stands in for this toggle.
+          //
+          // Keep the literals as literals: Tailwind scans source text, so an
+          // interpolated class generates no CSS and the label would be hidden
+          // at every width (the #2131 rule, restated in composer-layout).
+          directInputSlot={
+            <button
+              type="button"
+              data-testid="direct-input-toggle"
+              aria-pressed={directInputOpen}
+              aria-label={directInputToggleAria}
+              title={directInputToggleAria}
+              disabled={!terminal.isRunning}
+              onClick={handleDirectInputToggle}
+              className={`shrink-0 inline-flex items-center gap-1 h-[22px] px-1 @min-[520px]:px-2 rounded-md border text-[11px] font-medium leading-none whitespace-nowrap transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                directInputOpen
+                  ? 'bg-info-subtle border-info-border text-info-foreground'
+                  : 'bg-surface border-border text-muted-foreground hover:bg-muted'
+              }`}
+            >
+              <Keyboard size={14} aria-hidden="true" className="shrink-0" />
+              <span className="hidden @min-[520px]:inline" data-testid="direct-input-toggle-label">
+                {directInputToggleLabel}
+              </span>
+            </button>
+          }
         />
       </div>
     ),
     [
       showNav,
+      // Issue #2809: the pad's Enter gate on a plan review.
+      hideNavEnterKey,
       showPrompt,
       showEscapeHatch,
       showUnsentComposerBar,
@@ -1133,6 +1331,14 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       autoYesExpiresAt,
       lastAutoResponse,
       onAutoYesToggle,
+      // Issue #2766: the bar's ONLY gate. Leaving it out of this list is the
+      // failure this file is most prone to -- the toggle flips, the memo does
+      // not re-run, and the bar never appears.
+      directInputOpen,
+      handleDirectInputToggle,
+      handleDirectInputClose,
+      directInputToggleLabel,
+      directInputToggleAria,
       // Issue #806: toast surface for the "queued (session busy)" hint.
       showToast,
       // Issue #2598: the composer's height scope and bound.
@@ -1225,6 +1431,8 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       // Issue #1079: the derived agent status now renders as a StatusDot inside
       // the selector trigger (session title bar). BranchStatus ⊂ StatusDotStatus.
       status={cliStatus}
+      // Issue #2775: the "cannot tell" ring for a `ready` nothing read.
+      statusUnclassified={cliStatusUnclassified}
       // Issue #1783: the model the agent reported, shown beside the alias.
       // Issue #2042 prefixes the persona when the agent named one.
       agentModel={paneAgentModel}

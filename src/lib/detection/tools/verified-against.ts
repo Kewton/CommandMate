@@ -32,10 +32,37 @@ export const CLAUDE_VERIFIED_AGAINST = {
   paneGeometry: '200x1000',
 } as const;
 
-/** codex-cli these rules were read off (#1628 / #1829 / #1890 fixtures). */
+/**
+ * codex-cli these rules were read off (#1628 / #1829 / #1890 fixtures; re-read
+ * on 0.155.1 by #2808 / #2818).
+ *
+ * ## Held back by Issue #2808, advanced to 0.155.1 by Issue #2818
+ *
+ * #2808 re-captured codex **0.155.1** on a private tmux socket at 200x1000
+ * (`tests/fixtures/codex-dialogs-0155/`, 2026-09-21): the command approval,
+ * `/model`, `/experimental`, `/keymap` and the directory-trust screen all read
+ * `waiting`, each highlighted row the same one-span shape as the 0.146.0-0.153.2
+ * captures, and the idle composers read `ready`. The stamp stayed at 0.148.0
+ * because one frame of that probe was misread: the idle composer after a
+ * declined approval read `running`. From 0.154.0 on the status bar carries the
+ * thread's title after the path, `CODEX_STATUS_BAR_PATTERN` wants the path last,
+ * so the detector found no bar and its bar-independent branch D read the
+ * declined command's lingering `• Ran` row in the 15-row tail.
+ *
+ * #2818 made the titled bar a boundary (`CODEX_TRAILED_STATUS_BAR_PATTERN`) and
+ * probed 0.155.1 again on its own socket (`tests/fixtures/codex-thread-title-probe/`,
+ * 2026-09-21): a turn running `sleep 30` under a titled bar, the same turn after
+ * the command finished and codex was still working, and the idle composer once
+ * it had answered — the last with the `• Ran sleep 30` row still in the tail,
+ * which read `running` before the fix. The two running frames read `running`,
+ * both idle frames read `ready`, and no other frame in the tree changed its
+ * verdict. **The stamp moved to 0.155.1 because every 0.155.1 frame now reads
+ * correctly** (`codex-thread-title-bar-2818.test.ts`,
+ * `codex-dialogs-0155-2808.test.ts`).
+ */
 export const CODEX_VERIFIED_AGAINST = {
-  version: '0.148.0',
-  capturedAt: '2026-08-15',
+  version: '0.155.1',
+  capturedAt: '2026-09-21',
   paneGeometry: '200x1000',
 } as const;
 
@@ -143,10 +170,52 @@ export const ANTIGRAVITY_VERIFIED_AGAINST = {
  * `detectDialog` declares. The rule itself was read off the 1.40.1 and 1.49.0
  * dialog frames above, and no 1.53.1 frame was added to the fixture directory,
  * so the condition in the previous paragraph is still unmet.
+ *
+ * ## Held back by Issue #2754, advanced to 1.54.1 by Issue #2773
+ *
+ * #2754 finally did the probe the paragraph above asked for: a live **1.54.1**
+ * session on a private tmux socket at 200x1000, twenty-six captures in
+ * `tests/fixtures/command-code-askuserquestion-2754/` (`capturedAt` is the day
+ * that probe ran, 2026-09-20), and every key in the screen's footer sent ONE AT
+ * A TIME with a capture on each side of it. By the letter of that paragraph the
+ * stamp could have moved then. It did not, because what the probe measured was
+ * that **the rules did not answer for 1.54.1**: nine of the 26 captures came out
+ * wrong, and six of those published `ready` / `input_prompt` for a live,
+ * unanswered question — #2521's 偽完了 on a real capture. Stamping 1.54.1 over
+ * frames the rules demonstrably misread would have made the probe report a
+ * measurement that said the opposite of what was measured — the fail-open
+ * version of the #2304 precedent rather than an application of it.
+ *
+ * The defects it found were closed one Issue at a time:
+ *
+ *  - **#2753** added `COMMAND_CODE_TAB_ANSWERED_MARKERS` (`✔`, U+2714), so a
+ *    strip like `✔ Party size | ● Update scope | ◯ Review` passes
+ *    `isCommandCodeQuestionTabRow` and eight frames left the generic parser;
+ *  - **#2755** closed the rest: (a) a `❯` outside the option list (`❯ Submit`,
+ *    `❯ Next`, `❯ notes:`) is named `cursor-outside-options` and hands the human
+ *    the screen instead of publishing `ready`; (b) the Review page is named
+ *    `review-page` and publishes no payload, so its default can no longer COMMIT
+ *    the answers; (c) checkbox lists (`1. [ ] …` / `Submit`) are read as
+ *    multi-select with the box off the label and the 1.54.1 footer off the last
+ *    option.
+ *
+ * **The stamp moved to 1.54.1 because all twenty-six frames now read correctly**
+ * (`askuserquestion-1541-2754.test.ts` pins each): fifteen publish an answerable
+ * payload, six are `cursor-outside-options` and two are `review-page` (both
+ * decline on purpose — a human is sent to the screen, Auto-Yes has nothing to
+ * send), two are `ready` because the question is gone, and one is `running`
+ * because it was caught mid-turn. False completions went from six to zero.
+ * The rules were re-read off THESE frames, so 1.54.1 is the build they were read
+ * off — not the build that happens to be installed. `getDetectorFreshness`
+ * compares this stamp with the CLI installed now and will say `stale` once that
+ * is newer, which is the probe doing its job.
+ *
+ * This stamp answers "which build were these rules read off", and
+ * {@link getDetectorFreshness} turns it into "are they current".
  */
 export const COMMAND_CODE_VERIFIED_AGAINST = {
-  version: '1.40.1',
-  capturedAt: '2026-09-03',
+  version: '1.54.1',
+  capturedAt: '2026-09-20',
   paneGeometry: '200x1000',
 } as const;
 

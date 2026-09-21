@@ -78,6 +78,7 @@ import {
 import {
   hasCommandCodeQuestionChrome,
   readCommandCodeQuestionRegion,
+  readCommandCodeReviewPage,
   type CommandCodeQuestionRegion,
 } from '../../selection-shape';
 import { findNumberedOptionBlock } from '../dialog-block';
@@ -149,19 +150,62 @@ const COMMAND_CODE_FREE_TEXT_OPTION_PATTERN = /^[^\S\n]*type\s+something\b/i;
 /**
  * A checkbox option — the row shape of a MULTI-select question.
  *
- * The same expression `prompt-answer-sender` and `prompt-answer-semantic` use to
- * recognise one, restated here (both are private to their modules) because this
- * reader has to DECLINE the screen rather than answer it: 対象外 says Review,
- * multi-select and free-text screens are not to be pushed through the
- * single-select parser, and the reason is mechanical. On a checkbox list the
- * digit TOGGLES a box and the confirm is a separate `Next` row, so a payload
- * that claimed "option 2 is the answer" would have `respond 2` tick a box and
- * stop — leaving the question up and the operator told it was answered.
+ * Issue #2522 used this to DECLINE the screen: on a checkbox list the digit
+ * toggles a box and the confirm is a separate `Submit` / `Next` row, so a
+ * payload claiming "option 2 is the answer" had `respond 2` tick a box and stop,
+ * leaving the question up and the operator told it was answered.
  *
- * `unsupported` rather than `none`: the screen IS a live question and the human
- * has to be sent to the pane for it, which is exactly #2521's fallback.
+ * Issue #2755 turns it into a READING instead. The prefix is stripped off the
+ * label, the ticked rows are reported as {@link MultipleChoiceOption.checked},
+ * and the payload says `multiSelect: true` so that every consumer that turns a
+ * number into keys branches on it. The decline survives for the one screen that
+ * still cannot be answered — a checkbox list with no confirm row, where nothing
+ * measured says how the question is committed.
+ *
+ * Three tick glyphs, all measured: `[x]` on the 1.54.1 capture #2753 was raised
+ * from, `[✔]` (U+2714) across #2754's twenty-six, and `[X]` because the two
+ * differ only in case and a build that switches is not worth a second Issue.
  */
-const CHECKBOX_OPTION_PATTERN = /^\[[ x]\]\s/i;
+const CHECKBOX_OPTION_PATTERN = /^\[[ xX\u2714]\]\s/;
+
+/** The tick half of {@link CHECKBOX_OPTION_PATTERN}: a box that is ON. */
+const CHECKBOX_TICKED_PATTERN = /^\[[xX\u2714]\]\s/;
+
+/**
+ * The confirm row of a multi-select question (Issue #2755).
+ *
+ * `Submit` on the last question of a call, `Next` on every other one, measured
+ * on 1.54.1. It carries NO number — the strict `1.`…`N.` run ends one row above
+ * it — and it is the row `findNumberedOptionBlock` files as `footer` and this
+ * module used to fold into the bottom option's label:
+ *
+ *     options[4].label = "[ ] Type something... Submit Enter to select | …"
+ *
+ * The cursor glyph is optional and is the reason this is not
+ * `/^\s*Submit\s*$/`: 1.54.1 draws `❯ Submit` the moment the cursor parks
+ * there (#2754 実測 1), and a pattern that missed that spelling would fold the
+ * row back into the label on exactly the frames #2755 exists for.
+ */
+const COMMAND_CODE_CONFIRM_ROW_PATTERN =
+  /^[^\S\n]*(?:\u276F[^\S\n]*)?(?:Submit|Next)[^\S\n]*$/;
+
+/**
+ * 1.54.1's hint bar, which is not part of any option either (Issue #2755).
+ *
+ *     Enter to select | Arrow keys to navigate | 1-9 quick select | n notes | c chat | Esc to cancel
+ *
+ * Drawn only when the call carries more than one question (#2754 実測 3), which
+ * is why it is NOT used as evidence that this screen is up — the most dangerous
+ * spelling, one question with the cursor on `Submit`, draws no footer at all.
+ * It is read here for the one thing it is good for: keeping it out of the last
+ * option's label, where the tail walk would otherwise put it along with its
+ * `requiresTextInput` flag.
+ *
+ * Distinct from {@link COMMAND_CODE_SELECTION_LIST_FOOTER}, which is the `·`
+ * separated picker footer and is left exactly as #2753 left it.
+ */
+const COMMAND_CODE_QUESTION_HINT_BAR_PATTERN =
+  /^[^\S\n]*Enter\s+to\s+select\b.*\|.*\bEsc\s+to\s+cancel[^\S\n]*$/i;
 
 /**
  * The same tail limits `prompt-detector.ts` applies to `rawContent`
@@ -213,8 +257,45 @@ export type CommandCodeQuestionUnsupportedReason =
   | 'option-count-mismatch'
   /** The `❯` could not be tied to one option of the block. */
   | 'default-unresolved'
-  /** The options are checkboxes: a multi-select, which this reader does not answer. */
+  /**
+   * The options are checkboxes and the screen draws no confirm row.
+   *
+   * Issue #2755 turned the rest of the multi-select family into a reading; this
+   * is what is left of the decline. Without a `Submit` / `Next` row nothing
+   * measured says how the question is committed, so ticking boxes would leave
+   * the human exactly where #2522 found them — told the prompt was answered
+   * while it is still on screen.
+   */
   | 'multi-select'
+  /**
+   * The question screen is up and the `❯` has left the option list
+   * (Issue #2755 §2 / §8).
+   *
+   * `Submit`, `Next` and the `notes:` row `n` opens, generalised: the condition
+   * is the cursor's POSITION, not the label it happens to be resting on. Six
+   * live captures of an unanswered question were published as `ready` /
+   * `input_prompt` before this reason existed, because the region reading
+   * declined them and the composer check then answered off the dialog's own `❯`
+   * row — #2521's 偽完了, and `commandmate wait` exited 0 on every one.
+   *
+   * Declined rather than answered because a digit sent while the cursor is off
+   * the list is measured to do NOTHING at all (#2754 §4.1): the quick-select
+   * hotkeys are dead, so a payload built from this frame would promise an answer
+   * no keystroke could deliver.
+   */
+  | 'cursor-outside-options'
+  /**
+   * The `AskUserQuestion` Review page (Issue #2755 §7).
+   *
+   * `❯ 1. Submit` / `2. Cancel` over `← to go back and edit`. It is a real
+   * numbered list under a real tab strip, so the generic parser answered it —
+   * with the default on `Submit`, which does not pick anything but COMMITS
+   * whatever the human has ticked. Declined here so no payload reaches Auto-Yes
+   * or the answer panels; the same verdict covers the page reached with answers
+   * still missing (`⚠ You have not answered all questions`), which must never
+   * read as answered either.
+   */
+  | 'review-page'
   /** Nothing but blanks between the tab strip and option 1. */
   | 'question-missing';
 
@@ -234,6 +315,13 @@ export function readCommandCodeQuestionDialog(
 ): CommandCodeQuestionReading {
   if (!frame) return { kind: 'none' };
 
+  // Issue #2755 §7: the Review page, before the question reading, because the
+  // two are told apart by what the rows SAY and not by their shape. Declined
+  // outright — see `'review-page'` — so neither this reader nor, through
+  // `beforePrompt`'s fallback verdict, the generic parser can turn `1. Submit`
+  // into an answerable default.
+  if (readCommandCodeReviewPage(frame) !== null) return unsupported('review-page');
+
   // The positive recognition is #2521's, unchanged and not re-derived: the last
   // qualifying rule row, a tab strip under it, a question, a strict `1.`…`N.`
   // run and exactly one `❯` on one of its rows, with the pickers and panels the
@@ -252,6 +340,13 @@ export function readCommandCodeQuestionDialog(
       : { kind: 'none' };
   }
 
+  // Issue #2755 §2 / §8. The region is this screen and the `❯` is not on a
+  // numbered row: `Submit`, `Next` or the `notes:` input. Nothing here can be
+  // answered — the digits are dead while the cursor is off the list — but the
+  // pane is a live question, so it takes #2521's manual-operation fallback and
+  // NOT the `ready` the composer check would otherwise publish off `❯ Submit`.
+  if (!region.cursorOnOptionRow) return unsupported('cursor-outside-options');
+
   const lines = frame.replace(/\r\n/g, '\n').split('\n').map(stripAnsi);
   const regionRows = lines.slice(region.firstLineIndex, region.lastLineIndex + 1);
   if (regionRows.length > COMMAND_CODE_QUESTION_MAX_REGION_ROWS) {
@@ -268,16 +363,36 @@ export function readCommandCodeQuestionDialog(
   if (block === null) return unsupported('option-block-unreadable');
 
   const labels = [...block.options];
-  if (block.footer !== '') {
-    // Rows below the bottom option. The region's lower edge is the last row with
-    // content and this screen draws no footer, so they are that option's own
-    // description.
+  // Rows below the bottom option. On 1.53.0 there were none but a wrapped
+  // description, which 確定仕様 A folds into that option. 1.54.1 draws two rows
+  // that are NOT anybody's description — the `Submit` / `Next` confirm and the
+  // hint bar — and folding them produced the label #2754 recorded:
+  //
+  //     "[ ] Type something... Submit Enter to select | Arrow keys to navigate | …"
+  //
+  // Issue #2755 takes them out here rather than in `findNumberedOptionBlock`:
+  // that reader is shared by every tool's `prompt.ts`, and what a row below the
+  // last option MEANS is exactly the per-tool knowledge a tool module owns.
+  const tailRows = block.footer === '' ? [] : block.footer.split('\n');
+  const hasConfirmRow = tailRows.some((row) => COMMAND_CODE_CONFIRM_ROW_PATTERN.test(row));
+  const description = tailRows.filter(
+    (row) =>
+      !COMMAND_CODE_CONFIRM_ROW_PATTERN.test(row) &&
+      !COMMAND_CODE_QUESTION_HINT_BAR_PATTERN.test(row),
+  );
+  if (description.length > 0) {
     const last = labels.length - 1;
-    labels[last] = [labels[last], ...block.footer.split('\n')].join(' ').trim();
+    labels[last] = [labels[last], ...description].join(' ').trim();
   }
 
   if (labels.length !== region.optionCount) return unsupported('option-count-mismatch');
-  if (labels.some((label) => CHECKBOX_OPTION_PATTERN.test(label))) return unsupported('multi-select');
+
+  // Issue #2755: a checkbox list is READ rather than declined — but only when
+  // the screen also draws the row that commits it. Without one, the digit
+  // toggles a box and nothing on this frame says what finishes the question, so
+  // #2522's decline stands.
+  const multiSelect = labels.some((label) => CHECKBOX_OPTION_PATTERN.test(label));
+  if (multiSelect && !hasConfirmRow) return unsupported('multi-select');
 
   // The default. Not `selectedGlyph` alone: `findNumberedOptionBlock`'s glyph
   // union is `[❯›●>]` because it serves every CLI, and `●` is this screen's TAB
@@ -318,13 +433,33 @@ export function readCommandCodeQuestionDialog(
   // the sentence the option is actually promising.
   const dialogText = joinApprovalTarget(regionRows, tabOffset + 1, regionRows.length);
 
+  // Issue #2755: the checkbox comes OFF the label and becomes state. A label
+  // that still read `[ ] calc.js` is what a user reported as "cannot pick more
+  // than one" (#2753's capture), and it is also what every label-matching
+  // consumer downstream — the deny patterns, `respond`'s semantic resolution,
+  // the answer panels — would have had to learn to strip for itself.
+  //
+  // `checked` is written on BOTH states of a multi-select row, because the
+  // sender computes a symmetric difference against it and "absent" would be
+  // indistinguishable from "unticked" at the one place the distinction decides
+  // whether a box is turned OFF. On a single-select row it is written on
+  // neither: 受入基準 (a) pins those payloads with `toStrictEqual`, and an
+  // added `checked: false` is exactly the drift that pin exists to catch.
+  const readOptions: ReadonlyArray<{
+    number: number;
+    label: string;
+    isDefault: boolean;
+    checked?: boolean;
+  }> = labels.map((label, index) => ({
+    number: index + 1,
+    label: multiSelect ? label.replace(CHECKBOX_OPTION_PATTERN, '') : label,
+    isDefault: index === block.selectedIndex,
+    ...(multiSelect ? { checked: CHECKBOX_TICKED_PATTERN.test(label) } : {}),
+  }));
+
   const built = buildMultipleChoiceResult(
     question,
-    labels.map((label, index) => ({
-      number: index + 1,
-      label,
-      isDefault: index === block.selectedIndex,
-    })),
+    readOptions,
     { instructionText: dialogText, approvalTarget: dialogText },
     regionRows.join('\n'),
     truncateRawContent,
@@ -357,12 +492,19 @@ export function readCommandCodeQuestionDialog(
       ...built,
       promptData: {
         ...promptData,
-        options: promptData.options.map((option) =>
-          option.requiresTextInput === true ||
-          COMMAND_CODE_FREE_TEXT_OPTION_PATTERN.test(option.label)
-            ? { ...option, requiresTextInput: true }
-            : option,
-        ),
+        // Only ever added, never set to `false`: see the `checked` note above.
+        ...(multiSelect ? { multiSelect: true } : {}),
+        // `buildMultipleChoiceResult` rebuilds every option from the three
+        // fields it takes, so `checked` is re-applied here rather than trusted
+        // to survive the shared builder (Issue #2755).
+        options: promptData.options.map((option, index) => {
+          const checked = readOptions[index]?.checked;
+          const withState = checked === undefined ? option : { ...option, checked };
+          return option.requiresTextInput === true ||
+            COMMAND_CODE_FREE_TEXT_OPTION_PATTERN.test(option.label)
+            ? { ...withState, requiresTextInput: true }
+            : withState;
+        }),
       },
     },
   };

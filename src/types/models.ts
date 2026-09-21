@@ -133,6 +133,14 @@ export interface SessionStatusReadingDetail {
   statusEvidence?: 'positive' | 'none';
   /** The detector's reason token, e.g. `input_prompt` / `exited`. */
   sessionStatusReason?: string;
+  /**
+   * No rule could classify the frame at all (Issue #2775) — the server's
+   * `isUnclassifiedFrame`. Such a session arrives with `isProcessing: false`,
+   * so the triple alone derives `ready`; read it through
+   * `isUnclassifiedCliStatus` (`@/types/sidebar`) to draw "cannot tell"
+   * instead. Present only when true, and absent from a server older than #2775.
+   */
+  isUnclassified?: boolean;
 }
 
 /**
@@ -421,6 +429,14 @@ export interface MultipleChoiceOption {
   /** Whether this option requires text input from the user */
   requiresTextInput?: boolean;
   /**
+   * Whether this option is currently ticked — Issue #2755.
+   *
+   * Only ever set for a MULTI-select question (`multiSelect: true`), where the
+   * row is drawn as `1. [ ] …` / `3. [x] …`. The brackets are stripped from
+   * `label`, so this is the only place the state survives.
+   */
+  checked?: boolean;
+  /**
    * The explanatory second line the option carries, when one is known — Issue
    * #1726.
    *
@@ -487,6 +503,17 @@ export interface MultipleChoicePromptData extends BasePromptData {
   options: MultipleChoiceOption[];
   /** How to submit the answer: 'answer_only' (no Enter) or 'answer_then_enter' (default). Issue #616. */
   submitMode?: SubmitMode;
+  /**
+   * Whether several options may be ticked before the question is submitted —
+   * Issue #2755.
+   *
+   * Measured on Command Code 1.54.1: the rows are checkboxes and the confirm is
+   * a separate `Submit` row, so an answer of "2" means "tick 2", not "the answer
+   * is 2". Every consumer that turns a number into keys has to branch on this:
+   * the answer UIs draw checkboxes, the sender ticks then submits, and Auto-Yes
+   * refuses the prompt outright.
+   */
+  multiSelect?: boolean;
   /**
    * Whether this prompt is rendered as a Claude Code v2.x AskUserQuestion picker
    * (arrow-key navigation, "Enter to select … to navigate" footer). Issue #807.

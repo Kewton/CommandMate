@@ -3,6 +3,8 @@
  *
  * Base rules (unchanged since Issue #479):
  * - yes/no prompt -> 'y'
+ * - multiple_choice with `multiSelect: true` -> null (Issue #2755: the number
+ *   ticks a box, the confirm is a separate row, so a default is half an answer)
  * - multiple_choice with default option -> default option number
  * - multiple_choice without default -> first option number
  * - option requiring text input -> null (skip)
@@ -111,6 +113,13 @@ function resolveBaseAnswer(promptData: PromptData): string | null {
   }
 
   if (promptData.type === 'multiple_choice') {
+    // Issue #2755: a checkbox question. A number ticks a box and the confirm is
+    // a separate row, so "the default option" is not an answer — it is half of
+    // one. Auto-Yes refuses the prompt instead of ticking something and stopping.
+    if (promptData.multiSelect === true) {
+      return null;
+    }
+
     const defaultOpt = promptData.options.find(o => o.isDefault);
     const target = defaultOpt ?? promptData.options[0];
 

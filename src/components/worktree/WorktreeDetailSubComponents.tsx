@@ -38,7 +38,12 @@ import { truncateString } from '@/lib/utils';
 import { ClipboardCopy, Check } from 'lucide-react';
 import { copyToClipboard } from '@/lib/clipboard-utils';
 import { NotificationDot } from '@/components/common/NotificationDot';
-import { deriveCliStatus } from '@/types/sidebar';
+import { deriveCliStatus, isUnclassifiedCliStatus } from '@/types/sidebar';
+import {
+  UNCLASSIFIED_STATUS_DOT_CLASS,
+  UNCLASSIFIED_STATUS_LABEL_KEY,
+  resolveUnclassifiedDot,
+} from '@/components/sidebar/BranchStatusIndicator';
 import type { AgentEventSourceView, Worktree, ChatMessage, GitStatus } from '@/types/models';
 import {
   sumAgentSessionTokens,
@@ -122,6 +127,28 @@ export function deriveWorktreeStatus(
   }
 
   return 'idle';
+}
+
+/**
+ * Whether the worktree-level dot {@link deriveWorktreeStatus} produced should be
+ * drawn as "cannot tell" (Issue #2775 for the PC header, shared with the phone
+ * header by Issue #2810).
+ *
+ * `cliTool` must be the tool `deriveWorktreeStatus` was given: the dot reads
+ * that tool's per-CLI entry, so the flag is read from the same entry rather
+ * than from a second source that could disagree with the dot it annotates.
+ * `resolveUnclassifiedDot` re-checks `ready`, so an `error`, a `waiting` or a
+ * `running` dot is never redrawn by this.
+ */
+export function isWorktreeStatusUnclassified(
+  status: WorktreeStatus,
+  sessionStatusByCli: Worktree['sessionStatusByCli'],
+  cliTool: CLIToolType | undefined
+): boolean {
+  return resolveUnclassifiedDot(
+    status,
+    isUnclassifiedCliStatus(cliTool ? sessionStatusByCli?.[cliTool] : undefined)
+  );
 }
 
 /**
@@ -1020,6 +1047,16 @@ export const DesktopHeader = memo(function DesktopHeader({
         ?? false)
     : false;
 
+  // Issue #2775: the worktree-level dot draws "cannot tell" for a `ready` that
+  // no rule actually read. `status` is `deriveWorktreeStatus`'s, which reads the
+  // per-CLI entry of the active tab — the active instance's tool. Issue #2810:
+  // the phone header asks the same question through the same helper.
+  const statusUnclassified = isWorktreeStatusUnclassified(
+    status,
+    sessionStatusByCli,
+    activeInstance?.cliTool
+  );
+
   const handleAgentDragStart = useCallback(
     (e: React.DragEvent<HTMLButtonElement>, instanceId: string) => {
       // Issue #786 / #869: payload via dedicated MIME so external file/text
@@ -1058,6 +1095,28 @@ export const DesktopHeader = memo(function DesktopHeader({
     ),
     isActive: inst.id === activeInstanceId,
   }));
+  // Issue #2775: the instances whose `ready` is a fallback for a frame nothing
+  // could read, from the same per-instance → per-CLI entry as the status above.
+  // Kept beside `headerItems` rather than inside it: `HeaderInstanceItem` is the
+  // layout's type, and "cannot tell" does not change a pill's slot — it stays
+  // the `ready` the layout already sizes for, drawn and worded differently.
+  const unclassifiedInstanceIds = new Set(
+    (instances ?? [])
+      .filter((inst) =>
+        isUnclassifiedCliStatus(sessionStatusByInstance?.[inst.id] ?? sessionStatusByCli?.[inst.cliTool])
+      )
+      .map((inst) => inst.id)
+  );
+  // The status word and dot classes for one instance. `resolveUnclassifiedDot`
+  // re-checks `ready`, so no working pill can be redrawn by this.
+  const instanceStatusWord = (instanceId: string, status: string): string =>
+    resolveUnclassifiedDot(status, unclassifiedInstanceIds.has(instanceId))
+      ? tCommon(UNCLASSIFIED_STATUS_LABEL_KEY)
+      : tCommon(`status.${status}`);
+  const instanceDotClass = (instanceId: string, status: string): string | undefined =>
+    resolveUnclassifiedDot(status, unclassifiedInstanceIds.has(instanceId))
+      ? UNCLASSIFIED_STATUS_DOT_CLASS
+      : undefined;
 
   // Issue #1787 acceptance 4: the detail header is the third surface
   // that has to say "an agent here is done and wants work", alongside
@@ -1113,7 +1172,10 @@ export const DesktopHeader = memo(function DesktopHeader({
     awaitingInstruction ? 'awaiting' : '',
     appUpdateKey,
     ...headerItems.map(
-      (it) => `${it.item.id}:${getInstanceLabel(it.item)}:${it.status}:${it.isActive ? 'active' : ''}`
+      (it) =>
+        `${it.item.id}:${getInstanceLabel(it.item)}:${it.status}:${it.isActive ? 'active' : ''}` +
+        // Issue #2775: an active "cannot tell" pill prints a different word.
+        (unclassifiedInstanceIds.has(it.item.id) ? ':unclassified' : '')
     ),
   ].join('\n');
   const headerRef = useRef<HTMLDivElement>(null);
@@ -1149,7 +1211,9 @@ export const DesktopHeader = memo(function DesktopHeader({
           data-testid="desktop-status-indicator"
           status={status}
           size="lg"
-          label={statusLabel}
+          label={statusUnclassified ? tCommon(UNCLASSIFIED_STATUS_LABEL_KEY) : statusLabel}
+          className={statusUnclassified ? UNCLASSIFIED_STATUS_DOT_CLASS : undefined}
+          data-unclassified={statusUnclassified ? 'true' : undefined}
         />
         {/* Worktree name, memo, and repository. Issue #2481: gives way before
             the verification chip on a narrow header (`shrink-4` against the
@@ -1247,9 +1311,11 @@ export const DesktopHeader = memo(function DesktopHeader({
                 if (c.slot === 'overflow') return null;
                 const inst = c.item;
                 const label = getInstanceLabel(inst);
+                const statusWord = instanceStatusWord(inst.id, c.status);
+                const dotClass = instanceDotClass(inst.id, c.status);
                 const fullLabel = tWorktree('detail.statusPill', {
                   label,
-                  status: tCommon(`status.${c.status}`),
+                  status: statusWord,
                 });
                 // Issue #1783: tooltip-only, on purpose. This row is
                 // width-budgeted — MAX_HEADER_AGENT_PILLS caps the labelled
@@ -1274,7 +1340,7 @@ export const DesktopHeader = memo(function DesktopHeader({
                 const baseLabel = instanceModel
                   ? tWorktree('detail.statusPillWithModel', {
                       label,
-                      status: tCommon(`status.${c.status}`),
+                      status: statusWord,
                       model: instanceModel,
                     })
                   : fullLabel;
@@ -1343,7 +1409,7 @@ export const DesktopHeader = memo(function DesktopHeader({
                       }${dragActive}`}
                     >
                       {/* Issue #1078: unified StatusDot (decorative; the button carries the label) */}
-                      <StatusDot status={c.status} size="sm" aria-hidden title={undefined} />
+                      <StatusDot status={c.status} size="sm" aria-hidden title={undefined} className={dotClass} />
                       <span className="whitespace-nowrap">{fullLabel}</span>
                     </button>
                   );
@@ -1370,7 +1436,7 @@ export const DesktopHeader = memo(function DesktopHeader({
                           : 'hover:bg-muted'
                       }${dragActive}`}
                     >
-                      <StatusDot status={c.status} size="sm" aria-hidden title={undefined} />
+                      <StatusDot status={c.status} size="sm" aria-hidden title={undefined} className={dotClass} />
                     </button>
                   </Tooltip>
                 );
@@ -1398,7 +1464,7 @@ export const DesktopHeader = memo(function DesktopHeader({
                       const inst = c.item;
                       const fullLabel = tWorktree('detail.statusPill', {
                         label: getInstanceLabel(inst),
-                        status: tCommon(`status.${c.status}`),
+                        status: instanceStatusWord(inst.id, c.status),
                       });
                       return (
                         <DropdownMenuItem
@@ -1406,7 +1472,13 @@ export const DesktopHeader = memo(function DesktopHeader({
                           data-testid={`desktop-agent-overflow-${inst.id}`}
                           onSelect={() => onActiveInstanceChange?.(inst.id)}
                         >
-                          <StatusDot status={c.status} size="sm" aria-hidden title={undefined} />
+                          <StatusDot
+                            status={c.status}
+                            size="sm"
+                            aria-hidden
+                            title={undefined}
+                            className={instanceDotClass(inst.id, c.status)}
+                          />
                           <span className="whitespace-nowrap">{fullLabel}</span>
                         </DropdownMenuItem>
                       );

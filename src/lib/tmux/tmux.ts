@@ -12,7 +12,9 @@ import { TMUX_HISTORY_LIMIT, TUI_PANE_HEIGHT, TUI_PANE_WIDTH } from '@/config/tm
 import { createLogger } from '@/lib/logger';
 import { NAVIGATION_KEY_VALUES, type NavigationKey, type TerminalKey } from '@/types/terminal-keys';
 import type { KeySequence } from '../../types/cli-tool-contracts';
+import { isDirectInputEvent, type DirectInputEvent } from '../../types/direct-input';
 import {
+  escapeTrailingSemicolon,
   keySequenceArgs,
   runKeySequence,
   type KeySequenceTransport,
@@ -504,11 +506,17 @@ export async function sendKeys(
 
   // execFile() passes arguments directly without shell interpretation,
   // so no shell-level escaping is needed
+  //
+  // Issue #2769: tmux is NOT a shell, but it does read each argument, and a `;`
+  // at the end of one is its command separator. Unescaped, `go;` + `C-m` makes
+  // tmux run `send-keys go` and then a command called `C-m` — which fails, so
+  // the whole call throws and nothing reaches the pane.
+  const legacyKeys = escapeTrailingSemicolon(keys);
   const args = options?.literal
     ? keySequenceArgs(exactTarget(sessionName), { kind: 'literal', text: keys })
     : sendEnter
-      ? ['send-keys', '-t', exactTarget(sessionName), keys, 'C-m']
-      : ['send-keys', '-t', exactTarget(sessionName), keys];
+      ? ['send-keys', '-t', exactTarget(sessionName), legacyKeys, 'C-m']
+      : ['send-keys', '-t', exactTarget(sessionName), legacyKeys];
 
   try {
     await execFileAsync('tmux', args, { timeout: DEFAULT_TIMEOUT });
@@ -622,6 +630,11 @@ const ALLOWED_SPECIAL_KEYS = new Set([
   // from user-controlled text.
   'C-x', 'C-p', 'C-t',
   'a', 'l', 'n', 't', 'm', 'g', 'u', 'r', 'c',
+  // Issue #2760: Command Code's plan review is approved with ctrl+a and with
+  // nothing else. Deliverable for every session, declared by Command Code alone
+  // (`COMMAND_CODE_NAVIGATION_KEY_VALUES`), so the route answers 400 for every
+  // other tool — the same arrangement as `s` above.
+  'C-a',
 ]);
 
 /**
@@ -1098,6 +1111,63 @@ export async function sendSpecialKeysAndInvalidate(
   keys: string[]
 ): Promise<void> {
   await sendSpecialKeys(sessionName, keys);
+  invalidateCache(sessionName);
+  scheduleRepaintInvalidation(sessionName);
+}
+
+/**
+ * Bytes of `text` per `send-keys -H` invocation (Issue #2765).
+ *
+ * `-H` takes one argv entry per byte, so a 4096-character paste sent as one
+ * command would be thousands of arguments. 256 keeps every invocation small and
+ * the number of invocations for the longest accepted paste in the dozens.
+ */
+export const DIRECT_INPUT_TEXT_CHUNK_BYTES = 256;
+
+/**
+ * Deliver direct-input events to a pane, in order (Issue #2765).
+ *
+ * - a `key` event is a tmux key NAME from `DIRECT_INPUT_KEY_VALUES`, sent as
+ *   `send-keys -t <target> -- <name>` so tmux translates it for the pane's
+ *   current keypad / cursor mode;
+ * - a `text` event is sent as `send-keys -t <target> -H <hex bytes>`, NOT as
+ *   `-l`: measured on tmux 3.5a, `send-keys -l -- 'a;'` delivers `a` and drops
+ *   the trailing `;` (tmux takes it for a command separator), and `-l -- ';'`
+ *   delivers nothing at all. `-H` has no such rule and carries UTF-8 unchanged.
+ *
+ * Every event is re-validated here, so nothing unvalidated reaches `execFile`
+ * even if a caller forgot to: a key outside the vocabulary throws before any
+ * tmux process is started.
+ */
+export async function sendDirectInputAndInvalidate(
+  sessionName: string,
+  events: readonly DirectInputEvent[]
+): Promise<void> {
+  for (const event of events) {
+    if (!isDirectInputEvent(event)) {
+      throw new Error('Invalid direct input event');
+    }
+  }
+
+  const target = exactTarget(sessionName);
+  for (const event of events) {
+    if (event.type === 'key') {
+      await execFileAsync('tmux', ['send-keys', '-t', target, '--', event.key], {
+        timeout: DEFAULT_TIMEOUT,
+      });
+      continue;
+    }
+    const bytes = Buffer.from(event.text, 'utf8');
+    for (let offset = 0; offset < bytes.length; offset += DIRECT_INPUT_TEXT_CHUNK_BYTES) {
+      const hex = Array.from(bytes.subarray(offset, offset + DIRECT_INPUT_TEXT_CHUNK_BYTES), (byte) =>
+        byte.toString(16).padStart(2, '0')
+      );
+      await execFileAsync('tmux', ['send-keys', '-t', target, '-H', ...hex], {
+        timeout: DEFAULT_TIMEOUT,
+      });
+    }
+  }
+
   invalidateCache(sessionName);
   scheduleRepaintInvalidation(sessionName);
 }

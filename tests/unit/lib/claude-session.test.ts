@@ -1755,7 +1755,7 @@ describe('claude-session - hooks auto-injection (Issue #1722)', () => {
 
   /** Start a session to completion and return the command that launched the CLI. */
   async function launchCommand(
-    options: { worktreeId: string; worktreePath: string; instanceId?: string }
+    options: { worktreeId: string; worktreePath: string; instanceId?: string; model?: string }
   ): Promise<string> {
     const promise = startClaudeSession(options);
     await vi.advanceTimersByTimeAsync(100 + CLAUDE_INIT_POLL_INTERVAL * 2 + CLAUDE_POST_PROMPT_DELAY);
@@ -1815,6 +1815,61 @@ describe('claude-session - hooks auto-injection (Issue #1722)', () => {
     // tmux send-keys delivers this as a single line; a newline in it would
     // submit half a command.
     expect((await launchCommand(TEST_SESSION_OPTIONS)).split('\n')).toHaveLength(1);
+  });
+
+  describe('--model (Issue #2771)', () => {
+    it('appends the model after --settings, single-quoted', async () => {
+      const command = await launchCommand({ ...TEST_SESSION_OPTIONS, model: 'sonnet' });
+
+      expect(command).toMatch(/ --settings '[^']+\.json' --model 'sonnet'$/);
+      expect(command.split('\n')).toHaveLength(1);
+    });
+
+    it('quotes the context-window suffix, which is a glob to the pane shell', async () => {
+      const command = await launchCommand({ ...TEST_SESSION_OPTIONS, model: 'opus[1m]' });
+
+      expect(command.endsWith(" --model 'opus[1m]'")).toBe(true);
+    });
+
+    it('adds nothing when no model is given — the launch line is byte-identical to before', async () => {
+      const command = await launchCommand(TEST_SESSION_OPTIONS);
+
+      expect(command).not.toContain('--model');
+      expect(command).toMatch(/--settings '[^']+\.json'$/);
+    });
+
+    it('keeps the flag when hook injection is off', async () => {
+      process.env.CM_AGENT_HOOKS_INJECT = '0';
+
+      const command = await launchCommand({ ...TEST_SESSION_OPTIONS, model: 'sonnet' });
+
+      expect(command).not.toContain('--settings');
+      expect(command.endsWith(" --model 'sonnet'")).toBe(true);
+    });
+
+    it.each(['sonnet; rm -rf /', "sonnet'", '-sonnet', 'Claude Sonnet 5 (Thinking)', ''])(
+      'refuses %j before a tmux session is created',
+      async (model) => {
+        await expect(startClaudeSession({ ...TEST_SESSION_OPTIONS, model })).rejects.toThrow(
+          'Invalid Claude model name'
+        );
+        expect(createSession).not.toHaveBeenCalled();
+        expect(sendKeys).not.toHaveBeenCalled();
+      }
+    );
+
+    it('does not relaunch a healthy existing session to apply a model', async () => {
+      // The reuse branch returns before the launch command is built. This is why
+      // the send route answers 400 for a model on a running session instead of
+      // accepting one that would be ignored.
+      vi.mocked(hasSession).mockResolvedValue(true);
+      vi.mocked(capturePane).mockResolvedValue('> ');
+
+      await startClaudeSession({ ...TEST_SESSION_OPTIONS, model: 'sonnet' });
+
+      expect(createSession).not.toHaveBeenCalled();
+      expect(vi.mocked(sendKeys).mock.calls.some((call) => call[1].includes('--model'))).toBe(false);
+    });
   });
 
   it('launches the bare CLI, behind the server port, when CM_AGENT_HOOKS_INJECT=0', async () => {

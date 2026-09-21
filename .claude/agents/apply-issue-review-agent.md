@@ -6,7 +6,7 @@ description: |
   Reads context from apply-issue-review-context.json and outputs apply-issue-review-result.json.
   Updates GitHub Issue content based on review findings.
 tools: Read,Write,Bash,Grep,Glob
-model: opus
+model: inherit
 ---
 
 # Apply Issue Review Agent

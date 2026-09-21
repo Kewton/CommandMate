@@ -43,7 +43,7 @@
  * ESC[1mESC[38;5;6m› 1. Yes, proceed (y)ESC[0m             approval option  → bold label
  * ESC[1mESC[38;5;6m› [ ] Network proxy  Apply network…     /experimental    → bold label
  * ESC[1mESC[38;5;6m› Global  - Open Agents      unboundESC[0m  /keymap      → bold label
- * ESC[38;5;6m› 1. Yes, continueESC[39m                     trust dialog     → coloured glyph
+ * ESC[38;5;6m› 1. Yes, continueESC[39m                     trust dialog     → glyph colour runs into the label
  * ```
  *
  * `composer-residual-leading-number.txt` is the frame that rules out the cheap
@@ -52,9 +52,37 @@
  * `waiting` — the shape #1883 turned into a send guard that rejected every send.
  *
  * {@link readCodexGlyphRowKind} therefore recognises an option **positively**
- * (bold label, or a non-default foreground on the glyph) instead of defining it
- * as "not the composer". Every unrecognised shape falls to `composer`, which is
- * the direction that costs nothing: it is what the code did before #2310.
+ * (bold label, or the glyph's colour running on into the label) instead of
+ * defining it as "not the composer". Every unrecognised shape falls to
+ * `composer`, which is what the code did before #2310.
+ *
+ * ## codex 0.155.1 colours the composer glyph (Issue #2798)
+ *
+ * Through 0.154.0 a coloured glyph was only ever a dialog's, so "the glyph has a
+ * non-default foreground" was read as an option on its own. 0.155.1 draws the
+ * idle composer's glyph bold AND in truecolor orange
+ * (`tests/fixtures/codex-idle-composer-0155/`):
+ *
+ * ```text
+ * ESC[1mESC[38;2;255;178;66m›ESC[0m ESC[2mAsk Codex to do anythingESC[0m   composer, empty (0.155.1)
+ * ```
+ *
+ * Read by colour alone that is an option, so every finished turn on 0.155.1
+ * published `waiting` / `codex_selection_list` next to a `ghost` composer: the
+ * chat pane stuck on the selection-list card, `commandmate wait` returned
+ * exit 10 instead of completing, and the Pick pad offered the assistant's own
+ * numbered paragraphs as choices. What still separates the two is where the
+ * colour stops. A dialog paints its highlighted row as ONE span — glyph and
+ * label in the same colour, with no attribute change between them — while the
+ * composer resets (`ESC[0m`) right after its glyph, on every measured build, so
+ * its label carries its own styling or none. The rule therefore reads the
+ * colour as option evidence only when the label is drawn in the glyph's colour,
+ * and reads a dim label — the composer's placeholder, the same signal
+ * `composer-text.ts` calls `ghost` — as the composer before it looks at colour.
+ * `codex-pasted-content.capture` (#2464, 0.154.0) is why "the label is coloured
+ * too" is not enough: a composer holding pasted text draws its
+ * `[Pasted Content …]` label cyan, and on 0.155.1 that label would sit next to
+ * an orange glyph.
  *
  * ## Why this duplicates a little of `composer-text.ts`
  *
@@ -80,16 +108,18 @@ export const CODEX_GLYPH = '›';
  * The codex build these dialog rules were read off.
  *
  * Separate from `CODEX_VERIFIED_AGAINST` on purpose: that stamp is the whole
- * detector's (`tools/verified-against.ts`, outside this Issue's scope) and still
- * names 0.148.0, while the frames below are 0.153.2. Recording the newer
- * measurement here rather than leaving it unrecorded keeps a later reader able
- * to tell "this rule is wrong" from "this rule was right for 0.153.2"; the
- * detector-wide stamp should be raised to match the next time that file is in
- * scope.
+ * detector's (`tools/verified-against.ts`). It was held at 0.148.0 while one
+ * idle frame of the same 0.155.1 probe was misread for a reason outside these
+ * rules — the status-bar boundary — and advanced to 0.155.1 once Issue #2818
+ * fixed that boundary. The dialog frames themselves
+ * all read correctly on 0.155.1 (Issue #2808, `tests/fixtures/codex-dialogs-0155/`):
+ * the command approval, `/model`, `/experimental`, `/keymap` and the
+ * directory-trust screen are `waiting`, and every highlighted row is the
+ * one-span shape these rules key on. The rules were first read off 0.153.2.
  */
 export const CODEX_DIALOG_RULES_VERIFIED_AGAINST = {
-  version: '0.153.2',
-  capturedAt: '2026-09-04',
+  version: '0.155.1',
+  capturedAt: '2026-09-21',
   paneGeometry: '200x1000',
 } as const;
 
@@ -113,6 +143,7 @@ export const CODEX_DIALOG_RULES_VERIFIED_AGAINST = {
  * | `Press t to trust all; enter to review hooks; esc to close` | hooks list | both |
  * | `Press t to trust; esc to go back` | hooks detail | both |
  * | `Press space to select or enter to save for next conversation` | `/experimental` | 1st |
+ * | `Press space to select or enter to save` | `/experimental` (0.155.1) | 1st |
  * | `left/right group · enter edit shortcut · … · esc close` | `/keymap` | 2nd |
  *
  * No `/g` (keeps `.test()` stateless) and no nested quantifiers (ReDoS-safe).
@@ -133,11 +164,19 @@ export type CodexGlyphRowKind =
 interface GlyphSgrState {
   bold: boolean;
   dim: boolean;
-  /** Whether a non-default foreground colour is in effect (SGR 30-37/38/90-97). */
-  coloured: boolean;
+  /**
+   * The foreground colour in effect, as its SGR spelling (`'5;6'`, `'2;255;178;66'`,
+   * `'36'`), or `null` for the default foreground.
+   *
+   * The value and not just "is coloured" (Issue #2798): what tells a dialog's
+   * highlighted row from codex 0.155.1's orange composer glyph is whether the
+   * label is drawn in the glyph's OWN colour, and a composer holding pasted text
+   * has a coloured label of a different colour.
+   */
+  fg: string | null;
 }
 
-const INITIAL_SGR: GlyphSgrState = { bold: false, dim: false, coloured: false };
+const INITIAL_SGR: GlyphSgrState = { bold: false, dim: false, fg: null };
 
 /**
  * Apply one SGR parameter list to the running attribute state.
@@ -150,17 +189,16 @@ const INITIAL_SGR: GlyphSgrState = { bold: false, dim: false, coloured: false };
  */
 function applySgr(params: string, state: GlyphSgrState): GlyphSgrState {
   const parts = params === '' ? ['0'] : params.split(';');
-  let { bold, dim, coloured } = state;
+  let { bold, dim, fg } = state;
   for (let i = 0; i < parts.length; i++) {
     const code = parts[i] === '' ? 0 : Number(parts[i]);
     if (Number.isNaN(code)) continue;
     if (code === 38) {
       const mode = parts[i + 1] === '' || parts[i + 1] === undefined ? -1 : Number(parts[i + 1]);
       // 5 = 256-colour (one argument), 2 = 24-bit RGB (three arguments).
-      if (mode === 5) i += 2;
-      else if (mode === 2) i += 4;
-      else i += 1;
-      coloured = true;
+      const argCount = mode === 5 ? 2 : mode === 2 ? 4 : 1;
+      fg = parts.slice(i + 1, i + 1 + argCount).join(';');
+      i += argCount;
       continue;
     }
     if (code === 48 || code === 58) {
@@ -174,16 +212,16 @@ function applySgr(params: string, state: GlyphSgrState): GlyphSgrState {
     if (code === 0) {
       bold = false;
       dim = false;
-      coloured = false;
+      fg = null;
     } else if (code === 1) bold = true;
     else if (code === 2) dim = true;
     else if (code === 22) {
       bold = false;
       dim = false;
-    } else if (code === 39) coloured = false;
-    else if ((code >= 30 && code <= 37) || (code >= 90 && code <= 97)) coloured = true;
+    } else if (code === 39) fg = null;
+    else if ((code >= 30 && code <= 37) || (code >= 90 && code <= 97)) fg = String(code);
   }
-  return { bold, dim, coloured };
+  return { bold, dim, fg };
 }
 
 /** One rendered character plus the attributes these rules read. */
@@ -267,8 +305,19 @@ export function readCodexGlyphRowKind(rawRow: string): CodexGlyphRowKind | null 
   if (glyph.dim) return 'transcript-echo';
 
   const label = chars.slice(glyphIndex + 1).find(c => c.ch.trim() !== '');
-  // Positively recognised: the two shapes every measured dialog row has.
-  if (label?.attrs.bold || glyph.coloured) return 'option';
+  // A dialog renders its highlighted label bold; composer text never is.
+  if (label?.attrs.bold) return 'option';
+  // Issue #2798: a dim label is the placeholder codex paints into an EMPTY
+  // composer (`Ask Codex to do anything`), which is the input box saying so
+  // itself. Checked before the colour, because from 0.155.1 on the composer's
+  // glyph is coloured too.
+  if (label?.attrs.dim) return 'composer';
+  // Issue #2798: a coloured glyph alone is not a dialog — 0.155.1 draws the idle
+  // composer's `›` in orange. A dialog paints glyph and label as one span, so
+  // the colour counts only when the label is drawn in the glyph's own colour;
+  // the composer resets right after its glyph, and its pasted-content label is
+  // cyan, not the glyph's orange.
+  if (glyph.fg !== null && label?.attrs.fg === glyph.fg) return 'option';
 
   return 'composer';
 }

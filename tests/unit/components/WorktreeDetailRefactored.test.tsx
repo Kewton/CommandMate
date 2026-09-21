@@ -547,6 +547,86 @@ describe('WorktreeDetailRefactored', () => {
         expect(screen.getByTestId('mobile-prompt-sheet')).toBeInTheDocument();
       });
     });
+
+    describe('Auto-Yes and the checkbox question (Issue #2755)', () => {
+      /**
+       * Auto-Yes hides the sheet because the poller is supposed to be
+       * answering instead. On a CHECKBOX question it is measured never to
+       * answer — a digit ticks a box and the confirm is a separate row, so
+       * `resolveBaseAnswer` returns null rather than send half an answer — and
+       * hiding the sheet there left a live question answerable by nobody until
+       * the operator noticed and turned Auto-Yes off.
+       */
+      function arrange(options: { multiSelect: boolean; autoYesEnabled: boolean }): void {
+        mockFetch.mockImplementation((url: string) => {
+          if (url.includes('/auto-yes')) {
+            return Promise.resolve({
+              ok: true,
+              json: () =>
+                Promise.resolve({
+                  instances: { claude: { enabled: options.autoYesEnabled, expiresAt: null } },
+                }),
+            });
+          }
+          if (url.includes('/current-output')) {
+            return Promise.resolve({
+              ok: true,
+              json: () =>
+                Promise.resolve({
+                  isRunning: true,
+                  isPromptWaiting: true,
+                  promptData: {
+                    type: 'multiple_choice',
+                    question: 'Which caches should I clear?',
+                    status: 'pending',
+                    isAskUserQuestion: true,
+                    ...(options.multiSelect ? { multiSelect: true } : {}),
+                    options: [
+                      { number: 1, label: 'node_modules', isDefault: true },
+                      { number: 2, label: 'dist', isDefault: false },
+                    ],
+                  },
+                }),
+            });
+          }
+          if (url.includes('/messages')) {
+            return Promise.resolve({ ok: true, json: () => Promise.resolve(mockMessages) });
+          }
+          return Promise.resolve({ ok: true, json: () => Promise.resolve(mockWorktree) });
+        });
+      }
+
+      it('shows the sheet for a checkbox question even with Auto-Yes ON', async () => {
+        arrange({ multiSelect: true, autoYesEnabled: true });
+        render(<WorktreeDetailRefactored worktreeId="test-worktree-123" />);
+
+        await waitFor(() => {
+          expect(screen.getByTestId('mobile-prompt-sheet')).toBeInTheDocument();
+        });
+      });
+
+      it('still hides the sheet for a single-select prompt with Auto-Yes ON', async () => {
+        // The gate this Issue narrowed rather than removed.
+        arrange({ multiSelect: false, autoYesEnabled: true });
+        render(<WorktreeDetailRefactored worktreeId="test-worktree-123" />);
+
+        await waitFor(() => {
+          expect(screen.getByTestId('mobile-header')).toBeInTheDocument();
+        });
+        await waitFor(() => {
+          expect(screen.queryByTestId('mobile-prompt-sheet')).not.toBeInTheDocument();
+        });
+      });
+
+      it('shows the single-select sheet once Auto-Yes is off', async () => {
+        arrange({ multiSelect: false, autoYesEnabled: false });
+        render(<WorktreeDetailRefactored worktreeId="test-worktree-123" />);
+
+        await waitFor(() => {
+          expect(screen.getByTestId('mobile-prompt-sheet')).toBeInTheDocument();
+        });
+      });
+    });
   });
 
   describe('Loading State', () => {

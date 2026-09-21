@@ -540,6 +540,58 @@
       "hint": "前回の会話は履歴で参照できます。"
     }
   },
+  "directInput": {
+    "toggle": "直接入力",
+    "toggleAria": "キー入力をそのままターミナルへ送る",
+    "notice": "直接入力中です。ここで打ったキーは、そのままエージェントのターミナルへ送られます。",
+    "placeholder": "ここに入力…",
+    "close": "直接入力を終了",
+    "error": "送信できませんでした。セッションの状態を確認してください。"
+  },
+  "directInputKeyboard": {
+    "menuItem": "直接入力",
+    "unavailableTab": "ターミナルタブで使えます",
+    "unavailableChat": "ターミナル表示で使えます（チャット表示では使えません）",
+    "unavailableSession": "セッションが動いていないため使えません",
+    "groupLabel": "直接入力キーボード",
+    "confirmRowLabel": "送るキーの確認",
+    "specialKeysLabel": "特殊キー",
+    "charKeysLabel": "文字キー",
+    "stagedLabel": "送る予定のキー",
+    "stagedCount": "送る予定 {count} 件",
+    "chipRepeat": "{key} ×{count}",
+    "send": "送信 ({count})",
+    "sendAria": "{count} 件をターミナルへ送信",
+    "undo": "取消",
+    "undoAria": "最後の 1 件を取り消す",
+    "clearAll": "すべて消去",
+    "close": "閉じる",
+    "closeAria": "直接入力を閉じる",
+    "showChars": "文字キーを表示",
+    "hideChars": "文字キーを隠す",
+    "full": "{max} 件までです。送信するか取り消してください",
+    "sendFailed": "送れたかどうか分かりません。途中まで届いている場合があります。ターミナルの表示を確認してから、足りない分だけ送ってください",
+    "acknowledge": "OK",
+    "keys": {
+      "esc": "Esc キー",
+      "enter": "Enter キー",
+      "bs": "Backspace キー（上へスワイプで Delete）",
+      "home": "Home キー",
+      "up": "上矢印",
+      "end": "End キー",
+      "pgup": "Page Up キー",
+      "tab": "Tab キー",
+      "ctrl": "Ctrl（タップで次の 1 キー、長押しで固定）",
+      "shift": "Shift（タップで次の 1 キー、長押しで固定）",
+      "left": "左矢印",
+      "down": "下矢印",
+      "right": "右矢印",
+      "pgdn": "Page Down キー",
+      "space": "スペース",
+      "toSymbols": "数字・記号に切り替え",
+      "toAlpha": "英字に切り替え"
+    }
+  },
   "unsentComposer": {
     "regionLabel": "未送信の入力",
     "label": "未送信の入力:",
@@ -974,6 +1026,12 @@
     "toolbarLabel": "この画面を閉じる",
     "close": "閉じる (Esc)",
     "closeAria": "この画面を閉じる (Esc)"
+  },
+  "planApproveKeys": {
+    "toolbarLabel": "このプランを承認",
+    "approve": "プランを承認 (Ctrl+A)",
+    "approveAria": "このプランを承認して実行する (Ctrl+A)",
+    "note": "承認するとプランが実行されます。やめる場合は上の Esc を押してください。"
   },
   "selectionKeys": {
     "numbersToolbarLabel": "選択肢の番号キー",

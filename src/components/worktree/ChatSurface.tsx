@@ -146,13 +146,14 @@ import {
   SelectionNumberKeys,
 } from '@/components/worktree/PromptAnswerKeys';
 import { OpencodeModelKeys } from '@/components/worktree/OpencodeQuickKeys';
+import { PlanApproveKeys } from '@/components/worktree/PlanApproveKeys';
 import {
   hasDismissablePanelFooter,
   readCommandCodeQuestionRegion,
   readSelectionListShape,
   shouldOfferOptionNumbers,
 } from '@/lib/detection/selection-shape';
-import { SESSION_SCOPE_KEY_TOOL_IDS } from '@/types/terminal-keys';
+import { PLAN_APPROVE_KEY_TOOL_IDS, SESSION_SCOPE_KEY_TOOL_IDS } from '@/types/terminal-keys';
 import { isAnswerablePromptData, type ChatMessage, type LivePromptData } from '@/types/models';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import type { SurfaceMode } from '@/types/ui-state';
@@ -383,6 +384,19 @@ export interface ChatSurfaceHistoryProps {
   onRetryPending?: (tempId: string) => void;
   onDiscardPending?: (tempId: string) => void;
   splitIndex?: number;
+  /**
+   * Issue #2821: forwarded to `ChatTranscript` — draw none of its top-right
+   * icon buttons. Only the phone passes it (`MobileTerminalTab`, whose surface
+   * pill covers that corner and carries the tool-activity toggle itself).
+   */
+  hideCornerControls?: boolean;
+  /**
+   * Issue #2823: forwarded to `ChatTranscript` — open its search on the window
+   * event `chat-search-open`. Only the phone passes it (`MobileTerminalTab`).
+   */
+  openSearchOnWindowEvent?: boolean;
+  /** Issue #2823: forwarded to `ChatTranscript` — the top offset class of its top-right strip. */
+  searchBarTopClassName?: string;
 }
 
 export interface ChatSurfaceProps {
@@ -986,9 +1000,23 @@ export const ChatSurface = memo(function ChatSurface({
         const showCommitKeys =
           shape?.offersSessionScope === true &&
           (SESSION_SCOPE_KEY_TOOL_IDS as readonly string[]).includes(cliToolId);
+        // Issue #2762. Command Code's plan review: the footer names `ctrl+a` as
+        // the ONLY way to approve, and the arrow pad above cannot send it. Gated
+        // on the tool declaring the key, exactly as `showCommitKeys` is, so the
+        // button can never be the 400 the route answers for anyone else.
+        const showPlanApprove =
+          shape?.offersPlanApprove === true &&
+          (PLAN_APPROVE_KEY_TOOL_IDS as readonly string[]).includes(cliToolId);
+        // Issue #2793. On the same screen `Enter` either opens a comment box or
+        // RUNS the focused action (`❯ Approve`), depending on a focus this card
+        // cannot show — so the pad leaves it out, and approving is the labelled
+        // `PlanApproveKeys` button alone. Not gated on the tool: taking a key
+        // away is the safe direction. The approve-with-comments radio is not
+        // `offersPlanApprove` and keeps `Enter`, which is its documented confirm.
+        const hideEnterKey = shape?.offersPlanApprove === true;
         return (
           <div className="space-y-2">
-            <NavigationButtons {...keyProps} />
+            <NavigationButtons {...keyProps} hideEnterKey={hideEnterKey} />
             {/* Issue #2521 suppresses the row for the one frame whose numbers
                 have not been measured as answerable — see
                 `isCommandCodeQuestionFallback`. Every other numbered list is
@@ -1002,6 +1030,7 @@ export const ChatSurface = memo(function ChatSurface({
                 commitsDefaultOnEnter={shape.commitsDefaultOnEnter}
               />
             ) : null}
+            {showPlanApprove ? <PlanApproveKeys {...keyProps} /> : null}
             {/* opencode has no numbered `/model` at all — switching models is
                 `ctrl+t` or a `ctrl+x` chord, and neither was reachable from
                 chat. Rendered for opencode only; the component itself re-checks. */}

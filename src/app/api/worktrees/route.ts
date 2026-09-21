@@ -30,7 +30,7 @@ import { resolveAgentInstances } from '@/lib/session/agent-instances-resolver';
 import { getAllSessionNotes, type SessionNote } from '@/lib/db/agent-instances-db';
 import { getDefaultSelectedAgents } from '@/lib/db/app-settings-db';
 import { resolveSelectedAgents } from '@/lib/selected-agents-validator';
-import { deriveSessionStatus } from '@/lib/session/status-mapping';
+import { deriveSessionStatus, isUnclassifiedCliStatus } from '@/lib/session/status-mapping';
 import { getEnabledAutoYesByWorktree } from '@/lib/auto-yes-state';
 import { createLogger } from '@/lib/logger';
 import type { PromptType } from '@/types/models';
@@ -184,8 +184,21 @@ export async function GET(request: NextRequest) {
       // Issue #600: Add review fields when ?include=review
       if (includeReview) {
         const cliToolId = worktree.cliToolId ?? 'claude';
-        const sessionStatus = deriveSessionStatus(status);
         const stalled = isWorktreeStalled(worktree.id, cliToolId);
+        // Issue #2810: a stalled session whose frame no rule could read is still
+        // stalled. Since #2775 its `running` (the detector's floor) raises no
+        // activity flag, so the triple folds back to `ready` and the review
+        // fields would say "Send message" instead of "Check stalled". The stall
+        // is an observation of its own (the Auto-Yes poller has heard nothing),
+        // so for the stalled case only, the detector's `running` is handed back.
+        // An unreadable frame that is not stalled stays `ready` (#2775 does not
+        // call it running), and `=== 'ready'` leaves a waiting / running read
+        // from another tool as it was.
+        const foldedStatus = deriveSessionStatus(status);
+        const sessionStatus =
+          foldedStatus === 'ready' && stalled && isUnclassifiedCliStatus(status.sessionStatusByCli[cliToolId])
+            ? 'running'
+            : foldedStatus;
         // Derive promptType from status helper - approximate from isWaitingForResponse
         const promptType: PromptType | null = status.isWaitingForResponse ? 'approval' : null;
         const nextAction = getNextAction(sessionStatus, promptType, stalled);

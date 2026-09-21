@@ -11,7 +11,12 @@ import React, { memo, useRef, useState, useEffect, useCallback, useMemo } from '
 import ReactDOM from 'react-dom';
 import { useTranslations } from 'next-intl';
 import type { SidebarBranchItem } from '@/types/sidebar';
-import { aggregateCliStatus, formatCliStatusBreakdown } from '@/types/sidebar';
+import {
+  aggregateCliStatus,
+  formatCliStatusBreakdown,
+  isBranchUnclassified,
+  UNCLASSIFIED_STATUS_WORD,
+} from '@/types/sidebar';
 import { BranchStatusIndicator } from '@/components/sidebar/BranchStatusIndicator';
 
 // ============================================================================
@@ -74,6 +79,7 @@ function BranchTooltip({
   isVisible,
   anchorRef,
   nextActionLabel,
+  unclassified,
 }: {
   id: string;
   branch: SidebarBranchItem;
@@ -81,6 +87,11 @@ function BranchTooltip({
   anchorRef: { current: HTMLButtonElement | null };
   /** Already-translated next action, or null when the branch has no key. */
   nextActionLabel: string | null;
+  /**
+   * The row's dot reads "cannot tell" (Issue #2775), so the Status line must
+   * not print the `ready` underneath it.
+   */
+  unclassified: boolean;
 }) {
   // Start off-screen so tooltip is never briefly visible at (0,0) before coords are set
   const [coords, setCoords] = useState({ top: -9999, left: -9999 });
@@ -147,7 +158,9 @@ function BranchTooltip({
     >
       <p className="font-medium text-sidebar-foreground whitespace-nowrap">{branch.name}</p>
       <p className="text-sidebar-muted whitespace-nowrap">{branch.repositoryName}</p>
-      <p className="text-sidebar-muted whitespace-nowrap">Status: {branch.status}</p>
+      <p className="text-sidebar-muted whitespace-nowrap">
+        Status: {unclassified ? UNCLASSIFIED_STATUS_WORD : branch.status}
+      </p>
       {branch.worktreePath && (
         <p className="text-sidebar-muted truncate">{branch.worktreePath}</p>
       )}
@@ -243,6 +256,15 @@ export const BranchListItem = memo(function BranchListItem({
     () => new Set(branch.exitedInstanceIds ?? []),
     [branch.exitedInstanceIds]
   );
+  // Issue #2775: the instances whose `ready` is a fallback for a frame nothing
+  // could read. Same Set-and-memo shape as the exited ids above, for the same
+  // reason. The aggregated dot reads "cannot tell" only when one of them is what
+  // made it `ready` — see `isBranchUnclassified` for the precedence.
+  const unclassifiedInstanceIds = useMemo(
+    () => new Set(branch.unclassifiedInstanceIds ?? []),
+    [branch.unclassifiedInstanceIds]
+  );
+  const isUnclassified = isBranchUnclassified(branch.cliStatus, branch.unclassifiedInstanceIds);
   // The next action is rendered INLINE (never hover-only) for the two states
   // that need one, because a hover tooltip is permanently invisible on touch.
   // Every other status keeps it in the tooltip alone: "Running…" on every row
@@ -353,9 +375,12 @@ export const BranchListItem = memo(function BranchListItem({
                 exitedInstanceIds.size > 0
                   ? (instanceId) =>
                       exitedInstanceIds.has(instanceId) ? t('branchItem.agentExited') : null
-                  : undefined
+                  : undefined,
+                // Issue #2775: `Codex: unknown`, not `Codex: ready`.
+                unclassifiedInstanceIds
               )}
               waitingKind={branch.waitingKind}
+              unclassified={isUnclassified}
             />
           </div>
         )}
@@ -432,6 +457,7 @@ export const BranchListItem = memo(function BranchListItem({
         isVisible={showTooltip}
         anchorRef={buttonRef}
         nextActionLabel={nextActionLabel}
+        unclassified={isUnclassified}
       />
     </button>
   );

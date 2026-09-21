@@ -16,7 +16,7 @@
 
 'use client';
 
-import React, { memo, useCallback, useMemo, useState } from 'react';
+import React, { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { useTranslations } from 'next-intl';
 import { MoreHorizontal } from 'lucide-react';
@@ -25,10 +25,15 @@ import { MobileHeader } from '@/components/mobile/MobileHeader';
 import { StatusDot } from '@/components/ui/StatusDot';
 import { MobileTabBar } from '@/components/mobile/MobileTabBar';
 import { MobilePromptSheet } from '@/components/mobile/MobilePromptSheet';
-import { MobileTerminalActionsSheet } from '@/components/mobile/MobileTerminalActionsSheet';
+import {
+  MobileTerminalActionsSheet,
+  type DirectInputUnavailableReason,
+} from '@/components/mobile/MobileTerminalActionsSheet';
+import { MobileDirectInputKeyboard } from '@/components/mobile/MobileDirectInputKeyboard';
 import { ErrorBoundary } from '@/components/error/ErrorBoundary';
 import { MessageInput } from '@/components/worktree/MessageInput';
 import type { ShowToast } from '@/types/markdown-editor';
+import type { LivePromptData } from '@/types/models';
 import { NavigationButtons } from '@/components/worktree/NavigationButtons';
 import { Button } from '@/components/ui/Button';
 import { FileViewer } from '@/components/worktree/FileViewer';
@@ -69,6 +74,7 @@ const MarkdownEditor = dynamic(
 import {
   LoadingIndicator,
   ErrorDisplay,
+  isWorktreeStatusUnclassified,
 } from '@/components/worktree/WorktreeDetailSubComponents';
 import { MobileContent } from '@/components/worktree/WorktreeDetailMobile';
 import { WorktreeDetailDesktop } from '@/components/worktree/WorktreeDetailDesktop';
@@ -78,7 +84,12 @@ import { AutoYesToggle } from '@/components/worktree/AutoYesToggle';
 import { AgentModeControl } from '@/components/worktree/AgentModeControl';
 import { BranchMismatchAlert } from '@/components/worktree/BranchMismatchAlert';
 import { getCliToolDisplayName, getInstanceLabel, getActiveInstanceLabel, type CLIToolType } from '@/lib/cli-tools/types';
-import { deriveCliStatus } from '@/types/sidebar';
+import { deriveCliStatus, isUnclassifiedCliStatus } from '@/types/sidebar';
+import {
+  UNCLASSIFIED_STATUS_DOT_CLASS,
+  UNCLASSIFIED_STATUS_LABEL_KEY,
+  resolveUnclassifiedDot,
+} from '@/components/sidebar/BranchStatusIndicator';
 import { MoveDialog } from '@/components/worktree/MoveDialog';
 import { NewFileDialog } from '@/components/worktree/NewFileDialog';
 import { useSwipeGesture } from '@/hooks/useSwipeGesture';
@@ -271,6 +282,19 @@ const MobileComposer = memo(function MobileComposer({
 // ============================================================================
 
 /**
+ * Is this a CHECKBOX question? (Issue #2755)
+ *
+ * The same predicate `TerminalSplitPaneContent` applies to its own Auto-Yes
+ * gate, restated here for the phone sheet. It is the one prompt shape Auto-Yes
+ * never answers — `resolveBaseAnswer` returns null, because a digit ticks a box
+ * and the confirm is a separate row — so hiding its sheet under Auto-Yes left a
+ * live question answerable by nobody.
+ */
+function isMultiSelectPrompt(promptData: LivePromptData | null | undefined): boolean {
+  return promptData?.type === 'multiple_choice' && promptData.multiSelect === true;
+}
+
+/**
  * WorktreeDetailRefactored - Integrated worktree detail component
  *
  * @example
@@ -366,6 +390,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     isReconnecting,
     isSelectionListActive,
     isPagerActive,
+    offersPlanApprove,
     // Issue #2592: the composer's permission-mode control reads these. The
     // phone's composer is docked outside `MobileTerminalTab` — which owns the
     // pane hook the PC split reads the same facts from — so they come off this
@@ -514,6 +539,62 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     [worktree?.path, handleFilePathClick],
   );
 
+  // Issue #960: derive the active session's running state per-instance優先
+  // （PC版と整合）so the End button and MessageInput reflect the selected
+  // instance rather than the per-CLI aggregate. Falls back to the per-CLI map
+  // for backward compat (single-instance / legacy configs).
+  const activeSessionRunning =
+    (worktree?.sessionStatusByInstance?.[activeInstanceId] ?? worktree?.sessionStatusByCli?.[activeCliTab])
+      ?.isRunning ?? false;
+
+  // --------------------------------------------------------------------------
+  // Issue #2799: the phone's direct-input keyboard
+  // --------------------------------------------------------------------------
+  // The last way out of a frame the detector cannot read, so it is gated on
+  // WHERE the user is, never on a detection flag (a prompt may well be up):
+  // the Terminal tab, the terminal surface (chat does not draw the frame the
+  // keys are aimed at), and a running session (the route 404s without one).
+  // The first reason that applies is the one the actions sheet shows.
+  const [directInputOpen, setDirectInputOpen] = useState(false);
+  const directInputUnavailableReason: DirectInputUnavailableReason | null =
+    activeTab !== 'terminal'
+      ? 'tab'
+      : mobileSurfaceMode === 'chat'
+        ? 'chat'
+        : !activeSessionRunning
+          ? 'session'
+          : null;
+  /**
+   * The keyboard is on screen. Gated on the same conditions as the sheet row,
+   * so the render never shows it against a target or surface it was not opened
+   * for, even in the one render before the effects below close the mode.
+   */
+  const showDirectInputKeyboard = directInputOpen && directInputUnavailableReason === null;
+
+  // Close — and so discard the staged keys, which live in the keyboard — when
+  // the target changes. The instance tabs stay visible while the keyboard is
+  // open, and staged keys carried across a switch would reach another agent.
+  // Same rule as PC's `DirectInputBar` (#2766, `TerminalSplitPaneContent`).
+  useEffect(() => {
+    setDirectInputOpen(false);
+  }, [worktreeId, activeCliTab, activeInstanceId]);
+
+  // Close when the session goes away. Its own effect, not the one above: in one
+  // effect keyed on both, a session coming BACK would close the mode too.
+  useEffect(() => {
+    if (!activeSessionRunning) setDirectInputOpen(false);
+  }, [activeSessionRunning]);
+
+  // Close on leaving the Terminal tab, and on the chat surface. The latter is
+  // defensive — the surface pill is locked while the keyboard is open — but
+  // the surface is also restored from localStorage.
+  useEffect(() => {
+    if (activeTab !== 'terminal' || mobileSurfaceMode === 'chat') setDirectInputOpen(false);
+  }, [activeTab, mobileSurfaceMode]);
+
+  const openDirectInput = useCallback(() => setDirectInputOpen(true), []);
+  const closeDirectInput = useCallback(() => setDirectInputOpen(false), []);
+
   // Render
   // ========================================================================
 
@@ -557,20 +638,15 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   // back to the active instance label when no target is set (dialog closed).
   const killDialogLabel = killTarget?.label ?? activeInstanceLabel;
 
-  // Issue #960: derive the active session's running state per-instance優先
-  // （PC版と整合）so the End button and MessageInput reflect the selected
-  // instance rather than the per-CLI aggregate. Falls back to the per-CLI map
-  // for backward compat (single-instance / legacy configs).
-  const activeSessionRunning =
-    (worktree?.sessionStatusByInstance?.[activeInstanceId] ?? worktree?.sessionStatusByCli?.[activeCliTab])
-      ?.isRunning ?? false;
-
   // Issue #2406: the generating verdict for the same instance, kept beside
   // `activeSessionRunning` because the composer needs BOTH and they answer
   // different questions. `isProcessing` on this payload is
-  // `sessionStatusToActivityFlags(status).isProcessing` — true for exactly
+  // `sessionStatusToActivityFlags(status, unclassified).isProcessing` — true for
   // `status === 'running'` (`lib/session/status-mapping.ts`), which is the same
-  // verdict PC's split reads off its own poller as `sessionStatus === 'running'`.
+  // verdict PC's split reads off its own poller as `sessionStatus === 'running'`,
+  // except when no rule could read the frame (Issue #2775): that `running` is
+  // the detector's floor, and it no longer raises the "queued behind a busy
+  // agent" toast here — nor, since Issue #2810, on PC's split.
   const activeSessionProcessing =
     (worktree?.sessionStatusByInstance?.[activeInstanceId] ?? worktree?.sessionStatusByCli?.[activeCliTab])
       ?.isProcessing ?? false;
@@ -737,6 +813,13 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                 worktreeName={worktreeName}
                 repositoryName={worktree?.repositoryName}
                 status={worktreeStatus}
+                // Issue #2810: the PC header's "cannot tell" question, asked of
+                // the entry `worktreeStatus` was derived from (`activeCliTab`).
+                statusUnclassified={isWorktreeStatusUnclassified(
+                  worktreeStatus,
+                  worktree?.sessionStatusByCli,
+                  activeCliTab
+                )}
                 gitStatus={worktree?.gitStatus}
                 onMenuClick={openMobileDrawer}
               />
@@ -744,8 +827,14 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
 
             {/* Issue #1816: task contract / verification verdict. Renders nothing
                 when the branch has no task row, so this strip only appears for
-                worktrees that were actually delegated with a contract. */}
-            {verification.task && (
+                worktrees that were actually delegated with a contract.
+                Issue #2824: stands aside while the direct-input keyboard is open,
+                with the branch-mismatch alert below — the only two bands above
+                <main> that come and go. With them a 360x640 screen left the
+                terminal 85px under the open keyboard (#2799 §8 wants 120px);
+                without them it is 132px whatever the worktree's state. Both come
+                back on 閉じる. */}
+            {verification.task && !showDirectInputKeyboard && (
               <div className="flex-shrink-0 border-b border-border bg-surface px-3 py-1.5">
                 <VerificationStatusChip
                   task={verification.task}
@@ -762,8 +851,9 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
               </div>
             )}
 
-            {/* Issue #111: Branch mismatch warning (Mobile) */}
-            {worktree?.gitStatus && worktree.gitStatus.isBranchMismatch && (
+            {/* Issue #111: Branch mismatch warning (Mobile). Issue #2824: hidden
+                while the direct-input keyboard is open (see the strip above). */}
+            {worktree?.gitStatus && worktree.gitStatus.isBranchMismatch && !showDirectInputKeyboard && (
               <div className="z-35 flex-shrink-0">
                 <BranchMismatchAlert
                   isBranchMismatch={worktree.gitStatus.isBranchMismatch}
@@ -790,13 +880,21 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                 aria-label={tWorktree('detail.agentInstanceSelection')}
               >
                 {displayedInstances.map((inst) => {
-                  const toolStatus = deriveCliStatus(
-                    worktree?.sessionStatusByInstance?.[inst.id] ?? worktree?.sessionStatusByCli?.[inst.cliTool]
+                  const toolEntry =
+                    worktree?.sessionStatusByInstance?.[inst.id] ?? worktree?.sessionStatusByCli?.[inst.cliTool];
+                  const toolStatus = deriveCliStatus(toolEntry);
+                  // Issue #2775: a `ready` nothing actually read is drawn and
+                  // worded as "cannot tell", the same ring the PC header uses.
+                  const toolUnclassified = resolveUnclassifiedDot(
+                    toolStatus,
+                    isUnclassifiedCliStatus(toolEntry)
                   );
                   // Issue #1277: the status wording comes from the generic
                   // `common.status.*` keys (#1273) — one source of truth, shared
                   // with SIDEBAR_STATUS_CONFIG's labelKey (#1304).
-                  const statusLabel = tCommon(`status.${toolStatus}`);
+                  const statusLabel = tCommon(
+                    toolUnclassified ? UNCLASSIFIED_STATUS_LABEL_KEY : `status.${toolStatus}`
+                  );
                   const isActive = activeInstanceId === inst.id;
                   return (
                     <button
@@ -821,6 +919,8 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                           label: getInstanceLabel(inst),
                           status: statusLabel,
                         })}
+                        className={toolUnclassified ? UNCLASSIFIED_STATUS_DOT_CLASS : undefined}
+                        data-unclassified={toolUnclassified ? 'true' : undefined}
                       />
                       {getInstanceLabel(inst)}
                     </button>
@@ -901,6 +1001,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                 verification={verification}
                 toolsSubTabRequest={toolsSubTabRequest}
                 onSurfaceModeChange={setMobileSurfaceMode}
+                directInputOpen={showDirectInputKeyboard}
               />
             </main>
 
@@ -916,7 +1017,28 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                   required: `activeTab` because the mode only describes the
                   terminal tab (History / Files / Tools keep the docked pad), and
                   `mobileSurfaceMode` because that is which half of it is on. */}
-              {isSelectionListActive && !isMobileChatSurface && (
+              {/* Issue #2799: the direct-input keyboard, docked HERE rather than
+                  in the terminal tab. `<main>` above scrolls (the keyboard would
+                  scroll with it) and carries the #1128 tab swipe, whose 32px edge
+                  bands overlap ESC / TAB / PGUP / PGDN at 360px — a sideways
+                  mis-tap would switch tabs and, by the rule above, throw the
+                  staged keys away. Pointer capture does not stop the swipe: it
+                  reads touch events. While it is open it stands in for the
+                  navigation pad (unmounted — it holds no state) and the
+                  composer (hidden, NOT unmounted: see below). */}
+              {showDirectInputKeyboard ? (
+                <MobileDirectInputKeyboard
+                  // Keyed on the target, so staged keys can never outlive it —
+                  // not even for the one render before the close effect runs.
+                  key={`${worktreeId}:${activeCliTab}:${activeInstanceId}`}
+                  worktreeId={worktreeId}
+                  cliToolId={activeCliTab}
+                  instanceId={activeInstanceId}
+                  onKeysSent={fetchCurrentOutput}
+                  onClose={closeDirectInput}
+                />
+              ) : null}
+              {isSelectionListActive && !isMobileChatSurface && !showDirectInputKeyboard && (
                 <div className="px-2 pt-1 border-b border-border">
                   <NavigationButtons
                     worktreeId={worktreeId}
@@ -924,10 +1046,24 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                     instanceId={activeInstanceId}
                     onKeysSent={fetchCurrentOutput}
                     showPagerKeys={isPagerActive}
+                    // Issue #2809: no `Enter` on a plan review (see ChatSurface, #2793).
+                    hideEnterKey={offersPlanApprove}
                   />
                 </div>
               )}
-              <div className="p-2">
+              {/* Issue #2799: hidden with `display:none` while the keyboard is
+                  open — never unmounted. `MessageInput` saves its draft 500ms
+                  after the last keystroke and drops the pending save on unmount,
+                  so unmounting it would lose what was typed just before. Not
+                  `opacity-0` / `h-0` either: those keep it in the tab order (so
+                  `aria-hidden` would be a real ARIA violation) and take height.
+                  Nothing re-measures the textarea while it is hidden: its height
+                  effect runs on a value change, and a hidden textarea gets none. */}
+              <div
+                className={showDirectInputKeyboard ? 'p-2 hidden' : 'p-2'}
+                aria-hidden={showDirectInputKeyboard ? true : undefined}
+                data-testid="mobile-composer-wrapper"
+              >
                 {/* Issue #2213: `MobileComposer` is `MessageInput` plus the one line
                     that reads the screen's registered optimistic send. It has to be a
                     child component because that read is a hook and the provider is
@@ -996,7 +1132,17 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
               inFlow
             />
 
-            {!autoYesEnabled && (
+            {/* Issue #2755: a checkbox question is shown whatever Auto-Yes is
+                doing — it is the one prompt Auto-Yes is measured never to
+                answer, so hiding it left the screen answerable by nobody.
+                Issue #2799: EXCEPT while the direct-input keyboard is open. The
+                sheet is a full-screen overlay with a focus trap; drawn over the
+                keyboard it would block the one way out that does not depend on
+                detection, on the strength of a detection. This deliberately
+                narrows #2755 for the duration of the mode — not a regression to
+                "fix": the tab bar's prompt badge (`hasPrompt`) stays up, and
+                `閉じる` brings the sheet straight back. */}
+            {!showDirectInputKeyboard && (!autoYesEnabled || isMultiSelectPrompt(state.prompt.data)) && (
               <MobilePromptSheet
                 promptData={state.prompt.data}
                 visible={state.prompt.visible}
@@ -1009,13 +1155,24 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
 
             {/* Issue #1080: terminal secondary actions (search + End) bottom sheet.
                 Issue #1171: End defers to openActiveKillConfirm, which snapshots the
-                active instance as the kill target and opens the confirm dialog. */}
+                active instance as the kill target and opens the confirm dialog.
+                Issue #2823: on the chat surface `TerminalDisplay` is not mounted,
+                so the row searches the conversation through `chat-search-open`,
+                which only the phone's transcript hears (`openSearchOnWindowEvent`).
+                Everything else, the other tabs included, keeps the old row. */}
             <MobileTerminalActionsSheet
               open={showActionsSheet}
               onClose={() => setShowActionsSheet(false)}
-              onSearch={() => window.dispatchEvent(new CustomEvent('terminal-search-open'))}
+              searchTarget={isMobileChatSurface ? 'chat' : 'terminal'}
+              onSearch={() =>
+                window.dispatchEvent(
+                  new CustomEvent(isMobileChatSurface ? 'chat-search-open' : 'terminal-search-open'),
+                )
+              }
               onEnd={openActiveKillConfirm}
               endDisabled={!activeSessionRunning}
+              onDirectInput={openDirectInput}
+              directInputUnavailableReason={directInputUnavailableReason}
             />
 
             {/* Issue #1519: single mobile file screen — markdown viewing and editing

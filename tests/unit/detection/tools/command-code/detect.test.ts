@@ -32,7 +32,7 @@ describe('Issue #2250: the registry resolves Command Code to its own module', ()
     expect(detector).toBe(commandCodeStatusDetector);
     expect(detector.tool).toBe('command-code');
     expect(detector.verifiedAgainst).toBe(COMMAND_CODE_VERIFIED_AGAINST);
-    expect(detector.verifiedAgainst.version).toBe('1.40.1');
+    expect(detector.verifiedAgainst.version).toBe('1.54.1');
     expect(detector.verifiedAgainst.paneGeometry).toBe('200x1000');
   });
 

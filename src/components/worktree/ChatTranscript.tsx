@@ -117,6 +117,17 @@
  * lives (the FAB, following the terminal surface's #1079 button) and where the
  * two ends are published from, for a parent that would otherwise write
  * `scrollTop` (see {@link ChatTranscriptScrollControls}).
+ *
+ * ## "The latest" is the head of the latest reply (Issue #2820)
+ *
+ * A reply row is drawn answer first, then Thinking, then Tool calls. With the
+ * tool-activity toggle on, one codex turn measured 2,508px against a 728px
+ * viewport, so holding the BOTTOM of that row put the answer 2,500px above the
+ * reader. The anchor therefore aims at {@link resolveChatLandingTarget}: the
+ * head of the latest reply (`align: 'start'`), or the end of the last row while
+ * a turn is live or the latest row is not a reply. A head closer to the end than
+ * one viewport is clamped to the bottom by the virtualizer itself, which is
+ * what keeps a short reply exactly where #2283 put it.
  */
 
 import React, {
@@ -151,7 +162,7 @@ import { normalizeChatFilePath } from '@/lib/chat/chat-file-path';
 import { probeChatFilePath } from '@/lib/chat/chat-file-probe';
 import { useChatFileLinkScope } from '@/lib/chat/chat-file-link-scope';
 import { applyHistoryHighlights, clearHistoryHighlights } from '@/lib/terminal-highlight';
-import { isNearBottom } from '@/lib/history-virtualization';
+import { HISTORY_STICK_TO_BOTTOM_THRESHOLD_PX, isNearBottom } from '@/lib/history-virtualization';
 import {
   buildChatTranscriptRows,
   CHAT_ESTIMATED_MESSAGE_HEIGHT_PX,
@@ -162,10 +173,7 @@ import {
 } from '@/lib/chat/chat-transcript-view';
 import { isToolApprovalMessage } from '@/lib/chat/chat-tool-approvals';
 import { resolveChatSearchNamespace } from '@/lib/chat/chat-search-namespace';
-import {
-  readChatToolActivityPreference,
-  writeChatToolActivityPreference,
-} from '@/lib/chat/chat-tool-activity';
+import { useChatToolActivityPreference } from '@/lib/chat/chat-tool-activity';
 import {
   CHAT_BUBBLE_ASSISTANT_CLASS,
   CHAT_BUBBLE_MARKDOWN_BODY_CLASS,
@@ -176,6 +184,7 @@ import {
   ChatMessageBubble,
   ChatToolActivityProvider,
   ChatToolApprovalGroup,
+  isFoldedPaneScrape,
   type ChatToolActivityState,
 } from './ChatMessageBubble';
 import { CHAT_LIVE_TURN_TESTID, ChatLiveTurnBubble } from './ChatLiveTurnBubble';
@@ -320,7 +329,10 @@ export interface ChatTranscriptLiveTurn {
  * can measure it.
  */
 export interface ChatTranscriptScrollControls {
-  /** Land on the last row and hold there while its height is measured. */
+  /**
+   * Land on the latest reply's head, or on the last row's end (Issue #2820's
+   * {@link resolveChatLandingTarget}), and hold there while heights are measured.
+   */
   scrollToLatest: () => void;
   /** Land on the first row and release the tail anchor. */
   scrollToTop: () => void;
@@ -341,6 +353,49 @@ type ChatDisplayRow =
   | { kind: 'previousSessionHeader'; key: string; count: number }
   | ({ previousSession?: boolean } & ChatTranscriptRow);
 
+/** Where the tail anchor aims: a row index and the edge of it to align. */
+export interface ChatLandingTarget {
+  index: number;
+  align: 'start' | 'end';
+}
+
+/**
+ * Where "the latest" is, as a row and an edge (Issue #2820).
+ *
+ * Walks up from the last row, skipping the rows that are not a reply — an
+ * approval run and a folded pane scrape (`isFoldedPaneScrape`) — and stops at
+ * the first row that is anything else. An assistant `normal` message there is
+ * the latest reply, and its HEAD is the landing. Anything else (a user row, the
+ * previous-session header, another message type) means the newest thing is not
+ * a reply, and the landing stays the end of the last row, as #2283 left it.
+ * While a turn is live (`liveTurn`, generating or settling) the newest thing is
+ * the bubble under the list, so the landing is the end as well.
+ *
+ * No heights are read: `scrollToIndex(index, { align: 'start' })` is clamped to
+ * the bottom of the scroll range by the virtualizer, so a reply shorter than
+ * the viewport still lands at the bottom. Exported for its unit test only.
+ */
+export function resolveChatLandingTarget(
+  rows: ReadonlyArray<{ readonly kind: string; readonly message?: ChatMessage }>,
+  hasLiveTurn: boolean,
+): ChatLandingTarget | null {
+  const lastIndex = rows.length - 1;
+  if (lastIndex < 0) return null;
+  const tail: ChatLandingTarget = { index: lastIndex, align: 'end' };
+  if (hasLiveTurn) return tail;
+  for (let index = lastIndex; index >= 0; index -= 1) {
+    const row = rows[index];
+    if (row.kind === 'approvals') continue;
+    const message = row.kind === 'message' ? row.message : undefined;
+    if (!message) return tail;
+    if (isFoldedPaneScrape(message)) continue;
+    return message.role === 'assistant' && message.messageType === 'normal'
+      ? { index, align: 'start' }
+      : tail;
+  }
+  return tail;
+}
+
 /** One in-flight run of the tail anchor (Issue #2283). */
 interface TailAnchorRun {
   /** The pending `requestAnimationFrame` handle, or null between frames. */
@@ -351,6 +406,8 @@ interface TailAnchorRun {
   stableFrames: number;
   /** The total height the last aim was taken against. */
   totalSize: number;
+  /** [#2820] The landing the last aim was taken at. */
+  target: ChatLandingTarget;
   /** `Date.now()` past which the run ends however the frames are going. */
   deadline: number;
 }
@@ -419,6 +476,30 @@ export interface ChatTranscriptProps {
    * `scrollTop`. See {@link ChatTranscriptScrollControls}.
    */
   onScrollControlsChange?: (controls: ChatTranscriptScrollControls | null) => void;
+  /**
+   * Issue #2821: draw none of the top-right icon buttons — the tool-activity
+   * toggle and the search toggle.
+   *
+   * For a mount whose parent owns that corner: on the phone, `MobileTerminalTab`
+   * floats its surface pill over exactly these 28px icons, so they could be
+   * neither seen nor pressed, and the pill carries the tool-activity toggle
+   * instead. The search BAR is not affected: while search is open it is drawn
+   * whatever this says, so a parent that opens search another way still gets
+   * the bar. Omit (the default) everywhere else.
+   */
+  hideCornerControls?: boolean;
+  /**
+   * Issue #2823: open the search bar, input focused, on the window event
+   * `chat-search-open` (the phone's "More actions" sheet). Only the phone's
+   * chat surface passes it: none of the PC split's transcripts may answer.
+   */
+  openSearchOnWindowEvent?: boolean;
+  /**
+   * Issue #2823: the top offset class of the top-right strip. Replaces the
+   * default `top-2` (two `top-*` classes resolve by stylesheet order). The
+   * phone passes a lower one so the bar opens below its surface pill.
+   */
+  searchBarTopClassName?: string;
 }
 
 // ============================================================================
@@ -665,6 +746,9 @@ export const ChatTranscript = memo(function ChatTranscript({
   liveTurn = null,
   sessionEnded = false,
   onScrollControlsChange,
+  hideCornerControls = false,
+  openSearchOnWindowEvent = false,
+  searchBarTopClassName = 'top-2',
 }: ChatTranscriptProps) {
   const t = useTranslations('worktree');
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -863,20 +947,15 @@ export const ChatTranscript = memo(function ChatTranscript({
   // ---------------------------------------------------------------
   // Tool activity (Issue #2284)
   // ---------------------------------------------------------------
-  // One verdict for the whole column, remembered per browser. Read lazily on
+  // One verdict for the whole column, remembered per browser. Read during the
   // first render rather than in an effect, which is `useHistoryFilters`'
   // pattern for `commandmate:showArchived`: an effect would paint every chip
   // closed and then open them, and the reader's own preference is not a thing
   // to flicker through.
-  const [showToolActivity, setShowToolActivity] = useState<boolean>(
-    readChatToolActivityPreference,
-  );
-
-  const toggleToolActivity = useCallback(() => {
-    const next = !showToolActivity;
-    setShowToolActivity(next);
-    writeChatToolActivityPreference(next);
-  }, [showToolActivity]);
+  //
+  // [#2821] Read from the page-wide store rather than held per mount, so the
+  // PC's side-by-side transcripts and the phone's pill button all move together.
+  const [showToolActivity, toggleToolActivity] = useChatToolActivityPreference();
 
   const toolActivityValue = useMemo<ChatToolActivityState>(
     () => ({ showAll: showToolActivity }),
@@ -903,6 +982,27 @@ export const ChatTranscript = memo(function ChatTranscript({
     // Intentionally excludes closeSearch: reset only on worktree change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [worktreeId]);
+
+  // [#2823] Opening search from outside: the phone's "More actions" sheet
+  // raises a window event, as it does for `TerminalDisplay`. Opt-in, so one
+  // sheet row cannot open every transcript of the PC split. Every request also
+  // asks for focus (the bar focuses on MOUNT only), served in an effect so it
+  // lands after the sheet's focus trap restores focus in the same commit.
+  const cornerRef = useRef<HTMLDivElement>(null);
+  const [searchFocusRequest, setSearchFocusRequest] = useState(0);
+  useEffect(() => {
+    if (!openSearchOnWindowEvent) return;
+    const handleOpen = () => {
+      openSearch();
+      setSearchFocusRequest((n) => n + 1);
+    };
+    window.addEventListener('chat-search-open', handleOpen);
+    return () => window.removeEventListener('chat-search-open', handleOpen);
+  }, [openSearchOnWindowEvent, openSearch]);
+  useEffect(() => {
+    if (searchFocusRequest === 0) return;
+    cornerRef.current?.querySelector('input')?.focus();
+  }, [searchFocusRequest]);
 
   // ---------------------------------------------------------------
   // Rows (Issue #2245)
@@ -937,6 +1037,16 @@ export const ChatTranscript = memo(function ChatTranscript({
     previousSessionCount,
   ]);
   rowCountRef.current = rows.length;
+
+  // [#2820] Where the anchor aims, readable from inside an animation frame for
+  // the same reason as `rowCountRef`.
+  const hasLiveTurn = liveTurn !== null;
+  const landingTarget = useMemo(
+    () => resolveChatLandingTarget(rows, hasLiveTurn),
+    [rows, hasLiveTurn],
+  );
+  const landingTargetRef = useRef<ChatLandingTarget | null>(landingTarget);
+  landingTargetRef.current = landingTarget;
 
   // ---------------------------------------------------------------
   // Virtualization
@@ -993,11 +1103,26 @@ export const ChatTranscript = memo(function ChatTranscript({
     if (run && run.frame !== null) cancelAnimationFrame(run.frame);
   }, []);
 
+  /**
+   * [#2820] How far the scroll position is from where `target` puts it, in px.
+   * `getOffsetForIndex` is the virtualizer's own answer, clamp included, so a
+   * head that would scroll past the bottom is compared against the bottom.
+   */
+  const distanceFromLanding = useCallback(
+    (target: ChatLandingTarget): number => {
+      const container = scrollContainerRef.current;
+      const offset = rowVirtualizer.getOffsetForIndex(target.index, target.align)?.[0];
+      if (!container || offset === undefined) return Number.POSITIVE_INFINITY;
+      return Math.abs(container.scrollTop - offset);
+    },
+    [rowVirtualizer],
+  );
+
   const anchorToTail = useCallback(() => {
     stopTailAnchor();
-    const lastIndex = rowCountRef.current - 1;
-    if (lastIndex < 0) return;
-    rowVirtualizer.scrollToIndex(lastIndex, { align: 'end' });
+    const target = landingTargetRef.current;
+    if (target === null) return;
+    rowVirtualizer.scrollToIndex(target.index, { align: target.align });
     // SSR / a jsdom environment without frames still gets the aim above; only
     // the correction needs a frame loop.
     if (typeof requestAnimationFrame !== 'function') return;
@@ -1007,6 +1132,7 @@ export const ChatTranscript = memo(function ChatTranscript({
       frames: 0,
       stableFrames: 0,
       totalSize: rowVirtualizer.getTotalSize(),
+      target,
       deadline: Date.now() + CHAT_TAIL_ANCHOR_MAX_MS,
     };
     const step = () => {
@@ -1014,9 +1140,9 @@ export const ChatTranscript = memo(function ChatTranscript({
       // A newer run, or an unmount, has taken over.
       if (tailAnchorRef.current !== run) return;
       run.frames += 1;
-      const index = rowCountRef.current - 1;
+      const next = landingTargetRef.current;
       if (
-        index < 0 ||
+        next === null ||
         !isPinnedToBottomRef.current ||
         run.frames > CHAT_TAIL_ANCHOR_MAX_FRAMES ||
         Date.now() > run.deadline
@@ -1025,7 +1151,19 @@ export const ChatTranscript = memo(function ChatTranscript({
         return;
       }
       const totalSize = rowVirtualizer.getTotalSize();
-      if (totalSize === run.totalSize) {
+      // [#2820] Re-aim on three things, not one: the total moving (#2283), the
+      // landing itself moving, and — on the FIRST frame only — the position
+      // having been moved off it. `ChatSurface`'s own follow writes
+      // `scrollTop = scrollHeight` in the same commit as this run's first aim
+      // (a parent's layout effect runs after its child's), so that write is
+      // visible by frame 1; checking later frames would fight a reader who
+      // scrolls away while the run is still settling.
+      const isSettled =
+        totalSize === run.totalSize &&
+        next.index === run.target.index &&
+        next.align === run.target.align &&
+        (run.frames > 1 || distanceFromLanding(next) <= 1);
+      if (isSettled) {
         run.stableFrames += 1;
         if (run.stableFrames >= CHAT_TAIL_ANCHOR_STABLE_FRAMES) {
           tailAnchorRef.current = null;
@@ -1034,13 +1172,14 @@ export const ChatTranscript = memo(function ChatTranscript({
       } else {
         run.stableFrames = 0;
         run.totalSize = totalSize;
-        rowVirtualizer.scrollToIndex(index, { align: 'end' });
+        run.target = next;
+        rowVirtualizer.scrollToIndex(next.index, { align: next.align });
       }
       run.frame = requestAnimationFrame(step);
     };
     tailAnchorRef.current = run;
     run.frame = requestAnimationFrame(step);
-  }, [rowVirtualizer, stopTailAnchor]);
+  }, [rowVirtualizer, stopTailAnchor, distanceFromLanding]);
 
   useEffect(() => stopTailAnchor, [stopTailAnchor]);
 
@@ -1064,11 +1203,18 @@ export const ChatTranscript = memo(function ChatTranscript({
   const handleScroll = useCallback(() => {
     const container = scrollContainerRef.current;
     if (!container) return;
-    const pinned = isNearBottom({
-      scrollTop: container.scrollTop,
-      scrollHeight: container.scrollHeight,
-      clientHeight: container.clientHeight,
-    });
+    // [#2820] Parked at the latest reply's head is following too: within the
+    // same 80px of the landing as `isNearBottom` allows of the bottom.
+    const target = landingTargetRef.current;
+    const pinned =
+      isNearBottom({
+        scrollTop: container.scrollTop,
+        scrollHeight: container.scrollHeight,
+        clientHeight: container.clientHeight,
+      }) ||
+      (target !== null &&
+        target.align === 'start' &&
+        distanceFromLanding(target) <= HISTORY_STICK_TO_BOTTOM_THRESHOLD_PX);
     // [#2283] While an anchor run is in flight the only scrolls are its own,
     // and its intermediate frames are BY CONSTRUCTION short of the bottom —
     // that gap is what it exists to close. Reading one of them as "the reader
@@ -1077,7 +1223,7 @@ export const ChatTranscript = memo(function ChatTranscript({
     if (!pinned && tailAnchorRef.current !== null) return;
     isPinnedToBottomRef.current = pinned;
     setIsAtTail(pinned);
-  }, []);
+  }, [distanceFromLanding]);
 
   // Land on the tail, and stay there while the rows are measured.
   //
@@ -1093,14 +1239,24 @@ export const ChatTranscript = memo(function ChatTranscript({
   //     changes across that swap, so an append-shaped condition cannot see it;
   //  3. messages being appended, which is what the effect already followed.
   //
+  // [#2820] And two more that move the landing without adding a message: a live
+  // turn appearing or going away (the landing flips between the end and the
+  // reply's head), and the tool-activity toggle (the reply row's height).
+  //
   // Skipped during an active search so the match's own `scrollToIndex` is not
   // overridden — #1123's rule, inherited from `HistoryPane`.
+  const prevHasLiveTurnRef = useRef(hasLiveTurn);
+  const prevShowToolActivityRef = useRef(showToolActivity);
   useLayoutEffect(() => {
     const previousCount = prevRowCountRef.current;
     const wasLoading = prevIsLoadingRef.current;
+    const hadLiveTurn = prevHasLiveTurnRef.current;
+    const hadToolActivity = prevShowToolActivityRef.current;
     const current = visibleMessages.length;
     prevRowCountRef.current = current;
     prevIsLoadingRef.current = isLoading;
+    prevHasLiveTurnRef.current = hasLiveTurn;
+    prevShowToolActivityRef.current = showToolActivity;
 
     if (isLoading || isSearchActive || rows.length === 0) return;
     if (!isPinnedToBottomRef.current) return;
@@ -1108,9 +1264,19 @@ export const ChatTranscript = memo(function ChatTranscript({
     // folds into an existing group adds no row, and the tail to follow is
     // whatever the row list ends with.
     const isFirstRenderableList = previousCount === -1 || wasLoading;
-    if (!isFirstRenderableList && current <= previousCount) return;
+    const isLandingMoved =
+      hadLiveTurn !== hasLiveTurn || hadToolActivity !== showToolActivity;
+    if (!isFirstRenderableList && !isLandingMoved && current <= previousCount) return;
     anchorToTail();
-  }, [visibleMessages.length, rows.length, isLoading, isSearchActive, anchorToTail]);
+  }, [
+    visibleMessages.length,
+    rows.length,
+    isLoading,
+    isSearchActive,
+    hasLiveTurn,
+    showToolActivity,
+    anchorToTail,
+  ]);
 
   // Publish the two ends, so the surface above can borrow the virtualizer
   // instead of writing `scrollTop` (Issue #2283). Withdrawn on unmount, so a
@@ -1512,9 +1678,20 @@ export const ChatTranscript = memo(function ChatTranscript({
           the bar is what pushes it off the pane. Nothing is lost by yielding —
           a search hit opens the chips in its own row anyway (see
           `searchHitMessageIds`), which is the only reason to want them open
-          while searching. */}
-      <div className="pointer-events-none absolute right-2 top-2 z-10 flex items-start justify-end gap-1">
-        {!isSearchOpen && (
+          while searching.
+
+          [#2821] `hideCornerControls` withdraws both icons (the phone's surface
+          pill sits on top of them and carries the tool-activity toggle
+          itself). The search bar still renders whenever search is open, so the
+          strip stays the one place the bar lives.
+
+          [#2823] `searchBarTopClassName` lowers the strip on the phone, so the
+          bar opens below the surface pill rather than under it. */}
+      <div
+        ref={cornerRef}
+        className={`pointer-events-none absolute right-2 ${searchBarTopClassName} z-10 flex items-start justify-end gap-1`}
+      >
+        {!isSearchOpen && !hideCornerControls && (
           <div className="pointer-events-auto">
             <button
               type="button"
@@ -1543,33 +1720,35 @@ export const ChatTranscript = memo(function ChatTranscript({
             </button>
           </div>
         )}
-        <div className="pointer-events-auto">
-          {isSearchOpen ? (
-            <HistorySearchBar
-              query={searchQuery}
-              onQueryChange={setSearchQuery}
-              matchCount={matchCount}
-              currentIndex={currentIndex}
-              onNext={nextMatch}
-              onPrev={prevMatch}
-              onClose={closeSearch}
-              isAtMaxMatches={isAtMaxMatches}
-              onCompositionStart={onCompositionStart}
-              onCompositionEnd={onCompositionEnd}
-            />
-          ) : (
-            <button
-              type="button"
-              data-testid="chat-transcript-search-toggle"
-              onClick={openSearch}
-              aria-label={t('chatTranscript.openSearch')}
-              title={t('chatTranscript.openSearch')}
-              className="rounded-full border border-border bg-surface-2/80 p-1.5 text-muted-foreground shadow-sm backdrop-blur transition-colors hover:bg-muted hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring touch-manipulation"
-            >
-              <Search size={14} aria-hidden="true" />
-            </button>
-          )}
-        </div>
+        {(isSearchOpen || !hideCornerControls) && (
+          <div className="pointer-events-auto">
+            {isSearchOpen ? (
+              <HistorySearchBar
+                query={searchQuery}
+                onQueryChange={setSearchQuery}
+                matchCount={matchCount}
+                currentIndex={currentIndex}
+                onNext={nextMatch}
+                onPrev={prevMatch}
+                onClose={closeSearch}
+                isAtMaxMatches={isAtMaxMatches}
+                onCompositionStart={onCompositionStart}
+                onCompositionEnd={onCompositionEnd}
+              />
+            ) : (
+              <button
+                type="button"
+                data-testid="chat-transcript-search-toggle"
+                onClick={openSearch}
+                aria-label={t('chatTranscript.openSearch')}
+                title={t('chatTranscript.openSearch')}
+                className="rounded-full border border-border bg-surface-2/80 p-1.5 text-muted-foreground shadow-sm backdrop-blur transition-colors hover:bg-muted hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring touch-manipulation"
+              >
+                <Search size={14} aria-hidden="true" />
+              </button>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

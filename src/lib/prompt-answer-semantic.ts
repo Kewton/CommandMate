@@ -12,10 +12,34 @@
  * matched, so the caller sends nothing at all instead of a stray Enter.
  */
 
-import type { MultipleChoiceOption, PromptData, PromptType } from '@/types/models';
+import type { MultipleChoiceOption, MultipleChoicePromptData, PromptData, PromptType } from '@/types/models';
 
-/** Checkbox-style multi-select options have no yes/no semantics. */
-const CHECKBOX_OPTION_PATTERN = /^\[[ x]\] /;
+/**
+ * Checkbox-style multi-select options have no yes/no semantics.
+ *
+ * Issue #2755 made this the SECOND of two readings rather than the only one.
+ * Command Code's reader now strips the box off the label and reports the state
+ * as `multiSelect` / `checked`, so on that tool there is no bracket left to
+ * match and {@link isMultiSelectPrompt} is what refuses the answer. The pattern
+ * stays for every payload that still carries brackets — claude's and agy's
+ * checkbox menus reach the sender through the generic parser, which does not
+ * strip them — because dropping it here would silently reopen #1681's hole on
+ * those tools.
+ */
+const CHECKBOX_OPTION_PATTERN = /^\[[ xX\u2714]\] /;
+
+/**
+ * Whether this prompt is a checkbox question (Issue #2755).
+ *
+ * Either reading counts: the payload saying so, or a label that still wears its
+ * box. See {@link CHECKBOX_OPTION_PATTERN} for why both are needed.
+ */
+function isMultiSelectPrompt(promptData: MultipleChoicePromptData): boolean {
+  return (
+    promptData.multiSelect === true ||
+    promptData.options.some(o => CHECKBOX_OPTION_PATTERN.test(o.label))
+  );
+}
 
 /** Labels that mean "approve" (e.g. "Yes", "Yes, allow all edits ..."). */
 const AFFIRMATIVE_LABEL_PATTERN = /^yes\b/i;
@@ -74,12 +98,13 @@ function isAffirmativeLabel(label: string): boolean {
 }
 
 function resolveSemanticOption(
-  options: MultipleChoiceOption[],
+  promptData: MultipleChoicePromptData,
   semantic: SemanticAnswer,
 ): MultipleChoiceOption {
-  if (options.some(o => CHECKBOX_OPTION_PATTERN.test(o.label))) {
+  const options = promptData.options;
+  if (isMultiSelectPrompt(promptData)) {
     throw new PromptAnswerResolutionError(
-      'Multi-select (checkbox) prompts cannot be answered with yes/no. Answer with an option number.'
+      'Multi-select (checkbox) prompts cannot be answered with yes/no. Answer with the option numbers you want ticked, comma-separated (for example "1,3").'
     );
   }
 
@@ -139,6 +164,17 @@ export function resolvePromptAnswer(params: ResolvePromptAnswerParams): AnswerRe
 
   if (useDefault) {
     if (promptData?.type === 'multiple_choice') {
+      // Issue #2755: on a checkbox question the `❯` is a CURSOR, not a
+      // pre-selected answer — it says which row a key would toggle. Turning it
+      // into "the answer" ticked one box and stopped, and on a screen where the
+      // human had already ticked that box it UNticked it (`respond --default`
+      // on #2754's `multiselect-cursor-on-option-2`). Refused before anything
+      // is sent, like every other unresolvable answer here.
+      if (isMultiSelectPrompt(promptData)) {
+        throw new PromptAnswerResolutionError(
+          'Multi-select (checkbox) prompts have no default answer: the cursor marks the row a key would toggle, not a choice. Answer with the option numbers you want ticked, comma-separated (for example "1,3").'
+        );
+      }
       const opt = resolveDefaultOption(promptData.options);
       return {
         input: String(opt.number),
@@ -166,7 +202,7 @@ export function resolvePromptAnswer(params: ResolvePromptAnswerParams): AnswerRe
   }
 
   if (promptData?.type === 'multiple_choice') {
-    const opt = resolveSemanticOption(promptData.options, semantic);
+    const opt = resolveSemanticOption(promptData, semantic);
     return {
       input: String(opt.number),
       resolved: { via: 'semantic', optionNumber: opt.number, optionLabel: opt.label },

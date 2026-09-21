@@ -62,10 +62,20 @@
  * "changed" notice the server's model edge raises. It is the one thing in this
  * tab that takes vertical space by design (28px, inside #2106's budget), and
  * only while a model is known; see the component for the arithmetic.
+ *
+ * Issue #2799: while the phone's direct-input keyboard is open
+ * (`directInputOpen`), this tab's own key pads — the unsent-input bar, the
+ * opencode quick keys and the escape hatch — stand down (the keyboard stands
+ * in for them, and the terminal needs their rows), the surface toggle
+ * is locked (direct input is aimed at the terminal frame; chat does not draw
+ * it), and the terminal is kept pinned to its last row as the keyboard takes
+ * height away from it. The keyboard itself is docked in the screen's bottom
+ * bar, not here: this tab lives inside the scrolling `<main>` and under the
+ * tab-swipe gesture.
  */
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Cpu, MessageSquare, StickyNote, TerminalSquare } from 'lucide-react';
+import { Cpu, MessageSquare, StickyNote, TerminalSquare, Wrench } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
 import { TerminalDisplay } from '@/components/worktree/TerminalDisplay';
 import { TerminalEscapeHatch } from '@/components/worktree/TerminalEscapeHatch';
@@ -103,6 +113,7 @@ import {
   useRegisterChatOptimisticSend,
 } from '@/contexts/WorktreeChatSendContext';
 import { useChatFileLinkScope } from '@/lib/chat/chat-file-link-scope';
+import { useChatToolActivityPreference } from '@/lib/chat/chat-tool-activity';
 import {
   buildModelByInstance,
   formatAgentModelLabel,
@@ -145,6 +156,13 @@ export interface MobileTerminalTabProps {
    * the seventeen existing suites that mount this tab need no new prop.
    */
   onSurfaceModeChange?: (mode: SurfaceMode) => void;
+  /**
+   * Issue #2799: the direct-input keyboard is open in the screen's bottom bar.
+   * Hides this tab's own key pads, locks the surface toggle and keeps the
+   * terminal on its last row. Optional, like `onSurfaceModeChange`, so every
+   * suite that mounts this tab with just `worktreeId` / `cliToolId` stays valid.
+   */
+  directInputOpen?: boolean;
 }
 
 /**
@@ -162,6 +180,15 @@ const MOBILE_SURFACE_SEGMENTS: readonly {
   { mode: 'terminal', labelKey: 'surfaceMode.terminal', icon: TerminalSquare },
   { mode: 'chat', labelKey: 'surfaceMode.chat', icon: MessageSquare },
 ] as const;
+
+/**
+ * Issue #2823: where both search bars start on the phone — 64px below the top
+ * of the terminal region, 6px below the surface pill. The pill is 50px tall at
+ * `top-2`, so its bottom is 58px down; with the session row it is at `top-9`
+ * but the region is 28px (`h-7`) lower too, so it is 58px either way. At
+ * `top-2` the bars opened under the pill (`z-30`), hiding "next" and "close".
+ */
+const MOBILE_SEARCH_BAR_TOP_CLASS = 'top-16';
 
 // ============================================================================
 // The session row's model source (Issue #2357)
@@ -535,6 +562,14 @@ const MobileChatSurface = memo(function MobileChatSurface({
         // chat surface is where re-sending a previous prompt is most useful,
         // because the terminal is not on screen to scroll back through.
         onInsertToMessage: insertToComposer,
+        // Issue #2821: the tab's surface pill floats over the transcript's
+        // top-right icons, so the transcript draws none and the pill carries
+        // the tool-activity toggle instead.
+        hideCornerControls: true,
+        // Issue #2823: with the icon gone, search opens from the "More
+        // actions" sheet (`chat-search-open`), and the bar opens below the pill.
+        openSearchOnWindowEvent: true,
+        searchBarTopClassName: MOBILE_SEARCH_BAR_TOP_CLASS,
       }}
     />
   );
@@ -546,6 +581,7 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
   instanceId,
   disableAutoFollow,
   onSurfaceModeChange,
+  directInputOpen = false,
 }: MobileTerminalTabProps) {
   const { terminal, prompt, agentSession, setAutoScroll, refresh } = useTerminalPanePolling({
     worktreeId,
@@ -721,6 +757,47 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
     [surfaceStorageKey],
   );
 
+  // Issue #2799: the pill is drawn unavailable while direct input is open, and
+  // the tap is refused here too — `aria-disabled` alone does not stop it.
+  const handleSurfaceToggle = useCallback(
+    (mode: SurfaceMode) => {
+      if (directInputOpen) return;
+      handleSurfaceModeChange(mode);
+    },
+    [directInputOpen, handleSurfaceModeChange],
+  );
+
+  // Issue #2821: the chat surface's tool-activity toggle, drawn in the pill on
+  // the phone. The same page-wide value every transcript reads, so a tap here
+  // re-renders the transcript underneath in the same pass.
+  const [showToolActivity, toggleToolActivity] = useChatToolActivityPreference();
+
+  // Issue #2799: keep the terminal on its last row while the keyboard takes
+  // height from it. A shrinking scroll box keeps its `scrollTop`, so the rows
+  // it loses come off the BOTTOM — the prompt the user opened the keyboard to
+  // answer — and no scroll event fires to say so. `TerminalDisplay` only
+  // re-pins on new output, so it is re-pinned here whenever the region changes
+  // size, and only while following (a user who scrolled up is left alone, and
+  // a `disableAutoFollow` pane — a full-screen TUI read from the top — is never
+  // following).
+  const regionRef = useRef<HTMLDivElement>(null);
+  const followRef = useRef(terminal.autoScroll);
+  followRef.current = terminal.autoScroll;
+  useEffect(() => {
+    const region = regionRef.current;
+    if (!directInputOpen || disableAutoFollow || region === null) return;
+    const pin = (): void => {
+      if (!followRef.current) return;
+      const log = region.querySelector<HTMLElement>('[role="log"]');
+      if (log) log.scrollTop = log.scrollHeight;
+    };
+    pin();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(pin);
+    observer.observe(region);
+    return () => observer.disconnect();
+  }, [directInputOpen, disableAutoFollow]);
+
   // Issue #2254: publish the mode to the screen that owns the docked controls.
   // In an effect keyed on the resolved value rather than inside
   // `handleSurfaceModeChange`, because the mode ALSO arrives from localStorage
@@ -842,21 +919,57 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
             <button
               key={mode}
               type="button"
-              onClick={() => handleSurfaceModeChange(mode)}
+              onClick={() => handleSurfaceToggle(mode)}
               aria-pressed={active}
               aria-label={label}
+              aria-disabled={directInputOpen ? true : undefined}
               title={label}
               data-testid={`mobile-surface-mode-${mode}`}
               className={`pointer-events-auto flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full transition-colors touch-manipulation ${
                 active
                   ? 'bg-accent-500/20 text-accent-600 dark:text-accent-400'
                   : 'text-muted-foreground'
-              }`}
+              } ${directInputOpen ? 'opacity-40' : ''}`}
             >
               <Icon size={18} aria-hidden="true" />
             </button>
           );
         })}
+        {/* Issue #2821: the tool-activity toggle, on the chat surface only (the
+            terminal has nothing to fold). The transcript's own copy sits under
+            this pill, so it is withdrawn there (`hideCornerControls`) and drawn
+            here instead. The rule keeps it visibly apart from the two surface
+            segments, whose "selected" tint is close to its "on" tint. Not
+            subject to `directInputOpen`: direct input only opens on the
+            terminal surface, where this button is not drawn. */}
+        {surfaceMode === 'chat' ? (
+          <>
+            <span aria-hidden="true" className="mx-0.5 h-6 w-px bg-border" />
+            <button
+              type="button"
+              onClick={toggleToolActivity}
+              aria-pressed={showToolActivity}
+              aria-label={
+                showToolActivity
+                  ? t('chatTranscript.toolActivity.hide')
+                  : t('chatTranscript.toolActivity.show')
+              }
+              title={
+                showToolActivity
+                  ? t('chatTranscript.toolActivity.hide')
+                  : t('chatTranscript.toolActivity.show')
+              }
+              data-testid="mobile-chat-tool-activity-toggle"
+              className={`pointer-events-auto flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full transition-colors touch-manipulation ${
+                showToolActivity
+                  ? 'bg-accent-500/15 text-accent-700 dark:text-accent-400'
+                  : 'text-muted-foreground'
+              }`}
+            >
+              <Wrench size={18} aria-hidden="true" />
+            </button>
+          </>
+        ) : null}
       </div>
       {/* Issue #2106: the measured surface. The wrapper is what the flex column
           hands to TerminalDisplay (which is `h-full`), so its rect IS the
@@ -913,7 +1026,7 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
           </p>
         </div>
       ) : null}
-      <div className="flex-1 min-h-0 overflow-hidden" data-testid="mobile-terminal-region">
+      <div ref={regionRef} className="flex-1 min-h-0 overflow-hidden" data-testid="mobile-terminal-region">
         {surfaceMode === 'chat' ? (
           <div className="h-full min-h-0" data-testid="mobile-chat-surface">
             <MobileChatSurface
@@ -937,10 +1050,14 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
             compactTuiLayoutPadding={compactTuiLayoutPadding}
             preservePaintedPanelRows={preservePaintedPanelRows}
             wrapMode={mobileWrapMode}
+            searchBarTopClassName={MOBILE_SEARCH_BAR_TOP_CLASS}
           />
         )}
       </div>
-      {showUnsentComposerBar ? (
+      {/* Issue #2799: the three pads below stand down while the direct-input
+          keyboard is open — it stands in for them, and the terminal needs
+          their rows (the keyboard's height comes out of this column). */}
+      {showUnsentComposerBar && !directInputOpen ? (
         <div className="shrink-0 px-2 pt-1">
           <UnsentComposerBar
             worktreeId={worktreeId}
@@ -970,7 +1087,7 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
           every tool while the session is running, but OpencodeQuickKeys still
           returns null for anything other than opencode -- so on claude / codex /
           copilot this is an empty div exactly as it was before #2106. */}
-      {terminal.isRunning ? (
+      {terminal.isRunning && !directInputOpen ? (
         <div className="shrink-0 px-2 pt-1" data-testid="mobile-quick-keys-slot">
           <OpencodeQuickKeys
             worktreeId={worktreeId}
@@ -988,7 +1105,7 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
           />
         </div>
       ) : null}
-      {showEscapeHatch ? (
+      {showEscapeHatch && !directInputOpen ? (
         <div className="shrink-0 px-2 pt-1 pb-2">
           <TerminalEscapeHatch
             worktreeId={worktreeId}

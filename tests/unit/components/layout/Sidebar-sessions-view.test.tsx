@@ -8,9 +8,12 @@ import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import React from 'react';
 import type { Worktree } from '@/types/models';
 
+import { UNCLASSIFIED_STATUS_DOT_CLASS } from '@/components/sidebar/BranchStatusIndicator';
+
+const locale = vi.hoisted(() => ({ current: 'en' }));
 vi.mock('next-intl', async () => {
   const { createRealIntlMock } = await import('@tests/helpers/real-intl');
-  return createRealIntlMock('en');
+  return createRealIntlMock(() => locale.current);
 });
 
 const mockPush = vi.fn();
@@ -45,10 +48,10 @@ const WORKTREES: Worktree[] = [
   } as Worktree,
 ];
 
-function renderSidebar() {
+function renderSidebar(worktrees: Worktree[] = WORKTREES) {
   return render(
     <SidebarProvider>
-      <WorktreeSelectionProvider externalWorktrees={WORKTREES} externalRepositories={[]}>
+      <WorktreeSelectionProvider externalWorktrees={worktrees} externalRepositories={[]}>
         <Sidebar />
       </WorktreeSelectionProvider>
     </SidebarProvider>,
@@ -59,6 +62,7 @@ const sessionKeys = () =>
   screen.queryAllByTestId('session-list-item').map((el) => el.getAttribute('data-session-key'));
 
 beforeEach(() => {
+  locale.current = 'en';
   localStorage.clear();
   mockPush.mockClear();
   global.fetch = vi.fn().mockResolvedValue({ json: async () => ({ success: true, order: null }) }) as unknown as typeof fetch;
@@ -143,5 +147,57 @@ describe('Sidebar sessions view (Issue #2656)', () => {
       expect(screen.getAllByTestId('session-list-item')).toHaveLength(3);
     });
     expect(localStorage.getItem(SIDEBAR_VIEW_MODE_STORAGE_KEY)).toBe('sessions');
+  });
+
+  it('draws an unclassified instance with UNCLASSIFIED_STATUS_DOT_CLASS and 不明 label (Issue #2822)', async () => {
+    locale.current = 'ja';
+    localStorage.setItem(SIDEBAR_VIEW_MODE_STORAGE_KEY, 'sessions');
+
+    const unclassifiedWorktree: Worktree = {
+      id: 'wt-unclass',
+      name: 'feature/unclass',
+      path: '/repo/unclass',
+      repositoryPath: '/repo',
+      repositoryName: 'RepoUnclass',
+      updatedAt: new Date('2026-09-01T00:00:00Z'),
+      agentInstances: [
+        { id: 'codex', cliTool: 'codex', alias: 'UnclassAgent', order: 0 },
+        { id: 'claude', cliTool: 'claude', alias: 'NormalAgent', order: 1 },
+      ],
+      sessionStatusByInstance: {
+        codex: {
+          isRunning: true,
+          isWaitingForResponse: false,
+          isProcessing: false,
+          isUnclassified: true,
+        },
+        claude: {
+          isRunning: true,
+          isWaitingForResponse: false,
+          isProcessing: false,
+        },
+      },
+    } as Worktree;
+
+    renderSidebar([unclassifiedWorktree]);
+
+    await waitFor(() => {
+      expect(screen.getAllByTestId('session-list-item')).toHaveLength(2);
+    });
+
+    const items = screen.getAllByTestId('session-list-item');
+    const unclassDot = items[0].querySelector('span.rounded-full') as HTMLElement;
+    const normalDot = items[1].querySelector('span.rounded-full') as HTMLElement;
+
+    // The unclassified instance gets UNCLASSIFIED_STATUS_DOT_CLASS and 不明
+    for (const cls of UNCLASSIFIED_STATUS_DOT_CLASS.split(' ')) {
+      expect(unclassDot.className).toContain(cls);
+    }
+    expect(unclassDot.getAttribute('aria-label')).toBe('不明');
+
+    // The normal ready instance keeps standard ready styling and 準備完了
+    expect(normalDot.className).not.toContain('bg-transparent');
+    expect(normalDot.className).toContain('bg-success');
+    expect(normalDot.getAttribute('aria-label')).toBe('準備完了');
   });
 });

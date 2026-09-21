@@ -81,6 +81,17 @@ export interface WorktreeItem {
      */
     sessionStatusReason?: string;
     /**
+     * No rule could classify this tool's frame at all (Issue #2775).
+     *
+     * The server's `isUnclassifiedFrame` — the fact `capture --json` publishes
+     * as `isUnclassifiedActive`. Such a session is published with
+     * `isProcessing: false`, so `commandmate ls` / `peers` print `ready` for it
+     * rather than `running`; the REASON column still names the floor
+     * (`default (no evidence)` …). Present only when true, and absent from a
+     * server older than #2775 — which still sends `isProcessing: true` here.
+     */
+    isUnclassified?: boolean;
+    /**
      * The last status anything could positively confirm for this tool, or
      * absent (Issue #1926, design §7).
      *

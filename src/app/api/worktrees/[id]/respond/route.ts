@@ -168,6 +168,29 @@ export async function POST(
 
     // For multiple choice, check if answer is an option number or custom text
     if (promptData.type === 'multiple_choice') {
+      // Issue #2755: this route cannot deliver a CHECKBOX answer, and the way
+      // it failed was silent. `parseInt("1,3", 10)` is `1`, so a request naming
+      // two boxes reached `sendPromptAnswer` as the single number `1` — one box
+      // ticked, the question still on screen, and this route answering
+      // `success: true`. Refused instead, and pointed at the route that has the
+      // toggle-and-confirm arm (`POST /api/worktrees/[id]/prompt-response`,
+      // which takes `answers: [1,3]` or `answer: "1,3"`).
+      //
+      // Scoped to a payload that SAYS it is a checkbox question, which is the
+      // minimal correction 確定仕様 5 asks for here: a comma in an answer to
+      // any other prompt is free text and still passes through as it always did.
+      if (promptData.multiSelect === true && answer.includes(',')) {
+        return NextResponse.json(
+          {
+            error:
+              'This prompt is a checkbox question and this endpoint cannot answer one: the numbers '
+              + 'would be sent as a single choice. POST the same worktree\'s '
+              + '/prompt-response with { "answers": [1, 3] } instead.',
+          },
+          { status: 400 }
+        );
+      }
+
       const answerNum = parseInt(answer, 10);
 
       // If answer is a number, validate it's one of the available options

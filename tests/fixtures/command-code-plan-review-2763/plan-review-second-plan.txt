@@ -1,0 +1,1000 @@
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+Plan review: Add `divide(a, b)` to calc.js (with tests) · ~/.commandcode/plans/add-divide-to-calc.md · v1
+Review the plan like a PR — type on any line to comment, enter pins it under the line.
+
+   1   # Add `divide(a, b)` to calc.js (with tests)
+   2
+   3   ## Context / current state
+   4   - `calc.js` currently exports exactly two functions: `add(a, b)` and `mul(a,
+       b)`. Nothing else.
+   5   - **Nothing from the earlier approved plan has been written yet** — `calc.js`
+       on disk is unchanged. The earlier plan's shell verification step was denied and
+       execution stopped there. So this work starts from a genuinely clean tree.
+   6   - **Why there is no `package.json` / test framework / dependencies (explaining
+       the earlier note):** this repo is a deliberate throwaway — `README.md` says
+       verbatim "A throwaway repository used only for a TUI probe." It has only
+       `calc.js`, `README.md`, `.git/` and `.commandcode/`. There is no
+       `package.json`, no lockfile, and no installed deps, so there is no test runner
+       to configure and no manifest to hang a `test` script on. That is what makes a
+       zero-dependency test approach the natural fit rather than a preference.
+   7   - The `calc.js` file is ESM (`export function ...`) even though it is named
+       `.js`, which is only legal here because there is no `package.json`, so Node
+       falls back to its default module detection. Any test file that imports it must
+       likewise be treated as ESM.
+   8
+   9   ## Scope
+  10   Divide only, per review decision:
+  11   - Add `divide(a, b)` to `calc.js`.
+  12   - Add a short test covering it.
+  13   - **Out of scope:** `subtract(a, b)` and the broader test-file work from the
+       earlier approved plan. Those stay deferred as a separate follow-up. (For that
+       reason I have not edited `~/.commandcode/plans/add-subtract-to-calc.md` per the
+       earlier review notes — its line-5 edit, line-4 explanation and line-6 re-check
+       are now folded into *this* plan's context instead, since the file it describes
+       is being superseded.)
+  14
+  15   ## Changes
+  16
+  17   ### 1. `/private/tmp/ccplan-probe/sample-repo/calc.js`
+  18   Append after `mul`, matching the existing style exactly (named export, two
+       params, single unvalidated `return`, no semicolons, same spacing):
+  19
+  20   ```js
+  21   export function divide(a, b) {
+  22     return a / b;
+  23   }
+  24   ```
+  25
+  26   Zero-division handling is **deliberately native JS**, confirmed by review:
+       `divide(1, 0)` returns `Infinity`, `divide(0, 0)` returns `NaN`, `divide(-1, 0)`
+       returns `-Infinity`. No `RangeError` guard. This keeps `divide` consistent with
+       `add`/`mul`, which also do no input validation, and keeps the function a single
+       expression.
+  27
+  28   ### 2. `/private/tmp/ccplan-probe/sample-repo/calc.test.mjs` (new)
+  29   Node's built-in runner, zero new dependencies. This is the risky item flagged in
+       review, so it is addressed explicitly below.
+  30
+  31   ```js
+  32   import { test } from 'node:test';
+  33   import assert from 'node:assert/strict';
+  34   import { divide } from './calc.js';
+  35   ```
+  36
+  37   Tests (short):
+  38   - `divide(6, 3) === 2` — normal case
+  39   - `divide(-6, 3) === -2` — sign handling
+  40   - `divide(1, 0) === Infinity` — documents the confirmed native zero-division
+       behavior so a future guard addition can't land silently
+  41   - `divide(0, 0)` is `NaN` — same intent, uses `Number.isNaN(...)`
+  42
+  43   Use `assert.strictEqual` for the first three and
+       `assert.ok(Number.isNaN(divide(0, 0)))` for the last, since `NaN !== NaN` under
+       `strictEqual`.
+  44
+  45   ## Addressing the risky assumption (earlier line-6 note: "double-check before
+       implementing")
+  46   The `node:test` + `.mjs` approach depends on two things that I **could not
+       verify in plan mode** (shell execution was denied, so `node --version` was not
+       run):
+  47   1. **Node >= 18.** `node --test` and `import { test } from 'node:test'` require
+       Node 18+, and `node --test` file discovery requires Node 20+. If the local Node
+       is older, this approach fails at runtime and we fall back to a tiny hand-rolled
+       runner (a plain `.mjs` that imports `divide`, runs the assertions, and calls
+       `process.exit(1)` on mismatch — still zero dependencies).
+  48   2. **`.mjs` is required.** Confirmed by inspection, not assumption: there is no
+       `package.json`, so nothing declares `"type": "module"`. A `.js` test file would
+       parse as CommonJS and the `import` lines would throw `SyntaxError: Cannot use
+       import statement outside a module`. Naming the test `calc.test.mjs` forces ESM
+       and makes the explicit `./calc.js` import resolve.
+  49
+  50   **First implementation step must be `node --version`.** If it is < 18, stop and
+       use the fallback runner before writing anything else.
+  51
+  52   ## Files
+  53   | File | Action |
+  54   | --- | --- |
+  55   | `calc.js` | Add `divide` named export after `mul` |
+  56   | `calc.test.mjs` | New — `node:test` tests for `divide` |
+  57
+  58   ## Verification
+  59   1. `node --version` — confirm >= 18 (see risk section above).
+  60   2. `node --test calc.test.mjs` — expect all 4 `divide` assertions to pass, exit
+       code 0.
+  61   3. Sanity-check the export surface didn't regress: `node --input-type=module -e
+       "import('./calc.js').then(m => console.log(Object.keys(m).sort()))"` — expect
+       `['add', 'divide', 'mul']` (i.e. `add` and `mul` still present and no
+       accidental default export).
+  62   4. Optional guard-rail: after the tests pass, temporarily point one assertion at
+       a wrong value and confirm the suite goes red, proving the tests actually execute
+       rather than silently no-op.
+  63
+  64   ## Notes
+  65   - No `package.json` is created and no `npm test` script is added; run the suite
+       directly via `node --test`.
+  66   - README is not touched — it describes the repo only as a probe and does not
+       list the API.
+  67   - Follow-up (separate): `subtract(a, b)` plus its tests from
+       `~/.commandcode/plans/add-subtract-to-calc.md`, at which point `calc.test.mjs`
+       should be extended rather than duplicated.
+  68
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+ REVIEW
+Approve ctrl+a   executes the plan
+Cancel esc
+
+type + enter to comment · quick: ? why  x cut  ! risky · ctrl+g $EDITOR
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

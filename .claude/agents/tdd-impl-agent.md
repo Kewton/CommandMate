@@ -6,7 +6,7 @@ description: |
   Reads context from tdd-context.json and outputs tdd-result.json.
   Follows Red-Green-Refactor cycle strictly.
 tools: Read,Write,Bash,Edit,Grep,Glob
-model: opus
+model: inherit
 ---
 
 # TDD Implementation Agent

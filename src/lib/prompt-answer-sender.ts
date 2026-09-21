@@ -12,13 +12,35 @@ import { normalizeFrame } from '@/lib/detection/tools/frame';
 import { getToolStatusDetector } from '@/lib/detection/tools/registry';
 import type { DialogAnswerMode, DialogVerdict } from '@/lib/detection/tools/types';
 import { isTypedTextFieldOption } from '@/lib/detection/prompt-detect-multiple-choice';
-import type { PromptData, PromptType, SubmitMode } from '@/types/models';
+import { readCommandCodeQuestionDialog } from '@/lib/detection/tools/command-code/dialog';
+import { readCommandCodeReviewPage } from '@/lib/detection/selection-shape';
+import type { MultipleChoicePromptData, PromptData, PromptType, SubmitMode } from '@/types/models';
 import { isValidSubmitMode } from '@/types/models';
 import { invalidateCache } from './tmux/tmux-capture-cache';
-import { TUI_TEXT_INPUT_WAIT_MS } from '@/config/cli-tool-timing-config';
+import {
+  TUI_MESSAGE_PROCESSED_WAIT_MS,
+  TUI_TEXT_INPUT_WAIT_MS,
+} from '@/config/cli-tool-timing-config';
 
 /** Regex pattern to detect checkbox-style multi-select options */
 const CHECKBOX_OPTION_PATTERN = /^\[[ x]\] /;
+
+/**
+ * A validated SELECTION SET, as opposed to free text (Issue #2755).
+ *
+ * `"1,3"` does not match `/^\d+$/`, which is the shape every guard in this
+ * module asks "is this a number?" with — so without this the answer for a
+ * checkbox question would be judged, and refused, as free text aimed at a menu
+ * row (#2573 / #2583 / #2584). The set is recognised BEFORE those guards run
+ * and takes its own arm; none of them is loosened, and every other answer still
+ * meets them exactly as it did.
+ *
+ * Deliberately strict: digits and single commas, no spaces, no empty members.
+ * `/prompt-response` normalises what it accepts into this spelling and refuses
+ * anything else with nothing sent, so a string reaching here is one the route
+ * has already range-checked against the option list on the FRESH frame.
+ */
+const SELECTION_SET_PATTERN = /^\d+(?:,\d+)*$/;
 
 /**
  * The reason code a caller gets back when a digit meets a `keys`-mode dialog
@@ -565,6 +587,263 @@ function assertFreeTextCursorIsOnTheField(params: SendPromptAnswerParams): void 
   );
 }
 
+/**
+ * The reason code every Command Code multi-select refusal carries
+ * (Issue #2755).
+ *
+ * Shares the shape of {@link ANSWER_MODE_KEYS_REASON} and
+ * {@link FREE_TEXT_AT_MENU_ROW_REASON} — a machine-readable code the API and
+ * `respond` branch on — and means one thing: **the question was not
+ * committed.** What varies is how far the arm got, which
+ * {@link MultiSelectAnswerRejectedError.stage} says.
+ */
+export const MULTI_SELECT_NOT_COMMITTED_REASON = 'multi_select_not_committed';
+
+/** How far {@link sendCommandCodeMultiSelectAnswer} got before it gave up. */
+export type MultiSelectRefusalStage =
+  /** The payload named no cursor row, so the walk to the confirm row has no origin. NOTHING was sent. */
+  | 'cursor-unknown'
+  /** The pane could not be re-read after the toggles. */
+  | 'recapture-failed'
+  /** The screen is no longer the same checkbox question. */
+  | 'screen-changed'
+  /** The re-read ticks do not equal the requested set. The confirm was NOT pressed. */
+  | 'toggle-mismatch'
+  /** The confirm row was pressed and neither a Review page nor the next question came up. */
+  | 'not-committed'
+  /** The Review page says answers are missing, so it must not be confirmed. */
+  | 'review-unanswered';
+
+/**
+ * A Command Code checkbox answer that did not reach the agent (Issue #2755).
+ *
+ * The sibling of {@link PromptAnswerRejectedError} for the two-stage confirm.
+ * Unlike that one it does NOT always promise an untouched pane — ticking boxes
+ * is the first half of this answer and it may already have happened — so
+ * {@link keysSent} says which of the two the caller is looking at. What it does
+ * promise in every case is that the question was **not submitted**: the arm
+ * stops before the confirm row whenever the screen it re-read is not the one it
+ * was asked to answer.
+ *
+ * Fixed text, a tool id and option numbers only (SEC-003, as in
+ * `prompt-answer-semantic`): `/prompt-response` returns this message verbatim.
+ */
+export class MultiSelectAnswerRejectedError extends Error {
+  /** Machine-readable code, always {@link MULTI_SELECT_NOT_COMMITTED_REASON}. */
+  readonly reason: string;
+  readonly stage: MultiSelectRefusalStage;
+  /** Whether any key reached the pane before the refusal. */
+  readonly keysSent: boolean;
+  /** The set the caller asked for, ascending. */
+  readonly wanted: readonly number[];
+
+  constructor(stage: MultiSelectRefusalStage, keysSent: boolean, wanted: readonly number[]) {
+    super(
+      `The question was not submitted (${stage}). `
+      + (keysSent
+        ? 'Some boxes may have been ticked, but the confirm row was not pressed, so the '
+          + 'question is still on screen exactly as the pane shows it. '
+        : 'No key was sent. ')
+      + `Requested selection: ${wanted.join(', ')}. Check the terminal and answer it there, or `
+      + 'retry once the screen has settled.'
+    );
+    this.name = 'MultiSelectAnswerRejectedError';
+    this.reason = MULTI_SELECT_NOT_COMMITTED_REASON;
+    this.stage = stage;
+    this.keysSent = keysSent;
+    this.wanted = wanted;
+  }
+}
+
+/**
+ * Is this request a Command Code checkbox answer? (Issue #2755)
+ *
+ * Three conditions, all of them about the FRESH reading rather than about the
+ * caller's claim: the tool, the payload's own `multiSelect` and the shape of
+ * the answer. `promptData` here is what `/prompt-response` re-verified against
+ * the pane a moment ago, which is why this arm may act on `option.checked`
+ * without taking a capture of its own first.
+ *
+ * A bare `"2"` counts. On a `multiSelect: true` payload the digit is a TOGGLE,
+ * so "the answer is 2" is not an available reading of it — which is the half of
+ * 確定仕様 5 this function owns; the other half, telling a one-item checkbox
+ * answer apart from a single-select one, is a request-shape question and lives
+ * in the route.
+ */
+function readMultiSelectRequest(
+  params: SendPromptAnswerParams,
+): { promptData: MultipleChoicePromptData; wanted: number[] } | null {
+  if (params.cliToolId !== 'command-code') return null;
+  const { promptData } = params;
+  if (promptData?.type !== 'multiple_choice') return null;
+  if (promptData.multiSelect !== true) return null;
+  if (!SELECTION_SET_PATTERN.test(params.answer)) return null;
+  const wanted = [...new Set(params.answer.split(',').map(Number))].sort((a, b) => a - b);
+  return { promptData, wanted };
+}
+
+/** `Down` this many times, as {@link sendSpecialKeys} names the key. */
+function downKeys(count: number): string[] {
+  return Array.from({ length: Math.max(0, count) }, () => 'Down');
+}
+
+/** The ticked option numbers of a reading, ascending. */
+function tickedNumbers(promptData: MultipleChoicePromptData): number[] {
+  return promptData.options.filter((o) => o.checked === true).map((o) => o.number);
+}
+
+function sameNumbers(a: readonly number[], b: readonly number[]): boolean {
+  return a.length === b.length && a.every((value, index) => value === b[index]);
+}
+
+/**
+ * Re-read the pane after a keystroke, or null when it cannot be read.
+ *
+ * `capturePane` here rather than the caller's `frame`: the whole point of the
+ * read is that the screen has moved since. {@link TUI_MESSAGE_PROCESSED_WAIT_MS}
+ * is the settle the rest of this file already uses for a TUI that has just been
+ * typed at.
+ */
+async function recaptureAfterKeys(sessionName: string): Promise<string | null> {
+  await new Promise((resolve) => setTimeout(resolve, TUI_MESSAGE_PROCESSED_WAIT_MS));
+  try {
+    return await capturePane(sessionName, GUARD_CAPTURE_LINES);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Answer Command Code's checkbox `AskUserQuestion` (Issue #2755 §6 / §7).
+ *
+ * ## What the keys mean, measured
+ *
+ * Every line below is from #2754's twenty-six live captures
+ * (`docs/design/command-code-1541-askuserquestion.md` §4), taken one keystroke
+ * at a time with a capture on each side:
+ *
+ * | key | on this screen |
+ * |---|---|
+ * | `1`–`9` | **toggles** that box. The cursor does not move. Dead while the `❯` is off the list |
+ * | `Enter` on an option row | toggles that row. It is NOT a confirm |
+ * | `Enter` on `Submit` / `Next` | opens the **Review page**, or advances to the next question. Still not a send |
+ * | `Enter` on the Review page's `❯ 1. Submit` | **this** is where the answer is sent |
+ * | `Space` | works, but from `Submit` it ticked a row the cursor was nowhere near. Not sent |
+ * | `Esc` / `c` / `d` / `n` | cancel, send-as-chat, finish, mode switch. One keystroke each, no confirmation. Not sent |
+ *
+ * So the sequence is: **toggle the symmetric difference → walk down to the
+ * confirm row → Enter → confirm on the Review page.** The confirm is two stages
+ * and an implementation that stopped at the first one would report an answer
+ * the agent never received.
+ *
+ * ## Why a symmetric difference and not "press the numbers"
+ *
+ * The answer is the SET the operator wants ticked, not a list of toggles. A row
+ * the human already ticked in the terminal is `[✔]` on the frame, and pressing
+ * its number would turn it OFF; a row they want off but that is already on has
+ * to be pressed even though it is not in the answer. `current` comes from
+ * `option.checked` on the payload `/prompt-response` verified against the pane
+ * moments earlier, so both halves are read rather than assumed.
+ *
+ * ## Why it re-reads before the confirm
+ *
+ * Because a toggle is only measured to work while the cursor is in the list,
+ * and nothing on the frame proves the tool accepted the keystroke. Confirming a
+ * set nobody verified is the failure this whole Issue is about, one screen
+ * later. If the re-read does not equal the request, the confirm is not pressed
+ * and the operator gets the pane back exactly as it is.
+ *
+ * @throws {MultiSelectAnswerRejectedError} whenever the question was not
+ *   committed; `keysSent` says whether the pane was touched.
+ */
+async function sendCommandCodeMultiSelectAnswer(
+  sessionName: string,
+  promptData: MultipleChoicePromptData,
+  wanted: readonly number[],
+): Promise<void> {
+  const cursor = promptData.options.find((option) => option.isDefault === true);
+  if (cursor === undefined) {
+    throw new MultiSelectAnswerRejectedError('cursor-unknown', false, wanted);
+  }
+
+  // 1. The symmetric difference, ascending, one digit per press. An empty one
+  //    sends nothing at all — the set on screen is already the set asked for,
+  //    and the only thing left to do is commit it.
+  const current = tickedNumbers(promptData);
+  const toggles = [
+    ...wanted.filter((n) => !current.includes(n)),
+    ...current.filter((n) => !wanted.includes(n)),
+  ].sort((a, b) => a - b);
+  if (toggles.length > 0) {
+    await sendSpecialKeys(sessionName, toggles.map(String));
+  }
+  const keysSent = toggles.length > 0;
+
+  // 2. Read the screen back and refuse unless it is the same question with
+  //    exactly the requested boxes ticked.
+  const afterToggle = await recaptureAfterKeys(sessionName);
+  if (afterToggle === null) {
+    throw new MultiSelectAnswerRejectedError('recapture-failed', keysSent, wanted);
+  }
+  const reading = readCommandCodeQuestionDialog(afterToggle);
+  if (
+    reading.kind !== 'prompt' ||
+    reading.prompt.promptData?.type !== 'multiple_choice' ||
+    reading.prompt.promptData.multiSelect !== true ||
+    reading.prompt.promptData.question !== promptData.question ||
+    reading.prompt.promptData.options.length !== promptData.options.length
+  ) {
+    throw new MultiSelectAnswerRejectedError('screen-changed', keysSent, wanted);
+  }
+  const verified = reading.prompt.promptData;
+  if (!sameNumbers(tickedNumbers(verified), [...wanted])) {
+    throw new MultiSelectAnswerRejectedError('toggle-mismatch', keysSent, wanted);
+  }
+
+  // 3. Walk to the confirm row and open it. `Down` is the only movement key
+  //    measured to be deterministic here: it steps one row at a time through
+  //    the options, then the free-text row, then stops on `Submit` / `Next`.
+  //    (`Up` from option 1 goes to two different rows depending on whether the
+  //    list has ever reported a highlight — invisible on the frame.) The cursor
+  //    is re-read rather than reused, because the request is allowed to have
+  //    been built from a slightly older frame.
+  const cursorNow = verified.options.find((option) => option.isDefault === true);
+  if (cursorNow === undefined) {
+    throw new MultiSelectAnswerRejectedError('cursor-unknown', keysSent, wanted);
+  }
+  await sendSpecialKeys(sessionName, [
+    ...downKeys(verified.options.length - cursorNow.number + 1),
+    'Enter',
+  ]);
+
+  // 4. The second stage. `Submit` opens the Review page and the answer is sent
+  //    from there; `Next` advances to the following question, which IS the
+  //    commit for this one (its tab turns `✔`).
+  const afterConfirm = await recaptureAfterKeys(sessionName);
+  if (afterConfirm === null) {
+    throw new MultiSelectAnswerRejectedError('recapture-failed', true, wanted);
+  }
+  const review = readCommandCodeReviewPage(afterConfirm);
+  if (review !== null) {
+    // Reached with answers still missing — the `d` shape. Confirming it would
+    // send `No answer` for questions nobody has been shown (Issue #2755 §7).
+    if (review.hasUnansweredWarning) {
+      throw new MultiSelectAnswerRejectedError('review-unanswered', true, wanted);
+    }
+    await sendSpecialKeys(sessionName, ['Enter']);
+    return;
+  }
+
+  const next = readCommandCodeQuestionDialog(afterConfirm);
+  const advanced =
+    next.kind === 'prompt' &&
+    next.prompt.promptData?.type === 'multiple_choice' &&
+    next.prompt.promptData.question !== promptData.question;
+  if (!advanced) {
+    throw new MultiSelectAnswerRejectedError('not-committed', true, wanted);
+  }
+}
+
 export interface SendPromptAnswerParams {
   sessionName: string;
   answer: string;
@@ -601,6 +880,20 @@ export interface SendPromptAnswerParams {
  */
 export async function sendPromptAnswer(params: SendPromptAnswerParams): Promise<void> {
   const { sessionName, answer, cliToolId, promptData, fallbackPromptType, fallbackDefaultOptionNumber } = params;
+
+  // Issue #2755: Command Code's checkbox question, before every guard below.
+  // Its answer is a SET (`"1,3"`), which none of them can read — `/^\d+$/` is
+  // how all three ask "is this a number?", so a set would be judged as free
+  // text and refused as text aimed at a menu row. The arm is entered only on a
+  // reading that says `multiSelect: true`, so nothing else's path moves, and it
+  // returns rather than falling through: what this screen needs is toggles and
+  // a two-stage confirm, not a digit and an Enter.
+  const multiSelect = readMultiSelectRequest(params);
+  if (multiSelect !== null) {
+    await sendCommandCodeMultiSelectAnswer(sessionName, multiSelect.promptData, multiSelect.wanted);
+    invalidateCache(sessionName);
+    return;
+  }
 
   // Issue #2033: before ANY key is chosen, let the tool's own dialog rules
   // refuse a digit its dialog cannot take. Placed above the branch rather than

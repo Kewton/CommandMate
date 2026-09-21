@@ -1,0 +1,69 @@
+{
+  "version": "0.40.0",
+  "date": "2026-09-21",
+  "highlight": {
+    "ja": "エージェントの画面を読み取れないときでも、キー入力をそのまま届けられる「直接入力」をパソコンとスマートフォンに追加しました。状態を判別できないエージェントは「不明」と表示されます。",
+    "en": "Added Direct input on computers and phones, which sends your keys straight to the agent even when its screen cannot be read. Agents whose state cannot be determined are now shown as Unknown."
+  },
+  "added": [
+    {
+      "ja": "パソコンの分割ペインに、キー入力をそのままエージェントへ届ける「直接入力」モードを追加しました。",
+      "en": "Added a Direct input mode to split panes on a computer that sends your keystrokes straight to the agent."
+    },
+    {
+      "ja": "スマートフォンのターミナルで、画面内キーボードを使った「直接入力」ができるようになりました。",
+      "en": "On phones, you can now use Direct input in the terminal with an on-screen keyboard."
+    },
+    {
+      "ja": "スマートフォンのチャット画面で、ツール表示の切り替えボタンが画面切り替えボタンの隣に出るようになりました。",
+      "en": "On phones, the tool activity toggle in chat now appears next to the view switcher."
+    },
+    {
+      "ja": "Command Code のプラン確認画面に、プランを承認するボタンを追加しました。",
+      "en": "Added a button to approve the plan on the Command Code plan review screen."
+    },
+    {
+      "ja": "Command Code の複数選択の質問に、画面から回答できるようになりました。",
+      "en": "You can now answer Command Code multiple-choice questions from the screen."
+    },
+    {
+      "ja": "CLI の send コマンドで、Claude のモデルを指定できるようになりました。",
+      "en": "The CLI send command can now choose the model for Claude."
+    }
+  ],
+  "improved": [],
+  "fixed": [
+    {
+      "ja": "状態を判別できないエージェントが「処理中」や「準備完了」と表示される問題を直し、「不明」と表示するようにしました。",
+      "en": "Agents whose state cannot be determined are no longer shown as busy or ready; they are now shown as Unknown."
+    },
+    {
+      "ja": "チャット画面でツール表示をオンにすると、最新の返答が画面の外に押し出される問題を直しました。",
+      "en": "Fixed the latest reply being pushed off screen in chat when tool activity is shown."
+    },
+    {
+      "ja": "スマートフォンのチャット画面で検索ができない問題を直しました。",
+      "en": "Fixed search not working in the chat view on phones."
+    },
+    {
+      "ja": "Codex の作業が終わった後も、処理中や選択待ちのまま表示される問題を直しました。",
+      "en": "Fixed Codex still appearing busy or waiting for a choice after it had finished."
+    },
+    {
+      "ja": "Command Code のプラン確認画面が処理中や完了と誤って表示される問題を直し、誤ってプランを実行しうる Enter ボタンを出さないようにしました。",
+      "en": "Fixed the Command Code plan review screen being shown as busy or finished, and removed the Enter button that could run the plan by mistake."
+    },
+    {
+      "ja": "Command Code で回答済みのタブがあると、質問が正しく読み取れない問題を直しました。",
+      "en": "Fixed Command Code questions being misread when some tabs were already answered."
+    },
+    {
+      "ja": "会話の中にツールの操作案内の文言が含まれていると、エージェントが処理中のまま表示される問題を直しました。",
+      "en": "Fixed an agent staying busy when the conversation quoted text from the tool's on-screen hints."
+    },
+    {
+      "ja": "末尾がセミコロンのメッセージを送ると、セミコロンが消えたり送信に失敗したりする問題を直しました。",
+      "en": "Fixed messages ending with a semicolon losing it or failing to send."
+    }
+  ]
+}

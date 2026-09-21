@@ -94,6 +94,15 @@
  * reading declines. The move to `beforePrompt` is part of that: see the branch
  * for why the generic parser must not get this frame either before or after.
  *
+ * Issue #2761 put a second reading in `beforePrompt`, ahead of that one: the
+ * plan review overlay (1.58.0), identified by `Approve ctrl+a` / `Cancel esc`.
+ * It is there for the same reason — the shared parser must not get the frame —
+ * but for a different hazard: the rows above its footer are the plan itself, and
+ * a plan that ends in `(y/n)` reads as a yes/no prompt. Issue #2793 extended that
+ * reading to the two states of the overlay #2763 measured and #2761 had not seen:
+ * the action list focused (`❯ Approve  ctrl+a`), and the radio `ctrl+a` asks
+ * with comments pending.
+ *
  * ## What #2304 re-measured, and what it did not change
  *
  * Nothing here changed, and that is the finding. Seven frames were captured
@@ -125,8 +134,10 @@
 
 import { detectThinking, getCliToolPatterns } from '../../cli-patterns';
 import {
+  COMMAND_CODE_PLAN_REVIEW_FOOTER,
   COMMAND_CODE_SELECTION_LIST_FOOTER,
   DISMISSABLE_PANEL_FOOTER_PATTERN,
+  isCommandCodePlanApproveChoice,
 } from '../../selection-shape';
 import { readCommandCodeQuestionDialog } from './dialog';
 import { detectCommandCodePermissionDialog } from './permission';
@@ -143,6 +154,46 @@ export const commandCodeStatusDetector = createToolStatusDetector({
   verifiedAgainst: VERIFIED_AGAINST,
 
   beforePrompt(frame): ToolStatusVerdict | null {
+    // Issue #2761. The plan review overlay, read off its two footer rows.
+    //
+    // `beforePrompt` and not `afterPrompt`, and that placement is the point: the
+    // rows above the footer are the PLAN — free text the agent wrote — and the
+    // last eight of them sit inside the 15-row window the shared parser reads.
+    // A plan whose last line is `Do you want to proceed? (y/n)` or `Approve?` is
+    // read by that parser as a yes/no prompt (measured), which publishes
+    // `hasActivePrompt: true` and lets Auto-Yes type `y` — into the plan, as a
+    // comment. So this screen must be claimed before the parser sees it.
+    //
+    // `waiting` + the selection-list family: the arrows move a line cursor, a
+    // human has to decide, and nothing on this pane moves until they do.
+    // `hasActivePrompt: false` — there is no payload to answer with, and approval
+    // is never something Auto-Yes may do on its own.
+    //
+    // Issue #2793 widened what "this screen" covers, on two frames each that
+    // #2763 measured and this branch had missed:
+    //
+    //  - **the action list focused** (`❯ Approve  ctrl+a` / `❯ Cancel  esc`).
+    //    The footer pattern now takes the `❯` on either row. Missing it was a
+    //    false completion, not a gap: the frame fell through to the composer
+    //    check, `COMMAND_CODE_PROMPT_PATTERN` read the `❯` row as the composer,
+    //    and `wait` exited 0 on a plan nobody had approved;
+    //  - **the approve-with-comments radio** `ctrl+a` opens when comments are
+    //    pending (`←/→ choose · enter confirm · esc back`). The same verdict: it is
+    //    the same overlay, still waiting on a human's decision about the plan,
+    //    and the arrow pad (`◀` `▶` `Enter` `Esc`) is exactly what it asks for.
+    if (
+      COMMAND_CODE_PLAN_REVIEW_FOOTER.test(frame.lastLines) ||
+      isCommandCodePlanApproveChoice(frame.lastLines)
+    ) {
+      return {
+        status: 'waiting',
+        confidence: 'high',
+        reason: STATUS_REASON.COMMAND_CODE_PLAN_REVIEW,
+        hasActivePrompt: false,
+        evidence: 'positive',
+      };
+    }
+
     // Issue #2521 recognised this screen; Issue #2522 reads it.
     //
     // `AskUserQuestion` draws no footer, so neither `afterPrompt` branch below
