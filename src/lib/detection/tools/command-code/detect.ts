@@ -98,7 +98,10 @@
  * plan review overlay (1.58.0), identified by `Approve ctrl+a` / `Cancel esc`.
  * It is there for the same reason — the shared parser must not get the frame —
  * but for a different hazard: the rows above its footer are the plan itself, and
- * a plan that ends in `(y/n)` reads as a yes/no prompt.
+ * a plan that ends in `(y/n)` reads as a yes/no prompt. Issue #2793 extended that
+ * reading to the two states of the overlay #2763 measured and #2761 had not seen:
+ * the action list focused (`❯ Approve  ctrl+a`), and the radio `ctrl+a` asks
+ * with comments pending.
  *
  * ## What #2304 re-measured, and what it did not change
  *
@@ -134,6 +137,7 @@ import {
   COMMAND_CODE_PLAN_REVIEW_FOOTER,
   COMMAND_CODE_SELECTION_LIST_FOOTER,
   DISMISSABLE_PANEL_FOOTER_PATTERN,
+  isCommandCodePlanApproveChoice,
 } from '../../selection-shape';
 import { readCommandCodeQuestionDialog } from './dialog';
 import { detectCommandCodePermissionDialog } from './permission';
@@ -164,7 +168,23 @@ export const commandCodeStatusDetector = createToolStatusDetector({
     // human has to decide, and nothing on this pane moves until they do.
     // `hasActivePrompt: false` — there is no payload to answer with, and approval
     // is never something Auto-Yes may do on its own.
-    if (COMMAND_CODE_PLAN_REVIEW_FOOTER.test(frame.lastLines)) {
+    //
+    // Issue #2793 widened what "this screen" covers, on two frames each that
+    // #2763 measured and this branch had missed:
+    //
+    //  - **the action list focused** (`❯ Approve  ctrl+a` / `❯ Cancel  esc`).
+    //    The footer pattern now takes the `❯` on either row. Missing it was a
+    //    false completion, not a gap: the frame fell through to the composer
+    //    check, `COMMAND_CODE_PROMPT_PATTERN` read the `❯` row as the composer,
+    //    and `wait` exited 0 on a plan nobody had approved;
+    //  - **the approve-with-comments radio** `ctrl+a` opens when comments are
+    //    pending (`←/→ choose · enter confirm · esc back`). The same verdict: it is
+    //    the same overlay, still waiting on a human's decision about the plan,
+    //    and the arrow pad (`◀` `▶` `Enter` `Esc`) is exactly what it asks for.
+    if (
+      COMMAND_CODE_PLAN_REVIEW_FOOTER.test(frame.lastLines) ||
+      isCommandCodePlanApproveChoice(frame.lastLines)
+    ) {
       return {
         status: 'waiting',
         confidence: 'high',
