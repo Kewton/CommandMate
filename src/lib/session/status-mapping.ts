@@ -28,6 +28,10 @@
  *     -> deriveCliStatus()                      (this module)
  *     -> BranchStatus                           (sidebar / header / tab dots)
  *
+ * An unclassified frame (Issue #2775) takes the same chain with no activity
+ * flag raised, and `isUnclassifiedCliStatus()` is how a surface tells its
+ * `ready` apart from a real one.
+ *
  * `deriveSessionStatus()` is the reverse edge of that chain: the worktrees API
  * folds the boolean triple back into a `SessionStatus` for its JSON payload.
  *
@@ -187,10 +191,20 @@ export interface CliToolStatusFlags {
   isRunning: boolean;
   isWaitingForResponse: boolean;
   isProcessing: boolean;
+  /**
+   * The detector could not classify this session's frame at all (Issue #2775).
+   *
+   * The server's answer to `isUnclassifiedFrame` in `status-evidence.ts`, carried
+   * beside the triple rather than folded into it: {@link deriveCliStatus} never
+   * reads it, so every `BranchStatus` consumer keeps its five-value vocabulary.
+   * {@link isUnclassifiedCliStatus} is the one reader. Optional because the
+   * server publishes the key only when it is true.
+   */
+  isUnclassified?: boolean;
 }
 
 /** The activity half of the boolean triple — everything except session existence. */
-export type SessionActivityFlags = Omit<CliToolStatusFlags, 'isRunning'>;
+export type SessionActivityFlags = Omit<CliToolStatusFlags, 'isRunning' | 'isUnclassified'>;
 
 /**
  * Project a detected `SessionStatus` onto the activity flags.
@@ -199,19 +213,43 @@ export type SessionActivityFlags = Omit<CliToolStatusFlags, 'isRunning'>;
  * existence (plus the Claude health check), which is independent of what the
  * terminal output says.
  *
- * | SessionStatus | isWaitingForResponse | isProcessing |
- * |---------------|----------------------|--------------|
- * | `idle`        | false                | false        |
- * | `ready`       | false                | false        |
- * | `running`     | false                | true         |
- * | `waiting`     | true                 | false        |
+ * | SessionStatus | unclassified | isWaitingForResponse | isProcessing |
+ * |---------------|--------------|----------------------|--------------|
+ * | `idle`        | (ignored)    | false                | false        |
+ * | `ready`       | (ignored)    | false                | false        |
+ * | `running`     | false        | false                | true         |
+ * | `running`     | true         | false                | false        |
+ * | `waiting`     | (ignored)    | true                 | false        |
+ *
+ * ## The `running` + unclassified row (Issue #2775)
+ *
+ * The detector's floors (`default` / `unknown_frame` / `no_recent_output`)
+ * answer `running`, and `running` keeps meaning what it means there — the
+ * detector is not touched. What changes is only this projection: `isProcessing`
+ * is what the sidebar, the header, `commandmate ls` and `peers` read as "it is
+ * working", and "no rule could read the frame" is not an observation that it
+ * is. So an unclassified `running` raises no activity flag at all, and the
+ * caller publishes the fact itself (`isUnclassified`) for the surfaces that
+ * draw it.
+ *
+ * `unclassified` is the caller's `isUnclassifiedFrame(status, reason)`, passed
+ * in rather than recomputed: that function is the single producer of the fact,
+ * and this module stays free of the server-side imports it would need to call
+ * it. It is ignored for every status but `running`, which is the only status it
+ * can be true for.
+ *
+ * @param status - The detector's verdict
+ * @param unclassified - `isUnclassifiedFrame(status, reason)` for the same frame
  */
-export function sessionStatusToActivityFlags(status: SessionStatus): SessionActivityFlags {
+export function sessionStatusToActivityFlags(
+  status: SessionStatus,
+  unclassified: boolean = false,
+): SessionActivityFlags {
   switch (status) {
     case 'waiting':
       return { isWaitingForResponse: true, isProcessing: false };
     case 'running':
-      return { isWaitingForResponse: false, isProcessing: true };
+      return { isWaitingForResponse: false, isProcessing: !unclassified };
     case 'idle':
     case 'ready':
       return { isWaitingForResponse: false, isProcessing: false };
@@ -242,6 +280,31 @@ export function deriveCliStatus(toolStatus?: CliToolStatusFlags): BranchStatus {
   if (toolStatus.isProcessing) return 'running';
   if (toolStatus.isRunning) return 'ready';
   return 'idle';
+}
+
+/**
+ * Whether one session should be drawn as "cannot tell" rather than as the
+ * `BranchStatus` {@link deriveCliStatus} names for it (Issue #2775).
+ *
+ * True exactly when the server flagged the frame unclassified AND nothing more
+ * significant is known, i.e. {@link deriveCliStatus} lands on `ready`. The
+ * second half is not decoration:
+ *
+ *  - an unclassified session raises no activity flag of its own (see
+ *    {@link sessionStatusToActivityFlags}), so on its own it derives `ready` —
+ *    the one `BranchStatus` that would otherwise claim "you can send now";
+ *  - a `waiting` the agent's own events reported, or a `running` from another
+ *    instance folded into the same per-tool aggregate, is a reading, and a
+ *    reading outranks "cannot tell". Those keep their dot.
+ *
+ * Which also means a `running` with positive evidence can never be redrawn by
+ * this: it has no `isUnclassified`, and even if it had, it derives `running`.
+ *
+ * Reads the published flag, never `(status, reason)`: the classification itself
+ * has one producer, `isUnclassifiedFrame` in `status-evidence.ts`.
+ */
+export function isUnclassifiedCliStatus(toolStatus?: CliToolStatusFlags): boolean {
+  return toolStatus?.isUnclassified === true && deriveCliStatus(toolStatus) === 'ready';
 }
 
 /**

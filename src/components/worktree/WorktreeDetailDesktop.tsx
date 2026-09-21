@@ -53,7 +53,7 @@ import { NewFileDialog } from '@/components/worktree/NewFileDialog';
 import { buildModelByInstance, DesktopHeader, formatAgentModelLabel, InfoModal } from '@/components/worktree/WorktreeDetailSubComponents';
 import type { AgentSessionSnapshot } from '@/types/agent-session';
 import { UPLOADABLE_EXTENSIONS } from '@/config/uploadable-extensions';
-import { deriveCliStatus } from '@/types/sidebar';
+import { deriveCliStatus, isUnclassifiedCliStatus } from '@/types/sidebar';
 import { getCliToolDisplayName, type AgentInstance, type CLIToolType } from '@/lib/cli-tools/types';
 import type { SessionKillTarget } from '@/types/terminal-split-pane';
 import type { AutoYesToggleParams } from '@/components/worktree/AutoYesToggle';
@@ -466,9 +466,12 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
       // the per-CLI map for backward compat. Only the resolved BranchStatus
       // string is handed to the child, so a polling tick that leaves the status
       // unchanged does not break the child's memo (S3-001 memo-safe).
-      const paneCliStatus = deriveCliStatus(
-        worktree?.sessionStatusByInstance?.[paneInstanceId] ?? worktree?.sessionStatusByCli?.[paneCli]
-      );
+      const paneCliEntry =
+        worktree?.sessionStatusByInstance?.[paneInstanceId] ?? worktree?.sessionStatusByCli?.[paneCli];
+      const paneCliStatus = deriveCliStatus(paneCliEntry);
+      // Issue #2775: whether that status is a `ready` nothing actually read. A
+      // boolean, so the child's memo is as safe as it is with the string above.
+      const paneCliUnclassified = isUnclassifiedCliStatus(paneCliEntry);
       return (
         <TerminalSplitPaneContent
           worktreeId={worktreeId}
@@ -490,6 +493,8 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
           onMessageSent={onMessageSent}
           // Issue #743: derived per-CLI status string for the split header dot.
           cliStatus={paneCliStatus}
+          // Issue #2775: draw that dot as "cannot tell" when it is a fallback.
+          cliStatusUnclassified={paneCliUnclassified}
           // Issue #1783: the model this pane's agent reported. Per-INSTANCE
           // only — `sessionStatusByCli` is an aggregate over every instance of
           // the tool, so it has no model to speak of. Undefined (no entry, no

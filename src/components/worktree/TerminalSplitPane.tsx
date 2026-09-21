@@ -30,6 +30,11 @@ import {
 import { DEFAULT_SURFACE_MODE, type SurfaceMode } from '@/types/ui-state';
 import { StatusDot, type StatusDotStatus } from '@/components/ui/StatusDot';
 import {
+  UNCLASSIFIED_STATUS_DOT_CLASS,
+  UNCLASSIFIED_STATUS_LABEL_KEY,
+  resolveUnclassifiedDot,
+} from '@/components/sidebar/BranchStatusIndicator';
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -378,6 +383,13 @@ export interface TerminalSplitPaneProps {
    */
   status?: StatusDotStatus;
   /**
+   * Issue #2775: `status` is a `ready` no rule actually read (the server
+   * flagged the frame unclassified). The dot is drawn as the "cannot tell" ring
+   * and titled "Unknown" instead. Ignored for every status but `ready`, so a
+   * working split can never lose its glow to it. Defaults to false.
+   */
+  statusUnclassified?: boolean;
+  /**
    * Issue #1783: the model this split's agent last reported running, from the
    * structured hook events (`sessionStatusByInstance[instanceId].model`).
    *
@@ -484,6 +496,7 @@ export const TerminalSplitPane = memo(function TerminalSplitPane({
   availableInstances,
   onInstanceChange,
   status = 'idle',
+  statusUnclassified = false,
   agentModel,
   agentUsage,
   agentUsageDetail,
@@ -502,6 +515,10 @@ export const TerminalSplitPane = memo(function TerminalSplitPane({
   draggedInstanceId,
 }: TerminalSplitPaneProps) {
   const t = useTranslations('worktree');
+  // Issue #2775: the "cannot tell" word for the title-bar dot. `common` because
+  // that is where every StatusDot label lives (`common.status.*`).
+  const tCommon = useTranslations('common');
+  const showUnclassifiedDot = resolveUnclassifiedDot(status, statusUnclassified);
   // Issue #786: drag-over hover state lives LOCAL to this pane (D-3) so a hover
   // change never re-creates the parent's renderSplitPane / terminalSplitRegion
   // memo (which would re-render every split). null = no drag over this pane.
@@ -673,6 +690,9 @@ export const TerminalSplitPane = memo(function TerminalSplitPane({
               size="sm"
               aria-hidden
               data-testid={`split-status-indicator-${splitIndex}`}
+              label={showUnclassifiedDot ? tCommon(UNCLASSIFIED_STATUS_LABEL_KEY) : undefined}
+              className={showUnclassifiedDot ? UNCLASSIFIED_STATUS_DOT_CLASS : undefined}
+              data-unclassified={showUnclassifiedDot ? 'true' : undefined}
             />
             <span className="truncate">{attachLabel}</span>
             <ChevronDown size={14} aria-hidden="true" className="flex-shrink-0 opacity-70" />

@@ -79,7 +79,12 @@ import { AutoYesToggle } from '@/components/worktree/AutoYesToggle';
 import { AgentModeControl } from '@/components/worktree/AgentModeControl';
 import { BranchMismatchAlert } from '@/components/worktree/BranchMismatchAlert';
 import { getCliToolDisplayName, getInstanceLabel, getActiveInstanceLabel, type CLIToolType } from '@/lib/cli-tools/types';
-import { deriveCliStatus } from '@/types/sidebar';
+import { deriveCliStatus, isUnclassifiedCliStatus } from '@/types/sidebar';
+import {
+  UNCLASSIFIED_STATUS_DOT_CLASS,
+  UNCLASSIFIED_STATUS_LABEL_KEY,
+  resolveUnclassifiedDot,
+} from '@/components/sidebar/BranchStatusIndicator';
 import { MoveDialog } from '@/components/worktree/MoveDialog';
 import { NewFileDialog } from '@/components/worktree/NewFileDialog';
 import { useSwipeGesture } from '@/hooks/useSwipeGesture';
@@ -582,9 +587,12 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   // Issue #2406: the generating verdict for the same instance, kept beside
   // `activeSessionRunning` because the composer needs BOTH and they answer
   // different questions. `isProcessing` on this payload is
-  // `sessionStatusToActivityFlags(status).isProcessing` — true for exactly
+  // `sessionStatusToActivityFlags(status, unclassified).isProcessing` — true for
   // `status === 'running'` (`lib/session/status-mapping.ts`), which is the same
-  // verdict PC's split reads off its own poller as `sessionStatus === 'running'`.
+  // verdict PC's split reads off its own poller as `sessionStatus === 'running'`,
+  // except when no rule could read the frame (Issue #2775): that `running` is
+  // the detector's floor, and it no longer raises the "queued behind a busy
+  // agent" toast here.
   const activeSessionProcessing =
     (worktree?.sessionStatusByInstance?.[activeInstanceId] ?? worktree?.sessionStatusByCli?.[activeCliTab])
       ?.isProcessing ?? false;
@@ -804,13 +812,21 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                 aria-label={tWorktree('detail.agentInstanceSelection')}
               >
                 {displayedInstances.map((inst) => {
-                  const toolStatus = deriveCliStatus(
-                    worktree?.sessionStatusByInstance?.[inst.id] ?? worktree?.sessionStatusByCli?.[inst.cliTool]
+                  const toolEntry =
+                    worktree?.sessionStatusByInstance?.[inst.id] ?? worktree?.sessionStatusByCli?.[inst.cliTool];
+                  const toolStatus = deriveCliStatus(toolEntry);
+                  // Issue #2775: a `ready` nothing actually read is drawn and
+                  // worded as "cannot tell", the same ring the PC header uses.
+                  const toolUnclassified = resolveUnclassifiedDot(
+                    toolStatus,
+                    isUnclassifiedCliStatus(toolEntry)
                   );
                   // Issue #1277: the status wording comes from the generic
                   // `common.status.*` keys (#1273) — one source of truth, shared
                   // with SIDEBAR_STATUS_CONFIG's labelKey (#1304).
-                  const statusLabel = tCommon(`status.${toolStatus}`);
+                  const statusLabel = tCommon(
+                    toolUnclassified ? UNCLASSIFIED_STATUS_LABEL_KEY : `status.${toolStatus}`
+                  );
                   const isActive = activeInstanceId === inst.id;
                   return (
                     <button
@@ -835,6 +851,8 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                           label: getInstanceLabel(inst),
                           status: statusLabel,
                         })}
+                        className={toolUnclassified ? UNCLASSIFIED_STATUS_DOT_CLASS : undefined}
+                        data-unclassified={toolUnclassified ? 'true' : undefined}
                       />
                       {getInstanceLabel(inst)}
                     </button>

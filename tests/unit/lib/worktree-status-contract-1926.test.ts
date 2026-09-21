@@ -220,9 +220,13 @@ describe('[#1926] lastKnownStatus on sessionStatusByCli', () => {
     mockDetectedStatus('running', STATUS_REASON.DEFAULT, 'none');
     const blind = await detect();
 
+    // Issue #2775: this `running`/`default` is the detector's floor, so it is
+    // published with no activity flag and `isUnclassified` — the latch is
+    // what this test is about, and it still reports the confirmed `waiting`.
     expect(blind.sessionStatusByCli.claude).toMatchObject({
       statusEvidence: 'none',
-      isProcessing: true,
+      isProcessing: false,
+      isUnclassified: true,
       lastKnownStatus: 'waiting',
     });
   });

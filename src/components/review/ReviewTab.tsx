@@ -26,7 +26,12 @@ import {
   getClientDefaultSelectedAgents,
   setClientDefaultSelectedAgents,
 } from '@/config/default-agents';
-import { deriveCliStatus } from '@/types/sidebar';
+import { deriveCliStatus, isUnclassifiedCliStatus } from '@/types/sidebar';
+import {
+  UNCLASSIFIED_STATUS_DOT_CLASS,
+  UNCLASSIFIED_STATUS_LABEL_KEY,
+  resolveUnclassifiedDot,
+} from '@/components/sidebar/BranchStatusIndicator';
 import { getCliToolDisplayName } from '@/lib/cli-tools/types';
 import { SIDEBAR_STATUS_CONFIG } from '@/config/status-colors';
 import type { Worktree } from '@/types/models';
@@ -55,11 +60,34 @@ const FILTER_PREDICATES: Record<ReviewFilter, (wt: Worktree) => boolean> = {
 };
 
 /** Small CLI status dot */
-function CliDot({ status, label }: { status: BranchStatus; label: string }) {
+function CliDot({
+  status,
+  label,
+  unclassified,
+}: {
+  status: BranchStatus;
+  label: string;
+  /** Issue #2775: `status` is a `ready` nothing actually read. */
+  unclassified?: boolean;
+}) {
   const tCommon = useTranslations('common');
   const config = SIDEBAR_STATUS_CONFIG[status];
-  const title = `${label}: ${tCommon(config.labelKey)}`;
   const base = 'w-2.5 h-2.5 rounded-full flex-shrink-0';
+
+  // Issue #2775: the "cannot tell" ring every agent-dot surface shares, in
+  // place of the static green `ready` dot. Checked first and only for `ready`,
+  // so the spinner branch below is untouched for every working agent.
+  if (resolveUnclassifiedDot(status, unclassified)) {
+    return (
+      <span
+        className={`${base} ${UNCLASSIFIED_STATUS_DOT_CLASS}`}
+        title={`${label}: ${tCommon(UNCLASSIFIED_STATUS_LABEL_KEY)}`}
+        data-unclassified="true"
+      />
+    );
+  }
+
+  const title = `${label}: ${tCommon(config.labelKey)}`;
 
   if (config.type === 'spinner') {
     return (
@@ -266,10 +294,15 @@ export default function ReviewTab() {
                         {t(FILTER_LABEL_KEYS[activeFilter])}
                       </span>
                       {agents.map((agent) => {
-                        const agentStatus = deriveCliStatus(wt.sessionStatusByCli?.[agent]);
+                        const agentEntry = wt.sessionStatusByCli?.[agent];
+                        const agentStatus = deriveCliStatus(agentEntry);
                         return (
                           <div key={agent} className="flex items-center gap-1">
-                            <CliDot status={agentStatus} label={getCliToolDisplayName(agent)} />
+                            <CliDot
+                              status={agentStatus}
+                              label={getCliToolDisplayName(agent)}
+                              unclassified={isUnclassifiedCliStatus(agentEntry)}
+                            />
                             <span className="text-xs text-muted-foreground">
                               {getCliToolDisplayName(agent)}
                             </span>

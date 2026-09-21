@@ -23,6 +23,15 @@ import type { CLIToolType } from '../../lib/cli-tools/types';
  * Deliberately still the three-way boolean branch (design DR3-005 says so in as
  * many words): Issue #1926 adds a reason column beside this, not a fourth
  * branch inside it. The status vocabulary is unchanged.
+ *
+ * Issue #2775: a session whose frame no rule could classify reaches this row
+ * with `isProcessing: false` (the server stopped projecting the detector's
+ * floor onto "it is working"), so it prints `ready`, not `running` — the same
+ * answer the sidebar's `deriveCliStatus` gives it. The vocabulary has no
+ * "cannot tell" and is not widened for it: operators and the orchestrate
+ * recipes read this column positionally. What says "this `ready` is a fallback"
+ * is the REASON beside it, which names the floor with `(no evidence)` — and
+ * `--json` carries `sessionStatusByCli.<tool>.isUnclassified`.
  */
 function deriveStatus(wt: WorktreeItem): string {
   if (wt.isWaitingForResponse) return 'waiting';
