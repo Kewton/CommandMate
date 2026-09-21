@@ -114,6 +114,20 @@ export interface MessageInputProps {
    */
   agentModeSlot?: React.ReactNode;
   /**
+   * Issue #2797: the direct-input toggle (#2766), drawn in the toolbar's END
+   * group, immediately before the interrupt button.
+   *
+   * Not the meta row, and not the toolbar's start group, because both give way
+   * in a narrow pane: the meta row's Auto-Yes half and the start group scroll
+   * sideways, and whatever sits after the first item is what scrolls out of
+   * sight. The end group never shrinks and never scrolls — it is the one place
+   * in the composer that is on screen at every width, which is what the last
+   * way into a pane needs. Beside the interrupt button, too, because both act
+   * on the pane rather than send a message. Callers without one pass nothing
+   * and nothing is drawn.
+   */
+  directInputSlot?: React.ReactNode;
+  /**
    * Issue #2598: where this composer's textarea height is stored
    * (`split:<n>` / `session-tile`, see `src/config/composer-height.ts`).
    *
@@ -196,7 +210,7 @@ function migrateLegacyDraftKey(worktreeId: string): void {
   }
 }
 
-export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSent, cliToolId, instanceId, isSessionRunning = false, pendingInsertText, onInsertConsumed, splitIndex = 0, onFocus, isProcessing = false, showToast, autoYesSlot, agentModeSlot, onOptimisticSend, heightScope, maxHeight }: MessageInputProps) {
+export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSent, cliToolId, instanceId, isSessionRunning = false, pendingInsertText, onInsertConsumed, splitIndex = 0, onFocus, isProcessing = false, showToast, autoYesSlot, agentModeSlot, directInputSlot, onOptimisticSend, heightScope, maxHeight }: MessageInputProps) {
   const t = useTranslations('worktree');
   const [message, setMessage] = useState('');
   const [sending, setSending] = useState(false);
@@ -706,6 +720,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
                   </svg>
                 </Button>
                 {toolbarControls}
+                {directInputSlot}
                 {interruptButton}
               </>
             ) : (
@@ -722,8 +737,10 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
                   {toolbarControls}
                 </div>
                 {/* `InterruptButton` takes no className; this group keeps it
-                    whole and always on screen. */}
-                <div className="flex flex-shrink-0 items-center" data-testid="composer-toolbar-end">
+                    whole and always on screen. Issue #2797: the direct-input
+                    toggle shares it for exactly that reason. */}
+                <div className="flex flex-shrink-0 items-center gap-1" data-testid="composer-toolbar-end">
+                  {directInputSlot}
                   {interruptButton}
                 </div>
               </>
