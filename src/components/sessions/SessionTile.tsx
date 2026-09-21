@@ -120,7 +120,12 @@ import { useSessionTileSurfaceMode } from '@/hooks/useSessionTileSurfaceMode';
 import { useComposerMaxHeight } from '@/hooks/useComposerHeight';
 import { SESSION_TILE_COMPOSER_HEIGHT_SCOPE } from '@/config/composer-height';
 import { worktreeApi } from '@/lib/api-client';
-import { deriveCliStatus } from '@/types/sidebar';
+import { deriveCliStatus, isUnclassifiedCliStatus } from '@/types/sidebar';
+import {
+  UNCLASSIFIED_STATUS_DOT_CLASS,
+  UNCLASSIFIED_STATUS_LABEL_KEY,
+  resolveUnclassifiedDot,
+} from '@/components/sidebar/BranchStatusIndicator';
 import {
   agentInstancesFromSelectedAgents,
   getInstanceLabel,
@@ -504,9 +509,11 @@ function SessionTileCard({
 
   const branchLabel = worktree.branch ?? worktree.name;
   const repositoryLabel = worktree.repositoryDisplayName ?? worktree.repositoryName;
-  const status = deriveCliStatus(
-    instanceId ? worktree.sessionStatusByInstance?.[instanceId] : undefined,
-  );
+  const statusEntry = instanceId ? worktree.sessionStatusByInstance?.[instanceId] : undefined;
+  const status = deriveCliStatus(statusEntry);
+  // Issue #2775: a `ready` no rule actually read is drawn as "cannot tell" —
+  // the same ring and word as the sidebar, header and split title bar.
+  const statusUnclassified = resolveUnclassifiedDot(status, isUnclassifiedCliStatus(statusEntry));
 
   return (
     <section
@@ -517,7 +524,13 @@ function SessionTileCard({
     >
       {/* Header. Its own row rather than a wrapping <Link>: see the module comment. */}
       <header className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2">
-        <StatusDot status={status} size="sm" label={t(`status.${status}`)} />
+        <StatusDot
+          status={status}
+          size="sm"
+          label={t(statusUnclassified ? UNCLASSIFIED_STATUS_LABEL_KEY : `status.${status}`)}
+          className={statusUnclassified ? UNCLASSIFIED_STATUS_DOT_CLASS : undefined}
+          data-unclassified={statusUnclassified ? 'true' : undefined}
+        />
         <div className="min-w-0 flex-1">
           <div className="truncate text-xs text-muted-foreground">{repositoryLabel}</div>
           <Link

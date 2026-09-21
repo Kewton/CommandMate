@@ -32,6 +32,7 @@ import { deriveWaitingKind, type WaitingKind } from '@/lib/session/waiting-kind'
 import {
   forgetLastKnownStatus,
   getLastKnownStatus,
+  isUnclassifiedFrame,
   observeStatusEvidence,
   type StatusEvidence,
 } from '@/lib/session/status-evidence';
@@ -202,6 +203,30 @@ export interface CliToolSessionStatus {
    */
   sessionStatusReason?: string;
   /**
+   * The detector could not classify this instance's frame at all (Issue #2775).
+   *
+   * `isUnclassifiedFrame(status, reason)` from `status-evidence.ts` — the same
+   * single producer `CurrentOutputResponse.isUnclassifiedActive` comes from, so
+   * the list API and `capture --json` cannot disagree about which frames are
+   * unreadable. Such a frame is `running` to the detector (its floors answer
+   * that) but raises NO activity flag here: `isProcessing` is what every dot
+   * and `commandmate ls` read as "it is working", and a floor is not that
+   * observation. This key is what lets a surface draw "cannot tell" instead of
+   * the `ready` the three booleans alone would now derive — see
+   * `isUnclassifiedCliStatus` in `status-mapping.ts`.
+   *
+   * NOT `statusEvidence === 'none'`: an idle composer whose idle rule declined
+   * to vouch for it is `'none'` and classified (Issue #2011).
+   *
+   * **Present, and `true`, only for an unclassified frame; omitted otherwise** —
+   * the key-omission rule {@link model} follows, for its reason (existing suites
+   * compare these objects with `toEqual`), so every classified status object is
+   * byte-identical to its pre-#2775 self. Unlike the four #1926 fields it
+   * survives {@link mergeSessionStatus}, as a logical-OR: it is a flag, not a
+   * reason, and the per-CLI map is what the header dot and Review read.
+   */
+  isUnclassified?: boolean;
+  /**
    * The last status anything could positively confirm for this instance, or
    * absent (Issue #1926, §7 「直前の確定状態（証拠なしの間の表示）」).
    *
@@ -312,6 +337,12 @@ function mergeWaitingSince(a: number | null, b: number | null): number | null {
  * aggregate that picked one would tell the header chip a reason that is true of
  * an instance the user is not looking at. Read them from
  * `sessionStatusByInstance`, which is never folded.
+ *
+ * `isUnclassified` (#2775) DOES fold, as a logical-OR like the three booleans:
+ * "some instance of this tool could not be read" is a well-defined aggregate,
+ * and the dot drawn from it cannot overstate it — `isUnclassifiedCliStatus`
+ * only draws "cannot tell" when the fold is otherwise `ready`, so a running or
+ * waiting sibling still wins. Omitted, as per instance, when false.
  */
 function mergeSessionStatus(
   a: CliToolSessionStatus,
@@ -324,6 +355,7 @@ function mergeSessionStatus(
     waitingKind: mergeWaitingKind(a.waitingKind, b.waitingKind),
     waitingSince: mergeWaitingSince(a.waitingSince, b.waitingSince),
     awaitingInstruction: a.awaitingInstruction || b.awaitingInstruction,
+    ...(a.isUnclassified || b.isUnclassified ? { isUnclassified: true } : {}),
   };
 }
 
@@ -448,6 +480,9 @@ async function detectInstanceSessionStatus(
   // the same rule `model` follows and for the same reason.
   let statusEvidence: StatusEvidence | null = null;
   let sessionStatusReason: string | null = null;
+  // Issue #2775: whether no rule could read the frame. False when there was no
+  // frame to read, like the two above, and published only when true.
+  let isUnclassified = false;
   if (isRunning) {
     try {
       // Issue #1933: the per-tool ladder that used to live here — and that made
@@ -480,8 +515,19 @@ async function detectInstanceSessionStatus(
         instanceId,
         extractModelInfo(cliToolId, output)
       );
-      // Issue #1550: SessionStatus → activity flags lives in status-mapping.ts
-      ({ isWaitingForResponse, isProcessing } = sessionStatusToActivityFlags(statusResult.status));
+      // Issue #1550: SessionStatus → activity flags lives in status-mapping.ts.
+      // Issue #2775: the detector's floor (`default` and the other two
+      // unclassified reasons) is `running` with nothing behind it, and it used to
+      // reach every dot and `commandmate ls` as `isProcessing: true` — "still
+      // working" for a frame nothing could read. `isUnclassifiedFrame` is the
+      // single producer of that fact (`current-output-builder` and therefore
+      // `wait` read the same one); this only changes how it is PROJECTED, never
+      // what the detector said.
+      isUnclassified = isUnclassifiedFrame(statusResult.status, statusResult.reason);
+      ({ isWaitingForResponse, isProcessing } = sessionStatusToActivityFlags(
+        statusResult.status,
+        isUnclassified,
+      ));
 
       // Issue #1926 read the same derivation `current-output-builder` used;
       // Issue #1927 replaced the derivation with the detector's own answer, for
@@ -624,6 +670,8 @@ async function detectInstanceSessionStatus(
         // uses. Issue #2317 asks for exactly that vocabulary, and taking it from
         // `deriveCliStatus` rather than restating the three-way branch is what
         // stops the tmux surface and the CLI table naming one session two ways.
+        // An unclassified frame (#2775) is therefore `ready` here, as it is in
+        // `commandmate ls`: the four-word vocabulary has no "cannot tell".
         status: deriveCliStatus({ isRunning, isWaitingForResponse, isProcessing }),
       });
     } else {
@@ -652,6 +700,7 @@ async function detectInstanceSessionStatus(
     ...(effort !== null ? { reasoningEffort: effort } : {}),
     ...(statusEvidence !== null ? { statusEvidence } : {}),
     ...(sessionStatusReason !== null ? { sessionStatusReason } : {}),
+    ...(isUnclassified ? { isUnclassified: true } : {}),
     // Issue #2070: the one reason published for a session that is NOT running.
     // `statusEvidence: 'positive'` is not a formality — tmux was asked, the
     // pane was read, and a shell prompt was found where the agent's composer

@@ -39,11 +39,21 @@
  * split, survives a reload, and is only DRAWN smaller when the pane is shorter
  * (the #2421 grid): leaving the grid gives it back.
  *
+ * ## Issue #2797: the direct-input toggle
+ *
+ * #2766 put the toggle in the meta row, whose one line the hints and a full
+ * Auto-Yes had already spent in the two-split pane and the 2x2 grid, so it was
+ * not drawn there; in the three-split panes it sat at the end of the Auto-Yes
+ * half, which scrolls sideways, and was partly or wholly scrolled out of sight.
+ * It is now in the toolbar's end group, beside the interrupt button, and the
+ * meta row is back to what Phase 1 measured. What that costs the toolbar is
+ * printed as `MEASURE-2797`.
+ *
  * No agent process is involved; `/api/` is mocked in the browser.
  */
 
 import { test, expect, type Page } from '@playwright/test';
-import { boxContains, boxesInSplit, type Box } from './fixtures/agent-mode-helpers';
+import { boxContains, boxesInSplit, boxesIntersect, type Box } from './fixtures/agent-mode-helpers';
 import {
   COMPOSER_SPLITS,
   E2E_COMPOSER_OTHER_WORKTREE,
@@ -78,6 +88,13 @@ const ONE_LINE_META_ROW_PX = 24;
  * for Chromium's 1/64px layout units.
  */
 const FLOOR_SLACK_PX = 0.5;
+
+/**
+ * Mirror of `DIRECT_INPUT_LABEL_MIN_CONTAINER_PX` (TerminalSplitPaneContent.tsx):
+ * the composer-row width at which the direct-input toggle prints its label.
+ * Mirrored rather than imported because that module is a client component.
+ */
+const DIRECT_INPUT_LABEL_MIN_ROW_PX = 520;
 
 /** Before #2598, with this fixture — see the module table. */
 const PRE_2598 = {
@@ -330,6 +347,90 @@ test.describe('[#2598] two rows on a PC', () => {
     await textarea.click();
     await textarea.pressSequentially('typed');
     await expect(textarea).toHaveValue('typed');
+  });
+});
+
+test.describe('[#2797] the direct-input toggle', () => {
+  test('is on screen whole, beside the interrupt button, in every layout, and opens the bar', async ({ page }) => {
+    // Auto-Yes on: the meta row at its widest, which is what hid the toggle.
+    for (const widths of [[1], [1, 1], PRE_2598.threeSplits.widths, [1, 1, 1], [1, 1, 1, 1]] as const) {
+      const fresh = await page.context().newPage();
+      await open(fresh, widths, { autoYesEnabled: true });
+      await expect(fresh.getByText(/\d:\d\d:\d\d/).first()).toBeVisible();
+      for (let index = 0; index < widths.length; index += 1) {
+        const tool = COMPOSER_SPLITS[index].cliTool;
+        const label = `${widths.length} splits / pane ${index} (${tool})`;
+        const b = await boxesInSplit(fresh, index, [
+          'composer-input-row',
+          'composer-toolbar-start',
+          'composer-toolbar-end',
+          'composer-meta-row',
+          'direct-input-toggle',
+          'direct-input-toggle-label',
+          'interrupt-button',
+          'agent-mode-cycle-button',
+        ]);
+        const row = b['composer-input-row']!.box;
+        const toggle = b['direct-input-toggle']!;
+        const labelShown = (b['direct-input-toggle-label']?.box.width ?? 0) > 0;
+        const captions = await fresh.evaluate(idx => {
+          const pane = document.querySelector(`[data-testid="terminal-split-pane-${idx}"]`);
+          const fit = (id: string) => {
+            const el = pane?.querySelector(`[data-testid="${id}"]`) as HTMLElement | null;
+            return el ? { content: el.scrollWidth, drawn: el.clientWidth } : null;
+          };
+          return { chip: fit('agent-mode-chip'), note: fit('agent-mode-note') };
+        }, index);
+        // eslint-disable-next-line no-console -- the measurement is the deliverable
+        console.log(`MEASURE-2797 ${label} ` + JSON.stringify({
+          row: row.width,
+          start: b['composer-toolbar-start']!.box.width,
+          end: b['composer-toolbar-end']!.box.width,
+          toggle: toggle.box.width,
+          labelShown,
+          ...captions,
+        }));
+
+        // Soft: every pane reports, so a regression names each layout it breaks.
+        //
+        // Painted whole — `getBoundingClientRect` alone would also say yes for
+        // a toggle scrolled out of an `overflow-x-auto` strip, which is how it
+        // sat in the three-split panes before.
+        expect.soft(toggle.visible, `${label}: toggle painted`).not.toBeNull();
+        expect.soft(toggle.visible?.width ?? 0, `${label}: toggle painted whole`).toBeCloseTo(toggle.box.width, 0);
+        // In the end group, left of the interrupt button, clear of the start
+        // group, and not in the meta row.
+        const interrupt = b['interrupt-button']!.box;
+        expect.soft(boxContains(b['composer-toolbar-end']!.box, toggle.box), `${label}: in end group`).toBe(true);
+        expect.soft(toggle.box.right, `${label}: left of interrupt`).toBeLessThanOrEqual(interrupt.left + 0.5);
+        expect.soft(boxesIntersect(toggle.box, b['composer-toolbar-start']!.box), `${label}: clear of start`).toBe(false);
+        expect.soft(toggle.box.bottom, `${label}: above the meta row`).toBeLessThanOrEqual(b['composer-meta-row']!.box.top);
+        // The mode button beside it is still painted whole.
+        const mode = b['agent-mode-cycle-button']!;
+        expect.soft(mode.visible?.width ?? 0, `${label}: mode button whole`).toBeCloseTo(mode.box.width, 0);
+        // The label is printed exactly where the row is at least the threshold.
+        expect.soft(labelShown, `${label}: label`).toBe(row.width >= DIRECT_INPUT_LABEL_MIN_ROW_PX);
+        // Where the hints are printed (one split, two splits, the grid), the
+        // toggle took nothing from the mode control: chip and caution whole.
+        if (row.width >= COMPOSER_HINTS_MIN_CONTAINER_PX) {
+          for (const [what, fit] of Object.entries(captions)) {
+            if (fit) expect.soft(fit.content, `${label}: ${what} not truncated`).toBeLessThanOrEqual(fit.drawn + 1);
+          }
+        }
+
+        // …and it is reachable: a real click opens the bar and a second closes
+        // it. Only on a painted toggle — the failure is already recorded above,
+        // and a click would scroll a clipped one into view (or wait out the
+        // test's timeout on an undrawn one) rather than say anything new.
+        if (!toggle.visible) continue;
+        const pane = fresh.getByTestId(`terminal-split-pane-${index}`);
+        await pane.getByTestId('direct-input-toggle').click();
+        await expect(pane.getByTestId('direct-input-bar'), `${label}: bar opens`).toBeVisible();
+        await pane.getByTestId('direct-input-toggle').click();
+        await expect(pane.getByTestId('direct-input-bar'), `${label}: bar closes`).toHaveCount(0);
+      }
+      await fresh.close();
+    }
   });
 });
 

@@ -14,14 +14,15 @@ import {
   type AgentInstance,
 } from '@/lib/cli-tools/types';
 import { getClientDefaultSelectedAgents } from '@/config/default-agents';
-import { deriveCliStatus } from '@/lib/session/status-mapping';
+import { deriveCliStatus, isUnclassifiedCliStatus } from '@/lib/session/status-mapping';
 import { getNextAction, type NextActionKey } from '@/lib/session/next-action-helper';
 import type { SessionStatus } from '@/lib/detection/status-detector';
 
 // Issue #1550: the status-vocabulary conversions now live in
 // `@/lib/session/status-mapping`. Re-exported here so existing importers of
 // `@/types/sidebar` keep working; that module holds the only definition.
-export { deriveCliStatus };
+// Issue #2775 adds its "cannot tell" reader beside it, for the same importers.
+export { deriveCliStatus, isUnclassifiedCliStatus };
 
 /**
  * Branch status in sidebar
@@ -54,6 +55,19 @@ export type BranchWaitingKind = 'prompt' | 'menu' | 'unclassified';
  * restatement cannot drift.
  */
 export const EXITED_STATUS_REASON = 'exited';
+
+/**
+ * The status word the breakdown tooltip prints for an instance whose frame no
+ * rule could classify (Issue #2775), in place of the `ready` its triple derives.
+ *
+ * Not a `BranchStatus` member, and deliberately so: a sixth value would ripple
+ * into the colours, the sort order (`STATUS_PRIORITY`) and the emphasis tiers,
+ * which is the cost #2070 declined for `exited` too. The instance keeps its
+ * `ready` in `cliStatus`; `unclassifiedInstanceIds` says which `ready` is a
+ * fallback. Raw English like the other words in the breakdown, which prints
+ * `BranchStatus` tokens verbatim.
+ */
+export const UNCLASSIFIED_STATUS_WORD = 'unknown';
 
 /**
  * `BranchStatus` → `SessionStatus`, so the sidebar can reuse `getNextAction`
@@ -120,21 +134,54 @@ export function aggregateCliStatus(
  *   because the word is user-facing and therefore localized, and this module
  *   runs on the server where `t()` cannot be called (the same rule
  *   `NEXT_ACTION_KEYS` follows).
+ * @param unclassifiedInstanceIds - Instances whose `ready` is a fallback for a
+ *   frame nothing could read (Issue #2775). Their status word becomes
+ *   {@link UNCLASSIFIED_STATUS_WORD} — `Codex: unknown` — because the `ready`
+ *   the entry carries is exactly what is not known. Only a `ready` entry is
+ *   rewritten, so a caller cannot relabel a real reading with it.
  * @returns Comma-separated "Label: status" string ('' when empty/absent)
  */
 export function formatCliStatusBreakdown(
   cliStatus?: Partial<Record<string, BranchStatus>>,
   labels?: Record<string, string>,
-  exitedSuffix?: (instanceId: string) => string | null
+  exitedSuffix?: (instanceId: string) => string | null,
+  unclassifiedInstanceIds?: ReadonlySet<string>
 ): string {
   if (!cliStatus) return '';
   return Object.entries(cliStatus)
     .map(([instanceId, status]) => {
       const label = labels?.[instanceId] ?? getCliToolDisplayNameSafe(instanceId, instanceId);
       const suffix = exitedSuffix?.(instanceId);
-      return `${label}: ${status ?? 'idle'}${suffix ? ` (${suffix})` : ''}`;
+      const word =
+        status === 'ready' && unclassifiedInstanceIds?.has(instanceId)
+          ? UNCLASSIFIED_STATUS_WORD
+          : (status ?? 'idle');
+      return `${label}: ${word}${suffix ? ` (${suffix})` : ''}`;
     })
     .join(', ');
+}
+
+/**
+ * Whether the sidebar's ONE aggregated dot should read "cannot tell"
+ * (Issue #2775).
+ *
+ * True when the aggregate is `ready` and at least one of the instances that
+ * made it `ready` is only `ready` because its frame could not be read. The
+ * precedence this gives is waiting > running/generating > cannot-tell > ready
+ * > idle: a reading of work in progress outranks a blind spot, but a blind spot
+ * outranks a sibling that is merely idle — the unreadable pane is the one a
+ * human should look at, and it may well be hiding a dialog.
+ *
+ * @param cliStatus - Per-instance status map (`SidebarBranchItem.cliStatus`)
+ * @param unclassifiedInstanceIds - `SidebarBranchItem.unclassifiedInstanceIds`
+ */
+export function isBranchUnclassified(
+  cliStatus?: Partial<Record<string, BranchStatus>>,
+  unclassifiedInstanceIds?: readonly string[]
+): boolean {
+  if (!cliStatus || !unclassifiedInstanceIds || unclassifiedInstanceIds.length === 0) return false;
+  if (aggregateCliStatus(cliStatus) !== 'ready') return false;
+  return unclassifiedInstanceIds.some((id) => cliStatus[id] === 'ready');
 }
 
 /**
@@ -250,6 +297,16 @@ export interface SidebarBranchItem {
    * annotates nothing and renders exactly what it rendered before.
    */
   exitedInstanceIds?: string[];
+  /**
+   * Agent-instance ids whose frame no rule could classify (Issue #2775), i.e.
+   * whose `cliStatus` entry is a `ready` that nothing actually read.
+   *
+   * Same shape and same reasoning as {@link exitedInstanceIds}: the entry keeps
+   * the `BranchStatus` its triple derives, and this list is what the row reads
+   * to draw "cannot tell" instead (see {@link isBranchUnclassified}). Empty for
+   * a server older than #2775, which renders exactly as before.
+   */
+  unclassifiedInstanceIds?: string[];
 }
 
 /**
@@ -314,10 +371,12 @@ function deriveSidebarCliStatus(worktree: Worktree): {
   cliStatus: Partial<Record<string, BranchStatus>>;
   cliStatusLabels: Record<string, string>;
   exitedInstanceIds: string[];
+  unclassifiedInstanceIds: string[];
 } {
   const cliStatus: Partial<Record<string, BranchStatus>> = {};
   const cliStatusLabels: Record<string, string> = {};
   const exitedInstanceIds: string[] = [];
+  const unclassifiedInstanceIds: string[] = [];
 
   const byInstance = worktree.sessionStatusByInstance;
 
@@ -330,8 +389,11 @@ function deriveSidebarCliStatus(worktree: Worktree): {
       if (worktree.sessionStatusByCli?.[agent]?.sessionStatusReason === EXITED_STATUS_REASON) {
         exitedInstanceIds.push(agent);
       }
+      if (isUnclassifiedCliStatus(worktree.sessionStatusByCli?.[agent])) {
+        unclassifiedInstanceIds.push(agent);
+      }
     }
-    return { cliStatus, cliStatusLabels, exitedInstanceIds };
+    return { cliStatus, cliStatusLabels, exitedInstanceIds, unclassifiedInstanceIds };
   }
 
   // Configured roster: explicit agentInstances, else primaries per selectedAgents.
@@ -350,6 +412,9 @@ function deriveSidebarCliStatus(worktree: Worktree): {
     if (byInstance[instance.id]?.sessionStatusReason === EXITED_STATUS_REASON) {
       exitedInstanceIds.push(instance.id);
     }
+    if (isUnclassifiedCliStatus(byInstance[instance.id])) {
+      unclassifiedInstanceIds.push(instance.id);
+    }
   }
 
   // Surface any RUNNING instance missing from the roster (e.g. a `claude`
@@ -361,9 +426,12 @@ function deriveSidebarCliStatus(worktree: Worktree): {
     if (derived === 'idle') continue;
     cliStatus[instanceId] = derived;
     cliStatusLabels[instanceId] = labelForUnknownInstance(instanceId);
+    if (isUnclassifiedCliStatus(status)) {
+      unclassifiedInstanceIds.push(instanceId);
+    }
   }
 
-  return { cliStatus, cliStatusLabels, exitedInstanceIds };
+  return { cliStatus, cliStatusLabels, exitedInstanceIds, unclassifiedInstanceIds };
 }
 
 /**
@@ -391,12 +459,17 @@ export function toBranchItem(worktree: Worktree): SidebarBranchItem {
   // agentInstances) so instances outside selectedAgents and alias instances are
   // reflected. Falls back to the legacy selectedAgents path when no per-instance
   // data is present.
-  const { cliStatus, cliStatusLabels, exitedInstanceIds } = deriveSidebarCliStatus(worktree);
+  const { cliStatus, cliStatusLabels, exitedInstanceIds, unclassifiedInstanceIds } =
+    deriveSidebarCliStatus(worktree);
 
   // Issue #1787: the row's emphasis and its "what do I do next" label both come
   // from the AGGREGATED status, matching the single dot the row renders.
   const aggregated = aggregateCliStatus(cliStatus);
   const { waitingKind, awaitingInstruction } = deriveWorktreeWaitingDetail(worktree);
+  // Issue #2775: when that dot reads "cannot tell", so does the next action.
+  // `getNextAction` would answer "Send message" for the `ready` underneath,
+  // which is advice about a state nobody observed.
+  const unclassified = isBranchUnclassified(cliStatus, unclassifiedInstanceIds);
 
   return {
     id: worktree.id,
@@ -409,6 +482,7 @@ export function toBranchItem(worktree: Worktree): SidebarBranchItem {
     cliStatus,
     cliStatusLabels,
     exitedInstanceIds,
+    unclassifiedInstanceIds,
     worktreePath: worktree.path,
     waitingKind,
     awaitingInstruction,
@@ -419,10 +493,12 @@ export function toBranchItem(worktree: Worktree): SidebarBranchItem {
     // would be a bug the user cannot explain. `isStalled` is server-only
     // (`isWorktreeStalled` needs the detector's timers), so the sidebar never
     // claims "Check stalled".
-    nextActionKey: getNextAction(
-      BRANCH_STATUS_TO_SESSION_STATUS[aggregated],
-      aggregated === 'waiting' ? 'approval' : null,
-      false
-    ),
+    nextActionKey: unclassified
+      ? undefined
+      : getNextAction(
+          BRANCH_STATUS_TO_SESSION_STATUS[aggregated],
+          aggregated === 'waiting' ? 'approval' : null,
+          false
+        ),
   };
 }

@@ -72,6 +72,10 @@ interface PeerRow {
  * over three booleans, and the alternative — exporting `deriveStatus` from a
  * command module so another command module can import it — couples two
  * commands to save nothing. The vocabulary itself is pinned by `ls`'s own tests.
+ *
+ * Issue #2775: an unclassified session arrives with `isProcessing: false` and
+ * so reads `ready` here exactly as it does in `ls` — never `running`, which
+ * would tell the asking agent to wait on a pane nothing could read.
  */
 function deriveStatus(wt: WorktreeItem): string {
   if (wt.isWaitingForResponse) return 'waiting';

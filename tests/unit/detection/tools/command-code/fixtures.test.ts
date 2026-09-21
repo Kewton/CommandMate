@@ -568,15 +568,17 @@ describe('[#2304] the busy row is what the running verdict rests on', () => {
   });
 });
 
-describe('[#2304] what the rules were measured against', () => {
-  it('still records 1.40.1, and this suite is the statement about 1.49.0', () => {
-    // `verifiedAgainst` is the build the rules were READ OFF, and re-capturing
-    // did not change one of them, so the value stays where #2250 put it. The
-    // 1.49.0 rows in the table above are the receipt: same rules, same
-    // verdicts, frames captured 2026-09-04 on 1.49.0 at 200x1000.
+describe('[#2304] / [#2773] what the rules were measured against', () => {
+  it('records 1.54.1 (#2773), and this suite is still the statement about 1.49.0', () => {
+    // `verifiedAgainst` is the build the rules were READ OFF. #2304 re-captured
+    // on 1.49.0 and changed no rule, so the value stayed where #2250 put it
+    // (1.40.1) — the 1.49.0 rows in the table above are the receipt: same rules,
+    // same verdicts, frames captured 2026-09-04 on 1.49.0 at 200x1000. #2773
+    // then moved it to 1.54.1 / 2026-09-20, once #2753 / #2755 re-read the rules
+    // off the 26 frames #2754 probed and all of them came out right.
     expect(commandCodeStatusDetector.verifiedAgainst).toEqual({
-      version: '1.40.1',
-      capturedAt: '2026-09-03',
+      version: '1.54.1',
+      capturedAt: '2026-09-20',
       paneGeometry: '200x1000',
     });
   });
