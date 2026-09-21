@@ -20,6 +20,7 @@ import {
   CODEX_APPROVAL_FOOTER_PATTERN,
   CODEX_PAGER_FOOTER_PATTERN,
   CODEX_STATUS_BAR_PATTERN,
+  CODEX_TRAILED_STATUS_BAR_PATTERN,
   getCodexLifecycleDialog,
   stripBoxDrawing,
   buildDetectPromptOptions,
@@ -57,10 +58,18 @@ export const VERIFIED_AGAINST = CODEX_VERIFIED_AGAINST;
 const CODEX_CONFIRMATION_FOOTER_PATTERN = /press\s+(?:number|enter)\s+to\s+confirm/i;
 const CODEX_NUMBERED_OPTION_PATTERN = /^\s*[❯›●]?\s*\d{1,2}[.)]\s/;
 
-/** Index of the Codex status bar within the last 10 content rows, or -1. */
+/**
+ * Index of the Codex status bar within the last 10 content rows, or -1.
+ *
+ * Issue #2818: a bar carrying a thread title or the Plan-mode badge after the
+ * path (codex 0.154.0+) is the same bar, so it is a boundary too. Without it
+ * such frames fell to branch D, whose 15-row tail still holds a finished
+ * turn's `• Ran …` record, and an idle session read `running`.
+ */
 function findCodexFooterBoundary(contentLines: readonly string[]): number {
   for (let ci = contentLines.length - 1; ci >= Math.max(0, contentLines.length - 10); ci--) {
-    if (CODEX_STATUS_BAR_PATTERN.test(contentLines[ci])) return ci;
+    const line = contentLines[ci];
+    if (CODEX_STATUS_BAR_PATTERN.test(line) || CODEX_TRAILED_STATUS_BAR_PATTERN.test(line)) return ci;
   }
   return -1;
 }
@@ -251,7 +260,8 @@ export const codexStatusDetector = createToolStatusDetector({
     // prompts high in scrollback to falsely trigger NavigationButtons.
     //
     // Issue #1150: the status bar is located via CODEX_STATUS_BAR_PATTERN (version-
-    // independent; matches both legacy "N% left ·" and v0.141 "model · path" bars).
+    // independent; matches both legacy "N% left ·" and v0.141 "model · path" bars),
+    // and since #2818 via CODEX_TRAILED_STATUS_BAR_PATTERN too (0.154+ "· <title>").
     const codexFooterBoundary = findCodexFooterBoundary(contentLines);
     let codexContentEnd =
       codexFooterBoundary >= 0 ? codexFooterBoundary - 1 : contentLines.length - 1;
@@ -454,6 +464,12 @@ export const codexStatusDetector = createToolStatusDetector({
       // Claude's interrupt-hint net. Gated so idle frames are unaffected:
       // only fires when the tail is NOT the idle › prompt, so an idle session still
       // falls through to the generic composer check.
+      //
+      // That gate does not hold when the bar is drawn but not recognised: the tail
+      // is then the bar, not the `›`, and a finished turn's `• Ran …` record in the
+      // 15-row window reads as running. That is how 0.154's titled bar misread
+      // idle sessions until #2818 taught findCodexFooterBoundary its shape — the
+      // cost of this net whenever codex redraws the bar again.
       let codexTailIdx = contentLines.length - 1;
       while (codexTailIdx >= 0 && contentLines[codexTailIdx].trim() === '') {
         codexTailIdx--;
