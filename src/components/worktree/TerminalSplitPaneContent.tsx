@@ -77,6 +77,7 @@ import { TerminalEscapeHatch } from '@/components/worktree/TerminalEscapeHatch';
 import { OpencodeQuickKeys } from '@/components/worktree/OpencodeQuickKeys';
 import { AgentModeControl } from '@/components/worktree/AgentModeControl';
 import { UnsentComposerBar, hasUnsentComposerText } from '@/components/worktree/UnsentComposerBar';
+import { DirectInputBar } from '@/components/worktree/DirectInputBar';
 import {
   OpencodeSidebarNotice,
   hasOpenCodeSidebarObstruction,
@@ -404,6 +405,42 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
     instanceId: resolvedInstanceId,
     enabled: !disabled,
   });
+
+  // Issue #2766: direct-input mode. Deliberately NOT hung off `showNav` /
+  // `showEscapeHatch` / `showPrompt` — every one of those is a detection
+  // verdict, and this mode exists for the frames detection cannot read. It is
+  // therefore available on both surfaces and under every combination of flags.
+  const [directInputOpen, setDirectInputOpen] = useState(false);
+
+  // Close when this pane starts pointing somewhere else. The bar holds focus
+  // and swallows keys; carrying it across a worktree / tool / instance change
+  // would type the next thing the user presses into a different agent.
+  useEffect(() => {
+    setDirectInputOpen(false);
+  }, [worktreeId, cliToolId, resolvedInstanceId]);
+
+  // Close when the session goes away. The route 404s without a tmux session, so
+  // an open bar would answer every keystroke with the error line; separate from
+  // the effect above so a session coming back up does not close it.
+  useEffect(() => {
+    if (!terminal.isRunning) setDirectInputOpen(false);
+  }, [terminal.isRunning]);
+
+  // Resolved out here, not inside `footerSlot`. `t` is a fresh closure on every
+  // render (next-intl's, and the suite's mock), so listing IT as a dependency
+  // would re-run the footer memo every render and quietly turn the memo into
+  // dead weight — and, worse, make a MISSING dependency undetectable by test.
+  // These are strings: the dependency array compares them by value.
+  const directInputToggleLabel = t('directInput.toggle');
+  const directInputToggleAria = t('directInput.toggleAria');
+
+  const handleDirectInputToggle = useCallback(() => {
+    setDirectInputOpen((open) => !open);
+  }, []);
+
+  const handleDirectInputClose = useCallback(() => {
+    setDirectInputOpen(false);
+  }, []);
 
   // Issue #744: this split's OWN message history, fetched independently by its
   // cliToolId. `state.messages` in the parent is server-filtered to the active
@@ -1037,6 +1074,20 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
           diff={agentSession.diff}
           disabled={!terminal.isRunning}
         />
+        {/* Issue #2766: directly above the composer, because the two are the
+            same gesture seen twice -- one types at the agent, the other types
+            at its pane -- and a user who has just failed to get through with a
+            message finds the way in on the next row rather than in a menu.
+            Gated on `directInputOpen` ALONE: no detection flag, by design. */}
+        {directInputOpen ? (
+          <DirectInputBar
+            worktreeId={worktreeId}
+            cliToolId={cliToolId}
+            instanceId={resolvedInstanceId}
+            onKeysSent={refresh}
+            onClose={handleDirectInputClose}
+          />
+        ) : null}
         <MessageInput
           worktreeId={worktreeId}
           onMessageSent={handleMessageSent}
@@ -1096,15 +1147,70 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
           }
           // Issue #1080: per-split Auto-Yes toggle now lives in the composer's
           // bottom meta row instead of its own full-width footer row.
+          // Issue #2766: the direct-input toggle rides the SAME slot as
+          // Auto-Yes rather than getting one of its own. `autoYesSlot` is a
+          // `ReactNode`, so a Fragment carries both, and it goes AFTER the
+          // Auto-Yes toggle so the switch keeps the left edge of the strip
+          // (`composer-auto-yes` scrolls sideways; whatever is first is what
+          // stays painted in a narrow pane).
+          //
+          // ## Why the toggle disappears between 420px and 520px of meta row
+          //
+          // #2598's budget is one line of meta row, and the row's Auto-Yes half
+          // is what pays for anything added to it. Measured in Chromium at
+          // 1440x900 (tests/e2e/composer-two-row-2598.spec.ts, `MEASURE-2598`):
+          //
+          //   | item                               | width |
+          //   |------------------------------------|-------|
+          //   | hints (`@min-[420px]`) + its gap   | 195px |
+          //   | Auto-Yes ON, copilot / antigravity | 216 / 236px |
+          //   | this toggle + its gap              |  87px |
+          //
+          // So a row that draws the hints needs 195 + 236 + 87 = 518px before a
+          // second control fits beside a full Auto-Yes. Below that the strip
+          // scrolls, and the e2e asserts the Auto-Yes control is NOT clipped
+          // wherever the hints are drawn — the two-split pane and every pane of
+          // the 2x2 grid are 431px of row, which is exactly the band where the
+          // hints have already taken the room.
+          //
+          // Hence `@min-[420px]:hidden @min-[520px]:inline-flex` over a base
+          // `inline-flex`: drawn below 420 (no hints, the strip is the whole
+          // row — a 3-split pane keeps the toggle), yielded to the hints in the
+          // band, and drawn again once the row can carry all three. Raising
+          // COMPOSER_HINTS_MIN_CONTAINER_PX instead would be the other way to
+          // free the band, but that constant is `MessageInput`'s and the e2e
+          // pins the hints ON at two splits.
+          //
+          // Keep the two literals as literals: Tailwind scans source text, so
+          // an interpolated class generates no CSS and the toggle would be
+          // drawn at every width (the #2131 rule, restated in composer-layout).
           autoYesSlot={
-            <AutoYesToggle
-              enabled={autoYesEnabled}
-              expiresAt={autoYesExpiresAt ?? null}
-              onToggle={onAutoYesToggle}
-              lastAutoResponse={lastAutoResponse ?? null}
-              cliToolName={cliToolId}
-              inline
-            />
+            <>
+              <AutoYesToggle
+                enabled={autoYesEnabled}
+                expiresAt={autoYesExpiresAt ?? null}
+                onToggle={onAutoYesToggle}
+                lastAutoResponse={lastAutoResponse ?? null}
+                cliToolName={cliToolId}
+                inline
+              />
+              <button
+                type="button"
+                data-testid="direct-input-toggle"
+                aria-pressed={directInputOpen}
+                aria-label={directInputToggleAria}
+                title={directInputToggleAria}
+                disabled={!terminal.isRunning}
+                onClick={handleDirectInputToggle}
+                className={`shrink-0 inline-flex @min-[420px]:hidden @min-[520px]:inline-flex items-center h-[22px] px-2 rounded-md border text-[11px] font-medium leading-none transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                  directInputOpen
+                    ? 'bg-info-subtle border-info-border text-info-foreground'
+                    : 'bg-surface border-border text-muted-foreground hover:bg-muted'
+                }`}
+              >
+                {directInputToggleLabel}
+              </button>
+            </>
           }
         />
       </div>
@@ -1156,6 +1262,14 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       autoYesExpiresAt,
       lastAutoResponse,
       onAutoYesToggle,
+      // Issue #2766: the bar's ONLY gate. Leaving it out of this list is the
+      // failure this file is most prone to -- the toggle flips, the memo does
+      // not re-run, and the bar never appears.
+      directInputOpen,
+      handleDirectInputToggle,
+      handleDirectInputClose,
+      directInputToggleLabel,
+      directInputToggleAria,
       // Issue #806: toast surface for the "queued (session busy)" hint.
       showToast,
       // Issue #2598: the composer's height scope and bound.

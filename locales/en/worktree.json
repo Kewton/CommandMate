@@ -540,6 +540,14 @@
       "hint": "You can view the previous conversation in History."
     }
   },
+  "directInput": {
+    "toggle": "Direct input",
+    "toggleAria": "Send keystrokes straight to the terminal",
+    "notice": "Direct input is on. Every key you type here goes straight to the agent's terminal.",
+    "placeholder": "Type here…",
+    "close": "Exit direct input",
+    "error": "Could not send. Check the session and try again."
+  },
   "unsentComposer": {
     "regionLabel": "Unsent input",
     "label": "Unsent input:",
