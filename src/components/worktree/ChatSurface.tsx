@@ -994,9 +994,16 @@ export const ChatSurface = memo(function ChatSurface({
         const showPlanApprove =
           shape?.offersPlanApprove === true &&
           (PLAN_APPROVE_KEY_TOOL_IDS as readonly string[]).includes(cliToolId);
+        // Issue #2793. On the same screen `Enter` either opens a comment box or
+        // RUNS the focused action (`❯ Approve`), depending on a focus this card
+        // cannot show — so the pad leaves it out, and approving is the labelled
+        // `PlanApproveKeys` button alone. Not gated on the tool: taking a key
+        // away is the safe direction. The approve-with-comments radio is not
+        // `offersPlanApprove` and keeps `Enter`, which is its documented confirm.
+        const hideEnterKey = shape?.offersPlanApprove === true;
         return (
           <div className="space-y-2">
-            <NavigationButtons {...keyProps} />
+            <NavigationButtons {...keyProps} hideEnterKey={hideEnterKey} />
             {/* Issue #2521 suppresses the row for the one frame whose numbers
                 have not been measured as answerable — see
                 `isCommandCodeQuestionFallback`. Every other numbered list is
