@@ -8,8 +8,17 @@
  * known prompt footers, excludes overlays rendered below the active prompt.
  */
 
-const CLAUDE_PROMPT_FOOTER_PATTERN = /Esc\s+to\s+cancel\s*[·•]\s*Tab\s+to\s+amend/i;
-const CLAUDE_PICKER_FOOTER_PATTERN = /Enter\s+to\s+select\b.*\bnavigate\b/i;
+// A real footer starts its row: in every capture measured for Issue 2776 only
+// whitespace precedes it (plus one SGR colour sequence in a raw capture), while
+// every measured quote of it has visible text first (`「`, `- Approval footer: `,
+// `navigate · `). A quote above the live prompt otherwise cut the frame at the
+// quote (Issue 2774: 963 of 1002 rows). The row end is NOT anchored: real
+// footers go on with more key hints (` · Esc to cancel`, ` · ctrl+e to explain`).
+// Position and discard-size limits were measured and rejected — see
+// docs/design/tui-frame-footer-scan-2776.md.
+const CLAUDE_PROMPT_FOOTER_PATTERN =
+  /^(?:\s|\x1b\[[0-9;]*m)*Esc\s+to\s+cancel\s*[·•]\s*Tab\s+to\s+amend/i;
+const CLAUDE_PICKER_FOOTER_PATTERN = /^(?:\s|\x1b\[[0-9;]*m)*Enter\s+to\s+select\b.*\bnavigate\b/i;
 
 // A prompt/thinking/input anchor below a footer means that footer belongs to an
 // older frame. Task-panel rows intentionally do not match these patterns.
@@ -21,7 +30,8 @@ const CLAUDE_PICKER_FOOTER_PATTERN = /Enter\s+to\s+select\b.*\bnavigate\b/i;
 const CLAUDE_LOWER_INTERACTIVE_ANCHOR =
   /^\s*[>❯›]\s*(?:\d{1,2}[.)])?|esc\s+to\s+interrupt|[✻✽✶✢✳⦿◉●⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]\s+.+…/i;
 
-function isClaudeFooter(line: string): boolean {
+/** Whether `line` is one of Claude's prompt/picker footer rows (not a quote of one). */
+export function isClaudeFooter(line: string): boolean {
   return CLAUDE_PROMPT_FOOTER_PATTERN.test(line) || CLAUDE_PICKER_FOOTER_PATTERN.test(line);
 }
 
