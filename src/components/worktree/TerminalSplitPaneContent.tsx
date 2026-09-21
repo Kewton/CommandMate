@@ -196,6 +196,14 @@ export interface TerminalSplitPaneContentProps extends TerminalSplitPaneCoreProp
    */
   agentModel?: string | null;
   /**
+   * Issue #2775: `cliStatus` is a `ready` that no rule actually read — the
+   * server flagged the frame unclassified. Passed straight to
+   * `TerminalSplitPane`, which draws the "cannot tell" ring for it. Declared
+   * here rather than in `TerminalSplitPaneCoreProps` for the reason
+   * {@link agentModel} gives; omitting it renders exactly what it did before.
+   */
+  cliStatusUnclassified?: boolean;
+  /**
    * Issue #2042: published when this split's agent changes what it says about
    * its own session (persona / cost / context), so the surfaces above — the
    * desktop header's instance pills — can show it too.
@@ -236,6 +244,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   onInsertConsumed,
   onMessageSent,
   cliStatus = 'idle',
+  cliStatusUnclassified = false,
   autoYes,
   history,
   onDropInstance,
@@ -1362,6 +1371,8 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       // Issue #1079: the derived agent status now renders as a StatusDot inside
       // the selector trigger (session title bar). BranchStatus ⊂ StatusDotStatus.
       status={cliStatus}
+      // Issue #2775: the "cannot tell" ring for a `ready` nothing read.
+      statusUnclassified={cliStatusUnclassified}
       // Issue #1783: the model the agent reported, shown beside the alias.
       // Issue #2042 prefixes the persona when the agent named one.
       agentModel={paneAgentModel}

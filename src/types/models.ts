@@ -133,6 +133,14 @@ export interface SessionStatusReadingDetail {
   statusEvidence?: 'positive' | 'none';
   /** The detector's reason token, e.g. `input_prompt` / `exited`. */
   sessionStatusReason?: string;
+  /**
+   * No rule could classify the frame at all (Issue #2775) — the server's
+   * `isUnclassifiedFrame`. Such a session arrives with `isProcessing: false`,
+   * so the triple alone derives `ready`; read it through
+   * `isUnclassifiedCliStatus` (`@/types/sidebar`) to draw "cannot tell"
+   * instead. Present only when true, and absent from a server older than #2775.
+   */
+  isUnclassified?: boolean;
 }
 
 /**
