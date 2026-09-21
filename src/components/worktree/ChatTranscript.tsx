@@ -428,6 +428,18 @@ export interface ChatTranscriptProps {
    * the bar. Omit (the default) everywhere else.
    */
   hideCornerControls?: boolean;
+  /**
+   * Issue #2823: open the search bar, input focused, on the window event
+   * `chat-search-open` (the phone's "More actions" sheet). Only the phone's
+   * chat surface passes it: none of the PC split's transcripts may answer.
+   */
+  openSearchOnWindowEvent?: boolean;
+  /**
+   * Issue #2823: the top offset class of the top-right strip. Replaces the
+   * default `top-2` (two `top-*` classes resolve by stylesheet order). The
+   * phone passes a lower one so the bar opens below its surface pill.
+   */
+  searchBarTopClassName?: string;
 }
 
 // ============================================================================
@@ -675,6 +687,8 @@ export const ChatTranscript = memo(function ChatTranscript({
   sessionEnded = false,
   onScrollControlsChange,
   hideCornerControls = false,
+  openSearchOnWindowEvent = false,
+  searchBarTopClassName = 'top-2',
 }: ChatTranscriptProps) {
   const t = useTranslations('worktree');
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -908,6 +922,27 @@ export const ChatTranscript = memo(function ChatTranscript({
     // Intentionally excludes closeSearch: reset only on worktree change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [worktreeId]);
+
+  // [#2823] Opening search from outside: the phone's "More actions" sheet
+  // raises a window event, as it does for `TerminalDisplay`. Opt-in, so one
+  // sheet row cannot open every transcript of the PC split. Every request also
+  // asks for focus (the bar focuses on MOUNT only), served in an effect so it
+  // lands after the sheet's focus trap restores focus in the same commit.
+  const cornerRef = useRef<HTMLDivElement>(null);
+  const [searchFocusRequest, setSearchFocusRequest] = useState(0);
+  useEffect(() => {
+    if (!openSearchOnWindowEvent) return;
+    const handleOpen = () => {
+      openSearch();
+      setSearchFocusRequest((n) => n + 1);
+    };
+    window.addEventListener('chat-search-open', handleOpen);
+    return () => window.removeEventListener('chat-search-open', handleOpen);
+  }, [openSearchOnWindowEvent, openSearch]);
+  useEffect(() => {
+    if (searchFocusRequest === 0) return;
+    cornerRef.current?.querySelector('input')?.focus();
+  }, [searchFocusRequest]);
 
   // ---------------------------------------------------------------
   // Rows (Issue #2245)
@@ -1522,8 +1557,14 @@ export const ChatTranscript = memo(function ChatTranscript({
           [#2821] `hideCornerControls` withdraws both icons (the phone's surface
           pill sits on top of them and carries the tool-activity toggle
           itself). The search bar still renders whenever search is open, so the
-          strip stays the one place the bar lives. */}
-      <div className="pointer-events-none absolute right-2 top-2 z-10 flex items-start justify-end gap-1">
+          strip stays the one place the bar lives.
+
+          [#2823] `searchBarTopClassName` lowers the strip on the phone, so the
+          bar opens below the surface pill rather than under it. */}
+      <div
+        ref={cornerRef}
+        className={`pointer-events-none absolute right-2 ${searchBarTopClassName} z-10 flex items-start justify-end gap-1`}
+      >
         {!isSearchOpen && !hideCornerControls && (
           <div className="pointer-events-auto">
             <button

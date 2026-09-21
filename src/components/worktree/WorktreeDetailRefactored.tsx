@@ -1155,11 +1155,20 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
 
             {/* Issue #1080: terminal secondary actions (search + End) bottom sheet.
                 Issue #1171: End defers to openActiveKillConfirm, which snapshots the
-                active instance as the kill target and opens the confirm dialog. */}
+                active instance as the kill target and opens the confirm dialog.
+                Issue #2823: on the chat surface `TerminalDisplay` is not mounted,
+                so the row searches the conversation through `chat-search-open`,
+                which only the phone's transcript hears (`openSearchOnWindowEvent`).
+                Everything else, the other tabs included, keeps the old row. */}
             <MobileTerminalActionsSheet
               open={showActionsSheet}
               onClose={() => setShowActionsSheet(false)}
-              onSearch={() => window.dispatchEvent(new CustomEvent('terminal-search-open'))}
+              searchTarget={isMobileChatSurface ? 'chat' : 'terminal'}
+              onSearch={() =>
+                window.dispatchEvent(
+                  new CustomEvent(isMobileChatSurface ? 'chat-search-open' : 'terminal-search-open'),
+                )
+              }
               onEnd={openActiveKillConfirm}
               endDisabled={!activeSessionRunning}
               onDirectInput={openDirectInput}

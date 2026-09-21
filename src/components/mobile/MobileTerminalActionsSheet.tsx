@@ -29,6 +29,11 @@
  * its place in the focus order and the reason stays readable, and the handler
  * refuses the tap as well. The caller decides the reason; this sheet only draws
  * it. Both props are optional, and without `onDirectInput` the row is absent.
+ *
+ * Issue #2823: on the chat surface `TerminalDisplay` is not mounted, so the
+ * search row reads "Search this conversation" there (`searchTarget`) and the
+ * caller opens the transcript's search. The sheet only draws the label; which
+ * event `onSearch` raises stays the caller's. Same button, testid and order.
  */
 
 'use client';
@@ -44,8 +49,10 @@ export interface MobileTerminalActionsSheetProps {
   open: boolean;
   /** Dismiss the sheet (overlay tap / after an action). */
   onClose: () => void;
-  /** Invoked when "Search terminal" is chosen. */
+  /** Invoked when the search row ("Search terminal" / "Search this conversation") is chosen. */
   onSearch: () => void;
+  /** Issue #2823: the search row's label — "Search terminal" (default) or "Search this conversation". */
+  searchTarget?: 'terminal' | 'chat';
   /** Invoked when "End session" is chosen (caller shows the confirm dialog). */
   onEnd: () => void;
   /** When true, the End action is unavailable (no running session). */
@@ -82,6 +89,7 @@ export function MobileTerminalActionsSheet({
   open,
   onClose,
   onSearch,
+  searchTarget = 'terminal',
   onEnd,
   endDisabled = false,
   onDirectInput,
@@ -169,7 +177,7 @@ export function MobileTerminalActionsSheet({
             className="flex w-full items-center gap-3 rounded-lg px-3 py-3 text-sm text-foreground hover:bg-muted transition-colors touch-manipulation"
           >
             <Search size={18} aria-hidden="true" className="text-muted-foreground" />
-            {t('terminal.searchTerminal')}
+            {searchTarget === 'chat' ? t('chatTranscript.openSearch') : t('terminal.searchTerminal')}
           </button>
           <button
             type="button"
