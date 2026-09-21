@@ -108,20 +108,18 @@ export const CODEX_GLYPH = '›';
  * The codex build these dialog rules were read off.
  *
  * Separate from `CODEX_VERIFIED_AGAINST` on purpose: that stamp is the whole
- * detector's (`tools/verified-against.ts`, outside this Issue's scope) and still
- * names 0.148.0, while the frames below are 0.153.2. Recording the newer
- * measurement here rather than leaving it unrecorded keeps a later reader able
- * to tell "this rule is wrong" from "this rule was right for 0.153.2"; the
- * detector-wide stamp should be raised to match the next time that file is in
- * scope.
- *
- * Issue #2798 re-read the COMPOSER side of {@link readCodexGlyphRowKind} on
- * 0.155.1, but no dialog was re-captured on that build, so the stamp still
- * names the build the dialog frames came from.
+ * detector's (`tools/verified-against.ts`). It was held at 0.148.0 while one
+ * idle frame of the same 0.155.1 probe was misread for a reason outside these
+ * rules — the status-bar boundary — and advanced to 0.155.1 once Issue #2818
+ * fixed that boundary. The dialog frames themselves
+ * all read correctly on 0.155.1 (Issue #2808, `tests/fixtures/codex-dialogs-0155/`):
+ * the command approval, `/model`, `/experimental`, `/keymap` and the
+ * directory-trust screen are `waiting`, and every highlighted row is the
+ * one-span shape these rules key on. The rules were first read off 0.153.2.
  */
 export const CODEX_DIALOG_RULES_VERIFIED_AGAINST = {
-  version: '0.153.2',
-  capturedAt: '2026-09-04',
+  version: '0.155.1',
+  capturedAt: '2026-09-21',
   paneGeometry: '200x1000',
 } as const;
 
@@ -145,6 +143,7 @@ export const CODEX_DIALOG_RULES_VERIFIED_AGAINST = {
  * | `Press t to trust all; enter to review hooks; esc to close` | hooks list | both |
  * | `Press t to trust; esc to go back` | hooks detail | both |
  * | `Press space to select or enter to save for next conversation` | `/experimental` | 1st |
+ * | `Press space to select or enter to save` | `/experimental` (0.155.1) | 1st |
  * | `left/right group · enter edit shortcut · … · esc close` | `/keymap` | 2nd |
  *
  * No `/g` (keeps `.test()` stateless) and no nested quantifiers (ReDoS-safe).

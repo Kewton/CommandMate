@@ -827,8 +827,14 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
 
             {/* Issue #1816: task contract / verification verdict. Renders nothing
                 when the branch has no task row, so this strip only appears for
-                worktrees that were actually delegated with a contract. */}
-            {verification.task && (
+                worktrees that were actually delegated with a contract.
+                Issue #2824: stands aside while the direct-input keyboard is open,
+                with the branch-mismatch alert below — the only two bands above
+                <main> that come and go. With them a 360x640 screen left the
+                terminal 85px under the open keyboard (#2799 §8 wants 120px);
+                without them it is 132px whatever the worktree's state. Both come
+                back on 閉じる. */}
+            {verification.task && !showDirectInputKeyboard && (
               <div className="flex-shrink-0 border-b border-border bg-surface px-3 py-1.5">
                 <VerificationStatusChip
                   task={verification.task}
@@ -845,8 +851,9 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
               </div>
             )}
 
-            {/* Issue #111: Branch mismatch warning (Mobile) */}
-            {worktree?.gitStatus && worktree.gitStatus.isBranchMismatch && (
+            {/* Issue #111: Branch mismatch warning (Mobile). Issue #2824: hidden
+                while the direct-input keyboard is open (see the strip above). */}
+            {worktree?.gitStatus && worktree.gitStatus.isBranchMismatch && !showDirectInputKeyboard && (
               <div className="z-35 flex-shrink-0">
                 <BranchMismatchAlert
                   isBranchMismatch={worktree.gitStatus.isBranchMismatch}
