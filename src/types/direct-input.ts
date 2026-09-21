@@ -69,7 +69,15 @@ export interface KeyEventLike {
   readonly metaKey: boolean;
   readonly shiftKey: boolean;
   readonly isComposing?: boolean;
+  /** Legacy, but the one IME signal older Safari still gets right (see below). */
+  readonly keyCode?: number;
 }
+
+/**
+ * The `keyCode` every browser gives a keydown the IME is handling. No physical
+ * key maps to it, so treating it as "not ours" costs ordinary typing nothing.
+ */
+const IME_PROCESS_KEY_CODE = 229;
 
 const NAMED_KEY_BY_DOM_KEY: Readonly<Record<string, DirectInputKey>> = {
   Enter: 'Enter',
@@ -91,9 +99,17 @@ const NAMED_KEY_BY_DOM_KEY: Readonly<Record<string, DirectInputKey>> = {
  *
  * `null` is an answer, not a failure: the caller must NOT `preventDefault()` on
  * it, so Cmd+C / Cmd+V / Cmd+R, IME composition and function keys keep working.
+ *
+ * IME is checked twice because `isComposing` alone misses the key that matters
+ * most (Issue #2801). Safari before WebKit 310826@main fires the Enter that
+ * commits a composition AFTER `compositionend`, with `isComposing: false` — so
+ * the committed text would reach the pane followed by an Enter the user meant
+ * for the IME, submitting the composer or confirming a dialog's highlighted
+ * option. That keydown still carries `keyCode` 229, the same test
+ * `MessageInput` uses.
  */
 export function encodeKeyEvent(event: KeyEventLike): DirectInputEvent | null {
-  if (event.isComposing === true) return null;
+  if (event.isComposing === true || event.keyCode === IME_PROCESS_KEY_CODE) return null;
   if (event.metaKey || event.altKey) return null;
 
   if (event.key === 'Tab') {

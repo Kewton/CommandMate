@@ -39,7 +39,7 @@ function footerRows(frame: string, isFooter: (row: string) => boolean = isClaude
     .flatMap((row, i) => (isFooter(row) ? [i + 1] : []));
 }
 
-describe('本物のフッタは従来どおり採用される（採取 1・2, claude 2.1.278）', () => {
+describe('本物のフッタは従来どおり採用される（採取 1・2・3, claude 2.1.278）', () => {
   it.each([
     ['claude-2.1.278-bash-approval.txt', 25],
     ['claude-2.1.278-edit-approval.txt', 58],
@@ -47,6 +47,9 @@ describe('本物のフッタは従来どおり採用される（採取 1・2, cl
     // 同じフレームの上に引用が 4 行あるが、当たるのは本物の 1 行だけ（採取 5）
     ['claude-2.1.278-picker-below-quoted-footers.txt', 92],
     ['claude-2.1.278-approval-below-quoted-footers.txt', 102],
+    // フッタの下（ペイン最下部）に task panel がある（採取 3, Issue 2811）
+    ['claude-2.1.278-bash-approval-task-panel.txt', 24],
+    ['claude-2.1.278-askuserquestion-task-panel.txt', 32],
   ])('%s: L%i だけがフッタで、正規化はその行で終わる', (name, footerLine) => {
     const frame = stripAnsi(capture(name));
     expect(footerRows(frame)).toEqual([footerLine]);
@@ -59,6 +62,8 @@ describe('本物のフッタは従来どおり採用される（採取 1・2, cl
     for (const [name, footerLine] of [
       ['claude-2.1.278-bash-approval.txt', 25],
       ['claude-2.1.278-askuserquestion-picker.txt', 30],
+      ['claude-2.1.278-bash-approval-task-panel.txt', 24],
+      ['claude-2.1.278-askuserquestion-task-panel.txt', 32],
     ] as const) {
       const row = capture(name).split('\n')[footerLine - 1];
       const prefix = row.slice(0, row.search(/Esc to cancel|Enter to select/));
@@ -67,8 +72,30 @@ describe('本物のフッタは従来どおり採用される（採取 1・2, cl
     }
   });
 
-  it('フッタの下に描かれた task panel は従来どおり捨てる（旧版の実キャプチャ）', () => {
-    // 2.1.278 では task panel を出せなかった（未測）。旧版の実キャプチャで固定する。
+  it.each([
+    ['claude-2.1.278-bash-approval-task-panel.txt', 24],
+    ['claude-2.1.278-askuserquestion-task-panel.txt', 32],
+  ])('%s: フッタ L%i の下に描かれた task panel は捨てる（2.1.278, Issue 2811）', (name, footerLine) => {
+    const frame = stripAnsi(capture(name));
+    const rows = frame.split('\n');
+    // task panel はフッタの直下ではなくペインの最下部に描かれ、フッタとの間は空行
+    expect(rows.length).toBe(1001);
+    expect(rows.slice(footerLine).filter(row => row.trim() !== '')).toEqual([
+      '  3 tasks (0 done, 1 in progress, 2 open)',
+      '  ◼ a.ts を読む',
+      '  ◻ README.md を読む',
+      '  ◻ probe.txt を作る',
+    ]);
+    expect(rows.findIndex(row => row.includes('3 tasks (0 done, 1 in progress, 2 open)')) + 1).toBe(997);
+
+    const normalized = normalizeTuiFrameForDetection(frame);
+    expect(normalized).not.toContain('3 tasks (0 done, 1 in progress, 2 open)');
+    expect(normalized).not.toContain('◻ probe.txt を作る');
+    expect(normalized.split('\n').at(-1)).toBe(rows[footerLine - 1]);
+  });
+
+  it('旧版の実キャプチャ（2.1.240 / 2.1.223）でも task panel を捨てる', () => {
+    // 2776 では 2.1.278 の task panel を出せず、この 2 本で代えていた（Issue 2811 で上の実測に置き換え）。
     const bash = stripAnsi(read('tests/unit/lib/detection/fixtures/claude-live-1708/bash-approval-taskpanel.txt'));
     expect(footerRows(bash)).toEqual([108]);
     const bashOut = normalizeTuiFrameForDetection(bash);
