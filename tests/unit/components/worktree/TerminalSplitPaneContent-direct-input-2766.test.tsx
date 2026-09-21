@@ -21,9 +21,16 @@
  * is needed.
  *
  * `MessageInput` and `AutoYesToggle` are the REAL components: the toggle is
- * handed to the composer through `autoYesSlot` as a Fragment beside Auto-Yes,
- * and a stub for either would make "both are in the meta row" true by
- * construction rather than by rendering.
+ * handed to the composer through `directInputSlot` (Issue #2797 moved it there
+ * from `autoYesSlot`), and a stub for the composer would make "it is in the
+ * toolbar's end group" true by construction rather than by rendering.
+ *
+ * **Where it is drawn (Issue #2797).** In #2766 it rode the meta row beside
+ * Auto-Yes, which hid it in the two-split pane and the 2x2 grid and scrolled it
+ * partly or wholly out of sight in the three-split panes. What is measured
+ * about that lives in `tests/e2e/composer-two-row-2598.spec.ts`; this file pins
+ * the structure the measurement depends on — the group it is mounted in, and
+ * the container-query literal that prints its label.
  *
  * @vitest-environment jsdom
  */
@@ -31,7 +38,10 @@
 import React from 'react';
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
-import { TerminalSplitPaneContent } from '@/components/worktree/TerminalSplitPaneContent';
+import {
+  DIRECT_INPUT_LABEL_MIN_CONTAINER_PX,
+  TerminalSplitPaneContent,
+} from '@/components/worktree/TerminalSplitPaneContent';
 import { getSplitSurfaceModeStorageKey } from '@/config/surface-mode-config';
 import type { AgentInstance, CLIToolType } from '@/lib/cli-tools/types';
 import { installRadixJsdomPolyfills } from '@tests/helpers/radix-jsdom';
@@ -216,14 +226,55 @@ describe('[#2766] the toggle drives the bar', () => {
     await waitFor(() => expect(bar()).toBeNull());
     expect(toggle()).toHaveAttribute('aria-pressed', 'false');
   });
+});
 
-  it('sits in the composer meta row beside Auto-Yes', () => {
-    // #2598's row. Both controls go through the one `autoYesSlot`, so this is
-    // where a second control would show up as a broken strip if it broke one.
+describe('[#2797] where the toggle is drawn', () => {
+  it('sits in the toolbar end group, before the interrupt button', () => {
+    // The end group is the one place in the composer that neither shrinks nor
+    // scrolls. The start group and the meta row's Auto-Yes half both scroll
+    // sideways, and #2766's toggle was scrolled out of the latter.
     render(split());
-    const row = screen.getByTestId('composer-auto-yes');
-    expect(within(row).getByTestId('direct-input-toggle')).toBe(toggle());
-    expect(within(row).getByRole('switch')).toBeInTheDocument();
+    const end = screen.getByTestId('composer-toolbar-end');
+    expect(within(end).getByTestId('direct-input-toggle')).toBe(toggle());
+    const order = Array.from(end.querySelectorAll('[data-testid]')).map(n => n.getAttribute('data-testid'));
+    expect(order.indexOf('direct-input-toggle')).toBeGreaterThanOrEqual(0);
+    expect(order.indexOf('direct-input-toggle')).toBeLessThan(order.indexOf('interrupt-button'));
+    expect(screen.getAllByTestId('direct-input-toggle')).toHaveLength(1);
+  });
+
+  it('is gone from the meta row and from the scrolling start group', () => {
+    render(split());
+    const meta = screen.getByTestId('composer-meta-row');
+    expect(within(meta).queryByTestId('direct-input-toggle')).toBeNull();
+    expect(within(screen.getByTestId('composer-toolbar-start')).queryByTestId('direct-input-toggle')).toBeNull();
+    // The meta row's Auto-Yes half holds Auto-Yes and nothing else again —
+    // the budget #2598 measured.
+    const autoYes = screen.getByTestId('composer-auto-yes');
+    expect(within(autoYes).getByRole('switch')).toBeInTheDocument();
+    expect(within(autoYes).queryAllByRole('button')).toHaveLength(0);
+  });
+
+  it('prints its label only from the container threshold, spelled as a literal', () => {
+    render(split());
+    const label = screen.getByTestId('direct-input-toggle-label');
+    expect(toggle().contains(label)).toBe(true);
+    expect(label).toHaveTextContent(/directInput\.toggle$/);
+    const classes = label.className.split(/\s+/);
+    // Hidden by default, printed from the threshold up. Tailwind cannot see an
+    // interpolated class, so the literal must spell the constant.
+    expect(classes).toContain('hidden');
+    expect(classes).toContain(`@min-[${DIRECT_INPUT_LABEL_MIN_CONTAINER_PX}px]:inline`);
+    expect(toggle().className.split(/\s+/)).toContain(`@min-[${DIRECT_INPUT_LABEL_MIN_CONTAINER_PX}px]:px-2`);
+  });
+
+  it('keeps a name and an icon where the label is not printed', () => {
+    render(split());
+    // `aria-label` names it whether or not the label is drawn; the icon is
+    // decoration, so it does not add to the name.
+    expect(toggle()).toHaveAccessibleName(/directInput\.toggleAria$/);
+    const icon = toggle().querySelector('svg');
+    expect(icon).not.toBeNull();
+    expect(icon).toHaveAttribute('aria-hidden', 'true');
   });
 });
 

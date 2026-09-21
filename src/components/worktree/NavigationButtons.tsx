@@ -4,6 +4,7 @@
  * NavigationButtons component for TUI selection list navigation.
  * Issue #473: Provides Up/Down/Enter/Escape buttons for OpenCode TUI interaction.
  * Issue #592: Added Left/Right buttons for Copilot reasoning effort adjustment.
+ * Issue #2793: `hideEnterKey` drops Enter for a screen where it is not safe.
  *
  * Touch targets: minimum 44x44px for mobile accessibility.
  * Keyboard: Arrow keys intercepted only when component has focus.
@@ -48,6 +49,18 @@ export interface NavigationButtonsProps {
    * for every existing selection-list (e.g. /model) caller.
    */
   showPagerKeys?: boolean;
+  /**
+   * Issue #2793: leave `Enter` off the pad — the button AND the intercepted
+   * Enter key — while every other key stays.
+   *
+   * For Command Code's plan review, where `Enter` means two different things
+   * depending on a focus the card cannot show: on a plan line it opens a comment
+   * box, and once `↓` has walked past the plan's last line it RUNS the focused
+   * action, which is `❯ Approve` (measured by #2763: `↓` ×24 then `Enter`
+   * executed the plan). The user cannot tell which one a tap would do, so the
+   * tap is not offered; approving has its own labelled button (#2762).
+   */
+  hideEnterKey?: boolean;
 }
 
 /**
@@ -100,7 +113,14 @@ const PAGER_BUTTONS: ReadonlyArray<NavButtonDef> = [
 
 /* eslint-enable no-restricted-syntax */
 
-export function NavigationButtons({ worktreeId, cliToolId, instanceId, onKeysSent, showPagerKeys = false }: NavigationButtonsProps) {
+export function NavigationButtons({
+  worktreeId,
+  cliToolId,
+  instanceId,
+  onKeysSent,
+  showPagerKeys = false,
+  hideEnterKey = false,
+}: NavigationButtonsProps) {
   const t = useTranslations('worktree');
   // Issue #2176: the highlight timer is owned by the hook (ref-held id, cleared
   // on the next press and on unmount) instead of being fired and forgotten here.
@@ -114,10 +134,12 @@ export function NavigationButtons({ worktreeId, cliToolId, instanceId, onKeysSen
     send(keys);
   }, [markPressed, send]);
 
-  const buttons = useMemo(
-    () => (showPagerKeys ? [...NAVIGATION_BUTTONS, ...PAGER_BUTTONS] : NAVIGATION_BUTTONS),
-    [showPagerKeys],
-  );
+  const buttons = useMemo(() => {
+    const base = hideEnterKey
+      ? NAVIGATION_BUTTONS.filter(({ key }) => key !== 'Enter')
+      : NAVIGATION_BUTTONS;
+    return showPagerKeys ? [...base, ...PAGER_BUTTONS] : base;
+  }, [showPagerKeys, hideEnterKey]);
 
   const handleKeyDown = useCallback((e: KeyboardEvent<HTMLDivElement>) => {
     // Only arrow/Enter/Escape are handled via keyboard; the pager 'q'/PgUp/etc.
@@ -130,12 +152,15 @@ export function NavigationButtons({ worktreeId, cliToolId, instanceId, onKeysSen
       Enter: 'Enter',
       Escape: 'Escape',
     };
+    // Issue #2793: a hidden Enter must not come back through the keyboard.
+    // Not intercepted, so Enter on a focused button just activates that button.
+    if (hideEnterKey && e.key === 'Enter') return;
     const mappedKey = keyMap[e.key];
     if (mappedKey) {
       e.preventDefault();
       sendKeys([mappedKey]);
     }
-  }, [sendKeys]);
+  }, [sendKeys, hideEnterKey]);
 
   return (
     <div
