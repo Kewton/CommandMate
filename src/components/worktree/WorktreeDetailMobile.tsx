@@ -223,6 +223,16 @@ interface MobileContentProps {
    * own pad inside the dialog card.
    */
   onSurfaceModeChange?: (mode: SurfaceMode) => void;
+  /**
+   * [Issue #2799] The phone's direct-input keyboard is open.
+   *
+   * Pure pass-through to {@link MobileTerminalTab}, the same way as
+   * `onSurfaceModeChange`: the keyboard is docked in the screen's bottom bar,
+   * outside this switch's subtree, and the tab has to hide its own key pads
+   * and lock the surface toggle while it is open. Optional, like the rest of
+   * the tab's screen-facing props.
+   */
+  directInputOpen?: boolean;
 }
 
 // Issue #1494 / #1496: MobileTerminalTab moved to its own module so the mobile
@@ -278,6 +288,7 @@ export const MobileContent = memo(function MobileContent({
   verification,
   toolsSubTabRequest,
   onSurfaceModeChange,
+  directInputOpen,
 }: MobileContentProps) {
   // Unconditional hook call — must stay above the `activeTab` switch below.
   const tWorktree = useTranslations('worktree');
@@ -292,6 +303,7 @@ export const MobileContent = memo(function MobileContent({
             instanceId={instanceId}
             disableAutoFollow={disableAutoFollow}
             onSurfaceModeChange={onSurfaceModeChange}
+            directInputOpen={directInputOpen}
           />
         </ErrorBoundary>
       );
