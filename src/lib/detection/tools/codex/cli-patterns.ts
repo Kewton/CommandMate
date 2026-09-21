@@ -108,9 +108,10 @@ export const CODEX_GLYPH = '›';
  * The codex build these dialog rules were read off.
  *
  * Separate from `CODEX_VERIFIED_AGAINST` on purpose: that stamp is the whole
- * detector's (`tools/verified-against.ts`) and still names 0.148.0, because one
- * idle frame of the same 0.155.1 probe is misread for a reason outside these
- * rules — the status-bar boundary (Issue #2818). The dialog frames themselves
+ * detector's (`tools/verified-against.ts`). It was held at 0.148.0 while one
+ * idle frame of the same 0.155.1 probe was misread for a reason outside these
+ * rules — the status-bar boundary — and advanced to 0.155.1 once Issue #2818
+ * fixed that boundary. The dialog frames themselves
  * all read correctly on 0.155.1 (Issue #2808, `tests/fixtures/codex-dialogs-0155/`):
  * the command approval, `/model`, `/experimental`, `/keymap` and the
  * directory-trust screen are `waiting`, and every highlighted row is the

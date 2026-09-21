@@ -110,7 +110,9 @@ env -u CM_DB_PATH -u CM_ROOT_DIR -u CM_BIND -u CM_VAPID_* \
 **この probe では入力欄のグリフはオレンジにならなかった**（3 枚とも色なしの `ESC[1m›`）。#2798 が本番サーバから
 採ったオレンジのグリフ（`ESC[38;2;255;178;66m`）がどの条件で出るのかは特定していない。
 
-## 表の外の所見 — アイドルが `running` に読まれる（規則は直していない）
+## 表の外の所見 — アイドルが `running` に読まれる（#2818 で解消）
+
+**#2818 で解消した**: `findCodexFooterBoundary`（`src/lib/detection/tools/codex/detect.ts`）がスレッド名つきのバーも境界と認めるようになり、`idle-after-declined-approval.txt` は `ready` と読まれる（`codex-dialogs-0155-2808.test.ts` の期待値は反転済み、`CODEX_VERIFIED_AGAINST` も 0.155.1 へ進めた）。以下は解消前の記録。
 
 `idle-after-declined-approval.txt` はターンが中断されて入力待ちの画面だが、`detectSessionStatus` は
 **`running` / `thinking_indicator`** を返す。#2798 の行規則は正しく読めている（23 行目は `composer`、
