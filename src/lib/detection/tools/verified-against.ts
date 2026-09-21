@@ -33,24 +33,36 @@ export const CLAUDE_VERIFIED_AGAINST = {
 } as const;
 
 /**
- * codex-cli these rules were read off (#1628 / #1829 / #1890 fixtures).
+ * codex-cli these rules were read off (#1628 / #1829 / #1890 fixtures; re-read
+ * on 0.155.1 by #2808 / #2818).
  *
- * ## Not advanced by Issue #2808
+ * ## Held back by Issue #2808, advanced to 0.155.1 by Issue #2818
  *
  * #2808 re-captured codex **0.155.1** on a private tmux socket at 200x1000
  * (`tests/fixtures/codex-dialogs-0155/`, 2026-09-21): the command approval,
  * `/model`, `/experimental`, `/keymap` and the directory-trust screen all read
  * `waiting`, each highlighted row the same one-span shape as the 0.146.0-0.153.2
- * captures, and the idle composers read `ready`. The stamp still stays here because one frame of the
- * same probe is misread: the idle composer after a declined approval reads
- * `running`, since the status bar carries a thread title after the path, which
- * `CODEX_STATUS_BAR_PATTERN` does not accept, and the tail window then reaches
- * the declined command's lingering `• Ran` row. `codex-dialogs-0155-2808.test.ts`
- * pins that frame; advance this stamp once it reads `ready`.
+ * captures, and the idle composers read `ready`. The stamp stayed at 0.148.0
+ * because one frame of that probe was misread: the idle composer after a
+ * declined approval read `running`. From 0.154.0 on the status bar carries the
+ * thread's title after the path, `CODEX_STATUS_BAR_PATTERN` wants the path last,
+ * so the detector found no bar and its bar-independent branch D read the
+ * declined command's lingering `• Ran` row in the 15-row tail.
+ *
+ * #2818 made the titled bar a boundary (`CODEX_TRAILED_STATUS_BAR_PATTERN`) and
+ * probed 0.155.1 again on its own socket (`tests/fixtures/codex-thread-title-probe/`,
+ * 2026-09-21): a turn running `sleep 30` under a titled bar, the same turn after
+ * the command finished and codex was still working, and the idle composer once
+ * it had answered — the last with the `• Ran sleep 30` row still in the tail,
+ * which read `running` before the fix. The two running frames read `running`,
+ * both idle frames read `ready`, and no other frame in the tree changed its
+ * verdict. **The stamp moved to 0.155.1 because every 0.155.1 frame now reads
+ * correctly** (`codex-thread-title-bar-2818.test.ts`,
+ * `codex-dialogs-0155-2808.test.ts`).
  */
 export const CODEX_VERIFIED_AGAINST = {
-  version: '0.148.0',
-  capturedAt: '2026-08-15',
+  version: '0.155.1',
+  capturedAt: '2026-09-21',
   paneGeometry: '200x1000',
 } as const;
 

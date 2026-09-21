@@ -75,7 +75,7 @@
  */
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Cpu, MessageSquare, StickyNote, TerminalSquare } from 'lucide-react';
+import { Cpu, MessageSquare, StickyNote, TerminalSquare, Wrench } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
 import { TerminalDisplay } from '@/components/worktree/TerminalDisplay';
 import { TerminalEscapeHatch } from '@/components/worktree/TerminalEscapeHatch';
@@ -113,6 +113,7 @@ import {
   useRegisterChatOptimisticSend,
 } from '@/contexts/WorktreeChatSendContext';
 import { useChatFileLinkScope } from '@/lib/chat/chat-file-link-scope';
+import { useChatToolActivityPreference } from '@/lib/chat/chat-tool-activity';
 import {
   buildModelByInstance,
   formatAgentModelLabel,
@@ -552,6 +553,10 @@ const MobileChatSurface = memo(function MobileChatSurface({
         // chat surface is where re-sending a previous prompt is most useful,
         // because the terminal is not on screen to scroll back through.
         onInsertToMessage: insertToComposer,
+        // Issue #2821: the tab's surface pill floats over the transcript's
+        // top-right icons, so the transcript draws none and the pill carries
+        // the tool-activity toggle instead.
+        hideCornerControls: true,
       }}
     />
   );
@@ -749,6 +754,11 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
     [directInputOpen, handleSurfaceModeChange],
   );
 
+  // Issue #2821: the chat surface's tool-activity toggle, drawn in the pill on
+  // the phone. The same page-wide value every transcript reads, so a tap here
+  // re-renders the transcript underneath in the same pass.
+  const [showToolActivity, toggleToolActivity] = useChatToolActivityPreference();
+
   // Issue #2799: keep the terminal on its last row while the keyboard takes
   // height from it. A shrinking scroll box keeps its `scrollTop`, so the rows
   // it loses come off the BOTTOM — the prompt the user opened the keyboard to
@@ -912,6 +922,41 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
             </button>
           );
         })}
+        {/* Issue #2821: the tool-activity toggle, on the chat surface only (the
+            terminal has nothing to fold). The transcript's own copy sits under
+            this pill, so it is withdrawn there (`hideCornerControls`) and drawn
+            here instead. The rule keeps it visibly apart from the two surface
+            segments, whose "selected" tint is close to its "on" tint. Not
+            subject to `directInputOpen`: direct input only opens on the
+            terminal surface, where this button is not drawn. */}
+        {surfaceMode === 'chat' ? (
+          <>
+            <span aria-hidden="true" className="mx-0.5 h-6 w-px bg-border" />
+            <button
+              type="button"
+              onClick={toggleToolActivity}
+              aria-pressed={showToolActivity}
+              aria-label={
+                showToolActivity
+                  ? t('chatTranscript.toolActivity.hide')
+                  : t('chatTranscript.toolActivity.show')
+              }
+              title={
+                showToolActivity
+                  ? t('chatTranscript.toolActivity.hide')
+                  : t('chatTranscript.toolActivity.show')
+              }
+              data-testid="mobile-chat-tool-activity-toggle"
+              className={`pointer-events-auto flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full transition-colors touch-manipulation ${
+                showToolActivity
+                  ? 'bg-accent-500/15 text-accent-700 dark:text-accent-400'
+                  : 'text-muted-foreground'
+              }`}
+            >
+              <Wrench size={18} aria-hidden="true" />
+            </button>
+          </>
+        ) : null}
       </div>
       {/* Issue #2106: the measured surface. The wrapper is what the flex column
           hands to TerminalDisplay (which is `h-full`), so its rect IS the

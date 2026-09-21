@@ -405,8 +405,8 @@ describe('[#2310] CODEX_DIALOG_FOOTER_PATTERN covers every measured footer', () 
 
   it('stamps the build these rules were read off', () => {
     expect(CODEX_DIALOG_RULES_VERIFIED_AGAINST).toEqual({
-      version: '0.153.2',
-      capturedAt: '2026-09-04',
+      version: '0.155.1',
+      capturedAt: '2026-09-21',
       paneGeometry: '200x1000',
     });
   });
