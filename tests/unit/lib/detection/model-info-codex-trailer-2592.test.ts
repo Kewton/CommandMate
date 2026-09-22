@@ -54,10 +54,14 @@ describe('[#2592 F3] the trailer-bearing bar yields model and effort', () => {
   });
 
   it('still reads the pre-0.154 bar that ends in the path', () => {
-    // The shape #1784 was written for — unchanged.
+    // The shape #1784 was written for — unchanged. The bar reads
+    // `gpt-5.6-sol default`: codex's `None` effort, which names no level, so the
+    // effort is null and — since Issue #2835 — flagged as shown-but-unreadable,
+    // which is what stops the latch keeping an older effort beside it.
     expect(extractModelInfo('codex', frame('codex-default.txt'))).toEqual({
       model: 'gpt-5.6-sol',
       effort: null,
+      effortUnreadable: true,
     });
   });
 

@@ -72,11 +72,27 @@ import {
 /**
  * The reasoning-effort vocabulary these tools actually print.
  *
- * `minimal` and `xhigh` are the ends Codex exposes; Claude prints `xhigh` too.
+ * `minimal` and `xhigh` are the ends Codex exposed until 0.155; Claude prints
+ * `xhigh` too. Issue #2835 adds the three levels above `xhigh` that codex 0.155.1
+ * defines (`ReasoningEffort` in `codex-rs/protocol/src/openai_models.rs`, tag
+ * `rust-v0.155.1`: `max` / `ultra` / `persistent`, drawn in the status bar
+ * verbatim by `status_line_reasoning_effort_label`). Its `None` is drawn as
+ * `default` and is deliberately NOT a level — it names no effort. Command Code's
+ * `with max effort` banner resolves through the same list.
+ *
  * Anything outside this list is treated as "not an effort token", which is what
  * keeps a stray word at the end of a status bar from being published as one.
  */
-export const REASONING_EFFORT_LEVELS = ['minimal', 'low', 'medium', 'high', 'xhigh'] as const;
+export const REASONING_EFFORT_LEVELS = [
+  'minimal',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+  'max',
+  'ultra',
+  'persistent',
+] as const;
 
 export type ReasoningEffort = (typeof REASONING_EFFORT_LEVELS)[number];
 
@@ -86,6 +102,18 @@ export interface ModelInfo {
   model: string | null;
   /** The reasoning effort on screen, or null. Always a {@link ReasoningEffort}. */
   effort: string | null;
+  /**
+   * The frame draws an effort in the place the effort goes, but not one of
+   * {@link REASONING_EFFORT_LEVELS} (Issue #2835).
+   *
+   * Set only by the Codex status-bar reader, and only when true — every other
+   * reading omits it, so the `toEqual` suites that pin `{ model, effort }` keep
+   * their shape. It is what lets the latch tell "this frame does not show an
+   * effort" (keep the last one) from "this frame shows an effort that is no
+   * longer the last one" (drop it): codex draws `default`, or a model-defined
+   * value, exactly where `xhigh` used to be.
+   */
+  effortUnreadable?: true;
 }
 
 /**
@@ -178,7 +206,24 @@ export function resolveEffortToken(
  * `cli-patterns.ts` documents).
  */
 export const CODEX_FOOTER_MODEL_PATTERN =
-  /^\s*([^\s·]+)(?:\s+(minimal|low|medium|high|xhigh)\b)?/i;
+  /^\s*([^\s·]+)(?:\s+(minimal|low|medium|high|xhigh|max|ultra|persistent)\b)?/i;
+
+/**
+ * The head of a Codex status bar that has a word where the effort goes
+ * (Issue #2835).
+ *
+ * codex draws `<model> <effort>` and, for an effort it has no name for, still
+ * draws a word there: `default` for `None` (`status_line_reasoning_effort_label`,
+ * codex 0.155.1; live in `tests/fixtures/agent-mode-2592/codex-default.txt`), or
+ * a model-defined value verbatim. A head whose second token is a word is
+ * therefore a bar that SHOWS an effort, even when {@link CODEX_FOOTER_MODEL_PATTERN}
+ * cannot name it. The legacy o4-mini head (`o4-mini            50% left`) has no
+ * such slot — its second token starts with a digit — and neither does a status
+ * line configured to show the model alone.
+ *
+ * No /g. No nested quantifiers: two adjacent runs and a lookahead.
+ */
+export const CODEX_FOOTER_EFFORT_SLOT_PATTERN = /^\s*[^\s·]+\s+[A-Za-z][A-Za-z_-]*(?=\s|$)/;
 
 /**
  * A codex status bar with something AFTER the path (Issue #2592).
@@ -226,7 +271,8 @@ function readCodexFooter(line: string): ModelInfo | null {
   }
   const separator = line.indexOf('·');
   if (separator < 0) return null;
-  const match = CODEX_FOOTER_MODEL_PATTERN.exec(line.slice(0, separator));
+  const head = line.slice(0, separator);
+  const match = CODEX_FOOTER_MODEL_PATTERN.exec(head);
   if (!match) return null;
   const model = match[1];
   if (!isPlausibleModelToken(model)) return null;
@@ -240,6 +286,13 @@ function readCodexFooter(line: string): ModelInfo | null {
   // version number, so a digit in the token or a recognised effort keyword
   // beside it is what separates chrome from prose.
   if (effort === null && !/\d/.test(model)) return null;
+  // Issue #2835: a bar that shows an effort this module cannot name says the
+  // latched effort is no longer current. Publishing the old one would be a
+  // wrong value, which is worse than none — the case that found it was a
+  // session moved from `xhigh` to `max` while `max` was not yet a level.
+  if (effort === null && CODEX_FOOTER_EFFORT_SLOT_PATTERN.test(head)) {
+    return { model, effort: null, effortUnreadable: true };
+  }
   return { model, effort };
 }
 
@@ -643,11 +696,10 @@ function readOpencodeStepMarker(line: string): ModelInfo | null {
  *    footer reads `? for shortcuts · taste on`), so everything from the dot on
  *    is dropped, and the dot itself is optional.
  *  - **The effort is read when the banner prints one, through the shared
- *    vocabulary.** `low` / `high` resolve; `max` is not a
- *    {@link ReasoningEffort} and answers null rather than widening a list every
- *    other reader and the UI type depend on. The model half is published either
- *    way: the ` with … effort` frame delimits it cleanly, so nothing is
- *    half-read.
+ *    vocabulary.** `low` / `high` / `max` resolve (`max` since Issue #2835,
+ *    which added it to {@link REASONING_EFFORT_LEVELS} for codex; before that it
+ *    answered null). The model half is published either way: the
+ *    ` with … effort` frame delimits it cleanly, so nothing is half-read.
  *
  * ## After a `/model` switch (measured, 1.49.0)
  *
