@@ -1821,6 +1821,13 @@ export function getLastKnownAgentModel(
  * which is the honest state for gemini/copilot and for any session whose chrome
  * this module has no rule for.
  *
+ * **The one exception is an effort the frame shows but cannot name** (Issue
+ * #2835, `info.effortUnreadable`). A codex bar that draws `default` or a
+ * model-defined value where `xhigh` used to be is not "not showing" the effort
+ * — it is showing a different one. Keeping `xhigh` would publish a value the
+ * session is no longer running at, so the effort half is dropped to null and
+ * the model half latches as usual.
+ *
  * @param info - {@link import('@/lib/detection/model-info-extractor').extractModelInfo}'s answer
  */
 export function recordCapturedModelInfo(
@@ -1836,7 +1843,7 @@ export function recordCapturedModelInfo(
   const model = info.model ? info.model.slice(0, MAX_EVENT_DETAIL_LENGTH) : (previous?.model ?? null);
   capturedModelInfo.set(key, {
     model,
-    effort: info.effort ?? previous?.effort ?? null,
+    effort: info.effortUnreadable ? null : (info.effort ?? previous?.effort ?? null),
     // Issue #2361: the change stamp moves only when the model half takes a
     // different value. A banner re-read on every poll keeps the stamp where the
     // first sighting put it, so it never out-dates a hook by mere repetition.
