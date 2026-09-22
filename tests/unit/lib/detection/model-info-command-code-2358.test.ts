@@ -157,13 +157,13 @@ describe('extractModelInfo: command-code banner after /model (Issue #2358, 1.49.
     });
   });
 
-  it('publishes the model and no effort for `max`, which is not a ReasoningEffort', () => {
-    // `max` is a Command Code level with no counterpart in
-    // REASONING_EFFORT_LEVELS. The model half is delimited by the literal
-    // ` with … effort` frame, so it is read whole; the effort answers null.
+  it('publishes the model and `max`, a shared level since Issue #2835', () => {
+    // `max` answered null until #2835 added it to REASONING_EFFORT_LEVELS for
+    // codex; Command Code's banner resolves through the same list. The model
+    // half is delimited by the literal ` with … effort` frame either way.
     expect(extractModelInfo('command-code', liveFrame('boot-effort-max'))).toEqual({
       model: 'deepseek-v4-flash-(latest)',
-      effort: null,
+      effort: 'max',
     });
   });
 
@@ -214,7 +214,8 @@ describe('COMMAND_CODE_BANNER_MODELS_PATTERN', () => {
   });
 
   it('answers null effort for a level outside the shared vocabulary, model intact', () => {
-    expect(extractModelInfo('command-code', '# models: deepseek-v4-flash-(latest) with max effort · taste-1'))
+    // `max` was the example here until Issue #2835 made it a level.
+    expect(extractModelInfo('command-code', '# models: deepseek-v4-flash-(latest) with turbo effort · taste-1'))
       .toEqual({ model: 'deepseek-v4-flash-(latest)', effort: null });
   });
 

@@ -1,0 +1,20 @@
+{
+  "version": "0.40.1",
+  "date": "2026-09-22",
+  "highlight": {
+    "ja": "Codex の推論の強さが max のとき、セッション一覧とインスタンス一覧に表示されない問題を直しました。",
+    "en": "Fixed Codex sessions with max reasoning effort not showing that effort in the session and instance lists."
+  },
+  "added": [],
+  "improved": [],
+  "fixed": [
+    {
+      "ja": "Codex の推論の強さが max・ultra・persistent のとき、一覧に表示されるようになりました。",
+      "en": "Codex reasoning effort set to max, ultra, or persistent now appears in the session and instance lists."
+    },
+    {
+      "ja": "Codex で推論の強さを切り替えたあと、前の値が表示され続ける問題を直しました。",
+      "en": "Fixed the previous reasoning effort staying on screen after switching effort in a Codex session."
+    }
+  ]
+}

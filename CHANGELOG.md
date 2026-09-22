@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.40.1] - 2026-09-22
+
+> **Highlight**: codex の reasoning effort が `max` のとき、`commandmate ls --json` と `instances --json` が effort を返さなかった問題を直したパッチリリース（#2835）。codex 0.155.1 の `max` / `ultra` / `persistent` を語彙に足し、同じセッションで effort を変えたときに前の値が残る問題もあわせて直した。実 codex 0.155.1（`gpt-5.6-terra`）で、max → xhigh → max と切り替えて両 API が毎回正しい値を返すことを確かめた（修正前は、同じ実画面で max が null になり、max に戻しても xhigh が残った）。
+
+### Fixed
+
+- **fix(detection): codex の effort が `max` のとき `ls` / `instances` の `reasoningEffort` が空になり、同じセッションで effort を変えると古い値が残る問題を修正** (#2835): codex 0.155.1 は `xhigh` の上に `max` / `ultra` / `persistent` を持ち、ステータスバーにそのまま `gpt-5.6-terra max · ~/…` と描くが、共通語彙 `REASONING_EFFORT_LEVELS` と `CODEX_FOOTER_MODEL_PATTERN` が `xhigh` で止まっていたため effort を読めず、`ls --json` はキーを出さず `instances --json` は null を返していた。3 語を語彙とパターンに足した（Command Code の `with max effort` も同じ語彙で `max` と読むようになる）。あわせて、バーが effort の位置に語彙に無い語（`default`＝codex の None、モデル定義の値）を描いたときは `effortUnreadable` を立て、`recordCapturedModelInfo` が前の effort を残さず null にする（修正前は `xhigh` → `max` に変えたセッションが `xhigh` を返し続けた）。effort の欄が無いバー（旧 o4-mini の `50% left`、モデル名だけの表示）とバーが見えないフレームは従来どおり前の値を残す。
+
 ## [0.40.0] - 2026-09-21
 
 > **Highlight**: 検出層が画面を読めないときの逃げ道を作ったリリース。エージェントの tmux ペインへキーをそのまま届ける「直接入力」を、PC の分割ペイン（#2764〜#2766 / #2797）と、スマホの Termux 方式の画面内キーボード（#2799 / #2801 / #2824）に追加した。あわせて、分類できなかったフレームを緑の点滅（処理中）で描くのをやめ、「判別不能」（点滅しない中空のグレーの輪、ラベル「不明」）としてサイドバー・ヘッダ・Sessions・コマンドパレットに出す（#2775 / #2810 / #2822）。Command Code 1.58.0 の Plan review は検出・承認（Ctrl+A）できるようになり（#2760〜#2763 / #2793 / #2809）、codex 0.155.1 で完了後も選択リストや処理中のまま固まる誤読（#2798 / #2818）と、会話中の引用 1 行でフレームが切り落とされる問題（#2774 / #2776）を直した。スマホのチャット面では、ツール表示の切替と検索を面切替ピルの下から出し（#2821 / #2823）、ツール表示 ON で最新の返答が画面外へ押し出される問題も直した（#2820）。
