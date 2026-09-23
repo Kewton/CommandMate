@@ -3,8 +3,9 @@
  *
  * The view lists one agent instance per row, so the interesting behaviour is
  * entirely in these pure helpers: which rows exist (`buildSessionRows`), what
- * order they are in (`sortSessionRows` — status always first, except when the
- * user sorts BY status) and where a row leads (`buildSessionRowHref`).
+ * order they are in (`sortSessionRows` — `waiting` always first, except when
+ * the user sorts BY status; Issue #2838) and where a row leads
+ * (`buildSessionRowHref`).
  */
 
 import { describe, it, expect } from 'vitest';
@@ -102,6 +103,23 @@ describe('buildSessionRows (Issue #2656)', () => {
     ]);
   });
 
+  it('uses each instance\'s own time and falls back to the branch time (Issue #2838)', () => {
+    const rows = buildSessionRows([
+      item({
+        id: 'wt-a',
+        lastActivity: '2026-09-01T00:00:00Z',
+        lastActivityByInstance: { codex: '2026-09-05T00:00:00Z' },
+        cliStatus: { claude: 'ready', codex: 'ready' },
+      }),
+    ]);
+    expect(rows.map((r) => [r.key, r.lastActivity])).toEqual([
+      ['wt-a:claude', '2026-09-01T00:00:00Z'],
+      ['wt-a:codex', '2026-09-05T00:00:00Z'],
+    ]);
+    // the instance that sent last comes first under "newest first"
+    expect(keys(sortSessionRows(rows, 'updatedAt', 'desc'))).toEqual(['wt-a:codex', 'wt-a:claude']);
+  });
+
   it('contributes no rows for an item without cliStatus, and none for an empty list', () => {
     expect(buildSessionRows([item({ id: 'wt-none' })])).toEqual([]);
     expect(buildSessionRows([])).toEqual([]);
@@ -117,14 +135,23 @@ describe('sortSessionRows (Issue #2656)', () => {
     row({ key: 'e:claude', status: 'ready', repositoryName: 'Zeta', branchName: 'e' }),
   ];
 
-  it('puts status first for updatedAt, newest first within a status', () => {
+  it('puts only waiting first for updatedAt, then newest first regardless of status (Issue #2838)', () => {
     expect(keys(sortSessionRows(rows, 'updatedAt', 'desc'))).toEqual([
-      'a:codex', 'e:claude', 'c:claude', 'd:claude', 'b:claude',
+      'a:codex', 'd:claude', 'b:claude', 'c:claude', 'e:claude',
     ]);
   });
 
-  it('keeps status first even when the direction is ascending', () => {
+  it('keeps waiting first even when the direction is ascending (Issue #2838)', () => {
     expect(keys(sortSessionRows(rows, 'updatedAt', 'asc'))).toEqual([
+      'a:codex', 'e:claude', 'c:claude', 'b:claude', 'd:claude',
+    ]);
+  });
+
+  it('orders non-waiting rows by repository name regardless of status (Issue #2838)', () => {
+    expect(keys(sortSessionRows(rows, 'repositoryName', 'asc'))).toEqual([
+      'a:codex', 'd:claude', 'b:claude', 'c:claude', 'e:claude',
+    ]);
+    expect(keys(sortSessionRows(rows, 'repositoryName', 'desc'))).toEqual([
       'a:codex', 'e:claude', 'c:claude', 'b:claude', 'd:claude',
     ]);
   });
@@ -156,6 +183,40 @@ describe('sortSessionRows (Issue #2656)', () => {
       row({ key: 'z:1', branchName: 'a' }),
     ];
     expect(keys(sortSessionRows(same, 'branchName', 'asc'))).toEqual(['z:1', 'x:1', 'y:1']);
+  });
+
+  it('does not reorder rows on a running ⇄ ready flip alone (Issue #2838)', () => {
+    const before = [
+      row({ key: 'x:claude', status: 'running', lastActivity: '2026-09-02T00:00:00Z' }),
+      row({ key: 'y:claude', status: 'ready', lastActivity: '2026-09-01T00:00:00Z' }),
+    ];
+    const after = [
+      { ...before[0], status: 'ready' as const },
+      { ...before[1], status: 'running' as const },
+    ];
+    expect(keys(sortSessionRows(before, 'updatedAt', 'desc'))).toEqual(['x:claude', 'y:claude']);
+    expect(keys(sortSessionRows(after, 'updatedAt', 'desc'))).toEqual(['x:claude', 'y:claude']);
+  });
+
+  describe('regression: the four rows from the Issue #2838 report', () => {
+    const reported = [
+      row({ key: 'beta:claude', status: 'ready', repositoryName: 'beta', lastActivity: '2026-09-20T00:00:00Z' }),
+      row({ key: 'zeta:claude', status: 'ready', repositoryName: 'zeta', lastActivity: '2026-09-23T12:00:00Z' }),
+      row({ key: 'alpha:claude', status: 'running', repositoryName: 'alpha', lastActivity: '2026-09-23T10:00:00Z' }),
+      row({ key: 'alpha:codex', status: 'idle', repositoryName: 'alpha', lastActivity: '2026-09-23T11:00:00Z' }),
+    ];
+
+    it('repository name A→Z puts alpha first', () => {
+      expect(keys(sortSessionRows(reported, 'repositoryName', 'asc'))).toEqual([
+        'alpha:claude', 'alpha:codex', 'beta:claude', 'zeta:claude',
+      ]);
+    });
+
+    it('newest first puts the 3-day-old row last', () => {
+      expect(keys(sortSessionRows(reported, 'updatedAt', 'desc'))).toEqual([
+        'zeta:claude', 'alpha:codex', 'alpha:claude', 'beta:claude',
+      ]);
+    });
   });
 
   it('keeps the input order for full ties and does not mutate the input', () => {

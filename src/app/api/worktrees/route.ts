@@ -28,6 +28,7 @@ import { isWorktreeStalled } from '@/lib/detection/stalled-detector';
 import { getNextAction, getReviewStatus } from '@/lib/session/next-action-helper';
 import { resolveAgentInstances } from '@/lib/session/agent-instances-resolver';
 import { getAllSessionNotes, type SessionNote } from '@/lib/db/agent-instances-db';
+import { getLastMessageAtByInstance } from '@/lib/db/chat-db';
 import { getDefaultSelectedAgents } from '@/lib/db/app-settings-db';
 import { resolveSelectedAgents } from '@/lib/selected-agents-validator';
 import { deriveSessionStatus, isUnclassifiedCliStatus } from '@/lib/session/status-mapping';
@@ -101,6 +102,19 @@ export async function GET(request: NextRequest) {
     // for the whole server, inside the `dbMs` window because that is what it is;
     // a point query per worktree would multiply the poll every open client makes.
     const sessionNotesByWorktree = getAllSessionNotes(db);
+    // Issue #2838: each session row's own time (one GROUP BY for the server),
+    // so the sidebar's "newest first" sorts instances, not their worktree.
+    // A refinement of `updatedAt` rather than something the list stands on: if
+    // it cannot be read, the rows fall back to the worktree time instead of the
+    // whole list failing.
+    let lastActivityByWorktree = new Map<string, Record<string, Date>>();
+    try {
+      lastActivityByWorktree = getLastMessageAtByInstance(db);
+    } catch (error) {
+      logger.error('list:last-activity-failed', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
     const dbMs = performance.now() - dbStartedAt;
 
     // ---- Phase 2: the status. Every tmux round-trip lives here. -----------
@@ -162,6 +176,9 @@ export async function GET(request: NextRequest) {
       // Auto-Yes is server state, not a tmux reading.
       const autoYesByInstance: Record<string, AutoYesInstanceSummary> =
         autoYesByWorktree.get(worktree.id) ?? {};
+      // Issue #2838: a DB value, so it rides both paths like the notes.
+      const lastActivityByInstance: Record<string, Date> =
+        lastActivityByWorktree.get(worktree.id) ?? {};
 
       // `?includeStatus=0`: the status keys are OMITTED rather than zeroed. All
       // of them are optional on `Worktree`, and absence is the only honest way
@@ -170,7 +187,7 @@ export async function GET(request: NextRequest) {
       // dot. The review block goes with it: `nextAction` / `reviewStatus` are
       // derived from the status, so there is nothing to derive them from.
       if (!status) {
-        return { ...worktree, agentInstances, sessionNotes, autoYesByInstance };
+        return { ...worktree, agentInstances, sessionNotes, autoYesByInstance, lastActivityByInstance };
       }
 
       const base = {
@@ -179,6 +196,7 @@ export async function GET(request: NextRequest) {
         agentInstances,
         sessionNotes,
         autoYesByInstance,
+        lastActivityByInstance,
       };
 
       // Issue #600: Add review fields when ?include=review

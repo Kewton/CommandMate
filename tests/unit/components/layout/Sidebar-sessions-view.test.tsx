@@ -80,21 +80,24 @@ describe('Sidebar sessions view (Issue #2656)', () => {
     ]);
   });
 
-  it('lists one row per agent instance, attention first', async () => {
+  it('lists one row per agent instance, waiting first, then newest first (Issue #2838)', async () => {
     localStorage.setItem(SIDEBAR_VIEW_MODE_STORAGE_KEY, 'sessions');
     renderSidebar();
 
     await waitFor(() => {
       expect(screen.getAllByTestId('session-list-item')).toHaveLength(3);
     });
-    // waiting → ready → idle
-    expect(sessionKeys()).toEqual(['wt-a:codex', 'wt-a:claude', 'wt-b:claude']);
+    // waiting pinned first; the rest by the default sort (updatedAt, newest
+    // first), so wt-b (09-02, idle) comes before wt-a's claude (09-01, ready).
+    expect(sessionKeys()).toEqual(['wt-a:codex', 'wt-b:claude', 'wt-a:claude']);
 
     const rows = screen.getAllByTestId('session-list-item');
     expect(rows[0]).toHaveTextContent('Reviewer');
     expect(rows[0]).toHaveTextContent('feature/a · RepoA');
+    expect(rows[1]).toHaveTextContent('Claude');
+    expect(rows[1]).toHaveTextContent('feature/b · RepoB');
     expect(rows[2]).toHaveTextContent('Claude');
-    expect(rows[2]).toHaveTextContent('feature/b · RepoB');
+    expect(rows[2]).toHaveTextContent('feature/a · RepoA');
 
     // No groups and no branch rows in this view.
     expect(screen.queryAllByTestId('group-header')).toHaveLength(0);
