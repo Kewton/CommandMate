@@ -257,6 +257,11 @@ export interface SidebarBranchItem {
   hasUnread: boolean;
   /** Last activity timestamp (Date object or ISO string from API) */
   lastActivity?: Date | string;
+  /**
+   * Latest message time per agent instance (Issue #2838), keyed like
+   * `cliStatus`. Session rows use it; branch rows keep {@link lastActivity}.
+   */
+  lastActivityByInstance?: Partial<Record<string, Date | string>>;
   /** User description for this branch */
   description?: string;
   /** Per-instance status for sidebar display, keyed by agent-instance id (Issue #878) */
@@ -478,6 +483,7 @@ export function toBranchItem(worktree: Worktree): SidebarBranchItem {
     status,
     hasUnread,
     lastActivity: worktree.updatedAt,
+    lastActivityByInstance: worktree.lastActivityByInstance,
     description: worktree.description,
     cliStatus,
     cliStatusLabels,

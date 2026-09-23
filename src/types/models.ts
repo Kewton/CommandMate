@@ -278,6 +278,13 @@ export interface Worktree {
    * an omitted key when nothing is armed.
    */
   autoYesByInstance?: Partial<Record<string, AutoYesInstanceSummary>>;
+  /**
+   * Latest chat-message time per agent instance (Issue #2838), keyed like
+   * {@link sessionStatusByInstance}. Only `GET /api/worktrees` fills it in, on
+   * both paths (it is a DB value, not a tmux reading). An instance without any
+   * message is absent; the sidebar falls back to {@link updatedAt} for it.
+   */
+  lastActivityByInstance?: Partial<Record<string, Date | string>>;
   /** Whether this worktree is marked as favorite */
   favorite?: boolean;
   /** Worktree status: ready, in_progress, in_review, done, or null if not set */
