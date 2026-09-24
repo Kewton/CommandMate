@@ -58,6 +58,7 @@ import {
   clearTuiAccumulator,
 } from '../tui-accumulator';
 import { isDuplicatePrompt, normalizePromptForDedup } from './prompt-dedup';
+import { hasRecentAntigravityPermissionReceipt } from './antigravity-permission-receipts';
 // Issue #2457: the same rollout table, `hasDialogRules` cross-check and
 // `detectDialog` seam Auto-Yes reads, reached through the presence helper rather
 // than through `evaluateAutoYesDialogGate` — see `isNumberedDialogVouched`.
@@ -315,6 +316,11 @@ export function buildPromptExtractionResult(
  *   (Issue #499 Item 4); must be the split of THIS string, not of the raw capture
  * @param rawFrame - the SAME tick's capture with its box drawing intact (ANSI
  *   optional), for the tool readers anchored on it (Issue #2522)
+ * @param receiptScope - whose frame this is, when the caller answers it
+ *   automatically (Issue #2849). For agy only: a frame that reads as a prompt is
+ *   then handed back as no prompt unless agy asked CommandMate about a tool call
+ *   for that instance a moment ago. Omitted, the reading is not gated — which is
+ *   what every caller that only DISPLAYS the frame wants.
  * @returns PromptDetectionResult with isPrompt, promptData, and cleanContent
  */
 export function detectPromptOnCleanFrame(
@@ -322,6 +328,7 @@ export function detectPromptOnCleanFrame(
   cliToolId: CLIToolType,
   precomputedLines?: string[],
   rawFrame?: string,
+  receiptScope?: AntigravityReceiptScope,
 ): PromptDetectionResult {
   // Issue #2364: agy's `↑/↓ Navigate` dialogs are read by agy's own reader
   // before the generic pass, on the same spelling `tools/antigravity/detect.ts`
@@ -340,7 +347,11 @@ export function detectPromptOnCleanFrame(
   // API published the very same screen as an answerable four-option prompt.
   if (cliToolId === 'antigravity') {
     const dialog = detectAntigravityNumberedDialogPrompt(cleanOutput);
-    if (dialog !== null) return dialog;
+    if (dialog !== null) {
+      return isWithheldForWantOfReceipt(receiptScope)
+        ? { isPrompt: false, cleanContent: cleanOutput.trim() }
+        : dialog;
+    }
   }
 
   // Issue #2522: Command Code's footer-less `AskUserQuestion`, read by the same
@@ -396,7 +407,55 @@ export function detectPromptOnCleanFrame(
   ) {
     return { isPrompt: false, cleanContent: cleanOutput.trim() };
   }
+
+  // Issue #2849: the same withholding on this exit. agy's reader answering `null`
+  // does not mean the frame is no dialog — the generic pass above reads shapes
+  // agy's reader declines, and #2851 showed it can read a quotation — so a gate
+  // that covered only the reader's exit would leave this one open.
+  if (cliToolId === 'antigravity' && result.isPrompt && isWithheldForWantOfReceipt(receiptScope)) {
+    return { isPrompt: false, cleanContent: cleanOutput.trim() };
+  }
   return result;
+}
+
+/**
+ * Whose frame an automatic answer would go to (Issue #2849).
+ *
+ * `instanceId` is left out for the primary session, the way every Auto-Yes
+ * caller spells it.
+ */
+export interface AntigravityReceiptScope {
+  worktreeId: string;
+  instanceId?: string;
+}
+
+/**
+ * Should an agy frame that reads as a prompt be treated as no prompt because
+ * agy asked CommandMate about no tool call lately? (Issue #2849)
+ *
+ * agy asks (`PreToolUse`) before it draws ANY approval dialog and waits for the
+ * reply, so a dialog that is really open follows a question a moment before it,
+ * and one that is only quoted in a reply follows nothing. The frame carries no
+ * tool name, so the check is time-only.
+ *
+ * Not gated (false) when there is no scope: a caller that only shows the frame —
+ * the status API, the response poller's stored `prompt` row, the notification —
+ * must keep showing a real dialog on a machine whose hook is not installed or
+ * did not reach us. Only the caller that ANSWERS the frame opts in, because for
+ * it a missed answer costs a human a keystroke and a wrong one is sent as an
+ * utterance nobody asked for.
+ *
+ * `debug`, not `info`: the poller re-reads a static pane every 2s, so a
+ * quotation left on screen would print this on every tick.
+ */
+function isWithheldForWantOfReceipt(scope: AntigravityReceiptScope | undefined): boolean {
+  if (scope === undefined) return false;
+  if (hasRecentAntigravityPermissionReceipt(scope.worktreeId, 'antigravity', scope.instanceId)) return false;
+  logger.debug('antigravity-dialog-no-recent-receipt', {
+    worktreeId: scope.worktreeId,
+    instanceId: scope.instanceId ?? 'antigravity',
+  });
+  return true;
 }
 
 /**
