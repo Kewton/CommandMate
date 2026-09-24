@@ -130,6 +130,7 @@ import {
   type StatusEvidence,
 } from '@/lib/session/status-evidence';
 import { applyAskUserQuestion } from '@/lib/session/ask-user-question-prompt';
+import { classifyLayerDisagreement, reportLayerDisagreement } from '@/lib/session/layer-disagreement';
 import {
   buildStructuredPromptData,
   buildStructuredPromptHistoryRecord,
@@ -1957,6 +1958,31 @@ async function buildPayload(
       // Issue #2095: the cause, when the frame carries one. Null leaves the row
       // exactly as #1708 wrote it.
       obstruction: paneObstruction,
+    });
+  }
+
+  // Issue #2843: the opposite gap — the scraper reads a dialog on a turn the
+  // agent's own `Stop` closed. Logged only (see `layer-disagreement.ts`); fed the
+  // SCRAPER's verdict, because the merge lets a scraper `waiting` win and would
+  // hide the very disagreement this records.
+  const disagreement = classifyLayerDisagreement({
+    supportedEvents: eventSource.capabilities.supportedEvents,
+    scraperStatus: statusResult.status,
+    scraperReason: statusResult.reason,
+    hasActivePrompt: scraperPromptWaiting,
+    lastEventType: structuredEvents.lastEventType,
+    lastEventDetail: structuredEvents.lastEventDetail,
+  });
+  if (disagreement !== null) {
+    reportLayerDisagreement({
+      compositeKey,
+      worktreeId,
+      cliToolId,
+      instanceId: resolvedInstanceId,
+      turnId: structuredEvents.turnId,
+      kind: disagreement,
+      scraperReason: statusResult.reason,
+      frame: output,
     });
   }
 
