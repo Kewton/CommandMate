@@ -81,3 +81,23 @@ tmux -L codexprobe kill-server   # -L 付き。本番の tmux サーバーには
 ```
 
 `$PROBE` は、Issue に添付するまで残しておいてよい。
+
+## 3. 実運用での検知（Issue #2843）
+
+更新時の確認で拾えない誤判定（特定の会話内容でだけ起きるもの）は、サーバーログ（`logs/server.log`）の
+`[WARN] [layer-disagreement] layerDisagreement {…}` 行で拾う。hook がターンの開始と終了を届けるツール
+（claude・codex・copilot・gemini・opencode）の画面が「ダイアログが開いている」と読み、同時にそのツールの hook は
+「ターンは終わっている（`Stop`）」と言っている回を、ターンごとに 1 行、画面の末尾 40 行つきで記録する。
+antigravity と Command Code は、hook がターンの開始を届けず、新しいターンの途中でも最新の hook イベントが前のターンの
+`Stop` のまま残るため、対象外にしている。ターンは閉じたが自分で再開する `Stop`（`self_resume_pending`）も記録しない。
+
+```bash
+grep '\[layer-disagreement\] layerDisagreement' logs/server.log | tail
+```
+
+行の `cliToolId` がどのツールの画面かを示す。
+
+- `kind: approval-after-stop` — ターン終了後に「答えられる承認」が見えている。承認はターンの途中にしか出ないので、
+  毎回が検出器の不具合。`frameTail` を元に fixture を作り、Issue を起票する。
+- `kind: menu-after-stop` — ターン終了後に選択リストが見えている。利用者が `/model` などを開いた場合にも出るので、
+  開いた覚えが無いものだけを調べる。
