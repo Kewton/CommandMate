@@ -113,7 +113,7 @@ function isAntigravitySelectionScreenOpen(lastLines: string): boolean {
  * shared pass then read the quoted `Do you want to proceed?` menu itself and
  * published the composer-idle pane as `waiting` / `prompt_detected`.
  */
-function isAntigravityQuotedNumberedList(frame: NormalizedFrame, prompt: PromptDetectionResult): boolean {
+export function isAntigravityQuotedNumberedList(frame: NormalizedFrame, prompt: PromptDetectionResult): boolean {
   if (prompt.promptData?.type !== 'multiple_choice') return false;
   const rows = stripBoxDrawing(frame.contentLines.join('\n')).split('\n');
   const { promptPattern } = getCliToolPatterns('antigravity');
