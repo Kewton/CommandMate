@@ -442,6 +442,60 @@ export function readCodexDialogFrame(
   };
 }
 
+/** A `›` row that is a numbered option (`› 1. …`), as opposed to the composer. */
+const CODEX_NUMBERED_GLYPH_ROW_PATTERN = /^\s*›\s*\d{1,2}[.)]\s/;
+
+/**
+ * Is the bottom of this codex pane the composer (Issue #2841)?
+ *
+ * codex draws exactly one thing between the conversation and its status bar:
+ * the composer, or a dialog that REPLACES the composer while it is open. Every
+ * measured dialog frame (`tests/fixtures/codex-dialogs-0155/`,
+ * `tests/fixtures/codex-live-2310/`, `codex-live-1628/`) ends on the dialog's
+ * rows with no `›` row below its footer. So when the composer is the pane's
+ * bottom, no dialog is open, whatever the conversation above it says — and the
+ * conversation is free text: an agent quoting another session's approval dialog
+ * (the reported case), a numbered list, a pasted footer.
+ *
+ * This is the one question every dialog reading in this module asks first, so
+ * that no reading can be satisfied by words in the transcript.
+ *
+ * Two readings, in order:
+ *
+ *  1. **raw** — the bottom-most `›` row of the RAW capture
+ *     ({@link findCodexBottomGlyphRow}) is `composer` → true; `option` → false;
+ *     `transcript-echo` → false (not shown to be the composer).
+ *  2. **stripped** (no attributes: Auto-Yes and `prompt-answer-sender` hand the
+ *     layer a `stripAnsi`'d capture) — the last non-blank row of the content
+ *     region starts with `›` and is not a numbered option row. A dialog's
+ *     highlighted row can also be the last row; a numbered one is excluded here,
+ *     and an unnumbered one keeps the reading it had before (branch 2.7 B
+ *     already calls that frame `ready` when stripped).
+ *
+ * False only means "not shown to be the composer": callers must use it as a
+ * veto on a dialog reading, never as evidence of one.
+ *
+ * @param raw - The capture exactly as it arrived (`NormalizedFrame.raw`)
+ * @param contentLines - The ANSI-stripped rows (`NormalizedFrame.contentLines`)
+ * @param contentEnd - Exclusive end of the conversation region (the row above
+ *   the status bar with padding walked off, or `contentLines.length`)
+ */
+export function isCodexComposerAtBottom(
+  raw: string,
+  contentLines: readonly string[],
+  contentEnd: number,
+): boolean {
+  const glyphRow = findCodexBottomGlyphRow(raw);
+  if (glyphRow !== null) return glyphRow.kind === 'composer';
+
+  const end = Math.min(contentEnd, contentLines.length);
+  let last = end - 1;
+  while (last >= 0 && contentLines[last].trim() === '') last--;
+  if (last < 0) return false;
+  const row = contentLines[last];
+  return row.trimStart().startsWith(CODEX_GLYPH) && !CODEX_NUMBERED_GLYPH_ROW_PATTERN.test(row);
+}
+
 /** Index of the bottom-most `›` row within the content region, or -1. */
 function findLastGlyphContentRow(contentLines: readonly string[], endExclusive: number): number {
   for (let i = Math.min(endExclusive, contentLines.length) - 1; i >= 0; i--) {

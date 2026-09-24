@@ -30,6 +30,7 @@ import { STATUS_REASON } from '../../status-reason';
 import {
   readCodexDialogFrame,
   findCodexBottomGlyphRow,
+  isCodexComposerAtBottom,
   reportCodexDialogFooterDrift,
 } from './cli-patterns';
 import { detectCodexDialog } from './prompt';
@@ -193,6 +194,17 @@ export const codexStatusDetector = createToolStatusDetector({
 
   beforePrompt(frame): ToolStatusVerdict | null {
     const { contentLines } = frame;
+
+    // 0.6. The composer is the pane's bottom → no dialog is open (Issue #2841).
+    // Every branch below reads dialog chrome (a pager footer, a lifecycle
+    // screen, a "Press enter to confirm" footer, a `›`-selected block) out of
+    // rows that can also be conversation text. codex hides the composer while a
+    // dialog is up, so a composer at the bottom vetoes all of them at once, and
+    // the chain goes on to the prompt / thinking / idle readings it would have
+    // reached had the transcript not quoted anything.
+    if (isCodexComposerAtBottom(frame.raw, contentLines, findCodexContentEnd(contentLines))) {
+      return null;
+    }
 
     // 0.7. Codex: pager / edit-previous (transcript) mode detection (Issue #1017)
     // Codex's transcript pager renders scroll / edit key-hint footers, e.g.:
@@ -369,7 +381,12 @@ export const codexStatusDetector = createToolStatusDetector({
   },
 
   isStalePrompt(frame) {
-    return isCodexStalePrompt(frame.contentLines);
+    // Issue #2841: a prompt above the composer is conversation text, not a
+    // dialog — the same veto branch 0.6 applies to the status branches.
+    return (
+      isCodexStalePrompt(frame.contentLines) ||
+      isCodexComposerAtBottom(frame.raw, frame.contentLines, findCodexContentEnd(frame.contentLines))
+    );
   },
 
   // §4 D1 決定 4 (Issue #1928). All three inputs are readings this module
@@ -377,8 +394,13 @@ export const codexStatusDetector = createToolStatusDetector({
   // the content boundary (0.8 / 2.7), the #1160 staleness guard and the #1829
   // lifecycle screens. `prompt.ts` therefore needs no import from this file.
   detectDialog(frame) {
+    // Issue #2841: Auto-Yes and `respond` act on this answer, so it takes the
+    // same veto as the status branches — before the lifecycle screens too, whose
+    // wording (`Do you trust …`) can be quoted like any other.
+    const contentEnd = findCodexContentEnd(frame.contentLines);
+    if (isCodexComposerAtBottom(frame.raw, frame.contentLines, contentEnd)) return null;
     return detectCodexDialog(frame, {
-      contentEnd: findCodexContentEnd(frame.contentLines),
+      contentEnd,
       stalePrompt: isCodexStalePrompt(frame.contentLines),
       lifecycleDialog: getCodexLifecycleDialog(frame.clean),
     });
