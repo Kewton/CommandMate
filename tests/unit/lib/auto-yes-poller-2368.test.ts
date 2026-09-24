@@ -82,6 +82,10 @@ import { detectPrompt } from '@/lib/detection/prompt-detector';
 import { detectPromptOnCleanFrame } from '@/lib/polling/response-checker';
 import { detectAntigravityNumberedDialogPrompt } from '@/lib/detection/tools/antigravity/dialog';
 import { detectAndRespondToPrompt, type AutoYesPollerState } from '@/lib/auto-yes-poller';
+import {
+  recordAntigravityPermissionReceipt,
+  resetAntigravityPermissionReceiptsForTests,
+} from '@/lib/polling/antigravity-permission-receipts';
 import { clearPolicySuppressions } from '@/lib/polling/auto-yes-suppression-state';
 import { clearAutoYesPolicyCache } from '@/lib/polling/auto-yes-policy';
 import { createTask } from '@/lib/db/tasks-db';
@@ -115,11 +119,20 @@ function pollerState(): AutoYesPollerState {
 /** Every answer `sendPromptAnswer` was asked to type, in order. */
 const answersSent = (): string[] => sendPromptAnswer.mock.calls.map(([p]) => p.answer);
 
-/** Drive the real poller over one fixture, the way `pollAutoYes` does. */
+/**
+ * Drive the real poller over one fixture, the way `pollAutoYes` does.
+ *
+ * Every dialog frame here is a REAL open dialog, and agy asks CommandMate
+ * (`PreToolUse`) before it draws one — so a receipt is recorded first, as the
+ * hook route would have (#2849). Without it the Auto-Yes entry withholds the
+ * frame (#2857) and these suites would be asserting on the gate, not on the
+ * reading and the answer they are about.
+ */
 async function respondTo(
   name: string,
   state: AutoYesPollerState = pollerState(),
 ): Promise<'responded' | 'no_prompt' | 'duplicate' | 'no_answer' | 'error'> {
+  recordAntigravityPermissionReceipt(WORKTREE_ID, 'antigravity', 'antigravity', 'run_command');
   const clean = asPollerSees(frame(name));
   return detectAndRespondToPrompt(
     WORKTREE_ID,
@@ -135,11 +148,13 @@ beforeEach(() => {
   db = new Database(':memory:');
   runMigrations(db);
   vi.clearAllMocks();
+  resetAntigravityPermissionReceiptsForTests();
   clearPolicySuppressions();
   clearAutoYesPolicyCache();
 });
 
 afterEach(() => {
+  resetAntigravityPermissionReceiptsForTests();
   clearPolicySuppressions();
   db.close();
 });
