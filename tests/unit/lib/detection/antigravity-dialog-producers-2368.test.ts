@@ -93,6 +93,10 @@ import { detectPromptWithOptions } from '@/lib/polling/response-checker';
 import { detectAndRespondToPrompt, type AutoYesPollerState } from '@/lib/auto-yes-poller';
 import { stripAnsi, stripBoxDrawing } from '@/lib/detection/cli-patterns';
 import { upsertWorktree } from '@/lib/db';
+import {
+  recordAntigravityPermissionReceipt,
+  resetAntigravityPermissionReceiptsForTests,
+} from '@/lib/polling/antigravity-permission-receipts';
 import { clearPolicySuppressions } from '@/lib/polling/auto-yes-suppression-state';
 import { clearAutoYesPolicyCache } from '@/lib/polling/auto-yes-policy';
 
@@ -128,6 +132,14 @@ function pollerState(): AutoYesPollerState {
   };
 }
 
+/**
+ * agy asked CommandMate (`PreToolUse`) about a tool call just now — what the hook
+ * route records before agy draws a real dialog (#2849). The Auto-Yes column reads
+ * REAL open dialogs, and without this its entry withholds them (#2857).
+ */
+const agyAskedAboutAToolCall = (): void =>
+  recordAntigravityPermissionReceipt(WT, 'antigravity', 'antigravity', 'run_command');
+
 /** The `promptData` the last `sendPromptAnswer` call was given. */
 function sentPromptData(): PromptData | null {
   const last = sendPromptAnswer.mock.calls.at(-1);
@@ -160,11 +172,13 @@ beforeEach(() => {
     cliToolId: 'antigravity',
   });
   vi.clearAllMocks();
+  resetAntigravityPermissionReceiptsForTests();
   clearPolicySuppressions();
   clearAutoYesPolicyCache();
 });
 
 afterEach(() => {
+  resetAntigravityPermissionReceiptsForTests();
   clearPolicySuppressions();
   db.close();
 });
@@ -210,6 +224,7 @@ describe.each([
   });
 
   it('the Auto-Yes poller answers it — the column #2364 left out', async () => {
+    agyAskedAboutAToolCall();
     const clean = asPollerSees(frame(name));
 
     const result = await detectAndRespondToPrompt(
@@ -243,6 +258,7 @@ describe.each([
     const fromRoute = shapeOf(sentPromptData());
 
     sendPromptAnswer.mockClear();
+    agyAskedAboutAToolCall();
     const clean = asPollerSees(frame(name));
     await detectAndRespondToPrompt(WT, pollerState(), 'antigravity', clean, clean.split('\n'), 'antigravity');
     const fromAutoYes = shapeOf(sentPromptData());
