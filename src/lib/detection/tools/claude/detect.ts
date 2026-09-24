@@ -15,6 +15,7 @@ import { findClaudeInputBox } from '../../composer-text';
 import { findClaudeChrome } from '../../prompt-detect-multiple-choice';
 import { STATUS_REASON } from '../../status-reason';
 import { detectClaudeDialog } from './prompt';
+import { STATUS_CHECK_LINE_COUNT } from '../frame';
 import { createToolStatusDetector } from '../run-detection';
 import {
   CLAUDE_BANNER_PATTERN,
@@ -107,6 +108,31 @@ export function readIdleEvidence(frame: NormalizedFrame): StatusEvidence {
   return 'none';
 }
 
+/**
+ * The rows a selection-list footer may be read from (Issue #2847).
+ *
+ * The footer belongs to the picker, and a picker is either the input box's
+ * neighbour or its replacement. Above the input box is the conversation, which
+ * can quote the footer's wording (a reply explaining the picker, a pasted
+ * transcript) without any picker being open — and reading the whole 15-row tail
+ * turned that quotation into `waiting` on an idle composer.
+ *
+ * So when the input box is on screen, only its rows and the status bar under it
+ * are read (still inside the 15-row tail, never wider). When there is no input
+ * box, a picker has taken its place and the tail is read as before.
+ *
+ * The box is located by {@link findClaudeInputBox}, the finder
+ * {@link findClaudeTranscriptTail} and {@link readIdleEvidence} already use, so
+ * this rule cannot disagree with them about where the conversation ends.
+ */
+function selectionFooterRows(frame: NormalizedFrame): string {
+  const box = findClaudeInputBox(frame.contentLines as string[]);
+  if (!box) return frame.lastLines;
+
+  const tailStart = frame.contentLines.length - STATUS_CHECK_LINE_COUNT;
+  return frame.contentLines.slice(Math.max(box.openingSeparator, tailStart)).join('\n');
+}
+
 export const claudeStatusDetector = createToolStatusDetector({
   tool: 'claude',
   verifiedAgainst: VERIFIED_AGAINST,
@@ -117,7 +143,9 @@ export const claudeStatusDetector = createToolStatusDetector({
     // use arrow keys + Enter to navigate and toggle, not number input.
     // The 15-line window may miss the question line, causing SEC-001a rejection above.
     // Detect via the footer instruction pattern and show NavigationButtons instead of PromptPanel.
-    if (CLAUDE_SELECTION_LIST_FOOTER.test(frame.lastLines)) {
+    // Read only the rows at or below the input box (Issue #2847): a footer quoted in the reply
+    // above it is conversation, not a picker.
+    if (CLAUDE_SELECTION_LIST_FOOTER.test(selectionFooterRows(frame))) {
       return {
         status: 'waiting' as const,
         confidence: 'high' as const,
