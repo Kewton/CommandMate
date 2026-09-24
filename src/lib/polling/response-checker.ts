@@ -14,6 +14,8 @@ import { broadcastMessage } from '@/lib/ws-server';
 import type { ChatMessage } from '@/types/models';
 import { detectPrompt } from '@/lib/detection/prompt-detector';
 import { detectAntigravityNumberedDialogPrompt } from '@/lib/detection/tools/antigravity/dialog';
+import { isAntigravityQuotedNumberedList } from '@/lib/detection/tools/antigravity/detect';
+import { normalizeFrame } from '@/lib/detection/tools/frame';
 import { readCommandCodeQuestionDialog } from '@/lib/detection/tools/command-code/dialog';
 import type { PromptDetectionResult } from '@/lib/detection/prompt-detector';
 import { recordClaudeConversation } from '@/lib/conversation-logger';
@@ -367,10 +369,34 @@ export function detectPromptOnCleanFrame(
   }
 
   const promptOptions = buildDetectPromptOptions(cliToolId);
-  return detectPrompt(
+  const result = detectPrompt(
     cleanOutput,
     precomputedLines ? { ...promptOptions, precomputedLines } : promptOptions,
   );
+
+  // Issue #2851: agy's reader above declines a dialog quoted in a reply (#2845),
+  // and this generic pass then read the quotation itself — `Do you want to
+  // proceed?` and its four options, above a live `>` composer — as an answerable
+  // `multiple_choice`. agy's Auto-Yes gate row is `legacy`, so nothing after this
+  // point judges the frame again and the poller answered a dialog nobody had
+  // opened. The status side declines the same candidate with the same predicate
+  // (`isStalePrompt`, #2845): agy draws its numbered screens in place of the
+  // composer or below it, never above it, so a composer under the list's last
+  // row makes the list a quotation.
+  //
+  // `rawFrame` when the caller has it, and `cleanOutput` otherwise. The status
+  // side normalises the capture as captured and the predicate then strips box
+  // drawing exactly once; handing it `cleanOutput` — already stripped once, and
+  // `stripBoxDrawing` is not idempotent — would strip a second time and could
+  // read different rows.
+  if (
+    cliToolId === 'antigravity' &&
+    result.isPrompt &&
+    isAntigravityQuotedNumberedList(normalizeFrame(rawFrame ?? cleanOutput), result)
+  ) {
+    return { isPrompt: false, cleanContent: cleanOutput.trim() };
+  }
+  return result;
 }
 
 /**
