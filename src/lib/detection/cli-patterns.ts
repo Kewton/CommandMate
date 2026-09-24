@@ -2407,6 +2407,13 @@ export interface AntigravityDialogRegion {
  * scrollback above a newer one is never the one read. Returns null when the
  * frame has no footer at all.
  *
+ * Also null when agy's input box is drawn BELOW that footer (Issue #2845): agy
+ * paints no `>` composer while a dialog is open — the dialog takes its place —
+ * so a footer with a composer under it is the model's reply quoting a dialog,
+ * or a dialog left in the scrollback, not a screen waiting for a keypress. It is
+ * the same reading `isAntigravitySurveyOpen` gives the survey row (#2364), and
+ * the composer is recognised by the same {@link ANTIGRAVITY_PROMPT_PATTERN}.
+ *
  * @param lines - ANSI-stripped rows, box drawing optional
  */
 export function locateAntigravityDialogRegion(lines: readonly string[]): AntigravityDialogRegion | null {
@@ -2418,6 +2425,9 @@ export function locateAntigravityDialogRegion(lines: readonly string[]): Antigra
     }
   }
   if (footer < 0) return null;
+  for (let i = footer + 1; i < lines.length; i++) {
+    if (ANTIGRAVITY_PROMPT_PATTERN.test(lines[i])) return null;
+  }
 
   const floor = Math.max(0, footer - ANTIGRAVITY_DIALOG_MAX_ROWS);
   let start = floor;
