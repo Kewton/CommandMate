@@ -134,9 +134,9 @@
 
 import { detectThinking, getCliToolPatterns } from '../../cli-patterns';
 import {
-  COMMAND_CODE_PLAN_REVIEW_FOOTER,
-  COMMAND_CODE_SELECTION_LIST_FOOTER,
-  DISMISSABLE_PANEL_FOOTER_PATTERN,
+  hasCommandCodeDismissablePanelFooterAtBottom,
+  hasCommandCodePlanReviewFooterAtBottom,
+  hasCommandCodeSelectionListFooterAtBottom,
   isCommandCodePlanApproveChoice,
 } from '../../selection-shape';
 import { readCommandCodeQuestionDialog } from './dialog';
@@ -181,8 +181,14 @@ export const commandCodeStatusDetector = createToolStatusDetector({
     //    pending (`←/→ choose · enter confirm · esc back`). The same verdict: it is
     //    the same overlay, still waiting on a human's decision about the plan,
     //    and the arrow pad (`◀` `▶` `Enter` `Esc`) is exactly what it asks for.
+    //
+    // Issue #2846: the footer has to be at the BOTTOM of the frame, not merely
+    // somewhere in the 15-row window. A reply that quotes `Approve ctrl+a` /
+    // `Cancel esc` sits above the composer, and `frame.lastLines` used to match it
+    // there — `waiting` on a pane that was waiting for a message. See
+    // `hasCommandCodePlanReviewFooterAtBottom` for how far from the end is "bottom".
     if (
-      COMMAND_CODE_PLAN_REVIEW_FOOTER.test(frame.lastLines) ||
+      hasCommandCodePlanReviewFooterAtBottom(frame.lastLines) ||
       isCommandCodePlanApproveChoice(frame.lastLines)
     ) {
       return {
@@ -291,7 +297,10 @@ export const commandCodeStatusDetector = createToolStatusDetector({
     //
     // A human still has to press the key, so `waiting` is also the honest word:
     // nothing on this pane will move until they do.
-    if (DISMISSABLE_PANEL_FOOTER_PATTERN.test(frame.lastLines)) {
+    //
+    // Issue #2846: only when `Press Esc to close` is the LAST row. The panel draws
+    // it last; a reply that quotes it has the composer underneath.
+    if (hasCommandCodeDismissablePanelFooterAtBottom(frame.lastLines)) {
       return {
         status: 'waiting',
         confidence: 'high',
@@ -312,7 +321,9 @@ export const commandCodeStatusDetector = createToolStatusDetector({
     // `waiting` + `positive`, exactly as claude's selection-list branch reports:
     // a human has to move the highlight and press enter, and the frame says so
     // in as many words.
-    if (COMMAND_CODE_SELECTION_LIST_FOOTER.test(frame.lastLines)) {
+    //
+    // Issue #2846: last row only, for the reason the branch above gives.
+    if (hasCommandCodeSelectionListFooterAtBottom(frame.lastLines)) {
       return {
         status: 'waiting',
         confidence: 'high',

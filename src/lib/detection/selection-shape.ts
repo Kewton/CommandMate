@@ -294,6 +294,86 @@ export function isCommandCodePlanApproveChoice(tail: string): boolean {
 }
 
 /**
+ * How many content rows the plan review footer's LAST row (`Cancel esc`) may
+ * have under it and still be the overlay's own footer (Issue #2846): the footer's
+ * two rows plus three.
+ *
+ * Measured over the sixteen plan review captures that carry the footer
+ * (`tests/fixtures/command-code-plan-review-2761/`, `-2763/`): fourteen draw ONE
+ * row below it, the hint bar (`type + enter to comment · …`); one draws two, an
+ * `Editor exited with code 127` row and then the hint bar; and the garbled
+ * `editor-killed-staircase.txt` draws three, because the pane wrapped the hint
+ * bar. So the plan review footer is NOT the last row the way the picker's is,
+ * and a "last two rows" rule misses every one of them.
+ *
+ * What bounds it from above is the composer. A transcript is always drawn above
+ * one, and its shortest measured form is four rows — rule, `❯ Ask your
+ * question...`, rule, status row — so a footer QUOTED in a reply has at least
+ * four content rows under it and its `Approve` row falls outside this window.
+ * The margin between the widest overlay (3) and the narrowest composer (4) is
+ * one row; a capture that narrows it is the reason to re-measure, not to widen
+ * this.
+ */
+const COMMAND_CODE_PLAN_REVIEW_TAIL_ROW_COUNT = 5;
+
+/**
+ * The last `count` rows of `text` that carry content, joined with `\n`.
+ *
+ * Blank rows are dropped rather than counted: the pane is padded with them, and
+ * a real footer is set off from its hint bar by one.
+ */
+function lastContentRows(text: string, count: number): string {
+  return text
+    .split('\n')
+    .filter((row) => row.trim() !== '')
+    .slice(-count)
+    .join('\n');
+}
+
+/**
+ * Whether the LAST content row of this tail is Command Code's picker footer
+ * (Issue #2846).
+ *
+ * {@link COMMAND_CODE_SELECTION_LIST_FOOTER} matches the sentence anywhere, and
+ * a reply that quotes the `/model` footer is that sentence in the middle of the
+ * transcript. The picker draws the footer as the last row of the pane (all four
+ * captures that carry it do, `tests/fixtures/chat-dialog-card-2254/`), and a
+ * transcript always has the composer under it — the same reasoning
+ * {@link COMMAND_CODE_PLAN_APPROVE_CHOICE_FOOTER} anchors with `$`.
+ *
+ * @param tail - the frame's last rows, ANSI stripped, last content row last
+ */
+export function hasCommandCodeSelectionListFooterAtBottom(tail: string): boolean {
+  return COMMAND_CODE_SELECTION_LIST_FOOTER.test(lastContentRows(tail, 1));
+}
+
+/**
+ * Whether the LAST content row of this tail is the dismiss-only panel's footer
+ * (Issue #2846). `Press Esc to close` is the panel's last row
+ * ({@link DISMISSABLE_PANEL_FOOTER_PATTERN}); the same row inside a reply has
+ * the composer under it.
+ *
+ * @param tail - the frame's last rows, ANSI stripped, last content row last
+ */
+export function hasCommandCodeDismissablePanelFooterAtBottom(tail: string): boolean {
+  return DISMISSABLE_PANEL_FOOTER_PATTERN.test(lastContentRows(tail, 1));
+}
+
+/**
+ * Whether the plan review footer ({@link COMMAND_CODE_PLAN_REVIEW_FOOTER}) sits
+ * at the bottom of this tail (Issue #2846): both of its rows are within the last
+ * {@link COMMAND_CODE_PLAN_REVIEW_TAIL_ROW_COUNT} content rows, which is the
+ * overlay's own hint bar and nothing as tall as a composer.
+ *
+ * @param tail - the frame's last rows, ANSI stripped, last content row last
+ */
+export function hasCommandCodePlanReviewFooterAtBottom(tail: string): boolean {
+  return COMMAND_CODE_PLAN_REVIEW_FOOTER.test(
+    lastContentRows(tail, COMMAND_CODE_PLAN_REVIEW_TAIL_ROW_COUNT),
+  );
+}
+
+/**
  * How many rows from the end of the content the dismiss footer is looked for.
  *
  * The same 15-row tail the detection chain hands a tool module as
