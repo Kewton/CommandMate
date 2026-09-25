@@ -1,0 +1,29 @@
+{
+  "version": "0.41.0",
+  "date": "2026-09-25",
+  "highlight": {
+    "ja": "エージェントが返答の中でダイアログの文面を引用しただけなのに、ダイアログが開いていると表示される問題を直しました。",
+    "en": "Fixed a dialog being shown as open when the agent had only quoted a dialog's text in its reply."
+  },
+  "added": [],
+  "improved": [
+    {
+      "ja": "Antigravity の Auto-Yes は、本当に確認を求められたときだけ承認に答えるようになりました。",
+      "en": "Antigravity's Auto-Yes now answers an approval only when the agent actually asked for one."
+    }
+  ],
+  "fixed": [
+    {
+      "ja": "Codex・Antigravity・Command Code・Claude で、入力待ちなのに選択リストやダイアログが開いていると表示される問題を直しました。",
+      "en": "Fixed Codex, Antigravity, Command Code and Claude showing an open selection list or dialog while waiting for input."
+    },
+    {
+      "ja": "Antigravity の Auto-Yes が、返答に引用されたダイアログの文面に自動で答えてしまう問題を直しました。",
+      "en": "Fixed Antigravity's Auto-Yes answering dialog text that was only quoted in a reply."
+    },
+    {
+      "ja": "サイドバーのセッション表示で、選んだ並び順どおりに並ぶようになりました。",
+      "en": "The session view in the sidebar now follows the sort order you choose."
+    }
+  ]
+}
