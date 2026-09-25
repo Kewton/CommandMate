@@ -87,6 +87,7 @@ import {
   type PendingDecision,
   type Verdict,
 } from '@/lib/hooks/sources';
+import { recordAntigravityPermissionReceipt } from '@/lib/polling/antigravity-permission-receipts';
 import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('api/hooks-permission-request');
@@ -204,6 +205,22 @@ export async function POST(request: NextRequest) {
     // `resolvePermissionRequest` — was already tool-independent and is
     // untouched.
     const payload = source.parsePermissionRequest(raw);
+
+    // Issue #2849: agy asks about EVERY tool call before it draws a dialog, so
+    // "a question named this tool a moment ago" is what tells Auto-Yes a dialog
+    // on the pane is open rather than quoted in a reply. Recorded whatever
+    // `permissionHookPredictsDialog` says and before the adjudication, so the
+    // record does not depend on how the question was answered.
+    if (tool === 'antigravity') {
+      recordAntigravityPermissionReceipt(
+        worktree.id,
+        tool,
+        instanceParam ?? tool,
+        payload?.toolName ?? null,
+        startedAt,
+      );
+    }
+
     const decision = resolvePermissionRequest(
       { worktreeId: worktree.id, cliToolId: tool, instanceId: instanceParam ?? tool },
       payload

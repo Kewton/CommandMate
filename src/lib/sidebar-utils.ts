@@ -556,8 +556,8 @@ export interface SessionRow {
   /** Repository display name. */
   repositoryName: string;
   /**
-   * The BRANCH's last activity. There is no per-instance activity time, so
-   * every row of one branch shares it.
+   * This instance's latest message time (Issue #2838), else the branch's last
+   * activity for an instance that has no message yet.
    */
   lastActivity?: Date | string;
   /** The tmux session is there but the agent is gone (Issue #2070). */
@@ -596,7 +596,7 @@ export function buildSessionRows(items: ReadonlyArray<SidebarBranchItem>): Sessi
         status: status ?? 'idle',
         branchName: item.name,
         repositoryName: item.repositoryName,
-        lastActivity: item.lastActivity,
+        lastActivity: item.lastActivityByInstance?.[instanceId] ?? item.lastActivity,
         exited: exitedIds.has(instanceId),
         // Issue #2775: only a `ready` can be a fallback (see isBranchUnclassified).
         ...(status === 'ready' && unclassifiedIds.has(instanceId) ? { unclassified: true as const } : {}),
@@ -634,14 +634,17 @@ function sessionRowTime(row: SessionRow): number {
 /**
  * Sort session rows (Issue #2656).
  *
- * 1. Status first, by {@link STATUS_PRIORITY} (waiting → ready → running →
- *    generating → idle) — always ascending, whatever `direction` is —
- *    EXCEPT when `sortKey === 'status'`, where this stage IS the user's sort
- *    and follows `direction` (asc = waiting first, desc = idle first).
- * 2. Then the selected key, with `sortBranches()`'s direction semantics:
- *    `updatedAt` / `lastSent` compare `lastActivity` (desc = newest first),
- *    `repositoryName` / `branchName` compare case-insensitively (asc = A→Z).
- *    For `status` this stage is `lastActivity`, newest first.
+ * 1. `waiting` rows first (Issue #2838), whatever `direction` is — the same
+ *    two-stage shape as `sortBranches()` (#1787). No other status is ranked:
+ *    `ready` is what almost every live session reads between turns, so ranking
+ *    it made rows jump on every running ⇄ ready flip and overrode the key the
+ *    user picked. EXCEPT when `sortKey === 'status'`, where the whole
+ *    {@link STATUS_PRIORITY} order IS the user's sort and follows `direction`
+ *    (asc = waiting first, desc = idle first), then `lastActivity` newest first.
+ * 2. Within each group, the selected key with `sortBranches()`'s direction
+ *    semantics: `updatedAt` / `lastSent` compare `lastActivity` (desc = newest
+ *    first), `repositoryName` / `branchName` compare case-insensitively
+ *    (asc = A→Z).
  * 3. Ties keep the input order (`Array.prototype.sort` is stable), i.e. the
  *    branch order and then the roster order from {@link buildSessionRows}.
  *
@@ -654,12 +657,13 @@ export function sortSessionRows(
 ): SessionRow[] {
   const sign = direction === 'asc' ? 1 : -1;
   return rows.slice().sort((a, b) => {
-    const priorityDelta = STATUS_PRIORITY[a.status] - STATUS_PRIORITY[b.status];
     if (sortKey === 'status') {
+      const priorityDelta = STATUS_PRIORITY[a.status] - STATUS_PRIORITY[b.status];
       if (priorityDelta !== 0) return priorityDelta * sign;
       return sessionRowTime(b) - sessionRowTime(a);
     }
-    if (priorityDelta !== 0) return priorityDelta;
+    const waitingDelta = Number(b.status === 'waiting') - Number(a.status === 'waiting');
+    if (waitingDelta !== 0) return waitingDelta;
 
     switch (sortKey) {
       case 'updatedAt':

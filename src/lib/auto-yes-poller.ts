@@ -13,6 +13,10 @@
 import type { CLIToolType } from './cli-tools/types';
 import { captureSessionOutput } from './session/cli-session';
 import { detectPromptOnCleanFrame } from './polling/response-checker';
+import {
+  ANTIGRAVITY_PERMISSION_RECEIPT_WINDOW_MS,
+  hasRecentAntigravityPermissionReceipt,
+} from './polling/antigravity-permission-receipts';
 import { resolveAutoAnswerWithPolicy } from './polling/auto-yes-resolver';
 import { getSessionAutoYesPolicy, invalidateSessionAutoYesPolicy } from './polling/auto-yes-policy';
 import { recordPolicySuppression } from './polling/auto-yes-suppression-state';
@@ -24,6 +28,7 @@ import { sendPromptAnswer } from './prompt-answer-sender';
 import { CLIToolManager } from './cli-tools/manager';
 import { stripAnsi, stripBoxDrawing, detectThinking, getCodexLifecycleDialog } from './detection/cli-patterns';
 import { generatePromptKey } from './detection/prompt-key';
+import type { PromptDetectionResult } from './detection/types';
 import { getErrorMessage } from './errors';
 import { invalidateCache } from './tmux/tmux-capture-cache';
 import {
@@ -95,11 +100,25 @@ export interface StartPollingResult {
 declare global {
   // eslint-disable-next-line no-var
   var __autoYesPollerStates: Map<string, AutoYesPollerState> | undefined;
+  // eslint-disable-next-line no-var
+  var __autoYesWithheldNoReceiptLoggedAt: Map<string, number> | undefined;
 }
 
 /** In-memory storage for poller states (globalThis for hot reload persistence) */
 const autoYesPollerStates = globalThis.__autoYesPollerStates ??
   (globalThis.__autoYesPollerStates = new Map<string, AutoYesPollerState>());
+
+/**
+ * When `antigravity-autoyes-withheld-no-hook-receipt` was last logged, per
+ * compositeKey (Issue #2857). The poller re-reads a static pane every 2s, so the
+ * line is limited to one per {@link WITHHELD_NO_RECEIPT_LOG_INTERVAL_MS} per
+ * instance. globalThis for the same reason as the poller states above.
+ */
+const withheldNoReceiptLoggedAt = globalThis.__autoYesWithheldNoReceiptLoggedAt ??
+  (globalThis.__autoYesWithheldNoReceiptLoggedAt = new Map<string, number>());
+
+/** Least gap between two `antigravity-autoyes-withheld-no-hook-receipt` lines for one instance. */
+const WITHHELD_NO_RECEIPT_LOG_INTERVAL_MS = 60_000;
 
 // =============================================================================
 // Poller State Accessors (compositeKey-based)
@@ -130,6 +149,7 @@ export function getActivePollerCount(): number {
 export function clearAllPollerStates(): void {
   stopAllAutoYesPolling();
   autoYesPollerStates.clear();
+  withheldNoReceiptLoggedAt.clear();
 }
 
 /**
@@ -365,6 +385,55 @@ export function processStopConditionDelta(
 }
 
 /**
+ * Say, once a minute, that Auto-Yes left an agy dialog alone for want of a hook
+ * receipt (Issue #2857).
+ *
+ * `detectPromptOnCleanFrame` hands a frame the receipt gate (#2849) withholds
+ * back as an ordinary `isPrompt: false`, so the poller cannot tell "no dialog on
+ * the pane" from "a dialog agy never asked us about" by looking at the result.
+ * The gate is the ONLY thing `receiptScope` changes, so the same frame read
+ * without it answering a prompt is exactly the withheld case. That second
+ * reading is taken only after the cheap tests: no receipt for this instance in
+ * the window (with one, the gate let the frame through and a no-prompt result is
+ * a real one) and no line for it in the last minute.
+ *
+ * Why it is worth a line: a machine whose `~/.gemini/config/hooks.json` points at
+ * another server (#2622) never sends us the question, and every real dialog then
+ * waits for a human with no sign of why. The line names the file to look at.
+ * The response-checker's own `antigravity-dialog-no-recent-receipt` stays at
+ * debug — it prints on every tick the same pane is read again.
+ *
+ * @param compositeKey - The instance's key, for the once-a-minute limit
+ * @param readWithoutGate - The same frame read without `receiptScope`
+ */
+function logIfWithheldForWantOfReceipt(
+  worktreeId: string,
+  instanceId: string | undefined,
+  compositeKey: string,
+  readWithoutGate: () => PromptDetectionResult,
+): void {
+  if (hasRecentAntigravityPermissionReceipt(worktreeId, 'antigravity', instanceId)) return;
+
+  const now = Date.now();
+  const lastLoggedAt = withheldNoReceiptLoggedAt.get(compositeKey);
+  if (lastLoggedAt !== undefined && now - lastLoggedAt < WITHHELD_NO_RECEIPT_LOG_INTERVAL_MS) return;
+
+  const ungated = readWithoutGate();
+  if (!ungated.isPrompt || !ungated.promptData) return;
+
+  for (const [key, loggedAt] of withheldNoReceiptLoggedAt) {
+    if (now - loggedAt >= WITHHELD_NO_RECEIPT_LOG_INTERVAL_MS) withheldNoReceiptLoggedAt.delete(key);
+  }
+  withheldNoReceiptLoggedAt.set(compositeKey, now);
+  logger.info('antigravity-autoyes-withheld-no-hook-receipt', {
+    worktreeId,
+    instanceId: instanceId ?? 'antigravity',
+    windowMs: ANTIGRAVITY_PERMISSION_RECEIPT_WINDOW_MS,
+    hint: 'hook の受信記録が直近に無いため Auto-Yes は答えなかった。~/.gemini/config/hooks.json の向き先（#2622）を確認',
+  });
+}
+
+/**
  * Detect prompt in terminal output, resolve auto-answer, and send response.
  *
  * @internal Exported for testing purposes only.
@@ -418,16 +487,34 @@ export async function detectAndRespondToPrompt(
     // the same tick's raw capture reached it. `precomputedLines` stays the split
     // of `cleanOutput` — the stop-condition delta and every other tool's reading
     // are measured on that string and must not move.
+    //
+    // Issue #2857 adds the fifth, and this is the only caller that passes it: the
+    // one that ANSWERS the frame. For agy the frame then reads as a prompt only
+    // when agy asked CommandMate about a tool call for this instance in the last
+    // few seconds (#2849) — a dialog it never asked about is a reply quoting one
+    // (#2845, #2851) or a menu the user opened, and neither is ours to answer.
+    // The status API, the response poller's `prompt` row and the notification
+    // still call without it, so a real dialog stays visible to a human on a
+    // machine whose hook does not reach us. The price is that Auto-Yes leaves
+    // such a machine's dialogs alone, which is why `logIfWithheldForWantOfReceipt`
+    // says so.
+    const receiptScope = { worktreeId, instanceId };
     const promptDetection = detectPromptOnCleanFrame(
       cleanOutput,
       cliToolId,
       precomputedLines,
       rawOutput,
+      receiptScope,
     );
 
     if (!promptDetection.isPrompt || !promptDetection.promptData) {
       pollerState.lastAnsweredPromptKey = null;
       pollerState.lastAnsweredAt = null;
+      if (cliToolId === 'antigravity' && !promptDetection.isPrompt) {
+        logIfWithheldForWantOfReceipt(worktreeId, instanceId, compositeKey, () =>
+          detectPromptOnCleanFrame(cleanOutput, cliToolId, precomputedLines, rawOutput),
+        );
+      }
       return 'no_prompt';
     }
 

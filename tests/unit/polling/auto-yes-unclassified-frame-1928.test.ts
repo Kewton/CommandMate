@@ -74,6 +74,10 @@ import {
 } from '@/lib/polling/auto-yes-suppression-state';
 import { AUTO_YES_DIALOG_GATE_ENV_VAR } from '@/lib/polling/auto-yes-dialog-gate';
 import { detectAndRespondToPrompt, type AutoYesPollerState } from '@/lib/auto-yes-poller';
+import {
+  recordAntigravityPermissionReceipt,
+  resetAntigravityPermissionReceiptsForTests,
+} from '@/lib/polling/antigravity-permission-receipts';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 
 const WORKTREE_ID = 'wt-1928';
@@ -122,12 +126,14 @@ beforeEach(() => {
   db = new Database(':memory:');
   runMigrations(db);
   vi.clearAllMocks();
+  resetAntigravityPermissionReceiptsForTests();
   clearPolicySuppressions();
   delete process.env[AUTO_YES_DIALOG_GATE_ENV_VAR];
 });
 
 afterEach(() => {
   db.close();
+  resetAntigravityPermissionReceiptsForTests();
   clearPolicySuppressions();
   if (originalEnv === undefined) delete process.env[AUTO_YES_DIALOG_GATE_ENV_VAR];
   else process.env[AUTO_YES_DIALOG_GATE_ENV_VAR] = originalEnv;
@@ -220,6 +226,12 @@ describe('[#1928] the gate does not switch Auto-Yes off', () => {
     // measured only well enough to answer (#999), and the repository holds no
     // live agy capture to write a dialog rule against. Gating it on a rule
     // inferred from another tool's frames is the mistake #1979 corrected.
+    //
+    // The receipt is what agy's own hook would have recorded before drawing a
+    // dialog (#2849). It is NOT what this case is about: the #1928 gate is a
+    // separate, later layer, and the receipt gate (#2857) sits in front of it for
+    // agy, so without one the frame never reaches the layer under test.
+    recordAntigravityPermissionReceipt(WORKTREE_ID, 'antigravity', 'antigravity', 'run_command');
     const result = await detectAndRespondToPrompt(
       WORKTREE_ID,
       pollerState('antigravity'),

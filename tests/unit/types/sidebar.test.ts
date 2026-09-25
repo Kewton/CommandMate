@@ -57,6 +57,23 @@ describe('sidebar types', () => {
   });
 
   describe('toBranchItem', () => {
+    it('carries lastActivityByInstance and keeps lastActivity as the worktree time (Issue #2838)', () => {
+      const updatedAt = new Date('2026-09-01T00:00:00Z');
+      const byInstance = { codex: '2026-09-05T00:00:00Z' };
+      const result = toBranchItem({
+        id: 'wt-2838',
+        name: 'feature/2838',
+        path: '/path/to/worktree',
+        repositoryPath: '/path/to/repo',
+        repositoryName: 'MyRepo',
+        updatedAt,
+        lastActivityByInstance: byInstance,
+      });
+
+      expect(result.lastActivityByInstance).toEqual(byInstance);
+      expect(result.lastActivity).toBe(updatedAt);
+    });
+
     it('should convert Worktree to SidebarBranchItem', () => {
       const worktree: Worktree = {
         id: 'feature-test',

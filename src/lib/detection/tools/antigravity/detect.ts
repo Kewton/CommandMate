@@ -19,6 +19,7 @@ import {
   detectThinking,
   getCliToolPatterns,
   stripBoxDrawing,
+  ANTIGRAVITY_NUMBERED_OPTION_PATTERN,
   ANTIGRAVITY_SELECTION_LIST_PATTERN,
   ANTIGRAVITY_SURVEY_PATTERN,
   isAntigravityNumberedDialog,
@@ -27,7 +28,8 @@ import { STATUS_REASON } from '../../status-reason';
 import { createToolStatusDetector } from '../run-detection';
 import { ANTIGRAVITY_VERIFIED_AGAINST } from '../verified-against';
 import { detectAntigravityNumberedDialogPrompt } from './dialog';
-import type { ToolStatusVerdict } from '../types';
+import type { NormalizedFrame, ToolStatusVerdict } from '../types';
+import type { PromptDetectionResult } from '../../prompt-detector';
 
 /** agy build these rules were read off (Issue #988 / #995 / #2364; value in ../verified-against, #1929). */
 export const VERIFIED_AGAINST = ANTIGRAVITY_VERIFIED_AGAINST;
@@ -71,9 +73,66 @@ function isAntigravitySurveyOpen(contentLines: readonly string[]): boolean {
   return !tail.slice(surveyAt + 1).some(row => promptPattern.test(row));
 }
 
+/**
+ * Is the screen the selection-list pattern matched the LIVE one, rather than
+ * words the model quoted or a screen left in the scrollback? (Issue #2845)
+ *
+ * agy paints no `>` composer while a dialog or picker is open — the screen
+ * replaces it — so a composer drawn below the last row the pattern matches
+ * means that row is not an open screen's. Without this the model quoting
+ * `↑/↓ Navigate` in a reply put the whole pane at `waiting` while agy sat at its
+ * composer, and Auto-Yes answered a dialog nobody had opened. The same reading
+ * `locateAntigravityDialogRegion` gives the numbered dialog's footer, and
+ * `isAntigravitySurveyOpen` above gives the survey row, with the same composer
+ * pattern.
+ */
+function isAntigravitySelectionScreenOpen(lastLines: string): boolean {
+  const rows = lastLines.split('\n');
+  let matchedAt = -1;
+  for (let i = rows.length - 1; i >= 0; i--) {
+    if (ANTIGRAVITY_SELECTION_LIST_PATTERN.test(rows[i])) {
+      matchedAt = i;
+      break;
+    }
+  }
+  if (matchedAt < 0) return false;
+  const { promptPattern } = getCliToolPatterns('antigravity');
+  return !rows.slice(matchedAt + 1).some(row => promptPattern.test(row));
+}
+
+/**
+ * Is the numbered list the shared parser read a quotation, not a dialog?
+ * (Issue #2845)
+ *
+ * The shared pass takes any `> 1. …` run in the last rows for a menu, wherever
+ * on the frame it sits. agy draws its numbered screens either IN PLACE OF the
+ * composer (the approval dialogs) or BELOW it (`/feedback`'s category menu),
+ * never above it — so a numbered list with the composer drawn under its last row
+ * is the model's reply, or a dialog left in the scrollback. Branch 0.9 declines
+ * such a frame (see {@link isAntigravitySelectionScreenOpen}); without this the
+ * shared pass then read the quoted `Do you want to proceed?` menu itself and
+ * published the composer-idle pane as `waiting` / `prompt_detected`.
+ */
+export function isAntigravityQuotedNumberedList(frame: NormalizedFrame, prompt: PromptDetectionResult): boolean {
+  if (prompt.promptData?.type !== 'multiple_choice') return false;
+  const rows = stripBoxDrawing(frame.contentLines.join('\n')).split('\n');
+  const { promptPattern } = getCliToolPatterns('antigravity');
+  let composerAt = -1;
+  for (let i = rows.length - 1; i >= 0; i--) {
+    if (promptPattern.test(rows[i])) {
+      composerAt = i;
+      break;
+    }
+  }
+  if (composerAt < 0) return false;
+  return !rows.slice(composerAt + 1).some(row => ANTIGRAVITY_NUMBERED_OPTION_PATTERN.test(row));
+}
+
 export const antigravityStatusDetector = createToolStatusDetector({
   tool: 'antigravity',
   verifiedAgainst: VERIFIED_AGAINST,
+
+  isStalePrompt: isAntigravityQuotedNumberedList,
 
   beforePrompt(frame): ToolStatusVerdict | null {
     // 0.85. Issue #2364: the survey agy draws in place of its composer after a
@@ -99,7 +158,12 @@ export const antigravityStatusDetector = createToolStatusDetector({
     // screen as "generating" and NavigationButtons would never be shown. Detecting the
     // selection list here — ahead of thinking — is the fix. Mirrors the Copilot /
     // Codex early-detection pattern.
+    //
+    // Issue #2845: only while the screen is the live one. The words alone are
+    // not enough — a reply that quotes the `↑/↓ Navigate` footer leaves them in
+    // the last rows of a pane whose composer is drawn below them.
     if (!ANTIGRAVITY_SELECTION_LIST_PATTERN.test(frame.lastLines)) return null;
+    if (!isAntigravitySelectionScreenOpen(frame.lastLines)) return null;
 
     // Issue #2270 / #2364: except when the frame is a NUMBERED dialog.
     //

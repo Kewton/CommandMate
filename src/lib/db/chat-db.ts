@@ -138,6 +138,46 @@ export function getLastAssistantMessageAt(
 }
 
 /**
+ * Latest message time per worktree and agent instance (Issue #2838).
+ *
+ * The sidebar's session rows need a time of their own: `worktrees.updated_at`
+ * moves on a message from ANY instance, so every row of one worktree used to
+ * share it. One `GROUP BY` for the whole server — the list polls it, so a
+ * query per worktree would multiply every poll.
+ *
+ * A row belongs to `COALESCE(instance_id, cli_tool_id, 'claude')`, the instance
+ * `getMessages` reads it as, so pre-#868 rows (`instance_id IS NULL`) count
+ * toward the primary instance. Role and `archived` are not filtered, matching
+ * what moves `updated_at` (`createMessage` touches it for every row).
+ *
+ * @returns worktreeId → (instanceId → latest message time); worktrees without
+ *   messages are absent
+ */
+export function getLastMessageAtByInstance(
+  db: Database.Database
+): Map<string, Record<string, Date>> {
+  const rows = db.prepare(`
+    SELECT worktree_id,
+           COALESCE(instance_id, cli_tool_id, 'claude') AS resolved_instance_id,
+           MAX(timestamp) AS last_message_at
+    FROM chat_messages
+    GROUP BY worktree_id, resolved_instance_id
+  `).all() as Array<{ worktree_id: string; resolved_instance_id: string; last_message_at: number | null }>;
+
+  const result = new Map<string, Record<string, Date>>();
+  for (const row of rows) {
+    if (row.last_message_at === null) continue;
+    let byInstance = result.get(row.worktree_id);
+    if (!byInstance) {
+      byInstance = {};
+      result.set(row.worktree_id, byInstance);
+    }
+    byInstance[row.resolved_instance_id] = new Date(row.last_message_at);
+  }
+  return result;
+}
+
+/**
  * Create a new chat message
  */
 export function createMessage(
