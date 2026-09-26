@@ -36,6 +36,7 @@ import { copyToClipboard } from '@/lib/clipboard-utils';
 import { Copy, Check, Maximize2, Minimize2, ClipboardCopy, Eye, Lock, Pencil, Search, X, Download, MoreHorizontal } from 'lucide-react';
 import { Z_INDEX } from '@/config/z-index';
 import { encodePathForUrl } from '@/lib/url-path-encoder';
+import { useInlinedHtmlImages } from '@/hooks/useInlinedHtmlImages';
 import { useFileContentSearch } from '@/hooks/useFileContentSearch';
 import { useCopyFeedback } from '@/hooks/useCopyFeedback';
 import hljs from 'highlight.js';
@@ -156,9 +157,11 @@ document.addEventListener('click', function(e) {
 </script>`;
 
 function HtmlPreviewMobile({
+  worktreeId,
   htmlContent,
   filePath,
 }: {
+  worktreeId: string;
   htmlContent: string;
   filePath: string;
 }) {
@@ -180,13 +183,16 @@ function HtmlPreviewMobile({
   }, [filePath, confirm, tWorktree]);
 
   // In interactive mode, inject link click script; in safe mode, pass as-is
+  // [Issue #2861] Relative <img src> are inlined as data URIs (srcDoc has no base URL).
+  // The source view keeps the original htmlContent.
+  const inlinedHtml = useInlinedHtmlImages(worktreeId, filePath, htmlContent);
   const iframeSrcDoc = useMemo(() => {
-    if (sandboxLevel !== 'interactive') return htmlContent;
-    if (htmlContent.includes('</body>')) {
-      return htmlContent.replace('</body>', `${MOBILE_LINK_CLICK_SCRIPT}</body>`);
+    if (sandboxLevel !== 'interactive') return inlinedHtml;
+    if (inlinedHtml.includes('</body>')) {
+      return inlinedHtml.replace('</body>', `${MOBILE_LINK_CLICK_SCRIPT}</body>`);
     }
-    return htmlContent + MOBILE_LINK_CLICK_SCRIPT;
-  }, [htmlContent, sandboxLevel]);
+    return inlinedHtml + MOBILE_LINK_CLICK_SCRIPT;
+  }, [inlinedHtml, sandboxLevel]);
 
   // Listen for postMessage from iframe and open external links in new browser tab
   useEffect(() => {
@@ -710,6 +716,7 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
     if (content.isHtml) {
       return (
         <HtmlPreviewMobile
+          worktreeId={worktreeId}
           htmlContent={content.content}
           filePath={filePath}
         />
