@@ -24,6 +24,7 @@ import { useConfirm } from '@/components/ui/ConfirmDialog';
 import type { SandboxLevel } from '@/config/html-extensions';
 import { SANDBOX_ATTRIBUTES } from '@/config/html-extensions';
 import { classifyLink, resolveRelativePath, sanitizeHref } from '@/lib/link-utils';
+import { useInlinedHtmlImages } from '@/hooks/useInlinedHtmlImages';
 import hljs from 'highlight.js';
 import 'highlight.js/styles/github-dark.css';
 
@@ -163,6 +164,7 @@ function HtmlIframePreview({
  * - Link click handling via postMessage (interactive mode only) [Issue #505]
  */
 export function HtmlPreview({
+  worktreeId,
   filePath,
   htmlContent,
   onOpenFile,
@@ -243,18 +245,22 @@ export function HtmlPreview({
   /**
    * Prepare htmlContent for iframe.
    * In interactive mode, inject link click script. [DR2-004]
-   * In safe mode, pass htmlContent as-is (no script injection).
+   * In safe mode, pass the (image-inlined) HTML as-is (no script injection).
    */
+  // [Issue #2861] Relative <img src> are inlined as data URIs (srcDoc has no base URL).
+  // The source view keeps the original htmlContent.
+  const inlinedHtml = useInlinedHtmlImages(worktreeId, filePath, htmlContent);
+
   const iframeContent = useMemo(() => {
     if (sandboxLevel === 'interactive') {
       // Inject script before </body> or at end
-      if (htmlContent.includes('</body>')) {
-        return htmlContent.replace('</body>', `${LINK_CLICK_SCRIPT}</body>`);
+      if (inlinedHtml.includes('</body>')) {
+        return inlinedHtml.replace('</body>', `${LINK_CLICK_SCRIPT}</body>`);
       }
-      return htmlContent + LINK_CLICK_SCRIPT;
+      return inlinedHtml + LINK_CLICK_SCRIPT;
     }
-    return htmlContent;
-  }, [htmlContent, sandboxLevel]);
+    return inlinedHtml;
+  }, [inlinedHtml, sandboxLevel]);
 
   return (
     <div className="h-full flex flex-col" data-testid="html-preview">
