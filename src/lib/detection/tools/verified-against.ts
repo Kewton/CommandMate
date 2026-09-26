@@ -59,10 +59,19 @@ export const CLAUDE_VERIFIED_AGAINST = {
  * verdict. **The stamp moved to 0.155.1 because every 0.155.1 frame now reads
  * correctly** (`codex-thread-title-bar-2818.test.ts`,
  * `codex-dialogs-0155-2808.test.ts`).
+ *
+ * ## Advanced to 0.157.1 by Issue #2868
+ *
+ * 0.157.1 reworded the `/model` picker's footer to `enter select · esc back`, so
+ * the picker read `prompt_detected` and `/prompt-response` refused its answers.
+ * #2868 ran the #2842 probe (`tests/fixtures/codex-dialogs-0157/`, 2026-09-27):
+ * of the six standard screens only `model-picker.txt` failed, and it reads
+ * `codex_selection_list` again via `CODEX_PICKER_FOOTER_PATTERN`
+ * (`codex-dialogs-0157.test.ts`).
  */
 export const CODEX_VERIFIED_AGAINST = {
-  version: '0.155.1',
-  capturedAt: '2026-09-21',
+  version: '0.157.1',
+  capturedAt: '2026-09-27',
   paneGeometry: '200x1000',
 } as const;
 

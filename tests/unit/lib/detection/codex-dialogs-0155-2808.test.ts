@@ -364,11 +364,12 @@ describe('[#2808 → #2818] an idle frame after a declined approval reads `ready
     expect(result.reason).toBe(STATUS_REASON.INPUT_PROMPT);
   });
 
-  it('lets the detector-wide stamp advance to 0.155.1', () => {
+  it('lets the detector-wide stamp advance past 0.155.1', () => {
     // `CODEX_VERIFIED_AGAINST` claims the rules answer for the build it names.
-    // #2808 held it at 0.148.0 while the frame above was misread.
-    expect(CODEX_VERIFIED_AGAINST.version).toBe('0.155.1');
-    expect(CODEX_VERIFIED_AGAINST.capturedAt).toBe('2026-09-21');
+    // #2808 held it at 0.148.0 while the frame above was misread; #2818 moved it
+    // to 0.155.1 and #2868 on to 0.157.1 (codex-dialogs-0157.test.ts).
+    expect(CODEX_VERIFIED_AGAINST.version).toBe('0.157.1');
+    expect(CODEX_VERIFIED_AGAINST.capturedAt).toBe('2026-09-27');
     expect(CODEX_VERIFIED_AGAINST.paneGeometry).toBe('200x1000');
   });
 });
