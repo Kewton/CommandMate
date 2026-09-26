@@ -1,0 +1,16 @@
+{
+  "version": "0.41.1",
+  "date": "2026-09-26",
+  "highlight": {
+    "ja": "HTML ファイルのプレビューで、同じフォルダなどにある画像が表示されるようになりました。",
+    "en": "HTML file previews now show images stored alongside the file, such as in the same folder."
+  },
+  "added": [],
+  "improved": [],
+  "fixed": [
+    {
+      "ja": "HTML ファイルのプレビューで、相対パスで指定した画像が表示されない問題を直しました。",
+      "en": "Fixed images referenced by a relative path not appearing in HTML file previews."
+    }
+  ]
+}

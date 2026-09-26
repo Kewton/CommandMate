@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.41.1] - 2026-09-26
+
+> **Highlight**: Files の HTML プレビューで、`<img src="shots/x.png">` のような相対パスの画像が表示されなかった問題を直しました。iframe の `srcDoc` には基準 URL が無いため、画像を親の画面でファイル API から取得し、データ URI に置き換えてから渡します。Safe モードのまま表示でき、実リポジトリのレポート（画像 24 枚）で PC・スマホとも全枚数の表示を確認しています。
+
+### Fixed
+
+- **fix(files): HTML プレビューで相対パスの `<img>` が表示されない問題を修正** (#2861): `srcDoc` の文書は基準 URL が `about:srcdoc` のため相対パスの画像を読み込めなかった。親の画面で相対パスの `<img src>` をファイル API で取得してデータ URI に置き換えてから iframe に渡すようにした（PC の `HtmlPreview`・スマホの `HtmlPreviewMobile`。Safe モードの `sandbox` は変更なし。1 HTML あたり最大 50 枚・データ URI 合計 20,000,000 文字まで。ソース表示は元の HTML のまま）。
+
 ## [0.41.0] - 2026-09-25
 
 > **Highlight**: エージェントが返答の本文でダイアログの文面を引用すると、入力待ちなのに「ダイアログが開いている」と表示され、選択リストのカードや Pick ボタンが出ていた問題を、codex・antigravity・Command Code・Claude の 4 ツールで直しました（「画面の一番下が入力欄ならダイアログは開いていない」を判定の入口に置く）。antigravity の Auto-Yes は引用されたダイアログに答えなくなり、さらに hook の問い合わせで裏付けが取れない承認ダイアログにも答えません。あわせて、画面の判定と hook の報告の食い違いをサーバーログに記録するようにし、codex のキャプチャ 55 件の判定を表で固定しました。サイドバーのセッション表示の並び替えも、選んだ順番どおりになりました。
