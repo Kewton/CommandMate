@@ -172,6 +172,46 @@ export interface PromptPanelProps {
   onDismiss?: () => void;
   /** CLI tool display name (e.g., 'Claude', 'Gemini') for header */
   cliToolName?: string;
+  /**
+   * Issue #2869: the same window has survived two Sends in a row. Drawn only
+   * together with {@link PromptPanelProps.onSwitchToDirectInput}.
+   */
+  showStuckHint?: boolean;
+  /** Issue #2869: the hint's link — opens direct-input mode for this pane. */
+  onSwitchToDirectInput?: () => void;
+}
+
+/** Props for {@link PromptStuckHint} */
+interface PromptStuckHintProps {
+  showStuckHint?: boolean;
+  onSwitchToDirectInput?: () => void;
+}
+
+/**
+ * The "Send is not working — use direct input" line under a prompt window
+ * (Issue #2869). Renders nothing unless both props are given, so a caller that
+ * passes neither keeps its pre-#2869 output. `MobilePromptSheet` draws its own
+ * copy rather than importing this one: suites that mock this module for the
+ * split pane still render the sheet.
+ */
+function PromptStuckHint({ showStuckHint, onSwitchToDirectInput }: PromptStuckHintProps) {
+  const t = useTranslations('worktree');
+  if (!showStuckHint || !onSwitchToDirectInput) return null;
+  const linkLabel = t('promptResponse.stuckHintLink');
+  return (
+    <p data-testid="prompt-stuck-hint" className="mt-3 text-sm text-warning-foreground">
+      {t('promptResponse.stuckHint')}{' '}
+      <button
+        type="button"
+        data-testid="prompt-stuck-hint-link"
+        onClick={onSwitchToDirectInput}
+        aria-label={linkLabel}
+        className="underline font-medium hover:no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-warning-border rounded"
+      >
+        {linkLabel}
+      </button>
+    </p>
+  );
 }
 
 /** Props for PromptPanelContent component */
@@ -1104,6 +1144,8 @@ export const PromptPanel = memo(function PromptPanel({
   onRespond,
   onDismiss,
   cliToolName,
+  showStuckHint,
+  onSwitchToDirectInput,
 }: PromptPanelProps) {
   const { shouldRender, animationClass } = usePromptAnimation({
     visible: visible && promptData !== null,
@@ -1135,6 +1177,10 @@ export const PromptPanel = memo(function PromptPanel({
           onDismiss={onDismiss}
           labelId={labelId}
           cliToolName={cliToolName}
+        />
+        <PromptStuckHint
+          showStuckHint={showStuckHint}
+          onSwitchToDirectInput={onSwitchToDirectInput}
         />
       </div>
     </ErrorBoundary>

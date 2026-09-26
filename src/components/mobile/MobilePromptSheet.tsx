@@ -126,6 +126,41 @@ export interface MobilePromptSheetProps {
   onDismiss?: () => void;
   /** CLI tool display name (e.g., 'Claude', 'Gemini') for header */
   cliToolName?: string;
+  /**
+   * Issue #2869: the same window has survived two Sends in a row. Drawn only
+   * together with {@link MobilePromptSheetProps.onSwitchToDirectInput}.
+   */
+  showStuckHint?: boolean;
+  /** Issue #2869: the hint's link — switches to the terminal and opens direct input. */
+  onSwitchToDirectInput?: () => void;
+}
+
+/**
+ * The "Send is not working — use direct input" line (Issue #2869). The same
+ * row as `PromptPanel`'s, restated here for the reason the typed-text patterns
+ * above are: suites that mock `PromptPanel` still render this sheet.
+ */
+function PromptStuckHint({
+  showStuckHint,
+  onSwitchToDirectInput,
+}: Pick<MobilePromptSheetProps, 'showStuckHint' | 'onSwitchToDirectInput'>) {
+  const t = useTranslations('worktree');
+  if (!showStuckHint || !onSwitchToDirectInput) return null;
+  const linkLabel = t('promptResponse.stuckHintLink');
+  return (
+    <p data-testid="prompt-stuck-hint" className="mt-3 text-sm text-warning-foreground">
+      {t('promptResponse.stuckHint')}{' '}
+      <button
+        type="button"
+        data-testid="prompt-stuck-hint-link"
+        onClick={onSwitchToDirectInput}
+        aria-label={linkLabel}
+        className="underline font-medium min-h-[44px] touch-manipulation"
+      >
+        {linkLabel}
+      </button>
+    </p>
+  );
 }
 
 /**
@@ -141,6 +176,8 @@ export const MobilePromptSheet = memo(function MobilePromptSheet({
   onRespond,
   onDismiss,
   cliToolName,
+  showStuckHint,
+  onSwitchToDirectInput,
 }: MobilePromptSheetProps) {
   const { shouldRender, animationClass } = usePromptAnimation({
     visible: visible && promptData !== null,
@@ -269,6 +306,10 @@ export const MobilePromptSheet = memo(function MobilePromptSheet({
             onRespond={onRespond}
             labelId={labelId}
             cliToolName={cliToolName}
+          />
+          <PromptStuckHint
+            showStuckHint={showStuckHint}
+            onSwitchToDirectInput={onSwitchToDirectInput}
           />
         </div>
       </div>

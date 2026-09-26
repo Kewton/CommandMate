@@ -1020,7 +1020,9 @@
     "caption": "回答"
   },
   "promptResponse": {
-    "refused": "ダイアログの状態が変わったため送信できませんでした。画面を確認してください。"
+    "refused": "ダイアログの状態が変わったため送信できませんでした。画面を確認してください。",
+    "stuckHint": "送信がうまくいかない場合は、直接入力モードで操作してください。",
+    "stuckHintLink": "直接入力に切り替える"
   },
   "dismissPanelKeys": {
     "toolbarLabel": "この画面を閉じる",

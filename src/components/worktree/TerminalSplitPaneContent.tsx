@@ -83,6 +83,7 @@ import {
   hasOpenCodeSidebarObstruction,
 } from '@/components/worktree/OpencodeSidebarNotice';
 import { PromptPanel } from '@/components/worktree/PromptPanel';
+import { usePromptStuckCounter } from '@/hooks/usePromptStuckCounter';
 import { MessageInput } from '@/components/worktree/MessageInput';
 import { OpencodeTurnDiffPanel } from '@/components/worktree/OpencodeTurnDiffPanel';
 import { HistoryPane, splitHistorySlotId } from '@/components/worktree/HistoryPane';
@@ -476,6 +477,26 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
     setDirectInputOpen(false);
   }, []);
 
+  // Issue #2869: the same prompt window shown again after two Sends in a row
+  // (refused, or delivered to a frame that did not react) points the user at
+  // direct input. Counted on the window `PromptPanel` is actually drawing — the
+  // same condition as `showPrompt` below, restated because the handler that
+  // calls `markSubmitted` is declared above it.
+  const {
+    showStuckHint: showPromptStuckHint,
+    markSubmitted: markPromptSubmitted,
+  } = usePromptStuckCounter({
+    promptData:
+      prompt.visible && (!autoYesEnabled || isMultiSelectPrompt(prompt.data)) ? prompt.data : null,
+    targetKey: `${worktreeId}:${cliToolId}:${resolvedInstanceId}`,
+  });
+
+  // The hint's link. Only offered while the session is live: the direct-input
+  // route 404s without one, and the effect above closes the bar in that state.
+  const handleSwitchToDirectInput = useCallback(() => {
+    setDirectInputOpen(true);
+  }, []);
+
   // Issue #744: this split's OWN message history, fetched independently by its
   // cliToolId. `state.messages` in the parent is server-filtered to the active
   // CLI tab, so it cannot represent split A=Claude and split B=Codex at once.
@@ -594,6 +615,9 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
 
   const handlePromptRespond = useCallback(
     async (answer: string, decisionId?: string | null): Promise<void> => {
+      // Issue #2869: remember which window this Send was made from, so the
+      // next display can tell whether it changed anything.
+      markPromptSubmitted();
       setPromptAnswering(true);
       try {
         // Issue #1932: an approval the agent named by id goes to `/respond`,
@@ -657,7 +681,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
         setPromptAnswering(false);
       }
     },
-    [worktreeId, cliToolId, resolvedInstanceId, prompt.data, setPromptAnswering, clearPrompt, refresh, showToast, t],
+    [worktreeId, cliToolId, resolvedInstanceId, prompt.data, setPromptAnswering, clearPrompt, refresh, showToast, t, markPromptSubmitted],
   );
 
   const handlePromptDismiss = useCallback(() => {
@@ -1078,6 +1102,8 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
             onRespond={handlePromptRespond}
             onDismiss={handlePromptDismiss}
             cliToolName={getCliToolDisplayName(cliToolId)}
+            showStuckHint={showPromptStuckHint}
+            onSwitchToDirectInput={terminal.isRunning ? handleSwitchToDirectInput : undefined}
           />
         ) : null}
         {/* Issue #2046: opencode only. The chords opencode's TUI is driven by
@@ -1318,6 +1344,9 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       prompt.answering,
       handlePromptRespond,
       handlePromptDismiss,
+      // Issue #2869: the stuck hint under the panel, and its link.
+      showPromptStuckHint,
+      handleSwitchToDirectInput,
       handleMessageSent,
       sendOptimistic,
       terminal.isRunning,

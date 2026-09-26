@@ -106,6 +106,8 @@ import type { MobileTab } from '@/components/mobile/MobileTabBar';
 import { VerificationStatusChip } from '@/components/worktree/VerificationStatusChip';
 import type { SubTabRequest } from '@/components/worktree/NotesAndLogsPane';
 import { DEFAULT_SURFACE_MODE, type SurfaceMode } from '@/types/ui-state';
+import { getMobileSurfaceModeStorageKey, writeSurfaceMode } from '@/config/surface-mode-config';
+import { usePromptStuckCounter } from '@/hooks/usePromptStuckCounter';
 
 // ============================================================================
 // Types
@@ -595,6 +597,42 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   const openDirectInput = useCallback(() => setDirectInputOpen(true), []);
   const closeDirectInput = useCallback(() => setDirectInputOpen(false), []);
 
+  // --------------------------------------------------------------------------
+  // Issue #2869: pointing a stuck prompt sheet at direct input
+  // --------------------------------------------------------------------------
+  // The same window shown again after two Sends in a row (refused, or keys
+  // that did not change the frame) gets a line and a link to the keyboard.
+  const {
+    showStuckHint: showPromptStuckHint,
+    markSubmitted: markPromptSubmitted,
+  } = usePromptStuckCounter({
+    promptData: state.prompt.visible ? state.prompt.data : null,
+    targetKey: `${worktreeId}:${activeCliTab}:${activeInstanceId}`,
+  });
+
+  const handleMobilePromptRespond = useCallback(
+    async (answer: string): Promise<void> => {
+      markPromptSubmitted();
+      await handlePromptRespond(answer);
+    },
+    [markPromptSubmitted, handlePromptRespond]
+  );
+
+  // `MobileTerminalTab` owns the surface mode (per worktree, in localStorage)
+  // and only REPORTS it up through `setMobileSurfaceMode`; setting this
+  // screen's copy does not move the tab off chat. So the link writes the
+  // preference and remounts the content, which re-reads it — the same path a
+  // tab switch takes. All in one event, so the close-on-chat effect above sees
+  // `terminal` on both sides and leaves the keyboard open.
+  const [mobileContentMountKey, setMobileContentMountKey] = useState(0);
+  const handleStuckSwitchToDirectInput = useCallback(() => {
+    writeSurfaceMode(getMobileSurfaceModeStorageKey(worktreeId), 'terminal');
+    handleMobileTabChange('terminal');
+    setMobileSurfaceMode('terminal');
+    setMobileContentMountKey((key) => key + 1);
+    setDirectInputOpen(true);
+  }, [worktreeId, handleMobileTabChange]);
+
   // Render
   // ========================================================================
 
@@ -949,6 +987,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
               ref={tabSwipeRef}
             >
               <MobileContent
+                key={mobileContentMountKey}
                 activeTab={activeTab}
                 worktreeId={worktreeId}
                 worktree={worktree}
@@ -1147,9 +1186,11 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                 promptData={state.prompt.data}
                 visible={state.prompt.visible}
                 answering={state.prompt.answering}
-                onRespond={handlePromptRespond}
+                onRespond={handleMobilePromptRespond}
                 onDismiss={handlePromptDismiss}
                 cliToolName={getCliToolDisplayName(activeCliTab)}
+                showStuckHint={showPromptStuckHint}
+                onSwitchToDirectInput={activeSessionRunning ? handleStuckSwitchToDirectInput : undefined}
               />
             )}
 
