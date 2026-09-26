@@ -17,6 +17,7 @@ import {
   detectThinking,
   CODEX_PROMPT_PATTERN,
   CODEX_SELECTION_LIST_PATTERN,
+  CODEX_PICKER_FOOTER_PATTERN,
   CODEX_APPROVAL_FOOTER_PATTERN,
   CODEX_PAGER_FOOTER_PATTERN,
   CODEX_STATUS_BAR_PATTERN,
@@ -284,7 +285,13 @@ export const codexStatusDetector = createToolStatusDetector({
       const codexSelectionWindow = contentLines
         .slice(Math.max(0, codexContentEnd - STATUS_CHECK_LINE_COUNT + 1), codexContentEnd + 1)
         .join('\n');
-      if (CODEX_SELECTION_LIST_PATTERN.test(codexSelectionWindow)) {
+      // Issue #2868: codex 0.157's picker closes with `enter select · esc back`.
+      // Only the window's LAST non-blank row is tested against it (never the
+      // whole window), so the same words quoted in a transcript do not count.
+      if (
+        CODEX_SELECTION_LIST_PATTERN.test(codexSelectionWindow) ||
+        CODEX_PICKER_FOOTER_PATTERN.test(contentLines[codexContentEnd].trim())
+      ) {
         const codexPromptDetection = detectPrompt(
           stripBoxDrawing(frame.clean),
           buildDetectPromptOptions('codex'),

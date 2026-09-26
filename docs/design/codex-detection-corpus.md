@@ -82,6 +82,10 @@ tmux -L codexprobe kill-server   # -L 付き。本番の tmux サーバーには
 
 `$PROBE` は、Issue に添付するまで残しておいてよい。
 
+### 2-5. 実施記録
+
+- **0.157.1**（2026-09-27、Issue #2868）: `model-picker.txt` だけが落ちた（フッタが `enter select · esc back` に変わった）。`CODEX_PICKER_FOOTER_PATTERN` で直し、`CODEX_VERIFIED_AGAINST` を 0.157.1 へ。`-a untrusted` が廃止され `-c projects.….trust_level` の上書きも効かなかったので、`-a on-request -s read-only` で起動し trust は画面で承認した（`tests/fixtures/codex-dialogs-0157/README.md`）
+
 ## 3. 実運用での検知（Issue #2843）
 
 更新時の確認で拾えない誤判定（特定の会話内容でだけ起きるもの）は、サーバーログ（`logs/server.log`）の

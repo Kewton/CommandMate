@@ -602,6 +602,24 @@ export const CODEX_APPROVAL_FOOTER_PATTERN = /esc\s+to\s+cancel/i;
 export const CODEX_FORM_SUBMIT_FOOTER_PATTERN = /^enter\s+to\s+submit\s*\|\s*esc\s+to\s+cancel$/im;
 
 /**
+ * Codex CLI 0.157 picker footer pattern (Issue #2868).
+ *
+ * codex-cli 0.157.1 retitled `/model` ("Select Model and Effort") and replaced
+ * its "Press enter to confirm or esc to go back" footer with the terse
+ * `enter select · esc back` row (measured: `tests/fixtures/codex-dialogs-0157/`).
+ * CODEX_SELECTION_LIST_PATTERN no longer matched, so branch 0.8 missed the
+ * picker and the dialog entry gate refused the answer (`prompt_no_longer_active`).
+ *
+ * Same construction as CODEX_FORM_SUBMIT_FOOTER_PATTERN: the whole measured row
+ * (`/m` + `^…$`), tested only against a trimmed single footer row — never a
+ * window — so a transcript quoting the words does not vouch for anything.
+ * CODEX_SELECTION_LIST_PATTERN is deliberately left as is (#2774 / #2841).
+ *
+ * No /g flag (keeps .test() stateless), no nested quantifiers (ReDoS-safe).
+ */
+export const CODEX_PICKER_FOOTER_PATTERN = /^enter\s+select\s*·\s*esc\s+back$/im;
+
+/**
  * Codex CLI pager / edit-previous (transcript) mode footer pattern (Issue #1017)
  *
  * When Codex enters its transcript pager / "edit previous message" mode, the
