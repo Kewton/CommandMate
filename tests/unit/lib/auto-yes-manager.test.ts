@@ -1,4 +1,9 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
+// Issue #2865: the poller answers only a session created in the worktree's own
+// directory. Ownership itself is covered by tests/unit/tmux/session-ownership.test.ts.
+vi.mock('@/lib/cli-tools/worktree-session-ownership', () => ({
+  checkWorktreeSessionOwnership: vi.fn(async () => ({ verdict: 'owned', sessionPath: null })),
+}));
 import {
   getAutoYesState,
   setAutoYesEnabled,

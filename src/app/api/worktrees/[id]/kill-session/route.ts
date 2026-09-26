@@ -23,6 +23,7 @@ import {
 } from '@/lib/session/resolve-session-target';
 import { createLogger } from '@/lib/logger';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
+import { checkSessionOwnership, foreignSessionErrorBody } from '@/lib/cli-tools/session-ownership';
 
 const logger = createLogger('api/kill-session');
 
@@ -128,18 +129,30 @@ export async function POST(
     const killedSessions: string[] = [];
     const failedSessions: string[] = [];
     let anySessionRunning = false;
+    // Issue #2865: same-named sessions another CommandMate server created
+    // (`#{session_path}` is not this worktree) are never killed.
+    const skippedForeignSessions: string[] = [];
+    let firstForeignSessionPath: string | null = null;
 
     // Kill targeted sessions
     for (const { cliToolId, instanceId } of targets) {
       const cliTool = manager.getTool(cliToolId);
+      // `getSessionName` is part of the gateway too; it is only used here to
+      // name the pane in the response and the log, and to check ownership —
+      // never to address tmux.
+      const sessionName = cliTool.getSessionName(id, instanceId);
+      const ownership = await checkSessionOwnership(sessionName, worktree.path);
+      if (ownership.verdict === 'foreign') {
+        if (skippedForeignSessions.length === 0) firstForeignSessionPath = ownership.sessionPath;
+        skippedForeignSessions.push(sessionName);
+        continue;
+      }
+
       const isRunning = await cliTool.isRunning(id, instanceId);
 
       if (!isRunning) continue;
 
       anySessionRunning = true;
-      // `getSessionName` is part of the gateway too; it is only used here to
-      // name the pane in the response and the log, never to address tmux.
-      const sessionName = cliTool.getSessionName(id, instanceId);
 
       try {
         // Issue #1905 (design §4 D4): go through the CLITool gateway instead of
@@ -179,6 +192,16 @@ export async function POST(
 
       // Clean up session state for this instance
       deleteSessionState(db, id, cliToolId, instanceId);
+    }
+
+    if (!anySessionRunning && skippedForeignSessions.length > 0) {
+      return NextResponse.json(
+        {
+          ...foreignSessionErrorBody(skippedForeignSessions[0], firstForeignSessionPath),
+          skippedForeignSessions,
+        },
+        { status: 409 }
+      );
     }
 
     if (!anySessionRunning) {
@@ -242,6 +265,7 @@ export async function POST(
           : `All sessions killed successfully: ${killedSessions.join(', ')}`,
         killedSessions,
         ...(failedSessions.length > 0 ? { failedSessions } : {}),
+        ...(skippedForeignSessions.length > 0 ? { skippedForeignSessions } : {}),
         cliTool: targetCliTool || null,
         instance: instanceParam || null,
       },

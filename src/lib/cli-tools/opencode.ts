@@ -345,7 +345,7 @@ export class OpenCodeTool extends BaseCLITool {
       // 200 wide, reconnected ones are 80" ships without anyone noticing —
       // a reconnect would silently hand the detectors a geometry the creation
       // path had been moved away from.
-      await this.reconcileExistingSession(sessionName, {
+      await this.reconcileExistingSession(sessionName, worktreePath, {
         windowWidth: resolveOpencodePaneWidthChecked(),
         windowHeight: OPENCODE_PANE_HEIGHT,
       });

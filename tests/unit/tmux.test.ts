@@ -123,7 +123,7 @@ describe('tmux library', () => {
       vi.mocked(execFile).mockImplementation((...args: unknown[]) => {
         const callback = args[args.length - 1] as (err: Error | null, result: { stdout: string; stderr: string }) => void;
         callback(null, {
-          stdout: 'session1|2|1\nsession2|1|0\n',
+          stdout: 'session1\t2\t1\t/repo/a\nsession2\t1\t0\t/repo/b\n',
           stderr: '',
         });
         return {} as ReturnType<typeof execFile>;
@@ -132,15 +132,35 @@ describe('tmux library', () => {
       const result = await listSessions();
 
       expect(result).toEqual([
-        { name: 'session1', windows: 2, attached: true },
-        { name: 'session2', windows: 1, attached: false },
+        { name: 'session1', windows: 2, attached: true, path: '/repo/a' },
+        { name: 'session2', windows: 1, attached: false, path: '/repo/b' },
       ]);
       expect(execFile).toHaveBeenCalledWith(
         'tmux',
-        ['list-sessions', '-F', '#{session_name}|#{session_windows}|#{session_attached}'],
+        ['list-sessions', '-F', '#{session_name}\t#{session_windows}\t#{session_attached}\t#{session_path}'],
         { timeout: 5000 },
         expect.any(Function)
       );
+    });
+
+    // Issue #2865: the path is the last, tab-separated column, so `|` and spaces
+    // in a directory name survive intact.
+    it('returns session_path containing | and spaces unmangled', async () => {
+      vi.mocked(execFile).mockImplementation((...args: unknown[]) => {
+        const callback = args[args.length - 1] as (err: Error | null, result: { stdout: string; stderr: string }) => void;
+        callback(null, {
+          stdout: 'mcbd-claude-wt\t1\t0\t/Users/me/My Repo|v2/wt one\nbare\t1\t0\t\n',
+          stderr: '',
+        });
+        return {} as ReturnType<typeof execFile>;
+      });
+
+      const result = await listSessions();
+
+      expect(result).toEqual([
+        { name: 'mcbd-claude-wt', windows: 1, attached: false, path: '/Users/me/My Repo|v2/wt one' },
+        { name: 'bare', windows: 1, attached: false, path: '' },
+      ]);
     });
 
     it('should return empty array when no sessions exist', async () => {

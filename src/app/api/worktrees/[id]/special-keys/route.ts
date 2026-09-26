@@ -26,7 +26,8 @@ import { isCliToolType, isValidInstanceId } from '@/lib/cli-tools/types';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { getWorktreeById } from '@/lib/db';
 import { getDbInstance } from '@/lib/db/db-instance';
-import { hasSession, isAllowedSpecialKey, sendSpecialKeysAndInvalidate } from '@/lib/tmux/tmux';
+import { isAllowedSpecialKey, sendSpecialKeysAndInvalidate } from '@/lib/tmux/tmux';
+import { checkSessionOwnership, foreignSessionErrorBody } from '@/lib/cli-tools/session-ownership';
 import { createLogger } from '@/lib/logger';
 import { broadcastTerminalSnapshotAfterInteraction } from '@/lib/realtime/terminal-broadcast';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
@@ -119,8 +120,12 @@ export async function POST(
     // 5. Session existence check
     const sessionName = cliTool.getSessionName(id, instanceId);
 
-    const sessionExists = await hasSession(sessionName);
-    if (!sessionExists) {
+    // Issue #2865: a same-named session another CommandMate server created is not ours.
+    const ownership = await checkSessionOwnership(sessionName, worktree.path);
+    if (ownership.verdict === 'foreign') {
+      return NextResponse.json(foreignSessionErrorBody(sessionName, ownership.sessionPath), { status: 409 });
+    }
+    if (ownership.verdict === 'absent') {
       return NextResponse.json(
         { error: 'Session not found' },
         { status: 404 }

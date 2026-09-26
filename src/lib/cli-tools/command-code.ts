@@ -228,7 +228,7 @@ export class CommandCodeTool extends BaseCLITool {
 
     const exists = await hasSession(sessionName);
     if (exists) {
-      await this.reconcileExistingSession(sessionName);
+      await this.reconcileExistingSession(sessionName, worktreePath);
 
       // Issue #2070's shape: a tmux session outlives the agent that was launched
       // into it, and skipping the launch for a pane holding nothing but a shell

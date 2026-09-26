@@ -81,6 +81,13 @@ vi.mock('@/lib/tmux/tmux', () => ({
   sendSpecialKeys: (...args: unknown[]) => mockSendSpecialKeys(...args),
 }));
 
+// Issue #2865: the ownership check the timer / relay sends reach only through
+// this service. Owned unless a case says otherwise.
+const mockCheckWorktreeSessionOwnership = vi.fn();
+vi.mock('@/lib/cli-tools/worktree-session-ownership', () => ({
+  checkWorktreeSessionOwnership: (...args: unknown[]) => mockCheckWorktreeSessionOwnership(...args),
+}));
+
 const mockInvalidateCache = vi.fn();
 vi.mock('@/lib/tmux/tmux-capture-cache', () => ({
   invalidateCache: (...args: unknown[]) => mockInvalidateCache(...args),
@@ -129,6 +136,51 @@ describe('sendUserMessage (Issue #1028)', () => {
     mockSavePendingAssistantResponse.mockResolvedValue(null);
     mockDeleteMessageById.mockReturnValue(true);
     mockCreateMessage.mockReturnValue({ id: 'created-msg', role: 'user', content: 'Hello' });
+    mockCheckWorktreeSessionOwnership.mockResolvedValue({ verdict: 'owned', sessionPath: '/wt-1' });
+  });
+
+  // Issue #2865: the timer manager (timer-manager.ts) and relay delivery
+  // (relay/relay-delivery.ts) type into tmux only through this function.
+  it('sends nothing and starts no poller into a session another server created', async () => {
+    const tool = makeTool();
+    mockGetTool.mockReturnValue(tool);
+    mockCheckWorktreeSessionOwnership.mockResolvedValue({ verdict: 'foreign', sessionPath: '/other/wt-1' });
+
+    const result = await sendUserMessage(mockDb, {
+      worktreeId: 'wt-1',
+      content: 'Hello',
+      cliToolId: 'claude',
+      instanceId: 'claude',
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      stage: 'foreign_session',
+      error: expect.stringContaining('mcbd-claude-wt-1'),
+    });
+    expect(mockCheckWorktreeSessionOwnership).toHaveBeenCalledWith('wt-1', 'mcbd-claude-wt-1', mockDb);
+    expect(tool.sendMessage).not.toHaveBeenCalled();
+    expect(tool.sendMessageWithImage).not.toHaveBeenCalled();
+    expect(mockStartPolling).not.toHaveBeenCalled();
+    expect(mockCreateMessage).not.toHaveBeenCalled();
+    expect(mockSavePendingAssistantResponse).not.toHaveBeenCalled();
+  });
+
+  it('sends nothing when the worktree row is gone and ownership cannot be confirmed', async () => {
+    const tool = makeTool();
+    mockGetTool.mockReturnValue(tool);
+    mockCheckWorktreeSessionOwnership.mockResolvedValue(null);
+
+    const result = await sendUserMessage(mockDb, {
+      worktreeId: 'wt-1',
+      content: 'Hello',
+      cliToolId: 'claude',
+      instanceId: 'claude',
+    });
+
+    expect(result).toMatchObject({ ok: false, stage: 'foreign_session' });
+    expect(tool.sendMessage).not.toHaveBeenCalled();
+    expect(mockStartPolling).not.toHaveBeenCalled();
   });
 
   it('records a normal message in chat_messages and starts response polling', async () => {

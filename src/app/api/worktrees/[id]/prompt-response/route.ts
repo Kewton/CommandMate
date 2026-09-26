@@ -38,6 +38,7 @@ import { isValidWorktreeId } from '@/lib/security/path-validator';
 import type { PromptType, SubmitMode } from '@/types/models';
 import { isValidSubmitMode } from '@/types/models';
 import { createLogger } from '@/lib/logger';
+import { checkSessionOwnership, foreignSessionErrorBody } from '@/lib/cli-tools/session-ownership';
 import { startPolling } from '@/lib/polling/response-poller';
 import { broadcastTerminalSnapshotAfterInteraction } from '@/lib/realtime/terminal-broadcast';
 import { applyEventToActiveTask } from '@/lib/tasks/task-transition-service';
@@ -259,6 +260,14 @@ export async function POST(
     // Get CLI tool instance from manager
     const manager = CLIToolManager.getInstance();
     const cliTool = manager.getTool(cliToolId);
+
+    // Issue #2865: a same-named session another CommandMate server created is
+    // never answered, on either the structured or the keystroke path below.
+    const ownedSessionName = cliTool.getSessionName(id, instanceId);
+    const ownership = await checkSessionOwnership(ownedSessionName, worktree.path);
+    if (ownership.verdict === 'foreign') {
+      return NextResponse.json(foreignSessionErrorBody(ownedSessionName, ownership.sessionPath), { status: 409 });
+    }
 
     // Check if session is running (Issue #868: per-instance)
     const running = await cliTool.isRunning(id, instanceId);

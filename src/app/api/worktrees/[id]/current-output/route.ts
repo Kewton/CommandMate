@@ -14,6 +14,8 @@ import { detectAgentMode } from '@/lib/detection/agent-mode';
 import { isValidWorktreeId } from '@/lib/security/path-validator';
 import { createLogger } from '@/lib/logger';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
+import { resolveSessionName } from '@/lib/cli-tools/session-name';
+import { checkSessionOwnership, foreignSessionErrorBody } from '@/lib/cli-tools/session-ownership';
 
 const logger = createLogger('api/current-output');
 
@@ -90,6 +92,14 @@ export async function GET(
         rosterCliTool: target.conflict.rosterCliTool,
         requestedCliTool: target.conflict.requestedCliTool,
       });
+    }
+
+    // Issue #2865: a same-named session another CommandMate server created is
+    // not this worktree's — its output is never read back here.
+    const sessionName = resolveSessionName(target.cliToolId, id, target.instanceId);
+    const ownership = await checkSessionOwnership(sessionName, worktree.path);
+    if (ownership.verdict === 'foreign') {
+      return NextResponse.json(foreignSessionErrorBody(sessionName, ownership.sessionPath), { status: 409 });
     }
 
     // Issue #1120: payload assembly is shared with the WS terminal streamer via

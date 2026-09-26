@@ -20,6 +20,12 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+// Issue #2865: the reuse branch first confirms the existing pane was created in
+// this worktree's directory. Ownership itself is covered by session-ownership.test.ts.
+vi.mock('@/lib/tmux/session-ownership', () => ({
+  assertSessionNotForeign: vi.fn(async () => ({ verdict: 'owned', sessionPath: null })),
+}));
 import { existsSync, mkdtempSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';

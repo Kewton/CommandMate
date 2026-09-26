@@ -25,7 +25,9 @@ import { isCliToolType, isValidInstanceId } from '@/lib/cli-tools/types';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { getWorktreeById } from '@/lib/db';
 import { getDbInstance } from '@/lib/db/db-instance';
-import { hasSession } from '@/lib/tmux/tmux';
+// Issue #2865: imported from the tmux module this route was already allowlisted
+// for (`.eslintrc.json` §4 D4), in place of the `hasSession` it used before.
+import { checkSessionOwnership, foreignSessionErrorBody } from '@/lib/tmux/session-ownership';
 import { clearComposer } from '@/lib/session/composer-clear';
 import { createLogger } from '@/lib/logger';
 import { broadcastTerminalSnapshotAfterInteraction } from '@/lib/realtime/terminal-broadcast';
@@ -68,8 +70,12 @@ export async function POST(
     const cliTool = manager.getTool(cliToolId);
     const sessionName = cliTool.getSessionName(id, instanceId as string | undefined);
 
-    const sessionExists = await hasSession(sessionName);
-    if (!sessionExists) {
+    // Issue #2865: a same-named session another CommandMate server created is not ours.
+    const ownership = await checkSessionOwnership(sessionName, worktree.path);
+    if (ownership.verdict === 'foreign') {
+      return NextResponse.json(foreignSessionErrorBody(sessionName, ownership.sessionPath), { status: 409 });
+    }
+    if (ownership.verdict === 'absent') {
       return NextResponse.json({ error: 'Session not found' }, { status: 404 });
     }
 

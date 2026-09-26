@@ -15,6 +15,7 @@ import { createLogger } from '@/lib/logger';
 import { broadcastTerminalSnapshotAfterInteraction } from '@/lib/realtime/terminal-broadcast';
 import { applyEventToActiveTask } from '@/lib/tasks/task-transition-service';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
+import { checkSessionOwnership, foreignSessionErrorBody } from '@/lib/cli-tools/session-ownership';
 import { isAnswerablePromptData } from '@/types/models';
 import { respondByDecisionId, respondToSolePendingDecision } from './structured-decision';
 
@@ -223,19 +224,6 @@ export async function POST(
       }
     }
 
-    // Update prompt data
-    const updatedPromptData = {
-      ...promptData,
-      status: 'answered' as const,
-      answer,
-      answeredAt: new Date().toISOString(),
-      // Issue #1685: audit attribution — this route is only reached from an
-      // explicit human reply (chat prompt buttons).
-      answeredBy: 'human' as const,
-    };
-
-    updatePromptData(db, messageId, updatedPromptData);
-
     // Get worktree to verify it exists
     const worktree = getWorktreeById(db, id);
     if (!worktree) {
@@ -258,6 +246,27 @@ export async function POST(
 
     // Get session name for the CLI tool
     const sessionName = cliTool.getSessionName(id, instanceId);
+
+    // Issue #2865: a same-named session another CommandMate server created is
+    // not this prompt's pane. Refused before the prompt is marked answered.
+    const ownership = await checkSessionOwnership(sessionName, worktree.path);
+    if (ownership.verdict === 'foreign') {
+      return NextResponse.json(foreignSessionErrorBody(sessionName, ownership.sessionPath), { status: 409 });
+    }
+
+    // Update prompt data
+    const updatedPromptData = {
+      ...promptData,
+      status: 'answered' as const,
+      answer,
+      answeredAt: new Date().toISOString(),
+      // Issue #1685: audit attribution — this route is only reached from an
+      // explicit human reply (chat prompt buttons).
+      answeredBy: 'human' as const,
+    };
+
+    updatePromptData(db, messageId, updatedPromptData);
+
 
     // Send answer to tmux via shared sendPromptAnswer() (Issue #616)
     try {

@@ -29,6 +29,8 @@ vi.mock('@/lib/db/db-instance', () => ({
 vi.mock('@/lib/session-cleanup', () => ({
   cleanupMultipleWorktrees: vi.fn().mockResolvedValue({ results: [], warnings: [] }),
   killWorktreeSession: vi.fn().mockResolvedValue(false),
+  // Issue #2865: the DELETE route kills through a path-aware killer.
+  createOwnedSessionKiller: vi.fn(() => vi.fn().mockResolvedValue(false)),
 }));
 
 vi.mock('@/lib/ws-server', () => ({

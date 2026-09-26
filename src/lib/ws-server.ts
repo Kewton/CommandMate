@@ -23,6 +23,7 @@ import { getDbInstance } from './db/db-instance';
 import { getWorktreeById } from './db';
 import { observeTmuxControlFirstOutputLatency } from './tmux/tmux-control-mode-metrics';
 import { getControlModeTmuxTransport } from './tmux/control-mode-tmux-transport';
+import { checkSessionOwnership } from './cli-tools/session-ownership';
 import { isTmuxControlModeEnabled } from './tmux/tmux-control-mode-flags';
 import { getExternalAppCache } from './external-apps/cache';
 import type { ExternalApp } from '@/types/external-apps';
@@ -958,6 +959,18 @@ async function handleTerminalSubscribe(ws: WebSocket, message: WebSocketMessage)
   }
 
   const sessionName = resolveSessionName(cliToolId, worktreeId);
+
+  // Issue #2865: never stream a same-named session another CommandMate server
+  // created (its `#{session_path}` is not this worktree's directory).
+  const ownership = await checkSessionOwnership(sessionName, worktree.path);
+  if (ownership.verdict === 'foreign') {
+    sendTerminalEvent(ws, {
+      type: 'terminal_error',
+      error: 'Session belongs to another CommandMate server',
+    });
+    return;
+  }
+
   const transport = getControlModeTmuxTransport();
   if (transport.getSubscriberCount(sessionName) >= MAX_TERMINAL_SUBSCRIBERS_PER_SESSION) {
     sendTerminalEvent(ws, {

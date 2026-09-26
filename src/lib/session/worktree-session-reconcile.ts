@@ -81,6 +81,7 @@ import { getAgentInstances } from '@/lib/db/agent-instances-db';
 import { getAllWorktreeAliases } from '@/lib/db/worktree-alias-db';
 import { isValidWorktreeId } from '@/lib/security/path-validator';
 import { listSessions, renameSession } from '@/lib/tmux/tmux';
+import { createCachedOwnershipMatcher } from '@/lib/tmux/session-ownership';
 import { getControlModeTmuxTransport } from '@/lib/tmux/control-mode-tmux-transport';
 import {
   migrateAutoYesStateWorktreeIds,
@@ -159,6 +160,11 @@ export interface ReconcileWorktreeSessionsResult {
 export interface ReconcileTmuxDeps {
   listSessions: typeof listSessions;
   renameSession: typeof renameSession;
+  /**
+   * Issue #2865: whether a session created in `sessionPath` belongs to the
+   * worktree at `worktreePath`. Defaults to `isSessionPathOwnedBy`.
+   */
+  isSessionOwnedBy: (sessionPath: string | null, worktreePath: string) => boolean;
 }
 
 export interface ReconcileOptions {
@@ -441,6 +447,69 @@ function mergeSessionPlans(
   return Array.from(byOldName.values());
 }
 
+/**
+ * The path of a worktree row, or null. Queried directly for the same reason
+ * {@link collectKnownWorktreeIds} is (suites mock `worktree-db`).
+ */
+function readWorktreePath(db: Database.Database, worktreeId: string): string | null {
+  try {
+    const row = db.prepare('SELECT path FROM worktrees WHERE id = ?').get(worktreeId) as
+      | { path: string }
+      | undefined;
+    return row?.path ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Drop the plans whose live source session another CommandMate server created
+ * (Issue #2865).
+ *
+ * Session names carry no server identity, so a live `mcbd-claude-<old>` may be
+ * a different server's session that merely shares the worktree ID. Only a
+ * session whose `#{session_path}` is the worktree's own directory is renamed;
+ * the rest are reported in `skippedSessions`. The directory comes from the
+ * rename target's row, falling back to the source's row when the pass runs
+ * ahead of the DB move. A plan whose worktree has no row at all cannot be
+ * vouched for and is skipped too (fail safe).
+ */
+function excludeForeignSessionPlans(
+  db: Database.Database,
+  plans: SessionRenamePlan[],
+  live: ReadonlySet<string>,
+  livePaths: ReadonlyMap<string, string>,
+  deps: ReconcileTmuxDeps,
+  result: ReconcileWorktreeSessionsResult
+): SessionRenamePlan[] {
+  const owned: SessionRenamePlan[] = [];
+  for (const plan of plans) {
+    // Not live: renameSessionsTwoStage drops it without counting it.
+    if (!live.has(plan.oldName)) {
+      owned.push(plan);
+      continue;
+    }
+    const worktreePath =
+      readWorktreePath(db, plan.rename.newId) ?? readWorktreePath(db, plan.rename.oldId);
+    const sessionPath = livePaths.get(plan.oldName) ?? null;
+    if (worktreePath !== null && deps.isSessionOwnedBy(sessionPath, worktreePath)) {
+      owned.push(plan);
+      continue;
+    }
+    result.skippedSessions.push({
+      oldName: plan.oldName,
+      newName: plan.newName,
+      reason: 'session owned by another server',
+    });
+    logger.warn('reconcile:foreign-session-skipped', {
+      sessionName: plan.oldName,
+      sessionPath,
+      worktreePath,
+    });
+  }
+  return owned;
+}
+
 /** Mint a session name that is free both on the server and within this pass. */
 function allocateTempName(taken: Set<string>, ordinal: number): string {
   let candidate = `${TEMP_SESSION_PREFIX}${ordinal}`;
@@ -680,14 +749,18 @@ export async function reconcileWorktreeSessions(
   const deps: ReconcileTmuxDeps = {
     listSessions: options?.tmux?.listSessions ?? listSessions,
     renameSession: options?.tmux?.renameSession ?? renameSession,
+    isSessionOwnedBy: options?.tmux?.isSessionOwnedBy ?? createCachedOwnershipMatcher(),
   };
 
   // Listed once, up front: both the prediction pass and the attribution pass
   // need it, and it is what makes a startup with nothing stale cost exactly one
   // `tmux list-sessions`.
   let live: Set<string> | null = null;
+  const livePaths = new Map<string, string>();
   try {
-    live = new Set((await deps.listSessions()).map((session) => session.name));
+    const sessions = await deps.listSessions();
+    live = new Set(sessions.map((session) => session.name));
+    for (const session of sessions) livePaths.set(session.name, session.path);
   } catch (error) {
     result.errors.push(
       `list tmux sessions: ${error instanceof Error ? error.message : String(error)}`
@@ -708,7 +781,8 @@ export async function reconcileWorktreeSessions(
       else result.planSources.discovered++;
     }
 
-    await renameSessionsTwoStage(plans, live, deps, result);
+    const ownedPlans = excludeForeignSessionPlans(db, plans, live, livePaths, deps, result);
+    await renameSessionsTwoStage(ownedPlans, live, deps, result);
   }
 
   // Runtime state moves after the sessions: a poller that ticks in between
