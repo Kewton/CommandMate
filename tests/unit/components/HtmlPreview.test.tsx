@@ -176,3 +176,55 @@ describe('HtmlPreview - postMessage link handling', () => {
     expect(onOpenFile).not.toHaveBeenCalled();
   });
 });
+
+// Issue #2861: relative <img src> must be inlined as data URIs because srcDoc
+// documents have no base URL (about:srcdoc).
+describe('HtmlPreview - relative image inlining (Issue #2861)', () => {
+  const DATA_URI = 'data:image/png;base64,iVBORw0KGgo=';
+  const htmlWithImage =
+    '<!DOCTYPE html><html><body><img src="shots/a.png" alt="A"></body></html>';
+
+  beforeEach(() => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ ok: true, json: async () => ({ content: DATA_URI, isImage: true }) })),
+    );
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  it('puts the fetched data URI into the iframe srcdoc and keeps Safe sandbox', async () => {
+    render(
+      <ConfirmProvider>
+        <HtmlPreview worktreeId="wt-1" filePath="docs/report/index.html" htmlContent={htmlWithImage} />
+      </ConfirmProvider>,
+    );
+
+    const iframe = screen.getByTestId('html-iframe-preview');
+    await waitFor(() => {
+      expect(iframe.getAttribute('srcdoc')).toContain(DATA_URI);
+    });
+    expect(iframe.getAttribute('srcdoc')).not.toContain('src="shots/a.png"');
+    expect(iframe.getAttribute('sandbox')).toBe('');
+    expect(fetch).toHaveBeenCalledWith('/api/worktrees/wt-1/files/docs/report/shots/a.png');
+  });
+
+  it('keeps the original src in the source view', async () => {
+    render(
+      <ConfirmProvider>
+        <HtmlPreview worktreeId="wt-1" filePath="docs/report/index.html" htmlContent={htmlWithImage} />
+      </ConfirmProvider>,
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId('html-iframe-preview').getAttribute('srcdoc')).toContain(DATA_URI);
+    });
+
+    fireEvent.click(screen.getByText('Source'));
+    const source = screen.getByTestId('html-source-viewer');
+    expect(source.textContent).toContain('shots/a.png');
+    expect(source.textContent).not.toContain(DATA_URI);
+  });
+});
