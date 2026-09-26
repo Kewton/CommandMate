@@ -45,6 +45,7 @@ import {
 } from '@/lib/cmate-cli-tool-parser';
 import { broadcastSessionStatus } from '@/lib/realtime/terminal-broadcast';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
+import { checkSessionOwnership, foreignSessionErrorBody } from '@/lib/cli-tools/session-ownership';
 
 const logger = createLogger('api/send');
 
@@ -295,6 +296,15 @@ export async function POST(
     // refused. `isRunning` is positive evidence that the agent is alive, and
     // `which` failing (a server started from a shell without the nvm PATH, say)
     // says nothing about whether it can be typed into.
+
+    // Issue #2865: a same-named session another CommandMate server created (its
+    // `#{session_path}` is not this worktree's directory) is neither typed into
+    // nor adopted, and no session of our own is started over it.
+    const sessionName = cliTool.getSessionName(id, instanceId);
+    const ownership = await checkSessionOwnership(sessionName, worktree.path);
+    if (ownership.verdict === 'foreign') {
+      return NextResponse.json(foreignSessionErrorBody(sessionName, ownership.sessionPath), { status: 409 });
+    }
 
     // Check if CLI tool session is running
     const running = await cliTool.isRunning(id, instanceId);

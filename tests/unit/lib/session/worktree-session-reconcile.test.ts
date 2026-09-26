@@ -54,6 +54,7 @@ import {
 } from '@/lib/ws-server';
 import type { WebSocket } from 'ws';
 import type { Worktree } from '@/types/models';
+import { isSessionPathOwnedBy } from '@/lib/tmux/session-ownership';
 
 // ---------------------------------------------------------------------------
 // Fake tmux server
@@ -66,7 +67,17 @@ interface FakeTmux extends ReconcileTmuxDeps {
   calls: Array<[string, string]>;
 }
 
-function makeFakeTmux(initial: string[]): FakeTmux {
+/**
+ * @param sessionPaths - Issue #2865: `#{session_path}` per session name. A name
+ *   not listed reports `/repos/anvil/<unknown>`; ownership is decided by
+ *   `isSessionOwnedBy`, which defaults to "everything is ours" so the suites
+ *   below keep testing the rename logic they were written for.
+ */
+function makeFakeTmux(
+  initial: string[],
+  sessionPaths: Record<string, string> = {},
+  isSessionOwnedBy: ReconcileTmuxDeps['isSessionOwnedBy'] = () => true
+): FakeTmux {
   const sessions = new Set(initial);
   const calls: Array<[string, string]> = [];
 
@@ -74,7 +85,13 @@ function makeFakeTmux(initial: string[]): FakeTmux {
     calls,
     names: () => Array.from(sessions).sort(),
     listSessions: async () =>
-      Array.from(sessions).map((name) => ({ name, windows: 1, attached: false })),
+      Array.from(sessions).map((name) => ({
+        name,
+        windows: 1,
+        attached: false,
+        path: sessionPaths[name] ?? '/repos/anvil/<unknown>',
+      })),
+    isSessionOwnedBy,
     renameSession: async (oldName: string, newName: string) => {
       calls.push([oldName, newName]);
       if (!sessions.has(oldName)) return false;
@@ -305,6 +322,38 @@ describe('reconcileWorktreeSessions (Issue #1621 Phase 3)', () => {
       ]);
       // Both sessions survive untouched.
       expect(tmux.names()).toEqual(['mcbd-claude-alpha', 'mcbd-claude-beta']);
+    });
+
+    // Issue #2865: a same-named session another CommandMate server created is
+    // not this worktree's to rename.
+    it('does not rename a live session whose session_path is another directory', async () => {
+      upsertWorktree(db, makeWorktree('alpha', 'alpha'));
+      setAgentInstances(db, 'alpha', [
+        { id: 'claude', cliTool: 'claude', alias: '', order: 0 },
+        { id: 'codex', cliTool: 'codex', alias: '', order: 1 },
+      ]);
+      const tmux = makeFakeTmux(
+        ['mcbd-claude-alpha', 'mcbd-codex-alpha'],
+        {
+          'mcbd-claude-alpha': '/repos/anvil/alpha',
+          'mcbd-codex-alpha': '/other-server/anvil/alpha',
+        },
+        isSessionPathOwnedBy
+      );
+
+      const result = await reconcileWorktreeSessions(db, 'alpha', 'gamma', { tmux });
+
+      expect(result.renamedSessions).toEqual([
+        { oldName: 'mcbd-claude-alpha', newName: 'mcbd-claude-gamma' },
+      ]);
+      expect(result.skippedSessions).toEqual([
+        {
+          oldName: 'mcbd-codex-alpha',
+          newName: 'mcbd-codex-gamma',
+          reason: 'session owned by another server',
+        },
+      ]);
+      expect(tmux.names()).toEqual(['mcbd-claude-gamma', 'mcbd-codex-alpha']);
     });
 
     it('rejects an invalid new id before it reaches tmux', async () => {

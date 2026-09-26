@@ -8,6 +8,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db/db-instance';
 import { getWorktreeById, getAgentInstance, getAgentInstances } from '@/lib/db';
+import { checkSessionOwnership, foreignSessionErrorBody } from '@/lib/cli-tools/session-ownership';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { createLogger, generateRequestId } from '@/lib/logger';
 import { CLI_TOOL_IDS, isCliToolType, isValidInstanceId, type CLIToolType } from '@/lib/cli-tools/types';
@@ -113,12 +114,21 @@ export async function POST(
       }
     }
 
+    // Issue #2865: a same-named session another CommandMate server created
+    // (`#{session_path}` is not this worktree) is skipped, never interrupted.
+    const skippedForeign: Array<{ sessionName: string; sessionPath: string | null }> = [];
     for (const { cliToolId, instanceId } of targets) {
       const cliTool = manager.getTool(cliToolId);
+      const sessionName = cliTool.getSessionName(worktreeId, instanceId);
+      const ownership = await checkSessionOwnership(sessionName, worktree.path);
+      if (ownership.verdict === 'foreign') {
+        skippedForeign.push({ sessionName, sessionPath: ownership.sessionPath });
+        continue;
+      }
+
       const isRunning = await cliTool.isRunning(worktreeId, instanceId);
 
       if (isRunning) {
-        const sessionName = cliTool.getSessionName(worktreeId, instanceId);
         log.debug('interrupt:sending', { cliToolId, sessionName });
 
         await cliTool.interrupt(worktreeId, instanceId);
@@ -129,6 +139,16 @@ export async function POST(
     }
 
     // 4. 結果を返却
+    if (interrupted.length === 0 && skippedForeign.length > 0) {
+      const [first] = skippedForeign;
+      return NextResponse.json(
+        {
+          ...foreignSessionErrorBody(first.sessionName, first.sessionPath),
+          skippedForeignSessions: skippedForeign.map((s) => s.sessionName),
+        },
+        { status: 409 }
+      );
+    }
     if (interrupted.length === 0) {
       log.warn('interrupt:no_active_sessions');
       return NextResponse.json(
@@ -144,6 +164,9 @@ export async function POST(
         success: true,
         message: `Interrupt sent to ${interrupted.length} session(s)`,
         interrupted,
+        ...(skippedForeign.length > 0
+          ? { skippedForeignSessions: skippedForeign.map((s) => s.sessionName) }
+          : {}),
       },
       { status: 200 }
     );

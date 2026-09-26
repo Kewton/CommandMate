@@ -14,6 +14,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db/db-instance';
 import {
   getWorktreeIdsByRepository,
+  getWorktreeById,
   deleteRepositoryWorktrees,
 } from '@/lib/db';
 import {
@@ -23,7 +24,7 @@ import {
   getAllRepositoriesWithWorktreeCount,
 } from '@/lib/db/db-repository';
 import { findDuplicateScanRoots } from '@/lib/git/git-common-dir';
-import { cleanupMultipleWorktrees, killWorktreeSession } from '@/lib/session-cleanup';
+import { cleanupMultipleWorktrees, createOwnedSessionKiller } from '@/lib/session-cleanup';
 import { cleanupRooms, broadcastMessage } from '@/lib/ws-server';
 import { createLogger } from '@/lib/logger';
 
@@ -157,9 +158,16 @@ export async function DELETE(request: NextRequest) {
     logger.info('repository:delete-start', { repositoryPath, worktreeCount: worktreeIds.length });
 
     // 1. Clean up sessions and pollers for all worktrees
+    // Issue #2865: each worktree's path (read before the rows are deleted below)
+    // decides which same-named sessions are this server's to kill.
+    const pathById = new Map<string, string>();
+    for (const worktreeId of worktreeIds) {
+      const worktree = getWorktreeById(db, worktreeId);
+      if (worktree) pathById.set(worktreeId, worktree.path);
+    }
     const cleanupResult = await cleanupMultipleWorktrees(
       worktreeIds,
-      killWorktreeSession
+      createOwnedSessionKiller(pathById)
     );
 
     // Log cleanup results

@@ -51,13 +51,24 @@ vi.mock('@/lib/git/worktrees', () => ({
   syncWorktreesToDB: vi.fn(),
 }));
 
+// Issue #2865: the pre-sync path snapshot and the ownership check
+vi.mock('@/lib/db/worktree-db', () => ({
+  getAllWorktreePathIds: vi.fn(() => []),
+}));
+vi.mock('@/lib/cli-tools/session-ownership', () => ({
+  checkSessionOwnership: vi.fn(),
+}));
+
 // Import after mocking
 import {
   cleanupWorktreeSessions,
   cleanupMultipleWorktrees,
   killWorktreeSession,
+  createOwnedSessionKiller,
   syncWorktreesAndCleanup,
 } from '@/lib/session-cleanup';
+import { checkSessionOwnership } from '@/lib/cli-tools/session-ownership';
+import { getAllWorktreePathIds } from '@/lib/db/worktree-db';
 import { stopPolling as stopResponsePolling } from '@/lib/polling/response-poller';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { killSession } from '@/lib/tmux/tmux';
@@ -74,6 +85,8 @@ describe('Session Cleanup Utility', () => {
     vi.mocked(CLIToolManager.getInstance).mockReturnValue({
       getTool: vi.fn(),
     } as unknown as CLIToolManager);
+    vi.mocked(getAllWorktreePathIds).mockReturnValue([]);
+    vi.mocked(checkSessionOwnership).mockResolvedValue({ verdict: 'owned', sessionPath: '/wt/1' });
   });
 
   describe('cleanupWorktreeSessions', () => {
@@ -216,7 +229,7 @@ describe('Session Cleanup Utility', () => {
       vi.mocked(CLIToolManager.getInstance().getTool).mockReturnValue(mockTool as unknown as ICLITool);
       vi.mocked(killSession).mockResolvedValue(true);
 
-      const result = await killWorktreeSession('wt-1', 'claude');
+      const result = await killWorktreeSession('wt-1', 'claude', '/wt/1');
 
       expect(result).toBe(true);
       expect(mockTool.isRunning).toHaveBeenCalledWith('wt-1');
@@ -231,10 +244,42 @@ describe('Session Cleanup Utility', () => {
       };
       vi.mocked(CLIToolManager.getInstance().getTool).mockReturnValue(mockTool as unknown as ICLITool);
 
-      const result = await killWorktreeSession('wt-1', 'claude');
+      const result = await killWorktreeSession('wt-1', 'claude', '/wt/1');
 
       expect(result).toBe(false);
       expect(killSession).not.toHaveBeenCalled();
+    });
+
+    // Issue #2865
+    it('does not kill a same-named session another server created (foreign)', async () => {
+      const mockTool = {
+        isRunning: vi.fn().mockResolvedValue(true),
+        getSessionName: vi.fn().mockReturnValue('claude-wt-1'),
+      };
+      vi.mocked(CLIToolManager.getInstance().getTool).mockReturnValue(mockTool as unknown as ICLITool);
+      vi.mocked(checkSessionOwnership).mockResolvedValue({ verdict: 'foreign', sessionPath: '/other/wt-1' });
+
+      const result = await killWorktreeSession('wt-1', 'claude', '/wt/1');
+
+      expect(result).toBe(false);
+      expect(checkSessionOwnership).toHaveBeenCalledWith('claude-wt-1', '/wt/1');
+      expect(killSession).not.toHaveBeenCalled();
+    });
+
+    it('createOwnedSessionKiller kills nothing for a worktree with no known path', async () => {
+      const mockTool = {
+        isRunning: vi.fn().mockResolvedValue(true),
+        getSessionName: vi.fn().mockReturnValue('claude-wt-1'),
+      };
+      vi.mocked(CLIToolManager.getInstance().getTool).mockReturnValue(mockTool as unknown as ICLITool);
+      vi.mocked(killSession).mockResolvedValue(true);
+
+      const kill = createOwnedSessionKiller(new Map([['wt-1', '/wt/1']]));
+
+      expect(await kill('wt-2', 'claude')).toBe(false);
+      expect(await kill('wt-1', 'claude')).toBe(true);
+      expect(checkSessionOwnership).toHaveBeenCalledWith('claude-wt-1', '/wt/1');
+      expect(killSession).toHaveBeenCalledTimes(1);
     });
 
     it('should return false when getTool throws (tool not found)', async () => {
@@ -242,7 +287,7 @@ describe('Session Cleanup Utility', () => {
         throw new Error("CLI tool 'unknown' not found");
       });
 
-      const result = await killWorktreeSession('wt-1', 'claude');
+      const result = await killWorktreeSession('wt-1', 'claude', '/wt/1');
 
       expect(result).toBe(false);
     });

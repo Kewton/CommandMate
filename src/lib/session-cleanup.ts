@@ -21,6 +21,8 @@ import { createLogger } from '@/lib/logger';
 import { CLIToolManager } from './cli-tools/manager';
 import { killSession, hasSession } from './tmux/tmux';
 import { syncWorktreesToDB, type SyncResult } from './git/worktrees';
+import { getAllWorktreePathIds } from './db/worktree-db';
+import { checkSessionOwnership } from './cli-tools/session-ownership';
 import type { Worktree } from '@/types/models';
 import type Database from 'better-sqlite3';
 
@@ -209,28 +211,53 @@ export async function cleanupMultipleWorktrees(
  * MF-C01: getTool() throws Error if tool not found, wrapped in try-catch
  * SF-004: isRunning() correctly awaited
  *
+ * Issue #2865: only a session created in `worktreePath` is killed. A
+ * same-named session another CommandMate server created (the worktree ID is
+ * derived from the directory name, so two servers can share it) is left alone
+ * and `false` is returned.
+ *
  * @param worktreeId - Worktree ID
  * @param cliToolId - CLI tool type
+ * @param worktreePath - The worktree's directory, read from its row BEFORE the row is deleted
  * @returns true if session was killed, false otherwise
  */
 export async function killWorktreeSession(
   worktreeId: string,
-  cliToolId: CLIToolType
+  cliToolId: CLIToolType,
+  worktreePath: string
 ): Promise<boolean> {
   try {
     const manager = CLIToolManager.getInstance();
     const tool = manager.getTool(cliToolId); // throws Error if not found
     if (!await tool.isRunning(worktreeId)) return false; // SF-004: await
 
+    const sessionName = tool.getSessionName(worktreeId);
+    const ownership = await checkSessionOwnership(sessionName, worktreePath);
+    if (ownership.verdict !== 'owned') return false;
+
     // Issue #565: Clear prompt dedup cache on session kill
     const pollerKey = `${worktreeId}:${cliToolId}`;
     clearPromptHashCache(pollerKey);
 
-    const sessionName = tool.getSessionName(worktreeId);
     return killSession(sessionName);
   } catch {
     return false;
   }
+}
+
+/**
+ * A {@link KillSessionFn} that kills through {@link killWorktreeSession} with
+ * each worktree's pre-deletion path (Issue #2865). A worktree with no known
+ * path cannot be vouched for, so nothing is killed for it.
+ *
+ * @param pathById - worktree ID -> path, captured before the rows are deleted
+ */
+export function createOwnedSessionKiller(pathById: ReadonlyMap<string, string>): KillSessionFn {
+  return async (worktreeId, cliToolId) => {
+    const worktreePath = pathById.get(worktreeId);
+    if (worktreePath === undefined) return false;
+    return killWorktreeSession(worktreeId, cliToolId, worktreePath);
+  };
 }
 
 /**
@@ -298,6 +325,9 @@ export async function syncWorktreesAndCleanup(
   db: Database.Database,
   worktrees: Worktree[]
 ): Promise<SyncAndCleanupResult> {
+  // Issue #2865: the rows sync deletes are gone afterwards, and their paths are
+  // what decides which sessions are this server's to kill.
+  const pathById = new Map(getAllWorktreePathIds(db).map((row) => [row.id, row.path] as const));
   const syncResult = syncWorktreesToDB(db, worktrees);
 
   // Issue #649: Clean up orphaned global assistant sessions
@@ -313,7 +343,7 @@ export async function syncWorktreesAndCleanup(
     try {
       const cleanupResult = await cleanupMultipleWorktrees(
         syncResult.deletedIds,
-        killWorktreeSession
+        createOwnedSessionKiller(pathById)
       );
 
       if (cleanupResult.warnings.length > 0) {

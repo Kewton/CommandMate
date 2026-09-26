@@ -22,6 +22,11 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+// Issue #2865: these cases are not about `#{session_path}` ownership, so the
+// check decides by session name as before (see the helper's docblock).
+vi.mock('@/lib/tmux/session-ownership', async (importOriginal) =>
+  (await import('@tests/unit/tmux/name-only-session-ownership')).nameOnlySessionOwnership(importOriginal)
+);
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';

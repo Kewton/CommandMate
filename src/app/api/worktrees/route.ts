@@ -18,6 +18,7 @@ export const dynamic = 'force-dynamic';
 import { getDbInstance } from '@/lib/db/db-instance';
 import { getWorktrees, getRepositories, getMessages, markPendingPromptsAsAnswered, getAgentInstances } from '@/lib/db';
 import { listSessions } from '@/lib/tmux/tmux';
+import { createCachedOwnershipMatcher, ownedSessionNameSet } from '@/lib/cli-tools/session-ownership';
 import {
   createStatusDetectionMetrics,
   detectWorktreeSessionStatus,
@@ -135,14 +136,17 @@ export async function GET(request: NextRequest) {
       const tmuxSessions = await listSessions();
       listSessionsMs = performance.now() - statusStartedAt;
       tmuxSessionCount = tmuxSessions.length;
-      const sessionNameSet = new Set(tmuxSessions.map(s => s.name));
+      // Issue #2865: a session counts as this worktree's only when it was created
+      // in this worktree's directory — a same-named session another CommandMate
+      // server started is not "running" here. realpath memoized per request.
+      const ownershipMatcher = createCachedOwnershipMatcher();
 
       const probeStartedAt = performance.now();
       await Promise.all(
         worktrees.map(async (worktree) => {
           const status = await detectWorktreeSessionStatus(
             worktree.id,
-            sessionNameSet,
+            ownedSessionNameSet(tmuxSessions, worktree.path, ownershipMatcher),
             db,
             getMessages,
             markPendingPromptsAsAnswered,

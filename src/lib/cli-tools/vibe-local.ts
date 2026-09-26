@@ -80,7 +80,7 @@ export class VibeLocalTool extends BaseCLITool {
 
     const exists = await hasSession(sessionName);
     if (exists) {
-      await this.reconcileExistingSession(sessionName);
+      await this.reconcileExistingSession(sessionName, worktreePath);
 
       // Issue #2070: this branch used to return unconditionally. A tmux session
       // outlives the agent that was launched into it — a quit, a self-update, a

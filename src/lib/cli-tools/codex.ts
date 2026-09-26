@@ -265,7 +265,7 @@ export class CodexTool extends BaseCLITool {
     // Check if session already exists
     const exists = await hasSession(sessionName);
     if (exists) {
-      await this.reconcileExistingSession(sessionName);
+      await this.reconcileExistingSession(sessionName, worktreePath);
 
       // Issue #2070: this branch used to return unconditionally, and that is
       // the second half of the reported bug. codex's own "1. Update now"

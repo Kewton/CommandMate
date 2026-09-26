@@ -24,6 +24,7 @@ import { evaluateAutoYesDialogGate } from './polling/auto-yes-dialog-gate';
 import { applyEventToActiveTask } from './tasks/task-transition-service';
 import { getDbInstance } from './db/db-instance';
 import { recordAnsweredPrompt, type RecordAnsweredPromptResult } from './db/chat-db';
+import { checkWorktreeSessionOwnership } from './cli-tools/worktree-session-ownership';
 import { sendPromptAnswer } from './prompt-answer-sender';
 import { CLIToolManager } from './cli-tools/manager';
 import { stripAnsi, stripBoxDrawing, detectThinking, getCodexLifecycleDialog } from './detection/cli-patterns';
@@ -639,6 +640,21 @@ export async function detectAndRespondToPrompt(
     const manager = CLIToolManager.getInstance();
     const cliTool = manager.getTool(cliToolId);
     const sessionName = cliTool.getSessionName(worktreeId, instanceId);
+
+    // Issue #2865: never auto-answer a same-named session another CommandMate
+    // server created. The poller keeps running; it just does not type.
+    const ownership = await checkWorktreeSessionOwnership(worktreeId, sessionName);
+    if (ownership === null || ownership.verdict === 'foreign') {
+      logger.warn('poller:auto-yes-skipped-foreign-session', {
+        worktreeId,
+        cliToolId,
+        instanceId,
+        sessionName,
+        sessionPath: ownership?.sessionPath ?? null,
+        reason: ownership ? 'foreign' : 'worktree_not_found',
+      });
+      return 'no_answer';
+    }
 
     try {
       await sendPromptAnswer({

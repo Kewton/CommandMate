@@ -12,6 +12,15 @@ const mockResize = vi.fn();
 const mockGetSubscriberCount = vi.fn();
 const mockCaptureSnapshot = vi.fn();
 
+// Issue #2865: the subscribe path checks `#{session_path}` ownership; the real
+// check runs over these two tmux reads, so no case reaches a real tmux server.
+const mockHasSession = vi.fn();
+const mockGetSessionWorkingDirectory = vi.fn();
+vi.mock('@/lib/tmux/tmux', () => ({
+  hasSession: (...args: unknown[]) => mockHasSession(...args),
+  getSessionWorkingDirectory: (...args: unknown[]) => mockGetSessionWorkingDirectory(...args),
+}));
+
 vi.mock('@/lib/db/db-instance', () => ({
   getDbInstance: vi.fn(() => ({})),
 }));
@@ -68,7 +77,9 @@ describe('ws-server terminal handlers', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     resetTmuxControlModeMetrics();
-    mockGetWorktreeById.mockReturnValue({ id: 'wt-1' });
+    mockGetWorktreeById.mockReturnValue({ id: 'wt-1', path: '/nonexistent-2865/wt-1' });
+    mockHasSession.mockResolvedValue(true);
+    mockGetSessionWorkingDirectory.mockResolvedValue('/nonexistent-2865/wt-1');
     mockIsCliToolType.mockReturnValue(true);
     mockIsTmuxControlModeEnabled.mockReturnValue(true);
     mockGetSubscriberCount.mockReturnValue(0);
@@ -96,6 +107,43 @@ describe('ws-server terminal handlers', () => {
       type: 'terminal_error',
       error: 'Unauthorized WebSocket client',
     }));
+  });
+
+  // Issue #2865
+  it('does not subscribe to a same-named session another server created', async () => {
+    const { __internal } = await import('@/lib/ws-server');
+    const { ws, sendMock } = createMockWebSocket();
+    __internal.resetStateForTest();
+    __internal.registerClientForTest(ws);
+    mockGetSessionWorkingDirectory.mockResolvedValue('/nonexistent-2865/other-server/wt-1');
+
+    await __internal.handleTerminalSubscribe(ws, {
+      type: 'terminal_subscribe',
+      worktreeId: 'wt-1',
+      cliToolId: 'codex',
+    });
+
+    expect(mockGetSessionWorkingDirectory).toHaveBeenCalledWith(SESSION_NAME);
+    expect(mockSubscribe).not.toHaveBeenCalled();
+    expect(sendMock).toHaveBeenCalledWith(JSON.stringify({
+      type: 'terminal_error',
+      error: 'Session belongs to another CommandMate server',
+    }));
+  });
+
+  it('subscribes to its own session (control for the ownership check)', async () => {
+    const { __internal } = await import('@/lib/ws-server');
+    const { ws } = createMockWebSocket();
+    __internal.resetStateForTest();
+    __internal.registerClientForTest(ws);
+
+    await __internal.handleTerminalSubscribe(ws, {
+      type: 'terminal_subscribe',
+      worktreeId: 'wt-1',
+      cliToolId: 'codex',
+    });
+
+    expect(mockSubscribe).toHaveBeenCalledWith(SESSION_NAME, expect.any(Object));
   });
 
   it('rejects subscribe when session subscriber limit is reached', async () => {

@@ -29,6 +29,7 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import { access, constants } from 'fs/promises';
 import { createLogger } from '@/lib/logger';
+import { assertSessionNotForeign } from '@/lib/cli-tools/session-ownership';
 import { CLAUDE_RESTART_DELAY_MS } from '@/config/cli-tool-timing-config';
 import { deriveSessionSuffix } from '@/lib/cli-tools/types';
 import { CLAUDE_CLI_TOOL_ID } from '@/lib/hooks/sources';
@@ -584,6 +585,10 @@ export async function startClaudeSession(
   // Check if session already exists
   const exists = await hasSession(sessionName);
   if (exists) {
+    // Issue #2865: a same-named session another CommandMate server created is
+    // refused before the health check can kill or reuse it.
+    await assertSessionNotForeign(sessionName, worktreePath);
+
     // SF-S2-004: Health check on existing session
     const healthy = await ensureHealthySession(sessionName);
     if (healthy) {
