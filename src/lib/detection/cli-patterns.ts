@@ -620,6 +620,19 @@ export const CODEX_FORM_SUBMIT_FOOTER_PATTERN = /^enter\s+to\s+submit\s*\|\s*esc
 export const CODEX_PICKER_FOOTER_PATTERN = /^enter\s+select\s*·\s*esc\s+back$/im;
 
 /**
+ * Codex CLI 0.157 effort-picker footer pattern (Issue #2868).
+ *
+ * The second `/model` step ("Select Reasoning Level for …") closes with
+ * `enter default · s session · esc back` (measured:
+ * `tests/fixtures/codex-dialogs-0157/model-picker-effort.txt`). Same
+ * construction and rules as CODEX_PICKER_FOOTER_PATTERN: the whole row, tested
+ * only against a single trimmed footer row.
+ *
+ * No /g flag (keeps .test() stateless), no nested quantifiers (ReDoS-safe).
+ */
+export const CODEX_EFFORT_PICKER_FOOTER_PATTERN = /^enter\s+default\s*·\s*s\s+session\s*·\s*esc\s+back$/im;
+
+/**
  * Codex CLI pager / edit-previous (transcript) mode footer pattern (Issue #1017)
  *
  * When Codex enters its transcript pager / "edit previous message" mode, the

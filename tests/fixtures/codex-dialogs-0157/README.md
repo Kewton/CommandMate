@@ -5,6 +5,8 @@ codex-cli 0.157.1 で `/model` の選択画面を UI から操作できなくな
 
 **答え: 6 画面のうち落ちたのは `model-picker.txt` だけ。** 原因はフッタの文言変更
 （`Press enter to confirm or esc to go back` → `enter select · esc back`）。`CODEX_PICKER_FOOTER_PATTERN` で直した。
+追加の 2 枚（`/model` の 2 段目）もフッタ `enter default · s session · esc back` が同じ理由で落ちていたので、
+`CODEX_EFFORT_PICKER_FOOTER_PATTERN` で直した。
 
 **raw のまま置いている。ANSI を剥がさないこと**（`tests/fixtures/codex-dialogs-0155/README.md` と同じ理由）。
 読むテストは `tests/unit/lib/detection/codex-dialogs-0157.test.ts` と `codex-verdict-corpus.test.ts`。
@@ -67,8 +69,8 @@ env -u CM_DB_PATH -u CM_ROOT_DIR -u CM_BIND \
 | `running.txt` | `• Working (3s • esc to interrupt)` | `running` / `thinking_indicator` |
 | `approval.txt` | `Would you like to run the following command?`（`touch probe.txt`） | `waiting` / `prompt_detected` |
 | `model-picker.txt` | `/model` の 1 段目 `Select Model and Effort` | `waiting` / `codex_selection_list`（修正前は `prompt_detected`） |
-| `model-picker-effort.txt` | 1 段目で選択中の行のまま Enter → 2 段目 `Select Reasoning Level for GPT-6-Sol` | `waiting` / `prompt_detected`（下記） |
-| `model-picker-digit.txt` | `/model` を開き直して `3` → 2 段目 `Select Reasoning Level for GPT-6-Luna` | `waiting` / `prompt_detected`（下記） |
+| `model-picker-effort.txt` | 1 段目で選択中の行のまま Enter → 2 段目 `Select Reasoning Level for GPT-6-Sol` | `waiting` / `codex_selection_list`（修正前は `prompt_detected`） |
+| `model-picker-digit.txt` | `/model` を開き直して `3` → 2 段目 `Select Reasoning Level for GPT-6-Luna` | `waiting` / `codex_selection_list`（修正前は `prompt_detected`） |
 | `quoted-approval-idle.txt` | 承認画面の文面を本文で引用した返答の後の入力欄 | `ready` / `input_prompt` |
 
 ## 0.155.1 からの差分
@@ -91,8 +93,5 @@ env -u CM_DB_PATH -u CM_ROOT_DIR -u CM_BIND \
 
 ## この fixture で直していないもの（Issue の範囲外）
 
-- **`/model` 2 段目**（`model-picker-effort.txt` / `model-picker-digit.txt`）: フッタ `enter default · s session · esc back` は
-  どの定数にも一致しない。`prompt_detected` / `hasActivePrompt: true` と読まれ、`evaluateDialogPresence(…).present` は false
-  （1 段目と同じ拒否が 2 段目で起きる）
 - **trust**: 状態は `waiting` / `prompt_detected` で標準画面の期待どおりだが、フッタ `enter continue · esc quit` を入口が
   認めないので `evaluateDialogPresence(…).present` は false

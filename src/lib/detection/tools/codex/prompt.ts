@@ -44,6 +44,7 @@ import {
   CODEX_APPROVAL_FOOTER_PATTERN,
   CODEX_FORM_SUBMIT_FOOTER_PATTERN,
   CODEX_PICKER_FOOTER_PATTERN,
+  CODEX_EFFORT_PICKER_FOOTER_PATTERN,
   stripBoxDrawing,
   type CodexLifecycleDialog,
 } from '../../cli-patterns';
@@ -124,12 +125,14 @@ export function detectCodexDialog(
   //
   // Issue #2609: the approval form's footer is admitted as its own measured row,
   // not by widening the list pattern — an `esc to cancel` alone still vouches
-  // for nothing. Issue #2868: 0.157's `enter select · esc back` picker footer
-  // is admitted the same way.
+  // for nothing. Issue #2868: 0.157's two `/model` footers (`enter select ·
+  // esc back`, then `enter default · s session · esc back`) are admitted the
+  // same way.
   if (
     !CODEX_SELECTION_LIST_PATTERN.test(block.footer) &&
     !CODEX_FORM_SUBMIT_FOOTER_PATTERN.test(block.footer) &&
-    !CODEX_PICKER_FOOTER_PATTERN.test(block.footer)
+    !CODEX_PICKER_FOOTER_PATTERN.test(block.footer) &&
+    !CODEX_EFFORT_PICKER_FOOTER_PATTERN.test(block.footer)
   ) {
     return null;
   }

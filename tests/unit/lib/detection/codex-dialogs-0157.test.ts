@@ -27,6 +27,7 @@ import { detectSessionStatus, SELECTION_LIST_REASONS } from '@/lib/detection/sta
 import { detectPrompt, resetDetectPromptCache } from '@/lib/detection/prompt-detector';
 import {
   buildDetectPromptOptions,
+  CODEX_EFFORT_PICKER_FOOTER_PATTERN,
   CODEX_PICKER_FOOTER_PATTERN,
   CODEX_SELECTION_LIST_PATTERN,
   stripAnsi,
@@ -92,37 +93,55 @@ describe('[#2868] the fixtures still carry what was measured', () => {
     expect(rows[992]).toMatch(/^› 2\. GPT-6-Sol \(current\)/);
     expect(rows[999]).toBe('  enter select · esc back');
   });
-});
 
-describe('[#2868] CODEX_PICKER_FOOTER_PATTERN', () => {
-  it('matches the measured footer row, which the list pattern does not', () => {
-    expect(CODEX_PICKER_FOOTER_PATTERN.test('enter select · esc back')).toBe(true);
-    expect(CODEX_SELECTION_LIST_PATTERN.test('enter select · esc back')).toBe(false);
-  });
-
-  it('does not match the row inside a longer sentence', () => {
-    expect(CODEX_PICKER_FOOTER_PATTERN.test('The footer reads enter select · esc back')).toBe(false);
-    expect(CODEX_PICKER_FOOTER_PATTERN.test('enter select · esc back to leave')).toBe(false);
+  it('the effort step closes with its own footer row', () => {
+    const rows = stripAnsi(read('model-picker-effort')).split('\n');
+    expect(rows[990].trim()).toBe('Select Reasoning Level for GPT-6-Sol');
+    expect(rows[999]).toBe('  enter default · s session · esc back');
+    expect(stripAnsi(read('model-picker-digit')).split('\n')[990].trim()).toBe(
+      'Select Reasoning Level for GPT-6-Luna',
+    );
   });
 });
 
-describe('[#2868] the 0.157.1 `/model` picker reads as a selection list', () => {
-  it('detectSessionStatus: waiting / codex_selection_list', () => {
-    const result = detectSessionStatus(read('model-picker'), 'codex');
+/** Each 0.157.1 `/model` footer row and the constant that admits it. */
+const FOOTERS = [
+  ['enter select · esc back', CODEX_PICKER_FOOTER_PATTERN],
+  ['enter default · s session · esc back', CODEX_EFFORT_PICKER_FOOTER_PATTERN],
+] as const;
+
+describe('[#2868] the 0.157.1 `/model` footer constants', () => {
+  it.each(FOOTERS)('%s: matches the measured row, which the list pattern does not', (row, pattern) => {
+    expect(pattern.test(row)).toBe(true);
+    expect(CODEX_SELECTION_LIST_PATTERN.test(row)).toBe(false);
+  });
+
+  it.each(FOOTERS)('%s: does not match the row inside a longer sentence', (row, pattern) => {
+    expect(pattern.test(`The footer reads ${row}`)).toBe(false);
+    expect(pattern.test(`${row} to leave`)).toBe(false);
+  });
+});
+
+/** Both `/model` steps: the model list, the effort list after Enter, and after `3`. */
+const PICKERS = ['model-picker', 'model-picker-effort', 'model-picker-digit'] as const;
+
+describe('[#2868] the 0.157.1 `/model` steps read as selection lists', () => {
+  it.each(PICKERS)('%s: detectSessionStatus is waiting / codex_selection_list', name => {
+    const result = detectSessionStatus(read(name), 'codex');
     expect(result.status).toBe('waiting');
     expect(result.reason).toBe(STATUS_REASON.CODEX_SELECTION_LIST);
     expect(result.hasActivePrompt).toBe(false);
-    expect(isSelectionListActive(read('model-picker'))).toBe(true);
+    expect(isSelectionListActive(read(name))).toBe(true);
   });
 
-  it('reads the same after stripAnsi (what Auto-Yes hands the detector)', () => {
-    const result = detectSessionStatus(stripAnsi(read('model-picker')), 'codex');
+  it.each(PICKERS)('%s: reads the same after stripAnsi (what Auto-Yes hands the detector)', name => {
+    const result = detectSessionStatus(stripAnsi(read(name)), 'codex');
     expect(result.status).toBe('waiting');
     expect(result.reason).toBe(STATUS_REASON.CODEX_SELECTION_LIST);
   });
 
-  it('/prompt-response vouches for it: present, and no refusal', () => {
-    const frame = read('model-picker');
+  it.each(PICKERS)('%s: /prompt-response vouches for it (present, no refusal)', name => {
+    const frame = read(name);
     const presence = evaluateDialogPresence('codex', 'multiple_choice', frame);
     expect(presence.gated).toBe(true);
     expect(presence.present).toBe(true);
@@ -132,21 +151,17 @@ describe('[#2868] the 0.157.1 `/model` picker reads as a selection list', () => 
   });
 });
 
-describe('[#2868] a reply quoting the footer does not open a picker', () => {
+describe('[#2868] a reply quoting a footer does not open a picker', () => {
   /** `idle.txt` with a reply whose body quotes the footer row just above the composer. */
-  const quoted = (): string =>
-    withRow(
-      withRow(read('idle'), 992, '• The picker closes with this row:'),
-      993,
-      '  enter select · esc back',
-    );
+  const quoted = (footer: string): string =>
+    withRow(withRow(read('idle'), 992, '• The picker closes with this row:'), 993, `  ${footer}`);
 
-  it('the quoted row is really there', () => {
-    expect(stripAnsi(quoted()).split('\n')[993]).toBe('  enter select · esc back');
+  it.each(FOOTERS)('%s: the quoted row is really there', row => {
+    expect(stripAnsi(quoted(row)).split('\n')[993]).toBe(`  ${row}`);
   });
 
-  it('is not waiting, and the dialog gate does not vouch for it', () => {
-    const frame = quoted();
+  it.each(FOOTERS)('%s: is not waiting, and the dialog gate does not vouch for it', row => {
+    const frame = quoted(row);
     const result = detectSessionStatus(frame, 'codex');
     expect(result.status).not.toBe('waiting');
     expect(isSelectionListActive(frame)).toBe(false);
