@@ -20,6 +20,11 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+// Issue #2865: sendUserMessage first confirms the session is this worktree's.
+// Ownership itself is covered by send-user-message.test.ts / session-ownership.test.ts.
+vi.mock('@/lib/cli-tools/worktree-session-ownership', () => ({
+  checkWorktreeSessionOwnership: vi.fn(async () => ({ verdict: 'owned', sessionPath: null })),
+}));
 
 vi.mock('@/lib/logger', () => ({
   createLogger: vi.fn(() => ({

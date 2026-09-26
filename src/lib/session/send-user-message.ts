@@ -48,6 +48,8 @@ import { savePendingAssistantResponse } from '@/lib/assistant-response-saver';
 import { broadcastMessage } from '@/lib/ws-server';
 import { MESSAGES_INVALIDATED_EVENT_TYPE } from '@/lib/realtime/types';
 import { createLogger } from '@/lib/logger';
+import { checkWorktreeSessionOwnership } from '@/lib/cli-tools/worktree-session-ownership';
+import { resolveSessionName } from '@/lib/cli-tools/session-name';
 import { isPromptWaiting, promptWaitingMessage } from '@/lib/session/prompt-waiting-guard';
 import type { CopilotTool } from '@/lib/cli-tools/copilot';
 import { formatImagePathFallbackMessage } from '@/lib/cli-tools/opencode';
@@ -101,7 +103,13 @@ export type SendUserMessageResult =
    * persists `[prompt_waiting] <message>` as the timer's reason — and the send
    * route maps it to its own status code.
    */
-  | { ok: false; stage: 'model' | 'send' | 'prompt_waiting'; error: string };
+  /**
+   * `foreign_session` (Issue #2865) is also a refusal: the tmux session under
+   * this worktree's name was created in another directory (another CommandMate
+   * server's session), or this worktree has no row to vouch for it. Nothing was
+   * sent and no poller was started.
+   */
+  | { ok: false; stage: 'model' | 'send' | 'prompt_waiting' | 'foreign_session'; error: string };
 
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -174,6 +182,31 @@ export async function sendUserMessage(
   const resolvedInstanceId = instanceId ?? cliToolId;
 
   const cliTool = CLIToolManager.getInstance().getTool(cliToolId);
+
+  // Issue #2865: the send route checks ownership itself, but the timer manager
+  // and relay delivery reach tmux only through here. A session under this
+  // worktree's name that was created in another directory belongs to another
+  // CommandMate server; nothing is typed into it and no poller watches it.
+  // Checked before the prompt guard, which would otherwise read that pane.
+  const sessionName = resolveSessionName(cliToolId, worktreeId, instanceId);
+  const ownership = await checkWorktreeSessionOwnership(worktreeId, sessionName, db);
+  if (ownership === null || ownership.verdict === 'foreign') {
+    logger.warn('send-refused-foreign-session', {
+      worktreeId,
+      cliToolId,
+      instanceId: resolvedInstanceId,
+      sessionName,
+      sessionPath: ownership?.sessionPath ?? null,
+      reason: ownership ? 'foreign' : 'worktree_not_found',
+    });
+    return {
+      ok: false,
+      stage: 'foreign_session',
+      error: ownership
+        ? `tmux session "${sessionName}" belongs to another CommandMate server`
+        : `Worktree '${worktreeId}' not found; cannot confirm tmux session "${sessionName}" is this server's`,
+    };
+  }
 
   // Issue #1708: refuse before the first side effect. A prompt dialog does not
   // forward keystrokes to the agent — they accumulate in its own input line — so

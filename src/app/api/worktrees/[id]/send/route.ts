@@ -45,7 +45,7 @@ import {
 } from '@/lib/cmate-cli-tool-parser';
 import { broadcastSessionStatus } from '@/lib/realtime/terminal-broadcast';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
-import { checkSessionOwnership, foreignSessionErrorBody } from '@/lib/cli-tools/session-ownership';
+import { checkSessionOwnership, foreignSessionErrorBody, FOREIGN_SESSION_ERROR_CODE } from '@/lib/cli-tools/session-ownership';
 
 const logger = createLogger('api/send');
 
@@ -449,6 +449,14 @@ export async function POST(
       if (result.stage === 'prompt_waiting') {
         return NextResponse.json(
           { error: result.error, code: PROMPT_WAITING_CODE },
+          { status: 409 }
+        );
+      }
+      // Issue #2865: checked above as well; this is the send service's own
+      // refusal (the session changed hands in between, or the row vanished).
+      if (result.stage === 'foreign_session') {
+        return NextResponse.json(
+          { error: result.error, code: FOREIGN_SESSION_ERROR_CODE },
           { status: 409 }
         );
       }
