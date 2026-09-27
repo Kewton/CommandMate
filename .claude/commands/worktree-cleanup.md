@@ -210,7 +210,7 @@ curl -s -X POST http://localhost:${CM_PORT:-3000}/api/repositories/sync
 📋 Cleanup Summary:
   Issue:     #135
   Server:    Stopped (PID: 12345)
-  tmux:      Killed (mcbd-claude-commandmate-feature-135-worktree)
+  tmux:      Killed (mcbd-claude-commandmate-issue-135)
   Worktree:  Removed (../commandmate-issue-135)
   Branch:    Deleted (feature/135-worktree)
   DB:        Preserved (~/.commandmate/data/cm-135.db)
@@ -228,7 +228,7 @@ curl -s -X POST http://localhost:${CM_PORT:-3000}/api/repositories/sync
 
   Issue #187:
     Server:    Not running
-    tmux:      Killed (mcbd-claude-commandmate-feature-187-worktree)
+    tmux:      Killed (mcbd-claude-commandmate-issue-187)
     Worktree:  Removed (../commandmate-issue-187)
     Branch:    Deleted (feature/187-worktree) [merged]
 
@@ -240,13 +240,13 @@ curl -s -X POST http://localhost:${CM_PORT:-3000}/api/repositories/sync
 
   Issue #191:
     Server:    Not running
-    tmux:      Killed (mcbd-claude-commandmate-feature-191-worktree)
+    tmux:      Killed (mcbd-claude-commandmate-issue-191)
     Worktree:  Removed (../commandmate-issue-191)
     Branch:    Deleted (feature/191-worktree) [merged]
 
   Issue #193:
     Server:    Stopped (PID: 54321)
-    tmux:      Killed (mcbd-claude-commandmate-feature-193-worktree)
+    tmux:      Killed (mcbd-9f2ab73e-claude-commandmate-issue-193)
     Worktree:  Removed (../commandmate-issue-193)
     Branch:    ⚠️ Not merged (feature/193-worktree)
 
