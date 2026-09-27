@@ -23,7 +23,7 @@
  * @vitest-environment node
  */
 
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { spawnSync } from 'child_process';
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
@@ -35,6 +35,13 @@ import {
   REAL_SHELL_SUBPROCESS_TIMEOUT_MS,
   assertSubprocessCompleted,
 } from '@tests/helpers/real-shell-budget';
+
+// Delegates to the real `spawnSync` (the shell tests below need it) and lets the
+// `codexSupportsNoDaemon` tests script `codex --help` (Issue #2891).
+vi.mock('child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('child_process')>();
+  return { ...actual, spawnSync: vi.fn(actual.spawnSync) };
+});
 import {
   buildCodexEventHookCommand,
   buildCodexHookSettings,
@@ -45,12 +52,16 @@ import {
   CODEX_HOOK_TRUST_BYPASS_FLAG,
   CODEX_HOOK_TRUST_ENV_VAR,
   CODEX_INSTANCE_ID_ENV_VAR,
+  CODEX_NO_DAEMON_FLAG,
   CODEX_SESSION_END_TIMEOUT_SECONDS,
   CODEX_WORKTREE_ID_ENV_VAR,
+  codexSupportsNoDaemon,
   getCodexHooksPath,
   isCodexHookTrustBypassEnabled,
   mergeCodexHookSettings,
+  resetCodexNoDaemonSupportCacheForTests,
   writeCodexHookSettings,
+  type CodexHookOptions,
   type CodexHookSettings,
 } from '@/lib/hooks/sources/codex/hooks-config';
 
@@ -419,12 +430,24 @@ describe('writing into the operator’s file', () => {
 });
 
 describe('the launch command', () => {
+  /**
+   * `--no-daemon` is pinned off unless a test asks for it, so these assertions do
+   * not depend on whether a codex that lists it happens to be on this machine's
+   * `PATH` (Issue #2891). The flag is exercised in its own block below.
+   */
+  const build = (
+    executablePath: string,
+    target: Parameters<typeof buildCodexLaunchPlan>[1],
+    options: CodexHookOptions = {}
+  ): ReturnType<typeof buildCodexLaunchPlan> =>
+    buildCodexLaunchPlan(executablePath, target, { supportsNoDaemon: false, ...options });
+
   /** What the pane receives — `env` applied to `command`, exactly once (#1846). */
-  const line = (...args: Parameters<typeof buildCodexLaunchPlan>): string =>
-    renderAgentLaunchCommand(buildCodexLaunchPlan(...args));
+  const line = (...args: Parameters<typeof build>): string =>
+    renderAgentLaunchCommand(build(...args));
 
   it('carries the worktree, the instance and both receiver URLs', () => {
-    const plan = buildCodexLaunchPlan('codex', TARGET_2, { port: 4321 });
+    const plan = build('codex', TARGET_2, { port: 4321 });
     // The correlation keys are declared data since #1846, not a prefix baked
     // into `command` — which is what let gemini, copilot and antigravity stop
     // writing the same prefix by hand.
@@ -446,9 +469,11 @@ describe('the launch command', () => {
   it('keeps codex off the shared app-server daemon so hooks run with this session\'s env', () => {
     // Issue #2874: codex 0.157+ attaches the TUI to a machine-wide daemon and
     // runs hooks inside it, with the daemon's environment — every instance was
-    // reported as the one that started it. Any `-c` makes codex run embedded.
+    // reported as the one that started it. The `-c` stops codex starting one
+    // (Issue #2891: it does not stop it attaching to one that is already up —
+    // that is `--no-daemon`, below).
     expect(CODEX_EMBEDDED_MODE_ARGS).toBe('-c features.daemon_auto_start=false');
-    expect(buildCodexLaunchPlan('codex', TARGET_2, { port: 4321 }).command).toContain(
+    expect(build('codex', TARGET_2, { port: 4321 }).command).toContain(
       CODEX_EMBEDDED_MODE_ARGS
     );
     expect(line('codex', TARGET_2, { port: 4321 })).toContain(CODEX_EMBEDDED_MODE_ARGS);
@@ -456,17 +481,106 @@ describe('the launch command', () => {
 
   it('does not add the embedded-mode flag to the bare launch (injection off)', () => {
     process.env.CM_AGENT_HOOKS_INJECT = '0';
-    expect(buildCodexLaunchPlan('codex', TARGET_2).command).not.toContain(
+    expect(build('codex', TARGET_2).command).not.toContain(
       CODEX_EMBEDDED_MODE_ARGS
     );
     expect(line('codex', TARGET_2)).not.toContain(CODEX_EMBEDDED_MODE_ARGS);
+  });
+
+  describe('--no-daemon (Issue #2891)', () => {
+    // `-c features.daemon_auto_start=false` alone still attaches to a daemon that
+    // is already running, and hooks then run with *its* environment. Measured
+    // 2026-09-27 on codex-cli 0.157.1: only `--no-daemon` made the hook report
+    // the process that was launched.
+    const HELP_WITH_FLAG = [
+      'Usage: codex [OPTIONS] [PROMPT]',
+      '',
+      '      --no-daemon',
+      '          Run without the shared background server, even if it is already running',
+      '',
+    ].join('\n');
+
+    beforeEach(() => {
+      resetCodexNoDaemonSupportCacheForTests();
+      vi.mocked(spawnSync).mockClear();
+    });
+
+    afterEach(() => {
+      resetCodexNoDaemonSupportCacheForTests();
+    });
+
+    it('follows the embedded-mode arguments when codex accepts it', () => {
+      const plan = buildCodexLaunchPlan('codex', TARGET_2, {
+        port: 4321,
+        supportsNoDaemon: true,
+      });
+      expect(plan.command).toBe(
+        `'codex' -c features.daemon_auto_start=false ${CODEX_NO_DAEMON_FLAG}`
+      );
+      expect(plan.command).toBe("'codex' -c features.daemon_auto_start=false --no-daemon");
+      expect(renderAgentLaunchCommand(plan).endsWith(plan.command)).toBe(true);
+    });
+
+    it('comes before the trust bypass flag', () => {
+      process.env[CODEX_HOOK_TRUST_ENV_VAR] = 'bypass';
+      expect(
+        buildCodexLaunchPlan('codex', TARGET, { supportsNoDaemon: true }).command
+      ).toBe(
+        `'codex' ${CODEX_EMBEDDED_MODE_ARGS} ${CODEX_NO_DAEMON_FLAG} ${CODEX_HOOK_TRUST_BYPASS_FLAG}`
+      );
+    });
+
+    it('is left off when codex does not accept it (the #2874 launch line)', () => {
+      const plan = buildCodexLaunchPlan('codex', TARGET_2, {
+        port: 4321,
+        supportsNoDaemon: false,
+      });
+      expect(plan.command).toBe("'codex' -c features.daemon_auto_start=false");
+      expect(plan.command).not.toContain(CODEX_NO_DAEMON_FLAG);
+
+      process.env[CODEX_HOOK_TRUST_ENV_VAR] = 'bypass';
+      expect(
+        buildCodexLaunchPlan('codex', TARGET, { supportsNoDaemon: false }).command
+      ).toBe(`'codex' ${CODEX_EMBEDDED_MODE_ARGS} ${CODEX_HOOK_TRUST_BYPASS_FLAG}`);
+    });
+
+    it.each([true, false])(
+      'is never on the bare launch (injection off, supportsNoDaemon=%s)',
+      (supportsNoDaemon) => {
+        process.env.CM_AGENT_HOOKS_INJECT = '0';
+        const plan = buildCodexLaunchPlan('codex', TARGET_2, { supportsNoDaemon });
+        expect(plan.command).toBe('codex');
+        expect(plan.command).not.toContain(CODEX_NO_DAEMON_FLAG);
+        expect(line('codex', TARGET_2, { supportsNoDaemon })).not.toContain(CODEX_NO_DAEMON_FLAG);
+      }
+    );
+
+    it('asks the executable itself when the caller does not say', () => {
+      vi.mocked(spawnSync).mockReturnValueOnce({
+        status: 0,
+        stdout: HELP_WITH_FLAG,
+      } as unknown as ReturnType<typeof spawnSync>);
+      expect(buildCodexLaunchPlan('/opt/codex/bin/codex', TARGET).command).toBe(
+        `'/opt/codex/bin/codex' ${CODEX_EMBEDDED_MODE_ARGS} ${CODEX_NO_DAEMON_FLAG}`
+      );
+      expect(vi.mocked(spawnSync)).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(spawnSync).mock.calls[0][0]).toBe('/opt/codex/bin/codex');
+    });
+
+    it('does not spawn anything when the caller says, or when injection is off', () => {
+      buildCodexLaunchPlan('codex', TARGET, { supportsNoDaemon: true });
+      buildCodexLaunchPlan('codex', TARGET, { supportsNoDaemon: false });
+      process.env.CM_AGENT_HOOKS_INJECT = '0';
+      buildCodexLaunchPlan('codex', TARGET);
+      expect(vi.mocked(spawnSync)).not.toHaveBeenCalled();
+    });
   });
 
   it('keeps shell syntax out of `command`', () => {
     // The #1846 invariant. A `NAME=value` prefix inside `command` is invisible
     // to any launcher that is not a shell, and reporting the settings path used
     // to be inferred from whether one was there.
-    const plan = buildCodexLaunchPlan('codex', TARGET, { port: 4321 });
+    const plan = build('codex', TARGET, { port: 4321 });
     expect(plan.command).not.toMatch(/^[A-Z_][A-Z0-9_]*=/);
     expect(plan.settingsPath).toBe(getCodexHooksPath());
   });
@@ -501,7 +615,7 @@ describe('the launch command', () => {
 
   it('is byte-identical to the pre-#1760 launch when injection is off', () => {
     process.env.CM_AGENT_HOOKS_INJECT = '0';
-    expect(buildCodexLaunchPlan('codex', TARGET_2)).toEqual({
+    expect(build('codex', TARGET_2)).toEqual({
       command: 'codex',
       settingsPath: null,
       env: {},
@@ -519,7 +633,7 @@ describe('the launch command', () => {
     expect(isCodexHookTrustBypassEnabled()).toBe(true);
     expect(line('codex', TARGET)).toContain(CODEX_HOOK_TRUST_BYPASS_FLAG);
     // The bypass flag follows the embedded-mode arguments (#2874).
-    expect(buildCodexLaunchPlan('codex', TARGET).command).toBe(
+    expect(build('codex', TARGET).command).toBe(
       `'codex' ${CODEX_EMBEDDED_MODE_ARGS} ${CODEX_HOOK_TRUST_BYPASS_FLAG}`
     );
 
@@ -548,5 +662,134 @@ describe('the launch command', () => {
     expect(line('codex', TARGET, { codexHome: join(blocked, 'inner') })).toBe(
       `${PORT_ASSIGNMENT} codex`
     );
+  });
+});
+
+describe('codexSupportsNoDaemon (Issue #2891)', () => {
+  const HELP_WITH_FLAG = [
+    'Usage: codex [OPTIONS] [PROMPT]',
+    '',
+    '  -c, --config <key=value>',
+    '      --no-daemon',
+    '          Run without the shared background server, even if it is already running',
+    '',
+  ].join('\n');
+  const HELP_WITHOUT_FLAG = [
+    'Usage: codex [OPTIONS] [PROMPT]',
+    '',
+    '  -c, --config <key=value>',
+    '  -m, --model <MODEL>',
+    '',
+  ].join('\n');
+
+  /** What `spawnSync` hands back, with only the fields the probe may read. */
+  const spawned = (fields: Record<string, unknown>): ReturnType<typeof spawnSync> =>
+    ({ status: 0, signal: null, stdout: '', stderr: '', ...fields }) as unknown as ReturnType<
+      typeof spawnSync
+    >;
+
+  beforeEach(() => {
+    resetCodexNoDaemonSupportCacheForTests();
+    vi.mocked(spawnSync).mockClear();
+  });
+
+  afterEach(() => {
+    resetCodexNoDaemonSupportCacheForTests();
+  });
+
+  it('is true when `--help` lists --no-daemon', () => {
+    vi.mocked(spawnSync).mockReturnValueOnce(spawned({ stdout: HELP_WITH_FLAG }));
+    expect(codexSupportsNoDaemon('/opt/codex')).toBe(true);
+  });
+
+  it('is false when `--help` does not list it', () => {
+    vi.mocked(spawnSync).mockReturnValueOnce(spawned({ stdout: HELP_WITHOUT_FLAG }));
+    expect(codexSupportsNoDaemon('/opt/codex')).toBe(false);
+  });
+
+  it('does not take a longer option that starts the same way for it', () => {
+    vi.mocked(spawnSync).mockReturnValueOnce(
+      spawned({ stdout: '      --no-daemon-autostart\n          Something else\n' })
+    );
+    expect(codexSupportsNoDaemon('/opt/codex')).toBe(false);
+  });
+
+  it('runs `<executable> --help`, bounded, without the server\'s credentials', () => {
+    process.env.CM_AUTH_TOKEN = 'secret-token';
+    process.env.CM_AUTH_TOKEN_HASH = 'secret-hash';
+    vi.mocked(spawnSync).mockReturnValueOnce(spawned({ stdout: HELP_WITH_FLAG }));
+
+    codexSupportsNoDaemon('/opt/codex');
+
+    expect(vi.mocked(spawnSync)).toHaveBeenCalledTimes(1);
+    const [command, args, options] = vi.mocked(spawnSync).mock.calls[0];
+    expect(command).toBe('/opt/codex');
+    expect(args).toEqual(['--help']);
+    expect(options).toMatchObject({ encoding: 'utf8', timeout: 5000 });
+    const env = (options as { env?: NodeJS.ProcessEnv }).env;
+    expect(env).toBeDefined();
+    expect(env).not.toHaveProperty('CM_AUTH_TOKEN');
+    expect(env).not.toHaveProperty('CM_AUTH_TOKEN_HASH');
+    expect(env).toHaveProperty('PATH');
+  });
+
+  it('is false when the executable cannot be spawned', () => {
+    vi.mocked(spawnSync).mockReturnValueOnce(
+      spawned({
+        status: null,
+        stdout: null,
+        error: Object.assign(new Error('spawnSync /opt/codex ENOENT'), { code: 'ENOENT' }),
+      })
+    );
+    expect(codexSupportsNoDaemon('/opt/codex')).toBe(false);
+  });
+
+  it('is false when `--help` exits non-zero, whatever it printed', () => {
+    vi.mocked(spawnSync).mockReturnValueOnce(spawned({ status: 2, stdout: HELP_WITH_FLAG }));
+    expect(codexSupportsNoDaemon('/opt/codex')).toBe(false);
+  });
+
+  it('is false when `--help` times out', () => {
+    vi.mocked(spawnSync).mockReturnValueOnce(
+      spawned({
+        status: null,
+        signal: 'SIGTERM',
+        stdout: HELP_WITH_FLAG,
+        error: Object.assign(new Error('spawnSync /opt/codex ETIMEDOUT'), { code: 'ETIMEDOUT' }),
+      })
+    );
+    expect(codexSupportsNoDaemon('/opt/codex')).toBe(false);
+  });
+
+  it('is false when spawning throws', () => {
+    vi.mocked(spawnSync).mockImplementationOnce(() => {
+      throw new Error('boom');
+    });
+    expect(codexSupportsNoDaemon('/opt/codex')).toBe(false);
+  });
+
+  it('spawns once per executable path, and remembers a failure too', () => {
+    vi.mocked(spawnSync).mockReturnValueOnce(spawned({ stdout: HELP_WITH_FLAG }));
+    expect(codexSupportsNoDaemon('/opt/codex')).toBe(true);
+    expect(codexSupportsNoDaemon('/opt/codex')).toBe(true);
+    expect(vi.mocked(spawnSync)).toHaveBeenCalledTimes(1);
+
+    // A different path is a different binary, so it is asked separately…
+    vi.mocked(spawnSync).mockReturnValueOnce(spawned({ status: 1 }));
+    expect(codexSupportsNoDaemon('/other/codex')).toBe(false);
+    expect(vi.mocked(spawnSync)).toHaveBeenCalledTimes(2);
+    // …and a codex that failed once is not asked again on every launch.
+    expect(codexSupportsNoDaemon('/other/codex')).toBe(false);
+    expect(vi.mocked(spawnSync)).toHaveBeenCalledTimes(2);
+  });
+
+  it('asks again after the cache is reset', () => {
+    vi.mocked(spawnSync).mockReturnValueOnce(spawned({ stdout: HELP_WITHOUT_FLAG }));
+    expect(codexSupportsNoDaemon('/opt/codex')).toBe(false);
+
+    resetCodexNoDaemonSupportCacheForTests();
+    vi.mocked(spawnSync).mockReturnValueOnce(spawned({ stdout: HELP_WITH_FLAG }));
+    expect(codexSupportsNoDaemon('/opt/codex')).toBe(true);
+    expect(vi.mocked(spawnSync)).toHaveBeenCalledTimes(2);
   });
 });
