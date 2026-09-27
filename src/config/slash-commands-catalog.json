@@ -1244,7 +1244,7 @@
     },
     {
       "name": "tui",
-      "descriptionKey": "slashCommands.descriptions.tui",
+      "descriptionKey": "slashCommands.descriptions.tui.claude",
       "category": "standard-util",
       "cliTools": [
         "claude"
@@ -1294,7 +1294,7 @@
     },
     {
       "name": "voice",
-      "descriptionKey": "slashCommands.descriptions.voice",
+      "descriptionKey": "slashCommands.descriptions.voice.claude",
       "category": "standard-util",
       "cliTools": [
         "claude"
@@ -1355,16 +1355,6 @@
     {
       "name": "setup-default-sandbox",
       "descriptionKey": "slashCommands.descriptions.setup-default-sandbox",
-      "category": "standard-util",
-      "cliTools": [
-        "codex"
-      ],
-      "isStandard": true,
-      "source": "standard"
-    },
-    {
-      "name": "sandbox-add-read-dir",
-      "descriptionKey": "slashCommands.descriptions.sandbox-add-read-dir",
       "category": "standard-util",
       "cliTools": [
         "codex"
@@ -1595,16 +1585,6 @@
     {
       "name": "stop",
       "descriptionKey": "slashCommands.descriptions.stop",
-      "category": "standard-util",
-      "cliTools": [
-        "codex"
-      ],
-      "isStandard": true,
-      "source": "standard"
-    },
-    {
-      "name": "personality",
-      "descriptionKey": "slashCommands.descriptions.personality",
       "category": "standard-util",
       "cliTools": [
         "codex"
@@ -2424,7 +2404,7 @@
     },
     {
       "name": "voice",
-      "descriptionKey": "slashCommands.descriptions.voice",
+      "descriptionKey": "slashCommands.descriptions.voice.copilot",
       "category": "standard-config",
       "cliTools": [
         "copilot"
@@ -3095,6 +3075,66 @@
     {
       "name": "worktree",
       "descriptionKey": "slashCommands.descriptions.worktree.codex",
+      "category": "standard-util",
+      "cliTools": [
+        "codex"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "output-style",
+      "descriptionKey": "slashCommands.descriptions.output-style",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "update-config",
+      "descriptionKey": "slashCommands.descriptions.update-config",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "voice",
+      "descriptionKey": "slashCommands.descriptions.voice.codex",
+      "category": "standard-util",
+      "cliTools": [
+        "codex"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "tui",
+      "descriptionKey": "slashCommands.descriptions.tui.codex",
+      "category": "standard-util",
+      "cliTools": [
+        "codex"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "daemon",
+      "descriptionKey": "slashCommands.descriptions.daemon",
+      "category": "standard-util",
+      "cliTools": [
+        "codex"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "warnings",
+      "descriptionKey": "slashCommands.descriptions.warnings",
       "category": "standard-util",
       "cliTools": [
         "codex"

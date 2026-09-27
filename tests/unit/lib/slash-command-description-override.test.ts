@@ -196,6 +196,13 @@ describe('the bundled catalog carries descriptionKey through verbatim', () => {
     // reported a description-conflict and the flat key was split by hand into
     // `worktree.command-code` (the shipped wording, unchanged) and
     // `worktree.codex`.
+    // Issue #2914 (the Phase 1.5 leftover of the v0.42.0 release): codex
+    // 0.157.1 added /voice and /tui, names claude (and, for /voice, copilot)
+    // already held under flat keys. codex's /voice also picks a voice through
+    // `/voice settings` and its /tui chooses the TUI mode for the next launch,
+    // so `--check` reported a description-conflict on both and the flat keys
+    // were split by hand into `voice.claude` / `voice.copilot` / `tui.claude`
+    // (the shipped wording, unchanged) plus `voice.codex` and `tui.codex`.
     expect(overridden.map((e) => e.descriptionKey).sort()).toEqual([
       'slashCommands.descriptions.agent.copilot',
       'slashCommands.descriptions.agents.claude',
@@ -246,6 +253,11 @@ describe('the bundled catalog carries descriptionKey through verbatim', () => {
       'slashCommands.descriptions.skills.command-code',
       'slashCommands.descriptions.skills.copilot',
       'slashCommands.descriptions.skills.opencode',
+      'slashCommands.descriptions.tui.claude',
+      'slashCommands.descriptions.tui.codex',
+      'slashCommands.descriptions.voice.claude',
+      'slashCommands.descriptions.voice.codex',
+      'slashCommands.descriptions.voice.copilot',
       'slashCommands.descriptions.worktree.codex',
       'slashCommands.descriptions.worktree.command-code',
     ]);
