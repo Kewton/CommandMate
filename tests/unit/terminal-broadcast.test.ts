@@ -123,6 +123,7 @@ const POSITIVE_EVIDENCE = {
 const BASE_PAYLOAD = {
   isRunning: true,
   cliToolId: 'claude',
+  sessionName: 'mcbd-test-session',
   sessionStatus: 'running',
   sessionStatusReason: 'thinking_indicator',
   content: '',
@@ -271,6 +272,7 @@ describe('broadcastTerminalSnapshotAfterInteraction', () => {
       .mockResolvedValueOnce({
         isRunning: true,
         cliToolId: 'claude',
+        sessionName: 'mcbd-test-session',
         sessionStatus: 'waiting',
         sessionStatusReason: 'prompt_detected',
         content: '',
@@ -288,6 +290,7 @@ describe('broadcastTerminalSnapshotAfterInteraction', () => {
       .mockResolvedValueOnce({
         isRunning: true,
         cliToolId: 'claude',
+        sessionName: 'mcbd-test-session',
         sessionStatus: 'running',
         sessionStatusReason: 'thinking_indicator',
         content: '',

@@ -477,6 +477,23 @@ export interface StructuredSourcePayload {
 export interface CurrentOutputPayload {
   isRunning: boolean;
   cliToolId: CLIToolType;
+  /**
+   * The tmux session name this instance actually runs (or would run) under
+   * (Issue #2886).
+   *
+   * `CLIToolManager.getTool(cliToolId).getSessionName(worktreeId, instanceId)`
+   * verbatim — the same call every route already makes to reach the pane, so
+   * this is the name a namespaced server (#2866) actually bound, adopted
+   * legacy name included, never the `mcbd-${cliToolId}-${worktreeId}` a reader
+   * would have to reconstruct. `orchestrate-monitor`'s `monitor.sh` reads this
+   * field first and falls back to rebuilding the legacy shape only when it is
+   * absent (an older server).
+   *
+   * Always present, computed independently of {@link isRunning}: the name is a
+   * pure function of (tool, worktree, instance, namespace), not a fact about
+   * the tmux session's existence.
+   */
+  sessionName: string;
   sessionStatus: string;
   sessionStatusReason: string;
   content: string;
@@ -1451,6 +1468,9 @@ async function buildPayload(
   const resolvedInstanceId = instanceId ?? cliToolId;
   const manager = CLIToolManager.getInstance();
   const cliTool = manager.getTool(cliToolId);
+  // Issue #2886: read once, independent of `isRunning`, so both return paths
+  // below publish the same value the pane is (or would be) reached at.
+  const sessionName = cliTool.getSessionName(worktreeId, instanceId);
 
   const stopEventAt = getLastStopEventAt(worktreeId, cliToolId, instanceId);
   const lastEvent = getLastAgentEvent(worktreeId, cliToolId, instanceId);
@@ -1576,6 +1596,7 @@ async function buildPayload(
     forgetLastKnownStatus(buildCompositeKey(worktreeId, cliToolId, instanceId));
     return {
       isRunning: false,
+      sessionName,
       content: '',
       lineCount: 0,
       cliToolId,
@@ -2060,6 +2081,7 @@ async function buildPayload(
 
   return {
     isRunning: true,
+    sessionName,
     cliToolId,
     sessionStatus: merged.status,
     sessionStatusReason: merged.reason,

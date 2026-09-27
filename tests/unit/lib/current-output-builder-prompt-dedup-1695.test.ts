@@ -20,7 +20,7 @@ const isRunning = vi.fn(async () => true);
 vi.mock('@/lib/cli-tools/manager', () => ({
   CLIToolManager: {
     getInstance: () => ({
-      getTool: () => ({ isRunning: (...a: unknown[]) => isRunning(...(a as [])) }),
+      getTool: () => ({ getSessionName: () => 'mcbd-test-session', isRunning: (...a: unknown[]) => isRunning(...(a as [])) }),
     }),
   },
 }));

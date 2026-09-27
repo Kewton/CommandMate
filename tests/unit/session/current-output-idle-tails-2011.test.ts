@@ -37,7 +37,7 @@ import type Database from 'better-sqlite3';
 vi.mock('@/lib/db', () => ({ getSessionState: vi.fn(() => null), createMessage: vi.fn() }));
 vi.mock('@/lib/cli-tools/manager', () => ({
   CLIToolManager: {
-    getInstance: () => ({ getTool: () => ({ isRunning: vi.fn().mockResolvedValue(true) }) }),
+    getInstance: () => ({ getTool: () => ({ getSessionName: () => 'mcbd-test-session', isRunning: vi.fn().mockResolvedValue(true) }) }),
   },
 }));
 vi.mock('@/lib/session/cli-session', () => ({ captureSessionOutput: vi.fn() }));

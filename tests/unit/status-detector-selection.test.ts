@@ -976,7 +976,7 @@ describe('/current-output payload for the live agy permission pane (Issue #2270)
       createMessage: vi.fn(),
     }));
     vi.doMock('@/lib/cli-tools/manager', () => ({
-      CLIToolManager: { getInstance: () => ({ getTool: () => ({ isRunning: async () => true }) }) },
+      CLIToolManager: { getInstance: () => ({ getTool: () => ({ getSessionName: () => 'mcbd-test-session', isRunning: async () => true }) }) },
     }));
     vi.doMock('@/lib/session/cli-session', () => ({
       captureSessionOutput: vi.fn(async () => pane),

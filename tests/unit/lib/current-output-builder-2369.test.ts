@@ -32,7 +32,7 @@ vi.mock('@/lib/db', () => ({ getSessionState: vi.fn(() => null) }));
 vi.mock('@/lib/cli-tools/manager', () => ({
   CLIToolManager: {
     getInstance: () => ({
-      getTool: () => ({ isRunning: vi.fn().mockResolvedValue(true) }),
+      getTool: () => ({ getSessionName: () => 'mcbd-test-session', isRunning: vi.fn().mockResolvedValue(true) }),
     }),
   },
 }));
