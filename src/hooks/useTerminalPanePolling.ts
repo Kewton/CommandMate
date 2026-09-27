@@ -449,17 +449,21 @@ export function useTerminalPanePolling({
       isPromptWaiting?: boolean;
       promptData?: LivePromptData | null;
       /**
-       * Issue #2870: carried by the poll only — the WebSocket push has no
-       * `promptAnswerable`. See {@link carriesAnswerable}.
+       * Issue #2870, and on the push too since #2887. See
+       * {@link carriesAnswerable}.
        */
       promptAnswerable?: boolean;
     },
     /**
-     * Whether this delivery path carries `promptAnswerable` (the poll does, the
-     * push does not). When it does not, the last verdict is kept for the SAME
-     * window (same fingerprint) and dropped for a different one, so a push
-     * never re-enables Send the poll said was refused, nor carries that refusal
-     * over to a window nobody judged.
+     * Whether this delivery path carries `promptAnswerable`. The poll always
+     * does (Issue #2870). The push does too since #2887, but only when the
+     * server includes the key — `parseRealtimeEvent` does not validate the
+     * wire, so a server predating #2887 still sends frames with no such key,
+     * and the caller passes `'promptAnswerable' in snap` to tell the two apart.
+     * When it does not, the last verdict is kept for the SAME window (same
+     * fingerprint) and dropped for a different one, so a push never re-enables
+     * Send the poll said was refused, nor carries that refusal over to a window
+     * nobody judged.
      */
     carriesAnswerable = false,
     ): void => {
@@ -694,7 +698,12 @@ export function useTerminalPanePolling({
         isUnclassifiedActive: snap.isUnclassifiedActive,
         isPromptWaiting: snap.isPromptWaiting,
         promptData: snap.promptData ?? null,
-      });
+        promptAnswerable: snap.promptAnswerable,
+      // Issue #2887: a server that predates the field sends no such key at all
+      // (not even `undefined` — `parseRealtimeEvent` unwraps parsed JSON, which
+      // has no way to express a key with no value), so `in` is what tells "this
+      // push judged the prompt" apart from "this push says nothing about it".
+      }, 'promptAnswerable' in snap);
     });
   }, [enabled, worktreeId, addListener, applySnapshot, markPushHealthy]);
 
