@@ -28,7 +28,9 @@ vi.mock('@/lib/ws-server', () => ({
   broadcastMessage: vi.fn(),
 }));
 vi.mock('@/lib/realtime/terminal-broadcast', () => ({
+  broadcastTerminalSnapshot: vi.fn().mockResolvedValue(undefined),
   broadcastTerminalSnapshotAfterInteraction: vi.fn().mockResolvedValue(undefined),
+  broadcastSessionStatus: vi.fn(),
 }));
 
 // Declare mock function type
