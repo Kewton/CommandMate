@@ -451,7 +451,7 @@ describe('getCatalogStaleness', () => {
     execTable = {
       claude: { stdout: '2.1.0 (Claude Code)' }, // older
       codex: { stdout: 'codex-cli 0.144.6' }, // equal
-      agy: { stdout: '1.1.3' }, // equal
+      agy: { stdout: '1.2.12' }, // equal
     };
     const staleness = await getCatalogStaleness();
     expect(staleness.claude.stale).toBe(false);
