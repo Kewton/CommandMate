@@ -203,8 +203,17 @@ describe('the bundled catalog carries descriptionKey through verbatim', () => {
     // so `--check` reported a description-conflict on both and the flat keys
     // were split by hand into `voice.claude` / `voice.copilot` / `tui.claude`
     // (the shipped wording, unchanged) plus `voice.codex` and `tui.codex`.
+    // Issue #2922: agy 1.2.12 was read for the first time since 1.1.3 and adds
+    // 33 commands. It takes its own leaf on the names that were already split
+    // (/agents /exit /feedback /logout /skills /voice), and three flat keys are
+    // split by hand because the shipped sentence is wrong for agy:
+    // /keybindings (claude opens a shortcuts file), /remote-control (claude's
+    // names claude.ai) and /title (codex configures title items). /learn is
+    // split too: Command Code's opens a browser learn hub, agy's saves lessons
+    // as skills or rules.
     expect(overridden.map((e) => e.descriptionKey).sort()).toEqual([
       'slashCommands.descriptions.agent.copilot',
+      'slashCommands.descriptions.agents.antigravity',
       'slashCommands.descriptions.agents.claude',
       'slashCommands.descriptions.agents.codex',
       'slashCommands.descriptions.agents.command-code',
@@ -217,11 +226,13 @@ describe('the bundled catalog carries descriptionKey through verbatim', () => {
       'slashCommands.descriptions.debug.opencode',
       'slashCommands.descriptions.design.claude',
       'slashCommands.descriptions.design.command-code',
+      'slashCommands.descriptions.exit.antigravity',
       'slashCommands.descriptions.exit.claude',
       'slashCommands.descriptions.exit.codex',
       'slashCommands.descriptions.exit.command-code',
       'slashCommands.descriptions.exit.copilot',
       'slashCommands.descriptions.exit.opencode',
+      'slashCommands.descriptions.feedback.antigravity',
       'slashCommands.descriptions.feedback.claude',
       'slashCommands.descriptions.feedback.codex',
       'slashCommands.descriptions.feedback.command-code',
@@ -234,9 +245,14 @@ describe('the bundled catalog carries descriptionKey through verbatim', () => {
       'slashCommands.descriptions.init.command-code',
       'slashCommands.descriptions.init.copilot',
       'slashCommands.descriptions.init.opencode',
+      'slashCommands.descriptions.keybindings.antigravity',
+      'slashCommands.descriptions.keybindings.claude',
+      'slashCommands.descriptions.learn.antigravity',
+      'slashCommands.descriptions.learn.command-code',
       'slashCommands.descriptions.login.claude',
       'slashCommands.descriptions.login.command-code',
       'slashCommands.descriptions.login.copilot',
+      'slashCommands.descriptions.logout.antigravity',
       'slashCommands.descriptions.logout.claude',
       'slashCommands.descriptions.logout.codex',
       'slashCommands.descriptions.logout.command-code',
@@ -248,13 +264,19 @@ describe('the bundled catalog carries descriptionKey through verbatim', () => {
       'slashCommands.descriptions.plugin.copilot',
       'slashCommands.descriptions.recap.claude',
       'slashCommands.descriptions.recap.codex',
+      'slashCommands.descriptions.remote-control.antigravity',
+      'slashCommands.descriptions.remote-control.claude',
+      'slashCommands.descriptions.skills.antigravity',
       'slashCommands.descriptions.skills.claude',
       'slashCommands.descriptions.skills.codex',
       'slashCommands.descriptions.skills.command-code',
       'slashCommands.descriptions.skills.copilot',
       'slashCommands.descriptions.skills.opencode',
+      'slashCommands.descriptions.title.antigravity',
+      'slashCommands.descriptions.title.codex',
       'slashCommands.descriptions.tui.claude',
       'slashCommands.descriptions.tui.codex',
+      'slashCommands.descriptions.voice.antigravity',
       'slashCommands.descriptions.voice.claude',
       'slashCommands.descriptions.voice.codex',
       'slashCommands.descriptions.voice.copilot',
@@ -309,6 +331,7 @@ describe('the bundled catalog carries descriptionKey through verbatim', () => {
       'codex',
       'copilot',
       'command-code',
+      'antigravity',
     ]);
     expect([...new Set(claimants.map((entry) => entry.descriptionKey))]).toEqual([
       'slashCommands.descriptions.copy',

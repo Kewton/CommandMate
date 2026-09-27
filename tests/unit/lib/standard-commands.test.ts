@@ -487,8 +487,10 @@ describe('STANDARD_COMMANDS', () => {
       attestedCatalogNames(a, DEFAULT_EXCLUSIONS).includes('agents')
     ).map((a) => a.tool);
     // The evidence trail #1503/#1767/#1913/#2024/#2253 built, now stated once:
-    // four tools ship /agents and copilot ships /agent, a different command.
+    // five tools ship /agents and copilot ships /agent, a different command.
+    // Issue #2922: agy 1.2.12 ships /agents ("List available custom agents").
     expect([...attestedClaimants].sort()).toEqual([
+      'antigravity',
       'claude',
       'codex',
       'command-code',
@@ -728,7 +730,11 @@ describe('Claude built-in catalog additions (Issue #1488)', () => {
   // claude-scoped data row) and covers /vim, which the exclusions file does not
   // list because the claude docs already mark it removed.
   it('does not add /schedule, and keeps /vim off claude', () => {
-    expect(STANDARD_COMMANDS.some((c) => c.name === 'schedule')).toBe(false);
+    // Issue #2922: the #1488 exclusion is claude-scoped. agy 1.2.12 ships its
+    // own /schedule (a local recurring instruction), which the catalog carries.
+    expect(
+      STANDARD_COMMANDS.some((c) => c.name === 'schedule' && toolsOfCommand(c).includes('claude'))
+    ).toBe(false);
     const vim = STANDARD_COMMANDS.filter((c) => c.name === 'vim');
     expect(vim.length).toBe(1);
     expect(vim[0].cliTools).toEqual(['codex']);
@@ -944,7 +950,9 @@ describe('copilot / opencode catalog reconcile (Issue #1913)', () => {
     const exits = STANDARD_COMMANDS.filter((c) => c.name === 'exit');
     // Issue #2253: command-code joins the split. `/exit` means "Exit Command
     // Code" there, so it gets its own leaf like every other claimant.
+    // Issue #2922: antigravity joins the split the same way.
     expect(exits.map((c) => c.cliTools?.join(',')).sort()).toEqual([
+      'antigravity',
       'claude',
       'codex',
       'command-code',
