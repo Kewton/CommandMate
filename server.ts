@@ -442,6 +442,19 @@ app.prepare().then(() => {
         console.error('Error reconciling Skill operations:', error);
       }
 
+      // Issue #2866: this server's tmux session-name namespace. Must precede the
+      // session reconcile below, which renames onto (and attributes against)
+      // names in this namespace. Fail-open in its own try/catch: without a
+      // namespace sessions keep the legacy `mcbd-{cli}-{id}` names. Dynamic
+      // import for the same reason as the reconcilers around it.
+      try {
+        const { initSessionNamespace } = await import('./src/lib/cli-tools/session-namespace');
+        const namespace = initSessionNamespace(db);
+        console.log(`tmux session namespace: ${namespace}`);
+      } catch (error) {
+        console.error('Error initializing tmux session namespace:', error);
+      }
+
       // Issue #1621 Phase 3/4: make live tmux sessions follow the worktree IDs
       // that migration v54 has just renumbered. Session names are DERIVED from
       // the ID (`mcbd-{cli}-{worktreeId}`), so a running agent would otherwise
@@ -482,6 +495,22 @@ app.prepare().then(() => {
         }
       } catch (error) {
         console.error('Error reconciling worktree sessions:', error);
+      }
+
+      // Issue #2866: keep serving this server's sessions that predate the
+      // namespace under their legacy names (adopted, not renamed). After the
+      // reconcile above, so an ID move has already been applied. Fail-open.
+      try {
+        const { adoptLegacySessions } = await import('./src/lib/session/adopt-legacy-sessions');
+        const adoptReport = await adoptLegacySessions(db);
+        if (adoptReport.adopted.length > 0) {
+          console.log(`Adopted ${adoptReport.adopted.length} legacy-named tmux session(s)`);
+        }
+        if (adoptReport.errors.length > 0) {
+          console.warn(`Legacy session adoption warnings: ${adoptReport.errors.join(', ')}`);
+        }
+      } catch (error) {
+        console.error('Error adopting legacy tmux sessions:', error);
       }
 
       // Issue #1543: close verification runs that a crash left in `running`.

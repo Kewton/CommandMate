@@ -30,14 +30,13 @@
 
 import { dirname, resolve, sep } from 'path';
 import type { VerificationGateTerminalStatus } from '@/lib/db';
-import { resolveSessionName } from '@/lib/cli-tools/session-name';
-import { CLI_TOOL_IDS, isCliToolType } from '@/lib/cli-tools/types';
+import { parseSessionName, resolveSessionName } from '@/lib/cli-tools/session-name';
+import { isCliToolType } from '@/lib/cli-tools/types';
 import type { TaskContract } from '@/lib/tasks/contract-parser';
 import {
   captureEnvSnapshot,
   ENV_PROBE_IDS,
   ENV_PROBE_LABELS,
-  MCBD_SESSION_PREFIX,
   type EnvEntry,
   type EnvProbeId,
   type EnvSnapshot,
@@ -121,11 +120,13 @@ export interface EnvAttributionContext {
   worktreePath: string;
 }
 
-/** CLI tool ids, longest first: `vibe-local` must not be stripped as `vibe`. */
-const CLI_PREFIXES = [...CLI_TOOL_IDS].sort((a, b) => b.length - a.length);
-
 /**
- * Attribute an `mcbd-<cli>-<worktreeId>[-suffix]` session name to a worktree.
+ * Attribute an `mcbd-[<ns>-]<cli>-<worktreeId>[-suffix]` session name to a
+ * worktree.
+ *
+ * The namespace (Issue #2866) is not consulted: the worktree ID is what ties a
+ * session to this task, and a session this task's agent started in any
+ * server's namespace is still this task's addition.
  *
  * Ambiguity resolves towards `self` on purpose. Worktree ids may contain
  * hyphens, so `mcbd-claude-foo-bar` is genuinely ambiguous between worktree
@@ -134,11 +135,9 @@ const CLI_PREFIXES = [...CLI_TOOL_IDS].sort((a, b) => b.length - a.length);
  * rather than a missed leak.
  */
 export function attributeSessionName(name: string, worktreeId: string): EnvEntryOwner {
-  if (!name.startsWith(MCBD_SESSION_PREFIX)) return 'unattributed';
-  const rest = name.slice(MCBD_SESSION_PREFIX.length);
-  const cli = CLI_PREFIXES.find((id) => rest.startsWith(`${id}-`));
-  if (!cli) return 'unattributed';
-  const tail = rest.slice(cli.length + 1);
+  const parsed = parseSessionName(name);
+  if (!parsed) return 'unattributed';
+  const tail = parsed.rest;
   if (tail === worktreeId || tail.startsWith(`${worktreeId}-`)) return 'self';
   return 'other';
 }

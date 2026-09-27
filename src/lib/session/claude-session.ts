@@ -31,7 +31,7 @@ import { access, constants } from 'fs/promises';
 import { createLogger } from '@/lib/logger';
 import { assertSessionNotForeign } from '@/lib/cli-tools/session-ownership';
 import { CLAUDE_RESTART_DELAY_MS } from '@/config/cli-tool-timing-config';
-import { deriveSessionSuffix } from '@/lib/cli-tools/types';
+import { resolveSessionName } from '@/lib/cli-tools/session-name';
 import { CLAUDE_CLI_TOOL_ID } from '@/lib/hooks/sources';
 import { shellQuote } from '@/lib/hooks/hook-settings-generator';
 import { validateClaudeModelName } from '@/lib/cmate-cli-tool-parser';
@@ -422,9 +422,9 @@ export interface ClaudeSessionState {
  * Get tmux session name for a worktree
  *
  * Issue #868: Supports additional agent instances. The primary instance
- * (instanceId omitted or equal to 'claude') keeps the original
- * `mcbd-claude-{worktreeId}` name for backward compatibility. Additional
- * instances append a suffix derived from the instance ID.
+ * (instanceId omitted or equal to 'claude') carries no suffix; additional
+ * instances append a suffix derived from the instance ID. Issue #2866: the
+ * rule is `resolveSessionName`'s (server namespace included).
  *
  * @param worktreeId - Worktree ID
  * @param instanceId - Optional agent instance ID (defaults to primary)
@@ -437,12 +437,11 @@ export interface ClaudeSessionState {
  * ```
  */
 export function getSessionName(worktreeId: string, instanceId?: string): string {
-  const base = `mcbd-claude-${worktreeId}`;
-  if (!instanceId || instanceId === 'claude') {
-    return base;
-  }
-  const suffix = deriveSessionSuffix(instanceId, 'claude');
-  return suffix ? `${base}-${suffix}` : base;
+  // Issue #2866: delegated so the server namespace and adopted legacy sessions
+  // apply to Claude exactly as to every other tool. A local copy of the rule
+  // would start, send to and stop `mcbd-claude-*` while capture and the UI
+  // address `mcbd-{ns}-claude-*`.
+  return resolveSessionName('claude', worktreeId, instanceId);
 }
 
 /**
