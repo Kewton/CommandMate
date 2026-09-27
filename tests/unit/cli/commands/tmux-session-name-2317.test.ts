@@ -190,6 +190,39 @@ describe('instances', () => {
     expect(rows[1].tmuxSession).toBe('mcbd-codex-wt1-2');
   });
 
+  it('names the session the server published for each instance (Issue #2867)', async () => {
+    // The namespace lives in the server's DB, so a name derived here would be
+    // the legacy one. An adopted legacy session keeps its legacy name.
+    mockFetchSequence([
+      {
+        data: {
+          agentInstances: [
+            { id: 'claude', cliTool: 'claude', alias: 'Claude', order: 0, sessionName: 'mcbd-0a1b2c3d-claude-wt1' },
+            { id: 'codex-2', cliTool: 'codex', alias: 'Reviewer', order: 1, sessionName: 'mcbd-codex-wt1-2' },
+          ],
+        },
+      },
+      { data: { isRunning: true, autoYes: { enabled: false } } },
+      { data: { isRunning: false, autoYes: { enabled: false } } },
+    ]);
+    await runInstances(['wt1', '--json']);
+
+    const rows = JSON.parse(lastLogged());
+    expect(rows[0].tmuxSession).toBe('mcbd-0a1b2c3d-claude-wt1');
+    expect(rows[1].tmuxSession).toBe('mcbd-codex-wt1-2');
+  });
+
+  it('derives the legacy name when the server sends no sessionName (older server, Issue #2867)', async () => {
+    mockRoster();
+    await runInstances(['wt1', '--json']);
+
+    const rows = JSON.parse(lastLogged());
+    expect(rows.map((row: { tmuxSession: string }) => row.tmuxSession)).toEqual([
+      'mcbd-claude-wt1',
+      'mcbd-codex-wt1-2',
+    ]);
+  });
+
   it('appends a TMUX_SESSION column rather than inserting one', async () => {
     // Anything reading this table by column position keeps working — the same
     // rule #1785 and #2038 followed.
