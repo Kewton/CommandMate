@@ -238,18 +238,24 @@
       "team-onboarding": "Generate a team onboarding guide from your Claude Code usage history",
       "teleport": "Pull a Claude Code on the web session into this terminal: opens a picker, then fetches the branch and conversation",
       "theme": "Choose the color and syntax highlighting theme",
-      "tui": "Set the terminal UI renderer and relaunch into it with your conversation intact",
+      "tui": {
+        "claude": "Set the terminal UI renderer and relaunch into it with your conversation intact",
+        "codex": "Choose the TUI mode for the next launch"
+      },
       "ultrareview": "Run a deep, multi-agent code review in a cloud sandbox with ultrareview",
       "upgrade": "Open the upgrade page in your browser to switch to a higher plan tier",
       "usage-credits": "Configure usage credits, or request them from your admin, when you hit a limit",
       "verify": "Confirm a code change does what it should by building your project's app, running it, and observing the result, rather than relying on tests or type checks",
-      "voice": "Toggle voice dictation, or enable it in a specific mode",
+      "voice": {
+        "claude": "Toggle voice dictation, or enable it in a specific mode",
+        "copilot": "Toggle voice dictation, or enable it in a specific mode",
+        "codex": "Start or stop voice, or choose a voice with /voice settings"
+      },
       "web-setup": "Connect your GitHub account to Claude Code on the web using your local gh CLI credentials",
       "workflows": "Open the workflow progress view to watch, pause, resume, or save running and completed workflows",
       "keymap": "Remap TUI shortcuts",
       "vim": "Toggle Vim mode for the composer",
       "setup-default-sandbox": "Set up elevated agent sandbox",
-      "sandbox-add-read-dir": "Let sandbox read a directory: /sandbox-add-read-dir [absolute-path]",
       "experimental": "Toggle experimental features",
       "approve": "Approve one retry of a recent auto-review denial",
       "import": {
@@ -272,7 +278,6 @@
       "plugins": "Browse plugins",
       "rollout": "Print the rollout file path",
       "ps": "List background terminals",
-      "personality": "Choose a communication style for Codex",
       "test-approval": "Test approval request",
       "list-agents": "List the subagents and other Claude Code sessions Claude can message, with the name to use for each",
       "allow-all": "Enable all tool, path, and URL permissions",
@@ -336,10 +341,14 @@
       "tree": "Browse the session tree and jump to any point in it",
       "unshare": "Stop sharing the conversation",
       "worktree": {
-      "codex": "Start or continue a conversation in a new worktree",
-      "command-code": "Create, list, or switch git worktrees"
-    },
-      "skill-doctor": "Show what each of your skills costs in context and how often it gets used, so you can find skills to turn off"
+        "codex": "Start or continue a conversation in a new worktree",
+        "command-code": "Create, list, or switch git worktrees"
+      },
+      "skill-doctor": "Show what each of your skills costs in context and how often it gets used, so you can find skills to turn off",
+      "output-style": "List output styles or switch to one, for example /output-style concise",
+      "update-config": "Describe a settings change and have Claude edit the matching settings.json file",
+      "daemon": "Manage the local background server",
+      "warnings": "View retained warnings and diagnostic details"
     }
   },
   "session": {
@@ -501,7 +510,7 @@
     },
     "jumpToTop": "Jump to the beginning",
     "toolLog": {
-      "summary": "Tool calls \u00b7 {count}",
+      "summary": "Tool calls · {count}",
       "expand": "Show the tool calls",
       "collapse": "Hide the tool calls"
     },
@@ -1044,7 +1053,7 @@
     "sessionOnlyAria": "Use the highlighted choice for this session only (s)",
     "setDefault": "Set as default",
     "setDefaultAria": "Set the highlighted choice as the default (Enter)",
-    "defaultWarning": "Enter saves this choice as the default for new sessions. Use \u201cThis session only\u201d to leave your default unchanged.",
+    "defaultWarning": "Enter saves this choice as the default for new sessions. Use “This session only” to leave your default unchanged.",
     "opencodeToolbarLabel": "opencode model keys",
     "opencodeCaption": "Model"
   },
