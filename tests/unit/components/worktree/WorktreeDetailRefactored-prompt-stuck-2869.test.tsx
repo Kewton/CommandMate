@@ -378,6 +378,29 @@ describe('[#2869] the stuck-prompt hint on the phone', () => {
     expect(directInputPosts).toHaveLength(0);
   });
 
+  it('clears a stale ?view=chat from the URL so the terminal surface does not bounce back to chat (Issue #2888)', async () => {
+    window.history.replaceState({}, '', `/worktrees/${WORKTREE_ID}?view=chat`);
+    await renderScreen();
+    await screen.findByTestId('mobile-chat-surface');
+
+    await pressSend();
+    await pressSend();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'worktree.promptResponse.stuckHintLink' }));
+
+    const keyboard = await screen.findByTestId('mobile-direct-input-keyboard');
+    expect(screen.getByTestId('mobile-tab-terminal')).toHaveAttribute('aria-selected', 'true');
+    await waitFor(() => expect(screen.queryByTestId('mobile-chat-surface')).not.toBeInTheDocument());
+    // The remount that follows re-reads `resolveSurfaceMode`, which lets a live
+    // `?view=` out-rank the localStorage write above; without clearing it first
+    // the surface (and the keyboard it gates) would bounce straight back to chat.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect(keyboard).toBeInTheDocument();
+    expect(window.location.search).toBe('');
+  });
+
   it('opens the keyboard on the Terminal tab when the sheet was answered from another tab', async () => {
     await renderScreen();
     fireEvent.click(screen.getByTestId('mobile-tab-history'));

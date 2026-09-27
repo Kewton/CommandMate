@@ -78,6 +78,7 @@ options:
 | `maxLogTailBytes` | integer | `8192` | 失敗ゲートのログを stderr に出す際の末尾バイト数。`0..1048576`。`0` で抑止 |
 | `requireCommit` | boolean | `false` | `true` で `work-evidence` が「変更が在る」ではなく **「commit が在る」** を要求する。`commits=0 uncommitted=1` は failed（run は `not_started`）。実行契約の前文は「未 commit の作業は未完了とみなされる」と宣言するのに、ゲートは未 commit の変更 1 件で `passed` を返していた（Issue #1628 D-4）。既定を false に置いたのは、このゲートの本来の問いが「judge する work が在るか」だからで、リポジトリ単位の opt-in にしてある。**委任 1 件だけに要求したい場合は実行契約の `success.requireCommit`**（Issue #1642、[task-contract.md](./task-contract.md) §2.5）。両者は **OR** で合成し、契約が本オプションを緩めることはできない |
 | `requireEnvClean` | boolean | `false` | `true` で組み込み `env-clean` ゲート（Issue #1740 / #2442、[task-contract.md](./task-contract.md) §2.6）を既定ゲート集合に加える。`scope` がリポジトリ**内**の変更を裁定するのに対し、こちらは**外**（稼働中の CommandMate サーバのポート・`mcbd-*` tmux セッション・`$HOME` 直下・`~/.commandmate` 直下）を裁定する。**このフラグは判定だけでなく計測の有無も決める** — ベースラインのスナップショットは task 作成時（`POST /api/worktrees/:id/tasks` ＝ `send --contract`）に、**次の 3 つのいずれかが真のときにのみ**記録される（Issue #2442 で 3 つ目が加わった）: 本フラグ / 契約の `success.requireEnvClean` / 契約の `verify.gates` が `env-clean` を名指し。off の既定はファイルを 1 つも書かない。後から on にしても過去の task のベースラインは作れないため、そのランは **UNKNOWN**（gate `error` → run `failed`）になり、決して `passed` にはならない。**リポジトリ全体の設定であって委任専用のスイッチではない** — 自分の `commandmate verify` にも同じように効く。有効化は task 作成より前に行うこと |
+| `envCleanIgnoreHomeEntries` | list\<string\> | `[]` | ワーカーの作業と結び付かない `$HOME` 直下のエントリ（例: 別ツールのドットディレクトリ）を `env-clean` の判定から外す（Issue #2890）。**`$HOME` 直下のエントリ名との完全一致のみ**（glob・正規表現は使わない）。除外は比較の段階だけに効き、task 作成時に採ったベースラインは書き換えない — 後からリストに足した名前は既存 task の再検証にも効く。`home-entries` probe の追加・削除の両方が対象で、`commandmate-entries` など他の probe には効かない。除外した項目は黙って消さず、`env-clean` のレポートに `ignored (options.envCleanIgnoreHomeEntries): <名前>` の 1 行で出す。要素は非空文字列、`/` や NUL を含まない、`.` / `..` でない、最大 32 件 |
 
 ---
 
@@ -657,8 +658,14 @@ GATE e2e SKIP reason=mutex-wait waited=600s
 | `gates[]` | `retryOnFail` / `flakyIsPass` | ✅ #1772 | ✅ skills #224 | ✅ skills #224 |
 | `options` | `baseRef` / `skipInPrimaryCheckout` / `maxLogTailBytes` / `requireCommit` | ✅ | ✅ | ✅ |
 | `options` | `requireEnvClean` | ✅ #1740 | ✅ skills PR #225 | ✅ skills PR #225 |
+| `options` | `envCleanIgnoreHomeEntries` | ✅ #2890 | ❌（別 Issue） | ❌（別 Issue） |
 
-**2026-08-20 実測: 4 実装すべてが同じ集合を受理する。** 内訳は本体の TS ローダ 1 本、
+**Issue #2890 でこの一致は再び崩れている。** `envCleanIgnoreHomeEntries` は
+CommandMate 本体だけが受理し、standalone ランナーは `env-clean` そのものを判定しない
+（本表直後の `GATE env-clean SKIP reason=no-baseline` の説明どおり）ため、キーの受理を
+足すには awk パーサの改修が要る。port は別 Issue とし、本 Issue のスコープには含めていない。
+
+**2026-08-20 実測: 4 実装すべてが同じ集合を受理する（`envCleanIgnoreHomeEntries` 以前の集合について）。** 内訳は本体の TS ローダ 1 本、
 バイト一致する bash ランナー 2 箇所（CommandMate の
 `.claude/skills/cmate-verify/scripts/verify-run.sh` ＋ `.agents/...` のミラーと、
 commandmate-skills の `skills/cmate-verify/scripts/verify-run.sh`）、そして JS の
