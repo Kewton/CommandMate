@@ -229,5 +229,13 @@ options:
   # （検証直前の状態を「開始時」と偽ることが、このゲートが拒否する fail-open そのもの）。
   # 契約なしの単独 verify で env-clean を避けるには `--gates` で明示指名する。
   requireEnvClean: true
+  # [Issue #2890 / #2901] env-clean の `$HOME` 直下の比較から外すエントリ（名前の完全一致）。
+  # どちらもワーカーの作業と結び付かずに作られる（2026-09-27 の /orchestrate run で実測）:
+  #   - .semgrep     : 並行した 3 ワーカーすべてに同時刻（00:41）で出た。どのワーカーのコマンドとも結び付かない
+  #   - .commandagent: 別プロジェクト（CommandAgent）のツールが作る
+  # 除外した項目は env-clean のレポートに `ignored (options.envCleanIgnoreHomeEntries): …` と出る。
+  envCleanIgnoreHomeEntries:
+    - .semgrep
+    - .commandagent
   # 8192 では vitest の失敗サマリが途中で切れ、2 件の失敗のうち 1 件しか読めなかった。
   maxLogTailBytes: 32768
