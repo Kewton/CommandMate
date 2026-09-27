@@ -1024,7 +1024,7 @@ export const GEMINI_THINKING_PATTERN = /[\u2800-\u28FF]|Thinking\.\.\./;
  * OpenCode TUI shows "Ask anything..." in the input area when waiting for user input.
  * Unlike Claude/Codex (which use > or ❯), OpenCode uses a text-based prompt indicator.
  */
-export const OPENCODE_PROMPT_PATTERN = /Ask anything\.\.\./;
+export const OPENCODE_PROMPT_PATTERN = /Ask anything(?:\.\.\.|\u2026)/;
 
 /**
  * OpenCode idle composer pattern (Issue #1883).
@@ -1054,9 +1054,12 @@ export const OPENCODE_PROMPT_PATTERN = /Ask anything\.\.\./;
  * {@link OPENCODE_PROMPT_PATTERN} stays as it is: `response-checker` and
  * `OPENCODE_SKIP_PATTERNS` want the bare phrase wherever it lands, because they
  * are deleting the row from an extracted response, not judging a session.
+ *
+ * opencode 1.18.31 以降は見本文を U+2026（`…`）で描く。ASCII の `...` も実行ファイルに
+ * 残っているので両方を受け付ける（Issue #2915、2026-09-28 に実行ファイルから確認）。
  */
 export const OPENCODE_IDLE_COMPOSER_PATTERN =
-  /^[^\S\n]*[\u2502\u2503][^\S\n]*Ask anything\.\.\./m;
+  /^[^\S\n]*[\u2502\u2503][^\S\n]*Ask anything(?:\.\.\.|\u2026)/m;
 
 /**
  * OpenCode prompt pattern after response completion (Issue #379)
