@@ -230,6 +230,18 @@ export const CLAUDE_TRUST_DIALOG_PATTERN = /Yes, I trust this folder/m;
 export const CODEX_PROMPT_PATTERN = /^›\s*/m;
 
 /**
+ * The directory/folder trust dialog's question line, across codex builds
+ * (Issue #2884): `Do you trust the contents of this directory?` (<=0.155.1)
+ * and `Trust this folder?` (0.157.1, which dropped the "Do you trust" wording
+ * entirely -- `tests/fixtures/codex-dialogs-0157/trust.txt`). The two variants
+ * are kept as alternatives of one pattern -- rather than duplicated across
+ * {@link CODEX_DIALOG_PATTERN}, `getCodexActiveDialog` and
+ * `getCodexLifecycleDialog` -- so those three cannot drift into disagreeing
+ * about what counts as the trust dialog.
+ */
+export const CODEX_TRUST_QUESTION_PATTERN = /Do you trust|Trust this folder\?/;
+
+/**
  * Codex INTERACTIVE startup dialog pattern (Issue #890)
  *
  * Codex shows interactive update-notification and trust dialogs on first launch.
@@ -239,7 +251,7 @@ export const CODEX_PROMPT_PATTERN = /^›\s*/m;
  * also confirm no INTERACTIVE dialog is still active. This pattern matches markers
  * that appear ONLY in interactive dialogs:
  *   - Interactive update dialog: "Skip until next version" (the option-3 label)
- *   - Trust dialog:              "Do you trust the contents of this directory?"
+ *   - Trust dialog:              {@link CODEX_TRUST_QUESTION_PATTERN}
  *   - Dialog confirm footer:     "Press enter to continue"
  *   - Numbered selection option: "› 1. ..." (leading ›, a digit, a dot)
  *
@@ -255,8 +267,10 @@ export const CODEX_PROMPT_PATTERN = /^›\s*/m;
  *
  * No /g flag (would make .test() stateful); no nested quantifiers (ReDoS-safe).
  */
-export const CODEX_DIALOG_PATTERN =
-  /Skip until next version|Do you trust|Press enter to continue|^\s*›\s*\d+\.\s/m;
+export const CODEX_DIALOG_PATTERN = new RegExp(
+  `Skip until next version|${CODEX_TRUST_QUESTION_PATTERN.source}|Press enter to continue|^\\s*›\\s*\\d+\\.\\s`,
+  'm',
+);
 
 /**
  * Codex genuine input-prompt line (Issue #892).
@@ -363,7 +377,7 @@ export function getCodexActiveDialog(output: string): CodexActiveDialog {
   ) {
     return 'update';
   }
-  if (active.includes('Do you trust')) {
+  if (CODEX_TRUST_QUESTION_PATTERN.test(active)) {
     return 'trust';
   }
   if (active.includes('Press enter to continue')) {
@@ -459,9 +473,6 @@ const CODEX_UPDATE_DIALOG_ANCHORS = [
   /^\s*[›❯]?\s*\d+\.\s*Update now/im,
 ] as const;
 
-/** The directory-trust dialog's question line. */
-const CODEX_TRUST_DIALOG_ANCHOR = /Do you trust/;
-
 /**
  * Classify the bottom-most ACTIVE codex lifecycle screen (Issue #1829).
  *
@@ -508,7 +519,7 @@ export function getCodexLifecycleDialog(output: string): CodexLifecycleDialog | 
     // above it has been left behind and must not withhold the answer.
     if (CODEX_APPROVAL_FOOTER_PATTERN.test(line)) return null;
     if (CODEX_UPDATE_DIALOG_ANCHORS.some((pattern) => pattern.test(line))) return 'update';
-    if (CODEX_TRUST_DIALOG_ANCHOR.test(line)) return 'trust';
+    if (CODEX_TRUST_QUESTION_PATTERN.test(line)) return 'trust';
     // Both anchors required, so a stray "hooks" mention cannot claim the screen.
     if (line.includes(CODEX_HOOKS_REVIEW_ANCHORS[1]) && text.includes(CODEX_HOOKS_REVIEW_ANCHORS[0])) {
       return 'hooks-review';

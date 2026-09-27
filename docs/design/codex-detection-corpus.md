@@ -33,7 +33,8 @@ codex --version                                  # 例: codex-cli 0.156.1
 PROBE=$HOME/codex-probe-$(codex --version | awk '{print $2}')
 mkdir -p "$PROBE/repo" && cd "$PROBE/repo" && git init -q && echo probe > README.md
 # 本番の tmux サーバーに触れないよう、専用ソケット（-L）を使う
-tmux -L codexprobe new-session -d -s probe -x 200 -y 1000 -c "$PROBE/repo" 'codex -a untrusted'
+# `-a untrusted` は 0.157.1 で廃止。`-a on-request -s read-only` で起動し、trust は画面で承認する
+tmux -L codexprobe new-session -d -s probe -x 200 -y 1000 -c "$PROBE/repo" 'codex -a on-request -s read-only'
 cap() { tmux -L codexprobe capture-pane -t '=probe:' -p -e -S -1000 > "$PROBE/$1"; }
 send() { tmux -L codexprobe send-keys -t '=probe:' -l -- "$1"; tmux -L codexprobe send-keys -t '=probe:' Enter; }
 ```
