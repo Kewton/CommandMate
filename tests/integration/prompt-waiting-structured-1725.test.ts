@@ -49,7 +49,7 @@ vi.mock('@/lib/db/db-instance', () => {
 const isRunning = vi.fn().mockResolvedValue(true);
 vi.mock('@/lib/cli-tools/manager', () => ({
   CLIToolManager: {
-    getInstance: () => ({ getTool: () => ({ isRunning: (...a: unknown[]) => isRunning(...a) }) }),
+    getInstance: () => ({ getTool: () => ({ getSessionName: () => 'mcbd-test-session', isRunning: (...a: unknown[]) => isRunning(...a) }) }),
   },
 }));
 vi.mock('@/lib/session/cli-session', () => ({ captureSessionOutput: vi.fn() }));

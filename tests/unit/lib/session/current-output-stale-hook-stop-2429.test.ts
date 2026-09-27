@@ -35,7 +35,7 @@ const isRunning = vi.fn().mockResolvedValue(true);
 vi.mock('@/lib/cli-tools/manager', () => ({
   CLIToolManager: {
     getInstance: () => ({
-      getTool: () => ({ isRunning: (...args: unknown[]) => isRunning(...args) }),
+      getTool: () => ({ getSessionName: () => 'mcbd-test-session', isRunning: (...args: unknown[]) => isRunning(...args) }),
     }),
   },
 }));

@@ -252,6 +252,19 @@ export interface CurrentOutputResponse {
   thinking: boolean;
   thinkingMessage: string | null;
   cliToolId?: string;
+  /**
+   * The tmux session name this instance actually runs (or would run) under
+   * (Issue #2886).
+   *
+   * Mirrors: src/lib/session/current-output-builder.ts
+   * CurrentOutputPayload.sessionName — `getSessionName(worktreeId, instanceId)`
+   * verbatim, namespace (#2866) and legacy-adoption included, so a consumer
+   * never has to reconstruct `mcbd-${cliToolId}-${worktreeId}` itself.
+   *
+   * Optional because a server older than #2886 sends no such key; a reader
+   * falls back to the legacy construction in that case.
+   */
+  sessionName?: string;
   isSelectionListActive: boolean;
   /** Issue #1017: Codex pager/edit-previous mode (subset of isSelectionListActive). */
   isPagerActive?: boolean;

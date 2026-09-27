@@ -437,7 +437,23 @@ while [ "$done_count" -lt "$n_ids" ]; do
     # intervention is otherwise invisible until the first one is needed — and by
     # then a missed approval has already stalled the worker (Issue #1601).
     cli_tool=$(ml_json_scalar "$poll" cliToolId)
-    session=$(ml_session_name "$wid" "$cli_tool" "$inst" "$SESSION_PREFIX") || session=""
+    # Issue #2886: a server with a namespace (#2866) or an adopted legacy
+    # session names the pane something other than `mcbd-<cliToolId>-<wid>`, so
+    # the payload's own `sessionName` — CLIToolManager's
+    # getSessionName(worktreeId, instanceId), the name actually bound — is
+    # preferred over rebuilding it here. `--session-prefix` is the legacy
+    # escape hatch and must keep outranking everything the server says, so it
+    # is still checked first.
+    if [ -n "$SESSION_PREFIX" ]; then
+      session=$(ml_session_name "$wid" "$cli_tool" "$inst" "$SESSION_PREFIX") || session=""
+    else
+      session=$(ml_json_scalar "$poll" sessionName)
+      if [ -z "$session" ]; then
+        # A server older than #2886 sends no `sessionName` — fall back to the
+        # derived shape exactly as before.
+        session=$(ml_session_name "$wid" "$cli_tool" "$inst" "$SESSION_PREFIX") || session=""
+      fi
+    fi
     if [ ! -f "$STATE_DIR/$lbl.target" ] && [ -n "$session" ]; then
       echo "$session" > "$STATE_DIR/$lbl.target"
       echo "monitor[$lbl]: intervention target = $session"
