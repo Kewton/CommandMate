@@ -10,6 +10,11 @@
 export interface WorktreeListResponse {
   worktrees: WorktreeItem[];
   repositories: unknown[]; // CLI does not use this
+  /**
+   * The namespace the server names its tmux sessions with, or null when it
+   * uses the legacy form (Issue #2867). Absent from servers older than #2867.
+   */
+  tmuxSessionNamespace?: string | null;
 }
 
 // Mirrors: src/types/models.ts Worktree (subset)
@@ -127,6 +132,12 @@ export interface AgentInstance {
   cliTool: string;
   alias: string;
   order: number;
+  /**
+   * The tmux session name the server uses for this instance — namespaced, or
+   * an adopted legacy name (Issue #2867). Only on `GET /api/worktrees/[id]`,
+   * and absent from servers older than #2867.
+   */
+  sessionName?: string;
 }
 
 /**

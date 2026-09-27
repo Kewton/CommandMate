@@ -334,9 +334,13 @@ Message format example:
 
 ### 6.1 Session Naming Convention
 
-- Session name: `mcbd-{cliToolId}-{worktreeId}`
+- Session name: `mcbd-{ns}-{cliToolId}-{worktreeId}[-{suffix}]` (Issue #2866)
+  - `{ns}` is a per-server namespace (8 hex digits, stored in the DB), so two servers with the same worktree ID never share a session name
+  - A legacy `mcbd-{cliToolId}-{worktreeId}[-{suffix}]` session is adopted by the server and keeps its legacy name
+  - Names are built and split in one place: `src/lib/cli-tools/session-name.ts` (`resolveSessionName` / `parseSessionName`)
+  - The ns lives in the server's DB, so the CLI cannot compute it. The server publishes `tmuxSessionNamespace` at the top level of `GET /api/worktrees` and the name actually in use as `agentInstances[].sessionName` on `GET /api/worktrees/[id]` (Issue #2867)
 - Example:
-  - Claude: `mcbd-claude-feature-foo`
+  - Claude: `mcbd-0a1b2c3d-claude-feature-foo` (legacy: `mcbd-claude-feature-foo`)
 - One session per worktree is maintained.
 - Note: Migration from old naming convention `cw_{worktreeId}`: Implemented in Issue #4
 
