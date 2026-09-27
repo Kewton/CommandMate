@@ -99,22 +99,25 @@ fi
 
 ### Phase 3: tmuxセッション終了
 
-1. Issue番号に対応するtmuxセッションを検索
-2. 存在する場合は終了（`tmux kill-session`）
+`git worktree remove`（Phase 4）とWorktree同期（Phase 7）はどちらもtmuxセッションを止めない。tmuxサーバーが持つ別プロセスのため、ここで明示的にkillする。
+
+1. **CommandMate経由で止める（第一手段）**: サーバーが実際に使っている名前（名前空間・旧形式の採用を反映）で止まる
+2. **tmuxを直接見る（取りこぼしの回収）**: サーバーが未起動、またはworktreeが未登録の場合に備える
 
 ```bash
-# tmuxセッション名パターン: mcbd-claude-*-feature-{ISSUE_NO}-worktree
-# tmux list-sessions でセッション名を取得し、Issue番号でフィルタ
-TMUX_SESSIONS=$(tmux list-sessions -F '#{session_name}' 2>/dev/null | grep -E "feature-${ISSUE_NO}-worktree$" || true)
+# 第一手段: CommandMate経由で止める。roster全インスタンスに対して実行する
+# （runningでの絞り込みはしない。runningがfalseのままsessionが残る例があるため）
+WT_ID="commandmate-issue-${ISSUE_NO}"
+for INST in $(commandmate instances "$WT_ID" --json 2>/dev/null | jq -r '.[].instanceId'); do
+  commandmate instances "$WT_ID" kill "$INST" || true
+done
 
-if [ -n "$TMUX_SESSIONS" ]; then
-  for SESSION in $TMUX_SESSIONS; do
-    echo "Killing tmux session: $SESSION"
-    tmux kill-session -t "$SESSION"
-  done
-else
-  echo "No tmux session found for Issue #${ISSUE_NO}"
-fi
+# 第二手段: tmuxを直接見て取りこぼしを回収する。完全一致の指定でkillする
+PATTERN="^mcbd-([0-9a-f]{8}-)?[a-z][a-z-]*-commandmate-issue-${ISSUE_NO}(-[0-9A-Za-z]+)?$"
+tmux list-sessions -F '#{session_name}' 2>/dev/null | grep -E "$PATTERN" | while read -r SESSION; do
+  echo "Killing tmux session: $SESSION"
+  tmux kill-session -t "=${SESSION}"
+done
 ```
 
 ### Phase 4: Worktree削除
@@ -207,7 +210,7 @@ curl -s -X POST http://localhost:${CM_PORT:-3000}/api/repositories/sync
 📋 Cleanup Summary:
   Issue:     #135
   Server:    Stopped (PID: 12345)
-  tmux:      Killed (mcbd-claude-commandmate-feature-135-worktree)
+  tmux:      Killed (mcbd-claude-commandmate-issue-135)
   Worktree:  Removed (../commandmate-issue-135)
   Branch:    Deleted (feature/135-worktree)
   DB:        Preserved (~/.commandmate/data/cm-135.db)
@@ -225,7 +228,7 @@ curl -s -X POST http://localhost:${CM_PORT:-3000}/api/repositories/sync
 
   Issue #187:
     Server:    Not running
-    tmux:      Killed (mcbd-claude-commandmate-feature-187-worktree)
+    tmux:      Killed (mcbd-claude-commandmate-issue-187)
     Worktree:  Removed (../commandmate-issue-187)
     Branch:    Deleted (feature/187-worktree) [merged]
 
@@ -237,13 +240,13 @@ curl -s -X POST http://localhost:${CM_PORT:-3000}/api/repositories/sync
 
   Issue #191:
     Server:    Not running
-    tmux:      Killed (mcbd-claude-commandmate-feature-191-worktree)
+    tmux:      Killed (mcbd-claude-commandmate-issue-191)
     Worktree:  Removed (../commandmate-issue-191)
     Branch:    Deleted (feature/191-worktree) [merged]
 
   Issue #193:
     Server:    Stopped (PID: 54321)
-    tmux:      Killed (mcbd-claude-commandmate-feature-193-worktree)
+    tmux:      Killed (mcbd-9f2ab73e-claude-commandmate-issue-193)
     Worktree:  Removed (../commandmate-issue-193)
     Branch:    ⚠️ Not merged (feature/193-worktree)
 
