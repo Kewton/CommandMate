@@ -106,7 +106,11 @@ import type { MobileTab } from '@/components/mobile/MobileTabBar';
 import { VerificationStatusChip } from '@/components/worktree/VerificationStatusChip';
 import type { SubTabRequest } from '@/components/worktree/NotesAndLogsPane';
 import { DEFAULT_SURFACE_MODE, type SurfaceMode } from '@/types/ui-state';
-import { getMobileSurfaceModeStorageKey, writeSurfaceMode } from '@/config/surface-mode-config';
+import {
+  clearSurfaceModeParamFromLocation,
+  getMobileSurfaceModeStorageKey,
+  writeSurfaceMode,
+} from '@/config/surface-mode-config';
 import { usePromptStuckCounter } from '@/hooks/usePromptStuckCounter';
 
 // ============================================================================
@@ -625,8 +629,12 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   // preference and remounts the content, which re-reads it — the same path a
   // tab switch takes. All in one event, so the close-on-chat effect above sees
   // `terminal` on both sides and leaves the keyboard open.
+  // Issue #2888: a `?view=chat` deep link out-ranks the localStorage write
+  // below on the remount this triggers (`resolveSurfaceMode`), so it must be
+  // cleared first or the link would bounce straight back to chat.
   const [mobileContentMountKey, setMobileContentMountKey] = useState(0);
   const handleStuckSwitchToDirectInput = useCallback(() => {
+    clearSurfaceModeParamFromLocation();
     writeSurfaceMode(getMobileSurfaceModeStorageKey(worktreeId), 'terminal');
     handleMobileTabChange('terminal');
     setMobileSurfaceMode('terminal');
