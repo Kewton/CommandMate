@@ -232,6 +232,30 @@ describe('broadcastTerminalSnapshot', () => {
     expect(mockBroadcast.mock.calls[0][1]).toMatchObject({ isDismissablePanelActive: false });
   });
 
+  it('publishes promptAnswerable: false when the payload carries it (Issue #2887)', async () => {
+    vi.mocked(buildCurrentOutput).mockResolvedValue({
+      ...BASE_PAYLOAD,
+      sessionStatus: 'waiting',
+      sessionStatusReason: 'prompt_detected',
+      promptAnswerable: false,
+    });
+
+    await broadcastTerminalSnapshot('wt-1', 'claude');
+
+    expect(mockBroadcast.mock.calls[0][1]).toMatchObject({ promptAnswerable: false });
+  });
+
+  it('omits promptAnswerable from the wire when the payload has none (Issue #2887)', async () => {
+    // BASE_PAYLOAD carries no promptAnswerable. A round trip through
+    // JSON.stringify — what `broadcast` actually does to reach the socket — is
+    // what proves the key is genuinely absent, not merely `undefined` on the
+    // in-process object this mock captured.
+    await broadcastTerminalSnapshot('wt-1', 'claude');
+
+    const wire = JSON.parse(JSON.stringify(mockBroadcast.mock.calls[0][1]));
+    expect(wire).not.toHaveProperty('promptAnswerable');
+  });
+
   it('tracks versions independently per instance', async () => {
     await broadcastTerminalSnapshot('wt-1', 'claude');
     await broadcastTerminalSnapshot('wt-1', 'claude', 'claude-2');
@@ -355,6 +379,25 @@ describe('broadcastTerminalSnapshotAfterInteraction', () => {
     expect(mockBroadcast).toHaveBeenCalledTimes(2);
     expect(mockBroadcast.mock.calls[0][1]).toMatchObject({ isDismissablePanelActive: true });
     expect(mockBroadcast.mock.calls[1][1]).toMatchObject({ isDismissablePanelActive: false });
+  });
+
+  it('redraws when only promptAnswerable changed true -> false (Issue #2887)', async () => {
+    // Same reasoning as the sessionStatus and isDismissablePanelActive cases
+    // above: the fingerprint decides whether the second push is emitted, and a
+    // dialog going from answerable to not (with the same screen) has to reach
+    // the client without waiting for the fallback poll.
+    vi.useFakeTimers();
+    vi.mocked(buildCurrentOutput)
+      .mockResolvedValueOnce({ ...BASE_PAYLOAD, sessionStatus: 'waiting', sessionStatusReason: 'prompt_detected', promptAnswerable: true })
+      .mockResolvedValueOnce({ ...BASE_PAYLOAD, sessionStatus: 'waiting', sessionStatusReason: 'prompt_detected', promptAnswerable: false });
+
+    const pending = broadcastTerminalSnapshotAfterInteraction('wt-1', 'claude', undefined, [10]);
+    await vi.advanceTimersByTimeAsync(10);
+    await pending;
+
+    expect(mockBroadcast).toHaveBeenCalledTimes(2);
+    expect(mockBroadcast.mock.calls[0][1]).toMatchObject({ promptAnswerable: true });
+    expect(mockBroadcast.mock.calls[1][1]).toMatchObject({ promptAnswerable: false });
   });
 
   it('does not duplicate the initial snapshot when retry frames are unchanged', async () => {
