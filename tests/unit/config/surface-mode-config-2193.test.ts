@@ -17,6 +17,7 @@ import { DEFAULT_SURFACE_MODE, isSurfaceMode } from '@/types/ui-state';
 import {
   SURFACE_MODE_STORAGE_KEY_PREFIX,
   SURFACE_MODE_VIEW_PARAM,
+  clearSurfaceModeParamFromLocation,
   getMobileSurfaceModeStorageKey,
   getSplitSurfaceModeStorageKey,
   parseSurfaceModeParam,
@@ -268,5 +269,39 @@ describe('[#2193] resolveSurfaceMode precedence', () => {
     window.history.replaceState({}, '', '/worktrees/wt-resolve?view=chat');
     writeSurfaceMode(KEY, 'terminal');
     expect(resolveSurfaceMode(KEY, null)).toBe('terminal');
+  });
+});
+
+describe('[#2888] clearSurfaceModeParamFromLocation', () => {
+  afterEach(() => {
+    window.history.replaceState({}, '', '/');
+  });
+
+  it('removes ?view= while preserving other query params and the hash', () => {
+    window.history.replaceState({}, '', '/worktrees/wt-clear?view=chat&pane=terminal#x');
+    clearSurfaceModeParamFromLocation();
+    expect(window.location.pathname + window.location.search + window.location.hash).toBe(
+      '/worktrees/wt-clear?pane=terminal#x'
+    );
+  });
+
+  it('drops the query entirely when ?view= was the only param', () => {
+    window.history.replaceState({}, '', '/worktrees/wt-clear?view=chat');
+    clearSurfaceModeParamFromLocation();
+    expect(window.location.search).toBe('');
+    expect(window.location.pathname + window.location.search + window.location.hash).toBe(
+      '/worktrees/wt-clear'
+    );
+  });
+
+  it('does not touch history when there is no ?view= to clear', () => {
+    window.history.replaceState({}, '', '/worktrees/wt-clear?pane=terminal');
+    const spy = vi.spyOn(window.history, 'replaceState');
+    try {
+      clearSurfaceModeParamFromLocation();
+      expect(spy).not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
