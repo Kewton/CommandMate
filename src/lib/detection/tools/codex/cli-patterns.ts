@@ -117,17 +117,15 @@ export const CODEX_GLYPH = '›';
  * directory-trust screen are `waiting`, and every highlighted row is the
  * one-span shape these rules key on. The rules were first read off 0.153.2.
  *
- * Issue #2884 extended the directory-trust screen's WORDING anchor
- * (`CODEX_TRUST_QUESTION_PATTERN` in `../../cli-patterns`) to also admit
- * 0.157.1's reworded question line (`Trust this folder?`), so `tests/fixtures/
- * codex-dialogs-0157/trust.txt` now reads `'trust'` too -- see
- * `tests/unit/lib/detection/codex-dialogs-0157.test.ts`. This stamp is left at
- * 0.155.1: it is about the STRUCTURAL rules in this file (the glyph/attribute
- * scan), which that Issue did not re-measure.
+ * Advanced to 0.157.1 by Issue #2884: the 0.157.1 dialog screens
+ * (`codex-dialogs-0157/`) read correctly too, including the directory-trust
+ * screen once its WORDING anchor (`CODEX_TRUST_QUESTION_PATTERN` in
+ * `../../cli-patterns`) learned that build's reworded question line
+ * (`Trust this folder?`) -- see `tests/unit/lib/detection/codex-dialogs-0157.test.ts`.
  */
 export const CODEX_DIALOG_RULES_VERIFIED_AGAINST = {
-  version: '0.155.1',
-  capturedAt: '2026-09-21',
+  version: '0.157.1',
+  capturedAt: '2026-09-27',
   paneGeometry: '200x1000',
 } as const;
 
