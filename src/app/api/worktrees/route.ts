@@ -34,6 +34,7 @@ import { getDefaultSelectedAgents } from '@/lib/db/app-settings-db';
 import { resolveSelectedAgents } from '@/lib/selected-agents-validator';
 import { deriveSessionStatus, isUnclassifiedCliStatus } from '@/lib/session/status-mapping';
 import { getEnabledAutoYesByWorktree } from '@/lib/auto-yes-state';
+import { getSessionNamespace } from '@/lib/cli-tools/session-namespace';
 import { createLogger } from '@/lib/logger';
 import type { PromptType } from '@/types/models';
 import type { AutoYesInstanceSummary } from '@/types/auto-yes';
@@ -274,6 +275,11 @@ export async function GET(request: NextRequest) {
         // nothing to compute, it is the same for every caller, and the clients
         // that need it are exactly the ones that never pass a query string.
         defaultSelectedAgents,
+        // Issue #2867: the namespace this server names its tmux sessions with
+        // (null = legacy names), so `commandmate ls --json` can print a name it
+        // cannot compute itself. Once per response rather than per row: the
+        // sidebar polls this route, and every row would carry the same value.
+        tmuxSessionNamespace: getSessionNamespace(),
         // Only present when the caller opted out, so the default response shape
         // is byte-for-byte what it was before #2060.
         ...(includeStatus ? {} : { statusIncluded: false }),

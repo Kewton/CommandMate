@@ -181,23 +181,109 @@ describe('whoami: inside a session', () => {
 });
 
 describe('parseSessionName', () => {
+  // Issue #2867: whoami splits with the same function that builds the names
+  // (lib/cli-tools/session-name.ts) instead of a private copy.
   it('splits a hyphenated tool id without eating the worktree', async () => {
-    const { parseSessionName } = await import('../../../../src/cli/commands/whoami');
+    const { parseSessionName } = await import('../../../../src/lib/cli-tools/session-name');
 
     // The failure a shortest-first scan produces: tool `command`, which is not
     // a tool at all.
     expect(parseSessionName('mcbd-command-code-anvil-develop')).toEqual({
+      namespace: null,
       cliToolId: 'command-code',
-      remainder: 'anvil-develop',
+      rest: 'anvil-develop',
     });
     expect(parseSessionName('mcbd-vibe-local-wt')).toEqual({
+      namespace: null,
       cliToolId: 'vibe-local',
-      remainder: 'wt',
+      rest: 'wt',
+    });
+    expect(parseSessionName('mcbd-0a1b2c3d-command-code-anvil-develop')).toEqual({
+      namespace: '0a1b2c3d',
+      cliToolId: 'command-code',
+      rest: 'anvil-develop',
     });
     expect(parseSessionName('not-a-commandmate-session')).toBeNull();
     expect(parseSessionName('mcbd-claude-')).toBeNull();
+    expect(parseSessionName('mcbd-0a1b2c3d-claude-')).toBeNull();
   });
 });
+
+describe('whoami: namespaced session names (Issue #2867)', () => {
+  async function whoamiJson(): Promise<Record<string, unknown>> {
+    const { createWhoamiCommand } = await import('../../../../src/cli/commands/whoami');
+    await createWhoamiCommand().parseAsync(['node', 'whoami', '--json']);
+    return JSON.parse(stdout());
+  }
+
+  it('reads the namespaced form', async () => {
+    inTmux('mcbd-0a1b2c3d-claude-anvil-develop');
+    mockFetchSequence([
+      { data: { worktrees: [worktree()], repositories: [] } },
+      { data: { agentInstances: worktree().agentInstances } },
+    ]);
+
+    expect(await whoamiJson()).toMatchObject({
+      worktreeId: 'anvil-develop',
+      instanceId: 'claude',
+      cliToolId: 'claude',
+      source: 'tmux-session',
+      sessionName: 'mcbd-0a1b2c3d-claude-anvil-develop',
+    });
+  });
+
+  it('still reads the legacy form', async () => {
+    inTmux('mcbd-codex-anvil-develop');
+    mockFetchSequence([
+      { data: { worktrees: [worktree()], repositories: [] } },
+      { data: { agentInstances: worktree().agentInstances } },
+    ]);
+
+    expect(await whoamiJson()).toMatchObject({
+      worktreeId: 'anvil-develop',
+      instanceId: 'codex',
+      cliToolId: 'codex',
+    });
+  });
+
+  it('reads an instance suffix after a namespaced name', async () => {
+    inTmux('mcbd-0a1b2c3d-codex-anvil-develop-2');
+    mockFetchSequence([
+      { data: { worktrees: [worktree()], repositories: [] } },
+      { data: { agentInstances: worktree().agentInstances } },
+    ]);
+
+    expect(await whoamiJson()).toMatchObject({
+      worktreeId: 'anvil-develop',
+      instanceId: 'codex-2',
+      cliToolId: 'codex',
+    });
+  });
+
+  it('does not read the namespace as part of the worktree id', async () => {
+    // A worktree whose id is 8 hex digits long is the case a naive split gets
+    // wrong in the other direction: `mcbd-claude-deadbeef` is legacy, because
+    // `claude` — not `deadbeef` — follows `mcbd-`.
+    inTmux('mcbd-claude-deadbeef');
+    mockFetchSequence([
+      { data: { worktrees: [worktree({ id: 'deadbeef' })], repositories: [] } },
+      { data: { agentInstances: [] } },
+    ]);
+
+    expect(await whoamiJson()).toMatchObject({ worktreeId: 'deadbeef', cliToolId: 'claude' });
+  });
+
+  it('exits 3 for a session name that does not start with mcbd-', async () => {
+    inTmux('0a1b2c3d-claude-anvil-develop');
+    mockFetchSequence([]);
+
+    const { createWhoamiCommand } = await import('../../../../src/cli/commands/whoami');
+    await createWhoamiCommand().parseAsync(['node', 'whoami']);
+
+    expect(mockExit).toHaveBeenCalledWith(3);
+  });
+});
+
 
 describe('peers', () => {
   it('exits 3 outside a session', async () => {

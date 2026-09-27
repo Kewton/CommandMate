@@ -1954,7 +1954,7 @@ commandmate attach <worktree-id> --live               # 端末サイズへ再レ
 
 | 手で attach したとき | このコマンド |
 |---|---|
-| セッション名 `mcbd-<tool>-<worktree>[-<suffix>]` を、命名規則とロスター（`instances`）から自分で組み立てる必要がある | サーバに解決させて名前を組み立てる。`--instance` の suffix 規則も同じ |
+| セッション名 `mcbd-<ns>-<tool>-<worktree>[-<suffix>]`（旧形式のセッションは `mcbd-<tool>-<worktree>[-<suffix>]` のまま）を組み立てる必要がある。`<ns>` はサーバの DB にあり手元では計算できない | サーバが公開する**実際に使っている名前**（`GET /api/worktrees/<id>` の `agentInstances[].sessionName`。旧形式の採用も反映）を使う。`sessionName` を返さない古いサーバでは旧形式を組み立てる |
 | `tmux attach -t =mcbd-…:` は **zsh の equals expansion に食われて `not found`**（実測）。`'=mcbd-…:'` のクォートが要る | シェルを経由せず argv で渡すので、クォートの問題自体が起きない |
 | alt-screen のエージェント（claude / opencode / copilot）では**空白と入力欄しか見えない**。壊れているように見えるが、これは 1000 行キャンバスの仕様 | attach 直前に理由と「読む 3 つの方法」を stderr に出す |
 
@@ -1970,6 +1970,17 @@ commandmate attach <worktree-id> --live               # 端末サイズへ再レ
 commandmate ls --json | jq -r '.[] | "\(.id)\t\(.tmuxSession)"'   # worktree 既定エージェント
 commandmate instances <worktree-id>                                # 全インスタンス（TMUX_SESSION 列）
 ```
+
+セッション名には 2 つの形式があります（Issue #2866 / #2867）。
+
+- **新形式** `mcbd-<ns>-<tool>-<worktree>[-<suffix>]` — `<ns>` はサーバごとの名前空間（16 進 8 桁）。
+  同じ worktree ID を持つ別の CommandMate サーバとセッション名が重ならないようにするためのもの
+- **旧形式** `mcbd-<tool>-<worktree>[-<suffix>]` — 名前空間導入前から動いていて、サーバが採用したセッション
+
+`ls --json` の `tmuxSession` は、`GET /api/worktrees` が返す `tmuxSessionNamespace` から新形式を組み立てた
+**一覧用の近似**です。旧形式で採用中のセッションも新形式の名前で表示されます（`ls` は worktree ごとの
+問い合わせをしません）。`commandmate attach` はサーバに実際の名前を問い合わせるので、どちらの形式でも
+正しいセッションを開きます。CLI とサーバは同じ版を使ってください（古い CLI は新形式の名前を組み立てられません）。
 
 ### `--live`: attach 中だけ端末サイズを借りる（claude 限定）
 
@@ -2320,7 +2331,7 @@ opencode     opencode opencode yes      no        claude-sonnet-4.6          ses
 - ロスターの行から**導出**しています（サーバへの問い合わせは増えていません）。
   導出は `BaseCLITool.getSessionName()` が委譲するのと同じ関数なので、
   ここに出た名前をサーバが開かない、ということは起きません
-- 命名規則は `mcbd-<tool>-<worktree>[-<suffix>]` です。プライマリインスタンスには suffix が付かず、
+- 命名規則は `mcbd-<ns>-<tool>-<worktree>[-<suffix>]`（旧形式 `mcbd-<tool>-<worktree>[-<suffix>]`、「セッション名を知る」参照）です。プライマリインスタンスには suffix が付かず、
   追加インスタンスにはインスタンス ID からツール名プレフィックスを除いたものが付きます
   （`codex-2` → `-2`）
 - 列は**末尾に追加**しています
@@ -2422,7 +2433,7 @@ opencode は、サポート対象エージェントの中で唯一**会話をコ
 ### `--agent` と `--instance` の優先順位（Issue #1629 / #1925）
 
 `--instance` はインスタンスIDであってCLIツール名ではないため、どのCLIツールで起動するかは
-別に決める必要があります。CLIツールIDは tmux セッション名の一部（`mcbd-<agent>-<worktree>[-<suffix>]`）
+別に決める必要があります。CLIツールIDは tmux セッション名の一部（`mcbd-[<ns>-]<agent>-<worktree>[-<suffix>]`）
 なので、取り違えると「codex という名前のセッションで claude が動く」状態になります。
 決定順は次のとおりで、`send` / `respond` / `capture` / `auto-yes` で共通です。
 

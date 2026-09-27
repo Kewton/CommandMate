@@ -129,6 +129,8 @@ describe('[#2060] GET /api/worktrees list/status split over a real DB', () => {
     expect(Object.keys(body).sort()).toEqual([
       'defaultSelectedAgents',
       'repositories',
+      // Issue #2867: unconditional too, and for the same reason.
+      'tmuxSessionNamespace',
       'worktrees',
     ]);
     expect(body.statusIncluded).toBeUndefined();

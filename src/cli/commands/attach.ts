@@ -7,10 +7,12 @@
  *
  * Three reasons, and each one is a thing an operator got wrong before it:
  *
- * 1. **The session name.** It is `mcbd-<tool>-<worktree>[-<suffix>]`, and the
- *    suffix depends on the agent-instance roster. `commandmate ls` did not print
- *    it, so the name had to be assembled by hand from three facts spread across
- *    two commands.
+ * 1. **The session name.** It is `mcbd-<ns>-<tool>-<worktree>[-<suffix>]` (or
+ *    the legacy `mcbd-<tool>-<worktree>[-<suffix>]` for a session the server
+ *    adopted), the suffix depends on the agent-instance roster, and the `<ns>`
+ *    lives in the server's DB (Issue #2866). `commandmate ls` did not print it,
+ *    so the name had to be assembled by hand from facts spread across two
+ *    commands — and since #2866 it cannot be assembled client-side at all.
  * 2. **The `=` trap.** The exact-match target form is `'=<name>:'` (Issue #1156),
  *    and in zsh an unquoted `=name` is an equals expansion — `tmux attach -t
  *    =mcbd-…:` fails with `not found` before tmux ever runs. Measured; it is in
@@ -37,7 +39,9 @@ import { TOKEN_WARNING, handleCommandError } from '../utils/command-helpers';
 import { isCliToolId, DEFAULT_CLI_TOOL_ID } from '../config/cli-tool-ids';
 import { AGENT_OPTION_DESCRIPTION, INSTANCE_OPTION_DESCRIPTION } from '../config/agent-target-options';
 import { resolveSessionTarget, describeSessionTargetConflict } from '../utils/session-target';
-import { resolveSessionName } from '../../lib/cli-tools/session-name';
+import { fetchAgentInstances } from '../utils/agent-instances';
+import { resolveLegacySessionName } from '../../lib/cli-tools/session-name';
+import { validateSessionName } from '../../lib/cli-tools/validation';
 import type { CLIToolType } from '../../lib/cli-tools/types';
 import {
   buildAttachArgs,
@@ -82,6 +86,38 @@ async function resolveTarget(
     cliToolId: target.cliToolId ?? options.agent ?? DEFAULT_CLI_TOOL_ID,
     instanceId: target.instanceId ?? options.instance,
   };
+}
+
+/**
+ * The tmux session name the server uses for this (tool, instance) (Issue #2867).
+ *
+ * The server publishes it per roster entry (`sessionName` on
+ * `GET /api/worktrees/[id]`), and that is the only place that knows both the
+ * server's namespace and whether a legacy session was adopted under the old
+ * name. A server older than #2867 sends no `sessionName` — and it also names
+ * its sessions the legacy way, so assembling the legacy name is right there.
+ * An unreadable roster, or a published name that fails `validateSessionName`
+ * (it is echoed into a copy-pasteable shell line), degrades the same way rather
+ * than failing the attach: `has-session` still refuses a name that opens nothing.
+ */
+async function resolveAttachSessionName(
+  client: ApiClient,
+  worktreeId: string,
+  cliToolId: string,
+  instanceId: string | undefined
+): Promise<string> {
+  const targetId = instanceId ?? cliToolId;
+  try {
+    const instances = await fetchAgentInstances(client, worktreeId);
+    const published = instances.find((inst) => inst.id === targetId)?.sessionName;
+    if (published) {
+      validateSessionName(published);
+      return published;
+    }
+  } catch {
+    // Fall through to the legacy name.
+  }
+  return resolveLegacySessionName(cliToolId as CLIToolType, worktreeId, instanceId);
 }
 
 /**
@@ -227,7 +263,7 @@ export function createAttachCommand(): Command {
           process.exit(ExitCode.CONFIG_ERROR);
         }
 
-        const sessionName = resolveSessionName(cliToolId as CLIToolType, worktreeId, instanceId);
+        const sessionName = await resolveAttachSessionName(client, worktreeId, cliToolId, instanceId);
 
         if (!runTmux(['has-session', '-t', exactSessionTarget(sessionName)])) {
           console.error(

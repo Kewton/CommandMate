@@ -957,7 +957,7 @@ gemini       Gemini  gemini    no       no                                   mcb
 > `commandmate attach <id> --instance <instance-id>` opens, and usable directly as
 > `tmux attach -t '=<name>:'`. It is **derived** from the roster row (no extra request), by the same
 > function `BaseCLITool.getSessionName()` delegates to, so a name printed here is never a name the
-> server would not open. The rule is `mcbd-<tool>-<worktree>[-<suffix>]`: a primary instance has no
+> server would not open. The rule is `mcbd-<ns>-<tool>-<worktree>[-<suffix>]` (legacy: `mcbd-<tool>-<worktree>[-<suffix>]`, see "Finding the session name"): a primary instance has no
 > suffix, an additional one carries its instance ID with the tool prefix removed (`codex-2` → `-2`).
 > The column is appended, so anything reading this table by column position keeps working.
 
@@ -1132,7 +1132,7 @@ Three separate things go wrong when you attach by hand, and this command absorbs
 
 | Attaching by hand | This command |
 |---|---|
-| The session name `mcbd-<tool>-<worktree>[-<suffix>]` has to be assembled yourself from the naming rule and the instance roster (`instances`) | The server resolves the target and the name is built from it, suffix rule included |
+| The session name `mcbd-<ns>-<tool>-<worktree>[-<suffix>]` (a legacy session keeps `mcbd-<tool>-<worktree>[-<suffix>]`) has to be assembled yourself, and `<ns>` lives in the server's DB, so it cannot be computed locally | Uses the name the server **actually uses** (`agentInstances[].sessionName` on `GET /api/worktrees/<id>`, adopted legacy sessions included). Against an older server that sends no `sessionName`, the legacy name is assembled |
 | `tmux attach -t =mcbd-…:` is **eaten by zsh's equals expansion and fails with `not found`** (measured). The `'=mcbd-…:'` quoting is mandatory | The target is passed as argv with no shell in the path, so the quoting problem cannot arise |
 | For an alternate-screen agent (claude / opencode / copilot) you see **nothing but blank space and the input box**. It looks broken; it is the 1000-row canvas | A hint on stderr before attaching says why, and names three ways to read anyway |
 
@@ -1149,6 +1149,19 @@ client is on a **different tmux server** and cannot switch, it prints the quoted
 commandmate ls --json | jq -r '.[] | "\(.id)\t\(.tmuxSession)"'   # the worktree's default agent
 commandmate instances <worktree-id>                                # every instance (TMUX_SESSION column)
 ```
+
+A session name comes in two forms (Issue #2866 / #2867):
+
+- **Namespaced** `mcbd-<ns>-<tool>-<worktree>[-<suffix>]` — `<ns>` is a per-server namespace (8 hex
+  digits), so two CommandMate servers with the same worktree ID never share a session name
+- **Legacy** `mcbd-<tool>-<worktree>[-<suffix>]` — a session that predates the namespace and was
+  adopted by the server
+
+`tmuxSession` in `ls --json` is built from the `tmuxSessionNamespace` that `GET /api/worktrees`
+returns, as a **list-wide approximation**: a legacy session the server adopted is still printed under
+its namespaced name (`ls` makes no per-worktree request). `commandmate attach` asks the server for
+the name it actually uses, so it opens the right session in either form. Keep the CLI and the server
+on the same version — an older CLI cannot build the namespaced name.
 
 ### `--live`: borrow this terminal's size while attached (claude only)
 
@@ -1573,7 +1586,7 @@ One worktree can run several sessions of the same CLI tool at once (Issue #868).
 
 `--instance` is an instance ID, not a CLI tool name, so which CLI tool starts has to be decided
 separately. The CLI tool ID is part of the tmux session name
-(`mcbd-<agent>-<worktree>[-<suffix>]`), so getting it wrong leaves you with "claude running in a
+(`mcbd-[<ns>-]<agent>-<worktree>[-<suffix>]`), so getting it wrong leaves you with "claude running in a
 session named codex". The resolution order below is shared by `send` / `respond` / `capture` /
 `auto-yes`.
 

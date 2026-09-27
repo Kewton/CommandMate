@@ -11,7 +11,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { execFileSync } from 'child_process';
-import { mkdtempSync, writeFileSync } from 'fs';
+import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 import {
@@ -78,7 +78,49 @@ describe('the delegate script', () => {
     // Not a shortcut: a hook fires with tmux formats, not with CommandMate's
     // roster, so the session NAME is all it has. Widening it means widening
     // LIVE_ATTACH_TOOLS, which needs the per-tool re-measurement #2317 defers.
-    expect(LIVE_DELEGATE_SCRIPT).toContain('mcbd-claude-*)');
+    // Issue #2867: the namespaced form too, with the namespace spelled as eight
+    // hex digits rather than `*` (see the behavioural cases below).
+    expect(LIVE_DELEGATE_SCRIPT).toContain(
+      `mcbd-claude-*|mcbd-${'[0-9a-f]'.repeat(8)}-claude-*)`
+    );
+  });
+
+  /**
+   * Run the delegate script for `session` with a `tmux` stand-in first on PATH
+   * that only records its argv (Issue #2867). Nothing reaches a real tmux server.
+   * Returns whether the script got past its session-name guard.
+   */
+  function delegateActsOn(session: string): boolean {
+    const dir = mkdtempSync(path.join(tmpdir(), 'cm-2867-delegate-'));
+    try {
+      const script = path.join(dir, LIVE_DELEGATE_SCRIPT_FILENAME);
+      const log = path.join(dir, 'tmux.log');
+      writeFileSync(script, LIVE_DELEGATE_SCRIPT);
+      writeFileSync(path.join(dir, 'tmux'), `#!/bin/sh\nprintf '%s\\n' "$*" >> "${log}"\n`);
+      chmodSync(path.join(dir, 'tmux'), 0o755);
+      execFileSync('/bin/sh', [script, session, '0'], {
+        stdio: 'pipe',
+        env: { ...process.env, PATH: `${dir}:/usr/bin:/bin` },
+      });
+      return existsSync(log) && readFileSync(log, 'utf8').includes(`=${session}:`);
+    } finally {
+      removeTempDir(dir);
+    }
+  }
+
+  it('acts on a claude session in either naming form (Issue #2867)', () => {
+    expect(delegateActsOn('mcbd-claude-wt1')).toBe(true);
+    expect(delegateActsOn('mcbd-0a1b2c3d-claude-wt1')).toBe(true);
+    expect(delegateActsOn('mcbd-0a1b2c3d-claude-wt1-2')).toBe(true);
+  });
+
+  it('ignores every other tool in either form, and a namespace that is not one', () => {
+    expect(delegateActsOn('mcbd-codex-wt1')).toBe(false);
+    expect(delegateActsOn('mcbd-0a1b2c3d-codex-wt1')).toBe(false);
+    // A legacy codex session of a worktree whose id starts with `claude-`:
+    // `mcbd-*-claude-*` would have matched it.
+    expect(delegateActsOn('mcbd-codex-claude-wt1')).toBe(false);
+    expect(delegateActsOn('other-claude-wt1')).toBe(false);
   });
 
   it('raises the flag before changing the size, never the other way round', () => {

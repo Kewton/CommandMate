@@ -119,7 +119,7 @@ describe('[#2060] default call: unchanged', () => {
     }
   });
 
-  it('keeps the top-level body shape to exactly { worktrees, repositories, defaultSelectedAgents }', async () => {
+  it('keeps the top-level body shape to exactly { worktrees, repositories, defaultSelectedAgents, tmuxSessionNamespace }', async () => {
     // `statusIncluded` is deliberately NOT emitted here: it describes what THIS
     // call opted out of, so emitting it unconditionally would change the answer
     // for callers that opted into nothing. `defaultSelectedAgents` (Issue #2065)
@@ -129,6 +129,8 @@ describe('[#2060] default call: unchanged', () => {
     expect(Object.keys(body).sort()).toEqual([
       'defaultSelectedAgents',
       'repositories',
+      // Issue #2867: unconditional too, and for the same reason.
+      'tmuxSessionNamespace',
       'worktrees',
     ]);
     expect(body.repositories).toEqual(mockRepositories);
@@ -145,6 +147,8 @@ describe('[#2060] default call: unchanged', () => {
     expect(Object.keys(body).sort()).toEqual([
       'defaultSelectedAgents',
       'repositories',
+      // Issue #2867: unconditional too, and for the same reason.
+      'tmuxSessionNamespace',
       'worktrees',
     ]);
     expect(detectWorktreeSessionStatus).toHaveBeenCalledTimes(2);
