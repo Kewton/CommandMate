@@ -40,6 +40,7 @@ import {
   buildCodexHookSettings,
   buildCodexLaunchPlan,
   buildCodexPermissionHookCommand,
+  CODEX_EMBEDDED_MODE_ARGS,
   CODEX_HOOK_MARKER,
   CODEX_HOOK_TRUST_BYPASS_FLAG,
   CODEX_HOOK_TRUST_ENV_VAR,
@@ -434,12 +435,31 @@ describe('the launch command', () => {
       'http://127.0.0.1:4321/api/hooks/permission-request' +
         '?tool=codex&worktreeId=wt-alpha&instanceId=codex-2'
     );
-    expect(plan.command).toBe("'codex'");
+    expect(plan.command).toBe("'codex' -c features.daemon_auto_start=false");
     // …and the rendered line is byte-for-byte the pre-#1846 one.
     const command = renderAgentLaunchCommand(plan);
     expect(command).toContain(`${CODEX_WORKTREE_ID_ENV_VAR}='wt-alpha'`);
     expect(command).toContain("CM_HOOK_URL='http://127.0.0.1:4321/api/hooks/agent-event'");
-    expect(command.endsWith("'codex'")).toBe(true);
+    expect(command.endsWith("'codex' -c features.daemon_auto_start=false")).toBe(true);
+  });
+
+  it('keeps codex off the shared app-server daemon so hooks run with this session\'s env', () => {
+    // Issue #2874: codex 0.157+ attaches the TUI to a machine-wide daemon and
+    // runs hooks inside it, with the daemon's environment — every instance was
+    // reported as the one that started it. Any `-c` makes codex run embedded.
+    expect(CODEX_EMBEDDED_MODE_ARGS).toBe('-c features.daemon_auto_start=false');
+    expect(buildCodexLaunchPlan('codex', TARGET_2, { port: 4321 }).command).toContain(
+      CODEX_EMBEDDED_MODE_ARGS
+    );
+    expect(line('codex', TARGET_2, { port: 4321 })).toContain(CODEX_EMBEDDED_MODE_ARGS);
+  });
+
+  it('does not add the embedded-mode flag to the bare launch (injection off)', () => {
+    process.env.CM_AGENT_HOOKS_INJECT = '0';
+    expect(buildCodexLaunchPlan('codex', TARGET_2).command).not.toContain(
+      CODEX_EMBEDDED_MODE_ARGS
+    );
+    expect(line('codex', TARGET_2)).not.toContain(CODEX_EMBEDDED_MODE_ARGS);
   });
 
   it('keeps shell syntax out of `command`', () => {
@@ -498,6 +518,10 @@ describe('the launch command', () => {
     process.env[CODEX_HOOK_TRUST_ENV_VAR] = 'bypass';
     expect(isCodexHookTrustBypassEnabled()).toBe(true);
     expect(line('codex', TARGET)).toContain(CODEX_HOOK_TRUST_BYPASS_FLAG);
+    // The bypass flag follows the embedded-mode arguments (#2874).
+    expect(buildCodexLaunchPlan('codex', TARGET).command).toBe(
+      `'codex' ${CODEX_EMBEDDED_MODE_ARGS} ${CODEX_HOOK_TRUST_BYPASS_FLAG}`
+    );
 
     process.env[CODEX_HOOK_TRUST_ENV_VAR] = '1';
     expect(line('codex', TARGET)).not.toContain(CODEX_HOOK_TRUST_BYPASS_FLAG);

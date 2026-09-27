@@ -63,6 +63,7 @@ import {
   recordAgentEvent,
   recordAskUserQuestion,
 } from '@/lib/session/agent-event-state';
+import { isSessionRunning } from '@/lib/session/cli-session';
 import { MAX_STRUCTURED_PROMPT_MESSAGE_LENGTH } from '@/lib/session/structured-prompt';
 import { createLogger } from '@/lib/logger';
 
@@ -265,6 +266,31 @@ export async function POST(request: NextRequest) {
         event,
         reason: recordOutcome.skipped,
       });
+    }
+
+    if (event === 'user_prompt_submit' && tool === 'codex') {
+      // Issue #2874: codex 0.157+ runs hooks inside a machine-wide daemon whose
+      // environment belongs to whichever instance started it, so a turn can be
+      // filed under an instance that has no session at all. Detect and say so;
+      // routing is left alone. Not awaited — the hook is waiting on this reply —
+      // and never allowed to fail it.
+      const notifiedWorktreeId = worktree.id;
+      const notifiedInstanceId = instanceParam ?? tool;
+      void (async () => {
+        try {
+          if (!(await isSessionRunning(notifiedWorktreeId, tool, notifiedInstanceId))) {
+            logger.warn('agent-event-instance-not-running', {
+              worktreeId: notifiedWorktreeId,
+              tool,
+              instanceId: notifiedInstanceId,
+              event,
+              sessionId: sessionId ?? null,
+            });
+          }
+        } catch {
+          /* ignore */
+        }
+      })();
     }
 
     if (event === 'pre_tool_use') {
