@@ -115,6 +115,16 @@ const TRUST_DIALOG = [
   '  2. No, quit',
 ].join('\n');
 
+// codex 0.157.1 reworded the question line (Issue #2884); no more "Do you trust".
+const TRUST_DIALOG_0157 = [
+  'Folder access',
+  '/test/path',
+  'Trust this folder? Codex can read, edit, and run files here, subject to your permission settings.',
+  '› 1. Trust and continue',
+  '  2. Quit',
+  'enter continue · esc quit',
+].join('\n');
+
 const PROMPT = '› ';
 
 // Issue #890 regression: after the update is skipped, codex keeps a NON-interactive
@@ -213,6 +223,25 @@ describe('CodexTool first-launch dialog handling (Issue #890)', () => {
 
       // Regression guard: number selections must NEVER be sent with a trailing Enter.
       expect(sendKeys).not.toHaveBeenCalledWith(SESSION, UPDATE_KEY, true);
+      expect(sendKeys).not.toHaveBeenCalledWith(SESSION, '1', true);
+    });
+
+    it('untrusted dir (codex 0.157.1 wording): sends the trust "1" without trailing Enter', async () => {
+      vi.mocked(hasSession).mockResolvedValue(false);
+      vi.mocked(capturePane)
+        .mockResolvedValueOnce(TRUST_DIALOG_0157)
+        .mockResolvedValue(PROMPT);
+
+      vi.useFakeTimers();
+      try {
+        const promise = tool.startSession(WORKTREE_ID, '/test/path');
+        await vi.runAllTimersAsync();
+        await promise;
+      } finally {
+        vi.useRealTimers();
+      }
+
+      expect(sendKeys).toHaveBeenCalledWith(SESSION, '1', false);
       expect(sendKeys).not.toHaveBeenCalledWith(SESSION, '1', true);
     });
 

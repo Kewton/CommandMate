@@ -30,6 +30,8 @@ import {
   CODEX_EFFORT_PICKER_FOOTER_PATTERN,
   CODEX_PICKER_FOOTER_PATTERN,
   CODEX_SELECTION_LIST_PATTERN,
+  getCodexActiveDialog,
+  getCodexLifecycleDialog,
   stripAnsi,
   stripBoxDrawing,
 } from '@/lib/detection/cli-patterns';
@@ -188,5 +190,47 @@ describe('[#2868] the other standard screens read as on 0.155.1', () => {
       capturedAt: '2026-09-27',
       paneGeometry: '200x1000',
     });
+  });
+});
+
+/**
+ * Issue #2884 — the 0.157.1 trust dialog reworded its question line from
+ * `Do you trust the contents of this directory?` to `Trust this folder?`,
+ * dropping the "Do you trust" wording `getCodexActiveDialog` /
+ * `getCodexLifecycleDialog` keyed on. Startup auto-approval and
+ * `/prompt-response` both read `trust.txt` as `waiting` / `prompt_detected`
+ * already (the generic parser does not depend on the wording), but neither
+ * function named it `'trust'`, so `evaluateDialogPresence` could not vouch
+ * for it and `/prompt-response` refused with `prompt_no_longer_active`.
+ */
+describe('[#2884] the 0.157.1 trust dialog is recognised by wording, not just structure', () => {
+  it("trust: getCodexLifecycleDialog / getCodexActiveDialog read 'trust', and /prompt-response may answer it", () => {
+    const raw = read('trust');
+    const frame = stripAnsi(raw);
+    expect(getCodexLifecycleDialog(frame)).toBe('trust');
+    expect(getCodexActiveDialog(frame)).toBe('trust');
+
+    const presence = evaluateDialogPresence('codex', 'multiple_choice', raw);
+    expect(presence.present).toBe(true);
+    expect(judgePromptResponse(promptOf(raw), presence)).toBeNull();
+  });
+
+  it('negative control: a reply quoting "Trust this folder? …" above the live prompt is not the trust dialog', () => {
+    const quoted = withRow(
+      withRow(read('idle'), 992, '• The trust dialog reads:'),
+      993,
+      '  Trust this folder? Codex can read, edit, and run files here, subject to your permission settings.',
+    );
+    const frame = stripAnsi(quoted);
+    expect(getCodexLifecycleDialog(frame)).not.toBe('trust');
+    expect(getCodexActiveDialog(frame)).not.toBe('trust');
+  });
+
+  it('regression guard: the 0.155.1 trust screen ("Do you trust …") still reads as trust', () => {
+    const frame = stripAnsi(
+      readFileSync(join(__dirname, '../../../fixtures/codex-dialogs-0155/dialog-trust-directory.txt'), 'utf-8'),
+    );
+    expect(getCodexLifecycleDialog(frame)).toBe('trust');
+    expect(getCodexActiveDialog(frame)).toBe('trust');
   });
 });
