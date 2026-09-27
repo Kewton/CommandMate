@@ -1,0 +1,9 @@
+# Issue #2901: options.envCleanIgnoreHomeEntries, empty flow list. `[]` means
+# "ignore nothing", not "value missing" — it must not be rejected either way.
+version: 1
+gates:
+  - id: ok
+    command: echo fine
+options:
+  skipInPrimaryCheckout: false
+  envCleanIgnoreHomeEntries: []

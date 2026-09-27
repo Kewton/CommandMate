@@ -1,0 +1,8 @@
+# Issue #2901: options.envCleanIgnoreHomeEntries, flow form.
+version: 1
+gates:
+  - id: ok
+    command: echo fine
+options:
+  skipInPrimaryCheckout: false
+  envCleanIgnoreHomeEntries: [.semgrep, .commandagent]
