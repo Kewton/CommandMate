@@ -54,6 +54,27 @@ vi.mock('@/lib/tmux/tmux', () => ({
 }));
 vi.mock('@/lib/ws-server', () => ({ broadcastMessage: vi.fn() }));
 vi.mock('@/lib/polling/response-poller', () => ({ startPolling: vi.fn() }));
+// Issue #2885: whether the pane under the session name is this server's is
+// decided per case below, not by what the tmux mock happens to say.
+vi.mock('@/lib/cli-tools/worktree-session-ownership', () => ({
+  checkWorktreeSessionOwnership: vi.fn(),
+}));
+
+const { mockLogger } = vi.hoisted(() => {
+  const logger = {
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    withContext: vi.fn(),
+  };
+  logger.withContext.mockReturnValue(logger);
+  return { mockLogger: logger };
+});
+vi.mock('@/lib/logger', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/logger')>()),
+  createLogger: vi.fn(() => mockLogger),
+}));
 vi.mock('@/lib/realtime/terminal-broadcast', () => ({
   broadcastTerminalSnapshotAfterInteraction: vi.fn().mockResolvedValue(undefined),
 }));
@@ -92,6 +113,10 @@ import { runMigrations } from '@/lib/db/db-migrations';
 import { upsertWorktree, createMessage } from '@/lib/db';
 import { addAgentInstance } from '@/lib/db/agent-instances-db';
 import { sendKeys } from '@/lib/tmux/tmux';
+import { startPolling } from '@/lib/polling/response-poller';
+import { broadcastTerminalSnapshotAfterInteraction } from '@/lib/realtime/terminal-broadcast';
+import { CLIToolManager } from '@/lib/cli-tools/manager';
+import { checkWorktreeSessionOwnership } from '@/lib/cli-tools/worktree-session-ownership';
 import type { ChatMessage, Worktree } from '@/types/models';
 
 const FIXTURES = join(process.cwd(), 'tests/fixtures/hooks/opencode');
@@ -186,6 +211,7 @@ beforeEach(async () => {
 
   vi.mocked(fetchOpencodePendingQuestions).mockResolvedValue([]);
   vi.mocked(replyOpencodePermission).mockResolvedValue(true);
+  vi.mocked(checkWorktreeSessionOwnership).mockResolvedValue({ verdict: 'owned', sessionPath: null });
   // Each opencode server answers with the ONE approval it is holding. This is
   // what makes "the id belongs to another instance" a real fact about the
   // world rather than a flag the route could have taken the caller's word for.
@@ -411,6 +437,97 @@ describe('the scope rule (S6 / DR4-003)', () => {
     expect(response.status).toBe(502);
     expect((await response.json()).code).toBe('decision_source_unreachable');
     expect(vi.mocked(replyOpencodePermission)).not.toHaveBeenCalled();
+  });
+});
+
+describe('the response poller after an answer (#2885)', () => {
+  // The approval is delivered over the agent's API for a decision in THIS
+  // server's store, so the delivery is right whatever tmux holds under the
+  // session name. The poller captures that pane into this worktree's history,
+  // which is what a same-named session another server created must not reach.
+  const SESSION_NAME = CLIToolManager.getInstance()
+    .getTool('opencode')
+    .getSessionName('wt-alpha', 'opencode');
+  const SKIPPED = 'respond-decision-skip-polling-foreign-session';
+
+  function skipWarnings(): unknown[][] {
+    return mockLogger.warn.mock.calls.filter(([event]) => event === SKIPPED);
+  }
+
+  it('starts polling when the session is this server\'s', async () => {
+    vi.mocked(checkWorktreeSessionOwnership).mockResolvedValue({ verdict: 'owned', sessionPath: '/tmp/wt-alpha' });
+
+    const response = await post('wt-alpha', { decisionId: PRIMARY_DECISION, answer: '1' });
+
+    expect(response.status).toBe(200);
+    expect(vi.mocked(checkWorktreeSessionOwnership)).toHaveBeenCalledWith('wt-alpha', SESSION_NAME, expect.anything());
+    expect(vi.mocked(startPolling)).toHaveBeenCalledWith('wt-alpha', 'opencode', 'opencode');
+    expect(vi.mocked(broadcastTerminalSnapshotAfterInteraction)).toHaveBeenCalledWith('wt-alpha', 'opencode', 'opencode');
+    expect(skipWarnings()).toHaveLength(0);
+  });
+
+  it('still starts polling when there is no session, leaving that to the poller', async () => {
+    vi.mocked(checkWorktreeSessionOwnership).mockResolvedValue({ verdict: 'absent', sessionPath: null });
+
+    const response = await post('wt-alpha', { decisionId: PRIMARY_DECISION, answer: '1' });
+
+    expect(response.status).toBe(200);
+    expect(vi.mocked(startPolling)).toHaveBeenCalledWith('wt-alpha', 'opencode', 'opencode');
+    expect(vi.mocked(broadcastTerminalSnapshotAfterInteraction)).toHaveBeenCalled();
+    expect(skipWarnings()).toHaveLength(0);
+  });
+
+  it('does not poll a session another server owns, and the answer is unchanged', async () => {
+    vi.mocked(checkWorktreeSessionOwnership).mockResolvedValue({ verdict: 'foreign', sessionPath: '/somewhere/else' });
+
+    const response = await post('wt-alpha', { decisionId: PRIMARY_DECISION, answer: '1' });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      success: true,
+      answer: '1',
+      resolved: { via: 'structured-decision', optionNumber: 1, decisionId: PRIMARY_DECISION },
+    });
+    expect(vi.mocked(replyOpencodePermission)).toHaveBeenCalledWith(
+      PRIMARY_PORT, PRIMARY_DECISION, 'once', undefined,
+    );
+    expect(vi.mocked(startPolling)).not.toHaveBeenCalled();
+    expect(vi.mocked(broadcastTerminalSnapshotAfterInteraction)).not.toHaveBeenCalled();
+    expect(mockLogger.warn).toHaveBeenCalledWith(SKIPPED, {
+      worktreeId: 'wt-alpha',
+      cliToolId: 'opencode',
+      instanceId: 'opencode',
+      sessionName: SESSION_NAME,
+    });
+  });
+
+  it('does not poll when the worktree row cannot vouch for the session, and the answer is unchanged', async () => {
+    vi.mocked(checkWorktreeSessionOwnership).mockResolvedValue(null);
+
+    const response = await post('wt-alpha', { decisionId: PRIMARY_DECISION, answer: '1' });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ success: true, answer: '1' });
+    expect(vi.mocked(replyOpencodePermission)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(startPolling)).not.toHaveBeenCalled();
+    expect(vi.mocked(broadcastTerminalSnapshotAfterInteraction)).not.toHaveBeenCalled();
+    expect(skipWarnings()).toHaveLength(1);
+  });
+
+  it('asks about the named instance\'s session, not the worktree default', async () => {
+    vi.mocked(checkWorktreeSessionOwnership).mockResolvedValue({ verdict: 'foreign', sessionPath: null });
+
+    const response = await post('wt-alpha', {
+      decisionId: SECOND_DECISION,
+      answer: '1',
+      instanceId: 'opencode-2',
+    });
+
+    expect(response.status).toBe(200);
+    const secondName = CLIToolManager.getInstance().getTool('opencode').getSessionName('wt-alpha', 'opencode-2');
+    expect(secondName).not.toBe(SESSION_NAME);
+    expect(vi.mocked(checkWorktreeSessionOwnership)).toHaveBeenCalledWith('wt-alpha', secondName, expect.anything());
+    expect(vi.mocked(startPolling)).not.toHaveBeenCalled();
   });
 });
 
