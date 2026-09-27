@@ -18,6 +18,7 @@ import { validateAgentInstancesInput } from '@/lib/agent-instances-validator';
 import { listSessions } from '@/lib/tmux/tmux';
 import { checkSessionOwnership, ownedSessionNameSet } from '@/lib/cli-tools/session-ownership';
 import { detectWorktreeSessionStatus } from '@/lib/session/worktree-status-helper';
+import { resolveSessionName } from '@/lib/cli-tools/session-name';
 import { createLogger } from '@/lib/logger';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 
@@ -81,7 +82,13 @@ export async function GET(
 
     // Issue #368: selectedAgents is already included in worktree from getWorktreeById
     // Issue #869: include the agent-instance roster (fallback derived from selectedAgents)
-    const agentInstances = resolveAgentInstances(db, id, worktree.selectedAgents);
+    // Issue #2867: each instance carries the tmux session name this server
+    // actually uses for it — namespaced, or the legacy name it adopted — so
+    // `commandmate attach` never has to assemble one it cannot know.
+    const agentInstances = resolveAgentInstances(db, id, worktree.selectedAgents).map((instance) => ({
+      ...instance,
+      sessionName: resolveSessionName(instance.cliTool, id, instance.id),
+    }));
     return NextResponse.json(
       {
         ...worktree,

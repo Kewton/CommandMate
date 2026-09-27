@@ -14,7 +14,7 @@ import { TOKEN_WARNING, handleCommandError } from '../utils/command-helpers';
 // Issue #2317: the tmux session name, so nobody has to assemble
 // `mcbd-<tool>-<worktree>[-<suffix>]` by hand from two commands' output.
 import { isCliToolId } from '../config/cli-tool-ids';
-import { resolveSessionName } from '../../lib/cli-tools/session-name';
+import { resolveNamespacedSessionName } from '../../lib/cli-tools/session-name';
 import type { CLIToolType } from '../../lib/cli-tools/types';
 
 /**
@@ -357,7 +357,8 @@ type JsonWorktreeRow = LsWorktreeItem & { tmuxSession: string | null };
  * The tmux session name of this worktree's DEFAULT agent, or null (Issue #2317).
  *
  * The default agent's PRIMARY instance, which is the session `commandmate
- * attach <id>` opens with no flags — so the two answers cannot disagree. A
+ * attach <id>` opens with no flags — so the two answers agree, except for an
+ * adopted legacy session (see below). A
  * worktree running several agents has several sessions, and this field names one
  * of them on purpose: the complete per-instance list is what
  * `commandmate instances <id>` is for, and duplicating it here would put the
@@ -368,14 +369,23 @@ type JsonWorktreeRow = LsWorktreeItem & { tmuxSession: string | null };
  * `validateSessionName` — the same three cases in which there is no name to
  * give rather than a wrong one.
  *
- * Computed CLIENT-side. The server does not publish it, and asking it to would
- * mean `/api/worktrees` — the sidebar's poll, for every worktree, every couple
- * of seconds — carrying a string derivable from two fields already in the row.
+ * Computed CLIENT-side from the row plus the list response's top-level
+ * `tmuxSessionNamespace` (Issue #2867): `mcbd-{ns}-{cli}-{id}` when the server
+ * sent a namespace, the legacy `mcbd-{cli}-{id}` when it sent null or nothing
+ * (a server older than #2866 / #2867). The server does not publish a name per
+ * row: `/api/worktrees` is the sidebar's poll, for every worktree, every couple
+ * of seconds, and the namespace is the same for all of them.
+ *
+ * The one case this gets wrong ON PURPOSE: a legacy session the server adopted
+ * (#2866) keeps its legacy name, and this prints the namespaced one. Knowing
+ * which sessions were adopted takes a per-worktree query, which `ls` does not
+ * make. `commandmate attach` asks per worktree and uses the name the server
+ * actually uses — this field is a list-wide approximation.
  */
-function deriveTmuxSession(wt: WorktreeItem): string | null {
+function deriveTmuxSession(wt: WorktreeItem, namespace: string | null): string | null {
   if (!wt.cliToolId || !isCliToolId(wt.cliToolId)) return null;
   try {
-    return resolveSessionName(wt.cliToolId as CLIToolType, wt.id);
+    return resolveNamespacedSessionName(namespace, wt.cliToolId as CLIToolType, wt.id);
   } catch {
     return null;
   }
@@ -405,14 +415,18 @@ function deriveTmuxSession(wt: WorktreeItem): string | null {
  * know about answers the contract policy withheld. The cell is a summary for a
  * human reading a table.
  */
-function formatOutput(worktrees: LsWorktreeItem[], options: LsOptions): string {
+function formatOutput(
+  worktrees: LsWorktreeItem[],
+  options: LsOptions,
+  tmuxSessionNamespace: string | null = null
+): string {
   if (options.json) {
     // Issue #2317 appends one key and changes nothing else: every field the
     // server sent still passes through verbatim, so a consumer reading
     // `sessionStatusByCli.<tool>.statusEvidence` is unaffected.
     const rows: JsonWorktreeRow[] = worktrees.map((wt) => ({
       ...wt,
-      tmuxSession: deriveTmuxSession(wt),
+      tmuxSession: deriveTmuxSession(wt, tmuxSessionNamespace),
     }));
     return JSON.stringify(rows, null, 2);
   }
@@ -501,7 +515,7 @@ AUTO_YES column (Issue #2575):
           worktrees = worktrees.filter(wt => wt.id.startsWith(options.id!));
         }
 
-        const output = formatOutput(worktrees, options);
+        const output = formatOutput(worktrees, options, data.tmuxSessionNamespace ?? null);
         console.log(output);
       } catch (error) {
         handleCommandError(error);

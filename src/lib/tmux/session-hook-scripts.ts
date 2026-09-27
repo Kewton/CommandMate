@@ -111,12 +111,21 @@ tmux set-option -u -t "=$SESSION:" @cm_delegated 2>/dev/null || true
  * `CM_LIVE_ATTACH_HOOK=on`.
  *
  * claude-only by session-name prefix, and that is not a shortcut. The session
- * name is `mcbd-<tool>-<worktree>`, no other CLI tool id begins with `claude`,
- * and the script has nothing but the name to go on — a hook fires with tmux
- * formats, not with CommandMate's roster. Widening it means widening
+ * name is `mcbd-<ns>-<tool>-<worktree>` or the legacy `mcbd-<tool>-<worktree>`
+ * (Issue #2866), no other CLI tool id begins with `claude`, and the script has
+ * nothing but the name to go on — a hook fires with tmux formats, not with
+ * CommandMate's roster. The namespace is matched as exactly eight hex digits
+ * (Issue #2867), not `*`: `mcbd-*-claude-*` would also match a legacy codex
+ * session of a worktree whose id starts with `claude-`. Widening it means widening
  * `LIVE_ATTACH_TOOLS` too, and that needs the per-tool re-measurement
  * Issue #2317 puts out of scope.
  */
+/**
+ * A session-name namespace as a shell `case` glob: eight hex digits, the shape
+ * `SESSION_NAMESPACE_PATTERN` accepts (Issue #2866 / #2867).
+ */
+const NAMESPACE_GLOB = '[0-9a-f]'.repeat(8);
+
 export const LIVE_DELEGATE_SCRIPT = `#!/bin/sh
 # CommandMate live-attach delegate (Issue #2317) — generated file, edits are overwritten.
 #
@@ -138,7 +147,7 @@ SESSION="\${1:-}"
 CONTROL_MODE="\${2:-0}"
 
 case "$SESSION" in
-  ${MCBD_SESSION_PREFIX}claude-*) ;;
+  ${MCBD_SESSION_PREFIX}claude-*|${MCBD_SESSION_PREFIX}${NAMESPACE_GLOB}-claude-*) ;;
   *) exit 0 ;;
 esac
 
