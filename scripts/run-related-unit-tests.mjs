@@ -5,6 +5,8 @@
  * Used by `/orchestrate` verify gate `unit-related` (Issue #2639).
  * Runs only tests affected by the diff plus tests that scan repository files,
  * falling back to full unit tests when non-source/config files change.
+ * Excludes metadata files (.commandmate/tasks/, dev-reports/, changelog.d/,
+ * CHANGELOG.md, docs/module-reference.md).
  *
  * Usage: node scripts/run-related-unit-tests.mjs --base <ref>
  */
@@ -71,6 +73,7 @@ export function classifyChanges(files) {
     if (
       file.startsWith('.commandmate/tasks/') ||
       file.startsWith('dev-reports/') ||
+      file.startsWith('changelog.d/') ||
       file === 'CHANGELOG.md' ||
       file === 'docs/module-reference.md'
     ) {

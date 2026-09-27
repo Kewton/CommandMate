@@ -66,6 +66,36 @@ describe('classifyChanges', () => {
     });
   });
 
+  it('classifies src/lib/foo.ts and changelog.d/2865.md as related', () => {
+    const result = classifyChanges(['src/lib/foo.ts', 'changelog.d/2865.md']);
+    expect(result).toEqual({
+      mode: 'related',
+      reason: null,
+      considered: ['src/lib/foo.ts'],
+    });
+  });
+
+  it('classifies changelog.d/2865.md alone as none', () => {
+    const result = classifyChanges(['changelog.d/2865.md']);
+    expect(result).toEqual({
+      mode: 'none',
+      reason: null,
+      considered: [],
+    });
+  });
+
+  it('classifies changelog.d/2865.md and locales/ja/worktree.json as full with locales reason', () => {
+    const result = classifyChanges([
+      'changelog.d/2865.md',
+      'locales/ja/worktree.json',
+    ]);
+    expect(result).toEqual({
+      mode: 'full',
+      reason: 'locales/ja/worktree.json',
+      considered: ['locales/ja/worktree.json'],
+    });
+  });
+
   it('classifies src/a.ts and locales/ja/worktree.json as full with reason', () => {
     const result = classifyChanges(['locales/ja/worktree.json', 'src/a.ts']);
     expect(result).toEqual({
