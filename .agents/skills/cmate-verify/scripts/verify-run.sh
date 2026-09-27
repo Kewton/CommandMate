@@ -158,6 +158,20 @@ function checkvalue(key, v,   c) {
   if (v ~ /^[|>][-+0-9]*$/) { err(key ": block scalars are not supported"); return 0 }
   return 1
 }
+# Validates one options.envCleanIgnoreHomeEntries element (Issue #2901): the
+# same rule as the TS loader (verify-config.ts validateHomeEntryNames) minus
+# the NUL check, which this awk cannot enforce — a raw NUL byte truncates the
+# input line before any string op here ever sees it (measured: `length($0)`
+# stops at the NUL), so the same is already true of every other field this
+# parser reads (gate id, command, ...).
+function home_entry(item) {
+  if (item == "") { err("options.envCleanIgnoreHomeEntries: entry must not be empty"); return }
+  if (item == "." || item == "..") { err("options.envCleanIgnoreHomeEntries: entry must not be \"" item "\""); return }
+  if (index(item, "/") > 0) { err("options.envCleanIgnoreHomeEntries: entry must not contain \"/\": " item); return }
+  home_count++
+  if (home_count > 32) { err("options.envCleanIgnoreHomeEntries: at most 32 entries (got " home_count ")"); return }
+  printf "OPT\tenvCleanIgnoreHomeEntries\t%s\n", item
+}
 function gatekv(s) {
   if (!splitkv(s)) { err("expected \"key: value\" inside a gate"); return }
   if (!checkvalue(KV_K, KV_V)) return
@@ -202,7 +216,8 @@ function flushgate() {
   gid = ""; gcmd = ""; gto = ""; gmx = ""; gretry = ""; gflaky = ""; gate_open = 0
 }
 BEGIN { SQ = sprintf("%c", 39); section = ""; gate_open = 0; ngates = 0; nversion = 0
-        gid = ""; gcmd = ""; gto = ""; gmx = ""; gretry = ""; gflaky = "" }
+        gid = ""; gcmd = ""; gto = ""; gmx = ""; gretry = ""; gflaky = ""
+        home_open = 0; home_count = 0 }
 {
   line = $0
   sub(/\r$/, "", line)
@@ -216,6 +231,7 @@ BEGIN { SQ = sprintf("%c", 39); section = ""; gate_open = 0; ngates = 0; nversio
 
   if (ind == 0) {
     flushgate()
+    home_open = 0
     if (!splitkv(body)) { err("expected \"key: value\" at the top level"); next }
     if (KV_K == "version") {
       nversion++
@@ -244,6 +260,25 @@ BEGIN { SQ = sprintf("%c", 39); section = ""; gate_open = 0; ngates = 0; nversio
     }
     if (section == "options") {
       if (!splitkv(body)) { err("expected \"key: value\" inside options:"); next }
+      if (KV_K == "envCleanIgnoreHomeEntries") {
+        # Issue #2901: this key alone allows a list value, in either of the two
+        # forms verification-config.md documents — a flow one-liner (KV_V is
+        # "[...]", empty "[]" included) or a block list, whose "- " items follow
+        # at ind==4 while home_open stays set (see that branch below).
+        if (KV_V == "") { home_open = 1; next }
+        home_open = 0
+        if (match(KV_V, /^\[.*\]$/)) {
+          home_list = trim(substr(KV_V, 2, length(KV_V) - 2))
+          if (home_list != "") {
+            home_n = split(home_list, home_parts, ",")
+            for (home_i = 1; home_i <= home_n; home_i++) home_entry(unquote(trim(home_parts[home_i])))
+          }
+        } else {
+          err("options.envCleanIgnoreHomeEntries: must be a flow list \"[...]\" or an indented \"- \" block")
+        }
+        next
+      }
+      home_open = 0
       if (!checkvalue(KV_K, KV_V)) next
       if (KV_K == "baseRef" || KV_K == "skipInPrimaryCheckout" || KV_K == "maxLogTailBytes" || KV_K == "requireCommit" || KV_K == "requireEnvClean")
         printf "OPT\t%s\t%s\n", KV_K, unquote(KV_V)
@@ -252,6 +287,12 @@ BEGIN { SQ = sprintf("%c", 39); section = ""; gate_open = 0; ngates = 0; nversio
       next
     }
     err("indented line outside of gates: / options:")
+    next
+  }
+
+  if (ind == 4 && section == "options" && home_open) {
+    if (substr(body, 1, 2) != "- ") { err("envCleanIgnoreHomeEntries: list items must start with \"- \""); next }
+    home_entry(unquote(trim(substr(body, 3))))
     next
   }
 

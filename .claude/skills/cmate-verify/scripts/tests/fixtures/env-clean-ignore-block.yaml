@@ -1,0 +1,12 @@
+# Issue #2901: options.envCleanIgnoreHomeEntries, block form. This runner does
+# not judge env-clean (see require-env-clean.yaml), so accepting the key only
+# has to keep the config readable and let the other declared gates run.
+version: 1
+gates:
+  - id: ok
+    command: echo fine
+options:
+  skipInPrimaryCheckout: false
+  envCleanIgnoreHomeEntries:
+    - .semgrep
+    - .commandagent

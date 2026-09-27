@@ -658,12 +658,17 @@ GATE e2e SKIP reason=mutex-wait waited=600s
 | `gates[]` | `retryOnFail` / `flakyIsPass` | ✅ #1772 | ✅ skills #224 | ✅ skills #224 |
 | `options` | `baseRef` / `skipInPrimaryCheckout` / `maxLogTailBytes` / `requireCommit` | ✅ | ✅ | ✅ |
 | `options` | `requireEnvClean` | ✅ #1740 | ✅ skills PR #225 | ✅ skills PR #225 |
-| `options` | `envCleanIgnoreHomeEntries` | ✅ #2890 | ❌（別 Issue） | ❌（別 Issue） |
+| `options` | `envCleanIgnoreHomeEntries` | ✅ #2890 | ✅ #2901 | ❌（別 Issue） |
 
-**Issue #2890 でこの一致は再び崩れている。** `envCleanIgnoreHomeEntries` は
-CommandMate 本体だけが受理し、standalone ランナーは `env-clean` そのものを判定しない
-（本表直後の `GATE env-clean SKIP reason=no-baseline` の説明どおり）ため、キーの受理を
-足すには awk パーサの改修が要る。port は別 Issue とし、本 Issue のスコープには含めていない。
+**Issue #2890 でこの一致は一時的に崩れていた。** `envCleanIgnoreHomeEntries` を
+CommandMate 本体だけが受理し、standalone ランナー（`.claude/skills/cmate-verify/scripts/verify-run.sh`
+＋ `.agents/...` のミラー）は未知キーとして `exit 2` で拒否していた。standalone ランナーは
+`env-clean` そのものを判定しないため（本表直後の `GATE env-clean SKIP reason=no-baseline` の
+説明どおり）、受理した値は判定には使わず `OPT` レコードとして流すだけでよく、**Issue #2901** で
+awk パーサにブロック形式・フロー形式の両方を足して解消した。commandmate-skills 側の同名ファイル
+（バイト一致コピー、Kewton/commandmate-skills#270）と advisor（`verify-advisor.mjs`）の port は
+別 Issue のスコープのまま — 本 PR は skills 側の移植が入り `.claude/skills/sync-map.json` の pin が
+更新されてからマージする。
 
 **2026-08-20 実測: 4 実装すべてが同じ集合を受理する（`envCleanIgnoreHomeEntries` 以前の集合について）。** 内訳は本体の TS ローダ 1 本、
 バイト一致する bash ランナー 2 箇所（CommandMate の

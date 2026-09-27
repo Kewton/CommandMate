@@ -1,0 +1,7 @@
+version: 1
+gates:
+  - id: a
+    command: echo hi
+options:
+  envCleanIgnoreHomeEntries:
+    - ..

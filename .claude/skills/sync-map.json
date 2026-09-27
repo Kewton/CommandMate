@@ -76,6 +76,36 @@
           "sha256": "dcc323cd41552d9aa76d2d8d10a54b9e8ee234dc37f99cd7993764ce488ffb91"
         },
         {
+          "path": "scripts/tests/fixtures/bad-env-clean-ignore-dotdot.yaml",
+          "counterpartPath": "tests/fixtures/cmate-verify/fixtures/bad-env-clean-ignore-dotdot.yaml",
+          "policy": "byte-identical",
+          "sha256": "43fc0f963ec7ad8bfcc834cc42f8839422e3de5af401b491b42ae3c351568957"
+        },
+        {
+          "path": "scripts/tests/fixtures/bad-env-clean-ignore-empty-item.yaml",
+          "counterpartPath": "tests/fixtures/cmate-verify/fixtures/bad-env-clean-ignore-empty-item.yaml",
+          "policy": "byte-identical",
+          "sha256": "ddd0d3690622b570f656a9bf48a86d49249e735334425bcb76652cc3ba2f5fe8"
+        },
+        {
+          "path": "scripts/tests/fixtures/bad-env-clean-ignore-scalar.yaml",
+          "counterpartPath": "tests/fixtures/cmate-verify/fixtures/bad-env-clean-ignore-scalar.yaml",
+          "policy": "byte-identical",
+          "sha256": "e658b8bcf77905c460e5a80dbbc52046d36ca0b89a753e099794344ce3e66bf0"
+        },
+        {
+          "path": "scripts/tests/fixtures/bad-env-clean-ignore-slash.yaml",
+          "counterpartPath": "tests/fixtures/cmate-verify/fixtures/bad-env-clean-ignore-slash.yaml",
+          "policy": "byte-identical",
+          "sha256": "197734ffa4241ee3a37ded5011c3e6045ecf053085e3f1250b2b896ca52bdd2f"
+        },
+        {
+          "path": "scripts/tests/fixtures/bad-env-clean-ignore-too-many.yaml",
+          "counterpartPath": "tests/fixtures/cmate-verify/fixtures/bad-env-clean-ignore-too-many.yaml",
+          "policy": "byte-identical",
+          "sha256": "eb21df1af77130d7c7c20d4fb89668bd5303f22a0c7091409bbe7ff4690dd2e6"
+        },
+        {
           "path": "scripts/tests/fixtures/bad-env-clean.yaml",
           "counterpartPath": "tests/fixtures/cmate-verify/fixtures/bad-env-clean.yaml",
           "policy": "byte-identical",
@@ -227,6 +257,24 @@
           "sha256": "98657da4079c59565c23d66d46373c8c71b2df3abe8b7f63a1f7aa5556180396"
         },
         {
+          "path": "scripts/tests/fixtures/env-clean-ignore-block.yaml",
+          "counterpartPath": "tests/fixtures/cmate-verify/fixtures/env-clean-ignore-block.yaml",
+          "policy": "byte-identical",
+          "sha256": "e73c7f990b34c598da2aca9cc954a0330c21b0f959a6c1ef4017fd6307d53c0a"
+        },
+        {
+          "path": "scripts/tests/fixtures/env-clean-ignore-empty.yaml",
+          "counterpartPath": "tests/fixtures/cmate-verify/fixtures/env-clean-ignore-empty.yaml",
+          "policy": "byte-identical",
+          "sha256": "bb8457ec20f957b3adffafac4250e6570bab18e8e8b629b28f0c6fde6840cef0"
+        },
+        {
+          "path": "scripts/tests/fixtures/env-clean-ignore-flow.yaml",
+          "counterpartPath": "tests/fixtures/cmate-verify/fixtures/env-clean-ignore-flow.yaml",
+          "policy": "byte-identical",
+          "sha256": "2b744f5e35f760a64d0647ae7a7efcda1c6bb0c26dae88d599e9681a5c205643"
+        },
+        {
           "path": "scripts/tests/fixtures/mutex-flaky.yaml",
           "counterpartPath": "tests/fixtures/cmate-verify/fixtures/mutex-flaky.yaml",
           "policy": "byte-identical",
@@ -340,13 +388,13 @@
           "path": "scripts/tests/run-tests.sh",
           "counterpartPath": "tests/fixtures/cmate-verify/run-tests.sh",
           "policy": "port-required",
-          "sha256": "94b20b1e0739ccfeed60df2b2919e0aa2b0bfd23bf6a0aa145a7e5c255a93416",
+          "sha256": "386037b0d4a2ac7010d07251c6f3c8895c0c618a3cc05ab26701872fef33e120",
           "note": "Issue #1639 で追加。 2026-08-03 に counterpart（cmate-verify 0.2.0、skills PR #41）へ移植済み。 2026-08-03 に Issue #1651 の変更も counterpart（cmate-verify 0.3.0、skills PR #42）へ移植済み。 2026-08-20（Issue #1864）に skills #228（PR #230）の case 23 と mutex assertion の分割を取り込んだ。 【未移植 #1950】2026-08-22: 本リポジトリ側のみ修正済み。counterpart への移植が未了。 counterpart の同一 suite は package の外（`tests/fixtures/cmate-verify/run-tests.sh`）に在り、Issue #2904 で counterpartPath をそれに設定した。差分はヘッダのコメントと RUNNER の解決（CommandMate は package 内相対パス、skills 側は `${VERIFY_RUN:-$REPO_ROOT/skills/cmate-verify/scripts/verify-run.sh}` で package 外からの絶対パス）の 2 箇所で、パスの前提が構造的に異なるため byte-identical を諦め policy を port-required に変えた（2026-09-27 実測）。"
         },
         {
           "path": "scripts/verify-run.sh",
           "policy": "byte-identical",
-          "sha256": "505a8d145707a53badca1dda0faaa6d9206b2985abf4265ca216ac4c85bc9561",
+          "sha256": "c1c89157ada9c1661d9a6cca872b976ba5c2b74776c5e90f6f62a7b6d087de38",
           "note": "ランナー本体。#1586 で byte-identical に移植され、#1607 が CommandMate 側だけを直して 4 日間ドリフトした（#1611 で復旧）。この Issue の直接の発端。 Issue #1639 で追加。 2026-08-03 に counterpart（cmate-verify 0.2.0、skills PR #41）へ移植済み。 2026-08-03 に Issue #1651 の変更も counterpart（cmate-verify 0.3.0、skills PR #42）へ移植済み。 2026-08-20（Issue #1861）に counterpart PR #225（6faa33f）から逐語コピーした。 2026-08-20（Issue #1864）に counterpart PR #230（9604e8f、skills #228）から逐語コピーした。"
         }
       ]
