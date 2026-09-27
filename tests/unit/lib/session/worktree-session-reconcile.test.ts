@@ -55,6 +55,7 @@ import {
 import type { WebSocket } from 'ws';
 import type { Worktree } from '@/types/models';
 import { isSessionPathOwnedBy } from '@/lib/tmux/session-ownership';
+import { setActiveSessionNamespace } from '@/lib/cli-tools/session-name';
 
 // ---------------------------------------------------------------------------
 // Fake tmux server
@@ -791,6 +792,63 @@ describe('reconcileWorktreeSessions (Issue #1621 Phase 3)', () => {
       expect(second.renamedSessions).toEqual([]);
       expect(second.unaccountedSessions).toEqual([]);
       expect(tmux.names()).toEqual(['mcbd-claude-beta', 'mcbd-claude-beta-2']);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Issue #2866: server namespace
+  // -------------------------------------------------------------------------
+
+  describe('server namespace (Issue #2866)', () => {
+    const NS = '0a1b2c3d';
+    const OTHER = 'deadbeef';
+
+    afterEach(() => setActiveSessionNamespace(null));
+
+    it('renames legacy and own-namespace sessions onto the namespaced name, ignores another namespace', async () => {
+      setActiveSessionNamespace(NS);
+      upsertWorktree(db, makeWorktree('beta', 'beta'));
+
+      const tmux = makeFakeTmux([
+        'mcbd-claude-alpha',
+        `mcbd-${NS}-claude-alpha-2`,
+        `mcbd-${OTHER}-claude-alpha`,
+        `mcbd-${OTHER}-codex-zeta`,
+      ]);
+      const result = await reconcileWorktreeSessions(db, 'alpha', 'beta', { tmux });
+
+      expect(result.errors).toEqual([]);
+      expect(tmux.names()).toEqual(
+        [
+          `mcbd-${NS}-claude-beta`,
+          `mcbd-${NS}-claude-beta-2`,
+          `mcbd-${OTHER}-claude-alpha`,
+          `mcbd-${OTHER}-codex-zeta`,
+        ].sort()
+      );
+      // Another server's sessions are neither renamed nor reported.
+      expect(tmux.calls.some(([from]) => from.startsWith(`mcbd-${OTHER}-`))).toBe(false);
+      expect(result.unaccountedSessions).toEqual([]);
+    });
+
+    it('ignores any namespaced session while this server has no namespace', async () => {
+      upsertWorktree(db, makeWorktree('beta', 'beta'));
+
+      const tmux = makeFakeTmux(['mcbd-claude-alpha', `mcbd-${OTHER}-claude-alpha`]);
+      const result = await reconcileWorktreeSessions(db, 'alpha', 'beta', { tmux });
+
+      expect(tmux.names()).toEqual(['mcbd-claude-beta', `mcbd-${OTHER}-claude-alpha`]);
+      expect(result.unaccountedSessions).toEqual([]);
+    });
+
+    it('attributes legacy and own-namespace names only', () => {
+      const known = new Set(['alpha']);
+      const expected = { cliToolId: 'claude', worktreeId: 'alpha', suffix: '2' };
+
+      expect(__internal.attributeSessionName('mcbd-claude-alpha-2', known, NS)).toEqual(expected);
+      expect(__internal.attributeSessionName(`mcbd-${NS}-claude-alpha-2`, known, NS)).toEqual(expected);
+      expect(__internal.attributeSessionName(`mcbd-${OTHER}-claude-alpha-2`, known, NS)).toBeNull();
+      expect(__internal.attributeSessionName(`mcbd-${OTHER}-claude-alpha-2`, known, null)).toBeNull();
     });
   });
 });

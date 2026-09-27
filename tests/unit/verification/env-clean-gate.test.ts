@@ -101,6 +101,13 @@ describe('attributeSessionName', () => {
     expect(attributeSessionName('mcbd-vibe-local-other-wt', WORKTREE_ID)).toBe('other');
   });
 
+  it('attributes namespaced names whatever the namespace (Issue #2866)', () => {
+    expect(attributeSessionName(`mcbd-0a1b2c3d-claude-${WORKTREE_ID}`, WORKTREE_ID)).toBe('self');
+    expect(attributeSessionName(`mcbd-deadbeef-codex-${WORKTREE_ID}-2`, WORKTREE_ID)).toBe('self');
+    expect(attributeSessionName('mcbd-deadbeef-claude-other-wt', WORKTREE_ID)).toBe('other');
+    expect(attributeSessionName('mcbd-deadbeef-unknowncli-wt', WORKTREE_ID)).toBe('unattributed');
+  });
+
   it('leaves a name it cannot parse unattributed, which is the strict answer', () => {
     expect(attributeSessionName('my-editor', WORKTREE_ID)).toBe('unattributed');
     expect(attributeSessionName('mcbd-unknowncli', WORKTREE_ID)).toBe('unattributed');

@@ -23,10 +23,21 @@
  * 同値性である。値そのものは tests/unit/cli-tools/base.test.ts が押さえている。
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { CLI_TOOL_IDS } from '@/lib/cli-tools/types';
-import { resolveSessionName } from '@/lib/cli-tools/session-name';
+import {
+  parseSessionName,
+  resolveLegacySessionName,
+  resolveNamespacedSessionName,
+  resolveSessionName,
+  setActiveSessionNamespace,
+} from '@/lib/cli-tools/session-name';
+import {
+  clearLegacyAliasesForTests,
+  dropLegacyAliasByLegacyName,
+  registerLegacyAlias,
+} from '@/lib/tmux/legacy-session-alias';
 
 // `manager` を import するだけで poller グラフを引かないための stub（#1984 で
 // 静的 import は切れているが、`stopPollers()` の遅延 import 先はここで塞いでおく）。
@@ -75,5 +86,122 @@ describe('resolveSessionName (Issue #1984)', () => {
     // 0 回まわって緑になる。回数を名指ししておく。
     expect(CLI_TOOL_IDS.length).toBe(8);
     expect(WORKTREE_IDS.length * 4 * CLI_TOOL_IDS.length).toBe(96);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Issue #2866: server namespace, legacy names and the parser
+// ---------------------------------------------------------------------------
+
+describe('session names with a server namespace (Issue #2866)', () => {
+  const NS = '0a1b2c3d';
+
+  afterEach(() => {
+    setActiveSessionNamespace(null);
+    clearLegacyAliasesForTests();
+  });
+
+  it('keeps the legacy form while no namespace is set', () => {
+    expect(resolveSessionName('claude', 'feature-foo')).toBe('mcbd-claude-feature-foo');
+    expect(resolveSessionName('codex', 'wt-1', 'codex-review')).toBe('mcbd-codex-wt-1-review');
+  });
+
+  it('puts the namespace after mcbd- once set (primary and additional instances)', () => {
+    setActiveSessionNamespace(NS);
+    expect(resolveSessionName('claude', 'feature-foo')).toBe(`mcbd-${NS}-claude-feature-foo`);
+    expect(resolveSessionName('claude', 'feature-foo', 'claude')).toBe(`mcbd-${NS}-claude-feature-foo`);
+    expect(resolveSessionName('claude', 'feature-foo', 'claude-2')).toBe(`mcbd-${NS}-claude-feature-foo-2`);
+    expect(resolveSessionName('vibe-local', 'wt-1', 'vibe-local-review')).toBe(
+      `mcbd-${NS}-vibe-local-wt-1-review`
+    );
+  });
+
+  it('every tool still agrees with the rule under a namespace', () => {
+    setActiveSessionNamespace(NS);
+    const manager = CLIToolManager.getInstance();
+    for (const toolId of CLI_TOOL_IDS) {
+      expect(manager.getTool(toolId).getSessionName('wt-1', `${toolId}-2`)).toBe(
+        resolveSessionName(toolId, 'wt-1', `${toolId}-2`)
+      );
+    }
+  });
+
+  it('returns the adopted legacy name while an alias is registered', () => {
+    setActiveSessionNamespace(NS);
+    registerLegacyAlias(`mcbd-${NS}-claude-wt-1`, 'mcbd-claude-wt-1');
+
+    expect(resolveSessionName('claude', 'wt-1')).toBe('mcbd-claude-wt-1');
+    // Only the aliased name is affected.
+    expect(resolveSessionName('claude', 'wt-1', 'claude-2')).toBe(`mcbd-${NS}-claude-wt-1-2`);
+
+    dropLegacyAliasByLegacyName('mcbd-claude-wt-1');
+    expect(resolveSessionName('claude', 'wt-1')).toBe(`mcbd-${NS}-claude-wt-1`);
+  });
+
+  it('resolveLegacySessionName is always the legacy form', () => {
+    expect(resolveLegacySessionName('claude', 'wt-1')).toBe('mcbd-claude-wt-1');
+    setActiveSessionNamespace(NS);
+    expect(resolveLegacySessionName('claude', 'wt-1')).toBe('mcbd-claude-wt-1');
+    expect(resolveLegacySessionName('codex', 'wt-1', 'codex-2')).toBe('mcbd-codex-wt-1-2');
+  });
+
+  it('refuses an ill-formed namespace', () => {
+    expect(() => setActiveSessionNamespace('ABCDEF01')).toThrow(/Invalid session namespace/);
+  });
+});
+
+describe('parseSessionName (Issue #2866)', () => {
+  it('reads the legacy form', () => {
+    expect(parseSessionName('mcbd-claude-wt-1')).toEqual({ namespace: null, cliToolId: 'claude', rest: 'wt-1' });
+  });
+
+  it('reads the namespaced form', () => {
+    expect(parseSessionName('mcbd-0a1b2c3d-codex-wt-1')).toEqual({
+      namespace: '0a1b2c3d',
+      cliToolId: 'codex',
+      rest: 'wt-1',
+    });
+  });
+
+  it('keeps a suffix and hyphenated worktree IDs in rest', () => {
+    expect(parseSessionName('mcbd-claude-feature-foo-bar-2')).toEqual({
+      namespace: null,
+      cliToolId: 'claude',
+      rest: 'feature-foo-bar-2',
+    });
+    expect(parseSessionName('mcbd-0a1b2c3d-claude-feature-foo-review')).toEqual({
+      namespace: '0a1b2c3d',
+      cliToolId: 'claude',
+      rest: 'feature-foo-review',
+    });
+  });
+
+  it('reads a hyphenated tool id whole, not as a shorter one', () => {
+    expect(parseSessionName('mcbd-vibe-local-wt')?.cliToolId).toBe('vibe-local');
+    expect(parseSessionName('mcbd-0a1b2c3d-command-code-wt')).toEqual({
+      namespace: '0a1b2c3d',
+      cliToolId: 'command-code',
+      rest: 'wt',
+    });
+  });
+
+  it('round-trips what resolveNamespacedSessionName builds', () => {
+    for (const toolId of CLI_TOOL_IDS) {
+      for (const ns of [null, 'deadbeef']) {
+        const name = resolveNamespacedSessionName(ns, toolId, 'a-b', `${toolId}-2`);
+        expect(parseSessionName(name)).toEqual({ namespace: ns, cliToolId: toolId, rest: 'a-b-2' });
+      }
+    }
+  });
+
+  it('returns null for non-CommandMate names and unknown tools', () => {
+    expect(parseSessionName('my-editor')).toBeNull();
+    expect(parseSessionName('xmcbd-claude-wt')).toBeNull();
+    expect(parseSessionName('mcbd-unknowncli-wt')).toBeNull();
+    expect(parseSessionName('mcbd-0a1b2c3d-unknowncli-wt')).toBeNull();
+    expect(parseSessionName('mcbd-claude-')).toBeNull();
+    expect(parseSessionName('mcbd-0a1b2c3d')).toBeNull();
+    // An upper-case "namespace" is not one: the tool slot then fails.
+    expect(parseSessionName('mcbd-0A1B2C3D-claude-wt')).toBeNull();
   });
 });

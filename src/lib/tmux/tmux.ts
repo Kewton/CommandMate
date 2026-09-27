@@ -7,6 +7,7 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { invalidateCache } from './tmux-capture-cache';
 import { hasHumanClientAttached } from './geometry-delegation';
+import { dropLegacyAliasByLegacyName } from './legacy-session-alias';
 import { validateSessionName } from '@/lib/cli-tools/validation';
 import { TMUX_HISTORY_LIMIT, TUI_PANE_HEIGHT, TUI_PANE_WIDTH } from '@/config/tmux-pane-config';
 import { createLogger } from '@/lib/logger';
@@ -236,6 +237,9 @@ export async function hasSession(sessionName: string): Promise<boolean> {
     return true;
   } catch {
     // tmux has-session returns non-zero exit code if session doesn't exist
+    // Issue #2866: an adopted legacy session that is gone no longer serves its
+    // new-format name, so the next start uses the new-format name.
+    dropLegacyAliasByLegacyName(sessionName);
     return false;
   }
 }
@@ -796,6 +800,8 @@ export async function killSession(sessionName: string): Promise<boolean> {
     await execFileAsync('tmux', ['kill-session', '-t', exactTarget(sessionName)], {
       timeout: DEFAULT_TIMEOUT,
     });
+    // Issue #2866: see hasSession.
+    dropLegacyAliasByLegacyName(sessionName);
     return true;
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : String(error);

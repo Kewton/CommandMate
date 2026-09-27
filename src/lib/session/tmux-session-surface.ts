@@ -2,9 +2,9 @@
  * The tmux "surface" CommandMate publishes on its own sessions (Issue #2317).
  *
  * Everything here is a pure argument builder or a pure predicate — no
- * `child_process`, no `@/` path alias, and one constants import. Three
- * constraints put it here rather than under `lib/tmux/`, and all three are
- * load-bearing:
+ * `child_process`, no `@/` path alias, one constants import and the pure
+ * session-name parser. Three constraints put it here rather than under
+ * `lib/tmux/`, and all three are load-bearing:
  *
  * 1. **`tsconfig.cli.json` sets `"paths": {}`.** The CLI bundle resolves nothing
  *    through `@/…`, so a module the `attach` command needs may only reach the
@@ -34,6 +34,10 @@
  */
 
 import { TUI_PANE_HEIGHT, TUI_PANE_WIDTH } from '../../config/tmux-pane-config';
+// Relative on purpose (constraint 1 above). `session-name.ts` is already part of
+// the CLI bundle (`commands/attach.ts` imports it) and reaches nothing through
+// `@/…`, so it costs the bundle nothing new (Issue #2866).
+import { parseSessionName } from '../cli-tools/session-name';
 
 /**
  * Session-name prefix every CommandMate tmux session carries.
@@ -319,8 +323,9 @@ export function isLiveAttachSupported(cliToolId: string): boolean {
 /**
  * Whether a tmux session's NAME says it runs a tool `--live` supports.
  *
- * The session name is `mcbd-<tool>-<worktree>` and no supported tool id is a
- * prefix of another, so this is exact rather than a guess. It exists because
+ * The session name is `mcbd-[<ns>-]<tool>-<worktree>` and `parseSessionName`
+ * reads the tool out of either form (Issue #2866), so this is exact rather
+ * than a guess. It exists because
  * the two callers that need the answer — the attach hook script's installer and
  * the response poller — hold a session name and nothing else: a hook fires with
  * tmux formats, and the poller must not pay a tmux round-trip to ask about a
@@ -330,9 +335,8 @@ export function isLiveAttachSupported(cliToolId: string): boolean {
  */
 export function isLiveAttachEligibleSession(sessionName: string): boolean {
   if (!isCommandMateSession(sessionName)) return false;
-  return LIVE_ATTACH_TOOLS.some((tool) =>
-    sessionName.startsWith(`${MCBD_SESSION_PREFIX}${tool}-`)
-  );
+  const cliToolId = parseSessionName(sessionName)?.cliToolId;
+  return cliToolId !== undefined && LIVE_ATTACH_TOOLS.includes(cliToolId);
 }
 
 /**
@@ -344,8 +348,9 @@ export function isLiveAttachEligibleSession(sessionName: string): boolean {
  * else. `attach` prints its hint for exactly these.
  *
  * Deliberately a local list rather than an import of `usesAlternateScreen()`:
- * this module must stay free of `lib/cli-tools`, whose graph the CLI bundle
- * cannot afford (see the module docblock). The two are pinned to each other by
+ * this module must stay free of `lib/cli-tools` beyond the pure
+ * `session-name.ts`, whose tool graph the CLI bundle cannot afford (see the
+ * module docblock). The two are pinned to each other by
  * `tests/unit/tmux/session-surface-2317.test.ts`, so a tool moving in or out of
  * the alternate screen breaks a test rather than silently dropping the hint.
  */
