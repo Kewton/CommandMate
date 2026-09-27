@@ -369,6 +369,107 @@ describe('the delegation’s own agent session (#2472)', () => {
   });
 });
 
+describe('options.envCleanIgnoreHomeEntries (#2890)', () => {
+  const IGNORED_LINE = 'ignored (options.envCleanIgnoreHomeEntries)';
+
+  it('passes a run whose only new $HOME entry is listed in verify.yaml, and says so', async () => {
+    setupRepo('  requireEnvClean: true\n  envCleanIgnoreHomeEntries:\n    - .semgrep\n');
+    const task = seedTask();
+    baselines.set(task.id, snapshot({ 'home-entries': listing(['Documents']) }));
+    currentSnapshot = snapshot({ 'home-entries': listing(['Documents', '.semgrep']) });
+    addWork();
+
+    const run = await runToCompletion({ taskId: task.id });
+    expect(envCleanGate(run)?.status).toBe('passed');
+    expect(envCleanGate(run)?.logTail).toContain(`${IGNORED_LINE}: .semgrep`);
+    expect(run?.status).toBe('passed');
+  });
+
+  it('fails the same run when verify.yaml does not list the entry', async () => {
+    setupRepo('  requireEnvClean: true\n  envCleanIgnoreHomeEntries: [.commandagent]\n');
+    const task = seedTask();
+    baselines.set(task.id, snapshot({ 'home-entries': listing(['Documents']) }));
+    currentSnapshot = snapshot({ 'home-entries': listing(['Documents', '.semgrep']) });
+    addWork();
+
+    const run = await runToCompletion({ taskId: task.id });
+    expect(envCleanGate(run)?.status).toBe('failed');
+    expect(envCleanGate(run)?.logTail).toContain('+ .semgrep [unattributed]');
+    expect(envCleanGate(run)?.logTail).not.toContain(IGNORED_LINE);
+    expect(run?.status).toBe('failed');
+  });
+
+  it('fails the same run when verify.yaml has no list at all', async () => {
+    setupRepo('  requireEnvClean: true\n');
+    const task = seedTask();
+    baselines.set(task.id, snapshot({ 'home-entries': listing(['Documents']) }));
+    currentSnapshot = snapshot({ 'home-entries': listing(['Documents', '.semgrep']) });
+    addWork();
+
+    const run = await runToCompletion({ taskId: task.id });
+    expect(envCleanGate(run)?.status).toBe('failed');
+    expect(envCleanGate(run)?.logTail).toContain('+ .semgrep [unattributed]');
+  });
+
+  it('excuses only what is listed: an unlisted entry beside it still fails the run', async () => {
+    setupRepo('  requireEnvClean: true\n  envCleanIgnoreHomeEntries: [.semgrep]\n');
+    const task = seedTask();
+    baselines.set(task.id, snapshot());
+    currentSnapshot = snapshot({ 'home-entries': listing(['.semgrep', '.commandagent']) });
+    addWork();
+
+    const run = await runToCompletion({ taskId: task.id });
+    const logTail = envCleanGate(run)?.logTail ?? '';
+    expect(envCleanGate(run)?.status).toBe('failed');
+    expect(logTail).toContain('+ .commandagent [unattributed]');
+    expect(logTail).not.toContain('+ .semgrep');
+    expect(logTail).toContain(`${IGNORED_LINE}: .semgrep`);
+  });
+
+  it('reaches a gate that the contract alone switched on', async () => {
+    // The list is a property of the repository's verify.yaml, whichever
+    // declaration made the gate run.
+    setupRepo('  envCleanIgnoreHomeEntries: [.semgrep]\n');
+    const task = seedTask({ requireEnvClean: true });
+    baselines.set(task.id, snapshot());
+    currentSnapshot = snapshot({ 'home-entries': listing(['.semgrep']) });
+    addWork();
+
+    const run = await runToCompletion({ taskId: task.id });
+    expect(envCleanGate(run)?.status).toBe('passed');
+    expect(envCleanGate(run)?.logTail).toContain(`${IGNORED_LINE}: .semgrep`);
+  });
+
+  it('does not let the list excuse a tmux session of the same name', async () => {
+    const session = `mcbd-codex-${wtId}`;
+    setupRepo(`  requireEnvClean: true\n  envCleanIgnoreHomeEntries: [${session}]\n`);
+    const task = seedTask();
+    baselines.set(task.id, snapshot());
+    currentSnapshot = snapshot({ 'tmux-sessions': listing([session]) });
+    addWork();
+
+    const run = await runToCompletion({ taskId: task.id });
+    expect(envCleanGate(run)?.status).toBe('failed');
+    expect(envCleanGate(run)?.logTail).toContain(`+ ${session} [self]`);
+  });
+
+  it('refuses to run against an invalid list rather than ignoring it', async () => {
+    setupRepo('  requireEnvClean: true\n  envCleanIgnoreHomeEntries: [.semgrep, ""]\n');
+    const task = seedTask();
+    baselines.set(task.id, snapshot());
+    currentSnapshot = snapshot({ 'home-entries': listing(['.semgrep']) });
+    addWork();
+
+    const run = await runToCompletion({ taskId: task.id });
+    // A config that cannot be read is no verdict, and never a pass: the run
+    // ends `error` before any probe is taken.
+    expect(run?.status).toBe('error');
+    expect(run?.gates.map((gate) => gate.gateId)).toEqual(['config']);
+    expect(run?.gates[0].logTail).toContain('options.envCleanIgnoreHomeEntries[1]');
+    expect(captureCalls).toBe(0);
+  });
+});
+
 describe('per-delegation opt-in (success.requireEnvClean)', () => {
   it('runs the gate from the contract alone, with the repository switch off', async () => {
     const task = seedTask({ requireEnvClean: true });
