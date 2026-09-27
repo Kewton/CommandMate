@@ -70,13 +70,18 @@
  * to one machine-wide `codex app-server --managed-daemon`, and hooks run inside
  * *that* process, so they see the daemon's environment — the first instance that
  * started it — not the launching session's. Every later instance was reported as
- * that first one. Any `-c` makes codex run embedded, where hooks inherit the
- * session's own env again; {@link CODEX_EMBEDDED_MODE_ARGS} is that `-c`.
+ * that first one.
+ *
+ * `-c features.daemon_auto_start=false` ({@link CODEX_EMBEDDED_MODE_ARGS}) only stops
+ * codex *starting* a daemon; one already running is still attached to (Issue #2891 —
+ * #2874 was observed with none up). `--no-daemon` ({@link CODEX_NO_DAEMON_FLAG}) stays
+ * off it even then, when {@link codexSupportsNoDaemon}; both are kept.
  * Measured 2026-09-27 on codex-cli 0.157.1.
  *
  * @module lib/hooks/sources/codex/hooks-config
  */
 
+import { spawnSync } from 'child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { homedir } from 'os';
 import { dirname, join } from 'path';
@@ -96,6 +101,7 @@ import {
   shellQuote,
 } from '@/lib/hooks/hook-settings-generator';
 import { createLogger } from '@/lib/logger';
+import { sanitizeEnvForChildProcess } from '@/lib/security/env-sanitizer';
 import { isValidWorktreeId } from '@/lib/security/path-validator';
 import { isPlainObject } from '../event-mapper';
 import type { AgentInstanceRef, AgentLaunchPlan } from '../types';
@@ -156,6 +162,59 @@ export const CODEX_HOOK_TRUST_BYPASS_FLAG = '--dangerously-bypass-hook-trust';
 
 /** codex 0.157+: keep the TUI off the shared app-server daemon so hooks run with this session's env. */
 export const CODEX_EMBEDDED_MODE_ARGS = '-c features.daemon_auto_start=false';
+
+/** codex 0.157+: stay off the shared app-server daemon even when one is already running. */
+export const CODEX_NO_DAEMON_FLAG = '--no-daemon';
+
+/** How long `codex --help` may take before {@link codexSupportsNoDaemon} gives up. */
+const CODEX_HELP_PROBE_TIMEOUT_MS = 5000;
+
+/** `--no-daemon` as a whole option name, not the prefix of a longer one. */
+const CODEX_NO_DAEMON_HELP_PATTERN = new RegExp(`${CODEX_NO_DAEMON_FLAG}(?![\\w-])`);
+
+const noDaemonSupportCache = new Map<string, boolean>();
+
+/**
+ * Whether `executablePath --help` lists `--no-daemon`. Cached per executable path for the
+ * life of the process. Any failure (spawn error, non-zero exit, timeout) → false.
+ *
+ * Decided from the help text, not from a version number: a version that was
+ * read wrongly, or a build that backported or dropped the option, still gets
+ * the answer the binary itself gives. The failure direction is the safe one — an
+ * unrecognised option would stop codex starting at all, whereas a missing flag
+ * only leaves the #2874 behaviour in place. Failures are cached too, so a codex
+ * that hangs on `--help` costs one timeout, not one per launch.
+ *
+ * Synchronous because `prepareLaunch` is. The child gets the sanitised
+ * environment: `executablePath` may be a bare name resolved off the server's
+ * `PATH`, and a `--help` probe has no use for CommandMate's credentials.
+ */
+export function codexSupportsNoDaemon(executablePath: string): boolean {
+  const cached = noDaemonSupportCache.get(executablePath);
+  if (cached !== undefined) return cached;
+
+  let supported = false;
+  try {
+    const result = spawnSync(executablePath, ['--help'], {
+      encoding: 'utf8',
+      timeout: CODEX_HELP_PROBE_TIMEOUT_MS,
+      env: sanitizeEnvForChildProcess(),
+    });
+    supported =
+      !result.error &&
+      result.status === 0 &&
+      CODEX_NO_DAEMON_HELP_PATTERN.test(String(result.stdout ?? ''));
+  } catch {
+    supported = false;
+  }
+  noDaemonSupportCache.set(executablePath, supported);
+  return supported;
+}
+
+/** Forget what {@link codexSupportsNoDaemon} has learned. Tests only. */
+export function resetCodexNoDaemonSupportCacheForTests(): void {
+  noDaemonSupportCache.clear();
+}
 
 /**
  * `SessionEnd`'s budget, in seconds.
@@ -227,6 +286,8 @@ export interface CodexHookOptions {
   relayScriptPath?: string | null;
   /** Defaults to {@link isAuthTokenExpected}. */
   withAuthHeader?: boolean;
+  /** Defaults to {@link codexSupportsNoDaemon} for the executable being launched. */
+  supportsNoDaemon?: boolean;
 }
 
 /**
@@ -680,9 +741,13 @@ export function buildCodexLaunchPlan(
       [CODEX_EVENT_URL_ENV_VAR]: `http://${CODEX_HOOK_HOST}:${port}${AGENT_EVENT_PATH}`,
       [CODEX_PERMISSION_URL_ENV_VAR]: `http://${CODEX_HOOK_HOST}:${port}${PERMISSION_REQUEST_PATH}?${query.toString()}`,
     };
+    const noDaemon =
+      (options.supportsNoDaemon ?? codexSupportsNoDaemon(executablePath))
+        ? ` ${CODEX_NO_DAEMON_FLAG}`
+        : '';
     const trust = isCodexHookTrustBypassEnabled() ? ` ${CODEX_HOOK_TRUST_BYPASS_FLAG}` : '';
     return {
-      command: `${shellQuote(executablePath)} ${CODEX_EMBEDDED_MODE_ARGS}${trust}`,
+      command: `${shellQuote(executablePath)} ${CODEX_EMBEDDED_MODE_ARGS}${noDaemon}${trust}`,
       settingsPath,
       env,
     };

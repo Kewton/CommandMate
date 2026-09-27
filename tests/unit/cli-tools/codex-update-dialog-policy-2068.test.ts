@@ -50,8 +50,13 @@ vi.mock('@/lib/cli-tools/validation', () => ({
   validateSessionName: vi.fn(),
 }));
 
-// BaseCLITool.isInstalled() uses promisify(exec); resolve it so isInstalled() === true
-vi.mock('child_process', () => ({ exec: vi.fn() }));
+// BaseCLITool.isInstalled() uses promisify(exec); resolve it so isInstalled() === true.
+// `spawnSync` is the `codex --help` probe for `--no-daemon` (Issue #2891): scripted to
+// list it, so the launch line here carries the flag whatever codex this machine has.
+vi.mock('child_process', () => ({
+  exec: vi.fn(),
+  spawnSync: vi.fn(() => ({ status: 0, stdout: '      --no-daemon\n', stderr: '' })),
+}));
 vi.mock('util', async (importOriginal) => {
   const actual = await importOriginal<typeof import('util')>();
   return {
@@ -64,6 +69,7 @@ import { CodexTool } from '@/lib/cli-tools/codex';
 import {
   CODEX_EMBEDDED_MODE_ARGS,
   CODEX_HOOK_TRUST_BYPASS_FLAG,
+  CODEX_NO_DAEMON_FLAG,
 } from '@/lib/hooks/sources/codex/hooks-config';
 import { hasSession, sendKeys, capturePane } from '@/lib/tmux/tmux';
 import {
@@ -101,11 +107,12 @@ const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/
 /**
  * The line that starts codex: the bare executable, or the injected one
  * (`… 'codex'` after the env prefix), optionally followed by the embedded-mode
- * arguments (Issue #2874) and the trust bypass flag. Nothing else may follow the
- * executable, so a line that gained an unknown argument is still caught.
+ * arguments (Issue #2874), `--no-daemon` (Issue #2891) and the trust bypass flag,
+ * in that order. Nothing else may follow the executable, so a line that gained
+ * an unknown argument is still caught.
  */
 const CODEX_LAUNCH_LINE_PATTERN = new RegExp(
-  `^codex$|'codex'(?: ${escapeRegExp(CODEX_EMBEDDED_MODE_ARGS)})?(?: ${escapeRegExp(CODEX_HOOK_TRUST_BYPASS_FLAG)})?$`
+  `^codex$|'codex'(?: ${escapeRegExp(CODEX_EMBEDDED_MODE_ARGS)})?(?: ${escapeRegExp(CODEX_NO_DAEMON_FLAG)})?(?: ${escapeRegExp(CODEX_HOOK_TRUST_BYPASS_FLAG)})?$`
 );
 
 /** The launch line, however Issue #1760's env prefix renders it. */
