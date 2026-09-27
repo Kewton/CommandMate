@@ -1,0 +1,62 @@
+{
+  "version": "0.42.0",
+  "date": "2026-09-27",
+  "highlight": {
+    "ja": "同じマシンで複数の CommandMate を動かしても、別のサーバのエージェントの画面が見えたり操作できたりしないようになりました。codex 0.157 の新しい画面にも対応しました。",
+    "en": "Running several CommandMate servers on one machine no longer lets one server see or drive another server's agents. The new screens in codex 0.157 are also supported."
+  },
+  "added": [
+    {
+      "ja": "選択画面で送信が続けて効かないとき、直接入力モードに切り替えるリンクが表示されるようになりました。",
+      "en": "When sending on a selection screen keeps having no effect, a link to switch to direct input mode is now shown."
+    },
+    {
+      "ja": "検証の環境チェックで、作業と無関係なホームディレクトリの項目を名前で除外できるようになりました。",
+      "en": "The environment check in verification can now ignore unrelated items in your home directory by name."
+    }
+  ],
+  "improved": [
+    {
+      "ja": "エージェントのセッション名にサーバごとの名前が付くようになり、別のサーバと同じ名前のプロジェクトでもセッションを起動できるようになりました。",
+      "en": "Agent session names now include a per-server name, so sessions can start even when another server has a project with the same name."
+    },
+    {
+      "ja": "CLI の attach・ls・whoami・instances が新しいセッション名に対応しました。",
+      "en": "The CLI attach, ls, whoami, and instances commands now work with the new session names."
+    }
+  ],
+  "fixed": [
+    {
+      "ja": "別のサーバが起動した同じ名前のセッションが表示され、送信や停止ができてしまう問題を直しました。",
+      "en": "Fixed sessions started by another server with the same name being shown and accepting messages or stop requests."
+    },
+    {
+      "ja": "codex 0.157 のモデル選択画面を選択画面として扱えず、送信しても反応しなかった問題を直しました。",
+      "en": "Fixed the codex 0.157 model picker not being recognized, so sending a choice did nothing."
+    },
+    {
+      "ja": "codex 0.157 のフォルダーの信頼確認画面を認識できなかった問題を直しました。",
+      "en": "Fixed the codex 0.157 folder trust screen not being recognized."
+    },
+    {
+      "ja": "CommandMate から答えられない画面に送信ボタンが出ていた問題を直しました。代わりに直接入力への案内が出ます。",
+      "en": "Fixed the Send button appearing on screens CommandMate cannot answer. A pointer to direct input is shown instead."
+    },
+    {
+      "ja": "「操作できません」の案内が表示されるまで最大で十数秒かかることがあった問題を直しました。",
+      "en": "Fixed the cannot-operate notice sometimes taking up to about fifteen seconds to appear."
+    },
+    {
+      "ja": "スマホでチャット表示のリンクから開いたとき、直接入力に切り替えるとチャット表示に戻ってしまう問題を直しました。",
+      "en": "Fixed switching to direct input on a phone going back to the chat view when the page was opened from a chat view link."
+    },
+    {
+      "ja": "codex を複数起動すると、別の codex の返答が最初に起動した codex の会話に入ってしまう問題を直しました。",
+      "en": "Fixed replies from one codex instance being saved into the conversation of the first codex that was started."
+    },
+    {
+      "ja": "承認への応答の後に、別のサーバのセッションの画面が会話履歴に取り込まれることがある問題を直しました。",
+      "en": "Fixed another server's session screen sometimes being saved into the conversation history after answering an approval."
+    }
+  ]
+}
