@@ -195,6 +195,35 @@ export function readSurfaceModeFromLocation(): SurfaceMode | null {
 }
 
 /**
+ * Remove `?view=` from the current URL, leaving every other query param and
+ * the hash untouched. A no-op under SSR and when `view` is already absent
+ * (no `replaceState` call in that case).
+ *
+ * Exists for `handleStuckSwitchToDirectInput` (Issue #2888): that handler
+ * writes `terminal` to localStorage and remounts, but {@link resolveSurfaceMode}
+ * lets a `?view=` on the URL out-rank localStorage, so a stale `?view=chat`
+ * link would otherwise immediately reassert `chat` on the remount it just
+ * triggered. Uses `window.location`/`history` directly rather than next/navigation's
+ * router, matching {@link readSurfaceModeFromLocation} — routing through
+ * `useSearchParams` re-serializes the whole query string and risks changing
+ * params this function has no business touching.
+ */
+export function clearSurfaceModeParamFromLocation(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const { location, history } = window;
+    const params = new URLSearchParams(location.search);
+    if (!params.has(SURFACE_MODE_VIEW_PARAM)) return;
+    params.delete(SURFACE_MODE_VIEW_PARAM);
+    const query = params.toString();
+    const nextUrl = `${location.pathname}${query ? `?${query}` : ''}${location.hash}`;
+    history.replaceState(history.state, '', nextUrl);
+  } catch {
+    /* location/history unavailable */
+  }
+}
+
+/**
  * Resolve the mode a surface should open in.
  *
  * Precedence: a valid `?view=` wins over localStorage, and is written back to

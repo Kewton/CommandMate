@@ -16,6 +16,7 @@ import {
   RESERVED_GATE_IDS,
   DEFAULT_TIMEOUT_SEC,
   DEFAULT_MAX_LOG_TAIL_BYTES,
+  MAX_ENV_CLEAN_IGNORE_HOME_ENTRIES,
   MAX_GATE_MUTEX_LENGTH,
   MAX_RETRY_ON_FAIL,
 } from '@/lib/verification/verify-config';
@@ -97,6 +98,7 @@ options:
           maxLogTailBytes: 32768,
           requireCommit: false,
           requireEnvClean: false,
+          envCleanIgnoreHomeEntries: [],
         },
       });
     });
@@ -113,6 +115,7 @@ options:
           maxLogTailBytes: 8192,
           requireCommit: false,
           requireEnvClean: false,
+          envCleanIgnoreHomeEntries: [],
         },
       });
     });
@@ -136,6 +139,7 @@ options:
         maxLogTailBytes: DEFAULT_MAX_LOG_TAIL_BYTES,
         requireCommit: false,
         requireEnvClean: false,
+        envCleanIgnoreHomeEntries: [],
       });
     });
 
@@ -149,6 +153,7 @@ options:
         maxLogTailBytes: DEFAULT_MAX_LOG_TAIL_BYTES,
         requireCommit: false,
         requireEnvClean: false,
+        envCleanIgnoreHomeEntries: [],
       });
     });
 
@@ -209,6 +214,7 @@ options:
           maxLogTailBytes: 4096,
           requireCommit: false,
           requireEnvClean: false,
+          envCleanIgnoreHomeEntries: [],
         },
       });
     });
@@ -389,6 +395,125 @@ gates:
       expect(issuesOf(`${MINIMAL}options: origin/develop\n`)).toEqual([
         expect.stringContaining('options'),
       ]);
+    });
+  });
+
+  // Issue #2890: exact `$HOME` entry names the env-clean gate does not count.
+  describe('options.envCleanIgnoreHomeEntries (Issue #2890)', () => {
+    const KEY = 'options.envCleanIgnoreHomeEntries';
+
+    /** `options:` block whose list is spelled as a YAML flow sequence. */
+    function withList(flow: string): string {
+      return `${MINIMAL}options:\n  envCleanIgnoreHomeEntries: ${flow}\n`;
+    }
+
+    it('defaults to an empty list when the key is absent', () => {
+      writeConfig(MINIMAL);
+      expect(loadVerifyConfig(repoPath)?.options.envCleanIgnoreHomeEntries).toEqual([]);
+
+      writeConfig(`${MINIMAL}options:\n  baseRef: origin/main\n`);
+      expect(loadVerifyConfig(repoPath)?.options.envCleanIgnoreHomeEntries).toEqual([]);
+    });
+
+    it('reads a block-style list, in order', () => {
+      writeConfig(
+        `${MINIMAL}options:\n  envCleanIgnoreHomeEntries:\n    - .semgrep\n    - .commandagent\n`
+      );
+      expect(loadVerifyConfig(repoPath)?.options.envCleanIgnoreHomeEntries).toEqual([
+        '.semgrep',
+        '.commandagent',
+      ]);
+    });
+
+    it('reads a flow-style list and an explicitly empty one', () => {
+      writeConfig(withList('[.semgrep]'));
+      expect(loadVerifyConfig(repoPath)?.options.envCleanIgnoreHomeEntries).toEqual(['.semgrep']);
+
+      writeConfig(withList('[]'));
+      expect(loadVerifyConfig(repoPath)?.options.envCleanIgnoreHomeEntries).toEqual([]);
+    });
+
+    it('keeps names that merely look special: dots inside a name, spaces, backslashes', () => {
+      writeConfig(withList(`['..hidden', 'a.b', 'My Files', 'a\\b', '...']`));
+      expect(loadVerifyConfig(repoPath)?.options.envCleanIgnoreHomeEntries).toEqual([
+        '..hidden',
+        'a.b',
+        'My Files',
+        'a\\b',
+        '...',
+      ]);
+    });
+
+    it('leaves the other options untouched when the list is set', () => {
+      writeConfig(
+        `${MINIMAL}options:\n  requireEnvClean: true\n  envCleanIgnoreHomeEntries: [.semgrep]\n`
+      );
+      const options = loadVerifyConfig(repoPath)?.options;
+      expect(options?.requireEnvClean).toBe(true);
+      expect(options?.baseRef).toBeNull();
+      expect(options?.envCleanIgnoreHomeEntries).toEqual(['.semgrep']);
+    });
+
+    it.each([
+      ['a bare string', '.semgrep'],
+      ['a number', '3'],
+      ['a boolean', 'true'],
+      ['a mapping', '{ a: b }'],
+      ['a childless key (null)', ''],
+    ])('rejects %s instead of a list', (_label, value) => {
+      const issues = issuesOf(`${MINIMAL}options:\n  envCleanIgnoreHomeEntries: ${value}\n`);
+      expect(issues).toHaveLength(1);
+      expect(issues[0]).toContain(`${KEY}: must be a list`);
+    });
+
+    it.each([
+      ['a number', '[3]', 'must be a string'],
+      ['a boolean', '[true]', 'must be a string'],
+      ['null', '[~]', 'must be a string'],
+      ['a nested list', '[[.semgrep]]', 'must be a string'],
+      ['a mapping', '[{ a: b }]', 'must be a string'],
+      ['an empty string', '[""]', 'must not be empty'],
+      ['"."', '["."]', 'not "."'],
+      ['".."', '[".."]', 'not ".."'],
+      ['a name with a slash', '[".config/foo"]', '"/" or NUL'],
+      ['a path', '["/Users/me/.semgrep"]', '"/" or NUL'],
+      ['a name with a NUL', '["a\\0b"]', '"/" or NUL'],
+    ])('rejects an item that is %s', (_label, flow, message) => {
+      const issues = issuesOf(withList(flow));
+      expect(issues).toHaveLength(1);
+      expect(issues[0]).toContain(`${KEY}[0]:`);
+      expect(issues[0]).toContain(message);
+    });
+
+    it('names the index of every bad item and keeps the good ones out of the report', () => {
+      const issues = issuesOf(withList('[.semgrep, "", 3, .ok]'));
+      expect(issues).toHaveLength(2);
+      expect(issues[0]).toContain(`${KEY}[1]:`);
+      expect(issues[1]).toContain(`${KEY}[2]:`);
+    });
+
+    it('accepts exactly 32 entries and rejects 33', () => {
+      expect(MAX_ENV_CLEAN_IGNORE_HOME_ENTRIES).toBe(32);
+      const names = (count: number) =>
+        `[${Array.from({ length: count }, (_, index) => `.tool-${index}`).join(', ')}]`;
+
+      writeConfig(withList(names(32)));
+      expect(loadVerifyConfig(repoPath)?.options.envCleanIgnoreHomeEntries).toHaveLength(32);
+
+      const issues = issuesOf(withList(names(33)));
+      expect(issues).toEqual([`${KEY}: at most 32 entries (got 33)`]);
+    });
+
+    it('is a known option key, so it is not reported as an unknown one', () => {
+      const issues = issuesOf(withList('[3]'));
+      expect(issues.some((issue) => issue.includes('unknown'))).toBe(false);
+    });
+
+    it('throws one VerifyConfigError that also carries this list\'s issues alongside others', () => {
+      const issues = issuesOf(`${MINIMAL}options:\n  baseRef: 3\n  envCleanIgnoreHomeEntries: [""]\n`);
+      expect(issues).toHaveLength(2);
+      expect(issues.some((issue) => issue.includes('baseRef'))).toBe(true);
+      expect(issues.some((issue) => issue.includes(KEY))).toBe(true);
     });
   });
 

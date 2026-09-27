@@ -1904,6 +1904,13 @@ export interface VerifyConfigOptionsView {
   maxLogTailBytes: number;
   requireCommit: boolean;
   requireEnvClean: boolean;
+  /**
+   * Issue #2890: `$HOME` entry names `env-clean` does not count. Optional for
+   * the same reason `VerifyOptions.envCleanIgnoreHomeEntries` is — a mirror,
+   * not a looser wire contract: the loader always fills it (`[]` when unset),
+   * so a config read off the route carries the key regardless.
+   */
+  envCleanIgnoreHomeEntries?: string[];
 }
 
 /**

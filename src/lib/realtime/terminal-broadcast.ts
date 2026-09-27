@@ -85,6 +85,11 @@ function snapshotFingerprint(payload: Awaited<ReturnType<typeof buildCurrentOutp
     payload.sessionStatus,
     payload.thinking ?? false,
     payload.isPromptWaiting ?? false,
+    // Issue #2887: so a redraw whose only change is this verdict (a dialog's
+    // answerability flipping between `#2870`'s judgement calls) still reaches
+    // the push, the same reason `sessionStatus` and the two dismiss-panel
+    // fields above are here.
+    payload.promptAnswerable ?? null,
     payload.isSelectionListActive ?? false,
     payload.isPagerActive ?? false,
     // Issue #2369: in the fingerprint for the same reason `sessionStatus` is —
@@ -129,6 +134,12 @@ function emitTerminalSnapshot(
     thinking: payload.thinking ?? false,
     isPromptWaiting: payload.isPromptWaiting ?? false,
     promptData: payload.promptData ?? null,
+    // Issue #2887: straight through, unlike its neighbours above — not
+    // `?? false`. `buildCurrentOutput` publishes this only when it judged the
+    // prompt (#2870), and `undefined` here means "no verdict", which
+    // `JSON.stringify` (in `broadcast`) already drops from the wire on its own.
+    // Defaulting it would turn "not judged" into a judgement.
+    promptAnswerable: payload.promptAnswerable,
     isSelectionListActive: payload.isSelectionListActive ?? false,
     isPagerActive: payload.isPagerActive ?? false,
     isDismissablePanelActive: payload.isDismissablePanelActive ?? false,
