@@ -316,6 +316,63 @@ describe('monitor.sh derives the intervention target from the capture payload (I
   });
 });
 
+describe('monitor.sh prefers the payload-carried session name (Issue #2886)', () => {
+  it('addresses the payload\'s own sessionName rather than the derived shape', () => {
+    // A namespaced server (#2866) or an adopted legacy session names the pane
+    // something other than `mcbd-<cliToolId>-<worktree-id>`; the payload's own
+    // `sessionName` (CLIToolManager's getSessionName(), the name actually
+    // bound) must be what the loop types into, not a reconstruction that would
+    // land on a pane nothing is listening on.
+    const run = runLoop({
+      fixtures: [derived('rate-limit.json', { sessionName: 'mcbd-0a1b2c3d-claude-w1' })],
+      polls: 1,
+    });
+    expectPolls(run, 1);
+
+    expect(run.tmuxCalls).toEqual([
+      'has-session -t =mcbd-0a1b2c3d-claude-w1:',
+      'send-keys -t =mcbd-0a1b2c3d-claude-w1: a Enter',
+    ]);
+    expect(run.stdout).toContain('monitor[w1]: intervention target = mcbd-0a1b2c3d-claude-w1');
+    // The derived shape must not also have been addressed.
+    expect(run.tmuxCalls.join('\n')).not.toContain('mcbd-claude-w1:');
+  });
+
+  it('falls back to the derived shape when the payload carries no sessionName (older server)', () => {
+    // `rate-limit.json` carries no `sessionName` key at all — the shape every
+    // server before #2886 sends — so this is the same fixture the acceptance
+    // case above this file's first describe block already runs, pinned here
+    // under this Issue's name too.
+    const run = runLoop({ fixtures: ['rate-limit.json'], polls: 1 });
+    expectPolls(run, 1);
+
+    expect(run.tmuxCalls).toEqual([
+      'has-session -t =mcbd-claude-w1:',
+      'send-keys -t =mcbd-claude-w1: a Enter',
+    ]);
+  });
+
+  it('keeps --session-prefix outranking the payload, even when sessionName is present', () => {
+    // The escape hatch's meaning must not change: an operator who passed
+    // --session-prefix is overriding the server on purpose, so a namespaced
+    // sessionName in the payload must not silently win back control.
+    const run = runLoop({
+      fixtures: [
+        derived('rate-limit.json', { cliToolId: 'codex', sessionName: 'mcbd-0a1b2c3d-codex-w1-2' }),
+      ],
+      polls: 1,
+      specs: ['w1@codex-2'],
+      args: ['--session-prefix', 'legacy'],
+    });
+    expectPolls(run, 1);
+
+    expect(run.tmuxCalls).toEqual([
+      'has-session -t =legacy-w1-2:',
+      'send-keys -t =legacy-w1-2: a Enter',
+    ]);
+  });
+});
+
 describe('monitor.sh reports undelivered interventions instead of swallowing them (Issue #1601)', () => {
   it('does not send, and says so, when the session does not exist', () => {
     // The production shape of the defect: the target is wrong (or the pane died),
