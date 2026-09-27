@@ -392,6 +392,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     isReconnecting,
     isSelectionListActive,
     isPagerActive,
+    promptAnswerable,
     offersPlanApprove,
     // Issue #2592: the composer's permission-mode control reads these. The
     // phone's composer is docked outside `MobileTerminalTab` — which owns the
@@ -1191,6 +1192,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                 cliToolName={getCliToolDisplayName(activeCliTab)}
                 showStuckHint={showPromptStuckHint}
                 onSwitchToDirectInput={activeSessionRunning ? handleStuckSwitchToDirectInput : undefined}
+                answerable={promptAnswerable}
               />
             )}
 

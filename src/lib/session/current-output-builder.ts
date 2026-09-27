@@ -130,6 +130,7 @@ import {
   type StatusEvidence,
 } from '@/lib/session/status-evidence';
 import { applyAskUserQuestion } from '@/lib/session/ask-user-question-prompt';
+import { assessPromptAnswerability } from '@/lib/polling/auto-yes-dialog-gate';
 import { classifyLayerDisagreement, reportLayerDisagreement } from '@/lib/session/layer-disagreement';
 import {
   buildStructuredPromptData,
@@ -497,6 +498,14 @@ export interface CurrentOutputPayload {
    * check `type` — the degraded form carries none, by construction.
    */
   promptData?: PromptData | StructuredPromptWaitingData | null;
+  /**
+   * Whether `/prompt-response` would answer the published prompt right now
+   * (Issue #2870): `assessPromptAnswerability(...).refusal === null` on the same
+   * capture. Present only when `promptData` is the screen-parsed prompt; absent
+   * with no prompt and for the structured (hook / degraded) forms. `false` means
+   * the UI must not offer Send — the route would refuse it.
+   */
+  promptAnswerable?: boolean;
   autoYes?: {
     enabled: boolean;
     expiresAt: number | null;
@@ -1891,6 +1900,19 @@ async function buildPayload(
       ? buildStructuredPromptData(worktreeId, structuredFacts)
       : null;
 
+  // Issue #2870: whether `/prompt-response` would answer the prompt published
+  // above, read by the SAME function it re-verifies with. In #2868 `promptData`
+  // came off the generic parser alone, the route refused it, and the UI's Send
+  // did nothing. Only for a parser-read prompt: the structured form (hook
+  // `decisionId`, degraded) is answered by id or not by number at all, so the
+  // key is left out there, as it is when no prompt is up. `isPromptWaiting` /
+  // `promptData` / `sessionStatus` are untouched — `wait`'s exit 10, Auto-Yes
+  // and push notifications keep reading exactly what they read before.
+  const promptAnswerable: boolean | undefined =
+    scraperPromptWaiting && (correctedPromptData ?? scraperPromptData)
+      ? assessPromptAnswerability(cliToolId, output).refusal === null
+      : undefined;
+
   // Issue #1723 §3: the field data this Epic is being built on. Every line is
   // one poll where the screen and the agent disagreed about what the agent was
   // doing, which is the only way to answer "how wrong was the scraper?" with a
@@ -2054,6 +2076,7 @@ async function buildPayload(
     thinkingMessage: merged.thinking ? `${getCliToolDisplayName(cliToolId)} is thinking...` : null,
     isPromptWaiting,
     promptData,
+    ...(promptAnswerable !== undefined ? { promptAnswerable } : {}),
     autoYes: {
       enabled: autoYesState?.enabled ?? false,
       expiresAt: autoYesState?.enabled ? autoYesState.expiresAt : null,

@@ -1104,6 +1104,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
             cliToolName={getCliToolDisplayName(cliToolId)}
             showStuckHint={showPromptStuckHint}
             onSwitchToDirectInput={terminal.isRunning ? handleSwitchToDirectInput : undefined}
+            answerable={prompt.answerable}
           />
         ) : null}
         {/* Issue #2046: opencode only. The chords opencode's TUI is driven by
@@ -1342,6 +1343,8 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       promptDecisionId,
       prompt.visible,
       prompt.answering,
+      // Issue #2870: PromptPanel's `answerable`.
+      prompt.answerable,
       handlePromptRespond,
       handlePromptDismiss,
       // Issue #2869: the stuck hint under the panel, and its link.

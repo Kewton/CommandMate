@@ -102,6 +102,8 @@ interface CurrentOutputResponse {
   isPromptWaiting?: boolean;
   /** Issue #1738: may be the degraded structured form published since #1725. */
   promptData?: LivePromptData;
+  /** Issue #2870: whether `/prompt-response` would answer `promptData`; absent when not judged. */
+  promptAnswerable?: boolean;
   content?: string;
   fullOutput?: string;
   realtimeSnippet?: string;
@@ -331,6 +333,10 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   const [isSelectionListActive, setIsSelectionListActive] = useState(false);
   // Issue #1017: Track Codex pager/edit-previous mode (drives pager keys on mobile)
   const [isPagerActive, setIsPagerActive] = useState(false);
+  // Issue #2870: the status API's `promptAnswerable` for the prompt on show.
+  // Kept beside the reducer's prompt slice rather than in it — this poll is the
+  // only writer, and it rewrites it on every prompt it shows.
+  const [promptAnswerable, setPromptAnswerable] = useState<boolean | undefined>(undefined);
   // Issue #2809: the frame is Command Code's plan review, where `Enter` runs the
   // focused action — so the phone's docked pad drops it, as ChatSurface's does
   // (#2793). Only the boolean is kept: the frame itself is not mirrored (#736).
@@ -779,6 +785,7 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       // Handle prompt state transitions
       if (data.isPromptWaiting && data.promptData) {
         actions.showPrompt(data.promptData, `prompt-${Date.now()}`);
+        setPromptAnswerable(data.promptAnswerable);
       } else if (!data.isPromptWaiting && state.prompt.visible) {
         actions.clearPrompt();
       }
@@ -1965,6 +1972,8 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     isReconnecting,
     isSelectionListActive,
     isPagerActive,
+    // Issue #2870: MobilePromptSheet's `answerable`.
+    promptAnswerable,
     // Issue #2809: the docked pad's Enter gate on a plan review.
     offersPlanApprove,
     // Issue #2592: the phone composer's permission-mode control.

@@ -44,6 +44,7 @@ import type { RealtimeEvent, TerminalSnapshotEvent, SessionStatusEvent } from '@
 import { extractComposerText } from '@/lib/detection/composer-text';
 import { buildRealtimeSnippet } from '@/lib/realtime-snippet';
 import { detectAgentMode } from '@/lib/detection/agent-mode';
+import { promptFingerprint } from '@/hooks/usePromptStuckCounter';
 import { AGENT_MODE_UNKNOWN, type AgentMode } from '@/types/cli-tool-contracts';
 import {
   DETAIL_PANE_POLLING_CADENCE,
@@ -232,6 +233,11 @@ export interface PanePromptState {
   data: LivePromptData | null;
   messageId: string | null;
   answering: boolean;
+  /**
+   * Issue #2870: the status API's `promptAnswerable` for this window — whether
+   * `/prompt-response` would answer it. Undefined when not judged.
+   */
+  answerable?: boolean;
 }
 
 interface CurrentOutputResponse {
@@ -242,6 +248,8 @@ interface CurrentOutputResponse {
   isGenerating?: boolean;
   isPromptWaiting?: boolean;
   promptData?: LivePromptData;
+  /** Issue #2870. See {@link PanePromptState.answerable}. */
+  promptAnswerable?: boolean;
   fullOutput?: string;
   realtimeSnippet?: string;
   thinking?: boolean;
@@ -440,7 +448,21 @@ export function useTerminalPanePolling({
       isUnclassifiedActive?: boolean;
       isPromptWaiting?: boolean;
       promptData?: LivePromptData | null;
-    }): void => {
+      /**
+       * Issue #2870: carried by the poll only — the WebSocket push has no
+       * `promptAnswerable`. See {@link carriesAnswerable}.
+       */
+      promptAnswerable?: boolean;
+    },
+    /**
+     * Whether this delivery path carries `promptAnswerable` (the poll does, the
+     * push does not). When it does not, the last verdict is kept for the SAME
+     * window (same fingerprint) and dropped for a different one, so a push
+     * never re-enables Send the poll said was refused, nor carries that refusal
+     * over to a window nobody judged.
+     */
+    carriesAnswerable = false,
+    ): void => {
       const nextOutput = data.fullOutput ?? data.realtimeSnippet ?? '';
       const rawUnclassified = data.isUnclassifiedActive === true
         && data.isPromptWaiting !== true
@@ -503,12 +525,20 @@ export function useTerminalPanePolling({
       });
 
       if (data.isPromptWaiting && data.promptData) {
-        setPrompt(prev => ({
-          ...prev,
-          visible: true,
-          data: data.promptData ?? prev.data,
-          messageId: prev.messageId ?? `prompt-${Date.now()}`,
-        }));
+        setPrompt(prev => {
+          const nextData = data.promptData ?? prev.data;
+          const sameWindow = promptFingerprint(prev.data) !== null
+            && promptFingerprint(prev.data) === promptFingerprint(nextData);
+          return {
+            ...prev,
+            visible: true,
+            data: nextData,
+            messageId: prev.messageId ?? `prompt-${Date.now()}`,
+            answerable: carriesAnswerable
+              ? data.promptAnswerable
+              : sameWindow ? prev.answerable : undefined,
+          };
+        });
       } else if (!data.isPromptWaiting && promptVisibleRef.current) {
         setPrompt({ visible: false, data: null, messageId: null, answering: false });
       }
@@ -538,7 +568,7 @@ export function useTerminalPanePolling({
         return;
       }
 
-      applySnapshot(data);
+      applySnapshot(data, true);
       // Issue #2042: only the poll carries these — the WebSocket push has no
       // `structuredEvents` — so they are applied here rather than in the shared
       // `applySnapshot`. The signature guard keeps the object identity stable

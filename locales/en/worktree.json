@@ -1022,7 +1022,8 @@
   "promptResponse": {
     "refused": "Your answer was not sent because the dialog has changed. Please check the screen.",
     "stuckHint": "If sending does not work, operate the terminal in direct input mode.",
-    "stuckHintLink": "Switch to direct input"
+    "stuckHintLink": "Switch to direct input",
+    "unanswerable": "CommandMate cannot operate this screen. Use direct input mode instead."
   },
   "dismissPanelKeys": {
     "toolbarLabel": "Close this screen",
