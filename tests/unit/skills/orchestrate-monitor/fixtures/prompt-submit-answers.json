@@ -12,7 +12,10 @@
   "thinking": false,
   "thinkingMessage": null,
   "isPromptWaiting": false,
-  "promptData": null,
+  "promptData": {
+    "type": "yes_no",
+    "question": "Submit these answers?"
+  },
   "autoYes": {
     "enabled": true,
     "expiresAt": 1790000000000

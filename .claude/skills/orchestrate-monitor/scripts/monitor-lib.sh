@@ -25,6 +25,19 @@ ml_json_scalar() {
     | sed 's/[[:space:]]*$//; s/,$//; s/^"//; s/"$//'
 }
 
+# Extract a nested OBJECT belonging to a top-level key, lines included.
+# The same two-space anchor as ml_json_scalar makes the range unambiguous: the
+# object opens on `  "<key>": {` and closes on the next line that starts with two
+# spaces and a brace, which no deeper level can produce (options entries close at
+# six spaces, their array at four). A key whose value is `null` — which is what
+# `promptData` is on most frames — yields nothing, and every caller below treats
+# "nothing" as "no evidence" rather than as a permissive default (skills #59,
+# ported in Issue #2904).
+# Usage: ml_json_block <file> <key>
+ml_json_block() {
+  sed -n "/^  \"${2}\"[[:space:]]*:[[:space:]]*{/,/^  }/p" "$1"
+}
+
 # --- text normalization -------------------------------------------------------
 # Every text anchor below matches against normalized text, never against the raw
 # JSON. Issue #1522: `↓ [0-9]` was grepped straight out of the --json file and so
@@ -413,6 +426,148 @@ ml_agy_is_retrying() {
     $0 == "idle" { idle = 1 }
     $0 == "footer" { footer = 1 }
     END { exit !(retry && !idle && !footer) }'
+}
+
+# --- prompt approval policy (skills #59, ported in Issue #2904) ---------------
+# Enter is not a neutral "unblock". Two facts, both measured, decide whether it
+# may be typed at all:
+#
+#   1. It goes into the pane directly, so it overrides whatever the SERVER
+#      decided. When a contract declares `autoYes.mode: off` or `denyPatterns`,
+#      CommandMate withholds the answer on purpose (#1547) and publishes that it
+#      did — `autoYes.lastSuppression` (#1684). Typing Enter there re-approves
+#      exactly what the contract author asked to escalate.
+#   2. On a multiple_choice prompt Enter confirms the DEFAULT option (#1681),
+#      not "yes". That is only an approval when the default IS an approval.
+#
+# Measured against live `capture --json` frames (2026-08-05, CommandMate 0.21.2,
+# 6 worktrees, 30 frames carrying promptData; see commandmate-skills PR #77):
+#   - promptData.type was `multiple_choice` on 30/30 frames. Claude Code's plain
+#     permission prompt is multiple_choice too, so "hold every multiple_choice"
+#     would hold 100% of real approvals — it is not a usable discriminator.
+#   - options[].isDefault existed on every frame and exactly one option carried
+#     it; its label was "Yes" (number 1) on 34/34 options.
+#   - the dangerous shape is visible in the SAME field: the AskUserQuestion-style
+#     picker recorded for prompt db9f9d48 (`capture --prompts --json`) carries
+#     three prose options and NO isDefault at all, so Enter there confirms
+#     whatever the cursor happens to sit on.
+#   - autoYes.lastSuppression was present on every frame (null throughout, since
+#     no contract policy withheld anything during the window).
+#
+# Hence the rule is a positive test, not a deny-list: Enter is sent only when the
+# poll shows a binary approval whose default is affirmative. Anything else — a
+# policy suppression, no promptData, no default option, a non-affirmative default
+# — is held and reported. Holding stalls a worker; approving the wrong option
+# cannot be undone.
+
+# ml_autoyes_suppressed <file>: the contract's autoYes policy withheld an answer
+# for this session. Absent on CommandMate older than #1684, where it reads as
+# "not suppressed" — the pre-Issue-#2904 behaviour, which is why the caller must
+# still document that a contract-backed dispatch is not this loop's job.
+ml_autoyes_suppressed() {
+  ml_json_block "$1" autoYes | grep -qE '^    "lastSuppression"[[:space:]]*:[[:space:]]*\{'
+}
+
+# ml_autoyes_suppression_reason <file>: `mode-off` / `deny-pattern` /
+# `deny-pattern-unusable` / `type-not-allowed` (AutoYesSuppressionReason,
+# src/lib/polling/auto-yes-resolver.ts), for the operator-facing line.
+ml_autoyes_suppression_reason() {
+  ml_json_block "$1" autoYes \
+    | sed -n 's/^      "reason"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+    | head -1
+}
+
+# ml_prompt_type <file>: promptData.type, empty when the frame carries no
+# promptData (which is the case whenever PROMPT came from ml_has_prompt_marker
+# rather than from the product's own detector).
+ml_prompt_type() {
+  ml_json_block "$1" promptData \
+    | sed -n 's/^    "type"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+    | head -1
+}
+
+# ml_prompt_default_label <file>: the label Enter would confirm, empty when the
+# frame states no default.
+# JSON.stringify emits an option object in declaration order (number, label,
+# isDefault, requiresTextInput — MultipleChoiceOption, src/types/models.ts), so
+# the label of the default option is the last one seen before `"isDefault": true`.
+# A label can hold arbitrary command text but never a line that STARTS with
+# `"isDefault"`, because every JSON member is on its own line and newlines inside
+# a string are escaped.
+# yes_no prompts carry plain-string options instead; their optional
+# `defaultOption` is read as the label.
+ml_prompt_default_label() {
+  ml__block=$(ml_json_block "$1" promptData)
+  ml__labelline=$(printf '%s\n' "$ml__block" | awk '
+    /^[[:space:]]*"label"[[:space:]]*:/ { ml_lab = $0 }
+    /^[[:space:]]*"isDefault"[[:space:]]*:[[:space:]]*true/ { print ml_lab; exit }
+  ')
+  if [ -n "$ml__labelline" ]; then
+    printf '%s\n' "$ml__labelline" \
+      | sed 's/^[[:space:]]*"label"[[:space:]]*:[[:space:]]*"//; s/",*[[:space:]]*$//'
+    return 0
+  fi
+  printf '%s\n' "$ml__block" \
+    | sed -n 's/^    "defaultOption"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+    | head -1
+}
+
+# ml_is_affirmative <text>: the option label reads as an approval rather than as
+# a choice. Anchored at the start and followed by a non-alphanumeric or the end,
+# so "Yes" and "Yes, and don't ask again for: …" pass while "No" and a prose
+# answer do not. LC_ALL=C keeps grep byte-oriented for the same reason
+# ml_strip_ansi does: a label carries whatever the worker printed.
+ml_is_affirmative() {
+  printf '%s' "${1:-}" | LC_ALL=C grep -aqiE '^(y|yes|allow|approve|proceed|accept|ok)([^a-zA-Z0-9]|$)'
+}
+
+# ml_prompt_enter_verdict <file> -> approve | hold:<why>
+#   hold:policy          the server withheld the answer under the contract policy
+#   hold:no-prompt-data  the frame carries no promptData; what Enter selects is unknown
+#   hold:type            a prompt type this rule has never been measured against
+#   hold:no-default      no option is marked default; Enter confirms the cursor
+#   hold:choice          the default option is not an approval
+ml_prompt_enter_verdict() {
+  if ml_autoyes_suppressed "$1"; then
+    printf 'hold:policy\n'
+    return 0
+  fi
+  ml__ptype=$(ml_prompt_type "$1")
+  if [ -z "$ml__ptype" ]; then
+    printf 'hold:no-prompt-data\n'
+    return 0
+  fi
+  case "$ml__ptype" in
+    yes_no|multiple_choice) ;;
+    *) printf 'hold:type\n'; return 0 ;;
+  esac
+  ml__label=$(ml_prompt_default_label "$1")
+  if [ -z "$ml__label" ]; then
+    # A yes_no prompt states no default because there is nothing to choose: the
+    # product's own resolver answers it "yes" (resolveBaseAnswer), and `mode:
+    # safe` is defined as "yes_no only". A multiple_choice without a default is
+    # the picker shape, where Enter confirms the cursor position.
+    if [ "$ml__ptype" = "yes_no" ]; then
+      printf 'approve\n'
+    else
+      printf 'hold:no-default\n'
+    fi
+    return 0
+  fi
+  if ml_is_affirmative "$ml__label"; then
+    printf 'approve\n'
+  else
+    printf 'hold:choice\n'
+  fi
+}
+
+# ml_prompt_signature <file> <verdict>: identity of the held prompt, so a prompt
+# that stays on screen for twenty polls is reported (and counted) once rather
+# than twenty times. Derived from the promptData block, which is stable while the
+# prompt is up and different for the next one; the verdict is mixed in so a
+# changed reason re-reports.
+ml_prompt_signature() {
+  { printf '%s\n' "${2:-}"; ml_json_block "$1" promptData; } | cksum | awk '{print $1}'
 }
 
 # --- tmux session targeting ---------------------------------------------------
