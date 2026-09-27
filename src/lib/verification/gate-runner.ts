@@ -1565,6 +1565,7 @@ async function executeRun(
         taskId: envClean.taskId,
         baseline: envClean.baseline,
         sources: envClean.decision.sources,
+        ignoreHomeEntries: config.options.envCleanIgnoreHomeEntries,
       })
     );
     statuses.push(outcome.status);

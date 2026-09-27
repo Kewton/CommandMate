@@ -93,6 +93,22 @@ export interface VerifyOptions {
    * never a pass.
    */
   requireEnvClean: boolean;
+  /**
+   * `$HOME` entry names the `env-clean` gate does not count (Issue #2890).
+   * Default `[]`; the loader always fills it, so a loaded config has the key.
+   *
+   * **Exact names, no glob, no regex.** A pattern would let one careless line
+   * (`.*`) switch the `home-entries` probe off, and the probe exists to catch
+   * exactly what an agent leaves in `$HOME`. The list is for entries that
+   * appear on their own — another tool's dotdir created by a process nobody on
+   * this task started — and it is applied when the two snapshots are compared,
+   * so it also covers baselines taken before the entry was listed here.
+   * Whatever it excused is named in the gate's report rather than dropped.
+   *
+   * Optional in the type only so a hand-built {@link VerifyConfig} fixture that
+   * predates the key keeps compiling; the parser never leaves it out.
+   */
+  envCleanIgnoreHomeEntries?: string[];
 }
 
 export interface VerifyConfig {
@@ -211,6 +227,12 @@ export const MAX_GATE_MUTEX_LENGTH = 64;
  */
 export const MAX_RETRY_ON_FAIL = 1;
 
+/**
+ * Most names `options.envCleanIgnoreHomeEntries` may list (Issue #2890). A list
+ * this long is already a repository papering over a machine it should fix.
+ */
+export const MAX_ENV_CLEAN_IGNORE_HOME_ENTRIES = 32;
+
 const TOP_LEVEL_KEYS = ['version', 'gates', 'options'];
 const GATE_KEYS = ['id', 'command', 'timeoutSec', 'mutex', 'retryOnFail', 'flakyIsPass'];
 const OPTION_KEYS = [
@@ -219,6 +241,7 @@ const OPTION_KEYS = [
   'maxLogTailBytes',
   'requireCommit',
   'requireEnvClean',
+  'envCleanIgnoreHomeEntries',
 ];
 
 export class VerifyConfigError extends Error {
@@ -433,6 +456,51 @@ function validateGates(value: unknown, issues: string[]): VerifyGate[] {
   return validateGateEntries(value, 'gates', issues);
 }
 
+/**
+ * Validate `options.envCleanIgnoreHomeEntries` (Issue #2890).
+ *
+ * Each item must be usable as one exact `$HOME` directory-entry name: a string,
+ * non-empty, not `.` / `..`, and free of `/` and NUL. Anything with a separator
+ * could never equal a `readdir` result, so accepting it would be a rule that
+ * silently matches nothing.
+ *
+ * @returns the names, or null when the value was invalid (issues were pushed)
+ */
+function validateHomeEntryNames(value: unknown, issues: string[]): string[] | null {
+  const label = 'options.envCleanIgnoreHomeEntries';
+  if (!Array.isArray(value)) {
+    issues.push(`${label}: must be a list of $HOME entry names (got ${describe(value)})`);
+    return null;
+  }
+
+  const before = issues.length;
+  if (value.length > MAX_ENV_CLEAN_IGNORE_HOME_ENTRIES) {
+    issues.push(
+      `${label}: at most ${MAX_ENV_CLEAN_IGNORE_HOME_ENTRIES} entries (got ${value.length})`
+    );
+  }
+
+  const names: string[] = [];
+  value.forEach((item: unknown, index) => {
+    const at = `${label}[${index}]`;
+    if (typeof item !== 'string') {
+      issues.push(`${at}: must be a string (got ${describe(item)})`);
+    } else if (item === '') {
+      issues.push(`${at}: must not be empty`);
+    } else if (item === '.' || item === '..') {
+      issues.push(`${at}: must be an entry name, not ${JSON.stringify(item)}`);
+    } else if (item.includes('/') || item.includes('\0')) {
+      issues.push(
+        `${at}: must be a single $HOME entry name without "/" or NUL (got ${describe(item)})`
+      );
+    } else {
+      names.push(item);
+    }
+  });
+
+  return issues.length === before ? names : null;
+}
+
 function validateOptions(value: unknown, issues: string[]): VerifyOptions {
   const options: VerifyOptions = {
     baseRef: null,
@@ -440,6 +508,7 @@ function validateOptions(value: unknown, issues: string[]): VerifyOptions {
     maxLogTailBytes: DEFAULT_MAX_LOG_TAIL_BYTES,
     requireCommit: false,
     requireEnvClean: false,
+    envCleanIgnoreHomeEntries: [],
   };
 
   // A childless `options:` key parses as null and means "all defaults".
@@ -492,6 +561,11 @@ function validateOptions(value: unknown, issues: string[]): VerifyOptions {
     } else {
       options.requireEnvClean = parsed;
     }
+  }
+
+  if (value.envCleanIgnoreHomeEntries !== undefined) {
+    const names = validateHomeEntryNames(value.envCleanIgnoreHomeEntries, issues);
+    if (names) options.envCleanIgnoreHomeEntries = names;
   }
 
   if (value.maxLogTailBytes !== undefined) {
