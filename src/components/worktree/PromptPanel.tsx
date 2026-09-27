@@ -179,12 +179,21 @@ export interface PromptPanelProps {
   showStuckHint?: boolean;
   /** Issue #2869: the hint's link — opens direct-input mode for this pane. */
   onSwitchToDirectInput?: () => void;
+  /**
+   * Issue #2870: whether `/prompt-response` would answer this window — the
+   * status API's `promptAnswerable`. `false` keeps the options on screen but
+   * disables every control, and says to use direct input instead (with the
+   * #2869 link, no Send count needed). Undefined or `true`: unchanged.
+   */
+  answerable?: boolean;
 }
 
 /** Props for {@link PromptStuckHint} */
 interface PromptStuckHintProps {
   showStuckHint?: boolean;
   onSwitchToDirectInput?: () => void;
+  /** Issue #2870. See {@link PromptPanelProps.answerable}. */
+  answerable?: boolean;
 }
 
 /**
@@ -194,10 +203,33 @@ interface PromptStuckHintProps {
  * copy rather than importing this one: suites that mock this module for the
  * split pane still render the sheet.
  */
-function PromptStuckHint({ showStuckHint, onSwitchToDirectInput }: PromptStuckHintProps) {
+function PromptStuckHint({ showStuckHint, onSwitchToDirectInput, answerable }: PromptStuckHintProps) {
   const t = useTranslations('worktree');
-  if (!showStuckHint || !onSwitchToDirectInput) return null;
   const linkLabel = t('promptResponse.stuckHintLink');
+  // Issue #2870: a window the route would refuse says so up front — no Send
+  // has to fail first — and offers the link whenever there is one to offer.
+  if (answerable === false) {
+    return (
+      <p data-testid="prompt-unanswerable-hint" className="mt-3 text-sm text-warning-foreground">
+        {t('promptResponse.unanswerable')}
+        {onSwitchToDirectInput && (
+          <>
+            {' '}
+            <button
+              type="button"
+              data-testid="prompt-stuck-hint-link"
+              onClick={onSwitchToDirectInput}
+              aria-label={linkLabel}
+              className="underline font-medium hover:no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-warning-border rounded"
+            >
+              {linkLabel}
+            </button>
+          </>
+        )}
+      </p>
+    );
+  }
+  if (!showStuckHint || !onSwitchToDirectInput) return null;
   return (
     <p data-testid="prompt-stuck-hint" className="mt-3 text-sm text-warning-foreground">
       {t('promptResponse.stuckHint')}{' '}
@@ -224,6 +256,8 @@ interface PromptPanelContentProps {
   onDismiss?: () => void;
   labelId: string;
   cliToolName?: string;
+  /** Issue #2870. See {@link PromptPanelProps.answerable}. */
+  answerable?: boolean;
 }
 
 /**
@@ -237,6 +271,7 @@ function PromptPanelContent({
   onDismiss,
   labelId,
   cliToolName,
+  answerable,
 }: PromptPanelContentProps) {
   const t = useTranslations('prompt');
   const [selectedOption, setSelectedOption] = useState<number | null>(
@@ -292,7 +327,10 @@ function PromptPanelContent({
   const takesTypedText = multiSelectOptions !== null
     ? checkedTextFieldNumbers.length > 0
     : selectedOptionData !== null && optionTakesTypedText(selectedOptionData);
-  const isDisabled = answering || isSubmitting;
+  const isBusy = answering || isSubmitting;
+  // Issue #2870: a window the route would refuse keeps its options on screen
+  // but nothing on it can be pressed.
+  const isDisabled = isBusy || answerable === false;
 
   const handleToggleOption = useCallback((optionNumber: number, checked: boolean) => {
     setCheckedNumbers((previous) =>
@@ -442,7 +480,7 @@ function PromptPanelContent({
       </p>
 
       {/* Answering indicator */}
-      {isDisabled && (
+      {isBusy && (
         <div data-testid="answering-indicator" className="flex items-center gap-2 text-sm text-muted-foreground" role="status" aria-live="polite">
           <Spinner size="sm" variant="accent" />
           <span>{t('sending')}</span>
@@ -1146,6 +1184,7 @@ export const PromptPanel = memo(function PromptPanel({
   cliToolName,
   showStuckHint,
   onSwitchToDirectInput,
+  answerable,
 }: PromptPanelProps) {
   const { shouldRender, animationClass } = usePromptAnimation({
     visible: visible && promptData !== null,
@@ -1177,10 +1216,12 @@ export const PromptPanel = memo(function PromptPanel({
           onDismiss={onDismiss}
           labelId={labelId}
           cliToolName={cliToolName}
+          answerable={answerable}
         />
         <PromptStuckHint
           showStuckHint={showStuckHint}
           onSwitchToDirectInput={onSwitchToDirectInput}
+          answerable={answerable}
         />
       </div>
     </ErrorBoundary>

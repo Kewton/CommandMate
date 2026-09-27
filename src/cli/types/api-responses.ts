@@ -203,6 +203,12 @@ export interface CurrentOutputResponse {
   lineCount: number;
   lastCapturedLine: number;
   promptData: PromptData | null;
+  /**
+   * Whether `/prompt-response` would answer `promptData` right now (Issue #2870).
+   * Present only for a screen-parsed prompt; absent with no prompt and for the
+   * structured (hook / degraded) forms.
+   */
+  promptAnswerable?: boolean;
   autoYes: {
     enabled: boolean;
     expiresAt: number | null;

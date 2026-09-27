@@ -57,7 +57,10 @@ import { normalizeFrame } from '@/lib/detection/tools/frame';
 import { getToolStatusDetector } from '@/lib/detection/tools/registry';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import type { DialogVerdict } from '@/lib/detection/tools/types';
-import type { PromptDetectionResult } from '@/lib/detection/prompt-detector';
+import { detectPrompt, type PromptDetectionResult } from '@/lib/detection/prompt-detector';
+import { stripAnsi, stripBoxDrawing, buildDetectPromptOptions } from '@/lib/detection/cli-patterns';
+import { detectAntigravityNumberedDialogPrompt } from '@/lib/detection/tools/antigravity/dialog';
+import { readCommandCodeQuestionDialog } from '@/lib/detection/tools/command-code/dialog';
 import type { PromptType } from '@/types/models';
 
 /**
@@ -420,4 +423,98 @@ export function judgePromptResponse(
     return { reason: UNSUPPORTED_DIALOG_LAYOUT_REASON, message: UNSUPPORTED_DIALOG_LAYOUT_MESSAGE };
   }
   return { reason: PROMPT_NO_LONGER_ACTIVE_REASON };
+}
+
+/**
+ * The refusal text for a Command Code question screen that is plainly up and
+ * could not be read (Issue #2522 確定仕様 B).
+ *
+ * Shares {@link UNSUPPORTED_DIALOG_LAYOUT_REASON} with Issue #2486's refusal —
+ * the reason code is what `respond --json` and the CLI branch on, and both cases
+ * are the same thing: a picker is on screen whose layout no rule could verify.
+ * The SENTENCE is its own because the next step differs in one respect worth
+ * saying out loud: this screen's LIST is what could not be read, so retrying
+ * once the pane has repainted is genuinely worth a try before walking over to it.
+ *
+ * Fixed text that never quotes the answer or the frame (SEC-003), so it is safe
+ * to return to a client verbatim.
+ */
+export const COMMAND_CODE_UNSUPPORTED_QUESTION_MESSAGE =
+  'A Command Code question is on screen, but its option list could not be read, so no key was ' +
+  'sent. Answer it in the terminal, or retry once the screen has settled.';
+
+/** What {@link assessPromptAnswerability} read off a frame (Issue #2870). */
+export interface PromptAnswerability {
+  /** The prompt read off the frame (the route builds its answer from this). */
+  promptCheck: PromptDetectionResult;
+  /** Whether it was read as Command Code's question dialog (the route's free-text guard). */
+  isCommandCodeQuestion: boolean;
+  /** Null when the frame may be answered; otherwise why not. */
+  refusal: PromptResponseRefusal | null;
+  /** {@link evaluateDialogPresence} for the frame (the route's log line). */
+  presence: DialogPresenceVerdict;
+}
+
+/**
+ * May this frame be answered from CommandMate? (Issue #2870)
+ *
+ * The ONE reading both `/prompt-response` (before it sends a key) and the status
+ * API (`promptAnswerable`, before the UI offers Send) use, so the two can no
+ * longer disagree: in #2868 the status API published a prompt off the generic
+ * parser alone while `/prompt-response` refused it, and Send did nothing.
+ *
+ * The order is the route's (#161, #2364, #2457, #2486, #2522): the tool's own
+ * reader (agy's `↑/↓ Navigate` dialog, Command Code's question) → the generic
+ * parser → {@link evaluateDialogPresence} → {@link judgePromptResponse}.
+ *
+ * @param cliToolId - CLI tool the frame came from
+ * @param frame - The capture itself (ANSI and box drawing intact). It is cleaned
+ *   here for the parsers; Command Code's reader and the presence gate read it as
+ *   captured (see {@link evaluateDialogPresence}).
+ */
+export function assessPromptAnswerability(
+  cliToolId: CLIToolType,
+  frame: string,
+): PromptAnswerability {
+  const cleanOutput = stripBoxDrawing(stripAnsi(frame));
+  const toolDialog = cliToolId === 'antigravity'
+    ? detectAntigravityNumberedDialogPrompt(cleanOutput)
+    : null;
+
+  const commandCodeQuestion = cliToolId === 'command-code'
+    ? readCommandCodeQuestionDialog(frame)
+    : { kind: 'none' as const };
+
+  // Plainly up and unreadable: refuse before the generic parser, whose partial
+  // list is exactly what must not reach a keystroke.
+  if (commandCodeQuestion.kind === 'unsupported') {
+    return {
+      promptCheck: { isPrompt: false, cleanContent: cleanOutput },
+      isCommandCodeQuestion: false,
+      refusal: {
+        reason: UNSUPPORTED_DIALOG_LAYOUT_REASON,
+        message: COMMAND_CODE_UNSUPPORTED_QUESTION_MESSAGE,
+      },
+      presence: {
+        present: false,
+        dialog: null,
+        mode: AUTO_YES_DIALOG_GATE_DEFAULT_MODE[cliToolId] ?? 'legacy',
+        gated: false,
+      },
+    };
+  }
+
+  const isCommandCodeQuestion = commandCodeQuestion.kind === 'prompt';
+  const promptCheck = (commandCodeQuestion.kind === 'prompt' ? commandCodeQuestion.prompt : null)
+    ?? toolDialog
+    ?? detectPrompt(cleanOutput, buildDetectPromptOptions(cliToolId));
+
+  const presence = evaluateDialogPresence(cliToolId, promptCheck.promptData?.type, frame);
+
+  return {
+    promptCheck,
+    isCommandCodeQuestion,
+    refusal: judgePromptResponse(promptCheck, presence),
+    presence,
+  };
 }
