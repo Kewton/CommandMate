@@ -64,6 +64,16 @@
  * resolving the worktree from `cwd`, which is exactly the hand-configured
  * behaviour of Issue #1549. `CM_AGENT_HOOKS_INJECT=0` turns the whole thing off.
  *
+ * ## The shared app-server daemon (Issue #2874)
+ *
+ * From codex **0.157** the TUI attaches by default (`features.daemon_auto_start`)
+ * to one machine-wide `codex app-server --managed-daemon`, and hooks run inside
+ * *that* process, so they see the daemon's environment — the first instance that
+ * started it — not the launching session's. Every later instance was reported as
+ * that first one. Any `-c` makes codex run embedded, where hooks inherit the
+ * session's own env again; {@link CODEX_EMBEDDED_MODE_ARGS} is that `-c`.
+ * Measured 2026-09-27 on codex-cli 0.157.1.
+ *
  * @module lib/hooks/sources/codex/hooks-config
  */
 
@@ -143,6 +153,9 @@ export const CODEX_HOOK_TRUST_ENV_VAR = 'CM_CODEX_HOOK_TRUST';
 
 /** codex's own flag for running unreviewed hooks, for one invocation. */
 export const CODEX_HOOK_TRUST_BYPASS_FLAG = '--dangerously-bypass-hook-trust';
+
+/** codex 0.157+: keep the TUI off the shared app-server daemon so hooks run with this session's env. */
+export const CODEX_EMBEDDED_MODE_ARGS = '-c features.daemon_auto_start=false';
 
 /**
  * `SessionEnd`'s budget, in seconds.
@@ -668,7 +681,11 @@ export function buildCodexLaunchPlan(
       [CODEX_PERMISSION_URL_ENV_VAR]: `http://${CODEX_HOOK_HOST}:${port}${PERMISSION_REQUEST_PATH}?${query.toString()}`,
     };
     const trust = isCodexHookTrustBypassEnabled() ? ` ${CODEX_HOOK_TRUST_BYPASS_FLAG}` : '';
-    return { command: `${shellQuote(executablePath)}${trust}`, settingsPath, env };
+    return {
+      command: `${shellQuote(executablePath)} ${CODEX_EMBEDDED_MODE_ARGS}${trust}`,
+      settingsPath,
+      env,
+    };
   } catch (error) {
     logger.warn('codex-hooks-config-write-failed', {
       worktreeId: target.worktreeId,
