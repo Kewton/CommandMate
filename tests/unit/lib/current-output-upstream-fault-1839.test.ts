@@ -16,7 +16,7 @@ import type Database from 'better-sqlite3';
 vi.mock('@/lib/db', () => ({ getSessionState: vi.fn(() => null), createMessage: vi.fn() }));
 const isRunning = vi.fn().mockResolvedValue(true);
 vi.mock('@/lib/cli-tools/manager', () => ({
-  CLIToolManager: { getInstance: () => ({ getTool: () => ({ isRunning }) }) },
+  CLIToolManager: { getInstance: () => ({ getTool: () => ({ getSessionName: () => 'mcbd-test-session', isRunning }) }) },
 }));
 vi.mock('@/lib/session/cli-session', () => ({ captureSessionOutput: vi.fn() }));
 vi.mock('@/lib/polling/auto-yes-manager', () => ({

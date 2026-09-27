@@ -18,6 +18,7 @@ export const dynamic = 'force-dynamic';
 import { getDbInstance } from '@/lib/db/db-instance';
 import { getWorktrees, getRepositories, getMessages, markPendingPromptsAsAnswered, getAgentInstances } from '@/lib/db';
 import { listSessions } from '@/lib/tmux/tmux';
+import { createCachedOwnershipMatcher, ownedSessionNameSet } from '@/lib/cli-tools/session-ownership';
 import {
   createStatusDetectionMetrics,
   detectWorktreeSessionStatus,
@@ -33,6 +34,7 @@ import { getDefaultSelectedAgents } from '@/lib/db/app-settings-db';
 import { resolveSelectedAgents } from '@/lib/selected-agents-validator';
 import { deriveSessionStatus, isUnclassifiedCliStatus } from '@/lib/session/status-mapping';
 import { getEnabledAutoYesByWorktree } from '@/lib/auto-yes-state';
+import { getSessionNamespace } from '@/lib/cli-tools/session-namespace';
 import { createLogger } from '@/lib/logger';
 import type { PromptType } from '@/types/models';
 import type { AutoYesInstanceSummary } from '@/types/auto-yes';
@@ -135,14 +137,17 @@ export async function GET(request: NextRequest) {
       const tmuxSessions = await listSessions();
       listSessionsMs = performance.now() - statusStartedAt;
       tmuxSessionCount = tmuxSessions.length;
-      const sessionNameSet = new Set(tmuxSessions.map(s => s.name));
+      // Issue #2865: a session counts as this worktree's only when it was created
+      // in this worktree's directory — a same-named session another CommandMate
+      // server started is not "running" here. realpath memoized per request.
+      const ownershipMatcher = createCachedOwnershipMatcher();
 
       const probeStartedAt = performance.now();
       await Promise.all(
         worktrees.map(async (worktree) => {
           const status = await detectWorktreeSessionStatus(
             worktree.id,
-            sessionNameSet,
+            ownedSessionNameSet(tmuxSessions, worktree.path, ownershipMatcher),
             db,
             getMessages,
             markPendingPromptsAsAnswered,
@@ -270,6 +275,11 @@ export async function GET(request: NextRequest) {
         // nothing to compute, it is the same for every caller, and the clients
         // that need it are exactly the ones that never pass a query string.
         defaultSelectedAgents,
+        // Issue #2867: the namespace this server names its tmux sessions with
+        // (null = legacy names), so `commandmate ls --json` can print a name it
+        // cannot compute itself. Once per response rather than per row: the
+        // sidebar polls this route, and every row would carry the same value.
+        tmuxSessionNamespace: getSessionNamespace(),
         // Only present when the caller opted out, so the default response shape
         // is byte-for-byte what it was before #2060.
         ...(includeStatus ? {} : { statusIncluded: false }),

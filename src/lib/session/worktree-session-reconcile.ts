@@ -70,17 +70,16 @@
 
 import type Database from 'better-sqlite3';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
-import {
-  CLI_TOOL_IDS,
-  buildInstanceId,
-  isCliToolType,
-  type CLIToolType,
-} from '@/lib/cli-tools/types';
-import { validateSessionName } from '@/lib/cli-tools/validation';
+import { buildInstanceId, isCliToolType, type CLIToolType } from '@/lib/cli-tools/types';
 import { getAgentInstances } from '@/lib/db/agent-instances-db';
+import { validateSessionName } from '@/lib/cli-tools/validation';
+import { parseSessionName } from '@/lib/cli-tools/session-name';
+import { getSessionNamespace } from '@/lib/cli-tools/session-namespace';
+import { collectInstanceTargets, type InstanceTarget } from './session-instance-targets';
 import { getAllWorktreeAliases } from '@/lib/db/worktree-alias-db';
 import { isValidWorktreeId } from '@/lib/security/path-validator';
 import { listSessions, renameSession } from '@/lib/tmux/tmux';
+import { createCachedOwnershipMatcher } from '@/lib/tmux/session-ownership';
 import { getControlModeTmuxTransport } from '@/lib/tmux/control-mode-tmux-transport';
 import {
   migrateAutoYesStateWorktreeIds,
@@ -159,6 +158,11 @@ export interface ReconcileWorktreeSessionsResult {
 export interface ReconcileTmuxDeps {
   listSessions: typeof listSessions;
   renameSession: typeof renameSession;
+  /**
+   * Issue #2865: whether a session created in `sessionPath` belongs to the
+   * worktree at `worktreePath`. Defaults to `isSessionPathOwnedBy`.
+   */
+  isSessionOwnedBy: (sessionPath: string | null, worktreePath: string) => boolean;
 }
 
 export interface ReconcileOptions {
@@ -212,41 +216,13 @@ function normalizeRenames(renames: ReadonlyArray<WorktreeIdRename>): WorktreeIdR
  * The roster is read for BOTH IDs because the caller may reconcile either side
  * of the DB move: after `migrateWorktreeIdPreservingChildren` the rows sit under
  * `newId`, but a caller reconciling ahead of the move still finds them under
- * `oldId`. The primary instance of every CLI tool is always included — a
- * worktree that predates the roster (#1000) has no `agent_instances` rows at all
- * yet can absolutely have a running `mcbd-claude-<id>` session.
+ * `oldId`.
  */
-function collectInstanceTargets(
+function collectRenameInstanceTargets(
   db: Database.Database,
   rename: WorktreeIdRename
-): Array<{ cliToolId: CLIToolType; instanceId: string }> {
-  const seen = new Set<string>();
-  const targets: Array<{ cliToolId: CLIToolType; instanceId: string }> = [];
-
-  const add = (cliToolId: CLIToolType, instanceId: string): void => {
-    const key = `${cliToolId}|${instanceId}`;
-    if (seen.has(key)) return;
-    seen.add(key);
-    targets.push({ cliToolId, instanceId });
-  };
-
-  for (const cliToolId of CLI_TOOL_IDS) add(cliToolId, cliToolId);
-
-  for (const worktreeId of [rename.newId, rename.oldId]) {
-    let instances;
-    try {
-      instances = getAgentInstances(db, worktreeId);
-    } catch {
-      // No agent_instances table (older database) — the primary instances above
-      // already cover the pre-roster shape.
-      continue;
-    }
-    for (const instance of instances) {
-      if (isCliToolType(instance.cliTool)) add(instance.cliTool, instance.id);
-    }
-  }
-
-  return targets;
+): InstanceTarget[] {
+  return collectInstanceTargets(db, [rename.newId, rename.oldId]);
 }
 
 /** Build the (old session name → new session name) plan for one ID move. */
@@ -258,7 +234,7 @@ function planSessionRenames(
   const manager = CLIToolManager.getInstance();
   const plans: SessionRenamePlan[] = [];
 
-  for (const { cliToolId, instanceId } of collectInstanceTargets(db, rename)) {
+  for (const { cliToolId, instanceId } of collectRenameInstanceTargets(db, rename)) {
     try {
       const tool = manager.getTool(cliToolId);
       const oldName = tool.getSessionName(rename.oldId, instanceId);
@@ -349,27 +325,36 @@ interface AttributedSession {
  * @param knownIds - Every worktree ID the database can vouch for
  * @returns The attribution, or `null` when nothing in `knownIds` explains the name
  */
-function attributeSessionName(name: string, knownIds: ReadonlySet<string>): AttributedSession | null {
-  for (const cliToolId of CLI_TOOL_IDS) {
-    const prefix = `mcbd-${cliToolId}-`;
-    if (!name.startsWith(prefix)) continue;
+function attributeSessionName(
+  name: string,
+  knownIds: ReadonlySet<string>,
+  namespace: string | null = getSessionNamespace()
+): AttributedSession | null {
+  // Issue #2866: legacy names and names in this server's namespace only. A name
+  // in another namespace is another server's session, whatever ID it carries.
+  const parsed = parseSessionName(name);
+  if (!parsed) return null;
+  if (parsed.namespace !== null && parsed.namespace !== namespace) return null;
 
-    // No CLI tool id is a prefix of another, so at most one branch is entered
-    // and the remainder is unambiguously `<id>[-<suffix>]`.
-    const rest = name.slice(prefix.length);
-    let candidate = rest;
-    for (;;) {
-      if (knownIds.has(candidate)) {
-        const suffix = candidate.length === rest.length ? undefined : rest.slice(candidate.length + 1);
-        return { cliToolId, worktreeId: candidate, suffix: suffix || undefined };
-      }
-      const cut = candidate.lastIndexOf('-');
-      if (cut <= 0) return null;
-      candidate = candidate.slice(0, cut);
+  // No CLI tool id is a prefix of another, so the remainder is unambiguously
+  // `<id>[-<suffix>]`.
+  const { cliToolId, rest } = parsed;
+  let candidate = rest;
+  for (;;) {
+    if (knownIds.has(candidate)) {
+      const suffix = candidate.length === rest.length ? undefined : rest.slice(candidate.length + 1);
+      return { cliToolId, worktreeId: candidate, suffix: suffix || undefined };
     }
+    const cut = candidate.lastIndexOf('-');
+    if (cut <= 0) return null;
+    candidate = candidate.slice(0, cut);
   }
+}
 
-  return null;
+/** Whether a live name is another server's namespaced session (Issue #2866). */
+function isOtherNamespaceSession(name: string, namespace: string | null): boolean {
+  const parsed = parseSessionName(name);
+  return parsed !== null && parsed.namespace !== null && parsed.namespace !== namespace;
 }
 
 /**
@@ -389,11 +374,14 @@ function discoverSessionRenames(
 ): SessionRenamePlan[] {
   const byOldId = new Map(renames.map((rename) => [rename.oldId, rename]));
   const plans: SessionRenamePlan[] = [];
+  const namespace = getSessionNamespace();
 
   for (const name of liveNames) {
     if (!name.startsWith('mcbd-')) continue;
+    // Issue #2866: another server's namespace — neither attributed nor reported.
+    if (isOtherNamespaceSession(name, namespace)) continue;
 
-    const attributed = attributeSessionName(name, knownIds);
+    const attributed = attributeSessionName(name, knownIds, namespace);
     if (!attributed) {
       result.unaccountedSessions.push(name);
       continue;
@@ -405,7 +393,8 @@ function discoverSessionRenames(
     try {
       const tool = CLIToolManager.getInstance().getTool(attributed.cliToolId);
       // Rebuilt through getSessionName rather than by string surgery so the
-      // suffix convention stays owned by one place (`cli-tools/base.ts`).
+      // suffix convention stays owned by one place (`cli-tools/session-name.ts`).
+      // A legacy-form source lands on the current form (Issue #2866).
       const instanceId = attributed.suffix
         ? buildInstanceId(attributed.cliToolId, attributed.suffix)
         : attributed.cliToolId;
@@ -439,6 +428,69 @@ function mergeSessionPlans(
     if (!byOldName.has(plan.oldName)) byOldName.set(plan.oldName, plan);
   }
   return Array.from(byOldName.values());
+}
+
+/**
+ * The path of a worktree row, or null. Queried directly for the same reason
+ * {@link collectKnownWorktreeIds} is (suites mock `worktree-db`).
+ */
+function readWorktreePath(db: Database.Database, worktreeId: string): string | null {
+  try {
+    const row = db.prepare('SELECT path FROM worktrees WHERE id = ?').get(worktreeId) as
+      | { path: string }
+      | undefined;
+    return row?.path ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Drop the plans whose live source session another CommandMate server created
+ * (Issue #2865).
+ *
+ * Session names carry no server identity, so a live `mcbd-claude-<old>` may be
+ * a different server's session that merely shares the worktree ID. Only a
+ * session whose `#{session_path}` is the worktree's own directory is renamed;
+ * the rest are reported in `skippedSessions`. The directory comes from the
+ * rename target's row, falling back to the source's row when the pass runs
+ * ahead of the DB move. A plan whose worktree has no row at all cannot be
+ * vouched for and is skipped too (fail safe).
+ */
+function excludeForeignSessionPlans(
+  db: Database.Database,
+  plans: SessionRenamePlan[],
+  live: ReadonlySet<string>,
+  livePaths: ReadonlyMap<string, string>,
+  deps: ReconcileTmuxDeps,
+  result: ReconcileWorktreeSessionsResult
+): SessionRenamePlan[] {
+  const owned: SessionRenamePlan[] = [];
+  for (const plan of plans) {
+    // Not live: renameSessionsTwoStage drops it without counting it.
+    if (!live.has(plan.oldName)) {
+      owned.push(plan);
+      continue;
+    }
+    const worktreePath =
+      readWorktreePath(db, plan.rename.newId) ?? readWorktreePath(db, plan.rename.oldId);
+    const sessionPath = livePaths.get(plan.oldName) ?? null;
+    if (worktreePath !== null && deps.isSessionOwnedBy(sessionPath, worktreePath)) {
+      owned.push(plan);
+      continue;
+    }
+    result.skippedSessions.push({
+      oldName: plan.oldName,
+      newName: plan.newName,
+      reason: 'session owned by another server',
+    });
+    logger.warn('reconcile:foreign-session-skipped', {
+      sessionName: plan.oldName,
+      sessionPath,
+      worktreePath,
+    });
+  }
+  return owned;
 }
 
 /** Mint a session name that is free both on the server and within this pass. */
@@ -680,14 +732,18 @@ export async function reconcileWorktreeSessions(
   const deps: ReconcileTmuxDeps = {
     listSessions: options?.tmux?.listSessions ?? listSessions,
     renameSession: options?.tmux?.renameSession ?? renameSession,
+    isSessionOwnedBy: options?.tmux?.isSessionOwnedBy ?? createCachedOwnershipMatcher(),
   };
 
   // Listed once, up front: both the prediction pass and the attribution pass
   // need it, and it is what makes a startup with nothing stale cost exactly one
   // `tmux list-sessions`.
   let live: Set<string> | null = null;
+  const livePaths = new Map<string, string>();
   try {
-    live = new Set((await deps.listSessions()).map((session) => session.name));
+    const sessions = await deps.listSessions();
+    live = new Set(sessions.map((session) => session.name));
+    for (const session of sessions) livePaths.set(session.name, session.path);
   } catch (error) {
     result.errors.push(
       `list tmux sessions: ${error instanceof Error ? error.message : String(error)}`
@@ -708,7 +764,8 @@ export async function reconcileWorktreeSessions(
       else result.planSources.discovered++;
     }
 
-    await renameSessionsTwoStage(plans, live, deps, result);
+    const ownedPlans = excludeForeignSessionPlans(db, plans, live, livePaths, deps, result);
+    await renameSessionsTwoStage(ownedPlans, live, deps, result);
   }
 
   // Runtime state moves after the sessions: a poller that ticks in between

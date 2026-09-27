@@ -56,6 +56,7 @@ import {
 } from '@/lib/session/prompt-waiting-guard';
 import { createLogger } from '@/lib/logger';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
+import { checkSessionOwnership, foreignSessionErrorBody } from '@/lib/cli-tools/session-ownership';
 
 const logger = createLogger('api/terminal');
 
@@ -138,6 +139,14 @@ export async function POST(
 
     const manager = CLIToolManager.getInstance();
     const cliTool = manager.getTool(target.cliToolId);
+
+    // Issue #2865: a same-named session another CommandMate server created is
+    // never typed into.
+    const sessionName = cliTool.getSessionName(id, instanceId);
+    const ownership = await checkSessionOwnership(sessionName, worktree.path);
+    if (ownership.verdict === 'foreign') {
+      return NextResponse.json(foreignSessionErrorBody(sessionName, ownership.sessionPath), { status: 409 });
+    }
 
     // No auto-creation; return 404 if session does not exist. `isRunning` is the
     // ICLITool spelling of the `hasSession` check this used to make directly.

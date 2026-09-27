@@ -641,6 +641,15 @@ probe は `ok` / `unavailable` のどちらかを必ず名乗り、`unavailable`
 （`EnvBaseline`、`src/lib/verification/env-clean-gate.ts`）。保存は JSON の往復で、
 `isEnvSnapshot` は知らないキーを無視するため、キー付きのファイルも従来のローダでそのまま読める。
 
+#### `$HOME` 直下の除外リスト（`options.envCleanIgnoreHomeEntries`、Issue #2890）
+
+ワーカーと無関係に `$HOME` 直下へ現れるエントリ（別ツールのドットディレクトリ等）で毎回 `failed` になるのを、
+verify.yaml の `options.envCleanIgnoreHomeEntries`（文字列の配列、既定 `[]`、最大 32 件）で外せる。
+**エントリ名との完全一致**のみ（glob・正規表現なし。`.semgrep-x` は `.semgrep` に一致しない）で、`home-entries`
+probe の追加・削除の両方に効き、`commandmate-entries` には効かない。除外は**比較の段階だけ**で、採取済みの
+ベースラインは書き換えない（後から足したリストが既存 task にも効く）。除外した項目は黙って消さず、
+レポートに `ignored (options.envCleanIgnoreHomeEntries): .semgrep` の 1 行で出す。
+
 #### 既定は無効、opt-in で有効
 
 | 宣言場所 | 単位 |

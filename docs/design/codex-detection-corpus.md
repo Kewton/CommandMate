@@ -33,7 +33,8 @@ codex --version                                  # 例: codex-cli 0.156.1
 PROBE=$HOME/codex-probe-$(codex --version | awk '{print $2}')
 mkdir -p "$PROBE/repo" && cd "$PROBE/repo" && git init -q && echo probe > README.md
 # 本番の tmux サーバーに触れないよう、専用ソケット（-L）を使う
-tmux -L codexprobe new-session -d -s probe -x 200 -y 1000 -c "$PROBE/repo" 'codex -a untrusted'
+# `-a untrusted` は 0.157.1 で廃止。`-a on-request -s read-only` で起動し、trust は画面で承認する
+tmux -L codexprobe new-session -d -s probe -x 200 -y 1000 -c "$PROBE/repo" 'codex -a on-request -s read-only'
 cap() { tmux -L codexprobe capture-pane -t '=probe:' -p -e -S -1000 > "$PROBE/$1"; }
 send() { tmux -L codexprobe send-keys -t '=probe:' -l -- "$1"; tmux -L codexprobe send-keys -t '=probe:' Enter; }
 ```
@@ -81,6 +82,10 @@ tmux -L codexprobe kill-server   # -L 付き。本番の tmux サーバーには
 ```
 
 `$PROBE` は、Issue に添付するまで残しておいてよい。
+
+### 2-5. 実施記録
+
+- **0.157.1**（2026-09-27、Issue #2868）: `model-picker.txt` だけが落ちた（フッタが `enter select · esc back` に変わった）。`CODEX_PICKER_FOOTER_PATTERN` で直し、`CODEX_VERIFIED_AGAINST` を 0.157.1 へ。`-a untrusted` が廃止され `-c projects.….trust_level` の上書きも効かなかったので、`-a on-request -s read-only` で起動し trust は画面で承認した（`tests/fixtures/codex-dialogs-0157/README.md`）
 
 ## 3. 実運用での検知（Issue #2843）
 

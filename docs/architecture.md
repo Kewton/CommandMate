@@ -31,7 +31,7 @@
 
 - **worktree**: git worktree として管理されるブランチディレクトリ
 - **worktreeId**: URL セーフな識別子（例: `feature-foo`）
-- **tmux session**: `mcbd-{cliToolId}-{worktreeId}` という名前の tmux セッション（§6.1。`cw_{worktreeId}` は Issue #4 以前の旧名）
+- **tmux session**: `mcbd-{ns}-{cliToolId}-{worktreeId}`（名前空間導入前から動いていたものは `mcbd-{cliToolId}-{worktreeId}`）という名前の tmux セッション（§6.1。`cw_{worktreeId}` は Issue #4 以前の旧名）
 - **Stop フック**: Claude CLI の `CLAUDE_HOOKS_STOP` に設定する完了フック
 
 ---
@@ -221,7 +221,7 @@ graph TD
 	•	SQLite への接続
 	•	tmux server
 	•	システム上に既存の tmux サーバを利用
-	•	mcbd-{cliToolId}-{worktreeId} というセッション名で CLI ツールを起動
+	•	mcbd-{ns}-{cliToolId}-{worktreeId} というセッション名で CLI ツールを起動
 	•	CLI ツールプロセス（Claude Code / Codex CLI）
 	•	各 tmux セッション内で選択された CLI ツールが起動
 	•	CLAUDE_HOOKS_STOP に設定されたコマンドで完了通知（Claude Code の場合）
@@ -462,9 +462,13 @@ tmux セッション / Claude プロセスが落ちた場合
 ## 6. tmux & CLI Tool Integration
 
 ### 6.1 セッション命名規則
-- セッション名: `mcbd-{cliToolId}-{worktreeId}`
+- セッション名: `mcbd-{ns}-{cliToolId}-{worktreeId}[-{suffix}]`（Issue #2866）
+  - `{ns}` はサーバごとの名前空間（16 進 8 桁、DB に保存）。worktree ID が同じ別サーバとセッション名が重ならないようにする
+  - 旧形式 `mcbd-{cliToolId}-{worktreeId}[-{suffix}]` のセッションは、サーバが採用して旧名のまま使い続ける
+  - 名前の組み立て・分解は `src/lib/cli-tools/session-name.ts` の 1 箇所（`resolveSessionName` / `parseSessionName`）
+  - ns はサーバの DB にあるため CLI は自分で計算できない。サーバは `GET /api/worktrees` のトップレベルに `tmuxSessionNamespace`、`GET /api/worktrees/[id]` の `agentInstances[].sessionName` に実際の名前を公開する（Issue #2867）
 - 例:
-  - Claude: `mcbd-claude-feature-foo`
+  - Claude: `mcbd-0a1b2c3d-claude-feature-foo`（旧形式: `mcbd-claude-feature-foo`）
 - 1 worktree に対して 1 セッションを維持する。
 - ※ 旧命名規則 `cw_{worktreeId}` からの移行: Issue #4で実装
 - `cliToolId` / instance の解決は `src/lib/session/resolve-session-target.ts` 1 箇所で行う（Issue #1925 / 設計 §4 D5）。CLI は `GET /api/capabilities` で版を確かめてから `GET /api/worktrees/:id/resolve-target` へ委譲する薄いクライアント。
@@ -511,7 +515,7 @@ tmux セッション / Claude プロセスが落ちた場合
 ### 6.2 UC-2: 遅延セッション起動フロー
 
 ```
-# {sessionName}   = mcbd-{cliToolId}-{worktreeId}
+# {sessionName}   = mcbd-{ns}-{cliToolId}-{worktreeId}（旧形式は mcbd-{cliToolId}-{worktreeId}、§6.1）
 # {worktreePath}  = /path/to/root/feature/foo
 tmux new-session -d -s "{sessionName}" -c "{worktreePath}"
 

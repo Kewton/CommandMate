@@ -81,8 +81,14 @@ export function findStalePins(map, repoRoot = REPO_ROOT) {
   return stale;
 }
 
-/** The counterpart path a file must be ported to, as written in the map. */
+/**
+ * The counterpart path a file must be ported to, as written in the map.
+ * `file.counterpartPath` overrides the default `${pkg.counterpart}/${file.path}`
+ * join for packages whose counterpart repository places the file elsewhere
+ * (Issue #2904 — cmate-verify's fixtures live outside the published package).
+ */
 export function counterpartPathOf(pkg, file) {
+  if (file.counterpartPath) return file.counterpartPath;
   return `${pkg.counterpart}/${file.path}`;
 }
 

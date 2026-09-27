@@ -17,6 +17,8 @@ import {
   detectThinking,
   CODEX_PROMPT_PATTERN,
   CODEX_SELECTION_LIST_PATTERN,
+  CODEX_PICKER_FOOTER_PATTERN,
+  CODEX_EFFORT_PICKER_FOOTER_PATTERN,
   CODEX_APPROVAL_FOOTER_PATTERN,
   CODEX_PAGER_FOOTER_PATTERN,
   CODEX_STATUS_BAR_PATTERN,
@@ -284,7 +286,16 @@ export const codexStatusDetector = createToolStatusDetector({
       const codexSelectionWindow = contentLines
         .slice(Math.max(0, codexContentEnd - STATUS_CHECK_LINE_COUNT + 1), codexContentEnd + 1)
         .join('\n');
-      if (CODEX_SELECTION_LIST_PATTERN.test(codexSelectionWindow)) {
+      // Issue #2868: codex 0.157's `/model` steps close with `enter select · esc
+      // back` and `enter default · s session · esc back`. Only the window's LAST
+      // non-blank row is tested against them (never the whole window), so the
+      // same words quoted in a transcript do not count.
+      const codexLastRow = contentLines[codexContentEnd].trim();
+      if (
+        CODEX_SELECTION_LIST_PATTERN.test(codexSelectionWindow) ||
+        CODEX_PICKER_FOOTER_PATTERN.test(codexLastRow) ||
+        CODEX_EFFORT_PICKER_FOOTER_PATTERN.test(codexLastRow)
+      ) {
         const codexPromptDetection = detectPrompt(
           stripBoxDrawing(frame.clean),
           buildDetectPromptOptions('codex'),

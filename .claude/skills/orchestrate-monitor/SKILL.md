@@ -95,6 +95,14 @@ mcbd-<cliToolId>-<worktree-id>[-<instance suffix>]      # getSessionName() と�
 関与せず、ループを外部から kill せずに決定論的に終わらせるためのもの（#1527 の単体テストと、
 `--max-polls 1` の 1 回だけ様子を見るプローブで使う）。
 
+### PROMPT は承認と保留を判定する（Issue #2904）
+
+`PROMPT` で Enter を打つのは、そのポーリングの `promptData` が二択かつ default が肯定（`Yes` 系）の
+ときだけ。ポリシーで抑止済み・`promptData` 無し・default 無し・default が選択肢（承認でない）の
+いずれかは**保留**し、`monitor[<lbl>]: PROMPT held, no Enter sent — <理由>` を保留ごとに 1 回だけ
+報告する（`commandmate respond <worktree-id>` で人手対応）。`--no-auto-approve` を付けると常に保留に
+固定される。COMPLETE 行の `held=` は保留が 1 件以上あったときだけ付く。
+
 ### 監視が生きているかを外から見る（#1728）
 
 **「静かなのは健全だから」と「静かなのは監視が死んだから」を区別できること。** 2026-08-06 に、

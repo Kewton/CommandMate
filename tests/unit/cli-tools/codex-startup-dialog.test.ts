@@ -24,6 +24,12 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
+// Issue #2865: the reuse branch first confirms the existing pane was created in
+// this worktree's directory. Ownership itself is covered by session-ownership.test.ts.
+vi.mock('@/lib/tmux/session-ownership', () => ({
+  assertSessionNotForeign: vi.fn(async () => ({ verdict: 'owned', sessionPath: null })),
+}));
+
 // Mock tmux module
 vi.mock('@/lib/tmux/tmux', () => ({
   hasSession: vi.fn(),
@@ -44,8 +50,13 @@ vi.mock('@/lib/cli-tools/validation', () => ({
   validateSessionName: vi.fn(),
 }));
 
-// BaseCLITool.isInstalled() uses promisify(exec); resolve it so isInstalled() === true
-vi.mock('child_process', () => ({ exec: vi.fn() }));
+// BaseCLITool.isInstalled() uses promisify(exec); resolve it so isInstalled() === true.
+// `spawnSync` is the `codex --help` probe for `--no-daemon` (Issue #2891): scripted to
+// list it, so the launch line here carries the flag whatever codex this machine has.
+vi.mock('child_process', () => ({
+  exec: vi.fn(),
+  spawnSync: vi.fn(() => ({ status: 0, stdout: '      --no-daemon\n', stderr: '' })),
+}));
 vi.mock('util', async (importOriginal) => {
   const actual = await importOriginal<typeof import('util')>();
   return {
@@ -56,12 +67,30 @@ vi.mock('util', async (importOriginal) => {
 
 import { CodexTool } from '@/lib/cli-tools/codex';
 import {
+  CODEX_EMBEDDED_MODE_ARGS,
+  CODEX_HOOK_TRUST_BYPASS_FLAG,
+  CODEX_NO_DAEMON_FLAG,
+} from '@/lib/hooks/sources/codex/hooks-config';
+import {
   CODEX_UPDATE_DIALOG_ENV_VAR,
   CODEX_UPDATE_DIALOG_KEYS,
   DEFAULT_CODEX_UPDATE_DIALOG_POLICY,
 } from '@/config/codex-update-dialog-config';
 import { hasSession, createSession, sendKeys, sendSpecialKey, capturePane, reconcileSessionGeometry } from '@/lib/tmux/tmux';
 import { sendMessageWithSubmitVerification } from '@/lib/cli-tools/submit-verified-sender';
+
+const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * The line that starts codex: the bare executable, or the injected one
+ * (`… 'codex'` after the env prefix), optionally followed by the embedded-mode
+ * arguments (Issue #2874), `--no-daemon` (Issue #2891) and the trust bypass flag,
+ * in that order. Nothing else may follow the executable, so a line that gained
+ * an unknown argument is still caught.
+ */
+const CODEX_LAUNCH_LINE_PATTERN = new RegExp(
+  `^codex$|'codex'(?: ${escapeRegExp(CODEX_EMBEDDED_MODE_ARGS)})?(?: ${escapeRegExp(CODEX_NO_DAEMON_FLAG)})?(?: ${escapeRegExp(CODEX_HOOK_TRUST_BYPASS_FLAG)})?$`
+);
 
 /** What the DEFAULT policy answers the update dialog with (Issue #2068). */
 const UPDATE_KEY = CODEX_UPDATE_DIALOG_KEYS[DEFAULT_CODEX_UPDATE_DIALOG_POLICY];
@@ -84,6 +113,16 @@ const TRUST_DIALOG = [
   'Do you trust the contents of this directory?',
   '› 1. Yes, continue',
   '  2. No, quit',
+].join('\n');
+
+// codex 0.157.1 reworded the question line (Issue #2884); no more "Do you trust".
+const TRUST_DIALOG_0157 = [
+  'Folder access',
+  '/test/path',
+  'Trust this folder? Codex can read, edit, and run files here, subject to your permission settings.',
+  '› 1. Trust and continue',
+  '  2. Quit',
+  'enter continue · esc quit',
 ].join('\n');
 
 const PROMPT = '› ';
@@ -171,11 +210,12 @@ describe('CodexTool first-launch dialog handling (Issue #890)', () => {
 
       // The launch command keeps its Enter; the number selections must not.
       // Issue #1760 put the hook correlation keys in front of `codex` on that
-      // line, so it is matched on the Enter and the executable rather than on
-      // the whole string, which `codex-agent-hooks-1760.test.ts` owns.
+      // line, and #2874 put the embedded-mode arguments after it, so it is
+      // matched on the Enter and the executable rather than on the whole
+      // string, which `codex-agent-hooks-1760.test.ts` owns.
       expect(sendKeys).toHaveBeenCalledWith(
         SESSION,
-        expect.stringMatching(/(^codex$|'codex'$)/),
+        expect.stringMatching(CODEX_LAUNCH_LINE_PATTERN),
         true
       );
       expect(sendKeys).toHaveBeenCalledWith(SESSION, UPDATE_KEY, false);
@@ -183,6 +223,25 @@ describe('CodexTool first-launch dialog handling (Issue #890)', () => {
 
       // Regression guard: number selections must NEVER be sent with a trailing Enter.
       expect(sendKeys).not.toHaveBeenCalledWith(SESSION, UPDATE_KEY, true);
+      expect(sendKeys).not.toHaveBeenCalledWith(SESSION, '1', true);
+    });
+
+    it('untrusted dir (codex 0.157.1 wording): sends the trust "1" without trailing Enter', async () => {
+      vi.mocked(hasSession).mockResolvedValue(false);
+      vi.mocked(capturePane)
+        .mockResolvedValueOnce(TRUST_DIALOG_0157)
+        .mockResolvedValue(PROMPT);
+
+      vi.useFakeTimers();
+      try {
+        const promise = tool.startSession(WORKTREE_ID, '/test/path');
+        await vi.runAllTimersAsync();
+        await promise;
+      } finally {
+        vi.useRealTimers();
+      }
+
+      expect(sendKeys).toHaveBeenCalledWith(SESSION, '1', false);
       expect(sendKeys).not.toHaveBeenCalledWith(SESSION, '1', true);
     });
 

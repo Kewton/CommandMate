@@ -10,6 +10,11 @@
 export interface WorktreeListResponse {
   worktrees: WorktreeItem[];
   repositories: unknown[]; // CLI does not use this
+  /**
+   * The namespace the server names its tmux sessions with, or null when it
+   * uses the legacy form (Issue #2867). Absent from servers older than #2867.
+   */
+  tmuxSessionNamespace?: string | null;
 }
 
 // Mirrors: src/types/models.ts Worktree (subset)
@@ -127,6 +132,12 @@ export interface AgentInstance {
   cliTool: string;
   alias: string;
   order: number;
+  /**
+   * The tmux session name the server uses for this instance — namespaced, or
+   * an adopted legacy name (Issue #2867). Only on `GET /api/worktrees/[id]`,
+   * and absent from servers older than #2867.
+   */
+  sessionName?: string;
 }
 
 /**
@@ -203,6 +214,12 @@ export interface CurrentOutputResponse {
   lineCount: number;
   lastCapturedLine: number;
   promptData: PromptData | null;
+  /**
+   * Whether `/prompt-response` would answer `promptData` right now (Issue #2870).
+   * Present only for a screen-parsed prompt; absent with no prompt and for the
+   * structured (hook / degraded) forms.
+   */
+  promptAnswerable?: boolean;
   autoYes: {
     enabled: boolean;
     expiresAt: number | null;
@@ -235,6 +252,19 @@ export interface CurrentOutputResponse {
   thinking: boolean;
   thinkingMessage: string | null;
   cliToolId?: string;
+  /**
+   * The tmux session name this instance actually runs (or would run) under
+   * (Issue #2886).
+   *
+   * Mirrors: src/lib/session/current-output-builder.ts
+   * CurrentOutputPayload.sessionName — `getSessionName(worktreeId, instanceId)`
+   * verbatim, namespace (#2866) and legacy-adoption included, so a consumer
+   * never has to reconstruct `mcbd-${cliToolId}-${worktreeId}` itself.
+   *
+   * Optional because a server older than #2886 sends no such key; a reader
+   * falls back to the legacy construction in that case.
+   */
+  sessionName?: string;
   isSelectionListActive: boolean;
   /** Issue #1017: Codex pager/edit-previous mode (subset of isSelectionListActive). */
   isPagerActive?: boolean;
@@ -1874,6 +1904,13 @@ export interface VerifyConfigOptionsView {
   maxLogTailBytes: number;
   requireCommit: boolean;
   requireEnvClean: boolean;
+  /**
+   * Issue #2890: `$HOME` entry names `env-clean` does not count. Optional for
+   * the same reason `VerifyOptions.envCleanIgnoreHomeEntries` is — a mirror,
+   * not a looser wire contract: the loader always fills it (`[]` when unset),
+   * so a config read off the route carries the key regardless.
+   */
+  envCleanIgnoreHomeEntries?: string[];
 }
 
 /**

@@ -101,6 +101,13 @@ describe('attributeSessionName', () => {
     expect(attributeSessionName('mcbd-vibe-local-other-wt', WORKTREE_ID)).toBe('other');
   });
 
+  it('attributes namespaced names whatever the namespace (Issue #2866)', () => {
+    expect(attributeSessionName(`mcbd-0a1b2c3d-claude-${WORKTREE_ID}`, WORKTREE_ID)).toBe('self');
+    expect(attributeSessionName(`mcbd-deadbeef-codex-${WORKTREE_ID}-2`, WORKTREE_ID)).toBe('self');
+    expect(attributeSessionName('mcbd-deadbeef-claude-other-wt', WORKTREE_ID)).toBe('other');
+    expect(attributeSessionName('mcbd-deadbeef-unknowncli-wt', WORKTREE_ID)).toBe('unattributed');
+  });
+
   it('leaves a name it cannot parse unattributed, which is the strict answer', () => {
     expect(attributeSessionName('my-editor', WORKTREE_ID)).toBe('unattributed');
     expect(attributeSessionName('mcbd-unknowncli', WORKTREE_ID)).toBe('unattributed');
@@ -237,6 +244,232 @@ describe('diffEnvSnapshots', () => {
     expect(diff.status).toBe('violated');
     // ...and the unmeasured probe is still reported, not swallowed by the verdict.
     expect(formatEnvCleanReport(diff)).toContain('listeners UNKNOWN');
+  });
+});
+
+// =============================================================================
+// options.envCleanIgnoreHomeEntries (Issue #2890)
+// =============================================================================
+
+describe('options.envCleanIgnoreHomeEntries (#2890)', () => {
+  const IGNORED_LINE = 'ignored (options.envCleanIgnoreHomeEntries)';
+
+  /** The report of a diff judged with `ignoreHomeEntries`, or without the option at all. */
+  function homeDiff(
+    before: EnvEntry[],
+    after: EnvEntry[],
+    ignoreHomeEntries?: readonly string[]
+  ) {
+    const diff = diffEnvSnapshots(
+      snapshot({ 'home-entries': probe(before) }),
+      snapshot({ 'home-entries': probe(after) }),
+      CONTEXT,
+      ignoreHomeEntries ? { ignoreHomeEntries } : undefined
+    );
+    return { diff, home: diff.probes.find((entry) => entry.probeId === 'home-entries') };
+  }
+
+  describe('diffEnvSnapshots', () => {
+    it('counts a new $HOME entry as a violation when nothing is listed', () => {
+      const { diff, home } = homeDiff([], [entry('.semgrep')]);
+      expect(diff.status).toBe('violated');
+      expect(home?.added.map((change) => change.key)).toEqual(['.semgrep']);
+      expect(home?.ignoredByConfig).toEqual([]);
+
+      // An empty list is the same as no list.
+      expect(homeDiff([], [entry('.semgrep')], []).diff.status).toBe('violated');
+    });
+
+    it('does not count a new entry whose name is listed', () => {
+      const { diff, home } = homeDiff([], [entry('.semgrep')], ['.semgrep']);
+      expect(diff.status).toBe('clean');
+      expect(home?.status).toBe('clean');
+      expect(home?.added).toEqual([]);
+      expect(home?.removed).toEqual([]);
+      expect(home?.ignoredByConfig.map((change) => change.key)).toEqual(['.semgrep']);
+    });
+
+    it('matches the whole name only: neither a prefix, a suffix nor another case', () => {
+      for (const name of ['.semgrep-x', 'x.semgrep', '.semgrep.bak', '.Semgrep', '.semgre']) {
+        const { diff, home } = homeDiff([], [entry(name)], ['.semgrep']);
+        expect(diff.status, name).toBe('violated');
+        expect(home?.added.map((change) => change.key), name).toEqual([name]);
+        expect(home?.ignoredByConfig, name).toEqual([]);
+      }
+    });
+
+    it('treats a listed name as a literal, not a pattern', () => {
+      // `*` and `.` are ordinary characters here; a pattern would let one line
+      // switch the whole probe off.
+      for (const listed of ['*', '.*', '.semgr?p', '.sem*']) {
+        expect(homeDiff([], [entry('.semgrep')], [listed]).diff.status, listed).toBe('violated');
+      }
+    });
+
+    it('does not count a listed entry that disappeared either', () => {
+      const removed = homeDiff([entry('.semgrep'), entry('Documents')], [entry('Documents')]);
+      expect(removed.diff.status).toBe('violated');
+      expect(removed.home?.removed.map((change) => change.key)).toEqual(['.semgrep']);
+
+      const listed = homeDiff(
+        [entry('.semgrep'), entry('Documents')],
+        [entry('Documents')],
+        ['.semgrep']
+      );
+      expect(listed.diff.status).toBe('clean');
+      expect(listed.home?.removed).toEqual([]);
+      expect(listed.home?.ignoredByConfig.map((change) => change.key)).toEqual(['.semgrep']);
+    });
+
+    it('still counts every unlisted entry next to a listed one', () => {
+      const { diff, home } = homeDiff(
+        [entry('Documents'), entry('gone')],
+        [entry('Documents'), entry('.semgrep'), entry('.leftover')],
+        ['.semgrep']
+      );
+      expect(diff.status).toBe('violated');
+      expect(home?.added.map((change) => change.key)).toEqual(['.leftover']);
+      expect(home?.removed.map((change) => change.key)).toEqual(['gone']);
+      expect(home?.ignoredByConfig.map((change) => change.key)).toEqual(['.semgrep']);
+    });
+
+    it('does not apply to the ~/.commandmate probe, where the same name is a different directory', () => {
+      const diff = diffEnvSnapshots(
+        snapshot(),
+        snapshot({ 'commandmate-entries': probe([entry('.semgrep')]) }),
+        CONTEXT,
+        { ignoreHomeEntries: ['.semgrep'] }
+      );
+      const commandmate = diff.probes.find((entry) => entry.probeId === 'commandmate-entries');
+      expect(diff.status).toBe('violated');
+      expect(commandmate?.added.map((change) => change.key)).toEqual(['.semgrep']);
+      expect(commandmate?.ignoredByConfig).toEqual([]);
+    });
+
+    it('does not apply to listeners or tmux sessions', () => {
+      const diff = diffEnvSnapshots(
+        snapshot(),
+        snapshot({
+          listeners: probe([entry('.semgrep', WORKTREE_PATH)]),
+          'tmux-sessions': probe([entry('.semgrep')]),
+        }),
+        CONTEXT,
+        { ignoreHomeEntries: ['.semgrep'] }
+      );
+      expect(diff.status).toBe('violated');
+      expect(diff.probes.flatMap((entry) => entry.ignoredByConfig)).toEqual([]);
+    });
+
+    it('never turns an unmeasured $HOME probe into a measured one', () => {
+      const diff = diffEnvSnapshots(
+        snapshot({ 'home-entries': { status: 'unavailable', entries: [], reason: 'EACCES' } }),
+        snapshot({ 'home-entries': probe([entry('.semgrep')]) }),
+        CONTEXT,
+        { ignoreHomeEntries: ['.semgrep'] }
+      );
+      expect(diff.status).toBe('unknown');
+      expect(diff.probes.find((entry) => entry.probeId === 'home-entries')?.ignoredByConfig).toEqual(
+        []
+      );
+    });
+
+    it('compares only: the baseline handed in is not edited', () => {
+      const before = snapshot({ 'home-entries': probe([entry('.semgrep'), entry('Documents')]) });
+      const frozen = JSON.parse(JSON.stringify(before));
+      diffEnvSnapshots(
+        before,
+        snapshot({ 'home-entries': probe([entry('Documents')]) }),
+        CONTEXT,
+        { ignoreHomeEntries: ['.semgrep'] }
+      );
+      expect(before).toEqual(frozen);
+    });
+
+    it('applies to a baseline recorded before the name was listed', () => {
+      // The baseline is the same file either way; only the comparison differs.
+      const before = snapshot({ 'home-entries': probe([entry('Documents')]) });
+      const after = snapshot({ 'home-entries': probe([entry('Documents'), entry('.commandagent')]) });
+      expect(diffEnvSnapshots(before, after, CONTEXT).status).toBe('violated');
+      expect(
+        diffEnvSnapshots(before, after, CONTEXT, { ignoreHomeEntries: ['.commandagent'] }).status
+      ).toBe('clean');
+    });
+  });
+
+  describe('formatEnvCleanReport', () => {
+    it('names what it did not count, on a passing probe', () => {
+      const { diff } = homeDiff([], [entry('.semgrep')], ['.semgrep']);
+      const report = formatEnvCleanReport(diff);
+      expect(report).toContain('home-entries clean');
+      expect(report).toContain(`${IGNORED_LINE}: .semgrep`);
+    });
+
+    it('lists several names on one line, in the order they were found', () => {
+      const { diff } = homeDiff(
+        [],
+        [entry('.semgrep'), entry('.commandagent')],
+        ['.commandagent', '.semgrep']
+      );
+      const lines = formatEnvCleanReport(diff)
+        .split('\n')
+        .filter((line) => line.includes(IGNORED_LINE));
+      expect(lines).toEqual([`    ${IGNORED_LINE}: .semgrep, .commandagent`]);
+    });
+
+    it('names it next to the violations that are still counted', () => {
+      const { diff } = homeDiff([], [entry('.semgrep'), entry('.leftover')], ['.semgrep']);
+      const report = formatEnvCleanReport(diff);
+      expect(report).toContain('home-entries VIOLATED ($HOME entries): +1 -0');
+      expect(report).toContain('+ .leftover [unattributed]');
+      expect(report).not.toContain('+ .semgrep');
+      expect(report).toContain(`${IGNORED_LINE}: .semgrep`);
+    });
+
+    it('says nothing when nothing listed actually changed', () => {
+      // Listed but present at both ends: there is nothing to report as skipped.
+      const { diff } = homeDiff([entry('.semgrep')], [entry('.semgrep')], ['.semgrep']);
+      expect(formatEnvCleanReport(diff)).not.toContain(IGNORED_LINE);
+      expect(formatEnvCleanReport(homeDiff([], [entry('x')]).diff)).not.toContain(IGNORED_LINE);
+    });
+  });
+
+  describe('evaluateEnvClean', () => {
+    const base = { ...CONTEXT, taskId: 'task-2890', sources: [REQUIRE_ENV_CLEAN_SOURCE_CONFIG] };
+    const capture = async () => snapshot({ 'home-entries': probe([entry('.semgrep')]) });
+
+    it('fails on the new entry when it is not listed', async () => {
+      const outcome = await evaluateEnvClean({ ...base, baseline: snapshot(), capture });
+      expect(outcome.status).toBe('failed');
+      expect(outcome.logTail).toContain('+ .semgrep [unattributed]');
+      expect(outcome.logTail).not.toContain(IGNORED_LINE);
+    });
+
+    it('passes when it is listed, and says which entry it did not count', async () => {
+      const outcome = await evaluateEnvClean({
+        ...base,
+        baseline: snapshot(),
+        ignoreHomeEntries: ['.semgrep'],
+        capture,
+      });
+      expect(outcome.status).toBe('passed');
+      expect(outcome.exitCode).toBe(0);
+      expect(outcome.logTail).toContain(`${IGNORED_LINE}: .semgrep`);
+    });
+
+    it('does not let the list rescue a run that is unknown for another reason', async () => {
+      const outcome = await evaluateEnvClean({
+        ...base,
+        baseline: snapshot(),
+        ignoreHomeEntries: ['.semgrep'],
+        capture: async () =>
+          snapshot({
+            'home-entries': probe([entry('.semgrep')]),
+            listeners: { status: 'unavailable', entries: [], reason: 'lsof could not be run' },
+          }),
+      });
+      expect(outcome.status).toBe('error');
+      expect(outcome.logTail).toContain('listeners UNKNOWN');
+    });
   });
 });
 

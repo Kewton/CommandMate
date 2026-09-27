@@ -217,6 +217,13 @@ describe('which tools each behaviour applies to', () => {
     expect(isLiveAttachEligibleSession('not-commandmates')).toBe(false);
   });
 
+  it('recognises a live-eligible session in a server namespace (Issue #2866)', () => {
+    expect(isLiveAttachEligibleSession('mcbd-0a1b2c3d-claude-wt')).toBe(true);
+    expect(isLiveAttachEligibleSession('mcbd-0a1b2c3d-claude-wt-2')).toBe(true);
+    expect(isLiveAttachEligibleSession('mcbd-0a1b2c3d-codex-wt')).toBe(false);
+    expect(isLiveAttachEligibleSession('mcbd-0a1b2c3d-unknowncli-wt')).toBe(false);
+  });
+
   it('the alt-screen list agrees with the detection layer, tool for tool', () => {
     // The list is duplicated because this module may not import lib/cli-tools
     // (the CLI bundle cannot afford that graph). This is what keeps them equal,

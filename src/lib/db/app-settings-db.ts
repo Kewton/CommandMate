@@ -42,6 +42,15 @@ const KEY_DEFAULT_SELECTED_AGENTS = 'default_selected_agents';
  */
 const KEY_DEFAULT_SURFACE_MODE = 'default_surface_mode';
 
+/**
+ * Storage key for this server's tmux session-name namespace (Issue #2866).
+ *
+ * 8 lowercase hex digits, minted once at first startup. Validated by
+ * `initSessionNamespace()` rather than here: an ill-formed row has to be seen
+ * (and warned about) before it is replaced, not silently read as "unset".
+ */
+const KEY_TMUX_SESSION_NAMESPACE = 'tmux_session_namespace';
+
 /** How many recently used directories to remember (Issue #1517) */
 export const RECENT_BROWSE_PATHS_LIMIT = 5;
 
@@ -230,4 +239,26 @@ export function setDefaultSurfaceMode(
   mode: SurfaceMode
 ): void {
   writeScalar(db, KEY_DEFAULT_SURFACE_MODE, mode);
+}
+
+// ============================================================================
+// tmux session namespace (Issue #2866)
+// ============================================================================
+
+/**
+ * Get the stored tmux session-name namespace, unvalidated.
+ *
+ * @returns The raw stored value, or null when unset
+ */
+export function getTmuxSessionNamespace(db: Database.Database): string | null {
+  return readScalar(db, KEY_TMUX_SESSION_NAMESPACE);
+}
+
+/**
+ * Save the tmux session-name namespace.
+ *
+ * @param namespace - Already-validated namespace (`^[0-9a-f]{8}$`)
+ */
+export function setTmuxSessionNamespace(db: Database.Database, namespace: string): void {
+  writeScalar(db, KEY_TMUX_SESSION_NAMESPACE, namespace);
 }

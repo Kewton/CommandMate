@@ -33,6 +33,30 @@ import {
 } from '@/lib/session/agent-event-state';
 import { removeTempDir } from '@tests/helpers/temp-dir';
 
+// Issue #2874: the route logs `agent-event-instance-not-running` from a
+// fire-and-forget check, so the logger and the tmux probe are the two seams.
+const { mockLogger, isSessionRunningMock } = vi.hoisted(() => {
+  const logger = {
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    withContext: vi.fn(),
+  };
+  logger.withContext.mockReturnValue(logger);
+  return { mockLogger: logger, isSessionRunningMock: vi.fn() };
+});
+
+vi.mock('@/lib/logger', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/logger')>()),
+  createLogger: vi.fn(() => mockLogger),
+}));
+
+vi.mock('@/lib/session/cli-session', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/session/cli-session')>()),
+  isSessionRunning: isSessionRunningMock,
+}));
+
 declare module '@/lib/db/db-instance' {
   export function setMockDb(db: Database.Database): void;
 }
@@ -134,6 +158,9 @@ beforeEach(async () => {
   const { setMockDb } = await import('@/lib/db/db-instance');
   setMockDb(db);
   clearAgentStopEvents();
+  isSessionRunningMock.mockReset();
+  isSessionRunningMock.mockResolvedValue(true);
+  mockLogger.warn.mockClear();
 
   repo = createRepo();
   upsertWorktree(db, {
@@ -511,5 +538,127 @@ describe('event vocabulary', () => {
 
     expect(listTaskEvents(db, task.id).map((e) => e.event)).toEqual(['agent_idle']);
     expect(getLastAgentEvent(wtId, 'claude', 'claude-2')?.sessionId).toBe('after');
+  });
+});
+
+describe('codex hook attributed to an instance with no session (Issue #2874)', () => {
+  /** The relay script's shape, which is what codex hooks deliver. */
+  const codexBody = (event: string, sessionId = 'codex-session-1') => ({
+    event,
+    cwd: repo,
+    sessionId,
+  });
+  const codexQuery = (instanceId?: string) => ({
+    tool: 'codex',
+    worktreeId: wtId,
+    ...(instanceId ? { instanceId } : {}),
+  });
+
+  /** The check is not awaited by the route; let its promise chain settle. */
+  const settle = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+  const notRunningWarnings = () =>
+    mockLogger.warn.mock.calls.filter(([message]) => message === 'agent-event-instance-not-running');
+
+  it('warns when the notified instance has no tmux session, and still answers as before', async () => {
+    isSessionRunningMock.mockResolvedValue(false);
+
+    const response = await post(codexBody('user_prompt_submit'), codexQuery('codex'));
+    await settle();
+
+    expect(response.status).toBe(202);
+    expect(await response.json()).toEqual({ accepted: true });
+    expect(isSessionRunningMock).toHaveBeenCalledWith(wtId, 'codex', 'codex');
+    expect(mockLogger.warn).toHaveBeenCalledWith('agent-event-instance-not-running', {
+      worktreeId: wtId,
+      tool: 'codex',
+      instanceId: 'codex',
+      event: 'user_prompt_submit',
+      sessionId: 'codex-session-1',
+    });
+    // Detection only: the event is still filed where the hook said.
+    expect(getLastAgentEvent(wtId, 'codex', 'codex')?.event).toBe('user_prompt_submit');
+  });
+
+  it('checks the instance the hook named, and the primary when none was named', async () => {
+    isSessionRunningMock.mockResolvedValue(false);
+
+    await post(codexBody('user_prompt_submit'), codexQuery('codex-3'));
+    await post(codexBody('user_prompt_submit', 'codex-session-2'), codexQuery());
+    await settle();
+
+    expect(isSessionRunningMock).toHaveBeenNthCalledWith(1, wtId, 'codex', 'codex-3');
+    expect(isSessionRunningMock).toHaveBeenNthCalledWith(2, wtId, 'codex', 'codex');
+    expect(notRunningWarnings().map(([, fields]) => (fields as { instanceId: string }).instanceId)).toEqual([
+      'codex-3',
+      'codex',
+    ]);
+  });
+
+  it('is silent when the notified instance has a session', async () => {
+    isSessionRunningMock.mockResolvedValue(true);
+
+    const response = await post(codexBody('user_prompt_submit'), codexQuery('codex-3'));
+    await settle();
+
+    expect(response.status).toBe(202);
+    expect(isSessionRunningMock).toHaveBeenCalledTimes(1);
+    expect(notRunningWarnings()).toHaveLength(0);
+  });
+
+  it('does not probe tmux for a codex stop', async () => {
+    isSessionRunningMock.mockResolvedValue(false);
+    seedTask({ instanceId: 'codex-3' });
+
+    const response = await post(codexBody('stop'), codexQuery('codex-3'));
+    await settle();
+
+    expect(response.status).toBe(202);
+    expect(isSessionRunningMock).not.toHaveBeenCalled();
+    expect(notRunningWarnings()).toHaveLength(0);
+  });
+
+  it('does not probe tmux for another tool’s user_prompt_submit', async () => {
+    isSessionRunningMock.mockResolvedValue(false);
+
+    const response = await post(
+      { event: 'user_prompt_submit', cwd: repo, sessionId: 'claude-session-1' },
+      injected('claude')
+    );
+    await settle();
+
+    expect(response.status).toBe(202);
+    expect(isSessionRunningMock).not.toHaveBeenCalled();
+    expect(notRunningWarnings()).toHaveLength(0);
+  });
+
+  it('never lets a failing probe fail or delay the hook', async () => {
+    isSessionRunningMock.mockRejectedValue(new Error('tmux is gone'));
+
+    const response = await post(codexBody('user_prompt_submit'), codexQuery('codex-3'));
+    await settle();
+
+    expect(response.status).toBe(202);
+    expect(notRunningWarnings()).toHaveLength(0);
+    expect(mockLogger.error).not.toHaveBeenCalled();
+  });
+
+  it('answers without waiting for the probe to finish', async () => {
+    let resolveProbe: (running: boolean) => void = () => {};
+    isSessionRunningMock.mockReturnValue(
+      new Promise<boolean>((resolve) => {
+        resolveProbe = resolve;
+      })
+    );
+
+    // If the route awaited the probe this would never resolve and the test
+    // would time out.
+    const response = await post(codexBody('user_prompt_submit'), codexQuery('codex-3'));
+    expect(response.status).toBe(202);
+    expect(notRunningWarnings()).toHaveLength(0);
+
+    resolveProbe(false);
+    await settle();
+    expect(notRunningWarnings()).toHaveLength(1);
   });
 });

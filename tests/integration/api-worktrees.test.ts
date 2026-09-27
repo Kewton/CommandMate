@@ -79,6 +79,9 @@ describe('GET /api/worktrees', () => {
       worktrees: [],
       repositories: [],
       defaultSelectedAgents: ['claude', 'codex', 'antigravity'],
+      // Issue #2867: no server startup here, so the namespace is uninitialized
+      // and sessions carry legacy names.
+      tmuxSessionNamespace: null,
     });
     // Belt and braces: the literal above is the constant, so a change to the
     // constant is a deliberate edit here rather than a silent no-op.

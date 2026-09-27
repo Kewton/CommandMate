@@ -7,6 +7,7 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { invalidateCache } from './tmux-capture-cache';
 import { hasHumanClientAttached } from './geometry-delegation';
+import { dropLegacyAliasByLegacyName } from './legacy-session-alias';
 import { validateSessionName } from '@/lib/cli-tools/validation';
 import { TMUX_HISTORY_LIMIT, TUI_PANE_HEIGHT, TUI_PANE_WIDTH } from '@/config/tmux-pane-config';
 import { createLogger } from '@/lib/logger';
@@ -68,6 +69,12 @@ export interface TmuxSession {
   name: string;
   windows: number;
   attached: boolean;
+  /**
+   * `#{session_path}` — the directory the session was created in (Issue #2865).
+   * Empty string when tmux reports none. Used to tell this server's sessions
+   * apart from a same-named session another CommandMate server created.
+   */
+  path: string;
 }
 
 /**
@@ -230,6 +237,9 @@ export async function hasSession(sessionName: string): Promise<boolean> {
     return true;
   } catch {
     // tmux has-session returns non-zero exit code if session doesn't exist
+    // Issue #2866: an adopted legacy session that is gone no longer serves its
+    // new-format name, so the next start uses the new-format name.
+    dropLegacyAliasByLegacyName(sessionName);
     return false;
   }
 }
@@ -279,9 +289,12 @@ export async function getSessionWorkingDirectory(sessionName: string): Promise<s
  */
 export async function listSessions(): Promise<TmuxSession[]> {
   try {
+    // Issue #2865: `#{session_path}` is the LAST column and tab-separated, so a
+    // path containing `|` or spaces survives intact (everything after the third
+    // tab is the path).
     const { stdout } = await execFileAsync(
       'tmux',
-      ['list-sessions', '-F', '#{session_name}|#{session_windows}|#{session_attached}'],
+      ['list-sessions', '-F', '#{session_name}\t#{session_windows}\t#{session_attached}\t#{session_path}'],
       { timeout: DEFAULT_TIMEOUT }
     );
 
@@ -290,14 +303,15 @@ export async function listSessions(): Promise<TmuxSession[]> {
     }
 
     return stdout
-      .trim()
       .split('\n')
+      .filter(line => line.trim() !== '')
       .map(line => {
-        const [name, windows, attached] = line.split('|');
+        const [name, windows, attached, ...rest] = line.split('\t');
         return {
           name,
           windows: parseInt(windows, 10) || 0,
           attached: attached === '1',
+          path: rest.join('\t'),
         };
       });
   } catch {
@@ -786,6 +800,8 @@ export async function killSession(sessionName: string): Promise<boolean> {
     await execFileAsync('tmux', ['kill-session', '-t', exactTarget(sessionName)], {
       timeout: DEFAULT_TIMEOUT,
     });
+    // Issue #2866: see hasSession.
+    dropLegacyAliasByLegacyName(sessionName);
     return true;
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : String(error);

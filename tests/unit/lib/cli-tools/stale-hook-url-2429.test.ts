@@ -41,6 +41,10 @@ vi.mock('@/lib/tmux/tmux', () => ({
   getSessionWorkingDirectory: vi.fn(),
   sendSpecialKey: vi.fn(),
 }));
+// Issue #2865: the reuse branch first confirms the pane is this worktree's.
+vi.mock('@/lib/tmux/session-ownership', () => ({
+  assertSessionNotForeign: vi.fn(async () => ({ verdict: 'owned', sessionPath: null })),
+}));
 
 const getServerPort = vi.fn(() => 3000);
 // Partial: `logger` reads `getLogConfig` from the same module, and a total mock
@@ -109,8 +113,8 @@ class TestTool extends BaseCLITool {
   async isRunning(): Promise<boolean> {
     return true;
   }
-  protected async launchSession(worktreeId: string, _path: string, instanceId?: string): Promise<void> {
-    if (this.adopts) await this.reconcileExistingSession(this.getSessionName(worktreeId, instanceId));
+  protected async launchSession(worktreeId: string, worktreePath: string, instanceId?: string): Promise<void> {
+    if (this.adopts) await this.reconcileExistingSession(this.getSessionName(worktreeId, instanceId), worktreePath);
     if (this.launchError) throw this.launchError;
   }
   async sendMessage(): Promise<void> {}

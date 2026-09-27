@@ -409,6 +409,12 @@ assert_rejected bad-flaky-type.yaml "flakyIsPass must be true or false"
 assert_rejected bad-mutex-name.yaml "invalid mutex name: e2e/port"
 assert_rejected bad-mutex-length.yaml "mutex must be at most 64 characters"
 assert_rejected bad-env-clean.yaml "requireEnvClean must be true or false"
+# Issue #2901: options.envCleanIgnoreHomeEntries element/shape validation.
+assert_rejected bad-env-clean-ignore-slash.yaml 'entry must not contain "/": foo/bar'
+assert_rejected bad-env-clean-ignore-empty-item.yaml "entry must not be empty"
+assert_rejected bad-env-clean-ignore-dotdot.yaml 'entry must not be ".."'
+assert_rejected bad-env-clean-ignore-too-many.yaml "at most 32 entries (got 33)"
+assert_rejected bad-env-clean-ignore-scalar.yaml 'must be a flow list "[...]" or an indented "- " block'
 
 # --- 14. a failing run leaves its reason inside out.N (Issue #1607) ------------
 # The CI red that opened this issue printed three `not ok - parsing: ...` lines
@@ -943,6 +949,28 @@ assert_has "require-env-clean: the built-in is named rather than silently droppe
 assert_has "require-env-clean: the declared gates still run" "$OUT" "GATE ok PASS exit=0 duration="
 assert_has "require-env-clean: the reason says what is missing" "$ERR" "needs the baseline snapshot CommandMate records at task creation"
 assert_stdout_contract "require-env-clean: stdout holds only GATE/RESULT records" "$RAWOUT"
+
+# --- 24. options.envCleanIgnoreHomeEntries is accepted in both forms (#2901) ---
+# #2890 taught the TS loader this key; these skill copies still rejected it with
+# exit 2 (unknown options key), so a verify.yaml written for the product runner
+# could not be read here at all. Accepting it is not judging it (same rule as
+# requireEnvClean above): the standalone runner never computes env-clean, so a
+# valid value only has to keep the config readable and the declared gates
+# running — it is not asserted anywhere in $RAWOUT/$OUT.
+run_verify --config "$FIXTURES/env-clean-ignore-block.yaml" --cwd "$mx" --base-ref "$BASE_BRANCH"
+assert_eq "envCleanIgnoreHomeEntries block form: the key no longer makes the config unreadable" "0" "$RC"
+assert_has "envCleanIgnoreHomeEntries block form: the declared gate still runs" "$OUT" "GATE ok PASS exit=0 duration="
+assert_stdout_contract "envCleanIgnoreHomeEntries block form: stdout holds only GATE/RESULT records" "$RAWOUT"
+
+run_verify --config "$FIXTURES/env-clean-ignore-flow.yaml" --cwd "$mx" --base-ref "$BASE_BRANCH"
+assert_eq "envCleanIgnoreHomeEntries flow form: the key no longer makes the config unreadable" "0" "$RC"
+assert_has "envCleanIgnoreHomeEntries flow form: the declared gate still runs" "$OUT" "GATE ok PASS exit=0 duration="
+assert_stdout_contract "envCleanIgnoreHomeEntries flow form: stdout holds only GATE/RESULT records" "$RAWOUT"
+
+run_verify --config "$FIXTURES/env-clean-ignore-empty.yaml" --cwd "$mx" --base-ref "$BASE_BRANCH"
+assert_eq "envCleanIgnoreHomeEntries empty list: the key no longer makes the config unreadable" "0" "$RC"
+assert_has "envCleanIgnoreHomeEntries empty list: the declared gate still runs" "$OUT" "GATE ok PASS exit=0 duration="
+assert_stdout_contract "envCleanIgnoreHomeEntries empty list: stdout holds only GATE/RESULT records" "$RAWOUT"
 
 # --- 23. the run directory outlives the run (Issue #228) ---------------------
 # The defect this pins: a gate that finishes before the runner has forked its

@@ -50,8 +50,13 @@ vi.mock('@/lib/cli-tools/validation', () => ({
   validateSessionName: vi.fn(),
 }));
 
-// BaseCLITool.isInstalled() uses promisify(exec); resolve it so isInstalled() === true
-vi.mock('child_process', () => ({ exec: vi.fn() }));
+// BaseCLITool.isInstalled() uses promisify(exec); resolve it so isInstalled() === true.
+// `spawnSync` is the `codex --help` probe for `--no-daemon` (Issue #2891): scripted to
+// list it, so the launch line here carries the flag whatever codex this machine has.
+vi.mock('child_process', () => ({
+  exec: vi.fn(),
+  spawnSync: vi.fn(() => ({ status: 0, stdout: '      --no-daemon\n', stderr: '' })),
+}));
 vi.mock('util', async (importOriginal) => {
   const actual = await importOriginal<typeof import('util')>();
   return {
@@ -61,6 +66,11 @@ vi.mock('util', async (importOriginal) => {
 });
 
 import { CodexTool } from '@/lib/cli-tools/codex';
+import {
+  CODEX_EMBEDDED_MODE_ARGS,
+  CODEX_HOOK_TRUST_BYPASS_FLAG,
+  CODEX_NO_DAEMON_FLAG,
+} from '@/lib/hooks/sources/codex/hooks-config';
 import { hasSession, sendKeys, capturePane } from '@/lib/tmux/tmux';
 import {
   CODEX_UPDATE_DIALOG_ENV_VAR,
@@ -92,8 +102,21 @@ const PROMPT = '› ';
 /** A pane with nothing on it but a shell prompt — no dialog anywhere above. */
 const BARE_SHELL = 'localuser@EXAMPLEMac-Studio wt %';
 
+const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * The line that starts codex: the bare executable, or the injected one
+ * (`… 'codex'` after the env prefix), optionally followed by the embedded-mode
+ * arguments (Issue #2874), `--no-daemon` (Issue #2891) and the trust bypass flag,
+ * in that order. Nothing else may follow the executable, so a line that gained
+ * an unknown argument is still caught.
+ */
+const CODEX_LAUNCH_LINE_PATTERN = new RegExp(
+  `^codex$|'codex'(?: ${escapeRegExp(CODEX_EMBEDDED_MODE_ARGS)})?(?: ${escapeRegExp(CODEX_NO_DAEMON_FLAG)})?(?: ${escapeRegExp(CODEX_HOOK_TRUST_BYPASS_FLAG)})?$`
+);
+
 /** The launch line, however Issue #1760's env prefix renders it. */
-const LAUNCH_LINE = expect.stringMatching(/(^codex$|'codex'$)/);
+const LAUNCH_LINE = expect.stringMatching(CODEX_LAUNCH_LINE_PATTERN);
 
 /** Digits sent to the pane, in order, ignoring the launch line. */
 function digitsSent(): string[] {
@@ -107,7 +130,7 @@ function digitsSent(): string[] {
 function launchCount(): number {
   return vi
     .mocked(sendKeys)
-    .mock.calls.filter(([session, sent, enter]) => session === SESSION && enter === true && /(^codex$|'codex'$)/.test(sent))
+    .mock.calls.filter(([session, sent, enter]) => session === SESSION && enter === true && CODEX_LAUNCH_LINE_PATTERN.test(sent))
     .length;
 }
 

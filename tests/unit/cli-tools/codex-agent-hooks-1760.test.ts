@@ -26,6 +26,12 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+
+// Issue #2865: the reuse branch first confirms the existing pane was created in
+// this worktree's directory. Ownership itself is covered by session-ownership.test.ts.
+vi.mock('@/lib/tmux/session-ownership', () => ({
+  assertSessionNotForeign: vi.fn(async () => ({ verdict: 'owned', sessionPath: null })),
+}));
 import { mkdtempSync, readFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -43,8 +49,13 @@ vi.mock('@/lib/tmux/tmux', () => ({
 
 vi.mock('@/lib/cli-tools/validation', () => ({ validateSessionName: vi.fn() }));
 
-// BaseCLITool.isInstalled() uses promisify(exec); resolve it so isInstalled() === true
-vi.mock('child_process', () => ({ exec: vi.fn() }));
+// BaseCLITool.isInstalled() uses promisify(exec); resolve it so isInstalled() === true.
+// `spawnSync` is the `codex --help` probe for `--no-daemon` (Issue #2891): scripted,
+// so the launch line does not depend on the codex installed on this machine.
+vi.mock('child_process', () => ({
+  exec: vi.fn(),
+  spawnSync: vi.fn(() => ({ status: 0, stdout: '      --no-daemon\n', stderr: '' })),
+}));
 vi.mock('util', async (importOriginal) => {
   const actual = await importOriginal<typeof import('util')>();
   return { ...actual, promisify: () => vi.fn().mockResolvedValue(undefined) };
@@ -53,7 +64,13 @@ vi.mock('util', async (importOriginal) => {
 import { CodexTool, isCodexHooksReviewDialog } from '@/lib/cli-tools/codex';
 import { capturePane, createSession, hasSession, sendKeys } from '@/lib/tmux/tmux';
 import { getAgentEventGenerationStartedAt, recordAgentEvent } from '@/lib/session/agent-event-state';
-import { getCodexHooksPath } from '@/lib/hooks/sources/codex/hooks-config';
+import {
+  CODEX_EMBEDDED_MODE_ARGS,
+  CODEX_NO_DAEMON_FLAG,
+  getCodexHooksPath,
+  resetCodexNoDaemonSupportCacheForTests,
+} from '@/lib/hooks/sources/codex/hooks-config';
+import { spawnSync } from 'child_process';
 import {
   CODEX_HOOKS_REVIEW_PANE,
   CODEX_READY_PANE,
@@ -74,6 +91,7 @@ let home: string;
 
 beforeEach(() => {
   vi.clearAllMocks();
+  resetCodexNoDaemonSupportCacheForTests();
   saved = Object.fromEntries(MANAGED_ENV.map((key) => [key, process.env[key]]));
   for (const key of MANAGED_ENV) delete process.env[key];
   home = mkdtempSync(join(tmpdir(), 'codex-session-home-'));
@@ -150,7 +168,24 @@ describe('startSession injects the correlation keys', () => {
     expect(command).toContain("CM_AGENT_INSTANCE_ID='codex-2'");
     expect(command).toContain("CM_HOOK_URL='http://127.0.0.1:4321/api/hooks/agent-event'");
     expect(command).toContain('instanceId=codex-2');
-    expect(command.endsWith("'codex'")).toBe(true);
+    // Issue #2874 / #2891: the executable is followed by the embedded-mode
+    // arguments and `--no-daemon` and nothing else, so hooks run with this
+    // session's env, not a shared daemon's — including one that is already up.
+    expect(command.endsWith(`'codex' ${CODEX_EMBEDDED_MODE_ARGS} ${CODEX_NO_DAEMON_FLAG}`)).toBe(
+      true
+    );
+  });
+
+  it('leaves --no-daemon off for a codex whose --help does not list it', async () => {
+    vi.mocked(spawnSync).mockReturnValueOnce({
+      status: 0,
+      stdout: '  -c, --config <key=value>\n',
+      stderr: '',
+    } as unknown as ReturnType<typeof spawnSync>);
+    await new CodexTool().startSession(WORKTREE_ID, WORKTREE_PATH, 'codex-2');
+    const command = launchCommand();
+    expect(command.endsWith(`'codex' ${CODEX_EMBEDDED_MODE_ARGS}`)).toBe(true);
+    expect(command).not.toContain(CODEX_NO_DAEMON_FLAG);
   });
 
   it('writes the hooks file codex will read', async () => {

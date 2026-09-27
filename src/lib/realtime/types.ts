@@ -148,6 +148,20 @@ export interface TerminalSnapshotEvent {
    * literal, so the mismatch never surfaced at the broadcast site.
    */
   promptData?: LivePromptData | null;
+  /**
+   * Issue #2887: the status API's `promptAnswerable` (Issue #2870), carried on
+   * the push too so a client does not have to wait for the throttled HTTP
+   * fallback poll to learn that `/prompt-response` would refuse the dialog on
+   * screen.
+   *
+   * Optional, and genuinely absent from the wire — not `?? false` — when
+   * `buildCurrentOutput` did not judge it: `emitTerminalSnapshot` assigns this
+   * straight from the payload, and `JSON.stringify` drops an `undefined`
+   * property rather than sending it as `null`. A client reads a missing key the
+   * same way it reads a server that predates this field: see
+   * `carriesAnswerable` in `useTerminalPanePolling`.
+   */
+  promptAnswerable?: boolean;
   isSelectionListActive: boolean;
   isPagerActive: boolean;
   /**

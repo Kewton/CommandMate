@@ -31,6 +31,7 @@ import { isValidUuidV4 } from '@/config/schedule-config';
 import { scheduleTimer, cancelScheduledTimer } from '@/lib/timer-manager';
 import { createLogger } from '@/lib/logger';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
+import { checkSessionOwnership, foreignSessionErrorBody } from '@/lib/cli-tools/session-ownership';
 
 const logger = createLogger('api/timers');
 
@@ -110,10 +111,19 @@ export async function POST(
       return NextResponse.json({ error: 'Max timers reached' }, { status: 400 });
     }
 
+    // Issue #2865: a timer aimed at a same-named session another CommandMate
+    // server created would fire into that server's agent. Refused up front.
+    const timerCliTool = CLIToolManager.getInstance().getTool(cliToolId as CLIToolType);
+    const sessionName = timerCliTool.getSessionName(id, resolvedInstanceId);
+    const ownership = await checkSessionOwnership(sessionName, worktree.path);
+    if (ownership.verdict === 'foreign') {
+      return NextResponse.json(foreignSessionErrorBody(sessionName, ownership.sessionPath), { status: 409 });
+    }
+
     // [Issue #539] Check if session is running (warning only, do not block registration)
     let warning: string | undefined;
     try {
-      const cliTool = CLIToolManager.getInstance().getTool(cliToolId as CLIToolType);
+      const cliTool = timerCliTool;
       const running = await cliTool.isRunning(id, resolvedInstanceId);
       if (!running) {
         warning = 'session_not_running';

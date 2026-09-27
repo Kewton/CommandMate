@@ -34,6 +34,7 @@ import type { CurrentOutputResponse, OpencodeSessionsResponse } from '../types/a
 // Issue #2317: the tmux session name each instance runs in, so `commandmate
 // attach` / `tmux attach` need no hand-assembly of `mcbd-<tool>-<wt>[-<suffix>]`.
 import { resolveSessionName } from '../../lib/cli-tools/session-name';
+import { validateSessionName } from '../../lib/cli-tools/validation';
 import type { CLIToolType } from '../../lib/cli-tools/types';
 
 type InstanceRow = {
@@ -67,11 +68,13 @@ type InstanceRow = {
   /**
    * Issue #2317: the tmux session this instance runs in, or null.
    *
-   * Derived, not fetched — {@link resolveSessionName} is the same function
-   * `BaseCLITool.getSessionName()` delegates to, so this cannot name a different
-   * session than the server opens. Null only when the roster row would not
-   * survive `validateSessionName`, i.e. when there is no name to give rather
-   * than a wrong one.
+   * Issue #2867: the `sessionName` the server published on the roster row —
+   * namespaced, or an adopted legacy name — since the namespace lives in the
+   * server's DB and cannot be derived here. Only a server older than #2867
+   * sends none, and that server names its sessions the legacy way, which
+   * {@link resolveSessionName} (namespace unset in the CLI) derives. Null when
+   * the name would not survive `validateSessionName`, i.e. when there is no
+   * name to give rather than a wrong one.
    */
   tmuxSession: string | null;
 };
@@ -84,6 +87,10 @@ type InstanceRow = {
  */
 function deriveInstanceSession(worktreeId: string, inst: AgentInstance): string | null {
   try {
+    if (inst.sessionName) {
+      validateSessionName(inst.sessionName);
+      return inst.sessionName;
+    }
     return resolveSessionName(inst.cliTool as CLIToolType, worktreeId, inst.id);
   } catch {
     return null;

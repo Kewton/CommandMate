@@ -4,6 +4,11 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+// Issue #2865: these cases are not about `#{session_path}` ownership, so the
+// check decides by session name as before (see the helper's docblock).
+vi.mock('@/lib/tmux/session-ownership', async (importOriginal) =>
+  (await import('@tests/unit/tmux/name-only-session-ownership')).nameOnlySessionOwnership(importOriginal)
+);
 import { POST as respondToPrompt } from '@/app/api/worktrees/[id]/respond/route';
 import Database from 'better-sqlite3';
 import { runMigrations } from '@/lib/db/db-migrations';
@@ -23,7 +28,9 @@ vi.mock('@/lib/ws-server', () => ({
   broadcastMessage: vi.fn(),
 }));
 vi.mock('@/lib/realtime/terminal-broadcast', () => ({
+  broadcastTerminalSnapshot: vi.fn().mockResolvedValue(undefined),
   broadcastTerminalSnapshotAfterInteraction: vi.fn().mockResolvedValue(undefined),
+  broadcastSessionStatus: vi.fn(),
 }));
 
 // Declare mock function type

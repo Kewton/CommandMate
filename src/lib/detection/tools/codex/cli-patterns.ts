@@ -116,10 +116,16 @@ export const CODEX_GLYPH = '›';
  * the command approval, `/model`, `/experimental`, `/keymap` and the
  * directory-trust screen are `waiting`, and every highlighted row is the
  * one-span shape these rules key on. The rules were first read off 0.153.2.
+ *
+ * Advanced to 0.157.1 by Issue #2884: the 0.157.1 dialog screens
+ * (`codex-dialogs-0157/`) read correctly too, including the directory-trust
+ * screen once its WORDING anchor (`CODEX_TRUST_QUESTION_PATTERN` in
+ * `../../cli-patterns`) learned that build's reworded question line
+ * (`Trust this folder?`) -- see `tests/unit/lib/detection/codex-dialogs-0157.test.ts`.
  */
 export const CODEX_DIALOG_RULES_VERIFIED_AGAINST = {
-  version: '0.155.1',
-  capturedAt: '2026-09-21',
+  version: '0.157.1',
+  capturedAt: '2026-09-27',
   paneGeometry: '200x1000',
 } as const;
 

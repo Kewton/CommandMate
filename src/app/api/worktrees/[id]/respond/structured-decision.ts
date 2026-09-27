@@ -88,6 +88,8 @@ import {
   INSTANCE_TOOL_CONFLICT,
 } from '@/lib/session/resolve-session-target';
 import { isCliToolType, isValidInstanceId, type CLIToolType } from '@/lib/cli-tools/types';
+import { CLIToolManager } from '@/lib/cli-tools/manager';
+import { checkWorktreeSessionOwnership } from '@/lib/cli-tools/worktree-session-ownership';
 import { getAgentEventSource } from '@/lib/hooks/sources';
 import type { AgentInstanceRef, PendingDecision, Verdict } from '@/lib/hooks/sources';
 import { answerPendingDecisionWithReceipt } from '@/lib/hooks/sources/pending-decisions';
@@ -627,7 +629,7 @@ async function answerPendingApproval({
   const { delivery } = await answerPendingDecisionWithReceipt(source, target, decision, verdict);
   const delivered = delivery?.delivered === true;
 
-  settleAnsweredDecision({
+  await settleAnsweredDecision({
     db,
     source,
     decision,
@@ -672,7 +674,7 @@ async function answerPendingApproval({
  * same way (§5.3.1 — the session reads `busy` and no `session.idle` arrives
  * until it is answered), so it has to be released in exactly the same way.
  */
-function settleAnsweredDecision({
+async function settleAnsweredDecision({
   db,
   source,
   decision,
@@ -688,7 +690,7 @@ function settleAnsweredDecision({
   worktreeId: string;
   cliToolId: CLIToolType;
   instanceId: string;
-}): void {
+}): Promise<void> {
   if (delivered && source.capabilities.permissionReplyReleasesPrompt) {
     // The release the agent's own `permission.replied` frame would take, taken
     // here as well because that frame may be seconds away and the operator is
@@ -715,6 +717,27 @@ function settleAnsweredDecision({
   applyEventToActiveTask(db, worktreeId, cliToolId, instanceId, 'prompt_answered_human', {
     promptType: 'multiple_choice',
   });
+
+  // Issue #2885: the delivery above went over the agent's API for a decision in
+  // THIS server's store, so it stands whatever tmux holds under the name. The
+  // poller, though, captures the pane and saves it into this worktree's history:
+  // a same-named session another server created (#2865) must not be read. A
+  // worktree row that is gone cannot vouch for the session either. `absent` is
+  // left to the poller, which handles a missing session itself.
+  const sessionName = CLIToolManager.getInstance()
+    .getTool(cliToolId)
+    .getSessionName(worktreeId, instanceId);
+  const ownership = await checkWorktreeSessionOwnership(worktreeId, sessionName, db);
+  if (ownership === null || ownership.verdict === 'foreign') {
+    logger.warn('respond-decision-skip-polling-foreign-session', {
+      worktreeId,
+      cliToolId,
+      instanceId,
+      sessionName,
+    });
+    return;
+  }
+
   startPolling(worktreeId, cliToolId, instanceId);
   void broadcastTerminalSnapshotAfterInteraction(worktreeId, cliToolId, instanceId);
 }
@@ -790,7 +813,7 @@ async function answerPendingQuestion({
   const { delivery } = await answerPendingDecisionWithReceipt(source, target, decision, verdict);
   const delivered = delivery?.delivered === true;
 
-  settleAnsweredDecision({
+  await settleAnsweredDecision({
     db,
     source,
     decision,

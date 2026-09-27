@@ -11,15 +11,8 @@ import { broadcastMessage } from '@/lib/ws-server';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { isCliToolType, isValidInstanceId, type CLIToolType } from '@/lib/cli-tools/types';
 import { captureSessionOutputFresh } from '@/lib/session/cli-session';
-import { detectPrompt, type PromptDetectionResult } from '@/lib/detection/prompt-detector';
-import { stripAnsi, stripBoxDrawing, buildDetectPromptOptions } from '@/lib/detection/cli-patterns';
-import { detectAntigravityNumberedDialogPrompt } from '@/lib/detection/tools/antigravity/dialog';
-import { readCommandCodeQuestionDialog } from '@/lib/detection/tools/command-code/dialog';
-import {
-  evaluateDialogPresence,
-  judgePromptResponse,
-  UNSUPPORTED_DIALOG_LAYOUT_REASON,
-} from '@/lib/polling/auto-yes-dialog-gate';
+import type { PromptDetectionResult } from '@/lib/detection/prompt-detector';
+import { assessPromptAnswerability } from '@/lib/polling/auto-yes-dialog-gate';
 import {
   sendPromptAnswer,
   PromptAnswerRejectedError,
@@ -38,6 +31,7 @@ import { isValidWorktreeId } from '@/lib/security/path-validator';
 import type { PromptType, SubmitMode } from '@/types/models';
 import { isValidSubmitMode } from '@/types/models';
 import { createLogger } from '@/lib/logger';
+import { checkSessionOwnership, foreignSessionErrorBody } from '@/lib/cli-tools/session-ownership';
 import { startPolling } from '@/lib/polling/response-poller';
 import { broadcastTerminalSnapshotAfterInteraction } from '@/lib/realtime/terminal-broadcast';
 import { applyEventToActiveTask } from '@/lib/tasks/task-transition-service';
@@ -55,25 +49,6 @@ const logger = createLogger('api/prompt-response');
 const COMMAND_CODE_FREE_TEXT_OPTION_MESSAGE =
   'That option is a free-text field on this screen, not a choice a number selects, so no key was ' +
   'sent. Send the text you want to answer with, or type it in the terminal.';
-
-/**
- * The refusal text for a Command Code question screen that is plainly up and
- * could not be read (Issue #2522 確定仕様 B).
- *
- * Shares {@link UNSUPPORTED_DIALOG_LAYOUT_REASON} with Issue #2486's refusal —
- * the reason code is what `respond --json` and the CLI branch on, and both cases
- * are the same thing: a picker is on screen whose layout no rule could verify.
- * The SENTENCE is its own because the next step differs in one respect worth
- * saying out loud: this screen's LIST is what could not be read, so retrying
- * once the pane has repainted is genuinely worth a try before walking over to it.
- *
- * Both messages here are fixed text that never quotes the answer or the frame
- * (SEC-003, as in `prompt-answer-semantic`), so both are safe to return to a
- * client verbatim.
- */
-const COMMAND_CODE_UNSUPPORTED_QUESTION_MESSAGE =
-  'A Command Code question is on screen, but its option list could not be read, so no key was ' +
-  'sent. Answer it in the terminal, or retry once the screen has settled.';
 
 /**
  * The reason code for a checkbox answer this route would not let through
@@ -260,6 +235,14 @@ export async function POST(
     const manager = CLIToolManager.getInstance();
     const cliTool = manager.getTool(cliToolId);
 
+    // Issue #2865: a same-named session another CommandMate server created is
+    // never answered, on either the structured or the keystroke path below.
+    const ownedSessionName = cliTool.getSessionName(id, instanceId);
+    const ownership = await checkSessionOwnership(ownedSessionName, worktree.path);
+    if (ownership.verdict === 'foreign') {
+      return NextResponse.json(foreignSessionErrorBody(ownedSessionName, ownership.sessionPath), { status: 409 });
+    }
+
     // Check if session is running (Issue #868: per-instance)
     const running = await cliTool.isRunning(id, instanceId);
     if (!running) {
@@ -351,80 +334,25 @@ export async function POST(
     try {
       const currentOutput = await captureSessionOutputFresh(id, cliToolId, undefined, instanceId);
       verifiedFrame = currentOutput;
-      const cleanOutput = stripBoxDrawing(stripAnsi(currentOutput));
-      // Issue #2364: agy's `↑/↓ Navigate` dialogs are read by agy's own reader
-      // first, exactly as `/current-output` and the response poller read them
-      // (`detectPromptWithOptions`). The generic pass alone refused
-      // (`prompt_no_longer_active`) the very dialog the status API had just
-      // published as answerable: agy's Bash approval wraps its option labels,
-      // which the one-row-per-option parser cannot read, so PromptPanel's
-      // Submit did nothing while the dialog stayed up.
-      const toolDialog = cliToolId === 'antigravity'
-        ? detectAntigravityNumberedDialogPrompt(cleanOutput)
-        : null;
-
-      // Issue #2522: Command Code's footer-less `AskUserQuestion`, read off the
-      // capture itself rather than off `cleanOutput` — the screen is anchored on
-      // a 200-column U+2500 rule row and `stripBoxDrawing` blanks it. This is
-      // the FRESH frame the answer is about to be sent at, which is the whole
-      // point of re-verifying here: the options and the default this resolves
-      // against are the ones on the pane now, not the ones the status API
-      // published some polls ago.
-      const commandCodeQuestion = cliToolId === 'command-code'
-        ? readCommandCodeQuestionDialog(currentOutput)
-        : { kind: 'none' as const };
-
-      // The question UI is up and could not be read (a gap in the numbering, an
-      // over-tall region). 確定仕様 B: refuse with the reason that says WHICH of
-      // the two it is — the operator's next step is "answer it at the pane", not
-      // "retry, the prompt is gone" — and send no key. Falling through would
-      // hand the frame to the generic parser, whose partial list is exactly what
-      // must not reach a keystroke: its "option 1" is not this screen's.
-      if (commandCodeQuestion.kind === 'unsupported') {
-        logger.info('prompt-response-refused', {
-          worktreeId: id,
-          cliToolId,
-          instanceId,
-          reason: UNSUPPORTED_DIALOG_LAYOUT_REASON,
-          vouched: false,
-        });
-        return NextResponse.json({
-          success: false,
-          reason: UNSUPPORTED_DIALOG_LAYOUT_REASON,
-          message: COMMAND_CODE_UNSUPPORTED_QUESTION_MESSAGE,
-          answer: answer ?? '',
-        });
-      }
-
-      isCommandCodeQuestion = commandCodeQuestion.kind === 'prompt';
-      const promptOptions = buildDetectPromptOptions(cliToolId);
-      promptCheck = (commandCodeQuestion.kind === 'prompt' ? commandCodeQuestion.prompt : null)
-        ?? toolDialog
-        ?? detectPrompt(cleanOutput, promptOptions);
-
-      // Issue #2457: the same shared gate the response poller saves through.
-      // Without it this re-verification vouched for the very rows #2457 is
-      // about — a reply whose Markdown `1. / 2. / 3.` satisfies the generic
-      // parser — and PromptPanel's Submit typed a digit into an idle composer,
-      // i.e. sent the agent a bare "1" as a new instruction.
+      // Issue #2870: the reading is `assessPromptAnswerability`, the SAME one
+      // the status API publishes as `promptAnswerable`, so the UI never offers
+      // Send for a frame this route would refuse (#2868). In order: the tool's
+      // own reader first — agy's `↑/↓ Navigate` dialog (#2364) and Command
+      // Code's footer-less question, read off the capture itself (#2522) — then
+      // the generic parser, then the shared presence gate the response poller
+      // saves through (#2457, handed the capture, not the cleaned text), then
+      // the refusal that says WHICH of "gone" and "unverifiable" it is (#2486).
+      // This is the FRESH frame the answer is about to be sent at, which is the
+      // whole point of re-verifying here.
       //
-      // The gate is handed `currentOutput`, the capture itself — not
-      // `cleanOutput`, which the generic parser needs and the tools' dialog
-      // rules do not (see `evaluateDialogPresence`). agy is unaffected in either
-      // direction: it is `legacy` in the rollout table, so the gate does not
-      // judge it and its own reader above keeps deciding.
-      const presence = evaluateDialogPresence(
-        cliToolId,
-        promptCheck.promptData?.type,
-        currentOutput,
-      );
-
-      // Issue #2486: a refusal says WHICH of the two it is. "The prompt is
-      // gone" and "a picker is up but its layout could not be verified" need
-      // different next steps from the operator (retry vs. answer at the pane),
-      // and #2486's `respond` said the first while `wait` had just exited 10
-      // for the second.
-      const refusal = judgePromptResponse(promptCheck, presence);
+      // A Command Code question that is up and could not be read comes back as
+      // `unsupported_dialog_layout` before the generic parser runs (確定仕様 B):
+      // its partial list is exactly what must not reach a keystroke. Its
+      // `presence` is unvouched, so the log line below still says `vouched: false`.
+      const assessment = assessPromptAnswerability(cliToolId, currentOutput);
+      const { presence, refusal } = assessment;
+      isCommandCodeQuestion = assessment.isCommandCodeQuestion;
+      promptCheck = assessment.promptCheck;
       if (refusal) {
         logger.info('prompt-response-refused', {
           worktreeId: id,

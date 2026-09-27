@@ -22,12 +22,15 @@
  *    session.
  * 2. **The tmux session name.** claude is configured through `--settings` and
  *    carries no launch-line environment at all, so for the most common agent
- *    of the lot the environment says nothing. `mcbd-<tool>-<worktree>[-<n>]` is
- *    the name CommandMate gave the session (`lib/cli-tools/session-name.ts`),
- *    and a shell inside the pane can read it back from tmux. Shelling out to
- *    `tmux` rather than importing anything: the CLI build sets `paths: {}` and
- *    an ESLint guard (Issue #1922) forbids `lib/tmux/**` outright — `attach`
- *    already talks to the binary the same way.
+ *    of the lot the environment says nothing. `mcbd-<ns>-<tool>-<worktree>[-<n>]`
+ *    (or the legacy `mcbd-<tool>-<worktree>[-<n>]`, Issue #2866) is the name
+ *    CommandMate gave the session, and a shell inside the pane can read it back
+ *    from tmux. Split by `parseSessionName` in `lib/cli-tools/session-name.ts`,
+ *    the module that builds the names, so the two forms cannot drift apart from
+ *    what the server produces (Issue #2867). Shelling out to `tmux` rather than
+ *    importing anything tmux-side: the CLI build sets `paths: {}` and an ESLint
+ *    guard (Issue #1922) forbids `lib/tmux/**` outright — `attach` already talks
+ *    to the binary the same way.
  *
  * Neither one answering means this is not a CommandMate-started session, and
  * that is {@link NOT_IN_SESSION} rather than a guess.
@@ -38,8 +41,9 @@ import { Command } from 'commander';
 import type { AgentInstance, WorktreeItem, WorktreeListResponse } from '../types/api-responses';
 import { ApiClient } from '../utils/api-client';
 import { TOKEN_WARNING, handleCommandError } from '../utils/command-helpers';
-import { CLI_TOOL_IDS, isCliToolId } from '../config/cli-tool-ids';
+import { isCliToolId } from '../config/cli-tool-ids';
 import { fetchAgentInstances } from '../utils/agent-instances';
+import { parseSessionName, type ParsedSessionName } from '../../lib/cli-tools/session-name';
 
 /**
  * Exit code for "this shell is not inside a CommandMate agent session".
@@ -57,9 +61,6 @@ export const NOT_IN_SESSION = 3;
 const WORKTREE_ENV_VARS = ['CM_WORKTREE_ID', 'CM_AGENT_WORKTREE_ID'] as const;
 const INSTANCE_ENV_VARS = ['CM_INSTANCE_ID', 'CM_AGENT_INSTANCE_ID'] as const;
 const TOOL_ENV_VARS = ['CM_CLI_TOOL', 'CM_AGENT_TOOL'] as const;
-
-/** The tmux session-name prefix `resolveSessionName` builds every name from. */
-const SESSION_NAME_PREFIX = 'mcbd-';
 
 /** How this identity was established. Reported so a wrong answer is traceable. */
 export type IdentitySource = 'env' | 'tmux-session';
@@ -134,39 +135,6 @@ export function readTmuxSessionName(
   return name === '' ? null : name;
 }
 
-/** A session name split into the parts {@link resolveSessionName} put there. */
-interface ParsedSessionName {
-  cliToolId: string;
-  /** Everything after `mcbd-<tool>-`: a worktree id, possibly plus `-<n>`. */
-  remainder: string;
-}
-
-/**
- * Split `mcbd-<tool>-<rest>` into its tool and the rest.
- *
- * Matched against the tool ids longest-first, because two of them contain a
- * hyphen (`vibe-local`, `command-code`) and a shortest-first scan would read
- * `mcbd-command-code-wt` as the tool `command` — which is not a tool, but the
- * scan does not know that until it has already split in the wrong place.
- *
- * @param sessionName - A tmux session name
- * @returns The parts, or null when this is not a CommandMate session name
- */
-export function parseSessionName(sessionName: string): ParsedSessionName | null {
-  if (!sessionName.startsWith(SESSION_NAME_PREFIX)) return null;
-  const body = sessionName.slice(SESSION_NAME_PREFIX.length);
-
-  const byLength = [...CLI_TOOL_IDS].sort((a, b) => b.length - a.length);
-  for (const cliToolId of byLength) {
-    const prefix = `${cliToolId}-`;
-    if (body.startsWith(prefix)) {
-      const remainder = body.slice(prefix.length);
-      return remainder === '' ? null : { cliToolId, remainder };
-    }
-  }
-  return null;
-}
-
 /**
  * Every worktree id the server knows, or null when it could not be asked.
  *
@@ -184,7 +152,7 @@ async function readWorktreeIds(client: ApiClient): Promise<Set<string> | null> {
 }
 
 /**
- * Decide which part of `mcbd-<tool>-<remainder>` is the worktree.
+ * Decide which part of `mcbd-[<ns>-]<tool>-<rest>` is the worktree.
  *
  * `mcbd-claude-anvil-develop-2` is genuinely two readings: worktree
  * `anvil-develop-2` running claude's primary instance, or worktree
@@ -193,22 +161,22 @@ async function readWorktreeIds(client: ApiClient): Promise<Set<string> | null> {
  * worktree id ending in a number is ordinary (`feature/2-…` slugs to
  * `repo-feature-2`) while a second instance is not the common case.
  *
- * @param parsed - Tool and remainder from {@link parseSessionName}
+ * @param parsed - Tool and rest from {@link parseSessionName}
  * @param knownWorktreeIds - Worktree ids from the server, or null
  */
 function splitRemainder(
   parsed: ParsedSessionName,
   knownWorktreeIds: Set<string> | null,
 ): { worktreeId: string; instanceId: string } {
-  const { cliToolId, remainder } = parsed;
-  const primary = { worktreeId: remainder, instanceId: cliToolId };
+  const { cliToolId, rest } = parsed;
+  const primary = { worktreeId: rest, instanceId: cliToolId };
 
-  const suffixMatch = /^(.*)-(\d+)$/.exec(remainder);
+  const suffixMatch = /^(.*)-(\d+)$/.exec(rest);
   if (!suffixMatch) return primary;
 
   const [, base, suffix] = suffixMatch;
   if (!knownWorktreeIds) return primary;
-  if (knownWorktreeIds.has(remainder)) return primary;
+  if (knownWorktreeIds.has(rest)) return primary;
   if (base !== '' && knownWorktreeIds.has(base)) {
     return { worktreeId: base, instanceId: `${cliToolId}-${suffix}` };
   }
@@ -381,7 +349,7 @@ export const NOT_IN_SESSION_MESSAGE =
   'Error: not inside a CommandMate agent session.\n'
   + '  whoami reads CM_WORKTREE_ID / CM_INSTANCE_ID / CM_CLI_TOOL (or the CM_AGENT_* '
   + 'variables CommandMate puts on an agent launch line), and falls back to the\n'
-  + '  mcbd-<tool>-<worktree> tmux session name. Neither said anything here, which '
+  + '  mcbd-[<ns>-]<tool>-<worktree> tmux session name. Neither said anything here, which '
   + 'means this shell was not started by CommandMate.\n'
   + '  Use `commandmate ls` to list worktrees from outside a session.';
 

@@ -16,7 +16,9 @@ import { isValidWorktreeId } from '@/lib/security/path-validator';
 import { validateSelectedAgentsInput } from '@/lib/selected-agents-validator';
 import { validateAgentInstancesInput } from '@/lib/agent-instances-validator';
 import { listSessions } from '@/lib/tmux/tmux';
+import { checkSessionOwnership, ownedSessionNameSet } from '@/lib/cli-tools/session-ownership';
 import { detectWorktreeSessionStatus } from '@/lib/session/worktree-status-helper';
+import { resolveSessionName } from '@/lib/cli-tools/session-name';
 import { createLogger } from '@/lib/logger';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 
@@ -61,7 +63,8 @@ export async function GET(
     // session status detection depends on the session name set, so it chains off
     // listSessions() while git status runs concurrently above.
     const sessionStatusPromise = listSessions().then((tmuxSessions) => {
-      const sessionNameSet = new Set(tmuxSessions.map(s => s.name));
+      // Issue #2865: only sessions created in this worktree's directory count.
+      const sessionNameSet = ownedSessionNameSet(tmuxSessions, worktree.path);
       return detectWorktreeSessionStatus(
         id,
         sessionNameSet,
@@ -79,7 +82,13 @@ export async function GET(
 
     // Issue #368: selectedAgents is already included in worktree from getWorktreeById
     // Issue #869: include the agent-instance roster (fallback derived from selectedAgents)
-    const agentInstances = resolveAgentInstances(db, id, worktree.selectedAgents);
+    // Issue #2867: each instance carries the tmux session name this server
+    // actually uses for it — namespaced, or the legacy name it adopted — so
+    // `commandmate attach` never has to assemble one it cannot know.
+    const agentInstances = resolveAgentInstances(db, id, worktree.selectedAgents).map((instance) => ({
+      ...instance,
+      sessionName: resolveSessionName(instance.cliTool, id, instance.id),
+    }));
     return NextResponse.json(
       {
         ...worktree,
@@ -277,7 +286,11 @@ export async function PATCH(
     const manager = CLIToolManager.getInstance();
     const cliToolId = updatedWorktree?.cliToolId || 'claude';
     const cliTool = manager.getTool(cliToolId);
-    const isRunning = await cliTool.isRunning(id);
+    // Issue #2865: a same-named session another server created is not running here.
+    const ownership = updatedWorktree
+      ? await checkSessionOwnership(cliTool.getSessionName(id), updatedWorktree.path)
+      : null;
+    const isRunning = ownership?.verdict === 'foreign' ? false : await cliTool.isRunning(id);
     const agentInstances = resolveAgentInstances(db, id, updatedWorktree?.selectedAgents);
     return NextResponse.json(
       {

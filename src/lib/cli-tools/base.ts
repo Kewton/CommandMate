@@ -14,6 +14,7 @@ import {
   sendSpecialKey,
   type SessionGeometryOptions,
 } from '../tmux/tmux';
+import { assertSessionNotForeign } from '../tmux/session-ownership';
 import { resolveComposerSpec } from './composer-spec';
 import { resolveCaptureSpec } from './capture-spec';
 import { resolveAgentModeSpec } from './agent-mode-spec';
@@ -291,11 +292,20 @@ export abstract class BaseCLITool implements ICLITool {
   /**
    * Repair geometry when reusing a tmux session that predates the current
    * defaults, and record that this launch reused one (Issue #2429).
+   *
+   * Issue #2865: only a session created in `worktreePath` is reused. A
+   * same-named session another CommandMate server created is refused with
+   * {@link ForeignSessionError} before anything touches it, and is never
+   * recorded as adopted.
+   *
+   * @throws {ForeignSessionError} When the session's `#{session_path}` is not `worktreePath`
    */
   protected async reconcileExistingSession(
     sessionName: string,
+    worktreePath: string,
     options?: SessionGeometryOptions,
   ): Promise<void> {
+    await assertSessionNotForeign(sessionName, worktreePath);
     adoptedSessions.add(sessionName);
     await reconcileSessionGeometry(sessionName, options);
   }

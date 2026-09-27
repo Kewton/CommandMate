@@ -30,14 +30,13 @@
 
 import { dirname, resolve, sep } from 'path';
 import type { VerificationGateTerminalStatus } from '@/lib/db';
-import { resolveSessionName } from '@/lib/cli-tools/session-name';
-import { CLI_TOOL_IDS, isCliToolType } from '@/lib/cli-tools/types';
+import { parseSessionName, resolveSessionName } from '@/lib/cli-tools/session-name';
+import { isCliToolType } from '@/lib/cli-tools/types';
 import type { TaskContract } from '@/lib/tasks/contract-parser';
 import {
   captureEnvSnapshot,
   ENV_PROBE_IDS,
   ENV_PROBE_LABELS,
-  MCBD_SESSION_PREFIX,
   type EnvEntry,
   type EnvProbeId,
   type EnvSnapshot,
@@ -121,11 +120,13 @@ export interface EnvAttributionContext {
   worktreePath: string;
 }
 
-/** CLI tool ids, longest first: `vibe-local` must not be stripped as `vibe`. */
-const CLI_PREFIXES = [...CLI_TOOL_IDS].sort((a, b) => b.length - a.length);
-
 /**
- * Attribute an `mcbd-<cli>-<worktreeId>[-suffix]` session name to a worktree.
+ * Attribute an `mcbd-[<ns>-]<cli>-<worktreeId>[-suffix]` session name to a
+ * worktree.
+ *
+ * The namespace (Issue #2866) is not consulted: the worktree ID is what ties a
+ * session to this task, and a session this task's agent started in any
+ * server's namespace is still this task's addition.
  *
  * Ambiguity resolves towards `self` on purpose. Worktree ids may contain
  * hyphens, so `mcbd-claude-foo-bar` is genuinely ambiguous between worktree
@@ -134,11 +135,9 @@ const CLI_PREFIXES = [...CLI_TOOL_IDS].sort((a, b) => b.length - a.length);
  * rather than a missed leak.
  */
 export function attributeSessionName(name: string, worktreeId: string): EnvEntryOwner {
-  if (!name.startsWith(MCBD_SESSION_PREFIX)) return 'unattributed';
-  const rest = name.slice(MCBD_SESSION_PREFIX.length);
-  const cli = CLI_PREFIXES.find((id) => rest.startsWith(`${id}-`));
-  if (!cli) return 'unattributed';
-  const tail = rest.slice(cli.length + 1);
+  const parsed = parseSessionName(name);
+  if (!parsed) return 'unattributed';
+  const tail = parsed.rest;
   if (tail === worktreeId || tail.startsWith(`${worktreeId}-`)) return 'self';
   return 'other';
 }
@@ -288,6 +287,22 @@ export interface EnvProbeDiff {
   taskSessionAdded: EnvChange[];
   /** Entries that existed at task start and are gone. Always violations. */
   removed: EnvChange[];
+  /**
+   * `home-entries` additions and removals dropped because their name is in
+   * `options.envCleanIgnoreHomeEntries` (#2890). Kept, not discarded: the
+   * report names them, so an excused entry is never a silent one.
+   */
+  ignoredByConfig: EnvChange[];
+}
+
+/** What {@link diffEnvSnapshots} may be told beyond the two snapshots. */
+export interface EnvDiffOptions {
+  /**
+   * `$HOME` entry names not to count (`options.envCleanIgnoreHomeEntries`).
+   * Exact match against the entry's name; applied to the `home-entries` probe
+   * only, in both directions. The baseline itself is never edited.
+   */
+  ignoreHomeEntries?: readonly string[];
 }
 
 export interface EnvCleanDiff {
@@ -312,9 +327,11 @@ function toChange(entry: EnvEntry, owner: EnvEntryOwner): EnvChange {
 export function diffEnvSnapshots(
   baseline: EnvSnapshot,
   final: EnvSnapshot,
-  context: EnvAttributionContext
+  context: EnvAttributionContext,
+  options: EnvDiffOptions = {}
 ): EnvCleanDiff {
   const taskSession = readTaskSession(baseline);
+  const ignoredHomeEntries = new Set(options.ignoreHomeEntries ?? []);
   const probes: EnvProbeDiff[] = ENV_PROBE_IDS.map((probeId) => {
     const before = baseline.probes[probeId];
     const after = final.probes[probeId];
@@ -328,6 +345,7 @@ export function diffEnvSnapshots(
         ignoredAdded: [],
         taskSessionAdded: [],
         removed: [],
+        ignoredByConfig: [],
       };
     }
     if (!after || after.status !== 'ok') {
@@ -339,18 +357,29 @@ export function diffEnvSnapshots(
         ignoredAdded: [],
         taskSessionAdded: [],
         removed: [],
+        ignoredByConfig: [],
       };
     }
 
     const beforeKeys = new Set(before.entries.map((entry) => entry.key));
     const afterKeys = new Set(after.entries.map((entry) => entry.key));
 
+    // Only `home-entries`, and only by the whole name: the same string under
+    // `~/.commandmate` is a different directory and stays counted.
+    const isIgnoredByConfig = (entry: EnvEntry): boolean =>
+      probeId === 'home-entries' && ignoredHomeEntries.has(entry.key);
+
     const added: EnvChange[] = [];
     const ignoredAdded: EnvChange[] = [];
     const taskSessionAdded: EnvChange[] = [];
+    const ignoredByConfig: EnvChange[] = [];
     for (const entry of after.entries) {
       if (beforeKeys.has(entry.key)) continue;
       const owner = attributeEntry(probeId, entry, context);
+      if (isIgnoredByConfig(entry)) {
+        ignoredByConfig.push(toChange(entry, owner));
+        continue;
+      }
       if (probeId === 'tmux-sessions' && taskSession && entry.key === taskSession) {
         // Additions only: a task session that existed at task start and is gone
         // falls through to `removed` below like everything else (#1624).
@@ -360,9 +389,12 @@ export function diffEnvSnapshots(
       (owner === 'other' ? ignoredAdded : added).push(toChange(entry, owner));
     }
 
-    const removed = before.entries
-      .filter((entry) => !afterKeys.has(entry.key))
-      .map((entry) => toChange(entry, attributeEntry(probeId, entry, context)));
+    const removed: EnvChange[] = [];
+    for (const entry of before.entries) {
+      if (afterKeys.has(entry.key)) continue;
+      const change = toChange(entry, attributeEntry(probeId, entry, context));
+      (isIgnoredByConfig(entry) ? ignoredByConfig : removed).push(change);
+    }
 
     return {
       probeId,
@@ -372,6 +404,7 @@ export function diffEnvSnapshots(
       ignoredAdded,
       taskSessionAdded,
       removed,
+      ignoredByConfig,
     };
   });
 
@@ -431,6 +464,18 @@ function formatTaskSessionChanges(changes: EnvChange[]): string[] {
 }
 
 /**
+ * `home-entries` changes dropped by `options.envCleanIgnoreHomeEntries`, on one
+ * line (#2890). Listed rather than dropped for the reason the excused task
+ * session is: a verdict that silently discounted an entry would read exactly
+ * like one that never saw it.
+ */
+function formatIgnoredByConfig(changes: EnvChange[]): string[] {
+  if (changes.length === 0) return [];
+  const names = changes.map((change) => change.key).join(', ');
+  return [`    ignored (options.envCleanIgnoreHomeEntries): ${names}`];
+}
+
+/**
  * The header's account of what could be excused, so a report judged against a
  * baseline written before #2472 says why the task's own session was not.
  */
@@ -456,6 +501,7 @@ export function formatEnvCleanReport(diff: EnvCleanDiff): string {
           : '';
       lines.push(`  ${probe.probeId} clean (${label})${excused}`);
       lines.push(...formatTaskSessionChanges(probe.taskSessionAdded));
+      lines.push(...formatIgnoredByConfig(probe.ignoredByConfig));
       continue;
     }
     lines.push(
@@ -464,6 +510,7 @@ export function formatEnvCleanReport(diff: EnvCleanDiff): string {
     lines.push(...formatChanges('+', probe.added));
     lines.push(...formatChanges('-', probe.removed));
     lines.push(...formatTaskSessionChanges(probe.taskSessionAdded));
+    lines.push(...formatIgnoredByConfig(probe.ignoredByConfig));
     for (const excused of probe.ignoredAdded) {
       lines.push(`    · ${excused.key} (ignored: belongs to another worktree)`);
     }
@@ -501,6 +548,12 @@ export interface EvaluateEnvCleanInput extends EnvAttributionContext {
   baseline: EnvSnapshot | null;
   /** Declarations that switched the gate on, for the no-baseline message. */
   sources: string[];
+  /**
+   * `options.envCleanIgnoreHomeEntries` from verify.yaml (#2890): `$HOME` entry
+   * names the comparison does not count. Passed through to
+   * {@link diffEnvSnapshots}; omitted means nothing is ignored.
+   */
+  ignoreHomeEntries?: readonly string[];
   /** Injected by tests; defaults to probing the real machine. */
   capture?: () => Promise<EnvSnapshot>;
 }
@@ -547,7 +600,9 @@ export async function evaluateEnvClean(input: EvaluateEnvCleanInput): Promise<En
     );
   }
 
-  const diff = diffEnvSnapshots(input.baseline, final, input);
+  const diff = diffEnvSnapshots(input.baseline, final, input, {
+    ignoreHomeEntries: input.ignoreHomeEntries,
+  });
   const header =
     `${ENV_CLEAN_GATE_ID}: baseline=${new Date(input.baseline.capturedAt).toISOString()} ` +
     `status=${diff.status} task-session=${describeTaskSession(diff.taskSession)}`;

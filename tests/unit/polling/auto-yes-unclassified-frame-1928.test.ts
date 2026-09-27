@@ -21,6 +21,11 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+// Issue #2865: the poller answers only a session created in the worktree's own
+// directory. Ownership itself is covered by tests/unit/tmux/session-ownership.test.ts.
+vi.mock('@/lib/cli-tools/worktree-session-ownership', () => ({
+  checkWorktreeSessionOwnership: vi.fn(async () => ({ verdict: 'owned', sessionPath: null })),
+}));
 import Database from 'better-sqlite3';
 import { runMigrations } from '@/lib/db/db-migrations';
 
