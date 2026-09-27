@@ -62,12 +62,28 @@ vi.mock('util', async (importOriginal) => {
 
 import { CodexTool } from '@/lib/cli-tools/codex';
 import {
+  CODEX_EMBEDDED_MODE_ARGS,
+  CODEX_HOOK_TRUST_BYPASS_FLAG,
+} from '@/lib/hooks/sources/codex/hooks-config';
+import {
   CODEX_UPDATE_DIALOG_ENV_VAR,
   CODEX_UPDATE_DIALOG_KEYS,
   DEFAULT_CODEX_UPDATE_DIALOG_POLICY,
 } from '@/config/codex-update-dialog-config';
 import { hasSession, createSession, sendKeys, sendSpecialKey, capturePane, reconcileSessionGeometry } from '@/lib/tmux/tmux';
 import { sendMessageWithSubmitVerification } from '@/lib/cli-tools/submit-verified-sender';
+
+const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * The line that starts codex: the bare executable, or the injected one
+ * (`… 'codex'` after the env prefix), optionally followed by the embedded-mode
+ * arguments (Issue #2874) and the trust bypass flag. Nothing else may follow the
+ * executable, so a line that gained an unknown argument is still caught.
+ */
+const CODEX_LAUNCH_LINE_PATTERN = new RegExp(
+  `^codex$|'codex'(?: ${escapeRegExp(CODEX_EMBEDDED_MODE_ARGS)})?(?: ${escapeRegExp(CODEX_HOOK_TRUST_BYPASS_FLAG)})?$`
+);
 
 /** What the DEFAULT policy answers the update dialog with (Issue #2068). */
 const UPDATE_KEY = CODEX_UPDATE_DIALOG_KEYS[DEFAULT_CODEX_UPDATE_DIALOG_POLICY];
@@ -177,11 +193,12 @@ describe('CodexTool first-launch dialog handling (Issue #890)', () => {
 
       // The launch command keeps its Enter; the number selections must not.
       // Issue #1760 put the hook correlation keys in front of `codex` on that
-      // line, so it is matched on the Enter and the executable rather than on
-      // the whole string, which `codex-agent-hooks-1760.test.ts` owns.
+      // line, and #2874 put the embedded-mode arguments after it, so it is
+      // matched on the Enter and the executable rather than on the whole
+      // string, which `codex-agent-hooks-1760.test.ts` owns.
       expect(sendKeys).toHaveBeenCalledWith(
         SESSION,
-        expect.stringMatching(/(^codex$|'codex'$)/),
+        expect.stringMatching(CODEX_LAUNCH_LINE_PATTERN),
         true
       );
       expect(sendKeys).toHaveBeenCalledWith(SESSION, UPDATE_KEY, false);

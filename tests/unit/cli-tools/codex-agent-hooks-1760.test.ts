@@ -59,7 +59,7 @@ vi.mock('util', async (importOriginal) => {
 import { CodexTool, isCodexHooksReviewDialog } from '@/lib/cli-tools/codex';
 import { capturePane, createSession, hasSession, sendKeys } from '@/lib/tmux/tmux';
 import { getAgentEventGenerationStartedAt, recordAgentEvent } from '@/lib/session/agent-event-state';
-import { getCodexHooksPath } from '@/lib/hooks/sources/codex/hooks-config';
+import { CODEX_EMBEDDED_MODE_ARGS, getCodexHooksPath } from '@/lib/hooks/sources/codex/hooks-config';
 import {
   CODEX_HOOKS_REVIEW_PANE,
   CODEX_READY_PANE,
@@ -156,7 +156,9 @@ describe('startSession injects the correlation keys', () => {
     expect(command).toContain("CM_AGENT_INSTANCE_ID='codex-2'");
     expect(command).toContain("CM_HOOK_URL='http://127.0.0.1:4321/api/hooks/agent-event'");
     expect(command).toContain('instanceId=codex-2');
-    expect(command.endsWith("'codex'")).toBe(true);
+    // Issue #2874: the executable is followed by the embedded-mode arguments and
+    // nothing else, so hooks run with this session's env, not a shared daemon's.
+    expect(command.endsWith(`'codex' ${CODEX_EMBEDDED_MODE_ARGS}`)).toBe(true);
   });
 
   it('writes the hooks file codex will read', async () => {
