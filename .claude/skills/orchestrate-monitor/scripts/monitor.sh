@@ -12,7 +12,15 @@
 #     under zsh/bash and breaks curl/tmux lookups; feedback_zsh_path_loop_var)
 #
 # Interventions, in order of how much damage a false positive does:
-#   PROMPT      -> Enter (silent auto-approve, counted)
+#   PROMPT      -> Enter, but ONLY when the poll shows a binary approval whose
+#               default option is affirmative (skills #59, ported in Issue
+#               #2904). Enter is typed into the pane, so it overrides the
+#               server's own autoYes policy, and on a multiple_choice prompt it
+#               confirms the DEFAULT option rather than answering "yes". Everything
+#               else — a policy suppression, a frame with no promptData, a picker
+#               with no default — is HELD: no keys, one report, counted separately
+#               from approvals. See monitor-lib.sh § "prompt approval policy" for
+#               the fields and the measurements behind the rule.
 #   RATE_LIMIT  -> "a" immediately, never sleep through a limit
 #   IDLE + terminal API error at the idle threshold -> resend --resend-message,
 #               capped by --max-resends. This is the only recovery from the CLI
@@ -29,7 +37,7 @@
 # Usage:
 #   monitor.sh [--interval 20] [--idle-threshold 8] [--session-prefix <prefix>] \
 #              [--resend-message continue] [--max-resends 2] [--max-polls 0] \
-#              [--heartbeat 10] [--verbose] [--hooks <file>] \
+#              [--heartbeat 10] [--verbose] [--no-auto-approve] [--hooks <file>] \
 #              <worktree-id>[@<instance-id>] [<worktree-id>[@<instance-id>] ...]
 #
 #   <worktree-id>[@<instance-id>]
@@ -72,6 +80,15 @@
 #                  second while it was the first. Cheap enough to leave on —
 #                  the interventions and verdicts around it are unchanged.
 #
+#   --no-auto-approve
+#                  never type Enter at a prompt; hold and report every one of
+#                  them. The switch supervision needs when the delegation carries
+#                  an execution contract: the answer then belongs to the server's
+#                  autoYes policy, and a keystroke into the pane is not subject to
+#                  it (skills #59, ported in Issue #2904). Everything else —
+#                  classification, rate-limit resume, resend, completion — is
+#                  unchanged.
+#
 #   --hooks <file> source <file> after the built-in count_commits /
 #                  count_uncommitted / read_task_status stubs, so an operator can
 #                  supply the real data sources (Issue #1533, #1581). Repeatable,
@@ -97,6 +114,7 @@ MAX_RESENDS=2
 MAX_POLLS=0               # 0 = poll until every worker is COMPLETE (operator default)
 HEARTBEAT=10              # poll rounds between `alive` lines; 0 = off
 VERBOSE=0                 # 0 = default stream (interventions + verdicts only)
+AUTO_APPROVE=1            # 0 = hold every prompt (contract-backed supervision)
 CM=${CM:-"npx commandmate@latest"}
 
 # bash 3.2: plain indexed array, appended with += so an empty array is never
@@ -117,6 +135,7 @@ while [ $# -gt 0 ]; do
     --max-polls) shift; MAX_POLLS=${1:-0};;
     --heartbeat) shift; HEARTBEAT=${1:-10};;
     --verbose) VERBOSE=1;;
+    --no-auto-approve) AUTO_APPROVE=0;;
     --hooks)
       shift
       # The first flag drops the MONITOR_HOOKS default (the flag wins); later
@@ -220,6 +239,8 @@ while [ "$i" -lt "$n_ids" ]; do
   echo "0" > "$STATE_DIR/$lbl.streak"
   echo "0" > "$STATE_DIR/$lbl.started"
   echo "0" > "$STATE_DIR/$lbl.approvals"
+  echo "0" > "$STATE_DIR/$lbl.held"
+  : > "$STATE_DIR/$lbl.heldsig"
   echo "0" > "$STATE_DIR/$lbl.resends"
   i=$((i + 1))
 done
@@ -253,7 +274,7 @@ send_to_pane() {
   shift 3
 
   if [ -z "$sp__session" ]; then
-    echo "monitor[$sp__label]: $sp__what NOT delivered — no tmux session could be derived (capture payload carries no cliToolId; pass --session-prefix)" >&2
+    echo "monitor[$sp__label]: $sp__what NOT delivered — no tmux session could be derived (capture payload carries no sessionName or cliToolId; pass --session-prefix)" >&2
     return 1
   fi
 
@@ -267,6 +288,39 @@ send_to_pane() {
     return 1
   fi
   return 0
+}
+
+# prompt_hold_reason <verdict> <poll-file>: why Enter was withheld, in the terms
+# the operator has to act on. Each one needs a different move — re-run the
+# delegation without the deny pattern, answer the picker by hand, look at a pane
+# the product could not parse — so they are never collapsed into one message
+# (skills #59, ported in Issue #2904).
+prompt_hold_reason() {
+  case "$1" in
+    hold:policy)
+      printf "the contract's autoYes policy withheld this answer server-side (autoYes.lastSuppression: %s); typing Enter would override it" \
+        "$(ml_autoyes_suppression_reason "$2")"
+      ;;
+    hold:disabled)
+      printf 'auto-approve is off (--no-auto-approve)'
+      ;;
+    hold:no-prompt-data)
+      printf 'the poll carries no promptData, so what Enter would select is unknown'
+      ;;
+    hold:no-default)
+      printf 'no option is marked default, so Enter confirms whatever the cursor sits on, not an approval'
+      ;;
+    hold:choice)
+      printf "the default option is '%s', which is a choice rather than an approval" \
+        "$(ml_prompt_default_label "$2")"
+      ;;
+    hold:type)
+      printf "prompt type '%s' has never been measured against this rule" "$(ml_prompt_type "$2")"
+      ;;
+    *)
+      printf 'unrecognised hold verdict %s' "$1"
+      ;;
+  esac
 }
 
 # count_uncommitted <worktree-id>: best-effort change count. Left to the operator
@@ -332,9 +386,10 @@ done_count=0
 # `set -u`.
 run_ended=1
 
-# Issue #1950: which fatal signal gets to speak. A second one arriving while the
-# first is still being reported does NOT displace it — see report_fatal_signal.
-fatal_reported=0
+# Issue #1950: only the signal that actually stopped the run gets to speak. A
+# second one arriving while the first is still being reported does NOT displace
+# it — the latch that enforces that lives in report_fatal_signal below.
+fatal_signal_seen=""
 
 report_exit() {
   re__rc=$?
@@ -363,8 +418,8 @@ report_exit() {
 # shutdown already in progress is dropped, and the first one is the one that
 # explains what happened.
 report_fatal_signal() {
-  if [ "$fatal_reported" = "1" ]; then return; fi
-  fatal_reported=1
+  if [ -n "$fatal_signal_seen" ]; then return; fi
+  fatal_signal_seen=$1
   echo "monitor: ERROR caught SIG$1 (signal $2) on poll round $poll_round — monitoring stops here" >&2
   exit $((128 + $2))
 }
@@ -451,7 +506,7 @@ while [ "$done_count" -lt "$n_ids" ]; do
       if [ -z "$session" ]; then
         # A server older than #2886 sends no `sessionName` — fall back to the
         # derived shape exactly as before.
-        session=$(ml_session_name "$wid" "$cli_tool" "$inst" "$SESSION_PREFIX") || session=""
+        session=$(ml_session_name "$wid" "$cli_tool" "$inst" "") || session=""
       fi
     fi
     if [ ! -f "$STATE_DIR/$lbl.target" ] && [ -n "$session" ]; then
@@ -477,15 +532,42 @@ while [ "$done_count" -lt "$n_ids" ]; do
         echo "0" > "$STATE_DIR/$lbl.streak"
         ;;
       PROMPT)
-        # Silent auto-approve, so the notifier is not flooded — but the counter
-        # moves ONLY on a delivered Enter, so `approvals=` on the COMPLETE line is
-        # a count of approvals that happened. Before #1601 it counted attempts at
-        # a session that did not exist, i.e. the loop reported approvals it had
-        # never made. Silence still means "approved"; a miss is on stderr.
-        if send_to_pane "$lbl" "$session" "prompt approval Enter" Enter; then
-          approvals=$(read_state "$lbl" approvals)
-          approvals=$((approvals + 1))
-          echo "$approvals" > "$STATE_DIR/$lbl.approvals"
+        # Approve or hold — never unconditionally (skills #59, ported in Issue
+        # #2904). The verdict is read out of THIS poll's promptData, the same
+        # payload the pane was classified from, so what Enter would select is
+        # judged rather than assumed. ml_prompt_enter_verdict returns `approve`
+        # only for a binary approval whose default option is affirmative.
+        if [ "$AUTO_APPROVE" = "1" ]; then
+          prompt_verdict=$(ml_prompt_enter_verdict "$poll")
+        else
+          prompt_verdict="hold:disabled"
+        fi
+        if [ "$prompt_verdict" = "approve" ]; then
+          # Silent auto-approve, so the notifier is not flooded — but the counter
+          # moves ONLY on a delivered Enter, so `approvals=` on the COMPLETE line
+          # is a count of approvals that happened. Before #1601 it counted
+          # attempts at a session that did not exist, i.e. the loop reported
+          # approvals it had never made. Silence still means "approved"; a miss
+          # is on stderr.
+          if send_to_pane "$lbl" "$session" "prompt approval Enter" Enter; then
+            approvals=$(read_state "$lbl" approvals)
+            approvals=$((approvals + 1))
+            echo "$approvals" > "$STATE_DIR/$lbl.approvals"
+          fi
+        else
+          # A hold is NOT silent: nothing resumes the worker now, so the operator
+          # has to be told once — and only once per prompt, or a prompt left up
+          # for twenty polls reports twenty stalls and inflates `held=`. The
+          # signature is the promptData block, which is stable while the prompt
+          # is on screen and different for the next one.
+          hold_sig=$(ml_prompt_signature "$poll" "$prompt_verdict")
+          if [ "$hold_sig" != "$(read_state "$lbl" heldsig)" ]; then
+            echo "$hold_sig" > "$STATE_DIR/$lbl.heldsig"
+            held=$(read_state "$lbl" held)
+            held=$((held + 1))
+            echo "$held" > "$STATE_DIR/$lbl.held"
+            echo "monitor[$lbl]: PROMPT held, no Enter sent — $(prompt_hold_reason "$prompt_verdict" "$poll"). Answer it in the pane, or with 'commandmate respond $wid'"
+          fi
         fi
         echo "0" > "$STATE_DIR/$lbl.streak"
         ;;
@@ -531,6 +613,14 @@ while [ "$done_count" -lt "$n_ids" ]; do
         echo "$streak" > "$STATE_DIR/$lbl.streak"
         ;;
     esac
+
+    # Leaving PROMPT clears the held-prompt identity, so the NEXT prompt is
+    # reported even when it is byte-identical to the one just answered (a rerun
+    # of the same command asks the same question). Held prompts are episodes, not
+    # polls.
+    if [ "$state" != "PROMPT" ]; then
+      : > "$STATE_DIR/$lbl.heldsig"
+    fi
 
     post_started=$(read_state "$lbl" started)
     post_streak=$(read_state "$lbl" streak)
@@ -592,7 +682,17 @@ while [ "$done_count" -lt "$n_ids" ]; do
 
     case "$verdict" in
       COMPLETE)
-        echo "monitor[$lbl]: COMPLETE (approvals=$(read_state "$lbl" approvals))"
+        # `held=` is appended only when a prompt was actually held, for the same
+        # reason `task=` is appended only when the ledger answered: a run that
+        # never held anything keeps the pre-#2904 line byte-identical, and a
+        # `held=0` on it would be a counter pretending to be evidence. Present
+        # means "this many prompts went unanswered by the loop" — grep
+        # 'PROMPT held' for which ones.
+        complete_counters="approvals=$(read_state "$lbl" approvals)"
+        if [ "$(read_state "$lbl" held)" -gt 0 ]; then
+          complete_counters="$complete_counters held=$(read_state "$lbl" held)"
+        fi
+        echo "monitor[$lbl]: COMPLETE ($complete_counters)"
         touch "$STATE_DIR/$lbl.done"
         done_count=$((done_count + 1))
         ;;

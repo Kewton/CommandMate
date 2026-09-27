@@ -35,7 +35,7 @@
       "local": ".claude/skills/cmate-verify",
       "counterpart": "skills/cmate-verify",
       "policy": "mapped",
-      "rationale": "CommandMate が開発元。scripts は #1586 で byte-identical に移植された（2026-08-01 実測: diff -r 無差分）。SKILL.md だけは移植時に適応が入っている。 2026-08-20（Issue #1861）に counterpart PR #225（6faa33f、skills #223 / #224）を取り込み、verify-run.sh を再び byte-identical にした。 なお counterpart は fixture と run-tests.sh を package の外（`tests/fixtures/cmate-verify/`）に置いているため、`check --counterpart` は`scripts/tests/**` を MISSING と報告する。これは構造上の既知差で、CommandMate 側は Node の無い導入先でも suite を回せるよう package 内に同梱している。 同日（Issue #1864）に counterpart PR #230（9604e8f、skills #228 —— run の途中で $WORKDIR が消える欠陥の修正）も取り込み、verify-run.sh のバイト一致を維持している。",
+      "rationale": "CommandMate が開発元。scripts は #1586 で byte-identical に移植された（2026-08-01 実測: diff -r 無差分）。SKILL.md だけは移植時に適応が入っている。 2026-08-20（Issue #1861）に counterpart PR #225（6faa33f、skills #223 / #224）を取り込み、verify-run.sh を再び byte-identical にした。 なお counterpart は fixture と run-tests.sh を package の外（`tests/fixtures/cmate-verify/`）に置いているため、対応する `scripts/tests/fixtures/**` と `scripts/tests/run-tests.sh` の各 file エントリに `counterpartPath` でその実体を指定してある（Issue #2904。以前は `check --counterpart` がこれを MISSING と誤報告していた）。CommandMate 側は Node の無い導入先でも suite を回せるよう package 内に同梱している。fixture 47 本は byte-identical のまま（2026-09-27 実測: cmp で無差分）。run-tests.sh はヘッダのコメントと RUNNER 解決パスの前提が異なるため port-required に変更した。 同日（Issue #1864）に counterpart PR #230（9604e8f、skills #228 —— run の途中で $WORKDIR が消える欠陥の修正）も取り込み、verify-run.sh のバイト一致を維持している。",
       "mirrors": [
         ".agents/skills/cmate-verify"
       ],
@@ -53,247 +53,295 @@
         },
         {
           "path": "scripts/tests/fixtures/all-pass.yaml",
+          "counterpartPath": "tests/fixtures/cmate-verify/fixtures/all-pass.yaml",
           "policy": "byte-identical",
           "sha256": "830fe8f301d9e06871eb8ea58ca272e4db63f6d38c0ebce18470ca3a79ceb6c9"
         },
         {
           "path": "scripts/tests/fixtures/bad-anchor.yaml",
+          "counterpartPath": "tests/fixtures/cmate-verify/fixtures/bad-anchor.yaml",
           "policy": "byte-identical",
           "sha256": "1b80b0829432f4269f2a8842aa7f4c89e32e3bda205d37a53b49670796be29d0"
         },
         {
           "path": "scripts/tests/fixtures/bad-block-scalar.yaml",
+          "counterpartPath": "tests/fixtures/cmate-verify/fixtures/bad-block-scalar.yaml",
           "policy": "byte-identical",
           "sha256": "b89117a79cfab8b2099c187337e1339bcedca63dc0e201c79d411a7a6e10bf80"
         },
         {
           "path": "scripts/tests/fixtures/bad-duplicate-id.yaml",
+          "counterpartPath": "tests/fixtures/cmate-verify/fixtures/bad-duplicate-id.yaml",
           "policy": "byte-identical",
           "sha256": "dcc323cd41552d9aa76d2d8d10a54b9e8ee234dc37f99cd7993764ce488ffb91"
         },
         {
           "path": "scripts/tests/fixtures/bad-env-clean.yaml",
+          "counterpartPath": "tests/fixtures/cmate-verify/fixtures/bad-env-clean.yaml",
           "policy": "byte-identical",
           "sha256": "c4b569baa00547867792d6c5d566d760d17d78912b070a1534436329b6238667"
         },
         {
           "path": "scripts/tests/fixtures/bad-flaky-alone.yaml",
+          "counterpartPath": "tests/fixtures/cmate-verify/fixtures/bad-flaky-alone.yaml",
           "policy": "byte-identical",
           "sha256": "f2ce6aa14c292c09db58a04257432412ddb4a21b1f1aa52bc7c77f2d4132bf68"
         },
         {
           "path": "scripts/tests/fixtures/bad-flaky-type.yaml",
+          "counterpartPath": "tests/fixtures/cmate-verify/fixtures/bad-flaky-type.yaml",
           "policy": "byte-identical",
           "sha256": "43455adc7ba8b657e9a48a327c79c7dcaa0762dc9743274a772af91722e7d743"
         },
         {
           "path": "scripts/tests/fixtures/bad-flow.yaml",
+          "counterpartPath": "tests/fixtures/cmate-verify/fixtures/bad-flow.yaml",
           "policy": "byte-identical",
           "sha256": "3179c3ac553c2a308e270a098ba4ac95ff69f024ae0836106e062f5b7cdf5b37"
         },
         {
           "path": "scripts/tests/fixtures/bad-gate-key.yaml",
+          "counterpartPath": "tests/fixtures/cmate-verify/fixtures/bad-gate-key.yaml",
           "policy": "byte-identical",
           "sha256": "1d62c602d1c59b5c9bbd20f99b11525f28c0316945f4b2a4caf8e86eb94832b3"
         },
         {
           "path": "scripts/tests/fixtures/bad-indent.yaml",
+          "counterpartPath": "tests/fixtures/cmate-verify/fixtures/bad-indent.yaml",
           "policy": "byte-identical",
           "sha256": "99e0f97fd288bfb565a5fa808fbb8bb046e7cbb208aac67bd360b7f81ef8319e"
         },
         {
           "path": "scripts/tests/fixtures/bad-invalid-id.yaml",
+          "counterpartPath": "tests/fixtures/cmate-verify/fixtures/bad-invalid-id.yaml",
           "policy": "byte-identical",
           "sha256": "9c96187607ef74c2d5086166f836aeae161bbf94357b37d1c011e857fdb3ef1f"
         },
         {
           "path": "scripts/tests/fixtures/bad-missing-command.yaml",
+          "counterpartPath": "tests/fixtures/cmate-verify/fixtures/bad-missing-command.yaml",
           "policy": "byte-identical",
           "sha256": "810a6f34c4f2a5a77dc635c2a0243d159272f0e43d14823a6add79aed87fb59e"
         },
         {
           "path": "scripts/tests/fixtures/bad-missing-id.yaml",
+          "counterpartPath": "tests/fixtures/cmate-verify/fixtures/bad-missing-id.yaml",
           "policy": "byte-identical",
           "sha256": "44c9ce1e2d331cf521961398bdea34b5fb890376d8dfe059470774a9d1e616b6"
         },
         {
           "path": "scripts/tests/fixtures/bad-mutex-length.yaml",
+          "counterpartPath": "tests/fixtures/cmate-verify/fixtures/bad-mutex-length.yaml",
           "policy": "byte-identical",
           "sha256": "2b132f844243a517ca4ad82ee29751ee1a147123003f507d7260746745bbfea5"
         },
         {
           "path": "scripts/tests/fixtures/bad-mutex-name.yaml",
+          "counterpartPath": "tests/fixtures/cmate-verify/fixtures/bad-mutex-name.yaml",
           "policy": "byte-identical",
           "sha256": "a7fc8ce3a40f772006f2ca06cb59126f174180e9a874f86d0ee25dd649936b14"
         },
         {
           "path": "scripts/tests/fixtures/bad-no-gates.yaml",
+          "counterpartPath": "tests/fixtures/cmate-verify/fixtures/bad-no-gates.yaml",
           "policy": "byte-identical",
           "sha256": "7be542f8bb5954519fab54267758b48bd0c9b9fd44e1f6d6a906a52e8e4e1d26"
         },
         {
           "path": "scripts/tests/fixtures/bad-no-version.yaml",
+          "counterpartPath": "tests/fixtures/cmate-verify/fixtures/bad-no-version.yaml",
           "policy": "byte-identical",
           "sha256": "43e806edf29c0d52ec09e1094ca4ab8eded9fccd62ffb609f620bc5a508239df"
         },
         {
           "path": "scripts/tests/fixtures/bad-option-key.yaml",
+          "counterpartPath": "tests/fixtures/cmate-verify/fixtures/bad-option-key.yaml",
           "policy": "byte-identical",
           "sha256": "eea039f08edd17bdb3cf01898e56485a151a40f3afab339a7b8439b9d29680a6"
         },
         {
           "path": "scripts/tests/fixtures/bad-option-value.yaml",
+          "counterpartPath": "tests/fixtures/cmate-verify/fixtures/bad-option-value.yaml",
           "policy": "byte-identical",
           "sha256": "a41b5672d7adfdf698062ce1e47c154106e38eabd97ebb9906d109acf11053ff"
         },
         {
           "path": "scripts/tests/fixtures/bad-require-commit.yaml",
+          "counterpartPath": "tests/fixtures/cmate-verify/fixtures/bad-require-commit.yaml",
           "policy": "byte-identical",
           "sha256": "2262736fa5dfcd4ae37e512c8f9cf5d054b5590a54036ce2c2bd9517c8d69586",
           "note": "他の fixture と同じく counterpart へ逐語コピーする。Issue #1639 で追加。 2026-08-03 に counterpart（cmate-verify 0.2.0、skills PR #41）へ移植済み。"
         },
         {
           "path": "scripts/tests/fixtures/bad-reserved-env-clean.yaml",
+          "counterpartPath": "tests/fixtures/cmate-verify/fixtures/bad-reserved-env-clean.yaml",
           "policy": "byte-identical",
           "sha256": "1b8f62e377a37d5f4eacc0f806a30e47fe8a2a2a64a74dd3588189ae39cd4e1c"
         },
         {
           "path": "scripts/tests/fixtures/bad-reserved-id.yaml",
+          "counterpartPath": "tests/fixtures/cmate-verify/fixtures/bad-reserved-id.yaml",
           "policy": "byte-identical",
           "sha256": "f8a526bc59f198505c82533c184572b5ac1191f30dad70f3907a703967acb231"
         },
         {
           "path": "scripts/tests/fixtures/bad-retry-range.yaml",
+          "counterpartPath": "tests/fixtures/cmate-verify/fixtures/bad-retry-range.yaml",
           "policy": "byte-identical",
           "sha256": "40920f1992ed31038039194ae3691f39c481df136dfdff0fd4d783483ff6e607"
         },
         {
           "path": "scripts/tests/fixtures/bad-retry-type.yaml",
+          "counterpartPath": "tests/fixtures/cmate-verify/fixtures/bad-retry-type.yaml",
           "policy": "byte-identical",
           "sha256": "02c9b8e98566fb786064c9be332d8aeef05d3e935bbe0972f3dc5fd6632811f1"
         },
         {
           "path": "scripts/tests/fixtures/bad-tab.yaml",
+          "counterpartPath": "tests/fixtures/cmate-verify/fixtures/bad-tab.yaml",
           "policy": "byte-identical",
           "sha256": "1f6043cb5ae62709915a406b4564122e3793ed51cb4c41e9d1f8ac6d0daec984"
         },
         {
           "path": "scripts/tests/fixtures/bad-timeout-range.yaml",
+          "counterpartPath": "tests/fixtures/cmate-verify/fixtures/bad-timeout-range.yaml",
           "policy": "byte-identical",
           "sha256": "95e1907fbcb531ca1cda9a49a90bc6b4b96aefc0ff3839750f2ca1e8d382ef79"
         },
         {
           "path": "scripts/tests/fixtures/bad-timeout-type.yaml",
+          "counterpartPath": "tests/fixtures/cmate-verify/fixtures/bad-timeout-type.yaml",
           "policy": "byte-identical",
           "sha256": "bc42beb805d8b57dc00a9c63107e228f38142a1ada72fc2c446fca8984415188"
         },
         {
           "path": "scripts/tests/fixtures/bad-version.yaml",
+          "counterpartPath": "tests/fixtures/cmate-verify/fixtures/bad-version.yaml",
           "policy": "byte-identical",
           "sha256": "deb52d8f8205df596c026404f913d15cde8d7afc6c96f7a0fbc881d1086dd75c"
         },
         {
           "path": "scripts/tests/fixtures/default-options.yaml",
+          "counterpartPath": "tests/fixtures/cmate-verify/fixtures/default-options.yaml",
           "policy": "byte-identical",
           "sha256": "98657da4079c59565c23d66d46373c8c71b2df3abe8b7f63a1f7aa5556180396"
         },
         {
           "path": "scripts/tests/fixtures/mutex-flaky.yaml",
+          "counterpartPath": "tests/fixtures/cmate-verify/fixtures/mutex-flaky.yaml",
           "policy": "byte-identical",
           "sha256": "227203a5b04754e0bc762285f9cf108058492e4c1270910405969ccedf1f9baa"
         },
         {
           "path": "scripts/tests/fixtures/mutex-short.yaml",
+          "counterpartPath": "tests/fixtures/cmate-verify/fixtures/mutex-short.yaml",
           "policy": "byte-identical",
           "sha256": "44d10db0a3f019d6f802183846cb321442f72270ab32b70d0c43ed707cb6ff1f"
         },
         {
           "path": "scripts/tests/fixtures/mutex.yaml",
+          "counterpartPath": "tests/fixtures/cmate-verify/fixtures/mutex.yaml",
           "policy": "byte-identical",
           "sha256": "24245f56f09d2e173491e0ec2bcabe71df1133058136867e74f89e20cc192518"
         },
         {
           "path": "scripts/tests/fixtures/no-log-tail.yaml",
+          "counterpartPath": "tests/fixtures/cmate-verify/fixtures/no-log-tail.yaml",
           "policy": "byte-identical",
           "sha256": "7cddb975d5c3af7f4b316e879bd20cf12ecc64b121934d3b5db328692bbbde33"
         },
         {
           "path": "scripts/tests/fixtures/one-fail.yaml",
+          "counterpartPath": "tests/fixtures/cmate-verify/fixtures/one-fail.yaml",
           "policy": "byte-identical",
           "sha256": "62580fa87300a3e79736df33a2c4e2e4a7b5260ee3455c1de329ce4c07f56993"
         },
         {
           "path": "scripts/tests/fixtures/parsing.yaml",
+          "counterpartPath": "tests/fixtures/cmate-verify/fixtures/parsing.yaml",
           "policy": "byte-identical",
           "sha256": "262417735fae50aa79e3addb33e5157cc202df16045ec2af2b47110e39581edf"
         },
         {
           "path": "scripts/tests/fixtures/require-commit.yaml",
+          "counterpartPath": "tests/fixtures/cmate-verify/fixtures/require-commit.yaml",
           "policy": "byte-identical",
           "sha256": "a734180dcf4dec0f97549f4e79ecd976b14e0b6a8d8b2bdcf7611412d01b6670",
           "note": "他の fixture と同じく counterpart へ逐語コピーする。Issue #1639 で追加。 2026-08-03 に counterpart（cmate-verify 0.2.0、skills PR #41）へ移植済み。"
         },
         {
           "path": "scripts/tests/fixtures/require-env-clean.yaml",
+          "counterpartPath": "tests/fixtures/cmate-verify/fixtures/require-env-clean.yaml",
           "policy": "byte-identical",
           "sha256": "1a34d8d1feef606f24424b59cd5489956c10483f36dd9580f0aa8a8dea9f07ea"
         },
         {
           "path": "scripts/tests/fixtures/retry-flaky-pass.yaml",
+          "counterpartPath": "tests/fixtures/cmate-verify/fixtures/retry-flaky-pass.yaml",
           "policy": "byte-identical",
           "sha256": "e1fbf7b3b5a305b652d4f847a4d858a93b014b3e89b919aeaea5a245e7888e9b"
         },
         {
           "path": "scripts/tests/fixtures/retry-flaky.yaml",
+          "counterpartPath": "tests/fixtures/cmate-verify/fixtures/retry-flaky.yaml",
           "policy": "byte-identical",
           "sha256": "c3f21d8657a164d6a4410e5a4589a376f9ee505318e695fa74b586697770f080"
         },
         {
           "path": "scripts/tests/fixtures/retry-hard-fail.yaml",
+          "counterpartPath": "tests/fixtures/cmate-verify/fixtures/retry-hard-fail.yaml",
           "policy": "byte-identical",
           "sha256": "b6ef94ec488c1b9263878bf9b35af672662d08d836e4e63ca973645ab7a7bc34"
         },
         {
           "path": "scripts/tests/fixtures/retry-thrice.yaml",
+          "counterpartPath": "tests/fixtures/cmate-verify/fixtures/retry-thrice.yaml",
           "policy": "byte-identical",
           "sha256": "f159c7d54948c3a1c93d237475acc8b488074573b563b41687e7e7d6a77d3731"
         },
         {
           "path": "scripts/tests/fixtures/retry-timeout.yaml",
+          "counterpartPath": "tests/fixtures/cmate-verify/fixtures/retry-timeout.yaml",
           "policy": "byte-identical",
           "sha256": "cb54a8222e29f4af866c9deaea45b1feeae5af2d4b22158ecaafbe15a7fbf704"
         },
         {
           "path": "scripts/tests/fixtures/side-effect.yaml",
+          "counterpartPath": "tests/fixtures/cmate-verify/fixtures/side-effect.yaml",
           "policy": "byte-identical",
           "sha256": "1e9b218d5e3cb63f9e09469dd95c4bfd1813aac6911ab62ff40364e4df227b3e"
         },
         {
           "path": "scripts/tests/fixtures/silent-fail.yaml",
+          "counterpartPath": "tests/fixtures/cmate-verify/fixtures/silent-fail.yaml",
           "policy": "byte-identical",
           "sha256": "a3a640a9f4ad179f802cf411d6ce51f551ca8691a1e7b829165438335f5888bb"
         },
         {
           "path": "scripts/tests/fixtures/timeout.yaml",
+          "counterpartPath": "tests/fixtures/cmate-verify/fixtures/timeout.yaml",
           "policy": "byte-identical",
           "sha256": "8ba1f347093da9d80378d75e403279954339cd63232616a218607238f381350d"
         },
         {
           "path": "scripts/tests/fixtures/workdir-lifetime.yaml",
+          "counterpartPath": "tests/fixtures/cmate-verify/fixtures/workdir-lifetime.yaml",
           "policy": "byte-identical",
           "sha256": "ff188070f800114865d1ceb5690bf38e60e32b7e67a7c7694dad62e2bc319579",
           "note": "他の fixture と同じく counterpart へ逐語コピーする。skills #228（PR #230）で追加された回帰 fixture で、48 ゲートすべてが即座に fail するため runner は全ゲートの log tail を出さねばならない。run-tests.sh の case 23 がこれを 12 回回して $WORKDIR の寿命を固定する。"
         },
         {
           "path": "scripts/tests/fixtures/worktree-env.yaml",
+          "counterpartPath": "tests/fixtures/cmate-verify/fixtures/worktree-env.yaml",
           "policy": "byte-identical",
           "sha256": "d6dc6148b57b27cbcd0de14839e59813c38deed21672acbfc98a7bde1b37baa6"
         },
         {
           "path": "scripts/tests/run-tests.sh",
-          "policy": "byte-identical",
+          "counterpartPath": "tests/fixtures/cmate-verify/run-tests.sh",
+          "policy": "port-required",
           "sha256": "94b20b1e0739ccfeed60df2b2919e0aa2b0bfd23bf6a0aa145a7e5c255a93416",
-          "note": "Issue #1639 で追加。 2026-08-03 に counterpart（cmate-verify 0.2.0、skills PR #41）へ移植済み。 2026-08-03 に Issue #1651 の変更も counterpart（cmate-verify 0.3.0、skills PR #42）へ移植済み。 counterpart の同一 suite は `tests/fixtures/cmate-verify/run-tests.sh` に在り、RUNNER の解決とヘッダのコメントだけが違う（Issue #1861 で実測: 差分はその 2 箇所のみ）。 2026-08-20（Issue #1864）に skills #228（PR #230）の case 23 と mutex assertion の分割を取り込んだ。counterpart との差分は依然 RUNNER の解決とヘッダのコメントの 2 箇所のみ。 【未移植 #1950】2026-08-22: 本リポジトリ側のみ修正済み。counterpart への移植が未了。 byte-identical 指定なので同じバイトをコピーすること。"
+          "note": "Issue #1639 で追加。 2026-08-03 に counterpart（cmate-verify 0.2.0、skills PR #41）へ移植済み。 2026-08-03 に Issue #1651 の変更も counterpart（cmate-verify 0.3.0、skills PR #42）へ移植済み。 2026-08-20（Issue #1864）に skills #228（PR #230）の case 23 と mutex assertion の分割を取り込んだ。 【未移植 #1950】2026-08-22: 本リポジトリ側のみ修正済み。counterpart への移植が未了。 counterpart の同一 suite は package の外（`tests/fixtures/cmate-verify/run-tests.sh`）に在り、Issue #2904 で counterpartPath をそれに設定した。差分はヘッダのコメントと RUNNER の解決（CommandMate は package 内相対パス、skills 側は `${VERIFY_RUN:-$REPO_ROOT/skills/cmate-verify/scripts/verify-run.sh}` で package 外からの絶対パス）の 2 箇所で、パスの前提が構造的に異なるため byte-identical を諦め policy を port-required に変えた（2026-09-27 実測）。"
         },
         {
           "path": "scripts/verify-run.sh",
@@ -307,7 +355,7 @@
       "local": ".claude/skills/orchestrate-monitor",
       "counterpart": "skills/cmate-orchestrate-monitor",
       "policy": "mapped",
-      "rationale": "CommandMate が開発元（判定ロジックのテストは tests/unit/skills/orchestrate-monitor/ にある）。scripts はコメント中の Issue 番号だけが両リポジトリで異なり（CommandMate #1581/#1601 ↔ skills #1589/#1602）、コメントを除いたコード差分は 8 ファイルすべて 0 行（2026-08-01 実測、#1613 同期後）。",
+      "rationale": "CommandMate が開発元（判定ロジックのテストは tests/unit/skills/orchestrate-monitor/ にある）。scripts はコメント中の Issue 番号だけが両リポジトリで異なり（CommandMate #1581/#1601 ↔ skills #1589/#1602）。2026-09-27（Issue #2904）に commandmate-skills PR #77（f929fe6、skills #59）を取り込んだ: `--no-auto-approve` と、prompt_hold_reason / held・heldsig 状態ファイル / ml_autoyes_suppression_reason・ml_prompt_default_label 等（promptData でプロンプトの自動承認を判定し、承認できないものは黙って Enter せず保留する）を monitor.sh・monitor-lib.sh に移植した。取り込み後のコメントを除いたコード差分は monitor.sh・monitor-lib.sh を含む全 8 ファイルで 0 行（2026-09-27 実測）。ただし monitor-lib.sh の `ML_CLI_TOOL_IDS` は CommandMate 側だけが末尾に `command-code` を持つ既存差分で、これは skills に無い CLI ツールへの対応のため意図的であり、この Issue の対象外（0 行の外に置く）。",
       "mirrors": [],
       "mirrorNote": "CommandMate 側は .claude/skills だけに置いてあり .agents/skills には無い（Claude 専用）。skills リポジトリ経由で install した場合は .agents/skills にも入るため、CommandMate 内の二重配置ガード（dual-placement / mirror テスト）とは対象が重ならない。",
       "counterpartOnly": [
@@ -322,8 +370,8 @@
         {
           "path": "SKILL.md",
           "policy": "port-required",
-          "sha256": "215eed59e3de2b2b4ea2d1539c4f3fb56d6da3759acf14fd781d2de2a74bdcef",
-          "note": "counterpart は独立に書き起こされた文書で、共有行は 17 行しかない（2026-08-01 実測、CommandMate 423 行 / skills 380 行）。コピーではなく「同じ scripts を説明した別の文書」なので、移植するのは prose ではなく挙動の記述（フラグ・exit code・判定順序・警告文言）である。 #1728 で両側に反映済み（skills 0.7.0 / commandmate-skills#110、2026-08-07）。hooks-git.sh: worktree id の突合に `slug(basename(path))`（deriveWorktreeId / #1621）を第1候補として追加（ブランチ由来の旧2規則は残置）、診断行に ERROR/WARN のレベル語を付与。monitor.sh: シグナル報告 trap・正常終端以外の EXIT 報告・`--heartbeat`（既定10）を追加。SKILL.md: 上記の挙動記述（突合順の表・レベル語・生存報告）を追記。 #2119 でマーカー置き場（`MONITOR_HOOKS_STATE_DIR` / `STATE_DIR` / standalone の `mktemp -d`）とその掃除規則の記述を追加した。"
+          "sha256": "4cab1bb82deb64feb7c92d82a2af1e65680ec6e3410644861fb4a55315694528",
+          "note": "counterpart は独立に書き起こされた文書で、共有行は 17 行しかない（2026-08-01 実測、CommandMate 423 行 / skills 380 行）。コピーではなく「同じ scripts を説明した別の文書」なので、移植するのは prose ではなく挙動の記述（フラグ・exit code・判定順序・警告文言）である。 #1728 で両側に反映済み（skills 0.7.0 / commandmate-skills#110、2026-08-07）。hooks-git.sh: worktree id の突合に `slug(basename(path))`（deriveWorktreeId / #1621）を第1候補として追加（ブランチ由来の旧2規則は残置）、診断行に ERROR/WARN のレベル語を付与。monitor.sh: シグナル報告 trap・正常終端以外の EXIT 報告・`--heartbeat`（既定10）を追加。SKILL.md: 上記の挙動記述（突合順の表・レベル語・生存報告）を追記。 #2119 でマーカー置き場（`MONITOR_HOOKS_STATE_DIR` / `STATE_DIR` / standalone の `mktemp -d`）とその掃除規則の記述を追加した。 2026-09-27（Issue #2904）に commandmate-skills PR #77（skills #59）の `--no-auto-approve` と、promptData による PROMPT の承認/保留判定を 1 節（「PROMPT は承認と保留を判定する」）で追記した。"
         },
         {
           "path": "scripts/classify-state.sh",
@@ -346,14 +394,14 @@
         {
           "path": "scripts/monitor-lib.sh",
           "policy": "port-required",
-          "sha256": "c88759c637ca2b1da844ee28ddb160912428a839f576b23dfbc2b789ccc4ced6",
-          "note": "#2606 で両側に反映済み（skills 0.9.0 / commandmate-skills#267、2026-09-17）。classify-state.sh が capture の cliToolId で目印の組を選び、antigravity のときは monitor-lib.sh の ml_agy_*（生成中・PROMPT・待機中の枠、realtimeSnippet と content の長い方の末尾 64 行を読む ml_agy_frame）で判定する。コメントを除いたコード差分は classify-state.sh が 0 行、monitor-lib.sh は移植前からある差分（skills 側だけの #59 の関数群と ML_CLI_TOOL_IDS の command-code）のみ。"
+          "sha256": "ada537bed08ee4441d44200fa32147ac2e85f9c365f8d9a87adf478d3ec7b6ca",
+          "note": "#2606 で両側に反映済み（skills 0.9.0 / commandmate-skills#267、2026-09-17）。classify-state.sh が capture の cliToolId で目印の組を選び、antigravity のときは monitor-lib.sh の ml_agy_*（生成中・PROMPT・待機中の枠、realtimeSnippet と content の長い方の末尾 64 行を読む ml_agy_frame）で判定する。 2026-09-27（Issue #2904）に commandmate-skills PR #77（f929fe6、skills #59）を取り込み、ml_json_block・ml_autoyes_suppressed・ml_autoyes_suppression_reason・ml_prompt_type・ml_prompt_default_label・ml_is_affirmative・ml_prompt_enter_verdict・ml_prompt_signature を移植した。コメントを除いたコード差分は 0 行（`ML_CLI_TOOL_IDS` の末尾に CommandMate 側だけ持つ `command-code` を除く。skills に無い CLI ツールへの対応で意図的、この Issue の対象外）。"
         },
         {
           "path": "scripts/monitor.sh",
           "policy": "port-required",
-          "sha256": "bb943a923de4d44e3b199a48606a7d96fcbe23f26e3d5a7d0a58d696c955da98",
-          "note": "#1613 で同期済み。それ以前は skills 側だけが FALLBACK MODE 警告を出していた（コード差分 13 行）。 #1728 で両側に反映済み（skills 0.7.0 / commandmate-skills#110、2026-08-07）。hooks-git.sh: worktree id の突合に `slug(basename(path))`（deriveWorktreeId / #1621）を第1候補として追加（ブランチ由来の旧2規則は残置）、診断行に ERROR/WARN のレベル語を付与。monitor.sh: シグナル報告 trap・正常終端以外の EXIT 報告・`--heartbeat`（既定10）を追加。SKILL.md: 上記の挙動記述（突合順の表・レベル語・生存報告）を追記。 【未移植 #1950】2026-08-22: 本リポジトリ側のみ修正済み。counterpart への移植が未了。 port-required なので逐語コピーせず fatal_reported の挙動を再表現すること。"
+          "sha256": "06811da54f4e567c6fd8f2d4b0b14dd102ecbfe7e107d986fec7cbc01a1a5391",
+          "note": "#1613 で同期済み。それ以前は skills 側だけが FALLBACK MODE 警告を出していた（コード差分 13 行）。 #1728 で両側に反映済み（skills 0.7.0 / commandmate-skills#110、2026-08-07）。hooks-git.sh: worktree id の突合に `slug(basename(path))`（deriveWorktreeId / #1621）を第1候補として追加（ブランチ由来の旧2規則は残置）、診断行に ERROR/WARN のレベル語を付与。monitor.sh: シグナル報告 trap・正常終端以外の EXIT 報告・`--heartbeat`（既定10）を追加。SKILL.md: 上記の挙動記述（突合順の表・レベル語・生存報告）を追記。 2026-09-27（Issue #2904）に commandmate-skills PR #77（f929fe6、skills #59）を取り込み、`--no-auto-approve`・AUTO_APPROVE・prompt_hold_reason と PROMPT ハンドラの approve/hold 分岐・held/heldsig 状態ファイルを移植した。ついでに 2026-08-22 の【未移植 #1950】fatal_reported も skills 側の fatal_signal_seen ラッチへ書き換えて解消した。コメントを除いたコード差分は 0 行（2026-09-27 実測）。"
         },
         {
           "path": "scripts/quality-gate.sh",
