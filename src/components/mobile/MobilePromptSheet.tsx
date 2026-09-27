@@ -133,6 +133,13 @@ export interface MobilePromptSheetProps {
   showStuckHint?: boolean;
   /** Issue #2869: the hint's link — switches to the terminal and opens direct input. */
   onSwitchToDirectInput?: () => void;
+  /**
+   * Issue #2870: whether `/prompt-response` would answer this window — the
+   * status API's `promptAnswerable`. `false` keeps the options on screen but
+   * disables every control, and says to use direct input instead (with the
+   * #2869 link, no Send count needed). Undefined or `true`: unchanged.
+   */
+  answerable?: boolean;
 }
 
 /**
@@ -143,10 +150,34 @@ export interface MobilePromptSheetProps {
 function PromptStuckHint({
   showStuckHint,
   onSwitchToDirectInput,
-}: Pick<MobilePromptSheetProps, 'showStuckHint' | 'onSwitchToDirectInput'>) {
+  answerable,
+}: Pick<MobilePromptSheetProps, 'showStuckHint' | 'onSwitchToDirectInput' | 'answerable'>) {
   const t = useTranslations('worktree');
-  if (!showStuckHint || !onSwitchToDirectInput) return null;
   const linkLabel = t('promptResponse.stuckHintLink');
+  // Issue #2870: a window the route would refuse says so up front — no Send
+  // has to fail first — and offers the link whenever there is one to offer.
+  if (answerable === false) {
+    return (
+      <p data-testid="prompt-unanswerable-hint" className="mt-3 text-sm text-warning-foreground">
+        {t('promptResponse.unanswerable')}
+        {onSwitchToDirectInput && (
+          <>
+            {' '}
+            <button
+              type="button"
+              data-testid="prompt-stuck-hint-link"
+              onClick={onSwitchToDirectInput}
+              aria-label={linkLabel}
+              className="underline font-medium min-h-[44px] touch-manipulation"
+            >
+              {linkLabel}
+            </button>
+          </>
+        )}
+      </p>
+    );
+  }
+  if (!showStuckHint || !onSwitchToDirectInput) return null;
   return (
     <p data-testid="prompt-stuck-hint" className="mt-3 text-sm text-warning-foreground">
       {t('promptResponse.stuckHint')}{' '}
@@ -178,6 +209,7 @@ export const MobilePromptSheet = memo(function MobilePromptSheet({
   cliToolName,
   showStuckHint,
   onSwitchToDirectInput,
+  answerable,
 }: MobilePromptSheetProps) {
   const { shouldRender, animationClass } = usePromptAnimation({
     visible: visible && promptData !== null,
@@ -306,10 +338,12 @@ export const MobilePromptSheet = memo(function MobilePromptSheet({
             onRespond={onRespond}
             labelId={labelId}
             cliToolName={cliToolName}
+            answerable={answerable}
           />
           <PromptStuckHint
             showStuckHint={showStuckHint}
             onSwitchToDirectInput={onSwitchToDirectInput}
+            answerable={answerable}
           />
         </div>
       </div>
@@ -326,6 +360,8 @@ interface PromptContentProps {
   onRespond: (answer: string) => Promise<void>;
   labelId: string;
   cliToolName?: string;
+  /** Issue #2870. See {@link MobilePromptSheetProps.answerable}. */
+  answerable?: boolean;
 }
 
 /**
@@ -337,6 +373,7 @@ function PromptContent({
   onRespond,
   labelId,
   cliToolName,
+  answerable,
 }: PromptContentProps) {
   const t = useTranslations('prompt');
   const [selectedOption, setSelectedOption] = useState<number | null>(
@@ -387,7 +424,10 @@ function PromptContent({
   const takesTypedText = multiSelectOptions !== null
     ? checkedTextFieldCount > 0
     : selectedOptionData !== null && optionTakesTypedText(selectedOptionData);
-  const isDisabled = answering || isSubmitting;
+  const isBusy = answering || isSubmitting;
+  // Issue #2870: a window the route would refuse keeps its options on screen
+  // but nothing on it can be pressed.
+  const isDisabled = isBusy || answerable === false;
 
   const handleToggleOption = useCallback((optionNumber: number, checked: boolean) => {
     setCheckedNumbers((previous) =>
@@ -468,7 +508,7 @@ function PromptContent({
       <p className="text-foreground leading-relaxed">{promptData.question}</p>
 
       {/* Answering indicator */}
-      {isDisabled && (
+      {isBusy && (
         <div data-testid="answering-indicator" className="flex items-center gap-2 text-sm text-muted-foreground" role="status" aria-live="polite">
           <Spinner size="sm" variant="accent" />
           <span>{t('sending')}</span>

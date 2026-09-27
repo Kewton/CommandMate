@@ -106,13 +106,14 @@ const ALLOWED: readonly { file: string; why: string }[] = [
       + '(#1885 / #1895) before the chain would, and re-reads the frame to do it.',
   },
   {
-    file: 'src/app/api/worktrees/[id]/prompt-response/route.ts',
+    file: 'src/lib/polling/auto-yes-dialog-gate.ts',
     why:
-      'Issue #161 re-verification, on the way to sending a human answer. It composes '
-      + "the agy reader with the generic pass by hand (`toolDialog ?? detectPrompt(…)`) "
-      + 'rather than calling the entry, which is duplication #2368 did not remove '
-      + 'because this route is outside its scope — the duplicate is listed here so it '
-      + 'is a known debt rather than a place a fifth reading can appear unnoticed.',
+      'Issue #2870 `assessPromptAnswerability`: the #161 re-verification the '
+      + '`prompt-response` route used to compose by hand, moved here so the status API '
+      + '(`promptAnswerable`) and the route read a frame the SAME way. It composes the '
+      + "agy / Command Code readers with the generic pass (`toolDialog ?? detectPrompt(…)`) "
+      + 'rather than calling the entry — the duplication #2368 left in the route, now in '
+      + 'one place both surfaces share, and listed so it stays a known debt.',
   },
 ] as const;
 
