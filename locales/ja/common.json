@@ -287,7 +287,8 @@
       "usingBuiltIn": "既定値を使用中",
       "range": "エージェントは {min} 〜 {max} 個で選択してください。",
       "saveError": "保存に失敗しました。",
-      "loadError": "設定を読み込めませんでした。"
+      "loadError": "設定を読み込めませんでした。",
+      "opencodeSharedData": "OpenCode と OpenCode V2 が両方入っています。両者は ~/.local/share/opencode を共有しており、V2 が変えたデータベースを OpenCode（1.x）が読めずに起動に失敗することがあります。その場合は V2 だけを使うか、1.x のデータの置き場所を分けてください。"
     }
   }
 }

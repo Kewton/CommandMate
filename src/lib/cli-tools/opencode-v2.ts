@@ -78,16 +78,14 @@ import {
   OPENCODE_V2_COMPOSER_WAIT_MS,
 } from '@/config/cli-tool-timing-config';
 import { missingToolError } from './install-hints';
+import {
+  parseOpencodeVersionOutput,
+  resolveOpencodeV2Executable,
+} from './opencode-executable';
 
 const logger = createLogger('cli-tools/opencode-v2');
 
 const execFileAsync = promisify(execFile);
-
-/**
- * What `opencode2 --version` prints: `opencode v2.0.18` (D1). Anchored so a
- * different program that happens to be called `opencode2` is not taken for it.
- */
-export const OPENCODE_V2_VERSION_PATTERN = /^opencode v(\d+\.\d+\.\d+)\b/m;
 
 /** Interval between composer polls (launch and send). */
 export const OPENCODE_V2_READY_POLL_INTERVAL_MS = 500;
@@ -106,10 +104,12 @@ export const OPENCODE_V2_RESUME_RETRY_MS = 30_000;
 
 /**
  * The version `opencode2 --version` reports, or null when the output is not
- * OpenCode V2's.
+ * OpenCode V2's. Issue #2939: the same rule OpenCode 1.x is told apart by
+ * (`./opencode-executable`), so `1.18.33` is not V2 and `opencode v2.0.18` is.
  */
 export function parseOpencodeV2Version(output: string): string | null {
-  return OPENCODE_V2_VERSION_PATTERN.exec(output)?.[1] ?? null;
+  const info = parseOpencodeVersionOutput(output);
+  return info?.generation === 'v2' ? info.version : null;
 }
 
 export class OpenCodeV2Tool extends BaseCLITool {
@@ -121,22 +121,12 @@ export class OpenCodeV2Tool extends BaseCLITool {
   private readonly resumeAttemptedAt = new Map<string, number>();
 
   /**
-   * Installed means `opencode2` is on PATH AND identifies itself as OpenCode
-   * (`opencode v<semver>`, D1).
+   * Installed means an executable that identifies itself as OpenCode V2
+   * (`opencode v<semver>`, D1): `opencode2`, or — Issue #2939 — an `opencode`
+   * that answers as V2, for an operator who has V2 under that name only.
    */
   async isInstalled(): Promise<boolean> {
-    try {
-      const result: unknown = await execFileAsync(this.command, ['--version'], { timeout: 5000 });
-      // `promisify(execFile)` resolves `{ stdout, stderr }`; a plain callback
-      // function (as test doubles are) resolves stdout itself.
-      const stdout =
-        typeof result === 'string'
-          ? result
-          : String((result as { stdout?: unknown } | null)?.stdout ?? '');
-      return parseOpencodeV2Version(stdout) !== null;
-    } catch {
-      return false;
-    }
+    return (await resolveOpencodeV2Executable()).executable !== null;
   }
 
   /**
@@ -177,7 +167,9 @@ export class OpenCodeV2Tool extends BaseCLITool {
     worktreePath: string,
     instanceId?: string
   ): Promise<void> {
-    if (!(await this.isInstalled())) {
+    // Issue #2939: the file that answered as V2 is the file the line runs.
+    const executable = (await resolveOpencodeV2Executable()).executable;
+    if (!executable) {
       throw missingToolError(this);
     }
 
@@ -223,7 +215,7 @@ export class OpenCodeV2Tool extends BaseCLITool {
 
       await sendKeys(
         sessionName,
-        buildAgentLaunchCommandLine({ target, executablePath: this.command, worktreePath }),
+        buildAgentLaunchCommandLine({ target, executablePath: executable.path, worktreePath }),
         true
       );
 
