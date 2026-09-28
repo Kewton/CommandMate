@@ -1,6 +1,6 @@
 # エージェント CLI の日次確認（agent-health）
 
-Claude Code・Codex・Antigravity・OpenCode・Command Code は頻繁に更新され、そのたびに CommandMate との連携
+Claude Code・Codex・Antigravity・OpenCode・Command Code・OpenCode V2 は頻繁に更新され、そのたびに CommandMate との連携
 （画面の判定・hook の宛先）が壊れることがある（例: #2842 の codex の画面判定、#2874／#2891 の codex 共有デーモンによる
 hook のインスタンス取り違え）。`scripts/agent-health/run.ts` は、これを **AI を使わず決まった手順で** 確かめ、
 結果を JSON に書くスクリプトである（Issue #2878）。
@@ -15,14 +15,29 @@ hook のインスタンス取り違え）。`scripts/agent-health/run.ts` は、
 
 | checkId | 内容 | 合格の条件 |
 |---|---|---|
-| `version` | `<cli> --version`（`claude` / `codex` / `agy` / `opencode` / `commandcode`） | 版が取れる。前回の版は state に残し、`versionChanged` で知らせる |
-| `hook-correlation` | CommandMate 自身の起動行（`getAgentEventSource(tool).prepareLaunch(...)` → `renderAgentLaunchCommand`）で `worktreeId: "agent-health-probe"`・`instanceId: "<tool>-probe"` を与えて起動し、下の依頼を送る。hook はスクリプト内の listener が受ける | `session_start`・`user_prompt_submit`・`stop` のうち、そのツールの `capabilities.supportedEvents` にあるものが、両方のキーが上の値のまま届く。別のキーで届いた hook が 1 件でもあれば fail（#2874 の型）。`configScope: 'none'`（opencode）は skip |
+| `version` | `<cli> --version`（`claude` / `codex` / `agy` / `opencode` / `commandcode` / `opencode2`） | 版が取れる。前回の版は state に残し、`versionChanged` で知らせる |
+| `hook-correlation` | CommandMate 自身の起動行（`getAgentEventSource(tool).prepareLaunch(...)` → `renderAgentLaunchCommand`）で `worktreeId: "agent-health-probe"`・`instanceId: "<tool>-probe"` を与えて起動し、下の依頼を送る。hook はスクリプト内の listener が受ける | `session_start`・`user_prompt_submit`・`stop` のうち、そのツールの `capabilities.supportedEvents` にあるものが、両方のキーが上の値のまま届く。別のキーで届いた hook が 1 件でもあれば fail（#2874 の型）。`configScope: 'none'`（opencode）は skip。**opencode-v2 は hook を使わないため、代わりに自前 serve の SSE を確かめる**（下記） |
 | `screen-idle` | 起動（起動時のダイアログを越えた）直後の画面 | `detectSessionStatus` が `ready`、`hasActivePrompt` が偽 |
 | `screen-running` | `Run the shell command: sleep 20` を送った直後の画面 | `running`（evidence が `positive`） |
 | `screen-approval` | 承認が要る操作で承認ダイアログを出した画面。撮った後は**断る** | `waiting` で `hasActivePrompt` が真。ダイアログを出さないツール（opencode の既定）は skip |
 | `screen-quoted-dialog` | そのツールの承認ダイアログの文面を本文で引用させた返答が終わった後の画面 | `ready`、`hasActivePrompt` が偽（#2841〜#2847 の型の回帰） |
 
-画面は本番と同じ形で撮る（200x1000。opencode は 80x200。行数は `resolveCaptureSpec(tool).statusLines`）。
+画面は本番と同じ形で撮る（200x1000。opencode・opencode-v2 は 80x200。行数は `resolveCaptureSpec(tool).statusLines`）。
+
+### opencode-v2 の起動と SSE（Issue #2937）
+
+OpenCode V2 は本番では `scripts/opencode-v2/launch.sh` が `opencode2 serve`（インスタンス専用のポートとパスワード）と
+TUI を 1 つのペインで動かす。確認も同じ経路で起動する。
+
+- `reserveOpencodeV2Server()` でポートとパスワードを用意してから `prepareLaunch` を呼び、起動行が `launch.sh` を
+  通ることを確かめる。`--standalone` に落ちたら（本番と違う経路なので）起動せず、`version` 以外の check を fail にする
+- パスワードとポートの記録は実行の一時ディレクトリの下（`CM_OPENCODE_V2_DIR`）。利用者の `~/.commandmate/opencode-v2/` には書かない
+- TUI の状態（入力履歴・モデルの選択など。利用者の背景サービスの `service.json` と同じ `~/.local/state/opencode/`）は、
+  起動行の前に `XDG_STATE_HOME=<一時ディレクトリ>` を付けて一時ディレクトリへ向ける
+- `hook-correlation` の枠では、自前 serve の `/api/event` を本番のクライアント（`opencode-v2/client.ts`）で購読し、
+  `sleep 20` のターンの間に `session.execution.started` と `session.execution.succeeded` が届けば pass。
+  受け取った `type` の一覧（重複除去）を summary に残す（イベント名が変わったときに何に変わったかが読める）
+- セッションを止めた後、serve のプロセスとポートが残っていたら `hook-correlation` を fail にする（#1905 の型。残った serve は止める）
 
 ツールごとの操作（起動時のダイアログの越え方・依頼の文面・断るキー）は `scripts/agent-health/tool-table.ts` の表にある。
 要点:
@@ -34,18 +49,19 @@ hook のインスタンス取り違え）。`scripts/agent-health/run.ts` は、
 | antigravity | なし | `sleep` の依頼の時点で訊かれる | Esc |
 | opencode | なし | 出ない（skip） | — |
 | command-code | `--trust --skip-onboarding --no-auto-update`（CommandMate と同じ） | `sleep` の依頼の時点で訊かれる | Esc |
+| opencode-v2 | なし（前に `XDG_STATE_HOME=<一時ディレクトリ>`） | 出ない（skip。既定のルールで `shell` は確認なしに走る） | — |
 
 ## コマンドライン
 
 ```bash
-npx tsx scripts/agent-health/run.ts [--tools claude,codex,antigravity,opencode,command-code] \
+npx tsx scripts/agent-health/run.ts [--tools claude,codex,antigravity,opencode,command-code,opencode-v2] \
   [--only <checkId>[,<checkId>]] [--out <file>] [--timeout-per-tool <sec>] \
   [--state <file>] [--server-log <file>]
 ```
 
 | オプション | 既定 | 説明 |
 |---|---|---|
-| `--tools` | 5 ツールすべて | 対象ツール |
+| `--tools` | 6 ツールすべて | 対象ツール |
 | `--only` | 全チェック | 行うチェック（`version` は常に行う） |
 | `--out` | `~/.commandmate/agent-health/reports/<YYYY-MM-DD>.json`（JST の日付） | レポートの書き出し先 |
 | `--timeout-per-tool` | 150 | 1 ツールの持ち時間（秒）。時間切れのチェックは fail |
@@ -76,7 +92,7 @@ interface AgentHealthReport {
   completedAt: string;        // ISO。#2880 はこの有無で「今日の結果がある」を判断する
   host: { commandmateCommit: string; node: string };
   tools: Array<{
-    tool: 'claude' | 'codex' | 'antigravity' | 'opencode' | 'command-code';
+    tool: 'claude' | 'codex' | 'antigravity' | 'opencode' | 'command-code' | 'opencode-v2';
     version: string | null;         // `<cli> --version` の 1 行目
     previousVersion: string | null; // 前回（state）の値
     versionChanged: boolean;        // 両方が分かっていて違うときだけ true
@@ -139,7 +155,7 @@ interface AgentHealthReport {
 
 ```bash
 cd <CommandMate のチェックアウト>
-npx tsx scripts/agent-health/run.ts                         # 5 ツール・全チェック（モデル呼び出しあり）
+npx tsx scripts/agent-health/run.ts                         # 6 ツール・全チェック（モデル呼び出しあり）
 npx tsx scripts/agent-health/run.ts --only screen-idle      # 起動画面だけ（モデル呼び出しなし）
 npx tsx scripts/agent-health/run.ts --tools codex --out /tmp/agent-health-codex.json
 ```
