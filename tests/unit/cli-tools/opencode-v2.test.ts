@@ -86,6 +86,18 @@ vi.mock('@/lib/cli-tools/submit-verified-sender', () => ({
   }),
 }));
 
+// Issue #2939: the executable is found on PATH and then asked its version, and
+// the path that answered is the path launched. Only `opencode2` is "on PATH"
+// here, at a fixed fake location.
+const FAKE_OPENCODE2 = '/fake/bin/opencode2';
+vi.mock('@/lib/cli-tools/copilot-executable', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/cli-tools/copilot-executable')>();
+  return {
+    ...actual,
+    findExecutablesOnPath: vi.fn((name: string) => (name === 'opencode2' ? [FAKE_OPENCODE2] : [])),
+  };
+});
+
 vi.mock('child_process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('child_process')>();
   return {
@@ -94,7 +106,7 @@ vi.mock('child_process', async (importOriginal) => {
       const callback = rest.find((arg) => typeof arg === 'function') as
         | ((error: Error | null, stdout: string, stderr: string) => void)
         | undefined;
-      const stdout = file === 'opencode2' && args[0] === '--version' ? versionOutput : '';
+      const stdout = file === FAKE_OPENCODE2 && args[0] === '--version' ? versionOutput : '';
       queueMicrotask(() => callback?.(null, stdout, ''));
       return {};
     }),
@@ -107,6 +119,7 @@ import {
   parseOpencodeV2Version,
 } from '@/lib/cli-tools/opencode-v2';
 import { buildAgentLaunchCommandLine } from '@/lib/session/agent-session-lifecycle';
+import { clearOpencodeExecutableCache } from '@/lib/cli-tools/opencode-executable';
 
 let versionOutput = 'opencode v2.0.18\n';
 const FIXTURES = resolve(__dirname, '../../fixtures/opencode-v2-live-2934');
@@ -115,6 +128,7 @@ const BOOT_IDLE = readFileSync(resolve(FIXTURES, 'boot-idle.txt'), 'utf8');
 beforeEach(() => {
   calls.length = 0;
   versionOutput = 'opencode v2.0.18\n';
+  clearOpencodeExecutableCache();
   vi.mocked(hasSession).mockReset();
   vi.mocked(capturePane).mockReset();
   vi.mocked(capturePane).mockResolvedValue(BOOT_IDLE);
@@ -136,6 +150,7 @@ describe('identity (D1)', () => {
   it('is installed only when the binary answers as OpenCode', async () => {
     expect(await new OpenCodeV2Tool().isInstalled()).toBe(true);
     versionOutput = 'not opencode\n';
+    clearOpencodeExecutableCache();
     expect(await new OpenCodeV2Tool().isInstalled()).toBe(false);
   });
 });
@@ -155,7 +170,7 @@ describe('launch (D2)', () => {
     ]);
     expect(buildAgentLaunchCommandLine).toHaveBeenCalledWith({
       target: { worktreeId: 'wt', cliToolId: 'opencode-v2', instanceId: undefined },
-      executablePath: 'opencode2',
+      executablePath: FAKE_OPENCODE2,
       worktreePath: '/wt',
     });
   });

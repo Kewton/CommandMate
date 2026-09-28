@@ -78,6 +78,7 @@ npm install -g @anthropic-ai/claude-code   # Claude Code (claude)
 npm install -g @openai/codex               # Codex CLI (codex)
 npm install -g @google/gemini-cli          # Gemini CLI (gemini)
 npm install -g opencode-ai                 # OpenCode (opencode)
+npm install -g @opencode/cli               # OpenCode V2 (opencode2)
 npm install -g command-code                # Command Code CLI (commandcode)
 brew install copilot-cli                   # GitHub Copilot CLI (copilot)
                                            # npm i -g @github/copilot でも可
@@ -89,6 +90,46 @@ Antigravity CLI（`agy`）は npm では配布されていません。入手方�
 > **Note**: `command-code` パッケージは `cmd` / `cmdc` / `command-code` /
 > `commandcode` の 4 つの実行ファイルを入れます。CommandMate が起動するのは
 > `commandcode` です（`cmd` は Windows のシェルと衝突するため）。
+
+#### OpenCode（1.x）と OpenCode V2 の共存
+
+OpenCode V2（エージェント名 `OpenCode V2`）は `npm install -g @opencode/cli` で入れます。
+このパッケージは実行ファイルを **`opencode2` と `opencode` の 2 つ**登録します。つまり V2 を入れると、
+OpenCode 1.x（`opencode-ai` や `~/.opencode/bin` のインストーラ）と同じ `opencode` という名前が
+もう 1 つ `PATH` に増え、どちらが呼ばれるかは `PATH` の順番だけで決まります。
+
+CommandMate は名前ではなく `--version` の出力で見分けます。
+
+| エージェント | 「入っている」とみなす条件 | 起動に使う実行ファイル |
+|---|---|---|
+| OpenCode | `PATH` 上の `opencode` のうち、`--version` が `1.x`（例 `1.18.33`）を返すもの | その絶対パス |
+| OpenCode V2 | `opencode2`。無ければ `--version` が `opencode v2.x` を返す `opencode` | その絶対パス |
+
+`opencode` が V2 しか指していないときは、OpenCode は「入っていない」扱いになり、起動しようとすると
+理由（`opencode` が OpenCode V2 であること）が表示されます。V2 を `opencode` の名前でしか入れていない
+場合、OpenCode V2 は専用ラッパー（`opencode2` を名前で起動する）を使えないため、構造化イベントの無い
+`--standalone` で起動します。
+
+**共有データの注意**: OpenCode 1.x と V2 は同じ `~/.local/share/opencode/opencode.db` を使います。
+V2 はこのデータベースのテーブルを作り替えるため、V2 を使ったあとで OpenCode 1.x が
+`no such column: …` で起動に失敗することがあります。このとき CommandMate は opencode のログ
+（`~/.local/share/opencode/log/opencode.log`）から原因を読み取り、起動エラーとして表示します。
+両方が入っている環境では、More 画面の「Default agents for new branches」にも注意が 1 行出ます。
+これは opencode 側の問題で、CommandMate からはデータベースを直せません。分け方は次のどちらかです。
+
+- **どちらか一方だけを使う**。V2 だけにするなら OpenCode 1.x をアンインストールし、1.x だけにするなら
+  `npm uninstall -g @opencode/cli` で V2 を外します。
+- **OpenCode 1.x のデータの置き場所を分ける**。OpenCode 1.x は `XDG_DATA_HOME` の下にデータを置くので、
+  1.x の実体を呼ぶラッパーを `opencode` という名前で `PATH` の前の方に置きます（1.x のログイン情報も
+  新しい場所に移るため、1.x でもう一度ログインが要ります）。
+
+  ```bash
+  #!/bin/sh
+  # 例: ~/bin/opencode（~/bin を PATH の先頭に置く）
+  XDG_DATA_HOME="$HOME/.local/share/opencode-v1" exec "$HOME/.opencode/bin/opencode" "$@"
+  ```
+
+  CommandMate はこのラッパーにも `--version` を聞き、`1.x` を返すので OpenCode として起動します。
 
 未インストールのエージェントで起動しようとすると、CommandMate は「入っていない」ことと
 **その入れ方**を 1 文で返します。例:

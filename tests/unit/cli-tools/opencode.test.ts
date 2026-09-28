@@ -13,6 +13,7 @@ vi.mock('@/lib/tmux/session-ownership', () => ({
   assertSessionNotForeign: vi.fn(async () => ({ verdict: 'owned', sessionPath: null })),
 }));
 import { join } from 'path';
+import { mkdirSync, writeFileSync } from 'fs';
 import { makeTempDir, removeTempDir } from '@tests/helpers/temp-dir';
 import {
   OpenCodeTool,
@@ -48,6 +49,21 @@ vi.mock('@/lib/cli-tools/submit-verified-sender', () => ({
 }));
 
 // Mock child_process (exec for BaseCLITool.isInstalled(), execFile for OpenCodeTool.startSession())
+// Issue #2939: which `opencode` is OpenCode 1.x is decided by running it with
+// `--version`. The launch is under test here, not that probe
+// (`opencode-executable-2939.test.ts`), so the resolution is fixed to a plain
+// `opencode` — which also keeps the launch-line pins byte-identical.
+vi.mock('@/lib/cli-tools/opencode-executable', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/cli-tools/opencode-executable')>();
+  return {
+    ...actual,
+    resolveOpencodeV1Executable: vi.fn(async () => ({
+      executable: { path: 'opencode', version: '1.18.33', generation: 'v1' as const },
+      probed: [],
+    })),
+  };
+});
+
 vi.mock('child_process', () => ({
   exec: vi.fn(),
   execFile: vi.fn(),
@@ -143,6 +159,9 @@ describe('OpenCodeTool', () => {
     resetOpencodeLaunchSettings();
     vi.stubEnv('CM_AGENT_HOOKS_INJECT', '1');
     vi.stubEnv('CM_PORT', SERVER_PORT);
+    // Issue #2939: a launch whose server never answered reads opencode's log.
+    // Never the operator's.
+    vi.stubEnv('XDG_DATA_HOME', join(sandbox, 'xdg-data'));
     // `clearAllMocks` clears calls but keeps implementations, so the pipeline
     // stubs are re-stated here — a test that made one reserve a port would
     // otherwise leak it into every test that follows.
@@ -297,6 +316,83 @@ describe('OpenCodeTool', () => {
         true
       );
       expect(attachOpencodeEventStream).toHaveBeenCalled();
+    });
+
+    describe('Issue #2939 (D2): a server that never answered, explained from opencode\'s log', () => {
+      const logLine = (at: Date, rest: string): string =>
+        `timestamp=${at.toISOString()} level=ERROR run=906e1cd3 ${rest}\n`;
+
+      function writeLog(content: string): void {
+        const dir = join(sandbox, 'xdg-data', 'opencode', 'log');
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(join(dir, 'opencode.log'), content);
+      }
+
+      async function launchWithUnreachableServer(): Promise<unknown> {
+        vi.mocked(hasSession).mockResolvedValue(false);
+        vi.mocked(createSession).mockResolvedValue(undefined);
+        vi.mocked(ensureOpencodeConfig).mockResolvedValue({
+          written: false,
+          configPath: null,
+          reason: 'disabled',
+        });
+        vi.mocked(reserveOpencodeServerPort).mockImplementation(async (target) => {
+          rememberOpencodePort(target, 4242, '/test/path');
+          return 4242;
+        });
+        // The log is written "by opencode" once the launch line has been typed.
+        vi.mocked(attachOpencodeEventStream).mockImplementation(async () => {
+          writeLog(
+            logLine(new Date(Date.now() - 60_000), 'message=failed error="SQLiteError: no such column: old_one"') +
+              logLine(new Date(), 'message=failed error="SQLiteError: no such column: project_id"')
+          );
+          return false;
+        });
+
+        vi.useFakeTimers({ toFake: ['setTimeout'] });
+        const outcome = tool.startSession('test-123', '/test/path').then(
+          () => null,
+          (error: unknown) => error
+        );
+        await vi.runAllTimersAsync();
+        vi.useRealTimers();
+        return outcome;
+      }
+
+      it('names the shared-data conflict as the start error', async () => {
+        const error = await launchWithUnreachableServer();
+
+        expect(error).toBeInstanceOf(Error);
+        expect((error as Error).message).toContain('no such column: project_id');
+        expect((error as Error).message).toContain('OpenCode V2');
+        expect((error as Error).message).not.toContain('old_one');
+      });
+
+      it('changes nothing when the log has no such line', async () => {
+        vi.mocked(attachOpencodeEventStream).mockResolvedValue(false);
+        writeLog(logLine(new Date(), 'message="cli starting" version=1.18.33'));
+        vi.mocked(hasSession).mockResolvedValue(false);
+        vi.mocked(createSession).mockResolvedValue(undefined);
+        vi.mocked(ensureOpencodeConfig).mockResolvedValue({
+          written: false,
+          configPath: null,
+          reason: 'disabled',
+        });
+        vi.mocked(reserveOpencodeServerPort).mockImplementation(async (target) => {
+          rememberOpencodePort(target, 4242, '/test/path');
+          return 4242;
+        });
+
+        vi.useFakeTimers({ toFake: ['setTimeout'] });
+        const outcome = tool.startSession('test-123', '/test/path').then(
+          () => null,
+          (error: unknown) => error
+        );
+        await vi.runAllTimersAsync();
+        vi.useRealTimers();
+
+        expect(await outcome).toBeNull();
+      });
     });
 
     it('launches the bare TUI when CM_AGENT_HOOKS_INJECT=0', async () => {

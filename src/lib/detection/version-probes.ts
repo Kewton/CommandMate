@@ -94,6 +94,10 @@
 
 import { execFile } from 'child_process';
 import { findExecutableOnPath, resolveCopilotExecutable } from '../cli-tools/copilot-executable';
+import {
+  resolveOpencodeV1Executable,
+  resolveOpencodeV2Executable,
+} from '../cli-tools/opencode-executable';
 import { sanitizeEnvForChildProcess } from '../security/env-sanitizer';
 import { DETECTOR_VERIFIED_AGAINST } from './tools/verified-against';
 
@@ -210,10 +214,19 @@ export const DETECTOR_VERSION_PROBES: Readonly<Record<string, DetectorVersionPro
   codex: { kind: 'execFile', command: 'codex', args: ['--version'] },
   antigravity: { kind: 'execFile', command: 'agy', args: ['--version'] },
   'command-code': { kind: 'execFile', command: 'commandcode', args: ['--version'] },
-  opencode: { kind: 'execFile', command: 'opencode', args: ['--version'] },
-  // Issue #2934: tool id `opencode-v2`, executable `opencode2`
-  // (prints `opencode v2.0.18`).
-  'opencode-v2': { kind: 'execFile', command: 'opencode2', args: ['--version'] },
+  // Issue #2939: both OpenCodes are delegated, like copilot. `opencode` may be
+  // OpenCode V2 (npm `@opencode/cli` registers it next to `opencode2`), so the
+  // row reads the version of the binary each tool would launch — the same
+  // resolution `isInstalled()` and the launch line use, never `opencode v2.x`
+  // filed as OpenCode 1.x's version.
+  opencode: {
+    kind: 'delegated',
+    probe: async () => (await resolveOpencodeV1Executable()).executable?.version ?? null,
+  },
+  'opencode-v2': {
+    kind: 'delegated',
+    probe: async () => (await resolveOpencodeV2Executable()).executable?.version ?? null,
+  },
   gemini: { kind: 'execFile', command: 'gemini', args: ['--version'] },
   copilot: {
     kind: 'delegated',

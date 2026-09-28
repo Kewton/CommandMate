@@ -119,11 +119,14 @@ export type InstallHintSubject = Pick<ICLITool, 'id' | 'name' | 'command'>;
  * and #2009's contract is that the phrase survives.
  *
  * @param tool - The tool that could not be started
+ * @param detail - Why, when there is more to say than "not on PATH" — e.g.
+ *   `opencode` is there but is OpenCode V2 (Issue #2939)
  * @returns A sentence safe to hand back to an HTTP caller
  */
-export function buildMissingToolMessage(tool: InstallHintSubject): string {
+export function buildMissingToolMessage(tool: InstallHintSubject, detail?: string | null): string {
   return (
     `${tool.name} (${tool.command}) is not installed or not in PATH. ` +
+    (detail ? `${detail} ` : '') +
     `${getCliToolInstallHint(tool.id)}`
   );
 }
@@ -132,8 +135,12 @@ export function buildMissingToolMessage(tool: InstallHintSubject): string {
  * The typed refusal, carrying {@link buildMissingToolMessage}.
  *
  * @param tool - The tool that could not be started
+ * @param detail - See {@link buildMissingToolMessage}
  * @returns The error every launch path throws for a missing binary
  */
-export function missingToolError(tool: InstallHintSubject): SessionStartUnavailableError {
-  return new SessionStartUnavailableError(tool.name, buildMissingToolMessage(tool));
+export function missingToolError(
+  tool: InstallHintSubject,
+  detail?: string | null
+): SessionStartUnavailableError {
+  return new SessionStartUnavailableError(tool.name, buildMissingToolMessage(tool, detail));
 }

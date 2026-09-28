@@ -18,7 +18,7 @@
  */
 
 import { existsSync } from 'fs';
-import { resolve } from 'path';
+import { basename, resolve } from 'path';
 import { shellQuote } from '@/lib/hooks/hook-settings-generator';
 import { createLogger } from '@/lib/logger';
 import { definePullEventSource } from '../define-source';
@@ -38,7 +38,7 @@ import {
   getOpencodeV2Liveness,
   openOpencodeV2Subscription,
 } from './subscription';
-import { OPENCODE_V2_CLI_TOOL_ID } from './tool-id';
+import { OPENCODE_V2_CLI_TOOL_ID, OPENCODE_V2_COMMAND } from './tool-id';
 
 const logger = createLogger('lib/hooks/sources/opencode-v2/source');
 
@@ -65,6 +65,10 @@ export function resolveOpencodeV2LaunchScriptPath(): string | null {
  * `opencode2 --standalone <worktree>`: a private server with no structured
  * events, which the screen scraper still reads. Never the bare `opencode2`,
  * which would attach to the user's shared background service.
+ *
+ * Issue #2939: the wrapper starts `opencode2` by that name, so it is only used
+ * when the resolved executable IS an `opencode2`. OpenCode V2 installed under
+ * the `opencode` name alone takes the standalone line, run by its absolute path.
  */
 export function prepareOpencodeV2Launch({
   target,
@@ -80,11 +84,19 @@ export function prepareOpencodeV2Launch({
   if (port === null) return standalone;
   const passwordFile = getOpencodeV2PasswordFilePath(target);
   const script = resolveOpencodeV2LaunchScriptPath();
-  if (script === null || !existsSync(passwordFile)) {
+  const reason =
+    script === null
+      ? 'launch-script-missing'
+      : !existsSync(passwordFile)
+        ? 'password-file-missing'
+        : basename(executablePath) !== OPENCODE_V2_COMMAND
+          ? 'opencode2-not-installed'
+          : null;
+  if (script === null || reason !== null) {
     logger.warn('opencode-v2-launch-degraded-to-standalone', {
       worktreeId: target.worktreeId,
       instanceId: target.instanceId ?? target.cliToolId,
-      reason: script === null ? 'launch-script-missing' : 'password-file-missing',
+      reason,
     });
     return standalone;
   }
