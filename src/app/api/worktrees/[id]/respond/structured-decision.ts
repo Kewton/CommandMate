@@ -101,6 +101,8 @@ import {
   STRUCTURED_REJECT_MESSAGE,
 } from '@/lib/hooks/structured-decision-response';
 import { STRUCTURED_DECISION_OPTIONS } from '@/lib/session/structured-prompt';
+import { OPENCODE_V2_DECISION_LABELS } from '@/lib/hooks/sources/opencode-v2/decision-labels';
+import { OPENCODE_V2_CLI_TOOL_ID } from '@/lib/hooks/sources/opencode-v2/tool-id';
 import { PERMISSION_REPLIED_DETAIL } from '@/lib/hooks/agent-event-types';
 import { recordAgentEvent } from '@/lib/session/agent-event-state';
 import { applyEventToActiveTask } from '@/lib/tasks/task-transition-service';
@@ -649,6 +651,13 @@ async function answerPendingApproval({
     delivered,
   });
 
+  // Issue #2945: OpenCode V2's TUI draws `Always allow`, so the receipt names
+  // the verdict in its words. The number and the wire reply are unchanged.
+  const optionLabel =
+    cliToolId === OPENCODE_V2_CLI_TOOL_ID
+      ? OPENCODE_V2_DECISION_LABELS[option.reply] ?? option.label
+      : option.label;
+
   return NextResponse.json({
     success: delivered,
     answer: String(option.number),
@@ -656,7 +665,7 @@ async function answerPendingApproval({
     resolved: {
       via: 'structured-decision',
       optionNumber: option.number,
-      optionLabel: option.label,
+      optionLabel,
       decisionId: decision.id,
     },
   });

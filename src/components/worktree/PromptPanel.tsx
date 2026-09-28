@@ -583,9 +583,19 @@ function UnclassifiedPromptNotice({
 
   return (
     <div className="space-y-2" data-testid="unclassified-prompt-notice">
-      {promptData.message && (
+      {/* Issue #2945: a multi-line message is an approval's diff (OpenCode V2's
+          `permission.asked` carries the patch), drawn as the lines it is. A
+          single line — every other tool's message — renders as before. */}
+      {promptData.message && promptData.message.includes('\n') ? (
+        <pre
+          className="max-h-60 overflow-auto whitespace-pre-wrap break-all rounded border border-border bg-muted p-2 font-mono text-xs text-foreground"
+          data-testid="structured-decision-message"
+        >
+          {promptData.message}
+        </pre>
+      ) : promptData.message ? (
         <p className="text-sm text-muted-foreground">{promptData.message}</p>
-      )}
+      ) : null}
       {/* Issue #1726: the agent told us what it asked even though nothing could
           read the screen. The labels are listed WITHOUT numbers — the picker
           renumbers and appends its own entries, and this branch exists precisely

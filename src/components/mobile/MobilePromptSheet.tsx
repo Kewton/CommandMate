@@ -15,6 +15,12 @@ import { Checkbox, RadioGroup, RadioGroupItem, Spinner } from '@/components/ui';
 import { usePromptAnimation } from '@/hooks/usePromptAnimation';
 import { useFocusTrap } from '@/hooks/useFocusTrap';
 import { useSwipeGesture } from '@/hooks/useSwipeGesture';
+import {
+  readPromptDecisionId,
+  readPromptQuestionChoices,
+  type PromptQuestionChoices,
+} from '@/components/worktree/prompt-decision-id';
+import type { StructuredDecisionOption } from '@/lib/session/structured-prompt';
 
 /** Animation duration for sheet transitions */
 const ANIMATION_DURATION_MS = 300;
@@ -114,6 +120,12 @@ export interface MobilePromptSheetProps {
    * Issue #1738: {@link LivePromptData}, matching the reducer slice it is fed
    * from. The degraded structured form (#1725) renders as the question alone —
    * the sheet has no clickable options to offer for a dialog nobody parsed.
+   *
+   * Issue #2945: unless the dialog is ADDRESSABLE — the payload names a
+   * `decisionId`. Then an approval gets its verdict buttons (with its diff
+   * above them) and a question gets its choices, exactly as `PromptPanel`
+   * draws them on the PC, and `onRespond` receives the option number. The
+   * caller sends that to `/respond` by id (see `WorktreeDetailRefactored`).
    */
   promptData: LivePromptData | null;
   /** Whether the sheet is visible */
@@ -488,6 +500,19 @@ function PromptContent({
     }
   }, [isDisabled, onRespond, checkedNumbers, takesTypedText, textInputValue]);
 
+  // Issue #2945: a verdict or a choice number for an addressable decision.
+  const handleStructuredRespond = useCallback(async (answer: string) => {
+    if (isDisabled) return;
+    setIsSubmitting(true);
+    try {
+      await onRespond(answer);
+    } catch {
+      // Error handling silently
+    } finally {
+      setIsSubmitting(false);
+    }
+  }, [isDisabled, onRespond]);
+
   return (
     <div className="space-y-4">
       {/* Header */}
@@ -522,6 +547,16 @@ function PromptContent({
           disabled={isDisabled}
           onYes={() => handleYesNoClick('yes')}
           onNo={() => handleYesNoClick('no')}
+        />
+      )}
+
+      {/* Issue #2945: an addressable approval / question the structured layer
+          reported — the same controls `PromptPanel` draws on the PC. */}
+      {!isAnswerablePromptData(promptData) && (
+        <StructuredDecisionContent
+          promptData={promptData}
+          disabled={isDisabled}
+          onRespond={handleStructuredRespond}
         />
       )}
 
@@ -810,3 +845,121 @@ const MultiSelectActions = memo(function MultiSelectActions({
 });
 
 export default MobilePromptSheet;
+
+/**
+ * The controls for a dialog only the structured layer could see, when it is
+ * addressable (Issue #2945).
+ *
+ * The phone half of `PromptPanel`'s `UnclassifiedPromptNotice`: the agent's own
+ * message (for an OpenCode V2 approval, the action and its diff), then either
+ * the approval's verdict buttons or the question's choices. The two are
+ * mutually exclusive by construction — `readPromptQuestionChoices` answers null
+ * whenever verdicts are published — and neither is drawn without a
+ * `decisionId`, which is what makes a number here a verdict sent by id rather
+ * than a keystroke. With neither, the sheet shows the message alone, as before.
+ */
+function StructuredDecisionContent({
+  promptData,
+  disabled,
+  onRespond,
+}: {
+  promptData: LivePromptData;
+  disabled: boolean;
+  onRespond: (answer: string) => Promise<void>;
+}) {
+  const decisionId = readPromptDecisionId(promptData);
+  const payload = promptData as { message?: unknown; decisionOptions?: unknown };
+  const message = typeof payload.message === 'string' ? payload.message : null;
+  const verdicts =
+    decisionId && Array.isArray(payload.decisionOptions) && payload.decisionOptions.length > 0
+      ? (payload.decisionOptions as readonly StructuredDecisionOption[])
+      : null;
+  const question = readPromptQuestionChoices(promptData);
+
+  return (
+    <div className="space-y-3" data-testid="mobile-structured-decision">
+      {message && (
+        <pre
+          className="max-h-48 overflow-auto whitespace-pre-wrap break-all rounded border border-border bg-muted p-2 font-mono text-xs text-foreground"
+          data-testid="mobile-structured-decision-message"
+        >
+          {message}
+        </pre>
+      )}
+      {verdicts ? (
+        <div className="flex flex-col gap-2" role="group" data-testid="mobile-structured-decision-actions">
+          {verdicts.map((option) => (
+            <button
+              key={option.number}
+              type="button"
+              disabled={disabled}
+              onClick={() => void onRespond(String(option.number))}
+              data-testid={`mobile-structured-decision-option-${option.number}`}
+              className={`w-full ${BUTTON_STYLES.base} ${
+                option.reply === 'reject' ? BUTTON_STYLES.secondary : BUTTON_STYLES.primary
+              }`}
+            >
+              {option.number}. {option.label}
+            </button>
+          ))}
+        </div>
+      ) : question ? (
+        <StructuredQuestionChoices choices={question} disabled={disabled} onRespond={onRespond} />
+      ) : null}
+    </div>
+  );
+}
+
+/** A question's choices as a radio list and a submit, like `PromptPanel`'s (Issue #2945). */
+function StructuredQuestionChoices({
+  choices,
+  disabled,
+  onRespond,
+}: {
+  choices: PromptQuestionChoices;
+  disabled: boolean;
+  onRespond: (answer: string) => Promise<void>;
+}) {
+  const t = useTranslations('prompt');
+  const groupName = useId();
+  const [selected, setSelected] = useState<number | null>(null);
+
+  return (
+    <div className="space-y-3" data-testid="mobile-structured-question">
+      <p className="text-sm text-foreground">{choices.question}</p>
+      <fieldset>
+        <legend className="sr-only">{t('selectAnOption')}</legend>
+        <RadioGroup
+          name={groupName}
+          value={selected != null ? String(selected) : ''}
+          onValueChange={(v) => setSelected(Number(v))}
+          disabled={disabled}
+          className="flex flex-col gap-2"
+        >
+          {choices.labels.map((label, index) => (
+            <label
+              key={`${index + 1}-${label}`}
+              className={`flex items-start gap-3 p-3 rounded-lg border-2 min-h-[44px] ${
+                selected === index + 1 ? 'border-accent-500 bg-accent-50 dark:bg-accent-900/30' : 'border-border bg-surface'
+              } ${disabled ? 'opacity-50' : ''}`}
+            >
+              <RadioGroupItem value={String(index + 1)} className="mt-1" />
+              <span className="font-medium">{index + 1}. {label}</span>
+            </label>
+          ))}
+        </RadioGroup>
+      </fieldset>
+      <button
+        type="button"
+        data-testid="mobile-structured-question-submit"
+        disabled={disabled || selected === null}
+        onClick={() => {
+          if (selected !== null) void onRespond(String(selected));
+        }}
+        className={`w-full ${BUTTON_STYLES.base} ${BUTTON_STYLES.primary}`}
+      >
+        {t('submit')}
+      </button>
+    </div>
+  );
+}
