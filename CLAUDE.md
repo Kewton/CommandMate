@@ -51,6 +51,14 @@ feature/*, fix/*, hotfix/* (作業ブランチ)
 | 緊急修正 | `hotfix/<description>` | `hotfix/critical-security-fix` |
 | ドキュメント | `docs/<description>` | `docs/update-readme` |
 
+### 恒久 worktree（クリーンアップ対象外）
+次の worktree とブランチは常駐用。「worktree を片付けて」と頼まれても削除・ブランチ削除しない。
+
+| worktree | ブランチ | 用途 |
+|----------|----------|------|
+| `../commandmate-main` | `main` | main の参照用 |
+| `../commandmate-agent-health` | `agent-health-runner` | 日次確認の Schedule 実行場所（`CMATE.md` あり。docs/user-guide/agent-health.md） |
+
 ---
 
 ## 標準マージフロー
