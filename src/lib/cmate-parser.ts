@@ -30,6 +30,7 @@ import {
   ANTIGRAVITY_PERMISSIONS,
   COMMAND_CODE_SCHEDULE_PERMISSIONS,
   DEFAULT_PERMISSIONS,
+  isScheduleSupportedCliTool,
 } from '@/config/schedule-config';
 import {
   CMATE_FILENAME,
@@ -258,6 +259,12 @@ export function parseSchedulesSection(rows: string[][]): ScheduleEntry[] {
     const resolvedCliToolId = parsed.cliToolId;
     if (!isCliToolType(resolvedCliToolId)) {
       logger.warn('parse:invalid-cli-tool', { name: sanitizedName, cliToolId: resolvedCliToolId });
+      continue;
+    }
+    // Issue #2934: registered but not schedulable yet (OpenCode V2 Phase 1).
+    // Skipped like an unknown tool, so no run is ever built for it.
+    if (!isScheduleSupportedCliTool(resolvedCliToolId)) {
+      logger.warn('parse:unsupported-cli-tool', { name: sanitizedName, cliToolId: resolvedCliToolId });
       continue;
     }
     const defaultPermission = DEFAULT_PERMISSIONS[resolvedCliToolId] ?? '';

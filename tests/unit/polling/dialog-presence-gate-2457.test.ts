@@ -75,7 +75,14 @@ describe('[#2457] the presence gate judges exactly the tools the table says', ()
   ].join('\n');
 
   const ENFORCED: CLIToolType[] = ['claude', 'codex', 'copilot', 'opencode'];
-  const LEGACY: CLIToolType[] = ['gemini', 'antigravity', 'vibe-local', 'command-code'];
+  const LEGACY: CLIToolType[] = [
+    'gemini',
+    'antigravity',
+    'vibe-local',
+    'command-code',
+    // Issue #2934: no dialog rule in OpenCode V2 Phase 1.
+    'opencode-v2',
+  ];
 
   it('covers every CLI tool exactly once', () => {
     // A tool added to `CLI_TOOL_IDS` without a row here would silently inherit

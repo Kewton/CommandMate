@@ -422,6 +422,9 @@ const AGENT_DISCOVERY_MATRIX: readonly SkillAgentMatrixEntry[] = [
     reloadKey: AGENT_RELOAD_MESSAGE_KEYS.SESSION_RESTART,
     skipReasonKey: null,
   },
+  // Issue #2934: OpenCode V2 is registered (Epic #2370 Phase 1) but Skills
+  // discovery has not been probed on it; the measurement is Phase 4's.
+  unmeasuredEntry('opencode-v2'),
 ];
 
 /** The measured matrix, in CLI-tool declaration order. */

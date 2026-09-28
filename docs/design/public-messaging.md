@@ -551,7 +551,7 @@ LP / README では §4 の直後に置く。ここに書いた 5 行を超える
 | `report metrics` | `commandmate report metrics` サブコマンド | `src/cli/commands/report.ts` |
 | worktree 1 つと契約 1 つ | worktree ごとの独立セッション + 契約ファイル | `src/lib/session/` ・ `.commandmate/tasks/` |
 | 入力待ちが届く（バッジ / トースト / タブタイトル / 通知） | App Badge ・ Toast ・ `document.title` ・ Web Push | `src/hooks/useAttentionBadge.ts` ・ `src/lib/pwa/attention-badge.ts` ・ `src/components/common/Toast.tsx` ・ `src/lib/push/waiting-push-notifier.ts` |
-| 8 種のエージェント CLI とローカルモデル | `CLI_TOOL_IDS`（claude / codex / gemini / vibe-local / opencode / copilot / antigravity / command-code） | `src/lib/cli-tools/types.ts` の `CLI_TOOL_IDS` |
+| 8 種のエージェント CLI とローカルモデル | `CLI_TOOL_IDS`（claude / codex / gemini / vibe-local / opencode / copilot / antigravity / command-code。9 件目の opencode-v2 は Epic #2370 Phase 1 のプレビューで、公開面の「8 種」には数えない。数え方の更新は Phase 4） | `src/lib/cli-tools/types.ts` の `CLI_TOOL_IDS` |
 | `wait --verify` | `commandmate wait --verify` オプション | `src/cli/commands/wait.ts` |
 
 ---

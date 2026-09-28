@@ -81,6 +81,7 @@ import { OpenCodeTool } from '@/lib/cli-tools/opencode';
 import { CopilotTool } from '@/lib/cli-tools/copilot';
 import { AntigravityTool } from '@/lib/cli-tools/antigravity';
 import { CommandCodeTool } from '@/lib/cli-tools/command-code';
+import { OpenCodeV2Tool } from '@/lib/cli-tools/opencode-v2';
 import type { ICLITool } from '@/lib/cli-tools/types';
 import { CLI_TOOL_IDS } from '@/lib/cli-tools/types';
 import {
@@ -106,6 +107,7 @@ const TOOLS: ReadonlyArray<() => ICLITool> = [
   () => new CopilotTool(),
   () => new AntigravityTool(),
   () => new CommandCodeTool(),
+  () => new OpenCodeV2Tool(),
 ];
 
 /** The rejection message from a start that cannot happen. */
@@ -145,6 +147,9 @@ describe('Issue #2301: the hint table', () => {
     expect(CLI_TOOL_INSTALL_HINTS.gemini).toContain('@google/gemini-cli');
     expect(CLI_TOOL_INSTALL_HINTS.opencode).toContain('opencode-ai');
     expect(CLI_TOOL_INSTALL_HINTS['command-code']).toContain('command-code');
+    // Issue #2934: `@opencode/cli` installs `opencode2`; `@opencode-ai/cli` was
+    // the beta name and stopped updating on 2026-09-07.
+    expect(CLI_TOOL_INSTALL_HINTS['opencode-v2']).toContain('@opencode/cli');
     // Copilot keeps #1907's wording, which is also why the retired extension
     // must not come back.
     expect(CLI_TOOL_INSTALL_HINTS.copilot).toMatch(/brew install copilot-cli|@github\/copilot/);

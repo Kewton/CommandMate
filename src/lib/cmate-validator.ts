@@ -23,6 +23,7 @@ import {
   ANTIGRAVITY_PERMISSIONS,
   COMMAND_CODE_PERMISSIONS,
   COMMAND_CODE_SCHEDULE_PERMISSIONS,
+  isScheduleSupportedCliTool,
 } from '@/config/schedule-config';
 import { parseAndValidateCliToolColumn } from '@/lib/cmate-cli-tool-parser';
 import { isCliToolType } from '@/lib/cli-tools/types';
@@ -303,6 +304,16 @@ export function validateSchedulesSection(
       errors.push({
         row: i,
         message: `Row ${i + 1}: unknown CLI Tool "${parsed.cliToolId}"`,
+        field: 'cliTool',
+      });
+    }
+
+    // Issue #2934: a registered tool that cannot be scheduled yet — OpenCode V2
+    // Phase 1 has no headless path. The parser skips the same rows.
+    if (parsed && isCliToolType(parsed.cliToolId) && !isScheduleSupportedCliTool(parsed.cliToolId)) {
+      errors.push({
+        row: i,
+        message: `Row ${i + 1}: CLI Tool "${parsed.cliToolId}" is not supported in schedules yet`,
         field: 'cliTool',
       });
     }

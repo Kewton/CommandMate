@@ -232,7 +232,7 @@ describe('which tools each behaviour applies to', () => {
     for (const tool of CLI_TOOL_IDS) {
       expect(usesAltScreen(tool), tool).toBe(usesAlternateScreen(tool as CLIToolType));
     }
-    expect([...ALT_SCREEN_TOOLS].sort()).toEqual(['claude', 'copilot', 'opencode']);
+    expect([...ALT_SCREEN_TOOLS].sort()).toEqual(['claude', 'copilot', 'opencode', 'opencode-v2']);
   });
 });
 

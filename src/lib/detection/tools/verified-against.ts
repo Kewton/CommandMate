@@ -229,6 +229,22 @@ export const COMMAND_CODE_VERIFIED_AGAINST = {
 } as const;
 
 /**
+ * OpenCode V2 (`opencode2`, npm `@opencode/cli`) — Issue #2934, Epic #2370
+ * Phase 1.
+ *
+ * 2.0.18 is the build Phase 0 and Phase 1 were measured on (2026-09-28, pane
+ * 80x200): the SSE vocabulary the state is read from, and the composer / footer
+ * rows the send path and the fallback reader match. OpenCode V2 shipped 18
+ * releases in its first two weeks, so this stamp is expected to go `stale`
+ * quickly — which is the freshness probe doing its job, not a defect.
+ */
+export const OPENCODE_V2_VERIFIED_AGAINST = {
+  version: '2.0.18',
+  capturedAt: '2026-09-28',
+  paneGeometry: '80x200',
+} as const;
+
+/**
  * The stamp for a tool whose frames nobody has captured yet.
  *
  * Not a version, on purpose. `parseCliVersion` cannot read `'unmeasured'`, so a
@@ -263,6 +279,7 @@ export const DETECTOR_VERIFIED_AGAINST: Readonly<Record<string, VerifiedAgainstS
   opencode: OPENCODE_VERIFIED_AGAINST,
   antigravity: ANTIGRAVITY_VERIFIED_AGAINST,
   'command-code': COMMAND_CODE_VERIFIED_AGAINST,
+  'opencode-v2': OPENCODE_V2_VERIFIED_AGAINST,
   gemini: UNMEASURED_VERIFIED_AGAINST,
   'vibe-local': UNMEASURED_VERIFIED_AGAINST,
 };

@@ -91,6 +91,9 @@ export const IDLE_EVIDENCE_DEFAULT_MODE: Readonly<Record<CLIToolType, IdleEviden
   // whatever this row says, and claiming `enforce` would state a rollout that
   // does not exist. Epic #2249 決定 3 pins the same value from the other side.
   'command-code': 'legacy',
+  // Issue #2934: OpenCode V2 Phase 1 declares no `readIdleEvidence` either, so
+  // `legacy` is the honest row; its state comes from the SSE stream.
+  'opencode-v2': 'legacy',
 };
 
 /**

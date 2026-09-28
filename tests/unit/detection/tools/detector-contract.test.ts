@@ -89,6 +89,9 @@ describe('[#1928] detectDialog is the seam Auto-Yes reads', () => {
     // without an Enter. Epic #2249 決定 3 still keeps Auto-Yes on the
     // numbered-response path: `AUTO_YES_DIALOG_GATE_DEFAULT_MODE` is `legacy`.
     'command-code': true,
+    // Issue #2934: OpenCode V2 Phase 1 reads no dialog off the screen; its
+    // approval dialog (`Always allow`) is Phase 3's.
+    'opencode-v2': false,
   };
 
   it('declares which tools have measured dialog rules', () => {

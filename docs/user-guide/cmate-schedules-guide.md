@@ -138,6 +138,12 @@ CLI Tool列で `copilot --model <model-name>` と記述すると、スケジュ�
 
 > **Warning:** 無人バッチであるスケジュール実行では、これが唯一の許可値である点に注意してください。
 
+### opencode-v2（スケジュール未対応）
+
+`opencode-v2`（OpenCode V2、実行ファイル `opencode2`）は worktree のエージェントとしては使えますが、
+**スケジュールの CLI Tool にはまだ指定できません**（Issue #2934。ヘッドレス実行 `opencode2 run` の
+対応は Epic #2370 Phase 4）。CMATE.md に書くと検証エラーになり、その行は実行されません。
+
 ### command-code（--yolo / --permission-mode）
 
 | 値 | 説明 |

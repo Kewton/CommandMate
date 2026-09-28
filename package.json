@@ -33,6 +33,7 @@
     "!.next/cache",
     "public/",
     "scripts/hooks/",
+    "scripts/opencode-v2/",
     ".env.example",
     "release-notes/"
   ],

@@ -211,6 +211,9 @@ export const DETECTOR_VERSION_PROBES: Readonly<Record<string, DetectorVersionPro
   antigravity: { kind: 'execFile', command: 'agy', args: ['--version'] },
   'command-code': { kind: 'execFile', command: 'commandcode', args: ['--version'] },
   opencode: { kind: 'execFile', command: 'opencode', args: ['--version'] },
+  // Issue #2934: tool id `opencode-v2`, executable `opencode2`
+  // (prints `opencode v2.0.18`).
+  'opencode-v2': { kind: 'execFile', command: 'opencode2', args: ['--version'] },
   gemini: { kind: 'execFile', command: 'gemini', args: ['--version'] },
   copilot: {
     kind: 'delegated',

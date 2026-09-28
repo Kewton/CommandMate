@@ -89,6 +89,8 @@ describe('[#1928] the rollout table', () => {
       // cannot dismiss the dialog. Issue #2574 added a rule for that dialog and
       // kept this row `legacy`; see the `[#2574]` block below for why.
       'command-code': 'legacy',
+      // Issue #2934: OpenCode V2 Phase 1 has no dialog rule to gate on.
+      'opencode-v2': 'legacy',
     });
   });
 

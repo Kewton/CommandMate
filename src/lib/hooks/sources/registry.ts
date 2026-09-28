@@ -37,6 +37,7 @@ import { antigravityAgentEventSource } from './antigravity/source';
 import { codexAgentEventSource } from './codex/source';
 import { opencodeAgentEventSource } from './opencode/source';
 import { commandCodeAgentEventSource } from './command-code/source';
+import { opencodeV2AgentEventSource } from './opencode-v2/source';
 
 declare global {
   // eslint-disable-next-line no-var
@@ -124,3 +125,4 @@ registerAgentEventSource(opencodeAgentEventSource);
 // Issue #2251, Epic #2249 Phase B. The seventh, and the last line of "adding a
 // tool" — its own directory plus this.
 registerAgentEventSource(commandCodeAgentEventSource);
+registerAgentEventSource(opencodeV2AgentEventSource);
