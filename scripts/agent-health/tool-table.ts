@@ -7,6 +7,8 @@
  * 0.157.1, agy 1.2.12, opencode 1.18.31/1.18.32 and commandcode 1.58.1/1.66.0,
  * in a 200x1000 pane (80x200 for opencode, the geometry CommandMate uses).
  *
+ * opencode-v2 (opencode2 2.0.18) was added on 2026-09-28 (Issue #2937).
+ *
  * Model calls per tool: at most three turns (running, approval, quoted) — the
  * approval turn is folded into the running turn where the CLI already asks
  * before `sleep` (antigravity, command-code).
@@ -66,6 +68,19 @@ export interface ToolProbeSpec {
   approval: ApprovalSpec;
   /** Machine-singleton files the run touches. */
   guardedFiles: () => { hookConfig: string[]; trustState: string[] };
+  /**
+   * Variables put in front of the launch line (`env K=V <line>`), for state
+   * the CLI would otherwise write into the user's home. Never anything the
+   * production launch line itself depends on.
+   */
+  launchEnv?: (workDir: string) => Record<string, string>;
+  /**
+   * `opencode-v2`: the launch goes through `scripts/opencode-v2/launch.sh`
+   * with a reserved port and password (the production path), and the
+   * `hook-correlation` slot checks that server's SSE instead of hooks
+   * (Issue #2937).
+   */
+  server?: 'opencode-v2';
 }
 
 const RUNNING_PROMPT = 'Run the shell command: sleep 20';
@@ -251,5 +266,40 @@ export const TOOL_PROBE_SPECS: Record<AgentHealthTool, ToolProbeSpec> = {
       hookConfig: [],
       trustState: [path.join(os.homedir(), '.commandcode', 'trusted-hooks.json')],
     }),
+  },
+  'opencode-v2': {
+    tool: 'opencode-v2',
+    cliToolId: 'opencode-v2',
+    executable: 'opencode2',
+    width: OPENCODE_PANE_WIDTH,
+    height: OPENCODE_PANE_HEIGHT,
+    captureLines: resolveCaptureSpec('opencode-v2').statusLines,
+    launchFlags: () => [],
+    startupDialogs: [],
+    prompts: {
+      running: RUNNING_PROMPT,
+      approval: APPROVAL_PROMPT,
+      // v2's wording: `Always allow`, where v1 says `Allow always`.
+      quoted: quote(
+        ['△ Permission required', '  # Shell command', '$ uname -a', ' Allow once   Always allow   Reject'].join(
+          '\n'
+        )
+      ),
+    },
+    approval: {
+      via: 'none',
+      dialog: /Permission required/,
+      denyKeys: ['Escape'],
+      skipReason:
+        'opencode2 の既定のルールは shell を確認なしで実行する（#2370 Phase 0 (f)。実測: sleep 20 がダイアログ無しで走る）ため、承認ダイアログが出ない',
+    },
+    // The TUI keeps prompt history, model picks and locks in
+    // $XDG_STATE_HOME/opencode — the directory that also holds the user's
+    // background service (`service.json`). Pointed next to the work dir (in
+    // the run's temp dir, outside the repo the agent sees), so none of the
+    // user's files is written, rather than compared afterwards.
+    launchEnv: (workDir) => ({ XDG_STATE_HOME: `${workDir}-xdg-state` }),
+    guardedFiles: () => ({ hookConfig: [], trustState: [] }),
+    server: 'opencode-v2',
   },
 };
