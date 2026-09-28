@@ -110,6 +110,12 @@ CommandMate は名前ではなく `--version` の出力で見分けます。
 場合、OpenCode V2 は専用ラッパー（`opencode2` を名前で起動する）を使えないため、構造化イベントの無い
 `--standalone` で起動します。
 
+**V2 の自動更新**: CommandMate が起動する OpenCode V2 では、V2 自身の更新確認を止めています
+（`OPENCODE_DISABLE_AUTOUPDATE=1` と `COREPACK_ENABLE_AUTO_PIN=0`）。V2 は起動時の更新確認で
+`pnpm` / `yarn` などを起動したディレクトリで実行し、それらが corepack 経由だと、プロジェクトの
+`package.json` に `"packageManager"` を書き込んでしまうためです。V2 の更新は
+`npm install -g @opencode/cli` で行ってください。
+
 **共有データの注意**: OpenCode 1.x と V2 は同じ `~/.local/share/opencode/opencode.db` を使います。
 V2 はこのデータベースのテーブルを作り替えるため、V2 を使ったあとで OpenCode 1.x が
 `no such column: …` で起動に失敗することがあります。このとき CommandMate は opencode のログ

@@ -108,6 +108,12 @@ When `opencode` points only at V2, OpenCode counts as not installed, and startin
 `opencode` is OpenCode V2). When V2 is installed under the `opencode` name only, OpenCode V2 cannot use
 its wrapper (which starts `opencode2` by name) and launches with `--standalone`, without structured events.
 
+**V2 self-update**: in the OpenCode V2 sessions CommandMate starts, V2's own update check is turned off
+(`OPENCODE_DISABLE_AUTOUPDATE=1` and `COREPACK_ENABLE_AUTO_PIN=0`). On start V2 checks for updates by
+running `pnpm` / `yarn` and the like in the directory it was started from, and where those are corepack
+shims they write a `"packageManager"` field into the project's `package.json`. Update V2 with
+`npm install -g @opencode/cli`.
+
 **Shared data**: OpenCode 1.x and V2 use the same `~/.local/share/opencode/opencode.db`. V2 rebuilds
 tables in it, so after V2 has run, OpenCode 1.x can fail to start with `no such column: …`. CommandMate
 then reads opencode's log (`~/.local/share/opencode/log/opencode.log`) and shows that cause as the start
