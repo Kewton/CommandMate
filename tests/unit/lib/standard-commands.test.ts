@@ -489,12 +489,14 @@ describe('STANDARD_COMMANDS', () => {
     // The evidence trail #1503/#1767/#1913/#2024/#2253 built, now stated once:
     // five tools ship /agents and copilot ships /agent, a different command.
     // Issue #2922: agy 1.2.12 ships /agents ("List available custom agents").
+    // Issue #2944: opencode2 2.0.18 lists /agents ("Switch agent") in its palette.
     expect([...attestedClaimants].sort()).toEqual([
       'antigravity',
       'claude',
       'codex',
       'command-code',
       'opencode',
+      'opencode-v2',
     ]);
 
     const agentsEntries = STANDARD_COMMANDS.filter((c) => c.name === 'agents');
@@ -951,6 +953,8 @@ describe('copilot / opencode catalog reconcile (Issue #1913)', () => {
     // Issue #2253: command-code joins the split. `/exit` means "Exit Command
     // Code" there, so it gets its own leaf like every other claimant.
     // Issue #2922: antigravity joins the split the same way.
+    // Issue #2944: so does opencode-v2, as its own row ("Exit OpenCode V2"), so
+    // the opencode entry and its wording stay exactly as they were.
     expect(exits.map((c) => c.cliTools?.join(',')).sort()).toEqual([
       'antigravity',
       'claude',
@@ -958,6 +962,7 @@ describe('copilot / opencode catalog reconcile (Issue #1913)', () => {
       'command-code',
       'copilot',
       'opencode',
+      'opencode-v2',
     ]);
     for (const cmd of exits) {
       const tool = cmd.cliTools?.[0] as string;

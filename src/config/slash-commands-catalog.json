@@ -41,6 +41,13 @@
       "model",
       "status",
       "help"
+    ],
+    "opencode-v2": [
+      "models",
+      "new",
+      "status",
+      "help",
+      "exit"
     ]
   },
   "commands": [
@@ -304,7 +311,7 @@
     },
     {
       "name": "quit",
-      "descriptionKey": "slashCommands.descriptions.quit",
+      "descriptionKey": "slashCommands.descriptions.quit.codex",
       "category": "standard-session",
       "cliTools": [
         "codex"
@@ -2384,7 +2391,7 @@
     },
     {
       "name": "settings",
-      "descriptionKey": "slashCommands.descriptions.settings",
+      "descriptionKey": "slashCommands.descriptions.settings.copilot",
       "category": "standard-config",
       "cliTools": [
         "copilot"
@@ -2854,7 +2861,7 @@
     },
     {
       "name": "reload",
-      "descriptionKey": "slashCommands.descriptions.reload",
+      "descriptionKey": "slashCommands.descriptions.reload.command-code",
       "category": "standard-session",
       "cliTools": [
         "command-code"
@@ -3204,7 +3211,7 @@
     },
     {
       "name": "open",
-      "descriptionKey": "slashCommands.descriptions.open",
+      "descriptionKey": "slashCommands.descriptions.open.antigravity",
       "category": "standard-util",
       "cliTools": [
         "antigravity"
@@ -3478,6 +3485,376 @@
       "category": "standard-util",
       "cliTools": [
         "command-code"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "agents",
+      "descriptionKey": "slashCommands.descriptions.agents.opencode-v2",
+      "category": "standard-config",
+      "cliTools": [
+        "opencode-v2"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "btw",
+      "descriptionKey": "slashCommands.descriptions.btw",
+      "category": "standard-util",
+      "cliTools": [
+        "opencode-v2"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "cd",
+      "descriptionKey": "slashCommands.descriptions.cd.opencode-v2",
+      "category": "standard-util",
+      "cliTools": [
+        "opencode-v2"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "clear",
+      "descriptionKey": "slashCommands.descriptions.clear",
+      "category": "standard-session",
+      "cliTools": [
+        "opencode-v2"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "connect",
+      "descriptionKey": "slashCommands.descriptions.connect",
+      "category": "standard-session",
+      "cliTools": [
+        "opencode-v2"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "continue",
+      "descriptionKey": "slashCommands.descriptions.continue",
+      "category": "standard-session",
+      "cliTools": [
+        "opencode-v2"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "debug",
+      "descriptionKey": "slashCommands.descriptions.debug.opencode-v2",
+      "category": "standard-monitor",
+      "cliTools": [
+        "opencode-v2"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "diff",
+      "descriptionKey": "slashCommands.descriptions.diff",
+      "category": "standard-git",
+      "cliTools": [
+        "opencode-v2"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "editor",
+      "descriptionKey": "slashCommands.descriptions.editor",
+      "category": "standard-util",
+      "cliTools": [
+        "opencode-v2"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "effort",
+      "descriptionKey": "slashCommands.descriptions.effort",
+      "category": "standard-config",
+      "cliTools": [
+        "opencode-v2"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "exit",
+      "descriptionKey": "slashCommands.descriptions.exit.opencode-v2",
+      "category": "standard-session",
+      "cliTools": [
+        "opencode-v2"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "help",
+      "descriptionKey": "slashCommands.descriptions.help",
+      "category": "standard-util",
+      "cliTools": [
+        "opencode-v2"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "init",
+      "descriptionKey": "slashCommands.descriptions.init.opencode-v2",
+      "category": "standard-util",
+      "cliTools": [
+        "opencode-v2"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "mcps",
+      "descriptionKey": "slashCommands.descriptions.mcps",
+      "category": "standard-config",
+      "cliTools": [
+        "opencode-v2"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "models",
+      "descriptionKey": "slashCommands.descriptions.models",
+      "category": "standard-config",
+      "cliTools": [
+        "opencode-v2"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "new",
+      "descriptionKey": "slashCommands.descriptions.new",
+      "category": "standard-session",
+      "cliTools": [
+        "opencode-v2"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "open",
+      "descriptionKey": "slashCommands.descriptions.open.opencode-v2",
+      "category": "standard-session",
+      "cliTools": [
+        "opencode-v2"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "pair",
+      "descriptionKey": "slashCommands.descriptions.pair",
+      "category": "standard-util",
+      "cliTools": [
+        "opencode-v2"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "plugins",
+      "descriptionKey": "slashCommands.descriptions.plugins",
+      "category": "standard-util",
+      "cliTools": [
+        "opencode-v2"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "project",
+      "descriptionKey": "slashCommands.descriptions.project",
+      "category": "standard-session",
+      "cliTools": [
+        "opencode-v2"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "projects",
+      "descriptionKey": "slashCommands.descriptions.projects",
+      "category": "standard-session",
+      "cliTools": [
+        "opencode-v2"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "q",
+      "descriptionKey": "slashCommands.descriptions.q",
+      "category": "standard-session",
+      "cliTools": [
+        "opencode-v2"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "quit",
+      "descriptionKey": "slashCommands.descriptions.quit.opencode-v2",
+      "category": "standard-session",
+      "cliTools": [
+        "opencode-v2"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "reload",
+      "descriptionKey": "slashCommands.descriptions.reload.opencode-v2",
+      "category": "standard-config",
+      "cliTools": [
+        "opencode-v2"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "resume",
+      "descriptionKey": "slashCommands.descriptions.resume",
+      "category": "standard-session",
+      "cliTools": [
+        "opencode-v2"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "review",
+      "descriptionKey": "slashCommands.descriptions.review",
+      "category": "standard-git",
+      "cliTools": [
+        "opencode-v2"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "sessions",
+      "descriptionKey": "slashCommands.descriptions.sessions",
+      "category": "standard-session",
+      "cliTools": [
+        "opencode-v2"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "settings",
+      "descriptionKey": "slashCommands.descriptions.settings.opencode-v2",
+      "category": "standard-config",
+      "cliTools": [
+        "opencode-v2"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "skills",
+      "descriptionKey": "slashCommands.descriptions.skills.opencode-v2",
+      "category": "standard-config",
+      "cliTools": [
+        "opencode-v2"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "stats",
+      "descriptionKey": "slashCommands.descriptions.stats",
+      "category": "standard-monitor",
+      "cliTools": [
+        "opencode-v2"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "status",
+      "descriptionKey": "slashCommands.descriptions.status",
+      "category": "standard-monitor",
+      "cliTools": [
+        "opencode-v2"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "themes",
+      "descriptionKey": "slashCommands.descriptions.themes",
+      "category": "standard-config",
+      "cliTools": [
+        "opencode-v2"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "thinking",
+      "descriptionKey": "slashCommands.descriptions.thinking",
+      "category": "standard-config",
+      "cliTools": [
+        "opencode-v2"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "update",
+      "descriptionKey": "slashCommands.descriptions.update",
+      "category": "standard-util",
+      "cliTools": [
+        "opencode-v2"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "variants",
+      "descriptionKey": "slashCommands.descriptions.variants",
+      "category": "standard-config",
+      "cliTools": [
+        "opencode-v2"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "web",
+      "descriptionKey": "slashCommands.descriptions.web",
+      "category": "standard-util",
+      "cliTools": [
+        "opencode-v2"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "worktrees",
+      "descriptionKey": "slashCommands.descriptions.worktrees",
+      "category": "standard-util",
+      "cliTools": [
+        "opencode-v2"
       ],
       "isStandard": true,
       "source": "standard"

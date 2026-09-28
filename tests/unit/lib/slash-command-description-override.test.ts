@@ -211,6 +211,13 @@ describe('the bundled catalog carries descriptionKey through verbatim', () => {
     // names claude.ai) and /title (codex configures title items). /learn is
     // split too: Command Code's opens a browser learn hub, agy's saves lessons
     // as skills or rules.
+    // Issue #2944: OpenCode V2 (opencode2 2.0.18) takes its own leaf on the
+    // names that were already split (/agents /cd /debug /exit /init /skills),
+    // and four flat keys are split by hand because the shipped sentence is
+    // wrong for v2: /open (agy opens a file; v2 opens a session or project),
+    // /quit ("Exit Codex CLI"), /reload (Command Code restarts to apply an
+    // update; v2 reloads configuration) and /settings (copilot also shows and
+    // sets a single value). The existing claimant keeps its wording on its leaf.
     expect(overridden.map((e) => e.descriptionKey).sort()).toEqual([
       'slashCommands.descriptions.agent.copilot',
       'slashCommands.descriptions.agents.antigravity',
@@ -218,12 +225,15 @@ describe('the bundled catalog carries descriptionKey through verbatim', () => {
       'slashCommands.descriptions.agents.codex',
       'slashCommands.descriptions.agents.command-code',
       'slashCommands.descriptions.agents.opencode',
+      'slashCommands.descriptions.agents.opencode-v2',
       'slashCommands.descriptions.app.codex',
       'slashCommands.descriptions.app.copilot',
       'slashCommands.descriptions.cd.claude',
       'slashCommands.descriptions.cd.codex',
+      'slashCommands.descriptions.cd.opencode-v2',
       'slashCommands.descriptions.debug.claude',
       'slashCommands.descriptions.debug.opencode',
+      'slashCommands.descriptions.debug.opencode-v2',
       'slashCommands.descriptions.design.claude',
       'slashCommands.descriptions.design.command-code',
       'slashCommands.descriptions.exit.antigravity',
@@ -232,6 +242,7 @@ describe('the bundled catalog carries descriptionKey through verbatim', () => {
       'slashCommands.descriptions.exit.command-code',
       'slashCommands.descriptions.exit.copilot',
       'slashCommands.descriptions.exit.opencode',
+      'slashCommands.descriptions.exit.opencode-v2',
       'slashCommands.descriptions.feedback.antigravity',
       'slashCommands.descriptions.feedback.claude',
       'slashCommands.descriptions.feedback.codex',
@@ -245,6 +256,7 @@ describe('the bundled catalog carries descriptionKey through verbatim', () => {
       'slashCommands.descriptions.init.command-code',
       'slashCommands.descriptions.init.copilot',
       'slashCommands.descriptions.init.opencode',
+      'slashCommands.descriptions.init.opencode-v2',
       'slashCommands.descriptions.keybindings.antigravity',
       'slashCommands.descriptions.keybindings.claude',
       'slashCommands.descriptions.learn.antigravity',
@@ -260,18 +272,27 @@ describe('the bundled catalog carries descriptionKey through verbatim', () => {
       'slashCommands.descriptions.memory.claude',
       'slashCommands.descriptions.memory.command-code',
       'slashCommands.descriptions.memory.copilot',
+      'slashCommands.descriptions.open.antigravity',
+      'slashCommands.descriptions.open.opencode-v2',
       'slashCommands.descriptions.plugin.claude',
       'slashCommands.descriptions.plugin.copilot',
+      'slashCommands.descriptions.quit.codex',
+      'slashCommands.descriptions.quit.opencode-v2',
       'slashCommands.descriptions.recap.claude',
       'slashCommands.descriptions.recap.codex',
+      'slashCommands.descriptions.reload.command-code',
+      'slashCommands.descriptions.reload.opencode-v2',
       'slashCommands.descriptions.remote-control.antigravity',
       'slashCommands.descriptions.remote-control.claude',
+      'slashCommands.descriptions.settings.copilot',
+      'slashCommands.descriptions.settings.opencode-v2',
       'slashCommands.descriptions.skills.antigravity',
       'slashCommands.descriptions.skills.claude',
       'slashCommands.descriptions.skills.codex',
       'slashCommands.descriptions.skills.command-code',
       'slashCommands.descriptions.skills.copilot',
       'slashCommands.descriptions.skills.opencode',
+      'slashCommands.descriptions.skills.opencode-v2',
       'slashCommands.descriptions.title.antigravity',
       'slashCommands.descriptions.title.codex',
       'slashCommands.descriptions.tui.claude',

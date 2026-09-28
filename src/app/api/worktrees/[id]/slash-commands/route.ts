@@ -17,11 +17,15 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { getDbInstance } from '@/lib/db/db-instance';
 import { getWorktreeById } from '@/lib/db';
-import { getSlashCommandGroups, loadSkills, loadCodexSkills, loadAgentsSkills, loadOpencodeSkills, loadCommandCodeSkills, mergeCodexFamilySkills, getCopilotBuiltinCommands, getGeminiBuiltinCommands, opencodeLiveCommandsToSlashCommands } from '@/lib/slash-commands';
+import { getSlashCommandGroups, loadSkills, loadCodexSkills, loadAgentsSkills, loadOpencodeSkills, loadOpencodeV2Skills, loadCommandCodeSkills, mergeCodexFamilySkills, getCopilotBuiltinCommands, getGeminiBuiltinCommands, opencodeLiveCommandsToSlashCommands } from '@/lib/slash-commands';
 import {
   getOpencodeLiveCommands,
   scheduleOpencodeLiveRefresh,
 } from './opencode-live';
+import {
+  getOpencodeV2LiveCommands,
+  scheduleOpencodeV2LiveRefresh,
+} from './opencode-v2-live';
 import { getStandardCommandGroups } from '@/lib/standard-commands';
 import {
   loadUserCatalogCommands,
@@ -163,6 +167,18 @@ export async function GET(
           ])
         : [[], []];
 
+    // Skill roots OpenCode V2 2.0.18 was measured to read (Issue #2944). Not v1's
+    // list: v2 also reads the singular `.opencode/skill`, and under $HOME it
+    // reads `~/.config/opencode/skill(s)` but not `~/.opencode/skills`. Loaded
+    // only for an opencode-v2 session, for the same reasons as the v1 scan.
+    const [worktreeOpencodeV2Skills, globalOpencodeV2Skills] =
+      cliTool === 'opencode-v2'
+        ? await Promise.all([
+            loadOpencodeV2Skills(worktree.path, 'project').catch(() => []),
+            loadOpencodeV2Skills(os.homedir(), 'global').catch(() => []),
+          ])
+        : [[], []];
+
     // Skill roots Command Code 1.47.0 was measured to read — `.commandcode/skills`
     // and `.agents/skills`, in the worktree and under $HOME (Issue #2322).
     // `.claude/skills` is deliberately absent: a Skill planted only there is not
@@ -216,6 +232,14 @@ export async function GET(
       ? [{ category: 'skill' as const, label: 'Skills', commands: worktreeOpencodeSkills }]
       : [];
 
+    // Same global-then-worktree ordering, same reason (Issue #2944).
+    const globalOpencodeV2Groups: SlashCommandGroup[] = globalOpencodeV2Skills.length > 0
+      ? [{ category: 'skill' as const, label: 'Skills', commands: globalOpencodeV2Skills }]
+      : [];
+    const worktreeOpencodeV2Groups: SlashCommandGroup[] = worktreeOpencodeV2Skills.length > 0
+      ? [{ category: 'skill' as const, label: 'Skills', commands: worktreeOpencodeV2Skills }]
+      : [];
+
     // Same global-then-worktree ordering, same reason (Issue #2322).
     const globalCommandCodeGroups: SlashCommandGroup[] = globalCommandCodeSkills.length > 0
       ? [{ category: 'skill' as const, label: 'Skills', commands: globalCommandCodeSkills }]
@@ -226,7 +250,7 @@ export async function GET(
 
     const mergedGroups = mergeCommandGroups(
       standardGroups,
-      [...globalClaudeGroups, ...globalOpencodeGroups, ...globalCommandCodeGroups, ...worktreeGroups, ...worktreeOpencodeGroups, ...worktreeCommandCodeGroups, ...globalCodexGroups, ...copilotBuiltinGroups, ...geminiBuiltinGroups]
+      [...globalClaudeGroups, ...globalOpencodeGroups, ...globalOpencodeV2Groups, ...globalCommandCodeGroups, ...worktreeGroups, ...worktreeOpencodeGroups, ...worktreeOpencodeV2Groups, ...worktreeCommandCodeGroups, ...globalCodexGroups, ...copilotBuiltinGroups, ...geminiBuiltinGroups]
     );
 
     // Issue #4: Filter by CLI tool
@@ -248,6 +272,18 @@ export async function GET(
         opencodeLiveCommandsToSlashCommands(getOpencodeLiveCommands(id))
       );
       scheduleOpencodeLiveRefresh(id, worktree.path);
+    }
+
+    // Issue #2944: the same fold for OpenCode V2, read off the instance's own
+    // server (`GET /api/command` + `GET /api/skill`, Basic auth). Same cache-then-
+    // background-refresh shape; a Skill the disk scan above already found keeps
+    // its row (same `name::opencode-v2` key), so nothing is listed twice.
+    if (cliTool === 'opencode-v2') {
+      filteredGroups = foldInMissingCommands(
+        filteredGroups,
+        opencodeLiveCommandsToSlashCommands(getOpencodeV2LiveCommands(id), 'opencode-v2')
+      );
+      scheduleOpencodeV2LiveRefresh(id, worktree.path);
     }
 
     // Calculate source counts in a single pass

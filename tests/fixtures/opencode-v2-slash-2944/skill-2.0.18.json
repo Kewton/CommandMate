@@ -1,0 +1,77 @@
+{
+  "location": {
+    "directory": "/tmp/cm2944/work"
+  },
+  "data": [
+    {
+      "id": "opencode",
+      "name": "OpenCode",
+      "description": "Use this skill for any question about OpenCode itself, including how OpenCode works, using or configuring it, migrating from V1 to V2, troubleshooting it, developing plugins or integrations, using the OpenCode SDK, clients, server, or API, and contributing to the OpenCode codebase. Also use it for OpenCode agents, commands, skills, tools, permissions, MCP servers, providers, models, themes, keybinds, formatters, the CLI, TUI, desktop app, and web app.",
+      "path": "/builtin/opencode.md",
+      "content": "# OpenCode\n\nUse this guide as the starting point for work involving OpenCode itself. It\ncovers the core concepts needed to configure and customize OpenCode, ext"
+    },
+    {
+      "id": "report",
+      "name": "Report",
+      "description": "Use when the user wants to report an opencode issue or bug. Collect standard diagnostics, add user-specific reproduction context, and publish the issue with GitHub CLI.",
+      "path": "/builtin/report.md",
+      "content": "<!--\n  Built-in skill. Name and description are registered in code at\n  packages/core/src/plugin/skill.ts. The body below becomes the skill's\n  content.\n-->\n\n# "
+    },
+    {
+      "id": "home-claudeskills",
+      "name": "home-claudeskills",
+      "description": "Home probe skill in .claude/skills",
+      "path": "/tmp/cm2944/home/.claude/skills/home-claudeskills/SKILL.md",
+      "content": "Reply exactly PROBE_OK_home-claudeskills.\n"
+    },
+    {
+      "id": "probe-claudeskills",
+      "name": "probe-claudeskills",
+      "description": "Probe skill in .claude/skills. Answer PROBE_OK_probe-claudeskills",
+      "path": "/tmp/cm2944/work/.claude/skills/probe-claudeskills/SKILL.md",
+      "content": "Reply exactly PROBE_OK_probe-claudeskills and nothing else.\n"
+    },
+    {
+      "id": "home-agentsskills",
+      "name": "home-agentsskills",
+      "description": "Home probe skill in .agents/skills",
+      "path": "/tmp/cm2944/home/.agents/skills/home-agentsskills/SKILL.md",
+      "content": "Reply exactly PROBE_OK_home-agentsskills.\n"
+    },
+    {
+      "id": "probe-agentsskills",
+      "name": "probe-agentsskills",
+      "description": "Probe skill in .agents/skills. Answer PROBE_OK_probe-agentsskills",
+      "path": "/tmp/cm2944/work/.agents/skills/probe-agentsskills/SKILL.md",
+      "content": "Reply exactly PROBE_OK_probe-agentsskills and nothing else.\n"
+    },
+    {
+      "id": "home-configopencodeskill",
+      "name": "home-configopencodeskill",
+      "description": "Home probe skill in .config/opencode/skill",
+      "path": "/tmp/cm2944/home/.config/opencode/skill/home-configopencodeskill/SKILL.md",
+      "content": "Reply exactly PROBE_OK_home-configopencodeskill.\n"
+    },
+    {
+      "id": "home-configopencodeskills",
+      "name": "home-configopencodeskills",
+      "description": "Home probe skill in .config/opencode/skills",
+      "path": "/tmp/cm2944/home/.config/opencode/skills/home-configopencodeskills/SKILL.md",
+      "content": "Reply exactly PROBE_OK_home-configopencodeskills.\n"
+    },
+    {
+      "id": "probe-opencodeskill",
+      "name": "probe-opencodeskill",
+      "description": "Probe skill in .opencode/skill. Answer PROBE_OK_probe-opencodeskill",
+      "path": "/tmp/cm2944/work/.opencode/skill/probe-opencodeskill/SKILL.md",
+      "content": "Reply exactly PROBE_OK_probe-opencodeskill and nothing else.\n"
+    },
+    {
+      "id": "probe-opencodeskills",
+      "name": "probe-opencodeskills",
+      "description": "Probe skill in .opencode/skills. Answer PROBE_OK_probe-opencodeskills",
+      "path": "/tmp/cm2944/work/.opencode/skills/probe-opencodeskills/SKILL.md",
+      "content": "Reply exactly PROBE_OK_probe-opencodeskills and nothing else.\n"
+    }
+  ]
+}

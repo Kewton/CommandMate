@@ -117,7 +117,10 @@
         "command-code": "Command Code またはプロバイダーからログアウト",
         "antigravity": "ログアウト"
       },
-      "quit": "Codex CLI を終了",
+      "quit": {
+        "codex": "Codex CLI を終了",
+        "opencode-v2": "OpenCode V2 を終了"
+      },
       "diff": "Git の差分を表示（未追跡ファイルを含む）",
       "mention": "次のやり取りにファイル/フォルダを添付",
       "mcp": "MCP サーバーと利用可能なツールを管理",
@@ -126,7 +129,8 @@
         "claude": "リポジトリ向けの CLAUDE.md ガイドを生成",
         "copilot": "このリポジトリ向けの Copilot 指示ファイルを初期化",
         "opencode": "AGENTS.md のガイド付きセットアップを実行",
-        "command-code": "このプロジェクト向けの AGENTS.md を生成"
+        "command-code": "このプロジェクト向けの AGENTS.md を生成",
+        "opencode-v2": "AGENTS.md のガイド付きセットアップを実行"
       },
       "feedback": {
         "codex": "Codex チームにフィードバックを送信",
@@ -149,7 +153,8 @@
         "copilot": "機能を拡張するスキルを管理",
         "opencode": "利用可能なスキルを一覧・実行",
         "command-code": "エージェントスキルを一覧・表示",
-        "antigravity": "利用できるスキルを一覧表示"
+        "antigravity": "利用できるスキルを一覧表示",
+        "opencode-v2": "利用可能なスキルを一覧"
       },
       "hooks": "フック設定を確認・管理",
       "sessions": "会話履歴を閲覧",
@@ -160,7 +165,8 @@
         "codex": "CLI を終了",
         "copilot": "CLI を終了",
         "command-code": "Command Code を終了",
-        "antigravity": "CLI を終了"
+        "antigravity": "CLI を終了",
+        "opencode-v2": "OpenCode V2 を終了"
       },
       "models": "AI モデルを切り替え",
       "agents": {
@@ -168,7 +174,8 @@
         "claude": "サブエージェントの作成・管理を Claude に依頼するか .claude/agents/ を直接編集するよう促す案内を表示",
         "codex": "稼働中のすべてのエージェントセッションを一覧・切り替え",
         "command-code": "エージェント構成を管理",
-        "antigravity": "利用できるカスタムエージェントを一覧表示"
+        "antigravity": "利用できるカスタムエージェントを一覧表示",
+        "opencode-v2": "エージェントを切り替え"
       },
       "themes": "TUI のテーマを変更",
       "editor": "長文メッセージ用のエディタを開く",
@@ -182,7 +189,8 @@
       "bug": "バグを報告、または会話を共有",
       "cd": {
         "claude": "このセッションの作業ディレクトリを変更",
-        "codex": "現在の作業ディレクトリを変更"
+        "codex": "現在の作業ディレクトリを変更",
+        "opencode-v2": "作業ディレクトリを変更"
       },
       "chrome": "Claude in Chrome の設定",
       "claude-api": "プロジェクトの言語向けの Claude API リファレンスと Managed Agents リファレンスを読み込み",
@@ -192,7 +200,8 @@
       "dataviz": "チャート・グラフ・ダッシュボードの設計ガイダンス",
       "debug": {
         "claude": "デバッグログを有効化し、セッションのデバッグログを読んで問題を切り分け",
-        "opencode": "デバッグ情報を表示"
+        "opencode": "デバッグ情報を表示",
+        "opencode-v2": "デバッグ情報を表示"
       },
       "deep-research": "質問に対して web 検索を展開し、出典を突き合わせて引用付きレポートを作成",
       "design-login": "claude.ai アカウントで /design-sync のデザインシステムアクセスを認可",
@@ -320,7 +329,10 @@
       "rubber-duck": "現在の作業への独立した批評を取得",
       "search": "会話タイムラインを検索",
       "session": "セッションを表示・管理",
-      "settings": "設定 UI を開く、または個別の値を表示・設定",
+      "settings": {
+        "copilot": "設定 UI を開く、または個別の値を表示・設定",
+        "opencode-v2": "設定を開く"
+      },
       "share": "セッションを Markdown ファイルや GitHub gist として共有",
       "undo": "直前のターンを巻き戻してファイル変更を取り消し",
       "update": "CLI を最新バージョンに更新",
@@ -351,7 +363,10 @@
       "plan-review": "このセッションの最新プランをレビュー表示で開く",
       "plans": "保存済みプランの閲覧・レビュー・注釈",
       "pr-comments": "現在のブランチの PR コメントをすべて取得",
-      "reload": "CLI を再起動してこのセッションを再開し、保留中の更新を適用",
+      "reload": {
+        "command-code": "CLI を再起動してこのセッションを再開し、保留中の更新を適用",
+        "opencode-v2": "設定を再読み込み"
+      },
       "session-file": "現在のセッション ID とセッションファイルのパスを表示",
       "taste": "taste 学習と利用状況を管理",
       "todos": "セッションの TODO リストを管理",
@@ -368,7 +383,10 @@
       "daemon": "ローカルのバックグラウンドサーバを管理",
       "warnings": "保持されている警告と診断情報を表示",
       "credits": "残りの G1 クレジットと購入リンクを表示",
-      "open": "ファイルを開く、または開いた・編集したファイルを表示",
+      "open": {
+        "antigravity": "ファイルを開く、または開いた・編集したファイルを表示",
+        "opencode-v2": "セッションまたはプロジェクトを開く"
+      },
       "schedule": "指示を定期実行、または一度きりのタイマーで実行",
       "browser": "ブラウザエージェントで Web 上の作業を実行",
       "grill-me": "計画をすり合わせるために質問してもらう",
@@ -379,7 +397,16 @@
       "automation": "定期実行するバックグラウンド自動処理を対話形式で作成",
       "migrate-workflows": "旧形式のワークフローをスキルへ移行",
       "artifact": "アーティファクトを表示・レビュー",
-      "codesearch": "ワークスペース内のコードを検索"
+      "codesearch": "ワークスペース内のコードを検索",
+      "continue": "別のセッションに切り替え",
+      "pair": "この OpenCode に別のデバイスをペアリング",
+      "project": "セッションまたはプロジェクトを開く",
+      "projects": "セッションまたはプロジェクトを開く",
+      "q": "OpenCode V2 を終了",
+      "stats": "使用量の統計を表示",
+      "thinking": "モデルのバリアントを切り替え",
+      "web": "この OpenCode に別のデバイスをペアリング",
+      "worktrees": "ワークスペースを管理"
     }
   },
   "session": {
