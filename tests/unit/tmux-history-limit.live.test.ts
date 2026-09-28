@@ -57,7 +57,7 @@ const SOCKET = 'cm1624-live-test';
 const HOLDER_SESSION = 'cm1624-holder';
 
 /** Sessions `createSession` is pointed at, listed so strays can be swept up. */
-const TEST_SESSIONS = ['cm1624-pane', 'cm1624-geometry', 'cm1624-global'];
+const TEST_SESSIONS = ['cm1624-pane', 'cm1624-geometry', 'cm1624-global', 'cm2958-shell'];
 
 let tmuxAvailable = false;
 let socketPath: string | undefined;
@@ -222,6 +222,27 @@ describe('createSession against a real tmux server (Issue #1624)', () => {
       expect(await tmuxctl(['show-options', '-g', '-v', 'history-limit'])).toBe(
         String(TMUX_BUILTIN_HISTORY_LIMIT),
       );
+    } finally {
+      await killSession(sessionName).catch(() => undefined);
+    }
+  }, 30_000);
+});
+
+describe('createSession window 0 placeholder against a real tmux server (Issue #2958)', () => {
+  it('replaces the placeholder with tmux\'s default login shell', async () => {
+    if (!tmuxAvailable) return;
+    const { createSession, killSession } = await import('@/lib/tmux/tmux');
+    const sessionName = 'cm2958-shell';
+
+    try {
+      await createSession({ sessionName, workingDirectory: workDir! });
+      await expectIsolated(sessionName);
+
+      // An empty start command is tmux's default-command: the login shell the
+      // launch command is typed into. `sleep …` here would mean the throwaway
+      // placeholder survived and the agent would never start.
+      expect(await tmuxQuery(sessionName, '#{pane_start_command}')).toBe('');
+      expect(await tmuxQuery(sessionName, '#{pane_dead}')).toBe('0');
     } finally {
       await killSession(sessionName).catch(() => undefined);
     }
