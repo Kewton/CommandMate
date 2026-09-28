@@ -104,6 +104,50 @@ export interface PromptQuestionChoices {
   labels: string[];
   /** How many questions the one call carries; only the first is answerable. */
   questionCount: number;
+  /**
+   * Whether a typed answer is accepted besides the choices (Issue #2951) —
+   * OpenCode V2's form field `custom: true`. The panel and the phone sheet
+   * then offer an input; see {@link readQuestionFreeText}. Present only when
+   * true.
+   */
+  custom?: true;
+}
+
+/**
+ * Bound on a typed answer, the server's `MAX_QUESTION_FREE_TEXT_LENGTH`
+ * (`lib/hooks/structured-decision-response`), which refuses a longer one rather
+ * than cutting it. Repeated here because that module is server-only.
+ */
+export const QUESTION_FREE_TEXT_MAX_LENGTH = 1000;
+
+/**
+ * An answer `resolveStructuredQuestionAnswer` would read as option NUMBERS
+ * (`2`, `1,3`) rather than as text — the same pattern it tests first.
+ */
+const QUESTION_SELECTION_PATTERN = /^\d+(?:\s*[,\s]\s*\d+)*$/;
+
+/**
+ * The typed answer to send, or null when it must not be sent (Issue #2951).
+ *
+ * The typed text goes to `/respond` as the `answer`, where
+ * `resolveStructuredQuestionAnswer` tries option numbers first, then labels,
+ * then free text. A label typed in full is the same answer as clicking it, so
+ * that is allowed. Digits alone are not: `2` would be sent as the second
+ * choice, not as the word the operator typed, so it is refused here, where the
+ * panel can say why.
+ *
+ * @returns The trimmed text, or null when empty, too long, or read as numbers
+ */
+export function readQuestionFreeText(text: string): string | null {
+  const trimmed = text.trim();
+  if (trimmed === '' || trimmed.length > QUESTION_FREE_TEXT_MAX_LENGTH) return null;
+  if (QUESTION_SELECTION_PATTERN.test(trimmed)) return null;
+  return trimmed;
+}
+
+/** Whether a typed answer is refused only because it is read as option numbers. */
+export function isQuestionFreeTextNumeric(text: string): boolean {
+  return QUESTION_SELECTION_PATTERN.test(text.trim());
 }
 
 /**
@@ -154,7 +198,12 @@ export function readPromptQuestionChoices(
 ): PromptQuestionChoices | null {
   if (readPromptDecisionId(promptData) === null) return null;
   const payload = promptData as {
-    askUserQuestion?: { question?: unknown; labels?: unknown; questionCount?: unknown };
+    askUserQuestion?: {
+      question?: unknown;
+      labels?: unknown;
+      questionCount?: unknown;
+      custom?: unknown;
+    };
     decisionOptions?: unknown;
   };
   if (Array.isArray(payload.decisionOptions) && payload.decisionOptions.length > 0) return null;
@@ -176,5 +225,10 @@ export function readPromptQuestionChoices(
   // whose submit the server would refuse.
   if (questionCount !== 1) return null;
 
-  return { question: asked.question, labels, questionCount };
+  return {
+    question: asked.question,
+    labels,
+    questionCount,
+    ...(asked.custom === true ? { custom: true as const } : {}),
+  };
 }

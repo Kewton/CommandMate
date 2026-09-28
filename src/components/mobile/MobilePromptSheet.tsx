@@ -16,8 +16,11 @@ import { usePromptAnimation } from '@/hooks/usePromptAnimation';
 import { useFocusTrap } from '@/hooks/useFocusTrap';
 import { useSwipeGesture } from '@/hooks/useSwipeGesture';
 import {
+  isQuestionFreeTextNumeric,
+  QUESTION_FREE_TEXT_MAX_LENGTH,
   readPromptDecisionId,
   readPromptQuestionChoices,
+  readQuestionFreeText,
   type PromptQuestionChoices,
 } from '@/components/worktree/prompt-decision-id';
 import type { StructuredDecisionOption } from '@/lib/session/structured-prompt';
@@ -923,6 +926,11 @@ function StructuredQuestionChoices({
   const t = useTranslations('prompt');
   const groupName = useId();
   const [selected, setSelected] = useState<number | null>(null);
+  // Issue #2951: the typed answer, for a question that takes one — the same
+  // rules as `PromptPanel`'s (`readQuestionFreeText`).
+  const [freeText, setFreeText] = useState('');
+  const typedAnswer = choices.custom ? readQuestionFreeText(freeText) : null;
+  const typedIsNumeric = choices.custom === true && isQuestionFreeTextNumeric(freeText);
 
   return (
     <div className="space-y-3" data-testid="mobile-structured-question">
@@ -932,7 +940,10 @@ function StructuredQuestionChoices({
         <RadioGroup
           name={groupName}
           value={selected != null ? String(selected) : ''}
-          onValueChange={(v) => setSelected(Number(v))}
+          onValueChange={(v) => {
+            setSelected(Number(v));
+            setFreeText('');
+          }}
           disabled={disabled}
           className="flex flex-col gap-2"
         >
@@ -949,12 +960,40 @@ function StructuredQuestionChoices({
           ))}
         </RadioGroup>
       </fieldset>
+      {choices.custom && (
+        <div>
+          <label htmlFor={`free-text-${groupName}`} className="block text-sm text-muted-foreground mb-1">
+            {t('freeTextLabel')}
+          </label>
+          <input
+            id={`free-text-${groupName}`}
+            data-testid="mobile-structured-question-free-text"
+            type="text"
+            value={freeText}
+            maxLength={QUESTION_FREE_TEXT_MAX_LENGTH}
+            onChange={(e) => {
+              setFreeText(e.target.value);
+              if (e.target.value !== '') setSelected(null);
+            }}
+            disabled={disabled}
+            placeholder={t('enterValuePlaceholder')}
+            enterKeyHint="send"
+            className="w-full min-h-[44px] px-4 py-2 border-2 border-input dark:bg-muted dark:text-foreground rounded-lg focus:outline-none focus:border-accent-500 disabled:opacity-50"
+          />
+          {typedIsNumeric && (
+            <p className="mt-1 text-sm text-muted-foreground" data-testid="mobile-structured-question-free-text-numeric">
+              {t('freeTextNumericHint')}
+            </p>
+          )}
+        </div>
+      )}
       <button
         type="button"
         data-testid="mobile-structured-question-submit"
-        disabled={disabled || selected === null}
+        disabled={disabled || (selected === null && typedAnswer === null)}
         onClick={() => {
-          if (selected !== null) void onRespond(String(selected));
+          if (typedAnswer !== null) void onRespond(typedAnswer);
+          else if (selected !== null) void onRespond(String(selected));
         }}
         className={`w-full ${BUTTON_STYLES.base} ${BUTTON_STYLES.primary}`}
       >

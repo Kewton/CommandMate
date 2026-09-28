@@ -16,5 +16,7 @@
   "unclassifiedInstruction": "ターミナルで応答するか、{command} で選択肢の「番号」を送ってください。番号つきダイアログでは「yes」「no」といった語は解決されません。",
   "unclassifiedRespondCommand": "commandmate respond [worktree-id] [番号]",
   "askUserQuestionProgress": "エージェントからの質問 {index}/{total}",
-  "askUserQuestionSource": "選択肢はエージェントから取得しました"
+  "askUserQuestionSource": "選択肢はエージェントから取得しました",
+  "freeTextLabel": "または自由に入力して回答",
+  "freeTextNumericHint": "数字だけの回答は選択肢の番号として扱われるため、ここからは送れません。"
 }
