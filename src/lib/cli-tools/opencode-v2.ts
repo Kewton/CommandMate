@@ -112,6 +112,27 @@ export function parseOpencodeV2Version(output: string): string | null {
   return info?.generation === 'v2' ? info.version : null;
 }
 
+/** A bare `/<name>`: a slash command with no argument and no whitespace at all. */
+const BARE_SLASH_COMMAND = /^\/\S+$/;
+
+/**
+ * The text to type for `message` (Issue #2950).
+ *
+ * The TUI opens its command dropdown on any composer text starting with `/`,
+ * and while it is open Enter picks a row instead of submitting — so a bare
+ * `/probe-agentsskills` sits in the composer ("No matching commands") and runs
+ * nothing, while `/probe-agentsskills ` (one trailing space) closes the
+ * dropdown and runs. The palette already inserts `` `${trigger} ` `` (see
+ * `loadOpencodeSkills` in `@/lib/slash-commands`, "The trailing space is
+ * load-bearing"), but the send route trims the body, so the space never
+ * arrives. It is put back here, and only for a bare `/<name>`: a command with
+ * an argument already has a space after the name, and ordinary text does not
+ * open the dropdown.
+ */
+export function toOpencodeV2ComposerText(message: string): string {
+  return BARE_SLASH_COMMAND.test(message) ? `${message} ` : message;
+}
+
 export class OpenCodeV2Tool extends BaseCLITool {
   readonly id: CLIToolType = OPENCODE_V2_CLI_TOOL_ID;
   readonly name = 'OpenCode V2';
@@ -280,7 +301,7 @@ export class OpenCodeV2Tool extends BaseCLITool {
       await this.waitForComposer(sessionName);
       await sendMessageWithSubmitVerification({
         sessionName,
-        message,
+        message: toOpencodeV2ComposerText(message),
         cliToolId: OPENCODE_V2_CLI_TOOL_ID,
         composer: this.describeComposer(),
       });
