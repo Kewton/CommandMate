@@ -77,6 +77,7 @@ npm install -g @anthropic-ai/claude-code   # Claude Code (claude)
 npm install -g @openai/codex               # Codex CLI (codex)
 npm install -g @google/gemini-cli          # Gemini CLI (gemini)
 npm install -g opencode-ai                 # OpenCode (opencode)
+npm install -g @opencode/cli               # OpenCode V2 (opencode2)
 npm install -g command-code                # Command Code CLI (commandcode)
 brew install copilot-cli                   # GitHub Copilot CLI (copilot)
                                            # or: npm i -g @github/copilot
@@ -88,6 +89,44 @@ The Antigravity CLI (`agy`) is not published on npm. See the
 > **Note**: The `command-code` package installs four executables — `cmd`, `cmdc`,
 > `command-code` and `commandcode`. CommandMate launches `commandcode`, because
 > `cmd` collides with the Windows shell.
+
+#### OpenCode (1.x) and OpenCode V2 side by side
+
+OpenCode V2 (the `OpenCode V2` agent) is installed with `npm install -g @opencode/cli`. That package
+registers **two** executables, `opencode2` **and `opencode`**. So installing V2 puts a second `opencode`
+on `PATH` next to OpenCode 1.x's (`opencode-ai`, or the `~/.opencode/bin` installer), and which one runs
+is decided by nothing but the order of `PATH`.
+
+CommandMate tells them apart by what `--version` prints, not by the name.
+
+| Agent | Counted as installed when | Launched with |
+|---|---|---|
+| OpenCode | an `opencode` on `PATH` answers `--version` with `1.x` (e.g. `1.18.33`) | its absolute path |
+| OpenCode V2 | `opencode2`; failing that, an `opencode` that answers `opencode v2.x` | its absolute path |
+
+When `opencode` points only at V2, OpenCode counts as not installed, and starting it says why (that
+`opencode` is OpenCode V2). When V2 is installed under the `opencode` name only, OpenCode V2 cannot use
+its wrapper (which starts `opencode2` by name) and launches with `--standalone`, without structured events.
+
+**Shared data**: OpenCode 1.x and V2 use the same `~/.local/share/opencode/opencode.db`. V2 rebuilds
+tables in it, so after V2 has run, OpenCode 1.x can fail to start with `no such column: …`. CommandMate
+then reads opencode's log (`~/.local/share/opencode/log/opencode.log`) and shows that cause as the start
+error. When both are installed, the "Default agents for new branches" card on the More screen also shows
+a one-line notice. This is opencode's problem and CommandMate cannot repair the database. Either:
+
+- **Use one of them.** For V2 only, uninstall OpenCode 1.x; for 1.x only, remove V2 with
+  `npm uninstall -g @opencode/cli`.
+- **Give OpenCode 1.x its own data directory.** OpenCode 1.x keeps its data under `XDG_DATA_HOME`, so put
+  a wrapper named `opencode` early on `PATH` that runs the 1.x binary with a different one (1.x's login
+  moves with it, so log in again in 1.x):
+
+  ```bash
+  #!/bin/sh
+  # e.g. ~/bin/opencode, with ~/bin first on PATH
+  XDG_DATA_HOME="$HOME/.local/share/opencode-v1" exec "$HOME/.opencode/bin/opencode" "$@"
+  ```
+
+  CommandMate asks the wrapper for `--version` too; it answers `1.x`, so it is launched as OpenCode.
 
 Starting an agent that is not installed answers with both facts — that it is
 missing, and **how to install it** — in one sentence. For example:

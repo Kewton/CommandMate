@@ -33,8 +33,16 @@ vi.mock('child_process', async () => {
 });
 
 // Issue #1907: copilot の実在判定。実体は PATH 走査 + `--version` の子プロセス。
+// Issue #2939: OpenCode 1.x / V2 は PATH 上の実体を走査してから `--version` を聞く。
+// 走査は偽の `which` と同じ installedCommands を見る（実 PATH には触れない）。
 vi.mock('@/lib/cli-tools/copilot-executable', () => ({
   resolveCopilotExecutable: vi.fn(),
+  findExecutablesOnPath: vi.fn((name: string) =>
+    installedCommands.has(name) ? [`/fake/bin/${name}`] : []
+  ),
+  findExecutableOnPath: vi.fn((name: string) =>
+    installedCommands.has(name) ? `/fake/bin/${name}` : null
+  ),
 }));
 
 // `stopPollers()` の委譲先。このファイルは stopPollers を検証しない
@@ -43,6 +51,7 @@ vi.mock('@/lib/cli-tools/copilot-executable', () => ({
 vi.mock('@/lib/polling/response-poller', () => ({ stopPolling: vi.fn() }));
 
 import { CLIToolManager } from '@/lib/cli-tools/manager';
+import { clearOpencodeExecutableCache } from '@/lib/cli-tools/opencode-executable';
 import { resolveCopilotExecutable } from '@/lib/cli-tools/copilot-executable';
 import type { CopilotExecutable } from '@/lib/cli-tools/copilot-executable';
 import type { CLIToolType } from '@/lib/cli-tools/types';
@@ -111,6 +120,7 @@ describe('CLIToolManager', () => {
     manager = CLIToolManager.getInstance();
 
     installedCommands = new Set<string>();
+    clearOpencodeExecutableCache();
     copilotResolved = null;
     copilotProbeIssued = false;
     holdCallbacks = false;
@@ -138,14 +148,14 @@ describe('CLIToolManager', () => {
       callback?: unknown
     ) => {
       execFileCalls.push([file, ...args]);
-      // Issue #2934: OpenCode V2 is identified by `opencode2 --version`, whose
-      // output (`opencode v<semver>`) is the installation check (D1).
-      if (file === 'opencode2' && args[0] === '--version') {
-        respond(
-          installedCommands.has('opencode2'),
-          callback as ExecCallback | undefined,
-          'opencode v2.0.18\n'
-        );
+      // Issue #2934 / #2939: OpenCode 1.x and V2 are identified by the version
+      // the resolved executable prints — `1.18.33` and `opencode v2.0.18`.
+      if (file === '/fake/bin/opencode2' && args[0] === '--version') {
+        respond(true, callback as ExecCallback | undefined, 'opencode v2.0.18\n');
+        return {} as childProcess.ChildProcess;
+      }
+      if (file === '/fake/bin/opencode' && args[0] === '--version') {
+        respond(true, callback as ExecCallback | undefined, '1.18.33\n');
         return {} as childProcess.ChildProcess;
       }
       respond(false, callback as ExecCallback | undefined);
@@ -387,12 +397,14 @@ describe('CLIToolManager', () => {
         'which codex',
         'which gemini',
         'which vibe-local',
-        'which opencode',
         'which agy',
         'which commandcode',
       ]);
       expect(copilotProbeIssued).toBe(true);
-      expect(execFileCalls).toEqual([['opencode2', '--version']]);
+      expect(execFileCalls).toEqual([
+        ['/fake/bin/opencode', '--version'],
+        ['/fake/bin/opencode2', '--version'],
+      ]);
 
       await releaseParked();
 

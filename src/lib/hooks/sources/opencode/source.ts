@@ -314,7 +314,13 @@ export function prepareOpencodeLaunch({
   // `env` is empty for every branch: opencode is the one source that needs no
   // correlation variable at all, because CommandMate holds the connection and
   // therefore already knows which instance the frames belong to (#1846).
-  const bare: AgentLaunchPlan = { command: executablePath, settingsPath: null, env: {} };
+  // Issue #2939: `executablePath` is now the absolute path that answered as
+  // OpenCode 1.x, so it is quoted when it needs to be. A plain word keeps the
+  // pre-#2939 bytes.
+  const bareCommand = /^[A-Za-z0-9_./-]+$/.test(executablePath)
+    ? executablePath
+    : shellQuote(executablePath);
+  const bare: AgentLaunchPlan = { command: bareCommand, settingsPath: null, env: {} };
   if (!isHookInjectionEnabled()) return bare;
   const port = getAssignedOpencodePort(target);
   if (port === null) return bare;
