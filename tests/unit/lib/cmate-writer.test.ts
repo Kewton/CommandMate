@@ -278,6 +278,12 @@ describe('validateScheduleInput', () => {
     expect(result.valid).toBe(true);
   });
 
+  it('rejects a model for a tool that does not support it', () => {
+    const result = validateScheduleInput({ ...baseSchedule, model: 'gpt-4.1' });
+    expect(result.valid).toBe(false);
+    expect(result.errors).toContain('model is not supported for this CLI tool');
+  });
+
   it('rejects an unsupported CLI tool (Issue #2936)', () => {
     const result = validateScheduleInput({
       ...baseSchedule,
