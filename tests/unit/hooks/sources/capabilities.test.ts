@@ -197,15 +197,15 @@ const TABLE: Record<string, DeclaredRow> = {
     transcriptHistory: 'pull',
     stopReportsSelfResume: false,
   },
-  // Issue #2934 (Epic #2370 Phase 1). A pull source like opencode, but Phase 1
-  // publishes state only: no per-decision id (so no surface offers a structured
-  // answer yet), no resync and no transcript (Phase 2). `permission.replied` /
-  // `form.replied` do retire the decision, so the reply releases the prompt.
+  // Issue #2934 (Epic #2370 Phase 1). A pull source like opencode, with no
+  // resync. `permission.replied` / `form.replied` retire the decision, so the
+  // reply releases the prompt. Issue #2945 (Phase 2): the `per_…` / `frm_…` id
+  // the reply URL takes is the per-decision identity, as on v1.
   'opencode-v2': {
     permissionHookPredictsDialog: false,
     sessionStartMayArriveLate: false,
     permissionReplyReleasesPrompt: true,
-    eventIdentity: null,
+    eventIdentity: 'permission-id',
     resync: 'none',
     // Issue #2940: each finished turn is written from the server's own record.
     transcriptHistory: 'push',
@@ -296,7 +296,8 @@ describe('[#1924] AgentSourceCapabilities — the table of §4 D3', () => {
     expect(releases).toEqual(['opencode', 'opencode-v2']);
 
     const identified = Object.keys(TABLE).filter((id) => TABLE[id].eventIdentity !== null);
-    expect(identified).toEqual(['opencode']);
+    // Issue #2945: OpenCode V2's approvals and questions are addressed by id.
+    expect(identified).toEqual(['opencode', 'opencode-v2']);
 
     const resyncing = Object.keys(TABLE).filter((id) => TABLE[id].resync !== 'none');
     expect(resyncing).toEqual(['opencode']);

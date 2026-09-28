@@ -35,6 +35,46 @@
  */
 
 import type { LivePromptData } from '@/types/models';
+import type { CLIToolType } from '@/lib/cli-tools/types';
+import { OPENCODE_V2_DECISION_LABELS } from '@/lib/hooks/sources/opencode-v2/decision-labels';
+
+/**
+ * A tool's own words for the approval verdicts, keyed by wire reply
+ * (Issue #2945). Only tools whose dialog words differ from the shared list are
+ * here: OpenCode V2 draws `Always allow` where v1 draws `Allow always`.
+ */
+const DECISION_LABELS_BY_TOOL: Partial<Record<CLIToolType, Readonly<Record<string, string>>>> = {
+  'opencode-v2': OPENCODE_V2_DECISION_LABELS,
+};
+
+/**
+ * The payload with its approval verdicts in the tool's own words (Issue #2945).
+ *
+ * Only the LABEL changes: the number and the wire reply are what an answer
+ * sends, and both stay exactly as published, so a relabelled `2. Always allow`
+ * still sends `2` and still means `always`. Answers the same object when there
+ * is nothing to relabel, so a memoised caller does not re-render.
+ *
+ * @param promptData - The live prompt from `/current-output`, or null
+ * @param cliToolId - The tool the prompt belongs to
+ */
+export function withToolDecisionLabels<T extends LivePromptData | null>(
+  promptData: T,
+  cliToolId: CLIToolType
+): T {
+  const labels = DECISION_LABELS_BY_TOOL[cliToolId];
+  if (!promptData || !labels) return promptData;
+  const options = (promptData as { decisionOptions?: unknown }).decisionOptions;
+  if (!Array.isArray(options) || options.length === 0) return promptData;
+  return {
+    ...promptData,
+    decisionOptions: options.map((option: { reply?: unknown; label?: unknown }) =>
+      typeof option.reply === 'string' && labels[option.reply]
+        ? { ...option, label: labels[option.reply] }
+        : option
+    ),
+  };
+}
 
 /**
  * The decision id this payload names, or null.
