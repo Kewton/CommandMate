@@ -65,6 +65,21 @@ vi.mock('@/lib/cli-tools/copilot-executable', () => ({
   resolveCopilotExecutable: () => resolveCopilotExecutableMock(),
 }));
 
+// Issue #2950: opencode-v2's probe is delegated to the resolver
+// OpenCodeV2Tool.startSession launches from. Stubbed so the probe never walks
+// the real PATH.
+let opencodeV2Version: string | null = null;
+const resolveOpencodeV2ExecutableMock = vi.fn(async () => ({
+  executable: opencodeV2Version
+    ? { path: '/usr/local/bin/opencode2', version: opencodeV2Version, generation: 'v2' as const }
+    : null,
+  probed: [],
+}));
+vi.mock('@/lib/cli-tools/opencode-executable', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/cli-tools/opencode-executable')>();
+  return { ...actual, resolveOpencodeV2Executable: () => resolveOpencodeV2ExecutableMock() };
+});
+
 import {
   loadUserCatalogCommands,
   composeStandardLayer,
@@ -103,8 +118,10 @@ beforeEach(() => {
   execTable = {};
   execCalls = [];
   copilotVersion = null;
+  opencodeV2Version = null;
   execHangs = false;
   resolveCopilotExecutableMock.mockClear();
+  resolveOpencodeV2ExecutableMock.mockClear();
   clearCatalogCache();
 });
 
@@ -445,6 +462,35 @@ describe('getCatalogStaleness', () => {
     } finally {
       delete process.env.CM_AUTH_TOKEN_HASH;
     }
+  });
+
+  // Issue #2950: OpenCode V2 has an attestation (#2947) but had no probe row,
+  // so a newer opencode2 never surfaced as a stale catalog.
+  it('reports opencode-v2 as stale when the installed opencode2 is newer than its attestation', async () => {
+    const verified = CATALOG_VERIFIED_AGAINST['opencode-v2'];
+    expect(verified, 'opencode-v2 needs an attestation for this probe to mean anything').toBeDefined();
+    const [major, minor, patch] = verified.split('.').map(Number);
+    opencodeV2Version = `${major}.${minor}.${patch + 1}`;
+
+    const staleness = await getCatalogStaleness();
+
+    expect(resolveOpencodeV2ExecutableMock).toHaveBeenCalledTimes(1);
+    expect(staleness['opencode-v2']).toEqual({
+      current: opencodeV2Version,
+      verifiedAgainst: verified,
+      stale: true,
+    });
+    // Delegated: nothing named opencode2 is spawned from this module.
+    expect(execCalls.some((call) => call.command === 'opencode2')).toBe(false);
+  });
+
+  it('reports opencode-v2 as not stale at its attested version, and omits it when absent', async () => {
+    opencodeV2Version = CATALOG_VERIFIED_AGAINST['opencode-v2'];
+    expect((await getCatalogStaleness())['opencode-v2']?.stale).toBe(false);
+
+    clearCatalogCache();
+    opencodeV2Version = null;
+    expect((await getCatalogStaleness())['opencode-v2']).toBeUndefined();
   });
 
   it('reports stale=false for an older or equal CLI', async () => {

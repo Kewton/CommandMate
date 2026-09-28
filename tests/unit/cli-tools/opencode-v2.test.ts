@@ -117,6 +117,7 @@ import { capturePane, hasSession } from '@/lib/tmux/tmux';
 import {
   OpenCodeV2Tool,
   parseOpencodeV2Version,
+  toOpencodeV2ComposerText,
 } from '@/lib/cli-tools/opencode-v2';
 import { buildAgentLaunchCommandLine } from '@/lib/session/agent-session-lifecycle';
 import { clearOpencodeExecutableCache } from '@/lib/cli-tools/opencode-executable';
@@ -232,6 +233,47 @@ describe('send (D6)', () => {
   it('refuses when there is no session', async () => {
     vi.mocked(hasSession).mockResolvedValue(false);
     await expect(new OpenCodeV2Tool().sendMessage('wt', 'hello')).rejects.toThrow(/does not exist/);
+  });
+});
+
+// Issue #2950: the send route trims the body, so the palette's `/<name> ` lost
+// its trailing space and the TUI's command dropdown swallowed the Enter.
+describe('bare slash command gets its trailing space back (#2950)', () => {
+  it('types `/<name> ` for a bare `/<name>`', async () => {
+    vi.mocked(hasSession).mockResolvedValue(true);
+
+    await new OpenCodeV2Tool().sendMessage('wt', '/probe-agentsskills');
+
+    expect(calls).toContain('submit:opencode-v2:/probe-agentsskills ');
+  });
+
+  it('leaves a command with an argument unchanged', async () => {
+    vi.mocked(hasSession).mockResolvedValue(true);
+
+    await new OpenCodeV2Tool().sendMessage('wt', '/probe-agentsskills go');
+
+    expect(calls).toContain('submit:opencode-v2:/probe-agentsskills go');
+  });
+
+  it('leaves ordinary text unchanged', async () => {
+    vi.mocked(hasSession).mockResolvedValue(true);
+
+    await new OpenCodeV2Tool().sendMessage('wt', 'hello');
+
+    expect(calls).toContain('submit:opencode-v2:hello');
+    expect(calls).not.toContain('submit:opencode-v2:hello ');
+  });
+
+  it.each([
+    ['/status', '/status '],
+    ['/status ', '/status '],
+    ['/review HEAD~1', '/review HEAD~1'],
+    ['/', '/'],
+    ['/a\n/b', '/a\n/b'],
+    ['look at /tmp/x', 'look at /tmp/x'],
+    ['hello', 'hello'],
+  ])('toOpencodeV2ComposerText(%j) -> %j', (input, expected) => {
+    expect(toOpencodeV2ComposerText(input)).toBe(expected);
   });
 });
 
