@@ -40,6 +40,9 @@ interface Record2934 {
   passwordEnv: string | null;
   /** The fake's own `$0`: which executable the wrapper actually ran (Issue #2952). */
   self: string;
+  /** COREPACK_ENABLE_AUTO_PIN / OPENCODE_DISABLE_AUTOUPDATE as received (Issue #2957). */
+  autoPinEnv: string | null;
+  disableAutoupdateEnv: string | null;
 }
 
 const FAKE_SERVE_JS = `
@@ -49,7 +52,7 @@ const path = require('node:path');
 const argv = process.argv.slice(2);
 const port = Number(argv[argv.indexOf('--port') + 1]);
 const host = argv[argv.indexOf('--hostname') + 1];
-const record = { role: 'serve', pid: process.pid, argv, passwordEnv: process.env.OPENCODE_SERVER_PASSWORD ?? null, self: process.env.FAKE_SELF };
+const record = { role: 'serve', pid: process.pid, argv, passwordEnv: process.env.OPENCODE_SERVER_PASSWORD ?? null, self: process.env.FAKE_SELF, autoPinEnv: process.env.COREPACK_ENABLE_AUTO_PIN ?? null, disableAutoupdateEnv: process.env.OPENCODE_DISABLE_AUTOUPDATE ?? null };
 fs.writeFileSync(path.join(process.env.FAKE_RECORD_DIR, 'serve.json'), JSON.stringify(record));
 process.on('SIGTERM', () => process.exit(0));
 if (process.env.FAKE_SERVE_MODE === 'silent') {
@@ -72,7 +75,7 @@ if [ "\${1:-}" = "serve" ]; then
 fi
 node -e '
   const fs = require("node:fs");
-  const record = { role: "tui", pid: Number(process.argv[1]), argv: process.argv.slice(2), passwordEnv: process.env.OPENCODE_SERVER_PASSWORD ?? null, self: process.env.FAKE_SELF };
+  const record = { role: "tui", pid: Number(process.argv[1]), argv: process.argv.slice(2), passwordEnv: process.env.OPENCODE_SERVER_PASSWORD ?? null, self: process.env.FAKE_SELF, autoPinEnv: process.env.COREPACK_ENABLE_AUTO_PIN ?? null, disableAutoupdateEnv: process.env.OPENCODE_DISABLE_AUTOUPDATE ?? null };
   fs.writeFileSync(process.env.FAKE_RECORD_DIR + "/tui.json", JSON.stringify(record));
 ' "$$" "$@"
 if [ "\${FAKE_TUI_MODE:-exit}" = "wait" ]; then
@@ -276,6 +279,24 @@ describe('scripts/opencode-v2/launch.sh (Issue #2934 D2)', () => {
     expect(stderr).not.toContain(PASSWORD);
     // And the wrapper's own command line names only the file.
     expect(standardArgs(port).join(' ')).not.toContain(PASSWORD);
+  });
+
+  it('keeps the project package.json untouched: no corepack auto-pin, no self-update check (Issue #2957)', async () => {
+    const port = await freePort();
+    // Whatever the caller had set, the wrapper's values win.
+    const run = runWrapper(standardArgs(port), {
+      FAKE_TUI_MODE: 'exit',
+      COREPACK_ENABLE_AUTO_PIN: '1',
+      OPENCODE_DISABLE_AUTOUPDATE: '0',
+    });
+    const { code } = await run.exited;
+    expect(code).toBe(0);
+
+    for (const role of ['serve', 'tui'] as const) {
+      const record = readRecord(role);
+      expect(record.autoPinEnv).toBe('0');
+      expect(record.disableAutoupdateEnv).toBe('1');
+    }
   });
 
   it('refuses to start without its three arguments', async () => {

@@ -129,6 +129,16 @@ IFS= read -r OPENCODE_SERVER_PASSWORD <"$password_file" || true
 [ -n "$OPENCODE_SERVER_PASSWORD" ] || die 66 "password file is empty: ${password_file}"
 export OPENCODE_SERVER_PASSWORD
 
+# Keep the user's project untouched (Issue #2957). On start the TUI checks for
+# its own update by running `npm`/`pnpm`/`yarn`/`bun list -g` in the directory
+# it was started from; where `pnpm`/`yarn` are corepack shims, corepack then
+# writes a "packageManager" field into the nearest package.json (auto-pin).
+# Measured with opencode2 v2.0.18: OPENCODE_DISABLE_AUTOUPDATE=1 stops those
+# spawns altogether, and COREPACK_ENABLE_AUTO_PIN=0 keeps corepack from writing
+# should any package manager run anyway. CommandMate reports updates itself.
+export OPENCODE_DISABLE_AUTOUPDATE=1
+export COREPACK_ENABLE_AUTO_PIN=0
+
 server_url="http://127.0.0.1:${port}"
 serve_pid=""
 tui_pid=""
