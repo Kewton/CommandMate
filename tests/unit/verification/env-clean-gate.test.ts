@@ -8,7 +8,9 @@
  *      measure" case below asserts `status !== 'passed'` explicitly, not just
  *      the message, because the defect being prevented is a green verdict —
  *      wording is secondary.
- *   2. Removals are violations whoever they belonged to (#1739, #1624), and
+ *   2. Removals are violations whoever they belonged to (#1739, #1624) — except
+ *      a tmux session the baseline recorded as another CommandMate server's
+ *      (#2627) while the tmux server itself survived — and
  *      additions are violations unless they are demonstrably another worker's —
  *      or are the one agent session the delegation itself started, named in the
  *      baseline and excused by that exact name (#2472).
@@ -17,19 +19,25 @@
  * @vitest-environment node
  */
 
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect } from 'vitest';
+import { setActiveSessionNamespace } from '@/lib/cli-tools/session-name';
+import { clearLegacyAliasesForTests, registerLegacyAlias } from '@/lib/tmux/legacy-session-alias';
 import {
   attributeAnchor,
   attributeSessionName,
+  currentSessionServer,
   diffEnvSnapshots,
   evaluateEnvClean,
   formatEnvCleanReport,
+  isOtherServerSession,
+  readOtherServerSessions,
   readTaskSession,
   recordTaskSession,
   REQUIRE_ENV_CLEAN_SOURCE_CONFIG,
   REQUIRE_ENV_CLEAN_SOURCE_CONTRACT,
   resolveRequireEnvClean,
   resolveTaskSessionName,
+  type SessionServerIdentity,
   type TaskSessionOwner,
 } from '@/lib/verification/env-clean-gate';
 import {
@@ -755,6 +763,186 @@ describe('the task’s own agent session (#2472)', () => {
       });
       expect(outcome.status).toBe('failed');
       expect(outcome.logTail).toContain('task-session=unrecorded');
+    });
+  });
+});
+
+// =============================================================================
+// Another CommandMate server's sessions (Issue #2627)
+// =============================================================================
+
+describe('another CommandMate server’s sessions (#2627)', () => {
+  /** This server: namespaced, with one legacy session adopted under its alias. */
+  const NS = '0a1b2c3d';
+  const ADOPTED_LEGACY = 'mcbd-claude-commandmate-issue-1500';
+  const SERVER: SessionServerIdentity = {
+    namespace: NS,
+    legacyAliasOf: (newName) =>
+      newName === `mcbd-${NS}-claude-commandmate-issue-1500` ? ADOPTED_LEGACY : undefined,
+  };
+  const TASK: TaskSessionOwner = { worktreeId: WORKTREE_ID, cliToolId: 'claude', instanceId: null };
+  /** The name the send starts; spelled out as `resolveSessionName` produces it in tests. */
+  const TASK_SESSION = `mcbd-claude-${WORKTREE_ID}`;
+  /** The incident of 2026-09-17: a global-install server's orchestrate in another repository. */
+  const FOREIGN_107 = 'mcbd-command-code-other-repo-issue-107';
+  const FOREIGN_108 = 'mcbd-command-code-other-repo-issue-108';
+  /** A sibling worker of *this* server, as #2866 names it. */
+  const SIBLING = `mcbd-${NS}-claude-commandmate-issue-1726`;
+
+  function sessions(names: string[]): EnvProbeResult {
+    return probe(names.map((name) => entry(name)));
+  }
+
+  function baselineOf(names: string[], server: SessionServerIdentity = SERVER) {
+    return recordTaskSession(snapshot({ 'tmux-sessions': sessions(names) }), TASK, server);
+  }
+
+  function atVerification(names: string[]): EnvSnapshot {
+    return snapshot({ 'tmux-sessions': sessions(names) });
+  }
+
+  describe('isOtherServerSession', () => {
+    it('claims this server’s namespace and its adopted legacy sessions', () => {
+      expect(isOtherServerSession(SIBLING, SERVER)).toBe(false);
+      expect(isOtherServerSession(`mcbd-${NS}-codex-${WORKTREE_ID}-2`, SERVER)).toBe(false);
+      expect(isOtherServerSession(ADOPTED_LEGACY, SERVER)).toBe(false);
+    });
+
+    it('attributes another namespace and an unadopted legacy name to another server', () => {
+      expect(isOtherServerSession('mcbd-deadbeef-claude-commandmate-issue-1726', SERVER)).toBe(true);
+      expect(isOtherServerSession(FOREIGN_107, SERVER)).toBe(true);
+    });
+
+    it('claims nothing as foreign when this server has no namespace, or the name is not ours to parse', () => {
+      const legacyServer: SessionServerIdentity = { namespace: null, legacyAliasOf: () => undefined };
+      expect(isOtherServerSession(FOREIGN_107, legacyServer)).toBe(false);
+      expect(isOtherServerSession('mcbd-deadbeef-claude-x', legacyServer)).toBe(false);
+      expect(isOtherServerSession('mcbd-unknowncli-x', SERVER)).toBe(false);
+    });
+  });
+
+  describe('currentSessionServer', () => {
+    afterEach(() => {
+      clearLegacyAliasesForTests();
+      setActiveSessionNamespace(null);
+    });
+
+    it('reads this process’s namespace and adoption table', () => {
+      expect(currentSessionServer().namespace).toBeNull();
+      setActiveSessionNamespace(NS);
+      registerLegacyAlias(`mcbd-${NS}-claude-commandmate-issue-1500`, ADOPTED_LEGACY);
+      const server = currentSessionServer();
+      expect(server.namespace).toBe(NS);
+      expect(isOtherServerSession(ADOPTED_LEGACY, server)).toBe(false);
+      expect(isOtherServerSession(SIBLING, server)).toBe(false);
+      expect(isOtherServerSession(FOREIGN_107, server)).toBe(true);
+    });
+  });
+
+  describe('recordTaskSession', () => {
+    it('records the baseline’s other-server sessions at task creation', () => {
+      const baseline = baselineOf([SIBLING, FOREIGN_107, ADOPTED_LEGACY]);
+      expect(baseline.otherServerSessions).toEqual([FOREIGN_107]);
+      expect(readOtherServerSessions(baseline)).toEqual(new Set([FOREIGN_107]));
+      // It rides the same JSON file as the rest of the baseline.
+      const stored: unknown = JSON.parse(JSON.stringify(baseline));
+      expect(isEnvSnapshot(stored)).toBe(true);
+      expect(readOtherServerSessions(stored as EnvSnapshot)).toEqual(new Set([FOREIGN_107]));
+    });
+
+    it('records null — nothing excusable — when this server has no namespace', () => {
+      const baseline = baselineOf([FOREIGN_107], { namespace: null, legacyAliasOf: () => undefined });
+      expect(baseline.otherServerSessions).toBeNull();
+      expect(readOtherServerSessions(baseline).size).toBe(0);
+      expect(readOtherServerSessions(snapshot()).size).toBe(0);
+    });
+  });
+
+  describe('diffEnvSnapshots', () => {
+    it('does not fail the 2026-09-17 repro: another server closed its own session', () => {
+      const { diff, probe: tmux } = probeDiff(
+        baselineOf([FOREIGN_107]),
+        atVerification([TASK_SESSION, FOREIGN_108]),
+        'tmux-sessions'
+      );
+      expect(diff.status).toBe('clean');
+      expect(tmux?.removed).toEqual([]);
+      expect(tmux?.removedByOtherServer.map((change) => change.key)).toEqual([FOREIGN_107]);
+      expect(tmux?.ignoredAdded.map((change) => change.key)).toEqual([FOREIGN_108]);
+      expect(formatEnvCleanReport(diff)).toContain(
+        `· - ${FOREIGN_107} (ignored: another CommandMate server's session`
+      );
+    });
+
+    it('still reports a sibling session of this server being killed (#1624, namespaced)', () => {
+      const { diff, probe: tmux } = probeDiff(
+        baselineOf([`mcbd-${NS}-claude-${WORKTREE_ID}`, SIBLING]),
+        atVerification([`mcbd-${NS}-claude-${WORKTREE_ID}`]),
+        'tmux-sessions'
+      );
+      expect(diff.status).toBe('violated');
+      expect(tmux?.removed.map((change) => change.key)).toEqual([SIBLING]);
+      expect(tmux?.removedByOtherServer).toEqual([]);
+    });
+
+    it('still reports this server’s adopted legacy session being killed', () => {
+      const { diff, probe: tmux } = probeDiff(
+        baselineOf([TASK_SESSION, ADOPTED_LEGACY]),
+        atVerification([TASK_SESSION]),
+        'tmux-sessions'
+      );
+      expect(diff.status).toBe('violated');
+      expect(tmux?.removed.map((change) => change.key)).toEqual([ADOPTED_LEGACY]);
+    });
+
+    it('excuses nothing when the tmux server looks killed — every session gone (#1624: the whole tmux server stopped)', () => {
+      const { diff, probe: tmux } = probeDiff(
+        baselineOf([FOREIGN_107, SIBLING]),
+        atVerification([]),
+        'tmux-sessions'
+      );
+      expect(diff.status).toBe('violated');
+      expect(tmux?.removed.map((change) => change.key)).toEqual([FOREIGN_107, SIBLING]);
+      expect(tmux?.removedByOtherServer).toEqual([]);
+    });
+
+    it('excuses nothing from a baseline that did not record other servers', () => {
+      const { diff } = probeDiff(
+        snapshot({ 'tmux-sessions': sessions([FOREIGN_107]) }),
+        atVerification([TASK_SESSION]),
+        'tmux-sessions'
+      );
+      expect(diff.status).toBe('violated');
+    });
+
+    it('never excuses a removal in any other probe', () => {
+      const baseline = baselineOf([FOREIGN_107]);
+      const withListener = {
+        ...baseline,
+        probes: { ...baseline.probes, listeners: probe([entry('tcp/3000', '/opt/elsewhere')]) },
+      };
+      const { diff, probe: listeners } = probeDiff(
+        withListener,
+        atVerification([TASK_SESSION, FOREIGN_107]),
+        'listeners'
+      );
+      expect(diff.status).toBe('violated');
+      expect(listeners?.removed.map((change) => change.key)).toEqual(['tcp/3000']);
+    });
+  });
+
+  describe('evaluateEnvClean', () => {
+    it('passes the repro and says what it excused', async () => {
+      const outcome = await evaluateEnvClean({
+        ...CONTEXT,
+        taskId: 'task-2627',
+        sources: [REQUIRE_ENV_CLEAN_SOURCE_CONFIG],
+        baseline: baselineOf([FOREIGN_107]),
+        capture: async () => atVerification([TASK_SESSION, FOREIGN_108]),
+      });
+      expect(outcome.status).toBe('passed');
+      expect(outcome.logTail).toContain('tmux-sessions clean');
+      expect(outcome.logTail).toContain(`- ${FOREIGN_107} (ignored: another CommandMate server's`);
     });
   });
 });

@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.42.2] - 2026-09-28
+
+> **Highlight**: worktree の既定 CLI（Command Code などに固定したもの）が、`commandmate sync` のたびに `claude` へ戻っていた問題を直しました（原因は DB 更新時の既定値の入れ方）。あわせて、検証ゲートの `env-clean` が別の CommandMate サーバによるセッションの片付けや無関係な listener を違反に数えていた誤検知を減らし、`commandmate verify --task <id>` で完了済みの task を再判定できるようにしました。日次確認（agent-health）は、develop との同期から実行までを `daily.sh` 1 本にまとめ、同期の失敗を確実に報告するようにしています。
+
+### Changed
+
+- **feat(agent-health): 日次確認の同期・依存更新・実行を `scripts/agent-health/daily.sh` に集約** (#2924): 同期（`git pull --ff-only origin develop`）に失敗したら確認を実行せず、`completedAt` を持つ最小のレポートを書いて exit 2 にする。`npm install` は同期の前後で `package-lock.json` が変わったときだけ（`HEAD@{1}` 比較をやめた）。同期の前後の commit を `AGENT_HEALTH_SYNC` 行とレポートの `sync` に記録し、`run.ts` に `--synced-from <sha>` を追加。依頼文はこのスクリプトを呼ぶだけにした。
+
+### Fixed
+
+- **fix(cli): `commandmate verify` に `--task <id>` を追加し succeeded 済み task の再判定を可能にする** (#2927): `--task` オプションで task ID を指定して検証を実行できるようにし、detached contract 判定を回避して完了済み task を再判定できるようにした。
+
+- **fix(db): worktree の既定 CLI 固定が sync 呼び出し時に claude へ戻る問題を修正** (#2917): upsertWorktree の cliToolId フォールバックを ?? null に変え、sync などの未指定呼び出し時に COALESCE で既存の cli_tool_id が維持されるように修正。
+
+- **fix(skills-sync-map): update で追加する新規ファイルに同じディレクトリの対応から counterpartPath を推定して付ける** (#2911): 新規ファイルの追加時、同じパッケージの同一ディレクトリにある既存エントリから相手側置き場所を推定して設定し、--counterpart 渡し時に相手側未存在なら warning を出すよう改善。
+
+- **fix(verification): `env-clean` が別の CommandMate サーバのセッション終了と無関係な listener を違反に数える問題を修正** (#2627): タスク作成時のベースラインに「別サーバのセッション」（自サーバの名前空間を持たず、自サーバが採用した旧形式名でもない `mcbd-*`）を記録し、それが消えた場合は tmux サーバが生き残っているときに限り違反から外して `(ignored: another CommandMate server's session …)` と出力に残すようにした（自サーバの別 worktree のセッション・採用済み旧形式セッションの消滅と、全セッション消滅＝`kill-server` の形は従来どおり違反）。listener の判定はコマンドライン全体への部分一致をやめ、実行ファイル名（`commandmate`・`next-server`）か、`node`・`tsx`・`next` などの起動プログラムの位置引数（`dist/server/server.js`・`server.ts`・`commandmate`・`next dev|start`）だけで行うようにし、引数に CommandMate のパスを含むだけの `language_server_macos_arm` などを記録しないようにした。
+
 ## [0.42.1] - 2026-09-28
 
 > **Highlight**: エージェント CLI（claude・codex・antigravity・opencode・command-code）が日々のアップデートで壊れていないかを、AI を使わず決まった手順で確かめる日次確認スクリプトと、その自動実行の手順を追加した。スラッシュコマンドの候補を claude 2.1.283・codex 0.157.1・antigravity 1.2.12・command-code 1.66.0 に合わせて更新し（antigravity は 13 件から 46 件）、opencode 1.18.31 以降で起動直後の入力待ちを検出できず送信が拒否される問題を直した。

@@ -24,7 +24,7 @@
 import { execFile } from 'child_process';
 import { mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs';
 import { homedir } from 'os';
-import { dirname, join } from 'path';
+import { basename, dirname, join } from 'path';
 import { getEnv } from '@/lib/env';
 import { createLogger } from '@/lib/logger';
 import { MACHINE_LOCK_DIR_NAME } from './machine-lock';
@@ -176,9 +176,74 @@ export const DEFAULT_ENV_PROBE_DEPS: EnvProbeDeps = {
  * to "CommandMate 関連" for exactly that reason, so relevance is decided from
  * the owning process's command line rather than from the port number — a
  * developer's `commandmate start --port 3179` is as relevant as port 3000.
+ *
+ * This is only the vocabulary, and a cheap first filter. Matched against the
+ * whole command line it also hits a process that merely *mentions* a
+ * CommandMate path among its arguments — an editor's language server started
+ * with `--workspace_id …_commandmate_issue_2616` was recorded as a CommandMate
+ * listener and then read as "killed" when it exited (#2627). The decision is
+ * {@link isCommandMateCommandLine}'s, which looks only at the program.
  */
 export const COMMANDMATE_PROCESS_PATTERN =
   /commandmate|dist\/server\/server\.js|next-server|next (dev|start)|server\.ts/i;
+
+/**
+ * Executables that run a script named by a later argument. CommandMate is
+ * never a native binary of its own: every shape it runs as is one of these
+ * with a CommandMate script, or a process title set by one of them.
+ */
+const SCRIPT_LAUNCHERS = new Set(['node', 'nodejs', 'bun', 'tsx', 'ts-node', 'npx', 'next']);
+
+/** Executables that are CommandMate by their own name (process title or bin). */
+const COMMANDMATE_EXECUTABLES = /^(commandmate(\.js)?|next-server)$/i;
+
+/** A script argument that is CommandMate's server or CLI, judged by its path's end. */
+function isCommandMateScript(token: string): boolean {
+  const name = basename(token);
+  return (
+    /(^|\/)dist\/server\/server\.js$/.test(token) ||
+    name === 'server.ts' ||
+    /^commandmate(\.js)?$/i.test(name)
+  );
+}
+
+/**
+ * Whether a `ps` command line is a CommandMate process (#2627).
+ *
+ * Judged on the program, never on free-form arguments:
+ *
+ *   - the executable itself (`next-server (v14…)`, a `commandmate` bin run
+ *     directly) — its basename, so a directory called `commandmate` in the
+ *     executable's *path* does not count either;
+ *   - or, when the executable is a script launcher (`node`, `tsx`, `next`, …),
+ *     its positional arguments matched as whole paths by their end:
+ *     `…/dist/server/server.js`, `server.ts`, a `commandmate` bin, or `next`
+ *     followed by `dev` / `start`.
+ *
+ * Flags are dropped before matching, `--workspace=/x/commandmate` included,
+ * and a positional counts only as a whole token: `/x/commandmate-issue-1` is a
+ * path that mentions CommandMate, not CommandMate. Any other executable —
+ * `language_server_macos_arm`, Chrome, postgres — is not CommandMate whatever
+ * its arguments say.
+ *
+ * Why not `ps -o comm=` (the executable alone): `node dist/server/server.js` is
+ * `node` there, indistinguishable from every other node process, so the
+ * production server itself would stop being recorded.
+ */
+export function isCommandMateCommandLine(commandLine: string): boolean {
+  if (!COMMANDMATE_PROCESS_PATTERN.test(commandLine)) return false;
+  const [program, ...rest] = commandLine.trim().split(/\s+/);
+  if (!program) return false;
+  const name = basename(program);
+  if (COMMANDMATE_EXECUTABLES.test(name)) return true;
+  if (!SCRIPT_LAUNCHERS.has(name.toLowerCase())) return false;
+
+  const positionals = [name, ...rest.filter((token) => !token.startsWith('-'))];
+  return positionals.some((token, index) => {
+    if (index > 0 && isCommandMateScript(token)) return true;
+    return basename(token) === 'next' && /^(dev|start)$/.test(positionals[index + 1] ?? '');
+  });
+}
 
 /** `ps` line: leading pid, then the full command line. */
 function parseProcessTable(stdout: string): Map<number, string> {
@@ -287,7 +352,7 @@ export async function probeListeners(deps: EnvProbeDeps): Promise<EnvProbeResult
 
   const relevant = blocks.filter((block) => {
     const commandLine = table.get(block.pid);
-    return commandLine !== undefined && COMMANDMATE_PROCESS_PATTERN.test(commandLine);
+    return commandLine !== undefined && isCommandMateCommandLine(commandLine);
   });
   if (relevant.length === 0) return ok([]);
 

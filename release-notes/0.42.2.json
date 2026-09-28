@@ -1,0 +1,20 @@
+{
+  "version": "0.42.2",
+  "date": "2026-09-28",
+  "highlight": {
+    "ja": "ブランチごとに選んだ既定のエージェントが、同期のたびに Claude に戻ってしまう問題を直しました。",
+    "en": "Fixed the default agent chosen for a branch switching back to Claude every time branches were synced."
+  },
+  "added": [],
+  "improved": [],
+  "fixed": [
+    {
+      "ja": "ブランチごとに選んだ既定のエージェントが、同期のたびに Claude に戻ってしまう問題を直しました。",
+      "en": "Fixed the default agent chosen for a branch switching back to Claude every time branches were synced."
+    },
+    {
+      "ja": "commandmate verify でタスクを指定できるようになり、完了済みのタスクを検証し直せるようになりました。",
+      "en": "commandmate verify can now take a task, so a finished task can be verified again."
+    }
+  ]
+}
