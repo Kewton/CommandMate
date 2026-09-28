@@ -4,6 +4,7 @@
  * ```
  * run.ts [--tools claude,codex,…] [--only <checkId>[,<checkId>]] [--out <file>]
  *        [--timeout-per-tool <sec>] [--state <file>] [--server-log <file>]
+ *        [--synced-from <sha>]
  * ```
  */
 
@@ -13,6 +14,7 @@ import {
   isAgentHealthCheckId,
   isAgentHealthTool,
   type AgentHealthCheckId,
+  type AgentHealthSync,
   type AgentHealthTool,
 } from './types';
 
@@ -32,7 +34,11 @@ export interface AgentHealthOptions {
   statePath: string | null;
   /** null → located automatically (see `production-log.ts`). */
   serverLog: string | null;
+  /** The commit before `daily.sh` synced (Issue #2924). null → no `sync` in the report. */
+  syncedFrom: string | null;
 }
+
+const FULL_SHA = /^[0-9a-f]{40}$/i;
 
 export type ParseResult =
   | { ok: true; options: AgentHealthOptions }
@@ -47,6 +53,7 @@ export const USAGE = [
   `  --timeout-per-tool <sec>  per-tool budget (default: ${DEFAULT_TIMEOUT_PER_TOOL_SEC})`,
   '  --state <file>            previous-version state (default: ~/.commandmate/agent-health/state.json)',
   '  --server-log <file>       production server log to watch (default: <main worktree>/logs/server.log)',
+  '  --synced-from <sha>       commit before the sync (set by daily.sh); records `sync` in the report',
   '  -h, --help                show this help',
   '',
   'Exit: 0 all pass/skip, 1 at least one fail, 2 the script itself failed.',
@@ -67,6 +74,7 @@ export function parseAgentHealthArgs(argv: readonly string[]): ParseResult {
     timeoutPerToolSec: DEFAULT_TIMEOUT_PER_TOOL_SEC,
     statePath: null,
     serverLog: null,
+    syncedFrom: null,
   };
 
   for (let i = 0; i < argv.length; i++) {
@@ -138,10 +146,31 @@ export function parseAgentHealthArgs(argv: readonly string[]): ParseResult {
         options.timeoutPerToolSec = seconds;
         break;
       }
+      case '--synced-from': {
+        const value = takeValue();
+        if (value === null || !FULL_SHA.test(value)) {
+          return {
+            ok: false,
+            error: `--synced-from must be a 40-digit hex commit (got ${value ?? 'nothing'})`,
+          };
+        }
+        options.syncedFrom = value;
+        break;
+      }
       default:
         return { ok: false, error: `unknown argument: ${flag}` };
     }
   }
 
   return { ok: true, options };
+}
+
+/**
+ * The report's `sync` field for a run started by `daily.sh` (Issue #2924).
+ * `head` is the commit being checked. A hand-run `run.ts` (no `--synced-from`)
+ * gets no `sync`.
+ */
+export function syncRecordFor(syncedFrom: string | null, head: string): AgentHealthSync | undefined {
+  if (syncedFrom === null) return undefined;
+  return { status: 'ok', before: syncedFrom, after: head };
 }

@@ -92,6 +92,16 @@ export interface AgentHealthReport {
   };
   /** Present only when the script itself went wrong (exit 2). */
   scriptErrors?: string[];
+  /** How the runner synced to origin/develop before this run (written by scripts/agent-health/daily.sh). */
+  sync?: AgentHealthSync;
+}
+
+/** `before` / `after`: full commit SHAs. `reason` is set only when `status` is `failed`. */
+export interface AgentHealthSync {
+  status: 'ok' | 'failed';
+  before: string;
+  after: string;
+  reason?: string;
 }
 
 /** `~/.commandmate/agent-health/state.json`. */
