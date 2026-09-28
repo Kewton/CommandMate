@@ -20,6 +20,7 @@ import { join } from 'path';
 import {
   captureEnvSnapshot,
   COMMANDMATE_PROCESS_PATTERN,
+  isCommandMateCommandLine,
   ENV_PROBE_IDS,
   ENV_SNAPSHOT_DIR_NAME,
   ENV_SNAPSHOT_RETENTION_MS,
@@ -187,6 +188,78 @@ describe('probeListeners', () => {
       expect(COMMANDMATE_PROCESS_PATTERN.test(commandLine)).toBe(true);
     }
     expect(COMMANDMATE_PROCESS_PATTERN.test('/usr/bin/postgres -D /var/db')).toBe(false);
+  });
+
+  describe('isCommandMateCommandLine (#2627)', () => {
+    it('still recognises every shape CommandMate runs as', () => {
+      for (const commandLine of [
+        'node /opt/homebrew/lib/node_modules/commandmate/dist/server/server.js',
+        'node dist/server/server.js',
+        'node --max-old-space-size=4096 dist/server/server.js',
+        'next-server (v14.2.15)',
+        'node_modules/.bin/tsx server.ts',
+        // What `tsx server.ts` (npm run dev) leaves listening: node with loader flags.
+        'node --require /x/node_modules/tsx/dist/preflight.cjs ' +
+          '--import file:///x/node_modules/tsx/dist/loader.mjs server.ts',
+        'node /x/commandmate-main/node_modules/.bin/next dev',
+        'node /x/node_modules/.bin/next start -p 3000',
+        'next dev',
+        // The global `commandmate` command, through its shebang and run directly.
+        'node /opt/homebrew/bin/commandmate start --daemon',
+        '/opt/homebrew/bin/commandmate start',
+      ]) {
+        expect(isCommandMateCommandLine(commandLine), commandLine).toBe(true);
+      }
+    });
+
+    it('ignores a process that only mentions CommandMate among its arguments', () => {
+      for (const commandLine of [
+        // The shape of pid 39533 in the 2026-09-17 incident: a native language
+        // server whose workspace arguments name a CommandMate worktree.
+        '/Applications/Antigravity.app/Contents/Resources/bin/language_server_macos_arm ' +
+          '--workspace_id file_Users_dev_work_commandmate_issue_2616 ' +
+          '--app_data_dir /Users/dev/work/commandmate-issue-2616',
+        '/usr/local/bin/some-daemon --config=/Users/dev/commandmate/server.ts',
+        'node /x/eslint-server.js --workspace=/Users/dev/work/commandmate',
+        'node /x/vite.js /Users/dev/work/commandmate-issue-2616',
+        'node /x/next build',
+        '/usr/bin/postgres -D /var/db',
+      ]) {
+        expect(isCommandMateCommandLine(commandLine), commandLine).toBe(false);
+      }
+    });
+  });
+
+  it('does not record the language server of the 2026-09-17 incident (#2627)', async () => {
+    const lsof = [
+      'p1234',
+      'cnode',
+      'n*:3000',
+      'p39533',
+      'clanguage_server_macos_arm',
+      'n127.0.0.1:63753',
+      'n127.0.0.1:63754',
+      'n127.0.0.1:63762',
+      '',
+    ].join('\n');
+    const ps = [
+      ' 1234 node /Users/dev/work/commandmate-main/dist/server/server.js',
+      ' 39533 /Applications/Antigravity.app/Contents/Resources/bin/language_server_macos_arm ' +
+        '--workspace_id file_Users_dev_work_commandmate_issue_2616',
+      '',
+    ].join('\n');
+    const result = await probeListeners(
+      deps({
+        commands: {
+          [LSOF_LISTEN_KEY]: okResult(lsof),
+          [PS_KEY]: okResult(ps),
+          'lsof -a -d cwd -p 1234 -F pn': okResult('p1234\nn/Users/dev/work/commandmate-main\n'),
+        },
+      })
+    );
+    expect(result.status).toBe('ok');
+    expect(result.entries.map((entry) => entry.key)).toEqual(['tcp/3000']);
+    expect(result.entries[0].anchor).toBe('/Users/dev/work/commandmate-main');
   });
 });
 

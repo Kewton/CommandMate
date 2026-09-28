@@ -16,7 +16,9 @@
  *      counted, and it is the single failure this gate must not reproduce.
  *   2. **Additions and removals are judged asymmetrically.** Everything that
  *      existed at task start must still exist, whoever it belonged to — that is
- *      the pkill (#1739) and `kill-server` (#1624) case. New things are a
+ *      the pkill (#1739) and `kill-server` (#1624) case — with one exception: a
+ *      tmux session the baseline recorded as *another CommandMate server's*
+ *      (#2627), which that server may close whenever it likes. New things are a
  *      violation *unless they are attributable to another worker*, because
  *      parallel delegations legitimately start their own sessions and servers
  *      inside each other's measurement windows — or unless they are the one
@@ -30,7 +32,12 @@
 
 import { dirname, resolve, sep } from 'path';
 import type { VerificationGateTerminalStatus } from '@/lib/db';
-import { parseSessionName, resolveSessionName } from '@/lib/cli-tools/session-name';
+import {
+  getActiveSessionNamespace,
+  parseSessionName,
+  resolveNamespacedSessionName,
+  resolveSessionName,
+} from '@/lib/cli-tools/session-name';
 import { isCliToolType } from '@/lib/cli-tools/types';
 import type { TaskContract } from '@/lib/tasks/contract-parser';
 import {
@@ -212,6 +219,13 @@ function attributeEntry(
  */
 export interface EnvBaseline extends EnvSnapshot {
   taskSession?: string | null;
+  /**
+   * Baseline `mcbd-*` sessions that belonged to another CommandMate server when
+   * the task was created (#2627); see {@link recordOtherServerSessions}.
+   * `null` when this server's identity was unknown (no namespace), absent in a
+   * baseline written before #2627. Only a list excuses anything.
+   */
+  otherServerSessions?: string[] | null;
 }
 
 /** The task-row fields that name the session a delegation runs in. */
@@ -242,8 +256,16 @@ export function resolveTaskSessionName(task: TaskSessionOwner): string | null {
 }
 
 /** A freshly captured baseline, stamped with its task's own agent session. */
-export function recordTaskSession(snapshot: EnvSnapshot, task: TaskSessionOwner): EnvBaseline {
-  return { ...snapshot, taskSession: resolveTaskSessionName(task) };
+export function recordTaskSession(
+  snapshot: EnvSnapshot,
+  task: TaskSessionOwner,
+  server: SessionServerIdentity = currentSessionServer()
+): EnvBaseline {
+  return {
+    ...snapshot,
+    taskSession: resolveTaskSessionName(task),
+    otherServerSessions: recordOtherServerSessions(snapshot, server),
+  };
 }
 
 /**
@@ -255,6 +277,124 @@ export function readTaskSession(baseline: EnvSnapshot): string | null | undefine
   if (!('taskSession' in baseline)) return undefined;
   const recorded = baseline.taskSession;
   return typeof recorded === 'string' && recorded !== '' ? recorded : null;
+}
+
+// =============================================================================
+// Other CommandMate servers' sessions (Issue #2627)
+// =============================================================================
+
+/**
+ * What this server knows about which session names are its own.
+ *
+ * Two CommandMate servers on one machine share the default tmux server. Since
+ * #2866 each names its sessions `mcbd-{ns}-…` with its own namespace, and keeps
+ * a pre-namespace `mcbd-{cli}-{worktreeId}` session only by adopting it under
+ * an alias. So, given this server's namespace, a name is this server's exactly
+ * when it carries that namespace or is one of its adopted legacy names.
+ */
+export interface SessionServerIdentity {
+  /** This server's session namespace; null when unset (CLI, tests, failed init). */
+  namespace: string | null;
+  /** The legacy session this server adopted for a new-format name, if any. */
+  legacyAliasOf(newName: string): string | undefined;
+}
+
+/**
+ * The identity of the server process this module runs in.
+ *
+ * The adoption table is read through `resolveSessionName`, which returns the
+ * adopted legacy name in place of the new-format one — this module may not
+ * reach into `lib/tmux` (#1922).
+ */
+export function currentSessionServer(): SessionServerIdentity {
+  return {
+    namespace: getActiveSessionNamespace(),
+    legacyAliasOf: (newName) => {
+      const parsed = parseSessionName(newName);
+      if (!parsed) return undefined;
+      try {
+        const resolved = resolveSessionName(parsed.cliToolId, parsed.rest);
+        return resolved !== newName ? resolved : undefined;
+      } catch {
+        return undefined;
+      }
+    },
+  };
+}
+
+/**
+ * Whether a session name positively belongs to a CommandMate server other than
+ * `server`.
+ *
+ * False whenever that cannot be shown: this server has no namespace (then every
+ * name could be its own), or the name is not a CommandMate session name at all.
+ */
+export function isOtherServerSession(name: string, server: SessionServerIdentity): boolean {
+  if (server.namespace === null) return false;
+  const parsed = parseSessionName(name);
+  if (!parsed) return false;
+  if (parsed.namespace !== null) return parsed.namespace !== server.namespace;
+  let ownName: string;
+  try {
+    ownName = resolveNamespacedSessionName(server.namespace, parsed.cliToolId, parsed.rest);
+  } catch {
+    // A name this server could never have built is not one of its adoptions.
+    return true;
+  }
+  return server.legacyAliasOf(ownName) !== name;
+}
+
+/**
+ * The baseline's `mcbd-*` sessions that belonged to another CommandMate server
+ * at task creation.
+ *
+ * Recorded then, because only then is it knowable: this server's legacy
+ * adoptions are dropped when their session goes away, so by verification time
+ * a vanished adopted session would look like a stranger's.
+ *
+ * Why this is the line removals are excused on — the design note for #2627:
+ *
+ *   - A removal is a violation because a worker may have killed someone else's
+ *     session (#1624) or server (#1739). A session *of this server* — the
+ *     sibling worktree in #1624, whose name carries this server's namespace —
+ *     stays guarded exactly as before.
+ *   - A session of *another server* is closed by that server's own lifecycle:
+ *     the incident of 2026-09-17 was a global-install server's orchestrate
+ *     finishing issue-107 and moving on to issue-108, with no kill of any kind
+ *     in the three workers' transcripts. This task has no way to tell that
+ *     from a worker's kill, and that server — not this gate — owns the fact.
+ *   - The namespace is the designed marker of "which server" (#2866); nothing
+ *     else here needs this server's database or a guess at the other
+ *     repository's paths.
+ *
+ * Rejected: counting (`one other session gone is fine`) — that is the #1624
+ * shape, a sibling session disappearing while this worktree's stays; ignoring
+ * every `other` removal — that drops #1624 outright; the database's worktree
+ * table — the other server has a different database and the same worktree ids
+ * can exist in both, which is why #2866 exists; timing — the two snapshots do
+ * not say *when* inside the window something went away; the worker's command
+ * log — not recorded in a form the gate reads, and a kill run through a script
+ * would not name the session anyway.
+ *
+ * @returns the names, or null when `server` has no namespace to judge by
+ */
+export function recordOtherServerSessions(
+  snapshot: EnvSnapshot,
+  server: SessionServerIdentity
+): string[] | null {
+  if (server.namespace === null) return null;
+  const sessions = snapshot.probes['tmux-sessions'];
+  if (!sessions || sessions.status !== 'ok') return [];
+  return sessions.entries
+    .map((entry) => entry.key)
+    .filter((name) => isOtherServerSession(name, server));
+}
+
+/** The recorded other-server sessions of a baseline; empty when none was recorded. */
+export function readOtherServerSessions(baseline: EnvSnapshot): ReadonlySet<string> {
+  const recorded = (baseline as EnvBaseline).otherServerSessions;
+  if (!Array.isArray(recorded)) return new Set();
+  return new Set(recorded.filter((name): name is string => typeof name === 'string'));
 }
 
 // =============================================================================
@@ -287,6 +427,12 @@ export interface EnvProbeDiff {
   taskSessionAdded: EnvChange[];
   /** Entries that existed at task start and are gone. Always violations. */
   removed: EnvChange[];
+  /**
+   * `tmux-sessions` removals excused because the baseline recorded the session
+   * as another CommandMate server's (#2627). Listed in the report, never
+   * dropped. Always empty when the tmux server itself looks killed.
+   */
+  removedByOtherServer: EnvChange[];
   /**
    * `home-entries` additions and removals dropped because their name is in
    * `options.envCleanIgnoreHomeEntries` (#2890). Kept, not discarded: the
@@ -331,6 +477,7 @@ export function diffEnvSnapshots(
   options: EnvDiffOptions = {}
 ): EnvCleanDiff {
   const taskSession = readTaskSession(baseline);
+  const otherServerSessions = readOtherServerSessions(baseline);
   const ignoredHomeEntries = new Set(options.ignoreHomeEntries ?? []);
   const probes: EnvProbeDiff[] = ENV_PROBE_IDS.map((probeId) => {
     const before = baseline.probes[probeId];
@@ -345,6 +492,7 @@ export function diffEnvSnapshots(
         ignoredAdded: [],
         taskSessionAdded: [],
         removed: [],
+        removedByOtherServer: [],
         ignoredByConfig: [],
       };
     }
@@ -357,6 +505,7 @@ export function diffEnvSnapshots(
         ignoredAdded: [],
         taskSessionAdded: [],
         removed: [],
+        removedByOtherServer: [],
         ignoredByConfig: [],
       };
     }
@@ -389,11 +538,32 @@ export function diffEnvSnapshots(
       (owner === 'other' ? ignoredAdded : added).push(toChange(entry, owner));
     }
 
+    // An excuse for another server's session presumes the tmux server lived
+    // through the task. When nothing from the baseline survived and the task's
+    // own session is gone too, the likeliest story is `kill-server` (#1624), and
+    // every removal is counted.
+    const tmuxServerSurvived =
+      probeId === 'tmux-sessions' &&
+      after.entries.some(
+        (entry) => beforeKeys.has(entry.key) || (taskSession !== null && entry.key === taskSession)
+      );
+
     const removed: EnvChange[] = [];
+    const removedByOtherServer: EnvChange[] = [];
     for (const entry of before.entries) {
       if (afterKeys.has(entry.key)) continue;
       const change = toChange(entry, attributeEntry(probeId, entry, context));
-      (isIgnoredByConfig(entry) ? ignoredByConfig : removed).push(change);
+      if (isIgnoredByConfig(entry)) {
+        ignoredByConfig.push(change);
+      } else if (
+        tmuxServerSurvived &&
+        change.owner !== 'self' &&
+        otherServerSessions.has(entry.key)
+      ) {
+        removedByOtherServer.push(change);
+      } else {
+        removed.push(change);
+      }
     }
 
     return {
@@ -404,6 +574,7 @@ export function diffEnvSnapshots(
       ignoredAdded,
       taskSessionAdded,
       removed,
+      removedByOtherServer,
       ignoredByConfig,
     };
   });
@@ -469,6 +640,14 @@ function formatTaskSessionChanges(changes: EnvChange[]): string[] {
  * session is: a verdict that silently discounted an entry would read exactly
  * like one that never saw it.
  */
+/** Removals excused as another CommandMate server's sessions (#2627), one line each. */
+function formatRemovedByOtherServer(changes: EnvChange[]): string[] {
+  return changes.map(
+    (change) =>
+      `    · - ${change.key} (ignored: another CommandMate server's session, recorded at task start)`
+  );
+}
+
 function formatIgnoredByConfig(changes: EnvChange[]): string[] {
   if (changes.length === 0) return [];
   const names = changes.map((change) => change.key).join(', ');
@@ -501,6 +680,7 @@ export function formatEnvCleanReport(diff: EnvCleanDiff): string {
           : '';
       lines.push(`  ${probe.probeId} clean (${label})${excused}`);
       lines.push(...formatTaskSessionChanges(probe.taskSessionAdded));
+      lines.push(...formatRemovedByOtherServer(probe.removedByOtherServer));
       lines.push(...formatIgnoredByConfig(probe.ignoredByConfig));
       continue;
     }
@@ -510,6 +690,7 @@ export function formatEnvCleanReport(diff: EnvCleanDiff): string {
     lines.push(...formatChanges('+', probe.added));
     lines.push(...formatChanges('-', probe.removed));
     lines.push(...formatTaskSessionChanges(probe.taskSessionAdded));
+    lines.push(...formatRemovedByOtherServer(probe.removedByOtherServer));
     lines.push(...formatIgnoredByConfig(probe.ignoredByConfig));
     for (const excused of probe.ignoredAdded) {
       lines.push(`    · ${excused.key} (ignored: belongs to another worktree)`);
