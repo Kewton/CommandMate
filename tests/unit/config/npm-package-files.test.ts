@@ -15,6 +15,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import fs from 'fs';
+import { execFileSync } from 'child_process';
 import path from 'path';
 
 const REPO_ROOT = path.resolve(__dirname, '../../..');
@@ -48,6 +49,26 @@ describe('Issue #1315: the published package excludes the Next.js build cache', 
     for (const entry of ['bin/', 'dist/', '.next/', 'public/', '.env.example', 'release-notes/']) {
       expect(files).toContain(entry);
     }
+  });
+
+  it('ships the scripts an agent pane runs at launch (Issue #2934)', () => {
+    // `scripts/hooks/` carries the hook relay; `scripts/opencode-v2/` carries
+    // `launch.sh`, which an OpenCode V2 pane runs to start its own server. A
+    // package without it degrades every OpenCode V2 launch to `--standalone`,
+    // with no structured state, and says so only in a log line.
+    expect(files).toContain('scripts/hooks/');
+    expect(files).toContain('scripts/opencode-v2/');
+  });
+
+  it('keeps launch.sh executable in the index (mode 100755)', () => {
+    // `prepareOpencodeV2Launch` runs it through `bash`, so the bit is not what
+    // makes it work — but a packed tarball preserves what git records, and a
+    // user running the script by hand should not meet EACCES.
+    const entry = execFileSync('git', ['ls-files', '-s', 'scripts/opencode-v2/launch.sh'], {
+      cwd: REPO_ROOT,
+      encoding: 'utf-8',
+    });
+    expect(entry.split(/\s+/)[0]).toBe('100755');
   });
 
   it('excludes nothing under .next/ beyond the cache', () => {
