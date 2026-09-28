@@ -25,6 +25,13 @@
 
 - **issue_numbers**: 対象Issue番号（必須、1つ以上、スペース区切り、各番号は正の整数）
 
+### 削除しない worktree
+
+CLAUDE.md の「恒久 worktree（クリーンアップ対象外）」に載っている worktree とブランチ
+（`../commandmate-main` / `main`、`../commandmate-agent-health` / `agent-health-runner`）は、
+このコマンドでも、Issue 番号を指定しない「worktree をまとめて片付けて」という依頼でも、削除・停止しない。
+`git worktree list` から片付け対象を選ぶときは、先にこの一覧を除く。
+
 ---
 
 ## 実行フェーズ

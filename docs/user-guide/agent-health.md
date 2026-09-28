@@ -166,7 +166,9 @@ tmux -L cm-agent-health kill-server
 
 ## 毎日の自動実行（Schedule）
 
-- 確認専用の worktree（`../commandmate-agent-health`、ブランチ `develop` 追従）に `docs/agent-health/CMATE.example.md` の中身を `CMATE.md` として置く。CommandMate の Schedule 機能が毎日 07:00 に Antigravity（`agy -p`）で `docs/agent-health/daily-triage-prompt.md` の手順を実行し、結果を Issue にする
+- 確認専用の worktree（`../commandmate-agent-health`）に `docs/agent-health/CMATE.example.md` の中身を `CMATE.md` として置く。CommandMate の Schedule 機能が毎日 07:00 に Antigravity（`agy -p`）で `docs/agent-health/daily-triage-prompt.md` の手順を実行し、結果を Issue にする
+- この worktree は常駐用で、ブランチ `agent-health-runner`（upstream は `origin/develop`。独自の commit は持たない）を使う。develop は本体の作業ディレクトリで使っているため同じブランチは使えない。作り方: `git worktree add -b agent-health-runner ../commandmate-agent-health origin/develop` のあと `git -C ../commandmate-agent-health branch --set-upstream-to=origin/develop`、`npm install --include=dev`、リポジトリの同期
+- **worktree の片付けで削除しない**（CLAUDE.md の「恒久 worktree（クリーンアップ対象外）」）。消すと翌朝の Schedule が動かない
 - ラベル `agent-health` を作っておく: `gh label create agent-health --repo Kewton/CommandMate --description "日次ヘルスチェックが自動登録した Issue"`
 - Antigravity の Schedule は許可の値が `--dangerously-skip-permissions` しか無い。Command Code は `yolo` でないとコマンドを実行できない（#2454）
 - 依頼文は `docs/agent-health/daily-triage-prompt.md`、Issue のひな形は `docs/agent-health/issue-template.md`。変えたいときはリポジトリのこれらの文書を直す（`CMATE.md` の Message 欄は依頼文を読むよう指示するだけ）
