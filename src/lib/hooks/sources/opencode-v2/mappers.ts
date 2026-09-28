@@ -8,7 +8,7 @@
  * carries `durable` instead), so nothing here reads it: one instance owns one
  * server, and every frame on that server's stream is that instance's.
  *
- * Phase 1 maps the turn boundaries and the two kinds of "the agent is waiting
+ * Phase 1 mapped the turn boundaries and the two kinds of "the agent is waiting
  * for a human":
  *
  * | OpenCode V2 event                               | agent event                          |
@@ -35,6 +35,7 @@
 import { PERMISSION_REPLIED_DETAIL } from '@/lib/hooks/agent-event-types';
 import {
   isPlainObject,
+  readEventIdentity,
   readNestedString,
   whenNamed,
   type EventMapper,
@@ -90,6 +91,9 @@ export function frameData(payload: Record<string, unknown>): Record<string, unkn
 export function frameSessionId(payload: Record<string, unknown>): string | null {
   return (
     readNestedString(frameData(payload), ['sessionID']) ??
+    // Issue #2945: `form.created` nests the form — `data.form.sessionID`
+    // (measured on 2.0.18).
+    readNestedString(frameData(payload), ['form', 'sessionID']) ??
     readNestedString(payload, ['durable', 'aggregateID'])
   );
 }
@@ -97,16 +101,20 @@ export function frameSessionId(payload: Record<string, unknown>): string | null 
 /**
  * The id of the decision a frame opens or settles.
  *
- * `permission.asked` / `form.created` carry it as `data.id` (`per_…` /
- * `frm_…`); `permission.replied` names it `data.requestID`; the form replies
- * are read under either spelling.
+ * `permission.asked` carries it as `data.id` (`per_…`), `form.created` as
+ * `data.form.id` (`frm_…`, the form is nested — measured, Issue #2945);
+ * `permission.replied` names it `data.requestID`; the form replies carry
+ * `data.id` and are read under the other spellings too.
  */
 export function frameDecisionId(payload: Record<string, unknown>): string | null {
   const data = frameData(payload);
   switch (frameType(payload)) {
     case 'permission.asked':
-    case 'form.created':
       return readNestedString(data, ['id']);
+    case 'form.created':
+      // Measured on 2.0.18 (Issue #2945): the form is nested,
+      // `data.form.id`. `data.id` is read as well, for a frame that is not.
+      return readNestedString(data, ['form', 'id']) ?? readNestedString(data, ['id']);
     case 'permission.replied':
       return readNestedString(data, ['requestID']) ?? readNestedString(data, ['id']);
     case 'form.replied':
@@ -119,6 +127,22 @@ export function frameDecisionId(payload: Record<string, unknown>): string | null
     default:
       return null;
   }
+}
+
+/**
+ * The frame's own identity, for de-duplication (Issue #2945,
+ * `eventIdentity: 'permission-id'`).
+ *
+ * The decision id ({@link frameDecisionId}) — the `per_…` / `frm_…` the reply
+ * URL takes. An approval and the reply that settles it carry the SAME id, which
+ * is why `classifyAgentEventDelivery` keys on `(event, detail, identity)`
+ * rather than on the id alone. Every other frame (the `session.execution.*`
+ * boundaries) answers null and keeps the time window, as v1's `session.idle`
+ * does. The envelope's `evt_…` is not used, for v1's reason: nothing measured
+ * says it is unique per frame.
+ */
+export function opencodeV2EventIdentity(payload: Record<string, unknown>): string | null {
+  return readEventIdentity(frameDecisionId(payload));
 }
 
 /** The action an approval is for (`edit`, `shell`, …), or null. */

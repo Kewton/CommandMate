@@ -9,9 +9,13 @@
  *  - {@link openOpencodeV2EventStream}: `GET /api/event`, the SSE stream the
  *    subscription reads its state from;
  *  - {@link fetchOpencodeV2SessionMessagesPage}: `GET /api/session/{id}/message`,
- *    the stored turns History is written from (Issue #2940).
+ *    the stored turns History is written from (Issue #2940);
+ *  - the approval and question calls (Issue #2945): list what is pending
+ *    (`GET /api/permission/request`, `GET /api/form`,
+ *    `GET /api/session/{id}/form`) and answer it
+ *    (`POST …/permission/{requestID}/reply`, `POST …/form/{formID}/reply`).
  *
- * Both authenticate with Basic `opencode:<password>`, the password read from
+ * All authenticate with Basic `opencode:<password>`, the password read from
  * the instance's file (`./secrets`) at call time. The value is put into a
  * header and nowhere else — never into a URL, an error message or a log field.
  *
@@ -313,4 +317,164 @@ export async function fetchOpencodeV2SessionMessagesPage(
   } catch {
     return null;
   }
+}
+
+// =============================================================================
+// Approvals and questions (Issue #2945)
+// =============================================================================
+
+/** How long one approval / question request may take (Issue #2945). */
+export const OPENCODE_V2_DECISION_TIMEOUT_MS = 5_000;
+
+/** Largest approval / question response body accepted, in characters (Issue #2945). */
+export const MAX_OPENCODE_V2_DECISION_BODY_CHARS = 4 * 1024 * 1024;
+
+/** OpenCode V2's three approval replies (`Permission.Reply`, 2.0.18). */
+export type OpencodeV2PermissionReply = 'once' | 'always' | 'reject';
+
+/** What one request answered: the status, and the parsed body when there was one. */
+interface OpencodeV2Response {
+  status: number;
+  body: unknown;
+}
+
+/**
+ * One authenticated JSON request to an instance's server.
+ *
+ * @returns The status and parsed body, or null when nothing answered (refused
+ *   connection, timeout, a body over the bound or not JSON). Never throws.
+ */
+async function requestOpencodeV2(
+  port: number,
+  password: string,
+  method: 'GET' | 'POST',
+  path: string,
+  body?: unknown
+): Promise<OpencodeV2Response | null> {
+  try {
+    const response = await fetch(`${opencodeV2BaseUrl(port)}${path}`, {
+      method,
+      headers: {
+        Accept: 'application/json',
+        Authorization: opencodeV2AuthorizationHeader(password),
+        ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+      },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      redirect: 'error',
+      signal: AbortSignal.timeout(OPENCODE_V2_DECISION_TIMEOUT_MS),
+    });
+    const text = await response.text();
+    if (text.length > MAX_OPENCODE_V2_DECISION_BODY_CHARS) return null;
+    return { status: response.status, body: text === '' ? null : JSON.parse(text) };
+  } catch {
+    return null;
+  }
+}
+
+/** The `data` array of a 200 list response, or null. */
+function listData(response: OpencodeV2Response | null): unknown[] | null {
+  if (response === null || response.status !== 200) return null;
+  return isPlainObject(response.body) && Array.isArray(response.body.data)
+    ? response.body.data
+    : null;
+}
+
+/**
+ * `GET /api/permission/request` — every approval the server is waiting on
+ * (`Permission.Request[]`). The server is the instance's own, so "every" is
+ * this instance's.
+ *
+ * @returns The entries, or null when the server did not answer the list
+ */
+export async function fetchOpencodeV2PendingPermissions(
+  port: number,
+  password: string
+): Promise<unknown[] | null> {
+  return listData(await requestOpencodeV2(port, password, 'GET', '/api/permission/request'));
+}
+
+/**
+ * `GET /api/form` — every question (`Form.Info[]`) the server is waiting on.
+ *
+ * @returns The entries, or null when the server did not answer the list
+ */
+export async function fetchOpencodeV2PendingForms(
+  port: number,
+  password: string
+): Promise<unknown[] | null> {
+  return listData(await requestOpencodeV2(port, password, 'GET', '/api/form'));
+}
+
+/**
+ * `GET /api/session/{id}/form` — the questions one session is waiting on.
+ *
+ * Where a question's fields are read from when a `form.created` frame arrives
+ * without them (2.0.18 sends the form in the frame as `data.form`).
+ *
+ * @returns The entries, or null when the server did not answer the list
+ */
+export async function fetchOpencodeV2SessionForms(
+  port: number,
+  password: string,
+  sessionId: string
+): Promise<unknown[] | null> {
+  return listData(
+    await requestOpencodeV2(
+      port,
+      password,
+      'GET',
+      `/api/session/${encodeURIComponent(sessionId)}/form`
+    )
+  );
+}
+
+/**
+ * `POST /api/session/{sessionID}/permission/{requestID}/reply`.
+ *
+ * Measured on 2.0.18: 204, then `permission.replied` on the stream and the
+ * TUI's dialog closes.
+ *
+ * @returns Whether the server accepted the reply (2xx)
+ */
+export async function replyOpencodeV2Permission(
+  port: number,
+  password: string,
+  sessionId: string,
+  requestId: string,
+  decision: OpencodeV2PermissionReply,
+  message?: string
+): Promise<boolean> {
+  const response = await requestOpencodeV2(
+    port,
+    password,
+    'POST',
+    `/api/session/${encodeURIComponent(sessionId)}/permission/${encodeURIComponent(requestId)}/reply`,
+    message === undefined ? { decision } : { decision, message }
+  );
+  return response !== null && response.status >= 200 && response.status < 300;
+}
+
+/**
+ * `POST /api/session/{sessionID}/form/{formID}/reply` with `{answer}`.
+ *
+ * Measured on 2.0.18: 204, then `form.replied`. A value the form does not
+ * accept answers 400 (`FormInvalidAnswerError`).
+ *
+ * @returns Whether the server accepted the answer (2xx)
+ */
+export async function replyOpencodeV2Form(
+  port: number,
+  password: string,
+  sessionId: string,
+  formId: string,
+  answer: Record<string, unknown>
+): Promise<boolean> {
+  const response = await requestOpencodeV2(
+    port,
+    password,
+    'POST',
+    `/api/session/${encodeURIComponent(sessionId)}/form/${encodeURIComponent(formId)}/reply`,
+    { answer }
+  );
+  return response !== null && response.status >= 200 && response.status < 300;
 }

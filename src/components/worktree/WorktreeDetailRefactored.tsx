@@ -309,6 +309,10 @@ function isMultiSelectPrompt(promptData: LivePromptData | null | undefined): boo
  * ```
  */
 import { useWorktreeDetailController } from '@/hooks/useWorktreeDetailController';
+import {
+  readPromptDecisionId,
+  withToolDecisionLabels,
+} from '@/components/worktree/prompt-decision-id';
 import { useNewOutputIndicator } from '@/hooks/useNewOutputIndicator';
 export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   worktreeId,
@@ -615,12 +619,67 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     targetKey: `${worktreeId}:${activeCliTab}:${activeInstanceId}`,
   });
 
+  // Issue #2945: the approval / question the phone sheet is answering, when the
+  // agent named it by id (opencode, OpenCode V2). Null for every scraper-read
+  // prompt, which keeps those on `/prompt-response`.
+  const mobilePromptDecisionId = readPromptDecisionId(
+    state.prompt.visible ? state.prompt.data : null,
+  );
+  // Issue #2945: the verdicts in the tool's own words (OpenCode V2 draws
+  // `Always allow`); the numbers they send are unchanged.
+  const mobilePromptData = useMemo(
+    () => withToolDecisionLabels(state.prompt.data, activeCliTab),
+    [state.prompt.data, activeCliTab],
+  );
+
   const handleMobilePromptRespond = useCallback(
     async (answer: string): Promise<void> => {
       markPromptSubmitted();
-      await handlePromptRespond(answer);
+      if (!mobilePromptDecisionId) {
+        await handlePromptRespond(answer);
+        return;
+      }
+      // Issue #2945: the same body the PC split sends for a decision it can
+      // name (`TerminalSplitPaneContent`'s `handlePromptRespond`): `/respond`
+      // delivers it over the agent's own API. `/prompt-response` would
+      // re-capture the pane and refuse a dialog nobody parsed.
+      try {
+        const response = await fetch(`/api/worktrees/${worktreeId}/respond`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            decisionId: mobilePromptDecisionId,
+            answer,
+            cliTool: activeCliTab,
+            ...(activeInstanceId && activeInstanceId !== activeCliTab
+              ? { instanceId: activeInstanceId }
+              : {}),
+          }),
+        });
+        const result = (await response.json().catch(() => null)) as { success?: unknown } | null;
+        if (!response.ok || result?.success === false) {
+          showToast(tWorktree('promptResponse.refused'), 'warning');
+          await fetchCurrentOutput();
+          return;
+        }
+        handlePromptDismiss();
+        await fetchCurrentOutput();
+      } catch (err) {
+        console.error('[WorktreeDetailRefactored] Error answering a decision:', err);
+      }
     },
-    [markPromptSubmitted, handlePromptRespond]
+    [
+      markPromptSubmitted,
+      handlePromptRespond,
+      mobilePromptDecisionId,
+      worktreeId,
+      activeCliTab,
+      activeInstanceId,
+      showToast,
+      tWorktree,
+      fetchCurrentOutput,
+      handlePromptDismiss,
+    ]
   );
 
   // `MobileTerminalTab` owns the surface mode (per worktree, in localStorage)
@@ -1192,7 +1251,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                 `閉じる` brings the sheet straight back. */}
             {!showDirectInputKeyboard && (!autoYesEnabled || isMultiSelectPrompt(state.prompt.data)) && (
               <MobilePromptSheet
-                promptData={state.prompt.data}
+                promptData={mobilePromptData}
                 visible={state.prompt.visible}
                 answering={state.prompt.answering}
                 onRespond={handleMobilePromptRespond}

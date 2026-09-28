@@ -135,9 +135,11 @@ export const AUTO_YES_DIALOG_GATE_DEFAULT_MODE: Readonly<
   // Promote only once both dialogs are recognised on both spellings, with a
   // `/prompt-response` test pinning that the question is still answered.
   'command-code': 'legacy',
-  // Issue #2934: OpenCode V2 Phase 1 has no dialog rule (the approval dialog,
-  // `Allow once   Always allow   Reject`, is read in Phase 3 and answered via
-  // the API in Phase 2), so there is nothing to gate on.
+  // Issue #2934: OpenCode V2 has no dialog rule (the approval dialog,
+  // `Allow once   Always allow   Reject`, is read off the screen in Phase 3),
+  // so there is nothing to gate on. Issue #2945: its approvals are answered by
+  // Auto-Yes over the API as they arrive (`sources/opencode-v2/ingest`), not by
+  // this screen path — the strip carries no digits for it to type.
   'opencode-v2': 'legacy',
 };
 

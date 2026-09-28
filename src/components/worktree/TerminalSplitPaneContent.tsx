@@ -110,7 +110,10 @@ import {
 import { worktreeApi } from '@/lib/api-client';
 import { buildPromptResponseBody } from '@/lib/prompt-response-body-builder';
 import { readSelectionListShape } from '@/lib/detection/selection-shape';
-import { readPromptDecisionId } from '@/components/worktree/prompt-decision-id';
+import {
+  readPromptDecisionId,
+  withToolDecisionLabels,
+} from '@/components/worktree/prompt-decision-id';
 import { getCliToolDisplayName, getInstanceLabel } from '@/lib/cli-tools/types';
 import type {
   TerminalSplitPaneCoreProps,
@@ -738,6 +741,12 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   // names one. Null for every scraper-read prompt and for every source that
   // publishes no per-decision id, which is what keeps those on the pane path.
   const promptDecisionId = readPromptDecisionId(prompt.data);
+  // Issue #2945: the approval verdicts in the tool's own words (OpenCode V2
+  // draws `Always allow`); the numbers they send are unchanged.
+  const panelPromptData = useMemo(
+    () => withToolDecisionLabels(prompt.data, cliToolId),
+    [prompt.data, cliToolId],
+  );
 
   // Issue #1017 / #1494: detection-independent navigation safety net (←/→/↑/↓/Enter/
   // Esc, plus Codex 'q'). Shown only when the session is interactive but detection
@@ -1094,7 +1103,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
         ) : null}
         {showPrompt ? (
           <PromptPanel
-            promptData={prompt.data}
+            promptData={panelPromptData}
             messageId={prompt.messageId}
             decisionId={promptDecisionId}
             visible={prompt.visible}
@@ -1338,7 +1347,8 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       cliToolId,
       resolvedInstanceId,
       refresh,
-      prompt.data,
+      // Issue #2945: `prompt.data` relabelled — see `panelPromptData`.
+      panelPromptData,
       prompt.messageId,
       promptDecisionId,
       prompt.visible,
