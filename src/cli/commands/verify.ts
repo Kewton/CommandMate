@@ -60,6 +60,9 @@ const MAX_HISTORY_LIMIT = 500;
 /** Gate statuses that mean the gate did not pass. `skipped` is not a failure. */
 const FAILED_GATE_STATUSES: ReadonlySet<string> = new Set(['failed', 'timeout', 'error']);
 
+/** crypto.randomUUID() output; mirrors TASK_ID_PATTERN in task.ts and API routes. */
+const TASK_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 // =============================================================================
 // Scope-gate evidence (Issue #1841)
 // =============================================================================
@@ -200,6 +203,10 @@ export function createVerifyCommand(): Command {
     .argument('<worktree-id>', 'Worktree ID to verify')
     .option('--instance <id>', 'Agent instance ID the run is attributed to (e.g. codex-2)')
     .option(
+      '--task <id>',
+      "Verify against this task (re-verify a succeeded/failed task instead of the worktree's latest)"
+    )
+    .option(
       '--gates <ids>',
       'Comma-separated gate ids to run (default: work-evidence plus every declared gate)'
     )
@@ -222,6 +229,12 @@ export function createVerifyCommand(): Command {
           return;
         }
 
+        if (options.task && !TASK_ID_PATTERN.test(options.task)) {
+          console.error('Error: Invalid --task. Must be a UUID (crypto.randomUUID() format).');
+          process.exit(ExitCode.CONFIG_ERROR);
+          return;
+        }
+
         const gateIds = parseGateIds(options.gates);
         if (gateIds === null) {
           console.error('Error: --gates must name at least one gate id.');
@@ -234,6 +247,7 @@ export function createVerifyCommand(): Command {
           worktreeId,
           trigger: 'manual',
           instanceId: options.instance,
+          taskId: options.task,
           gateIds,
           timeoutSec: options.timeout,
           suppressResultLine: options.json,

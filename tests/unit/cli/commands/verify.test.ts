@@ -9,6 +9,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { restoreFetch } from '../../../helpers/mock-api';
 import { ExitCode, VerifyExitCode } from '../../../../src/cli/types';
+import * as verifyRunner from '../../../../src/cli/utils/verify-runner';
 import {
   exitCodeForRunStatus,
   MAX_PRINTED_LOG_TAIL_LINES,
@@ -22,12 +23,14 @@ import type {
 const mockExit = vi.spyOn(process, 'exit').mockImplementation((() => {}) as never);
 const mockConsoleLog = vi.spyOn(console, 'log').mockImplementation(() => {});
 const mockConsoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+const mockRunVerification = vi.spyOn(verifyRunner, 'runVerification');
 
 afterEach(() => {
   restoreFetch();
   mockExit.mockClear();
   mockConsoleLog.mockClear();
   mockConsoleError.mockClear();
+  mockRunVerification.mockClear();
   vi.useRealTimers();
 });
 
@@ -114,7 +117,7 @@ describe('createVerifyCommand', () => {
     const cmd = await loadCommand();
     const flags = cmd.options.map((opt) => opt.long);
     expect(flags).toEqual(
-      expect.arrayContaining(['--instance', '--gates', '--json', '--timeout', '--token'])
+      expect.arrayContaining(['--instance', '--task', '--gates', '--json', '--timeout', '--token'])
     );
   });
 });
@@ -907,4 +910,57 @@ describe('verify command action', () => {
     expect(mockExit).toHaveBeenCalledWith(ExitCode.CONFIG_ERROR);
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it('passes taskId to runVerification when --task is specified with a valid UUID', async () => {
+    const taskId = '11111111-2222-4333-8444-555555555555';
+    const fetchMock = mockFetchWithTail([
+      { data: { runId: 7 }, status: 202 },
+      { data: { run: run({ status: 'passed', gates: [gate()] }) } },
+    ]);
+
+    const cmd = await loadCommand();
+    await cmd.parseAsync(['node', 'verify', 'wt1', '--task', taskId]);
+
+    expect(mockRunVerification).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ taskId })
+    );
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/api/worktrees/wt1/verify');
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(init.body).taskId).toBe(taskId);
+    expect(mockExit).toHaveBeenCalledWith(VerifyExitCode.SUCCESS);
+  });
+
+  it('rejects an invalid --task before calling runVerification or making any HTTP call', async () => {
+    const fetchMock = mockFetchWithTail([]);
+    const cmd = await loadCommand();
+    await cmd.parseAsync(['node', 'verify', 'wt1', '--task', 'invalid-task-uuid']);
+
+    expect(mockExit).toHaveBeenCalledWith(ExitCode.CONFIG_ERROR);
+    expect(mockConsoleError).toHaveBeenCalledWith(
+      'Error: Invalid --task. Must be a UUID (crypto.randomUUID() format).'
+    );
+    expect(mockRunVerification).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('leaves taskId undefined when --task is omitted', async () => {
+    const fetchMock = mockFetchWithTail([
+      { data: { runId: 7 }, status: 202 },
+      { data: { run: run({ status: 'passed', gates: [gate()] }) } },
+    ]);
+
+    const cmd = await loadCommand();
+    await cmd.parseAsync(['node', 'verify', 'wt1']);
+
+    expect(mockRunVerification).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ taskId: undefined })
+    );
+    const [, init] = fetchMock.mock.calls[0];
+    expect(JSON.parse(init.body).taskId).toBeUndefined();
+    expect(mockExit).toHaveBeenCalledWith(VerifyExitCode.SUCCESS);
+  });
 });
+

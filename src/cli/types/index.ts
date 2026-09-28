@@ -289,6 +289,8 @@ export const WAIT_EXIT_CODE_PRIORITY: readonly number[] = [
 export interface VerifyOptions {
   /** Agent instance the run is attributed to. */
   instance?: string;
+  /** Verify against this task (re-verify a succeeded/failed task instead of the worktree's latest) [Issue #2927] */
+  task?: string;
   /** Comma-separated gate ids; omitted means work-evidence plus every declared gate. */
   gates?: string;
   json?: boolean;
