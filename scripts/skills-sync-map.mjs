@@ -92,13 +92,44 @@ export function counterpartPathOf(pkg, file) {
   return `${pkg.counterpart}/${file.path}`;
 }
 
-function updateMap({ counterpartDir }) {
-  const map = readMap();
+/**
+ * Infer the counterpartPath for a newly added file from existing entries in the
+ * same package that live in the same directory (Issue #2911).
+ */
+export function inferCounterpartPath(pkg, rel) {
+  const targetDir = path.posix.dirname(rel);
+  const candidates = (pkg.files ?? []).filter(
+    (f) => Boolean(f.counterpartPath) && path.posix.dirname(f.path) === targetDir,
+  );
+
+  if (candidates.length === 0) return null;
+
+  const cpDirs = new Set(candidates.map((f) => path.posix.dirname(f.counterpartPath)));
+  if (cpDirs.size !== 1) return null;
+
+  const allSameBasename = candidates.every(
+    (f) => path.posix.basename(f.counterpartPath) === path.posix.basename(f.path),
+  );
+  if (!allSameBasename) return null;
+
+  const inferredDir = Array.from(cpDirs)[0];
+  return path.posix.join(inferredDir, path.posix.basename(rel));
+}
+
+export function updateMap(options = {}) {
+  const opts = typeof options === 'string' ? { counterpartDir: options } : (options ?? {});
+  const counterpartDir = opts.counterpartDir ?? null;
+  const repoRoot = opts.repoRoot ?? REPO_ROOT;
+  const mapPath = opts.mapPath ?? path.join(repoRoot, '.claude/skills/sync-map.json');
+
+  const map = readMap(mapPath);
   let added = 0;
   let repinned = 0;
+  let inferred = 0;
+  const newlyAdded = [];
 
   for (const pkg of mappedPackages(map)) {
-    const root = path.join(REPO_ROOT, pkg.local);
+    const root = path.join(repoRoot, pkg.local);
     const onDisk = listFiles(root);
     const known = new Map(pkg.files.map((f) => [f.path, f]));
     const next = [];
@@ -108,14 +139,19 @@ function updateMap({ counterpartDir }) {
       const sha256 = digestFile(path.join(root, rel));
       if (!previous) {
         added += 1;
-        next.push({
+        const counterpartPath = inferCounterpartPath(pkg, rel);
+        if (counterpartPath) inferred += 1;
+        const newEntry = {
           path: rel,
+          ...(counterpartPath ? { counterpartPath } : {}),
           // Never invent a classification. The test rejects any note that still
           // starts with REVIEW:, so a new file cannot reach main unclassified.
           policy: 'port-required',
           sha256,
           note: `${REVIEW_PREFIX} classify this file deliberately (byte-identical / port-required), or move the package to local-only`,
-        });
+        };
+        next.push(newEntry);
+        newlyAdded.push({ pkg, file: newEntry });
         continue;
       }
       if (previous.sha256 !== sha256) repinned += 1;
@@ -127,13 +163,28 @@ function updateMap({ counterpartDir }) {
     pkg.files = next;
   }
 
-  writeFileSync(MAP_PATH, `${JSON.stringify(map, null, 2)}\n`);
-  console.log(`updated ${path.relative(REPO_ROOT, MAP_PATH)}: ${repinned} re-pinned, ${added} added`);
+  writeFileSync(mapPath, `${JSON.stringify(map, null, 2)}\n`);
+  console.log(`updated ${path.relative(repoRoot, mapPath)}: ${repinned} re-pinned, ${added} added`);
   if (added > 0) {
     console.log(`\n${added} new file(s) carry a ${REVIEW_PREFIX} note. Replace each one with a real`);
     console.log('policy and rationale — the unit test fails while any REVIEW: note remains.');
   }
-  if (counterpartDir) reportCounterpart(map, counterpartDir);
+  if (inferred > 0) {
+    console.log(`${inferred} new file(s) got counterpartPath inferred from their directory`);
+  }
+  if (counterpartDir) {
+    reportCounterpart(map, counterpartDir, repoRoot);
+    const root = path.resolve(counterpartDir);
+    if (existsSync(root)) {
+      for (const { pkg, file } of newlyAdded) {
+        const targetPath = counterpartPathOf(pkg, file);
+        const theirs = path.join(root, targetPath);
+        if (!existsSync(theirs)) {
+          console.warn(`warning: ${file.path} has no counterpart at ${targetPath}`);
+        }
+      }
+    }
+  }
   return 0;
 }
 
@@ -165,7 +216,7 @@ function checkMap({ counterpartDir }) {
  * directions, which is what the pinned digests alone cannot do.
  * Returns the number of `byte-identical` violations (the only hard failures).
  */
-function reportCounterpart(map, counterpartDir) {
+function reportCounterpart(map, counterpartDir, repoRoot = REPO_ROOT) {
   const root = path.resolve(counterpartDir);
   if (!existsSync(root)) {
     console.error(`counterpart checkout not found: ${root}`);
@@ -175,7 +226,7 @@ function reportCounterpart(map, counterpartDir) {
   let hardFailures = 0;
   for (const pkg of mappedPackages(map)) {
     for (const file of pkg.files) {
-      const mine = path.join(REPO_ROOT, pkg.local, file.path);
+      const mine = path.join(repoRoot, pkg.local, file.path);
       const theirs = path.join(root, counterpartPathOf(pkg, file));
       if (!existsSync(theirs)) {
         console.error(`  MISSING  ${counterpartPathOf(pkg, file)}`);
