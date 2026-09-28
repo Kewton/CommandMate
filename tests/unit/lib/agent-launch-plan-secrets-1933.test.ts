@@ -184,8 +184,8 @@ function makeTempDir(prefix: string): string {
 function planFor(cliToolId: CLIToolType): AgentLaunchPlan {
   return getAgentEventSource(cliToolId).prepareLaunch({
     target: { worktreeId: 'wt-1933', cliToolId, instanceId: cliToolId },
-    // Issue #2939: OpenCode V2's wrapper line is only taken for a resolved
-    // `opencode2`, so its row names the executable rather than the tool id.
+    // OpenCode V2's executable is `opencode2`, not its tool id (Issue #2939);
+    // the wrapper line passes it with --executable (Issue #2952).
     executablePath: `/usr/local/bin/${cliToolId === 'opencode-v2' ? 'opencode2' : cliToolId}`,
     worktreePath: worktree,
   });
