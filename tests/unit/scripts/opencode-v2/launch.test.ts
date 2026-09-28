@@ -38,6 +38,8 @@ interface Record2934 {
   pid: number;
   argv: string[];
   passwordEnv: string | null;
+  /** The fake's own `$0`: which executable the wrapper actually ran (Issue #2952). */
+  self: string;
 }
 
 const FAKE_SERVE_JS = `
@@ -47,7 +49,7 @@ const path = require('node:path');
 const argv = process.argv.slice(2);
 const port = Number(argv[argv.indexOf('--port') + 1]);
 const host = argv[argv.indexOf('--hostname') + 1];
-const record = { role: 'serve', pid: process.pid, argv, passwordEnv: process.env.OPENCODE_SERVER_PASSWORD ?? null };
+const record = { role: 'serve', pid: process.pid, argv, passwordEnv: process.env.OPENCODE_SERVER_PASSWORD ?? null, self: process.env.FAKE_SELF };
 fs.writeFileSync(path.join(process.env.FAKE_RECORD_DIR, 'serve.json'), JSON.stringify(record));
 process.on('SIGTERM', () => process.exit(0));
 if (process.env.FAKE_SERVE_MODE === 'silent') {
@@ -63,13 +65,14 @@ if (process.env.FAKE_SERVE_MODE === 'silent') {
 `;
 
 const FAKE_OPENCODE2 = `#!/bin/bash
+export FAKE_SELF="$0"
 if [ "\${1:-}" = "serve" ]; then
   shift
   exec node "$FAKE_RECORD_DIR/fake-serve.js" "$@"
 fi
 node -e '
   const fs = require("node:fs");
-  const record = { role: "tui", pid: Number(process.argv[1]), argv: process.argv.slice(2), passwordEnv: process.env.OPENCODE_SERVER_PASSWORD ?? null };
+  const record = { role: "tui", pid: Number(process.argv[1]), argv: process.argv.slice(2), passwordEnv: process.env.OPENCODE_SERVER_PASSWORD ?? null, self: process.env.FAKE_SELF };
   fs.writeFileSync(process.env.FAKE_RECORD_DIR + "/tui.json", JSON.stringify(record));
 ' "$$" "$@"
 if [ "\${FAKE_TUI_MODE:-exit}" = "wait" ]; then
@@ -287,6 +290,57 @@ describe('scripts/opencode-v2/launch.sh (Issue #2934 D2)', () => {
     const run = runWrapper(standardArgs(await freePort()));
     const { code } = await run.exited;
     expect(code).toBe(66);
+    expect(existsSync(join(sandbox, 'serve.json'))).toBe(false);
+  });
+});
+
+describe('scripts/opencode-v2/launch.sh --executable (Issue #2952)', () => {
+  it('runs both the server and the TUI with the given executable, even one named `opencode` off PATH', async () => {
+    // OpenCode V2 installed under the `opencode` name only, somewhere PATH does
+    // not reach; the `opencode2` on PATH must not be the one that runs.
+    const elsewhere = join(sandbox, 'elsewhere');
+    mkdirSync(elsewhere);
+    const executable = join(elsewhere, 'opencode');
+    writeFileSync(executable, FAKE_OPENCODE2);
+    chmodSync(executable, 0o755);
+
+    const port = await freePort();
+    const run = runWrapper([...standardArgs(port), '--executable', executable], {
+      FAKE_TUI_MODE: 'exit',
+    });
+    const { code } = await run.exited;
+    expect(code).toBe(0);
+
+    const serve = readRecord('serve');
+    const tui = readRecord('tui');
+    expect(serve.self).toBe(executable);
+    expect(tui.self).toBe(executable);
+    expect(serve.argv).toEqual(['--hostname', '127.0.0.1', '--port', String(port)]);
+    expect(tui.argv).toEqual(['--server', `http://127.0.0.1:${port}`, join(sandbox, 'repo')]);
+    expect(isAlive(serve.pid)).toBe(false);
+    expect(await portAnswers(port)).toBe(false);
+  });
+
+  it('runs `opencode2` from PATH when --executable is omitted', async () => {
+    const port = await freePort();
+    const run = runWrapper(standardArgs(port), { FAKE_TUI_MODE: 'exit' });
+    const { code } = await run.exited;
+    expect(code).toBe(0);
+
+    const onPath = join(sandbox, 'bin', 'opencode2');
+    expect(readRecord('serve').self).toBe(onPath);
+    expect(readRecord('tui').self).toBe(onPath);
+  });
+
+  it('refuses an --executable that is not an executable file, before starting anything', async () => {
+    const notExecutable = join(sandbox, 'opencode');
+    writeFileSync(notExecutable, FAKE_OPENCODE2);
+    for (const bad of [notExecutable, join(sandbox, 'missing'), join(sandbox, 'repo')]) {
+      const run = runWrapper([...standardArgs(await freePort()), '--executable', bad]);
+      const { code } = await run.exited;
+      expect(code).toBe(64);
+      expect(run.output().stderr).toContain('--executable');
+    }
     expect(existsSync(join(sandbox, 'serve.json'))).toBe(false);
   });
 });

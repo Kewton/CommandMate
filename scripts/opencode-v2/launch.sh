@@ -15,6 +15,14 @@
 #
 # Usage:
 #   launch.sh --port <N> --password-file <path> --directory <path>
+#             [--executable <path>]
+#
+# The executable
+#   The OpenCode V2 binary to run for both the server and the TUI. CommandMate
+#   passes the absolute path it identified as OpenCode V2 by `--version`
+#   (Issue #2952), which may be named `opencode` as well as `opencode2`, and
+#   which the pane's own PATH might resolve differently. Omitted, it is
+#   `opencode2` looked up on PATH.
 #
 # The password
 #   CommandMate generates one per launch and writes it to a 0600 file under
@@ -45,9 +53,10 @@ STOP_GRACE_TICKS=30 # x 0.1 s before SIGKILL
 port=""
 password_file=""
 directory=""
+executable=""
 
 usage() {
-  echo "Usage: ${PROGRAM_NAME} --port <N> --password-file <path> --directory <path>" >&2
+  echo "Usage: ${PROGRAM_NAME} --port <N> --password-file <path> --directory <path> [--executable <path>]" >&2
 }
 
 die() {
@@ -72,6 +81,12 @@ while [ $# -gt 0 ]; do
     --directory)
       [ $# -ge 2 ] || { usage; exit 64; }
       directory="$2"
+      shift 2
+      ;;
+    --executable)
+      [ $# -ge 2 ] || { usage; exit 64; }
+      executable="$2"
+      [ -n "$executable" ] || { usage; exit 64; }
       shift 2
       ;;
     -h | --help)
@@ -99,6 +114,12 @@ case "$READY_TIMEOUT_SECONDS" in
   '' | *[!0-9]*) READY_TIMEOUT_SECONDS=15 ;;
 esac
 [ -d "$directory" ] || die 64 "--directory is not a directory: ${directory}"
+if [ -n "$executable" ]; then
+  { [ -f "$executable" ] && [ -x "$executable" ]; } ||
+    die 64 "--executable is not an executable file: ${executable}"
+else
+  executable="opencode2"
+fi
 [ -r "$password_file" ] || die 66 "password file is not readable: ${password_file}"
 
 # `read` returns non-zero on a file without a trailing newline even though it
@@ -153,7 +174,7 @@ trap 'exit 143' TERM
 
 # The server's own output would only be painted over by the TUI's alternate
 # screen, and with OPENCODE_SERVER_PASSWORD set it prints no secret anyway.
-opencode2 serve --hostname 127.0.0.1 --port "$port" </dev/null >/dev/null 2>&1 &
+"$executable" serve --hostname 127.0.0.1 --port "$port" </dev/null >/dev/null 2>&1 &
 serve_pid=$!
 
 # Ready means `GET /openapi.json` answered 200 with our credentials. The
@@ -170,7 +191,7 @@ ready=0
 deadline=$((SECONDS + READY_TIMEOUT_SECONDS))
 while [ "$SECONDS" -lt "$deadline" ]; do
   if ! kill -0 "$serve_pid" 2>/dev/null; then
-    die 69 "opencode2 serve exited before answering on ${server_url}"
+    die 69 "${executable} serve exited before answering on ${server_url}"
   fi
   if probe_ready; then
     ready=1
@@ -178,14 +199,14 @@ while [ "$SECONDS" -lt "$deadline" ]; do
   fi
   sleep 0.25
 done
-[ "$ready" -eq 1 ] || die 69 "opencode2 serve did not answer on ${server_url} within ${READY_TIMEOUT_SECONDS}s"
+[ "$ready" -eq 1 ] || die 69 "${executable} serve did not answer on ${server_url} within ${READY_TIMEOUT_SECONDS}s"
 
 # Asynchronous commands in a non-interactive shell get /dev/null as stdin
 # unless they are given an explicit redirection, so the terminal is handed over
 # on fd 3. The TUI still shares this script's process group, which is the
 # pane's foreground group, so it keeps reading the terminal.
 exec 3<&0
-opencode2 --server "$server_url" "$directory" <&3 3<&- &
+"$executable" --server "$server_url" "$directory" <&3 3<&- &
 tui_pid=$!
 exec 3<&-
 

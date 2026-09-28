@@ -25,7 +25,15 @@ import { OpenCodeTool } from '@/lib/cli-tools/opencode';
 import { OpenCodeV2Tool, parseOpencodeV2Version } from '@/lib/cli-tools/opencode-v2';
 import { buildMissingToolMessage } from '@/lib/cli-tools/install-hints';
 import { prepareOpencodeLaunch } from '@/lib/hooks/sources/opencode/source';
-import { prepareOpencodeV2Launch } from '@/lib/hooks/sources/opencode-v2/source';
+import {
+  prepareOpencodeV2Launch,
+  resolveOpencodeV2LaunchScriptPath,
+} from '@/lib/hooks/sources/opencode-v2/source';
+import {
+  rememberOpencodeV2Port,
+  resetOpencodeV2PortAssignments,
+} from '@/lib/hooks/sources/opencode-v2/ports';
+import { writeOpencodeV2Password } from '@/lib/hooks/sources/opencode-v2/secrets';
 import { resetOpencodePortAssignments } from '@/lib/hooks/sources/opencode/ports';
 
 let sandbox: string;
@@ -48,6 +56,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  resetOpencodeV2PortAssignments();
   vi.unstubAllEnvs();
   clearOpencodeExecutableCache();
   removeTempDir(sandbox);
@@ -112,14 +121,35 @@ describe('only an `opencode` that is OpenCode V2 on PATH', () => {
     const resolved = (await resolveOpencodeV2Executable()).executable;
     expect(resolved).toEqual({ path: v2Path, version: '2.0.18', generation: 'v2' });
 
-    // The wrapper runs `opencode2` by name, so a V2 known only as `opencode`
-    // takes the standalone line — with the path that answered.
+    // With no server reserved it takes the standalone line — with the path
+    // that answered.
     const plan = prepareOpencodeV2Launch({
       target: { worktreeId: 'wt-2939', cliToolId: 'opencode-v2' },
       executablePath: resolved!.path,
       worktreePath: sandbox,
     });
     expect(plan.command).toBe(`'${v2Path}' --standalone '${sandbox}'`);
+  });
+
+  it('Issue #2952: with a server reserved, the wrapper runs that `opencode` by --executable', async () => {
+    const resolved = (await resolveOpencodeV2Executable()).executable;
+    expect(resolved?.path).toBe(v2Path);
+
+    const target = { worktreeId: 'wt-2952', cliToolId: 'opencode-v2' as const, instanceId: 'opencode-v2' };
+    rememberOpencodeV2Port(target, 4352, sandbox);
+    const passwordFile = writeOpencodeV2Password(target);
+
+    const plan = prepareOpencodeV2Launch({
+      target,
+      executablePath: resolved!.path,
+      worktreePath: sandbox,
+    });
+    expect(plan.command).toBe(
+      `bash '${resolveOpencodeV2LaunchScriptPath()}' --port 4352 ` +
+        `--password-file '${passwordFile}' --directory '${sandbox}' --executable '${v2Path}'`
+    );
+    expect(plan.command).not.toContain('--standalone');
+    expect(plan.env).toEqual({});
   });
 });
 
