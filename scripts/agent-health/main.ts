@@ -23,6 +23,7 @@ import path from 'path';
 import {
   parseAgentHealthArgs,
   RUN_BUDGET_SEC,
+  syncRecordFor,
   type AgentHealthOptions,
 } from '@/lib/agent-health/cli-args';
 import {
@@ -112,15 +113,18 @@ function acquireLock(lockPath: string): string | null {
   return null;
 }
 
-function emptyReport(startedAt: Date, errors: string[]): AgentHealthReport {
+function emptyReport(startedAt: Date, errors: string[], syncedFrom: string | null = null): AgentHealthReport {
+  const commit = commandmateCommit();
+  const sync = syncRecordFor(syncedFrom, commit);
   return {
     schemaVersion: 1,
     startedAt: startedAt.toISOString(),
     completedAt: new Date().toISOString(),
-    host: { commandmateCommit: commandmateCommit(), node: process.version },
+    host: { commandmateCommit: commit, node: process.version },
     tools: [],
     safety: { globalConfigRestored: [], tmuxSocket: AGENT_HEALTH_TMUX_SOCKET },
     scriptErrors: errors,
+    ...(sync ? { sync } : {}),
   };
 }
 
@@ -189,7 +193,7 @@ async function run(options: AgentHealthOptions, startedAt: Date): Promise<AgentH
   const lockError = acquireLock(lockPath);
   if (lockError) {
     log(lockError);
-    writeReportOrPrint(outPath, emptyReport(startedAt, [lockError]));
+    writeReportOrPrint(outPath, emptyReport(startedAt, [lockError], options.syncedFrom));
     return 2;
   }
 
@@ -358,11 +362,13 @@ async function run(options: AgentHealthOptions, startedAt: Date): Promise<AgentH
     scriptErrors.push(`後始末の後に本番ログへ ${PROBE_WORKTREE_ID} を含む行が ${lateLeak.length} 行増えた`);
   }
 
+  const commit = commandmateCommit();
+  const sync = syncRecordFor(options.syncedFrom, commit);
   const report: AgentHealthReport = {
     schemaVersion: 1,
     startedAt: startedAt.toISOString(),
     completedAt: new Date().toISOString(),
-    host: { commandmateCommit: commandmateCommit(), node: process.version },
+    host: { commandmateCommit: commit, node: process.version },
     tools: results,
     safety: {
       globalConfigRestored: restoreEntries,
@@ -375,6 +381,7 @@ async function run(options: AgentHealthOptions, startedAt: Date): Promise<AgentH
       },
     },
     ...(scriptErrors.length > 0 ? { scriptErrors } : {}),
+    ...(sync ? { sync } : {}),
   };
 
   if (!writeReportOrPrint(outPath, report)) scriptErrors.push(`レポートを書けなかった: ${outPath}`);

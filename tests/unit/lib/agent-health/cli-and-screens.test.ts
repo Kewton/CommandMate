@@ -21,6 +21,7 @@ describe('parseAgentHealthArgs', () => {
         timeoutPerToolSec: 150,
         statePath: null,
         serverLog: null,
+        syncedFrom: null,
       },
     });
   });
