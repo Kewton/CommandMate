@@ -117,7 +117,10 @@
         "command-code": "Log out of Command Code or a provider",
         "antigravity": "Log out"
       },
-      "quit": "Exit Codex CLI",
+      "quit": {
+        "codex": "Exit Codex CLI",
+        "opencode-v2": "Exit OpenCode V2"
+      },
       "diff": "Show Git diff (including untracked files)",
       "mention": "Attach file/folder for next interaction",
       "mcp": "Manage MCP servers and available tools",
@@ -126,7 +129,8 @@
         "claude": "Generate a CLAUDE.md guide for the repository",
         "copilot": "Initialize Copilot instructions for this repository",
         "opencode": "Run guided AGENTS.md setup",
-        "command-code": "Initialize AGENTS.md for this project"
+        "command-code": "Initialize AGENTS.md for this project",
+        "opencode-v2": "Run guided AGENTS.md setup"
       },
       "feedback": {
         "codex": "Send feedback to Codex team",
@@ -149,7 +153,8 @@
         "copilot": "Manage skills for enhanced capabilities",
         "opencode": "Browse and run available skills",
         "command-code": "Browse and open agent skills",
-        "antigravity": "List available skills"
+        "antigravity": "List available skills",
+        "opencode-v2": "Browse available skills"
       },
       "hooks": "View or manage hook configurations",
       "sessions": "Browse conversation history",
@@ -160,7 +165,8 @@
         "codex": "Exit the CLI",
         "copilot": "Exit the CLI",
         "command-code": "Exit Command Code",
-        "antigravity": "Exit the CLI"
+        "antigravity": "Exit the CLI",
+        "opencode-v2": "Exit OpenCode V2"
       },
       "models": "Switch AI model",
       "agents": {
@@ -168,7 +174,8 @@
         "claude": "Show a reminder to ask Claude to create or manage subagents, or to edit .claude/agents/ directly",
         "codex": "view and switch between all active agent sessions",
         "command-code": "Manage agent configurations",
-        "antigravity": "List available custom agents"
+        "antigravity": "List available custom agents",
+        "opencode-v2": "Switch agent"
       },
       "themes": "Change TUI theme",
       "editor": "Open editor for long messages",
@@ -182,7 +189,8 @@
       "bug": "Report a bug or share your conversation",
       "cd": {
         "claude": "Move this session to a new working directory",
-        "codex": "change the current working directory"
+        "codex": "change the current working directory",
+        "opencode-v2": "Change the working directory"
       },
       "chrome": "Configure Claude in Chrome settings",
       "claude-api": "Load Claude API reference material for your project's language (Python, TypeScript, Java, Go, Ruby, C#, PHP, or cURL) and Managed Agents reference",
@@ -192,7 +200,8 @@
       "dataviz": "Design guidance for charts, graphs, and dashboards",
       "debug": {
         "claude": "Enable debug logging for the current session and troubleshoot issues by reading the session debug log",
-        "opencode": "View debug information"
+        "opencode": "View debug information",
+        "opencode-v2": "View debug information"
       },
       "deep-research": "Fan out web searches on a question, fetch and cross-check sources, and synthesize a cited report",
       "design-login": "Authorize design-system access for /design-sync with your claude.ai account",
@@ -320,7 +329,10 @@
       "rubber-duck": "Get an independent critique of the current work",
       "search": "Search the conversation timeline",
       "session": "View and manage sessions",
-      "settings": "Open the settings UI, or show and set a single value",
+      "settings": {
+        "copilot": "Open the settings UI, or show and set a single value",
+        "opencode-v2": "Open settings"
+      },
       "share": "Share the session to a markdown file or a GitHub gist",
       "undo": "Rewind the last turn and revert file changes",
       "update": "Update the CLI to the latest version",
@@ -351,7 +363,10 @@
       "plan-review": "Open this session's latest plan in review",
       "plans": "Browse, review, and annotate saved plans",
       "pr-comments": "Fetch all PR comments for the current branch",
-      "reload": "Restart the CLI and resume this session, applying a staged update",
+      "reload": {
+        "command-code": "Restart the CLI and resume this session, applying a staged update",
+        "opencode-v2": "Reload configuration"
+      },
       "session-file": "Show the current session id and session file path",
       "taste": "Manage taste learning and usage",
       "todos": "Manage the session todo list",
@@ -368,7 +383,10 @@
       "daemon": "Manage the local background server",
       "warnings": "View retained warnings and diagnostic details",
       "credits": "Show remaining G1 credits and purchase link",
-      "open": "Open a file or view opened/edited files",
+      "open": {
+        "antigravity": "Open a file or view opened/edited files",
+        "opencode-v2": "Open a session or project"
+      },
       "schedule": "Run an instruction on a recurring schedule or as a one-time timer",
       "browser": "Invoke a browser agent for web tasks",
       "grill-me": "Have the agent interview you to align on a plan",
@@ -379,7 +397,16 @@
       "automation": "Interactively design and create a scheduled background automation",
       "migrate-workflows": "Migrate legacy workflows to skills",
       "artifact": "View and review artifacts",
-      "codesearch": "Search code in the workspace"
+      "codesearch": "Search code in the workspace",
+      "continue": "Switch to another session",
+      "pair": "Pair another device with this OpenCode",
+      "project": "Open a session or project",
+      "projects": "Open a session or project",
+      "q": "Exit OpenCode V2",
+      "stats": "Show usage statistics",
+      "thinking": "Switch the model variant",
+      "web": "Pair another device with this OpenCode",
+      "worktrees": "Manage workspaces"
     }
   },
   "session": {

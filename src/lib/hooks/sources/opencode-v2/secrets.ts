@@ -141,8 +141,23 @@ export function writeOpencodeV2Password(target: AgentInstanceRef): string {
 
 /** The instance's password, or null when it has no (readable, non-empty) file. */
 export function readOpencodeV2Password(target: AgentInstanceRef): string | null {
+  return readPasswordFile(getOpencodeV2PasswordFilePath(target));
+}
+
+/**
+ * {@link readOpencodeV2Password} by composite key — the form the persisted port
+ * assignments are keyed by (Issue #2944: the slash palette knows a worktree,
+ * not an instance, so it walks `ports.json` and needs each entry's password).
+ */
+export function readOpencodeV2PasswordByKey(key: string): string | null {
+  return readPasswordFile(
+    join(getOpencodeV2StateDir(), `${opencodeV2FileStem(key)}${OPENCODE_V2_PASSWORD_SUFFIX}`)
+  );
+}
+
+function readPasswordFile(path: string): string | null {
   try {
-    const value = readFileSync(getOpencodeV2PasswordFilePath(target), 'utf8').split('\n')[0];
+    const value = readFileSync(path, 'utf8').split('\n')[0];
     return value !== undefined && value.length > 0 ? value : null;
   } catch {
     return null;
