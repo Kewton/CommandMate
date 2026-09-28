@@ -173,6 +173,21 @@ if ((process.env.CM_OPENCODE_PORT_FILE ?? '').trim() === '') {
   );
 }
 
+// Issue #2948: OpenCode V2 keeps its per-instance passwords and port
+// assignments under `~/.commandmate/opencode-v2` unless `CM_OPENCODE_V2_DIR`
+// says otherwise (`getOpencodeV2StateDir()`). A test that reaches the
+// startup sweep (`server.ts` → `reattachOpencodeV2EventStreams()`) with no
+// live tmux session deletes every record there — the records of the user's
+// running OpenCode V2 instances. Same default and same per-pid scoping as
+// CM_OPENCODE_PORT_FILE above. A test that stubs the variable still wins.
+if ((process.env.CM_OPENCODE_V2_DIR ?? '').trim() === '') {
+  process.env.CM_OPENCODE_V2_DIR = join(
+    tmpdir(),
+    'commandmate-test-opencode-v2',
+    String(process.pid)
+  );
+}
+
 // Mock next-intl for all component tests
 vi.mock('next-intl', () => ({
   useTranslations: (namespace?: string) => {
