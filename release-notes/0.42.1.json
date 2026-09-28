@@ -1,0 +1,16 @@
+{
+  "version": "0.42.1",
+  "date": "2026-09-28",
+  "highlight": {
+    "ja": "opencode の新しい版で、起動直後に送信できないことがある問題を直しました。",
+    "en": "Sending to a newly started opencode session on recent versions works again."
+  },
+  "added": [],
+  "improved": [],
+  "fixed": [
+    {
+      "ja": "opencode 1.18.31 以降で、起動直後の入力待ちを認識できず送信が拒否されることがある問題を直しました。",
+      "en": "Fixed messages sometimes being refused right after opencode 1.18.31 or later started, because its input prompt was not recognized."
+    }
+  ]
+}
