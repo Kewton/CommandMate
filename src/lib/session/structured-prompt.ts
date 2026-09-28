@@ -159,6 +159,36 @@ export function isAddressableDecision(value: unknown): value is string {
 }
 
 /**
+ * Whether the agent is holding a decision this server can answer over the
+ * agent's own API right now (Issue #2965).
+ *
+ * The gate on the two "the detection layer could not read this" rows — the
+ * unclassified-frame row and the structured-prompt row
+ * ({@link buildStructuredPromptQuestion}). Both exist to record a dialog nobody
+ * could answer; while this is true somebody can, by id, and the row is a
+ * meaningless line in the chat (OpenCode V2 approvals and questions, #2945;
+ * v1 opencode's approvals, which carry the same `permission-id`). All three
+ * conjuncts are required, and each failing one puts the row back — the safe
+ * side:
+ *
+ *  - the source publishes per-decision ids (`eventIdentity: 'permission-id'`);
+ *  - a pending decision carries one ({@link isAddressableDecision});
+ *  - its delivery window has not expired (a verdict can still reach the agent).
+ *
+ * @param eventIdentity - `capabilities.eventIdentity` of the tool's event source
+ * @param pendingDecisions - the decisions the turn is holding, as published
+ */
+export function hasApiAnswerableDecision(
+  eventIdentity: string | null,
+  pendingDecisions: readonly { id: string | null; deliveryExpired: boolean }[],
+): boolean {
+  if (eventIdentity !== 'permission-id') return false;
+  return pendingDecisions.some(
+    (decision) => isAddressableDecision(decision.id) && !decision.deliveryExpired,
+  );
+}
+
+/**
  * The question an `AskUserQuestion` call asked, for a dialog nobody parsed
  * (Issue #1726).
  *

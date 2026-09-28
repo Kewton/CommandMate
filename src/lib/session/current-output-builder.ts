@@ -135,6 +135,7 @@ import { classifyLayerDisagreement, reportLayerDisagreement } from '@/lib/sessio
 import {
   buildStructuredPromptData,
   buildStructuredPromptHistoryRecord,
+  hasApiAnswerableDecision,
   isAddressableDecision,
   structuredDecisionOptionsFor,
   type StructuredAskUserQuestionSummary,
@@ -1995,7 +1996,22 @@ async function buildPayload(
   // an unclassified frame, and writing a "detection failed" row for a turn the
   // agent itself told us had ended would put a false stall into the audit trail
   // `capture --prompts` prints.
-  const unclassifiedVerdict = observeUnclassifiedFrame(compositeKey, merged.isUnclassifiedActive);
+  //
+  // Issue #2965: not while the agent holds a decision this server can answer by
+  // id (OpenCode V2 / opencode approvals and questions). The frame may still be
+  // one the scraper cannot read, but "nothing could answer it" is false then,
+  // and the row landed in the chat as a meaningless assistant line. Fed to the
+  // tracker as "not unclassified" rather than merely not written, so the run —
+  // and the 60 seconds — start afresh if the frame is still unreadable once the
+  // decision is gone (answered, expired, or the source dropped).
+  const answerableOverAgentApi = hasApiAnswerableDecision(
+    eventSource.capabilities.eventIdentity,
+    structuredEvents.pendingDecisions ?? [],
+  );
+  const unclassifiedVerdict = observeUnclassifiedFrame(
+    compositeKey,
+    merged.isUnclassifiedActive && !answerableOverAgentApi,
+  );
   if (unclassifiedVerdict.shouldRecord) {
     recordUnclassifiedFrame(db, {
       worktreeId,
@@ -2037,7 +2053,18 @@ async function buildPayload(
 
   // Issue #1725: the structured layer saw a dialog the scraper did not. That
   // gap is the fact worth keeping — see recordStructuredPrompt.
-  if (promptWaiting !== null && structuredFacts !== null && !scraperPromptWaiting && !promptWaiting.recorded) {
+  //
+  // Issue #2965: except while that dialog can be answered over the agent's API
+  // — the live payload already carries its id and replies, so the row says
+  // nothing true. Not marked recorded either: should the decision expire with
+  // the dialog still open, the row is written then (the safe side).
+  if (
+    promptWaiting !== null &&
+    structuredFacts !== null &&
+    !scraperPromptWaiting &&
+    !promptWaiting.recorded &&
+    !answerableOverAgentApi
+  ) {
     markStructuredPromptRecorded(worktreeId, cliToolId, instanceId);
     recordStructuredPrompt(db, {
       worktreeId,
