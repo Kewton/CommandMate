@@ -197,16 +197,18 @@ const TABLE: Record<string, DeclaredRow> = {
     transcriptHistory: 'pull',
     stopReportsSelfResume: false,
   },
-  // Issue #2934 (Epic #2370 Phase 1). A pull source like opencode, with no
-  // resync. `permission.replied` / `form.replied` retire the decision, so the
+  // Issue #2934 (Epic #2370 Phase 1). A pull source like opencode.
+  // `permission.replied` / `form.replied` retire the decision, so the
   // reply releases the prompt. Issue #2945 (Phase 2): the `per_…` / `frm_…` id
-  // the reply URL takes is the per-decision identity, as on v1.
+  // the reply URL takes is the per-decision identity, as on v1. Issue #2951:
+  // its pending lists are re-read on re-connect and when Auto-Yes is switched
+  // on, with no session-status poll — `pending-list`.
   'opencode-v2': {
     permissionHookPredictsDialog: false,
     sessionStartMayArriveLate: false,
     permissionReplyReleasesPrompt: true,
     eventIdentity: 'permission-id',
-    resync: 'none',
+    resync: 'pending-list',
     // Issue #2940: each finished turn is written from the server's own record.
     transcriptHistory: 'push',
     stopReportsSelfResume: false,
@@ -300,7 +302,8 @@ describe('[#1924] AgentSourceCapabilities — the table of §4 D3', () => {
     expect(identified).toEqual(['opencode', 'opencode-v2']);
 
     const resyncing = Object.keys(TABLE).filter((id) => TABLE[id].resync !== 'none');
-    expect(resyncing).toEqual(['opencode']);
+    // Issue #2951: OpenCode V2's pending lists are re-read too.
+    expect(resyncing).toEqual(['opencode', 'opencode-v2']);
   });
 
   it('names exactly the six sources with a second writer, and which kind (#2252, #2940)', () => {

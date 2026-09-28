@@ -100,9 +100,7 @@ import {
   resolveStructuredQuestionAnswer,
   STRUCTURED_REJECT_MESSAGE,
 } from '@/lib/hooks/structured-decision-response';
-import { STRUCTURED_DECISION_OPTIONS } from '@/lib/session/structured-prompt';
-import { OPENCODE_V2_DECISION_LABELS } from '@/lib/hooks/sources/opencode-v2/decision-labels';
-import { OPENCODE_V2_CLI_TOOL_ID } from '@/lib/hooks/sources/opencode-v2/tool-id';
+import { structuredDecisionOptionsFor } from '@/lib/session/structured-prompt';
 import { PERMISSION_REPLIED_DETAIL } from '@/lib/hooks/agent-event-types';
 import { recordAgentEvent } from '@/lib/session/agent-event-state';
 import { applyEventToActiveTask } from '@/lib/tasks/task-transition-service';
@@ -610,14 +608,16 @@ async function answerPendingApproval({
   cliToolId: CLIToolType;
   instanceId: string;
 }): Promise<NextResponse> {
-  const option = resolveStructuredDecisionOption(answer);
+  // Issue #2951: matched in the tool's own words, so OpenCode V2's
+  // `Always allow` resolves (and `Allow always` still does, as an alias).
+  const option = resolveStructuredDecisionOption(answer, cliToolId);
   const verdict = option ? verdictFor(option.number) : null;
   if (!option || !verdict) {
     return NextResponse.json(
       {
         error:
           `'${answer}' is not one of the verdicts this approval accepts. ` +
-          STRUCTURED_DECISION_OPTIONS.map(
+          structuredDecisionOptionsFor(cliToolId).map(
             (each) => `${each.number} = ${each.label} (${each.reply})`
           ).join(', ') +
           '.',
@@ -652,11 +652,9 @@ async function answerPendingApproval({
   });
 
   // Issue #2945: OpenCode V2's TUI draws `Always allow`, so the receipt names
-  // the verdict in its words. The number and the wire reply are unchanged.
-  const optionLabel =
-    cliToolId === OPENCODE_V2_CLI_TOOL_ID
-      ? OPENCODE_V2_DECISION_LABELS[option.reply] ?? option.label
-      : option.label;
+  // the verdict in its words. Since #2951 the option resolved above already
+  // carries them. The number and the wire reply are unchanged.
+  const optionLabel = option.label;
 
   return NextResponse.json({
     success: delivered,

@@ -17,7 +17,10 @@ import type {
   StructuredPromptWaitingData,
 } from '@/lib/session/structured-prompt';
 import {
+  isQuestionFreeTextNumeric,
+  QUESTION_FREE_TEXT_MAX_LENGTH,
   readPromptQuestionChoices,
+  readQuestionFreeText,
   type PromptQuestionChoices,
 } from '@/components/worktree/prompt-decision-id';
 import { ErrorBoundary } from '@/components/error/ErrorBoundary';
@@ -796,6 +799,12 @@ function StructuredDecisionActions({
  * read as a number by that resolver, and a label sent verbatim would then be a
  * choice the operator did not click. The number cannot collide with itself.
  *
+ * Issue #2951: a question that takes a typed answer (`choices.custom`) also
+ * gets a text input. Typing clears the radio and picking a radio clears the
+ * text, so what Submit sends is never ambiguous; the typed text is sent as the
+ * answer, guarded by `readQuestionFreeText` (digits alone would be read as an
+ * option number, so they are refused here with a hint).
+ *
  * Single-select only. `multiSelect` is on the agent's own payload but
  * `summarizeAskUserQuestion` does not carry it to the browser, so the panel
  * cannot know when several answers are allowed; the API accepts `1,3` for the
@@ -814,6 +823,9 @@ function StructuredQuestionActions({
   const t = useTranslations('prompt');
   const groupName = useId();
   const [selected, setSelected] = useState<number | null>(null);
+  const [freeText, setFreeText] = useState('');
+  const typedAnswer = choices.custom ? readQuestionFreeText(freeText) : null;
+  const typedIsNumeric = choices.custom === true && isQuestionFreeTextNumeric(freeText);
 
   const getOptionClasses = useCallback(
     (optionNumber: number) => {
@@ -835,7 +847,10 @@ function StructuredQuestionActions({
         <RadioGroup
           name={groupName}
           value={selected != null ? String(selected) : ''}
-          onValueChange={(v) => setSelected(Number(v))}
+          onValueChange={(v) => {
+            setSelected(Number(v));
+            setFreeText('');
+          }}
           disabled={disabled}
           className="flex flex-col gap-2"
         >
@@ -851,13 +866,40 @@ function StructuredQuestionActions({
           ))}
         </RadioGroup>
       </fieldset>
+      {choices.custom && (
+        <div>
+          <label htmlFor={`free-text-${groupName}`} className="block text-sm text-muted-foreground mb-1">
+            {t('freeTextLabel')}
+          </label>
+          <input
+            id={`free-text-${groupName}`}
+            data-testid="structured-question-free-text"
+            type="text"
+            value={freeText}
+            maxLength={QUESTION_FREE_TEXT_MAX_LENGTH}
+            onChange={(e) => {
+              setFreeText(e.target.value);
+              if (e.target.value !== '') setSelected(null);
+            }}
+            disabled={disabled}
+            placeholder={t('enterValuePlaceholder')}
+            className="w-full px-4 py-2 border-2 border-input dark:bg-muted dark:text-foreground rounded-lg focus:outline-none focus:border-accent-500 disabled:opacity-50"
+          />
+          {typedIsNumeric && (
+            <p className="mt-1 text-sm text-muted-foreground" data-testid="structured-question-free-text-numeric">
+              {t('freeTextNumericHint')}
+            </p>
+          )}
+        </div>
+      )}
       <button
         type="button"
         data-testid="structured-question-submit"
         onClick={() => {
-          if (selected !== null) onRespond(String(selected));
+          if (typedAnswer !== null) onRespond(typedAnswer);
+          else if (selected !== null) onRespond(String(selected));
         }}
-        disabled={disabled || selected === null}
+        disabled={disabled || (selected === null && typedAnswer === null)}
         className={`w-full ${BUTTON_BASE_STYLES} ${BUTTON_PRIMARY_STYLES}`}
       >
         {t('submit')}

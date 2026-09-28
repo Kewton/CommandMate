@@ -136,7 +136,7 @@ import {
   buildStructuredPromptData,
   buildStructuredPromptHistoryRecord,
   isAddressableDecision,
-  STRUCTURED_DECISION_OPTIONS,
+  structuredDecisionOptionsFor,
   type StructuredAskUserQuestionSummary,
   type StructuredPromptFacts,
   type StructuredPromptSource,
@@ -1102,6 +1102,9 @@ function summarizeAskUserQuestion(
     question: first.question,
     labels: first.choices.map((choice) => choice.label),
     questionCount: episode!.spec.questions.length,
+    // Issue #2951: a question that takes a typed answer, so the panel and the
+    // phone sheet can offer an input for it.
+    ...(first.custom ? { custom: true as const } : {}),
   };
 }
 
@@ -1882,7 +1885,10 @@ async function buildPayload(
   const addressesQuestion =
     promptWaiting !== null && pendingDecisionKind(promptWaiting.toolName) === 'question';
   const decisionOptions =
-    addressableDecisionId !== null && !addressesQuestion ? STRUCTURED_DECISION_OPTIONS : null;
+    addressableDecisionId !== null && !addressesQuestion
+      ? // Issue #2951: in the tool's own words (OpenCode V2: `Always allow`).
+        structuredDecisionOptionsFor(cliToolId)
+      : null;
 
   const structuredFacts: StructuredPromptFacts | null =
     promptWaiting === null

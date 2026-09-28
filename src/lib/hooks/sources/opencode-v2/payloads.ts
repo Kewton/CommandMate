@@ -315,7 +315,12 @@ export function parseOpencodeV2Form(payload: Record<string, unknown>): AskUserQu
     })),
   });
   if (questions === null) return null;
-  return { questions, promptId: formId };
+  // Issue #2951: a field that takes a typed answer says so, so the surfaces
+  // can offer an input for it. `questions` is `fields` one-to-one.
+  const withCustom = questions.map((entry, index) =>
+    fields[index]?.custom ? { ...entry, custom: true as const } : entry
+  );
+  return { questions: withCustom, promptId: formId };
 }
 
 /** Turn a form into a {@link PendingDecision}; `raw` keeps the form for the reply. */

@@ -452,6 +452,12 @@ export interface AgentSourceCapabilities {
    * in order to decide between re-arming a turn and synthesising the `stop` it
    * missed. Push sources answer `'none'` — a hook that was dropped is gone, and
    * there is nothing to poll.
+   *
+   * `'pending-list'` for OpenCode V2 (Issue #2951): its server lists what it is
+   * waiting on (`GET /api/permission/request`, `GET /api/form`), which is read
+   * again on every re-connect and whenever Auto-Yes is switched on
+   * (`recheckPendingDecisions`), but it has no session-status poll, so a
+   * re-connect does not synthesise a missed `stop`.
    */
   readonly resync: SourceResync;
 }
@@ -464,7 +470,7 @@ export interface AgentSourceCapabilities {
  * declares it, so the value has to be handed across that edge as a parameter.
  * A second inline copy of the union would be a second place to widen it.
  */
-export type SourceResync = 'none' | 'session-status-poll';
+export type SourceResync = 'none' | 'session-status-poll' | 'pending-list';
 
 /**
  * Everything {@link AgentEventSource.prepareLaunch} is given (Issue #1846).

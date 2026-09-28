@@ -19,10 +19,12 @@
  *     watchdog that forces a reconnect on a silent socket.
  * Any other failure waits out a backoff and tries again.
  *
- * Unlike v1's subscription this one keeps no turn gate and no resync of pending
- * decisions: those are Phase 2's. It does record the reply (Issue #2940): a
- * frame that ends a turn also has `./history` read the finished turn off
- * `GET /api/session/{id}/message`.
+ * Unlike v1's subscription this one keeps no turn gate. It does record the
+ * reply (Issue #2940): a frame that ends a turn also has `./history` read the
+ * finished turn off `GET /api/session/{id}/message`. And (Issue #2951) each
+ * connection first replays what the server is still waiting on
+ * ({@link resyncOpencodeV2Pending}), as v1's `resyncPending` does, so an
+ * approval raised while the stream was down is recorded and adjudicated.
  *
  * @module lib/hooks/sources/opencode-v2/subscription
  */
@@ -35,7 +37,10 @@ import type {
   SourceLiveness,
   Subscription,
 } from '../types';
+import { isPlainObject } from '../event-mapper';
 import {
+  fetchOpencodeV2PendingForms,
+  fetchOpencodeV2PendingPermissions,
   openOpencodeV2EventStream,
   probeOpencodeV2Server,
   type OpencodeV2Frame,
@@ -60,6 +65,13 @@ export const OPENCODE_V2_RECONNECT_BACKOFF_MS: readonly number[] = [
 
 /** Consecutive `rejected` probes after which the port is taken to be someone else's. */
 export const OPENCODE_V2_MAX_REJECTED_PROBES = 3;
+
+/**
+ * Cap on decisions replayed per list on one connection (Issue #2951). The same
+ * bound, for the same reason, as v1's `MAX_RESYNCED_DECISIONS`: the list comes
+ * off a server CommandMate does not police.
+ */
+export const OPENCODE_V2_MAX_RESYNCED_DECISIONS = 50;
 
 interface SubscriptionState {
   readonly key: string;
@@ -298,6 +310,13 @@ async function runStream(state: SubscriptionState): Promise<void> {
         );
         markAlive(state);
         attempt = 0;
+        // Issue #2951: before the first live frame, so an approval raised while
+        // the stream was down reaches the same ingest (and Auto-Yes) as a live
+        // one. A frame for the same id on the new stream is then a duplicate by
+        // identity, not a second approval.
+        await resyncOpencodeV2Pending(state.target, state.port, password, (frame) =>
+          deliver(state, frame)
+        );
         for await (const item of items) {
           if (state.closed) break;
           markAlive(state);
@@ -321,6 +340,74 @@ async function runStream(state: SubscriptionState): Promise<void> {
     await waitUnlessAborted(backoffFor(attempt), state.lifetimeController.signal);
     attempt += 1;
   }
+}
+
+/**
+ * Replay what the server is still waiting on as the frames that announced it
+ * (Issue #2951).
+ *
+ * `GET /api/permission/request` entries become `permission.asked` frames and
+ * `GET /api/form` entries `form.created` frames (the form nested as
+ * `data.form`, as 2.0.18 sends it), so one mapper and one parser cover both
+ * arrival routes. Never throws; an unreachable server replays nothing.
+ *
+ * Exported for the tests.
+ *
+ * @returns How many frames were replayed
+ */
+export async function resyncOpencodeV2Pending(
+  target: AgentInstanceRef,
+  port: number,
+  password: string,
+  replay: (frame: OpencodeV2Frame) => void
+): Promise<number> {
+  let replayed = 0;
+  try {
+    const [permissions, forms] = await Promise.all([
+      fetchOpencodeV2PendingPermissions(port, password),
+      fetchOpencodeV2PendingForms(port, password),
+    ]);
+    const each = (
+      entries: unknown[] | null,
+      type: string,
+      wrap: (entry: Record<string, unknown>) => Record<string, unknown>
+    ): void => {
+      const list = (entries ?? []).filter(isPlainObject);
+      const kept = list.slice(0, OPENCODE_V2_MAX_RESYNCED_DECISIONS);
+      if (list.length > kept.length) {
+        logger.warn('opencode-v2-resync-truncated', {
+          worktreeId: target.worktreeId,
+          instanceId: target.instanceId ?? target.cliToolId,
+          type,
+          examined: kept.length,
+          skipped: list.length - kept.length,
+          limit: OPENCODE_V2_MAX_RESYNCED_DECISIONS,
+        });
+      }
+      for (const entry of kept) {
+        const id = typeof entry.id === 'string' && entry.id !== '' ? entry.id : null;
+        if (id === null) continue;
+        replay({ id: `resync_${id}`, type, data: wrap(entry) });
+        replayed += 1;
+      }
+    };
+    each(permissions, 'permission.asked', (entry) => entry);
+    each(forms, 'form.created', (entry) => ({ form: entry }));
+  } catch (error) {
+    logger.warn('opencode-v2-resync-failed', {
+      worktreeId: target.worktreeId,
+      instanceId: target.instanceId ?? target.cliToolId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+  if (replayed > 0) {
+    logger.info('opencode-v2-resync', {
+      worktreeId: target.worktreeId,
+      instanceId: target.instanceId ?? target.cliToolId,
+      replayed,
+    });
+  }
+  return replayed;
 }
 
 /**

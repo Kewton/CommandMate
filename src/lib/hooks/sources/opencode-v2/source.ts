@@ -299,7 +299,11 @@ export const opencodeV2AgentEventSource: AgentEventSource = definePullEventSourc
     // `permission.replied` / `form.replied` settle. Moves together with
     // `extractEventIdentity` below.
     eventIdentity: 'permission-id',
-    resync: 'none',
+    // Issue #2951: `listPending` re-reads the server's own lists, so Auto-Yes
+    // switched on under an open approval answers it
+    // (`recheckPendingDecisions`), and each re-connect replays them
+    // (`./subscription`). No session-status poll, hence not v1's value.
+    resync: 'pending-list',
     // Issue #2940: the subscription writes each finished turn from
     // `GET /api/session/{id}/message` (`./history`), so the scraper stands
     // down while it is live.
