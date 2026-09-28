@@ -127,7 +127,7 @@ const SYSTEM_ROW_REQUEST_ID_PREFIXES = [
 /**
  * Whether this tool's reply is read out of a transcript rather than off a screen.
  *
- * For the five that answer `true` the ledger is authoritative: a row with no
+ * For the six that answer `true` the ledger is authoritative: a row with no
  * turn marker was written by the SCRAPER, and for these tools a scraped row is
  * never the answer — it is a footer line, a half-drawn frame or the ANSI dump
  * the send path flushes (Issues #2398 / #2400). The relay may therefore hold
@@ -154,9 +154,9 @@ const TRANSCRIPT_READER_TOOLS: Readonly<Record<CLIToolType, boolean>> = {
   copilot: false,
   gemini: false,
   'vibe-local': false,
-  // Issue #2934: OpenCode V2 Phase 1 reads no transcript (History is Phase 2),
-  // so the scraper's row is its only record.
-  'opencode-v2': false,
+  // Issue #2940: OpenCode V2's replies are written from its server
+  // (`GET /api/session/{id}/message`) under `oc-turn:`, like opencode's.
+  'opencode-v2': true,
 };
 
 /**

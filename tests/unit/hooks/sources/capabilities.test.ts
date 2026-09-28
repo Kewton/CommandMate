@@ -207,7 +207,8 @@ const TABLE: Record<string, DeclaredRow> = {
     permissionReplyReleasesPrompt: true,
     eventIdentity: null,
     resync: 'none',
-    transcriptHistory: null,
+    // Issue #2940: each finished turn is written from the server's own record.
+    transcriptHistory: 'push',
     stopReportsSelfResume: false,
   },
 };
@@ -301,7 +302,7 @@ describe('[#1924] AgentSourceCapabilities — the table of §4 D3', () => {
     expect(resyncing).toEqual(['opencode']);
   });
 
-  it('names exactly the five sources with a second writer, and which kind (#2252)', () => {
+  it('names exactly the six sources with a second writer, and which kind (#2252, #2940)', () => {
     // The column-wise reading of Issue #2197's addition, with #2198's fourth
     // source and #2252's fifth in it. Two departures from "nobody but the
     // scraper", and they are different departures: opencode is pushed the reply
@@ -314,12 +315,12 @@ describe('[#1924] AgentSourceCapabilities — the table of §4 D3', () => {
     expect(pull).toEqual(['claude', 'codex', 'antigravity', 'command-code']);
 
     const push = Object.keys(TABLE).filter((id) => TABLE[id].transcriptHistory === 'push');
-    expect(push).toEqual(['opencode']);
+    // Issue #2940: OpenCode V2 joins opencode — its subscription writes each
+    // finished turn from `GET /api/session/{id}/message`.
+    expect(push).toEqual(['opencode', 'opencode-v2']);
 
     const scraperOnly = Object.keys(TABLE).filter((id) => TABLE[id].transcriptHistory === null);
-    // Issue #2934: OpenCode V2's History (`GET /api/session/{id}/message`) is
-    // Phase 2, so for now the scraper is its only writer.
-    expect(scraperOnly).toEqual(['gemini', 'copilot', 'opencode-v2']);
+    expect(scraperOnly).toEqual(['gemini', 'copilot']);
   });
 
   it('names exactly one source whose stop can say it will resume by itself (#2614)', () => {

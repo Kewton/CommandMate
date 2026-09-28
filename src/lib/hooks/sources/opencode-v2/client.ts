@@ -1,13 +1,15 @@
 /**
  * HTTP client for an OpenCode V2 server CommandMate started (Issue #2934).
  *
- * Two calls, both to the loopback server `scripts/opencode-v2/launch.sh` runs
+ * Three calls, all to the loopback server `scripts/opencode-v2/launch.sh` runs
  * in the instance's pane:
  *
  *  - {@link probeOpencodeV2Server}: `GET /openapi.json` — the same request the
  *    wrapper waits on before it starts the TUI;
  *  - {@link openOpencodeV2EventStream}: `GET /api/event`, the SSE stream the
- *    subscription reads its state from.
+ *    subscription reads its state from;
+ *  - {@link fetchOpencodeV2SessionMessagesPage}: `GET /api/session/{id}/message`,
+ *    the stored turns History is written from (Issue #2940).
  *
  * Both authenticate with Basic `opencode:<password>`, the password read from
  * the instance's file (`./secrets`) at call time. The value is put into a
@@ -251,5 +253,64 @@ export async function* iterateOpencodeV2Stream(
     yield* convert(parser.flush());
   } finally {
     await reader.cancel().catch(() => {});
+  }
+}
+
+/** How long one `GET /api/session/{id}/message` may take (Issue #2940). */
+export const OPENCODE_V2_MESSAGES_TIMEOUT_MS = 5_000;
+
+/** Largest `/message` response body accepted, in characters (Issue #2940). */
+export const MAX_OPENCODE_V2_MESSAGES_BODY_CHARS = 8 * 1024 * 1024;
+
+/** Messages asked for per page (Issue #2940). */
+export const OPENCODE_V2_MESSAGES_PAGE_SIZE = 100;
+
+/**
+ * One page of `GET /api/session/{id}/message` (Issue #2940).
+ *
+ * Measured on 2.0.18: `{data: [...], cursor: {previous, next}}`, newest first
+ * with `order=desc`. `cursor.next` walks towards older messages and must be
+ * sent without `order`.
+ *
+ * @param cursor - `cursor.next` of the previous page, or null for the newest page
+ * @returns The page, or null when the server did not answer it (any status but
+ *   200, a timeout, a body that is not the expected object). Never throws.
+ */
+export async function fetchOpencodeV2SessionMessagesPage(
+  port: number,
+  password: string,
+  sessionId: string,
+  cursor: string | null
+): Promise<{ data: unknown[]; next: string | null } | null> {
+  const query = new URLSearchParams({ limit: String(OPENCODE_V2_MESSAGES_PAGE_SIZE) });
+  if (cursor === null) query.set('order', 'desc');
+  else query.set('cursor', cursor);
+  try {
+    const response = await fetch(
+      `${opencodeV2BaseUrl(port)}/api/session/${encodeURIComponent(sessionId)}/message?${query}`,
+      {
+        headers: {
+          Accept: 'application/json',
+          Authorization: opencodeV2AuthorizationHeader(password),
+        },
+        redirect: 'error',
+        signal: AbortSignal.timeout(OPENCODE_V2_MESSAGES_TIMEOUT_MS),
+      }
+    );
+    if (response.status !== 200) {
+      await response.body?.cancel().catch(() => {});
+      return null;
+    }
+    const text = await response.text();
+    if (text.length > MAX_OPENCODE_V2_MESSAGES_BODY_CHARS) return null;
+    const parsed: unknown = JSON.parse(text);
+    if (!isPlainObject(parsed) || !Array.isArray(parsed.data)) return null;
+    const next =
+      isPlainObject(parsed.cursor) && typeof parsed.cursor.next === 'string'
+        ? parsed.cursor.next
+        : null;
+    return { data: parsed.data, next };
+  } catch {
+    return null;
   }
 }
