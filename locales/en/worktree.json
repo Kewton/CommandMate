@@ -114,7 +114,8 @@
         "codex": "Sign out from Codex",
         "claude": "Sign out of your Anthropic account",
         "copilot": "Log out of the current OAuth session",
-        "command-code": "Log out of Command Code or a provider"
+        "command-code": "Log out of Command Code or a provider",
+        "antigravity": "Log out"
       },
       "quit": "Exit Codex CLI",
       "diff": "Show Git diff (including untracked files)",
@@ -131,7 +132,8 @@
         "codex": "Send feedback to Codex team",
         "claude": "Send feedback about Claude Code",
         "copilot": "Provide feedback about the CLI",
-        "command-code": "Report a bug or share feedback on GitHub"
+        "command-code": "Report a bug or share feedback on GitHub",
+        "antigravity": "Submit qualitative feedback to improve the agent"
       },
       "plan": "Toggle plan mode",
       "goal": "Set goal for current session",
@@ -146,7 +148,8 @@
         "claude": "Manage Claude Code skills",
         "copilot": "Manage skills for enhanced capabilities",
         "opencode": "Browse and run available skills",
-        "command-code": "Browse and open agent skills"
+        "command-code": "Browse and open agent skills",
+        "antigravity": "List available skills"
       },
       "hooks": "View or manage hook configurations",
       "sessions": "Browse conversation history",
@@ -156,14 +159,16 @@
         "claude": "Exit the CLI",
         "codex": "Exit the CLI",
         "copilot": "Exit the CLI",
-        "command-code": "Exit Command Code"
+        "command-code": "Exit Command Code",
+        "antigravity": "Exit the CLI"
       },
       "models": "Switch AI model",
       "agents": {
         "opencode": "List and manage available agents",
         "claude": "Show a reminder to ask Claude to create or manage subagents, or to edit .claude/agents/ directly",
         "codex": "view and switch between all active agent sessions",
-        "command-code": "Manage agent configurations"
+        "command-code": "Manage agent configurations",
+        "antigravity": "List available custom agents"
       },
       "themes": "Change TUI theme",
       "editor": "Open editor for long messages",
@@ -199,7 +204,10 @@
       "insights": "Generate a report analyzing your Claude Code sessions, including project areas, interaction patterns, and friction points",
       "install-github-app": "Install the Claude GitHub App for a repository, with an optional step to set up GitHub Actions workflows and secrets",
       "install-slack-app": "Install the Claude Slack app",
-      "keybindings": "Open your keyboard shortcuts file",
+      "keybindings": {
+        "claude": "Open your keyboard shortcuts file",
+        "antigravity": "Set custom keybindings"
+      },
       "login": {
         "claude": "Sign in to your Anthropic account",
         "copilot": "Log in to Copilot",
@@ -221,7 +229,10 @@
       "release-notes": "View the changelog in an interactive version picker",
       "reload-plugins": "Reload all active plugins to apply pending changes without restarting",
       "reload-skills": "Re-scan skill and command directories so skills added or changed on disk during the session become available without restarting",
-      "remote-control": "Make this session available for Remote Control from claude.ai",
+      "remote-control": {
+        "claude": "Make this session available for Remote Control from claude.ai",
+        "antigravity": "Turn on remote control for this session (off to disable)"
+      },
       "remote-env": "Choose the default environment for cloud agents",
       "rename": "Rename the current session or thread",
       "run": "Launch and drive your project's app to see a change working, not only passing tests",
@@ -238,18 +249,25 @@
       "team-onboarding": "Generate a team onboarding guide from your Claude Code usage history",
       "teleport": "Pull a Claude Code on the web session into this terminal: opens a picker, then fetches the branch and conversation",
       "theme": "Choose the color and syntax highlighting theme",
-      "tui": "Set the terminal UI renderer and relaunch into it with your conversation intact",
+      "tui": {
+        "claude": "Set the terminal UI renderer and relaunch into it with your conversation intact",
+        "codex": "Choose the TUI mode for the next launch"
+      },
       "ultrareview": "Run a deep, multi-agent code review in a cloud sandbox with ultrareview",
       "upgrade": "Open the upgrade page in your browser to switch to a higher plan tier",
       "usage-credits": "Configure usage credits, or request them from your admin, when you hit a limit",
       "verify": "Confirm a code change does what it should by building your project's app, running it, and observing the result, rather than relying on tests or type checks",
-      "voice": "Toggle voice dictation, or enable it in a specific mode",
+      "voice": {
+        "claude": "Toggle voice dictation, or enable it in a specific mode",
+        "copilot": "Toggle voice dictation, or enable it in a specific mode",
+        "codex": "Start or stop voice, or choose a voice with /voice settings",
+        "antigravity": "Dictate a prompt using your microphone"
+      },
       "web-setup": "Connect your GitHub account to Claude Code on the web using your local gh CLI credentials",
       "workflows": "Open the workflow progress view to watch, pause, resume, or save running and completed workflows",
       "keymap": "Remap TUI shortcuts",
       "vim": "Toggle Vim mode for the composer",
       "setup-default-sandbox": "Set up elevated agent sandbox",
-      "sandbox-add-read-dir": "Let sandbox read a directory: /sandbox-add-read-dir [absolute-path]",
       "experimental": "Toggle experimental features",
       "approve": "Approve one retry of a recent auto-review denial",
       "import": {
@@ -266,13 +284,15 @@
       "side": "Start a side conversation in an ephemeral fork",
       "raw": "Toggle raw scrollback mode for copy-friendly terminal selection",
       "debug-config": "Show config layers and requirement sources for debugging",
-      "title": "Configure which items appear in the terminal title",
+      "title": {
+        "codex": "Configure which items appear in the terminal title",
+        "antigravity": "Toggle a custom terminal window title"
+      },
       "pets": "Choose or hide the terminal pet",
       "apps": "Manage apps",
       "plugins": "Browse plugins",
       "rollout": "Print the rollout file path",
       "ps": "List background terminals",
-      "personality": "Choose a communication style for Codex",
       "test-approval": "Test approval request",
       "list-agents": "List the subagents and other Claude Code sessions Claude can message, with the name to use for each",
       "allow-all": "Enable all tool, path, and URL permissions",
@@ -322,7 +342,10 @@
       },
       "extra": "Open the billing page to buy on-demand credits",
       "hotkeys": "Show all keyboard shortcuts",
-      "learn": "Open the learn hub in your browser",
+      "learn": {
+        "command-code": "Open the learn hub in your browser",
+        "antigravity": "Reflect on recent successes or corrections and save them as reusable skills or rules"
+      },
       "learn-taste": "Learn coding taste from sessions with other coding agents",
       "mode": "Show or switch the permission mode",
       "plan-review": "Open this session's latest plan in review",
@@ -336,10 +359,27 @@
       "tree": "Browse the session tree and jump to any point in it",
       "unshare": "Stop sharing the conversation",
       "worktree": {
-      "codex": "Start or continue a conversation in a new worktree",
-      "command-code": "Create, list, or switch git worktrees"
-    },
-      "skill-doctor": "Show what each of your skills costs in context and how often it gets used, so you can find skills to turn off"
+        "codex": "Start or continue a conversation in a new worktree",
+        "command-code": "Create, list, or switch git worktrees"
+      },
+      "skill-doctor": "Show what each of your skills costs in context and how often it gets used, so you can find skills to turn off",
+      "output-style": "List output styles or switch to one, for example /output-style concise",
+      "update-config": "Describe a settings change and have Claude edit the matching settings.json file",
+      "daemon": "Manage the local background server",
+      "warnings": "View retained warnings and diagnostic details",
+      "credits": "Show remaining G1 credits and purchase link",
+      "open": "Open a file or view opened/edited files",
+      "schedule": "Run an instruction on a recurring schedule or as a one-time timer",
+      "browser": "Invoke a browser agent for web tasks",
+      "grill-me": "Have the agent interview you to align on a plan",
+      "teamwork-preview": "Invoke a team of agents to autonomously tackle large projects (preview)",
+      "boost": "Invoke the Boost multi-agent orchestrator for complex tasks",
+      "agy-customizations": "Guide to how Antigravity customizations (skills, rules and more) work",
+      "antigravity-guide": "Guide and quick reference for the Antigravity CLI, IDE and SDK",
+      "automation": "Interactively design and create a scheduled background automation",
+      "migrate-workflows": "Migrate legacy workflows to skills",
+      "artifact": "View and review artifacts",
+      "codesearch": "Search code in the workspace"
     }
   },
   "session": {
@@ -501,7 +541,7 @@
     },
     "jumpToTop": "Jump to the beginning",
     "toolLog": {
-      "summary": "Tool calls \u00b7 {count}",
+      "summary": "Tool calls · {count}",
       "expand": "Show the tool calls",
       "collapse": "Hide the tool calls"
     },
@@ -1044,7 +1084,7 @@
     "sessionOnlyAria": "Use the highlighted choice for this session only (s)",
     "setDefault": "Set as default",
     "setDefaultAria": "Set the highlighted choice as the default (Enter)",
-    "defaultWarning": "Enter saves this choice as the default for new sessions. Use \u201cThis session only\u201d to leave your default unchanged.",
+    "defaultWarning": "Enter saves this choice as the default for new sessions. Use “This session only” to leave your default unchanged.",
     "opencodeToolbarLabel": "opencode model keys",
     "opencodeCaption": "Model"
   },

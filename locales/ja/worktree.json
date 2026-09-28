@@ -114,7 +114,8 @@
         "codex": "Codex からサインアウト",
         "claude": "Anthropic アカウントからサインアウト",
         "copilot": "現在の OAuth ログインセッションからログアウト",
-        "command-code": "Command Code またはプロバイダーからログアウト"
+        "command-code": "Command Code またはプロバイダーからログアウト",
+        "antigravity": "ログアウト"
       },
       "quit": "Codex CLI を終了",
       "diff": "Git の差分を表示（未追跡ファイルを含む）",
@@ -131,7 +132,8 @@
         "codex": "Codex チームにフィードバックを送信",
         "claude": "Claude Code についてのフィードバックを送信",
         "copilot": "CLI についてのフィードバックを送信",
-        "command-code": "GitHub にバグ報告・フィードバックを送信"
+        "command-code": "GitHub にバグ報告・フィードバックを送信",
+        "antigravity": "エージェント改善のためのフィードバックを送信"
       },
       "plan": "プランモードを切り替え",
       "goal": "現在のセッションの目標を設定",
@@ -146,7 +148,8 @@
         "claude": "Claude Code のスキルを管理",
         "copilot": "機能を拡張するスキルを管理",
         "opencode": "利用可能なスキルを一覧・実行",
-        "command-code": "エージェントスキルを一覧・表示"
+        "command-code": "エージェントスキルを一覧・表示",
+        "antigravity": "利用できるスキルを一覧表示"
       },
       "hooks": "フック設定を確認・管理",
       "sessions": "会話履歴を閲覧",
@@ -156,14 +159,16 @@
         "claude": "CLI を終了",
         "codex": "CLI を終了",
         "copilot": "CLI を終了",
-        "command-code": "Command Code を終了"
+        "command-code": "Command Code を終了",
+        "antigravity": "CLI を終了"
       },
       "models": "AI モデルを切り替え",
       "agents": {
         "opencode": "利用可能なエージェントを一覧・管理",
         "claude": "サブエージェントの作成・管理を Claude に依頼するか .claude/agents/ を直接編集するよう促す案内を表示",
         "codex": "稼働中のすべてのエージェントセッションを一覧・切り替え",
-        "command-code": "エージェント構成を管理"
+        "command-code": "エージェント構成を管理",
+        "antigravity": "利用できるカスタムエージェントを一覧表示"
       },
       "themes": "TUI のテーマを変更",
       "editor": "長文メッセージ用のエディタを開く",
@@ -199,7 +204,10 @@
       "insights": "セッションを分析し、対象領域・対話パターン・摩擦点のレポートを生成",
       "install-github-app": "リポジトリに Claude GitHub App を導入（GitHub Actions の設定も任意で実施）",
       "install-slack-app": "Claude Slack アプリを導入",
-      "keybindings": "キーボードショートカットの設定ファイルを開く",
+      "keybindings": {
+        "claude": "キーボードショートカットの設定ファイルを開く",
+        "antigravity": "キーバインドを設定"
+      },
       "login": {
         "claude": "Anthropic アカウントにサインイン",
         "copilot": "Copilot にログイン",
@@ -221,7 +229,10 @@
       "release-notes": "変更履歴をバージョン選択つきで表示",
       "reload-plugins": "再起動せずに有効なプラグインを再読み込み",
       "reload-skills": "スキル・コマンドのディレクトリを再走査し、再起動せずに反映",
-      "remote-control": "このセッションを claude.ai のリモートコントロール対象にする",
+      "remote-control": {
+        "claude": "このセッションを claude.ai のリモートコントロール対象にする",
+        "antigravity": "このセッションのリモート操作をオン（off で無効化）"
+      },
       "remote-env": "クラウドエージェントの既定環境を選択",
       "rename": "現在のセッション（スレッド）の名前を変更",
       "run": "プロジェクトのアプリを起動・操作し、テストだけでなく実際の動作で変更を確認",
@@ -238,18 +249,25 @@
       "team-onboarding": "利用履歴からチーム向けオンボーディングガイドを生成",
       "teleport": "web の Claude Code セッションをこのターミナルに引き込み（ブランチと会話を取得）",
       "theme": "配色・シンタックスハイライトのテーマを選択",
-      "tui": "端末 UI のレンダラーを設定し、会話を保ったまま再起動",
+      "tui": {
+        "claude": "端末 UI のレンダラーを設定し、会話を保ったまま再起動",
+        "codex": "次回起動時の TUI モードを選択"
+      },
       "ultrareview": "クラウドサンドボックスでマルチエージェントの詳細コードレビューを実行",
       "upgrade": "上位プランへの切り替えページをブラウザで開く",
       "usage-credits": "使用クレジットを設定、または上限到達時に管理者へ申請",
       "verify": "ビルド・実行・観察によって、テストや型検査に頼らず変更の動作を確認",
-      "voice": "音声入力を切り替え、または特定モードで有効化",
+      "voice": {
+        "claude": "音声入力を切り替え、または特定モードで有効化",
+        "copilot": "音声入力を切り替え、または特定モードで有効化",
+        "codex": "音声を開始・停止、または /voice settings で声を選択",
+        "antigravity": "マイクでプロンプトを音声入力"
+      },
       "web-setup": "ローカルの gh CLI 認証を使って GitHub アカウントを Claude Code on the web に接続",
       "workflows": "実行中・完了済みワークフローの進捗ビューを開く（監視・一時停止・再開・保存）",
       "keymap": "TUI のショートカットを再割り当て",
       "vim": "コンポーザーの Vim モードを切り替え",
       "setup-default-sandbox": "昇格エージェント用のサンドボックスを設定",
-      "sandbox-add-read-dir": "サンドボックスに読み取り可能なディレクトリを追加: /sandbox-add-read-dir [絶対パス]",
       "experimental": "実験的機能を切り替え",
       "approve": "直近の自動レビュー拒否に対する再試行を 1 回承認",
       "import": {
@@ -266,13 +284,15 @@
       "side": "一時的なフォークで別の会話を開始",
       "raw": "コピーしやすい raw スクロールバックモードを切り替え",
       "debug-config": "設定の階層と要件の出所をデバッグ用に表示",
-      "title": "ターミナルのタイトルに表示する項目を設定",
+      "title": {
+        "codex": "ターミナルのタイトルに表示する項目を設定",
+        "antigravity": "ターミナルのウィンドウタイトル表示を切り替え"
+      },
       "pets": "ターミナルのペットを選択・非表示",
       "apps": "アプリを管理",
       "plugins": "プラグインを閲覧",
       "rollout": "rollout ファイルのパスを表示",
       "ps": "バックグラウンドのターミナル一覧を表示",
-      "personality": "Codex の応答スタイルを選択",
       "test-approval": "承認リクエストのテスト",
       "list-agents": "Claude がメッセージを送れるサブエージェントと他の Claude Code セッションを宛先名つきで一覧表示",
       "allow-all": "ツール・パス・URL の権限をすべて許可",
@@ -322,7 +342,10 @@
       },
       "extra": "オンデマンドクレジットを購入する請求ページを開く",
       "hotkeys": "すべてのキーボードショートカットを表示",
-      "learn": "学習ハブをブラウザで開く",
+      "learn": {
+        "command-code": "学習ハブをブラウザで開く",
+        "antigravity": "最近の成功や修正を振り返り、再利用できるスキルやルールとして保存"
+      },
       "learn-taste": "他のコーディングエージェントのセッションからコーディングの好みを学習",
       "mode": "権限モードを表示・切り替え",
       "plan-review": "このセッションの最新プランをレビュー表示で開く",
@@ -336,10 +359,27 @@
       "tree": "セッションツリーを辿って任意の地点へジャンプ",
       "unshare": "会話の共有を停止",
       "worktree": {
-      "codex": "新しい worktree で会話を開始・再開する",
-      "command-code": "git worktree の作成・一覧・切り替え"
-    },
-      "skill-doctor": "各スキルのコンテキスト消費量と使用頻度を表示し、オフにするスキルを特定"
+        "codex": "新しい worktree で会話を開始・再開する",
+        "command-code": "git worktree の作成・一覧・切り替え"
+      },
+      "skill-doctor": "各スキルのコンテキスト消費量と使用頻度を表示し、オフにするスキルを特定",
+      "output-style": "出力スタイルを一覧表示・切り替え（例: /output-style concise）",
+      "update-config": "設定の変更内容を伝えると、Claude が対応する settings.json を編集",
+      "daemon": "ローカルのバックグラウンドサーバを管理",
+      "warnings": "保持されている警告と診断情報を表示",
+      "credits": "残りの G1 クレジットと購入リンクを表示",
+      "open": "ファイルを開く、または開いた・編集したファイルを表示",
+      "schedule": "指示を定期実行、または一度きりのタイマーで実行",
+      "browser": "ブラウザエージェントで Web 上の作業を実行",
+      "grill-me": "計画をすり合わせるために質問してもらう",
+      "teamwork-preview": "エージェントのチームで大きなプロジェクトを自律的に進める（プレビュー）",
+      "boost": "Boost マルチエージェントオーケストレーターで複雑なタスクを実行",
+      "agy-customizations": "Antigravity のカスタマイズ（スキル・ルールなど）の仕組みを解説",
+      "antigravity-guide": "Antigravity の CLI・IDE・SDK のガイドとクイックリファレンス",
+      "automation": "定期実行するバックグラウンド自動処理を対話形式で作成",
+      "migrate-workflows": "旧形式のワークフローをスキルへ移行",
+      "artifact": "アーティファクトを表示・レビュー",
+      "codesearch": "ワークスペース内のコードを検索"
     }
   },
   "session": {
@@ -501,13 +541,13 @@
     },
     "jumpToTop": "会話の先頭へ",
     "toolLog": {
-      "summary": "\u30c4\u30fc\u30eb\u547c\u3073\u51fa\u3057 {count} \u4ef6",
-      "expand": "\u30c4\u30fc\u30eb\u547c\u3073\u51fa\u3057\u3092\u958b\u304f",
-      "collapse": "\u30c4\u30fc\u30eb\u547c\u3073\u51fa\u3057\u3092\u9589\u3058\u308b"
+      "summary": "ツール呼び出し {count} 件",
+      "expand": "ツール呼び出しを開く",
+      "collapse": "ツール呼び出しを閉じる"
     },
     "toolActivity": {
-      "show": "\u30c4\u30fc\u30eb\u6d3b\u52d5\u3092\u958b\u304f",
-      "hide": "\u30c4\u30fc\u30eb\u6d3b\u52d5\u3092\u9589\u3058\u308b"
+      "show": "ツール活動を開く",
+      "hide": "ツール活動を閉じる"
     },
     "toolApproval": {
       "summary": "ツール承認 {count} 件",

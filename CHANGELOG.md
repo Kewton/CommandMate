@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.42.1] - 2026-09-28
+
+> **Highlight**: エージェント CLI（claude・codex・antigravity・opencode・command-code）が日々のアップデートで壊れていないかを、AI を使わず決まった手順で確かめる日次確認スクリプトと、その自動実行の手順を追加した。スラッシュコマンドの候補を claude 2.1.283・codex 0.157.1・antigravity 1.2.12・command-code 1.66.0 に合わせて更新し（antigravity は 13 件から 46 件）、opencode 1.18.31 以降で起動直後の入力待ちを検出できず送信が拒否される問題を直した。
+
+### Added
+
+- **docs(agent-health): 日次確認の見張り役の依頼文（Command Code）を追加** (#2880): Antigravity 自身が壊れた日に備え、Command Code がレポートの有無を確認し必要に応じて日次確認を引き継ぐ依頼文（`docs/agent-health/watch-prompt.md`）を追加し、`docs/user-guide/agent-health.md` に見張り役の自動実行手順を追記。
+
+- **docs(agent-health): 日次確認の Schedule 設定・AI への依頼文・Issue のひな形を追加** (#2879): CommandMate の Schedule 機能で毎朝 Antigravity（`agy -p`）にエージェント日次確認を実行させるための依頼文（`docs/agent-health/daily-triage-prompt.md`）、自動登録用 Issue ひな形（`docs/agent-health/issue-template.md`）、`CMATE.md` 設定例（`docs/agent-health/CMATE.example.md`）を追加し、`docs/user-guide/agent-health.md` に自動実行手順を追記。
+
+- **feat(agent-health): エージェント CLI の日次確認スクリプトを追加** (#2878): `npx tsx scripts/agent-health/run.ts` が claude・codex・antigravity・opencode・command-code を私設 tmux（`-L cm-agent-health`）と一時リポジトリで 1 つずつ起動し、**AI を使わず決まった手順で** `version`（前回からの版の変化）・`hook-correlation`（CommandMate 自身の起動行で起動した hook が `worktreeId`／`instanceId` を保ったまま届くか。#2874／#2891 の型）・`screen-idle`／`screen-running`／`screen-approval`／`screen-quoted-dialog`（本番の `detectSessionStatus` の判定）を確かめ、`~/.commandmate/agent-health/reports/<JST 日付>.json` に書く（exit 0 = 全 pass/skip、1 = fail あり、2 = スクリプト自体の異常）。codex・antigravity の共有 hook 設定は保存してバイト単位で書き戻し sha256 で確かめ、hook はスクリプト内の listener に向けて本番ログへの漏れも数える。手順は `docs/user-guide/agent-health.md`。
+
+### Changed
+
+- **chore(slash-commands): antigravity 1.2.12 と command-code 1.66.0 のスラッシュコマンドを照合してカタログを更新** (#2922): antigravity は 1.1.3 以来の照合で、`/help` のコマンド一覧から 33 件を追加した（`/btw` `/codesearch` `/goal` `/schedule` `/browser` `/boost` `/artifact` など。ユーザーが入れたスキルは数えず、agy 同梱のスキル 4 件は含める）。command-code は `/loop` を追加した。agy で意味が違う `/keybindings` `/remote-control` `/title` `/learn` は説明キーをツールごとに分け、既に分割済みの `/agents` `/exit` `/feedback` `/logout` `/skills` `/voice` には antigravity 用の説明を足した。attestation は antigravity 13→46 件（1.1.3→1.2.12）、command-code 56→57 件（1.40.1→1.66.0）。
+
+- **chore(slash-commands): スラッシュコマンドカタログを claude 2.1.283 / codex 0.157.1 に合わせて更新** (#2914): claude に `/output-style` と `/update-config`、codex に `/voice` `/tui` `/daemon` `/warnings` を追加し、codex 0.157.1 の enum から消えた `/personality` と `/sandbox-add-read-dir` を除去した。codex の `/voice`（`/voice settings` で声を選択）と `/tui`（次回起動時の TUI モード）は claude・copilot と意味が違うため、説明キーをツールごとに分けた（`voice.{claude,copilot,codex}` / `tui.{claude,codex}`）。attestation は claude 108→110 件（2.1.261→2.1.283）、codex 58→60 件（0.154.0→0.157.1）に採り直した。antigravity・command-code は #2922 で照合した。copilot・opencode は未照合。
+
+### Fixed
+
+- **fix(detection): opencode 起動直後の入力待ちが U+2026 の見本文で検出できない問題を修正** (#2915): opencode 1.18.31 以降は入力欄の見本文の省略記号を ASCII の三点(...)ではなく Unicode の三点リーダー(U+2026)で描くため、`OPENCODE_PROMPT_PATTERN` と `OPENCODE_IDLE_COMPOSER_PATTERN`（`src/lib/detection/cli-patterns.ts`）が入力待ちを検出できず、`commandmate send` が `blockedBy: 'scraper'` で拒否される場合があった。両パターンが ASCII と U+2026 の両方を受け付けるように修正。
+
 ## [0.42.0] - 2026-09-27
 
 > **Highlight**: 同じマシンで複数の CommandMate サーバを動かすと、同名の tmux セッションを奪い合い、別サーバのエージェントの画面が見えて送信・停止までできていた問題を直した（#2865・#2866・#2867。セッション名にサーバごとの名前空間を入れ、旧名のセッションは作業ディレクトリが一致するものだけ旧名のまま引き継ぐ）。codex 0.157 への追従として、`/model` と trust の画面の判定（#2868・#2884）と、共有デーモン経由で hook の送信元インスタンスが取り違えられる問題（#2874・#2891、実機で `codex-3` の返答が `codex-3` に入ることを確認）を直した。送れない選択ウインドウでは Send を出さずに直接入力モードへ案内する（#2869・#2870・#2887・#2888）。

@@ -251,3 +251,57 @@ describe('Issue #1883: the gutter anchor is what makes the verdict positive', ()
     ).toBe(false);
   });
 });
+
+/**
+ * Issue #2915: opencode 1.18.31+ draws the placeholder ellipsis as U+2026
+ * (`…`) instead of three ASCII dots. Both forms live in the same shipped
+ * executable, so both must be accepted. The fixtures on disk are untouched —
+ * every frame below is the existing #1883 fixture with the ellipsis swapped
+ * in as a string, at test time.
+ */
+describe('Issue #2915: opencode draws the placeholder ellipsis as U+2026', () => {
+  beforeEach(() => {
+    resetDetectPromptCache();
+  });
+
+  function withUnicodeEllipsis(raw: string): string {
+    return raw.replaceAll('Ask anything...', 'Ask anything…');
+  }
+
+  it('still anchors on the idle composer when the ellipsis is U+2026', () => {
+    const raw = stripAnsi(withUnicodeEllipsis(frame('boot-idle')));
+
+    expect(raw).not.toContain('Ask anything...');
+    expect(raw).toContain('Ask anything…');
+    expect(OPENCODE_IDLE_COMPOSER_PATTERN.test(raw)).toBe(true);
+  });
+
+  it('reports the U+2026 boot idle frame identically to the ASCII original', () => {
+    const original = statusOf(frame('boot-idle'));
+    const withEllipsis = statusOf(withUnicodeEllipsis(frame('boot-idle')));
+
+    expect(withEllipsis.status).toBe(original.status);
+    expect(withEllipsis.reason).toBe(original.reason);
+    expect(withEllipsis.hasActivePrompt).toBe(original.hasActivePrompt);
+  });
+
+  it('still requires the row-initial gutter when the ellipsis is U+2026', () => {
+    // Same non-vacuity guard as the ASCII case above, but for the U+2026 form:
+    // the phrase sits in a response body with no gutter in front of it, so the
+    // anchor must stay false even though the phrase itself is present.
+    const raw = stripAnsi(withUnicodeEllipsis(frame('phrase-in-response')));
+
+    expect(raw).not.toContain('Ask anything...');
+    expect(raw).toContain('Ask anything…');
+    expect(OPENCODE_IDLE_COMPOSER_PATTERN.test(raw)).toBe(false);
+  });
+
+  it('matches OPENCODE_PROMPT_PATTERN with both the ASCII and U+2026 ellipsis', () => {
+    expect(
+      OPENCODE_PROMPT_PATTERN.test('Ask anything... "Fix a TODO in the codebase"'),
+    ).toBe(true);
+    expect(
+      OPENCODE_PROMPT_PATTERN.test('Ask anything… "Fix a TODO in the codebase"'),
+    ).toBe(true);
+  });
+});

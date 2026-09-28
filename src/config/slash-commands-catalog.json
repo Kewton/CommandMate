@@ -914,7 +914,7 @@
     },
     {
       "name": "keybindings",
-      "descriptionKey": "slashCommands.descriptions.keybindings",
+      "descriptionKey": "slashCommands.descriptions.keybindings.claude",
       "category": "standard-util",
       "cliTools": [
         "claude"
@@ -1054,7 +1054,7 @@
     },
     {
       "name": "remote-control",
-      "descriptionKey": "slashCommands.descriptions.remote-control",
+      "descriptionKey": "slashCommands.descriptions.remote-control.claude",
       "category": "standard-util",
       "cliTools": [
         "claude"
@@ -1244,7 +1244,7 @@
     },
     {
       "name": "tui",
-      "descriptionKey": "slashCommands.descriptions.tui",
+      "descriptionKey": "slashCommands.descriptions.tui.claude",
       "category": "standard-util",
       "cliTools": [
         "claude"
@@ -1294,7 +1294,7 @@
     },
     {
       "name": "voice",
-      "descriptionKey": "slashCommands.descriptions.voice",
+      "descriptionKey": "slashCommands.descriptions.voice.claude",
       "category": "standard-util",
       "cliTools": [
         "claude"
@@ -1355,16 +1355,6 @@
     {
       "name": "setup-default-sandbox",
       "descriptionKey": "slashCommands.descriptions.setup-default-sandbox",
-      "category": "standard-util",
-      "cliTools": [
-        "codex"
-      ],
-      "isStandard": true,
-      "source": "standard"
-    },
-    {
-      "name": "sandbox-add-read-dir",
-      "descriptionKey": "slashCommands.descriptions.sandbox-add-read-dir",
       "category": "standard-util",
       "cliTools": [
         "codex"
@@ -1504,7 +1494,7 @@
     },
     {
       "name": "title",
-      "descriptionKey": "slashCommands.descriptions.title",
+      "descriptionKey": "slashCommands.descriptions.title.codex",
       "category": "standard-util",
       "cliTools": [
         "codex"
@@ -1595,16 +1585,6 @@
     {
       "name": "stop",
       "descriptionKey": "slashCommands.descriptions.stop",
-      "category": "standard-util",
-      "cliTools": [
-        "codex"
-      ],
-      "isStandard": true,
-      "source": "standard"
-    },
-    {
-      "name": "personality",
-      "descriptionKey": "slashCommands.descriptions.personality",
       "category": "standard-util",
       "cliTools": [
         "codex"
@@ -2424,7 +2404,7 @@
     },
     {
       "name": "voice",
-      "descriptionKey": "slashCommands.descriptions.voice",
+      "descriptionKey": "slashCommands.descriptions.voice.copilot",
       "category": "standard-config",
       "cliTools": [
         "copilot"
@@ -2754,7 +2734,7 @@
     },
     {
       "name": "learn",
-      "descriptionKey": "slashCommands.descriptions.learn",
+      "descriptionKey": "slashCommands.descriptions.learn.command-code",
       "category": "standard-util",
       "cliTools": [
         "command-code"
@@ -3098,6 +3078,406 @@
       "category": "standard-util",
       "cliTools": [
         "codex"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "output-style",
+      "descriptionKey": "slashCommands.descriptions.output-style",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "update-config",
+      "descriptionKey": "slashCommands.descriptions.update-config",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "voice",
+      "descriptionKey": "slashCommands.descriptions.voice.codex",
+      "category": "standard-util",
+      "cliTools": [
+        "codex"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "tui",
+      "descriptionKey": "slashCommands.descriptions.tui.codex",
+      "category": "standard-util",
+      "cliTools": [
+        "codex"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "daemon",
+      "descriptionKey": "slashCommands.descriptions.daemon",
+      "category": "standard-util",
+      "cliTools": [
+        "codex"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "warnings",
+      "descriptionKey": "slashCommands.descriptions.warnings",
+      "category": "standard-util",
+      "cliTools": [
+        "codex"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "credits",
+      "descriptionKey": "slashCommands.descriptions.credits",
+      "category": "standard-util",
+      "cliTools": [
+        "antigravity"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "effort",
+      "descriptionKey": "slashCommands.descriptions.effort",
+      "category": "standard-util",
+      "cliTools": [
+        "antigravity"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "exit",
+      "descriptionKey": "slashCommands.descriptions.exit.antigravity",
+      "category": "standard-util",
+      "cliTools": [
+        "antigravity"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "feedback",
+      "descriptionKey": "slashCommands.descriptions.feedback.antigravity",
+      "category": "standard-util",
+      "cliTools": [
+        "antigravity"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "keybindings",
+      "descriptionKey": "slashCommands.descriptions.keybindings.antigravity",
+      "category": "standard-util",
+      "cliTools": [
+        "antigravity"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "logout",
+      "descriptionKey": "slashCommands.descriptions.logout.antigravity",
+      "category": "standard-util",
+      "cliTools": [
+        "antigravity"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "open",
+      "descriptionKey": "slashCommands.descriptions.open",
+      "category": "standard-util",
+      "cliTools": [
+        "antigravity"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "remote-control",
+      "descriptionKey": "slashCommands.descriptions.remote-control.antigravity",
+      "category": "standard-util",
+      "cliTools": [
+        "antigravity"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "rename",
+      "descriptionKey": "slashCommands.descriptions.rename",
+      "category": "standard-util",
+      "cliTools": [
+        "antigravity"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "skills",
+      "descriptionKey": "slashCommands.descriptions.skills.antigravity",
+      "category": "standard-util",
+      "cliTools": [
+        "antigravity"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "statusline",
+      "descriptionKey": "slashCommands.descriptions.statusline",
+      "category": "standard-util",
+      "cliTools": [
+        "antigravity"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "title",
+      "descriptionKey": "slashCommands.descriptions.title.antigravity",
+      "category": "standard-util",
+      "cliTools": [
+        "antigravity"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "voice",
+      "descriptionKey": "slashCommands.descriptions.voice.antigravity",
+      "category": "standard-util",
+      "cliTools": [
+        "antigravity"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "goal",
+      "descriptionKey": "slashCommands.descriptions.goal",
+      "category": "standard-util",
+      "cliTools": [
+        "antigravity"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "schedule",
+      "descriptionKey": "slashCommands.descriptions.schedule",
+      "category": "standard-util",
+      "cliTools": [
+        "antigravity"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "browser",
+      "descriptionKey": "slashCommands.descriptions.browser",
+      "category": "standard-util",
+      "cliTools": [
+        "antigravity"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "grill-me",
+      "descriptionKey": "slashCommands.descriptions.grill-me",
+      "category": "standard-util",
+      "cliTools": [
+        "antigravity"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "teamwork-preview",
+      "descriptionKey": "slashCommands.descriptions.teamwork-preview",
+      "category": "standard-util",
+      "cliTools": [
+        "antigravity"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "learn",
+      "descriptionKey": "slashCommands.descriptions.learn.antigravity",
+      "category": "standard-util",
+      "cliTools": [
+        "antigravity"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "boost",
+      "descriptionKey": "slashCommands.descriptions.boost",
+      "category": "standard-util",
+      "cliTools": [
+        "antigravity"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "agy-customizations",
+      "descriptionKey": "slashCommands.descriptions.agy-customizations",
+      "category": "standard-util",
+      "cliTools": [
+        "antigravity"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "antigravity-guide",
+      "descriptionKey": "slashCommands.descriptions.antigravity-guide",
+      "category": "standard-util",
+      "cliTools": [
+        "antigravity"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "automation",
+      "descriptionKey": "slashCommands.descriptions.automation",
+      "category": "standard-util",
+      "cliTools": [
+        "antigravity"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "migrate-workflows",
+      "descriptionKey": "slashCommands.descriptions.migrate-workflows",
+      "category": "standard-util",
+      "cliTools": [
+        "antigravity"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "add-dir",
+      "descriptionKey": "slashCommands.descriptions.add-dir",
+      "category": "standard-util",
+      "cliTools": [
+        "antigravity"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "agents",
+      "descriptionKey": "slashCommands.descriptions.agents.antigravity",
+      "category": "standard-util",
+      "cliTools": [
+        "antigravity"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "artifact",
+      "descriptionKey": "slashCommands.descriptions.artifact",
+      "category": "standard-util",
+      "cliTools": [
+        "antigravity"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "btw",
+      "descriptionKey": "slashCommands.descriptions.btw",
+      "category": "standard-util",
+      "cliTools": [
+        "antigravity"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "changelog",
+      "descriptionKey": "slashCommands.descriptions.changelog",
+      "category": "standard-util",
+      "cliTools": [
+        "antigravity"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "codesearch",
+      "descriptionKey": "slashCommands.descriptions.codesearch",
+      "category": "standard-util",
+      "cliTools": [
+        "antigravity"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "config",
+      "descriptionKey": "slashCommands.descriptions.config",
+      "category": "standard-util",
+      "cliTools": [
+        "antigravity"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "context",
+      "descriptionKey": "slashCommands.descriptions.context",
+      "category": "standard-util",
+      "cliTools": [
+        "antigravity"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "copy",
+      "descriptionKey": "slashCommands.descriptions.copy",
+      "category": "standard-util",
+      "cliTools": [
+        "antigravity"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "loop",
+      "descriptionKey": "slashCommands.descriptions.loop",
+      "category": "standard-util",
+      "cliTools": [
+        "command-code"
       ],
       "isStandard": true,
       "source": "standard"
