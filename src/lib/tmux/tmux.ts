@@ -321,6 +321,41 @@ export async function listSessions(): Promise<TmuxSession[]> {
 }
 
 /**
+ * Issue #2958: what window 0 of a new session runs until `createSession`
+ * replaces it with the login shell. Two words so tmux execs it directly (a
+ * single word would be run through `default-shell -c`); it never exits on its
+ * own and dies with the SIGHUP the replacement sends.
+ */
+const PLACEHOLDER_PANE_COMMAND = ['sleep', '2147483647'] as const;
+
+/**
+ * Fallback for a failed window rebuild: swap the placeholder in window 0 for
+ * the login shell tmux would have started (`default-shell`, as a login shell).
+ *
+ * A bare `respawn-pane` would re-run the pane's creation command — the
+ * placeholder — so the shell is named explicitly.
+ */
+async function respawnLoginShell(sessionName: string, workingDirectory: string): Promise<void> {
+  let shell = '';
+  try {
+    const { stdout } = await execFileAsync(
+      'tmux',
+      ['show-options', '-gv', 'default-shell'],
+      { timeout: DEFAULT_TIMEOUT }
+    );
+    shell = stdout.trim();
+  } catch {
+    // Fall through to the environment's shell.
+  }
+  if (!shell) shell = process.env.SHELL || '/bin/sh';
+  await execFileAsync(
+    'tmux',
+    ['respawn-pane', '-k', '-t', `${exactTarget(sessionName)}0`, '-c', workingDirectory, shell, '-l'],
+    { timeout: DEFAULT_TIMEOUT }
+  );
+}
+
+/**
  * Create a new tmux session (legacy signature)
  */
 export async function createSession(
@@ -385,9 +420,25 @@ export async function createSession(
   try {
     // Create session with explicit window size to avoid 80x24 default
     // This is critical for TUI tools (Copilot, OpenCode) that use alternate screen
+    //
+    // Issue #2958: window 0 runs a PLACEHOLDER, not the login shell, because it
+    // is thrown away by the `new-window -k` below a few milliseconds later. A
+    // shell killed that early is still inside its rc files, and pyenv's
+    // `pyenv init -` (`command pyenv rehash`) can die holding its lock file
+    // (`$PYENV_ROOT/shims/.pyenv-shim`). The NEXT shell then spins in
+    // `pyenv rehash` for its 60s lock timeout before running the launch command,
+    // so the agent missed the 60s initialization wait (exit 99). Measured on tmux
+    // 3.5a / pyenv 2.6.0: 7 of 40 shell-first creations left the lock behind and
+    // the replacement pane ran its first command after 61s; 0 of 40 with the
+    // placeholder. Two argv words make tmux exec it directly, so no shell (and
+    // no rc file) is started for window 0 at all.
     await execFileAsync(
       'tmux',
-      ['new-session', '-d', '-s', sessionName, '-c', workingDirectory, '-x', String(windowWidth), '-y', String(windowHeight)],
+      [
+        'new-session', '-d', '-s', sessionName, '-c', workingDirectory,
+        '-x', String(windowWidth), '-y', String(windowHeight),
+        ...PLACEHOLDER_PANE_COMMAND,
+      ],
       { timeout: DEFAULT_TIMEOUT }
     );
 
@@ -419,7 +470,9 @@ export async function createSession(
     // cwd instead). Omitting it silently launches every agent in the wrong repo.
     //
     // Best-effort, matching the geometry step below: if this fails the session is
-    // still usable, just with tmux's default 2000-line scrollback.
+    // still usable, just with tmux's default 2000-line scrollback. Window 0 is
+    // only a placeholder (Issue #2958), so the fallback must still put the login
+    // shell into it — see respawnLoginShell().
     try {
       await execFileAsync(
         'tmux',
@@ -432,6 +485,7 @@ export async function createSession(
         historyLimit,
         error: error instanceof Error ? error.message : String(error),
       });
+      await respawnLoginShell(sessionName, workingDirectory);
     }
 
     // Issue #1163: Pin the pane to a fixed height so alternate-screen TUIs
