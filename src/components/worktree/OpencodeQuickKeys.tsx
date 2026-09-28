@@ -61,6 +61,15 @@
  * itself is read from `OPENCODE_LEADER_KEY` rather than written next to each
  * row, so a tool whose leader differs changes one declaration.
  *
+ * ## OpenCode V2 gets its own table (Issue #2966)
+ *
+ * `opencode2` 2.0.18 keeps the `ctrl+x` leader but not v1's layout: the agent
+ * switch is `shift+tab` (and `tab` is not one), `ctrl+x t` is no longer themes,
+ * and the session-scoped chords cannot be gated because nothing reports a v2
+ * session. So the table is chosen by tool id ({@link GROUPS_BY_TOOL}) and v1's
+ * seventeen keys are untouched. The measurement is on {@link V2_DIRECT_KEYS},
+ * {@link V2_GLOBAL_CHORDS} and {@link V2_GROUPS}.
+ *
  * ## Both screens fold it away (Issue #2106 for the phone, #2131 for PC)
  *
  * Seventeen 44px targets do not fit beside a terminal on a phone. Measured in a
@@ -160,7 +169,10 @@ import {
 
 export interface OpencodeQuickKeysProps {
   worktreeId: string;
-  /** Rendered only for `'opencode'`; anything else renders nothing at all. */
+  /**
+   * Rendered for `'opencode'` and (Issue #2966) `'opencode-v2'`, each with its
+   * own key table; anything else renders nothing at all.
+   */
   cliToolId: CLIToolType;
   /** Agent instance id. Defaults to the primary instance (`=== cliToolId`). */
   instanceId?: string;
@@ -266,11 +278,99 @@ const GROUPS: ReadonlyArray<ReadonlyArray<QuickKeyDef>> = [
   SCROLL_KEYS,
 ];
 
+/* eslint-disable no-restricted-syntax -- i18n(#1271): opencode's own key
+   notation, identical in every locale; see the block above DIRECT_KEYS. */
+
+/**
+ * OpenCode V2's leaderless keys (Issue #2966).
+ *
+ * Measured on `opencode2` 2.0.18 (private tmux socket, 80 columns, isolated
+ * `HOME` / XDG dirs). The footer reads `shift+tab agents  ctrl+p commands`, and
+ * `shift+tab` is the ONLY agent switch: it toggles `Build` ⇄ `Plan` on the home
+ * screen and inside a session alike. `tab` does not switch agents at all — on
+ * an empty or a typed composer it changes nothing, and in the `/` completion
+ * list it completes the highlighted entry (it opened `Select agent` there). So
+ * v1's `agentNext` = `Tab` is not carried over; `agentNext` is `BTab` here and
+ * there is no `agentPrev` (two agents, one key, no reverse binding to offer).
+ *
+ * `ctrl+p` opens the command palette in every state. `ctrl+t` is the palette's
+ * `Variant cycle ctrl+t`; with a model that has no variants it changes nothing.
+ */
+const V2_DIRECT_KEYS: ReadonlyArray<QuickKeyDef> = [
+  { id: 'agentNext', keys: ['BTab'], notation: 'shift+tab' },
+  { id: 'commands', keys: ['C-p'], notation: 'ctrl+p' },
+  { id: 'variant', keys: ['C-t'], notation: 'ctrl+t' },
+];
+
+/**
+ * OpenCode V2's leader chords that open a dialog on the home screen and in a
+ * session alike (Issue #2966): `ctrl+x a` Select agent, `ctrl+x l` Sessions,
+ * `ctrl+x n` New session, `ctrl+x m` Select model — each also printed beside
+ * its entry in 2.0.18's palette.
+ *
+ * `themes` (`ctrl+x t`) is NOT here: 2.0.18 has no key for `Switch theme`. On
+ * the home screen the leader lets the `t` through into the composer, and inside
+ * a session `ctrl+x t` is `Show terminal pane`.
+ */
+const V2_GLOBAL_CHORDS: ReadonlyArray<QuickKeyDef> = [
+  { id: 'agents', keys: chord('a'), notation: 'ctrl+x a' },
+  { id: 'sessions', keys: chord('l'), notation: 'ctrl+x l' },
+  { id: 'newSession', keys: chord('n'), notation: 'ctrl+x n' },
+  { id: 'models', keys: chord('m'), notation: 'ctrl+x m' },
+];
+
+/* eslint-enable no-restricted-syntax */
+
+/**
+ * The strip OpenCode V2 gets (Issue #2966).
+ *
+ * No session-scoped group. 2.0.18 does bind `ctrl+x g` (Jump to message),
+ * `ctrl+x u` (Undo), `ctrl+x r` (Redo) and `ctrl+x c` (Compact) inside a
+ * session — all four measured — but on the home screen each types its letter
+ * into the composer, exactly as v1's do, and the gate v1 uses is
+ * `hasAgentSession`, which nothing fills for v2: session telemetry is recorded
+ * by v1's event subscription only. Offered, the four buttons would be disabled
+ * for the life of every v2 pane. Scrolling is measured too: `PageUp` /
+ * `PageDown` / `Home` / `End` all move the transcript.
+ */
+const V2_GROUPS: ReadonlyArray<ReadonlyArray<QuickKeyDef>> = [
+  V2_DIRECT_KEYS,
+  V2_GLOBAL_CHORDS,
+  SCROLL_KEYS,
+];
+
+/**
+ * Which strip each tool gets, keyed by tool id (Issue #2966). A tool with no
+ * entry gets nothing at all — the one gate #2046 kept in this component.
+ */
+const GROUPS_BY_TOOL: Readonly<Partial<Record<CLIToolType, ReadonlyArray<ReadonlyArray<QuickKeyDef>>>>> = {
+  opencode: GROUPS,
+  'opencode-v2': V2_GROUPS,
+};
+
 /**
  * How many keys the disclosure toggle says are hidden underneath (Issue #2106).
  * Derived, so it cannot drift from the groups the way a written-out 17 would.
  */
-const QUICK_KEY_COUNT = GROUPS.reduce((total, group) => total + group.length, 0);
+function countQuickKeys(groups: ReadonlyArray<ReadonlyArray<QuickKeyDef>>): number {
+  return groups.reduce((total, group) => total + group.length, 0);
+}
+
+/**
+ * The quick keys a tool's strip sends, flattened in render order (Issue #2966).
+ *
+ * Exported for the tests that pin every button's keys to the tool's declared
+ * `navigationKeys()` vocabulary — the browser cannot call that, so the pin is
+ * what keeps a button from drawing a request the route would answer 400 for.
+ *
+ * @param cliToolId - CLI tool identifier
+ * @returns `{ id, keys }` per button, or an empty array for a tool with no strip
+ */
+export function opencodeQuickKeyBindings(
+  cliToolId: CLIToolType,
+): ReadonlyArray<{ id: string; keys: readonly string[] }> {
+  return (GROUPS_BY_TOOL[cliToolId] ?? []).flat().map(({ id, keys }) => ({ id, keys }));
+}
 
 /**
  * Container width at or above which the key notation is printed (Issue #2131).
@@ -327,7 +427,10 @@ export const OpencodeQuickKeys = memo(function OpencodeQuickKeys({
   // so for any other tool there is nothing to render. Issue #2106 keeps the gate
   // here (rather than in the mobile caller) so there is still exactly one of it,
   // which is also what keeps the disclosure toggle from appearing for claude.
-  if (cliToolId !== 'opencode') return null;
+  // Issue #2966: the gate is now "has a definition table", which is opencode's
+  // and OpenCode V2's — each with its own measured keys.
+  const groups = GROUPS_BY_TOOL[cliToolId];
+  if (!groups) return null;
 
   const toolbar = (
     <div
@@ -355,7 +458,7 @@ export const OpencodeQuickKeys = memo(function OpencodeQuickKeys({
           {t('opencodeQuickKeys.caption')}
         </span>
       )}
-      {GROUPS.map((group, groupIndex) => (
+      {groups.map((group, groupIndex) => (
         <div key={group[0].id} className="flex flex-wrap items-center gap-1.5">
           {groupIndex > 0 ? (
             <span className="w-px h-6 bg-border mx-0.5" aria-hidden="true" />
@@ -438,7 +541,7 @@ export const OpencodeQuickKeys = memo(function OpencodeQuickKeys({
           aria-hidden="true"
         />
         <span>{t('opencodeQuickKeys.toolbarLabel')}</span>
-        <span className="ml-auto text-xs text-muted-foreground">{QUICK_KEY_COUNT}</span>
+        <span className="ml-auto text-xs text-muted-foreground">{countQuickKeys(groups)}</span>
       </button>
       {disclosureOpen ? toolbar : null}
     </div>

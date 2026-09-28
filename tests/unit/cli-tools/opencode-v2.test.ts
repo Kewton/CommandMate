@@ -301,3 +301,33 @@ describe('kill', () => {
     ]);
   });
 });
+
+describe('quick-key vocabulary (Issue #2966)', () => {
+  it('declares the ctrl+x leader and the keys the v2 strip sends, on top of the base pad', async () => {
+    const { NAVIGATION_KEY_VALUES } = await import('@/types/terminal-keys');
+    const spec = new OpenCodeV2Tool().navigationKeys();
+    expect(spec.leaderKey).toBe('C-x');
+    expect(spec.keys).toEqual([...NAVIGATION_KEY_VALUES, 'C-x', 'C-p', 'C-t', 'a', 'l', 'm']);
+    expect(new Set(spec.keys).size).toBe(spec.keys.length);
+  });
+
+  it('does not declare the chord letters 2.0.18 lets through into the composer', () => {
+    const keys = new OpenCodeV2Tool().navigationKeys().keys as readonly string[];
+    // `t` is not themes on 2.0.18; g/u/r/c are session-only and not on the v2 strip;
+    // `b` is v1's refused sidebar toggle.
+    for (const letter of ['t', 'g', 'u', 'r', 'c', 'b']) {
+      expect(keys).not.toContain(letter);
+    }
+  });
+
+  it('can send every key every button of the v2 strip sends (no 400 from /special-keys)', async () => {
+    const { opencodeQuickKeyBindings } = await import('@/components/worktree/OpencodeQuickKeys');
+    const declared = new OpenCodeV2Tool().navigationKeys().keys as readonly string[];
+    const bindings = opencodeQuickKeyBindings('opencode-v2');
+    expect(bindings.length).toBeGreaterThan(0);
+    const undeclared = bindings.flatMap(({ id, keys }) =>
+      keys.filter((key) => !declared.includes(key)).map((key) => `${id}:${key}`),
+    );
+    expect(undeclared).toEqual([]);
+  });
+});
