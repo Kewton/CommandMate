@@ -25,7 +25,7 @@
  */
 
 import { existsSync } from 'fs';
-import { basename, resolve } from 'path';
+import { resolve } from 'path';
 import { shellQuote } from '@/lib/hooks/hook-settings-generator';
 import { createLogger } from '@/lib/logger';
 import { definePullEventSource } from '../define-source';
@@ -79,7 +79,8 @@ export function resolveOpencodeV2LaunchScriptPath(): string | null {
  *
  * With a reserved port and a written password file (the runtime's
  * `reserveOpencodeV2Server` does both first) it is
- * `bash <launch.sh> --port <N> --password-file <path> --directory <worktree>`:
+ * `bash <launch.sh> --port <N> --password-file <path> --directory <worktree>
+ * --executable <path>`:
  * the password travels as a PATH, and `env` stays empty, so neither the line
  * typed into the pane nor the environment it renders carries the secret.
  *
@@ -89,9 +90,11 @@ export function resolveOpencodeV2LaunchScriptPath(): string | null {
  * events, which the screen scraper still reads. Never the bare `opencode2`,
  * which would attach to the user's shared background service.
  *
- * Issue #2939: the wrapper starts `opencode2` by that name, so it is only used
- * when the resolved executable IS an `opencode2`. OpenCode V2 installed under
- * the `opencode` name alone takes the standalone line, run by its absolute path.
+ * Issue #2952: the wrapper is handed the resolved executable with
+ * `--executable <path>`, so OpenCode V2 installed under the `opencode` name
+ * alone gets its own server too, and the pane runs the very binary that
+ * answered `--version` rather than whatever its PATH names `opencode2`. The
+ * flag is left off only for the bare name `opencode2`, the wrapper's default.
  */
 export function prepareOpencodeV2Launch({
   target,
@@ -112,9 +115,7 @@ export function prepareOpencodeV2Launch({
       ? 'launch-script-missing'
       : !existsSync(passwordFile)
         ? 'password-file-missing'
-        : basename(executablePath) !== OPENCODE_V2_COMMAND
-          ? 'opencode2-not-installed'
-          : null;
+        : null;
   if (script === null || reason !== null) {
     logger.warn('opencode-v2-launch-degraded-to-standalone', {
       worktreeId: target.worktreeId,
@@ -133,6 +134,9 @@ export function prepareOpencodeV2Launch({
       shellQuote(passwordFile),
       '--directory',
       shellQuote(worktreePath),
+      ...(executablePath === OPENCODE_V2_COMMAND
+        ? []
+        : ['--executable', shellQuote(executablePath)]),
     ].join(' '),
     settingsPath: null,
     env: {},
