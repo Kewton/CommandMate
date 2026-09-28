@@ -30,6 +30,7 @@ import {
   MAX_SCHEDULE_NAME_LENGTH,
   MAX_SCHEDULE_MESSAGE_LENGTH,
   getPermissionOptionsForTool,
+  isScheduleSupportedCliTool,
 } from '@/config/schedule-config';
 import { isCliToolType } from '@/lib/cli-tools/types';
 import {
@@ -378,6 +379,8 @@ export function validateScheduleInput(input: ScheduleWriteInput): ScheduleValida
 
   if (!isCliToolType(input.cliToolId)) {
     errors.push('invalid CLI tool');
+  } else if (!isScheduleSupportedCliTool(input.cliToolId)) {
+    errors.push(`CLI tool "${input.cliToolId}" is not supported in schedules yet`);
   } else {
     if (input.model && input.model.trim()) {
       if (!TOOLS_WITH_MODEL_SUPPORT.has(input.cliToolId)) {

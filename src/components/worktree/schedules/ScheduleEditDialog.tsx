@@ -40,6 +40,7 @@ import {
   DEFAULT_PERMISSIONS,
   MAX_SCHEDULE_NAME_LENGTH,
   MAX_SCHEDULE_MESSAGE_LENGTH,
+  isScheduleSupportedCliTool,
 } from '@/config/schedule-config';
 import { NAME_PATTERN, isValidCronExpression } from '@/config/cmate-constants';
 import {
@@ -257,11 +258,14 @@ export function ScheduleEditDialog({
   const isMobile = useIsMobile();
 
   // Resolve the agent roster: explicit instances when configured, otherwise the
-  // primary instance of every CLI tool (legacy behavior).
+  // primary instance of every CLI tool (legacy behavior). Filter out tools that
+  // are not supported in schedules yet (Issue #2936).
   const resolvedInstances = useMemo<AgentInstance[]>(
-    () => (instances && instances.length > 0
-      ? instances
-      : agentInstancesFromSelectedAgents([...CLI_TOOL_IDS])),
+    () =>
+      (instances && instances.length > 0
+        ? instances
+        : agentInstancesFromSelectedAgents([...CLI_TOOL_IDS])
+      ).filter((inst) => isScheduleSupportedCliTool(inst.cliTool)),
     [instances]
   );
 
