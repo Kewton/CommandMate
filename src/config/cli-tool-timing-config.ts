@@ -148,6 +148,26 @@ export const VIBE_LOCAL_DOUBLE_ENTER_WAIT_MS = 200;
 export const COMMAND_CODE_INIT_WAIT_MS = 3000;
 
 /**
+ * Wait (ms) after OpenCode V2's `/exit` before its postcondition is checked
+ * (Issue #2934).
+ *
+ * Longer than {@link OPENCODE_EXIT_WAIT_MS} because two processes go away, not
+ * one: the TUI quits, then `scripts/opencode-v2/launch.sh`'s trap stops the
+ * `opencode2 serve` it started (SIGTERM, then SIGKILL after 3 s). The
+ * postcondition that follows (`verifyGracefulExit`) still polls, so this only
+ * keeps the first probe from firing while the server is shutting down.
+ * Site: opencode-v2 killSession().
+ */
+export const OPENCODE_V2_EXIT_WAIT_MS = 3000;
+
+/**
+ * Upper bound (ms) on waiting for OpenCode V2's composer before a send
+ * (Issue #2934, D6).
+ * Site: opencode-v2 sendMessage().
+ */
+export const OPENCODE_V2_COMPOSER_WAIT_MS = 15000;
+
+/**
  * Wait (ms) for the `unset CLAUDECODE` command to reach the shell while
  * sanitizing the session environment (empirically determined).
  * Site: session-key-sender sanitizeSessionEnvironment().

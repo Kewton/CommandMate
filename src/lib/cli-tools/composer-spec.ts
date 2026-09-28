@@ -94,6 +94,17 @@ const COMPOSER_SPECS: Record<CLIToolType, ComposerSpec> = {
     clearBeforeSend: false,
     submitEnterCount: 1,
   },
+
+  // Issue #2934: OpenCode V2 draws the same gutter-and-no-marker input box as
+  // v1 (`┃  Ask anything… "…"` on 2.0.18, 80x200), so the box reader is the
+  // right one — the marker reader would find nothing and classify every send
+  // `submitted` without evidence. Same pane height as v1's.
+  'opencode-v2': {
+    reader: 'opencode-box',
+    verifyCaptureLines: OPENCODE_PANE_HEIGHT,
+    clearBeforeSend: false,
+    submitEnterCount: 1,
+  },
 };
 
 /**

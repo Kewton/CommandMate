@@ -95,6 +95,9 @@ describe('Issue #2046: every tool but opencode declares the pre-#2046 set, uncha
       'codex',
       'copilot',
       'gemini',
+      // Issue #2934: OpenCode V2 Phase 1 keeps the shared pad; its own quick
+      // keys (`shift+tab` agents, palette) are Phase 3's.
+      'opencode-v2',
       'vibe-local',
     ]);
     // Issue #2250 put Command Code on the shared set; Issue #2297 moved it and

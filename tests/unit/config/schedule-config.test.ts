@@ -19,6 +19,7 @@ import {
   GEMINI_PERMISSIONS,
   VIBE_LOCAL_PERMISSIONS,
   OPENCODE_PERMISSIONS,
+  OPENCODE_V2_PERMISSIONS,
   NO_PERMISSION_FLAGS,
   DEFAULT_PERMISSIONS,
   getPermissionOptionsForTool,
@@ -237,6 +238,8 @@ describe('getPermissionOptionsForTool() resolves through the tool\'s own case (I
     ['gemini', GEMINI_PERMISSIONS],
     ['vibe-local', VIBE_LOCAL_PERMISSIONS],
     ['opencode', OPENCODE_PERMISSIONS],
+    // Issue #2934: not schedulable yet, but answered by its own case.
+    ['opencode-v2', OPENCODE_V2_PERMISSIONS],
   ] as const)('%s', (cliToolId, expected) => {
     expect(getPermissionOptionsForTool(cliToolId)).toBe(expected);
   });

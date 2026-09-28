@@ -1,0 +1,28 @@
+[
+  {
+    "id": "evt_0e6b1e42e001MW8DdRoqSYzSlw",
+    "created": 1790576813102,
+    "type": "session.execution.started",
+    "data": {
+      "sessionID": "ses_f194e1bf3ffeD8Ak2TrW5f3pwe"
+    },
+    "durable": {
+      "aggregateID": "ses_f194e1bf3ffeD8Ak2TrW5f3pwe",
+      "seq": 2,
+      "version": 1
+    }
+  },
+  {
+    "id": "evt_0e6b1f20d00182fGFCuGsB5Ghb",
+    "created": 1790576816653,
+    "type": "session.execution.succeeded",
+    "data": {
+      "sessionID": "ses_f194e1bf3ffeD8Ak2TrW5f3pwe"
+    },
+    "durable": {
+      "aggregateID": "ses_f194e1bf3ffeD8Ak2TrW5f3pwe",
+      "seq": 12,
+      "version": 1
+    }
+  }
+]

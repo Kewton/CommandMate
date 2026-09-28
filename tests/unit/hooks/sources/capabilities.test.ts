@@ -73,6 +73,7 @@ import { copilotAgentEventSource } from '@/lib/hooks/sources/copilot/source';
 import { opencodeAgentEventSource } from '@/lib/hooks/sources/opencode/source';
 import { antigravityAgentEventSource } from '@/lib/hooks/sources/antigravity/source';
 import { commandCodeAgentEventSource } from '@/lib/hooks/sources/command-code/source';
+import { opencodeV2AgentEventSource } from '@/lib/hooks/sources/opencode-v2/source';
 import type { AgentEventSource, AgentSourceCapabilities } from '@/lib/hooks/sources/types';
 
 /**
@@ -196,6 +197,19 @@ const TABLE: Record<string, DeclaredRow> = {
     transcriptHistory: 'pull',
     stopReportsSelfResume: false,
   },
+  // Issue #2934 (Epic #2370 Phase 1). A pull source like opencode, but Phase 1
+  // publishes state only: no per-decision id (so no surface offers a structured
+  // answer yet), no resync and no transcript (Phase 2). `permission.replied` /
+  // `form.replied` do retire the decision, so the reply releases the prompt.
+  'opencode-v2': {
+    permissionHookPredictsDialog: false,
+    sessionStartMayArriveLate: false,
+    permissionReplyReleasesPrompt: true,
+    eventIdentity: null,
+    resync: 'none',
+    transcriptHistory: null,
+    stopReportsSelfResume: false,
+  },
 };
 
 const SOURCES: Record<string, AgentEventSource> = {
@@ -206,6 +220,7 @@ const SOURCES: Record<string, AgentEventSource> = {
   opencode: opencodeAgentEventSource,
   antigravity: antigravityAgentEventSource,
   'command-code': commandCodeAgentEventSource,
+  'opencode-v2': opencodeV2AgentEventSource,
 };
 
 function declaredRow(capabilities: AgentSourceCapabilities): DeclaredRow {
@@ -275,7 +290,9 @@ describe('[#1924] AgentSourceCapabilities — the table of §4 D3', () => {
     expect(forecasts).toEqual(['claude', 'codex']);
 
     const releases = Object.keys(TABLE).filter((id) => TABLE[id].permissionReplyReleasesPrompt);
-    expect(releases).toEqual(['opencode']);
+    // Issue #2934: OpenCode V2's `permission.replied` retires the dialog the
+    // same way v1's does.
+    expect(releases).toEqual(['opencode', 'opencode-v2']);
 
     const identified = Object.keys(TABLE).filter((id) => TABLE[id].eventIdentity !== null);
     expect(identified).toEqual(['opencode']);
@@ -300,7 +317,9 @@ describe('[#1924] AgentSourceCapabilities — the table of §4 D3', () => {
     expect(push).toEqual(['opencode']);
 
     const scraperOnly = Object.keys(TABLE).filter((id) => TABLE[id].transcriptHistory === null);
-    expect(scraperOnly).toEqual(['gemini', 'copilot']);
+    // Issue #2934: OpenCode V2's History (`GET /api/session/{id}/message`) is
+    // Phase 2, so for now the scraper is its only writer.
+    expect(scraperOnly).toEqual(['gemini', 'copilot', 'opencode-v2']);
   });
 
   it('names exactly one source whose stop can say it will resume by itself (#2614)', () => {

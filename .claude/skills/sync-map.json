@@ -442,8 +442,8 @@
         {
           "path": "scripts/monitor-lib.sh",
           "policy": "port-required",
-          "sha256": "ada537bed08ee4441d44200fa32147ac2e85f9c365f8d9a87adf478d3ec7b6ca",
-          "note": "#2606 で両側に反映済み（skills 0.9.0 / commandmate-skills#267、2026-09-17）。classify-state.sh が capture の cliToolId で目印の組を選び、antigravity のときは monitor-lib.sh の ml_agy_*（生成中・PROMPT・待機中の枠、realtimeSnippet と content の長い方の末尾 64 行を読む ml_agy_frame）で判定する。 2026-09-27（Issue #2904）に commandmate-skills PR #77（f929fe6、skills #59）を取り込み、ml_json_block・ml_autoyes_suppressed・ml_autoyes_suppression_reason・ml_prompt_type・ml_prompt_default_label・ml_is_affirmative・ml_prompt_enter_verdict・ml_prompt_signature を移植した。コメントを除いたコード差分は 0 行（`ML_CLI_TOOL_IDS` の末尾に CommandMate 側だけ持つ `command-code` を除く。skills に無い CLI ツールへの対応で意図的、この Issue の対象外）。"
+          "sha256": "4319bbb3cc1c626ed97f446381e1018a9f0f2c3aacbabd3ccf5d7c9b7b35c8f4",
+          "note": "#2606 で両側に反映済み（skills 0.9.0 / commandmate-skills#267、2026-09-17）。classify-state.sh が capture の cliToolId で目印の組を選び、antigravity のときは monitor-lib.sh の ml_agy_*（生成中・PROMPT・待機中の枠、realtimeSnippet と content の長い方の末尾 64 行を読む ml_agy_frame）で判定する。 2026-09-27（Issue #2904）に commandmate-skills PR #77（f929fe6、skills #59）を取り込み、ml_json_block・ml_autoyes_suppressed・ml_autoyes_suppression_reason・ml_prompt_type・ml_prompt_default_label・ml_is_affirmative・ml_prompt_enter_verdict・ml_prompt_signature を移植した。コメントを除いたコード差分は 0 行（`ML_CLI_TOOL_IDS` の末尾に CommandMate 側だけ持つ `command-code` を除く。skills に無い CLI ツールへの対応で意図的、この Issue の対象外）。2026-09-28（Issue #2934）に `ML_CLI_TOOL_IDS` の末尾へ `opencode-v2` を足して re-pin した（CommandMate 側だけの差分がもう 1 語増えた。skills 側への移植は不要な意図的差分）。"
         },
         {
           "path": "scripts/monitor.sh",

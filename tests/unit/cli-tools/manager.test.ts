@@ -59,6 +59,7 @@ const TOOL_ORDER: CLIToolType[] = [
   'copilot',
   'antigravity',
   'command-code',
+  'opencode-v2',
 ];
 
 /** 偽の `which` が見つけるコマンド集合 */
@@ -77,11 +78,11 @@ let execFileCalls: string[][];
 /** holdCallbacks 中に保留されたコールバック */
 let parked: Array<() => void>;
 
-function respond(ok: boolean, callback: ExecCallback | undefined): void {
+function respond(ok: boolean, callback: ExecCallback | undefined, stdout = 'ok'): void {
   if (!callback) return;
   const fire = (): void => {
     if (ok) {
-      callback(null, 'ok', '');
+      callback(null, stdout, '');
     } else {
       callback(new Error('Command failed'), '', 'not found');
     }
@@ -137,6 +138,16 @@ describe('CLIToolManager', () => {
       callback?: unknown
     ) => {
       execFileCalls.push([file, ...args]);
+      // Issue #2934: OpenCode V2 is identified by `opencode2 --version`, whose
+      // output (`opencode v<semver>`) is the installation check (D1).
+      if (file === 'opencode2' && args[0] === '--version') {
+        respond(
+          installedCommands.has('opencode2'),
+          callback as ExecCallback | undefined,
+          'opencode v2.0.18\n'
+        );
+        return {} as childProcess.ChildProcess;
+      }
       respond(false, callback as ExecCallback | undefined);
       return {} as childProcess.ChildProcess;
     }) as unknown as typeof childProcess.execFile);
@@ -227,9 +238,9 @@ describe('CLIToolManager', () => {
   });
 
   describe('getAllTools', () => {
-    it('should return all eight tools', () => {
+    it('should return all nine tools', () => {
       const tools = manager.getAllTools();
-      expect(tools).toHaveLength(8);
+      expect(tools).toHaveLength(9);
       expect(tools.map((t) => t.id)).toEqual(TOOL_ORDER);
     });
 
@@ -317,7 +328,7 @@ describe('CLIToolManager', () => {
   });
 
   describe('getAllToolsInfo', () => {
-    it('should return per-tool installation status for all eight tools', async () => {
+    it('should return per-tool installation status for all nine tools', async () => {
       installedCommands = new Set(['claude', 'gemini', 'agy', 'commandcode']);
       copilotResolved = { path: '/usr/local/bin/copilot', version: '1.0.80', source: 'path' };
 
@@ -332,6 +343,7 @@ describe('CLIToolManager', () => {
         { id: 'copilot', name: 'Copilot', command: 'copilot', installed: true },
         { id: 'antigravity', name: 'Antigravity CLI', command: 'agy', installed: true },
         { id: 'command-code', name: 'Command Code CLI', command: 'commandcode', installed: true },
+        { id: 'opencode-v2', name: 'OpenCode V2', command: 'opencode2', installed: false },
       ]);
     });
 
@@ -340,6 +352,7 @@ describe('CLIToolManager', () => {
 
       expect(allInfo.map((info) => info.id)).toEqual(TOOL_ORDER);
       expect(allInfo.map((info) => info.installed)).toEqual([
+        false,
         false,
         false,
         false,
@@ -360,6 +373,7 @@ describe('CLIToolManager', () => {
         'opencode',
         'agy',
         'commandcode',
+        'opencode2',
       ]);
       copilotResolved = { path: '/usr/local/bin/copilot', version: '1.0.80', source: 'path' };
       holdCallbacks = true;
@@ -378,11 +392,13 @@ describe('CLIToolManager', () => {
         'which commandcode',
       ]);
       expect(copilotProbeIssued).toBe(true);
+      expect(execFileCalls).toEqual([['opencode2', '--version']]);
 
       await releaseParked();
 
       const allInfo = await pending;
       expect(allInfo.map((info) => info.installed)).toEqual([
+        true,
         true,
         true,
         true,

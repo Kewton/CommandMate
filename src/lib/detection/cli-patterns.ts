@@ -1577,6 +1577,66 @@ export const OPENCODE_SKIP_PATTERNS: readonly RegExp[] = [
   PASTED_TEXT_PATTERN,
 ] as const;
 
+// =============================================================================
+// OpenCode V2 (`opencode2`, Issue #2934)
+// =============================================================================
+//
+// A separate tool id from `opencode` (Epic #2370, decision 1). Its TUI is drawn
+// by the same toolkit and many rows look alike, but v1's constants are v1's:
+// they are left exactly as they are, and v2 names its own here so a change on
+// either side cannot move the other. Phase 1 reads only what the send path and
+// the fallback status reader need; the approval dialog (`Always allow`, the
+// reverse of v1's `Allow always`), the completion row and the session tabs are
+// Phase 3's.
+
+/**
+ * OpenCode V2's empty composer: the input box's `┃` gutter with the
+ * `Ask anything…` placeholder on the same row (2.0.18 draws U+2026; the ASCII
+ * `...` is accepted too, as for v1 since #2915).
+ *
+ * Measured on 2.0.18 at 80x200 (2026-09-28):
+ * `   ┃  Ask anything… "Fix broken tests"`. Match against the ANSI-stripped
+ * frame BEFORE `stripBoxDrawing`, which removes the gutter this anchors on.
+ */
+export const OPENCODE_V2_IDLE_COMPOSER_PATTERN =
+  /^[^\S\n]*[\u2502\u2503][^\S\n]*Ask anything(?:\.\.\.|\u2026)/m;
+
+/**
+ * OpenCode V2's footer, which ends in `ctrl+p commands` on every frame the
+ * TUI draws (before a turn: `<path>:<branch>  shift+tab agents  ctrl+p commands`;
+ * after one: `<path>:<branch>  8.8K (1%)  ctrl+p commands`, 2.0.18).
+ *
+ * Proof that the TUI — and so its composer — is on screen, NOT that it is idle:
+ * a running turn keeps the footer.
+ */
+export const OPENCODE_V2_FOOTER_PATTERN = /ctrl\+p commands/;
+
+/**
+ * OpenCode V2 working indicator: the footer's `esc interrupt` hint, drawn only
+ * while a turn is running (2.0.18).
+ */
+export const OPENCODE_V2_THINKING_PATTERN = /esc interrupt/;
+
+/**
+ * Whether OpenCode V2's composer is on screen, so a send may type into it
+ * (Issue #2934, D6): the gutter-anchored placeholder, or the footer.
+ *
+ * @param text - ANSI-stripped capture, box drawing intact
+ */
+export function isOpencodeV2ComposerVisible(text: string): boolean {
+  return OPENCODE_V2_IDLE_COMPOSER_PATTERN.test(text) || OPENCODE_V2_FOOTER_PATTERN.test(text);
+}
+
+/** OpenCode V2 rows that are chrome, never reply content. */
+export const OPENCODE_V2_SKIP_PATTERNS: readonly RegExp[] = [
+  OPENCODE_SEPARATOR_PATTERN,
+  OPENCODE_V2_FOOTER_PATTERN,
+  OPENCODE_V2_THINKING_PATTERN,
+  /Ask anything(?:\.\.\.|\u2026)/,
+  /^Build\s+·/,
+  PASTED_TEXT_PATTERN,
+] as const;
+
 /**
  * Copilot prompt pattern (Issue #545)
  * Copilot CLI shows "❯" followed by cursor/text hint:
@@ -2828,6 +2888,9 @@ export function detectThinking(cliToolId: CLIToolType, content: string): boolean
     case 'command-code':
       result = COMMAND_CODE_THINKING_PATTERN.test(content);
       break;
+    case 'opencode-v2':
+      result = OPENCODE_V2_THINKING_PATTERN.test(content);
+      break;
     default:
       result = CLAUDE_THINKING_PATTERN.test(content);
   }
@@ -2959,6 +3022,17 @@ export function getCliToolPatterns(cliToolId: CLIToolType): {
         separatorPattern: COMMAND_CODE_SEPARATOR_PATTERN,
         thinkingPattern: COMMAND_CODE_THINKING_PATTERN,
         skipPatterns: [...COMMAND_CODE_SKIP_PATTERNS],
+      };
+
+    // Issue #2934: OpenCode V2's own constants (see OPENCODE_V2_* above). The
+    // separator row is the same half-block rule v1 draws, so v1's pattern is
+    // reused as a value; nothing of v1's is changed.
+    case 'opencode-v2':
+      return {
+        promptPattern: OPENCODE_V2_IDLE_COMPOSER_PATTERN,
+        separatorPattern: OPENCODE_SEPARATOR_PATTERN,
+        thinkingPattern: OPENCODE_V2_THINKING_PATTERN,
+        skipPatterns: [...OPENCODE_V2_SKIP_PATTERNS],
       };
 
     default:

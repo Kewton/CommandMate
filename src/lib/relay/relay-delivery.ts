@@ -154,6 +154,9 @@ const TRANSCRIPT_READER_TOOLS: Readonly<Record<CLIToolType, boolean>> = {
   copilot: false,
   gemini: false,
   'vibe-local': false,
+  // Issue #2934: OpenCode V2 Phase 1 reads no transcript (History is Phase 2),
+  // so the scraper's row is its only record.
+  'opencode-v2': false,
 };
 
 /**

@@ -138,6 +138,12 @@ Model names may contain alphanumeric characters, hyphens, dots, slashes and colo
 
 > **Warning:** note that this is the only permitted value, and scheduled execution is an unattended batch.
 
+### opencode-v2 (not schedulable yet)
+
+`opencode-v2` (OpenCode V2, executable `opencode2`) can run as a worktree agent, but **cannot be the
+CLI Tool of a schedule yet** (Issue #2934; the headless `opencode2 run` path is Epic #2370 Phase 4).
+Writing it in CMATE.md is a validation error, and the row is not run.
+
 ### command-code (--yolo / --permission-mode)
 
 | Value | Description |

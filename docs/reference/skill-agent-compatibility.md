@@ -33,6 +33,7 @@ receipt の `install_roots` に両方が記録される。`install_roots` を持
 | Copilot | `1.0.83` | `.agents/skills` と `.claude/skills`（`.github/skills` も） | ✅ 確認済み | ✅ 確認済み（Copilot 自身の palette に出る） | 機械的（`copilot skill list` の列挙と composer 補完。陽性対照 `/hel`・陰性対照 `/zzzznotacommand`） | 2026-09-05 |
 | Antigravity | — | — | ❔ 未計測 | ❔ 未計測 | 実測なし | — |
 | Command Code | `1.49.0` | `.agents/skills` のみ（`.claude/skills` は読まない） | ✅ 確認済み | ✅ 確認済み（Command Code 自身の palette に `[skill]` 行として出る） | 機械的（`cmd skills list -d` が読み取る root を列挙し probe Skill を載せる／`cmd -p "/<name>"` が `skill_loaded` イベントを出して token を返す） | 2026-09-05 |
+| OpenCode V2 | — | — | ❔ 未計測 | ❔ 未計測 | 実測なし（Issue #2934 で登録のみ。計測は Epic #2370 Phase 4） | — |
 
 計測環境（Claude / Codex 行）: 専用 port・専用 DB・skills 未導入の新規 git repository / CommandMate 0.15.0 / macOS 26.5.2 / Node v24.1.0。
 証跡: <https://github.com/Kewton/CommandMate/issues/1513#issuecomment-5083878264>

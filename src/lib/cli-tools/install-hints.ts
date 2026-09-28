@@ -80,6 +80,8 @@ export const CLI_TOOL_INSTALL_HINTS: Readonly<Record<CLIToolType, string>> = {
   opencode: 'Install with: npm install -g opencode-ai',
   copilot: COPILOT_INSTALL_HINT,
   'command-code': 'Install with: npm install -g command-code',
+  // Issue #2934: the package installs the `opencode2` executable.
+  'opencode-v2': 'Install with: npm install -g @opencode/cli',
   // No package to name: `agy` ships with Antigravity and updates itself. The
   // URL is lifted from the binary on PATH rather than from a search result.
   antigravity: 'Install the Antigravity CLI: https://antigravity.google/docs/cli/reference',

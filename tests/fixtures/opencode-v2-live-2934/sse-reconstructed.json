@@ -1,0 +1,150 @@
+[
+  {
+    "id": "evt_0e6b1f20d002permAskedExample1",
+    "created": 1790576820000,
+    "type": "permission.asked",
+    "location": {
+      "directory": "/tmp/probe/repo"
+    },
+    "data": {
+      "id": "per_0e6b1f20d003ExamplePermission",
+      "sessionID": "ses_f194e1bf3ffeD8Ak2TrW5f3pwe",
+      "action": "edit",
+      "resources": [
+        "hello.txt"
+      ],
+      "save": [
+        "*"
+      ],
+      "metadata": {
+        "files": [
+          {
+            "file": "hello.txt",
+            "patch": "Index: hello.txt\n===================================================================\n--- hello.txt\n+++ hello.txt\n@@ -0,0 +1,1 @@\n+hi\n",
+            "status": "added",
+            "additions": 1,
+            "deletions": 0
+          }
+        ]
+      },
+      "source": {
+        "type": "tool",
+        "messageID": "msg_0e6b1f20d004ExampleMessage",
+        "id": "prt_0e6b1f20d005ExamplePart"
+      }
+    }
+  },
+  {
+    "id": "evt_0e6b1f20d006permRepliedExampl",
+    "created": 1790576825000,
+    "type": "permission.replied",
+    "location": {
+      "directory": "/tmp/probe/repo"
+    },
+    "data": {
+      "sessionID": "ses_f194e1bf3ffeD8Ak2TrW5f3pwe",
+      "requestID": "per_0e6b1f20d003ExamplePermission",
+      "reply": "once"
+    }
+  },
+  {
+    "id": "evt_0e6b1f20d007formCreatedExampl",
+    "created": 1790576830000,
+    "type": "form.created",
+    "location": {
+      "directory": "/tmp/probe/repo"
+    },
+    "data": {
+      "id": "frm_0e6b1f20d008ExampleForm",
+      "sessionID": "ses_f194e1bf3ffeD8Ak2TrW5f3pwe",
+      "title": "Questions",
+      "metadata": {
+        "kind": "question"
+      },
+      "fields": [
+        {
+          "key": "q0",
+          "title": "Favourite colour?",
+          "description": "Pick one",
+          "type": "string",
+          "options": [
+            {
+              "value": "Blue",
+              "label": "Blue",
+              "description": ""
+            },
+            {
+              "value": "Red",
+              "label": "Red",
+              "description": ""
+            }
+          ],
+          "custom": true
+        }
+      ]
+    }
+  },
+  {
+    "id": "evt_0e6b1f20d009formRepliedExampl",
+    "created": 1790576835000,
+    "type": "form.replied",
+    "location": {
+      "directory": "/tmp/probe/repo"
+    },
+    "data": {
+      "sessionID": "ses_f194e1bf3ffeD8Ak2TrW5f3pwe",
+      "formID": "frm_0e6b1f20d008ExampleForm",
+      "answer": {
+        "q0": "Blue"
+      }
+    }
+  },
+  {
+    "id": "evt_0e6b1f20d00aformCancelledExam",
+    "created": 1790576840000,
+    "type": "form.cancelled",
+    "data": {
+      "sessionID": "ses_f194e1bf3ffeD8Ak2TrW5f3pwe",
+      "formID": "frm_0e6b1f20d008ExampleForm"
+    }
+  },
+  {
+    "id": "evt_0e6b1f20d00bexecFailedExample",
+    "created": 1790576845000,
+    "type": "session.execution.failed",
+    "data": {
+      "sessionID": "ses_f194e1bf3ffeD8Ak2TrW5f3pwe",
+      "error": {
+        "name": "ProviderError",
+        "message": "model provider returned 529"
+      }
+    },
+    "durable": {
+      "aggregateID": "ses_f194e1bf3ffeD8Ak2TrW5f3pwe",
+      "seq": 20,
+      "version": 1
+    }
+  },
+  {
+    "id": "evt_0e6b1f20d00cexecInterruptedEx",
+    "created": 1790576850000,
+    "type": "session.execution.interrupted",
+    "data": {
+      "sessionID": "ses_f194e1bf3ffeD8Ak2TrW5f3pwe"
+    },
+    "durable": {
+      "aggregateID": "ses_f194e1bf3ffeD8Ak2TrW5f3pwe",
+      "seq": 24,
+      "version": 1
+    }
+  },
+  {
+    "id": "evt_0e6b1f20d00dreasoningDeltaExa",
+    "created": 1790576851000,
+    "type": "session.reasoning.delta",
+    "data": {
+      "sessionID": "ses_f194e1bf3ffeD8Ak2TrW5f3pwe",
+      "delta": "thinking"
+    }
+  }
+]

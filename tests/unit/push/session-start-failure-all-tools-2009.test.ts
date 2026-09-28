@@ -85,6 +85,7 @@ import { OpenCodeTool } from '@/lib/cli-tools/opencode';
 import { CopilotTool } from '@/lib/cli-tools/copilot';
 import { AntigravityTool } from '@/lib/cli-tools/antigravity';
 import { CommandCodeTool } from '@/lib/cli-tools/command-code';
+import { OpenCodeV2Tool } from '@/lib/cli-tools/opencode-v2';
 import type { ICLITool } from '@/lib/cli-tools/types';
 import { CLI_TOOL_IDS } from '@/lib/cli-tools/types';
 import { clearCachedClaudePath } from '@/lib/session/claude-session';
@@ -118,6 +119,7 @@ const TOOLS: ReadonlyArray<{ tool: () => ICLITool; name: string }> = [
   { tool: () => new CopilotTool(), name: 'Copilot' },
   { tool: () => new AntigravityTool(), name: 'Antigravity CLI' },
   { tool: () => new CommandCodeTool(), name: 'Command Code CLI' },
+  { tool: () => new OpenCodeV2Tool(), name: 'OpenCode V2' },
 ];
 
 let savedEnv: Record<string, string | undefined>;

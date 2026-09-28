@@ -12,6 +12,7 @@ import { OpenCodeTool } from './opencode';
 import { CopilotTool } from './copilot';
 import { AntigravityTool } from './antigravity';
 import { CommandCodeTool } from './command-code';
+import { OpenCodeV2Tool } from './opencode-v2';
 
 /**
  * CLI Tool Manager (Singleton)
@@ -36,6 +37,7 @@ export class CLIToolManager {
     this.tools.set('copilot', new CopilotTool());
     this.tools.set('antigravity', new AntigravityTool());
     this.tools.set('command-code', new CommandCodeTool());
+    this.tools.set('opencode-v2', new OpenCodeV2Tool());
   }
 
   /**

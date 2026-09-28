@@ -14,6 +14,7 @@ import { codexStatusDetector } from './codex/detect';
 import { commandCodeStatusDetector } from './command-code/detect';
 import { copilotStatusDetector } from './copilot/detect';
 import { opencodeStatusDetector } from './opencode/detect';
+import { opencodeV2StatusDetector } from './opencode-v2/detect';
 import { createToolStatusDetector } from './run-detection';
 import { UNMEASURED_VERIFIED_AGAINST } from './verified-against';
 import type { CLIToolType } from '@/lib/cli-tools/types';
@@ -44,6 +45,7 @@ const DETECTORS: Readonly<Record<CLIToolType, ToolStatusDetector>> = {
   opencode: opencodeStatusDetector,
   antigravity: antigravityStatusDetector,
   'command-code': commandCodeStatusDetector,
+  'opencode-v2': opencodeV2StatusDetector,
   gemini: geminiStatusDetector,
   'vibe-local': vibeLocalStatusDetector,
 };

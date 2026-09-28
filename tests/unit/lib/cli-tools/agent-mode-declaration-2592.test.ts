@@ -50,7 +50,8 @@ const DECLARING = ['antigravity', 'claude', 'codex', 'command-code', 'copilot'] 
  *  - `gemini` — the binding exists in its own docs, the footer spelling does
  *    not exist anywhere. A button is a promise about what happens.
  */
-const NOT_DECLARING = ['gemini', 'opencode', 'vibe-local'] as const;
+// Issue #2934: OpenCode V2's `shift+tab` agent switch is Phase 3's.
+const NOT_DECLARING = ['gemini', 'opencode', 'opencode-v2', 'vibe-local'] as const;
 
 function spec(id: CLIToolType): AgentModeSpec | null {
   return manager.getTool(id).agentModeSpec();

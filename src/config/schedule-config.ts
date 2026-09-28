@@ -135,6 +135,14 @@ export const VIBE_LOCAL_PERMISSIONS = [] as const;
 export const OPENCODE_PERMISSIONS = [] as const;
 
 /**
+ * Allowed permission values for OpenCode V2 (Issue #2934): none, because it
+ * cannot be scheduled yet (see {@link SCHEDULE_UNSUPPORTED_CLI_TOOLS}). A
+ * separate constant for the reason {@link OPENCODE_PERMISSIONS} is one: the
+ * tool answers through its own case, not through `default`.
+ */
+export const OPENCODE_V2_PERMISSIONS = [] as const;
+
+/**
  * What a CLI tool with no permission flag at all resolves to (Issue #1914).
  *
  * The `default:` branch of {@link getPermissionOptionsForTool} returns this
@@ -166,7 +174,28 @@ export const DEFAULT_PERMISSIONS: Record<string, string> = {
   // run still reports success, so an unattended schedule that omits the column
   // would look like it worked and change nothing.
   'command-code': COMMAND_CODE_YOLO_PERMISSION,
+  // Issue #2934: listed so the table stays total over CLI_TOOL_IDS. OpenCode V2
+  // cannot be scheduled yet (see SCHEDULE_UNSUPPORTED_CLI_TOOLS), so the value
+  // is never used to build a command.
+  'opencode-v2': '',
 };
+
+/**
+ * CLI tools that are registered but cannot be the CLI Tool of a CMATE.md
+ * schedule yet (Issue #2934).
+ *
+ * OpenCode V2 runs interactively in Phase 1 of Epic #2370; its headless path
+ * (`opencode2 run --format json`, where `ask` rules are auto-rejected with exit
+ * 1 and `edit: deny` does not stop the `shell` tool from writing) is Phase 4.
+ * Until then a schedule naming it is a validation error in `cmate-validator` and
+ * a skipped row in `cmate-parser`, rather than a command nobody has measured.
+ */
+export const SCHEDULE_UNSUPPORTED_CLI_TOOLS: readonly string[] = ['opencode-v2'];
+
+/** Whether a CLI tool can be scheduled (see {@link SCHEDULE_UNSUPPORTED_CLI_TOOLS}). */
+export function isScheduleSupportedCliTool(cliToolId: string): boolean {
+  return !SCHEDULE_UNSUPPORTED_CLI_TOOLS.includes(cliToolId);
+}
 
 /**
  * Resolve the allowed Permission dropdown options for a CLI tool (Issue #824).
@@ -212,6 +241,9 @@ export function getPermissionOptionsForTool(cliToolId: string): readonly string[
       return VIBE_LOCAL_PERMISSIONS;
     case 'opencode':
       return OPENCODE_PERMISSIONS;
+    case 'opencode-v2':
+      // Not schedulable yet (Issue #2934), so there is nothing to choose.
+      return OPENCODE_V2_PERMISSIONS;
     default:
       return NO_PERMISSION_FLAGS;
   }

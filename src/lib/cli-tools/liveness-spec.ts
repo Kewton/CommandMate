@@ -50,6 +50,9 @@ import {
   OPENCODE_PROMPT_AFTER_RESPONSE,
   OPENCODE_SELECTION_LIST_PATTERN,
   OPENCODE_THINKING_PATTERN,
+  OPENCODE_V2_FOOTER_PATTERN,
+  OPENCODE_V2_IDLE_COMPOSER_PATTERN,
+  OPENCODE_V2_THINKING_PATTERN,
   VIBE_LOCAL_PROMPT_PATTERN,
   VIBE_LOCAL_THINKING_PATTERN,
 } from '../detection/cli-patterns';
@@ -255,6 +258,26 @@ const LIVENESS_SPECS: Record<CLIToolType, ToolLivenessSpec> = {
       COMMAND_CODE_PROMPT_PATTERN,
       COMMAND_CODE_MODE_INDICATOR_PATTERN,
       COMMAND_CODE_THINKING_PATTERN,
+    ],
+  },
+
+  /**
+   * OpenCode V2 2.0.18 — measured at 80x200 (Issue #2934).
+   *
+   * The footer (`… ctrl+p commands`) is drawn on every frame the TUI paints,
+   * before and after a turn and while one runs, so it alone carries liveness;
+   * the placeholder and the running hint are listed as well so a frame with
+   * either is not taken for a shell. None of the three can be matched by a
+   * shell prompt. After the TUI exits the alternate screen is gone and only the
+   * shell's rows remain, which is what makes the verdict flip.
+   */
+  'opencode-v2': {
+    ...SHARED,
+    ...ADDED_TOOL_DEFAULTS,
+    alivePatterns: [
+      OPENCODE_V2_IDLE_COMPOSER_PATTERN,
+      OPENCODE_V2_FOOTER_PATTERN,
+      OPENCODE_V2_THINKING_PATTERN,
     ],
   },
 

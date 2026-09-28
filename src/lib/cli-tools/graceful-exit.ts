@@ -45,6 +45,7 @@ import { COPILOT_TEXT_INPUT_DELAY_MS } from '../../config/copilot-constants';
 import {
   COPILOT_EXIT_WAIT_MS,
   OPENCODE_EXIT_WAIT_MS,
+  OPENCODE_V2_EXIT_WAIT_MS,
   TUI_EXIT_WAIT_MS,
   TUI_INTERRUPT_SETTLE_MS,
   TUI_TEXT_INPUT_WAIT_MS,
@@ -62,6 +63,9 @@ export const COPILOT_EXIT_COMMAND_TEXT = '/exit';
 
 /** The graceful exit command opencode's TUI accepts. */
 export const OPENCODE_EXIT_COMMAND_TEXT = '/exit';
+
+/** OpenCode V2's quit command (Issue #2934) — the TUI's own `/exit`. */
+export const OPENCODE_V2_EXIT_COMMAND_TEXT = '/exit';
 
 /** Command Code's own quit command (Issue #2250). */
 export const COMMAND_CODE_EXIT_COMMAND_TEXT = '/exit';
@@ -159,6 +163,19 @@ const GRACEFUL_EXIT_SPECS: Record<CLIToolType, GracefulExitSpec> = {
       keyStep('Enter'),
     ],
     exitWaitMs: OPENCODE_EXIT_WAIT_MS,
+    ownsLoopbackServer: true,
+  },
+
+  // Issue #2934: `/exit` and a separate Enter, as for v1. The server is not the
+  // TUI here but `opencode2 serve` in the same pane, stopped by
+  // `scripts/opencode-v2/launch.sh`'s trap when the TUI goes — so the pane still
+  // owns a loopback port, and the postcondition checks it stopped answering.
+  'opencode-v2': {
+    keys: [
+      literalStep(OPENCODE_V2_EXIT_COMMAND_TEXT, TUI_TEXT_INPUT_WAIT_MS),
+      keyStep('Enter'),
+    ],
+    exitWaitMs: OPENCODE_V2_EXIT_WAIT_MS,
     ownsLoopbackServer: true,
   },
 };

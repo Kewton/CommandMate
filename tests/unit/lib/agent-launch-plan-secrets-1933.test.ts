@@ -72,6 +72,11 @@ import {
 } from '@/lib/security/env-sanitizer';
 import { CLI_TOOL_IDS, type CLIToolType } from '@/lib/cli-tools/types';
 import type { AgentLaunchPlan } from '@/lib/hooks/sources/types';
+import { writeOpencodeV2Password, readOpencodeV2Password } from '@/lib/hooks/sources/opencode-v2/secrets';
+import {
+  rememberOpencodeV2Port,
+  resetOpencodeV2PortAssignments,
+} from '@/lib/hooks/sources/opencode-v2/ports';
 
 /**
  * Secrets planted in `process.env` before the plans are built.
@@ -257,6 +262,36 @@ describe('AgentLaunchPlan.env carries no secrets (Issue #1933 S18)', () => {
     const { command } = planFor(cliToolId);
     const firstWord = command.trim().split(/\s+/)[0];
     expect(firstWord).not.toMatch(/^[A-Za-z_][A-Za-z0-9_]*=/);
+  });
+
+  /**
+   * Issue #2934 (D3): OpenCode V2 is the one tool whose launch involves a
+   * secret of its own — the per-launch password of the `opencode2 serve` its
+   * wrapper starts. The `it.each` rows above build its plan without a reserved
+   * server (the `--standalone` fallback); this builds the real line, with a
+   * port assigned and the password file written, and holds it to the same
+   * rule: the file's PATH may be on the line, the value may not.
+   */
+  it('opencode-v2: carries the password file path and never the password', () => {
+    const target = { worktreeId: 'wt-1933', cliToolId: 'opencode-v2' as const, instanceId: 'opencode-v2' };
+    try {
+      rememberOpencodeV2Port(target, 4321, worktree);
+      const passwordFile = writeOpencodeV2Password(target);
+      const password = readOpencodeV2Password(target);
+      expect(password).not.toBeNull();
+
+      const plan = planFor('opencode-v2');
+      const rendered = renderAgentLaunchCommand(plan);
+
+      expect(plan.command).toContain(`--password-file '${passwordFile}'`);
+      expect(Object.values(plan.env)).not.toContain(password);
+      expect(Object.values(resolveAgentLaunchEnv(plan))).not.toContain(password);
+      expect(plan.command).not.toContain(password as string);
+      expect(rendered).not.toContain(password as string);
+      expect(rendered).not.toContain('OPENCODE_SERVER_PASSWORD');
+    } finally {
+      resetOpencodeV2PortAssignments();
+    }
   });
 
   /**
