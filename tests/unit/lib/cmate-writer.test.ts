@@ -278,10 +278,27 @@ describe('validateScheduleInput', () => {
     expect(result.valid).toBe(true);
   });
 
-  it('rejects a model for a tool that does not support it', () => {
-    const result = validateScheduleInput({ ...baseSchedule, model: 'gpt-4.1' });
+  it('rejects an unsupported CLI tool (Issue #2936)', () => {
+    const result = validateScheduleInput({
+      ...baseSchedule,
+      cliToolId: 'opencode-v2',
+      permission: '',
+    });
     expect(result.valid).toBe(false);
-    expect(result.errors).toContain('model is not supported for this CLI tool');
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0]).toContain('not supported in schedules yet');
+  });
+
+  it('does not produce duplicate errors when model is provided for an unsupported CLI tool (Issue #2936)', () => {
+    const result = validateScheduleInput({
+      ...baseSchedule,
+      cliToolId: 'opencode-v2',
+      permission: '',
+      model: 'claude-3-5-sonnet',
+    });
+    expect(result.valid).toBe(false);
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0]).toContain('not supported in schedules yet');
   });
 });
 
