@@ -465,7 +465,7 @@ export function upsertWorktree(
       worktree.lastUserMessageAt?.getTime() || null,
       worktree.lastMessageSummary || null,
       worktree.updatedAt?.getTime() || null,
-      worktree.cliToolId || 'claude',
+      worktree.cliToolId ?? null,
       worktree.branch || null
     );
   });
