@@ -1,0 +1,299 @@
+[
+  {
+    "id": "evt_0e75f4865001h6zmidQoVI7QPf",
+    "created": 1790588176485,
+    "type": "session.execution.started",
+    "data": {
+      "sessionID": "ses_f18a0b80affeVVzGMUwUIzo15L"
+    },
+    "durable": {
+      "aggregateID": "ses_f18a0b80affeVVzGMUwUIzo15L",
+      "seq": 3,
+      "version": 1
+    }
+  },
+  {
+    "id": "evt_0e75f5bc7002p5QJF8lHgFe2ce",
+    "created": 1790588181447,
+    "type": "session.text.started",
+    "location": {
+      "directory": "/…/tmp/probe/repo"
+    },
+    "data": {
+      "sessionID": "ses_f18a0b80affeVVzGMUwUIzo15L",
+      "assistantMessageID": "msg_0e75f4874001CMGp2CYU8SuwnL",
+      "ordinal": 0
+    },
+    "durable": {
+      "aggregateID": "ses_f18a0b80affeVVzGMUwUIzo15L",
+      "seq": 8,
+      "version": 1
+    }
+  },
+  {
+    "id": "evt_0e75f5c0d001hszaN6QJQMrbdR",
+    "created": 1790588181517,
+    "type": "session.text.delta",
+    "location": {
+      "directory": "/…/tmp/probe/repo"
+    },
+    "data": {
+      "sessionID": "ses_f18a0b80affeVVzGMUwUIzo15L",
+      "assistantMessageID": "msg_0e75f4874001CMGp2CYU8SuwnL",
+      "ordinal": 0,
+      "delta": "ALPHA one"
+    }
+  },
+  {
+    "id": "evt_0e75f5c0e001vAhNxp1GkrWIX9",
+    "created": 1790588181518,
+    "type": "session.text.ended",
+    "location": {
+      "directory": "/…/tmp/probe/repo"
+    },
+    "data": {
+      "sessionID": "ses_f18a0b80affeVVzGMUwUIzo15L",
+      "assistantMessageID": "msg_0e75f4874001CMGp2CYU8SuwnL",
+      "ordinal": 0,
+      "text": "ALPHA one"
+    },
+    "durable": {
+      "aggregateID": "ses_f18a0b80affeVVzGMUwUIzo15L",
+      "seq": 10,
+      "version": 1
+    }
+  },
+  {
+    "id": "evt_0e75f5c1e001uAEgqKjGC1N2Ct",
+    "created": 1790588181534,
+    "type": "session.step.ended",
+    "location": {
+      "directory": "/…/tmp/probe/repo"
+    },
+    "data": {
+      "sessionID": "ses_f18a0b80affeVVzGMUwUIzo15L",
+      "assistantMessageID": "msg_0e75f4874001CMGp2CYU8SuwnL",
+      "finish": "stop",
+      "rawFinish": "stop",
+      "cost": 0,
+      "tokens": {
+        "input": 5246,
+        "output": 6,
+        "reasoning": 39,
+        "cache": {
+          "read": 3328,
+          "write": 0
+        }
+      },
+      "snapshot": "4b825dc642cb6eb9a060e54bf8d69288fbee4904",
+      "files": []
+    },
+    "durable": {
+      "aggregateID": "ses_f18a0b80affeVVzGMUwUIzo15L",
+      "seq": 12,
+      "version": 1
+    }
+  },
+  {
+    "id": "evt_0e75f5c20002xJe8PotMAa1bZy",
+    "created": 1790588181536,
+    "type": "session.execution.succeeded",
+    "data": {
+      "sessionID": "ses_f18a0b80affeVVzGMUwUIzo15L"
+    },
+    "durable": {
+      "aggregateID": "ses_f18a0b80affeVVzGMUwUIzo15L",
+      "seq": 13,
+      "version": 1
+    }
+  },
+  {
+    "id": "evt_0e75f74ee0015z501w6P2bUAtm",
+    "created": 1790588187886,
+    "type": "session.execution.started",
+    "data": {
+      "sessionID": "ses_f18a0b80affeVVzGMUwUIzo15L"
+    },
+    "durable": {
+      "aggregateID": "ses_f18a0b80affeVVzGMUwUIzo15L",
+      "seq": 15,
+      "version": 1
+    }
+  },
+  {
+    "id": "evt_0e75f9e310021OGA3karPp1gKh",
+    "created": 1790588198449,
+    "type": "session.tool.called",
+    "location": {
+      "directory": "/…/tmp/probe/repo"
+    },
+    "data": {
+      "sessionID": "ses_f18a0b80affeVVzGMUwUIzo15L",
+      "assistantMessageID": "msg_0e75f74f4001LYdqIg2Xidlr22",
+      "id": "call_3e94b3d6c3d4454480aacdc8",
+      "input": {
+        "path": "."
+      },
+      "executed": false
+    },
+    "durable": {
+      "aggregateID": "ses_f18a0b80affeVVzGMUwUIzo15L",
+      "seq": 22,
+      "version": 1
+    }
+  },
+  {
+    "id": "evt_0e75f9e35001PATIHFf2W1mirC",
+    "created": 1790588198453,
+    "type": "session.tool.success",
+    "location": {
+      "directory": "/…/tmp/probe/repo"
+    },
+    "data": {
+      "sessionID": "ses_f18a0b80affeVVzGMUwUIzo15L",
+      "assistantMessageID": "msg_0e75f74f4001LYdqIg2Xidlr22",
+      "id": "call_3e94b3d6c3d4454480aacdc8",
+      "content": [
+        {
+          "type": "text",
+          "text": "Read directory ., entries 1-1\n.git/"
+        }
+      ],
+      "metadata": {
+        "truncated": false
+      },
+      "executed": false
+    },
+    "durable": {
+      "aggregateID": "ses_f18a0b80affeVVzGMUwUIzo15L",
+      "seq": 24,
+      "version": 2
+    }
+  },
+  {
+    "id": "evt_0e75f9e47001aAJnQ1CBkRwvGp",
+    "created": 1790588198471,
+    "type": "session.step.ended",
+    "location": {
+      "directory": "/…/tmp/probe/repo"
+    },
+    "data": {
+      "sessionID": "ses_f18a0b80affeVVzGMUwUIzo15L",
+      "assistantMessageID": "msg_0e75f74f4001LYdqIg2Xidlr22",
+      "finish": "tool-calls",
+      "rawFinish": "tool_calls",
+      "cost": 0,
+      "tokens": {
+        "input": 5317,
+        "output": 16,
+        "reasoning": 44,
+        "cache": {
+          "read": 3328,
+          "write": 0
+        }
+      },
+      "snapshot": "4b825dc642cb6eb9a060e54bf8d69288fbee4904",
+      "files": []
+    },
+    "durable": {
+      "aggregateID": "ses_f18a0b80affeVVzGMUwUIzo15L",
+      "seq": 25,
+      "version": 1
+    }
+  },
+  {
+    "id": "evt_0e75fb3ba001Rol9jiQYks3WNj",
+    "created": 1790588203962,
+    "type": "session.text.started",
+    "location": {
+      "directory": "/…/tmp/probe/repo"
+    },
+    "data": {
+      "sessionID": "ses_f18a0b80affeVVzGMUwUIzo15L",
+      "assistantMessageID": "msg_0e75f9e4c001OfaHitlMzlK06M",
+      "ordinal": 0
+    },
+    "durable": {
+      "aggregateID": "ses_f18a0b80affeVVzGMUwUIzo15L",
+      "seq": 28,
+      "version": 1
+    }
+  },
+  {
+    "id": "evt_0e75fb3ca0017A6phlQS1vkZl1",
+    "created": 1790588203978,
+    "type": "session.text.delta",
+    "location": {
+      "directory": "/…/tmp/probe/repo"
+    },
+    "data": {
+      "sessionID": "ses_f18a0b80affeVVzGMUwUIzo15L",
+      "assistantMessageID": "msg_0e75f9e4c001OfaHitlMzlK06M",
+      "ordinal": 0,
+      "delta": "BETA two"
+    }
+  },
+  {
+    "id": "evt_0e75fb3ca002jww7Nsu9NNST36",
+    "created": 1790588203978,
+    "type": "session.text.ended",
+    "location": {
+      "directory": "/…/tmp/probe/repo"
+    },
+    "data": {
+      "sessionID": "ses_f18a0b80affeVVzGMUwUIzo15L",
+      "assistantMessageID": "msg_0e75f9e4c001OfaHitlMzlK06M",
+      "ordinal": 0,
+      "text": "BETA two"
+    },
+    "durable": {
+      "aggregateID": "ses_f18a0b80affeVVzGMUwUIzo15L",
+      "seq": 30,
+      "version": 1
+    }
+  },
+  {
+    "id": "evt_0e75fb3d9001wUxaIOzucpLj4u",
+    "created": 1790588203993,
+    "type": "session.step.ended",
+    "location": {
+      "directory": "/…/tmp/probe/repo"
+    },
+    "data": {
+      "sessionID": "ses_f18a0b80affeVVzGMUwUIzo15L",
+      "assistantMessageID": "msg_0e75f9e4c001OfaHitlMzlK06M",
+      "finish": "stop",
+      "rawFinish": "stop",
+      "cost": 0,
+      "tokens": {
+        "input": 152,
+        "output": 6,
+        "reasoning": 36,
+        "cache": {
+          "read": 8576,
+          "write": 0
+        }
+      },
+      "snapshot": "4b825dc642cb6eb9a060e54bf8d69288fbee4904",
+      "files": []
+    },
+    "durable": {
+      "aggregateID": "ses_f18a0b80affeVVzGMUwUIzo15L",
+      "seq": 32,
+      "version": 1
+    }
+  },
+  {
+    "id": "evt_0e75fb3db0016N7ynRiqONnbGi",
+    "created": 1790588203995,
+    "type": "session.execution.succeeded",
+    "data": {
+      "sessionID": "ses_f18a0b80affeVVzGMUwUIzo15L"
+    },
+    "durable": {
+      "aggregateID": "ses_f18a0b80affeVVzGMUwUIzo15L",
+      "seq": 33,
+      "version": 1
+    }
+  }
+]

@@ -474,7 +474,7 @@ export const ChatToolLogDisclosure = memo(function ChatToolLogDisclosure({
  * is `'use client'`. What is shared is the FACT, and the fact is two sentences
  * long:
  *
- * For the five that answer `true`, a reply is written by a transcript reader
+ * For the six that answer `true`, a reply is written by a transcript reader
  * and carries a `<tool>-turn:` request id. A row of theirs with `request_id`
  * NULL was therefore written by the SCRAPER, and on a turn the reader also
  * recorded it is the pane's copy of an answer History already holds — prompt
@@ -501,9 +501,9 @@ export const CHAT_TRANSCRIPT_READER_TOOLS: Readonly<Record<CLIToolType, boolean>
   copilot: false,
   gemini: false,
   'vibe-local': false,
-  // Issue #2934: OpenCode V2 Phase 1 reads no transcript (History is Phase 2),
-  // so the scraper's row is its only record.
-  'opencode-v2': false,
+  // Issue #2940: OpenCode V2's replies are written from its server
+  // (`GET /api/session/{id}/message`) under `oc-turn:`, like opencode's.
+  'opencode-v2': true,
 };
 
 /**

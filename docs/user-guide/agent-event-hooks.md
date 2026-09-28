@@ -36,7 +36,7 @@ CommandMate がエージェントセッションを**新規作成**するとき�
 | **antigravity** | `~/.gemini/config/hooks.json`（マシン共通。gemini と同じツリーに同居） | global-singleton | 環境変数 `CM_HOOK_URL` / `CM_PERMISSION_HOOK_URL` | `command` | `PreToolUse` | 5 秒 |
 | **opencode** | **何も書かない** | none | 起動時に割り当てた `--port <N>` | **push ではない** — CommandMate が SSE を**購読する側** | `POST /permission/:id/reply` | **なし（無期限に待つ）** |
 | **command-code** | `<worktree>/.commandcode/settings.local.json` へ merge | per-worktree | `CM_HOOK_URL`（instance は URL 側） | `command`（`matcher` は**空文字必須**。§0.8） | **なし**（`PreToolUse` は承認の後に発火するので裁定に使えない） | — |
-| **opencode-v2** | **何も書かない**（パスワードだけ `~/.commandmate/opencode-v2/<複合キー>.pw` に 0600 で置く） | none | 起動時に割り当てた自前 `opencode2 serve` のポート（4300–4399） | **push ではない** — CommandMate が自前サーバの SSE（`GET /api/event`、Basic 認証）を**購読する側** | **なし**（Phase 1 は状態のみ。裁定は Epic #2370 Phase 2） | — |
+| **opencode-v2** | **何も書かない**（パスワードだけ `~/.commandmate/opencode-v2/<複合キー>.pw` に 0600 で置く） | none | 起動時に割り当てた自前 `opencode2 serve` のポート（4300–4399） | **push ではない** — CommandMate が自前サーバの SSE（`GET /api/event`、Basic 認証）を**購読する側**。ターンの終わり（`session.execution.*`）で `GET /api/session/{id}/message` から返答を History に 1 ターン 1 行で記録する（#2940） | **なし**（Phase 1 は状態のみ。裁定は Epic #2370 Phase 2） | — |
 
 読み方の注意:
 

@@ -9,7 +9,8 @@
  * own port with the instance's own password, waits for it, runs the TUI
  * against it, and stops the server however the TUI goes away.
  *
- * Phase 1 publishes state only. `decide` / `listPending` are inert and
+ * Phase 1 publishes state, and (Issue #2940) each finished turn's reply into
+ * History (`./history`). `decide` / `listPending` are inert and
  * `eventIdentity` is null, so no surface offers a structured answer to an
  * approval or a question yet — the human answers in the TUI (Phase 2 adds the
  * approval UI and `…/permission/{id}/reply`).
@@ -128,7 +129,10 @@ export const opencodeV2AgentEventSource: AgentEventSource = definePullEventSourc
     permissionReplyReleasesPrompt: true,
     eventIdentity: null,
     resync: 'none',
-    transcriptHistory: null,
+    // Issue #2940: the subscription writes each finished turn from
+    // `GET /api/session/{id}/message` (`./history`), so the scraper stands
+    // down while it is live.
+    transcriptHistory: 'push',
     stopReportsSelfResume: false,
   },
   mappers: OPENCODE_V2_MAPPERS,

@@ -39,7 +39,7 @@ and every one of those differences **fails silently**.
 | **antigravity** | `~/.gemini/config/hooks.json` (machine-wide; shares gemini's tree) | global-singleton | environment variables `CM_HOOK_URL` / `CM_PERMISSION_HOOK_URL` | `command` | `PreToolUse` | 5 s |
 | **opencode** | **nothing at all** | none | the `--port <N>` assigned at launch | **not a push** — CommandMate is the one **subscribing** over SSE | `POST /permission/:id/reply` | **none (waits forever)** |
 | **command-code** | merges into `<worktree>/.commandcode/settings.local.json` | per-worktree | `CM_HOOK_URL` (the instance rides in the URL) | `command` (`matcher` **must be the empty string**; §0.8) | **none** (`PreToolUse` fires after approval, so no reply can be a verdict) | — |
-| **opencode-v2** | **nothing at all** (only the password, as a 0600 file `~/.commandmate/opencode-v2/<composite key>.pw`) | none | the port of its own `opencode2 serve`, assigned at launch (4300–4399) | **not a push** — CommandMate **subscribes** to that server's SSE (`GET /api/event`, Basic auth) | **none** (Phase 1 is state only; verdicts are Epic #2370 Phase 2) | — |
+| **opencode-v2** | **nothing at all** (only the password, as a 0600 file `~/.commandmate/opencode-v2/<composite key>.pw`) | none | the port of its own `opencode2 serve`, assigned at launch (4300–4399) | **not a push** — CommandMate **subscribes** to that server's SSE (`GET /api/event`, Basic auth). When a turn ends (`session.execution.*`) the reply is read from `GET /api/session/{id}/message` and recorded in History, one row per turn (#2940) | **none** (Phase 1 is state only; verdicts are Epic #2370 Phase 2) | — |
 
 How to read it:
 

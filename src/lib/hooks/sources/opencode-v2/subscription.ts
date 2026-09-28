@@ -19,8 +19,10 @@
  *     watchdog that forces a reconnect on a silent socket.
  * Any other failure waits out a backoff and tries again.
  *
- * Unlike v1's subscription this one keeps no turn gate, no transcript and no
- * resync of pending decisions: those are Phase 2's.
+ * Unlike v1's subscription this one keeps no turn gate and no resync of pending
+ * decisions: those are Phase 2's. It does record the reply (Issue #2940): a
+ * frame that ends a turn also has `./history` read the finished turn off
+ * `GET /api/session/{id}/message`.
  *
  * @module lib/hooks/sources/opencode-v2/subscription
  */
@@ -38,7 +40,8 @@ import {
   probeOpencodeV2Server,
   type OpencodeV2Frame,
 } from './client';
-import { frameType, isHandledOpencodeV2EventType } from './mappers';
+import { isOpencodeV2TurnEndEventType, syncOpencodeV2History } from './history';
+import { frameSessionId, frameType, isHandledOpencodeV2EventType } from './mappers';
 import { opencodeV2KeyOf, readOpencodeV2Password } from './secrets';
 
 const logger = createLogger('lib/hooks/sources/opencode-v2/subscription');
@@ -98,6 +101,20 @@ export function isOpencodeV2Subscribed(target: AgentInstanceRef): boolean {
 export function getOpencodeV2Liveness(target: AgentInstanceRef): SourceLiveness {
   const key = opencodeV2KeyOf(target);
   return subscriptions.get(key)?.liveness ?? endedLiveness.get(key) ?? { state: 'unknown' };
+}
+
+/**
+ * Whether this instance's replies are being written from its server
+ * (Issue #2940).
+ *
+ * The screen scraper's stand-down test, read through
+ * `lib/polling/structured-history-gate`. `live` only, for the reason v1's
+ * `isOpencodeStructuredHistoryLive` gives: a `lost` stream delivers no end of
+ * turn, so it writes nothing, and standing the scraper down for it would leave
+ * the reply recorded by nobody.
+ */
+export function isOpencodeV2StructuredHistoryLive(target: AgentInstanceRef): boolean {
+  return getOpencodeV2Liveness(target).state === 'live';
 }
 
 /** The port an open subscription reads, or null. */
@@ -335,5 +352,38 @@ function deliver(state: SubscriptionState, frame: OpencodeV2Frame): void {
       type: frameType(frame),
       error: error instanceof Error ? error.message : String(error),
     });
+  }
+  void recordOpencodeV2TurnEnd(state.target, state.port, frame);
+}
+
+/**
+ * Have `./history` record the reply of a turn this frame ends (Issue #2940).
+ *
+ * Not awaited: the read loop delivers one frame at a time and a fetch plus a
+ * database write must not hold the stream (or the `stop` just delivered).
+ * `syncOpencodeV2History` catches its own failures; the guard here is for a
+ * frame that cannot even be read.
+ *
+ * Exported for the tests, which drive frames through the path the stream does.
+ *
+ * @returns The sync, or null when the frame ends no turn
+ */
+export function recordOpencodeV2TurnEnd(
+  target: AgentInstanceRef,
+  port: number,
+  frame: OpencodeV2Frame
+): Promise<number> | null {
+  try {
+    if (!isOpencodeV2TurnEndEventType(frameType(frame))) return null;
+    const sessionId = frameSessionId(frame);
+    if (sessionId === null) return null;
+    return syncOpencodeV2History(target, port, sessionId);
+  } catch (error) {
+    logger.warn('opencode-v2-history-trigger-failed', {
+      worktreeId: target.worktreeId,
+      instanceId: target.instanceId ?? target.cliToolId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return null;
   }
 }
