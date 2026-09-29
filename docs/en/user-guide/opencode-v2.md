@@ -108,9 +108,6 @@ Both can be installed and used side by side. The installation details are in the
 
 ## 5. Not yet, and known bugs
 
-- **Choice lines in a reply body block sending** (Issue #2991, open): when the body of a reply contains a line such
-  as `❯ 1. Yes`, the state stays waiting and the next message cannot be sent from the screen or the CLI (and no card
-  to answer appears). Opening a new session in the terminal (`ctrl+x n`) gets out of it.
 - **The first send after a start**: the first `commandmate send` to a newly started instance can fail with
   `OpenCode V2 composer not ready` (exit 99, nothing sent). Sending again goes through (observed in the UAT of
   2026-09-29).
