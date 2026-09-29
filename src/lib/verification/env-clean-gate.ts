@@ -30,6 +30,8 @@
  * @module lib/verification/env-clean-gate
  */
 
+import { execFileSync } from 'child_process';
+import { readlinkSync } from 'fs';
 import { dirname, resolve, sep } from 'path';
 import type { VerificationGateTerminalStatus } from '@/lib/db';
 import {
@@ -171,20 +173,108 @@ export function attributeAnchor(anchor: string | null, worktreePath: string): En
   return 'unattributed';
 }
 
+/**
+ * The working directory of a live process, or null when the process is gone or
+ * its cwd cannot be read. Never throws.
+ *
+ * Synchronous because {@link diffEnvSnapshots} is, and it is only asked about
+ * the few `$HOME` entries {@link demoVitestPid} recognises.
+ */
+export type PidCwdResolver = (pid: number) => string | null;
+
+/** Bounded like the snapshot probes: a hung `lsof` must not hold a run open. */
+const PID_CWD_TIMEOUT_MS = 5_000;
+
+/**
+ * Read a process's cwd from the machine: `/proc/<pid>/cwd` on Linux, `lsof` on
+ * macOS (which has no procfs). A dead pid, a process owned by someone this user
+ * cannot inspect, or a missing `lsof` all answer null — which leaves the entry
+ * unattributed, the strict verdict.
+ */
+export const readLivePidCwd: PidCwdResolver = (pid) => {
+  try {
+    process.kill(pid, 0);
+  } catch (error) {
+    // EPERM means the process exists but belongs to another user.
+    if ((error as NodeJS.ErrnoException).code !== 'EPERM') return null;
+  }
+  if (process.platform === 'linux') {
+    try {
+      return readlinkSync(`/proc/${pid}/cwd`);
+    } catch {
+      return null;
+    }
+  }
+  try {
+    const out = execFileSync('lsof', ['-a', '-d', 'cwd', '-p', String(pid), '-F', 'n'], {
+      encoding: 'utf8',
+      timeout: PID_CWD_TIMEOUT_MS,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    const line = out.split('\n').find((field) => field.startsWith('n'));
+    return line ? line.slice(1) : null;
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * `tests/unit/skills/demo-video/env-scripts.test.ts` creates
+ * `~/.commandmate-demo-vitest-<pid>` for the length of its run — in the real
+ * `$HOME`, because `env-up.sh` refuses `/tmp` and `/var` (#2954). The name
+ * carries the pid of the test process that made it, which is the one `$HOME`
+ * entry whose owner can be established.
+ */
+const DEMO_VITEST_HOME_ENTRY = /^\.commandmate-demo-vitest-([1-9]\d*)$/;
+
+/** The pid a `.commandmate-demo-vitest-<pid>` name carries; null for any other name. */
+export function demoVitestPid(name: string): number | null {
+  const match = DEMO_VITEST_HOME_ENTRY.exec(name);
+  if (!match) return null;
+  const pid = Number(match[1]);
+  return Number.isSafeInteger(pid) ? pid : null;
+}
+
+/**
+ * Attribute a `$HOME` entry (#2954).
+ *
+ * Only `.commandmate-demo-vitest-<pid>` can be attributed, and only while its
+ * pid is alive: the test process's cwd is then judged exactly as a listener's
+ * is ({@link attributeAnchor}), so a parallel worktree's test run is `other`.
+ * A dead pid, an unreadable cwd, or a cwd inside this worktree leave it
+ * unattributed — a directory this worker's own tests failed to remove is still
+ * caught.
+ */
+export function attributeHomeEntry(
+  name: string,
+  worktreePath: string,
+  resolvePidCwd: PidCwdResolver = readLivePidCwd
+): EnvEntryOwner {
+  const pid = demoVitestPid(name);
+  if (pid === null) return 'unattributed';
+  const owner = attributeAnchor(resolvePidCwd(pid), worktreePath);
+  // `self` is not an excuse for an addition, and a file has no self to report.
+  return owner === 'other' ? 'other' : 'unattributed';
+}
+
 function attributeEntry(
   probeId: EnvProbeId,
   entry: EnvEntry,
-  context: EnvAttributionContext
+  context: EnvAttributionContext,
+  resolvePidCwd: PidCwdResolver
 ): EnvEntryOwner {
   switch (probeId) {
     case 'tmux-sessions':
       return attributeSessionName(entry.key, context.worktreeId);
     case 'listeners':
       return attributeAnchor(entry.anchor, context.worktreePath);
+    case 'home-entries':
+      return attributeHomeEntry(entry.key, context.worktreePath, resolvePidCwd);
     default:
       // A file has no owner. `$HOME` and `~/.commandmate` are shared, so an
       // entry appearing there is a violation for whoever is being judged — the
-      // rule the Issue's incident list is made of.
+      // rule the Issue's incident list is made of. The one `$HOME` exception is
+      // above (#2954).
       return 'unattributed';
   }
 }
@@ -449,6 +539,11 @@ export interface EnvDiffOptions {
    * only, in both directions. The baseline itself is never edited.
    */
   ignoreHomeEntries?: readonly string[];
+  /**
+   * How a `.commandmate-demo-vitest-<pid>` entry's pid is looked up (#2954).
+   * Injected by tests; defaults to {@link readLivePidCwd}.
+   */
+  resolvePidCwd?: PidCwdResolver;
 }
 
 export interface EnvCleanDiff {
@@ -479,6 +574,7 @@ export function diffEnvSnapshots(
   const taskSession = readTaskSession(baseline);
   const otherServerSessions = readOtherServerSessions(baseline);
   const ignoredHomeEntries = new Set(options.ignoreHomeEntries ?? []);
+  const resolvePidCwd = options.resolvePidCwd ?? readLivePidCwd;
   const probes: EnvProbeDiff[] = ENV_PROBE_IDS.map((probeId) => {
     const before = baseline.probes[probeId];
     const after = final.probes[probeId];
@@ -524,7 +620,7 @@ export function diffEnvSnapshots(
     const ignoredByConfig: EnvChange[] = [];
     for (const entry of after.entries) {
       if (beforeKeys.has(entry.key)) continue;
-      const owner = attributeEntry(probeId, entry, context);
+      const owner = attributeEntry(probeId, entry, context, resolvePidCwd);
       if (isIgnoredByConfig(entry)) {
         ignoredByConfig.push(toChange(entry, owner));
         continue;
@@ -552,7 +648,7 @@ export function diffEnvSnapshots(
     const removedByOtherServer: EnvChange[] = [];
     for (const entry of before.entries) {
       if (afterKeys.has(entry.key)) continue;
-      const change = toChange(entry, attributeEntry(probeId, entry, context));
+      const change = toChange(entry, attributeEntry(probeId, entry, context, resolvePidCwd));
       if (isIgnoredByConfig(entry)) {
         ignoredByConfig.push(change);
       } else if (
@@ -735,6 +831,8 @@ export interface EvaluateEnvCleanInput extends EnvAttributionContext {
    * {@link diffEnvSnapshots}; omitted means nothing is ignored.
    */
   ignoreHomeEntries?: readonly string[];
+  /** Injected by tests; defaults to {@link readLivePidCwd} (#2954). */
+  resolvePidCwd?: PidCwdResolver;
   /** Injected by tests; defaults to probing the real machine. */
   capture?: () => Promise<EnvSnapshot>;
 }
@@ -783,6 +881,7 @@ export async function evaluateEnvClean(input: EvaluateEnvCleanInput): Promise<En
 
   const diff = diffEnvSnapshots(input.baseline, final, input, {
     ignoreHomeEntries: input.ignoreHomeEntries,
+    resolvePidCwd: input.resolvePidCwd,
   });
   const header =
     `${ENV_CLEAN_GATE_ID}: baseline=${new Date(input.baseline.capturedAt).toISOString()} ` +
