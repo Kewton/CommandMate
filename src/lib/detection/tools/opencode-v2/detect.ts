@@ -153,6 +153,13 @@ export const opencodeV2StatusDetector = createToolStatusDetector({
   tool: 'opencode-v2',
   verifiedAgainst: VERIFIED_AGAINST,
 
+  // Issue #2991: every v2 dialog is recognised by `beforePrompt` below, so a
+  // numbered list that reaches the generic parser is text in a reply (the UAT
+  // frame: `❯ 1. Yes / 2. No` quoted in the answer). Unvouched by
+  // `detectDialog`, it is not published as `waiting` — which had left the
+  // session refusing every send with nothing on screen to answer.
+  requireVouchedPrompt: true,
+
   // Issue #2965: the two dialogs, ahead of everything. Each is the agent
   // blocked on a human whatever else is on the pane — the question frame keeps
   // the previous turn's completion row above it — and ahead of the generic
