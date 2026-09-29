@@ -1033,10 +1033,12 @@ export const ChatSurface = memo(function ChatSurface({
             {showPlanApprove ? <PlanApproveKeys {...keyProps} /> : null}
             {/* opencode has no numbered `/model` at all — switching models is
                 `ctrl+t` or a `ctrl+x` chord, and neither was reachable from
-                chat. Rendered for opencode only; the component itself re-checks. */}
+                chat. Rendered for opencode, and for OpenCode V2 while the frame
+                shows one of its dialogs (#2983); the component decides. */}
             <OpencodeModelKeys
               worktreeId={worktreeId}
               cliToolId={cliToolId}
+              frame={frame}
               instanceId={instanceId}
               onKeysSent={handleDialogKeysSent}
             />
@@ -1091,6 +1093,7 @@ export const ChatSurface = memo(function ChatSurface({
     handleDialogKeysSent,
     selectionShape,
     isCommandCodeQuestionFallback,
+    frame,
     t,
   ]);
 

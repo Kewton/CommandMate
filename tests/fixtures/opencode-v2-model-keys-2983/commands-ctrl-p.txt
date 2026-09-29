@@ -1,0 +1,200 @@
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+              Commands                                         esc
+
+              Search
+
+              Suggested
+              Switch model                                ctrl+x m
+              Connect an integration
+              Open settings
+
+              Session
+              Switch session                              ctrl+x l
+              New session                                 ctrl+x n
+              Clear session
+              Open session or project                       ctrl+o
+              Close tab                                   ctrl+x w
+              Reopen closed tab                       ctrl+shift+t
+              Open editor                                 ctrl+x e
+              Manage workspaces
+              Ask a side question One-shot answer from the session
+
+              Agent
+              Switch model                                ctrl+x m
+              Switch agent                                ctrl+x a
+              MCP servers
+              Variant cycle                                 ctrl+t
+
+              Integration
+              Connect an integration
+
+              System
+              Open settings
+              View status                                 ctrl+x s
+              Update OpenCode
+              Pair device
+              Reload configuration
+              View debug info
+              Switch theme
+              Help
+              Open docs
+              Exit the app                ctrl+c, ctrl+d, ctrl+x q
+              Toggle console
+              Usage statistics
+              Plugins
+
+              Prompt
+              Queue prompt                            ctrl+x enter
+              Skills
+
+              VCS
+   ┃          Open diff viewer
+   ┃  Ask
+   ┃
+   ┃  Build · LongCat 2.5 Preview Free OpenCode Zen
+   ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+   /…/tmp/probe/repo:master  shift+tab agents  ctrl+p commands
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                                                        2.0.18
+

@@ -1,0 +1,200 @@
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+              Commands                                         esc
+
+              m
+
+              Mouse                               Settings · Input
+              MCP servers                                    Agent
+              Switch model                        Agent · ctrl+x m
+              Manage workspaces                            Session
+              Color mode                     Settings · Appearance
+              Markdown                          Settings · Session
+              Mode                                 Settings · Tabs
+              Animations                     Settings · Appearance
+              Queue prompt                   Prompt · ctrl+x enter
+              Image previews                      Settings · Input
+              Switch theme                                  System
+              Switch model variant                           Agent
+              Theme                          Settings · Appearance
+              Permissions                       Settings · Session
+              Volume                             Settings · Alerts
+              Transcript images                 Settings · Session
+              Leader timeout                      Settings · Input
+              Skills                                        Prompt
+              Window title                     Settings · Terminal
+              Open session or project             Session · ctrl+o
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                                      ▄
+                     █▀▀█ █▀▀█ █▀▀█ █▀▀▄ █▀▀▀ █▀▀█ █▀▀█ █▀▀█
+                     █  █ █  █ █▀▀▀ █  █ █    █  █ █  █ █▀▀▀
+                     ▀▀▀▀ █▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀
+
+
+   ┃
+   ┃  Ask anything… "Fix a TODO in the codebase"
+   ┃
+   ┃  Build · Space Bunny Free OpenCode Zen · medium
+   ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+   /…/tmp/probe/repo:master  shift+tab agents  ctrl+p commands
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                                                        2.0.18
+

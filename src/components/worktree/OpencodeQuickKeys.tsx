@@ -162,6 +162,8 @@ import type { CLIToolType } from '@/lib/cli-tools/types';
 import { OPENCODE_LEADER_KEY } from '@/types/terminal-keys';
 import { useSpecialKeys } from '@/hooks/useSpecialKeys';
 import { useKeyPressFeedback } from '@/hooks/useKeyPressFeedback';
+import { stripAnsi } from '@/lib/detection/ansi';
+import { findOpencodeV2DialogTitle } from '@/lib/detection/tools/opencode-v2/dialog-title';
 import {
   useOpencodeQuickKeysDisclosure,
   type OpencodeQuickKeysLayout,
@@ -562,27 +564,98 @@ export const OpencodeQuickKeys = memo(function OpencodeQuickKeys({
  * two above do not reach, and because it is the one key on this list that is
  * safe from every state.
  *
- * Read out of {@link DIRECT_KEYS} / {@link GLOBAL_CHORDS} rather than rewritten,
- * so the notation, the leader and the "one request, two entries" chord discipline
- * cannot drift between the terminal footer and the chat card.
+ * Read out of each tool's own strip ({@link GROUPS} for v1, {@link V2_GROUPS}
+ * for v2 since Issue #2983) rather than rewritten, so the notation, the leader
+ * and the "one request, two entries" chord discipline cannot drift between the
+ * terminal footer and the chat card.
  * `f2` (`model_cycle_recent`) is still absent for #2046's reason: it switches
  * models with no confirmation and could not be measured.
  */
 const MODEL_KEY_IDS: ReadonlyArray<string> = ['variant', 'models', 'commands'];
 
-const MODEL_KEYS: ReadonlyArray<QuickKeyDef> = MODEL_KEY_IDS.map((id) => {
-  const def = [...DIRECT_KEYS, ...GLOBAL_CHORDS].find((entry) => entry.id === id);
-  // Unreachable while MODEL_KEY_IDS names entries of those two groups; throwing
-  // rather than filtering makes a rename a build-time failure instead of a strip
-  // that quietly loses a button.
-  if (!def) throw new Error(`OpencodeQuickKeys: unknown model key id ${id}`);
-  return def;
-});
+/**
+ * Pick {@link MODEL_KEY_IDS} out of a tool's quick-key strip, in that order
+ * (Issue #2983: v1 and v2 each read their OWN table, so v2's notation is never
+ * written twice).
+ */
+function pickModelKeys(groups: ReadonlyArray<ReadonlyArray<QuickKeyDef>>): ReadonlyArray<QuickKeyDef> {
+  return MODEL_KEY_IDS.map((id) => {
+    const def = groups.flat().find((entry) => entry.id === id);
+    // Unreachable while MODEL_KEY_IDS names entries of every table below;
+    // throwing rather than filtering makes a rename a build-time failure
+    // instead of a strip that quietly loses a button.
+    if (!def) throw new Error(`OpencodeQuickKeys: unknown model key id ${id}`);
+    return def;
+  });
+}
+
+/**
+ * OpenCode V2's model keys close the open dialog first (Issue #2983).
+ *
+ * The card is only ever on screen while a dialog is (#2971 reads every v2
+ * picker and the palette as `waiting` / `opencode_modal_overlay`), and on
+ * `opencode2` 2.0.18 none of the three keys reaches THROUGH one — measured at
+ * 80x200 on a private tmux socket (`tests/fixtures/opencode-v2-model-keys-2983/`):
+ * `ctrl+p` and `ctrl+t` inside `Select model` change nothing, `ctrl+t` inside
+ * `Commands` changes nothing, and `ctrl+x m` inside `Commands` types `m` into
+ * its filter. With `Escape` sent first, 100 ms ahead like every other entry,
+ * each one does what it says from inside a dialog and from the home screen.
+ */
+function closeDialogFirst(def: QuickKeyDef): QuickKeyDef {
+  return { ...def, keys: ['Escape', ...def.keys] };
+}
+
+/**
+ * Which model keys each tool's dialog card gets, keyed by tool id — the same
+ * shape as {@link GROUPS_BY_TOOL}. A tool with no entry gets nothing.
+ */
+const MODEL_KEYS_BY_TOOL: Readonly<Partial<Record<CLIToolType, ReadonlyArray<QuickKeyDef>>>> = {
+  opencode: pickModelKeys(GROUPS),
+  'opencode-v2': pickModelKeys(V2_GROUPS).map(closeDialogFirst),
+};
+
+/**
+ * Whether the card may draw `cliToolId`'s model keys over `frame` (Issue #2983).
+ *
+ * v1 is unconditional, as it was. v2 needs a picker or the palette on the pane
+ * — the title row #2971's detector reads — because its keys lead with `Escape`,
+ * and the other two v2 screens that raise this card must never receive one:
+ * the approval strip (`Allow once   Always allow   Reject`) and the question
+ * form (`esc dismiss`) are answers, not overlays to close.
+ */
+function offersModelKeys(cliToolId: CLIToolType, frame: string | null | undefined): boolean {
+  if (cliToolId === 'opencode-v2') {
+    return frame != null && findOpencodeV2DialogTitle(stripAnsi(frame)) !== null;
+  }
+  return MODEL_KEYS_BY_TOOL[cliToolId] !== undefined;
+}
+
+/**
+ * The model keys the card sends for `cliToolId` over `frame`, in render order
+ * (Issue #2983) — empty when the card draws none. Exported for the tests that
+ * pin every key to the tool's declared `navigationKeys()` vocabulary.
+ *
+ * @param cliToolId - CLI tool identifier
+ * @param frame - The pane the card is drawn over (v2 reads its dialog title)
+ * @returns `{ id, keys }` per button
+ */
+export function opencodeModelKeyBindings(
+  cliToolId: CLIToolType,
+  frame?: string | null,
+): ReadonlyArray<{ id: string; keys: readonly string[] }> {
+  if (!offersModelKeys(cliToolId, frame)) return [];
+  return (MODEL_KEYS_BY_TOOL[cliToolId] ?? []).map(({ id, keys }) => ({ id, keys }));
+}
 
 export interface OpencodeModelKeysProps {
   worktreeId: string;
-  /** Rendered only for `'opencode'`; anything else renders nothing at all. */
+  /**
+   * Rendered for `'opencode'`, and for `'opencode-v2'` while `frame` shows one
+   * of its dialogs (Issue #2983); anything else renders nothing at all.
+   */
   cliToolId: CLIToolType;
+  /** The pane the card is drawn over. Read for OpenCode V2 only. */
+  frame?: string | null;
   /** Agent instance id. Defaults to the primary instance (`=== cliToolId`). */
   instanceId?: string;
   /** Trigger an immediate terminal refresh after the keys are sent. */
@@ -607,10 +680,15 @@ export interface OpencodeModelKeysProps {
  * The chord discipline is `OpencodeQuickKeys`': `['C-x', 'm']` is ONE request
  * with TWO entries, which `sendSpecialKeys()` delivers 100 ms apart, inside
  * opencode's 2000 ms `leader_timeout`.
+ *
+ * OpenCode V2 (Issue #2983) gets the same three from its own table, drawn only
+ * while one of its pickers or the palette is open and sent after an `Escape`
+ * that closes it — see {@link closeDialogFirst} and {@link offersModelKeys}.
  */
 export const OpencodeModelKeys = memo(function OpencodeModelKeys({
   worktreeId,
   cliToolId,
+  frame,
   instanceId,
   onKeysSent,
 }: OpencodeModelKeysProps) {
@@ -626,7 +704,8 @@ export const OpencodeModelKeys = memo(function OpencodeModelKeys({
     [markPressed, send],
   );
 
-  if (cliToolId !== 'opencode') return null;
+  const modelKeys = MODEL_KEYS_BY_TOOL[cliToolId];
+  if (!modelKeys || !offersModelKeys(cliToolId, frame)) return null;
 
   return (
     <div
@@ -636,7 +715,7 @@ export const OpencodeModelKeys = memo(function OpencodeModelKeys({
       className="flex flex-wrap items-center gap-1.5 rounded-lg bg-muted px-2 py-1.5"
     >
       <span className="text-xs text-muted-foreground">{t('selectionKeys.opencodeCaption')}</span>
-      {MODEL_KEYS.map((def) => {
+      {modelKeys.map((def) => {
         const label = t(`opencodeQuickKeys.keys.${def.id}`);
         return (
           <button

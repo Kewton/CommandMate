@@ -33,6 +33,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import fs from 'fs';
+import path from 'path';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { CLI_TOOL_IDS, type CLIToolType } from '@/lib/cli-tools/types';
 import { isSendableSpecialKey } from '@/lib/tmux/tmux';
@@ -310,6 +312,30 @@ describe('Issue #2032 invariant, quantified over the registry (Issue #2046)', ()
     for (const key of ['Space', 'BSpace', 'DC']) {
       expect(isSendableSpecialKey(key)).toBe(true);
       expect(published.has(key)).toBe(false);
+    }
+  });
+});
+
+describe('Issue #2983: the dialog card’s model keys stay inside each tool’s vocabulary', () => {
+  // The card cannot call navigationKeys(); a key outside it is a 400 the user
+  // sees as a dead button. v2's keys lead with `Escape` (they close the open
+  // dialog first), so that key must be declared for v2 as well.
+  const V2_DIALOG = fs.readFileSync(
+    path.resolve(__dirname, '../../fixtures/opencode-v2-model-keys-2983/select-model-ctrl-x-m.txt'),
+    'utf-8',
+  );
+
+  it.each<[CLIToolType, string | undefined]>([
+    ['opencode', undefined],
+    ['opencode-v2', V2_DIALOG],
+  ])('%s: every key the card sends is declared and deliverable', async (id, frame) => {
+    const { opencodeModelKeyBindings } = await import('@/components/worktree/OpencodeQuickKeys');
+    const bindings = opencodeModelKeyBindings(id, frame);
+    expect(bindings.map((binding) => binding.id)).toEqual(['variant', 'models', 'commands']);
+    const declared = manager.getTool(id).navigationKeys().keys as readonly string[];
+    for (const key of bindings.flatMap((binding) => binding.keys)) {
+      expect(declared, `${id} card key ${key}`).toContain(key);
+      expect(isSendableSpecialKey(key)).toBe(true);
     }
   });
 });
