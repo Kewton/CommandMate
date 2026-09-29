@@ -1,0 +1,453 @@
+{
+  "location": {
+    "directory": "/…/tmp/probe/cwd"
+  },
+  "data": [
+    {
+      "id": "longcat-2.5-preview-free",
+      "modelID": "longcat-2.5-preview-free",
+      "providerID": "opencode",
+      "family": "longcat",
+      "name": "LongCat 2.5 Preview Free",
+      "compatibility": {
+        "reasoningField": "reasoning_content"
+      },
+      "package": "@opencode/ai/providers/openai-compatible",
+      "settings": {
+        "apiKey": "public",
+        "baseURL": "https://opencode.ai/zen/v1",
+        "provider": "opencode"
+      },
+      "capabilities": {
+        "tools": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "variants": [],
+      "time": {
+        "released": 1790294400000
+      },
+      "cost": [
+        {
+          "input": 0,
+          "output": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        }
+      ],
+      "status": "active",
+      "enabled": true,
+      "limit": {
+        "context": 1000000,
+        "output": 131072
+      }
+    },
+    {
+      "id": "space-bunny-free",
+      "modelID": "space-bunny-free",
+      "providerID": "opencode",
+      "name": "Space Bunny Free",
+      "compatibility": {
+        "reasoningField": "reasoning_content"
+      },
+      "package": "@opencode/ai/providers/openai-compatible",
+      "settings": {
+        "apiKey": "public",
+        "baseURL": "https://opencode.ai/zen/v1",
+        "provider": "opencode"
+      },
+      "capabilities": {
+        "tools": true,
+        "input": [
+          "text",
+          "image",
+          "video"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "variants": [
+        {
+          "id": "low",
+          "settings": {
+            "reasoningEffort": "low"
+          }
+        },
+        {
+          "id": "medium",
+          "settings": {
+            "reasoningEffort": "medium"
+          }
+        },
+        {
+          "id": "high",
+          "settings": {
+            "reasoningEffort": "high"
+          }
+        },
+        {
+          "id": "xhigh",
+          "settings": {
+            "reasoningEffort": "xhigh"
+          }
+        },
+        {
+          "id": "max",
+          "settings": {
+            "reasoningEffort": "max"
+          }
+        }
+      ],
+      "time": {
+        "released": 1790121600000
+      },
+      "cost": [
+        {
+          "input": 0,
+          "output": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        }
+      ],
+      "status": "active",
+      "enabled": true,
+      "limit": {
+        "context": 1048576,
+        "input": 524288,
+        "output": 524288
+      }
+    },
+    {
+      "id": "mimo-v2.6-flash-free",
+      "modelID": "mimo-v2.6-flash-free",
+      "providerID": "opencode",
+      "family": "mimo",
+      "name": "MiMo-V2.6-Flash Free",
+      "compatibility": {
+        "reasoningField": "reasoning_content"
+      },
+      "package": "@opencode/ai/providers/openai-compatible",
+      "settings": {
+        "apiKey": "public",
+        "baseURL": "https://opencode.ai/zen/v1",
+        "provider": "opencode"
+      },
+      "capabilities": {
+        "tools": true,
+        "input": [
+          "text",
+          "image",
+          "audio",
+          "video"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "variants": [],
+      "time": {
+        "released": 1790035200000
+      },
+      "cost": [
+        {
+          "input": 0,
+          "output": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        }
+      ],
+      "status": "active",
+      "enabled": true,
+      "limit": {
+        "context": 200000,
+        "output": 32000
+      }
+    },
+    {
+      "id": "muse-spark-1.3-contributor-free",
+      "modelID": "muse-spark-1.3-contributor-free",
+      "providerID": "opencode",
+      "family": "muse-free",
+      "name": "Muse Spark 1.3 Free",
+      "package": "@opencode/ai/providers/openai",
+      "settings": {
+        "apiKey": "public",
+        "baseURL": "https://opencode.ai/zen/v1"
+      },
+      "capabilities": {
+        "tools": true,
+        "input": [
+          "text",
+          "image",
+          "video",
+          "pdf",
+          "audio"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "variants": [
+        {
+          "id": "minimal",
+          "settings": {
+            "reasoningEffort": "minimal",
+            "reasoningSummary": "auto",
+            "include": [
+              "reasoning.encrypted_content"
+            ]
+          }
+        },
+        {
+          "id": "low",
+          "settings": {
+            "reasoningEffort": "low",
+            "reasoningSummary": "auto",
+            "include": [
+              "reasoning.encrypted_content"
+            ]
+          }
+        },
+        {
+          "id": "medium",
+          "settings": {
+            "reasoningEffort": "medium",
+            "reasoningSummary": "auto",
+            "include": [
+              "reasoning.encrypted_content"
+            ]
+          }
+        },
+        {
+          "id": "high",
+          "settings": {
+            "reasoningEffort": "high",
+            "reasoningSummary": "auto",
+            "include": [
+              "reasoning.encrypted_content"
+            ]
+          }
+        },
+        {
+          "id": "xhigh",
+          "settings": {
+            "reasoningEffort": "xhigh",
+            "reasoningSummary": "auto",
+            "include": [
+              "reasoning.encrypted_content"
+            ]
+          }
+        }
+      ],
+      "time": {
+        "released": 1788307200000
+      },
+      "cost": [
+        {
+          "input": 0,
+          "output": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        }
+      ],
+      "status": "active",
+      "enabled": true,
+      "limit": {
+        "context": 1048576,
+        "output": 131072
+      }
+    },
+    {
+      "id": "ling-3.0-flash-fin-free",
+      "modelID": "ling-3.0-flash-fin-free",
+      "providerID": "opencode",
+      "family": "ling",
+      "name": "Ling 3.0 Flash Fin Free",
+      "package": "@opencode/ai/providers/openai-compatible",
+      "settings": {
+        "apiKey": "public",
+        "baseURL": "https://opencode.ai/zen/v1",
+        "provider": "opencode"
+      },
+      "capabilities": {
+        "tools": true,
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "variants": [],
+      "time": {
+        "released": 1787788800000
+      },
+      "cost": [
+        {
+          "input": 0,
+          "output": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        }
+      ],
+      "status": "active",
+      "enabled": true,
+      "limit": {
+        "context": 262144,
+        "output": 32768
+      }
+    },
+    {
+      "id": "nemotron-3.5-lightning-free",
+      "modelID": "nemotron-3.5-lightning-free",
+      "providerID": "opencode",
+      "family": "nemotron-free",
+      "name": "Nemotron 3.5 Lightning Free",
+      "compatibility": {
+        "reasoningField": "reasoning_content"
+      },
+      "package": "@opencode/ai/providers/openai-compatible",
+      "settings": {
+        "apiKey": "public",
+        "baseURL": "https://opencode.ai/zen/v1",
+        "provider": "opencode"
+      },
+      "capabilities": {
+        "tools": true,
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "variants": [],
+      "time": {
+        "released": 1786406400000
+      },
+      "cost": [
+        {
+          "input": 0,
+          "output": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        }
+      ],
+      "status": "active",
+      "enabled": true,
+      "limit": {
+        "context": 262144,
+        "output": 262144
+      }
+    },
+    {
+      "id": "nemotron-3-ultra-free",
+      "modelID": "nemotron-3-ultra-free",
+      "providerID": "opencode",
+      "family": "nemotron-free",
+      "name": "Nemotron 3 Ultra Free",
+      "compatibility": {
+        "reasoningField": "reasoning_content"
+      },
+      "package": "@opencode/ai/providers/openai-compatible",
+      "settings": {
+        "apiKey": "public",
+        "baseURL": "https://opencode.ai/zen/v1",
+        "provider": "opencode"
+      },
+      "capabilities": {
+        "tools": true,
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "variants": [],
+      "time": {
+        "released": 1780531200000
+      },
+      "cost": [
+        {
+          "input": 0,
+          "output": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        }
+      ],
+      "status": "active",
+      "enabled": true,
+      "limit": {
+        "context": 1000000,
+        "output": 128000
+      }
+    },
+    {
+      "id": "big-pickle",
+      "modelID": "big-pickle",
+      "providerID": "opencode",
+      "family": "big-pickle",
+      "name": "Big Pickle",
+      "compatibility": {
+        "reasoningField": "reasoning_content"
+      },
+      "package": "@opencode/ai/providers/openai-compatible",
+      "settings": {
+        "apiKey": "public",
+        "baseURL": "https://opencode.ai/zen/v1",
+        "provider": "opencode"
+      },
+      "capabilities": {
+        "tools": true,
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "variants": [],
+      "time": {
+        "released": 1760659200000
+      },
+      "cost": [
+        {
+          "input": 0,
+          "output": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        }
+      ],
+      "status": "active",
+      "enabled": true,
+      "limit": {
+        "context": 200000,
+        "input": 160000,
+        "output": 32000
+      }
+    }
+  ]
+}

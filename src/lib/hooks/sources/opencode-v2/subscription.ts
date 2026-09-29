@@ -25,10 +25,14 @@
  * connection first replays what the server is still waiting on
  * ({@link resyncOpencodeV2Pending}), as v1's `resyncPending` does, so an
  * approval raised while the stream was down is recorded and adjudicated.
+ * And (Issue #2981) `session.usage.updated` and the end of a turn have
+ * `./usage` refresh the session's spend and context, which the subscription
+ * drops again when it closes or ends — the place v1 drops them.
  *
  * @module lib/hooks/sources/opencode-v2/subscription
  */
 
+import { forgetAgentSessionTelemetry } from '@/lib/hooks/agent-session-telemetry';
 import { createLogger } from '@/lib/logger';
 import type {
   AgentInstanceRef,
@@ -48,6 +52,7 @@ import {
 import { isOpencodeV2TurnEndEventType, syncOpencodeV2History } from './history';
 import { frameSessionId, frameType, isHandledOpencodeV2EventType } from './mappers';
 import { opencodeV2KeyOf, readOpencodeV2Password } from './secrets';
+import { isOpencodeV2UsageTriggerType, scheduleOpencodeV2SessionUsageRefresh } from './usage';
 
 const logger = createLogger('lib/hooks/sources/opencode-v2/subscription');
 
@@ -194,6 +199,9 @@ export async function closeOpencodeV2Subscription(target: AgentInstanceRef): Pro
   if (!state) return;
   stop(state);
   subscriptions.delete(key);
+  // Issue #2981, where v1's close does it (#2040): the records describe the
+  // conversation this process was having, and closing is the pane going away.
+  forgetAgentSessionTelemetry(target);
   logger.info('opencode-v2-subscription-closed', {
     worktreeId: target.worktreeId,
     instanceId: target.instanceId ?? target.cliToolId,
@@ -221,6 +229,9 @@ function endSubscription(state: SubscriptionState, reason: string): void {
   state.liveness = { state: 'lost', since: Date.now(), reason };
   if (subscriptions.get(state.key) === state) subscriptions.delete(state.key);
   endedLiveness.set(state.key, state.liveness);
+  // Issue #2981: ending on its own means the password file is gone or the port
+  // is someone else's — the server this pane had is not coming back either.
+  forgetAgentSessionTelemetry(state.target);
   logger.warn('opencode-v2-subscription-ended', {
     worktreeId: state.target.worktreeId,
     instanceId: state.target.instanceId ?? state.target.cliToolId,
@@ -441,6 +452,43 @@ function deliver(state: SubscriptionState, frame: OpencodeV2Frame): void {
     });
   }
   void recordOpencodeV2TurnEnd(state.target, state.port, frame);
+  void refreshOpencodeV2UsageOnFrame(state.target, state.port, frame, () =>
+    isCurrentSubscription(state)
+  );
+}
+
+function isCurrentSubscription(state: SubscriptionState): boolean {
+  return !state.closed && subscriptions.get(state.key) === state;
+}
+
+/**
+ * Have `./usage` re-read the session's spend and context when this frame says
+ * they moved (Issue #2981): `session.usage.updated`, or the end of a turn.
+ *
+ * Not awaited, for the reason {@link recordOpencodeV2TurnEnd} gives. Exported
+ * for the tests.
+ *
+ * @returns The refresh, or null when the frame triggers none
+ */
+export function refreshOpencodeV2UsageOnFrame(
+  target: AgentInstanceRef,
+  port: number,
+  frame: OpencodeV2Frame,
+  isCurrent: () => boolean = () => true
+): Promise<void> | null {
+  try {
+    if (!isOpencodeV2UsageTriggerType(frameType(frame))) return null;
+    const sessionId = frameSessionId(frame);
+    if (sessionId === null) return null;
+    return scheduleOpencodeV2SessionUsageRefresh(target, port, sessionId, isCurrent);
+  } catch (error) {
+    logger.warn('opencode-v2-usage-trigger-failed', {
+      worktreeId: target.worktreeId,
+      instanceId: target.instanceId ?? target.cliToolId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
 }
 
 /**

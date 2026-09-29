@@ -1,0 +1,59 @@
+   ALPHA one                     +
+
+  ┃                                                                                                                                                             ALPHA one
+  ┃  Reply with exactly: ALPHA one
+  ┃                                                                                                                                                             Context
+                                                                                                                                                                6,208 tokens
+     + Thought · 896ms                                                                                                                                          1% used
+
+     ALPHA one
+
+     Build · LongCat 2.5 Preview Free · 3.5s · 10.6 tok/s
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                                                                                                                                                  ⬖ Getting started                ✕
+
+                                                                                                                                                                    OpenCode includes free models so
+                                                                                                                                                                    you can start immediately.
+
+                                                                                                                                                                    Connect from 75+ providers to
+                                                                                                                                                                    use other models, including
+  ┃                                                                                                                                                                 Claude, GPT, Gemini etc
+  ┃
+  ┃                                                                                                                                                                 Connect provider        /connect
+  ┃  Build · LongCat 2.5 Preview Free OpenCode Zen
+  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+  /…/tmp/probe/repo:master                                          6.2K (1%)  ctrl+p commands    /…/tmp/probe/repo:master
