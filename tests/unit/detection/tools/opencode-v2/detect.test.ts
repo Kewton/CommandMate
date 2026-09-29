@@ -49,9 +49,9 @@ describe('Issue #2934: the registry resolves OpenCode V2 to its own module', () 
       capturedAt: '2026-09-28',
       paneGeometry: '80x200',
     });
-    // Issue #2965 reads the dialogs as a STATUS only: both are driven by keys
-    // and answered over the agent's API, so there is still no `detectDialog`.
-    expect(detector.hasDialogRules).toBe(false);
+    // Issue #2984: the same dialogs are also read by `detectDialog`, for the
+    // Auto-Yes gate (pinned in `tests/unit/detection/tools/dialogs.test.ts`).
+    expect(detector.hasDialogRules).toBe(true);
   });
 });
 

@@ -29,9 +29,16 @@
  *
  * v1's opencode detector is deliberately not reused: its dialog rule keys on
  * v1's wording (`Allow always`, the reverse word order) and would misread v2.
- * No `detectDialog` either: every surface here is driven by keys (`⇆` / `↑↓` +
- * Enter), and v2's approvals and questions are answered through the agent's own
- * API (#2945), so the Auto-Yes / `respond` gate has nothing to add yet.
+ *
+ * `detectDialog` (Issue #2984) reads the same three surfaces for the Auto-Yes
+ * gate (`polling/auto-yes-dialog-gate`), measured on 2.0.18 at 80x200
+ * (2026-09-29, `tests/fixtures/opencode-v2-dialogs-2984/`): the approval strip
+ * (`keys` — a typed digit leaves it open), the question form (`numbered`,
+ * `answer_only` — a typed `2` alone submitted `Blue`) and a dialog title
+ * (`keys` — a digit goes into the filter). v2's approvals and questions are
+ * still answered through the agent's own API (#2945); what the gate needs from
+ * this module is the NO — an agent's reply that quotes a `❯ 1. Yes` dialog is
+ * none of the three, so Auto-Yes does not type into the composer for it.
  *
  * @module lib/detection/tools/opencode-v2/detect
  */
@@ -46,7 +53,7 @@ import {
 import { STATUS_REASON } from '../../status-reason';
 import { createToolStatusDetector } from '../run-detection';
 import { OPENCODE_V2_VERIFIED_AGAINST } from '../verified-against';
-import type { NormalizedFrame, ToolStatusVerdict } from '../types';
+import type { DialogVerdict, NormalizedFrame, ToolStatusVerdict } from '../types';
 
 export const VERIFIED_AGAINST = OPENCODE_V2_VERIFIED_AGAINST;
 
@@ -77,6 +84,47 @@ export const OPENCODE_V2_QUESTION_PATTERN =
  */
 export const OPENCODE_V2_TURN_COMPLETE_PATTERN =
   /^[^\S\n│┃]*[A-Za-z][\w-]*(?: [\w-]+)* · [^\n]+? · \d+(?:\.\d+)?(?:ms|s|m(?: \d+s)?)(?: · [\d.]+ tok\/s)?[^\S\n]*$/;
+
+/** The approval strip's buttons, in the order it draws them (2.0.18). */
+export const OPENCODE_V2_PERMISSION_OPTIONS: readonly string[] = ['Allow once', 'Always allow', 'Reject'];
+
+/** A row of the composer's gutter (`┃  …`). The question form is drawn entirely on it. */
+const GUTTER_ROW_PATTERN = /^[^\S\n]*[│┃]/;
+
+/** One choice of the question form: `┃  1. Red` (2.0.18). */
+const QUESTION_OPTION_ROW_PATTERN = /^[^\S\n]*[│┃][^\S\n]*(\d+)\.[^\S\n]+(\S.*?)[^\S\n]*$/;
+
+/**
+ * The question form as a dialog (Issue #2984): the choices on the gutter rows
+ * above its key hints, numbered 1..n without a gap. `null` when the hints row
+ * is not in the status window or fewer than two choices can be read.
+ *
+ * `numbered` / `answer_only` because that is what the form does with a digit:
+ * measured on 2.0.18, typing `2` with no Enter submitted `Blue`
+ * (`tests/fixtures/opencode-v2-dialogs-2984/question-answered-by-digit.txt`).
+ */
+function readQuestionDialog(frame: NormalizedFrame): DialogVerdict | null {
+  if (!OPENCODE_V2_QUESTION_PATTERN.test(frame.lastLines)) return null;
+  const lines = frame.contentLines;
+  let hints = -1;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (OPENCODE_V2_QUESTION_PATTERN.test(lines[i])) {
+      hints = i;
+      break;
+    }
+  }
+  if (hints < 0) return null;
+
+  const options: string[] = [];
+  for (let i = hints - 1; i >= 0 && GUTTER_ROW_PATTERN.test(lines[i]); i--) {
+    const match = QUESTION_OPTION_ROW_PATTERN.exec(lines[i]);
+    if (match) options.unshift(`${match[1]}. ${match[2]}`);
+  }
+  if (options.length < 2) return null;
+  if (!options.every((option, index) => option.startsWith(`${index + 1}. `))) return null;
+
+  return { kind: 'question', options, answerMode: 'numbered', submitMode: 'answer_only' };
+}
 
 /** Rows below the transcript that are chrome: gutter padding, the model bar, the rule, the footer, the version. */
 function isChromeRow(line: string): boolean {
@@ -109,9 +157,10 @@ export const opencodeV2StatusDetector = createToolStatusDetector({
   // blocked on a human whatever else is on the pane — the question frame keeps
   // the previous turn's completion row above it — and ahead of the generic
   // numbered-list parser too, because the question's `1. Red / 2. Blue` is
-  // driven by ↑↓ + Enter: a typed digit is not an answer (hence
-  // `hasActivePrompt: false` and a reason from `SELECTION_LIST_REASONS`, which
-  // draws the arrow keys instead of offering to type a number).
+  // driven by ↑↓ + Enter (hence `hasActivePrompt: false` and a reason from
+  // `SELECTION_LIST_REASONS`, which draws the arrow keys instead of offering to
+  // type a number). Issue #2984 measured that a typed digit also commits it,
+  // with no Enter — see `detectDialog` below.
   beforePrompt(frame): ToolStatusVerdict | null {
     if (OPENCODE_V2_PERMISSION_PATTERN.test(frame.lastLines)) {
       return {
@@ -188,6 +237,27 @@ export const opencodeV2StatusDetector = createToolStatusDetector({
         hasActivePrompt: false,
         evidence: 'positive',
       };
+    }
+    return null;
+  },
+
+  // Issue #2984: the seam the Auto-Yes gate and `respond` read. The same three
+  // rules `beforePrompt` reports `waiting` on, in the same order, so the gate
+  // and the status API agree about which frames carry a dialog.
+  //
+  // The strip and the question form are anchored on the composer's `┃` gutter,
+  // which `stripBoxDrawing` removes: on the spelling the Auto-Yes poller judges
+  // they answer `null` (v1's #1893 precedent). For Auto-Yes `null` and `keys`
+  // both send nothing, and the question form never reaches the gate anyway —
+  // it draws no `❯` for the generic parser to key on.
+  detectDialog(frame): DialogVerdict | null {
+    if (OPENCODE_V2_PERMISSION_PATTERN.test(frame.lastLines)) {
+      return { kind: 'permission', options: OPENCODE_V2_PERMISSION_OPTIONS, answerMode: 'keys' };
+    }
+    const question = readQuestionDialog(frame);
+    if (question !== null) return question;
+    if (findOpencodeV2DialogTitle(stripAnsi(frame.raw)) !== null) {
+      return { kind: 'picker', options: [], answerMode: 'keys' };
     }
     return null;
   },
