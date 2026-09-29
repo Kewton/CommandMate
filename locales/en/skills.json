@@ -72,6 +72,7 @@
     "reload": {
       "sessionRestart": "Start a new {agent} session in this repository. Skills are scanned when a session starts.",
       "sessionRestartNoSlash": "Start a new {agent} session in this repository, then ask for the Skill by name — this version does not list Skills as slash commands.",
+      "pickedUpLive": "No new {agent} session is needed. {agent} rescans Skills while it runs, so the new Skill is found from your next message in this repository.",
       "unknown": "CommandMate has not measured how {agent} reloads Skills. Restarting the session is the safe assumption."
     },
     "reason": {
