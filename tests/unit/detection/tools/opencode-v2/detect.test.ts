@@ -4,8 +4,9 @@
  * decides when the stream is not there.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import { getToolStatusDetector } from '@/lib/detection/tools/registry';
 import { normalizeFrame } from '@/lib/detection/tools/frame';
@@ -19,7 +20,17 @@ import {
   stripAnsi,
 } from '@/lib/detection/cli-patterns';
 import { OPENCODE_V2_VERIFIED_AGAINST } from '@/lib/detection/tools/verified-against';
-import { opencodeV2StatusDetector } from '@/lib/detection/tools/opencode-v2/detect';
+import {
+  opencodeV2StatusDetector,
+  endsWithTurnComplete,
+  OPENCODE_V2_PERMISSION_PATTERN,
+  OPENCODE_V2_QUESTION_PATTERN,
+  OPENCODE_V2_TURN_COMPLETE_PATTERN,
+} from '@/lib/detection/tools/opencode-v2/detect';
+import { opencodeStatusDetector } from '@/lib/detection/tools/opencode/detect';
+import { OPENCODE_PERMISSION_PATTERN } from '@/lib/detection/cli-patterns';
+import { STATUS_REASON } from '@/lib/detection/status-reason';
+import { SELECTION_LIST_REASONS } from '@/lib/detection/status-detector';
 import { resolveLivenessSpec } from '@/lib/cli-tools/liveness-spec';
 
 const DIR = path.resolve(__dirname, '../../../../fixtures/opencode-v2-live-2934');
@@ -37,7 +48,8 @@ describe('Issue #2934: the registry resolves OpenCode V2 to its own module', () 
       capturedAt: '2026-09-28',
       paneGeometry: '80x200',
     });
-    // Phase 3 reads the approval dialog; Phase 1 declares none.
+    // Issue #2965 reads the dialogs as a STATUS only: both are driven by keys
+    // and answered over the agent's API, so there is still no `detectDialog`.
     expect(detector.hasDialogRules).toBe(false);
   });
 });
@@ -89,5 +101,121 @@ describe('Issue #2934: the patterns (D6)', () => {
     const spec = resolveLivenessSpec('opencode-v2');
     expect(spec.alivePatterns).toContain(OPENCODE_V2_FOOTER_PATTERN);
     expect(spec.alivePatterns.some((p) => p.test('maenokota@host repo % '))).toBe(false);
+  });
+});
+
+const DIR_2965 = path.resolve(__dirname, '../../../../fixtures/opencode-v2-live-2945');
+const frame2965 = (name: string): string =>
+  fs.readFileSync(path.join(DIR_2965, `${name}.txt`), 'utf-8');
+const verdict2965 = (name: string) => detector.detect(normalizeFrame(frame2965(name)));
+
+describe('Issue #2965: the dialogs and the completion row (2.0.18, 80x200)', () => {
+  it('reads the approval dialog as waiting, on the key-driven menu reason', () => {
+    const v = verdict2965('permission-required');
+    expect(v.status).toBe('waiting');
+    expect(v.reason).toBe(STATUS_REASON.OPENCODE_PERMISSION_PROMPT);
+    expect(v.hasActivePrompt).toBe(false);
+    expect(v.evidence).toBe('positive');
+    expect(SELECTION_LIST_REASONS.has(v.reason)).toBe(true);
+  });
+
+  it('reads the question form as waiting, and never as a numbered prompt', () => {
+    const v = verdict2965('question');
+    expect(v.status).toBe('waiting');
+    expect(v.reason).toBe(STATUS_REASON.OPENCODE_SELECTION_LIST);
+    expect(v.hasActivePrompt).toBe(false);
+    expect(v.promptDetection?.isPrompt ?? false).toBe(false);
+    expect(SELECTION_LIST_REASONS.has(v.reason)).toBe(true);
+  });
+
+  it('reads a finished turn as ready on its completion row', () => {
+    for (const name of ['turn-done-after-approval', 'question-answered']) {
+      const v = verdict2965(name);
+      expect(v.status, name).toBe('ready');
+      expect(v.reason, name).toBe(STATUS_REASON.OPENCODE_RESPONSE_COMPLETE);
+    }
+    expect(verdict('turn-done').reason).toBe(STATUS_REASON.OPENCODE_RESPONSE_COMPLETE);
+  });
+
+  it('does not let the previous turn’s completion row outrank a dialog or a running turn', () => {
+    // The question frame keeps `Build · … · 23.2s` above the form.
+    expect(stripAnsi(frame2965('question'))).toMatch(/Build · .+ · 23\.2s/);
+    expect(verdict2965('question').status).toBe('waiting');
+    // A new turn under the old completion row: the footer says it is running.
+    const running = frame2965('turn-done-after-approval').replace(
+      /8\.8K \(1%\)  ctrl\+p commands/,
+      '⬝⬝⬝⬝■■■■ esc interrupt  ctrl+p commands',
+    );
+    expect(detector.detect(normalizeFrame(running)).status).toBe('running');
+  });
+
+  it('reads only the LAST transcript row as the completion', () => {
+    expect(endsWithTurnComplete(normalizeFrame(frame2965('question')))).toBe(false);
+    expect(endsWithTurnComplete(normalizeFrame(frame2965('permission-required')))).toBe(false);
+    expect(endsWithTurnComplete(normalizeFrame(frame('turn-running')))).toBe(false);
+    expect(endsWithTurnComplete(normalizeFrame(frame('boot-idle')))).toBe(false);
+    expect(endsWithTurnComplete(normalizeFrame(frame('turn-done')))).toBe(true);
+  });
+
+  it('keeps the rows the completion rule must not match out of it', () => {
+    const row = '     Build · LongCat 2.5 Preview Free · 3.5s · 11.2 tok/s';
+    expect(OPENCODE_V2_TURN_COMPLETE_PATTERN.test(row)).toBe(true);
+    // A turn over a minute (seen live while an approval waited 2 minutes).
+    expect(OPENCODE_V2_TURN_COMPLETE_PATTERN.test('     Build · LongCat 2.5 Preview Free · 2m 4s · 15.5 tok/s')).toBe(true);
+    // The composer's model bar: gutter, no duration.
+    expect(OPENCODE_V2_TURN_COMPLETE_PATTERN.test('  ┃  Build · LongCat 2.5 Preview Free OpenCode Zen')).toBe(false);
+    // A step still open (no duration) and a thought row.
+    expect(OPENCODE_V2_TURN_COMPLETE_PATTERN.test('     Build · LongCat 2.5 Preview Free')).toBe(false);
+    expect(OPENCODE_V2_TURN_COMPLETE_PATTERN.test('     + Thought · 979ms')).toBe(false);
+    // v1's row.
+    expect(OPENCODE_V2_TURN_COMPLETE_PATTERN.test('▣  Build · gpt-5-mini · 2.3s')).toBe(false);
+  });
+});
+
+describe('Issue #2965: the dialog patterns against v1 and against reply text', () => {
+  it('reads v2’s word order and not v1’s', () => {
+    const v2 = '  ┃   Allow once   Always allow   Reject  ctrl+f fullscreen  ⇆ select  enter con';
+    const v1 = '  ┃   Allow once   Allow always   Reject';
+    expect(OPENCODE_V2_PERMISSION_PATTERN.test(v2)).toBe(true);
+    expect(OPENCODE_V2_PERMISSION_PATTERN.test(v1)).toBe(false);
+    // v1's own rule is untouched, and does not read v2's strip either.
+    expect(OPENCODE_PERMISSION_PATTERN.test(v1)).toBe(true);
+    expect(OPENCODE_PERMISSION_PATTERN.test(v2)).toBe(false);
+    expect(opencodeStatusDetector.detect(normalizeFrame(frame2965('permission-required'))).reason).not.toBe(
+      STATUS_REASON.OPENCODE_PERMISSION_PROMPT,
+    );
+  });
+
+  it('needs the gutter: the same words in a reply are not a dialog', () => {
+    expect(OPENCODE_V2_PERMISSION_PATTERN.test('     Allow once   Always allow   Reject')).toBe(false);
+    expect(OPENCODE_V2_QUESTION_PATTERN.test('     ↑↓ select  enter submit  esc dismiss')).toBe(false);
+    expect(OPENCODE_V2_QUESTION_PATTERN.test('  ┃  ↑↓ select  enter submit  esc dismiss')).toBe(true);
+  });
+});
+
+describe('Issue #2965: controls written outside the repository', () => {
+  let tmp: string | null = null;
+  afterEach(() => {
+    if (tmp !== null) fs.rmSync(tmp, { recursive: true, force: true });
+    tmp = null;
+  });
+
+  const readVia = (name: string, text: string) => {
+    tmp = tmp ?? fs.mkdtempSync(path.join(os.tmpdir(), 'ocv2-2965-'));
+    const file = path.join(tmp, name);
+    fs.writeFileSync(file, text, 'utf-8');
+    return detector.detect(normalizeFrame(fs.readFileSync(file, 'utf-8')));
+  };
+
+  it('positive: the captured dialogs, copied byte for byte, are waiting', () => {
+    expect(readVia('perm.txt', frame2965('permission-required')).status).toBe('waiting');
+    expect(readVia('question.txt', frame2965('question')).status).toBe('waiting');
+  });
+
+  it('negative: the same frames with the gutter removed from the dialog row are not', () => {
+    const perm = frame2965('permission-required').replace(/^(\s*)┃(\s+Allow once)/m, '$1 $2');
+    const question = frame2965('question').replace(/^(\s*)┃(\s+↑↓ select)/m, '$1 $2');
+    expect(readVia('perm-no-gutter.txt', perm).status).not.toBe('waiting');
+    expect(readVia('question-no-gutter.txt', question).status).not.toBe('waiting');
   });
 });

@@ -1,0 +1,200 @@
+ ! New session                   +
+
+  ┃
+  ┃  Use your edit tool to change the word hello to goodbye in notes.txt. Do
+  ┃  nothing else.
+  ┃
+
+     + Thought · 1.5s
+
+     → Explored: 1 read
+
+     + Thought · 1.4s
+
+  ┃
+  ┃  ← Edit notes.txt
+  ┃
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  ┃
+  ┃  △ Permission required
+  ┃    → Edit notes.txt
+  ┃
+  ┃  1 - hello
+  ┃  1 + goodbye
+  ┃
+  ┃
+  ┃
+  ┃
+  ┃
+  ┃
+  ┃
+  ┃   Allow once   Always allow   Reject  ctrl+f fullscreen  ⇆ select  enter con
+  ┃
+
