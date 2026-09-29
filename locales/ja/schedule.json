@@ -159,6 +159,7 @@
     "errorModelInvalid": "モデル名が不正です。",
     "errorAgentInvalid": "Agent 名が不正です。",
     "errorVariantInvalid": "Variant 名が不正です。",
+    "errorVariantNeedsModel": "OpenCode V2 では Variant は Model と一緒に指定してください（-m <provider/model>#<variant> として渡します）。",
     "errorTitleInvalid": "セッションタイトルが不正です。"
   },
   "timerTab": "Timer",

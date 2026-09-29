@@ -163,7 +163,8 @@ export function recoverRunningLogs(): void {
  * - **the CMATE.md CLI Tool column**, read by
  *   {@link resolveScheduleCommandOptions} — `--model` for every tool in
  *   `TOOLS_WITH_MODEL_SUPPORT`, plus opencode's `--agent` / `--variant` /
- *   `--continue` / `--title` for the ids in `TOOLS_WITH_RUN_OPTIONS`;
+ *   `--continue` / `--title` for the ids in `TOOLS_WITH_RUN_OPTIONS`
+ *   (opencode and, since Issue #2982, opencode-v2);
  * - **the DB** (`worktree.vibe_local_model`), for vibe-local, whose model is
  *   chosen in the worktree's Agent settings rather than written in the file.
  *
