@@ -16,6 +16,7 @@ import {
   OPENCODE_V2_IDLE_COMPOSER_PATTERN,
   OPENCODE_V2_THINKING_PATTERN,
   detectThinking,
+  findOpencodeV2DialogTitle,
   isOpencodeV2ComposerVisible,
   stripAnsi,
 } from '@/lib/detection/cli-patterns';
@@ -217,5 +218,80 @@ describe('Issue #2965: controls written outside the repository', () => {
     const question = frame2965('question').replace(/^(\s*)┃(\s+↑↓ select)/m, '$1 $2');
     expect(readVia('perm-no-gutter.txt', perm).status).not.toBe('waiting');
     expect(readVia('question-no-gutter.txt', question).status).not.toBe('waiting');
+  });
+});
+
+const DIR_2971 = path.resolve(__dirname, '../../../../fixtures/opencode-v2-live-2971');
+const frame2971 = (name: string): string =>
+  fs.readFileSync(path.join(DIR_2971, `${name}.txt`), 'utf-8');
+
+describe('Issue #2971: a dialog open over the composer (2.0.18, 80x200)', () => {
+  it.each([
+    ['select-model', 'Select model'],
+    ['select-variant', 'Select variant'],
+    ['select-variant-typed', 'Select variant'],
+    ['select-variant-over-transcript', 'Select variant'],
+    ['commands', 'Commands'],
+    ['sessions', 'Sessions for repo'],
+    ['select-agent', 'Select agent'],
+  ])('finds the %s dialog by its title row', (name, title) => {
+    const text = stripAnsi(frame2971(name));
+    expect(findOpencodeV2DialogTitle(text)).toBe(title);
+    // Why the composer check alone let the send through: the footer is still drawn.
+    expect(isOpencodeV2ComposerVisible(text)).toBe(true);
+  });
+
+  it('keeps the UAT shape: the typed body sits in the filter, not the composer', () => {
+    const text = stripAnsi(frame2971('select-variant-typed'));
+    expect(text).toMatch(/^\s+Reply with exactly: UAT-MODEL-2$/m);
+    expect(text).toMatch(/No results found/);
+  });
+
+  it('finds no dialog on the composer, approval, question, running and finished frames', () => {
+    for (const name of ['boot-idle', 'turn-running', 'turn-done']) {
+      expect(findOpencodeV2DialogTitle(stripAnsi(frame(name))), name).toBeNull();
+    }
+    for (const name of ['permission-required', 'question', 'question-answered', 'turn-done-after-approval']) {
+      expect(findOpencodeV2DialogTitle(stripAnsi(frame2965(name))), name).toBeNull();
+    }
+  });
+
+  it('leaves the verdicts of those frames as they were', () => {
+    expect(verdict('boot-idle').status).toBe('ready');
+    expect(verdict('turn-running').status).toBe('running');
+    expect(verdict('turn-done').status).toBe('ready');
+    expect(verdict2965('permission-required').status).toBe('waiting');
+    expect(verdict2965('question').status).toBe('waiting');
+  });
+
+  it('does not read the hints that end in other words, or a gutter row, as a title', () => {
+    expect(findOpencodeV2DialogTitle('   /…/repo:main  ⬝⬝■■ esc interrupt  ctrl+p commands')).toBeNull();
+    expect(findOpencodeV2DialogTitle('  ┃  ↑↓ select  enter submit  esc dismiss')).toBeNull();
+    expect(findOpencodeV2DialogTitle('  ┃  Select model                           esc')).toBeNull();
+    expect(findOpencodeV2DialogTitle('     Press esc to close the picker.')).toBeNull();
+  });
+});
+
+describe('Issue #2971: controls written outside the repository', () => {
+  let tmp: string | null = null;
+  afterEach(() => {
+    if (tmp !== null) fs.rmSync(tmp, { recursive: true, force: true });
+    tmp = null;
+  });
+
+  const readVia = (name: string, text: string): string | null => {
+    tmp = tmp ?? fs.mkdtempSync(path.join(os.tmpdir(), 'ocv2-2971-'));
+    const file = path.join(tmp, name);
+    fs.writeFileSync(file, text, 'utf-8');
+    return findOpencodeV2DialogTitle(stripAnsi(fs.readFileSync(file, 'utf-8')));
+  };
+
+  it('positive: the captured dialog, copied byte for byte, is found', () => {
+    expect(readVia('variant.txt', frame2971('select-variant-typed'))).toBe('Select variant');
+  });
+
+  it('negative: the same frame with the title row’s `esc` removed is not', () => {
+    const noHint = frame2971('select-variant-typed').replace(/^(\s+Select variant)\s+esc$/m, '$1');
+    expect(readVia('variant-no-esc.txt', noHint)).toBeNull();
   });
 });

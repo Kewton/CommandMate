@@ -125,6 +125,8 @@ import { clearOpencodeExecutableCache } from '@/lib/cli-tools/opencode-executabl
 let versionOutput = 'opencode v2.0.18\n';
 const FIXTURES = resolve(__dirname, '../../fixtures/opencode-v2-live-2934');
 const BOOT_IDLE = readFileSync(resolve(FIXTURES, 'boot-idle.txt'), 'utf8');
+const DIALOG = (name: string): string =>
+  readFileSync(resolve(FIXTURES, `../opencode-v2-live-2971/${name}.txt`), 'utf8');
 
 beforeEach(() => {
   calls.length = 0;
@@ -233,6 +235,32 @@ describe('send (D6)', () => {
   it('refuses when there is no session', async () => {
     vi.mocked(hasSession).mockResolvedValue(false);
     await expect(new OpenCodeV2Tool().sendMessage('wt', 'hello')).rejects.toThrow(/does not exist/);
+  });
+
+  // Issue #2971: a dialog keeps the footer, so the composer check alone passed
+  // and the body went into the dialog's filter (`No results found`).
+  it.each([
+    ['select-variant', 'Select variant'],
+    ['select-variant-over-transcript', 'Select variant'],
+    ['select-model', 'Select model'],
+    ['commands', 'Commands'],
+  ])('does not type while the %s dialog is open', async (name, title) => {
+    vi.mocked(hasSession).mockResolvedValue(true);
+    vi.mocked(capturePane).mockResolvedValue(DIALOG(name));
+
+    await expect(new OpenCodeV2Tool().sendMessage('wt', 'hello')).rejects.toThrow(
+      `the "${title}" dialog is open`
+    );
+    expect(calls.some((c) => c.startsWith('submit:'))).toBe(false);
+  });
+
+  it('sends once the dialog is gone (the same pane, idle)', async () => {
+    vi.mocked(hasSession).mockResolvedValue(true);
+    vi.mocked(capturePane).mockResolvedValue(BOOT_IDLE);
+
+    await new OpenCodeV2Tool().sendMessage('wt', 'hello');
+
+    expect(calls).toContain('submit:opencode-v2:hello');
   });
 });
 
