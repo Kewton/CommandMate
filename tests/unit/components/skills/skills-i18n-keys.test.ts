@@ -246,6 +246,7 @@ const PLACEHOLDERS: Record<string, string[]> = {
   'compatibility.reloadHeading': ['{agent}'],
   'compatibility.reload.sessionRestart': ['{agent}'],
   'compatibility.reload.sessionRestartNoSlash': ['{agent}'],
+  'compatibility.reload.pickedUpLive': ['{agent}'],
   'compatibility.reload.unknown': ['{agent}'],
   'risk.declaredLabel': ['{level}'],
   'detail.packageBytes': ['{bytes}'],
