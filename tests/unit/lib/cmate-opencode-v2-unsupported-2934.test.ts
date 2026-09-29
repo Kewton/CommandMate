@@ -1,9 +1,11 @@
 /**
- * OpenCode V2 cannot be a schedule's CLI Tool yet (Issue #2934).
+ * OpenCode V2 as a schedule's CLI Tool.
  *
- * Phase 1 of Epic #2370 runs it interactively only; the headless path
- * (`opencode2 run`) is Phase 4. The parser and the validator must agree: the
- * validator reports the row, the parser skips it, and no other tool changes.
+ * Issue #2934 kept it out (Phase 1 had no headless path); Issue #2974 measured
+ * `opencode2 run --standalone --format json` and let it in. The parser and the
+ * validator must still agree: both accept the row, both accept the same
+ * Permission values, both reject the same out-of-vocabulary value, and no other
+ * tool changes.
  */
 
 import { describe, expect, it, vi } from 'vitest';
@@ -25,42 +27,65 @@ vi.mock('@/lib/logger', () => ({
 import { parseSchedulesSection } from '@/lib/cmate-parser';
 import { validateSchedulesSection } from '@/lib/cmate-validator';
 import {
+  DEFAULT_PERMISSIONS,
+  OPENCODE_V2_PERMISSIONS,
   SCHEDULE_UNSUPPORTED_CLI_TOOLS,
   getPermissionOptionsForTool,
   isScheduleSupportedCliTool,
 } from '@/config/schedule-config';
 import { CLI_TOOL_IDS } from '@/lib/cli-tools/types';
 
-describe('opencode-v2 in CMATE.md (Issue #2934)', () => {
-  const row = ['v2-task', '0 9 * * *', 'Do something', 'opencode-v2', 'true', ''];
+describe('opencode-v2 in CMATE.md (Issue #2934 → #2974)', () => {
+  const row = (permission: string) => ['v2-task', '0 9 * * *', 'Do something', 'opencode-v2', 'true', permission];
 
-  it('is a validation error naming the tool', () => {
-    const errors = validateSchedulesSection([row]);
-    expect(errors).toHaveLength(1);
-    expect(errors[0]).toMatchObject({ row: 0, field: 'cliTool' });
-    expect(errors[0].message).toContain('"opencode-v2" is not supported in schedules yet');
+  it('passes validation and is parsed, not skipped', () => {
+    expect(validateSchedulesSection([row('')])).toEqual([]);
+    const parsed = parseSchedulesSection([row('')]);
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0]).toMatchObject({ name: 'v2-task', cliToolId: 'opencode-v2' });
+    expect(mockLogger.warn).not.toHaveBeenCalledWith('parse:unsupported-cli-tool', expect.anything());
   });
 
-  it('is skipped by the parser, so no run is ever built for it', () => {
-    expect(parseSchedulesSection([row])).toEqual([]);
-    expect(mockLogger.warn).toHaveBeenCalledWith('parse:unsupported-cli-tool', {
-      name: 'v2-task',
-      cliToolId: 'opencode-v2',
-    });
+  it('an empty Permission cell resolves to `default` (no --auto)', () => {
+    expect(DEFAULT_PERMISSIONS['opencode-v2']).toBe('default');
+    expect(parseSchedulesSection([row('')])[0].permission).toBe('default');
   });
 
-  it('offers no permission values', () => {
-    expect(getPermissionOptionsForTool('opencode-v2')).toEqual([]);
+  it.each(['default', 'auto'])('accepts Permission "%s" in both parser and validator', (permission) => {
+    expect(validateSchedulesSection([row(permission)])).toEqual([]);
+    expect(parseSchedulesSection([row(permission)])[0].permission).toBe(permission);
   });
 
-  it('leaves every other tool schedulable', () => {
-    expect(SCHEDULE_UNSUPPORTED_CLI_TOOLS).toEqual(['opencode-v2']);
-    for (const id of CLI_TOOL_IDS) {
-      expect(isScheduleSupportedCliTool(id), id).toBe(id !== 'opencode-v2');
+  it.each(['acceptEdits', 'yolo', 'workspace-write'])(
+    'rejects another tool\'s Permission "%s" in both parser and validator',
+    (permission) => {
+      const errors = validateSchedulesSection([row(permission)]);
+      expect(errors).toHaveLength(1);
+      expect(errors[0]).toMatchObject({ row: 0, field: 'permission' });
+      // The parser falls back to the default rather than passing it on.
+      expect(parseSchedulesSection([row(permission)])[0].permission).toBe('default');
     }
-    // v1 is untouched.
+  );
+
+  it('does not accept v1\'s run options in the column yet (the row is skipped)', () => {
+    const withModel = ['v2-task', '0 9 * * *', 'Do something', 'opencode-v2 --model ollama/qwen3:8b', 'true', ''];
+    expect(validateSchedulesSection([withModel])[0]).toMatchObject({ field: 'cliTool' });
+    expect(parseSchedulesSection([withModel])).toEqual([]);
+  });
+
+  it('offers `default` and `auto` in the dialog / writer vocabulary', () => {
+    expect(getPermissionOptionsForTool('opencode-v2')).toBe(OPENCODE_V2_PERMISSIONS);
+    expect([...OPENCODE_V2_PERMISSIONS]).toEqual(['default', 'auto']);
+  });
+
+  it('leaves every tool schedulable, and v1 untouched', () => {
+    expect(SCHEDULE_UNSUPPORTED_CLI_TOOLS).toEqual([]);
+    for (const id of CLI_TOOL_IDS) {
+      expect(isScheduleSupportedCliTool(id), id).toBe(true);
+    }
     const v1 = ['v1-task', '0 9 * * *', 'Do something', 'opencode', 'true', ''];
     expect(validateSchedulesSection([v1])).toEqual([]);
     expect(parseSchedulesSection([v1])).toHaveLength(1);
+    expect(validateSchedulesSection([[...v1.slice(0, 5), 'auto']])).toHaveLength(1);
   });
 });

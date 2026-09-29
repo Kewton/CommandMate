@@ -2,8 +2,10 @@
  * CLI Command Executor (non-interactive mode)
  * Issue #294: Executes CLI tool commands for scheduled executions
  * Issue #379: Added OpenCode support (opencode run)
+ * Issue #2974: Added OpenCode V2 support (opencode2 run --standalone)
  *
- * Supported tools: claude, codex, gemini, vibe-local, opencode, copilot, antigravity, command-code
+ * Supported tools: claude, codex, gemini, vibe-local, opencode, copilot, antigravity, command-code,
+ * opencode-v2
  *
  * Security:
  * - Uses execFile (not exec) to prevent shell injection
@@ -21,10 +23,15 @@ import {
   COPILOT_PERMISSIONS,
   COMMAND_CODE_PERMISSIONS,
   COMMAND_CODE_YOLO_PERMISSION,
+  OPENCODE_V2_AUTO_PERMISSION,
   type CopilotPermission,
   type CommandCodePermission,
 } from '@/config/schedule-config';
 import type { OpencodeRunOptions } from '@/types/cmate';
+import {
+  OPENCODE_V2_BINARY_NAME,
+  resolveOpencodeV2Executable,
+} from '@/lib/cli-tools/opencode-executable';
 
 // =============================================================================
 // Constants
@@ -78,6 +85,11 @@ export function getCommandForTool(cliToolId: string): string {
     // cannot drift.
     case 'command-code':
       return 'commandcode';
+    // Issue #2974: the name only. `executeClaudeCommand` runs the path
+    // `resolveOpencodeV2Executable` answers, which also accepts an `opencode`
+    // that reports `opencode v2.x`.
+    case 'opencode-v2':
+      return OPENCODE_V2_BINARY_NAME;
     default:
       return cliToolId;
   }
@@ -152,6 +164,7 @@ export function truncateOutput(output: string): string {
  * - gemini: -p <message>
  * - vibe-local: [-p <message> -y] or [--model <model> -p <message> -y]
  * - opencode: run --format json [-m <model>] [--agent <a>] [--variant <v>] [-c] [--title <t>] <message>
+ * - opencode-v2: run --standalone --format json [--auto] [-m <model>[#<variant>]] [--agent <a>] [-c] [--title <t>] -- <message>
  * - antigravity: -p <message> --dangerously-skip-permissions
  * - command-code: -p <message> --output-format json [--yolo | --permission-mode <permission>] --no-auto-update
  * - others: -p <message> (fallback)
@@ -212,6 +225,57 @@ export function buildCliArgs(message: string, cliToolId: string, permission?: st
       if (options?.continueSession) args.push('-c');
       if (options?.title) args.push('--title', options.title);
       args.push(message);
+      return args;
+    }
+    case 'opencode-v2': {
+      // Issue #2974 (Epic #2370 Phase 4). Measured on OpenCode V2 2.0.18 in an
+      // isolated `HOME` / `XDG_*` (`tests/fixtures/opencode-v2-schedule-2974/`).
+      //
+      // ## `--standalone` is unconditional
+      //
+      // Without it `opencode2 run` connects to the *background service* — a
+      // shared `opencode serve --service` recorded in
+      // `~/.local/state/opencode/service.json`, starting one when there is
+      // none. That service is the operator's (their own TUI talks to it), it is
+      // not the schedule's child, and it outlives the run: in the isolated
+      // measurement the run spawned a detached `serve --service` (PPID 1) and
+      // then failed with "Timed out waiting for the background service to
+      // start" (exit 1). `--standalone` runs a private server for this one run;
+      // after it no `opencode2` process was left.
+      //
+      // ## `--format json` is unconditional
+      //
+      // For v1's reason (see the `opencode` case): the stream is the same NDJSON
+      // shape, so {@link extractOpencodeFinalText} reads both.
+      //
+      // ## `--auto`
+      //
+      // `auto` is the only Permission value that adds a flag. Without it an
+      // `ask` rule is auto-rejected and the run exits 1 (so the schedule is
+      // recorded as failed); with it the rule is approved. See
+      // OPENCODE_V2_PERMISSIONS for why the flag-less run is the default.
+      //
+      // ## Options, and `--` before the message
+      //
+      // `-m`, `--agent`, `-c` and `--title` exist with v1's meaning. There is
+      // no `--variant`: `opencode2 run --help` documents `-m` as
+      // `provider/model#variant` and `--variant` is "Unrecognized flag" (exit
+      // 1), so a variant rides on the model. A variant without a model has
+      // nothing to ride on and is not sent. (The CMATE.md column does not carry
+      // these options for opencode-v2 today; this is the direct-call shape.)
+      //
+      // Unlike v1, a message that begins with `-` is read as a flag ("-x reply"
+      // printed the usage; "--- list" was "Unrecognized flag"), so the message
+      // follows `--`, which v2 accepts.
+      const args = ['run', '--standalone', '--format', 'json'];
+      if (permission === OPENCODE_V2_AUTO_PERMISSION) args.push('--auto');
+      if (options?.model) {
+        args.push('-m', options.variant ? `${options.model}#${options.variant}` : options.model);
+      }
+      if (options?.agent) args.push('--agent', options.agent);
+      if (options?.continueSession) args.push('-c');
+      if (options?.title) args.push('--title', options.title);
+      args.push('--', message);
       return args;
     }
     case 'command-code': {
@@ -355,6 +419,12 @@ export function buildCliArgs(message: string, cliToolId: string, permission?: st
  * whole extraction, because `--print-logs` and a plugin's stray `console.log`
  * both land on the same stdout.
  *
+ * ## OpenCode V2 (Issue #2974)
+ *
+ * `opencode2 run --format json` (2.0.18) writes the same frames with the same
+ * `part.messageID` / `part.text`, so this reads it unchanged. Only the `error`
+ * frame differs — see {@link renderOpencodeErrorFrame}.
+ *
  * @param stdout - Raw stdout from `opencode run --format json`
  * @returns The assistant's final text, a one-line rendering of an `error`
  *   frame, or null when the stream carried neither
@@ -407,21 +477,74 @@ export function extractOpencodeFinalText(stdout: string): string | null {
 /**
  * One line describing an `{"type":"error"}` frame.
  *
- * The measured shape is `error: { name, data: { message, ref } }`; every field
- * is treated as optional because the only thing this layer knows for certain is
- * the `type`. Rendered rather than dropped so a failed opencode run says
- * something in the execution log instead of nothing.
+ * The measured v1 shape is `error: { name, data: { message, ref } }`; OpenCode
+ * V2 2.0.18 writes `error: { type, message }` (`{"type":"aborted","message":
+ * "Step interrupted"}` after an auto-rejected `ask`, `{"type":"unknown",
+ * "message":"Agent not found: …"}`, `{"type":"provider.no-route",…}`). Both are
+ * read; v1's fields win when present. Every field is treated as optional
+ * because the only thing this layer knows for certain is the `type`. Rendered
+ * rather than dropped so a failed opencode run says something in the execution
+ * log instead of nothing.
  */
 function renderOpencodeErrorFrame(record: Record<string, unknown>): string {
   const error = typeof record.error === 'object' && record.error !== null
     ? (record.error as Record<string, unknown>)
     : {};
-  const name = typeof error.name === 'string' ? error.name : 'error';
+  const name = typeof error.name === 'string' ? error.name
+    : typeof error.type === 'string' ? error.type
+    : 'error';
   const data = typeof error.data === 'object' && error.data !== null
     ? (error.data as Record<string, unknown>)
     : {};
-  const message = typeof data.message === 'string' ? data.message : '';
+  const message = typeof data.message === 'string' ? data.message
+    : typeof error.message === 'string' ? error.message
+    : '';
   return message ? `opencode error: ${name}: ${message}` : `opencode error: ${name}`;
+}
+
+/**
+ * The `error` frame an opencode stream *ends* with, rendered, or null.
+ *
+ * Issue #2974: the measured OpenCode V2 failures (an auto-rejected `ask`, an
+ * unknown agent, an unavailable model) all end the stream in an `error` frame
+ * and exit 1. The exit code is what fails the schedule; this is the second
+ * half, so a run that ever exits 0 after an `error` frame is not recorded as
+ * completed either. "Ends with" rather than "contains": a stream whose last
+ * word is the assistant's answer did finish.
+ *
+ * @param stdout - Raw stdout from `opencode2 run --format json`
+ * @returns The rendered error, or null when the last frame is not an error
+ */
+export function findOpencodeTrailingError(stdout: string): string | null {
+  let last: Record<string, unknown> | null = null;
+  for (const line of stdout.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith('{')) continue;
+    try {
+      const frame: unknown = JSON.parse(trimmed);
+      if (typeof frame === 'object' && frame !== null) last = frame as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+  }
+  return last && last.type === 'error' ? renderOpencodeErrorFrame(last) : null;
+}
+
+/**
+ * The `Reason:` line for a failed OpenCode V2 run, or null.
+ *
+ * Measured on 2.0.18: an `ask` rule without `--auto` prints
+ * `! permission requested: <permission> (<target>); auto-rejecting` on stderr
+ * and exits 1. That line is the one that says what to change, so it is named;
+ * any other failure is described by its trailing `error` frame.
+ */
+export function describeOpencodeV2Failure(stdout: string, stderr: string): string | null {
+  if (/permission requested: .*auto-rejecting/.test(stripAnsi(stderr))) {
+    return 'Reason: opencode-v2 auto-rejected a permission request (an `ask` rule);'
+      + ' set the schedule\'s Permission to `auto` to approve it unattended';
+  }
+  const trailing = findOpencodeTrailingError(stdout);
+  return trailing ? `Reason: ${trailing}` : null;
 }
 
 // =============================================================================
@@ -791,8 +914,21 @@ export async function executeClaudeCommand(
 
   const args = buildCliArgs(truncatedMessage, cliToolId, permission, options);
 
+  // Issue #2974: OpenCode V2 runs the binary `resolveOpencodeV2Executable`
+  // answers for (`opencode2`, or an `opencode` that reports v2) — the same
+  // resolution the interactive launch uses, so a v1 `opencode` is never handed
+  // v2's flags.
+  let command = getCommandForTool(cliToolId);
+  if (cliToolId === 'opencode-v2') {
+    const resolution = await resolveOpencodeV2Executable();
+    if (!resolution.executable) {
+      const error = 'OpenCode V2 not found: no `opencode2` (or `opencode` reporting v2) on PATH';
+      return { output: error, exitCode: null, status: 'failed', error };
+    }
+    command = resolution.executable.path;
+  }
+
   return new Promise<ExecutionResult>((resolve) => {
-    const command = getCommandForTool(cliToolId);
     const child = execFile(
       command,
       args,
@@ -830,6 +966,7 @@ export async function executeClaudeCommand(
             ? describeCommandCodeBlockedToolCalls(commandCodeStream)
             : null;
           const exitCodeNumber = typeof errCode === 'number' ? errCode : null;
+          const isOpencodeV2 = cliToolId === 'opencode-v2';
 
           const errorSummary = [
             ...(blockedWarning ?? []),
@@ -840,6 +977,7 @@ export async function executeClaudeCommand(
             cliToolId === 'command-code'
               ? describeCommandCodeFailure(exitCodeNumber, commandCodeResult)
               : null,
+            isOpencodeV2 ? describeOpencodeV2Failure(stdout || '', stderr || '') : null,
           ]
             .filter((line): line is string => line !== null)
             .join('\n');
@@ -848,9 +986,14 @@ export async function executeClaudeCommand(
           // before it could write a result line (an unknown `--model` exits 1
           // with empty stdout and the message on stderr) reports what it did
           // write rather than an empty body.
+          //
+          // Issue #2974: OpenCode V2 likewise decodes its NDJSON, so the body is
+          // the answer (or the rendered `error` frame), not the event dump.
           const decodedStdout = commandCodeResult
             ? commandCodeResult.finalText
-            : (stdout || '');
+            : isOpencodeV2
+              ? extractOpencodeFinalText(stdout || '') ?? (stdout || '')
+              : (stdout || '');
 
           const rawOutput = stripAnsi(
             [
@@ -902,6 +1045,22 @@ export async function executeClaudeCommand(
             status: failure ? 'failed' : 'completed',
             ...(failure ? { error: failure } : {}),
             ...(blockedWarning ? { warning: blockedWarning[0] } : {}),
+          });
+          return;
+        }
+
+        // Issue #2974: exit 0 is not the whole verdict for OpenCode V2 — a
+        // stream that ends in an `error` frame did not finish, whatever the
+        // exit code says (see findOpencodeTrailingError).
+        if (cliToolId === 'opencode-v2') {
+          const trailingError = findOpencodeTrailingError(stdout || '');
+          const body = extractOpencodeFinalText(stdout || '') ?? (stdout || '');
+          const head = trailingError ? [`Reason: ${trailingError}`] : [];
+          resolve({
+            output: truncateOutput(stripAnsi([...head, body].join('\n'))),
+            exitCode: 0,
+            status: trailingError ? 'failed' : 'completed',
+            ...(trailingError ? { error: trailingError } : {}),
           });
           return;
         }

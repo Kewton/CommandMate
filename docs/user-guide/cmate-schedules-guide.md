@@ -67,7 +67,7 @@ your-project/          ← worktreeルート
 | **Name** | はい | スケジュール名。1〜100文字。英数字・日本語・ハイフン・スペースが使用可能 | - |
 | **Cron** | はい | cron式（5〜6フィールド）。実行タイミングを指定 | - |
 | **Message** | はい | `claude -p`に送信するプロンプト。最大10,000文字 | - |
-| **CLI Tool** | いいえ | 使用するCLIツール（`claude` / `codex` / `gemini` / `vibe-local` / `opencode` / `copilot` / `antigravity` / `command-code`。正本は `src/lib/cli-tools/types.ts` の `CLI_TOOL_IDS`）。**`--model <model-name>` を書けるのは copilot と opencode のみ**で、他のツールに書くと構文エラーとして行ごとスキップされる。opencode だけは `--agent` / `--variant` / `--continue` / `--title` も書ける（Issue #2044） | `claude` |
+| **CLI Tool** | いいえ | 使用するCLIツール（`claude` / `codex` / `gemini` / `vibe-local` / `opencode` / `copilot` / `antigravity` / `command-code` / `opencode-v2`。正本は `src/lib/cli-tools/types.ts` の `CLI_TOOL_IDS`）。**`--model <model-name>` を書けるのは copilot と opencode のみ**で、他のツールに書くと構文エラーとして行ごとスキップされる。opencode だけは `--agent` / `--variant` / `--continue` / `--title` も書ける（Issue #2044） | `claude` |
 | **Enabled** | いいえ | スケジュールの有効/無効（`true` / `false`） | `true` |
 | **Permission** | いいえ | 実行時の許可レベル。下記のPermission一覧を参照 | ツール別のデフォルト値 |
 
@@ -138,11 +138,31 @@ CLI Tool列で `copilot --model <model-name>` と記述すると、スケジュ�
 
 > **Warning:** 無人バッチであるスケジュール実行では、これが唯一の許可値である点に注意してください。
 
-### opencode-v2（スケジュール未対応）
+### opencode-v2（--auto）
 
-`opencode-v2`（OpenCode V2、実行ファイル `opencode2`）は worktree のエージェントとしては使えますが、
-**スケジュールの CLI Tool にはまだ指定できません**（Issue #2934。ヘッドレス実行 `opencode2 run` の
-対応は Epic #2370 Phase 4）。CMATE.md に書くと検証エラーになり、その行は実行されません。
+`opencode-v2`（OpenCode V2、実行ファイル `opencode2`。無ければ `--version` が v2 を返す `opencode`）は
+`opencode2 run --standalone --format json [--auto] -- <message>` で実行されます（Issue #2974）。
+NDJSON の出力から最後のメッセージの本文を取り出して実行記録に残します。
+
+| 値 | 説明 |
+|----|------|
+| `default` | フラグを付けない（**デフォルト**）。OpenCode の `permission` 設定で `ask` のルールに当たると自動で拒否され、実行は **exit 1 で失敗として記録** される |
+| `auto` | `--auto` を付ける。明示的に `deny` されていない権限要求（`ask` を含む）を自動で承認する |
+
+- 実測（OpenCode V2 2.0.18）: `permission` 設定が無ければ書き込みは確認なしで通ります。`ask` のルールがあると
+  stderr に `permission requested: edit (…); auto-rejecting` が出て exit 1 になり、実行記録には
+  「`auto` にすれば無人で承認される」旨の Reason が残ります。「成功したのに何も変わっていない」にはなりません。
+- **`deny` はサンドボックスではありません**: `edit: deny` / `write: deny` にしても、`shell` ツール経由で
+  ファイルを書けてしまうことを実測で確認しています。`auto` と組み合わせるときは特に注意してください。
+- `--standalone` は常に付けます。付けないと `opencode2 run` は利用者のバックグラウンドサービス
+  （`opencode serve --service`）に接続し、無ければ起動して残します。`--standalone` なら実行ごとに専用の
+  サーバーを立て、終了後にプロセスは残りません。
+- CLI Tool 列には `opencode-v2` 単独で書きます。v1 の `--model` / `--agent` / `--variant` / `--continue` /
+  `--title` は、opencode-v2 ではまだ書けません（書くと構文エラーで行がスキップされます）。
+
+```markdown
+| nightly-v2 | 0 2 * * * | 依存関係の更新を確認してください | opencode-v2 | true | default |
+```
 
 ### command-code（--yolo / --permission-mode）
 

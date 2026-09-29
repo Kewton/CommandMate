@@ -259,7 +259,8 @@ export function ScheduleEditDialog({
 
   // Resolve the agent roster: explicit instances when configured, otherwise the
   // primary instance of every CLI tool (legacy behavior). Filter out tools that
-  // are not supported in schedules yet (Issue #2936).
+  // are not supported in schedules (Issue #2936; none since #2974, which let
+  // opencode-v2 in).
   const resolvedInstances = useMemo<AgentInstance[]>(
     () =>
       (instances && instances.length > 0

@@ -29,6 +29,7 @@ import {
   COPILOT_PERMISSIONS,
   ANTIGRAVITY_PERMISSIONS,
   COMMAND_CODE_SCHEDULE_PERMISSIONS,
+  OPENCODE_V2_PERMISSIONS,
   DEFAULT_PERMISSIONS,
   isScheduleSupportedCliTool,
 } from '@/config/schedule-config';
@@ -261,8 +262,8 @@ export function parseSchedulesSection(rows: string[][]): ScheduleEntry[] {
       logger.warn('parse:invalid-cli-tool', { name: sanitizedName, cliToolId: resolvedCliToolId });
       continue;
     }
-    // Issue #2934: registered but not schedulable yet (OpenCode V2 Phase 1).
-    // Skipped like an unknown tool, so no run is ever built for it.
+    // Issue #2934: registered but not schedulable (SCHEDULE_UNSUPPORTED_CLI_TOOLS,
+    // empty since #2974). Skipped like an unknown tool, so no run is built for it.
     if (!isScheduleSupportedCliTool(resolvedCliToolId)) {
       logger.warn('parse:unsupported-cli-tool', { name: sanitizedName, cliToolId: resolvedCliToolId });
       continue;
@@ -298,6 +299,12 @@ export function parseSchedulesSection(rows: string[][]): ScheduleEntry[] {
       // reports success (Issue #2576 warns about those rows below).
       case 'command-code':
         allowedValues = COMMAND_CODE_SCHEDULE_PERMISSIONS;
+        break;
+      // Issue #2974: `default` (no flag) / `auto` (`--auto`). An empty cell
+      // resolves to `default`, so an `ask` rule fails the run rather than being
+      // approved unattended.
+      case 'opencode-v2':
+        allowedValues = OPENCODE_V2_PERMISSIONS;
         break;
       case 'gemini':
       case 'vibe-local':
