@@ -928,13 +928,26 @@ export async function executeClaudeCommand(
     command = resolution.executable.path;
   }
 
+  // Issue #2979: `execFile`'s `cwd` does not touch `PWD`, so the child inherits
+  // the server's (the main checkout it was started from). OpenCode V2 takes its
+  // project directory from `PWD`, not `process.cwd()`: measured on 2.0.18 in a
+  // throwaway repo + `git worktree`, the write landed wherever `PWD` pointed
+  // (cwd=worktree / PWD=main → main; cwd=main / PWD=worktree → worktree;
+  // PWD unset → cwd), for a plain repo and a worktree alike, and the
+  // `opencode.json` read was the one under `PWD`. `opencode2 run` has no `--dir`
+  // (v1 has), so the child's `PWD` is set to `cwd`. Other tools keep the
+  // environment they had.
+  const env = cliToolId === 'opencode-v2'
+    ? { ...sanitizeEnvForChildProcess(), PWD: cwd }
+    : sanitizeEnvForChildProcess();
+
   return new Promise<ExecutionResult>((resolve) => {
     const child = execFile(
       command,
       args,
       {
         cwd,
-        env: sanitizeEnvForChildProcess(),
+        env,
         maxBuffer: MAX_OUTPUT_SIZE,
         timeout: options?.timeoutMs ?? EXECUTION_TIMEOUT_MS,
       },

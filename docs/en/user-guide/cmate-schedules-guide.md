@@ -158,6 +158,10 @@ message is taken from the NDJSON output and stored in the execution log.
 - `--standalone` is always passed. Without it `opencode2 run` connects to the operator's background service
   (`opencode serve --service`), starting one and leaving it behind when there is none. With `--standalone`
   each run starts a private server, and no process is left after it ends.
+- The run happens in the worktree that holds the schedule, and reads that worktree's `opencode.json` /
+  `AGENTS.md`. OpenCode V2 picks its project from the `PWD` environment variable rather than its working
+  directory, so the child is started with `PWD` set to the worktree (Issue #2979; before that it ran in the
+  directory the server was started from).
 - Write `opencode-v2` alone in the CLI Tool column. v1's `--model` / `--agent` / `--variant` /
   `--continue` / `--title` are not accepted for opencode-v2 yet (the row is skipped as a syntax error).
 
