@@ -13,7 +13,7 @@ vi.mock('@/lib/tmux/session-ownership', () => ({
   assertSessionNotForeign: vi.fn(async () => ({ verdict: 'owned', sessionPath: null })),
 }));
 import { join } from 'path';
-import { mkdirSync, writeFileSync } from 'fs';
+import { mkdirSync, rmSync, writeFileSync } from 'fs';
 import { makeTempDir, removeTempDir } from '@tests/helpers/temp-dir';
 import {
   OpenCodeTool,
@@ -179,6 +179,10 @@ describe('OpenCodeTool', () => {
   afterEach(() => {
     vi.unstubAllEnvs();
     resetOpencodePortAssignments();
+    // Issue #2970: the D2 tests below write opencode's log into the sandbox.
+    // A line left there is still "since the launch" (1 s slack) for the next
+    // test whose launch reads the log, and that launch then fails.
+    rmSync(join(sandbox, 'xdg-data'), { recursive: true, force: true });
   });
 
   describe('properties', () => {
@@ -274,9 +278,10 @@ describe('OpenCodeTool', () => {
       });
 
       vi.useFakeTimers();
-      void tool.startSession('test-123', '/test/path', 'opencode-2');
+      const started = tool.startSession('test-123', '/test/path', 'opencode-2');
       await vi.runAllTimersAsync();
       vi.useRealTimers();
+      await started;
 
       expect(beginAgentSession).toHaveBeenCalledWith({
         worktreeId: 'test-123',
@@ -306,9 +311,10 @@ describe('OpenCodeTool', () => {
       });
 
       vi.useFakeTimers();
-      void tool.startSession('test-123', '/test/path');
+      const started = tool.startSession('test-123', '/test/path');
       await vi.runAllTimersAsync();
       vi.useRealTimers();
+      await started;
 
       expect(sendKeys).toHaveBeenCalledWith(
         'mcbd-opencode-test-123',
@@ -414,9 +420,10 @@ describe('OpenCodeTool', () => {
       vi.stubEnv('CM_AGENT_HOOKS_INJECT', '0');
 
       vi.useFakeTimers();
-      void tool.startSession('test-123', '/test/path');
+      const started = tool.startSession('test-123', '/test/path');
       await vi.runAllTimersAsync();
       vi.useRealTimers();
+      await started;
 
       // Hooks off, but #2403's port stays: it says which CommandMate the agent
       // belongs to, not whether its hooks are configured.
@@ -439,10 +446,11 @@ describe('OpenCodeTool', () => {
 
       // Speed up test by mocking setTimeout
       vi.useFakeTimers();
-      void tool.startSession('test-123', '/test/path');
+      const started = tool.startSession('test-123', '/test/path');
       // Advance through all setTimeout calls
       await vi.runAllTimersAsync();
       vi.useRealTimers();
+      await started;
 
       // Verify ensureOpencodeConfig was called
       expect(ensureOpencodeConfig).toHaveBeenCalledWith('/test/path');
