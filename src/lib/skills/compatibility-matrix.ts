@@ -143,6 +143,7 @@ const NOT_MEASURED_SKIP_REASON_KEY = 'skills.compatibility.skipReason.notMeasure
 export const AGENT_RELOAD_MESSAGE_KEYS = {
   SESSION_RESTART: 'skills.compatibility.reload.sessionRestart',
   SESSION_RESTART_NO_SLASH: 'skills.compatibility.reload.sessionRestartNoSlash',
+  PICKED_UP_LIVE: 'skills.compatibility.reload.pickedUpLive',
   UNKNOWN: 'skills.compatibility.reload.unknown',
 } as const;
 
@@ -485,10 +486,8 @@ const AGENT_DISCOVERY_MATRIX: readonly SkillAgentMatrixEntry[] = [
     // Also measured, and the opposite of v1: the server does NOT need a
     // restart. A Skill planted while it ran appeared in `GET /api/skill` within
     // seconds, and one planted into `$HOME/.agents/skills` mid-session was run
-    // by `/name` in that same session. A new session is therefore more than is
-    // needed rather than wrong, and it is the closest instruction the existing
-    // reload vocabulary has — there is no "picked up live" key yet.
-    reloadKey: AGENT_RELOAD_MESSAGE_KEYS.SESSION_RESTART,
+    // in that same session — so the guidance is "no new session needed".
+    reloadKey: AGENT_RELOAD_MESSAGE_KEYS.PICKED_UP_LIVE,
     skipReasonKey: null,
   },
 ];

@@ -72,6 +72,7 @@
     "reload": {
       "sessionRestart": "このrepositoryで {agent} のセッションを開始し直してください。Skillはセッション開始時に走査されます。",
       "sessionRestartNoSlash": "このrepositoryで {agent} のセッションを開始し直したうえで、Skillを名前で指定して呼び出してください。このversionはSkillをスラッシュコマンドとして表示しません。",
+      "pickedUpLive": "{agent} のセッションを開始し直す必要はありません。{agent} は稼働中に足したSkillも走査するので、このrepositoryでの次の送信から新しいSkillが見つかります。",
       "unknown": "CommandMateは {agent} のSkill再読み込み方法を実測していません。セッションの再起動が安全な前提です。"
     },
     "reason": {

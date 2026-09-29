@@ -171,8 +171,8 @@ describe('the other tools keep their grammar (Issue #2044)', () => {
     expect(parseCliToolColumn('claude')).toEqual({ cliToolId: 'claude', model: undefined });
   });
 
-  it('opencode is the only tool with the flag-list grammar', () => {
-    expect([...TOOLS_WITH_RUN_OPTIONS]).toEqual(['opencode']);
+  it('opencode (and, since Issue #2982, opencode-v2) are the only tools with the flag-list grammar', () => {
+    expect([...TOOLS_WITH_RUN_OPTIONS]).toEqual(['opencode', 'opencode-v2']);
   });
 
   it('leaves claude and codex argv untouched', () => {

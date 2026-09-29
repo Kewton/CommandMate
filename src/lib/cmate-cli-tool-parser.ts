@@ -15,6 +15,8 @@
  * - resolveScheduleCommandOptions(): CMATE.md row -> executor options (Issue #2044)
  * - TOOLS_WITH_MODEL_SUPPORT: Set of tools supporting --model in CMATE.md
  * - TOOLS_WITH_RUN_OPTIONS: Set of tools whose column accepts a flag list
+ * - TOOLS_WITH_VARIANT_ON_MODEL: tools whose variant rides on the model (Issue #2982)
+ * - validateVariantHasModel(): refuse a model-less variant for those tools (Issue #2982)
  */
 
 import { MODEL_NAME_PATTERN, MAX_MODEL_NAME_LENGTH } from '@/config/copilot-constants';
@@ -71,8 +73,14 @@ export interface ParsedCliToolColumn extends OpencodeRunOptions {
  * format `opencode run --help` documents for `-m, --model` (measured on
  * opencode 1.18.21). It is not prefixed with `ollama/` — see
  * `buildCliArgs()` for why that prefix went away.
+ *
+ * ## `opencode-v2` (Issue #2982)
+ *
+ * `opencode2 run -m` takes the same `provider/model` value (plus an optional
+ * `#variant`, see {@link TOOLS_WITH_VARIANT_ON_MODEL}), and the executor's
+ * `opencode-v2` case has built `-m` since #2974.
  */
-export const TOOLS_WITH_MODEL_SUPPORT = new Set(['copilot', 'opencode']);
+export const TOOLS_WITH_MODEL_SUPPORT = new Set(['copilot', 'opencode', 'opencode-v2']);
 
 /**
  * CLI Tools whose CMATE.md column is a **flag list** rather than one fixed shape
@@ -88,8 +96,29 @@ export const TOOLS_WITH_MODEL_SUPPORT = new Set(['copilot', 'opencode']);
  * CommandMate can drive (`--agent`, `--variant`, `-c`, `--title`), and a
  * schedule that wants `--agent plan --variant high` cannot say so in three
  * tokens. Membership here is what {@link parseCliToolColumn} branches on.
+ *
+ * Issue #2982: `opencode-v2` joins with the same five column flags. Its
+ * `opencode2 run` has `-m`, `--agent`, `-c` and `--title` with v1's meaning;
+ * `--variant` is the one difference, see {@link TOOLS_WITH_VARIANT_ON_MODEL}.
  */
-export const TOOLS_WITH_RUN_OPTIONS = new Set(['opencode']);
+export const TOOLS_WITH_RUN_OPTIONS = new Set(['opencode', 'opencode-v2']);
+
+/**
+ * Tools whose CLI has no `--variant` flag and takes the variant as a suffix of
+ * the model instead: `-m provider/model#variant` (Issue #2982).
+ *
+ * `opencode2 run` (2.0.18, measured in #2974) answers `--variant` with
+ * "Unrecognized flag" and exit 1. The column still spells the variant as
+ * `--variant <name>` — the same grammar, dialog field and writer order as v1 —
+ * and `claude-executor.ts` composes `model#variant`. Two consequences are
+ * enforced by {@link validateVariantHasModel}:
+ *
+ * - a variant **without a model** has nothing to ride on, and is an error
+ *   rather than a silently dropped option;
+ * - `#` in the model itself is not a way around it: `MODEL_NAME_PATTERN`
+ *   already refuses `#`, so `--model x#high` is rejected as an invalid model.
+ */
+export const TOOLS_WITH_VARIANT_ON_MODEL = new Set(['opencode-v2']);
 
 /**
  * The opencode column grammar, as one line, for error messages.
@@ -99,6 +128,33 @@ export const TOOLS_WITH_RUN_OPTIONS = new Set(['opencode']);
  */
 export const OPENCODE_COLUMN_SYNTAX =
   'opencode [--model <provider/model>] [--agent <name>] [--variant <name>] [--continue] [--title <text>]';
+
+/**
+ * The opencode-v2 column grammar, as one line, for error messages (Issue #2982).
+ *
+ * Same flags as {@link OPENCODE_COLUMN_SYNTAX}; `--variant` is nested inside
+ * the `--model` bracket because it is only valid alongside a model.
+ */
+export const OPENCODE_V2_COLUMN_SYNTAX =
+  'opencode-v2 [--model <provider/model> [--variant <name>]] [--agent <name>] [--continue] [--title <text>]';
+
+/**
+ * Error for a variant given without a model, for the tools in
+ * {@link TOOLS_WITH_VARIANT_ON_MODEL} (Issue #2982). Shared by the column
+ * parser and `cmate-writer.validateScheduleInput()` so the file and the
+ * form refuse the same row with the same words.
+ *
+ * @returns The error message, or undefined when the combination is fine
+ */
+export function validateVariantHasModel(
+  cliToolId: string,
+  model: string | undefined,
+  variant: string | undefined
+): string | undefined {
+  if (!TOOLS_WITH_VARIANT_ON_MODEL.has(cliToolId)) return undefined;
+  if (!variant?.trim() || model?.trim()) return undefined;
+  return `${cliToolId} option "--variant" needs "--model" (sent as -m <provider/model>#<variant>)`;
+}
 
 // =============================================================================
 // Parse Functions
@@ -174,7 +230,8 @@ export function tokenizeCliToolColumn(raw: string): { tokens: string[]; error?: 
  * - **a missing value** — `--agent --title x` would make `--title` the agent
  *   name, and a value starting with `-` is the DR4-001 injection shape anyway.
  *
- * @param cliToolId - Always `opencode` today; echoed into error messages
+ * @param cliToolId - `opencode` or `opencode-v2` (Issue #2982); echoed into
+ *   error messages and picks the syntax hint
  * @param tokens - Tokens after the tool id
  * @returns The parsed options, or an error
  */
@@ -237,10 +294,15 @@ function parseOpencodeRunFlags(cliToolId: string, tokens: string[]): ParsedCliTo
         parsed.continueSession = true;
         break;
       }
-      default:
-        return { cliToolId, error: `${cliToolId} only supports: ${OPENCODE_COLUMN_SYNTAX}` };
+      default: {
+        const syntax = cliToolId === 'opencode-v2' ? OPENCODE_V2_COLUMN_SYNTAX : OPENCODE_COLUMN_SYNTAX;
+        return { cliToolId, error: `${cliToolId} only supports: ${syntax}` };
+      }
     }
   }
+
+  const variantError = validateVariantHasModel(cliToolId, parsed.model, parsed.variant);
+  if (variantError) return { cliToolId, error: variantError };
 
   return parsed;
 }
@@ -563,7 +625,8 @@ export function parseAndValidateCliToolColumn(
  * {@link TOOLS_WITH_MODEL_SUPPORT} for the model, exactly as that line did, so
  * the two agree about which tools take one; the run options are additionally
  * gated on {@link TOOLS_WITH_RUN_OPTIONS} so a future tool cannot inherit
- * opencode's flags by accident.
+ * opencode's flags by accident. For `opencode-v2` (Issue #2982) the variant is
+ * passed on as-is; the executor folds it into `-m model#variant`.
  *
  * Living here rather than in `job-executor.ts` is the point: the column's
  * grammar is this module's business, and a scheduler that re-states any part of
