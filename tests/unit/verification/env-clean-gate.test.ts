@@ -19,17 +19,23 @@
  * @vitest-environment node
  */
 
+import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
 import { afterEach, describe, it, expect } from 'vitest';
 import { setActiveSessionNamespace } from '@/lib/cli-tools/session-name';
 import { clearLegacyAliasesForTests, registerLegacyAlias } from '@/lib/tmux/legacy-session-alias';
 import {
   attributeAnchor,
+  attributeHomeEntry,
   attributeSessionName,
   currentSessionServer,
+  demoVitestPid,
   diffEnvSnapshots,
   evaluateEnvClean,
   formatEnvCleanReport,
   isOtherServerSession,
+  readLivePidCwd,
   readOtherServerSessions,
   readTaskSession,
   recordTaskSession,
@@ -252,6 +258,114 @@ describe('diffEnvSnapshots', () => {
     expect(diff.status).toBe('violated');
     // ...and the unmeasured probe is still reported, not swallowed by the verdict.
     expect(formatEnvCleanReport(diff)).toContain('listeners UNKNOWN');
+  });
+});
+
+// =============================================================================
+// .commandmate-demo-vitest-<pid> attribution (Issue #2954)
+// =============================================================================
+
+describe('home-entries: .commandmate-demo-vitest-<pid> (#2954)', () => {
+  // A pid no system hands out (above Linux's pid_max ceiling and macOS's 99998).
+  const DEAD_PID = 99_999_999;
+  let root: string | null = null;
+
+  afterEach(() => {
+    if (root) rmSync(root, { recursive: true, force: true });
+    root = null;
+  });
+
+  /** This worktree and a sibling worktree, side by side under a fresh tmpdir. */
+  function worktrees(): { self: string; sibling: string } {
+    root = realpathSync(mkdtempSync(join(tmpdir(), 'env-clean-2954-')));
+    const self = join(root, 'commandmate-issue-2954');
+    const sibling = join(root, 'commandmate-issue-2940');
+    mkdirSync(self);
+    mkdirSync(sibling);
+    return { self, sibling };
+  }
+
+  function homeDiff(
+    added: string,
+    worktreePath: string,
+    resolvePidCwd?: (pid: number) => string | null
+  ) {
+    const diff = diffEnvSnapshots(
+      snapshot({ 'home-entries': probe([entry('Documents')]) }),
+      snapshot({ 'home-entries': probe([entry('Documents'), entry(added)]) }),
+      { worktreeId: WORKTREE_ID, worktreePath },
+      resolvePidCwd ? { resolvePidCwd } : {}
+    );
+    return { diff, home: diff.probes.find((p) => p.probeId === 'home-entries')! };
+  }
+
+  it('recognises only the exact .commandmate-demo-vitest-<pid> name', () => {
+    expect(demoVitestPid('.commandmate-demo-vitest-30733')).toBe(30733);
+    expect(demoVitestPid('.commandmate-demo-vitest-')).toBeNull();
+    expect(demoVitestPid('.commandmate-demo-vitest-0')).toBeNull();
+    expect(demoVitestPid('.commandmate-demo-vitest-12x')).toBeNull();
+    expect(demoVitestPid('commandmate-demo-vitest-12')).toBeNull();
+    expect(demoVitestPid('.commandmate-uat-1726')).toBeNull();
+  });
+
+  it('excuses a live pid whose cwd is another worktree, and says so in the report', () => {
+    const { self, sibling } = worktrees();
+    const asked: number[] = [];
+    const { diff, home } = homeDiff('.commandmate-demo-vitest-30733', self, (pid) => {
+      asked.push(pid);
+      return sibling;
+    });
+    expect(asked).toEqual([30733]);
+    expect(diff.status).toBe('clean');
+    expect(home.added).toEqual([]);
+    expect(home.ignoredAdded).toEqual([
+      { key: '.commandmate-demo-vitest-30733', detail: null, owner: 'other' },
+    ]);
+    expect(formatEnvCleanReport(diff)).toContain(
+      'home-entries clean ($HOME entries) (1 addition(s) attributed to another worktree)'
+    );
+  });
+
+  it('still counts a live pid whose cwd is this worktree (the real process.pid)', () => {
+    const self = realpathSync(process.cwd());
+    // The resolver is the real one: this test process runs inside the worktree.
+    expect(realpathSync(readLivePidCwd(process.pid) ?? '/nonexistent')).toBe(self);
+    const { diff, home } = homeDiff(`.commandmate-demo-vitest-${process.pid}`, self);
+    expect(diff.status).toBe('violated');
+    expect(home.added.map((c) => [c.key, c.owner])).toEqual([
+      [`.commandmate-demo-vitest-${process.pid}`, 'unattributed'],
+    ]);
+    expect(home.ignoredAdded).toEqual([]);
+  });
+
+  it('still counts a pid that is not alive', () => {
+    const { self } = worktrees();
+    expect(readLivePidCwd(DEAD_PID)).toBeNull();
+    const { diff, home } = homeDiff(`.commandmate-demo-vitest-${DEAD_PID}`, self);
+    expect(diff.status).toBe('violated');
+    expect(home.added.map((c) => c.owner)).toEqual(['unattributed']);
+  });
+
+  it('still counts a name that does not match, without asking about any pid', () => {
+    const { self, sibling } = worktrees();
+    const asked: number[] = [];
+    const { diff, home } = homeDiff('.commandmate-demo-vitest-30733.bak', self, (pid) => {
+      asked.push(pid);
+      return sibling;
+    });
+    expect(asked).toEqual([]);
+    expect(diff.status).toBe('violated');
+    expect(home.ignoredAdded).toEqual([]);
+  });
+
+  it('does not excuse a cwd that is outside every sibling worktree', () => {
+    const { self } = worktrees();
+    expect(attributeHomeEntry('.commandmate-demo-vitest-30733', self, () => '/')).toBe(
+      'unattributed'
+    );
+    expect(attributeHomeEntry('.commandmate-demo-vitest-30733', self, () => null)).toBe(
+      'unattributed'
+    );
   });
 });
 

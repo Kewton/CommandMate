@@ -232,6 +232,9 @@ export const TOOL_PROBE_SPECS: Record<AgentHealthTool, ToolProbeSpec> = {
       skipReason:
         'opencode の既定の権限設定は bash・編集を確認なしで実行する（実測: sleep 20 がダイアログ無しで走る）ため、承認ダイアログが出ない',
     },
+    // The TUI keeps prompt history, model picks and locks in $XDG_STATE_HOME/opencode.
+    // Pointed next to the work dir so none of the user's files is written.
+    launchEnv: (workDir) => ({ XDG_STATE_HOME: `${workDir}-xdg-state` }),
     guardedFiles: () => ({ hookConfig: [], trustState: [] }),
   },
 
