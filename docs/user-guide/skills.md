@@ -24,7 +24,7 @@ module 単位の責務は [docs/module-reference.md](../module-reference.md) を
 | 検査 | server | archive を展開せずに全 entry を解析し、manifest と双方向照合する |
 | plan | server | live branch / HEAD と配置予定 file を固定した期限つき plan を発行する |
 | install | server | staging へ書いてから atomic rename で各 install root へ commit する（primary = `.agents/skills/<id>/`） |
-| Agent 認識 | Agent CLI | 各 Agent が起動時に自分の discovery root を読む（**セッション再起動が必要**、§2-2） |
+| Agent 認識 | Agent CLI | 各 Agent が自分の discovery root を読む（多くの Agent は起動時に一度だけ読むため**セッション再起動が必要**。OpenCode V2 は稼働中に拾うので開始し直し不要、§2-2） |
 
 **download / install / uninstall のいずれも、package 内の script や hook を実行しない。**
 `declared_permissions` は提供元の *申告* であって CommandMate による enforcement ではない。
@@ -50,13 +50,14 @@ module 単位の責務は [docs/module-reference.md](../module-reference.md) を
 
 install は `.agents/skills/<id>/` と `.claude/skills/<id>/` の両方へ同じ payload を配置する。
 Agent 側がどちらを読むかは Agent の実装依存であり、下表は **2026-07-26 に実機で計測した結果**
-（#1513 G4）である。CommandMate が保証するのは「両 root に配置したこと」までで、
+（#1513 G4。OpenCode V2 の行は 2026-09-29、#2975）である。CommandMate が保証するのは「両 root に配置したこと」までで、
 Agent CLI の discovery 実装そのものは保証対象外である。
 
 | Agent | 実測 version | discovery root | slash command として露出 | 計測日 |
 |---|---|---|---|---|
 | Claude Code | 2.1.220 | `.claude/skills` を読む。`.agents/skills` は読まない | ✅ palette に出る | 2026-07-26 |
 | Codex CLI | 0.145.0 | `.agents/skills` を読む | ❌ 露出しない（CLI 側の制約） | 2026-07-26 |
+| OpenCode V2 | 2.0.18 | `.agents/skills` と `.claude/skills` の両方を読む。稼働中に足した Skill も開始し直し不要で拾う（#2985） | ⚠️ V2 自身の `/` 補完には出ない（`@` 補完には出る）。CommandMate から `/<name>` を送ると実行される | 2026-09-29 |
 | Gemini / OpenCode / vibe-local | — | **未計測（unknown）** | 未計測 | — |
 
 未計測の Agent は `unknown` のままにしてある。CommandMate は未計測を `unsupported` とも

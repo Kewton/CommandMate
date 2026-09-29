@@ -163,7 +163,9 @@ as observed（実測した範囲）
 README の `## Supported agents` 冒頭の 1 段落。**逐語で固定する**。LP ではカード 1「One agent leads」の直下に置く（#2550）。
 
 **数え方**: 「8 種」は `CLI_TOOL_IDS`（claude / codex / gemini / vibe-local / opencode / copilot /
-antigravity / command-code）の要素数で、ローカルモデル（`vibe-local`）はその 1 つとして数える。
+antigravity / command-code / opencode-v2）を数えたもので、ローカルモデル（`vibe-local`）はその 1 つとして数える。
+**v1 と v2 は 1 種と数える**: OpenCode の v1（`opencode`）と v2（`opencode-v2`）は同じ OpenCode の版なので、`CLI_TOOL_IDS` は 9 件でも公開面は 8 のまま
+（Issue #2976 の決定・案 A）。公開面で版を書き分けるときは「OpenCode（1.x と V2）」/「OpenCode (1.x and V2)」と書く。
 **「8 + ローカルモデル」「8 種のエージェント CLI とローカルモデル」とは書かない**（§11 の根拠表の
 行名は実装との突合のための見出しで、公開面での数え方ではない）。
 
@@ -347,7 +349,7 @@ worker 1 体の 1 ターンを近くで見る。lead が配るタスクはどれ
 | Evidence | A chat transcript | Commits, gate logs, `verify history`, `report metrics` |
 | Parallel work | Terminal tabs | One worktree and one contract per task |
 | When it stops | You notice, eventually | Waiting is surfaced: badge, toast, tab title, push |
-| Which agent | Locked to one | Claude Code, Codex, Gemini CLI, Copilot, OpenCode, Antigravity, local models |
+| Which agent | Locked to one | Claude Code, Codex, Gemini CLI, Copilot, OpenCode (1.x and V2), Antigravity, local models |
 
 ### ja（README ja / チュートリアル）
 
@@ -359,7 +361,7 @@ worker 1 体の 1 ターンを近くで見る。lead が配るタスクはどれ
 | 証跡 | チャットの履歴 | commit ・ ゲートログ ・ `verify history` ・ `report metrics` |
 | 並列作業 | ターミナルのタブ | タスクごとに worktree 1 つと契約 1 つ |
 | 止まったとき | そのうち気づく | 入力待ちが届く: バッジ ・ トースト ・ タブタイトル ・ 通知 |
-| 使えるエージェント | 1 つに固定 | Claude Code ・ Codex ・ Gemini CLI ・ Copilot ・ OpenCode ・ Antigravity ・ ローカルモデル |
+| 使えるエージェント | 1 つに固定 | Claude Code ・ Codex ・ Gemini CLI ・ Copilot ・ OpenCode（1.x と V2） ・ Antigravity ・ ローカルモデル |
 
 ---
 
@@ -551,7 +553,7 @@ LP / README では §4 の直後に置く。ここに書いた 5 行を超える
 | `report metrics` | `commandmate report metrics` サブコマンド | `src/cli/commands/report.ts` |
 | worktree 1 つと契約 1 つ | worktree ごとの独立セッション + 契約ファイル | `src/lib/session/` ・ `.commandmate/tasks/` |
 | 入力待ちが届く（バッジ / トースト / タブタイトル / 通知） | App Badge ・ Toast ・ `document.title` ・ Web Push | `src/hooks/useAttentionBadge.ts` ・ `src/lib/pwa/attention-badge.ts` ・ `src/components/common/Toast.tsx` ・ `src/lib/push/waiting-push-notifier.ts` |
-| 8 種のエージェント CLI とローカルモデル | `CLI_TOOL_IDS`（claude / codex / gemini / vibe-local / opencode / copilot / antigravity / command-code。9 件目の opencode-v2 は Epic #2370 Phase 1 のプレビューで、公開面の「8 種」には数えない。数え方の更新は Phase 4） | `src/lib/cli-tools/types.ts` の `CLI_TOOL_IDS` |
+| 8 種のエージェント CLI とローカルモデル | `CLI_TOOL_IDS`（claude / codex / gemini / vibe-local / opencode / copilot / antigravity / command-code / opencode-v2 の 9 件）。**v1 と v2 は 1 種と数える**: opencode と opencode-v2 は同じ OpenCode の 1.x と V2 なので、公開面では「OpenCode（1.x と V2）」の 1 種として 8 に数える（Issue #2976、案 A）。§1 の lede の列挙の「OpenCode」は両方の版を指す | `src/lib/cli-tools/types.ts` の `CLI_TOOL_IDS` |
 | `wait --verify` | `commandmate wait --verify` オプション | `src/cli/commands/wait.ts` |
 
 ---

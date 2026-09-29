@@ -373,6 +373,7 @@ Select which CLI agents to use for each worktree.
 | **Gemini** | Google Gemini CLI |
 | **Vibe-Local** | Ollama local LLM |
 | **OpenCode** | OpenCode CLI |
+| **OpenCode V2** | OpenCode 2.0 (`opencode2`, [OpenCode V2 guide](./opencode-v2.md)) |
 | **Copilot** | GitHub Copilot CLI |
 | **Antigravity** | Antigravity CLI (`agy`) |
 | **Command Code** | Command Code CLI (`commandcode`, Issue #2250) |

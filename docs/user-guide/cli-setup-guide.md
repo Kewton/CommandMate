@@ -93,6 +93,8 @@ Antigravity CLI（`agy`）は npm では配布されていません。入手方�
 
 #### OpenCode（1.x）と OpenCode V2 の共存
 
+OpenCode V2 で何ができるか・1.x との違い・まだできないことは [OpenCode V2 ガイド](./opencode-v2.md) にまとめています。
+
 OpenCode V2（エージェント名 `OpenCode V2`）は `npm install -g @opencode/cli` で入れます。
 このパッケージは実行ファイルを **`opencode2` と `opencode` の 2 つ**登録します。つまり V2 を入れると、
 OpenCode 1.x（`opencode-ai` や `~/.opencode/bin` のインストーラ）と同じ `opencode` という名前が
