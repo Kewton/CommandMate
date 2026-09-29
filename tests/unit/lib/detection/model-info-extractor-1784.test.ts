@@ -17,11 +17,15 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import {
   ANTIGRAVITY_BANNER_MODEL_PATTERN,
   ANTIGRAVITY_MODEL_ID_EFFORT_PATTERN,
   ANTIGRAVITY_STATUS_BAR_HINT_PATTERN,
   CLAUDE_STARTUP_BANNER_PATTERN,
+  CLAUDE_STARTUP_BANNER_V2_1_28X_PATTERN,
+  CLAUDE_EFFORT_ROW_PATTERN,
   CODEX_FOOTER_MODEL_PATTERN,
   REASONING_EFFORT_LEVELS,
   deriveEffortFromModelId,
@@ -172,6 +176,56 @@ describe('extractModelInfo: claude', () => {
   it('rejects a truncated banner rather than reporting half a value', () => {
     // Narrow panes fold the welcome box: "with xh… · Claude Max".
     const capture = '│   Opus 4.8 (1M context) with xh… · Claude Max ·    │';
+    expect(extractModelInfo('claude', capture)).toEqual(UNKNOWN);
+  });
+});
+
+// =============================================================================
+// Claude 2.1.28x — `<model> · <plan>`, effort on its own row (Issue #2955)
+// =============================================================================
+
+describe('extractModelInfo: claude 2.1.28x banner (Issue #2955)', () => {
+  const BANNER_2_1_284 = readFileSync(
+    join(process.cwd(), 'tests/fixtures/claude-session-start-2955/banner-2.1.284.txt'),
+    'utf8'
+  );
+
+  it('reads the model off the real 2.1.284 startup capture', () => {
+    // The effort row had already been replaced by a tmux notice when this frame
+    // was captured, so the effort is honestly unknown.
+    expect(extractModelInfo('claude', BANNER_2_1_284)).toEqual({ model: 'Sonnet 5.5', effort: null });
+  });
+
+  it('takes the effort from the right-aligned `/effort` row', () => {
+    const capture = [
+      ' ▐▛███▛█   Claude Code v2.1.284',
+      '▝▜██████▀  Opus 5 (1M context) · Claude Max',
+      ' ▝▝   ▝▝   ~/repo',
+      '                                                                       ◐ xhigh · /effort',
+      '❯ ',
+    ].join('\n');
+    expect(extractModelInfo('claude', capture)).toEqual({ model: 'Opus 5 (1M context)', effort: 'xhigh' });
+  });
+
+  it('still reads the old `with <effort> effort` banner, effort included', () => {
+    expect(extractModelInfo('claude', CLAUDE_STARTUP_BANNER_CAPTURE_V2_1_232)).toEqual({
+      model: 'Opus 5 (1M context)',
+      effort: 'xhigh',
+    });
+  });
+
+  it('does not read the version line or the cwd line of the banner', () => {
+    const capture = [' ▐▛███▛█   Claude Code v2.1.284', ' ▝▝   ▝▝   ~/repo'].join('\n');
+    expect(extractModelInfo('claude', capture)).toEqual(UNKNOWN);
+  });
+
+  it('does not read a box-framed table row with ` · ` that names no plan', () => {
+    const capture = '│ build · passed │';
+    expect(extractModelInfo('claude', capture)).toEqual(UNKNOWN);
+  });
+
+  it('does not let the effort row supply an effort without a banner', () => {
+    const capture = ['  Sure.', '                                   ◐ medium · /effort'].join('\n');
     expect(extractModelInfo('claude', capture)).toEqual(UNKNOWN);
   });
 });
@@ -431,6 +485,8 @@ describe('pattern hygiene', () => {
   const patterns: Array<[string, RegExp]> = [
     ['CODEX_FOOTER_MODEL_PATTERN', CODEX_FOOTER_MODEL_PATTERN],
     ['CLAUDE_STARTUP_BANNER_PATTERN', CLAUDE_STARTUP_BANNER_PATTERN],
+    ['CLAUDE_STARTUP_BANNER_V2_1_28X_PATTERN', CLAUDE_STARTUP_BANNER_V2_1_28X_PATTERN],
+    ['CLAUDE_EFFORT_ROW_PATTERN', CLAUDE_EFFORT_ROW_PATTERN],
     ['ANTIGRAVITY_STATUS_BAR_HINT_PATTERN', ANTIGRAVITY_STATUS_BAR_HINT_PATTERN],
     ['ANTIGRAVITY_BANNER_MODEL_PATTERN', ANTIGRAVITY_BANNER_MODEL_PATTERN],
     ['ANTIGRAVITY_MODEL_ID_EFFORT_PATTERN', ANTIGRAVITY_MODEL_ID_EFFORT_PATTERN],
