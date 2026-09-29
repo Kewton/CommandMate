@@ -36,6 +36,7 @@ import { isCliToolType } from '@/lib/cli-tools/types';
 import {
   TOOLS_WITH_MODEL_SUPPORT,
   TOOLS_WITH_RUN_OPTIONS,
+  validateVariantHasModel,
   validateCopilotModelName,
   validateOpencodeRunName,
   validateOpencodeTitle,
@@ -87,7 +88,8 @@ export function escapeTableCell(value: string): string {
  * Build the CLI Tool column value, embedding `--model <name>` when the tool
  * supports it and a model is provided.
  *
- * Issue #2044: also serializes opencode's run options, in the fixed order
+ * Issue #2044: also serializes opencode's run options (and, since #2982,
+ * opencode-v2's — the same flags), in the fixed order
  * `--model --agent --variant --continue --title`. Fixed rather than
  * input-ordered because the row is the file's record of the schedule and two
  * saves of the same schedule must produce the same line — a diff that reorders
@@ -417,6 +419,10 @@ export function validateScheduleInput(input: ScheduleWriteInput): ScheduleValida
         const result = validateOpencodeTitle(input.title.trim());
         if (!result.valid) errors.push(result.reason ?? 'invalid title');
       }
+      // Issue #2982: opencode-v2 sends the variant as `-m model#variant`, so a
+      // variant without a model would be written and then never sent.
+      const variantError = validateVariantHasModel(input.cliToolId, input.model, input.variant);
+      if (variantError) errors.push(variantError);
     }
 
     const permission = (input.permission ?? '').trim();

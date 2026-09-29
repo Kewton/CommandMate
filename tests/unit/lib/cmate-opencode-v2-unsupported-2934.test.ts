@@ -67,10 +67,10 @@ describe('opencode-v2 in CMATE.md (Issue #2934 → #2974)', () => {
     }
   );
 
-  it('does not accept v1\'s run options in the column yet (the row is skipped)', () => {
+  it('accepts run options in the column since Issue #2982', () => {
     const withModel = ['v2-task', '0 9 * * *', 'Do something', 'opencode-v2 --model ollama/qwen3:8b', 'true', ''];
-    expect(validateSchedulesSection([withModel])[0]).toMatchObject({ field: 'cliTool' });
-    expect(parseSchedulesSection([withModel])).toEqual([]);
+    expect(validateSchedulesSection([withModel])).toEqual([]);
+    expect(parseSchedulesSection([withModel])[0]).toMatchObject({ model: 'ollama/qwen3:8b' });
   });
 
   it('offers `default` and `auto` in the dialog / writer vocabulary', () => {

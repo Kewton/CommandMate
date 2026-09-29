@@ -261,8 +261,10 @@ export function buildCliArgs(message: string, cliToolId: string, permission?: st
       // no `--variant`: `opencode2 run --help` documents `-m` as
       // `provider/model#variant` and `--variant` is "Unrecognized flag" (exit
       // 1), so a variant rides on the model. A variant without a model has
-      // nothing to ride on and is not sent. (The CMATE.md column does not carry
-      // these options for opencode-v2 today; this is the direct-call shape.)
+      // nothing to ride on and is not sent. Since Issue #2982 the CMATE.md
+      // column carries these options for opencode-v2 too, and the column parser
+      // and `cmate-writer` refuse a variant without a model before it gets here
+      // (`validateVariantHasModel`); the guard below stays for direct callers.
       //
       // Unlike v1, a message that begins with `-` is read as a flag ("-x reply"
       // printed the usage; "--- list" was "Unrecognized flag"), so the message

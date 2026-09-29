@@ -67,7 +67,7 @@ Create a `## Schedules` section in your `CMATE.md` and define entries using Mark
 | **Name** | Yes | Schedule name. 1-100 characters. Alphanumeric, Japanese, hyphens, and spaces allowed | - |
 | **Cron** | Yes | Cron expression (5-6 fields). Defines execution timing | - |
 | **Message** | Yes | Prompt sent to `claude -p`. Max 10,000 characters | - |
-| **CLI Tool** | No | CLI tool to use (`claude` / `codex` / `gemini` / `vibe-local` / `opencode` / `copilot` / `antigravity` / `command-code` / `opencode-v2`; the authority is `CLI_TOOL_IDS` in `src/lib/cli-tools/types.ts`). **Only copilot and opencode accept `--model <model-name>`** — writing it for another tool is a syntax error and the whole row is skipped | `claude` |
+| **CLI Tool** | No | CLI tool to use (`claude` / `codex` / `gemini` / `vibe-local` / `opencode` / `copilot` / `antigravity` / `command-code` / `opencode-v2`; the authority is `CLI_TOOL_IDS` in `src/lib/cli-tools/types.ts`). **Only copilot, opencode and opencode-v2 accept `--model <model-name>`** — writing it for another tool is a syntax error and the whole row is skipped. opencode and opencode-v2 also accept `--agent` / `--variant` / `--continue` / `--title` (Issue #2044 / #2982; opencode-v2's `--variant` only together with `--model`) | `claude` |
 | **Enabled** | No | Enable/disable the schedule (`true` / `false`) | `true` |
 | **Permission** | No | Execution permission level. See Permission Reference below | Tool-specific default |
 
@@ -162,11 +162,36 @@ message is taken from the NDJSON output and stored in the execution log.
   `AGENTS.md`. OpenCode V2 picks its project from the `PWD` environment variable rather than its working
   directory, so the child is started with `PWD` set to the worktree (Issue #2979; before that it ran in the
   directory the server was started from).
-- Write `opencode-v2` alone in the CLI Tool column. v1's `--model` / `--agent` / `--variant` /
-  `--continue` / `--title` are not accepted for opencode-v2 yet (the row is skipped as a syntax error).
+
+#### opencode-v2 run options (Issue #2982)
+
+The CLI Tool column takes run options with the same spelling as v1.
+
+```
+opencode-v2 [--model <provider/model> [--variant <name>]] [--agent <name>] [--continue] [--title <text>]
+```
+
+| In the column | Argument passed to `opencode2 run` |
+|---|---|
+| `--model <provider/model>` (or `-m`) | `-m <provider/model>` |
+| `--model <provider/model> --variant <name>` | `-m <provider/model>#<name>` |
+| `--agent <name>` | `--agent <name>` |
+| `--continue` (or `-c`) | `-c` |
+| `--title <text>` (wrap in `"…"` if it contains spaces) | `--title <text>` |
+
+- **`--variant` is only accepted together with `--model`.** `opencode2 run` has no `--variant` flag
+  (`Unrecognized flag`, exit 1 on 2.0.18); the variant rides on the model as `-m provider/model#variant`.
+  A `--variant` without a model is not silently dropped: it is a syntax error and the row is skipped
+  (the schedule editor and the API refuse it before saving, too). v1 (`opencode`) still accepts a
+  model-less `--variant`.
+- A `#` cannot be written in the `--model` value itself (invalid model-name character); use `--variant`.
+- Values are validated as for v1 (allowed characters, length). Choosing OpenCode V2 in the schedule editor
+  shows the Model / Agent / Variant / Title / Continue fields.
 
 ```markdown
 | nightly-v2 | 0 2 * * * | Check for dependency updates | opencode-v2 | true | default |
+| review-v2 | 0 3 * * * | Review today's diff | opencode-v2 --model anthropic/claude-sonnet-4-5 --agent plan | true | default |
+| deep-v2 | 0 4 * * * | Look for vulnerable dependencies | opencode-v2 --model anthropic/claude-sonnet-4-5 --variant high --title "nightly deps" | true | auto |
 ```
 
 ### command-code (--yolo / --permission-mode)

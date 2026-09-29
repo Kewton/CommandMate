@@ -159,6 +159,7 @@
     "errorModelInvalid": "Invalid model name.",
     "errorAgentInvalid": "Invalid agent name.",
     "errorVariantInvalid": "Invalid variant name.",
+    "errorVariantNeedsModel": "OpenCode V2 needs a Model to go with the Variant (it is sent as -m <provider/model>#<variant>).",
     "errorTitleInvalid": "Invalid session title."
   },
   "timerTab": "Timer",
