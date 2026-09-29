@@ -28,6 +28,7 @@ import { STATUS_REASON } from './status-reason';
 import { normalizeFrame } from './tools/frame';
 import { getToolStatusDetector } from './tools/registry';
 import type { PromptDetectionResult } from './prompt-detector';
+import { evaluateDialogPresence } from '@/lib/polling/auto-yes-dialog-gate';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import type { StatusEvidence } from '@/lib/session/status-evidence';
 
@@ -227,7 +228,16 @@ export function detectSessionStatus(
   lastOutputTimestamp?: Date
 ): StatusDetectionResult {
   const frame = normalizeFrame(output);
-  const verdict = getToolStatusDetector(cliToolId).detect(frame, { lastOutputTimestamp });
+  const verdict = getToolStatusDetector(cliToolId).detect(frame, {
+    lastOutputTimestamp,
+    // Issue #2991: the same presence reading Auto-Yes and History use, so an
+    // unvouched numbered list is not `waiting` here either (and therefore
+    // neither `isPromptWaiting` nor a send refusal). Consulted only by tools
+    // that set `requireVouchedPrompt`; `legacy` tools and non-`multiple_choice`
+    // prompts come back `present: true` regardless.
+    isPromptVouched: (prompt) =>
+      evaluateDialogPresence(cliToolId, prompt.promptData?.type, output).present,
+  });
   return {
     status: verdict.status,
     confidence: verdict.confidence,
