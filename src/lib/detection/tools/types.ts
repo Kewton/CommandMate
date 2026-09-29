@@ -155,6 +155,19 @@ export interface ToolDetectorSpec {
    * true neutralises the detection and lets the chain continue.
    */
   isStalePrompt?(frame: NormalizedFrame, prompt: PromptDetectionResult): boolean;
+  /**
+   * Whether a step-1 prompt must be vouched for by the tool's own dialog rules
+   * (Issue #2991). When true, a prompt {@link ToolDetectionContext.isPromptVouched}
+   * rejects is neutralised like a stale one.
+   *
+   * Opt-in, not implied by `detectDialog`: only a tool whose every dialog is
+   * recognised BEFORE step 1 can turn it on, because then a step-1 candidate is
+   * never one of its dialogs, only text in a reply. The other gated tools'
+   * dialogs surface through step 1 itself, and their rules are not proven
+   * against every layout that reaches it (#2991 measured the demo-video
+   * cassette and several synthetic dialogs losing `waiting`).
+   */
+  readonly requireVouchedPrompt?: boolean;
   /** Priority 1.5 — runs after prompt detection, before the thinking window. */
   afterPrompt?(frame: NormalizedFrame, prompt: PromptDetectionResult): ToolStatusVerdict | null;
   /** Priority 2.5–2.9 — runs after the shared thinking window. */
@@ -209,6 +222,21 @@ export interface ToolDetectorSpec {
 export interface ToolDetectionContext {
   /** Last time the poller saw the output change, for the staleness heuristic. */
   lastOutputTimestamp?: Date;
+  /**
+   * Whether the tool's own dialog rules vouch for the prompt the generic parser
+   * found on this frame (Issue #2991). `false` sends the chain on past step 1 as
+   * if no prompt were there — for a tool that sets
+   * {@link ToolDetectorSpec.requireVouchedPrompt}; absent means "not judged".
+   *
+   * Supplied by `detectSessionStatus` from `evaluateDialogPresence`, the reading
+   * the Auto-Yes gate and the History save path already use, so a numbered list
+   * in a reply that none of them treat as a dialog is not published as
+   * `waiting` / `prompt_detected` either — which is what closed the send guard
+   * on an OpenCode V2 session whose answer merely quoted `❯ 1. Yes / 2. No`.
+   * A callback rather than an import because the gate lives in `lib/polling`
+   * and reads this module's registry.
+   */
+  isPromptVouched?(prompt: PromptDetectionResult): boolean;
 }
 
 /** The per-tool detector §4 D2 specifies. */

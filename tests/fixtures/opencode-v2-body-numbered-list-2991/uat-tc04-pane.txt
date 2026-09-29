@@ -1,0 +1,12 @@
+  ┃    2. No                                                                  
+  ┃                                                                           
+     Pick one:
+     ❯ 1. Yes
+       2. No
+     Build · GPT-5.6 Luna · 1.2s · 26.9 tok/s
+  ┃                                                                           
+  ┃                                                                           
+  ┃                                                                           
+  ┃  Build · GPT-5.6 Luna GitHub Copilot                                      
+  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+  /…/tmp/probe/repo:master  9.4K (1%) · $0.00  ctrl+p commands
