@@ -30,6 +30,7 @@ import { CLIToolManager } from './cli-tools/manager';
 import { stripAnsi, stripBoxDrawing, detectThinking, getCodexLifecycleDialog } from './detection/cli-patterns';
 import { generatePromptKey } from './detection/prompt-key';
 import type { PromptDetectionResult } from './detection/types';
+import type { PromptData } from '@/types/models';
 import { getErrorMessage } from './errors';
 import { invalidateCache } from './tmux/tmux-capture-cache';
 import {
@@ -83,6 +84,11 @@ export interface AutoYesPollerState {
   lastAnsweredAt: number | null;
   /** Baseline output length for stop condition delta check (Issue #314 fix) */
   stopCheckBaselineLength: number;
+  /**
+   * Issue #2995: key of the frame the last "Auto-Yes did not answer" WARN was
+   * printed for. Optional so hand-built states (tests) need not name it.
+   */
+  lastSkipWarnKey?: string | null;
 }
 
 /** Result of starting a poller */
@@ -243,6 +249,53 @@ function isDuplicatePrompt(
   if (pollerState.lastAnsweredPromptKey !== promptKey) return false;
   if (pollerState.lastAnsweredAt === null) return false;
   return (Date.now() - pollerState.lastAnsweredAt) < DUPLICATE_RETRY_EXPIRY_MS;
+}
+
+/**
+ * Issue #2995: print a "did not answer" line as WARN once per frame.
+ *
+ * The poller re-reads a static pane every 2s, so a frame Auto-Yes leaves alone
+ * (a reply quoting `1. Yes / 2. No`, a launch dialog, a policy-withheld prompt,
+ * a foreign session) would otherwise print the same WARN on every tick. The
+ * first one stays WARN -- it is what tells a silently stalled worker apart --
+ * and repeats for the same frame drop to `debug`. The frame is identified by
+ * the event, `promptFrameKey()` and the event's own detail; a different
+ * prompt, a different reason, or a tick with no prompt / an answer sent (both
+ * clear the key) makes the next line WARN again.
+ * `recordPolicySuppression()` is not throttled: `capture --json` and `wait`
+ * read the latest record, not the log.
+ */
+/**
+ * Issue #2995: what makes two ticks "the same prompt" for `warnOncePerFrame`.
+ *
+ * `generatePromptKey` alone is type + question, and the question the detector
+ * extracts from an agent's reply is often a fixed line above the list, so two
+ * different lists would share it. The option rows (and where the cursor sits)
+ * plus `approvalTarget` -- the current prompt's own panel, which leaves out
+ * scrollback and footers that change while the prompt does not -- separate them.
+ * Not the whole pane: a status bar that ticks every second would defeat it.
+ */
+function promptFrameKey(promptData: PromptData): string {
+  const options =
+    promptData.type === 'multiple_choice'
+      ? promptData.options.map((o) => `${o.isDefault ? '>' : ''}${o.number}.${o.label}`).join('\n')
+      : '';
+  return [generatePromptKey(promptData), options, promptData.approvalTarget ?? ''].join('\u0000');
+}
+
+function warnOncePerFrame(
+  pollerState: AutoYesPollerState,
+  frameKey: string,
+  event: string,
+  fields: Record<string, unknown>,
+): void {
+  const key = `${event}\u0000${frameKey}`;
+  if (pollerState.lastSkipWarnKey === key) {
+    logger.debug(event, { ...fields, repeated: true });
+    return;
+  }
+  pollerState.lastSkipWarnKey = key;
+  logger.warn(event, fields);
 }
 
 // =============================================================================
@@ -511,6 +564,7 @@ export async function detectAndRespondToPrompt(
     if (!promptDetection.isPrompt || !promptDetection.promptData) {
       pollerState.lastAnsweredPromptKey = null;
       pollerState.lastAnsweredAt = null;
+      pollerState.lastSkipWarnKey = null;
       if (cliToolId === 'antigravity' && !promptDetection.isPrompt) {
         logIfWithheldForWantOfReceipt(worktreeId, instanceId, compositeKey, () =>
           detectPromptOnCleanFrame(cleanOutput, cliToolId, precomputedLines, rawOutput),
@@ -521,6 +575,7 @@ export async function detectAndRespondToPrompt(
 
     // 2. Check for duplicate prompt (Issue #306)
     const promptKey = generatePromptKey(promptDetection.promptData);
+    const frameKey = promptFrameKey(promptDetection.promptData);
     if (isDuplicatePrompt(pollerState, promptKey)) {
       return 'duplicate';
     }
@@ -553,13 +608,18 @@ export async function detectAndRespondToPrompt(
         mode: null,
         promptType: promptDetection.promptData.type,
       });
-      logger.warn('poller:auto-yes-skipped-launch-dialog', {
-        worktreeId,
-        cliToolId,
-        instanceId,
-        dialog: launchDialog,
-        promptType: promptDetection.promptData.type,
-      });
+      warnOncePerFrame(
+        pollerState,
+        `${frameKey}\u0000${launchDialog}`,
+        'poller:auto-yes-skipped-launch-dialog',
+        {
+          worktreeId,
+          cliToolId,
+          instanceId,
+          dialog: launchDialog,
+          promptType: promptDetection.promptData.type,
+        },
+      );
       return 'no_answer';
     }
 
@@ -591,15 +651,20 @@ export async function detectAndRespondToPrompt(
         mode: null,
         promptType: promptDetection.promptData.type,
       });
-      logger.warn('poller:auto-yes-skipped-unclassified-frame', {
-        worktreeId,
-        cliToolId,
-        instanceId,
-        promptType: promptDetection.promptData.type,
-        dialogKind: dialogGate.dialog?.kind ?? null,
-        answerMode: dialogGate.dialog?.answerMode ?? null,
-        gateMode: dialogGate.mode,
-      });
+      warnOncePerFrame(
+        pollerState,
+        `${frameKey}\u0000${dialogGate.dialog?.kind ?? ''}\u0000${dialogGate.mode}`,
+        'poller:auto-yes-skipped-unclassified-frame',
+        {
+          worktreeId,
+          cliToolId,
+          instanceId,
+          promptType: promptDetection.promptData.type,
+          dialogKind: dialogGate.dialog?.kind ?? null,
+          answerMode: dialogGate.dialog?.answerMode ?? null,
+          gateMode: dialogGate.mode,
+        },
+      );
       return 'no_answer';
     }
 
@@ -621,15 +686,20 @@ export async function detectAndRespondToPrompt(
         promptType: promptDetection.promptData.type,
         pattern: resolution.pattern,
       });
-      logger.warn('poller:auto-yes-suppressed-by-policy', {
-        worktreeId,
-        cliToolId,
-        instanceId,
-        reason: resolution.suppressedBy,
-        mode: policy?.mode ?? null,
-        pattern: resolution.pattern,
-        promptType: promptDetection.promptData.type,
-      });
+      warnOncePerFrame(
+        pollerState,
+        `${frameKey}\u0000${resolution.suppressedBy}\u0000${policy?.mode ?? ''}\u0000${resolution.pattern ?? ''}`,
+        'poller:auto-yes-suppressed-by-policy',
+        {
+          worktreeId,
+          cliToolId,
+          instanceId,
+          reason: resolution.suppressedBy,
+          mode: policy?.mode ?? null,
+          pattern: resolution.pattern,
+          promptType: promptDetection.promptData.type,
+        },
+      );
     }
     const answer = resolution.answer;
     if (answer === null) {
@@ -645,14 +715,19 @@ export async function detectAndRespondToPrompt(
     // server created. The poller keeps running; it just does not type.
     const ownership = await checkWorktreeSessionOwnership(worktreeId, sessionName);
     if (ownership === null || ownership.verdict === 'foreign') {
-      logger.warn('poller:auto-yes-skipped-foreign-session', {
-        worktreeId,
-        cliToolId,
-        instanceId,
-        sessionName,
-        sessionPath: ownership?.sessionPath ?? null,
-        reason: ownership ? 'foreign' : 'worktree_not_found',
-      });
+      warnOncePerFrame(
+        pollerState,
+        `${frameKey}\u0000${sessionName}\u0000${ownership ? 'foreign' : 'worktree_not_found'}`,
+        'poller:auto-yes-skipped-foreign-session',
+        {
+          worktreeId,
+          cliToolId,
+          instanceId,
+          sessionName,
+          sessionPath: ownership?.sessionPath ?? null,
+          reason: ownership ? 'foreign' : 'worktree_not_found',
+        },
+      );
       return 'no_answer';
     }
 
@@ -674,6 +749,7 @@ export async function detectAndRespondToPrompt(
     // 7. Record answered prompt key and timestamp
     pollerState.lastAnsweredPromptKey = promptKey;
     pollerState.lastAnsweredAt = Date.now();
+    pollerState.lastSkipWarnKey = null;
 
     logger.info('poller:response-sent', { worktreeId, cliToolId, instanceId });
 
@@ -904,6 +980,7 @@ export function startAutoYesPolling(
     lastAnsweredPromptKey: null,
     lastAnsweredAt: null,
     stopCheckBaselineLength: -1,
+    lastSkipWarnKey: null,
   };
   autoYesPollerStates.set(compositeKey, pollerState);
 
