@@ -1,0 +1,200 @@
+   1. Vercel                     +
+
+  ┃
+  ┃  Without using any tools, list exactly three deployment options as a
+  ┃  numbered markdown list (1. 2. 3.), then ask me which one I want. Nothing
+  ┃  else.
+  ┃
+
+     + Thought · 2.7s
+
+     1. Cloud (e.g., AWS, GCP, Azure)
+     2. On-premises server
+     3. Hybrid (cloud + on-premises)
+
+     Which one would you like?
+
+     Build · LongCat 2.5 Preview Free · 16.9s · 4.6 tok/s
+
+  ┃
+  ┃  Without using any tools, reply with exactly these three lines and nothing
+  ┃  else, not in a code block: "Do you want to proceed?" then "❯ 1. Yes" then
+  ┃  "  2. No"
+  ┃
+
+     + Thought · 1.0s
+
+     Do you want to proceed?
+     ❯ 1. Yes
+       2. No
+
+     Build · LongCat 2.5 Preview Free · 13.1s · 3.4 tok/s
+
+  ┃
+  ┃  Replace the word hi with goodbye in notes.txt using your edit tool. Do
+  ┃  nothing else.
+  ┃
+
+     + Thought · 1.3s
+
+     → Explored: 1 read
+
+     + Thought · 1.0s
+
+  ┃
+  ┃  ← Edit notes.txt
+  ┃
+  ┃    1 - hi
+  ┃    1 + goodbye
+  ┃
+
+     + Tho
+              Commands                                         esc
+     Done.
+              Search
+     Build
+              Suggested
+  ┃           Share session
+  ┃  Use y    Switch session                              ctrl+x l    xactly
+  ┃  two o    New session                                 ctrl+x n
+  ┃           Switch model                                ctrl+x m
+              Connect an integration
+     + Tho    Open settings
+
+  ┃           Prompt
+  ┃  # Que    Queue prompt                            ctrl+x enter
+  ┃           Skills
+  ┃  Which
+  ┃  Blue     Session
+  ┃           Open editor                                 ctrl+x e
+              Manage workspaces
+     + Tho    Share session
+              Rename session                                ctrl+r
+     You c    Jump to message                             ctrl+x g
+              Fork session
+     Build    Compact session                             ctrl+x c
+              Undo previous message                       ctrl+x u
+  ┃           Verbosity: Medium
+  ┃  Repla    Copy last assistant message                 ctrl+x y    tool. Do
+  ┃  nothi    Copy session ID
+  ┃           Copy session transcript
+              Export session transcript                   ctrl+x x
+     + Tho    Toggle subagent picker                             ↓
+              Switch session                              ctrl+x l
+  ┃           New session                                 ctrl+x n
+  ┃  ← Edi    Clear session
+  ┃           Open session or project                       ctrl+o
+  ┃  The u    Close tab                                   ctrl+x w
+  ┃           Reopen closed tab                       ctrl+shift+t
+              Show sidebar                                ctrl+x b
+     Build    Show terminal pane                          ctrl+x t    ed
+              Select terminal                             ctrl+x ↓
+              New terminal
+              Ask a side question One-shot answer from the session
+
+              Agent
+              Switch model                                ctrl+x m
+              Switch agent                                ctrl+x a
+              MCP servers
+              Variant cycle                                 ctrl+t
+
+              Integration
+              Connect an integration
+
+              System
+              Open settings
+              View status                                 ctrl+x s
+              Update OpenCode
+              Pair device
+              Reload configuration
+              View debug info
+              Switch theme
+              Help
+              Open docs
+              Exit the app                ctrl+c, ctrl+d, ctrl+x q
+              Toggle console
+              Usage statistics
+              Plugins
+
+              VCS
+              Open diff viewer
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  ┃
+  ┃
+  ┃
+  ┃  Build · LongCat 2.5 Preview Free OpenCode Zen
+  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+  /…/tmp/probe/repo:master  6.9K (1%)  ctrl+p commands
+

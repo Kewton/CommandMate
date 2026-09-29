@@ -74,14 +74,13 @@ describe('[#2457] the presence gate judges exactly the tools the table says', ()
     '  3. neither, keep it local',
   ].join('\n');
 
-  const ENFORCED: CLIToolType[] = ['claude', 'codex', 'copilot', 'opencode'];
+  // Issue #2984: OpenCode V2's dialogs were measured on 2.0.18 and enforced.
+  const ENFORCED: CLIToolType[] = ['claude', 'codex', 'copilot', 'opencode', 'opencode-v2'];
   const LEGACY: CLIToolType[] = [
     'gemini',
     'antigravity',
     'vibe-local',
     'command-code',
-    // Issue #2934: no dialog rule in OpenCode V2 Phase 1.
-    'opencode-v2',
   ];
 
   it('covers every CLI tool exactly once', () => {
