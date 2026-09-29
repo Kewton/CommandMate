@@ -100,6 +100,7 @@ describe('the public count of agents stays at eight (Issue #2976, option A)', ()
 
   it.each([
     ['README.md', 'OpenCode (1.x and V2)'],
+    ['docs/ja/README.md', 'OpenCode（1.x と V2）'],
     ['website/index.html', 'OpenCode (1.x and V2)'],
     ['docs/design/public-messaging.md', 'OpenCode (1.x and V2)'],
     ['docs/design/public-messaging.md', 'OpenCode（1.x と V2）'],
@@ -127,6 +128,7 @@ describe('the OpenCode V2 user guides (Issue #2976)', () => {
 
   it('is linked from README and from the CLI setup guides', () => {
     expect(read('README.md')).toContain('(./docs/en/user-guide/opencode-v2.md)');
+    expect(read('docs/ja/README.md')).toContain('(../user-guide/opencode-v2.md)');
     expect(read('docs/user-guide/cli-setup-guide.md')).toContain('(./opencode-v2.md)');
     expect(read('docs/en/user-guide/cli-setup-guide.md')).toContain('(./opencode-v2.md)');
   });
