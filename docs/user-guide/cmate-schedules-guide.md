@@ -157,6 +157,9 @@ NDJSON の出力から最後のメッセージの本文を取り出して実行�
 - `--standalone` は常に付けます。付けないと `opencode2 run` は利用者のバックグラウンドサービス
   （`opencode serve --service`）に接続し、無ければ起動して残します。`--standalone` なら実行ごとに専用の
   サーバーを立て、終了後にプロセスは残りません。
+- 実行はスケジュールを置いた worktree で行われ、その worktree の `opencode.json`・`AGENTS.md` が読まれます。
+  OpenCode V2 は作業ディレクトリではなく環境変数 `PWD` からプロジェクトを決めるため、子プロセスの `PWD` を
+  worktree に合わせて起動します（Issue #2979。それ以前はサーバーを起動したディレクトリで動いていました）。
 - CLI Tool 列には `opencode-v2` 単独で書きます。v1 の `--model` / `--agent` / `--variant` / `--continue` /
   `--title` は、opencode-v2 ではまだ書けません（書くと構文エラーで行がスキップされます）。
 
