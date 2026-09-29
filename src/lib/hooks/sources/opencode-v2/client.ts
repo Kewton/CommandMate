@@ -478,3 +478,71 @@ export async function replyOpencodeV2Form(
   );
   return response !== null && response.status >= 200 && response.status < 300;
 }
+
+// =============================================================================
+// Session usage (Issue #2981)
+// =============================================================================
+
+/** Messages asked for when only the newest assistant message is wanted (Issue #2981). */
+export const OPENCODE_V2_CONTEXT_MESSAGE_WINDOW = 20;
+
+/**
+ * `GET /api/session/{id}` — the session's `Session.Info`, cumulative `cost` and
+ * `tokens` included. Measured on 2.0.18: `{data: {...}}`.
+ *
+ * @returns The `data` object, or null when the server did not answer it
+ */
+export async function fetchOpencodeV2Session(
+  port: number,
+  password: string,
+  sessionId: string
+): Promise<Record<string, unknown> | null> {
+  const response = await requestOpencodeV2(
+    port,
+    password,
+    'GET',
+    `/api/session/${encodeURIComponent(sessionId)}`
+  );
+  if (response === null || response.status !== 200) return null;
+  return isPlainObject(response.body) && isPlainObject(response.body.data)
+    ? response.body.data
+    : null;
+}
+
+/**
+ * The newest {@link OPENCODE_V2_CONTEXT_MESSAGE_WINDOW} entries of
+ * `GET /api/session/{id}/message`, newest first.
+ *
+ * @returns The entries, or null when the server did not answer the list
+ */
+export async function fetchOpencodeV2RecentMessages(
+  port: number,
+  password: string,
+  sessionId: string
+): Promise<unknown[] | null> {
+  const query = new URLSearchParams({
+    limit: String(OPENCODE_V2_CONTEXT_MESSAGE_WINDOW),
+    order: 'desc',
+  });
+  return listData(
+    await requestOpencodeV2(
+      port,
+      password,
+      'GET',
+      `/api/session/${encodeURIComponent(sessionId)}/message?${query}`
+    )
+  );
+}
+
+/**
+ * `GET /api/model` — the models the server offers, each with
+ * `limit: { context, output, input? }` (2.0.18).
+ *
+ * @returns The entries, or null when the server did not answer the list
+ */
+export async function fetchOpencodeV2Models(
+  port: number,
+  password: string
+): Promise<unknown[] | null> {
+  return listData(await requestOpencodeV2(port, password, 'GET', '/api/model'));
+}

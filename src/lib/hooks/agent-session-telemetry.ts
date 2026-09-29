@@ -60,6 +60,17 @@
  * its own — see {@link AgentSessionContextUsage} and
  * `docs/design/opencode-server-live-verification.md` §14.
  *
+ * ## OpenCode V2 (Issue #2981)
+ *
+ * `opencode-v2` fills both records too, with the same meanings — measured on
+ * 2.0.18 (`tests/fixtures/opencode-v2-usage-2981`): `GET /api/session/{id}`
+ * carries the session's cumulative `cost` / `tokens` (the running total
+ * `session.usage.updated` announces), while the TUI's `6.3K (1%)` is the last
+ * assistant message's footprint. The writer is
+ * `./sources/opencode-v2/usage`, which asks its own server with its own port
+ * and password; {@link ensureAgentSessionContextUsage} leaves those instances
+ * alone.
+ *
  * @module lib/hooks/agent-session-telemetry
  */
 
@@ -263,7 +274,29 @@ export function readOpencodeSessionFrame(
 ): AgentSessionRecord | null {
   const properties = isPlainObject(frame.properties) ? frame.properties : null;
   if (!properties) return null;
-  const info = isPlainObject(properties.info) ? properties.info : null;
+  return readOpencodeSessionInfo(properties.info, at);
+}
+
+/**
+ * Read one `Session` object, or answer null (Issue #2981).
+ *
+ * Split out of {@link readOpencodeSessionFrame} because OpenCode V2 serves the
+ * same fields — `Session.Info` in 2.0.18's `GET /openapi.json` declares `id`,
+ * `parentID`, `title`, `agent`, `model: { id, providerID, variant? }`, `cost`
+ * and `tokens: { input, output, reasoning, cache: { read, write } }` — from
+ * `GET /api/session/{id}` instead of on a frame. One reader keeps the two
+ * versions from disagreeing about what "verbatim" means, and the sub-agent
+ * refusal above applies to both.
+ *
+ * @param value - The `Session` object, unvalidated
+ * @param at - Epoch ms it was received
+ * @returns The record to store, or null when this is not one to store
+ */
+export function readOpencodeSessionInfo(
+  value: unknown,
+  at: number
+): AgentSessionRecord | null {
+  const info = isPlainObject(value) ? value : null;
   if (!info) return null;
   if (typeof info.parentID === 'string' && info.parentID.length > 0) return null;
 
@@ -409,6 +442,10 @@ export function ensureAgentSessionContextUsage(
   // cached value is left in place rather than cleared — the subscription's
   // close is what retires it, the same lifetime the record itself has.
   if (!record || !record.id) return cached;
+  // Issue #2981: OpenCode V2 measures its own context in the same refresh that
+  // writes the record (`./sources/opencode-v2/usage`), with its own port and
+  // password. The v1 fetch below would dial v1's port map for a v2 instance.
+  if (target.cliToolId === 'opencode-v2') return cached;
   if (cached && cached.sessionAt === record.at) return cached;
   if (contextRefreshes.has(key)) return cached;
   contextRefreshes.add(key);

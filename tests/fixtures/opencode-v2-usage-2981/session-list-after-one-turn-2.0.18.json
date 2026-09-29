@@ -1,0 +1,39 @@
+{
+  "data": [
+    {
+      "id": "ses_f1404be91ffex4cCxEyfrRm6bs",
+      "projectID": "e55b993abb41e0711676eb5c16762d28148e138f",
+      "agent": "build",
+      "model": {
+        "id": "longcat-2.5-preview-free",
+        "providerID": "opencode",
+        "variant": "default"
+      },
+      "cost": 0,
+      "tokens": {
+        "input": 2857,
+        "output": 12,
+        "reasoning": 64,
+        "cache": {
+          "read": 3840,
+          "write": 0
+        }
+      },
+      "outcome": "succeeded",
+      "time": {
+        "created": 1790665507225,
+        "updated": 1790665510363,
+        "idle": 1790665510729,
+        "viewed": 1790665510729
+      },
+      "title": "ALPHA one",
+      "location": {
+        "directory": "/…/tmp/probe/repo"
+      }
+    }
+  ],
+  "cursor": {
+    "previous": "eyJhbmNob3IiOnsiaWQiOiJzZXNfZjE0MDRiZTkxZmZleDRjQ3hFeWZyUm02YnMiLCJ0aW1lIjoxNzkwNjY1NTEwMzYzLCJkaXJlY3Rpb24iOiJwcmV2aW91cyJ9fQ",
+    "next": "eyJhbmNob3IiOnsiaWQiOiJzZXNfZjE0MDRiZTkxZmZleDRjQ3hFeWZyUm02YnMiLCJ0aW1lIjoxNzkwNjY1NTEwMzYzLCJkaXJlY3Rpb24iOiJuZXh0In19"
+  }
+}

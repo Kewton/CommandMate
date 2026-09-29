@@ -251,10 +251,12 @@ export interface StructuredEventsPayload extends PublishedTurn {
    * which persona, which model, what it has cost and how many tokens it has
    * spent. Read off opencode's `session.updated` frames, which were already
    * arriving and mapped to none of the seven event words — so this costs no
-   * request and no poll.
+   * request and no poll. OpenCode V2 (`opencode-v2`, Issue #2981) fills the
+   * same record from `GET /api/session/{id}` whenever `session.usage.updated`
+   * or the end of a turn arrives.
    *
    * **Sent on every payload this build produces, null when nothing knows** —
-   * which is every tool but opencode, every opencode pane whose stream has not
+   * which is every tool but opencode / opencode-v2, every such pane whose stream has not
    * reported a session yet, and every pane that has been killed since it did.
    * See {@link AgentSessionRecord} for the field-by-field contract and for why
    * the values are verbatim.
@@ -287,7 +289,8 @@ export interface StructuredEventsPayload extends PublishedTurn {
    * **Always present, null while nothing has been measured.** The measurement
    * is refreshed off the hot path — the poll that notices the session moved
    * publishes the previous turn's numbers (or null on the first one) and the
-   * next poll publishes the new ones. Null forever for every tool but opencode.
+   * next poll publishes the new ones. OpenCode V2 measures it in the refresh
+   * that writes {@link session} (Issue #2981). Null forever for every other tool.
    *
    * Optional on the type for the reason `pendingDecisions` below is.
    */
