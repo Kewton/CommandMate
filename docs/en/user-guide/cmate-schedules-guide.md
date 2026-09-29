@@ -67,7 +67,7 @@ Create a `## Schedules` section in your `CMATE.md` and define entries using Mark
 | **Name** | Yes | Schedule name. 1-100 characters. Alphanumeric, Japanese, hyphens, and spaces allowed | - |
 | **Cron** | Yes | Cron expression (5-6 fields). Defines execution timing | - |
 | **Message** | Yes | Prompt sent to `claude -p`. Max 10,000 characters | - |
-| **CLI Tool** | No | CLI tool to use (`claude` / `codex` / `gemini` / `vibe-local` / `opencode` / `copilot` / `antigravity` / `command-code`; the authority is `CLI_TOOL_IDS` in `src/lib/cli-tools/types.ts`). **Only copilot and opencode accept `--model <model-name>`** — writing it for another tool is a syntax error and the whole row is skipped | `claude` |
+| **CLI Tool** | No | CLI tool to use (`claude` / `codex` / `gemini` / `vibe-local` / `opencode` / `copilot` / `antigravity` / `command-code` / `opencode-v2`; the authority is `CLI_TOOL_IDS` in `src/lib/cli-tools/types.ts`). **Only copilot and opencode accept `--model <model-name>`** — writing it for another tool is a syntax error and the whole row is skipped | `claude` |
 | **Enabled** | No | Enable/disable the schedule (`true` / `false`) | `true` |
 | **Permission** | No | Execution permission level. See Permission Reference below | Tool-specific default |
 
@@ -138,11 +138,32 @@ Model names may contain alphanumeric characters, hyphens, dots, slashes and colo
 
 > **Warning:** note that this is the only permitted value, and scheduled execution is an unattended batch.
 
-### opencode-v2 (not schedulable yet)
+### opencode-v2 (--auto)
 
-`opencode-v2` (OpenCode V2, executable `opencode2`) can run as a worktree agent, but **cannot be the
-CLI Tool of a schedule yet** (Issue #2934; the headless `opencode2 run` path is Epic #2370 Phase 4).
-Writing it in CMATE.md is a validation error, and the row is not run.
+`opencode-v2` (OpenCode V2, executable `opencode2`, or an `opencode` whose `--version` reports v2) runs as
+`opencode2 run --standalone --format json [--auto] -- <message>` (Issue #2974). The body of the last
+message is taken from the NDJSON output and stored in the execution log.
+
+| Value | Description |
+|-------|-------------|
+| `default` | No flag (**default**). A request that hits an `ask` rule in OpenCode's `permission` config is rejected automatically, and the run is **recorded as failed (exit 1)** |
+| `auto` | Passes `--auto`: permission requests that are not explicitly `deny`-ed (including `ask`) are approved automatically |
+
+- Measured on OpenCode V2 2.0.18: with no `permission` config, writes go through without a prompt. With an
+  `ask` rule, stderr says `permission requested: edit (…); auto-rejecting` and the process exits 1; the
+  execution log carries a Reason line saying that `auto` approves it unattended. The run never "succeeds"
+  having changed nothing.
+- **`deny` is not a sandbox**: with `edit: deny` / `write: deny` the model was still able to write a file
+  through the `shell` tool. Keep that in mind especially when combining it with `auto`.
+- `--standalone` is always passed. Without it `opencode2 run` connects to the operator's background service
+  (`opencode serve --service`), starting one and leaving it behind when there is none. With `--standalone`
+  each run starts a private server, and no process is left after it ends.
+- Write `opencode-v2` alone in the CLI Tool column. v1's `--model` / `--agent` / `--variant` /
+  `--continue` / `--title` are not accepted for opencode-v2 yet (the row is skipped as a syntax error).
+
+```markdown
+| nightly-v2 | 0 2 * * * | Check for dependency updates | opencode-v2 | true | default |
+```
 
 ### command-code (--yolo / --permission-mode)
 

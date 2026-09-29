@@ -2,6 +2,7 @@
  * Tests for claude-executor.ts
  * Issue #294: Claude CLI executor for scheduled executions
  * Issue #719: Add execFile error handling tests (maxBuffer, ETIMEDOUT, signal, exit code)
+ * Issue #2974: OpenCode V2 (`opencode2 run --standalone --format json`) against measured fixtures
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -12,6 +13,15 @@ vi.mock('child_process', () => ({
   execFile: vi.fn(),
 }));
 
+// Issue #2974: the executor resolves OpenCode V2's binary before running it.
+const { mockResolveOpencodeV2 } = vi.hoisted(() => ({ mockResolveOpencodeV2: vi.fn() }));
+vi.mock('@/lib/cli-tools/opencode-executable', () => ({
+  OPENCODE_V2_BINARY_NAME: 'opencode2',
+  resolveOpencodeV2Executable: mockResolveOpencodeV2,
+}));
+
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import { execFile } from 'child_process';
 import {
   truncateOutput,
@@ -23,6 +33,8 @@ import {
   MAX_MESSAGE_LENGTH,
   ALLOWED_CLI_TOOLS,
   getActiveProcesses,
+  getCommandForTool,
+  findOpencodeTrailingError,
 } from '../../../src/lib/session/claude-executor';
 import { SENSITIVE_ENV_KEYS } from '../../../src/lib/security/env-sanitizer';
 
@@ -379,6 +391,157 @@ describe('claude-executor', () => {
       expect(result.exitCode).toBeNull();
       expect(result.output).toContain('Code: unknown');
       expect(result.output).toContain('Signal: none');
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Issue #2974: OpenCode V2 schedules, against stdout measured on 2.0.18
+  // (tests/fixtures/opencode-v2-schedule-2974/README.md)
+  // ---------------------------------------------------------------------------
+  describe('opencode-v2 (Issue #2974)', () => {
+    const FIXTURES = join(__dirname, '../../fixtures/opencode-v2-schedule-2974');
+    const fixture = (name: string): string => readFileSync(join(FIXTURES, name), 'utf-8');
+    const V2_PATH = '/opt/homebrew/bin/opencode2';
+
+    beforeEach(() => {
+      mockResolveOpencodeV2.mockReset();
+      mockResolveOpencodeV2.mockResolvedValue({
+        executable: { path: V2_PATH, version: '2.0.18', generation: 'v2' },
+        probed: [],
+      });
+    });
+
+    function exitError(code: number): Error & { code: number } {
+      return Object.assign(new Error(`Command failed: ${V2_PATH} run`), { code });
+    }
+
+    describe('buildCliArgs', () => {
+      it('builds the measured line: --standalone, --format json, message after --', () => {
+        expect(buildCliArgs('hello', 'opencode-v2', 'default')).toEqual([
+          'run', '--standalone', '--format', 'json', '--', 'hello',
+        ]);
+      });
+
+      it('passes --auto only for the `auto` Permission', () => {
+        expect(buildCliArgs('hello', 'opencode-v2', 'auto')).toEqual([
+          'run', '--standalone', '--format', 'json', '--auto', '--', 'hello',
+        ]);
+        for (const permission of [undefined, '', 'default', 'acceptEdits', 'yolo']) {
+          expect(buildCliArgs('hello', 'opencode-v2', permission), String(permission)).not.toContain('--auto');
+        }
+      });
+
+      it('keeps a message that starts with "-" behind --', () => {
+        const args = buildCliArgs('--- list', 'opencode-v2', 'default');
+        expect(args.slice(-2)).toEqual(['--', '--- list']);
+      });
+
+      it('rides the variant on -m (there is no --variant) and keeps -c / --agent / --title', () => {
+        const args = buildCliArgs('hello', 'opencode-v2', 'default', {
+          model: 'ollama/qwen3:8b',
+          variant: 'high',
+          agent: 'plan',
+          continueSession: true,
+          title: 'nightly',
+        });
+        expect(args).toEqual([
+          'run', '--standalone', '--format', 'json',
+          '-m', 'ollama/qwen3:8b#high', '--agent', 'plan', '-c', '--title', 'nightly',
+          '--', 'hello',
+        ]);
+        expect(args).not.toContain('--variant');
+        expect(buildCliArgs('hello', 'opencode-v2', 'default', { variant: 'high' })).not.toContain('high');
+      });
+
+      it('leaves v1 opencode unchanged (no --standalone, no --)', () => {
+        expect(buildCliArgs('hello', 'opencode')).toEqual(['run', '--format', 'json', 'hello']);
+      });
+    });
+
+    it('names opencode2 as the command', () => {
+      expect(getCommandForTool('opencode-v2')).toBe('opencode2');
+    });
+
+    it('runs the resolved binary and records the answer of a measured run', async () => {
+      setupExecFileMock(null, fixture('run-text.ndjson'), '');
+
+      const result = await executeClaudeCommand('Reply with exactly the word PONG.', '/tmp', 'opencode-v2', 'default');
+
+      expect(mockedExecFile).toHaveBeenCalledWith(
+        V2_PATH,
+        ['run', '--standalone', '--format', 'json', '--', 'Reply with exactly the word PONG.'],
+        expect.objectContaining({ cwd: '/tmp' }),
+        expect.any(Function)
+      );
+      expect(result).toMatchObject({ status: 'completed', exitCode: 0, output: 'PONG' });
+    });
+
+    it('records the final message of a measured run that called tools', async () => {
+      setupExecFileMock(null, fixture('run-tool-use.ndjson'), '');
+
+      const result = await executeClaudeCommand('Reply with exactly PONG2', '/tmp', 'opencode-v2', 'default');
+
+      expect(result).toMatchObject({ status: 'completed', output: 'PONG2' });
+    });
+
+    it('records an auto-rejected `ask` as failed, naming the fix', async () => {
+      setupExecFileMock(exitError(1), fixture('run-ask-rejected.ndjson'), fixture('run-ask-rejected.stderr.txt'));
+
+      const result = await executeClaudeCommand('Create a file', '/tmp', 'opencode-v2', 'default');
+
+      expect(result.status).toBe('failed');
+      expect(result.exitCode).toBe(1);
+      expect(result.output).toContain('Reason: opencode-v2 auto-rejected a permission request');
+      expect(result.output).toContain('`auto`');
+      // The decoded error frame, not the event dump.
+      expect(result.output).toContain('opencode error: aborted: Step interrupted');
+      expect(result.output).not.toContain('"type":"step_start"');
+      expect(result.output).toContain('permission requested: edit (created.txt); auto-rejecting');
+    });
+
+    it('renders v2\'s error frame shape for other measured failures', async () => {
+      setupExecFileMock(exitError(1), fixture('run-agent-not-found.ndjson'), '');
+
+      const result = await executeClaudeCommand('Reply PONG', '/tmp', 'opencode-v2', 'default');
+
+      expect(result.status).toBe('failed');
+      expect(result.output).toContain('Reason: opencode error: unknown: Agent not found: "nosuchagent"');
+      expect(findOpencodeTrailingError(fixture('run-model-unavailable.ndjson'))).toBe(
+        'opencode error: provider.no-route: Model unavailable: ollama/nonexistent-model'
+      );
+    });
+
+    it('does not record exit 0 as completed when the stream ends in an error frame', async () => {
+      setupExecFileMock(null, fixture('run-ask-rejected.ndjson'), '');
+
+      const result = await executeClaudeCommand('Create a file', '/tmp', 'opencode-v2', 'default');
+
+      expect(result.status).toBe('failed');
+      expect(result.error).toBe('opencode error: aborted: Step interrupted');
+    });
+
+    it('only a trailing error frame counts: an answered stream is not an error', () => {
+      expect(findOpencodeTrailingError(fixture('run-text.ndjson'))).toBeNull();
+      expect(findOpencodeTrailingError(fixture('run-tool-use.ndjson'))).toBeNull();
+    });
+
+    it('fails without running anything when no OpenCode V2 binary is found', async () => {
+      mockResolveOpencodeV2.mockResolvedValue({ executable: null, probed: [] });
+
+      const result = await executeClaudeCommand('hello', '/tmp', 'opencode-v2', 'default');
+
+      expect(result.status).toBe('failed');
+      expect(result.error).toContain('OpenCode V2 not found');
+      expect(mockedExecFile).not.toHaveBeenCalled();
+    });
+
+    it('does not resolve a binary for other tools', async () => {
+      setupExecFileMock(null, fixture('run-text.ndjson'), '');
+
+      await executeClaudeCommand('hello', '/tmp', 'opencode');
+
+      expect(mockResolveOpencodeV2).not.toHaveBeenCalled();
+      expect(mockedExecFile.mock.calls[0][0]).toBe('opencode');
     });
   });
 });
