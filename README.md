@@ -118,7 +118,7 @@ Works on desktop and mobile — monitor and steer sessions from any browser, inc
 | **cmate-orchestrate Skill** | Plans several issues at once and hands each one out with its own contract: `plan` → `dispatch` → `merge` → `uat` | Nothing mutates without `--approve`, and a failed gate stops the run |
 | **Delegation between sessions** | `commandmate ask` puts a question to another session and brings the answer back; `ask --async` with `commandmate relays` when you would rather not wait, `commandmate peers` to see who is reachable, and the `cmate-delegate` Skill for the pattern | One session can hand work to another, and it works across agent CLIs |
 | **Git Worktree Sessions** | One session per worktree, parallel execution | Multiple issues progress simultaneously without interference |
-| **Multi-Agent Support** | Choose Claude Code, Codex, Gemini CLI, Copilot, OpenCode, Antigravity, Command Code or local models per worktree | Pick the right agent for each task |
+| **Multi-Agent Support** | Choose Claude Code, Codex, Gemini CLI, Copilot, OpenCode (1.x and V2), Antigravity, Command Code or local models per worktree | Pick the right agent for each task |
 | **Auto Yes Mode** | Agent runs without stopping for confirmations | Optional unattended mode for trusted workflows — review the Security section before enabling |
 
 ### Verified, not vibe-checked
@@ -159,7 +159,7 @@ Works on desktop and mobile — monitor and steer sessions from any browser, inc
 All eight are first-class. Each one gets the same treatment inside CommandMate — its own launch path, its own hook source and its own status detection — so the worktree session, the task contract, the verification gates and the evidence trail behave the same way whichever agent you pick.
 
 - **Claude Code**, **Codex**, **Gemini CLI**, **Copilot**, **Antigravity** — choose per worktree, per task.
-- **OpenCode** — the open-source terminal agent, driven through the same contract-and-gate path as the rest.
+- **OpenCode (1.x and V2)** — the open-source terminal agent, driven through the same contract-and-gate path as the rest. OpenCode V2 (`opencode2`) is counted with 1.x as one agent and can run next to it; see the [OpenCode V2 guide](./docs/en/user-guide/opencode-v2.md).
 - **Command Code** — driven the same way, its hooks and its transcript included.
 - **Local models** (`vibe-local`) — the same worktree session, contract and gates, against a model you host yourself.
 
@@ -594,7 +594,7 @@ The comparison that matters is not against other products; it is against the way
 | Evidence | A chat transcript | Commits, gate logs, `verify history`, `report metrics` |
 | Parallel work | Terminal tabs | One worktree and one contract per task |
 | When it stops | You notice, eventually | Waiting is surfaced: badge, toast, tab title, push |
-| Which agent | Locked to one | Claude Code, Codex, Gemini CLI, Copilot, OpenCode, Antigravity, Command Code, local models |
+| Which agent | Locked to one | Claude Code, Codex, Gemini CLI, Copilot, OpenCode (1.x and V2), Antigravity, Command Code, local models |
 
 </details>
 

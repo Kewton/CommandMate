@@ -155,6 +155,11 @@ message is taken from the NDJSON output and stored in the execution log.
   having changed nothing.
 - **`deny` is not a sandbox**: with `edit: deny` / `write: deny` the model was still able to write a file
   through the `shell` tool. Keep that in mind especially when combining it with `auto`.
+- **An operation answered with "Always allow" on screen is allowed in the schedules of every worktree of the
+  same repository.** OpenCode treats the worktrees of one repository as one project and saves "Always allow"
+  there. So even with the default Permission (`default`), an operation always-allowed in any worktree is not stopped
+  by `ask` (measured: an "Always allow" for `edit *` left in this repository's project let the edit `ask` through,
+  while a bash `ask` with no saved allowance was recorded as failed; the UAT of Issue #2979).
 - `--standalone` is always passed. Without it `opencode2 run` connects to the operator's background service
   (`opencode serve --service`), starting one and leaving it behind when there is none. With `--standalone`
   each run starts a private server, and no process is left after it ends.

@@ -56,6 +56,12 @@ const PAIRS: ReadonlyArray<{ name: string; ja: string; en: string }> = [
     ja: 'docs/user-guide/webapp-guide.md',
     en: 'docs/en/user-guide/webapp-guide.md',
   },
+  {
+    // Issue #2976: the OpenCode V2 guide is new in both languages.
+    name: 'opencode-v2',
+    ja: 'docs/user-guide/opencode-v2.md',
+    en: 'docs/en/user-guide/opencode-v2.md',
+  },
 ];
 
 /** Placeholders a translation must never ship with. */

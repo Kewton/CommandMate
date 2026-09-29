@@ -370,6 +370,7 @@ Claude の詳細な出力をMarkdown形式で閲覧できます。
 | **Gemini** | Google Gemini CLI |
 | **Vibe-Local** | Ollama ローカルLLM |
 | **OpenCode** | OpenCode CLI |
+| **OpenCode V2** | OpenCode 2.0（`opencode2`、[OpenCode V2 ガイド](./opencode-v2.md)） |
 | **Copilot** | GitHub Copilot CLI |
 | **Antigravity** | Antigravity CLI（`agy`） |
 | **Command Code** | Command Code CLI（`commandcode`、Issue #2250） |

@@ -92,6 +92,8 @@ The Antigravity CLI (`agy`) is not published on npm. See the
 
 #### OpenCode (1.x) and OpenCode V2 side by side
 
+What OpenCode V2 can do, how it differs from 1.x and what it cannot do yet are in the [OpenCode V2 guide](./opencode-v2.md).
+
 OpenCode V2 (the `OpenCode V2` agent) is installed with `npm install -g @opencode/cli`. That package
 registers **two** executables, `opencode2` **and `opencode`**. So installing V2 puts a second `opencode`
 on `PATH` next to OpenCode 1.x's (`opencode-ai`, or the `~/.opencode/bin` installer), and which one runs
