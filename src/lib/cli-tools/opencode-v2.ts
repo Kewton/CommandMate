@@ -53,7 +53,11 @@ import {
   exactTarget,
   getSessionWorkingDirectory,
 } from '../tmux/tmux';
-import { isOpencodeV2ComposerVisible, stripAnsi } from '../detection/cli-patterns';
+import {
+  findOpencodeV2DialogTitle,
+  isOpencodeV2ComposerVisible,
+  stripAnsi,
+} from '../detection/cli-patterns';
 import { sendMessageWithSubmitVerification } from './submit-verified-sender';
 import { invalidateCache } from '../tmux/tmux-capture-cache';
 import { OPENCODE_PANE_HEIGHT, resolveOpencodePaneWidth } from '@/config/tmux-pane-config';
@@ -322,16 +326,32 @@ export class OpenCodeV2Tool extends BaseCLITool {
   /**
    * Wait for the composer before typing into it (D6).
    *
-   * @throws When it does not appear within {@link OPENCODE_V2_COMPOSER_WAIT_MS}
+   * Issue #2971: a dialog open over the composer (model / variant picker,
+   * Commands, Sessions, agents) leaves the footer on screen, so the composer
+   * check alone passes and the text went into the dialog's filter. The send is
+   * refused instead, on the first frame that shows one: the dialog is someone's
+   * choice in progress, so it is neither dismissed (Escape would throw that
+   * choice away) nor waited out (nothing closes it but a person).
+   *
+   * @throws When a dialog is open, or when the composer does not appear within
+   *   {@link OPENCODE_V2_COMPOSER_WAIT_MS}
    */
   private async waitForComposer(sessionName: string): Promise<void> {
     const deadline = Date.now() + OPENCODE_V2_COMPOSER_WAIT_MS;
     for (;;) {
+      let dialog: string | null = null;
       try {
         const output = stripAnsi(await capturePane(sessionName, OPENCODE_V2_READY_CAPTURE_LINES));
-        if (isOpencodeV2ComposerVisible(output)) return;
+        dialog = findOpencodeV2DialogTitle(output);
+        if (dialog === null && isOpencodeV2ComposerVisible(output)) return;
       } catch {
         // Treated as "not yet".
+      }
+      if (dialog !== null) {
+        throw new Error(
+          `OpenCode V2 composer not available: the "${dialog}" dialog is open. ` +
+            'Close it (esc) or finish the choice, then send again'
+        );
       }
       if (Date.now() >= deadline) break;
       await new Promise((resolve) => setTimeout(resolve, OPENCODE_V2_READY_POLL_INTERVAL_MS));
