@@ -369,7 +369,49 @@ describe('correlation keys and the widened vocabulary (Issue #1722)', () => {
       worktreeId: 'wt-a',
       instanceId: 'claude',
       detail: 'startup',
+      // Issue #2955: the model claude named is forwarded, not dropped.
+      model: 'claude-opus-5[1m]',
     });
+  });
+
+  it('forwards the model of the real claude 2.1.284 SessionStart payload (Issue #2955)', () => {
+    const payload = readFileSync(
+      join(process.cwd(), 'tests/fixtures/claude-session-start-2955/session-start-2.1.284.json'),
+      'utf8'
+    ).replace('<CWD>', '/repos/wt-a');
+
+    const result = run(
+      ['--stdin-json', '--event', 'session_start', '--worktree-id', 'wt-a', '--instance-id', 'claude'],
+      { stdin: payload }
+    );
+
+    expect(result.status).toBe(0);
+    expect(body(result).model).toBe('claude-sonnet-5-5');
+  });
+
+  it('omits the model key when the SessionStart payload has none (Issue #2955)', () => {
+    // `/clear`'s SessionStart and `claude -p` carry no `model`; an empty value
+    // would read downstream as "the model is now unknown".
+    const payload = readFileSync(
+      join(process.cwd(), 'tests/fixtures/hooks/claude/session-start-clear.json'),
+      'utf8'
+    ).replace('<CWD>', '/repos/wt-a');
+    expect(JSON.parse(payload)).not.toHaveProperty('model');
+
+    const result = run(['--stdin-json', '--event', 'session_start'], { stdin: payload });
+
+    expect(result.status).toBe(0);
+    expect(body(result)).not.toHaveProperty('model');
+  });
+
+  it('forwards the model on session_start only (Issue #2955)', () => {
+    // Other tools' payloads (codex puts `model` on every event) keep the body
+    // they had before #2955.
+    const result = run(['--json', JSON.stringify({ hook_event_name: 'Stop', cwd: '/r', model: 'gpt-5.6-sol' })]);
+
+    expect(result.status).toBe(0);
+    expect(body(result).event).toBe('stop');
+    expect(body(result)).not.toHaveProperty('model');
   });
 
   it('rejects a missing value for either correlation flag', () => {
