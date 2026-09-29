@@ -188,6 +188,18 @@ const MEASURED_DATE_2026_09_05 = '2026-09-05';
 const OTHER_AGENTS_EVIDENCE_SOURCE =
   'https://github.com/Kewton/CommandMate/blob/main/docs/reference/skill-agent-compatibility.md#9-gemini--copilot-probe-log-issue-2302';
 
+/**
+ * Evidence reference for the OpenCode V2 (opencode2) 2.0.18 measurement
+ * (Issue #2975).
+ *
+ * The reference doc carries the harness, the controls and the raw
+ * `GET /api/skill` / message output.
+ */
+const OPENCODE_V2_EVIDENCE_SOURCE =
+  'https://github.com/Kewton/CommandMate/blob/main/docs/reference/skill-agent-compatibility.md#10-opencode-v2-probe-log-issue-2975';
+
+const MEASURED_DATE_2026_09_29 = '2026-09-29';
+
 function unmeasuredEntry(agent: CLIToolType): SkillAgentMatrixEntry {
   return {
     agent,
@@ -422,9 +434,63 @@ const AGENT_DISCOVERY_MATRIX: readonly SkillAgentMatrixEntry[] = [
     reloadKey: AGENT_RELOAD_MESSAGE_KEYS.SESSION_RESTART,
     skipReasonKey: null,
   },
-  // Issue #2934: OpenCode V2 is registered (Epic #2370 Phase 1) but Skills
-  // discovery has not been probed on it; the measurement is Phase 4's.
-  unmeasuredEntry('opencode-v2'),
+  {
+    agent: 'opencode-v2',
+    // Issue #2975, opencode2 2.0.18. Measured on its own rather than copied off
+    // the v1 row: the values happen to match v1's, but the release, the day and
+    // the route that makes invocation work are different.
+    //
+    // Ten probe Skills were planted, one per candidate root, each told to
+    // answer a unique token. `GET /api/skill` returned eight of them with their
+    // absolute SKILL.md paths — project `.opencode/skills`, `.opencode/skill`,
+    // `.claude/skills`, `.agents/skills`; home `.claude/skills`,
+    // `.agents/skills`, `.config/opencode/skills`, `.config/opencode/skill` —
+    // and not the two negative controls (`.github/skills`,
+    // `$HOME/.opencode/skills`). Both CommandMate install roots are among the
+    // eight, and the byte-identical dual-root install is listed once.
+    discoveryRoots: [SKILL_INSTALL_ROOT_PREFIX, SKILL_CLAUDE_INSTALL_ROOT_PREFIX],
+    discovery: {
+      outcome: 'verified',
+      evidenceKind: 'mechanical',
+      labelKey: AGENT_AXIS_OUTCOME_LABEL_KEYS.verified,
+      evidenceKindKey: AGENT_EVIDENCE_KIND_LABEL_KEYS.mechanical,
+      limitationKey: null,
+    },
+    invocation: {
+      // Submitting `/probe-agents-root ` produced a `skill` tool part with
+      // `input.id: "probe-agents-root"` and the Skill's absolute directory in
+      // its metadata, and the agent answered `PROBE_OK_probe-agents-root`;
+      // `.claude/skills` did the same with its own token. Unlike v1 the TUI
+      // does not expand the Skill — the user message is the literal
+      // `/probe-agents-root ` (a markdown command, by contrast, is replaced by
+      // its template) — so it is the model calling the `skill` tool. The tool
+      // part is the discriminator, not the token: `/probe-home-dotopencode-root`
+      // (never discovered) came back with a *different* Skill's token.
+      //
+      // The limitation is the same as v1's: typing the name after `/` shows
+      // "No matching commands" (positive control `/rev` → `/review`, negative
+      // control `/zzzznotacommand` → nothing), and the `ctrl+p` palette has no
+      // row for it either. What v2 adds is an `@` completion — `@probe` lists
+      // every discovered Skill tagged `skill`, and the `/skills` picker inserts
+      // `@name` — so v2 does have its own way in, just not a slash command.
+      outcome: 'verified',
+      evidenceKind: 'mechanical',
+      labelKey: AGENT_AXIS_OUTCOME_LABEL_KEYS.verified,
+      evidenceKindKey: AGENT_EVIDENCE_KIND_LABEL_KEYS.mechanical,
+      limitationKey: AGENT_LIMITATION_MESSAGE_KEYS.NO_SLASH_COMMAND,
+    },
+    testedVersion: '2.0.18',
+    testedDate: MEASURED_DATE_2026_09_29,
+    evidenceSource: OPENCODE_V2_EVIDENCE_SOURCE,
+    // Also measured, and the opposite of v1: the server does NOT need a
+    // restart. A Skill planted while it ran appeared in `GET /api/skill` within
+    // seconds, and one planted into `$HOME/.agents/skills` mid-session was run
+    // by `/name` in that same session. A new session is therefore more than is
+    // needed rather than wrong, and it is the closest instruction the existing
+    // reload vocabulary has — there is no "picked up live" key yet.
+    reloadKey: AGENT_RELOAD_MESSAGE_KEYS.SESSION_RESTART,
+    skipReasonKey: null,
+  },
 ];
 
 /** The measured matrix, in CLI-tool declaration order. */

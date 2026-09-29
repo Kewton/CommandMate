@@ -33,7 +33,7 @@ receipt の `install_roots` に両方が記録される。`install_roots` を持
 | Copilot | `1.0.83` | `.agents/skills` と `.claude/skills`（`.github/skills` も） | ✅ 確認済み | ✅ 確認済み（Copilot 自身の palette に出る） | 機械的（`copilot skill list` の列挙と composer 補完。陽性対照 `/hel`・陰性対照 `/zzzznotacommand`） | 2026-09-05 |
 | Antigravity | — | — | ❔ 未計測 | ❔ 未計測 | 実測なし | — |
 | Command Code | `1.49.0` | `.agents/skills` のみ（`.claude/skills` は読まない） | ✅ 確認済み | ✅ 確認済み（Command Code 自身の palette に `[skill]` 行として出る） | 機械的（`cmd skills list -d` が読み取る root を列挙し probe Skill を載せる／`cmd -p "/<name>"` が `skill_loaded` イベントを出して token を返す） | 2026-09-05 |
-| OpenCode V2 | — | — | ❔ 未計測 | ❔ 未計測 | 実測なし（Issue #2934 で登録のみ。計測は Epic #2370 Phase 4） | — |
+| OpenCode V2 | `2.0.18` | `.agents/skills` と `.claude/skills`（project / global の両方。`.opencode/skills` 等も） | ✅ 確認済み | ✅ 確認済み（ただし v2 自身の `/` 補完・`ctrl+p` には出ない。`@` 補完には出る） | 機械的（`GET /api/skill` が絶対 path を返し、`/<name>` 送信で `skill` tool part が `input.id` と Skill の directory つきで記録され probe token が返る） | 2026-09-29 |
 
 計測環境（Claude / Codex 行）: 専用 port・専用 DB・skills 未導入の新規 git repository / CommandMate 0.15.0 / macOS 26.5.2 / Node v24.1.0。
 証跡: <https://github.com/Kewton/CommandMate/issues/1513#issuecomment-5083878264>
@@ -43,6 +43,8 @@ receipt の `install_roots` に両方が記録される。`install_roots` を持
 計測環境（Command Code 行, Issue #2302）: 同じ形の隔離 — **`HOME` ごと差し替えた scratchpad**（`auth.json` / `config.json` だけを持ち込む）・skills 未導入の新規 git repository・`--no-auto-update`（計測中に binary が入れ替わらないようにする）。手順は `dev-reports/qa/issue-2302-command-code-skill-probe.sh`、生の測定結果は本ページ [§8](#8-command-code-probe-log-issue-2302)。
 
 計測環境（Copilot 行, Issue #2302）: 同じ形の隔離（専用の `HOME`・skills 未導入の新規 git repository・root ごとに固有 token の probe Skill）。手順は `dev-reports/qa/issue-2302-other-agents-skill-probe.sh`、生の測定結果は本ページ [§9](#9-gemini--copilot-probe-log-issue-2302)。model 呼出は伴わない — `copilot skill list` も composer 補完も sign-in 前に動く CLI 自身の面である。同じ probe で Gemini 0.58.0 の発見軸も測ったが、行としては未計測のままにしてある（理由は下記）。
+
+計測環境（OpenCode V2 行, Issue #2975）: 同じ形の隔離 — 専用 port（4975）・skills 未導入の新規 git repository・**`HOME` ごと差し替えた scratchpad**（`env -i` で起動し、利用者の `~/.local/share/opencode` などは読まない）・私設 tmux socket。model は server 既定の無料 model（`opencode/longcat-2.5-preview-free`、credential 不要）のままで、model picker は開いていない。手順と生の測定結果は本ページ [§10](#10-opencode-v2-probe-log-issue-2975)。
 
 ### 読み取り方
 
@@ -61,6 +63,10 @@ receipt の `install_roots` に両方が記録される。`install_roots` を持
 - **Copilot は 2 つの install root を両方読む唯一の実測行。** `copilot skill list` が `.github/skills`（陽性対照）・`.agents/skills`・`.claude/skills` の 3 つを返し、#1460 の byte-identical な 2 root install は **1 行**にまとまる。`copilot skill --help` も同じ root を謳っているが、根拠にしたのは help ではなく root ごとに固有 token を持たせた probe Skill である。
 - **Copilot の呼出は palette まで。** composer に `/probe` と打つと 4 つの probe がすべて出る（陰性対照 `/zzzznotacommand` は 0 行、陽性対照 `/hel` は built-in にマッチ）。Claude 行と同じ「palette 一致」水準であり、model が実際に Skill を読み込むところまでは見ていない（計測時は未 sign-in）。
 - **Command Code / Copilot の palette 行も CommandMate 側は出していない。** 下の command-code の項と同じ欠けが Copilot にも当てはまる。Copilot は 2 root とも読むのに CommandMate からは 1 行も出ない（`.claude/skills` のエントリは `cliTools` 未指定＝Claude 専用のため）。
+- **OpenCode V2 は v1 と同じ 2 root を読むが、値は v1 の行を共有していない。** 版（2.0.18）と日付が違ううえ、呼出が成立する経路も違う（次項）。v1 の 6 root に加えて project の `.opencode/skill`・global の `~/.config/opencode/skill`（単数形）も読み、`$HOME/.opencode/skills` と `.github/skills` は読まない（[§10.2](#102-発見軸--get-apiskill)）。
+- **OpenCode V2 の `/<name>` は model が `skill` tool を呼んで成立する。** v1 は server が Skill を command として展開したが、v2 の TUI は `/probe-agents-root ` を**そのままの文字列**で送る（markdown command の `/probe-cmd` は template に展開されて送られるのと対照的）。判別子は `GET /api/session/{id}/message` の `skill` tool part（`input.id` と `metadata.directory`）であり、**返ってきた token ではない** — 発見されない root に植えた `/probe-home-dotopencode-root` は、model が似た名前の `probe-home-opencode-root` を読んで**そちらの token を返した**（[§10.3](#103-呼出軸--skill-tool-part-が判別子)）。
+- **OpenCode V2 は `/` では出ないが `@` では出る。** composer の `/probe-agents-root` は `No matching commands`、`ctrl+p` の検索 `probe` は `No results found`。一方 `@probe` は発見済みの Skill を `skill` タグつきで全部並べ、`/skills` picker で選ぶと composer に `@name` が入る。v2 自身の入口はあるが slash command ではないので、呼出軸には v1 と同じ `NO_SLASH_COMMAND` を付けてある。
+- **OpenCode V2 は再起動なしで拾う。** v1（起動時に一度だけ走査）と逆で、稼働中に植えた Skill は数秒で `GET /api/skill` に載り、同じセッションのまま `/name` で走った（[§10.5](#105-reload)）。表示上の手順は既存の語彙で一番近い「新しいセッションを開始する」（`SESSION_RESTART`）にしてある — 必要以上ではあるが誤りではない。
 - **未計測は `unsupported` ではない。** 「動かないと確認した」ではなく「確認していない」であり、UI では `unknown` と skip 理由を表示する。
 
 ---
@@ -99,6 +105,7 @@ support 値の強さ順は `unsupported` < `unknown` < `commandmate_runtime` < `
 | OpenCode | 新しいセッションを開始する。server は起動時に一度だけ command / Skill を走査して cache するため、install 直後の Skill は**再起動するまで出ない**（実測）。呼び出しは `/<name>`（CommandMate の palette、または opencode 自身の `/skills` picker から） |
 | Command Code | 新しいセッションを開始する。`/skills` picker は開くたびに再走査するので稼働中に足した Skill も出るが、composer の slash 補完はセッション開始時に作られるため**再起動するまで出ない**（実測）。呼び出しは `/<name>` |
 | Copilot | reload 手順は未計測。セッション再起動が安全な前提 |
+| OpenCode V2 | 新しいセッションを開始する（表示される手順）。実測では**再起動も新しいセッションも要らない** — server は稼働中に足した Skill を数秒で拾い、同じセッションの `/<name>` で走った。呼び出しは `/<name>`（CommandMate の palette）または v2 自身の `@` 補完・`/skills` picker（`@name` を挿入する） |
 | 未計測の Agent | 実測していない。セッション再起動が安全な前提 |
 
 ---
@@ -308,3 +315,142 @@ composer に `/probe` と打ったところ:
 - Copilot の reload 手順（稼働中に足した Skill の扱い）は未計測。matrix の `reloadKey` は `UNKNOWN`（＝「再起動が安全な前提」）にしてある
 - Antigravity / Vibe Local は CLI が入っておらず未計測のまま
 - CommandMate の palette は Copilot セッションに 2 root のどちらの行も供給していない（§2 の読み取り方の項と同じ欠け。Gemini も同様）
+
+---
+
+## 10. OpenCode V2 probe log (Issue #2975)
+
+opencode2 `2.0.18` / macOS 26.5.2 / 2026-09-29。以下の `$WORK` は使い捨ての作業 dir（scratchpad）で、`$WORK/home` を `HOME` に、`$WORK/repo` を project にしている。
+
+### 10.1 隔離
+
+| 項目 | 値 |
+|------|-----|
+| `HOME` | `$WORK/home`。**何も複製していない**（credential も不要。下の model 行を参照） |
+| 起動 | `env -i PATH=… HOME=$WORK/home OPENCODE_SERVER_PASSWORD=<使い捨て> OPENCODE_DISABLE_AUTOUPDATE=1 COREPACK_ENABLE_AUTO_PIN=0 opencode2 serve --hostname 127.0.0.1 --port 4975`。TUI は `opencode2 --server http://127.0.0.1:4975 $WORK/repo`（CommandMate の `scripts/opencode-v2/launch.sh` と同じ serve + `--server` の形）。`env -i` なので利用者の `TMUX` / XDG 変数は漏れない |
+| tmux | 私設 socket `tmux -L cm2975`（200x50）。後始末は `kill-session -t '=tui:'` / `'=srv:'` のみ |
+| repository | `$WORK/repo`。`git init` 直後で Skill は 1 つも無い状態から植えた |
+| model | server 既定の `opencode/longcat-2.5-preview-free`（`GET /api/model/default`、`apiKey: "public"`）。model picker は開いていない |
+| 非汚染 | 計測前後で `ls -a $HOME`・`ls -a ~/.commandmate`・既定 tmux server の session 一覧が一致。port 4975 は後始末後に LISTEN なし。稼働中の self-hosted-runner の v2 には触れていない |
+
+植えた probe Skill（本文はすべて「`PROBE_OK_<name>` の 1 行だけを返せ」）:
+
+| 植えた場所 | 名前 | 役割 |
+|-----------|------|------|
+| `$WORK/repo/.agents/skills` | `probe-agents-root` | CommandMate primary |
+| `$WORK/repo/.claude/skills` | `probe-claude-root` | CommandMate secondary |
+| 両 install root | `probe-dual-root` | #1460 と同じ byte-identical 2 root install（`shasum -a 256` 一致） |
+| `$WORK/repo/.opencode/skills` | `probe-opencode-root` | v2 固有 root（陽性対照） |
+| `$WORK/repo/.opencode/skill` | `probe-opencode-singular-root` | 単数形 root |
+| `$WORK/home/.agents/skills` | `probe-home-agents-root` | global |
+| `$WORK/home/.claude/skills` | `probe-home-claude-root` | global |
+| `$WORK/home/.config/opencode/skills` | `probe-home-opencode-root` | global |
+| `$WORK/home/.config/opencode/skill` | `probe-home-opencode-singular-root` | global 単数形 |
+| `$WORK/home/.opencode/skills` | `probe-home-dotopencode-root` | 陰性対照（#2944 で不検出） |
+| `$WORK/repo/.github/skills` | `probe-github-root` | 陰性対照 |
+
+あわせて markdown command `$WORK/repo/.opencode/commands/probe-cmd.md`（`CUSTOM_CMD_OK` を返せ）を palette の陽性対照として置いた。
+
+### 10.2 発見軸 — `GET /api/skill`
+
+`GET /api/skill`（Basic `opencode:<password>`）の返り値の `data[]` を `id | path` に要約したもの:
+
+```
+opencode | /builtin/opencode.md
+report | /builtin/report.md
+probe-home-claude-root | $WORK/home/.claude/skills/probe-home-claude-root/SKILL.md
+probe-claude-root | $WORK/repo/.claude/skills/probe-claude-root/SKILL.md
+probe-dual-root | $WORK/repo/.agents/skills/probe-dual-root/SKILL.md
+probe-home-agents-root | $WORK/home/.agents/skills/probe-home-agents-root/SKILL.md
+probe-agents-root | $WORK/repo/.agents/skills/probe-agents-root/SKILL.md
+probe-home-opencode-singular-root | $WORK/home/.config/opencode/skill/probe-home-opencode-singular-root/SKILL.md
+probe-home-opencode-root | $WORK/home/.config/opencode/skills/probe-home-opencode-root/SKILL.md
+probe-opencode-singular-root | $WORK/repo/.opencode/skill/probe-opencode-singular-root/SKILL.md
+probe-opencode-root | $WORK/repo/.opencode/skills/probe-opencode-root/SKILL.md
+```
+
+`location` は `{"directory": "$WORK/repo"}`。植えた 11 個のうち 9 個が絶対 path つきで返り、`probe-github-root`（`.github/skills`）と `probe-home-dotopencode-root`（`$HOME/.opencode/skills`）は返らない。`probe-dual-root` は `.agents/skills` 側の 1 行だけ（二重化しない）。
+
+| root | project | global（`$HOME`） |
+|------|---------|------------------|
+| `.agents/skills`（CommandMate primary） | ✅ | ✅ |
+| `.claude/skills`（CommandMate secondary） | ✅ | ✅ |
+| `.opencode/skills` | ✅ | ❌（`$HOME/.opencode/skills`） |
+| `.opencode/skill` | ✅ | — |
+| `.config/opencode/skills` | — | ✅ |
+| `.config/opencode/skill` | — | ✅ |
+| `.github/skills` | ❌ | — |
+
+v1 と違い **`GET /api/command` は Skill を含まない**（返るのは `init` / `review` / `probe-cmd` の 3 行だけ。v1 の `GET /command` は Skill を `source: "skill"` で載せていた）。
+
+### 10.3 呼出軸 — `skill` tool part が判別子
+
+TUI の composer に入力して Enter、`GET /api/session/{id}/message` で結果を読んだ（新しいセッションごとに 1 入力）:
+
+| 入力 | user message の text | `skill` tool part | 返答 |
+|------|---------------------|------------------|------|
+| `/probe-agents-root ` | `/probe-agents-root ` | `input.id: "probe-agents-root"`・completed・`metadata.directory: $WORK/repo/.agents/skills/probe-agents-root` | `PROBE_OK_probe-agents-root` ✅ |
+| `/probe-claude-root ` | `/probe-claude-root ` | `probe-claude-root`・completed・`.claude/skills` | `PROBE_OK_probe-claude-root` ✅ |
+| `/probe-dual-root `（2 root install） | 同左 | `probe-dual-root`・completed・`.agents/skills` | `PROBE_OK_probe-dual-root` ✅ |
+| `/probe-home-agents-root ` | 同左 | `probe-home-agents-root`・completed・`$WORK/home/.agents/skills` | `PROBE_OK_probe-home-agents-root` ✅ |
+| `@probe-claude-root ` | 同左 | `probe-claude-root`・completed | `PROBE_OK_probe-claude-root` ✅ |
+| `/probe-github-root `（陰性対照） | 同左 | `probe-github-root`・**error** | `The skill \`probe-github-root\` doesn't exist in this environment. …` |
+| `/probe-home-dotopencode-root `（陰性対照） | 同左 | **`probe-home-opencode-root`**（別の Skill）・completed | **`PROBE_OK_probe-home-opencode-root`** |
+| `/probe-cmd `（markdown command の対照） | **`Reply with exactly CUSTOM_CMD_OK`**（template に展開済み） | なし | `CUSTOM_CMD_OK` |
+
+読み方:
+
+- Skill の `/name` は TUI が展開せず、文字列のまま model に届く。model がそれを見て `skill` tool を呼ぶ。markdown command（最終行）は TUI が template に置き換えて送るので、**v2 の `/name` は command と Skill で経路が違う**。
+- `skill` tool の候補は発見された Skill に限られる。`.github/skills` の名前は tool が error を返す。
+- **token は判別子にならない。** 7 行目は発見されない root の名前を送ったのに、model が似た名前の発見済み Skill を読んで**その token を返した**。合否は `input.id` が送った名前と一致し `metadata.directory` が植えた root を指すことで判定している。
+
+### 10.4 OpenCode V2 自身の palette
+
+| 入力 | 結果 |
+|------|------|
+| composer に `/probe` | `/probe-cmd`（markdown command）だけ。Skill は 1 行も出ない |
+| composer に `/probe-agents-root` | `No matching commands` |
+| composer に `/rev`（陽性対照） | `/review` にマッチ |
+| composer に `/zzzznotacommand`（陰性対照） | `No matching commands` |
+| `ctrl+p` → `probe` | `No results found` |
+| `ctrl+p` → `skill`（陽性対照） | `Skills` の行が出る |
+| `ctrl+p` → `zzzznotacommand`（陰性対照） | `No results found` |
+| composer に `@probe` | 発見済みの 9 個が `skill` タグつきで並ぶ（`.opencode/commands/probe-cmd.md` はファイル参照として並ぶ） |
+| composer に `@zzzznotaskill`（陰性対照） | `No matching files, agents, or references` |
+| `/skills` picker | `OpenCode` / `Report` と発見済みの 9 個。選ぶと composer に **`@probe-agents-root`** が入る |
+
+`@probe` の capture:
+
+```
+┃ @probe-dual-root CommandMate Issue 2975 probe skill (probe-dual-  skill ┃
+┃ @probe-agents-root CommandMate Issue 2975 probe skill (probe-age  skill ┃
+┃ @probe-claude-root CommandMate Issue 2975 probe skill (probe-cla  skill ┃
+┃ @probe-opencode-root CommandMate Issue 2975 probe skill (probe-o  skill ┃
+┃ @probe-home-claude-root CommandMate Issue 2975 probe skill (prob  skill ┃
+┃ @probe-home-agents-root CommandMate Issue 2975 probe skill (prob  skill ┃
+┃ @probe-home-opencode-root CommandMate Issue 2975 probe skill (pr  skill ┃
+┃ @probe-opencode-singular-root CommandMate Issue 2975 probe skill  skill ┃
+┃ @probe-home-opencode-singular-root CommandMate Issue 2975 probe   skill ┃
+┃ .opencode/commands/probe-cmd.md                                         ┃
+```
+
+v1 は Skill への入口が `/skills` picker だけだったが、v2 は `@` 補完にも載せる。ただし slash command としては出ないため、呼出軸の limitation は v1 と同じ `NO_SLASH_COMMAND` とした。
+
+### 10.5 reload
+
+server が動いている最中に Skill を植えた:
+
+| 手順 | 結果 |
+|------|------|
+| `$WORK/repo/.agents/skills/probe-hotreload` を植えて 3 秒後に `GET /api/skill` | `probe-hotreload` が載る（再起動なし） |
+| 新しいセッションで `@probe-hot` | `@probe-hotreload … skill` が出る |
+| 既存セッション（直前に 1 ターン済み）のまま `$WORK/repo/.claude/skills/probe-hotreload-claude` と `$WORK/home/.agents/skills/probe-hotreload-home` を植えて `@probe-hotreload-` | 両方 `skill` タグつきで出る |
+| 同じセッションのまま `/probe-hotreload-home ` を送信 | `skill` tool `input.id: "probe-hotreload-home"`・completed → `PROBE_OK_probe-hotreload-home` |
+
+**v1 と逆で、v2 は server の再起動もセッションの開き直しも要らない。** matrix の `reloadKey` は既存の語彙で最も近い `SESSION_RESTART`（新しいセッションを開始する）にしてある。「稼働中に拾う」ことを表す key は無く、locale の追加は Issue #2975 の scope 外である。
+
+### 10.6 この計測が触れていないこと
+
+- CommandMate の palette 側（`loadOpencodeV2Skills` の root 集合）は変えていない。§10.2 の project 4 root / global 4 root は #2944 の root 集合と一致している
+- CommandMate 経由（`commandmate send`）での送信は測っていない。TUI の composer に直接入力している
+- `allowed-tools` などの frontmatter 差異、Skill の大きさによる skip 挙動は測っていない
