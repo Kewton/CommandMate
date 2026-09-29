@@ -672,8 +672,10 @@ export abstract class BaseCLITool implements ICLITool {
    * against `NAVIGATION_KEY_VALUES` anyway, because a future edit could still
    * add an override to one of them.
    *
-   * THREE tools override it now:
+   * FOUR tools override it now:
    *  - opencode, with its `ctrl+x` leader and chord letters (#2046);
+   *  - OpenCode V2, with the same leader and a narrower set measured on 2.0.18
+   *    (`OPENCODE_V2_NAVIGATION_KEY_VALUES`, #2966);
    *  - claude and Command Code, with `CLAUDE_NAVIGATION_KEY_VALUES` — the base
    *    pad plus `s`, the key claude's `/model` footer offers for "use this
    *    session only" while `Enter` on the same overlay rewrites the user's
@@ -689,8 +691,10 @@ export abstract class BaseCLITool implements ICLITool {
    * Declare how this tool cycles its permission mode (Issue #2592).
    *
    * The default is `null` — "this tool has no mode on `shift+tab`" — and that is
-   * the answer for three of the eight: opencode (whose `BTab` switches AGENTS,
+   * the answer for four of the nine: opencode (whose `BTab` switches AGENTS,
    * and already has `OpencodeQuickKeys`' `agentPrev` button from #2046),
+   * OpenCode V2 (the same: `BTab` toggles Build ⇄ Plan on 2.0.18 and is its
+   * quick keys' `agentNext`, #2966),
    * vibe-local (measured: five presses, byte-identical frame) and gemini (its
    * own docs bind `app.cycleApprovalMode`, but sign-in refused the CLI and the
    * footer spelling was never measured — a button is a promise about what

@@ -23,14 +23,20 @@
  * | gemini         | 0.58.0   | `app.cycleApprovalMode` (docs)   | **NOT MEASURED** — see below                  |
  * | opencode       | 1.18.30  | agent switch, not a mode         | — (already shipped as #2046's quick keys)     |
  * | vibe-local     | —        | nothing (5 presses, no change)   | — (`-y` AUTO-APPROVE is fixed)                |
+ * | opencode-v2    | 2.0.18   | agent switch, not a mode (#2966) | Build ⇄ Plan (#2966's quick keys `agentNext`) |
  *
- * ## The three tools this table deliberately leaves out
+ * ## The four tools this table deliberately leaves out
  *
  *  - **opencode.** `BTab` there is `agent_cycle_reverse`, and it already has a
  *    UI — `OpencodeQuickKeys`' `agentPrev` button (#2046). Giving opencode a
  *    mode spec would put a second button on the same key with a different
  *    promise. The separation is a DECLARATION (no entry here), not a tool-id
  *    check in the UI.
+ *  - **opencode-v2** (Issue #2966). The same answer as v1, measured on 2.0.18:
+ *    `shift+tab` toggles the AGENT (`Build` ⇄ `Plan`, footer `shift+tab agents`)
+ *    and there is no other cycle on any key. It is `OpencodeQuickKeys`' v2
+ *    `agentNext` button, so declaring a mode here would again put two buttons on
+ *    one key.
  *  - **vibe-local.** Five presses produced a byte-identical frame. There is no
  *    mode to cycle; the wrapper fixes `-y`.
  *  - **gemini.** Its bundled `docs/reference/keyboard-shortcuts.md` does bind
@@ -303,7 +309,7 @@ const ANTIGRAVITY_MODE_SPEC: AgentModeSpec = {
  * The declarations, keyed by tool.
  *
  * A `Partial` rather than a total record on purpose: "this tool has no mode on
- * `shift+tab`" is a statement three tools make, and making it by ABSENCE keeps
+ * `shift+tab`" is a statement four tools make, and making it by ABSENCE keeps
  * `resolveAgentModeSpec` from needing a sentinel value that a caller could
  * mistake for a spec.
  */

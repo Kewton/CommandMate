@@ -27,7 +27,7 @@
  *  - the screen scraper still reads the pane, as every tool's fallback.
  *
  * Phase 2 adds approvals / questions / History, Phase 3 richer screen reading
- * and quick keys.
+ * and quick keys ({@link OpenCodeV2Tool.navigationKeys}, Issue #2966).
  *
  * @module lib/cli-tools/opencode-v2
  */
@@ -36,6 +36,13 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { BaseCLITool } from './base';
 import type { CLIToolType } from './types';
+import type { NavigationKeySpec } from '@/types/cli-tool-contracts';
+import {
+  NAVIGATION_KEY_VALUES,
+  OPENCODE_DIRECT_KEY_VALUES,
+  OPENCODE_LEADER_KEY,
+  type TerminalKey,
+} from '@/types/terminal-keys';
 import {
   hasSession,
   createSession,
@@ -133,6 +140,34 @@ export function toOpencodeV2ComposerText(message: string): string {
   return BARE_SLASH_COMMAND.test(message) ? `${message} ` : message;
 }
 
+/**
+ * The leader-chord letters OpenCode V2 2.0.18 answers on its home screen, as
+ * sent by `OpencodeQuickKeys`' v2 strip (Issue #2966): `a` agents, `l`
+ * sessions, `m` models. `n` (new session) is also sent, but is already in
+ * {@link NAVIGATION_KEY_VALUES} (#2254), so it is not listed twice.
+ *
+ * Deliberately narrower than v1's `OPENCODE_CHORD_ONLY_VALUES`. Measured on
+ * 2.0.18 (private tmux socket, 80 columns, isolated `HOME` / XDG dirs):
+ * `ctrl+x t` is not `theme_list` any more — on the home screen the leader lets
+ * the `t` through into the composer, and inside a session it opens a terminal
+ * pane. `g` / `u` / `r` / `c` work only inside a session and type their letter
+ * into the composer otherwise; the strip does not offer them for v2 (see
+ * `OpencodeQuickKeys`), so they are not declared either.
+ */
+const OPENCODE_V2_CHORD_ONLY_VALUES = ['a', 'l', 'm'] as const;
+
+/**
+ * Everything an OpenCode V2 pane may be sent through `/special-keys`: the base
+ * pad plus the `ctrl+x` leader, `ctrl+p` / `ctrl+t`, and the three chord
+ * letters above (Issue #2966).
+ */
+export const OPENCODE_V2_NAVIGATION_KEY_VALUES: readonly TerminalKey[] = [
+  ...NAVIGATION_KEY_VALUES,
+  OPENCODE_LEADER_KEY,
+  ...OPENCODE_DIRECT_KEY_VALUES,
+  ...OPENCODE_V2_CHORD_ONLY_VALUES,
+];
+
 export class OpenCodeV2Tool extends BaseCLITool {
   readonly id: CLIToolType = OPENCODE_V2_CLI_TOOL_ID;
   readonly name = 'OpenCode V2';
@@ -140,6 +175,24 @@ export class OpenCodeV2Tool extends BaseCLITool {
 
   /** Last lazy-resume attempt per session name, for {@link OPENCODE_V2_RESUME_RETRY_MS}. */
   private readonly resumeAttemptedAt = new Map<string, number>();
+
+  /**
+   * Declare the keys OpenCode V2's quick keys send (Issue #2966).
+   *
+   * Without this override the route validates against the base pad and answers
+   * 400 for `C-p` / `C-t` / `C-x`, so the palette, the variant cycle and every
+   * leader chord on the strip would be unsendable. The leader is `ctrl+x`, the
+   * same default as v1 — 2.0.18's own palette prints `ctrl+x m`, `ctrl+x a`,
+   * `ctrl+x l`, `ctrl+x n`.
+   *
+   * @returns This tool's {@link NavigationKeySpec}
+   */
+  navigationKeys(): NavigationKeySpec {
+    return {
+      keys: OPENCODE_V2_NAVIGATION_KEY_VALUES,
+      leaderKey: OPENCODE_LEADER_KEY,
+    };
+  }
 
   /**
    * Installed means an executable that identifies itself as OpenCode V2

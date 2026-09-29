@@ -74,7 +74,8 @@ describe('[#2592] which tools get a control at all', () => {
     (cliToolId) => {
       // opencode's `BTab` switches AGENTS and already has its own button
       // (#2046); vibe-local has no binding; gemini's footer was never measured.
-      // OpenCode V2 (#2934) declares no mode cycle in Phase 1.
+      // OpenCode V2: `shift+tab` switches agents there too (measured on
+      // 2.0.18, #2966) and is its quick keys' `agentNext`, so no mode cycle.
       const { container } = renderControl({ cliToolId });
       expect(container).toBeEmptyDOMElement();
     },
