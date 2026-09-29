@@ -47,6 +47,12 @@
  * so the text, the folded reasoning and the one-line tool summary look exactly
  * like an OpenCode (v1) reply (#2041 / #2234 / #2272).
  *
+ * ## The model that answered
+ *
+ * The same read also names the model of the newest assistant message
+ * (Issue #2964, {@link readLatestOpencodeV2AssistantModel}) and latches it
+ * where v1's hook-borne model goes, since no `session.*` frame carries one.
+ *
  * ## Nothing here throws
  *
  * A failed fetch or write costs the row, never the subscription: the state the
@@ -57,6 +63,7 @@
  */
 
 import { createLogger } from '@/lib/logger';
+import { recordAgentReportedModel } from '@/lib/session/agent-event-state';
 import { opencodeTurnRequestId } from '@/types/agent-transcript';
 import { isPlainObject, readNestedString, readStringField } from '../event-mapper';
 import {
@@ -70,6 +77,7 @@ import {
 import type { AgentInstanceRef } from '../types';
 import { fetchOpencodeV2SessionMessagesPage } from './client';
 import { opencodeV2KeyOf, readOpencodeV2Password } from './secrets';
+import { OPENCODE_V2_CLI_TOOL_ID } from './tool-id';
 
 const logger = createLogger('lib/hooks/sources/opencode-v2/history');
 
@@ -211,6 +219,38 @@ export function buildOpencodeV2TurnsFromMessages(
   }
   close(false);
   return turns;
+}
+
+/**
+ * The model the newest assistant message was answered by, or null
+ * (Issue #2964).
+ *
+ * `assistant.model` is `{ id, providerID }` (measured on 2.0.18,
+ * `tests/fixtures/opencode-v2-history-2940`). Only `id` is returned — v1's
+ * `frameModel` rule (#1783): every other tool reports the bare model, and
+ * `opencode/longcat-…` would make this one the odd one out.
+ *
+ * The reply, not the session's setting: Phase 0 saw a session created over the
+ * API run on a different model from the TUI's default, so the model worth
+ * showing is the one that actually answered. Newest by `time.created`, the id
+ * breaking ties, the order {@link buildOpencodeV2TurnsFromMessages} uses. An
+ * assistant message without a model id is skipped, not read as "unknown".
+ *
+ * Pure: no fetch, no state.
+ */
+export function readLatestOpencodeV2AssistantModel(entries: readonly unknown[]): string | null {
+  let latest: { at: number; id: string; model: string } | null = null;
+  for (const entry of entries) {
+    if (!isPlainObject(entry) || readStringField(entry, 'type') !== 'assistant') continue;
+    const model = readNestedString(entry, ['model', 'id']);
+    if (model === null) continue;
+    const at = createdAtOf(entry);
+    const id = readStringField(entry, 'id') ?? '';
+    if (latest === null || at > latest.at || (at === latest.at && id > latest.id)) {
+      latest = { at, id, model };
+    }
+  }
+  return latest?.model ?? null;
 }
 
 declare global {
@@ -365,6 +405,15 @@ export function syncOpencodeV2History(
         });
         return 0;
       }
+
+      // Issue #2964: the model that answered, onto the hook latch the UI and
+      // `capture --json` read. Before the rows, so a failed write cannot cost it.
+      recordAgentReportedModel(
+        target.worktreeId,
+        OPENCODE_V2_CLI_TOOL_ID,
+        target.instanceId ?? OPENCODE_V2_CLI_TOOL_ID,
+        readLatestOpencodeV2AssistantModel(entries)
+      );
 
       const closed = buildOpencodeV2TurnsFromMessages(entries, sessionId).filter(
         (turn) => turn.closed

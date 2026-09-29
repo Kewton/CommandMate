@@ -313,6 +313,8 @@ export const opencodeV2AgentEventSource: AgentEventSource = definePullEventSourc
   mappers: OPENCODE_V2_MAPPERS,
   nativeEventNameFields: ['type'],
   conversationIdFields: [],
+  // Issue #2964: no `session.*` frame carries a model. The model that answered
+  // is read off `/message` after each turn (`./history`) and latched there.
   extractModel: () => null,
   extractEventIdentity: opencodeV2EventIdentity,
   extractDetail: () => null,
