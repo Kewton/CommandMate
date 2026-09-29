@@ -121,7 +121,7 @@ describe('the OpenCode V2 user guides (Issue #2976)', () => {
   it.each([JA, EN])('%s names the executable, the open bug and the v1 differences', (relative) => {
     const body = read(relative);
     expect(body).toContain('opencode2');
-    expect(body).toContain('#2991');
+    expect(body).not.toContain('#2991');
     expect(body).toContain('shift+tab');
     expect(body).toContain('Always allow');
   });
