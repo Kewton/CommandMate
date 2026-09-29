@@ -392,8 +392,13 @@ describe('TOOLS_WITH_MODEL_SUPPORT', () => {
     expect(TOOLS_WITH_MODEL_SUPPORT.has('gemini')).toBe(false);
   });
 
-  it('should have exactly 2 members', () => {
-    expect(TOOLS_WITH_MODEL_SUPPORT.size).toBe(2);
+  // Issue #2982: opencode-v2 takes `-m provider/model[#variant]`.
+  it('should contain opencode-v2 (Issue #2982)', () => {
+    expect(TOOLS_WITH_MODEL_SUPPORT.has('opencode-v2')).toBe(true);
+  });
+
+  it('should have exactly 3 members', () => {
+    expect(TOOLS_WITH_MODEL_SUPPORT.size).toBe(3);
   });
 
   // Issue #989: antigravity model names contain spaces (e.g. "Gemini 3.1 Pro

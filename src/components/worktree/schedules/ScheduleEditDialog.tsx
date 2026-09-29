@@ -18,6 +18,8 @@
  *   (`TOOLS_WITH_MODEL_SUPPORT`: copilot and, since Issue #1914, opencode).
  * - Issue #2044: opencode additionally shows Agent / Variant / Continue / Title,
  *   which serialize into the same CMATE.md CLI Tool cell as `--model`.
+ * - Issue #2982: opencode-v2 shows the same fields; its Variant requires a Model
+ *   because `opencode2 run` takes it as `-m <provider/model>#<variant>`.
  */
 
 'use client';
@@ -46,6 +48,7 @@ import { NAME_PATTERN, isValidCronExpression } from '@/config/cmate-constants';
 import {
   TOOLS_WITH_MODEL_SUPPORT,
   TOOLS_WITH_RUN_OPTIONS,
+  validateVariantHasModel,
   validateCopilotModelName,
   validateOpencodeRunName,
   validateOpencodeTitle,
@@ -380,10 +383,15 @@ export function ScheduleEditDialog({
 
   const variantError = useMemo(() => {
     if (!showRunOptions || !form.variant.trim()) return null;
-    return validateOpencodeRunName(form.variant.trim(), 'variant').valid
-      ? null
-      : t('edit.errorVariantInvalid');
-  }, [showRunOptions, form.variant, t]);
+    if (!validateOpencodeRunName(form.variant.trim(), 'variant').valid) {
+      return t('edit.errorVariantInvalid');
+    }
+    // Issue #2982: the writer refuses this combination too; saying so here keeps
+    // the Save button from sending a row the API will reject.
+    return validateVariantHasModel(form.cliToolId, form.model, form.variant)
+      ? t('edit.errorVariantNeedsModel')
+      : null;
+  }, [showRunOptions, form.cliToolId, form.model, form.variant, t]);
 
   const titleError = useMemo(() => {
     if (!showRunOptions || !form.title.trim()) return null;
