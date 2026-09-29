@@ -66,7 +66,7 @@ receipt の `install_roots` に両方が記録される。`install_roots` を持
 - **OpenCode V2 は v1 と同じ 2 root を読むが、値は v1 の行を共有していない。** 版（2.0.18）と日付が違ううえ、呼出が成立する経路も違う（次項）。v1 の 6 root に加えて project の `.opencode/skill`・global の `~/.config/opencode/skill`（単数形）も読み、`$HOME/.opencode/skills` と `.github/skills` は読まない（[§10.2](#102-発見軸--get-apiskill)）。
 - **OpenCode V2 の `/<name>` は model が `skill` tool を呼んで成立する。** v1 は server が Skill を command として展開したが、v2 の TUI は `/probe-agents-root ` を**そのままの文字列**で送る（markdown command の `/probe-cmd` は template に展開されて送られるのと対照的）。判別子は `GET /api/session/{id}/message` の `skill` tool part（`input.id` と `metadata.directory`）であり、**返ってきた token ではない** — 発見されない root に植えた `/probe-home-dotopencode-root` は、model が似た名前の `probe-home-opencode-root` を読んで**そちらの token を返した**（[§10.3](#103-呼出軸--skill-tool-part-が判別子)）。
 - **OpenCode V2 は `/` では出ないが `@` では出る。** composer の `/probe-agents-root` は `No matching commands`、`ctrl+p` の検索 `probe` は `No results found`。一方 `@probe` は発見済みの Skill を `skill` タグつきで全部並べ、`/skills` picker で選ぶと composer に `@name` が入る。v2 自身の入口はあるが slash command ではないので、呼出軸には v1 と同じ `NO_SLASH_COMMAND` を付けてある。
-- **OpenCode V2 は再起動なしで拾う。** v1（起動時に一度だけ走査）と逆で、稼働中に植えた Skill は数秒で `GET /api/skill` に載り、同じセッションのまま `/name` で走った（[§10.5](#105-reload)）。表示上の手順は既存の語彙で一番近い「新しいセッションを開始する」（`SESSION_RESTART`）にしてある — 必要以上ではあるが誤りではない。
+- **OpenCode V2 は再起動なしで拾う。** v1（起動時に一度だけ走査）と逆で、稼働中に植えた Skill は数秒で `GET /api/skill` に載り、同じセッションのまま `/name` で走った（[§10.5](#105-reload)）。表示上の手順も実測どおり「開始し直し不要（次の送信から見つかる）」（`PICKED_UP_LIVE`、Issue #2985）にしてある。
 - **未計測は `unsupported` ではない。** 「動かないと確認した」ではなく「確認していない」であり、UI では `unknown` と skip 理由を表示する。
 
 ---
@@ -105,7 +105,7 @@ support 値の強さ順は `unsupported` < `unknown` < `commandmate_runtime` < `
 | OpenCode | 新しいセッションを開始する。server は起動時に一度だけ command / Skill を走査して cache するため、install 直後の Skill は**再起動するまで出ない**（実測）。呼び出しは `/<name>`（CommandMate の palette、または opencode 自身の `/skills` picker から） |
 | Command Code | 新しいセッションを開始する。`/skills` picker は開くたびに再走査するので稼働中に足した Skill も出るが、composer の slash 補完はセッション開始時に作られるため**再起動するまで出ない**（実測）。呼び出しは `/<name>` |
 | Copilot | reload 手順は未計測。セッション再起動が安全な前提 |
-| OpenCode V2 | 新しいセッションを開始する（表示される手順）。実測では**再起動も新しいセッションも要らない** — server は稼働中に足した Skill を数秒で拾い、同じセッションの `/<name>` で走った。呼び出しは `/<name>`（CommandMate の palette）または v2 自身の `@` 補完・`/skills` picker（`@name` を挿入する） |
+| OpenCode V2 | 開始し直し不要 — 次の送信から新しい Skill が見つかる（表示される手順、`PICKED_UP_LIVE`）。実測では**再起動も新しいセッションも要らない** — server は稼働中に足した Skill を数秒で拾い、同じセッションの `/<name>` で走った。呼び出しは `/<name>`（CommandMate の palette）または v2 自身の `@` 補完・`/skills` picker（`@name` を挿入する） |
 | 未計測の Agent | 実測していない。セッション再起動が安全な前提 |
 
 ---
@@ -447,7 +447,7 @@ server が動いている最中に Skill を植えた:
 | 既存セッション（直前に 1 ターン済み）のまま `$WORK/repo/.claude/skills/probe-hotreload-claude` と `$WORK/home/.agents/skills/probe-hotreload-home` を植えて `@probe-hotreload-` | 両方 `skill` タグつきで出る |
 | 同じセッションのまま `/probe-hotreload-home ` を送信 | `skill` tool `input.id: "probe-hotreload-home"`・completed → `PROBE_OK_probe-hotreload-home` |
 
-**v1 と逆で、v2 は server の再起動もセッションの開き直しも要らない。** matrix の `reloadKey` は既存の語彙で最も近い `SESSION_RESTART`（新しいセッションを開始する）にしてある。「稼働中に拾う」ことを表す key は無く、locale の追加は Issue #2975 の scope 外である。
+**v1 と逆で、v2 は server の再起動もセッションの開き直しも要らない。** matrix の `reloadKey` は「開始し直し不要（次の送信から見つかる）」を表す `PICKED_UP_LIVE` にしてある（Issue #2985 で追加。Issue #2975 の時点では既存の語彙で最も近い `SESSION_RESTART` を使っていた）。
 
 ### 10.6 この計測が触れていないこと
 

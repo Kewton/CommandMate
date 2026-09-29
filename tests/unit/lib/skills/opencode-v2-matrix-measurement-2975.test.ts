@@ -31,6 +31,7 @@ import {
   AGENT_RELOAD_MESSAGE_KEYS,
   deriveMatrixAgentSupport,
   findSkillAgentMatrixEntry,
+  getSkillAgentMatrix,
   isAgentMeasured,
 } from '@/lib/skills/compatibility-matrix';
 import {
@@ -96,11 +97,18 @@ describe('the 2026-09-29 OpenCode V2 measurement is recorded as taken (Issue #29
     expect(v2?.discovery.limitationKey).toBeNull();
   });
 
-  it('tells the operator to start a new session, the closest key to "picked up live"', () => {
+  it('tells the operator no new session is needed (Issue #2985)', () => {
     // Measured: no server restart is needed on 2.0.18 — a Skill planted while
-    // the server ran was listed within seconds and ran in the same session. A
-    // new session is sufficient advice; the vocabulary has no live-reload key.
-    expect(v2?.reloadKey).toBe(AGENT_RELOAD_MESSAGE_KEYS.SESSION_RESTART);
+    // the server ran was listed within seconds and ran in the same session.
+    expect(v2?.reloadKey).toBe(AGENT_RELOAD_MESSAGE_KEYS.PICKED_UP_LIVE);
+    expect(v2?.reloadKey).not.toBe(AGENT_RELOAD_MESSAGE_KEYS.SESSION_RESTART);
+  });
+
+  it('leaves every other row off the live-reload key (Issue #2985)', () => {
+    const others = getSkillAgentMatrix().filter((entry) => entry.agent !== 'opencode-v2');
+    for (const entry of others) {
+      expect(entry.reloadKey, entry.agent).not.toBe(AGENT_RELOAD_MESSAGE_KEYS.PICKED_UP_LIVE);
+    }
   });
 
   it('derives native support, which is the badge the measurement earns', () => {
