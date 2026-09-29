@@ -10,6 +10,9 @@
  *    → `waiting` (Issue #2965);
  *  - the question form's key hints (`↑↓ select  enter submit  esc dismiss`)
  *    → `waiting` (Issue #2965);
+ *  - a dialog's title row (`Select variant … esc`, the model / variant
+ *    pickers, Commands, Sessions, Select agent) anywhere on the pane
+ *    → `waiting` (Issue #2971);
  *  - the footer's `esc interrupt` hint → `running`;
  *  - the completion row (`Build · <model> · 3.5s · 11.2 tok/s`) as the last
  *    transcript row → `ready` (Issue #2965);
@@ -35,6 +38,7 @@
 
 import {
   detectThinking,
+  findOpencodeV2DialogTitle,
   OPENCODE_V2_FOOTER_PATTERN,
   OPENCODE_V2_IDLE_COMPOSER_PATTERN,
   stripAnsi,
@@ -123,6 +127,22 @@ export const opencodeV2StatusDetector = createToolStatusDetector({
         status: 'waiting',
         confidence: 'high',
         reason: STATUS_REASON.OPENCODE_SELECTION_LIST,
+        hasActivePrompt: false,
+        evidence: 'positive',
+      };
+    }
+    // Issue #2971: a dialog opened over the composer keeps the footer (and
+    // often the placeholder) on screen, so every rule below read it as `ready`
+    // and `wait` completed a turn that never started. Its title row sits ~150
+    // rows above the bottom of an 80x200 pane, outside `lastLines`, so the
+    // whole frame is read. The reason is v1's (#2112): the same kind of
+    // overlay, driven by ↑↓ + Enter and closed with `esc` — no number answers
+    // it, hence `hasActivePrompt: false`.
+    if (findOpencodeV2DialogTitle(stripAnsi(frame.raw)) !== null) {
+      return {
+        status: 'waiting',
+        confidence: 'high',
+        reason: STATUS_REASON.OPENCODE_MODAL_OVERLAY,
         hasActivePrompt: false,
         evidence: 'positive',
       };

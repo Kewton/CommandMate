@@ -241,6 +241,23 @@ describe('Issue #2971: a dialog open over the composer (2.0.18, 80x200)', () => 
     expect(isOpencodeV2ComposerVisible(text)).toBe(true);
   });
 
+  it.each([
+    'select-model',
+    'select-variant',
+    'select-variant-typed',
+    'select-variant-over-transcript',
+    'commands',
+    'sessions',
+    'select-agent',
+  ])('reads the %s dialog as waiting, on the overlay reason, not as ready', (name) => {
+    const v = detector.detect(normalizeFrame(frame2971(name)));
+    expect(v.status).toBe('waiting');
+    expect(v.reason).toBe(STATUS_REASON.OPENCODE_MODAL_OVERLAY);
+    expect(v.hasActivePrompt).toBe(false);
+    expect(v.evidence).toBe('positive');
+    expect(SELECTION_LIST_REASONS.has(v.reason)).toBe(true);
+  });
+
   it('keeps the UAT shape: the typed body sits in the filter, not the composer', () => {
     const text = stripAnsi(frame2971('select-variant-typed'));
     expect(text).toMatch(/^\s+Reply with exactly: UAT-MODEL-2$/m);
@@ -258,10 +275,16 @@ describe('Issue #2971: a dialog open over the composer (2.0.18, 80x200)', () => 
 
   it('leaves the verdicts of those frames as they were', () => {
     expect(verdict('boot-idle').status).toBe('ready');
+    expect(verdict('boot-idle').reason).toBe(STATUS_REASON.INPUT_PROMPT);
     expect(verdict('turn-running').status).toBe('running');
     expect(verdict('turn-done').status).toBe('ready');
-    expect(verdict2965('permission-required').status).toBe('waiting');
-    expect(verdict2965('question').status).toBe('waiting');
+    expect(verdict('turn-done').reason).toBe(STATUS_REASON.OPENCODE_RESPONSE_COMPLETE);
+    expect(verdict2965('permission-required').reason).toBe(STATUS_REASON.OPENCODE_PERMISSION_PROMPT);
+    expect(verdict2965('question').reason).toBe(STATUS_REASON.OPENCODE_SELECTION_LIST);
+    for (const name of ['turn-done-after-approval', 'question-answered']) {
+      expect(verdict2965(name).status, name).toBe('ready');
+      expect(verdict2965(name).reason, name).toBe(STATUS_REASON.OPENCODE_RESPONSE_COMPLETE);
+    }
   });
 
   it('does not read the hints that end in other words, or a gutter row, as a title', () => {
@@ -293,5 +316,7 @@ describe('Issue #2971: controls written outside the repository', () => {
   it('negative: the same frame with the title row’s `esc` removed is not', () => {
     const noHint = frame2971('select-variant-typed').replace(/^(\s+Select variant)\s+esc$/m, '$1');
     expect(readVia('variant-no-esc.txt', noHint)).toBeNull();
+    // …and the screen verdict falls back to what the rest of the pane says.
+    expect(detector.detect(normalizeFrame(noHint)).status).not.toBe('waiting');
   });
 });
