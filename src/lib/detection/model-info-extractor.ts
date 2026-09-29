@@ -326,12 +326,76 @@ function readCodexFooter(line: string): ModelInfo | null {
 export const CLAUDE_STARTUP_BANNER_PATTERN =
   /^\s*[\u2500-\u259F][\s\u2500-\u259F]*(\S[^\u2500-\u259F]*?)\s+with\s+(minimal|low|medium|high|xhigh)\s+effort\b/i;
 
+/**
+ * The startup banner as claude 2.1.28x draws it: `<model> · <plan>` with no
+ * effort clause (Issue #2955).
+ *
+ * Measured on claude 2.1.284 (`tests/fixtures/claude-session-start-2955/`):
+ *   `▝▜██████▀  Sonnet 5.5 · Claude Max`
+ * The effort moved off this row to a right-aligned one of its own
+ * ({@link CLAUDE_EFFORT_ROW_PATTERN}).
+ *
+ * Without the `with … effort` anchor, a box-framed table row containing ` · `
+ * would read as a banner — the reason #2361 declined to widen
+ * {@link CLAUDE_STARTUP_BANNER_PATTERN}. The anchor here is the plan instead:
+ * the separator must be followed by `Claude <Plan>`, the spelling measured on
+ * 2.1.284. `API Usage Billing` is deliberately NOT accepted yet: the only frames
+ * that carry it are #2361's 2.1.263 Haiku banners, and
+ * `model-info-claude-switch-2361.test.ts` pins those as an honest unknown
+ * (`fullscreen-after-clear`). The hook's `SessionStart` names the model on
+ * those sessions. `·` is excluded from the model group so the lazy
+ * match stops at the first separator, and a label still carrying `with …
+ * effort` (a truncated old-format banner) is refused by the caller.
+ *
+ * Tried only after the old pattern, so a 2.1.232-shaped line keeps its effort.
+ */
+export const CLAUDE_STARTUP_BANNER_V2_1_28X_PATTERN =
+  /^\s*[\u2500-\u259F][\s\u2500-\u259F]*(\S[^\u2500-\u259F·]*?)\s+·\s+Claude\s+[A-Za-z]+\b/;
+
+/**
+ * The right-aligned effort row claude 2.1.28x draws under its banner
+ * (Issue #2955): `◐ medium · /effort`.
+ *
+ * Anchored on the trailing `· /effort` hint, which is chrome and nothing a
+ * reply would end a line with; the leading glyph is any one non-space
+ * character (the dial changes with the level). The word goes through
+ * {@link resolveEffortToken}, so anything outside the known levels reads as no
+ * effort rather than as a guess.
+ */
+export const CLAUDE_EFFORT_ROW_PATTERN = /^\s*\S\s+([A-Za-z]+)\s+·\s+\/effort\s*$/;
+
 function readClaudeBanner(line: string): ModelInfo | null {
   const match = CLAUDE_STARTUP_BANNER_PATTERN.exec(line);
+  if (match) {
+    const model = match[1].trim();
+    if (!isPlausibleModelLabel(model)) return null;
+    return { model, effort: resolveEffortToken(match[2]) };
+  }
+  // Issue #2955: the 2.1.28x shape, no effort on the row.
+  const current = CLAUDE_STARTUP_BANNER_V2_1_28X_PATTERN.exec(line);
+  if (!current) return null;
+  const model = current[1].trim();
+  if (/\swith\s/i.test(model) || !isPlausibleModelLabel(model)) return null;
+  return { model, effort: null };
+}
+
+function readClaudeEffortRow(line: string): ModelInfo | null {
+  const match = CLAUDE_EFFORT_ROW_PATTERN.exec(line);
   if (!match) return null;
-  const model = match[1].trim();
-  if (!isPlausibleModelLabel(model)) return null;
-  return { model, effort: resolveEffortToken(match[2]) };
+  const effort = resolveEffortToken(match[1]);
+  return effort === null ? null : { model: null, effort };
+}
+
+/**
+ * The banner, with the effort filled from the 2.1.28x effort row when the
+ * banner itself names none (Issue #2955). The row is consulted only for a
+ * banner that was read, so it never supplies an effort on its own.
+ */
+function readClaudeBannerWithEffort(captureText: string): ModelInfo | null {
+  const banner = scanFromEnd(captureText, readClaudeBanner);
+  if (!banner || banner.effort !== null) return banner;
+  const row = scanFromEnd(captureText, readClaudeEffortRow);
+  return row ? { model: banner.model, effort: row.effort } : banner;
 }
 
 /**
@@ -378,7 +442,10 @@ function readClaudeBanner(line: string): ModelInfo | null {
  *    Billing`), so {@link CLAUDE_STARTUP_BANNER_PATTERN} does not read it and
  *    the confirmation line is what publishes the model there. The banner
  *    pattern is deliberately not widened: without the `with … effort` anchor
- *    a box-framed table row containing ` · ` would read as a banner.
+ *    a box-framed table row containing ` · ` would read as a banner. (#2955
+ *    added a second, plan-anchored pattern for the 2.1.28x banner —
+ *    {@link CLAUDE_STARTUP_BANNER_V2_1_28X_PATTERN} — which accepts
+ *    `· Claude <Plan>` only, so this Haiku row is still not read.)
  *  - **`/fast` prints `⎿  ↯ Fast mode ON · model set to Opus 5 · $10/$50 per
  *    Mtok` and is a model switch** (`PostModelSwitch` reported
  *    `claude-fable-5-1` → `claude-opus-5[1m]` on the same keypress). It is NOT
@@ -797,7 +864,7 @@ export function extractModelInfo(cliToolId: CLIToolType, captureText: string): M
       // the events CommandMate registers — so on a switch the pane is the only
       // channel that hears it.
       return (
-        scanFromEnd(captureText, readClaudeBanner) ??
+        readClaudeBannerWithEffort(captureText) ??
         scanFromEnd(captureText, readClaudeModelSwitchLine) ??
         unknown()
       );
