@@ -30,6 +30,7 @@ import {
   loadCodexSkills,
   loadCommandCodeSkills,
   loadOpencodeSkills,
+  loadOpencodeV2Skills,
   loadSkills,
   mergeCodexFamilySkills,
 } from '@/lib/slash-commands';
@@ -86,12 +87,18 @@ const LOADER_BY_ROOT: Record<string, (basePath: string) => Promise<SlashCommand[
  * loader that is. For command-code the root-keyed map would have answered
  * `loadAgentsSkills`, whose entries are scoped to codex and antigravity — the
  * exact mismatch #2322 closed.
+ *
+ * OpenCode V2 (#2975, measured on 2.0.18) reads both install roots and runs a
+ * Skill as `/<name>` like v1, and its palette entries come from its own folding
+ * loader. The matrix roots are project roots, so the project scope is the one
+ * this suite checks.
  */
 const LOADER_BY_AGENT: Partial<
   Record<SkillAgentMatrixEntry['agent'], (basePath: string) => Promise<SlashCommand[]>>
 > = {
   opencode: loadOpencodeSkills,
   'command-code': loadCommandCodeSkills,
+  'opencode-v2': (basePath: string) => loadOpencodeV2Skills(basePath, 'project'),
 };
 
 /**
