@@ -192,20 +192,17 @@ describe('additivity (Issue #1785 requirement 3)', () => {
  * The real claude 2.1.284 `SessionStart` payload and startup banner, captured
  * for #2955 (`tests/fixtures/claude-session-start-2955/README.md`).
  *
- * Claude still names its model on `SessionStart`; the value is lost on the way
- * in. `SessionStart` cannot be an http hook (#1721 D1), so the injected settings
+ * Claude still names its model on `SessionStart`; before the fix the value was
+ * lost on the way in. `SessionStart` cannot be an http hook (#1721 D1), so the injected settings
  * deliver it through `scripts/hooks/cmate-agent-event.sh`, which rebuilds the
  * body from a fixed list of keys that does not include `model`. And the frame
  * fallback is blind too: the 2.1.28x banner dropped the `with <effort> effort`
  * half that `CLAUDE_STARTUP_BANNER_PATTERN` requires.
  *
  * The positive control proves the receiver is sound — the payload as claude
- * wrote it reaches `.model`. The two `it.fails` cases are the two broken
- * channels, stated as the behaviour that is wanted: each passes today BECAUSE
- * its assertion fails, and turns red the moment that channel is fixed, which is
- * the cue to turn it into a plain `it`. Both fixes are in files outside this
- * Issue's contract (`scripts/hooks/cmate-agent-event.sh`,
- * `src/lib/detection/model-info-extractor.ts`).
+ * wrote it reaches `.model`. The last two cases are the two channels that were
+ * broken, now fixed: the relay forwards `model` on `session_start`, and the
+ * extractor reads the 2.1.28x banner (`CLAUDE_STARTUP_BANNER_V2_1_28X_PATTERN`).
  */
 describe('claude 2.1.284 SessionStart (Issue #2955)', () => {
   const FIXTURE_DIR = join(process.cwd(), 'tests/fixtures/claude-session-start-2955');
@@ -277,16 +274,15 @@ describe('claude 2.1.284 SessionStart (Issue #2955)', () => {
     expect((await build()).model).toBe('claude-sonnet-5-5');
   });
 
-  it.fails('through the injected SessionStart relay, the model reaches capture --json', async () => {
-    // Fails today: the relay's body has no `model` key (see the header above).
+  it('through the injected SessionStart relay, the model reaches capture --json', async () => {
     deliver(relayBody(realPayload()));
 
     expect((await build()).model).toBe('claude-sonnet-5-5');
   });
 
-  it.fails('the 2.1.284 startup banner is read as a model by the frame fallback', () => {
-    // Fails today: the banner is `Sonnet 5.5 · Claude Max`, with no
-    // `with <effort> effort` for the banner pattern to anchor on.
+  it('the 2.1.284 startup banner is read as a model by the frame fallback', () => {
+    // The banner is `Sonnet 5.5 · Claude Max`, with no `with <effort> effort`;
+    // read by the plan-anchored 2.1.28x pattern.
     const banner = readFileSync(join(FIXTURE_DIR, 'banner-2.1.284.txt'), 'utf8');
 
     expect(extractModelInfo('claude', banner).model).toBe('Sonnet 5.5');

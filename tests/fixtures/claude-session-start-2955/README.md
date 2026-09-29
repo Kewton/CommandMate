@@ -26,3 +26,7 @@ What the two show:
 
 A `claude -p` run of the same probe emitted a `SessionStart` **without** `model`
 (and without `scratchpad_dir`); only the interactive session carries it.
+
+Both were fixed in #2955: the relay forwards `model` on `session_start`, and
+`CLAUDE_STARTUP_BANNER_V2_1_28X_PATTERN` / `CLAUDE_EFFORT_ROW_PATTERN` read the
+new banner and effort row.
