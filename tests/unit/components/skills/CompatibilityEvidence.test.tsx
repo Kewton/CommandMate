@@ -140,6 +140,7 @@ describe('reload guidance is always reachable', () => {
   it.each([
     ['claude', 'skills.compatibility.reload.sessionRestart'],
     ['codex', 'skills.compatibility.reload.sessionRestartNoSlash'],
+    ['opencode-v2', 'skills.compatibility.reload.pickedUpLive'],
     ['gemini', 'skills.compatibility.reload.unknown'],
   ])('%s reaches a reload instruction from its support status', (agent, key) => {
     // 受入条件 (manual): every support status must lead to its evidence and its
