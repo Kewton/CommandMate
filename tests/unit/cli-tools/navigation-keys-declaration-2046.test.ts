@@ -49,6 +49,7 @@ import {
   OPENCODE_NAVIGATION_KEY_VALUES,
   TERMINAL_KEY_VALUES,
 } from '@/types/terminal-keys';
+import { OPENCODE_V2_NAVIGATION_KEY_VALUES } from '@/lib/cli-tools/opencode-v2';
 
 /**
  * The claude-family tools, which declare `NAVIGATION_KEY_VALUES` **plus `s`**
@@ -62,9 +63,15 @@ import {
  */
 const SESSION_SCOPE_TOOLS: readonly CLIToolType[] = ['claude', 'command-code'];
 
+/**
+ * The tools with a leader of their own: opencode (#2046) and, since Issue #2966,
+ * OpenCode V2 — each pinned to its own list in its own `describe` below.
+ */
+const LEADER_TOOLS: readonly CLIToolType[] = ['opencode', 'opencode-v2'];
+
 /** Every tool whose key set is still exactly the pre-#2046 list. */
 const UNCHANGED_TOOLS: readonly CLIToolType[] = CLI_TOOL_IDS.filter(
-  (id) => id !== 'opencode' && !SESSION_SCOPE_TOOLS.includes(id),
+  (id) => !LEADER_TOOLS.includes(id) && !SESSION_SCOPE_TOOLS.includes(id),
 );
 
 const manager = CLIToolManager.getInstance();
@@ -95,14 +102,13 @@ describe('Issue #2046: every tool but opencode declares the pre-#2046 set, uncha
       'codex',
       'copilot',
       'gemini',
-      // Issue #2934: OpenCode V2 Phase 1 keeps the shared pad; its own quick
-      // keys (`shift+tab` agents, palette) are Phase 3's.
-      'opencode-v2',
+      // Issue #2966 moved OpenCode V2 off this list: its quick keys need the
+      // `ctrl+x` leader, `ctrl+p` / `ctrl+t` and three chord letters.
       'vibe-local',
     ]);
     // Issue #2250 put Command Code on the shared set; Issue #2297 moved it and
     // claude onto CLAUDE_NAVIGATION_KEY_VALUES. The union is still every tool.
-    expect([...UNCHANGED_TOOLS, ...SESSION_SCOPE_TOOLS, 'opencode'].sort()).toEqual(
+    expect([...UNCHANGED_TOOLS, ...SESSION_SCOPE_TOOLS, ...LEADER_TOOLS].sort()).toEqual(
       [...CLI_TOOL_IDS].sort(),
     );
   });
@@ -222,6 +228,42 @@ describe('Issue #2046: opencode declares its own chords', () => {
   it('does NOT publish `F2` (model_cycle_recent) — a real binding this Issue could not measure', () => {
     expect(spec.keys as readonly string[]).not.toContain('F2');
     expect(TERMINAL_KEY_VALUES as readonly string[]).not.toContain('F2');
+  });
+
+  it('has no duplicate entries', () => {
+    expect(new Set(spec.keys).size).toBe(spec.keys.length);
+  });
+});
+
+describe('Issue #2966: OpenCode V2 declares its own, narrower chords', () => {
+  const spec = manager.getTool('opencode-v2').navigationKeys();
+
+  it('publishes exactly OPENCODE_V2_NAVIGATION_KEY_VALUES: the base pad, the leader, C-p / C-t and a / l / m', () => {
+    // Equality, as for every other tool: a key gained is as much a regression
+    // as a key lost.
+    expect(spec.keys).toEqual([...OPENCODE_V2_NAVIGATION_KEY_VALUES]);
+    expect(spec.keys).toEqual([
+      ...NAVIGATION_KEY_VALUES,
+      OPENCODE_LEADER_KEY,
+      ...OPENCODE_DIRECT_KEY_VALUES,
+      'a',
+      'l',
+      'm',
+    ]);
+  });
+
+  it('names ctrl+x as the leader — the default 2.0.18’s palette prints', () => {
+    expect(spec.leaderKey).toBe('C-x');
+  });
+
+  it('does NOT publish the v1 chord letters 2.0.18 lets through into the composer', () => {
+    // `t` is not themes on 2.0.18; g / u / r / c are session-only and not on
+    // the v2 strip; `b` is #2046's refused sidebar toggle.
+    for (const letter of ['t', 'g', 'u', 'r', 'c', 'b']) {
+      expect(spec.keys, `opencode-v2 must not accept the bare letter ${letter}`).not.toContain(letter);
+    }
+    expect(spec.keys as readonly string[]).not.toContain('F2');
+    expect(spec.keys as readonly string[]).not.toContain(SESSION_SCOPE_KEY);
   });
 
   it('has no duplicate entries', () => {
