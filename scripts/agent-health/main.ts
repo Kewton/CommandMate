@@ -31,6 +31,7 @@ import {
   restoreTrustState,
   snapshotFile,
   type FileSnapshot,
+  type TrustStateComparator,
 } from '@/lib/agent-health/config-guard';
 import {
   buildToolResult,
@@ -210,13 +211,17 @@ async function run(options: AgentHealthOptions, startedAt: Date): Promise<AgentH
 
   let listener: HookListener | null = null;
   let tmux: AgentHealthTmux | null = null;
-  const pendingSnapshots: Array<{ snapshot: FileSnapshot; kind: 'hook-config' | 'trust-state' }> = [];
+  const pendingSnapshots: Array<{
+    snapshot: FileSnapshot;
+    kind: 'hook-config' | 'trust-state';
+    compare?: TrustStateComparator;
+  }> = [];
 
   const restorePending = () => {
     while (pendingSnapshots.length > 0) {
-      const { snapshot, kind } = pendingSnapshots.shift()!;
+      const { snapshot, kind, compare } = pendingSnapshots.shift()!;
       const entry =
-        kind === 'hook-config' ? restoreSnapshot(snapshot) : restoreTrustState(snapshot, WORK_PREFIX);
+        kind === 'hook-config' ? restoreSnapshot(snapshot) : restoreTrustState(snapshot, WORK_PREFIX, compare);
       restoreEntries.push(entry);
       log(`restore ${entry.path}: ${entry.restored ? 'ok' : `NOT restored (${entry.detail ?? ''})`}`);
     }
@@ -301,7 +306,10 @@ async function run(options: AgentHealthOptions, startedAt: Date): Promise<AgentH
       log(`── ${tool}`);
       const guarded = spec.guardedFiles();
       for (const file of guarded.hookConfig) pendingSnapshots.push({ snapshot: snapshotFile(file), kind: 'hook-config' });
-      for (const file of guarded.trustState) pendingSnapshots.push({ snapshot: snapshotFile(file), kind: 'trust-state' });
+      for (const file of guarded.trustState) {
+        const { path: filePath, compare } = typeof file === 'string' ? { path: file, compare: undefined } : file;
+        pendingSnapshots.push({ snapshot: snapshotFile(filePath), kind: 'trust-state', compare });
+      }
       serverLog.takeLinesContaining(PROBE_WORKTREE_ID);
 
       let outcome: { version: string | null; checks: AgentHealthCheck[] };
