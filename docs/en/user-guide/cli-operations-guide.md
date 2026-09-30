@@ -64,6 +64,7 @@ node bin/commandmate.js ls
 | [`commandmate verify`](#commandmate-verify) | Run the verification gates (`.commandmate/verify.yaml`) and read the run history |
 | [`commandmate task`](#commandmate-task) | List and inspect execution contracts (`.commandmate/tasks/*.yaml`) |
 | [`commandmate capture`](#commandmate-capture) | Get terminal output |
+| [`commandmate reply`](#commandmate-reply) | Get a session's latest reply (from its transcript) |
 | [`commandmate attach`](#commandmate-attach) | Attach this terminal to an agent's tmux session |
 | [`commandmate auto-yes`](#commandmate-auto-yes) | Control auto-yes |
 | [`commandmate instances`](#commandmate-instances) | List, add, remove, and rename agent instances (the roster) |
@@ -1110,6 +1111,42 @@ blends in with detected prompts**:
   `capture --json` call. **The server-side Auto-Yes poller alone does not record it.** That a stall
   nobody waited on leaves no trace is deliberate: the stall this feature exists to explain — one where
   something was waiting — is always under observation
+
+---
+
+## commandmate reply
+
+Prints the **latest reply** an instance wrote, read from the chat ledger rows the transcript readers write (Issue #3039).
+Use it to read the answer to a turn you did not send with `ask` (for example a supervisor's "stop and report" nudge)
+without knowing where the tool keeps its transcript file.
+
+### Usage
+
+```bash
+commandmate reply <worktree-id> --instance cc-1                                  # Reply body
+commandmate reply <worktree-id> --instance cc-1 --since 2026-09-30T12:00:00Z     # Only a reply at or after this time
+commandmate reply <worktree-id> --instance cc-1 --json
+```
+
+### Rules
+
+- Only rows a transcript reader wrote (`<tool>-turn:<id>`) count as a reply. `ask` reads through the same shared function,
+  so both mean the same thing by "reply". Furniture rows (`relay-sys:` / `model-changed:`) are skipped; ANSI and control
+  characters are stripped
+- Tools with a transcript reader: claude / codex / antigravity / command-code / opencode. Any other tool always reports
+  "no reply"
+- **The pane is never read**: a screen line cannot be attributed to a turn (the nudge's own echo is on it)
+- `--since` takes ISO 8601 and returns only a reply written **at or after** that time. `--instance` / `--agent` resolve as in `ask`
+
+### Output and exit codes
+
+| State | stdout | stderr | exit |
+|-------|--------|--------|------|
+| A reply exists | Body | Nothing | 0 |
+| No reply (no transcript row yet, or none after `--since`) | Empty | One line | 0 |
+| Server unreachable, etc. | Empty | Error | Same as the other CLI commands |
+
+`--json` prints `{ worktreeId, instanceId, cliToolId, reply, requestId, at }`; with no reply, `reply` / `requestId` / `at` are `null`.
 
 ---
 

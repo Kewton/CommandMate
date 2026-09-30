@@ -73,6 +73,7 @@ CM_PORT=3000 node bin/commandmate.js send abc123 "msg"
 | [`commandmate verify`](#commandmate-verify) | 検証ゲート（.commandmate/verify.yaml）の実行と検証履歴の参照 |
 | [`commandmate task`](#commandmate-task) | 実行契約（.commandmate/tasks/*.yaml）の一覧・詳細 |
 | [`commandmate capture`](#commandmate-capture) | ターミナル出力の取得 |
+| [`commandmate reply`](#commandmate-reply) | セッションの最新の返答（転写から）の取得 |
 | [`commandmate attach`](#commandmate-attach) | エージェントの tmux セッションにこの端末を attach |
 | [`commandmate auto-yes`](#commandmate-auto-yes) | Auto-Yesの制御 |
 | [`commandmate instances`](#commandmate-instances) | エージェントインスタンス（roster）の一覧・追加・削除・alias変更 |
@@ -1946,6 +1947,40 @@ JSON 出力（`prompts` は古い順）:
   `capture --json` を打った、のいずれかが必要です。**サーバ側の Auto-Yes ポーラ単独では
   記録されません**。誰も待っていない停滞は残らない、という制約は意図的なもので、
   この機能が説明したい停滞（＝何かが待っていた停滞）は必ず観測下にあるためです
+
+---
+
+## commandmate reply
+
+指定インスタンスが書いた**最新の返答**を、チャット台帳（転写リーダーが書いた行）から読みます（Issue #3039）。
+`ask` を使わずに送ったターン（例: 監督の「止めて報告」nudge）の返答を、転写ファイルの場所を知らずに読むためのものです。
+
+### 使用方法
+
+```bash
+commandmate reply <worktree-id> --instance cc-1                                  # 返答本文
+commandmate reply <worktree-id> --instance cc-1 --since 2026-09-30T12:00:00Z     # この時刻以降の返答のみ
+commandmate reply <worktree-id> --instance cc-1 --json
+```
+
+### 規則
+
+- 返答とみなすのは転写リーダーが書いた行（`<tool>-turn:<id>`）だけです。`ask` と同じ共有関数で読むので、
+  「返答」の定義は `ask` と一致します。furniture 行（`relay-sys:` / `model-changed:`）は除き、ANSI・制御文字は落とします
+- 転写リーダーがあるツール: claude / codex / antigravity / command-code / opencode。
+  それ以外のツールでは常に「返答なし」になります
+- **画面（pane）は読みません**。画面の行はターンに帰属できない（nudge 自身のエコーが混ざる）ためです
+- `--since` は ISO 8601。その時刻**以降**に書かれた返答だけを返します。`--instance` / `--agent` の解決は `ask` と同じです
+
+### 出力と終了コード
+
+| 状態 | stdout | stderr | exit |
+|------|--------|--------|------|
+| 返答あり | 本文 | なし | 0 |
+| 返答なし（まだ転写行が無い／`--since` 以降に無い） | 空 | 1 行 | 0 |
+| サーバに届かない等 | 空 | エラー | 既存 CLI と同じ |
+
+`--json` は `{ worktreeId, instanceId, cliToolId, reply, requestId, at }`。返答が無いときは `reply` / `requestId` / `at` が `null` です。
 
 ---
 
