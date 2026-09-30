@@ -333,7 +333,11 @@ export const CLAUDE_STARTUP_BANNER_PATTERN =
  * Measured on claude 2.1.284 (`tests/fixtures/claude-session-start-2955/`):
  *   `▝▜██████▀  Sonnet 5.5 · Claude Max`
  * The effort moved off this row to a right-aligned one of its own
- * ({@link CLAUDE_EFFORT_ROW_PATTERN}).
+ * ({@link CLAUDE_EFFORT_ROW_PATTERN}). Issue #3023 measured on 2.1.285 that
+ * this is the shape at the model's DEFAULT effort only: a non-default effort
+ * brings the clause back (`Opus 5.5 with xhigh effort · Claude Max`), which
+ * {@link CLAUDE_STARTUP_BANNER_PATTERN} reads
+ * (`tests/fixtures/claude-effort-default-3023/`).
  *
  * Without the `with … effort` anchor, a box-framed table row containing ` · `
  * would read as a banner — the reason #2361 declined to widen
@@ -361,6 +365,9 @@ export const CLAUDE_STARTUP_BANNER_V2_1_28X_PATTERN =
  * character (the dial changes with the level). The word goes through
  * {@link resolveEffortToken}, so anything outside the known levels reads as no
  * effort rather than as a guess.
+ *
+ * The row is drawn on the first frame only; after the first turn it is gone
+ * (Issue #3023), so a later frame reads the model and no effort.
  */
 export const CLAUDE_EFFORT_ROW_PATTERN = /^\s*\S\s+([A-Za-z]+)\s+·\s+\/effort\s*$/;
 
