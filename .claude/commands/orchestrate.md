@@ -400,7 +400,9 @@ success:
 >     **行キー（`| \`path\` |`）ごと**に列挙する。既存行への追記なら「どの行に何を足すか」を書く。
 >     **既存行に足すときは `grep -n '^| \`<path>\`' docs/module-reference.md` を実行し、その出力
 >     （行番号つきの行キー）を断片に書き写してから**書くこと。0 件だった行への追記を指示しない
->     （新しい行を足すなら「新規行」と明記する）。足すものが無ければ「追記なし」の 1 行でよい。実例:
+>     （新しい行を足すなら「新規行」と明記する）。**ファイルの行が 0 件なら、親ディレクトリの行
+>     （`grep -n '^| \`<dir>/\`' docs/module-reference.md`。例 `src/lib/agent-health/`）も探し、あればそこに足す。**
+>     足すものが無ければ「追記なし」の 1 行でよい。実例:
 >
 >     ```markdown
 >     ## 既存行への追記
@@ -672,7 +674,8 @@ set_claude_model() {  # <worktree-path> <opus|sonnet>
 }
 
 # assign.tsv は 1-2b の結果（1 行 = "<issue>\t<claude|antigravity>\t<opus|sonnet|->"）。3 列目は Claude のモデル
-while IFS="$(printf '\t')" read -r issue AGENT MODEL; do
+# assign.tsv は fd 3 から読む（stdin にすると、ループの中の commandmatedev が残りの行を読み尽くす。下の注を参照）
+while IFS="$(printf '\t')" read -r issue AGENT MODEL <&3; do
   WT=$(commandmatedev ls --branch "feature/${issue}" --quiet)
   if [ "$AGENT" = claude ]; then
     WT_PATH=$(commandmatedev ls --json | jq -r --arg id "$WT" '.[] | select(.id == $id) | .path')
@@ -687,6 +690,10 @@ while IFS="$(printf '\t')" read -r issue AGENT MODEL; do
     > "workspace/orchestration/runs/$DATE/send-${issue}.out" 2> "workspace/orchestration/runs/$DATE/send-${issue}.err"
   echo "exit=$? issue=${issue}"
   TASK_ID=$(head -1 "workspace/orchestration/runs/$DATE/send-${issue}.out")
+  # 送れたことは exit code ではなく、サーバーに task ができたことで確かめる
+  curl -s "http://localhost:3000/api/worktrees/$WT/tasks" \
+    | jq -e --arg id "$TASK_ID" '.tasks[] | select(.id == $id)' > /dev/null \
+    && echo "task ok issue=${issue} id=${TASK_ID}" || echo "task MISSING issue=${issue}"
   printf '%s\t%s\t%s\t%s\t%s\n' "$issue" "$WT" "$AGENT" "$TASK_ID" "$MODEL" >> "workspace/orchestration/runs/$DATE/tasks.tsv"
   if [ "$AGENT" = claude ]; then
     # 起動したセッションが実際にどのモデルで動いているかを確かめる（SessionStart の hook とバナーから読まれる）
@@ -697,8 +704,16 @@ while IFS="$(printf '\t')" read -r issue AGENT MODEL; do
       *)          echo "model MISMATCH issue=${issue} want=${MODEL} got=${GOT}" ;;
     esac
   fi
-done < "workspace/orchestration/runs/$DATE/assign.tsv"
+done 3< "workspace/orchestration/runs/$DATE/assign.tsv"
 ```
+
+**assign.tsv を stdin で読まない**（2026-09-30 実測）: `while read …; done < assign.tsv` にすると、
+ループの中の `commandmatedev`（`ls` / `send` / `capture`）が stdin を読み、残りの行を消費する。
+その run では 1 件目の `send` の前でループが止まり、**約 90 分、ワーカーが 1 人も起動していないのに「送信中」と報告した**
+（send の出力ファイルは 1 つも作られず、`GET /api/worktrees/<WT>/tasks` は空だった）。
+上の雛形は fd 3 から読むので、ループの中のコマンドに `</dev/null` を付けなくてよい。雛形を書き換えて使うときも、
+stdin で読む形に戻さないこと。ループを使わずに 1 件ずつ送るときは、各 `commandmatedev` に `</dev/null` を付ける。
+`task MISSING` が出たら、その Issue は送れていない。`send-<issue>.err` を読み、3-1 の「冷間起動の失敗」に従って再送する。
 
 **モデルの確認結果の扱い**:
 
@@ -1351,6 +1366,20 @@ summary.md の末尾に「振り分けの改善案」節を書き、完了報告
 2. **原因の見立て**: 判定表のどの観点が外れたか。または、道具のどの欠陥か
 3. **改善案**: 判定表の条件の足し引き、goal の雛形（2-4-2）の追記、道具の Issue 起票の要否。
    起票はユーザーの了承を得てから行う
+
+**起票の前に、同じ不具合の開いている Issue を探す**（UAT の指摘・ワーカーの報告・8-3 の改善案のどれでも）。
+日次確認（`agent-health`）は、毎朝 07:00 の Schedule が `<!-- agent-health:<tool>:<checkId> -->` を本文に入れた Issue を自動で起票する。
+並行する別のセッションやワーカーが、先に起票していることもある。
+
+```bash
+gh issue list --repo Kewton/CommandMate --state open --label agent-health --json number,title,createdAt
+gh issue list --repo Kewton/CommandMate --state open --search "<ファイル名か関数名> in:body" --json number,title,createdAt
+```
+
+見つかったら新しく起票せず、その Issue に追加の事実をコメントする。自動起票の Issue は残す
+（翌朝の Schedule は `agent-health:<tool>:<checkId>` を本文に持つ開いた Issue を探してコメントするので、手で起票した別の Issue では重複を防げない）。
+2026-09-30 に 2 回、この確認をせずに重複を起票した: #3024（日次確認が 36 分前に #3021 / #3022 を起票済み）と
+#3031（同じ朝に別のセッションかワーカーが #3026 を起票済み）。
 
 ---
 
