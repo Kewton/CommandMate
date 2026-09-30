@@ -474,11 +474,18 @@ export type ToolLivenessVerdict =
  * | `manual`        | claude                           | `⏸ manual mode on`              |
  * | `auto`          | claude                           | `⏵⏵ auto mode on`               |
  * | `accept-edits`  | claude / Command Code / agy      | `⏵⏵ accept edits on`, `» accept edits on`, `accept-edits ·` |
- * | `plan`          | all five                         | `⏸ plan mode on`, `plan mode`, `Plan mode (shift+tab to cycle)`, `plan` |
+ * | `plan`          | all six                          | `⏸ plan mode on`, `plan mode`, `Plan mode (shift+tab to cycle)`, `plan`, `┃  Plan · <model>` |
  * | `autopilot`     | copilot                          | `autopilot` in the hint bar     |
  * | `bypass`        | Command Code (NOT in its cycle)  | `» permission bypass on`        |
  * | `dont-ask`      | Command Code (NOT in its cycle)  | `» don't-ask on`                |
  * | `default`       | Command Code                     | `? for shortcuts` (its own row) |
+ * | `build`         | OpenCode V2 (Issue #3038)        | `┃  Build · <model>` under the composer |
+ *
+ * `build` is OpenCode V2's AGENT, not a permission mode, and it is its own id
+ * rather than `default` on purpose: the chip says what the pane says (#2592).
+ * OpenCode V2's `shift+tab` toggles `Build` ⇄ `Plan` agents, and the button
+ * carries the `opencodeAgentSwitch` note so the "permission mode" wording of
+ * its aria label is not the whole story.
  *
  * `bypass` and `dont-ask` are declared even though `shift+tab` cannot REACH
  * them, and that is the point: a user who put Command Code in one of those from
@@ -496,6 +503,7 @@ export const AGENT_MODE_IDS = [
   'autopilot',
   'bypass',
   'dont-ask',
+  'build',
 ] as const;
 
 /** One permission mode a supported CLI can be in. */
@@ -555,7 +563,7 @@ export interface AgentModeIndicator {
  * translated (`.eslintrc.json`'s i18n rule, Issue #1271), and because the tool
  * declaring it has no way to call `useTranslations()`.
  */
-export const AGENT_MODE_NOTE_IDS = ['codexModelCoupled'] as const;
+export const AGENT_MODE_NOTE_IDS = ['codexModelCoupled', 'opencodeAgentSwitch'] as const;
 
 /** Which caution one tool's mode button carries, if any. */
 export type AgentModeNoteId = typeof AGENT_MODE_NOTE_IDS[number];
@@ -591,7 +599,7 @@ export type AgentModeNoteId = typeof AGENT_MODE_NOTE_IDS[number];
  */
 export interface AgentModeSpec {
   /**
-   * The key that advances the cycle — `BTab` for all five declaring tools.
+   * The key that advances the cycle — `BTab` for all six declaring tools.
    *
    * Declared rather than hard-coded so the invariant above is checkable, and so
    * a tool that moves its binding changes one line.
@@ -629,10 +637,14 @@ export interface AgentModeSpec {
   /**
    * A caution this tool's button must carry, or `null`.
    *
-   * codex alone today: its modes are coupled to the model and reasoning effort
+   * codex: its modes are coupled to the model and reasoning effort
    * (`xhigh` ⇄ `medium`, measured 2026-09-16), so one press of a button labelled
    * "mode" also moves the model tier. Issue #2592 §「設計に効く事実」4 requires
    * that be visible rather than discovered.
+   *
+   * OpenCode V2 (Issue #3038): its `shift+tab` switches the AGENT (`Build`,
+   * which edits, ⇄ `Plan`, which only reads) rather than a permission mode, so
+   * the note says what the button actually switches.
    */
   readonly noteId: AgentModeNoteId | null;
 }

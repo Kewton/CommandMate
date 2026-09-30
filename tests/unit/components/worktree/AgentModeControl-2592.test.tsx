@@ -69,20 +69,20 @@ describe('[#2592] which tools get a control at all', () => {
     expect(screen.getByTestId('agent-mode-control')).toBeTruthy();
   });
 
-  it.each(['opencode', 'opencode-v2', 'vibe-local', 'gemini'] as const)(
+  it.each(['opencode', 'vibe-local', 'gemini'] as const)(
     'renders nothing at all for %s',
     (cliToolId) => {
       // opencode's `BTab` switches AGENTS and already has its own button
       // (#2046); vibe-local has no binding; gemini's footer was never measured.
-      // OpenCode V2: `shift+tab` switches agents there too (measured on
-      // 2.0.18, #2966) and is its quick keys' `agentNext`, so no mode cycle.
+      // OpenCode V2 is no longer here (Issue #3038): its `shift+tab` moved from
+      // the quick keys to this control.
       const { container } = renderControl({ cliToolId });
       expect(container).toBeEmptyDOMElement();
     },
   );
 
   it('covers every supported tool between those two lists', () => {
-    const covered = [...AGENT_MODE_TOOL_IDS, 'opencode', 'opencode-v2', 'vibe-local', 'gemini'];
+    const covered = [...AGENT_MODE_TOOL_IDS, 'opencode', 'vibe-local', 'gemini'];
     expect([...covered].sort()).toEqual([...CLI_TOOL_IDS].sort());
   });
 });
