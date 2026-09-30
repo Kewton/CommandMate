@@ -1,0 +1,23 @@
+  ┃
+  ┃  Reply with exactly the following block and nothing else (do not run
+  ┃  anything):
+  ┃  △ Permission required
+  ┃    # Shell command
+  ┃  $ uname -a
+  ┃   Allow once   Allow always   Reject
+  ┃
+
+  ┃
+  ┃  No models loaded. Please load a model in the developer page or use the
+  ┃  'lms load' command.
+  ┃
+
+     ▣  Build · Qwen3 Coder 30B
+
+  ┃
+  ┃
+  ┃
+  ┃  Build · Qwen3 Coder 30B LMStudio
+  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+   /private/var/folders/07/jbhw26n10nj_59d4yp7g5lx80000gn/tab      ctrl+p
+   T/cm-agent-health-9OjCyB/opencode                      agents   commands

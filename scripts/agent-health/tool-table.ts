@@ -75,12 +75,24 @@ export interface ToolProbeSpec {
    */
   launchEnv?: (workDir: string) => Record<string, string>;
   /**
+   * Files copied (read-only on the `from` side) into the isolated state that
+   * `launchEnv` points at, before launch. For settings the user's own state
+   * carries and the CLI would otherwise fall back from — never history.
+   */
+  seedFiles?: (workDir: string) => Array<{ from: string; to: string }>;
+  /**
    * `opencode-v2`: the launch goes through `scripts/opencode-v2/launch.sh`
    * with a reserved port and password (the production path), and the
    * `hook-correlation` slot checks that server's SSE instead of hooks
    * (Issue #2937).
    */
   server?: 'opencode-v2';
+}
+
+/** `$XDG_STATE_HOME`, or its XDG default `~/.local/state`. */
+export function userStateHome(env: Readonly<Record<string, string | undefined>> = process.env): string {
+  const configured = env.XDG_STATE_HOME;
+  return configured && path.isAbsolute(configured) ? configured : path.join(os.homedir(), '.local', 'state');
 }
 
 const RUNNING_PROMPT = 'Run the shell command: sleep 20';
@@ -235,6 +247,18 @@ export const TOOL_PROBE_SPECS: Record<AgentHealthTool, ToolProbeSpec> = {
     // The TUI keeps prompt history, model picks and locks in $XDG_STATE_HOME/opencode.
     // Pointed next to the work dir so none of the user's files is written.
     launchEnv: (workDir) => ({ XDG_STATE_HOME: `${workDir}-xdg-state` }),
+    // Issue #3021 / #3022: the model pick lives in that same state dir
+    // (`opencode/model.json`, `recent[0]` is the model the TUI starts on). An
+    // empty dir made opencode 1.18.33 start on its built-in default (LM Studio's
+    // `Qwen3 Coder 30B` here), which answered every turn with "No models
+    // loaded" — no running screen, no finished-turn marker. Only the model
+    // pick is copied; the prompt history stays out.
+    seedFiles: (workDir) => [
+      {
+        from: path.join(userStateHome(), 'opencode', 'model.json'),
+        to: path.join(`${workDir}-xdg-state`, 'opencode', 'model.json'),
+      },
+    ],
     guardedFiles: () => ({ hookConfig: [], trustState: [] }),
   },
 

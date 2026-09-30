@@ -132,6 +132,22 @@ export function buildProbeLaunchCommand(spec: ToolProbeSpec, renderedLaunch: str
   return [...env, renderedLaunch, ...spec.launchFlags(workDir).map(shellQuote)].join(' ');
 }
 
+/**
+ * Copy `spec.seedFiles` into the isolated state before launch (Issue #3021).
+ * A missing source is not an error — the CLI then starts on its own default,
+ * as it would for a user who never picked anything. Returns what was copied.
+ */
+export function seedStateFiles(seeds: Array<{ from: string; to: string }>): string[] {
+  const copied: string[] = [];
+  for (const { from, to } of seeds) {
+    if (!fs.existsSync(from)) continue;
+    fs.mkdirSync(path.dirname(to), { recursive: true });
+    fs.copyFileSync(from, to);
+    copied.push(to);
+  }
+  return copied;
+}
+
 /** Everything one session needs; one instance per tool. */
 class ToolSession {
   readonly name: string;
@@ -220,7 +236,11 @@ class ToolSession {
         }
       }
       if (last.frame === previous) {
-        if (Date.now() - stableSince >= 2 * POLL_MS && Date.now() - startedAt >= 4000) return last;
+        // A blank pane is a TUI still booting (seen with opencode under load,
+        // Issue #3021): taking it for the idle screen also sends the next
+        // request into a composer that does not exist yet.
+        const painted = last.clean.trim() !== '';
+        if (painted && Date.now() - stableSince >= 2 * POLL_MS && Date.now() - startedAt >= 4000) return last;
       } else {
         previous = last.frame;
         stableSince = Date.now();
@@ -464,6 +484,9 @@ export async function probeTool(ctx: ProbeContext): Promise<ProbeOutcome> {
     }
   }
   const command = buildProbeLaunchCommand(spec, rendered, workDir);
+  for (const seeded of seedStateFiles(spec.seedFiles?.(workDir) ?? [])) {
+    ctx.log(`${spec.tool}: seeded ${seeded}`);
+  }
   ctx.log(`${spec.tool}: launching — ${command}`);
 
   let recorder: ServerEventRecorder | null = null;
