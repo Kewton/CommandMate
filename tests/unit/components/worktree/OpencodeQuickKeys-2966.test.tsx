@@ -122,7 +122,7 @@ describe('[#2966] each v2 button sends the measured keys as one request', () => 
 });
 
 describe('[#2966] the disclosure counts the v2 table, not v1’s', () => {
-  it('says 11 on the v2 toggle and 17 on the v1 toggle', () => {
+  it('says 10 on the v2 toggle and 17 on the v1 toggle', () => {
     const { unmount } = renderStrip({ collapsible: true, layout: 'desktop' });
     // Issue #3038: ten since `agentNext` (shift+tab) moved to the mode button.
     expect(screen.getByTestId('opencode-quick-keys-toggle').textContent).toContain('10');

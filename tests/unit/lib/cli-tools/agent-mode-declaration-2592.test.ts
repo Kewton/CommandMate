@@ -216,7 +216,7 @@ describe('[#2592] the shape of each declaration', () => {
     }
   });
 
-  it('carries the codex model-coupling caution, and nobody else carries one', () => {
+  it('carries the codex model-coupling caution, and no one else but opencode-v2 carries one', () => {
     // #2592 §「設計に効く事実」4: codex's modes move the model tier and the
     // reasoning effort with them (xhigh <-> medium, measured), so one press of a
     // button labelled "mode" also changes the model. That has to be printed, not
