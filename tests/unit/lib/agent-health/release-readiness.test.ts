@@ -27,6 +27,7 @@ import {
   type DispatchedIssueRow,
   type PullRequestInfo,
   type ReadinessFacts,
+  selectRunFiles,
 } from '@/lib/agent-health/release-readiness';
 
 function row(overrides: Partial<DispatchedIssueRow> = {}): DispatchedIssueRow {
@@ -435,5 +436,35 @@ describe('parseReleaseReportArgs', () => {
     expect(parseReleaseReportArgs(['--repo', 'nope'], 'x').ok).toBe(false);
     expect(parseReleaseReportArgs(['--bogus'], 'x').ok).toBe(false);
     expect(parseReleaseReportArgs(['--help'], 'x')).toMatchObject({ ok: false, help: true });
+  });
+});
+
+describe('selectRunFiles (#3045)', () => {
+  const files = [
+    'plan-3050-3051.md',
+    'plan-9000.md',
+    'summary-3050-3051.md',
+    'summary.md',
+    'tasks-3050-3051.tsv',
+    'tasks.tsv',
+    'wait-3050.log',
+    'wait-3051-r2.log',
+    'wait-9000.log',
+    'notes.txt',
+  ];
+
+  it('keeps every file without a suffix', () => {
+    expect(selectRunFiles(files, undefined)).toEqual(files);
+  });
+
+  it('keeps the suffixed run files and the wait logs of its Issues', () => {
+    expect(selectRunFiles(files, '3050-3051')).toEqual([
+      'plan-3050-3051.md',
+      'summary-3050-3051.md',
+      'tasks-3050-3051.tsv',
+      'wait-3050.log',
+      'wait-3051-r2.log',
+      'notes.txt',
+    ]);
   });
 });

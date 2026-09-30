@@ -160,3 +160,32 @@ describe('release-report main', () => {
     expect(html).not.toContain('取得できなかった事実');
   });
 });
+
+describe('release-report main with a runSuffix (#3045)', () => {
+  it('reads only the run files of the dispatched run', async () => {
+    write(
+      path.join(stateDir, 'dispatch', '2026-10-01.json'),
+      JSON.stringify({
+        schemaVersion: 1,
+        date: '2026-10-01',
+        status: 'sent',
+        issues: [{ number: 3050, kind: 'bug', title: 'x' }],
+        deferred: [],
+        runSuffix: '3050',
+      })
+    );
+    const day = path.join(runsDir, '2026-10-01');
+    write(path.join(day, 'summary-3050.md'), '- mine\n');
+    write(path.join(day, 'summary-9000-9001.md'), '- another run\n');
+    write(path.join(day, 'summary.md'), '- unsuffixed\n');
+    write(path.join(day, 'tasks-3050.tsv'), '3050\tcommandmate-issue-3050\tclaude\tid\topus\n');
+    write(path.join(day, 'tasks-9000-9001.tsv'), '3050\tcommandmate-issue-3050\tcodex\tid\tgpt\n');
+    const { code, html } = await run(['--no-gh', '--no-audit']);
+    expect(code).toBe(0);
+    expect(html).toContain('summary-3050.md');
+    expect(html).not.toContain('another run');
+    expect(html).not.toContain('unsuffixed');
+    expect(html).toContain('claude (opus)');
+    expect(html).not.toContain('codex (gpt)');
+  });
+});

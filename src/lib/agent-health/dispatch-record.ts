@@ -33,12 +33,23 @@ export interface DispatchRecord {
   issues: DispatchIssue[];
   /** Issue numbers that were candidates but carried over to a later day. */
   deferred: number[];
+  /**
+   * The Issue numbers handed to orchestrate joined by `-` (e.g. `3050-3051`), so
+   * the run files are `summary-<runSuffix>.md` / `tasks-<runSuffix>.tsv` (#3045).
+   * Absent in older records: the report then reads every run file of the day.
+   */
+  runSuffix?: string;
+  /** Why the dispatch did not go as planned (a missing label, a failed send …), when it did not. */
+  reason?: string;
 }
 
 /** `<baseDir>/dispatch/<date>.json` (`baseDir` is `~/.commandmate/agent-health` in production). */
 export function dispatchRecordPath(baseDir: string, date: string): string {
   return path.join(baseDir, 'dispatch', `${date}.json`);
 }
+
+/** `3050` or `3050-3051-…`: only digits and dashes, so it is safe inside a file name. */
+export const RUN_SUFFIX_RE = /^\d+(?:-\d+)*$/;
 
 function isPositiveInteger(value: unknown): value is number {
   return typeof value === 'number' && Number.isInteger(value) && value > 0;
@@ -81,5 +92,7 @@ export function parseDispatchRecord(text: string | null): DispatchRecord | null 
     ...(typeof raw.sentAt === 'string' ? { sentAt: raw.sentAt } : {}),
     issues,
     deferred,
+    ...(typeof raw.runSuffix === 'string' && RUN_SUFFIX_RE.test(raw.runSuffix) ? { runSuffix: raw.runSuffix } : {}),
+    ...(typeof raw.reason === 'string' ? { reason: raw.reason } : {}),
   };
 }
