@@ -30,7 +30,9 @@ import {
   COMMAND_CODE_COMMAND,
   COMMAND_CODE_LAUNCH_FLAGS,
   COMMAND_CODE_EXIT_COMMAND,
+  COMMAND_CODE_STARTING_WINDOW_MS,
 } from '@/lib/cli-tools/command-code';
+import { SESSION_STARTING_CODE } from '@/lib/session/session-start-error';
 import { getCommandCodeSettingsPath } from '@/lib/hooks/sources/command-code/hooks-config';
 import { getAgentEventGenerationStartedAt } from '@/lib/session/agent-event-state';
 import type { CLIToolType } from '@/lib/cli-tools/types';
@@ -357,6 +359,184 @@ describe('CommandCodeTool', () => {
         await assertion;
 
         expect(sendMessageWithSubmitVerification).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
+  /**
+   * Issue #3006: a dispatch's first send to a Command Code session it has just
+   * launched failed with `prompt not ready` (exit 99) whenever the composer was
+   * later than the ~48 s the launch and the send wait between them. That is a
+   * slow start, and it now reads as one — `SESSION_STARTING`, what claude says
+   * — while a session that has already shown its composer keeps the old error.
+   */
+  describe('a send the composer is late for (#3006)', () => {
+    /** What a pane still loading Command Code shows: no composer yet. */
+    const BOOTING = "user@host wt % CM_PORT='60301' commandcode --trust --skip-onboarding --no-auto-update";
+
+    async function arrange(): Promise<{ capturePane: ReturnType<typeof vi.fn> }> {
+      const { hasSession, capturePane } = await import('@/lib/tmux/tmux');
+      vi.spyOn(tool, 'isInstalled').mockResolvedValue(true);
+      // The relaunch probe is #2070's business; here the agent is alive.
+      vi.spyOn(
+        tool as unknown as { relaunchIfToolExited: () => Promise<void> },
+        'relaunchIfToolExited',
+      ).mockResolvedValue(undefined);
+      vi.mocked(hasSession).mockResolvedValue(false);
+      return { capturePane: vi.mocked(capturePane) };
+    }
+
+    async function launch(): Promise<void> {
+      const { hasSession } = await import('@/lib/tmux/tmux');
+      const started = tool.startSession('test-wt', '/path/to/wt');
+      await vi.advanceTimersByTimeAsync(40000);
+      await started;
+      vi.mocked(hasSession).mockResolvedValue(true);
+    }
+
+    async function sendAndCatch(): Promise<unknown> {
+      const sent = tool.sendMessage('test-wt', 'hello').then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      await vi.advanceTimersByTimeAsync(20000);
+      return sent;
+    }
+
+    it('reports SESSION_STARTING when a just-launched session has not shown its composer', async () => {
+      vi.useFakeTimers();
+      try {
+        const { capturePane } = await arrange();
+        const { sendMessageWithSubmitVerification } = await import(
+          '@/lib/cli-tools/submit-verified-sender'
+        );
+        capturePane.mockResolvedValue(BOOTING);
+
+        await launch();
+        const error = await sendAndCatch();
+
+        expect(error).toBeInstanceOf(Error);
+        expect((error as { code?: string }).code).toBe(SESSION_STARTING_CODE);
+        // Unwrapped: "Failed to send message to …" would hide the code's meaning.
+        expect((error as Error).message).not.toContain('Failed to send message');
+        expect((error as Error).message).toMatch(/retry/i);
+        expect(sendMessageWithSubmitVerification).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('sends normally once the late composer does appear', async () => {
+      vi.useFakeTimers();
+      try {
+        const { capturePane } = await arrange();
+        const { sendMessageWithSubmitVerification } = await import(
+          '@/lib/cli-tools/submit-verified-sender'
+        );
+        capturePane.mockResolvedValue(BOOTING);
+        await launch();
+
+        capturePane.mockResolvedValue(frame('boot-idle'));
+        const error = await sendAndCatch();
+
+        expect(error).toBeUndefined();
+        expect(sendMessageWithSubmitVerification).toHaveBeenCalledTimes(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('keeps `prompt not ready` for a session that has already shown its composer', async () => {
+      vi.useFakeTimers();
+      try {
+        const { capturePane } = await arrange();
+        capturePane.mockResolvedValue(frame('boot-idle'));
+        await launch();
+
+        // The previous turn left a dialog up: the session is running, and
+        // something on screen is in the way. #3007 reads the screen for this.
+        capturePane.mockResolvedValue(frame('dialog-create-file'));
+        const error = await sendAndCatch();
+
+        expect((error as Error).message).toMatch(/prompt not ready/i);
+        expect((error as { code?: string }).code).toBeUndefined();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('keeps `prompt not ready` once the composer has been seen by an earlier send', async () => {
+      vi.useFakeTimers();
+      try {
+        const { capturePane } = await arrange();
+        capturePane.mockResolvedValue(BOOTING);
+        await launch();
+        capturePane.mockResolvedValue(frame('boot-idle'));
+        expect(await sendAndCatch()).toBeUndefined();
+
+        capturePane.mockResolvedValue(frame('dialog-create-file'));
+        const error = await sendAndCatch();
+
+        expect((error as Error).message).toMatch(/prompt not ready/i);
+        expect((error as { code?: string }).code).toBeUndefined();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('keeps `prompt not ready` for a session this server did not launch', async () => {
+      vi.useFakeTimers();
+      try {
+        const { capturePane } = await arrange();
+        const { hasSession } = await import('@/lib/tmux/tmux');
+        vi.mocked(hasSession).mockResolvedValue(true);
+        capturePane.mockResolvedValue(BOOTING);
+
+        const error = await sendAndCatch();
+
+        expect((error as Error).message).toMatch(/prompt not ready/i);
+        expect((error as { code?: string }).code).toBeUndefined();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('stops calling it a slow start once the starting window has passed', async () => {
+      vi.useFakeTimers();
+      try {
+        const { capturePane } = await arrange();
+        capturePane.mockResolvedValue(BOOTING);
+        await launch();
+
+        await vi.advanceTimersByTimeAsync(COMMAND_CODE_STARTING_WINDOW_MS);
+        const error = await sendAndCatch();
+
+        expect((error as Error).message).toMatch(/prompt not ready/i);
+        expect((error as { code?: string }).code).toBeUndefined();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('forgets the pending launch when the session is killed', async () => {
+      vi.useFakeTimers();
+      try {
+        const { capturePane } = await arrange();
+        const { hasSession } = await import('@/lib/tmux/tmux');
+        capturePane.mockResolvedValue(BOOTING);
+        await launch();
+
+        const killed = tool.killSession('test-wt');
+        await vi.advanceTimersByTimeAsync(10000);
+        await killed;
+        // A pane under the same name that this instance did not launch.
+        vi.mocked(hasSession).mockResolvedValue(true);
+        const error = await sendAndCatch();
+
+        expect((error as Error).message).toMatch(/prompt not ready/i);
+        expect((error as { code?: string }).code).toBeUndefined();
       } finally {
         vi.useRealTimers();
       }

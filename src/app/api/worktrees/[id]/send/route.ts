@@ -460,6 +460,16 @@ export async function POST(
           { status: 409 }
         );
       }
+      // Issue #3006: the session this request (or one just before it) launched
+      // has not shown its input prompt yet. Answered exactly as a slow start
+      // above is — 503 + SESSION_STARTING, message unwrapped — so the CLI and
+      // dispatch read one "still starting, retry" whichever step noticed it.
+      if (result.code === SESSION_STARTING_CODE) {
+        return NextResponse.json(
+          { error: result.error, code: SESSION_STARTING_CODE },
+          { status: 503 }
+        );
+      }
       if (result.stage === 'model') {
         return NextResponse.json(
           { error: `Failed to switch model to ${body.model}: ${result.error}` },

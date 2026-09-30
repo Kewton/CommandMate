@@ -69,6 +69,10 @@ import {
   COMMAND_CODE_INIT_WAIT_MS,
 } from '@/config/cli-tool-timing-config';
 import { missingToolError } from './install-hints';
+import {
+  SessionStartTimeoutError,
+  isSessionStartTimeoutError,
+} from '@/lib/session/session-start-error';
 
 const logger = createLogger('cli-tools/command-code');
 
@@ -133,6 +137,17 @@ const COMMAND_CODE_INIT_MAX_ATTEMPTS = 30;
 /** Timeout for waiting for the composer before sending a message. */
 const COMMAND_CODE_PROMPT_WAIT_TIMEOUT_MS = 15000;
 
+/**
+ * How long after a launch a composer that has never been seen still counts as
+ * "starting" (Issue #3006).
+ *
+ * Past this, a pane that has shown no composer since it was launched is not
+ * slow, it is stuck on something (an unmeasured dialog, a crash screen), and
+ * `prompt not ready` — which #3007 answers by reading the screen — is the
+ * truer report than "retry in a few seconds".
+ */
+export const COMMAND_CODE_STARTING_WINDOW_MS = 120_000;
+
 /** Rows of pane tail the readiness probe reads. */
 const COMMAND_CODE_READINESS_CAPTURE_LINES = 50;
 
@@ -169,6 +184,21 @@ export class CommandCodeTool extends BaseCLITool {
   readonly id: CLIToolType = 'command-code';
   readonly name = 'Command Code CLI';
   readonly command = COMMAND_CODE_COMMAND;
+
+  /**
+   * Sessions this instance launched whose composer has not been seen since,
+   * keyed by tmux session name, valued by launch time (Issue #3006).
+   *
+   * This is what tells a slow cold start apart from a live session that is
+   * showing something other than the composer. Only the launch path adds an
+   * entry, and any readiness probe that sees the composer removes it, so a
+   * session that has ever reached its composer keeps the old
+   * `prompt not ready` refusal. Held per instance rather than per module
+   * because `CLIToolManager` holds one instance for the process, and a restart
+   * forgets it — which errs towards `prompt not ready`, the answer this
+   * repository gave before.
+   */
+  private readonly composerPendingSince = new Map<string, number>();
 
   /**
    * Declare the claude-family pad (Issue #2297).
@@ -249,6 +279,10 @@ export class CommandCodeTool extends BaseCLITool {
     // and trusting a dead session's events is not.
     beginAgentSession({ worktreeId, cliToolId: COMMAND_CODE_CLI_TOOL_ID, instanceId });
 
+    // Issue #3006: from here until a readiness probe sees the composer, a send
+    // that cannot find it is reporting a slow start, not a wedged session.
+    this.composerPendingSince.set(sessionName, Date.now());
+
     try {
       if (!exists) {
         // Inline-rendered, so the pane keeps scrollback; depth comes from the
@@ -276,6 +310,7 @@ export class CommandCodeTool extends BaseCLITool {
 
       logger.info('started-command-code-session');
     } catch (error: unknown) {
+      this.composerPendingSince.delete(sessionName);
       throw new Error(`Failed to start Command Code session: ${getErrorMessage(error)}`);
     }
   }
@@ -294,6 +329,7 @@ export class CommandCodeTool extends BaseCLITool {
       try {
         const rawOutput = await capturePane(sessionName, COMMAND_CODE_READINESS_CAPTURE_LINES);
         if (isCommandCodeReady(rawOutput)) {
+          this.composerPendingSince.delete(sessionName);
           logger.info('command-code-prompt-detected');
           return;
         }
@@ -310,6 +346,15 @@ export class CommandCodeTool extends BaseCLITool {
    * Mirrors CodexTool.waitForPrompt: throws on timeout so a failed readiness
    * check STOPS the send rather than typing into a non-ready TUI.
    *
+   * Issue #3006: when the session was launched by this server and its composer
+   * has not been seen once since — the cold start of a dispatch — the timeout
+   * is a {@link SessionStartTimeoutError} (`SESSION_STARTING`, 503 at the send
+   * route), the same answer claude gives for a start that is merely slow. A
+   * session that HAS shown its composer keeps the plain `prompt not ready`
+   * error: it is up, and something on screen is in the way.
+   *
+   * @throws SessionStartTimeoutError when a just-launched session's composer
+   *   has still not appeared
    * @throws Error when the composer is not detected within the timeout
    */
   private async waitForPrompt(sessionName: string): Promise<void> {
@@ -319,12 +364,23 @@ export class CommandCodeTool extends BaseCLITool {
       try {
         const rawOutput = await capturePane(sessionName, COMMAND_CODE_READINESS_CAPTURE_LINES);
         if (isCommandCodeReady(rawOutput)) {
+          this.composerPendingSince.delete(sessionName);
           return;
         }
       } catch {
         // Capture may fail - continue polling
       }
       await new Promise((resolve) => setTimeout(resolve, pollInterval));
+    }
+    const launchedAt = this.composerPendingSince.get(sessionName);
+    if (launchedAt !== undefined) {
+      const sinceLaunchMs = Date.now() - launchedAt;
+      if (sinceLaunchMs <= COMMAND_CODE_STARTING_WINDOW_MS) {
+        logger.info('command-code-session-still-starting', { sessionName, sinceLaunchMs });
+        throw new SessionStartTimeoutError(this.name, sessionName, sinceLaunchMs);
+      }
+      // Too long since the launch to call it slow; report it as not ready.
+      this.composerPendingSince.delete(sessionName);
     }
     logger.info('command-code-prompt-not-ready');
     throw new Error(
@@ -369,6 +425,8 @@ export class CommandCodeTool extends BaseCLITool {
 
       logger.info('sent-message-to-command-code-session');
     } catch (error: unknown) {
+      // Issue #3006: passed through unwrapped so its `code` reaches the route.
+      if (isSessionStartTimeoutError(error)) throw error;
       throw new Error(`Failed to send message to Command Code: ${getErrorMessage(error)}`);
     }
   }
@@ -398,6 +456,7 @@ export class CommandCodeTool extends BaseCLITool {
       }
 
       const killed = await killSession(sessionName);
+      this.composerPendingSince.delete(sessionName);
 
       // So a later session reusing the name starts clean.
       invalidateCache(sessionName);

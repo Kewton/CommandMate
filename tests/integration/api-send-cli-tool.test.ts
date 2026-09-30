@@ -818,4 +818,75 @@ describe('POST /api/worktrees/:id/send - CLI Tool Support', () => {
       expect(getMessages(db, 'missing-cli-history', { limit: 10 })).toHaveLength(0);
     });
   });
+
+  /**
+   * Issue #3006: Command Code's first send after a cold launch used to come
+   * back as a 500 `prompt not ready` when its composer was late. The tool now
+   * throws SESSION_STARTING for a session it just launched, and this route
+   * answers that exactly as it answers a slow claude start.
+   */
+  describe('Command Code composer late after launch (Issue #3006)', () => {
+    async function arrange(id: string, sendError: Error) {
+      upsertWorktree(db, {
+        id,
+        name: 'Command Code cold start',
+        path: `/path/to/${id}`,
+        repositoryPath: '/path/to/repo',
+        repositoryName: 'TestRepo',
+        cliToolId: 'command-code',
+      } as Worktree);
+      const { CLIToolManager } = await import('@/lib/cli-tools/manager');
+      const tool = CLIToolManager.getInstance().getTool('command-code');
+      vi.spyOn(tool, 'isRunning').mockResolvedValueOnce(false);
+      const start = vi.spyOn(tool, 'startSession').mockResolvedValueOnce(undefined);
+      vi.spyOn(tool, 'sendMessage').mockRejectedValueOnce(sendError);
+      return { start };
+    }
+
+    async function send(id: string): Promise<Response> {
+      const request = new Request(`http://localhost:3000/api/worktrees/${id}/send`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: 'hello', cliToolId: 'command-code' }),
+      });
+      return sendMessage(
+        request as unknown as import('next/server').NextRequest,
+        { params: Promise.resolve({ id }) }
+      ) as unknown as Response;
+    }
+
+    it('answers 503 + SESSION_STARTING, the same body a slow claude start gets', async () => {
+      const { start } = await arrange(
+        'cc-cold-start',
+        new SessionStartTimeoutError('Command Code CLI', 'mcbd-command-code-cc-cold-start', 48000)
+      );
+
+      const response = await send('cc-cold-start');
+      const body = (await response.json()) as { error?: string; code?: string };
+
+      expect(start).toHaveBeenCalledTimes(1);
+      expect(response.status).toBe(503);
+      expect(body.code).toBe(SESSION_STARTING_CODE);
+      expect(body.error).toContain('initialization timeout');
+      expect(body.error).toMatch(/retry/i);
+      expect(body.error).not.toContain('Failed to send message');
+      expect(getMessages(db, 'cc-cold-start', { limit: 10 })).toHaveLength(0);
+    });
+
+    it('still answers 500 prompt not ready for a session whose composer is merely hidden', async () => {
+      await arrange(
+        'cc-not-ready',
+        new Error(
+          'Failed to send message to Command Code: Command Code prompt not ready: timed out waiting for the composer before sending'
+        )
+      );
+
+      const response = await send('cc-not-ready');
+      const body = (await response.json()) as { error?: string; code?: string };
+
+      expect(response.status).toBe(500);
+      expect(body.code).toBeUndefined();
+      expect(body.error).toMatch(/prompt not ready/);
+    });
+  });
 });
