@@ -195,6 +195,111 @@ tmux -L cm-agent-health kill-server
 - 08:00 に Command Code が今日のレポートの有無を確かめ、無ければ自分で確認を実行する（`docs/agent-health/watch-prompt.md`）
 - Command Code の Schedule の許可は `yolo` にすること（それ以外ではコマンドを実行できず、成功のまま何もしない。#2454）
 
+## メトリクス計測（セキュリティ・保守性、Issue #3044）
+
+日次確認の前（06:30）に、セキュリティ脆弱性とソフトウェア保守性の指標を **AI を使わず** 計測し、JSON に書く。
+起票するのは Schedule で動く AI（`docs/agent-health/metrics-prompt.md`）で、スクリプトは Issue を立てない。
+
+- 計測: `scripts/agent-health/metrics.ts`（外部ツールの呼び出しは `metrics-runners.ts`）。判定は純粋関数
+  `src/lib/agent-health/metrics-parse.ts`（ツールの出力 → 計測値）・`metrics-rules.ts`（前回比・候補・並び・exit code）、
+  型は `metrics-types.ts`（閾値の定数もここ）
+- 入口: `bash scripts/agent-health/metrics.sh --out <file>`。`daily.sh --sync-only` で同期してから `metrics.ts` を実行する。
+  同期に失敗したら計測せず、`completedAt` と `scriptErrors` を持ち `metrics` が空の最小の JSON を書いて exit 2
+  （同期側の最小レポートは一時ディレクトリに書き、その日の agent-health レポートを上書きしない）
+
+### 何を計測するか
+
+| 分類 | metricId | 計測 | `value` | 候補になる条件（定数） |
+|---|---|---|---|---|
+| security | `npm-audit` | `npm audit --omit=dev --json`（registry 不達は `scripts/check-npm-audit.mjs` と同じ形で見分けて skip） | high 以上の advisory 件数 | advisory の検出はひとつずつ、候補は**パッケージ単位**（1 回の版上げで全部直るため）。前回に無い advisory を持つパッケージ。証拠に目標の版・修正版の有無・メジャー更新の要否 |
+| security | `semgrep` | `semgrep scan --config p/typescript --config p/nodejs --json src`（ルール取得にネットワークが要る。取れなければ skip） | ERROR 件数 | 前回に無い ERROR（ルール × ファイル） |
+| security | `secrets` | `gitleaks detect --redact`（未インストールなら skip） | 検出件数 | 前回に無い検出（fingerprint）。1 件でもあれば fail |
+| maintainability | `file-size` | `src/` の行数（`wc -l` と同じ数え方） | 1,500 行超の本数 | 新たに 1,500 行を超えた／500 行以上のファイルが前回比 +200 行以上 |
+| maintainability | `complexity` | ESLint `complexity`（閾値 10）だけを、リポジトリの設定を使わず報告専用で実行 | 複雑度 25 以上の関数の数 | ファイル内最大の複雑度が新たに 25 以上／25 以上で前回比 +5 以上 |
+| maintainability | `duplication` | `npx jscpd@4 src`（最小 10 行） | 重複率（%） | 前回比 +0.5pt 以上 |
+| maintainability | `unused` | `npx knip@5 --reporter json` | 未使用の依存の数 | 前回に無い未使用の依存（未使用 export は件数だけ記録） |
+| maintainability | `outdated` | `npm outdated --json`（直接依存だけ） | メジャー 2 版以上遅れた数 | 新たにメジャー 2 版以上遅れた |
+| maintainability | `type-safety` | `src/` の型位置の `any`・`eslint-disable`・`@ts-ignore` の数 | 合計 | どれかが前回より増えた |
+| maintainability | `coverage` | `vitest run tests/unit --coverage`（**月曜（JST）だけ**） | 行カバレッジ（%） | 前回（前週）比 -2pt 以上 |
+
+- **「新たに閾値を超えた」「前回より悪化した」だけが候補**（`candidates`）。前から超えているもの（1,500 行超の 14 本、
+  複雑度 25 以上の 83 関数など）は起票せず、`value` と `details` の件数として残す
+- 前回値が無い指標（初回・前回が skip のまま）は基準として記録するだけで、候補を出さない
+- security の検出が続いている間は `status: 'fail'`。前からあるものは `outstanding` に入り、AI はその日の起票枠（2 件）に
+  余りがあるときだけ、まだ Issue の無いものを立てる（初日に見送った advisory も翌日以降に回る）
+- 外部ツールが無い・失敗した・時間切れの指標は `status: 'skip'`（`skipReason` に理由）。skip した指標の前回値は
+  state に残り、次の実行はそれと比べる
+- 全体は **10 分以内**（3 並列、ツールごとの上限あり。上限に達したものは skip）。2026-10-01 の実測（カバレッジなし）:
+  54 秒・149 秒・140 秒（semgrep が最も長く 54〜140 秒）
+
+### 使い方
+
+```bash
+npx tsx scripts/agent-health/metrics.ts --out /tmp/metrics.json            # 計測だけ（同期しない）
+npx tsx scripts/agent-health/metrics.ts --only npm-audit,file-size --state /tmp/metrics-state.json
+bash scripts/agent-health/metrics.sh --out "$HOME/.commandmate/agent-health/metrics/$(TZ=Asia/Tokyo date +%F).json"
+```
+
+| オプション | 既定 | 説明 |
+|---|---|---|
+| `--out` | `~/.commandmate/agent-health/metrics/<YYYY-MM-DD>.json`（JST） | 計測結果の書き出し先 |
+| `--state` | `~/.commandmate/agent-health/metrics-state.json` | 前回値（`{ schemaVersion: 1, metrics: { <metricId>: { measuredAt, value, items } } }`）。実行の最後に更新する |
+| `--only` | 全指標 | 計測する指標（カンマ区切り） |
+| `--coverage` / `--no-coverage` | 月曜（JST）だけ | カバレッジを強制する／しない |
+
+終了コード: `0` fail なし、`1` fail の指標あり、`2` スクリプト自体の異常（引数の誤り・同期の失敗・別の計測が進行中・
+書き込み失敗）。同時に 2 つ走らないよう、state と同じディレクトリに `metrics.lock`（pid）を置く。
+ツールの一時ファイル（jscpd・gitleaks・カバレッジのレポート、semgrep の設定とログ）は `os.tmpdir()` 配下の
+`cm-agent-health-metrics-XXXXXX` に書き、終了時に消す。
+
+### 計測 JSON の形
+
+#3045（依頼）と #3046（HTML）が読む。フィールドの追加はよいが、名前の変更・削除はそれらを壊す。
+
+```ts
+interface MetricsReport {
+  schemaVersion: 1;
+  startedAt: string;               // ISO
+  completedAt: string;             // ISO
+  metrics: Array<{                 // metricId の順（上の表の順）
+    metricId: 'npm-audit' | 'semgrep' | 'secrets' | 'file-size' | 'complexity'
+      | 'duplication' | 'unused' | 'outdated' | 'type-safety' | 'coverage';
+    category: 'security' | 'maintainability';
+    status: 'pass' | 'fail' | 'skip';
+    value: number | null;          // skip のとき null
+    summary: string;
+    candidates: Array<{
+      key: string;                 // `metrics:<metricId>:<対象>`。Issue 本文の先頭 `<!-- key -->`
+      title: string;
+      severity?: string;           // security のとき（critical / high）
+      evidence?: string;           // 何を測ったか・何で直るか
+      delta?: number;              // 前回からの悪化量（指標の単位）
+      score?: number;              // 保守性の並び順の重み（悪化量 ÷ 閾値）
+    }>;
+    outstanding?: Array<同上>;     // security: 前から続いている検出
+    skipReason?: string;
+    details?: Record<string, number | string>; // 起票しない件数（500 行超の本数など）
+  }>;
+  queue: Array<{ key: string; metricId: string; source: 'candidate' | 'outstanding' }>; // 起票する順
+  host: { commandmateCommit: string; node: string };
+  scriptErrors?: string[];         // exit 2 の理由
+}
+```
+
+### 毎日の自動実行（Schedule）
+
+- 日次確認と同じ worktree（`../commandmate-agent-health`）の `CMATE.md` に、`docs/agent-health/CMATE.example.md` の
+  `agent-health-metrics` 行（`30 6 * * *`・command-code・`yolo`）を加える。計測（最大 10 分）と起票は 07:00 の
+  日次確認より前に終わる
+- 依頼文 `docs/agent-health/metrics-prompt.md`、Issue のひな形 `docs/agent-health/metrics-issue-template.md`。
+  識別子 `metrics:<metricId>:<対象>` で open の Issue を探し、あれば（その日の新規・悪化のときだけ）コメント、
+  無ければ起票する。**新規起票は 1 日 2 件まで**（`queue` の順: security の新規 → 悪化幅の大きい保守性 → 続いている security）
+- ラベル `metrics`・`enhancement`（security は `security` も）を使う。無ければ作る:
+  `gh label create metrics --repo Kewton/CommandMate --description "日次メトリクス計測が自動登録した改善 Issue"`
+  （`security`・`enhancement` も同様。依頼文の手順 2 でも確かめる）
+- 最後の 1 行: `AGENT_HEALTH_METRICS date=… issues_created=… issues_commented=… skipped=… exit=…`
+- `gitleaks` と `semgrep` は無ければ skip になる（`brew install gitleaks semgrep`）。`jscpd`・`knip` は `npx` で取得する
+
 ## リリース判断レポート
 
 `scripts/agent-health/release-report.ts` は、その日に自動依頼した orchestrate の結果と develop の状態を集め、
