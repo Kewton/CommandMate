@@ -194,3 +194,57 @@ tmux -L cm-agent-health kill-server
 - 依頼文は `docs/agent-health/daily-triage-prompt.md`、Issue のひな形は `docs/agent-health/issue-template.md`。変えたいときはリポジトリのこれらの文書を直す（`CMATE.md` の Message 欄は依頼文を読むよう指示するだけ）
 - 08:00 に Command Code が今日のレポートの有無を確かめ、無ければ自分で確認を実行する（`docs/agent-health/watch-prompt.md`）
 - Command Code の Schedule の許可は `yolo` にすること（それ以外ではコマンドを実行できず、成功のまま何もしない。#2454）
+
+## リリース判断レポート
+
+`scripts/agent-health/release-report.ts` は、その日に自動依頼した orchestrate の結果と develop の状態を集め、
+リリースの **GO／要判断／NO-GO** を判断するための HTML を 1 ファイル書く（Issue #3046）。
+事実はスクリプトが集め、判定はルールで機械的に決める。AI の所見は載せるだけで判定には使わない。
+
+```bash
+npx tsx scripts/agent-health/release-report.ts --date 2026-10-01
+# → <main worktree>/workspace/agent-health/2026-10-01/release-readiness.html（git の管理外）
+npx tsx scripts/agent-health/release-report.ts --date 2026-10-01 --findings <所見.md> --out /tmp/rr.html
+```
+
+| オプション | 既定 |
+|---|---|
+| `--date <YYYY-MM-DD>` | 今日（JST） |
+| `--out <file>` | `<main worktree>/workspace/agent-health/<date>/release-readiness.html` |
+| `--state-dir <dir>` | `$AGENT_HEALTH_DIR` か `~/.commandmate/agent-health`（`dispatch/`・`metrics/`・`reports/` を読む） |
+| `--runs-dir <dir>` | `<main worktree>/workspace/orchestration/runs` |
+| `--findings <file>` | なし。AI の所見の Markdown を「AI の所見」節に載せる |
+| `--repo <owner/name>` | `Kewton/CommandMate` |
+| `--no-gh` | gh を呼ばない（CI・PR・Issue は「取得できず」） |
+| `--no-audit` | 今日の計測に `npm-audit` が無いときの `npm audit --omit=dev` の実行をしない |
+
+標準出力に `RELEASE_READINESS date=<日付> verdict=go|hold|no-go dispatched=<件数> out=<パス>` を 1 行出す。
+HTML を書けたら判定にかかわらず exit 0、引数の誤りやスクリプトの異常は exit 2。
+
+### 読むもの（すべて読むだけ。無い・壊れているときは「無し」「取得できず」として続ける）
+
+- 依頼の記録 `~/.commandmate/agent-health/dispatch/<date>.json`（#3045 が書く。型は `src/lib/agent-health/dispatch-record.ts`）。
+  無ければ「依頼なし」
+- 計測 `~/.commandmate/agent-health/metrics/<date>.json`（#3044 が書く）。前日比は `<date>` より前で最も新しいファイル、
+  前回リリース比は前回リリースタグの日（JST）以前で最も新しいファイルと比べる
+- agent-health のレポート `~/.commandmate/agent-health/reports/`（`<date>` 以降。retry の結果も含む）
+- orchestrate の `runs/<date>/` の `tasks*.tsv`（担当エージェント）・`wait-*<Issue>[-rN].log`（verify の exit。最後の試行）・
+  `summary*.md`（所見の欄に折りたたんで載せる）
+- git: `origin/develop`（無ければ `HEAD`）、`git describe --tags --abbrev=0`、タグからのコミット数
+  （`--ancestry-path`。リリースの back-merge 以降に develop へ入ったもの）、develop の `changelog.d/` の断片。fetch はしない
+- gh: develop HEAD の workflow run、直近 14 日に更新された PR（チェックは表に出す PR だけ個別に取る）、
+  open な `agent-health`／`metrics` Issue、dispatch したバグ Issue の本文（識別子 `agent-health:<tool>:<checkId>`）
+
+### 判定のルール（`src/lib/agent-health/release-readiness.ts` の `decideReadiness`）
+
+- **NO-GO**: develop HEAD の CI が赤／本日（JST）develop にマージされた PR にチェックが緑でないもの（実行中・チェックなしを含む）がある／
+  `npm audit --omit=dev` の high 以上の advisory 数が前回リリース時より増えた／dispatch したバグ Issue の修正のマージ後に走った
+  agent-health で、その識別子のチェックがまだ `fail`
+- **要判断**: dispatch した Issue に未完了（PR 未作成・未マージ・verify 不合格）がある／持ち越しがある／
+  develop HEAD の CI が実行中または取得できない／本日マージされた PR の一覧を取得できない
+- **GO**: 上のどれにも当たらない
+
+判定の理由はどの判定でも箇条書きで出す。判定に影響しない事実（前回リリース時の audit 値が無い、マージ後の agent-health が
+まだ走っていない修正など）は「参考」に出す。次の一手は GO なら `/release`、NO-GO なら直すもの、要判断なら決めること。
+
+orchestrate が途中で止まった日でも、手で実行すればその時点の状態で HTML が出る。
