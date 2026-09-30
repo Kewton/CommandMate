@@ -3,7 +3,9 @@
  *
  * The v2 table is chosen by tool id and carries the keys measured on
  * `opencode2` 2.0.18: `shift+tab` is the agent switch (v1's `Tab` is not one
- * there), `ctrl+x t` is not themes, and there is no session-scoped group. v1's
+ * there), `ctrl+x t` is not themes, and there is no session-scoped group.
+ * Since Issue #3038 the agent switch is the mode button beside the composer
+ * (`AgentModeControl`), so the v2 strip sends neither `shift+tab` nor `tab`. v1's
  * strip is pinned by its own suites (#2046 / #2106 / #2131 / #2174), unchanged.
  *
  * @vitest-environment jsdom
@@ -47,7 +49,6 @@ function renderStrip(props: Partial<React.ComponentProps<typeof OpencodeQuickKey
 
 /** The measured 2.0.18 table, in render order. */
 const V2_EXPECTED: ReadonlyArray<[id: string, keys: string[], notation: string]> = [
-  ['agentNext', ['BTab'], 'shift+tab'],
   ['commands', ['C-p'], 'ctrl+p'],
   ['variant', ['C-t'], 'ctrl+t'],
   ['agents', ['C-x', 'a'], 'ctrl+x a'],
@@ -102,19 +103,29 @@ describe('[#2966] each v2 button sends the measured keys as one request', () => 
     expect(sentBody()).toMatchObject({ cliToolId: 'opencode-v2', keys });
   });
 
-  it('switches agents with shift+tab, never with tab', async () => {
+  it('[#3038] offers no agent switch: sends neither shift+tab nor tab', async () => {
+    // The agent toggle is `AgentModeControl`'s button since #3038 — one key,
+    // one button — so no button on this strip may send `BTab`, and `Tab` was
+    // never an agent switch on 2.0.18.
     renderStrip();
-    fireEvent.click(screen.getByTestId('opencode-quick-key-agentNext'));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-    expect(sentBody().keys).toEqual(['BTab']);
-    expect(opencodeQuickKeyBindings('opencode-v2').flatMap(({ keys }) => keys)).not.toContain('Tab');
+    expect(screen.queryByTestId('opencode-quick-key-agentNext')).toBeNull();
+    const buttons = screen.getAllByRole('button');
+    for (const button of buttons) fireEvent.click(button);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(buttons.length));
+    const sent = fetchMock.mock.calls.map((_, i) => sentBody(i).keys).flat();
+    expect(sent).not.toContain('BTab');
+    expect(sent).not.toContain('Tab');
+    const bound = opencodeQuickKeyBindings('opencode-v2').flatMap(({ keys }) => keys);
+    expect(bound).not.toContain('BTab');
+    expect(bound).not.toContain('Tab');
   });
 });
 
 describe('[#2966] the disclosure counts the v2 table, not v1’s', () => {
-  it('says 11 on the v2 toggle and 17 on the v1 toggle', () => {
+  it('says 10 on the v2 toggle and 17 on the v1 toggle', () => {
     const { unmount } = renderStrip({ collapsible: true, layout: 'desktop' });
-    expect(screen.getByTestId('opencode-quick-keys-toggle').textContent).toContain('11');
+    // Issue #3038: ten since `agentNext` (shift+tab) moved to the mode button.
+    expect(screen.getByTestId('opencode-quick-keys-toggle').textContent).toContain('10');
     unmount();
     renderStrip({ cliToolId: 'opencode', collapsible: true, layout: 'desktop' });
     expect(screen.getByTestId('opencode-quick-keys-toggle').textContent).toContain('17');

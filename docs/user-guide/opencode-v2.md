@@ -54,7 +54,8 @@ npm install -g @opencode/cli               # OpenCode V2 (opencode2)
 | ダイアログ中の送信の拒否 | モデル選択・Commands パレットなどが開いているときは、本文をダイアログに入力せずに失敗で返します（下記） | #2971 |
 | モデル表示 | 実際に返答したモデルを `capture --json` の `.model`・画面のペイン見出しに出します。TUI でモデルを替えると、次の返答の後に切り替わり、変更の通知が出ます | #2964 |
 | 使用量 | トークン（入力・出力）・コスト・コンテキストの使用率を画面と API に出します。V2 自身の画面下部の表示と一致します。新しいセッションに替えると入れ替わり、インスタンスを止めると消えます | #2981 |
-| クイックキー | V2 の実測のキー表で 11 キー（Next agent `shift+tab` / Commands / Variant / Agents / Sessions / New session / Models / Page up / Page down / First / Latest）を出します | #2966 |
+| エージェントの切り替え | 入力欄の横のモードボタンで Build ⇄ Plan を切り替えられます（`shift+tab` を送ります）。今のエージェントも表示します。チャット画面・ターミナル画面・スマホで使えます | #3038 |
+| クイックキー | V2 の実測のキー表で 10 キー（Commands / Variant / Agents / Sessions / New session / Models / Page up / Page down / First / Latest）を出します。`shift+tab` は上のモードボタンに移しました | #2966 #3038 |
 | ダイアログカードのキー | モデル選択が開いているとき、チャットのカードに Variant `ctrl+t` / Models `ctrl+x m` / Commands `ctrl+p` が出て、押すと切り替わります | #2983 |
 | スラッシュコマンド候補 | 組み込みコマンド・Skill・稼働中のサーバーの project コマンドを候補に出します。組み込み一覧の鮮度確認（`catalogStaleness`）にも V2 が載ります | #2944 #2950 |
 | Skill | `.agents/skills` と `.claude/skills` を読みます。稼働中に入れた Skill は**開始し直し不要**で、次の送信から見つかります | #2975 #2985 |

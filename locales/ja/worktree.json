@@ -1230,10 +1230,12 @@
     "cycleAria": "エージェントの権限モードを切り替える (shift+tab)",
     "cycleFromAria": "エージェントの権限モードを切り替える。現在は {mode}。(shift+tab)",
     "note": {
-      "codexModelCoupled": "Codex はモードと連動してモデルと推論の強さも変わります。"
+      "codexModelCoupled": "Codex はモードと連動してモデルと推論の強さも変わります。",
+      "opencodeAgentSwitch": "OpenCode V2 では Build（編集あり）と Plan（読み取りのみ）のエージェントが切り替わります。"
     },
     "noteShort": {
-      "codexModelCoupled": "モデルも変わる"
+      "codexModelCoupled": "モデルも変わる",
+      "opencodeAgentSwitch": "エージェント切替"
     },
     "mode": {
       "default": "default",
@@ -1243,7 +1245,8 @@
       "auto": "auto",
       "autopilot": "autopilot",
       "bypass": "permission bypass",
-      "dont-ask": "don't-ask"
+      "dont-ask": "don't-ask",
+      "build": "build"
     }
   },
   "sessionNote": {

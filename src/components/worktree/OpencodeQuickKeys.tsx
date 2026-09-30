@@ -292,14 +292,19 @@ const GROUPS: ReadonlyArray<ReadonlyArray<QuickKeyDef>> = [
  * screen and inside a session alike. `tab` does not switch agents at all — on
  * an empty or a typed composer it changes nothing, and in the `/` completion
  * list it completes the highlighted entry (it opened `Select agent` there). So
- * v1's `agentNext` = `Tab` is not carried over; `agentNext` is `BTab` here and
- * there is no `agentPrev` (two agents, one key, no reverse binding to offer).
+ * v1's `agentNext` = `Tab` is not carried over, and there is no `agentPrev`
+ * (two agents, one key, no reverse binding to offer).
+ *
+ * Nor is `shift+tab` on this strip any more (Issue #3038). It was `agentNext`
+ * here until the agent toggle moved to the mode button beside the composer
+ * (`AgentModeControl`, declared in `lib/cli-tools/agent-mode-spec.ts`), which
+ * also shows the current agent and works from the chat surface. One key, one
+ * button: the strip sends neither `BTab` nor `Tab`.
  *
  * `ctrl+p` opens the command palette in every state. `ctrl+t` is the palette's
  * `Variant cycle ctrl+t`; with a model that has no variants it changes nothing.
  */
 const V2_DIRECT_KEYS: ReadonlyArray<QuickKeyDef> = [
-  { id: 'agentNext', keys: ['BTab'], notation: 'shift+tab' },
   { id: 'commands', keys: ['C-p'], notation: 'ctrl+p' },
   { id: 'variant', keys: ['C-t'], notation: 'ctrl+t' },
 ];
