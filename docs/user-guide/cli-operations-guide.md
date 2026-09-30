@@ -443,7 +443,7 @@ commandmate wait <worktree-id> --fail-on-upstream-fault  # 上流障害で compo
 |:------:|------|---------------|
 | 0 | 正常完了（`--verify` 指定時は検証にも合格） | `capture` で結果取得 |
 | 10 | プロンプト検出（`--on-prompt agent` 時） | `respond` で応答し、再度 `wait` |
-| 11 | 上流障害（`--fail-on-upstream-fault` 指定時のみ、Issue #1839） | **`verify` を回さず**時間をおいて同じ内容を再 `send` |
+| 11 | 上流障害（`--fail-on-upstream-fault` 指定時。`ask` は常時、Issue #1839 / #3011）。`id=context-limit` は文脈上限で、`instances <wt> kill <instance>` で新しいセッションにして送り直す | **`verify` を回さず**時間をおいて同じ内容を再 `send` |
 | 20 | 検証ゲート不合格（`--verify`） | `verify --json` で失敗ゲートを確認し修正 |
 | 21 | 作業証跡ゼロ（コミットも未コミット変更も無い）／セッションが一度も稼働していない | エージェントが着手していない。再度 `send` |
 | 124 | タイムアウト | `capture` で状況確認、再度 `wait` or 中断 |
@@ -625,6 +625,20 @@ hooks 設定を使って観測した結果です（詳細は
   60 秒後に届くため、採用すると同じ誤判定が 1 分遅れで再現します
 - 完了しない間は stderr に理由（`turnStartedAt` と `lastStopEventAt`）を出し続けます。
   最終的には `--timeout` で exit 124 になります — 「ゴミを 0 で通す」より「止める」ほうが安全です
+
+#### `ask` の上流障害と `id=context-limit`（Issue #3011）
+
+`ask` は `--fail-on-upstream-fault` を**常に付けた状態**で待ちます（フラグ不要）。ターンの終わりに
+上流障害の署名が画面にあれば、返答が無いまま exit 0 にせず exit **11** を返します。stderr と
+`--json`（`upstreamFault.id`）に障害の `id` が出ます。
+
+`id=context-limit` は会話がモデルの文脈上限（`maximum context length is N tokens`）を超えた状態で、
+同じセッションへ再送しても通りません。新しいセッションにして送り直してください。
+
+```bash
+commandmate instances "$WT" kill "$INSTANCE"   # セッションを止める
+commandmate ask "$WT" "$SAME_MESSAGE" --instance "$INSTANCE"   # 新しいセッションで送り直す
+```
 
 #### `--fail-on-upstream-fault`
 
