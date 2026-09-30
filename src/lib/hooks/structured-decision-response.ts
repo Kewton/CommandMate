@@ -79,6 +79,7 @@ import type { AskUserQuestionSpec } from '@/lib/hooks/ask-user-question-payload'
 import { createLogger } from '@/lib/logger';
 import {
   STRUCTURED_DECISION_OPTIONS,
+  structuredDecisionOptionsFor,
   type StructuredDecisionOption,
 } from '@/lib/session/structured-prompt';
 import { answerPendingDecisionWithReceipt } from './sources/pending-decisions';
@@ -167,12 +168,25 @@ export interface AnswerStructuredDecisionParams {
 /**
  * Resolve an answer against the option list.
  *
+ * Issue #2951: with `cliToolId`, the labels matched are the tool's own
+ * (`structuredDecisionOptionsFor`) — OpenCode V2's `Always allow` — and the
+ * option returned carries that label. The shared spelling (`Allow always`) is
+ * still accepted there as an alias of the same number, so nothing that
+ * resolved before stops resolving.
+ *
+ * @param answer - An option number, a label, a `reply` word or an alias
+ * @param cliToolId - The tool the approval belongs to; omitted = the shared list
  * @returns The option, or null when nothing matched
  */
-export function resolveStructuredDecisionOption(answer: string): StructuredDecisionOption | null {
+export function resolveStructuredDecisionOption(
+  answer: string,
+  cliToolId?: CLIToolType
+): StructuredDecisionOption | null {
   const normalized = answer.trim().toLowerCase();
   if (normalized === '') return null;
-  for (const option of STRUCTURED_DECISION_OPTIONS) {
+  const options =
+    cliToolId === undefined ? STRUCTURED_DECISION_OPTIONS : structuredDecisionOptionsFor(cliToolId);
+  for (const option of options) {
     if (normalized === String(option.number)) return option;
     if (normalized === option.label.toLowerCase()) return option;
     if (normalized === option.reply) return option;
@@ -472,20 +486,20 @@ export async function answerStructuredDecision({
       reason: 'unresolvable_answer',
       message:
         '--default cannot answer a structured approval: the agent publishes no default verdict. ' +
-        `Send a number instead — ${STRUCTURED_DECISION_OPTIONS.map(
+        `Send a number instead — ${structuredDecisionOptionsFor(cliToolId).map(
           (option) => `${option.number} = ${option.label}`
         ).join(', ')}.`,
     };
   }
 
-  const option = answer === undefined ? null : resolveStructuredDecisionOption(answer);
+  const option = answer === undefined ? null : resolveStructuredDecisionOption(answer, cliToolId);
   if (!option) {
     return {
       kind: 'refused',
       reason: 'answer_out_of_range',
       message:
         `'${answer ?? ''}' is not one of the verdicts this approval accepts. ` +
-        STRUCTURED_DECISION_OPTIONS.map(
+        structuredDecisionOptionsFor(cliToolId).map(
           (each) => `${each.number} = ${each.label} (${each.reply})`
         ).join(', ') +
         '.',

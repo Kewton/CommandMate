@@ -287,7 +287,8 @@
       "usingBuiltIn": "Using the built-in default",
       "range": "Select between {min} and {max} agents.",
       "saveError": "Could not save.",
-      "loadError": "Could not load the setting."
+      "loadError": "Could not load the setting.",
+      "opencodeSharedData": "OpenCode and OpenCode V2 are both installed. They share ~/.local/share/opencode, and V2 changes the database in ways OpenCode 1.x cannot read — if OpenCode fails to start, use OpenCode V2 only or give OpenCode 1.x its own data directory."
     }
   }
 }

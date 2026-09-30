@@ -7,6 +7,8 @@
  * 0.157.1, agy 1.2.12, opencode 1.18.31/1.18.32 and commandcode 1.58.1/1.66.0,
  * in a 200x1000 pane (80x200 for opencode, the geometry CommandMate uses).
  *
+ * opencode-v2 (opencode2 2.0.18) was added on 2026-09-28 (Issue #2937).
+ *
  * Model calls per tool: at most three turns (running, approval, quoted) — the
  * approval turn is folded into the running turn where the CLI already asks
  * before `sleep` (antigravity, command-code).
@@ -20,6 +22,7 @@ import type { CLIToolType } from '@/lib/cli-tools/types';
 import { getAntigravityHooksConfigPath } from '@/lib/hooks/sources/antigravity/hooks-config';
 import { getCodexHome, getCodexHooksPath } from '@/lib/hooks/sources/codex/hooks-config';
 import { getCodexRelayInstallPath } from '@/lib/hooks/sources/codex/relay-install';
+import { sameTomlWithoutMarker, type TrustStateComparator } from '@/lib/agent-health/config-guard';
 import type { AgentHealthTool } from '@/lib/agent-health/types';
 
 export interface StartupDialog {
@@ -46,6 +49,12 @@ export interface ApprovalSpec {
   skipReason?: string;
 }
 
+/**
+ * A trust-state file: a bare path is compared as JSON; `compare` swaps in
+ * another format's comparison (see `restoreTrustState`).
+ */
+export type TrustStateFile = string | { path: string; compare: TrustStateComparator };
+
 export interface ToolProbeSpec {
   tool: AgentHealthTool;
   cliToolId: CLIToolType;
@@ -65,8 +74,45 @@ export interface ToolProbeSpec {
   prompts: { running: string; approval: string; quoted: string };
   approval: ApprovalSpec;
   /** Machine-singleton files the run touches. */
-  guardedFiles: () => { hookConfig: string[]; trustState: string[] };
+  guardedFiles: () => { hookConfig: string[]; trustState: TrustStateFile[] };
+  /**
+   * Variables put in front of the launch line (`env K=V <line>`), for state
+   * the CLI would otherwise write into the user's home. Never anything the
+   * production launch line itself depends on.
+   */
+  launchEnv?: (workDir: string) => Record<string, string>;
+  /**
+   * Files copied (read-only on the `from` side) into the isolated state that
+   * `launchEnv` points at, before launch. For settings the user's own state
+   * carries and the CLI would otherwise fall back from — never history.
+   */
+  seedFiles?: (workDir: string) => Array<{ from: string; to: string }>;
+  /**
+   * `opencode-v2`: the launch goes through `scripts/opencode-v2/launch.sh`
+   * with a reserved port and password (the production path), and the
+   * `hook-correlation` slot checks that server's SSE instead of hooks
+   * (Issue #2937).
+   */
+  server?: 'opencode-v2';
 }
+
+/** `$XDG_STATE_HOME`, or its XDG default `~/.local/state`. */
+export function userStateHome(env: Readonly<Record<string, string | undefined>> = process.env): string {
+  const configured = env.XDG_STATE_HOME;
+  return configured && path.isAbsolute(configured) ? configured : path.join(os.homedir(), '.local', 'state');
+}
+
+/**
+ * codex's update offer while it is still the bottom of the pane (Issue #3020):
+ * the last option row, then only its footer (`enter continue · esc skip` in
+ * 0.157.1, `Press enter to continue` in 0.149.1) and blank rows. Anchored to
+ * the end so a dialog left in the scrollback above the composer is not
+ * answered again.
+ */
+export const CODEX_UPDATE_DIALOG_OPEN = /3\. Skip until next version[ \t]*\n\s*(?:enter continue|Press enter to continue)[^\n]*\s*$/;
+
+/** The plain "Skip" row (`  2. Skip`), not "Skip until next version". */
+export const CODEX_UPDATE_SKIP_OPTION = /^\s*(?:›\s*)?2\.\s+Skip\s*$/;
 
 const RUNNING_PROMPT = 'Run the shell command: sleep 20';
 const APPROVAL_PROMPT = 'Run the shell command: touch agent-health-probe.txt';
@@ -119,11 +165,18 @@ export const TOOL_PROBE_SPECS: Record<AgentHealthTool, ToolProbeSpec> = {
     // Trust through `-c` lives in memory only (the dialog would save it to
     // config.toml). codex splits the key on '.', so the work dir has no dots.
     // `read-only` + `on-request` makes `touch` ask; `sleep` still runs.
+    // `check_for_update_on_startup=false` (Issue #3020): whenever a newer
+    // release is cached in `$CODEX_HOME/version.json`, codex opens with its
+    // update offer instead of the composer, so screen-idle judged that dialog
+    // (correctly `waiting`) the day a release came out. The flag also keeps the
+    // probe from refreshing the user's `version.json`.
     launchFlags: (workDir) => [
       '-c',
       `projects.${workDir}.trust_level=trusted`,
       '-c',
       'history.persistence=none',
+      '-c',
+      'check_for_update_on_startup=false',
       '-c',
       'model_reasoning_effort=low',
       '-s',
@@ -133,6 +186,9 @@ export const TOOL_PROBE_SPECS: Record<AgentHealthTool, ToolProbeSpec> = {
     ],
     startupDialogs: [
       { id: 'trust', pattern: /Trust this folder\?/, select: /Trust and continue/ },
+      // Backstop for the flag above. "Skip" only — "Skip until next version"
+      // writes `dismissed_version` into the user's `version.json`.
+      { id: 'update', pattern: CODEX_UPDATE_DIALOG_OPEN, select: CODEX_UPDATE_SKIP_OPTION },
     ],
     prompts: {
       running: RUNNING_PROMPT,
@@ -155,7 +211,9 @@ export const TOOL_PROBE_SPECS: Record<AgentHealthTool, ToolProbeSpec> = {
     },
     guardedFiles: () => ({
       hookConfig: [getCodexHooksPath(), getCodexRelayInstallPath(getCodexHome())],
-      trustState: [path.join(getCodexHome(), 'config.toml')],
+      // TOML, not JSON (Issue #3031): compared with the run's
+      // `[projects."<dir>"]` tables taken out line by line.
+      trustState: [{ path: path.join(getCodexHome(), 'config.toml'), compare: sameTomlWithoutMarker }],
     }),
   },
 
@@ -217,6 +275,21 @@ export const TOOL_PROBE_SPECS: Record<AgentHealthTool, ToolProbeSpec> = {
       skipReason:
         'opencode の既定の権限設定は bash・編集を確認なしで実行する（実測: sleep 20 がダイアログ無しで走る）ため、承認ダイアログが出ない',
     },
+    // The TUI keeps prompt history, model picks and locks in $XDG_STATE_HOME/opencode.
+    // Pointed next to the work dir so none of the user's files is written.
+    launchEnv: (workDir) => ({ XDG_STATE_HOME: `${workDir}-xdg-state` }),
+    // Issue #3021 / #3022: the model pick lives in that same state dir
+    // (`opencode/model.json`, `recent[0]` is the model the TUI starts on). An
+    // empty dir made opencode 1.18.33 start on its built-in default (LM Studio's
+    // `Qwen3 Coder 30B` here), which answered every turn with "No models
+    // loaded" — no running screen, no finished-turn marker. Only the model
+    // pick is copied; the prompt history stays out.
+    seedFiles: (workDir) => [
+      {
+        from: path.join(userStateHome(), 'opencode', 'model.json'),
+        to: path.join(`${workDir}-xdg-state`, 'opencode', 'model.json'),
+      },
+    ],
     guardedFiles: () => ({ hookConfig: [], trustState: [] }),
   },
 
@@ -251,5 +324,40 @@ export const TOOL_PROBE_SPECS: Record<AgentHealthTool, ToolProbeSpec> = {
       hookConfig: [],
       trustState: [path.join(os.homedir(), '.commandcode', 'trusted-hooks.json')],
     }),
+  },
+  'opencode-v2': {
+    tool: 'opencode-v2',
+    cliToolId: 'opencode-v2',
+    executable: 'opencode2',
+    width: OPENCODE_PANE_WIDTH,
+    height: OPENCODE_PANE_HEIGHT,
+    captureLines: resolveCaptureSpec('opencode-v2').statusLines,
+    launchFlags: () => [],
+    startupDialogs: [],
+    prompts: {
+      running: RUNNING_PROMPT,
+      approval: APPROVAL_PROMPT,
+      // v2's wording: `Always allow`, where v1 says `Allow always`.
+      quoted: quote(
+        ['△ Permission required', '  # Shell command', '$ uname -a', ' Allow once   Always allow   Reject'].join(
+          '\n'
+        )
+      ),
+    },
+    approval: {
+      via: 'none',
+      dialog: /Permission required/,
+      denyKeys: ['Escape'],
+      skipReason:
+        'opencode2 の既定のルールは shell を確認なしで実行する（#2370 Phase 0 (f)。実測: sleep 20 がダイアログ無しで走る）ため、承認ダイアログが出ない',
+    },
+    // The TUI keeps prompt history, model picks and locks in
+    // $XDG_STATE_HOME/opencode — the directory that also holds the user's
+    // background service (`service.json`). Pointed next to the work dir (in
+    // the run's temp dir, outside the repo the agent sees), so none of the
+    // user's files is written, rather than compared afterwards.
+    launchEnv: (workDir) => ({ XDG_STATE_HOME: `${workDir}-xdg-state` }),
+    guardedFiles: () => ({ hookConfig: [], trustState: [] }),
+    server: 'opencode-v2',
   },
 };

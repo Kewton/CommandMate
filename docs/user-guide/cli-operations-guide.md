@@ -73,6 +73,7 @@ CM_PORT=3000 node bin/commandmate.js send abc123 "msg"
 | [`commandmate verify`](#commandmate-verify) | 検証ゲート（.commandmate/verify.yaml）の実行と検証履歴の参照 |
 | [`commandmate task`](#commandmate-task) | 実行契約（.commandmate/tasks/*.yaml）の一覧・詳細 |
 | [`commandmate capture`](#commandmate-capture) | ターミナル出力の取得 |
+| [`commandmate reply`](#commandmate-reply) | セッションの最新の返答（転写から）の取得 |
 | [`commandmate attach`](#commandmate-attach) | エージェントの tmux セッションにこの端末を attach |
 | [`commandmate auto-yes`](#commandmate-auto-yes) | Auto-Yesの制御 |
 | [`commandmate instances`](#commandmate-instances) | エージェントインスタンス（roster）の一覧・追加・削除・alias変更 |
@@ -277,7 +278,7 @@ commandmate send <worktree-id> "<message>" --auto-yes --stop-pattern "FAILED"
 | オプション | 説明 | デフォルト |
 |-----------|------|-----------|
 | `--instance <id>` | **送り先の推奨指定方法**。インスタンスID（`<agent>` または `<agent>-<n>`、例: `codex` / `claude-2`）。未起動なら自動起動 | エージェントのプライマリインスタンス |
-| `--agent <id>` | roster に無いインスタンスをアドホック起動するときの補助（claude, codex, gemini, vibe-local, opencode, copilot, antigravity, command-code） | roster の値・worktree既定 |
+| `--agent <id>` | roster に無いインスタンスをアドホック起動するときの補助（claude, codex, gemini, vibe-local, opencode, copilot, antigravity, command-code, opencode-v2） | roster の値・worktree既定 |
 | `--register` | `--instance` で指定したセッションをroster（エージェントインスタンス一覧）に登録 | - |
 | `--model <model>` | 使うモデル（copilot / antigravity / claude のみ）。**copilot** はセッション内で切り替える。**antigravity と claude は起動フラグ**なので、この send がセッションを起動するときだけ効き、稼働中のセッションに渡すと 400 になる（切り替えるにはセッションを止めてから送り直す）。claude の値は別名（`sonnet` / `opus` / `opus[1m]`）か完全な ID（`claude-sonnet-5`）。送り先（`--instance` か `--agent`）の指定が必須 | ツールの既定 |
 | `--auto-yes` | 送信前にAuto-Yesを有効化 | - |
@@ -443,7 +444,7 @@ commandmate wait <worktree-id> --fail-on-upstream-fault  # 上流障害で compo
 |:------:|------|---------------|
 | 0 | 正常完了（`--verify` 指定時は検証にも合格） | `capture` で結果取得 |
 | 10 | プロンプト検出（`--on-prompt agent` 時） | `respond` で応答し、再度 `wait` |
-| 11 | 上流障害（`--fail-on-upstream-fault` 指定時のみ、Issue #1839） | **`verify` を回さず**時間をおいて同じ内容を再 `send` |
+| 11 | 上流障害（`--fail-on-upstream-fault` 指定時。`ask` は常時、Issue #1839 / #3011）。`id=context-limit` は文脈上限で、`instances <wt> kill <instance>` で新しいセッションにして送り直す | **`verify` を回さず**時間をおいて同じ内容を再 `send` |
 | 20 | 検証ゲート不合格（`--verify`） | `verify --json` で失敗ゲートを確認し修正 |
 | 21 | 作業証跡ゼロ（コミットも未コミット変更も無い）／セッションが一度も稼働していない | エージェントが着手していない。再度 `send` |
 | 124 | タイムアウト | `capture` で状況確認、再度 `wait` or 中断 |
@@ -625,6 +626,20 @@ hooks 設定を使って観測した結果です（詳細は
   60 秒後に届くため、採用すると同じ誤判定が 1 分遅れで再現します
 - 完了しない間は stderr に理由（`turnStartedAt` と `lastStopEventAt`）を出し続けます。
   最終的には `--timeout` で exit 124 になります — 「ゴミを 0 で通す」より「止める」ほうが安全です
+
+#### `ask` の上流障害と `id=context-limit`（Issue #3011）
+
+`ask` は `--fail-on-upstream-fault` を**常に付けた状態**で待ちます（フラグ不要）。ターンの終わりに
+上流障害の署名が画面にあれば、返答が無いまま exit 0 にせず exit **11** を返します。stderr と
+`--json`（`upstreamFault.id`）に障害の `id` が出ます。
+
+`id=context-limit` は会話がモデルの文脈上限（`maximum context length is N tokens`）を超えた状態で、
+同じセッションへ再送しても通りません。新しいセッションにして送り直してください。
+
+```bash
+commandmate instances "$WT" kill "$INSTANCE"   # セッションを止める
+commandmate ask "$WT" "$SAME_MESSAGE" --instance "$INSTANCE"   # 新しいセッションで送り直す
+```
 
 #### `--fail-on-upstream-fault`
 
@@ -1932,6 +1947,40 @@ JSON 出力（`prompts` は古い順）:
   `capture --json` を打った、のいずれかが必要です。**サーバ側の Auto-Yes ポーラ単独では
   記録されません**。誰も待っていない停滞は残らない、という制約は意図的なもので、
   この機能が説明したい停滞（＝何かが待っていた停滞）は必ず観測下にあるためです
+
+---
+
+## commandmate reply
+
+指定インスタンスが書いた**最新の返答**を、チャット台帳（転写リーダーが書いた行）から読みます（Issue #3039）。
+`ask` を使わずに送ったターン（例: 監督の「止めて報告」nudge）の返答を、転写ファイルの場所を知らずに読むためのものです。
+
+### 使用方法
+
+```bash
+commandmate reply <worktree-id> --instance cc-1                                  # 返答本文
+commandmate reply <worktree-id> --instance cc-1 --since 2026-09-30T12:00:00Z     # この時刻以降の返答のみ
+commandmate reply <worktree-id> --instance cc-1 --json
+```
+
+### 規則
+
+- 返答とみなすのは転写リーダーが書いた行（`<tool>-turn:<id>`）だけです。`ask` と同じ共有関数で読むので、
+  「返答」の定義は `ask` と一致します。furniture 行（`relay-sys:` / `model-changed:`）は除き、ANSI・制御文字は落とします
+- 転写リーダーがあるツール: claude / codex / antigravity / command-code / opencode。
+  それ以外のツールでは常に「返答なし」になります
+- **画面（pane）は読みません**。画面の行はターンに帰属できない（nudge 自身のエコーが混ざる）ためです
+- `--since` は ISO 8601。その時刻**以降**に書かれた返答だけを返します。`--instance` / `--agent` の解決は `ask` と同じです
+
+### 出力と終了コード
+
+| 状態 | stdout | stderr | exit |
+|------|--------|--------|------|
+| 返答あり | 本文 | なし | 0 |
+| 返答なし（まだ転写行が無い／`--since` 以降に無い） | 空 | 1 行 | 0 |
+| サーバに届かない等 | 空 | エラー | 既存 CLI と同じ |
+
+`--json` は `{ worktreeId, instanceId, cliToolId, reply, requestId, at }`。返答が無いときは `reply` / `requestId` / `at` が `null` です。
 
 ---
 
@@ -3257,7 +3306,7 @@ Error: Invalid duration. Must be one of: 1h, 3h, 8h
 ### 不正なagentエラー
 
 ```
-Error: Invalid agent. Must be one of: claude, codex, gemini, vibe-local, opencode, copilot, antigravity, command-code
+Error: Invalid agent. Must be one of: claude, codex, gemini, vibe-local, opencode, copilot, antigravity, command-code, opencode-v2
 ```
 
 **対処**: `--agent` には上記のいずれかを指定してください。

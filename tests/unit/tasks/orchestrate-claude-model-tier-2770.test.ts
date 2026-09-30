@@ -68,13 +68,24 @@ describe('/orchestrate 1-2b: three tiers', () => {
     expect(body).toMatch(/^\| 難 \| claude \| opus \|/m);
   });
 
-  it('admits to the middle tier ONLY on 「危険な領域」 and 「依存」', () => {
+  it('admits to the middle tier ONLY on 「危険な領域」「依存」 and closed judgment / design (Issue #3015)', () => {
     const row = body.split('\n').find((line) => line.startsWith('| 中 |')) ?? '';
     expect(row).toContain('「危険な領域」');
     expect(row).toContain('「依存」');
+    // #3015 (Sonnet 5.5): a judgment or a design is admitted only when the body
+    // closes it — the options listed, or the checks and controls enumerated.
+    expect(row).toContain('「閉じた判断」');
+    expect(row).toContain('「閉じた設計」');
     expect(row).toContain('だけ');
-    for (const ambiguity of ['判断の余地', '設計', '原因', '未決事項', '検証', '新規 export']) {
+    for (const ambiguity of ['判断の余地', '原因', '未決事項', '検証', '新規 export']) {
       expect(row, `${ambiguity} must not admit an Issue to the sonnet tier`).not.toContain(ambiguity);
+    }
+  });
+
+  it('keeps the open-ended work on opus (Issue #3015)', () => {
+    const row = body.split('\n').find((line) => line.startsWith('| 難 |')) ?? '';
+    for (const openEnded of ['原因', '未決事項', '検証', '新規 export']) {
+      expect(row, `${openEnded} must stay in the opus tier`).toContain(openEnded);
     }
   });
 

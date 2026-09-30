@@ -79,7 +79,7 @@ export const AUTO_YES_DIALOG_GATE_MODES: readonly AutoYesDialogGateMode[] = ['en
 /**
  * The rollout state each tool ships in.
  *
- * `enforce` is set only for the four tools with a dialog rule measured from
+ * `enforce` is set only for the five tools with a dialog rule measured from
  * their own live captures, each with a positive fixture and a mutation fixture
  * (`tests/unit/detection/tools/dialogs.test.ts`):
  *
@@ -89,6 +89,7 @@ export const AUTO_YES_DIALOG_GATE_MODES: readonly AutoYesDialogGateMode[] = ['en
  * | codex    | `Press enter to confirm …` under the options, above the status bar, not stale | #1628 / #1160 |
  * | copilot  | the bottom status bar is GONE and the option run carries a picker footer | #1885 / #1895 |
  * | opencode | the `Allow once / Allow always / Reject` strip, or a picker header    | #1893 / #1896 |
+ * | opencode-v2 | the `Allow once / Always allow / Reject` strip, the question form's key hints, or a dialog title row | #2984 |
  *
  * The rest are `legacy` because nobody has measured them:
  *
@@ -135,6 +136,19 @@ export const AUTO_YES_DIALOG_GATE_DEFAULT_MODE: Readonly<
   // Promote only once both dialogs are recognised on both spellings, with a
   // `/prompt-response` test pinning that the question is still answered.
   'command-code': 'legacy',
+  // Issue #2984: enforced. The screen path DOES run for OpenCode V2 — nothing
+  // in `startAutoYesPolling` / `pollAutoYes` (`auto-yes-poller.ts`) excludes a
+  // tool, and `buildDetectPromptOptions` gives v2 the default options
+  // (`cli-patterns.ts`), so any `❯ 1.`-shaped rows in the last 50 read as
+  // `multiple_choice`. Measured on 2.0.18 (`tests/fixtures/opencode-v2-dialogs-2984/`):
+  // a reply that quotes a Claude dialog (`❯ 1. Yes / 2. No`) is exactly such a
+  // candidate, and under `legacy` Auto-Yes would have typed `1` + Enter into
+  // the composer — #1896 again. v2's own dialogs never are: the approval strip
+  // and the question form draw no `❯`, so the generic parser finds nothing on
+  // them, and they are answered over the API (#2945 / #2951,
+  // `sources/opencode-v2/ingest`) as before. Enforcing therefore takes nothing
+  // away from Auto-Yes and refuses the quoted list.
+  'opencode-v2': 'enforce',
 };
 
 /**

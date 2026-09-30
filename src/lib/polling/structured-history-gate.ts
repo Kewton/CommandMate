@@ -68,6 +68,7 @@ import type { CLIToolType } from '@/lib/cli-tools/types';
 import type { TranscriptHistoryMode } from '@/lib/hooks/agent-event-types';
 import { createLogger } from '@/lib/logger';
 import { isOpencodeStructuredHistoryLive } from '@/lib/hooks/sources/opencode/subscription';
+import { isOpencodeV2StructuredHistoryLive } from '@/lib/hooks/sources/opencode-v2/subscription';
 import {
   captureClaudeTranscriptTurn,
   resolveClaudeTranscriptPath,
@@ -446,10 +447,25 @@ export function isPullTranscriptHistory(cliToolId: CLIToolType): boolean {
 }
 
 /**
+ * The push-mode writers' liveness probes, by tool (Issue #2940).
+ *
+ * The counterpart of {@link PULL_TRANSCRIPT_READERS}: a push source declares
+ * `transcriptHistory: 'push'` in its own `source.ts` and adds its probe here.
+ * A push source with no row of its own is asked opencode's probe, which is
+ * what every push declaration was asked before this table existed — the
+ * branch follows the declaration, not the tool name (#2197).
+ */
+const PUSH_TRANSCRIPT_WRITERS: Partial<Record<CLIToolType, (target: AgentInstanceRef) => boolean>> =
+  {
+    opencode: (target: AgentInstanceRef) => isOpencodeStructuredHistoryLive(target),
+    'opencode-v2': (target: AgentInstanceRef) => isOpencodeV2StructuredHistoryLive(target),
+  };
+
+/**
  * Whether the agent's own server is recording this instance's replies.
  *
  * False for every tool whose source does not declare `transcriptHistory: 'push'`
- * — today that is all of them but opencode — and false for an opencode instance
+ * — today that is all of them but opencode and opencode-v2 — and false for an instance
  * whose subscription is anything other than `live`; see
  * {@link isOpencodeStructuredHistoryLive} for why `lost` counts as "nobody is
  * writing this down" rather than as "somebody will". The fallback direction is
@@ -468,10 +484,10 @@ export function isStructuredHistoryWriterLive(
 ): boolean {
   if (transcriptHistoryModeOf(cliToolId) !== 'push') return false;
   try {
-    // One probe, because there is one push source. A second one adds a table
-    // here of the shape `PULL_TRANSCRIPT_READERS` already has; it does not add
-    // another `cliToolId ===`.
-    return isOpencodeStructuredHistoryLive({
+    // Issue #2940 added the second push source, and with it the table the
+    // single probe used to stand in for.
+    const probe = PUSH_TRANSCRIPT_WRITERS[cliToolId] ?? isOpencodeStructuredHistoryLive;
+    return probe({
       worktreeId,
       cliToolId,
       instanceId: instanceId ?? cliToolId,

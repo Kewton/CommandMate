@@ -48,8 +48,8 @@
         {
           "path": "SKILL.md",
           "policy": "port-required",
-          "sha256": "ec9c55c0cefcd1f74b56cd4cfab3fae5c106d6c95860290708dcce5d4b76e9fa",
-          "note": "#1586 の移植で GitHub 絶対 URL 化・「起案 / スタンドアロンランナー」の2役への書き換えが入っている。単純コピーするとこの適応が壊れる（#1611 で実際に注意点として扱った）。手順・フラグ・exit code の意味を変えたときは counterpart 側の同じ節を書き直す。 Issue #1639 で追加。 2026-08-03 に counterpart（cmate-verify 0.2.0、skills PR #41）へ移植済み。 2026-08-03 に Issue #1651 の変更も counterpart（cmate-verify 0.3.0、skills PR #42）へ移植済み。 2026-08-20 に Issue #1861 で counterpart（skills PR #225、6faa33f）のmutex / retryOnFail / flakyIsPass / requireEnvClean の記述を移植した（CommandMate 側の Issue 番号 #1771 / #1772 / #1740 と相対パスに読み替えてある）。"
+          "sha256": "33c33e7a8d144cd93677cb2715479c0b5ec82e38f6b75300effa5c46e5ac6b68",
+          "note": "#1586 の移植で GitHub 絶対 URL 化・「起案 / スタンドアロンランナー」の2役への書き換えが入っている。単純コピーするとこの適応が壊れる（#1611 で実際に注意点として扱った）。手順・フラグ・exit code の意味を変えたときは counterpart 側の同じ節を書き直す。 Issue #1639 で追加。 2026-08-03 に counterpart（cmate-verify 0.2.0、skills PR #41）へ移植済み。 2026-08-03 に Issue #1651 の変更も counterpart（cmate-verify 0.3.0、skills PR #42）へ移植済み。 2026-08-20 に Issue #1861 で counterpart（skills PR #225、6faa33f）のmutex / retryOnFail / flakyIsPass / requireEnvClean の記述を移植した（CommandMate 側の Issue 番号 #1771 / #1772 / #1740 と相対パスに読み替えてある）。 2026-09-30 に Issue #3012 で counterpart（cmate-verify 0.6.0、skills #276）の `<skills-root>` 表記（install 先の説明と手順 2 の実行例）を移植した。"
         },
         {
           "path": "scripts/tests/fixtures/all-pass.yaml",
@@ -442,8 +442,8 @@
         {
           "path": "scripts/monitor-lib.sh",
           "policy": "port-required",
-          "sha256": "ada537bed08ee4441d44200fa32147ac2e85f9c365f8d9a87adf478d3ec7b6ca",
-          "note": "#2606 で両側に反映済み（skills 0.9.0 / commandmate-skills#267、2026-09-17）。classify-state.sh が capture の cliToolId で目印の組を選び、antigravity のときは monitor-lib.sh の ml_agy_*（生成中・PROMPT・待機中の枠、realtimeSnippet と content の長い方の末尾 64 行を読む ml_agy_frame）で判定する。 2026-09-27（Issue #2904）に commandmate-skills PR #77（f929fe6、skills #59）を取り込み、ml_json_block・ml_autoyes_suppressed・ml_autoyes_suppression_reason・ml_prompt_type・ml_prompt_default_label・ml_is_affirmative・ml_prompt_enter_verdict・ml_prompt_signature を移植した。コメントを除いたコード差分は 0 行（`ML_CLI_TOOL_IDS` の末尾に CommandMate 側だけ持つ `command-code` を除く。skills に無い CLI ツールへの対応で意図的、この Issue の対象外）。"
+          "sha256": "4319bbb3cc1c626ed97f446381e1018a9f0f2c3aacbabd3ccf5d7c9b7b35c8f4",
+          "note": "#2606 で両側に反映済み（skills 0.9.0 / commandmate-skills#267、2026-09-17）。classify-state.sh が capture の cliToolId で目印の組を選び、antigravity のときは monitor-lib.sh の ml_agy_*（生成中・PROMPT・待機中の枠、realtimeSnippet と content の長い方の末尾 64 行を読む ml_agy_frame）で判定する。 2026-09-27（Issue #2904）に commandmate-skills PR #77（f929fe6、skills #59）を取り込み、ml_json_block・ml_autoyes_suppressed・ml_autoyes_suppression_reason・ml_prompt_type・ml_prompt_default_label・ml_is_affirmative・ml_prompt_enter_verdict・ml_prompt_signature を移植した。コメントを除いたコード差分は 0 行（`ML_CLI_TOOL_IDS` の末尾に CommandMate 側だけ持つ `command-code` を除く。skills に無い CLI ツールへの対応で意図的、この Issue の対象外）。2026-09-28（Issue #2934）に `ML_CLI_TOOL_IDS` の末尾へ `opencode-v2` を足して re-pin した（CommandMate 側だけの差分がもう 1 語増えた。skills 側への移植は不要な意図的差分）。"
         },
         {
           "path": "scripts/monitor.sh",

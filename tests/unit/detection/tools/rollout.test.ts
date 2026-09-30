@@ -63,6 +63,8 @@ describe('[#1927] the rollout table', () => {
       // Issue #2250: Command Code's module declares no `readIdleEvidence`
       // either, so `enforce` here would state a rollout that does not exist.
       'command-code': 'legacy',
+      // Issue #2934: no `readIdleEvidence` in OpenCode V2 Phase 1 either.
+      'opencode-v2': 'legacy',
     });
   });
 

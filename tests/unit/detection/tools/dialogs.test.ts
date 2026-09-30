@@ -441,3 +441,97 @@ describe('[#2457] a Claude reply written as a numbered list carries no dialog', 
     expect(dialogOf('claude', asDialog)).not.toBeNull();
   });
 });
+
+/**
+ * OpenCode V2's dialog rules, over live 2.0.18 captures (Issue #2984).
+ *
+ * Its own block rather than a `SUITES` row because the two spellings split
+ * three ways, not two: the approval strip and the question form are anchored on
+ * the composer's `┃` gutter and answer `null` once it is stripped (opencode v1's
+ * #1893 precedent), while a dialog title row carries no gutter and survives.
+ * What has to hold on both is the ACTION — the Auto-Yes poller, which reads the
+ * stripped spelling, sends nothing for any of them — and that is asserted
+ * directly. `tests/fixtures/opencode-v2-dialogs-2984/README.md` records how
+ * each frame was captured and what a typed digit did to it.
+ */
+describe('[#2984] opencode-v2 dialog rules', () => {
+  const DIR = path.resolve(__dirname, '../../../fixtures/opencode-v2-dialogs-2984');
+  const v2Frame = (name: string): string => readFileSync(path.join(DIR, `${name}.txt`), 'utf8');
+
+  const POSITIVES: readonly DialogFixture[] = [
+    { frame: 'permission', kind: 'permission', answerMode: 'keys', firstOption: 'Allow once' },
+    { frame: 'permission-after-digit', kind: 'permission', answerMode: 'keys', firstOption: 'Allow once' },
+    { frame: 'question', kind: 'question', answerMode: 'numbered', firstOption: '1. Red' },
+    { frame: 'question-under-quoted-dialog', kind: 'question', answerMode: 'numbered', firstOption: '1. Red' },
+    { frame: 'commands', kind: 'picker', answerMode: 'keys' },
+  ];
+
+  // The #1896 shape, live: v2's reply rows carry no gutter, so neither a plain
+  // numbered list nor a quoted `❯ 1. Yes / 2. No` dialog is one of its dialogs.
+  const NEGATIVES = ['numbered-reply', 'quoted-dialog-reply', 'question-answered-by-digit'];
+
+  it.each(POSITIVES)('$frame is a $kind the tool vouches for', ({ frame: name, kind, answerMode, firstOption }) => {
+    const verdict = dialogOf('opencode-v2', v2Frame(name));
+
+    expect(verdict, `${name} was not recognised`).not.toBeNull();
+    expect(verdict!.kind).toBe(kind);
+    expect(verdict!.answerMode).toBe(answerMode);
+    if (firstOption !== undefined) expect(verdict!.options[0]).toBe(firstOption);
+  });
+
+  it('reads the question form as a digit that commits without an Enter', () => {
+    // Measured: `2` with no Enter submitted `Blue` (question-answered-by-digit).
+    expect(dialogOf('opencode-v2', v2Frame('question'))).toEqual({
+      kind: 'question',
+      options: ['1. Red', '2. Blue', '3. Type your own answer'],
+      answerMode: 'numbered',
+      submitMode: 'answer_only',
+    });
+  });
+
+  it.each(POSITIVES)('$frame sends nothing on the spelling the Auto-Yes poller judges', ({ frame: name }) => {
+    expect(
+      evaluateAutoYesDialogGate('opencode-v2', 'multiple_choice', asAutoYesSees(v2Frame(name))).allowed,
+    ).toBe(false);
+  });
+
+  it.each(NEGATIVES)('%s is not a dialog, on either spelling', name => {
+    const raw = v2Frame(name);
+    expect(dialogOf('opencode-v2', raw), `${name} (boxed)`).toBeNull();
+    expect(dialogOf('opencode-v2', asAutoYesSees(raw)), `${name} (stripped)`).toBeNull();
+  });
+
+  const MUTATIONS: readonly DialogMutation[] = [
+    {
+      label: 'one button of the approval strip is reworded',
+      frame: 'permission',
+      mutate: raw => rewordRow(raw, /Allow once/, 'Reject', 'Refuse'),
+    },
+    {
+      label: "the question form's key hints are reworded",
+      frame: 'question',
+      mutate: raw => rewordRow(raw, /↑↓ select/, 'enter submit', 'enter send'),
+    },
+    {
+      label: 'a choice number of the question form is skipped',
+      frame: 'question',
+      mutate: raw => rewordRow(raw, /[│┃]\s+2\. Blue/, '2. Blue', '4. Blue'),
+    },
+    {
+      label: "the dialog title's dismiss hint is erased",
+      frame: 'commands',
+      mutate: raw => rewordRow(raw, /Commands\s+esc/, 'esc', '   '),
+    },
+  ];
+
+  it.each(MUTATIONS)('loses the verdict when $label', ({ frame: name, mutate }) => {
+    const raw = v2Frame(name);
+    const mutated = mutate(raw);
+
+    expect(mutated).not.toBe(raw);
+    expect(dialogOf('opencode-v2', raw), 'the fixture was not a dialog to begin with').not.toBeNull();
+
+    expect(dialogOf('opencode-v2', mutated)).toBeNull();
+    expect(dialogOf('opencode-v2', asAutoYesSees(mutated))).toBeNull();
+  });
+});

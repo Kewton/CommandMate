@@ -124,6 +124,14 @@ import {
   OPENCODE_INTERRUPT_SECOND_ESCAPE_DELAY_MS,
 } from '@/config/cli-tool-timing-config';
 import { missingToolError } from './install-hints';
+import {
+  describeOpencodeV1Unavailable,
+  resolveOpencodeV1Executable,
+} from './opencode-executable';
+import {
+  buildOpencodeSharedDataConflictMessage,
+  findOpencodeSharedDataConflict,
+} from '@/lib/hooks/sources/opencode/log-diagnosis';
 
 const logger = createLogger('cli-tools/opencode');
 
@@ -314,6 +322,15 @@ export class OpenCodeTool extends BaseCLITool {
   }
 
   /**
+   * Installed means an `opencode` on PATH that reports a 1.x version (Issue
+   * #2939). `which opencode` is not enough: npm `@opencode/cli` registers
+   * `opencode` for OpenCode V2 too. See `./opencode-executable`.
+   */
+  async isInstalled(): Promise<boolean> {
+    return (await resolveOpencodeV1Executable()).executable !== null;
+  }
+
+  /**
    * Check if OpenCode session is running for a worktree
    */
   async isRunning(worktreeId: string, instanceId?: string): Promise<boolean> {
@@ -329,9 +346,12 @@ export class OpenCodeTool extends BaseCLITool {
    * @param worktreePath - Worktree path
    */
   protected async launchSession(worktreeId: string, worktreePath: string, instanceId?: string): Promise<void> {
-    const opencodeAvailable = await this.isInstalled();
-    if (!opencodeAvailable) {
-      throw missingToolError(this);
+    // Issue #2939: one resolution decides both whether to start and what to
+    // run, so the launch line names the very file that answered as 1.x.
+    const resolution = await resolveOpencodeV1Executable();
+    const executable = resolution.executable;
+    if (!executable) {
+      throw missingToolError(this, describeOpencodeV1Unavailable(resolution));
     }
 
     const sessionName = this.getSessionName(worktreeId, instanceId);
@@ -452,7 +472,7 @@ export class OpenCodeTool extends BaseCLITool {
       // variable, because CommandMate holds the connection (#1846).
       const plannedCommand = buildAgentLaunchCommandLine({
         target,
-        executablePath: this.command,
+        executablePath: executable.path,
         worktreePath,
       });
 
@@ -479,6 +499,7 @@ export class OpenCodeTool extends BaseCLITool {
         });
       }
 
+      const launchedAt = Date.now();
       await sendKeys(sessionName, launchCommand, true);
 
       // Issue #1908: poll for opencode's own composer instead of sleeping 15 s.
@@ -495,7 +516,18 @@ export class OpenCodeTool extends BaseCLITool {
       // with the server already listening, which the fixed 15 s wait did not
       // guarantee: the 22.8 s run had nothing to probe at 15 s and would have
       // lost structured events for the whole session.
-      await attachOpencodeEventStream(target);
+      const attached = await attachOpencodeEventStream(target);
+
+      // Issue #2939 (D2): a server that never answered may be OpenCode 1.x
+      // dying on the database OpenCode V2 migrated. opencode's own log says so;
+      // when it does, that is the start error. Otherwise nothing changes.
+      if (!attached && getAssignedOpencodePort(target) !== null) {
+        const conflict = await findOpencodeSharedDataConflict(launchedAt);
+        if (conflict !== null) {
+          logger.warn('opencode-shared-data-conflict', { worktreeId, finding: conflict });
+          throw new Error(buildOpencodeSharedDataConflictMessage(conflict));
+        }
+      }
 
       logger.info('started-opencode-session:sessionname');
     } catch (error: unknown) {

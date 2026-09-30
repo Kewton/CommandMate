@@ -265,6 +265,20 @@ fi
 if [ -n "$DETAIL" ]; then
   BODY="$BODY,\"detail\":\"$(json_escape "$DETAIL")\""
 fi
+# Issue #2955. Claude names its model on `SessionStart` (`"model":
+# "claude-sonnet-5-5"`, measured on 2.1.284), and `SessionStart` is the one
+# Claude event that has to come through this script (http hooks are not
+# supported there). Before #2955 the value was dropped here, so the server's
+# model latch was never written for any claude session. Forwarded on
+# session_start only — other tools' payloads keep the body they had — and
+# omitted when the payload has none (`claude -p`, the `SessionStart` of
+# `/clear`), where an empty value would read as "the model is unknown".
+if [ "$EVENT" = "session_start" ] && [ -n "$HOOK_JSON" ]; then
+  MODEL="$(json_string_field "$HOOK_JSON" 'model')"
+  if [ -n "$MODEL" ]; then
+    BODY="$BODY,\"model\":\"$(json_escape "$MODEL")\""
+  fi
+fi
 BODY="$BODY}"
 
 # Token via --header rather than the command line of a subprocess: argv is world

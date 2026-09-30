@@ -38,7 +38,16 @@ import {
 const manager = CLIToolManager.getInstance();
 
 /** The tools Issue #2592 measured a `shift+tab` mode cycle on. */
-const DECLARING = ['antigravity', 'claude', 'codex', 'command-code', 'copilot'] as const;
+// Issue #3038: plus OpenCode V2, whose `shift+tab` toggles the Build ⇄ Plan
+// agents and moved from its quick keys' `agentNext` to the mode button.
+const DECLARING = [
+  'antigravity',
+  'claude',
+  'codex',
+  'command-code',
+  'copilot',
+  'opencode-v2',
+] as const;
 
 /**
  * The tools that must NOT declare one, and why.
@@ -50,6 +59,8 @@ const DECLARING = ['antigravity', 'claude', 'codex', 'command-code', 'copilot'] 
  *  - `gemini` — the binding exists in its own docs, the footer spelling does
  *    not exist anywhere. A button is a promise about what happens.
  */
+// Issue #2966 left OpenCode V2 here for v1's reason; Issue #3038 took its
+// `shift+tab` off the quick keys and declared it, so it is in DECLARING now.
 const NOT_DECLARING = ['gemini', 'opencode', 'vibe-local'] as const;
 
 function spec(id: CLIToolType): AgentModeSpec | null {
@@ -151,6 +162,8 @@ describe('[#2592] the shape of each declaration', () => {
     expect(spec('codex')!.cycle).toEqual(['default', 'plan']);
     expect(spec('copilot')!.cycle).toEqual(['default', 'plan', 'autopilot']);
     expect(spec('antigravity')!.cycle).toEqual(['default', 'accept-edits', 'plan']);
+    // Issue #3038, measured on opencode2 2.0.18 on 2026-09-30.
+    expect(spec('opencode-v2')!.cycle).toEqual(['build', 'plan']);
   });
 
   it('can read at least every mode its own cycle contains, or knowingly cannot', () => {
@@ -203,16 +216,23 @@ describe('[#2592] the shape of each declaration', () => {
     }
   });
 
-  it('carries the codex model-coupling caution, and nobody else carries one', () => {
+  it('carries the codex model-coupling caution, and no one else but opencode-v2 carries one', () => {
     // #2592 §「設計に効く事実」4: codex's modes move the model tier and the
     // reasoning effort with them (xhigh <-> medium, measured), so one press of a
     // button labelled "mode" also changes the model. That has to be printed, not
     // discovered.
     expect(spec('codex')!.noteId).toBe('codexModelCoupled');
     for (const id of DECLARING) {
-      if (id === 'codex') continue;
+      // Issue #3038: OpenCode V2 carries its own note, pinned below.
+      if (id === 'codex' || id === 'opencode-v2') continue;
       expect(spec(id)!.noteId, id).toBeNull();
     }
+  });
+
+  it('[#3038] carries the agent-switch note for OpenCode V2', () => {
+    // The button's aria says "permission mode"; on OpenCode V2 it switches the
+    // Build (edits) ⇄ Plan (read-only) AGENT, and the note says so.
+    expect(spec('opencode-v2')!.noteId).toBe('opencodeAgentSwitch');
   });
 
   it('uses stateless, non-global patterns', () => {

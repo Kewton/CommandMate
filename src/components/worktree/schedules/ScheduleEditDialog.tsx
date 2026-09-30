@@ -18,6 +18,8 @@
  *   (`TOOLS_WITH_MODEL_SUPPORT`: copilot and, since Issue #1914, opencode).
  * - Issue #2044: opencode additionally shows Agent / Variant / Continue / Title,
  *   which serialize into the same CMATE.md CLI Tool cell as `--model`.
+ * - Issue #2982: opencode-v2 shows the same fields; its Variant requires a Model
+ *   because `opencode2 run` takes it as `-m <provider/model>#<variant>`.
  */
 
 'use client';
@@ -40,11 +42,13 @@ import {
   DEFAULT_PERMISSIONS,
   MAX_SCHEDULE_NAME_LENGTH,
   MAX_SCHEDULE_MESSAGE_LENGTH,
+  isScheduleSupportedCliTool,
 } from '@/config/schedule-config';
 import { NAME_PATTERN, isValidCronExpression } from '@/config/cmate-constants';
 import {
   TOOLS_WITH_MODEL_SUPPORT,
   TOOLS_WITH_RUN_OPTIONS,
+  validateVariantHasModel,
   validateCopilotModelName,
   validateOpencodeRunName,
   validateOpencodeTitle,
@@ -257,11 +261,15 @@ export function ScheduleEditDialog({
   const isMobile = useIsMobile();
 
   // Resolve the agent roster: explicit instances when configured, otherwise the
-  // primary instance of every CLI tool (legacy behavior).
+  // primary instance of every CLI tool (legacy behavior). Filter out tools that
+  // are not supported in schedules (Issue #2936; none since #2974, which let
+  // opencode-v2 in).
   const resolvedInstances = useMemo<AgentInstance[]>(
-    () => (instances && instances.length > 0
-      ? instances
-      : agentInstancesFromSelectedAgents([...CLI_TOOL_IDS])),
+    () =>
+      (instances && instances.length > 0
+        ? instances
+        : agentInstancesFromSelectedAgents([...CLI_TOOL_IDS])
+      ).filter((inst) => isScheduleSupportedCliTool(inst.cliTool)),
     [instances]
   );
 
@@ -375,10 +383,15 @@ export function ScheduleEditDialog({
 
   const variantError = useMemo(() => {
     if (!showRunOptions || !form.variant.trim()) return null;
-    return validateOpencodeRunName(form.variant.trim(), 'variant').valid
-      ? null
-      : t('edit.errorVariantInvalid');
-  }, [showRunOptions, form.variant, t]);
+    if (!validateOpencodeRunName(form.variant.trim(), 'variant').valid) {
+      return t('edit.errorVariantInvalid');
+    }
+    // Issue #2982: the writer refuses this combination too; saying so here keeps
+    // the Save button from sending a row the API will reject.
+    return validateVariantHasModel(form.cliToolId, form.model, form.variant)
+      ? t('edit.errorVariantNeedsModel')
+      : null;
+  }, [showRunOptions, form.cliToolId, form.model, form.variant, t]);
 
   const titleError = useMemo(() => {
     if (!showRunOptions || !form.title.trim()) return null;

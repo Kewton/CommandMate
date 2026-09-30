@@ -8,18 +8,24 @@
  * renaming or removing one breaks both.
  */
 
-/** The five agent CLIs the daily check covers, in report order. */
+/** The six agent CLIs the daily check covers, in report order. */
 export const AGENT_HEALTH_TOOLS = [
   'claude',
   'codex',
   'antigravity',
   'opencode',
   'command-code',
+  'opencode-v2',
 ] as const;
 
 export type AgentHealthTool = (typeof AGENT_HEALTH_TOOLS)[number];
 
-/** Every check, in the order a tool's checks appear in the report. */
+/**
+ * Every check, in the order a tool's checks appear in the report.
+ *
+ * For opencode-v2, which fires no hooks, `hook-correlation` checks its own
+ * server's SSE instead (`./server-events`, Issue #2937).
+ */
 export const AGENT_HEALTH_CHECK_IDS = [
   'version',
   'hook-correlation',

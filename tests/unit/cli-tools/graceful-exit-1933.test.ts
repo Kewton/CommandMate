@@ -143,7 +143,9 @@ describe('gracefulExitSequence (Issue #1933 S10)', () => {
 
   it('is the only tool that owns a loopback server', () => {
     const owners = CLI_TOOL_IDS.filter((id) => resolveGracefulExitSpec(id).ownsLoopbackServer);
-    expect(owners).toEqual(['opencode']);
+    // Issue #2934: OpenCode V2's pane owns one too — `opencode2 serve`, run and
+    // stopped by `scripts/opencode-v2/launch.sh` beside the TUI.
+    expect(owners).toEqual(['opencode', 'opencode-v2']);
   });
 });
 

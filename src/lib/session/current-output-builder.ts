@@ -135,8 +135,9 @@ import { classifyLayerDisagreement, reportLayerDisagreement } from '@/lib/sessio
 import {
   buildStructuredPromptData,
   buildStructuredPromptHistoryRecord,
+  hasApiAnswerableDecision,
   isAddressableDecision,
-  STRUCTURED_DECISION_OPTIONS,
+  structuredDecisionOptionsFor,
   type StructuredAskUserQuestionSummary,
   type StructuredPromptFacts,
   type StructuredPromptSource,
@@ -250,10 +251,12 @@ export interface StructuredEventsPayload extends PublishedTurn {
    * which persona, which model, what it has cost and how many tokens it has
    * spent. Read off opencode's `session.updated` frames, which were already
    * arriving and mapped to none of the seven event words — so this costs no
-   * request and no poll.
+   * request and no poll. OpenCode V2 (`opencode-v2`, Issue #2981) fills the
+   * same record from `GET /api/session/{id}` whenever `session.usage.updated`
+   * or the end of a turn arrives.
    *
    * **Sent on every payload this build produces, null when nothing knows** —
-   * which is every tool but opencode, every opencode pane whose stream has not
+   * which is every tool but opencode / opencode-v2, every such pane whose stream has not
    * reported a session yet, and every pane that has been killed since it did.
    * See {@link AgentSessionRecord} for the field-by-field contract and for why
    * the values are verbatim.
@@ -286,7 +289,8 @@ export interface StructuredEventsPayload extends PublishedTurn {
    * **Always present, null while nothing has been measured.** The measurement
    * is refreshed off the hot path — the poll that notices the session moved
    * publishes the previous turn's numbers (or null on the first one) and the
-   * next poll publishes the new ones. Null forever for every tool but opencode.
+   * next poll publishes the new ones. OpenCode V2 measures it in the refresh
+   * that writes {@link session} (Issue #2981). Null forever for every other tool.
    *
    * Optional on the type for the reason `pendingDecisions` below is.
    */
@@ -1102,6 +1106,9 @@ function summarizeAskUserQuestion(
     question: first.question,
     labels: first.choices.map((choice) => choice.label),
     questionCount: episode!.spec.questions.length,
+    // Issue #2951: a question that takes a typed answer, so the panel and the
+    // phone sheet can offer an input for it.
+    ...(first.custom ? { custom: true as const } : {}),
   };
 }
 
@@ -1882,7 +1889,10 @@ async function buildPayload(
   const addressesQuestion =
     promptWaiting !== null && pendingDecisionKind(promptWaiting.toolName) === 'question';
   const decisionOptions =
-    addressableDecisionId !== null && !addressesQuestion ? STRUCTURED_DECISION_OPTIONS : null;
+    addressableDecisionId !== null && !addressesQuestion
+      ? // Issue #2951: in the tool's own words (OpenCode V2: `Always allow`).
+        structuredDecisionOptionsFor(cliToolId)
+      : null;
 
   const structuredFacts: StructuredPromptFacts | null =
     promptWaiting === null
@@ -1989,7 +1999,22 @@ async function buildPayload(
   // an unclassified frame, and writing a "detection failed" row for a turn the
   // agent itself told us had ended would put a false stall into the audit trail
   // `capture --prompts` prints.
-  const unclassifiedVerdict = observeUnclassifiedFrame(compositeKey, merged.isUnclassifiedActive);
+  //
+  // Issue #2965: not while the agent holds a decision this server can answer by
+  // id (OpenCode V2 / opencode approvals and questions). The frame may still be
+  // one the scraper cannot read, but "nothing could answer it" is false then,
+  // and the row landed in the chat as a meaningless assistant line. Fed to the
+  // tracker as "not unclassified" rather than merely not written, so the run —
+  // and the 60 seconds — start afresh if the frame is still unreadable once the
+  // decision is gone (answered, expired, or the source dropped).
+  const answerableOverAgentApi = hasApiAnswerableDecision(
+    eventSource.capabilities.eventIdentity,
+    structuredEvents.pendingDecisions ?? [],
+  );
+  const unclassifiedVerdict = observeUnclassifiedFrame(
+    compositeKey,
+    merged.isUnclassifiedActive && !answerableOverAgentApi,
+  );
   if (unclassifiedVerdict.shouldRecord) {
     recordUnclassifiedFrame(db, {
       worktreeId,
@@ -2031,7 +2056,18 @@ async function buildPayload(
 
   // Issue #1725: the structured layer saw a dialog the scraper did not. That
   // gap is the fact worth keeping — see recordStructuredPrompt.
-  if (promptWaiting !== null && structuredFacts !== null && !scraperPromptWaiting && !promptWaiting.recorded) {
+  //
+  // Issue #2965: except while that dialog can be answered over the agent's API
+  // — the live payload already carries its id and replies, so the row says
+  // nothing true. Not marked recorded either: should the decision expire with
+  // the dialog still open, the row is written then (the safe side).
+  if (
+    promptWaiting !== null &&
+    structuredFacts !== null &&
+    !scraperPromptWaiting &&
+    !promptWaiting.recorded &&
+    !answerableOverAgentApi
+  ) {
     markStructuredPromptRecorded(worktreeId, cliToolId, instanceId);
     recordStructuredPrompt(db, {
       worktreeId,

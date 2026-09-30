@@ -123,6 +123,7 @@ describe('[#1929] DETECTOR_VERSION_PROBES', () => {
       'copilot',
       'gemini',
       'opencode',
+      'opencode-v2',
     ]);
 
     const detectorTools = TOOL_STATUS_DETECTORS.map((d) => d.tool).sort();

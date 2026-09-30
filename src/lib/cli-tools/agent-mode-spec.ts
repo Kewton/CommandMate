@@ -23,6 +23,7 @@
  * | gemini         | 0.58.0   | `app.cycleApprovalMode` (docs)   | **NOT MEASURED** — see below                  |
  * | opencode       | 1.18.30  | agent switch, not a mode         | — (already shipped as #2046's quick keys)     |
  * | vibe-local     | —        | nothing (5 presses, no change)   | — (`-y` AUTO-APPROVE is fixed)                |
+ * | opencode-v2    | 2.0.18   | agent switch (Build ⇄ Plan)      | build ⇄ plan (declared since #3038)           |
  *
  * ## The three tools this table deliberately leaves out
  *
@@ -31,6 +32,9 @@
  *    mode spec would put a second button on the same key with a different
  *    promise. The separation is a DECLARATION (no entry here), not a tool-id
  *    check in the UI.
+ *    (OpenCode V2 is NOT left out any more — see {@link OPENCODE_V2_MODE_SPEC}.
+ *    #2966 left it out for v1's reason; #3038 moved its `shift+tab` from the
+ *    quick keys to the mode button, so there is still one button per key.)
  *  - **vibe-local.** Five presses produced a byte-identical frame. There is no
  *    mode to cycle; the wrapper fixes `-y`.
  *  - **gemini.** Its bundled `docs/reference/keyboard-shortcuts.md` does bind
@@ -43,12 +47,13 @@
  *
  * ## Why the indicators are patterns on a windowed tail and not positions
  *
- * The five declaring tools put the mode in five structurally different places —
+ * The declaring tools put the mode in structurally different places —
  * a dedicated footer row (claude), an independent row above the shortcut hint
  * (Command Code 1.53.1) or *replacing* it (1.49.0), the right end of a status
  * bar (codex), a word spliced into a hint bar whose element count changes with
  * the mode (copilot), and a right-aligned footer segment plus a banner inside
- * the composer box (agy). No column index, no row offset and no "nth segment"
+ * the composer box (agy), and the agent row under the composer (OpenCode V2).
+ * No column index, no row offset and no "nth segment"
  * rule survives that set, so each tool declares what its row LOOKS like and the
  * reader scans a small window of non-blank tail rows for it.
  *
@@ -300,6 +305,53 @@ const ANTIGRAVITY_MODE_SPEC: AgentModeSpec = {
 };
 
 /**
+ * OpenCode V2's agent row, directly under the composer (Issue #3038).
+ *
+ * `shift+tab` on 2.0.18 toggles the AGENT, not a permission mode — `Build`
+ * (edits allowed) ⇄ `Plan` (read only) — on the home screen and inside a session
+ * alike, and the composer's last row names it. Measured 2026-09-30 through
+ * `scripts/opencode-v2/launch.sh` on a private tmux socket, 80x200
+ * (`tests/fixtures/opencode-v2-agent-mode-3038/`):
+ *
+ *   `   ┃  Build · LongCat 2.5 Preview Free OpenCode Zen`   (home, 4th row up)
+ *   `  ┃  Plan · LongCat 2.5 Preview Free OpenCode Zen`     (session, 3rd row up)
+ *
+ * Two rows the patterns must NOT read, both on the same screen:
+ *
+ *  - the completion row a finished turn leaves in the transcript,
+ *    `     Build · LongCat 2.5 Preview Free · 4.9s · 8.1 tok/s`. On 2.0.18 it
+ *    has no gutter at all (v1 drew `▣` there); the required `┃` excludes it;
+ *  - the user's own message, drawn in the same `┃  <text>` gutter. It is above
+ *    the composer, so the tail window below cannot reach it on a frame where
+ *    the composer is drawn.
+ *
+ * Both agents are drawn, so unlike codex / copilot / agy there is no silent
+ * base mode here: a frame without the row (a permission or question dialog
+ * replaces the composer) reads `unknown`.
+ *
+ * `build` is its own id rather than `default` — the chip says what the pane
+ * says (#2592) — and the `opencodeAgentSwitch` note tells the user this button
+ * switches the agent, which its "permission mode" aria label does not.
+ *
+ * The same key was `OpencodeQuickKeys`' v2 `agentNext` until #3038. It was
+ * taken off the strip in the same change, so the key has one button.
+ */
+const OPENCODE_V2_MODE_SPEC: AgentModeSpec = {
+  key: 'BTab',
+  cycle: ['build', 'plan'],
+  indicators: [
+    { mode: 'build', pattern: /^[^\S\n]*┃[^\S\n]+Build[^\S\n]·[^\S\n]/ },
+    { mode: 'plan', pattern: /^[^\S\n]*┃[^\S\n]+Plan[^\S\n]·[^\S\n]/ },
+  ],
+  // The home screen draws `2.0.18` under the footer, which puts the agent row
+  // 4th from the bottom; in a session it is 3rd (footer, `╹▀▀▀`, agent row).
+  // Four and no more: the fifth row up is the composer's own gutter, and above
+  // that is the transcript, where the user's `┃  …` message lives.
+  tailRows: 4,
+  noteId: 'opencodeAgentSwitch',
+};
+
+/**
  * The declarations, keyed by tool.
  *
  * A `Partial` rather than a total record on purpose: "this tool has no mode on
@@ -313,6 +365,7 @@ const AGENT_MODE_SPECS: Readonly<Partial<Record<CLIToolType, AgentModeSpec>>> = 
   codex: CODEX_MODE_SPEC,
   copilot: COPILOT_MODE_SPEC,
   antigravity: ANTIGRAVITY_MODE_SPEC,
+  'opencode-v2': OPENCODE_V2_MODE_SPEC,
 };
 
 /**

@@ -67,7 +67,7 @@ Create a `## Schedules` section in your `CMATE.md` and define entries using Mark
 | **Name** | Yes | Schedule name. 1-100 characters. Alphanumeric, Japanese, hyphens, and spaces allowed | - |
 | **Cron** | Yes | Cron expression (5-6 fields). Defines execution timing | - |
 | **Message** | Yes | Prompt sent to `claude -p`. Max 10,000 characters | - |
-| **CLI Tool** | No | CLI tool to use (`claude` / `codex` / `gemini` / `vibe-local` / `opencode` / `copilot` / `antigravity` / `command-code`; the authority is `CLI_TOOL_IDS` in `src/lib/cli-tools/types.ts`). **Only copilot and opencode accept `--model <model-name>`** — writing it for another tool is a syntax error and the whole row is skipped | `claude` |
+| **CLI Tool** | No | CLI tool to use (`claude` / `codex` / `gemini` / `vibe-local` / `opencode` / `copilot` / `antigravity` / `command-code` / `opencode-v2`; the authority is `CLI_TOOL_IDS` in `src/lib/cli-tools/types.ts`). **Only copilot, opencode and opencode-v2 accept `--model <model-name>`** — writing it for another tool is a syntax error and the whole row is skipped. opencode and opencode-v2 also accept `--agent` / `--variant` / `--continue` / `--title` (Issue #2044 / #2982; opencode-v2's `--variant` only together with `--model`) | `claude` |
 | **Enabled** | No | Enable/disable the schedule (`true` / `false`) | `true` |
 | **Permission** | No | Execution permission level. See Permission Reference below | Tool-specific default |
 
@@ -137,6 +137,67 @@ Model names may contain alphanumeric characters, hyphens, dots, slashes and colo
 | `--dangerously-skip-permissions` | Auto-approves tool use (**default**; no other value is accepted) |
 
 > **Warning:** note that this is the only permitted value, and scheduled execution is an unattended batch.
+
+### opencode-v2 (--auto)
+
+`opencode-v2` (OpenCode V2, executable `opencode2`, or an `opencode` whose `--version` reports v2) runs as
+`opencode2 run --standalone --format json [--auto] -- <message>` (Issue #2974). The body of the last
+message is taken from the NDJSON output and stored in the execution log.
+
+| Value | Description |
+|-------|-------------|
+| `default` | No flag (**default**). A request that hits an `ask` rule in OpenCode's `permission` config is rejected automatically, and the run is **recorded as failed (exit 1)** |
+| `auto` | Passes `--auto`: permission requests that are not explicitly `deny`-ed (including `ask`) are approved automatically |
+
+- Measured on OpenCode V2 2.0.18: with no `permission` config, writes go through without a prompt. With an
+  `ask` rule, stderr says `permission requested: edit (…); auto-rejecting` and the process exits 1; the
+  execution log carries a Reason line saying that `auto` approves it unattended. The run never "succeeds"
+  having changed nothing.
+- **`deny` is not a sandbox**: with `edit: deny` / `write: deny` the model was still able to write a file
+  through the `shell` tool. Keep that in mind especially when combining it with `auto`.
+- **An operation answered with "Always allow" on screen is allowed in the schedules of every worktree of the
+  same repository.** OpenCode treats the worktrees of one repository as one project and saves "Always allow"
+  there. So even with the default Permission (`default`), an operation always-allowed in any worktree is not stopped
+  by `ask` (measured: an "Always allow" for `edit *` left in this repository's project let the edit `ask` through,
+  while a bash `ask` with no saved allowance was recorded as failed; the UAT of Issue #2979).
+- `--standalone` is always passed. Without it `opencode2 run` connects to the operator's background service
+  (`opencode serve --service`), starting one and leaving it behind when there is none. With `--standalone`
+  each run starts a private server, and no process is left after it ends.
+- The run happens in the worktree that holds the schedule, and reads that worktree's `opencode.json` /
+  `AGENTS.md`. OpenCode V2 picks its project from the `PWD` environment variable rather than its working
+  directory, so the child is started with `PWD` set to the worktree (Issue #2979; before that it ran in the
+  directory the server was started from).
+
+#### opencode-v2 run options (Issue #2982)
+
+The CLI Tool column takes run options with the same spelling as v1.
+
+```
+opencode-v2 [--model <provider/model> [--variant <name>]] [--agent <name>] [--continue] [--title <text>]
+```
+
+| In the column | Argument passed to `opencode2 run` |
+|---|---|
+| `--model <provider/model>` (or `-m`) | `-m <provider/model>` |
+| `--model <provider/model> --variant <name>` | `-m <provider/model>#<name>` |
+| `--agent <name>` | `--agent <name>` |
+| `--continue` (or `-c`) | `-c` |
+| `--title <text>` (wrap in `"…"` if it contains spaces) | `--title <text>` |
+
+- **`--variant` is only accepted together with `--model`.** `opencode2 run` has no `--variant` flag
+  (`Unrecognized flag`, exit 1 on 2.0.18); the variant rides on the model as `-m provider/model#variant`.
+  A `--variant` without a model is not silently dropped: it is a syntax error and the row is skipped
+  (the schedule editor and the API refuse it before saving, too). v1 (`opencode`) still accepts a
+  model-less `--variant`.
+- A `#` cannot be written in the `--model` value itself (invalid model-name character); use `--variant`.
+- Values are validated as for v1 (allowed characters, length). Choosing OpenCode V2 in the schedule editor
+  shows the Model / Agent / Variant / Title / Continue fields.
+
+```markdown
+| nightly-v2 | 0 2 * * * | Check for dependency updates | opencode-v2 | true | default |
+| review-v2 | 0 3 * * * | Review today's diff | opencode-v2 --model anthropic/claude-sonnet-4-5 --agent plan | true | default |
+| deep-v2 | 0 4 * * * | Look for vulnerable dependencies | opencode-v2 --model anthropic/claude-sonnet-4-5 --variant high --title "nightly deps" | true | auto |
+```
 
 ### command-code (--yolo / --permission-mode)
 

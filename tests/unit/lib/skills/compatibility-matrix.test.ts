@@ -188,6 +188,8 @@ describe('the 2026-07-26 measurements are recorded as taken', () => {
       // both left this list. gemini stays on it deliberately: its discovery
       // axis was measured but its invocation axis could not be, so the row is
       // still `unknown` rather than a half-landed claim.
+      // Issue #2934 registered OpenCode V2 without a probe; Issue #2975
+      // measured it on opencode2 2.0.18 and it left this list.
       ['antigravity', 'gemini', 'vibe-local'].sort()
     );
   });

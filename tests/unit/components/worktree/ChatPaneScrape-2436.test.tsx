@@ -109,6 +109,8 @@ describe('[#2436] the tool table this fold is limited by', () => {
       copilot: false,
       gemini: false,
       'vibe-local': false,
+      // Issue #2940: OpenCode V2's replies are written from its server.
+      'opencode-v2': true,
     });
   });
 });

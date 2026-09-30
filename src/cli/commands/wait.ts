@@ -750,7 +750,12 @@ export async function pollWorktree(
   client: ApiClient,
   worktreeId: string,
   options: PollWorktreeOptions,
-): Promise<{ exitCode: number; output?: WaitPromptOutput }> {
+): Promise<{
+  exitCode: number;
+  output?: WaitPromptOutput;
+  /** Set with exit 11: which upstream fault was on the frame (Issue #3011). */
+  upstreamFault?: { id: string; matchedText: string };
+}> {
   const startTime = Date.now();
   let lastActivityTime = Date.now();
   let lastContent = '';
@@ -1132,7 +1137,18 @@ export async function pollWorktree(
               'composer with an upstream API failure on screen, so this turn did not run. ' +
               `Matched: ${JSON.stringify(fault.matchedText)}`,
           );
-          return { exitCode: WaitExitCode.UPSTREAM_FAULT };
+          if (fault.id === 'context-limit') {
+            // A retry into the same session hits the same wall (Issue #3011).
+            console.error(
+              'The session\'s conversation is over the model\'s context limit. Start a fresh ' +
+                `session and send again: commandmate instances ${worktreeId} kill ` +
+                `${options.instance ?? '<instance>'}`,
+            );
+          }
+          return {
+            exitCode: WaitExitCode.UPSTREAM_FAULT,
+            upstreamFault: { id: fault.id, matchedText: fault.matchedText },
+          };
         }
 
         // Issue #1839: `ready` off the terminal frame is the agent's composer,

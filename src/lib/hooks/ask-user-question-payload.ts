@@ -77,6 +77,12 @@ export interface AskUserQuestionEntry {
   /** Whether the picker accepts several answers for this question. */
   multiSelect: boolean;
   choices: AskUserQuestionChoice[];
+  /**
+   * Whether a typed answer is accepted besides the choices (Issue #2951).
+   * Set only by a source that says so — OpenCode V2's form field
+   * `custom: true`; absent (not false) everywhere else.
+   */
+  custom?: true;
 }
 
 /** Everything one `AskUserQuestion` tool call asked. */

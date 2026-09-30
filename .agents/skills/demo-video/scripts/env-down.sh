@@ -130,7 +130,7 @@ stop_server() {
 # somebody else's session.
 # CLI_TOOL_IDS (src/lib/cli-tools/types.ts) as an alternation. Pinned against
 # the product's list by env-scripts.test.ts.
-DEMO_TOOL_IDS='claude|codex|gemini|vibe-local|opencode|copilot|antigravity|command-code'
+DEMO_TOOL_IDS='claude|codex|gemini|vibe-local|opencode|copilot|antigravity|command-code|opencode-v2'
 
 kill_session_if_live() {
   grep -Fqx -- "$1" "$LIVE_SESSIONS" || return 0

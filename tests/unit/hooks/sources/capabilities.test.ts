@@ -73,6 +73,7 @@ import { copilotAgentEventSource } from '@/lib/hooks/sources/copilot/source';
 import { opencodeAgentEventSource } from '@/lib/hooks/sources/opencode/source';
 import { antigravityAgentEventSource } from '@/lib/hooks/sources/antigravity/source';
 import { commandCodeAgentEventSource } from '@/lib/hooks/sources/command-code/source';
+import { opencodeV2AgentEventSource } from '@/lib/hooks/sources/opencode-v2/source';
 import type { AgentEventSource, AgentSourceCapabilities } from '@/lib/hooks/sources/types';
 
 /**
@@ -196,6 +197,22 @@ const TABLE: Record<string, DeclaredRow> = {
     transcriptHistory: 'pull',
     stopReportsSelfResume: false,
   },
+  // Issue #2934 (Epic #2370 Phase 1). A pull source like opencode.
+  // `permission.replied` / `form.replied` retire the decision, so the
+  // reply releases the prompt. Issue #2945 (Phase 2): the `per_…` / `frm_…` id
+  // the reply URL takes is the per-decision identity, as on v1. Issue #2951:
+  // its pending lists are re-read on re-connect and when Auto-Yes is switched
+  // on, with no session-status poll — `pending-list`.
+  'opencode-v2': {
+    permissionHookPredictsDialog: false,
+    sessionStartMayArriveLate: false,
+    permissionReplyReleasesPrompt: true,
+    eventIdentity: 'permission-id',
+    resync: 'pending-list',
+    // Issue #2940: each finished turn is written from the server's own record.
+    transcriptHistory: 'push',
+    stopReportsSelfResume: false,
+  },
 };
 
 const SOURCES: Record<string, AgentEventSource> = {
@@ -206,6 +223,7 @@ const SOURCES: Record<string, AgentEventSource> = {
   opencode: opencodeAgentEventSource,
   antigravity: antigravityAgentEventSource,
   'command-code': commandCodeAgentEventSource,
+  'opencode-v2': opencodeV2AgentEventSource,
 };
 
 function declaredRow(capabilities: AgentSourceCapabilities): DeclaredRow {
@@ -275,16 +293,20 @@ describe('[#1924] AgentSourceCapabilities — the table of §4 D3', () => {
     expect(forecasts).toEqual(['claude', 'codex']);
 
     const releases = Object.keys(TABLE).filter((id) => TABLE[id].permissionReplyReleasesPrompt);
-    expect(releases).toEqual(['opencode']);
+    // Issue #2934: OpenCode V2's `permission.replied` retires the dialog the
+    // same way v1's does.
+    expect(releases).toEqual(['opencode', 'opencode-v2']);
 
     const identified = Object.keys(TABLE).filter((id) => TABLE[id].eventIdentity !== null);
-    expect(identified).toEqual(['opencode']);
+    // Issue #2945: OpenCode V2's approvals and questions are addressed by id.
+    expect(identified).toEqual(['opencode', 'opencode-v2']);
 
     const resyncing = Object.keys(TABLE).filter((id) => TABLE[id].resync !== 'none');
-    expect(resyncing).toEqual(['opencode']);
+    // Issue #2951: OpenCode V2's pending lists are re-read too.
+    expect(resyncing).toEqual(['opencode', 'opencode-v2']);
   });
 
-  it('names exactly the five sources with a second writer, and which kind (#2252)', () => {
+  it('names exactly the six sources with a second writer, and which kind (#2252, #2940)', () => {
     // The column-wise reading of Issue #2197's addition, with #2198's fourth
     // source and #2252's fifth in it. Two departures from "nobody but the
     // scraper", and they are different departures: opencode is pushed the reply
@@ -297,7 +319,9 @@ describe('[#1924] AgentSourceCapabilities — the table of §4 D3', () => {
     expect(pull).toEqual(['claude', 'codex', 'antigravity', 'command-code']);
 
     const push = Object.keys(TABLE).filter((id) => TABLE[id].transcriptHistory === 'push');
-    expect(push).toEqual(['opencode']);
+    // Issue #2940: OpenCode V2 joins opencode — its subscription writes each
+    // finished turn from `GET /api/session/{id}/message`.
+    expect(push).toEqual(['opencode', 'opencode-v2']);
 
     const scraperOnly = Object.keys(TABLE).filter((id) => TABLE[id].transcriptHistory === null);
     expect(scraperOnly).toEqual(['gemini', 'copilot']);

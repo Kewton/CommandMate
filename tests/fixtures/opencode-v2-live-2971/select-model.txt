@@ -1,0 +1,200 @@
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+              Select model                                     esc
+
+              Search
+
+            ● LongCat 2.5 Preview Free                        Free
+              Space Bunny Free                                Free
+              MiMo-V2.6-Flash Free                            Free
+              Muse Spark 1.3 Free                             Free
+              Ling 3.0 Flash Fin Free                         Free
+              Nemotron 3.5 Lightning Free                     Free
+              Nemotron 3 Ultra Free                           Free
+              Big Pickle                                      Free
+              codegeex4:latest
+              Deepseek v4 Flash
+              gemma4:26b
+              gemma4:31b
+              gemma4:31b-cloud
+              gpt-oss:20b
+              pielee/qwen3-4b-thinking-2507_q8:latest
+              qwen3-coder:30b
+              qwen3:8b
+              qwen3.5:2b
+              qwen3.5:4b
+              qwen3.5:9b
+              qwen3.6:27b-coding-mxfp8
+              qwen3.6:27b-coding-nvfp4
+              qwen3.6:35b-a3b-coding-nvfp4
+              Qwen3.8 27B
+              qwen3.8-flash-next:125b-mlx
+              qwen3.8:27b-mlx
+
+              View all integrations ctrl+a
+
+
+
+
+
+
+
+
+
+
+
+                                                      ▄
+                     █▀▀█ █▀▀█ █▀▀█ █▀▀▄ █▀▀▀ █▀▀█ █▀▀█ █▀▀█
+                     █  █ █  █ █▀▀▀ █  █ █    █  █ █  █ █▀▀▀
+                     ▀▀▀▀ █▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀
+
+
+   ┃
+   ┃  Ask anything… "Fix broken tests"
+   ┃
+   ┃  Build · LongCat 2.5 Preview Free OpenCode Zen
+   ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+   /…/tmp/probe/repo:master  shift+tab agents  ctrl+p commands
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                                                        2.0.18
+

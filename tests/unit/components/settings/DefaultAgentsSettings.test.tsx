@@ -112,6 +112,22 @@ describe('DefaultAgentsSettings (Issue #2065)', () => {
    * value that differs from the constant in membership and order, which is the
    * only shape that can tell the two apart.
    */
+  describe('Issue #2939: OpenCode 1.x and V2 side by side', () => {
+    it('warns about the shared data once when both are installed', async () => {
+      installFetch({ get: { ...GET_BODY, installed: ['claude', 'opencode', 'opencode-v2'] } });
+      await renderCard();
+      const notice = screen.getByTestId('default-agents-opencode-shared-data');
+      expect(notice.textContent).toContain('OpenCode V2');
+      expect(notice.textContent).not.toContain('settings.defaultAgents');
+    });
+
+    it('says nothing when only one of them is installed', async () => {
+      installFetch({ get: { ...GET_BODY, installed: ['claude', 'opencode-v2'] } });
+      await renderCard();
+      expect(screen.queryByTestId('default-agents-opencode-shared-data')).toBeNull();
+    });
+  });
+
   describe('reads the STORED setting, not the constant', () => {
     beforeEach(() => {
       installFetch({ get: CONFIGURED_BODY });

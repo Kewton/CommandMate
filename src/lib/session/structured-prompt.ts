@@ -34,6 +34,8 @@
  */
 
 import { UNCLASSIFIED_PROMPT_TYPE } from '@/types/models';
+import type { CLIToolType } from '@/lib/cli-tools/types';
+import { OPENCODE_V2_DECISION_LABELS } from '@/lib/hooks/sources/opencode-v2/decision-labels';
 
 /**
  * Where the structured layer learned that a dialog is open.
@@ -101,6 +103,37 @@ export const STRUCTURED_DECISION_OPTIONS: readonly StructuredDecisionOption[] = 
   { number: 3, label: 'Reject', reply: 'reject' },
 ];
 
+/**
+ * A tool's own words for the approval verdicts, keyed by wire reply
+ * (Issue #2951). Only tools whose dialog words differ from
+ * {@link STRUCTURED_DECISION_OPTIONS} are here: OpenCode V2 draws `Always allow`
+ * where v1 draws `Allow always`.
+ */
+const DECISION_LABELS_BY_TOOL: Partial<Record<CLIToolType, Readonly<Record<string, string>>>> = {
+  'opencode-v2': OPENCODE_V2_DECISION_LABELS,
+};
+
+/**
+ * The approval verdicts in the words of the tool that asked (Issue #2951).
+ *
+ * What `capture --json` publishes as `decisionOptions` and what `respond`
+ * matches a label against, so both say what the tool's own dialog says. Only
+ * the LABEL differs per tool: the number and the wire reply are the shared
+ * list's, so `2` still means `always` everywhere. Every tool without its own
+ * words gets {@link STRUCTURED_DECISION_OPTIONS} itself (the same object).
+ *
+ * @param cliToolId - The tool the approval belongs to
+ */
+export function structuredDecisionOptionsFor(
+  cliToolId: CLIToolType
+): readonly StructuredDecisionOption[] {
+  const labels = DECISION_LABELS_BY_TOOL[cliToolId];
+  if (!labels) return STRUCTURED_DECISION_OPTIONS;
+  return STRUCTURED_DECISION_OPTIONS.map((option) =>
+    labels[option.reply] ? { ...option, label: labels[option.reply] } : option
+  );
+}
+
 /** Bound on the agent's `message`, which is prose and only ever displayed. */
 export const MAX_STRUCTURED_PROMPT_MESSAGE_LENGTH = 500;
 
@@ -126,6 +159,36 @@ export function isAddressableDecision(value: unknown): value is string {
 }
 
 /**
+ * Whether the agent is holding a decision this server can answer over the
+ * agent's own API right now (Issue #2965).
+ *
+ * The gate on the two "the detection layer could not read this" rows — the
+ * unclassified-frame row and the structured-prompt row
+ * ({@link buildStructuredPromptQuestion}). Both exist to record a dialog nobody
+ * could answer; while this is true somebody can, by id, and the row is a
+ * meaningless line in the chat (OpenCode V2 approvals and questions, #2945;
+ * v1 opencode's approvals, which carry the same `permission-id`). All three
+ * conjuncts are required, and each failing one puts the row back — the safe
+ * side:
+ *
+ *  - the source publishes per-decision ids (`eventIdentity: 'permission-id'`);
+ *  - a pending decision carries one ({@link isAddressableDecision});
+ *  - its delivery window has not expired (a verdict can still reach the agent).
+ *
+ * @param eventIdentity - `capabilities.eventIdentity` of the tool's event source
+ * @param pendingDecisions - the decisions the turn is holding, as published
+ */
+export function hasApiAnswerableDecision(
+  eventIdentity: string | null,
+  pendingDecisions: readonly { id: string | null; deliveryExpired: boolean }[],
+): boolean {
+  if (eventIdentity !== 'permission-id') return false;
+  return pendingDecisions.some(
+    (decision) => isAddressableDecision(decision.id) && !decision.deliveryExpired,
+  );
+}
+
+/**
  * The question an `AskUserQuestion` call asked, for a dialog nobody parsed
  * (Issue #1726).
  *
@@ -148,6 +211,12 @@ export interface StructuredAskUserQuestionSummary {
   labels: string[];
   /** How many questions the one tool call carries. */
   questionCount: number;
+  /**
+   * The first question also takes a typed answer (Issue #2951) — OpenCode V2's
+   * form field `custom: true`. Present only when true, so every other tool's
+   * payload is unchanged.
+   */
+  custom?: true;
 }
 
 /** What a structured prompt is built from, from either source. */

@@ -273,7 +273,9 @@ describe('3. no `denies` member (declined)', () => {
     const blocking = listAgentEventSources().filter(
       (source: AgentEventSource) => source.noDecision.kind === 'blocks'
     );
-    expect(blocking.map((source) => source.cliToolId)).toEqual(['opencode']);
+    // Issue #2934: OpenCode V2 declares the same — its approval also waits for
+    // an answer with no timeout (Phase 0, #2370).
+    expect(blocking.map((source) => source.cliToolId)).toEqual(['opencode', 'opencode-v2']);
   });
 });
 
@@ -335,6 +337,9 @@ describe('5. pull sources fold their own repeats (declined)', () => {
     // Stated so the rule has a scope: push sources are answered request by
     // request and have no stream to replay, so there is nothing to fold.
     const pull = listAgentEventSources().filter((source) => source.transport === 'pull');
-    expect(pull.map((source) => source.cliToolId)).toEqual(['opencode']);
+    // Issue #2934: OpenCode V2 is subscribed to as well. It folds nothing — its
+    // `session.execution.*` frames carry a durable sequence and are not replayed
+    // on reconnect in Phase 1.
+    expect(pull.map((source) => source.cliToolId)).toEqual(['opencode', 'opencode-v2']);
   });
 });

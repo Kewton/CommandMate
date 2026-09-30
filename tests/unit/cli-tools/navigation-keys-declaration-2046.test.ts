@@ -33,6 +33,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import fs from 'fs';
+import path from 'path';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { CLI_TOOL_IDS, type CLIToolType } from '@/lib/cli-tools/types';
 import { isSendableSpecialKey } from '@/lib/tmux/tmux';
@@ -49,6 +51,7 @@ import {
   OPENCODE_NAVIGATION_KEY_VALUES,
   TERMINAL_KEY_VALUES,
 } from '@/types/terminal-keys';
+import { OPENCODE_V2_NAVIGATION_KEY_VALUES } from '@/lib/cli-tools/opencode-v2';
 
 /**
  * The claude-family tools, which declare `NAVIGATION_KEY_VALUES` **plus `s`**
@@ -62,9 +65,15 @@ import {
  */
 const SESSION_SCOPE_TOOLS: readonly CLIToolType[] = ['claude', 'command-code'];
 
+/**
+ * The tools with a leader of their own: opencode (#2046) and, since Issue #2966,
+ * OpenCode V2 — each pinned to its own list in its own `describe` below.
+ */
+const LEADER_TOOLS: readonly CLIToolType[] = ['opencode', 'opencode-v2'];
+
 /** Every tool whose key set is still exactly the pre-#2046 list. */
 const UNCHANGED_TOOLS: readonly CLIToolType[] = CLI_TOOL_IDS.filter(
-  (id) => id !== 'opencode' && !SESSION_SCOPE_TOOLS.includes(id),
+  (id) => !LEADER_TOOLS.includes(id) && !SESSION_SCOPE_TOOLS.includes(id),
 );
 
 const manager = CLIToolManager.getInstance();
@@ -95,11 +104,13 @@ describe('Issue #2046: every tool but opencode declares the pre-#2046 set, uncha
       'codex',
       'copilot',
       'gemini',
+      // Issue #2966 moved OpenCode V2 off this list: its quick keys need the
+      // `ctrl+x` leader, `ctrl+p` / `ctrl+t` and three chord letters.
       'vibe-local',
     ]);
     // Issue #2250 put Command Code on the shared set; Issue #2297 moved it and
     // claude onto CLAUDE_NAVIGATION_KEY_VALUES. The union is still every tool.
-    expect([...UNCHANGED_TOOLS, ...SESSION_SCOPE_TOOLS, 'opencode'].sort()).toEqual(
+    expect([...UNCHANGED_TOOLS, ...SESSION_SCOPE_TOOLS, ...LEADER_TOOLS].sort()).toEqual(
       [...CLI_TOOL_IDS].sort(),
     );
   });
@@ -226,6 +237,42 @@ describe('Issue #2046: opencode declares its own chords', () => {
   });
 });
 
+describe('Issue #2966: OpenCode V2 declares its own, narrower chords', () => {
+  const spec = manager.getTool('opencode-v2').navigationKeys();
+
+  it('publishes exactly OPENCODE_V2_NAVIGATION_KEY_VALUES: the base pad, the leader, C-p / C-t and a / l / m', () => {
+    // Equality, as for every other tool: a key gained is as much a regression
+    // as a key lost.
+    expect(spec.keys).toEqual([...OPENCODE_V2_NAVIGATION_KEY_VALUES]);
+    expect(spec.keys).toEqual([
+      ...NAVIGATION_KEY_VALUES,
+      OPENCODE_LEADER_KEY,
+      ...OPENCODE_DIRECT_KEY_VALUES,
+      'a',
+      'l',
+      'm',
+    ]);
+  });
+
+  it('names ctrl+x as the leader — the default 2.0.18’s palette prints', () => {
+    expect(spec.leaderKey).toBe('C-x');
+  });
+
+  it('does NOT publish the v1 chord letters 2.0.18 lets through into the composer', () => {
+    // `t` is not themes on 2.0.18; g / u / r / c are session-only and not on
+    // the v2 strip; `b` is #2046's refused sidebar toggle.
+    for (const letter of ['t', 'g', 'u', 'r', 'c', 'b']) {
+      expect(spec.keys, `opencode-v2 must not accept the bare letter ${letter}`).not.toContain(letter);
+    }
+    expect(spec.keys as readonly string[]).not.toContain('F2');
+    expect(spec.keys as readonly string[]).not.toContain(SESSION_SCOPE_KEY);
+  });
+
+  it('has no duplicate entries', () => {
+    expect(new Set(spec.keys).size).toBe(spec.keys.length);
+  });
+});
+
 describe('Issue #2032 invariant, quantified over the registry (Issue #2046)', () => {
   it('leaves an empty difference set for EVERY tool: nothing declared is undeliverable', () => {
     const undeliverable: Array<{ tool: CLIToolType; key: string }> = [];
@@ -265,6 +312,30 @@ describe('Issue #2032 invariant, quantified over the registry (Issue #2046)', ()
     for (const key of ['Space', 'BSpace', 'DC']) {
       expect(isSendableSpecialKey(key)).toBe(true);
       expect(published.has(key)).toBe(false);
+    }
+  });
+});
+
+describe('Issue #2983: the dialog card’s model keys stay inside each tool’s vocabulary', () => {
+  // The card cannot call navigationKeys(); a key outside it is a 400 the user
+  // sees as a dead button. v2's keys lead with `Escape` (they close the open
+  // dialog first), so that key must be declared for v2 as well.
+  const V2_DIALOG = fs.readFileSync(
+    path.resolve(__dirname, '../../fixtures/opencode-v2-model-keys-2983/select-model-ctrl-x-m.txt'),
+    'utf-8',
+  );
+
+  it.each<[CLIToolType, string | undefined]>([
+    ['opencode', undefined],
+    ['opencode-v2', V2_DIALOG],
+  ])('%s: every key the card sends is declared and deliverable', async (id, frame) => {
+    const { opencodeModelKeyBindings } = await import('@/components/worktree/OpencodeQuickKeys');
+    const bindings = opencodeModelKeyBindings(id, frame);
+    expect(bindings.map((binding) => binding.id)).toEqual(['variant', 'models', 'commands']);
+    const declared = manager.getTool(id).navigationKeys().keys as readonly string[];
+    for (const key of bindings.flatMap((binding) => binding.keys)) {
+      expect(declared, `${id} card key ${key}`).toContain(key);
+      expect(isSendableSpecialKey(key)).toBe(true);
     }
   });
 });

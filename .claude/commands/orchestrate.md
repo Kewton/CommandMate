@@ -64,7 +64,7 @@ TodoWriteツールで作業計画を作成：
 
 **重要（エージェント指定ルール）**: `commandmatedev send` でワーカーにタスクを送信する際のエージェント指定は以下に従うこと：
 - **開発タスク**: 担当は 1-2b の難易度判定で決める。**易 → `--instance antigravity`**
-  （モデルは agy の既定。`--model` は渡さない）、**中 → `--instance claude`（sonnet）**、**難 → `--instance claude`（opus）**
+  （モデルは agy の既定。`--model` は渡さない）、**中 → `--instance claude`（sonnet＝Sonnet 5.5）**、**難 → `--instance claude`（opus）**
   - **Claude のモデルは `--instance` でも `--model` でも決まらない**（`send --model` は copilot / antigravity 専用で、claude に渡すと 400）。
     セッションの**起動時**に、worktree の `.claude/settings.local.json` から決まる。書くのは 3-1 の `set_claude_model`
   - **ワーカーに `/model` を送らない。** Enter が `~/.claude/settings.json` のグローバル既定を書き換える（#1495 / #2297）
@@ -137,23 +137,38 @@ done
   コミットメッセージ本文に『本文に無い指摘: `<file>:<line>` `<rule>`』と書いて報告すること（勝手に直さない）」。
   これが**規模を上げられる条件そのもの**である（下の実測を参照）
 
-**Claude の中の振り分け（opus / sonnet）— パイロット（2026-09-20 開始）**
+**確定 diff は、対象のコードを読んでから書く**: 起票で確定 diff を書くときは、対象の範囲を `sed -n '<開始>,<終了>p' <file>` などで
+実際に読んでから書く。#2936（2026-09-28）は実コードを読まずに「既存の `else` ブロックを入れ子にする」修正案を書き、
+契約の作成時に過大と気づいて `else if` 1 段に直した（Issue も更新）。確定 diff の誤りは、「易」の前提をそのまま崩す。
 
-上の表で「難」になった Issue のうち、**当てはまった観点が「危険な領域」と「依存」だけ**で、それ以外は
-「Antigravity に回す」の条件（全変更が確定 diff／受入基準がすべて自動／バグなら原因と対策が本文にある／逸脱時の退避路がある）を
-すべて満たすものは、**中 → Claude（sonnet）** にする。それ以外の「難」は **難 → Claude（opus）** のままである。
+**Claude の中の振り分け（opus / sonnet）— 2026-09-30 改定（Sonnet 5.5）**
+
+Claude の担当は、Issue の中で**ワーカーが自分で見つけなければならないもの**の大きさで opus と sonnet に分ける。
+2026-09-30 に Sonnet 5.5（`sonnet` が指すモデル）が出たので、パイロットの「中」を「危険な領域・依存だけ」から「**選択肢か手順が本文で閉じている判断・設計**」まで広げた（根拠は下の実測）。
 
 | 難易度 | 担当 | モデル | 条件 |
 |---|---|---|---|
 | 易 | antigravity | —（agy の既定） | 「Antigravity に回す」をすべて満たす |
-| 中 | claude | sonnet | 「Claude に回す」の観点のうち当てはまるのが「危険な領域」「依存」**だけ**で、残りは「易」の条件をすべて満たす |
-| 難 | claude | opus | 上のどちらでもない（判断の余地・設計・原因・未決事項・検証・新規 export のどれかに当てはまる） |
+| 中 | claude | sonnet | 「Claude に回す」の観点のうち当てはまるのが「危険な領域」「依存」と、次の「閉じた判断」「閉じた設計」**だけ**で、受入基準がすべて自動・逸脱時の退避路がある。**閉じた判断**＝直し方の候補が本文に列挙されている、または「置き場所・書き方はあなたが決めてよい」の範囲が 1 関数・1 節に収まる。**閉じた設計**＝新しいテストを書くが、確かめる項目と陽性/陰性対照が受入基準に列挙されている |
+| 難 | claude | opus | 次のどれかに当てはまる: **原因**（バグで原因が file:line まで特定されていない）・**未決事項**（「要調査」「実機で決める」など、結論が作業の結果で変わる）・**検証**（合否が実機・画面でしか決まらない）・**新規 export**（新しいモジュールと呼び出し元の配線）・**開いた判断/設計**（候補も確かめる項目も本文に無い） |
 
-- 「危険な領域」と「依存」は、**壊したときの被害**と**順序の調整**の話で、「どう直すかが決まっているか」とは別の軸である。
-  直し方が本文で確定していれば、必要なのは判断力ではなく、リポジトリの規約（CLAUDE.md・コマンド・ガードテスト）に沿って正確に写す力になる
+- 「中」と「難」の境目は、**作業の前に結論が決まっているか**である。候補や手順が本文にあれば、ワーカーの仕事は選んで正確に書くことで、Sonnet 5.5 で足りる。
+  結論が実機の結果や調査で変わる Issue（#2955 のような原因調査、#2997 のような「再現したら直す」）は opus に残す
+- 「危険な領域」と「依存」は、**壊したときの被害**と**順序の調整**の話で、「どう直すかが決まっているか」とは別の軸である。これは改定前と同じ
 - それでも Antigravity には上げない。過去の Antigravity の事故（#2605 / #2622）は道具に由来し、道具の事故がいちばん高くつくのが危険な領域だからである
-- **sonnet で足りるかどうかは、このリポジトリではまだ測っていない。** パイロットの間は、中の Issue ごとに再指示の回数・実装時間・格上げの有無を
-  8-2 に記録し、8-3 で基準を見直す。**中か難かで迷ったら難（opus）にする**
+- **迷ったら難（opus）にする**。sonnet がワーカー起因で 2 回不合格になったら opus へ格上げする（3-5b）ので、中に回した判断の誤りは往復 2 回で取り返せる
+- `.claude/settings.local.json` の `{"model":"sonnet"}` は、claude 2.1.284 で `claude-sonnet-5-5` に解決する（#2955 の fixture `tests/fixtures/claude-session-start-2955/`、SessionStart の `model`）。
+  版を固定したいときだけ `claude-sonnet-5-5` と書く
+
+**実測（改定の根拠）**
+
+- **Sonnet 5 の「中」は 17 件で、ワーカー起因の再指示 0・格上げ 0**（2026-09-21〜27: #2773 #2774 #2819 #2835 #2845 #2846 #2847 #2884〜#2888 #2890 #2901 #2903 #2904 #2915）。
+  範囲を広げて再送した 4 件は、すべてオーケストレーターの契約 scope 漏れ（固定値テスト・型・文書）だった。
+  逸脱は 1 件: #2819 が、禁じた `npm run test:unit` を実行した（2-4-2 の「差し替えの条件」）
+- **2026-09-29 の run で opus に回した「閉じた判断・設計」の 4 件は、すべて 1 回目の検証で合格した**: #2995（抑止の粒度。候補 2 つが本文）、#2954（判定の置き場所を任せた。範囲は 1 関数）、#2996（リンク検査テスト。確かめる項目が受入基準に列挙）、#2956（本文の 5 項目を orchestrate.md の該当節へ）。
+  どれも作業の前に結論が決まっていた。これらを改定後は「中」に回す
+- 同じ run で opus が要ったのは、結論が作業で変わった 2 件: #2955（原因調査。hook の中継と画面の読み取りの 2 か所を実機で特定）、#2997（実機で再現を確かめ、再現しないと結論）
+- **Sonnet 5.5 での実測はまだ無い（閉じた判断・閉じた設計への拡大はパイロット）。** 改定後の最初の run から、中の Issue ごとに再指示の回数・格上げの有無と、③④のどちらで中にしたかを 8-2 に記録し、8-3 で見直す
 
 **「検証」の注**: 受入基準に実機・画面の項目があっても、それが**見た目の念押し**だけなら、この行では「難」にしない。
 条件は、実装そのものが自動の受入基準（描画結果の class・DOM・e2e など）で一意に決まること。
@@ -341,6 +356,13 @@ success:
   ファイルが変わったときはテスト全体に切り替わる）。テスト全体の合否は CI の `Unit Tests` で見るので、
   `unit-related` で裁定した PR は 6-2 の例外に従う。テストの共通設定・ヘルパーの変更や広い範囲の rename
   など、テスト全体が必要な Issue では `gates: [lint, typecheck, unit]` にする（#2639）。
+- **`$HOME` 配下に新しい置き場所（ファイル・ディレクトリ・環境変数で移せる場所）を足す Issue** では、
+  goal の受入基準に「`tests/setup.ts` に、その置き場所をテスト用の一時パスへ向ける既定を足す
+  （`CM_OPENCODE_PORT_FILE` / `CM_OPENCODE_V2_DIR` と同じ形）」を書く。`scope.allow` に `tests/setup.ts` を入れ、
+  共通設定の変更なので `gates` は `unit` にする。
+  #2934 で `CM_OPENCODE_V2_DIR` を足したときにこれが無く、起動処理を走らせるテストが利用者の
+  `~/.commandmate/opencode-v2/` を消していた（#2948 で修正）。`env-clean` は `~/.commandmate` **直下**の増減しか見ないので、
+  その下の中身が消えても捕まらない。
 
 ### 2-4-1. 共有ファイルはワーカーに書かせない（必須）
 
@@ -378,7 +400,9 @@ success:
 >     **行キー（`| \`path\` |`）ごと**に列挙する。既存行への追記なら「どの行に何を足すか」を書く。
 >     **既存行に足すときは `grep -n '^| \`<path>\`' docs/module-reference.md` を実行し、その出力
 >     （行番号つきの行キー）を断片に書き写してから**書くこと。0 件だった行への追記を指示しない
->     （新しい行を足すなら「新規行」と明記する）。足すものが無ければ「追記なし」の 1 行でよい。実例:
+>     （新しい行を足すなら「新規行」と明記する）。**ファイルの行が 0 件なら、親ディレクトリの行
+>     （`grep -n '^| \`<dir>/\`' docs/module-reference.md`。例 `src/lib/agent-health/`）も探し、あればそこに足す。**
+>     足すものが無ければ「追記なし」の 1 行でよい。実例:
 >
 >     ```markdown
 >     ## 既存行への追記
@@ -466,6 +490,7 @@ goal: |
     `$HOME` 配下にファイルを作らない（一時ファイルは `os.tmpdir()` 配下のみ）。
   - worktree の外（`$HOME`、`/tmp` など）に既にあるファイルやディレクトリは、確認のためでも消したり書き換えたりしない。
     確認は `os.tmpdir()` 配下に作った一時ディレクトリ（private HOME など）の中で行う。
+  - 既存の `it(...)` / `describe(...)` を消したり名前を変えたりしない。変更が要ると判断したら、本文に無い指摘として報告する。
   - <2-4-1 の転記ブロック（断片ファイル 2 本と実例）>
   - コミットは 1 つにまとめる。メッセージは `<type>(<scope>): <要約> (#<N>)`。
     `.commandmate/tasks/issue-<N>.yaml` と `dev-reports/` はコミットに含めない。
@@ -487,6 +512,10 @@ scope ゲートは worktree の外の操作を見ないので、こうした操�
 
 - 受入基準に「どこそこに残らない」と書くときは、「private HOME（`os.tmpdir()` 配下）で実行したときに」と、確かめる場所も書く
 - 本物の `$HOME` や `/tmp` の後始末が要るなら、ワーカーにはさせず、オーケストレーターが行う
+
+**「既存のテストを消さない」を書く理由**（2026-09-28 #2936）: #2936 は検証ゲートをすべて通ったが、既存テスト
+「rejects a model for a tool that does not support it」を新しいテストに置き換えて消していた（レビューで見つけて再指示 1 回）。
+`unit-related` のゲートは「テストが消えたこと」を検出できないので、6-4 で機械的に確かめる。
 
 **「実装の進め方」の 3・4 を書く理由**（2026-09-17 #2605）: 以前の雛形は「テスト全体は自分で回さなくてよい」だった。
 Antigravity はコミットの後にテスト全体をバックグラウンドで起動し、その終了を待つ間、何度もターンを閉じた
@@ -541,6 +570,25 @@ Antigravity はコミットの後にテスト全体をバックグラウンド�
 撃ち、**稼働中の全 `mcbd-*` セッションを消して並列ワーカーを即死させた**。テストは 3/3 緑で、CI は
 tmux 非導入で skip するため誰も気付かない。`tests/unit/config/tmux-live-test-safety.test.ts` が
 unit ゲートで同型を弾くが、契約側にも明示すること。
+
+### 2-6. 実機でエージェント CLI / サーバーを動かす Issue の隔離の雛形（必須）
+
+実機でエージェント CLI や CommandMate のサーバーを動かして確かめる Issue では、**次の項目を契約の「作業ルール（厳守）」に転記する**
+（tmux を触るなら 2-5 の 4 項目も一緒に転記する）。
+
+> - **CommandMate のサーバーは別ポート（`CM_PORT`）・一時データベースで動かす。** `CM_DB_PATH` は worktree の `data/` 配下などに置く
+>   （`/tmp` は検証で拒まれる）。起動後に `lsof -p <pid> | grep '\.db'` で、本番のデータベースを掴んでいないことを確かめる。
+> - **エージェント CLI の状態の置き場所を一時ディレクトリへ向ける。** `XDG_STATE_HOME`（必要なら `XDG_DATA_HOME` / `XDG_CONFIG_HOME` /
+>   `XDG_CACHE_HOME`）と、OpenCode V2 の記録（`CM_OPENCODE_V2_DIR`）。**環境変数を書いただけで済ませず、
+>   プロセスの環境に実際に効いていることを `ps eww <pid>` などで確かめる。**
+> - **tmux は `-L <専用socket>` で使う**（2-5）。
+> - **作ったものを後始末する。** 作ったエージェントのセッション（opencode なら `DELETE /api/session/{id}`）、サーバー、ポート、一時ファイル。
+> - **利用者の状態を前後で比べる。** `service.json`・`~/.commandmate/*`・`~/.local/state/*` の一覧（`ls -la`）を作業の前後で取り、
+>   変わっていないことを結果（コミットメッセージ本文か報告）に書く。
+
+**理由**（2026-09-28）: #2944 / #2945 は、契約に隔離の手順を具体的に書いたことで、ワーカーが本番に触れずに実機確認できた。
+一方 #2937 では、実装の途中で隔離が効かないまま走った実行があり、利用者の `~/.commandmate/opencode-v2/` の記録が消えたとみられる。
+`env-clean` は `~/.commandmate` 直下の増減しか見ないので、下の階層が消えても捕まらない。
 
 ---
 
@@ -626,7 +674,8 @@ set_claude_model() {  # <worktree-path> <opus|sonnet>
 }
 
 # assign.tsv は 1-2b の結果（1 行 = "<issue>\t<claude|antigravity>\t<opus|sonnet|->"）。3 列目は Claude のモデル
-while IFS="$(printf '\t')" read -r issue AGENT MODEL; do
+# assign.tsv は fd 3 から読む（stdin にすると、ループの中の commandmatedev が残りの行を読み尽くす。下の注を参照）
+while IFS="$(printf '\t')" read -r issue AGENT MODEL <&3; do
   WT=$(commandmatedev ls --branch "feature/${issue}" --quiet)
   if [ "$AGENT" = claude ]; then
     WT_PATH=$(commandmatedev ls --json | jq -r --arg id "$WT" '.[] | select(.id == $id) | .path')
@@ -641,6 +690,10 @@ while IFS="$(printf '\t')" read -r issue AGENT MODEL; do
     > "workspace/orchestration/runs/$DATE/send-${issue}.out" 2> "workspace/orchestration/runs/$DATE/send-${issue}.err"
   echo "exit=$? issue=${issue}"
   TASK_ID=$(head -1 "workspace/orchestration/runs/$DATE/send-${issue}.out")
+  # 送れたことは exit code ではなく、サーバーに task ができたことで確かめる
+  curl -s "http://localhost:3000/api/worktrees/$WT/tasks" \
+    | jq -e --arg id "$TASK_ID" '.tasks[] | select(.id == $id)' > /dev/null \
+    && echo "task ok issue=${issue} id=${TASK_ID}" || echo "task MISSING issue=${issue}"
   printf '%s\t%s\t%s\t%s\t%s\n' "$issue" "$WT" "$AGENT" "$TASK_ID" "$MODEL" >> "workspace/orchestration/runs/$DATE/tasks.tsv"
   if [ "$AGENT" = claude ]; then
     # 起動したセッションが実際にどのモデルで動いているかを確かめる（SessionStart の hook とバナーから読まれる）
@@ -651,8 +704,16 @@ while IFS="$(printf '\t')" read -r issue AGENT MODEL; do
       *)          echo "model MISMATCH issue=${issue} want=${MODEL} got=${GOT}" ;;
     esac
   fi
-done < "workspace/orchestration/runs/$DATE/assign.tsv"
+done 3< "workspace/orchestration/runs/$DATE/assign.tsv"
 ```
+
+**assign.tsv を stdin で読まない**（2026-09-30 実測）: `while read …; done < assign.tsv` にすると、
+ループの中の `commandmatedev`（`ls` / `send` / `capture`）が stdin を読み、残りの行を消費する。
+その run では 1 件目の `send` の前でループが止まり、**約 90 分、ワーカーが 1 人も起動していないのに「送信中」と報告した**
+（send の出力ファイルは 1 つも作られず、`GET /api/worktrees/<WT>/tasks` は空だった）。
+上の雛形は fd 3 から読むので、ループの中のコマンドに `</dev/null` を付けなくてよい。雛形を書き換えて使うときも、
+stdin で読む形に戻さないこと。ループを使わずに 1 件ずつ送るときは、各 `commandmatedev` に `</dev/null` を付ける。
+`task MISSING` が出たら、その Issue は送れていない。`send-<issue>.err` を読み、3-1 の「冷間起動の失敗」に従って再送する。
 
 **モデルの確認結果の扱い**:
 
@@ -876,6 +937,10 @@ commandmatedev verify "$WT" --json    # 失敗したゲートと exit code を�
   - 別リポジトリの orchestrate が消した `mcbd-*` セッション（`-`）
   - 別プロセスの TCP listener（`-`）
   - ワーカーの最初のツール呼び出しより前の時刻が名前に入った `~/.commandmate-test-<ms>`（`+`）
+
+  並行するワーカーのテストが一時的に作る `~/.commandmate-demo-vitest-<pid>`（`+`）も、このワーカー起因ではないことがある
+  （2026-09-28、2 本を並行した run で、互いのテストが作ったものを `env-clean` が違反に数えた。道具の側は #2954 で直す）。
+  直るまでは、`commandmatedev verify "$WT" --gates env-clean` を再実行して、その項目が消えていれば合格として扱う。
 
   帰属は次の 3 つで確かめる:
   - ワーカーが実行したコマンド: `capture --prompts --limit 100` の `Run this command?` と、そこに書かれた `start with '<cmd>'`
@@ -1175,6 +1240,15 @@ git diff --name-status origin/develop...HEAD -- changelog.d/   # 状態 A（追�
 node scripts/changelog-fragments.mjs check; echo "CHECK=$?"     # CHECK=0 であること
 ```
 
+既存のテストが消えていないことも、同じタイミングで確認する（`unit-related` のゲートはテストが消えたことを検出できない。2-4-2 の #2936）:
+
+```bash
+# 削除された it / describe / test の行数。0 であること
+git diff origin/develop...HEAD -- 'tests/**' | grep -cE '^-\s*(it|describe|test)\('
+```
+
+0 でなければ、差分を読んで意図を確かめる（名前の変更・移動なら理由が本文かコミットメッセージにあるか）。
+
 **断片が無い PR はマージしない。** `changelog.d/<N>.md` がコミットに含まれていない PR も、
 module-reference の断片が無い PR も同じ扱いにする。リリースノートに載らない Issue が出る
 （過去に実際に発生し、後追いで docs PR が必要になった）。`check` が exit 0 にならない PR もマージしない
@@ -1239,7 +1313,7 @@ npm run build
 |-------|--------|------|---------------|-----------|--------|------|---------|------|-----------|
 | #{N} | 易 | antigravity | — | {plan.md の根拠} | 0 | なし | 5 分 | exit 20 → 合格扱い | env-clean の違反はワーカー起因でない（{根拠}） |
 | #{M} | 易 | antigravity → claude | opus | {根拠} | 2 | 切替（{失敗ゲート}） | {分} | exit 0 | — |
-| #{L} | 中 | claude | sonnet（`claude-sonnet-5`） | {根拠} | 0 | なし | {分} | exit 0 | — |
+| #{L} | 中 | claude | sonnet（`claude-sonnet-5-5`） | {根拠} | 0 | なし | {分} | exit 0 | — |
 | #{K} | 中 | claude | sonnet → opus | {根拠} | 2 | 格上げ（{失敗ゲート}） | {分} | exit 0 | — |
 
 「モデル（実測）」には、3-1 で `capture --json` の `.model` から読んだ値を書く（指定した値ではなく、動いていた値）。
@@ -1292,6 +1366,20 @@ summary.md の末尾に「振り分けの改善案」節を書き、完了報告
 2. **原因の見立て**: 判定表のどの観点が外れたか。または、道具のどの欠陥か
 3. **改善案**: 判定表の条件の足し引き、goal の雛形（2-4-2）の追記、道具の Issue 起票の要否。
    起票はユーザーの了承を得てから行う
+
+**起票の前に、同じ不具合の開いている Issue を探す**（UAT の指摘・ワーカーの報告・8-3 の改善案のどれでも）。
+日次確認（`agent-health`）は、毎朝 07:00 の Schedule が `<!-- agent-health:<tool>:<checkId> -->` を本文に入れた Issue を自動で起票する。
+並行する別のセッションやワーカーが、先に起票していることもある。
+
+```bash
+gh issue list --repo Kewton/CommandMate --state open --label agent-health --json number,title,createdAt
+gh issue list --repo Kewton/CommandMate --state open --search "<ファイル名か関数名> in:body" --json number,title,createdAt
+```
+
+見つかったら新しく起票せず、その Issue に追加の事実をコメントする。自動起票の Issue は残す
+（翌朝の Schedule は `agent-health:<tool>:<checkId>` を本文に持つ開いた Issue を探してコメントするので、手で起票した別の Issue では重複を防げない）。
+2026-09-30 に 2 回、この確認をせずに重複を起票した: #3024（日次確認が 36 分前に #3021 / #3022 を起票済み）と
+#3031（同じ朝に別のセッションかワーカーが #3026 を起票済み）。
 
 ---
 

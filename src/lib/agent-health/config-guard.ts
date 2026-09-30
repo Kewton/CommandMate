@@ -110,23 +110,67 @@ function parseJson(content: Buffer | null): unknown {
 }
 
 /**
+ * Whether two versions of a trust-state file differ only by the run's own
+ * entries (anything mentioning `marker`). Throws when a version cannot be read
+ * in the file's format; `restoreTrustState` reports that as not restored.
+ */
+export type TrustStateComparator = (before: Buffer | null, now: Buffer | null, marker: string) => boolean;
+
+/** JSON files (antigravity's `settings.json`, command-code's `trusted-hooks.json`). */
+export const sameJsonWithoutMarker: TrustStateComparator = (before, now, marker) =>
+  JSON.stringify(withoutMarker(parseJson(now), marker)) === JSON.stringify(withoutMarker(parseJson(before), marker));
+
+/** A table or array-of-tables header line (`[a.b]`, `[[a]]`). */
+const TOML_HEADER = /^\s*\[/;
+
+/**
+ * The lines of a TOML file with every table whose header mentions `marker`
+ * dropped — header line through to the next header or EOF — and blank lines
+ * left out, since codex writes a blank line in front of each table it adds
+ * (Issue #3031). Line-based on purpose: codex records a folder's trust as a
+ * whole `[projects."<dir>"]` table, so no parser is needed to take it out.
+ */
+export function tomlLinesWithoutMarker(content: string, marker: string): string[] {
+  const kept: string[] = [];
+  let skipping = false;
+  for (const line of content.split(/\r?\n/)) {
+    if (TOML_HEADER.test(line)) skipping = line.includes(marker);
+    if (skipping || line.trim() === '') continue;
+    kept.push(line);
+  }
+  return kept;
+}
+
+/**
+ * codex's `$CODEX_HOME/config.toml` (Issue #3031). An absent file reads as
+ * empty, so one codex created holding nothing but the run's table is removed.
+ */
+export const sameTomlWithoutMarker: TrustStateComparator = (before, now, marker) => {
+  const lines = (content: Buffer | null) =>
+    JSON.stringify(tomlLinesWithoutMarker(content?.toString('utf8') ?? '', marker));
+  return lines(now) === lines(before);
+};
+
+/**
  * Restore a CLI's own trust-state file (e.g. antigravity's
  * `trustedWorkspaces`), but only when the run's own entries — anything that
  * mentions `marker`, the probe's temp-dir prefix — are the whole difference.
  * If something else changed too (the user trusted a folder meanwhile), the
  * file is left alone and reported as not restored: overwriting it would lose
  * the user's change, which is worse than leaving one stale temp path behind.
+ * `same` reads the file's format; JSON unless the caller says otherwise.
  */
-export function restoreTrustState(snapshot: FileSnapshot, marker: string): GlobalConfigRestoreEntry {
+export function restoreTrustState(
+  snapshot: FileSnapshot,
+  marker: string,
+  same: TrustStateComparator = sameJsonWithoutMarker
+): GlobalConfigRestoreEntry {
   const base = { path: snapshot.path, kind: 'trust-state' as const };
   try {
     const now = readIfPresent(snapshot.path);
     const nowSha = now ? sha256Of(now.content) : null;
     if (nowSha === snapshot.sha256) return { ...base, restored: true };
-    const same =
-      JSON.stringify(withoutMarker(parseJson(now?.content ?? null), marker)) ===
-      JSON.stringify(withoutMarker(parseJson(snapshot.content), marker));
-    if (!same) {
+    if (!same(snapshot.content, now?.content ?? null, marker)) {
       return { ...base, restored: false, detail: '実行中に別の変更が入ったため触っていない' };
     }
     return { ...restoreSnapshot(snapshot), kind: 'trust-state' };

@@ -329,6 +329,7 @@ commandmate respond <worktree-id> "yes" --instance codex       # 送り先指定
 commandmate capture <worktree-id>                              # ターミナル出力をテキストで取得
 commandmate capture <worktree-id> --json                       # JSON形式で取得
 commandmate capture <worktree-id> --instance codex             # 送り先指定
+commandmate reply <worktree-id> --instance cc-1 --json         # 最新の返答（転写から、無ければ null）
 
 # Auto-Yes制御
 commandmate auto-yes <worktree-id> --enable                    # Auto-Yes有効化（デフォルト1h）

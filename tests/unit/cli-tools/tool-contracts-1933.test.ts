@@ -54,6 +54,8 @@ describe('describeComposer (Issue #1933 §6.3)', () => {
       antigravity: 'input-line-marker',
       'command-code': 'input-line-marker',
       opencode: 'opencode-box',
+      // Issue #2934: OpenCode V2 draws the same gutter box with no marker.
+      'opencode-v2': 'opencode-box',
     });
   });
 
@@ -67,7 +69,7 @@ describe('describeComposer (Issue #1933 §6.3)', () => {
 
   it('reads back twelve rows for the marker tools and the whole frame for opencode', () => {
     for (const id of CLI_TOOL_IDS) {
-      const expected = id === 'opencode' ? OPENCODE_PANE_HEIGHT : 12;
+      const expected = id === 'opencode' || id === 'opencode-v2' ? OPENCODE_PANE_HEIGHT : 12;
       expect(resolveComposerSpec(id).verifyCaptureLines).toBe(expected);
     }
   });

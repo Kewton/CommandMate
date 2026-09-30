@@ -1807,6 +1807,35 @@ export function getLastKnownAgentModel(
 }
 
 /**
+ * Latch the model the agent named for itself outside an agent event
+ * (Issue #2964).
+ *
+ * The hook channel's latch — the one {@link recordAgentEvent} writes from
+ * `record.model` — for a source whose model arrives on something that is not
+ * one of the seven event words. OpenCode V2 is that source: its `session.*`
+ * frames carry no model, and the model it actually answered with is read off
+ * the assistant messages of `GET /api/session/{id}/message` after the turn.
+ *
+ * Latch, never clear ({@link latchAgentModel}'s rule), and judged for a change
+ * exactly as a hook-borne model is, so #2357's broadcast and push fire for it.
+ *
+ * @param model - The model name, or null/empty to leave the latch alone
+ */
+export function recordAgentReportedModel(
+  worktreeId: string,
+  cliToolId: CLIToolType,
+  instanceId: string | undefined,
+  model: string | null | undefined,
+  at: number = Date.now()
+): void {
+  if (typeof model !== 'string' || model === '') return;
+  const key = buildCompositeKey(worktreeId, cliToolId, instanceId);
+  lastAgentModel.set(key, model.slice(0, MAX_EVENT_DETAIL_LENGTH));
+  lastAgentModelAt.set(key, at);
+  observeAgentModel(worktreeId, cliToolId, instanceId, 'hook', at);
+}
+
+/**
  * Latch what a terminal capture showed for this instance (Issue #1784).
  *
  * Called from the status-detection poll with the text that poll already

@@ -64,6 +64,7 @@ node bin/commandmate.js ls
 | [`commandmate verify`](#commandmate-verify) | Run the verification gates (`.commandmate/verify.yaml`) and read the run history |
 | [`commandmate task`](#commandmate-task) | List and inspect execution contracts (`.commandmate/tasks/*.yaml`) |
 | [`commandmate capture`](#commandmate-capture) | Get terminal output |
+| [`commandmate reply`](#commandmate-reply) | Get a session's latest reply (from its transcript) |
 | [`commandmate attach`](#commandmate-attach) | Attach this terminal to an agent's tmux session |
 | [`commandmate auto-yes`](#commandmate-auto-yes) | Control auto-yes |
 | [`commandmate instances`](#commandmate-instances) | List, add, remove, and rename agent instances (the roster) |
@@ -289,7 +290,7 @@ commandmate send "$WT" "Quick check" --agent codex --instance codex-3 --register
 | Option | Description | Default |
 |--------|-------------|---------|
 | `--instance <id>` | **Recommended way to name the target.** Instance id: `<agent>` or `<agent>-<n>` (e.g. `codex`, `claude-2`). Starts the session if it is not running | The agent's primary instance |
-| `--agent <id>` | Ad-hoc CLI tool for an instance the roster does not know (claude, codex, gemini, vibe-local, opencode, copilot, antigravity) | The roster value / worktree default |
+| `--agent <id>` | Ad-hoc CLI tool for an instance the roster does not know (claude, codex, gemini, vibe-local, opencode, copilot, antigravity, command-code, opencode-v2) | The roster value / worktree default |
 | `--register` | Register the `--instance` session into the roster | - |
 | `--model <model>` | Model to use (copilot / antigravity / claude only). **copilot** switches inside the session. **antigravity and claude take it as a launch flag**: it applies only when this send starts the session, and a running session answers 400 (stop the session and resend to switch). For claude the value is an alias (`sonnet` / `opus` / `opus[1m]`) or a full id (`claude-sonnet-5`). The target must be named (`--instance` or `--agent`) | The tool's default |
 | `--auto-yes` | Enable auto-yes before sending | - |
@@ -1113,6 +1114,42 @@ blends in with detected prompts**:
 
 ---
 
+## commandmate reply
+
+Prints the **latest reply** an instance wrote, read from the chat ledger rows the transcript readers write (Issue #3039).
+Use it to read the answer to a turn you did not send with `ask` (for example a supervisor's "stop and report" nudge)
+without knowing where the tool keeps its transcript file.
+
+### Usage
+
+```bash
+commandmate reply <worktree-id> --instance cc-1                                  # Reply body
+commandmate reply <worktree-id> --instance cc-1 --since 2026-09-30T12:00:00Z     # Only a reply at or after this time
+commandmate reply <worktree-id> --instance cc-1 --json
+```
+
+### Rules
+
+- Only rows a transcript reader wrote (`<tool>-turn:<id>`) count as a reply. `ask` reads through the same shared function,
+  so both mean the same thing by "reply". Furniture rows (`relay-sys:` / `model-changed:`) are skipped; ANSI and control
+  characters are stripped
+- Tools with a transcript reader: claude / codex / antigravity / command-code / opencode. Any other tool always reports
+  "no reply"
+- **The pane is never read**: a screen line cannot be attributed to a turn (the nudge's own echo is on it)
+- `--since` takes ISO 8601 and returns only a reply written **at or after** that time. `--instance` / `--agent` resolve as in `ask`
+
+### Output and exit codes
+
+| State | stdout | stderr | exit |
+|-------|--------|--------|------|
+| A reply exists | Body | Nothing | 0 |
+| No reply (no transcript row yet, or none after `--since`) | Empty | One line | 0 |
+| Server unreachable, etc. | Empty | Error | Same as the other CLI commands |
+
+`--json` prints `{ worktreeId, instanceId, cliToolId, reply, requestId, at }`; with no reply, `reply` / `requestId` / `at` are `null`.
+
+---
+
 ## commandmate attach
 
 Attach **this terminal** to the tmux session a worktree's agent is running in (Issue #2317).
@@ -1893,6 +1930,7 @@ Each of these prints a message and exits 0 without changing anything.
 | 3 | START_FAILED | Update succeeded but the restarted server could not be verified (no rollback needed) |
 | 4 | STOP_FAILED | The server could not be stopped; aborted **without changing anything** |
 | 5 | UPDATE_FAILED | Registry query, `npm install -g`, or version verification failed |
+| 11 | UPSTREAM_FAULT | An upstream API fault was on the screen when the turn ended (`wait --fail-on-upstream-fault`; `ask` always). stderr / `--json` carry `id=...`; `id=context-limit` means the conversation is over the model's context limit — kill the instance (`commandmate instances <wt> kill <instance>`) and send again in a fresh session |
 | 99 | UNEXPECTED_ERROR | Unexpected error |
 
 ### Caveats
@@ -2210,7 +2248,7 @@ Warning: Response may not have been applied. Reason: prompt_no_longer_active
 
 ```
 Error: Invalid duration. Must be one of: 1h, 3h, 8h
-Error: Invalid agent. Must be one of: claude, codex, gemini, vibe-local, opencode, copilot, antigravity
+Error: Invalid agent. Must be one of: claude, codex, gemini, vibe-local, opencode, copilot, antigravity, command-code, opencode-v2
 ```
 
 **Fix**: Use one of the allowed values listed in the error message.

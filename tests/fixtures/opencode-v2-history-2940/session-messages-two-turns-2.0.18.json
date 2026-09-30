@@ -1,0 +1,208 @@
+{
+    "data": [
+        {
+            "id": "msg_0e75fb3db0016N7ynRiqONnbGi",
+            "time": {
+                "created": 1790588203995
+            },
+            "type": "idle",
+            "outcome": "succeeded"
+        },
+        {
+            "id": "msg_0e75f9e4c001OfaHitlMzlK06M",
+            "time": {
+                "created": 1790588198494,
+                "streamed": 1790588203979,
+                "completed": 1790588203993
+            },
+            "type": "assistant",
+            "agent": "build",
+            "model": {
+                "id": "longcat-2.5-preview-free",
+                "providerID": "opencode"
+            },
+            "content": [
+                {
+                    "type": "reasoning",
+                    "text": "\nThe directory listing shows only `.git/`. The user asked me to reply with exactly \"BETA two\" after listing the files. I should comply with that exact format.",
+                    "state": {
+                        "reasoningField": "reasoning_content"
+                    },
+                    "time": {
+                        "created": 1790588203027,
+                        "completed": 1790588203977
+                    }
+                },
+                {
+                    "type": "text",
+                    "text": "BETA two"
+                }
+            ],
+            "snapshot": {
+                "start": "4b825dc642cb6eb9a060e54bf8d69288fbee4904",
+                "end": "4b825dc642cb6eb9a060e54bf8d69288fbee4904",
+                "files": []
+            },
+            "finish": "stop",
+            "rawFinish": "stop",
+            "cost": 0,
+            "tokens": {
+                "input": 152,
+                "output": 6,
+                "reasoning": 36,
+                "cache": {
+                    "read": 8576,
+                    "write": 0
+                }
+            }
+        },
+        {
+            "id": "msg_0e75f74f4001LYdqIg2Xidlr22",
+            "time": {
+                "created": 1790588187911,
+                "streamed": 1790588198450,
+                "completed": 1790588198471
+            },
+            "type": "assistant",
+            "agent": "build",
+            "model": {
+                "id": "longcat-2.5-preview-free",
+                "providerID": "opencode"
+            },
+            "content": [
+                {
+                    "type": "reasoning",
+                    "text": "\nThe user wants me to list the files in the current directory using a tool, then reply with \"BETA two\". I'll use the read tool to list the directory contents, then provide the exact reply requested.",
+                    "state": {
+                        "reasoningField": "reasoning_content"
+                    },
+                    "time": {
+                        "created": 1790588197185,
+                        "completed": 1790588198447
+                    }
+                },
+                {
+                    "type": "tool",
+                    "id": "call_3e94b3d6c3d4454480aacdc8",
+                    "name": "read",
+                    "executed": false,
+                    "state": {
+                        "status": "completed",
+                        "input": {
+                            "path": "."
+                        },
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "Read directory ., entries 1-1\n.git/"
+                            }
+                        ],
+                        "metadata": {
+                            "truncated": false
+                        }
+                    },
+                    "time": {
+                        "created": 1790588198249,
+                        "ran": 1790588198449,
+                        "completed": 1790588198453
+                    }
+                }
+            ],
+            "snapshot": {
+                "start": "4b825dc642cb6eb9a060e54bf8d69288fbee4904",
+                "end": "4b825dc642cb6eb9a060e54bf8d69288fbee4904",
+                "files": []
+            },
+            "finish": "tool-calls",
+            "rawFinish": "tool_calls",
+            "cost": 0,
+            "tokens": {
+                "input": 5317,
+                "output": 16,
+                "reasoning": 44,
+                "cache": {
+                    "read": 3328,
+                    "write": 0
+                }
+            }
+        },
+        {
+            "id": "msg_0e75f74ec001P3u9WbSEfm7LEn",
+            "time": {
+                "created": 1790588187889
+            },
+            "text": "\"List the files in this directory using a tool, then reply with: BETA two\"",
+            "files": [],
+            "type": "user"
+        },
+        {
+            "id": "msg_0e75f5c20002xJe8PotMAa1bZy",
+            "time": {
+                "created": 1790588181536
+            },
+            "type": "idle",
+            "outcome": "succeeded"
+        },
+        {
+            "id": "msg_0e75f4874001CMGp2CYU8SuwnL",
+            "time": {
+                "created": 1790588176554,
+                "streamed": 1790588181518,
+                "completed": 1790588181534
+            },
+            "type": "assistant",
+            "agent": "build",
+            "model": {
+                "id": "longcat-2.5-preview-free",
+                "providerID": "opencode"
+            },
+            "content": [
+                {
+                    "type": "reasoning",
+                    "text": "\nThe user is asking me to reply with exactly \"ALPHA one\". This is a simple, direct request with no ambiguity. I should comply and output exactly that text with no additional content.\n",
+                    "state": {
+                        "reasoningField": "reasoning_content"
+                    },
+                    "time": {
+                        "created": 1790588180366,
+                        "completed": 1790588181516
+                    }
+                },
+                {
+                    "type": "text",
+                    "text": "ALPHA one"
+                }
+            ],
+            "snapshot": {
+                "start": "4b825dc642cb6eb9a060e54bf8d69288fbee4904",
+                "end": "4b825dc642cb6eb9a060e54bf8d69288fbee4904",
+                "files": []
+            },
+            "finish": "stop",
+            "rawFinish": "stop",
+            "cost": 0,
+            "tokens": {
+                "input": 5246,
+                "output": 6,
+                "reasoning": 39,
+                "cache": {
+                    "read": 3328,
+                    "write": 0
+                }
+            }
+        },
+        {
+            "id": "msg_0e75f4826001x6PX1M8AIBrYGY",
+            "time": {
+                "created": 1790588176495
+            },
+            "text": "\"Reply with exactly: ALPHA one\"",
+            "files": [],
+            "type": "user"
+        }
+    ],
+    "cursor": {
+        "previous": "eyJpZCI6Im1zZ18wZTc1ZmIzZGIwMDE2Tjd5blJpcU9ObmJHaSIsIm9yZGVyIjoiZGVzYyIsImRpcmVjdGlvbiI6InByZXZpb3VzIn0",
+        "next": "eyJpZCI6Im1zZ18wZTc1ZjQ4MjYwMDF4NlBYMU04QUlCcllHWSIsIm9yZGVyIjoiZGVzYyIsImRpcmVjdGlvbiI6Im5leHQifQ"
+    }
+}

@@ -53,6 +53,21 @@ vi.mock('@/lib/cli-tools/submit-verified-sender', () => ({
   sendMessageWithSubmitVerification: vi.fn().mockResolvedValue(undefined),
 }));
 
+// Issue #2939: which `opencode` is OpenCode 1.x is decided by running it with
+// `--version`. The launch is under test here, not that probe
+// (`opencode-executable-2939.test.ts`), so the resolution is fixed to a plain
+// `opencode` — which also keeps the launch-line pins byte-identical.
+vi.mock('@/lib/cli-tools/opencode-executable', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/cli-tools/opencode-executable')>();
+  return {
+    ...actual,
+    resolveOpencodeV1Executable: vi.fn(async () => ({
+      executable: { path: 'opencode', version: '1.18.33', generation: 'v1' as const },
+      probed: [],
+    })),
+  };
+});
+
 vi.mock('child_process', () => ({ exec: vi.fn(), execFile: vi.fn() }));
 vi.mock('util', async (importOriginal) => {
   const actual = await importOriginal<typeof import('util')>();
@@ -98,6 +113,8 @@ const MANAGED_ENV = [
   'CM_OPENCODE_PORT_FILE',
   'CM_AGENT_HOOKS_DIR',
   'CODEX_HOME',
+  // Issue #2939: a launch whose server never answered reads opencode's log.
+  'XDG_DATA_HOME',
 ] as const;
 const savedEnv: Record<string, string | undefined> = {};
 
@@ -129,6 +146,7 @@ beforeEach(() => {
   process.env.CM_OPENCODE_PORT_FILE = join(sandbox, 'opencode-ports.json');
   process.env.CM_AGENT_HOOKS_DIR = join(sandbox, 'hooks');
   process.env.CODEX_HOME = join(sandbox, 'codex-home');
+  process.env.XDG_DATA_HOME = join(sandbox, 'xdg-data');
   process.env.CM_PORT = SERVER_PORT;
   resetOpencodePortAssignments();
   resetOpencodeSessionMemories();

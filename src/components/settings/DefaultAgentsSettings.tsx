@@ -216,6 +216,15 @@ export function DefaultAgentsSettings() {
           <p className="mt-1 text-xs text-muted-foreground">
             {t('settings.defaultAgents.appliesToNew')}
           </p>
+          {/* Issue #2939: OpenCode 1.x and V2 share one data directory. */}
+          {installed.includes('opencode') && installed.includes('opencode-v2') && (
+            <p
+              className="mt-1 text-xs text-warning-foreground"
+              data-testid="default-agents-opencode-shared-data"
+            >
+              {t('settings.defaultAgents.opencodeSharedData')}
+            </p>
+          )}
         </div>
 
         <ul className="space-y-2" data-testid="default-agents-selected">

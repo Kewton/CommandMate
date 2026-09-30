@@ -22,6 +22,7 @@ import {
   setScheduleEnabledInCmate,
   SCHEDULE_TABLE_HEADER,
 } from '@/lib/cmate-writer';
+import { SCHEDULE_UNSUPPORTED_CLI_TOOLS } from '@/config/schedule-config';
 import type { ScheduleWriteInput } from '@/types/cmate';
 
 const baseSchedule: ScheduleWriteInput = {
@@ -282,6 +283,60 @@ describe('validateScheduleInput', () => {
     const result = validateScheduleInput({ ...baseSchedule, model: 'gpt-4.1' });
     expect(result.valid).toBe(false);
     expect(result.errors).toContain('model is not supported for this CLI tool');
+  });
+
+  it('accepts an opencode-v2 schedule (Issue #2974)', () => {
+    for (const permission of ['default', 'auto']) {
+      const result = validateScheduleInput({
+        ...baseSchedule,
+        cliToolId: 'opencode-v2',
+        permission,
+      });
+      expect(result, permission).toEqual({ valid: true, errors: [] });
+    }
+  });
+
+  /**
+   * Issue #2936's rejection path is still there (`SCHEDULE_UNSUPPORTED_CLI_TOOLS`
+   * / `isScheduleSupportedCliTool()`), but since Issue #2974 no real tool is on
+   * the list. So these tests put one on it for their duration — the same array
+   * the writer reads, not a mock of the writer — and take it off again.
+   */
+  describe('a tool on SCHEDULE_UNSUPPORTED_CLI_TOOLS (Issue #2936)', () => {
+    const UNSUPPORTED = 'opencode-v2';
+    const list = SCHEDULE_UNSUPPORTED_CLI_TOOLS as string[];
+
+    beforeEach(() => {
+      expect(list).toEqual([]);
+      list.push(UNSUPPORTED);
+    });
+
+    afterEach(() => {
+      list.splice(0, list.length);
+    });
+
+    it('rejects an unsupported CLI tool', () => {
+      const result = validateScheduleInput({
+        ...baseSchedule,
+        cliToolId: UNSUPPORTED,
+        permission: '',
+      });
+      expect(result.valid).toBe(false);
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0]).toContain('not supported in schedules yet');
+    });
+
+    it('does not produce duplicate errors when model is provided for an unsupported CLI tool', () => {
+      const result = validateScheduleInput({
+        ...baseSchedule,
+        cliToolId: UNSUPPORTED,
+        permission: '',
+        model: 'claude-3-5-sonnet',
+      });
+      expect(result.valid).toBe(false);
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0]).toContain('not supported in schedules yet');
+    });
   });
 });
 

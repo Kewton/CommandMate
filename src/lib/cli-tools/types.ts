@@ -16,7 +16,7 @@ import type {
  * T2.1: Single source of truth for CLI tool IDs
  * CLIToolType is derived from this constant (DRY principle)
  */
-export const CLI_TOOL_IDS = ['claude', 'codex', 'gemini', 'vibe-local', 'opencode', 'copilot', 'antigravity', 'command-code'] as const;
+export const CLI_TOOL_IDS = ['claude', 'codex', 'gemini', 'vibe-local', 'opencode', 'copilot', 'antigravity', 'command-code', 'opencode-v2'] as const;
 
 /**
  * CLIツールタイプ
@@ -47,6 +47,9 @@ const ALTERNATE_SCREEN_CLI_TOOLS: ReadonlySet<CLIToolType> = new Set<CLIToolType
   // INLINE -- measured on 1.40.1, `#{alternate_on}` is 0 and the pane keeps its
   // scrollback -- so its captured line count really is a monotonic cursor, the
   // way codex's and agy's are.
+  // Issue #2934: OpenCode V2's TUI is the same full-screen toolkit as v1's
+  // (`#{alternate_on}` 1 on 2.0.18, measured 2026-09-28).
+  'opencode-v2',
 ]);
 
 /**
@@ -371,6 +374,7 @@ export const CLI_TOOL_DISPLAY_NAMES: Record<CLIToolType, string> = {
   copilot: 'Copilot',
   antigravity: 'Antigravity',
   'command-code': 'Command Code',
+  'opencode-v2': 'OpenCode V2',
 };
 
 /**

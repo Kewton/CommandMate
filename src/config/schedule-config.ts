@@ -134,6 +134,42 @@ export const VIBE_LOCAL_PERMISSIONS = [] as const;
  */
 export const OPENCODE_PERMISSIONS = [] as const;
 
+/** OpenCode V2 Permission value that passes no flag (Issue #2974). */
+export const OPENCODE_V2_DEFAULT_PERMISSION = 'default';
+
+/** OpenCode V2 Permission value that passes `--auto` (Issue #2974). */
+export const OPENCODE_V2_AUTO_PERMISSION = 'auto';
+
+/**
+ * Allowed permission values for OpenCode V2 (Issue #2934, #2974).
+ *
+ * `opencode2 run` has one permission switch, `--auto` ("auto-approve
+ * permissions that are not explicitly denied"). The column names both sides of
+ * it — `default` passes nothing, `auto` passes `--auto` — so the dropdown can
+ * offer the flag-less run as a choice rather than as a blank cell.
+ *
+ * Measured on 2.0.18 (isolated `HOME` / `XDG_*`,
+ * `tests/fixtures/opencode-v2-schedule-2974/`):
+ *
+ *  - with no `permission` config a write goes through without `--auto`;
+ *  - an `ask` rule is auto-rejected ("permission requested: edit (…);
+ *    auto-rejecting" on stderr), the stream ends in an `error` frame and the
+ *    process exits 1 — so the run fails loudly, it never "succeeds" having done
+ *    nothing (the #2454 failure mode);
+ *  - `--auto` approves the same `ask` rule and the run exits 0;
+ *  - `deny` is not a sandbox: with `edit: deny` / `write: deny` and `--auto`
+ *    the model wrote the file through the `shell` tool.
+ *
+ * So the default is `default`: an operator who wrote `ask` asked for a human,
+ * and without one the schedule is recorded as failed. `auto` is for an operator
+ * who wants those rules approved unattended.
+ */
+export const OPENCODE_V2_PERMISSIONS = [
+  OPENCODE_V2_DEFAULT_PERMISSION,
+  OPENCODE_V2_AUTO_PERMISSION,
+] as const;
+export type OpencodeV2Permission = (typeof OPENCODE_V2_PERMISSIONS)[number];
+
 /**
  * What a CLI tool with no permission flag at all resolves to (Issue #1914).
  *
@@ -166,7 +202,27 @@ export const DEFAULT_PERMISSIONS: Record<string, string> = {
   // run still reports success, so an unattended schedule that omits the column
   // would look like it worked and change nothing.
   'command-code': COMMAND_CODE_YOLO_PERMISSION,
+  // Issue #2974: no `--auto` -- an `ask` rule then fails the run (exit 1)
+  // instead of being approved; see OPENCODE_V2_PERMISSIONS.
+  'opencode-v2': OPENCODE_V2_DEFAULT_PERMISSION,
 };
+
+/**
+ * CLI tools that are registered but cannot be the CLI Tool of a CMATE.md
+ * schedule (Issue #2934).
+ *
+ * A tool listed here is a validation error in `cmate-validator`, a skipped row
+ * in `cmate-parser`, a rejected input in `cmate-writer` and absent from the
+ * schedule dialog. Empty since Issue #2974, which measured and wired OpenCode
+ * V2's headless path (`opencode2 run --standalone --format json`); kept as the
+ * one place a future tool without a measured headless path is listed.
+ */
+export const SCHEDULE_UNSUPPORTED_CLI_TOOLS: readonly string[] = [];
+
+/** Whether a CLI tool can be scheduled (see {@link SCHEDULE_UNSUPPORTED_CLI_TOOLS}). */
+export function isScheduleSupportedCliTool(cliToolId: string): boolean {
+  return !SCHEDULE_UNSUPPORTED_CLI_TOOLS.includes(cliToolId);
+}
 
 /**
  * Resolve the allowed Permission dropdown options for a CLI tool (Issue #824).
@@ -212,6 +268,9 @@ export function getPermissionOptionsForTool(cliToolId: string): readonly string[
       return VIBE_LOCAL_PERMISSIONS;
     case 'opencode':
       return OPENCODE_PERMISSIONS;
+    case 'opencode-v2':
+      // Issue #2974: `default` (no flag) or `auto` (`--auto`).
+      return OPENCODE_V2_PERMISSIONS;
     default:
       return NO_PERMISSION_FLAGS;
   }

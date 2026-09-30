@@ -26,7 +26,8 @@
  * being answered by the route that is holding them; re-judging one would
  * deliver a second verdict into a slot that is about to be closed. Only a
  * source that can be asked again (`'session-status-poll'`, i.e. opencode's
- * `GET /permission`) has anything to re-read.
+ * `GET /permission`, or `'pending-list'`, OpenCode V2's
+ * `GET /api/permission/request` — Issue #2951) has anything to re-read.
  *
  * @module lib/hooks/pending-decision-recheck
  */

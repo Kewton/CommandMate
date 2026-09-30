@@ -116,6 +116,14 @@ export function runToolDetection(
       // Neutralise it so Auto-Yes and the sidebar never act on a dead prompt,
       // and let the chain continue to the tool's running/idle branches.
       promptDetection = { ...promptDetection, isPrompt: false, promptData: undefined };
+    } else if (spec.requireVouchedPrompt && context.isPromptVouched?.(promptDetection) === false) {
+      // Issue #2991: a numbered list the tool's own dialog rules do not vouch
+      // for — the agent's reply quoting `❯ 1. Yes / 2. No`. Auto-Yes (#2984)
+      // and History (#2457) already refuse it; publishing `waiting` for it
+      // left the session unanswerable (no dialog to answer) and unwritable (the
+      // send guard refused every message). Neutralised the same way as the
+      // stale block above, so the tool's own branches decide the status.
+      promptDetection = { ...promptDetection, isPrompt: false, promptData: undefined };
     } else {
       return {
         status: 'waiting',

@@ -65,7 +65,7 @@ COMMANDMATE_CMD="commandmate"
 # Mirror of CLI_TOOL_IDS (src/lib/cli-tools/types.ts). fake-agent.test.ts pins
 # the two lists against each other, so a ninth tool fails there rather than
 # silently getting claude's geometry here.
-KNOWN_TOOLS="claude codex gemini vibe-local opencode copilot antigravity command-code"
+KNOWN_TOOLS="claude codex gemini vibe-local opencode copilot antigravity command-code opencode-v2"
 
 # Matches TUI_PANE_WIDTH / TUI_PANE_HEIGHT (src/config/tmux-pane-config.ts). The
 # server force-reconciles adopted sessions to this geometry, so creating the
@@ -311,7 +311,8 @@ elif [ -n "$TOOL" ] && [ -z "$WORKTREE_ID" ] && [ -n "$RECORD_TO" ]; then
 fi
 [ -n "$TOOL" ] || TOOL="claude"
 
-if [ "$TOOL" = "opencode" ]; then
+# opencode-v2 (Issue #2934) is launched at the same 80x200 as opencode.
+if [ "$TOOL" = "opencode" ] || [ "$TOOL" = "opencode-v2" ]; then
   PANE_WIDTH="$OPENCODE_PANE_WIDTH"
   PANE_HEIGHT="$OPENCODE_PANE_HEIGHT"
 fi

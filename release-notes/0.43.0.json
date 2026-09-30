@@ -1,0 +1,130 @@
+{
+  "version": "0.43.0",
+  "date": "2026-09-30",
+  "highlight": {
+    "ja": "OpenCode V2 をエージェントとして使えるようになりました。起動・状態表示・承認や質問への応答・スケジュールまで、これまでの OpenCode と同じ場所で扱えます。",
+    "en": "OpenCode V2 is now available as an agent. Launching, status, answering approvals and questions, and schedules all work in the same places as the existing OpenCode."
+  },
+  "added": [
+    {
+      "ja": "OpenCode V2 をエージェントとして選べるようになり、起動・終了と状態の表示ができるようになりました。",
+      "en": "You can now choose OpenCode V2 as an agent, start and stop it, and see its status."
+    },
+    {
+      "ja": "OpenCode V2 の承認と質問に、画面・スマホ・CLI・Auto-Yes から答えられるようになりました。",
+      "en": "You can now answer OpenCode V2 approvals and questions from the screen, your phone, the CLI, or Auto-Yes."
+    },
+    {
+      "ja": "OpenCode V2 の入力欄で「/」を打つと、スラッシュコマンドの候補が出るようになりました。",
+      "en": "Typing / in the OpenCode V2 input now shows slash command suggestions."
+    },
+    {
+      "ja": "OpenCode V2 で、実際に返答したモデル名が画面と capture に出るようになりました。",
+      "en": "OpenCode V2 now shows the model that actually replied, on screen and in capture."
+    },
+    {
+      "ja": "OpenCode V2 でも、エージェント切り替えやコマンドパレットのクイックキーが使えるようになりました。",
+      "en": "Quick keys such as agent switching and the command palette now work with OpenCode V2."
+    },
+    {
+      "ja": "OpenCode V2 のトークン・費用・コンテキストの使用量が、これまでの OpenCode と同じ場所に出るようになりました。",
+      "en": "OpenCode V2 token, cost, and context usage now appear in the same place as for the existing OpenCode."
+    },
+    {
+      "ja": "スケジュールで OpenCode V2 を指定でき、モデルやエージェントなどの実行オプションも渡せるようになりました。",
+      "en": "Schedules can now run OpenCode V2 and pass run options such as the model and agent."
+    },
+    {
+      "ja": "OpenCode V2 のダイアログカードに、モデルを切り替えるキーが出るようになりました。",
+      "en": "OpenCode V2 dialog cards now show the keys for switching models."
+    },
+    {
+      "ja": "日次確認の対象に OpenCode V2 が加わりました。",
+      "en": "The daily health check now covers OpenCode V2."
+    },
+    {
+      "ja": "新しい commandmate reply コマンドで、セッションの最新の返答を読めるようになりました。",
+      "en": "The new commandmate reply command reads a session's latest reply."
+    }
+  ],
+  "improved": [
+    {
+      "ja": "OpenCode V2 の Build と Plan の切り替えが入力欄の横のボタンになり、今のエージェントが表示されるようになりました。",
+      "en": "Switching between Build and Plan in OpenCode V2 is now a button next to the input, and it shows the current agent."
+    },
+    {
+      "ja": "Skill の互換表で、OpenCode V2 は Skill を足したあとに開始し直さなくてよいことを示すようにしました。",
+      "en": "The Skill compatibility table now shows that OpenCode V2 does not need a restart after a Skill is added."
+    },
+    {
+      "ja": "commandmate ask が、会話が長すぎてモデルの上限を超えたときに、完了ではなく失敗として返すようになりました。",
+      "en": "commandmate ask now reports a failure, not a completed turn, when the conversation is over the model's context limit."
+    },
+    {
+      "ja": "起動したばかりの Command Code にすぐ送ったとき、「起動中」として返すようになりました。",
+      "en": "Sending to a Command Code session that has only just started is now reported as still starting."
+    }
+  ],
+  "fixed": [
+    {
+      "ja": "新しいセッションを起動した直後の送信が、約 1 分待たされて失敗することがある問題を直しました。",
+      "en": "Fixed the first send to a new session sometimes waiting about a minute and then failing."
+    },
+    {
+      "ja": "起動直後の Claude で、使っているモデル名が表示されない問題を直しました。",
+      "en": "Fixed the model name not showing for a Claude session that had just started."
+    },
+    {
+      "ja": "Auto-Yes が飛ばした画面の警告が、同じ画面の間に何度も出る問題を直しました。",
+      "en": "Fixed the warning for a screen Auto-Yes skipped repeating while the same screen stayed up."
+    },
+    {
+      "ja": "OpenCode V2 の返答が履歴に記録されない問題を直しました。",
+      "en": "Fixed OpenCode V2 replies not being recorded in History."
+    },
+    {
+      "ja": "OpenCode V2 の返答に番号付きのリストがあると、応答待ちと誤って扱われ、Auto-Yes が番号を送ってしまう問題を直しました。",
+      "en": "Fixed numbered lists in OpenCode V2 replies being treated as a question, which made Auto-Yes send a number."
+    },
+    {
+      "ja": "OpenCode V2 でダイアログが開いたまま送信すると、本文が消える問題を直しました。",
+      "en": "Fixed the message being lost when sending while an OpenCode V2 dialog was open."
+    },
+    {
+      "ja": "OpenCode V2 で、引数なしのスラッシュコマンドが実行されない問題を直しました。",
+      "en": "Fixed OpenCode V2 slash commands without arguments not running."
+    },
+    {
+      "ja": "OpenCode V2 の承認の文言や、保留中の承認への Auto-Yes の応答を直しました。",
+      "en": "Fixed OpenCode V2 approval wording and Auto-Yes answers to pending approvals."
+    },
+    {
+      "ja": "OpenCode V2 の承認や質問を待つ間の注意文が、チャットに記録されてしまう問題を直しました。",
+      "en": "Fixed the notice shown while OpenCode V2 waits on an approval or question being recorded in the chat."
+    },
+    {
+      "ja": "OpenCode V2 を起動すると、プロジェクトの package.json が書き換えられる問題を直しました。",
+      "en": "Fixed starting OpenCode V2 writing to the project's package.json."
+    },
+    {
+      "ja": "OpenCode V2 を opencode という名前で入れている環境でも、正しく起動するようにしました。",
+      "en": "OpenCode V2 now starts correctly when it is installed under the name opencode."
+    },
+    {
+      "ja": "OpenCode と OpenCode V2 を取り違えることがある問題を直しました。",
+      "en": "Fixed OpenCode and OpenCode V2 sometimes being mixed up."
+    },
+    {
+      "ja": "OpenCode V2 のスケジュールが worktree で動くようにし、画面から作れてしまう不正なスケジュールを防ぎました。",
+      "en": "OpenCode V2 schedules now run in the worktree, and invalid schedules can no longer be created from the screen."
+    },
+    {
+      "ja": "日次確認で、codex の更新ダイアログや設定ファイル、OpenCode のモデル選択と入力履歴の扱いに関する問題を直しました。",
+      "en": "Fixed daily health check issues with the codex update dialog and config file, and with OpenCode model selection and input history."
+    },
+    {
+      "ja": "commandmate verify が、別の作業で一時的にできたファイルを自分の違反として数える問題を直しました。",
+      "en": "Fixed commandmate verify counting temporary files from other work as its own violations."
+    }
+  ]
+}

@@ -73,6 +73,21 @@ const { execFileAsyncSpy } = vi.hoisted(() => ({
   execFileAsyncSpy: vi.fn().mockResolvedValue({ stdout: '', stderr: '' }),
 }));
 
+// Issue #2939: which `opencode` is OpenCode 1.x is decided by running it with
+// `--version`. The launch is under test here, not that probe
+// (`opencode-executable-2939.test.ts`), so the resolution is fixed to a plain
+// `opencode` — which also keeps the launch-line pins byte-identical.
+vi.mock('@/lib/cli-tools/opencode-executable', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/cli-tools/opencode-executable')>();
+  return {
+    ...actual,
+    resolveOpencodeV1Executable: vi.fn(async () => ({
+      executable: { path: 'opencode', version: '1.18.33', generation: 'v1' as const },
+      probed: [],
+    })),
+  };
+});
+
 vi.mock('child_process', () => ({
   exec: vi.fn(),
   execFile: vi.fn(),

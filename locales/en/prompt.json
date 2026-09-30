@@ -16,5 +16,7 @@
   "unclassifiedInstruction": "Answer it in the terminal, or reply with the option NUMBER using {command}. Words like \"yes\"/\"no\" are not resolved on a numbered dialog.",
   "unclassifiedRespondCommand": "commandmate respond [worktree-id] [number]",
   "askUserQuestionProgress": "Question {index} of {total} asked by the agent",
-  "askUserQuestionSource": "Options reported by the agent"
+  "askUserQuestionSource": "Options reported by the agent",
+  "freeTextLabel": "Or type your own answer",
+  "freeTextNumericHint": "An answer of digits only is read as an option number, so it cannot be sent from here."
 }

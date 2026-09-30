@@ -431,6 +431,55 @@ describe('ScheduleEditDialog', () => {
       const select = screen.getByTestId('schedule-cli-tool-select') as HTMLSelectElement;
       expect(select.value).toBe('codex');
     });
+
+    it('lists opencode-v2 in the agent selector (Issue #2974; excluded by #2936)', () => {
+      const instancesWithV2 = [
+        ...instances,
+        { id: 'opencode-v2-main', cliTool: 'opencode-v2' as const, alias: 'OpenCode V2', order: 3 },
+      ];
+      renderDialog({ instances: instancesWithV2 });
+      const select = screen.getByTestId('schedule-cli-tool-select') as HTMLSelectElement;
+      const values = Array.from(select.options).map((o) => o.value);
+      const labels = Array.from(select.options).map((o) => o.textContent);
+      expect(values).toContain('opencode-v2-main');
+      expect(labels).toContain('OpenCode V2');
+    });
+
+    it('lists opencode-v2 when instances are not provided (Issue #2974)', () => {
+      renderDialog({ instances: undefined });
+      const select = screen.getByTestId('schedule-cli-tool-select') as HTMLSelectElement;
+      const values = Array.from(select.options).map((o) => o.value);
+      expect(values).toContain('opencode-v2');
+    });
+
+    it('offers default / auto for opencode-v2 and arrives on default (Issue #2974)', () => {
+      renderDialog({ instances: undefined });
+      fireEvent.change(screen.getByTestId('schedule-cli-tool-select'), {
+        target: { value: 'opencode-v2' },
+      });
+      expect(getSelectValues('schedule-permission-select')).toEqual(['default', 'auto']);
+      const permission = screen.getByTestId('schedule-permission-select') as HTMLSelectElement;
+      expect(permission.value).toBe('default');
+    });
+
+    it('saves opencode-v2 with the chosen Permission (Issue #2974)', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ success: true }) });
+      vi.stubGlobal('fetch', fetchMock);
+
+      renderDialog({ worktreeId: 'wt-9', instances: undefined, initialValues: { name: 'v2-task', message: 'hello' } });
+      fireEvent.change(screen.getByTestId('schedule-cli-tool-select'), {
+        target: { value: 'opencode-v2' },
+      });
+      fireEvent.change(screen.getByTestId('schedule-permission-select'), {
+        target: { value: 'auto' },
+      });
+      fireEvent.click(screen.getByTestId('schedule-save-button'));
+
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+      const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+      expect(body.cliToolId).toBe('opencode-v2');
+      expect(body.permission).toBe('auto');
+    });
   });
 
   // --- Phase 4 (Issue #827): "Ask AI" buttons for cron / message drafting ---

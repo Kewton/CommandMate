@@ -199,7 +199,7 @@ describe('tmux library', () => {
       // Issue #1163: default pane height is now TUI_PANE_HEIGHT (1000 rows)
       expect(execFile).toHaveBeenCalledWith(
         'tmux',
-        ['new-session', '-d', '-s', 'test-session', '-c', '/path/to/cwd', '-x', '200', '-y', '1000'],
+        ['new-session', '-d', '-s', 'test-session', '-c', '/path/to/cwd', '-x', '200', '-y', '1000', 'sleep', '2147483647'],
         { timeout: 5000 },
         expect.any(Function)
       );
@@ -243,7 +243,7 @@ describe('tmux library', () => {
       // Issue #1163: default pane height is now TUI_PANE_HEIGHT (1000 rows)
       expect(execFile).toHaveBeenCalledWith(
         'tmux',
-        ['new-session', '-d', '-s', 'test-session', '-c', '/path/to/cwd', '-x', '200', '-y', '1000'],
+        ['new-session', '-d', '-s', 'test-session', '-c', '/path/to/cwd', '-x', '200', '-y', '1000', 'sleep', '2147483647'],
         { timeout: 5000 },
         expect.any(Function)
       );
@@ -271,7 +271,7 @@ describe('tmux library', () => {
 
       expect(execFile).toHaveBeenCalledWith(
         'tmux',
-        ['new-session', '-d', '-s', 'test-session', '-c', '/path/to/cwd', '-x', '200', '-y', '50'],
+        ['new-session', '-d', '-s', 'test-session', '-c', '/path/to/cwd', '-x', '200', '-y', '50', 'sleep', '2147483647'],
         { timeout: 5000 },
         expect.any(Function)
       );
@@ -296,7 +296,7 @@ describe('tmux library', () => {
       // Issue #1163: default height raised to TUI_PANE_HEIGHT (1000 rows)
       expect(execFile).toHaveBeenCalledWith(
         'tmux',
-        ['new-session', '-d', '-s', 'test-session', '-c', '/path/to/cwd', '-x', '200', '-y', '1000'],
+        ['new-session', '-d', '-s', 'test-session', '-c', '/path/to/cwd', '-x', '200', '-y', '1000', 'sleep', '2147483647'],
         { timeout: 5000 },
         expect.any(Function)
       );
@@ -317,7 +317,7 @@ describe('tmux library', () => {
       // Issue #1163: default height raised to TUI_PANE_HEIGHT (1000 rows)
       expect(execFile).toHaveBeenCalledWith(
         'tmux',
-        ['new-session', '-d', '-s', 'test-session', '-c', '/path/to/cwd', '-x', '200', '-y', '1000'],
+        ['new-session', '-d', '-s', 'test-session', '-c', '/path/to/cwd', '-x', '200', '-y', '1000', 'sleep', '2147483647'],
         { timeout: 5000 },
         expect.any(Function)
       );
@@ -466,6 +466,11 @@ describe('tmux library', () => {
       width: number;
       height: number;
       cwd: string;
+      /**
+       * Issue #2958: what the pane runs. `login-shell` stands for tmux's default
+       * (no command argv); anything else is the argv tmux was given.
+       */
+      command: string;
     }
     interface FakeSession {
       /** The session-level option — what `show-options history-limit` reports. */
@@ -485,7 +490,9 @@ describe('tmux library', () => {
      * Install a stateful fake tmux. Returns the session table so tests can read
      * the PANE's history_limit rather than the session option.
      */
-    function installFakeTmux(options: { failNewWindow?: boolean } = {}): Map<string, FakeSession> {
+    function installFakeTmux(
+      options: { failNewWindow?: boolean; defaultShell?: string } = {}
+    ): Map<string, FakeSession> {
       const sessions = new Map<string, FakeSession>();
 
       const activeWindowOf = (target: string): FakeWindow => {
@@ -525,6 +532,8 @@ describe('tmux library', () => {
                 width: Number(flag('-x')),
                 height: Number(flag('-y')),
                 cwd: flag('-c')!,
+                // Everything after the last option value is the pane command.
+                command: argv.slice(argv.indexOf('-y') + 2).join(' ') || 'login-shell',
               }]]),
             });
             break;
@@ -565,10 +574,23 @@ describe('tmux library', () => {
               // A bare `new-window` starts in the tmux client's cwd, NOT the
               // session's; only an explicit `-c` keeps the worktree path.
               cwd: flag('-c') ?? '/some/other/client/cwd',
+              // No command argv: tmux starts `default-command`, i.e. the login shell.
+              command: 'login-shell',
             });
             session.activeWindow = index;
             break;
           }
+          case 'respawn-pane': {
+            const win = activeWindowOf(flag('-t')!);
+            const tail = argv.slice(argv.indexOf('-c') + 2);
+            // A bare respawn re-runs the pane's creation command.
+            if (tail.length > 0) win.command = tail.join(' ');
+            win.cwd = flag('-c') ?? win.cwd;
+            break;
+          }
+          case 'show-options':
+            if (argv.includes('default-shell')) stdout = `${options.defaultShell ?? '/bin/zsh'}\n`;
+            break;
           case 'set-window-option': {
             const win = activeWindowOf(flag('-t')!);
             if (argv.includes('window-size')) {
@@ -726,6 +748,60 @@ describe('tmux library', () => {
       expect(pane.historyLimit).toBe(TMUX_BUILTIN_HISTORY_LIMIT);
       expect(pane.windowSize).toBe('manual');
       expect(pane.height).toBe(1000);
+    });
+
+    // Issue #2958: killing window 0's login shell while it was still in its rc
+    // files could leave pyenv's rehash lock behind, stalling the NEXT shell (the
+    // one the launch command is typed into) for pyenv's 60s lock timeout.
+    it('never starts a login shell in the window it throws away (Issue #2958)', async () => {
+      installFakeTmux();
+
+      await createSession({ sessionName: 'mcbd-claude-wt', workingDirectory: '/repo/wt' });
+
+      const newSession = vi.mocked(execFile).mock.calls
+        .map((call) => call[1] as string[])
+        .find((argv) => argv[0] === 'new-session')!;
+      // Two argv words: tmux execs it directly instead of via `default-shell -c`.
+      expect(newSession.slice(-2)).toEqual(['sleep', '2147483647']);
+    });
+
+    it('the pane the agent is launched in runs the login shell (Issue #2958)', async () => {
+      const sessions = installFakeTmux();
+
+      await createSession({ sessionName: 'mcbd-claude-wt', workingDirectory: '/repo/wt' });
+
+      const pane = activePane(sessions, 'mcbd-claude-wt');
+      expect(pane.command).toBe('login-shell');
+      expect(pane.cwd).toBe('/repo/wt');
+    });
+
+    it('a failed rebuild respawns the login shell over the placeholder (Issue #2958)', async () => {
+      const sessions = installFakeTmux({ failNewWindow: true, defaultShell: '/bin/zsh' });
+
+      await createSession({ sessionName: 'mcbd-claude-wt', workingDirectory: '/repo/wt' });
+
+      // Without the respawn the launch command would be typed into `sleep`.
+      const pane = activePane(sessions, 'mcbd-claude-wt');
+      expect(pane.command).toBe('/bin/zsh -l');
+      expect(pane.cwd).toBe('/repo/wt');
+    });
+
+    it('fails session creation when the placeholder cannot be replaced at all (Issue #2958)', async () => {
+      installFakeTmux({ failNewWindow: true });
+      const fake = vi.mocked(execFile).getMockImplementation()!;
+      vi.mocked(execFile).mockImplementation(((...args: unknown[]) => {
+        const argv = args[1] as string[];
+        if (argv[0] === 'respawn-pane') {
+          const callback = args[args.length - 1] as (err: Error | null) => void;
+          callback(new Error('respawn failed'));
+          return {} as ReturnType<typeof execFile>;
+        }
+        return (fake as (...a: unknown[]) => ReturnType<typeof execFile>)(...args);
+      }) as typeof execFile);
+
+      await expect(
+        createSession({ sessionName: 'mcbd-claude-wt', workingDirectory: '/repo/wt' })
+      ).rejects.toThrow(/Failed to create tmux session: .*respawn failed/);
     });
   });
 

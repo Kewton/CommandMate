@@ -106,14 +106,29 @@ function isExecutableFile(candidate: string): boolean {
  * is; what is copilot-specific is the caller below.
  */
 export function findExecutableOnPath(name: string): string | null {
+  return findExecutablesOnPath(name, 1)[0] ?? null;
+}
+
+/**
+ * Every executable named `name` on `PATH`, in `PATH` order, up to `limit`.
+ *
+ * Issue #2939: `opencode` can name two different programs on one machine
+ * (OpenCode 1.x's installer and `@opencode/cli`, which registers `opencode`
+ * next to `opencode2`), so "the first one" is not always the one a tool wants.
+ * The same walk as {@link findExecutableOnPath}, not a second copy of it.
+ */
+export function findExecutablesOnPath(name: string, limit: number = Infinity): string[] {
   const rawPath = process.env.PATH;
-  if (!rawPath) return null;
+  if (!rawPath || limit <= 0) return [];
+  const found: string[] = [];
   for (const directory of rawPath.split(delimiter)) {
     if (!directory) continue;
     const candidate = join(directory, name);
-    if (isExecutableFile(candidate)) return candidate;
+    if (found.includes(candidate) || !isExecutableFile(candidate)) continue;
+    found.push(candidate);
+    if (found.length >= limit) break;
   }
-  return null;
+  return found;
 }
 
 /**

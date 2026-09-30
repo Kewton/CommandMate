@@ -27,7 +27,7 @@ per-module responsibilities see [docs/module-reference.md](../module-reference.m
 | inspection | server | Parses every archive entry without extracting it, and cross-checks it against the manifest in both directions |
 | plan | server | Issues an expiring plan that pins the live branch / HEAD and the files to be written |
 | install | server | Writes to staging, then commits into each install root with an atomic rename (primary = `.agents/skills/<id>/`) |
-| agent discovery | agent CLI | Each agent reads its own discovery root at startup (**a session restart is required**, §2-2) |
+| agent discovery | agent CLI | Each agent reads its own discovery root (most read it once at startup, so **a session restart is required**; OpenCode V2 picks it up while running and needs no new session, §2-2) |
 
 **Neither download, install, nor uninstall executes any script or hook inside the package.**
 `declared_permissions` is the *claim* of the provider, not something CommandMate enforces.
@@ -53,7 +53,7 @@ per-module responsibilities see [docs/module-reference.md](../module-reference.m
 
 An install places the same payload in both `.agents/skills/<id>/` and `.claude/skills/<id>/`.
 Which one an agent reads is up to that agent's implementation; the table below is
-**what was measured on real CLIs on 2026-07-26** (#1513 G4). What CommandMate guarantees stops at
+**what was measured on real CLIs on 2026-07-26** (#1513 G4; the OpenCode V2 row on 2026-09-29, #2975). What CommandMate guarantees stops at
 "the payload was placed in both roots" — the discovery implementation of an agent CLI is outside
 that guarantee.
 
@@ -61,6 +61,7 @@ that guarantee.
 |-------|------------------|----------------|----------------------------|-------------|
 | Claude Code | 2.1.220 | Reads `.claude/skills`. Does not read `.agents/skills` | Yes, it appears in the palette | 2026-07-26 |
 | Codex CLI | 0.145.0 | Reads `.agents/skills` | No (a CLI-side constraint) | 2026-07-26 |
+| OpenCode V2 | 2.0.18 | Reads both `.agents/skills` and `.claude/skills`. A Skill added while it runs is picked up with no new session (#2985) | Partly: not in V2's own `/` completion (it is in `@` completion); `/<name>` sent from CommandMate runs it | 2026-09-29 |
 | Gemini / OpenCode / vibe-local | — | **Not measured (unknown)** | Not measured | — |
 
 Unmeasured agents are left as `unknown`. CommandMate never displays an unmeasured agent as

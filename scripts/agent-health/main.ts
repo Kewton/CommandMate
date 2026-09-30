@@ -31,6 +31,7 @@ import {
   restoreTrustState,
   snapshotFile,
   type FileSnapshot,
+  type TrustStateComparator,
 } from '@/lib/agent-health/config-guard';
 import {
   buildToolResult,
@@ -145,8 +146,11 @@ function writeReportOrPrint(file: string, report: AgentHealthReport): boolean {
  * `prepareLaunch` implementations read `CM_PORT` (the hook URL's port) and
  * `CM_AGENT_HOOKS_DIR` (where claude's `--settings` file goes); the rest is
  * removed so nothing inherited from the shell leaks into a launch line.
+ * `CM_OPENCODE_V2_DIR` moves opencode-v2's password and port files into the
+ * run's temp dir: they are written by this process (`reserveOpencodeV2Server`),
+ * so the variable has to be set here, not only in the child environment.
  */
-function redirectLaunchEnvironment(port: number, hooksDir: string): void {
+function redirectLaunchEnvironment(port: number, hooksDir: string, opencodeV2Dir: string): void {
   for (const name of [
     'CM_HOOK_URL',
     'CM_PERMISSION_HOOK_URL',
@@ -162,6 +166,7 @@ function redirectLaunchEnvironment(port: number, hooksDir: string): void {
   }
   process.env.CM_PORT = String(port);
   process.env.CM_AGENT_HOOKS_DIR = hooksDir;
+  process.env.CM_OPENCODE_V2_DIR = opencodeV2Dir;
 }
 
 export async function main(argv: readonly string[]): Promise<AgentHealthExitCode> {
@@ -202,16 +207,21 @@ async function run(options: AgentHealthOptions, startedAt: Date): Promise<AgentH
   const workRoot = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), WORK_PREFIX));
   const hooksDir = path.join(workRoot, 'hooks');
   fs.mkdirSync(hooksDir, { mode: 0o700 });
+  const opencodeV2Dir = path.join(workRoot, 'opencode-v2-state');
 
   let listener: HookListener | null = null;
   let tmux: AgentHealthTmux | null = null;
-  const pendingSnapshots: Array<{ snapshot: FileSnapshot; kind: 'hook-config' | 'trust-state' }> = [];
+  const pendingSnapshots: Array<{
+    snapshot: FileSnapshot;
+    kind: 'hook-config' | 'trust-state';
+    compare?: TrustStateComparator;
+  }> = [];
 
   const restorePending = () => {
     while (pendingSnapshots.length > 0) {
-      const { snapshot, kind } = pendingSnapshots.shift()!;
+      const { snapshot, kind, compare } = pendingSnapshots.shift()!;
       const entry =
-        kind === 'hook-config' ? restoreSnapshot(snapshot) : restoreTrustState(snapshot, WORK_PREFIX);
+        kind === 'hook-config' ? restoreSnapshot(snapshot) : restoreTrustState(snapshot, WORK_PREFIX, compare);
       restoreEntries.push(entry);
       log(`restore ${entry.path}: ${entry.restored ? 'ok' : `NOT restored (${entry.detail ?? ''})`}`);
     }
@@ -245,9 +255,10 @@ async function run(options: AgentHealthOptions, startedAt: Date): Promise<AgentH
 
   try {
     listener = await HookListener.start();
-    redirectLaunchEnvironment(listener.port, hooksDir);
+    redirectLaunchEnvironment(listener.port, hooksDir, opencodeV2Dir);
     const childEnv = buildChildEnv(process.env, {
       CM_PORT: String(listener.port),
+      CM_OPENCODE_V2_DIR: opencodeV2Dir,
       // Safety net only: every launch line sets its own URL. A hook that
       // falls back to this one arrives without correlation keys and fails
       // the check — it never reaches production.
@@ -295,7 +306,10 @@ async function run(options: AgentHealthOptions, startedAt: Date): Promise<AgentH
       log(`── ${tool}`);
       const guarded = spec.guardedFiles();
       for (const file of guarded.hookConfig) pendingSnapshots.push({ snapshot: snapshotFile(file), kind: 'hook-config' });
-      for (const file of guarded.trustState) pendingSnapshots.push({ snapshot: snapshotFile(file), kind: 'trust-state' });
+      for (const file of guarded.trustState) {
+        const { path: filePath, compare } = typeof file === 'string' ? { path: file, compare: undefined } : file;
+        pendingSnapshots.push({ snapshot: snapshotFile(filePath), kind: 'trust-state', compare });
+      }
       serverLog.takeLinesContaining(PROBE_WORKTREE_ID);
 
       let outcome: { version: string | null; checks: AgentHealthCheck[] };

@@ -380,6 +380,16 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
   commandmate capture <id> --json            # JSON with status info
   commandmate capture <id> --instance codex  # Specific instance
 
+### commandmate reply <worktree-id>
+  Print the latest reply a session wrote, read from its transcript (no pane).
+  Use it to read a turn you did not send with 'ask' (e.g. "stop and report").
+
+  commandmate reply <id> --instance cc-1                          # Reply body
+  commandmate reply <id> --instance cc-1 --since 2026-09-30T12:00:00Z --json
+
+  Only transcript-reader rows (<tool>-turn:<id>) count, as in 'ask'. No reply
+  yet: exit 0, empty stdout, one line on stderr; --json prints "reply": null.
+
 ### commandmate auto-yes <worktree-id>
   Control auto-yes (automatic prompt response).
 
@@ -712,6 +722,9 @@ same CommandMate server, and you can hand work to them.
 
     0    the turn ended; stdout is the reply body
     10   they are waiting on a confirmation. stdout carries the prompt JSON
+    11   the turn never ran: an upstream fault is on their screen (stderr and
+         --json carry id=...). id=context-limit means their conversation is over
+         the model's limit: 'instances <id> kill <instance>', then ask again
     21   nothing was running to ask
     124  timed out
 

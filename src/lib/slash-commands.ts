@@ -7,7 +7,7 @@
  * - .agents/skills/{name}/SKILL.md (Codex skills, current CLI standard, Issue #1165)
  * - .codex/skills/{name}/SKILL.md (Codex skills, legacy, Issue #166)
  * - .opencode/skills, .commandcode/skills (per-tool roots folded in by the
- *   opencode / Command Code loaders below, Issue #2037, Issue #2322)
+ *   opencode / OpenCode V2 / Command Code loaders below, Issue #2037, #2944, #2322)
  *
  * `.agents/skills` is where the current Codex CLI reads skills
  * ($REPO_ROOT/.agents/skills and $HOME/.agents/skills); `.codex/skills` is kept
@@ -73,6 +73,39 @@ const OPENCODE_SKILLS_SUBDIR = path.join('.opencode', 'skills');
  */
 const OPENCODE_SKILL_SUBDIRS = [
   OPENCODE_SKILLS_SUBDIR,
+  path.join('.claude', 'skills'),
+  AGENTS_SKILLS_SUBDIR,
+] as const;
+
+/**
+ * Skill roots OpenCode V2 2.0.18 was **measured** to scan in a project, in the
+ * order they are folded together here (Issue #2944).
+ *
+ * Measured, not read off the migration guide: one probe Skill per candidate
+ * root in an isolated `HOME`, and `GET /api/skill` on the instance's own server
+ * answered with the absolute `SKILL.md` path of each one it discovered
+ * (`tests/fixtures/opencode-v2-slash-2944/skill-2.0.18.json`). v2 reads the
+ * singular `.opencode/skill` as well as `.opencode/skills` (the guide calls the
+ * plural the preferred layout). `.agents/skills` is last for the reason given on
+ * OPENCODE_SKILL_SUBDIRS.
+ */
+const OPENCODE_V2_PROJECT_SKILL_SUBDIRS = [
+  path.join('.opencode', 'skill'),
+  OPENCODE_SKILLS_SUBDIR,
+  path.join('.claude', 'skills'),
+  AGENTS_SKILLS_SUBDIR,
+] as const;
+
+/**
+ * Skill roots OpenCode V2 2.0.18 was measured to scan under `$HOME` (Issue #2944).
+ *
+ * Not the project list: the user-level opencode root is `~/.config/opencode/skill(s)`,
+ * and a probe planted in `~/.opencode/skills` — a root v1 does read — was **not**
+ * discovered, so it is absent here.
+ */
+const OPENCODE_V2_GLOBAL_SKILL_SUBDIRS = [
+  path.join('.config', 'opencode', 'skill'),
+  path.join('.config', 'opencode', 'skills'),
   path.join('.claude', 'skills'),
   AGENTS_SKILLS_SUBDIR,
 ] as const;
@@ -502,6 +535,38 @@ export async function loadOpencodeSkills(basePath?: string): Promise<SlashComman
 }
 
 /**
+ * Load the Skills an OpenCode V2 session can invoke (Issue #2944).
+ *
+ * Measured on opencode2 2.0.18, 2026-09-28, isolated `HOME`: `GET /api/skill`
+ * listed every probe planted under OPENCODE_V2_PROJECT_SKILL_SUBDIRS (project)
+ * and OPENCODE_V2_GLOBAL_SKILL_SUBDIRS (`$HOME`). As on v1, the TUI palette does
+ * not offer a Skill (typing `/probe-agentsskills` showed "No matching
+ * commands"), and submitting `/probe-agentsskills ` loaded that Skill and the
+ * agent answered its token — so `/name` is the route, and this palette is the
+ * only place it is discoverable.
+ *
+ * The disk scan is what the palette has before the instance's server has been
+ * read (or when no instance is running); the live `GET /api/skill` rows are
+ * folded in afterwards and a name found here is not added twice
+ * (`foldInMissingCommands`, key `name::opencode-v2`).
+ *
+ * @param basePath - The worktree for `'project'`, or os.homedir() for `'global'`
+ * @param scope - Which of the two measured root lists to scan
+ * @returns Skills scoped to opencode-v2, later roots winning a name collision
+ */
+export async function loadOpencodeV2Skills(
+  basePath: string | undefined,
+  scope: 'project' | 'global'
+): Promise<SlashCommand[]> {
+  return foldSkillRoots(
+    basePath,
+    scope === 'project' ? OPENCODE_V2_PROJECT_SKILL_SUBDIRS : OPENCODE_V2_GLOBAL_SKILL_SUBDIRS,
+    'opencode-v2',
+    'opencode-v2-skills-count-limit',
+  );
+}
+
+/**
  * Load the Skills a Command Code session can actually invoke (Issue #2322).
  *
  * ## What was measured, on Command Code 1.47.0, 2026-09-04
@@ -603,11 +668,16 @@ function foldSkillRoots(
  * translate it to. That is also why the caller must not let one of these
  * override a catalog entry — see `foldInMissingCommands` in command-merger.ts.
  *
+ * Issue #2944: OpenCode V2 rows (`GET /api/command` + `GET /api/skill`) are
+ * converted the same way, scoped to `opencode-v2` through `cliTool`.
+ *
  * @param live - Rows parsed from `GET /command`
- * @returns Palette entries scoped to opencode
+ * @param cliTool - The only session these entries are offered to
+ * @returns Palette entries scoped to `cliTool` (opencode unless told otherwise)
  */
 export function opencodeLiveCommandsToSlashCommands(
-  live: readonly OpencodeLiveCommand[]
+  live: readonly OpencodeLiveCommand[],
+  cliTool: 'opencode' | 'opencode-v2' = 'opencode'
 ): SlashCommand[] {
   return live.map((command) => {
     const hint = command.hints.length > 0 ? command.hints.join(' ') : '';
@@ -619,7 +689,7 @@ export function opencodeLiveCommandsToSlashCommands(
       description: truncateString(description, MAX_SKILL_DESCRIPTION_LENGTH),
       category: isSkill ? 'skill' : 'workflow',
       source: isSkill ? 'skill' : 'worktree',
-      cliTools: ['opencode'],
+      cliTools: [cliTool],
       filePath: '',
     } satisfies SlashCommand;
   });

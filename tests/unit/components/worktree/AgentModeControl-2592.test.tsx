@@ -74,6 +74,8 @@ describe('[#2592] which tools get a control at all', () => {
     (cliToolId) => {
       // opencode's `BTab` switches AGENTS and already has its own button
       // (#2046); vibe-local has no binding; gemini's footer was never measured.
+      // OpenCode V2 is no longer here (Issue #3038): its `shift+tab` moved from
+      // the quick keys to this control.
       const { container } = renderControl({ cliToolId });
       expect(container).toBeEmptyDOMElement();
     },

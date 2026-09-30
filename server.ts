@@ -780,6 +780,33 @@ app.prepare().then(() => {
     // Initialize worktrees after server starts
     await initializeWorktrees();
 
+    // Issue #2934: re-open the event streams of OpenCode V2 (`opencode-v2`)
+    // panes that outlived the last process — the counterpart of the Issue #2108
+    // block below for v1, whose TUI is its own server; OpenCode V2's is a
+    // separate `opencode2 serve` in the same pane. The sweep re-subscribes every
+    // instance whose tmux session is alive (port from
+    // `~/.commandmate/opencode-v2/ports.json`, password from the instance's
+    // `.pw` file) and deletes the password file and port entry of every instance
+    // whose session is gone. Same shape and reasons as the #2108 block: not
+    // awaited, fail-open, dynamic import, after `initializeWorktrees()`. The log
+    // line carries counts only — never a password or a file's content.
+    void (async () => {
+      try {
+        const { reattachOpencodeV2EventStreams } = await import(
+          './src/lib/hooks/sources/opencode-v2/reattach'
+        );
+        const report = await reattachOpencodeV2EventStreams();
+        if (report.known > 0) {
+          console.log(
+            `opencode-v2 streams reattached: ${report.reattached}/${report.candidates} ` +
+              `live pane(s) (known=${report.known} swept=${report.swept})`
+          );
+        }
+      } catch (error) {
+        console.error('Error reattaching opencode-v2 event streams:', error);
+      }
+    })();
+
     // Issue #2108: re-open the event streams of opencode panes that outlived
     // the last process. The port each one's server listens on is in
     // `~/.commandmate/opencode-ports.json`, and until this call nothing read it

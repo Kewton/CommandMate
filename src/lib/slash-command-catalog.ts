@@ -34,6 +34,7 @@ import { isCliToolType, type CLIToolType } from '@/lib/cli-tools/types';
 import { getConfigDir } from '@/cli/utils/install-context';
 import { CATALOG_VERIFIED_AGAINST } from '@/lib/standard-commands';
 import { resolveCopilotExecutable } from '@/lib/cli-tools/copilot-executable';
+import { resolveOpencodeV2Executable } from '@/lib/cli-tools/opencode-executable';
 import { sanitizeEnvForChildProcess } from '@/lib/security/env-sanitizer';
 import { mergeCommandGroups, groupByCategory } from '@/lib/command-merger';
 import { truncateString } from '@/lib/utils';
@@ -105,6 +106,15 @@ type VersionProbe =
  * The remaining four names are still resolved by `execFile` off the server's
  * PATH; see probeCliVersion for why absolute-path resolution lands with Phase 3.
  *
+ * **opencode-v2 is delegated too** (Issue #2950), to
+ * `resolveOpencodeV2Executable` — the resolution `OpenCodeV2Tool.startSession`
+ * launches from, for the same reason as copilot: probe and launch must be one
+ * measurement. An `execFile` row for `opencode2` would also miss an operator
+ * whose V2 is on PATH only as `opencode`, and a plain `opencode --version` row
+ * cannot tell which generation answered (npm `@opencode/cli` registers both
+ * names, #2939). The resolver reads `opencode v2.0.18` and returns `2.0.18`,
+ * resolves to an absolute path, runs with a sanitized env and caches its probe.
+ *
  * **command-code is deliberately absent** (Issue #2253). It has an attestation
  * like the other five, so `CATALOG_VERIFIED_AGAINST['command-code']` exists and a
  * probe row would work — but `commandcode --version` is not a read. Run against
@@ -129,6 +139,10 @@ const VERSION_PROBES: Record<string, VersionProbe> = {
   copilot: {
     kind: 'delegated',
     probe: async () => (await resolveCopilotExecutable())?.version ?? null,
+  },
+  'opencode-v2': {
+    kind: 'delegated',
+    probe: async () => (await resolveOpencodeV2Executable()).executable?.version ?? null,
   },
 };
 

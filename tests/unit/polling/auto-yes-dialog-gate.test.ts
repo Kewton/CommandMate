@@ -72,7 +72,7 @@ afterEach(() => {
 });
 
 describe('[#1928] the rollout table', () => {
-  it('gates only the four tools with measured dialog rules', () => {
+  it('gates only the five tools with measured dialog rules', () => {
     // Pinned by equality rather than by spot checks: adding a tool here without
     // a rule would silence its Auto-Yes entirely, so the change has to be a
     // visible diff to this line.
@@ -89,6 +89,10 @@ describe('[#1928] the rollout table', () => {
       // cannot dismiss the dialog. Issue #2574 added a rule for that dialog and
       // kept this row `legacy`; see the `[#2574]` block below for why.
       'command-code': 'legacy',
+      // Issue #2984: the screen path runs for OpenCode V2 and read a reply that
+      // quotes `❯ 1. Yes / 2. No` as `multiple_choice`; its measured dialog
+      // rules refuse it. See the `[#2984]` block below.
+      'opencode-v2': 'enforce',
     });
   });
 

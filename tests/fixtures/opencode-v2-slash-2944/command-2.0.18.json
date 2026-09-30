@@ -1,0 +1,23 @@
+{
+  "location": {
+    "directory": "/tmp/cm2944/work"
+  },
+  "data": [
+    {
+      "name": "init",
+      "description": "guided AGENTS.md setup"
+    },
+    {
+      "name": "review",
+      "description": "review changes [commit|branch|pr], defaults to uncommitted"
+    },
+    {
+      "name": "probe-cmd2",
+      "description": "Probe singular dir command"
+    },
+    {
+      "name": "probe-cmd",
+      "description": "Probe markdown command"
+    }
+  ]
+}

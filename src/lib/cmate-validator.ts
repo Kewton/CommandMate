@@ -23,6 +23,8 @@ import {
   ANTIGRAVITY_PERMISSIONS,
   COMMAND_CODE_PERMISSIONS,
   COMMAND_CODE_SCHEDULE_PERMISSIONS,
+  OPENCODE_V2_PERMISSIONS,
+  isScheduleSupportedCliTool,
 } from '@/config/schedule-config';
 import { parseAndValidateCliToolColumn } from '@/lib/cmate-cli-tool-parser';
 import { isCliToolType } from '@/lib/cli-tools/types';
@@ -307,6 +309,17 @@ export function validateSchedulesSection(
       });
     }
 
+    // Issue #2934: a registered tool that cannot be scheduled
+    // (SCHEDULE_UNSUPPORTED_CLI_TOOLS, empty since #2974). The parser skips the
+    // same rows.
+    if (parsed && isCliToolType(parsed.cliToolId) && !isScheduleSupportedCliTool(parsed.cliToolId)) {
+      errors.push({
+        row: i,
+        message: `Row ${i + 1}: CLI Tool "${parsed.cliToolId}" is not supported in schedules yet`,
+        field: 'cliTool',
+      });
+    }
+
     // Validate permission (6th column)
     // Empty/missing permission is allowed -- parser applies default per CLI tool
     const permissionStr = row[5];
@@ -328,6 +341,8 @@ export function validateSchedulesSection(
         : cliToolId === 'copilot' ? COPILOT_PERMISSIONS
         : cliToolId === 'antigravity' ? ANTIGRAVITY_PERMISSIONS
         : cliToolId === 'command-code' ? COMMAND_CODE_SCHEDULE_PERMISSIONS
+        // Issue #2974: `default` / `auto`, the parser's and the dialog's list.
+        : cliToolId === 'opencode-v2' ? OPENCODE_V2_PERMISSIONS
         : [];
       if (!allowedValues.includes(trimmedPermission)) {
         errors.push({

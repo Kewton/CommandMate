@@ -354,7 +354,7 @@ export function isLiveAttachEligibleSession(sessionName: string): boolean {
  * `tests/unit/tmux/session-surface-2317.test.ts`, so a tool moving in or out of
  * the alternate screen breaks a test rather than silently dropping the hint.
  */
-export const ALT_SCREEN_TOOLS: readonly string[] = ['claude', 'opencode', 'copilot'];
+export const ALT_SCREEN_TOOLS: readonly string[] = ['claude', 'opencode', 'copilot', 'opencode-v2'];
 
 /** Whether `attach` should warn that a bare attach shows no transcript. */
 export function usesAltScreen(cliToolId: string): boolean {
