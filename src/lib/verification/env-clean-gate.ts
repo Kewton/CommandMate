@@ -16,9 +16,13 @@
  *      counted, and it is the single failure this gate must not reproduce.
  *   2. **Additions and removals are judged asymmetrically.** Everything that
  *      existed at task start must still exist, whoever it belonged to — that is
- *      the pkill (#1739) and `kill-server` (#1624) case — with one exception: a
- *      tmux session the baseline recorded as *another CommandMate server's*
- *      (#2627), which that server may close whenever it likes. New things are a
+ *      the pkill (#1739) and `kill-server` (#1624) case — with three exceptions,
+ *      each recorded in the baseline rather than guessed at verification: a
+ *      tmux session of *another CommandMate server* (#2627) or of *this* server's
+ *      worktree in *another repository* (#3043), which their owners close
+ *      whenever they like, and a `.commandmate-demo-vitest-<pid>` directory
+ *      whose pid was already dead (#3043), which the demo-video tests clean up
+ *      by design. New things are a
  *      violation *unless they are attributable to another worker*, because
  *      parallel delegations legitimately start their own sessions and servers
  *      inside each other's measurement windows — or unless they are the one
@@ -34,6 +38,8 @@ import { execFileSync } from 'child_process';
 import { readlinkSync } from 'fs';
 import { dirname, resolve, sep } from 'path';
 import type { VerificationGateTerminalStatus } from '@/lib/db';
+import { getDbInstance } from '@/lib/db/db-instance';
+import { getWorktreeById } from '@/lib/db/worktree-db';
 import {
   getActiveSessionNamespace,
   parseSessionName,
@@ -227,6 +233,21 @@ export const readLivePidCwd: PidCwdResolver = (pid) => {
  */
 const DEMO_VITEST_HOME_ENTRY = /^\.commandmate-demo-vitest-([1-9]\d*)$/;
 
+/**
+ * Whether a pid names a live process. EPERM counts as alive: the process exists
+ * and belongs to another user. Never throws.
+ */
+export type PidLivenessProbe = (pid: number) => boolean;
+
+export const isLivePid: PidLivenessProbe = (pid) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'EPERM';
+  }
+};
+
 /** The pid a `.commandmate-demo-vitest-<pid>` name carries; null for any other name. */
 export function demoVitestPid(name: string): number | null {
   const match = DEMO_VITEST_HOME_ENTRY.exec(name);
@@ -316,6 +337,21 @@ export interface EnvBaseline extends EnvSnapshot {
    * baseline written before #2627. Only a list excuses anything.
    */
   otherServerSessions?: string[] | null;
+  /**
+   * Baseline `mcbd-*` sessions of *this* server whose worktree belonged to a
+   * different repository than the task's when the task was created (#3043);
+   * see {@link recordOtherRepositorySessions}. `null` when that could not be
+   * judged, absent in a baseline written before #3043. Only a list excuses
+   * anything.
+   */
+  otherRepositorySessions?: string[] | null;
+  /**
+   * Baseline `$HOME` entries named `.commandmate-demo-vitest-<pid>` whose pid was
+   * already dead when the task was created (#3043); see
+   * {@link recordDeadDemoVitestEntries}. Absent in a baseline written before
+   * #3043, which excuses nothing.
+   */
+  deadDemoVitestEntries?: string[];
 }
 
 /** The task-row fields that name the session a delegation runs in. */
@@ -349,12 +385,15 @@ export function resolveTaskSessionName(task: TaskSessionOwner): string | null {
 export function recordTaskSession(
   snapshot: EnvSnapshot,
   task: TaskSessionOwner,
-  server: SessionServerIdentity = currentSessionServer()
+  server: SessionServerIdentity = currentSessionServer(),
+  isPidAlive: PidLivenessProbe = isLivePid
 ): EnvBaseline {
   return {
     ...snapshot,
     taskSession: resolveTaskSessionName(task),
     otherServerSessions: recordOtherServerSessions(snapshot, server),
+    otherRepositorySessions: recordOtherRepositorySessions(snapshot, task.worktreeId, server),
+    deadDemoVitestEntries: recordDeadDemoVitestEntries(snapshot, isPidAlive),
   };
 }
 
@@ -387,6 +426,12 @@ export interface SessionServerIdentity {
   namespace: string | null;
   /** The legacy session this server adopted for a new-format name, if any. */
   legacyAliasOf(newName: string): string | undefined;
+  /**
+   * The repository a worktree id of *this* server belongs to, from this
+   * server's database (#3043); null when the id is not registered or the lookup
+   * failed. Omitted means no worktree can be placed, so nothing is excused.
+   */
+  repositoryOf?(worktreeId: string): string | null;
 }
 
 /**
@@ -407,6 +452,13 @@ export function currentSessionServer(): SessionServerIdentity {
         return resolved !== newName ? resolved : undefined;
       } catch {
         return undefined;
+      }
+    },
+    repositoryOf: (worktreeId) => {
+      try {
+        return getWorktreeById(getDbInstance(), worktreeId)?.repositoryPath || null;
+      } catch {
+        return null;
       }
     },
   };
@@ -488,6 +540,135 @@ export function readOtherServerSessions(baseline: EnvSnapshot): ReadonlySet<stri
 }
 
 // =============================================================================
+// This server's sessions of another repository (Issue #3043)
+// =============================================================================
+
+/**
+ * The repository a session of this server belongs to, or null when that
+ * cannot be pinned to exactly one.
+ *
+ * The worktree id and the instance suffix are not separable by name alone
+ * (`parseSessionName`), so every hyphen-boundary prefix of the tail is looked
+ * up; a prefix that is not a registered worktree answers null and is skipped.
+ * More than one repository among the answers is ambiguous and answers null —
+ * the strict direction, because null excuses nothing.
+ */
+function sessionRepository(tail: string, server: SessionServerIdentity): string | null {
+  const repositoryOf = server.repositoryOf;
+  if (!repositoryOf) return null;
+  const repositories = new Set<string>();
+  let end = tail.indexOf('-');
+  for (;;) {
+    const candidate = end === -1 ? tail : tail.slice(0, end);
+    const repository = repositoryOf(candidate);
+    if (repository) repositories.add(repository);
+    if (end === -1) break;
+    end = tail.indexOf('-', end + 1);
+  }
+  return repositories.size === 1 ? [...repositories][0] : null;
+}
+
+/**
+ * The baseline's `mcbd-*` sessions of *this* server whose worktree belongs to a
+ * repository other than the task's, at task creation.
+ *
+ * Why this is the second line removals are excused on — the design note for
+ * #3043, which extends the one for #2627 rather than contradicting it:
+ *
+ *   - #1624, the case the removal rule exists for, was a worker killing a
+ *     *sibling worktree of the same repository*. Those sessions stay guarded
+ *     exactly as before: a same-repository removal is never excused, however
+ *     plainly `other` its name is.
+ *   - A worktree of another repository is driven by another orchestrate on the
+ *     same server, which closes its workers' sessions when they finish (the
+ *     2026-09-29 and 2026-09-30 runs, `commandagent-issue-546/554` against
+ *     `commandmate-issue-3023`). A delegation has no business in another
+ *     repository, and the one it is judged for cannot tell that close from a
+ *     kill any better than it could for another server's.
+ *   - It uses the database the #2627 note rejected, but not for what that note
+ *     rejected it for: there the other server's worktrees lived in a different
+ *     database under colliding ids. Here the session carries *this* server's
+ *     namespace, so *this* server's worktree table is the authority on it.
+ *   - Recorded at task creation, like {@link recordOtherServerSessions}: the
+ *     other orchestrate may remove its worktree — and with it the row — before
+ *     this task is verified, and an unknown worktree excuses nothing.
+ *
+ * Still rejected: excusing every `other` removal (drops #1624), counting,
+ * timing and the worker's command log, for the reasons in the #2627 note; and
+ * a "needs review" verdict of its own, because the orchestrator's review of the
+ * same-repository case is exactly the one #1624 needs a hard failure for.
+ *
+ * @returns the names, or null when `server` has no namespace or cannot place
+ *          the task's own worktree
+ */
+export function recordOtherRepositorySessions(
+  snapshot: EnvSnapshot,
+  taskWorktreeId: string,
+  server: SessionServerIdentity
+): string[] | null {
+  if (server.namespace === null || !server.repositoryOf) return null;
+  const ownRepository = server.repositoryOf(taskWorktreeId);
+  if (!ownRepository) return null;
+  const sessions = snapshot.probes['tmux-sessions'];
+  if (!sessions || sessions.status !== 'ok') return [];
+  return sessions.entries
+    .map((entry) => entry.key)
+    .filter((name) => {
+      if (attributeSessionName(name, taskWorktreeId) !== 'other') return false;
+      if (isOtherServerSession(name, server)) return false;
+      const parsed = parseSessionName(name);
+      if (!parsed) return false;
+      const repository = sessionRepository(parsed.rest, server);
+      return repository !== null && repository !== ownRepository;
+    });
+}
+
+/** The recorded other-repository sessions of a baseline; empty when none was recorded. */
+export function readOtherRepositorySessions(baseline: EnvSnapshot): ReadonlySet<string> {
+  const recorded = (baseline as EnvBaseline).otherRepositorySessions;
+  if (!Array.isArray(recorded)) return new Set();
+  return new Set(recorded.filter((name): name is string => typeof name === 'string'));
+}
+
+// =============================================================================
+// Stale demo-vitest directories (Issue #3043)
+// =============================================================================
+
+/**
+ * The baseline's `.commandmate-demo-vitest-<pid>` entries whose pid was already
+ * dead at task creation.
+ *
+ * Recorded then, because only then is it knowable: a removed directory's pid is
+ * always dead by verification, so the gate could not otherwise tell a leftover
+ * swept up by `env-scripts.test.ts` (#3025, run by any parallel worktree's unit
+ * gate) from a directory a live test run was still using. The latter — a pid
+ * alive at task start — stays a violation: a worker may have deleted a parallel
+ * test's working directory.
+ */
+export function recordDeadDemoVitestEntries(
+  snapshot: EnvSnapshot,
+  isPidAlive: PidLivenessProbe = isLivePid
+): string[] {
+  const home = snapshot.probes['home-entries'];
+  if (!home || home.status !== 'ok') return [];
+  return home.entries
+    .map((entry) => entry.key)
+    .filter((name) => {
+      const pid = demoVitestPid(name);
+      return pid !== null && !isPidAlive(pid);
+    });
+}
+
+/** The recorded dead-pid demo-vitest entries of a baseline; empty when none was recorded. */
+export function readDeadDemoVitestEntries(baseline: EnvSnapshot): ReadonlySet<string> {
+  const recorded = (baseline as EnvBaseline).deadDemoVitestEntries;
+  if (!Array.isArray(recorded)) return new Set();
+  return new Set(
+    recorded.filter((name): name is string => typeof name === 'string' && demoVitestPid(name) !== null)
+  );
+}
+
+// =============================================================================
 // Diff
 // =============================================================================
 
@@ -515,7 +696,7 @@ export interface EnvProbeDiff {
    * worktree stays in `added`.
    */
   taskSessionAdded: EnvChange[];
-  /** Entries that existed at task start and are gone. Always violations. */
+  /** Entries that existed at task start, are gone, and were not excused below. */
   removed: EnvChange[];
   /**
    * `tmux-sessions` removals excused because the baseline recorded the session
@@ -523,6 +704,17 @@ export interface EnvProbeDiff {
    * dropped. Always empty when the tmux server itself looks killed.
    */
   removedByOtherServer: EnvChange[];
+  /**
+   * `tmux-sessions` removals excused because the baseline recorded the session
+   * as this server's worktree of another repository (#3043). Listed, never
+   * dropped; empty when the tmux server itself looks killed.
+   */
+  removedByOtherRepository: EnvChange[];
+  /**
+   * `home-entries` removals of a `.commandmate-demo-vitest-<pid>` directory whose
+   * pid the baseline recorded as already dead (#3043). Listed, never dropped.
+   */
+  removedStaleDemoVitest: EnvChange[];
   /**
    * `home-entries` additions and removals dropped because their name is in
    * `options.envCleanIgnoreHomeEntries` (#2890). Kept, not discarded: the
@@ -573,6 +765,8 @@ export function diffEnvSnapshots(
 ): EnvCleanDiff {
   const taskSession = readTaskSession(baseline);
   const otherServerSessions = readOtherServerSessions(baseline);
+  const otherRepositorySessions = readOtherRepositorySessions(baseline);
+  const deadDemoVitestEntries = readDeadDemoVitestEntries(baseline);
   const ignoredHomeEntries = new Set(options.ignoreHomeEntries ?? []);
   const resolvePidCwd = options.resolvePidCwd ?? readLivePidCwd;
   const probes: EnvProbeDiff[] = ENV_PROBE_IDS.map((probeId) => {
@@ -589,6 +783,8 @@ export function diffEnvSnapshots(
         taskSessionAdded: [],
         removed: [],
         removedByOtherServer: [],
+        removedByOtherRepository: [],
+        removedStaleDemoVitest: [],
         ignoredByConfig: [],
       };
     }
@@ -602,6 +798,8 @@ export function diffEnvSnapshots(
         taskSessionAdded: [],
         removed: [],
         removedByOtherServer: [],
+        removedByOtherRepository: [],
+        removedStaleDemoVitest: [],
         ignoredByConfig: [],
       };
     }
@@ -646,6 +844,8 @@ export function diffEnvSnapshots(
 
     const removed: EnvChange[] = [];
     const removedByOtherServer: EnvChange[] = [];
+    const removedByOtherRepository: EnvChange[] = [];
+    const removedStaleDemoVitest: EnvChange[] = [];
     for (const entry of before.entries) {
       if (afterKeys.has(entry.key)) continue;
       const change = toChange(entry, attributeEntry(probeId, entry, context, resolvePidCwd));
@@ -657,6 +857,14 @@ export function diffEnvSnapshots(
         otherServerSessions.has(entry.key)
       ) {
         removedByOtherServer.push(change);
+      } else if (
+        tmuxServerSurvived &&
+        change.owner === 'other' &&
+        otherRepositorySessions.has(entry.key)
+      ) {
+        removedByOtherRepository.push(change);
+      } else if (probeId === 'home-entries' && deadDemoVitestEntries.has(entry.key)) {
+        removedStaleDemoVitest.push(change);
       } else {
         removed.push(change);
       }
@@ -671,6 +879,8 @@ export function diffEnvSnapshots(
       taskSessionAdded,
       removed,
       removedByOtherServer,
+      removedByOtherRepository,
+      removedStaleDemoVitest,
       ignoredByConfig,
     };
   });
@@ -744,6 +954,22 @@ function formatRemovedByOtherServer(changes: EnvChange[]): string[] {
   );
 }
 
+/** Removals excused as this server's sessions of another repository (#3043), one line each. */
+function formatRemovedByOtherRepository(changes: EnvChange[]): string[] {
+  return changes.map(
+    (change) =>
+      `    · - ${change.key} (ignored: a worktree of another repository on this server, recorded at task start)`
+  );
+}
+
+/** Removals excused as leftover demo-vitest directories (#3043), one line each. */
+function formatRemovedStaleDemoVitest(changes: EnvChange[]): string[] {
+  return changes.map(
+    (change) =>
+      `    · - ${change.key} (ignored: its pid was already dead at task start — a leftover swept by the demo-video tests)`
+  );
+}
+
 function formatIgnoredByConfig(changes: EnvChange[]): string[] {
   if (changes.length === 0) return [];
   const names = changes.map((change) => change.key).join(', ');
@@ -777,6 +1003,8 @@ export function formatEnvCleanReport(diff: EnvCleanDiff): string {
       lines.push(`  ${probe.probeId} clean (${label})${excused}`);
       lines.push(...formatTaskSessionChanges(probe.taskSessionAdded));
       lines.push(...formatRemovedByOtherServer(probe.removedByOtherServer));
+      lines.push(...formatRemovedByOtherRepository(probe.removedByOtherRepository));
+      lines.push(...formatRemovedStaleDemoVitest(probe.removedStaleDemoVitest));
       lines.push(...formatIgnoredByConfig(probe.ignoredByConfig));
       continue;
     }
@@ -787,6 +1015,8 @@ export function formatEnvCleanReport(diff: EnvCleanDiff): string {
     lines.push(...formatChanges('-', probe.removed));
     lines.push(...formatTaskSessionChanges(probe.taskSessionAdded));
     lines.push(...formatRemovedByOtherServer(probe.removedByOtherServer));
+    lines.push(...formatRemovedByOtherRepository(probe.removedByOtherRepository));
+    lines.push(...formatRemovedStaleDemoVitest(probe.removedStaleDemoVitest));
     lines.push(...formatIgnoredByConfig(probe.ignoredByConfig));
     for (const excused of probe.ignoredAdded) {
       lines.push(`    · ${excused.key} (ignored: belongs to another worktree)`);
