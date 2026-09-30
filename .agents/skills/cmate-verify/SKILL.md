@@ -37,8 +37,9 @@ cmate-verify/
 `tests/unit/skills/cmate-verify/` の薄いラッパが `npm run test:unit` から同じ suite を回す）。
 
 install 先は `.claude/skills/cmate-verify/` と `.agents/skills/cmate-verify/` の両方で、
-中身は byte-identical である（Claude は前者、Codex は後者を読む）。以下のコマンド例は
-`.claude/...` で書いてあるが、`.agents/...` に読み替えても同じものが走る。
+中身は byte-identical である（Claude は前者、Codex と Command Code は後者を読む）。以下のコマンド例の
+`<skills-root>` は、worktree の root（`git rev-parse --show-toplevel`）の下の `.agents/skills` と
+`.claude/skills` のうち `cmate-verify/SKILL.md` が**在る方**である。どちらから実行しても同じものが走る。
 
 ## 手順 1: init（`.commandmate/verify.yaml` が無い場合）
 
@@ -67,7 +68,8 @@ install 先は `.claude/skills/cmate-verify/` と `.agents/skills/cmate-verify/`
 ## 手順 2: run（verify.yaml がある場合）
 
 ```bash
-.claude/skills/cmate-verify/scripts/verify-run.sh --cwd <worktree-path>
+<skills-root>/cmate-verify/scripts/verify-run.sh --cwd <worktree-path>
+# 例: .agents/skills/cmate-verify/scripts/verify-run.sh または .claude/skills/cmate-verify/scripts/verify-run.sh
 ```
 
 主なオプション:
