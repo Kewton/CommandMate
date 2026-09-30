@@ -36,6 +36,7 @@ import {
   parseTasksTsv,
   parseVerifyExit,
   pickWaitLog,
+  selectRunFiles,
   reproducesFailAfter,
   summarizeCheckRollup,
   summarizeWorkflowRuns,
@@ -354,7 +355,8 @@ export async function main(argv: readonly string[], overrides: Partial<ReleaseRe
 
   // --- orchestrate run files
   const runDir = path.join(runsDir, date);
-  const runFiles = listDir(runDir);
+  // One run's files when the dispatch record names its suffix (#3045); else the whole day.
+  const runFiles = selectRunFiles(listDir(runDir), dispatch?.runSuffix);
   const tasks = new Map<number, OrchestrateTask>();
   for (const name of runFiles.filter((file) => /^tasks.*\.tsv$/.test(file))) {
     parseTasksTsv(readText(path.join(runDir, name)) ?? '', tasks);

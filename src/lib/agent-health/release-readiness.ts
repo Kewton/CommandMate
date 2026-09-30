@@ -243,6 +243,25 @@ export function pickWaitLog(fileNames: readonly string[], issue: number): string
 }
 
 /**
+ * The run dir's files that belong to one orchestrate run (#3045). With the
+ * dispatch record's `runSuffix` (`3050-3051`), `tasks*.tsv` / `summary*.md` /
+ * `plan*.md` are only the `-<runSuffix>` ones and `wait-*` logs only those of
+ * the run's Issues, so another run on the same day does not leak in. Without
+ * a suffix (older records) every file is kept.
+ */
+export function selectRunFiles(fileNames: readonly string[], runSuffix: string | undefined): string[] {
+  if (!runSuffix) return [...fileNames];
+  const issues = new Set(runSuffix.split('-').map(Number));
+  return fileNames.filter((name) => {
+    const own = /^(tasks|summary|plan)(.*)\.(tsv|md)$/.exec(name);
+    if (own) return own[2] === `-${runSuffix}`;
+    const wait = /^wait-(?:.*-)?(\d+)(?:-r\d+)?\.log$/.exec(name);
+    if (wait) return issues.has(Number(wait[1]));
+    return true;
+  });
+}
+
+/**
  * The verify exit of a `commandmate wait --verify` log: an explicit `exit=N`
  * line, else `RESULT passed` → 0, `RESULT failed` → 20 (21 when the
  * work-evidence gate failed). null while no verdict is in the log.

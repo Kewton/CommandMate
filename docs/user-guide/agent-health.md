@@ -300,6 +300,75 @@ interface MetricsReport {
 - 最後の 1 行: `AGENT_HEALTH_METRICS date=… issues_created=… issues_commented=… skipped=… exit=…`
 - `gitleaks` と `semgrep` は無ければ skip になる（`brew install gitleaks semgrep`）。`jscpd`・`knip` は `npx` で取得する
 
+## 自動依頼（develop の Claude 3 へ /orchestrate、Issue #3045）
+
+日次確認（07:00、バグ Issue）と計測（06:30、改善 Issue）の後、08:30 に develop の **Claude 3**
+（worktree `mycodebranchdesk`・instance `claude-3`。この用途の専用）へ `/orchestrate` を依頼し、調査から修正・develop への
+マージまでを毎日自動で回す。main へのリリース（GO／NO-GO）は「リリース判断レポート」を見て利用者が決める。
+
+```bash
+npx tsx scripts/agent-health/dispatch.ts             # 選定 → 状態確認 → /clear → 依頼 → ラベル・コメント → 記録
+npx tsx scripts/agent-health/dispatch.ts --dry-run   # 選定と状態確認だけ。送らず、ラベルもコメントも記録も書かない
+```
+
+| オプション | 既定 |
+|---|---|
+| `--state-dir <dir>` | `$AGENT_HEALTH_DIR` か `~/.commandmate/agent-health`（`dispatch/<JST 日付>.json` を書く） |
+| `--dry-run` | 無効 |
+
+送り先・リポジトリ・上限は `src/lib/agent-health/dispatch.ts` の定数で固定し、引数では変えられない。
+
+### 決まった手順（`src/lib/agent-health/dispatch.ts`。AI の解釈に任せない）
+
+- **対象**: `gh issue list --repo Kewton/CommandMate --state open` のうち、作成者が `kewton`（大文字小文字は区別しない。
+  公開リポジトリのため、外部の人が書いた本文による指示の注入を防ぐ）・ラベル `agent-health`（バグ）か `metrics`（改善）・
+  ラベル `auto-dispatched` が無いもの。両方のラベルがあればバグとして扱う
+- **順番と上限**: バグ（作成が古い順）→ 改善（`security` → その他。それぞれ古い順）。バグは全件、改善は 2 件まで、合計 5 件まで。
+  上限を超えたものは `deferred`（持ち越し）に入れる
+- **Claude 3 の状態**（`commandmate ls --json` の `sessionStatusByInstance["claude-3"]`）: 実行中で処理中でもプロンプト待ちでもなければ
+  入力待ち（送る）。処理中・プロンプト待ちは送らない（`skipped-busy`。全件を持ち越し）。セッションが無ければ `send` が起動する。
+  roster に `claude-3`（cliTool `claude`）が無いときは送らずに失敗する
+- **送信**: `commandmate send mycodebranchdesk "/clear" --instance claude-3` → 5 秒ごとに状態を見て入力待ちに戻ったことを確かめる（90 秒まで）→
+  `commandmate send mycodebranchdesk "<依頼>" --instance claude-3 --auto-yes --duration 8h`。どちらも `exit 99`（起動直後）なら 2 分後に 1 回だけ再送
+- **依頼の中身**: 1 行目が `/orchestrate <番号…>`（`--full` は付けない。UAT を main の作業ディレクトリで走らせないため）。続けて
+  「本 run では PR の develop へのマージを進めてよい（利用者の明示的な許可）」・run のファイル名を
+  `plan-<番号を - でつないだもの>.md`・`summary-<同>.md`・`tasks-<同>.tsv` にすること（同じ日の別の run と上書きし合わないため）・
+  完了後に `release-report.ts --date <日付>` で `workspace/agent-health/<日付>/release-readiness.html` を書くこと・
+  失敗した Issue を当日中に再依頼しないこと。**対象が 1 件の日もそのまま 1 件で送る**（`/orchestrate` は 1 件でも動く。2026-10-01 に確認）
+- **後始末**: 送った Issue にラベル `auto-dispatched` を付け、`<!-- agent-health-dispatch:<日付> -->` で始まるコメントを残す。
+  ラベルが付いた Issue は翌日以降の対象にならない（もう一度依頼したいときはラベルを外す）
+- **同じ日に 2 回送らない**: その日の記録が `sent` なら何もしない
+
+### 記録と出力
+
+- 記録 `~/.commandmate/agent-health/dispatch/<JST 日付>.json`（型は `src/lib/agent-health/dispatch-record.ts` の `DispatchRecord`）。
+  `status`（`sent`・`skipped-busy`・`no-target`）・`sentAt`・`issues`・`deferred`・`runSuffix`（送った番号を `-` でつないだもの）・
+  `reason`（送れなかった理由や、ラベル付けの失敗）。リリース判断レポートが読む
+- 送れなかったとき（ラベルが無い・gh や commandmate の失敗・`/clear` 後に入力待ちに戻らない）は `status=skipped-busy` と `reason` を書き、
+  選んだ Issue をすべて持ち越す
+- 標準出力の最後に `AGENT_HEALTH_DISPATCH date=<日付> status=sent|skipped-busy|no-target issues=<番号,…|-> deferred=<番号,…|->[ reason="…"]`
+- exit: 0 送った・busy で見送った・対象なし／1 送ったがラベル・コメント・記録のどれかに失敗／2 送っていない（失敗・引数の誤り）
+
+### ラベルの準備（利用者が 1 回だけ行う）
+
+スクリプトはラベルを作らない。`agent-health`・`metrics`・`security`・`auto-dispatched` のどれかが無いと、送らずに exit 2 で終わり、
+記録と出力の `reason` に無いラベルを書く。`metrics`・`security` は計測の依頼文（手順 2）でも作られる。
+
+```bash
+gh label create auto-dispatched --repo Kewton/CommandMate --description "agent-health の自動依頼で /orchestrate に渡した Issue"
+gh label create metrics --repo Kewton/CommandMate --description "日次メトリクス計測が自動登録した改善 Issue"
+gh label create security --repo Kewton/CommandMate --description "セキュリティ"
+```
+
+### 毎日の自動実行（Schedule）
+
+- 日次確認と同じ worktree（`../commandmate-agent-health`）の `CMATE.md` に、`docs/agent-health/CMATE.example.md` の
+  `agent-health-dispatch` 行（`30 8 * * *`・command-code・`yolo`）を加える
+- 依頼文 `docs/agent-health/dispatch-prompt.md` は「スクリプトを実行し、最後の行を出す」だけ。AI は `send` を直接打たず、
+  orchestrate の完了も待たない
+- 初めて有効にする前に、`--dry-run` で対象と Claude 3 の状態を確かめ、1 回は手で実行して Claude 3 に届き `/orchestrate` が
+  始まることを確かめる
+
 ## リリース判断レポート
 
 `scripts/agent-health/release-report.ts` は、その日に自動依頼した orchestrate の結果と develop の状態を集め、
@@ -335,6 +404,8 @@ HTML を書けたら判定にかかわらず exit 0、引数の誤りやスク�
 - agent-health のレポート `~/.commandmate/agent-health/reports/`（`<date>` 以降。retry の結果も含む）
 - orchestrate の `runs/<date>/` の `tasks*.tsv`（担当エージェント）・`wait-*<Issue>[-rN].log`（verify の exit。最後の試行）・
   `summary*.md`（所見の欄に折りたたんで載せる）
+  依頼の記録に `runSuffix` があれば、その run の `tasks-<runSuffix>.tsv`・`summary-<runSuffix>.md` と、依頼した Issue の `wait-*` だけを読む
+  （同じ日の別の run を混ぜない。#3045）。無ければその日のファイルをすべて読む
 - git: `origin/develop`（無ければ `HEAD`）、`git describe --tags --abbrev=0`、タグからのコミット数
   （`--ancestry-path`。リリースの back-merge 以降に develop へ入ったもの）、develop の `changelog.d/` の断片。fetch はしない
 - gh: develop HEAD の workflow run、直近 14 日に更新された PR（チェックは表に出す PR だけ個別に取る）、

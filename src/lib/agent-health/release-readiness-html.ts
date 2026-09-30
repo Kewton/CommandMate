@@ -275,15 +275,17 @@ function remainingSection(model: ReleaseReadinessModel): string {
       ? `<ul>${dispatch.deferred.map((n) => `<li>${link(issueUrl(repo, n), `#${n}`)}</li>`).join('')}</ul>`
       : '<p class="muted">持ち越しは無い。</p>';
   const why =
-    dispatch === null
-      ? 'dispatch の記録が無い（依頼は行われていない）。'
-      : dispatch.status === 'skipped-busy'
-        ? 'orchestrate が実行中だったため依頼を見送った（skipped-busy）。'
-        : dispatch.status === 'no-target'
-          ? '依頼する対象が無かった（no-target）。'
-          : dispatch.deferred.length > 0
-            ? '上限を超えた分を持ち越した。'
-            : '—';
+    dispatch?.reason // #3045: a failed or partial dispatch says why in the record
+      ? dispatch.reason
+      : dispatch === null
+        ? 'dispatch の記録が無い（依頼は行われていない）。'
+        : dispatch.status === 'skipped-busy'
+          ? 'orchestrate が実行中だったため依頼を見送った（skipped-busy）。'
+          : dispatch.status === 'no-target'
+            ? '依頼する対象が無かった（no-target）。'
+            : dispatch.deferred.length > 0
+              ? '上限を超えた分を持ち越した。'
+              : '—';
   return `<h3>open な <code>agent-health</code>／<code>metrics</code> Issue</h3>${open}
 <h3>持ち越し</h3>${deferred}
 <h3>dispatch されなかった理由</h3><p>${escapeHtml(why)}</p>`;
