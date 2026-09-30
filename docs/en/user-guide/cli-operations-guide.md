@@ -1893,6 +1893,7 @@ Each of these prints a message and exits 0 without changing anything.
 | 3 | START_FAILED | Update succeeded but the restarted server could not be verified (no rollback needed) |
 | 4 | STOP_FAILED | The server could not be stopped; aborted **without changing anything** |
 | 5 | UPDATE_FAILED | Registry query, `npm install -g`, or version verification failed |
+| 11 | UPSTREAM_FAULT | An upstream API fault was on the screen when the turn ended (`wait --fail-on-upstream-fault`; `ask` always). stderr / `--json` carry `id=...`; `id=context-limit` means the conversation is over the model's context limit — kill the instance (`commandmate instances <wt> kill <instance>`) and send again in a fresh session |
 | 99 | UNEXPECTED_ERROR | Unexpected error |
 
 ### Caveats

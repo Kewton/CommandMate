@@ -32,6 +32,7 @@ describe('findUpstreamFault (Issue #1839)', () => {
       { frame: '✻ Working · Retrying in 8s · attempt 2/10', id: 'retrying' },
       { frame: 'Claude usage limit reached. Your limit will reset at 3pm.', id: 'limit-reached' },
       { frame: '⏺ API Error: Connection error.', id: 'api-error' },
+      { frame: "Error: 400 This model's maximum context length is 1048576 tokens.", id: 'context-limit' },
     ];
 
     for (const { frame, id } of cases) {

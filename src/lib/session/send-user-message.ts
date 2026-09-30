@@ -51,6 +51,10 @@ import { createLogger } from '@/lib/logger';
 import { checkWorktreeSessionOwnership } from '@/lib/cli-tools/worktree-session-ownership';
 import { resolveSessionName } from '@/lib/cli-tools/session-name';
 import { isPromptWaiting, promptWaitingMessage } from '@/lib/session/prompt-waiting-guard';
+import {
+  SESSION_STARTING_CODE,
+  isSessionStartTimeoutError,
+} from '@/lib/session/session-start-error';
 import type { CopilotTool } from '@/lib/cli-tools/copilot';
 import { formatImagePathFallbackMessage } from '@/lib/cli-tools/opencode';
 import type { ChatMessage, MessageType } from '@/types/models';
@@ -109,7 +113,18 @@ export type SendUserMessageResult =
    * server's session), or this worktree has no row to vouch for it. Nothing was
    * sent and no poller was started.
    */
-  | { ok: false; stage: 'model' | 'send' | 'prompt_waiting' | 'foreign_session'; error: string };
+  /**
+   * `code` (Issue #3006) carries a failure's stable code when it has one. Today
+   * that is only `SESSION_STARTING`: the agent's session was just launched and
+   * its input prompt has not appeared yet, which the send route answers with the
+   * same 503 a slow claude start gets. Absent for every other failure.
+   */
+  | {
+      ok: false;
+      stage: 'model' | 'send' | 'prompt_waiting' | 'foreign_session';
+      error: string;
+      code?: typeof SESSION_STARTING_CODE;
+    };
 
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -393,6 +408,9 @@ export async function sendUserMessage(
     }
   } catch (error) {
     logger.error('failed-to-send-message-to:', { error: getErrorMessage(error) });
+    if (isSessionStartTimeoutError(error)) {
+      return { ok: false, stage: 'send', error: error.message, code: SESSION_STARTING_CODE };
+    }
     return { ok: false, stage: 'send', error: getErrorMessage(error) };
   }
 

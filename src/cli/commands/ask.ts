@@ -409,6 +409,9 @@ Exit codes (wait's, unchanged; --async always exits 0 once the relay exists):
        (same shape as \`wait --on-prompt agent\`). Report it; do NOT answer it
        with \`respond\` on the other session's behalf — the number that resolves
        a dialog is the dialog's own, and a wrong one picks the default (#1681).
+  11   the turn never ran: an upstream fault is on the screen. stderr and --json
+       name it (id=...). id=context-limit: the conversation is over the model's
+       limit; \`instances <id> kill <instance>\` and ask again in a fresh session
   21   nothing was running to ask
   124  timed out. Look with \`capture <id> --instance <id> --pane --tail 60\`
 
@@ -544,6 +547,8 @@ a decision about that session's guard rails, not part of asking it a question.
           timeout,
           instance: instanceId,
           token: options.token,
+          // Always on (Issue #3011): a turn that never ran must not read as a reply.
+          failOnUpstreamFault: true,
         });
 
         if (result.exitCode !== WaitExitCode.SUCCESS) {
@@ -551,6 +556,14 @@ a decision about that session's guard rails, not part of asking it a question.
           // else, so a caller can parse it without stripping progress lines.
           if (result.output) {
             console.log(JSON.stringify(result.output));
+          }
+          if (result.upstreamFault && options.json) {
+            console.log(JSON.stringify({
+              worktreeId,
+              instanceId: instanceId ?? null,
+              cliToolId: agent ?? null,
+              upstreamFault: result.upstreamFault,
+            }, null, 2));
           }
           process.exit(result.exitCode);
           return;
