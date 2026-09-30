@@ -1230,10 +1230,12 @@
     "cycleAria": "Cycle the agent permission mode (shift+tab)",
     "cycleFromAria": "Cycle the agent permission mode. Currently {mode}. (shift+tab)",
     "note": {
-      "codexModelCoupled": "Codex changes its model and reasoning effort along with the mode."
+      "codexModelCoupled": "Codex changes its model and reasoning effort along with the mode.",
+      "opencodeAgentSwitch": "OpenCode V2 switches between the Build (edits files) and Plan (read-only) agents."
     },
     "noteShort": {
-      "codexModelCoupled": "Also switches model"
+      "codexModelCoupled": "Also switches model",
+      "opencodeAgentSwitch": "Switches agent"
     },
     "mode": {
       "default": "default",
@@ -1243,7 +1245,8 @@
       "auto": "auto",
       "autopilot": "autopilot",
       "bypass": "permission bypass",
-      "dont-ask": "don't-ask"
+      "dont-ask": "don't-ask",
+      "build": "build"
     }
   },
   "sessionNote": {

@@ -56,7 +56,8 @@ in the CLI setup guide.
 | Refusing to send into a dialog | While a dialog such as model selection or the Commands palette is open, sending fails instead of typing the text into the dialog (below) | #2971 |
 | Model | The model that actually answered is shown in `capture --json` (`.model`) and in the pane header. After a model change in the TUI it switches with the next reply, and a change notification is raised | #2964 |
 | Usage | Tokens (input, output), cost and context usage are shown on screen and in the API, matching V2's own footer. They switch with a new session and are cleared when the instance stops | #2981 |
-| Quick keys | Eleven keys from V2's measured key table (Next agent `shift+tab` / Commands / Variant / Agents / Sessions / New session / Models / Page up / Page down / First / Latest) | #2966 |
+| Switching agents | The mode button beside the composer switches Build ⇄ Plan (it sends `shift+tab`) and shows the current agent. It works on the chat screen, the terminal screen and the phone | #3038 |
+| Quick keys | Ten keys from V2's measured key table (Commands / Variant / Agents / Sessions / New session / Models / Page up / Page down / First / Latest). `shift+tab` moved to the mode button above | #2966 #3038 |
 | Keys on the dialog card | While model selection is open, the chat card shows Variant `ctrl+t` / Models `ctrl+x m` / Commands `ctrl+p`, and pressing one switches to it | #2983 |
 | Slash-command candidates | Built-in commands, Skills and the running server's project commands are offered. V2 is also covered by the freshness check of the built-in list (`catalogStaleness`) | #2944 #2950 |
 | Skills | Reads `.agents/skills` and `.claude/skills`. A Skill added while it runs needs **no new session**: it is found from the next send | #2975 #2985 |
