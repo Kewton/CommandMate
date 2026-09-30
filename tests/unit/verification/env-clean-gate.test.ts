@@ -10,7 +10,9 @@
  *      wording is secondary.
  *   2. Removals are violations whoever they belonged to (#1739, #1624) — except
  *      a tmux session the baseline recorded as another CommandMate server's
- *      (#2627) while the tmux server itself survived — and
+ *      (#2627) or as this server's worktree of another repository (#3043) while
+ *      the tmux server itself survived, and a `.commandmate-demo-vitest-<pid>`
+ *      directory whose pid was already dead at task start (#3043) — and
  *      additions are violations unless they are demonstrably another worker's —
  *      or are the one agent session the delegation itself started, named in the
  *      baseline and excused by that exact name (#2472).
@@ -36,7 +38,11 @@ import {
   formatEnvCleanReport,
   isOtherServerSession,
   readLivePidCwd,
+  readDeadDemoVitestEntries,
+  readOtherRepositorySessions,
   readOtherServerSessions,
+  recordDeadDemoVitestEntries,
+  recordOtherRepositorySessions,
   readTaskSession,
   recordTaskSession,
   REQUIRE_ENV_CLEAN_SOURCE_CONFIG,
@@ -1058,6 +1064,254 @@ describe('another CommandMate server’s sessions (#2627)', () => {
       expect(outcome.logTail).toContain('tmux-sessions clean');
       expect(outcome.logTail).toContain(`- ${FOREIGN_107} (ignored: another CommandMate server's`);
     });
+  });
+});
+
+// =============================================================================
+// Removals excused by the baseline (Issue #3043)
+// =============================================================================
+
+describe('removals excused by the baseline (#3043)', () => {
+  const NS = 'e7375aa6';
+  const OWN_REPO = '/Users/dev/work/commandmate';
+  const OTHER_REPO = '/Users/dev/work/commandagent';
+  /** Worktree id → repository, as this server's worktree table holds them. */
+  const WORKTREES: Record<string, string> = {
+    [WORKTREE_ID]: OWN_REPO,
+    'commandmate-issue-1726': OWN_REPO,
+    'commandagent-issue-546-security-tools-scope': OTHER_REPO,
+    'commandagent-issue-554-security-gui': OTHER_REPO,
+  };
+  const SERVER: SessionServerIdentity = {
+    namespace: NS,
+    legacyAliasOf: () => undefined,
+    repositoryOf: (id) => WORKTREES[id] ?? null,
+  };
+  const TASK: TaskSessionOwner = { worktreeId: WORKTREE_ID, cliToolId: 'claude', instanceId: null };
+  const OWN_SESSION = `mcbd-${NS}-claude-${WORKTREE_ID}`;
+  /** The 2026-09-30 incident: another orchestrate's workers on this server. */
+  const OTHER_REPO_546 = `mcbd-${NS}-command-code-commandagent-issue-546-security-tools-scope`;
+  const OTHER_REPO_554 = `mcbd-${NS}-command-code-commandagent-issue-554-security-gui-2`;
+  /** #1624: a sibling worktree of the same repository on this server. */
+  const SIBLING = `mcbd-${NS}-claude-commandmate-issue-1726`;
+  /** A worktree this server does not know: nothing places it. */
+  const UNKNOWN = `mcbd-${NS}-claude-somewhere-issue-9`;
+  const DEAD = '.commandmate-demo-vitest-27623';
+  const LIVE = '.commandmate-demo-vitest-31212';
+  const alive = (pid: number): boolean => pid === 31212;
+
+  function baselineOf(
+    tmux: string[],
+    home: string[] = [],
+    server: SessionServerIdentity = SERVER
+  ) {
+    return recordTaskSession(
+      snapshot({
+        'tmux-sessions': probe(tmux.map((name) => entry(name))),
+        'home-entries': probe(home.map((name) => entry(name))),
+      }),
+      TASK,
+      server,
+      alive
+    );
+  }
+
+  function current(tmux: string[], home: string[] = []): EnvSnapshot {
+    return snapshot({
+      'tmux-sessions': probe(tmux.map((name) => entry(name))),
+      'home-entries': probe(home.map((name) => entry(name))),
+    });
+  }
+
+  function diffOf(before: EnvSnapshot, after: EnvSnapshot) {
+    const diff = diffEnvSnapshots(before, after, CONTEXT, { resolvePidCwd: () => null });
+    return {
+      diff,
+      tmux: diff.probes.find((p) => p.probeId === 'tmux-sessions')!,
+      home: diff.probes.find((p) => p.probeId === 'home-entries')!,
+    };
+  }
+
+  describe('recordOtherRepositorySessions', () => {
+    it('records only this server’s sessions whose worktree is in another repository', () => {
+      const recorded = recordOtherRepositorySessions(
+        current([OWN_SESSION, SIBLING, OTHER_REPO_546, OTHER_REPO_554, UNKNOWN]),
+        WORKTREE_ID,
+        SERVER
+      );
+      // The instance suffix `-2` is not part of the worktree id; the prefix lookup finds it.
+      expect(recorded).toEqual([OTHER_REPO_546, OTHER_REPO_554]);
+    });
+
+    it('records nothing from another server’s namespace (that is #2627’s list)', () => {
+      const foreign = 'mcbd-deadbeef-command-code-commandagent-issue-546-security-tools-scope';
+      expect(recordOtherRepositorySessions(current([foreign]), WORKTREE_ID, SERVER)).toEqual([]);
+    });
+
+    it('does not place a session whose prefixes resolve to more than one repository', () => {
+      const server: SessionServerIdentity = {
+        ...SERVER,
+        repositoryOf: (id) =>
+          id === 'commandagent' ? OWN_REPO : (WORKTREES[id] ?? null),
+      };
+      expect(recordOtherRepositorySessions(current([OTHER_REPO_546]), WORKTREE_ID, server)).toEqual(
+        []
+      );
+    });
+
+    it('records null when there is no namespace, no lookup, or the task’s own worktree is unknown', () => {
+      const names = current([OTHER_REPO_546]);
+      expect(
+        recordOtherRepositorySessions(names, WORKTREE_ID, { ...SERVER, namespace: null })
+      ).toBeNull();
+      expect(
+        recordOtherRepositorySessions(names, WORKTREE_ID, {
+          namespace: NS,
+          legacyAliasOf: () => undefined,
+        })
+      ).toBeNull();
+      expect(recordOtherRepositorySessions(names, 'unregistered-wt', SERVER)).toBeNull();
+    });
+
+    it('rides the baseline JSON', () => {
+      const baseline = baselineOf([OWN_SESSION, OTHER_REPO_546]);
+      const stored = JSON.parse(JSON.stringify(baseline)) as EnvSnapshot;
+      expect(isEnvSnapshot(stored)).toBe(true);
+      expect(readOtherRepositorySessions(stored)).toEqual(new Set([OTHER_REPO_546]));
+      expect(readOtherRepositorySessions(snapshot()).size).toBe(0);
+    });
+  });
+
+  describe('recordDeadDemoVitestEntries', () => {
+    it('records the demo-vitest entries whose pid is dead at task start, and nothing else', () => {
+      const asked: number[] = [];
+      const recorded = recordDeadDemoVitestEntries(
+        current([], ['Documents', DEAD, LIVE, '.commandmate-demo-vitest-12x']),
+        (pid) => {
+          asked.push(pid);
+          return alive(pid);
+        }
+      );
+      expect(recorded).toEqual([DEAD]);
+      expect(asked).toEqual([27623, 31212]);
+    });
+
+    it('rides the baseline JSON and ignores names that are not demo-vitest', () => {
+      const baseline = { ...baselineOf([], [DEAD]), deadDemoVitestEntries: [DEAD, 'Documents'] };
+      const stored = JSON.parse(JSON.stringify(baseline)) as EnvSnapshot;
+      expect(readDeadDemoVitestEntries(stored)).toEqual(new Set([DEAD]));
+      expect(readDeadDemoVitestEntries(snapshot()).size).toBe(0);
+    });
+  });
+
+  describe('diffEnvSnapshots', () => {
+    it('does not fail the 2026-09-30 repro: another repository’s orchestrate closed its workers', () => {
+      const { diff, tmux } = diffOf(
+        baselineOf([OWN_SESSION, OTHER_REPO_546, OTHER_REPO_554]),
+        current([OWN_SESSION])
+      );
+      expect(diff.status).toBe('clean');
+      expect(tmux.removed).toEqual([]);
+      expect(tmux.removedByOtherRepository.map((c) => c.key)).toEqual([
+        OTHER_REPO_546,
+        OTHER_REPO_554,
+      ]);
+      expect(formatEnvCleanReport(diff)).toContain(
+        `· - ${OTHER_REPO_546} (ignored: a worktree of another repository on this server`
+      );
+    });
+
+    it('still reports #1624: a same-repository sibling gone while this worktree’s session stays', () => {
+      const { diff, tmux } = diffOf(
+        baselineOf([OWN_SESSION, SIBLING, OTHER_REPO_546]),
+        current([OWN_SESSION])
+      );
+      expect(diff.status).toBe('violated');
+      expect(tmux.removed.map((c) => c.key)).toEqual([SIBLING]);
+      expect(tmux.removedByOtherRepository.map((c) => c.key)).toEqual([OTHER_REPO_546]);
+      const report = formatEnvCleanReport(diff);
+      expect(report).toContain('tmux-sessions VIOLATED (mcbd-* tmux sessions): +0 -1');
+      expect(report).toContain(`· - ${OTHER_REPO_546} (ignored: a worktree of another repository`);
+    });
+
+    it('still reports a session of a worktree this server could not place', () => {
+      const { diff, tmux } = diffOf(baselineOf([OWN_SESSION, UNKNOWN]), current([OWN_SESSION]));
+      expect(diff.status).toBe('violated');
+      expect(tmux.removed.map((c) => c.key)).toEqual([UNKNOWN]);
+    });
+
+    it('excuses nothing when the tmux server looks killed', () => {
+      const { diff, tmux } = diffOf(baselineOf([OWN_SESSION, OTHER_REPO_546]), current([]));
+      expect(diff.status).toBe('violated');
+      expect(tmux.removed.map((c) => c.key)).toEqual([OWN_SESSION, OTHER_REPO_546]);
+      expect(tmux.removedByOtherRepository).toEqual([]);
+    });
+
+    it('excuses nothing from a baseline that did not record repositories', () => {
+      const { diff } = diffOf(
+        current([OWN_SESSION, OTHER_REPO_546]),
+        current([OWN_SESSION])
+      );
+      expect(diff.status).toBe('violated');
+    });
+
+    it('does not fail on a dead-pid demo-vitest directory swept during the task (#3025)', () => {
+      const { diff, home } = diffOf(
+        baselineOf([OWN_SESSION], ['Documents', DEAD]),
+        current([OWN_SESSION], ['Documents'])
+      );
+      expect(diff.status).toBe('clean');
+      expect(home.removed).toEqual([]);
+      expect(home.removedStaleDemoVitest.map((c) => c.key)).toEqual([DEAD]);
+      expect(formatEnvCleanReport(diff)).toContain(
+        `· - ${DEAD} (ignored: its pid was already dead at task start`
+      );
+    });
+
+    it('still reports a demo-vitest directory whose pid was alive at task start', () => {
+      const { diff, home } = diffOf(
+        baselineOf([OWN_SESSION], ['Documents', DEAD, LIVE]),
+        current([OWN_SESSION], ['Documents'])
+      );
+      expect(diff.status).toBe('violated');
+      expect(home.removed.map((c) => c.key)).toEqual([LIVE]);
+      expect(home.removedStaleDemoVitest.map((c) => c.key)).toEqual([DEAD]);
+    });
+
+    it('still reports a demo-vitest removal against a baseline that predates #3043', () => {
+      const { diff, home } = diffOf(
+        current([OWN_SESSION], ['Documents', DEAD]),
+        current([OWN_SESSION], ['Documents'])
+      );
+      expect(diff.status).toBe('violated');
+      expect(home.removed.map((c) => c.key)).toEqual([DEAD]);
+    });
+
+    it('excuses the dead-pid entry only in $HOME, not under ~/.commandmate', () => {
+      const baseline = baselineOf([OWN_SESSION], [DEAD]);
+      const withCommandmate = {
+        ...baseline,
+        probes: { ...baseline.probes, 'commandmate-entries': probe([entry(DEAD)]) },
+      };
+      const { diff } = diffOf(withCommandmate, current([OWN_SESSION]));
+      const cm = diff.probes.find((p) => p.probeId === 'commandmate-entries')!;
+      expect(cm.removed.map((c) => c.key)).toEqual([DEAD]);
+      expect(diff.status).toBe('violated');
+    });
+  });
+
+  it('evaluateEnvClean passes the 2026-09-30 repro and lists both exclusions', async () => {
+    const outcome = await evaluateEnvClean({
+      ...CONTEXT,
+      taskId: 'task-3043',
+      sources: [REQUIRE_ENV_CLEAN_SOURCE_CONFIG],
+      baseline: baselineOf([OWN_SESSION, OTHER_REPO_546, OTHER_REPO_554], ['Documents', DEAD]),
+      resolvePidCwd: () => null,
+      capture: async () => current([OWN_SESSION], ['Documents']),
+    });
+    expect(outcome.status).toBe('passed');
+    expect(outcome.logTail).toContain(`- ${OTHER_REPO_554} (ignored: a worktree of another repository`);
+    expect(outcome.logTail).toContain(`- ${DEAD} (ignored: its pid was already dead`);
   });
 });
 
