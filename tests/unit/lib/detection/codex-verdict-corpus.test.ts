@@ -85,6 +85,7 @@ const CORPUS: ReadonlyArray<readonly [string, string, string]> = [
   ['fixtures/codex-update-dialog-2068/update-dialog-01491.txt', 'waiting/prompt_detected/prompt', 'waiting/prompt_detected/prompt'],
   ['fixtures/codex-update-dialog-2068/updated-shell-01491.txt', 'waiting/prompt_detected/prompt', 'waiting/prompt_detected/prompt'],
   ['fixtures/codex-update-dialog-2068/updating-01491.txt', 'waiting/prompt_detected/prompt', 'waiting/prompt_detected/prompt'],
+  ['fixtures/codex-update-dialog-3020/update-dialog-01571.txt', 'waiting/prompt_detected/prompt', 'waiting/prompt_detected/prompt'],
   ['fixtures/long-body-2464/codex-idle.capture', 'ready/input_prompt', 'ready/input_prompt'],
   ['fixtures/long-body-2464/codex-pasted-content.capture', 'ready/input_prompt', 'ready/input_prompt'],
   ['fixtures/tool-liveness-2070/codex-exited-01491.txt', 'waiting/prompt_detected/prompt', 'waiting/prompt_detected/prompt'],

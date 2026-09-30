@@ -151,11 +151,12 @@ export const CODEX_DIALOG_RULES_VERIFIED_AGAINST = {
  * | `Press space to select or enter to save for next conversation` | `/experimental` | 1st |
  * | `Press space to select or enter to save` | `/experimental` (0.155.1) | 1st |
  * | `left/right group · enter edit shortcut · … · esc close` | `/keymap` | 2nd |
+ * | `enter continue · esc skip` | update offer (0.157.1, Issue #3020) | 2nd |
  *
  * No `/g` (keeps `.test()` stateless) and no nested quantifiers (ReDoS-safe).
  */
 export const CODEX_DIALOG_FOOTER_PATTERN =
-  /press\s+\S+\s+to\s+\S|esc\s+(?:to\s+)?(?:cancel|close|dismiss|quit|exit|back|go\s+back)/i;
+  /press\s+\S+\s+to\s+\S|esc\s+(?:to\s+)?(?:cancel|close|dismiss|quit|exit|back|go\s+back|skip)/i;
 
 /** What one `›` row of a raw codex frame turned out to be. */
 export type CodexGlyphRowKind =
