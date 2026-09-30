@@ -20,6 +20,7 @@ import { CLI_TOOL_IDS } from '@/lib/cli-tools/types';
 import { claudeProjectSlug } from '@/lib/hooks/sources/claude/transcript';
 import { findCodexRolloutPath } from '@/lib/hooks/sources/codex/history';
 import { parseCodexRollout } from '@/lib/hooks/sources/codex/transcript';
+import { sweepStaleScratchDirs } from './stale-scratch';
 
 const REPO_ROOT = path.resolve(__dirname, '../../../..');
 const SCRIPTS = path.join(REPO_ROOT, '.claude/skills/demo-video/scripts');
@@ -201,6 +202,8 @@ async function portListening(port: number): Promise<boolean> {
 }
 
 beforeAll(async () => {
+  // Collect dirs left by runs that were killed before afterAll (#3025).
+  sweepStaleScratchDirs(os.homedir());
   TEST_PORT = await reserveDemoPortPair();
   removeTempDir(SCRATCH_HOME);
   fs.mkdirSync(DEMO_HOME, { recursive: true });
