@@ -1,0 +1,4 @@
+  ⚠ Error: 400 This model's maximum context length is 1048576 tokens. However, you requested 1070861 tokens (1006861 in the messages, 64000 in the completion). Please reduce the
+  length of the messages or complet...
+
+  Type "continue" to try again. If the issue persists, contact support: https://commandcode.ai/discord

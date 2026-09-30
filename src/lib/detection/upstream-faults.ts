@@ -60,6 +60,14 @@ export interface UpstreamFault {
 export const UPSTREAM_FAULTS: readonly UpstreamFault[] = [
   { id: 'overloaded', pattern: /\b5\d{2}\s+Overloaded\b/i, selfRetrying: true },
   { id: 'retrying', pattern: /Retrying in \d+s\s*[·•]\s*attempt \d+\/\d+/i, selfRetrying: true },
+  {
+    // The conversation outgrew the model's window (Issue #3011). Command Code
+    // prints `400 This model's maximum context length is N tokens. However, you
+    // requested M tokens`; retrying the same session cannot succeed.
+    id: 'context-limit',
+    pattern: /\bmaximum context length is \d+ tokens\b/i,
+    selfRetrying: false,
+  },
   { id: 'limit-reached', pattern: /\blimit reached\b/i, selfRetrying: false },
   { id: 'api-error', pattern: /\bAPI Error(?::|\s+\d{3})/i, selfRetrying: false },
 ];
