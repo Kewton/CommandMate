@@ -83,6 +83,18 @@ export interface ToolProbeSpec {
   server?: 'opencode-v2';
 }
 
+/**
+ * codex's update offer while it is still the bottom of the pane (Issue #3020):
+ * the last option row, then only its footer (`enter continue · esc skip` in
+ * 0.157.1, `Press enter to continue` in 0.149.1) and blank rows. Anchored to
+ * the end so a dialog left in the scrollback above the composer is not
+ * answered again.
+ */
+export const CODEX_UPDATE_DIALOG_OPEN = /3\. Skip until next version[ \t]*\n\s*(?:enter continue|Press enter to continue)[^\n]*\s*$/;
+
+/** The plain "Skip" row (`  2. Skip`), not "Skip until next version". */
+export const CODEX_UPDATE_SKIP_OPTION = /^\s*(?:›\s*)?2\.\s+Skip\s*$/;
+
 const RUNNING_PROMPT = 'Run the shell command: sleep 20';
 const APPROVAL_PROMPT = 'Run the shell command: touch agent-health-probe.txt';
 
@@ -134,11 +146,18 @@ export const TOOL_PROBE_SPECS: Record<AgentHealthTool, ToolProbeSpec> = {
     // Trust through `-c` lives in memory only (the dialog would save it to
     // config.toml). codex splits the key on '.', so the work dir has no dots.
     // `read-only` + `on-request` makes `touch` ask; `sleep` still runs.
+    // `check_for_update_on_startup=false` (Issue #3020): whenever a newer
+    // release is cached in `$CODEX_HOME/version.json`, codex opens with its
+    // update offer instead of the composer, so screen-idle judged that dialog
+    // (correctly `waiting`) the day a release came out. The flag also keeps the
+    // probe from refreshing the user's `version.json`.
     launchFlags: (workDir) => [
       '-c',
       `projects.${workDir}.trust_level=trusted`,
       '-c',
       'history.persistence=none',
+      '-c',
+      'check_for_update_on_startup=false',
       '-c',
       'model_reasoning_effort=low',
       '-s',
@@ -148,6 +167,9 @@ export const TOOL_PROBE_SPECS: Record<AgentHealthTool, ToolProbeSpec> = {
     ],
     startupDialogs: [
       { id: 'trust', pattern: /Trust this folder\?/, select: /Trust and continue/ },
+      // Backstop for the flag above. "Skip" only — "Skip until next version"
+      // writes `dismissed_version` into the user's `version.json`.
+      { id: 'update', pattern: CODEX_UPDATE_DIALOG_OPEN, select: CODEX_UPDATE_SKIP_OPTION },
     ],
     prompts: {
       running: RUNNING_PROMPT,
