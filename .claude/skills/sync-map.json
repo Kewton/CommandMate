@@ -48,8 +48,8 @@
         {
           "path": "SKILL.md",
           "policy": "port-required",
-          "sha256": "ec9c55c0cefcd1f74b56cd4cfab3fae5c106d6c95860290708dcce5d4b76e9fa",
-          "note": "#1586 の移植で GitHub 絶対 URL 化・「起案 / スタンドアロンランナー」の2役への書き換えが入っている。単純コピーするとこの適応が壊れる（#1611 で実際に注意点として扱った）。手順・フラグ・exit code の意味を変えたときは counterpart 側の同じ節を書き直す。 Issue #1639 で追加。 2026-08-03 に counterpart（cmate-verify 0.2.0、skills PR #41）へ移植済み。 2026-08-03 に Issue #1651 の変更も counterpart（cmate-verify 0.3.0、skills PR #42）へ移植済み。 2026-08-20 に Issue #1861 で counterpart（skills PR #225、6faa33f）のmutex / retryOnFail / flakyIsPass / requireEnvClean の記述を移植した（CommandMate 側の Issue 番号 #1771 / #1772 / #1740 と相対パスに読み替えてある）。"
+          "sha256": "33c33e7a8d144cd93677cb2715479c0b5ec82e38f6b75300effa5c46e5ac6b68",
+          "note": "#1586 の移植で GitHub 絶対 URL 化・「起案 / スタンドアロンランナー」の2役への書き換えが入っている。単純コピーするとこの適応が壊れる（#1611 で実際に注意点として扱った）。手順・フラグ・exit code の意味を変えたときは counterpart 側の同じ節を書き直す。 Issue #1639 で追加。 2026-08-03 に counterpart（cmate-verify 0.2.0、skills PR #41）へ移植済み。 2026-08-03 に Issue #1651 の変更も counterpart（cmate-verify 0.3.0、skills PR #42）へ移植済み。 2026-08-20 に Issue #1861 で counterpart（skills PR #225、6faa33f）のmutex / retryOnFail / flakyIsPass / requireEnvClean の記述を移植した（CommandMate 側の Issue 番号 #1771 / #1772 / #1740 と相対パスに読み替えてある）。 2026-09-30 に Issue #3012 で counterpart（cmate-verify 0.6.0、skills #276）の `<skills-root>` 表記（install 先の説明と手順 2 の実行例）を移植した。"
         },
         {
           "path": "scripts/tests/fixtures/all-pass.yaml",
