@@ -22,6 +22,7 @@ import type { CLIToolType } from '@/lib/cli-tools/types';
 import { getAntigravityHooksConfigPath } from '@/lib/hooks/sources/antigravity/hooks-config';
 import { getCodexHome, getCodexHooksPath } from '@/lib/hooks/sources/codex/hooks-config';
 import { getCodexRelayInstallPath } from '@/lib/hooks/sources/codex/relay-install';
+import { sameTomlWithoutMarker, type TrustStateComparator } from '@/lib/agent-health/config-guard';
 import type { AgentHealthTool } from '@/lib/agent-health/types';
 
 export interface StartupDialog {
@@ -48,6 +49,12 @@ export interface ApprovalSpec {
   skipReason?: string;
 }
 
+/**
+ * A trust-state file: a bare path is compared as JSON; `compare` swaps in
+ * another format's comparison (see `restoreTrustState`).
+ */
+export type TrustStateFile = string | { path: string; compare: TrustStateComparator };
+
 export interface ToolProbeSpec {
   tool: AgentHealthTool;
   cliToolId: CLIToolType;
@@ -67,7 +74,7 @@ export interface ToolProbeSpec {
   prompts: { running: string; approval: string; quoted: string };
   approval: ApprovalSpec;
   /** Machine-singleton files the run touches. */
-  guardedFiles: () => { hookConfig: string[]; trustState: string[] };
+  guardedFiles: () => { hookConfig: string[]; trustState: TrustStateFile[] };
   /**
    * Variables put in front of the launch line (`env K=V <line>`), for state
    * the CLI would otherwise write into the user's home. Never anything the
@@ -204,7 +211,9 @@ export const TOOL_PROBE_SPECS: Record<AgentHealthTool, ToolProbeSpec> = {
     },
     guardedFiles: () => ({
       hookConfig: [getCodexHooksPath(), getCodexRelayInstallPath(getCodexHome())],
-      trustState: [path.join(getCodexHome(), 'config.toml')],
+      // TOML, not JSON (Issue #3031): compared with the run's
+      // `[projects."<dir>"]` tables taken out line by line.
+      trustState: [{ path: path.join(getCodexHome(), 'config.toml'), compare: sameTomlWithoutMarker }],
     }),
   },
 
