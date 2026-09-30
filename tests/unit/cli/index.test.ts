@@ -105,6 +105,8 @@ describe('buildProgram', () => {
       // Issue #2101: CLI face of POST /api/worktrees/:id/interrupt
       'interrupt',
       'capture',
+      // Issue #3039: latest transcript reply of a session, no pane fallback
+      'reply',
       // Issue #2317: opens a worktree's tmux session in this terminal, with the
       // exact-match `'=name:'` quoting zsh would otherwise eat
       'attach',
