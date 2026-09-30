@@ -47,7 +47,7 @@ TUI を 1 つのペインで動かす。確認も同じ経路で起動する。
 | claude | `--model haiku --permission-mode manual` | `touch` の依頼 | Esc |
 | codex | `-c projects.<作業dir>.trust_level=trusted`（信頼をファイルに書かない）・`-c history.persistence=none`・`-c check_for_update_on_startup=false`（起動時の更新ダイアログを出さず、利用者の `version.json` も取り直さない。出たときは `2. Skip`、#3020）・`-c model_reasoning_effort=low`・`-s read-only -a on-request` | `touch` の依頼 | Esc |
 | antigravity | なし | `sleep` の依頼の時点で訊かれる | Esc |
-| opencode | なし | 出ない（skip） | — |
+| opencode | なし（前に `XDG_STATE_HOME=<一時ディレクトリ>`。利用者の `opencode/model.json` だけを読み取り専用で複製してモデル選択を引き継ぐ、#3021） | 出ない（skip） | — |
 | command-code | `--trust --skip-onboarding --no-auto-update`（CommandMate と同じ） | `sleep` の依頼の時点で訊かれる | Esc |
 | opencode-v2 | なし（前に `XDG_STATE_HOME=<一時ディレクトリ>`） | 出ない（skip。既定のルールで `shell` は確認なしに走る） | — |
 
