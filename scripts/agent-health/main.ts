@@ -34,6 +34,11 @@ import {
   type TrustStateComparator,
 } from '@/lib/agent-health/config-guard';
 import {
+  describePickerSettingsChanges,
+  readPickerSettings,
+  type PickerSettingsValues,
+} from '@/lib/agent-health/picker-settings';
+import {
   buildToolResult,
   decideExitCode,
   nextState,
@@ -311,6 +316,12 @@ async function run(options: AgentHealthOptions, startedAt: Date): Promise<AgentH
         pendingSnapshots.push({ snapshot: snapshotFile(filePath), kind: 'trust-state', compare });
       }
       serverLog.takeLinesContaining(PROBE_WORKTREE_ID);
+      // Issue #3053: what a confirmed picker would write. Compared, never written back.
+      const pickerSettings = selected('screen-picker') && spec.picker ? spec.picker.settings() : null;
+      const readSettings = (): PickerSettingsValues | null =>
+        pickerSettings &&
+        readPickerSettings(readTextIfPresent(pickerSettings.path), pickerSettings.format, pickerSettings.keys);
+      const settingsBefore = readSettings();
 
       let outcome: { version: string | null; checks: AgentHealthCheck[] };
       try {
@@ -339,6 +350,15 @@ async function run(options: AgentHealthOptions, startedAt: Date): Promise<AgentH
         };
       } finally {
         restorePending();
+        const settingsAfter = readSettings();
+        if (pickerSettings && settingsBefore && settingsAfter) {
+          const changes = describePickerSettingsChanges(settingsBefore, settingsAfter);
+          if (changes.length > 0) {
+            const message = `${tool}: 選択画面の確認の前後で ${pickerSettings.path} が変わった（書き戻していない）: ${changes.join(', ')}`;
+            log(message);
+            scriptErrors.push(message);
+          }
+        }
       }
 
       const leaked = serverLog.takeLinesContaining(PROBE_WORKTREE_ID);

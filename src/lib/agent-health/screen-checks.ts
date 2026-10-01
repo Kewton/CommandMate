@@ -7,7 +7,8 @@
  * testable without a CLI.
  */
 
-import { paneEvidence } from './report';
+import { SELECTION_LIST_REASONS } from '@/lib/detection/status-detector';
+import { paneEvidence, truncateEvidence } from './report';
 import type { AgentHealthCheckStatus } from './types';
 
 /** The part of `StatusDetectionResult` the checks read. */
@@ -16,9 +17,19 @@ export interface ScreenVerdict {
   reason: string;
   hasActivePrompt: boolean;
   evidence: 'positive' | 'none';
+  /**
+   * `detectPrompt(...).isPrompt` on the same frame — what Auto-Yes reads
+   * (Issue #3053). Only `screen-picker` reads it; absent elsewhere.
+   */
+  isPrompt?: boolean;
 }
 
-export type ScreenCheckId = 'screen-idle' | 'screen-running' | 'screen-approval' | 'screen-quoted-dialog';
+export type ScreenCheckId =
+  | 'screen-idle'
+  | 'screen-picker'
+  | 'screen-running'
+  | 'screen-approval'
+  | 'screen-quoted-dialog';
 
 export interface ScreenCheckVerdict {
   status: Exclude<AgentHealthCheckStatus, 'skip'>;
@@ -30,6 +41,14 @@ const EXPECTATIONS: Record<ScreenCheckId, { text: string; holds: (v: ScreenVerdi
   'screen-idle': {
     text: '入力待ち（ready）で hasActivePrompt=false',
     holds: (v) => v.status === 'ready' && !v.hasActivePrompt,
+  },
+  'screen-picker': {
+    // Issue #3053: a picker (`/model`, `/effort`) must read as a selection
+    // list — that is what puts the navigation buttons up. This entry is the
+    // default `isPrompt=false` (claude, #1495); `evaluatePickerScreens` takes
+    // each screen's own `detectPrompt` expectation from tool-table.ts.
+    text: '選択画面（waiting、reason が SELECTION_LIST_REASONS のいずれか）で hasActivePrompt=false、detectPrompt も isPrompt=false',
+    holds: (v) => pickerVerdictHolds(v, false),
   },
   'screen-running': {
     // `running` with evidence `none` is the detector's floor ("no rule could
@@ -47,8 +66,23 @@ const EXPECTATIONS: Record<ScreenCheckId, { text: string; holds: (v: ScreenVerdi
   },
 };
 
+/**
+ * The picker expectation with the screen's own `detectPrompt` expectation
+ * (Issue #3053): claude's pickers must not read as a prompt (#1495), codex's
+ * `/model` must (#2868 — `/prompt-response` answers it by number).
+ */
+export function pickerVerdictHolds(verdict: ScreenVerdict, expectPrompt: boolean): boolean {
+  return (
+    verdict.status === 'waiting' &&
+    !verdict.hasActivePrompt &&
+    SELECTION_LIST_REASONS.has(verdict.reason) &&
+    verdict.isPrompt === expectPrompt
+  );
+}
+
 export function describeVerdict(verdict: ScreenVerdict): string {
-  return `status=${verdict.status} reason=${verdict.reason} hasActivePrompt=${verdict.hasActivePrompt} evidence=${verdict.evidence}`;
+  const prompt = verdict.isPrompt === undefined ? '' : ` isPrompt=${verdict.isPrompt}`;
+  return `status=${verdict.status} reason=${verdict.reason} hasActivePrompt=${verdict.hasActivePrompt} evidence=${verdict.evidence}${prompt}`;
 }
 
 export function screenExpectationHolds(checkId: ScreenCheckId, verdict: ScreenVerdict): boolean {
@@ -73,6 +107,56 @@ export function evaluateScreen(
     status: 'fail',
     summary: `期待: ${text}。実際: ${describeVerdict(verdict)}${suffix}`,
     evidence: paneEvidence(frame),
+  };
+}
+
+/** One picker the probe opened (Issue #3053). */
+export interface PickerScreenResult {
+  /** The command that opens it (`/model`). */
+  screen: string;
+  /** Whether the picker's own text (not the detector's pattern) appeared. */
+  opened: boolean;
+  /** The verdict on the open picker; null when it never opened. */
+  verdict: ScreenVerdict | null;
+  /** The frame judged, or the last frame seen when it never opened. */
+  frame: string;
+  /** False when Esc did not bring the composer back (`ready`). */
+  closed: boolean;
+  /** The `detectPrompt(...).isPrompt` this screen must read as (tool-table.ts). Default false. */
+  expectPrompt?: boolean;
+}
+
+function pickerScreenHolds(result: PickerScreenResult): boolean {
+  return (
+    result.opened &&
+    result.closed &&
+    result.verdict !== null &&
+    pickerVerdictHolds(result.verdict, result.expectPrompt ?? false)
+  );
+}
+
+function describePickerScreen(result: PickerScreenResult): string {
+  if (!result.opened || result.verdict === null) return `${result.screen}: 不合格（画面が開いたことを確認できなかった）`;
+  const closed = result.closed ? '' : '、Esc の後に入力待ちに戻らなかった';
+  const expected = `期待 isPrompt=${result.expectPrompt ?? false}`;
+  return `${result.screen}: ${pickerScreenHolds(result) ? '合格' : '不合格'}（${expected}。${describeVerdict(result.verdict)}${closed}）`;
+}
+
+/**
+ * The one `screen-picker` check for every picker a tool opened: the summary
+ * lists each screen's verdict, any miss fails the check, and the evidence is
+ * the tail of each screen that missed.
+ */
+export function evaluatePickerScreens(results: readonly PickerScreenResult[]): ScreenCheckVerdict {
+  const summary = `期待: 選択画面（waiting、reason が SELECTION_LIST_REASONS のいずれか）で hasActivePrompt=false、detectPrompt の isPrompt は画面ごとの期待どおり。実際: ${
+    results.length === 0 ? '選択画面を 1 つも開いていない' : results.map(describePickerScreen).join(' / ')
+  }`;
+  const missed = results.filter((result) => !pickerScreenHolds(result));
+  if (results.length > 0 && missed.length === 0) return { status: 'pass', summary };
+  return {
+    status: 'fail',
+    summary,
+    evidence: truncateEvidence(missed.map((result) => `── ${result.screen}\n${paneEvidence(result.frame)}`).join('\n')),
   };
 }
 
