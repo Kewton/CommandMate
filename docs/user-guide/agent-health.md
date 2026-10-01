@@ -195,13 +195,14 @@ tmux -L cm-agent-health kill-server
 - 08:00 に Command Code が今日のレポートの有無を確かめ、無ければ自分で確認を実行する（`docs/agent-health/watch-prompt.md`）
 - Command Code の Schedule の許可は `yolo` にすること（それ以外ではコマンドを実行できず、成功のまま何もしない。#2454）
 
-## メトリクス計測（セキュリティ・保守性、Issue #3044）
+## メトリクス計測（セキュリティ・保守性・性能、Issue #3044 / #3054）
 
-日次確認の前（06:30）に、セキュリティ脆弱性とソフトウェア保守性の指標を **AI を使わず** 計測し、JSON に書く。
+日次確認の前（06:30）に、セキュリティ脆弱性・ソフトウェア保守性・本番サーバーの性能の指標を **AI を使わず** 計測し、JSON に書く。
 起票するのは Schedule で動く AI（`docs/agent-health/metrics-prompt.md`）で、スクリプトは Issue を立てない。
 
-- 計測: `scripts/agent-health/metrics.ts`（外部ツールの呼び出しは `metrics-runners.ts`）。判定は純粋関数
-  `src/lib/agent-health/metrics-parse.ts`（ツールの出力 → 計測値）・`metrics-rules.ts`（前回比・候補・並び・exit code）、
+- 計測: `scripts/agent-health/metrics.ts`（外部ツールの呼び出し・ログの読み込み・`ps`・HTTP は `metrics-runners.ts`）。判定は純粋関数
+  `src/lib/agent-health/metrics-parse.ts`（ツールの出力 → 計測値）・`metrics-perf.ts`（ログ行・`ps` → 性能の計測値）・
+  `metrics-rules.ts`（前回比・候補・並び・exit code）、
   型は `metrics-types.ts`（閾値の定数もここ）
 - 入口: `bash scripts/agent-health/metrics.sh --out <file>`。`daily.sh --sync-only` で同期してから `metrics.ts` を実行する。
   同期に失敗したら計測せず、`completedAt` と `scriptErrors` を持ち `metrics` が空の最小の JSON を書いて exit 2
@@ -221,6 +222,10 @@ tmux -L cm-agent-health kill-server
 | maintainability | `outdated` | `npm outdated --json`（直接依存だけ） | メジャー 2 版以上遅れた数 | 新たにメジャー 2 版以上遅れた |
 | maintainability | `type-safety` | `src/` の型位置の `any`・`eslint-disable`・`@ts-ignore` の数 | 合計 | どれかが前回より増えた |
 | maintainability | `coverage` | `vitest run tests/unit --coverage`（**月曜（JST）だけ**） | 行カバレッジ（%） | 前回（前週）比 -2pt 以上 |
+| performance | `api-latency` | 本番ログの直近 24 時間の `[WARN]` で JSON に `totalMs` を持つ行（今は `list:slow`）を `<tag> <event>` ごとに: 件数・p50・p95・最大・合計が最大の `…Ms` 内訳 | `api/worktrees list:slow` の p95（ms）。無ければ 0 | p95 が新たに 5,000ms 以上／件数 20 以上で p95 が前回比 +50% 以上。5,000ms 以上のままなら `outstanding` |
+| performance | `log-volume` | 本番ログの直近 24 時間の行数と `<tag> <event>` ごとの行数 | 24 時間の行数 | ある `<tag> <event>` が新たに 1 日 20,000 行以上／前回比 2 倍以上（前回 1,000 行以上のもの）。20,000 行以上のままなら `outstanding` |
+| performance | `error-rate` | 本番ログの直近 24 時間の `[ERROR]` 行を `<tag> <event>` ごとに | ERROR 行の合計 | ある `<tag> <event>` が新たに 1 日 50 行以上／前回比 2 倍以上（前回 50 行以上のもの）。50 行以上のままなら `outstanding` |
+| performance | `server-process` | サーバー（`logs/server.pid` の子の `node dist/server/server.js`）の RSS と CPU を 5 秒おきに 6 回（`ps -o rss=,%cpu=`）。あわせて `GET http://127.0.0.1:3000/api/worktrees` を 3 回順に呼び、中央値を `details.apiWorktreesMedianMs` に（401 などは `details.apiWorktreesError` に理由だけ） | RSS の最大（MB） | RSS が新たに 1,500MB 以上／前回比 +50% 以上／CPU 平均が新たに 50% 以上。RSS 1,500MB 以上のままなら `outstanding` |
 
 - **「新たに閾値を超えた」「前回より悪化した」だけが候補**（`candidates`）。前から超えているもの（1,500 行超の 14 本、
   複雑度 25 以上の 83 関数など）は起票せず、`value` と `details` の件数として残す
@@ -229,6 +234,14 @@ tmux -L cm-agent-health kill-server
   余りがあるときだけ、まだ Issue の無いものを立てる（初日に見送った advisory も翌日以降に回る）
 - 外部ツールが無い・失敗した・時間切れの指標は `status: 'skip'`（`skipReason` に理由）。skip した指標の前回値は
   state に残り、次の実行はそれと比べる
+- **performance**（Issue #3054）: 本番ログは `scripts/agent-health/production-log.ts` の解決（main worktree の `logs/server.log`）と、
+  同じディレクトリの `server.log.1`〜`.3` を読む。「直近 24 時間」は各行の先頭の ISO 時刻で絞る（ローテートの時刻に頼らない）。
+  ログが無い・読めない・24 時間分に満たない（最古の行が 24 時間より新しい）・窓の中に行が無いときは 3 指標とも skip。
+  `server.pid` が無い・そのプロセスが無いときは `server-process` だけ skip。本番サーバーを止めず、設定も変えない（読むのはログ・`ps`・`GET /api/worktrees` だけ）
+  - security と同じく、**前から閾値を超えているものも `outstanding`**（初回から）。`fail` は候補か `outstanding` があるとき
+  - 公開リポジトリのため、`title`・`evidence`・`details` に載るのは `<tag> <event>` の名前・件数・時間・内訳のフィールド名と数値だけ。
+    ログ行の JSON の値（`worktreeId`・パス・メッセージ・エラーの文面）は写さない。識別子らしくない名前（パスなど）は `(other)` にまとめる
+  - 閾値は `metrics-types.ts` の定数（2026-09-28〜10-01 の実測から決めた初期値）。計測は 30 秒程度（`ps` の 6 回 × 5 秒が大半）
 - 全体は **10 分以内**（3 並列、ツールごとの上限あり。上限に達したものは skip）。2026-10-01 の実測（カバレッジなし）:
   54 秒・149 秒・140 秒（semgrep が最も長く 54〜140 秒）
 
@@ -263,8 +276,9 @@ interface MetricsReport {
   completedAt: string;             // ISO
   metrics: Array<{                 // metricId の順（上の表の順）
     metricId: 'npm-audit' | 'semgrep' | 'secrets' | 'file-size' | 'complexity'
-      | 'duplication' | 'unused' | 'outdated' | 'type-safety' | 'coverage';
-    category: 'security' | 'maintainability';
+      | 'duplication' | 'unused' | 'outdated' | 'type-safety' | 'coverage'
+      | 'api-latency' | 'log-volume' | 'error-rate' | 'server-process';
+    category: 'security' | 'maintainability' | 'performance';
     status: 'pass' | 'fail' | 'skip';
     value: number | null;          // skip のとき null
     summary: string;
@@ -274,9 +288,9 @@ interface MetricsReport {
       severity?: string;           // security のとき（critical / high）
       evidence?: string;           // 何を測ったか・何で直るか
       delta?: number;              // 前回からの悪化量（指標の単位）
-      score?: number;              // 保守性の並び順の重み（悪化量 ÷ 閾値）
+      score?: number;              // 保守性・性能の並び順の重み（悪化量 ÷ 閾値）
     }>;
-    outstanding?: Array<同上>;     // security: 前から続いている検出
+    outstanding?: Array<同上>;     // security・performance: 前から続いている検出
     skipReason?: string;
     details?: Record<string, number | string>; // 起票しない件数（500 行超の本数など）
   }>;
@@ -293,7 +307,7 @@ interface MetricsReport {
   日次確認より前に終わる
 - 依頼文 `docs/agent-health/metrics-prompt.md`、Issue のひな形 `docs/agent-health/metrics-issue-template.md`。
   識別子 `metrics:<metricId>:<対象>` で open の Issue を探し、あれば（その日の新規・悪化のときだけ）コメント、
-  無ければ起票する。**新規起票は 1 日 2 件まで**（`queue` の順: security の新規 → 悪化幅の大きい保守性 → 続いている security）
+  無ければ起票する。**新規起票は 1 日 2 件まで**（`queue` の順: security の新規 → 悪化幅の大きい保守性 → performance の新規 → 続いている security → 続いている performance）
 - ラベル `metrics`・`enhancement`（security は `security` も）を使う。無ければ作る:
   `gh label create metrics --repo Kewton/CommandMate --description "日次メトリクス計測が自動登録した改善 Issue"`
   （`security`・`enhancement` も同様。依頼文の手順 2 でも確かめる）

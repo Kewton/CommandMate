@@ -28,7 +28,10 @@
 3. `$METRICS` の `queue` を先頭から順に 1 件ずつ処理する。`queue[].key` と同じ `key` を持つ項目を
    `metrics[].candidates[]`（`source: "candidate"`）または `metrics[].outstanding[]`（`source: "outstanding"`）から探し、
    その `title`・`severity`・`evidence` と、属する `metrics[]` の `metricId`・`category`・`summary` を使う
-   - 並びはスクリプトが決めている（security の新規 → 悪化幅の大きい保守性 → 残っている security）。並べ替えない
+   - 並びはスクリプトが決めている（security の新規 → 悪化幅の大きい保守性 → performance の新規 → 残っている security →
+     残っている performance）。並べ替えない
+   - performance（`api-latency`・`log-volume`・`error-rate`・`server-process`）の Issue には、計測 JSON の `title`・`evidence`・`summary` に
+     ある値だけを書く。本番ログ（`logs/server.log*`）を自分で開いて行の中身（worktree の ID・パス・エラーの文面）を写さない（リポジトリは公開）
    - 既存の Issue を探す（識別子は `key` そのもの。例 `metrics:npm-audit:ws`）:
      ```bash
      gh issue list --repo Kewton/CommandMate --label metrics --state open --search "\"<key>\" in:body" --json number,title,body

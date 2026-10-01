@@ -1,13 +1,14 @@
 # メトリクスの改善 Issue のひな形
 
 タイトル: 計測 JSON の `title` をそのまま使う（例: `security: ws の脆弱性 1 件（high）を解消する`、
-`refactor: src/lib/foo.ts を分割する（1620 行）`）
+`refactor: src/lib/foo.ts を分割する（1620 行）`、`perf: api/worktrees list:slow の遅延を減らす（p95 8,524ms）`）。
+performance の Issue には JSON にある値だけを書き、本番ログの行の中身（worktree の ID・パス・エラーの文面）は写さない（リポジトリは公開）
 
 本文（1 行目は識別子。検索に使うので変えない）:
 
 ```markdown
 <!-- metrics:<metricId>:<target> -->
-**種別**: 日次メトリクス計測が見つけた<セキュリティの問題 | 保守性の悪化>（自動登録）
+**種別**: 日次メトリクス計測が見つけた<セキュリティの問題 | 保守性の悪化 | 性能の問題>（自動登録）
 **指標**: `<metricId>` — <summary>
 **確認日**: <YYYY-MM-DD>
 
@@ -43,3 +44,7 @@
 | `outdated` | `<name>` を `latest` のメジャーへ上げる（上げられない理由があれば記録） | `npm outdated <name>` のメジャーの遅れが 2 未満 |
 | `type-safety` | 増えた `any`・`eslint-disable`・`@ts-ignore` を前回の数以下に戻す | 計測の件数が前回の値以下 |
 | `coverage` | 行カバレッジを前回の値以上に戻す | `vitest --coverage`（unit）の lines が前回の値以上 |
+| `api-latency` | `<tag> <event>` の p95 を 5,000ms 未満（前回比で悪化したなら前回の値以下）にする。evidence の内訳の最大のフィールドから手を付ける | 翌日以降の計測で当該 `<tag> <event>` の p95 が目標以下 |
+| `log-volume` | `<tag> <event>` の行数を 1 日 20,000 行未満（倍増したなら前回の値以下）にする（レベルを下げる・間引く・出す条件を絞る） | 翌日以降の計測で当該 `<tag> <event>` の 24 時間の行数が目標以下 |
+| `error-rate` | `<tag> <event>` の ERROR を 1 日 50 行未満（倍増したなら前回の値以下）にする（原因を直す。正常系ならレベルを下げる） | 翌日以降の計測で当該 `<tag> <event>` の 24 時間の ERROR 行数が目標以下 |
+| `server-process` | サーバーの RSS を 1,500MB 未満（増えたなら前回の値以下）にする／CPU の平均を 50% 未満にする | 翌日以降の計測で RSS の最大・CPU の平均が目標以下 |
