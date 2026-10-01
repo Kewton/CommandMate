@@ -1545,12 +1545,22 @@ export const CLAUDE_MODEL_OVERLAY_FOOTER_PATTERN = /Enter\s+to\s+set\s+as\s+defa
  *   "Enter to set as default · s to use this session only · Esc to cancel"
  *     (/model command footer as of Claude Code v2.1.218 — Issue #1495)
  *
+ *   "←/→ to adjust · Enter to confirm · s for this session only · Esc to cancel"
+ *     (/effort slider footer as of Claude Code v2.1.257 — Issue #3052; before
+ *      2.1.257 it was "Enter to confirm · Esc to cancel")
+ *
+ * The /effort branch keys on "Enter to confirm · s for this session only" rather
+ * than "←/→ to adjust": the `s` hint is unique to the pickers (the trust dialog's
+ * "Enter to confirm · Esc to cancel" and approval dialogs never carry it), and
+ * keeping the match under the `Enter to` prefix leaves the pattern a single
+ * linear alternation. Linear, no nested quantifiers — ReDoS safe.
+ *
  * The "set as default" branch lets status-detector classify the `/model` overlay
  * as a Claude selection list (NavigationButtons + ESC hatch, hasActivePrompt=false)
  * once detectPrompt() no longer reports it as a prompt (see
  * CLAUDE_MODEL_OVERLAY_FOOTER_PATTERN).
  */
-export const CLAUDE_SELECTION_LIST_FOOTER = /Enter\s+to\s+(?:select\s+.*to\s+navigate|confirm\s+·\s+Esc|set\s+as\s+default)/;
+export const CLAUDE_SELECTION_LIST_FOOTER = /Enter\s+to\s+(?:select\s+.*to\s+navigate|confirm\s+·\s+(?:Esc|s\s+for\s+this\s+session\s+only)|set\s+as\s+default)/;
 
 /**
  * OpenCode TUI separator pattern (Issue #379)
