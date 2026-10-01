@@ -1,6 +1,8 @@
 /**
  * Thin wrappers that run each measuring tool and hand its output to the pure
- * parsers in `src/lib/agent-health/metrics-parse.ts` (Issue #3044).
+ * parsers in `src/lib/agent-health/metrics-parse.ts` (Issue #3044) and, for
+ * performance, `metrics-perf.ts` (Issue #3054: the production log, `ps` and
+ * `GET /api/worktrees` — read only; the server is never stopped or changed).
  *
  * A runner never throws for a tool problem: a missing binary, no network, a
  * timeout or unreadable output all become `status: 'skip'` with the reason.
@@ -11,6 +13,7 @@ import { spawn } from 'child_process';
 import fs from 'fs';
 import { createRequire } from 'module';
 import path from 'path';
+import readline from 'readline';
 import {
   countLines,
   countTypeSafety,
@@ -26,7 +29,34 @@ import {
   measureTypeSafety,
   type TypeSafetyCounts,
 } from '@/lib/agent-health/metrics-parse';
-import { COMPLEXITY_REPORT_MIN, type MetricId, type MetricMeasurement } from '@/lib/agent-health/metrics-types';
+import {
+  addLogLine,
+  createLogAggregate,
+  findServerPid,
+  logCoverageProblem,
+  measureApiLatency,
+  measureErrorRate,
+  measureLogVolume,
+  measureServerProcess,
+  parsePsSample,
+  parsePsTable,
+  probeFailureReason,
+  type ApiProbe,
+  type LogAggregate,
+  type ProcessSample,
+} from '@/lib/agent-health/metrics-perf';
+import {
+  COMPLEXITY_REPORT_MIN,
+  PERF_LOG_MAX_ROTATED,
+  SERVER_API_CALLS,
+  SERVER_API_TIMEOUT_MS,
+  SERVER_API_URL,
+  SERVER_SAMPLE_COUNT,
+  SERVER_SAMPLE_INTERVAL_MS,
+  type MetricId,
+  type MetricMeasurement,
+} from '@/lib/agent-health/metrics-types';
+import { locateServerLog } from './production-log';
 
 export interface RunnerContext {
   repoRoot: string;
@@ -36,6 +66,15 @@ export interface RunnerContext {
   deadline: number;
   env: NodeJS.ProcessEnv;
   log: (message: string) => void;
+  /** Performance (Issue #3054): the production `server.log`; undefined → {@link locateServerLog}, null → none. */
+  serverLog?: string | null;
+  /** Performance: "now" for the 24-hour window (default: the time of the call). */
+  now?: Date;
+  /** server-process: `ps` samples and their interval (tests shorten them). */
+  sampleCount?: number;
+  sampleIntervalMs?: number;
+  /** server-process: the API to time; null → do not call it. */
+  apiUrl?: string | null;
 }
 
 interface CommandResult {
@@ -379,6 +418,137 @@ async function coverage(ctx: RunnerContext): Promise<MetricMeasurement> {
   return measureCoverage(text);
 }
 
+// ── performance (Issue #3054) ──────────────────────────────────────────────
+
+/** `server.log` first, then `server.log.1`, `.2`, … (at most {@link PERF_LOG_MAX_ROTATED}). */
+export function listServerLogFiles(serverLog: string): string[] {
+  const dir = path.dirname(serverLog);
+  const base = path.basename(serverLog);
+  let rotated: string[] = [];
+  try {
+    rotated = fs
+      .readdirSync(dir)
+      .flatMap((name) => {
+        const match = name.startsWith(`${base}.`) ? /^\d+$/.exec(name.slice(base.length + 1)) : null;
+        return match ? [{ name, n: Number(match[0]) }] : [];
+      })
+      .sort((a, b) => a.n - b.n)
+      .slice(0, PERF_LOG_MAX_ROTATED)
+      .map(({ name }) => path.join(dir, name));
+  } catch {
+    // unreadable dir: only server.log
+  }
+  return [serverLog, ...rotated].filter((file) => fs.existsSync(file));
+}
+
+/** Stream every log file into one aggregate; files last written before the window are not read. */
+export async function aggregateServerLog(files: readonly string[], now: Date): Promise<LogAggregate> {
+  const agg = createLogAggregate(now);
+  for (const file of files) {
+    let stat: fs.Stats;
+    try {
+      stat = fs.statSync(file);
+    } catch {
+      continue;
+    }
+    if (stat.mtimeMs < agg.windowStart) {
+      // Every line is older than the window; one line is enough to say the log reaches back.
+      if (agg.oldest === null || stat.mtimeMs < agg.oldest) agg.oldest = stat.mtimeMs;
+      continue;
+    }
+    const lines = readline.createInterface({ input: fs.createReadStream(file, { encoding: 'utf8' }), crlfDelay: Infinity });
+    for await (const line of lines) addLogLine(agg, line);
+  }
+  return agg;
+}
+
+type LogAggregateResult = { ok: true; agg: LogAggregate } | { ok: false; reason: string };
+/** The three log metrics share one read per run. */
+const logAggregates = new WeakMap<RunnerContext, Promise<LogAggregateResult>>();
+
+function resolveServerLog(ctx: RunnerContext): string | null {
+  return ctx.serverLog === undefined ? locateServerLog(ctx.repoRoot, null) : ctx.serverLog;
+}
+
+function sharedLogAggregate(ctx: RunnerContext): Promise<LogAggregateResult> {
+  let pending = logAggregates.get(ctx);
+  if (!pending) {
+    pending = (async (): Promise<LogAggregateResult> => {
+      const serverLog = resolveServerLog(ctx);
+      if (serverLog === null || !fs.existsSync(serverLog)) return { ok: false, reason: '本番ログ（logs/server.log）が無い' };
+      const started = Date.now();
+      try {
+        const files = listServerLogFiles(serverLog);
+        const agg = await aggregateServerLog(files, ctx.now ?? new Date());
+        ctx.log(`server log: ${files.length} file(s), ${agg.lines} line(s) in the window, ${Math.round((Date.now() - started) / 1000)}s`);
+        const problem = logCoverageProblem(agg);
+        return problem === null ? { ok: true, agg } : { ok: false, reason: problem };
+      } catch (error) {
+        return { ok: false, reason: `本番ログを読めなかった: ${(error as NodeJS.ErrnoException)?.code ?? 'error'}` };
+      }
+    })();
+    logAggregates.set(ctx, pending);
+  }
+  return pending;
+}
+
+function fromServerLog(metricId: MetricId, measure: (agg: LogAggregate) => MetricMeasurement) {
+  return async (ctx: RunnerContext): Promise<MetricMeasurement> => {
+    const result = await sharedLogAggregate(ctx);
+    return result.ok ? measure(result.agg) : skip(metricId, result.reason);
+  };
+}
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function probeApi(url: string, calls: number): Promise<ApiProbe[]> {
+  const probes: ApiProbe[] = [];
+  for (let i = 0; i < calls; i++) {
+    const started = performance.now();
+    try {
+      const response = await fetch(url, { signal: AbortSignal.timeout(SERVER_API_TIMEOUT_MS), redirect: 'manual' });
+      await response.arrayBuffer();
+      if (!response.ok) {
+        // 401 and the like: the reason is recorded, the timing is not.
+        probes.push({ ok: false, reason: probeFailureReason(null, response.status) });
+        break;
+      }
+      probes.push({ ok: true, ms: Math.round(performance.now() - started) });
+    } catch (error) {
+      probes.push({ ok: false, reason: probeFailureReason(error) });
+      break;
+    }
+  }
+  return probes;
+}
+
+async function serverProcess(ctx: RunnerContext): Promise<MetricMeasurement> {
+  const sampleCount = ctx.sampleCount ?? SERVER_SAMPLE_COUNT;
+  const intervalMs = ctx.sampleIntervalMs ?? SERVER_SAMPLE_INTERVAL_MS;
+  const serverLog = resolveServerLog(ctx);
+  const pidText = serverLog === null ? null : readIfPresent(path.join(path.dirname(serverLog), 'server.pid'));
+  const pidFromFile = Number.parseInt(pidText?.trim() ?? '', 10);
+  if (!Number.isInteger(pidFromFile) || pidFromFile <= 0) return skip('server-process', 'server.pid が無い（サーバーが動いていない）');
+  if (ctx.deadline - Date.now() < sampleCount * intervalMs + MIN_TOOL_MS) {
+    return skip('server-process', '全体の時間上限に達したため実行しない');
+  }
+  const table = await runCommand('ps', ['-A', '-o', 'pid=,ppid=,command='], { cwd: ctx.repoRoot, env: ctx.env, timeoutMs: 10_000 });
+  const pid = findServerPid(pidFromFile, parsePsTable(table.stdout));
+  if (pid === null) return skip('server-process', 'サーバーのプロセスが無い（server.pid の pid が動いていない）');
+
+  const apiUrl = ctx.apiUrl === undefined ? SERVER_API_URL : ctx.apiUrl;
+  const probing = apiUrl === null ? Promise.resolve([]) : probeApi(apiUrl, SERVER_API_CALLS);
+  const samples: ProcessSample[] = [];
+  for (let i = 0; i < sampleCount; i++) {
+    if (i > 0) await sleep(intervalMs);
+    const result = await runCommand('ps', ['-o', 'rss=,%cpu=', '-p', String(pid)], { cwd: ctx.repoRoot, env: ctx.env, timeoutMs: 10_000 });
+    const sample = parsePsSample(result.stdout);
+    if (sample === null) break;
+    samples.push(sample);
+  }
+  return measureServerProcess(samples, await probing);
+}
+
 export const METRIC_RUNNERS: Record<MetricId, (ctx: RunnerContext) => Promise<MetricMeasurement> | MetricMeasurement> = {
   'npm-audit': npmAudit,
   semgrep,
@@ -390,6 +560,10 @@ export const METRIC_RUNNERS: Record<MetricId, (ctx: RunnerContext) => Promise<Me
   outdated,
   'type-safety': typeSafety,
   coverage,
+  'api-latency': fromServerLog('api-latency', measureApiLatency),
+  'log-volume': fromServerLog('log-volume', measureLogVolume),
+  'error-rate': fromServerLog('error-rate', measureErrorRate),
+  'server-process': serverProcess,
 };
 
 /**
@@ -407,6 +581,10 @@ export const RUN_ORDER: readonly MetricId[] = [
   'outdated',
   'file-size',
   'type-safety',
+  'server-process',
+  'api-latency',
+  'log-volume',
+  'error-rate',
 ];
 
 export const MEASURE_CONCURRENCY = 3;

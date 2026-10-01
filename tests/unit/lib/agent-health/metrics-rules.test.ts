@@ -8,6 +8,14 @@ import { describe, expect, it } from 'vitest';
 import { parseMetricsArgs } from '@/lib/agent-health/metrics-args';
 import { measureFileSize, measureTypeSafety } from '@/lib/agent-health/metrics-parse';
 import {
+  addLogLine,
+  createLogAggregate,
+  measureApiLatency,
+  measureErrorRate,
+  measureLogVolume,
+  measureServerProcess,
+} from '@/lib/agent-health/metrics-perf';
+import {
   buildQueue,
   decideMetricsExitCode,
   evaluateAll,
@@ -282,5 +290,136 @@ describe('arguments', () => {
     expect(parseMetricsArgs(['--bogus']).ok).toBe(false);
     const help = parseMetricsArgs(['--help']);
     expect(!help.ok && help.help).toBe(true);
+  });
+});
+
+describe('performance (Issue #3054)', () => {
+  const NOW_MS = NOW.getTime();
+  const at = (hoursAgo: number) => new Date(NOW_MS - hoursAgo * 60 * 60 * 1000).toISOString();
+  const logLine = (level: string, tag: string, event: string, data?: unknown) =>
+    `[${at(1)}] [${level}] [${tag}] ${event}${data === undefined ? '' : ` ${JSON.stringify(data)}`}`;
+  const aggregateOf = (lines: string[]) => {
+    const agg = createLogAggregate(NOW);
+    addLogLine(agg, `[${at(30)}] [INFO] [boot] ready`);
+    for (const raw of lines) addLogLine(agg, raw);
+    return agg;
+  };
+  const repeat = (n: number, raw: string) => Array.from({ length: n }, () => raw);
+  const slow = (n: number, totalMs: number) => repeat(n, logLine('WARN', 'api/worktrees', 'list:slow', { totalMs, probeMs: totalMs - 1 }));
+  const snapshot = (m: MetricMeasurement): MetricSnapshot => snapshotOf(m);
+
+  it('the first run has no candidates, but what is over a threshold is outstanding', () => {
+    const errors = measureErrorRate(aggregateOf(repeat(50, logLine('ERROR', 'git-exec', 'git:command-failed'))));
+    const result = evaluateMetric(errors, null);
+    expect(result).toMatchObject({ category: 'performance', status: 'fail', candidates: [] });
+    expect(result.outstanding?.map((c) => c.key)).toEqual(['metrics:error-rate:git-exec:git:command-failed']);
+    expect(result.summary).toContain('初回');
+  });
+
+  it('newly over the threshold is a candidate; just under is not; still over is outstanding', () => {
+    const before = measureErrorRate(aggregateOf([...repeat(49, logLine('ERROR', 'a', 'x')), ...repeat(60, logLine('ERROR', 'b', 'y'))]));
+    const under = evaluateMetric(before, snapshot(measureErrorRate(aggregateOf(repeat(10, logLine('ERROR', 'a', 'x'))))));
+    expect(under.candidates.map((c) => c.key)).toEqual(['metrics:error-rate:b:y']); // b is new and over; a (49) is not
+    const after = measureErrorRate(aggregateOf([...repeat(50, logLine('ERROR', 'a', 'x')), ...repeat(60, logLine('ERROR', 'b', 'y'))]));
+    const result = evaluateMetric(after, snapshot(before));
+    expect(result.candidates.map((c) => c.key)).toEqual(['metrics:error-rate:a:x']);
+    expect(result.candidates[0].evidence).toContain('前回 49 行');
+    expect(result.outstanding?.map((c) => c.key)).toEqual(['metrics:error-rate:b:y']);
+    expect(result.status).toBe('fail');
+  });
+
+  it('error-rate / log-volume: doubling counts only from the floor', () => {
+    const prev = measureErrorRate(aggregateOf([...repeat(20, logLine('ERROR', 'a', 'x')), ...repeat(50, logLine('ERROR', 'b', 'y'))]));
+    // a: 20 → 40 (below the floor of 50 last time); b: 50 → 99 (just under ×2) — neither a candidate
+    const near = measureErrorRate(aggregateOf([...repeat(40, logLine('ERROR', 'a', 'x')), ...repeat(99, logLine('ERROR', 'b', 'y'))]));
+    expect(evaluateMetric(near, snapshot(prev)).candidates).toEqual([]);
+    const doubled = measureErrorRate(aggregateOf([...repeat(40, logLine('ERROR', 'a', 'x')), ...repeat(100, logLine('ERROR', 'b', 'y'))]));
+    expect(evaluateMetric(doubled, snapshot(prev)).candidates.map((c) => c.key)).toEqual(['metrics:error-rate:b:y']);
+
+    const volPrev = measureLogVolume(aggregateOf(repeat(1000, logLine('INFO', 'p', 'q'))));
+    const volNow = measureLogVolume(aggregateOf(repeat(2000, logLine('INFO', 'p', 'q'))));
+    expect(evaluateMetric(volNow, snapshot(volPrev)).candidates.map((c) => c.key)).toEqual(['metrics:log-volume:p:q']);
+    const volPrevSmall = measureLogVolume(aggregateOf(repeat(999, logLine('INFO', 'p', 'q'))));
+    expect(evaluateMetric(volNow, snapshot(volPrevSmall)).candidates).toEqual([]);
+  });
+
+  it('api-latency: newly ≥ 5,000ms, or +50% with at least 20 lines', () => {
+    const prev = measureApiLatency(aggregateOf(slow(20, 2000)));
+    expect(evaluateMetric(measureApiLatency(aggregateOf(slow(20, 2999))), snapshot(prev)).candidates).toEqual([]);
+    const worse = evaluateMetric(measureApiLatency(aggregateOf(slow(20, 3000))), snapshot(prev));
+    expect(worse.candidates.map((c) => c.key)).toEqual(['metrics:api-latency:api/worktrees:list:slow']);
+    expect(worse.status).toBe('fail');
+    // +50% but only 19 lines
+    expect(evaluateMetric(measureApiLatency(aggregateOf(slow(19, 3000))), snapshot(prev)).candidates).toEqual([]);
+    // newly over the threshold with few lines
+    const crossed = evaluateMetric(measureApiLatency(aggregateOf(slow(3, 5000))), snapshot(prev));
+    expect(crossed.candidates).toHaveLength(1);
+    // just under the threshold, few lines
+    expect(evaluateMetric(measureApiLatency(aggregateOf(slow(3, 4999))), snapshot(prev)).candidates).toEqual([]);
+    // still over: outstanding, not a candidate
+    const stillOver = evaluateMetric(measureApiLatency(aggregateOf(slow(3, 6000))), snapshot(measureApiLatency(aggregateOf(slow(3, 5500)))));
+    expect(stillOver.candidates).toEqual([]);
+    expect(stillOver.outstanding).toHaveLength(1);
+    // nothing slow: pass
+    expect(evaluateMetric(measureApiLatency(aggregateOf([])), snapshot(prev)).status).toBe('pass');
+  });
+
+  it('server-process: RSS newly ≥ 1,500MB or +50%, CPU newly ≥ 50%; RSS stays outstanding', () => {
+    const run = (rssMb: number, cpu: number) => measureServerProcess([{ rssKb: rssMb * 1024, cpu }], []);
+    const prev = run(1000, 10);
+    expect(evaluateMetric(run(1499, 49.9), snapshot(prev)).candidates).toEqual([]);
+    expect(evaluateMetric(run(1500, 10), snapshot(prev)).candidates.map((c) => c.key)).toEqual(['metrics:server-process:rss']);
+    expect(evaluateMetric(run(600, 10), snapshot(run(400, 10))).candidates.map((c) => c.key)).toEqual(['metrics:server-process:rss']);
+    expect(evaluateMetric(run(500, 50), snapshot(prev)).candidates.map((c) => c.key)).toEqual(['metrics:server-process:cpu']);
+    const still = evaluateMetric(run(1600, 60), snapshot(run(1550, 55)));
+    expect(still.candidates).toEqual([]);
+    expect(still.outstanding?.map((c) => c.key)).toEqual(['metrics:server-process:rss']);
+    expect(evaluateMetric(run(1600, 10), null).outstanding?.map((c) => c.key)).toEqual(['metrics:server-process:rss']);
+  });
+
+  it('candidates and outstanding carry no value from a log line JSON', () => {
+    const secrets = ['wt-private-1234', '/Users/someone/secret-repo', 'no such file'];
+    const lines = [
+      ...repeat(60, logLine('ERROR', 'slash-commands', 'error-parsing-skill-file-skillpath:', { error: `${secrets[2]} '${secrets[1]}'` })),
+      ...repeat(25, `[${at(1)}] [WARN] [api/worktrees] [${secrets[0]}:claude] list:slow ${JSON.stringify({ totalMs: 9000, worktreeId: secrets[0], path: secrets[1] })}`),
+    ];
+    const agg = aggregateOf(lines);
+    const measurements = [measureApiLatency(agg), measureLogVolume(agg), measureErrorRate(agg)];
+    const first = evaluateAll(measurements, null);
+    const state = nextMetricsState(null, [measureApiLatency(aggregateOf([])), measureLogVolume(aggregateOf([])), measureErrorRate(aggregateOf([]))], NOW);
+    const second = evaluateAll(measurements, state);
+    const text = JSON.stringify([first, second, buildQueue(second)]);
+    expect(second.flatMap((r) => r.candidates).length).toBeGreaterThan(0);
+    for (const secret of secrets) expect(text).not.toContain(secret);
+  });
+
+  it('queue: security new → maintainability → performance new → security outstanding → performance outstanding', () => {
+    const results = evaluateAll(
+      [measured('file-size', {}), measured('npm-audit', {}), measured('error-rate', {}), measured('api-latency', {})],
+      null
+    );
+    // METRIC_IDS order: npm-audit, file-size, api-latency, error-rate
+    const [audit, size, latency, errors] = results;
+    audit.candidates = [{ key: 'metrics:npm-audit:ws', title: 't', severity: 'high' }];
+    audit.outstanding = [{ key: 'metrics:npm-audit:old', title: 't', severity: 'critical' }];
+    size.candidates = [{ key: 'metrics:file-size:a', title: 't', score: 9 }];
+    latency.candidates = [{ key: 'metrics:api-latency:x', title: 't', score: 1 }];
+    latency.outstanding = [{ key: 'metrics:api-latency:old', title: 't', score: 2 }];
+    errors.candidates = [{ key: 'metrics:error-rate:y', title: 't', score: 3 }];
+    errors.outstanding = [{ key: 'metrics:error-rate:old', title: 't', score: 5 }];
+    expect(buildQueue(results).map((e) => `${e.source}:${e.key}`)).toEqual([
+      'candidate:metrics:npm-audit:ws',
+      'candidate:metrics:file-size:a',
+      'candidate:metrics:error-rate:y',
+      'candidate:metrics:api-latency:x',
+      'outstanding:metrics:npm-audit:old',
+      'outstanding:metrics:error-rate:old',
+      'outstanding:metrics:api-latency:old',
+    ]);
+  });
+
+  it('--only accepts the performance metrics', () => {
+    const parsed = parseMetricsArgs(['--only', 'api-latency,log-volume,error-rate,server-process']);
+    expect(parsed).toMatchObject({ ok: true, options: { metrics: ['api-latency', 'log-volume', 'error-rate', 'server-process'] } });
   });
 });
