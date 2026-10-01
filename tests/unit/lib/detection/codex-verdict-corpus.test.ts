@@ -41,6 +41,7 @@ function verdictOf(frame: string): string {
 
 /** [path under tests/, verdict as captured, verdict after stripAnsi] */
 const CORPUS: ReadonlyArray<readonly [string, string, string]> = [
+  ['fixtures/agent-health-picker-3053/codex-model.txt', 'waiting/codex_selection_list', 'waiting/codex_selection_list'],
   ['fixtures/agent-mode-2592/codex-default-thread-title.txt', 'ready/input_prompt', 'ready/input_prompt'],
   ['fixtures/agent-mode-2592/codex-default.txt', 'ready/input_prompt', 'ready/input_prompt'],
   ['fixtures/agent-mode-2592/codex-plan-no-thread-title.txt', 'ready/input_prompt', 'ready/input_prompt'],
