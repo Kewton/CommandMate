@@ -13,6 +13,8 @@ import fs from 'fs';
 import path from 'path';
 import { promisify } from 'util';
 import { stripAnsi } from '@/lib/detection/ansi';
+import { buildDetectPromptOptions, stripBoxDrawing } from '@/lib/detection/cli-patterns';
+import { detectPrompt } from '@/lib/detection/prompt-detector';
 import { detectSessionStatus } from '@/lib/detection/status-detector';
 import { shellQuote } from '@/lib/hooks/hook-settings-generator';
 import { getAgentEventSource, renderAgentLaunchCommand } from '@/lib/hooks/sources';
@@ -29,8 +31,10 @@ import {
 } from '@/lib/agent-health/server-events';
 import {
   countMatches,
+  evaluatePickerScreens,
   evaluateScreen,
   screenExpectationHolds,
+  type PickerScreenResult,
   type ScreenCheckId,
   type ScreenVerdict,
 } from '@/lib/agent-health/screen-checks';
@@ -50,7 +54,7 @@ import {
   type ServerEventRecorder,
 } from './opencode-v2-server';
 import type { AgentHealthTmux } from './tmux-driver';
-import type { ToolProbeSpec } from './tool-table';
+import type { PickerScreen, PickerSpec, ToolProbeSpec } from './tool-table';
 
 const execFileAsync = promisify(execFile);
 
@@ -67,6 +71,10 @@ const TURN_MAX_MS = 90_000;
 const STARTUP_MAX_MS = 45_000;
 /** Pause between typing a request and pressing Enter (codex drops an Enter that arrives with the text). */
 const TYPE_TO_ENTER_MS = 800;
+/** How long a picker may take to open after its command. */
+const PICKER_APPEAR_MS = 15_000;
+/** How long the composer may take to come back after Esc closes a picker. */
+const PICKER_CLOSE_MS = 15_000;
 /** After the session is killed: time for a `session_end` / late `stop` to land. */
 const HOOK_GRACE_MS = 2000;
 
@@ -198,6 +206,81 @@ class ToolSession {
 
   recordScreen(checkId: ScreenCheckId, verdict: ScreenVerdict, frame: string, note?: string): void {
     this.record({ checkId, ...evaluateScreen(checkId, verdict, frame, note) });
+  }
+
+  /**
+   * Open each picker, judge it, close it with Esc, and wait for the composer
+   * before the next (Issue #3053). Only `picker.closeKey` is ever sent while a
+   * picker may be up, and the command gets exactly one Enter: `submit`'s
+   * second Enter could land on a picker that opened late and confirm a model.
+   */
+  async pickerTurn(picker: PickerSpec): Promise<void> {
+    const results: PickerScreenResult[] = [];
+    for (const screen of picker.screens) {
+      const result = await this.openPicker(screen, picker.closeKey);
+      results.push(result);
+      this.ctx.log(
+        `${this.spec.tool}: picker ${screen.command} opened=${result.opened} closed=${result.closed}` +
+          (result.verdict ? ` status=${result.verdict.status} reason=${result.verdict.reason} isPrompt=${result.verdict.isPrompt}` : '')
+      );
+      // The composer did not come back: the next command would be typed into
+      // whatever is up.
+      if (!result.closed) break;
+    }
+    this.record({ checkId: 'screen-picker', ...evaluatePickerScreens(results) });
+  }
+
+  private async openPicker(screen: PickerScreen, closeKey: PickerSpec['closeKey']): Promise<PickerScreenResult> {
+    const baseline = countMatches(stripAnsi(this.lastFrame), screen.opened);
+    await this.ctx.tmux.typeText(this.name, screen.command);
+    await sleep(TYPE_TO_ENTER_MS);
+    await this.ctx.tmux.sendKey(this.name, 'Enter');
+    const limit = Date.now() + this.bounded(PICKER_APPEAR_MS);
+    let seen: { frame: string; verdict: ScreenVerdict } | null = null;
+    while (Date.now() < limit) {
+      await sleep(POLL_MS);
+      const now = await this.look();
+      if (countMatches(now.clean, screen.opened) > baseline) {
+        await sleep(700);
+        const settled = await this.look();
+        const isPrompt = detectPrompt(
+          stripBoxDrawing(settled.clean),
+          buildDetectPromptOptions(this.spec.cliToolId)
+        ).isPrompt;
+        seen = { frame: settled.frame, verdict: { ...settled.verdict, isPrompt } };
+        break;
+      }
+    }
+    const frame = seen?.frame ?? this.lastFrame;
+    await this.ctx.tmux.sendKey(this.name, closeKey);
+    const closed = await this.waitForComposer();
+    return {
+      screen: screen.command,
+      opened: seen !== null,
+      verdict: seen?.verdict ?? null,
+      frame,
+      closed,
+      expectPrompt: screen.expectPrompt,
+    };
+  }
+
+  /** True once the frame reads `ready` and stops changing. */
+  private async waitForComposer(): Promise<boolean> {
+    const limit = Date.now() + this.bounded(PICKER_CLOSE_MS);
+    let previous: string | null = null;
+    let stableSince = Date.now();
+    while (Date.now() < limit) {
+      await sleep(POLL_MS);
+      const now = await this.look();
+      if (now.frame !== previous) {
+        previous = now.frame;
+        stableSince = Date.now();
+        continue;
+      }
+      if (now.verdict.status === 'ready' && Date.now() - stableSince >= POLL_MS) return true;
+    }
+    if (this.remaining() <= 0) throw new DeadlineExceeded();
+    return false;
   }
 
   async start(command: string, workDir: string): Promise<void> {
@@ -425,7 +508,7 @@ export async function probeTool(ctx: ProbeContext): Promise<ProbeOutcome> {
       summary: `期待: \`${spec.executable} --version\` が版を返す。実際: 取得できなかった`,
       evidence: error ?? undefined,
     });
-    for (const checkId of ['hook-correlation', 'screen-idle', 'screen-running', 'screen-approval', 'screen-quoted-dialog'] as const) {
+    for (const checkId of ['hook-correlation', 'screen-idle', 'screen-picker', 'screen-running', 'screen-approval', 'screen-quoted-dialog'] as const) {
       if (ctx.selected(checkId)) {
         checks.push({ checkId, status: 'skip', summary: 'version が取れないため実行しない', skipReason: 'version fail' });
       }
@@ -434,9 +517,17 @@ export async function probeTool(ctx: ProbeContext): Promise<ProbeOutcome> {
   }
   checks.push({ checkId: 'version', status: 'pass', summary: `\`${spec.executable} --version\` → ${version}` });
 
-  const screens = (['screen-idle', 'screen-running', 'screen-approval', 'screen-quoted-dialog'] as const).filter(
-    ctx.selected
-  );
+  if (ctx.selected('screen-picker') && !spec.picker) {
+    checks.push({
+      checkId: 'screen-picker',
+      status: 'skip',
+      summary: '選択画面の定義が無いツール',
+      skipReason: `${spec.tool} は tool-table.ts に選択画面（picker）の定義が無い`,
+    });
+  }
+  const screens = (
+    ['screen-idle', 'screen-picker', 'screen-running', 'screen-approval', 'screen-quoted-dialog'] as const
+  ).filter((checkId) => ctx.selected(checkId) && (checkId !== 'screen-picker' || spec.picker !== undefined));
   const source = getAgentEventSource(spec.cliToolId);
   const mode = eventCheckMode(spec, source.capabilities);
   const wantHooks = ctx.selected('hook-correlation') && mode === 'hooks';
@@ -498,6 +589,9 @@ export async function probeTool(ctx: ProbeContext): Promise<ProbeOutcome> {
     if (serverPort !== null) recorder = await recordServerEvents(target, serverPort);
     const idle = await session.waitForStartup();
     session.recordScreen('screen-idle', idle.verdict, idle.frame);
+
+    // Before any turn: the composer is empty and no reply is on the pane.
+    if (ctx.selected('screen-picker') && spec.picker) await session.pickerTurn(spec.picker);
 
     let turns = 0;
     let approvalJudged = false;
