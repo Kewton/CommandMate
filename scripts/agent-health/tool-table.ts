@@ -23,6 +23,7 @@ import { getAntigravityHooksConfigPath } from '@/lib/hooks/sources/antigravity/h
 import { getCodexHome, getCodexHooksPath } from '@/lib/hooks/sources/codex/hooks-config';
 import { getCodexRelayInstallPath } from '@/lib/hooks/sources/codex/relay-install';
 import { sameTomlWithoutMarker, type TrustStateComparator } from '@/lib/agent-health/config-guard';
+import type { PickerSettingsFormat } from '@/lib/agent-health/picker-settings';
 import type { AgentHealthTool } from '@/lib/agent-health/types';
 
 export interface StartupDialog {
@@ -47,6 +48,30 @@ export interface ApprovalSpec {
   /** Keys that refuse the request and close the dialog. */
   denyKeys: string[];
   skipReason?: string;
+}
+
+/** One picker `screen-picker` opens (Issue #3053). */
+export interface PickerScreen {
+  /** Typed into the empty composer, then exactly one Enter (which picks the slash command). */
+  command: string;
+  /**
+   * Proves the picker is up. Deliberately text of the picker's own body, not
+   * the footer the detector reads: matched with the detector's pattern, a
+   * broken detector would look like "the picker never opened".
+   */
+  opened: RegExp;
+}
+
+/**
+ * The pickers of a tool, and the settings they write when confirmed. Only
+ * `closeKey` is ever sent to an open picker — arrows, Enter, Tab or `s` would
+ * change the user's default model / effort.
+ */
+export interface PickerSpec {
+  screens: PickerScreen[];
+  closeKey: 'Escape';
+  /** The user's file holding what the pickers write; compared before and after the run. */
+  settings: () => { path: string; format: PickerSettingsFormat; keys: string[] };
 }
 
 /**
@@ -94,6 +119,8 @@ export interface ToolProbeSpec {
    * (Issue #2937).
    */
   server?: 'opencode-v2';
+  /** `screen-picker`; a tool without it skips that check (Issue #3053). */
+  picker?: PickerSpec;
 }
 
 /** `$XDG_STATE_HOME`, or its XDG default `~/.local/state`. */
@@ -113,6 +140,18 @@ export const CODEX_UPDATE_DIALOG_OPEN = /3\. Skip until next version[ \t]*\n\s*(
 
 /** The plain "Skip" row (`  2. Skip`), not "Skip until next version". */
 export const CODEX_UPDATE_SKIP_OPTION = /^\s*(?:›\s*)?2\.\s+Skip\s*$/;
+
+/**
+ * claude's `/model` list rows (`❯ 5.  Haiku 4.5 ✔  Fastest for quick answers`,
+ * 2.1.286). The header and the footer are what the detector reads.
+ */
+export const CLAUDE_MODEL_PICKER_OPEN = /\d+\.\s+(?:Default \(recommended\)|Opus|Sonnet|Haiku|Fable)\b/;
+
+/** claude's `/effort` slider ends (`Faster ··· Smarter` above the slider, 2.1.286). */
+export const CLAUDE_EFFORT_PICKER_OPEN = /Faster\s+Smarter/;
+
+/** codex's `/model` list rows (`› 3. GPT-6-Sol (current)`, 0.159.3; `gpt-5.6-sol` in 0.151). */
+export const CODEX_MODEL_PICKER_OPEN = /\d+\.\s+gpt-\d/i;
 
 const RUNNING_PROMPT = 'Run the shell command: sleep 20';
 const APPROVAL_PROMPT = 'Run the shell command: touch agent-health-probe.txt';
@@ -153,6 +192,18 @@ export const TOOL_PROBE_SPECS: Record<AgentHealthTool, ToolProbeSpec> = {
     },
     approval: { via: 'own-turn', dialog: /Do you want to proceed\?/, denyKeys: ['Escape'] },
     guardedFiles: () => ({ hookConfig: [], trustState: [] }),
+    picker: {
+      screens: [
+        { command: '/model', opened: CLAUDE_MODEL_PICKER_OPEN },
+        { command: '/effort', opened: CLAUDE_EFFORT_PICKER_OPEN },
+      ],
+      closeKey: 'Escape',
+      settings: () => ({
+        path: path.join(os.homedir(), '.claude', 'settings.json'),
+        format: 'json',
+        keys: ['model', 'effortLevel'],
+      }),
+    },
   },
 
   codex: {
@@ -215,6 +266,17 @@ export const TOOL_PROBE_SPECS: Record<AgentHealthTool, ToolProbeSpec> = {
       // `[projects."<dir>"]` tables taken out line by line.
       trustState: [{ path: path.join(getCodexHome(), 'config.toml'), compare: sameTomlWithoutMarker }],
     }),
+    // The first stage only: Enter on a model row opens the effort stage and
+    // is never sent.
+    picker: {
+      screens: [{ command: '/model', opened: CODEX_MODEL_PICKER_OPEN }],
+      closeKey: 'Escape',
+      settings: () => ({
+        path: path.join(getCodexHome(), 'config.toml'),
+        format: 'toml',
+        keys: ['model', 'model_reasoning_effort'],
+      }),
+    },
   },
 
   antigravity: {
