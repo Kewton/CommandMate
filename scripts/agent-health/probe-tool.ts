@@ -254,7 +254,14 @@ class ToolSession {
     const frame = seen?.frame ?? this.lastFrame;
     await this.ctx.tmux.sendKey(this.name, closeKey);
     const closed = await this.waitForComposer();
-    return { screen: screen.command, opened: seen !== null, verdict: seen?.verdict ?? null, frame, closed };
+    return {
+      screen: screen.command,
+      opened: seen !== null,
+      verdict: seen?.verdict ?? null,
+      frame,
+      closed,
+      expectPrompt: screen.expectPrompt,
+    };
   }
 
   /** True once the frame reads `ready` and stops changing. */

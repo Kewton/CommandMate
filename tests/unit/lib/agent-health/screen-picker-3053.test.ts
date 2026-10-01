@@ -106,10 +106,23 @@ describe('evaluatePickerScreens', () => {
     ]);
     expect(verdict.status).toBe('fail');
     expect(verdict.summary).toContain('/model: 合格');
-    expect(verdict.summary).toContain('/effort: 不合格（status=running reason=default');
+    expect(verdict.summary).toContain('/effort: 不合格（期待 isPrompt=false。status=running reason=default');
     expect(verdict.evidence).toContain('── /effort');
     expect(verdict.evidence).toContain('Faster    Smarter');
     expect(verdict.evidence).not.toContain('MODEL FRAME');
+  });
+
+  it('takes each screen\'s own detectPrompt expectation (codex /model reads as a prompt, #2868)', () => {
+    const codex = picker({ reason: 'codex_selection_list', isPrompt: true });
+    expect(evaluatePickerScreens([screen({ verdict: codex, expectPrompt: true })]).status).toBe('pass');
+    expect(evaluatePickerScreens([screen({ verdict: codex })]).status).toBe('fail');
+    const unread = evaluatePickerScreens([screen({ verdict: picker({ isPrompt: false }), expectPrompt: true })]);
+    expect(unread.status).toBe('fail');
+    expect(unread.summary).toContain('期待 isPrompt=true');
+    // The other expectations do not move with it.
+    expect(
+      evaluatePickerScreens([screen({ verdict: { ...codex, hasActivePrompt: true }, expectPrompt: true })]).status
+    ).toBe('fail');
   });
 
   it('fails a picker that never opened, saying so', () => {
@@ -139,6 +152,11 @@ describe('the measured pickers (tests/fixtures/agent-health-picker-3053)', () =>
   it('codex 0.159.3 /model reads as its selection list', () => {
     const verdict = judge('codex-model.txt', 'codex');
     expect(verdict).toMatchObject({ status: 'waiting', reason: 'codex_selection_list', hasActivePrompt: false });
+  });
+
+  it('codex 0.159.3 /model passes with its isPrompt=true expectation', () => {
+    const verdict = judge('codex-model.txt', 'codex');
+    expect(evaluatePickerScreens([screen({ verdict, expectPrompt: true })]).status).toBe('pass');
   });
 });
 

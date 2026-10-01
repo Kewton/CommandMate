@@ -29,6 +29,11 @@ describe('tool-table pickers', () => {
     }
   });
 
+  it('expects claude\'s pickers not to read as a prompt (#1495) and codex /model to (#2868)', () => {
+    expect(TOOL_PROBE_SPECS.claude.picker?.screens.map((s) => s.expectPrompt)).toEqual([false, false]);
+    expect(TOOL_PROBE_SPECS.codex.picker?.screens.map((s) => s.expectPrompt)).toEqual([true]);
+  });
+
   it('closes every picker with Esc', () => {
     expect(TOOL_PROBE_SPECS.claude.picker?.closeKey).toBe('Escape');
     expect(TOOL_PROBE_SPECS.codex.picker?.closeKey).toBe('Escape');

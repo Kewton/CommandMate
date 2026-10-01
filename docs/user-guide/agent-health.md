@@ -18,7 +18,7 @@ hook のインスタンス取り違え）。`scripts/agent-health/run.ts` は、
 | `version` | `<cli> --version`（`claude` / `codex` / `agy` / `opencode` / `commandcode` / `opencode2`） | 版が取れる。前回の版は state に残し、`versionChanged` で知らせる |
 | `hook-correlation` | CommandMate 自身の起動行（`getAgentEventSource(tool).prepareLaunch(...)` → `renderAgentLaunchCommand`）で `worktreeId: "agent-health-probe"`・`instanceId: "<tool>-probe"` を与えて起動し、下の依頼を送る。hook はスクリプト内の listener が受ける | `session_start`・`user_prompt_submit`・`stop` のうち、そのツールの `capabilities.supportedEvents` にあるものが、両方のキーが上の値のまま届く。別のキーで届いた hook が 1 件でもあれば fail（#2874 の型）。`configScope: 'none'`（opencode）は skip。**opencode-v2 は hook を使わないため、代わりに自前 serve の SSE を確かめる**（下記） |
 | `screen-idle` | 起動（起動時のダイアログを越えた）直後の画面 | `detectSessionStatus` が `ready`、`hasActivePrompt` が偽 |
-| `screen-picker` | `screen-idle` の直後（依頼を送る前）に選択画面を開いた画面。claude は `/model` と `/effort`、codex は `/model`（1 段目のみ）。**Esc で閉じ**、入力待ちに戻ってから次へ進む。モデルは呼ばない（#3053） | 画面ごとに `waiting`・`hasActivePrompt` が偽・reason が `SELECTION_LIST_REASONS` のいずれか、かつ `detectPrompt` が `isPrompt: false`（Auto-Yes が答えない）。summary に画面ごとの判定を並べ、1 つでも外れたら fail（evidence は外れた画面の末尾）。画面が開いたこと（判定の正規表現とは別の、一覧・スライダー側の文字列）を確かめられなければ fail。選択画面の定義が無いツールは skip |
+| `screen-picker` | `screen-idle` の直後（依頼を送る前）に選択画面を開いた画面。claude は `/model` と `/effort`、codex は `/model`（1 段目のみ）。**Esc で閉じ**、入力待ちに戻ってから次へ進む。モデルは呼ばない（#3053） | 画面ごとに `waiting`・`hasActivePrompt` が偽・reason が `SELECTION_LIST_REASONS` のいずれか、かつ `detectPrompt` の `isPrompt` が画面ごとの期待どおり（claude の `/model`・`/effort` は `false`＝Auto-Yes が答えない、#1495。codex の `/model` は `true`＝`/prompt-response` が番号で答えられる、#2868。期待は `tool-table.ts` の定義に持つ）。summary に画面ごとの判定を並べ、1 つでも外れたら fail（evidence は外れた画面の末尾）。画面が開いたこと（判定の正規表現とは別の、一覧・スライダー側の文字列）を確かめられなければ fail。選択画面の定義が無いツールは skip |
 | `screen-running` | `Run the shell command: sleep 20` を送った直後の画面 | `running`（evidence が `positive`） |
 | `screen-approval` | 承認が要る操作で承認ダイアログを出した画面。撮った後は**断る** | `waiting` で `hasActivePrompt` が真。ダイアログを出さないツール（opencode の既定）は skip |
 | `screen-quoted-dialog` | そのツールの承認ダイアログの文面を本文で引用させた返答が終わった後の画面 | `ready`、`hasActivePrompt` が偽（#2841〜#2847 の型の回帰） |
@@ -45,8 +45,8 @@ TUI を 1 つのペインで動かす。確認も同じ経路で起動する。
 
 | ツール | 起動行に足すもの | 承認ダイアログの出し方 | 断るキー | 選択画面（`screen-picker`。開いたことの確認に使う文字列） |
 |---|---|---|---|---|
-| claude | `--model haiku --permission-mode manual` | `touch` の依頼 | Esc | `/model`（モデル一覧の行 `5.  Haiku 4.5`）・`/effort`（スライダーの上の `Faster … Smarter`）。Esc で閉じる |
-| codex | `-c projects.<作業dir>.trust_level=trusted`（信頼をファイルに書かない）・`-c history.persistence=none`・`-c check_for_update_on_startup=false`（起動時の更新ダイアログを出さず、利用者の `version.json` も取り直さない。出たときは `2. Skip`、#3020）・`-c model_reasoning_effort=low`・`-s read-only -a on-request` | `touch` の依頼 | Esc | `/model` の 1 段目（モデル一覧の行 `3. GPT-6-Sol`）。Esc で閉じる |
+| claude | `--model haiku --permission-mode manual` | `touch` の依頼 | Esc | `/model`（モデル一覧の行 `5.  Haiku 4.5`）・`/effort`（スライダーの上の `Faster … Smarter`）。どちらも `isPrompt: false` を期待。Esc で閉じる |
+| codex | `-c projects.<作業dir>.trust_level=trusted`（信頼をファイルに書かない）・`-c history.persistence=none`・`-c check_for_update_on_startup=false`（起動時の更新ダイアログを出さず、利用者の `version.json` も取り直さない。出たときは `2. Skip`、#3020）・`-c model_reasoning_effort=low`・`-s read-only -a on-request` | `touch` の依頼 | Esc | `/model` の 1 段目（モデル一覧の行 `3. GPT-6-Sol`）。`isPrompt: true` を期待。Esc で閉じる |
 | antigravity | なし | `sleep` の依頼の時点で訊かれる | Esc | 定義なし（skip） |
 | opencode | なし（前に `XDG_STATE_HOME=<一時ディレクトリ>`。利用者の `opencode/model.json` だけを読み取り専用で複製してモデル選択を引き継ぐ、#3021） | 出ない（skip） | — | 定義なし（skip） |
 | command-code | `--trust --skip-onboarding --no-auto-update`（CommandMate と同じ） | `sleep` の依頼の時点で訊かれる | Esc | 定義なし（skip） |

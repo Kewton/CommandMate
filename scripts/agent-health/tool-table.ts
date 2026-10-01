@@ -60,6 +60,11 @@ export interface PickerScreen {
    * broken detector would look like "the picker never opened".
    */
   opened: RegExp;
+  /**
+   * What `detectPrompt(...).isPrompt` must be on the open picker. Not one
+   * answer for every tool: see each definition for why.
+   */
+  expectPrompt: boolean;
 }
 
 /**
@@ -194,8 +199,11 @@ export const TOOL_PROBE_SPECS: Record<AgentHealthTool, ToolProbeSpec> = {
     guardedFiles: () => ({ hookConfig: [], trustState: [] }),
     picker: {
       screens: [
-        { command: '/model', opened: CLAUDE_MODEL_PICKER_OPEN },
-        { command: '/effort', opened: CLAUDE_EFFORT_PICKER_OPEN },
+        // `isPrompt: false` (#1495): Auto-Yes Enter-confirming `/model` once
+        // changed a user's default model, so claude's pickers must not read as
+        // a prompt at all.
+        { command: '/model', opened: CLAUDE_MODEL_PICKER_OPEN, expectPrompt: false },
+        { command: '/effort', opened: CLAUDE_EFFORT_PICKER_OPEN, expectPrompt: false },
       ],
       closeKey: 'Escape',
       settings: () => ({
@@ -269,7 +277,10 @@ export const TOOL_PROBE_SPECS: Record<AgentHealthTool, ToolProbeSpec> = {
     // The first stage only: Enter on a model row opens the effort stage and
     // is never sent.
     picker: {
-      screens: [{ command: '/model', opened: CODEX_MODEL_PICKER_OPEN }],
+      // `isPrompt: true` (#2868): codex's `/model` is read as a prompt on
+      // purpose and vouched for by its dialog gate, so `/prompt-response` can
+      // answer it by number (tests/unit/lib/detection/codex-dialogs-0157.test.ts).
+      screens: [{ command: '/model', opened: CODEX_MODEL_PICKER_OPEN, expectPrompt: true }],
       closeKey: 'Escape',
       settings: () => ({
         path: path.join(getCodexHome(), 'config.toml'),
