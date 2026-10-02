@@ -36,11 +36,10 @@
 # mobile-file-link need delegate-ask earlier in the cut, and mobile-approve is
 # the cut's one approval.
 #
-# Captions say only what is on screen (docs/design/public-messaging.md §5):
-# "five agents in one worktree" is the roster and the picker listing five, not
-# a claim that five ran — live are Claude and Codex. Wording is copied from
-# public-messaging.md §6, the canonical source, and tests/unit/docs pins the
-# two against each other.
+# Captions say only what is on screen: "five agents in one worktree" is the
+# roster and the picker listing five, not a claim that five ran — live are
+# Claude and Codex. The telops are written for this cut; Issue #3057 retired the
+# rule that copied them from docs/design/public-messaging.md.
 
 version: 1
 duration: 30

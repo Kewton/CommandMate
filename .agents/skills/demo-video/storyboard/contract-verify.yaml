@@ -9,8 +9,8 @@
 #     Task Contract and the verification gates have no Web UI, so the CLI's own
 #     output is where the product shows them (Epic #1807 D5).
 #
-# Wording is copied from docs/design/public-messaging.md section 6, which is the
-# canonical source for every telop on a public surface.
+# Telops are written for this cut. Numbers and exit codes in them must agree with
+# docs/design/public-messaging.md, which is a reference of facts, not of wording.
 
 version: 1
 duration: 30

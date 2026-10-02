@@ -11,8 +11,9 @@ CommandMate は、エンジニアリングの規律をワークフローその�
 どのコーディングエージェントでも、あなたの要求を検証済みの成果物に変えられます。
 
 このドキュメントは Vision / Mission / 中核原則 / 実装の **正本** です。
-公開面（LP・README・チュートリアル・product-highlights）が使う文言は
-[docs/design/public-messaging.md](./design/public-messaging.md) に集約しています。
+公開面（LP・README・チュートリアル・product-highlights）の文言は面ごとに書きます。
+どの面でもずれてはいけない事実（数字・対応エージェントの数え方・exit code・通信の範囲）と書かないことは
+[docs/design/public-messaging.md](./design/public-messaging.md) にまとめた参考資料にあります。
 
 ---
 
@@ -77,7 +78,7 @@ CommandMate はこれを否定しません。**出発点として扱います。
 > （[Vibe engineering, 2025-10-07](https://simonwillison.net/2025/Oct/7/vibe-engineering/)）。
 > 原文は「経験を積んだプロが、責任を持ったまま LLM で仕事を加速する」側を指しており、
 > 規律を**人が持っている**ことが前提です。CommandMate はその規律を**仕組み側に置く**ため、
-> 対象が「専門知識を持たない人」まで広がります。詳細な突合は
+> 対象が「専門知識を持たない人」まで広がります。出典の記録は
 > [public-messaging.md](./design/public-messaging.md) の出典節にあります。
 
 ---
@@ -132,7 +133,7 @@ yaml の内容が、そのタスクの判定基準になります。あとから
 
 | ドキュメント | 内容 |
 |---|---|
-| [公開面 発信仕様](./design/public-messaging.md) | 公開面の文言の単一ソース（hero・定義文・4 カード・With / Without・禁止語） |
+| [公開面の事実と、言わないこと](./design/public-messaging.md) | 公開面の参考資料（数字と出典・対応エージェントの数え方・exit code・通信の範囲・やらないこと・禁止語） |
 | [Task Contract 設計](./design/task-contract.md) | 契約ファイルの形式と裁定 |
 | [検証設定 設計](./design/verification-config.md) | `.commandmate/verify.yaml` とゲートの仕様 |
 | [Skills ガイド](./user-guide/skills.md) | Catalog からの Skill 導入と更新 |
