@@ -118,16 +118,16 @@ describe('sync command action', () => {
     expect(mockExit).toHaveBeenCalledWith(ExitCode.DEPENDENCY_ERROR);
   });
 
-  it('passes the server wording through on 400 (no repositories configured)', async () => {
+  it('passes the server wording through on 400 (no repositories registered)', async () => {
     mockFetchResponse(
-      { error: 'No repositories configured. Please set WORKTREE_REPOS or CM_ROOT_DIR environment variable.' },
+      { error: 'No repositories are registered yet. Add one in the Web UI (Repositories → Add Repository), or list repository paths in WORKTREE_REPOS (comma-separated) and restart the server. Then run `commandmate sync` again.' },
       400
     );
     const { createSyncCommand } = await import('../../../../src/cli/commands/sync');
     const cmd = createSyncCommand();
     await cmd.parseAsync(['node', 'sync']);
     expect(mockConsoleError).toHaveBeenCalledWith(
-      'Error: No repositories configured. Please set WORKTREE_REPOS or CM_ROOT_DIR environment variable.'
+      'Error: No repositories are registered yet. Add one in the Web UI (Repositories → Add Repository), or list repository paths in WORKTREE_REPOS (comma-separated) and restart the server. Then run `commandmate sync` again.'
     );
     expect(mockExit).toHaveBeenCalledWith(ExitCode.CONFIG_ERROR);
   });

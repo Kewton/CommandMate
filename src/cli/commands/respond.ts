@@ -160,6 +160,27 @@ async function answerSolePendingDecision(
   }
 }
 
+/** Reason `/prompt-response` gives when no dialog is on screen any more. */
+const PROMPT_NO_LONGER_ACTIVE = 'prompt_no_longer_active';
+
+/** ` --instance <id>` as the caller spelled it, or nothing. */
+function instanceFlag(instance: string | undefined): string {
+  return instance ? ` --instance ${instance}` : '';
+}
+
+/**
+ * `textFollowUp` from a `/prompt-response` success (Issue #3093), read
+ * defensively: an older server omits it, and the route's mirror type is not
+ * this command's to widen.
+ */
+function readTextFollowUp(result: unknown): { optionNumber: number; optionLabel: string } | null {
+  const value = (result as { textFollowUp?: unknown } | null | undefined)?.textFollowUp;
+  if (typeof value !== 'object' || value === null) return null;
+  const { optionNumber, optionLabel } = value as Record<string, unknown>;
+  if (typeof optionNumber !== 'number' || typeof optionLabel !== 'string') return null;
+  return { optionNumber, optionLabel };
+}
+
 export function createRespondCommand(): Command {
   const cmd = new Command('respond');
   cmd
@@ -298,6 +319,17 @@ export function createRespondCommand(): Command {
             }
           } else {
             console.error(`Warning: Response may not have been applied. Reason: ${reason}`);
+            // Issue #3093: the usual way here is the second half of a "No, tell
+            // … what to do differently" answer — the row closed the dialog and
+            // the agent is waiting for the reason in its input box, which
+            // `respond` (dialogs only) cannot reach and `send` can.
+            if (reason === PROMPT_NO_LONGER_ACTIVE && !useDefault && answer !== undefined && !/^\d+$/.test(answer.trim())) {
+              console.error(
+                'Hint: no dialog is open, so this text was not delivered. If you just chose an option that asks ' +
+                  'for text (e.g. "No, tell … what to do differently"), the agent is waiting for it in its input box — ' +
+                  `send it with \`commandmate send ${worktreeId} "<text>"${instanceFlag(options.instance)}\`.`,
+              );
+            }
           }
           // Issue #1726: an option number the agent's own payload does not offer
           // is a bad argument, so it exits with the input-error code the rest of
@@ -343,6 +375,17 @@ export function createRespondCommand(): Command {
         }
 
         console.error('Response sent.');
+
+        // Issue #3093: the option just chosen continues as typed text, which the
+        // dialog no longer takes — name the command that does deliver it.
+        const followUp = readTextFollowUp(result);
+        if (followUp) {
+          console.error(
+            `Next: option ${followUp.optionNumber} ("${followUp.optionLabel}") asks for your text, and the dialog ` +
+              'is closed now, so `respond` cannot deliver it — send it with ' +
+              `\`commandmate send ${worktreeId} "<text>"${instanceFlag(options.instance)}\`.`,
+          );
+        }
       } catch (error) {
         handleCommandError(error);
       }

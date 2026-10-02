@@ -82,6 +82,28 @@ export class SessionStartTimeoutError extends Error {
 }
 
 /**
+ * The message for a start timeout whose pane is back at a shell (Issue #3093).
+ *
+ * {@link SessionStartTimeoutError} says "the process is still running, so this
+ * is a slow start … nothing needs repairing" — true for a slow cold start, and
+ * exactly wrong when the agent quit during startup (e.g. a trust dialog that
+ * was answered with "No, exit"): the reader was told to wait for a process that
+ * no longer exists. Built from the tool's display name and the session name
+ * only, for the same SEC-SF-002 reason as the classes in this module.
+ *
+ * @param toolName - Display name of the CLI tool (e.g. `Claude Code`)
+ * @param sessionName - tmux session whose pane is back at a shell
+ */
+export function buildSessionExitedToShellMessage(toolName: string, sessionName: string): string {
+  return (
+    `${toolName} exited before reaching its input prompt: the tmux session '${sessionName}' ` +
+    'is back at a shell, so this is not a slow start and waiting will not help. The message ' +
+    'was not delivered. Run `commandmate capture <worktree-id>` to see why it exited (for ' +
+    'example a startup dialog answered with exit, or a missing login), fix that, then send again.'
+  );
+}
+
+/**
  * The CLI tool printed an error that startup cannot recover from.
  *
  * Distinct from {@link SessionStartTimeoutError} because retrying changes

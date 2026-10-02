@@ -36,6 +36,7 @@ import { startPolling } from '@/lib/polling/response-poller';
 import { broadcastTerminalSnapshotAfterInteraction } from '@/lib/realtime/terminal-broadcast';
 import { applyEventToActiveTask } from '@/lib/tasks/task-transition-service';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
+import { findTextFollowUp } from './text-follow-up';
 
 const logger = createLogger('api/prompt-response');
 
@@ -673,9 +674,14 @@ export async function POST(
     startPolling(id, cliToolId, instanceId);
     void broadcastTerminalSnapshotAfterInteraction(id, cliToolId, instanceId);
 
+    // Issue #3093: a "No, tell … what to do differently" row continues as text
+    // in the composer, which only `send` reaches — say so in the answer itself.
+    const textFollowUp = findTextFollowUp(effectivePromptData, resolution.input);
+
     return NextResponse.json({
       success: true,
       answer: resolution.input,
+      ...(textFollowUp ? { textFollowUp } : {}),
       // Issue #1681: audit trail — which option a semantic/default answer
       // selected. Issue #1726 adds the label match against the agent's own
       // options, which resolves before `resolvePromptAnswer` ever sees the
