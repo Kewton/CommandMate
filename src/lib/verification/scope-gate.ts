@@ -32,6 +32,7 @@
 import { spawn } from 'child_process';
 import type { VerificationGateTerminalStatus } from '@/lib/db';
 import type { TaskContractScope } from '@/lib/tasks/contract-parser';
+import { collectSkillReceiptOwnedPaths } from '@/lib/skills/receipt-owned-paths';
 
 /**
  * Violations listed in `log_tail` before the rest are summarised as a count.
@@ -365,8 +366,20 @@ function splitNul(output: string): string[] {
  * as one change (#1580).
  */
 export function parsePorcelainEntries(output: string): string[][] {
+  return parsePorcelainStatusEntries(output).map((entry) => entry.paths);
+}
+
+/** One `git status --porcelain -z` record: its `XY` code and its paths. */
+export interface PorcelainStatusEntry {
+  /** The two-character status code, e.g. `??` for an untracked file. */
+  status: string;
+  paths: string[];
+}
+
+/** {@link parsePorcelainEntries}, keeping each record's status code (#3092). */
+export function parsePorcelainStatusEntries(output: string): PorcelainStatusEntry[] {
   const fields = output.split('\0');
-  const entries: string[][] = [];
+  const entries: PorcelainStatusEntry[] = [];
   let i = 0;
 
   while (i < fields.length) {
@@ -384,10 +397,26 @@ export function parsePorcelainEntries(output: string): string[][] {
       if (original) paths.push(original);
     }
 
-    entries.push(paths);
+    entries.push({ status: entry.slice(0, 2), paths });
   }
 
   return entries;
+}
+
+/**
+ * Whether a status record is an untracked file a recorded Skill install placed
+ * there, untouched since (#3092).
+ *
+ * Untracked only: a tracked Skill file that changed is a change to what the
+ * branch carries, and stays counted. `owned` comes from
+ * `collectSkillReceiptOwnedPaths`, which already rejects files whose bytes no
+ * longer match the receipt.
+ */
+export function isSkillInstalledUntrackedEntry(
+  entry: PorcelainStatusEntry,
+  owned: ReadonlySet<string>
+): boolean {
+  return entry.status === '??' && entry.paths.every((path) => owned.has(path));
 }
 
 export interface ChangedPaths {
@@ -448,10 +477,18 @@ export async function collectChangedPaths(
     };
   }
 
+  // Untracked files a recorded Skill install placed are CommandMate's, not the
+  // agent's (#3092). Dropped from the working-tree side only; a committed Skill
+  // file is still judged by the diff above.
+  const skillOwned = collectSkillReceiptOwnedPaths(worktreePath);
+  const workingTree = parsePorcelainStatusEntries(status.stdout).filter(
+    (entry) => !isSkillInstalledUntrackedEntry(entry, skillOwned)
+  );
+
   // Both sides are filtered, not just the working tree: an orchestrator may
   // also have committed the contract as a setup commit (#1580).
   const paths = new Set<string>(
-    [...splitNul(diff.stdout), ...parsePorcelainEntries(status.stdout).flat()].filter(
+    [...splitNul(diff.stdout), ...workingTree.flatMap((entry) => entry.paths)].filter(
       (path) => !isContractPath(path)
     )
   );
