@@ -51,6 +51,7 @@ CM_DEMO_PGID=""
 CM_DEMO_PROC_MATCH=""
 CM_DEMO_SEED_ROOT=""
 CM_DEMO_SESSIONS_FILE=""
+CM_DEMO_SESSION_NAMESPACE=""
 CM_DEMO_PRIMARY_WORKTREE_ID=""
 CM_DEMO_WORKTREE_ID=""
 CM_DEMO_LOGIN_WORKTREE_ID=""
@@ -118,10 +119,14 @@ stop_server() {
 # holds their live worktree sessions:
 #
 #   1. every name fake-agent.sh appended to $CM_DEMO_SESSIONS_FILE;
-#   2. `mcbd-<tool>-<id>[-<suffix>]` for the worktree ids env-up.sh derived,
-#      which also catches a session the demo *server* started (a real CLI, or an
-#      extra agent instance) and a leftover from the retired branch-derived
-#      scheme, whose ids all began with the seed repository's name.
+#   2. `mcbd-[<ns>-]<tool>-<id>[-<suffix>]` for the worktree ids env-up.sh
+#      derived, which also catches a session the demo *server* started (a real
+#      CLI, or an extra agent instance) and a leftover from the retired
+#      branch-derived scheme, whose ids all began with the seed repository's
+#      name. `<ns>` is only ever the demo server's own namespace
+#      (CM_DEMO_SESSION_NAMESPACE, Issue #3079): another server's
+#      `mcbd-<its ns>-claude-wt-dark-mode` is a different session that merely
+#      shares a worktree directory name — the collision #2866 namespaced away.
 #
 # Both are anchored on ids minted from `$HOME/.commandmate-demo/seed/*`, so a
 # name has to be about this demo's own directories to match at all.
@@ -154,6 +159,16 @@ kill_demo_sessions() {
     done <"$CM_DEMO_SESSIONS_FILE"
   fi
 
+  # The namespace is 8 hex digits (SESSION_NAMESPACE_PATTERN), so it cannot
+  # bring a regex metacharacter into the pattern; anything else is ignored and
+  # only the legacy names are matched.
+  ns_group=""
+  case "$CM_DEMO_SESSION_NAMESPACE" in
+    [0123456789abcdef][0123456789abcdef][0123456789abcdef][0123456789abcdef][0123456789abcdef][0123456789abcdef][0123456789abcdef][0123456789abcdef])
+      ns_group="(${CM_DEMO_SESSION_NAMESPACE}-)?"
+      ;;
+  esac
+
   for demo_id in "$CM_DEMO_PRIMARY_WORKTREE_ID" "$CM_DEMO_WORKTREE_ID" \
                  "$CM_DEMO_LOGIN_WORKTREE_ID" "$CM_DEMO_UNSYNCED_WORKTREE_ID"; do
     [ -n "$demo_id" ] || continue
@@ -164,7 +179,7 @@ kill_demo_sessions() {
     # not match, so `mcbd-command-code-wt-dark-mode` survived teardown — and
     # `[a-z0-9-]+` would over-match, taking `mcbd-claude-foo-wt-dark-mode`
     # (worktree `foo-wt-dark-mode`, somebody else's) down with it.
-    grep -E "^mcbd-(${DEMO_TOOL_IDS})-${demo_id}(-[a-zA-Z0-9_-]+)?\$" "$LIVE_SESSIONS" \
+    grep -E "^mcbd-${ns_group}(${DEMO_TOOL_IDS})-${demo_id}(-[a-zA-Z0-9_-]+)?\$" "$LIVE_SESSIONS" \
       >"$STATE_DIR/.matched-sessions" 2>/dev/null || : >"$STATE_DIR/.matched-sessions"
     while IFS= read -r session; do
       [ -n "$session" ] || continue

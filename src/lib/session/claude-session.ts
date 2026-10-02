@@ -7,13 +7,15 @@ import {
   hasSession,
   createSession,
   sendKeys,
+  sendSpecialKeys,
   capturePane,
   killSession,
   reconcileSessionGeometry,
 } from '@/lib/tmux/tmux';
 import {
   CLAUDE_PROMPT_PATTERN,
-  CLAUDE_TRUST_DIALOG_PATTERN,
+  isClaudeTrustDialogOpen,
+  resolveClaudeTrustDialogKeys,
   stripAnsi,
 } from '@/lib/detection/cli-patterns';
 import { findFatalPattern } from '@/lib/detection/tool-liveness';
@@ -150,6 +152,16 @@ export const CLAUDE_INIT_POLL_INTERVAL = 300;
  * @see Issue #152 - First message not being sent after session start
  */
 export const CLAUDE_POST_PROMPT_DELAY = 500;
+
+/**
+ * Polls (of CLAUDE_INIT_POLL_INTERVAL) a still-open trust dialog is given to
+ * close after being answered before it is answered again (Issue #3078). The
+ * measured close is ~950 ms (Issue #1637), so 10 polls = 3 s is not a race.
+ */
+const TRUST_DIALOG_REANSWER_POLLS = 10;
+
+/** Upper bound on trust dialog answers per session start (Issue #3078). */
+const TRUST_DIALOG_MAX_ANSWERS = 3;
 
 /**
  * Prompt wait timeout before message send (milliseconds)
@@ -673,7 +685,9 @@ export async function startClaudeSession(
     const startTime = Date.now();
 
     let initialized = false;
-    let trustDialogHandled = false;
+    // Issue #3078: polls since the trust dialog was last answered, null = not yet.
+    let pollsSinceTrustAnswer: number | null = null;
+    let trustAnswers = 0;
     while (Date.now() - startTime < maxWaitTime) {
       await new Promise((resolve) => setTimeout(resolve, pollInterval));
 
@@ -688,28 +702,48 @@ export async function startClaudeSession(
         continue;
       }
 
+      // Issue #201 / #3078: answer the folder-trust dialog. Checked BEFORE the
+      // prompt: the dialog's cursor row (`❯ No, exit`) wears the prompt glyph,
+      // so an open dialog is never read as a ready prompt. The answer is read
+      // off the screen, because Enter alone confirms whichever option the
+      // cursor is on, and since 2.1.259 that is `No, exit` (which quits Claude).
+      // A dialog still open TRUST_DIALOG_REANSWER_POLLS polls after the answer
+      // swallowed its keys (sent before the TUI took input); answer it again
+      // from the screen as it is now, a bounded number of times.
+      const trustDialogOpen = isClaudeTrustDialogOpen(cleanOutput);
+      if (pollsSinceTrustAnswer !== null) pollsSinceTrustAnswer++;
+      const trustAnswerDue =
+        pollsSinceTrustAnswer === null ||
+        (pollsSinceTrustAnswer >= TRUST_DIALOG_REANSWER_POLLS && trustAnswers < TRUST_DIALOG_MAX_ANSWERS);
+      if (trustDialogOpen && trustAnswerDue) {
+        const keys = resolveClaudeTrustDialogKeys(cleanOutput);
+        if (keys !== null) {
+          try {
+            if (keys.length === 1) {
+              // Cursor already on Yes: the Issue #201 Enter, unchanged.
+              await sendKeys(sessionName, '', true);
+            } else {
+              await sendSpecialKeys(sessionName, keys);
+            }
+            pollsSinceTrustAnswer = 0;
+            trustAnswers++;
+            logger.info('trust-dialog-detected', { keys: keys.join(' '), attempt: trustAnswers });
+          } catch {
+            // Left unhandled so the next poll answers the dialog again
+          }
+        }
+        // Continue polling to wait for prompt detection
+      }
+
       // Claude is ready when we see the prompt (DRY-001)
       // Use CLAUDE_PROMPT_PATTERN from cli-patterns.ts for consistency
       // Note: CLAUDE_SEPARATOR_PATTERN was removed from initialization check (Issue #187, P1-1)
-      if (CLAUDE_PROMPT_PATTERN.test(cleanOutput)) {
+      if (!trustDialogOpen && CLAUDE_PROMPT_PATTERN.test(cleanOutput)) {
         // Wait for stability after prompt detection (CONS-007, DOC-001)
         await new Promise((resolve) => setTimeout(resolve, CLAUDE_POST_PROMPT_DELAY));
         logger.info('claude-initialized-in');
         initialized = true;
         break;
-      }
-
-      // Issue #201: Detect trust dialog and auto-respond with Enter
-      // Condition order: CLAUDE_PROMPT_PATTERN (above) is checked first for shortest path
-      if (!trustDialogHandled && CLAUDE_TRUST_DIALOG_PATTERN.test(cleanOutput)) {
-        try {
-          await sendKeys(sessionName, '', true);
-          trustDialogHandled = true;
-          logger.info('trust-dialog-detected');
-        } catch {
-          // Left unhandled so the next poll answers the dialog again
-        }
-        // Continue polling to wait for prompt detection
       }
 
       // Issue #1637: fail fast on a start that cannot succeed. The budget is

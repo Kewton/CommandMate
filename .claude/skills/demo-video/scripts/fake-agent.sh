@@ -46,10 +46,20 @@ RECORD_TO=""
 # several *distinct* submissions on one pipe.
 INPUT_SETTLE=1
 # Issue #2380. Which CLI tool this pane impersonates. Decides the session name
-# (`mcbd-<tool>-<worktreeId>`) and the pane geometry; empty means "claude, or
-# whatever the --session name says".
+# (`mcbd-[<ns>-]<tool>-<worktreeId>`) and the pane geometry; empty means
+# "claude, or whatever the --session name says".
 TOOL=""
 WORKTREE_ID=""
+# Issue #3079. The demo server's tmux session-name namespace (Issue #2866:
+# `app_settings.tmux_session_namespace`, minted at its first startup). The
+# server names — and only looks for — `mcbd-<ns>-<tool>-<worktreeId>`; the
+# legacy `mcbd-<tool>-<worktreeId>` is adopted once at server startup, which is
+# before any pane here exists, so a legacy-named pane is never picked up.
+# Resolved below: --namespace, else $CM_DEMO_SESSION_NAMESPACE (set, even
+# empty), else the CM_DEMO_SESSION_NAMESPACE line env-up.sh wrote to state.env.
+# Empty means "the server has no namespace": the legacy name.
+NAMESPACE=""
+NAMESPACE_GIVEN=0
 IDLE_ONLY=0
 INNER_REPLAY=0
 # `CM_PORT` for `@exec` rows: the demo server's port, so a `commandmate …` run
@@ -98,15 +108,23 @@ Usage: fake-agent.sh <cassette> [--speed N] [--once] [--dry-run]
                   be asserted without depending on wall-clock timing. `@exec`
                   rows are traced and NOT run.
   --session NAME  create a detached tmux session running this script, and exit.
-                  Use CommandMate's own name, `mcbd-<tool>-<worktreeId>`, so the
-                  server adopts the session instead of starting a real CLI.
+                  Use CommandMate's own name, `mcbd-<ns>-<tool>-<worktreeId>`, so
+                  the server adopts the session instead of starting a real CLI.
   --tool ID       which CLI tool this pane impersonates (claude, codex, opencode,
                   antigravity, command-code, …). With --worktree and no
-                  --session the name is derived as `mcbd-<tool>-<worktreeId>`;
-                  with --session the name must start with `mcbd-<tool>-`.
+                  --session the name is derived as `mcbd-<ns>-<tool>-<worktreeId>`
+                  (see --namespace); with --session the name must start with
+                  `mcbd-<tool>-`.
                   Also picks the pane geometry (opencode 80x200, others
                   200x1000). Default: claude, or the tool named by --session.
   --worktree ID   the worktree id the derived session name is for.
+  --namespace NS  the demo server's tmux session namespace (8 hex digits, or
+                  empty for none). The derived name becomes
+                  `mcbd-<ns>-<tool>-<worktreeId>`, which is what the server
+                  looks for (Issue #2866). Default: $CM_DEMO_SESSION_NAMESPACE,
+                  else the value env-up.sh recorded in
+                  ${CM_DEMO_HOME:-$HOME/.commandmate-demo}/state.env.
+                  Not applied to --session, which is taken verbatim.
   --idle-only     play the rows before the first @input and then hold that
                   screen: input is swallowed and the idle rows repainted. For
                   the tools that are present in the roster but never prompted.
@@ -175,6 +193,12 @@ while [ $# -gt 0 ]; do
     --worktree)
       [ $# -ge 2 ] || die "--worktree needs a value"
       WORKTREE_ID="$2"
+      shift 2
+      ;;
+    --namespace)
+      [ $# -ge 2 ] || die "--namespace needs a value"
+      NAMESPACE="$2"
+      NAMESPACE_GIVEN=1
       shift 2
       ;;
     --idle-only)
@@ -286,6 +310,42 @@ tool_of_session() {
   printf '%s' "$best"
 }
 
+# The value env-up.sh recorded, read as data: state.env is never sourced here.
+state_file_namespace() {
+  local state="${CM_DEMO_HOME:-$HOME/.commandmate-demo}/state.env"
+  [ -f "$state" ] || return 0
+  sed -n 's/^CM_DEMO_SESSION_NAMESPACE=//p' "$state" | tail -n 1
+}
+
+resolve_namespace() {
+  if [ "$NAMESPACE_GIVEN" -eq 0 ]; then
+    if [ -n "${CM_DEMO_SESSION_NAMESPACE+set}" ]; then
+      NAMESPACE="$CM_DEMO_SESSION_NAMESPACE"
+    else
+      NAMESPACE="$(state_file_namespace)"
+    fi
+  fi
+  # SESSION_NAMESPACE_PATTERN (src/lib/cli-tools/session-name.ts). Anything
+  # else would name a session the server can never resolve to. The digits are
+  # spelled out: a `[0-9a-f]` range is locale-collated and takes `A` too.
+  case "$NAMESPACE" in
+    '') : ;;
+    [0123456789abcdef][0123456789abcdef][0123456789abcdef][0123456789abcdef][0123456789abcdef][0123456789abcdef][0123456789abcdef][0123456789abcdef]) : ;;
+    *) die "session namespace must be 8 lowercase hex digits (SESSION_NAMESPACE_PATTERN), got '$NAMESPACE'" ;;
+  esac
+}
+
+# `buildSessionName` (src/lib/cli-tools/session-name.ts) for the primary
+# instance: `mcbd-<ns>-<tool>-<worktreeId>`, or the legacy
+# `mcbd-<tool>-<worktreeId>` when the namespace is empty.
+derive_session_name() {
+  if [ -n "$1" ]; then
+    printf 'mcbd-%s-%s-%s' "$1" "$2" "$3"
+  else
+    printf 'mcbd-%s-%s' "$2" "$3"
+  fi
+}
+
 if [ -n "$TOOL" ]; then
   is_known_tool "$TOOL" || die "--tool must be one of: $KNOWN_TOOLS (got '$TOOL')"
 fi
@@ -305,7 +365,8 @@ elif [ -n "$SESSION" ]; then
     TOOL="$(tool_of_session "$SESSION")"
   fi
 elif [ -n "$TOOL" ] && [ -n "$WORKTREE_ID" ]; then
-  SESSION="mcbd-$TOOL-$WORKTREE_ID"
+  resolve_namespace
+  SESSION="$(derive_session_name "$NAMESPACE" "$TOOL" "$WORKTREE_ID")"
 elif [ -n "$TOOL" ] && [ -z "$WORKTREE_ID" ] && [ -n "$RECORD_TO" ]; then
   die "--tool needs --worktree (or --session) to derive the session name"
 fi
