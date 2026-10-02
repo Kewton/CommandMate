@@ -52,11 +52,11 @@ describe('POST /api/hooks/agent-event authentication', () => {
   });
 
   it('rejects a request with no credentials at all', async () => {
-    // Browsers get redirected to /login rather than a 401; either way the
-    // request never reaches the route handler.
+    // Issue #3090: /api/* answers 401 even without an Authorization header
+    // (no redirect); either way the request never reaches the route handler.
     const response = await callMiddleware(HOOK_PATH);
-    expect(response.status).not.toBe(200);
-    expect(response.headers.get('location')).toContain('/login');
+    expect(response.status).toBe(401);
+    expect(response.headers.get('location')).toBeNull();
   });
 
   it('lets the correct bearer token through', async () => {

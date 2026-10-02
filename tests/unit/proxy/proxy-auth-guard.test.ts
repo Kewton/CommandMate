@@ -153,14 +153,16 @@ describe('/proxy/* authentication and IP restriction (Issue #1804 guard)', () =>
   });
 
   it.each(PROXY_PATHS)(
-    'should redirect an unauthenticated browser request for %s to /login',
+    'should send an unauthenticated browser request for %s to /login',
     async (pathname) => {
       await enableAuth();
 
       const { middleware } = await import('@/middleware');
       const res = await middleware(createMockRequest(pathname) as never);
 
-      expect(res.status).toBe(302);
+      // Issue #3090: 401 + a same-origin refresh to /login instead of a 3xx.
+      expect(res.status).toBe(401);
+      expect(res.headers.get('refresh')).toBe('0; url=/login');
     }
   );
 
@@ -189,7 +191,7 @@ describe('/proxy/* authentication and IP restriction (Issue #1804 guard)', () =>
       }) as never
     );
 
-    expect(res.status).toBe(302);
+    expect(res.status).toBe(401);
   });
 
   it('should let an authenticated /proxy request through', async () => {
@@ -216,7 +218,7 @@ describe('/proxy/* authentication and IP restriction (Issue #1804 guard)', () =>
     );
 
     // The header is not part of routing or auth: still unauthenticated.
-    expect(res.status).toBe(302);
+    expect(res.status).toBe(401);
   });
 
   it.each(PROXY_PATHS)(
