@@ -72,11 +72,11 @@ const LP_SOURCE_FILES = ['index.html', 'styles.css', 'main.js'];
  * all of its inks from custom properties. #1812 had one, #2551 two; #3060
  * replaced both with figures A to G (the three levels in the hero, then one or
  * two per section) and kept the network drawing under Trust. A new drawing is
- * one more entry here.
+ * one more entry here. #3058 replaced figure B's storyboard drawing with the
+ * recording it stood in for (PHONE_DEMO), so it is a video, not an entry here.
  */
 const INLINE_DRAWINGS = [
   'levels-diagram',
-  'phone-story',
   'flow-diagram',
   'contrast-diagram',
   'team-diagram',
@@ -113,11 +113,13 @@ const ALLOWED_MEDIA = [
   'never-miss-waiting.mp4',
   'orchestrate-run.mp4',
   'parallel-worktrees.mp4',
+  'phone-team.mp4',
   'poster-contract-verify.webp',
   'poster-install-skill.webp',
   'poster-never-miss-waiting.webp',
   'poster-orchestrate-run.webp',
   'poster-parallel-worktrees.webp',
+  'poster-phone-team.webp',
 ];
 
 /**
@@ -129,6 +131,13 @@ const ALLOWED_MEDIA = [
  * it came from in prose.
  */
 const LEAD_DEMO = 'orchestrate-run.mp4';
+
+/**
+ * Figure B (Issue #3058): ten seconds at phone width — an agent needs you, you
+ * answer from the chat, it keeps going. Like LEAD_DEMO its take is in
+ * gitignored `workspace/`, so the allowlist and the README are its gate.
+ */
+const PHONE_DEMO = 'phone-team.mp4';
 
 /**
  * The four feature demos and the `docs/images/features/` take each one is a
@@ -146,11 +155,13 @@ const DEMO_SOURCES: Record<string, string> = {
 
 /**
  * Page order (Issue #3060): the demos sit in the level each one shows. Level 1
- * has waiting reaching your phone and the sessions side by side, Level 2 the
+ * has the phone clip in figure B's slot (#3058), then waiting reaching your
+ * phone and the sessions side by side, Level 2 the
  * contract and its checks and a Skill being installed, and Level 3 the recorded
  * orchestrate run.
  */
 const DEMO_ORDER = [
+  PHONE_DEMO,
   'never-miss-waiting.mp4',
   'parallel-worktrees.mp4',
   'contract-verify.mp4',
@@ -688,7 +699,6 @@ describe('Issue #3060: figures A to G', () => {
   it('puts each figure in the section the Issue names', () => {
     const hero = /<section class="hero">[\s\S]*?<\/section>/.exec(readIndexHtml())![0];
     const placement: [string, string][] = [
-      ['level-1', 'phone-story'],
       ['level-2', 'flow-diagram'],
       ['level-2', 'contrast-diagram'],
       ['level-3', 'team-diagram'],
@@ -919,7 +929,7 @@ describe('Issue #1577: feature demo playback', () => {
   const videoTags = (): string[] => readIndexHtml().match(/<video\b[\s\S]*?<\/video>/g) ?? [];
   const source = (tag: string): string | undefined => /src="([^"]+)"/.exec(tag)?.[1];
 
-  it('embeds the five demos in page order, each in the level it shows', () => {
+  it('embeds the six demos in page order, each in the level it shows', () => {
     // #3060 moved each demo into the level it shows (see DEMO_ORDER), the
     // recorded orchestrate run last, under Level 3.
     const expected = DEMO_ORDER.map((file) => `${MEDIA_DIR.split(path.sep).join('/')}/${file}`);
@@ -1894,5 +1904,89 @@ describe('Issue #3060: three levels and setup with your agent', () => {
 
     expect(llms.split('\n')[0]).toBe(`# CommandMate — ${heading(hero(), 'h1')}`);
     expect(llms).toContain(SETUP_PROMPT);
+  });
+});
+
+/**
+ * Issue #3058 — the evidence the levels were missing: a ten-second phone clip
+ * in figure B's slot in Level 1, and under Level 3 the facts of one recorded
+ * PM → dev lead → workers run. The numbers are pinned to what the run's record
+ * says, and public-messaging.md §1 is where each one is sourced.
+ */
+describe('Issue #3058: the phone clip and the three-layer run', () => {
+  const page = (): string => readIndexHtml();
+  const section = (id: string): string =>
+    new RegExp(`<section class="section[^"]*" id="${id}"[\\s\\S]*?</section>`).exec(page())?.[0] ?? '';
+  const phoneTag = (): string =>
+    (section('level-1').match(/<video\b[\s\S]*?<\/video>/g) ?? []).find((tag) =>
+      tag.includes(`src="assets/media/${PHONE_DEMO}"`),
+    ) ?? '';
+
+  it('puts the phone clip in Level 1, first, and nowhere else', () => {
+    const level1Videos = section('level-1').match(/<video\b[\s\S]*?<\/video>/g) ?? [];
+
+    expect(level1Videos[0]).toContain(`src="assets/media/${PHONE_DEMO}"`);
+    expect(page().split(`assets/media/${PHONE_DEMO}`)).toHaveLength(2);
+    const hero = /<section class="hero">[\s\S]*?<\/section>/.exec(page())![0];
+    expect(hero).not.toContain(PHONE_DEMO);
+  });
+
+  it('loads the clip lazily, behind a poster, on the terms iOS plays it', () => {
+    const tag = phoneTag();
+
+    expect(tag).not.toBe('');
+    // A bare `autoplay` outranks preload="none" and would fetch it on first load.
+    expect(tag).not.toMatch(/\sautoplay\b/);
+    expect(tag).toMatch(/\sdata-autoplay\b/);
+    expect(tag).toMatch(/preload="none"/);
+    expect(tag).toMatch(/\smuted\b/);
+    expect(tag).toMatch(/\splaysinline\b/);
+    expect(tag).toMatch(/poster="assets\/media\/poster-phone-team\.webp"/);
+    expect(fs.existsSync(path.join(WEBSITE_DIR, MEDIA_DIR, 'poster-phone-team.webp'))).toBe(true);
+  });
+
+  it('keeps the clip and its poster small', () => {
+    const size = (file: string): number => fs.statSync(path.join(WEBSITE_DIR, MEDIA_DIR, file)).size;
+
+    expect(size(PHONE_DEMO)).toBeLessThan(1_000_000);
+    expect(size('poster-phone-team.webp')).toBeLessThan(HERO_BUDGET_BYTES);
+  });
+
+  it('records where the clip came from in the media README', () => {
+    const readme = fs.readFileSync(path.join(WEBSITE_DIR, MEDIA_DIR, 'README.md'), 'utf-8');
+
+    expect(readme).toContain(`\`${PHONE_DEMO}\``);
+    expect(readme).toContain('#3058');
+    expect(readme).toContain('HOME=/Users/Shared/cmdemo-home');
+  });
+
+  it('states the recorded run in Level 3 with the numbers from its record', () => {
+    // From the block's opening tag to its closing note.
+    const block = /<div class="run-record"[\s\S]*?class="run-record-note"[\s\S]*?<\/p>/.exec(section('level-3'));
+
+    expect(block, 'no run-record block in #level-3').not.toBeNull();
+    const said = text(block![0]);
+    for (const fact of [
+      'Claude Code',
+      '4 × Command Code',
+      '2 messages and 3 taps',
+      '9 min 48 s',
+      '4/4 passed',
+      'merged with CI green',
+      '4/4 GO',
+      'as recorded on 2026-10-02',
+    ]) {
+      expect(said, fact).toContain(fact);
+    }
+    expect(block![0]).toContain('href="https://github.com/Kewton/commandmate-team-demo"');
+    // One run is not a speed claim.
+    expect(said.toLowerCase()).not.toMatch(/\balways\b|\bunder 10 minutes\b|\bevery time\b/);
+  });
+
+  it('sources the run in public-messaging.md §1', () => {
+    const doc = fs.readFileSync(MESSAGING_DOC, 'utf-8');
+
+    expect(doc).toContain('https://github.com/Kewton/CommandMate/issues/3058#issuecomment-5945597304');
+    expect(doc).toContain('9 分 48 秒');
   });
 });
