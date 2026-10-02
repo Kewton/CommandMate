@@ -16,6 +16,7 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { AUTH_COOKIE_NAME, AUTH_EXCLUDED_PATHS, computeExpireAt, isValidTokenHash } from './config/auth-config';
 import { getAllowedRanges, isIpAllowed, isIpRestrictionEnabled, getClientIp, normalizeIp } from './lib/security/ip-restriction';
+import { createLoginRefreshResponse, isApiShapedRequest } from './lib/security/auth-challenge';
 
 /** Token expiration timestamp, computed once at module load time */
 const expireAt: number | null = computeExpireAt();
@@ -197,16 +198,16 @@ export async function middleware(request: NextRequest) {
   }
 
   // Step C: Auth failure response branching [DR1-10]
-  // CLI requests (with Authorization header) get 401 JSON
-  // Browser requests (no Authorization header) get /login redirect
-  if (authHeader) {
+  // CLI requests (with Authorization header) and browser API requests
+  // (`/api/*`, `Accept: application/json`) get 401 JSON [Issue #3090]
+  if (authHeader || isApiShapedRequest(pathname, request.headers.get('accept'))) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  // Redirect to login page (browser flow)
-  const loginUrl = request.nextUrl.clone();
-  loginUrl.pathname = '/login';
-  return NextResponse.redirect(loginUrl);
+  // Screen requests are sent to the same-origin /login by the browser itself.
+  // Issue #3090: no absolute URL — request.nextUrl names localhost:3000 behind a
+  // tunnel, and Host / X-Forwarded-Host are caller-set (see auth-challenge.ts).
+  return createLoginRefreshResponse();
 }
 
 /**

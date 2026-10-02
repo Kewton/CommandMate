@@ -111,13 +111,28 @@ describe('middleware Bearer token support', () => {
     expect(true).toBe(true);
   });
 
-  it('scenario 5: No auth credentials - redirects to /login', async () => {
+  it('scenario 5: No auth credentials on a screen - sent to /login', async () => {
     const { middleware } = await import('../../src/middleware');
-    const req = createMockRequest({});
+    const req = createMockRequest({ pathname: '/' });
+    const res = (await middleware(req as never)) as unknown as Response;
+    // Without valid cookie or bearer, and no Authorization header, a screen
+    // request is sent to the same-origin /login (Issue #3090: 401 + refresh,
+    // never an absolute URL)
+    expect(res).toBeInstanceOf(Response);
+    expect(res.status).toBe(401);
+    expect(res.headers.get('refresh')).toBe('0; url=/login');
+    expect(mockNextResponseRedirect).not.toHaveBeenCalled();
+  });
+
+  it('scenario 5b: No auth credentials on /api/* - returns 401 JSON (Issue #3090)', async () => {
+    const { middleware } = await import('../../src/middleware');
+    const req = createMockRequest({ pathname: '/api/worktrees' });
     await middleware(req as never);
-    // Without valid cookie or bearer, and no Authorization header,
-    // should redirect to /login
-    expect(mockNextResponseRedirect).toHaveBeenCalled();
+    expect(mockNextResponseJson).toHaveBeenCalledWith(
+      { error: 'Unauthorized' },
+      { status: 401 }
+    );
+    expect(mockNextResponseRedirect).not.toHaveBeenCalled();
   });
 
   it('scenario 6: Invalid Bearer only - returns 401 JSON', async () => {
