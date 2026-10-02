@@ -40,7 +40,7 @@ unset TMUX
 .claude/skills/demo-video/scripts/demo-video.sh --storyboard readme-hero --gif --out ~/Desktop/commandmate-demo/readme-hero
 ```
 
-偽エージェントの tmux セッション（`mcbd-<tool>-wt-dark-mode`）は既定サーバに立つ。サーバも `tmux` を素で呼ぶので同じサーバでないと採用されない。後片付けは `env-down.sh` が**記録した名前だけ**を kill する。
+偽エージェントの tmux セッション（`mcbd-<ns>-<tool>-wt-dark-mode`。`<ns>` は demo サーバの名前空間、#3079）は既定サーバに立つ。サーバも `tmux` を素で呼ぶので同じサーバでないと採用されない。後片付けは `env-down.sh` が**記録した名前だけ**を kill する。
 
 ## 設計判断
 
@@ -147,7 +147,7 @@ npx playwright install chromium   # 未導入なら実行（導入済みなら n
 
 ### 2. 偽エージェントを起動
 
-セッション名は CommandMate 自身の命名規則 `mcbd-<cliTool>-<worktreeId>`（primary インスタンスは suffix 無し。`src/lib/session/claude-session.ts` の `getSessionName`）に合わせる。
+セッション名は CommandMate 自身の命名規則 `mcbd-<ns>-<cliTool>-<worktreeId>`（primary インスタンスは suffix 無し。`src/lib/session/claude-session.ts` の `getSessionName`）に合わせる。`<ns>` はサーバが初回起動時に DB の `app_settings.tmux_session_namespace` に採番する名前空間（#2866）。旧名 `mcbd-<cliTool>-<worktreeId>` の採用はサーバ起動時の 1 回だけなので、起動後に旧名で立てたペインは採用されない（#3079）。`env-up.sh` が名前空間を demo DB から読んで `state.env` の `CM_DEMO_SESSION_NAMESPACE` に書き、`fake-agent.sh` はそれで名前を組む。
 
 worktree id は **ディレクトリ由来**である。`id = sanitize(basename(resolvedPath))`、衝突したときだけ `-<sha256(path) の先頭 8 桁>`（`src/lib/git/worktree-id.ts` の `deriveWorktreeId`。Issue #1621 / #1644 / #1645）。ブランチ名は入らない。旧規則 `<repo 名>-<branch>` の採番関数は **@deprecated** で `src/` から呼ばれていない。
 
@@ -169,7 +169,7 @@ for t in antigravity opencode command-code; do
 done
 ```
 
-`--tool <id> --worktree <id>` で `mcbd-<tool>-<worktreeId>` を導出する（`--session` を明示するときは `mcbd-<tool>-` で始まっていないと拒否。`--tool` 無しなら `--session` の名前からツールを読む）。ジオメトリもツールで決まる: opencode は 80×200（`OPENCODE_PANE_WIDTH` / `OPENCODE_PANE_HEIGHT`。121 桁以上はサイドバーが全行に混ざる、#2047）、他は 200×1000。`--idle-only` は最初の `@input` より前の行だけ描いて保持し、届いた入力は飲み込んで再描画する（present-only の 3 体用）。
+`--tool <id> --worktree <id>` で `mcbd-<ns>-<tool>-<worktreeId>` を導出する（`<ns>` は `--namespace`、無ければ `$CM_DEMO_SESSION_NAMESPACE`、無ければ `state.env` の値。空なら旧名。`--session` を明示するときは名前をそのまま使い `mcbd-<tool>-` で始まっていないと拒否。`--tool` 無しなら `--session` の名前からツールを読む）。ジオメトリもツールで決まる: opencode は 80×200（`OPENCODE_PANE_WIDTH` / `OPENCODE_PANE_HEIGHT`。121 桁以上はサイドバーが全行に混ざる、#2047）、他は 200×1000。`--idle-only` は最初の `@input` より前の行だけ描いて保持し、届いた入力は飲み込んで再描画する（present-only の 3 体用）。
 
 ペインは **tmux サーバの環境**を継ぐ（クライアントではない）ので、`fake-agent.sh` は隔離した `HOME` と `PATH`、`--port` の `CM_PORT` をコマンド行に書き込んでから起こす。これが無いとペインの `commandmate` は開発者の `~/.commandmate/.env` を読んで本番に繋ぐ。`--port 3000` は拒否。
 
@@ -358,7 +358,7 @@ git status --short     # 何も出ないこと
 tmux セッションの kill 対象は 2 系統で、どちらも**この run が記録した名前・id にしか一致しない**。`mcbd-*` の総なめはしない（この tmux サーバは開発者自身の稼働セッションを抱えている）。
 
 1. `fake-agent.sh --record-to` が `$CM_DEMO_SESSIONS_FILE` に追記した名前
-2. `state.env` の 4 つの demo worktree id に対する `mcbd-<tool>-<id>[-<suffix>]` — サーバ自身が起こしたセッションや追加インスタンスを拾う
+2. `state.env` の 4 つの demo worktree id に対する `mcbd-[<ns>-]<tool>-<id>[-<suffix>]` — サーバ自身が起こしたセッションや追加インスタンスを拾う。`<ns>` は `state.env` の `CM_DEMO_SESSION_NAMESPACE` だけ（別サーバの名前空間は拾わない）
 
 **手順 1 以降のどこで失敗しても、必ず 6 まで到達させること。** 途中で諦めると隔離サーバがポートを掴んだまま残り、次回の `env-up.sh` が state ファイルの存在を理由に起動を拒否する（これは意図的な設計。壊れた状態に上書きするより止める）。`demo-video.sh` は `trap ... EXIT INT TERM` でこれを保証する。
 
