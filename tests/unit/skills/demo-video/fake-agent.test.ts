@@ -416,7 +416,11 @@ describe('a multi-line submission', () => {
 // ---------------------------------------------------------------------------
 
 import { CLI_TOOL_IDS } from '@/lib/cli-tools/types';
-import { resolveSessionName } from '@/lib/cli-tools/session-name';
+import {
+  parseSessionName,
+  resolveNamespacedSessionName,
+  resolveSessionName,
+} from '@/lib/cli-tools/session-name';
 import {
   OPENCODE_PANE_HEIGHT,
   OPENCODE_PANE_WIDTH,
@@ -498,19 +502,31 @@ afterAll(() => {
   fs.rmSync(STUB_ROOT, { recursive: true, force: true });
 });
 
-function runWithStubs(args: string[], input = '', env: Record<string, string> = {}) {
+/**
+ * A demo home with no state.env in it. The session namespace (Issue #3079) is
+ * read from `$CM_DEMO_HOME/state.env` when nothing else names it, so a demo the
+ * developer has up while the suite runs must not leak its namespace in here.
+ */
+const EMPTY_DEMO_HOME = path.join(STUB_ROOT, 'no-demo-home');
+
+function runWithStubs(args: string[], input = '', env: Record<string, string | undefined> = {}) {
   const settled = args.includes('--input-settle') ? args : [...args, '--input-settle', '0'];
+  const merged: Record<string, string | undefined> = {
+    ...process.env,
+    PATH: `${STUB_BIN}:${process.env.PATH ?? ''}`,
+    TMUX_STUB_LOG: TMUX_LOG,
+    COMMANDMATE_STUB_LOG: COMMANDMATE_LOG,
+    CM_DEMO_HOME: EMPTY_DEMO_HOME,
+    CM_DEMO_SESSION_NAMESPACE: undefined,
+    ...env,
+  };
+  // An `undefined` value unsets the variable for the child.
+  for (const key of Object.keys(merged)) if (merged[key] === undefined) delete merged[key];
   return spawnSync('bash', [SCRIPT, ...settled], {
     input,
     encoding: 'utf8',
     cwd: STUB_ROOT,
-    env: {
-      ...process.env,
-      PATH: `${STUB_BIN}:${process.env.PATH ?? ''}`,
-      TMUX_STUB_LOG: TMUX_LOG,
-      COMMANDMATE_STUB_LOG: COMMANDMATE_LOG,
-      ...env,
-    },
+    env: merged as NodeJS.ProcessEnv,
   });
 }
 
@@ -628,6 +644,105 @@ describe('--tool derives the session name and pane geometry (Issue #2380)', () =
     const result = runWithStubs([CASSETTE, '--port', '3000', '--once', '--dry-run']);
     expect(result.status).toBe(2);
     expect(result.stderr).toContain('must not be 3000');
+  });
+});
+
+describe('the derived name carries the demo server\'s namespace (Issue #3079)', () => {
+  // What a server mints at first startup (`initSessionNamespace`). Since #2866
+  // the server names — and only looks for — `mcbd-<ns>-<tool>-<worktreeId>`;
+  // the legacy name is adopted once at startup, before any fake pane exists.
+  const NS = '0a1b2c3d';
+
+  /** A demo home whose state.env says what env-up.sh would have written. */
+  function demoHomeWithState(namespace: string): string {
+    const home = fs.mkdtempSync(path.join(STUB_ROOT, 'demo-home-'));
+    fs.writeFileSync(
+      path.join(home, 'state.env'),
+      `CM_DEMO_PORT=3482\nCM_DEMO_SESSION_NAMESPACE=${namespace}\nCM_DEMO_WORKTREE_ID=wt-dark-mode\n`,
+    );
+    return home;
+  }
+
+  function derivedName(args: string[], env: Record<string, string | undefined> = {}) {
+    fs.rmSync(TMUX_LOG, { force: true });
+    const result = runWithStubs([CASSETTE, ...args], '', env);
+    return { result, name: result.status === 0 ? flag(lastNewSession(), '-s') : '' };
+  }
+
+  it.each([...CLI_TOOL_IDS])('names the %s pane the way the namespaced server does', (tool) => {
+    const { result, name } = derivedName(['--tool', tool, '--worktree', 'wt-dark-mode'], {
+      CM_DEMO_SESSION_NAMESPACE: NS,
+    });
+    expect(result.status).toBe(0);
+    expect(name).toBe(resolveNamespacedSessionName(NS, tool, 'wt-dark-mode'));
+    expect(name).toBe(`mcbd-${NS}-${tool}-wt-dark-mode`);
+    expect(result.stdout.trim()).toBe(name);
+    // And the server reads it back as its own: this namespace, this tool.
+    expect(parseSessionName(name)).toEqual({ namespace: NS, cliToolId: tool, rest: 'wt-dark-mode' });
+  });
+
+  it('reads the namespace env-up.sh recorded in state.env when nothing else names one', () => {
+    const { result, name } = derivedName(['--tool', 'claude', '--worktree', 'wt-dark-mode'], {
+      CM_DEMO_HOME: demoHomeWithState(NS),
+    });
+    expect(result.status).toBe(0);
+    expect(name).toBe(`mcbd-${NS}-claude-wt-dark-mode`);
+  });
+
+  it('prefers --namespace, then $CM_DEMO_SESSION_NAMESPACE, over state.env', () => {
+    const home = demoHomeWithState('ffffffff');
+    expect(derivedName(['--tool', 'claude', '--worktree', 'wt', '--namespace', NS], {
+      CM_DEMO_HOME: home,
+      CM_DEMO_SESSION_NAMESPACE: 'eeeeeeee',
+    }).name).toBe(`mcbd-${NS}-claude-wt`);
+    expect(derivedName(['--tool', 'claude', '--worktree', 'wt'], {
+      CM_DEMO_HOME: home,
+      CM_DEMO_SESSION_NAMESPACE: NS,
+    }).name).toBe(`mcbd-${NS}-claude-wt`);
+  });
+
+  it('keeps the legacy name when the server has no namespace', () => {
+    // No state.env at all (the suite default) ...
+    expect(derivedName(['--tool', 'codex', '--worktree', 'wt']).name).toBe('mcbd-codex-wt');
+    // ... a state.env whose server never minted one ...
+    expect(derivedName(['--tool', 'codex', '--worktree', 'wt'], {
+      CM_DEMO_HOME: demoHomeWithState(''),
+    }).name).toBe('mcbd-codex-wt');
+    // ... and an explicitly empty value, which wins over state.env.
+    expect(derivedName(['--tool', 'codex', '--worktree', 'wt'], {
+      CM_DEMO_HOME: demoHomeWithState(NS),
+      CM_DEMO_SESSION_NAMESPACE: '',
+    }).name).toBe('mcbd-codex-wt');
+    expect(resolveNamespacedSessionName(null, 'codex', 'wt')).toBe('mcbd-codex-wt');
+  });
+
+  it('refuses a namespace the server could never have minted', () => {
+    for (const bad of ['0A1B2C3D', '0a1b2c3', 'x;rm -rf', '0a1b2c3d-']) {
+      const { result } = derivedName(['--tool', 'claude', '--worktree', 'wt'], {
+        CM_DEMO_SESSION_NAMESPACE: bad,
+      });
+      expect(result.status).toBe(2);
+      expect(result.stderr).toContain('session namespace must be 8 lowercase hex digits');
+    }
+  });
+
+  it('leaves an explicit --session alone', () => {
+    const { result, name } = derivedName(['--session', 'mcbd-claude-wt-dark-mode'], {
+      CM_DEMO_SESSION_NAMESPACE: NS,
+    });
+    expect(result.status).toBe(0);
+    expect(name).toBe('mcbd-claude-wt-dark-mode');
+  });
+
+  it('records the namespaced name for env-down.sh', () => {
+    const record = path.join(STUB_ROOT, 'sessions-3079');
+    fs.rmSync(record, { force: true });
+    const { result } = derivedName(
+      ['--tool', 'claude', '--worktree', 'wt-dark-mode', '--record-to', record],
+      { CM_DEMO_SESSION_NAMESPACE: NS },
+    );
+    expect(result.status).toBe(0);
+    expect(fs.readFileSync(record, 'utf8')).toBe(`mcbd-${NS}-claude-wt-dark-mode\n`);
   });
 });
 

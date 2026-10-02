@@ -211,6 +211,7 @@ for loc in $LOCALES; do
   CM_DEMO_UNSYNCED_WORKTREE_ID=""
   CM_DEMO_WORKTREE_PATH=""
   CM_DEMO_SESSIONS_FILE=""
+  CM_DEMO_SESSION_NAMESPACE=""
   CM_DEMO_CLAUDE_TRANSCRIPT=""
   CM_DEMO_CODEX_TRANSCRIPT=""
   # shellcheck disable=SC1090
@@ -224,8 +225,9 @@ for loc in $LOCALES; do
   [ -n "$CM_DEMO_CODEX_TRANSCRIPT" ] || die "state.env has no CM_DEMO_CODEX_TRANSCRIPT — env-up.sh is out of date"
 
   # One pane per agent in the seed roster (Issue #2380). fake-agent.sh derives
-  # `mcbd-<tool>-<worktreeId>` — the primary instance's name (`getSessionName`,
-  # src/lib/session/claude-session.ts) — and matching it is what makes the
+  # `mcbd-<ns>-<tool>-<worktreeId>` — the primary instance's name
+  # (`getSessionName`, src/lib/session/claude-session.ts; `<ns>` is the demo
+  # server's namespace, Issue #3079) — and matching it is what makes the
   # server adopt the pane instead of launching a real CLI. claude and codex are
   # live (they answer what they are sent, and their transcripts are what the
   # chat surface renders); the other three hold their boot screen.
@@ -235,10 +237,11 @@ for loc in $LOCALES; do
   # cwd is the worktree, hence the absolute path to src/cli/index.ts.
   COMMANDMATE_CMD="$REPO_ROOT/node_modules/.bin/tsx $REPO_ROOT/src/cli/index.ts"
   start_agent() {
-    log "starting the fake $1 agent in mcbd-$1-$CM_DEMO_WORKTREE_ID"
+    log "starting the fake $1 agent in mcbd-${CM_DEMO_SESSION_NAMESPACE:+$CM_DEMO_SESSION_NAMESPACE-}$1-$CM_DEMO_WORKTREE_ID"
     shift
     "$SCRIPT_DIR/fake-agent.sh" "$@" \
       --worktree "$CM_DEMO_WORKTREE_ID" \
+      --namespace "$CM_DEMO_SESSION_NAMESPACE" \
       --cwd "$CM_DEMO_WORKTREE_PATH" \
       --port "$CM_DEMO_PORT" \
       --record-to "$CM_DEMO_SESSIONS_FILE" >/dev/null \
