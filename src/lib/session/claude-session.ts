@@ -11,10 +11,12 @@ import {
   capturePane,
   killSession,
   reconcileSessionGeometry,
+  getPaneCurrentCommand,
 } from '@/lib/tmux/tmux';
 import {
   CLAUDE_PROMPT_PATTERN,
   isClaudeTrustDialogOpen,
+  isShellPaneCommand,
   resolveClaudeTrustDialogKeys,
   stripAnsi,
 } from '@/lib/detection/cli-patterns';
@@ -162,6 +164,140 @@ const TRUST_DIALOG_REANSWER_POLLS = 10;
 
 /** Upper bound on trust dialog answers per session start (Issue #3078). */
 const TRUST_DIALOG_MAX_ANSWERS = 3;
+
+/**
+ * Polls a cursor move is given to show up on screen before the next one is
+ * sent (Issue #3089). 3 polls = ~900 ms: a TUI that is not taking keys yet
+ * swallows the move, and the next one goes in once the screen still shows the
+ * cursor off `Yes`.
+ */
+const TRUST_DIALOG_MOVE_SETTLE_POLLS = 3;
+
+/**
+ * Upper bound on single cursor moves per session start (Issue #3089). 20 moves
+ * at TRUST_DIALOG_MOVE_SETTLE_POLLS apart is ~18 s of a TUI that will not move its
+ * cursor; past that the start fails without ever pressing Enter.
+ */
+const TRUST_DIALOG_MAX_MOVES = 20;
+
+/** Reported when the cursor never reached `Yes` (Issue #3089). A fixed string, never captured output. */
+export const CLAUDE_TRUST_DIALOG_CURSOR_STUCK = 'trust dialog: cursor did not reach "Yes, I trust this folder"';
+
+/** Reported when Claude Code quit from the trust dialog (Issue #3089). A fixed string, never captured output. */
+export const CLAUDE_TRUST_DIALOG_EXITED = 'trust dialog: Claude Code exited to the shell';
+
+/** The trust dialog's progress during one session start (Issue #3078 / #3089). */
+interface TrustDialogState {
+  /** Polls since Enter was last sent, null = not yet. */
+  pollsSinceAnswer: number | null;
+  /** Polls since a cursor move was last sent, null = not yet. */
+  pollsSinceMove: number | null;
+  answers: number;
+  moves: number;
+  /** The dialog has been on screen, so Claude Code was running. */
+  seen: boolean;
+  /**
+   * The pane's foreground command, sampled while the dialog was on screen, was
+   * something other than a shell — so a shell there later means Claude Code
+   * exited. False when it could not be told (a wrapper script that did not
+   * `exec`, or tmux could not say), which turns the exit probe off.
+   */
+  shellTellsExit: boolean;
+}
+
+/**
+ * One poll's answer to the folder-trust dialog (Issue #201 / #3078 / #3089).
+ *
+ * Enter confirms whichever option the cursor is on, and since 2.1.259 that is
+ * `No, exit` by default (which quits Claude Code). So Enter is sent only when
+ * THIS screen shows the cursor on `Yes, I trust this folder`. Otherwise one
+ * move key goes in, and the screen is read again on a later poll: sending
+ * `Down Enter` together lost the `Down` to a TUI that was not taking keys yet
+ * and confirmed `No, exit` (Issue #3089). Both are bounded: Enter is repeated
+ * TRUST_DIALOG_REANSWER_POLLS apart up to TRUST_DIALOG_MAX_ANSWERS times for a
+ * dialog that outlives it, and a cursor that has not reached Yes after
+ * TRUST_DIALOG_MAX_MOVES moves fails the start without Enter.
+ *
+ * @param sessionName - tmux session name
+ * @param dialogScreen - ANSI-stripped pane output when the dialog is open, else null
+ * @param state - Mutated in place
+ * @throws {SessionStartFailedError} When the move budget is spent
+ */
+async function answerTrustDialog(
+  sessionName: string,
+  dialogScreen: string | null,
+  state: TrustDialogState
+): Promise<void> {
+  if (state.pollsSinceAnswer !== null) state.pollsSinceAnswer++;
+  if (state.pollsSinceMove !== null) state.pollsSinceMove++;
+  if (dialogScreen === null) return;
+  if (!state.seen) {
+    state.seen = true;
+    state.shellTellsExit = await paneCommandIsAgent(sessionName);
+  }
+
+  const keys = resolveClaudeTrustDialogKeys(dialogScreen);
+  if (keys === null) return;
+
+  if (keys.length === 1) {
+    // Cursor on Yes, on this very screen: the Issue #201 Enter.
+    const due =
+      state.pollsSinceAnswer === null ||
+      (state.pollsSinceAnswer >= TRUST_DIALOG_REANSWER_POLLS && state.answers < TRUST_DIALOG_MAX_ANSWERS);
+    if (!due) return;
+    try {
+      await sendKeys(sessionName, '', true);
+      state.pollsSinceAnswer = 0;
+      state.answers++;
+      logger.info('trust-dialog-detected', { keys: 'Enter', attempt: state.answers });
+    } catch {
+      // Left unhandled so a later poll answers the dialog again
+    }
+    return;
+  }
+
+  // Cursor off Yes: one move, then look again before anything else.
+  if (state.pollsSinceMove !== null && state.pollsSinceMove < TRUST_DIALOG_MOVE_SETTLE_POLLS) return;
+  if (state.moves >= TRUST_DIALOG_MAX_MOVES) {
+    throw new SessionStartFailedError('Claude Code', sessionName, CLAUDE_TRUST_DIALOG_CURSOR_STUCK);
+  }
+  try {
+    await sendSpecialKeys(sessionName, [keys[0]]);
+    state.pollsSinceMove = 0;
+    state.moves++;
+    logger.info('trust-dialog-cursor-move', { key: keys[0], attempt: state.moves });
+  } catch {
+    // Left unhandled so a later poll moves the cursor again
+  }
+}
+
+/**
+ * Whether the pane's foreground process is a shell again (Issue #3089). A
+ * pane tmux cannot describe is not called exited; the start budget still
+ * bounds that case. Only asked when {@link TrustDialogState.shellTellsExit}.
+ *
+ * @param sessionName - tmux session name
+ */
+async function hasReturnedToShell(sessionName: string): Promise<boolean> {
+  const command = await readPaneCommand(sessionName);
+  return command !== null && isShellPaneCommand(command);
+}
+
+/** Whether the pane's foreground command is known and is not a shell (Issue #3089). */
+async function paneCommandIsAgent(sessionName: string): Promise<boolean> {
+  const command = await readPaneCommand(sessionName);
+  return command !== null && !isShellPaneCommand(command);
+}
+
+/** `#{pane_current_command}`, or null when it cannot be read. */
+async function readPaneCommand(sessionName: string): Promise<string | null> {
+  try {
+    const command = await getPaneCurrentCommand(sessionName);
+    return typeof command === 'string' ? command : null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Prompt wait timeout before message send (milliseconds)
@@ -685,9 +821,8 @@ export async function startClaudeSession(
     const startTime = Date.now();
 
     let initialized = false;
-    // Issue #3078: polls since the trust dialog was last answered, null = not yet.
-    let pollsSinceTrustAnswer: number | null = null;
-    let trustAnswers = 0;
+    // Issue #3078 / #3089: the trust dialog's progress this start.
+    const trust: TrustDialogState = { pollsSinceAnswer: null, pollsSinceMove: null, answers: 0, moves: 0, seen: false, shellTellsExit: false };
     while (Date.now() - startTime < maxWaitTime) {
       await new Promise((resolve) => setTimeout(resolve, pollInterval));
 
@@ -702,38 +837,11 @@ export async function startClaudeSession(
         continue;
       }
 
-      // Issue #201 / #3078: answer the folder-trust dialog. Checked BEFORE the
-      // prompt: the dialog's cursor row (`❯ No, exit`) wears the prompt glyph,
-      // so an open dialog is never read as a ready prompt. The answer is read
-      // off the screen, because Enter alone confirms whichever option the
-      // cursor is on, and since 2.1.259 that is `No, exit` (which quits Claude).
-      // A dialog still open TRUST_DIALOG_REANSWER_POLLS polls after the answer
-      // swallowed its keys (sent before the TUI took input); answer it again
-      // from the screen as it is now, a bounded number of times.
+      // Issue #201 / #3078 / #3089: answer the folder-trust dialog. Checked
+      // BEFORE the prompt: the dialog's cursor row (`❯ No, exit`) wears the
+      // prompt glyph, so an open dialog is never read as a ready prompt.
       const trustDialogOpen = isClaudeTrustDialogOpen(cleanOutput);
-      if (pollsSinceTrustAnswer !== null) pollsSinceTrustAnswer++;
-      const trustAnswerDue =
-        pollsSinceTrustAnswer === null ||
-        (pollsSinceTrustAnswer >= TRUST_DIALOG_REANSWER_POLLS && trustAnswers < TRUST_DIALOG_MAX_ANSWERS);
-      if (trustDialogOpen && trustAnswerDue) {
-        const keys = resolveClaudeTrustDialogKeys(cleanOutput);
-        if (keys !== null) {
-          try {
-            if (keys.length === 1) {
-              // Cursor already on Yes: the Issue #201 Enter, unchanged.
-              await sendKeys(sessionName, '', true);
-            } else {
-              await sendSpecialKeys(sessionName, keys);
-            }
-            pollsSinceTrustAnswer = 0;
-            trustAnswers++;
-            logger.info('trust-dialog-detected', { keys: keys.join(' '), attempt: trustAnswers });
-          } catch {
-            // Left unhandled so the next poll answers the dialog again
-          }
-        }
-        // Continue polling to wait for prompt detection
-      }
+      await answerTrustDialog(sessionName, trustDialogOpen ? cleanOutput : null, trust);
 
       // Claude is ready when we see the prompt (DRY-001)
       // Use CLAUDE_PROMPT_PATTERN from cli-patterns.ts for consistency
@@ -744,6 +852,14 @@ export async function startClaudeSession(
         logger.info('claude-initialized-in');
         initialized = true;
         break;
+      }
+
+      // Issue #3089: the dialog is gone and no prompt came up. If the pane is
+      // back at its shell, Claude Code quit (an Enter that landed on
+      // `No, exit`); nothing will ever draw a prompt, so fail now instead of
+      // spending the rest of the budget (and answering the shell).
+      if (!trustDialogOpen && trust.shellTellsExit && (await hasReturnedToShell(sessionName))) {
+        throw new SessionStartFailedError('Claude Code', sessionName, CLAUDE_TRUST_DIALOG_EXITED);
       }
 
       // Issue #1637: fail fast on a start that cannot succeed. The budget is

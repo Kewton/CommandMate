@@ -2,6 +2,8 @@
  * Issue #3078: Claude Code's folder-trust dialog whose cursor starts on
  * `No, exit` (2.1.287 with a permission allow-list) must be neither read as a
  * ready prompt nor answered with a bare Enter.
+ * Issue #3089: Enter goes in only once a screen shows the cursor on Yes, and a
+ * Claude Code that quit from the dialog fails the start at once.
  * @vitest-environment node
  */
 
@@ -25,6 +27,7 @@ vi.mock('@/lib/tmux/tmux', () => ({
   killSession: vi.fn(),
   sendSpecialKey: vi.fn(),
   reconcileSessionGeometry: vi.fn().mockResolvedValue(false),
+  getPaneCurrentCommand: vi.fn(),
 }));
 
 vi.mock('fs/promises', () => ({
@@ -46,20 +49,38 @@ vi.mock('child_process', () => ({
 import {
   startClaudeSession,
   CLAUDE_INIT_POLL_INTERVAL,
+  CLAUDE_INIT_TIMEOUT,
   CLAUDE_POST_PROMPT_DELAY,
+  CLAUDE_TRUST_DIALOG_CURSOR_STUCK,
+  CLAUDE_TRUST_DIALOG_EXITED,
 } from '@/lib/session/claude-session';
-import { hasSession, createSession, sendKeys, sendSpecialKeys, capturePane } from '@/lib/tmux/tmux';
+import {
+  hasSession,
+  createSession,
+  sendKeys,
+  sendSpecialKeys,
+  capturePane,
+  getPaneCurrentCommand,
+} from '@/lib/tmux/tmux';
 import {
   CLAUDE_PROMPT_PATTERN,
   isClaudeTrustDialogOpen,
+  isShellPaneCommand,
   resolveClaudeTrustDialogKeys,
 } from '@/lib/detection/cli-patterns';
+import { SessionStartFailedError } from '@/lib/session/session-start-error';
 
 const FIXTURES = join(__dirname, '../../fixtures');
 
 /** 2.1.287, allow-list repository: cursor on `No, exit` (the reported screen). */
 const DEFAULT_NO_ALLOWLIST = readFileSync(
   join(FIXTURES, 'claude-trust-dialog-3078/allowlist-default-no-2-1-287.txt'),
+  'utf-8'
+);
+
+/** Issue #3089: the poll right after `Down` was swallowed — cursor still on `No, exit`. */
+const DOWN_SWALLOWED = readFileSync(
+  join(FIXTURES, 'claude-trust-dialog-3078/down-swallowed-cursor-still-no-2-1-287.txt'),
   'utf-8'
 );
 
@@ -146,6 +167,15 @@ describe('startClaudeSession() - trust dialog layouts (Issue #3078)', () => {
     return vi.mocked(sendKeys).mock.calls.filter((call) => call[1] === '' && call[2] === true).length;
   }
 
+  function enterCallOrders(): number[] {
+    const mock = vi.mocked(sendKeys).mock;
+    return mock.calls.flatMap((call, i) => (call[1] === '' && call[2] === true ? [mock.invocationCallOrder[i]] : []));
+  }
+
+  function sentSpecialKeys(): string[] {
+    return vi.mocked(sendSpecialKeys).mock.calls.flatMap((call) => call[1]);
+  }
+
   /** Pane shows `screens[i]` on poll i, and the last one from then on. */
   function paneSequence(screens: string[]): void {
     let poll = 0;
@@ -153,15 +183,19 @@ describe('startClaudeSession() - trust dialog layouts (Issue #3078)', () => {
   }
 
   it('selects `Yes, I trust this folder` before confirming the default-No dialog', async () => {
-    paneSequence([DEFAULT_NO_ALLOWLIST.replace(/^ /gm, ''), DEFAULT_NO_ALLOWLIST, '❯ ']);
+    paneSequence([DEFAULT_NO_ALLOWLIST.replace(/^ /gm, ''), CURSOR_MOVED_TO_YES, '❯ ']);
 
     const promise = startClaudeSession({ worktreeId: 'wt', worktreePath: '/path/to/wt' });
     await vi.advanceTimersByTimeAsync(100 + CLAUDE_INIT_POLL_INTERVAL * 4 + CLAUDE_POST_PROMPT_DELAY);
     await expect(promise).resolves.toBeUndefined();
 
-    // Not a bare Enter (which would confirm `No, exit`), and only once.
-    expect(enterOnlyCalls()).toBe(0);
-    expect(vi.mocked(sendSpecialKeys).mock.calls).toEqual([['mcbd-claude-wt', ['Down', 'Enter']]]);
+    // Issue #3089: the move alone, then Enter once the screen shows Yes — never
+    // `Down Enter` in one go (a swallowed Down left Enter on `No, exit`).
+    expect(vi.mocked(sendSpecialKeys).mock.calls).toEqual([['mcbd-claude-wt', ['Down']]]);
+    expect(enterOnlyCalls()).toBe(1);
+    expect(vi.mocked(sendSpecialKeys).mock.invocationCallOrder[0]).toBeLessThan(
+      enterCallOrders()[0]
+    );
   });
 
   it('does not take the open dialog for a ready prompt', async () => {
@@ -174,7 +208,9 @@ describe('startClaudeSession() - trust dialog layouts (Issue #3078)', () => {
     await vi.advanceTimersByTimeAsync(100 + CLAUDE_INIT_POLL_INTERVAL * 5 + CLAUDE_POST_PROMPT_DELAY);
 
     expect(settled).not.toHaveBeenCalled();
-    expect(sendSpecialKeys).toHaveBeenCalledTimes(1);
+    expect(sendSpecialKeys).toHaveBeenCalled();
+    expect(sentSpecialKeys().every((key) => key === 'Down')).toBe(true);
+    expect(enterOnlyCalls()).toBe(0);
 
     vi.mocked(capturePane).mockResolvedValue('❯ ');
     await vi.advanceTimersByTimeAsync(CLAUDE_INIT_POLL_INTERVAL * 2 + CLAUDE_POST_PROMPT_DELAY);
@@ -198,13 +234,19 @@ describe('startClaudeSession() - trust dialog layouts (Issue #3078)', () => {
 
     const promise = startClaudeSession({ worktreeId: 'wt', worktreePath: '/path/to/wt' });
     await vi.advanceTimersByTimeAsync(100 + CLAUDE_INIT_POLL_INTERVAL * 5);
-    expect(sendSpecialKeys).toHaveBeenCalledTimes(1);
+    // Issue #3089: moves only, one at a time, ~3 polls apart; no Enter while on No.
+    expect(sentSpecialKeys()).toEqual(['Down', 'Down']);
+    expect(enterOnlyCalls()).toBe(0);
 
-    // The Down landed but the Enter did not.
+    // A Down landed.
     vi.mocked(capturePane).mockResolvedValue(CURSOR_MOVED_TO_YES);
     await vi.advanceTimersByTimeAsync(CLAUDE_INIT_POLL_INTERVAL * 10);
-    expect(sendSpecialKeys).toHaveBeenCalledTimes(1);
+    expect(sendSpecialKeys).toHaveBeenCalledTimes(2);
     expect(enterOnlyCalls()).toBe(1);
+
+    // The Enter was swallowed: the dialog, cursor on Yes, outlives it and is answered again.
+    await vi.advanceTimersByTimeAsync(CLAUDE_INIT_POLL_INTERVAL * 10);
+    expect(enterOnlyCalls()).toBe(2);
 
     vi.mocked(capturePane).mockResolvedValue('❯ ');
     await vi.advanceTimersByTimeAsync(CLAUDE_INIT_POLL_INTERVAL * 2 + CLAUDE_POST_PROMPT_DELAY);
@@ -220,5 +262,128 @@ describe('startClaudeSession() - trust dialog layouts (Issue #3078)', () => {
 
     expect(enterOnlyCalls()).toBe(0);
     expect(sendSpecialKeys).not.toHaveBeenCalled();
+  });
+});
+
+describe('startClaudeSession() - confirming Yes on screen before Enter (Issue #3089)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+    vi.mocked(hasSession).mockResolvedValue(false);
+    vi.mocked(createSession).mockResolvedValue();
+    vi.mocked(sendKeys).mockResolvedValue();
+    vi.mocked(sendSpecialKeys).mockResolvedValue();
+    // Claude Code 2.x native build: the pane command is its version string.
+    vi.mocked(getPaneCurrentCommand).mockResolvedValue('2.1.287');
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function enterOnlyCalls(): number {
+    return vi.mocked(sendKeys).mock.calls.filter((call) => call[1] === '' && call[2] === true).length;
+  }
+
+  function sentSpecialKeys(): string[] {
+    return vi.mocked(sendSpecialKeys).mock.calls.flatMap((call) => call[1]);
+  }
+
+  /** Pane shows `screens[i]` on poll i, and the last one from then on. */
+  function paneSequence(screens: string[]): void {
+    let poll = 0;
+    vi.mocked(capturePane).mockImplementation(async () => screens[Math.min(poll++, screens.length - 1)]);
+  }
+
+  it('the swallowed-Down screen still has the cursor on `No, exit`', () => {
+    expect(isClaudeTrustDialogOpen(DOWN_SWALLOWED)).toBe(true);
+    expect(resolveClaudeTrustDialogKeys(DOWN_SWALLOWED)).toEqual(['Down', 'Enter']);
+  });
+
+  it('does not send Enter while the screen after Down still shows the cursor on No', async () => {
+    paneSequence([DEFAULT_NO_ALLOWLIST, DOWN_SWALLOWED, DOWN_SWALLOWED, DOWN_SWALLOWED]);
+
+    const promise = startClaudeSession({ worktreeId: 'wt', worktreePath: '/path/to/wt' });
+    const settled = vi.fn();
+    promise.then(settled, settled);
+    await vi.advanceTimersByTimeAsync(100 + CLAUDE_INIT_POLL_INTERVAL * 4);
+
+    expect(settled).not.toHaveBeenCalled();
+    expect(enterOnlyCalls()).toBe(0);
+    expect(sentSpecialKeys()).not.toContain('Enter');
+    // Moved again once the swallowed Down had had its time to show.
+    expect(sentSpecialKeys()).toEqual(['Down', 'Down']);
+
+    // The second Down lands: now, and only now, Enter.
+    paneSequence([CURSOR_MOVED_TO_YES, '❯ ']);
+    await vi.advanceTimersByTimeAsync(CLAUDE_INIT_POLL_INTERVAL * 3 + CLAUDE_POST_PROMPT_DELAY);
+    await expect(promise).resolves.toBeUndefined();
+    expect(enterOnlyCalls()).toBe(1);
+    expect(sentSpecialKeys()).toEqual(['Down', 'Down']);
+  });
+
+  it('fails without ever sending Enter when the cursor never reaches Yes', async () => {
+    vi.mocked(capturePane).mockResolvedValue(DOWN_SWALLOWED);
+
+    const promise = startClaudeSession({ worktreeId: 'wt', worktreePath: '/path/to/wt' });
+    const assertion = expect(promise).rejects.toMatchObject({
+      name: 'SessionStartFailedError',
+      detectedPattern: CLAUDE_TRUST_DIALOG_CURSOR_STUCK,
+    });
+    await vi.advanceTimersByTimeAsync(CLAUDE_INIT_TIMEOUT);
+    await assertion;
+
+    expect(enterOnlyCalls()).toBe(0);
+    expect(sentSpecialKeys().length).toBeGreaterThan(1);
+    expect(sentSpecialKeys().every((key) => key === 'Down')).toBe(true);
+  });
+
+  it('fails fast when Claude Code exited from the dialog back to the shell', async () => {
+    paneSequence([DEFAULT_NO_ALLOWLIST, DEFAULT_NO_ALLOWLIST, 'user@host:~/repos/commandmate-tutorial$ ']);
+    vi.mocked(getPaneCurrentCommand).mockImplementation(async () =>
+      vi.mocked(capturePane).mock.calls.length >= 3 ? 'bash' : '2.1.287'
+    );
+
+    const promise = startClaudeSession({ worktreeId: 'wt', worktreePath: '/path/to/wt' });
+    const assertion = expect(promise).rejects.toBeInstanceOf(SessionStartFailedError);
+    await vi.advanceTimersByTimeAsync(100 + CLAUDE_INIT_POLL_INTERVAL * 4);
+    await assertion;
+    await expect(promise).rejects.toMatchObject({ detectedPattern: CLAUDE_TRUST_DIALOG_EXITED });
+
+    // Well inside the 60 s budget, and no Enter went to the shell.
+    expect(enterOnlyCalls()).toBe(0);
+  });
+
+  it('keeps waiting while the dialog has closed and Claude Code is still drawing', async () => {
+    paneSequence([CURSOR_MOVED_TO_YES, '', '', '❯ ']);
+
+    const promise = startClaudeSession({ worktreeId: 'wt', worktreePath: '/path/to/wt' });
+    await vi.advanceTimersByTimeAsync(100 + CLAUDE_INIT_POLL_INTERVAL * 5 + CLAUDE_POST_PROMPT_DELAY);
+    await expect(promise).resolves.toBeUndefined();
+    expect(enterOnlyCalls()).toBe(1);
+  });
+
+  it('does not call a shell pane an exit when the shell was there while the dialog was open', async () => {
+    // A wrapper script that did not `exec` claude: the pane command is a shell throughout.
+    vi.mocked(getPaneCurrentCommand).mockResolvedValue('bash');
+    paneSequence([CURSOR_MOVED_TO_YES, '', '', '❯ ']);
+
+    const promise = startClaudeSession({ worktreeId: 'wt', worktreePath: '/path/to/wt' });
+    await vi.advanceTimersByTimeAsync(100 + CLAUDE_INIT_POLL_INTERVAL * 5 + CLAUDE_POST_PROMPT_DELAY);
+    await expect(promise).resolves.toBeUndefined();
+  });
+});
+
+describe('isShellPaneCommand (Issue #3089)', () => {
+  it('names shells, including tmux login-shell names', () => {
+    for (const command of ['bash', 'zsh', '-zsh', 'sh', 'fish', 'dash']) {
+      expect(isShellPaneCommand(command)).toBe(true);
+    }
+  });
+
+  it('does not name Claude Code as a shell', () => {
+    for (const command of ['claude', 'node', '2.1.287']) {
+      expect(isShellPaneCommand(command)).toBe(false);
+    }
   });
 });

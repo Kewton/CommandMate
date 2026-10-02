@@ -277,6 +277,31 @@ export async function getSessionWorkingDirectory(sessionName: string): Promise<s
 }
 
 /**
+ * The foreground command of a session's pane (`#{pane_current_command}`), or
+ * null when tmux cannot say (Issue #3089).
+ *
+ * Read by Claude's start wait to tell "the agent quit back to the shell" from
+ * "the agent is still drawing": once the agent has exited, the pane's
+ * foreground process is the login shell again (`bash`, `zsh`, `-zsh`, ...).
+ *
+ * @param sessionName - Target session name
+ * @returns The command name, or null when the session or tmux is unavailable
+ */
+export async function getPaneCurrentCommand(sessionName: string): Promise<string | null> {
+  try {
+    const { stdout } = await execFileAsync(
+      'tmux',
+      ['display-message', '-p', '-t', exactTarget(sessionName), '#{pane_current_command}'],
+      { timeout: DEFAULT_TIMEOUT }
+    );
+    const command = stdout.trim();
+    return command === '' ? null : command;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * List all tmux sessions
  *
  * @returns Array of tmux session information
