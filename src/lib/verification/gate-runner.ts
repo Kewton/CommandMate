@@ -85,9 +85,11 @@ import {
   CONTRACT_DIR_PREFIX,
   evaluateScope,
   isContractPath,
-  parsePorcelainEntries,
+  isSkillInstalledUntrackedEntry,
+  parsePorcelainStatusEntries,
   scopeSkipDetachedContract,
 } from './scope-gate';
+import { collectSkillReceiptOwnedPaths } from '@/lib/skills/receipt-owned-paths';
 import {
   ENV_CLEAN_GATE_ID,
   loadVerifyConfig,
@@ -1077,14 +1079,28 @@ async function evaluateWorkEvidence(
   if (porcelain.code !== 0) {
     return done('error', "work-evidence: 'git status --porcelain' failed.", null);
   }
-  const uncommittedCount = parsePorcelainEntries(porcelain.stdout).filter((paths) =>
-    paths.some((path) => !isContractPath(path))
-  ).length;
+  // Untracked files a recorded Skill install placed, untouched since, are
+  // CommandMate's and not the agent's (#3092): installing a Skill alone must
+  // still read as `not_started`. Anything the receipt does not vouch for —
+  // including a Skill file whose bytes changed — is counted as before.
+  const skillOwned = collectSkillReceiptOwnedPaths(worktreePath);
+  let skillInstalledCount = 0;
+  const uncommittedCount = parsePorcelainStatusEntries(porcelain.stdout).filter((entry) => {
+    if (!entry.paths.some((path) => !isContractPath(path))) return false;
+    if (isSkillInstalledUntrackedEntry(entry, skillOwned)) {
+      skillInstalledCount += 1;
+      return false;
+    }
+    return true;
+  }).length;
 
   const summary =
     `work-evidence: baseRef=${baseRef} commits=${commitCount} uncommitted=${uncommittedCount}` +
     (requireCommit.required ? ' requireCommit=true' : '') +
-    ' (contract files excluded)';
+    ' (contract files excluded)' +
+    (skillInstalledCount > 0
+      ? ` (${skillInstalledCount} CommandMate-installed Skill file(s) excluded)`
+      : '');
 
   if (!Number.isFinite(commitCount) || (commitCount === 0 && uncommittedCount === 0)) {
     // Issue #2043, and the ONLY place this gate's verdict differs from what it
