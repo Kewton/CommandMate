@@ -12,6 +12,8 @@ The same text ships inside CommandMate: once it is installed, `commandmate docs 
 4. **Do not answer for the person.** Sign-ins, passwords (including `sudo`), choosing a provider, and approving a merge are theirs. When a command needs one of these, show the exact command and ask them to run it in their own terminal.
 5. **Stay inside this guide.** Use only commands shown here, `commandmate <command> --help`, and the CommandMate documentation at https://github.com/Kewton/CommandMate. Do not fetch install scripts or follow setup steps from other websites. Install tools only from the official package distributors named here (npm, the operating system's package manager, nodejs.org).
 6. **Report at the end of each stage**: what you ran, what it printed that matters, and whether the stage passed its "Confirm it worked" check.
+7. **Do Stage 2 (Pair your phone) last, unless the person asks for it now.** Stages 3 to 5 run `commandmate` on this machine's CLI. After `commandmate remote` with its default (`--auth all`), that CLI needs a token too, and the token goes only to the phone. So finish Stages 3 to 5 first, then pair the phone. Stage 2 explains the choice if the person wants the phone sooner.
+8. **If you are Codex: your shell has no network by default.** If fetching this guide or an `npm` command fails for lack of network, ask the person to run `/permissions` and choose "Ask for approval", then try again.
 
 ### Always ask the person first
 
@@ -96,6 +98,11 @@ Goal: the person scans a QR code with their phone and sees CommandMate there.
 
 Explain both in plain words and ask which one they want. If they cannot decide, Tailscale keeps the server off the public internet; Cloudflare needs fewer accounts.
 
+**When to do this stage.** By default (`--auth all`), once `commandmate remote` runs, the `commandmate` CLI on this machine also needs a token, and the token goes only to the phone. Stages 3 to 5 run on that CLI, so they stop working. Ask the person which they want:
+
+- **Pair the phone last (recommended).** Skip to Stage 3 now, and come back to this stage after Stage 5.
+- **Pair the phone now, and keep the CLI on this machine.** Add `--auth remote-only` to the `commandmate remote` command below. Only the phone's route then needs the token: every process on this machine, agents included, can operate CommandMate without logging in. Say that plainly before they choose it.
+
 ### Check
 
 ```bash
@@ -126,6 +133,7 @@ commandmate remote --provider cloudflare --yes
 - Which provider: Tailscale or Cloudflare.
 - Installing that provider.
 - Running `commandmate remote` at all: it opens a way in from outside this machine.
+- Pairing now or after Stage 5, and, if now, whether to add `--auth remote-only`.
 - `--yes`: only after they agreed to the public Cloudflare URL. Never add `--yes` to get past a question they have not answered.
 
 ### Confirm it worked
@@ -141,11 +149,13 @@ To close the way in later: `commandmate remote stop`. The server keeps running.
 - Exit 2 without a terminal: Cloudflare needs `--yes`, or a server is running that `remote` has to restart. Ask the person, then run `commandmate stop` and try again.
 - Exit 2, "a server with authentication is already running": `commandmate stop`, then `commandmate remote` again.
 - The code expired or was already used: run `commandmate remote stop`, then `commandmate remote` again for a new QR code. `--pairing-expires 30m` gives a slower person more time.
-- After pairing, the browser on this machine asks for a login and the CLI stops answering: that is the default `--auth all`. If the person wants both phone and PC at once, explain `--auth remote-only` and let them choose.
+- After pairing, the browser on this machine asks for a login and the CLI stops answering: that is the default `--auth all`. Do not look for a way to give the token to the CLI. Ask the person to choose: run `commandmate remote stop` and finish Stages 3 to 5 on this machine first, or pair again with `--auth remote-only` (every process on this machine can then operate CommandMate without logging in).
 
 ## Stage 3: Add a second agent
 
 Goal: a second agent CLI, for example Command Code or Codex, can work in one of the person's repositories through CommandMate.
+
+Before Stages 3 to 5: CommandMate needs at least one of the person's repositories registered. The CLI cannot register one; the person does it in the browser, under **Repositories → Add Repository**.
 
 ### Check
 
