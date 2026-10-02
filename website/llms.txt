@@ -17,6 +17,7 @@ What it gives you:
 
 - [Documentation](https://github.com/Kewton/CommandMate/tree/main/docs/en): the English docs
 - [Tutorial](https://github.com/Kewton/CommandMate/blob/main/docs/en/user-guide/tutorial.md): Use a sample repository with two bugs left in on purpose to work through the core of CommandMate in about fifteen minutes.
+- [Set up with your agent](https://kewton.github.io/CommandMate/setup.md): a guide for a coding agent to set CommandMate up on this machine, stage by stage, asking the person before it installs anything or opens access from the internet. Also printed by `commandmate docs --section setup`.
 - [Setup guide](https://github.com/Kewton/CommandMate/blob/main/docs/en/user-guide/cli-setup-guide.md): install it for daily use
 - [CLI operations guide](https://github.com/Kewton/CommandMate/blob/main/docs/en/user-guide/cli-operations-guide.md): every flag and every exit code
 
