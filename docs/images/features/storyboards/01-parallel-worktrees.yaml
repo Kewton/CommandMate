@@ -1,9 +1,9 @@
-# cm-01 — Any agent, in parallel (Issue #1811; LP demo 3 of docs/design/public-messaging.md §5).
+# cm-01 — Any agent, in parallel (Issue #1811; LP demo 3).
 #
 # The cut has to *show* parallelism rather than assert it, so it opens on the
 # branch list, then films CommandMate picking up a worktree plain `git` made
 # outside it, then returns to the list now carrying one more session. Telops are
-# copied from public-messaging.md §6 (demo 3) where that table has them.
+# written for this cut (Issue #3057 retired copying them from public-messaging.md).
 
 version: 1
 duration: 20

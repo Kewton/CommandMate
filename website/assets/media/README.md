@@ -65,7 +65,7 @@ ffmpeg -v error -y -ss 6.5 -i website/assets/media/orchestrate-run.mp4 \
 
 ## The current demos (Issue #1577, re-cut for Issue #1812)
 
-The four are the four cards in `docs/design/public-messaging.md` §3, one demo each.
+The four were cut one per card of the LP's four cards (#1812).
 
 | File | Source | Shows |
 |------|--------|-------|

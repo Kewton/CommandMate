@@ -9,8 +9,10 @@ verification gates after it, evidence throughout.
 Any coding agent turns your requirement into a verified result.
 
 This document is the **canonical source** for the Vision, the Mission, the core principle and the
-implementation. The wording every public surface uses (landing page, README, tutorial,
-product highlights) lives in [docs/design/public-messaging.md](../design/public-messaging.md).
+implementation. Each public surface (landing page, README, tutorial, product highlights) words
+itself; the facts none of them may get wrong (numbers, how agents are counted, exit codes, network
+scope) and what they do not say are kept as a reference in
+[docs/design/public-messaging.md](../design/public-messaging.md).
 
 ---
 
@@ -79,7 +81,7 @@ gates. Ride the system, and you arrive at the same result whether or not you hav
 > His post describes seasoned professionals accelerating their work with LLMs while staying
 > accountable for what they ship, so the discipline is assumed to live **in the person**.
 > CommandMate puts that discipline **in the system instead**, which widens the audience to people
-> without the expertise. The full comparison is recorded in the sourcing section of
+> without the expertise. The source is recorded in the sourcing section of
 > [public-messaging.md](../design/public-messaging.md) (Japanese).
 
 ---
@@ -136,7 +138,7 @@ it is the condition that lets the centre hold.
 
 | Document | Contents |
 |---|---|
-| [Public messaging spec](../design/public-messaging.md) | Single source for public wording: hero, definition, four cards, With / Without, banned terms (Japanese) |
+| [Public messaging facts](../design/public-messaging.md) | Reference for public surfaces: numbers and sources, agent count, exit codes, network scope, what it does not do, banned terms (Japanese) |
 | [Task Contract design](../design/task-contract.md) | Contract file format and how it is judged (Japanese) |
 | [Verification config design](../design/verification-config.md) | `.commandmate/verify.yaml` and the gate specification (Japanese) |
 | [Skills guide](../user-guide/skills.md) | Installing and updating Skills from the Catalog (Japanese) |

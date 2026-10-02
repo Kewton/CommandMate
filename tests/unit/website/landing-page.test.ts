@@ -17,9 +17,15 @@
  * screenshot, so the guard that kept the screenshot eager became a guard on the
  * drawing being an image to a screen reader and taking its colours from the
  * page's custom properties — the screenshot's own budget survives untouched
- * because it is still the og:image. And the wording is no longer free text: it
- * is copied from `docs/design/public-messaging.md`, so the retired vocabulary is
- * asserted absent from everything Pages serves.
+ * because it is still the og:image. And the competitor names and unmeasured
+ * claims `docs/design/public-messaging.md` lists are asserted absent from
+ * everything Pages serves.
+ *
+ * Issue #3057 retired the rule that the page copies its wording verbatim from
+ * that file. What this suite still reads out of it is facts, not sentences: the
+ * banned terms, the claims §5 puts outside what was measured, and §6's network
+ * routes and retracted network wording. The page is free to say the rest its
+ * own way.
  *
  * Issue #2551 gave the hero to a drawing of the product — sessions, then gate
  * lines — and moved the loop down to The loop. The colour guard now scans every
@@ -141,33 +147,6 @@ function readIndexHtml(): string {
 }
 
 /**
- * The markup with every run of whitespace collapsed. Copy taken verbatim from
- * the messaging doc is re-wrapped by hand when it lands in HTML, so comparing
- * the raw file against a sentence would fail on indentation rather than on
- * wording — which is the opposite of what these assertions are for.
- */
-function normalizedHtml(): string {
-  return readIndexHtml().replace(/\s+/g, ' ');
-}
-
-/**
- * The en definition sentence, read out of `docs/design/public-messaging.md`
- * between its `<!-- def:en -->` markers. Read rather than restated: the point of
- * that file is that one string exists once, so a copy of it here would be the
- * second place it could drift.
- */
-function definitionEn(): string {
-  const doc = fs.readFileSync(MESSAGING_DOC, 'utf-8');
-  const match = /<!-- def:en -->([\s\S]*?)<!-- \/def:en -->/.exec(doc);
-
-  expect(
-    match,
-    'docs/design/public-messaging.md must delimit the en definition with <!-- def:en --> … <!-- /def:en -->',
-  ).not.toBeNull();
-  return match![1].trim();
-}
-
-/**
  * The rows of the banned-term table in `docs/design/public-messaging.md`: each
  * term with its reason (the last column). The table writes `同上` ("same as
  * above") for a run of rows sharing one reason, so that is resolved to the row
@@ -204,10 +183,9 @@ function documentedBannedTerms(): string[] {
 }
 
 /**
- * What Issue #1812 measured on this page before the rewrite and required gone.
- * These are shorter than some of the doc's rows on purpose — the old H1 is
- * banned as a whole sentence there, but the LP carried it split across a `<br>`
- * and rephrased in three meta tags, so the substring is what actually finds it.
+ * The competitor names the page must not carry. #1812 also listed the old-axis
+ * wording here (`control plane`, the old H1); #3057 cut the doc's table to
+ * competitor names and this list with it, leaving the axis to the page.
  *
  * Every competitor name the doc bans is mirrored here, and a test pins that
  * (Issue #2549). The mirror is what makes deleting such a row from the doc
@@ -215,8 +193,6 @@ function documentedBannedTerms(): string[] {
  * name quietly dropping out of the union the page is scanned for.
  */
 const LP_BANNED_TERMS = [
-  'control plane',
-  'Orchestrate your agent CLIs',
   'Remote Control',
   'Happy Coder',
   'claude-squad',
@@ -227,7 +203,7 @@ const LP_BANNED_TERMS = [
 ];
 
 /**
- * The two rows of `docs/design/public-messaging.md` §11b that cannot be scanned
+ * The two rows of `docs/design/public-messaging.md` §5 that cannot be scanned
  * for as substrings. Listed rather than silently skipped: a test pins that both
  * are still rows in that table, so dropping one from the doc surfaces here
  * instead of leaving a dead exemption behind.
@@ -245,10 +221,8 @@ function text(fragment: string): string {
 /**
  * The rows of the `|`-delimited tables in one `## <n>.` section of
  * `docs/design/public-messaging.md`, header and separator rows dropped. Parsed
- * rather than restated for the same reason `definitionEn()` is read out of the
- * file: a copy of the wording here would be the second place it could drift,
- * and #2493 renumbered which demo maps to which card without touching a single
- * string — a hand-copied expectation would have stayed green through that.
+ * rather than restated: a copy of a fact here would be the second place it
+ * could drift.
  */
 function sectionBody(section: string): string {
   const lines = fs.readFileSync(MESSAGING_DOC, 'utf-8').split('\n');
@@ -256,10 +230,9 @@ function sectionBody(section: string): string {
 
   expect(start, `public-messaging.md has no "## ${section}." section`).toBeGreaterThan(-1);
 
-  // Fence-aware rather than a plain "up to the next `## `": §1b's en block is a
-  // fenced sample of the section as it renders, so it opens with a `## ` line of
-  // its own, and a naive scan ends the section in the middle of the block it was
-  // looking for.
+  // Fence-aware rather than a plain "up to the next `## `": a fenced sample in
+  // the doc may open with a `## ` line of its own, and a naive scan would end the
+  // section in the middle of it.
   const body: string[] = [];
   let fenced = false;
 
@@ -300,7 +273,7 @@ function messagingTable(section: string): string[][] {
 /**
  * What sits under one heading of a markdown fragment, down to the next heading
  * at the same level or above (`### en` stops at `### ja`, not at a `####`).
- * Fence-aware like sectionBody(): §3e's contract YAML opens with a `# ` comment.
+ * Fence-aware like sectionBody(): a fenced YAML sample may open with a `# ` comment.
  */
 function headingBody(markdown: string, heading: string): string {
   const level = heading.indexOf(' ');
@@ -325,46 +298,13 @@ function headingBody(markdown: string, heading: string): string {
   return body.join('\n');
 }
 
-/** The contents of the first fenced block in a markdown fragment. */
-function firstFence(markdown: string): string {
-  const fence = /^```[^\n]*\n([\s\S]*?)\n```/m.exec(markdown);
-
-  expect(fence, 'expected a fenced block in public-messaging.md').not.toBeNull();
-  return fence![1];
-}
-
-/** Markdown copy as the page renders it: code spans become `<code>`, which text() drops. */
-function prose(markdown: string): string {
-  return markdown.replace(/`/g, '').replace(/\s+/g, ' ').trim();
-}
-
-/** One labelled row of the §1 hero table, by the label its first cell starts with. */
-function heroRow(label: string): string {
-  const row = messagingTable('1').find((cells) => cells[0].startsWith(label));
-
-  expect(row, `public-messaging.md §1 has no "${label}…" row`).not.toBeUndefined();
-  return row![1];
-}
-
-/** The en title and sentence of each §3 card, in the order the doc lists them. */
-function messagingCards(): { title: string; body: string }[] {
-  return messagingTable('3').map((cells) => ({ title: cells[1], body: cells[2] }));
-}
-
-/** The en caption of each numbered §5 demo, hero cut excluded. */
-function messagingCaptions(): string[] {
-  return messagingTable('5')
-    .filter((cells) => /^\d+$/.test(cells[0]))
-    .map((cells) => cells[3]);
-}
-
 /**
- * The claims §11b puts outside what has actually been measured. Backticked
+ * The claims §5 puts outside what has actually been measured. Backticked
  * first cells only, which is exactly the "言えないこと" table: the "言えること"
  * rows above it are prose.
  */
 function unmeasuredClaims(): string[] {
-  return messagingTable('11b')
+  return messagingTable('5')
     .map((cells) => /^`([^`]+)`$/.exec(cells[0])?.[1])
     .filter((claim): claim is string => Boolean(claim));
 }
@@ -784,12 +724,11 @@ describe('Issue #2551: the session mock in the hero, the loop in The loop', () =
 /**
  * Issue #2554 — the network-scope note under the cards becomes a section of its
  * own, "Runs on your machine", with a drawing of the machine and the two
- * connections every session has. The words are public-messaging.md §14 between
- * its `trust:en` markers, split without a word changed: the lede is what
- * CommandMate itself does, the drawing's footnote is what goes over the network
- * and when. Both halves are read from the doc, and the footnote's length from
- * §14's evidence table, so a route added there stays red here until the page
- * lists it too.
+ * connections every session has: the lede is what CommandMate itself does, the
+ * drawing's footnote is what goes over the network and when. The footnote's
+ * length is read from public-messaging.md §6's evidence table, so a route added
+ * there stays red here until the page lists it too. (#3057 dropped the check
+ * that the two halves are that file's sentence verbatim.)
  *
  * The colour scan in the #1812 block and the markup scan in the #2551 block reach
  * this drawing through INLINE_DRAWINGS. The other three drawing guards in #1812
@@ -812,23 +751,11 @@ describe('Issue #2554: Trust', () => {
   const footnote = (): string =>
     firstGroup(trustSection(), /<figcaption class="trust-notes">([\s\S]*?)<\/figcaption>/, 'the drawing footnote');
 
-  /** §14's en sentence as the page renders it, read between its `trust:en` markers. */
-  const trustEn = (): string => {
-    const doc = fs.readFileSync(MESSAGING_DOC, 'utf-8');
-    const match = /<!-- trust:en -->([\s\S]*?)<!-- \/trust:en -->/.exec(doc);
-
-    expect(
-      match,
-      'docs/design/public-messaging.md must delimit the §14 en sentence with <!-- trust:en --> … <!-- /trust:en -->',
-    ).not.toBeNull();
-    return prose(match![1]);
-  };
-
-  /** The rows of one `### ` table in §14, its header row dropped. */
+  /** The rows of one `### ` table in §6, its header row dropped. */
   const trustTable = (heading: string): string[][] => {
-    const [header, ...rows] = tableRows(headingBody(sectionBody('14'), heading));
+    const [header, ...rows] = tableRows(headingBody(sectionBody('6'), heading));
 
-    expect(header, `§14 has no table under "${heading}"`).not.toBeUndefined();
+    expect(header, `§6 has no table under "${heading}"`).not.toBeUndefined();
     return rows;
   };
 
@@ -841,22 +768,11 @@ describe('Issue #2554: Trust', () => {
     );
   });
 
-  it('states §14 verbatim: the lede, then the footnote under the drawing', () => {
-    const section = trustSection();
-    const lede = text(firstGroup(section, /<p class="trust-lede">([\s\S]*?)<\/p>/, 'the #trust lede'));
-
-    // One string split in two, not two strings: joined back, it has to be §14
-    // to the character, so neither half can be reworded or trimmed on its own.
-    expect(`${lede} ${text(footnote())}`).toBe(trustEn());
-    expect(section.indexOf('class="trust-lede"')).toBeLessThan(section.indexOf('<svg'));
-    expect(section.indexOf('</svg>')).toBeLessThan(section.indexOf('<figcaption'));
-  });
-
-  it("lists one footnote per route in §14's evidence table", () => {
+  it("lists one footnote per route in §6's evidence table", () => {
     const routes = [...footnote().matchAll(/<li>([\s\S]*?)<\/li>/g)].map((match) => text(match[1]));
     const evidence = trustTable('### 機能ごとの通信');
 
-    // §14's rule: a route is dropped from the sentence only after the table
+    // §6's rule: a route is dropped from the sentence only after the table
     // shows the traffic itself is gone. So the table's length is the list's.
     expect(evidence.length).toBeGreaterThan(0);
     expect(routes).toHaveLength(evidence.length);
@@ -869,17 +785,17 @@ describe('Issue #2554: Trust', () => {
     expect(text(cards)).not.toMatch(/telemetry|over the network/i);
   });
 
-  it('carries none of the network wording §14 retracted, anywhere Pages serves', () => {
+  it('carries none of the network wording §6 retracted, anywhere Pages serves', () => {
     const rows = trustTable('### 書かない表現');
     const terms = (conditional: boolean): string[] =>
       rows
         .filter(([cell]) => cell.includes('無条件') === conditional)
         .flatMap(([cell]) => [...cell.matchAll(/`([^`]+)`/g)].map((match) => match[1].toLowerCase()));
-    // The Issue's own criterion, as a literal too: §14 lists the whole retracted
+    // The Issue's own criterion, as a literal too: §6 lists the whole retracted
     // sentence, and the start of it is what would come back reworded.
     const banned = ['the only network traffic', ...terms(false)];
-    // "No external server" is retracted only as a bare claim; §14's own
-    // replacement says it needs none "to run".
+    // "No external server" is retracted only as a bare claim; §6's own
+    // rule says it needs none "to run".
     const bare = terms(true);
 
     expect(banned.length).toBeGreaterThan(1);
@@ -961,7 +877,7 @@ describe('Issue #1577: feature demo playback', () => {
   const source = (tag: string): string | undefined => /src="([^"]+)"/.exec(tag)?.[1];
 
   it('embeds the five demos in page order, the recorded run first', () => {
-    // #1812 cut the set to one demo per card in public-messaging.md §3. #2495
+    // #1812 cut the set to one demo per card. #2495
     // put a real orchestrate run at the head of it and moved the whole section
     // above The loop, so the order is the argument the section makes: one run
     // end to end, then the gate that judged it, where the method came from, the
@@ -1548,13 +1464,13 @@ describe('Issue #2555: compact', () => {
  * were folded or laid out closer, again with no wording changed: The loop's
  * beats become one band with their code folded (the page shows a whole contract
  * under One agent leads and gate lines in the hero), the four feature demos sit
- * two by two, the Catalog IDs fold under their §3d label, and the closing call
+ * two by two, the Catalog IDs fold under their label, and the closing call
  * to action shares Philosophy's section.
  *
  * The heights are measured in a browser outside this suite. What is pinned here
  * is the markup and the one CSS block that made the page shorter, and that what
- * the other blocks read — the four beats, the five demos and their playback, §3c,
- * §3d, the definition and #philosophy — is still where they read it.
+ * the other blocks read — the four beats, the five demos and their playback, the
+ * Catalog chips and #philosophy — is still where they read it.
  */
 describe('Issue #2555: compact (2)', () => {
   const CSS_BLOCK_START = '/* Compact 2 (#2555) */';
@@ -1685,28 +1601,21 @@ describe('Issue #2555: compact (2)', () => {
     );
   });
 
-  it('folds the Catalog IDs under their §3d label, and leaves §3c in view under card 1', () => {
+  it('folds the Catalog IDs under their label, and leaves the paragraph under card 1 in view', () => {
     const [first, , , fourth] = cards();
     const fold = firstMatch(fourth, /<details\b[^>]*>[\s\S]*?<\/details>/, 'the Catalog fold');
-    const label = messagingTable('3d').find((cells) => cells[0] === 'en')?.[1];
 
     expect(fold).toMatch(/^<details class="card-more catalog-fold">\s*<summary id="catalog-h">/);
-    expect(text(firstMatch(fold, /<summary\b[^>]*>[\s\S]*?<\/summary>/, 'the Catalog summary'))).toBe(label);
+    expect(text(firstMatch(fold, /<summary\b[^>]*>[\s\S]*?<\/summary>/, 'the Catalog summary'))).not.toBe('');
     expect(fold.match(/<ul class="chips" aria-labelledby="catalog-h">/g) ?? []).toHaveLength(1);
-    // Every Catalog ID sits inside the fold. The count comes from the §3d ID row
-    // rather than a literal: it was a literal 14 until cmate-uat made the Catalog
-    // 15 (#2590), and a literal has to be found and bumped by hand each time the
-    // Catalog grows — the very staleness §3d keeps the count out of the label for.
-    const catalogIds = [
-      ...(sectionBody('3d')
-        .split('\n')
-        .find((line) => line.startsWith('`cmate-')) ?? '').matchAll(/`([^`]+)`/g),
-    ];
-    expect(catalogIds.length, 'public-messaging.md §3d lists no Catalog IDs').toBeGreaterThan(0);
-    expect(fold.match(/<li><code>cmate-[^<]+<\/code><\/li>/g) ?? []).toHaveLength(catalogIds.length);
+    // Every chip inside the fold is a Catalog ID. #3057 dropped the comparison
+    // with the ID row of public-messaging.md: the page lists what it lists.
+    const chips = fold.match(/<li>[\s\S]*?<\/li>/g) ?? [];
+    expect(chips.length).toBeGreaterThan(0);
+    expect(fold.match(/<li><code>cmate-[^<]+<\/code><\/li>/g) ?? []).toHaveLength(chips.length);
     expect(fold).not.toMatch(/<details\b[^>]*\bopen\b/);
     expect(fold).not.toMatch(/<(?:details|summary)\b[^>]*\b(?:role|tabindex|onclick)=/);
-    // §3c is a paragraph a reader sees without opening anything.
+    // The paragraph under card 1 is one a reader sees without opening anything.
     expect(first).not.toMatch(/<details\b/);
     expect(first).toMatch(/<p class="card-more">/);
   });
@@ -1723,7 +1632,6 @@ describe('Issue #2555: compact (2)', () => {
       'Start in one command',
     );
     expect(copyableCommands(merged)).toEqual(['npx commandmate@latest']);
-    expect(merged.replace(/\s+/g, ' ')).toContain(definitionEn());
     expect(html.slice(html.indexOf(merged) + merged.length)).toMatch(/^\s*<\/main>/);
   });
 
@@ -1742,17 +1650,12 @@ describe('Issue #2555: compact (2)', () => {
 });
 
 /**
- * Issue #1812 — the page is written on the Vibe Engineering axis, and its words
- * are copied from `docs/design/public-messaging.md` rather than composed here.
- *
- * Two failures are worth machine-checking. The first is the retired vocabulary
- * surviving in a corner nobody re-read: before this Issue the old H1 and "local
- * control plane" were still in the `<title>`, three meta tags, the hero, a
- * section lede and the footer, and the competitor comparison was a whole
- * section — nine lines across a file that had been "updated" twice since. The
- * second is paraphrase: the definition sentence is the one string every surface
- * repeats, and a reworded copy of it reads fine in isolation and splits the
- * product's story everywhere it is quoted.
+ * Issue #1812 — the page is written on the Vibe Engineering axis. The failure
+ * worth machine-checking is banned wording surviving in a corner nobody re-read:
+ * before this Issue the old H1 was still in the `<title>`, three meta tags, the
+ * hero, a section lede and the footer, and the competitor comparison was a whole
+ * section. Since #3057 the banned list is competitor names, and the page's
+ * wording is no longer compared with `docs/design/public-messaging.md`.
  */
 describe('Issue #1812: the page says what the messaging doc says', () => {
   it('keeps every term the Issue named traceable to the messaging doc', () => {
@@ -1800,36 +1703,11 @@ describe('Issue #1812: the page says what the messaging doc says', () => {
     expect(offenders).toEqual([]);
   });
 
-  it('names the axis and states the definition verbatim in the Philosophy section', () => {
-    expect(normalizedHtml()).toContain('Vibe Engineering');
-
-    // Scoped to one section rather than the whole file, because a page-wide
-    // `toContain` stays green with the visible copy paraphrased — measured, not
-    // assumed: swapping "expertise" for "skills" passed the page-wide form.
-    // #2495 moved the sentence out of the hero and into Philosophy; what has to
-    // hold is that it is somewhere on the page verbatim, not where it sits.
-    const philosophy = /<section class="section philosophy"[\s\S]*?<\/section>/.exec(
-      readIndexHtml(),
-    );
-
-    expect(philosophy, 'philosophy section not found in index.html').not.toBeNull();
-    expect(
-      philosophy![0].replace(/\s+/g, ' '),
-      'the en definition must be copied into the page, not paraphrased',
-    ).toContain(definitionEn());
-  });
-
-  it('opens on the hero line the messaging doc settled on', () => {
-    // Read from the doc rather than restated: #2493 replaced this line outright,
-    // and a hand-copied literal here is exactly what would have kept the old one
-    // green. §1 is the only place the H1 is decided.
-    expect(normalizedHtml()).toContain(`<h1>${heroRow('H1（en')}</h1>`);
-  });
-
   it('carries the H1 in the title and in both social tags', () => {
     // Until #2495 these carried the axis word, because the axis word was the H1.
     // It is the Philosophy heading now, so what the card and the tab have to
-    // carry is the claim the page actually opens on.
+    // carry is the claim the page actually opens on. Read off the page itself
+    // since #3057: the tab and the card agree with the hero, whatever it says.
     const html = readIndexHtml();
     const title = /<title>([^<]+)<\/title>/.exec(html)?.[1] ?? '';
     const ogTitle = /<meta property="og:title" content="([^"]+)"/.exec(html)?.[1] ?? '';
@@ -1837,8 +1715,11 @@ describe('Issue #1812: the page says what the messaging doc says', () => {
     const ogDescription =
       /<meta\s+property="og:description"\s+content="([^"]+)"/.exec(html)?.[1] ?? '';
 
-    const h1 = heroRow('H1（en');
-    const [lede] = heroRow('lede（en').split(/(?<=\.)\s+/);
+    const h1 = text(/<h1>([\s\S]*?)<\/h1>/.exec(html)?.[1] ?? '');
+    const [lede] = text(/<p class="lede">([\s\S]*?)<\/p>/.exec(html)?.[1] ?? '').split(/(?<=\.)\s+/);
+
+    expect(h1, 'index.html has no <h1>').not.toBe('');
+    expect(lede, 'index.html has no hero lede').not.toBe('');
 
     for (const [name, value] of Object.entries({ title, ogTitle })) {
       expect(value, `${name} is missing from index.html`).toBe(`CommandMate — ${h1}`);
@@ -1881,32 +1762,12 @@ describe('Issue #1812: the page says what the messaging doc says', () => {
  * the product does, a recorded run opens "See it running" above The loop, and
  * the axis word steps down to a Philosophy section above the footer.
  *
- * The assertions below read `docs/design/public-messaging.md` rather than
- * restating it. That file is the single source, and #2493 rewrote the H1, the
- * lede, all four card titles and the demo-to-card mapping without changing a
- * single file under `website/` — against hand-copied expectations this suite
- * would have stayed green through the whole of it.
+ * #3057 dropped the assertions here that compared the hero, the problem
+ * section, the four cards, the captions and Philosophy with the wording of
+ * `docs/design/public-messaging.md`. What stays is the order of the page and
+ * the §5 scan for claims nobody measured.
  */
 describe('Issue #2495: the LP on the orchestrate axis', () => {
-  /** The fenced en block of one section, as its lines. */
-  function enBlock(section: string): string[] {
-    const fenced = /\n### en\n+```\n([\s\S]*?)```/.exec(sectionBody(section));
-
-    expect(fenced, `public-messaging.md §${section} must carry a fenced en block`).not.toBeNull();
-    return fenced![1].split('\n');
-  }
-
-  const bullets = (lines: string[]): string[] =>
-    lines.filter((line) => line.startsWith('- ')).map((line) => line.slice(2).trim());
-
-  /** The en rows of the §2 tables: the axis name, the definition, the creed. */
-  const philosophyRows = (): string[] =>
-    messagingTable('2')
-      .filter((cells) => cells[0] === 'en')
-      .map((cells) => cells[1]);
-
-  const axisName = (): string => philosophyRows()[0];
-
   const sectionHtml = (selector: RegExp): string => {
     const found = selector.exec(readIndexHtml());
 
@@ -1929,75 +1790,27 @@ describe('Issue #2495: the LP on the orchestrate axis', () => {
     expect(positionOf('id="philosophy"')).toBeLessThan(positionOf('<footer'));
   });
 
-  it('states the §1 lede in the hero, verbatim', () => {
-    const hero = sectionHtml(/<section class="hero">[\s\S]*?<\/section>/).replace(/\s+/g, ' ');
-
-    expect(hero, 'the lede must be copied from §1, not rephrased').toContain(heroRow('lede（en'));
-  });
-
   it('puts the fact row directly under the install box', () => {
     const hero = sectionHtml(/<section class="hero">[\s\S]*?<\/section>/);
 
-    expect(hero.replace(/\s+/g, ' ')).toContain(heroRow('事実行（en'));
     // Under the command rather than above it: it is the reassurance a reader
     // wants at the moment they are about to paste something into a shell.
     expect(hero.indexOf('class="facts"')).toBeGreaterThan(hero.indexOf('class="install"'));
   });
 
-  it('opens the problem section on §1b, verbatim and complete', () => {
-    const lines = enBlock('1b');
-    const heading = lines.find((line) => line.startsWith('## '))!.slice(3).trim();
-    const closing = lines
-      .filter((line) => line.trim() && !line.startsWith('#') && !line.startsWith('- '))
-      .join(' ')
-      .trim();
-    const section = sectionHtml(/<section class="section" id="problem"[\s\S]*?<\/section>/);
-    const points = [...section.matchAll(/<li>([\s\S]*?)<\/li>/g)].map((match) => text(match[1]));
-
-    expect(text(/<h2[^>]*>([\s\S]*?)<\/h2>/.exec(section)![1])).toBe(heading);
-    expect(points).toEqual(bullets(lines));
-    expect(text(section)).toContain(closing);
-  });
-
-  it('states §4b in full under "What it does not do", and adds nothing to it', () => {
-    const section = sectionHtml(/<section class="section" id="limits"[\s\S]*?<\/section>/);
-    const listed = [...section.matchAll(/<li>([\s\S]*?)<\/li>/g)].map((match) => text(match[1]));
-
-    // Equality rather than containment in both directions: §4b's own rule is
-    // "no other section promises more than these five lines", which a page that
-    // quietly added a sixth would still satisfy under a subset check.
-    expect(listed).toEqual(bullets(enBlock('4b')));
-  });
-
-  it('states the four §3 cards, in the order the doc lists them', () => {
-    const section = sectionHtml(/<h2 id="why">[\s\S]*?<\/section>/);
-    const rendered = [...section.matchAll(/<article class="card">([\s\S]*?)<\/article>/g)].map(
-      (match) => ({
-        title: text(/<h3>([\s\S]*?)<\/h3>/.exec(match[1])?.[1] ?? ''),
-        body: text(/<p>([\s\S]*?)<\/p>/.exec(match[1])?.[1] ?? ''),
-      }),
-    );
-
-    expect(rendered).toEqual(messagingCards());
-  });
-
-  it('carries every §5 caption in "See it running"', () => {
+  it('captions every demo in "See it running"', () => {
     const section = sectionHtml(/<section class="section" id="demos"[\s\S]*?<\/section>/);
     const captions = [...section.matchAll(/<figcaption>([\s\S]*?)<\/figcaption>/g)].map((match) =>
       text(match[1]),
     );
-    const rendered = captions.join(' ');
 
     expect(captions).toHaveLength(DEMO_ORDER.length);
-    expect(
-      messagingCaptions().filter((caption) => !rendered.includes(caption)),
-      'these §5 captions are not on the page',
-    ).toEqual([]);
+    expect(captions.filter((caption) => caption === ''), 'a demo with an empty caption').toEqual([]);
   });
 
   it('captions the lead run with what the recording shows', () => {
-    // A literal, unlike the four below it: §5 covers the feature cuts, and this
-    // clip is a recorded orchestrate run instead. Every count in the sentence
+    // A literal: this clip is a recorded orchestrate run, and the caption is a
+    // measured claim about it. Every count in the sentence
     // was read off the footage and the take's brief before it was written —
     // one message to a Command Code session, four issues (#19–#22), four
     // workers, four passing gate columns, and a UAT column in the closing
@@ -2010,20 +1823,6 @@ describe('Issue #2495: the LP on the orchestrate axis', () => {
     expect(section).toContain(`src="assets/media/${LEAD_DEMO}"`);
   });
 
-  it('leaves the retired H1 as the Philosophy heading and nowhere else', () => {
-    const section = sectionHtml(/<section class="section philosophy"[\s\S]*?<\/section>/);
-
-    // The failure #1812 was written against was the old wording surviving in a
-    // corner nobody re-read. #2493 did not retire this sentence, it demoted it,
-    // so "is it gone" is the wrong question and "is it in exactly one place" is
-    // the right one.
-    expect(readIndexHtml().split(axisName()).length - 1).toBe(1);
-    expect(section.replace(/\s+/g, ' ')).toContain(
-      `<h2 id="philosophy-h">${axisName()}</h2>`,
-    );
-    expect(text(section)).toContain(philosophyRows().find((row) => row.startsWith('We do not'))!);
-  });
-
   it('keeps the Willison footnote with the sentence it is a footnote to', () => {
     const section = sectionHtml(/<section class="section philosophy"[\s\S]*?<\/section>/);
 
@@ -2031,7 +1830,7 @@ describe('Issue #2495: the LP on the orchestrate axis', () => {
     expect(section).toContain('https://simonwillison.net/2025/Oct/7/vibe-engineering/');
   });
 
-  it('makes none of the claims §11b puts outside what was measured', () => {
+  it('makes none of the claims §5 puts outside what was measured', () => {
     const claims = unmeasuredClaims().filter((claim) => !UNSCANNABLE_CLAIMS.includes(claim));
 
     expect(claims.length).toBeGreaterThan(0);
@@ -2047,15 +1846,15 @@ describe('Issue #2495: the LP on the orchestrate axis', () => {
     expect(offenders).toEqual([]);
   });
 
-  it('still finds the two §11b rows a substring scan cannot be run for', () => {
+  it('still finds the two §5 rows a substring scan cannot be run for', () => {
     // Both are real rules, and neither can be a substring search on this page.
     // "loop" is the name of a section here — the cycle the page is about, which
-    // §11b's own reason ("nothing runs forever") is not talking about, and which
-    // §4b spells out as "Nothing loops forever". "the only …" is an ellipsis, a
+    // §5's own reason ("nothing runs forever") is not talking about, and which
+    // §7 spells out as "nothing loops forever". "the only …" is an ellipsis, a
     // shape rather than a string. (The page once said "the only network traffic
-    // is the agent CLI's own API calls"; #2549 retracted that as an overclaim and
-    // put public-messaging.md §14 in its place.) Pinned here so the exemption
-    // cannot outlive the rows.
+    // is the agent CLI's own API calls"; #2549 retracted that as an overclaim,
+    // and public-messaging.md §6 now lists it among the retracted wording.)
+    // Pinned here so the exemption cannot outlive the rows.
     expect(unmeasuredClaims()).toEqual(expect.arrayContaining(UNSCANNABLE_CLAIMS));
   });
 });
@@ -2065,44 +1864,14 @@ describe('Issue #2495: the LP on the orchestrate axis', () => {
  * happens after the agent says it is done, why this is not an IDE, and five more
  * a reader asks before installing.
  *
- * The answers are where the page is most specific — exit codes, what goes over
- * the network, when Auto Yes switches itself off — so a paraphrase here is a
- * promise the messaging doc never made. Every question and answer is read out of
- * §13 between its `<!-- faq:en -->` markers, the way definitionEn() reads
- * `def:en`, and compared with the page rather than restated.
+ * #3057 dropped the check that every question and answer is
+ * `docs/design/public-messaging.md` §13 verbatim, and §13 with it. What stays is
+ * how the section works — native disclosure, its place on the page, its own CSS
+ * block and reduced motion — and the words §5 rules out.
  */
 describe('Issue #2553: FAQ', () => {
   const CSS_BLOCK_START = '/* FAQ (#2553) */';
   const CSS_BLOCK_END = '/* /FAQ (#2553) */';
-
-  interface Faq {
-    question: string;
-    answer: string;
-    /** The answer's code spans, which the page has to render as `<code>`. */
-    code: string[];
-  }
-
-  const codeSpans = (markdown: string): string[] =>
-    Array.from(markdown.matchAll(/`([^`]+)`/g), ([, span]) => span);
-
-  /** §13's en table as the doc fixes it: numbered rows, in order. */
-  const faqEnRows = (): string[][] => {
-    const doc = fs.readFileSync(MESSAGING_DOC, 'utf-8');
-    const match = /<!-- faq:en -->([\s\S]*?)<!-- \/faq:en -->/.exec(doc);
-
-    expect(
-      match,
-      'docs/design/public-messaging.md must delimit the en FAQ with <!-- faq:en --> … <!-- /faq:en -->',
-    ).not.toBeNull();
-    return tableRows(match![1]).filter((cells) => cells[0] !== '#');
-  };
-
-  const faqEn = (): Faq[] =>
-    faqEnRows().map(([, question, answer]) => ({
-      question: prose(question),
-      answer: prose(answer),
-      code: codeSpans(answer),
-    }));
 
   const faqSection = (): string => {
     const found = /<section class="section" id="faq" aria-labelledby="faq-h">[\s\S]*?<\/section>/.exec(
@@ -2116,19 +1885,6 @@ describe('Issue #2553: FAQ', () => {
   const detailsBlocks = (): string[] =>
     Array.from(faqSection().matchAll(/<details\b[^>]*>([\s\S]*?)<\/details>/g), ([, inner]) => inner);
 
-  const renderedFaq = (): Faq[] =>
-    detailsBlocks().map((inner) => {
-      const parts = /^\s*<summary>([\s\S]*?)<\/summary>([\s\S]*)$/.exec(inner);
-
-      expect(parts, `a <details> must open on a bare <summary>:\n${inner}`).not.toBeNull();
-      const [, summary, body] = parts!;
-      return {
-        question: text(summary),
-        answer: text(body),
-        code: Array.from(body.matchAll(/<code>([\s\S]*?)<\/code>/g), ([, span]) => text(span)),
-      };
-    });
-
   /** styles.css between the FAQ's own opening and closing comments. */
   const faqCss = (): string => {
     const css = fs.readFileSync(STYLES_CSS, 'utf-8');
@@ -2139,28 +1895,6 @@ describe('Issue #2553: FAQ', () => {
     expect(end, `styles.css must close the FAQ rules with ${CSS_BLOCK_END}`).toBeGreaterThan(start);
     return css.slice(start, end);
   };
-
-  it('reads eight numbered questions out of the faq:en markers in §13', () => {
-    // Without this, a marker that parses to nothing would compare an empty doc
-    // against an empty page and pass.
-    const rows = faqEnRows();
-
-    expect(rows.map((cells) => cells[0])).toEqual(['1', '2', '3', '4', '5', '6', '7', '8']);
-    expect(rows.every((cells) => cells.length === 3), 'a §13 row split on a stray |').toBe(true);
-  });
-
-  it('asks and answers the eight §13 questions verbatim, in the order the doc fixes', () => {
-    // Equality in both directions, like §4b under "What it does not do": a ninth
-    // question the doc does not have is as much a drift as a reworded one.
-    expect(
-      renderedFaq().map(({ question, answer }) => ({ question, answer })),
-      'the FAQ must be copied from public-messaging.md §13, not paraphrased',
-    ).toEqual(faqEn().map(({ question, answer }) => ({ question, answer })));
-  });
-
-  it("renders each answer's code spans as code", () => {
-    expect(renderedFaq().map((faq) => faq.code)).toEqual(faqEn().map((faq) => faq.code));
-  });
 
   it('sits directly after "What it does not do"', () => {
     const html = readIndexHtml();
@@ -2177,8 +1911,11 @@ describe('Issue #2553: FAQ', () => {
   it('opens and closes on the native summary alone, so the keyboard needs no script', () => {
     const section = faqSection();
 
-    expect(detailsBlocks()).toHaveLength(faqEnRows().length);
-    expect(section.match(/<summary\b/g) ?? []).toHaveLength(faqEnRows().length);
+    expect(detailsBlocks().length).toBeGreaterThan(0);
+    expect(section.match(/<summary\b/g) ?? []).toHaveLength(detailsBlocks().length);
+    for (const inner of detailsBlocks()) {
+      expect(inner, 'a <details> must open on a bare <summary>').toMatch(/^\s*<summary>/);
+    }
     // A role, a tabindex or a click handler on either element takes the toggle
     // away from the browser, and with it Enter / Space; so does a script that
     // reaches for them.
@@ -2195,8 +1932,8 @@ describe('Issue #2553: FAQ', () => {
     expect(header![0]).not.toMatch(/href="#faq/);
   });
 
-  it('says neither "loop" nor "the only", which §13 rules out and the page-wide scan cannot', () => {
-    // UNSCANNABLE_CLAIMS exempts both from the §11b scan because the page has a
+  it('says neither "loop" nor "the only", which §5 rules out and the page-wide scan cannot', () => {
+    // UNSCANNABLE_CLAIMS exempts both from the §5 scan because the page has a
     // section called The loop. Inside this one section there is no such excuse.
     const said = text(faqSection()).toLowerCase();
 
@@ -2251,11 +1988,10 @@ describe('Issue #2553: FAQ', () => {
  * section walks the lead's run, and The loop is cut down to one worker's turn
  * inside it.
  *
- * All of it is copied from `docs/design/public-messaging.md` §3b–§3e, so every
- * assertion here reads the doc rather than restating it. The Measured table is
- * the one that most needs it: its cells are numbers read off recorded runs, and
- * a number retyped by hand is the kind of drift nobody sees until someone
- * checks it against the recording.
+ * #3057 dropped the assertions that compared this with the wording of
+ * `docs/design/public-messaging.md` §3b–§3e cell for cell. What stays is where
+ * the Measured table sits, that it is never shown without "as observed", and
+ * that it scrolls in a labelled region.
  */
 describe('Issue #2550: the lead run, measured and walked through', () => {
   const pageSection = (id: string): string => {
@@ -2274,28 +2010,6 @@ describe('Issue #2550: the lead run, measured and walked through', () => {
     return found![1];
   };
 
-  const allText = (html: string, pattern: RegExp): string[] =>
-    [...html.matchAll(pattern)].map((match) => text(match[1]));
-
-  /** One lettered part of §3e (`3e-1` … `3e-6`), with its en copy. */
-  const part = (id: string): string => headingBody(sectionBody('3e'), `### ${id}.`);
-  const partEn = (id: string): string => firstFence(headingBody(part(id), '#### en'));
-
-  /** §3b's en table and the line under it. */
-  const measuredEn = (): { header: string[]; rows: string[][]; under: string } => {
-    const body = headingBody(sectionBody('3b'), '### en');
-    const [header, ...rows] = tableRows(body);
-    const under = body
-      .split('\n')
-      .map((line) => line.trim())
-      .filter((line) => line && !line.startsWith('|'))[0];
-
-    // Guard against a parse that finds nothing and then compares nothing.
-    expect(header, 'public-messaging.md §3b en has no table').toBeDefined();
-    expect(rows.length, 'public-messaging.md §3b en table has no rows').toBeGreaterThan(0);
-    return { header, rows, under };
-  };
-
   /** The Measured block: after the recorded run, before the four feature demos. */
   const measuredHtml = (): string => {
     const demos = pageSection('demos');
@@ -2310,34 +2024,14 @@ describe('Issue #2550: the lead run, measured and walked through', () => {
     return demos.slice(start, end);
   };
 
-  it('copies the Measured table from §3b cell for cell', () => {
-    const { header, rows } = measuredEn();
-    const html = measuredHtml();
-    const thead = firstMatch(html, /<thead>([\s\S]*?)<\/thead>/, 'Measured <thead>');
-    const tbody = firstMatch(html, /<tbody>([\s\S]*?)<\/tbody>/, 'Measured <tbody>');
-
-    // Every cell, not only the numbers: "4/4 gates passed" and "UAT go" are as
-    // much a measured claim as "8 min 39 s", and §3b says the table is copied
-    // verbatim. Order and row count are part of the equality.
-    expect(allText(thead, /<th[^>]*>([\s\S]*?)<\/th>/g)).toEqual(header);
-    expect(
-      [...tbody.matchAll(/<tr>([\s\S]*?)<\/tr>/g)].map((row) =>
-        allText(row[1], /<t[hd][^>]*>([\s\S]*?)<\/t[hd]>/g),
-      ),
-    ).toEqual(rows);
-  });
-
-  it('puts "as observed" directly under the table, then §3e-4', () => {
-    const { under } = measuredEn();
+  it('puts "as observed" directly under the Measured table', () => {
     const html = measuredHtml();
 
-    // §3b: the line goes directly under the table and the table is never shown
-    // without it — so "somewhere in the block" is not enough.
-    expect(under).toBe('as observed');
+    // public-messaging.md §1: the line goes directly under the table and the
+    // table is never shown without it — so "somewhere in the block" is not enough.
     expect(
       text(firstMatch(html, /<\/table>\s*<\/div>\s*<p[^>]*>([\s\S]*?)<\/p>/, 'the line under the table')),
-    ).toBe(under);
-    expect(text(html)).toContain(`${under} ${prose(partEn('3e-4'))}`);
+    ).toBe('as observed');
   });
 
   it('scrolls the Measured table in its own box, as the With / Without table does', () => {
@@ -2352,126 +2046,6 @@ describe('Issue #2550: the lead run, measured and walked through', () => {
     expect(html.indexOf('id="lead"')).toBeLessThan(html.indexOf('id="loop"'));
   });
 
-  it('heads the section with card 1 and opens it on §3e-2', () => {
-    const section = pageSection('lead');
-
-    expect(text(firstMatch(section, /<h2[^>]*>([\s\S]*?)<\/h2>/, '#lead heading'))).toBe(
-      messagingCards()[0].title,
-    );
-    // §3e-2 ends on "Nothing mutates without an explicit approve, and a failed
-    // gate stops the run." — the sentence the Issue asked for by name.
-    expect(partEn('3e-2')).toContain('Nothing mutates without an explicit approve');
-    expect(
-      text(firstMatch(section, /<p class="section-lede">([\s\S]*?)<\/p>/, '#lead lede')),
-    ).toBe(prose(partEn('3e-2')));
-  });
-
-  it('walks plan, dispatch, merge and uat in §3e-1 order and wording', () => {
-    const lines = partEn('3e-1').split('\n');
-    const bullets = lines.filter((line) => line.startsWith('- ')).map((line) => line.slice(2).trim());
-    const closing = lines.filter((line) => line.trim() && !line.startsWith('- ')).join(' ');
-    const section = pageSection('lead');
-    const list = firstMatch(section, /<ol class="lead-steps">([\s\S]*?)<\/ol>/, '.lead-steps');
-
-    // The doc writes "name — what it does"; the page sets the name as the
-    // heading and the rest as the paragraph, so join them back to compare.
-    const steps = [...list.matchAll(/<li>([\s\S]*?)<\/li>/g)].map(
-      (item) =>
-        `${text(/<h3>([\s\S]*?)<\/h3>/.exec(item[1])?.[1] ?? '')} — ${text(/<p>([\s\S]*?)<\/p>/.exec(item[1])?.[1] ?? '')}`,
-    );
-
-    expect(bullets.map((bullet) => bullet.split(' — ')[0])).toEqual(['plan', 'dispatch', 'merge', 'uat']);
-    expect(steps).toEqual(bullets);
-    expect(
-      text(firstMatch(section, /<\/ol>\s*<p class="note">([\s\S]*?)<\/p>/, 'the note under the steps')),
-    ).toBe(prose(closing));
-  });
-
-  it('shows the §3e-3 contract byte for byte, captioned with its built-in gates', () => {
-    const section = pageSection('lead');
-    const figure = firstMatch(
-      section,
-      /<figure class="lead-contract">([\s\S]*?)<\/figure>/,
-      '.lead-contract',
-    );
-
-    // Raw rather than text(): YAML indentation is meaning, so whitespace is not
-    // collapsed here. Nothing in it needs escaping in HTML.
-    expect(firstMatch(figure, /<pre class="snippet"><code>([\s\S]*?)<\/code><\/pre>/, 'the contract snippet')).toBe(
-      firstFence(part('3e-3')),
-    );
-    expect(text(firstMatch(figure, /<figcaption>([\s\S]*?)<\/figcaption>/, 'the contract caption'))).toBe(
-      prose(partEn('3e-3')),
-    );
-  });
-
-  it('states §3e-5 whole under "Review by another agent"', () => {
-    const section = pageSection('lead');
-    const review = firstMatch(section, /<div class="lead-review">([\s\S]*?)<\/div>/, '.lead-review');
-    const title = /^### 3e-5\. (.+?)（/m.exec(sectionBody('3e'))?.[1];
-
-    expect(title, 'public-messaging.md §3e-5 has no title').toBe('Review by another agent');
-    expect(text(firstMatch(review, /<h3>([\s\S]*?)<\/h3>/, 'the review heading'))).toBe(title);
-    // Whole, never trimmed: the last sentence is what says the runner does not
-    // run a cross-model review for you (§4b), and it is the easiest one to cut.
-    expect(text(firstMatch(review, /<p>([\s\S]*?)<\/p>/, 'the review paragraph'))).toBe(
-      prose(partEn('3e-5')),
-    );
-  });
-
-  describe('the four cards', () => {
-    const cards = (): string[] => {
-      const section = /<h2 id="why">[\s\S]*?<\/section>/.exec(readIndexHtml());
-
-      expect(section, 'the cards section is not in index.html').not.toBeNull();
-      return [...section![0].matchAll(/<article class="card">([\s\S]*?)<\/article>/g)].map(
-        (match) => match[1],
-      );
-    };
-
-    it('puts §3c directly under the sentence of card 1', () => {
-      const card = cards()[0];
-      const supported = firstFence(headingBody(sectionBody('3c'), '### en'));
-
-      expect(text(firstMatch(card, /<h3>([\s\S]*?)<\/h3>/, 'card 1 title'))).toBe(messagingCards()[0].title);
-      expect(
-        text(firstMatch(card, /<\/p>\s*<p class="card-more">([\s\S]*?)<\/p>/, 'the paragraph under card 1')),
-      ).toBe(prose(supported));
-    });
-
-    it('lists the §3d Catalog IDs as chips under card 4, in order', () => {
-      const card = cards()[3];
-      const idLine = sectionBody('3d')
-        .split('\n')
-        .find((line) => line.startsWith('`cmate-'));
-      const ids = [...(idLine ?? '').matchAll(/`([^`]+)`/g)].map((match) => match[1]);
-      const label = messagingTable('3d').find((cells) => cells[0] === 'en')?.[1];
-
-      expect(ids.length, 'public-messaging.md §3d lists no Catalog IDs').toBeGreaterThan(0);
-      expect(text(firstMatch(card, /<h3>([\s\S]*?)<\/h3>/, 'card 4 title'))).toBe(messagingCards()[3].title);
-      // The label is the <summary> the IDs fold under since #2555, which a
-      // paragraph cannot be; the words compared with §3d are the same.
-      expect(text(firstMatch(card, /<summary id="catalog-h">([\s\S]*?)<\/summary>/, 'the Catalog label'))).toBe(label);
-      expect(
-        allText(firstMatch(card, /<ul class="chips"[^>]*>([\s\S]*?)<\/ul>/, 'the Catalog chips'), /<li>([\s\S]*?)<\/li>/g),
-      ).toEqual(ids);
-    });
-  });
-
-  it('opens The loop on §3e-6 and keeps its four beats', () => {
-    const section = pageSection('loop');
-
-    expect(text(firstMatch(section, /<p class="section-lede">([\s\S]*?)<\/p>/, '#loop lede'))).toBe(
-      prose(partEn('3e-6')),
-    );
-    // §3e-6 names four beats, so the section still has to show four.
-    expect(allText(section, /<li class="beat">\s*<h3>([\s\S]*?)<\/h3>/g)).toEqual([
-      'The requirement',
-      'The contract',
-      'The agent runs',
-      'The verdict',
-    ]);
-  });
 });
 
 /**
@@ -2756,29 +2330,10 @@ describe('Issue #2552: nav, footer, version line and llms.txt', () => {
   });
 
   it('serves llms.txt inside the wording scans above', () => {
-    // The banned-term and §11b scans walk textFiles(); a file they skip is a
+    // The banned-term and §5 scans walk textFiles(); a file they skip is a
     // file they cannot keep clean.
     expect(fs.existsSync(LLMS_TXT)).toBe(true);
     expect(textFiles().map((entry) => entry.file)).toContain('llms.txt');
-  });
-
-  it('opens llms.txt on the §1 H1, lede and fact row', () => {
-    const lines = llmsTxt().split('\n');
-
-    expect(lines[0]).toBe(`# CommandMate — ${heroRow('H1（en')}`);
-    expect(lines).toContain(`> ${heroRow('lede（en')}`);
-    expect(lines).toContain(heroRow('事実行（en'));
-  });
-
-  it('states the four §3 cards in llms.txt, in order and verbatim', () => {
-    const cards = llmsTxt()
-      .split('\n')
-      .flatMap((line) => {
-        const card = /^- \*\*([^*]+)\*\*: (.+)$/.exec(line);
-        return card ? [{ title: card[1], body: card[2] }] : [];
-      });
-
-    expect(cards).toEqual(messagingCards());
   });
 
   it('links llms.txt to the docs, the tutorial and GitHub', () => {
