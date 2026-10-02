@@ -1,17 +1,17 @@
 {
   "name": "commandmate",
   "version": "0.43.0",
-  "description": "A local control plane for agent CLIs — orchestration and visibility for Claude Code, Codex, Gemini CLI, and more across Git worktrees",
+  "description": "No long blocks of time? Run an AI team from your phone. Git worktree sessions, task contracts and verification gates for Claude Code, Codex, Gemini CLI, Copilot, OpenCode, Antigravity and Command Code.",
   "keywords": [
+    "ai-agents",
     "claude-code",
     "codex-cli",
     "gemini-cli",
-    "agent-cli",
-    "cli-orchestration",
-    "ai-coding",
-    "git-worktree",
     "coding-agent",
-    "session-manager",
+    "agent-orchestration",
+    "git-worktree",
+    "verification-gates",
+    "mobile",
     "tmux",
     "cli",
     "developer-tools"

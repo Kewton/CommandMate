@@ -77,6 +77,22 @@ http://127.0.0.1:3000
 > `localhost` can resolve to `::1` (IPv6) first, which CommandMate does not listen on — if
 > another process holds that address, your browser silently talks to it instead.
 
+### 3. Supported browsers
+
+The web UI is built with Tailwind CSS 4, which targets modern browsers and relies on
+`@property` and `color-mix()` for its color and theming layer. The minimum supported
+versions are:
+
+| Browser | Minimum version |
+|---------|-----------------|
+| Safari (macOS / iOS) | 16.4+ |
+| Chrome / Edge | 111+ |
+| Firefox | 128+ |
+
+Older browsers will load the app but render it with degraded colors and spacing.
+CommandMate is a local developer tool, so this matches the browsers a current
+development machine or phone will already have.
+
 ---
 
 ## Registering Repositories
@@ -826,6 +842,22 @@ On mobile, a tab bar is displayed at the bottom:
 
 ![Mobile view](../../images/screenshot-mobile.png)
 *Mobile: Homepage*
+
+### Installing as an app (PWA)
+
+CommandMate is a Progressive Web App. On a mobile browser, use **Add to Home Screen** to launch it
+full-screen (standalone), which is ideal for monitoring agents on the go. A Service Worker precaches
+static assets and shows an offline fallback screen; API responses, the login page, and WebSocket
+traffic are never cached.
+
+> **HTTPS is required for installation.** Browsers only register a Service Worker (and offer
+> install) on `https://` or `http://127.0.0.1`. When accessing a self-hosted instance over plain HTTP
+> on the LAN (e.g. `http://192.168.x.x:3000`), install and offline support are disabled by the
+> browser — use `commandmate remote`, a tunnel or an HTTPS reverse proxy to enable them. The app
+> itself remains fully usable without the PWA layer.
+
+Once installed, the app can also receive push notifications while it is closed — see
+[Phone Notifications (Web Push)](#phone-notifications-web-push).
 
 ---
 

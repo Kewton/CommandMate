@@ -161,6 +161,59 @@ Verify the installation:
 commandmate --version
 ```
 
+### Trying it first with `npx`
+
+```bash
+npx commandmate@latest
+```
+
+Always write `npx commandmate@latest`, not bare `npx commandmate`. If CommandMate is already
+installed globally, bare `npx commandmate` runs that existing binary without ever checking the
+registry, so you silently keep running an old version. `@latest` forces npx to resolve the newest
+release. This only affects `npx` — `npm install -g commandmate` always resolves from the registry.
+
+For anything beyond a first look, prefer the global install. `npx` unpacks CommandMate into the npm
+cache, and `commandmate start --daemon` runs the background server out of that cache directory — a
+later `npx` run or a cache clean can delete it out from under the running server.
+
+Running `commandmate` with no arguments walks you through the whole first run: it checks
+your dependencies, asks a few setup questions on first use, starts the server in the
+background, waits for it to come up, and opens the UI in your browser.
+Run it again later and it skips straight to opening the UI (or tells you the server is
+already running).
+
+- Already have a `.env`? The setup questions are skipped.
+- Don't want the browser to open? Use `commandmate --no-open` (also skipped automatically
+  on CI and headless sessions).
+- Windows: CommandMate depends on tmux, so it runs on Windows via WSL2 (native Windows is not
+  supported). See the [WSL2 Setup Guide](./wsl2-setup.md).
+
+### Developer setup (from source)
+
+For contributors or those building a development environment:
+
+```bash
+git clone https://github.com/Kewton/CommandMate.git
+cd CommandMate
+./scripts/setup.sh  # Auto-runs dependency check, env setup, build, and launch
+```
+
+Manual setup (for customization):
+
+```bash
+git clone https://github.com/Kewton/CommandMate.git
+cd CommandMate
+./scripts/preflight-check.sh          # Dependency check
+npm install
+./scripts/setup-env.sh                # Interactive .env generation
+npm run db:init
+npm run build
+npm start
+```
+
+> **Note**: `./scripts/*` scripts are only available in the development environment. For global
+> installs (`npm install -g`), use the `commandmate` CLI.
+
 ---
 
 ## Initial Setup
@@ -411,6 +464,9 @@ commandmate docs [options]
 
 ## Troubleshooting
 
+Sessions that look stuck, a bare `tmux attach` that looks empty, phone access and other common
+questions are collected in [Troubleshooting & FAQ](./troubleshooting.md).
+
 ### command not found Error
 
 If you see `commandmate: command not found`:
@@ -608,7 +664,7 @@ rm -rf ~/.commandmate
 ## Next Steps
 
 - [Web App Guide](./webapp-guide.md) - Basic browser operations
-- [Quick Start Guide](./quick-start.md) - Using Claude Code commands
+- [Quick Start Guide](./quick-start.md) - The minimum contract-and-verify loop, then a five-minute flow
 - [Deployment Guide](../../DEPLOYMENT.md) - Production environment deployment
 
 ---

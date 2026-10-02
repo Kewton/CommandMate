@@ -164,6 +164,59 @@ npm install -g commandmate
 commandmate --version
 ```
 
+### まず `npx` で試す
+
+```bash
+npx commandmate@latest
+```
+
+`npx` を使うときは必ず `npx commandmate@latest` と書いてください。CommandMate をグローバル
+インストール済みの環境では、`@latest` なしの `npx commandmate` はレジストリを一切参照せず、
+既存のバイナリをそのまま実行します。そのため古いバージョンで動き続けていることに気づけません。
+`@latest` を付けると npx が最新リリースを解決します。これは `npx` だけの話で、
+`npm install -g commandmate` は `@latest` なしでも常にレジストリから解決します。
+
+お試し以外の用途ではグローバルインストールを推奨します。`npx` は CommandMate を npm キャッシュ
+に展開するため、`commandmate start --daemon` のバックグラウンドサーバーもそのキャッシュ
+ディレクトリ上で動きます。後から `npx` を再実行したりキャッシュを削除すると、稼働中のサーバーの
+足元のファイルが消える可能性があります。
+
+引数なしで `commandmate` を実行すると、初回セットアップから起動までを一気に案内します。
+依存関係をチェックし、初回のみ設定を対話で質問し、サーバーをバックグラウンドで起動して
+起動完了を待ってから、ブラウザで UI を開きます。
+2 回目以降は質問されず、UI を開くだけ（またはサーバー稼働中である旨の案内）になります。
+
+- `.env` が既にある場合、設定の質問はスキップされます
+- ブラウザを開きたくない場合は `commandmate --no-open`（CI・ヘッドレス環境では自動的にスキップ）
+- Windows: CommandMate は tmux に依存するため、Windows では WSL2 上で動作します（ネイティブ Windows は
+  非対応）。[WSL2 セットアップガイド](./wsl2-setup.md) を参照してください
+
+### 開発者向けセットアップ（ソースから）
+
+コントリビューターや開発環境を構築する場合：
+
+```bash
+git clone https://github.com/Kewton/CommandMate.git
+cd CommandMate
+./scripts/setup.sh  # 依存チェック、環境設定、ビルド、起動まで自動実行
+```
+
+手動セットアップ（カスタマイズしたい場合）：
+
+```bash
+git clone https://github.com/Kewton/CommandMate.git
+cd CommandMate
+./scripts/preflight-check.sh          # 依存チェック
+npm install
+./scripts/setup-env.sh                # 対話式で .env を生成
+npm run db:init
+npm run build
+npm start
+```
+
+> **Note**: `./scripts/*` スクリプトは開発環境でのみ使用可能です。グローバルインストール
+> （`npm install -g`）では `commandmate` CLI を使用してください。
+
 ---
 
 ## 初期設定
@@ -524,6 +577,9 @@ codex を最新版に上げる導線は **2 本**あり、pane が落ちるか�
 
 ## トラブルシューティング
 
+固まって見えるセッション、素の `tmux attach` が空白に見える件、スマホからのアクセスなどのよくある質問は
+[トラブルシューティング & FAQ](./troubleshooting.md) にまとめています。
+
 ### command not found エラー
 
 `commandmate: command not found` と表示される場合：
@@ -721,7 +777,7 @@ rm -rf ~/.commandmate
 ## 次のステップ
 
 - [Webアプリ操作ガイド](./webapp-guide.md) - ブラウザからの基本操作
-- [クイックスタートガイド](./quick-start.md) - Claude Code コマンドの使い方
+- [クイックスタートガイド](./quick-start.md) - 契約と検証の最小ループと、5 分の開発フロー
 - [デプロイガイド](../DEPLOYMENT.md) - 本番環境への展開
 
 ---
