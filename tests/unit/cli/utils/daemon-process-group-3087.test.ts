@@ -195,6 +195,27 @@ describe('DaemonManager process group (Issue #3087)', () => {
     expect(await isPortInUse('127.0.0.1', port)).toBe(false);
   });
 
+  it('a later start keeps the stale PID file while the orphaned server lives, so stop can still find it', async () => {
+    const daemon = new DaemonManager(pidFile);
+    const leader = await daemon.start({ port });
+    leaders.push(leader);
+    expect(await waitForServer('127.0.0.1', port, { timeoutMs: 10000 })).toBe(true);
+    expect(await waitUntil(() => readChildPid() !== null)).toBe(true);
+    const child = readChildPid()!;
+
+    // npm (the recorded PID) alone dies, e.g. kill -9; the server keeps the port.
+    process.kill(leader, 'SIGKILL');
+    expect(await waitUntil(() => !isAlive(leader))).toBe(true);
+
+    // What `remote` / `start` run next: refused, and the PID file is not removed.
+    await expect(new DaemonManager(pidFile).start({ port })).rejects.toThrow(/still running/);
+    expect(existsSync(pidFile)).toBe(true);
+
+    expect(await new DaemonManager(pidFile).stop()).toBe(true);
+    expect(await waitUntil(() => !isAlive(child), 2000)).toBe(true);
+    expect(await isPortInUse('127.0.0.1', port)).toBe(false);
+  });
+
   it('start refuses a port another process already answers on, and spawns nothing', async () => {
     const holder = createServer();
     holders.push(holder);

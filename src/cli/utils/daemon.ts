@@ -16,6 +16,12 @@ import { REVERSE_PROXY_WARNING } from '../config/security-messages';
 import { CLILogger } from './logger';
 import { loadEffectiveEnv, resolveServerEndpoint, ServerEnv } from './server-url';
 import { isPortInUse } from './server-ready';
+import {
+  describeListeners,
+  isExitedState,
+  isZombieProcess,
+  listProcessGroupStates,
+} from './process-inspect';
 
 /** How long stop() waits for the server's process group after SIGTERM before escalating. */
 export const STOP_GRACE_TIMEOUT_MS = 10000;
@@ -40,14 +46,29 @@ function signalTargetExists(target: number): boolean {
 }
 
 /**
+ * Issue #3087: whether the process is still running code. `kill(pid, 0)` also succeeds for a
+ * zombie, which without an init process (a container whose PID 1 never reaps) stays forever.
+ */
+function processAlive(pid: number): boolean {
+  return signalTargetExists(pid) && !isZombieProcess(pid);
+}
+
+/**
  * Issue #3087: whether any process of the group the daemon was spawned into is still alive.
  *
  * `start()` spawns with `detached: true`, so the recorded PID is a process-group leader and the
  * server it launches (npm → node server.js) inherits that PGID. A PGID is not reused while any
  * member is alive, so a live group with the recorded ID is ours even after the leader exited.
+ *
+ * A group whose members are all zombies has exited. Only Linux can tell (via /proc); elsewhere,
+ * or when /proc shows no member at all, the signal-based answer stands.
  */
 function processGroupExists(pid: number): boolean {
-  return pid > 1 && signalTargetExists(-pid);
+  if (pid <= 1 || !signalTargetExists(-pid)) {
+    return false;
+  }
+  const states = listProcessGroupStates(pid);
+  return states === null || states.length === 0 || states.some((state) => !isExitedState(state));
 }
 
 /**
@@ -123,6 +144,16 @@ export class DaemonManager {
       throw new Error(`Server is already running (PID: ${pid})`);
     }
 
+    // Issue #3087: a stale PID file is the only record of the PGID an orphaned server still runs
+    // in. Removing it here would leave `stop` with nothing to find that server by.
+    const stale = this.pidManager.readState();
+    if (stale !== null && !processAlive(stale.pid) && processGroupExists(stale.pid)) {
+      throw new Error(
+        `Processes of an earlier server are still running (process group ${stale.pid}). ` +
+          'Run "commandmate stop" to stop them first.'
+      );
+    }
+
     // Clean up stale PID file
     this.pidManager.removePid();
 
@@ -188,9 +219,11 @@ export class DaemonManager {
     // readiness wait) would be answered by that other process and mistake it for this server.
     const probeHost = bindAddress === '0.0.0.0' ? '127.0.0.1' : bindAddress;
     if (await isPortInUse(probeHost, parseInt(port, 10))) {
+      const listeners = describeListeners(parseInt(port, 10));
       throw new Error(
-        `Port ${port} on ${probeHost} is already in use by another process ` +
-          '(not the server recorded in the PID file, e.g. an earlier server left running). ' +
+        `Port ${port} on ${probeHost} is already in use by another process` +
+          `${listeners ? ` (${listeners})` : ''} ` +
+          'that is not the server recorded in the PID file (e.g. an earlier server left running). ' +
           'Stop that process or choose another port.'
       );
     }
@@ -264,7 +297,7 @@ export class DaemonManager {
     if (!this.pidManager.isProcessRunning()) {
       // The leader is gone. Only when its PID is entirely unused (not reused by an unrelated
       // process) can a live group with that ID be the server it left behind.
-      const orphanedGroup = !signalTargetExists(pid) && processGroupExists(pid);
+      const orphanedGroup = !processAlive(pid) && processGroupExists(pid);
       if (!orphanedGroup) {
         // Process not running - clean up stale PID file
         this.pidManager.removePid();
@@ -278,6 +311,16 @@ export class DaemonManager {
     try {
       const exited = await this.terminateGroup(pid, signal);
       if (!exited) {
+        // Issue #3087: where zombies cannot be told apart (no /proc), a group can look alive
+        // after it stopped serving. The port is what was at stake, so a released port decides.
+        if (state.port !== undefined && (await this.waitForPortRelease(state))) {
+          this.logger.warn(
+            `Process group ${pid} did not report exit, but port ${state.port} has been released; ` +
+              'treating the server as stopped.'
+          );
+          this.pidManager.removePid();
+          return true;
+        }
         this.logger.warn(`Process group ${pid} did not exit.`);
         return false;
       }
@@ -415,7 +458,7 @@ export class DaemonManager {
     const checkInterval = 100;
 
     for (;;) {
-      if (!signalTargetExists(pid) && !processGroupExists(pid)) {
+      if (!processAlive(pid) && !processGroupExists(pid)) {
         return true;
       }
       if (Date.now() - startTime >= timeout) {

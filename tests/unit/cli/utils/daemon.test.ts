@@ -19,6 +19,14 @@ vi.mock('../../../../src/cli/utils/server-ready', () => ({
   isPortInUse: vi.fn(async () => false),
   waitForServer: vi.fn(async () => true),
 }));
+// Issue #3087: /proc and lsof inspection is platform-dependent and reads through the mocked fs;
+// default to "nothing known" so these suites behave the same on macOS and Linux CI.
+vi.mock('../../../../src/cli/utils/process-inspect', () => ({
+  isZombieProcess: vi.fn(() => false),
+  listProcessGroupStates: vi.fn(() => null),
+  isExitedState: (state: string) => state === 'Z' || state === 'X',
+  describeListeners: vi.fn(() => null),
+}));
 vi.mock('../../../../src/cli/utils/env-setup', () => ({
   getEnvPath: vi.fn(() => '/mock/.commandmate/.env'),
 }));
@@ -30,6 +38,7 @@ vi.mock('../../../../src/cli/utils/package-info', () => ({
 // Import after mocking
 import { DaemonManager } from '../../../../src/cli/utils/daemon';
 import { isPortInUse } from '../../../../src/cli/utils/server-ready';
+import { isZombieProcess, listProcessGroupStates } from '../../../../src/cli/utils/process-inspect';
 
 describe('DaemonManager', () => {
   let daemonManager: DaemonManager;
@@ -241,6 +250,79 @@ describe('DaemonManager', () => {
 
       killSpy.mockRestore();
     }, 10000);
+  });
+
+  describe('zombies and orphaned groups (Issue #3087)', () => {
+    const recorded = '12345\n' + JSON.stringify({ pid: 12345, port: 4100, bind: '127.0.0.1', protocol: 'http' });
+
+    afterEach(() => {
+      vi.mocked(isPortInUse).mockResolvedValue(false);
+      vi.mocked(isZombieProcess).mockReturnValue(false);
+      vi.mocked(listProcessGroupStates).mockReturnValue(null);
+    });
+
+    it('stop treats a group of only zombies (no init to reap them) as exited, without escalating', async () => {
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      vi.mocked(fs.readFileSync).mockReturnValue(recorded);
+      vi.mocked(fs.unlinkSync).mockReturnValue(undefined);
+      // kill(…, 0) succeeds for zombies, forever.
+      const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true);
+      vi.mocked(isZombieProcess).mockReturnValue(true);
+      vi.mocked(listProcessGroupStates).mockReturnValue(['Z', 'Z', 'Z']);
+
+      const started = Date.now();
+      expect(await daemonManager.stop()).toBe(true);
+
+      expect(Date.now() - started).toBeLessThan(2000);
+      expect(killSpy).toHaveBeenCalledWith(-12345, 'SIGTERM');
+      expect(killSpy).not.toHaveBeenCalledWith(-12345, 'SIGKILL');
+      expect(fs.unlinkSync).toHaveBeenCalled();
+      killSpy.mockRestore();
+    });
+
+    it('stop still waits for a group with a live member among zombies', async () => {
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      vi.mocked(fs.readFileSync).mockReturnValue(recorded);
+      const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true);
+      vi.mocked(isZombieProcess).mockReturnValue(true);
+      vi.mocked(listProcessGroupStates).mockReturnValue(['Z', 'S']);
+      vi.mocked(isPortInUse).mockResolvedValue(true);
+
+      // --force: SIGKILL straight away, so only the short kill timeout is spent.
+      expect(await daemonManager.stop(true)).toBe(false);
+      killSpy.mockRestore();
+    }, 15000);
+
+    it('stop lets a released port decide when zombies cannot be told apart (no /proc)', async () => {
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      vi.mocked(fs.readFileSync).mockReturnValue(recorded);
+      vi.mocked(fs.unlinkSync).mockReturnValue(undefined);
+      const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true);
+      vi.mocked(listProcessGroupStates).mockReturnValue(null);
+      vi.mocked(isPortInUse).mockResolvedValue(false);
+
+      expect(await daemonManager.stop(true)).toBe(true);
+      expect(fs.unlinkSync).toHaveBeenCalled();
+      killSpy.mockRestore();
+    }, 15000);
+
+    it('start keeps a stale PID file while its process group still has a live member', async () => {
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      vi.mocked(fs.readFileSync).mockReturnValue(recorded);
+      // The recorded leader (npm) is gone; its group (the orphaned server) is not.
+      const killSpy = vi.spyOn(process, 'kill').mockImplementation((target) => {
+        if (target === -12345) return true;
+        const error = new Error('No such process') as NodeJS.ErrnoException;
+        error.code = 'ESRCH';
+        throw error;
+      });
+      vi.mocked(listProcessGroupStates).mockReturnValue(['S']);
+
+      await expect(daemonManager.start({})).rejects.toThrow(/process group 12345/);
+      expect(fs.unlinkSync).not.toHaveBeenCalled();
+      expect(childProcess.spawn).not.toHaveBeenCalled();
+      killSpy.mockRestore();
+    });
   });
 
   describe('getStatus', () => {
