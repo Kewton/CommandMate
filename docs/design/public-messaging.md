@@ -35,6 +35,7 @@
 | 4 Issue、1 通 | Claude Code | Claude Code × 4 | ゲート 4/4 合格、2 wave、PR マージ、UAT go、8 分 39 秒 | #2494 の CHANGELOG エントリ（収録記録との突合） |
 | 4 Issue、1 通 | Command Code | Command Code × 4 | ゲート 4/4 合格、7 分 46 秒。そのあと人が develop を pull して 47/47 テスト | 同上 |
 | 1 Issue、レビュー 1 段つき | Command Code | Codex が実装、Claude Code がテスト、Antigravity がレビュー | レビュー REJECT → 修正 → APPROVE、RESULT passed | 同上 |
+| 4 Issue、PM → 開発リーダー → ワーカーの 3 層（2026-10-02） | PM・開発リーダーとも Claude Code | Command Code × 4 | スマホ幅の Web UI からメッセージ 2 通＋タップ 3 回、依頼から報告まで 9 分 48 秒、検証 4/4 合格、PR は CI 緑でマージ、UAT 4/4 GO。リポジトリは公開の使い捨て `Kewton/commandmate-team-demo` | [#3058 のコメント](https://github.com/Kewton/CommandMate/issues/3058#issuecomment-5945597304) |
 
 - 表を載せるときは、表の直下に `as observed`（ja: `as observed（実測した範囲）`）を添える。表だけを切り出して使わない
 - lead としての実測は Claude Code と Command Code の 2 つ、worker としての実測は Codex ・ Claude Code ・ Antigravity ・ Command Code の 4 つ（§5）
