@@ -63,6 +63,26 @@ ffmpeg -v error -y -ss 6.5 -i website/assets/media/orchestrate-run.mp4 \
   -frames:v 1 -c:v libwebp -q:v 80 website/assets/media/poster-orchestrate-run.webp
 ```
 
+## The phone clip (Issue #3058)
+
+`phone-team.mp4` is figure B in Level 1. Like the lead demo it is not a copy of a
+`docs/images/features/` take, so the allowlist and this section are its provenance record.
+
+| File | Source | Shows |
+|------|--------|-------|
+| `phone-team.mp4` | `workspace/market/posts/28-phone-team/phone-team-540.mp4` | A phone-width session list where one agent needs you; its chat, answered from the approval sheet with Submit; the list again, with that session carrying on |
+
+- **The take**: recorded for #3058 in the demo-video isolated environment — `HOME=/Users/Shared/cmdemo-home`,
+  its own port and database, a fake agent replaying a captured cast — on the real web UI at
+  390x844, then cut square. The storyboard it replaces opened on a push notification; that beat
+  was dropped, because a push can only be filmed honestly on a real phone.
+- **What is on screen**: the seed repository `cmdemo-app` and its branches only. No private
+  repository name, personal path or private source appears in any frame; the frames right after
+  each transition were checked at full size before the file was added.
+- **Shape**: 540x540, 10.0s, silent, 206KB. The poster (`poster-phone-team.webp`, 15KB) is the
+  second beat, the approval sheet. Re-cut it with the take's `run.sh` / `take.ts`, then re-check
+  the frames rather than trusting the filename.
+
 ## The current demos (Issue #1577, re-cut for Issue #1812)
 
 The four were cut one per card of the LP's four cards (#1812).

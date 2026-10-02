@@ -571,6 +571,62 @@ a {
   text-align: center;
 }
 
+/* Figure B (Issue #3058) is a phone-width recording cut square (540x540). It
+   takes the storyboard drawing's slot, capped near that drawing's height so
+   the page does not grow. */
+.demo-phone {
+  max-width: 18rem;
+  margin: 2rem auto 0;
+}
+
+.demo-phone figcaption {
+  text-align: center;
+}
+
+/* The three-layer run (Issue #3058): the facts of one recording, as a list. */
+.run-record {
+  max-width: 30rem;
+  margin: 2rem auto 0;
+  padding: 1rem 1.25rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.run-record h3 {
+  margin: 0 0 0.75rem;
+  font-size: 1rem;
+}
+
+.run-record dl {
+  margin: 0;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.run-record dl div {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+  gap: 0.75rem;
+}
+
+.run-record dt {
+  color: var(--fg-muted);
+  font-size: 0.85rem;
+}
+
+.run-record dd {
+  margin: 0;
+  font-size: 0.9rem;
+  overflow-wrap: anywhere;
+}
+
+.run-record-note {
+  margin: 0.75rem 0 0;
+  color: var(--fg-muted);
+  font-size: 0.8rem;
+}
+
 /* ---------- inline drawings ---------- */
 
 /* The drawings on this page are inline SVG so that these rules reach them, and
@@ -582,7 +638,6 @@ a {
    height:auto, so a 360-unit drawing shrinks to a 390px phone instead of
    widening the page. */
 .levels-diagram,
-.phone-story,
 .flow-diagram,
 .contrast-diagram,
 .team-diagram,
@@ -596,7 +651,6 @@ a {
 }
 
 .levels-diagram text,
-.phone-story text,
 .flow-diagram text,
 .contrast-diagram text,
 .team-diagram text,
@@ -644,67 +698,6 @@ a {
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   font-size: 11px;
   text-anchor: middle;
-}
-
-/* Figure B: a few seconds on the phone. */
-.phone-story .phone {
-  fill: var(--surface);
-  stroke: var(--border);
-  stroke-width: 1.5;
-}
-
-.phone-story .banner,
-.phone-story .row,
-.phone-story .bubble {
-  fill: var(--bg-subtle);
-  stroke: var(--border);
-  stroke-width: 1;
-}
-
-.phone-story .row-needs {
-  fill: var(--attention-subtle);
-  stroke: var(--attention);
-}
-
-.phone-story .bubble-you {
-  fill: var(--accent-subtle);
-  stroke: var(--accent);
-}
-
-.phone-story .dot {
-  fill: var(--accent);
-}
-
-.phone-story .dot-needs {
-  fill: var(--attention);
-}
-
-.phone-story .small {
-  fill: var(--fg);
-  font-size: 8.5px;
-}
-
-.phone-story .strong {
-  font-weight: 700;
-}
-
-.phone-story .caption {
-  fill: var(--fg-muted);
-  font-size: 11px;
-  font-weight: 600;
-  text-anchor: middle;
-}
-
-.phone-story .done-ring {
-  fill: var(--accent-subtle);
-  stroke: var(--accent);
-  stroke-width: 1.5;
-}
-
-.phone-story .done-tick {
-  fill: none;
-  stroke: var(--accent);
-  stroke-width: 2.5;
 }
 
 /* Figure C: one issue to a PR. */
