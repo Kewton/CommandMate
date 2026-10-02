@@ -1,4 +1,4 @@
-# cm-03 — Stay in control, anywhere (Issue #1811; LP demo 4 of public-messaging.md §5).
+# cm-03 — Stay in control, anywhere (Issue #1811; LP demo 4).
 #
 # `attention-badge` films the *transition* into waiting — the toast fires on a
 # realtime session_status_changed event, so it only exists on a page that was
