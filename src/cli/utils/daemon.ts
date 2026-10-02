@@ -15,6 +15,90 @@ import { readPackageVersion } from './package-info';
 import { REVERSE_PROXY_WARNING } from '../config/security-messages';
 import { CLILogger } from './logger';
 import { loadEffectiveEnv, resolveServerEndpoint, ServerEnv } from './server-url';
+import { isPortInUse } from './server-ready';
+import {
+  describeListeners,
+  isExitedState,
+  isZombieProcess,
+  listProcessGroupStates,
+} from './process-inspect';
+
+/** How long stop() waits for the server's process group after SIGTERM before escalating. */
+export const STOP_GRACE_TIMEOUT_MS = 10000;
+
+/** How long stop() waits for the process group after SIGKILL. */
+export const STOP_KILL_TIMEOUT_MS = 3000;
+
+/** How long stop() waits for the recorded port to be released once the group is gone. */
+export const PORT_RELEASE_TIMEOUT_MS = 3000;
+
+/**
+ * Whether a signal can be delivered to `target` (a PID, or a negated PGID).
+ * EPERM means it exists but belongs to someone else, which still counts as alive.
+ */
+function signalTargetExists(target: number): boolean {
+  try {
+    process.kill(target, 0);
+    return true;
+  } catch (err: unknown) {
+    return (err as NodeJS.ErrnoException).code === 'EPERM';
+  }
+}
+
+/**
+ * Issue #3087: whether the process is still running code. `kill(pid, 0)` also succeeds for a
+ * zombie, which without an init process (a container whose PID 1 never reaps) stays forever.
+ */
+function processAlive(pid: number): boolean {
+  return signalTargetExists(pid) && !isZombieProcess(pid);
+}
+
+/**
+ * Issue #3087: whether any process of the group the daemon was spawned into is still alive.
+ *
+ * `start()` spawns with `detached: true`, so the recorded PID is a process-group leader and the
+ * server it launches (npm → node server.js) inherits that PGID. A PGID is not reused while any
+ * member is alive, so a live group with the recorded ID is ours even after the leader exited.
+ *
+ * A group whose members are all zombies has exited. Only Linux can tell (via /proc); elsewhere,
+ * or when /proc shows no member at all, the signal-based answer stands.
+ */
+function processGroupExists(pid: number): boolean {
+  if (pid <= 1 || !signalTargetExists(-pid)) {
+    return false;
+  }
+  const states = listProcessGroupStates(pid);
+  return states === null || states.length === 0 || states.some((state) => !isExitedState(state));
+}
+
+/**
+ * Issue #3087: signal the whole process group, not just the recorded PID.
+ *
+ * The recorded PID is npm's, and npm does not reliably forward signals to the server it runs
+ * (observed on Linux), so `kill(pid)` alone left the server listening as an orphan. Falls back
+ * to the bare PID when no such group exists (e.g. a server that is not a group leader).
+ */
+function signalProcessGroup(pid: number, signal: NodeJS.Signals): void {
+  // Never negate 0 or 1: kill(0) signals our own group and kill(-1) every process we may signal.
+  if (pid <= 1) {
+    throw new Error(`Refusing to signal invalid PID ${pid}`);
+  }
+  try {
+    process.kill(-pid, signal);
+    return;
+  } catch (err: unknown) {
+    if ((err as NodeJS.ErrnoException).code !== 'ESRCH') {
+      throw err;
+    }
+  }
+  try {
+    process.kill(pid, signal);
+  } catch (err: unknown) {
+    if ((err as NodeJS.ErrnoException).code !== 'ESRCH') {
+      throw err;
+    }
+  }
+}
 
 /**
  * Daemon manager for background server process
@@ -58,6 +142,16 @@ export class DaemonManager {
     if (this.pidManager.isProcessRunning()) {
       const pid = this.pidManager.readPid();
       throw new Error(`Server is already running (PID: ${pid})`);
+    }
+
+    // Issue #3087: a stale PID file is the only record of the PGID an orphaned server still runs
+    // in. Removing it here would leave `stop` with nothing to find that server by.
+    const stale = this.pidManager.readState();
+    if (stale !== null && !processAlive(stale.pid) && processGroupExists(stale.pid)) {
+      throw new Error(
+        `Processes of an earlier server are still running (process group ${stale.pid}). ` +
+          'Run "commandmate stop" to stop them first.'
+      );
     }
 
     // Clean up stale PID file
@@ -120,6 +214,20 @@ export class DaemonManager {
       console.log(REVERSE_PROXY_WARNING);
     }
 
+    // Issue #3087: refuse to launch onto a port something else already answers on. The new
+    // server would fail to listen and exit, while every later TCP check (status, remote's
+    // readiness wait) would be answered by that other process and mistake it for this server.
+    const probeHost = bindAddress === '0.0.0.0' ? '127.0.0.1' : bindAddress;
+    if (await isPortInUse(probeHost, parseInt(port, 10))) {
+      const listeners = describeListeners(parseInt(port, 10));
+      throw new Error(
+        `Port ${port} on ${probeHost} is already in use by another process` +
+          `${listeners ? ` (${listeners})` : ''} ` +
+          'that is not the server recorded in the PID file (e.g. an earlier server left running). ' +
+          'Stop that process or choose another port.'
+      );
+    }
+
     // Log startup with accurate settings (Stage 4 review: MF-2)
     this.logger.info(`Starting server at ${protocol}://${bindAddress}:${port}`);
 
@@ -167,36 +275,113 @@ export class DaemonManager {
 
   /**
    * Stop daemon process
+   *
+   * Issue #3087: signals the daemon's whole process group, waits for every member to exit
+   * (escalating to SIGKILL after {@link STOP_GRACE_TIMEOUT_MS}), and then requires the recorded
+   * port to be free. "Stopped" is reported only when both hold. A recorded leader that already
+   * exited while its group lives on (the orphaned server of #3087) is stopped the same way.
+   *
    * @param force Use SIGKILL instead of SIGTERM
-   * @returns true if stopped successfully, false if not running
+   * @returns true if stopped (or the PID file was stale), false if not running or not stopped
    */
   async stop(force: boolean = false): Promise<boolean> {
-    const pid = this.pidManager.readPid();
+    const state = this.pidManager.readState();
 
-    if (pid === null) {
+    if (state === null) {
       return false;
     }
+
+    const pid = state.pid;
+    const signal: NodeJS.Signals = force ? 'SIGKILL' : 'SIGTERM';
 
     if (!this.pidManager.isProcessRunning()) {
-      // Process not running - clean up stale PID file
-      this.pidManager.removePid();
-      return true;
+      // The leader is gone. Only when its PID is entirely unused (not reused by an unrelated
+      // process) can a live group with that ID be the server it left behind.
+      const orphanedGroup = !processAlive(pid) && processGroupExists(pid);
+      if (!orphanedGroup) {
+        // Process not running - clean up stale PID file
+        this.pidManager.removePid();
+        return true;
+      }
+      this.logger.warn(
+        `The recorded process ${pid} has exited but its server processes are still running; stopping them.`
+      );
     }
 
-    const signal = force ? 'SIGKILL' : 'SIGTERM';
-
     try {
-      process.kill(pid, signal);
+      const exited = await this.terminateGroup(pid, signal);
+      if (!exited) {
+        // Issue #3087: where zombies cannot be told apart (no /proc), a group can look alive
+        // after it stopped serving. The port is what was at stake, so a released port decides.
+        if (state.port !== undefined && (await this.waitForPortRelease(state))) {
+          this.logger.warn(
+            `Process group ${pid} did not report exit, but port ${state.port} has been released; ` +
+              'treating the server as stopped.'
+          );
+          this.pidManager.removePid();
+          return true;
+        }
+        this.logger.warn(`Process group ${pid} did not exit.`);
+        return false;
+      }
 
-      // Wait for process to exit
-      await this.waitForExit(pid, 10000);
-
-      // Clean up PID file
+      // Clean up PID file: nothing this file describes is alive any more.
       this.pidManager.removePid();
 
-      return true;
+      return await this.waitForPortRelease(state);
     } catch {
       return false;
+    }
+  }
+
+  /**
+   * Signal the daemon's process group and wait until no member is left.
+   *
+   * @returns true once the group is gone, false if it outlived SIGKILL
+   */
+  private async terminateGroup(pid: number, signal: NodeJS.Signals): Promise<boolean> {
+    signalProcessGroup(pid, signal);
+    if (await this.waitForExit(pid, signal === 'SIGKILL' ? STOP_KILL_TIMEOUT_MS : STOP_GRACE_TIMEOUT_MS)) {
+      return true;
+    }
+    if (signal === 'SIGKILL') {
+      return false;
+    }
+    this.logger.warn(
+      `Server (process group ${pid}) did not exit within ${STOP_GRACE_TIMEOUT_MS / 1000}s; sending SIGKILL.`
+    );
+    signalProcessGroup(pid, 'SIGKILL');
+    return this.waitForExit(pid, STOP_KILL_TIMEOUT_MS);
+  }
+
+  /**
+   * Issue #3087: confirm the port the server was started on is free again.
+   *
+   * A state file from before #1354 records no port; re-deriving one from a .env that may have
+   * changed since could blame an unrelated listener, so that legacy case is not checked.
+   *
+   * @returns true when the port is free (or unknown), false if something still listens on it
+   */
+  private async waitForPortRelease(state: DaemonState): Promise<boolean> {
+    if (state.port === undefined) {
+      return true;
+    }
+    const bind = state.bind ?? '127.0.0.1';
+    const host = bind === '0.0.0.0' ? '127.0.0.1' : bind;
+    const deadline = Date.now() + PORT_RELEASE_TIMEOUT_MS;
+
+    for (;;) {
+      if (!(await isPortInUse(host, state.port, 500))) {
+        return true;
+      }
+      if (Date.now() >= deadline) {
+        this.logger.warn(
+          `Port ${state.port} on ${host} is still in use after the server stopped; ` +
+            'another process is listening on it.'
+        );
+        return false;
+      }
+      await new Promise(resolve => setTimeout(resolve, 100));
     }
   }
 
@@ -263,23 +448,23 @@ export class DaemonManager {
   }
 
   /**
-   * Wait for process to exit
+   * Wait until neither the recorded PID nor any member of its process group is alive
+   * (Issue #3087: the group, because the server outlives npm).
+   *
+   * @returns true if everything exited within the timeout
    */
-  private async waitForExit(pid: number, timeout: number): Promise<void> {
+  private async waitForExit(pid: number, timeout: number): Promise<boolean> {
     const startTime = Date.now();
     const checkInterval = 100;
 
-    while (Date.now() - startTime < timeout) {
-      try {
-        process.kill(pid, 0);
-        // Process still exists, wait
-        await new Promise(resolve => setTimeout(resolve, checkInterval));
-      } catch {
-        // Process exited
-        return;
+    for (;;) {
+      if (!processAlive(pid) && !processGroupExists(pid)) {
+        return true;
       }
+      if (Date.now() - startTime >= timeout) {
+        return false;
+      }
+      await new Promise(resolve => setTimeout(resolve, checkInterval));
     }
-
-    // Timeout - process may still be running
   }
 }

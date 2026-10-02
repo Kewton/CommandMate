@@ -55,6 +55,22 @@ export async function waitForServer(
 }
 
 /**
+ * Whether something is accepting TCP connections on host:port right now.
+ *
+ * Issue #3087: a single attempt, used where "the port is free" has to be proven
+ * (before `start` spawns a server, after `stop` claims to have stopped one)
+ * rather than waited for.
+ *
+ * @param host - Host to connect to
+ * @param port - Port to connect to
+ * @param timeoutMs - How long one connection attempt may take
+ * @returns true if a connection was accepted
+ */
+export function isPortInUse(host: string, port: number, timeoutMs: number = 1000): Promise<boolean> {
+  return tryConnect(host, port, timeoutMs);
+}
+
+/**
  * Attempt a single TCP connection.
  *
  * @returns true if the connection was established

@@ -38,6 +38,11 @@ vi.mock('../../../../src/cli/utils/env-setup', () => ({
 }));
 vi.mock('../../../../src/cli/utils/security-logger', () => ({ logSecurityEvent: vi.fn() }));
 vi.mock('../../../../src/cli/utils/server-ready', () => ({ waitForServer: vi.fn(async () => true) }));
+// Issue #3087: the pre-publish identity check talks HTTP to the listener; these
+// suites have no server, so it is stubbed to "verified" (covered by remote-publish-guard-3087).
+vi.mock('../../../../src/cli/utils/server-identity', () => ({
+  verifyLaunchedServer: vi.fn(async () => ({ ok: true })),
+}));
 vi.mock('../../../../src/cli/utils/prompt', () => ({
   isInteractive: vi.fn(() => false),
   confirm: vi.fn(async () => false),
@@ -104,6 +109,7 @@ import {
   findFreeLoopbackPort,
 } from '../../../../src/lib/remote';
 import { waitForServer } from '../../../../src/cli/utils/server-ready';
+import { verifyLaunchedServer } from '../../../../src/cli/utils/server-identity';
 import { isInteractive } from '../../../../src/cli/utils/prompt';
 import {
   REMOTE_STATE_SCHEMA_VERSION,
@@ -170,6 +176,7 @@ describe('commandmate remote', () => {
     // Issue #2489: `clearAllMocks` above wipes the module mocks' implementations
     // too, so the two `up` depends on are restored here rather than at declaration.
     vi.mocked(waitForServer).mockResolvedValue(true);
+    vi.mocked(verifyLaunchedServer).mockResolvedValue({ ok: true });
     vi.mocked(findFreeLoopbackPort).mockResolvedValue(45678);
     vi.mocked(runStart).mockResolvedValue({
       ok: true,

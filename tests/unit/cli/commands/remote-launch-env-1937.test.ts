@@ -57,6 +57,11 @@ vi.mock('../../../../src/cli/utils/env-setup', () => ({
 }));
 vi.mock('../../../../src/cli/utils/security-logger', () => ({ logSecurityEvent: vi.fn() }));
 vi.mock('../../../../src/cli/utils/server-ready', () => ({ waitForServer: vi.fn(async () => true) }));
+// Issue #3087: the pre-publish identity check talks HTTP to the listener; these
+// suites have no server, so it is stubbed to "verified" (covered by remote-publish-guard-3087).
+vi.mock('../../../../src/cli/utils/server-identity', () => ({
+  verifyLaunchedServer: vi.fn(async () => ({ ok: true })),
+}));
 vi.mock('../../../../src/cli/utils/prompt', () => ({
   isInteractive: vi.fn(() => false),
   confirm: vi.fn(async () => false),

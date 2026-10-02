@@ -71,6 +71,7 @@ import {
 import { loadEffectiveEnv } from '../utils/server-url';
 import { logSecurityEvent } from '../utils/security-logger';
 import { waitForServer } from '../utils/server-ready';
+import { verifyLaunchedServer } from '../utils/server-identity';
 import {
   createRemoteProviders,
   detectRemoteProviders,
@@ -482,6 +483,7 @@ async function approvePublicTunnel(options: RemoteOptions): Promise<boolean> {
 interface Endpoint {
   host: string;
   port: number;
+  protocol: 'http' | 'https';
 }
 
 /**
@@ -494,7 +496,7 @@ function parseEndpoint(url: string | undefined): Endpoint | null {
     const parsed = new URL(url);
     const port = parsed.port ? parseInt(parsed.port, 10) : parsed.protocol === 'https:' ? 443 : 80;
     if (Number.isNaN(port)) return null;
-    return { host: parsed.hostname, port };
+    return { host: parsed.hostname, port, protocol: parsed.protocol === 'https:' ? 'https' : 'http' };
   } catch {
     return null;
   }
@@ -740,6 +742,36 @@ export async function runRemoteUp(options: RemoteOptions): Promise<ExitCode> {
       return ExitCode.START_FAILED;
     }
     logger.success(`Remote listener: ${REMOTE_INGRESS_HOST}:${remoteIngressPort} (authentication required)`);
+  }
+
+  // 6c. Issue #3087: a listening port is not proof that it is OUR server. An
+  // orphan from an earlier `start --daemon` (no authentication) can hold the
+  // port while the server started above dies on EADDRINUSE, and every TCP
+  // check passes against it. Before the irreversible step, the exact port to
+  // be published must refuse an unknown token (authentication is on) and
+  // accept the token minted above (only the server launched with its hash
+  // can). Anything short of both is a refusal: nothing is published.
+  const publishedHost = remoteIngressPort !== undefined ? REMOTE_INGRESS_HOST : endpoint.host;
+  const identity = await verifyLaunchedServer({
+    protocol: endpoint.protocol,
+    host: publishedHost,
+    port: remoteIngressPort ?? endpoint.port,
+    sessionToken,
+  });
+  if (!identity.ok) {
+    logger.error(`Refusing to publish: ${identity.reason}.`);
+    logger.info(
+      'Nothing was published. Another process may be holding the port (for example an earlier ' +
+        'CommandMate server that was not stopped). Stop it and re-run "commandmate remote".'
+    );
+    await rollback(daemonManager, pairing.filePath, restoreEnv);
+    logSecurityEvent({
+      timestamp: new Date().toISOString(),
+      command: 'remote',
+      action: 'failure',
+      details: `up: listener identity not verified, nothing published (${provider.id})`,
+    });
+    return ExitCode.START_FAILED;
   }
 
   // 7. Open the outside door. The Provider is handed 127.0.0.1 explicitly; it
