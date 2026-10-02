@@ -1,23 +1,29 @@
-# CommandMate — One agent leads. Gates decide what's done.
+# CommandMate — No long blocks of time? Run an AI team from your phone.
 
-> CommandMate gives your lead agent the machinery to run the others: one Git worktree and one contract per task, gates that decide what is done, and a record of every run. Claude Code, Codex, Antigravity, Command Code, OpenCode, Gemini CLI, Copilot and local models. You approve; you don't relay.
+> CommandMate puts the coding agents you already use in one place you can run from your phone. Hand them work like a team, let checks decide what's done, and get back to your day.
 
 Open source (MIT) · runs on your machine · macOS / Linux / Windows (WSL2) · no app to install
 
-Status: Beta. Start in one command: `npx commandmate@latest`. From install to your first session in 60 seconds. Node.js v22+ · npm · git · tmux
+Status: Beta. Set it up by asking your agent: "Read https://kewton.github.io/CommandMate/setup.md and help me set up CommandMate on this machine. Explain each step before you run it, and ask me before you install anything or open access from the internet." Needs Node.js v22+ · npm · git · tmux
 
-What it gives you:
+The author's numbers:
 
-- **One agent leads**: One message to your lead session; it hands each task to a worker in its own worktree under a contract, and only what passes the gates comes back. Measured with Claude Code and Command Code as the lead.
-- **Verified, not vibe-checked**: Gates you declared decide whether the work is done, and the exit code is the verdict. The agent's summary is not the evidence; the run is.
-- **Know which one needs you**: Waiting is a state read from the agent's hooks, not a guess from the screen. It reaches you as a badge, a toast, the tab title, a push, and you answer from your phone.
-- **Method as a system**: The method is not in someone's head. It is installed as Skills and read by the agent.
+- 10+ PRs a day, solo
+- $110–$210 a month: Claude Max + Command Code Goat
+- ~80% of my instructions sent from a phone (my estimate)
+- 689 PRs merged in September 2026, across my repositories
+
+Three levels:
+
+- **Level 1 — Many agents, one place, in your pocket**: Claude Code, Codex, Gemini CLI, Copilot, OpenCode (1.x and V2), Antigravity, Command Code or local models, each task in its own session. Answer them like a chat, from your phone, paired with `commandmate remote` through Tailscale or Cloudflare. It runs on the plan you already pay for and adds no pay-per-use API bill of its own.
+- **Level 2 — Work like a team, not a chat**: one issue per Git worktree, a task handed over as a contract you can read later, your own checks deciding what is done by their exit code, and the method installed as Skills.
+- **Level 3 — An AI team that builds and maintains**: a PM session plans the issues, a dev lead hands each one to a worker, and only what passed the checks becomes a PR. Scheduled runs start sessions at set times. The author's daily auto-fix run is the author's own setup built from scheduled runs and the orchestrate Skill, not a switch in the product.
 
 ## Docs
 
+- [Set up with your agent](https://kewton.github.io/CommandMate/setup.md): a guide for a coding agent to set CommandMate up on this machine, stage by stage, asking the person before it installs anything or opens access from the internet. Also printed by `commandmate docs --section setup`.
 - [Documentation](https://github.com/Kewton/CommandMate/tree/main/docs/en): the English docs
 - [Tutorial](https://github.com/Kewton/CommandMate/blob/main/docs/en/user-guide/tutorial.md): Use a sample repository with two bugs left in on purpose to work through the core of CommandMate in about fifteen minutes.
-- [Set up with your agent](https://kewton.github.io/CommandMate/setup.md): a guide for a coding agent to set CommandMate up on this machine, stage by stage, asking the person before it installs anything or opens access from the internet. Also printed by `commandmate docs --section setup`.
 - [Setup guide](https://github.com/Kewton/CommandMate/blob/main/docs/en/user-guide/cli-setup-guide.md): install it for daily use
 - [CLI operations guide](https://github.com/Kewton/CommandMate/blob/main/docs/en/user-guide/cli-operations-guide.md): every flag and every exit code
 

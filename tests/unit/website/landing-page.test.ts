@@ -27,9 +27,18 @@
  * routes and retracted network wording. The page is free to say the rest its
  * own way.
  *
- * Issue #2551 gave the hero to a drawing of the product — sessions, then gate
- * lines — and moved the loop down to The loop. The colour guard now scans every
- * drawing in INLINE_DRAWINGS rather than the one that happens to be in the hero.
+ * Issue #2551 gave the hero to a drawing of the product and made the colour
+ * guard scan every drawing in INLINE_DRAWINGS rather than the one that happens
+ * to be in the hero.
+ *
+ * Issue #3060 rebuilt the page around three levels and setting up by asking an
+ * agent. The blocks that pinned the old sections (The loop, the four cards, the
+ * quick start tracks, the FAQ, Measured and the lead run, the tutorial box, the
+ * gallery and the compact passes) went with them; what the page inherits — sub-
+ * path asset resolution, the media budget and vetted media, lazy playback, no
+ * video in the hero, page-level markup, reduced motion, dark mode, the network
+ * scope under Trust, the metadata, llms.txt and the version line, and the banned
+ * names — is still pinned, and the new structure has its own block at the end.
  */
 import { describe, it, expect } from 'vitest';
 import { spawnSync } from 'child_process';
@@ -60,12 +69,21 @@ const LP_SOURCE_FILES = ['index.html', 'styles.css', 'main.js'];
 
 /**
  * The class of every inline SVG drawing on the page, each of which must take
- * all of its inks from custom properties. #1812 had one, the loop in the hero;
- * #2551 put a session mock in the hero and moved the loop to The loop — a
- * drawing that leaves the hero still has to follow the colour scheme, so the
- * scan grew rather than moved. A new drawing is one more entry here.
+ * all of its inks from custom properties. #1812 had one, #2551 two; #3060
+ * replaced both with figures A to G (the three levels in the hero, then one or
+ * two per section) and kept the network drawing under Trust. A new drawing is
+ * one more entry here.
  */
-const INLINE_DRAWINGS = ['hero-mock', 'loop-diagram', 'trust-diagram'];
+const INLINE_DRAWINGS = [
+  'levels-diagram',
+  'phone-story',
+  'flow-diagram',
+  'contrast-diagram',
+  'team-diagram',
+  'day-timeline',
+  'setup-chat',
+  'trust-diagram',
+];
 
 /** Everything under website/ a human reads, as opposed to the media bytes. */
 const TEXT_FILE = /\.(html|css|js|md|json|svg|txt)$/i;
@@ -127,12 +145,18 @@ const DEMO_SOURCES: Record<string, string> = {
 };
 
 /**
- * Page order, lead first. #2495 moved "See it running" above The loop and put
- * the orchestrate run at its head, so the order is the argument the section
- * makes: one real run, then the gate that judged it, where the method came
- * from, the parallelism it ran under, and how it reaches you when it stops.
+ * Page order (Issue #3060): the demos sit in the level each one shows. Level 1
+ * has waiting reaching your phone and the sessions side by side, Level 2 the
+ * contract and its checks and a Skill being installed, and Level 3 the recorded
+ * orchestrate run.
  */
-const DEMO_ORDER = [LEAD_DEMO, ...Object.keys(DEMO_SOURCES)];
+const DEMO_ORDER = [
+  'never-miss-waiting.mp4',
+  'parallel-worktrees.mp4',
+  'contract-verify.mp4',
+  'install-skill.mp4',
+  LEAD_DEMO,
+];
 
 /** Every file under website/, recursively, as paths relative to website/. */
 function walk(dir: string, base = dir): string[] {
@@ -365,23 +389,6 @@ function copyableBoxes(html: string): CopyableBox[] {
     }));
 }
 
-/** The shell commands the page offers a working copy button for, as command text. */
-function copyableCommands(html: string): string[] {
-  return copyableBoxes(html)
-    .filter((box) => !box.isUrl)
-    .map((box) => box.text);
-}
-
-/** Track A's card, i.e. everything the `Just try it` track renders. */
-function trackAMarkup(): string {
-  const article = readIndexHtml().match(
-    /<article class="track" aria-labelledby="track-try-h">[\s\S]*?<\/article>/,
-  );
-
-  expect(article, 'Track A card not found in index.html').not.toBeNull();
-  return article![0];
-}
-
 describe('Issue #1200: landing page structure', () => {
   it('has an index.html at the website root', () => {
     expect(fs.existsSync(INDEX_HTML)).toBe(true);
@@ -465,6 +472,25 @@ describe('Issue #1200: page-level markup', () => {
   it('declares an icon so the browser stops probing /favicon.ico at the root', () => {
     const html = readIndexHtml();
     expect(html).toMatch(/<link\s+rel="icon"\s+href="[^/][^"]*"/);
+  });
+
+  it('opens on a skip link to <main>, with a viewport for phones', () => {
+    const html = readIndexHtml();
+
+    expect(html).toMatch(/<meta name="viewport" content="width=device-width, initial-scale=1"/);
+    expect(html.indexOf('<a class="skip-link" href="#main">')).toBeLessThan(html.indexOf('<header'));
+    expect(html).toMatch(/<main id="main">/);
+    expect(fs.readFileSync(STYLES_CSS, 'utf-8')).toMatch(/\.skip-link:focus\s*\{/);
+  });
+
+  it('shortens every animation and transition for reduced motion', () => {
+    const css = fs.readFileSync(STYLES_CSS, 'utf-8');
+    const block = /@media \(prefers-reduced-motion: reduce\) \{([\s\S]*?\})\s*\}/.exec(css);
+
+    expect(block, 'no prefers-reduced-motion block in styles.css').not.toBeNull();
+    expect(block![1]).toMatch(/scroll-behavior:\s*auto/);
+    expect(block![1]).toMatch(/animation-duration:\s*0\.01ms !important/);
+    expect(block![1]).toMatch(/transition-duration:\s*0\.01ms !important/);
   });
 });
 
@@ -637,18 +663,14 @@ describe('Issue #1812: the hero diagram', () => {
 });
 
 /**
- * Issue #2551 — the hero shows the product instead of the loop: a session list
- * with one row waiting on a person, above the gate lines `commandmate wait
- * --verify` prints. "Gate" is used elsewhere for a question an agent stops to
- * ask; this drawing is where the page defines it as a declared command and its
- * exit code. The loop drawing moved down to the head of The loop.
- *
- * The block above still carries the four hero guards and now scans both
- * drawings' CSS. What it cannot see is the markup: an ink written as a `fill=`
- * attribute on the SVG never reaches styles.css, and a class the scan reads
- * that no drawing wears is a scan of nothing. Those two are pinned here.
+ * Issue #3060 — figures A to G. Each is inline SVG, one labelled image to a
+ * screen reader, with its box reserved before layout. The colour scan in the
+ * #1812 block reads their CSS through INLINE_DRAWINGS; what it cannot see is
+ * the markup, where an ink written as a `fill=` attribute never reaches
+ * styles.css, so that is pinned here. (Issue #2551 put this markup guard in
+ * place for the hero mock and the loop drawing, which #3060 removed.)
  */
-describe('Issue #2551: the session mock in the hero, the loop in The loop', () => {
+describe('Issue #3060: figures A to G', () => {
   const drawingMarkup = (drawing: string): string => {
     const svg = new RegExp(`<svg\\s+class="${drawing}"[\\s\\S]*?</svg>`).exec(readIndexHtml());
 
@@ -656,61 +678,45 @@ describe('Issue #2551: the session mock in the hero, the loop in The loop', () =
     return svg![0];
   };
 
-  const loopSection = (): string => {
-    const section = /<section class="section" id="loop"[\s\S]*?<\/section>/.exec(readIndexHtml());
+  const section = (id: string): string => {
+    const found = new RegExp(`<section class="section[^"]*" id="${id}"[\\s\\S]*?</section>`).exec(readIndexHtml());
 
-    expect(section, 'no #loop section in index.html').not.toBeNull();
-    return section![0];
+    expect(found, `no #${id} section in index.html`).not.toBeNull();
+    return found![0];
   };
 
-  it('draws the session mock in the hero, and the loop nowhere else but The loop', () => {
-    const hero = /<figure class="hero-media">[\s\S]*?<\/figure>/.exec(readIndexHtml())![0];
+  it('puts each figure in the section the Issue names', () => {
+    const hero = /<section class="hero">[\s\S]*?<\/section>/.exec(readIndexHtml())![0];
+    const placement: [string, string][] = [
+      ['level-1', 'phone-story'],
+      ['level-2', 'flow-diagram'],
+      ['level-2', 'contrast-diagram'],
+      ['level-3', 'team-diagram'],
+      ['level-3', 'day-timeline'],
+      ['setup', 'setup-chat'],
+    ];
 
-    expect(hero).toContain(drawingMarkup('hero-mock'));
-    expect(hero).not.toContain('loop-diagram');
-    expect(readIndexHtml().split('class="loop-diagram"')).toHaveLength(2);
+    expect(hero).toContain(drawingMarkup('levels-diagram'));
+    for (const [id, drawing] of placement) {
+      expect(section(id), `${drawing} belongs in #${id}`).toContain(drawingMarkup(drawing));
+    }
+    for (const drawing of INLINE_DRAWINGS) {
+      expect(readIndexHtml().split(`class="${drawing}"`), `${drawing} drawn once`).toHaveLength(2);
+    }
   });
 
-  it('opens The loop on the loop drawing, before the four beats', () => {
-    const section = loopSection();
-    const svg = drawingMarkup('loop-diagram');
+  it('presents every drawing as one labelled image, its box reserved before layout', () => {
+    for (const drawing of INLINE_DRAWINGS) {
+      const svg = drawingMarkup(drawing);
 
-    expect(section, 'the loop drawing must sit in #loop').toContain(svg);
-    expect(section.indexOf(svg)).toBeLessThan(section.indexOf('<ol class="beats">'));
-    // It left the hero, so the hero guards above no longer look at it.
-    expect(svg).toMatch(/role="img"/);
-    expect(/aria-label="([^"]+)"/.exec(svg)?.[1].length ?? 0).toBeGreaterThan(40);
-    expect(svg).toMatch(/viewBox="[^"]+"\s+width="\d+"\s+height="\d+"/);
+      expect(svg, drawing).toMatch(/role="img"/);
+      // A label of "diagram" describes the container, not the content.
+      expect(/aria-label="([^"]+)"/.exec(svg)?.[1].length ?? 0, drawing).toBeGreaterThan(40);
+      expect(svg, drawing).toMatch(/viewBox="[^"]+"\s+width="\d+"\s+height="\d+"/);
+    }
   });
 
-  it('marks one session as needing you, above gate lines in the verify output format', () => {
-    const svg = drawingMarkup('hero-mock');
-    const pills = [...svg.matchAll(/<text class="pill-label"[^>]*>([\s\S]*?)<\/text>/g)].map(
-      (match) => text(match[1]),
-    );
-    const terminal = [...svg.matchAll(/<text class="term[\s"][^>]*>([\s\S]*?)<\/text>/g)].map(
-      (match) => text(match[1]),
-    );
-
-    expect(pills).toHaveLength(4);
-    expect(pills.filter((label) => label === 'needs you')).toHaveLength(1);
-    expect(pills.filter((label) => label === 'working' || label === 'done')).toHaveLength(3);
-    expect(svg, 'the needs-you row is the amber one').toMatch(
-      /<g class="session session-needs">(?:(?!<\/g>)[\s\S])*needs you/,
-    );
-    // The shapes src/cli/utils/verify-runner.ts prints: `GATE <id> <LABEL>`
-    // with an optional `(detail)`, then `RESULT <status>`.
-    expect(terminal).toEqual([
-      '$ commandmate wait wt-pick --verify',
-      'GATE work-evidence PASS',
-      'GATE unit PASS (exit=0)',
-      'RESULT passed',
-      '$ echo $?',
-      '0',
-    ]);
-  });
-
-  it('writes no ink into the markup of either drawing, where the CSS scan cannot see it', () => {
+  it('writes no ink into the markup of any drawing, where the CSS scan cannot see it', () => {
     const offenders = INLINE_DRAWINGS.flatMap((drawing) =>
       [...drawingMarkup(drawing).matchAll(/\s(fill|stroke|color|stop-color|style)="[^"]*"/g)].map(
         (match) => `.${drawing}: ${match[0].trim()}`,
@@ -718,6 +724,43 @@ describe('Issue #2551: the session mock in the hero, the loop in The loop', () =
     );
 
     expect(offenders).toEqual([]);
+  });
+
+  it('draws the three levels as steps, each under a prompt chip', () => {
+    const svg = drawingMarkup('levels-diagram');
+    const titles = [...svg.matchAll(/<text class="step-title"[^>]*>([\s\S]*?)<\/text>/g)].map((m) => text(m[1]));
+    const chips = [...svg.matchAll(/<text class="chip-text"[^>]*>([\s\S]*?)<\/text>/g)].map((m) => text(m[1]));
+
+    expect(titles).toEqual(['Level 1', 'Level 2', 'Level 3']);
+    expect(chips).toHaveLength(3);
+    expect(chips.every((chip) => chip.includes('prompt'))).toBe(true);
+  });
+
+  it('sends failed work back from the checks in figure C', () => {
+    const svg = drawingMarkup('flow-diagram');
+    const nodes = [...svg.matchAll(/<g class="node[^"]*">[\s\S]*?<text[^>]*>([\s\S]*?)<\/text><\/g>/g)].map((m) =>
+      text(m[1]),
+    );
+
+    expect(nodes).toEqual(['Issue', 'worktree', 'contract', 'work', 'checks', 'UAT', 'PR']);
+    expect(svg).toMatch(/class="edge edge-fail"/);
+  });
+
+  it("times the agents' side of the day and marks yours as an example in figure F", () => {
+    const svg = drawingMarkup('day-timeline');
+    const times = [...svg.matchAll(/<text class="time"[^>]*>([\s\S]*?)<\/text>/g)].map((m) => text(m[1]));
+
+    expect(times).toEqual(['06:30', '07:00', '08:30']);
+    expect(svg).toContain('You (example)');
+  });
+
+  it('leaves the provider to the person in figure G', () => {
+    const said = text(drawingMarkup('setup-chat'));
+
+    expect(said).toContain('setup.md');
+    expect(said).toContain('You choose');
+    expect(said).toContain('Tailscale');
+    expect(said).toContain('Cloudflare');
   });
 });
 
@@ -728,9 +771,10 @@ describe('Issue #2551: the session mock in the hero, the loop in The loop', () =
  * drawing's footnote is what goes over the network and when. The footnote's
  * length is read from public-messaging.md §6's evidence table, so a route added
  * there stays red here until the page lists it too. (#3057 dropped the check
- * that the two halves are that file's sentence verbatim.)
+ * that the two halves are that file's sentence verbatim.) #3060 made it the
+ * first of four points under "Why you can trust it".
  *
- * The colour scan in the #1812 block and the markup scan in the #2551 block reach
+ * The colour scan in the #1812 block and the markup scan in the #3060 block reach
  * this drawing through INLINE_DRAWINGS. The other three drawing guards in #1812
  * read the hero's figure only, so they are repeated here for this one.
  */
@@ -759,13 +803,19 @@ describe('Issue #2554: Trust', () => {
     return rows;
   };
 
-  it('follows "What it gives you" directly, under the heading the Issue names', () => {
+  it('opens Trust on "Runs on your machine", between My setup and Start (#3060)', () => {
     expect(readIndexHtml()).toMatch(
-      /<h2 id="why">[\s\S]*?<\/section>\s*(?:<!--(?:(?!-->)[\s\S])*-->\s*)?<section class="section" id="trust"/,
+      /id="my-setup"[\s\S]*?<\/section>\s*(?:<!--(?:(?!-->)[\s\S])*-->\s*)?<section class="section" id="trust"/,
     );
     expect(text(firstGroup(trustSection(), /<h2 id="trust-h">([\s\S]*?)<\/h2>/, 'the #trust heading'))).toBe(
+      'Why you can trust it',
+    );
+    expect(text(firstGroup(trustSection(), /<h3 class="trust-point">([\s\S]*?)<\/h3>/, 'the first trust point'))).toBe(
       'Runs on your machine',
     );
+    // The other three points the Issue lists: you decide, the limits, MIT.
+    const points = [...trustSection().matchAll(/<div class="trust-card">\s*<h3>([\s\S]*?)<\/h3>/g)].map((m) => text(m[1]));
+    expect(points).toEqual(['You decide', 'The limits, written down', 'Open source, MIT']);
   });
 
   it("lists one footnote per route in §6's evidence table", () => {
@@ -776,13 +826,6 @@ describe('Issue #2554: Trust', () => {
     // shows the traffic itself is gone. So the table's length is the list's.
     expect(evidence.length).toBeGreaterThan(0);
     expect(routes).toHaveLength(evidence.length);
-  });
-
-  it('leaves no copy of the note under the cards', () => {
-    const cards = firstGroup(readIndexHtml(), /(<h2 id="why">[\s\S]*?<\/section>)/, 'the cards section');
-
-    expect(cards).not.toContain('class="note"');
-    expect(text(cards)).not.toMatch(/telemetry|over the network/i);
   });
 
   it('carries none of the network wording §6 retracted, anywhere Pages serves', () => {
@@ -819,7 +862,7 @@ describe('Issue #2554: Trust', () => {
     expect(offenders).toEqual([]);
   });
 
-  it('scans the drawing with the colour and markup guards of the other two', () => {
+  it('scans the drawing with the colour and markup guards of the others', () => {
     expect(INLINE_DRAWINGS).toContain('trust-diagram');
   });
 
@@ -876,12 +919,9 @@ describe('Issue #1577: feature demo playback', () => {
   const videoTags = (): string[] => readIndexHtml().match(/<video\b[\s\S]*?<\/video>/g) ?? [];
   const source = (tag: string): string | undefined => /src="([^"]+)"/.exec(tag)?.[1];
 
-  it('embeds the five demos in page order, the recorded run first', () => {
-    // #1812 cut the set to one demo per card. #2495
-    // put a real orchestrate run at the head of it and moved the whole section
-    // above The loop, so the order is the argument the section makes: one run
-    // end to end, then the gate that judged it, where the method came from, the
-    // parallelism it ran under, and how it reaches you when it stops.
+  it('embeds the five demos in page order, each in the level it shows', () => {
+    // #3060 moved each demo into the level it shows (see DEMO_ORDER), the
+    // recorded orchestrate run last, under Level 3.
     const expected = DEMO_ORDER.map((file) => `${MEDIA_DIR.split(path.sep).join('/')}/${file}`);
 
     expect(videoTags().map(source)).toEqual(expected);
@@ -1210,442 +1250,15 @@ describe('Issue #2556: lazy demo playback', () => {
  * Issue #1316 — a bare `npx commandmate` runs an already-installed global bin
  * without consulting the registry at all, so a reader following the LP on a
  * machine that once installed CommandMate silently gets whatever version is
- * already there (0.3.5 against a current 0.10.0, as measured). `@latest` is what
- * forces the resolve, and the LP advertises npx in three places, so the pin has
- * to hold in all of them rather than in whichever one was edited last.
- *
- * Issue #1317 — the quick start is two tracks, and Track B only earns its place
- * by being copy-pasteable: it exists so a long-running daemon is launched from a
- * stable global install rather than from npm's `_npx` cache, which a later npx
- * run replaces underneath the running server.
+ * already there. `@latest` is what forces the resolve. Since #3060 the page
+ * sends the reader to their agent rather than to a shell, so it may carry no
+ * npx line at all; any it does carry stays pinned.
  */
-describe('Issue #1316/#1317: quick start tracks', () => {
+describe('Issue #1316: npx invocations', () => {
   it('pins every npx invocation to @latest', () => {
-    const invocations = readIndexHtml().match(/npx commandmate[^\s<]*/g) ?? [];
+    const invocations = textFiles().flatMap(({ body }) => body.match(/npx commandmate[^\s<`]*/g) ?? []);
 
-    expect(invocations.length).toBeGreaterThan(0);
-    expect([...new Set(invocations)]).toEqual(['npx commandmate@latest']);
-  });
-
-  it('gives every Track B command its own copy button', () => {
-    const copyable = copyableCommands(readIndexHtml());
-
-    for (const command of ['npm install -g commandmate', 'commandmate init', 'commandmate start --daemon']) {
-      expect(copyable).toContain(command);
-    }
-  });
-
-  it('tells the reader how to stop the server both tracks leave running', () => {
-    const html = readIndexHtml();
-
-    expect(html).toMatch(/commandmate stop/);
-    expect(html).toMatch(/commandmate status/);
-  });
-});
-
-/**
- * Issue #1327 — Track A was a prose sentence next to Track B's numbered steps,
- * so it read as the thinner option when it is in fact the whole flow automated.
- * It now lists what `npx commandmate@latest` runs (src/cli/commands/quickstart.ts:
- * preflight -> init on first run -> start --daemon -> wait -> open browser).
- *
- * The list describes work the command already does, so it must not grow copy
- * buttons: a reader who copies them runs an `init` they do not need, and a
- * `start --daemon` out of npm's `_npx` cache — the fragile form #1318 removed
- * from the docs. Track A earns its place by being one command; this is the test
- * that keeps it one.
- */
-describe('Issue #1327: Track A shows what its one command does', () => {
-  it('still offers exactly one copyable command', () => {
-    expect(copyableCommands(trackAMarkup())).toEqual(['npx commandmate@latest']);
-  });
-
-  it('enumerates the automated steps, rather than burying them in prose', () => {
-    // steps-stack is Track B's list markup: the point of the Issue was that the
-    // two tracks should carry the same weight.
-    const list = trackAMarkup().match(/<ol class="steps steps-stack">([\s\S]*?)<\/ol>/);
-
-    expect(list, 'Track A renders no steps-stack list').not.toBeNull();
-    expect(list![1].match(/<li>/g) ?? []).toHaveLength(4);
-  });
-
-  it('lists the setup questions init actually asks, browsable roots included', () => {
-    // Four steps, but the second one describes five prompts: #1517 added
-    // CM_BROWSE_ROOTS ("Additional browsable directories") between the managed
-    // root and the port (src/cli/commands/init.ts), and the LP kept promising
-    // four. A reader who hits an unexpected prompt does not know whether they
-    // are running the thing the page described.
-    const steps = trackAMarkup()
-      .match(/<ol class="steps steps-stack">([\s\S]*?)<\/ol>/)![1]
-      .split('<li>')
-      .slice(1);
-
-    expect(steps).toHaveLength(4);
-    expect(steps[1].toLowerCase(), 'Track A step 2 must name the browsable-roots prompt').toContain(
-      'browsable',
-    );
-  });
-});
-
-/**
- * Issue #2555 — the page had grown to about fifteen screens on a laptop and
- * twenty-seven on a phone. Three things on it repeat what the docs already say,
- * so they were folded or cut, with no wording changed: Track B folds into a
- * <details>, "Pair your phone" keeps its lede, its command and the link to the
- * CLI operations guide, and the gallery keeps four of its seven shots.
- *
- * The heights need a browser and are measured outside this suite. What is
- * pinned here is the markup that made the page shorter, and that nothing a
- * reader could still act on went with it: the fold still holds every command
- * and its copy button, and the guide still carries what the cut cards said.
- */
-describe('Issue #2555: compact', () => {
-  const CSS_BLOCK_START = '/* Compact (#2555) */';
-  const CSS_BLOCK_END = '/* /Compact (#2555) */';
-  const CLI_OPERATIONS_GUIDE = 'docs/en/user-guide/cli-operations-guide.md';
-  const TRACK_B_COMMANDS = ['npm install -g commandmate', 'commandmate init', 'commandmate start --daemon'];
-
-  /** The four shots the gallery keeps, in page order: the og:image first. */
-  const GALLERY_SHOTS = [
-    OG_IMAGE,
-    'assets/img/screenshot-worktree-desktop-chat.webp',
-    'assets/img/screenshot-mobile.webp',
-    'assets/img/screenshot-worktree-mobile-chat.webp',
-  ];
-
-  /**
-   * The three it dropped. They are unreferenced but still on disk: stills.ts
-   * writes a webp for each of them, because the docs use their PNGs, and
-   * tests/unit/skills/demo-video/stills.test.ts requires that webp to exist —
-   * a file this Issue's scope could not change.
-   */
-  const DROPPED_SHOTS = [
-    'assets/img/screenshot-worktree-desktop.webp',
-    'assets/img/screenshot-worktree-mobile.webp',
-    'assets/img/screenshot-worktree-mobile-terminal.webp',
-  ];
-
-  const firstMatch = (html: string, pattern: RegExp, what: string): string => {
-    const found = pattern.exec(html);
-
-    expect(found, `${what} not found in index.html`).not.toBeNull();
-    return found![0];
-  };
-
-  const trackB = (): string =>
-    firstMatch(readIndexHtml(), /<article class="track" aria-labelledby="track-daily-h">[\s\S]*?<\/article>/, 'the Track B card');
-
-  const fold = (): string => firstMatch(trackB(), /<details\b[^>]*>[\s\S]*?<\/details>/, 'the Track B <details>');
-
-  const remoteSection = (): string =>
-    firstMatch(readIndexHtml(), /<section class="section" id="remote"[\s\S]*?<\/section>/, 'the #remote section');
-
-  const gallerySection = (): string =>
-    firstMatch(readIndexHtml(), /<section class="section" aria-labelledby="gallery-h">[\s\S]*?<\/section>/, 'the gallery');
-
-  /** styles.css between this Issue's own opening and closing comments. */
-  const compactCss = (): string => {
-    const css = fs.readFileSync(STYLES_CSS, 'utf-8');
-    const start = css.indexOf(CSS_BLOCK_START);
-    const end = css.indexOf(CSS_BLOCK_END);
-
-    expect(start, `styles.css must open the compact rules with ${CSS_BLOCK_START}`).toBeGreaterThan(-1);
-    expect(end, `styles.css must close the compact rules with ${CSS_BLOCK_END}`).toBeGreaterThan(start);
-    return css.slice(start, end);
-  };
-
-  it('folds Track B into a <details> that opens on "Install it for daily use"', () => {
-    const details = fold();
-    const summary = firstMatch(details, /<summary>([\s\S]*?)<\/summary>/, 'the Track B <summary>');
-
-    expect(text(summary)).toBe('Install it for daily use');
-    // The card is still labelled by its heading, which now sits in the summary.
-    expect(summary).toMatch(/<h3 id="track-daily-h">/);
-    // Folded by default, and toggled by the browser alone, as the FAQ is.
-    expect(details).not.toMatch(/<details\b[^>]*\bopen\b/);
-    expect(details).not.toMatch(/<(?:details|summary)\b[^>]*\b(?:role|tabindex|onclick)=/);
-  });
-
-  it('keeps every Track B command and its copy button inside the fold', () => {
-    expect(copyableCommands(fold())).toEqual(TRACK_B_COMMANDS);
-    expect(copyableCommands(trackB().replace(fold(), ''))).toEqual([]);
-  });
-
-  it('leaves Track A and the stop-the-server note outside any fold', () => {
-    const section = firstMatch(readIndexHtml(), /<section class="section" id="quick-start"[\s\S]*?<\/section>/, 'the quick start')
-      // The comment above Track B names the element it explains.
-      .replace(/<!--[\s\S]*?-->/g, '');
-
-    expect(trackAMarkup()).not.toMatch(/<details\b/);
-    expect(section.match(/<details\b/g) ?? []).toHaveLength(1);
-    expect(section.slice(section.indexOf('</details>'))).toMatch(/commandmate stop/);
-  });
-
-  it('cuts "Pair your phone" to its lede, the command and the link to the CLI operations guide', () => {
-    const section = remoteSection();
-
-    expect(section.match(/<h[2-6]\b/g) ?? []).toEqual(['<h2']);
-    expect(section).not.toMatch(/<article\b|class="(?:cards|card|note)\b/);
-    expect(section.match(/<p class="([^"]+)"/g) ?? []).toEqual(['<p class="section-lede"', '<p class="remote-docs"']);
-    expect(copyableCommands(section)).toEqual(['commandmate remote']);
-    expect(section).toContain(`href="https://github.com/Kewton/CommandMate/blob/main/${CLI_OPERATIONS_GUIDE}"`);
-  });
-
-  it('leaves what the cut cards said in the CLI operations guide the section links to', () => {
-    // The cards could go only because the guide says the same; if a heading
-    // there is renamed or removed, the page has to be looked at again.
-    const guide = fs.readFileSync(path.join(REPO_ROOT, CLI_OPERATIONS_GUIDE), 'utf-8');
-    const start = guide.indexOf('\n### commandmate remote\n');
-
-    expect(start, `${CLI_OPERATIONS_GUIDE} has no "### commandmate remote" section`).toBeGreaterThan(-1);
-    const end = guide.indexOf('\n### ', start + 1);
-    const remote = guide.slice(start, end === -1 ? undefined : end);
-
-    for (const heading of [
-      '#### Provider status', // one of two providers, or DEPENDENCY_ERROR
-      '#### A public tunnel needs explicit approval', // nothing public without a yes
-      '#### Pairing code', // a code that runs out
-      '#### Expiry closes the outward door only', // the session closes itself
-      '#### remote stop does not guess', // one door, and you close it
-    ]) {
-      expect(remote.split('\n'), `the guide's remote section lost "${heading}"`).toContain(heading);
-    }
-    for (const fact of ['DEPENDENCY_ERROR', '--pairing-expires', 'never writes `CM_BIND`', 'Auto-Yes stays off']) {
-      expect(remote, `the guide's remote section no longer says ${fact}`).toContain(fact);
-    }
-  });
-
-  it('shows four shots in the gallery, the og:image first', () => {
-    const shots = Array.from(gallerySection().matchAll(/<img\b[^>]*\bsrc="([^"]+)"/g), ([, src]) => src);
-
-    expect(shots).toEqual(GALLERY_SHOTS);
-  });
-
-  it('names the three shots it dropped nowhere under website/', () => {
-    const names = DROPPED_SHOTS.map((shot) => path.basename(shot));
-
-    expect(
-      textFiles().flatMap(({ file, body }) => names.filter((name) => body.includes(name)).map((name) => `${file}: ${name}`)),
-    ).toEqual([]);
-  });
-
-  it('ships no image under assets/img/ that the page does not reference, but the three stills.ts owns', () => {
-    const refs = new Set(extractRefs(readIndexHtml()));
-    const unreferenced = walk(path.join(WEBSITE_DIR, 'assets', 'img'))
-      .map((file) => `assets/img/${file.split(path.sep).join('/')}`)
-      .filter((file) => !refs.has(file));
-
-    // A subset rather than equality, so deleting them once stills.ts stops
-    // writing them needs no edit here.
-    expect(unreferenced.filter((file) => !DROPPED_SHOTS.includes(file))).toEqual([]);
-  });
-
-  it('keeps the fold and the gallery layout inside its one commented block in styles.css', () => {
-    const css = fs.readFileSync(STYLES_CSS, 'utf-8');
-    const block = compactCss();
-    const outside = css.replace(block, '');
-
-    expect(block).toMatch(/\.track-fold\b/);
-    expect(block).toMatch(/\.gallery\s*\{[^}]*grid-template-columns/);
-    expect(block).toMatch(/\.shot-wide\s*\{/);
-    expect(outside, 'a fold rule outside the /* Compact (#2555) */ block').not.toMatch(/\.track-fold\b/);
-    expect(outside, 'gallery columns outside the /* Compact (#2555) */ block').not.toMatch(
-      /\.gallery\s*\{[^}]*grid-template-columns|\.shot-wide\b/,
-    );
-    // The card grid the remote section no longer has leaves no rule behind.
-    expect(css).not.toMatch(/\.remote-cards\b/);
-    expect(readIndexHtml()).not.toMatch(/remote-cards/);
-  });
-});
-
-/**
- * Issue #2555, second pass — the page was still taller than it was before Epic
- * #2548 on a laptop, and the Epic's additions repeated each other. Four places
- * were folded or laid out closer, again with no wording changed: The loop's
- * beats become one band with their code folded (the page shows a whole contract
- * under One agent leads and gate lines in the hero), the four feature demos sit
- * two by two, the Catalog IDs fold under their label, and the closing call
- * to action shares Philosophy's section.
- *
- * The heights are measured in a browser outside this suite. What is pinned here
- * is the markup and the one CSS block that made the page shorter, and that what
- * the other blocks read — the four beats, the five demos and their playback, the
- * Catalog chips and #philosophy — is still where they read it.
- */
-describe('Issue #2555: compact (2)', () => {
-  const CSS_BLOCK_START = '/* Compact 2 (#2555) */';
-  const CSS_BLOCK_END = '/* /Compact 2 (#2555) */';
-
-  const firstMatch = (html: string, pattern: RegExp, what: string): string => {
-    const found = pattern.exec(html);
-
-    expect(found, `${what} not found in index.html`).not.toBeNull();
-    return found![0];
-  };
-
-  const section = (opening: string): string =>
-    firstMatch(readIndexHtml(), new RegExp(`${opening}[\\s\\S]*?</section>`), opening);
-
-  const beats = (): string[] =>
-    Array.from(
-      firstMatch(section('<section class="section" id="loop"'), /<ol class="beats">[\s\S]*?<\/ol>/, 'the beats').matchAll(
-        /<li class="beat">([\s\S]*?)<\/li>/g,
-      ),
-      ([, inner]) => inner,
-    );
-
-  /** The four cards' markup, comments dropped: the one above the Catalog fold names the element it explains. */
-  const cards = (): string[] =>
-    Array.from(
-      firstMatch(readIndexHtml(), /<h2 id="why">[\s\S]*?<\/section>/, 'the cards section').matchAll(
-        /<article class="card">([\s\S]*?)<\/article>/g,
-      ),
-      ([, inner]) => inner.replace(/<!--[\s\S]*?-->/g, ''),
-    );
-
-  /** styles.css between this pass's own opening and closing comments. */
-  const compactCss = (): string => {
-    const css = fs.readFileSync(STYLES_CSS, 'utf-8');
-    const start = css.indexOf(CSS_BLOCK_START);
-    const end = css.indexOf(CSS_BLOCK_END);
-
-    expect(start, `styles.css must open the rules with ${CSS_BLOCK_START}`).toBeGreaterThan(-1);
-    expect(css.indexOf(CSS_BLOCK_START, start + 1), `${CSS_BLOCK_START} must open one block`).toBe(-1);
-    expect(end, `styles.css must close the rules with ${CSS_BLOCK_END}`).toBeGreaterThan(start);
-    return css.slice(start, end);
-  };
-
-  /** Every `@media (<query>) { … }` block in a CSS fragment, whole, braces balanced. */
-  const mediaBlocks = (css: string, query: string): string[] => {
-    const blocks: string[] = [];
-    for (let open = css.indexOf(`@media (${query}) {`); open > -1; open = css.indexOf(`@media (${query}) {`, open + 1)) {
-      let depth = 1;
-      let at = css.indexOf('{', open) + 1;
-      for (; at < css.length && depth > 0; at++) {
-        if (css[at] === '{') depth++;
-        if (css[at] === '}') depth--;
-      }
-      blocks.push(css.slice(open, at));
-    }
-
-    expect(blocks.length, `no @media (${query}) block`).toBeGreaterThan(0);
-    return blocks;
-  };
-
-  it('lays the four beats out as one band: four across from 901px, stacked below it', () => {
-    const block = compactCss();
-    const wide = mediaBlocks(block, 'min-width: 901px');
-    const narrow = wide.reduce((css, media) => css.replace(media, ''), block);
-    const outside = fs.readFileSync(STYLES_CSS, 'utf-8').replace(block, '');
-
-    expect(beats().map((beat) => text(/^\s*<h3>([\s\S]*?)<\/h3>/.exec(beat)?.[1] ?? ''))).toEqual([
-      'The requirement',
-      'The contract',
-      'The agent runs',
-      'The verdict',
-    ]);
-    expect(narrow).toMatch(/\.beats\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\)/);
-    expect(wide.join('\n')).toMatch(/\.beats\s*\{[^}]*grid-template-columns:\s*repeat\(4, minmax\(0, 1fr\)\)/);
-    expect(outside, 'beat columns outside the /* Compact 2 (#2555) */ block').not.toMatch(
-      /\.beats\s*\{[^}]*grid-template-columns/,
-    );
-  });
-
-  it("folds each beat's code under the artifact it holds, in words the page already carries", () => {
-    const [requirement, ...coded] = beats();
-    const faq = section('<section class="section" id="faq"');
-
-    expect(requirement, 'the requirement has no code to fold').not.toMatch(/<details\b/);
-    const folds = coded.map((beat) => {
-      expect(beat.match(/<details\b/g) ?? [], beat).toHaveLength(1);
-      const details = firstMatch(beat, /<details class="beat-fold">[\s\S]*?<\/details>/, 'a beat fold');
-      const summary = /^<details class="beat-fold">\s*<summary><code>([^<]+)<\/code><\/summary>/.exec(details);
-
-      expect(summary, `a beat fold must open on a bare <summary> holding one <code>:\n${details}`).not.toBeNull();
-      // The sentence stays in view: it comes before the fold, not inside it.
-      expect(beat.indexOf('<p>')).toBeLessThan(beat.indexOf('<details'));
-      return {
-        label: summary![1],
-        snippet: firstMatch(details, /<pre class="snippet"><code>[\s\S]*?<\/code><\/pre>/, 'the folded snippet'),
-      };
-    });
-
-    expect(folds.map((fold) => fold.label)).toEqual(['fix-shout.yaml', 'commandmate send', 'commandmate wait --verify']);
-    // No new words: the file and the send command are named out of their own
-    // snippet, and the verdict's command the way the FAQ writes it.
-    expect(coded[0]).toContain('<p class="snippet-label">.commandmate/tasks/fix-shout.yaml</p>');
-    expect(folds[1].snippet).toContain('$ commandmate send wt-shout');
-    expect(faq).toContain(`<code>${folds[2].label}</code>`);
-    expect(folds[2].snippet).toContain('$ commandmate wait wt-shout --verify');
-    expect(folds[2].snippet).toContain('RESULT passed');
-    for (const beat of coded) {
-      expect(beat, 'folded by default').not.toMatch(/<details\b[^>]*\bopen\b/);
-      expect(beat).not.toMatch(/<(?:details|summary)\b[^>]*\b(?:role|tabindex|onclick)=/);
-    }
-  });
-
-  it('puts the four feature demos two by two under the Measured table, and folds none of them', () => {
-    const demos = section('<section class="section" id="demos"');
-    const grid = firstMatch(demos, /<div class="demos">[\s\S]*<\/div>/, 'the demo grid');
-    const block = compactCss();
-    const outside = fs.readFileSync(STYLES_CSS, 'utf-8').replace(block, '');
-
-    expect(grid.match(/<figure class="demo">/g) ?? []).toHaveLength(Object.keys(DEMO_SOURCES).length);
-    expect(demos.indexOf('<div class="measured">')).toBeLessThan(demos.indexOf('<div class="demos">'));
-    // Inside a closed <details> a demo never reaches the observer's threshold,
-    // so none of the five is behind one.
-    expect(demos).not.toMatch(/<details\b/);
-    expect(block).toMatch(/\.demos\s*\{[^}]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\)/);
-    expect(outside, 'demo columns outside the /* Compact 2 (#2555) */ block').not.toMatch(
-      /\.demos\s*\{[^}]*grid-template-columns/,
-    );
-  });
-
-  it('folds the Catalog IDs under their label, and leaves the paragraph under card 1 in view', () => {
-    const [first, , , fourth] = cards();
-    const fold = firstMatch(fourth, /<details\b[^>]*>[\s\S]*?<\/details>/, 'the Catalog fold');
-
-    expect(fold).toMatch(/^<details class="card-more catalog-fold">\s*<summary id="catalog-h">/);
-    expect(text(firstMatch(fold, /<summary\b[^>]*>[\s\S]*?<\/summary>/, 'the Catalog summary'))).not.toBe('');
-    expect(fold.match(/<ul class="chips" aria-labelledby="catalog-h">/g) ?? []).toHaveLength(1);
-    // Every chip inside the fold is a Catalog ID. #3057 dropped the comparison
-    // with the ID row of public-messaging.md: the page lists what it lists.
-    const chips = fold.match(/<li>[\s\S]*?<\/li>/g) ?? [];
-    expect(chips.length).toBeGreaterThan(0);
-    expect(fold.match(/<li><code>cmate-[^<]+<\/code><\/li>/g) ?? []).toHaveLength(chips.length);
-    expect(fold).not.toMatch(/<details\b[^>]*\bopen\b/);
-    expect(fold).not.toMatch(/<(?:details|summary)\b[^>]*\b(?:role|tabindex|onclick)=/);
-    // The paragraph under card 1 is one a reader sees without opening anything.
-    expect(first).not.toMatch(/<details\b/);
-    expect(first).toMatch(/<p class="card-more">/);
-  });
-
-  it('makes the closing call to action and Philosophy one section, the last in <main>, still #philosophy', () => {
-    const html = readIndexHtml();
-    const merged = section('<section class="section philosophy" id="philosophy" aria-labelledby="philosophy-h">');
-
-    expect(html).not.toMatch(/<section class="section closing"/);
-    expect(html.match(/\sid="philosophy"/g) ?? []).toHaveLength(1);
-    expect(merged.indexOf('<div class="closing">')).toBeGreaterThan(-1);
-    expect(merged.indexOf('<div class="closing">')).toBeLessThan(merged.indexOf('<div class="philosophy-body">'));
-    expect(text(firstMatch(merged, /<div class="closing">\s*<h2>[\s\S]*?<\/h2>/, 'the closing heading'))).toBe(
-      'Start in one command',
-    );
-    expect(copyableCommands(merged)).toEqual(['npx commandmate@latest']);
-    expect(html.slice(html.indexOf(merged) + merged.length)).toMatch(/^\s*<\/main>/);
-  });
-
-  it('keeps its rules in one commented block, with no motion for reduced motion to switch off', () => {
-    const block = compactCss();
-    const outside = fs.readFileSync(STYLES_CSS, 'utf-8').replace(block, '');
-
-    for (const rule of [/\.beat-fold\b/, /\.catalog-fold\b/, /\.philosophy-body\b/, /#loop\b/]) {
-      expect(block).toMatch(rule);
-      expect(outside, `${rule} outside the /* Compact 2 (#2555) */ block`).not.toMatch(rule);
-    }
-    // The FAQ switches its chevron's transition off by hand; these folds never
-    // declare one, so the page-wide reduced-motion rule has nothing to shorten.
-    expect(block.replace(/\/\*[\s\S]*?\*\//g, '')).not.toMatch(/\b(?:transition|animation)(?:-[a-z]+)?\s*:/);
+    expect(invocations.filter((invocation) => invocation !== 'npx commandmate@latest')).toEqual([]);
   });
 });
 
@@ -1728,108 +1341,15 @@ describe('Issue #1812: the page says what the messaging doc says', () => {
       expect(value, `${name} must open on the lede's first sentence`).toBe(lede);
     }
   });
-
-  it('replaces the competitor comparison with the With / Without table', () => {
-    const html = readIndexHtml();
-
-    // Both halves matter: the section has to be gone, and the nav link that
-    // pointed at it has to have moved with it or it scrolls nowhere. Anchors
-    // rather than the bare word, which survives legitimately in prose.
-    expect(html, 'the #comparison section must be gone').not.toMatch(/id="comparison[^"]*"/);
-    expect(html, 'the nav must not link to a section that no longer exists').not.toMatch(
-      /href="#comparison"/,
-    );
-    expect(html).toMatch(/id="with-without"/);
-    expect(html).toMatch(/href="#with-without"/);
-  });
-
-  it('states all seven With / Without rows', () => {
-    const section = /<section class="section" id="with-without"[\s\S]*?<\/section>/.exec(
-      readIndexHtml(),
-    );
-
-    expect(section, '#with-without section not found').not.toBeNull();
-    const body = /<tbody>([\s\S]*?)<\/tbody>/.exec(section![0]);
-
-    expect(body, '#with-without renders no table body').not.toBeNull();
-    expect(body![1].match(/<tr>/g) ?? []).toHaveLength(7);
-  });
 });
 
 /**
- * Issue #2495 — the page moved onto the orchestrate axis: the H1 says who leads
- * and what decides completion, the reader's own problem comes before anything
- * the product does, a recorded run opens "See it running" above The loop, and
- * the axis word steps down to a Philosophy section above the footer.
- *
- * #3057 dropped the assertions here that compared the hero, the problem
- * section, the four cards, the captions and Philosophy with the wording of
- * `docs/design/public-messaging.md`. What stays is the order of the page and
- * the §5 scan for claims nobody measured.
+ * Issue #2495 — §5 of `docs/design/public-messaging.md` lists the claims
+ * nobody measured. Since #3057 this is the only part of the orchestrate-axis
+ * block that still applies: the page may say things its own way, but not
+ * these.
  */
-describe('Issue #2495: the LP on the orchestrate axis', () => {
-  const sectionHtml = (selector: RegExp): string => {
-    const found = selector.exec(readIndexHtml());
-
-    expect(found, `no section matching ${selector}`).not.toBeNull();
-    return found![0];
-  };
-
-  const positionOf = (needle: string): number => {
-    const at = readIndexHtml().indexOf(needle);
-
-    expect(at, `${needle} is not in index.html`).toBeGreaterThan(-1);
-    return at;
-  };
-
-  it('orders the page hero, problem, demos, loop — and philosophy last', () => {
-    expect(positionOf('<section class="hero">')).toBeLessThan(positionOf('id="problem"'));
-    expect(positionOf('id="problem"')).toBeLessThan(positionOf('id="demos"'));
-    expect(positionOf('id="demos"')).toBeLessThan(positionOf('id="loop"'));
-    expect(positionOf('id="with-without"')).toBeLessThan(positionOf('id="limits"'));
-    expect(positionOf('id="philosophy"')).toBeLessThan(positionOf('<footer'));
-  });
-
-  it('puts the fact row directly under the install box', () => {
-    const hero = sectionHtml(/<section class="hero">[\s\S]*?<\/section>/);
-
-    // Under the command rather than above it: it is the reassurance a reader
-    // wants at the moment they are about to paste something into a shell.
-    expect(hero.indexOf('class="facts"')).toBeGreaterThan(hero.indexOf('class="install"'));
-  });
-
-  it('captions every demo in "See it running"', () => {
-    const section = sectionHtml(/<section class="section" id="demos"[\s\S]*?<\/section>/);
-    const captions = [...section.matchAll(/<figcaption>([\s\S]*?)<\/figcaption>/g)].map((match) =>
-      text(match[1]),
-    );
-
-    expect(captions).toHaveLength(DEMO_ORDER.length);
-    expect(captions.filter((caption) => caption === ''), 'a demo with an empty caption').toEqual([]);
-  });
-
-  it('captions the lead run with what the recording shows', () => {
-    // A literal: this clip is a recorded orchestrate run, and the caption is a
-    // measured claim about it. Every count in the sentence
-    // was read off the footage and the take's brief before it was written —
-    // one message to a Command Code session, four issues (#19–#22), four
-    // workers, four passing gate columns, and a UAT column in the closing
-    // matrix. Nothing here is inferred from the run log.
-    const section = sectionHtml(/<figure class="demo demo-lead">[\s\S]*?<\/figure>/);
-
-    expect(text(/<figcaption>([\s\S]*?)<\/figcaption>/.exec(section)![1])).toBe(
-      'One message to Command Code. Four issues, four workers, 4/4 gates, then UAT.',
-    );
-    expect(section).toContain(`src="assets/media/${LEAD_DEMO}"`);
-  });
-
-  it('keeps the Willison footnote with the sentence it is a footnote to', () => {
-    const section = sectionHtml(/<section class="section philosophy"[\s\S]*?<\/section>/);
-
-    expect(section).toContain('Simon Willison');
-    expect(section).toContain('https://simonwillison.net/2025/Oct/7/vibe-engineering/');
-  });
-
+describe('Issue #2495: claims outside what was measured', () => {
   it('makes none of the claims §5 puts outside what was measured', () => {
     const claims = unmeasuredClaims().filter((claim) => !UNSCANNABLE_CLAIMS.includes(claim));
 
@@ -1847,237 +1367,20 @@ describe('Issue #2495: the LP on the orchestrate axis', () => {
   });
 
   it('still finds the two §5 rows a substring scan cannot be run for', () => {
-    // Both are real rules, and neither can be a substring search on this page.
-    // "loop" is the name of a section here — the cycle the page is about, which
-    // §5's own reason ("nothing runs forever") is not talking about, and which
-    // §7 spells out as "nothing loops forever". "the only …" is an ellipsis, a
-    // shape rather than a string. (The page once said "the only network traffic
-    // is the agent CLI's own API calls"; #2549 retracted that as an overclaim,
-    // and public-messaging.md §6 now lists it among the retracted wording.)
+    // Both are real rules, and neither can be a substring search: "loop" is
+    // an ordinary word that §5 rules out only as a claim that something runs
+    // forever, and "the only …" is an ellipsis, a shape rather than a string.
     // Pinned here so the exemption cannot outlive the rows.
     expect(unmeasuredClaims()).toEqual(expect.arrayContaining(UNSCANNABLE_CLAIMS));
   });
-});
 
-/**
- * Issue #2553 — a FAQ directly under "What it does not do": what a gate is, what
- * happens after the agent says it is done, why this is not an IDE, and five more
- * a reader asks before installing.
- *
- * #3057 dropped the check that every question and answer is
- * `docs/design/public-messaging.md` §13 verbatim, and §13 with it. What stays is
- * how the section works — native disclosure, its place on the page, its own CSS
- * block and reduced motion — and the words §5 rules out.
- */
-describe('Issue #2553: FAQ', () => {
-  const CSS_BLOCK_START = '/* FAQ (#2553) */';
-  const CSS_BLOCK_END = '/* /FAQ (#2553) */';
+  it('says neither "loop" nor "the only" in the copy a reader sees', () => {
+    // The page has no section named after a loop any more (#3060), so the
+    // exemption above is not needed for the page's own text.
+    const said = text(readIndexHtml().replace(/<!--[\s\S]*?-->/g, '').replace(/<head>[\s\S]*?<\/head>/, '')).toLowerCase();
 
-  const faqSection = (): string => {
-    const found = /<section class="section" id="faq" aria-labelledby="faq-h">[\s\S]*?<\/section>/.exec(
-      readIndexHtml(),
-    );
-
-    expect(found, 'no <section class="section" id="faq" aria-labelledby="faq-h"> in index.html').not.toBeNull();
-    return found![0];
-  };
-
-  const detailsBlocks = (): string[] =>
-    Array.from(faqSection().matchAll(/<details\b[^>]*>([\s\S]*?)<\/details>/g), ([, inner]) => inner);
-
-  /** styles.css between the FAQ's own opening and closing comments. */
-  const faqCss = (): string => {
-    const css = fs.readFileSync(STYLES_CSS, 'utf-8');
-    const start = css.indexOf(CSS_BLOCK_START);
-    const end = css.indexOf(CSS_BLOCK_END);
-
-    expect(start, `styles.css must open the FAQ rules with ${CSS_BLOCK_START}`).toBeGreaterThan(-1);
-    expect(end, `styles.css must close the FAQ rules with ${CSS_BLOCK_END}`).toBeGreaterThan(start);
-    return css.slice(start, end);
-  };
-
-  it('sits directly after "What it does not do"', () => {
-    const html = readIndexHtml();
-    const limitsStart = html.indexOf('<section class="section" id="limits"');
-    const limitsEnd = html.indexOf('</section>', limitsStart);
-    const faqStart = html.indexOf('<section class="section" id="faq"');
-
-    expect(limitsStart, 'no #limits section in index.html').toBeGreaterThan(-1);
-    expect(faqStart).toBeGreaterThan(limitsEnd);
-    expect(html.slice(limitsEnd + '</section>'.length, faqStart)).not.toMatch(/<section\b/);
-    expect(text(/<h2 id="faq-h">([\s\S]*?)<\/h2>/.exec(faqSection())?.[1] ?? '')).toBe('FAQ');
-  });
-
-  it('opens and closes on the native summary alone, so the keyboard needs no script', () => {
-    const section = faqSection();
-
-    expect(detailsBlocks().length).toBeGreaterThan(0);
-    expect(section.match(/<summary\b/g) ?? []).toHaveLength(detailsBlocks().length);
-    for (const inner of detailsBlocks()) {
-      expect(inner, 'a <details> must open on a bare <summary>').toMatch(/^\s*<summary>/);
-    }
-    // A role, a tabindex or a click handler on either element takes the toggle
-    // away from the browser, and with it Enter / Space; so does a script that
-    // reaches for them.
-    expect(section).not.toMatch(/<(?:details|summary)\b[^>]*\b(?:role|tabindex|onclick)=/);
-    expect(fs.readFileSync(path.join(WEBSITE_DIR, 'main.js'), 'utf-8')).not.toMatch(
-      /faq|querySelector(?:All)?\(\s*['"`][^'"`]*\b(?:details|summary)\b/i,
-    );
-  });
-
-  it('adds no anchor to the nav', () => {
-    const header = /<header class="site-header">[\s\S]*?<\/header>/.exec(readIndexHtml());
-
-    expect(header, 'the site header not found in index.html').not.toBeNull();
-    expect(header![0]).not.toMatch(/href="#faq/);
-  });
-
-  it('says neither "loop" nor "the only", which §5 rules out and the page-wide scan cannot', () => {
-    // UNSCANNABLE_CLAIMS exempts both from the §5 scan because the page has a
-    // section called The loop. Inside this one section there is no such excuse.
-    const said = text(faqSection()).toLowerCase();
-
-    expect(said).not.toMatch(/\bloop/);
+    expect(said).not.toMatch(/\bloop(?:s|ed|ing)?\b/);
     expect(said).not.toMatch(/\bthe only\b/);
-  });
-
-  it('keeps every FAQ rule inside its one commented block in styles.css', () => {
-    const css = fs.readFileSync(STYLES_CSS, 'utf-8');
-    const outside = css.replace(faqCss(), '');
-
-    expect(faqCss()).toMatch(/\.faq-item\b/);
-    expect(outside, 'a FAQ rule outside the /* FAQ (#2553) */ block').not.toMatch(/\.faq\b|\.faq-|#faq\b/);
-  });
-
-  it('switches off, for reduced motion, every transition the FAQ block declares', () => {
-    const css = faqCss().replace(/\/\*[\s\S]*?\*\//g, '');
-    const media = /@media \(prefers-reduced-motion: reduce\) \{([\s\S]*?\})\s*\}/.exec(css);
-    const rules = (fragment: string): { selectors: string[]; transition?: string }[] =>
-      Array.from(fragment.matchAll(/([^{}]+)\{([^{}]*)\}/g), ([, selector, body]) => ({
-        selectors: selector.split(',').map((one) => one.trim()),
-        transition: /\btransition(?:-[a-z]+)?\s*:\s*([^;]+)/.exec(body)?.[1].trim(),
-      }));
-
-    const animated = rules(media ? css.replace(media[0], '') : css)
-      .filter((rule) => rule.transition !== undefined && !rule.transition.startsWith('none'))
-      .flatMap((rule) => rule.selectors);
-    const switchedOff = rules(media?.[1] ?? '')
-      .filter((rule) => rule.transition?.startsWith('none'))
-      .flatMap((rule) => rule.selectors);
-
-    // The page-wide reduced-motion rule only shortens a transition to 0.01ms, so
-    // the FAQ switches its own off: by name, or for everything inside #faq.
-    const covered = (selector: string): boolean => {
-      const pseudo = /::(?:before|after)$/.exec(selector)?.[0] ?? '';
-      const inside = /^(?:\.faq\b|\.faq-|#faq\s*[\s>+~])/.test(selector.slice(0, selector.length - pseudo.length));
-
-      return switchedOff.includes(selector) || (inside && switchedOff.includes(`#faq *${pseudo}`));
-    };
-
-    expect(
-      animated.filter((selector) => !covered(selector)),
-      'these FAQ rules still transition under prefers-reduced-motion: reduce',
-    ).toEqual([]);
-  });
-});
-
-/**
- * Issue #2550 — the H1 says one agent leads, and until this Issue the page only
- * showed that in a fifteen-second recording and one card. "See it running" now
- * carries the Measured table under that recording, a new "One agent leads"
- * section walks the lead's run, and The loop is cut down to one worker's turn
- * inside it.
- *
- * #3057 dropped the assertions that compared this with the wording of
- * `docs/design/public-messaging.md` §3b–§3e cell for cell. What stays is where
- * the Measured table sits, that it is never shown without "as observed", and
- * that it scrolls in a labelled region.
- */
-describe('Issue #2550: the lead run, measured and walked through', () => {
-  const pageSection = (id: string): string => {
-    const found = new RegExp(`<section class="section" id="${id}"[\\s\\S]*?</section>`).exec(
-      readIndexHtml(),
-    );
-
-    expect(found, `no #${id} section in index.html`).not.toBeNull();
-    return found![0];
-  };
-
-  const firstMatch = (html: string, pattern: RegExp, what: string): string => {
-    const found = pattern.exec(html);
-
-    expect(found, `${what} not found in index.html`).not.toBeNull();
-    return found![1];
-  };
-
-  /** The Measured block: after the recorded run, before the four feature demos. */
-  const measuredHtml = (): string => {
-    const demos = pageSection('demos');
-    const start = demos.indexOf('<div class="measured">');
-    const end = demos.indexOf('<div class="demos">');
-
-    expect(start, 'no .measured block in #demos').toBeGreaterThan(-1);
-    expect(start, 'the Measured table must sit under the recorded run').toBeGreaterThan(
-      demos.indexOf('<figure class="demo demo-lead">'),
-    );
-    expect(end, 'the Measured table must sit above the four feature demos').toBeGreaterThan(start);
-    return demos.slice(start, end);
-  };
-
-  it('puts "as observed" directly under the Measured table', () => {
-    const html = measuredHtml();
-
-    // public-messaging.md §1: the line goes directly under the table and the
-    // table is never shown without it — so "somewhere in the block" is not enough.
-    expect(
-      text(firstMatch(html, /<\/table>\s*<\/div>\s*<p[^>]*>([\s\S]*?)<\/p>/, 'the line under the table')),
-    ).toBe('as observed');
-  });
-
-  it('scrolls the Measured table in its own box, as the With / Without table does', () => {
-    expect(measuredHtml()).toMatch(/<div class="table-scroll" tabindex="0" role="region" aria-labelledby="measured-h">/);
-    expect(measuredHtml()).toMatch(/<h3 id="measured-h">/);
-  });
-
-  it('orders the new section after "See it running" and before The loop', () => {
-    const html = readIndexHtml();
-
-    expect(html.indexOf('id="demos"')).toBeLessThan(html.indexOf('id="lead"'));
-    expect(html.indexOf('id="lead"')).toBeLessThan(html.indexOf('id="loop"'));
-  });
-
-});
-
-/**
- * Issue #1329 — the LP sends a reader to a running server and stops there, with
- * nothing to point the agent at. The tutorial repo is that something. The URL is
- * pasted into the Repositories screen rather than a shell, so what matters is
- * that it is copyable at all — an uncopyable URL means transcribing it by hand,
- * which is the whole reason the copy buttons exist.
- */
-describe('Issue #1329: tutorial entry point', () => {
-  const TUTORIAL_CLONE_URL = 'https://github.com/Kewton/commandmate-tutorial.git';
-
-  it('wires a copy button to the tutorial clone URL', () => {
-    const box = copyableBoxes(readIndexHtml()).find((b) => b.text === TUTORIAL_CLONE_URL);
-
-    expect(box, `no copy-wired box renders ${TUTORIAL_CLONE_URL}`).toBeDefined();
-  });
-
-  it('marks the clone URL as a URL, so it renders without a shell prompt', () => {
-    // .install-cmd::before prepends "$ ", which would present the URL as a
-    // command to run. .install-url is what suppresses it (styles.css).
-    const box = copyableBoxes(readIndexHtml()).find((b) => b.text === TUTORIAL_CLONE_URL);
-
-    expect(box?.isUrl).toBe(true);
-  });
-
-  it('links out to the tutorial rather than inlining its steps', () => {
-    // The LP has no build step, so every step spelled out here is one more thing
-    // to keep in sync by hand with the doc that already carries it.
-    expect(readIndexHtml()).toMatch(
-      /href="https:\/\/github\.com\/Kewton\/CommandMate\/blob\/main\/docs\/en\/user-guide\/tutorial\.md"/,
-    );
   });
 });
 
@@ -2252,7 +1555,7 @@ describe('Issue #2552: nav, footer, version line and llms.txt', () => {
     const html = readIndexHtml();
 
     expect(anchors(footer()).map((link) => link.href)).toEqual(
-      expect.arrayContaining(['#loop', '#quick-start', '#with-without']),
+      expect.arrayContaining(['#level-1', '#level-2', '#level-3', '#setup', '#trust']),
     );
 
     const dangling = Array.from(html.matchAll(/href="#([^"]+)"/g), ([, id]) => id).filter(
@@ -2261,7 +1564,7 @@ describe('Issue #2552: nav, footer, version line and llms.txt', () => {
     expect(dangling, 'these in-page links scroll nowhere').toEqual([]);
   });
 
-  it('links the footer to Discussions and Releases, and to no X account yet', () => {
+  it('links the footer to Discussions and Releases, and the page to one X account', () => {
     const links = anchors(footer()).map(({ text: label, href }) => [label, href]);
 
     expect(links).toEqual(
@@ -2270,8 +1573,12 @@ describe('Issue #2552: nav, footer, version line and llms.txt', () => {
         ['Releases', `${REPO_URL}/releases`],
       ]),
     );
-    // Which account it would be is undecided; a guessed handle is worse than none.
-    expect(links.filter(([label, href]) => label === 'X' || /\/\/(www\.)?(x|twitter)\.com\b/.test(href))).toEqual([]);
+    // #3060 asks for "Follow on X" in Start. One account, the author's, and
+    // nowhere else: a second handle would be a guess.
+    const xLinks = anchors(readIndexHtml())
+      .map((link) => link.href)
+      .filter((href) => /\/\/(www\.)?(x|twitter)\.com\b/.test(href));
+    expect(xLinks).toEqual(['https://x.com/SibaKotaro']);
   });
 
   it('points a feed reader at the GitHub releases feed', () => {
@@ -2283,11 +1590,13 @@ describe('Issue #2552: nav, footer, version line and llms.txt', () => {
   });
 
   it('states the version package.json ships, directly under the prerequisites', () => {
-    const hero = markup(/<section class="hero">[\s\S]*?<\/section>/, 'the hero');
+    // In Start since #3060, where the reader decides to go ahead.
+    const start = markup(/<section class="section start" id="start"[\s\S]*?<\/section>/, 'the Start section');
 
     expect(releaseLine().version).toBe(packageVersion());
-    expect(hero.indexOf('class="release-line"')).toBeGreaterThan(hero.indexOf('class="prereq"'));
-    expect(hero.indexOf('class="release-line"')).toBeLessThan(hero.indexOf('class="cta-row"'));
+    expect(start.indexOf('class="prereq"')).toBeGreaterThan(-1);
+    expect(start.indexOf('class="release-line"')).toBeGreaterThan(start.indexOf('class="prereq"'));
+    expect(start.indexOf('class="release-line"')).toBeLessThan(start.indexOf('class="cta-row"'));
   });
 
   it("dates the version line from that version's CHANGELOG heading", () => {
@@ -2354,5 +1663,236 @@ describe('Issue #2552: nav, footer, version line and llms.txt', () => {
 
     expect(quoted.length).toBeGreaterThan(0);
     expect(new Set(quoted)).toEqual(new Set([/(\d+)/.exec(pkg.engines.node)?.[1]]));
+  });
+});
+
+/**
+ * Issue #3060 — the page is rebuilt for a reader who arrived from a post on X
+ * and has not decided anything yet: the three levels, then setting up by asking
+ * an agent. What is pinned here is the Issue's acceptance criteria: the order
+ * of the sections, the four numbers exactly as written (the estimate says it
+ * is one), the line to paste pointing at setup.md with a working Copy button,
+ * and the CSS that keeps a 390px phone from scrolling sideways.
+ */
+describe('Issue #3060: three levels and setup with your agent', () => {
+  const SETUP_URL = 'https://kewton.github.io/CommandMate/setup.md';
+  const SETUP_PROMPT = `Read ${SETUP_URL} and help me set up CommandMate on this machine. Explain each step before you run it, and ask me before you install anything or open access from the internet.`;
+
+  /** The four numbers, and their wording, as the Issue's table and README.md write them. */
+  const STATS = [
+    '10+ PRs a day, solo',
+    '$110–$210 a month: Claude Max + Command Code Goat',
+    '~80% of my instructions sent from a phone (my estimate)',
+    '689 PRs merged in September 2026, across my repositories',
+  ];
+
+  /** The 390px phone, less the page's side padding (1.25rem a side). */
+  const PHONE_CONTENT_PX = 390 - 2 * 20;
+
+  const html = (): string => readIndexHtml();
+
+  const firstMatch = (source: string, pattern: RegExp, what: string): string => {
+    const found = pattern.exec(source);
+
+    expect(found, `${what} not found in index.html`).not.toBeNull();
+    return found![0];
+  };
+
+  const hero = (): string => firstMatch(html(), /<section class="hero">[\s\S]*?<\/section>/, 'the hero');
+
+  const section = (id: string): string =>
+    firstMatch(html(), new RegExp(`<section class="section[^"]*" id="${id}"[\\s\\S]*?</section>`), `#${id}`);
+
+  const heading = (fragment: string, tag: 'h1' | 'h2'): string =>
+    text(new RegExp(`<${tag}\\b[^>]*>([\\s\\S]*?)</${tag}>`).exec(fragment)?.[1] ?? '');
+
+  /** styles.css with every `@media (min-width: …)` block taken out: what a phone gets. */
+  const narrowCss = (): string => {
+    let css = fs.readFileSync(STYLES_CSS, 'utf-8').replace(/\/\*[\s\S]*?\*\//g, '');
+    for (let open = css.indexOf('@media (min-width:'); open > -1; open = css.indexOf('@media (min-width:')) {
+      let depth = 1;
+      let at = css.indexOf('{', open) + 1;
+      for (; at < css.length && depth > 0; at++) {
+        if (css[at] === '{') depth++;
+        if (css[at] === '}') depth--;
+      }
+      css = css.slice(0, open) + css.slice(at);
+    }
+    return css;
+  };
+
+  const toPx = (value: string, unit: string): number => Number(value) * (unit === 'rem' || unit === 'em' ? 16 : 1);
+
+  it('orders the sections hero, problem, the three levels, setup, my setup, trust, start', () => {
+    const page = html();
+    const order = [
+      '<section class="hero">',
+      'id="problem"',
+      'id="level-1"',
+      'id="level-2"',
+      'id="level-3"',
+      'id="setup"',
+      'id="my-setup"',
+      'id="trust"',
+      'id="start"',
+    ].map((needle) => {
+      const at = page.indexOf(needle);
+      expect(at, `${needle} is not in index.html`).toBeGreaterThan(-1);
+      return at;
+    });
+
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+    expect(page.match(/<section\b/g) ?? []).toHaveLength(order.length);
+    expect(page.slice(page.indexOf(section('start')) + section('start').length)).toMatch(/^\s*<\/main>/);
+  });
+
+  it('heads each section with the words the Issue gives it', () => {
+    expect(heading(hero(), 'h1')).toBe('No long blocks of time? Run an AI team from your phone.');
+    expect(heading(section('problem'), 'h2')).toBe(
+      'Day job. Housework. Kids. Family time. Your project gets the gaps.',
+    );
+    expect(section('problem').match(/<li>/g) ?? []).toHaveLength(3);
+    expect(heading(section('level-1'), 'h2')).toBe('Many agents, one place, in your pocket');
+    expect(heading(section('level-2'), 'h2')).toBe('Work like a team, not a chat');
+    expect(heading(section('level-3'), 'h2')).toBe('An AI team that builds and maintains');
+    expect(heading(section('setup'), 'h2')).toBe('Set up with your agent');
+    expect(heading(section('my-setup'), 'h2')).toBe('My setup');
+  });
+
+  it('shows the four numbers, and only those four, exactly as written', () => {
+    const list = firstMatch(hero(), /<ul class="stats"[^>]*>[\s\S]*?<\/ul>/, 'the numbers');
+    const stats = [...list.matchAll(/<li>([\s\S]*?)<\/li>/g)].map((match) => text(match[1]));
+
+    expect(stats).toEqual(STATS);
+    // The same four in README.md, so the two surfaces never disagree.
+    const readme = fs.readFileSync(path.join(REPO_ROOT, 'README.md'), 'utf-8');
+    for (const stat of STATS) {
+      expect(readme.split('\n'), `README.md no longer says "${stat}"`).toContain(`- ${stat}`);
+    }
+    expect(fs.readFileSync(path.join(WEBSITE_DIR, 'llms.txt'), 'utf-8').split('\n')).toEqual(
+      expect.arrayContaining(STATS.map((stat) => `- ${stat}`)),
+    );
+  });
+
+  it('keeps the four numbers traceable to the messaging doc', () => {
+    const facts = sectionBody('1');
+
+    for (const stat of STATS) {
+      expect(facts, `public-messaging.md §1 has no source for "${stat}"`).toContain(stat);
+    }
+  });
+
+  it('offers the line to paste, pointing at setup.md, with a Copy button, in the hero and again in Start', () => {
+    const inHero = copyableBoxes(hero());
+    const inStart = copyableBoxes(section('start'));
+
+    expect(inHero.map((box) => box.text)).toEqual([SETUP_PROMPT]);
+    expect(inStart.map((box) => box.text)).toEqual([SETUP_PROMPT]);
+    // The URL the line points at is a file this site serves.
+    expect(fs.existsSync(path.join(WEBSITE_DIR, 'setup.md'))).toBe(true);
+    expect(fs.readFileSync(path.join(REPO_ROOT, 'README.md'), 'utf-8')).toContain(SETUP_PROMPT);
+  });
+
+  it('ends each level on an "Ask your agent" line that points at setup.md', () => {
+    for (const id of ['level-1', 'level-2', 'level-3']) {
+      const ask = firstMatch(section(id), /<div class="ask">[\s\S]*?<\/div>\s*<\/div>/, `the ask box in #${id}`);
+      const boxes = copyableBoxes(ask);
+
+      expect(text(ask), id).toContain('Ask your agent');
+      expect(boxes, id).toHaveLength(1);
+      expect(boxes[0].text, id).toContain(SETUP_URL);
+    }
+  });
+
+  it('says Level 1 runs on the plan you already pay for, and Level 3 that the daily run is an example', () => {
+    expect(text(section('level-1'))).toContain('It runs on the plan you already pay for.');
+    expect(section('level-1').match(/<li class="pillar">/g) ?? []).toHaveLength(4);
+    expect(section('level-2').match(/<li class="pillar">/g) ?? []).toHaveLength(4);
+    expect(section('level-3').match(/<li class="pillar">/g) ?? []).toHaveLength(2);
+    expect(text(section('level-3'))).toContain('It is not a switch in the product.');
+  });
+
+  it('walks the five stages of setup.md, in its order and under its names, each with what the agent checks', () => {
+    const guide = fs.readFileSync(path.join(WEBSITE_DIR, 'setup.md'), 'utf-8');
+    const stagesInGuide = Array.from(guide.matchAll(/^## Stage \d+: (.+)$/gm), ([, name]) => name);
+    const stages = Array.from(section('setup').matchAll(/<li class="stage">([\s\S]*?)<\/li>/g), ([, inner]) => inner);
+
+    expect(stagesInGuide).toHaveLength(5);
+    expect(stages.map((stage) => text(/<h3>([\s\S]*?)<\/h3>/.exec(stage)?.[1] ?? ''))).toEqual(stagesInGuide);
+    for (const stage of stages) {
+      expect(text(stage)).toMatch(/Your agent checks:/);
+    }
+  });
+
+  it('names the phone connection by its command and both providers in My setup', () => {
+    const rows = Array.from(section('my-setup').matchAll(/<tr>([\s\S]*?)<\/tr>/g), ([, row]) => text(row));
+
+    expect(rows).toContain('Phone connection commandmate remote (Tailscale or Cloudflare) — —');
+    expect(rows.some((row) => row.startsWith('Total') && row.includes(STATS[1]))).toBe(true);
+  });
+
+  it('closes with Star on GitHub, Follow on X and the README', () => {
+    const links = Array.from(section('start').matchAll(/<a\b[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g), ([, href, label]) => [
+      text(label),
+      href,
+    ]);
+
+    expect(links).toEqual([
+      ['Star on GitHub', 'https://github.com/Kewton/CommandMate'],
+      ['Follow on X', 'https://x.com/SibaKotaro'],
+      ['Read the README', 'https://github.com/Kewton/CommandMate#readme'],
+    ]);
+  });
+
+  it('sets no fixed width on a 390px phone wider than the content box', () => {
+    const wide = Array.from(
+      narrowCss().matchAll(/(?:^|[;{\s])((?:min-|max-)?width|flex-basis)\s*:\s*(\d+(?:\.\d+)?)(px|rem|em)\b/g),
+    )
+      .filter(([, property]) => property !== 'max-width')
+      .filter(([, , value, unit]) => toPx(value, unit) > PHONE_CONTENT_PX)
+      .map(([declaration]) => declaration.trim());
+
+    // The one exception is a table inside .table-scroll, which scrolls in its
+    // own box rather than widening the page.
+    expect(wide.filter((declaration) => !/min-width:\s*34rem/.test(declaration))).toEqual([]);
+    for (const table of html().match(/<table\b[\s\S]*?<\/table>/g) ?? []) {
+      expect(html().slice(0, html().indexOf(table)), 'a table outside .table-scroll').toMatch(
+        /<div class="table-scroll"[^>]*>\s*$/,
+      );
+    }
+  });
+
+  it('lets every grid column shrink to a phone', () => {
+    const fixedTracks = Array.from(narrowCss().matchAll(/grid-template-columns\s*:\s*([^;]+);/g), ([, value]) => value)
+      .map((value) => value.replace(/min\(100%,\s*[^)]+\)/g, '').replace(/minmax\(0,\s*[^)]+\)/g, ''))
+      .filter((value) => /\d(?:px|rem|em)\b/.test(value));
+
+    expect(fixedTracks).toEqual([]);
+  });
+
+  it('wraps the line to paste instead of letting its URL widen the page', () => {
+    const css = fs.readFileSync(STYLES_CSS, 'utf-8').replace(/\/\*[\s\S]*?\*\//g, '');
+    const rule = /\.install-prompt\s*\{([^}]*)\}/.exec(css)?.[1] ?? '';
+
+    expect(rule).toMatch(/white-space:\s*normal/);
+    expect(rule).toMatch(/overflow-wrap:\s*anywhere/);
+    expect(css).toMatch(/\.install-cmd\s*\{[^}]*min-width:\s*0/);
+    // Every drawing shrinks with its column.
+    for (const drawing of INLINE_DRAWINGS) {
+      const rules = Array.from(css.matchAll(new RegExp(`([^{}]*\\.${drawing}(?:\\s*,[^{}]*)?)\\s*\\{([^}]*)\\}`, 'g')))
+        .filter(([, selector]) => selector.split(',').some((one) => one.trim() === `.${drawing}`))
+        .map(([, , body]) => body)
+        .join('\n');
+
+      expect(rules, drawing).toMatch(/width:\s*100%/);
+      expect(rules, drawing).toMatch(/height:\s*auto/);
+    }
+  });
+
+  it('carries the new one line in llms.txt', () => {
+    const llms = fs.readFileSync(path.join(WEBSITE_DIR, 'llms.txt'), 'utf-8');
+
+    expect(llms.split('\n')[0]).toBe(`# CommandMate — ${heading(hero(), 'h1')}`);
+    expect(llms).toContain(SETUP_PROMPT);
   });
 });
