@@ -913,6 +913,35 @@ describe('POST /api/worktrees/:id/prompt-response - Semantic yes/no resolution (
     expect(sendKeys).not.toHaveBeenCalled();
   });
 
+  it('says the "tell … what to do differently" row continues through `send` (Issue #3093)', async () => {
+    const { captureSessionOutputFresh } = await import('@/lib/session/cli-session');
+    const { detectPrompt } = await import('@/lib/detection/prompt-detector');
+
+    vi.mocked(captureSessionOutputFresh).mockResolvedValue(CLAUDE_PERMISSION_FRAME);
+    vi.mocked(detectPrompt).mockReturnValue({
+      isPrompt: true,
+      promptData: claudePermissionPromptData,
+      cleanContent: 'permission menu',
+    });
+
+    const chosen = await (
+      await promptResponse(createBodyRequest('test-wt', { answer: '3' }), { params: Promise.resolve({ id: 'test-wt' }) })
+    ).json();
+    expect(chosen.success).toBe(true);
+    expect(chosen.textFollowUp).toMatchObject({
+      optionNumber: 3,
+      optionLabel: 'No, and tell Claude what to do differently (esc)',
+    });
+    expect(chosen.textFollowUp.message).toContain('commandmate send');
+
+    // Control: an ordinary choice carries no follow-up.
+    const plain = await (
+      await promptResponse(createBodyRequest('test-wt', { answer: '1' }), { params: Promise.resolve({ id: 'test-wt' }) })
+    ).json();
+    expect(plain.success).toBe(true);
+    expect(plain.textFollowUp).toBeUndefined();
+  });
+
   it('resolves "yes" to the plain affirmative option (option 1)', async () => {
     const { captureSessionOutputFresh } = await import('@/lib/session/cli-session');
     const { detectPrompt } = await import('@/lib/detection/prompt-detector');
