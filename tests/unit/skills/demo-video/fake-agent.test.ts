@@ -172,7 +172,8 @@ describe('the committed cassette drives the real status detector', () => {
     // and complete needs the return to `ready`.
     expect(statuses.map((s) => s.status)).toEqual([
       'ready',
-      'ready',
+      // the frame painted on send already runs: question scrolled up, composer empty (#3080)
+      'running',
       'running',
       'running',
       'running',
