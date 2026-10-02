@@ -49,6 +49,17 @@
 | 対応 OS | macOS ・ Linux ・ Windows（WSL2）。ネイティブ Windows は非対応 | CommandMate は tmux に依存する |
 | ライセンス | MIT | `LICENSE` |
 
+### 作者の数字（LP ・ README の hero、Issue #3060）
+
+表記はこのとおりに書く。作者個人の実績で、製品の性能の主張ではない。
+
+| 表記 | 出典 |
+|---|---|
+| 10+ PRs a day, solo | 作者の申告（2026-10-02）。根拠: 2026-09 のマージ PR は全リポジトリで 689 本 |
+| $110–$210 a month: Claude Max + Command Code Goat | 作者の実費（Claude Max $100 か $200、Command Code Goat $10） |
+| ~80% of my instructions sent from a phone (my estimate) | 作者の感覚値。必ず「estimate」と書く |
+| 689 PRs merged in September 2026, across my repositories | GitHub search `author:Kewton is:pr is:merged merged:2026-09-01..2026-09-30` |
+
 ---
 
 ## 2. 対応エージェントの数え方

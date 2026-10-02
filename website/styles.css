@@ -1,4 +1,4 @@
-/* CommandMate landing page (Issue #1200).
+/* CommandMate landing page (Issue #1200; rebuilt around the three levels in #3060).
    Plain CSS, no build step, no dependencies. Light and dark are both driven by
    prefers-color-scheme; there is no theme toggle to keep the page dependency-free. */
 
@@ -162,9 +162,9 @@ a {
 .hero {
   max-width: var(--maxw);
   margin: 0 auto;
-  padding: 3.5rem 1.25rem 2rem;
+  padding: 3.5rem 1.25rem 2.5rem;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
   gap: 3rem;
   align-items: center;
 }
@@ -196,23 +196,42 @@ a {
   line-height: 1.12;
   letter-spacing: -0.025em;
   font-weight: 800;
+  overflow-wrap: break-word;
 }
 
 .lede {
-  margin: 0 0 1rem;
+  margin: 0 0 1.25rem;
   font-size: 1.15rem;
   color: var(--fg-muted);
 }
 
-/* The definition sentence, verbatim from docs/design/public-messaging.md §2.
-   It sits at full contrast rather than muted: it is the one line every surface
-   repeats, so on the LP it reads as a statement and not as sub-copy. */
-.definition {
-  margin: 0 0 1.75rem;
-  padding-left: 0.9rem;
-  border-left: 3px solid var(--accent);
+/* The four numbers (Issue #3060). Two by two from a phone up: each is a short
+   line, and a column of four pushed the copy box below the fold. */
+.stats {
+  margin: 0 0 1.5rem;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 13rem), 1fr));
+  gap: 0.6rem;
+}
+
+.stats > li {
+  padding: 0.6rem 0.8rem;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.prompt-label,
+.ask-label {
+  margin: 0 0 0.5rem;
   color: var(--fg);
-  font-size: 1rem;
+  font-size: 0.92rem;
+  font-weight: 600;
 }
 
 .install {
@@ -224,17 +243,6 @@ a {
   background: var(--bg-subtle);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  max-width: 24rem;
-}
-
-.install-lg {
-  margin: 0 auto 1.5rem;
-  font-size: 1.05rem;
-}
-
-.install-sm {
-  margin-top: 0.75rem;
-  max-width: 20rem;
 }
 
 .install-cmd {
@@ -249,6 +257,26 @@ a {
 .install-cmd::before {
   content: "$ ";
   color: var(--fg-muted);
+}
+
+/* A sentence to paste into an agent, not a shell command: no "$ ", and it
+   wraps instead of scrolling, because the URL in it is the part the reader
+   needs to see. overflow-wrap is what keeps the URL from setting the page
+   width on a 390px phone. */
+.install-block {
+  align-items: flex-start;
+}
+
+.install-prompt {
+  flex: 1 1 auto;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  overflow-x: visible;
+  line-height: 1.5;
+}
+
+.install-prompt::before {
+  content: none;
 }
 
 .copy-btn {
@@ -275,6 +303,18 @@ a {
   border-color: var(--accent);
 }
 
+/* On a phone the button sits under the sentence rather than beside it. */
+@media (max-width: 30rem) {
+  .install {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  .install-cmd {
+    flex: 1 0 100%;
+  }
+}
+
 .facts {
   margin: 0.9rem 0 0;
   font-size: 0.875rem;
@@ -282,15 +322,13 @@ a {
 }
 
 .prereq {
-  margin: 0.4rem 0 0;
+  margin: 0.9rem 0 0;
   font-size: 0.875rem;
   color: var(--fg-muted);
 }
 
 /* The version line (Issue #2552). Quieter than the prerequisites above it: it
-   answers "is this maintained", which matters, but not before "can I run it".
-   The margin under it is the one .prereq used to carry, so the CTA row does
-   not move. */
+   answers "is this maintained", which matters, but not before "can I run it". */
 .release-line {
   margin: 0.3rem 0 1.75rem;
   font-size: 0.8rem;
@@ -302,10 +340,6 @@ a {
   display: flex;
   flex-wrap: wrap;
   gap: 0.75rem;
-}
-
-.cta-center {
-  justify-content: center;
 }
 
 .btn {
@@ -341,242 +375,6 @@ a {
   margin: 0;
 }
 
-.hero-media img {
-  width: 100%;
-  height: auto;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow);
-  display: block;
-  background: var(--bg-subtle);
-}
-
-/* ---------- inline drawings ---------- */
-
-/* The drawings on this page are inline SVG so that these rules reach them, and
-   every ink in them is a custom property. That is the whole point: a literal
-   colour here is how a diagram ends up perfectly legible in the theme its author
-   had open and invisible in the other one. Nothing in the drawing rules below
-   may be a hex, rgb() or named colour (tests/unit/website/landing-page.test.ts
-   pins that for each drawing class). */
-
-/* The hero session mock (Issue #2551). Contrast, text on its fill, light / dark:
-   --fg 15.80 / 14.65 and --fg-muted 6.11 / 5.94 on --surface; --fg 14.02 / 12.20
-   and --fg-muted 5.43 / 4.95 on --accent-subtle; --fg 14.84 / 14.65 and
-   --fg-muted 5.74 / 5.94 on --bg-subtle (the gate lines); on the amber row,
-   --fg 14.33 / 12.37 and --fg-muted 5.54 / 5.02 on --attention-subtle, and the
-   "needs you" label, --attention on --surface, 5.93 / 8.90. */
-.hero-mock {
-  width: 100%;
-  height: auto;
-  display: block;
-}
-
-.hero-mock text {
-  font-family: inherit;
-}
-
-.hero-mock .frame {
-  fill: var(--surface);
-  stroke: var(--border);
-  stroke-width: 1.5;
-}
-
-.hero-mock .rule {
-  stroke: var(--border);
-  stroke-width: 1;
-}
-
-.hero-mock .mock-heading {
-  fill: var(--fg);
-  font-size: 14px;
-  font-weight: 700;
-}
-
-.hero-mock .session-name {
-  fill: var(--fg);
-  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.hero-mock .session-agent {
-  fill: var(--fg-muted);
-  font-size: 11px;
-}
-
-.hero-mock .pill {
-  stroke-width: 1;
-}
-
-.hero-mock .pill-label {
-  font-size: 11px;
-  font-weight: 600;
-  text-anchor: middle;
-}
-
-/* The label is never --accent on --accent-subtle: that pair is 4.31:1 in the
-   light theme, under the 4.5:1 floor (see .remote-docs below). */
-.hero-mock .session-working .dot {
-  fill: var(--accent);
-}
-
-.hero-mock .session-working .pill {
-  fill: var(--accent-subtle);
-  stroke: var(--accent);
-}
-
-.hero-mock .session-working .pill-label {
-  fill: var(--fg);
-}
-
-.hero-mock .session-done .dot {
-  fill: var(--fg-muted);
-}
-
-.hero-mock .session-done .pill {
-  fill: var(--surface);
-  stroke: var(--border);
-}
-
-.hero-mock .session-done .pill-label {
-  fill: var(--fg-muted);
-}
-
-/* The one row that is waiting on a person carries the page's only warm colour,
-   so it is the row the eye lands on. */
-.hero-mock .session-needs .band {
-  fill: var(--attention-subtle);
-}
-
-.hero-mock .session-needs .dot {
-  fill: var(--attention);
-}
-
-.hero-mock .session-needs .pill {
-  fill: var(--surface);
-  stroke: var(--attention);
-}
-
-.hero-mock .session-needs .pill-label {
-  fill: var(--attention);
-  font-weight: 700;
-}
-
-.hero-mock .terminal {
-  fill: var(--bg-subtle);
-  stroke: var(--border);
-  stroke-width: 1;
-}
-
-.hero-mock .term {
-  fill: var(--fg);
-  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-  font-size: 11px;
-}
-
-.hero-mock .term-prompt {
-  fill: var(--fg-muted);
-}
-
-.hero-mock .term-strong {
-  font-weight: 700;
-}
-
-.hero-mock .pointer {
-  stroke: var(--fg-muted);
-  stroke-width: 1.25;
-}
-
-.hero-mock .pointer-head {
-  fill: var(--fg-muted);
-}
-
-.hero-mock .term-note {
-  fill: var(--fg-muted);
-  font-size: 11px;
-  font-style: italic;
-}
-
-/* 360 user units render at roughly 350 CSS px on a 390px phone. Capping it on
-   wide screens keeps the type from ballooning past the hero copy beside it. */
-@media (min-width: 901px) {
-  .hero-mock {
-    max-width: 28rem;
-    margin-left: auto;
-  }
-}
-
-/* The four-step cycle at the head of The loop, moved out of the hero in #2551. */
-.loop-diagram {
-  width: 100%;
-  height: auto;
-  display: block;
-}
-
-.loop-diagram text {
-  font-family: inherit;
-  text-anchor: middle;
-}
-
-.loop-diagram .node rect {
-  fill: var(--surface);
-  stroke: var(--border);
-  stroke-width: 1.5;
-}
-
-/* CommandMate is the node the reader is being told about, so it is the one that
-   carries the accent. --fg and --fg-muted both clear 4.5:1 on --accent-subtle in
-   either theme, which is why the text classes below need no variant. */
-.loop-diagram .node-accent rect {
-  fill: var(--accent-subtle);
-  stroke: var(--accent);
-}
-
-.loop-diagram .node-title {
-  fill: var(--fg);
-  font-size: 17px;
-  font-weight: 700;
-}
-
-.loop-diagram .node-sub {
-  fill: var(--fg-muted);
-  font-size: 11px;
-}
-
-.loop-diagram .edge {
-  stroke: var(--fg-muted);
-  stroke-width: 1.5;
-  fill: none;
-}
-
-.loop-diagram .arrowhead {
-  fill: var(--fg-muted);
-}
-
-.loop-diagram .edge-label {
-  fill: var(--fg-muted);
-  font-size: 11px;
-  font-weight: 600;
-}
-
-.loop-diagram .label-start {
-  text-anchor: start;
-}
-
-.loop-diagram .label-end {
-  text-anchor: end;
-}
-
-/* The whole width of the section on a phone, where 400 user units render at
-   roughly 350 CSS px. On wide screens it is capped and centred over the beats
-   rather than stretched to the section, which would set its labels larger than
-   the section's own headings. */
-.loop-figure {
-  margin: 0 auto;
-  max-width: 30rem;
-}
-
 /* ---------- sections ---------- */
 
 .section {
@@ -591,6 +389,7 @@ a {
   font-size: clamp(1.5rem, 3vw, 2rem);
   letter-spacing: -0.02em;
   font-weight: 700;
+  overflow-wrap: break-word;
 }
 
 .section-lede {
@@ -598,79 +397,668 @@ a {
   color: var(--fg-muted);
 }
 
-.section > h2 + .cards,
-.section > h2 + .table-scroll {
-  margin-top: 2rem;
+.section code {
+  overflow-wrap: anywhere;
 }
 
-.cards {
+.problem-points,
+.limits {
+  margin: 0;
+  padding: 0;
+  list-style: none;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr));
-  gap: 1.25rem;
+  gap: 0.85rem;
 }
 
-.card {
-  padding: 1.5rem;
+.problem-points {
+  margin-top: 1.5rem;
+}
+
+.problem-points > li,
+.limits > li {
+  padding-left: 0.9rem;
+  border-left: 3px solid var(--border);
+}
+
+.problem-points > li {
+  font-size: 1.05rem;
+}
+
+.limits > li {
+  color: var(--fg-muted);
+  font-size: 0.92rem;
+}
+
+/* ---------- levels ---------- */
+
+.level-tag {
+  display: inline-block;
+  margin: 0 0 0.6rem;
+  padding: 0.15rem 0.6rem;
+  border-radius: 999px;
+  background: var(--accent-subtle);
+  color: var(--fg);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.pillars {
+  margin: 1.5rem 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
+  gap: 1rem;
+}
+
+.pillars-two {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr));
+}
+
+.pillar {
+  padding: 1.25rem;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
 }
 
-.card h3 {
-  margin: 0 0 0.6rem;
-  font-size: 1.05rem;
+.pillar h3 {
+  margin: 0 0 0.5rem;
+  font-size: 1.02rem;
   font-weight: 700;
 }
 
-.card p {
+.pillar p {
   margin: 0;
   color: var(--fg-muted);
-  font-size: 0.94rem;
+  font-size: 0.92rem;
 }
 
-.note {
-  margin: 1.5rem 0 0;
+.plan-note {
+  margin: 1.25rem 0 0;
   padding: 0.9rem 1.1rem;
   background: var(--accent-subtle);
   border-radius: var(--radius);
   color: var(--fg);
+  font-size: 0.94rem;
+}
+
+.figure-pair {
+  margin-top: 2rem;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 2rem;
+}
+
+@media (min-width: 901px) {
+  .figure-pair {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.level-figure {
+  margin: 2rem 0 0;
+}
+
+.figure-pair .level-figure {
+  margin: 0;
+}
+
+.level-figure figcaption,
+.demo figcaption,
+.shot figcaption {
+  margin-top: 0.6rem;
+  color: var(--fg-muted);
+  font-size: 0.85rem;
+}
+
+.ask {
+  margin-top: 2rem;
+  max-width: 44rem;
+}
+
+/* ---------- demos and shots ---------- */
+
+.demos,
+.shots {
+  margin-top: 2rem;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1.25rem;
+  align-items: start;
+}
+
+@media (min-width: 701px) {
+  .demos {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .shots {
+    grid-template-columns: minmax(0, 3fr) minmax(0, 1fr);
+  }
+}
+
+.demo,
+.shot {
+  margin: 0;
+}
+
+.demo video,
+.shot img {
+  width: 100%;
+  height: auto;
+  display: block;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  background: var(--bg-subtle);
+}
+
+.shot-phone {
+  max-width: 16rem;
+}
+
+/* The recorded run is square (1080x1080) where the feature demos are 16:10, so
+   it is capped rather than stretched to the section. */
+.demo-lead {
+  max-width: 30rem;
+  margin: 2rem auto 0;
+}
+
+.demo-lead figcaption {
+  text-align: center;
+}
+
+/* ---------- inline drawings ---------- */
+
+/* The drawings on this page are inline SVG so that these rules reach them, and
+   every ink in them is a custom property. That is the whole point: a literal
+   colour here is how a diagram ends up perfectly legible in the theme its author
+   had open and invisible in the other one. Nothing in the drawing rules below
+   may be a hex, rgb() or named colour (tests/unit/website/landing-page.test.ts
+   pins that for each drawing class). Each one is 100% of its column and
+   height:auto, so a 360-unit drawing shrinks to a 390px phone instead of
+   widening the page. */
+.levels-diagram,
+.phone-story,
+.flow-diagram,
+.contrast-diagram,
+.team-diagram,
+.day-timeline,
+.setup-chat {
+  width: 100%;
+  height: auto;
+  display: block;
+  max-width: 30rem;
+  margin: 0 auto;
+}
+
+.levels-diagram text,
+.phone-story text,
+.flow-diagram text,
+.contrast-diagram text,
+.team-diagram text,
+.day-timeline text {
+  font-family: inherit;
+}
+
+/* Figure A: the three levels. */
+.levels-diagram .step-box {
+  fill: var(--accent-subtle);
+  stroke: var(--accent);
+  stroke-width: 1.5;
+}
+
+.levels-diagram .step-top .step-box {
+  fill: var(--accent);
+}
+
+.levels-diagram .step-title {
+  fill: var(--fg);
+  font-size: 14px;
+  font-weight: 700;
+  text-anchor: middle;
+}
+
+.levels-diagram .step-sub {
+  fill: var(--fg-muted);
+  font-size: 11px;
+  text-anchor: middle;
+}
+
+.levels-diagram .step-top .step-title,
+.levels-diagram .step-top .step-sub {
+  fill: var(--accent-fg);
+}
+
+.levels-diagram .chip-box {
+  fill: var(--surface);
+  stroke: var(--border);
+  stroke-width: 1.25;
+}
+
+.levels-diagram .chip-text {
+  fill: var(--fg-muted);
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 11px;
+  text-anchor: middle;
+}
+
+/* Figure B: a few seconds on the phone. */
+.phone-story .phone {
+  fill: var(--surface);
+  stroke: var(--border);
+  stroke-width: 1.5;
+}
+
+.phone-story .banner,
+.phone-story .row,
+.phone-story .bubble {
+  fill: var(--bg-subtle);
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
+.phone-story .row-needs {
+  fill: var(--attention-subtle);
+  stroke: var(--attention);
+}
+
+.phone-story .bubble-you {
+  fill: var(--accent-subtle);
+  stroke: var(--accent);
+}
+
+.phone-story .dot {
+  fill: var(--accent);
+}
+
+.phone-story .dot-needs {
+  fill: var(--attention);
+}
+
+.phone-story .small {
+  fill: var(--fg);
+  font-size: 8.5px;
+}
+
+.phone-story .strong {
+  font-weight: 700;
+}
+
+.phone-story .caption {
+  fill: var(--fg-muted);
+  font-size: 11px;
+  font-weight: 600;
+  text-anchor: middle;
+}
+
+.phone-story .done-ring {
+  fill: var(--accent-subtle);
+  stroke: var(--accent);
+  stroke-width: 1.5;
+}
+
+.phone-story .done-tick {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2.5;
+}
+
+/* Figure C: one issue to a PR. */
+.flow-diagram .node rect {
+  fill: var(--surface);
+  stroke: var(--border);
+  stroke-width: 1.5;
+}
+
+.flow-diagram .node-check rect {
+  fill: var(--accent-subtle);
+  stroke: var(--accent);
+}
+
+.flow-diagram .node-end rect {
+  stroke: var(--accent);
+}
+
+.flow-diagram .node text {
+  fill: var(--fg);
+  font-size: 12px;
+  font-weight: 600;
+  text-anchor: middle;
+}
+
+.flow-diagram .edge {
+  fill: none;
+  stroke: var(--fg-muted);
+  stroke-width: 1.5;
+}
+
+.flow-diagram .arrowhead {
+  fill: var(--fg-muted);
+}
+
+.flow-diagram .edge-fail {
+  stroke: var(--attention);
+  stroke-dasharray: 4 3;
+}
+
+.flow-diagram .arrowhead-fail {
+  fill: var(--attention);
+}
+
+.flow-diagram .edge-label {
+  fill: var(--fg-muted);
+  font-size: 10px;
+  font-weight: 600;
+  text-anchor: middle;
+}
+
+.flow-diagram .edge-label-fail {
+  fill: var(--attention);
+}
+
+.flow-diagram .note-text {
+  fill: var(--fg-muted);
+  font-size: 10.5px;
+  font-style: italic;
+}
+
+/* Figure D: a subagent against a CommandMate request. */
+.contrast-diagram .panel {
+  fill: var(--surface);
+  stroke: var(--border);
+  stroke-width: 1.5;
+}
+
+.contrast-diagram .side-cm .panel {
+  fill: var(--accent-subtle);
+  stroke: var(--accent);
+}
+
+.contrast-diagram .side-title {
+  fill: var(--fg);
+  font-size: 12px;
+  font-weight: 700;
+  text-anchor: middle;
+}
+
+.contrast-diagram .session {
+  fill: var(--bg-subtle);
+  stroke: var(--border);
+  stroke-width: 1.25;
+}
+
+.contrast-diagram .session-label {
+  fill: var(--fg-muted);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.contrast-diagram .hidden-box {
+  fill: var(--border);
+  stroke: var(--fg-muted);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+
+.contrast-diagram .hidden-text {
+  fill: var(--fg-muted);
+  font-size: 10px;
+  text-anchor: middle;
+}
+
+.contrast-diagram .link {
+  stroke: var(--accent);
+  stroke-width: 1.5;
+}
+
+.contrast-diagram .link-head {
+  fill: var(--accent);
+}
+
+.contrast-diagram .point {
+  fill: var(--fg);
+  font-size: 10.5px;
+}
+
+.contrast-diagram .point-sub {
+  fill: var(--fg-muted);
+  font-size: 10.5px;
+}
+
+/* Figure E: the team. */
+.team-diagram .member rect {
+  fill: var(--surface);
+  stroke: var(--border);
+  stroke-width: 1.5;
+}
+
+.team-diagram .member-you rect {
+  fill: var(--accent-subtle);
+  stroke: var(--accent);
+}
+
+.team-diagram .member-sched rect {
+  fill: var(--bg-subtle);
+  stroke-dasharray: 4 3;
+}
+
+.team-diagram .name {
+  fill: var(--fg);
+  font-size: 12px;
+  font-weight: 700;
+  text-anchor: middle;
+}
+
+.team-diagram .role {
+  fill: var(--fg-muted);
+  font-size: 9.5px;
+  text-anchor: middle;
+}
+
+.team-diagram .edge {
+  fill: none;
+  stroke: var(--fg-muted);
+  stroke-width: 1.5;
+}
+
+.team-diagram .arrowhead {
+  fill: var(--fg-muted);
+}
+
+.team-diagram .cost {
+  fill: var(--fg);
+  font-size: 11px;
+  font-weight: 600;
+  text-anchor: middle;
+}
+
+/* Figure F: one day. */
+.day-timeline .col {
+  fill: var(--surface);
+  stroke: var(--border);
+  stroke-width: 1.5;
+}
+
+.day-timeline .col-you {
+  fill: var(--bg-subtle);
+}
+
+.day-timeline .col-title {
+  fill: var(--fg);
+  font-size: 12px;
+  font-weight: 700;
+  text-anchor: middle;
+}
+
+.day-timeline .axis {
+  stroke: var(--border);
+  stroke-width: 2;
+}
+
+.day-timeline .tick {
+  fill: var(--accent);
+}
+
+.day-timeline .tick-you {
+  fill: var(--fg-muted);
+}
+
+.day-timeline .time {
+  fill: var(--fg);
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.day-timeline .what {
+  fill: var(--fg-muted);
+  font-size: 10.5px;
+}
+
+/* Figure G: the agent's side of the setup. */
+.setup-chat .frame {
+  fill: var(--bg-subtle);
+  stroke: var(--border);
+  stroke-width: 1.5;
+}
+
+.setup-chat .line {
+  fill: var(--fg);
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 10.5px;
+}
+
+.setup-chat .line-you {
+  fill: var(--accent);
+  font-weight: 700;
+}
+
+.setup-chat .line-muted {
+  fill: var(--fg-muted);
+}
+
+.setup-chat .line-strong {
+  fill: var(--fg);
+  font-weight: 700;
+}
+
+/* ---------- set up with your agent ---------- */
+
+.setup-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 2rem;
+  align-items: start;
+}
+
+@media (min-width: 901px) {
+  .setup-layout {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .setup-layout .level-figure {
+    margin: 0;
+  }
+}
+
+.stages {
+  list-style: none;
+  counter-reset: stage;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 1.1rem;
+}
+
+.stage {
+  counter-increment: stage;
+  position: relative;
+  padding-left: 2.75rem;
+}
+
+.stage::before {
+  content: counter(stage);
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 2rem;
+  height: 2rem;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.stage h3 {
+  margin: 0.2rem 0 0.35rem;
+  font-size: 1.02rem;
+  font-weight: 700;
+}
+
+.stage-check {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: 0.92rem;
+}
+
+.stage-check span {
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.by-hand {
+  margin: 2rem 0 0;
+  color: var(--fg-muted);
   font-size: 0.9rem;
 }
 
-/* Two columns at --maxw rather than four: cards 1 and 4 carry a second block
-   (the supported-agents paragraph, the Catalog chips), and four across left
-   them several times taller than the two cards between them. */
-.cards-why {
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 24rem), 1fr));
-}
+/* ---------- my setup ---------- */
 
-.card .card-more {
-  margin-top: 0.9rem;
-  padding-top: 0.9rem;
-  border-top: 1px solid var(--border);
-  font-size: 0.875rem;
-}
-
-.chips {
-  margin: 0.6rem 0 0;
-  padding: 0;
-  list-style: none;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem;
-}
-
-/* An ID is one token, so it never breaks across lines; the list wraps between
-   chips instead. The longest ID is well under the width of a 390px phone. */
-.chips code {
-  display: inline-block;
-  padding: 0.1rem 0.55rem;
-  background: var(--bg-subtle);
+.table-scroll {
+  overflow-x: auto;
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--radius);
+  -webkit-overflow-scrolling: touch;
+}
+
+.setup-table {
+  border-collapse: collapse;
+  width: 100%;
+  min-width: 34rem;
+  font-size: 0.9rem;
+}
+
+.setup-table th,
+.setup-table td {
+  padding: 0.7rem 0.9rem;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--border);
+}
+
+.setup-table thead th {
+  background: var(--bg-subtle);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.setup-table td {
+  color: var(--fg-muted);
+}
+
+.setup-table tfoot th,
+.setup-table tfoot td {
+  border-bottom: 0;
   color: var(--fg);
-  font-size: 0.76rem;
-  white-space: nowrap;
+  font-weight: 700;
+  background: var(--accent-subtle);
 }
 
 /* Trust (#2554) */
@@ -816,789 +1204,47 @@ a {
 
 /* /Trust (#2554) */
 
-/* ---------- one agent leads ---------- */
+/* The other three trust points, under the network drawing. */
+.trust-point {
+  margin: 1.5rem 0 0.5rem;
+  font-size: 1.1rem;
+  font-weight: 700;
+}
 
-/* Four across once there is room for them, since the four steps are one run
-   read left to right; two by two, then one column, below that. */
-.lead-steps {
-  list-style: none;
-  counter-reset: lead-step;
-  margin: 0;
-  padding: 0;
+.trust-grid {
+  margin-top: 2rem;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 13.5rem), 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
   gap: 1rem;
 }
 
-.lead-steps > li {
-  counter-increment: lead-step;
+.trust-card {
   padding: 1.25rem;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  min-width: 0;
 }
 
-/* The step names are the runner's phase names, so they are set as the tokens
-   they are rather than as title-case headings. */
-.lead-steps h3 {
-  margin: 0 0 0.5rem;
-  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-  font-size: 1rem;
-  font-weight: 700;
-  color: var(--accent);
-}
-
-.lead-steps h3::before {
-  content: counter(lead-step);
-  display: inline-grid;
-  place-items: center;
-  width: 1.5rem;
-  height: 1.5rem;
-  margin-right: 0.5rem;
-  vertical-align: 0.05rem;
-  border-radius: 999px;
-  background: var(--accent);
-  color: var(--accent-fg);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif;
-  font-size: 0.78rem;
-}
-
-.lead-steps p {
-  margin: 0;
-  color: var(--fg-muted);
-  font-size: 0.92rem;
-}
-
-/* Full width rather than beside the review paragraph: the goal line is the
-   longest in the file, and at half of --maxw it would sit behind the snippet's
-   scrollbar on a desktop screen. On a phone it scrolls inside the snippet. */
-.lead-contract {
-  margin: 2rem 0 0;
-  min-width: 0;
-}
-
-.lead-contract .snippet {
-  margin: 0;
-}
-
-.lead-contract figcaption {
-  margin-top: 0.6rem;
-  color: var(--fg-muted);
-  font-size: 0.88rem;
-}
-
-.lead-review {
-  margin-top: 2rem;
-  max-width: 70ch;
-}
-
-.lead-review h3 {
-  margin: 0 0 0.5rem;
-  font-size: 1.15rem;
-  font-weight: 700;
-}
-
-.lead-review p {
-  margin: 0;
-  color: var(--fg-muted);
-}
-
-.lead-review code {
-  background: var(--bg-subtle);
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  padding: 0.05rem 0.3rem;
-  white-space: nowrap;
-}
-
-/* ---------- the loop ---------- */
-
-/* The band's columns, frame and spacing, and the beat's fold, are in the
-   Compact 2 (#2555) block below. */
-.beats {
-  list-style: none;
-  counter-reset: beat;
-  padding: 0;
-  display: grid;
-}
-
-.beats > li {
-  counter-increment: beat;
-  /* A grid item's automatic minimum is its content's min-content width, which a
-     snippet line would set to the width of its longest command. Without this the
-     beat stops scrolling its own code and widens the page instead. */
-  min-width: 0;
-}
-
-.beats h3 {
+.trust-card h3 {
   margin: 0 0 0.6rem;
-  font-size: 1.05rem;
-  font-weight: 700;
-}
-
-.beats h3::before {
-  content: counter(beat);
-  display: inline-grid;
-  place-items: center;
-  width: 1.6rem;
-  height: 1.6rem;
-  margin-right: 0.55rem;
-  vertical-align: -0.35rem;
-  border-radius: 999px;
-  background: var(--accent);
-  color: var(--accent-fg);
-  font-size: 0.82rem;
-}
-
-.beats p {
-  color: var(--fg-muted);
-}
-
-.beats h3 + p {
-  margin-top: 0;
-}
-
-.beats .beat-quote {
-  padding-left: 0.85rem;
-  border-left: 3px solid var(--border);
-  color: var(--fg);
-  font-style: italic;
-}
-
-.beats .snippet-label {
-  margin-top: 1rem;
-  font-size: 0.72rem;
-  font-weight: 700;
-  letter-spacing: 0.03em;
-  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-}
-
-/* Code the reader is meant to read rather than run, so no copy button and no
-   `$ ` injected by CSS — the shell prompt is part of the text where it belongs. */
-.snippet {
-  margin: 0.45rem 0 0;
-  padding: 0.8rem 0.9rem;
-  background: var(--bg-subtle);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  overflow-x: auto;
-  color: var(--fg);
-  font-size: 0.78rem;
-  line-height: 1.6;
-}
-
-.snippet code {
-  font-size: inherit;
-}
-
-/* ---------- quick start tracks ---------- */
-
-.tracks {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
-  gap: 1.25rem;
-  align-items: start;
-}
-
-.track {
-  padding: 1.5rem;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-}
-
-.track-tag {
-  margin: 0 0 0.4rem;
-  font-size: 0.75rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--accent);
-}
-
-.track h3 {
-  margin: 0 0 0.5rem;
-  font-size: 1.15rem;
-  font-weight: 700;
-}
-
-.track-lede {
-  margin: 0;
-  color: var(--fg-muted);
-  font-size: 0.94rem;
-}
-
-.track-note {
-  margin: 0.9rem 0 0;
-  color: var(--fg-muted);
-  font-size: 0.88rem;
-}
-
-/* Inline code only: .install-cmd sits inside a box that already frames it. */
-.track code:not(.install-cmd),
-.note code {
-  background: var(--bg-subtle);
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  padding: 0.1rem 0.35rem;
-}
-
-/* ---------- steps ---------- */
-
-.steps {
-  list-style: none;
-  counter-reset: step;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
-  gap: 1.5rem;
-}
-
-.steps > li {
-  counter-increment: step;
-  padding-top: 2.75rem;
-  position: relative;
-}
-
-.steps > li::before {
-  content: counter(step);
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 2rem;
-  height: 2rem;
-  display: grid;
-  place-items: center;
-  border-radius: 999px;
-  background: var(--accent);
-  color: var(--accent-fg);
-  font-size: 0.9rem;
-  font-weight: 700;
-}
-
-/* One column, badge beside the content rather than above it. Must stay after
-   the `.steps > li` rules above: same specificity, so order decides. */
-.steps-stack {
-  /* minmax(0, …) rather than 1fr: a grid item's auto minimum would otherwise
-     let a wide command box stretch the column past the card. */
-  grid-template-columns: minmax(0, 1fr);
-  gap: 1.1rem;
-  margin-top: 1.25rem;
-}
-
-.steps-stack > li {
-  padding-top: 0;
-  padding-left: 2.75rem;
-}
-
-.steps-stack > li::before {
-  top: 0.1rem;
-}
-
-.steps h4 {
-  margin: 0 0 0.4rem;
   font-size: 1.02rem;
   font-weight: 700;
 }
 
-.steps p {
+.trust-card p {
   margin: 0;
   color: var(--fg-muted);
   font-size: 0.92rem;
 }
 
-/* A command box the card can't show in full is worse than no button at all. */
-.track .install {
-  max-width: none;
-}
-
-/* On a phone the button and the command cannot share a line without the command
-   scrolling out of sight — which defeats a section that exists to be read and
-   copied. Give the command the width and let the button sit under it. */
-@media (max-width: 30rem) {
-  .track {
-    padding: 1.25rem;
-  }
-
-  .steps-stack > li {
-    padding-left: 2.25rem;
-  }
-
-  .install {
-    flex-wrap: wrap;
-    justify-content: flex-end;
-  }
-
-  .install-cmd {
-    flex: 1 0 100%;
-  }
-}
-
-/* ---------- tutorial ---------- */
-
-/* Must stay after `.install-sm`: same specificity, so source order decides. The
-   clone URL is the one thing this section hands over, and at 20rem half of it
-   would sit behind a scroll. */
-.install-wide {
-  max-width: 34rem;
-}
-
-/* A URL, not a shell command — it goes into the Repositories screen, so the
-   `$ ` prompt the other boxes carry would be telling the reader to run it. */
-.install-cmd.install-url::before {
-  content: none;
-}
-
-.tutorial-note {
-  margin: 0.9rem 0 0;
-  color: var(--fg-muted);
-  font-size: 0.9rem;
-}
-
-/* The box below it holds the upstream URL, which is the thing to fork — not the
-   thing to paste. Without a label the reader pastes the wrong URL and their
-   commits point at someone else's repository. */
-.tutorial-label {
-  margin: 0 0 0.5rem;
-  color: var(--fg-muted);
-  font-size: 0.88rem;
-}
-
-/* ---------- feature demos ---------- */
-
-/* The columns are set in the Compact 2 (#2555) block below. */
-.demos {
-  display: grid;
-  align-items: start;
-}
-
-.demo {
-  margin: 0;
-}
-
-/* The lead demo is one real run rather than a feature cut, and it is square
-   (1080x1080) where the four below it are 16:10. Capping its width keeps the
-   square from towering over the grid it introduces, and centring it marks it as
-   the one that is not part of the set. */
-.demo-lead {
-  max-width: 30rem;
-  margin: 0 auto 2.5rem;
-}
-
-.demo-lead figcaption {
-  text-align: center;
-  font-size: 0.9rem;
-}
-
-/* ---------- measured ---------- */
-
-/* The space under the block is set in the Compact 2 (#2555) block below. */
-
-.measured h3 {
-  margin: 0 0 0.75rem;
-  font-size: 1.15rem;
-  font-weight: 700;
-}
-
-/* Four columns of short prose. Below this width the Result column wraps to a
-   word a line, so the table scrolls inside .table-scroll instead. Two classes
-   so it wins over `.compare-prose`, which is declared further down. */
-.compare-prose.measured-table {
-  min-width: 42rem;
-}
-
-/* Left to automatic layout, the Workers column took the width and the Result
-   column broke "8 min 39 s" across two lines. The Result column is the one the
-   table is read for, so it gets the most room. */
-.measured-table thead th:nth-child(1) {
-  width: 19%;
-}
-
-.measured-table thead th:nth-child(2) {
-  width: 13%;
-}
-
-.measured-table thead th:nth-child(3) {
-  width: 25%;
-}
-
-/* The Result column is what the row is for; the rest is who ran it. */
-.measured-table td:last-child {
-  color: var(--fg);
-}
-
-.measured-caption {
-  margin: 0.45rem 0 0;
-  color: var(--fg-muted);
-  font-size: 0.8rem;
-  font-style: italic;
-}
-
-.measured-scope {
-  margin: 0.9rem 0 0;
-  max-width: 70ch;
-  color: var(--fg-muted);
-  font-size: 0.94rem;
-}
-
-.demo video {
-  width: 100%;
-  height: auto;
-  display: block;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow);
-  background: var(--bg-subtle);
-}
-
-.demo figcaption {
-  margin-top: 0.6rem;
-  color: var(--fg-muted);
-  font-size: 0.85rem;
-}
-
-/* ---------- verbatim statement lists ---------- */
-
-.problem-points,
-.limits {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  display: grid;
-  gap: 0.85rem;
-}
-
-.problem-points > li,
-.limits > li {
-  padding-left: 0.9rem;
-  border-left: 3px solid var(--border);
-}
-
-.problem-points > li {
-  font-size: 1.05rem;
-}
-
-.limits > li {
-  color: var(--fg-muted);
-  max-width: 60ch;
-}
-
-/* FAQ (#2553) */
-
-/* One column the answers can be read in, not the whole section width. The
-   copy is public-messaging.md §13 verbatim, so nothing here styles wording. */
-.faq {
-  max-width: 48rem;
-  border-top: 1px solid var(--border);
-}
-
-.faq-item {
-  border-bottom: 1px solid var(--border);
-}
-
-/* Still a native <summary>, which is what makes it focusable and toggled by
-   Enter / Space; only its disclosure triangle is swapped for the chevron below,
-   hidden in both the standard and the WebKit form. */
-.faq-item > summary {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 1rem;
-  padding: 1rem 0;
-  cursor: pointer;
-  list-style: none;
-  font-size: 1.05rem;
-  font-weight: 600;
-}
-
-.faq-item > summary::-webkit-details-marker {
-  display: none;
-}
-
-.faq-item > summary:hover {
-  color: var(--accent);
-}
-
-/* The global focus ring lists a, button and [tabindex], none of which a
-   <summary> is. */
-.faq-item > summary:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-  border-radius: 4px;
-}
-
-.faq-item > summary::after {
-  content: "";
-  flex: none;
-  width: 0.55rem;
-  height: 0.55rem;
-  margin: 0.45rem 0.35rem 0 0;
-  border-right: 2px solid var(--fg-muted);
-  border-bottom: 2px solid var(--fg-muted);
-  transform: rotate(45deg);
-  transition: transform 0.15s ease;
-}
-
-.faq-item[open] > summary::after {
-  transform: translateY(0.25rem) rotate(-135deg);
-}
-
-.faq-item > p {
-  margin: 0 0 1.25rem;
-  max-width: 65ch;
-  color: var(--fg-muted);
-}
-
-.faq-item code {
-  background: var(--bg-subtle);
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  padding: 0.05rem 0.3rem;
-  white-space: nowrap;
-}
-
-/* none rather than the page-wide 0.01ms: that rule shortens every transition,
-   this one removes them from the whole section, the chevron included. By the
-   section's id, since its class is the one every section shares. !important
-   because the page-wide rule carries it too; the higher specificity wins. */
-@media (prefers-reduced-motion: reduce) {
-  #faq,
-  #faq::before,
-  #faq::after,
-  #faq *,
-  #faq *::before,
-  #faq *::after {
-    transition: none !important;
-  }
-}
-
-/* /FAQ (#2553) */
-
-/* ---------- philosophy ---------- */
-
-.philosophy .definition {
-  margin: 0 0 1.25rem;
-  font-size: 1.15rem;
-}
-
-.philosophy .creed {
-  margin: 0;
-  max-width: 60ch;
-  color: var(--fg-muted);
-}
-
-/* ---------- gallery ---------- */
-
-/* The columns are set in the Compact (#2555) block below. */
-.gallery {
-  display: grid;
-  gap: 1.25rem;
-  align-items: start;
-}
-
-.shot {
-  margin: 0;
-}
-
-.shot img {
-  width: 100%;
-  display: block;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow);
-  background: var(--bg-subtle);
-}
-
-.shot figcaption {
-  margin-top: 0.6rem;
-  color: var(--fg-muted);
-  font-size: 0.85rem;
-}
-
-/* ---------- with / without table ---------- */
-
-.table-scroll {
-  overflow-x: auto;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  -webkit-overflow-scrolling: touch;
-}
-
-.compare {
-  border-collapse: collapse;
-  width: 100%;
-  min-width: 46rem;
-  font-size: 0.875rem;
-}
-
-.compare th,
-.compare td {
-  padding: 0.7rem 0.9rem;
-  text-align: center;
-  border-bottom: 1px solid var(--border);
-}
-
-.compare thead th {
-  background: var(--bg-subtle);
-  font-size: 0.8rem;
-  font-weight: 700;
-  white-space: nowrap;
-}
-
-.compare tbody th[scope="row"] {
-  text-align: left;
-  font-weight: 600;
-  white-space: nowrap;
-}
-
-.compare td {
-  color: var(--fg-muted);
-}
-
-.compare tbody tr:last-child th,
-.compare tbody tr:last-child td {
-  border-bottom: 0;
-}
-
-/* Three columns of sentences rather than a grid of Yes/No, so the cells are
-   read left-to-right and the table needs far less width before it stops being
-   worth scrolling. */
-.compare-prose {
-  min-width: 34rem;
-}
-
-.compare-prose th,
-.compare-prose td {
-  text-align: left;
-  vertical-align: top;
-}
-
-.compare-prose thead th,
-.compare-prose tbody th[scope="row"] {
-  white-space: normal;
-}
-
-.compare-prose thead th:last-child {
-  color: var(--fg);
-}
-
-.compare-prose td.with {
-  color: var(--fg);
-  background: var(--accent-subtle);
-}
-
-.compare-prose code {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  padding: 0.05rem 0.3rem;
-  white-space: nowrap;
-}
-
-/* ---------- pairing a phone ---------- */
-
-/* The trailing docs line lives outside `.note` on purpose. `.note` paints
-   `--accent-subtle`, and the global link colour `--accent` measures 4.31:1
-   against that tint in the light theme -- under the 4.5:1 body-text floor. On
-   the page background the same link clears it, so anything with an `<a>` in it
-   stays out of the tinted box. Otherwise identical to `.tutorial-note`. */
-.remote-docs {
-  margin: 0.9rem 0 0;
-  color: var(--fg-muted);
-  font-size: 0.9rem;
-}
-
-/* Compact (#2555) */
-
-/* Track B, folded into a native <details>. The <summary> keeps the card's <h3>;
-   only its disclosure triangle is swapped for a chevron, hidden in both the
-   standard and the WebKit form. No transition, so reduced motion has nothing
-   to switch off here. */
-.track-fold > summary {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  cursor: pointer;
-  list-style: none;
-}
-
-.track-fold > summary::-webkit-details-marker {
-  display: none;
-}
-
-.track-fold > summary:hover {
-  color: var(--accent);
-}
-
-/* The global focus ring lists a, button and [tabindex], none of which a
-   <summary> is. */
-.track-fold > summary:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-  border-radius: 4px;
-}
-
-.track-fold > summary h3 {
-  margin: 0;
-}
-
-.track-fold > summary::after {
-  content: "";
-  flex: none;
-  width: 0.55rem;
-  height: 0.55rem;
-  margin: 0 0.35rem 0.25rem 0;
-  border-right: 2px solid var(--fg-muted);
-  border-bottom: 2px solid var(--fg-muted);
-  transform: rotate(45deg);
-}
-
-.track-fold[open] > summary::after {
-  margin: 0.25rem 0.35rem 0 0;
-  transform: rotate(-135deg);
-}
-
-/* Where the heading's own bottom margin used to be. */
-.track-fold > .track-lede {
-  margin-top: 0.5rem;
-}
-
-/* The gallery is four shots, two wide and two phones. Below 901px each wide
-   shot takes a row and the phones share one, in a column capped so that a
-   phone shot stays shorter than the screen it is read on. From 901px all four
-   share a row: six tracks, two per wide shot and one per phone, so the phones
-   stand taller than the wide shots instead of shrinking to slivers beside them. */
-.gallery {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  max-width: 40rem;
-}
-
-.shot-wide {
-  grid-column: span 2;
-}
-
-@media (min-width: 901px) {
-  .gallery {
-    grid-template-columns: repeat(6, minmax(0, 1fr));
-    max-width: none;
-  }
-}
-
-/* /Compact (#2555) */
-
-/* ---------- closing ---------- */
+/* ---------- start ---------- */
 
-/* The head of the Philosophy section since #2555; the two halves are laid out
-   in the Compact 2 block below. */
-.closing {
-  text-align: center;
+.start .install {
+  max-width: 44rem;
 }
 
-.closing h2 {
-  margin-bottom: 1.5rem;
+.start .prereq {
+  margin-top: 1rem;
 }
 
 /* ---------- footer ---------- */
@@ -1657,14 +1303,6 @@ a {
   text-decoration: underline;
 }
 
-.attribution {
-  margin: 1.75rem 0 0;
-  padding-top: 1.25rem;
-  border-top: 1px solid var(--border);
-  color: var(--fg-muted);
-  font-size: 0.82rem;
-}
-
 .copyright {
   max-width: var(--maxw);
   margin: 2rem auto 0;
@@ -1673,239 +1311,3 @@ a {
   color: var(--fg-muted);
   font-size: 0.82rem;
 }
-
-/* Compact 2 (#2555) */
-
-/* The second pass at the page height (#2555): The loop's beats as one band
-   with their code folded, the four feature demos two by two, the Catalog IDs
-   folded under their label, and the closing call to action sharing a section
-   with Philosophy. Nothing here transitions or animates, so reduced motion has
-   nothing to switch off. */
-
-/* The loop drawing's viewBox keeps 18 units of air above and below its nodes.
-   Drawn at 22rem here, and at a phone's width, that is a rem, so the margins
-   hand it back rather than stacking it on the gaps around the figure. */
-.loop-figure {
-  margin-block: -1rem;
-}
-
-/* From 901px The loop opens with its heading and lede beside the drawing, as
-   the hero does, instead of above a drawing centred on a row of its own. 22rem
-   is the width the drawing already has on a phone. */
-@media (min-width: 901px) {
-  #loop {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 22rem);
-    grid-template-rows: auto 1fr;
-    column-gap: 3rem;
-  }
-
-  #loop > h2,
-  #loop > .section-lede {
-    grid-column: 1;
-  }
-
-  #loop > .loop-figure {
-    grid-column: 2;
-    grid-row: 1 / span 2;
-    max-width: none;
-    margin: -1rem 0;
-  }
-
-  #loop > .beats {
-    grid-column: 1 / -1;
-  }
-}
-
-/* One band, one frame. From 901px the four beats share a row, read left to
-   right as the turn runs; below that they stack inside the same frame. A beat
-   has no card of its own, only the rule between it and the one before. */
-.beats {
-  margin: 1.5rem 0 0;
-  grid-template-columns: minmax(0, 1fr);
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-}
-
-.beats > li {
-  padding: 1rem 1.1rem;
-}
-
-.beats > li + li {
-  border-top: 1px solid var(--border);
-}
-
-.beats p {
-  margin: 0.6rem 0 0;
-  font-size: 0.92rem;
-}
-
-@media (min-width: 901px) {
-  .beats {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-  }
-
-  .beats > li + li {
-    border-top: 0;
-    border-left: 1px solid var(--border);
-  }
-}
-
-/* The two folds added here, a beat's code and the Catalog IDs, open on a
-   native <summary>, so Enter / Space toggle them; only the disclosure triangle
-   is swapped for a chevron, in both the standard and the WebKit form. */
-.beat-fold > summary,
-.catalog-fold > summary {
-  display: flex;
-  align-items: center;
-  gap: 0.55rem;
-  width: fit-content;
-  max-width: 100%;
-  cursor: pointer;
-  list-style: none;
-}
-
-.beat-fold > summary::-webkit-details-marker,
-.catalog-fold > summary::-webkit-details-marker {
-  display: none;
-}
-
-/* The global focus ring lists a, button and [tabindex], none of which a
-   <summary> is. */
-.beat-fold > summary:focus-visible,
-.catalog-fold > summary:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-  border-radius: 4px;
-}
-
-.beat-fold > summary::after,
-.catalog-fold > summary::after {
-  content: "";
-  flex: none;
-  width: 0.45rem;
-  height: 0.45rem;
-  margin: 0 0.1rem 0.2rem 0;
-  border-right: 2px solid var(--fg-muted);
-  border-bottom: 2px solid var(--fg-muted);
-  transform: rotate(45deg);
-}
-
-.beat-fold[open] > summary::after,
-.catalog-fold[open] > summary::after {
-  margin: 0.2rem 0.1rem 0 0;
-  transform: rotate(-135deg);
-}
-
-/* A beat's fold is named by the artifact in it, set as the token it is. */
-.beat-fold {
-  margin-top: 0.75rem;
-}
-
-.beat-fold > summary {
-  padding: 0.25rem 0.65rem;
-  background: var(--bg-subtle);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  color: var(--fg);
-  font-size: 0.78rem;
-}
-
-.beat-fold > summary:focus-visible {
-  border-radius: 999px;
-}
-
-.beat-fold > summary:hover {
-  border-color: var(--fg-muted);
-}
-
-.beat-fold > summary code {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-.beat-fold > .snippet-label {
-  margin-top: 0.75rem;
-}
-
-/* The Catalog label keeps the look it had as a paragraph. */
-.catalog-fold > summary {
-  color: var(--fg-muted);
-}
-
-.catalog-fold > summary:hover {
-  color: var(--accent);
-}
-
-.catalog-fold > .chips {
-  margin-top: 0.75rem;
-}
-
-/* The four feature demos, two by two. On a phone each caption sits under its
-   demo; from 901px beside it, which keeps the pair of rows shorter than one
-   row of demos was when each had half the section to itself. */
-.measured {
-  margin: 0 0 2rem;
-}
-
-.demos {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 1rem 0.75rem;
-}
-
-.demos .demo figcaption {
-  font-size: 0.8rem;
-}
-
-@media (min-width: 901px) {
-  .demos {
-    column-gap: 1.5rem;
-  }
-
-  .demos .demo {
-    display: grid;
-    grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
-    gap: 0.9rem;
-    align-items: center;
-  }
-
-  .demos .demo figcaption {
-    margin-top: 0;
-  }
-}
-
-/* The closing call to action, then Philosophy, in one section: one under the
-   other on a phone and a tablet, beside each other from 901px. The footnote
-   under the creed sits closer than it did at the foot of a section of its own. */
-.philosophy-body {
-  margin-top: 2rem;
-  padding-top: 2rem;
-  border-top: 1px solid var(--border);
-}
-
-.philosophy-body .attribution {
-  margin-top: 1rem;
-  padding-top: 1rem;
-}
-
-@media (min-width: 901px) {
-  .philosophy {
-    display: grid;
-    grid-template-columns: minmax(0, 24rem) minmax(0, 1fr);
-    align-items: center;
-  }
-
-  .closing {
-    padding-right: 3rem;
-  }
-
-  .philosophy-body {
-    margin-top: 0;
-    padding: 0 0 0 3rem;
-    border-top: 0;
-    border-left: 1px solid var(--border);
-  }
-}
-
-/* /Compact 2 (#2555) */
