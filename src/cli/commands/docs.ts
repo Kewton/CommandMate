@@ -23,6 +23,7 @@ import {
   searchDocs,
 } from '../utils/docs-reader';
 import { AGENT_DELEGATION_GUIDE } from '../docs/agent-operations';
+import { SETUP_GUIDE } from '../docs/setup-guide';
 
 /**
  * Sections this command carries itself (Issue #2376).
@@ -36,9 +37,13 @@ import { AGENT_DELEGATION_GUIDE } from '../docs/agent-operations';
  *
  * The next change to touch `docs-reader.ts` should fold this into
  * `EMBEDDED_SECTIONS` and delete the three branches below.
+ *
+ * `setup` (Issue #3059) is the agent-facing setup guide, served on the site as
+ * `website/setup.md`; registered here for the same reason as `delegation`.
  */
 const LOCAL_SECTIONS: Record<string, string> = {
   delegation: AGENT_DELEGATION_GUIDE,
+  setup: SETUP_GUIDE,
 };
 
 /** Every section name, the reader's plus {@link LOCAL_SECTIONS}. */
