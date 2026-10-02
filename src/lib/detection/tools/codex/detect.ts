@@ -36,7 +36,8 @@ import {
   reportCodexDialogFooterDrift,
 } from './cli-patterns';
 import { detectCodexDialog } from './prompt';
-import { STATUS_CHECK_LINE_COUNT } from '../frame';
+import { STATUS_CHECK_LINE_COUNT, normalizeFrame } from '../frame';
+import { findNumberedOptionBlock } from '../dialog-block';
 import { createToolStatusDetector } from '../run-detection';
 import { CODEX_VERIFIED_AGAINST } from '../verified-against';
 import { THINKING_TAIL_LINE_COUNT } from '@/config/thinking-constants';
@@ -525,3 +526,29 @@ export const codexStatusDetector = createToolStatusDetector({
     return null;
   },
 });
+
+/**
+ * Issue #3062: is this frame codex's `/model` picker (either stage)?
+ *
+ * Auto-Yes must not answer it: the digit is an immediate decision, so the
+ * poller would pick the model and the reasoning effort for the operator. It is
+ * judged by the picker's own footer row (`enter select · esc back`, `enter
+ * default · s session · esc back`) rather than by `detectDialog`'s `picker`
+ * kind, which also covers the hooks list/detail screens whose Auto-Yes
+ * behaviour is unchanged. The footer must sit under the option block of a frame
+ * `detectDialog` vouches for, so the same words quoted in a reply do not count.
+ * `/prompt-response` does not call this and keeps accepting an answer.
+ *
+ * @param cleanOutput - The capture Auto-Yes judged (ANSI and box drawing stripped)
+ */
+export function isCodexModelPickerFrame(cleanOutput: string): boolean {
+  const frame = normalizeFrame(cleanOutput);
+  if (!codexStatusDetector.detectDialog(frame)) return false;
+  const contentEnd = findCodexContentEnd(frame.contentLines);
+  const block = findNumberedOptionBlock(stripBoxDrawing(frame.clean).split('\n'), contentEnd);
+  return (
+    block !== null &&
+    (CODEX_PICKER_FOOTER_PATTERN.test(block.footer) ||
+      CODEX_EFFORT_PICKER_FOOTER_PATTERN.test(block.footer))
+  );
+}
