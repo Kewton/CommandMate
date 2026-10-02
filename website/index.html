@@ -190,57 +190,24 @@
           CLIs you are already signed in to. It adds no pay-per-use API bill of its own.
         </p>
 
-        <figure class="level-figure">
-          <!-- Figure B: a few seconds on the phone, as a storyboard. The video is
-               #3058; until then this is the picture. -->
-          <svg
-            class="phone-story"
-            viewBox="0 0 360 200"
-            width="360"
-            height="200"
-            role="img"
-            aria-label="A storyboard of a few seconds on a phone, in four frames. A notification says a session needs you. The session list shows that one row in amber. In the chat you answer the agent's question with yes. Then the phone goes back in your pocket and you return to your day."
-          >
-            <g class="panel">
-              <rect class="phone" x="6" y="8" width="80" height="150" rx="12" />
-              <rect class="banner" x="12" y="28" width="68" height="40" rx="6" />
-              <text class="small strong" x="18" y="41">CommandMate</text>
-              <text class="small" x="18" y="53">wt-auth</text>
-              <text class="small" x="18" y="64">needs you</text>
-              <text class="caption" x="46" y="184">Notified</text>
-            </g>
-            <g class="panel">
-              <rect class="phone" x="96" y="8" width="80" height="150" rx="12" />
-              <rect class="row" x="102" y="30" width="68" height="22" rx="4" />
-              <rect class="row row-needs" x="102" y="58" width="68" height="22" rx="4" />
-              <rect class="row" x="102" y="86" width="68" height="22" rx="4" />
-              <circle class="dot" cx="111" cy="41" r="3" />
-              <circle class="dot dot-needs" cx="111" cy="69" r="3" />
-              <circle class="dot" cx="111" cy="97" r="3" />
-              <text class="small" x="119" y="44">wt-docs</text>
-              <text class="small strong" x="119" y="72">wt-auth</text>
-              <text class="small" x="119" y="100">wt-pick</text>
-              <text class="caption" x="136" y="184">Open it</text>
-            </g>
-            <g class="panel">
-              <rect class="phone" x="186" y="8" width="80" height="150" rx="12" />
-              <rect class="bubble" x="192" y="30" width="62" height="34" rx="8" />
-              <text class="small" x="198" y="44">Add the</text>
-              <text class="small" x="198" y="56">login test?</text>
-              <rect class="bubble bubble-you" x="222" y="74" width="38" height="20" rx="8" />
-              <text class="small strong" x="241" y="88" text-anchor="middle">Yes</text>
-              <text class="caption" x="226" y="184">Answer</text>
-            </g>
-            <g class="panel">
-              <rect class="phone" x="276" y="8" width="80" height="150" rx="12" />
-              <circle class="done-ring" cx="316" cy="70" r="20" />
-              <polyline class="done-tick" points="306,70 313,77 327,62" />
-              <text class="small" x="316" y="114" text-anchor="middle">Back to</text>
-              <text class="small" x="316" y="126" text-anchor="middle">your day</text>
-              <text class="caption" x="316" y="184">Done</text>
-            </g>
-          </svg>
-          <figcaption>A question from an agent, answered between two other things.</figcaption>
+        <figure class="demo demo-phone">
+          <!-- Figure B (Issue #3058): a few seconds on the phone, recorded in the
+               isolated demo environment at phone width. It replaces the
+               storyboard drawing rather than sitting next to it, so the page
+               does not get longer. -->
+          <video
+            src="assets/media/phone-team.mp4"
+            poster="assets/media/poster-phone-team.webp"
+            data-autoplay
+            muted
+            loop
+            playsinline
+            preload="none"
+            width="540"
+            height="540"
+            aria-label="A phone-width session list in which one agent needs you, its chat opened to answer the question with Yes and Submit, then the list again with that session carrying on"
+          ></video>
+          <figcaption>Someone needs you. Answer from the chat. It keeps going.</figcaption>
         </figure>
 
         <div class="demos">
@@ -611,6 +578,22 @@
             then UAT.
           </figcaption>
         </figure>
+
+        <div class="run-record" role="group" aria-labelledby="run-record-h">
+          <h3 id="run-record-h">One recorded run, from the phone to merged PRs</h3>
+          <dl>
+            <div><dt>Repository</dt><dd><a href="https://github.com/Kewton/commandmate-team-demo">Kewton/commandmate-team-demo</a>, public and throwaway</dd></div>
+            <div><dt>Issues</dt><dd>4</dd></div>
+            <div><dt>PM and dev lead</dt><dd>Claude Code</dd></div>
+            <div><dt>Workers</dt><dd>4 × Command Code</dd></div>
+            <div><dt>What the human did</dt><dd>2 messages and 3 taps, from the phone-width web UI</dd></div>
+            <div><dt>Request to report</dt><dd>9 min 48 s</dd></div>
+            <div><dt>Checks</dt><dd>4/4 passed</dd></div>
+            <div><dt>PRs</dt><dd>merged with CI green</dd></div>
+            <div><dt>UAT</dt><dd>4/4 GO</dd></div>
+          </dl>
+          <p class="run-record-note">As observed: one run, as recorded on 2026-10-02. Not a benchmark.</p>
+        </div>
 
         <div class="ask">
           <p class="ask-label" id="ask-3-label">Ask your agent</p>
