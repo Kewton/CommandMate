@@ -23,15 +23,15 @@ import { AGENT_OPERATIONS_GUIDE, AGENT_OPERATIONS_SAMPLES } from '../docs/agent-
  * [C-CONS-003] Only files listed here can be accessed via the docs command.
  * Path traversal attempts are prevented by validating section names against this map.
  */
-const SECTION_MAP: Record<string, string> = {
-  'quick-start': 'docs/user-guide/quick-start.md',
-  'commands': 'docs/user-guide/commands-guide.md',
-  'webapp': 'docs/user-guide/webapp-guide.md',
-  'workflow-examples': 'docs/user-guide/workflow-examples.md',
-  'cli-setup': 'docs/user-guide/cli-setup-guide.md',
-  'agents': 'docs/user-guide/agents-guide.md',
-  'cmate-schedules': 'docs/user-guide/cmate-schedules-guide.md',
-  'architecture': 'docs/architecture.md',
+export const SECTION_MAP: Record<string, string> = {
+  'quick-start': 'docs/en/user-guide/quick-start.md',
+  'commands': 'docs/en/user-guide/commands-guide.md',
+  'webapp': 'docs/en/user-guide/webapp-guide.md',
+  'workflow-examples': 'docs/en/user-guide/workflow-examples.md',
+  'cli-setup': 'docs/en/user-guide/cli-setup-guide.md',
+  'agents': 'docs/en/user-guide/agents-guide.md',
+  'cmate-schedules': 'docs/en/user-guide/cmate-schedules-guide.md',
+  'architecture': 'docs/en/architecture.md',
   'readme': 'README.md',
 };
 
