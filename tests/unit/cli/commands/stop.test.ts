@@ -10,6 +10,12 @@ import * as fs from 'fs';
 vi.mock('fs');
 vi.mock('dotenv', () => ({ config: vi.fn(() => ({ parsed: {} })) }));
 vi.mock('../../../../src/cli/utils/security-logger');
+// Issue #3087: DaemonManager probes the port before start and after stop; keep it off the
+// real network so a server on this machine's 3000 cannot decide the outcome.
+vi.mock('../../../../src/cli/utils/server-ready', () => ({
+  isPortInUse: vi.fn(async () => false),
+  waitForServer: vi.fn(async () => true),
+}));
 // stop.ts reads the PID via getStatus(), which resolves the server URL from .env (Issue #1266)
 vi.mock('../../../../src/cli/utils/env-setup', () => ({
   getPidFilePath: vi.fn(() => '/mock/home/.commandmate/.commandmate.pid'),
@@ -108,7 +114,8 @@ describe('stopCommand', () => {
 
       await stopCommand({});
 
-      expect(killSpy).toHaveBeenCalledWith(12345, 'SIGTERM');
+      // Issue #3087: the whole process group, not just npm's PID
+      expect(killSpy).toHaveBeenCalledWith(-12345, 'SIGTERM');
       expect(mockExit).toHaveBeenCalledWith(ExitCode.SUCCESS);
 
       killSpy.mockRestore();
@@ -146,7 +153,7 @@ describe('stopCommand', () => {
 
       await stopCommand({ force: true });
 
-      expect(killSpy).toHaveBeenCalledWith(12345, 'SIGKILL');
+      expect(killSpy).toHaveBeenCalledWith(-12345, 'SIGKILL');
       expect(mockExit).toHaveBeenCalledWith(ExitCode.SUCCESS);
 
       killSpy.mockRestore();

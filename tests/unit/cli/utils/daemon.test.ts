@@ -13,6 +13,12 @@ import * as dotenv from 'dotenv';
 vi.mock('child_process');
 vi.mock('fs');
 vi.mock('dotenv');
+// Issue #3087: DaemonManager probes the port before start and after stop; keep it off the
+// real network so a server on this machine's 3000 cannot decide the outcome.
+vi.mock('../../../../src/cli/utils/server-ready', () => ({
+  isPortInUse: vi.fn(async () => false),
+  waitForServer: vi.fn(async () => true),
+}));
 vi.mock('../../../../src/cli/utils/env-setup', () => ({
   getEnvPath: vi.fn(() => '/mock/.commandmate/.env'),
 }));
@@ -23,6 +29,7 @@ vi.mock('../../../../src/cli/utils/package-info', () => ({
 
 // Import after mocking
 import { DaemonManager } from '../../../../src/cli/utils/daemon';
+import { isPortInUse } from '../../../../src/cli/utils/server-ready';
 
 describe('DaemonManager', () => {
   let daemonManager: DaemonManager;
@@ -164,7 +171,8 @@ describe('DaemonManager', () => {
       const result = await daemonManager.stop();
 
       expect(result).toBe(true);
-      expect(killSpy).toHaveBeenCalledWith(12345, 'SIGTERM');
+      // Issue #3087: the whole process group, not just npm's PID
+      expect(killSpy).toHaveBeenCalledWith(-12345, 'SIGTERM');
 
       killSpy.mockRestore();
     });
@@ -196,6 +204,43 @@ describe('DaemonManager', () => {
 
       killSpy.mockRestore();
     });
+  });
+
+  describe('port ownership (Issue #3087)', () => {
+    afterEach(() => {
+      vi.mocked(isPortInUse).mockResolvedValue(false);
+    });
+
+    it('start refuses, without spawning, when another process answers on the port', async () => {
+      vi.mocked(fs.existsSync).mockReturnValue(false);
+      vi.mocked(isPortInUse).mockResolvedValue(true);
+
+      await expect(daemonManager.start({ port: 4100 })).rejects.toThrow(/already in use by another process/);
+      expect(childProcess.spawn).not.toHaveBeenCalled();
+      expect(isPortInUse).toHaveBeenCalledWith('127.0.0.1', 4100);
+    });
+
+    it('stop does not report success while the recorded port is still in use', async () => {
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      vi.mocked(fs.readFileSync).mockReturnValue(
+        '12345\n' + JSON.stringify({ pid: 12345, port: 4100, bind: '127.0.0.1', protocol: 'http' })
+      );
+      vi.mocked(fs.unlinkSync).mockReturnValue(undefined);
+      vi.mocked(isPortInUse).mockResolvedValue(true);
+      const killSpy = vi.spyOn(process, 'kill')
+        .mockImplementationOnce(() => true) // isProcessRunning
+        .mockImplementationOnce(() => true) // SIGTERM to the group
+        .mockImplementation(() => {
+          const error = new Error('No such process') as NodeJS.ErrnoException;
+          error.code = 'ESRCH';
+          throw error;
+        });
+
+      expect(await daemonManager.stop()).toBe(false);
+      expect(killSpy).toHaveBeenCalledWith(-12345, 'SIGTERM');
+
+      killSpy.mockRestore();
+    }, 10000);
   });
 
   describe('getStatus', () => {

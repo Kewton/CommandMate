@@ -50,6 +50,20 @@ export async function stopCommand(options: StopOptions): Promise<void> {
         logger.info('Status: Stopped');
       } else {
         logger.info(`${serverLabel} is not running (stale PID file)`);
+        // Issue #3087: the recorded npm process can be gone while the server it launched still
+        // listens as an orphan. stop() finds that process group and stops it, and only reports
+        // failure when something is left behind.
+        if (!(await daemonManager.stop(options.force))) {
+          logger.error(`Failed to stop ${serverLabel}: its processes or port are still in use`);
+          logSecurityEvent({
+            timestamp: new Date().toISOString(),
+            command: 'stop',
+            action: 'failure',
+            details: `Failed to stop orphaned server of PID ${status.pid ?? 'unknown'}${options.issue !== undefined ? ` (Issue #${options.issue})` : ''}`,
+          });
+          process.exit(ExitCode.STOP_FAILED);
+          return;
+        }
       }
       process.exit(ExitCode.SUCCESS);
       return;
