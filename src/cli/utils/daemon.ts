@@ -139,6 +139,43 @@ export class DaemonManager {
    * @throws Error if already running
    */
   async start(options: StartOptions): Promise<number> {
+    this.assertNotRunning();
+
+    // Clean up stale PID file
+    this.pidManager.removePid();
+
+    const npmScript = options.dev ? 'dev' : 'start';
+    // Use package installation directory, not current working directory
+    const packageRoot = getPackageRoot();
+
+    const env = this.buildChildEnv(options);
+    const { bindAddress, port, protocol } = this.resolveEndpoint(env);
+
+    await this.assertPortFree(bindAddress, port);
+
+    // Log startup with accurate settings (Stage 4 review: MF-2)
+    this.logger.info(`Starting server at ${protocol}://${bindAddress}:${port}`);
+
+    // Spawn detached process
+    const child = spawn('npm', ['run', npmScript], {
+      cwd: packageRoot,
+      env,
+      detached: true,
+      stdio: 'ignore',
+    });
+
+    // Unref to allow parent to exit
+    child.unref();
+
+    const pid = child.pid!;
+
+    this.recordState(pid, env, bindAddress, port, protocol);
+
+    return pid;
+  }
+
+  /** Throws when the recorded server is running, or an earlier server's group lives on. */
+  private assertNotRunning(): void {
     if (this.pidManager.isProcessRunning()) {
       const pid = this.pidManager.readPid();
       throw new Error(`Server is already running (PID: ${pid})`);
@@ -153,14 +190,10 @@ export class DaemonManager {
           'Run "commandmate stop" to stop them first.'
       );
     }
+  }
 
-    // Clean up stale PID file
-    this.pidManager.removePid();
-
-    const npmScript = options.dev ? 'dev' : 'start';
-    // Use package installation directory, not current working directory
-    const packageRoot = getPackageRoot();
-
+  /** Builds the child process env from process.env, .env and the start options. */
+  private buildChildEnv(options: StartOptions): NodeJS.ProcessEnv {
     // Issue #125: Load .env file from correct location
     const envPath = getEnvPath();
     const envResult = dotenvConfig({ path: envPath });
@@ -200,7 +233,15 @@ export class DaemonManager {
         env[key] = process.env[key];
       }
     }
+    return env;
+  }
 
+  /** Decides bind address, port and protocol, warning when exposed without protection. */
+  private resolveEndpoint(env: NodeJS.ProcessEnv): {
+    bindAddress: string;
+    port: string;
+    protocol: 'http' | 'https';
+  } {
     // Issue #179: Security warning for external access - recommend reverse proxy
     const bindAddress = env.CM_BIND || '127.0.0.1';
     const port = env.CM_PORT || '3000';
@@ -213,7 +254,11 @@ export class DaemonManager {
     if (bindAddress === '0.0.0.0' && !env.CM_AUTH_TOKEN_HASH && !env.CM_ALLOWED_IPS) {
       console.log(REVERSE_PROXY_WARNING);
     }
+    return { bindAddress, port, protocol };
+  }
 
+  /** Throws when something else already answers on the port the server would bind. */
+  private async assertPortFree(bindAddress: string, port: string): Promise<void> {
     // Issue #3087: refuse to launch onto a port something else already answers on. The new
     // server would fail to listen and exit, while every later TCP check (status, remote's
     // readiness wait) would be answered by that other process and mistake it for this server.
@@ -227,23 +272,16 @@ export class DaemonManager {
           'Stop that process or choose another port.'
       );
     }
+  }
 
-    // Log startup with accurate settings (Stage 4 review: MF-2)
-    this.logger.info(`Starting server at ${protocol}://${bindAddress}:${port}`);
-
-    // Spawn detached process
-    const child = spawn('npm', ['run', npmScript], {
-      cwd: packageRoot,
-      env,
-      detached: true,
-      stdio: 'ignore',
-    });
-
-    // Unref to allow parent to exit
-    child.unref();
-
-    const pid = child.pid!;
-
+  /** Persists the DaemonState; kills the spawned child and throws when the write fails. */
+  private recordState(
+    pid: number,
+    env: NodeJS.ProcessEnv,
+    bindAddress: string,
+    port: string,
+    protocol: 'http' | 'https'
+  ): void {
     // Issue #1354/#1355/#1358: persist the daemon's version, effective settings, and a
     // process-identity signature so status/stop/start can report and verify the actual server,
     // not re-derive it from a possibly-diverged .env. The port/protocol/auth recorded here are
@@ -269,8 +307,6 @@ export class DaemonManager {
       }
       throw new Error('Failed to write PID file - server may already be running');
     }
-
-    return pid;
   }
 
   /**
