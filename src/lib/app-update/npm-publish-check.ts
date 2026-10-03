@@ -67,13 +67,13 @@ interface NpmPublishCache {
   inFlight: Promise<string | null> | null;
 }
 
-declare global {
-  // eslint-disable-next-line no-var -- globalThis pattern for hot-reload persistence (version-checker.ts precedent)
-  var __npmPublishCheckCache: NpmPublishCache | undefined;
-}
+/** globalThis slot that keeps the cache across hot reloads (typed without `declare global { var }`) */
+const globalStore = globalThis as typeof globalThis & {
+  __npmPublishCheckCache?: NpmPublishCache;
+};
 
-const cache: NpmPublishCache = globalThis.__npmPublishCheckCache ??
-  (globalThis.__npmPublishCheckCache = {
+const cache: NpmPublishCache = globalStore.__npmPublishCheckCache ??
+  (globalStore.__npmPublishCheckCache = {
     targetVersion: null,
     npmVersion: null,
     checkedAt: 0,
