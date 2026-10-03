@@ -25,6 +25,8 @@ import { WorktreeSelectionProvider } from '@/contexts/WorktreeSelectionContext';
 
 interface WorktreesCacheProviderProps {
   children: ReactNode;
+  /** Issue #3157: false keeps `/api/worktrees` silent (see useWorktreesCache). */
+  enabled?: boolean;
 }
 
 /**
@@ -48,8 +50,8 @@ const WorktreesCacheContext = createContext<UseWorktreesCacheReturn | null>(null
  * isLoading, error, refresh) should call `useWorktreesCacheContext()` —
  * see Issue #709 for the rationale.
  */
-export function WorktreesCacheProvider({ children }: WorktreesCacheProviderProps) {
-  const cache = useWorktreesCache();
+export function WorktreesCacheProvider({ children, enabled = true }: WorktreesCacheProviderProps) {
+  const cache = useWorktreesCache({ enabled });
   const { worktrees, repositories, isLoading, error, refresh } = cache;
 
   // Stable context value — only changes when one of the cache fields changes.
