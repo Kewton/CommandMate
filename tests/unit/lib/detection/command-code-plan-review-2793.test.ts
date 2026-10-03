@@ -237,9 +237,10 @@ describe('新しいパターンは Plan review の capture にしか当たらな
       const tail = normalizeFrame(readFileSync(file, 'utf8')).lastLines;
       return COMMAND_CODE_PLAN_REVIEW_FOOTER.test(tail) || isCommandCodePlanApproveChoice(tail);
     });
-    expect(matched.length).toBe(18);
+    // Issue #3125 adds the two 1.74.0 frames (`command-code-plan-review-3125/`).
+    expect(matched.length).toBe(20);
     for (const file of matched) {
-      expect(path.relative(FIXTURES, file)).toMatch(/^command-code-plan-review-27(61|63)\//);
+      expect(path.relative(FIXTURES, file)).toMatch(/^command-code-plan-review-(2761|2763|3125)\//);
     }
   });
 });

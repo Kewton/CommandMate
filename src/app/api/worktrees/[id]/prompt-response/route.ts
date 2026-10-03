@@ -37,6 +37,15 @@ import { broadcastTerminalSnapshotAfterInteraction } from '@/lib/realtime/termin
 import { applyEventToActiveTask } from '@/lib/tasks/task-transition-service';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 import { findTextFollowUp } from './text-follow-up';
+import {
+  answerCommandCodePlanReview,
+  planReviewNotActiveBody,
+} from './plan-review';
+import { isPlanReviewAction } from '@/lib/cli-tools/command-code-plan-review';
+import {
+  readCommandCodePlanReviewState,
+  type CommandCodePlanReviewState,
+} from '@/lib/detection/tools/command-code/plan-review-state';
 
 const logger = createLogger('api/prompt-response');
 
@@ -111,6 +120,13 @@ interface PromptResponseRequest {
   defaultOptionNumber?: number;
   /** Issue #616: Submit mode from client-side detection (fallback when promptCheck fails) */
   submitMode?: string;
+  /**
+   * Issue #3125: what to do on Command Code's plan review overlay —
+   * `comment` (the answer text), `submit` (Submit review, ctrl+r, after the
+   * answer text as a comment when one is given), `approve` (ctrl+a) or `cancel`
+   * (esc). Omitted, an answer at that overlay is a comment.
+   */
+  planReviewAction?: string;
 }
 
 /**
@@ -177,17 +193,38 @@ export async function POST(
     // all, and `answer: "1,3"` must not reach `resolvePromptAnswer`, which
     // would pass it through as free text.
     const selection = parseSelectionSet(body);
-    if (selection !== null && !selection.ok) {
+    // Issue #3125: a comma in a text `answer` is refused only once the screen is
+    // known not to be Command Code's plan review, where it is a comment
+    // (`divide(a, b)`). The `answers` array is refused here as before.
+    const deferredSelectionError =
+      selection !== null && !selection.ok && body.answers === undefined ? selection.error : null;
+    if (selection !== null && !selection.ok && deferredSelectionError === null) {
       return NextResponse.json({ error: selection.error }, { status: 400 });
     }
-    const selectionNumbers = selection === null ? null : selection.numbers;
+    const selectionNumbers = selection === null || !selection.ok ? null : selection.numbers;
 
     // Issue #616: Allowlist validation for submitMode
     const validSubmitMode: SubmitMode | undefined =
       isValidSubmitMode(bodySubmitMode) ? bodySubmitMode : undefined;
 
+    // Issue #3125: the plan review action is a closed set, and only Command
+    // Code draws the overlay it names.
+    const planReviewAction = body.planReviewAction;
+    if (planReviewAction !== undefined && !isPlanReviewAction(planReviewAction)) {
+      return NextResponse.json(
+        { error: 'planReviewAction must be one of: comment, submit, approve, cancel' },
+        { status: 400 }
+      );
+    }
+    if (planReviewAction !== undefined && cliToolParam !== undefined && cliToolParam !== 'command-code') {
+      return NextResponse.json(
+        { error: 'planReviewAction is only valid for command-code' },
+        { status: 400 }
+      );
+    }
+
     // Validation (Issue #1681: exactly one of answer / useDefault)
-    if (!answer && !useDefault && selectionNumbers === null) {
+    if (!answer && !useDefault && selectionNumbers === null && planReviewAction === undefined) {
       return NextResponse.json(
         { error: 'answer is required' },
         { status: 400 }
@@ -267,13 +304,18 @@ export async function POST(
     // and for every session holding no approval, which is where the keystroke
     // path below carries on unchanged. The id is never taken from the caller —
     // see the module comment for why that closes DR4-003 by construction.
-    const structuredDecision = await answerStructuredDecision({
-      worktreeId: id,
-      cliToolId,
-      instanceId,
-      answer,
-      useDefault,
-    });
+    //
+    // Issue #3125: never for a plan review action, which names no decision, nor
+    // for an answer whose comma refusal is only deferred (see above).
+    const structuredDecision = planReviewAction !== undefined || deferredSelectionError !== null
+      ? ({ kind: 'not-applicable', reason: 'no-decision-identity' } as const)
+      : await answerStructuredDecision({
+        worktreeId: id,
+        cliToolId,
+        instanceId,
+        answer,
+        useDefault,
+      });
     if (structuredDecision.kind === 'refused') {
       logger.info('prompt-response-refused', {
         worktreeId: id,
@@ -332,47 +374,116 @@ export async function POST(
     // and a checkbox answer is the one exception — see
     // {@link MULTI_SELECT_UNVERIFIED_MESSAGES}.
     let verificationFailed = false;
+    // Issue #3125: Command Code's plan review overlay, when that is the screen.
+    let planReviewState: CommandCodePlanReviewState | null = null;
     try {
       const currentOutput = await captureSessionOutputFresh(id, cliToolId, undefined, instanceId);
       verifiedFrame = currentOutput;
-      // Issue #2870: the reading is `assessPromptAnswerability`, the SAME one
-      // the status API publishes as `promptAnswerable`, so the UI never offers
-      // Send for a frame this route would refuse (#2868). In order: the tool's
-      // own reader first — agy's `↑/↓ Navigate` dialog (#2364) and Command
-      // Code's footer-less question, read off the capture itself (#2522) — then
-      // the generic parser, then the shared presence gate the response poller
-      // saves through (#2457, handed the capture, not the cleaned text), then
-      // the refusal that says WHICH of "gone" and "unverifiable" it is (#2486).
-      // This is the FRESH frame the answer is about to be sent at, which is the
-      // whole point of re-verifying here.
-      //
-      // A Command Code question that is up and could not be read comes back as
-      // `unsupported_dialog_layout` before the generic parser runs (確定仕様 B):
-      // its partial list is exactly what must not reach a keystroke. Its
-      // `presence` is unvouched, so the log line below still says `vouched: false`.
-      const assessment = assessPromptAnswerability(cliToolId, currentOutput);
-      const { presence, refusal } = assessment;
-      isCommandCodeQuestion = assessment.isCommandCodeQuestion;
-      promptCheck = assessment.promptCheck;
-      if (refusal) {
-        logger.info('prompt-response-refused', {
-          worktreeId: id,
-          cliToolId,
-          instanceId,
-          reason: refusal.reason,
-          vouched: presence.present,
-        });
-        return NextResponse.json({
-          success: false,
-          reason: refusal.reason,
-          ...(refusal.message ? { message: refusal.message } : {}),
-          answer: answer ?? '',
-        });
+      if (cliToolId === 'command-code') {
+        planReviewState = readCommandCodePlanReviewState(currentOutput);
       }
     } catch {
       // If capture fails, proceed with caution - don't block manual responses
       verificationFailed = true;
       logger.warn('failed-to-verify-prompt');
+    }
+
+    // Issue #3125: the plan review overlay is neither an options dialog nor the
+    // composer, so the reading below finds no prompt on it and answers
+    // `prompt_no_longer_active` — while `wait` reports it as
+    // `command_code_plan_review`. It is answered here instead, and never on a
+    // frame that could not be read.
+    if (planReviewState === null && planReviewAction !== undefined) {
+      logger.info('prompt-response-refused', {
+        worktreeId: id,
+        cliToolId,
+        instanceId,
+        reason: 'plan_review_not_active',
+      });
+      return NextResponse.json(planReviewNotActiveBody(answer, verificationFailed));
+    }
+    if (planReviewState !== null) {
+      let planReview;
+      try {
+        planReview = await answerCommandCodePlanReview({
+          sessionName,
+          state: planReviewState,
+          action: planReviewAction,
+          answer,
+          useDefault,
+        });
+      } catch (error: unknown) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        return NextResponse.json(
+          { error: `Failed to send answer to tmux: ${errorMessage}` },
+          { status: 500 }
+        );
+      }
+      if (!planReview.sent) {
+        logger.info('prompt-response-refused', {
+          worktreeId: id,
+          cliToolId,
+          instanceId,
+          reason: planReview.body.reason,
+          phase: planReviewState.phase,
+        });
+        return NextResponse.json(planReview.body);
+      }
+      // A comment leaves the agent waiting on the same review; every other
+      // action is the human's decision about the plan.
+      if (planReview.action !== 'comment') {
+        applyEventToActiveTask(db, id, cliToolId, instanceId ?? cliToolId, 'prompt_answered_human', {});
+      }
+      startPolling(id, cliToolId, instanceId);
+      void broadcastTerminalSnapshotAfterInteraction(id, cliToolId, instanceId);
+      return NextResponse.json(planReview.body);
+    }
+    if (deferredSelectionError !== null) {
+      return NextResponse.json({ error: deferredSelectionError }, { status: 400 });
+    }
+
+    if (!verificationFailed && verifiedFrame !== null) {
+      const currentOutput = verifiedFrame;
+      try {
+        // Issue #2870: the reading is `assessPromptAnswerability`, the SAME one
+        // the status API publishes as `promptAnswerable`, so the UI never offers
+        // Send for a frame this route would refuse (#2868). In order: the tool's
+        // own reader first — agy's `↑/↓ Navigate` dialog (#2364) and Command
+        // Code's footer-less question, read off the capture itself (#2522) — then
+        // the generic parser, then the shared presence gate the response poller
+        // saves through (#2457, handed the capture, not the cleaned text), then
+        // the refusal that says WHICH of "gone" and "unverifiable" it is (#2486).
+        // This is the FRESH frame the answer is about to be sent at, which is the
+        // whole point of re-verifying here.
+        //
+        // A Command Code question that is up and could not be read comes back as
+        // `unsupported_dialog_layout` before the generic parser runs (確定仕様 B):
+        // its partial list is exactly what must not reach a keystroke. Its
+        // `presence` is unvouched, so the log line below still says `vouched: false`.
+        const assessment = assessPromptAnswerability(cliToolId, currentOutput);
+        const { presence, refusal } = assessment;
+        isCommandCodeQuestion = assessment.isCommandCodeQuestion;
+        promptCheck = assessment.promptCheck;
+        if (refusal) {
+          logger.info('prompt-response-refused', {
+            worktreeId: id,
+            cliToolId,
+            instanceId,
+            reason: refusal.reason,
+            vouched: presence.present,
+          });
+          return NextResponse.json({
+            success: false,
+            reason: refusal.reason,
+            ...(refusal.message ? { message: refusal.message } : {}),
+            answer: answer ?? '',
+          });
+        }
+      } catch {
+        // Proceed with caution - don't block manual responses
+        verificationFailed = true;
+        logger.warn('failed-to-verify-prompt');
+      }
     }
 
     // Issue #1726: replace the screen-parsed options with the ones the agent
