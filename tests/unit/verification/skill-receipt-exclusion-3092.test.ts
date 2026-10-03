@@ -261,10 +261,11 @@ describe('work-evidence with a Skill installed (#3092)', () => {
     expect(gate?.logTail).toContain('uncommitted=1');
   });
 
-  it('still counts a .commandcode/ directory, which no receipt records', async () => {
+  it('still counts an undeclared .commandcode/ file, which no receipt records', async () => {
     const repo = createRepo();
     installSkill(repo);
-    write(repo, '.commandcode/settings.local.json', '{}\n');
+    // settings.local.json is declared agent state since #3126; any other file is not.
+    write(repo, '.commandcode/commands/x.md', 'x\n');
 
     const runId = await runWorkEvidence('wt-skill-commandcode', repo);
 
