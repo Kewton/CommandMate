@@ -1757,14 +1757,14 @@ describe('Issue #3060: three levels and setup with your agent', () => {
   });
 
   it('heads each section with the words the Issue gives it', () => {
-    expect(heading(hero(), 'h1')).toBe('No long blocks of time? Run an AI team from your phone.');
+    expect(heading(hero(), 'h1')).toBe('Run multiple coding agents in parallel — even away from your desk.');
     expect(heading(section('problem'), 'h2')).toBe(
       'Day job. Housework. Kids. Family time. Your project gets the gaps.',
     );
     expect(section('problem').match(/<li>/g) ?? []).toHaveLength(3);
-    expect(heading(section('level-1'), 'h2')).toBe('Many agents, one place, in your pocket');
-    expect(heading(section('level-2'), 'h2')).toBe('Work like a team, not a chat');
-    expect(heading(section('level-3'), 'h2')).toBe('An AI team that builds and maintains');
+    expect(heading(section('level-1'), 'h2')).toBe('Parallel');
+    expect(heading(section('level-2'), 'h2')).toBe('Delegate');
+    expect(heading(section('level-3'), 'h2')).toBe('Manage');
     expect(heading(section('setup'), 'h2')).toBe('Set up with your agent');
     expect(heading(section('my-setup'), 'h2')).toBe('My setup');
   });

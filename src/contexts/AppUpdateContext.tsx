@@ -124,7 +124,14 @@ function isNotYetPublished(error: unknown): boolean {
 
 const AppUpdateContext = createContext<AppUpdateContextValue>(APP_UPDATE_DEFAULT_VALUE);
 
-export function AppUpdateProvider({ children }: { children: ReactNode }) {
+export function AppUpdateProvider({
+  children,
+  enabled = true,
+}: {
+  children: ReactNode;
+  /** Issue #3157: false skips the update check (the unauthenticated `/login` screen). */
+  enabled?: boolean;
+}) {
   const t = useTranslations('worktree');
   const { showToast } = useToast();
   const [updateInfo, setUpdateInfo] = useState<UpdateCheckResponse | null>(null);
@@ -147,6 +154,7 @@ export function AppUpdateProvider({ children }: { children: ReactNode }) {
 
   // Update check: once on mount, then every UPDATE_RECHECK_INTERVAL_MS while idle.
   useEffect(() => {
+    if (!enabled) return;
     let cancelled = false;
     const run = async (): Promise<void> => {
       if (stateRef.current !== 'idle') return;
@@ -171,7 +179,7 @@ export function AppUpdateProvider({ children }: { children: ReactNode }) {
       runCheckRef.current = async () => {};
       clearInterval(timer);
     };
-  }, []);
+  }, [enabled]);
 
   const hasUpdate = updateInfo?.hasUpdate === true;
   const pendingVersion = hasUpdate ? null : (updateInfo?.pendingVersion ?? null);

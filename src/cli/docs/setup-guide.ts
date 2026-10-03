@@ -143,6 +143,8 @@ commandmate remote --provider cloudflare --yes
 
 If the QR code cannot be read, or scanning it does not get the person in, have them copy the pairing URL and paste it into the address bar of the phone's browser. Pasting the link into the address bar is the way that worked in the hands-on check; do not save the link to a file.
 
+When you hand the link or QR to the person, also tell them the time it expires: \`remote\` and \`remote pair\` print a \`Pairing expires: HH:MM (in N m), works once\` line, and \`pairing.expiresAt\` in \`--json\` is the same time. If it has passed, run \`commandmate remote pair\` (only works while the code is unused), otherwise \`commandmate remote stop\` and then \`commandmate remote\`.
+
 To get the link as text again without reopening the tunnel, run \`commandmate remote pair\` (or \`commandmate remote pair --json\` and read \`pairingUrl\`). The URL stays the same, and it works only while the code is unused.
 
 ### Ask the person first
