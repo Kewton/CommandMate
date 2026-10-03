@@ -1,0 +1,82 @@
+{
+  "version": "0.44.0",
+  "date": "2026-10-03",
+  "highlight": {
+    "ja": "エージェントに読ませるだけで導入まで案内してくれるセットアップガイドを加えました。スマホからのログインと公開の安全性も改善しています。",
+    "en": "A setup guide your agent can read and follow now walks you through installation. Phone login and remote access are also safer."
+  },
+  "added": [
+    {
+      "ja": "チャットの吹き出しで、worktree 内の画像を表示できるようになりました。",
+      "en": "Chat bubbles now show images from the worktree."
+    },
+    {
+      "ja": "チャットの吹き出しで、worktree 内の動画を再生できるようになりました。",
+      "en": "Chat bubbles now play videos from the worktree."
+    },
+    {
+      "ja": "Command Code の計画レビュー画面で、チャット面からコメント・送信・承認・取り消しができるようになりました。承認の前には確認が出ます。",
+      "en": "In Command Code's plan review, you can now comment, submit, approve, or cancel from the chat view. Approving asks for confirmation first."
+    },
+    {
+      "ja": "ペアリングの QR を失くしたとき、公開を張り直さずに新しいリンクを出せるようになりました。",
+      "en": "If you lose the pairing QR code, you can now get a new link without restarting remote access."
+    },
+    {
+      "ja": "エージェントに読ませて導入を進めてもらうセットアップガイドを追加しました。",
+      "en": "Added a setup guide that your agent can read to walk you through installation."
+    }
+  ],
+  "improved": [
+    {
+      "ja": "Command Code の計画レビュー画面に、CLI からコメント・送信・承認・取り消しを送れるようになりました。",
+      "en": "The CLI can now comment on, submit, approve, or cancel a Command Code plan review."
+    },
+    {
+      "ja": "画面の出力がまだ無いとき、確認ダイアログの見方を案内するようになりました。",
+      "en": "When there is no output yet, capture now tells you how to see a waiting confirmation screen."
+    },
+    {
+      "ja": "Command Code が自分で書く設定ファイルを、作業の変更として数えなくなりました。",
+      "en": "Settings files that Command Code writes for itself are no longer counted as your changes."
+    }
+  ],
+  "fixed": [
+    {
+      "ja": "停止したはずのサーバーが残り、ログインなしで公開されてしまうことがある問題を直しました。",
+      "en": "Fixed a case where a server that should have stopped stayed up and could be exposed without login."
+    },
+    {
+      "ja": "トンネル越しにログインしようとすると localhost に移動してしまう問題を直しました。",
+      "en": "Fixed logging in through a tunnel sending you to localhost."
+    },
+    {
+      "ja": "Claude Code の信頼の確認で、終了を選んでしまい最初の送信が届かない問題を直しました。",
+      "en": "Fixed Claude Code's trust prompt sometimes choosing to exit, so the first message was not delivered."
+    },
+    {
+      "ja": "初めて使うときに、送信・同期・応答のエラーが誤った対処を案内していた問題を直しました。",
+      "en": "Fixed send, sync, and respond errors pointing first-time users to the wrong fix."
+    },
+    {
+      "ja": "npm にまだ出ていない版で更新ボタンが押せてしまう問題を直しました。",
+      "en": "Fixed the Update button being available for a version not yet published to npm."
+    },
+    {
+      "ja": "大きすぎる画像を開いたとき、正しく「大きすぎる」と伝えるようになりました。",
+      "en": "Opening an image that is too large now correctly says it is too large."
+    },
+    {
+      "ja": "Codex のモデル選択画面に Auto-Yes が答えてしまう問題を直しました。",
+      "en": "Fixed Auto-Yes answering Codex's model selection screen."
+    },
+    {
+      "ja": "Claude の /effort の選択画面を正しく認識するようになりました。",
+      "en": "Claude's /effort selection screen is now recognized correctly."
+    },
+    {
+      "ja": "依存パッケージの脆弱性を解消しました。",
+      "en": "Resolved security vulnerabilities in dependencies."
+    }
+  ]
+}
