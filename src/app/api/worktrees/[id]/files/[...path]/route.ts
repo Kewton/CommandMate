@@ -397,7 +397,9 @@ async function serveRawMedia(
       'Content-Type': mimeType,
       'X-Content-Type-Options': 'nosniff',
       'Content-Disposition': 'inline',
-      'Cache-Control': 'private',
+      // next.config.js の /api/:path* が全応答に no-store を付けて上書きするため、実際に返る値に揃える。
+      // ?raw=1 だけキャッシュさせたくなったら、別 Issue で next.config.js 側を変えること。
+      'Cache-Control': 'no-store',
       'Accept-Ranges': 'bytes',
     });
 
