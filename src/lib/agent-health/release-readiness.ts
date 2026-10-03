@@ -93,14 +93,30 @@ export function summarizeWorkflowRuns(runs: readonly WorkflowRunInfo[] | null): 
  * A PR's `statusCheckRollup` → one state. The rollup keeps superseded runs
  * (an older push's cancelled run), so per check name only the newest counts.
  */
-export function summarizeCheckRollup(rollup: readonly unknown[] | null | undefined): CiState {
-  if (!Array.isArray(rollup)) return 'unknown';
-  const latest = new Map<string, { at: string; outcome: CheckOutcome }>();
+export function summarizeCheckRollup(
+  rollup: readonly unknown[] | null | undefined,
+  options: { ignoreCancelled?: boolean } = {}
+): CiState {
+  return analyzeCheckRollup(rollup, options).state;
+}
+
+/**
+ * Like {@link summarizeCheckRollup}; with `ignoreCancelled` the newest
+ * `cancelled` checks are left out of the verdict and only counted. A merged
+ * PR's pull_request runs are cancelled on close (cancel-pr-runs-on-close.yml).
+ */
+export function analyzeCheckRollup(
+  rollup: readonly unknown[] | null | undefined,
+  options: { ignoreCancelled?: boolean } = {}
+): { state: CiState; cancelled: number } {
+  if (!Array.isArray(rollup)) return { state: 'unknown', cancelled: 0 };
+  const latest = new Map<string, { at: string; outcome: CheckOutcome; cancelled: boolean }>();
   for (const item of rollup) {
     if (typeof item !== 'object' || item === null) continue;
     const raw = item as Record<string, unknown>;
     let key: string;
     let outcome: CheckOutcome;
+    let cancelled = false;
     if (typeof raw.context === 'string') {
       // StatusContext
       key = `status/${raw.context}`;
@@ -109,14 +125,23 @@ export function summarizeCheckRollup(rollup: readonly unknown[] | null | undefin
     } else if (typeof raw.name === 'string') {
       key = `${typeof raw.workflowName === 'string' ? raw.workflowName : ''}/${raw.name}`;
       outcome = outcomeOf(String(raw.status ?? ''), typeof raw.conclusion === 'string' ? raw.conclusion : null);
+      cancelled =
+        outcome === 'failure' &&
+        String(raw.status ?? '').toLowerCase() === 'completed' &&
+        String(raw.conclusion ?? '').toLowerCase() === 'cancelled';
     } else {
       continue;
     }
     const at = String(raw.startedAt ?? raw.completedAt ?? '');
     const seen = latest.get(key);
-    if (!seen || at >= seen.at) latest.set(key, { at, outcome });
+    if (!seen || at >= seen.at) latest.set(key, { at, outcome, cancelled });
   }
-  return combine([...latest.values()].map((entry) => entry.outcome));
+  const entries = [...latest.values()];
+  const skip = options.ignoreCancelled === true;
+  return {
+    state: combine(entries.filter((entry) => !(skip && entry.cancelled)).map((entry) => entry.outcome)),
+    cancelled: skip ? entries.filter((entry) => entry.cancelled).length : 0,
+  };
 }
 
 export const CI_STATE_LABELS: Record<CiState, string> = {
@@ -142,6 +167,8 @@ export interface PullRequestInfo {
   headRefOid: string | null;
   body: string;
   checks: CiState;
+  /** Merged PRs only: checks cancelled on close, left out of `checks`. */
+  cancelledChecks?: number;
 }
 
 /** `gh pr list --json …` rows → {@link PullRequestInfo}; malformed rows are dropped. */
@@ -157,6 +184,9 @@ export function parsePullRequests(json: unknown): PullRequestInfo[] {
       typeof raw.mergeCommit === 'object' && raw.mergeCommit !== null
         ? (raw.mergeCommit as { oid?: unknown }).oid
         : null;
+    const rollup = analyzeCheckRollup(Array.isArray(raw.statusCheckRollup) ? raw.statusCheckRollup : null, {
+      ignoreCancelled: state === 'MERGED',
+    });
     result.push({
       number: raw.number,
       title: typeof raw.title === 'string' ? raw.title : '',
@@ -168,7 +198,8 @@ export function parsePullRequests(json: unknown): PullRequestInfo[] {
       mergeCommit: typeof mergeCommit === 'string' ? mergeCommit : null,
       headRefOid: typeof raw.headRefOid === 'string' ? raw.headRefOid : null,
       body: typeof raw.body === 'string' ? raw.body : '',
-      checks: summarizeCheckRollup(Array.isArray(raw.statusCheckRollup) ? raw.statusCheckRollup : null),
+      checks: rollup.state,
+      cancelledChecks: rollup.cancelled,
     });
   }
   return result;
@@ -472,7 +503,7 @@ export interface DispatchedIssueRow {
 export interface ReadinessFacts {
   developCi: CiState;
   /** null: the merged-PR list could not be read. */
-  mergedToday: Array<{ number: number; title: string; url: string; checks: CiState }> | null;
+  mergedToday: Array<{ number: number; title: string; url: string; checks: CiState; cancelledChecks?: number }> | null;
   audit: { current: number | null; atLastRelease: number | null };
   dispatchStatus: DispatchStatus | null;
   dispatched: DispatchedIssueRow[];

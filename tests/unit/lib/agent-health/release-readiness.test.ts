@@ -241,6 +241,29 @@ describe('CI state readers', () => {
   });
 });
 
+describe('merged PR auto-cancelled checks (#3142)', () => {
+  const run = (name: string, conclusion: string) => ({ __typename: 'CheckRun', name, workflowName: 'CI', status: 'COMPLETED', conclusion, startedAt: '2026-10-03T00:00:00Z' });
+  const prRow = (state: string, rollup: unknown[]) => ({ number: 7, state, baseRefName: 'develop', statusCheckRollup: rollup });
+
+  it('a merged PR with only success and cancelled is green and shows the cancel count', () => {
+    const [merged] = parsePullRequests([prRow('MERGED', [run('Unit', 'SUCCESS'), run('E2E Tests', 'CANCELLED')])]);
+    expect(merged.checks).toBe('success');
+    expect(merged.cancelledChecks).toBe(1);
+  });
+
+  it('a failure still turns a merged PR red', () => {
+    const [merged] = parsePullRequests([prRow('MERGED', [run('Unit', 'FAILURE'), run('E2E Tests', 'CANCELLED')])]);
+    expect(merged.checks).toBe('failure');
+  });
+
+  it('cancelled still counts as failure for open PRs and develop push runs', () => {
+    const [open] = parsePullRequests([prRow('OPEN', [run('E2E Tests', 'CANCELLED')])]);
+    expect(open.checks).toBe('failure');
+    expect(summarizeWorkflowRuns([{ workflowName: 'CI', status: 'completed', conclusion: 'cancelled' }])).toBe('failure');
+    expect(summarizeCheckRollup([run('E2E Tests', 'CANCELLED')])).toBe('failure');
+  });
+});
+
 describe('pull requests', () => {
   it('parsePullRequests reads gh rows and drops junk', () => {
     const prs = parsePullRequests([
