@@ -69,6 +69,8 @@ export interface VideoValidationResult {
   valid: boolean;
   /** Error message if validation failed */
   error?: string;
+  /** Machine-readable cause when the failure is an oversize file */
+  reason?: 'too-large';
 }
 
 /**
@@ -153,6 +155,7 @@ export function validateVideoContent(
     return {
       valid: false,
       error: `File size exceeds ${VIDEO_MAX_SIZE_BYTES / 1024 / 1024}MB limit`,
+      reason: 'too-large',
     };
   }
 

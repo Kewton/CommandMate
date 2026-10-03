@@ -85,7 +85,7 @@ describe('?raw=1 video', () => {
     expect(response.headers.get('content-type')).toBe('video/mp4');
     expect(response.headers.get('x-content-type-options')).toBe('nosniff');
     expect(response.headers.get('content-disposition')).toBe('inline');
-    expect(response.headers.get('cache-control')).toBe('private');
+    expect(response.headers.get('cache-control')).toBe('no-store');
     expect(response.headers.get('accept-ranges')).toBe('bytes');
     expect(response.headers.get('content-length')).toBe('1000');
     expect((await bodyBytes(response)).equals(mp4Bytes())).toBe(true);
