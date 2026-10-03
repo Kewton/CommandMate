@@ -56,8 +56,16 @@ describe('browser-access guidance matches the default bind (Issue #2113)', () =>
   });
 
   it('explains why, so the URL does not get "corrected" back', () => {
+    // Issue #3153 moved the explanation out of the READMEs into the setup guide,
+    // so a README only has to link the place that explains it.
     for (const { file } of GUIDES) {
       const text = read(file);
+      if (file.endsWith('README.md')) {
+        expect(text, `${file} must link the guide that says why`).toMatch(
+          /\]\((?:\.\/docs\/en|\.\.)\/user-guide\/cli-setup-guide\.md#[^)]+\)/
+        );
+        continue;
+      }
       expect(text, `${file} must say what localhost resolves to`).toContain('::1');
       expect(text, `${file} must name CM_BIND or the bind default`).toContain('127.0.0.1');
     }
