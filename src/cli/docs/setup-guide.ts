@@ -141,6 +141,8 @@ commandmate remote --provider cloudflare --yes
 
 \`remote\` starts the server itself, publishes it, and prints the QR code. Show the person the QR code and tell them to scan it with the phone's camera. If the output is too narrow for a QR code, it prints a URL instead: that URL contains the pairing code, so give it only to the person and do not save it to a file or a log.
 
+If the QR code cannot be read, or scanning it does not get the person in, have them copy the pairing URL and paste it into the address bar of the phone's browser. Pasting the link into the address bar is the way that worked in the hands-on check; do not save the link to a file.
+
 ### Ask the person first
 
 - Which provider: Tailscale or Cloudflare.
@@ -202,6 +204,11 @@ commandmate reply <worktree-id> --instance command-code
 
 For Codex, use \`--agent codex\` and \`--instance codex\`.
 
+The first time Codex starts in a worktree it shows two confirmation screens. Show them to the person with \`commandmate capture <worktree-id> --instance codex\`; do not answer them yourself.
+
+- \`Trust this folder?\`: whether Codex may work in this folder.
+- \`Hooks need review (5 hooks are new or changed)\`: these hooks are not from the repository. CommandMate wrote them into \`~/.codex/hooks.json\` itself, marked with \`# commandmate:agent-hooks\`, and they only send Codex's events to CommandMate on localhost. Check this with \`grep -n 'commandmate:agent-hooks' ~/.codex/hooks.json\` before you say where they came from. If the person does not trust them, Codex still works, but CommandMate cannot receive Codex's state as events, so \`wait\` and the status shown in the browser are less accurate.
+
 ### Ask the person first
 
 - Which CLI to add, and installing it.
@@ -253,6 +260,8 @@ commandmate send <worktree-id> "Use the cmate-orchestrate skill to plan issues #
 
 The plan step changes nothing. Steps that change something run only when the person approves them.
 
+Command Code's plan mode (Command Code only; this workaround can be removed once #3125 is fixed): if the lead enters plan mode, it stops on a REVIEW screen and CommandMate cannot send a comment to it from the CLI. When you only want a plan, ask in plain words as above and do not have the lead enter plan mode.
+
 ### Ask the person first
 
 - Installing each Skill, after showing the \`--dry-run\` plan. Say plainly that \`cmate-orchestrate\` is marked high-risk and what \`--ack-risk\` acknowledges.
@@ -293,6 +302,8 @@ commandmate verify init --cwd <repository-path>             # write it (never ov
 \`\`\`
 
 Show the person the gates (lint, type check, tests and so on) and change them only with their agreement.
+
+Before handing over a task that commits, check that git knows who is committing: \`git config user.name\` and \`git config user.email\` in the repository (a worker's commit fails when they are empty). If they are empty, ask the person for their name and email, and set them only with their answer. Do not let a worker invent a bot name. The person may also choose to have the worker leave the changes uncommitted.
 
 2. Run the gates once on the worktree as it is:
 
