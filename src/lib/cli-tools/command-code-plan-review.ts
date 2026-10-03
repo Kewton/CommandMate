@@ -192,8 +192,7 @@ export const PLAN_REVIEW_STEP_DELAY_MS = 300;
 /**
  * Send the planned steps, one tmux invocation each.
  *
- * `C-r` goes through `sendKeys` (a fixed key name, not user text) because the
- * special-keys allow-list in `lib/tmux` does not carry it; the comment text
+ * Key steps (including `C-r`) go through `sendSpecialKeys`; the comment text
  * goes through `-l` so it is never resolved as a key name.
  */
 export async function sendCommandCodePlanReviewKeys(
@@ -205,8 +204,6 @@ export async function sendCommandCodePlanReviewKeys(
     const step = steps[i];
     if (step.kind === 'text') {
       await sendKeys(sessionName, step.text, false, { literal: true });
-    } else if (step.key === 'C-r') {
-      await sendKeys(sessionName, 'C-r', false);
     } else {
       await sendSpecialKeys(sessionName, [step.key]);
     }

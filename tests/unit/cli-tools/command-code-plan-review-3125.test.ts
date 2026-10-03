@@ -154,10 +154,10 @@ describe('sendCommandCodePlanReviewKeys (Issue #3125)', () => {
     expect(vi.mocked(sendSpecialKeys).mock.calls).toEqual([
       ['sess', ['Enter']],
       ['sess', ['Enter']],
+      ['sess', ['C-r']],
     ]);
     expect(vi.mocked(sendKeys).mock.calls).toEqual([
       ['sess', 'Escape', false, { literal: true }],
-      ['sess', 'C-r', false],
     ]);
     expect(sleep).toHaveBeenCalledTimes(3);
     expect(invalidateCache).toHaveBeenCalledWith('sess');
