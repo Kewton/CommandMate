@@ -1044,7 +1044,11 @@ export function envCleanNoBaseline(taskId: string | null, sources: string[]): st
     `${ENV_CLEAN_GATE_ID}: UNKNOWN — no baseline snapshot exists for ${who}, so nothing can be ` +
     'compared. This is NOT "the environment is unchanged": no measurement was taken. ' +
     'A baseline is recorded when the task is created (`send --contract`) and only while the ' +
-    `gate is switched on (currently: ${how}). Switch it on, then re-send the task.`
+    `gate is switched on (currently: ${how}). Switch it on, then re-send the task.` +
+    (taskId
+      ? ''
+      : ' To re-verify this worktree\'s contract task (this run is not attached to a task), run ' +
+        '`commandmate verify <worktree> --task <id>`.')
   );
 }
 
