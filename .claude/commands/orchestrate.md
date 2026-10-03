@@ -884,7 +884,7 @@ commandmatedev capture "$WT" --instance antigravity --pane --tail 40 \
 
   - **`after-signal`**: wait の exit code をそのまま使う
   - **`before-signal`**: 最後のコミットが検証の開始より後か、作業ツリーに変更があれば、検証は途中の状態を見ている。
-    `commandmatedev verify "$WT" --json` で全ゲートを検証し直し、その結果で裁定する。
+    `commandmatedev verify "$WT" --task "$TASK_ID" --json` で全ゲートを検証し直し、その結果で裁定する。
     どちらも無ければ、検証は最終状態を見ている。exit 0 はそのまま採用し、exit 20 は 3-4 の「合図の前に始まった検証」に従う
 - #2605 の値: 検証の開始が 01:28:40.776Z、最後のターン終了が 01:33:41.574Z（`before-signal`）。
   最後のワーカーのコミットは 01:27:47 で、作業ツリーはクリーンだった
@@ -956,7 +956,7 @@ commandmatedev verify "$WT" --json    # 失敗したゲートと exit code を�
 
 - 違反は、ワーカー自身がまだ動かしていたもの（バックグラウンドのテスト実行の listener `[self]`、
   テストが作って後で消す `~/.commandmate-demo-vitest-*` など）であることが多い
-- 合図の後に `commandmatedev verify "$WT" --gates env-clean` を再実行する
+- 合図の後に `commandmatedev verify "$WT" --task "$TASK_ID" --gates env-clean` を再実行する
   （`work-evidence` と `scope` も一緒に走る）
 - 再実行が PASS で、かつ 3-3 の確認で「最後のコミットが検証の開始より前・作業ツリーに変更なし」なら、合格として扱う。
   **再指示・切替の回数には数えない**。裁定の根拠は PR の Test plan と summary に書く
@@ -966,6 +966,20 @@ commandmatedev verify "$WT" --json    # 失敗したゲートと exit code を�
 ワーカー起因なら、失敗ゲートと `logTail` を添えて同じ worker に再指示する（契約は据え置き。再送は素の send でよく、
 `--instance "$AGENT"` を付ける）。再指示は **同一 worktree につき最大2回**。
 3回目に到達したら、**Antigravity 担当は 3-5 の手順で Claude に切り替える**。**Claude 担当は** worker を止め、ユーザーに判断を仰ぐ。
+
+**再指示の後の裁定は `wait --verify` ではなく、`wait` → `verify --task` の 2 段で行う。**
+
+```bash
+# 1. 完了を待つ（--verify を付けない）
+commandmatedev wait "$WT" --instance "$AGENT" --on-prompt human --timeout 10800
+# 2. 契約の task を名指しして裁定する。$TASK_ID は tasks.tsv の 4 列目
+commandmatedev verify "$WT" --task "$TASK_ID" --gates work-evidence,scope,env-clean,<契約の verify.gates> --json
+```
+
+exit code の読み方は上の表と同じ。理由:
+- `wait --verify` は進行中（running / waiting_input / verifying）の task にしか紐づかない（`IN_FLIGHT_TASK_STATUSES`）。1 回目の検証で task は終了済みになる
+- 紐づかないと scope は SKIP、env-clean は「ベースライン無し」の ERROR で exit 20 になり、ゲートも契約ではなく verify.yaml 全部になる
+- 2026-10-03 #3099 の実測: 宣言ゲートは unit 全体 1283 秒を含めて全 PASS なのに exit 20 になった
 
 **21 の対応**（作業証跡ゼロ）: ワーカーは1行も書いていない。ほぼ常に起動側の問題なので capture で切り分ける。
 
@@ -1080,7 +1094,7 @@ commandmatedev send <worktree-id> "設計書の以下の点を修正してくだ
 ```
 
 修正指示は**契約を作り直さない**（契約は Issue 単位の宣言であり、1往復の指摘ではない）。
-指示の反映は次の `wait --verify` で裁定される。
+指示の反映は、3-4 の同じ手順（`wait` → `verify --task "$TASK_ID"`）で裁定する。
 
 **`--phase impl` 指定時**: 全ワーカーの実装完了を確認して終了。
 
@@ -1393,6 +1407,7 @@ gh issue list --repo Kewton/CommandMate --state open --search "<ファイル名�
 | ワーカーのタイムアウト（exit 124） | captureで状況確認→追加指示 or ユーザーに報告 |
 | 検証不合格（exit 20） | `verify --json` で失敗ゲートを特定し、先にワーカー起因かを判定（3-4）。ワーカー起因なら再指示。上限2回で、Antigravity 担当は Claude（opus）へ切替（3-5）、Claude（sonnet）担当は opus へ格上げ（3-5b）、Claude（opus）担当は人間へエスカレーション |
 | env-clean だけが FAIL（exit 20） | `capture --prompts` と違反項目の時刻で帰属を判定。ワーカー起因でなければ合格扱いにし、根拠を PR と summary に書く（3-4） |
+| 再指示の後の検証で scope が SKIP（`was not attached to it`）／env-clean が `no baseline snapshot exists for this run` | task に紐づいていない。`verify --task <task id>` で検証し直す（3-4） |
 | 作業証跡ゼロ（exit 21） | captureでcomposer未確定・権限プロンプト・未起動を切り分け（Phase 3-4） |
 | send が exit 99（`prompt not ready`） | 未送信。**待つ前に capture で画面を見て**、信頼ダイアログ / 既にプロンプト / まだ起動中で分岐する（3-1 の表）。task id は再送のたびに差し替える |
 | Antigravity がアンケート画面で停止 | `tmux send-keys -t "mcbd-antigravity-$WT" -l -- 0` で閉じる（3-4） |

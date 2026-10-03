@@ -568,7 +568,8 @@ export function scopeSkipDetachedContract(taskId: string, status: string): strin
   return (
     `scope: task ${taskId} declares a scope for this worktree, but it is ${status} and ` +
     'this run was not attached to it, so its scope was NOT judged. ' +
-    'Name the task when starting the run (`wait --verify` does this automatically).'
+    '`wait --verify` attaches only to an in-flight task; to re-verify a finished task, run ' +
+    `\`commandmate verify <worktree> --task ${taskId}\`.`
   );
 }
 
