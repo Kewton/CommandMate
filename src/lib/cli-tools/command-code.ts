@@ -69,6 +69,7 @@ import {
   COMMAND_CODE_INIT_WAIT_MS,
 } from '@/config/cli-tool-timing-config';
 import { missingToolError } from './install-hints';
+import { readCommandCodePlanReviewState } from '../detection/tools/command-code/plan-review-state';
 import {
   SessionStartTimeoutError,
   isSessionStartTimeoutError,
@@ -175,6 +176,18 @@ export function isCommandCodeReady(rawOutput: string): boolean {
   if (chromeStart < 0) return false;
   return !COMMAND_CODE_THINKING_PATTERN.test(stripAnsi(rawOutput));
 }
+
+/**
+ * Why `send` stops at the plan review overlay (Issue #3125).
+ *
+ * The overlay replaces the composer until a human decides, so waiting for the
+ * composer only ran out the clock (`prompt not ready` after the full timeout).
+ * Its comments, Submit review, approval and cancel go through `respond`.
+ */
+export const COMMAND_CODE_PLAN_REVIEW_SEND_MESSAGE =
+  'Command Code is showing a plan review (REVIEW), which takes review comments, not messages. ' +
+  'Comment with `commandmate respond <worktree-id> "<text>"`, then `--plan-review submit` (ctrl+r), ' +
+  '`--plan-review approve` (ctrl+a) or `--plan-review cancel` (esc).';
 
 /**
  * Command Code CLI tool implementation.
@@ -355,20 +368,34 @@ export class CommandCodeTool extends BaseCLITool {
    *
    * @throws SessionStartTimeoutError when a just-launched session's composer
    *   has still not appeared
+   * @throws Error ({@link COMMAND_CODE_PLAN_REVIEW_SEND_MESSAGE}) at once when
+   *   the plan review overlay is on screen (Issue #3125)
    * @throws Error when the composer is not detected within the timeout
    */
   private async waitForPrompt(sessionName: string): Promise<void> {
     const startTime = Date.now();
     const pollInterval = 500;
+    let planReviewPolls = 0;
     while (Date.now() - startTime < COMMAND_CODE_PROMPT_WAIT_TIMEOUT_MS) {
+      let planReviewUp = false;
       try {
         const rawOutput = await capturePane(sessionName, COMMAND_CODE_READINESS_CAPTURE_LINES);
-        if (isCommandCodeReady(rawOutput)) {
+        // Read first: a focused action row (`❯ Approve  ctrl+a`) is a `❯` row.
+        planReviewUp = readCommandCodePlanReviewState(rawOutput) !== null;
+        if (!planReviewUp && isCommandCodeReady(rawOutput)) {
           this.composerPendingSince.delete(sessionName);
           return;
         }
       } catch {
         // Capture may fail - continue polling
+      }
+      // Issue #3125: no composer comes back until a human answers the review.
+      // Two polls in a row, because the frame redrawn just after `Esc` can
+      // still carry the footer (`after-cancel-partial-redraw.txt`, #2763).
+      planReviewPolls = planReviewUp ? planReviewPolls + 1 : 0;
+      if (planReviewPolls >= 2) {
+        logger.info('command-code-plan-review-blocks-send', { sessionName });
+        throw new Error(COMMAND_CODE_PLAN_REVIEW_SEND_MESSAGE);
       }
       await new Promise((resolve) => setTimeout(resolve, pollInterval));
     }

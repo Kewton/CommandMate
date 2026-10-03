@@ -163,6 +163,17 @@ async function answerSolePendingDecision(
 /** Reason `/prompt-response` gives when no dialog is on screen any more. */
 const PROMPT_NO_LONGER_ACTIVE = 'prompt_no_longer_active';
 
+/**
+ * Issue #3125: what `--plan-review` takes. Restated rather than imported from
+ * `src/lib` (the CLI build does not reach it); the server validates the same set.
+ */
+const PLAN_REVIEW_ACTIONS = ['comment', 'submit', 'approve', 'cancel'] as const;
+
+/** Reasons the server gives for a plan review answer it refused before any key. */
+function isPlanReviewRefusal(reason: string): boolean {
+  return reason.startsWith('plan_review_');
+}
+
 /** ` --instance <id>` as the caller spelled it, or nothing. */
 function instanceFlag(instance: string | undefined): string {
   return instance ? ` --instance ${instance}` : '';
@@ -203,6 +214,30 @@ function validateRespondArgs(worktreeId: string, answer: string | undefined, opt
 
   // Issue #1681: exactly one of <answer> / --default
   const useDefault = options.default === true;
+
+  // Issue #3125: Command Code's plan review. `approve` / `cancel` take no text,
+  // `comment` needs it, and `submit` takes an optional comment to send first.
+  const planReview = options.planReview;
+  if (planReview !== undefined) {
+    if (!(PLAN_REVIEW_ACTIONS as readonly string[]).includes(planReview)) {
+      console.error(`Error: --plan-review must be one of: ${PLAN_REVIEW_ACTIONS.join(', ')}.`);
+      process.exit(ExitCode.CONFIG_ERROR);
+    }
+    if (useDefault) {
+      console.error('Error: --plan-review and --default are mutually exclusive.');
+      process.exit(ExitCode.CONFIG_ERROR);
+    }
+    if ((planReview === 'approve' || planReview === 'cancel') && answer !== undefined) {
+      console.error(`Error: --plan-review ${planReview} takes no <answer>.`);
+      process.exit(ExitCode.CONFIG_ERROR);
+    }
+    if (planReview === 'comment' && (answer === undefined || !answer.trim())) {
+      console.error('Error: --plan-review comment needs the comment text as <answer>.');
+      process.exit(ExitCode.CONFIG_ERROR);
+    }
+    return false;
+  }
+
   if (useDefault && answer !== undefined) {
     console.error('Error: <answer> and --default are mutually exclusive.');
     process.exit(ExitCode.CONFIG_ERROR);
@@ -220,9 +255,14 @@ function buildPromptResponseBody(
   answer: string | undefined,
   agent: string | undefined,
   instanceId: string | undefined,
+  planReview?: string,
 ): Record<string, unknown> {
   // [DR2-06] Use prompt-response API with cliTool (not cliToolId)
   const body: Record<string, unknown> = useDefault ? { useDefault: true } : { answer };
+  // Issue #3125: Command Code's plan review action.
+  if (planReview !== undefined) {
+    body.planReviewAction = planReview;
+  }
   if (agent) {
     body.cliTool = agent;
   }
@@ -248,10 +288,13 @@ function reportFailedResponse(
   // other reasons leave the answer's fate unknown. Issue #2486 adds
   // `unsupported_dialog_layout`: a picker IS on screen but its layout
   // could not be verified, and the server's message says what to do.
+  // Issue #3125 adds the `plan_review_*` refusals: the plan review overlay was
+  // read and the request did not fit its current focus, so nothing was typed.
   const refusedBeforeSending =
     reason === 'unresolvable_answer' ||
     reason === 'answer_out_of_range' ||
-    reason === 'unsupported_dialog_layout';
+    reason === 'unsupported_dialog_layout' ||
+    isPlanReviewRefusal(reason);
   // Issue #1898: the verdict was addressed to the agent's own API and
   // the POST did not land. Distinct from the two above — the answer was
   // resolved and an attempt was made — and distinct from a keystroke,
@@ -303,6 +346,57 @@ function reportFailedResponse(
   );
 }
 
+/**
+ * What was done on Command Code's plan review (Issue #3125), and the next step:
+ * a pinned comment is not delivered to the agent until the review is submitted.
+ */
+function printPlanReviewOutcome(result: PromptResponseResult, worktreeId: string, options: RespondOptions): void {
+  const planReview = result.planReview;
+  if (!planReview) return;
+  const target = instanceFlag(options.instance);
+  switch (planReview.action) {
+    case 'comment':
+      console.log(`Plan review: pinned comment "${planReview.comment ?? ''}".`);
+      console.error(
+        `Next: send the review with \`commandmate respond ${worktreeId} --plan-review submit${target}\` ` +
+          `(ctrl+r), or approve with \`--plan-review approve\` (comments go along as notes).`,
+      );
+      break;
+    case 'submit':
+      console.log(
+        planReview.comment
+          ? `Plan review: pinned comment "${planReview.comment}" and submitted the review (ctrl+r).`
+          : 'Plan review: submitted the review (ctrl+r).',
+      );
+      break;
+    case 'approve':
+      if (planReview.phase === 'approve-choice') {
+        console.log(
+          `Plan review: confirmed the approval (${planReview.approveChoice === 'discard-comments' ? 'discarding' : 'with'} the pending comments).`,
+        );
+      } else {
+        console.log('Plan review: approved the plan (ctrl+a).');
+        if (planReview.pendingCommentsBefore > 0) {
+          console.error(
+            'Note: with pending comments Command Code may ask how to approve — confirm with ' +
+              `\`commandmate respond ${worktreeId} --plan-review approve${target}\` again, or go back with \`--plan-review cancel\`.`,
+          );
+        }
+      }
+      break;
+    case 'cancel':
+      console.log(
+        planReview.phase === 'approve-choice'
+          ? 'Plan review: went back from the approval choice (esc).'
+          : 'Plan review: cancelled the plan (esc).',
+      );
+      if (planReview.phase !== 'approve-choice' && planReview.pendingCommentsBefore > 0) {
+        console.error(`Note: ${planReview.pendingCommentsBefore} pending comment(s) were discarded with it.`);
+      }
+      break;
+  }
+}
+
 /** Audit trail of which option was actually selected. */
 function printResolvedAudit(result: PromptResponseResult | StructuredDecisionResult | null, answer: string | undefined): void {
   // Issue #1681: audit trail — print which option was actually selected.
@@ -348,6 +442,11 @@ export function createRespondCommand(): Command {
     .argument('<worktree-id>', 'Worktree ID')
     .argument('[answer]', 'Response answer (yes, no, number, or free text)')
     .option('--default', "Select the prompt's default option (mutually exclusive with <answer>)")
+    .option(
+      '--plan-review <action>',
+      'Command Code plan review: comment | submit | approve | cancel ' +
+        '(text alone is a comment; submit takes an optional comment; approve/cancel take no <answer>)',
+    )
     .option('--instance <id>', `${INSTANCE_OPTION_DESCRIPTION} ${INSTANCE_ALIAS_HELP_SUFFIX}`)
     .option('--agent <agent>', AGENT_OPTION_DESCRIPTION)
     .option('--token <token>', TOKEN_WARNING)
@@ -368,7 +467,7 @@ export function createRespondCommand(): Command {
         // Issue #2376: the resolved id. /prompt-response reads instance ids.
         const instanceId = target?.instanceId;
 
-        const body = buildPromptResponseBody(useDefault, answer, agent, instanceId);
+        const body = buildPromptResponseBody(useDefault, answer, agent, instanceId, options.planReview);
 
         // Issue #2040: for an agent that publishes per-decision ids (opencode
         // today, and only opencode), a bare `respond <worktree> 3` names the ONE
@@ -382,8 +481,12 @@ export function createRespondCommand(): Command {
         // the structured path refuses it (`answerStructuredDecision` says so in
         // as many words) — while Enter at a `keys` dialog is a real answer that
         // this command has always been able to give.
+        //
+        // Issue #3125: a plan review action names no decision, so it skips this.
         const structured =
-          !useDefault && (await addressesDecisionsById(client, worktreeId, agent, instanceId));
+          !useDefault &&
+          options.planReview === undefined &&
+          (await addressesDecisionsById(client, worktreeId, agent, instanceId));
 
         let result: PromptResponseResult | StructuredDecisionResult | null = null;
         if (structured) {
@@ -406,6 +509,7 @@ export function createRespondCommand(): Command {
         }
 
         printResolvedAudit(result, answer);
+        if (result && 'planReview' in result) printPlanReviewOutcome(result, worktreeId, options);
 
         console.error('Response sent.');
 
