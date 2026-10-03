@@ -259,9 +259,12 @@ function sizeLimitMessage(maxBytes: number): string {
  * Map an image validation error to its response. Shared by the base64 branch
  * and `?raw=1` so both refuse the same file the same way.
  */
-function imageValidationErrorResponse(error: string | undefined): NextResponse {
-  if (error?.includes('5MB')) {
-    return createErrorResponse('FILE_TOO_LARGE', error);
+function imageValidationErrorResponse(
+  validation: { error?: string; reason?: 'too-large' },
+): NextResponse {
+  const error = validation.error;
+  if (validation.reason === 'too-large') {
+    return createErrorResponse('FILE_TOO_LARGE', error ?? 'File too large');
   }
   if (error?.includes('magic bytes')) {
     return createErrorResponse('INVALID_MAGIC_BYTES', error);
@@ -271,9 +274,12 @@ function imageValidationErrorResponse(error: string | undefined): NextResponse {
 }
 
 /** Map a video validation error to its response (base64 branch and `?raw=1`). */
-function videoValidationErrorResponse(error: string | undefined): NextResponse {
-  if (error?.includes('MB')) {
-    return createErrorResponse('FILE_TOO_LARGE', error);
+function videoValidationErrorResponse(
+  validation: { error?: string; reason?: 'too-large' },
+): NextResponse {
+  const error = validation.error;
+  if (validation.reason === 'too-large') {
+    return createErrorResponse('FILE_TOO_LARGE', error ?? 'File too large');
   }
   if (error?.includes('magic bytes')) {
     return createErrorResponse('INVALID_MAGIC_BYTES', error);
@@ -371,10 +377,10 @@ async function serveRawMedia(
     const size = fileStat.size;
     const maxBytes = isVideo ? VIDEO_MAX_SIZE_BYTES : IMAGE_MAX_SIZE_BYTES;
     if (size > maxBytes) {
-      const message = sizeLimitMessage(maxBytes);
+      const tooLarge = { error: sizeLimitMessage(maxBytes), reason: 'too-large' as const };
       return isVideo
-        ? videoValidationErrorResponse(message)
-        : imageValidationErrorResponse(message);
+        ? videoValidationErrorResponse(tooLarge)
+        : imageValidationErrorResponse(tooLarge);
     }
 
     const head = Buffer.alloc(Math.min(RAW_MAGIC_HEAD_BYTES, size));
@@ -386,8 +392,8 @@ async function serveRawMedia(
       : validateImageContent(ext, head);
     if (!validation.valid) {
       return isVideo
-        ? videoValidationErrorResponse(validation.error)
-        : imageValidationErrorResponse(validation.error);
+        ? videoValidationErrorResponse(validation)
+        : imageValidationErrorResponse(validation);
     }
 
     const mimeType = isVideo
@@ -505,7 +511,7 @@ export async function GET(
         // Validate image content (size, magic bytes, SVG security)
         const validation = validateImageContent(ext, fileBuffer);
         if (!validation.valid) {
-          return imageValidationErrorResponse(validation.error);
+          return imageValidationErrorResponse(validation);
         }
 
         // [DRY] Get MIME type using centralized helper
@@ -550,7 +556,7 @@ export async function GET(
         // Validate video content (size, magic bytes)
         const validation = validateVideoContent(ext, fileBuffer);
         if (!validation.valid) {
-          return videoValidationErrorResponse(validation.error);
+          return videoValidationErrorResponse(validation);
         }
 
         // [DRY] Get MIME type using centralized helper
