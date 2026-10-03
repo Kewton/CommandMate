@@ -24,8 +24,9 @@
      2. 対象が 0 件なら送らずに終わる（`status=no-target`）
      3. `commandmate ls --json` で Claude 3 の状態を見る。作業中・プロンプト待ちなら送らずに終わる（`status=skipped-busy`。翌日に持ち越し）。
         セッションが無ければ `send` が起動する（起動直後の `exit 99` は 2 分後に 1 回だけ再送）
-     4. `/clear` を送り、Claude 3 が入力待ちに戻ったことを確かめてから、依頼（`/orchestrate <番号…>` と、develop へのマージの許可・
-        run のファイル名・完了後のリリース判断レポート）を `--auto-yes --duration 8h` つきで送る。対象が 1 件でもそのまま送る
+     4. `/clear` を送り、Claude 3 が入力待ちに戻ったことを確かめてから、依頼（1 行の `/orchestrate <番号…> <条件ファイルのパス> の条件に従うこと`。
+        条件＝develop へのマージの許可・run のファイル名・完了後のリリース判断レポートは、送る前に
+        `workspace/agent-health/<日付>/dispatch-terms-<番号>.md` へ書く。書けなければ送らない）を `--auto-yes --duration 8h` つきで送る。対象が 1 件でもそのまま送る
      5. 送った Issue にラベル `auto-dispatched` を付け、日付のコメントを残す（翌日に二重に依頼しないため）
      6. 記録 `~/.commandmate/agent-health/dispatch/<YYYY-MM-DD>.json` を書き、最後に `AGENT_HEALTH_DISPATCH …` を 1 行出す
    - `EXIT=0`: 正常（`status=sent`・`skipped-busy`・`no-target` のどれか）
