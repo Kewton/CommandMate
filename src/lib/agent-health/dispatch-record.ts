@@ -13,7 +13,7 @@ import path from 'path';
 export const DISPATCH_STATUSES = ['sent', 'skipped-busy', 'no-target'] as const;
 export type DispatchStatus = (typeof DISPATCH_STATUSES)[number];
 
-export const DISPATCH_ISSUE_KINDS = ['bug', 'metrics'] as const;
+export const DISPATCH_ISSUE_KINDS = ['bug', 'catalog', 'metrics'] as const;
 export type DispatchIssueKind = (typeof DISPATCH_ISSUE_KINDS)[number];
 
 export interface DispatchIssue {
