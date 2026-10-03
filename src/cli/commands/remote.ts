@@ -833,6 +833,7 @@ export async function runRemoteUp(options: RemoteOptions): Promise<ExitCode> {
   const pairingUrl = buildPairingUrl(handle.url, pairing.code);
   if (!options.json) {
     announcePairing(pairingUrl);
+    logger.info(formatPairingExpiryLine(state.pairing.expiresAt, now));
   }
 
   logSecurityEvent({
@@ -977,6 +978,21 @@ export function formatRemaining(ms: number): string {
   const hours = Math.floor(minutes / 60);
   if (hours === 0) return `in ${minutes}m`;
   return `in ${hours}h ${minutes % 60}m`;
+}
+
+/**
+ * The human-facing pairing expiry line shared by `remote` and `remote pair`
+ * (Issue #3156): local clock time, time left, and the single-use reminder, so
+ * whoever hands the link on can say when it stops working.
+ *
+ * @param expiresAt - Epoch ms the pairing code dies at
+ * @param now - Epoch ms, injectable for tests
+ * @returns e.g. `Pairing expires: 14:16 (in 9m), works once (2026-10-04T05:16:00.000Z)`
+ */
+export function formatPairingExpiryLine(expiresAt: number, now: number = Date.now()): string {
+  const d = new Date(expiresAt);
+  const hhmm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  return `Pairing expires: ${hhmm} (${formatRemaining(expiresAt - now)}), works once (${d.toISOString()})`;
 }
 
 /**
@@ -1264,7 +1280,7 @@ export async function runRemotePair(options: RemoteOptions): Promise<ExitCode> {
     );
   } else {
     announcePairing(pairingUrl, true);
-    logger.info(`Pairing expires: ${expiresAt} (${formatRemaining(reissued.expiresAt - now)})`);
+    logger.info(formatPairingExpiryLine(reissued.expiresAt, now));
     logger.info(PAIRING_LINK_NOTICE);
   }
 
