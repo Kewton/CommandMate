@@ -69,8 +69,8 @@ import {
   Wrench,
   X,
 } from 'lucide-react';
-import ReactMarkdown, { type Components } from 'react-markdown';
-import rehypeSanitize from 'rehype-sanitize';
+import ReactMarkdown, { defaultUrlTransform, type Components, type UrlTransform } from 'react-markdown';
+import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
 import rehypeHighlight from 'rehype-highlight';
 import type { ChatMessage } from '@/types/models';
 import type { CLIToolType } from '@/lib/cli-tools/types';
@@ -80,6 +80,8 @@ import { stripAnsi } from '@/lib/detection/ansi';
 import { splitFilePathParts, type ChatRowHeader } from '@/lib/chat/chat-transcript-view';
 import { SHARED_REMARK_PLUGINS } from '@/lib/markdown';
 import { classifyChatLink, normalizeChatFilePath } from '@/lib/chat/chat-file-path';
+import { splitChatUserBody, useChatImageScope } from '@/lib/chat/chat-image';
+import { ChatImage } from '@/components/worktree/ChatImage';
 import {
   chatMarkdownCopyText,
   chatMarkdownFullCopyText,
@@ -758,6 +760,66 @@ const ChatPlainBody = memo(function ChatPlainBody({
 });
 
 /**
+ * A user message: verbatim text, with the composer's attachment images drawn
+ * (Issue #3120).
+ *
+ * `sendMessageWithImage` appends `![](<worktree>/.commandmate/attachments/…)` to
+ * the prompt, and that line used to be shown as a string. Only a reference into
+ * the attachments directory is turned into an image ({@link splitChatUserBody});
+ * every other character — including any `![…](…)` the user typed — is handed to
+ * {@link ChatPlainBody} exactly as before.
+ */
+const ChatUserBody = memo(function ChatUserBody({
+  content,
+  onFilePathClick,
+}: {
+  content: string;
+  onFilePathClick: (path: string) => void;
+}) {
+  const { worktreePath } = useChatImageScope();
+  const parts = useMemo(() => splitChatUserBody(content, worktreePath), [content, worktreePath]);
+
+  if (parts.every((part) => part.type === 'text')) {
+    return <ChatPlainBody content={content} onFilePathClick={onFilePathClick} />;
+  }
+  return (
+    <span>
+      {parts.map((part, index) =>
+        part.type === 'image' ? (
+          <span key={index} className="my-1 block">
+            <ChatImage src={part.src} alt={part.alt} onFilePathClick={onFilePathClick} />
+          </span>
+        ) : (
+          <ChatPlainBody key={index} content={part.content} onFilePathClick={onFilePathClick} />
+        ),
+      )}
+    </span>
+  );
+});
+
+/**
+ * [#3120] `file://` image sources survive the pipeline; nothing else changes.
+ *
+ * react-markdown's default URL transform and rehype-sanitize's default schema
+ * both drop `file:`, which is one of the three shapes an agent writes an image
+ * as. Only `src` is widened — a link's `href` keeps the defaults, which #2345's
+ * renderer is documented against — and `ChatImage` still loads nothing that
+ * does not resolve into this worktree.
+ */
+const CHAT_FILE_SRC_REGEX = /^file:\/\//i;
+
+const chatUrlTransform: UrlTransform = (url, key) =>
+  key === 'src' && CHAT_FILE_SRC_REGEX.test(url) ? url : defaultUrlTransform(url);
+
+const CHAT_SANITIZE_SCHEMA = {
+  ...defaultSchema,
+  protocols: {
+    ...defaultSchema.protocols,
+    src: [...(defaultSchema.protocols?.src ?? []), 'file'],
+  },
+};
+
+/**
  * An agent-authored Markdown body (Issue #2041's distinction, unchanged).
  *
  * Same plugin set as History's renderer — {@link SHARED_REMARK_PLUGINS}
@@ -813,13 +875,26 @@ export const ChatMarkdownBody = memo(function ChatMarkdownBody({
           {children}
         </ChatFileLink>
       ),
+      // [#3120] An image is fetched through the files API when it is in this
+      // worktree and drawn as alt text + link otherwise — never as a raw
+      // `<img src>`, which the browser resolved against the screen's URL.
+      img: ({ src, alt }) => (
+        <ChatImage
+          src={typeof src === 'string' ? src : undefined}
+          alt={alt}
+          onFilePathClick={onFilePathClick}
+        />
+      ),
     };
   }, [onFilePathClick]);
 
   // [#2459] All three renders below — body, reasoning, tool log — take the same
   // shared remark list, so the Issue's broken bold URL is repaired wherever the
   // splitter happened to put it.
-  const rehypePlugins = useMemo(() => [rehypeSanitize, rehypeHighlight], []);
+  const rehypePlugins = useMemo(
+    () => [[rehypeSanitize, CHAT_SANITIZE_SCHEMA], rehypeHighlight] as NonNullable<React.ComponentProps<typeof ReactMarkdown>['rehypePlugins']>,
+    [],
+  );
 
   // [#2272] / [#2284] The answer, then the chips. `<ReactMarkdown>` inside a
   // chip is an ELEMENT, not a render: nothing of it reaches the DOM while the
@@ -836,6 +911,7 @@ export const ChatMarkdownBody = memo(function ChatMarkdownBody({
       <ReactMarkdown
         remarkPlugins={SHARED_REMARK_PLUGINS}
         rehypePlugins={rehypePlugins}
+        urlTransform={chatUrlTransform}
         components={components}
       >
         {split.body}
@@ -845,6 +921,7 @@ export const ChatMarkdownBody = memo(function ChatMarkdownBody({
           <ReactMarkdown
             remarkPlugins={SHARED_REMARK_PLUGINS}
             rehypePlugins={rehypePlugins}
+            urlTransform={chatUrlTransform}
             components={components}
           >
             {split.reasoning}
@@ -856,6 +933,7 @@ export const ChatMarkdownBody = memo(function ChatMarkdownBody({
           <ReactMarkdown
             remarkPlugins={SHARED_REMARK_PLUGINS}
             rehypePlugins={rehypePlugins}
+            urlTransform={chatUrlTransform}
             components={components}
           >
             {split.toolLog}
@@ -1265,6 +1343,8 @@ export const ChatMessageBubble = memo(function ChatMessageBubble({
           <div data-message-id={message.id} data-markdown={isMarkdown ? 'true' : undefined} className={bodyClassName}>
             {isMarkdown ? (
               <ChatMarkdownBody content={message.content} onFilePathClick={onFilePathClick} />
+            ) : isUser ? (
+              <ChatUserBody content={plainBody} onFilePathClick={onFilePathClick} />
             ) : (
               <ChatPlainBody content={plainBody} onFilePathClick={onFilePathClick} />
             )}

@@ -161,6 +161,7 @@ import { copyToClipboard } from '@/lib/clipboard-utils';
 import { normalizeChatFilePath } from '@/lib/chat/chat-file-path';
 import { probeChatFilePath } from '@/lib/chat/chat-file-probe';
 import { useChatFileLinkScope } from '@/lib/chat/chat-file-link-scope';
+import { ChatImageScopeProvider, type ChatImageScope } from '@/lib/chat/chat-image';
 import { applyHistoryHighlights, clearHistoryHighlights } from '@/lib/terminal-highlight';
 import { HISTORY_STICK_TO_BOTTOM_THRESHOLD_PX, isNearBottom } from '@/lib/history-virtualization';
 import {
@@ -1374,6 +1375,12 @@ export const ChatTranscript = memo(function ChatTranscript({
   // whose parent cannot pass it (see `ChatTranscriptProps.worktreePath`).
   const fileLinkScope = useChatFileLinkScope();
   const resolvedWorktreePath = worktreePath ?? fileLinkScope.worktreePath;
+  // [#3120] What a body's images are fetched against — the same worktree and
+  // root the file links above resolve with.
+  const imageScope: ChatImageScope = useMemo(
+    () => ({ worktreeId, worktreePath: resolvedWorktreePath }),
+    [worktreeId, resolvedWorktreePath],
+  );
 
   /**
    * Open a path from a message body — but only after asking whether it is here.
@@ -1575,42 +1582,44 @@ export const ChatTranscript = memo(function ChatTranscript({
             the toggle above is the thing that WRITES the verdict and has no
             business reading it back through a context. */}
         <ChatToolActivityProvider value={toolActivityValue}>
-          {renderContent()}
+          <ChatImageScopeProvider value={imageScope}>
+            {renderContent()}
 
-          {/* [#2233] The live tail. A plain sibling of the list — never an entry
-              in `virtualItems` — so no scroll position can unmount it, and inside
-              the scroll region so it sits exactly where its settled row will.
+            {/* [#2233] The live tail. A plain sibling of the list — never an entry
+                in `virtualItems` — so no scroll position can unmount it, and inside
+                the scroll region so it sits exactly where its settled row will.
 
-              [#2248] Two bubbles, one position: while the turn is generating, and
-              then while its body is HELD waiting for the saved row. The second
-              wears the same classes with the spinner and "Responding…" taken off,
-              so the turn ending changes nothing on screen but that one line. */}
-          {liveTurn &&
-            (liveTurn.settling ? (
-              <ChatSettlingTurnBubble
-                turnKey={liveTurn.turnKey}
-                version={liveTurn.version}
-                body={liveTurn.body}
-                partial={liveTurn.partial}
-                showHeader={shouldShowLiveRoleHeader(visibleMessages[visibleMessages.length - 1])}
-                onFilePathClick={handleFilePathClick}
-              />
-            ) : (
-              <ChatLiveTurnBubble
-                turnKey={liveTurn.turnKey}
-                version={liveTurn.version}
-                body={liveTurn.body}
-                partial={liveTurn.partial}
-                isThinking={liveTurn.isThinking}
-                showHeader={shouldShowLiveRoleHeader(visibleMessages[visibleMessages.length - 1])}
-                onFilePathClick={handleFilePathClick}
-              />
-            ))}
+                [#2248] Two bubbles, one position: while the turn is generating, and
+                then while its body is HELD waiting for the saved row. The second
+                wears the same classes with the spinner and "Responding…" taken off,
+                so the turn ending changes nothing on screen but that one line. */}
+            {liveTurn &&
+              (liveTurn.settling ? (
+                <ChatSettlingTurnBubble
+                  turnKey={liveTurn.turnKey}
+                  version={liveTurn.version}
+                  body={liveTurn.body}
+                  partial={liveTurn.partial}
+                  showHeader={shouldShowLiveRoleHeader(visibleMessages[visibleMessages.length - 1])}
+                  onFilePathClick={handleFilePathClick}
+                />
+              ) : (
+                <ChatLiveTurnBubble
+                  turnKey={liveTurn.turnKey}
+                  version={liveTurn.version}
+                  body={liveTurn.body}
+                  partial={liveTurn.partial}
+                  isThinking={liveTurn.isThinking}
+                  showHeader={shouldShowLiveRoleHeader(visibleMessages[visibleMessages.length - 1])}
+                  onFilePathClick={handleFilePathClick}
+                />
+              ))}
 
-          {/* [#2445] Under the fold and under anything sent since, so the last
-              thing the reader sees above the composer is what pressing send
-              will do. Withdrawn the instant a session exists again. */}
-          {hasPreviousSession && <ChatSessionEndedBanner />}
+            {/* [#2445] Under the fold and under anything sent since, so the last
+                thing the reader sees above the composer is what pressing send
+                will do. Withdrawn the instant a session exists again. */}
+            {hasPreviousSession && <ChatSessionEndedBanner />}
+          </ChatImageScopeProvider>
         </ChatToolActivityProvider>
       </div>
 

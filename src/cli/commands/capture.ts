@@ -55,6 +55,11 @@ const MAX_FOLLOW_INTERVAL_MS = 60_000;
  */
 const UNCLASSIFIED_FRAME_TYPE = 'unclassified';
 
+/** Shown by the default text mode when there is no transcript to print (Issue #3128). */
+const EMPTY_TRANSCRIPT_HINT =
+  'No transcript yet. A prompt (e.g. "Trust this folder?") may be waiting on screen; '
+  + 'read it with `commandmate capture <worktree-id> --instance <instance> --pane --tail 40`.';
+
 /** Response of POST /api/worktrees/[id]/capture. */
 interface PaneCaptureResponse {
   output: string;
@@ -582,7 +587,13 @@ export function createCaptureCommand(): Command {
           console.log(formatJson(data));
         } else {
           // Default: plain text output (content field)
-          console.log(data.content);
+          // Issue #3128: no transcript yet (e.g. a trust-folder dialog before the
+          // first turn) reads as a dead session. Point at the pane, where it shows.
+          if (data.content.trim() === '') {
+            console.log(EMPTY_TRANSCRIPT_HINT);
+          } else {
+            console.log(data.content);
+          }
         }
       } catch (error) {
         handleCommandError(error);

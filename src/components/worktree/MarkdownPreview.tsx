@@ -20,7 +20,7 @@
 
 'use client';
 
-import React, { memo, useMemo, useCallback, useRef, useState, useEffect } from 'react';
+import React, { memo, useMemo, useCallback, useRef } from 'react';
 import { useTranslations } from 'next-intl';
 import ReactMarkdown from 'react-markdown';
 import rehypeRaw from 'rehype-raw';
@@ -31,6 +31,7 @@ import 'highlight.js/styles/github-dark.css';
 import { X, AlertTriangle, FileText, Eye } from 'lucide-react';
 import { MermaidCodeBlock } from '@/components/worktree/MermaidCodeBlock';
 import { CodeBlockWithCopy } from '@/components/common/CodeBlockWithCopy';
+import { WorktreeImage } from '@/components/common/WorktreeImage';
 import { classifyLink, resolveRelativePath, sanitizeHref, REHYPE_SANITIZE_SCHEMA } from '@/lib/link-utils';
 import { encodePathForUrl } from '@/lib/url-path-encoder';
 import { SHARED_REMARK_PLUGINS } from '@/lib/markdown';
@@ -87,32 +88,6 @@ function isMermaidPreChild(children: React.ReactNode): boolean {
   if (!React.isValidElement(child)) return false;
   const className = (child.props as { className?: string }).className;
   return typeof className === 'string' && className.split(' ').includes('language-mermaid');
-}
-
-/**
- * Fetches an image from the worktree file API and displays it as a data URI.
- * The file API returns JSON with a Base64 data URI in the `content` field.
- */
-function WorktreeImage({ apiUrl, alt, width, height }: { apiUrl: string; alt: string; width?: string; height?: string }) {
-  const t = useTranslations('worktree');
-  const [dataUri, setDataUri] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    fetch(apiUrl)
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (!cancelled && data?.content) {
-          setDataUri(data.content);
-        }
-      })
-      .catch(() => { /* silently ignore */ });
-    return () => { cancelled = true; };
-  }, [apiUrl]);
-
-  if (!dataUri) return <span style={{ color: '#999' }}>{t('markdownPreview.loadingImage')}</span>;
-  // eslint-disable-next-line @next/next/no-img-element
-  return <img src={dataUri} alt={alt} width={width} height={height} style={{ maxWidth: width || '100%' }} />;
 }
 
 /**
