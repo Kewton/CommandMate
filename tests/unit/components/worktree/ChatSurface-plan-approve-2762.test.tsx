@@ -7,7 +7,7 @@
  */
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, within } from '@testing-library/react';
+import { render, screen, fireEvent, within, waitFor } from '@testing-library/react';
 import fs from 'fs';
 import path from 'path';
 import type { ChatMessage } from '@/types/models';
@@ -23,7 +23,6 @@ vi.mock('@/components/worktree/ChatTranscript', () => ({
 }));
 
 import { ChatSurface, type ChatSurfaceLiveState } from '@/components/worktree/ChatSurface';
-import { PLAN_APPROVE_KEY } from '@/types/terminal-keys';
 
 const FIXTURES = path.resolve(__dirname, '../../../fixtures');
 const capture = (rel: string): string => fs.readFileSync(path.join(FIXTURES, rel), 'utf-8');
@@ -91,39 +90,37 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('[#2762] Plan review の承認ボタン', () => {
-  it('Plan review のフレームで、矢印パッドの下に承認ボタンを出す', () => {
+describe('[#2762] Plan review の承認ボタン（#3139 で確認つきの PlanReviewControls に置換）', () => {
+  it('Plan review のフレームで、矢印パッドの下にレビュー操作（承認を含む）を出す', () => {
     renderSurface();
 
-    expect(within(actions()).getByTestId('plan-approve-keys')).toBeInTheDocument();
-    expect(within(actions()).getByTestId('plan-approve-key')).toBeInTheDocument();
-    expect(within(actions()).getByTestId('plan-approve-note')).toBeInTheDocument();
+    expect(within(actions()).getByTestId('plan-review-controls')).toBeInTheDocument();
+    expect(within(actions()).getByTestId('plan-review-approve')).toBeInTheDocument();
     // 矢印パッド（Esc = Cancel を含む）はそのまま残る。
     expect(within(actions()).getByRole('button', { name: 'Escape' })).toBeInTheDocument();
   });
 
-  it('押すと C-a を 1 つだけ special-keys へ送る', () => {
+  it('承認ボタンを押しただけでは何も送らない（#3139: 確認を挟む）。C-a を special-keys へ送ることもない', () => {
     renderSurface();
 
-    fireEvent.click(screen.getByTestId('plan-approve-key'));
+    fireEvent.click(screen.getByTestId('plan-review-approve'));
 
-    expect(keyCalls()).toHaveLength(1);
-    const [url, init] = keyCalls()[0];
-    expect(url).toBe(`/api/worktrees/${WORKTREE_ID}/special-keys`);
-    expect(JSON.parse(init.body as string)).toEqual({
-      cliToolId: 'command-code',
-      keys: [PLAN_APPROVE_KEY],
-    });
+    expect(keyCalls()).toHaveLength(0);
+    expect(screen.getByTestId('plan-review-approve-confirm')).toBeInTheDocument();
   });
 
-  it('非プライマリのインスタンスには instanceId を付けて送る', () => {
+  it('非プライマリのインスタンスには instanceId を付けて送る', async () => {
     renderSurface({ instanceId: 'command-code-2' });
 
-    fireEvent.click(screen.getByTestId('plan-approve-key'));
+    fireEvent.click(screen.getByTestId('plan-review-approve'));
+    fireEvent.click(screen.getByTestId('plan-review-approve-confirm-yes'));
 
-    expect(JSON.parse(keyCalls()[0][1].body as string)).toEqual({
-      cliToolId: 'command-code',
-      keys: [PLAN_APPROVE_KEY],
+    await waitFor(() => expect(keyCalls()).toHaveLength(1));
+    const [url, init] = keyCalls()[0];
+    expect(url).toBe(`/api/worktrees/${WORKTREE_ID}/prompt-response`);
+    expect(JSON.parse(init.body as string)).toEqual({
+      planReviewAction: 'approve',
+      cliTool: 'command-code',
       instanceId: 'command-code-2',
     });
   });
@@ -132,18 +129,18 @@ describe('[#2762] Plan review の承認ボタン', () => {
     renderSurface({ frame: PLAN_REVIEW.replace('       12,11.', '       1. then merge') });
 
     expect(screen.queryByTestId('selection-number-keys')).not.toBeInTheDocument();
-    expect(screen.getByTestId('plan-approve-key')).toBeInTheDocument();
+    expect(screen.getByTestId('plan-review-approve')).toBeInTheDocument();
   });
 
   it('Plan review でない selection list（/model）には出さない', () => {
     renderSurface({ frame: COMMAND_CODE_MODEL });
 
-    expect(screen.queryByTestId('plan-approve-keys')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('plan-review-controls')).not.toBeInTheDocument();
   });
 
   it('C-a を宣言していないツールには、同じフレームでも出さない', () => {
     renderSurface({ cliToolId: 'claude' });
 
-    expect(screen.queryByTestId('plan-approve-keys')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('plan-review-controls')).not.toBeInTheDocument();
   });
 });

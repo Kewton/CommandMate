@@ -146,7 +146,7 @@ import {
   SelectionNumberKeys,
 } from '@/components/worktree/PromptAnswerKeys';
 import { OpencodeModelKeys } from '@/components/worktree/OpencodeQuickKeys';
-import { PlanApproveKeys } from '@/components/worktree/PlanApproveKeys';
+import { PlanReviewControls } from '@/components/worktree/PlanReviewControls';
 import {
   hasDismissablePanelFooter,
   readCommandCodeQuestionRegion,
@@ -1010,7 +1010,8 @@ export const ChatSurface = memo(function ChatSurface({
         // Issue #2793. On the same screen `Enter` either opens a comment box or
         // RUNS the focused action (`❯ Approve`), depending on a focus this card
         // cannot show — so the pad leaves it out, and approving is the labelled
-        // `PlanApproveKeys` button alone. Not gated on the tool: taking a key
+        // `PlanReviewControls` Approve button alone (Issue #3139; #2762's
+        // `PlanApproveKeys` before it). Not gated on the tool: taking a key
         // away is the safe direction. The approve-with-comments radio is not
         // `offersPlanApprove` and keeps `Enter`, which is its documented confirm.
         const hideEnterKey = shape?.offersPlanApprove === true;
@@ -1030,7 +1031,11 @@ export const ChatSurface = memo(function ChatSurface({
                 commitsDefaultOnEnter={shape.commitsDefaultOnEnter}
               />
             ) : null}
-            {showPlanApprove ? <PlanApproveKeys {...keyProps} /> : null}
+            {/* Issue #3139: comment / Submit review / Approve (confirmed) /
+                Cancel through `/prompt-response`'s `planReviewAction`. It
+                replaces #2762's one-tap `ctrl+a`, which ran the plan with no
+                confirmation. */}
+            {showPlanApprove ? <PlanReviewControls {...keyProps} /> : null}
             {/* opencode has no numbered `/model` at all — switching models is
                 `ctrl+t` or a `ctrl+x` chord, and neither was reachable from
                 chat. Rendered for opencode, and for OpenCode V2 while the frame
