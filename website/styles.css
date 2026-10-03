@@ -205,10 +205,18 @@ a {
   color: var(--fg-muted);
 }
 
-/* The four numbers (Issue #3060). Two by two from a phone up: each is a short
-   line, and a column of four pushed the copy box below the fold. */
+/* The numbers of one recorded run (Issue #3162; four of them since #3060). Two
+   by two from a phone up: each is a short line, and a column of four pushed the
+   copy box below the fold. The note under them says what they are. */
+.stats-label {
+  margin: 0 0 0.5rem;
+  color: var(--fg-muted);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
 .stats {
-  margin: 0 0 1.5rem;
+  margin: 0 0 0.5rem;
   padding: 0;
   list-style: none;
   display: grid;
@@ -224,6 +232,12 @@ a {
   font-size: 0.9rem;
   font-weight: 600;
   line-height: 1.4;
+}
+
+.stats-note {
+  margin: 0 0 1.5rem;
+  color: var(--fg-muted);
+  font-size: 0.8rem;
 }
 
 .prompt-label,
@@ -431,17 +445,13 @@ a {
 
 /* ---------- levels ---------- */
 
-.level-tag {
-  display: inline-block;
-  margin: 0 0 0.6rem;
-  padding: 0.15rem 0.6rem;
-  border-radius: 999px;
-  background: var(--accent-subtle);
-  color: var(--fg);
-  font-size: 0.78rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+/* The heading is the level's name (public-messaging.md §10); the line under
+   it is what the level is for, set large enough to read as the claim. */
+.level-claim {
+  margin: 0 0 0.5rem;
+  font-size: clamp(1.15rem, 2.4vw, 1.4rem);
+  font-weight: 600;
+  line-height: 1.3;
 }
 
 .pillars {
@@ -451,10 +461,6 @@ a {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
   gap: 1rem;
-}
-
-.pillars-two {
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr));
 }
 
 .pillar {
@@ -519,10 +525,17 @@ a {
   max-width: 44rem;
 }
 
+.footnote {
+  margin: 1rem 0 0;
+  color: var(--fg-muted);
+  font-size: 0.85rem;
+}
+
 /* ---------- demos and shots ---------- */
 
-.demos,
-.shots {
+/* Level 1's one demo (Issue #3162): the desktop dashboard and the phone clip,
+   side by side as PC and phone from 701px up, stacked below that. */
+.pc-phone {
   margin-top: 2rem;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -531,12 +544,8 @@ a {
 }
 
 @media (min-width: 701px) {
-  .demos {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .shots {
-    grid-template-columns: minmax(0, 3fr) minmax(0, 1fr);
+  .pc-phone {
+    grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
   }
 }
 
@@ -556,10 +565,6 @@ a {
   background: var(--bg-subtle);
 }
 
-.shot-phone {
-  max-width: 16rem;
-}
-
 /* The recorded run is square (1080x1080) where the feature demos are 16:10, so
    it is capped rather than stretched to the section. */
 .demo-lead {
@@ -571,60 +576,21 @@ a {
   text-align: center;
 }
 
-/* Figure B (Issue #3058) is a phone-width recording cut square (540x540). It
-   takes the storyboard drawing's slot, capped near that drawing's height so
-   the page does not grow. */
+/* Figure B (Issue #3058) is a phone-width recording cut square (540x540),
+   capped so it sits beside the desktop shot as the phone it was filmed on. */
 .demo-phone {
   max-width: 18rem;
+  margin: 0 auto;
+}
+
+/* The contract demo in Level 2 is 16:10, capped to the drawings' width. */
+.demo-wide {
+  max-width: 40rem;
   margin: 2rem auto 0;
 }
 
 .demo-phone figcaption {
   text-align: center;
-}
-
-/* The three-layer run (Issue #3058): the facts of one recording, as a list. */
-.run-record {
-  max-width: 30rem;
-  margin: 2rem auto 0;
-  padding: 1rem 1.25rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
-}
-
-.run-record h3 {
-  margin: 0 0 0.75rem;
-  font-size: 1rem;
-}
-
-.run-record dl {
-  margin: 0;
-  display: grid;
-  gap: 0.35rem;
-}
-
-.run-record dl div {
-  display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
-  gap: 0.75rem;
-}
-
-.run-record dt {
-  color: var(--fg-muted);
-  font-size: 0.85rem;
-}
-
-.run-record dd {
-  margin: 0;
-  font-size: 0.9rem;
-  overflow-wrap: anywhere;
-}
-
-.run-record-note {
-  margin: 0.75rem 0 0;
-  color: var(--fg-muted);
-  font-size: 0.8rem;
 }
 
 /* ---------- inline drawings ---------- */
@@ -834,11 +800,6 @@ a {
   stroke: var(--accent);
 }
 
-.team-diagram .member-sched rect {
-  fill: var(--bg-subtle);
-  stroke-dasharray: 4 3;
-}
-
 .team-diagram .name {
   fill: var(--fg);
   font-size: 12px;
@@ -1012,9 +973,10 @@ a {
   font-size: 0.9rem;
 }
 
-/* ---------- my setup ---------- */
+/* ---------- the author's team and its cost (Level 3) ---------- */
 
 .table-scroll {
+  margin-top: 2rem;
   overflow-x: auto;
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -1026,6 +988,12 @@ a {
   width: 100%;
   min-width: 34rem;
   font-size: 0.9rem;
+}
+
+.setup-table caption {
+  padding: 0.6rem 0.9rem;
+  text-align: left;
+  font-weight: 700;
 }
 
 .setup-table th,
@@ -1231,6 +1199,12 @@ a {
 }
 
 /* ---------- start ---------- */
+
+.start-title {
+  margin: 0 0 1rem;
+  font-size: 1.25rem;
+  font-weight: 700;
+}
 
 .start .install {
   max-width: 44rem;

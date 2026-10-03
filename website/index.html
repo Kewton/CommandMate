@@ -7,9 +7,12 @@
     <!-- Issue #3060: the page is for someone who arrived from a post on X and has
          not decided to install anything yet. It opens on the three levels and on
          setting CommandMate up by asking an agent, rather than repeating the
-         README. The one line, the four numbers and the level names are the ones
+         README. Issue #3162 cut it to about half, on Parallel → Delegate →
+         Manage and Next — Learn, and swapped the hero's numbers for one recorded
+         run. The one line, the run's numbers and the level names are the ones
          README.md carries; the numbers and their sources are in
-         docs/design/public-messaging.md §1, and no other number is a claim here. -->
+         docs/design/public-messaging.md §1, and no other number is a claim here.
+         What the page stopped showing is listed in assets/media/README.md. -->
     <meta
       name="description"
       content="CommandMate puts the coding agents you already use in one place on your own machine, so you can run them side by side, hand them work one issue at a time, and let your own checks decide when the work is done."
@@ -72,23 +75,24 @@
           <p class="lede">
             CommandMate puts the coding agents you already use in one place on your own machine, so
             you can run them side by side, hand them work one issue at a time, and let your own
-            checks decide when the work is done. At every level you can answer and approve from
-            your phone, so the work does not stop when you leave the desk. Most people need only
-            Level 2.
+            checks decide when the work is done.
           </p>
 
-          <!-- The four numbers, and only these four (Issue #3060). Each has its
-               source in docs/design/public-messaging.md §1; the phone share is
-               the author's own estimate and always says so. -->
-          <ul class="stats" aria-label="The author's numbers">
-            <li>10+ PRs a day, solo</li>
-            <li>$110–$210 a month: Claude Max + Command Code Goat</li>
-            <li>~80% of my instructions sent from a phone (my estimate)</li>
-            <li>689 PRs merged in September 2026, across my repositories</li>
+          <!-- The numbers of one recorded run (Issue #3162), not the author's
+               own activity: the three-layer run in docs/design/public-messaging.md
+               §1, written exactly as that section lists them, with the note
+               directly under them. -->
+          <p class="stats-label">One recorded run:</p>
+          <ul class="stats" aria-label="One recorded run">
+            <li>4 issues, 4 workers (Command Code), PM and dev lead on Claude Code</li>
+            <li>2 messages and 3 taps from a phone-width web UI</li>
+            <li>4/4 checks passed, PRs merged with CI green, UAT 4/4 GO</li>
+            <li>9 min 48 s from request to report</li>
           </ul>
+          <p class="stats-note">As observed: one run, recorded on 2026-10-02. Not a benchmark.</p>
 
           <p class="prompt-label" id="hero-prompt-label">
-            Paste this into the agent you already use (Claude Code, Codex, …):
+            Paste this into your coding agent:
           </p>
           <div class="install install-block" role="group" aria-labelledby="hero-prompt-label">
             <code class="install-cmd install-prompt" id="setup-prompt">Read https://kewton.github.io/CommandMate/setup.md and help me set up CommandMate on this machine. Explain each step before you run it, and ask me before you install anything or open access from the internet.</code>
@@ -144,108 +148,51 @@
 
       <!-- Problem -->
       <section class="section" id="problem" aria-labelledby="problem-h">
-        <h2 id="problem-h">Day job. Housework. Kids. Family time. Your project gets the gaps.</h2>
+        <h2 id="problem-h">Agents can work in parallel. You are still one person.</h2>
         <ul class="problem-points">
-          <li>The agents can work for hours. You can't sit at the desk for hours to answer them.</li>
-          <li>From the outside, an idle agent and one waiting on you look the same.</li>
-          <li>The agent's summary of what it did is not evidence of what it did.</li>
+          <li>Every new agent is one more terminal to watch.</li>
+          <li>An agent waiting on you looks just like one still working.</li>
+          <li>"Done" is the agent's own word for it.</li>
+          <li>Managing the agents becomes a new job.</li>
         </ul>
       </section>
 
       <!-- Level 1 -->
       <section class="section level" id="level-1" aria-labelledby="level-1-h">
-        <p class="level-tag">Level 1</p>
-        <h2 id="level-1-h">Parallel</h2>
-        <p class="section-lede">Run several coding agents side by side, from one place. Your role: the operator, who answers each agent.</p>
+        <h2 id="level-1-h">Level 1 — Parallel</h2>
+        <p class="level-claim">Every agent side by side, and you see who needs you.</p>
+        <p class="section-lede">Your role: the operator.</p>
         <ul class="pillars">
           <li class="pillar">
-            <h3>Every agent on one screen</h3>
+            <h3>Run them in parallel</h3>
             <p>
               Claude Code, Codex, Gemini CLI, Copilot, OpenCode (1.x and V2), Antigravity, Command
-              Code or local models. Every task gets its own session, side by side.
+              Code or local models, several sessions at once.
             </p>
           </li>
           <li class="pillar">
-            <h3>A conversation, not a terminal</h3>
+            <h3>See who is waiting</h3>
+            <p>Working, waiting on you or done: every session in one place.</p>
+          </li>
+          <li class="pillar">
+            <h3>Answer from anywhere</h3>
             <p>
-              Read the agent's reply and answer it like a chat. The raw terminal is still there
-              when you want it.
+              The same session on your PC or phone, via <code>commandmate remote</code> (Tailscale or
+              Cloudflare).
             </p>
           </li>
           <li class="pillar">
-            <h3>Safely from your phone</h3>
-            <p>
-              <code>commandmate remote</code> pairs your phone with a QR code, through Tailscale or
-              Cloudflare. Nothing goes on the public internet without your yes.
-            </p>
-          </li>
-          <li class="pillar">
-            <h3>Step away from the desk</h3>
-            <p>
-              Waiting is read from the agents' own hooks, not guessed from the screen, and reaches
-              your phone as a badge or a push notification.
-            </p>
+            <h3>One worktree per task</h3>
+            <p>Each task in its own Git worktree, so no two agents edit the same files.</p>
           </li>
         </ul>
         <p class="plan-note">
-          <strong>It runs on the plan you already pay for.</strong> CommandMate drives the agent
-          CLIs you are already signed in to. It adds no pay-per-use API bill of its own.
+          <strong>It runs on the plan you already pay for.</strong>
         </p>
 
-        <figure class="demo demo-phone">
-          <!-- Figure B (Issue #3058): a few seconds on the phone, recorded in the
-               isolated demo environment at phone width. It replaces the
-               storyboard drawing rather than sitting next to it, so the page
-               does not get longer. -->
-          <video
-            src="assets/media/phone-team.mp4"
-            poster="assets/media/poster-phone-team.webp"
-            data-autoplay
-            muted
-            loop
-            playsinline
-            preload="none"
-            width="540"
-            height="540"
-            aria-label="A phone-width session list in which one agent needs you, its chat opened to answer the question with Yes and Submit, then the list again with that session carrying on"
-          ></video>
-          <figcaption>Someone needs you. Answer from the chat. It keeps going.</figcaption>
-        </figure>
-
-        <div class="demos">
-          <figure class="demo">
-            <video
-              src="assets/media/never-miss-waiting.mp4"
-              poster="assets/media/poster-never-miss-waiting.webp"
-              data-autoplay
-              muted
-              loop
-              playsinline
-              preload="none"
-              width="1280"
-              height="800"
-              aria-label="A session that stops for confirmation raises a needs-attention pill and a toast, and is answered from a phone"
-            ></video>
-            <figcaption>Waiting reaches you, and you answer from your phone.</figcaption>
-          </figure>
-          <figure class="demo">
-            <video
-              src="assets/media/parallel-worktrees.mp4"
-              poster="assets/media/poster-parallel-worktrees.webp"
-              data-autoplay
-              muted
-              loop
-              playsinline
-              preload="none"
-              width="1280"
-              height="800"
-              aria-label="One session per git worktree, several branches running in parallel"
-            ></video>
-            <figcaption>One session per task, running side by side.</figcaption>
-          </figure>
-        </div>
-
-        <div class="shots">
+        <!-- One demo for the level (Issue #3162): the desktop dashboard and
+             figure B, the phone clip (#3058), side by side as PC and phone. -->
+        <div class="pc-phone">
           <figure class="shot">
             <img
               src="assets/img/screenshot-desktop.webp"
@@ -253,16 +200,22 @@
               loading="lazy"
               decoding="async"
             />
-            <figcaption>Every session and its status, on one screen.</figcaption>
+            <figcaption>On the PC: every session and its status.</figcaption>
           </figure>
-          <figure class="shot shot-phone">
-            <img
-              src="assets/img/screenshot-worktree-mobile-chat.webp"
-              alt="A session read as a conversation on a phone: the agent's replies in full, its tool calls folded into a chip, and a composer to answer from"
-              loading="lazy"
-              decoding="async"
-            />
-            <figcaption>The same session, read and answered on the phone.</figcaption>
+          <figure class="demo demo-phone">
+            <video
+              src="assets/media/phone-team.mp4"
+              poster="assets/media/poster-phone-team.webp"
+              data-autoplay
+              muted
+              loop
+              playsinline
+              preload="none"
+              width="540"
+              height="540"
+              aria-label="A phone-width session list in which one agent needs you, its chat opened to answer the question with Yes and Submit, then the list again with that session carrying on"
+            ></video>
+            <figcaption>On the phone: answer, and it keeps going.</figcaption>
           </figure>
         </div>
 
@@ -279,161 +232,123 @@
 
       <!-- Level 2 -->
       <section class="section level" id="level-2" aria-labelledby="level-2-h">
-        <p class="level-tag">Level 2</p>
-        <h2 id="level-2-h">Delegate</h2>
-        <p class="section-lede">Hand over work one issue at a time, and let your own checks, not the agent, decide when it is done. Your role: the product or tech lead. Most people need only this level.</p>
+        <h2 id="level-2-h">Level 2 — Delegate</h2>
+        <p class="level-claim">Issues in parallel, verified before they reach you.</p>
+        <p class="section-lede">
+          Your role: product or tech lead. <strong>For many solo and small projects, this level is
+          enough.</strong>
+        </p>
         <ul class="pillars">
           <li class="pillar">
-            <h3>One issue, one workspace</h3>
-            <p>
-              Each task runs in its own Git worktree: a separate copy of your repository, so two
-              agents never edit the same files under each other.
-            </p>
-          </li>
-          <li class="pillar">
-            <h3>A request you can see</h3>
-            <p>
-              A task goes out as a contract: the goal, the files it may change, and the checks. It
-              stays in the repository as a file you can read later.
-            </p>
+            <h3>A request you can read</h3>
+            <p>Each issue goes out as a contract: the goal, the files it may change, the checks.</p>
           </li>
           <li class="pillar">
             <h3>Checks decide what's done</h3>
-            <p>
-              Your own lint, type check and tests run after the work. Their exit code (the number
-              a command ends with) is the verdict, not the agent's summary.
-            </p>
+            <p>Your lint and tests run after the work. Their exit code decides, not the agent.</p>
           </li>
           <li class="pillar">
             <h3>The method comes as Skills</h3>
-            <p>
-              How to plan, hand over and check work is installed from the official Catalog as
-              Skills, and the agent reads it. It is not in someone's head.
-            </p>
+            <p>How to plan, hand over and check work, installed from the official Catalog.</p>
           </li>
         </ul>
 
-        <div class="figure-pair">
-          <figure class="level-figure">
-            <!-- Figure C: one issue from start to PR. The checks send failed work
-                 back, which is the one arrow that goes backwards. -->
-            <svg
-              class="flow-diagram"
-              viewBox="0 0 360 190"
-              width="360"
-              height="190"
-              role="img"
-              aria-label="One issue from start to pull request. Issue, then its own worktree, then a contract, then the work. The checks run next: if they fail, the work goes back to the agent; if they pass, a person runs the UAT and only then does it become a PR."
-            >
-              <g class="node"><rect x="6" y="20" width="72" height="36" rx="8" /><text x="42" y="43">Issue</text></g>
-              <g class="node"><rect x="94" y="20" width="72" height="36" rx="8" /><text x="130" y="43">worktree</text></g>
-              <g class="node"><rect x="182" y="20" width="72" height="36" rx="8" /><text x="218" y="43">contract</text></g>
-              <g class="node node-work"><rect x="270" y="20" width="72" height="36" rx="8" /><text x="306" y="43">work</text></g>
-              <g class="node node-check"><rect x="270" y="120" width="72" height="36" rx="8" /><text x="306" y="143">checks</text></g>
-              <g class="node"><rect x="182" y="120" width="72" height="36" rx="8" /><text x="218" y="143">UAT</text></g>
-              <g class="node node-end"><rect x="94" y="120" width="72" height="36" rx="8" /><text x="130" y="143">PR</text></g>
+        <figure class="level-figure">
+          <!-- Figure C: issues to PRs. The checks send failed work back, which
+               is the one arrow that goes backwards. -->
+          <svg
+            class="flow-diagram"
+            viewBox="0 0 360 190"
+            width="360"
+            height="190"
+            role="img"
+            aria-label="Issues to pull requests. Issues become contracts, the contracts go to several agents at once, and the checks run on their work. Work that fails goes back to an agent; work that passes becomes a PR."
+          >
+            <g class="node"><rect x="6" y="20" width="90" height="36" rx="8" /><text x="51" y="43">Issues</text></g>
+            <g class="node"><rect x="135" y="20" width="90" height="36" rx="8" /><text x="180" y="43">Contracts</text></g>
+            <g class="node node-work"><rect x="264" y="20" width="90" height="36" rx="8" /><text x="309" y="43">Agents × N</text></g>
+            <g class="node node-check"><rect x="264" y="120" width="90" height="36" rx="8" /><text x="309" y="143">Checks</text></g>
+            <g class="node node-end"><rect x="135" y="120" width="90" height="36" rx="8" /><text x="180" y="143">PRs</text></g>
 
-              <line class="edge" x1="78" y1="38" x2="88" y2="38" />
-              <polygon class="arrowhead" points="94,38 87,34 87,42" />
-              <line class="edge" x1="166" y1="38" x2="176" y2="38" />
-              <polygon class="arrowhead" points="182,38 175,34 175,42" />
-              <line class="edge" x1="254" y1="38" x2="264" y2="38" />
-              <polygon class="arrowhead" points="270,38 263,34 263,42" />
-              <line class="edge" x1="300" y1="56" x2="300" y2="113" />
-              <polygon class="arrowhead" points="300,120 296,113 304,113" />
-              <line class="edge" x1="270" y1="138" x2="261" y2="138" />
-              <polygon class="arrowhead" points="254,138 261,134 261,142" />
-              <line class="edge" x1="182" y1="138" x2="173" y2="138" />
-              <polygon class="arrowhead" points="166,138 173,134 173,142" />
-              <text class="edge-label" x="262" y="114">pass</text>
+            <line class="edge" x1="96" y1="38" x2="128" y2="38" />
+            <polygon class="arrowhead" points="135,38 128,34 128,42" />
+            <line class="edge" x1="225" y1="38" x2="257" y2="38" />
+            <polygon class="arrowhead" points="264,38 257,34 257,42" />
+            <line class="edge" x1="290" y1="56" x2="290" y2="113" />
+            <polygon class="arrowhead" points="290,120 286,113 294,113" />
+            <line class="edge" x1="264" y1="138" x2="232" y2="138" />
+            <polygon class="arrowhead" points="225,138 232,134 232,142" />
+            <text class="edge-label" x="272" y="92">pass</text>
 
-              <polyline class="edge edge-fail" points="342,138 354,138 354,38 349,38" />
-              <polygon class="arrowhead arrowhead-fail" points="342,38 349,34 349,42" />
-              <text class="edge-label edge-label-fail" x="328" y="92">fail</text>
-              <text class="note-text" x="130" y="182">Failed work goes back to the agent.</text>
-            </svg>
-            <figcaption>The checks send failed work back. Only passed work reaches you.</figcaption>
-          </figure>
+            <line class="edge edge-fail" x1="330" y1="120" x2="330" y2="63" />
+            <polygon class="arrowhead arrowhead-fail" points="330,56 326,63 334,63" />
+            <text class="edge-label edge-label-fail" x="346" y="92">fail</text>
+            <text class="note-text" x="20" y="182">Failed work goes back to an agent.</text>
+          </svg>
+          <figcaption>Only work that passed your checks reaches you.</figcaption>
+        </figure>
 
-          <figure class="level-figure">
-            <!-- Figure D: a subagent against a CommandMate request. The difference
-                 is what you can open afterwards. -->
-            <svg
-              class="contrast-diagram"
-              viewBox="0 0 360 250"
-              width="360"
-              height="250"
-              role="img"
-              aria-label="Two ways to hand work to another agent. A subagent runs inside one session: what it was asked and what came back stay hidden, it is the same vendor's model, and it is done when it says so. A CommandMate request goes from one session to another that you can both open: the request is kept as text and a contract, it can go to another vendor's agent, and it is done when the checks' exit code says so."
-            >
-              <g class="side side-sub">
-                <rect class="panel" x="4" y="4" width="170" height="242" rx="12" />
-                <text class="side-title" x="89" y="28">A subagent</text>
-                <rect class="session" x="18" y="40" width="142" height="70" rx="8" />
-                <text class="session-label" x="28" y="56">One session</text>
-                <rect class="hidden-box" x="40" y="66" width="98" height="32" rx="6" />
-                <text class="hidden-text" x="89" y="86">subagent</text>
-                <text class="point" x="16" y="136">× What it was asked:</text>
-                <text class="point-sub" x="28" y="151">hidden</text>
-                <text class="point" x="16" y="172">× What came back:</text>
-                <text class="point-sub" x="28" y="187">a summary</text>
-                <text class="point" x="16" y="208">× Same vendor's model</text>
-                <text class="point" x="16" y="229">× Done when it says so</text>
-              </g>
-              <g class="side side-cm">
-                <rect class="panel" x="186" y="4" width="170" height="242" rx="12" />
-                <text class="side-title" x="271" y="28">A CommandMate request</text>
-                <rect class="session" x="196" y="44" width="60" height="58" rx="8" />
-                <text class="session-label" x="226" y="70" text-anchor="middle">Session</text>
-                <text class="session-label" x="226" y="84" text-anchor="middle">A</text>
-                <rect class="session" x="286" y="44" width="60" height="58" rx="8" />
-                <text class="session-label" x="316" y="70" text-anchor="middle">Session</text>
-                <text class="session-label" x="316" y="84" text-anchor="middle">B</text>
-                <line class="link" x1="256" y1="73" x2="280" y2="73" />
-                <polygon class="link-head" points="286,73 279,69 279,77" />
-                <text class="point" x="198" y="136">✓ Both sessions open</text>
-                <text class="point" x="198" y="157">✓ Request kept as text</text>
-                <text class="point-sub" x="210" y="172">and a contract</text>
-                <text class="point" x="198" y="193">✓ Any vendor's agent</text>
-                <text class="point" x="198" y="214">✓ Done: an exit code</text>
-              </g>
-            </svg>
-            <figcaption>What was asked, and what came back, stay where you can open them.</figcaption>
-          </figure>
-        </div>
+        <figure class="demo demo-wide">
+          <video
+            src="assets/media/contract-verify.mp4"
+            poster="assets/media/poster-contract-verify.webp"
+            data-autoplay
+            muted
+            loop
+            playsinline
+            preload="none"
+            width="1280"
+            height="800"
+            aria-label="A task contract and a verify.yaml, then a terminal running the gates and printing RESULT passed"
+          ></video>
+          <figcaption>A contract before the work, checks after it.</figcaption>
+        </figure>
 
-        <div class="demos">
-          <figure class="demo">
-            <video
-              src="assets/media/contract-verify.mp4"
-              poster="assets/media/poster-contract-verify.webp"
-              data-autoplay
-              muted
-              loop
-              playsinline
-              preload="none"
-              width="1280"
-              height="800"
-              aria-label="A task contract and a verify.yaml, then a terminal running the gates and printing RESULT passed"
-            ></video>
-            <figcaption>A contract before the work, checks after it, and the exit code decides.</figcaption>
-          </figure>
-          <figure class="demo">
-            <video
-              src="assets/media/install-skill.mp4"
-              poster="assets/media/poster-install-skill.webp"
-              data-autoplay
-              muted
-              loop
-              playsinline
-              preload="none"
-              width="1280"
-              height="800"
-              aria-label="Installing a Skill from the official Catalog into a worktree, then calling it from the composer"
-            ></video>
-            <figcaption>The method, installed as a Skill and read by the agent.</figcaption>
-          </figure>
-        </div>
+        <figure class="level-figure">
+          <!-- Figure D: a subagent against a CommandMate request. The difference
+               is what you can open afterwards. Below the demo, as support. -->
+          <svg
+            class="contrast-diagram"
+            viewBox="0 0 360 250"
+            width="360"
+            height="250"
+            role="img"
+            aria-label="Two ways to hand work to another agent. A subagent runs inside one session: what it was asked and what came back stay hidden, it is the same vendor's model, and it is done when it says so. A CommandMate request goes from one session to another that you can both open: the request is kept as text and a contract, it can go to another vendor's agent, and it is done when the checks' exit code says so."
+          >
+            <g class="side side-sub">
+              <rect class="panel" x="4" y="4" width="170" height="242" rx="12" />
+              <text class="side-title" x="89" y="28">A subagent</text>
+              <rect class="session" x="18" y="40" width="142" height="70" rx="8" />
+              <text class="session-label" x="28" y="56">One session</text>
+              <rect class="hidden-box" x="40" y="66" width="98" height="32" rx="6" />
+              <text class="hidden-text" x="89" y="86">subagent</text>
+              <text class="point" x="16" y="136">× What it was asked:</text>
+              <text class="point-sub" x="28" y="151">hidden</text>
+              <text class="point" x="16" y="172">× What came back:</text>
+              <text class="point-sub" x="28" y="187">a summary</text>
+              <text class="point" x="16" y="208">× Same vendor's model</text>
+              <text class="point" x="16" y="229">× Done when it says so</text>
+            </g>
+            <g class="side side-cm">
+              <rect class="panel" x="186" y="4" width="170" height="242" rx="12" />
+              <text class="side-title" x="271" y="28">A CommandMate request</text>
+              <rect class="session" x="196" y="44" width="60" height="58" rx="8" />
+              <text class="session-label" x="226" y="70" text-anchor="middle">Session</text>
+              <text class="session-label" x="226" y="84" text-anchor="middle">A</text>
+              <rect class="session" x="286" y="44" width="60" height="58" rx="8" />
+              <text class="session-label" x="316" y="70" text-anchor="middle">Session</text>
+              <text class="session-label" x="316" y="84" text-anchor="middle">B</text>
+              <line class="link" x1="256" y1="73" x2="280" y2="73" />
+              <polygon class="link-head" points="286,73 279,69 279,77" />
+              <text class="point" x="198" y="136">✓ Both sessions open</text>
+              <text class="point" x="198" y="157">✓ Request kept as text</text>
+              <text class="point-sub" x="210" y="172">and a contract</text>
+              <text class="point" x="198" y="193">✓ Any vendor's agent</text>
+              <text class="point" x="198" y="214">✓ Done: an exit code</text>
+            </g>
+          </svg>
+          <figcaption>What was asked and what came back stay where you can open them.</figcaption>
+        </figure>
 
         <div class="ask">
           <p class="ask-label" id="ask-2-label">Ask your agent</p>
@@ -446,73 +361,51 @@
         </div>
       </section>
 
-      <!-- Level 3 -->
+      <!-- Level 3. The author's setup (Issue #3060's "My setup") lives here
+           since Issue #3162: the monthly cost is the evidence of the team's
+           make-up, the PM on one plan and the workers on another. -->
       <section class="section level" id="level-3" aria-labelledby="level-3-h">
-        <p class="level-tag">Level 3</p>
-        <h2 id="level-3-h">Manage</h2>
-        <p class="section-lede">A PM agent plans, assigns and checks the work. You talk to the PM and approve. Your role: the owner.</p>
-        <ul class="pillars pillars-two">
-          <li class="pillar">
-            <h3>PM, dev lead, workers</h3>
-            <p>
-              One message to your PM session. It plans the issues, the dev lead hands each one to a
-              worker in its own worktree under a contract, and only what passed the checks becomes
-              a PR. Every step that changes something waits for your approval.
-            </p>
-          </li>
-          <li class="pillar">
-            <h3>Scheduled runs</h3>
-            <p>
-              Schedules start a session at the times you set, so work can begin while you are
-              asleep, at work or with your family.
-            </p>
-          </li>
-        </ul>
-        <p class="plan-note">
-          The author's daily auto-fix run is the author's own setup, built from scheduled runs and
-          the orchestrate Skill. It shows what these parts can do. It is not a switch in the
-          product.
+        <h2 id="level-3-h">Level 3 — Manage</h2>
+        <p class="level-claim">Talk to the PM, not every agent.</p>
+        <p class="section-lede">
+          A PM agent plans, assigns and checks the work. Your role: the owner. Every step that
+          changes something waits for your approval.
         </p>
 
         <div class="figure-pair">
           <figure class="level-figure">
-            <!-- Figure E: who talks to whom. You talk to the PM; the PM talks to
-                 the dev lead; the dev lead to the workers. -->
+            <!-- Figure E: who talks to whom. You talk to the PM; the PM to the
+                 workers. The cost is the author's, by plan. -->
             <svg
               class="team-diagram"
-              viewBox="0 0 360 300"
+              viewBox="0 0 360 250"
               width="360"
-              height="300"
+              height="250"
               role="img"
-              aria-label="The team. You, on your phone, send one message to the PM session, and a schedule can start it too. The PM plans the issues and passes them to the dev lead, who hands each one to one of four workers, each in its own worktree. The whole team runs on Claude Max plus Command Code Goat, $110 to $210 a month."
+              aria-label="The team. You talk to the PM session. The PM plans the issues, hands each one to one of four workers, each in its own worktree, and checks what comes back. The author runs the PM on Claude Max and the workers on Command Code Goat, $110 to $210 a month."
             >
-              <g class="member member-you"><rect x="130" y="8" width="100" height="42" rx="10" /><text class="name" x="180" y="26">You</text><text class="role" x="180" y="41">from your phone</text></g>
-              <g class="member member-sched"><rect x="6" y="80" width="100" height="42" rx="10" /><text class="name" x="56" y="98">Schedule</text><text class="role" x="56" y="113">starts it on time</text></g>
-              <g class="member"><rect x="130" y="80" width="100" height="42" rx="10" /><text class="name" x="180" y="98">PM</text><text class="role" x="180" y="113">plans the issues</text></g>
-              <g class="member"><rect x="130" y="152" width="100" height="42" rx="10" /><text class="name" x="180" y="170">Dev lead</text><text class="role" x="180" y="185">hands out tasks</text></g>
-              <g class="member member-worker"><rect x="6" y="224" width="78" height="42" rx="10" /><text class="name" x="45" y="242">Worker</text><text class="role" x="45" y="257">own worktree</text></g>
-              <g class="member member-worker"><rect x="96" y="224" width="78" height="42" rx="10" /><text class="name" x="135" y="242">Worker</text><text class="role" x="135" y="257">own worktree</text></g>
-              <g class="member member-worker"><rect x="186" y="224" width="78" height="42" rx="10" /><text class="name" x="225" y="242">Worker</text><text class="role" x="225" y="257">own worktree</text></g>
-              <g class="member member-worker"><rect x="276" y="224" width="78" height="42" rx="10" /><text class="name" x="315" y="242">Worker</text><text class="role" x="315" y="257">own worktree</text></g>
+              <g class="member member-you"><rect x="130" y="8" width="100" height="42" rx="10" /><text class="name" x="180" y="26">You</text><text class="role" x="180" y="41">approve</text></g>
+              <g class="member"><rect x="115" y="84" width="130" height="42" rx="10" /><text class="name" x="180" y="102">PM</text><text class="role" x="180" y="117">plans, assigns, checks</text></g>
+              <g class="member member-worker"><rect x="6" y="160" width="78" height="42" rx="10" /><text class="name" x="45" y="178">Worker</text><text class="role" x="45" y="193">own worktree</text></g>
+              <g class="member member-worker"><rect x="96" y="160" width="78" height="42" rx="10" /><text class="name" x="135" y="178">Worker</text><text class="role" x="135" y="193">own worktree</text></g>
+              <g class="member member-worker"><rect x="186" y="160" width="78" height="42" rx="10" /><text class="name" x="225" y="178">Worker</text><text class="role" x="225" y="193">own worktree</text></g>
+              <g class="member member-worker"><rect x="276" y="160" width="78" height="42" rx="10" /><text class="name" x="315" y="178">Worker</text><text class="role" x="315" y="193">own worktree</text></g>
 
-              <line class="edge" x1="180" y1="50" x2="180" y2="73" />
-              <polygon class="arrowhead" points="180,80 176,73 184,73" />
-              <line class="edge" x1="106" y1="101" x2="123" y2="101" />
-              <polygon class="arrowhead" points="130,101 123,97 123,105" />
-              <line class="edge" x1="180" y1="122" x2="180" y2="145" />
-              <polygon class="arrowhead" points="180,152 176,145 184,145" />
-              <polyline class="edge" points="180,194 180,208 45,208 45,217" />
-              <polygon class="arrowhead" points="45,224 41,217 49,217" />
-              <polyline class="edge" points="135,208 135,217" />
-              <polygon class="arrowhead" points="135,224 131,217 139,217" />
-              <polyline class="edge" points="180,208 225,208 225,217" />
-              <polygon class="arrowhead" points="225,224 221,217 229,217" />
-              <polyline class="edge" points="225,208 315,208 315,217" />
-              <polygon class="arrowhead" points="315,224 311,217 319,217" />
+              <line class="edge" x1="180" y1="50" x2="180" y2="77" />
+              <polygon class="arrowhead" points="180,84 176,77 184,77" />
+              <polyline class="edge" points="180,126 180,140 45,140 45,153" />
+              <polygon class="arrowhead" points="45,160 41,153 49,153" />
+              <polyline class="edge" points="135,140 135,153" />
+              <polygon class="arrowhead" points="135,160 131,153 139,153" />
+              <polyline class="edge" points="180,140 225,140 225,153" />
+              <polygon class="arrowhead" points="225,160 221,153 229,153" />
+              <polyline class="edge" points="225,140 315,140 315,153" />
+              <polygon class="arrowhead" points="315,160 311,153 319,153" />
 
-              <text class="cost" x="180" y="290">Claude Max + Command Code Goat: $110–$210 a month</text>
+              <text class="cost" x="180" y="226">PM: Claude Max · Workers: Command Code Goat</text>
+              <text class="cost" x="180" y="243">$110–$210 a month, the author's cost</text>
             </svg>
-            <figcaption>You talk to the PM. The rest of the team talks to each other.</figcaption>
+            <figcaption>You talk to the PM. The PM talks to the workers.</figcaption>
           </figure>
 
           <figure class="level-figure">
@@ -564,6 +457,45 @@
           </figure>
         </div>
 
+        <div class="table-scroll" tabindex="0" role="region" aria-labelledby="team-cost-h">
+          <table class="setup-table">
+            <caption id="team-cost-h">The author's team and its monthly cost</caption>
+            <thead>
+              <tr>
+                <th scope="col">Role</th>
+                <th scope="col">Agent</th>
+                <th scope="col">Plan</th>
+                <th scope="col">Monthly</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row">PM and dev lead</th>
+                <td>Claude Code</td>
+                <td>Claude Max</td>
+                <td>$100 or $200</td>
+              </tr>
+              <tr>
+                <th scope="row">Workers</th>
+                <td>Command Code</td>
+                <td>Command Code Goat</td>
+                <td>$10</td>
+              </tr>
+            </tbody>
+            <tfoot>
+              <tr>
+                <th scope="row">Total</th>
+                <td colspan="3">$110–$210 a month: Claude Max + Command Code Goat</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+        <p class="footnote">
+          The run at the top of this page used this team on
+          <a href="https://github.com/Kewton/commandmate-team-demo">a public throwaway repository</a>.
+          The daily auto-fix run is the author's own setup. It is not a switch in the product.
+        </p>
+
         <figure class="demo demo-lead">
           <video
             src="assets/media/orchestrate-run.mp4"
@@ -577,32 +509,8 @@
             height="1080"
             aria-label="One message sent to a Command Code session, four issues dispatched to four workers in their own worktrees, a worker terminal writing tests, and a closing phase-by-issue matrix in which all four pass dispatch, merge and UAT"
           ></video>
-          <figcaption>
-            One recorded run: one message to the lead, the issues handed to workers, the checks,
-            then UAT.
-          </figcaption>
+          <figcaption>Another recorded run: one message to the lead, four workers, then UAT.</figcaption>
         </figure>
-
-        <div class="run-record" role="group" aria-labelledby="run-record-h">
-          <h3 id="run-record-h">One recorded run, from the phone to merged PRs</h3>
-          <dl>
-            <div><dt>Repository</dt><dd><a href="https://github.com/Kewton/commandmate-team-demo">Kewton/commandmate-team-demo</a>, public and throwaway</dd></div>
-            <div><dt>Issues</dt><dd>4</dd></div>
-            <div><dt>PM and dev lead</dt><dd>Claude Code</dd></div>
-            <div><dt>Workers</dt><dd>4 × Command Code</dd></div>
-            <div><dt>What the human did</dt><dd>2 messages and 3 taps, from the phone-width web UI</dd></div>
-            <div><dt>Request to report</dt><dd>9 min 48 s</dd></div>
-            <div><dt>Checks</dt><dd>4/4 passed</dd></div>
-            <div><dt>PRs</dt><dd>merged with CI green</dd></div>
-            <div><dt>UAT</dt><dd>4/4 GO</dd></div>
-          </dl>
-          <p class="run-record-note">As observed: one run, as recorded on 2026-10-02. Not a benchmark.</p>
-        </div>
-
-        <p class="plan-note">
-          <strong>Next — Learn.</strong> Not built yet, and only a direction: use the record each
-          piece of work leaves behind to improve how the next one is done.
-        </p>
 
         <div class="ask">
           <p class="ask-label" id="ask-3-label">Ask your agent</p>
@@ -615,53 +523,46 @@
         </div>
       </section>
 
+      <!-- Next — Learn: a direction, not a feature (public-messaging.md §10). -->
+      <section class="section" id="next" aria-labelledby="next-h">
+        <h2 id="next-h">Next — Learn</h2>
+        <p class="section-lede">
+          Not built yet, only a direction: use the record each run leaves to improve who gets which
+          task, how issues are split, and the contracts, checks and Skills.
+        </p>
+      </section>
+
       <!-- Set up with your agent: the five stages of website/setup.md, in its
            order and under its names. What the agent checks at each stage is the
            stage's "Confirm it worked". -->
       <section class="section" id="setup" aria-labelledby="setup-h">
         <h2 id="setup-h">Set up with your agent</h2>
         <p class="section-lede">
-          Your agent reads <a href="setup.md">the setup guide</a> and walks you through it, one
-          stage at a time. Each stage is short enough to stop after it and come back later. It asks
-          before it installs anything, and the choices stay yours.
+          Your agent reads <a href="setup.md">the setup guide</a> and walks you through it, asking
+          before it installs anything.
         </p>
 
         <div class="setup-layout">
           <ol class="stages">
             <li class="stage">
               <h3>Install and start</h3>
-              <p class="stage-check">
-                <span>Your agent checks:</span> Node.js, npm, git and tmux are there, and
-                <code>commandmate status</code> reports the server running.
-              </p>
+              <p class="stage-check"><span>Your agent checks:</span> the server is running.</p>
             </li>
             <li class="stage">
               <h3>Pair your phone</h3>
-              <p class="stage-check">
-                <span>Your agent checks:</span> you chose Tailscale or Cloudflare, the phone opened
-                CommandMate, and the pairing code was used.
-              </p>
+              <p class="stage-check"><span>Your agent checks:</span> the phone opened CommandMate.</p>
             </li>
             <li class="stage">
               <h3>Add a second agent</h3>
-              <p class="stage-check">
-                <span>Your agent checks:</span> the new agent is listed for your repository and
-                answered a first small message.
-              </p>
+              <p class="stage-check"><span>Your agent checks:</span> the new agent replied.</p>
             </li>
             <li class="stage">
               <h3>Give your team a PM</h3>
-              <p class="stage-check">
-                <span>Your agent checks:</span> the orchestrate Skill is installed and the PM
-                replied with a plan, changing nothing yet.
-              </p>
+              <p class="stage-check"><span>Your agent checks:</span> the PM planned, changing nothing.</p>
             </li>
             <li class="stage">
               <h3>Let checks decide what's done</h3>
-              <p class="stage-check">
-                <span>Your agent checks:</span> your repository's checks are declared and run once,
-                with an exit code you recognize.
-              </p>
+              <p class="stage-check"><span>Your agent checks:</span> your checks ran once.</p>
             </li>
           </ol>
 
@@ -695,56 +596,9 @@
           </figure>
         </div>
         <p class="by-hand">
-          Prefer to do it by hand? It needs macOS / Linux / Windows (WSL2), Node.js v22+, npm, git
-          and tmux; the
-          <a href="https://github.com/Kewton/CommandMate#or-by-hand">README</a> has the commands.
+          By hand instead? See the
+          <a href="https://github.com/Kewton/CommandMate#or-by-hand">README</a>.
         </p>
-      </section>
-
-      <!-- My setup: what the author runs. The phone connection is written as the
-           command and both providers, not as one provider the author picked
-           (Issue #3060 leaves that open). -->
-      <section class="section" id="my-setup" aria-labelledby="my-setup-h">
-        <h2 id="my-setup-h">My setup</h2>
-        <p class="section-lede">What I run, and what it costs me each month.</p>
-        <div class="table-scroll" tabindex="0" role="region" aria-labelledby="my-setup-h">
-          <table class="setup-table">
-            <thead>
-              <tr>
-                <th scope="col">Role</th>
-                <th scope="col">Agent</th>
-                <th scope="col">Plan</th>
-                <th scope="col">Monthly</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <th scope="row">PM and dev lead</th>
-                <td>Claude Code</td>
-                <td>Claude Max</td>
-                <td>$100 or $200</td>
-              </tr>
-              <tr>
-                <th scope="row">Workers</th>
-                <td>Command Code</td>
-                <td>Command Code Goat</td>
-                <td>$10</td>
-              </tr>
-              <tr>
-                <th scope="row">Phone connection</th>
-                <td><code>commandmate remote</code> (Tailscale or Cloudflare)</td>
-                <td>—</td>
-                <td>—</td>
-              </tr>
-            </tbody>
-            <tfoot>
-              <tr>
-                <th scope="row">Total</th>
-                <td colspan="3">$110–$210 a month: Claude Max + Command Code Goat</td>
-              </tr>
-            </tfoot>
-          </table>
-        </div>
       </section>
 
       <!-- Trust: runs on your machine, you decide, the limits written down, MIT.
@@ -757,8 +611,7 @@
 
         <h3 class="trust-point">Runs on your machine</h3>
         <p class="trust-lede">
-          CommandMate runs on your machine. It sends no telemetry, needs no account, and needs no
-          external server to run.
+          It sends no telemetry, needs no account, and needs no external server to run.
         </p>
 
         <figure class="trust-figure">
@@ -827,36 +680,30 @@
         <div class="trust-grid">
           <div class="trust-card">
             <h3>You decide</h3>
-            <p>
-              Approvals come to you. Nothing merges, installs or opens to the internet without your
-              yes. Auto Yes is opt-in, time-boxed, and stops on the patterns you set.
-            </p>
+            <p>Approvals come to you. Auto Yes is opt-in and time-boxed.</p>
           </div>
           <div class="trust-card">
             <h3>The limits, written down</h3>
             <ul class="limits">
-              <li>It is a run, not a resident agent. Nothing mutates without an explicit approve.</li>
-              <li>It does not read the code for you. Checks catch what your tests catch.</li>
-              <li>Review by another agent is a step you add, not something the runner does for you.</li>
-              <li>It does not replace tmux, Git worktrees, your terminal, or your agent CLI.</li>
+              <li>It is a run, not a resident agent.</li>
+              <li>Checks catch only what your tests catch.</li>
             </ul>
           </div>
           <div class="trust-card">
             <h3>Open source, MIT</h3>
             <p>
-              Read every line on
-              <a href="https://github.com/Kewton/CommandMate">GitHub</a>. The
-              <a href="https://github.com/Kewton/CommandMate/blob/main/LICENSE">MIT License</a>
-              lets you use, change and share it.
+              Every line is on <a href="https://github.com/Kewton/CommandMate">GitHub</a>, under the
+              <a href="https://github.com/Kewton/CommandMate/blob/main/LICENSE">MIT License</a>.
             </p>
           </div>
         </div>
       </section>
 
-      <!-- Start: the same line as the hero, then where to go next. -->
+      <!-- Start: the same line as the hero, then where to go next. No <h2>
+           since Issue #3162, which caps the page at seven: it is the closing
+           call to action, labelled for a screen reader by its own line. -->
       <section class="section start" id="start" aria-labelledby="start-h">
-        <h2 id="start-h">Start with one paste</h2>
-        <p class="section-lede">Paste this into the agent you already use. It takes it from there.</p>
+        <p class="start-title" id="start-h">Start with one paste</p>
         <div class="install install-block" role="group" aria-labelledby="start-h">
           <code class="install-cmd install-prompt" id="setup-prompt-start">Read https://kewton.github.io/CommandMate/setup.md and help me set up CommandMate on this machine. Explain each step before you run it, and ask me before you install anything or open access from the internet.</code>
           <button type="button" class="copy-btn" data-copy-target="setup-prompt-start">
@@ -884,7 +731,7 @@
       <div class="footer-inner">
         <div class="footer-brand">
           <span class="wordmark">CommandMate</span>
-          <p>Run an AI team from your phone.</p>
+          <p>Run multiple coding agents in parallel.</p>
         </div>
         <div class="footer-groups">
           <nav class="footer-group" aria-labelledby="footer-page-h">

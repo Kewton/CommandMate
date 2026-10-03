@@ -39,6 +39,13 @@
  * video in the hero, page-level markup, reduced motion, dark mode, the network
  * scope under Trust, the metadata, llms.txt and the version line, and the banned
  * names — is still pinned, and the new structure has its own block at the end.
+ *
+ * Issue #3162 cut the page to about half, on Parallel → Delegate → Manage and
+ * Next — Learn: the hero's numbers are one recorded run rather than the
+ * author's, Level 1 and Level 2 keep one demo each, "My setup" became Level 3's
+ * cost table, and Start lost its heading so the page has seven. The blocks
+ * above were re-pinned to that structure, and the caps it set have a block of
+ * their own at the end.
  */
 import { describe, it, expect } from 'vitest';
 import { spawnSync } from 'child_process';
@@ -154,20 +161,13 @@ const DEMO_SOURCES: Record<string, string> = {
 };
 
 /**
- * Page order (Issue #3060): the demos sit in the level each one shows. Level 1
- * has the phone clip in figure B's slot (#3058), then waiting reaching your
- * phone and the sessions side by side, Level 2 the
- * contract and its checks and a Skill being installed, and Level 3 the recorded
- * orchestrate run.
+ * Page order (Issue #3060): the demos sit in the level each one shows. Since
+ * Issue #3162 that is one per level: Level 1 the phone clip (#3058) beside the
+ * desktop shot, Level 2 the contract and its checks, and Level 3 the recorded
+ * orchestrate run. The other three demos are kept on disk, unused, and listed
+ * in website/assets/media/README.md.
  */
-const DEMO_ORDER = [
-  PHONE_DEMO,
-  'never-miss-waiting.mp4',
-  'parallel-worktrees.mp4',
-  'contract-verify.mp4',
-  'install-skill.mp4',
-  LEAD_DEMO,
-];
+const DEMO_ORDER = [PHONE_DEMO, 'contract-verify.mp4', LEAD_DEMO];
 
 /** Every file under website/, recursively, as paths relative to website/. */
 function walk(dir: string, base = dir): string[] {
@@ -752,7 +752,8 @@ describe('Issue #3060: figures A to G', () => {
       text(m[1]),
     );
 
-    expect(nodes).toEqual(['Issue', 'worktree', 'contract', 'work', 'checks', 'UAT', 'PR']);
+    // Issue #3162: issues to PRs, several agents at once.
+    expect(nodes).toEqual(['Issues', 'Contracts', 'Agents × N', 'Checks', 'PRs']);
     expect(svg).toMatch(/class="edge edge-fail"/);
   });
 
@@ -813,9 +814,10 @@ describe('Issue #2554: Trust', () => {
     return rows;
   };
 
-  it('opens Trust on "Runs on your machine", between My setup and Start (#3060)', () => {
+  it('opens Trust on "Runs on your machine", between Set up and Start (#3060, #3162)', () => {
+    // My setup went into Level 3 in #3162, so Trust follows Set up directly.
     expect(readIndexHtml()).toMatch(
-      /id="my-setup"[\s\S]*?<\/section>\s*(?:<!--(?:(?!-->)[\s\S])*-->\s*)?<section class="section" id="trust"/,
+      /id="setup"[\s\S]*?<\/section>\s*(?:<!--(?:(?!-->)[\s\S])*-->\s*)?<section class="section" id="trust"/,
     );
     expect(text(firstGroup(trustSection(), /<h2 id="trust-h">([\s\S]*?)<\/h2>/, 'the #trust heading'))).toBe(
       'Why you can trust it',
@@ -929,9 +931,9 @@ describe('Issue #1577: feature demo playback', () => {
   const videoTags = (): string[] => readIndexHtml().match(/<video\b[\s\S]*?<\/video>/g) ?? [];
   const source = (tag: string): string | undefined => /src="([^"]+)"/.exec(tag)?.[1];
 
-  it('embeds the six demos in page order, each in the level it shows', () => {
+  it('embeds the three demos in page order, each in the level it shows', () => {
     // #3060 moved each demo into the level it shows (see DEMO_ORDER), the
-    // recorded orchestrate run last, under Level 3.
+    // recorded orchestrate run last, under Level 3; #3162 kept one per level.
     const expected = DEMO_ORDER.map((file) => `${MEDIA_DIR.split(path.sep).join('/')}/${file}`);
 
     expect(videoTags().map(source)).toEqual(expected);
@@ -1688,8 +1690,23 @@ describe('Issue #3060: three levels and setup with your agent', () => {
   const SETUP_URL = 'https://kewton.github.io/CommandMate/setup.md';
   const SETUP_PROMPT = `Read ${SETUP_URL} and help me set up CommandMate on this machine. Explain each step before you run it, and ask me before you install anything or open access from the internet.`;
 
-  /** The four numbers, and their wording, as the Issue's table and README.md write them. */
+  /**
+   * The hero's four numbers (Issue #3162): the three-layer run, as
+   * public-messaging.md §1 writes them. They replaced the author's four
+   * (AUTHOR_STATS), which may no longer stand in the hero.
+   */
   const STATS = [
+    '4 issues, 4 workers (Command Code), PM and dev lead on Claude Code',
+    '2 messages and 3 taps from a phone-width web UI',
+    '4/4 checks passed, PRs merged with CI green, UAT 4/4 GO',
+    '9 min 48 s from request to report',
+  ];
+
+  /** The note that has to sit directly under them. */
+  const STATS_NOTE = 'As observed: one run, recorded on 2026-10-02. Not a benchmark.';
+
+  /** The author's numbers #3060 put in the hero. Only the monthly cost stays on the page, in Level 3. */
+  const AUTHOR_STATS = [
     '10+ PRs a day, solo',
     '$110–$210 a month: Claude Max + Command Code Goat',
     '~80% of my instructions sent from a phone (my estimate)',
@@ -1733,16 +1750,17 @@ describe('Issue #3060: three levels and setup with your agent', () => {
 
   const toPx = (value: string, unit: string): number => Number(value) * (unit === 'rem' || unit === 'em' ? 16 : 1);
 
-  it('orders the sections hero, problem, the three levels, setup, my setup, trust, start', () => {
+  it('orders the sections hero, problem, the three levels, next, setup, trust, start', () => {
     const page = html();
+    // #3162: Next — Learn after Level 3, and My setup folded into Level 3.
     const order = [
       '<section class="hero">',
       'id="problem"',
       'id="level-1"',
       'id="level-2"',
       'id="level-3"',
+      'id="next"',
       'id="setup"',
-      'id="my-setup"',
       'id="trust"',
       'id="start"',
     ].map((needle) => {
@@ -1758,15 +1776,15 @@ describe('Issue #3060: three levels and setup with your agent', () => {
 
   it('heads each section with the words the Issue gives it', () => {
     expect(heading(hero(), 'h1')).toBe('Run multiple coding agents in parallel — even away from your desk.');
-    expect(heading(section('problem'), 'h2')).toBe(
-      'Day job. Housework. Kids. Family time. Your project gets the gaps.',
-    );
-    expect(section('problem').match(/<li>/g) ?? []).toHaveLength(3);
-    expect(heading(section('level-1'), 'h2')).toBe('Parallel');
-    expect(heading(section('level-2'), 'h2')).toBe('Delegate');
-    expect(heading(section('level-3'), 'h2')).toBe('Manage');
+    expect(heading(section('problem'), 'h2')).toBe('Agents can work in parallel. You are still one person.');
+    expect(section('problem').match(/<li>/g) ?? []).toHaveLength(4);
+    // The level names exactly as public-messaging.md §10 gives them (#3153).
+    expect(heading(section('level-1'), 'h2')).toBe('Level 1 — Parallel');
+    expect(heading(section('level-2'), 'h2')).toBe('Level 2 — Delegate');
+    expect(heading(section('level-3'), 'h2')).toBe('Level 3 — Manage');
+    expect(heading(section('next'), 'h2')).toBe('Next — Learn');
     expect(heading(section('setup'), 'h2')).toBe('Set up with your agent');
-    expect(heading(section('my-setup'), 'h2')).toBe('My setup');
+    expect(text(section('level-3'))).toContain('Talk to the PM, not every agent.');
   });
 
   it('shows the four numbers, and only those four, exactly as written', () => {
@@ -1774,20 +1792,30 @@ describe('Issue #3060: three levels and setup with your agent', () => {
     const stats = [...list.matchAll(/<li>([\s\S]*?)<\/li>/g)].map((match) => text(match[1]));
 
     expect(stats).toEqual(STATS);
-    // The same four in README.md, so the two surfaces never disagree.
-    const readme = fs.readFileSync(path.join(REPO_ROOT, 'README.md'), 'utf-8');
-    for (const stat of STATS) {
-      expect(readme.split('\n'), `README.md no longer says "${stat}"`).toContain(`- ${stat}`);
+    // #3162: the note directly under the list, nothing in between.
+    expect(hero()).toContain(`</ul>\n          <p class="stats-note">${STATS_NOTE}</p>`);
+    // The author's numbers are out of the hero.
+    for (const stat of AUTHOR_STATS) {
+      expect(text(hero()), `the hero still says "${stat}"`).not.toContain(stat);
     }
-    expect(fs.readFileSync(path.join(WEBSITE_DIR, 'llms.txt'), 'utf-8').split('\n')).toEqual(
-      expect.arrayContaining(STATS.map((stat) => `- ${stat}`)),
-    );
+    // The same four, and the note, in README.md and llms.txt, so the surfaces never disagree.
+    const readme = fs.readFileSync(path.join(REPO_ROOT, 'README.md'), 'utf-8');
+    const llms = fs.readFileSync(path.join(WEBSITE_DIR, 'llms.txt'), 'utf-8');
+    for (const [name, body] of Object.entries({ 'README.md': readme, 'llms.txt': llms })) {
+      for (const stat of STATS) {
+        expect(body.split('\n'), `${name} no longer says "${stat}"`).toContain(`- ${stat}`);
+      }
+      expect(body.split('\n'), name).toContain(STATS_NOTE);
+      for (const stat of AUTHOR_STATS) {
+        expect(body, `${name} still lists "${stat}"`).not.toContain(`- ${stat}`);
+      }
+    }
   });
 
   it('keeps the four numbers traceable to the messaging doc', () => {
     const facts = sectionBody('1');
 
-    for (const stat of STATS) {
+    for (const stat of [...STATS, STATS_NOTE, AUTHOR_STATS[1]]) {
       expect(facts, `public-messaging.md §1 has no source for "${stat}"`).toContain(stat);
     }
   });
@@ -1816,9 +1844,17 @@ describe('Issue #3060: three levels and setup with your agent', () => {
 
   it('says Level 1 runs on the plan you already pay for, and Level 3 that the daily run is an example', () => {
     expect(text(section('level-1'))).toContain('It runs on the plan you already pay for.');
-    expect(section('level-1').match(/<li class="pillar">/g) ?? []).toHaveLength(4);
-    expect(section('level-2').match(/<li class="pillar">/g) ?? []).toHaveLength(4);
-    expect(section('level-3').match(/<li class="pillar">/g) ?? []).toHaveLength(2);
+    // #3162: Level 1's four cards are parallel, who is waiting, anywhere, one worktree per task.
+    const cards = (id: string): string[] =>
+      Array.from(section(id).matchAll(/<li class="pillar">\s*<h3>([\s\S]*?)<\/h3>/g), ([, title]) => text(title));
+    expect(cards('level-1')).toEqual([
+      'Run them in parallel',
+      'See who is waiting',
+      'Answer from anywhere',
+      'One worktree per task',
+    ]);
+    expect(cards('level-2')).toHaveLength(3);
+    expect(cards('level-3')).toHaveLength(0);
     expect(text(section('level-3'))).toContain('It is not a switch in the product.');
   });
 
@@ -1835,10 +1871,12 @@ describe('Issue #3060: three levels and setup with your agent', () => {
   });
 
   it('names the phone connection by its command and both providers in My setup', () => {
-    const rows = Array.from(section('my-setup').matchAll(/<tr>([\s\S]*?)<\/tr>/g), ([, row]) => text(row));
+    // #3162 folded My setup into Level 3's cost table, and the phone connection
+    // into Level 1's "Answer from anywhere" card.
+    const rows = Array.from(section('level-3').matchAll(/<tr>([\s\S]*?)<\/tr>/g), ([, row]) => text(row));
 
-    expect(rows).toContain('Phone connection commandmate remote (Tailscale or Cloudflare) — —');
-    expect(rows.some((row) => row.startsWith('Total') && row.includes(STATS[1]))).toBe(true);
+    expect(text(section('level-1'))).toContain('commandmate remote (Tailscale or Cloudflare)');
+    expect(rows.some((row) => row.startsWith('Total') && row.includes(AUTHOR_STATS[1]))).toBe(true);
   });
 
   it('closes with Star on GitHub, Follow on X and the README', () => {
@@ -1961,26 +1999,29 @@ describe('Issue #3058: the phone clip and the three-layer run', () => {
   });
 
   it('states the recorded run in Level 3 with the numbers from its record', () => {
-    // From the block's opening tag to its closing note.
-    const block = /<div class="run-record"[\s\S]*?class="run-record-note"[\s\S]*?<\/p>/.exec(section('level-3'));
+    // Since #3162 the numbers are the hero's (from the list to its note), and
+    // Level 3 links the repository the run used.
+    const hero = /<section class="hero">[\s\S]*?<\/section>/.exec(page())![0];
+    const block = /<ul class="stats"[\s\S]*?class="stats-note"[\s\S]*?<\/p>/.exec(hero);
 
-    expect(block, 'no run-record block in #level-3').not.toBeNull();
+    expect(block, 'no stats block in the hero').not.toBeNull();
     const said = text(block![0]);
     for (const fact of [
       'Claude Code',
-      '4 × Command Code',
+      '4 workers (Command Code)',
       '2 messages and 3 taps',
       '9 min 48 s',
-      '4/4 passed',
+      '4/4 checks passed',
       'merged with CI green',
-      '4/4 GO',
-      'as recorded on 2026-10-02',
+      'UAT 4/4 GO',
+      'recorded on 2026-10-02',
     ]) {
       expect(said, fact).toContain(fact);
     }
-    expect(block![0]).toContain('href="https://github.com/Kewton/commandmate-team-demo"');
-    // One run is not a speed claim.
+    expect(section('level-3')).toContain('href="https://github.com/Kewton/commandmate-team-demo"');
+    // One run is not a speed claim, and the record is two messages, not one request.
     expect(said.toLowerCase()).not.toMatch(/\balways\b|\bunder 10 minutes\b|\bevery time\b/);
+    expect(said.toLowerCase()).not.toMatch(/\b(?:1|one) request\b/);
   });
 
   it('sources the run in public-messaging.md §1', () => {
@@ -1988,5 +2029,55 @@ describe('Issue #3058: the phone clip and the three-layer run', () => {
 
     expect(doc).toContain('https://github.com/Kewton/CommandMate/issues/3058#issuecomment-5945597304');
     expect(doc).toContain('9 分 48 秒');
+  });
+});
+
+/**
+ * Issue #3162 — the page at about half its length: seven <h2> at most, three
+ * videos at most, Level 2 saying it is enough for many, the monthly cost in
+ * Level 3 as the author's, and Next — Learn as a direction only. The word count
+ * (850 or fewer) was measured for the PR rather than pinned here.
+ */
+describe('Issue #3162: the page cut to its axis', () => {
+  const page = (): string => readIndexHtml();
+  const main = (): string =>
+    (/<main id="main">([\s\S]*?)<\/main>/.exec(page())?.[1] ?? '').replace(/<!--[\s\S]*?-->/g, '');
+  const section = (id: string): string =>
+    new RegExp(`<section class="section[^"]*" id="${id}"[\\s\\S]*?</section>`).exec(page())?.[0] ?? '';
+
+  it('has seven <h2> at most and three videos at most', () => {
+    expect((main().match(/<h2\b/g) ?? []).length).toBeLessThanOrEqual(7);
+    expect((main().match(/<video\b/g) ?? []).length).toBeLessThanOrEqual(3);
+  });
+
+  it('says in Level 2 that it is enough for many projects', () => {
+    expect(text(section('level-2'))).toContain('For many solo and small projects, this level is enough.');
+  });
+
+  it("puts the monthly cost in Level 3, as the author's, and nowhere in the hero", () => {
+    const level3 = text(section('level-3'));
+
+    expect(level3).toContain('$110–$210 a month');
+    expect(level3).toContain("The author's team and its monthly cost");
+    expect(level3).toContain('Every step that changes something waits for your approval.');
+    expect(text(/<section class="hero">[\s\S]*?<\/section>/.exec(page())![0])).not.toContain('$110');
+  });
+
+  it('writes Next — Learn as a direction that is not built yet', () => {
+    const next = text(section('next')).toLowerCase();
+
+    expect(next).toContain('not built yet');
+    expect(next).not.toMatch(/\bloop|self-managing|\d+%/);
+  });
+
+  it('records what it took off the page in the media README, and keeps the files', () => {
+    const readme = fs.readFileSync(path.join(WEBSITE_DIR, MEDIA_DIR, 'README.md'), 'utf-8');
+
+    for (const file of ['never-miss-waiting.mp4', 'parallel-worktrees.mp4', 'install-skill.mp4']) {
+      expect(page(), file).not.toContain(file);
+      expect(readme, file).toContain(`\`${file}\``);
+      expect(fs.existsSync(path.join(WEBSITE_DIR, MEDIA_DIR, file)), file).toBe(true);
+    }
+    expect(readme).toContain('#3162');
   });
 });

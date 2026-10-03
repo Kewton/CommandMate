@@ -50,9 +50,33 @@
 | 対応 OS | macOS ・ Linux ・ Windows（WSL2）。ネイティブ Windows は非対応 | CommandMate は tmux に依存する |
 | ライセンス | MIT | `LICENSE` |
 
-### 作者の数字（LP ・ README の hero、Issue #3060）
+### hero の数字は実測 run（LP ・ README ・ llms.txt、Issue #3162）
 
-表記はこのとおりに書く。作者個人の実績で、製品の性能の主張ではない。
+LP ・ README（en / ja）・ `website/llms.txt` の hero に置く数字は、上の表の **3 層 run の行**から採る。
+表記はこのとおりに書き、3 つの面で同じものを使う（`tests/unit/website/landing-page.test.ts` が LP ・ README ・
+llms.txt の一致を見ている）。
+
+| en | ja | 上の表のどこから |
+|---|---|---|
+| 4 issues, 4 workers (Command Code), PM and dev lead on Claude Code | 4 Issue、ワーカー 4 つ（Command Code）、PM と開発リーダーは Claude Code | Run ・ Lead ・ Workers の列 |
+| 2 messages and 3 taps from a phone-width web UI | スマホ幅の Web UI からメッセージ 2 通＋タップ 3 回 | 結果の列 |
+| 4/4 checks passed, PRs merged with CI green, UAT 4/4 GO | 検証 4/4 合格、PR は CI 緑でマージ、UAT 4/4 GO | 結果の列 |
+| 9 min 48 s from request to report | 依頼から報告まで 9 分 48 秒 | 結果の列 |
+
+- 直下に必ず注記を添える。en: `As observed: one run, recorded on 2026-10-02. Not a benchmark.` /
+  ja: `as observed（実測した範囲）: 2026-10-02 に記録した 1 回の run。ベンチマークではない。`
+- 「1 request」「1 通で」とは書かない。記録はメッセージ 2 通＋タップ 3 回である
+- 記録はスマホ幅の Web UI での操作なので、「スマホ幅の Web UI から」と書く（実機のスマホとは書かない）
+- 1 回の run なので、速さの主張（always ・ every time ・ under 10 minutes など）に広げない
+
+### 作者の数字（hero には置かない）
+
+作者個人の実績で、製品の性能の主張ではない。Issue #3060 で hero に置いたが、作者の活動量の印象が強く
+製品の能力を示さないため、Issue #3162 で hero から外した。
+
+- 置いてよい場所は、LP の Level 3（月額だけ。PM と worker でプランを分けたチーム編成の証拠として、作者の実費と書く）と、
+  作者の名前で書く面（作者の投稿 ・ 作者の節）に限る。どこに置くときも作者の数字だと分かるように書く
+- 表記はこのとおりに書く。phone の割合は感覚値なので、置くなら必ず「estimate」と書く
 
 | 表記 | 出典 |
 |---|---|
