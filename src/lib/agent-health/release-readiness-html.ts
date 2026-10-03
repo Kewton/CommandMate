@@ -30,7 +30,7 @@ export interface ReleaseReadinessModel {
   };
   dispatch: DispatchRecord | null;
   dispatched: DispatchedIssueRow[];
-  mergedToday: Array<{ number: number; title: string; url: string; checks: CiState }> | null;
+  mergedToday: Array<{ number: number; title: string; url: string; checks: CiState; cancelledChecks?: number }> | null;
   audit: { current: number | null; atLastRelease: number | null; source: string };
   metrics: {
     rows: MetricComparison[] | null;
@@ -210,7 +210,7 @@ function developSection(model: ReleaseReadinessModel): string {
       : mergedToday.length === 0
         ? '<p class="muted">本日マージされた PR は無い。</p>'
         : `<ul>${mergedToday
-            .map((pr) => `<li>${link(pr.url, `#${pr.number}`)} ${escapeHtml(pr.title)} ${ciBadge(pr.checks)}</li>`)
+            .map((pr) => `<li>${link(pr.url, `#${pr.number}`)} ${escapeHtml(pr.title)} ${ciBadge(pr.checks)}${pr.cancelledChecks ? ` <span class="muted">cancel ${pr.cancelledChecks}</span>` : ''}</li>`)
             .join('')}</ul>`;
   const fragments =
     release.fragments === null

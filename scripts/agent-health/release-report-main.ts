@@ -38,6 +38,7 @@ import {
   pickWaitLog,
   selectRunFiles,
   reproducesFailAfter,
+  analyzeCheckRollup,
   summarizeCheckRollup,
   summarizeWorkflowRuns,
   type CiState,
@@ -184,7 +185,7 @@ class Facts {
       [
         'pr', 'list', '--repo', this.repo, '--state', 'all', '--limit', '300',
         '--search', `updated:>=${since}`,
-        // No statusCheckRollup here: with it the query times out (HTTP 504). See prChecks().
+        // No statusCheckRollup here: with it the query times out (HTTP 504). See prRollup().
         '--json', 'number,title,url,state,headRefName,baseRefName,mergedAt,mergeCommit,headRefOid,body',
       ],
       'PR の一覧'
@@ -193,14 +194,14 @@ class Facts {
   }
 
   /** One PR's checks, fetched only for the PRs the report shows. */
-  prChecks(number: number): CiState {
+  prRollup(number: number): readonly unknown[] | null {
     const json = this.json(
       'gh',
       ['pr', 'view', String(number), '--repo', this.repo, '--json', 'statusCheckRollup'],
       `PR #${number} のチェック`
     );
     const rollup = (json as { statusCheckRollup?: unknown } | null)?.statusCheckRollup;
-    return summarizeCheckRollup(Array.isArray(rollup) ? rollup : null);
+    return Array.isArray(rollup) ? rollup : null;
   }
 
   openIssues(label: string): Array<{ number: number; title: string; url: string; labels: string[] }> | null {
@@ -331,15 +332,20 @@ export async function main(argv: readonly string[], overrides: Partial<ReleaseRe
   // --- gh: CI, PRs, Issues
   const developCi: CiState = options.gh && sha ? summarizeWorkflowRuns(facts.workflowRuns(sha)) : 'unknown';
   const prs = options.gh ? facts.pullRequests(shiftDate(date, -PR_LOOKBACK_DAYS)) : null;
-  const checksCache = new Map<number, CiState>();
-  const checksOf = (number: number): CiState => {
-    if (!checksCache.has(number)) checksCache.set(number, facts.prChecks(number));
-    return checksCache.get(number) as CiState;
+  const rollupCache = new Map<number, readonly unknown[] | null>();
+  const rollupOf = (number: number): readonly unknown[] | null => {
+    if (!rollupCache.has(number)) rollupCache.set(number, facts.prRollup(number));
+    return rollupCache.get(number) ?? null;
   };
+  const checksOf = (number: number): CiState => summarizeCheckRollup(rollupOf(number));
   const mergedToday =
     prs === null
       ? null
-      : mergedOnDate(prs, date).map((pr) => ({ number: pr.number, title: pr.title, url: pr.url, checks: checksOf(pr.number) }));
+      : mergedOnDate(prs, date).map((pr) => {
+          // Merged PRs: the pull_request runs cancelled on close are not a failure (#3142).
+          const { state, cancelled } = analyzeCheckRollup(rollupOf(pr.number), { ignoreCancelled: true });
+          return { number: pr.number, title: pr.title, url: pr.url, checks: state, cancelledChecks: cancelled };
+        });
   let openIssues: ReleaseReadinessModel['openIssues'] = null;
   if (options.gh) {
     const byNumber = new Map<number, NonNullable<ReleaseReadinessModel['openIssues']>[number]>();
