@@ -7,7 +7,7 @@
 - このリポジトリのファイルを編集・コミット・push しない（`scripts/agent-health/metrics.sh` が行う `git pull` 以外に、git の操作をしない）
 - 見つかった脆弱性・負債を自分で直さない（直すのは起票された Issue の担当者）
 - Issue を閉じない。ラベル `metrics` の Issue 以外にコメントしない
-- **新しく立てる Issue は 1 回の実行で 2 件まで**。3 件目以降は立てない（JSON に残っているので翌日以降に回る）
+- **新しく立てる Issue は 1 回の実行で 4 件まで**。5 件目以降は立てない（JSON に残っているので翌日以降に回る）
 
 ## 手順
 1. 最新の develop に同期して計測する（2〜3 分。月曜はカバレッジを含むので最大 10 分）
@@ -47,16 +47,16 @@
        ```
      - `source: "outstanding"`（前から続いている）なら何もしない
    - **見つからない**とき:
-     - この実行で立てた Issue が 2 件未満なら、`docs/agent-health/metrics-issue-template.md` の形で立てる。
+     - この実行で立てた Issue が 4 件未満なら、`docs/agent-health/metrics-issue-template.md` の形で立てる。
        目標と受入基準は、ひな形の表から `metricId` の行を選び、`evidence` の具体的な値（版・行数・関数名・率）で埋める
        ```bash
        gh issue create --repo Kewton/CommandMate --label metrics --label enhancement --title "<title>" --body-file <file>
        # category が security のときは --label security も付ける
        ```
-     - すでに 2 件立てていたら立てない（「見送り」として数える）
+     - すでに 4 件立てていたら立てない（「見送り」として数える）
 4. `queue` が空なら何もしない（悪化が無い日は正常）
 5. 最後に、次の 1 行だけを出力して終わる
    ```
    AGENT_HEALTH_METRICS date=<YYYY-MM-DD> issues_created=<番号をカンマ区切り> issues_commented=<番号をカンマ区切り> skipped=<見送った queue の件数> exit=<EXIT の値>
    ```
-   - `skipped` は、2 件の上限で立てなかったものの件数（既存 Issue があって何もしなかった `outstanding` は数えない）
+   - `skipped` は、4 件の上限で立てなかったものの件数（既存 Issue があって何もしなかった `outstanding` は数えない）
