@@ -350,7 +350,10 @@ npx tsx scripts/agent-health/dispatch.ts --dry-run   # 選定と状態確認だ�
   roster に `claude-3`（cliTool `claude`）が無いときは送らずに失敗する
 - **送信**: `commandmate send mycodebranchdesk "/clear" --instance claude-3` → 5 秒ごとに状態を見て入力待ちに戻ったことを確かめる（90 秒まで）→
   `commandmate send mycodebranchdesk "<依頼>" --instance claude-3 --auto-yes --duration 8h`。どちらも `exit 99`（起動直後）なら 2 分後に 1 回だけ再送
-- **依頼の中身**: 1 行目が `/orchestrate <番号…>`（`--full` は付けない。UAT を main の作業ディレクトリで走らせないため）。続けて
+- **依頼の中身**: 送る本文は **改行を含まない 1 行** `/orchestrate <番号…> <条件ファイルの絶対パス> の条件に従うこと`
+  （複数行の送信は Claude Code に貼り付けとして扱われ、スラッシュコマンドとして実行されないため）。`--full` は付けない
+  （UAT を main の作業ディレクトリで走らせないため）。条件は送る前に `workspace/agent-health/<日付>/dispatch-terms-<番号を - でつないだもの>.md`
+  へ書く（`--dry-run` では書かない。書けなければ送らずに `skipped-busy` と `reason`）。条件の中身は
   「本 run では PR の develop へのマージを進めてよい（利用者の明示的な許可）」・run のファイル名を
   `plan-<番号を - でつないだもの>.md`・`summary-<同>.md`・`tasks-<同>.tsv` にすること（同じ日の別の run と上書きし合わないため）・
   完了後に `release-report.ts --date <日付>` で `workspace/agent-health/<日付>/release-readiness.html` を書くこと・
