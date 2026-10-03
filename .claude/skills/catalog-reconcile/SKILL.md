@@ -59,6 +59,31 @@ argument-hint: "[--codex-ref <tag>] (任意。codex のソースを特定の rel
 
 ---
 
+## 無人実行（agent-health からの依頼）
+
+agent-health の 08:30 の自動依頼（`src/lib/agent-health/dispatch.ts`、Issue #3159）は、ラベル `catalog-drift`
+（作成者 `kewton`）の Issue を develop の Claude 3 の `/orchestrate` に渡し、develop へのマージまで進める。
+worker には契約で「`.claude/skills/catalog-reconcile/SKILL.md` を読み、無人実行の節に従う」と渡される
+（このスキルは `disable-model-invocation: true` のまま。Claude Code 以外の worker もこのファイルを読んで従う）。
+
+無人実行では、下の Phase 1〜7 のうち「人の判断」とされた箇所を次の表のとおりに読み替える。表に無い箇所は Phase 1〜7 のとおり。
+
+| 項目 | 無人実行での扱い |
+|---|---|
+| ja 訳・en の文体 | エージェントが行う。`[要レビュー]` が 0 件になるまで終わらない（Phase 4-1 の残数確認をそのまま使う） |
+| `description-conflict` | エージェントが tool 別の説明キーを足して解く（Phase 4-2） |
+| 除外の追加・変更・削除 | **しない**。除外の判断が要る候補（幻コマンドの疑い、`excluded` に似た行）が出たら、その候補を外して残りだけ進め、Issue に「人の判断待ち」としてコメントする。候補だけで残りが無ければ PR を作らずに止まる |
+| attestation（claude / codex） | provider が読んだ集合（Phase 5-1 のレシピ）から `commands` / `version` / `observedAt` を書く。**カタログから写さない**。PR に provider の出力を貼る |
+| attestation（antigravity / command-code / copilot / opencode-v2） | 無人では触らない。版の差は Issue に残す |
+| opencode 1.x・copilot の実機照合（Phase 4-4） | 行わない |
+| `npm run build` | primary checkout で実行しない（既存の前提条件どおり。orchestrate の worktree の中で行う） |
+
+- この節に従った PR には、本文に「無人実行」と書き、Issue を参照する（`Refs #<番号>`）。develop 向けの PR は
+  `Closes` で Issue を閉じないため、Issue は翌日のずれの確認（#3158）が `clean` を出したときに閉じる
+- 除外の判断待ちで止まったときも、Issue にコメントを残してから止まる（PR を作らないことは失敗ではない）
+
+---
+
 ## Phase 1: ドリフト検出（書き込みなし）
 
 ### 1-1. `--check` を実行する

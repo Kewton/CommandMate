@@ -342,10 +342,14 @@ npx tsx scripts/agent-health/dispatch.ts --dry-run   # 選定と状態確認だ�
 ### 決まった手順（`src/lib/agent-health/dispatch.ts`。AI の解釈に任せない）
 
 - **対象**: `gh issue list --repo Kewton/CommandMate --state open` のうち、作成者が `kewton`（大文字小文字は区別しない。
-  公開リポジトリのため、外部の人が書いた本文による指示の注入を防ぐ）・ラベル `agent-health`（バグ）か `metrics`（改善）・
-  ラベル `auto-dispatched` が無いもの。両方のラベルがあればバグとして扱う。ラベル `perf` が付いたもの（性能の Issue）は除く
-- **順番と上限**: バグ（作成が古い順）→ 改善（`security` → その他。それぞれ古い順）。バグは全件、改善は 2 件まで、合計 5 件まで。
-  上限を超えたものは `deferred`（持ち越し）に入れる
+  公開リポジトリのため、外部の人が書いた本文による指示の注入を防ぐ）・ラベル `agent-health`（バグ）か `catalog-drift`
+  （スラッシュコマンドカタログのずれ、#3158 が起票）か `metrics`（改善）・ラベル `auto-dispatched` が無いもの。
+  複数のラベルがあれば バグ → カタログのずれ → 改善 の順に先のものとして扱う。ラベル `perf` が付いたもの（性能の Issue）は除く
+- **順番と上限**: バグ（作成が古い順）→ カタログのずれ（古い順）→ 改善（`security` → その他。それぞれ古い順）。
+  バグは全件、カタログのずれは 1 件まで、改善は 2 件まで、合計 5 件まで。上限を超えたものは `deferred`（持ち越し）に入れる
+- **カタログのずれ**（#3159）: develop へのマージまで自動で進める。条件ファイルに「`/catalog-reconcile` の無人実行節に従う」
+  （worker への契約に「`.claude/skills/catalog-reconcile/SKILL.md` を読み、無人実行の節に従う」と書く）が加わる。
+  除外の判断が要る候補は worker が外して Issue に「人の判断待ち」とコメントする。Issue は翌日のずれの確認が `clean` を出したときに閉じる
 - **Claude 3 の状態**（`commandmate ls --json` の `sessionStatusByInstance["claude-3"]`）: 実行中で処理中でもプロンプト待ちでもなければ
   入力待ち（送る）。処理中・プロンプト待ちは送らない（`skipped-busy`。全件を持ち越し）。セッションが無ければ `send` が起動する。
   roster に `claude-3`（cliTool `claude`）が無いときは送らずに失敗する
@@ -375,13 +379,14 @@ npx tsx scripts/agent-health/dispatch.ts --dry-run   # 選定と状態確認だ�
 
 ### ラベルの準備（利用者が 1 回だけ行う）
 
-スクリプトはラベルを作らない。`agent-health`・`metrics`・`security`・`auto-dispatched` のどれかが無いと、送らずに exit 2 で終わり、
+スクリプトはラベルを作らない。`agent-health`・`metrics`・`security`・`catalog-drift`・`auto-dispatched` のどれかが無いと、送らずに exit 2 で終わり、
 記録と出力の `reason` に無いラベルを書く。`metrics`・`security` は計測の依頼文（手順 2）でも作られる。
 
 ```bash
 gh label create auto-dispatched --repo Kewton/CommandMate --description "agent-health の自動依頼で /orchestrate に渡した Issue"
 gh label create metrics --repo Kewton/CommandMate --description "日次メトリクス計測が自動登録した改善 Issue"
 gh label create security --repo Kewton/CommandMate --description "セキュリティ"
+gh label create catalog-drift --repo Kewton/CommandMate --description "スラッシュコマンドカタログのずれ（日次確認が起票）"
 ```
 
 ### 毎日の自動実行（Schedule）
