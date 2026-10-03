@@ -36,6 +36,12 @@ vi.mock('fs', async (importOriginal) => ({
   closeSync: vi.fn(),
 }));
 
+// Issue #3110: npm is never asked from these tests. null = "npm could not be
+// asked", which keeps the pre-#3110 behaviour every case below pins.
+vi.mock('@/lib/app-update/npm-publish-check', () => ({
+  checkNpmHasNewerVersion: vi.fn().mockResolvedValue(null),
+}));
+
 import { spawn } from 'child_process';
 import { closeSync, openSync } from 'fs';
 import { POST, dynamic } from '@/app/api/app/update/route';
@@ -43,6 +49,7 @@ import { ensureConfigDir, isGlobalInstall, isNpxExecution } from '@/cli/utils/in
 import { acquireUpdateLock, releaseUpdateLock } from '@/lib/app-update/update-lock';
 import { getDaemonManagerFactory } from '@/cli/utils/daemon-factory';
 import { AUTH_EXCLUDED_PATHS } from '@/config/auth-config';
+import { checkNpmHasNewerVersion } from '@/lib/app-update/npm-publish-check';
 
 const unref = vi.fn();
 
@@ -67,6 +74,7 @@ beforeEach(() => {
   vi.mocked(acquireUpdateLock).mockReturnValue(true);
   vi.mocked(openSync).mockReturnValue(42);
   vi.mocked(spawn).mockReturnValue({ unref } as unknown as ReturnType<typeof spawn>);
+  vi.mocked(checkNpmHasNewerVersion).mockResolvedValue(null);
   mockDaemon(true);
 });
 
@@ -350,5 +358,67 @@ describe('POST /api/app/update - restart branch (決定3)', () => {
     await POST();
 
     expect(order).toEqual(['isRunning', 'spawn']);
+  });
+});
+
+describe('POST /api/app/update - npm publish check (Issue #3110)', () => {
+  it('returns 409 not_yet_published and starts nothing when npm has no newer version', async () => {
+    vi.mocked(checkNpmHasNewerVersion).mockResolvedValue(false);
+
+    const response = await POST();
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ code: 'not_yet_published' });
+    expect(spawn).not.toHaveBeenCalled();
+    expect(acquireUpdateLock).not.toHaveBeenCalled();
+  });
+
+  it('starts the update (202) when npm serves a newer version', async () => {
+    vi.mocked(checkNpmHasNewerVersion).mockResolvedValue(true);
+
+    const response = await POST();
+
+    expect(response.status).toBe(202);
+    expect(spawn).toHaveBeenCalledTimes(1);
+    const [, argv] = vi.mocked(spawn).mock.calls[0];
+    expect((argv as string[]).slice(1)).toEqual(['update', '--yes']);
+  });
+
+  it('starts the update (202) as before when npm cannot be asked', async () => {
+    vi.mocked(checkNpmHasNewerVersion).mockResolvedValue(null);
+
+    const response = await POST();
+
+    expect(response.status).toBe(202);
+    expect(spawn).toHaveBeenCalledTimes(1);
+  });
+
+  it('compares against the running version, not anything from the request', async () => {
+    vi.mocked(checkNpmHasNewerVersion).mockResolvedValue(true);
+
+    await POST();
+
+    expect(checkNpmHasNewerVersion).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(checkNpmHasNewerVersion).mock.calls[0]).toHaveLength(1);
+    expect(vi.mocked(checkNpmHasNewerVersion).mock.calls[0][0]).toMatch(/^\d+\.\d+\.\d+/);
+  });
+
+  it('does not ask npm for a non-global install (refused with 400 first)', async () => {
+    vi.mocked(isGlobalInstall).mockReturnValue(false);
+
+    const response = await POST();
+
+    expect(response.status).toBe(400);
+    expect(checkNpmHasNewerVersion).not.toHaveBeenCalled();
+  });
+
+  it('leaves the npx relaunch path as before (no npm check)', async () => {
+    vi.mocked(isNpxExecution).mockReturnValue(true);
+    vi.mocked(checkNpmHasNewerVersion).mockResolvedValue(false);
+
+    const response = await POST();
+
+    expect(response.status).toBe(202);
+    expect(checkNpmHasNewerVersion).not.toHaveBeenCalled();
   });
 });

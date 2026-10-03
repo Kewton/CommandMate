@@ -491,7 +491,10 @@
     "buttonAriaLabel": "CommandMate を v{version} にアップデート",
     "buttonReleaseAriaLabel": "v{version} のリリースページを開く",
     "buttonUpdating": "更新中…",
-    "statusDialogTitle": "アップデートの状態"
+    "statusDialogTitle": "アップデートの状態",
+    "pendingLabel": "v{version} 公開準備中",
+    "pendingDescription": "v{version} は npm への反映待ちです。反映されると更新できるようになります。",
+    "notYetPublished": "npm への反映待ちです。しばらくしてから再度お試しください。"
   },
   "terminal": {
     "historyLabel": "履歴",

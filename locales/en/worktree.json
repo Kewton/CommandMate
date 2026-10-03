@@ -491,7 +491,10 @@
     "buttonAriaLabel": "Update CommandMate to v{version}",
     "buttonReleaseAriaLabel": "Open the v{version} release page",
     "buttonUpdating": "Updating…",
-    "statusDialogTitle": "Update status"
+    "statusDialogTitle": "Update status",
+    "pendingLabel": "v{version} coming soon",
+    "pendingDescription": "v{version} is not on npm yet. You can update once it is published there.",
+    "notYetPublished": "The new version is not on npm yet. Please try again in a few minutes."
   },
   "terminal": {
     "historyLabel": "History",

@@ -19,18 +19,21 @@ export function makeUpdateInfo(overrides: Partial<UpdateCheckResponse> = {}): Up
     publishedAt: '2026-09-20T00:00:00Z',
     installType: 'global',
     updateCommand: 'npm install -g commandmate@latest',
+    pendingVersion: null,
     ...overrides,
   };
 }
 
-/** hasUpdate / canSelfUpdate follow updateInfo unless overridden */
+/** hasUpdate / pendingVersion / canSelfUpdate follow updateInfo unless overridden */
 export function makeAppUpdateValue(
   overrides: Partial<AppUpdateContextValue> = {}
 ): AppUpdateContextValue {
   const updateInfo = overrides.updateInfo ?? null;
+  const hasUpdate = updateInfo?.hasUpdate === true;
   return {
     ...APP_UPDATE_DEFAULT_VALUE,
-    hasUpdate: updateInfo?.hasUpdate === true,
+    hasUpdate,
+    pendingVersion: hasUpdate ? null : (updateInfo?.pendingVersion ?? null),
     canSelfUpdate: updateInfo?.installType === 'global' || updateInfo?.installType === 'npx',
     openConfirm: vi.fn(),
     cancel: vi.fn(),

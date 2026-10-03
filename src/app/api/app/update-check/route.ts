@@ -20,6 +20,7 @@ import { checkForUpdate, getCurrentVersion } from '@/lib/version-checker';
 // [CONS-001] CLI layer utility. Cross-layer import precedent: db-path-resolver.ts
 import { isGlobalInstall, isNpxExecution } from '@/cli/utils/install-context';
 import type { UpdateCheckResult } from '@/lib/version-checker';
+import { resolveNpmPublishGate } from '@/lib/app-update/npm-publish-check';
 
 // [FIX-270] Force dynamic route to prevent static prerendering at build time.
 // Without this, Next.js caches the GitHub API response during `npm run build`
@@ -55,6 +56,12 @@ export interface UpdateCheckResponse {
   installType: InstallType;
   /** [SEC-SF-004] Fixed string "npm install -g commandmate@latest" only. Never include dynamic path info. */
   updateCommand: string | null;
+  /**
+   * Issue #3110: a version GitHub has released but npm does not serve yet.
+   * While set, hasUpdate is false — the update would install nothing.
+   * Only ever set for a global install.
+   */
+  pendingVersion: string | null;
 }
 
 // =============================================================================
@@ -125,6 +132,7 @@ function toUpdateCheckResponse(
       publishedAt: null,
       installType,
       updateCommand: null,
+      pendingVersion: null,
     };
   }
 
@@ -141,6 +149,37 @@ function toUpdateCheckResponse(
     updateCommand: result.hasUpdate && installType === 'global'
       ? 'npm install -g commandmate@latest'
       : null,
+    pendingVersion: null,
+  };
+}
+
+/**
+ * Issue #3110: hold a global install's update back until npm serves it.
+ * GitHub releases 34-43 minutes before npm publishes, and `commandmate update`
+ * installs npm's `latest`. npx / local installs keep the GitHub-only answer.
+ *
+ * @param response - GitHub-based response
+ * @returns The response with hasUpdate / updateCommand / pendingVersion adjusted
+ */
+async function applyNpmPublishGate(response: UpdateCheckResponse): Promise<UpdateCheckResponse> {
+  if (
+    response.status !== 'success' ||
+    !response.hasUpdate ||
+    response.installType !== 'global' ||
+    response.latestVersion === null
+  ) {
+    return response;
+  }
+  const gate = await resolveNpmPublishGate({
+    hasUpdate: response.hasUpdate,
+    latestVersion: response.latestVersion,
+  });
+  if (gate.hasUpdate) return response;
+  return {
+    ...response,
+    hasUpdate: false,
+    updateCommand: null,
+    pendingVersion: gate.pendingVersion,
   };
 }
 
@@ -156,7 +195,7 @@ export async function GET(): Promise<NextResponse<UpdateCheckResponse>> {
   try {
     const result = await checkForUpdate();
     const installType = detectInstallType();
-    return buildResponse(toUpdateCheckResponse(result, installType));
+    return buildResponse(await applyNpmPublishGate(toUpdateCheckResponse(result, installType)));
   } catch {
     // Silent failure: return degraded response
     const installType = detectInstallType();
