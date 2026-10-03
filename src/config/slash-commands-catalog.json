@@ -3858,6 +3858,56 @@
       ],
       "isStandard": true,
       "source": "standard"
+    },
+    {
+      "name": "artifact-capabilities",
+      "descriptionKey": "slashCommands.descriptions.artifact-capabilities",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "artifact-diagramming",
+      "descriptionKey": "slashCommands.descriptions.artifact-diagramming",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "claude-in-chrome",
+      "descriptionKey": "slashCommands.descriptions.claude-in-chrome",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "plugin-authoring",
+      "descriptionKey": "slashCommands.descriptions.plugin-authoring",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "slides",
+      "descriptionKey": "slashCommands.descriptions.slides",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
     }
   ]
 }
