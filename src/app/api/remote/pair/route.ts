@@ -122,7 +122,6 @@ export async function POST(request: NextRequest) {
 
     // 4. Expired.
     if (isPairingExpired(handoff)) {
-      consumePairingHandoff(pairingFilePath);
       logPairingEvent('failure', 'expired');
       return NextResponse.json({ error: 'Pairing is no longer available.' }, { status: 410 });
     }

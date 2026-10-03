@@ -130,6 +130,18 @@ export interface UseWorktreesCacheReturn {
 }
 
 /**
+ * Options of useWorktreesCache.
+ */
+export interface UseWorktreesCacheOptions {
+  /**
+   * Issue #3157: false skips the initial fetch and the polling loop, so the
+   * unauthenticated `/login` screen sends no `/api/worktrees` request. Flipping
+   * it back to true starts both as on a fresh mount. Defaults to true.
+   */
+  enabled?: boolean;
+}
+
+/**
  * Hook that provides cached access to the worktree list.
  *
  * Includes adaptive polling: 5s when any session is running, 30s when idle.
@@ -137,7 +149,9 @@ export interface UseWorktreesCacheReturn {
  *
  * @returns Worktree list, loading state, error state, and refresh function
  */
-export function useWorktreesCache(): UseWorktreesCacheReturn {
+export function useWorktreesCache(
+  { enabled = true }: UseWorktreesCacheOptions = {},
+): UseWorktreesCacheReturn {
   const [worktrees, setWorktrees] = useState<Worktree[]>([]);
   // Issue #690: Cache repositories alongside worktrees so the Sidebar
   // can filter out hidden repositories (visible=false) without an extra
@@ -258,8 +272,9 @@ export function useWorktreesCache(): UseWorktreesCacheReturn {
 
   // Initial fetch
   useEffect(() => {
+    if (!enabled) return;
     refresh();
-  }, [refresh]);
+  }, [enabled, refresh]);
 
   // Issue #2059: never leave a retry armed after unmount.
   useEffect(() => cancelRetry, [cancelRetry]);
@@ -316,6 +331,7 @@ export function useWorktreesCache(): UseWorktreesCacheReturn {
 
   // Adaptive polling: initial start + visibility change handling
   useEffect(() => {
+    if (!enabled) return;
     const handleVisibilityChange = () => {
       if (document.hidden) {
         stopPolling();
@@ -337,7 +353,7 @@ export function useWorktreesCache(): UseWorktreesCacheReturn {
       stopPolling();
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [refresh, startPolling, stopPolling]);
+  }, [enabled, refresh, startPolling, stopPolling]);
 
   // Sync worktreesRef and re-evaluate the polling interval when worktrees
   // change. Issue #710: if the active/idle state changed, restart polling
