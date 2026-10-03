@@ -54,6 +54,22 @@ describe('capture command action', () => {
     expect(mockConsoleLog).toHaveBeenCalledWith('Hello from agent');
   });
 
+  it('points to --pane when the transcript is empty (Issue #3128)', async () => {
+    mockFetchResponse({ ...sampleOutput, content: '', isPromptWaiting: true });
+    const { createCaptureCommand } = await import('../../../../src/cli/commands/capture');
+    const cmd = createCaptureCommand();
+    await cmd.parseAsync(['node', 'capture', 'wt1']);
+    expect(mockConsoleLog.mock.calls[0][0]).toContain('--pane');
+  });
+
+  it('keeps --json output unchanged when the transcript is empty (Issue #3128)', async () => {
+    mockFetchResponse({ ...sampleOutput, content: '' });
+    const { createCaptureCommand } = await import('../../../../src/cli/commands/capture');
+    const cmd = createCaptureCommand();
+    await cmd.parseAsync(['node', 'capture', 'wt1', '--json']);
+    expect(JSON.parse(mockConsoleLog.mock.calls[0][0]).content).toBe('');
+  });
+
   it('outputs JSON without fullOutput when --json', async () => {
     mockFetchResponse(sampleOutput);
     const { createCaptureCommand } = await import('../../../../src/cli/commands/capture');
