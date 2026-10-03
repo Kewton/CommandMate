@@ -65,6 +65,9 @@
     "systemMessage": "System Message",
     "systemMessageLabel": "System message",
     "openFile": "Open file: {path}",
+    "imageLoading": "Loading image…",
+    "imageUnavailable": "Image unavailable",
+    "openImage": "Open image: {path}",
     "conversationLabel": "Conversation: {preview}",
     "filePathMissing": "That path is not in this worktree"
   },
