@@ -236,7 +236,7 @@ tmux -L cm-agent-health kill-server
 - **「新たに閾値を超えた」「前回より悪化した」だけが候補**（`candidates`）。前から超えているもの（1,500 行超の 14 本、
   複雑度 25 以上の 83 関数など）は起票せず、`value` と `details` の件数として残す
 - 前回値が無い指標（初回・前回が skip のまま）は基準として記録するだけで、候補を出さない
-- security の検出が続いている間は `status: 'fail'`。前からあるものは `outstanding` に入り、AI はその日の起票枠（2 件）に
+- security の検出が続いている間は `status: 'fail'`。前からあるものは `outstanding` に入り、AI はその日の起票枠（4 件）に
   余りがあるときだけ、まだ Issue の無いものを立てる（初日に見送った advisory も翌日以降に回る）
 - 外部ツールが無い・失敗した・時間切れの指標は `status: 'skip'`（`skipReason` に理由）。skip した指標の前回値は
   state に残り、次の実行はそれと比べる
@@ -313,7 +313,7 @@ interface MetricsReport {
   日次確認より前に終わる
 - 依頼文 `docs/agent-health/metrics-prompt.md`、Issue のひな形 `docs/agent-health/metrics-issue-template.md`。
   識別子 `metrics:<metricId>:<対象>` で open の Issue を探し、あれば（その日の新規・悪化のときだけ）コメント、
-  無ければ起票する。**新規起票は 1 日 2 件まで**（`queue` の順: security の新規 → 悪化幅の大きい保守性 → performance の新規 → 続いている security → 続いている performance）
+  無ければ起票する。**新規起票は 1 日 4 件まで**（`queue` の順: security の新規 → 悪化幅の大きい保守性 → performance の新規 → 続いている security → 続いている performance）
 - ラベル `metrics`・`enhancement`（security は `security` も）を使う。無ければ作る:
   `gh label create metrics --repo Kewton/CommandMate --description "日次メトリクス計測が自動登録した改善 Issue"`
   （`security`・`enhancement` も同様。依頼文の手順 2 でも確かめる）
