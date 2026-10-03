@@ -342,10 +342,14 @@ npx tsx scripts/agent-health/dispatch.ts --dry-run   # 選定と状態確認だ�
 ### 決まった手順（`src/lib/agent-health/dispatch.ts`。AI の解釈に任せない）
 
 - **対象**: `gh issue list --repo Kewton/CommandMate --state open` のうち、作成者が `kewton`（大文字小文字は区別しない。
-  公開リポジトリのため、外部の人が書いた本文による指示の注入を防ぐ）・ラベル `agent-health`（バグ）か `metrics`（改善）・
-  ラベル `auto-dispatched` が無いもの。両方のラベルがあればバグとして扱う。ラベル `perf` が付いたもの（性能の Issue）は除く
-- **順番と上限**: バグ（作成が古い順）→ 改善（`security` → その他。それぞれ古い順）。バグは全件、改善は 2 件まで、合計 5 件まで。
-  上限を超えたものは `deferred`（持ち越し）に入れる
+  公開リポジトリのため、外部の人が書いた本文による指示の注入を防ぐ）・ラベル `agent-health`（バグ）か `catalog-drift`
+  （スラッシュコマンドカタログのずれ、#3158 が起票）か `metrics`（改善）・ラベル `auto-dispatched` が無いもの。
+  複数のラベルがあれば バグ → カタログのずれ → 改善 の順に先のものとして扱う。ラベル `perf` が付いたもの（性能の Issue）は除く
+- **順番と上限**: バグ（作成が古い順）→ カタログのずれ（古い順）→ 改善（`security` → その他。それぞれ古い順）。
+  バグは全件、カタログのずれは 1 件まで、改善は 2 件まで、合計 5 件まで。上限を超えたものは `deferred`（持ち越し）に入れる
+- **カタログのずれ**（#3159）: develop へのマージまで自動で進める。条件ファイルに「`/catalog-reconcile` の無人実行節に従う」
+  （worker への契約に「`.claude/skills/catalog-reconcile/SKILL.md` を読み、無人実行の節に従う」と書く）が加わる。
+  除外の判断が要る候補は worker が外して Issue に「人の判断待ち」とコメントする。Issue は翌日のずれの確認が `clean` を出したときに閉じる
 - **Claude 3 の状態**（`commandmate ls --json` の `sessionStatusByInstance["claude-3"]`）: 実行中で処理中でもプロンプト待ちでもなければ
   入力待ち（送る）。処理中・プロンプト待ちは送らない（`skipped-busy`。全件を持ち越し）。セッションが無ければ `send` が起動する。
   roster に `claude-3`（cliTool `claude`）が無いときは送らずに失敗する
@@ -375,13 +379,14 @@ npx tsx scripts/agent-health/dispatch.ts --dry-run   # 選定と状態確認だ�
 
 ### ラベルの準備（利用者が 1 回だけ行う）
 
-スクリプトはラベルを作らない。`agent-health`・`metrics`・`security`・`auto-dispatched` のどれかが無いと、送らずに exit 2 で終わり、
+スクリプトはラベルを作らない。`agent-health`・`metrics`・`security`・`catalog-drift`・`auto-dispatched` のどれかが無いと、送らずに exit 2 で終わり、
 記録と出力の `reason` に無いラベルを書く。`metrics`・`security` は計測の依頼文（手順 2）でも作られる。
 
 ```bash
 gh label create auto-dispatched --repo Kewton/CommandMate --description "agent-health の自動依頼で /orchestrate に渡した Issue"
 gh label create metrics --repo Kewton/CommandMate --description "日次メトリクス計測が自動登録した改善 Issue"
 gh label create security --repo Kewton/CommandMate --description "セキュリティ"
+gh label create catalog-drift --repo Kewton/CommandMate --description "スラッシュコマンドカタログのずれ（日次確認が起票）"
 ```
 
 ### 毎日の自動実行（Schedule）
@@ -392,6 +397,59 @@ gh label create security --repo Kewton/CommandMate --description "セキュリ�
   orchestrate の完了も待たない
 - 初めて有効にする前に、`--dry-run` で対象と Claude 3 の状態を確かめ、1 回は手で実行して Claude 3 に届き `/orchestrate` が
   始まることを確かめる
+
+## カタログのずれ（スラッシュコマンドカタログ、Issue #3158）
+
+スラッシュコマンドカタログ（`src/config/slash-commands-catalog.json`）と各 CLI のずれを毎日 07:30 に確かめ、ずれがあれば作成者 `kewton`・
+ラベル `catalog-drift` の Issue を 1 本立てる（08:30 の自動依頼が拾う。#3159）。ずれが解消したら閉じる。**読むだけで、追跡対象のファイルを書き換えない**
+（`--write` で追跡ファイルが変わると、翌朝の `daily.sh` が `dirty-worktree` で同期を拒否し、日次確認ごと止まるため）。
+
+```bash
+npx tsx scripts/agent-health/catalog-check.ts             # 判定 → 版の比較 → Issue の同期 → 記録
+npx tsx scripts/agent-health/catalog-check.ts --dry-run   # 判定と版の比較だけ。Issue を作成・更新・close せず、記録も書かない
+```
+
+| オプション | 既定 |
+|---|---|
+| `--state-dir <dir>` | `$AGENT_HEALTH_DIR` か `~/.commandmate/agent-health`（`reports/<JST 日付>.json` を読み、`catalog/<JST 日付>.json` を書く） |
+| `--dry-run` | 無効 |
+
+### 決まった手順（`src/lib/agent-health/catalog-check.ts`）
+
+- **判定**: `npm run catalog:refresh -- --check` の出力を `parseCatalogCheckOutput`（`src/lib/slash-command-reconcile/check-report.ts`）で
+  `drift`（新規コマンドあり、または attestation の陳腐化あり）・`clean`・`inconclusive`（ソースを照合できなかった）に分ける。exit code では判定しない
+- **opencode 1.x は対象外**（v2 がリリース済みのため）。`opencode provider skipped…` の警告は既知の状態として扱い、検査不能に数えない。
+  CI の週次 workflow の判定は変えないよう、`IGNORED_WARNING_PREFIXES` には足さずこのチェックの側で除く
+- **版の比較**: 当日の agent-health レポートの `tools[].version` と `src/config/slash-commands-attestations.json` の `version` を比べ、差を
+  Issue 本文の「版の差」と最後の行に出す（opencode 1.x は除く）。**版の差だけでは `drift` にしない**（patch のたびに依頼が飛ぶのを防ぐ）
+- **Issue の同期**（作成者 `kewton` の open な `catalog-drift` の Issue だけを見る。CI の bot が立てた Issue は使わない）:
+
+  | 判定 | open な Issue | 動作 |
+  |---|---|---|
+  | drift | 無い | 新規作成（本文は `scripts/catalog-drift-report.ts` の形式。冒頭に「対応は `/catalog-reconcile` の無人実行節に従う」） |
+  | drift | ある | タイトルと本文を更新。タイトルの件数が動いたときだけコメント |
+  | clean | ある | 「ずれ 0・検査不能なし」とコメントして close |
+  | clean | 無い | 何もしない |
+  | inconclusive | — | 作らない・閉じない。理由を記録と最後の行に出す |
+
+  一度閉じた Issue は再利用しない（次のずれは新しい Issue。`auto-dispatched` が残った Issue は再依頼されないため）
+
+### 記録と出力
+
+- 記録 `~/.commandmate/agent-health/catalog/<JST 日付>.json`（型は `CatalogCheckRecord`）: `status`・`newCount`・`newCommands`・
+  `attestationDrift`・`verifiedAgainstUpdates`・`ignoredWarnings`・`inconclusiveReasons`・`versionGaps`（当日のレポートが無ければ `null`）・
+  `issue`・`action`・`reason`
+- 標準出力の最後に `AGENT_HEALTH_CATALOG date=<日付> status=drift|clean|inconclusive new=<数> attestation_drift=<数> version_gaps=<tool:記録->手元,…|none|unknown> issue=<番号|none> action=created|updated|closed|none[ reason="…"]`。
+  `--dry-run` では先頭に `DRY_RUN`、末尾に `dry_run=would-create|update|close|none` が付く
+- exit: 0 正常（判定は問わない）／1 判定はできたが Issue の同期か記録に失敗／2 実行できなかった（引数の誤り・`npm` を起動できない）
+
+### 毎日の自動実行（Schedule）
+
+- 日次確認と同じ worktree（`../commandmate-agent-health`）の `CMATE.md` に、`docs/agent-health/CMATE.example.md` の
+  `agent-health-catalog` 行（`30 7 * * *`・command-code・`yolo`）を加える。07:00 の日次確認（最大 12 分）の後、08:30 の自動依頼の前に終わる
+- 依頼文 `docs/agent-health/catalog-prompt.md` は「`daily.sh --sync-only --out <一時ファイル>` で同期 → スクリプトを実行 → 最後の行を出す」だけ
+- ラベル `catalog-drift` は CI の週次 workflow が使っていたものをそのまま使う。無ければ作る:
+  `gh label create catalog-drift --repo Kewton/CommandMate --description "スラッシュコマンドカタログのずれ"`
 
 ## リリース判断レポート
 
