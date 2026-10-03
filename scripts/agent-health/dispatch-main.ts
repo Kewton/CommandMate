@@ -19,9 +19,11 @@ import path from 'path';
 import {
   buildDispatchRecord,
   buildRequest,
+  buildTerms,
   DISPATCH_REPO,
   DISPATCHED_LABEL,
   dispatchComment,
+  dispatchTermsPath,
   formatDispatchLine,
   judgeAgentState,
   missingLabels,
@@ -54,6 +56,10 @@ export interface DispatchDeps {
   now: () => Date;
   env: NodeJS.ProcessEnv;
   homedir: string;
+  /** The repository this runs in; the terms file goes under its `workspace/`. */
+  repoRoot: string;
+  /** Writes a text file (creating its directory); throws on failure. */
+  writeText: (file: string, content: string) => void;
   stdout: (line: string) => void;
   stderr: (line: string) => void;
 }
@@ -82,6 +88,11 @@ function defaultDeps(): DispatchDeps {
     now: () => new Date(),
     env: process.env,
     homedir: os.homedir(),
+    repoRoot: path.resolve(__dirname, '..', '..'),
+    writeText: (file, content) => {
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, content);
+    },
     stdout: (line) => process.stdout.write(`${line}\n`),
     stderr: (line) => process.stderr.write(`[agent-health-dispatch] ${line}\n`),
   };
@@ -204,14 +215,23 @@ export async function main(argv: readonly string[], overrides: Partial<DispatchD
     );
   }
 
-  const request = buildRequest(date, issues);
+  const termsFile = dispatchTermsPath(deps.repoRoot, date, issues);
+  const request = buildRequest(issues, termsFile);
   if (dryRun) {
     deps.stdout(`DRY_RUN state=${state.kind} (nothing is sent, labelled or written)`);
+    deps.stdout(`DRY_RUN terms file (not written): ${termsFile}`);
     deps.stdout(`DRY_RUN commandmate ${JSON.stringify(sendArgv('/clear', false))}`);
     deps.stdout(`DRY_RUN commandmate ${JSON.stringify(sendArgv('<request>', true))}`);
     deps.stdout('DRY_RUN request:');
     for (const line of request.split('\n')) deps.stdout(`  ${line}`);
     return finish(buildDispatchRecord({ date, status: 'sent', issues, deferred }), 0);
+  }
+
+  // --- the terms the request points at (a send is one line; see buildRequest)
+  try {
+    deps.writeText(termsFile, buildTerms(date, issues));
+  } catch (error) {
+    return fail(`条件ファイルを書けなかった: ${termsFile}（${error instanceof Error ? error.message : String(error)}）`, issues, deferred);
   }
 
   // --- send

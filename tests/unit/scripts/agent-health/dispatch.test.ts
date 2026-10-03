@@ -56,6 +56,8 @@ interface World {
   /** Successive exit codes of `commandmate send`; the last one repeats. */
   send?: number[];
   ghWrite?: number;
+  /** The terms file cannot be written. */
+  writeFails?: boolean;
 }
 
 function stub(world: World): Exec {
@@ -94,11 +96,14 @@ async function run(world: World, argv: string[] = []): Promise<number> {
     now: () => new Date('2026-10-01T00:30:00Z'),
     env: {} as NodeJS.ProcessEnv,
     homedir: path.join(root, 'home'),
+    repoRoot: path.join(root, 'repo'),
+    ...(world.writeFails ? { writeText: () => { throw new Error('EACCES'); } } : {}),
     stdout: (line) => lines.push(line),
     stderr: (line) => lines.push(line),
   });
 }
 
+const termsFile = (suffix: string) => path.join(root, 'repo', 'workspace', 'agent-health', '2026-10-01', `dispatch-terms-${suffix}.md`);
 const record = () => JSON.parse(fs.readFileSync(recordFile(), 'utf8'));
 const sends = () => calls.filter(([command, args]) => command === 'commandmate' && args[0] === 'send').map(([, args]) => args);
 const ghWrites = () => calls.filter(([command, args]) => command === 'gh' && args[0] === 'issue' && args[1] !== 'list').map(([, args]) => args);
@@ -116,7 +121,7 @@ describe('dispatch main', () => {
     expect(code).toBe(0);
     expect(sends()).toEqual([
       ['send', 'mycodebranchdesk', '/clear', '--instance', 'claude-3'],
-      ['send', 'mycodebranchdesk', expect.stringMatching(/^\/orchestrate 3050 3051\n/), '--instance', 'claude-3', '--auto-yes', '--duration', '8h'],
+      ['send', 'mycodebranchdesk', expect.stringMatching(/^\/orchestrate 3050 3051 [^\n]*dispatch-terms-3050-3051\.md の条件に従うこと$/), '--instance', 'claude-3', '--auto-yes', '--duration', '8h'],
     ]);
     // Waited for Claude 3 to come back to its prompt between the two sends.
     expect(calls.filter(([c, a]) => c === 'commandmate' && a[0] === 'ls')).toHaveLength(3);
@@ -214,7 +219,7 @@ describe('dispatch main', () => {
   it('resends once after 2 minutes on a cold start (exit 99)', async () => {
     const code = await run({ issues: [ghIssue(1, ['agent-health'], 'a')], ls: [null, READY], send: [99, 0, 0] });
     expect(code).toBe(0);
-    expect(sends().map((args) => args[2].split('\n')[0])).toEqual(['/clear', '/clear', '/orchestrate 1']);
+    expect(sends().map((args) => args[2].replace(/ \/.*$/, ''))).toEqual(['/clear', '/clear', '/orchestrate 1']);
     expect(sleeps[0]).toBe(120_000);
   });
 
@@ -240,6 +245,22 @@ describe('dispatch main', () => {
     expect(record()).toMatchObject({ status: 'sent', reason: expect.stringContaining('#1 にラベルを付けられなかった') });
   });
 
+  it('writes the terms file before sending, with the terms content', async () => {
+    const code = await run({ issues: [ghIssue(3050, ['agent-health'], 'a')] });
+    expect(code).toBe(0);
+    const terms = fs.readFileSync(termsFile('3050'), 'utf8');
+    expect(terms).toContain('summary-3050.md');
+    expect(terms).toContain('release-report.ts --date 2026-10-01');
+  });
+
+  it('does not send and records skipped-busy when the terms file cannot be written', async () => {
+    const code = await run({ issues: [ghIssue(3050, ['agent-health'], 'a')], writeFails: true });
+    expect(code).toBe(2);
+    expect(sends()).toEqual([]);
+    expect(ghWrites()).toEqual([]);
+    expect(record()).toMatchObject({ status: 'skipped-busy', deferred: [3050], reason: expect.stringContaining('条件ファイルを書けなかった') });
+  });
+
   it('does not hand anything again on a day already sent', async () => {
     fs.mkdirSync(path.dirname(recordFile()), { recursive: true });
     const earlier = { schemaVersion: 1, date: '2026-10-01', status: 'sent', issues: [{ number: 1, kind: 'bug', title: '' }], deferred: [] };
@@ -256,7 +277,8 @@ describe('dispatch main', () => {
     expect(sends()).toEqual([]);
     expect(ghWrites()).toEqual([]);
     expect(fs.existsSync(recordFile())).toBe(false);
-    expect(lines).toContain('  /orchestrate 1');
+    expect(fs.existsSync(termsFile('1'))).toBe(false);
+    expect(lines.some((line) => line.startsWith('  /orchestrate 1 '))).toBe(true);
     expect(lines).toContain('DRY_RUN AGENT_HEALTH_DISPATCH date=2026-10-01 status=sent issues=1 deferred=-');
   });
 
