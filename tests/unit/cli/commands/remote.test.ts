@@ -96,6 +96,7 @@ import {
   isLoopbackBind,
   parseAuthScope,
   parsePairingDuration,
+  runRemotePair,
   runRemoteStatus,
   runRemoteStop,
   runRemoteUp,
@@ -111,6 +112,12 @@ import {
 import { waitForServer } from '../../../../src/cli/utils/server-ready';
 import { verifyLaunchedServer } from '../../../../src/cli/utils/server-identity';
 import { isInteractive } from '../../../../src/cli/utils/prompt';
+import { hashToken } from '../../../../src/lib/security/auth';
+import {
+  readPairingHandoff,
+  verifyPairingCode,
+  writePairingHandoff,
+} from '../../../../src/lib/security/pairing-code';
 import {
   REMOTE_STATE_SCHEMA_VERSION,
   readRemoteState,
@@ -691,6 +698,106 @@ describe('commandmate remote', () => {
       expect(buildPairingUrl('https://host.ts.net', 'ABC')).toBe('https://host.ts.net/login#code=ABC');
       // A trailing slash from a Provider must not produce `//login`.
       expect(buildPairingUrl('https://host.ts.net/', 'ABC')).toBe('https://host.ts.net/login#code=ABC');
+    });
+  });
+
+  describe('pair (Issue #3127)', () => {
+    const handoffPath = join(configDir, 'remote-pairing.json');
+
+    function capture(): string[] {
+      const lines: string[] = [];
+      vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+        lines.push(args.join(' '));
+      });
+      return lines;
+    }
+
+    beforeEach(() => {
+      rmSync(handoffPath, { force: true });
+    });
+
+    it('shows a new one-time link for the same URL, and never the session token', async () => {
+      const state = recordedState();
+      writeRemoteState(state, statePath);
+      writePairingHandoff(handoffPath, {
+        pairingHash: hashToken('ABC123'),
+        expiresAt: state.pairing.expiresAt,
+        sessionToken: 'secret-session-token',
+      });
+      const lines = capture();
+
+      expect(await runRemotePair({ json: true })).toBe(ExitCode.SUCCESS);
+
+      const output = JSON.parse(lines.join('\n'));
+      expect(output.pairingUrl).toMatch(/^https:\/\/recorded\.example\.test\/login#code=[0-9A-Z]{26}$/);
+      expect(output.notice).toContain('remote stop');
+      expect(lines.join('\n')).not.toContain('secret-session-token');
+      const code = output.pairingUrl.split('#code=')[1];
+      expect(verifyPairingCode(code, readPairingHandoff(handoffPath)!.pairingHash)).toBe(true);
+      // No new public surface: no Provider is touched, the state is unchanged.
+      expect(detectRemoteProviders).not.toHaveBeenCalled();
+      expect(runStart).not.toHaveBeenCalled();
+      expect(readRemoteState(statePath)).toEqual(state);
+    });
+
+    it('prints the link as text next to the QR code', async () => {
+      const state = recordedState();
+      writeRemoteState(state, statePath);
+      writePairingHandoff(handoffPath, {
+        pairingHash: hashToken('ABC123'),
+        expiresAt: state.pairing.expiresAt,
+        sessionToken: 'secret-session-token',
+      });
+      const lines = capture();
+
+      expect(await runRemotePair({})).toBe(ExitCode.SUCCESS);
+
+      const output = lines.join('\n');
+      expect(output).toMatch(/\/login#code=[0-9A-Z]{26}/);
+      expect(output).toContain('remote stop');
+      expect(output).not.toContain('secret-session-token');
+    });
+
+    it('refuses a consumed code and points at remote stop -> remote', async () => {
+      writeRemoteState(recordedState(), statePath);
+      const lines = capture();
+
+      expect(await runRemotePair({ json: true })).toBe(ExitCode.CONFIG_ERROR);
+
+      const output = JSON.parse(lines.join('\n'));
+      expect(output.pairingUrl).toBeNull();
+      expect(output.pairing.state).toBe('consumed');
+      expect(output.hint).toContain('remote stop');
+      expect(existsSync(handoffPath)).toBe(false);
+    });
+
+    it('refuses an expired code', async () => {
+      const state = recordedState({
+        pairing: { filePath: handoffPath, expiresAt: Date.now() - 1000 },
+      });
+      writeRemoteState(state, statePath);
+      writePairingHandoff(handoffPath, {
+        pairingHash: hashToken('ABC123'),
+        expiresAt: Date.now() - 1000,
+        sessionToken: 'secret-session-token',
+      });
+      const lines = capture();
+
+      expect(await runRemotePair({ json: true })).toBe(ExitCode.CONFIG_ERROR);
+      expect(JSON.parse(lines.join('\n')).pairing.state).toBe('expired');
+    });
+
+    it('shows nothing when the handoff file is unreadable', async () => {
+      writeRemoteState(recordedState(), statePath);
+      writeFileSync(handoffPath, 'not json', { mode: 0o600 });
+      const lines = capture();
+
+      expect(await runRemotePair({ json: true })).toBe(ExitCode.CONFIG_ERROR);
+      expect(lines.join('\n')).not.toContain('code=');
+    });
+
+    it('refuses with no remote session recorded', async () => {
+      expect(await runRemotePair({})).toBe(ExitCode.CONFIG_ERROR);
     });
   });
 });

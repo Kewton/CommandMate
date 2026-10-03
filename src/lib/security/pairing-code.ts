@@ -84,7 +84,8 @@ export interface PairingHandoff {
 export interface CreatedPairing {
   /**
    * Plaintext pairing code. NEVER persisted — the caller renders it as a QR
-   * code and drops it. Re-displaying it means running `remote` again.
+   * code and drops it. It cannot be displayed again; `remote pair` mints a
+   * replacement instead (Issue #3127, `src/cli/utils/remote-pairing.ts`).
    */
   code: string;
   /** Plaintext long-lived token (also written to the handoff file). */
