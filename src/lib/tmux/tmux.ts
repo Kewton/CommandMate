@@ -728,6 +728,9 @@ const ALLOWED_SPECIAL_KEYS = new Set([
   // (`COMMAND_CODE_NAVIGATION_KEY_VALUES`), so the route answers 400 for every
   // other tool — the same arrangement as `s` above.
   'C-a',
+  // Issue #3138: Command Code's plan review is submitted with ctrl+r; sent via
+  // sendSpecialKeys() like the other keys instead of a one-off sendKeys() call.
+  'C-r',
 ]);
 
 /**

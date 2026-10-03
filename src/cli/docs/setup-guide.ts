@@ -143,6 +143,8 @@ commandmate remote --provider cloudflare --yes
 
 If the QR code cannot be read, or scanning it does not get the person in, have them copy the pairing URL and paste it into the address bar of the phone's browser. Pasting the link into the address bar is the way that worked in the hands-on check; do not save the link to a file.
 
+To get the link as text again without reopening the tunnel, run \`commandmate remote pair\` (or \`commandmate remote pair --json\` and read \`pairingUrl\`). The URL stays the same, and it works only while the code is unused.
+
 ### Ask the person first
 
 - Which provider: Tailscale or Cloudflare.
@@ -163,7 +165,8 @@ To close the way in later: \`commandmate remote stop\`. The server keeps running
 - Exit 1, "no provider is usable": read the reason it prints. For Tailscale it is usually "not connected" (the person has not signed in) or "no MagicDNS name". Do not switch to Cloudflare without asking: that changes who can reach the machine.
 - Exit 2 without a terminal: Cloudflare needs \`--yes\`, or a server is running that \`remote\` has to restart. Ask the person, then run \`commandmate stop\` and try again.
 - Exit 2, "a server with authentication is already running": \`commandmate stop\`, then \`commandmate remote\` again.
-- The code expired or was already used: run \`commandmate remote stop\`, then \`commandmate remote\` again for a new QR code. \`--pairing-expires 30m\` gives a slower person more time.
+- The QR code is cut off in the agent's chat pane, or the person lost it, and it has not been used yet: run \`commandmate remote pair\`. The public URL stays the same and the earlier link stops working. The new code keeps the original expiry time.
+- The code expired or was already used: run \`commandmate remote stop\`, then \`commandmate remote\` again for a new QR code (\`remote pair\` prints nothing for a used or expired code). \`--pairing-expires 30m\` gives a slower person more time.
 - After pairing, the browser on this machine asks for a login and the CLI stops answering: that is the default \`--auth all\`. Do not look for a way to give the token to the CLI. Ask the person to choose: run \`commandmate remote stop\` and finish Stages 3 to 5 on this machine first, or pair again with \`--auth remote-only\` (every process on this machine can then operate CommandMate without logging in).
 
 ## Stage 3: Add a second agent
