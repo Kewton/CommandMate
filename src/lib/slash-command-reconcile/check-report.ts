@@ -99,9 +99,15 @@ export const IGNORED_WARNING_PREFIXES: readonly string[] = [
   'antigravity provider not implemented yet',
 ];
 
-/** True when `warning` is a known permanent state rather than a real outage. */
-export function isIgnoredWarning(warning: string): boolean {
-  return IGNORED_WARNING_PREFIXES.some((prefix) => warning.startsWith(prefix));
+/**
+ * True when `warning` is a known permanent state rather than a real outage.
+ *
+ * `extraPrefixes` widens the allowlist for one caller only (Issue #3158: the
+ * agent-health daily check also ignores the opencode 1.x skip, while the CI
+ * workflow keeps treating it as blocking).
+ */
+export function isIgnoredWarning(warning: string, extraPrefixes: readonly string[] = []): boolean {
+  return [...IGNORED_WARNING_PREFIXES, ...extraPrefixes].some((prefix) => warning.startsWith(prefix));
 }
 
 /** Label used to find the single tracking issue across runs. */
@@ -133,6 +139,11 @@ type Section = 'none' | 'warnings' | 'notices' | 'new' | 'verified' | 'attestati
 export interface ParseCatalogCheckOptions {
   /** Exit code of the reconcile run; non-zero means the runner itself failed. */
   exitCode?: number;
+  /**
+   * Warning prefixes this caller treats as known states on top of
+   * IGNORED_WARNING_PREFIXES (Issue #3158). Same prefix match, same strictness.
+   */
+  extraIgnoredWarningPrefixes?: readonly string[];
 }
 
 /** Everything from the report header on, so the npm banner never reaches the issue. */
@@ -247,8 +258,9 @@ export function parseCatalogCheckOutput(
     }
   }
 
-  const ignoredWarnings = warnings.filter(isIgnoredWarning);
-  const blockingWarnings = warnings.filter((warning) => !isIgnoredWarning(warning));
+  const extraPrefixes = options.extraIgnoredWarningPrefixes ?? [];
+  const ignoredWarnings = warnings.filter((warning) => isIgnoredWarning(warning, extraPrefixes));
+  const blockingWarnings = warnings.filter((warning) => !isIgnoredWarning(warning, extraPrefixes));
 
   const exitCode = options.exitCode ?? 0;
   if (exitCode !== 0) inconclusiveReasons.push(`runner-exit-code:${exitCode}`);
@@ -326,6 +338,13 @@ export interface TrackingIssueBodyMeta {
   /** Exit code of the reconcile run, shown to document that 0 ≠ no drift. */
   exitCode?: number;
   maxReportChars?: number;
+  /**
+   * Quote lines under the marker saying who rewrites this issue (Issue #3158).
+   * Defaults to the weekly workflow's note.
+   */
+  headerNote?: readonly string[];
+  /** Extra lines placed just before the `### 対応` section (Issue #3158). */
+  extraSections?: readonly string[];
 }
 
 /**
@@ -355,8 +374,10 @@ export function formatTrackingIssueBody(
 
   const sections: string[] = [
     TRACKING_ISSUE_MARKER,
-    '> このIssueは `.github/workflows/catalog-drift.yml` が週次で自動更新します。',
-    '> 本文を手で編集しても次回の実行で上書きされます。',
+    ...(meta.headerNote ?? [
+      '> このIssueは `.github/workflows/catalog-drift.yml` が週次で自動更新します。',
+      '> 本文を手で編集しても次回の実行で上書きされます。',
+    ]),
     '',
     `## ${headline}`,
     '',
@@ -405,6 +426,10 @@ export function formatTrackingIssueBody(
     for (const reason of report.inconclusiveReasons) {
       sections.push(`- \`${reason}\``);
     }
+  }
+
+  if (meta.extraSections && meta.extraSections.length > 0) {
+    sections.push('', ...meta.extraSections);
   }
 
   sections.push(
