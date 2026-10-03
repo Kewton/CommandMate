@@ -48,3 +48,5 @@ performance の Issue には JSON にある値だけを書き、本番ログの�
 | `log-volume` | `<tag> <event>` の行数を 1 日 20,000 行未満（倍増したなら前回の値以下）にする（レベルを下げる・間引く・出す条件を絞る） | 翌日以降の計測で当該 `<tag> <event>` の 24 時間の行数が目標以下 |
 | `error-rate` | `<tag> <event>` の ERROR を 1 日 50 行未満（倍増したなら前回の値以下）にする（原因を直す。正常系ならレベルを下げる） | 翌日以降の計測で当該 `<tag> <event>` の 24 時間の ERROR 行数が目標以下 |
 | `server-process` | サーバーの RSS を 1,500MB 未満（増えたなら前回の値以下）にする／CPU の平均を 50% 未満にする | 翌日以降の計測で RSS の最大・CPU の平均が目標以下 |
+
+性能 4 行（`api-latency`・`log-volume`・`error-rate`・`server-process`）の Issue は `perf` ラベルが付き、自動依頼の対象外。着手は人が決める。
