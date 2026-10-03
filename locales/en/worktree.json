@@ -68,6 +68,7 @@
     "imageLoading": "Loading image…",
     "imageUnavailable": "Image unavailable",
     "openImage": "Open image: {path}",
+    "videoLabel": "Video: {path}",
     "conversationLabel": "Conversation: {preview}",
     "filePathMissing": "That path is not in this worktree"
   },

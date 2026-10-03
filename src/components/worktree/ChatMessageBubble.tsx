@@ -82,6 +82,7 @@ import { SHARED_REMARK_PLUGINS } from '@/lib/markdown';
 import { classifyChatLink, normalizeChatFilePath } from '@/lib/chat/chat-file-path';
 import { splitChatUserBody, useChatImageScope } from '@/lib/chat/chat-image';
 import { ChatImage } from '@/components/worktree/ChatImage';
+import { ChatVideo } from '@/components/worktree/ChatVideo';
 import {
   chatMarkdownCopyText,
   chatMarkdownFullCopyText,
@@ -870,21 +871,41 @@ export const ChatMarkdownBody = memo(function ChatMarkdownBody({
       // link's destination is consumed by the parser, so it is never a text
       // child of anything. Its children are deliberately NOT linkified — a path
       // inside a link's label is part of the label.
-      a: ({ href, children, node: _node, ...rest }) => (
-        <ChatFileLink {...rest} href={href} onFilePathClick={onFilePathClick}>
-          {children}
-        </ChatFileLink>
-      ),
+      //
+      // [#3121] A link to a video in this worktree is drawn as the video, with
+      // this same link kept under it.
+      a: ({ href, children, node: _node, ...rest }) => {
+        const link = (
+          <ChatFileLink {...rest} href={href} onFilePathClick={onFilePathClick}>
+            {children}
+          </ChatFileLink>
+        );
+        return (
+          <ChatVideo
+            target={href}
+            label={children}
+            fallback={link}
+            onFilePathClick={onFilePathClick}
+          />
+        );
+      },
       // [#3120] An image is fetched through the files API when it is in this
       // worktree and drawn as alt text + link otherwise — never as a raw
       // `<img src>`, which the browser resolved against the screen's URL.
-      img: ({ src, alt }) => (
-        <ChatImage
-          src={typeof src === 'string' ? src : undefined}
-          alt={alt}
-          onFilePathClick={onFilePathClick}
-        />
-      ),
+      // [#3121] `![](clip.mp4)` in this worktree is drawn as a video instead.
+      img: ({ src, alt }) => {
+        const source = typeof src === 'string' ? src : undefined;
+        return (
+          <ChatVideo
+            target={source}
+            label={alt || source}
+            fallback={
+              <ChatImage src={source} alt={alt} onFilePathClick={onFilePathClick} />
+            }
+            onFilePathClick={onFilePathClick}
+          />
+        );
+      },
     };
   }, [onFilePathClick]);
 
