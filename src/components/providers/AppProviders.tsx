@@ -11,6 +11,8 @@
 'use client';
 
 import { type ReactNode } from 'react';
+import { usePathname } from 'next/navigation';
+import { AUTH_EXCLUDED_PATHS } from '@/config/auth-config';
 import { NextIntlClientProvider } from 'next-intl';
 import { ThemeProvider } from 'next-themes';
 import { SidebarProvider } from '@/contexts/SidebarContext';
@@ -40,6 +42,23 @@ interface AppProvidersProps {
 }
 
 /**
+ * Issue #3157: whether the app-wide data feeds — the `/api/worktrees` cache and
+ * its polling, the realtime WebSocket and the `/api/app/update-check` poll —
+ * may start on this path.
+ *
+ * With auth on, middleware lets only `AUTH_EXCLUDED_PATHS` through without the
+ * cookie, so those screens (`/login`, `/offline`) may be rendered by a browser
+ * that is not logged in, and every feed request from them would come back 401.
+ * Any other path got past the middleware's cookie check, so it is
+ * authenticated. The match is exact, as in the middleware. With auth off there
+ * is nothing to wait for and the feeds start everywhere, as before.
+ */
+export function shouldStartAppData(authEnabled: boolean, pathname: string | null): boolean {
+  if (!authEnabled) return true;
+  return !(AUTH_EXCLUDED_PATHS as readonly string[]).includes(pathname ?? '');
+}
+
+/**
  * AppProviders wraps the application with all necessary context providers
  *
  * @example
@@ -50,6 +69,7 @@ interface AppProvidersProps {
  * ```
  */
 export function AppProviders({ children, locale, messages, timeZone, authEnabled = false }: AppProvidersProps) {
+  const dataEnabled = shouldStartAppData(authEnabled, usePathname());
   return (
     <NextIntlClientProvider locale={locale} messages={messages} timeZone={timeZone}>
       {/* Issue #1400: single app-wide toast queue + one portaled ToastContainer.
@@ -64,8 +84,8 @@ export function AppProviders({ children, locale, messages, timeZone, authEnabled
                     worktrees cache so session-status / message / terminal pushes
                     feed the sidebar and terminal panes; polling remains the
                     fallback when disconnected. */}
-                <RealtimeProvider>
-                  <WorktreesCacheProvider>
+                <RealtimeProvider enabled={dataEnabled}>
+                  <WorktreesCacheProvider enabled={dataEnabled}>
                     {/* Issue #1788: cross-screen waiting toast. Here — above the
                         routed content, below the toast queue / realtime / cache
                         it reads — so it survives navigation and fires on every
@@ -84,7 +104,7 @@ export function AppProviders({ children, locale, messages, timeZone, authEnabled
                           {/* Issue #2654: app-wide update state. Above the routed
                               content so the restart watch survives modals and
                               navigation. */}
-                          <AppUpdateProvider>
+                          <AppUpdateProvider enabled={dataEnabled}>
                             {/* Issue #2708: app-wide settings-modal state,
                                 outside the routed content so the modal
                                 survives navigation. */}
