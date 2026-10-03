@@ -24,6 +24,9 @@ npx tsx .claude/skills/demo-video/scripts/stills.ts --state "$HOME/.commandmate-
 ```
 
 `docs/images/screenshot-*.png` と `website/assets/img/*.webp` を書き換える。
+hero（`screenshot-desktop`）は `/sessions` を撮る。`/` は最後に開いたブランチ（無ければ `/sessions`）への
+振り分けで、撮れる画面がブラウザの履歴次第になるため使わない（Issue #3174）。
+`--still <id>` で 1 枚だけ撮り直せる。
 **バイト予算はゲート**で、hero（`screenshot-desktop.webp`）が 100KB に収まらなければ
 品質と解像度を段階的に落とし、それでも収まらなければ**何も書かずに落ちる**。
 撮る前に画面のテキストを読み、個人パス・LAN アドレス・旧製品名が写っていれば失敗させる

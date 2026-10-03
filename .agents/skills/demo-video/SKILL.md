@@ -326,7 +326,7 @@ npx tsx .claude/skills/demo-video/scripts/stills.ts --state "$HOME/.commandmate-
 
 | 出力 | 画面 | サイズ | 予算 |
 |---|---|---|---|
-| `screenshot-desktop` | `/`（Overview） | 1280×800 @2x | **< 100KB**（LP hero / og:image。`landing-page.test.ts` が固定） |
+| `screenshot-desktop` | `/sessions`（`/` は最後に開いたブランチへの振り分けなので使わない） | 1280×800 @2x | **< 100KB**（LP hero / og:image。`landing-page.test.ts` が固定） |
 | `screenshot-worktree-desktop` | worktree 詳細 | 同上 | < 200KB（唯一の例外） |
 | `screenshot-mobile` | `/sessions` | 390×844 @3x | < 100KB |
 | `screenshot-worktree-mobile` | worktree 詳細（History タブ） | 同上 | < 100KB |
