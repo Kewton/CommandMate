@@ -20,8 +20,9 @@
      `metrics` が空なら Issue の手順は行わず、手順 5 へ進む（計測のやり直しはしない）
 2. ラベルを確かめる。無いものだけ作る
    ```bash
-   gh label list --repo Kewton/CommandMate --limit 200 --json name --jq '.[].name' | grep -xE 'metrics|enhancement|security'
+   gh label list --repo Kewton/CommandMate --limit 200 --json name --jq '.[].name' | grep -xE 'metrics|enhancement|security|perf'
    gh label create metrics --repo Kewton/CommandMate --description "日次メトリクス計測が自動登録した改善 Issue"
+   gh label create perf --repo Kewton/CommandMate --description "性能。日次メトリクスが起票し、自動修正の対象外（人が着手する）"
    gh label create security --repo Kewton/CommandMate --description "セキュリティ"
    gh label create enhancement --repo Kewton/CommandMate --description "改善"
    ```
@@ -52,6 +53,7 @@
        ```bash
        gh issue create --repo Kewton/CommandMate --label metrics --label enhancement --title "<title>" --body-file <file>
        # category が security のときは --label security も付ける
+       # category が performance のときは --label perf も付ける（自動依頼の対象外。人が着手する）
        ```
      - すでに 4 件立てていたら立てない（「見送り」として数える）
 4. `queue` が空なら何もしない（悪化が無い日は正常）

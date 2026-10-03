@@ -25,6 +25,8 @@ export const DISPATCH_AUTHOR = 'kewton';
 
 export const BUG_LABEL = 'agent-health';
 export const METRICS_LABEL = 'metrics';
+/** Performance Issues are filed automatically but fixed by a person, so dispatch skips them. */
+export const PERF_LABEL = 'perf';
 export const SECURITY_LABEL = 'security';
 export const DISPATCHED_LABEL = 'auto-dispatched';
 /** Labels the run relies on; the script never creates them (docs/user-guide/agent-health.md「自動依頼」). */
@@ -88,6 +90,7 @@ export function missingLabels(existing: readonly string[]): string[] {
 export function issueKind(issue: CandidateIssue): DispatchIssueKind | null {
   if (issue.author.toLowerCase() !== DISPATCH_AUTHOR) return null;
   if (issue.labels.includes(DISPATCHED_LABEL)) return null;
+  if (issue.labels.includes(PERF_LABEL)) return null;
   if (issue.labels.includes(BUG_LABEL)) return 'bug';
   if (issue.labels.includes(METRICS_LABEL)) return 'metrics';
   return null;

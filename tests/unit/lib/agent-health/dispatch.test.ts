@@ -68,6 +68,21 @@ describe('issueKind', () => {
     expect(issueKind(issue(1, ['agent-health', 'auto-dispatched'], 'a'))).toBeNull();
     expect(issueKind(issue(1, ['bug'], 'a'))).toBeNull();
   });
+
+  it('skips perf Issues (filed automatically, fixed by a person)', () => {
+    expect(issueKind(issue(1, ['metrics', 'perf'], 'a', 'kewton'))).toBeNull();
+    expect(issueKind(issue(1, ['agent-health', 'perf'], 'a'))).toBeNull();
+    expect(issueKind(issue(1, ['metrics'], 'a', 'kewton'))).toBe('metrics');
+  });
+
+  it('keeps perf Issues out of the selection and deferred', () => {
+    const result = selectDispatchTargets([
+      issue(1, ['metrics', 'perf'], '2026-08-01', 'kewton'),
+      issue(2, ['metrics'], '2026-08-02', 'kewton'),
+    ]);
+    expect(result.issues.map((i) => i.number)).toEqual([2]);
+    expect(result.deferred).toEqual([]);
+  });
 });
 
 describe('selectDispatchTargets', () => {
