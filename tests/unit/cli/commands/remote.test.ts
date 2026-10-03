@@ -801,3 +801,17 @@ describe('commandmate remote', () => {
     });
   });
 });
+
+describe('formatPairingExpiryLine (Issue #3156)', () => {
+  it('shows local HH:MM, time left and single use', async () => {
+    const { formatPairingExpiryLine } = await import('../../../../src/cli/commands/remote');
+    const now = Date.now();
+    const at = now + 9 * 60 * 1000 + 30 * 1000;
+    const d = new Date(at);
+    const hhmm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+    const line = formatPairingExpiryLine(at, now);
+    expect(line).toContain(`Pairing expires: ${hhmm} (in 9m)`);
+    expect(line).toContain('works once');
+    expect(line).toContain(d.toISOString());
+  });
+});
