@@ -62,6 +62,12 @@ const PAIRS: ReadonlyArray<{ name: string; ja: string; en: string }> = [
     ja: 'docs/user-guide/opencode-v2.md',
     en: 'docs/en/user-guide/opencode-v2.md',
   },
+  {
+    // Issue #3154: the long form of the README, reordered by Level.
+    name: 'how-it-works',
+    ja: 'docs/user-guide/how-it-works.md',
+    en: 'docs/en/user-guide/how-it-works.md',
+  },
 ];
 
 /** Placeholders a translation must never ship with. */

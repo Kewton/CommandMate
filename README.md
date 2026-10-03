@@ -156,7 +156,7 @@ Every command and flag is in the [CLI Operations Guide](./docs/en/user-guide/cli
 
 | Document | Description |
 |----------|-------------|
-| [How CommandMate works](./docs/en/user-guide/how-it-works.md) | The long form: measured runs, feature tables, use cases, supported agents, security, the Vibe Engineering workflow |
+| [How CommandMate works](./docs/en/user-guide/how-it-works.md) | The long form, level by level: Parallel, Delegate (contracts, gates, Skills), Manage, Next; then Anywhere, supported agents, security, measured runs |
 | [Tutorial](./docs/en/user-guide/tutorial.md) | Fork a sample repository and go from a task contract to a result that passed its checks in about fifteen minutes |
 | [Quick Start](./docs/en/user-guide/quick-start.md) | The smallest hand-over-and-check flow on any agent, then a five-minute development flow |
 | [CLI Setup Guide](./docs/en/user-guide/cli-setup-guide.md) | Installation, `npx`, initial setup, updating, building from source |

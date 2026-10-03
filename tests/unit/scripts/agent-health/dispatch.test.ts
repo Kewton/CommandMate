@@ -17,7 +17,7 @@ let calls: Array<[string, string[]]>;
 let sleeps: number[];
 
 const recordFile = () => path.join(stateDir, 'dispatch', '2026-10-01.json');
-const ALL_LABELS = ['agent-health', 'metrics', 'security', 'auto-dispatched', 'bug'];
+const ALL_LABELS = ['agent-health', 'metrics', 'security', 'catalog-drift', 'auto-dispatched', 'bug'];
 
 beforeEach(() => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-dispatch-'));
@@ -183,7 +183,7 @@ describe('dispatch main', () => {
     const code = await run({ issues: [ghIssue(1, ['agent-health'], 'a')], labels: ['agent-health', 'bug'] });
     expect(code).toBe(2);
     expect(sends()).toEqual([]);
-    expect(record()).toMatchObject({ status: 'skipped-busy', deferred: [1], reason: expect.stringContaining('metrics, security, auto-dispatched') });
+    expect(record()).toMatchObject({ status: 'skipped-busy', deferred: [1], reason: expect.stringContaining('metrics, security, catalog-drift, auto-dispatched') });
     expect(lines.join('\n')).toMatch(/status=skipped-busy issues=- deferred=1 reason=".*auto-dispatched/);
   });
 

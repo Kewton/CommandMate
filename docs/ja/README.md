@@ -156,7 +156,7 @@ commandmate start --daemon
 
 | ドキュメント | 説明 |
 |-------------|------|
-| [CommandMate のしくみ](../user-guide/how-it-works.md) | 長い版: 実測、機能一覧、ユースケース、対応エージェント、セキュリティ、Vibe Engineering ワークフロー |
+| [CommandMate のしくみ](../user-guide/how-it-works.md) | 長い版を Level 順に: Parallel・Delegate（契約・ゲート・Skill）・Manage・Next、続いて Anywhere・対応エージェント・セキュリティ・実測 |
 | [チュートリアル](../user-guide/tutorial.md) | サンプルリポジトリを fork し、タスク定義から、チェックに合格した成果物までを 15 分ほどで体験する |
 | [クイックスタート](../user-guide/quick-start.md) | どのエージェントでも回る「タスク定義を渡してチェックで確かめる」最小の流れと、5 分の開発フロー |
 | [CLI セットアップガイド](../user-guide/cli-setup-guide.md) | インストール、`npx`、初期設定、アップデート、ソースからのビルド |
