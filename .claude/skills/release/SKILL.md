@@ -605,6 +605,9 @@ npm view commandmate version    # NEXT_VERSION になること
 
 失敗した場合はユーザーに報告する。**`npm publish` を手元で実行して回避しようとしないこと**（OIDC は CI 内でしか成立せず、provenance も付かない）。
 
+> publish はテスト全体を再実行しない（#3111）。代わりに `Require CI to have passed on the tag commit` で、タグのコミット（= 4-1 のマージコミット）の main push CI の `Unit Tests` と `Build` が success になるまで最大 20 分待つ。
+> ここで失敗した run は npm に何も出していない（ビルドより前）。main の CI を green にしてから `gh run rerun <run-id>` で再実行でき、版を進める必要はない。
+
 > **README のバージョンバッジは publish 成功後もしばらく古いまま**になる。shields.io と
 > GitHub camo のキャッシュによる表示遅延で、publish の失敗ではない。**慌てて再実行しないこと。**
 > 判定は上記 `npm view commandmate version` の実測値で行う。
