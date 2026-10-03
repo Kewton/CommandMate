@@ -70,6 +70,10 @@ const UPDATE_KEYS = [
   'buttonReleaseAriaLabel',
   'buttonUpdating',
   'statusDialogTitle',
+  // Issue #3110 (release on GitHub, not yet on npm)
+  'pendingLabel',
+  'pendingDescription',
+  'notYetPublished',
 ];
 
 describe('worktree.update i18n keys (Issue #1198)', () => {
@@ -136,6 +140,9 @@ describe('worktree.update i18n keys (Issue #1198)', () => {
       expect(resolve(dict, 'update.buttonLabel') as string).toContain('{version}');
       expect(resolve(dict, 'update.buttonAriaLabel') as string).toContain('{version}');
       expect(resolve(dict, 'update.buttonReleaseAriaLabel') as string).toContain('{version}');
+      // Issue #3110: the pending button names the version npm has not served yet.
+      expect(resolve(dict, 'update.pendingLabel') as string).toContain('{version}');
+      expect(resolve(dict, 'update.pendingDescription') as string).toContain('{version}');
     }
   });
 

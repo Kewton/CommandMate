@@ -1,0 +1,1 @@
+{"type":"user","uuid":"f7605faf-1ee6-43fa-8008-b4d18b45ce00","timestamp":"2026-10-03T00:00:00.000Z","sessionId":"3102a000-3102-4000-9000-0000000000aa","message":{"role":"user","content":"\n\n<pasted_content id=\"6b21\">\n/orchestrate 3099 3100\n\n条件の説明です。\n複数行の本文。\n</pasted_content id=\"6b21\">"}}

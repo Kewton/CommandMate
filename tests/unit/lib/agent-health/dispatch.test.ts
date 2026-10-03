@@ -7,6 +7,8 @@ import { describe, expect, it } from 'vitest';
 import {
   buildDispatchRecord,
   buildRequest,
+  buildTerms,
+  dispatchTermsPath,
   dispatchComment,
   DISPATCH_INSTANCE_ID,
   DISPATCH_WORKTREE_ID,
@@ -184,26 +186,42 @@ describe('what is sent', () => {
     ]);
   });
 
-  it('builds the request: /orchestrate first, merge permission, run-file names, report, no --full', () => {
+  it('builds the request: one line, /orchestrate first, the numbers, the terms file path, no --full', () => {
     const issues = [
       { number: 3050, kind: 'bug' as const, title: 'a' },
       { number: 3051, kind: 'metrics' as const, title: 'b' },
     ];
-    const request = buildRequest('2026-10-01', issues);
-    expect(request.split('\n')[0]).toBe('/orchestrate 3050 3051');
-    expect(request).toContain('本 run では PR の develop へのマージを進めてよい（利用者の明示的な許可）');
-    expect(request).toContain('plan-3050-3051.md・summary-3050-3051.md・tasks-3050-3051.tsv');
-    expect(request).toContain('npx tsx scripts/agent-health/release-report.ts --date 2026-10-01');
-    expect(request).toContain('workspace/agent-health/2026-10-01/release-readiness.html');
-    expect(request).toContain('再依頼・再実行しない');
-    expect(request.split('\n')[0]).not.toContain('--full');
+    const termsPath = dispatchTermsPath('/repo', '2026-10-01', issues);
+    expect(termsPath).toBe('/repo/workspace/agent-health/2026-10-01/dispatch-terms-3050-3051.md');
+    const request = buildRequest(issues, termsPath);
+    expect(request).not.toContain('\n');
+    expect(request.startsWith('/orchestrate 3050 3051 ')).toBe(true);
+    expect(request).toContain(termsPath);
+    expect(request).not.toContain('--full');
+  });
+
+  it('builds the terms: merge permission, run-file names, report, no --full', () => {
+    const issues = [
+      { number: 3050, kind: 'bug' as const, title: 'a' },
+      { number: 3051, kind: 'metrics' as const, title: 'b' },
+    ];
+    const terms = buildTerms('2026-10-01', issues);
+    expect(terms).toContain('本 run では PR の develop へのマージを進めてよい（利用者の明示的な許可）');
+    expect(terms).toContain('対象は 2 件（#3050 bug、#3051 metrics）');
+    expect(terms).toContain('plan-3050-3051.md・summary-3050-3051.md・tasks-3050-3051.tsv');
+    expect(terms).toContain('npx tsx scripts/agent-health/release-report.ts --date 2026-10-01');
+    expect(terms).toContain('workspace/agent-health/2026-10-01/release-readiness.html');
+    expect(terms).toContain('再依頼・再実行しない');
+    expect(terms).toContain('`--full` は付けない');
   });
 
   it('sends a single Issue as it is', () => {
-    const request = buildRequest('2026-10-01', [{ number: 3045, kind: 'bug', title: 'x' }]);
-    expect(request.split('\n')[0]).toBe('/orchestrate 3045');
-    expect(request).toContain('1 件で実行する');
-    expect(request).toContain('summary-3045.md');
+    const issues = [{ number: 3045, kind: 'bug' as const, title: 'x' }];
+    const request = buildRequest(issues, dispatchTermsPath('/repo', '2026-10-01', issues));
+    expect(request.startsWith('/orchestrate 3045 ')).toBe(true);
+    const terms = buildTerms('2026-10-01', issues);
+    expect(terms).toContain('1 件で実行する');
+    expect(terms).toContain('summary-3045.md');
   });
 
   it('comments with a dated marker and the other Issues of the run', () => {

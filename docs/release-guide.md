@@ -308,7 +308,7 @@ git merge-base --is-ancestor origin/main origin/develop && echo "祖先切れ解
 
 ### ワークフローの内容
 
-`npm ci` → `npm audit --audit-level=critical` → `npm run test:unit` → `npm run build` → `npm run build:cli` → `npm run build:server` → パッケージサイズ確認 → `npm publish --provenance --access public`
+`npm ci` → `npm audit --audit-level=critical` → **タグのコミットで CI の `Unit Tests` と `Build` が success であることの確認**（`scripts/check-release-ci.mjs`。main への push の CI が終わるまで最大 20 分待つ）→ `npm run build` → `npm run build:cli` → `npm run build:server` → パッケージサイズ確認 → `npm publish --provenance --access public`
 
 ---
 
@@ -400,6 +400,8 @@ gh run view <run-id> --repo Kewton/CommandMate --log-failed
 ```
 
 原因を修正し、新しいパッチバージョンでリリースし直してください。**同一バージョン番号での再公開はできません。**
+
+`Require CI to have passed on the tag commit` で止まった場合は、**npm にはまだ何も出ていません**（ビルドより前の手順）。タグのコミットの CI（main への push の `ci-pr.yml`）が失敗・未完了だったということなので、`npm view commandmate version` で未公開を確かめたうえで、CI を直す（または一時的な失敗なら main の CI を再実行して success にする）→ `gh run rerun <run-id>` で publish を再実行できます。版番号を進める必要はありません。
 
 ### リリースのロールバック
 

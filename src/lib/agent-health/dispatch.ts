@@ -11,6 +11,7 @@
  * no argument can point the send anywhere else.
  */
 
+import path from 'path';
 import type { DispatchIssue, DispatchIssueKind, DispatchRecord, DispatchStatus } from './dispatch-record';
 
 export const DISPATCH_REPO = 'Kewton/CommandMate';
@@ -210,16 +211,27 @@ export function sendArgv(message: string, withAutoYes: boolean): string[] {
 }
 
 /**
- * The request for Claude 3. The first line is the `/orchestrate` call (no
- * `--full`: UAT must not run in the main checkout); the rest are the run's
- * terms, which the skill receives with its arguments.
+ * Where the run's terms are written: `workspace/agent-health/<date>/dispatch-terms-<runSuffix>.md`
+ * under the repository this runs in (absolute, so Claude 3 in another worktree can read it).
  */
-export function buildRequest(date: string, issues: readonly DispatchIssue[]): string {
+export function dispatchTermsPath(repoRoot: string, date: string, issues: readonly DispatchIssue[]): string {
+  return path.join(repoRoot, 'workspace', 'agent-health', date, `dispatch-terms-${runSuffixOf(issues)}.md`);
+}
+
+/**
+ * The request for Claude 3: one line (a multi-line send arrives as a paste and
+ * is not run as a slash command). It is the `/orchestrate` call (no `--full`:
+ * UAT must not run in the main checkout) and the file holding the run's terms.
+ */
+export function buildRequest(issues: readonly DispatchIssue[], termsPath: string): string {
+  return `/orchestrate ${issues.map((issue) => issue.number).join(' ')} ${termsPath} の条件に従うこと`;
+}
+
+/** The run's terms, written to the file `buildRequest` points at. */
+export function buildTerms(date: string, issues: readonly DispatchIssue[]): string {
   const numbers = issues.map((issue) => issue.number);
   const suffix = runSuffixOf(issues);
   return [
-    `/orchestrate ${numbers.join(' ')}`,
-    '',
     `（agent-health の自動依頼 ${date}。以下は利用者が事前に決めた、この run の条件）`,
     '- 本 run では PR の develop へのマージを進めてよい（利用者の明示的な許可）。main へはマージしない',
     numbers.length === 1
@@ -230,6 +242,7 @@ export function buildRequest(date: string, issues: readonly DispatchIssue[]): st
     `- 完了後（途中で止まったときも）に \`npx tsx scripts/agent-health/release-report.ts --date ${date}\` を実行し、HTML を workspace/agent-health/${date}/release-readiness.html に書く`,
     '- 失敗した Issue を今日のうちに再依頼・再実行しない（翌日の日次に回す）',
     '- kill 系の API・コマンドを使わない。他のインスタンス・worktree に send しない',
+    '',
   ].join('\n');
 }
 

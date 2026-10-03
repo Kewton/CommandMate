@@ -208,6 +208,39 @@ export function claudeSlashCommandPrompt(text: string): string | null {
   return args.length === 0 ? name : `${name} ${args}`;
 }
 
+/**
+ * A paste's wrapper: `<pasted_content id="X">` … `</pasted_content id="X">`.
+ *
+ * The closing tag repeats the opening tag's id (`\1`), so a pair whose ids
+ * differ — or a tag only mentioned in prose — is not a wrapper and is left alone.
+ * One newline just inside each tag is the wrapper's own framing, not the body's.
+ */
+const CLAUDE_PASTED_CONTENT_PATTERN =
+  /<pasted_content id="([^"<>\s]+)">\n?([\s\S]*?)\n?<\/pasted_content id="\1">/g;
+
+/**
+ * The text a person sent, with Claude Code's paste wrapper taken off (Issue #3102).
+ *
+ * Claude Code records a multi-line message that arrived as a paste — which is
+ * what CommandMate's tmux send looks like to it — with the body wrapped in
+ * `<pasted_content id="X">…</pasted_content id="X">`. `recordUserTurn` compares
+ * the transcript's text with the `/send` row (and a relay row) byte for byte, so
+ * the wrapper made every such prompt look like a different message and a second
+ * `user` row was written. Unwrapping here lets the existing adoption rules match.
+ *
+ * Every wrapper in the text is replaced by its body, including one inside a
+ * sentence the person typed around a paste. When the result is empty the original
+ * is returned, so this never turns a record into a blank prompt.
+ *
+ * @param text - The record's text, as {@link ClaudeTranscriptRecord.text} holds it
+ * @returns The text without wrappers, or `text` itself when there is none to remove
+ */
+export function claudePastedContentPrompt(text: string): string {
+  if (!text.includes('<pasted_content id=')) return text;
+  const unwrapped = text.replace(CLAUDE_PASTED_CONTENT_PATTERN, (_match, _id, body: string) => body);
+  return unwrapped.trim().length === 0 ? text : unwrapped;
+}
+
 /** One content block of one record, reduced to what a reader needs. */
 export interface ClaudeContentBlock {
   /** `text` / `thinking` / `tool_use` / `tool_result` / … verbatim. */
@@ -723,7 +756,7 @@ export function createClaudeTurn(record: ClaudeTranscriptRecord, sessionId: stri
     // A slash command's record is XML and the operator typed a line; #2265 puts
     // the line on the turn so that the `user` row reads `/release v0.30.1` and
     // the `/send` row holding those same bytes is adopted rather than doubled.
-    promptText: claudeSlashCommandPrompt(record.text) ?? record.text,
+    promptText: claudeSlashCommandPrompt(record.text) ?? claudePastedContentPrompt(record.text),
     promptIsOperatorInput: isClaudeOperatorPromptRecord(record),
     blocks: [],
     assistantRecords: 0,

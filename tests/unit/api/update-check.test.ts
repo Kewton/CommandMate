@@ -24,6 +24,15 @@ vi.mock('@/cli/utils/install-context', () => ({
   isNpxExecution: vi.fn().mockReturnValue(false),
 }));
 
+// Issue #3110: the npm publish gate passes GitHub's answer through here; its
+// behaviour is covered by update-check-npm-publish.test.ts. Never spawns npm.
+vi.mock('@/lib/app-update/npm-publish-check', () => ({
+  resolveNpmPublishGate: vi.fn(async (github: { hasUpdate: boolean }) => ({
+    hasUpdate: github.hasUpdate,
+    pendingVersion: null,
+  })),
+}));
+
 import { GET, dynamic } from '@/app/api/app/update-check/route';
 import { checkForUpdate, getCurrentVersion } from '@/lib/version-checker';
 import { isGlobalInstall, isNpxExecution } from '@/cli/utils/install-context';

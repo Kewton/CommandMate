@@ -295,7 +295,7 @@ If the workflow fails, fix the cause -- do not work around it with a local publi
 
 ### What the workflow does
 
-`npm ci` → `npm audit --audit-level=critical` → `npm run test:unit` → `npm run build` → `npm run build:cli` → `npm run build:server` → package size check → `npm publish --provenance --access public`
+`npm ci` → `npm audit --audit-level=critical` → **check that CI's `Unit Tests` and `Build` succeeded on the tag commit** (`scripts/check-release-ci.mjs`; waits up to 20 minutes for the main-push CI to finish) → `npm run build` → `npm run build:cli` → `npm run build:server` → package size check → `npm publish --provenance --access public`
 
 ---
 
@@ -362,6 +362,8 @@ gh run view <run-id> --repo Kewton/CommandMate --log-failed
 ```
 
 Fix the cause and release again as a new patch version. **The same version number cannot be republished.**
+
+If the run stopped at `Require CI to have passed on the tag commit`, **nothing has reached npm** (that step runs before any build). CI on the tag commit (the main-push run of `ci-pr.yml`) failed or did not finish. Confirm with `npm view commandmate version` that the version is not out, fix CI (or re-run the main CI if the failure was transient) until it is green, then re-run the publish with `gh run rerun <run-id>`. No version bump is needed.
 
 ### Rolling back a release
 

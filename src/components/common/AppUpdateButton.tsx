@@ -6,6 +6,10 @@
  * global Header. Never rendered on mobile: the phone keeps the update UI in
  * the Info tab.
  *
+ * Issue #3110: while the release is on GitHub but not yet on npm
+ * (`pendingVersion`), it renders disabled with a "coming soon" label, since the
+ * update would install nothing.
+ *
  * @module components/common/AppUpdateButton
  */
 
@@ -30,11 +34,31 @@ const LINK_CLASS_NAME =
 export function AppUpdateButton() {
   const t = useTranslations('worktree');
   const isMobile = useIsMobile();
-  const { updateInfo, hasUpdate, canSelfUpdate, state, openConfirm } = useAppUpdate();
+  const { updateInfo, hasUpdate, pendingVersion, canSelfUpdate, state, openConfirm } =
+    useAppUpdate();
   const [statusOpen, setStatusOpen] = useState(false);
 
   const version = updateInfo?.latestVersion ?? null;
   if (isMobile || !version) return null;
+  if (state === 'idle' && !hasUpdate && pendingVersion) {
+    const description = t('update.pendingDescription', { version: pendingVersion });
+    return (
+      <Button
+        type="button"
+        variant="secondary"
+        size="sm"
+        disabled
+        className="flex-shrink-0 gap-1.5 whitespace-nowrap"
+        title={description}
+        aria-label={description}
+        data-testid="app-update-button"
+        data-state="pending"
+      >
+        <CircleArrowUp size={16} aria-hidden="true" />
+        <span>{t('update.pendingLabel', { version: pendingVersion })}</span>
+      </Button>
+    );
+  }
   if (state === 'idle' && !hasUpdate) return null;
 
   const isBusy = state === 'starting' || state === 'updating';

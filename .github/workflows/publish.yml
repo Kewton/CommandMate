@@ -12,6 +12,7 @@ on:
 permissions:
   contents: read
   id-token: write  # Required for OIDC authentication and npm provenance
+  checks: read  # [Issue #3111] scripts/check-release-ci.mjs reads the tag commit's check runs
 
 jobs:
   publish:
@@ -81,7 +82,21 @@ jobs:
     # on a tree the main-push CI has already run it on, and builds twice (the
     # three build steps below, then `prepublishOnly`). Shortening that is a
     # follow-up of #2560, not part of it.
-    timeout-minutes: 60
+    #
+    # [Issue #3111] That follow-up: `Run tests` is gone, replaced by
+    # `Require CI to have passed on the tag commit`, which reads the verdict the
+    # `main` push of ci-pr.yml already produced for the same commit. What is
+    # left, from 0.43.0's run (36725586872): setup/install/audit 0.6m, the
+    # three builds 1.7m, pack + publish 1.6m — about 4m. The gate itself polls
+    # until CI decides; measured 2026-10-03 on v0.41.1-v0.43.0, CI's `Unit
+    # Tests` finished 2.2 / 6.2 / 8.4 minutes after the Release was published,
+    # so the script gives up at 20 (8.4 x 2, rounded) and its step is capped at
+    # 25 as a backstop.
+    #
+    # 40 = the gate's 25 + about 3x the ~4m the remaining steps take. A healthy
+    # run waits at most ~9 minutes, so it sits far below this cap; a run near it
+    # means CI on main is stuck, which the gate reports by name.
+    timeout-minutes: 40
     steps:
       # [self-hosted] Toolchain and OIDC preflight, deliberately the FIRST step of
       # the only job that can publish. On a GitHub-hosted image node/npm/git are
@@ -90,7 +105,7 @@ jobs:
       # here, by name, rather than inside `npm publish --provenance`.
       - name: Preflight the toolchain and the OIDC token endpoint
         run: |
-          for tool in node npm git; do
+          for tool in node npm git gh; do
             command -v "$tool" >/dev/null || { echo "::error::missing required tool: $tool"; exit 1; }
           done
           if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
@@ -128,8 +143,25 @@ jobs:
         timeout-minutes: 5 # `npm audit` posts the tree to the registry; measured 0.03m max
         run: npm audit --audit-level=critical
 
-      - name: Run tests
-        run: npm run test:unit
+      # [Issue #3111] Was `npm run test:unit` (23m on 0.43.0) — the suite the
+      # `main` push of ci-pr.yml had already run on this very commit. Instead,
+      # require that run's verdict: the latest github-actions check runs named
+      # `Unit Tests` and `Build` (main's required checks) on the tag commit must
+      # be completed/success. A failure, a check that never appears or never
+      # finishes within 20 minutes, or a `gh` error all exit 1 here, before
+      # anything is built or published. Logic and tests:
+      # scripts/check-release-ci.mjs, tests/unit/scripts/release/.
+      - name: Require CI to have passed on the tag commit
+        timeout-minutes: 25 # the script gives up at 20; this only backstops a hung `gh`
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          node scripts/check-release-ci.mjs
+          --repo "${{ github.repository }}"
+          --sha "${{ github.sha }}"
+          --checks "Unit Tests,Build"
+          --timeout-minutes 20
+          --interval-seconds 30
 
       - name: Build Next.js
         run: npm run build
