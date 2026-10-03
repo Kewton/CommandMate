@@ -105,7 +105,7 @@ describe('[#2781] 3-4: a gate whose tests all passed is not the worker’s fault
 
   it('tells the orchestrator to re-run the single gate under lower load before judging', () => {
     expect(body).toMatch(/負荷が下がってから/);
-    expect(body).toContain('commandmatedev verify "$WT" --gates');
+    expect(body).toContain('commandmatedev verify "$WT" --task "$TASK_ID" --gates');
     expect(body).toMatch(/再現しなければワーカー起因ではない/);
   });
 

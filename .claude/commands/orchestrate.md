@@ -920,8 +920,13 @@ build-cli,build-server,lint,build,typecheck,integration,unit
 **20 の対応**（検証不合格）:
 
 ```bash
-commandmatedev verify "$WT" --json    # 失敗したゲートと exit code を特定
+# 1 回目の run を読む（再実行しない）。直近の run id を取り、gates[] から失敗したゲートを読む
+RUN_ID=$(commandmatedev verify history --worktree "$WT" --limit 1 --json | jq -r '.[0].id')
+commandmatedev verify show "$RUN_ID" --json | jq '.gates[] | select(.status != "passed") | {gateId, status, logTail}'
 ```
+
+`wait --verify` のログの `GATE <id> FAIL` 行で失敗したゲートを読んでもよい。
+`--task` を付けずに `verify "$WT"` を再実行すると、task に紐づかない別の run になり、全ゲートが走る（scope は SKIP・env-clean は「ベースライン無し」）ので、ここでは再実行しない。
 
 **先に、不合格がワーカー起因かを判定する。** 再指示と切替の回数に数えるのは、ワーカー起因の不合格だけである。
 
@@ -930,7 +935,7 @@ commandmatedev verify "$WT" --json    # 失敗したゲートと exit code を�
 - **ワーカー起因ではない**: 宣言ゲートが落ちたが、**そのゲートの出力で失敗したテストが 0 件**のもの
   （ティアダウンの race。`Test Files N passed / Tests M passed` なのに exit 1 で、原因が
   `EnvironmentTeardownError` などの未処理 rejection 1 件だけ）。**負荷が下がってから
-  `commandmatedev verify "$WT" --gates <落ちたゲート>` で単独再実行し、再現しなければワーカー起因ではない**
+  `commandmatedev verify "$WT" --task "$TASK_ID" --gates <落ちたゲート>` で単独再実行し、再現しなければワーカー起因ではない**（契約で定義したゲートは task に紐づかないと見つからないので `--task` を付ける）
   （2026-09-20 の #2771 で実測。原因は 2-4-2 の「差し替えの条件」にある mutex の非対称）
 - **ワーカー起因ではない**: `env-clean` の違反のうち、ワーカーの作業と結び付かないもの。
   2026-09-17 のパイロットでは、`env-clean` だけが FAIL して exit 20 になった。違反は次の 3 件で、いずれもワーカーと無関係だった:
@@ -940,7 +945,7 @@ commandmatedev verify "$WT" --json    # 失敗したゲートと exit code を�
 
   並行するワーカーのテストが一時的に作る `~/.commandmate-demo-vitest-<pid>`（`+`）も、このワーカー起因ではないことがある
   （2026-09-28、2 本を並行した run で、互いのテストが作ったものを `env-clean` が違反に数えた。道具の側は #2954 で直す）。
-  直るまでは、`commandmatedev verify "$WT" --gates env-clean` を再実行して、その項目が消えていれば合格として扱う。
+  直るまでは、`commandmatedev verify "$WT" --task "$TASK_ID" --gates env-clean` を再実行して、その項目が消えていれば合格として扱う。
 
   帰属は次の 3 つで確かめる:
   - ワーカーが実行したコマンド: `capture --prompts --limit 100` の `Run this command?` と、そこに書かれた `start with '<cmd>'`
@@ -973,8 +978,10 @@ commandmatedev verify "$WT" --json    # 失敗したゲートと exit code を�
 # 1. 完了を待つ（--verify を付けない）
 commandmatedev wait "$WT" --instance "$AGENT" --on-prompt human --timeout 10800
 # 2. 契約の task を名指しして裁定する。$TASK_ID は tasks.tsv の 4 列目
-commandmatedev verify "$WT" --task "$TASK_ID" --gates work-evidence,scope,env-clean,<契約の verify.gates> --json
+commandmatedev verify "$WT" --task "$TASK_ID" --json
 ```
+
+`--task` を付ければゲートは契約の `verify.gates` ＋必須の builtin（work-evidence / scope / env-clean）になるので `--gates` は要らない。
 
 exit code の読み方は上の表と同じ。理由:
 - `wait --verify` は進行中（running / waiting_input / verifying）の task にしか紐づかない（`IN_FLIGHT_TASK_STATUSES`）。1 回目の検証で task は終了済みになる

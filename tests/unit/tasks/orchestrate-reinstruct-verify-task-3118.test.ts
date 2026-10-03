@@ -52,3 +52,29 @@ describe('orchestrate re-instruct verification (Issue #3118)', () => {
     expect(section('3-5')).toMatch(/wait .*--verify/);
   });
 });
+
+describe('orchestrate 3-4 verify commands are bound to the task (Issue #3123)', () => {
+  it('has no `verify "$WT"` line without --task, history or show', () => {
+    const lines = section('3-4')
+      .split('\n')
+      .filter((l) => l.includes('commandmatedev verify "$WT"'))
+      .filter((l) => !l.includes('--task') && !l.includes('history') && !l.includes('show'));
+    expect(lines).toEqual([]);
+  });
+
+  it('reads the first run with `verify show`', () => {
+    expect(section('3-4')).toContain('verify show');
+  });
+
+  it('the post-re-instruct verify line has no --gates', () => {
+    const lines = section('3-4')
+      .split('\n')
+      .filter((l) => l.includes('verify "$WT" --task "$TASK_ID" --json'));
+    expect(lines.length).toBeGreaterThan(0);
+    expect(lines.every((l) => !l.includes('--gates'))).toBe(true);
+  });
+
+  it('3-3 keeps the `--gates token-discipline` fallback', () => {
+    expect(section('3-3')).toContain('--gates token-discipline');
+  });
+});
