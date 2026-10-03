@@ -410,7 +410,12 @@
       "stats": "Show usage statistics",
       "thinking": "Switch the model variant",
       "web": "Pair another device with this OpenCode",
-      "worktrees": "Manage workspaces"
+      "worktrees": "Manage workspaces",
+      "artifact-capabilities": "Load the reference for what a published artifact can use, such as connectors and file downloads",
+      "artifact-diagramming": "Load guidance for drawing diagrams in artifacts that stay legible in light and dark themes",
+      "claude-in-chrome": "Have Claude carry out a task in your browser through Claude in Chrome",
+      "plugin-authoring": "Load the reference Claude uses to write a mod",
+      "slides": "Make a new Claude Slides presentation from your brief"
     }
   },
   "session": {
