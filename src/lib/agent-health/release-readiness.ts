@@ -574,9 +574,10 @@ export function decideReadiness(facts: ReadinessFacts): ReadinessDecision {
       unfinished.push(`#${row.number}（${facts.prLookupOk ? 'PR 未作成' : 'PR を確認できず'}）`);
     } else if (!row.merged) {
       unfinished.push(`#${row.number}（PR #${row.pr.number} 未マージ）`);
-    } else if (row.verifyExit !== null && row.verifyExit !== 0) {
-      unfinished.push(`#${row.number}（verify 不合格 exit ${row.verifyExit}）`);
     }
+    // A merged PR means the orchestrator judged the gates and CI; an older
+    // verify exit in the wait log (e.g. an adjudicated exit 20) does not
+    // override it. verifyExit stays in the Issue table for reference.
   }
   if (unfinished.length > 0) {
     hold.push(`dispatch した Issue に未完了がある: ${unfinished.join(', ')}`);

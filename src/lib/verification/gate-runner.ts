@@ -90,6 +90,7 @@ import {
   scopeSkipDetachedContract,
 } from './scope-gate';
 import { collectSkillReceiptOwnedPaths } from '@/lib/skills/receipt-owned-paths';
+import { isAgentStateUntrackedEntry } from '@/lib/skills/agent-state-paths';
 import {
   ENV_CLEAN_GATE_ID,
   loadVerifyConfig,
@@ -1085,10 +1086,15 @@ async function evaluateWorkEvidence(
   // including a Skill file whose bytes changed — is counted as before.
   const skillOwned = collectSkillReceiptOwnedPaths(worktreePath);
   let skillInstalledCount = 0;
+  const agentStateExcluded = new Set<string>();
   const uncommittedCount = parsePorcelainStatusEntries(porcelain.stdout).filter((entry) => {
     if (!entry.paths.some((path) => !isContractPath(path))) return false;
     if (isSkillInstalledUntrackedEntry(entry, skillOwned)) {
       skillInstalledCount += 1;
+      return false;
+    }
+    if (isAgentStateUntrackedEntry(entry)) {
+      entry.paths.forEach((path) => agentStateExcluded.add(path));
       return false;
     }
     return true;
@@ -1100,6 +1106,9 @@ async function evaluateWorkEvidence(
     ' (contract files excluded)' +
     (skillInstalledCount > 0
       ? ` (${skillInstalledCount} CommandMate-installed Skill file(s) excluded)`
+      : '') +
+    (agentStateExcluded.size > 0
+      ? ` (agent-managed state file(s) excluded: ${[...agentStateExcluded].sort().join(', ')})`
       : '');
 
   if (!Number.isFinite(commitCount) || (commitCount === 0 && uncommittedCount === 0)) {
