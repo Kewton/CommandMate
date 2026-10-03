@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>CommandMate — No long blocks of time? Run an AI team from your phone.</title>
+    <title>CommandMate — Run multiple coding agents in parallel — even away from your desk.</title>
     <!-- Issue #3060: the page is for someone who arrived from a post on X and has
          not decided to install anything yet. It opens on the three levels and on
          setting CommandMate up by asking an agent, rather than repeating the
@@ -12,7 +12,7 @@
          docs/design/public-messaging.md §1, and no other number is a claim here. -->
     <meta
       name="description"
-      content="CommandMate puts the coding agents you already use in one place you can run from your phone."
+      content="CommandMate puts the coding agents you already use in one place on your own machine, so you can run them side by side, hand them work one issue at a time, and let your own checks decide when the work is done."
     />
     <link rel="canonical" href="https://kewton.github.io/CommandMate/" />
     <meta name="color-scheme" content="light dark" />
@@ -28,10 +28,10 @@
          the isolated environment stays the og:image (Issue #1272, #1810). -->
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://kewton.github.io/CommandMate/" />
-    <meta property="og:title" content="CommandMate — No long blocks of time? Run an AI team from your phone." />
+    <meta property="og:title" content="CommandMate — Run multiple coding agents in parallel — even away from your desk." />
     <meta
       property="og:description"
-      content="CommandMate puts the coding agents you already use in one place you can run from your phone."
+      content="CommandMate puts the coding agents you already use in one place on your own machine, so you can run them side by side, hand them work one issue at a time, and let your own checks decide when the work is done."
     />
     <meta property="og:image" content="https://kewton.github.io/CommandMate/assets/img/screenshot-desktop.webp" />
     <meta name="twitter:card" content="summary_large_image" />
@@ -68,11 +68,13 @@
       <section class="hero">
         <div class="hero-copy">
           <p class="status-pill">Status: Beta</p>
-          <h1>No long blocks of time? Run an AI team from your phone.</h1>
+          <h1>Run multiple coding agents in parallel — even away from your desk.</h1>
           <p class="lede">
-            CommandMate puts the coding agents you already use in one place you can run from your
-            phone. Hand them work like a team, let checks decide what's done, and get back to your
-            day.
+            CommandMate puts the coding agents you already use in one place on your own machine, so
+            you can run them side by side, hand them work one issue at a time, and let your own
+            checks decide when the work is done. At every level you can answer and approve from
+            your phone, so the work does not stop when you leave the desk. Most people need only
+            Level 2.
           </p>
 
           <!-- The four numbers, and only these four (Issue #3060). Each has its
@@ -113,27 +115,26 @@
             width="360"
             height="240"
             role="img"
-            aria-label="Three levels drawn as a staircase. Level 1, one place for many agents, in your pocket. Level 2, work like a team. Level 3, an AI team that builds and maintains. Above each step sits a prompt chip: each level is one prompt to your agent away."
+            aria-label="Three levels drawn as a staircase. Level 1, Parallel: run several agents side by side, and you are the operator. Level 2, Delegate: hand over issues and let your checks decide, and you are the product or tech lead. Level 3, Manage: a PM agent plans and assigns, and you are the owner who approves. Most people need only Level 2. Above each step sits a prompt chip: each level is one prompt to your agent away."
           >
             <g class="step">
               <rect class="step-box" x="6" y="170" width="110" height="64" rx="10" />
               <text class="step-title" x="61" y="196">Level 1</text>
-              <text class="step-sub" x="61" y="214">One place</text>
+              <text class="step-sub" x="61" y="214">Parallel</text>
               <rect class="chip-box" x="16" y="134" width="90" height="24" rx="12" />
               <text class="chip-text" x="61" y="150">› prompt</text>
             </g>
             <g class="step">
               <rect class="step-box" x="125" y="112" width="110" height="122" rx="10" />
               <text class="step-title" x="180" y="138">Level 2</text>
-              <text class="step-sub" x="180" y="156">A team</text>
+              <text class="step-sub" x="180" y="156">Delegate</text>
               <rect class="chip-box" x="135" y="76" width="90" height="24" rx="12" />
               <text class="chip-text" x="180" y="92">› prompt</text>
             </g>
             <g class="step step-top">
               <rect class="step-box" x="244" y="54" width="110" height="180" rx="10" />
               <text class="step-title" x="299" y="80">Level 3</text>
-              <text class="step-sub" x="299" y="98">Builds and</text>
-              <text class="step-sub" x="299" y="113">maintains</text>
+              <text class="step-sub" x="299" y="98">Manage</text>
               <rect class="chip-box" x="254" y="18" width="90" height="24" rx="12" />
               <text class="chip-text" x="299" y="34">› prompt</text>
             </g>
@@ -154,7 +155,8 @@
       <!-- Level 1 -->
       <section class="section level" id="level-1" aria-labelledby="level-1-h">
         <p class="level-tag">Level 1</p>
-        <h2 id="level-1-h">Many agents, one place, in your pocket</h2>
+        <h2 id="level-1-h">Parallel</h2>
+        <p class="section-lede">Run several coding agents side by side, from one place. Your role: the operator, who answers each agent.</p>
         <ul class="pillars">
           <li class="pillar">
             <h3>Every agent on one screen</h3>
@@ -278,7 +280,8 @@
       <!-- Level 2 -->
       <section class="section level" id="level-2" aria-labelledby="level-2-h">
         <p class="level-tag">Level 2</p>
-        <h2 id="level-2-h">Work like a team, not a chat</h2>
+        <h2 id="level-2-h">Delegate</h2>
+        <p class="section-lede">Hand over work one issue at a time, and let your own checks, not the agent, decide when it is done. Your role: the product or tech lead. Most people need only this level.</p>
         <ul class="pillars">
           <li class="pillar">
             <h3>One issue, one workspace</h3>
@@ -446,7 +449,8 @@
       <!-- Level 3 -->
       <section class="section level" id="level-3" aria-labelledby="level-3-h">
         <p class="level-tag">Level 3</p>
-        <h2 id="level-3-h">An AI team that builds and maintains</h2>
+        <h2 id="level-3-h">Manage</h2>
+        <p class="section-lede">A PM agent plans, assigns and checks the work. You talk to the PM and approve. Your role: the owner.</p>
         <ul class="pillars pillars-two">
           <li class="pillar">
             <h3>PM, dev lead, workers</h3>
@@ -594,6 +598,11 @@
           </dl>
           <p class="run-record-note">As observed: one run, as recorded on 2026-10-02. Not a benchmark.</p>
         </div>
+
+        <p class="plan-note">
+          <strong>Next — Learn.</strong> Not built yet, and only a direction: use the record each
+          piece of work leaves behind to improve how the next one is done.
+        </p>
 
         <div class="ask">
           <p class="ask-label" id="ask-3-label">Ask your agent</p>

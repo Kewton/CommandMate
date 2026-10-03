@@ -1,6 +1,6 @@
-# CommandMate — No long blocks of time? Run an AI team from your phone.
+# CommandMate — Run multiple coding agents in parallel — even away from your desk.
 
-> CommandMate puts the coding agents you already use in one place you can run from your phone. Hand them work like a team, let checks decide what's done, and get back to your day.
+> CommandMate puts the coding agents you already use in one place on your own machine, so you can run them side by side, hand them work one issue at a time, and let your own checks decide when the work is done.
 
 Open source (MIT) · runs on your machine · macOS / Linux / Windows (WSL2) · no app to install
 
@@ -13,11 +13,14 @@ The author's numbers:
 - ~80% of my instructions sent from a phone (my estimate)
 - 689 PRs merged in September 2026, across my repositories
 
-Three levels:
+Levels, by how much of the work a person still does:
 
-- **Level 1 — Many agents, one place, in your pocket**: Claude Code, Codex, Gemini CLI, Copilot, OpenCode (1.x and V2), Antigravity, Command Code or local models, each task in its own session. Answer them like a chat, from your phone, paired with `commandmate remote` through Tailscale or Cloudflare. It runs on the plan you already pay for and adds no pay-per-use API bill of its own.
-- **Level 2 — Work like a team, not a chat**: one issue per Git worktree, a task handed over as a contract you can read later, your own checks deciding what is done by their exit code, and the method installed as Skills.
-- **Level 3 — An AI team that builds and maintains**: a PM session plans the issues, a dev lead hands each one to a worker, and only what passed the checks becomes a PR. Scheduled runs start sessions at set times. The author's daily auto-fix run is the author's own setup built from scheduled runs and the orchestrate Skill, not a switch in the product.
+- **Level 1 — Parallel** (your role: operator): Claude Code, Codex, Gemini CLI, Copilot, OpenCode (1.x and V2), Antigravity, Command Code or local models, each task in its own session, side by side. You answer each agent like a chat. It runs on the plan you already pay for and adds no pay-per-use API bill of its own.
+- **Level 2 — Delegate** (your role: product or tech lead): one issue per Git worktree, a task handed over as a contract you can read later, and your own checks (lint, tests) deciding what is done, not the agent's summary. The method is installed as Skills.
+- **Level 3 — Manage** (your role: owner): a PM agent plans the issues and hands each one to an agent, and only what passed the checks becomes a PR. You talk to the PM and approve. Scheduled runs can start sessions at set times. The author's daily auto-fix run is the author's own setup built from scheduled runs and the orchestrate Skill, not a switch in the product.
+- **Next — Learn**: not built yet, only a direction: use the record each piece of work leaves behind to improve how the next one is done.
+
+Anywhere: at every level you can answer and approve from your phone, paired with `commandmate remote` through Tailscale or Cloudflare. Most people need only Level 2.
 
 ## Docs
 
