@@ -134,7 +134,7 @@ describe('POST /api/remote/pair', () => {
     expect(second.cookies.get(AUTH_COOKIE_NAME)).toBeUndefined();
   });
 
-  it('answers 410 once the TTL has passed, and removes the stale file', async () => {
+  it('answers 410 once the TTL has passed, and keeps the file so status reads expired (#3155)', async () => {
     const created = createPairingHandoff({
       filePath: pairingFile,
       now: Date.now() - 60 * 60 * 1000,
@@ -144,7 +144,12 @@ describe('POST /api/remote/pair', () => {
 
     expect(response.status).toBe(410);
     expect(response.cookies.get(AUTH_COOKIE_NAME)).toBeUndefined();
-    expect(existsSync(pairingFile)).toBe(false);
+    expect(existsSync(pairingFile)).toBe(true);
+    // Still unusable on a repeat attempt.
+    expect((await postPair({ code: created.code })).status).toBe(410);
+    // `remote pair` must still see "expired", not "consumed" (#3127 / #3155).
+    const { reissuePairingCode } = await import('@/cli/utils/remote-pairing');
+    expect(reissuePairingCode(pairingFile)).toEqual({ ok: false, reason: 'expired' });
   });
 
   it('answers 410 when the handoff file is corrupt', async () => {
