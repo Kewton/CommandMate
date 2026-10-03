@@ -27,6 +27,8 @@ import { NextResponse } from 'next/server';
 import { ensureConfigDir, isGlobalInstall, isNpxExecution } from '@/cli/utils/install-context';
 import { getDaemonManagerFactory } from '@/cli/utils/daemon-factory';
 import { acquireUpdateLock, releaseUpdateLock } from '@/lib/app-update/update-lock';
+import { checkNpmHasNewerVersion } from '@/lib/app-update/npm-publish-check';
+import { getCurrentVersion } from '@/lib/version-checker';
 
 // The response depends on runtime state (install type, PID file), so it must
 // never be prerendered at build time — same rationale as update-check [FIX-270].
@@ -56,7 +58,9 @@ export interface UpdateErrorResponse {
   error: string;
   // Issue #1395: 'npx' is gone — an npx run now takes the relaunch path (202)
   // instead of being refused (#1394).
-  code: 'not_global' | 'in_progress' | 'spawn_failed';
+  // Issue #3110: 'not_yet_published' — npm does not serve a newer version yet
+  // (GitHub releases ahead of npm), so the update would install nothing.
+  code: 'not_global' | 'in_progress' | 'spawn_failed' | 'not_yet_published';
 }
 
 type UpdateResponse = UpdateStartResponse | UpdateErrorResponse;
@@ -179,6 +183,22 @@ export async function POST(): Promise<NextResponse<UpdateResponse>> {
         code: 'not_global' as const,
       },
       { status: 400 }
+    );
+  }
+
+  // Issue #3110: GitHub announces a release before npm serves it, and
+  // `commandmate update` installs npm's latest. Launching it then would end in
+  // "Already up to date" with no restart, leaving the client to time out.
+  // Only a definite "no newer version" refuses; an npm that cannot be asked
+  // proceeds as before. Nothing from the request reaches this check.
+  // npx keeps its pre-#3110 behaviour, matching update-check.
+  if (!isNpx && (await checkNpmHasNewerVersion(getCurrentVersion())) === false) {
+    return NextResponse.json(
+      {
+        error: 'The new version is not yet available on npm. Try again in a few minutes.',
+        code: 'not_yet_published' as const,
+      },
+      { status: 409 }
     );
   }
 

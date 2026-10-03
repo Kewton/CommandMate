@@ -15,7 +15,7 @@
  * @module npm-runner
  */
 
-import { spawnSync, type SpawnSyncReturns } from 'child_process';
+import { execFile, spawnSync, type SpawnSyncReturns } from 'child_process';
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 
@@ -86,6 +86,48 @@ export function viewLatestVersion(packageName: string): NpmViewResult {
   }
 
   return { success: true, version };
+}
+
+/**
+ * Non-blocking twin of {@link viewLatestVersion}, for the server. [Issue #3110]
+ *
+ * The update-check route asks npm whether a release GitHub already announced
+ * has reached the registry. `spawnSync` would stall the server's event loop for
+ * the whole network round trip, so this uses `execFile` (array args, no shell —
+ * MF-SEC-1 holds) under the same timeout and failure classification.
+ *
+ * @param packageName - Package name (e.g. `commandmate`)
+ * @returns The resolved version, or a classified failure. Never rejects.
+ */
+export function viewLatestVersionAsync(packageName: string): Promise<NpmViewResult> {
+  return new Promise((resolve) => {
+    execFile(
+      'npm',
+      ['view', packageName, 'version'],
+      { encoding: 'utf-8', timeout: NPM_VIEW_TIMEOUT_MS },
+      (error, stdout, stderr) => {
+        if (error) {
+          const errnoError = error as NodeJS.ErrnoException;
+          if (errnoError.code === 'ENOENT') {
+            resolve({
+              success: false,
+              error: 'npm command not found. Install Node.js/npm and try again.',
+            });
+            return;
+          }
+          resolve({ success: false, error: readStream(stderr) || errnoError.message });
+          return;
+        }
+
+        const version = readStream(stdout);
+        if (!version) {
+          resolve({ success: false, error: 'npm view returned no version' });
+          return;
+        }
+        resolve({ success: true, version });
+      }
+    );
+  });
 }
 
 /**
