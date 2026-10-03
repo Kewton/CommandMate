@@ -5,6 +5,35 @@ named explicitly in `ALLOWED_MEDIA` in `tests/unit/website/landing-page.test.ts`
 means editing that list, which is deliberately the moment a human confirms the footage is safe to
 publish. The still images the page serves live in `website/assets/img/`.
 
+## Not on the page right now (Issue #3162)
+
+Issue #3162 cut the page to about half: three videos at most, and one demo per level. What it took
+off the page is **kept, not deleted**, so it can come back without being re-recorded or re-vetted.
+Every file below stays on `ALLOWED_MEDIA` and keeps the provenance written further down; none of
+them is referenced from `index.html` today.
+
+| Kept, unused | What it shows | Last shown in |
+|------|-------|-------|
+| `never-miss-waiting.mp4` + `poster-never-miss-waiting.webp` | Waiting raising a pill and a toast, answered from a phone | Level 1 |
+| `parallel-worktrees.mp4` + `poster-parallel-worktrees.webp` | One session per worktree, in parallel | Level 1 |
+| `install-skill.mp4` + `poster-install-skill.webp` | Installing a Skill from the official Catalog | Level 2 |
+| `../img/screenshot-worktree-mobile-chat.webp` | A session read and answered as a chat on a phone | Level 1 (the phone clip stands for the phone now) |
+
+The page still shows `phone-team.mp4` (Level 1, beside the desktop shot), `contract-verify.mp4`
+(Level 2) and `orchestrate-run.mp4` (Level 3).
+
+Copy and drawings the same cut removed are not files, so they are kept in git instead: `website/index.html`
+as of commit `fa5a5de7` (the #3153 merge) has them all.
+
+- **Cards**: Level 1's "Every agent on one screen", "A conversation, not a terminal", "Safely from
+  your phone" and "Step away from the desk" (replaced by four new ones); Level 2's "One issue, one
+  workspace"; Level 3's "PM, dev lead, workers" and "Scheduled runs".
+- **Blocks**: the run-record list under Level 3 (its numbers are the hero's now) and the "My setup"
+  section (its table is in Level 3, without the phone-connection row, which Level 1 says).
+- **Drawings**: figure C's one-issue flow (Issue → worktree → contract → work → checks → UAT → PR,
+  now Issues → Contracts → Agents × N → Checks → PRs) and figure E's Schedule and dev-lead nodes
+  (now You → PM → Workers).
+
 ## What went wrong the first time (Issue #1272)
 
 The LP used to open on `demo-desktop.mp4` with `demo-desktop-poster.webp` as its poster, and
@@ -83,9 +112,10 @@ ffmpeg -v error -y -ss 6.5 -i website/assets/media/orchestrate-run.mp4 \
   second beat, the approval sheet. Re-cut it with the take's `run.sh` / `take.ts`, then re-check
   the frames rather than trusting the filename.
 
-## The current demos (Issue #1577, re-cut for Issue #1812)
+## The feature demos (Issue #1577, re-cut for Issue #1812)
 
-The four were cut one per card of the LP's four cards (#1812).
+The four were cut one per card of the LP's four cards (#1812). Since #3162 only `contract-verify` is
+on the page; the other three are kept unused (see the top of this file).
 
 | File | Source | Shows |
 |------|--------|-------|
@@ -142,9 +172,9 @@ Generated, not taken by hand (Issue #1810). The screenshots come out of the same
 environment the demo video is filmed in, so the only repository that can appear in one is the
 throwaway seed — which is what #1225 could not reproduce about the hand-taken set.
 
-Since Issue #3060 the page has no gallery: Level 1 shows two shots, `screenshot-desktop` and
-`screenshot-worktree-mobile-chat`. `screenshot-worktree-desktop-chat` and `screenshot-mobile` stay
-on disk unreferenced. The two chat shots were recorded for #2298 in that same environment, not by
+Since Issue #3060 the page has no gallery. Since Issue #3162 Level 1 shows one shot,
+`screenshot-desktop`, beside the phone clip; `screenshot-worktree-mobile-chat`,
+`screenshot-worktree-desktop-chat` and `screenshot-mobile` stay on disk unreferenced. The two chat shots were recorded for #2298 in that same environment, not by
 the script below.
 
 ```bash

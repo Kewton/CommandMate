@@ -26,12 +26,14 @@ CommandMate puts the coding agents you already use in one place on your own mach
 
 Most people need only Level 2. Stop at the level that fits you; nothing here asks you to climb.
 
-The author's numbers, with CommandMate:
+One recorded run (PM → dev lead → workers):
 
-- 10+ PRs a day, solo
-- $110–$210 a month: Claude Max + Command Code Goat
-- ~80% of my instructions sent from a phone (my estimate)
-- 689 PRs merged in September 2026, across my repositories
+- 4 issues, 4 workers (Command Code), PM and dev lead on Claude Code
+- 2 messages and 3 taps from a phone-width web UI
+- 4/4 checks passed, PRs merged with CI green, UAT 4/4 GO
+- 9 min 48 s from request to report
+
+As observed: one run, recorded on 2026-10-02. Not a benchmark.
 
 <p align="center">
   <img src="./docs/images/demo-hero.en.gif" width="560" alt="A list of four open issues, one message typed into the lead session, four worktree sessions in the sidebar, a worker writing a test file, and a final report with a phase-by-phase table" />

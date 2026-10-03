@@ -26,12 +26,14 @@ CommandMate は、いつも使っているコーディングエージェント�
 
 多くの人は Level 2 で十分です。自分に合う Level で止めてかまいません。上を目指す必要はありません。
 
-CommandMate を使っている作者の数字:
+記録した 1 回の run（PM → 開発リーダー → ワーカー）:
 
-- 1 人で 1 日 10 本以上の PR
-- 月 $110〜$210: Claude Max + Command Code Goat
-- 指示の約 8 割をスマホから送信（作者の概算）
-- 2026 年 9 月にマージした PR 689 本（作者のリポジトリ合計）
+- 4 Issue、ワーカー 4 つ（Command Code）、PM と開発リーダーは Claude Code
+- スマホ幅の Web UI からメッセージ 2 通＋タップ 3 回
+- 検証 4/4 合格、PR は CI 緑でマージ、UAT 4/4 GO
+- 依頼から報告まで 9 分 48 秒
+
+as observed（実測した範囲）: 2026-10-02 に記録した 1 回の run。ベンチマークではない。
 
 <p align="center">
   <img src="../images/demo-hero.ja.gif" width="560" alt="4 つの Issue の一覧、lead セッションへ打ち込まれた 1 通、サイドバーに並ぶ 4 つの worktree セッション、テストファイルを書く worker、そしてフェーズごとの表がついた最終報告" />
