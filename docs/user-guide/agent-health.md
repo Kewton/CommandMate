@@ -69,7 +69,7 @@ npx tsx scripts/agent-health/run.ts [--tools claude,codex,antigravity,opencode,c
 | `--state` | `~/.commandmate/agent-health/state.json` | 前回の版の置き場所（`{ "versions": { "<tool>": "<版>" } }`）。実行の最後に更新する |
 | `--server-log` | main worktree の `logs/server.log` | 本番サーバのログ（hook の漏れを数える） |
 
-全体は 12 分を超えない（Schedule の 1 回の実行は 15 分で打ち切られるため）。持ち時間が尽きたら、残りのツールは
+全体は 12 分を超えない（Schedule の 1 回の実行は 30 分で打ち切られる。2026-10-03 までは 15 分だった）。持ち時間が尽きたら、残りのツールは
 `version` だけ読んで他を skip にする。
 
 終了コード:
