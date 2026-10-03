@@ -40,7 +40,7 @@ unset TMUX
 .claude/skills/demo-video/scripts/demo-video.sh --storyboard readme-hero --gif --out ~/Desktop/commandmate-demo/readme-hero
 ```
 
-偽エージェントの tmux セッション（`mcbd-<tool>-wt-dark-mode`）は既定サーバに立つ。サーバも `tmux` を素で呼ぶので同じサーバでないと採用されない。後片付けは `env-down.sh` が**記録した名前だけ**を kill する。
+偽エージェントの tmux セッション（`mcbd-<ns>-<tool>-wt-dark-mode`。`<ns>` は demo サーバの名前空間、#3079）は既定サーバに立つ。サーバも `tmux` を素で呼ぶので同じサーバでないと採用されない。後片付けは `env-down.sh` が**記録した名前だけ**を kill する。
 
 ## 設計判断
 
@@ -147,7 +147,7 @@ npx playwright install chromium   # 未導入なら実行（導入済みなら n
 
 ### 2. 偽エージェントを起動
 
-セッション名は CommandMate 自身の命名規則 `mcbd-<cliTool>-<worktreeId>`（primary インスタンスは suffix 無し。`src/lib/session/claude-session.ts` の `getSessionName`）に合わせる。
+セッション名は CommandMate 自身の命名規則 `mcbd-<ns>-<cliTool>-<worktreeId>`（primary インスタンスは suffix 無し。`src/lib/session/claude-session.ts` の `getSessionName`）に合わせる。`<ns>` はサーバが初回起動時に DB の `app_settings.tmux_session_namespace` に採番する名前空間（#2866）。旧名 `mcbd-<cliTool>-<worktreeId>` の採用はサーバ起動時の 1 回だけなので、起動後に旧名で立てたペインは採用されない（#3079）。`env-up.sh` が名前空間を demo DB から読んで `state.env` の `CM_DEMO_SESSION_NAMESPACE` に書き、`fake-agent.sh` はそれで名前を組む。
 
 worktree id は **ディレクトリ由来**である。`id = sanitize(basename(resolvedPath))`、衝突したときだけ `-<sha256(path) の先頭 8 桁>`（`src/lib/git/worktree-id.ts` の `deriveWorktreeId`。Issue #1621 / #1644 / #1645）。ブランチ名は入らない。旧規則 `<repo 名>-<branch>` の採番関数は **@deprecated** で `src/` から呼ばれていない。
 
@@ -169,7 +169,7 @@ for t in antigravity opencode command-code; do
 done
 ```
 
-`--tool <id> --worktree <id>` で `mcbd-<tool>-<worktreeId>` を導出する（`--session` を明示するときは `mcbd-<tool>-` で始まっていないと拒否。`--tool` 無しなら `--session` の名前からツールを読む）。ジオメトリもツールで決まる: opencode は 80×200（`OPENCODE_PANE_WIDTH` / `OPENCODE_PANE_HEIGHT`。121 桁以上はサイドバーが全行に混ざる、#2047）、他は 200×1000。`--idle-only` は最初の `@input` より前の行だけ描いて保持し、届いた入力は飲み込んで再描画する（present-only の 3 体用）。
+`--tool <id> --worktree <id>` で `mcbd-<ns>-<tool>-<worktreeId>` を導出する（`<ns>` は `--namespace`、無ければ `$CM_DEMO_SESSION_NAMESPACE`、無ければ `state.env` の値。空なら旧名。`--session` を明示するときは名前をそのまま使い `mcbd-<tool>-` で始まっていないと拒否。`--tool` 無しなら `--session` の名前からツールを読む）。ジオメトリもツールで決まる: opencode は 80×200（`OPENCODE_PANE_WIDTH` / `OPENCODE_PANE_HEIGHT`。121 桁以上はサイドバーが全行に混ざる、#2047）、他は 200×1000。`--idle-only` は最初の `@input` より前の行だけ描いて保持し、届いた入力は飲み込んで再描画する（present-only の 3 体用）。
 
 ペインは **tmux サーバの環境**を継ぐ（クライアントではない）ので、`fake-agent.sh` は隔離した `HOME` と `PATH`、`--port` の `CM_PORT` をコマンド行に書き込んでから起こす。これが無いとペインの `commandmate` は開発者の `~/.commandmate/.env` を読んで本番に繋ぐ。`--port 3000` は拒否。
 
@@ -358,7 +358,7 @@ git status --short     # 何も出ないこと
 tmux セッションの kill 対象は 2 系統で、どちらも**この run が記録した名前・id にしか一致しない**。`mcbd-*` の総なめはしない（この tmux サーバは開発者自身の稼働セッションを抱えている）。
 
 1. `fake-agent.sh --record-to` が `$CM_DEMO_SESSIONS_FILE` に追記した名前
-2. `state.env` の 4 つの demo worktree id に対する `mcbd-<tool>-<id>[-<suffix>]` — サーバ自身が起こしたセッションや追加インスタンスを拾う
+2. `state.env` の 4 つの demo worktree id に対する `mcbd-[<ns>-]<tool>-<id>[-<suffix>]` — サーバ自身が起こしたセッションや追加インスタンスを拾う。`<ns>` は `state.env` の `CM_DEMO_SESSION_NAMESPACE` だけ（別サーバの名前空間は拾わない）
 
 **手順 1 以降のどこで失敗しても、必ず 6 まで到達させること。** 途中で諦めると隔離サーバがポートを掴んだまま残り、次回の `env-up.sh` が state ファイルの存在を理由に起動を拒否する（これは意図的な設計。壊れた状態に上書きするより止める）。`demo-video.sh` は `trap ... EXIT INT TERM` でこれを保証する。
 
@@ -530,7 +530,7 @@ YAML は自前の**厳格なサブセットパーサ**で読む。このツリ�
 | #2380: 委任カセットの `@exec` は「`commandmate` 始まり」を許可条件にする | 先頭語だけの判定では `commandmate x; rm -rf …` が通る | 先頭語 `commandmate` **かつ**シェル演算子（`;` `&` `\|` バッククォート `$` `<` `>` `(` `)`）を含まない。差し込みは語分割の後 |
 | #1810: 静止画は 5 点とも 100KB 未満 | `screenshot-worktree-desktop` は 3 ペインで、旧アセットも 169KB だった | 本文の例外指定（`website/assets/media/README.md`）に合わせ、この 1 枚だけ 200KB。他の 4 枚は 100KB 未満（実測 q=82 で 47〜79KB） |
 | #2381: 各シーンの秒数（`repo-tab-switch` 4 / `reply-file-link` 5 / `mobile-approve` 4 / `mobile-file-link` 4） | 実測: タブ帯のブランチを押してからの遷移は dev サーバで約 2 秒（4 秒枠だとポップオーバーが枠外）、承認シートのタップ後「送信中…」が約 2.5 秒（4 秒枠だとシートが 1 秒）、委任往復の頭（依頼をタイプ → 挿入 → 送信）は 3.5〜4.8 秒（`head: 4` では送信が切れた） | `repo-tab-switch` 5 / `reply-file-link` 4 / `mobile-approve` 5 / `mobile-file-link` 3、`delegate-ask` は 7 秒のまま `head: 5`（尻 2 秒）。合計 30 秒は変えていない。見せ場が 1 フレームで済む 2 本（開いたファイル）から秒を回した |
-| #2381: `agent-tabs` の telop.ja「5 エージェントが 1 つの worktree に」 | 25 文字で record の上限 20 文字を超える（Issue 自身が「字数超過はそこで落ちる」と書いている） | 「5 エージェント、1 worktree」（19 文字）。public-messaging.md §6 も同じ文言 |
+| #2381: `agent-tabs` の telop.ja「5 エージェントが 1 つの worktree に」 | 25 文字で record の上限 20 文字を超える（Issue 自身が「字数超過はそこで落ちる」と書いている） | 「5 エージェント、1 worktree」（19 文字） |
 | #2381: 「エージェントタブに 5 体」 | PC ヘッダーの行は idle を**ドット**に畳む（`classifyHeaderInstances`）ので、5 体が名前で並ぶのは split のインスタンスピッカーと Agent ペインの roster だけ | `agent-tabs` は Agent ペインを開いた状態でピッカーを開いて撮る。roster の alias 入力は幅で切れる（`Antigravit`、`Command`）が、ピッカーはフル表示 |
 | #2381: 「2 つ目のリポジトリをクリック」 | タブ帯は名前順で `cmdemo-app` が 1 つ目。2 つ目の `cmdemo-docs` には live セッションが無い | `cmdemo-docs` の worktree から始めて `cmdemo-app` のタブを押す（ポップオーバーに 3 ブランチと状態ドット、`feature/demo-dark-mode` が緑）。切替先が次のシーンの worktree になる |
 | #2381: 「Codex の返答（全幅 Markdown）」 | codex 側は初回送信でバナー行が `chat_messages` に残る（#2380 の既知行）が、チャット面には描かれなかった | Issue どおり Codex タブで撮る。Claude 側にも同じリンクがあるので、描かれるようになったら Claude タブへ切り替えればよい |

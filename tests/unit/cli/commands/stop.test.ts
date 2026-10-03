@@ -10,6 +10,20 @@ import * as fs from 'fs';
 vi.mock('fs');
 vi.mock('dotenv', () => ({ config: vi.fn(() => ({ parsed: {} })) }));
 vi.mock('../../../../src/cli/utils/security-logger');
+// Issue #3087: DaemonManager probes the port before start and after stop; keep it off the
+// real network so a server on this machine's 3000 cannot decide the outcome.
+vi.mock('../../../../src/cli/utils/server-ready', () => ({
+  isPortInUse: vi.fn(async () => false),
+  waitForServer: vi.fn(async () => true),
+}));
+// Issue #3087: /proc and lsof inspection is platform-dependent and reads through the mocked fs;
+// default to "nothing known" so these suites behave the same on macOS and Linux CI.
+vi.mock('../../../../src/cli/utils/process-inspect', () => ({
+  isZombieProcess: vi.fn(() => false),
+  listProcessGroupStates: vi.fn(() => null),
+  isExitedState: (state: string) => state === 'Z' || state === 'X',
+  describeListeners: vi.fn(() => null),
+}));
 // stop.ts reads the PID via getStatus(), which resolves the server URL from .env (Issue #1266)
 vi.mock('../../../../src/cli/utils/env-setup', () => ({
   getPidFilePath: vi.fn(() => '/mock/home/.commandmate/.commandmate.pid'),
@@ -20,6 +34,8 @@ vi.mock('../../../../src/cli/utils/env-setup', () => ({
 import { stopCommand } from '../../../../src/cli/commands/stop';
 import { ExitCode } from '../../../../src/cli/types';
 import { getPidFilePath } from '../../../../src/cli/utils/env-setup';
+import { isPortInUse } from '../../../../src/cli/utils/server-ready';
+import { describeListeners } from '../../../../src/cli/utils/process-inspect';
 
 describe('stopCommand', () => {
   let mockExit: ReturnType<typeof vi.fn>;
@@ -43,6 +59,48 @@ describe('stopCommand', () => {
       await stopCommand({});
 
       expect(getPidFilePath).toHaveBeenCalled();
+    });
+  });
+
+  describe('unrecorded listener on the configured port (Issue #3087)', () => {
+    afterEach(() => {
+      vi.mocked(isPortInUse).mockResolvedValue(false);
+      vi.mocked(describeListeners).mockReturnValue(null);
+    });
+
+    it('does not say "stopped" when no PID file exists but the port still answers, and kills nothing', async () => {
+      vi.mocked(fs.existsSync).mockReturnValue(false);
+      vi.mocked(isPortInUse).mockResolvedValue(true);
+      vi.mocked(describeListeners).mockReturnValue('PID 875 (node dist/server/server.js)');
+      const killSpy = vi.spyOn(process, 'kill');
+      const logSpy = vi.mocked(console.log);
+
+      await stopCommand({});
+
+      expect(mockExit).toHaveBeenCalledWith(ExitCode.STOP_FAILED);
+      expect(isPortInUse).toHaveBeenCalledWith('127.0.0.1', 3000);
+      expect(killSpy).not.toHaveBeenCalled();
+      const printed = [...logSpy.mock.calls, ...vi.mocked(console.error).mock.calls].flat().join('\n');
+      expect(printed).toContain('PID 875');
+      expect(printed).not.toContain('Status: Stopped');
+    });
+
+    it('exits SUCCESS with "Status: Stopped" when the port is free', async () => {
+      vi.mocked(fs.existsSync).mockReturnValue(false);
+      vi.mocked(isPortInUse).mockResolvedValue(false);
+
+      await stopCommand({});
+
+      expect(mockExit).toHaveBeenCalledWith(ExitCode.SUCCESS);
+    });
+
+    it('does not probe the main port for a worktree server (--issue)', async () => {
+      vi.mocked(fs.existsSync).mockReturnValue(false);
+      vi.mocked(isPortInUse).mockResolvedValue(true);
+
+      await stopCommand({ issue: 135 });
+
+      expect(mockExit).toHaveBeenCalledWith(ExitCode.SUCCESS);
     });
   });
 
@@ -108,7 +166,8 @@ describe('stopCommand', () => {
 
       await stopCommand({});
 
-      expect(killSpy).toHaveBeenCalledWith(12345, 'SIGTERM');
+      // Issue #3087: the whole process group, not just npm's PID
+      expect(killSpy).toHaveBeenCalledWith(-12345, 'SIGTERM');
       expect(mockExit).toHaveBeenCalledWith(ExitCode.SUCCESS);
 
       killSpy.mockRestore();
@@ -146,7 +205,7 @@ describe('stopCommand', () => {
 
       await stopCommand({ force: true });
 
-      expect(killSpy).toHaveBeenCalledWith(12345, 'SIGKILL');
+      expect(killSpy).toHaveBeenCalledWith(-12345, 'SIGKILL');
       expect(mockExit).toHaveBeenCalledWith(ExitCode.SUCCESS);
 
       killSpy.mockRestore();

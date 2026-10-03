@@ -23,15 +23,18 @@ import {
 } from '@/lib/session/resolve-session-target';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { probeRunningSessionHookUrl } from '@/lib/cli-tools/base';
-import { CLI_TOOL_IDS, isValidInstanceId, type CLIToolType } from '@/lib/cli-tools/types';
+import { CLI_TOOL_IDS, isValidInstanceId, type CLIToolType, type ICLITool } from '@/lib/cli-tools/types';
 import { sendUserMessage } from '@/lib/session/send-user-message';
 import { PROMPT_WAITING_CODE } from '@/lib/session/prompt-waiting-guard';
 import {
+  buildSessionExitedToShellMessage,
   isSessionStartTimeoutError,
   isSessionStartUnavailableError,
   SESSION_STARTING_CODE,
+  SESSION_START_FAILED_CODE,
   SESSION_START_UNAVAILABLE_CODE,
 } from '@/lib/session/session-start-error';
+import { isPaneBackAtShell } from './pane-shell';
 import { getGitStatus } from '@/lib/git/git-utils';
 import { isPathSafe, resolveAndValidateRealPath } from '@/lib/security/path-validator';
 import path from 'path';
@@ -370,10 +373,7 @@ export async function POST(
         // is what made four separate orchestration runs misdiagnose a slow cold
         // start as a session-creation race.
         if (isSessionStartTimeoutError(error)) {
-          return NextResponse.json(
-            { error: error.message, code: SESSION_STARTING_CODE },
-            { status: 503 }
-          );
+          return answerSessionStartTimeout(error.message, cliTool, id, instanceId);
         }
         // Issue #2009: the CLI is not installed. Also a 503 — the request was
         // well formed and the server is healthy, the machine is simply missing
@@ -465,10 +465,7 @@ export async function POST(
       // above is — 503 + SESSION_STARTING, message unwrapped — so the CLI and
       // dispatch read one "still starting, retry" whichever step noticed it.
       if (result.code === SESSION_STARTING_CODE) {
-        return NextResponse.json(
-          { error: result.error, code: SESSION_STARTING_CODE },
-          { status: 503 }
-        );
+        return answerSessionStartTimeout(result.error, cliTool, id, instanceId);
       }
       if (result.stage === 'model') {
         return NextResponse.json(
@@ -490,4 +487,32 @@ export async function POST(
       { status: 500 }
     );
   }
+}
+
+/**
+ * The 503 for a session that did not reach its input prompt (Issue #1637), with
+ * the pane checked first (Issue #3093).
+ *
+ * The timeout's own message says the process is still running. When the pane's
+ * bottom row is a shell prompt, the agent has already exited (a startup dialog
+ * answered with exit, a crash) and that sentence sends the reader off to wait
+ * for nothing — so the answer becomes SESSION_START_FAILED with a message that
+ * says the agent exited. A pane that cannot be read keeps the original answer.
+ */
+async function answerSessionStartTimeout(
+  message: string,
+  cliTool: ICLITool,
+  worktreeId: string,
+  instanceId: string | undefined
+): Promise<NextResponse> {
+  if (await isPaneBackAtShell(cliTool, worktreeId, instanceId)) {
+    return NextResponse.json(
+      {
+        error: buildSessionExitedToShellMessage(cliTool.name, cliTool.getSessionName(worktreeId, instanceId)),
+        code: SESSION_START_FAILED_CODE,
+      },
+      { status: 503 }
+    );
+  }
+  return NextResponse.json({ error: message, code: SESSION_STARTING_CODE }, { status: 503 });
 }

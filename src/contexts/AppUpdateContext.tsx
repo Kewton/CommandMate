@@ -30,6 +30,7 @@ import {
 import { useTranslations } from 'next-intl';
 import { ApiError, appApi, type UpdateCheckResponse } from '@/lib/api-client';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
+import { useToast } from '@/components/common/Toast';
 
 /**
  * Update lifecycle.
@@ -59,6 +60,11 @@ export interface AppUpdateContextValue {
   checking: boolean;
   /** `updateInfo?.hasUpdate === true` */
   hasUpdate: boolean;
+  /**
+   * Issue #3110: a version released on GitHub that npm does not serve yet.
+   * Null whenever hasUpdate is true. The update cannot be started meanwhile.
+   */
+  pendingVersion: string | null;
   /** installType is 'global' or 'npx' (Issue #1198 / #1395) */
   canSelfUpdate: boolean;
   state: AppUpdateState;
@@ -83,6 +89,13 @@ export const UPDATE_TIMEOUT_MS = 5 * 60 * 1000;
 /** Re-run the update check this often (only while idle) */
 export const UPDATE_RECHECK_INTERVAL_MS = 60 * 60 * 1000;
 
+/**
+ * Issue #3110: while a version is pending on npm, re-run the check this often
+ * so the button turns on soon after npm publishes. Matches the server's npm
+ * recheck (NPM_PENDING_RECHECK_MS); the server keeps GitHub cached for 1 hour.
+ */
+export const UPDATE_PENDING_RECHECK_INTERVAL_MS = 5 * 60 * 1000;
+
 const noop = (): void => {};
 
 /** Value seen by consumers rendered without AppUpdateProvider */
@@ -90,6 +103,7 @@ export const APP_UPDATE_DEFAULT_VALUE: AppUpdateContextValue = {
   updateInfo: null,
   checking: false,
   hasUpdate: false,
+  pendingVersion: null,
   canSelfUpdate: false,
   state: 'idle',
   logPath: null,
@@ -99,10 +113,20 @@ export const APP_UPDATE_DEFAULT_VALUE: AppUpdateContextValue = {
   confirm: async () => {},
 };
 
+/** Issue #3110: POST /api/app/update refused because npm lacks the new version */
+function isNotYetPublished(error: unknown): boolean {
+  return (
+    error instanceof ApiError &&
+    error.status === 409 &&
+    (error.data as { code?: unknown } | undefined)?.code === 'not_yet_published'
+  );
+}
+
 const AppUpdateContext = createContext<AppUpdateContextValue>(APP_UPDATE_DEFAULT_VALUE);
 
 export function AppUpdateProvider({ children }: { children: ReactNode }) {
   const t = useTranslations('worktree');
+  const { showToast } = useToast();
   const [updateInfo, setUpdateInfo] = useState<UpdateCheckResponse | null>(null);
   const [checking, setChecking] = useState(true);
   const [state, setState] = useState<AppUpdateState>('idle');
@@ -117,6 +141,9 @@ export function AppUpdateProvider({ children }: { children: ReactNode }) {
 
   // Survives re-renders so a restart that completes between two polls is not missed.
   const seenDownRef = useRef(false);
+
+  // The mounted update check, for the pending recheck and confirm() to re-run.
+  const runCheckRef = useRef<() => Promise<void>>(async () => {});
 
   // Update check: once on mount, then every UPDATE_RECHECK_INTERVAL_MS while idle.
   useEffect(() => {
@@ -134,17 +161,29 @@ export function AppUpdateProvider({ children }: { children: ReactNode }) {
         if (!cancelled) setChecking(false);
       }
     };
+    runCheckRef.current = run;
     void run();
     const timer = setInterval(() => {
       void run();
     }, UPDATE_RECHECK_INTERVAL_MS);
     return () => {
       cancelled = true;
+      runCheckRef.current = async () => {};
       clearInterval(timer);
     };
   }, []);
 
   const hasUpdate = updateInfo?.hasUpdate === true;
+  const pendingVersion = hasUpdate ? null : (updateInfo?.pendingVersion ?? null);
+
+  // Issue #3110: poll faster while npm has not caught up with GitHub.
+  useEffect(() => {
+    if (!pendingVersion) return;
+    const timer = setInterval(() => {
+      void runCheckRef.current();
+    }, UPDATE_PENDING_RECHECK_INTERVAL_MS);
+    return () => clearInterval(timer);
+  }, [pendingVersion]);
   const canSelfUpdate =
     updateInfo?.installType === 'global' || updateInfo?.installType === 'npx';
 
@@ -168,6 +207,16 @@ export function AppUpdateProvider({ children }: { children: ReactNode }) {
       // Issue #1198 決定3: with no PID file the update never stops this server.
       setState(result.willRestart ? 'updating' : 'no-restart');
     } catch (error) {
+      // Issue #3110: npm has not published the new version yet. Nothing was
+      // started, so say so now (instead of a 5-minute restart wait) and allow
+      // a retry; the recheck picks up the pending state.
+      if (isNotYetPublished(error)) {
+        showToast(t('update.notYetPublished'), 'info');
+        stateRef.current = 'idle';
+        setState('idle');
+        void runCheckRef.current();
+        return;
+      }
       if (error instanceof ApiError && error.status === 400) {
         setErrorKey('update.errorNotGlobal');
       } else if (error instanceof ApiError && error.status === 409) {
@@ -177,7 +226,7 @@ export function AppUpdateProvider({ children }: { children: ReactNode }) {
       }
       setState('error');
     }
-  }, []);
+  }, [showToast, t]);
 
   /**
    * Watch the server go down and come back, then reload onto the new version.
@@ -227,6 +276,7 @@ export function AppUpdateProvider({ children }: { children: ReactNode }) {
       updateInfo,
       checking,
       hasUpdate,
+      pendingVersion,
       canSelfUpdate,
       state,
       logPath,
@@ -239,6 +289,7 @@ export function AppUpdateProvider({ children }: { children: ReactNode }) {
       updateInfo,
       checking,
       hasUpdate,
+      pendingVersion,
       canSelfUpdate,
       state,
       logPath,

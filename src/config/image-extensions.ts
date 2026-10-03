@@ -92,6 +92,8 @@ export interface ImageValidationResult {
   valid: boolean;
   /** Error message if validation failed */
   error?: string;
+  /** Machine-readable cause when the failure is an oversize file */
+  reason?: 'too-large';
 }
 
 /**
@@ -281,6 +283,7 @@ export function validateImageContent(
     return {
       valid: false,
       error: `File size exceeds ${IMAGE_MAX_SIZE_BYTES / 1024 / 1024}MB limit`,
+      reason: 'too-large',
     };
   }
 

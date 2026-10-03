@@ -65,6 +65,10 @@
     "systemMessage": "システムメッセージ",
     "systemMessageLabel": "システムメッセージ",
     "openFile": "ファイルを開く: {path}",
+    "imageLoading": "画像を読み込み中…",
+    "imageUnavailable": "画像を表示できません",
+    "openImage": "画像を開く: {path}",
+    "videoLabel": "動画: {path}",
     "conversationLabel": "会話: {preview}",
     "filePathMissing": "このパスは worktree にありません"
   },
@@ -491,7 +495,10 @@
     "buttonAriaLabel": "CommandMate を v{version} にアップデート",
     "buttonReleaseAriaLabel": "v{version} のリリースページを開く",
     "buttonUpdating": "更新中…",
-    "statusDialogTitle": "アップデートの状態"
+    "statusDialogTitle": "アップデートの状態",
+    "pendingLabel": "v{version} 公開準備中",
+    "pendingDescription": "v{version} は npm への反映待ちです。反映されると更新できるようになります。",
+    "notYetPublished": "npm への反映待ちです。しばらくしてから再度お試しください。"
   },
   "terminal": {
     "historyLabel": "履歴",
@@ -1097,11 +1104,26 @@
     "close": "閉じる (Esc)",
     "closeAria": "この画面を閉じる (Esc)"
   },
-  "planApproveKeys": {
-    "toolbarLabel": "このプランを承認",
-    "approve": "プランを承認 (Ctrl+A)",
-    "approveAria": "このプランを承認して実行する (Ctrl+A)",
-    "note": "承認するとプランが実行されます。やめる場合は上の Esc を押してください。"
+  "planReview": {
+    "groupLabel": "プランのレビュー",
+    "commentLabel": "プランへのコメント",
+    "commentPlaceholder": "直してほしい点を書く（コメントを追加 → レビューを送信）",
+    "comment": "コメントを追加",
+    "submit": "レビューを送信 (Ctrl+R)",
+    "approve": "承認 (Ctrl+A)",
+    "cancel": "取り消し (Esc)",
+    "approveConfirmLabel": "プランの承認の確認",
+    "approveConfirmText": "承認するとプランが実行されます。承認しますか？",
+    "approveConfirmYes": "承認して実行",
+    "approveConfirmNo": "やめる",
+    "refusal": {
+      "ambiguousAnswer": "番号や yes / no だけの入力は送っていません。計画には番号付きの選択肢がありません。承認か取り消しを使うか、コメントとして書き直してください。",
+      "busy": "レビュー画面のフォーカスが本文以外にあるため、何も送っていません。ターミナルで本文にフォーカスを戻してから、もう一度送ってください。",
+      "nothingToSubmit": "送るコメントがありません。先にコメントを追加してください。",
+      "invalidRequest": "この画面では送れない操作です。何も送っていません。",
+      "notActive": "計画のレビュー画面が表示されていないため、何も送っていません。",
+      "generic": "送信できませんでした。"
+    }
   },
   "selectionKeys": {
     "numbersToolbarLabel": "選択肢の番号キー",

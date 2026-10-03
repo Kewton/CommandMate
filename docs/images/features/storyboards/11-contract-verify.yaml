@@ -1,5 +1,4 @@
-# cm-11 — Verified, not vibe-checked (Issue #1811; LP demos 1 and 2 of
-# public-messaging.md §5, whose telops §6 fixes verbatim).
+# cm-11 — Verified, not vibe-checked (Issue #1811; LP demos 1 and 2).
 #
 # The two code cards are the real files env-up.sh writes into the seed
 # repository, copied here so the cut ships the listing it sits with (`source` is

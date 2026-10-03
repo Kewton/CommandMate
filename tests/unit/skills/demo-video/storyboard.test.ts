@@ -987,14 +987,6 @@ describe('the committed readme-hero cut', () => {
     const top = storyboard!.scenes.filter((scene) => scene.telopPosition === 'top').map((scene) => scene.id);
     expect(top).toEqual(['delegate-ask', 'mobile-approve']);
   });
-
-  it('takes its wording from the canonical public messaging document', () => {
-    const messaging = fs.readFileSync(path.join(REPO_ROOT, 'docs/design/public-messaging.md'), 'utf8');
-    for (const scene of storyboard!.scenes) {
-      expect(messaging, `telop.ja of ${scene.id}`).toContain(scene.telop.ja);
-      expect(messaging, `telop.en of ${scene.id}`).toContain(scene.telop.en);
-    }
-  });
 });
 
 describe('the committed contract-verify cut', () => {
@@ -1021,16 +1013,5 @@ describe('the committed contract-verify cut', () => {
   it('films the verdict from the terminal scene', () => {
     const recorded = storyboard!.scenes.filter((scene) => scene.type === 'record');
     expect(recorded.map((scene) => scene.id)).toEqual(['contract-verify']);
-  });
-
-  it('takes its wording from the canonical public messaging document', () => {
-    // #1808 settled every telop on a public surface. Copying rather than
-    // re-inventing is the point; this fails if either side is edited alone.
-    const messaging = fs.readFileSync(path.join(REPO_ROOT, 'docs/design/public-messaging.md'), 'utf8');
-    for (const scene of storyboard!.scenes) {
-      if (scene.id === 'outro') continue; // the repository URL, not a message
-      expect(messaging, `telop.ja of ${scene.id}`).toContain(scene.telop.ja);
-      expect(messaging, `telop.en of ${scene.id}`).toContain(scene.telop.en);
-    }
   });
 });

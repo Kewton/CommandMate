@@ -41,9 +41,9 @@ export function createSyncCommand(): Command {
           console.error(`Warning: ${warning}`);
         }
       } catch (error) {
-        // The route's only 400 is "No repositories configured..." — the server's
-        // wording names the fix (WORKTREE_REPOS / CM_ROOT_DIR), so pass it
-        // through instead of the generic "Bad request" mapping.
+        // The route's only 400 is "No repositories are registered yet..." — the
+        // server's wording names the fix (Web UI Add Repository / WORKTREE_REPOS),
+        // so pass it through instead of the generic "Bad request" mapping.
         if (error instanceof ApiError && error.statusCode === 400 && error.payload?.error) {
           console.error(`Error: ${error.payload.error}`);
           process.exit(ExitCode.CONFIG_ERROR);

@@ -65,6 +65,10 @@
     "systemMessage": "System Message",
     "systemMessageLabel": "System message",
     "openFile": "Open file: {path}",
+    "imageLoading": "Loading image…",
+    "imageUnavailable": "Image unavailable",
+    "openImage": "Open image: {path}",
+    "videoLabel": "Video: {path}",
     "conversationLabel": "Conversation: {preview}",
     "filePathMissing": "That path is not in this worktree"
   },
@@ -491,7 +495,10 @@
     "buttonAriaLabel": "Update CommandMate to v{version}",
     "buttonReleaseAriaLabel": "Open the v{version} release page",
     "buttonUpdating": "Updating…",
-    "statusDialogTitle": "Update status"
+    "statusDialogTitle": "Update status",
+    "pendingLabel": "v{version} coming soon",
+    "pendingDescription": "v{version} is not on npm yet. You can update once it is published there.",
+    "notYetPublished": "The new version is not on npm yet. Please try again in a few minutes."
   },
   "terminal": {
     "historyLabel": "History",
@@ -1097,11 +1104,26 @@
     "close": "Close (Esc)",
     "closeAria": "Close this screen (Esc)"
   },
-  "planApproveKeys": {
-    "toolbarLabel": "Approve this plan",
-    "approve": "Approve plan (Ctrl+A)",
-    "approveAria": "Approve this plan and run it (Ctrl+A)",
-    "note": "Approving runs the plan. Use Esc above to cancel instead."
+  "planReview": {
+    "groupLabel": "Plan review",
+    "commentLabel": "Comment on the plan",
+    "commentPlaceholder": "What should change? (Add comment → Submit review)",
+    "comment": "Add comment",
+    "submit": "Submit review (Ctrl+R)",
+    "approve": "Approve (Ctrl+A)",
+    "cancel": "Cancel (Esc)",
+    "approveConfirmLabel": "Confirm plan approval",
+    "approveConfirmText": "Approving runs the plan. Approve it?",
+    "approveConfirmYes": "Approve and run",
+    "approveConfirmNo": "Not now",
+    "refusal": {
+      "ambiguousAnswer": "Nothing was sent: a bare number or yes / no is not an answer here — the plan review has no numbered options. Approve or cancel, or rephrase it as a comment.",
+      "busy": "Nothing was sent: the plan review's focus is not on the plan. Move it back into the plan in the terminal, then retry.",
+      "nothingToSubmit": "There is no comment to submit. Add a comment first.",
+      "invalidRequest": "That action does not fit this screen. Nothing was sent.",
+      "notActive": "Nothing was sent: no plan review is on screen.",
+      "generic": "Could not send."
+    }
   },
   "selectionKeys": {
     "numbersToolbarLabel": "Option number keys",

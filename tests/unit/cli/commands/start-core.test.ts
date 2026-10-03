@@ -20,6 +20,20 @@ vi.mock('dotenv', () => ({
   })),
 }));
 vi.mock('../../../../src/cli/utils/security-logger');
+// Issue #3087: DaemonManager probes the port before start and after stop; keep it off the
+// real network so a server on this machine's 3000 cannot decide the outcome.
+vi.mock('../../../../src/cli/utils/server-ready', () => ({
+  isPortInUse: vi.fn(async () => false),
+  waitForServer: vi.fn(async () => true),
+}));
+// Issue #3087: /proc and lsof inspection is platform-dependent and reads through the mocked fs;
+// default to "nothing known" so these suites behave the same on macOS and Linux CI.
+vi.mock('../../../../src/cli/utils/process-inspect', () => ({
+  isZombieProcess: vi.fn(() => false),
+  listProcessGroupStates: vi.fn(() => null),
+  isExitedState: (state: string) => state === 'Z' || state === 'X',
+  describeListeners: vi.fn(() => null),
+}));
 vi.mock('../../../../src/cli/utils/env-setup', () => ({
   getEnvPath: vi.fn(() => '/mock/home/.commandmate/.env'),
   getPidFilePath: vi.fn(() => '/mock/home/.commandmate/.commandmate.pid'),

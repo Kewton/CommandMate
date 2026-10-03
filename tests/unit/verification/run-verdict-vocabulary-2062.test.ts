@@ -80,6 +80,12 @@ describe('skip reasons (Issue #2062)', () => {
     expect(SCOPE_SKIP_NOT_REQUIRED).toContain(SKIP_LOG_MARKERS.notRequired);
   });
 
+  it('points the detached-contract skip at `verify --task <id>` (Issue #3118)', () => {
+    const message = scopeSkipDetachedContract('task-1', 'succeeded');
+    expect(message).toContain('--task task-1');
+    expect(classifySkipReason(message)).toBe('detachedContract');
+  });
+
   it('classifies each producer to its own reason', () => {
     expect(classifySkipReason(PRIMARY_CHECKOUT_SKIP_LOG)).toBe('primaryCheckout');
     expect(classifySkipReason(WORK_EVIDENCE_SKIP_LOG)).toBe('workEvidence');

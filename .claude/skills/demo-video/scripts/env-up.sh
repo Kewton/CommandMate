@@ -519,6 +519,29 @@ set_default_agents() {
     || die "could not set the default agents on $BASE_URL/api/settings/default-agents"
 }
 
+# Issue #3079: the tmux session-name namespace the server minted at startup
+# (Issue #2866, `initSessionNamespace` in server.ts, before it listens). The
+# server only looks for `mcbd-<ns>-<tool>-<worktreeId>`; its adoption of the
+# legacy `mcbd-<tool>-<worktreeId>` runs once at startup, before fake-agent.sh
+# has created anything, so a pane under the legacy name stays invisible and
+# every "live agent session" wait times out. Read straight from the demo DB
+# (read-only) with the checkout's own better-sqlite3. Prints nothing when the
+# DB or the row is absent or ill-formed: the server then has no namespace
+# either, and the legacy name is the right one.
+read_session_namespace() {
+  [ -f "$DB_PATH" ] || return 0
+  ( cd "$REPO_ROOT" && node -e '
+    const Database = require("better-sqlite3");
+    const db = new Database(process.argv[1], { readonly: true, fileMustExist: true });
+    try {
+      const row = db.prepare("SELECT value FROM app_settings WHERE key = ?").get("tmux_session_namespace");
+      if (row && /^[0-9a-f]{8}$/.test(row.value)) process.stdout.write(row.value);
+    } finally {
+      db.close();
+    }
+  ' "$DB_PATH" ) 2>/dev/null || true
+}
+
 # ---------------------------------------------------------------- boot -------
 
 PORT="$(pick_port)" || exit 1
@@ -602,6 +625,13 @@ if [ "$ready" -ne 1 ]; then
   die "server did not answer $BASE_URL/ within ${READY_TIMEOUT}s"
 fi
 
+SESSION_NAMESPACE="$(read_session_namespace)"
+if [ -n "$SESSION_NAMESPACE" ]; then
+  log "tmux session namespace: $SESSION_NAMESPACE (fake agents are named mcbd-$SESSION_NAMESPACE-<tool>-<worktreeId>)"
+else
+  log "no tmux session namespace in $DB_PATH; fake agents keep the legacy mcbd-<tool>-<worktreeId>"
+fi
+
 log "setting the default agents and announcing the claude / codex sessions"
 set_default_agents || { cleanup_failed_boot; exit 1; }
 place_transcripts || { cleanup_failed_boot; exit 1; }
@@ -631,6 +661,7 @@ CM_DEMO_DB_PATH=$DB_PATH
 CM_DEMO_VIDEO_DIR=$VIDEO_DIR
 CM_DEMO_LOG_FILE=$LOG_FILE
 CM_DEMO_SESSIONS_FILE=$SESSIONS_FILE
+CM_DEMO_SESSION_NAMESPACE=$SESSION_NAMESPACE
 CM_DEMO_PRIMARY_WORKTREE_ID=$PRIMARY_WORKTREE_ID
 CM_DEMO_WORKTREE_ID=$WORKTREE_ID
 CM_DEMO_LOGIN_WORKTREE_ID=$LOGIN_WORKTREE_ID

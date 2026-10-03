@@ -63,9 +63,29 @@ ffmpeg -v error -y -ss 6.5 -i website/assets/media/orchestrate-run.mp4 \
   -frames:v 1 -c:v libwebp -q:v 80 website/assets/media/poster-orchestrate-run.webp
 ```
 
+## The phone clip (Issue #3058)
+
+`phone-team.mp4` is figure B in Level 1. Like the lead demo it is not a copy of a
+`docs/images/features/` take, so the allowlist and this section are its provenance record.
+
+| File | Source | Shows |
+|------|--------|-------|
+| `phone-team.mp4` | `workspace/market/posts/28-phone-team/phone-team-540.mp4` | A phone-width session list where one agent needs you; its chat, answered from the approval sheet with Submit; the list again, with that session carrying on |
+
+- **The take**: recorded for #3058 in the demo-video isolated environment — `HOME=/Users/Shared/cmdemo-home`,
+  its own port and database, a fake agent replaying a captured cast — on the real web UI at
+  390x844, then cut square. The storyboard it replaces opened on a push notification; that beat
+  was dropped, because a push can only be filmed honestly on a real phone.
+- **What is on screen**: the seed repository `cmdemo-app` and its branches only. No private
+  repository name, personal path or private source appears in any frame; the frames right after
+  each transition were checked at full size before the file was added.
+- **Shape**: 540x540, 10.0s, silent, 206KB. The poster (`poster-phone-team.webp`, 15KB) is the
+  second beat, the approval sheet. Re-cut it with the take's `run.sh` / `take.ts`, then re-check
+  the frames rather than trusting the filename.
+
 ## The current demos (Issue #1577, re-cut for Issue #1812)
 
-The four are the four cards in `docs/design/public-messaging.md` §3, one demo each.
+The four were cut one per card of the LP's four cards (#1812).
 
 | File | Source | Shows |
 |------|--------|-------|
@@ -122,9 +142,10 @@ Generated, not taken by hand (Issue #1810). The screenshots come out of the same
 environment the demo video is filmed in, so the only repository that can appear in one is the
 throwaway seed — which is what #1225 could not reproduce about the hand-taken set.
 
-The gallery shows four since Issue #2555: `screenshot-desktop`, `screenshot-worktree-desktop-chat`,
-`screenshot-mobile` and `screenshot-worktree-mobile-chat`. The two chat shots were recorded for
-#2298 in that same environment, not by the script below.
+Since Issue #3060 the page has no gallery: Level 1 shows two shots, `screenshot-desktop` and
+`screenshot-worktree-mobile-chat`. `screenshot-worktree-desktop-chat` and `screenshot-mobile` stay
+on disk unreferenced. The two chat shots were recorded for #2298 in that same environment, not by
+the script below.
 
 ```bash
 .claude/skills/demo-video/scripts/env-up.sh
@@ -142,15 +163,13 @@ to compose the shot differently, never to mask it.
 The script also shoots three worktree stills that `docs/en/user-guide/webapp-guide.md` uses as
 PNGs and the gallery dropped in Issue #2555. Their webp copies are still in `website/assets/img/`,
 unreferenced, only because `tests/unit/skills/demo-video/stills.test.ts` requires a webp for every
-still the script takes. They go once the script stops writing them; until then
-`tests/unit/website/landing-page.test.ts` fails on any other image there that `index.html` does not
-reference.
+still the script takes. They go once the script stops writing them.
 
 Budget: **each image < 100KB**, except `screenshot-worktree-desktop-chat.webp` (131KB, #2298) and the
 wide worktree still, which `stills.ts` allows 200KB.
 
 `screenshot-desktop.webp` is the `og:image`. Issue #1812 replaced the hero image with an inline SVG
 of the loop, which changes nothing here: no browser renders an SVG — let alone an inline one — into
-a social preview card, so the raster still has to exist and still has to be small. It now opens the
-gallery instead of the hero, and the 100KB budget on it is enforced by
+a social preview card, so the raster still has to exist and still has to be small. It is shown in
+Level 1 (Issue #3060) rather than the hero, and the 100KB budget on it is enforced by
 `tests/unit/website/landing-page.test.ts` rather than remembered.

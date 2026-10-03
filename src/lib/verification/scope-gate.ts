@@ -32,6 +32,8 @@
 import { spawn } from 'child_process';
 import type { VerificationGateTerminalStatus } from '@/lib/db';
 import type { TaskContractScope } from '@/lib/tasks/contract-parser';
+import { collectSkillReceiptOwnedPaths } from '@/lib/skills/receipt-owned-paths';
+import { isAgentStateUntrackedEntry } from '@/lib/skills/agent-state-paths';
 
 /**
  * Violations listed in `log_tail` before the rest are summarised as a count.
@@ -365,8 +367,20 @@ function splitNul(output: string): string[] {
  * as one change (#1580).
  */
 export function parsePorcelainEntries(output: string): string[][] {
+  return parsePorcelainStatusEntries(output).map((entry) => entry.paths);
+}
+
+/** One `git status --porcelain -z` record: its `XY` code and its paths. */
+export interface PorcelainStatusEntry {
+  /** The two-character status code, e.g. `??` for an untracked file. */
+  status: string;
+  paths: string[];
+}
+
+/** {@link parsePorcelainEntries}, keeping each record's status code (#3092). */
+export function parsePorcelainStatusEntries(output: string): PorcelainStatusEntry[] {
   const fields = output.split('\0');
-  const entries: string[][] = [];
+  const entries: PorcelainStatusEntry[] = [];
   let i = 0;
 
   while (i < fields.length) {
@@ -384,10 +398,26 @@ export function parsePorcelainEntries(output: string): string[][] {
       if (original) paths.push(original);
     }
 
-    entries.push(paths);
+    entries.push({ status: entry.slice(0, 2), paths });
   }
 
   return entries;
+}
+
+/**
+ * Whether a status record is an untracked file a recorded Skill install placed
+ * there, untouched since (#3092).
+ *
+ * Untracked only: a tracked Skill file that changed is a change to what the
+ * branch carries, and stays counted. `owned` comes from
+ * `collectSkillReceiptOwnedPaths`, which already rejects files whose bytes no
+ * longer match the receipt.
+ */
+export function isSkillInstalledUntrackedEntry(
+  entry: PorcelainStatusEntry,
+  owned: ReadonlySet<string>
+): boolean {
+  return entry.status === '??' && entry.paths.every((path) => owned.has(path));
 }
 
 export interface ChangedPaths {
@@ -395,6 +425,8 @@ export interface ChangedPaths {
   paths: string[];
   /** Resolved merge-base commit, for the report. */
   mergeBase: string;
+  /** Agent-managed state files dropped from the change set (#3126), sorted. */
+  agentStateExcluded: string[];
 }
 
 /**
@@ -448,14 +480,34 @@ export async function collectChangedPaths(
     };
   }
 
+  // Untracked files a recorded Skill install placed are CommandMate's, not the
+  // agent's (#3092). Dropped from the working-tree side only; a committed Skill
+  // file is still judged by the diff above.
+  const skillOwned = collectSkillReceiptOwnedPaths(worktreePath);
+  // Likewise the state files an agent CLI writes for itself (#3126), by an
+  // explicit declaration of paths; they are reported, not silently dropped.
+  const agentStateExcluded = new Set<string>();
+  const workingTree = parsePorcelainStatusEntries(status.stdout).filter((entry) => {
+    if (isSkillInstalledUntrackedEntry(entry, skillOwned)) return false;
+    if (isAgentStateUntrackedEntry(entry)) {
+      entry.paths.forEach((path) => agentStateExcluded.add(path));
+      return false;
+    }
+    return true;
+  });
+
   // Both sides are filtered, not just the working tree: an orchestrator may
   // also have committed the contract as a setup commit (#1580).
   const paths = new Set<string>(
-    [...splitNul(diff.stdout), ...parsePorcelainEntries(status.stdout).flat()].filter(
+    [...splitNul(diff.stdout), ...workingTree.flatMap((entry) => entry.paths)].filter(
       (path) => !isContractPath(path)
     )
   );
-  return { paths: [...paths].sort(), mergeBase: base };
+  return {
+    paths: [...paths].sort(),
+    mergeBase: base,
+    agentStateExcluded: [...agentStateExcluded].sort(),
+  };
 }
 
 // =============================================================================
@@ -505,6 +557,18 @@ function formatAdmitted(admitted: ScopeAdmission[]): string[] {
   ];
 }
 
+/** The `excluded:` section naming agent-managed state files left out (#3126). */
+function formatAgentStateExcluded(excluded: string[]): string[] {
+  if (excluded.length === 0) return [];
+  const listed = excluded.slice(0, MAX_REPORTED_VIOLATIONS);
+  const remainder = excluded.length - listed.length;
+  return [
+    'excluded (agent-managed state files, not counted as change):',
+    ...listed.map((path) => `  ~ ${path}`),
+    ...(remainder > 0 ? [`  ... (+${remainder} more)`] : []),
+  ];
+}
+
 /**
  * Reasons the gate has nothing to judge, phrased for `log_tail`.
  *
@@ -531,7 +595,8 @@ export function scopeSkipDetachedContract(taskId: string, status: string): strin
   return (
     `scope: task ${taskId} declares a scope for this worktree, but it is ${status} and ` +
     'this run was not attached to it, so its scope was NOT judged. ' +
-    'Name the task when starting the run (`wait --verify` does this automatically).'
+    '`wait --verify` attaches only to an in-flight task; to re-verify a finished task, run ' +
+    `\`commandmate verify <worktree> --task ${taskId}\`.`
   );
 }
 
@@ -599,6 +664,7 @@ export async function evaluateScope(
     `allow: ${formatPatterns(scope.allow)}`,
     `deny: ${formatPatterns(scope.deny)}`,
     ...formatAdmitted(admitted),
+    ...formatAgentStateExcluded(changed.agentStateExcluded),
   ].join('\n');
 
   if (violations.length === 0) {

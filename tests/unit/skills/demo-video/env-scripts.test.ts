@@ -90,6 +90,9 @@ const LIVE_SESSIONS = [
  * cannot lose a race with a socket the kernel handed out.
  */
 const PORT_BAND_START = 34000;
+
+/** The tmux session namespace the namespaced stub mints (Issue #3079). */
+const DEMO_NS = '0a1b2c3d';
 /** Pairs available in the band; the port and port+1 are both reserved. */
 const PORT_BAND_PAIRS = 500;
 
@@ -212,7 +215,19 @@ beforeAll(async () => {
     // Answers 200 to everything and writes each request down, so what env-up
     // tells the server (Issue #2380: the default agents, the session
     // announcements) can be asserted without a Next.js compile.
+    //
+    // Issue #3079: with STUB_NAMESPACE set it first does what server.ts does
+    // before it listens — mint the tmux session namespace into the DB — so
+    // env-up's read of it goes through a real SQLite file.
     `const fs = require('fs');
+     if (process.env.STUB_NAMESPACE) {
+       const Database = require(${JSON.stringify(path.join(REPO_ROOT, 'node_modules/better-sqlite3'))});
+       const db = new Database(process.env.CM_DB_PATH);
+       db.exec('CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
+       db.prepare('INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)')
+         .run('tmux_session_namespace', process.env.STUB_NAMESPACE);
+       db.close();
+     }
      require('http').createServer((q, s) => {
        let body = '';
        q.on('data', (c) => { body += c; });
@@ -552,6 +567,69 @@ describe('env-down stops exactly what env-up started', () => {
     expect(killed).not.toContain('=mcbd-claude-foo-wt-dark-mode');
     // The record is consumed, so the next teardown cannot chase dead names.
     expect(fs.existsSync(state.CM_DEMO_SESSIONS_FILE)).toBe(false);
+  }, 60_000);
+
+  it('kills the namespaced sessions of this server, and not another server\'s (Issue #3079)', () => {
+    expect(run(ENV_UP, [], { ...stubEnv(), STUB_NAMESPACE: DEMO_NS }).status).toBe(0);
+    const state = readState();
+    expect(state.CM_DEMO_SESSION_NAMESPACE).toBe(DEMO_NS);
+
+    fs.writeFileSync(state.CM_DEMO_SESSIONS_FILE, `mcbd-${DEMO_NS}-claude-wt-dark-mode\n`);
+    fs.writeFileSync(
+      TMUX_SESSION_LIST,
+      [
+        `mcbd-${DEMO_NS}-claude-wt-dark-mode`,
+        `mcbd-${DEMO_NS}-command-code-wt-dark-mode`,
+        `mcbd-${DEMO_NS}-codex-wt-api-cache-2`,
+        // A legacy name the server never got to adopt is still the demo's.
+        'mcbd-opencode-wt-dark-mode',
+        // Another server whose worktree directory merely has the same name —
+        // the collision #2866 put namespaces in to tell apart.
+        'mcbd-99999999-claude-wt-dark-mode',
+        `mcbd-${DEMO_NS}-claude-foo-wt-dark-mode`,
+        'mcbd-claude-mycodebranchdesk',
+        '',
+      ].join('\n'),
+    );
+    fs.rmSync(TMUX_KILL_LOG, { force: true });
+
+    const result = run(ENV_DOWN, [], {
+      PATH: `${BIN_DIR}:${process.env.PATH ?? ''}`,
+      TMUX_STUB_LOG: TMUX_KILL_LOG,
+      TMUX_STUB_SESSIONS: TMUX_SESSION_LIST,
+    });
+    expect(result.status).toBe(0);
+    const killed = fs.readFileSync(TMUX_KILL_LOG, 'utf8').split('\n').filter(Boolean);
+    expect(killed).toEqual([
+      `=mcbd-${DEMO_NS}-claude-wt-dark-mode`,
+      `=mcbd-${DEMO_NS}-command-code-wt-dark-mode`,
+      '=mcbd-opencode-wt-dark-mode',
+      `=mcbd-${DEMO_NS}-codex-wt-api-cache-2`,
+    ]);
+  }, 60_000);
+
+  it('records an empty namespace when the server has none, and matches legacy names only', () => {
+    // The demo DB outlives a plain env-down, and with it a namespace an earlier
+    // case minted; a server that has none starts from no DB at all.
+    for (const suffix of ['', '-wal', '-shm']) fs.rmSync(path.join(DEMO_HOME, `cm.db${suffix}`), { force: true });
+    expect(run(ENV_UP, [], stubEnv()).status).toBe(0);
+    const state = readState();
+    expect(state).toHaveProperty('CM_DEMO_SESSION_NAMESPACE', '');
+
+    fs.writeFileSync(
+      TMUX_SESSION_LIST,
+      [`mcbd-${DEMO_NS}-claude-wt-dark-mode`, 'mcbd-claude-wt-dark-mode', ''].join('\n'),
+    );
+    fs.rmSync(TMUX_KILL_LOG, { force: true });
+    const result = run(ENV_DOWN, [], {
+      PATH: `${BIN_DIR}:${process.env.PATH ?? ''}`,
+      TMUX_STUB_LOG: TMUX_KILL_LOG,
+      TMUX_STUB_SESSIONS: TMUX_SESSION_LIST,
+    });
+    expect(result.status).toBe(0);
+    expect(fs.readFileSync(TMUX_KILL_LOG, 'utf8').split('\n').filter(Boolean)).toEqual([
+      '=mcbd-claude-wt-dark-mode',
+    ]);
   }, 60_000);
 
   it('would have missed the demo session under the pre-#1809 substring match', () => {

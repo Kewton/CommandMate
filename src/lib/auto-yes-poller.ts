@@ -19,6 +19,7 @@ import {
 } from './polling/antigravity-permission-receipts';
 import { resolveAutoAnswerWithPolicy } from './polling/auto-yes-resolver';
 import { getSessionAutoYesPolicy, invalidateSessionAutoYesPolicy } from './polling/auto-yes-policy';
+import { isCodexModelPickerFrame } from './detection/tools/codex/detect';
 import { recordPolicySuppression } from './polling/auto-yes-suppression-state';
 import { evaluateAutoYesDialogGate } from './polling/auto-yes-dialog-gate';
 import { applyEventToActiveTask } from './tasks/task-transition-service';
@@ -617,6 +618,33 @@ export async function detectAndRespondToPrompt(
           cliToolId,
           instanceId,
           dialog: launchDialog,
+          promptType: promptDetection.promptData.type,
+        },
+      );
+      return 'no_answer';
+    }
+
+    // 3.2. Issue #3062: codex's `/model` picker (both stages) is not ours to
+    // answer. A digit there is an immediate decision, so the base rules'
+    // default would choose the model and effort for the operator. Judged by the
+    // picker's own footer, not by `kind: picker`, which the hooks screens share.
+    // The tool's `detectPrompt` still reports the prompt, so `/prompt-response`
+    // (the human's answer) is unaffected. Reuses `unclassified-frame`: the tool
+    // recognised the frame and deliberately declined it.
+    if (cliToolId === 'codex' && isCodexModelPickerFrame(cleanOutput)) {
+      recordPolicySuppression(worktreeId, cliToolId, instanceId, {
+        reason: 'unclassified-frame',
+        mode: null,
+        promptType: promptDetection.promptData.type,
+      });
+      warnOncePerFrame(
+        pollerState,
+        `${frameKey}\u0000codex-model-picker`,
+        'poller:auto-yes-skipped-model-picker',
+        {
+          worktreeId,
+          cliToolId,
+          instanceId,
           promptType: promptDetection.promptData.type,
         },
       );

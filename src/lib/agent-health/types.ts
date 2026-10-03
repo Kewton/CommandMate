@@ -25,11 +25,15 @@ export type AgentHealthTool = (typeof AGENT_HEALTH_TOOLS)[number];
  *
  * For opencode-v2, which fires no hooks, `hook-correlation` checks its own
  * server's SSE instead (`./server-events`, Issue #2937).
+ *
+ * `screen-picker` opens the tool's pickers (`/model`, `/effort`) and closes
+ * them with Esc; tools with none defined in `tool-table.ts` skip it (Issue #3053).
  */
 export const AGENT_HEALTH_CHECK_IDS = [
   'version',
   'hook-correlation',
   'screen-idle',
+  'screen-picker',
   'screen-running',
   'screen-approval',
   'screen-quoted-dialog',

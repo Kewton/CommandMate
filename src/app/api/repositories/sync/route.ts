@@ -14,6 +14,19 @@ import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('api/repositories-sync');
 
+/**
+ * 400 body when nothing is registered yet (Issue #3093).
+ *
+ * The old wording told the reader to set `CM_ROOT_DIR`, which
+ * `getRepositoryPaths()` never reads — a first-time user who had it set was
+ * sent to fix something that was already right. Repositories come from the
+ * DB (Web UI) or `WORKTREE_REPOS`, so name exactly those two.
+ */
+const NO_REPOSITORIES_MESSAGE =
+  'No repositories are registered yet. Add one in the Web UI (Repositories → Add Repository), ' +
+  'or list repository paths in WORKTREE_REPOS (comma-separated) and restart the server. ' +
+  'Then run `commandmate sync` again.';
+
 export async function POST() {
   try {
     // Get configured repository paths from environment
@@ -33,7 +46,7 @@ export async function POST() {
 
     if (allPaths.length === 0) {
       return NextResponse.json(
-        { error: 'No repositories configured. Please set WORKTREE_REPOS or CM_ROOT_DIR environment variable.' },
+        { error: NO_REPOSITORIES_MESSAGE },
         { status: 400 }
       );
     }

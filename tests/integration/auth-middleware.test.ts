@@ -3,7 +3,7 @@
  * Issue #331: Token authentication middleware
  *
  * Tests cover:
- * - Unauthenticated request -> redirect to /login
+ * - Unauthenticated request -> sent to /login (401 + same-origin refresh, Issue #3090)
  * - Authenticated request -> pass through
  * - Excluded paths -> pass through
  * - CM_AUTH_TOKEN_HASH unset -> immediate pass through
@@ -29,6 +29,10 @@ vi.mock('next/server', () => {
       const res = new MockNextResponse();
       res.status = 200;
       return res;
+    }
+
+    static json(_body: unknown, init?: { status?: number }) {
+      return new MockNextResponse(null, init);
     }
 
     static redirect(url: URL | string) {
@@ -124,7 +128,7 @@ describe('Auth Middleware', () => {
     const { middleware } = await import('@/middleware');
     const req = createMockRequest('/');
     const res = await middleware(req as never);
-    expect(res.status).toBe(302);
+    expect(res.status).toBe(401);
   });
 
   it('should pass through for authenticated requests with valid cookie', async () => {
@@ -190,7 +194,7 @@ describe('Auth Middleware', () => {
     const { middleware } = await import('@/middleware');
     const req = createMockRequest('/login-bypass');
     const res = await middleware(req as never);
-    expect(res.status).toBe(302);
+    expect(res.status).toBe(401);
   });
 
   it('should redirect to /login for invalid cookie token', async () => {
@@ -203,7 +207,7 @@ describe('Auth Middleware', () => {
     const { middleware } = await import('@/middleware');
     const req = createMockRequest('/', { cm_auth_token: 'wrong-token' });
     const res = await middleware(req as never);
-    expect(res.status).toBe(302);
+    expect(res.status).toBe(401);
   });
 
   it('should return 401 for unauthenticated WebSocket upgrade', async () => {
@@ -314,7 +318,7 @@ describe('Auth Middleware', () => {
       const { middleware } = await import('@/middleware');
       const req = createMockRequest('/sessions');
       const res = await middleware(req as never);
-      expect(res.status).toBe(302);
+      expect(res.status).toBe(401);
     });
 
     it('should redirect /repositories to /login for unauthenticated requests', async () => {
@@ -327,7 +331,7 @@ describe('Auth Middleware', () => {
       const { middleware } = await import('@/middleware');
       const req = createMockRequest('/repositories');
       const res = await middleware(req as never);
-      expect(res.status).toBe(302);
+      expect(res.status).toBe(401);
     });
 
     it('should redirect /review to /login for unauthenticated requests', async () => {
@@ -340,7 +344,7 @@ describe('Auth Middleware', () => {
       const { middleware } = await import('@/middleware');
       const req = createMockRequest('/review');
       const res = await middleware(req as never);
-      expect(res.status).toBe(302);
+      expect(res.status).toBe(401);
     });
 
     it('should redirect /more to /login for unauthenticated requests', async () => {
@@ -353,7 +357,7 @@ describe('Auth Middleware', () => {
       const { middleware } = await import('@/middleware');
       const req = createMockRequest('/more');
       const res = await middleware(req as never);
-      expect(res.status).toBe(302);
+      expect(res.status).toBe(401);
     });
 
     it('should NOT have new URLs in AUTH_EXCLUDED_PATHS', async () => {
@@ -365,7 +369,7 @@ describe('Auth Middleware', () => {
       expect(excludedPaths).not.toContain('/more');
     });
 
-    it('should redirect /api/templates to /login for unauthenticated requests (Issue #618)', async () => {
+    it('should answer 401 to /api/templates for unauthenticated requests (Issue #618, #3090)', async () => {
       const { hashToken } = await import('@/lib/security/auth');
       const hash = hashToken('test-token');
       process.env.CM_AUTH_TOKEN_HASH = hash;
@@ -375,7 +379,7 @@ describe('Auth Middleware', () => {
       const { middleware } = await import('@/middleware');
       const req = createMockRequest('/api/templates');
       const res = await middleware(req as never);
-      expect(res.status).toBe(302);
+      expect(res.status).toBe(401);
     });
   });
 });

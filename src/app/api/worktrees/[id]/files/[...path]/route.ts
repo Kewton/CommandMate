@@ -39,11 +39,13 @@ import {
   isImageExtension,
   validateImageContent,
   getMimeTypeByExtension,
+  IMAGE_MAX_SIZE_BYTES,
 } from '@/config/image-extensions';
 import {
   isVideoExtension,
   getMimeTypeByVideoExtension,
   validateVideoContent,
+  VIDEO_MAX_SIZE_BYTES,
 } from '@/config/video-extensions';
 import { isHtmlExtension, HTML_MAX_SIZE_BYTES } from '@/config/html-extensions';
 import {
@@ -52,7 +54,8 @@ import {
   PDF_MIME_TYPE,
 } from '@/config/pdf-extensions';
 import { extname } from 'path';
-import { readFile, stat } from 'fs/promises';
+import { readFile, stat, open } from 'fs/promises';
+import { Readable } from 'stream';
 import type { Stats } from 'fs';
 import { createLogger } from '@/lib/logger';
 import { buildAttachmentContentDisposition } from '@/lib/http/content-disposition';
@@ -247,6 +250,190 @@ async function getWorktreeAndValidatePath(
   return { worktree, relativePath: normalizedPath };
 }
 
+/** The message `validateImageContent` / `validateVideoContent` give for an oversize file. */
+function sizeLimitMessage(maxBytes: number): string {
+  return `File size exceeds ${maxBytes / 1024 / 1024}MB limit`;
+}
+
+/**
+ * Map an image validation error to its response. Shared by the base64 branch
+ * and `?raw=1` so both refuse the same file the same way.
+ */
+function imageValidationErrorResponse(
+  validation: { error?: string; reason?: 'too-large' },
+): NextResponse {
+  const error = validation.error;
+  if (validation.reason === 'too-large') {
+    return createErrorResponse('FILE_TOO_LARGE', error ?? 'File too large');
+  }
+  if (error?.includes('magic bytes')) {
+    return createErrorResponse('INVALID_MAGIC_BYTES', error);
+  }
+  // SVG security errors
+  return createErrorResponse('INVALID_FILE_CONTENT', error || 'Invalid image content');
+}
+
+/** Map a video validation error to its response (base64 branch and `?raw=1`). */
+function videoValidationErrorResponse(
+  validation: { error?: string; reason?: 'too-large' },
+): NextResponse {
+  const error = validation.error;
+  if (validation.reason === 'too-large') {
+    return createErrorResponse('FILE_TOO_LARGE', error ?? 'File too large');
+  }
+  if (error?.includes('magic bytes')) {
+    return createErrorResponse('INVALID_MAGIC_BYTES', error);
+  }
+  return createErrorResponse('INVALID_FILE_CONTENT', error || 'Invalid video content');
+}
+
+/**
+ * [Issue #3121] Bytes read from the head of a file for the magic-byte check.
+ * Every signature in image-extensions / video-extensions ends within 12 bytes.
+ */
+const RAW_MAGIC_HEAD_BYTES = 16;
+
+/** [Issue #3121] A satisfiable single byte range, inclusive on both ends. */
+type ByteRange = { start: number; end: number };
+
+/**
+ * [Issue #3121] Parse a `Range` header against a file of `size` bytes.
+ *
+ * - `null` — no header, or one this does not honour (another unit, several
+ *   ranges, malformed): the whole file is sent with 200, as RFC 9110 allows.
+ * - `'unsatisfiable'` — a well-formed single range that lies outside the file: 416.
+ */
+function parseByteRange(
+  header: string | null,
+  size: number,
+): ByteRange | 'unsatisfiable' | null {
+  if (!header) return null;
+  const match = /^bytes=(\d*)-(\d*)$/.exec(header.trim());
+  if (!match) return null;
+  const [, startText, endText] = match;
+  if (!startText && !endText) return null;
+
+  if (!startText) {
+    // Suffix range: the last N bytes.
+    const suffix = Number(endText);
+    if (suffix === 0 || size === 0) return 'unsatisfiable';
+    return { start: Math.max(0, size - suffix), end: size - 1 };
+  }
+
+  const start = Number(startText);
+  const end = endText ? Number(endText) : size - 1;
+  if (endText && end < start) return null;
+  if (start >= size) return 'unsatisfiable';
+  return { start, end: Math.min(end, size - 1) };
+}
+
+/**
+ * [Issue #3121] `GET …?raw=1` — the file's bytes as-is, streamed, for `<video>`
+ * and `<img>` to point at instead of a base64 data URI inside JSON.
+ *
+ * Only videos and non-SVG images. SVG is refused (400): served from this
+ * origin as `image/svg+xml` it is a document that can run script, which is why
+ * it stays on the data-URI path. Everything else is refused (400) too.
+ *
+ * The checks are the image / video branches' own: the same size ceiling
+ * (`IMAGE_MAX_SIZE_BYTES` / `VIDEO_MAX_SIZE_BYTES`, read from `stat` instead of
+ * the buffer length) and the same `validateImageContent` /
+ * `validateVideoContent` on the file's head, mapped to the same error
+ * responses. The path checks already ran in `getWorktreeAndValidatePath`. The
+ * file is opened once, so what is validated is what is streamed.
+ *
+ * `Range` is honoured (one range): 206 + `Content-Range`, or 416 outside the file.
+ */
+async function serveRawMedia(
+  request: NextRequest,
+  absolutePath: string,
+  ext: string,
+): Promise<NextResponse> {
+  const isVideo = isVideoExtension(ext);
+  const isRasterImage = isImageExtension(ext) && ext !== '.svg';
+  if (!isVideo && !isRasterImage) {
+    return createErrorResponse(
+      'INVALID_EXTENSION',
+      'raw=1 is only available for video and non-SVG image files',
+    );
+  }
+
+  let handle;
+  try {
+    handle = await open(absolutePath, 'r');
+  } catch (err: unknown) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+      return createErrorResponse('FILE_NOT_FOUND', 'File not found');
+    }
+    throw err;
+  }
+
+  let streaming = false;
+  try {
+    const fileStat = await handle.stat();
+    if (!fileStat.isFile()) {
+      return createErrorResponse('FILE_NOT_FOUND', 'File not found');
+    }
+    const size = fileStat.size;
+    const maxBytes = isVideo ? VIDEO_MAX_SIZE_BYTES : IMAGE_MAX_SIZE_BYTES;
+    if (size > maxBytes) {
+      const tooLarge = { error: sizeLimitMessage(maxBytes), reason: 'too-large' as const };
+      return isVideo
+        ? videoValidationErrorResponse(tooLarge)
+        : imageValidationErrorResponse(tooLarge);
+    }
+
+    const head = Buffer.alloc(Math.min(RAW_MAGIC_HEAD_BYTES, size));
+    if (head.length > 0) {
+      await handle.read(head, 0, head.length, 0);
+    }
+    const validation = isVideo
+      ? validateVideoContent(ext, head)
+      : validateImageContent(ext, head);
+    if (!validation.valid) {
+      return isVideo
+        ? videoValidationErrorResponse(validation)
+        : imageValidationErrorResponse(validation);
+    }
+
+    const mimeType = isVideo
+      ? getMimeTypeByVideoExtension(ext) || 'video/mp4'
+      : getMimeTypeByExtension(ext);
+    const headers = new Headers({
+      'Content-Type': mimeType,
+      'X-Content-Type-Options': 'nosniff',
+      'Content-Disposition': 'inline',
+      // next.config.js の /api/:path* が全応答に no-store を付けて上書きするため、実際に返る値に揃える。
+      // ?raw=1 だけキャッシュさせたくなったら、別 Issue で next.config.js 側を変えること。
+      'Cache-Control': 'no-store',
+      'Accept-Ranges': 'bytes',
+    });
+
+    const range = parseByteRange(request.headers.get('range'), size);
+    if (range === 'unsatisfiable') {
+      headers.set('Content-Range', `bytes */${size}`);
+      return new NextResponse(null, { status: 416, headers });
+    }
+
+    const { start, end } = range ?? { start: 0, end: size - 1 };
+    headers.set('Content-Length', String(size === 0 ? 0 : end - start + 1));
+    if (range) {
+      headers.set('Content-Range', `bytes ${start}-${end}/${size}`);
+    }
+
+    // autoClose (the default) closes the handle when the stream ends or is
+    // destroyed — including when the client cancels the body.
+    const nodeStream = handle.createReadStream({ start, end });
+    streaming = true;
+    const body = Readable.toWeb(nodeStream) as unknown as ReadableStream<Uint8Array>;
+    return new NextResponse(body, { status: range ? 206 : 200, headers });
+  } finally {
+    if (!streaming) {
+      await handle.close();
+    }
+  }
+}
+
 /**
  * GET /api/worktrees/:id/files/:path
  * Read file content (text or image)
@@ -304,6 +491,14 @@ export async function GET(
       }
     }
 
+    // [Issue #3121] Raw media branch. Same position as `?download=1`: after the
+    // path / symlink / deny-tier checks, before the base64 JSON branches. The
+    // size ceiling and magic-byte checks are the image / video branches' own
+    // (see serveRawMedia); only how the bytes are returned differs.
+    if (request.nextUrl.searchParams.get('raw') === '1') {
+      return serveRawMedia(request, join(worktree.path, relativePath), ext);
+    }
+
     // Check if this is an image file
     if (isImageExtension(ext)) {
       // Read file as binary for image processing
@@ -316,15 +511,7 @@ export async function GET(
         // Validate image content (size, magic bytes, SVG security)
         const validation = validateImageContent(ext, fileBuffer);
         if (!validation.valid) {
-          // Map validation errors to appropriate error codes
-          if (validation.error?.includes('5MB')) {
-            return createErrorResponse('FILE_TOO_LARGE', validation.error);
-          }
-          if (validation.error?.includes('magic bytes')) {
-            return createErrorResponse('INVALID_MAGIC_BYTES', validation.error);
-          }
-          // SVG security errors
-          return createErrorResponse('INVALID_FILE_CONTENT', validation.error || 'Invalid image content');
+          return imageValidationErrorResponse(validation);
         }
 
         // [DRY] Get MIME type using centralized helper
@@ -359,9 +546,8 @@ export async function GET(
       try {
         // [DRY] Check file size before reading full content (memory efficiency)
         const fileStat = await stat(absolutePath);
-        const maxSizeBytes = 100 * 1024 * 1024; // VIDEO_MAX_SIZE_BYTES
-        if (fileStat.size > maxSizeBytes) {
-          return createErrorResponse('FILE_TOO_LARGE', `File size exceeds ${maxSizeBytes / 1024 / 1024}MB limit`);
+        if (fileStat.size > VIDEO_MAX_SIZE_BYTES) {
+          return createErrorResponse('FILE_TOO_LARGE', sizeLimitMessage(VIDEO_MAX_SIZE_BYTES));
         }
 
         // Read file as binary
@@ -370,13 +556,7 @@ export async function GET(
         // Validate video content (size, magic bytes)
         const validation = validateVideoContent(ext, fileBuffer);
         if (!validation.valid) {
-          if (validation.error?.includes('MB')) {
-            return createErrorResponse('FILE_TOO_LARGE', validation.error);
-          }
-          if (validation.error?.includes('magic bytes')) {
-            return createErrorResponse('INVALID_MAGIC_BYTES', validation.error);
-          }
-          return createErrorResponse('INVALID_FILE_CONTENT', validation.error || 'Invalid video content');
+          return videoValidationErrorResponse(validation);
         }
 
         // [DRY] Get MIME type using centralized helper

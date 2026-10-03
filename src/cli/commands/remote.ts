@@ -5,6 +5,7 @@
  *   commandmate remote            # up (default): start, publish, show the QR
  *   commandmate remote status     # Provider / URL / expiry / pairing state
  *   commandmate remote stop       # close the door, keeping the server running
+ *   commandmate remote pair       # show a new pairing link, same URL (Issue #3127)
  *
  *   commandmate remote --auth remote-only   # only the phone's route authenticates
  *
@@ -68,9 +69,11 @@ import {
   type RemoteAuthScope,
   type RemoteState,
 } from '../utils/remote-state';
+import { reissuePairingCode, type PairingReissueFailure } from '../utils/remote-pairing';
 import { loadEffectiveEnv } from '../utils/server-url';
 import { logSecurityEvent } from '../utils/security-logger';
 import { waitForServer } from '../utils/server-ready';
+import { verifyLaunchedServer } from '../utils/server-identity';
 import {
   createRemoteProviders,
   detectRemoteProviders,
@@ -482,6 +485,7 @@ async function approvePublicTunnel(options: RemoteOptions): Promise<boolean> {
 interface Endpoint {
   host: string;
   port: number;
+  protocol: 'http' | 'https';
 }
 
 /**
@@ -494,7 +498,7 @@ function parseEndpoint(url: string | undefined): Endpoint | null {
     const parsed = new URL(url);
     const port = parsed.port ? parseInt(parsed.port, 10) : parsed.protocol === 'https:' ? 443 : 80;
     if (Number.isNaN(port)) return null;
-    return { host: parsed.hostname, port };
+    return { host: parsed.hostname, port, protocol: parsed.protocol === 'https:' ? 'https' : 'http' };
   } catch {
     return null;
   }
@@ -742,6 +746,36 @@ export async function runRemoteUp(options: RemoteOptions): Promise<ExitCode> {
     logger.success(`Remote listener: ${REMOTE_INGRESS_HOST}:${remoteIngressPort} (authentication required)`);
   }
 
+  // 6c. Issue #3087: a listening port is not proof that it is OUR server. An
+  // orphan from an earlier `start --daemon` (no authentication) can hold the
+  // port while the server started above dies on EADDRINUSE, and every TCP
+  // check passes against it. Before the irreversible step, the exact port to
+  // be published must refuse an unknown token (authentication is on) and
+  // accept the token minted above (only the server launched with its hash
+  // can). Anything short of both is a refusal: nothing is published.
+  const publishedHost = remoteIngressPort !== undefined ? REMOTE_INGRESS_HOST : endpoint.host;
+  const identity = await verifyLaunchedServer({
+    protocol: endpoint.protocol,
+    host: publishedHost,
+    port: remoteIngressPort ?? endpoint.port,
+    sessionToken,
+  });
+  if (!identity.ok) {
+    logger.error(`Refusing to publish: ${identity.reason}.`);
+    logger.info(
+      'Nothing was published. Another process may be holding the port (for example an earlier ' +
+        'CommandMate server that was not stopped). Stop it and re-run "commandmate remote".'
+    );
+    await rollback(daemonManager, pairing.filePath, restoreEnv);
+    logSecurityEvent({
+      timestamp: new Date().toISOString(),
+      command: 'remote',
+      action: 'failure',
+      details: `up: listener identity not verified, nothing published (${provider.id})`,
+    });
+    return ExitCode.START_FAILED;
+  }
+
   // 7. Open the outside door. The Provider is handed 127.0.0.1 explicitly; it
   // never reads CM_BIND (§9.1).
   //
@@ -887,7 +921,7 @@ export function buildPairingUrl(url: string, code: string): string {
  *
  * @param pairingUrl - The `/login#code=` URL
  */
-function announcePairing(pairingUrl: string): void {
+function announcePairing(pairingUrl: string, alwaysShowUrl = false): void {
   const qr = formatQrForTerminal(pairingUrl, {
     columns: process.stdout.columns,
     color: process.stdout.isTTY === true,
@@ -900,6 +934,12 @@ function announcePairing(pairingUrl: string): void {
   } else {
     console.log(qr);
     logger.info('Scan this with your phone. The code works once, and only until it expires.');
+    // Issue #3127: an agent's chat pane folds long output and cuts the QR off,
+    // so `remote pair` prints the link as text too.
+    if (alwaysShowUrl) {
+      logger.info('Or open this URL on the phone:');
+      logger.info(`  ${pairingUrl}`);
+    }
   }
   logger.blank();
 }
@@ -1070,6 +1110,9 @@ export async function runRemoteStatus(options: RemoteOptions): Promise<ExitCode>
     );
     logger.info(`Pairing:         ${pairing}`);
     logger.info(`Server:          ${describeServer(server)}`);
+    if (!expired) {
+      logger.info(describePairingNextStep(pairing));
+    }
   }
 
   if (closed !== null && !options.json) {
@@ -1095,6 +1138,139 @@ export async function runRemoteStatus(options: RemoteOptions): Promise<ExitCode>
  * @param state - The recorded session
  * @returns The text after `Auth scope:`
  */
+/**
+ * One line telling the user how to get a pairing link from this state
+ * (Issue #3127). `status` itself never prints a link or a code (§5.4).
+ *
+ * @param pairing - Derived pairing state
+ * @returns The hint line
+ */
+function describePairingNextStep(pairing: PairingState): string {
+  if (pairing === 'unused') {
+    return 'Lost the QR code? "commandmate remote pair" shows a new pairing link for the same URL.';
+  }
+  return PAIRING_RESTART_HINT;
+}
+
+/** What to do when no unused pairing code is left (Issue #3127). */
+const PAIRING_RESTART_HINT =
+  'To pair a device now, run "commandmate remote stop", then "commandmate remote" for a new QR code.';
+
+/**
+ * Printed with every re-issued link (Issue #3127). The link may stay behind in
+ * an agent's chat history, so its limits are said next to it.
+ */
+export const PAIRING_LINK_NOTICE =
+  'This link works once and expires at the time shown. Any earlier pairing link no longer works. ' +
+  'When you are done with remote access, run "commandmate remote stop".';
+
+/**
+ * @param reason - Why no code was issued
+ * @returns The pairing state to report for it
+ */
+function failureToPairingState(reason: PairingReissueFailure): PairingState | 'unavailable' {
+  if (reason === 'consumed' || reason === 'expired') return reason;
+  return 'unavailable';
+}
+
+/**
+ * `remote pair`: show a new pairing link for the live session (Issue #3127).
+ *
+ * The plaintext code from `remote up` is never stored, so "show it again"
+ * means minting a replacement and swapping its hash into the existing handoff
+ * file (`reissuePairingCode`). The server, the Provider and the published URL
+ * are left exactly as they are — no new way in is opened — and the session
+ * token is never printed: the only secret in the output is the one-time code.
+ *
+ * Refused unless the code is still unused: a consumed code means a device
+ * already holds the token, and an expired one closed its window on purpose.
+ * Both are answered with the `remote stop` -> `remote` route instead.
+ *
+ * @param options - Parsed command options (`--json`)
+ * @returns SUCCESS with a link, CONFIG_ERROR without one
+ */
+export async function runRemotePair(options: RemoteOptions): Promise<ExitCode> {
+  const state = readRemoteState();
+  const now = Date.now();
+
+  const refuse = (pairing: PairingState | 'unavailable' | null, message: string): ExitCode => {
+    if (options.json) {
+      console.log(
+        JSON.stringify(
+          { action: 'pair', pairingUrl: null, pairing: { state: pairing }, error: message, hint: PAIRING_RESTART_HINT },
+          null,
+          2
+        )
+      );
+    } else {
+      logger.error(message);
+      logger.info(PAIRING_RESTART_HINT);
+    }
+    logSecurityEvent({
+      timestamp: new Date().toISOString(),
+      command: 'remote',
+      action: 'failure',
+      details: `pair: not reissued (${pairing ?? 'no-remote-state'})`,
+    });
+    return ExitCode.CONFIG_ERROR;
+  };
+
+  if (state === null) {
+    return refuse(null, 'No remote session is recorded, so there is no pairing to show.');
+  }
+  if (now > state.expiresAt) {
+    return refuse(null, 'The remote session has expired.');
+  }
+
+  const pairing = derivePairingState(existsSync(state.pairing.filePath), state.pairing.expiresAt, now);
+  if (pairing !== 'unused') {
+    return refuse(
+      pairing,
+      pairing === 'consumed'
+        ? 'The pairing code has already been used.'
+        : 'The pairing code has expired.'
+    );
+  }
+
+  const reissued = reissuePairingCode(state.pairing.filePath, now);
+  if (!reissued.ok) {
+    return refuse(failureToPairingState(reissued.reason), `Could not issue a new pairing code (${reissued.reason}).`);
+  }
+
+  const pairingUrl = buildPairingUrl(state.url, reissued.code);
+  const expiresAt = new Date(reissued.expiresAt).toISOString();
+
+  logSecurityEvent({
+    timestamp: new Date().toISOString(),
+    command: 'remote',
+    action: 'success',
+    // Neither the pairing code nor the token appears here (§5.2).
+    details: `pair: reissued provider=${state.provider}`,
+  });
+
+  if (options.json) {
+    console.log(
+      JSON.stringify(
+        {
+          action: 'pair',
+          url: state.url,
+          pairingUrl,
+          pairing: { state: 'unused', expiresAt },
+          notice: PAIRING_LINK_NOTICE,
+        },
+        null,
+        2
+      )
+    );
+  } else {
+    announcePairing(pairingUrl, true);
+    logger.info(`Pairing expires: ${expiresAt} (${formatRemaining(reissued.expiresAt - now)})`);
+    logger.info(PAIRING_LINK_NOTICE);
+  }
+
+  return ExitCode.SUCCESS;
+}
+
 function describeAuthScope(state: RemoteState): string {
   const scope = state.authScope ?? DEFAULT_REMOTE_AUTH_SCOPE;
   if (scope !== 'remote-only') {
@@ -1187,7 +1363,7 @@ export async function runRemoteStop(options: RemoteOptions): Promise<ExitCode> {
  * future caller (a `quickstart --remote`, say) would compose, exactly as
  * `runStart` / `startCommand` are split (#1195).
  *
- * @param action - `up` (default), `status` or `stop`
+ * @param action - `up` (default), `status`, `stop` or `pair`
  * @param options - Parsed command options
  */
 export async function remoteCommand(
@@ -1207,8 +1383,11 @@ export async function remoteCommand(
       case 'stop':
         exitCode = await runRemoteStop(options);
         break;
+      case 'pair':
+        exitCode = await runRemotePair(options);
+        break;
       default:
-        logger.error(`Unknown action '${action}'. Valid actions: up, status, stop.`);
+        logger.error(`Unknown action '${action}'. Valid actions: up, status, stop, pair.`);
         exitCode = ExitCode.CONFIG_ERROR;
     }
   } catch (error) {
@@ -1238,7 +1417,7 @@ export function createRemoteCommand(): Command {
   const cmd = new Command('remote');
   cmd
     .description('Expose this server to your phone over a provider tunnel and pair it with a QR code')
-    .argument('[action]', 'up (default), status, or stop')
+    .argument('[action]', 'up (default), status, stop, or pair (show a new pairing link)')
     .option('--provider <name>', 'Force a provider instead of choosing one (tailscale or cloudflare)')
     .option('--expires <duration>', `Remote session TTL, 1h-30d (default: ${DEFAULT_REMOTE_EXPIRES})`)
     .option(

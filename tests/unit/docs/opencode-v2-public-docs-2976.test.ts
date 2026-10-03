@@ -4,12 +4,14 @@
  * The decision (option A): the public count stays at eight. `CLI_TOOL_IDS` has
  * nine ids, but `opencode` and `opencode-v2` are OpenCode 1.x and V2 and are
  * counted as one agent, written "OpenCode (1.x and V2)" where the versions are
- * spelled out. public-messaging §3c and §11 say so.
+ * spelled out. docs/design/public-messaging.md §2 records the rule; since
+ * Issue #3057 that file is a reference rather than wording to copy, so its own
+ * sentences are no longer pinned here — only that it, like every surface, does
+ * not count nine.
  *
  * What goes red here:
  * - a surface that starts counting nine (`nine agents`, `9 種`, ...);
- * - the counting rule dropping out of public-messaging;
- * - an agent list on README / LP / public-messaging losing "OpenCode (1.x and V2)";
+ * - an agent list on README / LP losing "OpenCode (1.x and V2)";
  * - the ja / en OpenCode V2 guides disappearing or losing their known-bug section;
  * - the skills guide going back to "a session restart is required" for every agent.
  *
@@ -92,18 +94,10 @@ describe('the public count of agents stays at eight (Issue #2976, option A)', ()
     expect(CLI_TOOL_IDS).toContain('opencode-v2');
   });
 
-  it('writes the counting rule into public-messaging §3c and §11', () => {
-    const doc = read('docs/design/public-messaging.md');
-    expect(doc.split('v1 と v2 は 1 種と数える').length - 1).toBeGreaterThanOrEqual(2);
-    expect(doc).not.toContain('公開面の「8 種」には数えない');
-  });
-
   it.each([
     ['README.md', 'OpenCode (1.x and V2)'],
     ['docs/ja/README.md', 'OpenCode（1.x と V2）'],
     ['website/index.html', 'OpenCode (1.x and V2)'],
-    ['docs/design/public-messaging.md', 'OpenCode (1.x and V2)'],
-    ['docs/design/public-messaging.md', 'OpenCode（1.x と V2）'],
   ])('%s names "%s" in its agent list', (relative, phrase) => {
     expect(read(relative)).toContain(phrase);
   });

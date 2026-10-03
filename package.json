@@ -1,17 +1,17 @@
 {
   "name": "commandmate",
-  "version": "0.43.0",
-  "description": "A local control plane for agent CLIs — orchestration and visibility for Claude Code, Codex, Gemini CLI, and more across Git worktrees",
+  "version": "0.44.0",
+  "description": "No long blocks of time? Run an AI team from your phone. Git worktree sessions, task contracts and verification gates for Claude Code, Codex, Gemini CLI, Copilot, OpenCode, Antigravity and Command Code.",
   "keywords": [
+    "ai-agents",
     "claude-code",
     "codex-cli",
     "gemini-cli",
-    "agent-cli",
-    "cli-orchestration",
-    "ai-coding",
-    "git-worktree",
     "coding-agent",
-    "session-manager",
+    "agent-orchestration",
+    "git-worktree",
+    "verification-gates",
+    "mobile",
     "tmux",
     "cli",
     "developer-tools"
@@ -32,6 +32,14 @@
     ".next/",
     "!.next/cache",
     "public/",
+    "docs/en/user-guide/quick-start.md",
+    "docs/en/user-guide/commands-guide.md",
+    "docs/en/user-guide/webapp-guide.md",
+    "docs/en/user-guide/workflow-examples.md",
+    "docs/en/user-guide/cli-setup-guide.md",
+    "docs/en/user-guide/agents-guide.md",
+    "docs/en/user-guide/cmate-schedules-guide.md",
+    "docs/en/architecture.md",
     "scripts/hooks/",
     "scripts/opencode-v2/",
     ".env.example",
@@ -141,5 +149,8 @@
     "tw-animate-css": "^1.4.0",
     "typescript": "^5.5.0",
     "vitest": "^4.1.2"
+  },
+  "overrides": {
+    "@xmldom/xmldom": "^0.9.12"
   }
 }

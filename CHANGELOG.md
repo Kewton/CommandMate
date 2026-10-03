@@ -7,6 +7,118 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.44.0] - 2026-10-03
+
+> **Highlight**: エージェントに読ませて導入まで案内させるセットアップガイド（`setup.md`）を加え、LP と README を「エージェントに聞きながら始める」形に作り直した。そのガイドを Ubuntu の素の環境で Claude Code・Codex・Command Code の 3 エージェントに実際に読ませ、全 5 段を通した（#3059）。その過程で見つかった、ログインなしの旧サーバが公開トンネルに載る問題（#3087）やトンネル越しのログイン先が localhost になる問題（#3090）などを直した。あわせて、チャットの吹き出しで worktree 内の画像・動画を表示できるようにし（#3120 / #3121）、Command Code の計画レビュー画面を CLI とチャット面から操作できるようにした（#3125 / #3139）。
+
+### Added
+
+- **feat(chat): Command Code の計画レビュー（REVIEW）でコメント・レビュー送信・承認・取り消しをチャット面から送れるようにする** (#3139): REVIEW のときダイアログカードに `PlanReviewControls`（コメント欄＋「コメントを追加」「レビューを送信 (Ctrl+R)」「承認 (Ctrl+A)」「取り消し (Esc)」）を出し、`POST /api/worktrees/[id]/prompt-response` の `planReviewAction`（#3125）で送る。承認は計画を実行するので確認を挟み、#2762 の確認なしの `ctrl+a` ボタン（`PlanApproveKeys`）は置き換えた。API の `plan_review_*` 拒否は訳文と API の文言を画面に出す。
+
+- **feat(cli): `commandmate remote pair` で、トンネルを張り直さずにペアリングのリンクと QR を出し直せるようにした** (#3127): 未使用のペアリングコードがあるときだけ新しいコードを発行し、同じ公開 URL のリンクを QR と文字の両方で表示する（以前のリンクは無効になる。セッショントークンは表示しない）。使用済み・期限切れ・読めないときは何も出さず `remote stop` → `remote` を案内する。`remote status` にも次の手順を 1 行添える。
+
+- **feat(chat): チャットの吹き出しで worktree 内の動画を埋め込む** (#3121): `![](<パス>)` や `[…](<パス>)` が worktree 内の `.mp4` を指すとき `<video controls preload="none">` で表示し、ラベルは動画の下にファイルリンクとして残す。files API に `?raw=1`（動画と SVG を除く画像のみ。パス検査・大きさの上限・magic bytes の確認は既存と同じ、`Range` 対応・ストリーム返却・`nosniff` / `Content-Disposition: inline` / `Cache-Control: private`）を追加し、base64 の JSON を経由しない。
+
+- **feat(chat): チャットの吹き出しで worktree 内の画像を表示する** (#3120): assistant の Markdown の `![alt](path)` を、相対パス・worktree 内の絶対パス・`file://` なら files API 経由で縮小表示（幅 100%・高さ 320px まで、押すとファイルパネルで開く、画面に入ってから読み込む）し、worktree の外・`http(s)://`・未知のスキームは読み込まずに代替テキストとリンクにした。user の吹き出しは `.commandmate/attachments/` の添付だけを画像にする。画像の読み込みは `MarkdownPreview` から切り出した共通の `WorktreeImage` で行い、CSP と files API の検査は変えていない。
+
+- **docs(setup): エージェントに読ませるセットアップガイド `setup.md` を追加** (#3059): `https://kewton.github.io/CommandMate/setup.md` として配信し、`commandmate docs --section setup` でも同じ内容を出す。インストールと起動・スマホのペアリング・2 体目のエージェント・PM 役の Skill・検証ゲートの 5 段で、各段に確認・実行・人に確認すること・成功の確かめ方・失敗時の対処を置き、依存の導入・外部への公開・Auto Yes・マージは人の同意なしに行わないと明記した。`website/llms.txt` から指し、2 つの同一性は単体テストで固定した。
+
+- **feat(website): Level 1 の図 B をスマホ幅の実 UI 録画に差し替え、Level 3 に PM → 開発リーダー → ワーカーの 3 層 run の実記録を追加** (#3058): 隔離環境で撮った 10 秒の `phone-team.mp4`（540×540、206 KB、ポスター付き、既存デモと同じ遅延再生）を図 B の絵コンテ SVG の位置に置き、Level 3 に 2026-10-02 の記録（4 Issue、PM と開発リーダーは Claude Code、ワーカーは Command Code × 4、スマホ幅の Web UI からメッセージ 2 通＋タップ 3 回、依頼から報告まで 9 分 48 秒、検証 4/4、PR は CI 緑でマージ、UAT 4/4 GO、公開リポジトリ commandmate-team-demo）を足した。出典は public-messaging.md §1 に追記した。
+
+- **feat(agent-health): 日次メトリクスに性能（本番ログの遅延・ログ量・ERROR・サーバーの RSS/CPU）を足す** (#3054): `scripts/agent-health/metrics.ts` に分類 `performance` と `api-latency`（直近 24 時間の `[WARN]` の `totalMs` を `<tag> <event>` ごとに件数・p50・p95・最大・内訳の最大で集計）・`log-volume`（24 時間の行数）・`error-rate`（`[ERROR]` 行数）・`server-process`（`server.pid` の子の RSS/CPU を 5 秒おきに 6 回と `GET /api/worktrees` 3 回の中央値）を足した。本番ログは main worktree の `logs/server.log` と `server.log.<N>` を各行の時刻で絞って読み、本番サーバーは止めない。前から閾値を超えているものも `outstanding` に入れ、起票の順は security の新規 → 保守性の悪化 → performance の新規 → security の続き → performance の続き。Issue に載るのは `<tag> <event>` の名前と数値だけで、ログ行の JSON の値は写さない。
+
+- **feat(agent-health): 選択画面（claude の `/model`・`/effort`、codex の `/model`）の判定を毎日確かめる `screen-picker` チェックを追加** (#3053): `screen-idle` の直後に選択画面を開き、`waiting`・`hasActivePrompt=false`・reason が `SELECTION_LIST_REASONS` のいずれか・`detectPrompt` の `isPrompt` が画面ごとの期待（claude は `false`、#1495／codex の `/model` は `true`、#2868）どおりであることを確かめて Esc だけで閉じる（モデル呼び出しなし。開いたことは判定の正規表現とは別の一覧・スライダー側の文字列で確かめ、1 つでも外れたら fail）。選択画面の定義は `scripts/agent-health/tool-table.ts` に置き、定義の無いツールは skip。前後で claude の `~/.claude/settings.json` の `model` / `effortLevel`、codex の `config.toml` の `model` / `model_reasoning_effort` を比べ、変わっていたら書き戻さずに exit 2。
+
+- **feat(agent-health): リリースの GO／要判断／NO-GO を判断する HTML レポートを出力** (#3046): `npx tsx scripts/agent-health/release-report.ts --date <YYYY-MM-DD>` が依頼の記録（`dispatch/<date>.json`）・計測・orchestrate の run ファイル・develop の CI と PR を集め、ルールで決めた判定と理由・依頼した Issue の表・前回リリースからの断片・メトリクスの前日比／前回リリース比を `workspace/agent-health/<date>/release-readiness.html` に書く。入力が無い日も「依頼なし」として出力する。
+
+- **feat(agent-health): 日次チェック後に develop の Claude 3 へ /orchestrate を自動依頼** (#3045): `scripts/agent-health/dispatch.ts` が作成者 `kewton`・ラベル `agent-health`／`metrics`・未 `auto-dispatched` の open Issue をバグ全件・改善 2 件・合計 5 件まで選び、Claude 3 が入力待ちのときだけ `/clear` と依頼を送ってラベル・コメント・依頼の記録（`runSuffix` つき）を残す。依頼文 `docs/agent-health/dispatch-prompt.md`（Schedule `agent-health-dispatch`、08:30）、リリース判断レポートは `runSuffix` でその run のファイルだけを読む。
+
+- **feat(agent-health): セキュリティ・保守性メトリクスを日次計測し、新規・悪化だけを改善 Issue の候補にする** (#3044): `scripts/agent-health/metrics.sh`（`daily.sh --sync-only` で同期→`metrics.ts`）が npm audit・semgrep・gitleaks・行数・複雑度・重複・knip・npm outdated・型安全・カバレッジ（月曜のみ）を 10 分以内に計測して `~/.commandmate/agent-health/metrics/<JST 日付>.json` に書き、前回値（`metrics-state.json`）と比べて新たに閾値を超えた・悪化したものだけを `candidates` にする。Schedule `agent-health-metrics`（06:30）の依頼文 `docs/agent-health/metrics-prompt.md` が 1 日 2 件まで起票する。
+
+### Changed
+
+- **docs(setup): セットアップガイドの段 2 に `remote pair` を追記** (#3141): QR が切れた・失くした（未使用）場合は `commandmate remote pair`、使用済み・期限切れは従来どおり `remote stop` → `remote`。文字のリンクは `remote pair`（または `--json` の `pairingUrl`）で得られると書いた。
+
+- **refactor(tmux): Command Code の REVIEW 送信 C-r を特殊キーの許可リスト経由にそろえた** (#3138): `ALLOWED_SPECIAL_KEYS` に `C-r` を足し、`sendKeys` の固定文字列送信をやめて `sendSpecialKeys` に統一した。
+
+- **docs(setup): セットアップガイドに実機確認で迷った 4 点を追記** (#3129): Codex の初回確認画面（hooks は CommandMate 自身が書いたもの）、コミット前の git 作者確認、ペアリングのリンクをアドレス欄に貼る手順、Command Code の plan mode を避ける暫定の書き方を `website/setup.md` と埋め込み定数に足した。
+
+- **ci(release): publish workflow がテスト全体を再実行せず、タグのコミットで CI が通っていることの確認に置き換えた** (#3111): `.github/workflows/publish.yml` の `Run tests`（`npm run test:unit`、0.43.0 で 23 分）を `Require CI to have passed on the tag commit` に置き換えた。新しい `scripts/check-release-ci.mjs` が、タグのコミットに付いた github-actions の check run のうち main の必須チェック（`Unit Tests`・`Build`）の最新が success になるまで 30 秒ごとに見て最大 20 分待ち、失敗・見つからない／終わらない・`gh` の失敗のときは exit 1 でビルドと `npm publish` の前に止める（v0.41.1〜v0.43.0 の実測では、タグのコミットの CI の `Unit Tests` は Release 公開の 2.2〜8.4 分後に完了していた）。`permissions` に `checks: read` を足し、ジョブの `timeout-minutes` を 60 から 40 に下げた。ビルド・パッケージの大きさの確認・`npm publish --provenance` は従来どおり。release-guide（日英）と `/release` に、この手順で止まった run は npm に何も出しておらず CI を直して再実行できることを書いた。
+
+- **feat(schedule): Schedule の 1 回の実行の時間制限を 15 分から 30 分に延ばした** (#3107): CMATE.md の Schedule が使う既定の `EXECUTION_TIMEOUT_MS`（`src/lib/session/claude-executor.ts`）を 30 分にした。この既定値を使うのは Schedule だけで、日次レポートの生成は自分の時間制限のまま。反映には本番サーバーの再ビルドが要る。
+
+- **docs(agent-health): 日次メトリクスの新規起票の上限を 1 日 2 件から 4 件に広げた** (#3105): 依頼文 `docs/agent-health/metrics-prompt.md` の上限（1 回の実行で立てる Issue の数・見送りの数え方）と `docs/user-guide/agent-health.md` の説明を 4 件に書き換えた。自動依頼（`dispatch.ts`）の上限（改善 2 件・合計 5 件）は変えていない。
+
+- **feat(agent-health): 性能の Issue に perf ラベルを付け、自動依頼の対象から外す** (#3104): `issueKind` が `perf` 付きの Issue を対象外にし（選定・`deferred`・上限に入らない）、`metrics-prompt.md` は category が performance のとき `--label perf` を付ける。性能は起票まで自動・修正は人が着手する。
+
+- **refactor(cli): DaemonManager.start() の分岐を、起動済み検査・env 組み立て・endpoint 決定・ポート検査・state 記録の private メソッドへ切り出した** (#3100): ESLint complexity を 25 から 20 未満へ下げた。出力文言・順序・例外・副作用の順序は変えない。
+
+- **refactor(cli): `respond` の action を引数検証・本文組み立て・失敗報告・resolved 監査の関数に分け、complexity を 50 から 25 未満にした** (#3099): 出力・順序・exit code・`process.exit` 後の続行条件は変えず、同一ファイル内の非 export 関数へ移した。
+
+- **docs(setup): セットアップガイドでスマホ接続を CLI 中心の段の後に回すよう指示する** (#3091): `commandmate remote` の既定（`--auth all`）の後はこの機械の CLI もトークン必須になり段 3〜5 が進められなかったため、エージェントへの指示に「段 2 は最後（段 5 の後）に行う」を足し、段 2 の中でも「最後に回す（推奨）／`--auth remote-only` で今つなぐ（この機械の全プロセスが認証なしで操作できる）」を人に選ばせるようにした。あわせて Codex はシェルのネットワークが既定で無効なので `/permissions` を Ask for approval にしてもらう注意と、段 3〜5 の前提としてリポジトリ登録は Web UI の Repositories → Add Repository で人が行うことを明記した。`website/setup.md` と `commandmate docs --section setup` は同じ内容。
+
+- **docs(readme): README（en / ja）を導入希望者向けに縮め、npm の description / keywords を新しい一言に揃えた** (#3061): README を「一言と数字・困りごと・3 レベル・エージェントにセットアップさせる 1 文と手動手順・やらないこと・ドキュメント表」の骨格にし（en 8.1 KB / ja 10.1 KB）、外した節は新設の `how-it-works.md` / `troubleshooting.md` と既存の CLI セットアップガイド・Webアプリ操作ガイド（en / ja）へ移した。Quick Start の説明、`docs/` と `docs/en/` のリンク混在、英語 README から日本語のみの設計書へのリンク、「no credentials leaked」の言い過ぎも直した。
+
+- **docs(website): LP を 3 レベルの世界観とエージェントに聞きながらのセットアップへ作り直した** (#3060): X から来たまだ導入を決めていない人向けに、Hero（README と同じ一言・出典つきの数字 4 つ・setup.md を指す貼り付け用の 1 文と Copy ボタン・図 A）→ Problem → Level 1〜3（柱・図 B〜F・既存デモ動画・Ask your agent）→ Set up with your agent（setup.md の 5 段と各段でエージェントが確認すること・図 G）→ My setup → Trust（ローカルで動く・人が決める・限界・MIT）→ Start の順に組み替えた。図はすべてテーマ追従の inline SVG。`llms.txt` と og:title / og:description も新しい一言に揃え、`docs/design/public-messaging.md` §1 に 4 つの数字の出典を加えた。
+
+- **docs(public-messaging): 公開面の文言を public-messaging.md から逐語コピーさせ、テストで一致を固定する運用を撤廃** (#3057): `docs/design/public-messaging.md` を「事実と、言わないことの一覧」（数字と出典・対応エージェントの数え方・exit code・実装との突合・実測の範囲・通信の範囲・やらないこと・競合製品名の禁止語・語の出典）に縮め、冒頭の「コピーして使う」規則を外して参考資料と明記した。README / LP / concept / デモのテロップを同文書の文言と突き合わせるテスト（hero・定義文・Philosophy 見出し・`##` 数・4 カード・§1b・§4b・キャプション・FAQ 本文・Measured 表のセル・§3e 各部・llms.txt の hero とカード）を外し、アセット解決・メディア容量・遅延再生・a11y・エージェント数 8・exit code・禁止語（競合名と未計測の主張）・通信範囲の検査は残した。concept（ja / en）・demo-video Skill・絵コンテの参照も合わせて直した。
+
+### Fixed
+
+- **fix(api): files API の ?raw=1 応答の Cache-Control を実際に返る no-store に揃えた** (#3143): next.config.js の /api/:path* が no-store で上書きするため、route の private と単体テストの期待を no-store に合わせた。挙動は変わらず、コメントに理由を追記した。
+
+- **fix(agent-health): マージ済み PR の自動キャンセル（cancelled）チェックを release-report の NO-GO に数えない** (#3142): マージ時に cancel-pr-runs-on-close が止めた PR のチェックを判定から外し、表には cancel 件数を出す。失敗が 1 つでもあれば従来どおり赤で、develop の push run と未マージ PR の cancel の扱いは変えない。
+
+- **fix(api): 上限を超える画像が 413 FILE_TOO_LARGE ではなく 400 で返る問題を修正** (#3140): files API が文言の部分一致（`5MB`）で大きさ超過を判定していたため、20MB 上限の画像が 400 になっていた。検証関数が `reason: 'too-large'` を返し、base64 経路と `?raw=1` の両方で 413 を返す。上限・パス検査・magic bytes は不変。
+
+- **fix(cli): 転写が空の `capture` が空を返さず `--pane` を案内するようにした** (#3128): `--pane` なしの `capture` は転写（content）が空だと何も表示せず、フォルダ信頼などの確認ダイアログが見えなかったため、空のときだけ `--pane --tail 40` への案内を表示する。転写があるときと `--json` の出力は変わらない。
+
+- **fix(verify): Command Code が自分で書く状態ファイルを scope / work-evidence の変更として数えない** (#3126): `.commandcode/settings.local.json` と `.commandcode/taste/**`（未追跡のみ）を宣言済み path として除外し、除外した path は判定結果に表示する。`.commandcode/` 配下の他のファイルは従来どおり数える。
+
+- **fix(command-code): 計画レビュー（REVIEW）画面にコメント・Submit review・承認・取り消しを CLI から送れるようにした** (#3125): `respond <id> "<text>"` は REVIEW 画面ではコメントとして打って Enter で確定し、`--plan-review submit|approve|cancel` でそれぞれ ctrl+r / ctrl+a / esc を送る。フォーカスがアクション一覧やコメント欄にあるとき、番号や yes だけの答えは何も送らずに拒否する。承認は明示した操作だけで、Auto-Yes は REVIEW を承認しない。`send` は composer を 30 秒待たずに、すぐ `respond` を案内して止まる。
+
+- **fix(orchestrate): 検証不合格（exit 20）の切り分けで 1 回目の run を `verify show` で読み、再実行は `--task` を付けるようにした** (#3123): `--task` 無しの `verify` は終了済みの task に紐づかず scope が SKIP・env-clean が「ベースライン無し」になり契約のゲートも走らないため、/orchestrate 3-4 の手順を `verify history` / `verify show` と `verify --task "$TASK_ID"` に直した。
+
+- **fix(agent-health): マージ済みの Issue は verify の exit code を要判断の根拠にしない** (#3119): release-readiness が、PR がマージ済みでも最新の wait ログの `exit=20` を「未完了」として hold に数えていた。マージ済みなら hold に入れず、Issue の表には verify の exit を参考として残す。未マージの Issue は従来どおり hold に入る。
+
+- **fix(verify): 再指示の後の裁定を `wait` → `verify --task` にし、task に紐づかない検証の案内文が `--task` を指すようにした** (#3118): `wait --verify` は進行中の task にしか紐づかず、終了済みの task を再指示した後は scope が SKIP・env-clean が「ベースライン無し」で exit 20 になっていたため、/orchestrate の手順と scope / env-clean の失敗文言に `commandmate verify <worktree> --task <id>` を案内する。
+
+- **fix(update): GitHub に出たが npm にまだ無い版で更新ボタンを押せないようにし、押しても 5 分待たせないようにした** (#3110): GitHub の Release は npm への公開より 34〜43 分早く出るため、その間の更新ボタンは何も入れずに 5 分待って「時間切れ」になっていた。`GET /api/app/update-check` は global インストールで GitHub が新しい版を示したとき `npm view commandmate version`（非同期・時間制限つき）も確かめ、npm がまだ古ければ `hasUpdate: false`・`pendingVersion` を返す（npm の再確認は 5 分ごと、GitHub は 1 時間のまま。npm に届かなければ従来どおり GitHub だけで判定）。`POST /api/app/update` は起動前に npm の最新版を確かめ、今の版以下なら起動せず 409 `not_yet_published` を返す。画面は PC の更新ボタンを押せない「v{版} 公開準備中」にし、`not_yet_published` ではすぐにトーストで知らせて `idle` に戻る。npx・ローカルの扱いと #1198 の安全上の決まり（固定の引数・global の判定・ロック）は変えていない。
+
+- **fix(agent-health): 自動依頼の `/orchestrate` を 1 行で送り、条件はファイルに書いて渡すようにした** (#3103): 改行を含む複数行の送信は Claude Code に貼り付けとして扱われ、スラッシュコマンドとして実行されていなかった。`buildRequest` は `/orchestrate <番号…> <条件ファイルのパス> の条件に従うこと` の 1 行を返し、条件は `buildTerms` が作って送る前に `workspace/agent-health/<日付>/dispatch-terms-<runSuffix>.md` へ書く。書けなければ送らずに `skipped-busy` と `reason` を記録し、`--dry-run` では書かない。
+
+- **fix(history): Claude の貼り付けの印（`<pasted_content>`）付きの user 行が、送信の行と重複して保存されるのを直した** (#3102): transcript の取り込みで印を外してから比較するようにし、既存の `/send` の行・relay の行を引き取れるようにした。既存の重複は `scripts/history/dedupe-pasted-user-rows.ts`（既定は `--dry-run`）で片付ける。
+
+- **fix(cli): `send` / `sync` / `respond` が初めての利用者を誤った方向に案内する 3 件を修正** (#3093): 起動タイムアウト時にペインの最下行がシェルのプロンプトなら「動いている（遅い起動）」ではなく「エージェントが終了した」と返す（`SESSION_START_FAILED`）。リポジトリ未登録の `sync` は読まれない `CM_ROOT_DIR` ではなく Web UI の Repositories → Add Repository か `WORKTREE_REPOS` を案内する。「No, tell … what to do differently」を `respond` で選ぶと、文章は `send` で送るよう案内し（`textFollowUp`）、ダイアログが無い所へ文章を `respond` したときも届かない理由と `send` を示す。
+
+- **fix(verify): Skill を入れただけの worktree で work-evidence が通り、scope が落ちる問題を修正** (#3092): `work-evidence` と `scope` の判定から、CommandMate が記録した install receipt（`.agents/skills/<id>/.commandmate-receipt.json`）が保証する未追跡ファイル（receipt に載り、sha256 が一致するもの。receipt 自身を含む）を除外した。利用者が置いたファイル、中身を変えた Skill ファイル、コミット済みの Skill ファイル、`.commandcode/` は従来どおり数える。
+
+- **fix(auth): トンネル越しの未ログイン要求が `https://localhost:3000/login` へ飛ばされる問題を修正** (#3090): ミドルウェアは未認証の画面要求に絶対 URL の 307 ではなく、相対 `/login` を指す `Refresh` ヘッダと meta refresh つきの 401 を返すようにした（ブラウザが表示中のオリジンで解決するため、トンネルの公開 URL の `/login` に向く。`Host` / `X-Forwarded-Host` は使わないので別オリジンへは飛ばない）。`/api/*` と `Accept: application/json` の未認証要求はリダイレクトせず 401 JSON を返す。認証の対象パスは変えていない。
+
+- **fix(claude): 信頼ダイアログでカーソルが Yes に来たことを画面で確かめてから Enter を送る** (#3089): `Down Enter` をまとめて送ると、まだキーを受け付けない TUI に `Down` が飲まれ `Enter` が `No, exit` を確定していた。移動キーを 1 つ送るごとに画面を読み直し、カーソルが `Yes, I trust this folder` の行にあるときだけ Enter を送る（移動は上限 20 回、超えたら Enter を送らず起動失敗）。ダイアログから Claude Code が終了してシェルに戻った場合は、60 秒待たずに起動失敗として返す。
+
+- **fix(cli): `stop` がサーバ本体を残し、`remote` がログインなしの旧サーバを公開トンネルに載せる問題を修正** (#3087): `stop` は npm の PID だけでなくプロセスグループ全体に SIGTERM を送り（猶予後は SIGKILL）、記録したポートが解放されたことを確かめてから成功を返す。npm が先に終わって孤児になったサーバも止め、init の無いコンテナで残るゾンビ（Linux の /proc で判定）は終了済みとみなす。孤児が生きている間は PID ファイルを消さず、PID ファイルが無くても設定ポートで何かが応答していれば `stop` は「停止済み」と言わず、待ち受け PID を示して非 0 で終わる（自分のものと確かめられないプロセスは殺さない）。`start --daemon` は別プロセスが応答しているポートでは起動しない。`remote` はトンネルを開く直前に、公開するポートが未知のトークンを 401 で拒み、今回発行したセッショントークンを受け入れること（＝今回起動した認証つきサーバであること）を確かめ、確かめられなければ何も公開せずロールバックして非 0 で終わる。
+
+- **fix(demo-video): カセットの承認フレームのフッターを実機の文言に直した** (#3081): `claude-session-sample.cast` と `claude-hero.cast` の承認フレームが入力欄のヒント行だったため、claude のダイアログ規則が拒否して Submit が `prompt_no_longer_active` になっていた。`Esc to cancel · Tab to amend · ctrl+e to explain` に置き換え、`evaluateDialogPresence` で present になることを単体テストで検査する。
+
+- **fix(demo-video): 既定カセットの `@input` 画面が入力欄に文字を残し `send` が 500 になる問題を修正** (#3080): `claude-session-sample.cast` の最初の `@input` を、質問が上に流れ入力欄が空の画面（`Cascading…`）に差し替え、全カセットの `@input` 画面で入力欄が空であることを検査する単体テストを追加した。
+
+- **fix(demo-video): 偽エージェントのペインをサーバが採用せず `isSessionRunning` が false のままになる問題を修正** (#3079): `env-up.sh` が demo DB の `tmux_session_namespace` を読んで `state.env` に `CM_DEMO_SESSION_NAMESPACE` として記録し、`fake-agent.sh --tool/--worktree` は `mcbd-<ns>-<tool>-<worktreeId>` で起動する（`--namespace` で上書き可。名前空間が無ければ従来名）。`env-down.sh` は自サーバの名前空間つきの名前も kill し、他サーバの名前空間は拾わない。`--session` 指定の経路は不変。
+
+- **fix(claude): 許可リストのあるリポジトリで Claude Code の信頼ダイアログに `No, exit` を確定してしまい初回 send が届かない問題を修正** (#3078): セッション起動待ちで信頼ダイアログをプロンプト判定より先に見るようにし、カーソル位置を画面から読んで `Yes, I trust this folder` へ ↑/↓ で移してから Enter を送る（既定 Yes の従来版は従来どおり Enter のみ）。答えた後も 3 秒ダイアログが残れば最大 3 回まで答え直す。
+
+- **fix(deps): 間接依存の js-yaml を更新して脆弱性 3 件（high）を解消** (#3068): `npm audit --omit=dev` で high の advisory が報告されていた間接依存の `js-yaml` を親の semver 範囲内で更新し、`gray-matter` 配下を 3.14.2 から 3.15.2 に、`@marp-team/marpit` 配下を 4.1.1 から 4.3.2 に更新した。
+
+- **fix(deps): @xmldom/xmldom を 0.9.12 に更新して脆弱性 15 件を解消** (#3067): speech-rule-engine が 0.9.8 を完全固定していたため、package.json の overrides で 0.9.12 に引き上げて high の advisory を解消した。
+
+- **fix(auto-yes): codex の `/model` 選択画面（1 段目・2 段目）に Auto-Yes が番号を答えないようにした** (#3062): 選択画面の案内文（`enter select · esc back` / `enter default · s session · esc back`）に当たる画面では、ポーラーが答えを送らず `unclassified-frame` で抑止を記録する（モデルと reasoning effort が自動で決まるのを防ぐ）。hooks の一覧、承認・信頼ダイアログの動作と、利用者が UI で答える `/prompt-response` は従来どおり。
+
+- **fix(cli): 公開 npm パッケージで `commandmate docs --section` がファイル参照型の節で ENOENT になる問題を修正** (#3056): `SECTION_MAP` の参照先を英語版（`docs/en/`）へ切り替え、参照する 8 ファイルだけを `package.json` の `files` に追加した。`SECTION_MAP` と `files` のずれを検出する単体テストを追加。
+
+- **fix(detection): Claude 2.1.257 以降の /effort 選択画面を選択画面として判定** (#3052): `/effort` の案内文 `←/→ to adjust · Enter to confirm · s for this session only · Esc to cancel` が `CLAUDE_SELECTION_LIST_FOOTER` に合わず `running` と判定され、操作ボタンが出なかった。`Enter to confirm · s for this session only` の枝を足し、`waiting` / `claude_selection_list`（Auto-Yes は反応しない）と判定する。
+
+- **fix(verify): env-clean の削除側が、同じサーバーの別リポジトリのセッション終了と、死んだ pid の demo-vitest の掃除を違反に数えないようにした** (#3043): task 作成時のベースラインに、同じサーバーの別リポジトリの worktree のセッション（`otherRepositorySessions`。このサーバーの DB の worktree 表で引き、別リポジトリに一意に解決したもの）と、採取時点で pid が既に死んでいた `.commandmate-demo-vitest-<pid>`（`deadDemoVitestEntries`）を記録し、それらの削除を `removedByOtherRepository` / `removedStaleDemoVitest` として違反から外して一覧に残す（2026-09-30 の run では 4 本すべてがこの 2 つだけで exit 20 になっていた）。同じリポジトリの兄弟 worktree のセッションの削除（#1624）、持ち主が不明・曖昧なもの、kill-server の形、基準時点で生きていた pid のディレクトリの削除は従来どおり違反。
+
 ## [0.43.0] - 2026-09-30
 
 > **Highlight**: OpenCode V2（`opencode-v2`）をエージェントとして正式に登録し、起動・状態表示・承認と質問への応答・スラッシュコマンド・スケジュール・Skill の互換表まで v1 と同じ場所で使えるようにした（#2934 ほか 20 件以上）。あわせて、委任まわりの CLI を強化した — 新しい `commandmate reply` でワーカーの最新の返答を台帳から読め（#3039）、`ask` は文脈の上限で止まった依頼を exit 11（`id=context-limit`）で返し（#3011）、起動直後の Command Code への送信は 503 `SESSION_STARTING` で「起動中」と区別できる（#3006）。

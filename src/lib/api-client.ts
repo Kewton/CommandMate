@@ -1296,6 +1296,11 @@ export interface UpdateCheckResponse {
   /** 'npx' (Issue #1394): running from the npx cache — no in-place update */
   installType: 'global' | 'local' | 'npx' | 'unknown';
   updateCommand: string | null;
+  /**
+   * Issue #3110: released on GitHub but not yet served by npm. hasUpdate is
+   * false meanwhile. Optional so a response from an older server still parses.
+   */
+  pendingVersion?: string | null;
 }
 
 /**

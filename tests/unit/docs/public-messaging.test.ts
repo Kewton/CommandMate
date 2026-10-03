@@ -1,37 +1,20 @@
 /**
- * `docs/design/public-messaging.md` is the single source for public wording, and
- * `docs/concept.md` / `docs/en/concept.md` are the canonical Vision/Mission text
- * (Issue #1808, Epic #1807 Step A). Six later issues (#1810–#1815) copy from
- * these files, so a drift here splits every public surface at once.
- *
- * What this file pins, and why each pin is cheap to break by hand:
+ * `docs/design/public-messaging.md` is a reference of facts and of what the
+ * public surfaces do not say — not a source of wording to copy. Issue #3057
+ * retired the #1808 rule that every surface copies its sentences verbatim from
+ * that file and that tests pin the copies; what is pinned here is only what a
+ * surface must not get wrong, whatever words it chooses.
  *
  * 1. **The banned-term list lives in one place.** The list is written for humans
  *    in public-messaging.md and consumed by machine here. If the two were
  *    maintained separately, deleting a row from the doc would silently disarm
  *    the guard — so the two are asserted equal, and the doc's own rows are what
- *    the concept files are then scanned for.
- * 2. **The definition sentence is verbatim in three files.** It is the one
- *    sentence every surface repeats; paraphrasing it is exactly the failure the
- *    single source exists to prevent.
- * 3. **The two concept files stay structurally parallel.** Equal `##` counts is
- *    the cheapest check that a section was not added to one language only.
- * 4. **Claims that name code are asserted against the code**, not restated:
+ *    the concept files and the READMEs are then scanned for. Since #3057 the
+ *    list holds competitor product names only.
+ * 2. **Claims that name code are asserted against the code**, not restated:
  *    `VerifyExitCode` for `exit 0 / 20 / 21` and `CLI_TOOL_IDS` for the agent
- *    list. Adding a CLI without updating the messaging is the realistic drift.
- * 5. **Demo telops fit the recorder that will render them.** The limits are read
- *    out of `storyboard.ts` rather than duplicated, so tightening the recorder
- *    fails the doc instead of failing the render months later.
- * 6. **No table cell is left blank.** The brief was "every item filled in both
- *    ja and en"; a blank cell is how a later issue ends up inventing wording.
- * 7. **The two READMEs are held to the same pins as the concept files**
- *    (Issue #1814). They are the surface most likely to be edited by someone
- *    who never opens public-messaging.md, so the hero, the axis, the definition
- *    and the retired wording are asserted there directly — and the two languages
- *    are kept structurally parallel for the same reason the concept files are.
- *    The READMEs are the only surface pinned to BOTH the hero and the axis
- *    (Issue #2494): they open with the pitch and then name the method, whereas
- *    the concept files only ever name the method.
+ *    list. Adding a CLI without updating the reference is the realistic drift.
+ * 3. **No table cell is left blank**, so no fact in the reference is half-stated.
  *
  * @vitest-environment node
  */
@@ -48,19 +31,14 @@ const CONCEPT_JA = 'docs/concept.md';
 const CONCEPT_EN = 'docs/en/concept.md';
 const README_EN = 'README.md';
 const README_JA = 'docs/ja/README.md';
-const STORYBOARD = '.claude/skills/demo-video/scripts/storyboard.ts';
 
 /**
  * The banned terms, as this test knows them. The list in the doc must match
  * exactly — that equality is the whole point of asserting it (see the header).
+ * #3057 cut it to competitor product names; the old-axis wording it used to
+ * carry is left to each surface.
  */
 const BANNED_TERMS = [
-  'control plane',
-  'コントロールプレーン',
-  'control layer',
-  'コントロールレイヤー',
-  'Orchestrate your agent CLIs, not your terminal tabs',
-  'Vibe Coder',
   'Remote Control',
   'Happy Coder',
   'claude-squad',
@@ -71,26 +49,6 @@ const BANNED_TERMS = [
   'Herdr',
   'Lanes',
 ];
-
-/**
- * The hero and the definition, verbatim. Changing these is a deliberate act.
- *
- * Issue #2493 moved the axis line off the hero: the hero now says who leads and
- * what decides done, and `From vibe coding to Vibe Engineering.` became the NAME
- * OF THE PHILOSOPHY (public-messaging.md §2) rather than the opening line. Both
- * strings are still load-bearing, so both are pinned — `HERO_H1_*` where a
- * surface opens, `AXIS_*` where it names the method. The concept docs are the
- * home of the philosophy and carry only the axis; the READMEs open with the hero
- * AND carry the axis as their Philosophy heading, so they are held to both.
- */
-const HERO_H1_EN = "One agent leads. Gates decide what's done.";
-const HERO_H1_JA = '指揮するのは、いつもの Agent。判定するのは、ゲート。';
-const AXIS_EN = 'From vibe coding to Vibe Engineering.';
-const AXIS_JA = 'vibe coding から、Vibe Engineering へ。';
-const DEFINITION_EN =
-  'Vibe Engineering — the AI does the building; the system, not your expertise, guarantees the engineering.';
-const DEFINITION_JA =
-  'Vibe Engineering — 作るのは AI。エンジニアリングを保証するのは、あなたの専門知識ではなく仕組み。';
 
 function readDoc(relative: string): string {
   return fs.readFileSync(path.join(REPO_ROOT, relative), 'utf8');
@@ -108,11 +66,6 @@ function tableCells(line: string): string[] | null {
   return trimmed.slice(1, -1).split('|');
 }
 
-/** Top-level sections, the cheapest proxy for "both languages got the edit". */
-function sectionCount(content: string): number {
-  return content.split('\n').filter((line) => /^## /.test(line)).length;
-}
-
 function isSeparatorRow(cells: string[]): boolean {
   return cells.every((cell) => /^:?-{2,}:?$/.test(cell.trim()));
 }
@@ -128,7 +81,7 @@ function tableRows(content: string): { line: number; cells: string[] }[] {
   return rows;
 }
 
-describe('public messaging is a single source', () => {
+describe('the public messaging reference', () => {
   const messaging = readDoc(MESSAGING_DOC);
 
   it('publishes the banned-term list this test enforces', () => {
@@ -147,25 +100,11 @@ describe('public messaging is a single source', () => {
     expect([...documented].sort()).toEqual([...BANNED_TERMS].sort());
   });
 
-  it('states the hero, the axis and the definition in both languages', () => {
-    const prose = readProse(MESSAGING_DOC);
-    for (const line of [
-      HERO_H1_EN,
-      HERO_H1_JA,
-      AXIS_EN,
-      AXIS_JA,
-      DEFINITION_EN,
-      DEFINITION_JA,
-    ]) {
-      expect(prose, `${MESSAGING_DOC} must carry: ${line}`).toContain(line);
-    }
-  });
-
   it('leaves no table cell blank, so every item is filled in ja and en', () => {
     const blank = tableRows(messaging).filter((row) => row.cells.some((cell) => cell === ''));
     expect(
       blank.map((row) => `${MESSAGING_DOC}:${row.line}`),
-      'every messaging item must be decided; a blank cell invites a later issue to invent wording'
+      'every fact in the reference must be stated in full'
     ).toEqual([]);
   });
 
@@ -191,22 +130,9 @@ describe('public messaging is a single source', () => {
   });
 });
 
-describe('concept docs are the canonical Vision/Mission text', () => {
+describe('the concept docs stay true to the reference', () => {
   const ja = readProse(CONCEPT_JA);
   const en = readProse(CONCEPT_EN);
-
-  it('carries the definition in its own language', () => {
-    expect(ja, `${CONCEPT_JA} must carry the ja definition verbatim`).toContain(DEFINITION_JA);
-    expect(en, `${CONCEPT_EN} must carry the en definition verbatim`).toContain(DEFINITION_EN);
-  });
-
-  it('carries the axis line, which is where the philosophy is named', () => {
-    // The concept docs are about the method, not the product pitch, so they
-    // keep the axis and are deliberately NOT held to the hero (Issue #2493).
-    expect(ja).toContain(AXIS_EN);
-    expect(ja).toContain(AXIS_JA);
-    expect(en).toContain(AXIS_EN);
-  });
 
   it.each([
     [CONCEPT_JA, ja],
@@ -215,11 +141,6 @@ describe('concept docs are the canonical Vision/Mission text', () => {
     const lowered = prose.toLowerCase();
     const found = BANNED_TERMS.filter((term) => lowered.includes(term.toLowerCase()));
     expect(found, `${relative} still uses retired wording`).toEqual([]);
-  });
-
-  it('keeps the same number of ## sections in both languages', () => {
-    expect(sectionCount(ja)).toBeGreaterThan(0);
-    expect(sectionCount(en)).toBe(sectionCount(ja));
   });
 
   it('draws the loop without an image', () => {
@@ -242,24 +163,9 @@ describe('concept docs are the canonical Vision/Mission text', () => {
   });
 });
 
-describe('the READMEs carry the same axis as the concept docs', () => {
+describe('the READMEs stay true to the reference', () => {
   const en = readProse(README_EN);
   const ja = readProse(README_JA);
-
-  it('opens with the hero and the definition, each in its own language', () => {
-    expect(en, `${README_EN} must open with the en hero verbatim`).toContain(HERO_H1_EN);
-    expect(en, `${README_EN} must carry the en definition verbatim`).toContain(DEFINITION_EN);
-    expect(ja, `${README_JA} must open with the ja hero verbatim`).toContain(HERO_H1_JA);
-    expect(ja, `${README_JA} must carry the ja definition verbatim`).toContain(DEFINITION_JA);
-  });
-
-  it('keeps the axis as the Philosophy heading, in its own language', () => {
-    // The hero alone would let the retired line disappear from the READMEs
-    // entirely; #2493 demoted it to a heading rather than deleting it, and a
-    // README that opens with the hero but drops the axis has lost the method.
-    expect(en, `${README_EN} must name the axis verbatim`).toContain(AXIS_EN);
-    expect(ja, `${README_JA} must name the axis verbatim`).toContain(AXIS_JA);
-  });
 
   it.each([
     [README_EN, en],
@@ -268,80 +174,5 @@ describe('the READMEs carry the same axis as the concept docs', () => {
     const lowered = prose.toLowerCase();
     const found = BANNED_TERMS.filter((term) => lowered.includes(term.toLowerCase()));
     expect(found, `${relative} still uses retired wording`).toEqual([]);
-  });
-
-  it.each([
-    [README_EN, en],
-    [README_JA, ja],
-  ])('%s names the axis in the hero and again on the workflow section', (relative, prose) => {
-    // Two is the floor the issue set: the hero says it once, the workflow
-    // heading says it again. Fewer means one of the two was reverted.
-    const occurrences = prose.split('Vibe Engineering').length - 1;
-    expect(occurrences, `${relative} must name the axis at least twice`).toBeGreaterThanOrEqual(2);
-  });
-
-  it('keeps the same number of ## sections in both languages', () => {
-    expect(sectionCount(ja)).toBeGreaterThan(0);
-    expect(sectionCount(en)).toBe(sectionCount(ja));
-  });
-});
-
-describe('demo telops fit the storyboard validator', () => {
-  const storyboard = readDoc(STORYBOARD);
-
-  /** Read the limits out of the recorder rather than restating them here. */
-  function limitsFor(type: 'record' | 'card'): { jaChars: number; enWords: number } {
-    const match = storyboard.match(
-      new RegExp(`${type}:\\s*\\{\\s*jaChars:\\s*(\\d+),\\s*enWords:\\s*(\\d+)\\s*\\}`)
-    );
-    expect(match, `${STORYBOARD} must declare the ${type} telop limits`).not.toBeNull();
-    return { jaChars: Number(match![1]), enWords: Number(match![2]) };
-  }
-
-  /** Same counting rules as storyboard.ts: code points for ja, whitespace runs for en. */
-  const jaChars = (text: string) => [...text].length;
-  const enWords = (text: string) => (text.trim() === '' ? 0 : text.trim().split(/\s+/).length);
-
-  const telopRows = tableRows(readDoc(MESSAGING_DOC)).filter(
-    (row) => row.cells.length === 4 && /^(record|card)$/.test(row.cells[1])
-  );
-
-  it('lists a telop for every demo and scene type', () => {
-    // 4 LP demos x (card + record) + the 8 beats of the README hero (#2381).
-    expect(telopRows.length).toBe(16);
-  });
-
-  it('carries the README hero cut beat for beat', () => {
-    // The storyboard test pins the other direction (every telop in the YAML
-    // is in this document); this pins that the document has the hero at all,
-    // so a row cannot be dropped here and the YAML edited to match.
-    const hero = telopRows.filter((row) => row.cells[0] === 'hero');
-    expect(hero.map((row) => row.cells[1])).toEqual([
-      'card', 'record', 'record', 'record', 'record', 'record', 'record', 'card',
-    ]);
-    expect(hero.map((row) => row.cells[3])).toEqual([
-      'CommandMate',
-      'Switch repos from the tab bar.',
-      'Five agents in one worktree.',
-      'Delegate to the next session.',
-      'Open the file from the reply.',
-      'Approve from your phone.',
-      'Open files on your phone, too.',
-      'github.com/Kewton/CommandMate',
-    ]);
-  });
-
-  it.each([
-    ['record' as const],
-    ['card' as const],
-  ])('%s telops stay inside the declared limits', (type) => {
-    const limits = limitsFor(type);
-    const overLong = telopRows
-      .filter((row) => row.cells[1] === type)
-      .filter(
-        (row) => jaChars(row.cells[2]) > limits.jaChars || enWords(row.cells[3]) > limits.enWords
-      )
-      .map((row) => `${MESSAGING_DOC}:${row.line}`);
-    expect(overLong).toEqual([]);
   });
 });

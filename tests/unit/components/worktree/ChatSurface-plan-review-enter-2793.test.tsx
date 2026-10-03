@@ -112,7 +112,7 @@ describe('[#2793] Plan review の矢印パッドに Enter を出さない', () =
     for (const name of ['Up', 'Down', 'Escape']) {
       expect(within(actions()).getByRole('button', { name })).toBeInTheDocument();
     }
-    expect(within(actions()).getByTestId('plan-approve-key')).toBeInTheDocument();
+    expect(within(actions()).getByTestId('plan-review-approve')).toBeInTheDocument();
   });
 
   it('矢印パッド上の Enter キーも pane へ送らない', async () => {
@@ -145,7 +145,7 @@ describe('[#2793] Plan review 以外では Enter を残す', () => {
     for (const name of ['Left', 'Right', 'Enter', 'Escape']) {
       expect(within(actions()).getByRole('button', { name })).toBeInTheDocument();
     }
-    expect(screen.queryByTestId('plan-approve-keys')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('plan-review-controls')).not.toBeInTheDocument();
   });
 
   // 変異注入: Enter を隠しているのがフレームのフッタの読み取りであることを示す。
@@ -156,6 +156,6 @@ describe('[#2793] Plan review 以外では Enter を残す', () => {
     renderSurface({ frame: mutated });
 
     expect(within(actions()).getByRole('button', { name: 'Enter' })).toBeInTheDocument();
-    expect(screen.queryByTestId('plan-approve-keys')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('plan-review-controls')).not.toBeInTheDocument();
   });
 });

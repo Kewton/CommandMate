@@ -223,6 +223,90 @@ export function findClaudeChromeStart(lines: string[]): number {
  */
 export const CLAUDE_TRUST_DIALOG_PATTERN = /Yes, I trust this folder/m;
 
+/** The option row of the trust dialog's cursor: `❯` (or legacy `>`) after the dialog's left padding. */
+const CLAUDE_TRUST_CURSOR_ROW_PATTERN = /^\s*[>❯]\s+\S/;
+
+/** How far the cursor row may sit from the `Yes, I trust this folder` row (the dialog has two options). */
+const CLAUDE_TRUST_MAX_CURSOR_DISTANCE = 3;
+
+/**
+ * Keys that answer Claude Code's folder-trust dialog with "Yes", or null when
+ * no answerable dialog is on screen (Issue #3078).
+ *
+ * The dialog comes in two layouts, and Enter alone is only right for one:
+ *
+ *   - default Yes (Issue #201 era, `tests/unit/lib/claude-session.test.ts`):
+ *     ` ❯ 1. Yes, I trust this folder` / `   2. No, exit` — Enter confirms Yes.
+ *   - default No (2.1.259 `tests/fixtures/chat-dialog-card-2254/claude-trust-2-1-259.txt`,
+ *     2.1.287 with a permission allow-list
+ *     `tests/fixtures/claude-trust-dialog-3078/allowlist-default-no-2-1-287.txt`):
+ *     ` ❯ No, exit` / `   Yes, I trust this folder` — Enter EXITS Claude Code.
+ *
+ * So the answer is read off the screen: the distance from the cursor row to the
+ * Yes row becomes that many `Up`/`Down` presses, then `Enter`. Only the last
+ * dialog in the capture counts, and a dialog followed by Claude's input-box
+ * separator is history in the scrollback, not an open dialog.
+ *
+ * @param output - ANSI-stripped pane output
+ * @returns tmux key names ending in `Enter` (just `['Enter']` when the cursor is
+ *   already on Yes), or null when no open dialog / no readable cursor row
+ */
+export function resolveClaudeTrustDialogKeys(output: string): string[] | null {
+  const lines = output.split('\n');
+  const yesIndex = findOpenClaudeTrustYesRow(lines);
+  if (yesIndex === -1) return null;
+
+  for (let distance = 0; distance <= CLAUDE_TRUST_MAX_CURSOR_DISTANCE; distance++) {
+    for (const direction of distance === 0 ? [0] : [-1, 1]) {
+      const index = yesIndex + direction * distance;
+      if (index < 0 || index >= lines.length) continue;
+      if (!CLAUDE_TRUST_CURSOR_ROW_PATTERN.test(lines[index])) continue;
+      // Cursor above Yes → move Down; below → move Up.
+      const key = direction < 0 ? 'Down' : 'Up';
+      return [...Array<string>(distance).fill(key), 'Enter'];
+    }
+  }
+  return null;
+}
+
+/**
+ * Whether Claude Code's folder-trust dialog is the open screen (Issue #3078).
+ *
+ * The dialog's cursor row (` ❯ No, exit`) has the prompt glyph, so the start
+ * wait asks this before CLAUDE_PROMPT_PATTERN rather than reading the dialog as
+ * a ready prompt.
+ *
+ * @param output - ANSI-stripped pane output
+ */
+export function isClaudeTrustDialogOpen(output: string): boolean {
+  return findOpenClaudeTrustYesRow(output.split('\n')) !== -1;
+}
+
+/** `#{pane_current_command}` values of an interactive shell, with tmux's `-` login prefix removed. */
+const SHELL_PANE_COMMANDS: ReadonlySet<string> = new Set(['sh', 'bash', 'zsh', 'fish', 'dash', 'ksh', 'tcsh', 'csh']);
+
+/**
+ * Whether a pane's foreground command is a shell rather than an agent
+ * (Issue #3089). Claude Code shows up as `claude`, `node` or its version
+ * string (`2.1.287`), never as one of these, so a shell here after the agent
+ * was seen running means the agent has exited.
+ *
+ * @param command - `#{pane_current_command}` of the pane
+ */
+export function isShellPaneCommand(command: string): boolean {
+  return SHELL_PANE_COMMANDS.has(command.trim().replace(/^-/, ''));
+}
+
+/** Row of the last `Yes, I trust this folder`, or -1 when absent or already answered. */
+function findOpenClaudeTrustYesRow(lines: readonly string[]): number {
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (!CLAUDE_TRUST_DIALOG_PATTERN.test(lines[i])) continue;
+    // Claude's input box (separator rows) drawn below it: the dialog is scrollback.
+    return lines.slice(i + 1).some((line) => CLAUDE_SEPARATOR_PATTERN.test(line)) ? -1 : i;
+  }
+  return -1;
+}
+
 /**
  * Codex prompt pattern
  * T1.2: Improved to detect empty prompts as well
@@ -1545,12 +1629,22 @@ export const CLAUDE_MODEL_OVERLAY_FOOTER_PATTERN = /Enter\s+to\s+set\s+as\s+defa
  *   "Enter to set as default · s to use this session only · Esc to cancel"
  *     (/model command footer as of Claude Code v2.1.218 — Issue #1495)
  *
+ *   "←/→ to adjust · Enter to confirm · s for this session only · Esc to cancel"
+ *     (/effort slider footer as of Claude Code v2.1.257 — Issue #3052; before
+ *      2.1.257 it was "Enter to confirm · Esc to cancel")
+ *
+ * The /effort branch keys on "Enter to confirm · s for this session only" rather
+ * than "←/→ to adjust": the `s` hint is unique to the pickers (the trust dialog's
+ * "Enter to confirm · Esc to cancel" and approval dialogs never carry it), and
+ * keeping the match under the `Enter to` prefix leaves the pattern a single
+ * linear alternation. Linear, no nested quantifiers — ReDoS safe.
+ *
  * The "set as default" branch lets status-detector classify the `/model` overlay
  * as a Claude selection list (NavigationButtons + ESC hatch, hasActivePrompt=false)
  * once detectPrompt() no longer reports it as a prompt (see
  * CLAUDE_MODEL_OVERLAY_FOOTER_PATTERN).
  */
-export const CLAUDE_SELECTION_LIST_FOOTER = /Enter\s+to\s+(?:select\s+.*to\s+navigate|confirm\s+·\s+Esc|set\s+as\s+default)/;
+export const CLAUDE_SELECTION_LIST_FOOTER = /Enter\s+to\s+(?:select\s+.*to\s+navigate|confirm\s+·\s+(?:Esc|s\s+for\s+this\s+session\s+only)|set\s+as\s+default)/;
 
 /**
  * OpenCode TUI separator pattern (Issue #379)

@@ -107,6 +107,18 @@ async function runMiddleware(spec: RequestSpec = {}): Promise<{ type?: string; s
   return (await middleware(createRequest(spec) as never)) as { type?: string; status?: number };
 }
 
+/**
+ * Issue #3090: an unauthenticated screen request is answered with 401 and a
+ * same-origin refresh to /login, not a 3xx to an absolute URL.
+ */
+function expectLoginRefresh(result: unknown): void {
+  expect(result).toBeInstanceOf(Response);
+  const response = result as Response;
+  expect(response.status).toBe(401);
+  expect(response.headers.get('refresh')).toBe('0; url=/login');
+  expect(response.headers.get('location')).toBeNull();
+}
+
 describe('middleware ingress auth (Issue #2489)', () => {
   const originalEnv = { ...process.env };
 
@@ -155,7 +167,7 @@ describe('middleware ingress auth (Issue #2489)', () => {
 
     it('still redirects an unauthenticated browser request on the provider listener', async () => {
       const result = await runMiddleware({ pathname: '/', ingress: 'remote' });
-      expect(result).toEqual({ type: 'redirect', url: 'http://localhost:3000/login' });
+      expectLoginRefresh(result);
     });
 
     it('still answers 401 to an unauthenticated API request on the provider listener', async () => {
@@ -185,7 +197,7 @@ describe('middleware ingress auth (Issue #2489)', () => {
     it('demands a token from a request no listener stamped', async () => {
       // Fail-closed. A request that reached middleware without passing a
       // listener this process built cannot prove where it came from.
-      expect(await runMiddleware({ pathname: '/' })).toMatchObject({ type: 'redirect' });
+      expectLoginRefresh(await runMiddleware({ pathname: '/' }));
     });
 
     it('demands a token when the stamp is not exactly "local"', async () => {
@@ -195,7 +207,7 @@ describe('middleware ingress auth (Issue #2489)', () => {
           pathname: '/',
           clientHeaders: { 'x-cm-ingress': value },
         });
-        expect(result).toMatchObject({ type: 'redirect' });
+        expectLoginRefresh(result);
       }
     });
 
@@ -222,24 +234,18 @@ describe('middleware ingress auth (Issue #2489)', () => {
   describe('CM_AUTH_SCOPE=all and unset (default behaviour)', () => {
     it('authenticates the local listener under --auth all', async () => {
       process.env.CM_AUTH_SCOPE = 'all';
-      expect(await runMiddleware({ pathname: '/', ingress: 'local' })).toMatchObject({
-        type: 'redirect',
-      });
+      expectLoginRefresh(await runMiddleware({ pathname: '/', ingress: 'local' }));
     });
 
     it('authenticates the local listener when the scope is unset', async () => {
       delete process.env.CM_AUTH_SCOPE;
-      expect(await runMiddleware({ pathname: '/', ingress: 'local' })).toMatchObject({
-        type: 'redirect',
-      });
+      expectLoginRefresh(await runMiddleware({ pathname: '/', ingress: 'local' }));
     });
 
     it('authenticates the local listener when the scope is misspelt', async () => {
       // Fail-closed: only the exact string opens the door.
       process.env.CM_AUTH_SCOPE = 'remote_only';
-      expect(await runMiddleware({ pathname: '/', ingress: 'local' })).toMatchObject({
-        type: 'redirect',
-      });
+      expectLoginRefresh(await runMiddleware({ pathname: '/', ingress: 'local' }));
     });
 
     it('leaves an auth-less server untouched in every scope', async () => {

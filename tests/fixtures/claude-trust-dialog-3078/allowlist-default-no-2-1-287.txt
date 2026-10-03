@@ -1,0 +1,11 @@
+ Accessing workspace:
+ /Users/maenokota/share/work/github_kewton/commandmate-team-demo
+ Quick safety check: Is this a project you created or one you trust? (Like your own code, a well-known open source project, or work from your team). If not, take a moment to review what is in this folder first.
+ Claude Code will be able to read, edit, and execute files here.
+ ⚠ This folder pre-approves 36 tool permissions in .claude/settings.json:
+   Edit, Write, Bash(npm test:*), Bash(npm test), Bash(npm ci:*), Bash(npm ci), Bash(npm run:*), Bash(node:*), and 28 more
+ These will apply without asking. Only proceed if you trust this configuration.
+ Security guide
+ ❯ No, exit
+   Yes, I trust this folder
+ Enter to confirm · Esc to cancel

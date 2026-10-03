@@ -1093,6 +1093,17 @@ export interface PromptResponseResult {
     /** The approval that was answered (Issue #1898). Absent on the key paths. */
     decisionId?: string;
   };
+  /**
+   * Issue #3125: what was done on Command Code's plan review overlay. Present
+   * only when the answer went to that overlay.
+   */
+  planReview?: {
+    action: 'comment' | 'submit' | 'approve' | 'cancel';
+    comment: string | null;
+    phase: string;
+    pendingCommentsBefore: number;
+    approveChoice?: 'with-comments' | 'discard-comments';
+  };
 }
 
 /**
