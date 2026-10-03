@@ -33,6 +33,7 @@ import { spawn } from 'child_process';
 import type { VerificationGateTerminalStatus } from '@/lib/db';
 import type { TaskContractScope } from '@/lib/tasks/contract-parser';
 import { collectSkillReceiptOwnedPaths } from '@/lib/skills/receipt-owned-paths';
+import { isAgentStateUntrackedEntry } from '@/lib/skills/agent-state-paths';
 
 /**
  * Violations listed in `log_tail` before the rest are summarised as a count.
@@ -424,6 +425,8 @@ export interface ChangedPaths {
   paths: string[];
   /** Resolved merge-base commit, for the report. */
   mergeBase: string;
+  /** Agent-managed state files dropped from the change set (#3126), sorted. */
+  agentStateExcluded: string[];
 }
 
 /**
@@ -481,9 +484,17 @@ export async function collectChangedPaths(
   // agent's (#3092). Dropped from the working-tree side only; a committed Skill
   // file is still judged by the diff above.
   const skillOwned = collectSkillReceiptOwnedPaths(worktreePath);
-  const workingTree = parsePorcelainStatusEntries(status.stdout).filter(
-    (entry) => !isSkillInstalledUntrackedEntry(entry, skillOwned)
-  );
+  // Likewise the state files an agent CLI writes for itself (#3126), by an
+  // explicit declaration of paths; they are reported, not silently dropped.
+  const agentStateExcluded = new Set<string>();
+  const workingTree = parsePorcelainStatusEntries(status.stdout).filter((entry) => {
+    if (isSkillInstalledUntrackedEntry(entry, skillOwned)) return false;
+    if (isAgentStateUntrackedEntry(entry)) {
+      entry.paths.forEach((path) => agentStateExcluded.add(path));
+      return false;
+    }
+    return true;
+  });
 
   // Both sides are filtered, not just the working tree: an orchestrator may
   // also have committed the contract as a setup commit (#1580).
@@ -492,7 +503,11 @@ export async function collectChangedPaths(
       (path) => !isContractPath(path)
     )
   );
-  return { paths: [...paths].sort(), mergeBase: base };
+  return {
+    paths: [...paths].sort(),
+    mergeBase: base,
+    agentStateExcluded: [...agentStateExcluded].sort(),
+  };
 }
 
 // =============================================================================
@@ -538,6 +553,18 @@ function formatAdmitted(admitted: ScopeAdmission[]): string[] {
     // Worded `(+N more)` rather than the violations' `... and N more`: the two
     // sections are capped independently and a reader scanning a truncated
     // report should not have to work out which count belongs to which list.
+    ...(remainder > 0 ? [`  ... (+${remainder} more)`] : []),
+  ];
+}
+
+/** The `excluded:` section naming agent-managed state files left out (#3126). */
+function formatAgentStateExcluded(excluded: string[]): string[] {
+  if (excluded.length === 0) return [];
+  const listed = excluded.slice(0, MAX_REPORTED_VIOLATIONS);
+  const remainder = excluded.length - listed.length;
+  return [
+    'excluded (agent-managed state files, not counted as change):',
+    ...listed.map((path) => `  ~ ${path}`),
     ...(remainder > 0 ? [`  ... (+${remainder} more)`] : []),
   ];
 }
@@ -637,6 +664,7 @@ export async function evaluateScope(
     `allow: ${formatPatterns(scope.allow)}`,
     `deny: ${formatPatterns(scope.deny)}`,
     ...formatAdmitted(admitted),
+    ...formatAgentStateExcluded(changed.agentStateExcluded),
   ].join('\n');
 
   if (violations.length === 0) {

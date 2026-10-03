@@ -87,6 +87,12 @@ describe('decideReadiness', () => {
     expect(decision.nextSteps).toEqual(['`/release` を実行する']);
   });
 
+  it('GO for a merged Issue whose latest wait log is exit 20 (#3119)', () => {
+    const decision = decideReadiness(facts({ dispatched: [row({ verifyExit: 20 })] }));
+    expect(decision.verdict).toBe('go');
+    expect(decision.reasons.join('\n')).not.toContain('未完了');
+  });
+
   it('GO on a day nothing was dispatched', () => {
     const decision = decideReadiness(facts({ dispatchStatus: null, dispatched: [], mergedToday: [] }));
     expect(decision.verdict).toBe('go');
@@ -152,10 +158,14 @@ describe('decideReadiness', () => {
       expect(decision.reasons[0]).toContain('未マージ');
     });
 
-    it('verify failed', () => {
-      const decision = decideReadiness(facts({ dispatched: [row({ verifyExit: 20 })] }));
+    it('an unmerged PR still holds when verify failed (negative control)', () => {
+      const decision = decideReadiness(
+        facts({
+          dispatched: [row({ verifyExit: 20, merged: false, pr: { number: 3060, url: '', state: 'OPEN' } })],
+        })
+      );
       expect(decision.verdict).toBe('hold');
-      expect(decision.reasons[0]).toContain('verify 不合格 exit 20');
+      expect(decision.reasons[0]).toContain('未マージ');
     });
 
     it('there is a carry-over', () => {
