@@ -1466,6 +1466,120 @@ interface ResponseCheckContext {
 }
 
 /**
+ * What a tick goes on with once its frame has been read as a finished turn. The
+ * three are computed in {@link extractCompletedTurn}, where the comments on each
+ * say why.
+ */
+interface CompletedTurn {
+  result: ExtractionResult;
+  isFullScreenTui: boolean;
+  lineCountIsCursor: boolean;
+}
+
+/**
+ * Read the frame this tick captured: is there a finished turn on it that the
+ * cursor has not already counted?
+ *
+ * The part of {@link checkForResponse} between the capture and the prompt
+ * check, split out as it was (Issue #3213). It starts on the line after the
+ * capture's `await` and holds no `await` of its own, so it moved as a
+ * synchronous function and the call adds no yield. The part above it — the
+ * session check through the capture — has four, and stays where it was: a
+ * function holding them would have to be awaited, and that yield would fall
+ * between the capture and everything this tick does with it.
+ *
+ * Not a pure read. It feeds the fault notifier and the Layer-2 accumulator on
+ * every tick, and on an unfinished frame it may mark pending prompts answered.
+ *
+ * Every `return false` is the tick's own result; the caller returns it as it is.
+ *
+ * @param ctx - What this tick is keyed by
+ * @param output - The capture this tick made
+ * @param sessionState - The session state row read before the capture, if any
+ * @param lastCapturedLine - Its cursor, 0 when there is none
+ * @returns What the tick goes on with, or `false` when the tick ends here
+ */
+function extractCompletedTurn(
+  ctx: ResponseCheckContext,
+  output: string,
+  sessionState: ReturnType<typeof getSessionState>,
+  lastCapturedLine: number
+): CompletedTurn | false {
+  const { db, worktreeId, cliToolId, instanceId, resolvedInstanceId, pollerKey } = ctx;
+
+  // Issue #2000: the frame is in hand, so this is the cheapest place to ask
+  // whether the model API has stalled the session. Level in, edge out — see
+  // the helper.
+  observeUpstreamFaultForPush(worktreeId, cliToolId, instanceId, output);
+
+  // Layer 2: Accumulate TUI content for full-screen TUI tools, so a turn that
+  // outgrows the alternate-screen pane keeps the head that has scrolled away.
+  if (cliToolId === 'opencode' || cliToolId === 'copilot') {
+    // Issue #1911: opencode is accumulated from the CURRENT TURN'S REGION
+    // rather than the whole frame. Feeding the raw pane seeded the accumulator
+    // with the previous turn's transcript, the echoed prompt and the bottom
+    // chrome on the very first poll, so the accumulated content could never be
+    // used as a response source without re-introducing defect 1.
+    const accumulatorSource = cliToolId === 'opencode' ? sliceOpenCodeTurn(output) : output;
+    accumulateTuiContent(pollerKey, accumulatorSource, cliToolId);
+  }
+
+  // Extract response
+  const result = extractResponse(output, lastCapturedLine, cliToolId, CACHE_MAX_CAPTURE_LINES);
+
+  if (!result || !result.isComplete) {
+    // DR-004 windowing: Only check tail lines
+    const { thinkingPattern } = getCliToolPatterns(cliToolId);
+    const cleanOutput = stripAnsi(output);
+    const tailLines = cleanOutput.split('\n').slice(-THINKING_TAIL_LINE_COUNT).join('\n');
+    if (thinkingPattern.test(tailLines)) {
+      const answeredCount = markPendingPromptsAsAnswered(
+        db,
+        worktreeId,
+        cliToolId,
+        resolvedInstanceId,
+        broadcastPromptSweptToAnswered(worktreeId),
+      );
+      if (answeredCount > 0) {
+        logger.info('marked-answeredcount-pending');
+      }
+    }
+    return false;
+  }
+
+  const isFullScreenTui = cliToolId === 'opencode' || cliToolId === 'copilot';
+
+  // Issue #1268: line-count bookkeeping is only meaningful for tools that keep
+  // scrollback. Alternate-screen tools (claude since v2, opencode, copilot)
+  // always capture exactly pane_height lines, so lastCapturedLine saturates at
+  // the pane height on the first save and every later check would see
+  // `lineCount <= lastCapturedLine` and drop the response forever — leaving
+  // History stuck on "Waiting for response..." while the terminal shows the
+  // reply. Those tools dedup on response content instead (see below).
+  //
+  // Issue #1670: the scrollback tools reach the SAME dead end from the other
+  // side. Their buffer does grow — but only until it outgrows the capture
+  // window, after which the capture is clipped, the count is pinned at the
+  // window size, and the cursor can never be overtaken again. #1268 fixed
+  // saturation at pane height; this is saturation at the capture window, and it
+  // disables the cursor for exactly as long as the clipping lasts (a session
+  // restart or a cleared pane un-saturates it and the cursor comes back).
+  const lineCountIsCursor = !usesAlternateScreen(cliToolId) && !result.captureWindowSaturated;
+
+  // Duplicate prevention
+  if (lineCountIsCursor && !result.bufferReset && result.lineCount === lastCapturedLine && !sessionState?.inProgressMessageId) {
+    return false;
+  }
+
+  if (lineCountIsCursor && !result.bufferReset && result.lineCount <= lastCapturedLine) {
+    logger.info('already-saved-up-to-line-lastcapturedlin');
+    return false;
+  }
+
+  return { result, isFullScreenTui, lineCountIsCursor };
+}
+
+/**
  * Save a live prompt as a prompt message, and raise what follows from it: the
  * task event, the push notification and the waiting episode.
  *
@@ -1761,7 +1875,8 @@ async function recheckDuplicateResponse(
 
 /**
  * What a tick decided to do with the pane's copy of a finished reply. The three
- * are computed in {@link checkForResponse}, where the comments on each say why.
+ * are computed in {@link recordCompletedResponse}, where the comments on each
+ * say why.
  */
 interface ScrapedHistoryDecision {
   structuredHistoryLive: boolean;
@@ -1775,9 +1890,10 @@ interface ScrapedHistoryDecision {
  * The three-way branch on the save path of {@link checkForResponse}, split out
  * as it was (Issue #3213). Only the branch moved. What decides it — the
  * structured-history gate and the conversation log, both awaited — stays in
- * `checkForResponse`: an `await` on a function holding them would put a yield
- * between the writes here and the ones that follow the call (the waiting edge,
- * the push, the cursor), and `onRelayTurnCompleted` starts work that could then
+ * the caller, {@link recordCompletedResponse}, together with the writes that
+ * follow the call (the waiting edge, the push, the cursor): an `await` on a
+ * function holding the first without the second would put a yield between the
+ * writes here and those, and `onRelayTurnCompleted` starts work that could then
  * run in between.
  *
  * @param ctx - What this tick is keyed by
@@ -1874,6 +1990,175 @@ function recordOrHoldScrapedResponse(
 }
 
 /**
+ * Record a finished reply and close the tick: the structured-history gate, the
+ * conversation log, the prompt sweep, the scrape, the waiting edge, the push
+ * and the cursor.
+ *
+ * The rest of {@link checkForResponse} from the structured-history gate to its
+ * last return, split out as it was (Issue #3213). One function, tail included,
+ * on purpose: the gate and the conversation log are awaited, and everything
+ * after them, from the prompt sweep to `stopPolling`, runs without a yield. Cut
+ * anywhere short of the last return and the caller's `await` would put one
+ * inside that run. Taken whole, the one `await` the split adds comes after
+ * every write of the tick, as in {@link recheckDuplicateResponse}. Both returns
+ * are the tick's own result.
+ *
+ * @param ctx - What this tick is keyed by
+ * @param turn - The finished turn this tick read off the frame
+ * @param claudeMetadata - Claude's parsed metadata, undefined for every other tool
+ * @param cleanedResponse - The cleaned response
+ * @param delegation - What the geometry-delegation probe answered for this tick
+ * @returns What `checkForResponse` returns for this tick
+ */
+async function recordCompletedResponse(
+  ctx: ResponseCheckContext,
+  turn: CompletedTurn,
+  claudeMetadata: ReturnType<typeof parseClaudeOutput> | undefined,
+  cleanedResponse: string,
+  delegation: Awaited<ReturnType<typeof probeGeometryDelegation>>
+): Promise<boolean> {
+  const { db, worktree, worktreeId, cliToolId, instanceId, resolvedInstanceId, pollerKey } = ctx;
+  const { result, isFullScreenTui, lineCountIsCursor } = turn;
+
+  // Issue #2041: opencode's own server is publishing this reply as Markdown
+  // over the SSE stream `lib/hooks/sources/opencode/history` is writing from,
+  // so the scrape below would be a second copy of the same turn — the agent's
+  // text once as it wrote it and once as its TUI drew it, 200 columns wide.
+  //
+  // Read here rather than at the top of the function on purpose: everything
+  // above this line is bookkeeping the event stream has no second producer for
+  // (the prompt row, Auto-Yes, the waiting episode, the push fan-out), and the
+  // liveness answer is only allowed to suppress the two calls that RECORD THE
+  // REPLY. See `./structured-history-gate` for the whole argument.
+  //
+  // Issue #2121 adds the second shape. Claude has no stream to be live on; it
+  // has a transcript file, and this is the moment to read it — the turn is
+  // finished (everything above this line established that) and the row is
+  // about to be written. `captureStructuredHistoryTurn` writes the agent's own
+  // Markdown and answers true, or answers false and leaves the scrape below to
+  // be the only record. `||` and not `&&`: the two are different tools'
+  // answers to the same question, and each one is false for the other's tool.
+  //
+  // Issue #2436 adds the third answer. `captureReport.outcome` distinguishes
+  // "the agent has not closed this turn yet" from "there is nothing to read
+  // here", which the boolean could not: both arrived as `false`, and `false`
+  // meant "save the pane's copy". See {@link StructuredHistoryCaptureOutcome}.
+  const captureReport: StructuredHistoryCaptureReport = {};
+  const structuredHistoryLive =
+    isStructuredHistoryWriterLive(worktreeId, cliToolId, instanceId) ||
+    (await captureStructuredHistoryTurn(
+      worktreeId,
+      cliToolId,
+      instanceId,
+      {
+        worktreePath: worktree.path,
+        transcriptPathHint: claudeMetadata?.logFilePath ?? null,
+      },
+      captureReport
+    ));
+
+  // Issue #2399: remember which way that went, because the next tick may not
+  // get here. A `false` is the reader saying "not yet, or not mine", and the
+  // dedup guard above turns every following poll of the same static frame into
+  // a return — so unless the fact is written down now, the ask never happens
+  // again. A `true` settles it: the turn is recorded and there is nothing left
+  // to re-ask about.
+  markOrSettleStructuredHistoryRecheck(pollerKey, structuredHistoryLive);
+
+  // Issue #2317 Phase D: the scrape is dropped while the geometry is
+  // delegated, and the transcript capture above is what makes that safe.
+  //
+  // ORDER IS LOAD-BEARING. The delegation test is folded in AFTER the two
+  // calls above rather than short-circuiting them: `captureStructuredHistoryTurn`
+  // is a WRITE, not a query — it is the moment claude's own transcript becomes
+  // a History row — so an `||` that put the delegation first would suppress
+  // the scrape and the real reply together, and the turn would vanish. Read as
+  // it stands: record the turn from the agent's own file, then drop the pane's
+  // copy of it, which at 44 rows is a fraction of the answer hard-wrapped at
+  // the reader's terminal width.
+  //
+  // When the transcript capture answers false (an unreadable or absent file)
+  // the turn goes UNRECORDED for as long as the delegation lasts. That is the
+  // deliberate trade: a missing row is recoverable, a truncated reply saved as
+  // the agent's answer is not.
+  const suppressScrapedHistory = structuredHistoryLive || delegation.delegated;
+
+  // Issue #2436: not suppressed — HELD. The reader has read the transcript,
+  // found the newest turn still open and said so, which means the agent's own
+  // Markdown for this turn is on its way. Writing the pane's copy now is what
+  // put a 234,323-character dump of prompt echo, intermediate output and
+  // footer into History beside the real answer, and #2399 explicitly accepted
+  // that trade because the boolean it had could not tell "not yet" from
+  // "never". It can now.
+  //
+  // Everything else this tick does still happens: the cursor advances, the
+  // prompts are marked answered, the waiting episode closes, the push goes
+  // out. Only the two writes that RECORD THE REPLY wait.
+  const holdScrapedHistory = !suppressScrapedHistory && captureReport.outcome === 'not_yet_closed';
+
+  // Create Markdown log file for the conversation pair
+  if (cleanedResponse && !suppressScrapedHistory && !holdScrapedHistory) {
+    await recordClaudeConversation(db, worktreeId, cleanedResponse, cliToolId);
+  }
+
+  // Mark any pending prompts as answered
+  const answeredCount = markPendingPromptsAsAnswered(
+    db,
+    worktreeId,
+    cliToolId,
+    resolvedInstanceId,
+    broadcastPromptSweptToAnswered(worktreeId),
+  );
+  if (answeredCount > 0) {
+    logger.info('marked-answeredcount-pending');
+  }
+
+  // Race condition prevention: re-check session state before saving.
+  // Issue #1268: skipped for alternate-screen tools for the same reason as the
+  // dedup gates above — their line count never grows past the pane height.
+  const currentSessionState = getSessionState(db, worktreeId, resolvedInstanceId);
+  if (lineCountIsCursor && currentSessionState && result.lineCount <= currentSessionState.lastCapturedLine) {
+    logger.info('race-condition-detected-skipping-save-re');
+    return false;
+  }
+
+  recordOrHoldScrapedResponse(ctx, cleanedResponse, claudeMetadata, {
+    structuredHistoryLive,
+    suppressScrapedHistory,
+    holdScrapedHistory,
+  });
+
+  // Issue #1790: the agent has just produced a reply, so whatever it was
+  // waiting for is over. Closing the episode here is what makes a *second*
+  // prompt in the same session notify again: without it a wait opened by the
+  // prompt branch above could stay open until a browser next probes the status
+  // API, and every later prompt would be folded into that stale episode and
+  // silently deduped. Nothing to close is a no-op, and no notification is
+  // raised for a closing edge.
+  observeWaitingEdge({ worktreeId, cliToolId, instanceId, waiting: false });
+
+  // Web Push fan-out (Issue #1125): session completed (running → idle).
+  // Fire-and-forget — push is advisory and must never block/break the poller.
+  void notifyPushSubscribers({
+    worktreeId,
+    worktreeName: worktree.name,
+    kind: 'completion',
+    agentName: resolvedInstanceId,
+    excerpt: cleanedResponse,
+  }).catch(() => {});
+
+  // Update session state
+  updateSessionState(db, worktreeId, cliToolId, result.lineCount, resolvedInstanceId);
+
+  // For full-screen TUIs, stop polling after saving the response.
+  if (isFullScreenTui) {
+    stopPolling(worktreeId, cliToolId, instanceId);
+  }
+
+  return true;
+}
+
+/**
  * Check for CLI tool response once
  *
  * Issue #868: Optionally scoped to a specific agent instance. The instanceId
@@ -1917,6 +2202,17 @@ export async function checkForResponse(
     }
 
     const pollerKey = getPollerKey(worktreeId, cliToolId, instanceId);
+
+    // Issue #3213: what the steps split out of this function are keyed by.
+    const ctx: ResponseCheckContext = {
+      db,
+      worktree,
+      worktreeId,
+      cliToolId,
+      instanceId,
+      resolvedInstanceId,
+      pollerKey,
+    };
 
     // Issue #2436: a scrape held by an earlier tick, whose transcript has now
     // had its whole budget to close. Ahead of everything below because most
@@ -1966,74 +2262,11 @@ export async function checkForResponse(
     // (Issue #1670) — a literal here would silently decouple the two.
     const output = await captureSessionOutput(worktreeId, cliToolId, CACHE_MAX_CAPTURE_LINES, instanceId);
 
-    // Issue #2000: the frame is in hand, so this is the cheapest place to ask
-    // whether the model API has stalled the session. Level in, edge out — see
-    // the helper.
-    observeUpstreamFaultForPush(worktreeId, cliToolId, instanceId, output);
-
-    // Layer 2: Accumulate TUI content for full-screen TUI tools, so a turn that
-    // outgrows the alternate-screen pane keeps the head that has scrolled away.
-    if (cliToolId === 'opencode' || cliToolId === 'copilot') {
-      // Issue #1911: opencode is accumulated from the CURRENT TURN'S REGION
-      // rather than the whole frame. Feeding the raw pane seeded the accumulator
-      // with the previous turn's transcript, the echoed prompt and the bottom
-      // chrome on the very first poll, so the accumulated content could never be
-      // used as a response source without re-introducing defect 1.
-      const accumulatorSource = cliToolId === 'opencode' ? sliceOpenCodeTurn(output) : output;
-      accumulateTuiContent(pollerKey, accumulatorSource, cliToolId);
-    }
-
-    // Extract response
-    const result = extractResponse(output, lastCapturedLine, cliToolId, CACHE_MAX_CAPTURE_LINES);
-
-    if (!result || !result.isComplete) {
-      // DR-004 windowing: Only check tail lines
-      const { thinkingPattern } = getCliToolPatterns(cliToolId);
-      const cleanOutput = stripAnsi(output);
-      const tailLines = cleanOutput.split('\n').slice(-THINKING_TAIL_LINE_COUNT).join('\n');
-      if (thinkingPattern.test(tailLines)) {
-        const answeredCount = markPendingPromptsAsAnswered(
-          db,
-          worktreeId,
-          cliToolId,
-          resolvedInstanceId,
-          broadcastPromptSweptToAnswered(worktreeId),
-        );
-        if (answeredCount > 0) {
-          logger.info('marked-answeredcount-pending');
-        }
-      }
+    const turn = extractCompletedTurn(ctx, output, sessionState, lastCapturedLine);
+    if (!turn) {
       return false;
     }
-
-    const isFullScreenTui = cliToolId === 'opencode' || cliToolId === 'copilot';
-
-    // Issue #1268: line-count bookkeeping is only meaningful for tools that keep
-    // scrollback. Alternate-screen tools (claude since v2, opencode, copilot)
-    // always capture exactly pane_height lines, so lastCapturedLine saturates at
-    // the pane height on the first save and every later check would see
-    // `lineCount <= lastCapturedLine` and drop the response forever — leaving
-    // History stuck on "Waiting for response..." while the terminal shows the
-    // reply. Those tools dedup on response content instead (see below).
-    //
-    // Issue #1670: the scrollback tools reach the SAME dead end from the other
-    // side. Their buffer does grow — but only until it outgrows the capture
-    // window, after which the capture is clipped, the count is pinned at the
-    // window size, and the cursor can never be overtaken again. #1268 fixed
-    // saturation at pane height; this is saturation at the capture window, and it
-    // disables the cursor for exactly as long as the clipping lasts (a session
-    // restart or a cleared pane un-saturates it and the cursor comes back).
-    const lineCountIsCursor = !usesAlternateScreen(cliToolId) && !result.captureWindowSaturated;
-
-    // Duplicate prevention
-    if (lineCountIsCursor && !result.bufferReset && result.lineCount === lastCapturedLine && !sessionState?.inProgressMessageId) {
-      return false;
-    }
-
-    if (lineCountIsCursor && !result.bufferReset && result.lineCount <= lastCapturedLine) {
-      logger.info('already-saved-up-to-line-lastcapturedlin');
-      return false;
-    }
+    const { result, isFullScreenTui, lineCountIsCursor } = turn;
 
     // Response is complete! Check if it's a prompt.
     const promptDetection = result.promptDetection ?? detectPromptWithOptions(result.response, cliToolId);
@@ -2055,17 +2288,6 @@ export async function checkForResponse(
     // has lost the position `detectDialog` judges by.
     const promptIsLive =
       promptDetection.isPrompt && isNumberedDialogVouched(cliToolId, promptDetection, output);
-
-    // Issue #3213: what the steps split out of this function are keyed by.
-    const ctx: ResponseCheckContext = {
-      db,
-      worktree,
-      worktreeId,
-      cliToolId,
-      instanceId,
-      resolvedInstanceId,
-      pollerKey,
-    };
 
     if (promptIsLive) {
       return savePromptMessage(ctx, promptDetection, result, isFullScreenTui);
@@ -2108,142 +2330,9 @@ export async function checkForResponse(
       }
     }
 
-    // Issue #2041: opencode's own server is publishing this reply as Markdown
-    // over the SSE stream `lib/hooks/sources/opencode/history` is writing from,
-    // so the scrape below would be a second copy of the same turn — the agent's
-    // text once as it wrote it and once as its TUI drew it, 200 columns wide.
-    //
-    // Read here rather than at the top of the function on purpose: everything
-    // above this line is bookkeeping the event stream has no second producer for
-    // (the prompt row, Auto-Yes, the waiting episode, the push fan-out), and the
-    // liveness answer is only allowed to suppress the two calls that RECORD THE
-    // REPLY. See `./structured-history-gate` for the whole argument.
-    //
-    // Issue #2121 adds the second shape. Claude has no stream to be live on; it
-    // has a transcript file, and this is the moment to read it — the turn is
-    // finished (everything above this line established that) and the row is
-    // about to be written. `captureStructuredHistoryTurn` writes the agent's own
-    // Markdown and answers true, or answers false and leaves the scrape below to
-    // be the only record. `||` and not `&&`: the two are different tools'
-    // answers to the same question, and each one is false for the other's tool.
-    //
-    // Issue #2436 adds the third answer. `captureReport.outcome` distinguishes
-    // "the agent has not closed this turn yet" from "there is nothing to read
-    // here", which the boolean could not: both arrived as `false`, and `false`
-    // meant "save the pane's copy". See {@link StructuredHistoryCaptureOutcome}.
-    const captureReport: StructuredHistoryCaptureReport = {};
-    const structuredHistoryLive =
-      isStructuredHistoryWriterLive(worktreeId, cliToolId, instanceId) ||
-      (await captureStructuredHistoryTurn(
-        worktreeId,
-        cliToolId,
-        instanceId,
-        {
-          worktreePath: worktree.path,
-          transcriptPathHint: claudeMetadata?.logFilePath ?? null,
-        },
-        captureReport
-      ));
-
-    // Issue #2399: remember which way that went, because the next tick may not
-    // get here. A `false` is the reader saying "not yet, or not mine", and the
-    // dedup guard above turns every following poll of the same static frame into
-    // a return — so unless the fact is written down now, the ask never happens
-    // again. A `true` settles it: the turn is recorded and there is nothing left
-    // to re-ask about.
-    markOrSettleStructuredHistoryRecheck(pollerKey, structuredHistoryLive);
-
-    // Issue #2317 Phase D: the scrape is dropped while the geometry is
-    // delegated, and the transcript capture above is what makes that safe.
-    //
-    // ORDER IS LOAD-BEARING. The delegation test is folded in AFTER the two
-    // calls above rather than short-circuiting them: `captureStructuredHistoryTurn`
-    // is a WRITE, not a query — it is the moment claude's own transcript becomes
-    // a History row — so an `||` that put the delegation first would suppress
-    // the scrape and the real reply together, and the turn would vanish. Read as
-    // it stands: record the turn from the agent's own file, then drop the pane's
-    // copy of it, which at 44 rows is a fraction of the answer hard-wrapped at
-    // the reader's terminal width.
-    //
-    // When the transcript capture answers false (an unreadable or absent file)
-    // the turn goes UNRECORDED for as long as the delegation lasts. That is the
-    // deliberate trade: a missing row is recoverable, a truncated reply saved as
-    // the agent's answer is not.
-    const suppressScrapedHistory = structuredHistoryLive || delegation.delegated;
-
-    // Issue #2436: not suppressed — HELD. The reader has read the transcript,
-    // found the newest turn still open and said so, which means the agent's own
-    // Markdown for this turn is on its way. Writing the pane's copy now is what
-    // put a 234,323-character dump of prompt echo, intermediate output and
-    // footer into History beside the real answer, and #2399 explicitly accepted
-    // that trade because the boolean it had could not tell "not yet" from
-    // "never". It can now.
-    //
-    // Everything else this tick does still happens: the cursor advances, the
-    // prompts are marked answered, the waiting episode closes, the push goes
-    // out. Only the two writes that RECORD THE REPLY wait.
-    const holdScrapedHistory = !suppressScrapedHistory && captureReport.outcome === 'not_yet_closed';
-
-    // Create Markdown log file for the conversation pair
-    if (cleanedResponse && !suppressScrapedHistory && !holdScrapedHistory) {
-      await recordClaudeConversation(db, worktreeId, cleanedResponse, cliToolId);
-    }
-
-    // Mark any pending prompts as answered
-    const answeredCount = markPendingPromptsAsAnswered(
-      db,
-      worktreeId,
-      cliToolId,
-      resolvedInstanceId,
-      broadcastPromptSweptToAnswered(worktreeId),
-    );
-    if (answeredCount > 0) {
-      logger.info('marked-answeredcount-pending');
-    }
-
-    // Race condition prevention: re-check session state before saving.
-    // Issue #1268: skipped for alternate-screen tools for the same reason as the
-    // dedup gates above — their line count never grows past the pane height.
-    const currentSessionState = getSessionState(db, worktreeId, resolvedInstanceId);
-    if (lineCountIsCursor && currentSessionState && result.lineCount <= currentSessionState.lastCapturedLine) {
-      logger.info('race-condition-detected-skipping-save-re');
-      return false;
-    }
-
-    recordOrHoldScrapedResponse(ctx, cleanedResponse, claudeMetadata, {
-      structuredHistoryLive,
-      suppressScrapedHistory,
-      holdScrapedHistory,
-    });
-
-    // Issue #1790: the agent has just produced a reply, so whatever it was
-    // waiting for is over. Closing the episode here is what makes a *second*
-    // prompt in the same session notify again: without it a wait opened by the
-    // prompt branch above could stay open until a browser next probes the status
-    // API, and every later prompt would be folded into that stale episode and
-    // silently deduped. Nothing to close is a no-op, and no notification is
-    // raised for a closing edge.
-    observeWaitingEdge({ worktreeId, cliToolId, instanceId, waiting: false });
-
-    // Web Push fan-out (Issue #1125): session completed (running → idle).
-    // Fire-and-forget — push is advisory and must never block/break the poller.
-    void notifyPushSubscribers({
-      worktreeId,
-      worktreeName: worktree.name,
-      kind: 'completion',
-      agentName: resolvedInstanceId,
-      excerpt: cleanedResponse,
-    }).catch(() => {});
-
-    // Update session state
-    updateSessionState(db, worktreeId, cliToolId, result.lineCount, resolvedInstanceId);
-
-    // For full-screen TUIs, stop polling after saving the response.
-    if (isFullScreenTui) {
-      stopPolling(worktreeId, cliToolId, instanceId);
-    }
-
-    return true;
+    // The rest of the tick, to its last return. `await` for the same reason as
+    // above.
+    return await recordCompletedResponse(ctx, turn, claudeMetadata, cleanedResponse, delegation);
   } catch (error: unknown) {
     logger.error('response:check-failed', { error: error instanceof Error ? error.message : String(error) });
     return false;
