@@ -75,6 +75,7 @@ import {
 import { normalizeTuiFrameForDetection } from '../../tui-detection-frame';
 import { findNumberedOptionBlock } from '../dialog-block';
 import type { PromptDetectionResult } from '../../types';
+import { truncateRawContent } from '../../truncate-raw-content';
 
 /**
  * How many non-blank rows above option 1 may be searched for the question.
@@ -112,22 +113,6 @@ const RULE_ROW_PATTERN = /^\s*─{3,}\s*$/;
 
 /** A row that asks something — the shape the question row takes on every measured dialog. */
 const QUESTION_ROW_PATTERN = /[?？]\s*$/;
-
-/**
- * The same tail limits `prompt-detector.ts` applies to `rawContent`
- * (`RAW_CONTENT_MAX_LINES` / `RAW_CONTENT_MAX_CHARS`), restated because that
- * helper is private to it. A prompt row stores this text as its message body,
- * so an unbounded 1000-row pane must not go in.
- */
-const RAW_CONTENT_MAX_LINES = 200;
-const RAW_CONTENT_MAX_CHARS = 5000;
-
-function truncateRawContent(content: string): string {
-  const lines = content.split('\n');
-  const tail = lines.length > RAW_CONTENT_MAX_LINES ? lines.slice(-RAW_CONTENT_MAX_LINES) : lines;
-  const joined = tail.join('\n');
-  return joined.length > RAW_CONTENT_MAX_CHARS ? joined.slice(-RAW_CONTENT_MAX_CHARS) : joined;
-}
 
 /** What {@link readAntigravityNumberedDialog} found on a frame. */
 export interface AntigravityNumberedDialog {
