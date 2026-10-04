@@ -189,3 +189,30 @@ describe('release-report main with a runSuffix (#3045)', () => {
     expect(html).not.toContain('codex (gpt)');
   });
 });
+
+describe('release-report main open Issues (#3173)', () => {
+  it('lists catalog-drift Issues and shows a multi-label Issue once', async () => {
+    const item = (number: number, labels: string[]) => ({
+      number,
+      title: `issue ${number}`,
+      url: `https://github.com/o/r/issues/${number}`,
+      labels: labels.map((name) => ({ name })),
+    });
+    const byLabel: Record<string, unknown[]> = {
+      'agent-health': [item(4001, ['agent-health']), item(4004, ['agent-health', 'catalog-drift'])],
+      'catalog-drift': [item(4002, ['catalog-drift']), item(4004, ['agent-health', 'catalog-drift'])],
+      metrics: [item(4003, ['metrics'])],
+    };
+    const exec: Exec = (command, args) => {
+      if (command === 'gh' && args[0] === 'issue' && args[1] === 'list') {
+        const label = args[args.indexOf('--label') + 1];
+        return { status: 0, stdout: JSON.stringify(byLabel[label] ?? []) };
+      }
+      return { status: null, stdout: '' };
+    };
+    const { code, html } = await run(['--no-audit'], exec);
+    expect(code).toBe(0);
+    for (const n of [4001, 4002, 4003, 4004]) expect(html).toContain(`#${n}`);
+    expect(html.split('issues/4004"').length - 1).toBe(1);
+  });
+});
