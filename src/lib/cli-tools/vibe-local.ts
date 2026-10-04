@@ -12,7 +12,6 @@ import { BaseCLITool } from './base';
 import { OLLAMA_MODEL_PATTERN, isValidVibeLocalContextWindow, type CLIToolType } from './types';
 import {
   hasSession,
-  createSession,
   sendKeys,
   sendSpecialKey,
   killSession,
@@ -23,12 +22,10 @@ import { getDbInstance } from '../db/db-instance';
 import { getWorktreeById } from '../db';
 import { createLogger } from '@/lib/logger';
 import {
-  TUI_SESSION_CREATE_WAIT_MS,
   TUI_INTERRUPT_SETTLE_MS,
   TUI_EXIT_WAIT_MS,
   VIBE_LOCAL_DOUBLE_ENTER_WAIT_MS,
 } from '@/config/cli-tool-timing-config';
-import { missingToolError } from './install-hints';
 import { beginAgentSession } from '@/lib/session/agent-session-lifecycle';
 import { withLaunchScreenCleared } from '@/lib/session/launch-screen';
 import { getErrorMessage } from '@/lib/errors';
@@ -58,29 +55,14 @@ export class VibeLocalTool extends BaseCLITool {
    * @param worktreePath - Worktree path
    */
   protected async launchSession(worktreeId: string, worktreePath: string, instanceId?: string): Promise<void> {
-    const vibeLocalAvailable = await this.isInstalled();
-    if (!vibeLocalAvailable) {
-      throw missingToolError(this);
-    }
+    await this.requireInstalled();
 
-    const sessionName = this.getSessionName(worktreeId, instanceId);
-
-    const exists = await hasSession(sessionName);
-    if (exists) {
-      await this.reconcileExistingSession(sessionName, worktreePath);
-
-      // Issue #2070: this branch used to return unconditionally. A tmux session
-      // outlives the agent that was launched into it — a quit, a self-update, a
-      // crash — and the launch was then skipped for a pane holding nothing but a
-      // shell prompt, which left `kill-session` by hand as the only recovery.
-      // When the tool is gone we fall THROUGH and re-send the launch command
-      // into the same pane.
-      if (await this.isToolLive(sessionName, { confirm: true })) {
-        logger.info('vibe-local-session');
-        return;
-      }
-      logger.warn('vibe-local-session-relaunch', { sessionName });
-    }
+    const { sessionName, exists, live } = await this.resolveLaunchPane(worktreeId, worktreePath, instanceId, {
+      logger,
+      liveAction: 'vibe-local-session',
+      relaunchAction: 'vibe-local-session-relaunch',
+    });
+    if (live) return;
 
     // Issue #1759 / #2444: the one line every tool's creation path owes the
     // rest of the system. vibe-local emits no structured events, so the
@@ -97,15 +79,7 @@ export class VibeLocalTool extends BaseCLITool {
       // exists and holds the transcript of the process that died in it; the
       // launch command is re-sent into that same pane.
       if (!exists) {
-        // Create tmux session. Scrollback depth comes from the shared
-        // TMUX_HISTORY_LIMIT default (Issue #1624) — do not re-hardcode it here.
-        await createSession({
-          sessionName,
-          workingDirectory: worktreePath,
-        });
-
-        // Wait a moment for the session to be created
-        await new Promise((resolve) => setTimeout(resolve, TUI_SESSION_CREATE_WAIT_MS));
+        await this.createLaunchPane(sessionName, worktreePath);
       }
 
       // Read Ollama model and context window preferences from DB

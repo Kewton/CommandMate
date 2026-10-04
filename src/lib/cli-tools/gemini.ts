@@ -12,7 +12,6 @@ import { BaseCLITool } from './base';
 import type { CLIToolType } from './types';
 import {
   hasSession,
-  createSession,
   sendKeys,
   sendSpecialKey,
   killSession,
@@ -29,11 +28,9 @@ import {
 } from '@/lib/session/agent-session-lifecycle';
 import { createLogger } from '@/lib/logger';
 import {
-  TUI_SESSION_CREATE_WAIT_MS,
   TUI_INTERRUPT_SETTLE_MS,
   TUI_EXIT_WAIT_MS,
 } from '@/config/cli-tool-timing-config';
-import { missingToolError } from './install-hints';
 import { withLaunchScreenCleared } from '@/lib/session/launch-screen';
 import { getErrorMessage } from '@/lib/errors';
 
@@ -79,30 +76,14 @@ export class GeminiTool extends BaseCLITool {
    */
   protected async launchSession(worktreeId: string, worktreePath: string, instanceId?: string): Promise<void> {
     // Check if Gemini is installed
-    const geminiAvailable = await this.isInstalled();
-    if (!geminiAvailable) {
-      throw missingToolError(this);
-    }
+    await this.requireInstalled();
 
-    const sessionName = this.getSessionName(worktreeId, instanceId);
-
-    // Check if session already exists
-    const exists = await hasSession(sessionName);
-    if (exists) {
-      await this.reconcileExistingSession(sessionName, worktreePath);
-
-      // Issue #2070: this branch used to return unconditionally. A tmux session
-      // outlives the agent that was launched into it — a quit, a self-update, a
-      // crash — and the launch was then skipped for a pane holding nothing but a
-      // shell prompt, which left `kill-session` by hand as the only recovery.
-      // When the tool is gone we fall THROUGH and re-send the launch command
-      // into the same pane.
-      if (await this.isToolLive(sessionName, { confirm: true })) {
-        logger.info('gemini-session-sessionname');
-        return;
-      }
-      logger.warn('gemini-session-relaunch', { sessionName });
-    }
+    const { sessionName, exists, live } = await this.resolveLaunchPane(worktreeId, worktreePath, instanceId, {
+      logger,
+      liveAction: 'gemini-session-sessionname',
+      relaunchAction: 'gemini-session-relaunch',
+    });
+    if (live) return;
 
     // Issue #1762: fence this instance's structured events off from the process
     // that used to hold the same (worktree, tool, instance) key. On the creation
@@ -121,15 +102,7 @@ export class GeminiTool extends BaseCLITool {
       // exists and holds the transcript of the process that died in it; the
       // launch command is re-sent into that same pane.
       if (!exists) {
-        // Create tmux session. Scrollback depth comes from the shared
-        // TMUX_HISTORY_LIMIT default (Issue #1624) — do not re-hardcode it here.
-        await createSession({
-          sessionName,
-          workingDirectory: worktreePath,
-        });
-
-        // Wait a moment for the session to be created
-        await new Promise((resolve) => setTimeout(resolve, TUI_SESSION_CREATE_WAIT_MS));
+        await this.createLaunchPane(sessionName, worktreePath);
       }
 
       // Start Gemini CLI in interactive mode (no flags = interactive REPL).

@@ -41,7 +41,6 @@ import type { NavigationKeySpec } from '@/types/cli-tool-contracts';
 import { COMMAND_CODE_NAVIGATION_KEY_VALUES } from '@/types/terminal-keys';
 import {
   hasSession,
-  createSession,
   sendKeys,
   sendSpecialKeys,
   killSession,
@@ -63,12 +62,10 @@ import {
   buildAgentLaunchCommandLine,
 } from '@/lib/session/agent-session-lifecycle';
 import {
-  TUI_SESSION_CREATE_WAIT_MS,
   TUI_TEXT_INPUT_WAIT_MS,
   TUI_EXIT_WAIT_MS,
   COMMAND_CODE_INIT_WAIT_MS,
 } from '@/config/cli-tool-timing-config';
-import { missingToolError } from './install-hints';
 import { readCommandCodePlanReviewState } from '../detection/tools/command-code/plan-review-state';
 import {
   SessionStartTimeoutError,
@@ -251,26 +248,17 @@ export class CommandCodeTool extends BaseCLITool {
     worktreePath: string,
     instanceId?: string
   ): Promise<void> {
-    const available = await this.isInstalled();
-    if (!available) {
-      throw missingToolError(this);
-    }
+    await this.requireInstalled();
 
-    const sessionName = this.getSessionName(worktreeId, instanceId);
-
-    const exists = await hasSession(sessionName);
-    if (exists) {
-      await this.reconcileExistingSession(sessionName, worktreePath);
-
-      // Issue #2070's shape: a tmux session outlives the agent that was launched
-      // into it, and skipping the launch for a pane holding nothing but a shell
-      // prompt leaves `kill-session` by hand as the only recovery.
-      if (await this.isToolLive(sessionName, { confirm: true })) {
-        logger.info('command-code-session-exists');
-        return;
-      }
-      logger.warn('command-code-session-relaunch', { sessionName });
-    }
+    // Issue #2070's shape: a tmux session outlives the agent that was launched
+    // into it, and skipping the launch for a pane holding nothing but a shell
+    // prompt leaves `kill-session` by hand as the only recovery.
+    const { sessionName, exists, live } = await this.resolveLaunchPane(worktreeId, worktreePath, instanceId, {
+      logger,
+      liveAction: 'command-code-session-exists',
+      relaunchAction: 'command-code-session-relaunch',
+    });
+    if (live) return;
 
     // Issue #2251, seam S8: fence this instance's structured events off from the
     // process that used to hold the same (worktree, tool, instance) key. On the
@@ -289,11 +277,7 @@ export class CommandCodeTool extends BaseCLITool {
       if (!exists) {
         // Inline-rendered, so the pane keeps scrollback; depth comes from the
         // shared TMUX_HISTORY_LIMIT default (Issue #1624).
-        await createSession({
-          sessionName,
-          workingDirectory: worktreePath,
-        });
-        await new Promise((resolve) => setTimeout(resolve, TUI_SESSION_CREATE_WAIT_MS));
+        await this.createLaunchPane(sessionName, worktreePath);
       }
 
       await sendKeys(
