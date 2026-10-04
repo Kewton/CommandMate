@@ -66,7 +66,7 @@
  */
 
 import { isPlainObject, readStringField } from '../event-mapper';
-import { collapseToLine, separateTurnBody, type TurnRenderBlock } from '../turn-body';
+import { boundDetail, collapseToLine, separateTurnBody, truncateTurnBody, type TurnRenderBlock } from '../turn-body';
 
 /**
  * `brain` — the directory agy keeps one conversation's working state under.
@@ -545,9 +545,7 @@ function renderThinking(text: string): string {
 }
 
 function boundDetailText(value: string): string {
-  return value.length <= MAX_ANTIGRAVITY_TOOL_DETAIL_LENGTH
-    ? value
-    : `${value.slice(0, MAX_ANTIGRAVITY_TOOL_DETAIL_LENGTH - 1)}…`;
+  return boundDetail(value, MAX_ANTIGRAVITY_TOOL_DETAIL_LENGTH);
 }
 
 /**
@@ -600,11 +598,7 @@ export function renderAntigravityTurn(
   }
 
   let body = separateTurnBody(rendered).body;
-  if (body.length > MAX_ANTIGRAVITY_TURN_BODY_LENGTH) {
-    body =
-      body.slice(0, MAX_ANTIGRAVITY_TURN_BODY_LENGTH - ANTIGRAVITY_TURN_TRUNCATION_MARKER.length) +
-      ANTIGRAVITY_TURN_TRUNCATION_MARKER;
-  }
+  body = truncateTurnBody(body, MAX_ANTIGRAVITY_TURN_BODY_LENGTH, ANTIGRAVITY_TURN_TRUNCATION_MARKER);
 
   return {
     conversationId: turn.conversationId,
