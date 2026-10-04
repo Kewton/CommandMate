@@ -30,6 +30,7 @@ import {
 } from '@/lib/cli-tools/types';
 import { getAgentEventSource } from '@/lib/hooks/sources/registry';
 import { describeAgentEventSource } from '@/lib/hooks/sources/define-source';
+import type { AgentEventSource } from '@/lib/hooks/sources/types';
 import { getOpencodeProbedActivity } from '@/lib/hooks/sources/opencode/subscription';
 import { getLastPermissionDecision } from '@/lib/hooks/permission-decision-state';
 import { getLastToolInputNormalization } from '@/lib/hooks/tool-input-normalization-state';
@@ -69,6 +70,7 @@ import {
   getStructuredSessionState,
   markStructuredPromptRecorded,
   observeScraperCompletionEvidence,
+  type AskUserQuestionEpisode,
 } from '@/lib/session/agent-event-state';
 import { resolvePromptWaiting } from '@/lib/session/prompt-waiting-composition';
 import { DIALOG_PENDING_MAX_MS, isDeliveryExpired } from '@/lib/session/provisional-turn';
@@ -195,24 +197,26 @@ export async function buildCurrentOutput(
   };
 }
 
+/** What {@link readAgentEvents} read, for the rest of {@link buildPayload}. */
+interface AgentEventsRead {
+  stopEventAt: number | null;
+  eventSource: AgentEventSource;
+  askUserQuestion: AskUserQuestionEpisode | null;
+  structuredEvents: StructuredEventsPayload;
+}
+
 /**
- * The payload itself, with no knowledge of how its (tool, instance) pair was
- * chosen. Split from {@link buildCurrentOutput} so the resolution fields are
- * appended in one place instead of at both of the two return sites below.
+ * The agent's own events for this session, read before the pane is looked at
+ * (Issue #3215). Split out of {@link buildPayload} in the order it ran there:
+ * nothing here awaits, and `structuredEvents` is the object both of its return
+ * paths publish.
  */
-async function buildPayload(
-  db: Database.Database,
+function readAgentEvents(
   worktreeId: string,
   cliToolId: CLIToolType,
-  instanceId?: string,
-): Promise<CurrentOutputPayload> {
-  const resolvedInstanceId = instanceId ?? cliToolId;
-  const manager = CLIToolManager.getInstance();
-  const cliTool = manager.getTool(cliToolId);
-  // Issue #2886: read once, independent of `isRunning`, so both return paths
-  // below publish the same value the pane is (or would be) reached at.
-  const sessionName = cliTool.getSessionName(worktreeId, instanceId);
-
+  instanceId: string | undefined,
+  resolvedInstanceId: string,
+): AgentEventsRead {
   const stopEventAt = getLastStopEventAt(worktreeId, cliToolId, instanceId);
   const lastEvent = getLastAgentEvent(worktreeId, cliToolId, instanceId);
   // Issue #1924: the registry answers for every tool — a real implementation
@@ -328,6 +332,34 @@ async function buildPayload(
     // tool's status poll grows a field or a request.
     sessionDiff: ensureOpencodeSessionDiff({ worktreeId, cliToolId, instanceId }),
   };
+
+  return { stopEventAt, eventSource, askUserQuestion, structuredEvents };
+}
+
+/**
+ * The payload itself, with no knowledge of how its (tool, instance) pair was
+ * chosen. Split from {@link buildCurrentOutput} so the resolution fields are
+ * appended in one place instead of at both of the two return sites below.
+ */
+async function buildPayload(
+  db: Database.Database,
+  worktreeId: string,
+  cliToolId: CLIToolType,
+  instanceId?: string,
+): Promise<CurrentOutputPayload> {
+  const resolvedInstanceId = instanceId ?? cliToolId;
+  const manager = CLIToolManager.getInstance();
+  const cliTool = manager.getTool(cliToolId);
+  // Issue #2886: read once, independent of `isRunning`, so both return paths
+  // below publish the same value the pane is (or would be) reached at.
+  const sessionName = cliTool.getSessionName(worktreeId, instanceId);
+
+  const { stopEventAt, eventSource, askUserQuestion, structuredEvents } = readAgentEvents(
+    worktreeId,
+    cliToolId,
+    instanceId,
+    resolvedInstanceId,
+  );
 
   const running = await cliTool.isRunning(worktreeId, instanceId);
   if (!running) {
