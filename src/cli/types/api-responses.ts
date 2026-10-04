@@ -7,6 +7,8 @@
  */
 
 import type { PromptView } from '../../lib/session/prompt-view';
+import type { AutoYesSuppressionReason } from '../../lib/polling/auto-yes-suppression-reason';
+import type { StatusEvidence } from '../../lib/session/status-evidence-type';
 
 // Mirrors: src/types/models.ts Worktree + src/app/api/worktrees/route.ts response shape
 export interface WorktreeListResponse {
@@ -75,7 +77,7 @@ export interface WorktreeItem {
      * no frame to read) and for a tool with two or more instances (an
      * aggregate has no single reason — read `--json` for the per-tool rows).
      */
-    statusEvidence?: 'positive' | 'none';
+    statusEvidence?: StatusEvidence;
     /**
      * The scraper's reason token: `input_prompt` / `no_recent_output` /
      * `thinking_indicator` / `default` … (Issue #1926).
@@ -192,16 +194,7 @@ export interface WorktreeDetailResponse extends WorktreeItem {
  * that phrases a suppression for a human has to tell the two apart — see
  * SUPPRESSION_CAUSE in src/cli/commands/wait.ts.
  */
-export type AutoYesSuppressionReason =
-  | 'mode-off'
-  | 'deny-pattern'
-  | 'deny-pattern-unusable'
-  | 'type-not-allowed'
-  | 'agent-launch-dialog'
-  // `unclassified-frame` is NOT one either (Issue #1924): the generic prompt
-  // estimator matched and the tool's own dialog detector did not, so nothing
-  // was sent. Same channel, third kind of cause.
-  | 'unclassified-frame';
+export type { AutoYesSuppressionReason };
 
 // Mirrors: src/app/api/worktrees/[id]/current-output/route.ts response shape
 // [DR2-03] All server-side fields included
