@@ -75,7 +75,7 @@ import {
   STRUCTURED_DECISION_OPTIONS,
   type StructuredPromptWaitingData,
 } from '@/lib/session/structured-prompt';
-import { readPromptDecisionId } from '@/components/worktree/prompt-decision-id';
+import { readDecisionId as readPromptDecisionId } from '@/lib/session/prompt-view';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 
 const DECISION_ID = 'per_0000000000000000000000000';
