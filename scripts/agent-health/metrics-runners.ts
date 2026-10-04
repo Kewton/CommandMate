@@ -2,7 +2,8 @@
  * Thin wrappers that run each measuring tool and hand its output to the pure
  * parsers in `src/lib/agent-health/metrics-parse.ts` (Issue #3044) and, for
  * performance, `metrics-perf.ts` (Issue #3054: the production log, `ps` and
- * `GET /api/worktrees` — read only; the server is never stopped or changed).
+ * `GET /api/worktrees` — read only; the server is never stopped or changed),
+ * and for `bug-flow` `bug-flow.ts` (Issue #3185: `gh issue list`, read only).
  *
  * A runner never throws for a tool problem: a missing binary, no network, a
  * timeout or unreadable output all become `status: 'skip'` with the reason.
@@ -29,6 +30,7 @@ import {
   measureTypeSafety,
   type TypeSafetyCounts,
 } from '@/lib/agent-health/metrics-parse';
+import { BUG_FLOW_WINDOW_DAYS, bugFlowWindowStart, measureBugFlow } from '@/lib/agent-health/bug-flow';
 import {
   addLogLine,
   createLogAggregate,
@@ -75,6 +77,8 @@ export interface RunnerContext {
   sampleIntervalMs?: number;
   /** server-process: the API to time; null → do not call it. */
   apiUrl?: string | null;
+  /** bug-flow: the `gh` executable (tests point it elsewhere). */
+  ghCommand?: string;
 }
 
 interface CommandResult {
@@ -549,6 +553,44 @@ async function serverProcess(ctx: RunnerContext): Promise<MetricMeasurement> {
   return measureServerProcess(samples, await probing);
 }
 
+// ── process (Issue #3185) ──────────────────────────────────────────────────
+
+const BUG_FLOW_REPO = 'Kewton/CommandMate';
+
+/** `bug` Issues of the last 7 days. A `gh` problem is a skip like any other tool's. */
+async function bugFlow(ctx: RunnerContext): Promise<MetricMeasurement> {
+  const now = ctx.now ?? new Date();
+  // The search is by UTC date; one extra day so the exact 7-day cut is made on `createdAt`.
+  const since = new Date(bugFlowWindowStart(now) - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const result = await runTool(
+    ctx,
+    'bug-flow',
+    ctx.ghCommand ?? 'gh',
+    [
+      'issue',
+      'list',
+      '--repo',
+      BUG_FLOW_REPO,
+      '--label',
+      'bug',
+      '--state',
+      'all',
+      '--search',
+      `created:>=${since}`,
+      '--limit',
+      '1000',
+      '--json',
+      'number,body,labels,createdAt',
+    ],
+    60_000
+  );
+  if (isMeasurement(result)) return result;
+  if (result.code !== 0) {
+    return skip('bug-flow', `gh issue list が失敗した（直近 ${BUG_FLOW_WINDOW_DAYS} 日の bug）: exit ${result.code} ${tail(result.stderr)}`);
+  }
+  return measureBugFlow(result.stdout, now);
+}
+
 export const METRIC_RUNNERS: Record<MetricId, (ctx: RunnerContext) => Promise<MetricMeasurement> | MetricMeasurement> = {
   'npm-audit': npmAudit,
   semgrep,
@@ -564,6 +606,7 @@ export const METRIC_RUNNERS: Record<MetricId, (ctx: RunnerContext) => Promise<Me
   'log-volume': fromServerLog('log-volume', measureLogVolume),
   'error-rate': fromServerLog('error-rate', measureErrorRate),
   'server-process': serverProcess,
+  'bug-flow': bugFlow,
 };
 
 /**
@@ -585,6 +628,7 @@ export const RUN_ORDER: readonly MetricId[] = [
   'api-latency',
   'log-volume',
   'error-rate',
+  'bug-flow',
 ];
 
 export const MEASURE_CONCURRENCY = 3;
