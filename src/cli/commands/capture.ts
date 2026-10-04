@@ -20,6 +20,7 @@ import {
   INSTANCE_SELECTOR_ERROR,
   resolveInstanceTarget,
 } from './instances';
+import { resolveCommandTarget } from './command-target';
 import { printMaybePaged } from '../utils/pager';
 import { squeezeTranscript } from '../../lib/tmux/transcript-squeeze';
 import { derivePromptView } from '../../lib/session/prompt-view';
@@ -562,10 +563,7 @@ export function createCaptureCommand(): Command {
         // alone captured the wrong (claude-named) session. Resolve the tool the
         // instance is registered under before asking. Issue #1925: 'read-only',
         // because capture looks rather than acts — see resolvePaneCliTool.
-        const target = options.instance
-          ? await resolveInstanceTarget(client, worktreeId, options.instance, options.agent, 'read-only')
-          : null;
-        const agent = target ? target.cliToolId : options.agent;
+        const { target, agent } = await resolveCommandTarget(client, worktreeId, options.instance, options.agent, 'read-only');
 
         // Build path with optional cliTool/instance query parameters. Issue
         // #2376: the RESOLVED instance id — /current-output cannot read an alias.
