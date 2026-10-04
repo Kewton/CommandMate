@@ -45,6 +45,7 @@ import {
   type SkillGitTargetState,
 } from '@/lib/skills/preview-diff';
 import type { SkillAgentSupport, SkillInstallReceipt } from '@/types/skills';
+import { getOrInitGlobal } from '../global-state';
 
 // =============================================================================
 // Vocabulary
@@ -451,9 +452,7 @@ declare global {
   var __skillUninstallPlans: UninstallPlanCacheState | undefined;
 }
 
-const cache: UninstallPlanCacheState =
-  globalThis.__skillUninstallPlans ??
-  (globalThis.__skillUninstallPlans = { records: new Map() });
+const cache: UninstallPlanCacheState = getOrInitGlobal('__skillUninstallPlans', () => ({ records: new Map() }));
 
 /** Token grammar. Anything else is rejected before the store is consulted. */
 export const SKILL_UNINSTALL_PLAN_TOKEN_PATTERN = /^[0-9a-f]{48}$/;
