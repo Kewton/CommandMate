@@ -18,8 +18,8 @@ import { getDbInstance } from '@/lib/db/db-instance';
 import { getWorktreeById, saveInitialBranch, getInitialBranch } from '@/lib/db';
 import {
   resolveSessionTargetStrict,
-  sessionTargetConflictResponse,
 } from '@/lib/session/resolve-session-target';
+import { sessionTargetConflictResponse } from '@/lib/session/session-target-conflict-response';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { probeRunningSessionHookUrl } from '@/lib/cli-tools/base';
 import { CLI_TOOL_IDS, isValidInstanceId, type CLIToolType, type ICLITool } from '@/lib/cli-tools/types';

@@ -11,9 +11,9 @@ import { getWorktreeById } from '@/lib/db';
 import {
   resolveSessionTarget,
   resolveSessionTargetStrict,
-  sessionTargetConflictResponse,
   type SessionTarget,
 } from '@/lib/session/resolve-session-target';
+import { sessionTargetConflictResponse } from '@/lib/session/session-target-conflict-response';
 import {
   getAutoYesState,
   setAutoYesEnabled,

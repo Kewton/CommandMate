@@ -20,8 +20,8 @@ import { broadcast } from '@/lib/ws-server';
 import { CLI_TOOL_IDS, isValidInstanceId, type CLIToolType } from '@/lib/cli-tools/types';
 import {
   resolveSessionTargetStrict,
-  sessionTargetConflictResponse,
 } from '@/lib/session/resolve-session-target';
+import { sessionTargetConflictResponse } from '@/lib/session/session-target-conflict-response';
 import { releaseAutoYes } from '@/lib/auto-yes-lifecycle';
 import { clearSessionStarting } from '@/lib/session/session-starting-state';
 import { createLogger } from '@/lib/logger';
