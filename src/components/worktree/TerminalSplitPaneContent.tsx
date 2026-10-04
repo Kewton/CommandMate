@@ -88,6 +88,7 @@ import { MessageInput } from '@/components/worktree/MessageInput';
 import { OpencodeTurnDiffPanel } from '@/components/worktree/OpencodeTurnDiffPanel';
 import { HistoryPane, splitHistorySlotId } from '@/components/worktree/HistoryPane';
 import { ChatSurface } from '@/components/worktree/ChatSurface';
+import { useChatSurfaceLiveState } from '@/hooks/useChatSurfaceLiveState';
 import { PaneResizer } from '@/components/worktree/PaneResizer';
 import { AutoYesToggle } from '@/components/worktree/AutoYesToggle';
 import {
@@ -95,19 +96,13 @@ import {
   type PanePromptState,
 } from '@/hooks/useTerminalPanePolling';
 import { useSplitMessages } from '@/hooks/useSplitMessages';
-import { usePendingMessages, type OptimisticSendOptions } from '@/hooks/usePendingMessages';
-import {
-  useConnectivity,
-  isServerConfirmedReachable,
-  isConnectionKnownDown,
-} from '@/hooks/useConnectivity';
+import { useOptimisticPaneMessages, useDiscardPending } from '@/hooks/useOptimisticPaneMessages';
 import { useHistoryPaneState } from '@/hooks/useHistoryPaneState';
 import { useComposerMaxHeight } from '@/hooks/useComposerHeight';
 import {
   COMPOSER_PANE_BODY_MIN_HEIGHT_PX,
   composerHeightScopeForSplit,
 } from '@/config/composer-height';
-import { worktreeApi } from '@/lib/api-client';
 import { buildPromptResponseBody } from '@/lib/prompt-response-body-builder';
 import { readSelectionListShape } from '@/lib/detection/selection-shape';
 import { withToolDecisionLabels } from '@/components/worktree/prompt-decision-id';
@@ -528,42 +523,15 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
     enabled: !disabled,
   });
 
-  // Issue #1121: optimistic-UI layer. Merges a just-sent message into this
-  // split's history as a pending bubble (< 100ms) before the send resolves, then
-  // reconciles it against the server echo (no duplicate) or surfaces a
-  // retry/discard error on failure. onSent refetches so reconciliation is prompt.
-  const sendMessageFn = useCallback(
-    (content: string, options: OptimisticSendOptions) =>
-      worktreeApi.sendMessage(worktreeId, content, options),
-    [worktreeId],
-  );
-  // Issue #2503: the same connection verdict the header pill renders (#2501),
-  // read here so a send made in a tunnel is held as "waiting" and resent once
-  // the server answers again, instead of failing after 30s of no network.
-  // Both halves read the *signals* rather than `status`, because both decide
-  // to act: `isServerConfirmedReachable` rather than `isOnline`, so a desktop
-  // carried by polling with the WebSocket down still counts as able to send;
-  // `isConnectionKnownDown` rather than `isOffline`, so a send is only held back
-  // from failing when something actually measured the network as gone.
-  const connectivity = useConnectivity();
-  const pendingConnectivity = useMemo(
-    () => ({
-      offline: isConnectionKnownDown(connectivity.signals),
-      reachable: isServerConfirmedReachable(connectivity.signals),
-    }),
-    [connectivity.signals],
-  );
   const {
     messages: mergedMessages,
     sendOptimistic,
     retry: retryPending,
     discard: discardPending,
-  } = usePendingMessages({
+  } = useOptimisticPaneMessages({
     worktreeId,
     serverMessages: splitMessages,
-    sendFn: sendMessageFn,
     onSent: refreshSplitMessages,
-    connectivity: pendingConnectivity,
   });
 
   // Issue #744: History visible/width. MVP keeps this common across splits
@@ -615,18 +583,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
     [refresh, refreshSplitMessages, onMessageSent],
   );
 
-  // Issue #1121: discarding a failed optimistic message removes its bubble and
-  // restores the text to the composer (via the existing insert-to-message
-  // pathway) so the user can edit and re-send.
-  const handleDiscardPending = useCallback(
-    (tempId: string) => {
-      const content = discardPending(tempId);
-      if (content) {
-        onHistoryInsertToMessage?.(content);
-      }
-    },
-    [discardPending, onHistoryInsertToMessage],
-  );
+  const handleDiscardPending = useDiscardPending(discardPending, onHistoryInsertToMessage);
 
   const handlePromptRespond = useCallback(
     async (answer: string, decisionId?: string | null): Promise<void> => {
@@ -922,6 +879,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   // banner's "a wait nobody could read" case is therefore a visible prompt whose
   // payload is #1708's / #1725's degraded record, which ChatSurface reads
   // itself with `derivePromptView` (Issue #3184).
+  const chatLiveState = useChatSurfaceLiveState(terminal, prompt);
   const chatSurfaceSlot = useMemo(
     () => (
       <div
@@ -936,32 +894,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
             cliToolId={cliToolId}
             instanceId={resolvedInstanceId}
             history={historyPaneProps}
-            live={{
-              isRunning: terminal.isRunning,
-              // Issue #2445: without this the surface cannot tell "tmux says
-              // there is no session" from the hook's own pre-first-poll default.
-              attaching: terminal.attaching,
-              // Issue #2238: the generating verdict the surface actually gates
-              // its in-flight bubble on. `isRunning` above stays because the
-              // surface still reports on the session; it is no longer mistaken
-              // for the turn.
-              sessionStatus: terminal.sessionStatus,
-              isThinking: terminal.isThinking,
-              isPromptWaiting: prompt.visible,
-              promptData: prompt.data,
-              isSelectionListActive: terminal.isSelectionListActive,
-              isPagerActive: terminal.isPagerActive,
-              // Issue #2373: the field #2369 added and did not copy across. The
-              // surface falls back to reading `frame` when this is absent, so the
-              // card was already correct — but that fallback reads the raw
-              // capture's last 15 rows while the server read `frame.lastLines`,
-              // and an explicit `false` from the server could never win because it
-              // never arrived. Copied here so the server's answer is the answer.
-              isDismissablePanelActive: terminal.isDismissablePanelActive,
-              isUnclassifiedActive: terminal.isUnclassifiedActive,
-              // Issue #3179: the surface draws the starting strip from this.
-              startingSince: terminal.startingSince,
-            }}
+            live={chatLiveState}
             onSurfaceModeChange={handleSurfaceModeChange}
             // Issue #2254: the dialog card's frame. `terminal.output`, not
             // `terminal.realtimeSnippet` — see `ChatSurfaceProps.frame` for the
@@ -981,19 +914,9 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       worktreeId,
       cliToolId,
       resolvedInstanceId,
-      terminal.isRunning,
-      terminal.attaching,
-      terminal.sessionStatus,
-      terminal.isThinking,
-      terminal.isSelectionListActive,
-      terminal.isPagerActive,
-      terminal.isDismissablePanelActive,
-      terminal.isUnclassifiedActive,
-      terminal.startingSince,
+      chatLiveState,
       terminal.output,
       refresh,
-      prompt.visible,
-      prompt.data,
       handleSurfaceModeChange,
     ],
   );

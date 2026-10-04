@@ -133,21 +133,11 @@ import {
   findOpencodeSharedDataConflict,
 } from '@/lib/hooks/sources/opencode/log-diagnosis';
 import { withLaunchScreenCleared } from '@/lib/session/launch-screen';
+import { getErrorMessage } from '@/lib/errors';
 
 const logger = createLogger('cli-tools/opencode');
 
 const execFileAsync = promisify(execFile);
-
-/**
- * Extract error message from unknown error type (DRY)
- * Same pattern as claude-session.ts / codex.ts / gemini.ts / vibe-local.ts.
- * A shared version exists in src/lib/errors.ts (getErrorMessage), but CLI tool
- * modules use local copies to avoid importing the server-side error module.
- * [D1-002] Future refactoring candidate: extract to BaseCLITool or a shared util.
- */
-function getErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
 
 /** OpenCode TUI graceful exit command [D1-006] */
 export const OPENCODE_EXIT_COMMAND = '/exit';
@@ -329,14 +319,6 @@ export class OpenCodeTool extends BaseCLITool {
    */
   async isInstalled(): Promise<boolean> {
     return (await resolveOpencodeV1Executable()).executable !== null;
-  }
-
-  /**
-   * Check if OpenCode session is running for a worktree
-   */
-  async isRunning(worktreeId: string, instanceId?: string): Promise<boolean> {
-    const sessionName = this.getSessionName(worktreeId, instanceId);
-    return await hasSession(sessionName);
   }
 
   /**
