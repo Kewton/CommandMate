@@ -57,6 +57,7 @@ import { isPlainObject, readNestedString, readStringField } from '../event-mappe
 import {
   collapseToLine,
   separateTurnBody,
+  truncateTurnBody,
   TURN_REASONING_LABEL,
   type TurnRenderBlock,
 } from '../turn-body';
@@ -354,11 +355,7 @@ export function renderOpencodeTurn(turn: OpencodeTurnAccumulator): OpencodeRende
   // now sits behind the prose, so what a 200 kB turn loses is the tail of its
   // thinking rather than the answer (Issue #2272).
   let body = separated.body;
-  if (body.length > MAX_OPENCODE_TURN_BODY_LENGTH) {
-    body =
-      body.slice(0, MAX_OPENCODE_TURN_BODY_LENGTH - OPENCODE_TURN_TRUNCATION_MARKER.length) +
-      OPENCODE_TURN_TRUNCATION_MARKER;
-  }
+  body = truncateTurnBody(body, MAX_OPENCODE_TURN_BODY_LENGTH, OPENCODE_TURN_TRUNCATION_MARKER);
 
   return {
     sessionId: turn.sessionId,

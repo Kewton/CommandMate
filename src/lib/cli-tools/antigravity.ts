@@ -360,20 +360,12 @@ export class AntigravityTool extends BaseCLITool {
   async sendMessage(worktreeId: string, message: string, instanceId?: string): Promise<void> {
     const sessionName = this.getSessionName(worktreeId, instanceId);
 
-    // Check if session exists
-    const exists = await hasSession(sessionName);
-    if (!exists) {
-      throw new Error(
-        `Antigravity session ${sessionName} does not exist. Start the session first.`
-      );
-    }
-
     // Issue #2070: the pane exists, but does the AGENT? An agent that quit,
     // updated itself or crashed leaves its tmux session behind, and the send
     // that followed used to sit in the readiness wait until it timed out —
     // leaving `kill-session` by hand as the only recovery. Relaunches into the
     // same pane when the tool is gone; costs one `capture-pane` when it is not.
-    await this.relaunchIfToolExited(worktreeId, instanceId);
+    await this.requireSession('Antigravity', worktreeId, instanceId, { relaunch: true });
 
     try {
       // Verify agy is at a ready prompt before sending

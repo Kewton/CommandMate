@@ -14,13 +14,14 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db/db-instance';
-import { getWorktreeById, deleteSessionState, deleteAllMessages, deleteMessagesByCliTool, deleteMessagesByInstance, recomputeLastUserMessage, getAgentInstances } from '@/lib/db';
+import { getWorktreeById, deleteSessionState, deleteAllMessages, deleteMessagesByCliTool, deleteMessagesByInstance, recomputeLastUserMessage } from '@/lib/db';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { broadcast } from '@/lib/ws-server';
 import { CLI_TOOL_IDS, isValidInstanceId, type CLIToolType } from '@/lib/cli-tools/types';
 import {
   resolveSessionTargetStrict,
 } from '@/lib/session/resolve-session-target';
+import { collectFanOutTargets } from '@/lib/session/session-fan-out-targets';
 import { sessionTargetConflictResponse } from '@/lib/session/session-target-conflict-response';
 import { releaseAutoYes } from '@/lib/auto-yes-lifecycle';
 import { clearSessionStarting } from '@/lib/session/session-starting-state';
@@ -100,25 +101,7 @@ export async function POST(
       // Determine which tools to kill, seeding each tool's primary instance
       // (instanceId === cliToolId) for backward compatibility.
       const toolsToKill: CLIToolType[] = targetCliTool ? [targetCliTool] : [...CLI_TOOL_IDS];
-      const seen = new Set<string>();
-      for (const tool of toolsToKill) {
-        const key = `${tool}:${tool}`;
-        if (!seen.has(key)) {
-          seen.add(key);
-          targets.push({ cliToolId: tool, instanceId: tool });
-        }
-      }
-      // Include any additional registered instances of the targeted tools so
-      // their sessions are not orphaned.
-      for (const ai of getAgentInstances(db, id)) {
-        if (toolsToKill.includes(ai.cliTool)) {
-          const key = `${ai.cliTool}:${ai.id}`;
-          if (!seen.has(key)) {
-            seen.add(key);
-            targets.push({ cliToolId: ai.cliTool, instanceId: ai.id });
-          }
-        }
-      }
+      targets.push(...collectFanOutTargets(db, id, toolsToKill));
     }
 
     // Track killed sessions
