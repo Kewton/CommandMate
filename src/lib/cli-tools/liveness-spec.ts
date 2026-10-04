@@ -133,22 +133,40 @@ const ADDED_TOOL_DEFAULTS: Pick<
  */
 const LIVENESS_SPECS: Record<CLIToolType, ToolLivenessSpec> = {
   /**
-   * claude's is `isSessionHealthy`, unchanged, expressed as a declaration.
+   * claude's is `isSessionHealthy`, expressed as a declaration.
    *
-   * Three fields carry that history and are claude's alone: `aliveTailLines:
-   * null` (the check has always tested the whole frame), `shellPromptPatterns:
-   * []` (the length gate and the endings are the whole rule), and
+   * Two fields carry that history and are claude's alone: `aliveTailLines:
+   * null` (the check has always tested the whole frame) and
    * `unreadableIsExited: true` (an empty pane and a capture that threw have
-   * both meant "unhealthy" since it was written). Issue #2070's acceptance
-   * condition is that claude's verdicts do not move, so none of the three may be
-   * "improved" here — a change would have to be its own Issue, with its own
-   * measurements.
+   * both meant "unhealthy" since it was written). Neither is "improved" here.
+   *
+   * `shellPromptPatterns` is NOT claude's alone any more (Issue #3191). #2070
+   * left it `[]` so claude's verdicts would not move, which kept claude on the
+   * length-gated endings rule — and that rule cannot see a prompt of 40
+   * characters or more. Measured 2026-10-04: after `/exit` the pane fell back
+   * to `maenokota@MAENOnoMac-Studio uat-repo-wt2 %` (42 characters) and the
+   * session stayed `running`, so the next send sat in `waitForPrompt` until
+   * `Prompt detection timeout (10000ms)`; the author's everyday prompt
+   * (`… MyCodeBranchDesk %`, 46) is past the gate too.
+   *
+   * The positive `user@host …` forms are therefore claude's as well. What made
+   * that safe to adopt unnarrowed: every row of every claude screen fixture in
+   * the repository (`tests/fixtures/claude-*`, `tests/unit/detection/tools/
+   * claude/fixtures/`, the #2070 frames — composer, transcript, dialogs,
+   * pickers, banners) was swept against both patterns and NONE matched, not
+   * just none on the bottom row; `tool-liveness-3191.test.ts` keeps that
+   * sweep. The whole-frame `CLAUDE_PROMPT_PATTERN` check still runs first, so
+   * a pane with claude's composer anywhere on it stays alive regardless. Below
+   * the 40-character gate the verdicts are unchanged — a pattern match there
+   * already ended in `$` / `%` / `#` — only the reason reads `shell prompt
+   * detected` instead of `shell prompt ending detected` for a `user@host:…`
+   * row.
    */
   claude: {
     ...SHARED,
     alivePatterns: [CLAUDE_PROMPT_PATTERN],
     aliveTailLines: null,
-    shellPromptPatterns: [],
+    shellPromptPatterns: SHELL_PROMPT_LINE_PATTERNS,
     unreadableIsExited: true,
     fatalPatterns: CLAUDE_SESSION_ERROR_PATTERNS,
     fatalRegexPatterns: CLAUDE_SESSION_ERROR_REGEX_PATTERNS,

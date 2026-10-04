@@ -1543,7 +1543,10 @@ describe('claude-session - Issue #306 improvements', () => {
     });
 
     it('should include reason for shell prompt ending', async () => {
-      vi.mocked(capturePane).mockResolvedValue('user@host:~$');
+      // Issue #3191: `user@host:~$` is now recognised by the line pattern
+      // (reason `shell prompt detected`); a prompt without `user@host` is what
+      // only the endings rule reads.
+      vi.mocked(capturePane).mockResolvedValue('host:~$');
 
       const result: HealthCheckResult = await isSessionHealthy(TEST_SESSION_NAME);
       expect(result.healthy).toBe(false);
