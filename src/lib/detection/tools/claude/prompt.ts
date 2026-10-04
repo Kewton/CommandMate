@@ -65,6 +65,7 @@ import {
   maskClaudeChrome,
 } from '../../prompt-detect-multiple-choice';
 import { findNumberedOptionBlock } from '../dialog-block';
+import { readContextAbove as readContextAboveFrom } from '../context-above';
 import type { DialogVerdict, NormalizedFrame } from '../types';
 import { findAskUserQuestionTabRow } from './picker-chrome';
 
@@ -97,9 +98,6 @@ const CLAUDE_DIALOG_FOOTER_PATTERN =
 /** The selection cursor Claude puts on the highlighted option. */
 const CLAUDE_SELECTION_GLYPHS: ReadonlySet<string> = new Set(['❯', '>']);
 
-/** How many non-blank rows above the options may hold the question. */
-const QUESTION_SCAN_ROWS = 4;
-
 /** The permission dialog's question, in the spellings 2.1.x draws. */
 const CLAUDE_PERMISSION_QUESTION_PATTERN = /do you want to\b|allow\b.*\?$/i;
 
@@ -117,13 +115,7 @@ const CLAUDE_PICKER_FOOTER_PATTERN = /set\s+as\s+default/i;
  */
 function readContextAbove(lines: readonly string[], firstRow: number): string {
   const tabRow = findAskUserQuestionTabRow(lines, firstRow, APPROVAL_TARGET_MAX_LOOKBACK);
-  const rows: string[] = [];
-  for (let i = firstRow - 1; i > tabRow && rows.length < QUESTION_SCAN_ROWS; i--) {
-    const row = lines[i].trim();
-    if (row === '') continue;
-    rows.push(row);
-  }
-  return rows.join('\n');
+  return readContextAboveFrom(lines, firstRow, tabRow);
 }
 
 /**

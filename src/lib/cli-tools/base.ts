@@ -10,6 +10,7 @@ import { resolveSessionName } from './session-name';
 import {
   capturePane,
   getSessionWorkingDirectory,
+  hasSession,
   reconcileSessionGeometry,
   sendSpecialKey,
   type SessionGeometryOptions,
@@ -205,7 +206,11 @@ export abstract class BaseCLITool implements ICLITool {
   }
 
   // Abstract methods that must be implemented by subclasses
-  abstract isRunning(worktreeId: string, instanceId?: string): Promise<boolean>;
+  async isRunning(worktreeId: string, instanceId?: string): Promise<boolean> {
+    const sessionName = this.getSessionName(worktreeId, instanceId);
+    return await hasSession(sessionName);
+  }
+
   abstract sendMessage(worktreeId: string, message: string, instanceId?: string): Promise<void>;
   abstract killSession(worktreeId: string, instanceId?: string): Promise<void>;
 

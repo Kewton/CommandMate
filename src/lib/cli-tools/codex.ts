@@ -48,16 +48,9 @@ import {
 } from '@/config/cli-tool-timing-config';
 import { missingToolError } from './install-hints';
 import { withLaunchScreenCleared } from '@/lib/session/launch-screen';
+import { getErrorMessage } from '@/lib/errors';
 
 const logger = createLogger('cli-tools/codex');
-
-/**
- * Extract error message from unknown error type (DRY)
- * Same pattern as claude-session.ts getErrorMessage()
- */
-function getErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
 
 /** Wait for Codex CLI to initialize after launch */
 const CODEX_INIT_WAIT_MS = 3000;
@@ -236,17 +229,6 @@ export class CodexTool extends BaseCLITool {
   readonly id: CLIToolType = 'codex';
   readonly name = 'Codex CLI';
   readonly command = 'codex';
-
-  /**
-   * Check if Codex session is running for a worktree
-   *
-   * @param worktreeId - Worktree ID
-   * @returns True if session is running
-   */
-  async isRunning(worktreeId: string, instanceId?: string): Promise<boolean> {
-    const sessionName = this.getSessionName(worktreeId, instanceId);
-    return await hasSession(sessionName);
-  }
 
   /**
    * Start a new Codex session for a worktree

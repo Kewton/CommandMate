@@ -43,6 +43,7 @@ import {
   type CopilotStatusBarState,
 } from '../../cli-patterns';
 import { findNumberedOptionBlock } from '../dialog-block';
+import { readContextAbove as readContextAboveFrom } from '../context-above';
 import type { DialogVerdict, NormalizedFrame } from '../types';
 
 /** What `detect.ts` measured about this frame before handing it over. */
@@ -58,17 +59,8 @@ export interface CopilotDialogContext {
 /** copilot's permission question, in the spelling 1.0.80 draws. */
 const COPILOT_PERMISSION_QUESTION_PATTERN = /do you want to\b/i;
 
-/** How many non-blank rows above the options may hold the question. */
-const QUESTION_SCAN_ROWS = 4;
-
 function readContextAbove(lines: readonly string[], firstRow: number): string {
-  const rows: string[] = [];
-  for (let i = firstRow - 1; i >= 0 && rows.length < QUESTION_SCAN_ROWS; i--) {
-    const row = lines[i].trim();
-    if (row === '') continue;
-    rows.push(row);
-  }
-  return rows.join('\n');
+  return readContextAboveFrom(lines, firstRow, -1);
 }
 
 /**
