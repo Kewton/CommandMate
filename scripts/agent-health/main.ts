@@ -48,6 +48,7 @@ import {
   type AgentHealthExitCode,
 } from '@/lib/agent-health/report';
 import { AGENT_HEALTH_TMUX_SOCKET, buildChildEnv } from '@/lib/agent-health/tmux-command';
+import { framesDirFor, resolveFrameSaveMode, type FrameArchive } from '@/lib/agent-health/frame-archive';
 import {
   PROBE_WORKTREE_ID,
   type AgentHealthCheck,
@@ -194,6 +195,12 @@ export async function main(argv: readonly string[]): Promise<AgentHealthExitCode
 async function run(options: AgentHealthOptions, startedAt: Date): Promise<AgentHealthExitCode> {
   const outPath = path.resolve(options.out ?? path.join(DEFAULT_DIR, 'reports', `${reportDateJst(startedAt)}.json`));
   const statePath = path.resolve(options.statePath ?? path.join(DEFAULT_DIR, 'state.json'));
+  // Issue #3183: the whole frame of a failing `screen-*` check, kept beside the
+  // report (`<reports>/../frames/<date>/`) so it can become a fixture as is.
+  const frameArchive: FrameArchive = {
+    dir: framesDirFor(outPath, reportDateJst(startedAt)),
+    mode: resolveFrameSaveMode(process.env),
+  };
   const lockPath = path.join(path.dirname(statePath), 'run.lock');
   const scriptErrors: string[] = [];
   const restoreEntries: GlobalConfigRestoreEntry[] = [];
@@ -334,6 +341,7 @@ async function run(options: AgentHealthOptions, startedAt: Date): Promise<AgentH
           selected,
           deadline: Math.min(Date.now() + options.timeoutPerToolSec * 1000, globalDeadline),
           log,
+          frameArchive,
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);

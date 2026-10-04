@@ -16,6 +16,7 @@ import { resolveAutoAnswer } from '@/lib/polling/auto-yes-resolver';
 import { buildPromptResponseBody } from '@/lib/prompt-response-body-builder';
 import { generatePromptKey } from '@/lib/detection/prompt-key';
 import { isAnswerablePromptData } from '@/types/models';
+import { derivePromptView } from '@/lib/session/prompt-view';
 import type { LivePromptData } from '@/types/models';
 
 /** Duplicate prevention window in milliseconds (3 seconds) */
@@ -90,6 +91,13 @@ export function useAutoYes({
     // written after a non-null answer. What changes is that the refusal is now
     // stated where the type says it belongs, instead of resting on a helper
     // whose `PromptData` parameter this value never satisfied.
+    //
+    // Issue #3184: "answerable at the pane" is the shared view's
+    // `screen-choices`. An `api-choices` payload is answered by the server's
+    // adjudicator over the agent's API, never by keys from here.
+    if (derivePromptView(promptData)?.kind !== 'screen-choices') return;
+    // #3184: type narrowing only — `resolveAutoAnswer` / the body builder take
+    // the closed `PromptData` union (#1725); equivalent to the line above.
     if (!isAnswerablePromptData(promptData)) return;
 
     // Issue #501: Skip client-side response entirely when server-side poller is active.

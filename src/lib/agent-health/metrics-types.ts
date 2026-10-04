@@ -24,11 +24,13 @@ export const METRIC_IDS = [
   'log-volume',
   'error-rate',
   'server-process',
+  'bug-flow',
 ] as const;
 
 export type MetricId = (typeof METRIC_IDS)[number];
 
-export type MetricCategory = 'security' | 'maintainability' | 'performance';
+/** `process`: how the work itself goes (Issue #3185); recorded only, never a candidate. */
+export type MetricCategory = 'security' | 'maintainability' | 'performance' | 'process';
 
 export const METRIC_CATEGORY: Record<MetricId, MetricCategory> = {
   'npm-audit': 'security',
@@ -45,6 +47,7 @@ export const METRIC_CATEGORY: Record<MetricId, MetricCategory> = {
   'log-volume': 'performance',
   'error-rate': 'performance',
   'server-process': 'performance',
+  'bug-flow': 'process',
 };
 
 export function isMetricId(value: string): value is MetricId {
@@ -147,7 +150,7 @@ export interface MetricResult {
   category: MetricCategory;
   /**
    * contract. security: fail while any finding exists; maintainability: fail when a candidate exists;
-   * performance: fail while a candidate or an outstanding entry exists.
+   * performance: fail while a candidate or an outstanding entry exists; process: never fails.
    */
   status: MetricStatus;
   /** contract. The metric's headline number (see docs/user-guide/agent-health.md); null when skipped. */
@@ -159,8 +162,8 @@ export interface MetricResult {
   /** Findings still present but not new (security and performance). Filed only when the daily cap has room. */
   outstanding?: MetricCandidate[];
   skipReason?: string;
-  /** Counts kept for the record (e.g. files over 500 lines) — never filed. */
-  details?: Record<string, number | string>;
+  /** Counts kept for the record (e.g. files over 500 lines) — never filed. null: a rate with a 0 denominator. */
+  details?: Record<string, number | string | null>;
 }
 
 export interface MetricsQueueEntry {
@@ -219,7 +222,7 @@ export type MetricMeasurement =
        * candidate), keyed by target. `findings` is a subset.
        */
       subjects?: Record<string, MetricFinding>;
-      details?: Record<string, number | string>;
+      details?: Record<string, number | string | null>;
     }
   | { metricId: MetricId; status: 'skip'; reason: string };
 

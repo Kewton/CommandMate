@@ -14,8 +14,9 @@ import { broadcastMessage } from '@/lib/ws-server';
 import type { ChatMessage } from '@/types/models';
 import { detectPrompt } from '@/lib/detection/prompt-detector';
 import { detectAntigravityNumberedDialogPrompt } from '@/lib/detection/tools/antigravity/dialog';
-import { isAntigravityQuotedNumberedList } from '@/lib/detection/tools/antigravity/detect';
-import { normalizeFrame } from '@/lib/detection/tools/frame';
+import { liveRegionOf, normalizeFrame } from '@/lib/detection/tools/frame';
+import { isQuotedNumberedPrompt } from '@/lib/detection/tools/live-region';
+import type { NormalizedFrame } from '@/lib/detection/tools/types';
 import { readCommandCodeQuestionDialog } from '@/lib/detection/tools/command-code/dialog';
 import type { PromptDetectionResult } from '@/lib/detection/prompt-detector';
 import { recordClaudeConversation } from '@/lib/conversation-logger';
@@ -321,6 +322,11 @@ export function buildPromptExtractionResult(
  *   then handed back as no prompt unless agy asked CommandMate about a tool call
  *   for that instance a moment ago. Omitted, the reading is not gated — which is
  *   what every caller that only DISPLAYS the frame wants.
+ * @param frame - the SAME tick's `normalizeFrame(raw, cliToolId)`, when the
+ *   caller built one (Issue #3183). The Auto-Yes poller builds it once and hands
+ *   the same object to the dialog gate, so the quotation veto below and the gate
+ *   read one live region. Omitted, it is built here from `rawFrame` (or, failing
+ *   that, `cleanOutput`).
  * @returns PromptDetectionResult with isPrompt, promptData, and cleanContent
  */
 export function detectPromptOnCleanFrame(
@@ -329,6 +335,7 @@ export function detectPromptOnCleanFrame(
   precomputedLines?: string[],
   rawFrame?: string,
   receiptScope?: AntigravityReceiptScope,
+  frame?: NormalizedFrame,
 ): PromptDetectionResult {
   // Issue #2364: agy's `↑/↓ Navigate` dialogs are read by agy's own reader
   // before the generic pass, on the same spelling `tools/antigravity/detect.ts`
@@ -385,27 +392,25 @@ export function detectPromptOnCleanFrame(
     precomputedLines ? { ...promptOptions, precomputedLines } : promptOptions,
   );
 
-  // Issue #2851: agy's reader above declines a dialog quoted in a reply (#2845),
-  // and this generic pass then read the quotation itself — `Do you want to
-  // proceed?` and its four options, above a live `>` composer — as an answerable
-  // `multiple_choice`. agy's Auto-Yes gate row is `legacy`, so nothing after this
-  // point judges the frame again and the poller answered a dialog nobody had
-  // opened. The status side declines the same candidate with the same predicate
-  // (`isStalePrompt`, #2845): agy draws its numbered screens in place of the
-  // composer or below it, never above it, so a composer under the list's last
-  // row makes the list a quotation.
+  // Issue #3183 (agy-only before, #2851): a numbered list on a frame whose
+  // input box is the bottom of the pane is a quotation — a reply quoting a
+  // dialog, or one left in the scrollback — and is not a prompt to answer. The
+  // status side declines the same candidate with the same rule on the same
+  // region (`run-detection.ts`), so `waiting` and an automatic answer cannot
+  // disagree about one frame. Every tool, not only agy: #2851 reached Auto-Yes
+  // because agy's `>` is not one of the glyphs the generic parser stops at, and
+  // opencode's gutter is not either.
   //
-  // `rawFrame` when the caller has it, and `cleanOutput` otherwise. The status
-  // side normalises the capture as captured and the predicate then strips box
-  // drawing exactly once; handing it `cleanOutput` — already stripped once, and
-  // `stripBoxDrawing` is not idempotent — would strip a second time and could
-  // read different rows.
-  if (
-    cliToolId === 'antigravity' &&
-    result.isPrompt &&
-    isAntigravityQuotedNumberedList(normalizeFrame(rawFrame ?? cleanOutput), result)
-  ) {
-    return { isPrompt: false, cleanContent: cleanOutput.trim() };
+  // `rawFrame` when there is no prebuilt frame: the input-box markers are rule
+  // rows that the cleaned spelling has blanked. `stripBoxDrawing` is not
+  // idempotent, so the cleaned string is never cleaned again here.
+  if (result.isPrompt) {
+    const liveRegion = frame !== undefined
+      ? liveRegionOf(frame, cliToolId)
+      : normalizeFrame(rawFrame ?? cleanOutput, cliToolId).liveRegion;
+    if (isQuotedNumberedPrompt(liveRegion, result)) {
+      return { isPrompt: false, cleanContent: cleanOutput.trim() };
+    }
   }
 
   // Issue #2849: the same withholding on this exit. agy's reader answering `null`

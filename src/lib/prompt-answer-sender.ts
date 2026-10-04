@@ -355,7 +355,7 @@ async function assertAnswerModeAcceptsNumber(params: SendPromptAnswerParams): Pr
   const frame = await readGuardFrame(params);
   if (frame === null) return null;
 
-  const dialog = detector.detectDialog(normalizeFrame(frame));
+  const dialog = detector.detectDialog(normalizeFrame(frame, params.cliToolId));
   if (dialog === null) return null;
   if (dialog.answerMode === TEXT_ANSWERABLE_ANSWER_MODE) return dialog;
 

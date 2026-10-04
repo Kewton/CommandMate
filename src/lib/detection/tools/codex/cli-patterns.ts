@@ -340,7 +340,7 @@ export interface CodexGlyphRow {
  * Find and classify the bottom-most `›` row of a raw capture.
  *
  * "Bottom-most" is the whole point, and it is the same rule `isCodexPromptReady`
- * and `codexActiveRegionLines` already apply for their own questions: codex
+ * and `findCodexComposerRow` already apply for their own questions: codex
  * draws on the normal screen, so a dialog the operator answered minutes ago is
  * still in the frame with its options intact (Issue #1160). Only the LAST `›`
  * row says what the pane is doing now — and when a turn is generating, that row

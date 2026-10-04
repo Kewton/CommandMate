@@ -19,17 +19,16 @@ import {
   detectThinking,
   getCliToolPatterns,
   stripBoxDrawing,
-  ANTIGRAVITY_NUMBERED_OPTION_PATTERN,
   ANTIGRAVITY_SELECTION_LIST_PATTERN,
   ANTIGRAVITY_SURVEY_PATTERN,
   isAntigravityNumberedDialog,
 } from '../../cli-patterns';
 import { STATUS_REASON } from '../../status-reason';
+import { ANTIGRAVITY_LIVE_REGION } from './live-region';
 import { createToolStatusDetector } from '../run-detection';
 import { ANTIGRAVITY_VERIFIED_AGAINST } from '../verified-against';
 import { detectAntigravityNumberedDialogPrompt } from './dialog';
-import type { NormalizedFrame, ToolStatusVerdict } from '../types';
-import type { PromptDetectionResult } from '../../prompt-detector';
+import type { ToolStatusVerdict } from '../types';
 
 /** agy build these rules were read off (Issue #988 / #995 / #2364; value in ../verified-against, #1929). */
 export const VERIFIED_AGAINST = ANTIGRAVITY_VERIFIED_AGAINST;
@@ -100,39 +99,16 @@ function isAntigravitySelectionScreenOpen(lastLines: string): boolean {
   return !rows.slice(matchedAt + 1).some(row => promptPattern.test(row));
 }
 
-/**
- * Is the numbered list the shared parser read a quotation, not a dialog?
- * (Issue #2845)
- *
- * The shared pass takes any `> 1. …` run in the last rows for a menu, wherever
- * on the frame it sits. agy draws its numbered screens either IN PLACE OF the
- * composer (the approval dialogs) or BELOW it (`/feedback`'s category menu),
- * never above it — so a numbered list with the composer drawn under its last row
- * is the model's reply, or a dialog left in the scrollback. Branch 0.9 declines
- * such a frame (see {@link isAntigravitySelectionScreenOpen}); without this the
- * shared pass then read the quoted `Do you want to proceed?` menu itself and
- * published the composer-idle pane as `waiting` / `prompt_detected`.
- */
-export function isAntigravityQuotedNumberedList(frame: NormalizedFrame, prompt: PromptDetectionResult): boolean {
-  if (prompt.promptData?.type !== 'multiple_choice') return false;
-  const rows = stripBoxDrawing(frame.contentLines.join('\n')).split('\n');
-  const { promptPattern } = getCliToolPatterns('antigravity');
-  let composerAt = -1;
-  for (let i = rows.length - 1; i >= 0; i--) {
-    if (promptPattern.test(rows[i])) {
-      composerAt = i;
-      break;
-    }
-  }
-  if (composerAt < 0) return false;
-  return !rows.slice(composerAt + 1).some(row => ANTIGRAVITY_NUMBERED_OPTION_PATTERN.test(row));
-}
-
 export const antigravityStatusDetector = createToolStatusDetector({
   tool: 'antigravity',
   verifiedAgainst: VERIFIED_AGAINST,
+  // Issue #3183: where the live part of the frame begins (`./live-region.ts`).
+  liveRegion: ANTIGRAVITY_LIVE_REGION,
 
-  isStalePrompt: isAntigravityQuotedNumberedList,
+  // Issue #2845's quoted-list rule (a numbered list with the `>` composer drawn
+  // under its last row is the model's reply) is the live region's now: the
+  // composer marker in `./live-region.ts` and the shared veto in
+  // `run-detection.ts`, which the Auto-Yes path applies too (#2851).
 
   beforePrompt(frame): ToolStatusVerdict | null {
     // 0.85. Issue #2364: the survey agy draws in place of its composer after a

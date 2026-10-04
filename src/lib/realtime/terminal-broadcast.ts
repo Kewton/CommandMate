@@ -143,6 +143,9 @@ function emitTerminalSnapshot(
     // `JSON.stringify` (in `broadcast`) already drops from the wire on its own.
     // Defaulting it would turn "not judged" into a judgement.
     promptAnswerable: payload.promptAnswerable,
+    // Issue #3184: derived from `promptData` by the builder; `?? null` like
+    // `promptData` itself, since both say "no prompt" the same way.
+    promptView: payload.promptView ?? null,
     isSelectionListActive: payload.isSelectionListActive ?? false,
     isPagerActive: payload.isPagerActive ?? false,
     isDismissablePanelActive: payload.isDismissablePanelActive ?? false,

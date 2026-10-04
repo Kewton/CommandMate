@@ -1233,6 +1233,8 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
         const requestBody = buildPromptResponseBody(
           answer,
           activeCliTab,
+          // #3184: type narrowing only — the builder takes the closed `PromptData`
+          // union (#1725); nothing about what is shown is decided here.
           isAnswerablePromptData(state.prompt.data) ? state.prompt.data : null,
           isMobileRef.current ? activeInstanceIdRef.current : undefined,
         );

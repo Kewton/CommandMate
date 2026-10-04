@@ -36,6 +36,8 @@ import type { CLIToolType } from '@/lib/cli-tools/types';
 import { onWaitingTransition } from '@/lib/session/waiting-episode-state';
 import { RELAY_PUMP_INTERVAL_MS } from '@/lib/relay/relay-policy';
 import { createLogger } from '@/lib/logger';
+import { isApiAnswerableWaitNow } from '@/lib/session/prompt-waiting-composition';
+import { getAgentEventSource } from '@/lib/hooks/sources/registry';
 
 const logger = createLogger('relay-triggers');
 
@@ -130,6 +132,20 @@ export function startRelayTriggers(): void {
     // frame the detectors failed on, which is not something to describe to
     // another session as a question it might report to a human.
     if (!transition.waiting || transition.kind !== 'prompt') return;
+    // Issue #3184 (design §6-2): a wait answered over the agent's API is
+    // published as `prompt` for the dots and the push body, but the relay is
+    // not raised for it — its notice lists the stored row's screen options,
+    // and such a wait has none to list. Relaying it is a separate Issue.
+    if (
+      isApiAnswerableWaitNow(
+        transition.worktreeId,
+        transition.cliToolId,
+        transition.instanceId,
+        getAgentEventSource(transition.cliToolId).capabilities.eventIdentity,
+      )
+    ) {
+      return;
+    }
     onRelayPromptWaiting(
       transition.worktreeId,
       transition.cliToolId,

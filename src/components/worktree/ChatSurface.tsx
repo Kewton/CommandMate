@@ -154,7 +154,8 @@ import {
   shouldOfferOptionNumbers,
 } from '@/lib/detection/selection-shape';
 import { PLAN_APPROVE_KEY_TOOL_IDS, SESSION_SCOPE_KEY_TOOL_IDS } from '@/types/terminal-keys';
-import { isAnswerablePromptData, type ChatMessage, type LivePromptData } from '@/types/models';
+import type { ChatMessage, LivePromptData } from '@/types/models';
+import { derivePromptView } from '@/lib/session/prompt-view';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import type { SurfaceMode } from '@/types/ui-state';
 import type { ShowToast } from '@/types/markdown-editor';
@@ -338,7 +339,7 @@ export interface ChatSurfaceLiveState {
   /**
    * The wait's payload. May be the degraded {@link LivePromptData} member that
    * carries no options (#1708 / #1725) — narrowed here with
-   * `isAnswerablePromptData`, so a caller cannot get the distinction wrong.
+   * `derivePromptView` (Issue #3184), so a caller cannot get the distinction wrong.
    */
   promptData?: LivePromptData | null;
   isSelectionListActive?: boolean;
@@ -594,7 +595,15 @@ export function resolveBlockedReason(
     return 'dismissablePanel';
   }
   if (live.isUnclassifiedActive) return 'unclassified';
-  if (live.isPromptWaiting && !isAnswerablePromptData(live.promptData)) return 'promptUnreadable';
+  // Issue #3184: "a wait whose payload carries nothing to answer" is the shared
+  // view's `unreadable`. Checking `type` alone (`isAnswerablePromptData`) also
+  // caught an approval or question answered over the agent's API — whose
+  // buttons PromptPanel / MobilePromptSheet are already drawing — and told the
+  // user its options could not be read (#3181 seen from this surface). A wait
+  // with no payload at all stays unreadable, as before.
+  if (live.isPromptWaiting && (derivePromptView(live.promptData)?.kind ?? 'unreadable') === 'unreadable') {
+    return 'promptUnreadable';
+  }
   return null;
 }
 

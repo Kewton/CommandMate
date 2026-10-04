@@ -22,6 +22,7 @@ import {
 } from './instances';
 import { printMaybePaged } from '../utils/pager';
 import { squeezeTranscript } from '../../lib/tmux/transcript-squeeze';
+import { derivePromptView } from '../../lib/session/prompt-view';
 
 /**
  * Rows of pane history the `--pane` viewer asks for.
@@ -46,14 +47,6 @@ const DEFAULT_FOLLOW_INTERVAL_MS = 2000;
 /** Floor and ceiling for `--interval`. */
 const MIN_FOLLOW_INTERVAL_MS = 250;
 const MAX_FOLLOW_INTERVAL_MS = 60_000;
-
-/**
- * `promptData.type` the server writes for a frame the detection layer could not
- * classify (Issue #1708). Mirrors UNCLASSIFIED_PROMPT_TYPE in
- * src/types/models.ts; duplicated rather than imported because the CLI bundle
- * keeps its own copy of the API shapes (see api-responses.ts).
- */
-const UNCLASSIFIED_FRAME_TYPE = 'unclassified';
 
 /** Shown by the default text mode when there is no transcript to print (Issue #3128). */
 const EMPTY_TRANSCRIPT_HINT =
@@ -259,7 +252,12 @@ async function capturePrompts(worktreeId: string, options: CaptureOptions): Prom
     // Issue #1708: a row recording that detection FAILED must not read as a
     // prompt that was seen and is merely unanswered — that reading is what would
     // send an operator looking for an answer path that never existed.
-    const unclassified = p.type === UNCLASSIFIED_FRAME_TYPE;
+    //
+    // Issue #3184: "a row nobody can answer" is the shared view's `unreadable`
+    // — every history record of type `unclassified` is one, since neither
+    // degraded record carries a decision id. Read through `derivePromptView`
+    // rather than a restated copy of the sentinel.
+    const unclassified = derivePromptView(p)?.kind === 'unreadable';
     // Issue #1725: the same row type now has two origins, and they mean
     // opposite things about coverage. `detection-failed` is "nothing saw this";
     // `hook-<source>` is "the agent told us, and the scraper still did not see

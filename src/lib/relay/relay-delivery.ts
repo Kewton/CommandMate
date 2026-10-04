@@ -279,6 +279,8 @@ export function findWorkerReply(
 /** The options of B's open dialog, in the shape the notice lists them. */
 function promptOptionsOf(message: ChatMessage): RelayPromptOption[] {
   const data = message.promptData;
+  // #3184: type narrowing only — the stored row's screen `options` are listed;
+  // a stored degraded record never carries a decision id, so it has none.
   if (!isAnswerablePromptData(data)) return [];
   if (data.type === 'yes_no') {
     return data.options.map((label) => ({ key: label, label }));
@@ -456,6 +458,7 @@ export function notifyRelayPromptWaiting(worker: RelayWorkerRef): void {
 
     const locale = resolveReadersLocale(db);
     const options = promptOptionsOf(prompt);
+    // #3184: type narrowing only, to read `question` off the closed union.
     const question = isAnswerablePromptData(prompt.promptData)
       ? prompt.promptData.question
       : (prompt.promptData?.question ?? prompt.content);

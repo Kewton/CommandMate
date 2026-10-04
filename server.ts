@@ -41,7 +41,7 @@ import {
 } from './src/lib/git/worktrees';
 import { getDbInstance } from './src/lib/db/db-instance';
 import { stopAllPolling } from './src/lib/polling/response-poller';
-import { stopAllAutoYesPolling } from './src/lib/polling/auto-yes-manager';
+import { releaseAutoYes } from './src/lib/auto-yes-lifecycle';
 import { initScheduleManager, stopAllSchedules } from './src/lib/schedule-manager';
 import { initTimerManager, stopAllTimers } from './src/lib/timer-manager';
 import { initResourceCleanup, stopResourceCleanup } from './src/lib/resource-cleanup';
@@ -904,8 +904,10 @@ app.prepare().then(() => {
     // Stop polling first
     stopAllPolling();
 
-    // Issue #138: Stop all auto-yes pollers
-    stopAllAutoYesPolling();
+    // Issue #138: Stop all auto-yes pollers. Issue #3184: the `server-shutdown`
+    // row of the Auto-Yes lifecycle table — the state itself is in memory and
+    // goes with the process; nothing is persisted for the next start.
+    releaseAutoYes('server-shutdown', { scope: 'all' });
 
     // Issue #294: Stop all scheduled executions (SIGKILL fire-and-forget)
     stopAllSchedules();

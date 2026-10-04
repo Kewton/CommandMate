@@ -38,6 +38,15 @@ export interface WaitingKindInput {
   scraperStatus: SessionStatus;
   /** `StatusDetectionResult.reason` for the same frame. */
   scraperReason: string;
+  /**
+   * The wait is answered over the agent's own API (Issue #3184,
+   * `isApiAnswerableStructuredWait`): the app draws its buttons, so it is a
+   * `prompt` whatever the scraper made of the frame — OpenCode V2's approval
+   * strip reads as a selection list (`menu`), and a dialog the scraper cannot
+   * see at all as `unclassified`. Optional; absent is `false`, the pre-#3184
+   * reading.
+   */
+  apiAnswerable?: boolean;
 }
 
 /**
@@ -52,6 +61,7 @@ export interface WaitingKindInput {
  * |--------------------------------------------------|------------------|
  * | not waiting                                       | `null`           |
  * | `hasActivePrompt`                                 | `'prompt'`       |
+ * | `apiAnswerable` (#3184: answered over the agent's API) | `'prompt'`   |
  * | scraper `waiting` + a {@link SELECTION_LIST_REASONS} reason | `'menu'` |
  * | anything else that is still waiting                | `'unclassified'` |
  *
@@ -69,6 +79,7 @@ export interface WaitingKindInput {
 export function deriveWaitingKind(input: WaitingKindInput): WaitingKind | null {
   if (!input.waiting) return null;
   if (input.hasActivePrompt) return 'prompt';
+  if (input.apiAnswerable === true) return 'prompt';
   if (input.scraperStatus === 'waiting' && SELECTION_LIST_REASONS.has(input.scraperReason)) {
     return 'menu';
   }

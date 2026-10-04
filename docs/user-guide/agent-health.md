@@ -103,6 +103,7 @@ interface AgentHealthReport {
       summary: string;              // 1 行。何を期待し何が起きたか
       evidence?: string;            // 失敗時の証拠（画面の末尾 40 行、届いた hook）。4,000 文字まで
       skipReason?: string;
+      framePaths?: string[];        // 画面全体を保存したファイル（下の「画面の保存」）
     }>;
   }>;
   safety: {
@@ -121,6 +122,23 @@ interface AgentHealthReport {
 ```
 
 型は `src/lib/agent-health/types.ts`。
+
+### 画面の保存（Issue #3183）
+
+`screen-*` が fail になったとき、判定に使った**画面全体**をレポートの隣に保存する（`evidence` は末尾の抜粋なので、
+fixture にするには足りない）。
+
+```
+~/.commandmate/agent-health/frames/<YYYY-MM-DD>/<tool>-<checkId>[-<screen>].txt   # capture-pane -p -e の結果そのまま（ANSI つき）
+~/.commandmate/agent-health/frames/<YYYY-MM-DD>/<tool>-<checkId>[-<screen>].json  # 判定（status・summary・版・保存時刻）
+```
+
+- 置き場所は `--out` のレポートのディレクトリの隣の `frames/<日付>/`（既定は上のとおり）。check の `framePaths` に保存先が入る
+- `screen-picker` は開いた選択画面ごとに 1 ファイル（`claude-screen-picker-model.txt` など）
+- 合格した画面も残したいとき（実機の fixture をまとめて採るとき）は `CM_AGENT_HEALTH_SAVE_FRAMES=all` を付けて実行する
+- `.txt` は 1 バイトも変えずに書く。fixture にするときは、利用者名・一時ディレクトリ名を同じ桁数で置き換えてから
+  `tests/fixtures/` に置く（`tests/fixtures/tui-frame-footer-2776/README.md` の「匿名化」と同じ手順）
+- 書けなかったときもレポートは書かれる（その check に `framePaths` が無いだけ）
 
 ## 安全上の不変条件
 
