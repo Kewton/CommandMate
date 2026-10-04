@@ -102,6 +102,9 @@ export function useFileSearch(options: UseFileSearchOptions): UseFileSearchRetur
     [debounceMs]
   );
 
+  // Cancel a pending update on unmount (or when the debounced fn is rebuilt)
+  useEffect(() => () => debouncedSetQuery.cancel(), [debouncedSetQuery]);
+
   /**
    * Set query with debouncing
    */

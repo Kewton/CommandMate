@@ -25,10 +25,10 @@
 export function debounce<T extends (...args: Parameters<T>) => void>(
   fn: T,
   delay: number
-): (...args: Parameters<T>) => void {
+): ((...args: Parameters<T>) => void) & { cancel: () => void } {
   let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
-  return (...args: Parameters<T>) => {
+  const debounced = (...args: Parameters<T>) => {
     if (timeoutId) {
       clearTimeout(timeoutId);
     }
@@ -37,6 +37,15 @@ export function debounce<T extends (...args: Parameters<T>) => void>(
       timeoutId = null;
     }, delay);
   };
+
+  debounced.cancel = (): void => {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+    timeoutId = null;
+  };
+
+  return debounced;
 }
 
 /**
