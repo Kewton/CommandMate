@@ -47,6 +47,7 @@ import {
   STATUS_REASON,
   SELECTION_LIST_REASONS,
   isGeneratingStatus,
+  type StatusDetectionResult,
 } from '@/lib/detection/status-detector';
 import {
   getAutoYesState,
@@ -71,6 +72,7 @@ import {
   markStructuredPromptRecorded,
   observeScraperCompletionEvidence,
   type AskUserQuestionEpisode,
+  type StructuredPromptWaitingState,
 } from '@/lib/session/agent-event-state';
 import { resolvePromptWaiting } from '@/lib/session/prompt-waiting-composition';
 import { DIALOG_PENDING_MAX_MS, isDeliveryExpired } from '@/lib/session/provisional-turn';
@@ -334,6 +336,163 @@ function readAgentEvents(
   };
 
   return { stopEventAt, eventSource, askUserQuestion, structuredEvents };
+}
+
+/** What {@link composePromptData} reads: the frame's verdict and both layers' records. */
+interface PromptCompositionInput {
+  worktreeId: string;
+  cliToolId: CLIToolType;
+  output: string;
+  statusResult: StatusDetectionResult;
+  scraperPromptWaiting: boolean;
+  startingSince: number | null;
+  promptWaiting: StructuredPromptWaitingState | null;
+  askUserQuestion: AskUserQuestionEpisode | null;
+  eventSource: AgentEventSource;
+}
+
+/** What {@link composePromptData} composed, for the rest of {@link buildPayload}. */
+interface PromptComposition {
+  structuredFacts: StructuredPromptFacts | null;
+  promptData: PromptData | StructuredPromptWaitingData | null;
+  promptAnswerable: boolean | undefined;
+}
+
+/**
+ * The prompt this payload publishes and the replies an approval accepts
+ * (Issue #3215). Split out of {@link buildPayload} in the order it ran there;
+ * every value below is derived from the arguments, and nothing is assigned
+ * outside this function.
+ */
+function composePromptData({
+  worktreeId,
+  cliToolId,
+  output,
+  statusResult,
+  scraperPromptWaiting,
+  startingSince,
+  promptWaiting,
+  askUserQuestion,
+  eventSource,
+}: PromptCompositionInput): PromptComposition {
+  // Issue #1726: the agent's own account of what it asked. It contributes only
+  // where some other layer has already established that a dialog is on screen —
+  // this record decides no status of its own, because Claude emits nothing at
+  // all while an AskUserQuestion picker is up (§5.6) and a record that asserted
+  // `waiting` from the invocation would go on asserting it long after a human
+  // answered in the terminal.
+  // Issue #2040 moved the read to the top of this function (the decision entries
+  // publish the same episode's choices) and this line now re-uses it, so the two
+  // surfaces cannot describe different instants.
+  const scraperPromptData = statusResult.promptDetection.promptData;
+  const correctedPromptData =
+    scraperPromptData && askUserQuestion
+      ? applyAskUserQuestion(scraperPromptData, askUserQuestion.spec)
+      : null;
+
+  // The degraded form, for a dialog only the structured layer can see. Enriched
+  // with the question text when one is in flight — that turns "a dialog is open
+  // and nobody could read it" into "a dialog is open and here is what it asks".
+  //
+  // Issue #1898 adds the replies the dialog accepts, for the sources that can be
+  // answered without touching the pane. The gate is `eventIdentity`: a source
+  // that publishes a per-decision id is a source whose approval can be answered
+  // by that id, which is what makes an option NUMBER here mean something other
+  // than a line on a screen nobody parsed. `source === 'notification'` narrows
+  // it to a dialog the agent actually reported — a `permission-request` record
+  // is a prediction, and a question is answered with a choice rather than with
+  // one of these three verdicts.
+  //
+  // Issue #2031 adds the fourth conjunct and folds the whole gate into ONE
+  // value. The three verdicts and the id they are delivered to are now derived
+  // from the same expression, so they cannot be published apart — and "apart"
+  // is not hypothetical, it is the state #1932 shipped: options were published
+  // on the capability alone while `decisionId` was published nowhere at all, so
+  // the panel drew no buttons and the only way out of an opencode approval in a
+  // browser was the arrow-key safety net. Options WITHOUT an id is the worse
+  // half of that pair — the numbers would reach the keystroke path, where a
+  // bare "1" selects whatever the picker happens to be highlighting (#1681).
+  const addressableDecisionId =
+    promptWaiting !== null &&
+    promptWaiting.source === 'notification' &&
+    eventSource.capabilities.eventIdentity === 'permission-id' &&
+    isAddressableDecision(promptWaiting.decisionId)
+      ? promptWaiting.decisionId
+      : null;
+  // Issue #2100 splits the two halves of #2031's single expression, because an
+  // addressable decision is now of two KINDS. The id is published for both — it
+  // is what `POST /respond` names, and a question needs it exactly as much as an
+  // approval does — but the three verdicts belong to an approval alone.
+  //
+  // Publishing both for a question is not a cosmetic error: it is precisely what
+  // #2039's third gate refuses. `readPromptQuestionChoices` returns null the
+  // moment `decisionOptions` is non-empty, so a question carrying them would
+  // draw `Allow once / Allow always / Reject` over the agent's own choices, and
+  // a verdict sent to a question is refused at the source
+  // (`question-needs-answer-verdict`). The kind is recovered from the record the
+  // same way `structuredEvents.pendingDecisions[].kind` is, through the one
+  // reader in `pending-decision-kind`.
+  const addressesQuestion =
+    promptWaiting !== null && pendingDecisionKind(promptWaiting.toolName) === 'question';
+  const decisionOptions =
+    addressableDecisionId !== null && !addressesQuestion
+      ? // Issue #2951: in the tool's own words (OpenCode V2: `Always allow`).
+        structuredDecisionOptionsFor(cliToolId)
+      : null;
+
+  const structuredFacts: StructuredPromptFacts | null =
+    promptWaiting === null
+      ? null
+      : {
+          ...promptWaiting,
+          askUserQuestion: summarizeAskUserQuestion(askUserQuestion),
+          decisionOptions,
+          // Explicit, though the spread above already carries a `decisionId`
+          // off the record: the spread's copy is the raw one, and what may be
+          // published is the GATED one. Letting the record's value through
+          // would put an id on a payload whose verdicts were withheld, which is
+          // the biconditional this Issue exists to hold.
+          decisionId: addressableDecisionId,
+          // Gated on the same value, for a reason of its own: `patterns` is
+          // what the `Allow always` BUTTON grants, so publishing it where no
+          // button is drawn adds a rule list to a panel that is telling the
+          // user to go and answer in the terminal. Every source but opencode
+          // therefore keeps the exact payload it had before this Issue, plus
+          // the one `decisionId: null`.
+          //
+          // Issue #2100 moves the gate onto `decisionOptions` rather than the
+          // id, which is the same value for every approval and the honest one
+          // for a question: a question draws no `Allow always`, so it may not
+          // carry the rules one would have saved. (`reportQuestionPending`
+          // records `patterns: null` anyway; the two agree by construction now
+          // instead of by coincidence.)
+          patterns: decisionOptions !== null ? promptWaiting.patterns : null,
+        };
+
+  const promptData: PromptData | StructuredPromptWaitingData | null = startingSince !== null
+    ? null
+    : scraperPromptWaiting
+    ? correctedPromptData ??
+      scraperPromptData ??
+      (structuredFacts ? buildStructuredPromptData(worktreeId, structuredFacts) : null)
+    : structuredFacts
+      ? buildStructuredPromptData(worktreeId, structuredFacts)
+      : null;
+
+  // Issue #2870: whether `/prompt-response` would answer the prompt published
+  // above, read by the SAME function it re-verifies with. In #2868 `promptData`
+  // came off the generic parser alone, the route refused it, and the UI's Send
+  // did nothing. Only for a parser-read prompt: the structured form (hook
+  // `decisionId`, degraded) is answered by id or not by number at all, so the
+  // key is left out there, as it is when no prompt is up. `isPromptWaiting` /
+  // `promptData` / `sessionStatus` are untouched — `wait`'s exit 10, Auto-Yes
+  // and push notifications keep reading exactly what they read before.
+  const promptAnswerable: boolean | undefined =
+    scraperPromptWaiting && (correctedPromptData ?? scraperPromptData)
+      ? assessPromptAnswerability(cliToolId, output).refusal === null
+      : undefined;
+
+  return { structuredFacts, promptData, promptAnswerable };
 }
 
 /**
@@ -616,122 +775,17 @@ async function buildPayload(
   // neutralised above; this also drops a structured wait the launch inherited.
   const isPromptWaiting = startingSince === null && promptResolution.waiting;
 
-  // Issue #1726: the agent's own account of what it asked. It contributes only
-  // where some other layer has already established that a dialog is on screen —
-  // this record decides no status of its own, because Claude emits nothing at
-  // all while an AskUserQuestion picker is up (§5.6) and a record that asserted
-  // `waiting` from the invocation would go on asserting it long after a human
-  // answered in the terminal.
-  // Issue #2040 moved the read to the top of this function (the decision entries
-  // publish the same episode's choices) and this line now re-uses it, so the two
-  // surfaces cannot describe different instants.
-  const scraperPromptData = statusResult.promptDetection.promptData;
-  const correctedPromptData =
-    scraperPromptData && askUserQuestion
-      ? applyAskUserQuestion(scraperPromptData, askUserQuestion.spec)
-      : null;
-
-  // The degraded form, for a dialog only the structured layer can see. Enriched
-  // with the question text when one is in flight — that turns "a dialog is open
-  // and nobody could read it" into "a dialog is open and here is what it asks".
-  //
-  // Issue #1898 adds the replies the dialog accepts, for the sources that can be
-  // answered without touching the pane. The gate is `eventIdentity`: a source
-  // that publishes a per-decision id is a source whose approval can be answered
-  // by that id, which is what makes an option NUMBER here mean something other
-  // than a line on a screen nobody parsed. `source === 'notification'` narrows
-  // it to a dialog the agent actually reported — a `permission-request` record
-  // is a prediction, and a question is answered with a choice rather than with
-  // one of these three verdicts.
-  //
-  // Issue #2031 adds the fourth conjunct and folds the whole gate into ONE
-  // value. The three verdicts and the id they are delivered to are now derived
-  // from the same expression, so they cannot be published apart — and "apart"
-  // is not hypothetical, it is the state #1932 shipped: options were published
-  // on the capability alone while `decisionId` was published nowhere at all, so
-  // the panel drew no buttons and the only way out of an opencode approval in a
-  // browser was the arrow-key safety net. Options WITHOUT an id is the worse
-  // half of that pair — the numbers would reach the keystroke path, where a
-  // bare "1" selects whatever the picker happens to be highlighting (#1681).
-  const addressableDecisionId =
-    promptWaiting !== null &&
-    promptWaiting.source === 'notification' &&
-    eventSource.capabilities.eventIdentity === 'permission-id' &&
-    isAddressableDecision(promptWaiting.decisionId)
-      ? promptWaiting.decisionId
-      : null;
-  // Issue #2100 splits the two halves of #2031's single expression, because an
-  // addressable decision is now of two KINDS. The id is published for both — it
-  // is what `POST /respond` names, and a question needs it exactly as much as an
-  // approval does — but the three verdicts belong to an approval alone.
-  //
-  // Publishing both for a question is not a cosmetic error: it is precisely what
-  // #2039's third gate refuses. `readPromptQuestionChoices` returns null the
-  // moment `decisionOptions` is non-empty, so a question carrying them would
-  // draw `Allow once / Allow always / Reject` over the agent's own choices, and
-  // a verdict sent to a question is refused at the source
-  // (`question-needs-answer-verdict`). The kind is recovered from the record the
-  // same way `structuredEvents.pendingDecisions[].kind` is, through the one
-  // reader in `pending-decision-kind`.
-  const addressesQuestion =
-    promptWaiting !== null && pendingDecisionKind(promptWaiting.toolName) === 'question';
-  const decisionOptions =
-    addressableDecisionId !== null && !addressesQuestion
-      ? // Issue #2951: in the tool's own words (OpenCode V2: `Always allow`).
-        structuredDecisionOptionsFor(cliToolId)
-      : null;
-
-  const structuredFacts: StructuredPromptFacts | null =
-    promptWaiting === null
-      ? null
-      : {
-          ...promptWaiting,
-          askUserQuestion: summarizeAskUserQuestion(askUserQuestion),
-          decisionOptions,
-          // Explicit, though the spread above already carries a `decisionId`
-          // off the record: the spread's copy is the raw one, and what may be
-          // published is the GATED one. Letting the record's value through
-          // would put an id on a payload whose verdicts were withheld, which is
-          // the biconditional this Issue exists to hold.
-          decisionId: addressableDecisionId,
-          // Gated on the same value, for a reason of its own: `patterns` is
-          // what the `Allow always` BUTTON grants, so publishing it where no
-          // button is drawn adds a rule list to a panel that is telling the
-          // user to go and answer in the terminal. Every source but opencode
-          // therefore keeps the exact payload it had before this Issue, plus
-          // the one `decisionId: null`.
-          //
-          // Issue #2100 moves the gate onto `decisionOptions` rather than the
-          // id, which is the same value for every approval and the honest one
-          // for a question: a question draws no `Allow always`, so it may not
-          // carry the rules one would have saved. (`reportQuestionPending`
-          // records `patterns: null` anyway; the two agree by construction now
-          // instead of by coincidence.)
-          patterns: decisionOptions !== null ? promptWaiting.patterns : null,
-        };
-
-  const promptData: PromptData | StructuredPromptWaitingData | null = startingSince !== null
-    ? null
-    : scraperPromptWaiting
-    ? correctedPromptData ??
-      scraperPromptData ??
-      (structuredFacts ? buildStructuredPromptData(worktreeId, structuredFacts) : null)
-    : structuredFacts
-      ? buildStructuredPromptData(worktreeId, structuredFacts)
-      : null;
-
-  // Issue #2870: whether `/prompt-response` would answer the prompt published
-  // above, read by the SAME function it re-verifies with. In #2868 `promptData`
-  // came off the generic parser alone, the route refused it, and the UI's Send
-  // did nothing. Only for a parser-read prompt: the structured form (hook
-  // `decisionId`, degraded) is answered by id or not by number at all, so the
-  // key is left out there, as it is when no prompt is up. `isPromptWaiting` /
-  // `promptData` / `sessionStatus` are untouched — `wait`'s exit 10, Auto-Yes
-  // and push notifications keep reading exactly what they read before.
-  const promptAnswerable: boolean | undefined =
-    scraperPromptWaiting && (correctedPromptData ?? scraperPromptData)
-      ? assessPromptAnswerability(cliToolId, output).refusal === null
-      : undefined;
+  const { structuredFacts, promptData, promptAnswerable } = composePromptData({
+    worktreeId,
+    cliToolId,
+    output,
+    statusResult,
+    scraperPromptWaiting,
+    startingSince,
+    promptWaiting,
+    askUserQuestion,
+    eventSource,
+  });
 
   // Issue #1723 §3: the field data this Epic is being built on. Every line is
   // one poll where the screen and the agent disagreed about what the agent was
