@@ -26,6 +26,7 @@ import {
   buildDetectPromptOptions,
 } from '../../cli-patterns';
 import { detectPrompt } from '../../prompt-detector';
+import { activePromptVerdict, positiveVerdict, positiveVerdictWithPrompt } from '../verdicts';
 import { STATUS_REASON } from '../../status-reason';
 import {
   readCodexDialogFrame,
@@ -200,14 +201,7 @@ export const codexStatusDetector = createToolStatusDetector({
     // content must not be misread as one. CODEX_PAGER_FOOTER_PATTERN does not match the
     // genuine "/model" selection footer, so the 0.8 path below is unaffected (no regression).
     if (CODEX_PAGER_FOOTER_PATTERN.test(frame.lastLines)) {
-      return {
-        status: 'waiting',
-        confidence: 'high',
-        reason: STATUS_REASON.CODEX_PAGER,
-        hasActivePrompt: false,
-        evidence: 'positive',
-        promptDetection: detectCodexPrompt(frame.clean),
-      };
+      return positiveVerdictWithPrompt('waiting', STATUS_REASON.CODEX_PAGER, detectCodexPrompt(frame.clean));
     }
 
     // 0.75. Codex: the hooks review screens (Issue #1829)
@@ -223,14 +217,7 @@ export const codexStatusDetector = createToolStatusDetector({
     // ordinary text that must not be read as options.
     const codexLifecycleDialog = getCodexLifecycleDialog(withLiveRegion(frame, 'codex'));
     if (codexLifecycleDialog === 'hooks-list' || codexLifecycleDialog === 'hooks-detail') {
-      return {
-        status: 'waiting',
-        confidence: 'high',
-        reason: STATUS_REASON.CODEX_HOOKS_REVIEW,
-        hasActivePrompt: false,
-        evidence: 'positive',
-        promptDetection: detectCodexPrompt(frame.clean),
-      };
+      return positiveVerdictWithPrompt('waiting', STATUS_REASON.CODEX_HOOKS_REVIEW, detectCodexPrompt(frame.clean));
     }
 
     // 0.8. Codex: selection list detection BEFORE prompt detection (Issue #622)
@@ -272,23 +259,9 @@ export const codexStatusDetector = createToolStatusDetector({
           isCodexApprovalRequest(codexPromptDetection, codexSelectionWindow) &&
           !isCodexStalePrompt(contentLines)
         ) {
-          return {
-            status: 'waiting',
-            confidence: 'high',
-            reason: STATUS_REASON.PROMPT_DETECTED,
-            hasActivePrompt: true,
-            evidence: 'positive',
-            promptDetection: codexPromptDetection,
-          };
+          return activePromptVerdict(STATUS_REASON.PROMPT_DETECTED, codexPromptDetection);
         }
-        return {
-          status: 'waiting',
-          confidence: 'high',
-          reason: STATUS_REASON.CODEX_SELECTION_LIST,
-          hasActivePrompt: false,
-          evidence: 'positive',
-          promptDetection: codexPromptDetection,
-        };
+        return positiveVerdictWithPrompt('waiting', STATUS_REASON.CODEX_SELECTION_LIST, codexPromptDetection);
       }
     }
 
@@ -329,23 +302,9 @@ export const codexStatusDetector = createToolStatusDetector({
       }
       const codexPromptDetection = detectCodexPrompt(frame.clean);
       if (codexPromptDetection.isPrompt) {
-        return {
-          status: 'waiting',
-          confidence: 'high',
-          reason: STATUS_REASON.PROMPT_DETECTED,
-          hasActivePrompt: true,
-          evidence: 'positive',
-          promptDetection: codexPromptDetection,
-        };
+        return activePromptVerdict(STATUS_REASON.PROMPT_DETECTED, codexPromptDetection);
       }
-      return {
-        status: 'waiting',
-        confidence: 'high',
-        reason: STATUS_REASON.CODEX_SELECTION_LIST,
-        hasActivePrompt: false,
-        evidence: 'positive',
-        promptDetection: codexPromptDetection,
-      };
+      return positiveVerdictWithPrompt('waiting', STATUS_REASON.CODEX_SELECTION_LIST, codexPromptDetection);
     }
 
     return null;
@@ -400,13 +359,7 @@ export const codexStatusDetector = createToolStatusDetector({
           .slice(Math.max(0, lastContentIdx - THINKING_TAIL_LINE_COUNT + 1), lastContentIdx + 1)
           .join('\n');
         if (detectThinking('codex', codexThinkingWindow)) {
-          return {
-            status: 'running',
-            confidence: 'high',
-            reason: STATUS_REASON.THINKING_INDICATOR,
-            hasActivePrompt: false,
-            evidence: 'positive',
-          };
+          return positiveVerdict('running', STATUS_REASON.THINKING_INDICATOR);
         }
 
         // B. Check if the last content line is the idle › prompt.
@@ -429,13 +382,7 @@ export const codexStatusDetector = createToolStatusDetector({
           CODEX_PROMPT_PATTERN.test(contentLines[lastContentIdx].trim()) &&
           !isCodexDialogGlyphTail(frame.raw)
         ) {
-          return {
-            status: 'ready',
-            confidence: 'high',
-            reason: STATUS_REASON.INPUT_PROMPT,
-            hasActivePrompt: false,
-            evidence: 'positive',
-          };
+          return positiveVerdict('ready', STATUS_REASON.INPUT_PROMPT);
         }
 
         // C. Fallback: status bar present but neither thinking nor idle › detected.
@@ -443,13 +390,7 @@ export const codexStatusDetector = createToolStatusDetector({
         // • Ran/• Working indicators beyond the 5-line thinking window.
         // The status bar ("model · N% left · path") is always visible during Codex
         // sessions, and the only idle state (›) was checked in B above.
-        return {
-          status: 'running',
-          confidence: 'high',
-          reason: STATUS_REASON.THINKING_INDICATOR,
-          hasActivePrompt: false,
-          evidence: 'positive',
-        };
+        return positiveVerdict('running', STATUS_REASON.THINKING_INDICATOR);
       }
     } else {
       // D. Status-bar-independent running detection (Issue #1150, mitigation B).
@@ -474,13 +415,7 @@ export const codexStatusDetector = createToolStatusDetector({
         CODEX_PROMPT_PATTERN.test(contentLines[codexTailIdx].trim()) &&
         !isCodexDialogGlyphTail(frame.raw);
       if (!codexTailIsIdlePrompt && detectThinking('codex', frame.lastLines)) {
-        return {
-          status: 'running',
-          confidence: 'high',
-          reason: STATUS_REASON.THINKING_INDICATOR,
-          hasActivePrompt: false,
-          evidence: 'positive',
-        };
+        return positiveVerdict('running', STATUS_REASON.THINKING_INDICATOR);
       }
     }
 

@@ -23,6 +23,7 @@ import {
   ANTIGRAVITY_SURVEY_PATTERN,
   isAntigravityNumberedDialog,
 } from '../../cli-patterns';
+import { activePromptVerdict, positiveVerdict } from '../verdicts';
 import { STATUS_REASON } from '../../status-reason';
 import { ANTIGRAVITY_LIVE_REGION } from './live-region';
 import { createToolStatusDetector } from '../run-detection';
@@ -41,13 +42,7 @@ export const VERIFIED_AGAINST = ANTIGRAVITY_VERIFIED_AGAINST;
  * puts NavigationButtons (and the chat surface's "drive it from the terminal"
  * card) on screen, and what makes `wait` stop with exit 10 instead of hanging.
  */
-const SELECTION_LIST_VERDICT: ToolStatusVerdict = {
-  status: 'waiting',
-  confidence: 'high',
-  reason: STATUS_REASON.ANTIGRAVITY_SELECTION_LIST,
-  hasActivePrompt: false,
-  evidence: 'positive',
-};
+const SELECTION_LIST_VERDICT: ToolStatusVerdict = positiveVerdict('waiting', STATUS_REASON.ANTIGRAVITY_SELECTION_LIST);
 
 /**
  * How close to the bottom of the content the survey row must be to count as
@@ -177,14 +172,7 @@ export const antigravityStatusDetector = createToolStatusDetector({
     if (isAntigravityNumberedDialog(text)) {
       const promptDetection = detectAntigravityNumberedDialogPrompt(text);
       if (promptDetection !== null) {
-        return {
-          status: 'waiting',
-          confidence: 'high',
-          reason: STATUS_REASON.PROMPT_DETECTED,
-          hasActivePrompt: true,
-          evidence: 'positive',
-          promptDetection,
-        };
+        return activePromptVerdict(STATUS_REASON.PROMPT_DETECTED, promptDetection);
       }
       return {
         status: 'running',
@@ -207,13 +195,7 @@ export const antigravityStatusDetector = createToolStatusDetector({
     // truth: "esc to cancel" + braille spinner / "Generating..." while running,
     // "? for shortcuts" when idle. Resolve running explicitly here first, then idle.
     if (detectThinking('antigravity', frame.lastLines)) {
-      return {
-        status: 'running',
-        confidence: 'high',
-        reason: STATUS_REASON.THINKING_INDICATOR,
-        hasActivePrompt: false,
-        evidence: 'positive',
-      };
+      return positiveVerdict('running', STATUS_REASON.THINKING_INDICATOR);
     }
     // Idle: bare "> " input prompt visible and the response has completed.
     //
@@ -227,13 +209,7 @@ export const antigravityStatusDetector = createToolStatusDetector({
     // first, so a generating pane in those modes is still `running`.
     const { promptPattern } = getCliToolPatterns('antigravity');
     if (promptPattern.test(frame.lastLines)) {
-      return {
-        status: 'ready',
-        confidence: 'high',
-        reason: STATUS_REASON.INPUT_PROMPT,
-        hasActivePrompt: false,
-        evidence: 'positive',
-      };
+      return positiveVerdict('ready', STATUS_REASON.INPUT_PROMPT);
     }
     return null;
   },
