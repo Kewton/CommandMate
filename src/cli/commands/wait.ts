@@ -964,9 +964,44 @@ type StageOutcome =
   | { kind: 'wait' }
   | { kind: 'next' };
 
+/**
+ * The {@link StageOutcome} of a stage that never holds the poll: `exit` or
+ * `next`. {@link pollWorktree} asks such a stage for `exit` alone, and this type
+ * is what keeps a `wait` from passing there as `next`.
+ */
+type ExitOrNextOutcome = Exclude<StageOutcome, { kind: 'wait' }>;
+
 /** The outcome that ends the wait with `result`. */
-function exitWith(result: PollResult): StageOutcome {
+function exitWith(result: PollResult): Extract<StageOutcome, { kind: 'exit' }> {
   return { kind: 'exit', result };
+}
+
+/**
+ * Stage: `--timeout` and `--stall-timeout`, asked at the top of every poll,
+ * before its request. Exit 124.
+ */
+function deadlineStage(poll: PollContext, state: PollState): ExitOrNextOutcome {
+  const { worktreeId, options, startTime } = poll;
+
+  // Check timeout
+  if (options.timeout) {
+    const elapsed = (Date.now() - startTime) / 1000;
+    if (elapsed >= options.timeout) {
+      console.error(`Timeout: ${worktreeId} exceeded ${options.timeout}s`);
+      return exitWith({ exitCode: WaitExitCode.TIMEOUT });
+    }
+  }
+
+  // Check stall-timeout
+  if (options.stallTimeout) {
+    const stallElapsed = (Date.now() - state.lastActivityTime) / 1000;
+    if (stallElapsed >= options.stallTimeout) {
+      console.error(`Stall timeout: ${worktreeId} no output for ${options.stallTimeout}s`);
+      return exitWith({ exitCode: WaitExitCode.TIMEOUT });
+    }
+  }
+
+  return { kind: 'next' };
 }
 
 /**
@@ -1135,6 +1170,47 @@ function unclassifiedStage(poll: PollContext, state: PollState, data: CurrentOut
     }
   } else {
     state.unclassifiedSince = null;
+  }
+
+  return { kind: 'next' };
+}
+
+/**
+ * Stage: the session is not running (Path A). Exit 21 when this wait never saw
+ * it alive (Issue #1628), exit 0 when it went away after it had been seen.
+ */
+function notRunningStage(
+  poll: PollContext,
+  state: PollState,
+  data: CurrentOutputResponse,
+  selfResumeSuffix: () => string,
+): ExitOrNextOutcome {
+  const { worktreeId, options } = poll;
+
+  // Completion check [DR1-04]:
+  // Path A: the tmux session went away after we had seen it alive — the agent
+  //         finished and its session was stopped.
+  // Path B: agent completed task (sessionStatus === 'ready', input prompt detected)
+  // Both indicate "no more work in progress" from wait command's perspective.
+  //
+  // Issue #1628 narrowed Path A: a session that was NEVER seen running is
+  // "nothing to wait for" (NOT_STARTED), not a completion. See `everRunning`.
+  if (!data.isRunning && !state.everRunning) {
+    console.error(describeNotStarted(worktreeId, data, options));
+    return exitWith({ exitCode: VerifyExitCode.NOT_STARTED });
+  }
+
+  // Issue #1708 narrowed Path B: `ready` is only a completion when the frame
+  // was actually understood. A structured `hook_stop` over an unreadable
+  // pane is the degraded form of an overlay nobody could parse (see the note
+  // above), and reporting it as `Completed` is how a stalled worker gets
+  // merged. Path A is untouched — a session that went away really is
+  // finished, and carries no flag anyway.
+  if (!data.isRunning) {
+    console.error(
+      `Completed: ${worktreeId} (basis=${COMPLETION_BASIS.SESSION_GONE}${selfResumeSuffix()})`,
+    );
+    return exitWith({ exitCode: WaitExitCode.SUCCESS });
   }
 
   return { kind: 'next' };
@@ -1421,23 +1497,8 @@ export async function pollWorktree(
   };
 
   while (true) {
-    // Check timeout
-    if (options.timeout) {
-      const elapsed = (Date.now() - startTime) / 1000;
-      if (elapsed >= options.timeout) {
-        console.error(`Timeout: ${worktreeId} exceeded ${options.timeout}s`);
-        return { exitCode: WaitExitCode.TIMEOUT };
-      }
-    }
-
-    // Check stall-timeout
-    if (options.stallTimeout) {
-      const stallElapsed = (Date.now() - state.lastActivityTime) / 1000;
-      if (stallElapsed >= options.stallTimeout) {
-        console.error(`Stall timeout: ${worktreeId} no output for ${options.stallTimeout}s`);
-        return { exitCode: WaitExitCode.TIMEOUT };
-      }
-    }
+    const deadlineOutcome = deadlineStage(poll, state);
+    if (deadlineOutcome.kind === 'exit') return deadlineOutcome.result;
 
     try {
       // Issue #868: scope polling to a specific agent instance when provided.
@@ -1521,31 +1582,8 @@ export async function pollWorktree(
         continue;
       }
 
-      // Completion check [DR1-04]:
-      // Path A: the tmux session went away after we had seen it alive — the agent
-      //         finished and its session was stopped.
-      // Path B: agent completed task (sessionStatus === 'ready', input prompt detected)
-      // Both indicate "no more work in progress" from wait command's perspective.
-      //
-      // Issue #1628 narrowed Path A: a session that was NEVER seen running is
-      // "nothing to wait for" (NOT_STARTED), not a completion. See `everRunning`.
-      if (!data.isRunning && !state.everRunning) {
-        console.error(describeNotStarted(worktreeId, data, options));
-        return { exitCode: VerifyExitCode.NOT_STARTED };
-      }
-
-      // Issue #1708 narrowed Path B: `ready` is only a completion when the frame
-      // was actually understood. A structured `hook_stop` over an unreadable
-      // pane is the degraded form of an overlay nobody could parse (see the note
-      // above), and reporting it as `Completed` is how a stalled worker gets
-      // merged. Path A is untouched — a session that went away really is
-      // finished, and carries no flag anyway.
-      if (!data.isRunning) {
-        console.error(
-          `Completed: ${worktreeId} (basis=${COMPLETION_BASIS.SESSION_GONE}${selfResumeSuffix()})`,
-        );
-        return { exitCode: WaitExitCode.SUCCESS };
-      }
+      const notRunningOutcome = notRunningStage(poll, state, data, selfResumeSuffix);
+      if (notRunningOutcome.kind === 'exit') return notRunningOutcome.result;
 
       const readyOutcome = await readyStage(poll, state, data, selfResumeStopAt, selfResumeSuffix);
       if (readyOutcome.kind === 'exit') return readyOutcome.result;
