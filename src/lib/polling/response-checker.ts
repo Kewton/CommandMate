@@ -561,6 +561,395 @@ export function detectPromptWithOptions(
 // ============================================================================
 
 /**
+ * Where the tool's pinned footer starts in the capture — the row the transcript
+ * stops at — or -1 when the tool pins none or its landmark is not on the frame.
+ *
+ * Split out of {@link extractResponse} (Issue #3213). The comment above
+ * `openCodeCleanLines` there introduces the first three readers and says why
+ * they stay separate functions; the one in the body here continues it.
+ *
+ * @param cliToolId - CLI tool identifier
+ * @param lines - The trimmed tmux buffer lines array
+ * @param openCodeCleanLines - `lines` with ANSI stripped for opencode, null for every other tool
+ * @returns Index of the first chrome row, or -1
+ */
+function findChromeStart(
+  cliToolId: CLIToolType,
+  lines: string[],
+  openCodeCleanLines: string[] | null
+): number {
+  // Issue #2250: Command Code is the fourth. Its landmark is its own — the
+  // `❯ Ask your question...` composer fenced by two full-pane rules, with the
+  // permission-mode row underneath — and it is load-bearing rather than tidy:
+  // that placeholder is drawn with the same `❯ <text>` shape as a transcript
+  // echo, so without the boundary `findRecentUserPromptIndex` anchors the turn
+  // on the FOOTER and every reply extracts as empty (#1289's defect, verbatim).
+  //
+  // Issue #2400: codex is the fifth, and the one that had been missing. It pins
+  // the same two rows — `› Ask Codex to do anything` and the `model · cwd`
+  // status bar — and without a boundary the saturated-window anchor (#1670)
+  // walked into them: the newest `›` in the pane was the COMPOSER, so extraction
+  // started on the status bar and every reply on a saturated pane was saved as
+  // that one row. `findCodexChromeStart` reads the composer by its SGR
+  // attributes (#2310) rather than by its placeholder wording, which is what the
+  // previous guard did and why it stopped working at codex 0.15x.
+  return cliToolId === 'claude'
+    ? findClaudeChromeStart(lines)
+    : cliToolId === 'copilot'
+      ? findCopilotChromeStart(lines)
+      : cliToolId === 'command-code'
+        ? findCommandCodeChromeStart(lines)
+        : cliToolId === 'codex'
+          ? findCodexChromeStart(lines)
+          : openCodeCleanLines
+            ? findOpenCodeChromeStart(openCodeCleanLines)
+            : -1;
+}
+
+/**
+ * Index of the newest echoed user prompt in the transcript, or -1 when there is
+ * none in the window.
+ *
+ * The body of the `findRecentUserPromptIndex` closure in {@link extractResponse},
+ * split out as it was (Issue #3213). The closure is still there: it binds the
+ * frame and keeps the default window, because `resolveExtractionStartIndex` and
+ * `buildPromptExtractionResult` take the search as a one-argument callback.
+ *
+ * @param cliToolId - CLI tool identifier
+ * @param lines - The trimmed tmux buffer lines array
+ * @param openCodeCleanLines - `lines` with ANSI stripped for opencode, null for every other tool
+ * @param chromeStart - What `findChromeStart` returned for this frame
+ * @param contentEnd - Where the transcript stops: `chromeStart`, or the line count when that is -1
+ * @param windowSize - How many rows up from `contentEnd` to search
+ * @returns Index into `lines`, or -1
+ */
+function findRecentUserPromptIndexInFrame(
+  cliToolId: CLIToolType,
+  lines: string[],
+  openCodeCleanLines: string[] | null,
+  chromeStart: number,
+  contentEnd: number,
+  windowSize: number
+): number {
+  let userPromptPattern: RegExp;
+  if (cliToolId === 'codex') {
+    // Issue #2400: codex's three uses of `›` are separated by their SGR
+    // attributes, not by their text (#2310). This branch used to exclude the
+    // composer with a negative lookahead over its placeholder strings
+    // (`Implement`, `Find and fix`, `Type`, `Summarize`) — codex 0.1x wording,
+    // none of which 0.15x draws. `Ask Codex to do anything` passed the guard,
+    // became the newest "echo", and on a saturated pane (#1670) — the only
+    // path where this anchor decides where extraction STARTS — every reply was
+    // saved as the single status-bar row below it.
+    //
+    // Two independent things now keep the composer out, and the reader needs
+    // both because neither covers the other's frames: `contentEnd` cuts the
+    // composer off structurally when `findCodexChromeStart` located it, and
+    // when it did not, `findCodexUserEchoIndex` steps over the bottom-most
+    // `›` row instead. The second is what still answers on an ANSI-stripped
+    // capture, where none of #2310's attributes survive to be read.
+    return findCodexUserEchoIndex(lines, contentEnd, windowSize, chromeStart >= 0);
+  } else if (openCodeCleanLines) {
+    // Issue #1911: anchor on the newest ECHOED USER PROMPT, not on the
+    // second-to-last `▣ Build` row. The old anchor belonged to the PREVIOUS
+    // turn, so the echoed prompt of the current one was always extracted as
+    // part of the reply — and on the first turn of a session, where there is
+    // no second marker, it fell through to line 0 and the whole pane (banner
+    // included) became the answer. `windowSize` is ignored: the alternate
+    // screen has no scrollback, so the whole pane IS the window, and every
+    // caller already passes `totalLines` or more for this tool.
+    return resolveOpenCodeTurnRegion(openCodeCleanLines).echoEnd;
+  } else if (cliToolId === 'copilot') {
+    // Issue #1897: copilot 1.0.80 draws the transcript one column in, so the
+    // bare `^[>❯]` form below never matched the echoed prompt -- every copilot
+    // extraction fell back to line 0, i.e. to the launch banner. The composer,
+    // which IS at column 0, lives below `contentEnd` and so cannot be picked up
+    // as an echo here.
+    //
+    // The scan then walks past the echo's own wrapped rows and returns the LAST
+    // of them, so that callers' `+ 1` lands on the reply rather than on the
+    // second half of the operator's question.
+    //
+    // Same defect as #1911's opencode branch above and the same shape of fix,
+    // but NOT the same code: opencode's echo is a `┃  <text>` gutter row and
+    // copilot's is ` ❯ <text>` at the pane's one-column indent, so the anchor
+    // and the continuation rule are both tool-specific measurements.
+    for (let i = contentEnd - 1; i >= Math.max(0, contentEnd - windowSize); i--) {
+      if (!COPILOT_USER_ECHO_PATTERN.test(stripAnsi(lines[i]))) continue;
+      let echoEnd = i;
+      while (
+        echoEnd + 1 < contentEnd &&
+        COPILOT_TRANSCRIPT_CONTINUATION_PATTERN.test(stripAnsi(lines[echoEnd + 1]))
+      ) {
+        echoEnd++;
+      }
+      return echoEnd;
+    }
+    return -1;
+  } else {
+    userPromptPattern = /^[>❯]\s+\S/;
+  }
+
+  // Issue #1289: for Claude the search stops above the footer. The text the
+  // user just typed sits in the footer's input box and matches the same "❯ …"
+  // shape as the transcript echo; anchoring on it would treat the footer as
+  // the newest turn and extract the status bar as its reply.
+  for (let i = contentEnd - 1; i >= Math.max(0, contentEnd - windowSize); i--) {
+    const cleanLine = stripAnsi(lines[i]);
+    if (userPromptPattern.test(cleanLine)) {
+      return i;
+    }
+  }
+
+  return -1;
+}
+
+// Startup-screen defenses, split out of extractResponse one function per tool
+// (Issue #3213). Each is called on a frame the completion rules have already
+// accepted, with the `response` extracted from it, and answers only for its own
+// tool: the incomplete result to return when the frame is that tool's startup
+// screen rather than a reply, `null` when the response stands. They are declared
+// in the order extractResponse calls them — the comments inside say "above" and
+// "below" about each other and about the checks that ran before the call.
+
+/**
+ * Claude: the startup banner, and an echoed prompt with no reply under it yet.
+ *
+ * @param cliToolId - CLI tool identifier
+ * @param response - The response extracted from the frame
+ * @param totalLines - Total line count in the buffer
+ * @param skipPatterns - The tool's skip patterns from `getCliToolPatterns`
+ * @param findRecentUserPromptIndex - Callback to locate the most recent user prompt
+ * @returns The incomplete result to return, or null when the response stands
+ */
+function suppressClaudeStartupScreen(
+  cliToolId: CLIToolType,
+  response: string,
+  totalLines: number,
+  skipPatterns: RegExp[],
+  findRecentUserPromptIndex: (windowSize: number) => number
+): ExtractionResult | null {
+  // CRITICAL FIX: Detect and skip Claude Code startup banner/screen
+  if (cliToolId === 'claude') {
+    const cleanResponse = stripAnsi(response);
+
+    // Issue #2247: `│` is what Claude Code draws markdown TABLES with -- the
+    // live frame in `tests/fixtures/claude-live-2247/turn-table.txt` is a
+    // two-row table and nothing else -- so it identified a reply, not a banner.
+    // The banner's own frame glyphs are the rounded corners and the block
+    // shading; those stay.
+    const hasBannerArt = /[╭╮╰╯]/.test(cleanResponse) || /░{3,}/.test(cleanResponse) || /▓{3,}/.test(cleanResponse);
+    // Issue #2247: the bare `v\d+\.\d+` alternative matched any version string a
+    // reply happens to mention. The frame that lost a turn on 2026-09-02 was
+    // "GitHub Release v0.30.0 を公開しました" (148 chars, well under the 2000
+    // below). What the banner actually prints is the tool's own name and
+    // version on one row -- `Claude Code v2.1.258` -- so that is what is
+    // matched now, plus the `claude/` form older banners used.
+    const hasVersionInfo = /Claude Code v\d+\.\d+|claude\//.test(cleanResponse);
+    const hasStartupTips = /Tip:|for shortcuts|\?\s*for help/.test(cleanResponse);
+    const hasProjectInit = /^\s*\/Users\/.*$/m.test(cleanResponse) && cleanResponse.split('\n').length < 30;
+
+    // Issue #2247: the anchors above are only evidence of a banner on a pane
+    // that has not had a single turn yet -- the same shape as the #1897 copilot
+    // fix below. Claude echoes every prompt into the transcript as `❯ <text>`,
+    // and the startup screen has none, so an echo anywhere in the transcript
+    // rules the banner out no matter what the reply quotes.
+    //
+    // The search is `findRecentUserPromptIndex`, deliberately: it is the same
+    // `/^[>❯]\s+\S/` this file already anchors extraction on, and it stops at
+    // `contentEnd`. That bound is load-bearing rather than incidental -- the
+    // footer's composer draws a DIM ghost suggestion (`❯ Try "write a test for
+    // <filepath>"`, see `boot-banner.txt`) whose stripped bytes are identical
+    // to a real echo (#1879), so a scan over the whole pane would read the
+    // startup screen as "already had a turn" and put the banner back in
+    // History.
+    const hasTurnEcho = findRecentUserPromptIndex(totalLines) >= 0;
+
+    const userPromptMatch = cleanResponse.match(/^[>❯]\s+(\S.*)$/m);
+
+    if (userPromptMatch) {
+      const userPromptIndex = cleanResponse.indexOf(userPromptMatch[0]);
+      const contentAfterPrompt = cleanResponse.substring(userPromptIndex + userPromptMatch[0].length).trim();
+
+      const contentLines = contentAfterPrompt.split('\n').filter(line => {
+        const trimmed = line.trim();
+        return trimmed &&
+               !skipPatterns.some(p => p.test(trimmed)) &&
+               !/^─+$/.test(trimmed);
+      });
+
+      if (contentLines.length === 0) {
+        return incompleteResult(totalLines);
+      }
+    } else if (
+      !hasTurnEcho &&
+      (hasBannerArt || hasVersionInfo || hasStartupTips || hasProjectInit) &&
+      response.length < 2000
+    ) {
+      // Issue #2247: this branch used to swallow the turn in silence -- the
+      // poller kept ticking every 2s and `response-poller` logged nothing at
+      // all, so the only way to tell a lost turn from an idle session was to
+      // re-run `extractResponse` on a saved pane by hand. It is reached only
+      // before the first echo lands, so it cannot become a per-tick flood.
+      logger.info('Claude startup banner suppressed, response not saved', {
+        responseLength: response.length,
+        hasBannerArt,
+        hasVersionInfo,
+        hasStartupTips,
+        hasProjectInit,
+      });
+      return incompleteResult(totalLines);
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Copilot: the launch screen.
+ *
+ * @param cliToolId - CLI tool identifier
+ * @param response - The response extracted from the frame
+ * @param totalLines - Total line count in the buffer
+ * @returns The incomplete result to return, or null when the response stands
+ */
+function suppressCopilotLaunchScreen(
+  cliToolId: CLIToolType,
+  response: string,
+  totalLines: number
+): ExtractionResult | null {
+  // Issue #1897: copilot's launch screen is a complete, idle frame -- composer
+  // drawn, key hints on the status bar -- so every check above accepts it and
+  // History used to open with the banner ("Current Sessions Issues Pull
+  // requests Gists / No copilot-instructions.md found… / Tip: /app") saved as
+  // the agent's first reply, before the operator had said anything.
+  //
+  // What actually distinguishes it is that no turn has happened: copilot echoes
+  // every prompt into the transcript as ` ❯ <text>`, and the launch screen has
+  // none. The banner anchors are only consulted once that echo is missing, so a
+  // reply that quotes any of this wording is unaffected.
+  if (cliToolId === 'copilot') {
+    const cleanResponse = stripAnsi(response);
+    const hasUserEcho = cleanResponse
+      .split('\n')
+      .some(line => COPILOT_USER_ECHO_PATTERN.test(line));
+    if (!hasUserEcho && COPILOT_BOOT_BANNER_ANCHORS.some(anchor => anchor.test(cleanResponse))) {
+      return incompleteResult(totalLines);
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Command Code: the launch screen.
+ *
+ * @param cliToolId - CLI tool identifier
+ * @param response - The response extracted from the frame
+ * @param totalLines - Total line count in the buffer
+ * @param findRecentUserPromptIndex - Callback to locate the most recent user prompt
+ * @returns The incomplete result to return, or null when the response stands
+ */
+function suppressCommandCodeLaunchScreen(
+  cliToolId: CLIToolType,
+  response: string,
+  totalLines: number,
+  findRecentUserPromptIndex: (windowSize: number) => number
+): ExtractionResult | null {
+  // Issue #2250: Command Code's launch screen is a complete, idle frame --
+  // block-art logo, three `#` banner rows, composer drawn between its two
+  // rules -- so every check above accepts it, and History would open with
+  // `# Command Code v1.40.1 / # models: … / # <cwd>` saved as the agent's
+  // first reply before the operator has said anything.
+  //
+  // The rule is ONE condition and it is a positive one: Command Code echoes
+  // every prompt into the transcript as `❯ <text>`, and the launch screen has
+  // none. That is the shape #1897 and #2247 both converged on; the anchor
+  // heuristics claude carries above (`hasBannerArt` / `hasVersionInfo` /
+  // `hasStartupTips`) are deliberately NOT reproduced here, because they are
+  // what #2247 had to take back -- a bare version string in a reply is a
+  // normal reply, and Command Code prints its own version on every launch.
+  //
+  // `findRecentUserPromptIndex` is the same `/^[>❯]\s+\S/` scan the extraction
+  // anchors on, and it stops at `contentEnd`, so the composer's own dim
+  // `❯ Ask your question...` placeholder cannot be mistaken for an echo
+  // (#1879's trap).
+  if (cliToolId === 'command-code' && findRecentUserPromptIndex(totalLines) < 0) {
+    logger.info('Command Code launch screen suppressed, response not saved', {
+      responseLength: response.length,
+    });
+    return incompleteResult(totalLines);
+  }
+
+  return null;
+}
+
+/**
+ * Gemini: the banner, the auth/loading states, and a frame too short to be a reply.
+ *
+ * @param cliToolId - CLI tool identifier
+ * @param response - The response extracted from the frame
+ * @param totalLines - Total line count in the buffer
+ * @returns The incomplete result to return, or null when the response stands
+ */
+function suppressGeminiStartupScreen(
+  cliToolId: CLIToolType,
+  response: string,
+  totalLines: number
+): ExtractionResult | null {
+  // Gemini-specific check
+  if (cliToolId === 'gemini') {
+    const bannerCharCount = (response.match(/[░███]/g) || []).length;
+    const totalChars = response.length;
+    if (bannerCharCount > totalChars * 0.3) {
+      return incompleteResult(totalLines);
+    }
+
+    if (GEMINI_LOADING_INDICATORS.some(indicator => response.includes(indicator))) {
+      return incompleteResult(totalLines);
+    }
+
+    if (!response.includes('\u2726') && response.length < 10) {
+      return incompleteResult(totalLines);
+    }
+  }
+
+  return null;
+}
+
+/**
+ * OpenCode: the banner.
+ *
+ * @param cliToolId - CLI tool identifier
+ * @param response - The response extracted from the frame
+ * @param totalLines - Total line count in the buffer
+ * @param cleanOutputToCheck - The ANSI-stripped text the completion rules were tested against
+ * @returns The incomplete result to return, or null when the response stands
+ */
+function suppressOpenCodeBanner(
+  cliToolId: CLIToolType,
+  response: string,
+  totalLines: number,
+  cleanOutputToCheck: string
+): ExtractionResult | null {
+  // OpenCode banner defense
+  if (cliToolId === 'opencode') {
+    const cleanResponse = stripAnsi(response);
+    if (cleanResponse.length < 50 || !OPENCODE_RESPONSE_COMPLETE.test(cleanOutputToCheck)) {
+      const contentLines = cleanResponse.split('\n').filter(line => {
+        const trimmed = line.trim();
+        return trimmed && !OPENCODE_SKIP_PATTERNS.some(p => p.test(trimmed));
+      });
+      if (contentLines.length === 0) {
+        return incompleteResult(totalLines);
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
  * Extract CLI tool response from tmux output
  * Detects when a CLI tool has completed a response by looking for tool-specific patterns
  *
@@ -624,32 +1013,7 @@ export function extractResponse(
   // does not fail loudly: it puts terminal furniture back into History.
   const openCodeCleanLines = cliToolId === 'opencode' ? lines.map(stripAnsi) : null;
 
-  // Issue #2250: Command Code is the fourth. Its landmark is its own — the
-  // `❯ Ask your question...` composer fenced by two full-pane rules, with the
-  // permission-mode row underneath — and it is load-bearing rather than tidy:
-  // that placeholder is drawn with the same `❯ <text>` shape as a transcript
-  // echo, so without the boundary `findRecentUserPromptIndex` anchors the turn
-  // on the FOOTER and every reply extracts as empty (#1289's defect, verbatim).
-  //
-  // Issue #2400: codex is the fifth, and the one that had been missing. It pins
-  // the same two rows — `› Ask Codex to do anything` and the `model · cwd`
-  // status bar — and without a boundary the saturated-window anchor (#1670)
-  // walked into them: the newest `›` in the pane was the COMPOSER, so extraction
-  // started on the status bar and every reply on a saturated pane was saved as
-  // that one row. `findCodexChromeStart` reads the composer by its SGR
-  // attributes (#2310) rather than by its placeholder wording, which is what the
-  // previous guard did and why it stopped working at codex 0.15x.
-  const chromeStart = cliToolId === 'claude'
-    ? findClaudeChromeStart(lines)
-    : cliToolId === 'copilot'
-      ? findCopilotChromeStart(lines)
-      : cliToolId === 'command-code'
-        ? findCommandCodeChromeStart(lines)
-        : cliToolId === 'codex'
-          ? findCodexChromeStart(lines)
-          : openCodeCleanLines
-            ? findOpenCodeChromeStart(openCodeCleanLines)
-            : -1;
+  const chromeStart = findChromeStart(cliToolId, lines, openCodeCleanLines);
   const contentEnd = chromeStart >= 0 ? chromeStart : totalLines;
 
   const BUFFER_RESET_TOLERANCE = 25;
@@ -673,79 +1037,8 @@ export function extractResponse(
   // Get tool-specific patterns from shared module
   const { promptPattern, separatorPattern, thinkingPattern, skipPatterns } = getCliToolPatterns(cliToolId);
 
-  const findRecentUserPromptIndex = (windowSize: number = 60): number => {
-    let userPromptPattern: RegExp;
-    if (cliToolId === 'codex') {
-      // Issue #2400: codex's three uses of `›` are separated by their SGR
-      // attributes, not by their text (#2310). This branch used to exclude the
-      // composer with a negative lookahead over its placeholder strings
-      // (`Implement`, `Find and fix`, `Type`, `Summarize`) — codex 0.1x wording,
-      // none of which 0.15x draws. `Ask Codex to do anything` passed the guard,
-      // became the newest "echo", and on a saturated pane (#1670) — the only
-      // path where this anchor decides where extraction STARTS — every reply was
-      // saved as the single status-bar row below it.
-      //
-      // Two independent things now keep the composer out, and the reader needs
-      // both because neither covers the other's frames: `contentEnd` cuts the
-      // composer off structurally when `findCodexChromeStart` located it, and
-      // when it did not, `findCodexUserEchoIndex` steps over the bottom-most
-      // `›` row instead. The second is what still answers on an ANSI-stripped
-      // capture, where none of #2310's attributes survive to be read.
-      return findCodexUserEchoIndex(lines, contentEnd, windowSize, chromeStart >= 0);
-    } else if (openCodeCleanLines) {
-      // Issue #1911: anchor on the newest ECHOED USER PROMPT, not on the
-      // second-to-last `▣ Build` row. The old anchor belonged to the PREVIOUS
-      // turn, so the echoed prompt of the current one was always extracted as
-      // part of the reply — and on the first turn of a session, where there is
-      // no second marker, it fell through to line 0 and the whole pane (banner
-      // included) became the answer. `windowSize` is ignored: the alternate
-      // screen has no scrollback, so the whole pane IS the window, and every
-      // caller already passes `totalLines` or more for this tool.
-      return resolveOpenCodeTurnRegion(openCodeCleanLines).echoEnd;
-    } else if (cliToolId === 'copilot') {
-      // Issue #1897: copilot 1.0.80 draws the transcript one column in, so the
-      // bare `^[>❯]` form below never matched the echoed prompt -- every copilot
-      // extraction fell back to line 0, i.e. to the launch banner. The composer,
-      // which IS at column 0, lives below `contentEnd` and so cannot be picked up
-      // as an echo here.
-      //
-      // The scan then walks past the echo's own wrapped rows and returns the LAST
-      // of them, so that callers' `+ 1` lands on the reply rather than on the
-      // second half of the operator's question.
-      //
-      // Same defect as #1911's opencode branch above and the same shape of fix,
-      // but NOT the same code: opencode's echo is a `┃  <text>` gutter row and
-      // copilot's is ` ❯ <text>` at the pane's one-column indent, so the anchor
-      // and the continuation rule are both tool-specific measurements.
-      for (let i = contentEnd - 1; i >= Math.max(0, contentEnd - windowSize); i--) {
-        if (!COPILOT_USER_ECHO_PATTERN.test(stripAnsi(lines[i]))) continue;
-        let echoEnd = i;
-        while (
-          echoEnd + 1 < contentEnd &&
-          COPILOT_TRANSCRIPT_CONTINUATION_PATTERN.test(stripAnsi(lines[echoEnd + 1]))
-        ) {
-          echoEnd++;
-        }
-        return echoEnd;
-      }
-      return -1;
-    } else {
-      userPromptPattern = /^[>❯]\s+\S/;
-    }
-
-    // Issue #1289: for Claude the search stops above the footer. The text the
-    // user just typed sits in the footer's input box and matches the same "❯ …"
-    // shape as the transcript echo; anchoring on it would treat the footer as
-    // the newest turn and extract the status bar as its reply.
-    for (let i = contentEnd - 1; i >= Math.max(0, contentEnd - windowSize); i--) {
-      const cleanLine = stripAnsi(lines[i]);
-      if (userPromptPattern.test(cleanLine)) {
-        return i;
-      }
-    }
-
-    return -1;
-  };
+  const findRecentUserPromptIndex = (windowSize: number = 60): number =>
+    findRecentUserPromptIndexInFrame(cliToolId, lines, openCodeCleanLines, chromeStart, contentEnd, windowSize);
 
   // Early check for interactive prompts (before extraction logic)
   //
@@ -909,153 +1202,16 @@ export function extractResponse(
       return incompleteResult(totalLines);
     }
 
-    // CRITICAL FIX: Detect and skip Claude Code startup banner/screen
-    if (cliToolId === 'claude') {
-      const cleanResponse = stripAnsi(response);
-
-      // Issue #2247: `│` is what Claude Code draws markdown TABLES with -- the
-      // live frame in `tests/fixtures/claude-live-2247/turn-table.txt` is a
-      // two-row table and nothing else -- so it identified a reply, not a banner.
-      // The banner's own frame glyphs are the rounded corners and the block
-      // shading; those stay.
-      const hasBannerArt = /[╭╮╰╯]/.test(cleanResponse) || /░{3,}/.test(cleanResponse) || /▓{3,}/.test(cleanResponse);
-      // Issue #2247: the bare `v\d+\.\d+` alternative matched any version string a
-      // reply happens to mention. The frame that lost a turn on 2026-09-02 was
-      // "GitHub Release v0.30.0 を公開しました" (148 chars, well under the 2000
-      // below). What the banner actually prints is the tool's own name and
-      // version on one row -- `Claude Code v2.1.258` -- so that is what is
-      // matched now, plus the `claude/` form older banners used.
-      const hasVersionInfo = /Claude Code v\d+\.\d+|claude\//.test(cleanResponse);
-      const hasStartupTips = /Tip:|for shortcuts|\?\s*for help/.test(cleanResponse);
-      const hasProjectInit = /^\s*\/Users\/.*$/m.test(cleanResponse) && cleanResponse.split('\n').length < 30;
-
-      // Issue #2247: the anchors above are only evidence of a banner on a pane
-      // that has not had a single turn yet -- the same shape as the #1897 copilot
-      // fix below. Claude echoes every prompt into the transcript as `❯ <text>`,
-      // and the startup screen has none, so an echo anywhere in the transcript
-      // rules the banner out no matter what the reply quotes.
-      //
-      // The search is `findRecentUserPromptIndex`, deliberately: it is the same
-      // `/^[>❯]\s+\S/` this file already anchors extraction on, and it stops at
-      // `contentEnd`. That bound is load-bearing rather than incidental -- the
-      // footer's composer draws a DIM ghost suggestion (`❯ Try "write a test for
-      // <filepath>"`, see `boot-banner.txt`) whose stripped bytes are identical
-      // to a real echo (#1879), so a scan over the whole pane would read the
-      // startup screen as "already had a turn" and put the banner back in
-      // History.
-      const hasTurnEcho = findRecentUserPromptIndex(totalLines) >= 0;
-
-      const userPromptMatch = cleanResponse.match(/^[>❯]\s+(\S.*)$/m);
-
-      if (userPromptMatch) {
-        const userPromptIndex = cleanResponse.indexOf(userPromptMatch[0]);
-        const contentAfterPrompt = cleanResponse.substring(userPromptIndex + userPromptMatch[0].length).trim();
-
-        const contentLines = contentAfterPrompt.split('\n').filter(line => {
-          const trimmed = line.trim();
-          return trimmed &&
-                 !skipPatterns.some(p => p.test(trimmed)) &&
-                 !/^─+$/.test(trimmed);
-        });
-
-        if (contentLines.length === 0) {
-          return incompleteResult(totalLines);
-        }
-      } else if (
-        !hasTurnEcho &&
-        (hasBannerArt || hasVersionInfo || hasStartupTips || hasProjectInit) &&
-        response.length < 2000
-      ) {
-        // Issue #2247: this branch used to swallow the turn in silence -- the
-        // poller kept ticking every 2s and `response-poller` logged nothing at
-        // all, so the only way to tell a lost turn from an idle session was to
-        // re-run `extractResponse` on a saved pane by hand. It is reached only
-        // before the first echo lands, so it cannot become a per-tick flood.
-        logger.info('Claude startup banner suppressed, response not saved', {
-          responseLength: response.length,
-          hasBannerArt,
-          hasVersionInfo,
-          hasStartupTips,
-          hasProjectInit,
-        });
-        return incompleteResult(totalLines);
-      }
-    }
-
-    // Issue #1897: copilot's launch screen is a complete, idle frame -- composer
-    // drawn, key hints on the status bar -- so every check above accepts it and
-    // History used to open with the banner ("Current Sessions Issues Pull
-    // requests Gists / No copilot-instructions.md found… / Tip: /app") saved as
-    // the agent's first reply, before the operator had said anything.
-    //
-    // What actually distinguishes it is that no turn has happened: copilot echoes
-    // every prompt into the transcript as ` ❯ <text>`, and the launch screen has
-    // none. The banner anchors are only consulted once that echo is missing, so a
-    // reply that quotes any of this wording is unaffected.
-    if (cliToolId === 'copilot') {
-      const cleanResponse = stripAnsi(response);
-      const hasUserEcho = cleanResponse
-        .split('\n')
-        .some(line => COPILOT_USER_ECHO_PATTERN.test(line));
-      if (!hasUserEcho && COPILOT_BOOT_BANNER_ANCHORS.some(anchor => anchor.test(cleanResponse))) {
-        return incompleteResult(totalLines);
-      }
-    }
-
-    // Issue #2250: Command Code's launch screen is a complete, idle frame --
-    // block-art logo, three `#` banner rows, composer drawn between its two
-    // rules -- so every check above accepts it, and History would open with
-    // `# Command Code v1.40.1 / # models: … / # <cwd>` saved as the agent's
-    // first reply before the operator has said anything.
-    //
-    // The rule is ONE condition and it is a positive one: Command Code echoes
-    // every prompt into the transcript as `❯ <text>`, and the launch screen has
-    // none. That is the shape #1897 and #2247 both converged on; the anchor
-    // heuristics claude carries above (`hasBannerArt` / `hasVersionInfo` /
-    // `hasStartupTips`) are deliberately NOT reproduced here, because they are
-    // what #2247 had to take back -- a bare version string in a reply is a
-    // normal reply, and Command Code prints its own version on every launch.
-    //
-    // `findRecentUserPromptIndex` is the same `/^[>❯]\s+\S/` scan the extraction
-    // anchors on, and it stops at `contentEnd`, so the composer's own dim
-    // `❯ Ask your question...` placeholder cannot be mistaken for an echo
-    // (#1879's trap).
-    if (cliToolId === 'command-code' && findRecentUserPromptIndex(totalLines) < 0) {
-      logger.info('Command Code launch screen suppressed, response not saved', {
-        responseLength: response.length,
-      });
-      return incompleteResult(totalLines);
-    }
-
-    // Gemini-specific check
-    if (cliToolId === 'gemini') {
-      const bannerCharCount = (response.match(/[░███]/g) || []).length;
-      const totalChars = response.length;
-      if (bannerCharCount > totalChars * 0.3) {
-        return incompleteResult(totalLines);
-      }
-
-      if (GEMINI_LOADING_INDICATORS.some(indicator => response.includes(indicator))) {
-        return incompleteResult(totalLines);
-      }
-
-      if (!response.includes('\u2726') && response.length < 10) {
-        return incompleteResult(totalLines);
-      }
-    }
-
-    // OpenCode banner defense
-    if (cliToolId === 'opencode') {
-      const cleanResponse = stripAnsi(response);
-      if (cleanResponse.length < 50 || !OPENCODE_RESPONSE_COMPLETE.test(cleanOutputToCheck)) {
-        const contentLines = cleanResponse.split('\n').filter(line => {
-          const trimmed = line.trim();
-          return trimmed && !OPENCODE_SKIP_PATTERNS.some(p => p.test(trimmed));
-        });
-        if (contentLines.length === 0) {
-          return incompleteResult(totalLines);
-        }
-      }
+    // Startup-screen defenses, one per tool and in this order. Each answers only
+    // for its own tool; `null` means the response stands.
+    const startupScreen =
+      suppressClaudeStartupScreen(cliToolId, response, totalLines, skipPatterns, findRecentUserPromptIndex) ??
+      suppressCopilotLaunchScreen(cliToolId, response, totalLines) ??
+      suppressCommandCodeLaunchScreen(cliToolId, response, totalLines, findRecentUserPromptIndex) ??
+      suppressGeminiStartupScreen(cliToolId, response, totalLines) ??
+      suppressOpenCodeBanner(cliToolId, response, totalLines, cleanOutputToCheck);
+    if (startupScreen) {
+      return startupScreen;
     }
 
     return {

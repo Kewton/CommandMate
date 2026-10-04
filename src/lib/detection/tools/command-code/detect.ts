@@ -141,6 +141,7 @@ import {
 } from '../../selection-shape';
 import { readCommandCodeQuestionDialog } from './dialog';
 import { detectCommandCodePermissionDialog } from './permission';
+import { activePromptVerdict, positiveVerdict } from '../verdicts';
 import { STATUS_REASON } from '../../status-reason';
 import { COMMAND_CODE_LIVE_REGION } from './live-region';
 import { liveRegionOf } from '../frame';
@@ -202,13 +203,7 @@ export const commandCodeStatusDetector = createToolStatusDetector({
       hasCommandCodePlanReviewFooterAtBottom(frame.lastLines) ||
       isCommandCodePlanApproveChoice(frame.lastLines)
     ) {
-      return {
-        status: 'waiting',
-        confidence: 'high',
-        reason: STATUS_REASON.COMMAND_CODE_PLAN_REVIEW,
-        hasActivePrompt: false,
-        evidence: 'positive',
-      };
+      return positiveVerdict('waiting', STATUS_REASON.COMMAND_CODE_PLAN_REVIEW);
     }
 
     // Issue #2521 recognised this screen; Issue #2522 reads it.
@@ -259,14 +254,7 @@ export const commandCodeStatusDetector = createToolStatusDetector({
     // the pane and lets Auto-Yes consider it — every one of them through the
     // SAME payload, which is the point of reading it once here.
     if (reading.kind === 'prompt') {
-      return {
-        status: 'waiting',
-        confidence: 'high',
-        reason: STATUS_REASON.PROMPT_DETECTED,
-        hasActivePrompt: true,
-        evidence: 'positive',
-        promptDetection: reading.prompt,
-      };
+      return activePromptVerdict(STATUS_REASON.PROMPT_DETECTED, reading.prompt);
     }
 
     // The question UI is plainly up and this reader could not read it. #2521's
@@ -279,13 +267,7 @@ export const commandCodeStatusDetector = createToolStatusDetector({
     // options, so there is no payload to answer with and none is invented — and
     // the generic parser is not given a second chance to invent a partial one.
     if (reading.kind === 'unsupported') {
-      return {
-        status: 'waiting',
-        confidence: 'high',
-        reason: STATUS_REASON.COMMAND_CODE_SELECTION_LIST,
-        hasActivePrompt: false,
-        evidence: 'positive',
-      };
+      return positiveVerdict('waiting', STATUS_REASON.COMMAND_CODE_SELECTION_LIST);
     }
     return null;
   },
@@ -312,13 +294,7 @@ export const commandCodeStatusDetector = createToolStatusDetector({
     // Issue #2846: only when `Press Esc to close` is the LAST row. The panel draws
     // it last; a reply that quotes it has the composer underneath.
     if (hasCommandCodeDismissablePanelFooterAtBottom(frame.lastLines)) {
-      return {
-        status: 'waiting',
-        confidence: 'high',
-        reason: STATUS_REASON.COMMAND_CODE_DISMISSABLE_PANEL,
-        hasActivePrompt: false,
-        evidence: 'positive',
-      };
+      return positiveVerdict('waiting', STATUS_REASON.COMMAND_CODE_DISMISSABLE_PANEL);
     }
 
     // Issue #2297. Command Code's pickers (`/model` measured live on v1.40.1 at
@@ -335,13 +311,7 @@ export const commandCodeStatusDetector = createToolStatusDetector({
     //
     // Issue #2846: last row only, for the reason the branch above gives.
     if (hasCommandCodeSelectionListFooterAtBottom(frame.lastLines)) {
-      return {
-        status: 'waiting',
-        confidence: 'high',
-        reason: STATUS_REASON.COMMAND_CODE_SELECTION_LIST,
-        hasActivePrompt: false,
-        evidence: 'positive',
-      };
+      return positiveVerdict('waiting', STATUS_REASON.COMMAND_CODE_SELECTION_LIST);
     }
 
     return null;
@@ -358,13 +328,7 @@ export const commandCodeStatusDetector = createToolStatusDetector({
     // before the generic composer check can say "ready". Widened window; see the
     // module docblock.
     if (detectThinking('command-code', frame.lastLines)) {
-      return {
-        status: 'running',
-        confidence: 'high',
-        reason: STATUS_REASON.THINKING_INDICATOR,
-        hasActivePrompt: false,
-        evidence: 'positive',
-      };
+      return positiveVerdict('running', STATUS_REASON.THINKING_INDICATOR);
     }
 
     // Idle: the composer row is on screen and nothing is in flight. Same verdict
@@ -372,13 +336,7 @@ export const commandCodeStatusDetector = createToolStatusDetector({
     // about which window they read.
     const { promptPattern } = getCliToolPatterns('command-code');
     if (promptPattern.test(frame.lastLines)) {
-      return {
-        status: 'ready',
-        confidence: 'high',
-        reason: STATUS_REASON.INPUT_PROMPT,
-        hasActivePrompt: false,
-        evidence: 'positive',
-      };
+      return positiveVerdict('ready', STATUS_REASON.INPUT_PROMPT);
     }
     return null;
   },
