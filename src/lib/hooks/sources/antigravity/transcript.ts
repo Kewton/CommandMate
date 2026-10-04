@@ -66,7 +66,7 @@
  */
 
 import { isPlainObject, readStringField } from '../event-mapper';
-import { separateTurnBody, type TurnRenderBlock } from '../turn-body';
+import { collapseToLine, separateTurnBody, type TurnRenderBlock } from '../turn-body';
 
 /**
  * `brain` — the directory agy keeps one conversation's working state under.
@@ -542,10 +542,6 @@ function renderThinking(text: string): string {
     .map((line) => (line.length > 0 ? `> ${line}` : '>'))
     .join('\n');
   return `> **${ANTIGRAVITY_THINKING_LABEL}**\n>\n${quoted}`;
-}
-
-function collapseToLine(value: string): string {
-  return value.replace(/\s+/g, ' ').trim();
 }
 
 function boundDetailText(value: string): string {

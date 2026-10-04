@@ -51,7 +51,7 @@
  * @module lib/hooks/sources/codex/history
  */
 
-import { readdir, stat } from 'fs/promises';
+import { readdir } from 'fs/promises';
 import { homedir } from 'os';
 import { join, resolve, sep } from 'path';
 import { buildCompositeKey } from '@/lib/auto-yes-state';
@@ -65,6 +65,7 @@ import { advanceCapturedLineForTranscriptTurn } from '@/lib/assistant-response-s
 import { createLogger } from '@/lib/logger';
 import { codexPromptRequestId, codexTurnRequestId } from '@/types/agent-transcript';
 import type { AgentInstanceRef } from '../types';
+import { isReadableFile, nextTurnOpensAt, resolveAssistantTimestampMs } from '../transcript-history';
 import type { StructuredHistoryCaptureReport } from '@/lib/polling/structured-history-gate';
 import {
   buildCodexTurns,
@@ -633,14 +634,6 @@ async function locateCodexRollout(codexHome: string, sessionId: string): Promise
   return accepted;
 }
 
-async function isReadableFile(path: string): Promise<boolean> {
-  try {
-    return (await stat(path)).isFile();
-  } catch {
-    return false;
-  }
-}
-
 /**
  * Record every prompt this turn answers, before the reply is written (#2196).
  *
@@ -695,7 +688,7 @@ async function recordCodexUserTurns(
   return last;
 }
 
-/**
+/*
  * When the assistant row for this turn is dated.
  *
  * **The turn's LAST record, not its first (Issue #2273).** #2197 dated the reply
@@ -723,19 +716,6 @@ async function recordCodexUserTurns(
  * @param nextTurnOpensAt - Epoch ms of the next turn's user row, or null when
  *   this is the newest turn in the window
  */
-function resolveAssistantTimestampMs(
-  turn: CodexTurnAccumulator,
-  userRow: RecordedUserTurn,
-  lastRecordAt = 0,
-  nextTurnOpensAt: number | null = null
-): number {
-  const earliest =
-    userRow.timestampMs === null
-      ? turn.startedAt
-      : Math.max(turn.startedAt, userRow.timestampMs + 1);
-  const latest = nextTurnOpensAt === null ? Number.POSITIVE_INFINITY : nextTurnOpensAt - 1;
-  return Math.max(earliest, Math.min(lastRecordAt, latest));
-}
 
 /**
  * When each turn's last record was written (Issue #2273).
@@ -764,7 +744,7 @@ function lastCodexRecordAt(records: readonly CodexRolloutRecord[]): Map<string, 
   return at;
 }
 
-/**
+/*
  * The instant the next pending turn's prompt row carries, or null (Issue #2273).
  *
  * The user row's own timestamp when there is one, because that is what History
@@ -773,15 +753,6 @@ function lastCodexRecordAt(records: readonly CodexRolloutRecord[]): Map<string, 
  * prompt is while the previous turn was still running. The turn's start is the
  * fallback for a turn that produced no row at all.
  */
-function nextTurnOpensAt(
-  turns: readonly CodexTurnAccumulator[],
-  userRows: readonly RecordedUserTurn[],
-  index: number
-): number | null {
-  const next = turns[index + 1];
-  if (!next) return null;
-  return userRows[index + 1]?.timestampMs ?? next.startedAt;
-}
 
 /**
  * Write one rendered turn, unless it is already there.
