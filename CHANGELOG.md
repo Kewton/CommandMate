@@ -7,6 +7,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.44.1] - 2026-10-04
+
+> **Highlight**: エージェントのセッションを起動している間は、起動途中の画面（操作パッド・選択ボタン・起動コマンドの行）を出さず「<エージェント名> を起動中…」と経過時間を表示するようになった（全エージェント）。起動コマンドの行は画面とスクロールバックの両方から消える（tmux 3.5a の実機で 7 ツールとも 0 行）。あわせて、インスタンスを止めると Auto-Yes も切れる・プロンプト行が 41 文字以上でも Claude の `/exit` を検知する・起動待ちを伴う送信を 30 秒で打ち切らない、の 3 つを直した。README と LP は Level（Parallel → Delegate → Manage）の軸で組み直した。
+
+### Added
+
+- **feat(session): セッション起動中は途中の画面を出さず「<エージェント名> を起動中…」と経過時間を表示する（全エージェント）** (#3179): 起動開始を `beginAgentSession` で記録し `startSession` の `finally` で消す `session-starting-state` を追加し、`current-output` と worktree の状態に `startingSince` を載せた。起動中は判定理由を `starting` にして Navigate パッド・選択ボタン・プロンプトシート・判定不能の記録を出さず、停止ボタンと Mode も出さない。スマホ・PC 分割・チャット面・Sessions のタイルでターミナルの場所に案内を出し、5 秒を超えると経過時間を足し、「ターミナルを見る」で今の表示に切り替えられる。起動の成功・失敗、ツールの起動待ち上限（claude 60 秒、ほか 30 秒）＋5 秒の超過、サーバーが答えないダイアログの 5 秒滞留で今の表示に戻る。`commandmate wait` は起動中を exit 10 にせず待つ。 起動中に `kill-session` で止めると、止めたインスタンスの起動中の記録も消し、止まったセッションに「起動中…」が起動待ちの上限まで出続けないようにした。
+
+- **feat(agent-health): カタログのずれの Issue を 08:30 の自動依頼に乗せ、`/catalog-reconcile` に無人実行の節を追加** (#3159): ラベル `catalog-drift`（作成者 `kewton`・`auto-dispatched` なし）を種別 `catalog` として 1 回 1 件まで選び、順番をバグ → catalog → 改善にした（合計 5 件は不変。`REQUIRED_LABELS` に `catalog-drift` を追加）。catalog を含む run の条件ファイルに「`/catalog-reconcile` の無人実行節に従う」を足す。SKILL.md の無人実行の節は、ja 訳・説明衝突はエージェントが解き、除外の判断と claude / codex 以外の attestation・実機照合は行わずに Issue に残す。
+
+- **feat(agent-health): スラッシュコマンドカタログのずれを日次で検知し、`catalog-drift` の Issue を同期する** (#3158): `scripts/agent-health/catalog-check.ts` が毎日 07:30 に `catalog:refresh --check` を読むだけで実行し、ずれがあれば作成者 kewton の Issue を作成・更新、解消したら close する。opencode 1.x の provider の skip は検査不能に数えず、手元の CLI と attestation の版の差は本文と最後の行に出す（版の差だけではずれにしない）。`--dry-run` あり。
+
+### Changed
+
+- **feat(session): 起動コマンドの行をターミナルとスクロールバックに残さないよう `clear 2>/dev/null; printf '\033[3J'; ` を前に付けて打ち込む** (#3180): 全ツール（claude・codex・gemini・vibe-local・opencode・OpenCode V2・copilot・antigravity・Command Code）の起動と同じペインへの再起動で、`CM_HOOK_URL='…' … 'agy'` のような起動行を `clear 2>/dev/null; printf '\033[3J'; <起動行>` の形で送るようにした。tmux 3.4 以降の既定 `scroll-on-clear on` では `clear` が消した画面がスクロールバックへ移り、capture に起動行と内部 URL が残るため、`clear` の後に ESC [3J でスクロールバックも消す。`clear` や `printf` が無い・失敗する環境でも `;` でつなぐのでエージェントは必ず起動し、エラー出力も画面に出さない。シェルはエージェントの親として残るため、終了検知・再起動・`capture` の判定は変わらない。
+
+- **refactor(app-update): npm 公開確認キャッシュの globalThis 退避を `eslint-disable` なしの書き方に替える** (#3172): `src/lib/app-update/npm-publish-check.ts` の `declare global { var … }`（`no-var` を抑える `eslint-disable` つき）を、`globalThis` を型付きで受ける定数経由の参照に替えた。キャッシュの保持先とホットリロード時の再利用は変わらない。`src/` の `eslint-disable` は 168 から 167 に戻る。
+
+- **refactor(prompt-response): `POST /api/worktrees/[id]/prompt-response` を段階ごとのモジュールへ分割し複雑度を 106 から 16 へ下げる** (#3171): 入力検証（`request-validation`）・構造化決定（`structured-decision`）・画面の再検証とプランレビュー（`frame-verification`）・回答の解決（`answer-resolution`）・送信と後処理（`answer-delivery`）を同じディレクトリへ切り出した。HTTP の status / body と副作用の順序は変えていない。分割後の各関数の複雑度は最大 16。
+
+- **docs(website): LP を Parallel → Delegate → Manage ＋ Next — Learn の軸で約半分に組み直し、hero の数字を実測 run に替える** (#3162): hero の数字を作者の活動量 4 つから 3 層 run（2026-10-02）の記録 4 つに替え、直下に as observed の注記を添えた（README en / ja・`llms.txt` も同じ数字に揃えた）。LP は本文約 1,360 語 → 832 語、`h2` 8 → 7、動画 6 → 3 本。Level 見出しを Level 名どおりにし、Level 2 に「多くの個人・小規模プロジェクトはここで十分」、Level 3 に作者の月額（チーム編成の証拠）と承認の 1 行、Next — Learn を方向だけの節として置いた。外した動画・画像は削除せず `website/assets/media/README.md` に記録した。
+
+- **feat(cli): `remote` が QR の直下にペアリングの期限時刻と残り時間を出す** (#3156): `remote` と `remote pair` が同じ関数 `formatPairingExpiryLine` で「Pairing expires: HH:MM (in N m), works once」を出す。`--json` は不変。setup.md 段 2 に期限を伝える手順を追記。
+
+- **docs(how-it-works): 詳細版を README と同じ Level 順（Parallel → Delegate → Manage → Next、横軸 Anywhere）に並べ替え** (#3154): en / ja の `how-it-works.md` を Level 1〜3・Next・Anywhere・対応エージェント・セキュリティ・実測の順に組み直し、各 Level に人間の役割を 1 行置いた。同じテーマの本文節と機能表の再掲、契約 YAML 例の重複、ユースケース表と With / Without 表を畳み、Vibe Engineering の節は Level 2 の「方法論は Skill として入る」へ出典つきで移した。README en / ja の Docs 表の説明も新構成に合わせた。
+
+- **docs(readme): Level を「人間がどこまで関与するか」で切り直し、README・LP・llms.txt の hero と定義文を揃えた** (#3153): hero を "Run multiple coding agents in parallel — even away from your desk." に替え、直下に何であるかを言う定義文と Level / CommandMate がすること / 人間の役割 の表（Parallel・Delegate・Manage・Next — Learn）、Anywhere の 1 行、「多くの人は Level 2 で十分」を置いた。`::1` の注意・VAPID の環境変数・exit code の値は README から外して各ガイドへのリンクにし、ja の硬い語（裁定・証跡・契約）を言い換えた。public-messaging.md に Level 名と役割、Next の書き方の上限を追記した。
+
+### Fixed
+
+- **fix(session): 起動中に止めてすぐ起動し直すと「起動中…」が早めに消える問題を修正** (#3195): 起動ごとにトークンを持たせ、`startSession` の `finally` は自分の起動の記録だけを消すようにした。kill-session はこれまでどおりトークンを問わず消す。codex の同ペイン再起動（Update now）でも記録は残り続けない。
+
+- **fix(api-client): 起動待ちを伴う送信が 30 秒で失敗扱いになる問題を修正** (#3194): セッションが無いときの send はサーバーが起動完了まで待つ（claude は最大 60 秒）のに画面が 30 秒で打ち切り、再送で指示が二重に届くおそれがあった。画面の `sendMessage` だけ、全ツールの起動待ちの最長＋30 秒をタイムアウトにした。他の書き込みは 30 秒のまま。
+
+- **fix(session): claude を `/exit` した後、41 文字以上のシェルプロンプトに戻ったペインが `running` のまま残る問題を修正** (#3191): claude の liveness 仕様にも `user@host …` 形のプロンプト行パターンを入れ、40 文字の長さゲートを超える zsh / bash のプロンプトでも終了と判定して次の送信で再起動するようにした。リポジトリ内の claude の画面 fixture を全行走査し、誤って当たる行が無いことをテストで固定している。
+
+- **fix(utils): debounce に cancel を足し、アンマウント後にタイマーが発火して window 未定義で落ちる問題を修正** (#3186): `debounce` の戻り値に `cancel()` を追加し、`MarkdownEditor` のプレビュー更新と `useFileSearch` の検索語更新でアンマウント時に保留中のタイマーを取り消すようにした。
+
+- **fix(kill-session): セッションを止めたインスタンスの Auto-Yes を一緒に無効にする** (#3182): `kill-session` が止める対象の組と同じ集合で Auto-Yes を無効化し poller も止める。止め直した後の承認が利用者の操作なしに通る問題を防ぐ。止めていない別インスタンスの Auto-Yes は残る。
+
+- **fix(prompt): 構造化の選択肢を持つ未分類ダイアログの見出しが「選択肢を読み取れませんでした」になる問題を修正** (#3181): OpenCode V2 の承認は `decisionId` と 3 つの選択肢を持つのに見出しが読み取れない旨を出していた。PC パネルとスマホシートが、選択肢があるときは「<ツール名> の承認」を出し、本当に無いときだけ従来の文を出す。
+
+- **fix(website): LP の PC 画面スクリーンショットと og:image を現行 UI の Sessions 画面で撮り直し** (#3174): 廃止した Home の Overview・ToDo・Home / Chat タブが映ったままだった `screenshot-desktop.webp` を隔離環境で撮り直した。`stills.ts` の `screenshot-desktop` は振り分けになった `/` ではなく `/sessions` を開き、`sessions-list` と seed worktree の行を待ってから撮る。
+
+- **fix(agent-health): リリース判断レポートの「開いている Issue」に catalog-drift の Issue を載せる** (#3173): 集めるラベルを `dispatch.ts` の `BUG_LABEL` / `CATALOG_LABEL` / `METRICS_LABEL` から作り、カタログのずれの Issue も一覧に出るようにした。複数ラベルの Issue は 1 回だけ出る。
+
+- **fix(auth): 未ログインの `/login` が `/api/worktrees`・`/api/app/update-check`・WebSocket を呼び続けて 401 を出す問題を修正** (#3157): 認証が有効なサーバで認証除外の画面（`/login`・`/offline`）を表示している間は、`AppProviders` が worktree 一覧の取得とポーリング・更新確認・リアルタイム接続を始めない。ログイン後の画面と認証無効のサーバでは従来どおり取得する。
+
+- **fix(remote): 期限切れのペアリング要求で `remote status` が `consumed` と誤表示する問題を修正** (#3155): `/api/remote/pair` が期限切れ要求でハンドオフファイルを消していたため、状態判定がファイル不在を `consumed` と読んでいた。ファイルを消さず `expired` のまま残す（410 は不変。ファイルは `remote stop` で消える）。
+
 ## [0.44.0] - 2026-10-03
 
 > **Highlight**: エージェントに読ませて導入まで案内させるセットアップガイド（`setup.md`）を加え、LP と README を「エージェントに聞きながら始める」形に作り直した。そのガイドを Ubuntu の素の環境で Claude Code・Codex・Command Code の 3 エージェントに実際に読ませ、全 5 段を通した（#3059）。その過程で見つかった、ログインなしの旧サーバが公開トンネルに載る問題（#3087）やトンネル越しのログイン先が localhost になる問題（#3090）などを直した。あわせて、チャットの吹き出しで worktree 内の画像・動画を表示できるようにし（#3120 / #3121）、Command Code の計画レビュー画面を CLI とチャット面から操作できるようにした（#3125 / #3139）。
