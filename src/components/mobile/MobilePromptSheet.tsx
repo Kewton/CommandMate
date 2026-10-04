@@ -21,14 +21,18 @@ import {
   readQuestionFreeText,
   type PromptQuestionChoices,
 } from '@/components/worktree/prompt-decision-id';
+import {
+  initialCheckedNumbers,
+  initialSelectedOption,
+  promptHeadingText,
+  promptQuestionKey,
+} from '@/components/worktree/prompt-answer';
 import type { StructuredDecisionOption } from '@/lib/session/structured-prompt';
 import {
   derivePromptView,
   optionTakesTypedText,
   readQuestionChoices,
   type PromptView,
-  promptHeadingMessage,
-  type PromptViewHeading,
 } from '@/lib/session/prompt-view';
 
 /** Animation duration for sheet transitions */
@@ -44,44 +48,6 @@ const SWIPE_DISMISS_THRESHOLD = 100;
  * `PromptPanel`; re-exported under the old name.
  */
 export { optionTakesTypedText };
-
-/**
- * Which question the sheet is currently showing (Issue #2755).
- *
- * The same reset key `PromptPanel` uses, and duplicated for the same reason the
- * two copies of {@link optionTakesTypedText} are: a client module cannot import
- * `lib/detection`, and importing this sheet's from the panel would couple two
- * surfaces that suites mock independently. The Issue's 逸脱時の扱い names this
- * case and asks for the duplicate to be reported rather than refactored away;
- * `tests/unit/components/mobile/MobilePromptSheet.test.tsx` asserts the two
- * agree.
- *
- * One `AskUserQuestion` call walks several questions through the SAME mounted
- * sheet, so a `useState` initialiser runs once and question 2 opened with
- * question 1's ticks on it. `checked` and `isDefault` are deliberately not part
- * of the key: they move on every poll while the operator is choosing.
- */
-function promptQuestionKey(promptData: LivePromptData): string {
-  const parts: string[] = [promptData.question];
-  if (promptData.type === 'multiple_choice') {
-    parts.push(String(promptData.askUserQuestion?.questionIndex ?? ''));
-    for (const option of promptData.options) parts.push(`${option.number}:${option.label}`);
-  }
-  return parts.join('\u0000');
-}
-
-/** The single-select cursor row, which is the sheet's initial radio selection. */
-function initialSelectedOption(promptData: LivePromptData): number | null {
-  if (promptData.type !== 'multiple_choice') return null;
-  if (promptData.multiSelect === true) return null;
-  return promptData.options.find((opt) => opt.isDefault)?.number ?? null;
-}
-
-/** The boxes the terminal already shows as ticked (Issue #2755). */
-function initialCheckedNumbers(promptData: LivePromptData): number[] {
-  if (promptData.type !== 'multiple_choice' || promptData.multiSelect !== true) return [];
-  return promptData.options.filter((opt) => opt.checked === true).map((opt) => opt.number);
-}
 
 /** Button style constants */
 const BUTTON_STYLES = {
@@ -999,14 +965,4 @@ function StructuredQuestionChoices({
       </button>
     </div>
   );
-}
-
-/** The heading above the prompt, in the user's locale (Issue #3181, #3184). */
-function promptHeadingText(
-  t: ReturnType<typeof useTranslations>,
-  heading: PromptViewHeading
-): string {
-  const message = promptHeadingMessage(heading);
-  if ('text' in message) return message.text;
-  return 'values' in message ? t(message.key, message.values) : t(message.key);
 }
