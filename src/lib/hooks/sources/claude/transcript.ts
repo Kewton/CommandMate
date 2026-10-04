@@ -57,7 +57,7 @@
 
 import { claudeHeadlessTurnId } from '@/types/agent-transcript';
 import { isPlainObject, readStringField } from '../event-mapper';
-import { separateTurnBody, type TurnRenderBlock } from '../turn-body';
+import { collapseToLine, separateTurnBody, type TurnRenderBlock } from '../turn-body';
 
 /**
  * `~/.claude/projects/<slug>` — the directory Claude keeps one project's
@@ -509,11 +509,6 @@ function readToolDetail(input: unknown): string | null {
     if (value) return boundToolDetail(collapseToLine(value));
   }
   return null;
-}
-
-/** A tool detail on one line. A heredoc `command` puts newlines in it. */
-function collapseToLine(value: string): string {
-  return value.replace(/\s+/g, ' ').trim();
 }
 
 function boundToolDetail(value: string): string {

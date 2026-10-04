@@ -91,7 +91,7 @@
  */
 
 import { isPlainObject, readStringField } from '../event-mapper';
-import { separateTurnBody, type TurnRenderBlock } from '../turn-body';
+import { collapseToLine, separateTurnBody, type TurnRenderBlock } from '../turn-body';
 
 /** `$CODEX_HOME/sessions` — where codex keeps one machine's rollout files. */
 export const CODEX_SESSIONS_DIR_SEGMENTS: readonly string[] = ['sessions'];
@@ -397,11 +397,6 @@ function readArgv(value: unknown): string | null {
   if (!Array.isArray(value)) return null;
   const parts = value.filter((entry): entry is string => typeof entry === 'string');
   return parts.length > 0 ? parts.join(' ') : null;
-}
-
-/** A tool detail on one line. A heredoc puts newlines in a shell command. */
-function collapseToLine(value: string): string {
-  return value.replace(/\s+/g, ' ').trim();
 }
 
 function boundDetailText(value: string): string {

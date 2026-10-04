@@ -142,6 +142,16 @@ export interface SeparatedTurnBody {
 }
 
 /**
+ * A tool title on one line.
+ *
+ * A `bash` title is the command, and a heredoc puts newlines in it. Left alone
+ * they would end the list item and turn the rest of the command into body text.
+ */
+export function collapseToLine(value: string): string {
+  return value.replace(/\s+/g, ' ').trim();
+}
+
+/**
  * Put one block inside a blockquote, line by line.
  *
  * Every line gets its own `> ` because a blockquote ends at the first line that
