@@ -33,7 +33,6 @@ import { MobileDirectInputKeyboard } from '@/components/mobile/MobileDirectInput
 import { ErrorBoundary } from '@/components/error/ErrorBoundary';
 import { MessageInput } from '@/components/worktree/MessageInput';
 import type { ShowToast } from '@/types/markdown-editor';
-import type { LivePromptData } from '@/types/models';
 import { NavigationButtons } from '@/components/worktree/NavigationButtons';
 import { Button } from '@/components/ui/Button';
 import { FileViewer } from '@/components/worktree/FileViewer';
@@ -292,19 +291,6 @@ const MobileComposer = memo(function MobileComposer({
 // ============================================================================
 
 /**
- * Is this a CHECKBOX question? (Issue #2755)
- *
- * The same predicate `TerminalSplitPaneContent` applies to its own Auto-Yes
- * gate, restated here for the phone sheet. It is the one prompt shape Auto-Yes
- * never answers — `resolveBaseAnswer` returns null, because a digit ticks a box
- * and the confirm is a separate row — so hiding its sheet under Auto-Yes left a
- * live question answerable by nobody.
- */
-function isMultiSelectPrompt(promptData: LivePromptData | null | undefined): boolean {
-  return promptData?.type === 'multiple_choice' && promptData.multiSelect === true;
-}
-
-/**
  * WorktreeDetailRefactored - Integrated worktree detail component
  *
  * @example
@@ -315,6 +301,8 @@ function isMultiSelectPrompt(promptData: LivePromptData | null | undefined): boo
 import { useWorktreeDetailController } from '@/hooks/useWorktreeDetailController';
 import { withToolDecisionLabels } from '@/components/worktree/prompt-decision-id';
 import { readDecisionId } from '@/lib/session/prompt-view';
+import { buildDecisionRespondBody, isPromptRefused } from '@/lib/prompt-response-body-builder';
+import { isMultiSelectPrompt } from '@/components/worktree/prompt-answer';
 import { useNewOutputIndicator } from '@/hooks/useNewOutputIndicator';
 export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   worktreeId,
@@ -656,17 +644,12 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
         const response = await fetch(`/api/worktrees/${worktreeId}/respond`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            decisionId: mobilePromptDecisionId,
-            answer,
-            cliTool: activeCliTab,
-            ...(activeInstanceId && activeInstanceId !== activeCliTab
-              ? { instanceId: activeInstanceId }
-              : {}),
-          }),
+          body: JSON.stringify(
+            buildDecisionRespondBody(mobilePromptDecisionId, answer, activeCliTab, activeInstanceId),
+          ),
         });
-        const result = (await response.json().catch(() => null)) as { success?: unknown } | null;
-        if (!response.ok || result?.success === false) {
+        const refused = await isPromptRefused(response);
+        if (!response.ok || refused) {
           showToast(tWorktree('promptResponse.refused'), 'warning');
           await fetchCurrentOutput();
           return;

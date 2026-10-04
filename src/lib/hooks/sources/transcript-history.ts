@@ -9,6 +9,7 @@
 
 import { stat } from 'fs/promises';
 import type { RecordedUserTurn } from '@/lib/history/user-turn-recorder';
+import type { AgentInstanceRef } from './types';
 
 /**
  * When the assistant row for this turn is dated.
@@ -79,4 +80,52 @@ export async function isReadableFile(path: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/** What {@link selectUnwrittenTurns} answers. */
+export interface PendingTurns<T extends { startedAt: number }> {
+  /** The turns to write, oldest first. Empty when the newest one is a row. */
+  readonly turns: readonly T[];
+  /** `startedAt` of the turn immediately before the first pending one, or 0. */
+  readonly previousStartedAt: number;
+  /** Whether a written turn was found in the window. Logged, never branched on. */
+  readonly anchored: boolean;
+}
+
+/**
+ * The turns still to write: search backwards from the newest turn for one that
+ * is already a row, and take everything after it (Issue #2246).
+ *
+ * Record order and never a timestamp. A window with no anchor answers with the
+ * newest turn alone. The tools differ only in how a turn's request id is built.
+ *
+ * @param turns - Every turn in the window, oldest first
+ * @param requestIdOf - The request id the tool records a turn's user row under
+ */
+export async function selectUnwrittenTurns<T extends { startedAt: number }>(
+  target: AgentInstanceRef,
+  turns: readonly T[],
+  requestIdOf: (turn: T) => string
+): Promise<PendingTurns<T>> {
+  const [{ getDbInstance }, { findMessageByRequestId }] = await Promise.all([
+    import('@/lib/db/db-instance'),
+    import('@/lib/db'),
+  ]);
+  const db = getDbInstance();
+
+  for (let index = turns.length - 1; index >= 0; index -= 1) {
+    const requestId = requestIdOf(turns[index]);
+    if (!findMessageByRequestId(db, target.worktreeId, requestId)) continue;
+    return {
+      turns: turns.slice(index + 1),
+      previousStartedAt: turns[index].startedAt,
+      anchored: true,
+    };
+  }
+
+  return {
+    turns: turns.slice(-1),
+    previousStartedAt: turns.length > 1 ? turns[turns.length - 2].startedAt : 0,
+    anchored: false,
+  };
 }

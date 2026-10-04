@@ -118,9 +118,6 @@ import { useChatFileLinkScope } from '@/lib/chat/chat-file-link-scope';
 import { useChatToolActivityPreference } from '@/lib/chat/chat-tool-activity';
 import {
   buildModelByInstance,
-  formatAgentModelLabel,
-  formatAgentSessionTooltip,
-  formatAgentSessionUsage,
 } from '@/components/worktree/WorktreeDetailSubComponents';
 import { useRealtimeListener } from '@/hooks/useRealtimeConnection';
 import { useSpecialKeys } from '@/hooks/useSpecialKeys';
@@ -130,12 +127,10 @@ import { OPENCODE_LEADER_KEY } from '@/types/terminal-keys';
 import { NAV_KEY_REFRESH_DELAY_MS } from '@/config/ui-feedback-config';
 import { worktreeApi } from '@/lib/api-client';
 import { getTerminalDisplayCompaction } from '@/config/terminal-display-compaction';
-import {
-  getMobileSurfaceModeStorageKey,
-  resolveSurfaceMode,
-  writeSurfaceMode,
-} from '@/config/surface-mode-config';
-import { DEFAULT_SURFACE_MODE, type SurfaceMode } from '@/types/ui-state';
+import { getMobileSurfaceModeStorageKey } from '@/config/surface-mode-config';
+import { useSurfaceMode } from '@/hooks/useSurfaceMode';
+import { buildPaneSessionLabels } from '@/components/worktree/pane-session-labels';
+import type { SurfaceMode } from '@/types/ui-state';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 
 export interface MobileTerminalTabProps {
@@ -586,23 +581,11 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
   // means the row is not rendered at all.
   const modelByInstanceLabel = useCachedAgentModelLabel(worktreeId, resolvedInstanceId);
   const worktreesCache = useOptionalWorktreesCacheContext();
-  const sessionModelLabel = formatAgentModelLabel(
-    modelByInstanceLabel,
-    null,
-    agentSession.session?.agent
-  );
-  const sessionUsage = formatAgentSessionUsage(
-    agentSession.session,
-    agentSession.context,
-    t,
-    locale
-  );
-  const sessionUsageDetail = formatAgentSessionTooltip(
-    agentSession.session,
-    agentSession.context,
-    t,
-    locale
-  );
+  const {
+    model: sessionModelLabel,
+    usage: sessionUsage,
+    usageDetail: sessionUsageDetail,
+  } = buildPaneSessionLabels(modelByInstanceLabel, agentSession, t, locale);
 
   // --------------------------------------------------------------------------
   // The session note (Issue #2427)
@@ -714,18 +697,7 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
   // `?view=` / localStorage resolution in an effect — same shape as
   // `useActivityBarState`, so there is no hydration mismatch.
   const surfaceStorageKey = getMobileSurfaceModeStorageKey(worktreeId);
-  const [surfaceMode, setSurfaceMode] = useState<SurfaceMode>(DEFAULT_SURFACE_MODE);
-  useEffect(() => {
-    setSurfaceMode(resolveSurfaceMode(surfaceStorageKey));
-  }, [surfaceStorageKey]);
-
-  const handleSurfaceModeChange = useCallback(
-    (mode: SurfaceMode) => {
-      setSurfaceMode(mode);
-      writeSurfaceMode(surfaceStorageKey, mode);
-    },
-    [surfaceStorageKey],
-  );
+  const { surfaceMode, handleSurfaceModeChange } = useSurfaceMode(surfaceStorageKey);
 
   // Issue #2799: the pill is drawn unavailable while direct input is open, and
   // the tap is refused here too — `aria-disabled` alone does not stop it.

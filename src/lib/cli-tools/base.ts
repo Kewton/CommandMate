@@ -683,6 +683,35 @@ export abstract class BaseCLITool implements ICLITool {
   }
 
   /**
+   * The pre-send guard every driver's `sendMessage` opened with: the session
+   * must exist, else throw `<label> session <name> does not exist. Start the
+   * session first.`; with `relaunch`, a pane whose tool has exited is then
+   * relaunched ({@link relaunchIfToolExited}) before the caller goes on.
+   *
+   * @param label - Tool name as it appears in the error text (e.g. `Command Code`)
+   * @param worktreeId - Worktree ID
+   * @param instanceId - Agent instance ID (defaults to the primary instance)
+   * @param options.relaunch - Also relaunch a tool that exited inside a live pane
+   */
+  protected async requireSession(
+    label: string,
+    worktreeId: string,
+    instanceId: string | undefined,
+    options: { relaunch: boolean }
+  ): Promise<void> {
+    const sessionName = this.getSessionName(worktreeId, instanceId);
+    const exists = await hasSession(sessionName);
+    if (!exists) {
+      throw new Error(
+        `${label} session ${sessionName} does not exist. Start the session first.`
+      );
+    }
+    if (options.relaunch) {
+      await this.relaunchIfToolExited(worktreeId, instanceId);
+    }
+  }
+
+  /**
    * Declare the keys this tool's terminal UI may send (Issue #2046).
    *
    * The default IS the pre-#2046 global list, verbatim: the twelve navigation

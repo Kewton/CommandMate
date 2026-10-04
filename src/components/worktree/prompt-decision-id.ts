@@ -41,6 +41,7 @@ import {
   readDecisionHeading,
   readDecisionId,
   readQuestionChoices,
+  type QuestionChoices,
 } from '@/lib/session/prompt-view';
 
 /**
@@ -93,30 +94,24 @@ export function readPromptDecisionId(promptData: LivePromptData | null): string 
   return readDecisionId(promptData);
 }
 
-/** What {@link readPromptQuestionChoices} answers with. */
-export interface PromptQuestionChoices {
-  /** The question text, as the agent wrote it. */
-  question: string;
-  /**
-   * The option labels, in payload order.
-   *
-   * Their POSITION is the answer: the panel sends `String(index + 1)` and
-   * `resolveStructuredQuestionAnswer` resolves that against the same list, read
-   * from `listPending()`. Both orders come from one parser
-   * (`parseAskUserQuestionToolInput`) over the same `questions[0].options`, so
-   * they agree by construction rather than by convention.
-   */
-  labels: string[];
-  /** How many questions the one call carries; only the first is answerable. */
-  questionCount: number;
-  /**
-   * Whether a typed answer is accepted besides the choices (Issue #2951) —
-   * OpenCode V2's form field `custom: true`. The panel and the phone sheet
-   * then offer an input; see {@link readQuestionFreeText}. Present only when
-   * true.
-   */
-  custom?: true;
-}
+/**
+ * What {@link readPromptQuestionChoices} answers with: the `QuestionChoices` of `prompt-view`.
+ *
+ * - `question`: The question text, as the agent wrote it.
+ * - `labels`: The option labels, in payload order.
+ *
+ *   Their POSITION is the answer: the panel sends `String(index + 1)` and
+ *   `resolveStructuredQuestionAnswer` resolves that against the same list, read
+ *   from `listPending()`. Both orders come from one parser
+ *   (`parseAskUserQuestionToolInput`) over the same `questions[0].options`, so
+ *   they agree by construction rather than by convention.
+ * - `questionCount`: How many questions the one call carries; only the first is answerable.
+ * - `custom`: Whether a typed answer is accepted besides the choices (Issue #2951) —
+ *   OpenCode V2's form field `custom: true`. The panel and the phone sheet
+ *   then offer an input; see {@link readQuestionFreeText}. Present only when
+ *   true.
+ */
+export type PromptQuestionChoices = QuestionChoices;
 
 /**
  * Bound on a typed answer, the server's `MAX_QUESTION_FREE_TEXT_LENGTH`
