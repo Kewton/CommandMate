@@ -887,6 +887,58 @@ function describeNotStarted(
 }
 
 /**
+ * What {@link pollWorktree} carries from one poll to the next: every variable its
+ * loop writes. What the loop only reads stays a `const` there.
+ */
+interface PollState {
+  lastActivityTime: number;
+  lastContent: string;
+  /**
+   * Issue #1628: whether this wait ever saw the session alive. `!isRunning` on the
+   * FIRST poll is "there is nothing here to wait for", not "the agent finished" —
+   * reporting SUCCESS for it is how a wait on a worktree whose agent never started
+   * (wrong tool, wrong instance, session never created) came back `Completed` in
+   * milliseconds and handed a `passed` verdict to whatever ran next.
+   */
+  everRunning: boolean;
+  /**
+   * Epoch ms of the first poll in the current unbroken run of
+   * `isUnclassifiedActive === true`, or null when the last poll cleared it
+   * (Issue #1708).
+   */
+  unclassifiedSince: number | null;
+  /**
+   * Epoch ms of the `user_prompt_submit` / `pre_tool_use` / `post_tool_use` this
+   * wait adopted as "the turn I am waiting on", or null when the agent has
+   * reported none (Issue #1839). See {@link adoptTurnStart}.
+   */
+  turnStartedAt: number | null;
+  /**
+   * Whether the chat ledger is still worth asking (Issue #1975). Cleared by the
+   * first read that fails, after which this wait judges completion from the
+   * frame alone — the pre-#1975 behaviour — rather than re-reporting the same
+   * unreachable endpoint on every poll.
+   */
+  promptLedgerReadable: boolean;
+  /**
+   * Epoch ms of the first poll in the current unbroken run of an agent-mode
+   * prompt the target's Auto-Yes is expected to answer, or null (Issue #2463).
+   * Cleared by the first poll that shows no prompt, so every prompt Auto-Yes
+   * answers gets a window of its own.
+   */
+  autoYesAnsweringSince: number | null;
+  /**
+   * The self-resume hold in progress: the `stop` it is about, and when this wait
+   * first held on it (CLI clock). Null when none is (Issue #2614).
+   */
+  selfResumeHold: { stopAt: number; since: number } | null;
+  /** Milliseconds spent in self-resume holds that have already ended (Issue #2614). */
+  selfResumeHeldMs: number;
+  /** Whether any poll of this wait was held for a self-resume (Issue #2614). */
+  selfResumeHeld: boolean;
+}
+
+/**
  * Poll a single worktree until completion, prompt, or timeout.
  *
  * Exported since Issue #2376 so `ask` can do the WAITING half of its round trip
@@ -911,61 +963,28 @@ export async function pollWorktree(
   upstreamFault?: { id: string; matchedText: string };
 }> {
   const startTime = Date.now();
-  let lastActivityTime = Date.now();
-  let lastContent = '';
-  /**
-   * Issue #1628: whether this wait ever saw the session alive. `!isRunning` on the
-   * FIRST poll is "there is nothing here to wait for", not "the agent finished" —
-   * reporting SUCCESS for it is how a wait on a worktree whose agent never started
-   * (wrong tool, wrong instance, session never created) came back `Completed` in
-   * milliseconds and handed a `passed` verdict to whatever ran next.
-   */
-  let everRunning = false;
-  /**
-   * Epoch ms of the first poll in the current unbroken run of
-   * `isUnclassifiedActive === true`, or null when the last poll cleared it
-   * (Issue #1708).
-   */
-  let unclassifiedSince: number | null = null;
-  /**
-   * Epoch ms of the `user_prompt_submit` / `pre_tool_use` / `post_tool_use` this
-   * wait adopted as "the turn I am waiting on", or null when the agent has
-   * reported none (Issue #1839). See {@link adoptTurnStart}.
-   */
-  let turnStartedAt: number | null = null;
-  /**
-   * Whether the chat ledger is still worth asking (Issue #1975). Cleared by the
-   * first read that fails, after which this wait judges completion from the
-   * frame alone — the pre-#1975 behaviour — rather than re-reporting the same
-   * unreachable endpoint on every poll.
-   */
-  let promptLedgerReadable = true;
-  /**
-   * Epoch ms of the first poll in the current unbroken run of an agent-mode
-   * prompt the target's Auto-Yes is expected to answer, or null (Issue #2463).
-   * Cleared by the first poll that shows no prompt, so every prompt Auto-Yes
-   * answers gets a window of its own.
-   */
-  let autoYesAnsweringSince: number | null = null;
+  const state: PollState = {
+    lastActivityTime: Date.now(),
+    lastContent: '',
+    everRunning: false,
+    unclassifiedSince: null,
+    turnStartedAt: null,
+    promptLedgerReadable: true,
+    autoYesAnsweringSince: null,
+    selfResumeHold: null,
+    selfResumeHeldMs: 0,
+    selfResumeHeld: false,
+  };
   const autoYesGraceSeconds = options.autoYesGrace ?? AUTO_YES_GRACE_DEFAULT_SECONDS;
   const autoYesGraceMs = autoYesGraceSeconds * 1000;
-  /**
-   * The self-resume hold in progress: the `stop` it is about, and when this wait
-   * first held on it (CLI clock). Null when none is (Issue #2614).
-   */
-  let selfResumeHold: { stopAt: number; since: number } | null = null;
-  /** Milliseconds spent in self-resume holds that have already ended (Issue #2614). */
-  let selfResumeHeldMs = 0;
-  /** Whether any poll of this wait was held for a self-resume (Issue #2614). */
-  let selfResumeHeld = false;
   /**
    * What the completion line adds when this wait held for a self-resume, or ''
    * (Issue #2614). `basis=` keeps its word: the verdict is still the agent's own
    * `Stop`, the hold only decided which one.
    */
   const selfResumeSuffix = (): string => {
-    if (!selfResumeHeld) return '';
-    const total = selfResumeHeldMs + (selfResumeHold ? Date.now() - selfResumeHold.since : 0);
+    if (!state.selfResumeHeld) return '';
+    const total = state.selfResumeHeldMs + (state.selfResumeHold ? Date.now() - state.selfResumeHold.since : 0);
     return `, heldForSelfResume=${Math.round(total / 1000)}s`;
   };
 
@@ -981,7 +1000,7 @@ export async function pollWorktree(
 
     // Check stall-timeout
     if (options.stallTimeout) {
-      const stallElapsed = (Date.now() - lastActivityTime) / 1000;
+      const stallElapsed = (Date.now() - state.lastActivityTime) / 1000;
       if (stallElapsed >= options.stallTimeout) {
         console.error(`Stall timeout: ${worktreeId} no output for ${options.stallTimeout}s`);
         return { exitCode: WaitExitCode.TIMEOUT };
@@ -996,13 +1015,13 @@ export async function pollWorktree(
       const data = await client.get<CurrentOutputResponse>(path);
 
       // Track content changes for stall detection
-      if (data.content !== lastContent) {
-        lastContent = data.content;
-        lastActivityTime = Date.now();
+      if (data.content !== state.lastContent) {
+        state.lastContent = data.content;
+        state.lastActivityTime = Date.now();
       }
 
       if (data.isRunning) {
-        everRunning = true;
+        state.everRunning = true;
       }
 
       // Issue #3179: the agent is still launching. Work in progress, so keep
@@ -1012,7 +1031,7 @@ export async function pollWorktree(
       // launch that then fails leaves no session, which is NOT_STARTED, not a
       // completion. The server bounds the launch, so this cannot hold forever.
       if (typeof data.startingSince === 'number') {
-        unclassifiedSince = null;
+        state.unclassifiedSince = null;
         await sleep(POLL_INTERVAL_MS);
         continue;
       }
@@ -1020,7 +1039,7 @@ export async function pollWorktree(
       // Issue #1839: done before any exit path so the turn is adopted even on a
       // poll that ends in a prompt — the same turn is still open when the human
       // answers and `--on-prompt human` resumes polling.
-      turnStartedAt = adoptTurnStart(data, startTime, turnStartedAt);
+      state.turnStartedAt = adoptTurnStart(data, startTime, state.turnStartedAt);
 
       // Issue #2614: a self-resume hold is about one `stop`, and ends the first
       // time that `stop` is no longer the newest word — the agent woke (a
@@ -1028,10 +1047,10 @@ export async function pollWorktree(
       // every exit, because the wake usually lands on a `running` frame that
       // never reaches the hold itself.
       const selfResumeStopAt = pendingSelfResumeStop(data);
-      if (selfResumeHold !== null && selfResumeHold.stopAt !== selfResumeStopAt) {
-        const heldMs = Date.now() - selfResumeHold.since;
-        selfResumeHeldMs += heldMs;
-        selfResumeHold = null;
+      if (state.selfResumeHold !== null && state.selfResumeHold.stopAt !== selfResumeStopAt) {
+        const heldMs = Date.now() - state.selfResumeHold.since;
+        state.selfResumeHeldMs += heldMs;
+        state.selfResumeHold = null;
         console.error(
           `Note: ${worktreeId} has moved past the stop it said it would resume from ` +
             `(held ${Math.round(heldMs / 1000)}s); judging its current state.`,
@@ -1065,18 +1084,18 @@ export async function pollWorktree(
         // the gate's other two branches and still exit 10 at once.
         if (!suppressed && data.autoYes?.enabled === true && autoYesGraceMs > 0) {
           const now = Date.now();
-          if (autoYesAnsweringSince === null) {
-            autoYesAnsweringSince = now;
+          if (state.autoYesAnsweringSince === null) {
+            state.autoYesAnsweringSince = now;
             // stderr only: stdout is the exit-10 payload and nothing else.
             console.error(
               "Prompt detected; the target's Auto-Yes is answering, waiting up to " +
                 `${autoYesGraceSeconds}s… (${worktreeId})`,
             );
           }
-          const heldMs = now - autoYesAnsweringSince;
+          const heldMs = now - state.autoYesAnsweringSince;
           if (
             heldMs < autoYesGraceMs &&
-            nextPollWithinDeadlines(options, startTime, lastActivityTime, now)
+            nextPollWithinDeadlines(options, startTime, state.lastActivityTime, now)
           ) {
             await sleep(POLL_INTERVAL_MS);
             continue;
@@ -1088,7 +1107,7 @@ export async function pollWorktree(
               : `Note: the target's Auto-Yes did not answer the prompt on ${worktreeId} within ` +
                   `${autoYesGraceSeconds}s; reporting it.`,
           );
-        } else if (autoYesAnsweringSince !== null && !suppressed) {
+        } else if (state.autoYesAnsweringSince !== null && !suppressed) {
           console.error(`Note: Auto-Yes is no longer enabled on ${worktreeId}; reporting the prompt.`);
         }
 
@@ -1104,12 +1123,12 @@ export async function pollWorktree(
       // Issue #2463: the prompt the hold was waiting on has gone. Who answered it
       // is not on the wire — Auto-Yes, or a human at the pane — so the line says
       // only that it cleared; what the agent does next is for the checks below.
-      if (autoYesAnsweringSince !== null) {
+      if (state.autoYesAnsweringSince !== null) {
         console.error(
           `Prompt on ${worktreeId} cleared after ` +
-            `${Math.round((Date.now() - autoYesAnsweringSince) / 1000)}s; judging completion as usual.`,
+            `${Math.round((Date.now() - state.autoYesAnsweringSince) / 1000)}s; judging completion as usual.`,
         );
-        autoYesAnsweringSince = null;
+        state.autoYesAnsweringSince = null;
       }
 
       // Issue #1628: an arrow-key menu is the agent blocked on a human just as much
@@ -1175,8 +1194,8 @@ export async function pollWorktree(
       // well as classification is open, and any answer belongs in the same place
       // as the rollout that produces the evidence — not here.
       if (data.isUnclassifiedActive === true) {
-        if (unclassifiedSince === null) unclassifiedSince = Date.now();
-        const dwellMs = Date.now() - unclassifiedSince;
+        if (state.unclassifiedSince === null) state.unclassifiedSince = Date.now();
+        const dwellMs = Date.now() - state.unclassifiedSince;
         if (dwellMs >= UNCLASSIFIED_DWELL_MS) {
           const question = describeUnclassifiedFrame(worktreeId, data, dwellMs);
 
@@ -1194,7 +1213,7 @@ export async function pollWorktree(
           };
         }
       } else {
-        unclassifiedSince = null;
+        state.unclassifiedSince = null;
       }
 
       // Completion check [DR1-04]:
@@ -1205,7 +1224,7 @@ export async function pollWorktree(
       //
       // Issue #1628 narrowed Path A: a session that was NEVER seen running is
       // "nothing to wait for" (NOT_STARTED), not a completion. See `everRunning`.
-      if (!data.isRunning && !everRunning) {
+      if (!data.isRunning && !state.everRunning) {
         console.error(describeNotStarted(worktreeId, data, options));
         return { exitCode: VerifyExitCode.NOT_STARTED };
       }
@@ -1257,10 +1276,10 @@ export async function pollWorktree(
         // hooks ARE reporting — the only case in which `turnStartedAt` is
         // non-null — that missing `Stop` is the difference between "finished"
         // and "never ran", and it is the only signal that carries it.
-        if (!turnSettled(data, turnStartedAt)) {
+        if (!turnSettled(data, state.turnStartedAt)) {
           console.error(
             `Waiting: ${worktreeId} is back at its composer, but its agent has not reported ` +
-              `the end of this turn (turnStartedAt=${turnStartedAt}, ` +
+              `the end of this turn (turnStartedAt=${state.turnStartedAt}, ` +
               `lastStopEventAt=${data.lastStopEventAt ?? 'none'}, ${describeTurnClose(data)}). ` +
               'Not reporting completion; inspect with ' +
               `\`commandmate capture ${worktreeId} --json\`.`,
@@ -1284,11 +1303,11 @@ export async function pollWorktree(
         // and never woke is not held again.
         if (selfResumeStopAt !== null) {
           const now = Date.now();
-          if (selfResumeHold === null) selfResumeHold = { stopAt: selfResumeStopAt, since: now };
-          const heldMs = now - selfResumeHold.since;
+          if (state.selfResumeHold === null) state.selfResumeHold = { stopAt: selfResumeStopAt, since: now };
+          const heldMs = now - state.selfResumeHold.since;
           const elapsedMs = Math.max(heldMs, now - selfResumeStopAt);
           if (elapsedMs < SELF_RESUME_HOLD_MS) {
-            selfResumeHeld = true;
+            state.selfResumeHeld = true;
             console.error(
               `Waiting: ${worktreeId} ended its turn with background work still running ` +
                 `(stoppedAt=${new Date(selfResumeStopAt).toISOString()}, ` +
@@ -1324,11 +1343,11 @@ export async function pollWorktree(
         // {@link reportsTurnBoundaries} for why a tool that posts no hooks never
         // reaches it.
         let answeredNewestPrompt = false;
-        if (turnStartedAt === null && promptLedgerReadable && reportsTurnBoundaries(data)) {
+        if (state.turnStartedAt === null && state.promptLedgerReadable && reportsTurnBoundaries(data)) {
           const ledger = await readNewestPromptAt(client, worktreeId, options, data);
           // One notice, then stop asking: a ledger that failed once will fail
           // every poll, and the point of degrading is to stop paying for it.
-          promptLedgerReadable = ledger.readable;
+          state.promptLedgerReadable = ledger.readable;
           if (ledger.readable && ledger.submittedAt !== null) {
             if (outstandingPrompt(data, ledger.submittedAt)) {
               const heldMs = Date.now() - startTime;
@@ -1359,7 +1378,7 @@ export async function pollWorktree(
         // — "the screen said so and nothing corroborated it" — which is now
         // exactly the set of cases that reach it.
         const basis =
-          turnStartedAt !== null || answeredNewestPrompt
+          state.turnStartedAt !== null || answeredNewestPrompt
             ? COMPLETION_BASIS.HOOK_STOP
             : COMPLETION_BASIS.SCRAPER_READY;
         console.error(`Completed: ${worktreeId} (basis=${basis}${selfResumeSuffix()})`);

@@ -91,7 +91,7 @@
  */
 
 import { isPlainObject, readStringField } from '../event-mapper';
-import { collapseToLine, separateTurnBody, type TurnRenderBlock } from '../turn-body';
+import { boundDetail, collapseToLine, separateTurnBody, truncateTurnBody, type TurnRenderBlock } from '../turn-body';
 
 /** `$CODEX_HOME/sessions` — where codex keeps one machine's rollout files. */
 export const CODEX_SESSIONS_DIR_SEGMENTS: readonly string[] = ['sessions'];
@@ -400,9 +400,7 @@ function readArgv(value: unknown): string | null {
 }
 
 function boundDetailText(value: string): string {
-  return value.length <= MAX_CODEX_TOOL_DETAIL_LENGTH
-    ? value
-    : `${value.slice(0, MAX_CODEX_TOOL_DETAIL_LENGTH - 1)}…`;
+  return boundDetail(value, MAX_CODEX_TOOL_DETAIL_LENGTH);
 }
 
 /**
@@ -731,11 +729,7 @@ export function renderCodexTurn(turn: CodexTurnAccumulator): CodexRenderedTurn {
   // The head mark goes on before the length bound, so a headless turn long
   // enough to be truncated at both ends still says so at both ends.
   if (!turn.started && body.length > 0) body = CODEX_TURN_HEAD_TRUNCATION_MARKER + body;
-  if (body.length > MAX_CODEX_TURN_BODY_LENGTH) {
-    body =
-      body.slice(0, MAX_CODEX_TURN_BODY_LENGTH - CODEX_TURN_TRUNCATION_MARKER.length) +
-      CODEX_TURN_TRUNCATION_MARKER;
-  }
+  body = truncateTurnBody(body, MAX_CODEX_TURN_BODY_LENGTH, CODEX_TURN_TRUNCATION_MARKER);
 
   return {
     sessionId: turn.sessionId,

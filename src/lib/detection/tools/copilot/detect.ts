@@ -22,6 +22,11 @@ import { createToolStatusDetector } from '../run-detection';
 import { COPILOT_VERIFIED_AGAINST } from '../verified-against';
 import type { StatusEvidence } from '@/lib/session/status-evidence';
 import type { NormalizedFrame } from '../types';
+import type { PromptDetectionResult } from '../../prompt-detector';
+
+function detectCopilotPrompt(clean: string): PromptDetectionResult {
+  return detectPrompt(stripBoxDrawing(clean), buildDetectPromptOptions('copilot'));
+}
 
 /** copilot-cli build these rules were read off (#1885 / #1895; value in ../verified-against, #1929). */
 export const VERIFIED_AGAINST = COPILOT_VERIFIED_AGAINST;
@@ -74,8 +79,7 @@ export const copilotStatusDetector = createToolStatusDetector({
     // never the transcript. Ordering against them is therefore settled inside the
     // helper: it declines any frame that still has a status bar.
     if (isCopilotSelectionFrame(frame.contentLines as string[])) {
-      const promptOptions = buildDetectPromptOptions('copilot');
-      const promptDetection = detectPrompt(stripBoxDrawing(frame.clean), promptOptions);
+      const promptDetection = detectCopilotPrompt(frame.clean);
       if (promptDetection.isPrompt) {
         // Distinguish yes/no prompts (2-3 options, e.g., "Do you want to run this command?")
         // from ask_user multi-select prompts (4+ options). Yes/no prompts should show
@@ -125,8 +129,7 @@ export const copilotStatusDetector = createToolStatusDetector({
     // window form would also have matched copilot's own response text -- see
     // `status-vocabulary-in-response.txt`.
     if (readCopilotStatusBar(frame.contentLines as string[]) === 'working') {
-      const promptOptions = buildDetectPromptOptions('copilot');
-      const promptDetection = detectPrompt(stripBoxDrawing(frame.clean), promptOptions);
+      const promptDetection = detectCopilotPrompt(frame.clean);
       return {
         status: 'running' as const,
         confidence: 'high' as const,
