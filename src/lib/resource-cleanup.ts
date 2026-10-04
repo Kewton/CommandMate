@@ -18,10 +18,9 @@ import { existsSync } from 'fs';
 import {
   getAutoYesStateCompositeKeys,
   getAutoYesPollerCompositeKeys,
-  deleteAutoYesState,
-  stopAutoYesPolling,
   extractWorktreeId,
 } from './polling/auto-yes-manager';
+import { applyAutoYesStateRule, stopAutoYesPollersFor } from './auto-yes-lifecycle';
 import { isValidWorktreeId } from './security/path-validator';
 import { stopScheduleForWorktree, getScheduleWorktreeIds } from './schedule-manager';
 import { stopTimersForWorktree, getTimerWorktreeIds } from './timer-manager';
@@ -231,18 +230,19 @@ export function cleanupOrphanedMapEntries(): CleanupMapResult {
     return result;
   }
 
-  // Cleanup autoYesStates (Issue #525: composite keys)
+  // Cleanup autoYesStates (Issue #525: composite keys). Issue #3184: through the
+  // `orphan-swept` row of the Auto-Yes lifecycle table.
   const autoYesStateKeys = getAutoYesStateCompositeKeys();
   for (const compositeKey of autoYesStateKeys) {
     const worktreeId = extractWorktreeId(compositeKey);
     // [SEC4-MF-001] Validate extracted worktreeId
     if (!isValidWorktreeId(worktreeId)) {
-      deleteAutoYesState(compositeKey);
+      applyAutoYesStateRule('orphan-swept', { scope: 'key', compositeKey });
       result.deletedAutoYesStateIds.push(compositeKey);
       continue;
     }
     if (!validWorktreeIds.has(worktreeId)) {
-      deleteAutoYesState(compositeKey);
+      applyAutoYesStateRule('orphan-swept', { scope: 'key', compositeKey });
       result.deletedAutoYesStateIds.push(compositeKey);
     }
   }
@@ -252,7 +252,7 @@ export function cleanupOrphanedMapEntries(): CleanupMapResult {
   for (const compositeKey of autoYesPollerKeys) {
     const worktreeId = extractWorktreeId(compositeKey);
     if (!isValidWorktreeId(worktreeId) || !validWorktreeIds.has(worktreeId)) {
-      stopAutoYesPolling(compositeKey);
+      stopAutoYesPollersFor('orphan-swept', { scope: 'key', compositeKey });
       result.deletedAutoYesPollerIds.push(compositeKey);
     }
   }

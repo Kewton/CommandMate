@@ -6,6 +6,8 @@
  * shared types in src/types/api-contracts.ts.
  */
 
+import type { PromptView } from '../../lib/session/prompt-view';
+
 // Mirrors: src/types/models.ts Worktree + src/app/api/worktrees/route.ts response shape
 export interface WorktreeListResponse {
   worktrees: WorktreeItem[];
@@ -220,6 +222,14 @@ export interface CurrentOutputResponse {
    * structured (hook / degraded) forms.
    */
   promptAnswerable?: boolean;
+  /**
+   * How `promptData` is shown and answered (Issue #3184). Absent from a server
+   * older than #3184; read it through `readPromptView`, which derives the same
+   * value from `promptData` then. Imported (by relative path) rather than
+   * restated: `lib/session/prompt-view` has no imports, so the CLI build can
+   * compile it, and a copy here would be a second definition to drift.
+   */
+  promptView?: PromptView | null;
   autoYes: {
     enabled: boolean;
     expiresAt: number | null;
@@ -1216,6 +1226,12 @@ export interface WaitPromptOutput {
   question: string;
   options: unknown[];
   status: string;
+  /**
+   * How the prompt is answered (Issue #3184), from the shared prompt view:
+   * `screen` (keys at the pane), `api` (a decision over the agent's API) or
+   * `terminal` (nothing to offer). Added beside `type`, which keeps its meaning.
+   */
+  answerVia?: 'screen' | 'api' | 'terminal';
   /**
    * What the prompt asks approval for, when the detector could attribute a block
    * to it (Issue #1699). Present so a caller that reads only this payload can

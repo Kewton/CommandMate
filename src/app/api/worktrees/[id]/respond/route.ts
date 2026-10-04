@@ -156,6 +156,9 @@ export async function POST(
     // ordinary prompt writer against its own row. Without this the row fell
     // through to the yes/no branch below, which would have typed an arbitrary
     // string into the pane on behalf of a prompt nobody could read.
+    //
+    // #3184: kept as a type narrowing at the server's send gate — the branches
+    // below need the closed `PromptData` union — not a display decision.
     if (!isAnswerablePromptData(message.promptData)) {
       return NextResponse.json(
         { error: 'Prompt cannot be answered: the frame was never classified' },

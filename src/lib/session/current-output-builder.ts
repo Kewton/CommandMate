@@ -135,6 +135,7 @@ import {
   type StatusEvidence,
 } from '@/lib/session/status-evidence';
 import { applyAskUserQuestion } from '@/lib/session/ask-user-question-prompt';
+import { derivePromptView, type PromptView } from '@/lib/session/prompt-view';
 import { assessPromptAnswerability } from '@/lib/polling/auto-yes-dialog-gate';
 import { classifyLayerDisagreement, reportLayerDisagreement } from '@/lib/session/layer-disagreement';
 import {
@@ -532,6 +533,15 @@ export interface CurrentOutputPayload {
    * the UI must not offer Send — the route would refuse it.
    */
   promptAnswerable?: boolean;
+  /**
+   * How {@link promptData} is shown and answered, decided once (Issue #3184):
+   * `derivePromptView(promptData)`, null when there is no prompt. Optional so the
+   * early payloads (session not running) may omit it; absent reads as null. Readers
+   * take this instead of combining `type` / `decisionOptions` / `decisionId`
+   * themselves; a CLI talking to a server older than #3184 derives the same
+   * value from `promptData` (`readPromptView`).
+   */
+  promptView?: PromptView | null;
   autoYes?: {
     enabled: boolean;
     expiresAt: number | null;
@@ -2189,6 +2199,9 @@ async function buildPayload(
     isPromptWaiting,
     promptData,
     ...(promptAnswerable !== undefined ? { promptAnswerable } : {}),
+    // Issue #3184: appended next to the value it is derived from, not at the end
+    // — it is a reading of `promptData`, and only of it.
+    promptView: derivePromptView(promptData),
     autoYes: {
       enabled: autoYesState?.enabled ?? false,
       expiresAt: autoYesState?.enabled ? autoYesState.expiresAt : null,

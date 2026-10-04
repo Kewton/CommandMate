@@ -19,11 +19,17 @@ import type {
 import {
   isQuestionFreeTextNumeric,
   QUESTION_FREE_TEXT_MAX_LENGTH,
-  readPromptQuestionChoices,
-  readStructuredDecisionHeading,
   readQuestionFreeText,
   type PromptQuestionChoices,
 } from '@/components/worktree/prompt-decision-id';
+import {
+  derivePromptView,
+  optionTakesTypedText,
+  readQuestionChoices,
+  type PromptView,
+  promptHeadingMessage,
+  type PromptViewHeading,
+} from '@/lib/session/prompt-view';
 import { ErrorBoundary } from '@/components/error/ErrorBoundary';
 import { Checkbox, RadioGroup, RadioGroupItem, Button, Spinner } from '@/components/ui';
 import { usePromptAnimation } from '@/hooks/usePromptAnimation';
@@ -45,38 +51,12 @@ const BUTTON_PRIMARY_STYLES = 'bg-accent-600 text-white hover:bg-accent-700 focu
 const BUTTON_SECONDARY_STYLES = 'bg-surface border-2 border-input hover:bg-muted text-foreground focus:ring-ring';
 
 /**
- * The option labels measured to be a text field on screen (Issue #2573).
- *
- * Restated from `TYPED_TEXT_FIELD_LABEL_PATTERNS` in
- * `lib/detection/prompt-detect-multiple-choice`, which this client module cannot
- * import (that module's graph reaches `lib/env`, which imports `fs`).
- * `tests/unit/components/PromptPanel.test.tsx` asserts the two predicates agree.
+ * Whether the answer panels send the operator's TEXT for an option rather than
+ * its number (Issue #2573). Issue #3184: defined once in `lib/session/prompt-view`
+ * (it was restated here and in `MobilePromptSheet`); re-exported under the old
+ * name for the callers and tests that import it from the panel.
  */
-const TYPED_TEXT_FIELD_LABEL_PATTERNS: readonly RegExp[] = [
-  /^[^\S\n]*type\s+something\b/i,
-];
-
-/**
- * Whether the answer panels should send the operator's TEXT for this option,
- * rather than its number (Issue #2573).
- *
- * `requiresTextInput` alone used to decide it, and it is true for two opposite
- * rows: Command Code's `Type something...` (a real text field, #2522) and the
- * permission dialog's `No, tell Command Code what to do differently` (a menu
- * row). Sending the reason at the second typed nothing the dialog read and let
- * the Enter after it confirm the highlighted `1. Yes`. A menu row is answered by
- * its number — the tool then returns to its composer, where the instructions go
- * as an ordinary message.
- *
- * `components/mobile/MobilePromptSheet.tsx` applies the same rule, so both
- * surfaces send the same answer for the same option.
- */
-export function optionTakesTypedText(
-  option: { readonly label: string; readonly requiresTextInput?: boolean },
-): boolean {
-  return option.requiresTextInput === true
-    && TYPED_TEXT_FIELD_LABEL_PATTERNS.some((pattern) => pattern.test(option.label));
-}
+export { optionTakesTypedText };
 
 /**
  * Which question the panel is currently showing (Issue #2755).
@@ -331,6 +311,16 @@ function PromptPanelContent({
   const takesTypedText = multiSelectOptions !== null
     ? checkedTextFieldNumbers.length > 0
     : selectedOptionData !== null && optionTakesTypedText(selectedOptionData);
+  // Issue #3184: what this payload is and how it is answered, decided by the
+  // one shared function rather than re-derived from `type` / `decisionOptions`
+  // here. See {@link panelPromptView} for which decision id it reads.
+  const view = panelPromptView(promptData, decisionId);
+  // #3184: type narrowing only — to the closed `PromptData` union (#1725) for
+  // the screen controls below, and to the structured form for the notice. It is
+  // the same split as `view.kind === 'screen-choices'` (pinned by
+  // prompt-view-3184.test); what is SHOWN is decided by `view`.
+  const screenPrompt = isAnswerablePromptData(promptData) ? promptData : null;
+  const structuredPrompt = screenPrompt === null ? (promptData as StructuredPromptWaitingData) : null;
   const isBusy = answering || isSubmitting;
   // Issue #2870: a window the route would refuse keeps its options on screen
   // but nothing on it can be pressed.
@@ -453,9 +443,9 @@ function PromptPanelContent({
       {/* Instruction Text (context preceding the prompt). Issue #1725: the
           structured form has none — it is built from a Notification payload,
           not from a pane, so there is no scrollback to show. */}
-      {isAnswerablePromptData(promptData) && promptData.instructionText && (
+      {screenPrompt?.instructionText && (
         <div className="max-h-40 overflow-y-auto whitespace-pre-wrap text-sm text-muted-foreground bg-muted rounded p-2 border border-border">
-          {promptData.instructionText}
+          {screenPrompt.instructionText}
         </div>
       )}
 
@@ -478,9 +468,7 @@ function PromptPanelContent({
           English one-liner built for `wait` / `capture`; the panel says the same
           thing in the user's locale instead. */}
       <p className="text-foreground leading-relaxed">
-        {isAnswerablePromptData(promptData)
-          ? promptData.question
-          : unclassifiedHeading(t, decisionId ? readStructuredDecisionHeading(promptData) : null)}
+        {promptHeadingText(t, view.heading)}
       </p>
 
       {/* Answering indicator */}
@@ -530,10 +518,11 @@ function PromptPanelContent({
       )}
 
       {/* Issue #1725: a dialog the structured layer reported and nobody parsed */}
-      {!isAnswerablePromptData(promptData) && (
+      {structuredPrompt && (
         <UnclassifiedPromptNotice
-          promptData={promptData}
-          decisionId={decisionId}
+          promptData={structuredPrompt}
+          view={view}
+          viewSource={{ ...structuredPrompt, decisionId: view.decisionId }}
           disabled={isDisabled}
           onRespond={handleDecisionRespond}
         />
@@ -559,13 +548,16 @@ function PromptPanelContent({
  */
 function UnclassifiedPromptNotice({
   promptData,
-  decisionId,
+  view,
+  viewSource,
   disabled,
   onRespond,
 }: {
   promptData: StructuredPromptWaitingData;
-  /** Issue #1932. See {@link PromptPanelProps.decisionId}. */
-  decisionId?: string | null;
+  /** Issue #3184: the panel's {@link PromptView} of this payload. */
+  view: PromptView;
+  /** The payload with the decision id the view was derived with. */
+  viewSource: StructuredPromptWaitingData;
   disabled: boolean;
   onRespond: (answer: string) => void;
 }) {
@@ -574,7 +566,10 @@ function UnclassifiedPromptNotice({
   // accepts these three verdicts; `decisionId` says WHICH approval they would
   // be applied to. With options but no id there is nothing to address, and the
   // panel says what it said before — answer it in the terminal.
-  const answerable = decisionId ? promptData.decisionOptions ?? null : null;
+  //
+  // Issue #3184: that "both halves" test is the view's `api-choices` /
+  // `approval`, so it is read off the view instead of restated.
+  const answerable = view.apiTarget === 'approval' ? promptData.decisionOptions ?? null : null;
   // Issue #2039: the same question asked of the OTHER kind of addressable
   // decision. `readPromptQuestionChoices` returns non-null only when this
   // payload names an id, published choices for exactly one question, and is NOT
@@ -583,7 +578,7 @@ function UnclassifiedPromptNotice({
   // written in. Answering a question with `Allow once` is refused at the source
   // (`question-needs-answer-verdict`), which is why the panel must not be able
   // to draw both.
-  const questionChoices = readPromptQuestionChoices(promptData);
+  const questionChoices = view.apiTarget === 'question' ? readQuestionChoices(viewSource) : null;
 
   return (
     <div className="space-y-2" data-testid="unclassified-prompt-notice">
@@ -1284,18 +1279,30 @@ export const PromptPanel = memo(function PromptPanel({
 export default PromptPanel;
 
 /**
- * The heading of a payload nobody classified (Issue #3181). With addressable
- * choices underneath it must not say the options could not be read.
+ * The heading above the prompt (Issue #3181, #3184): the view's heading in the
+ * user's locale. With addressable choices underneath it must not say the
+ * options could not be read — the view only says `unreadable` when there are
+ * none.
  */
-function unclassifiedHeading(
+function promptHeadingText(
   t: ReturnType<typeof useTranslations>,
-  heading: ReturnType<typeof readStructuredDecisionHeading>
+  heading: PromptViewHeading
 ): string {
-  if (heading?.kind === 'approval') {
-    return heading.toolName
-      ? t('structuredApprovalTitle', { toolName: heading.toolName })
-      : t('structuredApprovalTitleNoTool');
-  }
-  if (heading?.kind === 'question') return t('structuredQuestionTitle');
-  return t('unclassifiedTitle');
+  const message = promptHeadingMessage(heading);
+  if ('text' in message) return message.text;
+  return 'values' in message ? t(message.key, message.values) : t(message.key);
+}
+
+/**
+ * The panel's view of its payload (Issue #3184).
+ *
+ * The decision id is the panel's own `decisionId` prop and nothing else: it is
+ * the id every answer is sent with (#1932), and `handleDecisionRespond` refuses
+ * to send without it — so a payload that names an id the caller did not pass
+ * must not draw buttons, nor a heading that promises them
+ * (`PromptPanelDecisionSubject-2031`'s "verdicts but no id" case).
+ */
+function panelPromptView(promptData: PanelPromptData, decisionId: string | null | undefined): PromptView {
+  // derivePromptView answers null only for a null payload; the panel has one.
+  return derivePromptView({ ...promptData, decisionId: decisionId ?? null })!;
 }

@@ -23,8 +23,7 @@ import {
   describeSessionTargetConflict,
   INSTANCE_TOOL_CONFLICT,
 } from '@/lib/session/resolve-session-target';
-import { buildCompositeKey, disableAutoYes } from '@/lib/auto-yes-state';
-import { stopAutoYesPolling } from '@/lib/auto-yes-poller';
+import { releaseAutoYes } from '@/lib/auto-yes-lifecycle';
 import { clearSessionStarting } from '@/lib/session/session-starting-state';
 import { createLogger } from '@/lib/logger';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
@@ -216,8 +215,9 @@ export async function POST(
     // Issue #3195: no token here — the record is dropped whichever launch wrote
     // it; the killed launch's own `finally` then clears only its own record.
     for (const { cliToolId, instanceId } of targets) {
-      disableAutoYes(id, cliToolId, undefined, instanceId);
-      stopAutoYesPolling(buildCompositeKey(id, cliToolId, instanceId));
+      // Issue #3184: the table's `session-killed` row — disable with no reason,
+      // stop the poller — which is exactly what #3188 wrote here.
+      releaseAutoYes('session-killed', { scope: 'instance', worktreeId: id, cliToolId, instanceId });
       clearSessionStarting(id, cliToolId, instanceId);
     }
 

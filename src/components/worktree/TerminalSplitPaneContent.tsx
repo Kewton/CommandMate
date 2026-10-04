@@ -110,10 +110,8 @@ import {
 import { worktreeApi } from '@/lib/api-client';
 import { buildPromptResponseBody } from '@/lib/prompt-response-body-builder';
 import { readSelectionListShape } from '@/lib/detection/selection-shape';
-import {
-  readPromptDecisionId,
-  withToolDecisionLabels,
-} from '@/components/worktree/prompt-decision-id';
+import { withToolDecisionLabels } from '@/components/worktree/prompt-decision-id';
+import { derivePromptView } from '@/lib/session/prompt-view';
 import { getCliToolDisplayName, getInstanceLabel } from '@/lib/cli-tools/types';
 import type {
   TerminalSplitPaneCoreProps,
@@ -663,6 +661,9 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
           : buildPromptResponseBody(
               answer,
               cliToolId,
+              // #3184: type narrowing only — `buildPromptResponseBody` takes the
+              // closed `PromptData` union (#1725); what is shown and which route
+              // answers are decided by the shared view (`promptDecisionId`).
               isAnswerablePromptData(prompt.data) ? prompt.data : null,
               resolvedInstanceId,
             );
@@ -756,7 +757,11 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   // Issue #1932: the approval this pane's dialog addresses, when the payload
   // names one. Null for every scraper-read prompt and for every source that
   // publishes no per-decision id, which is what keeps those on the pane path.
-  const promptDecisionId = readPromptDecisionId(prompt.data);
+  //
+  // Issue #3184: read off the shared view, whose `decisionId` is non-null
+  // exactly when the payload is answered over the agent's API — an id with
+  // nothing addressable behind it no longer reaches the panel as one.
+  const promptDecisionId = derivePromptView(prompt.data)?.decisionId ?? null;
   // Issue #2945: the approval verdicts in the tool's own words (OpenCode V2
   // draws `Always allow`); the numbers they send are unchanged.
   const panelPromptData = useMemo(
@@ -915,8 +920,8 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   // `useTerminalPanePolling` folds `isPromptWaiting && promptData` into
   // `prompt.visible` and exposes no separate flag (see ChatSurfaceLiveState). The
   // banner's "a wait nobody could read" case is therefore a visible prompt whose
-  // payload is #1708's / #1725's degraded record, which ChatSurface narrows
-  // itself with `isAnswerablePromptData`.
+  // payload is #1708's / #1725's degraded record, which ChatSurface reads
+  // itself with `derivePromptView` (Issue #3184).
   const chatSurfaceSlot = useMemo(
     () => (
       <div

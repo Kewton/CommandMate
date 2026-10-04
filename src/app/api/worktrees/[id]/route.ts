@@ -20,6 +20,7 @@ import { checkSessionOwnership, ownedSessionNameSet } from '@/lib/cli-tools/sess
 import { detectWorktreeSessionStatus } from '@/lib/session/worktree-status-helper';
 import { resolveSessionName } from '@/lib/cli-tools/session-name';
 import { createLogger } from '@/lib/logger';
+import { releaseAutoYes } from '@/lib/auto-yes-lifecycle';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 
 const logger = createLogger('api/worktrees');
@@ -223,6 +224,10 @@ export async function PATCH(
       }
 
       const validatedInstances = validation.value as AgentInstance[];
+      // Issue #3184: the roster as it stood before this request — including the
+      // implied primaries of a worktree that never stored one — so the instances
+      // this PATCH drops can be named after it lands.
+      const previousInstances = resolveAgentInstances(db, id, worktree.selectedAgents);
       try {
         setAgentInstances(db, id, validatedInstances);
       } catch (instanceError) {
@@ -233,6 +238,23 @@ export async function PATCH(
           );
         }
         throw instanceError;
+      }
+
+      // Issue #3184: the `instance-removed` row of the Auto-Yes lifecycle table.
+      // Removing an instance from the roster (the UI's remove, or the CLI's
+      // `instances remove` without `--kill`) left its Auto-Yes armed, and the
+      // next instance to claim the id inherited the grant. Only after the roster
+      // write succeeded, and only for the (id, tool) pairs that are gone — an
+      // instance that stays, or is merely re-ordered or renamed, is untouched.
+      const kept = new Set(validatedInstances.map((instance) => `${instance.id}\u0000${instance.cliTool}`));
+      for (const removed of previousInstances) {
+        if (kept.has(`${removed.id}\u0000${removed.cliTool}`)) continue;
+        releaseAutoYes('instance-removed', {
+          scope: 'instance',
+          worktreeId: id,
+          cliToolId: removed.cliTool,
+          instanceId: removed.id,
+        });
       }
 
       // R1-007 (extended): keep cli_tool_id backed by an existing instance.

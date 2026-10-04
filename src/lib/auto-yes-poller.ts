@@ -225,6 +225,13 @@ function incrementErrorCount(compositeKey: string): void {
     pollerState.currentInterval = calculateBackoffInterval(pollerState.consecutiveErrors);
 
     // Issue #499 Item 5: Auto-stop after consecutive error threshold.
+    //
+    // Issue #3184: this is the `consecutive-errors` row of AUTO_YES_LIFECYCLE
+    // (`lib/auto-yes-lifecycle`) — disable with `consecutive_errors`, stop the
+    // poller — applied here directly rather than through `releaseAutoYes`:
+    // that module reaches this one through the auto-yes-manager barrel, so
+    // importing it back would be a cycle. `auto-yes-lifecycle-3184.test.ts`
+    // holds this call and the table row equal.
     if (pollerState.consecutiveErrors >= AUTO_STOP_ERROR_THRESHOLD) {
       const worktreeId = extractWorktreeId(compositeKey);
       const cliToolId = extractCliToolId(compositeKey);
