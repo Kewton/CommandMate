@@ -60,6 +60,7 @@ import { hasSession, createSession, sendKeys, capturePane } from '@/lib/tmux/tmu
 import { sendMessageWithSubmitVerification } from '@/lib/cli-tools/submit-verified-sender';
 import { beginAgentSession } from '@/lib/session/agent-session-lifecycle';
 import { LIVENESS_CONFIRM_DELAY_MS } from '@/config/cli-tool-timing-config';
+import { withLaunchScreenCleared } from '@/lib/session/launch-screen';
 
 const FIXTURES = path.join(process.cwd(), 'tests/fixtures/tool-liveness-2070');
 const frame = (name: string): string =>
@@ -123,7 +124,7 @@ describe('[#2070] CodexTool.launchSession reuse branch', () => {
     // The pane is reused, not recreated: the transcript of the process that
     // died in it is the operator's evidence of what happened.
     expect(createSession).not.toHaveBeenCalled();
-    expect(sendKeys).toHaveBeenCalledWith(SESSION, 'codex', true);
+    expect(sendKeys).toHaveBeenCalledWith(SESSION, withLaunchScreenCleared('codex'), true);
     // A new process under the same (worktree, tool, instance) key — the dead
     // one's structured events must not be read as this one's (#1760/#1723).
     expect(beginAgentSession).toHaveBeenCalledTimes(1);
@@ -171,7 +172,7 @@ describe('[#2070] CodexTool.sendMessage self-heals', () => {
       vi.useRealTimers();
     }
 
-    expect(sendKeys).toHaveBeenCalledWith(SESSION, 'codex', true);
+    expect(sendKeys).toHaveBeenCalledWith(SESSION, withLaunchScreenCleared('codex'), true);
     expect(sendMessageWithSubmitVerification).toHaveBeenCalledWith(
       expect.objectContaining({ sessionName: SESSION, message: 'hello' })
     );

@@ -75,6 +75,7 @@ import {
   CODEX_HOOKS_REVIEW_PANE,
   CODEX_READY_PANE,
 } from '../../fixtures/codex-hooks-review-0148';
+import { LAUNCH_SCREEN_CLEAR_PREFIX, withLaunchScreenCleared } from '@/lib/session/launch-screen';
 
 const WORKTREE_ID = 'wt-codex-1760';
 const WORKTREE_PATH = '/tmp/wt-codex-1760';
@@ -112,7 +113,11 @@ afterEach(() => {
 /** The command the tool typed into the pane to start codex. */
 function launchCommand(): string {
   const call = vi.mocked(sendKeys).mock.calls.find(([, keys]) => String(keys).includes('codex'));
-  return call ? String(call[1]) : '';
+  if (!call) return '';
+  // Issue #3180: typed behind `clear 2>/dev/null; `; the rest is the rendered line.
+  const typed = String(call[1]);
+  expect(typed.startsWith(LAUNCH_SCREEN_CLEAR_PREFIX)).toBe(true);
+  return typed.slice(LAUNCH_SCREEN_CLEAR_PREFIX.length);
 }
 
 describe('startSession fences the previous session’s events', () => {
@@ -209,7 +214,7 @@ describe('startSession injects the correlation keys', () => {
     expect(launchCommand()).toBe("CM_PORT='4321' codex");
     expect(vi.mocked(sendKeys)).toHaveBeenCalledWith(
       'mcbd-codex-wt-codex-1760',
-      "CM_PORT='4321' codex",
+      withLaunchScreenCleared("CM_PORT='4321' codex"),
       true
     );
   });

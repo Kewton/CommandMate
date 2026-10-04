@@ -93,6 +93,7 @@ import {
   parseOpencodeVersionOutput,
   resolveOpencodeV2Executable,
 } from './opencode-executable';
+import { withLaunchScreenCleared } from '@/lib/session/launch-screen';
 
 const logger = createLogger('cli-tools/opencode-v2');
 
@@ -293,7 +294,9 @@ export class OpenCodeV2Tool extends BaseCLITool {
 
       await sendKeys(
         sessionName,
-        buildAgentLaunchCommandLine({ target, executablePath: executable.path, worktreePath }),
+        withLaunchScreenCleared(
+          buildAgentLaunchCommandLine({ target, executablePath: executable.path, worktreePath })
+        ),
         true
       );
 

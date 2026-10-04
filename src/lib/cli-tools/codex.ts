@@ -47,6 +47,7 @@ import {
   CODEX_DIALOG_SETTLE_MS,
 } from '@/config/cli-tool-timing-config';
 import { missingToolError } from './install-hints';
+import { withLaunchScreenCleared } from '@/lib/session/launch-screen';
 
 const logger = createLogger('cli-tools/codex');
 
@@ -335,12 +336,12 @@ export class CodexTool extends BaseCLITool {
       // as the new one's.
       const relaunchIntoSamePane = async (): Promise<void> => {
         beginAgentSession({ worktreeId, cliToolId: CODEX_CLI_TOOL_ID, instanceId });
-        await sendKeys(sessionName, launchCommand, true);
+        await sendKeys(sessionName, withLaunchScreenCleared(launchCommand), true);
         await new Promise((resolve) => setTimeout(resolve, CODEX_INIT_WAIT_MS));
       };
 
       // Start Codex CLI in interactive mode
-      await sendKeys(sessionName, launchCommand, true);
+      await sendKeys(sessionName, withLaunchScreenCleared(launchCommand), true);
 
       // Wait for Codex to initialize
       await new Promise((resolve) => setTimeout(resolve, CODEX_INIT_WAIT_MS));

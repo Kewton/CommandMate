@@ -37,6 +37,7 @@ import { getCommandCodeSettingsPath } from '@/lib/hooks/sources/command-code/hoo
 import { getAgentEventGenerationStartedAt } from '@/lib/session/agent-event-state';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { removeTempDir } from '@tests/helpers/temp-dir';
+import { withLaunchScreenCleared } from '@/lib/session/launch-screen';
 
 vi.mock('@/lib/tmux/tmux', () => ({
   hasSession: vi.fn().mockResolvedValue(false),
@@ -245,7 +246,7 @@ describe('CommandCodeTool', () => {
         expect(createSession).toHaveBeenCalled();
         expect(sendKeys).toHaveBeenCalledWith(
           SESSION,
-          buildCommandCodeLaunchCommand(launchContext()),
+          withLaunchScreenCleared(buildCommandCodeLaunchCommand(launchContext())),
           true,
         );
       } finally {
@@ -293,7 +294,7 @@ describe('CommandCodeTool', () => {
         expect(createSession).not.toHaveBeenCalled();
         expect(sendKeys).toHaveBeenCalledWith(
           SESSION,
-          buildCommandCodeLaunchCommand(launchContext()),
+          withLaunchScreenCleared(buildCommandCodeLaunchCommand(launchContext())),
           true,
         );
       } finally {
@@ -640,7 +641,7 @@ describe('CommandCodeTool', () => {
 
         expect(sendKeys).toHaveBeenCalledWith(
           SESSION,
-          buildCommandCodeLaunchCommand(launchContext(worktree)),
+          withLaunchScreenCleared(buildCommandCodeLaunchCommand(launchContext(worktree))),
           true,
         );
       } finally {

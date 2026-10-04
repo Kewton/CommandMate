@@ -34,6 +34,7 @@ import {
   TUI_EXIT_WAIT_MS,
 } from '@/config/cli-tool-timing-config';
 import { missingToolError } from './install-hints';
+import { withLaunchScreenCleared } from '@/lib/session/launch-screen';
 
 const logger = createLogger('cli-tools/gemini');
 
@@ -166,7 +167,7 @@ export class GeminiTool extends BaseCLITool {
         executablePath: this.command,
         worktreePath,
       });
-      await sendKeys(sessionName, launchCommand, true);
+      await sendKeys(sessionName, withLaunchScreenCleared(launchCommand), true);
 
       // Wait for Gemini to initialize (minimum wait for banner/auth)
       await new Promise((resolve) => setTimeout(resolve, GEMINI_INIT_WAIT_MS));

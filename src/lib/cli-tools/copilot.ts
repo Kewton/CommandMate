@@ -55,6 +55,7 @@ import { COPILOT_CLI_TOOL_ID } from '@/lib/hooks/sources/copilot/tool-id';
 import { getErrorMessage } from '@/lib/errors';
 import { createLogger } from '@/lib/logger';
 import { missingToolError } from './install-hints';
+import { withLaunchScreenCleared } from '@/lib/session/launch-screen';
 
 const logger = createLogger('cli-tools/copilot');
 
@@ -448,7 +449,7 @@ export class CopilotTool extends BaseCLITool {
       });
 
       // Start Copilot CLI in interactive mode
-      await sendKeys(sessionName, launchCommand, true);
+      await sendKeys(sessionName, withLaunchScreenCleared(launchCommand), true);
 
       // Issue #1907: no blind sleep before this. The 4-second one that used to
       // sit here was a guess at how long copilot takes to paint (measured on

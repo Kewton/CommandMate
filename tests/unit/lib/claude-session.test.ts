@@ -15,6 +15,7 @@ vi.mock('@/lib/tmux/session-ownership', () => ({
 }));
 import { existsSync, readFileSync } from 'fs';
 import { findClaudeLaunchIndex } from '@tests/helpers/claude-launch-command';
+import { LAUNCH_SCREEN_CLEAR_PREFIX } from '@/lib/session/launch-screen';
 import { registerIsolatedAgentHooksDir } from '@tests/helpers/agent-hooks-dir';
 import { PERMISSION_DENY_RULES } from '@/lib/hooks/hook-settings-generator';
 
@@ -135,7 +136,14 @@ function countEnterOnlyCalls(): number {
  * tests of the launch decoration.
  */
 function findLaunchCallIndex(claudePath: string): number {
-  return findClaudeLaunchIndex(vi.mocked(sendKeys).mock.calls, claudePath);
+  // Issue #3180: the launch is typed as `clear 2>/dev/null; <line>`; the path is matched
+  // on the line itself.
+  const calls = vi.mocked(sendKeys).mock.calls.map((call) =>
+    call[1].startsWith(LAUNCH_SCREEN_CLEAR_PREFIX)
+      ? [call[0], call[1].slice(LAUNCH_SCREEN_CLEAR_PREFIX.length), ...call.slice(2)]
+      : call
+  );
+  return findClaudeLaunchIndex(calls, claudePath);
 }
 
 /** Assert the CLI was launched from `claudePath`, with hooks injected. */
@@ -145,8 +153,11 @@ function expectLaunchedFrom(claudePath: string): void {
 
   const call = vi.mocked(sendKeys).mock.calls[index];
   expect(call[0]).toBe(TEST_SESSION_NAME);
-  // #2403 puts this server's own port in front of every launch line.
-  expect(call[1]).toMatch(new RegExp(`^CM_PORT='\\d+' '${claudePath}' --settings '.+\\.json'$`));
+  // #2403 puts this server's own port in front of every launch line, and
+  // #3180 types the whole line behind `clear 2>/dev/null; `.
+  expect(call[1]).toMatch(
+    new RegExp(`^clear 2>/dev/null; CM_PORT='\\d+' '${claudePath}' --settings '.+\\.json'$`)
+  );
   expect(call[2]).toBe(true);
 }
 
@@ -1770,7 +1781,9 @@ describe('claude-session - hooks auto-injection (Issue #1722)', () => {
       .mocked(sendKeys)
       .mock.calls.find((call) => call[1].includes('claude') && call[1] !== 'unset CLAUDECODE');
     expect(launch, 'no CLI launch command was sent').toBeDefined();
-    return launch![1];
+    // Issue #3180: typed behind `clear 2>/dev/null; `; the rest is the rendered line.
+    expect(launch![1].startsWith(LAUNCH_SCREEN_CLEAR_PREFIX)).toBe(true);
+    return launch![1].slice(LAUNCH_SCREEN_CLEAR_PREFIX.length);
   }
 
   it('launches with --settings pointing at a real, per-instance file', async () => {
