@@ -6,9 +6,7 @@
 import { BaseCLITool } from './base';
 import type { CLIToolType } from './types';
 import {
-  hasSession,
   sendKeys,
-  killSession,
   sendSpecialKey,
   capturePane,
   getSessionWorkingDirectory,
@@ -831,28 +829,17 @@ export class CodexTool extends BaseCLITool {
    * @param worktreeId - Worktree ID
    */
   async killSession(worktreeId: string, instanceId?: string): Promise<void> {
-    const sessionName = this.getSessionName(worktreeId, instanceId);
-
-    try {
+    await this.requestExitAndKill(worktreeId, instanceId, {
+      logger,
+      stoppedAction: 'stopped-codex-session:sessionname',
       // Send Ctrl+D to exit Codex gracefully
-      const exists = await hasSession(sessionName);
-      if (exists) {
+      requestExit: async (sessionName) => {
         // Send Ctrl+D (ASCII 4)
         await sendSpecialKey(sessionName, 'C-d');
 
         // Wait a moment for Codex to exit
         await new Promise((resolve) => setTimeout(resolve, TUI_EXIT_WAIT_MS));
-      }
-
-      // Kill the tmux session
-      const killed = await killSession(sessionName);
-
-      if (killed) {
-        logger.info('stopped-codex-session:sessionname');
-      }
-    } catch (error: unknown) {
-      logger.error('session:stop-failed', { error: getErrorMessage(error) });
-      throw error;
-    }
+      },
+    });
   }
 }

@@ -11,10 +11,8 @@
 import { BaseCLITool } from './base';
 import type { CLIToolType } from './types';
 import {
-  hasSession,
   sendKeys,
   sendSpecialKey,
-  killSession,
   capturePane,
 } from '../tmux/tmux';
 import { sendMessageWithSubmitVerification } from './submit-verified-sender';
@@ -241,11 +239,10 @@ export class GeminiTool extends BaseCLITool {
    * @param worktreeId - Worktree ID
    */
   async killSession(worktreeId: string, instanceId?: string): Promise<void> {
-    const sessionName = this.getSessionName(worktreeId, instanceId);
-
-    try {
-      const exists = await hasSession(sessionName);
-      if (exists) {
+    await this.requestExitAndKill(worktreeId, instanceId, {
+      logger,
+      stoppedAction: 'stopped-gemini-session:sessionname',
+      requestExit: async (sessionName) => {
         // Send Ctrl+C to interrupt any running operation
         await sendSpecialKey(sessionName, 'C-c');
         await new Promise((resolve) => setTimeout(resolve, TUI_INTERRUPT_SETTLE_MS));
@@ -253,17 +250,7 @@ export class GeminiTool extends BaseCLITool {
         // Send /quit to exit Gemini gracefully
         await sendKeys(sessionName, '/quit', true);
         await new Promise((resolve) => setTimeout(resolve, TUI_EXIT_WAIT_MS));
-      }
-
-      // Kill the tmux session
-      const killed = await killSession(sessionName);
-
-      if (killed) {
-        logger.info('stopped-gemini-session:sessionname');
-      }
-    } catch (error: unknown) {
-      logger.error('session:stop-failed', { error: getErrorMessage(error) });
-      throw error;
-    }
+      },
+    });
   }
 }

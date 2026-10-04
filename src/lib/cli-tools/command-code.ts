@@ -40,10 +40,8 @@ import type { CLIToolType } from './types';
 import type { NavigationKeySpec } from '@/types/cli-tool-contracts';
 import { COMMAND_CODE_NAVIGATION_KEY_VALUES } from '@/types/terminal-keys';
 import {
-  hasSession,
   sendKeys,
   sendSpecialKeys,
-  killSession,
   capturePane,
 } from '../tmux/tmux';
 import { sendMessageWithSubmitVerification } from './submit-verified-sender';
@@ -439,29 +437,21 @@ export class CommandCodeTool extends BaseCLITool {
    * @param instanceId - Agent instance ID (defaults to the primary instance)
    */
   async killSession(worktreeId: string, instanceId?: string): Promise<void> {
-    const sessionName = this.getSessionName(worktreeId, instanceId);
-
-    try {
-      const exists = await hasSession(sessionName);
-      if (exists) {
+    await this.requestExitAndKill(worktreeId, instanceId, {
+      logger,
+      stoppedAction: 'stopped-command-code-session',
+      requestExit: async (sessionName) => {
         await sendKeys(sessionName, COMMAND_CODE_EXIT_COMMAND, false);
         await new Promise((resolve) => setTimeout(resolve, TUI_TEXT_INPUT_WAIT_MS));
         await sendSpecialKeys(sessionName, ['Enter']);
         await new Promise((resolve) => setTimeout(resolve, TUI_EXIT_WAIT_MS));
-      }
+      },
+      afterKill: (sessionName) => {
+        this.composerPendingSince.delete(sessionName);
 
-      const killed = await killSession(sessionName);
-      this.composerPendingSince.delete(sessionName);
-
-      // So a later session reusing the name starts clean.
-      invalidateCache(sessionName);
-
-      if (killed) {
-        logger.info('stopped-command-code-session');
-      }
-    } catch (error: unknown) {
-      logger.error('session:stop-failed', { error: getErrorMessage(error) });
-      throw error;
-    }
+        // So a later session reusing the name starts clean.
+        invalidateCache(sessionName);
+      },
+    });
   }
 }

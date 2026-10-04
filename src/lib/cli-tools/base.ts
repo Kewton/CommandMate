@@ -12,6 +12,7 @@ import {
   createSession,
   getSessionWorkingDirectory,
   hasSession,
+  killSession,
   reconcileSessionGeometry,
   sendSpecialKey,
   type SessionGeometryOptions,
@@ -29,6 +30,7 @@ import { stripAnsi } from '../detection/ansi';
 import { getServerPort } from '../env';
 import { AGENT_EVENT_URL_ENV_VAR } from '../hooks/sources/launch-command';
 import { createLogger, type Logger } from '../logger';
+import { getErrorMessage } from '../errors';
 import type {
   CaptureSpec,
   ComposerSpec,
@@ -803,6 +805,64 @@ export abstract class BaseCLITool implements ICLITool {
 
     // Wait a moment for the session to be created
     await new Promise((resolve) => setTimeout(resolve, TUI_SESSION_CREATE_WAIT_MS));
+  }
+
+  /**
+   * The stop sequence a driver's `killSession` runs: name the session, ask the
+   * tool to quit when its pane exists, kill the tmux session, run the driver's
+   * cleanup and log.
+   *
+   * The keys and waits that ask the tool to quit stay in each driver, as
+   * `requestExit`: they are measured per tool, and {@link gracefulExitSequence}
+   * describes them without sending them. Both log lines go through the caller's
+   * logger, the stop line under the caller's action name, so each driver's log
+   * reads as it did when this sequence was written out in every one of them.
+   *
+   * `afterKill` runs after the tmux kill and before the stop line, inside the
+   * same `try`, whether or not tmux had a session to kill.
+   *
+   * claude, opencode and OpenCode V2 keep their own `killSession`: claude hands
+   * the stop to `stopClaudeSession`, and the other two check the exit's
+   * postcondition and release what the instance held.
+   *
+   * @param worktreeId - Worktree ID
+   * @param instanceId - Agent instance ID (defaults to the primary instance)
+   * @param stop.logger - The driver's logger
+   * @param stop.stoppedAction - Logged when tmux reports it killed the session
+   * @param stop.requestExit - The driver's exit keys and the waits between them
+   * @param stop.afterKill - The driver's cleanup once the tmux kill has run
+   * @throws Whatever the sequence threw, unchanged, after logging `session:stop-failed`
+   */
+  protected async requestExitAndKill(
+    worktreeId: string,
+    instanceId: string | undefined,
+    stop: {
+      logger: Logger;
+      stoppedAction: string;
+      requestExit: (sessionName: string) => Promise<void>;
+      afterKill?: (sessionName: string) => void;
+    }
+  ): Promise<void> {
+    const sessionName = this.getSessionName(worktreeId, instanceId);
+
+    try {
+      const exists = await hasSession(sessionName);
+      if (exists) {
+        await stop.requestExit(sessionName);
+      }
+
+      // Kill the tmux session
+      const killed = await killSession(sessionName);
+
+      stop.afterKill?.(sessionName);
+
+      if (killed) {
+        stop.logger.info(stop.stoppedAction);
+      }
+    } catch (error: unknown) {
+      stop.logger.error('session:stop-failed', { error: getErrorMessage(error) });
+      throw error;
+    }
   }
 
   /**

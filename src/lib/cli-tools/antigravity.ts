@@ -15,9 +15,7 @@
 import { BaseCLITool } from './base';
 import type { CLIToolType } from './types';
 import {
-  hasSession,
   sendKeys,
-  killSession,
   sendSpecialKey,
   capturePane,
 } from '../tmux/tmux';
@@ -369,30 +367,20 @@ export class AntigravityTool extends BaseCLITool {
    * @param worktreeId - Worktree ID
    */
   async killSession(worktreeId: string, instanceId?: string): Promise<void> {
-    const sessionName = this.getSessionName(worktreeId, instanceId);
-
-    try {
-      const exists = await hasSession(sessionName);
-      if (exists) {
+    await this.requestExitAndKill(worktreeId, instanceId, {
+      logger,
+      stoppedAction: 'stopped-antigravity-session',
+      requestExit: async (sessionName) => {
         // Send Ctrl+D to exit agy gracefully
         await sendSpecialKey(sessionName, 'C-d');
 
         // Wait a moment for agy to exit
         await new Promise((resolve) => setTimeout(resolve, TUI_EXIT_WAIT_MS));
-      }
-
-      // Kill the tmux session
-      const killed = await killSession(sessionName);
-
-      // Invalidate cache so a later session reusing the name starts clean
-      invalidateCache(sessionName);
-
-      if (killed) {
-        logger.info('stopped-antigravity-session');
-      }
-    } catch (error: unknown) {
-      logger.error('session:stop-failed', { error: getErrorMessage(error) });
-      throw error;
-    }
+      },
+      afterKill: (sessionName) => {
+        // Invalidate cache so a later session reusing the name starts clean
+        invalidateCache(sessionName);
+      },
+    });
   }
 }
