@@ -223,6 +223,17 @@ export interface PaneTerminalState {
    * "no row" cannot be read as "default" without lying about the other four.
    */
   agentMode: AgentMode;
+  /**
+   * Epoch ms this pane's agent began launching, while it is still starting,
+   * else null (Issue #3179).
+   *
+   * Straight from the server (`CurrentOutputPayload.startingSince`, carried by
+   * the push too). The surfaces show "<agent> を起動中…" in place of the pane
+   * and keep the pads, the answer sheet, the stop button and the mode control
+   * down while it is non-null. Null on a server that predates the field, which
+   * is the pre-#3179 screen.
+   */
+  startingSince: number | null;
   attaching: boolean;
   autoScroll: boolean;
 }
@@ -258,6 +269,8 @@ interface CurrentOutputResponse {
   /** Issue #2369: absent on a daemon older than the field. */
   isDismissablePanelActive?: boolean;
   isUnclassifiedActive?: boolean;
+  /** Issue #3179. See {@link PaneTerminalState.startingSince}. */
+  startingSince?: number | null;
   /**
    * Issue #2042: the two blocks that describe the conversation rather than the
    * screen. Only the two this pane renders are declared — the payload carries a
@@ -338,6 +351,7 @@ export function useTerminalPanePolling({
     isUnclassifiedActive: false,
     composerText: '',
     agentMode: AGENT_MODE_UNKNOWN,
+    startingSince: null,
     attaching: true,
     autoScroll: true,
   }));
@@ -446,6 +460,8 @@ export function useTerminalPanePolling({
       isPagerActive?: boolean;
       isDismissablePanelActive?: boolean;
       isUnclassifiedActive?: boolean;
+      /** Issue #3179. Absent (an older server, the stop listener) reads as null. */
+      startingSince?: number | null;
       isPromptWaiting?: boolean;
       promptData?: LivePromptData | null;
       /**
@@ -524,6 +540,7 @@ export function useTerminalPanePolling({
           isUnclassifiedActive: confirmedUnclassified,
           composerText,
           agentMode,
+          startingSince: typeof data.startingSince === 'number' ? data.startingSince : null,
           attaching: false,
         };
       });
@@ -632,6 +649,7 @@ export function useTerminalPanePolling({
       // previous one's mode chip must not sit over the new pane while its first
       // frame is in flight — different tools do not even share a mode vocabulary.
       agentMode: AGENT_MODE_UNKNOWN,
+      startingSince: null,
       attaching: true,
     }));
     setPrompt({ visible: false, data: null, messageId: null, answering: false });
@@ -696,6 +714,7 @@ export function useTerminalPanePolling({
         isPagerActive: snap.isPagerActive,
         isDismissablePanelActive: snap.isDismissablePanelActive,
         isUnclassifiedActive: snap.isUnclassifiedActive,
+        startingSince: snap.startingSince,
         isPromptWaiting: snap.isPromptWaiting,
         promptData: snap.promptData ?? null,
         promptAnswerable: snap.promptAnswerable,

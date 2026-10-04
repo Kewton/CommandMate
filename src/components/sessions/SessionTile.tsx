@@ -100,10 +100,15 @@ import { History, MessageSquare, TerminalSquare } from 'lucide-react';
 import { ChatSurface, type ChatSurfaceLiveState } from '@/components/worktree/ChatSurface';
 import { HistoryPane } from '@/components/worktree/HistoryPane';
 import { TerminalDisplay } from '@/components/worktree/TerminalDisplay';
+import { SessionStartingNotice } from '@/components/worktree/SessionStartingNotice';
 import { MessageInput } from '@/components/worktree/MessageInput';
 import { AutoYesToggle } from '@/components/worktree/AutoYesToggle';
 import { StatusDot } from '@/components/ui';
 import { useTerminalPanePolling } from '@/hooks/useTerminalPanePolling';
+import {
+  sessionStartingScopeKey,
+  useSessionStartingGate,
+} from '@/hooks/useSessionStartingGate';
 import { useSplitMessages } from '@/hooks/useSplitMessages';
 import {
   usePendingMessages,
@@ -458,6 +463,8 @@ function SessionTileCard({
       isPagerActive: terminal.isPagerActive,
       isDismissablePanelActive: terminal.isDismissablePanelActive,
       isUnclassifiedActive: terminal.isUnclassifiedActive,
+      // Issue #3179: the chat surface's starting strip.
+      startingSince: terminal.startingSince,
     }),
     [
       terminal.isRunning,
@@ -468,9 +475,17 @@ function SessionTileCard({
       terminal.isPagerActive,
       terminal.isDismissablePanelActive,
       terminal.isUnclassifiedActive,
+      terminal.startingSince,
       prompt.visible,
       prompt.data,
     ],
+  );
+
+  // Issue #3179: the agent is still launching — the tile's terminal gives way
+  // to "<agent> を起動中…" and the composer's stop / mode controls stay down.
+  const startingGate = useSessionStartingGate(
+    sessionStartingScopeKey(worktree.id, resolvedInstanceId),
+    terminal.startingSince,
   );
 
   // Issue #2510: ChatSurface's banner offers a way out to the terminal. Phase 1
@@ -632,19 +647,27 @@ function SessionTileCard({
               }`}
               data-testid={`session-tile-terminal-${worktree.id}`}
             >
-              <TerminalDisplay
-                output={terminal.output}
-                isActive={terminal.isRunning}
-                attaching={terminal.attaching}
-                isThinking={terminal.isThinking}
-                autoScroll={terminal.autoScroll}
-                onScrollChange={setAutoScroll}
-                disableAutoFollow={disableAutoFollow}
-                compactTuiLayoutPadding={compactTuiLayoutPadding}
-                preservePaintedPanelRows={preservePaintedPanelRows}
-                wrapMode={SESSION_TILE_TERMINAL_LAYOUT.wrapMode}
-                density={SESSION_TILE_TERMINAL_LAYOUT.density}
-              />
+              {startingGate.noticeVisible && startingGate.startingSince !== null ? (
+                <SessionStartingNotice
+                  cliToolId={cliToolId}
+                  startingSince={startingGate.startingSince}
+                  onShowTerminal={startingGate.revealTerminal}
+                />
+              ) : (
+                <TerminalDisplay
+                  output={terminal.output}
+                  isActive={terminal.isRunning}
+                  attaching={terminal.attaching}
+                  isThinking={terminal.isThinking}
+                  autoScroll={terminal.autoScroll}
+                  onScrollChange={setAutoScroll}
+                  disableAutoFollow={disableAutoFollow}
+                  compactTuiLayoutPadding={compactTuiLayoutPadding}
+                  preservePaintedPanelRows={preservePaintedPanelRows}
+                  wrapMode={SESSION_TILE_TERMINAL_LAYOUT.wrapMode}
+                  density={SESSION_TILE_TERMINAL_LAYOUT.density}
+                />
+              )}
             </div>
             {showStackedHistory && (
               <div
@@ -709,6 +732,7 @@ function SessionTileCard({
             cliToolId={cliToolId}
             instanceId={resolvedInstanceId}
             isSessionRunning={terminal.isRunning}
+            isSessionStarting={startingGate.starting}
             onOptimisticSend={sendOptimistic}
             onMessageSent={handleMessageSent}
             pendingInsertText={composerInsert}

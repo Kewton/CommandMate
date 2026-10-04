@@ -297,6 +297,16 @@ export interface CurrentOutputResponse {
    */
   isUnclassifiedActive?: boolean;
   /**
+   * Epoch ms the agent's launch began, while it is still starting, else null
+   * (Issue #3179). Absent on a server that predates the field.
+   *
+   * While it is a number the session is published as `running` / `starting`
+   * with every dialog flag false, and `wait` keeps polling — the launch is work
+   * in progress, not a frame a human has to drive (exit 10) and not a session
+   * that never started (exit 21) even when its pane does not exist yet.
+   */
+  startingSince?: number | null;
+  /**
    * Whether {@link sessionStatus} rests on something positive, or only on
    * nothing having matched (Issue #1926, design §4 D1 決定 2 / §7).
    *

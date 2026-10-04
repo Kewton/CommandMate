@@ -114,6 +114,23 @@ export const STATUS_REASON = {
   INPUT_PROMPT: 'input_prompt',
   NO_RECENT_OUTPUT: 'no_recent_output',
   /**
+   * Issue #3179: the agent's launch is still in progress.
+   *
+   * Published by `current-output-builder` and `worktree-status-helper` while
+   * `lib/session/session-starting-state` holds a record for the instance — from
+   * `beginAgentSession` until `startSession` returns or throws, bounded by the
+   * tool's readiness wait and released early by a dialog the launch does not
+   * answer. The frame underneath (a shell prompt and the launch line, or a trust
+   * dialog the launch is about to answer) is not read while it is up: the status
+   * is `running`, and `isUnclassifiedActive` / `isSelectionListActive` /
+   * `isPromptWaiting` are all false, so no pad, no answer sheet and no `wait`
+   * exit 10 is raised for a screen nobody has to drive.
+   *
+   * ADDITIVE in the sense {@link STATUS_REASON.EXITED} is: a reader that does not
+   * know the token sees a `running` session.
+   */
+  STARTING: 'starting',
+  /**
    * Issue #2070: the tmux session is there, and the TOOL is not.
    *
    * Published by `worktree-status-helper` when the liveness probe reads a bare

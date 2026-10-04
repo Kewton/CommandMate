@@ -561,6 +561,13 @@
     "dialogCardLabel": "Terminal screen",
     "unreadableHint": "Answer with the number shown on screen (1-9) or y/n. Enter confirms whatever the CLI has highlighted."
   },
+  "sessionStarting": {
+    "title": "Starting {agent}…",
+    "titleWithElapsed": "Starting {agent}… {elapsed}",
+    "hint": "The terminal will appear once the agent is ready.",
+    "showTerminal": "Show terminal",
+    "label": "Agent starting"
+  },
   "chatTranscript": {
     "regionLabel": "Chat transcript",
     "loading": "Loading messages",
