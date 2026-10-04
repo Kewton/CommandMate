@@ -20,6 +20,7 @@ import {
 import { resolveAutoAnswerWithPolicy } from './polling/auto-yes-resolver';
 import { getSessionAutoYesPolicy, invalidateSessionAutoYesPolicy } from './polling/auto-yes-policy';
 import { isCodexModelPickerFrame } from './detection/tools/codex/detect';
+import { normalizeFrame } from './detection/tools/frame';
 import { recordPolicySuppression } from './polling/auto-yes-suppression-state';
 import { evaluateAutoYesDialogGate } from './polling/auto-yes-dialog-gate';
 import { applyEventToActiveTask } from './tasks/task-transition-service';
@@ -561,12 +562,20 @@ export async function detectAndRespondToPrompt(
     // such a machine's dialogs alone, which is why `logIfWithheldForWantOfReceipt`
     // says so.
     const receiptScope = { worktreeId, instanceId };
+    // Issue #3183: the ONE frame every judgement below reads — normalised once,
+    // from the capture as captured (the input-box markers are rule rows the
+    // cleaned spelling has blanked), and handed as the same object to the
+    // prompt reading, the codex launch guards and the dialog gate. That is what
+    // makes "the status chain and Auto-Yes read the same live region" a fact
+    // rather than a hope: there is no second normalisation to disagree with.
+    const frame = normalizeFrame(rawOutput ?? cleanOutput, cliToolId);
     const promptDetection = detectPromptOnCleanFrame(
       cleanOutput,
       cliToolId,
       precomputedLines,
       rawOutput,
       receiptScope,
+      frame,
     );
 
     if (!promptDetection.isPrompt || !promptDetection.promptData) {
@@ -607,7 +616,7 @@ export async function detectAndRespondToPrompt(
     // prompt, so the human keeps seeing the screen and the response poller
     // still notifies them about it.
     const launchDialog =
-      cliToolId === 'codex' ? getCodexLifecycleDialog(cleanOutput) : null;
+      cliToolId === 'codex' ? getCodexLifecycleDialog(frame) : null;
     if (launchDialog) {
       // Recorded through the #1684 channel so `capture --json` and `cmate wait`
       // can name the reason instead of showing a worker that went quiet.
@@ -638,7 +647,7 @@ export async function detectAndRespondToPrompt(
     // The tool's `detectPrompt` still reports the prompt, so `/prompt-response`
     // (the human's answer) is unaffected. Reuses `unclassified-frame`: the tool
     // recognised the frame and deliberately declined it.
-    if (cliToolId === 'codex' && isCodexModelPickerFrame(cleanOutput)) {
+    if (cliToolId === 'codex' && isCodexModelPickerFrame(frame)) {
       recordPolicySuppression(worktreeId, cliToolId, instanceId, {
         reason: 'unclassified-frame',
         mode: null,
@@ -678,7 +687,7 @@ export async function detectAndRespondToPrompt(
     const dialogGate = evaluateAutoYesDialogGate(
       cliToolId,
       promptDetection.promptData.type,
-      cleanOutput,
+      frame,
     );
     if (!dialogGate.allowed) {
       recordPolicySuppression(worktreeId, cliToolId, instanceId, {

@@ -5,6 +5,7 @@
 
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import type { DetectPromptOptions } from './types';
+import type { NormalizedFrame } from './tools/types';
 import { createLogger } from '@/lib/logger';
 import { stripAnsi } from './ansi';
 import { findClaudeInputBox } from './composer-text';
@@ -365,7 +366,7 @@ export const CODEX_DIALOG_PATTERN = new RegExp(
  * distinguishes the genuine input line from a dialog option line. Single-line
  * (no /m, no /g) -- callers test it per line to locate the prompt's position.
  */
-const CODEX_GENUINE_PROMPT_LINE = /^\s*›(?!\s*\d+\.)/;
+export const CODEX_GENUINE_PROMPT_LINE = /^\s*›(?!\s*\d+\.)/;
 
 /**
  * Decide whether Codex output shows a genuine interactive input prompt rather than
@@ -425,33 +426,50 @@ export type CodexActiveDialog = 'update' | 'press-enter' | 'trust' | null;
  * on the update dialog could confirm the default "1. Update now" (npm install).
  */
 /**
- * The lines of Codex's ACTIVE region: everything strictly below the bottom-most
- * genuine input-prompt line, or the whole frame when there is no prompt line
- * (Issue #892).
+ * Index of codex's bottom-most genuine input-prompt row, or -1 (Issue #892).
  *
- * This is the one rule that keeps every Codex dialog classifier honest.
+ * This is codex's live-region composer marker (Issue #3183): the declaration in
+ * `tools/codex/live-region.ts` is built on it, so `NormalizedFrame.liveRegion`
+ * starts at this row, and the string entries below — which keep a caller that
+ * has no `NormalizedFrame` (codex's own launch loop) — read the same row.
+ *
  * capturePane returns scrollback, so a dialog that was answered minutes ago is
  * still in the frame; only what sits BELOW the live prompt is still awaiting a
  * key. Shared by getCodexActiveDialog and getCodexLifecycleDialog so the two
  * cannot drift into disagreeing about what "active" means.
  */
-function codexActiveRegionLines(output: string): string[] {
-  const lines = output.split('\n');
-  // Index of the bottom-most genuine input-prompt line (-1 if none).
-  let promptIdx = -1;
+export function findCodexComposerRow(lines: readonly string[]): number {
   for (let i = lines.length - 1; i >= 0; i--) {
-    if (CODEX_GENUINE_PROMPT_LINE.test(lines[i])) {
-      promptIdx = i;
-      break;
-    }
+    if (CODEX_GENUINE_PROMPT_LINE.test(lines[i])) return i;
   }
-  return lines.slice(promptIdx + 1);
+  return -1;
 }
 
-export function getCodexActiveDialog(output: string): CodexActiveDialog {
+/**
+ * The rows of codex's ACTIVE region: everything strictly below the composer
+ * row, or the whole frame when there is none (Issue #892).
+ *
+ * A {@link NormalizedFrame} carries that answer already (Issue #3183); a string
+ * is read with the same marker, {@link findCodexComposerRow}.
+ */
+function codexActiveRows(input: string | NormalizedFrame): readonly string[] {
+  if (typeof input !== 'string') {
+    const region = input.liveRegion;
+    if (region.tool === 'codex') {
+      return region.anchor === 'composer'
+        ? input.contentLines.slice((region.composerEndRow ?? region.startRow) + 1)
+        : input.contentLines;
+    }
+    return codexActiveRows(input.clean);
+  }
+  const lines = input.split('\n');
+  return lines.slice(findCodexComposerRow(lines) + 1);
+}
+
+export function getCodexActiveDialog(output: string | NormalizedFrame): CodexActiveDialog {
   // Residual dialog text above a live prompt is excluded, so a dialog lingering
   // in scrollback is never treated as active.
-  const active = codexActiveRegionLines(output).join('\n');
+  const active = codexActiveRows(output).join('\n');
   if (active === '') {
     return null;
   }
@@ -560,7 +578,7 @@ const CODEX_UPDATE_DIALOG_ANCHORS = [
 /**
  * Classify the bottom-most ACTIVE codex lifecycle screen (Issue #1829).
  *
- * Position-based, via {@link codexActiveRegionLines}: a dialog left in
+ * Position-based, via {@link codexActiveRows}: a dialog left in
  * scrollback above a live prompt is not active and returns `null`. That is not
  * a detail — the auto-answer guard in the Auto-Yes poller is built on this
  * function, and a whole-frame version of it would switch Auto-Yes off for the
@@ -575,11 +593,11 @@ const CODEX_UPDATE_DIALOG_ANCHORS = [
  * reports these screens, so a human still sees them; what this function gates is
  * only whether a machine may answer on their behalf.
  *
- * @param output - ANSI-stripped pane capture
+ * @param output - ANSI-stripped pane capture, or a frame `normalizeFrame(…, 'codex')` built
  * @returns The active lifecycle screen, or null when none is
  */
-export function getCodexLifecycleDialog(output: string): CodexLifecycleDialog | null {
-  const activeLines = codexActiveRegionLines(output);
+export function getCodexLifecycleDialog(output: string | NormalizedFrame): CodexLifecycleDialog | null {
+  const activeLines = codexActiveRows(output);
   const window: string[] = [];
   for (let i = activeLines.length - 1; i >= 0 && window.length < CODEX_LIFECYCLE_TAIL_LINES; i--) {
     if (activeLines[i].trim() === '') continue;

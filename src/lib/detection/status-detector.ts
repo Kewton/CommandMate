@@ -227,7 +227,7 @@ export function detectSessionStatus(
   cliToolId: CLIToolType,
   lastOutputTimestamp?: Date
 ): StatusDetectionResult {
-  const frame = normalizeFrame(output);
+  const frame = normalizeFrame(output, cliToolId);
   const verdict = getToolStatusDetector(cliToolId).detect(frame, {
     lastOutputTimestamp,
     // Issue #2991: the same presence reading Auto-Yes and History use, so an

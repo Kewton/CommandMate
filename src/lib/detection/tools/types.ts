@@ -57,6 +57,107 @@ export interface NormalizedFrame {
   readonly lastLines: string;
   /** The last `THINKING_TAIL_LINE_COUNT` content lines, joined. */
   readonly thinkingLines: string;
+  /**
+   * The part of the frame the operator can act on right now (Issue #3183).
+   *
+   * Located once, by {@link normalizeFrame}, from the tool's
+   * {@link LiveRegionSpec}. A frame normalised without a tool carries the whole
+   * frame (`anchor: 'none'`), which is the reading every rule had before.
+   */
+  readonly liveRegion: LiveRegion;
+}
+
+/**
+ * What a {@link LiveRegion} was anchored on (Issue #3183).
+ *
+ * - `'composer'` — the tool's input box is on screen; the region starts at it.
+ * - `'dialog'` — no input box, but the tool's own dialog frame was found; the
+ *   region starts at the dialog's top.
+ * - `'none'` — neither was found (or no tool was named): the whole frame.
+ */
+export type LiveRegionAnchor = 'composer' | 'dialog' | 'none';
+
+/**
+ * "Where on this frame does the part the operator can act on begin?"
+ * (Issue #3183).
+ *
+ * Every quoted-dialog bug of 2026-09 (#2774 / #2776 / #2841 / #2845 / #2846 /
+ * #2847 / #2851 / #2991) was one tool answering this question on its own, and
+ * a fix to one tool did not reach the next. The answer now lives on the frame,
+ * computed once, so the status chain and Auto-Yes read the same rows.
+ *
+ * Indices are into {@link NormalizedFrame.contentLines}: every tool rule
+ * already reads that array, and keeping one coordinate system is what lets a
+ * rule compare "where my footer is" with "where the composer is".
+ */
+export interface LiveRegion {
+  /** The tool the region was located for, or null when none was named. */
+  readonly tool: CLIToolType | null;
+  readonly anchor: LiveRegionAnchor;
+  /** Index into `contentLines` where the region begins (0 for `'none'`). */
+  readonly startRow: number;
+  /** For `'composer'`: the last row of the input box block. */
+  readonly composerEndRow?: number;
+  /**
+   * True when the input box is the bottom of the pane: nothing an operator
+   * could answer is drawn below it. Every tool hides (or replaces) its input
+   * box while one of its numbered dialogs is open, so a numbered list or
+   * dialog wording on such a frame is conversation text — a quotation.
+   */
+  readonly composerAtBottom: boolean;
+  /**
+   * {@link LiveRegionSpec.composerHidesDialogs} of the tool the region was
+   * located for (false when none was named), carried so the shared rules need
+   * no lookup back into the declaration table.
+   */
+  readonly composerHidesDialogs: boolean;
+  /** `contentLines` from {@link startRow} on. */
+  readonly lines: readonly string[];
+}
+
+/** What a {@link LiveRegionMarker} found. Indices are into `contentLines`. */
+export interface LiveRegionHit {
+  readonly start: number;
+  readonly end?: number;
+  /** Composer markers only; see {@link LiveRegion.composerAtBottom}. */
+  readonly atBottom?: boolean;
+}
+
+/** The rows a marker may read: the same frame in its two spellings. */
+export interface LiveRegionRows {
+  /** The capture exactly as it arrived (ANSI intact), for SGR-reading markers. */
+  readonly raw: string;
+  /** {@link NormalizedFrame.contentLines}. */
+  readonly contentLines: readonly string[];
+}
+
+/** One "the live part starts here" sign, built from `tools/live-region.ts`'s parts. */
+export interface LiveRegionMarker {
+  locate(rows: LiveRegionRows): LiveRegionHit | null;
+}
+
+/**
+ * A tool's declaration of where its live region begins (Issue #3183).
+ *
+ * Declaration only: each tool module builds these from the shared parts in
+ * `tools/live-region.ts`, and the measured fixture for every marker is listed
+ * in `docs/design/3183-live-region-extraction.md` §7.
+ */
+export interface LiveRegionSpec {
+  /** The input box. Required. */
+  readonly composer: LiveRegionMarker;
+  /** The top of the tool's dialog frame, tried when there is no input box. */
+  readonly dialogTop?: LiveRegionMarker;
+  /**
+   * Whether EVERY screen of this tool that takes an answer (pickers included)
+   * replaces or pushes away the input box, so that an input box at the bottom
+   * of the pane proves nothing is open. True for claude / codex / antigravity /
+   * command-code. False for copilot and the opencode family, whose pickers and
+   * overlays are drawn over a live composer: there a composer at the bottom
+   * vetoes only a NUMBERED dialog reading, and a numbered list in the reply is
+   * left to the tool's own dialog rules (the Auto-Yes gate, `requireVouchedPrompt`).
+   */
+  readonly composerHidesDialogs: boolean;
 }
 
 /** Which build of which CLI a tool module's rules were measured against. */
@@ -147,6 +248,12 @@ export interface DialogVerdict {
 export interface ToolDetectorSpec {
   readonly tool: CLIToolType;
   readonly verifiedAgainst: DetectorProvenance;
+  /**
+   * Where this tool's live region begins (Issue #3183). Must be the same object
+   * `LIVE_REGION_SPECS[tool]` holds — `normalizeFrame` reads that table, which
+   * cannot import the detector modules without a cycle.
+   */
+  readonly liveRegion?: LiveRegionSpec;
   /** Priority 0.x — runs before the shared prompt detection. */
   beforePrompt?(frame: NormalizedFrame): ToolStatusVerdict | null;
   /**

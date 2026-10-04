@@ -142,6 +142,8 @@ import {
 import { readCommandCodeQuestionDialog } from './dialog';
 import { detectCommandCodePermissionDialog } from './permission';
 import { STATUS_REASON } from '../../status-reason';
+import { COMMAND_CODE_LIVE_REGION } from './live-region';
+import { liveRegionOf } from '../frame';
 import { createToolStatusDetector } from '../run-detection';
 import { COMMAND_CODE_VERIFIED_AGAINST } from '../verified-against';
 import type { ToolStatusVerdict } from '../types';
@@ -152,8 +154,17 @@ export const VERIFIED_AGAINST = COMMAND_CODE_VERIFIED_AGAINST;
 export const commandCodeStatusDetector = createToolStatusDetector({
   tool: 'command-code',
   verifiedAgainst: VERIFIED_AGAINST,
+  // Issue #3183: where the live part of the frame begins (`./live-region.ts`).
+  liveRegion: COMMAND_CODE_LIVE_REGION,
 
   beforePrompt(frame): ToolStatusVerdict | null {
+    // Issue #3183: an input box at the bottom of the pane means none of the
+    // three overlays below is open — each replaces the input box — so a footer
+    // the conversation quotes cannot reach them, whatever window it sits in.
+    // The live region says so once for every rule; the `…AtBottom` readings
+    // below (#2846) still decide the frames that have no input box.
+    if (liveRegionOf(frame, 'command-code').composerAtBottom) return null;
+
     // Issue #2761. The plan review overlay, read off its two footer rows.
     //
     // `beforePrompt` and not `afterPrompt`, and that placement is the point: the

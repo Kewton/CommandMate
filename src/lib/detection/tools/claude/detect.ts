@@ -15,7 +15,8 @@ import { findClaudeInputBox } from '../../composer-text';
 import { findClaudeChrome } from '../../prompt-detect-multiple-choice';
 import { STATUS_REASON } from '../../status-reason';
 import { detectClaudeDialog } from './prompt';
-import { STATUS_CHECK_LINE_COUNT } from '../frame';
+import { STATUS_CHECK_LINE_COUNT, liveRegionOf } from '../frame';
+import { CLAUDE_LIVE_REGION } from './live-region';
 import { createToolStatusDetector } from '../run-detection';
 import {
   CLAUDE_BANNER_PATTERN,
@@ -126,16 +127,20 @@ export function readIdleEvidence(frame: NormalizedFrame): StatusEvidence {
  * this rule cannot disagree with them about where the conversation ends.
  */
 function selectionFooterRows(frame: NormalizedFrame): string {
-  const box = findClaudeInputBox(frame.contentLines as string[]);
-  if (!box) return frame.lastLines;
+  // Issue #3183: the input box is the live region's composer marker
+  // (`./live-region.ts`, the same `findClaudeInputBox`), located once per frame.
+  const region = liveRegionOf(frame, 'claude');
+  if (region.anchor !== 'composer') return frame.lastLines;
 
   const tailStart = frame.contentLines.length - STATUS_CHECK_LINE_COUNT;
-  return frame.contentLines.slice(Math.max(box.openingSeparator, tailStart)).join('\n');
+  return frame.contentLines.slice(Math.max(region.startRow, tailStart)).join('\n');
 }
 
 export const claudeStatusDetector = createToolStatusDetector({
   tool: 'claude',
   verifiedAgainst: VERIFIED_AGAINST,
+  // Issue #3183: where the live part of the frame begins (`./live-region.ts`).
+  liveRegion: CLAUDE_LIVE_REGION,
 
   afterPrompt(frame) {
     // 1.5. Claude CLI selection list detection
