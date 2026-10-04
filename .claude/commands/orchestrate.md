@@ -627,9 +627,14 @@ success:
 **新しいモジュールに置く理由**: テストは、モジュールをパスで差し替えている。
 部分的な `vi.mock` は、同じモジュールの中の呼び出しには効かない。
 既存のモジュールの中に共通の関数を置くと、テストを変えずには通らないことがある。
-実測: 既存のモジュールの中に置くよう Issue に書いた 2 つ（P-1、Q-1）は、ワーカーが止まり、新しいファイルに置き直した。
-P-1 は、`resolveInstanceTarget` だけを差し替えるテスト（`tests/unit/cli/commands/respond-opencode-v2-2945.test.ts`）に当たった。
-置き直した先は `src/cli/commands/command-target.ts` である。
+`NextResponse` を返す関数のように、依存が増える関数は、その依存を持ってよい層だけが import する新しいファイルに置く。
+実測: 既存のモジュールの中に置くよう Issue に書いた 2 つ（P-1、Q-1）は、ワーカーが止まり、新しいファイルに置き直した。止まった理由は別である。
+
+- P-1 は、部分的な `vi.mock` に当たった。`resolveInstanceTarget` だけを差し替えるテスト
+  （`tests/unit/cli/commands/respond-opencode-v2-2945.test.ts`）である。置き直した先は `src/cli/commands/command-target.ts`
+- Q-1 は、依存の向きで置けなかった。共通の関数を `src/lib/session/resolve-session-target.ts` の中に置くと、
+  そのモジュールが `next/server` に依存する。そのモジュールは、API ルート以外（`src/lib/push` と `src/lib/relay`）からも import されている。
+  置き直した先は `src/lib/session/session-target-conflict-response.ts`
 
 **`await` を足さない理由**: 「無いと確かめてから入れる」処理の間に `await` を足すと、同時に走った処理が二重に入れる隙ができる。
 実測: E-5 と M-5 の契約に、この決まりを書いた。M-5 の契約では、共通の関数を同期にし、`db` などは呼び出し側から引数で渡すと決めた。
@@ -649,7 +654,7 @@ P-1 は、`resolveInstanceTarget` だけを差し替えるテスト（`tests/uni
 テストを消したり、題名を変えたりしない。PR に書いて、利用者に訊く。実測: 列 T（#3228）。
 
 **範囲外の食い違い**: ワーカーは直さずに報告する（転記ブロックの「本文に無い指摘」）。
-オーケストレーターは、仕分け用の Issue 1 本に、番号を付けて集める。実測: #3232 に 47 件。
+オーケストレーターは、仕分け用の Issue 1 本に、番号を付けて集める。実測: #3232 に 48 件（2026-10-05 07:20 時点）。
 写し（重複）の報告は、整理の Issue の候補として残す（1-2b、8-4）。
 
 **検証ゲート**: 契約のゲートは `lint` と `typecheck` にする。テスト全体は PR の CI で見る。
