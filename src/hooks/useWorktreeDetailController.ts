@@ -917,7 +917,6 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     () => Array.from(new Set(visibleInstances.map((inst) => inst.cliTool))),
     [visibleInstances],
   );
-  const displayedAgents = isMobile ? mobileSelectedAgents : selectedAgents;
 
   // Issue #869/#874: keep activeInstanceId pointing at a currently-displayed
   // instance. PC uses the full roster; mobile uses the visible subset. When the
@@ -1018,11 +1017,6 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   // These tools render in alternate screen mode where menus appear at the top.
   // Auto-following new content to bottom would hide these menus.
   const disableAutoFollow = activeCliTab === 'opencode' || activeCliTab === 'copilot';
-
-  /** Issue #368: Callback for AgentSettingsPane to update selectedAgents */
-  const handleSelectedAgentsChange = useCallback((agents: CLIToolType[]) => {
-    setSelectedAgents(agents);
-  }, []);
 
   /**
    * Issue #869: Callback for AgentSettingsPane to update the agent instance
@@ -1904,7 +1898,6 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     diffContent,
     diffFilePath,
     disableAutoFollow,
-    displayedAgents,
     displayedInstances,
     editorFilePath,
     error,
@@ -1959,7 +1952,6 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     handleRename,
     handleReLogin,
     handleRetry,
-    handleSelectedAgentsChange,
     handleSetLoading,
     handleShowArchivedChange,
     handleUpload,
@@ -2003,9 +1995,7 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     pendingInsertText,
     pendingInsertTextMap,
     selectedAgents,
-    setActiveCliTab,
     setActiveInstanceId,
-    setEditorFilePath,
     setFocusedSplitIndex,
     setHistorySubTab,
     setIsEditorMaximized,

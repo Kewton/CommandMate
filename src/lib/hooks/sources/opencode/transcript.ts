@@ -54,7 +54,12 @@
  */
 
 import { isPlainObject, readNestedString, readStringField } from '../event-mapper';
-import { separateTurnBody, TURN_REASONING_LABEL, type TurnRenderBlock } from '../turn-body';
+import {
+  collapseToLine,
+  separateTurnBody,
+  TURN_REASONING_LABEL,
+  type TurnRenderBlock,
+} from '../turn-body';
 
 /**
  * The field that groups assistant messages into one turn.
@@ -275,16 +280,6 @@ function renderToolPart(part: OpencodeTranscriptPart): string {
   const head = `- \`${name}\`${detail ? ` — ${collapseToLine(detail)}` : ''}`;
   if (!failed) return head;
   return part.error ? `${head} _(error: ${collapseToLine(part.error)})_` : `${head} _(error)_`;
-}
-
-/**
- * A tool title on one line.
- *
- * A `bash` title is the command, and a heredoc puts newlines in it. Left alone
- * they would end the list item and turn the rest of the command into body text.
- */
-function collapseToLine(value: string): string {
-  return value.replace(/\s+/g, ' ').trim();
 }
 
 /** What one rendered turn is. */
