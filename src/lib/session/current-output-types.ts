@@ -35,6 +35,8 @@ import type {
   StructuredPromptWaitingData,
 } from '@/lib/session/structured-prompt';
 import type { PromptData } from '@/types/models';
+import type { AgentMode } from '@/types/cli-tool-contracts';
+import type { DetectorStaleness } from '@/lib/detection/version-probes';
 
 /**
  * The last structured lifecycle event this instance reported (Issue #1722).
@@ -727,4 +729,14 @@ export interface CurrentOutputPayload {
 export interface SessionTargetResolution {
   resolvedBy: SessionTargetResolvedBy;
   conflict?: SessionTargetConflict | null;
+}
+
+/**
+ * What `GET /api/worktrees/:id/current-output` returns (Issue #3229): the
+ * builder's {@link CurrentOutputPayload} plus the two fields the route attaches
+ * itself. `detector` is absent until the staleness cache is warm.
+ */
+export interface CurrentOutputResponseBody extends CurrentOutputPayload {
+  agentMode: AgentMode;
+  detector?: { staleness: DetectorStaleness };
 }
