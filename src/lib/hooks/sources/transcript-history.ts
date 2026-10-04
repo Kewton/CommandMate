@@ -8,7 +8,10 @@
  */
 
 import { stat } from 'fs/promises';
+import { resolve, sep } from 'path';
+import type { Logger } from '@/lib/logger';
 import type { RecordedUserTurn } from '@/lib/history/user-turn-recorder';
+import type { ChatMessage } from '@/types/models';
 import type { AgentInstanceRef } from './types';
 
 /**
@@ -128,4 +131,162 @@ export async function selectUnwrittenTurns<T extends { startedAt: number }>(
     previousStartedAt: turns.length > 1 ? turns[turns.length - 2].startedAt : 0,
     anchored: false,
   };
+}
+
+/**
+ * The session id this instance's transcript is under, or null.
+ *
+ * Reads the structured event state first and falls back to the latched value.
+ * The import is dynamic so that `agent-event-state`'s module graph does not
+ * become a static dependency of the poller.
+ *
+ * @param pointers - The tool's latched session ids, keyed by `key`
+ * @param key - This instance's key in `pointers`
+ * @param logger - The calling tool's logger
+ * @param failureEvent - The event name the tool logs when the state module is unreachable
+ */
+export async function resolveSessionIdFromEvents(
+  target: AgentInstanceRef,
+  pointers: Map<string, string>,
+  key: string,
+  logger: Logger,
+  failureEvent: string
+): Promise<string | null> {
+  try {
+    const { getLastAgentEvent } = await import('@/lib/session/agent-event-state');
+    const sessionId = getLastAgentEvent(
+      target.worktreeId,
+      target.cliToolId,
+      target.instanceId
+    )?.sessionId;
+    if (typeof sessionId === 'string' && sessionId.length > 0) {
+      pointers.set(key, sessionId);
+      return sessionId;
+    }
+  } catch (error) {
+    // A state module that cannot be reached is one that knows no session id.
+    logger.debug(failureEvent, {
+      worktreeId: target.worktreeId,
+      instanceId: target.instanceId ?? target.cliToolId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+  return pointers.get(key) ?? null;
+}
+
+/**
+ * A path named by something other than the tool's module, accepted only if it
+ * ends in `extension`, carries no NUL and is under `rootDir`.
+ *
+ * Containment is checked on the *resolved* path so that `..` cannot climb out.
+ *
+ * @returns The resolved path, or null when it is not acceptable
+ */
+export function acceptPathUnderRoot(
+  rootDir: string,
+  extension: string,
+  candidate: string
+): string | null {
+  if (!candidate.endsWith(extension)) return null;
+  if (candidate.includes('\0')) return null;
+  const root = resolve(rootDir);
+  const resolved = resolve(candidate);
+  if (resolved !== root && !resolved.startsWith(root + sep)) return null;
+  return resolved;
+}
+
+/** What {@link growTurnRowTo} reads of a rendered turn. */
+export interface GrowableRenderedTurn {
+  readonly sessionId: string;
+  readonly body: string;
+  readonly textBlocks: number;
+  readonly toolBlocks: number;
+}
+
+/**
+ * Replace a saved row whose body has since grown (Issue #2264).
+ *
+ * Strictly longer, never merely different; `message_updated`, never `message`.
+ *
+ * @param updatedEvent - The event name the tool logs on replacement
+ * @returns Whether the row was replaced
+ */
+export async function growTurnRowTo(
+  target: AgentInstanceRef,
+  existing: ChatMessage,
+  rendered: GrowableRenderedTurn,
+  path: string,
+  logger: Logger,
+  updatedEvent: string
+): Promise<boolean> {
+  const instanceId = target.instanceId ?? target.cliToolId;
+  const previousLength = existing.content.length;
+  if (rendered.body.length <= previousLength) return false;
+
+  const [{ getDbInstance }, { updateMessageContent }, { broadcastMessage }] = await Promise.all([
+    import('@/lib/db/db-instance'),
+    import('@/lib/db'),
+    import('@/lib/ws-server'),
+  ]);
+
+  updateMessageContent(getDbInstance(), existing.id, rendered.body);
+  broadcastMessage('message_updated', {
+    worktreeId: target.worktreeId,
+    message: { ...existing, content: rendered.body },
+  });
+  logger.info(updatedEvent, {
+    worktreeId: target.worktreeId,
+    instanceId,
+    sessionId: rendered.sessionId,
+    requestId: existing.requestId,
+    path,
+    previousLength,
+    bodyLength: rendered.body.length,
+    textBlocks: rendered.textBlocks,
+    toolBlocks: rendered.toolBlocks,
+  });
+  return true;
+}
+
+/**
+ * Re-read the newest already-written turns and grow the short ones (#2264).
+ *
+ * Turns that are still open are skipped; the database is asked before the turn
+ * is rendered.
+ *
+ * @param candidates - Already-written turns, oldest first
+ * @returns How many rows were replaced
+ */
+export async function refreshTurnRowsTo<T, R extends GrowableRenderedTurn>(
+  target: AgentInstanceRef,
+  candidates: readonly T[],
+  path: string,
+  tool: {
+    isWritable: (turn: T) => boolean;
+    requestIdOf: (turn: T) => string;
+    render: (turn: T) => R;
+    grow: (
+      target: AgentInstanceRef,
+      existing: ChatMessage,
+      rendered: R,
+      path: string
+    ) => Promise<boolean>;
+  }
+): Promise<number> {
+  if (candidates.length === 0) return 0;
+
+  const [{ getDbInstance }, { findMessageByRequestId }] = await Promise.all([
+    import('@/lib/db/db-instance'),
+    import('@/lib/db'),
+  ]);
+  const db = getDbInstance();
+
+  let updated = 0;
+  for (const turn of candidates) {
+    if (!tool.isWritable(turn)) continue;
+    const existing = findMessageByRequestId(db, target.worktreeId, tool.requestIdOf(turn));
+    if (!existing) continue;
+    if (await tool.grow(target, existing, tool.render(turn), path)) updated += 1;
+  }
+  return updated;
 }

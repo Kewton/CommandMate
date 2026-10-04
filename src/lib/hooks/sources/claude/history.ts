@@ -58,7 +58,7 @@
 
 import { open, type FileHandle } from 'fs/promises';
 import { homedir } from 'os';
-import { join, resolve, sep } from 'path';
+import { join } from 'path';
 import { buildCompositeKey } from '@/lib/auto-yes-state';
 import {
   recordUserTurn,
@@ -74,7 +74,16 @@ import {
 } from '@/types/agent-transcript';
 import type { ChatMessage } from '@/types/models';
 import type { AgentInstanceRef } from '../types';
-import { isReadableFile, nextTurnOpensAt, resolveAssistantTimestampMs, selectUnwrittenTurns } from '../transcript-history';
+import {
+  acceptPathUnderRoot,
+  growTurnRowTo,
+  isReadableFile,
+  nextTurnOpensAt,
+  refreshTurnRowsTo,
+  resolveAssistantTimestampMs,
+  resolveSessionIdFromEvents,
+  selectUnwrittenTurns,
+} from '../transcript-history';
 import type { StructuredHistoryCaptureReport } from '@/lib/polling/structured-history-gate';
 import {
   buildClaudeTurns,
@@ -198,27 +207,7 @@ export function resetClaudeTranscriptSessions(): void {
  * become a static dependency of the poller.
  */
 export async function resolveClaudeSessionId(target: AgentInstanceRef): Promise<string | null> {
-  const key = keyOf(target);
-  try {
-    const { getLastAgentEvent } = await import('@/lib/session/agent-event-state');
-    const sessionId = getLastAgentEvent(
-      target.worktreeId,
-      target.cliToolId,
-      target.instanceId
-    )?.sessionId;
-    if (typeof sessionId === 'string' && sessionId.length > 0) {
-      sessionPointers.set(key, sessionId);
-      return sessionId;
-    }
-  } catch (error) {
-    // A state module that cannot be reached is one that knows no session id.
-    logger.debug('claude-transcript-session-lookup-failed', {
-      worktreeId: target.worktreeId,
-      instanceId: target.instanceId ?? target.cliToolId,
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
-  return sessionPointers.get(key) ?? null;
+  return resolveSessionIdFromEvents(target, sessionPointers, keyOf(target), logger, 'claude-transcript-session-lookup-failed');
 }
 
 /** `<home>/.claude/projects`. */
@@ -265,12 +254,7 @@ export function claudeTranscriptPath(
  * @returns The resolved path, or null when it is not acceptable
  */
 export function acceptClaudeTranscriptHint(homeDir: string, hint: string): string | null {
-  if (!hint.endsWith(CLAUDE_TRANSCRIPT_EXTENSION)) return null;
-  if (hint.includes('\0')) return null;
-  const root = resolve(claudeProjectsRoot(homeDir));
-  const resolved = resolve(hint);
-  if (resolved !== root && !resolved.startsWith(root + sep)) return null;
-  return resolved;
+  return acceptPathUnderRoot(claudeProjectsRoot(homeDir), CLAUDE_TRANSCRIPT_EXTENSION, hint);
 }
 
 /** What {@link captureClaudeTranscriptTurn} needs from its caller. */
@@ -1370,33 +1354,7 @@ async function growClaudeTurnRow(
   rendered: ClaudeRenderedTurn,
   path: string
 ): Promise<boolean> {
-  const instanceId = target.instanceId ?? target.cliToolId;
-  const previousLength = existing.content.length;
-  if (rendered.body.length <= previousLength) return false;
-
-  const [{ getDbInstance }, { updateMessageContent }, { broadcastMessage }] = await Promise.all([
-    import('@/lib/db/db-instance'),
-    import('@/lib/db'),
-    import('@/lib/ws-server'),
-  ]);
-
-  updateMessageContent(getDbInstance(), existing.id, rendered.body);
-  broadcastMessage('message_updated', {
-    worktreeId: target.worktreeId,
-    message: { ...existing, content: rendered.body },
-  });
-  logger.info('claude-transcript-turn-updated', {
-    worktreeId: target.worktreeId,
-    instanceId,
-    sessionId: rendered.sessionId,
-    requestId: existing.requestId,
-    path,
-    previousLength,
-    bodyLength: rendered.body.length,
-    textBlocks: rendered.textBlocks,
-    toolBlocks: rendered.toolBlocks,
-  });
-  return true;
+  return growTurnRowTo(target, existing, rendered, path, logger, 'claude-transcript-turn-updated');
 }
 
 /**
@@ -1424,26 +1382,12 @@ async function refreshClaudeTurnRows(
   candidates: readonly ClaudeTurnAccumulator[],
   path: string
 ): Promise<number> {
-  if (candidates.length === 0) return 0;
-
-  const [{ getDbInstance }, { findMessageByRequestId }] = await Promise.all([
-    import('@/lib/db/db-instance'),
-    import('@/lib/db'),
-  ]);
-  const db = getDbInstance();
-
-  let updated = 0;
-  for (const turn of candidates) {
-    if (!isClaudeTurnWritable(turn)) continue;
-    const existing = findMessageByRequestId(
-      db,
-      target.worktreeId,
-      claudeTurnRequestId(turn.promptUuid)
-    );
-    if (!existing) continue;
-    if (await growClaudeTurnRow(target, existing, renderClaudeTurn(turn), path)) updated += 1;
-  }
-  return updated;
+  return refreshTurnRowsTo(target, candidates, path, {
+    isWritable: isClaudeTurnWritable,
+    requestIdOf: (turn) => claudeTurnRequestId(turn.promptUuid),
+    render: renderClaudeTurn,
+    grow: growClaudeTurnRow,
+  });
 }
 
 /**
