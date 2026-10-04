@@ -592,6 +592,17 @@ function readFileOrEmpty(path: string): string {
   }
 }
 
+/**
+ * Read the user's `settings.json`.
+ *
+ * @returns The parsed object, or `{}` when the file does not exist
+ * @throws When the file exists but cannot be read or is not a JSON object —
+ *   the caller turns that into "start without hooks", never into a rewrite
+ */
+export function readCopilotSettings(settingsPath: string): Record<string, unknown> {
+  return parseCopilotSettings(readFileOrEmpty(settingsPath));
+}
+
 function parseCopilotSettings(raw: string): Record<string, unknown> {
   if (raw.trim() === '') return {};
   const parsed: unknown = JSON.parse(raw);
