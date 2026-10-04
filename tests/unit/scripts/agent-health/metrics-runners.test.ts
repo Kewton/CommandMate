@@ -161,3 +161,28 @@ describe('performance from the production log (Issue #3054)', () => {
     expect(gone[0]).toMatchObject({ status: 'skip' });
   });
 });
+
+describe('bug-flow (Issue #3185)', () => {
+  const NOW = new Date('2026-10-04T00:00:00.000Z');
+  const fakeGh = (script: string) => {
+    const file = path.join(root, 'fake-gh');
+    fs.writeFileSync(file, `#!/bin/sh\n${script}\n`, { mode: 0o755 });
+    return file;
+  };
+
+  it('a missing or failing gh is a skip, not a crash of the run', async () => {
+    const missing = await measureAll(ctx({ now: NOW, ghCommand: 'cm-no-such-gh-3185' }), ['bug-flow']);
+    expect(missing[0]).toMatchObject({ metricId: 'bug-flow', status: 'skip' });
+    const failing = await measureAll(ctx({ now: NOW, ghCommand: fakeGh('echo "HTTP 401" >&2; exit 4') }), ['bug-flow']);
+    expect(failing[0]).toMatchObject({ metricId: 'bug-flow', status: 'skip' });
+    expect(failing[0].status === 'skip' && failing[0].reason).toContain('exit 4');
+  });
+
+  it('counts the Issues gh returns', async () => {
+    const issues = [{ number: 1, body: '## 分類\n- 原因の PR: #9\n- 発見経路: uat\n- 影響する経路: chat\n', labels: [{ name: 'bug' }], createdAt: '2026-10-03T00:00:00Z' }];
+    const file = path.join(root, 'issues.json');
+    fs.writeFileSync(file, JSON.stringify(issues));
+    const results = await measureAll(ctx({ now: NOW, ghCommand: fakeGh(`cat '${file}'`) }), ['bug-flow']);
+    expect(results[0]).toMatchObject({ metricId: 'bug-flow', status: 'ok', value: 1, details: { regressionRate: 1 } });
+  });
+});

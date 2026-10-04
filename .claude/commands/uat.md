@@ -291,6 +291,24 @@ curl -s http://localhost:{UAT_PORT}/api/repositories/scan -X POST \
 3. 修正後、該当テストケースを再実行する
 4. 再実行結果を記録する（修正前・修正後の両方を記載）
 
+#### 6-4. 不具合を bug Issue として起票するとき
+
+不具合を bug Issue として起票するとき（`gh issue create --label bug --body …` でテンプレートを通らないときも）、本文の末尾に次の「分類」節を置く。
+値は決まった語から選ぶ（`.github/ISSUE_TEMPLATE/bug_report.md` と同じ語。日次メトリクスの `bug-flow` がこの節を数える）。
+
+```markdown
+## 分類
+- 原因の PR: #<番号> / 不明 / なし（以前から）/ 上流（<CLI> <版>）
+- 発見経路: uat / review / orchestrate / daily-use / automated
+- 影響する経路: chat / terminal / cli / mobile / auto-yes / push / なし（内部）
+```
+
+- 各行は 1 つを選んで書き換える（例: `- 原因の PR: #3191`、`- 原因の PR: 上流（codex 0.50.0）`、`- 発見経路: uat`）。
+  影響する経路だけは複数を `, ` で区切って書ける（例: `- 影響する経路: chat, mobile`）。選択肢を残したままの行は「未記入」に数えられる
+- 影響する経路は取りこぼしを防ぐ欄。直す人は、挙げた経路すべてを確かめる
+- 影響する経路が `なし（内部）`（テスト・CI・開発用スキル・agent-health・orchestrate）なら、`bug` に加えて `internal` ラベルも付ける
+  （`gh issue create … --label bug --label internal`）
+
 ---
 
 ### Phase 7: テスト報告書作成
