@@ -82,9 +82,9 @@ import {
   type StructuredPromptWaitingData,
 } from '@/lib/session/structured-prompt';
 import {
-  readPromptDecisionId,
-  readPromptQuestionChoices,
-} from '@/components/worktree/prompt-decision-id';
+  readDecisionId as readPromptDecisionId,
+  readQuestionChoices as readPromptQuestionChoices,
+} from '@/lib/session/prompt-view';
 import { OPENCODE_QUESTION_TOOL_NAME } from '@/lib/hooks/pending-decision-kind';
 import { ASK_USER_QUESTION_TOOL } from '@/lib/hooks/permission-request-payload';
 import type { AskUserQuestionSpec } from '@/lib/hooks/ask-user-question-payload';
