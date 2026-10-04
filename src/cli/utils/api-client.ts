@@ -346,30 +346,7 @@ export class ApiClient {
    * [DR1-05] Generic type parameter specified at call site
    */
   async post<T>(path: string, body?: unknown): Promise<T> {
-    try {
-      const response = await fetch(`${this.baseUrl}${path}`, {
-        method: 'POST',
-        headers: this.getHeaders(),
-        body: body !== undefined ? JSON.stringify(body) : undefined,
-      });
-
-      if (!response.ok) {
-        // Issue #1637: read the body first — handleApiError needs it to surface
-        // the server's reason for a 5xx instead of "check the logs".
-        const payload = await readErrorPayload(response);
-        const errResult = handleApiError(null, response.status, payload, { serverUrl: this.baseUrl });
-        throw new ApiError(errResult.message, errResult.exitCode, response.status, payload);
-      }
-
-      // Handle 204 No Content
-      const text = await response.text();
-      if (!text) return undefined as T;
-      return JSON.parse(text) as T;
-    } catch (error) {
-      if (error instanceof ApiError) throw error;
-      const errResult = handleApiError(error);
-      throw new ApiError(errResult.message, errResult.exitCode);
-    }
+    return sendWithBody<T>(this.baseUrl, 'POST', this.getHeaders(), path, body);
   }
 
   /**
@@ -378,29 +355,41 @@ export class ApiClient {
    * [DR1-05] Generic type parameter specified at call site
    */
   async patch<T>(path: string, body?: unknown): Promise<T> {
-    try {
-      const response = await fetch(`${this.baseUrl}${path}`, {
-        method: 'PATCH',
-        headers: this.getHeaders(),
-        body: body !== undefined ? JSON.stringify(body) : undefined,
-      });
+    return sendWithBody<T>(this.baseUrl, 'PATCH', this.getHeaders(), path, body);
+  }
+}
 
-      if (!response.ok) {
-        // Issue #1637: read the body first — handleApiError needs it to surface
-        // the server's reason for a 5xx instead of "check the logs".
-        const payload = await readErrorPayload(response);
-        const errResult = handleApiError(null, response.status, payload, { serverUrl: this.baseUrl });
-        throw new ApiError(errResult.message, errResult.exitCode, response.status, payload);
-      }
+/** POST / PATCH share everything but the method; an empty body (204) is `undefined`. */
+async function sendWithBody<T>(
+  baseUrl: string,
+  method: 'POST' | 'PATCH',
+  headers: Record<string, string>,
+  path: string,
+  body?: unknown
+): Promise<T> {
+  try {
+    const response = await fetch(`${baseUrl}${path}`, {
+      method,
+      headers,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
 
-      const text = await response.text();
-      if (!text) return undefined as T;
-      return JSON.parse(text) as T;
-    } catch (error) {
-      if (error instanceof ApiError) throw error;
-      const errResult = handleApiError(error);
-      throw new ApiError(errResult.message, errResult.exitCode);
+    if (!response.ok) {
+      // Issue #1637: read the body first — handleApiError needs it to surface
+      // the server's reason for a 5xx instead of "check the logs".
+      const payload = await readErrorPayload(response);
+      const errResult = handleApiError(null, response.status, payload, { serverUrl: baseUrl });
+      throw new ApiError(errResult.message, errResult.exitCode, response.status, payload);
     }
+
+    // Handle 204 No Content
+    const text = await response.text();
+    if (!text) return undefined as T;
+    return JSON.parse(text) as T;
+  } catch (error) {
+    if (error instanceof ApiError) throw error;
+    const errResult = handleApiError(error);
+    throw new ApiError(errResult.message, errResult.exitCode);
   }
 }
 

@@ -15,6 +15,7 @@ import {
   buildDetectPromptOptions,
 } from '../../cli-patterns';
 import { detectPrompt } from '../../prompt-detector';
+import { activePromptVerdict, positiveVerdict, positiveVerdictWithPrompt } from '../verdicts';
 import { STATUS_REASON } from '../../status-reason';
 import { detectCopilotDialog } from './prompt';
 import { COPILOT_LIVE_REGION } from './live-region';
@@ -86,25 +87,11 @@ export const copilotStatusDetector = createToolStatusDetector({
         // PromptPanel with buttons; ask_user prompts need NavigationButtons for ↑↓ selection.
         const optionsCount = promptDetection.promptData?.options?.length ?? 0;
         if (optionsCount <= 3) {
-          return {
-            status: 'waiting' as const,
-            confidence: 'high' as const,
-            reason: STATUS_REASON.PROMPT_DETECTED,
-            hasActivePrompt: true,
-            evidence: 'positive' as const,
-            promptDetection,
-          };
+          return activePromptVerdict(STATUS_REASON.PROMPT_DETECTED, promptDetection);
         }
         // 4+ options: treat as selection list (NavigationButtons)
       }
-      return {
-        status: 'waiting' as const,
-        confidence: 'high' as const,
-        reason: STATUS_REASON.COPILOT_SELECTION_LIST,
-        hasActivePrompt: false,
-        evidence: 'positive' as const,
-        promptDetection,
-      };
+      return positiveVerdictWithPrompt('waiting', STATUS_REASON.COPILOT_SELECTION_LIST, promptDetection);
     }
 
     // 0.5. Copilot: the bottom status bar carries the running half of the turn
@@ -130,14 +117,7 @@ export const copilotStatusDetector = createToolStatusDetector({
     // `status-vocabulary-in-response.txt`.
     if (readCopilotStatusBar(frame.contentLines as string[]) === 'working') {
       const promptDetection = detectCopilotPrompt(frame.clean);
-      return {
-        status: 'running' as const,
-        confidence: 'high' as const,
-        reason: STATUS_REASON.THINKING_INDICATOR,
-        hasActivePrompt: false,
-        evidence: 'positive' as const,
-        promptDetection,
-      };
+      return positiveVerdictWithPrompt('running', STATUS_REASON.THINKING_INDICATOR, promptDetection);
     }
 
     return null;
@@ -164,13 +144,7 @@ export const copilotStatusDetector = createToolStatusDetector({
     // verdict claude's `❯` row and codex's `›` row publish, so nothing downstream
     // has to learn a new reason code.
     if (readCopilotStatusBar(frame.contentLines as string[]) === 'idle') {
-      return {
-        status: 'ready' as const,
-        confidence: 'high' as const,
-        reason: STATUS_REASON.INPUT_PROMPT,
-        hasActivePrompt: false,
-        evidence: 'positive' as const,
-      };
+      return positiveVerdict('ready', STATUS_REASON.INPUT_PROMPT);
     }
     return null;
   },

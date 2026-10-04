@@ -68,3 +68,16 @@ export function promptHeadingText(
   if ('text' in message) return message.text;
   return 'values' in message ? t(message.key, message.values) : t(message.key);
 }
+
+/**
+ * Is this a CHECKBOX question? (Issue #2755)
+ *
+ * The same predicate `TerminalSplitPaneContent` applies to its own Auto-Yes
+ * gate, restated here for the phone sheet. It is the one prompt shape Auto-Yes
+ * never answers — `resolveBaseAnswer` returns null, because a digit ticks a box
+ * and the confirm is a separate row — so hiding its sheet under Auto-Yes left a
+ * live question answerable by nobody.
+ */
+export function isMultiSelectPrompt(promptData: LivePromptData | null | undefined): boolean {
+  return promptData?.type === 'multiple_choice' && promptData.multiSelect === true;
+}

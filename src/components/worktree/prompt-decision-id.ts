@@ -31,131 +31,34 @@
  * the same time, and a precedence spread across two `&&` chains in JSX is a
  * precedence nobody can test.
  *
- * @module components/worktree/prompt-decision-id
- */
-
-import type { LivePromptData } from '@/types/models';
-import type { CLIToolType } from '@/lib/cli-tools/types';
-import { OPENCODE_V2_DECISION_LABELS } from '@/lib/hooks/sources/opencode-v2/decision-labels';
-import {
-  readDecisionHeading,
-  readDecisionId,
-  readQuestionChoices,
-} from '@/lib/session/prompt-view';
-
-/**
- * A tool's own words for the approval verdicts, keyed by wire reply
- * (Issue #2945). Only tools whose dialog words differ from the shared list are
- * here: OpenCode V2 draws `Always allow` where v1 draws `Allow always`.
- */
-const DECISION_LABELS_BY_TOOL: Partial<Record<CLIToolType, Readonly<Record<string, string>>>> = {
-  'opencode-v2': OPENCODE_V2_DECISION_LABELS,
-};
-
-/**
- * The payload with its approval verdicts in the tool's own words (Issue #2945).
+ * ## Notes from the removed compatibility wrappers (Issue #3228)
  *
- * Only the LABEL changes: the number and the wire reply are what an answer
- * sends, and both stay exactly as published, so a relabelled `2. Always allow`
- * still sends `2` and still means `always`. Answers the same object when there
- * is nothing to relabel, so a memoised caller does not re-render.
+ * Moved unchanged from the doc comments of `readPromptDecisionId`,
+ * `readPromptQuestionChoices`, `readStructuredDecisionHeading`,
+ * `PromptQuestionChoices` and `StructuredDecisionHeading`, which are gone;
+ * callers read `lib/session/prompt-view` directly.
  *
- * @param promptData - The live prompt from `/current-output`, or null
- * @param cliToolId - The tool the prompt belongs to
- */
-export function withToolDecisionLabels<T extends LivePromptData | null>(
-  promptData: T,
-  cliToolId: CLIToolType
-): T {
-  const labels = DECISION_LABELS_BY_TOOL[cliToolId];
-  if (!promptData || !labels) return promptData;
-  const options = (promptData as { decisionOptions?: unknown }).decisionOptions;
-  if (!Array.isArray(options) || options.length === 0) return promptData;
-  return {
-    ...promptData,
-    decisionOptions: options.map((option: { reply?: unknown; label?: unknown }) =>
-      typeof option.reply === 'string' && labels[option.reply]
-        ? { ...option, label: labels[option.reply] }
-        : option
-    ),
-  };
-}
-
-/**
  * The decision id this payload names, or null.
  *
  * @param promptData - The live prompt from `/current-output`, or null
  * @returns The id, or null when the payload carries none
- */
-export function readPromptDecisionId(promptData: LivePromptData | null): string | null {
-  // Issue #3184: the read lives in `lib/session/prompt-view` now, shared with
-  // the server and the CLI; this name stays for the callers that import it.
-  return readDecisionId(promptData);
-}
-
-/** What {@link readPromptQuestionChoices} answers with. */
-export interface PromptQuestionChoices {
-  /** The question text, as the agent wrote it. */
-  question: string;
-  /**
-   * The option labels, in payload order.
-   *
-   * Their POSITION is the answer: the panel sends `String(index + 1)` and
-   * `resolveStructuredQuestionAnswer` resolves that against the same list, read
-   * from `listPending()`. Both orders come from one parser
-   * (`parseAskUserQuestionToolInput`) over the same `questions[0].options`, so
-   * they agree by construction rather than by convention.
-   */
-  labels: string[];
-  /** How many questions the one call carries; only the first is answerable. */
-  questionCount: number;
-  /**
-   * Whether a typed answer is accepted besides the choices (Issue #2951) —
-   * OpenCode V2's form field `custom: true`. The panel and the phone sheet
-   * then offer an input; see {@link readQuestionFreeText}. Present only when
-   * true.
-   */
-  custom?: true;
-}
-
-/**
- * Bound on a typed answer, the server's `MAX_QUESTION_FREE_TEXT_LENGTH`
- * (`lib/hooks/structured-decision-response`), which refuses a longer one rather
- * than cutting it. Repeated here because that module is server-only.
- */
-export const QUESTION_FREE_TEXT_MAX_LENGTH = 1000;
-
-/**
- * An answer `resolveStructuredQuestionAnswer` would read as option NUMBERS
- * (`2`, `1,3`) rather than as text — the same pattern it tests first.
- */
-const QUESTION_SELECTION_PATTERN = /^\d+(?:\s*[,\s]\s*\d+)*$/;
-
-/**
- * The typed answer to send, or null when it must not be sent (Issue #2951).
  *
- * The typed text goes to `/respond` as the `answer`, where
- * `resolveStructuredQuestionAnswer` tries option numbers first, then labels,
- * then free text. A label typed in full is the same answer as clicking it, so
- * that is allowed. Digits alone are not: `2` would be sent as the second
- * choice, not as the word the operator typed, so it is refused here, where the
- * panel can say why.
+ * What {@link readPromptQuestionChoices} answers with: the `QuestionChoices` of `prompt-view`.
  *
- * @returns The trimmed text, or null when empty, too long, or read as numbers
- */
-export function readQuestionFreeText(text: string): string | null {
-  const trimmed = text.trim();
-  if (trimmed === '' || trimmed.length > QUESTION_FREE_TEXT_MAX_LENGTH) return null;
-  if (QUESTION_SELECTION_PATTERN.test(trimmed)) return null;
-  return trimmed;
-}
-
-/** Whether a typed answer is refused only because it is read as option numbers. */
-export function isQuestionFreeTextNumeric(text: string): boolean {
-  return QUESTION_SELECTION_PATTERN.test(text.trim());
-}
-
-/**
+ * - `question`: The question text, as the agent wrote it.
+ * - `labels`: The option labels, in payload order.
+ *
+ *   Their POSITION is the answer: the panel sends `String(index + 1)` and
+ *   `resolveStructuredQuestionAnswer` resolves that against the same list, read
+ *   from `listPending()`. Both orders come from one parser
+ *   (`parseAskUserQuestionToolInput`) over the same `questions[0].options`, so
+ *   they agree by construction rather than by convention.
+ * - `questionCount`: How many questions the one call carries; only the first is answerable.
+ * - `custom`: Whether a typed answer is accepted besides the choices (Issue #2951) —
+ *   OpenCode V2's form field `custom: true`. The panel and the phone sheet
+ *   then offer an input; see {@link readQuestionFreeText}. Present only when
+ *   true.
+ *
  * The choices a question is offering, when the panel may answer it
  * (Issue #2039).
  *
@@ -197,29 +100,97 @@ export function isQuestionFreeTextNumeric(text: string): boolean {
  * @param promptData - The live prompt from `/current-output`, or null
  * @returns The first question and its labels, or null when the panel must not
  *   offer to answer it
- */
-export function readPromptQuestionChoices(
-  promptData: LivePromptData | null
-): PromptQuestionChoices | null {
-  // Issue #3184: moved to `lib/session/prompt-view` unchanged (same three gates).
-  return readQuestionChoices(promptData);
-}
-
-/**
+ *
  * What an unclassified payload's heading should say when it nevertheless
  * carries addressable choices (Issue #3181).
  *
  * `null` means there is nothing to click, so the "could not read its options"
  * heading is still the truth. `approval` is the three verdicts (with the tool
  * name when the payload has one); `question` is a published question.
+ *
+ * // Issue #3184: the read lives in `lib/session/prompt-view` now, shared with
+ * // the server and the CLI; this name stays for the callers that import it.
+ * // Issue #3184: moved to `lib/session/prompt-view` unchanged (same three gates).
+ * // Issue #3184: moved to `lib/session/prompt-view` unchanged.
+ *
+ * @module components/worktree/prompt-decision-id
  */
-export type StructuredDecisionHeading =
-  | { kind: 'approval'; toolName: string | null }
-  | { kind: 'question' };
 
-export function readStructuredDecisionHeading(
-  promptData: LivePromptData | null
-): StructuredDecisionHeading | null {
-  // Issue #3184: moved to `lib/session/prompt-view` unchanged.
-  return readDecisionHeading(promptData);
+import type { LivePromptData } from '@/types/models';
+import type { CLIToolType } from '@/lib/cli-tools/types';
+import { OPENCODE_V2_DECISION_LABELS } from '@/lib/hooks/sources/opencode-v2/decision-labels';
+
+/**
+ * A tool's own words for the approval verdicts, keyed by wire reply
+ * (Issue #2945). Only tools whose dialog words differ from the shared list are
+ * here: OpenCode V2 draws `Always allow` where v1 draws `Allow always`.
+ */
+const DECISION_LABELS_BY_TOOL: Partial<Record<CLIToolType, Readonly<Record<string, string>>>> = {
+  'opencode-v2': OPENCODE_V2_DECISION_LABELS,
+};
+
+/**
+ * The payload with its approval verdicts in the tool's own words (Issue #2945).
+ *
+ * Only the LABEL changes: the number and the wire reply are what an answer
+ * sends, and both stay exactly as published, so a relabelled `2. Always allow`
+ * still sends `2` and still means `always`. Answers the same object when there
+ * is nothing to relabel, so a memoised caller does not re-render.
+ *
+ * @param promptData - The live prompt from `/current-output`, or null
+ * @param cliToolId - The tool the prompt belongs to
+ */
+export function withToolDecisionLabels<T extends LivePromptData | null>(
+  promptData: T,
+  cliToolId: CLIToolType
+): T {
+  const labels = DECISION_LABELS_BY_TOOL[cliToolId];
+  if (!promptData || !labels) return promptData;
+  const options = (promptData as { decisionOptions?: unknown }).decisionOptions;
+  if (!Array.isArray(options) || options.length === 0) return promptData;
+  return {
+    ...promptData,
+    decisionOptions: options.map((option: { reply?: unknown; label?: unknown }) =>
+      typeof option.reply === 'string' && labels[option.reply]
+        ? { ...option, label: labels[option.reply] }
+        : option
+    ),
+  };
+}
+
+/**
+ * Bound on a typed answer, the server's `MAX_QUESTION_FREE_TEXT_LENGTH`
+ * (`lib/hooks/structured-decision-response`), which refuses a longer one rather
+ * than cutting it. Repeated here because that module is server-only.
+ */
+export const QUESTION_FREE_TEXT_MAX_LENGTH = 1000;
+
+/**
+ * An answer `resolveStructuredQuestionAnswer` would read as option NUMBERS
+ * (`2`, `1,3`) rather than as text — the same pattern it tests first.
+ */
+const QUESTION_SELECTION_PATTERN = /^\d+(?:\s*[,\s]\s*\d+)*$/;
+
+/**
+ * The typed answer to send, or null when it must not be sent (Issue #2951).
+ *
+ * The typed text goes to `/respond` as the `answer`, where
+ * `resolveStructuredQuestionAnswer` tries option numbers first, then labels,
+ * then free text. A label typed in full is the same answer as clicking it, so
+ * that is allowed. Digits alone are not: `2` would be sent as the second
+ * choice, not as the word the operator typed, so it is refused here, where the
+ * panel can say why.
+ *
+ * @returns The trimmed text, or null when empty, too long, or read as numbers
+ */
+export function readQuestionFreeText(text: string): string | null {
+  const trimmed = text.trim();
+  if (trimmed === '' || trimmed.length > QUESTION_FREE_TEXT_MAX_LENGTH) return null;
+  if (QUESTION_SELECTION_PATTERN.test(trimmed)) return null;
+  return trimmed;
+}
+
+/** Whether a typed answer is refused only because it is read as option numbers. */
+export function isQuestionFreeTextNumeric(text: string): boolean {
+  return QUESTION_SELECTION_PATTERN.test(text.trim());
 }

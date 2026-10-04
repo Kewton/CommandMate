@@ -22,10 +22,8 @@ vi.mock('next-intl', async () => {
 
 import { MobilePromptSheet } from '@/components/mobile/MobilePromptSheet';
 import { PromptPanel } from '@/components/worktree/PromptPanel';
-import {
-  readPromptDecisionId,
-  withToolDecisionLabels,
-} from '@/components/worktree/prompt-decision-id';
+import { withToolDecisionLabels } from '@/components/worktree/prompt-decision-id';
+import { readDecisionId as readPromptDecisionId } from '@/lib/session/prompt-view';
 import {
   buildStructuredPromptData,
   STRUCTURED_DECISION_OPTIONS,
