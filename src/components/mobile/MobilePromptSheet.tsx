@@ -20,6 +20,7 @@ import {
   QUESTION_FREE_TEXT_MAX_LENGTH,
   readPromptDecisionId,
   readPromptQuestionChoices,
+  readStructuredDecisionHeading,
   readQuestionFreeText,
   type PromptQuestionChoices,
 } from '@/components/worktree/prompt-decision-id';
@@ -533,7 +534,9 @@ function PromptContent({
       )}
 
       {/* Question */}
-      <p className="text-foreground leading-relaxed">{promptData.question}</p>
+      <p className="text-foreground leading-relaxed">
+        {isAnswerablePromptData(promptData) ? promptData.question : unclassifiedHeading(t, readStructuredDecisionHeading(promptData))}
+      </p>
 
       {/* Answering indicator */}
       {isBusy && (
@@ -1001,4 +1004,18 @@ function StructuredQuestionChoices({
       </button>
     </div>
   );
+}
+
+/** The heading of a payload nobody classified; see `PromptPanel` (Issue #3181). */
+function unclassifiedHeading(
+  t: ReturnType<typeof useTranslations>,
+  heading: ReturnType<typeof readStructuredDecisionHeading>
+): string {
+  if (heading?.kind === 'approval') {
+    return heading.toolName
+      ? t('structuredApprovalTitle', { toolName: heading.toolName })
+      : t('structuredApprovalTitleNoTool');
+  }
+  if (heading?.kind === 'question') return t('structuredQuestionTitle');
+  return t('unclassifiedTitle');
 }

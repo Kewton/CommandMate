@@ -561,6 +561,13 @@
     "dialogCardLabel": "ターミナルの画面",
     "unreadableHint": "画面に出ている番号（1〜9）か y／n で答えてください。Enter は選択中の項目をそのまま確定します。"
   },
+  "sessionStarting": {
+    "title": "{agent} を起動中…",
+    "titleWithElapsed": "{agent} を起動中… {elapsed}",
+    "hint": "起動が終わるとターミナルを表示します。",
+    "showTerminal": "ターミナルを見る",
+    "label": "エージェントの起動中"
+  },
   "chatTranscript": {
     "regionLabel": "チャット履歴",
     "loading": "メッセージを読み込み中",

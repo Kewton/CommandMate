@@ -97,6 +97,9 @@ function snapshotFingerprint(payload: Awaited<ReturnType<typeof buildCurrentOutp
     // client, or the Esc card outlives the panel it dismisses.
     payload.isDismissablePanelActive ?? false,
     payload.isUnclassifiedActive ?? false,
+    // Issue #3179: the launch ending is a change the client has to see even
+    // when the frame and every flag above are unchanged.
+    payload.startingSince ?? null,
   ]);
 }
 
@@ -144,6 +147,8 @@ function emitTerminalSnapshot(
     isPagerActive: payload.isPagerActive ?? false,
     isDismissablePanelActive: payload.isDismissablePanelActive ?? false,
     isUnclassifiedActive: payload.isUnclassifiedActive ?? false,
+    // Issue #3179: so the push and the poll agree on "still starting".
+    startingSince: payload.startingSince ?? null,
     version: nextVersion(key),
   });
 }

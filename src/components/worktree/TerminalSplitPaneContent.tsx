@@ -128,6 +128,11 @@ import {
   writeSurfaceMode,
 } from '@/config/surface-mode-config';
 import { Tooltip } from '@/components/common/Tooltip';
+import { SessionStartingNotice } from '@/components/worktree/SessionStartingNotice';
+import {
+  sessionStartingScopeKey,
+  useSessionStartingGate,
+} from '@/hooks/useSessionStartingGate';
 
 /**
  * Composer-row width at or above which the direct-input toggle prints its
@@ -444,6 +449,15 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
     enabled: !disabled,
   });
 
+  // Issue #3179: the agent is still launching. The pane shows "<agent> を起動中…"
+  // instead of the half-launched frame, and nothing that drives a dialog is
+  // drawn — see `useSessionStartingGate`.
+  const startingGate = useSessionStartingGate(
+    sessionStartingScopeKey(worktreeId, resolvedInstanceId),
+    terminal.startingSince,
+  );
+  const isStarting = startingGate.starting;
+
   // Issue #2766: direct-input mode. Deliberately NOT hung off `showNav` /
   // `showEscapeHatch` / `showPrompt` — every one of those is a detection
   // verdict, and this mode exists for the frames detection cannot read. It is
@@ -708,7 +722,8 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   // escape-hatch condition keeps meaning "a selection list is on screen" rather
   // than becoming "the footer happens to be drawing the nav pad".
   const isSelectionListFrame = terminal.isSelectionListActive;
-  const showNav = isSelectionListFrame && !isChatSurface;
+  // Issue #3179: and never while the agent is launching.
+  const showNav = isSelectionListFrame && !isChatSurface && !isStarting;
   // The same rule as ChatSurface (Issue #2793): on Command Code's plan
   // review, `Enter` runs the focused action, and the pad cannot show focus.
   // Read off `terminal.output`, the frame the chat surface's card reads (#2809).
@@ -736,7 +751,8 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   // answer). Hiding the panel there left a screen nobody could answer, by hand
   // or automatically, until the operator turned Auto-Yes off. So a multi-select
   // prompt is shown whatever Auto-Yes is doing; nothing is auto-sent either way.
-  const showPrompt = prompt.visible && (!autoYesEnabled || isMultiSelectPrompt(prompt.data));
+  const showPrompt =
+    prompt.visible && !isStarting && (!autoYesEnabled || isMultiSelectPrompt(prompt.data));
   // Issue #1932: the approval this pane's dialog addresses, when the payload
   // names one. Null for every scraper-read prompt and for every source that
   // publishes no per-decision id, which is what keeps those on the pane path.
@@ -760,7 +776,8 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
     terminal.isUnclassifiedActive &&
     !isSelectionListFrame &&
     !prompt.visible &&
-    !isChatSurface;
+    !isChatSurface &&
+    !isStarting;
 
   // Issue #1879: the unsent-input bar. Its gate is the composer's CONTENTS and
   // nothing else — not isUnclassifiedActive, not isSelectionListActive, not
@@ -840,7 +857,14 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   );
 
   const terminalDisplaySlot = useMemo(
-    () => (
+    () => (startingGate.noticeVisible && startingGate.startingSince !== null ? (
+      // Issue #3179: in the terminal's own box, so the split keeps its layout.
+      <SessionStartingNotice
+        cliToolId={cliToolId}
+        startingSince={startingGate.startingSince}
+        onShowTerminal={startingGate.revealTerminal}
+      />
+    ) : (
       <TerminalDisplay
         output={terminal.output}
         isActive={terminal.isRunning}
@@ -852,8 +876,12 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
         compactTuiLayoutPadding={compactTuiLayoutPadding}
         preservePaintedPanelRows={preservePaintedPanelRows}
       />
-    ),
+    )),
     [
+      startingGate.noticeVisible,
+      startingGate.revealTerminal,
+      startingGate.startingSince,
+      cliToolId,
       terminal.output,
       terminal.isRunning,
       terminal.attaching,
@@ -926,6 +954,8 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
               // never arrived. Copied here so the server's answer is the answer.
               isDismissablePanelActive: terminal.isDismissablePanelActive,
               isUnclassifiedActive: terminal.isUnclassifiedActive,
+              // Issue #3179: the surface draws the starting strip from this.
+              startingSince: terminal.startingSince,
             }}
             onSurfaceModeChange={handleSurfaceModeChange}
             // Issue #2254: the dialog card's frame. `terminal.output`, not
@@ -954,6 +984,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       terminal.isPagerActive,
       terminal.isDismissablePanelActive,
       terminal.isUnclassifiedActive,
+      terminal.startingSince,
       terminal.output,
       refresh,
       prompt.visible,
@@ -1181,6 +1212,8 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
           cliToolId={cliToolId}
           instanceId={resolvedInstanceId}
           isSessionRunning={terminal.isRunning}
+          // Issue #3179: no red stop button and no mode control on a launch.
+          isSessionStarting={isStarting}
           pendingInsertText={pendingInsertText ?? null}
           onInsertConsumed={onInsertConsumed}
           splitIndex={splitIndex}
@@ -1363,6 +1396,8 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       handleMessageSent,
       sendOptimistic,
       terminal.isRunning,
+      // Issue #3179: the composer's stop / mode gate.
+      isStarting,
       // Issue #2406: the composer's queued-send toast gate.
       isGenerating,
       pendingInsertText,

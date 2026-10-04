@@ -180,6 +180,12 @@ export interface TerminalSnapshotEvent {
    */
   isDismissablePanelActive?: boolean;
   isUnclassifiedActive: boolean;
+  /**
+   * Issue #3179: epoch ms the instance's launch began while it is still
+   * starting, else null — `CurrentOutputPayload.startingSince` straight through.
+   * Optional for a server that predates the field; absent reads as null.
+   */
+  startingSince?: number | null;
   version: number;
 }
 
