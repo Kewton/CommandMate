@@ -949,6 +949,315 @@ function suppressOpenCodeBanner(
   return null;
 }
 
+// The rest of extractResponse, split out one function per step (Issue #3213):
+// the completion rules, the completion branch they open, and the partial
+// reading a frame falls through to. They are declared in the order
+// extractResponse reaches them, and each is called at the position its lines
+// had. The comments inside were written in place: "above" and "below" in them
+// are positions in extractResponse. The startup-screen defenses above are
+// called from `extractCompletedResponse` now, in the order they were.
+
+/**
+ * What one `extractResponse` call has read off its capture, as handed to the
+ * steps split out of it (Issue #3213).
+ *
+ * One object rather than positional arguments, for the reason
+ * `ResponseCheckContext` below gives: five of these are numbers and three are
+ * patterns, and a call site could transpose either without a type error. Each
+ * step destructures the names it uses, so the moved lines read exactly as they
+ * did inside `extractResponse`. Nothing in it is written after it is built.
+ */
+interface ExtractionContext {
+  cliToolId: CLIToolType;
+  /** The trimmed tmux buffer lines array. */
+  lines: string[];
+  totalLines: number;
+  /** `lines` with ANSI stripped for opencode, null for every other tool. */
+  openCodeCleanLines: string[] | null;
+  /** What `findChromeStart` returned for this frame. */
+  chromeStart: number;
+  /** Where the transcript stops: `chromeStart`, or the line count when that is -1. */
+  contentEnd: number;
+  lastCapturedLine: number;
+  bufferReset: boolean;
+  captureWindowSaturated: boolean;
+  /** How many rows from the bottom the completion rules look at. */
+  checkLineCount: number;
+  /** The ANSI-stripped text the completion rules are tested against. */
+  cleanOutputToCheck: string;
+  promptPattern: RegExp;
+  separatorPattern: RegExp;
+  thinkingPattern: RegExp;
+  skipPatterns: RegExp[];
+  findRecentUserPromptIndex: (windowSize: number) => number;
+}
+
+/**
+ * Does this frame show a finished turn, by its tool's own completion rule?
+ *
+ * The readings and the four per-tool rules that decided the completion branch
+ * of {@link extractResponse}, split out as they were (Issue #3213). The return
+ * is the condition that `if` tested.
+ *
+ * @param ctx - What this call has read off the capture
+ * @returns True when the turn on the frame is finished
+ */
+function isTurnComplete(ctx: ExtractionContext): boolean {
+  const {
+    cliToolId, lines, totalLines, checkLineCount, cleanOutputToCheck,
+    promptPattern, separatorPattern, thinkingPattern,
+  } = ctx;
+
+  const hasPrompt = promptPattern.test(cleanOutputToCheck);
+  const hasSeparator = separatorPattern.test(cleanOutputToCheck);
+  // Issue #1671: Codex's activity markers are past-tense transcript records that
+  // never leave the scrollback, so testing them against this fixed tail window
+  // reports "still thinking" for a finished turn whenever its final message was
+  // short enough to keep the last "• Ran <cmd>" row inside the window. Codex gets
+  // a liveness check that keys off the status line it repaints above the composer
+  // instead; every other tool keeps the tail-window match.
+  const isThinking = cliToolId === 'codex'
+    ? isCodexTurnActive(lines, checkLineCount)
+    : thinkingPattern.test(cleanOutputToCheck);
+
+  // Issue #1897: copilot's `hasPrompt` is worthless as a completion signal and
+  // its `isThinking` is worthless as a liveness one. The `❯` composer is drawn
+  // between its two rules throughout a turn (measured on every frame of #1885's
+  // running fixtures), and `COPILOT_THINKING_PATTERN` matches nothing copilot
+  // 1.0.80 draws (0 of 44 live generating frames). So `hasPrompt && !isThinking`
+  // was true on the very first poll of a running turn -- the extractor declared
+  // the turn finished, saved the status bar as the reply, and `checkForResponse`
+  // stopped polling, which is why the real answer never reached History.
+  //
+  // 1.0.80 paints the turn's state on the bottom row of the pane and nowhere
+  // else, so that ROW -- never a tail window, which copilot's own reply text can
+  // forge (`status-vocabulary-in-response.txt`) -- is the evidence. `idle` is a
+  // positive observation that the turn is over (design policy §4 D1 decision 1
+  // item 2); `working` and `null` (a dialog box has taken the bar away) both mean
+  // "not finished", and the dialog case is already served by the prompt path
+  // above.
+  const copilotStatusBar = cliToolId === 'copilot'
+    ? readCopilotStatusBar(lines.slice(Math.max(0, totalLines - COPILOT_STATUS_BAR_SCAN_ROWS)).map(stripAnsi))
+    : null;
+
+  // Prompt-based completion logic
+  const isPromptBasedComplete = cliToolId === 'copilot'
+    ? copilotStatusBar === 'idle'
+    : (cliToolId === 'codex' || cliToolId === 'gemini' || cliToolId === 'vibe-local' || cliToolId === 'antigravity') && hasPrompt && !isThinking;
+  const isClaudeComplete = cliToolId === 'claude' && hasPrompt && hasSeparator && !isThinking;
+  // Issue #2250: claude's shape, because Command Code's layout is claude's — the
+  // composer sits between two full-pane rules and is drawn only when the agent
+  // will accept input. Deliberately NOT keyed on `✻ Worked for`: that row is the
+  // live turn's, not the transcript's (it is present in `turn-version.txt` and
+  // gone from `dialog-create-file.txt`, the same pane one prompt later) and
+  // `WorkedDurationNote` omits it entirely for a turn under 1000 ms.
+  const isCommandCodeComplete =
+    cliToolId === 'command-code' && hasPrompt && hasSeparator && !isThinking;
+  const isOpenCodeDone = cliToolId === 'opencode' && isOpenCodeComplete(cleanOutputToCheck);
+
+  return isPromptBasedComplete || isClaudeComplete || isCommandCodeComplete || isOpenCodeDone;
+}
+
+/**
+ * Collect the rows of a finished turn's reply, and where the cursor stops.
+ *
+ * The first half of the completion branch of {@link extractResponse}, split out
+ * as it was (Issue #3213). The loop writes `endIndex` when it stops early, so
+ * it is returned beside the response instead of being written through.
+ *
+ * @param ctx - What this call has read off the capture
+ * @returns The trimmed response, and the line count to report for it
+ */
+function collectCompletedResponse(ctx: ExtractionContext): { response: string; endIndex: number } {
+  const {
+    cliToolId, lines, totalLines, chromeStart, contentEnd, lastCapturedLine,
+    bufferReset, captureWindowSaturated, skipPatterns, findRecentUserPromptIndex,
+  } = ctx;
+
+  const responseLines: string[] = [];
+
+  const startIndex = resolveExtractionStartIndex(
+    lastCapturedLine, totalLines, bufferReset, cliToolId, findRecentUserPromptIndex,
+    captureWindowSaturated
+  );
+
+  // `contentEnd` bounds the content only; `endIndex` keeps reporting the full
+  // buffer so lineCount bookkeeping in session_states is unchanged (#1289).
+  //
+  // Issue #2400: codex is the exception, and it is the pre-existing behaviour
+  // rather than a new rule. Before this Issue the loop below stopped on the
+  // composer's `›` and wrote that row's index into `endIndex`; now the composer
+  // is outside `contentEnd`, so the break can no longer fire on it and
+  // `endIndex` would silently advance ~3 rows further. Those rows matter for
+  // codex specifically: it renders INLINE, and it repaints the composer band in
+  // place — the next turn's transcript is printed over exactly the rows the
+  // composer occupied in this capture. A cursor parked past them would skip
+  // real content on the following poll. So the cursor stops where the content
+  // stops, which is what it did before.
+  let endIndex = cliToolId === 'codex' ? contentEnd : totalLines;
+
+  for (let i = startIndex; i < contentEnd; i++) {
+    const line = lines[i];
+    const cleanLine = stripAnsi(line);
+
+    if (cliToolId === 'codex' && /^›\s+/.test(cleanLine)) {
+      endIndex = i;
+      break;
+    }
+
+    if (cliToolId === 'gemini' && /^(%|\$|.*@.*[%$#])\s*$/.test(cleanLine)) {
+      endIndex = i;
+      break;
+    }
+
+    // Antigravity (agy): the bare ">" input box line marks the end of the
+    // response (the status bar and shortcuts footer follow below it). (Issue #988)
+    if (cliToolId === 'antigravity' && /^>\s*$/.test(cleanLine)) {
+      endIndex = i;
+      break;
+    }
+
+    // Issue #1911: both rows this stops on (`Ask anything...` in the composer,
+    // `tab agents  ctrl+p commands` under its border) live in the chrome, which
+    // `contentEnd` now excludes structurally. Kept only as the fallback for a
+    // frame whose chrome could not be located, because there it is still the
+    // one boundary available — and #1883 measured that a REPLY can contain
+    // `Ask anything...`, so cutting the turn on it is a last resort, not the
+    // primary rule.
+    if (cliToolId === 'opencode' && chromeStart < 0) {
+      if (OPENCODE_PROMPT_PATTERN.test(cleanLine) || OPENCODE_PROMPT_AFTER_RESPONSE.test(cleanLine)) {
+        endIndex = i;
+        break;
+      }
+    }
+
+    const shouldSkip = skipPatterns.some(pattern => pattern.test(cleanLine));
+    if (shouldSkip) {
+      continue;
+    }
+
+    responseLines.push(line);
+  }
+
+  const response = responseLines.join('\n').trim();
+
+  return { response, endIndex };
+}
+
+/**
+ * Build the result for a frame the completion rules accepted.
+ *
+ * The body of the completion branch of {@link extractResponse}, split out as it
+ * was (Issue #3213). Every return is `extractResponse`'s own result: incomplete
+ * when the reply's tail still shows a thinking indicator or the frame is a
+ * startup screen, complete otherwise.
+ *
+ * @param ctx - What this call has read off the capture
+ * @returns What `extractResponse` returns for this frame
+ */
+function extractCompletedResponse(ctx: ExtractionContext): ExtractionResult {
+  const {
+    cliToolId, totalLines, openCodeCleanLines, bufferReset, captureWindowSaturated,
+    cleanOutputToCheck, thinkingPattern, skipPatterns, findRecentUserPromptIndex,
+  } = ctx;
+
+  const { response, endIndex } = collectCompletedResponse(ctx);
+
+  // DR-004: Check only the tail of the response for thinking indicators.
+  //
+  // Issue #1897: not for copilot. This is the same tail-window match the #1671
+  // codex fix removed from the liveness test, and on copilot it is both
+  // redundant and harmful: the status bar above has already made a positive
+  // `idle` observation about THIS frame, while the window here sees transcript
+  // that never scrolls away. `COPILOT_THINKING_PATTERN`'s braille alternative
+  // matches any spinner glyph a reply happens to quote, and the turn would then
+  // be reported unfinished for the rest of the session.
+  const responseTailLines = response.split('\n').slice(-THINKING_TAIL_LINE_COUNT).join('\n');
+  if (cliToolId !== 'copilot' && thinkingPattern.test(responseTailLines)) {
+    return incompleteResult(totalLines);
+  }
+
+  // Startup-screen defenses, one per tool and in this order. Each answers only
+  // for its own tool; `null` means the response stands.
+  const startupScreen =
+    suppressClaudeStartupScreen(cliToolId, response, totalLines, skipPatterns, findRecentUserPromptIndex) ??
+    suppressCopilotLaunchScreen(cliToolId, response, totalLines) ??
+    suppressCommandCodeLaunchScreen(cliToolId, response, totalLines, findRecentUserPromptIndex) ??
+    suppressGeminiStartupScreen(cliToolId, response, totalLines) ??
+    suppressOpenCodeBanner(cliToolId, response, totalLines, cleanOutputToCheck);
+  if (startupScreen) {
+    return startupScreen;
+  }
+
+  return {
+    response,
+    isComplete: true,
+    lineCount: endIndex,
+    bufferReset,
+    captureWindowSaturated,
+    // Issue #1911: opencode only. `echoEnd < 0` means the turn is longer than
+    // the alternate-screen pane and its head has already scrolled away, so
+    // `response` starts mid-answer. Nothing else in this frame can recover it.
+    turnHeadTruncated: openCodeCleanLines
+      ? resolveOpenCodeTurnRegion(openCodeCleanLines).headTruncated
+      : undefined,
+  };
+}
+
+/**
+ * Build the result for a frame whose turn is still running: what has streamed
+ * so far, or an empty incomplete result when nothing has.
+ *
+ * The tail of {@link extractResponse}, split out as it was (Issue #3213). Both
+ * returns are `extractResponse`'s own result.
+ *
+ * @param ctx - What this call has read off the capture
+ * @returns What `extractResponse` returns for this frame
+ */
+function extractPartialResponse(ctx: ExtractionContext): ExtractionResult {
+  const {
+    lines, totalLines, contentEnd, lastCapturedLine, bufferReset,
+    captureWindowSaturated, skipPatterns, findRecentUserPromptIndex,
+  } = ctx;
+
+  // Partial response in progress
+  const responseLines: string[] = [];
+  const endIndex = totalLines;
+  // Issue #1670: a saturated window makes lastCapturedLine meaningless here too —
+  // starting the partial slice at it would stream an arbitrary tail fragment
+  // instead of the turn so far. Re-anchor on the echoed user prompt.
+  const partialBufferReset = bufferReset || captureWindowSaturated || lastCapturedLine >= endIndex - 5;
+  const recentPromptIndex = partialBufferReset ? findRecentUserPromptIndex(80) : -1;
+  const startIndex = partialBufferReset
+    ? (recentPromptIndex >= 0 ? recentPromptIndex + 1 : Math.max(0, endIndex - 80))
+    : Math.max(0, lastCapturedLine);
+
+  // Partial (still-streaming) content is bounded by the footer too (#1289).
+  for (let i = startIndex; i < Math.min(endIndex, contentEnd); i++) {
+    const line = lines[i];
+    const cleanLine = stripAnsi(line);
+
+    const shouldSkip = skipPatterns.some(pattern => pattern.test(cleanLine));
+    if (shouldSkip) {
+      continue;
+    }
+
+    responseLines.push(line);
+  }
+
+  const partialResponse = responseLines.join('\n').trim();
+  if (partialResponse) {
+    return {
+      response: partialResponse,
+      isComplete: false,
+      lineCount: endIndex,
+    };
+  }
+
+  // Response not yet complete
+  return incompleteResult(totalLines);
+}
+
 /**
  * Extract CLI tool response from tmux output
  * Detects when a CLI tool has completed a response by looking for tool-specific patterns
@@ -1073,160 +1382,16 @@ export function extractResponse(
   // Strip ANSI codes before pattern matching
   const cleanOutputToCheck = stripAnsi(outputToCheck);
 
-  const hasPrompt = promptPattern.test(cleanOutputToCheck);
-  const hasSeparator = separatorPattern.test(cleanOutputToCheck);
-  // Issue #1671: Codex's activity markers are past-tense transcript records that
-  // never leave the scrollback, so testing them against this fixed tail window
-  // reports "still thinking" for a finished turn whenever its final message was
-  // short enough to keep the last "• Ran <cmd>" row inside the window. Codex gets
-  // a liveness check that keys off the status line it repaints above the composer
-  // instead; every other tool keeps the tail-window match.
-  const isThinking = cliToolId === 'codex'
-    ? isCodexTurnActive(lines, checkLineCount)
-    : thinkingPattern.test(cleanOutputToCheck);
+  // Issue #3213: what the steps split out of this function read off the frame.
+  const ctx: ExtractionContext = {
+    cliToolId, lines, totalLines, openCodeCleanLines, chromeStart, contentEnd,
+    lastCapturedLine, bufferReset, captureWindowSaturated, checkLineCount, cleanOutputToCheck,
+    promptPattern, separatorPattern, thinkingPattern, skipPatterns,
+    findRecentUserPromptIndex,
+  };
 
-  // Issue #1897: copilot's `hasPrompt` is worthless as a completion signal and
-  // its `isThinking` is worthless as a liveness one. The `❯` composer is drawn
-  // between its two rules throughout a turn (measured on every frame of #1885's
-  // running fixtures), and `COPILOT_THINKING_PATTERN` matches nothing copilot
-  // 1.0.80 draws (0 of 44 live generating frames). So `hasPrompt && !isThinking`
-  // was true on the very first poll of a running turn -- the extractor declared
-  // the turn finished, saved the status bar as the reply, and `checkForResponse`
-  // stopped polling, which is why the real answer never reached History.
-  //
-  // 1.0.80 paints the turn's state on the bottom row of the pane and nowhere
-  // else, so that ROW -- never a tail window, which copilot's own reply text can
-  // forge (`status-vocabulary-in-response.txt`) -- is the evidence. `idle` is a
-  // positive observation that the turn is over (design policy §4 D1 decision 1
-  // item 2); `working` and `null` (a dialog box has taken the bar away) both mean
-  // "not finished", and the dialog case is already served by the prompt path
-  // above.
-  const copilotStatusBar = cliToolId === 'copilot'
-    ? readCopilotStatusBar(lines.slice(Math.max(0, totalLines - COPILOT_STATUS_BAR_SCAN_ROWS)).map(stripAnsi))
-    : null;
-
-  // Prompt-based completion logic
-  const isPromptBasedComplete = cliToolId === 'copilot'
-    ? copilotStatusBar === 'idle'
-    : (cliToolId === 'codex' || cliToolId === 'gemini' || cliToolId === 'vibe-local' || cliToolId === 'antigravity') && hasPrompt && !isThinking;
-  const isClaudeComplete = cliToolId === 'claude' && hasPrompt && hasSeparator && !isThinking;
-  // Issue #2250: claude's shape, because Command Code's layout is claude's — the
-  // composer sits between two full-pane rules and is drawn only when the agent
-  // will accept input. Deliberately NOT keyed on `✻ Worked for`: that row is the
-  // live turn's, not the transcript's (it is present in `turn-version.txt` and
-  // gone from `dialog-create-file.txt`, the same pane one prompt later) and
-  // `WorkedDurationNote` omits it entirely for a turn under 1000 ms.
-  const isCommandCodeComplete =
-    cliToolId === 'command-code' && hasPrompt && hasSeparator && !isThinking;
-  const isOpenCodeDone = cliToolId === 'opencode' && isOpenCodeComplete(cleanOutputToCheck);
-
-  if (isPromptBasedComplete || isClaudeComplete || isCommandCodeComplete || isOpenCodeDone) {
-    const responseLines: string[] = [];
-
-    const startIndex = resolveExtractionStartIndex(
-      lastCapturedLine, totalLines, bufferReset, cliToolId, findRecentUserPromptIndex,
-      captureWindowSaturated
-    );
-
-    // `contentEnd` bounds the content only; `endIndex` keeps reporting the full
-    // buffer so lineCount bookkeeping in session_states is unchanged (#1289).
-    //
-    // Issue #2400: codex is the exception, and it is the pre-existing behaviour
-    // rather than a new rule. Before this Issue the loop below stopped on the
-    // composer's `›` and wrote that row's index into `endIndex`; now the composer
-    // is outside `contentEnd`, so the break can no longer fire on it and
-    // `endIndex` would silently advance ~3 rows further. Those rows matter for
-    // codex specifically: it renders INLINE, and it repaints the composer band in
-    // place — the next turn's transcript is printed over exactly the rows the
-    // composer occupied in this capture. A cursor parked past them would skip
-    // real content on the following poll. So the cursor stops where the content
-    // stops, which is what it did before.
-    let endIndex = cliToolId === 'codex' ? contentEnd : totalLines;
-
-    for (let i = startIndex; i < contentEnd; i++) {
-      const line = lines[i];
-      const cleanLine = stripAnsi(line);
-
-      if (cliToolId === 'codex' && /^›\s+/.test(cleanLine)) {
-        endIndex = i;
-        break;
-      }
-
-      if (cliToolId === 'gemini' && /^(%|\$|.*@.*[%$#])\s*$/.test(cleanLine)) {
-        endIndex = i;
-        break;
-      }
-
-      // Antigravity (agy): the bare ">" input box line marks the end of the
-      // response (the status bar and shortcuts footer follow below it). (Issue #988)
-      if (cliToolId === 'antigravity' && /^>\s*$/.test(cleanLine)) {
-        endIndex = i;
-        break;
-      }
-
-      // Issue #1911: both rows this stops on (`Ask anything...` in the composer,
-      // `tab agents  ctrl+p commands` under its border) live in the chrome, which
-      // `contentEnd` now excludes structurally. Kept only as the fallback for a
-      // frame whose chrome could not be located, because there it is still the
-      // one boundary available — and #1883 measured that a REPLY can contain
-      // `Ask anything...`, so cutting the turn on it is a last resort, not the
-      // primary rule.
-      if (cliToolId === 'opencode' && chromeStart < 0) {
-        if (OPENCODE_PROMPT_PATTERN.test(cleanLine) || OPENCODE_PROMPT_AFTER_RESPONSE.test(cleanLine)) {
-          endIndex = i;
-          break;
-        }
-      }
-
-      const shouldSkip = skipPatterns.some(pattern => pattern.test(cleanLine));
-      if (shouldSkip) {
-        continue;
-      }
-
-      responseLines.push(line);
-    }
-
-    const response = responseLines.join('\n').trim();
-
-    // DR-004: Check only the tail of the response for thinking indicators.
-    //
-    // Issue #1897: not for copilot. This is the same tail-window match the #1671
-    // codex fix removed from the liveness test, and on copilot it is both
-    // redundant and harmful: the status bar above has already made a positive
-    // `idle` observation about THIS frame, while the window here sees transcript
-    // that never scrolls away. `COPILOT_THINKING_PATTERN`'s braille alternative
-    // matches any spinner glyph a reply happens to quote, and the turn would then
-    // be reported unfinished for the rest of the session.
-    const responseTailLines = response.split('\n').slice(-THINKING_TAIL_LINE_COUNT).join('\n');
-    if (cliToolId !== 'copilot' && thinkingPattern.test(responseTailLines)) {
-      return incompleteResult(totalLines);
-    }
-
-    // Startup-screen defenses, one per tool and in this order. Each answers only
-    // for its own tool; `null` means the response stands.
-    const startupScreen =
-      suppressClaudeStartupScreen(cliToolId, response, totalLines, skipPatterns, findRecentUserPromptIndex) ??
-      suppressCopilotLaunchScreen(cliToolId, response, totalLines) ??
-      suppressCommandCodeLaunchScreen(cliToolId, response, totalLines, findRecentUserPromptIndex) ??
-      suppressGeminiStartupScreen(cliToolId, response, totalLines) ??
-      suppressOpenCodeBanner(cliToolId, response, totalLines, cleanOutputToCheck);
-    if (startupScreen) {
-      return startupScreen;
-    }
-
-    return {
-      response,
-      isComplete: true,
-      lineCount: endIndex,
-      bufferReset,
-      captureWindowSaturated,
-      // Issue #1911: opencode only. `echoEnd < 0` means the turn is longer than
-      // the alternate-screen pane and its head has already scrolled away, so
-      // `response` starts mid-answer. Nothing else in this frame can recover it.
-      turnHeadTruncated: openCodeCleanLines
-        ? resolveOpenCodeTurnRegion(openCodeCleanLines).headTruncated
-        : undefined,
-    };
+  if (isTurnComplete(ctx)) {
+    return extractCompletedResponse(ctx);
   }
 
   // Check if this is an interactive prompt
@@ -1245,42 +1410,7 @@ export function extractResponse(
     }
   }
 
-  // Partial response in progress
-  const responseLines: string[] = [];
-  const endIndex = totalLines;
-  // Issue #1670: a saturated window makes lastCapturedLine meaningless here too —
-  // starting the partial slice at it would stream an arbitrary tail fragment
-  // instead of the turn so far. Re-anchor on the echoed user prompt.
-  const partialBufferReset = bufferReset || captureWindowSaturated || lastCapturedLine >= endIndex - 5;
-  const recentPromptIndex = partialBufferReset ? findRecentUserPromptIndex(80) : -1;
-  const startIndex = partialBufferReset
-    ? (recentPromptIndex >= 0 ? recentPromptIndex + 1 : Math.max(0, endIndex - 80))
-    : Math.max(0, lastCapturedLine);
-
-  // Partial (still-streaming) content is bounded by the footer too (#1289).
-  for (let i = startIndex; i < Math.min(endIndex, contentEnd); i++) {
-    const line = lines[i];
-    const cleanLine = stripAnsi(line);
-
-    const shouldSkip = skipPatterns.some(pattern => pattern.test(cleanLine));
-    if (shouldSkip) {
-      continue;
-    }
-
-    responseLines.push(line);
-  }
-
-  const partialResponse = responseLines.join('\n').trim();
-  if (partialResponse) {
-    return {
-      response: partialResponse,
-      isComplete: false,
-      lineCount: endIndex,
-    };
-  }
-
-  // Response not yet complete
-  return incompleteResult(totalLines);
+  return extractPartialResponse(ctx);
 }
 
 // ============================================================================
