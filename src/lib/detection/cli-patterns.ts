@@ -231,44 +231,155 @@ export {
 
 
 /**
+ * Per-tool detection constants, one row per CLI tool (Issue #3230).
+ *
+ * Typed as Record<CLIToolType, ...> so a tool added to CLI_TOOL_IDS without a row
+ * here is a type error. Built once at module load; no pattern here carries the
+ * `g` or `y` flag, so sharing the instances across calls keeps no state.
+ * `skipPatterns` is copied on every getCliToolPatterns() call.
+ */
+interface CliToolPatternRow {
+  promptPattern: RegExp;
+  separatorPattern: RegExp;
+  thinkingPattern: RegExp;
+  skipPatterns: readonly RegExp[];
+}
+
+const CLI_TOOL_PATTERN_TABLE: Record<CLIToolType, CliToolPatternRow> = {
+  claude: {
+    promptPattern: CLAUDE_PROMPT_PATTERN,
+    separatorPattern: CLAUDE_SEPARATOR_PATTERN,
+    thinkingPattern: CLAUDE_THINKING_PATTERN,
+    skipPatterns: [
+      /^─{10,}$/, // Separator lines
+      /^[>❯]\s*$/, // Prompt line (legacy '>' and new '❯')
+      CLAUDE_THINKING_PATTERN, // Thinking indicators
+      /^\s*[⎿⏋]\s+Tip:/, // Tip lines
+      /^\s*Tip:/, // Tip lines
+      /^\s*\?\s*for shortcuts/, // Shortcuts hint
+      /to interrupt\)/, // Part of "esc to interrupt" message
+      PASTED_TEXT_PATTERN, // [Pasted text #N +XX lines] (Issue #212)
+    ],
+  },
+
+  codex: {
+    promptPattern: CODEX_PROMPT_PATTERN,
+    separatorPattern: CODEX_SEPARATOR_PATTERN,
+    thinkingPattern: CODEX_THINKING_PATTERN,
+    skipPatterns: [
+      /^─.*─+$/, // Separator lines
+      /^›\s*$/, // Empty prompt line
+      /^›\s+(Implement|Find and fix|Type)/, // New prompt suggestions
+      CODEX_THINKING_PATTERN, // Activity indicators
+      /^\s*\d+%\s+context left/, // Context indicator
+      /^\s*for shortcuts$/, // Shortcuts hint
+      /╭─+╮/, // Box drawing (top)
+      /╰─+╯/, // Box drawing (bottom)
+      // T1.3: Additional skip patterns for Codex
+      /•\s*Ran\s+/, // Command execution lines
+      /^\s*└/, // Tree output (completion indicator)
+      /^\s*│/, // Continuation lines
+      /\(.*esc to interrupt\)/, // Interrupt hint
+      PASTED_TEXT_PATTERN, // [Pasted text #N +XX lines] (Issue #212, defensive)
+    ],
+  },
+
+  gemini: {
+    promptPattern: GEMINI_PROMPT_PATTERN,
+    separatorPattern: /^[─━]{3,}$/m,
+    thinkingPattern: GEMINI_THINKING_PATTERN,
+    skipPatterns: [
+      GEMINI_PROMPT_PATTERN, // Prompt line (DRY: shared with GEMINI_PROMPT_PATTERN)
+      GEMINI_THINKING_PATTERN, // Thinking indicators
+      /^\s*$/, // Empty lines
+      /Gemini\s+\d+\.\d+/, // Version line
+      PASTED_TEXT_PATTERN, // [Pasted text #N +XX lines]
+    ],
+  },
+
+  'vibe-local': {
+    promptPattern: VIBE_LOCAL_PROMPT_PATTERN,
+    separatorPattern: /^[·]{10,}$/m, // vibe-local uses middle dot separators
+    thinkingPattern: VIBE_LOCAL_THINKING_PATTERN,
+    skipPatterns: [
+      VIBE_LOCAL_PROMPT_PATTERN, // Prompt line (ctx:N% ❯)
+      VIBE_LOCAL_THINKING_PATTERN, // Thinking indicators
+      /^\s*$/, // Empty lines
+      /vibe-local|vibe-coder/, // Version/banner lines
+      /ctx:\s*\d+%/, // Context usage indicator
+      /Model\s+\w/, // Model info line
+      /Engine\s+\w/, // Engine info line
+      /Mode\s+/, // Mode info line
+      /RAM\s+/, // RAM info line
+      /CWD\s+/, // Working directory line
+      /^[·]{10,}$/, // Middle dot separator lines
+      /✦\s*Ready/, // Status bar "Ready" indicator
+      /ESC:\s*stop/, // Status bar "ESC: stop" hint
+      PASTED_TEXT_PATTERN, // [Pasted text #N +XX lines]
+    ],
+  },
+
+  opencode: {
+    promptPattern: OPENCODE_PROMPT_PATTERN,
+    separatorPattern: OPENCODE_SEPARATOR_PATTERN,
+    thinkingPattern: OPENCODE_THINKING_PATTERN,
+    skipPatterns: OPENCODE_SKIP_PATTERNS,
+  },
+
+  copilot: {
+    promptPattern: COPILOT_PROMPT_PATTERN,
+    separatorPattern: COPILOT_SEPARATOR_PATTERN,
+    thinkingPattern: COPILOT_THINKING_PATTERN,
+    skipPatterns: COPILOT_SKIP_PATTERNS,
+  },
+
+  antigravity: {
+    promptPattern: ANTIGRAVITY_PROMPT_PATTERN,
+    separatorPattern: ANTIGRAVITY_SEPARATOR_PATTERN,
+    thinkingPattern: ANTIGRAVITY_THINKING_PATTERN,
+    skipPatterns: ANTIGRAVITY_SKIP_PATTERNS,
+  },
+
+  // Issue #2250: Command Code's layout is claude-shaped (inline transcript,
+  // `❯` composer fenced by two full-width rules) but the constants are its
+  // own. Sharing claude's would import the exact defect #2247 had to undo --
+  // claude's rules carry a startup-banner reading that keys on `v\d+\.\d+`
+  // and `|`, and Command Code prints its version into a `# Command Code
+  // v1.40.1` row on every launch.
+  'command-code': {
+    promptPattern: COMMAND_CODE_PROMPT_PATTERN,
+    separatorPattern: COMMAND_CODE_SEPARATOR_PATTERN,
+    thinkingPattern: COMMAND_CODE_THINKING_PATTERN,
+    skipPatterns: COMMAND_CODE_SKIP_PATTERNS,
+  },
+
+  // Issue #2934: OpenCode V2's own constants (see OPENCODE_V2_* above). The
+  // separator row is the same half-block rule v1 draws, so v1's pattern is
+  // reused as a value; nothing of v1's is changed.
+  'opencode-v2': {
+    promptPattern: OPENCODE_V2_IDLE_COMPOSER_PATTERN,
+    separatorPattern: OPENCODE_SEPARATOR_PATTERN,
+    thinkingPattern: OPENCODE_V2_THINKING_PATTERN,
+    skipPatterns: OPENCODE_V2_SKIP_PATTERNS,
+  },
+};
+
+/**
+ * Row for a tool id. An id outside CLI_TOOL_IDS (possible at runtime) falls back
+ * to claude's row, as the former `default` branches did.
+ */
+function patternRowFor(cliToolId: CLIToolType): CliToolPatternRow {
+  return CLI_TOOL_PATTERN_TABLE[cliToolId] ?? CLI_TOOL_PATTERN_TABLE.claude;
+}
+
+/**
  * Detect if CLI tool is showing "thinking" indicator
  */
 export function detectThinking(cliToolId: CLIToolType, content: string): boolean {
   const log = logger.withContext({ cliToolId });
   log.debug('detectThinking:check', { contentLength: content.length });
 
-  let result: boolean;
-  switch (cliToolId) {
-    case 'claude':
-      result = CLAUDE_THINKING_PATTERN.test(content);
-      break;
-    case 'codex':
-      result = CODEX_THINKING_PATTERN.test(content);
-      break;
-    case 'gemini':
-      result = GEMINI_THINKING_PATTERN.test(content);
-      break;
-    case 'vibe-local':
-      result = VIBE_LOCAL_THINKING_PATTERN.test(content);
-      break;
-    case 'opencode':
-      result = OPENCODE_THINKING_PATTERN.test(content);
-      break;
-    case 'copilot':
-      result = COPILOT_THINKING_PATTERN.test(content);
-      break;
-    case 'antigravity':
-      result = ANTIGRAVITY_THINKING_PATTERN.test(content);
-      break;
-    case 'command-code':
-      result = COMMAND_CODE_THINKING_PATTERN.test(content);
-      break;
-    case 'opencode-v2':
-      result = OPENCODE_V2_THINKING_PATTERN.test(content);
-      break;
-    default:
-      result = CLAUDE_THINKING_PATTERN.test(content);
-  }
+  const result = patternRowFor(cliToolId).thinkingPattern.test(content);
 
   log.debug('detectThinking:result', { isThinking: result });
   return result;
@@ -283,137 +394,13 @@ export function getCliToolPatterns(cliToolId: CLIToolType): {
   thinkingPattern: RegExp;
   skipPatterns: RegExp[];
 } {
-  switch (cliToolId) {
-    case 'claude':
-      return {
-        promptPattern: CLAUDE_PROMPT_PATTERN,
-        separatorPattern: CLAUDE_SEPARATOR_PATTERN,
-        thinkingPattern: CLAUDE_THINKING_PATTERN,
-        skipPatterns: [
-          /^─{10,}$/, // Separator lines
-          /^[>❯]\s*$/, // Prompt line (legacy '>' and new '❯')
-          CLAUDE_THINKING_PATTERN, // Thinking indicators
-          /^\s*[⎿⏋]\s+Tip:/, // Tip lines
-          /^\s*Tip:/, // Tip lines
-          /^\s*\?\s*for shortcuts/, // Shortcuts hint
-          /to interrupt\)/, // Part of "esc to interrupt" message
-          PASTED_TEXT_PATTERN, // [Pasted text #N +XX lines] (Issue #212)
-        ],
-      };
-
-    case 'codex':
-      return {
-        promptPattern: CODEX_PROMPT_PATTERN,
-        separatorPattern: CODEX_SEPARATOR_PATTERN,
-        thinkingPattern: CODEX_THINKING_PATTERN,
-        skipPatterns: [
-          /^─.*─+$/, // Separator lines
-          /^›\s*$/, // Empty prompt line
-          /^›\s+(Implement|Find and fix|Type)/, // New prompt suggestions
-          CODEX_THINKING_PATTERN, // Activity indicators
-          /^\s*\d+%\s+context left/, // Context indicator
-          /^\s*for shortcuts$/, // Shortcuts hint
-          /╭─+╮/, // Box drawing (top)
-          /╰─+╯/, // Box drawing (bottom)
-          // T1.3: Additional skip patterns for Codex
-          /•\s*Ran\s+/, // Command execution lines
-          /^\s*└/, // Tree output (completion indicator)
-          /^\s*│/, // Continuation lines
-          /\(.*esc to interrupt\)/, // Interrupt hint
-          PASTED_TEXT_PATTERN, // [Pasted text #N +XX lines] (Issue #212, defensive)
-        ],
-      };
-
-    case 'gemini':
-      return {
-        promptPattern: GEMINI_PROMPT_PATTERN,
-        separatorPattern: /^[─━]{3,}$/m,
-        thinkingPattern: GEMINI_THINKING_PATTERN,
-        skipPatterns: [
-          GEMINI_PROMPT_PATTERN, // Prompt line (DRY: shared with GEMINI_PROMPT_PATTERN)
-          GEMINI_THINKING_PATTERN, // Thinking indicators
-          /^\s*$/, // Empty lines
-          /Gemini\s+\d+\.\d+/, // Version line
-          PASTED_TEXT_PATTERN, // [Pasted text #N +XX lines]
-        ],
-      };
-
-    case 'vibe-local':
-      return {
-        promptPattern: VIBE_LOCAL_PROMPT_PATTERN,
-        separatorPattern: /^[·]{10,}$/m, // vibe-local uses middle dot separators
-        thinkingPattern: VIBE_LOCAL_THINKING_PATTERN,
-        skipPatterns: [
-          VIBE_LOCAL_PROMPT_PATTERN, // Prompt line (ctx:N% ❯)
-          VIBE_LOCAL_THINKING_PATTERN, // Thinking indicators
-          /^\s*$/, // Empty lines
-          /vibe-local|vibe-coder/, // Version/banner lines
-          /ctx:\s*\d+%/, // Context usage indicator
-          /Model\s+\w/, // Model info line
-          /Engine\s+\w/, // Engine info line
-          /Mode\s+/, // Mode info line
-          /RAM\s+/, // RAM info line
-          /CWD\s+/, // Working directory line
-          /^[·]{10,}$/, // Middle dot separator lines
-          /✦\s*Ready/, // Status bar "Ready" indicator
-          /ESC:\s*stop/, // Status bar "ESC: stop" hint
-          PASTED_TEXT_PATTERN, // [Pasted text #N +XX lines]
-        ],
-      };
-
-    case 'opencode':
-      return {
-        promptPattern: OPENCODE_PROMPT_PATTERN,
-        separatorPattern: OPENCODE_SEPARATOR_PATTERN,
-        thinkingPattern: OPENCODE_THINKING_PATTERN,
-        skipPatterns: [...OPENCODE_SKIP_PATTERNS],
-      };
-
-    case 'copilot':
-      return {
-        promptPattern: COPILOT_PROMPT_PATTERN,
-        separatorPattern: COPILOT_SEPARATOR_PATTERN,
-        thinkingPattern: COPILOT_THINKING_PATTERN,
-        skipPatterns: [...COPILOT_SKIP_PATTERNS],
-      };
-
-    case 'antigravity':
-      return {
-        promptPattern: ANTIGRAVITY_PROMPT_PATTERN,
-        separatorPattern: ANTIGRAVITY_SEPARATOR_PATTERN,
-        thinkingPattern: ANTIGRAVITY_THINKING_PATTERN,
-        skipPatterns: [...ANTIGRAVITY_SKIP_PATTERNS],
-      };
-
-    // Issue #2250: Command Code's layout is claude-shaped (inline transcript,
-    // `❯` composer fenced by two full-width rules) but the constants are its
-    // own. Sharing claude's would import the exact defect #2247 had to undo --
-    // claude's rules carry a startup-banner reading that keys on `v\d+\.\d+`
-    // and `|`, and Command Code prints its version into a `# Command Code
-    // v1.40.1` row on every launch.
-    case 'command-code':
-      return {
-        promptPattern: COMMAND_CODE_PROMPT_PATTERN,
-        separatorPattern: COMMAND_CODE_SEPARATOR_PATTERN,
-        thinkingPattern: COMMAND_CODE_THINKING_PATTERN,
-        skipPatterns: [...COMMAND_CODE_SKIP_PATTERNS],
-      };
-
-    // Issue #2934: OpenCode V2's own constants (see OPENCODE_V2_* above). The
-    // separator row is the same half-block rule v1 draws, so v1's pattern is
-    // reused as a value; nothing of v1's is changed.
-    case 'opencode-v2':
-      return {
-        promptPattern: OPENCODE_V2_IDLE_COMPOSER_PATTERN,
-        separatorPattern: OPENCODE_SEPARATOR_PATTERN,
-        thinkingPattern: OPENCODE_V2_THINKING_PATTERN,
-        skipPatterns: [...OPENCODE_V2_SKIP_PATTERNS],
-      };
-
-    default:
-      // Default to Claude patterns
-      return getCliToolPatterns('claude');
-  }
+  const row = patternRowFor(cliToolId);
+  return {
+    promptPattern: row.promptPattern,
+    separatorPattern: row.separatorPattern,
+    thinkingPattern: row.thinkingPattern,
+    skipPatterns: [...row.skipPatterns],
+  };
 }
 
 // ANSI primitives live in a dependency-free leaf module so client components can
