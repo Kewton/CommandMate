@@ -8,7 +8,7 @@
 
 'use client';
 
-import { memo, useState, useCallback, useId, useMemo } from 'react';
+import { memo, useState, useCallback, useId } from 'react';
 import { useTranslations } from 'next-intl';
 import type { LivePromptData, YesNoPromptData, MultipleChoicePromptData } from '@/types/models';
 import { isAnswerablePromptData } from '@/types/models';
@@ -31,9 +31,8 @@ import {
 import { ErrorBoundary } from '@/components/error/ErrorBoundary';
 import { Checkbox, RadioGroup, RadioGroupItem, Button, Spinner } from '@/components/ui';
 import { usePromptAnimation } from '@/hooks/usePromptAnimation';
+import { usePromptAnswerState } from '@/hooks/usePromptAnswerState';
 import {
-  initialCheckedNumbers,
-  initialSelectedOption,
   promptHeadingText,
   promptQuestionKey,
 } from '@/components/worktree/prompt-answer';
@@ -189,6 +188,14 @@ function PromptStuckHint({ showStuckHint, onSwitchToDirectInput, answerable }: P
   );
 }
 
+/** The PC logs a failed respond outside production (Issue #3209: moved out of the handlers). */
+function logRespondError(error: unknown): void {
+  // Log error for debugging purposes
+  if (process.env.NODE_ENV !== 'production') {
+    console.error('[PromptPanel] Failed to respond:', error);
+  }
+}
+
 /** Props for PromptPanelContent component */
 interface PromptPanelContentProps {
   promptData: PanelPromptData;
@@ -217,59 +224,36 @@ function PromptPanelContent({
   answerable,
 }: PromptPanelContentProps) {
   const t = useTranslations('prompt');
-  const [selectedOption, setSelectedOption] = useState<number | null>(
-    () => initialSelectedOption(promptData),
+  // Issue #1932: the PC forwards the decision id with every answer, logs a
+  // failed respond outside production, and refuses the structured submit
+  // without an id.
+  const send = useCallback(
+    (answer: string) => onRespond(answer, decisionId),
+    [onRespond, decisionId],
   );
-  // Issue #2755: the boxes ticked on a checkbox question, as the operator has
-  // them right now. Ascending order is applied at submit time, not here, so a
-  // click never reorders the list under the pointer.
-  const [checkedNumbers, setCheckedNumbers] = useState<readonly number[]>(
-    () => initialCheckedNumbers(promptData),
-  );
-  const [textInputValue, setTextInputValue] = useState('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
-
-  // Issue #2755: reset when the QUESTION changes, and only then. The card is
-  // not remounted between the questions of one `AskUserQuestion` call, so a
-  // `useState` initialiser is not enough — see {@link promptQuestionKey}.
-  // Written as the documented "adjust state during render" pattern rather than
-  // an effect: React re-renders this component immediately with the new state
-  // and nothing downstream ever sees the stale selection.
-  const questionKey = promptQuestionKey(promptData);
-  const [seenQuestionKey, setSeenQuestionKey] = useState(questionKey);
-  if (questionKey !== seenQuestionKey) {
-    setSeenQuestionKey(questionKey);
-    setSelectedOption(initialSelectedOption(promptData));
-    setCheckedNumbers(initialCheckedNumbers(promptData));
-    setTextInputValue('');
-  }
-
-  /** The checkbox question's options, or null when this is not one (#2755). */
-  const multiSelectOptions = promptData.type === 'multiple_choice'
-    && promptData.multiSelect === true
-    ? promptData.options
-    : null;
-
-  // Memoize selected option data to avoid recalculation on every render
-  const selectedOptionData = useMemo(() => {
-    if (promptData.type !== 'multiple_choice') return null;
-    return promptData.options.find(opt => opt.number === selectedOption) ?? null;
-  }, [promptData, selectedOption]);
-
-  // Issue #2573: the text field is offered — and its text sent — only for an
-  // option that IS a text field on screen, not for every `requiresTextInput` row.
-  // Issue #2755: on a checkbox question the same rule reads the TICKED rows —
-  // ticking `Type something...` is how that screen offers its text field.
-  const checkedTextFieldNumbers = useMemo(
-    () =>
-      (multiSelectOptions ?? [])
-        .filter((opt) => checkedNumbers.includes(opt.number) && optionTakesTypedText(opt))
-        .map((opt) => opt.number),
-    [multiSelectOptions, checkedNumbers],
-  );
-  const takesTypedText = multiSelectOptions !== null
-    ? checkedTextFieldNumbers.length > 0
-    : selectedOptionData !== null && optionTakesTypedText(selectedOptionData);
+  const {
+    selectedOption,
+    setSelectedOption,
+    checkedNumbers,
+    textInputValue,
+    setTextInputValue,
+    multiSelectOptions,
+    takesTypedText,
+    isBusy,
+    isDisabled,
+    handleToggleOption,
+    handleYesNoClick,
+    handleMultipleChoiceSubmit,
+    handleMultiSelectSubmit,
+    handleDecisionRespond,
+  } = usePromptAnswerState({
+    promptData,
+    answering,
+    answerable,
+    send,
+    onError: logRespondError,
+    canRespondDecision: !!decisionId,
+  });
   // Issue #3184: what this payload is and how it is answered, decided by the
   // one shared function rather than re-derived from `type` / `decisionOptions`
   // here. See {@link panelPromptView} for which decision id it reads.
@@ -280,101 +264,6 @@ function PromptPanelContent({
   // prompt-view-3184.test); what is SHOWN is decided by `view`.
   const screenPrompt = isAnswerablePromptData(promptData) ? promptData : null;
   const structuredPrompt = screenPrompt === null ? (promptData as StructuredPromptWaitingData) : null;
-  const isBusy = answering || isSubmitting;
-  // Issue #2870: a window the route would refuse keeps its options on screen
-  // but nothing on it can be pressed.
-  const isDisabled = isBusy || answerable === false;
-
-  const handleToggleOption = useCallback((optionNumber: number, checked: boolean) => {
-    setCheckedNumbers((previous) =>
-      checked
-        ? previous.includes(optionNumber) ? previous : [...previous, optionNumber]
-        : previous.filter((n) => n !== optionNumber),
-    );
-  }, []);
-
-  // Handle yes/no button click
-  const handleYesNoClick = useCallback(async (answer: 'yes' | 'no') => {
-    if (isDisabled) return;
-    setIsSubmitting(true);
-    try {
-      await onRespond(answer, decisionId);
-    } catch (error) {
-      // Log error for debugging purposes
-      if (process.env.NODE_ENV !== 'production') {
-        console.error('[PromptPanel] Failed to respond:', error);
-      }
-    } finally {
-      setIsSubmitting(false);
-    }
-  }, [isDisabled, onRespond, decisionId]);
-
-  // Handle multiple choice submit
-  const handleMultipleChoiceSubmit = useCallback(async () => {
-    if (isDisabled || selectedOption === null) return;
-    setIsSubmitting(true);
-    try {
-      // A text field with a value sends the text; every other option, including
-      // a menu row that reads as taking text, sends its number (Issue #2573).
-      const answer = takesTypedText && textInputValue.trim()
-        ? textInputValue.trim()
-        : selectedOption.toString();
-      await onRespond(answer, decisionId);
-    } catch (error) {
-      if (process.env.NODE_ENV !== 'production') {
-        console.error('[PromptPanel] Failed to respond:', error);
-      }
-    } finally {
-      setIsSubmitting(false);
-    }
-  }, [isDisabled, onRespond, decisionId, selectedOption, takesTypedText, textInputValue]);
-
-  /**
-   * Submit a checkbox question (Issue #2755).
-   *
-   * The answer is the SET, ascending, de-duplicated and comma-separated —
-   * `"1,3"` — because that is what the sender turns into toggles against the
-   * boxes on screen. A ticked `Type something...` sends the TEXT and nothing
-   * else: the two cannot be combined, since typing into that row is what ticks
-   * it and the other numbers would be swallowed by the field.
-   */
-  const handleMultiSelectSubmit = useCallback(async () => {
-    if (isDisabled) return;
-    const numbers = [...checkedNumbers].sort((a, b) => a - b);
-    if (numbers.length === 0) return;
-    const answer = takesTypedText ? textInputValue.trim() : numbers.join(',');
-    if (answer === '') return;
-    setIsSubmitting(true);
-    try {
-      await onRespond(answer, decisionId);
-    } catch (error) {
-      if (process.env.NODE_ENV !== 'production') {
-        console.error('[PromptPanel] Failed to respond:', error);
-      }
-    } finally {
-      setIsSubmitting(false);
-    }
-  }, [isDisabled, onRespond, decisionId, checkedNumbers, takesTypedText, textInputValue]);
-
-  // Issue #1932: the degraded form's own submit. Separate from the two above
-  // because there is no `selectedOption` state behind it — the verdict comes
-  // straight off the button that was pressed — and because it must never fire
-  // without a decision id: these numbers address an approval over the agent's
-  // API, and posting one with no id would send it down the keystroke path,
-  // where a bare "1" at a picker means whatever line is highlighted (#1681).
-  const handleDecisionRespond = useCallback(async (answer: string) => {
-    if (isDisabled || !decisionId) return;
-    setIsSubmitting(true);
-    try {
-      await onRespond(answer, decisionId);
-    } catch (error) {
-      if (process.env.NODE_ENV !== 'production') {
-        console.error('[PromptPanel] Failed to respond:', error);
-      }
-    } finally {
-      setIsSubmitting(false);
-    }
-  }, [isDisabled, onRespond, decisionId]);
 
   return (
     <div className="space-y-4">
