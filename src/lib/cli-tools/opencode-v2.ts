@@ -365,13 +365,7 @@ export class OpenCodeV2Tool extends BaseCLITool {
   async sendMessage(worktreeId: string, message: string, instanceId?: string): Promise<void> {
     const sessionName = this.getSessionName(worktreeId, instanceId);
 
-    if (!(await hasSession(sessionName))) {
-      throw new Error(
-        `OpenCode V2 session ${sessionName} does not exist. Start the session first.`
-      );
-    }
-
-    await this.relaunchIfToolExited(worktreeId, instanceId);
+    await this.requireSession('OpenCode V2', worktreeId, instanceId, { relaunch: true });
 
     try {
       await this.waitForComposer(sessionName);

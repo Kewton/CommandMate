@@ -784,13 +784,6 @@ export class OpenCodeTool extends BaseCLITool {
   async sendMessage(worktreeId: string, message: string, instanceId?: string): Promise<void> {
     const sessionName = this.getSessionName(worktreeId, instanceId);
 
-    const exists = await hasSession(sessionName);
-    if (!exists) {
-      throw new Error(
-        `OpenCode session ${sessionName} does not exist. Start the session first.`
-      );
-    }
-
     // Issue #2070: the pane exists, but does the AGENT? An agent that quit,
     // updated itself or crashed leaves its tmux session behind, and the send
     // that followed used to sit in the readiness wait until it timed out —
@@ -802,7 +795,7 @@ export class OpenCodeTool extends BaseCLITool {
     // typing the message into a shell prompt. The relaunch reserves a port and
     // re-attaches, so the server path is available again by the time it is
     // tried. `sendMessageWithImage` reaches this through its own fallback.
-    await this.relaunchIfToolExited(worktreeId, instanceId);
+    await this.requireSession('OpenCode', worktreeId, instanceId, { relaunch: true });
 
     if (await this.trySendViaServer(opencodeTarget(worktreeId, instanceId), message)) {
       // Issue #405: the transcript grew, so the cached capture is stale — the
@@ -878,12 +871,7 @@ export class OpenCodeTool extends BaseCLITool {
   ): Promise<void> {
     const sessionName = this.getSessionName(worktreeId, instanceId);
 
-    const exists = await hasSession(sessionName);
-    if (!exists) {
-      throw new Error(
-        `OpenCode session ${sessionName} does not exist. Start the session first.`
-      );
-    }
+    await this.requireSession('OpenCode', worktreeId, instanceId, { relaunch: false });
 
     const target = opencodeTarget(worktreeId, instanceId);
     if (await this.trySendViaServer(target, message, imagePath)) {
