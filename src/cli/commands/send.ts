@@ -22,8 +22,8 @@ import {
   isInstanceSelector,
   INSTANCE_ALIAS_HELP_SUFFIX,
   INSTANCE_SELECTOR_ERROR,
-  resolveInstanceTarget,
 } from './instances';
+import { resolveCommandTarget } from './command-target';
 import {
   ALLOW_RELAY_CHAIN_DESCRIPTION,
   REPLY_TO_OPTION_DESCRIPTION,
@@ -321,14 +321,10 @@ worktree and send a short message that tells the agent to read that file.
         // the roster is the only place that pairs the two. Resolve it once, up
         // front, so the task row, the send and auto-yes all name the same tool
         // as the session that actually starts.
-        const target = options.instance
-          ? await resolveInstanceTarget(client, worktreeId, options.instance, options.agent)
-          : null;
-        const agent = target ? target.cliToolId : options.agent;
+        const { agent, instanceId } = await resolveCommandTarget(client, worktreeId, options.instance, options.agent);
         // Issue #2376: the RESOLVED id, never the string the user typed.
         // `--instance "Codex 2"` has to reach /send as `codex-2`; no route but
         // /resolve-target knows how to read an alias.
-        const instanceId = target?.instanceId;
 
         // Issue #576/#588/#989: Validate --model option via shared validator (DR1-003).
         // Issue #1925: judged against the RESOLVED agent, not against --agent.
