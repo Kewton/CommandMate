@@ -48,8 +48,8 @@ import {
   isInstanceSelector,
   INSTANCE_ALIAS_HELP_SUFFIX,
   INSTANCE_SELECTOR_ERROR,
-  resolveInstanceTarget,
 } from './instances';
+import { resolveCommandTarget } from './command-target';
 import { pollWorktree } from './wait';
 import { readSqueezedPaneTail } from './capture';
 import {
@@ -307,11 +307,7 @@ a decision about that session's guard rails, not part of asking it a question.
         // worktree default: exit 21 while the default was not running, and the
         // default's turn instead of <tool>'s while it was.
         const selector = options.instance ?? options.agent;
-        const target = selector
-          ? await resolveInstanceTarget(client, worktreeId, selector, options.agent)
-          : null;
-        const agent = target ? target.cliToolId : options.agent;
-        const instanceId = target?.instanceId;
+        const { agent, instanceId } = await resolveCommandTarget(client, worktreeId, selector, options.agent);
 
         // Taken BEFORE the send so a reply written by the previous turn cannot
         // be read as this one's. Milliseconds, compared against the row's own

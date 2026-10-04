@@ -96,19 +96,13 @@ import {
   type PanePromptState,
 } from '@/hooks/useTerminalPanePolling';
 import { useSplitMessages } from '@/hooks/useSplitMessages';
-import { usePendingMessages, type OptimisticSendOptions } from '@/hooks/usePendingMessages';
-import {
-  useConnectivity,
-  isServerConfirmedReachable,
-  isConnectionKnownDown,
-} from '@/hooks/useConnectivity';
+import { useOptimisticPaneMessages, useDiscardPending } from '@/hooks/useOptimisticPaneMessages';
 import { useHistoryPaneState } from '@/hooks/useHistoryPaneState';
 import { useComposerMaxHeight } from '@/hooks/useComposerHeight';
 import {
   COMPOSER_PANE_BODY_MIN_HEIGHT_PX,
   composerHeightScopeForSplit,
 } from '@/config/composer-height';
-import { worktreeApi } from '@/lib/api-client';
 import { buildPromptResponseBody } from '@/lib/prompt-response-body-builder';
 import { readSelectionListShape } from '@/lib/detection/selection-shape';
 import { withToolDecisionLabels } from '@/components/worktree/prompt-decision-id';
@@ -529,42 +523,15 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
     enabled: !disabled,
   });
 
-  // Issue #1121: optimistic-UI layer. Merges a just-sent message into this
-  // split's history as a pending bubble (< 100ms) before the send resolves, then
-  // reconciles it against the server echo (no duplicate) or surfaces a
-  // retry/discard error on failure. onSent refetches so reconciliation is prompt.
-  const sendMessageFn = useCallback(
-    (content: string, options: OptimisticSendOptions) =>
-      worktreeApi.sendMessage(worktreeId, content, options),
-    [worktreeId],
-  );
-  // Issue #2503: the same connection verdict the header pill renders (#2501),
-  // read here so a send made in a tunnel is held as "waiting" and resent once
-  // the server answers again, instead of failing after 30s of no network.
-  // Both halves read the *signals* rather than `status`, because both decide
-  // to act: `isServerConfirmedReachable` rather than `isOnline`, so a desktop
-  // carried by polling with the WebSocket down still counts as able to send;
-  // `isConnectionKnownDown` rather than `isOffline`, so a send is only held back
-  // from failing when something actually measured the network as gone.
-  const connectivity = useConnectivity();
-  const pendingConnectivity = useMemo(
-    () => ({
-      offline: isConnectionKnownDown(connectivity.signals),
-      reachable: isServerConfirmedReachable(connectivity.signals),
-    }),
-    [connectivity.signals],
-  );
   const {
     messages: mergedMessages,
     sendOptimistic,
     retry: retryPending,
     discard: discardPending,
-  } = usePendingMessages({
+  } = useOptimisticPaneMessages({
     worktreeId,
     serverMessages: splitMessages,
-    sendFn: sendMessageFn,
     onSent: refreshSplitMessages,
-    connectivity: pendingConnectivity,
   });
 
   // Issue #744: History visible/width. MVP keeps this common across splits
@@ -616,18 +583,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
     [refresh, refreshSplitMessages, onMessageSent],
   );
 
-  // Issue #1121: discarding a failed optimistic message removes its bubble and
-  // restores the text to the composer (via the existing insert-to-message
-  // pathway) so the user can edit and re-send.
-  const handleDiscardPending = useCallback(
-    (tempId: string) => {
-      const content = discardPending(tempId);
-      if (content) {
-        onHistoryInsertToMessage?.(content);
-      }
-    },
-    [discardPending, onHistoryInsertToMessage],
-  );
+  const handleDiscardPending = useDiscardPending(discardPending, onHistoryInsertToMessage);
 
   const handlePromptRespond = useCallback(
     async (answer: string, decisionId?: string | null): Promise<void> => {

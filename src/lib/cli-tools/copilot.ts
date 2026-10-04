@@ -349,17 +349,6 @@ export class CopilotTool extends BaseCLITool {
   }
 
   /**
-   * Check if Copilot session is running for a worktree
-   *
-   * @param worktreeId - Worktree ID
-   * @returns True if session is running
-   */
-  async isRunning(worktreeId: string, instanceId?: string): Promise<boolean> {
-    const sessionName = this.getSessionName(worktreeId, instanceId);
-    return await hasSession(sessionName);
-  }
-
-  /**
    * Start a new Copilot session for a worktree
    * Launches copilot in interactive mode within tmux
    *
