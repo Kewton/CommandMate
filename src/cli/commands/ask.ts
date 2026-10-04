@@ -32,8 +32,7 @@
 
 import { Command } from 'commander';
 import { ExitCode, WaitExitCode } from '../types';
-import type { ChatMessage } from '../types/api-responses';
-import { ApiClient, ApiError, isValidWorktreeId } from '../utils/api-client';
+import { ApiClient, isValidWorktreeId } from '../utils/api-client';
 import { TOKEN_WARNING, handleCommandError } from '../utils/command-helpers';
 import {
   TRANSCRIPT_READER_TOOLS,
@@ -55,20 +54,8 @@ import { readSqueezedPaneTail } from './capture';
 import {
   ALLOW_RELAY_CHAIN_DESCRIPTION,
   REPLY_TO_OPTION_DESCRIPTION,
-  cancelRelayQuietly,
-  registerRelay,
-  resolveEndpointForWorktree,
-  resolveRelayEndpoint,
 } from './relays';
-
-/**
- * Code the send API returns when the session is blocked on a prompt.
- *
- * Mirrors `PROMPT_WAITING_CODE` in `send.ts`, which mirrors the server's own —
- * the CLI bundle keeps its own copies of API strings rather than importing the
- * server's tmux/detection graph for one of them.
- */
-const PROMPT_WAITING_CODE = 'PROMPT_WAITING';
+import { postMessage, registerRelayForMessage } from './message-dispatch';
 
 /** Default `--timeout`, in seconds. Matches the GUI's delegation brief. */
 const DEFAULT_ASK_TIMEOUT_SECONDS = 1800;
@@ -319,16 +306,11 @@ a decision about that session's guard rails, not part of asking it a question.
         // and the ledger row. A refusal exits 2 having sent nothing.
         let relayId: string | undefined;
         if (options.async) {
-          const replyEndpoint = await resolveRelayEndpoint(client, options.replyTo ?? 'self');
-          const workerEndpoint = await resolveEndpointForWorktree(
-            client,
+          relayId = await registerRelayForMessage(client, {
             worktreeId,
-            options.instance,
-            options.agent
-          );
-          relayId = await registerRelay(client, {
-            from: replyEndpoint,
-            to: workerEndpoint,
+            replyTo: options.replyTo ?? 'self',
+            instance: options.instance,
+            agent: options.agent,
             allowRelayChain: options.allowRelayChain,
           });
         }
@@ -337,25 +319,15 @@ a decision about that session's guard rails, not part of asking it a question.
         if (agent) sendBody.cliToolId = agent;
         if (instanceId) sendBody.instanceId = instanceId;
 
-        try {
-          await client.post<ChatMessage>(`/api/worktrees/${worktreeId}/send`, sendBody);
-        } catch (error) {
-          // The other session is sitting on a dialog, so the message would have
-          // been typed into the dialog's input line instead of reaching the
-          // agent (Issue #1708). Reported as a config error with the server's
-          // own sentence: the answer is to look at that session, never to
-          // re-send.
-          // A relay whose message never arrived can never be answered.
-          if (relayId) await cancelRelayQuietly(client, relayId);
-          if (error instanceof ApiError && error.apiCode === PROMPT_WAITING_CODE) {
-            console.error(
-              `Error: ${error.payload?.error
-                ?? `${worktreeId} is waiting on a prompt; the message was not sent.`}`
-            );
-            process.exit(ExitCode.CONFIG_ERROR);
-          }
-          throw error;
-        }
+        // The other session may be sitting on a dialog (Issue #1708): the
+        // message would be typed into the dialog's input line instead of
+        // reaching the agent. Reported as a config error with the server's
+        // own sentence: the answer is to look at that session, never to
+        // re-send.
+        await postMessage(client, worktreeId, sendBody, {
+          relayId,
+          promptWaitingFallback: `${worktreeId} is waiting on a prompt; the message was not sent.`,
+        });
 
         // Issue #2377: the whole point of `--async`. Nothing is waited on, so
         // the caller's own turn ends here and the answer arrives later, in their

@@ -6,7 +6,7 @@
 import { Command } from 'commander';
 import { ExitCode } from '../types';
 import type { SendOptions } from '../types';
-import type { ChatMessage, TaskCreateResponse } from '../types/api-responses';
+import type { TaskCreateResponse } from '../types/api-responses';
 import { ApiClient, ApiError, assertResponseShape, isValidWorktreeId, MAX_STOP_PATTERN_LENGTH } from '../utils/api-client';
 import { TOKEN_WARNING, handleCommandError } from '../utils/command-helpers';
 import { parseDurationToMs, ALLOWED_DURATIONS } from '../config/duration-constants';
@@ -27,11 +27,8 @@ import { resolveCommandTarget } from './command-target';
 import {
   ALLOW_RELAY_CHAIN_DESCRIPTION,
   REPLY_TO_OPTION_DESCRIPTION,
-  cancelRelayQuietly,
-  registerRelay,
-  resolveEndpointForWorktree,
-  resolveRelayEndpoint,
 } from './relays';
+import { postMessage, registerRelayForMessage } from './message-dispatch';
 
 /** Auto-yes duration used when --duration is omitted. */
 const DEFAULT_AUTO_YES_DURATION = '1h';
@@ -46,14 +43,6 @@ const DEFAULT_AUTO_YES_DURATION = '1h';
  */
 const SEND_VERIFIED_MAX_KIB = 48;
 const SEND_VERIFIED_MAX_LINES = 240;
-
-/**
- * Code the send API returns when the session is blocked on a prompt (Issue
- * #1708). Mirrors PROMPT_WAITING_CODE in src/lib/session/prompt-waiting-guard.ts;
- * duplicated rather than imported so the CLI bundle does not pull the server's
- * tmux/detection graph in for one string.
- */
-const PROMPT_WAITING_CODE = 'PROMPT_WAITING';
 
 /**
  * What to print when a PROMPT_WAITING response carried no message body — an
@@ -388,16 +377,11 @@ worktree and send a short message that tells the agent to read that file.
         // A refusal exits 2 here, having sent nothing.
         let relayId: string | undefined;
         if (options.replyTo) {
-          const replyEndpoint = await resolveRelayEndpoint(client, options.replyTo);
-          const workerEndpoint = await resolveEndpointForWorktree(
-            client,
+          relayId = await registerRelayForMessage(client, {
             worktreeId,
-            options.instance,
-            options.agent
-          );
-          relayId = await registerRelay(client, {
-            from: replyEndpoint,
-            to: workerEndpoint,
+            replyTo: options.replyTo,
+            instance: options.instance,
+            agent: options.agent,
             allowRelayChain: options.allowRelayChain,
           });
           // stderr, not stdout: `--contract` already owns this command's stdout
@@ -427,34 +411,17 @@ worktree and send a short message that tells the agent to read that file.
           sendBody.ignoreStructuredPromptGuard = true;
         }
 
-        try {
-          await client.post<ChatMessage>(`/api/worktrees/${worktreeId}/send`, sendBody);
-        } catch (error) {
-          // A task whose message never arrived is a failed task, not a pending
-          // one: nothing is working on it and nothing ever will.
-          if (taskId) {
-            await reportTaskStatus(client, taskId, 'failed');
-          }
-          // A relay whose message never arrived can never be answered; leaving
-          // it open would have the requester waiting 24h for a turn that was
-          // never started.
-          if (relayId) {
-            await cancelRelayQuietly(client, relayId);
-          }
-          // Issue #1708: the session is sitting on a prompt, so the message
-          // would have been typed into the prompt's input line rather than
-          // reaching the agent. Reported on its own so an unattended runner sees
-          // "answer the prompt", not a generic HTTP failure — nudging a stalled
-          // worker is exactly what made #1708 worse.
-          if (error instanceof ApiError && error.apiCode === PROMPT_WAITING_CODE) {
-            // The server's own sentence, not error.message: handleApiError maps a
-            // bare 409 to "Unexpected HTTP status: 409", which says nothing about
-            // what to do next.
-            console.error(`Error: ${error.payload?.error ?? promptWaitingFallback(worktreeId)}`);
-            process.exit(ExitCode.CONFIG_ERROR);
-          }
-          throw error;
-        }
+        await postMessage(client, worktreeId, sendBody, {
+          relayId,
+          onFailure: async () => {
+            // A task whose message never arrived is a failed task, not a pending
+            // one: nothing is working on it and nothing ever will.
+            if (taskId) {
+              await reportTaskStatus(client, taskId, 'failed');
+            }
+          },
+          promptWaitingFallback: promptWaitingFallback(worktreeId),
+        });
         console.error('Message sent.');
 
         if (taskId) {
