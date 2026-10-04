@@ -213,6 +213,8 @@ export async function POST(
     // readiness wait runs out (agy: 30 x 1 s), and only its `finally` cleared
     // the record — so the screen kept showing "starting" for a session that was
     // already gone. Clearing an instance that was not starting is a no-op.
+    // Issue #3195: no token here — the record is dropped whichever launch wrote
+    // it; the killed launch's own `finally` then clears only its own record.
     for (const { cliToolId, instanceId } of targets) {
       disableAutoYes(id, cliToolId, undefined, instanceId);
       stopAutoYesPolling(buildCompositeKey(id, cliToolId, instanceId));
