@@ -15,6 +15,7 @@ import {
   buildDetectPromptOptions,
 } from '../../cli-patterns';
 import { detectPrompt } from '../../prompt-detector';
+import { activePromptVerdict, positiveVerdict, positiveVerdictWithPrompt } from '../verdicts';
 import { STATUS_REASON } from '../../status-reason';
 import { detectCopilotDialog } from './prompt';
 import { COPILOT_LIVE_REGION } from './live-region';
@@ -22,6 +23,11 @@ import { createToolStatusDetector } from '../run-detection';
 import { COPILOT_VERIFIED_AGAINST } from '../verified-against';
 import type { StatusEvidence } from '@/lib/session/status-evidence';
 import type { NormalizedFrame } from '../types';
+import type { PromptDetectionResult } from '../../prompt-detector';
+
+function detectCopilotPrompt(clean: string): PromptDetectionResult {
+  return detectPrompt(stripBoxDrawing(clean), buildDetectPromptOptions('copilot'));
+}
 
 /** copilot-cli build these rules were read off (#1885 / #1895; value in ../verified-against, #1929). */
 export const VERIFIED_AGAINST = COPILOT_VERIFIED_AGAINST;
@@ -74,33 +80,18 @@ export const copilotStatusDetector = createToolStatusDetector({
     // never the transcript. Ordering against them is therefore settled inside the
     // helper: it declines any frame that still has a status bar.
     if (isCopilotSelectionFrame(frame.contentLines as string[])) {
-      const promptOptions = buildDetectPromptOptions('copilot');
-      const promptDetection = detectPrompt(stripBoxDrawing(frame.clean), promptOptions);
+      const promptDetection = detectCopilotPrompt(frame.clean);
       if (promptDetection.isPrompt) {
         // Distinguish yes/no prompts (2-3 options, e.g., "Do you want to run this command?")
         // from ask_user multi-select prompts (4+ options). Yes/no prompts should show
         // PromptPanel with buttons; ask_user prompts need NavigationButtons for ↑↓ selection.
         const optionsCount = promptDetection.promptData?.options?.length ?? 0;
         if (optionsCount <= 3) {
-          return {
-            status: 'waiting' as const,
-            confidence: 'high' as const,
-            reason: STATUS_REASON.PROMPT_DETECTED,
-            hasActivePrompt: true,
-            evidence: 'positive' as const,
-            promptDetection,
-          };
+          return activePromptVerdict(STATUS_REASON.PROMPT_DETECTED, promptDetection);
         }
         // 4+ options: treat as selection list (NavigationButtons)
       }
-      return {
-        status: 'waiting' as const,
-        confidence: 'high' as const,
-        reason: STATUS_REASON.COPILOT_SELECTION_LIST,
-        hasActivePrompt: false,
-        evidence: 'positive' as const,
-        promptDetection,
-      };
+      return positiveVerdictWithPrompt('waiting', STATUS_REASON.COPILOT_SELECTION_LIST, promptDetection);
     }
 
     // 0.5. Copilot: the bottom status bar carries the running half of the turn
@@ -125,16 +116,8 @@ export const copilotStatusDetector = createToolStatusDetector({
     // window form would also have matched copilot's own response text -- see
     // `status-vocabulary-in-response.txt`.
     if (readCopilotStatusBar(frame.contentLines as string[]) === 'working') {
-      const promptOptions = buildDetectPromptOptions('copilot');
-      const promptDetection = detectPrompt(stripBoxDrawing(frame.clean), promptOptions);
-      return {
-        status: 'running' as const,
-        confidence: 'high' as const,
-        reason: STATUS_REASON.THINKING_INDICATOR,
-        hasActivePrompt: false,
-        evidence: 'positive' as const,
-        promptDetection,
-      };
+      const promptDetection = detectCopilotPrompt(frame.clean);
+      return positiveVerdictWithPrompt('running', STATUS_REASON.THINKING_INDICATOR, promptDetection);
     }
 
     return null;
@@ -161,13 +144,7 @@ export const copilotStatusDetector = createToolStatusDetector({
     // verdict claude's `❯` row and codex's `›` row publish, so nothing downstream
     // has to learn a new reason code.
     if (readCopilotStatusBar(frame.contentLines as string[]) === 'idle') {
-      return {
-        status: 'ready' as const,
-        confidence: 'high' as const,
-        reason: STATUS_REASON.INPUT_PROMPT,
-        hasActivePrompt: false,
-        evidence: 'positive' as const,
-      };
+      return positiveVerdict('ready', STATUS_REASON.INPUT_PROMPT);
     }
     return null;
   },

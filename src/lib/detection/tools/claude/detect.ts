@@ -13,6 +13,7 @@ import {
 } from '../../cli-patterns';
 import { findClaudeInputBox } from '../../composer-text';
 import { findClaudeChrome } from '../../prompt-detect-multiple-choice';
+import { positiveVerdict } from '../verdicts';
 import { STATUS_REASON } from '../../status-reason';
 import { detectClaudeDialog } from './prompt';
 import { STATUS_CHECK_LINE_COUNT, liveRegionOf } from '../frame';
@@ -151,13 +152,7 @@ export const claudeStatusDetector = createToolStatusDetector({
     // Read only the rows at or below the input box (Issue #2847): a footer quoted in the reply
     // above it is conversation, not a picker.
     if (CLAUDE_SELECTION_LIST_FOOTER.test(selectionFooterRows(frame))) {
-      return {
-        status: 'waiting' as const,
-        confidence: 'high' as const,
-        reason: STATUS_REASON.CLAUDE_SELECTION_LIST,
-        hasActivePrompt: false,
-        evidence: 'positive' as const,
-      };
+      return positiveVerdict('waiting', STATUS_REASON.CLAUDE_SELECTION_LIST);
     }
     return null;
   },
@@ -176,13 +171,7 @@ export const claudeStatusDetector = createToolStatusDetector({
     // signal and does not reintroduce the Issue #188 spinner-summary false positive (only the
     // spinner+ellipsis branch is restricted to the 5-line window).
     if (CLAUDE_INTERRUPT_HINT_PATTERN.test(frame.lastLines)) {
-      return {
-        status: 'running' as const,
-        confidence: 'high' as const,
-        reason: STATUS_REASON.THINKING_INDICATOR,
-        hasActivePrompt: false,
-        evidence: 'positive' as const,
-      };
+      return positiveVerdict('running', STATUS_REASON.THINKING_INDICATOR);
     }
     return null;
   },
