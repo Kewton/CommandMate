@@ -109,6 +109,33 @@ export interface PromptView {
   apiTarget: 'approval' | 'question' | null;
 }
 
+/**
+ * What a surface prints as the heading, as a `prompt.*` message key (Issue
+ * #3181, #3184). `text` is set instead of `key` for a question read off the
+ * screen, which is printed verbatim. Both answer surfaces translate THIS rather
+ * than mapping the heading kinds themselves, so the two cannot disagree about
+ * when "could not read its options" is the truth.
+ */
+export type PromptHeadingMessage =
+  | { text: string }
+  | { key: 'structuredApprovalTitle'; values: { toolName: string } }
+  | { key: 'structuredApprovalTitleNoTool' | 'structuredQuestionTitle' | 'unclassifiedTitle' };
+
+export function promptHeadingMessage(heading: PromptViewHeading): PromptHeadingMessage {
+  switch (heading.kind) {
+    case 'question':
+      return { text: heading.text };
+    case 'approval':
+      return heading.toolName
+        ? { key: 'structuredApprovalTitle', values: { toolName: heading.toolName } }
+        : { key: 'structuredApprovalTitleNoTool' };
+    case 'agent-question':
+      return { key: 'structuredQuestionTitle' };
+    case 'unreadable':
+      return { key: 'unclassifiedTitle' };
+  }
+}
+
 // =============================================================================
 // Field readers (moved from components/worktree/prompt-decision-id, #1932/#2039/#3181)
 // =============================================================================

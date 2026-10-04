@@ -58,7 +58,7 @@
  */
 
 import type { ChatMessage } from '@/types/models';
-import { UNCLASSIFIED_PROMPT_TYPE } from '@/types/models';
+import { derivePromptView } from '@/lib/session/prompt-view';
 import { ASK_USER_QUESTION_TAB_BAR_PREFIX_PATTERN } from '@/lib/detection/tools/claude/picker-chrome';
 
 // ============================================================================
@@ -543,7 +543,14 @@ export function toToolApprovalEntry(message: ChatMessage, runId = 0): ToolApprov
     outcome = 'auto';
   } else if (answeredBy === 'auto' || answeredBy === 'human' || answeredBy === 'terminal') {
     outcome = answeredBy;
-  } else if (type === UNCLASSIFIED_PROMPT_TYPE || status === 'unclassified') {
+  } else if (
+    // Issue #3184: "a row nobody could answer" is the shared view's
+    // `unreadable` (every stored degraded record is one — none carries a
+    // decision id). `status === 'unclassified'` stays as the backstop for a
+    // row whose `type` was lost.
+    (type !== '' && derivePromptView({ ...record, type })?.kind === 'unreadable') ||
+    status === 'unclassified'
+  ) {
     outcome = 'unclassified';
   } else if (status === 'pending') {
     outcome = 'pending';

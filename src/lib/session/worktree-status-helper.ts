@@ -32,7 +32,7 @@ import { resolveCaptureSpec } from '@/lib/cli-tools/capture-spec';
 import { probeToolSessionLiveness } from '@/lib/cli-tools/session-liveness';
 import { getLastServerResponseTimestamp, buildCompositeKey } from '@/lib/polling/auto-yes-manager';
 import { GLOBAL_SESSION_WORKTREE_ID } from '@/lib/session/global-session-constants';
-import { peekPromptWaiting } from '@/lib/session/prompt-waiting-composition';
+import { isApiAnswerableStructuredWait, peekPromptWaiting } from '@/lib/session/prompt-waiting-composition';
 import { deriveWaitingKind, type WaitingKind } from '@/lib/session/waiting-kind';
 import {
   forgetLastKnownStatus,
@@ -611,6 +611,16 @@ async function detectInstanceSessionStatus(
         hasActivePrompt: statusResult.hasActivePrompt,
         scraperStatus: statusResult.status,
         scraperReason: statusResult.reason,
+        // Issue #3184 (design §6-2): a wait the app answers over the agent's
+        // API is a `prompt` for the dots and the push body, as the panel's
+        // buttons say. Not during a launch, for the reason the line above
+        // ignores the structured record then.
+        apiAnswerable:
+          startingSince === null &&
+          isApiAnswerableStructuredWait(
+            peek.structured,
+            getAgentEventSource(cliToolId).capabilities.eventIdentity,
+          ),
       });
 
       // Clean up stale pending prompts (scoped to this instance) if none is showing

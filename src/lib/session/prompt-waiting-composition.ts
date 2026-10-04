@@ -40,6 +40,53 @@ import {
   type StructuredPromptWaitingState,
 } from '@/lib/session/agent-event-state';
 import { HOOK_STATUS_REASON } from '@/lib/session/status-mapping';
+import { isAddressableDecision } from '@/lib/session/structured-prompt';
+
+/**
+ * Whether a structured wait is one the app answers over the agent's own API
+ * (Issue #3184, design §6-2).
+ *
+ * The same three conjuncts `current-output-builder` requires before it
+ * publishes a `decisionId` on the live payload (its `addressableDecisionId`):
+ * the record came from `Notification(permission_prompt)` rather than being a
+ * `permission-request` forecast, the tool's event source names each decision
+ * by id (`eventIdentity: 'permission-id'`), and the record carries such an id.
+ * That is exactly when `derivePromptView` reads the payload as `api-choices` —
+ * an approval or a question the panel draws buttons for — so the waiting kind
+ * published beside it says `prompt` too, instead of the scraper's `menu` /
+ * `unclassified` and the push body's "check the terminal".
+ *
+ * @param structured - The structured record, or null
+ * @param eventIdentity - `capabilities.eventIdentity` of the tool's event source
+ */
+export function isApiAnswerableStructuredWait(
+  structured: Pick<StructuredPromptWaitingState, 'source' | 'decisionId'> | null,
+  eventIdentity: string | null,
+): boolean {
+  return (
+    structured !== null &&
+    structured.source === 'notification' &&
+    eventIdentity === 'permission-id' &&
+    isAddressableDecision(structured.decisionId)
+  );
+}
+
+/**
+ * {@link isApiAnswerableStructuredWait} for the record as it stands now — a
+ * read, like {@link peekPromptWaiting}: nothing is released or corroborated.
+ * Kept here so the structured record is still read in this one module (#1737).
+ */
+export function isApiAnswerableWaitNow(
+  worktreeId: string,
+  cliToolId: CLIToolType,
+  instanceId: string | undefined,
+  eventIdentity: string | null,
+): boolean {
+  return isApiAnswerableStructuredWait(
+    getStructuredPromptWaiting(worktreeId, cliToolId, instanceId),
+    eventIdentity,
+  );
+}
 
 /**
  * How long a structured-only dialog may keep refusing sends (Issue #1737).

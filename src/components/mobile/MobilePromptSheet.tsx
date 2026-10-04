@@ -18,13 +18,18 @@ import { useSwipeGesture } from '@/hooks/useSwipeGesture';
 import {
   isQuestionFreeTextNumeric,
   QUESTION_FREE_TEXT_MAX_LENGTH,
-  readPromptDecisionId,
-  readPromptQuestionChoices,
-  readStructuredDecisionHeading,
   readQuestionFreeText,
   type PromptQuestionChoices,
 } from '@/components/worktree/prompt-decision-id';
 import type { StructuredDecisionOption } from '@/lib/session/structured-prompt';
+import {
+  derivePromptView,
+  optionTakesTypedText,
+  readQuestionChoices,
+  type PromptView,
+  promptHeadingMessage,
+  type PromptViewHeading,
+} from '@/lib/session/prompt-view';
 
 /** Animation duration for sheet transitions */
 const ANIMATION_DURATION_MS = 300;
@@ -33,36 +38,12 @@ const ANIMATION_DURATION_MS = 300;
 const SWIPE_DISMISS_THRESHOLD = 100;
 
 /**
- * The option labels measured to be a text field on screen (Issue #2573).
- *
- * Restated — as `PromptPanel.tsx` restates it — from
- * `TYPED_TEXT_FIELD_LABEL_PATTERNS` in `lib/detection/prompt-detect-multiple-choice`,
- * which a client module cannot import (its graph reaches `lib/env`'s `fs`). Not
- * imported from `PromptPanel` either: suites that mock that module for the split
- * pane still render this sheet. `tests/unit/components/mobile/MobilePromptSheet.test.tsx`
- * asserts this copy agrees with the detection module.
+ * Whether the sheet sends the operator's TEXT for an option rather than its
+ * number (Issue #2573). Issue #3184: defined once in `lib/session/prompt-view`
+ * — a module neither surface's suites mock — instead of restated here and in
+ * `PromptPanel`; re-exported under the old name.
  */
-const TYPED_TEXT_FIELD_LABEL_PATTERNS: readonly RegExp[] = [
-  /^[^\S\n]*type\s+something\b/i,
-];
-
-/**
- * Whether the sheet should send the operator's TEXT for this option rather than
- * its number (Issue #2573).
- *
- * `requiresTextInput` is true for both Command Code's `Type something...` (a real
- * text field, #2522) and its permission dialog's `No, tell Command Code what to
- * do differently` (a menu row). Text sent at the menu row reached no field, and
- * the Enter after it confirmed the highlighted `1. Yes`. So only a measured text
- * field takes text; a menu row is answered by its number, after which the tool is
- * back at its composer for the instructions.
- */
-export function optionTakesTypedText(
-  option: { readonly label: string; readonly requiresTextInput?: boolean },
-): boolean {
-  return option.requiresTextInput === true
-    && TYPED_TEXT_FIELD_LABEL_PATTERNS.some((pattern) => pattern.test(option.label));
-}
+export { optionTakesTypedText };
 
 /**
  * Which question the sheet is currently showing (Issue #2755).
@@ -440,6 +421,15 @@ function PromptContent({
   const takesTypedText = multiSelectOptions !== null
     ? checkedTextFieldCount > 0
     : selectedOptionData !== null && optionTakesTypedText(selectedOptionData);
+  // Issue #3184: what this payload is and how it is answered, from the one
+  // shared function. The sheet sends with the payload's own decision id
+  // (`handleStructuredRespond`), so the view is derived from the payload as is.
+  // derivePromptView answers null only for a null payload; the sheet has one.
+  const view = derivePromptView(promptData)!;
+  // #3184: type narrowing only — to the closed `PromptData` union (#1725) for
+  // the instruction text. The same split as `view.kind === 'screen-choices'`
+  // (pinned by prompt-view-3184.test); what is SHOWN is decided by `view`.
+  const screenPrompt = isAnswerablePromptData(promptData) ? promptData : null;
   const isBusy = answering || isSubmitting;
   // Issue #2870: a window the route would refuse keeps its options on screen
   // but nothing on it can be pressed.
@@ -527,15 +517,15 @@ function PromptContent({
       {/* Instruction Text (context preceding the prompt). Issue #1725: the
           degraded structured form has none — it is built from a Notification
           payload, not from a pane, so there is no scrollback to show. */}
-      {isAnswerablePromptData(promptData) && promptData.instructionText && (
+      {screenPrompt?.instructionText && (
         <div className="max-h-40 overflow-y-auto whitespace-pre-wrap text-sm text-muted-foreground bg-muted rounded p-2 border border-border">
-          {promptData.instructionText}
+          {screenPrompt.instructionText}
         </div>
       )}
 
       {/* Question */}
       <p className="text-foreground leading-relaxed">
-        {isAnswerablePromptData(promptData) ? promptData.question : unclassifiedHeading(t, readStructuredDecisionHeading(promptData))}
+        {promptHeadingText(t, view.heading)}
       </p>
 
       {/* Answering indicator */}
@@ -558,9 +548,10 @@ function PromptContent({
 
       {/* Issue #2945: an addressable approval / question the structured layer
           reported — the same controls `PromptPanel` draws on the PC. */}
-      {!isAnswerablePromptData(promptData) && (
+      {screenPrompt === null && (
         <StructuredDecisionContent
           promptData={promptData}
+          view={view}
           disabled={isDisabled}
           onRespond={handleStructuredRespond}
         />
@@ -866,21 +857,25 @@ export default MobilePromptSheet;
  */
 function StructuredDecisionContent({
   promptData,
+  view,
   disabled,
   onRespond,
 }: {
   promptData: LivePromptData;
+  /** Issue #3184: the sheet's {@link PromptView} of this payload. */
+  view: PromptView;
   disabled: boolean;
   onRespond: (answer: string) => Promise<void>;
 }) {
-  const decisionId = readPromptDecisionId(promptData);
   const payload = promptData as { message?: unknown; decisionOptions?: unknown };
   const message = typeof payload.message === 'string' ? payload.message : null;
+  // Issue #3184: which of the two the payload offers is the view's call — the
+  // same id-and-verdicts test this used to restate.
   const verdicts =
-    decisionId && Array.isArray(payload.decisionOptions) && payload.decisionOptions.length > 0
+    view.apiTarget === 'approval'
       ? (payload.decisionOptions as readonly StructuredDecisionOption[])
       : null;
-  const question = readPromptQuestionChoices(promptData);
+  const question = view.apiTarget === 'question' ? readQuestionChoices(promptData) : null;
 
   return (
     <div className="space-y-3" data-testid="mobile-structured-decision">
@@ -1006,16 +1001,12 @@ function StructuredQuestionChoices({
   );
 }
 
-/** The heading of a payload nobody classified; see `PromptPanel` (Issue #3181). */
-function unclassifiedHeading(
+/** The heading above the prompt, in the user's locale (Issue #3181, #3184). */
+function promptHeadingText(
   t: ReturnType<typeof useTranslations>,
-  heading: ReturnType<typeof readStructuredDecisionHeading>
+  heading: PromptViewHeading
 ): string {
-  if (heading?.kind === 'approval') {
-    return heading.toolName
-      ? t('structuredApprovalTitle', { toolName: heading.toolName })
-      : t('structuredApprovalTitleNoTool');
-  }
-  if (heading?.kind === 'question') return t('structuredQuestionTitle');
-  return t('unclassifiedTitle');
+  const message = promptHeadingMessage(heading);
+  if ('text' in message) return message.text;
+  return 'values' in message ? t(message.key, message.values) : t(message.key);
 }
