@@ -468,7 +468,7 @@ dev-reports/module-reference/3184.md
 | `instance-removed` | `PATCH /api/worktrees/[id]`（`route.ts:216-246`、`setAgentInstances` の前後の roster の差分） | 削除されたインスタンス | delete | — | 止める | 何もしない | **追加** |
 | `worktree-deleted` | `session-cleanup.ts:123` / `:133`（`DELETE /api/repositories`、`syncWorktreesAndCleanup` 経由の sync / scan / restore / clone-manager） | worktree 全体 | delete | — | 止める | 実装済み | 表の呼び出しに置き換え。順序（poller → state → schedule、#404）は保つ |
 | `orphan-swept` | `resource-cleanup.ts:236-257`（24 時間ごと） | 1 キー | delete | — | 止める | 実装済み | 表の呼び出しに置き換え |
-| `consecutive-errors` | `auto-yes-poller.ts:225-235` | 1 キー | disable | `'consecutive_errors'` | 止める | 実装済み | 表の呼び出しに置き換え |
+| `consecutive-errors` | `auto-yes-poller.ts:225-235` | 1 キー | disable | `'consecutive_errors'` | 止める | 実装済み | 循環を避けるため poller は行と同じ値を直接適用し、テストで一致を固定（§8.4） |
 | `server-shutdown` | `server.ts:908` | 全部 | （プロセス終了で Map ごと消える。明示の削除はしない） | — | 全部止める | 暗黙 | 表に明記し、`stopAllAutoYesPolling` を表経由で呼ぶ。再起動後に復元しない（永続化を足さない）ことを仕様として書く |
 
 表に**入れない**もの（「消す」出来事ではないため）と理由:
@@ -495,6 +495,7 @@ export type AutoYesLifecycleEvent =
 export interface AutoYesLifecycleRule {
   state: 'disable' | 'delete' | 'none';
   stopReason?: AutoYesStopReason;
+  poller: 'stop';
 }
 
 export const AUTO_YES_LIFECYCLE: Readonly<Record<AutoYesLifecycleEvent, AutoYesLifecycleRule>>;
@@ -505,14 +506,17 @@ export type AutoYesLifecycleTarget =
   | { scope: 'key'; compositeKey: string }
   | { scope: 'all' };
 
-/** poller を止めてから、表の規則で状態を消す。投げない。 */
+export function stopAutoYesPollersFor(event: AutoYesLifecycleEvent, target: AutoYesLifecycleTarget): void;
+export function applyAutoYesStateRule(event: AutoYesLifecycleEvent, target: AutoYesLifecycleTarget): void;
+/** poller を止めてから、表の規則で状態を消す（上の 2 つを順に呼ぶ）。 */
 export function releaseAutoYes(event: AutoYesLifecycleEvent, target: AutoYesLifecycleTarget): void;
 ```
 
 - **#3188 の扱い: 再利用ではなく置き換え（挙動は同一）**。`kill-session/route.ts:219-220` の 2 行を `releaseAutoYes('session-killed', { scope: 'instance', worktreeId: id, cliToolId, instanceId })` の 1 行にする。`disable` ＋理由なし＋poller 停止という #3188 の中身は表の `session-killed` 行がそのまま持つ。`targets` の集め方（kill の成否に関係なく全 target）は route に残す（どれを対象にするかは route の知識）。`kill-session-auto-yes-3182.test.ts` は**変更せずに**緑であることを置き換えの合格条件にする。
 - poller と状態の順序: 同期関数の中で続けて呼ぶので、間に poll が割り込むことはない（JS は単一スレッドで、`stopAutoYesPolling` も `disableAutoYes` も同期）。順序は `session-cleanup.ts` のコメント（#404）に合わせて poller → 状態に統一する。
-- **循環 import を作らない**: `auto-yes-poller.ts` は連続エラーで表を使うが、`auto-yes-lifecycle.ts` は poller を import する。poller から `releaseAutoYes` を静的 import すると循環になる。そこで表（`AUTO_YES_LIFECYCLE`）と状態の適用（`applyAutoYesStateRule(event, target)`、`auto-yes-state.ts` だけに依存）を分けて公開し、poller は状態の適用だけを呼んで自分の poller を自分で止める。実装時に `grep -n "^import" src/lib/auto-yes-poller.ts src/lib/auto-yes-lifecycle.ts` で循環が無いことを確かめる。
-- インスタンス削除の検出: PATCH ハンドラで `setAgentInstances` の**前に** `getAgentInstances(db, id)` で旧 roster を読み、新 roster に無い `{ id, cliTool }` について `releaseAutoYes('instance-removed', …)`。`setAgentInstances` が失敗（400）した場合は呼ばない。主インスタンス（`instanceId === cliToolId`）は 2 部のキーになる（`buildCompositeKey`、`auto-yes-state.ts:52-64`）が、`buildCompositeKey` を通すので呼ぶ側は区別しなくてよい。
+- **循環 import を作らない**（実装で変えた点）: `auto-yes-lifecycle.ts` は、cleanup 系のテスト（`session-cleanup*.test.ts`、`resource-cleanup.test.ts`）が `@/lib/polling/auto-yes-manager` を `vi.mock` しているため、その barrel 経由で state と poller を import する。barrel は poller を再 export するので、**poller から lifecycle を import すると循環になる**。単一ファイルの scope では表と状態適用を別モジュールに分けられないため、poller の連続エラー（`auto-yes-poller.ts` の `incrementErrorCount`）は**表の `consecutive-errors` 行と同じ値を直接適用**し、理由をコメントに書いた。表の行と poller の呼び出しが一致することは `auto-yes-lifecycle-3184.test.ts` が両端（表の値と poller のソースの `disableAutoYes(worktreeId, cliToolId, 'consecutive_errors',`、lifecycle を import していないこと）で固定する。
+- **2 つの半分を公開する**（実装で足した点）: `releaseAutoYes` = `stopAutoYesPollersFor(event, target)` → `applyAutoYesStateRule(event, target)`。`session-cleanup` は poller と状態の失敗を別々に `pollerErrors` へ積む（既存テスト `session-cleanup-issue404`）ので 2 つを別の try で呼び、`resource-cleanup` は状態キーと poller キーを別々のループで掃除するので、それぞれのループで片方を呼ぶ。
+- インスタンス削除の検出: PATCH ハンドラで `setAgentInstances` の**前に** `resolveAgentInstances(db, id, worktree.selectedAgents)` で旧 roster を読み（実装メモ: `getAgentInstances` ではなく resolver にした。roster を保存していない worktree の暗黙の主インスタンスも「旧 roster」に含めるため）、`(id, cliTool)` の組で比べて新 roster に無い組について `releaseAutoYes('instance-removed', …)`（同じ id が別ツールに付け替えられた場合は旧ツール側を消す）。`setAgentInstances` が失敗（400）した場合は呼ばない。主インスタンス（`instanceId === cliToolId`）は 2 部のキーになる（`buildCompositeKey`、`auto-yes-state.ts:52-64`）が、`buildCompositeKey` を通すので呼ぶ側は区別しなくてよい。
 
 ### 8.5 出来事ごとの単体テスト（`tests/unit/lib/auto-yes-lifecycle-3184.test.ts`）
 

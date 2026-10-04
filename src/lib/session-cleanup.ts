@@ -9,7 +9,7 @@
  */
 
 import { stopPolling as stopResponsePolling, clearPromptHashCache } from './polling/response-poller';
-import { stopAutoYesPollingByWorktree, deleteAutoYesStateByWorktree } from './polling/auto-yes-manager';
+import { applyAutoYesStateRule, stopAutoYesPollersFor } from './auto-yes-lifecycle';
 import { stopScheduleForWorktree } from './schedule-manager';
 import { stopTimersForWorktree } from './timer-manager';
 import { stopAllGlobalSessionPolling } from './polling/global-session-poller';
@@ -120,7 +120,9 @@ export async function cleanupWorktreeSessions(
   // 2. Stop auto-yes-poller for all agents (Issue #138, #525: byWorktree helper)
   // Order: stopAutoYesPollingByWorktree -> deleteAutoYesStateByWorktree -> stopScheduleForWorktree (Issue #404)
   try {
-    stopAutoYesPollingByWorktree(worktreeId);
+    // Issue #3184: the `worktree-deleted` row of the Auto-Yes lifecycle table,
+    // in its two halves so the two failures stay reported apart.
+    stopAutoYesPollersFor('worktree-deleted', { scope: 'worktree', worktreeId });
     result.pollersStopped.push('auto-yes-poller');
   } catch (error) {
     const errorMsg = `auto-yes-poller: ${getErrorMessage(error)}`;
@@ -130,7 +132,7 @@ export async function cleanupWorktreeSessions(
 
   // 3. Delete auto-yes state for all agents (Issue #404, #525: byWorktree helper)
   try {
-    deleteAutoYesStateByWorktree(worktreeId);
+    applyAutoYesStateRule('worktree-deleted', { scope: 'worktree', worktreeId });
     result.pollersStopped.push('auto-yes-state');
   } catch (error) {
     const errorMsg = `auto-yes-state: ${getErrorMessage(error)}`;
