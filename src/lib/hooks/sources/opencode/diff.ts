@@ -46,6 +46,7 @@ import {
   readOpencodeFileDiffs,
   type OpencodeFileDiff,
 } from './client';
+import { getOrInitGlobal } from '../../../global-state';
 
 const logger = createLogger('lib/hooks/sources/opencode/diff');
 
@@ -85,12 +86,10 @@ declare global {
 }
 
 /** compositeKey -> that instance's diff state. */
-const records = globalThis.__opencodeSessionDiff ??
-  (globalThis.__opencodeSessionDiff = new Map<string, OpencodeSessionDiffRecord>());
+const records = getOrInitGlobal('__opencodeSessionDiff', () => new Map<string, OpencodeSessionDiffRecord>());
 
 /** Keys with a `GET /diff` in flight, so a poll storm makes one request. */
-const refreshing = globalThis.__opencodeSessionDiffRefreshes ??
-  (globalThis.__opencodeSessionDiffRefreshes = new Set<string>());
+const refreshing = getOrInitGlobal('__opencodeSessionDiffRefreshes', () => new Set<string>());
 
 function keyOf(target: AgentInstanceRef): string {
   return buildCompositeKey(target.worktreeId, target.cliToolId, target.instanceId);

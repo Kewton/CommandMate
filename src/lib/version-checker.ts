@@ -37,6 +37,7 @@ export const GITHUB_API_URL = 'https://api.github.com/repos/Kewton/CommandMate/r
  * Imported from github-links.ts (Issue #264 DRY) and re-exported for backward compatibility.
  */
 import { GITHUB_RELEASE_URL_PREFIX } from '@/config/github-links';
+import { getOrInitGlobal } from './global-state';
 export { GITHUB_RELEASE_URL_PREFIX };
 
 /** Semver pattern: optional v-prefix followed by major.minor.patch */
@@ -113,12 +114,11 @@ declare global {
   var __versionCheckCache: VersionCache | undefined;
 }
 
-const cache: VersionCache = globalThis.__versionCheckCache ??
-  (globalThis.__versionCheckCache = {
+const cache: VersionCache = getOrInitGlobal('__versionCheckCache', () => ({
     result: null,
     fetchedAt: 0,
     rateLimitResetAt: null,
-  });
+  }));
 
 // =============================================================================
 // Public Functions

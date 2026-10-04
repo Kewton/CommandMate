@@ -64,6 +64,7 @@ import { resolveSafeDirectory } from '@/config/safe-directory';
 import { buildCompositeKey } from '@/lib/auto-yes-state';
 import { createLogger } from '@/lib/logger';
 import type { AgentInstanceRef } from '@/lib/hooks/sources/types';
+import { getOrInitGlobal } from '../global-state';
 
 const logger = createLogger('lib/session/opencode-session-store');
 
@@ -119,7 +120,7 @@ declare global {
   var __opencodeSessionMemories: Map<string, OpencodeSessionMemory> | undefined;
 }
 
-const memories = (globalThis.__opencodeSessionMemories ??= new Map<
+const memories = getOrInitGlobal('__opencodeSessionMemories', () => new Map<
   string,
   OpencodeSessionMemory
 >());

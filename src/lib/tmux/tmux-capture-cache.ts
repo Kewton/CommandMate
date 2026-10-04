@@ -20,6 +20,7 @@
 
 /** Cache entry structure */
 import { createLogger } from '@/lib/logger';
+import { getOrInitGlobal } from '../global-state';
 
 const logger = createLogger('tmux-capture-cache');
 interface CacheEntry {
@@ -99,11 +100,11 @@ declare global {
 }
 
 function getCache(): Map<string, CacheEntry> {
-  return (globalThis.__tmuxCaptureCache ??= new Map<string, CacheEntry>());
+  return getOrInitGlobal('__tmuxCaptureCache', () => new Map<string, CacheEntry>());
 }
 
 function getInflight(): Map<string, Promise<string>> {
-  return (globalThis.__tmuxCaptureCacheInflight ??= new Map<string, Promise<string>>());
+  return getOrInitGlobal('__tmuxCaptureCacheInflight', () => new Map<string, Promise<string>>());
 }
 
 // =========================================================================

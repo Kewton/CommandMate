@@ -65,6 +65,7 @@ import {
   type OpencodeRenderedTurn,
   type OpencodeTurnAccumulator,
 } from './transcript';
+import { getOrInitGlobal } from '../../../global-state';
 
 const logger = createLogger('lib/hooks/sources/opencode/history');
 
@@ -103,7 +104,7 @@ declare global {
  * otherwise each get a private copy, and the turn accumulated by one would be
  * invisible to the other.
  */
-const transcripts = (globalThis.__opencodeTranscripts ??= new Map<string, InstanceTurns>());
+const transcripts = getOrInitGlobal('__opencodeTranscripts', () => new Map<string, InstanceTurns>());
 
 function keyOf(target: AgentInstanceRef): string {
   return buildCompositeKey(target.worktreeId, target.cliToolId, target.instanceId);

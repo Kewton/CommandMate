@@ -39,6 +39,7 @@
 
 import { buildCompositeKey } from '@/lib/auto-yes-state';
 import type { CLIToolType } from '@/lib/cli-tools/types';
+import { getOrInitGlobal } from '../global-state';
 
 /**
  * globalThis pattern for hot reload persistence — Issue #153, as used by
@@ -73,8 +74,7 @@ interface PermissionReceipt {
   at: number;
 }
 
-const receipts = globalThis.__antigravityPermissionReceipts ??
-  (globalThis.__antigravityPermissionReceipts = new Map<string, PermissionReceipt>());
+const receipts = getOrInitGlobal('__antigravityPermissionReceipts', () => new Map<string, PermissionReceipt>());
 
 /**
  * How long an entry is kept before it is dropped on the next write.

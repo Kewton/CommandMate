@@ -17,6 +17,7 @@ import type { CLIToolType } from '@/lib/cli-tools/types';
 import { createLogger } from '@/lib/logger';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { invalidateCache } from '@/lib/tmux/tmux-capture-cache';
+import { getOrInitGlobal } from '../global-state';
 
 const logger = createLogger('terminal-broadcast');
 
@@ -38,8 +39,7 @@ declare global {
   var __terminalSnapshotVersions: Map<string, number> | undefined;
 }
 
-const versionCounters = globalThis.__terminalSnapshotVersions ??
-  (globalThis.__terminalSnapshotVersions = new Map<string, number>());
+const versionCounters = getOrInitGlobal('__terminalSnapshotVersions', () => new Map<string, number>());
 
 export const INTERACTION_SNAPSHOT_RETRY_DELAYS_MS = [100, 250, 500, 750] as const;
 

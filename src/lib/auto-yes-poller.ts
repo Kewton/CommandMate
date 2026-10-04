@@ -62,6 +62,7 @@ import {
   MAX_CONCURRENT_POLLERS,
   THINKING_CHECK_LINE_COUNT,
 } from './auto-yes-state';
+import { getOrInitGlobal } from './global-state';
 
 // =============================================================================
 // Poller Types
@@ -115,8 +116,7 @@ declare global {
 }
 
 /** In-memory storage for poller states (globalThis for hot reload persistence) */
-const autoYesPollerStates = globalThis.__autoYesPollerStates ??
-  (globalThis.__autoYesPollerStates = new Map<string, AutoYesPollerState>());
+const autoYesPollerStates = getOrInitGlobal('__autoYesPollerStates', () => new Map<string, AutoYesPollerState>());
 
 /**
  * When `antigravity-autoyes-withheld-no-hook-receipt` was last logged, per
@@ -124,8 +124,7 @@ const autoYesPollerStates = globalThis.__autoYesPollerStates ??
  * line is limited to one per {@link WITHHELD_NO_RECEIPT_LOG_INTERVAL_MS} per
  * instance. globalThis for the same reason as the poller states above.
  */
-const withheldNoReceiptLoggedAt = globalThis.__autoYesWithheldNoReceiptLoggedAt ??
-  (globalThis.__autoYesWithheldNoReceiptLoggedAt = new Map<string, number>());
+const withheldNoReceiptLoggedAt = getOrInitGlobal('__autoYesWithheldNoReceiptLoggedAt', () => new Map<string, number>());
 
 /** Least gap between two `antigravity-autoyes-withheld-no-hook-receipt` lines for one instance. */
 const WITHHELD_NO_RECEIPT_LOG_INTERVAL_MS = 60_000;

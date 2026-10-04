@@ -12,6 +12,7 @@ import { clearResponseHashCache, renameResponseHashCacheKey } from './response-d
 import { renamePromptDedupSkips } from './prompt-dedup-state';
 import { checkForResponse, flushPendingScrapedResponse } from './response-checker';
 import { broadcastTerminalSnapshot } from '@/lib/realtime/terminal-broadcast';
+import { getOrInitGlobal } from '../global-state';
 
 const logger = createLogger('response-poller');
 
@@ -151,8 +152,7 @@ declare global {
 }
 
 const coordinator: PollerCoordinator =
-  globalThis.__responsePollerCoordinator ??
-  (globalThis.__responsePollerCoordinator = {
+  getOrInitGlobal('__responsePollerCoordinator', () => ({
     activePollers: new Map<string, NodeJS.Timeout>(),
     pollingStartTimes: new Map<string, number>(),
     owners: new Map<string, PollerOwner>(),
@@ -161,7 +161,7 @@ const coordinator: PollerCoordinator =
     ownerStorage: new AsyncLocalStorage<PollerOwner>(),
     generationCounter: 0,
     pausedOnPrompt: new Set<string>(),
-  });
+  }));
 
 // The coordinator object outlives a module reload (that is the point of putting
 // it on `globalThis`), so a field added after the object was first built has to

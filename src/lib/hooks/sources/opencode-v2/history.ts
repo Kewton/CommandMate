@@ -78,6 +78,7 @@ import type { AgentInstanceRef } from '../types';
 import { fetchOpencodeV2SessionMessagesPage } from './client';
 import { opencodeV2KeyOf, readOpencodeV2Password } from './secrets';
 import { OPENCODE_V2_CLI_TOOL_ID } from './tool-id';
+import { getOrInitGlobal } from '../../../global-state';
 
 const logger = createLogger('lib/hooks/sources/opencode-v2/history');
 
@@ -263,7 +264,7 @@ declare global {
  * ends close together would otherwise race the existence check and insert the
  * same turn twice.
  */
-const queue = (globalThis.__opencodeV2HistoryQueue ??= new Map<string, Promise<unknown>>());
+const queue = getOrInitGlobal('__opencodeV2HistoryQueue', () => new Map<string, Promise<unknown>>());
 
 /** Forget queued syncs. Test seam. */
 export function resetOpencodeV2HistoryQueue(): void {

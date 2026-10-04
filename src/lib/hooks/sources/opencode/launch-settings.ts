@@ -57,6 +57,7 @@ import {
 } from '@/types/opencode-instance-settings';
 import type { AgentInstanceRef } from '../types';
 import type { OpencodePromptSelection } from './client';
+import { getOrInitGlobal } from '../../../global-state';
 
 const logger = createLogger('lib/hooks/sources/opencode/launch-settings');
 
@@ -73,7 +74,7 @@ declare global {
   var __opencodeLaunchSettings: Map<string, OpencodeInstanceSettings> | undefined;
 }
 
-const cache = (globalThis.__opencodeLaunchSettings ??= new Map<
+const cache = getOrInitGlobal('__opencodeLaunchSettings', () => new Map<
   string,
   OpencodeInstanceSettings
 >());

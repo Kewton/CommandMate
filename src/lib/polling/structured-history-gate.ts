@@ -96,6 +96,7 @@ import { COMMAND_CODE_CLI_TOOL_ID } from '@/lib/hooks/sources/command-code/tool-
 import { getAgentEventSource } from '@/lib/hooks/sources/registry';
 import type { AgentInstanceRef } from '@/lib/hooks/sources/types';
 import { onRelayTurnCompleted } from '@/lib/relay/relay-triggers';
+import { getOrInitGlobal } from '../global-state';
 
 const logger = createLogger('lib/polling/structured-history-gate');
 
@@ -140,7 +141,7 @@ declare global {
  * get a private copy of a module-scoped map, and a lock only one of two bundles
  * can see is not a lock.
  */
-const captureQueue = (globalThis.__structuredHistoryCaptureQueue ??= new Map<
+const captureQueue = getOrInitGlobal('__structuredHistoryCaptureQueue', () => new Map<
   string,
   Promise<void>
 >());
@@ -159,7 +160,7 @@ const captureQueue = (globalThis.__structuredHistoryCaptureQueue ??= new Map<
  * and a restart that forgets it costs at most one extra announcement into a
  * relay whose own stash guard already refuses a second payload.
  */
-const announcedCompletions = (globalThis.__structuredHistoryAnnouncedCompletions ??= new Map<
+const announcedCompletions = getOrInitGlobal('__structuredHistoryAnnouncedCompletions', () => new Map<
   string,
   string
 >());

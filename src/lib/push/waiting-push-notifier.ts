@@ -71,6 +71,7 @@ import { isPromptPushSuppressed } from './prompt-push-gate';
 import { notifyPushSubscribers } from './push-sender';
 import { notifyPromptResolved } from './resolution-push-notifier';
 import { isPushConfigured } from './vapid';
+import { getOrInitGlobal } from '../global-state';
 
 const logger = createLogger('push/waiting-notifier');
 
@@ -125,12 +126,10 @@ declare global {
   var __waitingPushGraceTimers: Map<string, ReturnType<typeof setTimeout>> | undefined;
 }
 
-const pending = globalThis.__waitingPushPending ??
-  (globalThis.__waitingPushPending = new Map<string, PendingWait>());
+const pending = getOrInitGlobal('__waitingPushPending', () => new Map<string, PendingWait>());
 
 /** Composite key -> the timer holding that wait's first notification (#2156). */
-const graceTimers = globalThis.__waitingPushGraceTimers ??
-  (globalThis.__waitingPushGraceTimers = new Map<string, ReturnType<typeof setTimeout>>());
+const graceTimers = getOrInitGlobal('__waitingPushGraceTimers', () => new Map<string, ReturnType<typeof setTimeout>>());
 
 /**
  * The worktree's display name, for the notification title.

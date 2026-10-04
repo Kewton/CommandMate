@@ -32,6 +32,7 @@ import {
   OPENCODE_V2_BINARY_NAME,
   resolveOpencodeV2Executable,
 } from '@/lib/cli-tools/opencode-executable';
+import { getOrInitGlobal } from '../global-state';
 
 // =============================================================================
 // Constants
@@ -1124,8 +1125,5 @@ declare global {
  * Uses globalThis for hot reload persistence.
  */
 export function getActiveProcesses(): Map<number, import('child_process').ChildProcess> {
-  if (!globalThis.__scheduleActiveProcesses) {
-    globalThis.__scheduleActiveProcesses = new Map();
-  }
-  return globalThis.__scheduleActiveProcesses;
+  return getOrInitGlobal('__scheduleActiveProcesses', () => new Map());
 }

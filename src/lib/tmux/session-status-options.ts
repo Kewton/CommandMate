@@ -66,6 +66,7 @@ import {
   isTmuxStatusEnabled,
 } from '../session/tmux-session-surface';
 import { createLogger } from '../logger';
+import { getOrInitGlobal } from '../global-state';
 
 const execFileAsync = promisify(execFile);
 const logger = createLogger('tmux-session-status');
@@ -98,12 +99,11 @@ declare global {
 }
 
 const published =
-  globalThis.__cmPublishedTmuxStatus ??
-  (globalThis.__cmPublishedTmuxStatus = new Map<string, PublishedStatus>());
+  getOrInitGlobal('__cmPublishedTmuxStatus', () => new Map<string, PublishedStatus>());
 
 /** Sessions this process has already uninstalled the surface from. */
 const cleared =
-  globalThis.__cmClearedTmuxStatus ?? (globalThis.__cmClearedTmuxStatus = new Set<string>());
+  getOrInitGlobal('__cmClearedTmuxStatus', () => new Set<string>());
 
 /** What one session's status write is about. */
 export interface SessionStatusPublication {

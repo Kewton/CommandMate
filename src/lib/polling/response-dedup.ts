@@ -41,6 +41,7 @@
  */
 
 import { createHash } from 'crypto';
+import { getOrInitGlobal } from '../global-state';
 
 /**
  * In-memory cache: pollerKey -> SHA-256 hash of the last saved response content.
@@ -59,8 +60,7 @@ declare global {
   var __structuredHistoryRecheckCache: Map<string, number> | undefined;
 }
 
-const responseHashCache = globalThis.__responseHashCache ??
-  (globalThis.__responseHashCache = new Map<string, string>());
+const responseHashCache = getOrInitGlobal('__responseHashCache', () => new Map<string, string>());
 
 /**
  * In-memory cache: pollerKey -> ticks still to wait before the transcript reader
@@ -69,8 +69,7 @@ const responseHashCache = globalThis.__responseHashCache ??
  * On `globalThis` for the same reason `responseHashCache` is, and populated and
  * cleared at exactly the same moments — see the module comment.
  */
-const structuredHistoryRecheckCache = globalThis.__structuredHistoryRecheckCache ??
-  (globalThis.__structuredHistoryRecheckCache = new Map<string, number>());
+const structuredHistoryRecheckCache = getOrInitGlobal('__structuredHistoryRecheckCache', () => new Map<string, number>());
 
 /**
  * How many duplicate ticks separate two asks of the transcript reader (#2399).

@@ -22,13 +22,14 @@
  * by the server at startup but read by the routes.
  */
 
+import { getOrInitGlobal } from '../global-state';
 declare global {
   // eslint-disable-next-line no-var
   var __cmLegacySessionAliases: Map<string, string> | undefined;
 }
 
 function aliases(): Map<string, string> {
-  return (globalThis.__cmLegacySessionAliases ??= new Map<string, string>());
+  return getOrInitGlobal('__cmLegacySessionAliases', () => new Map<string, string>());
 }
 
 /**
