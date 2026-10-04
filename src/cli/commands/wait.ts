@@ -27,6 +27,7 @@ import type { WaitOptions } from '../types';
 import type {
   AutoYesSuppressionReason,
   CurrentOutputResponse,
+  PromptData,
   PromptMessageResponse,
   TaskListResponse,
   TaskStatus,
@@ -754,6 +755,138 @@ function nextPollWithinDeadlines(
 }
 
 /**
+ * The exit-10 payload for a prompt the detection layer parsed. `suppressed` is
+ * {@link activeSuppression}'s reading of the same poll.
+ */
+function buildPromptOutput(
+  worktreeId: string,
+  data: CurrentOutputResponse,
+  promptData: PromptData,
+  suppressed: ReturnType<typeof activeSuppression>,
+): WaitPromptOutput {
+  // Issue #1898: the degraded `unclassified` payload carries no `options`
+  // — by construction, because nothing parsed the screen — but for a
+  // source whose approvals are answered by decision id it does carry
+  // `decisionOptions`, which ARE answerable (`respond <id> 1`). Reporting
+  // an empty list there told the caller a dialog was open and gave it
+  // nothing to do about it, which is the whole of #1898-3 seen from the
+  // pipeline's side.
+  //
+  // Issue #3184: and a QUESTION answered by decision id (OpenCode V2,
+  // #2100) carries neither — its choices are `askUserQuestion.labels`,
+  // numbered by position. The panel offered them as buttons while this
+  // reported `[]`. Which of these applies is the shared view's call
+  // (`readPromptView`), not a third reading of the raw fields here.
+  const promptView = readPromptView(data);
+  const promptOptions =
+    (promptData.options as unknown[])?.length
+      ? (promptData.options as unknown[])
+      : promptData.decisionOptions?.length
+        ? promptData.decisionOptions
+        : promptView?.apiTarget === 'question'
+          ? promptView.choices.map((choice) => ({
+              number: Number(choice.answer),
+              label: choice.label,
+            }))
+          : [];
+  const promptOutput: WaitPromptOutput = {
+    worktreeId,
+    cliToolId: data.cliToolId || 'claude',
+    type: promptData.type || 'unknown',
+    question: promptData.question || '',
+    options: promptOptions,
+    status: promptData.status || 'pending',
+    answerVia: waitAnswerVia(promptView),
+    ...(promptData.approvalTarget !== undefined && {
+      approvalTarget: promptData.approvalTarget,
+    }),
+    ...(suppressed && {
+      autoYesSuppression: {
+        reason: suppressed.suppression.reason,
+        mode: suppressed.suppression.mode,
+        promptType: suppressed.suppression.promptType,
+        ...(suppressed.suppression.pattern !== undefined && {
+          pattern: suppressed.suppression.pattern,
+        }),
+        ageSeconds: suppressed.ageSeconds,
+      },
+    }),
+  };
+  return promptOutput;
+}
+
+/** The exit-10 payload for an arrow-key selection list (Issue #1628). */
+function buildSelectionListOutput(worktreeId: string, data: CurrentOutputResponse): WaitPromptOutput {
+  return {
+    worktreeId,
+    cliToolId: data.cliToolId || 'claude',
+    type: SELECTION_LIST_PROMPT_TYPE,
+    question: data.sessionStatusReason ?? SELECTION_LIST_PROMPT_TYPE,
+    options: [],
+    status: 'pending',
+  };
+}
+
+/**
+ * What `wait` says about a frame that stayed unclassified for the whole dwell
+ * (Issue #1708): the stderr line, and the `question` of its exit-10 payload.
+ */
+function describeUnclassifiedFrame(
+  worktreeId: string,
+  data: CurrentOutputResponse,
+  dwellMs: number,
+): string {
+  const dwellSeconds = Math.round(dwellMs / 1000);
+  return (
+    `Unclassified interactive frame on ${worktreeId} for ${dwellSeconds}s ` +
+    `(status=${data.sessionStatus ?? 'unknown'}/${data.sessionStatusReason ?? 'unknown'}). ` +
+    `The detection layer could not parse it; inspect the raw pane with ` +
+    `\`commandmate capture ${worktreeId} --pane\`.` +
+    // Issue #2095: the sidebar is exactly this frame's reason, and the
+    // one recovery is a keystroke in the pane. Riding the message keeps
+    // the exit-code table (10, `type: unclassified`) unchanged for every
+    // caller that already branches on it.
+    describePaneObstruction(data)
+  );
+}
+
+/** The exit-10 payload for a persistently unclassified frame (Issue #1708). */
+function buildUnclassifiedOutput(
+  worktreeId: string,
+  data: CurrentOutputResponse,
+  question: string,
+): WaitPromptOutput {
+  return {
+    worktreeId,
+    cliToolId: data.cliToolId || 'claude',
+    type: UNCLASSIFIED_PROMPT_TYPE,
+    question,
+    options: [],
+    status: 'pending',
+    answerVia: 'terminal',
+  };
+}
+
+/** The stderr line for a session this wait never saw running (Issue #1628). */
+function describeNotStarted(
+  worktreeId: string,
+  data: CurrentOutputResponse,
+  options: WaitOptions,
+): string {
+  return (
+    `Not started: ${worktreeId} has no running ${data.cliToolId ?? 'agent'} session` +
+    `${options.instance ? ` for instance ${options.instance}` : ''}` +
+    // Issue #1884: name the stage that chose the agent above. `wait` has
+    // no --agent to correct a mis-resolution with, so "no running claude
+    // session for instance opencode" was the entire evidence an operator
+    // got for a live agent reported as absent. `worktree-default` here
+    // means the instance is neither in the roster nor named after a
+    // tool; `client-fallback`, that the server is too old to resolve.
+    `${data.resolvedBy ? ` (resolvedBy=${data.resolvedBy})` : ''}.`
+  );
+}
+
+/**
  * Poll a single worktree until completion, prompt, or timeout.
  *
  * Exported since Issue #2376 so `ask` can do the WAITING half of its round trip
@@ -960,55 +1093,7 @@ export async function pollWorktree(
         }
 
         // Default (agent mode): output prompt info and exit 10
-        //
-        // Issue #1898: the degraded `unclassified` payload carries no `options`
-        // — by construction, because nothing parsed the screen — but for a
-        // source whose approvals are answered by decision id it does carry
-        // `decisionOptions`, which ARE answerable (`respond <id> 1`). Reporting
-        // an empty list there told the caller a dialog was open and gave it
-        // nothing to do about it, which is the whole of #1898-3 seen from the
-        // pipeline's side.
-        //
-        // Issue #3184: and a QUESTION answered by decision id (OpenCode V2,
-        // #2100) carries neither — its choices are `askUserQuestion.labels`,
-        // numbered by position. The panel offered them as buttons while this
-        // reported `[]`. Which of these applies is the shared view's call
-        // (`readPromptView`), not a third reading of the raw fields here.
-        const promptView = readPromptView(data);
-        const promptOptions =
-          (data.promptData.options as unknown[])?.length
-            ? (data.promptData.options as unknown[])
-            : data.promptData.decisionOptions?.length
-              ? data.promptData.decisionOptions
-              : promptView?.apiTarget === 'question'
-                ? promptView.choices.map((choice) => ({
-                    number: Number(choice.answer),
-                    label: choice.label,
-                  }))
-                : [];
-        const promptOutput: WaitPromptOutput = {
-          worktreeId,
-          cliToolId: data.cliToolId || 'claude',
-          type: data.promptData.type || 'unknown',
-          question: data.promptData.question || '',
-          options: promptOptions,
-          status: data.promptData.status || 'pending',
-          answerVia: waitAnswerVia(promptView),
-          ...(data.promptData.approvalTarget !== undefined && {
-            approvalTarget: data.promptData.approvalTarget,
-          }),
-          ...(suppressed && {
-            autoYesSuppression: {
-              reason: suppressed.suppression.reason,
-              mode: suppressed.suppression.mode,
-              promptType: suppressed.suppression.promptType,
-              ...(suppressed.suppression.pattern !== undefined && {
-                pattern: suppressed.suppression.pattern,
-              }),
-              ageSeconds: suppressed.ageSeconds,
-            },
-          }),
-        };
+        const promptOutput = buildPromptOutput(worktreeId, data, data.promptData, suppressed);
         if (suppressed) {
           console.error(formatSuppressionNotice(suppressed.suppression, suppressed.ageSeconds));
         }
@@ -1049,14 +1134,7 @@ export async function pollWorktree(
 
         return {
           exitCode: WaitExitCode.PROMPT_DETECTED,
-          output: {
-            worktreeId,
-            cliToolId: data.cliToolId || 'claude',
-            type: SELECTION_LIST_PROMPT_TYPE,
-            question: data.sessionStatusReason ?? SELECTION_LIST_PROMPT_TYPE,
-            options: [],
-            status: 'pending',
-          },
+          output: buildSelectionListOutput(worktreeId, data),
         };
       }
 
@@ -1100,17 +1178,7 @@ export async function pollWorktree(
         if (unclassifiedSince === null) unclassifiedSince = Date.now();
         const dwellMs = Date.now() - unclassifiedSince;
         if (dwellMs >= UNCLASSIFIED_DWELL_MS) {
-          const dwellSeconds = Math.round(dwellMs / 1000);
-          const question =
-            `Unclassified interactive frame on ${worktreeId} for ${dwellSeconds}s ` +
-            `(status=${data.sessionStatus ?? 'unknown'}/${data.sessionStatusReason ?? 'unknown'}). ` +
-            `The detection layer could not parse it; inspect the raw pane with ` +
-            `\`commandmate capture ${worktreeId} --pane\`.` +
-            // Issue #2095: the sidebar is exactly this frame's reason, and the
-            // one recovery is a keystroke in the pane. Riding the message keeps
-            // the exit-code table (10, `type: unclassified`) unchanged for every
-            // caller that already branches on it.
-            describePaneObstruction(data);
+          const question = describeUnclassifiedFrame(worktreeId, data, dwellMs);
 
           if (options.onPrompt === 'human') {
             console.error(question);
@@ -1122,15 +1190,7 @@ export async function pollWorktree(
           console.error(question);
           return {
             exitCode: WaitExitCode.PROMPT_DETECTED,
-            output: {
-              worktreeId,
-              cliToolId: data.cliToolId || 'claude',
-              type: UNCLASSIFIED_PROMPT_TYPE,
-              question,
-              options: [],
-              status: 'pending',
-              answerVia: 'terminal',
-            },
+            output: buildUnclassifiedOutput(worktreeId, data, question),
           };
         }
       } else {
@@ -1146,17 +1206,7 @@ export async function pollWorktree(
       // Issue #1628 narrowed Path A: a session that was NEVER seen running is
       // "nothing to wait for" (NOT_STARTED), not a completion. See `everRunning`.
       if (!data.isRunning && !everRunning) {
-        console.error(
-          `Not started: ${worktreeId} has no running ${data.cliToolId ?? 'agent'} session` +
-            `${options.instance ? ` for instance ${options.instance}` : ''}` +
-            // Issue #1884: name the stage that chose the agent above. `wait` has
-            // no --agent to correct a mis-resolution with, so "no running claude
-            // session for instance opencode" was the entire evidence an operator
-            // got for a live agent reported as absent. `worktree-default` here
-            // means the instance is neither in the roster nor named after a
-            // tool; `client-fallback`, that the server is too old to resolve.
-            `${data.resolvedBy ? ` (resolvedBy=${data.resolvedBy})` : ''}.`,
-        );
+        console.error(describeNotStarted(worktreeId, data, options));
         return { exitCode: VerifyExitCode.NOT_STARTED };
       }
 

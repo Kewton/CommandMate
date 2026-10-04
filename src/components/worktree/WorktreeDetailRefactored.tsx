@@ -313,10 +313,8 @@ function isMultiSelectPrompt(promptData: LivePromptData | null | undefined): boo
  * ```
  */
 import { useWorktreeDetailController } from '@/hooks/useWorktreeDetailController';
-import {
-  readPromptDecisionId,
-  withToolDecisionLabels,
-} from '@/components/worktree/prompt-decision-id';
+import { withToolDecisionLabels } from '@/components/worktree/prompt-decision-id';
+import { readDecisionId } from '@/lib/session/prompt-view';
 import { useNewOutputIndicator } from '@/hooks/useNewOutputIndicator';
 export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   worktreeId,
@@ -633,7 +631,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   // Issue #2945: the approval / question the phone sheet is answering, when the
   // agent named it by id (opencode, OpenCode V2). Null for every scraper-read
   // prompt, which keeps those on `/prompt-response`.
-  const mobilePromptDecisionId = readPromptDecisionId(
+  const mobilePromptDecisionId = readDecisionId(
     state.prompt.visible ? state.prompt.data : null,
   );
   // Issue #2945: the verdicts in the tool's own words (OpenCode V2 draws
