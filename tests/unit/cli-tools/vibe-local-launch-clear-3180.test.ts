@@ -1,5 +1,5 @@
 /**
- * vibe-local types its launch line behind `clear 2>/dev/null; ` like every other tool
+ * vibe-local types its launch line behind `clear 2>/dev/null; printf '\033[3J'; ` like every other tool
  * (Issue #3180). It is the one launcher that does not go through
  * `buildAgentLaunchCommandLine`, so it is asserted on its own.
  *
@@ -64,7 +64,7 @@ describe('[#3180] VibeLocalTool types its launch line behind `clear 2>/dev/null;
 
     await startWithFakeTimers(new VibeLocalTool());
 
-    expect(sendKeys).toHaveBeenCalledWith('mcbd-vibe-local-wt-3180', 'clear 2>/dev/null; vibe-local -y', true);
+    expect(sendKeys).toHaveBeenCalledWith('mcbd-vibe-local-wt-3180', "clear 2>/dev/null; printf '\\033[3J'; vibe-local -y", true);
   });
 
   it('on the relaunch into a pane the agent has left (#2070)', async () => {
@@ -73,6 +73,6 @@ describe('[#3180] VibeLocalTool types its launch line behind `clear 2>/dev/null;
 
     await startWithFakeTimers(new VibeLocalTool());
 
-    expect(sendKeys).toHaveBeenCalledWith('mcbd-vibe-local-wt-3180', 'clear 2>/dev/null; vibe-local -y', true);
+    expect(sendKeys).toHaveBeenCalledWith('mcbd-vibe-local-wt-3180', "clear 2>/dev/null; printf '\\033[3J'; vibe-local -y", true);
   });
 });

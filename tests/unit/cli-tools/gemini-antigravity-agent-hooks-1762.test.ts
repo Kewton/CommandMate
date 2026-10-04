@@ -69,7 +69,7 @@ function makeTempDir(prefix: string): string {
 /** Drive a `startSession` that polls, without waiting for real time. */
 /**
  * The rendered launch line inside what `sendKeys` typed: Issue #3180 types it
- * behind `clear 2>/dev/null; `, and the assertions below are about the line itself.
+ * behind `clear 2>/dev/null; printf '\033[3J'; `, and the assertions below are about the line itself.
  */
 function typedLaunchLine(typed: string): string {
   expect(typed.startsWith(LAUNCH_SCREEN_CLEAR_PREFIX)).toBe(true);

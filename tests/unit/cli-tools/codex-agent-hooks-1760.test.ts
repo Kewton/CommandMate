@@ -114,7 +114,7 @@ afterEach(() => {
 function launchCommand(): string {
   const call = vi.mocked(sendKeys).mock.calls.find(([, keys]) => String(keys).includes('codex'));
   if (!call) return '';
-  // Issue #3180: typed behind `clear 2>/dev/null; `; the rest is the rendered line.
+  // Issue #3180: typed behind `clear 2>/dev/null; printf '\033[3J'; `; the rest is the rendered line.
   const typed = String(call[1]);
   expect(typed.startsWith(LAUNCH_SCREEN_CLEAR_PREFIX)).toBe(true);
   return typed.slice(LAUNCH_SCREEN_CLEAR_PREFIX.length);
