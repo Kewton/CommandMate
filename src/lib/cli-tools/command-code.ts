@@ -416,16 +416,9 @@ export class CommandCodeTool extends BaseCLITool {
   async sendMessage(worktreeId: string, message: string, instanceId?: string): Promise<void> {
     const sessionName = this.getSessionName(worktreeId, instanceId);
 
-    const exists = await hasSession(sessionName);
-    if (!exists) {
-      throw new Error(
-        `Command Code session ${sessionName} does not exist. Start the session first.`
-      );
-    }
-
     // Issue #2070: the pane exists, but does the AGENT? Relaunches into the same
     // pane when the tool is gone; costs one `capture-pane` when it is not.
-    await this.relaunchIfToolExited(worktreeId, instanceId);
+    await this.requireSession('Command Code', worktreeId, instanceId, { relaunch: true });
 
     try {
       await this.waitForPrompt(sessionName);

@@ -6,7 +6,7 @@
 import { Command } from 'commander';
 import { ExitCode } from '../types';
 import type { SendOptions } from '../types';
-import type { ChatMessage, TaskCreateResponse } from '../types/api-responses';
+import type { TaskCreateResponse } from '../types/api-responses';
 import { ApiClient, ApiError, assertResponseShape, isValidWorktreeId, MAX_STOP_PATTERN_LENGTH } from '../utils/api-client';
 import { TOKEN_WARNING, handleCommandError } from '../utils/command-helpers';
 import { parseDurationToMs, ALLOWED_DURATIONS } from '../config/duration-constants';
@@ -27,11 +27,8 @@ import { resolveCommandTarget } from './command-target';
 import {
   ALLOW_RELAY_CHAIN_DESCRIPTION,
   REPLY_TO_OPTION_DESCRIPTION,
-  cancelRelayQuietly,
-  registerRelay,
-  resolveEndpointForWorktree,
-  resolveRelayEndpoint,
 } from './relays';
+import { postMessage, registerRelayForMessage } from './message-dispatch';
 
 /** Auto-yes duration used when --duration is omitted. */
 const DEFAULT_AUTO_YES_DURATION = '1h';
@@ -46,14 +43,6 @@ const DEFAULT_AUTO_YES_DURATION = '1h';
  */
 const SEND_VERIFIED_MAX_KIB = 48;
 const SEND_VERIFIED_MAX_LINES = 240;
-
-/**
- * Code the send API returns when the session is blocked on a prompt (Issue
- * #1708). Mirrors PROMPT_WAITING_CODE in src/lib/session/prompt-waiting-guard.ts;
- * duplicated rather than imported so the CLI bundle does not pull the server's
- * tmux/detection graph in for one string.
- */
-const PROMPT_WAITING_CODE = 'PROMPT_WAITING';
 
 /**
  * What to print when a PROMPT_WAITING response carried no message body — an
@@ -214,6 +203,130 @@ async function reportTaskStatus(
   }
 }
 
+/** Option checks before any side effect. Returns --duration in ms. A mocked `process.exit` returns, so nothing here stops early. */
+function validateSendArgs(worktreeId: string, message: string | undefined, options: SendOptions): number {
+  // [SEC4-04] Validate worktree ID
+  if (!isValidWorktreeId(worktreeId)) {
+    console.error('Error: Invalid worktree ID format.');
+    process.exit(ExitCode.CONFIG_ERROR);
+  }
+
+  // Issue #1545: the contract supplies the message, so accepting both
+  // would leave which one the agent receives ambiguous.
+  if (options.contract && message !== undefined) {
+    console.error('Error: --contract supplies the message; do not pass a message argument as well.');
+    process.exit(ExitCode.CONFIG_ERROR);
+  }
+  if (!options.contract && message === undefined) {
+    console.error('Error: a message argument is required unless --contract is given.');
+    process.exit(ExitCode.CONFIG_ERROR);
+  }
+
+  // Validate agent if provided
+  if (options.agent && !isCliToolId(options.agent)) {
+    console.error(`Error: Invalid agent. Must be one of: ${CLI_TOOL_IDS.join(', ')}`);
+    process.exit(ExitCode.CONFIG_ERROR);
+  }
+
+  // Issue #868 / #2376: Validate the instance SELECTOR if provided. An id
+  // or an alias — which of the two it is, only the roster knows.
+  if (options.instance && !isInstanceSelector(options.instance)) {
+    console.error(INSTANCE_SELECTOR_ERROR);
+    process.exit(ExitCode.CONFIG_ERROR);
+  }
+
+  // Issue #1000: --register requires --instance, and requires --agent
+  // unless the instance id is itself a primary CLI tool id (e.g. claude).
+  if (options.register) {
+    if (!options.instance) {
+      console.error('Error: --register requires --instance.');
+      process.exit(ExitCode.CONFIG_ERROR);
+    }
+    if (!options.agent && !isCliToolId(options.instance)) {
+      console.error('Error: --register requires --agent when --instance is not a primary instance id (e.g. claude, codex).');
+      process.exit(ExitCode.CONFIG_ERROR);
+    }
+  }
+
+  // [SEC4-06] Validate stop-pattern length
+  if (options.stopPattern && options.stopPattern.length > MAX_STOP_PATTERN_LENGTH) {
+    console.error(`Error: stop-pattern exceeds maximum length of ${MAX_STOP_PATTERN_LENGTH} characters.`);
+    process.exit(ExitCode.CONFIG_ERROR);
+  }
+
+  // Issue #1608: every option that can be judged from its own value is
+  // judged here, before the first side effect. --duration used to be the
+  // exception: enableAutoYes() validated it, and that runs after
+  // --contract has already created the task row, so `--duration 2h` left
+  // a `pending` task for a message that was never sent. Validated
+  // unconditionally, like --stop-pattern and --model above: a value the
+  // CLI cannot honour is an error whether or not --auto-yes accompanies it.
+  return resolveAutoYesDurationMs(options.duration);
+}
+
+/** --model checks against the resolved agent. */
+function validateSendModel(options: SendOptions, agent: string | undefined): void {
+  // Issue #576/#588/#989: Validate --model option via shared validator (DR1-003).
+  // Issue #1925: judged against the RESOLVED agent, not against --agent.
+  // `--instance copilot-2 --model gpt-5` names a copilot session in the
+  // only way the roster understands, and this check used to reject it for
+  // not repeating `--agent copilot` — the tool-dependent option was being
+  // validated before the tool was known (design §4 D5 決定 3). Still ahead
+  // of every side effect: resolution only reads.
+  //
+  // Issue #2771: claude joins the list. `agent` is undefined when neither
+  // --instance nor --agent was given, and the server would then pick the
+  // worktree's default tool — which the CLI cannot know, so it cannot pick
+  // a validator either. The target has to be named.
+  if (options.model) {
+    if (agent !== 'copilot' && agent !== 'antigravity' && agent !== 'claude') {
+      console.error(
+        'Error: --model option requires --agent copilot, --agent antigravity or --agent claude'
+        + ' (or an --instance registered as one)'
+      );
+      process.exit(ExitCode.CONFIG_ERROR);
+    }
+    const modelValidation = agent === 'antigravity'
+      ? validateAntigravityModelName(options.model)
+      : agent === 'claude'
+        ? validateClaudeModelName(options.model)
+        : validateCopilotModelName(options.model);
+    if (!modelValidation.valid) {
+      console.error(`Error: Invalid model name: ${modelValidation.reason}`);
+      process.exit(ExitCode.CONFIG_ERROR);
+    }
+  }
+}
+
+/** The `/send` request body. */
+function buildSendBody(
+  content: string | undefined,
+  agent: string | undefined,
+  instanceId: string | undefined,
+  options: SendOptions
+): Record<string, unknown> {
+  // [DR2-05] Send API uses "content" not "message"
+  const sendBody: Record<string, unknown> = { content };
+  if (agent) {
+    sendBody.cliToolId = agent;
+  }
+  // Issue #868: Include instance ID in send body
+  if (instanceId) {
+    sendBody.instanceId = instanceId;
+  }
+  // Issue #576: Include model in send body
+  if (options.model) {
+    sendBody.model = options.model;
+  }
+  // Issue #1737: waive the structured half of the prompt guard for this
+  // send. Sent only when asked for, so an older daemon that does not know
+  // the field sees exactly the body it always did.
+  if (options.ignoreStructuredPrompt) {
+    sendBody.ignoreStructuredPromptGuard = true;
+  }
+  return sendBody;
+}
+
 export function createSendCommand(): Command {
   const cmd = new Command('send');
   cmd
@@ -257,63 +370,7 @@ worktree and send a short message that tells the agent to read that file.
 `)
     .action(async (worktreeId: string, message: string | undefined, options: SendOptions) => {
       try {
-        // [SEC4-04] Validate worktree ID
-        if (!isValidWorktreeId(worktreeId)) {
-          console.error('Error: Invalid worktree ID format.');
-          process.exit(ExitCode.CONFIG_ERROR);
-        }
-
-        // Issue #1545: the contract supplies the message, so accepting both
-        // would leave which one the agent receives ambiguous.
-        if (options.contract && message !== undefined) {
-          console.error('Error: --contract supplies the message; do not pass a message argument as well.');
-          process.exit(ExitCode.CONFIG_ERROR);
-        }
-        if (!options.contract && message === undefined) {
-          console.error('Error: a message argument is required unless --contract is given.');
-          process.exit(ExitCode.CONFIG_ERROR);
-        }
-
-        // Validate agent if provided
-        if (options.agent && !isCliToolId(options.agent)) {
-          console.error(`Error: Invalid agent. Must be one of: ${CLI_TOOL_IDS.join(', ')}`);
-          process.exit(ExitCode.CONFIG_ERROR);
-        }
-
-        // Issue #868 / #2376: Validate the instance SELECTOR if provided. An id
-        // or an alias — which of the two it is, only the roster knows.
-        if (options.instance && !isInstanceSelector(options.instance)) {
-          console.error(INSTANCE_SELECTOR_ERROR);
-          process.exit(ExitCode.CONFIG_ERROR);
-        }
-
-        // Issue #1000: --register requires --instance, and requires --agent
-        // unless the instance id is itself a primary CLI tool id (e.g. claude).
-        if (options.register) {
-          if (!options.instance) {
-            console.error('Error: --register requires --instance.');
-            process.exit(ExitCode.CONFIG_ERROR);
-          }
-          if (!options.agent && !isCliToolId(options.instance)) {
-            console.error('Error: --register requires --agent when --instance is not a primary instance id (e.g. claude, codex).');
-            process.exit(ExitCode.CONFIG_ERROR);
-          }
-        }
-
-        // [SEC4-06] Validate stop-pattern length
-        if (options.stopPattern && options.stopPattern.length > MAX_STOP_PATTERN_LENGTH) {
-          console.error(`Error: stop-pattern exceeds maximum length of ${MAX_STOP_PATTERN_LENGTH} characters.`);
-          process.exit(ExitCode.CONFIG_ERROR);
-        }
-
-        // Issue #1608: every option that can be judged from its own value is
-        // judged here, before the first side effect. --duration used to be the
-        // exception: enableAutoYes() validated it, and that runs after
-        // --contract has already created the task row, so `--duration 2h` left
-        // a `pending` task for a message that was never sent. Validated
-        // unconditionally, like --stop-pattern and --model above: a value the
-        // CLI cannot honour is an error whether or not --auto-yes accompanies it.
-        const autoYesDurationMs = resolveAutoYesDurationMs(options.duration);
+        const autoYesDurationMs = validateSendArgs(worktreeId, message, options);
 
         const client = new ApiClient({ token: options.token });
 
@@ -326,36 +383,7 @@ worktree and send a short message that tells the agent to read that file.
         // `--instance "Codex 2"` has to reach /send as `codex-2`; no route but
         // /resolve-target knows how to read an alias.
 
-        // Issue #576/#588/#989: Validate --model option via shared validator (DR1-003).
-        // Issue #1925: judged against the RESOLVED agent, not against --agent.
-        // `--instance copilot-2 --model gpt-5` names a copilot session in the
-        // only way the roster understands, and this check used to reject it for
-        // not repeating `--agent copilot` — the tool-dependent option was being
-        // validated before the tool was known (design §4 D5 決定 3). Still ahead
-        // of every side effect: resolution only reads.
-        //
-        // Issue #2771: claude joins the list. `agent` is undefined when neither
-        // --instance nor --agent was given, and the server would then pick the
-        // worktree's default tool — which the CLI cannot know, so it cannot pick
-        // a validator either. The target has to be named.
-        if (options.model) {
-          if (agent !== 'copilot' && agent !== 'antigravity' && agent !== 'claude') {
-            console.error(
-              'Error: --model option requires --agent copilot, --agent antigravity or --agent claude'
-              + ' (or an --instance registered as one)'
-            );
-            process.exit(ExitCode.CONFIG_ERROR);
-          }
-          const modelValidation = agent === 'antigravity'
-            ? validateAntigravityModelName(options.model)
-            : agent === 'claude'
-              ? validateClaudeModelName(options.model)
-              : validateCopilotModelName(options.model);
-          if (!modelValidation.valid) {
-            console.error(`Error: Invalid model name: ${modelValidation.reason}`);
-            process.exit(ExitCode.CONFIG_ERROR);
-          }
-        }
+        validateSendModel(options, agent);
 
         // Issue #1545: resolve the contract before anything with a side effect,
         // so an invalid contract cannot leave auto-yes enabled for a message
@@ -388,16 +416,11 @@ worktree and send a short message that tells the agent to read that file.
         // A refusal exits 2 here, having sent nothing.
         let relayId: string | undefined;
         if (options.replyTo) {
-          const replyEndpoint = await resolveRelayEndpoint(client, options.replyTo);
-          const workerEndpoint = await resolveEndpointForWorktree(
-            client,
+          relayId = await registerRelayForMessage(client, {
             worktreeId,
-            options.instance,
-            options.agent
-          );
-          relayId = await registerRelay(client, {
-            from: replyEndpoint,
-            to: workerEndpoint,
+            replyTo: options.replyTo,
+            instance: options.instance,
+            agent: options.agent,
             allowRelayChain: options.allowRelayChain,
           });
           // stderr, not stdout: `--contract` already owns this command's stdout
@@ -407,54 +430,19 @@ worktree and send a short message that tells the agent to read that file.
           console.error(`Relay registered: ${relayId}`);
         }
 
-        // [DR2-05] Send API uses "content" not "message"
-        const sendBody: Record<string, unknown> = { content };
-        if (agent) {
-          sendBody.cliToolId = agent;
-        }
-        // Issue #868: Include instance ID in send body
-        if (instanceId) {
-          sendBody.instanceId = instanceId;
-        }
-        // Issue #576: Include model in send body
-        if (options.model) {
-          sendBody.model = options.model;
-        }
-        // Issue #1737: waive the structured half of the prompt guard for this
-        // send. Sent only when asked for, so an older daemon that does not know
-        // the field sees exactly the body it always did.
-        if (options.ignoreStructuredPrompt) {
-          sendBody.ignoreStructuredPromptGuard = true;
-        }
+        const sendBody = buildSendBody(content, agent, instanceId, options);
 
-        try {
-          await client.post<ChatMessage>(`/api/worktrees/${worktreeId}/send`, sendBody);
-        } catch (error) {
-          // A task whose message never arrived is a failed task, not a pending
-          // one: nothing is working on it and nothing ever will.
-          if (taskId) {
-            await reportTaskStatus(client, taskId, 'failed');
-          }
-          // A relay whose message never arrived can never be answered; leaving
-          // it open would have the requester waiting 24h for a turn that was
-          // never started.
-          if (relayId) {
-            await cancelRelayQuietly(client, relayId);
-          }
-          // Issue #1708: the session is sitting on a prompt, so the message
-          // would have been typed into the prompt's input line rather than
-          // reaching the agent. Reported on its own so an unattended runner sees
-          // "answer the prompt", not a generic HTTP failure — nudging a stalled
-          // worker is exactly what made #1708 worse.
-          if (error instanceof ApiError && error.apiCode === PROMPT_WAITING_CODE) {
-            // The server's own sentence, not error.message: handleApiError maps a
-            // bare 409 to "Unexpected HTTP status: 409", which says nothing about
-            // what to do next.
-            console.error(`Error: ${error.payload?.error ?? promptWaitingFallback(worktreeId)}`);
-            process.exit(ExitCode.CONFIG_ERROR);
-          }
-          throw error;
-        }
+        await postMessage(client, worktreeId, sendBody, {
+          relayId,
+          onFailure: async () => {
+            // A task whose message never arrived is a failed task, not a pending
+            // one: nothing is working on it and nothing ever will.
+            if (taskId) {
+              await reportTaskStatus(client, taskId, 'failed');
+            }
+          },
+          promptWaitingFallback: promptWaitingFallback(worktreeId),
+        });
         console.error('Message sent.');
 
         if (taskId) {
