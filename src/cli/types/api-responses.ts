@@ -7,6 +7,7 @@
  */
 
 import type { PromptView } from '../../lib/session/prompt-view';
+import type { StatusEvidence } from '../../lib/session/status-evidence-type';
 
 // Mirrors: src/types/models.ts Worktree + src/app/api/worktrees/route.ts response shape
 export interface WorktreeListResponse {
@@ -75,7 +76,7 @@ export interface WorktreeItem {
      * no frame to read) and for a tool with two or more instances (an
      * aggregate has no single reason — read `--json` for the per-tool rows).
      */
-    statusEvidence?: 'positive' | 'none';
+    statusEvidence?: StatusEvidence;
     /**
      * The scraper's reason token: `input_prompt` / `no_recent_output` /
      * `thinking_indicator` / `default` … (Issue #1926).
