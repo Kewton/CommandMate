@@ -939,6 +939,513 @@ interface PollState {
 }
 
 /**
+ * What {@link pollWorktree} hands every stage of a poll and never writes: its
+ * `const`s, as {@link PollState} is its variables.
+ */
+interface PollContext {
+  client: ApiClient;
+  worktreeId: string;
+  options: PollWorktreeOptions;
+  startTime: number;
+  autoYesGraceSeconds: number;
+  autoYesGraceMs: number;
+}
+
+/** What {@link pollWorktree} resolves to. */
+type PollResult = Awaited<ReturnType<typeof pollWorktree>>;
+
+/**
+ * What one stage of a poll tells {@link pollWorktree} to do: `exit` ends the
+ * wait with `result`, `wait` sleeps one interval and polls again, and `next`
+ * says the stage does not apply to this frame, so the next one is asked.
+ */
+type StageOutcome =
+  | { kind: 'exit'; result: PollResult }
+  | { kind: 'wait' }
+  | { kind: 'next' };
+
+/**
+ * The {@link StageOutcome} of a stage that never holds the poll: `exit` or
+ * `next`. {@link pollWorktree} asks such a stage for `exit` alone, and this type
+ * is what keeps a `wait` from passing there as `next`.
+ */
+type ExitOrNextOutcome = Exclude<StageOutcome, { kind: 'wait' }>;
+
+/** The outcome that ends the wait with `result`. */
+function exitWith(result: PollResult): Extract<StageOutcome, { kind: 'exit' }> {
+  return { kind: 'exit', result };
+}
+
+/**
+ * Stage: `--timeout` and `--stall-timeout`, asked at the top of every poll,
+ * before its request. Exit 124.
+ */
+function deadlineStage(poll: PollContext, state: PollState): ExitOrNextOutcome {
+  const { worktreeId, options, startTime } = poll;
+
+  // Check timeout
+  if (options.timeout) {
+    const elapsed = (Date.now() - startTime) / 1000;
+    if (elapsed >= options.timeout) {
+      console.error(`Timeout: ${worktreeId} exceeded ${options.timeout}s`);
+      return exitWith({ exitCode: WaitExitCode.TIMEOUT });
+    }
+  }
+
+  // Check stall-timeout
+  if (options.stallTimeout) {
+    const stallElapsed = (Date.now() - state.lastActivityTime) / 1000;
+    if (stallElapsed >= options.stallTimeout) {
+      console.error(`Stall timeout: ${worktreeId} no output for ${options.stallTimeout}s`);
+      return exitWith({ exitCode: WaitExitCode.TIMEOUT });
+    }
+  }
+
+  return { kind: 'next' };
+}
+
+/**
+ * Stage: a prompt the detection layer parsed. Exit 10, unless it is held for a
+ * human (`--on-prompt human`) or for the target's Auto-Yes (Issue #2463).
+ */
+function promptStage(poll: PollContext, state: PollState, data: CurrentOutputResponse): StageOutcome {
+  const { worktreeId, options, startTime, autoYesGraceSeconds, autoYesGraceMs } = poll;
+
+  // Prompt detected
+  if (data.isPromptWaiting && data.promptData) {
+    // Issue #1699: report a policy suppression on both exits — the human one
+    // keeps polling and would otherwise say nothing about why nobody
+    // answered, and the agent one is read by pipelines that never see stderr.
+    const suppressed = activeSuppression(data, Date.now());
+
+    // [DR1-03] Prompt detection exit code
+    if (options.onPrompt === 'human') {
+      // Block and continue polling - user handles prompt manually
+      console.error(`Prompt detected on ${worktreeId}. Waiting for human response...`);
+      if (suppressed) {
+        console.error(formatSuppressionNotice(suppressed.suppression, suppressed.ageSeconds));
+      }
+      return { kind: 'wait' };
+    }
+
+    // Issue #2463: the one case `decidePromptPush()` stays quiet about —
+    // Auto-Yes is on and has not withheld this answer — is a prompt Auto-Yes
+    // is about to answer, and exit 10 there hands a delegation back to a
+    // human for a dialog nobody had to see. Hold it for the grace window; a
+    // poll that shows no prompt ends the hold below and completion is judged
+    // as usual. A withheld answer (`suppressed`) and Auto-Yes being off are
+    // the gate's other two branches and still exit 10 at once.
+    if (!suppressed && data.autoYes?.enabled === true && autoYesGraceMs > 0) {
+      const now = Date.now();
+      if (state.autoYesAnsweringSince === null) {
+        state.autoYesAnsweringSince = now;
+        // stderr only: stdout is the exit-10 payload and nothing else.
+        console.error(
+          "Prompt detected; the target's Auto-Yes is answering, waiting up to " +
+            `${autoYesGraceSeconds}s… (${worktreeId})`,
+        );
+      }
+      const heldMs = now - state.autoYesAnsweringSince;
+      if (
+        heldMs < autoYesGraceMs &&
+        nextPollWithinDeadlines(options, startTime, state.lastActivityTime, now)
+      ) {
+        return { kind: 'wait' };
+      }
+      console.error(
+        heldMs < autoYesGraceMs
+          ? `Note: the prompt on ${worktreeId} is still open after ${Math.round(heldMs / 1000)}s ` +
+              'under Auto-Yes, and the next poll would pass --timeout/--stall-timeout; reporting it now.'
+          : `Note: the target's Auto-Yes did not answer the prompt on ${worktreeId} within ` +
+              `${autoYesGraceSeconds}s; reporting it.`,
+      );
+    } else if (state.autoYesAnsweringSince !== null && !suppressed) {
+      console.error(`Note: Auto-Yes is no longer enabled on ${worktreeId}; reporting the prompt.`);
+    }
+
+    // Default (agent mode): output prompt info and exit 10
+    const promptOutput = buildPromptOutput(worktreeId, data, data.promptData, suppressed);
+    if (suppressed) {
+      console.error(formatSuppressionNotice(suppressed.suppression, suppressed.ageSeconds));
+    }
+
+    return exitWith({ exitCode: WaitExitCode.PROMPT_DETECTED, output: promptOutput });
+  }
+
+  return { kind: 'next' };
+}
+
+/** Stage: an arrow-key selection list (Issue #1628). Exit 10, or held under `--on-prompt human`. */
+function selectionListStage(poll: PollContext, data: CurrentOutputResponse): StageOutcome {
+  const { worktreeId, options } = poll;
+
+  // Issue #1628: an arrow-key menu is the agent blocked on a human just as much
+  // as a numbered prompt is, but it is published with isPromptWaiting=false so
+  // the UI can render NavigationButtons instead of PromptPanel. Treat it as a
+  // prompt here — otherwise `wait` polls a stopped agent until --timeout.
+  if (data.isSelectionListActive) {
+    if (options.onPrompt === 'human') {
+      console.error(
+        `Selection list active on ${worktreeId} (${data.sessionStatusReason ?? 'selection_list'}). ` +
+          'Waiting for human response...',
+      );
+      // Issue #1699: the poller parses frames status-detector publishes as
+      // selection lists, so a policy can be the reason this one is stuck too.
+      const suppressed = activeSuppression(data, Date.now());
+      if (suppressed) {
+        console.error(formatSuppressionNotice(suppressed.suppression, suppressed.ageSeconds));
+      }
+      return { kind: 'wait' };
+    }
+
+    return exitWith({
+      exitCode: WaitExitCode.PROMPT_DETECTED,
+      output: buildSelectionListOutput(worktreeId, data),
+    });
+  }
+
+  return { kind: 'next' };
+}
+
+/**
+ * Stage: an interactive frame nothing could parse, once it has stayed up for the
+ * whole dwell (Issue #1708). Exit 10, or held under `--on-prompt human`.
+ */
+function unclassifiedStage(poll: PollContext, state: PollState, data: CurrentOutputResponse): StageOutcome {
+  const { worktreeId, options } = poll;
+
+  // Issue #1708: the frame is interactive but nothing could parse it. The
+  // detection layer is the single entry point every downstream safeguard
+  // hangs off, so a frame that slips past it disables Auto-Yes, the exit-10
+  // handoff and the contract's autoYes policy all at once — and `wait` used
+  // to burn its whole --timeout without ever mentioning it. Treat a
+  // PERSISTENT unclassified frame as a stop reason of its own.
+  //
+  // The dwell deliberately spans ALL THREE states that raise this flag, and
+  // the completion check below is suppressed while it is up. That is the
+  // whole point, and it is worth spelling out because the obvious reading is
+  // the wrong one. The server's definition (`isUnclassifiedFrame` in
+  // `src/lib/session/status-evidence.ts`, restated there by Issue #2011):
+  //
+  //   isUnclassifiedActive =
+  //     running && (default | unknown_frame | no_recent_output)
+  //
+  // `no_recent_output` is there because a static unrecognised overlay
+  // DEGRADES into it — once the Auto-Yes poller stamps
+  // lastServerResponseTimestamp, a frame that stopped changing flips from
+  // `running`/`default` after STALE_OUTPUT_THRESHOLD_MS (5s). `unknown_frame`
+  // is the same floor for a tool that opts out of the generic composer check
+  // (copilot, opencode), and says "this tool's own rules looked and read
+  // nothing". Both arrive about twelve times faster than this dwell. Letting
+  // the completion check claim one turned a stalled worker into `Completed`,
+  // which is worse than the timeout Issue #1708 complained about: exit 124
+  // stops a pipeline, exit 0 lets it merge. Measured before this guard: two
+  // unclassified polls followed by the degraded state returned SUCCESS.
+  //
+  // What is deliberately NOT in the set is `ready`/`input_prompt` with
+  // `statusEvidence: 'none'` — the agent back at its composer on a frame no
+  // tool-specific idle rule could vouch for. That frame WAS classified; what
+  // is missing is positive proof, which is a different question and §4 D1's
+  // to answer. Issue #1927 folded the two together and every idle Claude pane
+  // stopped completing (#2011). Whether `wait` should hold for evidence as
+  // well as classification is open, and any answer belongs in the same place
+  // as the rollout that produces the evidence — not here.
+  if (data.isUnclassifiedActive === true) {
+    if (state.unclassifiedSince === null) state.unclassifiedSince = Date.now();
+    const dwellMs = Date.now() - state.unclassifiedSince;
+    if (dwellMs >= UNCLASSIFIED_DWELL_MS) {
+      const question = describeUnclassifiedFrame(worktreeId, data, dwellMs);
+
+      if (options.onPrompt === 'human') {
+        console.error(question);
+        console.error('Waiting for human response...');
+        return { kind: 'wait' };
+      }
+
+      console.error(question);
+      return exitWith({
+        exitCode: WaitExitCode.PROMPT_DETECTED,
+        output: buildUnclassifiedOutput(worktreeId, data, question),
+      });
+    }
+  } else {
+    state.unclassifiedSince = null;
+  }
+
+  return { kind: 'next' };
+}
+
+/**
+ * Stage: the session is not running (Path A). Exit 21 when this wait never saw
+ * it alive (Issue #1628), exit 0 when it went away after it had been seen.
+ */
+function notRunningStage(
+  poll: PollContext,
+  state: PollState,
+  data: CurrentOutputResponse,
+  selfResumeSuffix: () => string,
+): ExitOrNextOutcome {
+  const { worktreeId, options } = poll;
+
+  // Completion check [DR1-04]:
+  // Path A: the tmux session went away after we had seen it alive — the agent
+  //         finished and its session was stopped.
+  // Path B: agent completed task (sessionStatus === 'ready', input prompt detected)
+  // Both indicate "no more work in progress" from wait command's perspective.
+  //
+  // Issue #1628 narrowed Path A: a session that was NEVER seen running is
+  // "nothing to wait for" (NOT_STARTED), not a completion. See `everRunning`.
+  if (!data.isRunning && !state.everRunning) {
+    console.error(describeNotStarted(worktreeId, data, options));
+    return exitWith({ exitCode: VerifyExitCode.NOT_STARTED });
+  }
+
+  // Issue #1708 narrowed Path B: `ready` is only a completion when the frame
+  // was actually understood. A structured `hook_stop` over an unreadable
+  // pane is the degraded form of an overlay nobody could parse (see the note
+  // above), and reporting it as `Completed` is how a stalled worker gets
+  // merged. Path A is untouched — a session that went away really is
+  // finished, and carries no flag anyway.
+  if (!data.isRunning) {
+    console.error(
+      `Completed: ${worktreeId} (basis=${COMPLETION_BASIS.SESSION_GONE}${selfResumeSuffix()})`,
+    );
+    return exitWith({ exitCode: WaitExitCode.SUCCESS });
+  }
+
+  return { kind: 'next' };
+}
+
+/**
+ * Stage of a `ready` frame: an upstream fault on the frame, under
+ * `--fail-on-upstream-fault` (Issue #1839). Exit 11.
+ */
+function upstreamFaultStage(poll: PollContext, data: CurrentOutputResponse): StageOutcome {
+  const { worktreeId, options } = poll;
+
+  // Issue #1839: the agent is back at its composer with an upstream
+  // failure on the frame. Checked BEFORE the turn-boundary gate below,
+  // because it is the answer to the question that gate can only ask: the
+  // turn did not end, and this is why. Without it the same session runs
+  // to --timeout and reports 124, which says nothing about the cause.
+  const fault = data.upstreamFault ?? null;
+  if (options.failOnUpstreamFault && fault) {
+    console.error(
+      `Upstream fault on ${worktreeId}: id=${fault.id} — the agent is back at its ` +
+        'composer with an upstream API failure on screen, so this turn did not run. ' +
+        `Matched: ${JSON.stringify(fault.matchedText)}`,
+    );
+    if (fault.id === 'context-limit') {
+      // A retry into the same session hits the same wall (Issue #3011).
+      console.error(
+        'The session\'s conversation is over the model\'s context limit. Start a fresh ' +
+          `session and send again: commandmate instances ${worktreeId} kill ` +
+          `${options.instance ?? '<instance>'}`,
+      );
+    }
+    return exitWith({
+      exitCode: WaitExitCode.UPSTREAM_FAULT,
+      upstreamFault: { id: fault.id, matchedText: fault.matchedText },
+    });
+  }
+
+  return { kind: 'next' };
+}
+
+/**
+ * Stage of a `ready` frame: the agent has not reported the end of the turn this
+ * wait adopted (Issue #1839). Held.
+ */
+function unsettledTurnStage(poll: PollContext, state: PollState, data: CurrentOutputResponse): StageOutcome {
+  const { worktreeId } = poll;
+
+  // Issue #1839: `ready` off the terminal frame is the agent's composer,
+  // not the agent's verdict. Measured 2026-08-20 against a stub upstream
+  // answering 529: Claude returns to the composer ~3 s after the send
+  // having executed nothing, and never sends `Stop`. When this instance's
+  // hooks ARE reporting — the only case in which `turnStartedAt` is
+  // non-null — that missing `Stop` is the difference between "finished"
+  // and "never ran", and it is the only signal that carries it.
+  if (!turnSettled(data, state.turnStartedAt)) {
+    console.error(
+      `Waiting: ${worktreeId} is back at its composer, but its agent has not reported ` +
+        `the end of this turn (turnStartedAt=${state.turnStartedAt}, ` +
+        `lastStopEventAt=${data.lastStopEventAt ?? 'none'}, ${describeTurnClose(data)}). ` +
+        'Not reporting completion; inspect with ' +
+        `\`commandmate capture ${worktreeId} --json\`.`,
+    );
+    return { kind: 'wait' };
+  }
+
+  return { kind: 'next' };
+}
+
+/**
+ * Stage of a `ready` frame: the turn ended on a `stop` that said the agent will
+ * resume by itself (Issue #2614). Held, up to {@link SELF_RESUME_HOLD_MS}.
+ */
+function selfResumeHoldStage(
+  poll: PollContext,
+  state: PollState,
+  data: CurrentOutputResponse,
+  selfResumeStopAt: number | null,
+): StageOutcome {
+  const { worktreeId } = poll;
+
+  // Issue #2614: the turn did end — the agent said so — but it also said
+  // that work of its own is still running in the background (a `schedule`
+  // timer, a backgrounded command), and that work wakes it with nobody
+  // typing anything. Measured 2026-09-17 on antigravity 1.2.4: four such
+  // stops ~58 s before each self-wake, and the first one was reported as
+  // `Completed (basis=hook_stop)` and verified five minutes before the
+  // work was done. So this `stop` is held until it is no longer the newest
+  // word (see `selfResumeStopAt` above), or until the bound.
+  //
+  // The bound is measured from whichever is further along: the `stop`
+  // itself (server clock — a negative age is skew, and the max discards
+  // it) or this wait's first sight of it. A session that said so hours ago
+  // and never woke is not held again.
+  if (selfResumeStopAt !== null) {
+    const now = Date.now();
+    if (state.selfResumeHold === null) state.selfResumeHold = { stopAt: selfResumeStopAt, since: now };
+    const heldMs = now - state.selfResumeHold.since;
+    const elapsedMs = Math.max(heldMs, now - selfResumeStopAt);
+    if (elapsedMs < SELF_RESUME_HOLD_MS) {
+      state.selfResumeHeld = true;
+      console.error(
+        `Waiting: ${worktreeId} ended its turn with background work still running ` +
+          `(stoppedAt=${new Date(selfResumeStopAt).toISOString()}, ` +
+          `lastEventDetail=${SELF_RESUME_PENDING_DETAIL}, ${describeTurnClose(data)}); ` +
+          'it resumes by itself when that work finishes. Not reporting completion ' +
+          `(held ${Math.round(heldMs / 1000)}s, at most ${SELF_RESUME_HOLD_MS / 1000}s ` +
+          'after the stop).',
+      );
+      return { kind: 'wait' };
+    }
+    console.error(
+      `Note: ${worktreeId} said at its stop ${Math.round(elapsedMs / 1000)}s ` +
+        'ago that background work was still running, and has not resumed since; ' +
+        'completing on that stop.',
+    );
+  }
+
+  return { kind: 'next' };
+}
+
+/**
+ * Stage of a `ready` frame: the chat ledger shows a prompt the agent has not
+ * reported the end of (Issue #1975). Held, up to {@link PENDING_PROMPT_HOLD_MS}.
+ * `next` carries whether the newest prompt was answered, which
+ * {@link completionStage} needs for its basis.
+ */
+async function promptLedgerStage(
+  poll: PollContext,
+  state: PollState,
+  data: CurrentOutputResponse,
+): Promise<{ kind: 'wait' } | { kind: 'next'; answeredNewestPrompt: boolean }> {
+  const { client, worktreeId, options, startTime } = poll;
+
+  // Issue #1975: the same frame, one question further back. #1839's gate
+  // above can only fire once a turn has been ADOPTED, and `send` leaves a
+  // window ~1s wide in which nothing has been: the newest structured event
+  // is still the previous turn's `stop`, so `adoptTurnStart` takes nothing,
+  // `turnSettled` reads null as "settled", and the composer the agent has
+  // not touched yet is read as the composer it came back to. Measured
+  // 2026-08-22 against copilot 1.0.80 on an isolated server: 3 of 5
+  // send-then-wait runs came back in ~0.3s with `basis=scraper_ready` and
+  // no artefact on disk.
+  //
+  // So ask the ledger instead of the clock: has this instance been handed
+  // a prompt that the agent has not reported the end of? See
+  // {@link outstandingPrompt} for why that comparison is the one that
+  // separates "not started" from "finished", and
+  // {@link reportsTurnBoundaries} for why a tool that posts no hooks never
+  // reaches it.
+  let answeredNewestPrompt = false;
+  if (state.turnStartedAt === null && state.promptLedgerReadable && reportsTurnBoundaries(data)) {
+    const ledger = await readNewestPromptAt(client, worktreeId, options, data);
+    // One notice, then stop asking: a ledger that failed once will fail
+    // every poll, and the point of degrading is to stop paying for it.
+    state.promptLedgerReadable = ledger.readable;
+    if (ledger.readable && ledger.submittedAt !== null) {
+      if (outstandingPrompt(data, ledger.submittedAt)) {
+        const heldMs = Date.now() - startTime;
+        if (heldMs < PENDING_PROMPT_HOLD_MS) {
+          console.error(
+            `Waiting: ${worktreeId} is at its composer, but the newest prompt sent to it ` +
+              `has no reported end (sentAt=${new Date(ledger.submittedAt).toISOString()}, ` +
+              `lastStopEventAt=${data.lastStopEventAt ?? 'none'}, ${describeTurnClose(data)}). ` +
+              'Not reporting completion: the agent has not started this turn yet.',
+          );
+          return { kind: 'wait' };
+        }
+        console.error(
+          `Note: ${worktreeId} has been at its composer for ` +
+            `${Math.round(heldMs / 1000)}s with the newest prompt still unreported by its ` +
+            'agent. Its hooks are not answering; completing on the frame alone.',
+        );
+      } else {
+        answeredNewestPrompt = true;
+      }
+    }
+  }
+
+  return { kind: 'next', answeredNewestPrompt };
+}
+
+/** Last stage of a `ready` frame: the completion line with its basis. Exit 0. */
+function completionStage(
+  poll: PollContext,
+  state: PollState,
+  answeredNewestPrompt: boolean,
+  selfResumeSuffix: () => string,
+): StageOutcome {
+  const { worktreeId } = poll;
+
+  // `hook_stop` on both branches that have one, and they are the same
+  // statement made from two records: the agent reported the end of the
+  // turn this wait is about. `scraper_ready` keeps its documented meaning
+  // — "the screen said so and nothing corroborated it" — which is now
+  // exactly the set of cases that reach it.
+  const basis =
+    state.turnStartedAt !== null || answeredNewestPrompt
+      ? COMPLETION_BASIS.HOOK_STOP
+      : COMPLETION_BASIS.SCRAPER_READY;
+  console.error(`Completed: ${worktreeId} (basis=${basis}${selfResumeSuffix()})`);
+  return exitWith({ exitCode: WaitExitCode.SUCCESS });
+}
+
+/**
+ * Stage: the agent is back at its composer on a frame that was understood. Asks
+ * the stages of a `ready` frame in order; the first that applies decides.
+ */
+async function readyStage(
+  poll: PollContext,
+  state: PollState,
+  data: CurrentOutputResponse,
+  selfResumeStopAt: number | null,
+  selfResumeSuffix: () => string,
+): Promise<StageOutcome> {
+  if (data.sessionStatus === 'ready' && data.isUnclassifiedActive !== true) {
+    const faultOutcome = upstreamFaultStage(poll, data);
+    if (faultOutcome.kind !== 'next') return faultOutcome;
+
+    const turnOutcome = unsettledTurnStage(poll, state, data);
+    if (turnOutcome.kind !== 'next') return turnOutcome;
+
+    const holdOutcome = selfResumeHoldStage(poll, state, data, selfResumeStopAt);
+    if (holdOutcome.kind !== 'next') return holdOutcome;
+
+    const ledgerOutcome = await promptLedgerStage(poll, state, data);
+    if (ledgerOutcome.kind !== 'next') return ledgerOutcome;
+
+    return completionStage(poll, state, ledgerOutcome.answeredNewestPrompt, selfResumeSuffix);
+  }
+
+  return { kind: 'next' };
+}
+
+/**
  * Poll a single worktree until completion, prompt, or timeout.
  *
  * Exported since Issue #2376 so `ask` can do the WAITING half of its round trip
@@ -977,6 +1484,7 @@ export async function pollWorktree(
   };
   const autoYesGraceSeconds = options.autoYesGrace ?? AUTO_YES_GRACE_DEFAULT_SECONDS;
   const autoYesGraceMs = autoYesGraceSeconds * 1000;
+  const poll: PollContext = { client, worktreeId, options, startTime, autoYesGraceSeconds, autoYesGraceMs };
   /**
    * What the completion line adds when this wait held for a self-resume, or ''
    * (Issue #2614). `basis=` keeps its word: the verdict is still the agent's own
@@ -989,23 +1497,8 @@ export async function pollWorktree(
   };
 
   while (true) {
-    // Check timeout
-    if (options.timeout) {
-      const elapsed = (Date.now() - startTime) / 1000;
-      if (elapsed >= options.timeout) {
-        console.error(`Timeout: ${worktreeId} exceeded ${options.timeout}s`);
-        return { exitCode: WaitExitCode.TIMEOUT };
-      }
-    }
-
-    // Check stall-timeout
-    if (options.stallTimeout) {
-      const stallElapsed = (Date.now() - state.lastActivityTime) / 1000;
-      if (stallElapsed >= options.stallTimeout) {
-        console.error(`Stall timeout: ${worktreeId} no output for ${options.stallTimeout}s`);
-        return { exitCode: WaitExitCode.TIMEOUT };
-      }
-    }
+    const deadlineOutcome = deadlineStage(poll, state);
+    if (deadlineOutcome.kind === 'exit') return deadlineOutcome.result;
 
     try {
       // Issue #868: scope polling to a specific agent instance when provided.
@@ -1057,67 +1550,11 @@ export async function pollWorktree(
         );
       }
 
-      // Prompt detected
-      if (data.isPromptWaiting && data.promptData) {
-        // Issue #1699: report a policy suppression on both exits — the human one
-        // keeps polling and would otherwise say nothing about why nobody
-        // answered, and the agent one is read by pipelines that never see stderr.
-        const suppressed = activeSuppression(data, Date.now());
-
-        // [DR1-03] Prompt detection exit code
-        if (options.onPrompt === 'human') {
-          // Block and continue polling - user handles prompt manually
-          console.error(`Prompt detected on ${worktreeId}. Waiting for human response...`);
-          if (suppressed) {
-            console.error(formatSuppressionNotice(suppressed.suppression, suppressed.ageSeconds));
-          }
-          await sleep(POLL_INTERVAL_MS);
-          continue;
-        }
-
-        // Issue #2463: the one case `decidePromptPush()` stays quiet about —
-        // Auto-Yes is on and has not withheld this answer — is a prompt Auto-Yes
-        // is about to answer, and exit 10 there hands a delegation back to a
-        // human for a dialog nobody had to see. Hold it for the grace window; a
-        // poll that shows no prompt ends the hold below and completion is judged
-        // as usual. A withheld answer (`suppressed`) and Auto-Yes being off are
-        // the gate's other two branches and still exit 10 at once.
-        if (!suppressed && data.autoYes?.enabled === true && autoYesGraceMs > 0) {
-          const now = Date.now();
-          if (state.autoYesAnsweringSince === null) {
-            state.autoYesAnsweringSince = now;
-            // stderr only: stdout is the exit-10 payload and nothing else.
-            console.error(
-              "Prompt detected; the target's Auto-Yes is answering, waiting up to " +
-                `${autoYesGraceSeconds}s… (${worktreeId})`,
-            );
-          }
-          const heldMs = now - state.autoYesAnsweringSince;
-          if (
-            heldMs < autoYesGraceMs &&
-            nextPollWithinDeadlines(options, startTime, state.lastActivityTime, now)
-          ) {
-            await sleep(POLL_INTERVAL_MS);
-            continue;
-          }
-          console.error(
-            heldMs < autoYesGraceMs
-              ? `Note: the prompt on ${worktreeId} is still open after ${Math.round(heldMs / 1000)}s ` +
-                  'under Auto-Yes, and the next poll would pass --timeout/--stall-timeout; reporting it now.'
-              : `Note: the target's Auto-Yes did not answer the prompt on ${worktreeId} within ` +
-                  `${autoYesGraceSeconds}s; reporting it.`,
-          );
-        } else if (state.autoYesAnsweringSince !== null && !suppressed) {
-          console.error(`Note: Auto-Yes is no longer enabled on ${worktreeId}; reporting the prompt.`);
-        }
-
-        // Default (agent mode): output prompt info and exit 10
-        const promptOutput = buildPromptOutput(worktreeId, data, data.promptData, suppressed);
-        if (suppressed) {
-          console.error(formatSuppressionNotice(suppressed.suppression, suppressed.ageSeconds));
-        }
-
-        return { exitCode: WaitExitCode.PROMPT_DETECTED, output: promptOutput };
+      const promptOutcome = promptStage(poll, state, data);
+      if (promptOutcome.kind === 'exit') return promptOutcome.result;
+      if (promptOutcome.kind === 'wait') {
+        await sleep(POLL_INTERVAL_MS);
+        continue;
       }
 
       // Issue #2463: the prompt the hold was waiting on has gone. Who answered it
@@ -1131,258 +1568,28 @@ export async function pollWorktree(
         state.autoYesAnsweringSince = null;
       }
 
-      // Issue #1628: an arrow-key menu is the agent blocked on a human just as much
-      // as a numbered prompt is, but it is published with isPromptWaiting=false so
-      // the UI can render NavigationButtons instead of PromptPanel. Treat it as a
-      // prompt here — otherwise `wait` polls a stopped agent until --timeout.
-      if (data.isSelectionListActive) {
-        if (options.onPrompt === 'human') {
-          console.error(
-            `Selection list active on ${worktreeId} (${data.sessionStatusReason ?? 'selection_list'}). ` +
-              'Waiting for human response...',
-          );
-          // Issue #1699: the poller parses frames status-detector publishes as
-          // selection lists, so a policy can be the reason this one is stuck too.
-          const suppressed = activeSuppression(data, Date.now());
-          if (suppressed) {
-            console.error(formatSuppressionNotice(suppressed.suppression, suppressed.ageSeconds));
-          }
-          await sleep(POLL_INTERVAL_MS);
-          continue;
-        }
-
-        return {
-          exitCode: WaitExitCode.PROMPT_DETECTED,
-          output: buildSelectionListOutput(worktreeId, data),
-        };
+      const selectionListOutcome = selectionListStage(poll, data);
+      if (selectionListOutcome.kind === 'exit') return selectionListOutcome.result;
+      if (selectionListOutcome.kind === 'wait') {
+        await sleep(POLL_INTERVAL_MS);
+        continue;
       }
 
-      // Issue #1708: the frame is interactive but nothing could parse it. The
-      // detection layer is the single entry point every downstream safeguard
-      // hangs off, so a frame that slips past it disables Auto-Yes, the exit-10
-      // handoff and the contract's autoYes policy all at once — and `wait` used
-      // to burn its whole --timeout without ever mentioning it. Treat a
-      // PERSISTENT unclassified frame as a stop reason of its own.
-      //
-      // The dwell deliberately spans ALL THREE states that raise this flag, and
-      // the completion check below is suppressed while it is up. That is the
-      // whole point, and it is worth spelling out because the obvious reading is
-      // the wrong one. The server's definition (`isUnclassifiedFrame` in
-      // `src/lib/session/status-evidence.ts`, restated there by Issue #2011):
-      //
-      //   isUnclassifiedActive =
-      //     running && (default | unknown_frame | no_recent_output)
-      //
-      // `no_recent_output` is there because a static unrecognised overlay
-      // DEGRADES into it — once the Auto-Yes poller stamps
-      // lastServerResponseTimestamp, a frame that stopped changing flips from
-      // `running`/`default` after STALE_OUTPUT_THRESHOLD_MS (5s). `unknown_frame`
-      // is the same floor for a tool that opts out of the generic composer check
-      // (copilot, opencode), and says "this tool's own rules looked and read
-      // nothing". Both arrive about twelve times faster than this dwell. Letting
-      // the completion check claim one turned a stalled worker into `Completed`,
-      // which is worse than the timeout Issue #1708 complained about: exit 124
-      // stops a pipeline, exit 0 lets it merge. Measured before this guard: two
-      // unclassified polls followed by the degraded state returned SUCCESS.
-      //
-      // What is deliberately NOT in the set is `ready`/`input_prompt` with
-      // `statusEvidence: 'none'` — the agent back at its composer on a frame no
-      // tool-specific idle rule could vouch for. That frame WAS classified; what
-      // is missing is positive proof, which is a different question and §4 D1's
-      // to answer. Issue #1927 folded the two together and every idle Claude pane
-      // stopped completing (#2011). Whether `wait` should hold for evidence as
-      // well as classification is open, and any answer belongs in the same place
-      // as the rollout that produces the evidence — not here.
-      if (data.isUnclassifiedActive === true) {
-        if (state.unclassifiedSince === null) state.unclassifiedSince = Date.now();
-        const dwellMs = Date.now() - state.unclassifiedSince;
-        if (dwellMs >= UNCLASSIFIED_DWELL_MS) {
-          const question = describeUnclassifiedFrame(worktreeId, data, dwellMs);
-
-          if (options.onPrompt === 'human') {
-            console.error(question);
-            console.error('Waiting for human response...');
-            await sleep(POLL_INTERVAL_MS);
-            continue;
-          }
-
-          console.error(question);
-          return {
-            exitCode: WaitExitCode.PROMPT_DETECTED,
-            output: buildUnclassifiedOutput(worktreeId, data, question),
-          };
-        }
-      } else {
-        state.unclassifiedSince = null;
+      const unclassifiedOutcome = unclassifiedStage(poll, state, data);
+      if (unclassifiedOutcome.kind === 'exit') return unclassifiedOutcome.result;
+      if (unclassifiedOutcome.kind === 'wait') {
+        await sleep(POLL_INTERVAL_MS);
+        continue;
       }
 
-      // Completion check [DR1-04]:
-      // Path A: the tmux session went away after we had seen it alive — the agent
-      //         finished and its session was stopped.
-      // Path B: agent completed task (sessionStatus === 'ready', input prompt detected)
-      // Both indicate "no more work in progress" from wait command's perspective.
-      //
-      // Issue #1628 narrowed Path A: a session that was NEVER seen running is
-      // "nothing to wait for" (NOT_STARTED), not a completion. See `everRunning`.
-      if (!data.isRunning && !state.everRunning) {
-        console.error(describeNotStarted(worktreeId, data, options));
-        return { exitCode: VerifyExitCode.NOT_STARTED };
-      }
+      const notRunningOutcome = notRunningStage(poll, state, data, selfResumeSuffix);
+      if (notRunningOutcome.kind === 'exit') return notRunningOutcome.result;
 
-      // Issue #1708 narrowed Path B: `ready` is only a completion when the frame
-      // was actually understood. A structured `hook_stop` over an unreadable
-      // pane is the degraded form of an overlay nobody could parse (see the note
-      // above), and reporting it as `Completed` is how a stalled worker gets
-      // merged. Path A is untouched — a session that went away really is
-      // finished, and carries no flag anyway.
-      if (!data.isRunning) {
-        console.error(
-          `Completed: ${worktreeId} (basis=${COMPLETION_BASIS.SESSION_GONE}${selfResumeSuffix()})`,
-        );
-        return { exitCode: WaitExitCode.SUCCESS };
-      }
-
-      if (data.sessionStatus === 'ready' && data.isUnclassifiedActive !== true) {
-        // Issue #1839: the agent is back at its composer with an upstream
-        // failure on the frame. Checked BEFORE the turn-boundary gate below,
-        // because it is the answer to the question that gate can only ask: the
-        // turn did not end, and this is why. Without it the same session runs
-        // to --timeout and reports 124, which says nothing about the cause.
-        const fault = data.upstreamFault ?? null;
-        if (options.failOnUpstreamFault && fault) {
-          console.error(
-            `Upstream fault on ${worktreeId}: id=${fault.id} — the agent is back at its ` +
-              'composer with an upstream API failure on screen, so this turn did not run. ' +
-              `Matched: ${JSON.stringify(fault.matchedText)}`,
-          );
-          if (fault.id === 'context-limit') {
-            // A retry into the same session hits the same wall (Issue #3011).
-            console.error(
-              'The session\'s conversation is over the model\'s context limit. Start a fresh ' +
-                `session and send again: commandmate instances ${worktreeId} kill ` +
-                `${options.instance ?? '<instance>'}`,
-            );
-          }
-          return {
-            exitCode: WaitExitCode.UPSTREAM_FAULT,
-            upstreamFault: { id: fault.id, matchedText: fault.matchedText },
-          };
-        }
-
-        // Issue #1839: `ready` off the terminal frame is the agent's composer,
-        // not the agent's verdict. Measured 2026-08-20 against a stub upstream
-        // answering 529: Claude returns to the composer ~3 s after the send
-        // having executed nothing, and never sends `Stop`. When this instance's
-        // hooks ARE reporting — the only case in which `turnStartedAt` is
-        // non-null — that missing `Stop` is the difference between "finished"
-        // and "never ran", and it is the only signal that carries it.
-        if (!turnSettled(data, state.turnStartedAt)) {
-          console.error(
-            `Waiting: ${worktreeId} is back at its composer, but its agent has not reported ` +
-              `the end of this turn (turnStartedAt=${state.turnStartedAt}, ` +
-              `lastStopEventAt=${data.lastStopEventAt ?? 'none'}, ${describeTurnClose(data)}). ` +
-              'Not reporting completion; inspect with ' +
-              `\`commandmate capture ${worktreeId} --json\`.`,
-          );
-          await sleep(POLL_INTERVAL_MS);
-          continue;
-        }
-
-        // Issue #2614: the turn did end — the agent said so — but it also said
-        // that work of its own is still running in the background (a `schedule`
-        // timer, a backgrounded command), and that work wakes it with nobody
-        // typing anything. Measured 2026-09-17 on antigravity 1.2.4: four such
-        // stops ~58 s before each self-wake, and the first one was reported as
-        // `Completed (basis=hook_stop)` and verified five minutes before the
-        // work was done. So this `stop` is held until it is no longer the newest
-        // word (see `selfResumeStopAt` above), or until the bound.
-        //
-        // The bound is measured from whichever is further along: the `stop`
-        // itself (server clock — a negative age is skew, and the max discards
-        // it) or this wait's first sight of it. A session that said so hours ago
-        // and never woke is not held again.
-        if (selfResumeStopAt !== null) {
-          const now = Date.now();
-          if (state.selfResumeHold === null) state.selfResumeHold = { stopAt: selfResumeStopAt, since: now };
-          const heldMs = now - state.selfResumeHold.since;
-          const elapsedMs = Math.max(heldMs, now - selfResumeStopAt);
-          if (elapsedMs < SELF_RESUME_HOLD_MS) {
-            state.selfResumeHeld = true;
-            console.error(
-              `Waiting: ${worktreeId} ended its turn with background work still running ` +
-                `(stoppedAt=${new Date(selfResumeStopAt).toISOString()}, ` +
-                `lastEventDetail=${SELF_RESUME_PENDING_DETAIL}, ${describeTurnClose(data)}); ` +
-                'it resumes by itself when that work finishes. Not reporting completion ' +
-                `(held ${Math.round(heldMs / 1000)}s, at most ${SELF_RESUME_HOLD_MS / 1000}s ` +
-                'after the stop).',
-            );
-            await sleep(POLL_INTERVAL_MS);
-            continue;
-          }
-          console.error(
-            `Note: ${worktreeId} said at its stop ${Math.round(elapsedMs / 1000)}s ` +
-              'ago that background work was still running, and has not resumed since; ' +
-              'completing on that stop.',
-          );
-        }
-
-        // Issue #1975: the same frame, one question further back. #1839's gate
-        // above can only fire once a turn has been ADOPTED, and `send` leaves a
-        // window ~1s wide in which nothing has been: the newest structured event
-        // is still the previous turn's `stop`, so `adoptTurnStart` takes nothing,
-        // `turnSettled` reads null as "settled", and the composer the agent has
-        // not touched yet is read as the composer it came back to. Measured
-        // 2026-08-22 against copilot 1.0.80 on an isolated server: 3 of 5
-        // send-then-wait runs came back in ~0.3s with `basis=scraper_ready` and
-        // no artefact on disk.
-        //
-        // So ask the ledger instead of the clock: has this instance been handed
-        // a prompt that the agent has not reported the end of? See
-        // {@link outstandingPrompt} for why that comparison is the one that
-        // separates "not started" from "finished", and
-        // {@link reportsTurnBoundaries} for why a tool that posts no hooks never
-        // reaches it.
-        let answeredNewestPrompt = false;
-        if (state.turnStartedAt === null && state.promptLedgerReadable && reportsTurnBoundaries(data)) {
-          const ledger = await readNewestPromptAt(client, worktreeId, options, data);
-          // One notice, then stop asking: a ledger that failed once will fail
-          // every poll, and the point of degrading is to stop paying for it.
-          state.promptLedgerReadable = ledger.readable;
-          if (ledger.readable && ledger.submittedAt !== null) {
-            if (outstandingPrompt(data, ledger.submittedAt)) {
-              const heldMs = Date.now() - startTime;
-              if (heldMs < PENDING_PROMPT_HOLD_MS) {
-                console.error(
-                  `Waiting: ${worktreeId} is at its composer, but the newest prompt sent to it ` +
-                    `has no reported end (sentAt=${new Date(ledger.submittedAt).toISOString()}, ` +
-                    `lastStopEventAt=${data.lastStopEventAt ?? 'none'}, ${describeTurnClose(data)}). ` +
-                    'Not reporting completion: the agent has not started this turn yet.',
-                );
-                await sleep(POLL_INTERVAL_MS);
-                continue;
-              }
-              console.error(
-                `Note: ${worktreeId} has been at its composer for ` +
-                  `${Math.round(heldMs / 1000)}s with the newest prompt still unreported by its ` +
-                  'agent. Its hooks are not answering; completing on the frame alone.',
-              );
-            } else {
-              answeredNewestPrompt = true;
-            }
-          }
-        }
-
-        // `hook_stop` on both branches that have one, and they are the same
-        // statement made from two records: the agent reported the end of the
-        // turn this wait is about. `scraper_ready` keeps its documented meaning
-        // — "the screen said so and nothing corroborated it" — which is now
-        // exactly the set of cases that reach it.
-        const basis =
-          state.turnStartedAt !== null || answeredNewestPrompt
-            ? COMPLETION_BASIS.HOOK_STOP
-            : COMPLETION_BASIS.SCRAPER_READY;
-        console.error(`Completed: ${worktreeId} (basis=${basis}${selfResumeSuffix()})`);
-        return { exitCode: WaitExitCode.SUCCESS };
+      const readyOutcome = await readyStage(poll, state, data, selfResumeStopAt, selfResumeSuffix);
+      if (readyOutcome.kind === 'exit') return readyOutcome.result;
+      if (readyOutcome.kind === 'wait') {
+        await sleep(POLL_INTERVAL_MS);
+        continue;
       }
 
       // Progress indicator on stderr [DR1-05]
