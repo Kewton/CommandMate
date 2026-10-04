@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.44.2] - 2026-10-04
+
+> **Highlight**: 画面のうち「いま操作できる部分」（入力欄やダイアログ）の切り出しを全エージェント共通で 1 回だけ行うようにし、状態表示と Auto-Yes が同じものを読むようにした。会話に引用されたダイアログや footer の文字を本物の操作部分と読む不具合がツールごとに 1 件ずつ起きていた原因（判定がツール別に散っていたこと）を取り除いた。あわせて、承認ダイアログの見せ方・答え方をサーバー側の `promptView` で 1 か所で決め、PC・スマホ・チャット面・CLI が同じ結果を読むようにした。
+
+### Added
+
+- **feat(agent-health): bug Issue の「分類」節と metrics `bug-flow` を追加** (#3185): bug Issue の本文末尾に「分類」節（原因の PR／発見経路／影響する経路、値は決まった語）を置く形を `.github/ISSUE_TEMPLATE/bug_report.md` と起票手順（`/uat`・`/uat-fix-loop`・`/bug-fix`・`/orchestrate`）に追加し、影響する経路が `なし（内部）` なら `internal` ラベルも付けると明記。日次メトリクスに分類 `process` の `bug-flow` を追加し、直近 7 日の `bug` Issue を `gh issue list` で数えて総数・`internal` を除いた数・回帰の率・利用者まで届いた率・分類節の記入率を出す（未記入や決まった語以外の値は率の分母から外し、分母 0 は `null`）。`candidates` は常に空で Issue は自動で作らない。`gh` の失敗は他の指標と同じく skip。
+
+### Changed
+
+- **feat(prompt): 承認ダイアログの見せ方と答え方を `promptView` として 1 か所で決め、Auto-Yes を消す出来事を 1 つの表にまとめる** (#3184): 新しい純関数 `derivePromptView()`（`src/lib/session/prompt-view.ts`）が、承認待ちのデータから「画面の番号で答える／API で答える／読めない」の別・見出し・選択肢・自由入力の可否を決め、`current-output`（HTTP と WebSocket の両方）に `promptView` として追加で載せる。PC パネル・スマホのシート・チャット面・ブラウザ側 Auto-Yes・`commandmate wait`・`capture --prompts` はこの結果だけを読む。これにより、API で答える承認や質問（OpenCode V2）で、チャット面が「選択肢を読み取れませんでした」のカードを出していた問題も直る（#3181 の取りこぼし）。**挙動の変更**: API で答える待ちは、サイドバーの点とプッシュ通知では `waitingKind: 'prompt'` になり、「ターミナルで確認」ではなく「返答待ち」の文面で通知される（別セッションへの relay の対象にはしない）。**外部契約の変更**: `commandmate wait` の exit 10 の JSON に `answerVia`（`screen` / `api` / `terminal`）を追加し、決定 ID で答える質問では `options` が空ではなく `{number, label}` の選択肢になる（`type: 'unclassified'` などの既存フィールドの意味は不変）。Auto-Yes は `src/lib/auto-yes-lifecycle.ts` の表（セッション停止・インスタンス削除・worktree 削除・孤児の掃除・連続エラー・サーバー停止）で消し方を決め、各経路がそれを呼ぶ。これまで何もしていなかった**インスタンスの削除**（UI の削除や `--kill` なしの `instances remove`）で、そのインスタンスの Auto-Yes を消すようにした（残っていると同じ ID の次のインスタンスが許可を引き継いでいた）。
+
+### Fixed
+
+- **fix(detection): 「いま操作できる部分」（live region）を `NormalizedFrame` で 1 回だけ切り出し、状態表示と Auto-Yes が同じ切り出しを読むようにした** (#3183): 会話に引用されたダイアログや footer の文字を本物の操作部分と読む不具合（#2774 / #2776 / #2841 / #2845 / #2846 / #2847 / #2851 / #2991）がツールごとに 1 件ずつ起きていた原因は、「画面のどこからが操作部分か」の判定がツール別に散っていたこと。各ツールは入力欄・ダイアログ枠の目印を `LiveRegionSpec` として宣言するだけになり（claude / codex / antigravity / command-code / copilot / opencode / opencode-v2）、`normalizeFrame(output, tool)` が 1 回だけ切り出す。「入力欄が画面の下端なら、その上の番号リスト・ダイアログ判定は引用」という拒否規則を状態検出（`runToolDetection` と `detectDialog`）と Auto-Yes（`detectPromptOnCleanFrame` / `assessPromptAnswerability`）が共有し、Auto-Yes の poller は 1 tick につき生のキャプチャから 1 回だけ作ったフレームを、プロンプト検出・codex の起動画面ガード・ダイアログゲートへ同じものとして渡す（従来はゲートだけ罫線を消した綴りで判定しており、claude / command-code の入力欄が見えていなかった）。codex の `codexActiveRegionLines` と agy の `isAntigravityQuotedNumberedList` はこの仕組みに置き換えて削除。あわせて agent-health の `screen-*` が不合格のとき、判定に使った画面全体を ANSI つきのままレポートの隣（`~/.commandmate/agent-health/frames/<日付>/<tool>-<checkId>.txt`、判定は同名 `.json`、check の `framePaths`）に保存し、実機で撮り直さずに fixture にできるようにした（`CM_AGENT_HEALTH_SAVE_FRAMES=all` で合格した画面も保存）。設計は `docs/design/3183-live-region-extraction.md`。
+
 ## [0.44.1] - 2026-10-04
 
 > **Highlight**: エージェントのセッションを起動している間は、起動途中の画面（操作パッド・選択ボタン・起動コマンドの行）を出さず「<エージェント名> を起動中…」と経過時間を表示するようになった（全エージェント）。起動コマンドの行は画面とスクロールバックの両方から消える（tmux 3.5a の実機で 7 ツールとも 0 行）。あわせて、インスタンスを止めると Auto-Yes も切れる・プロンプト行が 41 文字以上でも Claude の `/exit` を検知する・起動待ちを伴う送信を 30 秒で打ち切らない、の 3 つを直した。README と LP は Level（Parallel → Delegate → Manage）の軸で組み直した。

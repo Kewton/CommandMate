@@ -1,0 +1,33 @@
+{
+  "version": "0.44.2",
+  "date": "2026-10-04",
+  "highlight": {
+    "ja": "会話の中に引用されたダイアログの文字を、本物の確認画面と取り違えないようになりました。",
+    "en": "Dialog text quoted inside a conversation is no longer mistaken for a real prompt."
+  },
+  "added": [],
+  "improved": [
+    {
+      "ja": "承認ダイアログの見出しと選択肢が、PC・スマホ・チャット画面で同じ内容で表示されるようになりました。",
+      "en": "Approval dialogs now show the same heading and choices on the PC view, the phone view and the chat view."
+    },
+    {
+      "ja": "画面からではなく返答で答える質問は、「ターミナルで確認」ではなく返答待ちとして通知されるようになりました。",
+      "en": "Questions answered by reply rather than on screen are now notified as waiting for a reply, not as a terminal check."
+    }
+  ],
+  "fixed": [
+    {
+      "ja": "会話に引用されたダイアログを、状態表示や Auto Yes が本物の確認画面と読み違える問題を直しました。",
+      "en": "Fixed the status display and Auto Yes reading a dialog quoted in the conversation as a real prompt."
+    },
+    {
+      "ja": "チャット画面で、OpenCode V2 の承認が「選択肢を読み取れませんでした」と表示される問題を直しました。",
+      "en": "Fixed OpenCode V2 approvals in the chat view saying the options could not be read."
+    },
+    {
+      "ja": "インスタンスを削除すると、そのインスタンスの Auto Yes も消えるようにしました。",
+      "en": "Removing an instance now also clears its Auto Yes."
+    }
+  ]
+}
