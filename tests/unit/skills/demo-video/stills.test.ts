@@ -67,6 +67,39 @@ describe('STILLS', () => {
     expect(DEFAULT_BUDGET_BYTES).toBe(100_000);
   });
 
+  it('shoots the desktop hero on /sessions, not on the / redirect', async () => {
+    // Issue #3174: `/` replaces itself with the last-opened branch (or
+    // /sessions) since #2643, so the hero depended on browser history and the
+    // published one still showed the retired Home Overview. /sessions is the
+    // screen the LP caption describes, and the phone shot already uses it.
+    const visited: string[] = [];
+    const waitedFor: string[] = [];
+    const page = {
+      goto: async (url: string) => {
+        visited.push(url);
+      },
+      evaluate: async () => 'en',
+      getByTestId: (id: string) => ({
+        waitFor: async () => {
+          waitedFor.push(id);
+        },
+        first: () => ({ waitFor: async () => { waitedFor.push(id); } }),
+      }),
+      waitForTimeout: async () => undefined,
+    };
+    const hero = STILLS.find((still) => still.id === 'screenshot-desktop');
+    await hero!.open({
+      page: page as never,
+      baseUrl: 'http://127.0.0.1:3399',
+      locale: 'en',
+      worktreeId: 'wt-dark-mode',
+      state: {} as never,
+    });
+    expect(visited).toEqual(['http://127.0.0.1:3399/sessions']);
+    expect(waitedFor).toContain('sessions-list');
+    expect(waitedFor).toContain('session-item-wt-dark-mode');
+  });
+
   it('writes every still to both published locations', () => {
     const options = parseStillsArgs([], {});
     expect(options.pngDir).toBe(path.join(REPO_ROOT, 'docs/images'));

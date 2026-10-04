@@ -76,10 +76,15 @@ export const STILLS: Still[] = [
     viewport: { ...DEFAULT_VIEWPORT },
     deviceScaleFactor: 2,
     budgetBytes: DEFAULT_BUDGET_BYTES,
-    open: async ({ page, baseUrl, locale }) => {
-      await gotoLocalized(page, `${baseUrl}/`, locale);
-      await page.getByTestId('branch-list').waitFor({ state: 'visible' });
-      await page.getByTestId('status-indicator').first().waitFor({ state: 'visible' });
+    // `/` is a redirect to the last-opened branch (or `/sessions`) since #2643,
+    // so what it showed depended on the browser's history. `/sessions` is the
+    // same page the phone shot uses and matches the LP caption ("every session
+    // and its status"), whatever was opened last.
+    open: async ({ page, baseUrl, locale, worktreeId }) => {
+      await gotoLocalized(page, `${baseUrl}/sessions`, locale);
+      await page.getByTestId('app-shell').waitFor({ state: 'visible' });
+      await page.getByTestId('sessions-list').waitFor({ state: 'visible' });
+      await page.getByTestId(`session-item-${worktreeId}`).waitFor({ state: 'visible' });
       await page.waitForTimeout(1500);
     },
   },
