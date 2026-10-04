@@ -107,12 +107,8 @@ import { formatSessionNoteTimestamp } from '@/lib/date-utils';
 import { useChatSurfaceLiveState } from '@/hooks/useChatSurfaceLiveState';
 import { useTerminalPanePolling } from '@/hooks/useTerminalPanePolling';
 import { useSplitMessages } from '@/hooks/useSplitMessages';
-import { usePendingMessages, type OptimisticSendOptions } from '@/hooks/usePendingMessages';
-import {
-  useConnectivity,
-  isServerConfirmedReachable,
-  isConnectionKnownDown,
-} from '@/hooks/useConnectivity';
+import { type OptimisticSendOptions } from '@/hooks/usePendingMessages';
+import { useOptimisticPaneMessages, useDiscardPending } from '@/hooks/useOptimisticPaneMessages';
 import {
   useChatComposerInsert,
   useChatOptimisticSend,
@@ -475,41 +471,15 @@ const MobileChatSurface = memo(function MobileChatSurface({
     instanceId,
   });
 
-  // Issue #2213: the same optimistic layer PC has had since #1121, wired the same
-  // way (`TerminalSplitPaneContent`) — the send is `worktreeApi.sendMessage` and
-  // `onSent` refetches so the bubble reconciles promptly rather than waiting for
-  // the next poll. The push from #2195 usually beats that refetch; both land on
-  // the same row id, and `usePendingMessages` consumes one echo per bubble.
-  const sendMessageFn = useCallback(
-    (content: string, options: OptimisticSendOptions) =>
-      worktreeApi.sendMessage(worktreeId, content, options),
-    [worktreeId],
-  );
-  // Issue #2503: the phone is the surface this is actually for. The same verdict
-  // MobileConnectionBanner shows (#2501) decides whether a send that could not
-  // get out is "送信待ち" or a failure — and, on the way back, triggers exactly
-  // one automatic resend of what is still waiting. Read through the two
-  // evidence-only helpers rather than the banner's verdict: holding a failure
-  // back needs proof the network is gone, not merely a socket that is closed.
-  const connectivity = useConnectivity();
-  const pendingConnectivity = useMemo(
-    () => ({
-      offline: isConnectionKnownDown(connectivity.signals),
-      reachable: isServerConfirmedReachable(connectivity.signals),
-    }),
-    [connectivity.signals],
-  );
   const {
     messages,
     sendOptimistic,
     retry: retryPending,
     discard: discardPending,
-  } = usePendingMessages({
+  } = useOptimisticPaneMessages({
     worktreeId,
     serverMessages,
-    sendFn: sendMessageFn,
     onSent: refresh,
-    connectivity: pendingConnectivity,
   });
 
   // Publish the send for the docked composer. Released on unmount, i.e. the
@@ -526,13 +496,7 @@ const MobileChatSurface = memo(function MobileChatSurface({
   // dropping it — PC does this through `onHistoryInsertToMessage`; here the
   // screen's own insert callback arrives over the same context.
   const insertToComposer = useChatComposerInsert();
-  const handleDiscardPending = useCallback(
-    (tempId: string) => {
-      const content = discardPending(tempId);
-      if (content) insertToComposer(content);
-    },
-    [discardPending, insertToComposer],
-  );
+  const handleDiscardPending = useDiscardPending(discardPending, insertToComposer);
 
   return (
     <ChatSurface
