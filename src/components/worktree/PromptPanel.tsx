@@ -8,7 +8,7 @@
 
 'use client';
 
-import { memo, useState, useCallback, useId, useMemo } from 'react';
+import { memo, useState, useCallback, useId } from 'react';
 import { useTranslations } from 'next-intl';
 import type { LivePromptData, YesNoPromptData, MultipleChoicePromptData } from '@/types/models';
 import { isAnswerablePromptData } from '@/types/models';
@@ -20,19 +20,24 @@ import {
   isQuestionFreeTextNumeric,
   QUESTION_FREE_TEXT_MAX_LENGTH,
   readQuestionFreeText,
-  type PromptQuestionChoices,
 } from '@/components/worktree/prompt-decision-id';
+import { PromptStuckHint } from '@/components/worktree/PromptStuckHint';
+
 import {
   derivePromptView,
   optionTakesTypedText,
   readQuestionChoices,
   type PromptView,
-  promptHeadingMessage,
-  type PromptViewHeading,
+  type QuestionChoices,
 } from '@/lib/session/prompt-view';
 import { ErrorBoundary } from '@/components/error/ErrorBoundary';
 import { Checkbox, RadioGroup, RadioGroupItem, Button, Spinner } from '@/components/ui';
 import { usePromptAnimation } from '@/hooks/usePromptAnimation';
+import { usePromptAnswerState } from '@/hooks/usePromptAnswerState';
+import {
+  promptHeadingText,
+  promptQuestionKey,
+} from '@/components/worktree/prompt-answer';
 
 /** Animation duration for prompt panel transitions */
 const ANIMATION_DURATION_MS = 200;
@@ -58,53 +63,8 @@ const BUTTON_SECONDARY_STYLES = 'bg-surface border-2 border-input hover:bg-muted
  */
 export { optionTakesTypedText };
 
-/**
- * Which question the panel is currently showing (Issue #2755).
- *
- * One `AskUserQuestion` call carries several questions and the picker walks
- * them **in the same card**: answering question 1 repaints the pane with
- * question 2 and the poller hands the new payload to a component that was never
- * unmounted. Both surfaces initialised their selection in a `useState`
- * initialiser, which runs once, so question 2 opened with question 1's ticks
- * already on it — and on a checkbox screen those ticks are an answer.
- *
- * So the state is reset when the QUESTION changes and left alone otherwise. The
- * key is what identifies a question and nothing else: its text, its position in
- * the call, and its option numbers and labels. Deliberately NOT `checked` or
- * `isDefault` — those move on every poll as the operator ticks boxes and walks
- * the cursor in the terminal, and keying on them would throw away a selection
- * being made right now, which is the other half of what this Issue asks for.
- */
-export function promptQuestionKey(promptData: PanelPromptData): string {
-  const parts: string[] = [promptData.question];
-  if (promptData.type === 'multiple_choice') {
-    parts.push(String(promptData.askUserQuestion?.questionIndex ?? ''));
-    for (const option of promptData.options) parts.push(`${option.number}:${option.label}`);
-  }
-  return parts.join('\u0000');
-}
-
-/** The single-select cursor row, which is the panel's initial radio selection. */
-function initialSelectedOption(promptData: PanelPromptData): number | null {
-  if (promptData.type !== 'multiple_choice') return null;
-  // A checkbox question has no single selection to pre-fill: its initial state
-  // is the set of boxes the pane already shows as ticked.
-  if (promptData.multiSelect === true) return null;
-  return promptData.options.find((opt) => opt.isDefault)?.number ?? null;
-}
-
-/**
- * The boxes the terminal already shows as ticked (Issue #2755).
- *
- * The panel opens on the screen's own state rather than on nothing, because the
- * answer it sends is the FINAL set and the sender reaches it by toggling the
- * difference. Opening empty would offer the operator a "select nothing" they
- * did not ask for, and sending it would untick what they had ticked at the pane.
- */
-function initialCheckedNumbers(promptData: PanelPromptData): number[] {
-  if (promptData.type !== 'multiple_choice' || promptData.multiSelect !== true) return [];
-  return promptData.options.filter((opt) => opt.checked === true).map((opt) => opt.number);
-}
+/** Re-exported from `prompt-answer`, where the pure helpers now live (Issue #3209). */
+export { promptQuestionKey };
 
 /**
  * Props for PromptPanel component
@@ -172,62 +132,12 @@ export interface PromptPanelProps {
   answerable?: boolean;
 }
 
-/** Props for {@link PromptStuckHint} */
-interface PromptStuckHintProps {
-  showStuckHint?: boolean;
-  onSwitchToDirectInput?: () => void;
-  /** Issue #2870. See {@link PromptPanelProps.answerable}. */
-  answerable?: boolean;
-}
-
-/**
- * The "Send is not working — use direct input" line under a prompt window
- * (Issue #2869). Renders nothing unless both props are given, so a caller that
- * passes neither keeps its pre-#2869 output. `MobilePromptSheet` draws its own
- * copy rather than importing this one: suites that mock this module for the
- * split pane still render the sheet.
- */
-function PromptStuckHint({ showStuckHint, onSwitchToDirectInput, answerable }: PromptStuckHintProps) {
-  const t = useTranslations('worktree');
-  const linkLabel = t('promptResponse.stuckHintLink');
-  // Issue #2870: a window the route would refuse says so up front — no Send
-  // has to fail first — and offers the link whenever there is one to offer.
-  if (answerable === false) {
-    return (
-      <p data-testid="prompt-unanswerable-hint" className="mt-3 text-sm text-warning-foreground">
-        {t('promptResponse.unanswerable')}
-        {onSwitchToDirectInput && (
-          <>
-            {' '}
-            <button
-              type="button"
-              data-testid="prompt-stuck-hint-link"
-              onClick={onSwitchToDirectInput}
-              aria-label={linkLabel}
-              className="underline font-medium hover:no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-warning-border rounded"
-            >
-              {linkLabel}
-            </button>
-          </>
-        )}
-      </p>
-    );
+/** The PC logs a failed respond outside production (Issue #3209: moved out of the handlers). */
+function logRespondError(error: unknown): void {
+  // Log error for debugging purposes
+  if (process.env.NODE_ENV !== 'production') {
+    console.error('[PromptPanel] Failed to respond:', error);
   }
-  if (!showStuckHint || !onSwitchToDirectInput) return null;
-  return (
-    <p data-testid="prompt-stuck-hint" className="mt-3 text-sm text-warning-foreground">
-      {t('promptResponse.stuckHint')}{' '}
-      <button
-        type="button"
-        data-testid="prompt-stuck-hint-link"
-        onClick={onSwitchToDirectInput}
-        aria-label={linkLabel}
-        className="underline font-medium hover:no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-warning-border rounded"
-      >
-        {linkLabel}
-      </button>
-    </p>
-  );
 }
 
 /** Props for PromptPanelContent component */
@@ -258,59 +168,36 @@ function PromptPanelContent({
   answerable,
 }: PromptPanelContentProps) {
   const t = useTranslations('prompt');
-  const [selectedOption, setSelectedOption] = useState<number | null>(
-    () => initialSelectedOption(promptData),
+  // Issue #1932: the PC forwards the decision id with every answer, logs a
+  // failed respond outside production, and refuses the structured submit
+  // without an id.
+  const send = useCallback(
+    (answer: string) => onRespond(answer, decisionId),
+    [onRespond, decisionId],
   );
-  // Issue #2755: the boxes ticked on a checkbox question, as the operator has
-  // them right now. Ascending order is applied at submit time, not here, so a
-  // click never reorders the list under the pointer.
-  const [checkedNumbers, setCheckedNumbers] = useState<readonly number[]>(
-    () => initialCheckedNumbers(promptData),
-  );
-  const [textInputValue, setTextInputValue] = useState('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
-
-  // Issue #2755: reset when the QUESTION changes, and only then. The card is
-  // not remounted between the questions of one `AskUserQuestion` call, so a
-  // `useState` initialiser is not enough — see {@link promptQuestionKey}.
-  // Written as the documented "adjust state during render" pattern rather than
-  // an effect: React re-renders this component immediately with the new state
-  // and nothing downstream ever sees the stale selection.
-  const questionKey = promptQuestionKey(promptData);
-  const [seenQuestionKey, setSeenQuestionKey] = useState(questionKey);
-  if (questionKey !== seenQuestionKey) {
-    setSeenQuestionKey(questionKey);
-    setSelectedOption(initialSelectedOption(promptData));
-    setCheckedNumbers(initialCheckedNumbers(promptData));
-    setTextInputValue('');
-  }
-
-  /** The checkbox question's options, or null when this is not one (#2755). */
-  const multiSelectOptions = promptData.type === 'multiple_choice'
-    && promptData.multiSelect === true
-    ? promptData.options
-    : null;
-
-  // Memoize selected option data to avoid recalculation on every render
-  const selectedOptionData = useMemo(() => {
-    if (promptData.type !== 'multiple_choice') return null;
-    return promptData.options.find(opt => opt.number === selectedOption) ?? null;
-  }, [promptData, selectedOption]);
-
-  // Issue #2573: the text field is offered — and its text sent — only for an
-  // option that IS a text field on screen, not for every `requiresTextInput` row.
-  // Issue #2755: on a checkbox question the same rule reads the TICKED rows —
-  // ticking `Type something...` is how that screen offers its text field.
-  const checkedTextFieldNumbers = useMemo(
-    () =>
-      (multiSelectOptions ?? [])
-        .filter((opt) => checkedNumbers.includes(opt.number) && optionTakesTypedText(opt))
-        .map((opt) => opt.number),
-    [multiSelectOptions, checkedNumbers],
-  );
-  const takesTypedText = multiSelectOptions !== null
-    ? checkedTextFieldNumbers.length > 0
-    : selectedOptionData !== null && optionTakesTypedText(selectedOptionData);
+  const {
+    selectedOption,
+    setSelectedOption,
+    checkedNumbers,
+    textInputValue,
+    setTextInputValue,
+    multiSelectOptions,
+    takesTypedText,
+    isBusy,
+    isDisabled,
+    handleToggleOption,
+    handleYesNoClick,
+    handleMultipleChoiceSubmit,
+    handleMultiSelectSubmit,
+    handleDecisionRespond,
+  } = usePromptAnswerState({
+    promptData,
+    answering,
+    answerable,
+    send,
+    onError: logRespondError,
+    canRespondDecision: !!decisionId,
+  });
   // Issue #3184: what this payload is and how it is answered, decided by the
   // one shared function rather than re-derived from `type` / `decisionOptions`
   // here. See {@link panelPromptView} for which decision id it reads.
@@ -321,101 +208,6 @@ function PromptPanelContent({
   // prompt-view-3184.test); what is SHOWN is decided by `view`.
   const screenPrompt = isAnswerablePromptData(promptData) ? promptData : null;
   const structuredPrompt = screenPrompt === null ? (promptData as StructuredPromptWaitingData) : null;
-  const isBusy = answering || isSubmitting;
-  // Issue #2870: a window the route would refuse keeps its options on screen
-  // but nothing on it can be pressed.
-  const isDisabled = isBusy || answerable === false;
-
-  const handleToggleOption = useCallback((optionNumber: number, checked: boolean) => {
-    setCheckedNumbers((previous) =>
-      checked
-        ? previous.includes(optionNumber) ? previous : [...previous, optionNumber]
-        : previous.filter((n) => n !== optionNumber),
-    );
-  }, []);
-
-  // Handle yes/no button click
-  const handleYesNoClick = useCallback(async (answer: 'yes' | 'no') => {
-    if (isDisabled) return;
-    setIsSubmitting(true);
-    try {
-      await onRespond(answer, decisionId);
-    } catch (error) {
-      // Log error for debugging purposes
-      if (process.env.NODE_ENV !== 'production') {
-        console.error('[PromptPanel] Failed to respond:', error);
-      }
-    } finally {
-      setIsSubmitting(false);
-    }
-  }, [isDisabled, onRespond, decisionId]);
-
-  // Handle multiple choice submit
-  const handleMultipleChoiceSubmit = useCallback(async () => {
-    if (isDisabled || selectedOption === null) return;
-    setIsSubmitting(true);
-    try {
-      // A text field with a value sends the text; every other option, including
-      // a menu row that reads as taking text, sends its number (Issue #2573).
-      const answer = takesTypedText && textInputValue.trim()
-        ? textInputValue.trim()
-        : selectedOption.toString();
-      await onRespond(answer, decisionId);
-    } catch (error) {
-      if (process.env.NODE_ENV !== 'production') {
-        console.error('[PromptPanel] Failed to respond:', error);
-      }
-    } finally {
-      setIsSubmitting(false);
-    }
-  }, [isDisabled, onRespond, decisionId, selectedOption, takesTypedText, textInputValue]);
-
-  /**
-   * Submit a checkbox question (Issue #2755).
-   *
-   * The answer is the SET, ascending, de-duplicated and comma-separated —
-   * `"1,3"` — because that is what the sender turns into toggles against the
-   * boxes on screen. A ticked `Type something...` sends the TEXT and nothing
-   * else: the two cannot be combined, since typing into that row is what ticks
-   * it and the other numbers would be swallowed by the field.
-   */
-  const handleMultiSelectSubmit = useCallback(async () => {
-    if (isDisabled) return;
-    const numbers = [...checkedNumbers].sort((a, b) => a - b);
-    if (numbers.length === 0) return;
-    const answer = takesTypedText ? textInputValue.trim() : numbers.join(',');
-    if (answer === '') return;
-    setIsSubmitting(true);
-    try {
-      await onRespond(answer, decisionId);
-    } catch (error) {
-      if (process.env.NODE_ENV !== 'production') {
-        console.error('[PromptPanel] Failed to respond:', error);
-      }
-    } finally {
-      setIsSubmitting(false);
-    }
-  }, [isDisabled, onRespond, decisionId, checkedNumbers, takesTypedText, textInputValue]);
-
-  // Issue #1932: the degraded form's own submit. Separate from the two above
-  // because there is no `selectedOption` state behind it — the verdict comes
-  // straight off the button that was pressed — and because it must never fire
-  // without a decision id: these numbers address an approval over the agent's
-  // API, and posting one with no id would send it down the keystroke path,
-  // where a bare "1" at a picker means whatever line is highlighted (#1681).
-  const handleDecisionRespond = useCallback(async (answer: string) => {
-    if (isDisabled || !decisionId) return;
-    setIsSubmitting(true);
-    try {
-      await onRespond(answer, decisionId);
-    } catch (error) {
-      if (process.env.NODE_ENV !== 'production') {
-        console.error('[PromptPanel] Failed to respond:', error);
-      }
-    } finally {
-      setIsSubmitting(false);
-    }
-  }, [isDisabled, onRespond, decisionId]);
 
   return (
     <div className="space-y-4">
@@ -812,7 +604,7 @@ function StructuredQuestionActions({
   disabled,
   onRespond,
 }: {
-  choices: PromptQuestionChoices;
+  choices: QuestionChoices;
   disabled: boolean;
   onRespond: (answer: string) => void;
 }) {
@@ -1270,6 +1062,7 @@ export const PromptPanel = memo(function PromptPanel({
           showStuckHint={showStuckHint}
           onSwitchToDirectInput={onSwitchToDirectInput}
           answerable={answerable}
+          linkClassName="underline font-medium hover:no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-warning-border rounded"
         />
       </div>
     </ErrorBoundary>
@@ -1277,21 +1070,6 @@ export const PromptPanel = memo(function PromptPanel({
 });
 
 export default PromptPanel;
-
-/**
- * The heading above the prompt (Issue #3181, #3184): the view's heading in the
- * user's locale. With addressable choices underneath it must not say the
- * options could not be read — the view only says `unreadable` when there are
- * none.
- */
-function promptHeadingText(
-  t: ReturnType<typeof useTranslations>,
-  heading: PromptViewHeading
-): string {
-  const message = promptHeadingMessage(heading);
-  if ('text' in message) return message.text;
-  return 'values' in message ? t(message.key, message.values) : t(message.key);
-}
 
 /**
  * The panel's view of its payload (Issue #3184).
