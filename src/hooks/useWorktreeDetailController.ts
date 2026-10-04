@@ -42,7 +42,7 @@ import { UPLOADABLE_EXTENSIONS, getMaxFileSize, isUploadableExtension } from '@/
 import { useToast } from '@/components/common/Toast';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
 import { useAutoYes } from '@/hooks/useAutoYes';
-import { buildPromptResponseBody } from '@/lib/prompt-response-body-builder';
+import { buildPromptResponseBody, isPromptRefused } from '@/lib/prompt-response-body-builder';
 import { readSelectionListShape } from '@/lib/detection/selection-shape';
 import { useAppUpdate } from '@/contexts/AppUpdateContext';
 import { type AutoYesToggleParams } from '@/components/worktree/AutoYesToggle';
@@ -1234,8 +1234,7 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
         // Issue #2468: a refusal is a 200 `{ success: false, reason }`, so the
         // card stays and the user is told why — the same contract as the split
         // pane's `handlePromptRespond`.
-        const result = (await response.json().catch(() => null)) as { success?: unknown } | null;
-        if (result?.success === false) {
+        if (await isPromptRefused(response)) {
           showToast(tWorktree('promptResponse.refused'), 'warning');
           await fetchCurrentOutput();
           return;
