@@ -30,6 +30,7 @@ import {
 } from '@/config/cli-tool-timing-config';
 import { missingToolError } from './install-hints';
 import { beginAgentSession } from '@/lib/session/agent-session-lifecycle';
+import { withLaunchScreenCleared } from '@/lib/session/launch-screen';
 
 const logger = createLogger('cli-tools/vibe-local');
 
@@ -145,7 +146,7 @@ export class VibeLocalTool extends BaseCLITool {
 
       // Start vibe-local in interactive mode with auto-approve (-y)
       // -y flag skips the permission confirmation prompt
-      await sendKeys(sessionName, vibeLocalCommand, true);
+      await sendKeys(sessionName, withLaunchScreenCleared(vibeLocalCommand), true);
 
       // Wait for vibe-local to initialize (banner + model loading)
       await new Promise((resolve) => setTimeout(resolve, VIBE_LOCAL_INIT_WAIT_MS));

@@ -98,6 +98,7 @@ import {
   rememberOpencodeSession,
   resetOpencodeSessionMemories,
 } from '@/lib/session/opencode-session-store';
+import { LAUNCH_SCREEN_CLEAR_PREFIX } from '@/lib/session/launch-screen';
 
 const WORKTREE_ID = 'wt-resume-2038';
 const SESSION_ID = 'ses_fc9802f88ffeZzlE5mU5cYYEFs';
@@ -121,7 +122,10 @@ const savedEnv: Record<string, string | undefined> = {};
 /** The command line `sendKeys` was asked to type into the pane. */
 function typedLaunchCommand(): string {
   const call = vi.mocked(sendKeys).mock.calls[0];
-  return String(call?.[1] ?? '');
+  // Issue #3180: typed behind `clear 2>/dev/null; `; the rest is the rendered line.
+  const typed = String(call?.[1] ?? '');
+  expect(typed.startsWith(LAUNCH_SCREEN_CLEAR_PREFIX)).toBe(true);
+  return typed.slice(LAUNCH_SCREEN_CLEAR_PREFIX.length);
 }
 
 

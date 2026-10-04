@@ -74,6 +74,7 @@ import {
   SessionStartTimeoutError,
   isSessionStartTimeoutError,
 } from '@/lib/session/session-start-error';
+import { withLaunchScreenCleared } from '@/lib/session/launch-screen';
 
 const logger = createLogger('cli-tools/command-code');
 
@@ -309,11 +310,13 @@ export class CommandCodeTool extends BaseCLITool {
 
       await sendKeys(
         sessionName,
-        buildCommandCodeLaunchCommand({
-          target: { worktreeId, cliToolId: COMMAND_CODE_CLI_TOOL_ID, instanceId },
-          executablePath: this.command,
-          worktreePath,
-        }),
+        withLaunchScreenCleared(
+          buildCommandCodeLaunchCommand({
+            target: { worktreeId, cliToolId: COMMAND_CODE_CLI_TOOL_ID, instanceId },
+            executablePath: this.command,
+            worktreePath,
+          })
+        ),
         true
       );
 

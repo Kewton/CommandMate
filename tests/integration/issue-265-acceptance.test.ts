@@ -70,6 +70,7 @@ import {
   CLAUDE_SESSION_ERROR_REGEX_PATTERNS,
 } from '@/lib/detection/cli-patterns';
 import { findClaudeLaunchIndex, sendKeysCommands } from '@tests/helpers/claude-launch-command';
+import { LAUNCH_SCREEN_CLEAR_PREFIX } from '@/lib/session/launch-screen';
 import { registerIsolatedAgentHooksDir } from '@tests/helpers/agent-hooks-dir';
 
 const TEST_SESSION_OPTIONS = {
@@ -77,6 +78,18 @@ const TEST_SESSION_OPTIONS = {
   worktreePath: '/path/to/worktree',
 } as const;
 const TEST_SESSION_NAME = 'mcbd-claude-test-worktree';
+
+/**
+ * `sendKeys` calls with the Issue #3180 `clear 2>/dev/null; ` prefix taken off the launch
+ * line, so the launch is located by the binary it runs, as before.
+ */
+function withoutLaunchScreenClear(calls: readonly (readonly unknown[])[]): unknown[][] {
+  return calls.map((call) =>
+    typeof call[1] === 'string' && call[1].startsWith(LAUNCH_SCREEN_CLEAR_PREFIX)
+      ? [call[0], call[1].slice(LAUNCH_SCREEN_CLEAR_PREFIX.length), ...call.slice(2)]
+      : [...call]
+  );
+}
 
 // Issue #1722 writes a hooks settings file on every session start.
 registerIsolatedAgentHooksDir('issue-265');
@@ -153,7 +166,7 @@ describe('Issue #265 Acceptance Test: CLI path cache invalidation and broken ses
       // session it was sent to, the Enter — plus that the rejected value did not
       // reach the command line by any route at all.
       const calls = vi.mocked(sendKeys).mock.calls;
-      const index = findClaudeLaunchIndex(calls, '/usr/local/bin/claude');
+      const index = findClaudeLaunchIndex(withoutLaunchScreenClear(calls), '/usr/local/bin/claude');
       expect(
         index,
         `no launch from the which-resolved path in ${JSON.stringify(sendKeysCommands(calls))}`
@@ -291,7 +304,10 @@ describe('Issue #265 Acceptance Test: CLI path cache invalidation and broken ses
       const unsetIndex = sendKeysCalls.findIndex(call => call[1] === 'unset CLAUDECODE');
       // The launch line carries `--settings` since Issue #1722; this criterion is
       // about ordering, so the launch call is located by which binary it runs.
-      const claudePathIndex = findClaudeLaunchIndex(sendKeysCalls, '/usr/local/bin/claude');
+      const claudePathIndex = findClaudeLaunchIndex(
+        withoutLaunchScreenClear(sendKeysCalls),
+        '/usr/local/bin/claude'
+      );
 
       // unset CLAUDECODE must come before claude CLI launch
       expect(unsetIndex).toBeGreaterThanOrEqual(0);

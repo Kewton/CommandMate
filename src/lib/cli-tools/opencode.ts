@@ -132,6 +132,7 @@ import {
   buildOpencodeSharedDataConflictMessage,
   findOpencodeSharedDataConflict,
 } from '@/lib/hooks/sources/opencode/log-diagnosis';
+import { withLaunchScreenCleared } from '@/lib/session/launch-screen';
 
 const logger = createLogger('cli-tools/opencode');
 
@@ -500,7 +501,7 @@ export class OpenCodeTool extends BaseCLITool {
       }
 
       const launchedAt = Date.now();
-      await sendKeys(sessionName, launchCommand, true);
+      await sendKeys(sessionName, withLaunchScreenCleared(launchCommand), true);
 
       // Issue #1908: poll for opencode's own composer instead of sleeping 15 s.
       await this.waitForReady(sessionName);

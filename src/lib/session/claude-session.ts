@@ -50,6 +50,7 @@ import {
   SessionStartUnavailableError,
   isSafeSessionStartError,
 } from '@/lib/session/session-start-error';
+import { withLaunchScreenCleared } from '@/lib/session/launch-screen';
 
 const logger = createLogger('claude-session');
 
@@ -812,7 +813,7 @@ export async function startClaudeSession(
       model === undefined ? baseLaunchCommand : `${baseLaunchCommand} --model ${shellQuote(model)}`;
 
     // Start Claude CLI in interactive mode using dynamically resolved path
-    await sendKeys(sessionName, launchCommand, true);
+    await sendKeys(sessionName, withLaunchScreenCleared(launchCommand), true);
 
     // Wait for Claude to initialize with dynamic detection (OCP-001)
     // Use constants instead of hardcoded values
