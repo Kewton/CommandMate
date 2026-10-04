@@ -449,11 +449,21 @@ const CLI_TOOL_PATTERN_TABLE: Record<CLIToolType, CliToolPatternRow> = {
 };
 
 /**
+ * The table's own row for an id, or undefined. The table is a plain object, so a
+ * name such as 'constructor' or '__proto__' must not reach Object.prototype.
+ */
+function ownRowFor(cliToolId: string): CliToolPatternRow | undefined {
+  return Object.prototype.hasOwnProperty.call(CLI_TOOL_PATTERN_TABLE, cliToolId)
+    ? CLI_TOOL_PATTERN_TABLE[cliToolId as CLIToolType]
+    : undefined;
+}
+
+/**
  * Row for a tool id. An id outside CLI_TOOL_IDS (possible at runtime) falls back
  * to claude's row, as the former `default` branches did.
  */
 function patternRowFor(cliToolId: CLIToolType): CliToolPatternRow {
-  return CLI_TOOL_PATTERN_TABLE[cliToolId] ?? CLI_TOOL_PATTERN_TABLE.claude;
+  return ownRowFor(cliToolId) ?? CLI_TOOL_PATTERN_TABLE.claude;
 }
 
 /**
@@ -515,7 +525,7 @@ export function buildDetectPromptOptions(
   cliToolId: CLIToolType
 ): DetectPromptOptions | undefined {
   // Fresh object per call (callers may mutate); an id outside the table yields undefined.
-  const options = CLI_TOOL_PATTERN_TABLE[cliToolId]?.promptOptions;
+  const options = ownRowFor(cliToolId)?.promptOptions;
   return options === undefined ? undefined : { ...options };
 }
 
@@ -524,6 +534,5 @@ export function buildDetectPromptOptions(
  * An id outside the table answers false.
  */
 export function usesFullFramePrompt(cliToolId: string): boolean {
-  return Object.prototype.hasOwnProperty.call(CLI_TOOL_PATTERN_TABLE, cliToolId)
-    && CLI_TOOL_PATTERN_TABLE[cliToolId as CLIToolType].fullFramePrompt;
+  return ownRowFor(cliToolId)?.fullFramePrompt ?? false;
 }
