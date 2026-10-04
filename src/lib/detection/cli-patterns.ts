@@ -243,6 +243,10 @@ interface CliToolPatternRow {
   separatorPattern: RegExp;
   thinkingPattern: RegExp;
   skipPatterns: readonly RegExp[];
+  /** buildDetectPromptOptions() result; undefined = default behavior (requireDefaultIndicator = true). */
+  promptOptions: DetectPromptOptions | undefined;
+  /** Hand the FULL frame to detectPrompt (see usesFullFramePrompt). */
+  fullFramePrompt: boolean;
 }
 
 const CLI_TOOL_PATTERN_TABLE: Record<CLIToolType, CliToolPatternRow> = {
@@ -260,6 +264,12 @@ const CLI_TOOL_PATTERN_TABLE: Record<CLIToolType, CliToolPatternRow> = {
       /to interrupt\)/, // Part of "esc to interrupt" message
       PASTED_TEXT_PATTERN, // [Pasted text #N +XX lines] (Issue #212)
     ],
+    // Full frame: their multiple-choice prompts with descriptions can exceed 15 lines: Codex
+    // approval prompts with long file lists, Claude "Yes, and don't ask again for:
+    // git commit -m …" options that embed full commit messages. `detectPrompt`
+    // applies its own 50-line window internally.
+    promptOptions: { requireDefaultIndicator: false },
+    fullFramePrompt: true,
   },
 
   codex: {
@@ -282,6 +292,12 @@ const CLI_TOOL_PATTERN_TABLE: Record<CLIToolType, CliToolPatternRow> = {
       /\(.*esc to interrupt\)/, // Interrupt hint
       PASTED_TEXT_PATTERN, // [Pasted text #N +XX lines] (Issue #212, defensive)
     ],
+    // Full frame: their multiple-choice prompts with descriptions can exceed 15 lines: Codex
+    // approval prompts with long file lists, Claude "Yes, and don't ask again for:
+    // git commit -m …" options that embed full commit messages. `detectPrompt`
+    // applies its own 50-line window internally.
+    promptOptions: undefined,
+    fullFramePrompt: true,
   },
 
   gemini: {
@@ -295,6 +311,8 @@ const CLI_TOOL_PATTERN_TABLE: Record<CLIToolType, CliToolPatternRow> = {
       /Gemini\s+\d+\.\d+/, // Version line
       PASTED_TEXT_PATTERN, // [Pasted text #N +XX lines]
     ],
+    promptOptions: undefined,
+    fullFramePrompt: false,
   },
 
   'vibe-local': {
@@ -317,6 +335,8 @@ const CLI_TOOL_PATTERN_TABLE: Record<CLIToolType, CliToolPatternRow> = {
       /ESC:\s*stop/, // Status bar "ESC: stop" hint
       PASTED_TEXT_PATTERN, // [Pasted text #N +XX lines]
     ],
+    promptOptions: undefined,
+    fullFramePrompt: false,
   },
 
   opencode: {
@@ -324,6 +344,41 @@ const CLI_TOOL_PATTERN_TABLE: Record<CLIToolType, CliToolPatternRow> = {
     separatorPattern: OPENCODE_SEPARATOR_PATTERN,
     thinkingPattern: OPENCODE_THINKING_PATTERN,
     skipPatterns: OPENCODE_SKIP_PATTERNS,
+    // [D2-006] OpenCode prompt "Ask anything..." does not use standard indicators (> / ❯),
+    // so requireDefaultIndicator must be false to avoid missing prompt detection.
+    //
+    // [Issue #1896] `hasNumberedDialogs: false` -- opencode 1.18 renders NO dialog
+    // that a typed number drives, so the generic numbered-list inference has
+    // nothing to find on its pane and every hit it scored was transcript text.
+    // Its two interactive surfaces were both measured at the production 80x200
+    // geometry and both are cursor-driven:
+    //
+    //  - the permission dialog is a horizontal button strip
+    //    ({@link OPENCODE_PERMISSION_PATTERN}, Issue #1893) driven by ←/→ + Enter;
+    //    typing a number does nothing to it.
+    //  - the pickers (`/models`, `/providers`, `/connect`, and the ctrl+p command
+    //    palette) are fuzzy-search lists driven by ↑/↓ + Enter, with no numbers
+    //    drawn at all. The first three are what
+    //    {@link OPENCODE_SELECTION_LIST_PATTERN} names; the palette shares the
+    //    chrome but not the header allowlist, and lands on `running` / `default`.
+    //
+    // Both keep their own POSITIVE detection in `status-detector.ts`, so `wait`
+    // still stops for them (exit 10 via `isSelectionListActive`) and the UI still
+    // renders NavigationButtons: nothing that could be answered before stops being
+    // answered. What ends is the false positive -- a response whose body ends in
+    // `1. / 2. / 3.` + a question was published as
+    // `waiting`/`prompt_detected`/`hasActivePrompt: true`, and Auto-Yes typed `1`
+    // into the composer and SENT IT as a user utterance (Issue #1896).
+    //
+    // `requireDefaultIndicator` is kept at its D2-006 value: it is the correct
+    // setting for opencode's ❯-less rendering should the numbered path ever be
+    // re-enabled, and it still describes the tool.
+    // Full frame: their multiple-choice prompts with descriptions can exceed 15 lines: Codex
+    // approval prompts with long file lists, Claude "Yes, and don't ask again for:
+    // git commit -m …" options that embed full commit messages. `detectPrompt`
+    // applies its own 50-line window internally.
+    promptOptions: { requireDefaultIndicator: false, hasNumberedDialogs: false },
+    fullFramePrompt: true,
   },
 
   copilot: {
@@ -331,6 +386,13 @@ const CLI_TOOL_PATTERN_TABLE: Record<CLIToolType, CliToolPatternRow> = {
     separatorPattern: COPILOT_SEPARATOR_PATTERN,
     thinkingPattern: COPILOT_THINKING_PATTERN,
     skipPatterns: COPILOT_SKIP_PATTERNS,
+    // [Issue #545] Copilot prompt pattern may not use standard indicators
+    // Full frame: their multiple-choice prompts with descriptions can exceed 15 lines: Codex
+    // approval prompts with long file lists, Claude "Yes, and don't ask again for:
+    // git commit -m …" options that embed full commit messages. `detectPrompt`
+    // applies its own 50-line window internally.
+    promptOptions: { requireDefaultIndicator: false },
+    fullFramePrompt: true,
   },
 
   antigravity: {
@@ -338,6 +400,24 @@ const CLI_TOOL_PATTERN_TABLE: Record<CLIToolType, CliToolPatternRow> = {
     separatorPattern: ANTIGRAVITY_SEPARATOR_PATTERN,
     thinkingPattern: ANTIGRAVITY_THINKING_PATTERN,
     skipPatterns: ANTIGRAVITY_SKIP_PATTERNS,
+    // [Issue #999] Antigravity (agy) permission-approval menus highlight the
+    // default with an ASCII ">" (0x3E), not the "❯/●/›" indicators that
+    // DEFAULT_OPTION_PATTERN recognizes, and their footer is "↑/↓ Navigate"
+    // (no "press enter to confirm"). Under the default requireDefaultIndicator=true
+    // the Pass 1 gate rejects these menus, so Auto-Yes never responds. Treat agy
+    // like claude/opencode/copilot so Pass 2 collects its "1. Yes / … / N. No"
+    // options and reports isPrompt=true.
+    //
+    // [Issue #2364] The `↑/↓ Navigate` dialogs themselves no longer reach
+    // `detectPrompt` on either production path: `tools/antigravity/detect.ts`
+    // (status) and `detectPromptWithOptions` (response poller) both read them
+    // with `detectAntigravityNumberedDialogPrompt` first, because the generic
+    // multiple-choice pass reads one row per option and agy wraps a long command
+    // across several rows of one label. What this setting still serves is every
+    // OTHER numbered agy screen — `/feedback`'s `1-6 Select & Continue` menu is
+    // the measured one — which the generic pass reads as before.
+    promptOptions: { requireDefaultIndicator: false },
+    fullFramePrompt: false,
   },
 
   // Issue #2250: Command Code's layout is claude-shaped (inline transcript,
@@ -351,6 +431,8 @@ const CLI_TOOL_PATTERN_TABLE: Record<CLIToolType, CliToolPatternRow> = {
     separatorPattern: COMMAND_CODE_SEPARATOR_PATTERN,
     thinkingPattern: COMMAND_CODE_THINKING_PATTERN,
     skipPatterns: COMMAND_CODE_SKIP_PATTERNS,
+    promptOptions: undefined,
+    fullFramePrompt: false,
   },
 
   // Issue #2934: OpenCode V2's own constants (see OPENCODE_V2_* above). The
@@ -361,6 +443,8 @@ const CLI_TOOL_PATTERN_TABLE: Record<CLIToolType, CliToolPatternRow> = {
     separatorPattern: OPENCODE_SEPARATOR_PATTERN,
     thinkingPattern: OPENCODE_V2_THINKING_PATTERN,
     skipPatterns: OPENCODE_V2_SKIP_PATTERNS,
+    promptOptions: undefined,
+    fullFramePrompt: false,
   },
 };
 
@@ -430,63 +514,16 @@ export { stripBoxDrawing };
 export function buildDetectPromptOptions(
   cliToolId: CLIToolType
 ): DetectPromptOptions | undefined {
-  if (cliToolId === 'claude') {
-    return { requireDefaultIndicator: false };
-  }
-  // [D2-006] OpenCode prompt "Ask anything..." does not use standard indicators (> / ❯),
-  // so requireDefaultIndicator must be false to avoid missing prompt detection.
-  //
-  // [Issue #1896] `hasNumberedDialogs: false` -- opencode 1.18 renders NO dialog
-  // that a typed number drives, so the generic numbered-list inference has
-  // nothing to find on its pane and every hit it scored was transcript text.
-  // Its two interactive surfaces were both measured at the production 80x200
-  // geometry and both are cursor-driven:
-  //
-  //  - the permission dialog is a horizontal button strip
-  //    ({@link OPENCODE_PERMISSION_PATTERN}, Issue #1893) driven by ←/→ + Enter;
-  //    typing a number does nothing to it.
-  //  - the pickers (`/models`, `/providers`, `/connect`, and the ctrl+p command
-  //    palette) are fuzzy-search lists driven by ↑/↓ + Enter, with no numbers
-  //    drawn at all. The first three are what
-  //    {@link OPENCODE_SELECTION_LIST_PATTERN} names; the palette shares the
-  //    chrome but not the header allowlist, and lands on `running` / `default`.
-  //
-  // Both keep their own POSITIVE detection in `status-detector.ts`, so `wait`
-  // still stops for them (exit 10 via `isSelectionListActive`) and the UI still
-  // renders NavigationButtons: nothing that could be answered before stops being
-  // answered. What ends is the false positive -- a response whose body ends in
-  // `1. / 2. / 3.` + a question was published as
-  // `waiting`/`prompt_detected`/`hasActivePrompt: true`, and Auto-Yes typed `1`
-  // into the composer and SENT IT as a user utterance (Issue #1896).
-  //
-  // `requireDefaultIndicator` is kept at its D2-006 value: it is the correct
-  // setting for opencode's ❯-less rendering should the numbered path ever be
-  // re-enabled, and it still describes the tool.
-  if (cliToolId === 'opencode') {
-    return { requireDefaultIndicator: false, hasNumberedDialogs: false };
-  }
-  // [Issue #545] Copilot prompt pattern may not use standard indicators
-  if (cliToolId === 'copilot') {
-    return { requireDefaultIndicator: false };
-  }
-  // [Issue #999] Antigravity (agy) permission-approval menus highlight the
-  // default with an ASCII ">" (0x3E), not the "❯/●/›" indicators that
-  // DEFAULT_OPTION_PATTERN recognizes, and their footer is "↑/↓ Navigate"
-  // (no "press enter to confirm"). Under the default requireDefaultIndicator=true
-  // the Pass 1 gate rejects these menus, so Auto-Yes never responds. Treat agy
-  // like claude/opencode/copilot so Pass 2 collects its "1. Yes / … / N. No"
-  // options and reports isPrompt=true.
-  //
-  // [Issue #2364] The `↑/↓ Navigate` dialogs themselves no longer reach
-  // `detectPrompt` on either production path: `tools/antigravity/detect.ts`
-  // (status) and `detectPromptWithOptions` (response poller) both read them
-  // with `detectAntigravityNumberedDialogPrompt` first, because the generic
-  // multiple-choice pass reads one row per option and agy wraps a long command
-  // across several rows of one label. What this setting still serves is every
-  // OTHER numbered agy screen — `/feedback`'s `1-6 Select & Continue` menu is
-  // the measured one — which the generic pass reads as before.
-  if (cliToolId === 'antigravity') {
-    return { requireDefaultIndicator: false };
-  }
-  return undefined; // Default behavior (requireDefaultIndicator = true)
+  // Fresh object per call (callers may mutate); an id outside the table yields undefined.
+  const options = CLI_TOOL_PATTERN_TABLE[cliToolId]?.promptOptions;
+  return options === undefined ? undefined : { ...options };
+}
+
+/**
+ * Whether a tool hands the FULL frame to `detectPrompt` instead of the 15-line tail.
+ * An id outside the table answers false.
+ */
+export function usesFullFramePrompt(cliToolId: string): boolean {
+  return Object.prototype.hasOwnProperty.call(CLI_TOOL_PATTERN_TABLE, cliToolId)
+    && CLI_TOOL_PATTERN_TABLE[cliToolId as CLIToolType].fullFramePrompt;
 }

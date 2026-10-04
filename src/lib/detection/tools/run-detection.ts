@@ -32,6 +32,7 @@ import {
   detectThinking,
   getCliToolPatterns,
   buildDetectPromptOptions,
+  usesFullFramePrompt,
 } from '../cli-patterns';
 import { detectPrompt } from '../prompt-detector';
 import { withLiveRegion } from './frame';
@@ -56,21 +57,6 @@ import type {
  * which is `running` with no evidence, not `ready`.
  */
 const STALE_OUTPUT_THRESHOLD_MS: number = 5000;
-
-/**
- * Which tools hand the FULL frame to `detectPrompt` instead of the 15-line tail.
- *
- * Their multiple-choice prompts with descriptions can exceed 15 lines: Codex
- * approval prompts with long file lists, Claude "Yes, and don't ask again for:
- * git commit -m …" options that embed full commit messages. `detectPrompt`
- * applies its own 50-line window internally.
- */
-const FULL_FRAME_PROMPT_TOOLS: ReadonlySet<string> = new Set([
-  'opencode',
-  'codex',
-  'claude',
-  'copilot',
-]);
 
 /**
  * Resolve the `evidence` for a `ready` / `input_prompt` verdict from the generic
@@ -112,7 +98,7 @@ export function runToolDetection(
   // Gemini wraps prompts in box-drawing characters (╭╮╰╯│─) which prevent
   // detectPrompt() from recognizing the prompt content.
   const promptOptions = buildDetectPromptOptions(spec.tool);
-  const promptInput = FULL_FRAME_PROMPT_TOOLS.has(spec.tool)
+  const promptInput = usesFullFramePrompt(spec.tool)
     ? stripBoxDrawing(frame.clean)
     : stripBoxDrawing(frame.lastLines);
   let promptDetection = detectPrompt(promptInput, promptOptions);
