@@ -21,8 +21,8 @@ import {
   isInstanceSelector,
   INSTANCE_ALIAS_HELP_SUFFIX,
   INSTANCE_SELECTOR_ERROR,
-  resolveInstanceTarget,
 } from './instances';
+import { resolveCommandTarget } from './command-target';
 
 /**
  * Whether this instance's agent can be answered by naming a decision
@@ -460,12 +460,8 @@ export function createRespondCommand(): Command {
         // and falls back to the worktree default, so `--instance codex` alone
         // answered into a session that was never started. Resolve the tool the
         // instance is registered under first.
-        const target = options.instance
-          ? await resolveInstanceTarget(client, worktreeId, options.instance, options.agent)
-          : null;
-        const agent = target ? target.cliToolId : options.agent;
+        const { agent, instanceId } = await resolveCommandTarget(client, worktreeId, options.instance, options.agent);
         // Issue #2376: the resolved id. /prompt-response reads instance ids.
-        const instanceId = target?.instanceId;
 
         const body = buildPromptResponseBody(useDefault, answer, agent, instanceId, options.planReview);
 
