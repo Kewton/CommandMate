@@ -33,7 +33,6 @@
  */
 
 import { createLogger } from '@/lib/logger';
-import type { CLIToolType } from '@/lib/cli-tools/types';
 import { PERMISSION_REPLIED_DETAIL } from './agent-event-types';
 import { adjudicatePendingPermission } from './permission-adjudication';
 import { getAgentEventSource } from './sources/registry';
@@ -178,13 +177,4 @@ export async function recheckPendingDecisions(
   });
 
   return { examined: judged.length, delivered, skipped, reason: null };
-}
-
-/** The ref every caller of {@link recheckPendingDecisions} builds. */
-export function decisionRecheckTarget(
-  worktreeId: string,
-  cliToolId: CLIToolType,
-  instanceId?: string
-): AgentInstanceRef {
-  return { worktreeId, cliToolId, instanceId };
 }
