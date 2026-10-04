@@ -17,6 +17,7 @@
  * room. Its candidates are the newly crossed thresholds and the growth rules.
  */
 
+import { bugFlowSummary } from './bug-flow';
 import { reportDateJst } from './report';
 import { severityRank } from './metrics-parse';
 import {
@@ -441,6 +442,9 @@ function evaluate(m: OkMeasurement, previous: MetricSnapshot | null): Evaluation
       );
     case 'server-process':
       return evaluateServerProcess(m, previous);
+    case 'bug-flow':
+      // Numbers only (Issue #3185): never a candidate, so no Issue is filed from it.
+      return { candidates: [], summary: bugFlowSummary(m.items) };
   }
 }
 
@@ -448,7 +452,7 @@ function evaluate(m: OkMeasurement, previous: MetricSnapshot | null): Evaluation
  * One metric's result. Security metrics fail while any finding exists (a
  * high advisory is a problem whether or not it is new); maintainability
  * metrics fail only when something got worse; performance metrics fail while
- * anything is a candidate or outstanding.
+ * anything is a candidate or outstanding; process metrics never fail.
  */
 export function evaluateMetric(measurement: MetricMeasurement, previous: MetricSnapshot | null): MetricResult {
   const category = METRIC_CATEGORY[measurement.metricId];
@@ -470,7 +474,9 @@ export function evaluateMetric(measurement: MetricMeasurement, previous: MetricS
       ? hasFindings
       : category === 'performance'
         ? evaluation.candidates.length + (evaluation.outstanding?.length ?? 0) > 0
-        : evaluation.candidates.length > 0;
+        : category === 'process'
+          ? false
+          : evaluation.candidates.length > 0;
   return {
     metricId: measurement.metricId,
     category,
