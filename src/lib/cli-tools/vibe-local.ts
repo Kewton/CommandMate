@@ -31,15 +31,9 @@ import {
 import { missingToolError } from './install-hints';
 import { beginAgentSession } from '@/lib/session/agent-session-lifecycle';
 import { withLaunchScreenCleared } from '@/lib/session/launch-screen';
+import { getErrorMessage } from '@/lib/errors';
 
 const logger = createLogger('cli-tools/vibe-local');
-
-/**
- * Extract error message from unknown error type (DRY)
- */
-function getErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
 
 /**
  * Wait for vibe-local to initialize after launch.
@@ -55,14 +49,6 @@ export class VibeLocalTool extends BaseCLITool {
   readonly id: CLIToolType = 'vibe-local';
   readonly name = 'Vibe Local';
   readonly command = 'vibe-local';
-
-  /**
-   * Check if vibe-local session is running for a worktree
-   */
-  async isRunning(worktreeId: string, instanceId?: string): Promise<boolean> {
-    const sessionName = this.getSessionName(worktreeId, instanceId);
-    return await hasSession(sessionName);
-  }
 
   /**
    * Start a new vibe-local session for a worktree

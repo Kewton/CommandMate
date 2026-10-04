@@ -43,9 +43,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { isCliToolType, isValidInstanceId } from '@/lib/cli-tools/types';
 import {
   resolveSessionTargetStrict,
-  describeSessionTargetConflict,
-  INSTANCE_TOOL_CONFLICT,
 } from '@/lib/session/resolve-session-target';
+import { sessionTargetConflictResponse } from '@/lib/session/session-target-conflict-response';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { getWorktreeById } from '@/lib/db';
 import { getDbInstance } from '@/lib/db/db-instance';
@@ -126,14 +125,7 @@ export async function POST(
       requestedCliTool: cliToolId,
     });
     if (!resolution.ok) {
-      return NextResponse.json(
-        {
-          error: describeSessionTargetConflict(resolution.conflict),
-          code: INSTANCE_TOOL_CONFLICT,
-          ...resolution.conflict,
-        },
-        { status: 400 }
-      );
+      return sessionTargetConflictResponse(resolution.conflict);
     }
     const target = resolution.target;
 
