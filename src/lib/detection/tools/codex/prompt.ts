@@ -49,6 +49,7 @@ import {
   type CodexLifecycleDialog,
 } from '../../cli-patterns';
 import { findNumberedOptionBlock } from '../dialog-block';
+import { readContextAbove as readContextAboveFrom } from '../context-above';
 import type { DialogVerdict, NormalizedFrame } from '../types';
 
 /** What `detect.ts` measured about this frame before handing it over. */
@@ -83,17 +84,8 @@ const LIFECYCLE_DIALOG_KINDS: Readonly<Record<CodexLifecycleDialog, string>> = {
   trust: 'trust',
 };
 
-/** How many non-blank rows above the options may hold the question. */
-const QUESTION_SCAN_ROWS = 4;
-
 function readContextAbove(lines: readonly string[], firstRow: number): string {
-  const rows: string[] = [];
-  for (let i = firstRow - 1; i >= 0 && rows.length < QUESTION_SCAN_ROWS; i--) {
-    const row = lines[i].trim();
-    if (row === '') continue;
-    rows.push(row);
-  }
-  return rows.join('\n');
+  return readContextAboveFrom(lines, firstRow, -1);
 }
 
 /**
