@@ -104,6 +104,7 @@ import {
   type SessionNoteValue,
 } from '@/components/worktree/TerminalSplitPane';
 import { formatSessionNoteTimestamp } from '@/lib/date-utils';
+import { useChatSurfaceLiveState } from '@/hooks/useChatSurfaceLiveState';
 import { useTerminalPanePolling } from '@/hooks/useTerminalPanePolling';
 import { useSplitMessages } from '@/hooks/useSplitMessages';
 import { usePendingMessages, type OptimisticSendOptions } from '@/hooks/usePendingMessages';
@@ -850,43 +851,7 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
   // `prompt` object the mobile prompt sheet is driven by, so the banner's "a wait
   // nobody could read" case and the sheet cannot disagree about one frame — see
   // `ChatSurfaceLiveState` for why `isPromptWaiting` is `prompt.visible`.
-  const chatLiveState: ChatSurfaceLiveState = useMemo(
-    () => ({
-      isRunning: terminal.isRunning,
-      // Issue #2445: same copy, same reason as the PC split — the phone must
-      // not read the hook's initial `isRunning: false` as a dead session.
-      attaching: terminal.attaching,
-      // Issue #2238: same pair, same reason as the PC split — this is the field
-      // the in-flight bubble is gated on, and `isRunning` is not.
-      sessionStatus: terminal.sessionStatus,
-      isThinking: terminal.isThinking,
-      isPromptWaiting: prompt.visible,
-      promptData: prompt.data,
-      isSelectionListActive: terminal.isSelectionListActive,
-      isPagerActive: terminal.isPagerActive,
-      // Issue #2373: same copy, same reason as the PC split — without it the
-      // surface only ever sees `undefined` here and re-derives the verdict from
-      // the frame it was handed, which is a different slice of bytes than the
-      // one the server judged.
-      isDismissablePanelActive: terminal.isDismissablePanelActive,
-      isUnclassifiedActive: terminal.isUnclassifiedActive,
-      // Issue #3179: same copy, same reason as the PC split.
-      startingSince: terminal.startingSince,
-    }),
-    [
-      terminal.isRunning,
-      terminal.attaching,
-      terminal.sessionStatus,
-      terminal.isThinking,
-      terminal.isSelectionListActive,
-      terminal.isPagerActive,
-      terminal.isDismissablePanelActive,
-      terminal.isUnclassifiedActive,
-      terminal.startingSince,
-      prompt.visible,
-      prompt.data,
-    ],
-  );
+  const chatLiveState: ChatSurfaceLiveState = useChatSurfaceLiveState(terminal, prompt);
 
   return (
     <div className="relative flex flex-col h-full min-h-0">
