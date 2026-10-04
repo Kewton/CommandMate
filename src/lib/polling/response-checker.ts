@@ -1307,6 +1307,442 @@ function markOrSettleStructuredHistoryRecheck(pollerKey: string, recorded: boole
   }
 }
 
+// The steps of checkForResponse's save path, split out one function per step
+// (Issue #3213). They are declared in the order checkForResponse calls them, and
+// each is called at the position its lines had, so nothing a step writes — a
+// row, a broadcast, a log line, poller state — moved relative to anything else.
+// The comments inside were written in place: "above" and "below" in them are
+// positions in checkForResponse.
+
+/**
+ * What one `checkForResponse` tick is keyed by, as handed to the steps split
+ * out of it (Issue #3213).
+ *
+ * One object rather than seven positional arguments because four of them are
+ * strings a call site could transpose without a type error. Each step
+ * destructures the names it uses, so the moved lines read exactly as they did
+ * inside `checkForResponse`.
+ */
+interface ResponseCheckContext {
+  db: ReturnType<typeof getDbInstance>;
+  worktree: NonNullable<ReturnType<typeof getWorktreeById>>;
+  worktreeId: string;
+  cliToolId: CLIToolType;
+  /** As passed to `checkForResponse`: undefined for the primary instance. */
+  instanceId: string | undefined;
+  /** `instanceId ?? cliToolId`. */
+  resolvedInstanceId: string;
+  pollerKey: string;
+}
+
+/**
+ * Save a live prompt as a prompt message, and raise what follows from it: the
+ * task event, the push notification and the waiting episode.
+ *
+ * The body of the `if (promptIsLive)` branch of {@link checkForResponse}, split
+ * out as it was (Issue #3213). Both returns are the tick's own result — `false`
+ * for a prompt the dedup has already recorded, `true` once the row is written.
+ *
+ * @param ctx - What this tick is keyed by
+ * @param promptDetection - The detection that passed the #2457 gate
+ * @param result - The complete extraction this tick made
+ * @param isFullScreenTui - True for opencode and copilot, which keep polling after a prompt
+ * @returns What `checkForResponse` returns for this tick
+ */
+function savePromptMessage(
+  ctx: ResponseCheckContext,
+  promptDetection: PromptDetectionResult,
+  result: ExtractionResult,
+  isFullScreenTui: boolean
+): boolean {
+  const { db, worktree, worktreeId, cliToolId, instanceId, resolvedInstanceId, pollerKey } = ctx;
+
+  // Issue #565: Content hash-based duplicate prompt prevention
+  const promptContent = promptDetection.rawContent || promptDetection.cleanContent;
+  const normalizedForDedup = normalizePromptForDedup(promptContent, cliToolId);
+  if (isDuplicatePrompt(pollerKey, normalizedForDedup)) {
+    // Issue #1695: the log line below is invisible to `commandmate capture
+    // --json`, so a suppressed prompt and a prompt the detection layer never
+    // classified (#1676) look identical from the CLI — both say "nothing was
+    // recorded". Count the skip so the payload can tell them apart.
+    recordPromptDedupSkip(worktreeId, cliToolId, instanceId);
+    logger.info('duplicate-prompt-skipped', { worktreeId, cliToolId });
+    return false;
+  }
+
+  // Issue #571: Clean TUI decorations from Copilot prompt content before saving
+  let promptSaveContent = promptContent;
+  if (cliToolId === 'copilot') {
+    promptSaveContent = cleanCopilotResponse(promptContent);
+    promptSaveContent = truncateMessage(promptSaveContent, COPILOT_MAX_MESSAGE_LENGTH, COPILOT_TRUNCATION_MARKER);
+  }
+
+  // This is a prompt - save as prompt message
+  clearInProgressMessageId(db, worktreeId, cliToolId, resolvedInstanceId);
+
+  const message = createMessage(db, {
+    worktreeId,
+    role: 'assistant',
+    content: promptSaveContent,
+    messageType: 'prompt',
+    promptData: promptDetection.promptData,
+    timestamp: new Date(),
+    cliToolId,
+    instanceId: resolvedInstanceId,
+  });
+
+  updateSessionState(db, worktreeId, cliToolId, result.lineCount, resolvedInstanceId);
+  broadcastMessage('message', { worktreeId, message });
+
+  // Issue #1548: the agent is blocked on input. Raised after the dedup and
+  // save above, so the task log counts prompts the system actually recorded
+  // rather than every poll that saw the same one still on screen. No-ops
+  // when this instance is not running a contract.
+  applyEventToActiveTask(db, worktreeId, cliToolId, resolvedInstanceId, 'prompt_detected', {
+    promptType: promptDetection.promptData?.type,
+  });
+
+  // Web Push fan-out (Issue #1125): agent is now waiting for a prompt reply.
+  // Fire-and-forget — push is advisory and must never block/break the poller.
+  //
+  // Issue #1790: the wait is now named by #1786's episode rather than by the
+  // prompt text. The two lines below are ordered, not incidental:
+  //
+  //  1. the notification is raised first, while it still has the prompt's
+  //     own question to quote — it records the episode in the dedup, so
+  //     whichever path reports the wait second says nothing;
+  //  2. `observeWaitingEdge` then opens that same episode, which is what
+  //     lets the edge listener (and #1788's WebSocket frame) agree with this
+  //     call about *which* wait this is instead of raising a second one.
+  //
+  // Both use one timestamp so the episode the notification claims and the
+  // episode the store opens are the same number.
+  const promptObservedAt = Date.now();
+  const promptWaitingSince =
+    getWaitingEpisode(worktreeId, cliToolId, instanceId)?.since ?? promptObservedAt;
+
+  // Issue #1999: Auto-Yes is a declaration that this session's prompts are
+  // answered without a human, so notifying for one is telling the reader the
+  // opposite of the truth. Only the notification is gated — the episode
+  // below still opens, so the WebSocket frame, the status API and the #1790
+  // reminder all see the wait exactly as they did before. The gate runs
+  // before the call rather than inside it because `shouldSendWaitingPush`
+  // records the episode the moment it decides to send.
+  if (
+    !isPromptPushSuppressed({
+      worktreeId,
+      cliToolId,
+      instanceId,
+      waitingSince: promptWaitingSince,
+    })
+  ) {
+    void notifyPushSubscribers({
+      worktreeId,
+      worktreeName: worktree.name,
+      kind: 'prompt',
+      agentName: resolvedInstanceId,
+      instanceId: resolvedInstanceId,
+      waitingKind: 'prompt',
+      waitingSince: promptWaitingSince,
+      excerpt: promptDetection.promptData?.question ?? promptSaveContent,
+    }).catch(() => {});
+  }
+
+  observeWaitingEdge({
+    worktreeId,
+    cliToolId,
+    instanceId,
+    waiting: true,
+    kind: 'prompt',
+    now: promptObservedAt,
+  });
+
+  if (!isFullScreenTui) {
+    stopPolling(worktreeId, cliToolId, instanceId);
+  }
+
+  return true;
+}
+
+/**
+ * Clean a complete response the way its tool needs before it is saved.
+ *
+ * The "Clean up responses" step of {@link checkForResponse}, split out as it
+ * was (Issue #3213). Not a pure function: for copilot and opencode it reads the
+ * Layer-2 accumulator and clears it, so it is called once per tick, at the
+ * position the step had.
+ *
+ * @param cliToolId - CLI tool identifier
+ * @param result - The complete extraction this tick made
+ * @param pollerKey - Poller key ("worktreeId:instanceId")
+ * @returns The cleaned response
+ */
+function cleanCompletedResponse(
+  cliToolId: CLIToolType,
+  result: ExtractionResult,
+  pollerKey: string
+): string {
+  // Clean up responses
+  let cleanedResponse = result.response;
+  if (cliToolId === 'gemini') {
+    cleanedResponse = cleanGeminiResponse(result.response);
+  } else if (cliToolId === 'claude') {
+    cleanedResponse = cleanClaudeResponse(result.response);
+  } else if (cliToolId === 'copilot') {
+    const accumulatedContent = getAccumulatedContent(pollerKey);
+    const sourceContent = accumulatedContent || result.response;
+    cleanedResponse = cleanCopilotResponse(sourceContent);
+    cleanedResponse = truncateMessage(cleanedResponse, COPILOT_MAX_MESSAGE_LENGTH, COPILOT_TRUNCATION_MARKER);
+
+    clearTuiAccumulator(pollerKey);
+  } else if (cliToolId === 'opencode') {
+    // Issue #1911 defect 3: opencode wrote to the Layer-2 accumulator but never
+    // read it, so any turn longer than the pane was saved without its head.
+    //
+    // Read it only when the head is ACTUALLY gone, which is what
+    // `turnHeadTruncated` measures — deliberately NOT copilot's unconditional
+    // `accumulated || response`. The accumulator appends whatever the overlap
+    // check cannot match against the previous poll, and opencode rewrites rows
+    // in place while it works (`+ Thought: … · 12ms` becomes `· 579ms`, a
+    // pending patch row becomes the applied edit). Every such rewrite breaks
+    // the overlap and re-appends the lines above it, so preferring the
+    // accumulator for the common short answer would duplicate content that
+    // `result.response` already holds exactly. When the echo is off screen the
+    // frame is missing content outright, and a possible duplicate beats a
+    // guaranteed truncation.
+    const accumulatedContent = getAccumulatedContent(pollerKey);
+    const sourceContent = result.turnHeadTruncated && accumulatedContent
+      ? accumulatedContent
+      : result.response;
+    cleanedResponse = cleanOpenCodeResponse(sourceContent);
+
+    clearTuiAccumulator(pollerKey);
+  }
+
+  return cleanedResponse;
+}
+
+/**
+ * Skip a response the content dedup has already seen, and re-ask the transcript
+ * reader on the ticks that are owed an answer (Issue #2399).
+ *
+ * The body of the `isDuplicateResponse` branch of {@link checkForResponse},
+ * split out as it was (Issue #3213). Both returns are the tick's own result,
+ * and the caller returns it without doing anything else — so the one `await`
+ * this split adds comes after every write of the tick.
+ *
+ * @param ctx - What this tick is keyed by
+ * @param result - The complete extraction this tick made
+ * @param claudeMetadata - Claude's parsed metadata, undefined for every other tool
+ * @returns What `checkForResponse` returns for this tick
+ */
+async function recheckDuplicateResponse(
+  ctx: ResponseCheckContext,
+  result: ExtractionResult,
+  claudeMetadata: ReturnType<typeof parseClaudeOutput> | undefined
+): Promise<boolean> {
+  const { db, worktree, worktreeId, cliToolId, instanceId, resolvedInstanceId, pollerKey } = ctx;
+
+  // Issue #1695: this branch used to drop the response silently — the
+  // prompt-side guard above has logged its skip since #565, this one
+  // logged nothing at all, so a reply that never reached History left no
+  // trace anywhere. Same action name shape as its sibling so both skips
+  // are found by one grep.
+  logger.info('duplicate-response-skipped', { worktreeId, cliToolId, instanceId: resolvedInstanceId });
+  updateSessionState(db, worktreeId, cliToolId, result.lineCount, resolvedInstanceId);
+
+  // Issue #2399: the skip above is about the SCREEN, and until this Issue
+  // it also ended the tick for the TRANSCRIPT READER 100 lines below —
+  // which is the one consumer for whom "the frame has not changed" is not
+  // evidence of anything. A pull-mode agent closes its turn in its own
+  // file AFTER the pane has gone quiet, so the reader's single ask (on the
+  // poll that saved the scrape) is systematically too early, and every
+  // later poll returned here. Measured on codex 2026-09-07: one
+  // `codex-transcript-turn-open`, `task_complete` appended 1.8 s later,
+  // and then `duplicate-response-skipped` every 2 s until
+  // `MAX_POLLING_DURATION` ran out. The Markdown row was never written and
+  // the only thing left in History was the scrape — for a saturated pane,
+  // a single footer line.
+  //
+  // So the reader is re-asked from inside the skip, throttled by
+  // `claimStructuredHistoryRecheck` (once on the first duplicate tick,
+  // then every third — see `./response-dedup`). Deliberately the reader
+  // and nothing else: the scrape stays suppressed, the cursor has already
+  // been advanced above, and none of the bookkeeping the guard skips has a
+  // second producer to be asked about.
+  //
+  // Order over the alternative in the Issue (hoist the reader above the
+  // guard): the reader is a WRITE, and hoisting it would run that write on
+  // every one of the 900 ticks of a 30-minute cycle instead of on the ones
+  // that are owed an answer — the same argument the #2317 Phase D comment
+  // below makes for not letting the delegation test short-circuit it.
+  //
+  // What this does NOT do is retract the scraped row the earlier tick
+  // saved. Three reasons, and the first is decisive: nothing here can
+  // identify that row. The hash this guard matched is per pollerKey, not
+  // per turn — it survives the `resume` of a chain paused on a prompt —
+  // so the row it stands for may belong to an earlier turn entirely, and
+  // a scraped row carries no turn key to join on. Second, `archived` in
+  // this schema is the tombstone of an operator clearing History (#168),
+  // written by `archiveMessages` for a whole worktree; reusing it for
+  // "superseded" would make a clear and a handover indistinguishable in
+  // the table. Third, the scrape is not always junk — when a turn is
+  // interrupted the pane holds text the transcript's closed turn does not
+  // — and a duplicated row is visible and recoverable where a deleted one
+  // is neither. Two rows for one turn is the failure this trades for, and
+  // #2401 has already stopped the junk one being picked as a relay's
+  // answer.
+  //
+  // Issue #2436 narrowed what that trade costs, without changing the
+  // decision above. The row this skip cannot retract is now only ever one
+  // the poller had no reason to hold: a turn whose reader said
+  // `not_yet_closed` is held at the save path below rather than written,
+  // so on the ordinary codex turn there is no earlier row here to regret.
+  // What remains is the case the three reasons above are actually about —
+  // a scrape written when the reader could tell us nothing, and a
+  // transcript that closed later anyway — and for that the row stays,
+  // folded rather than deleted on the chat surface (`ChatMessageBubble`).
+  if (claimStructuredHistoryRecheck(pollerKey)) {
+    const recaptured = await captureStructuredHistoryTurn(worktreeId, cliToolId, instanceId, {
+      worktreePath: worktree.path,
+      transcriptPathHint: claudeMetadata?.logFilePath ?? null,
+    });
+    if (recaptured) {
+      settleStructuredHistoryRecheck(pollerKey);
+      // Issue #2436: the turn is now the agent's own Markdown, so a
+      // scrape held for it is exactly the second row this Issue exists
+      // to stop. Dropped, not written — the only case where dropping a
+      // held reply loses nothing.
+      discardPendingScrapedResponse(pollerKey);
+      logger.info('structured-history-recheck-captured', {
+        worktreeId,
+        cliToolId,
+        instanceId: resolvedInstanceId,
+      });
+      // The turn IS now in History, as the agent's own Markdown, so this
+      // tick recorded something and says so. Inert for the poller either
+      // way: `runPollTick` only reads this value after a stop the tick
+      // raised itself, and this branch raises none.
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * What a tick decided to do with the pane's copy of a finished reply. The three
+ * are computed in {@link checkForResponse}, where the comments on each say why.
+ */
+interface ScrapedHistoryDecision {
+  structuredHistoryLive: boolean;
+  suppressScrapedHistory: boolean;
+  holdScrapedHistory: boolean;
+}
+
+/**
+ * Hold the scraped reply, write it as a message, or drop it.
+ *
+ * The three-way branch on the save path of {@link checkForResponse}, split out
+ * as it was (Issue #3213). Only the branch moved. What decides it — the
+ * structured-history gate and the conversation log, both awaited — stays in
+ * `checkForResponse`: an `await` on a function holding them would put a yield
+ * between the writes here and the ones that follow the call (the waiting edge,
+ * the push, the cursor), and `onRelayTurnCompleted` starts work that could then
+ * run in between.
+ *
+ * @param ctx - What this tick is keyed by
+ * @param cleanedResponse - The cleaned response
+ * @param claudeMetadata - Claude's parsed metadata, undefined for every other tool
+ * @param decision - Whether the scrape is held, written or suppressed
+ */
+function recordOrHoldScrapedResponse(
+  ctx: ResponseCheckContext,
+  cleanedResponse: string,
+  claudeMetadata: ReturnType<typeof parseClaudeOutput> | undefined,
+  decision: ScrapedHistoryDecision
+): void {
+  const { db, worktree, worktreeId, cliToolId, resolvedInstanceId, pollerKey } = ctx;
+  const { structuredHistoryLive, suppressScrapedHistory, holdScrapedHistory } = decision;
+
+  // Issue #2041: the one write the structured path replaces. The scraped text
+  // is dropped, not saved-and-deduped, because the two renderings of one turn
+  // are not byte-comparable — the pane's copy is hard-wrapped at the pane
+  // width and gutter-prefixed, so no content check could ever recognise them
+  // as the same reply.
+  if (holdScrapedHistory) {
+    holdScrapedResponse(pollerKey, {
+      worktreeId,
+      cliToolId,
+      instanceId: resolvedInstanceId,
+      content: cleanedResponse,
+      // The instant the turn was JUDGED finished, not the instant the row is
+      // written. History sorts on this, and a row dated at the end of the
+      // hold would sort under the NEXT turn's prompt.
+      timestamp: new Date(),
+      summary: claudeMetadata?.summary,
+      logFileName: claudeMetadata?.logFileName,
+      requestId: claudeMetadata?.requestId,
+      worktreePath: worktree.path,
+      transcriptPathHint: claudeMetadata?.logFilePath ?? null,
+      expiresAt: Date.now() + PENDING_SCRAPE_HOLD_MS,
+    });
+    logger.info('structured-history-scrape-held', {
+      worktreeId,
+      cliToolId,
+      instanceId: resolvedInstanceId,
+      scrapedLength: cleanedResponse.length,
+      holdMs: PENDING_SCRAPE_HOLD_MS,
+    });
+
+    // The completion edge is announced HERE and not at the flush, because the
+    // turn finished now. A relay waiting on this session gets #2401's grace
+    // window to find a turn-keyed row, which is exactly the row the hold is
+    // waiting for; delaying the announcement by the hold would delay every
+    // delivery by it too.
+    onRelayTurnCompleted(worktreeId, cliToolId, resolvedInstanceId, false);
+  } else if (!suppressScrapedHistory) {
+    // Create new CLI tool message in database
+    const message = createMessage(db, {
+      worktreeId,
+      role: 'assistant',
+      content: cleanedResponse,
+      messageType: 'normal',
+      timestamp: new Date(),
+      cliToolId,
+      instanceId: resolvedInstanceId,
+      summary: claudeMetadata?.summary,
+      logFileName: claudeMetadata?.logFileName,
+      requestId: claudeMetadata?.requestId,
+    });
+
+    // Broadcast message to WebSocket clients
+    broadcastMessage('message', { worktreeId, message });
+
+    // Issue #2377: the scrape path's completion edge. `settled: false` is the
+    // whole difference from the gate's own announcement: this row was read off
+    // a SCREEN whose completion was judged by string analysis, so a relay
+    // waiting on this session re-reads after a few seconds of quiet before it
+    // delivers — the Issue's 「完了検知 + 数秒の静穏」 for the three tools that
+    // keep no transcript. Announced here rather than after the `if` because
+    // the suppressed branch means the gate already announced it, settled.
+    onRelayTurnCompleted(worktreeId, cliToolId, resolvedInstanceId, false);
+  } else {
+    // Issue #2436: a hold from an earlier tick of this same turn is now moot
+    // — the row it was waiting for exists.
+    if (structuredHistoryLive) discardPendingScrapedResponse(pollerKey);
+    logger.info('structured-history-scrape-suppressed', {
+      worktreeId,
+      cliToolId,
+      instanceId: resolvedInstanceId,
+      scrapedLength: cleanedResponse.length,
+      // Which of the two reasons suppressed it. Without this the Phase D case
+      // and the ordinary #2041/#2121 handover are one indistinguishable log
+      // line, and "History is missing a turn" has two very different causes.
+      reason: structuredHistoryLive ? 'structured-history' : 'geometry-delegated',
+    });
+  }
+}
+
 /**
  * Check for CLI tool response once
  *
@@ -1490,112 +1926,19 @@ export async function checkForResponse(
     const promptIsLive =
       promptDetection.isPrompt && isNumberedDialogVouched(cliToolId, promptDetection, output);
 
+    // Issue #3213: what the steps split out of this function are keyed by.
+    const ctx: ResponseCheckContext = {
+      db,
+      worktree,
+      worktreeId,
+      cliToolId,
+      instanceId,
+      resolvedInstanceId,
+      pollerKey,
+    };
+
     if (promptIsLive) {
-      // Issue #565: Content hash-based duplicate prompt prevention
-      const promptContent = promptDetection.rawContent || promptDetection.cleanContent;
-      const normalizedForDedup = normalizePromptForDedup(promptContent, cliToolId);
-      if (isDuplicatePrompt(pollerKey, normalizedForDedup)) {
-        // Issue #1695: the log line below is invisible to `commandmate capture
-        // --json`, so a suppressed prompt and a prompt the detection layer never
-        // classified (#1676) look identical from the CLI — both say "nothing was
-        // recorded". Count the skip so the payload can tell them apart.
-        recordPromptDedupSkip(worktreeId, cliToolId, instanceId);
-        logger.info('duplicate-prompt-skipped', { worktreeId, cliToolId });
-        return false;
-      }
-
-      // Issue #571: Clean TUI decorations from Copilot prompt content before saving
-      let promptSaveContent = promptContent;
-      if (cliToolId === 'copilot') {
-        promptSaveContent = cleanCopilotResponse(promptContent);
-        promptSaveContent = truncateMessage(promptSaveContent, COPILOT_MAX_MESSAGE_LENGTH, COPILOT_TRUNCATION_MARKER);
-      }
-
-      // This is a prompt - save as prompt message
-      clearInProgressMessageId(db, worktreeId, cliToolId, resolvedInstanceId);
-
-      const message = createMessage(db, {
-        worktreeId,
-        role: 'assistant',
-        content: promptSaveContent,
-        messageType: 'prompt',
-        promptData: promptDetection.promptData,
-        timestamp: new Date(),
-        cliToolId,
-        instanceId: resolvedInstanceId,
-      });
-
-      updateSessionState(db, worktreeId, cliToolId, result.lineCount, resolvedInstanceId);
-      broadcastMessage('message', { worktreeId, message });
-
-      // Issue #1548: the agent is blocked on input. Raised after the dedup and
-      // save above, so the task log counts prompts the system actually recorded
-      // rather than every poll that saw the same one still on screen. No-ops
-      // when this instance is not running a contract.
-      applyEventToActiveTask(db, worktreeId, cliToolId, resolvedInstanceId, 'prompt_detected', {
-        promptType: promptDetection.promptData?.type,
-      });
-
-      // Web Push fan-out (Issue #1125): agent is now waiting for a prompt reply.
-      // Fire-and-forget — push is advisory and must never block/break the poller.
-      //
-      // Issue #1790: the wait is now named by #1786's episode rather than by the
-      // prompt text. The two lines below are ordered, not incidental:
-      //
-      //  1. the notification is raised first, while it still has the prompt's
-      //     own question to quote — it records the episode in the dedup, so
-      //     whichever path reports the wait second says nothing;
-      //  2. `observeWaitingEdge` then opens that same episode, which is what
-      //     lets the edge listener (and #1788's WebSocket frame) agree with this
-      //     call about *which* wait this is instead of raising a second one.
-      //
-      // Both use one timestamp so the episode the notification claims and the
-      // episode the store opens are the same number.
-      const promptObservedAt = Date.now();
-      const promptWaitingSince =
-        getWaitingEpisode(worktreeId, cliToolId, instanceId)?.since ?? promptObservedAt;
-
-      // Issue #1999: Auto-Yes is a declaration that this session's prompts are
-      // answered without a human, so notifying for one is telling the reader the
-      // opposite of the truth. Only the notification is gated — the episode
-      // below still opens, so the WebSocket frame, the status API and the #1790
-      // reminder all see the wait exactly as they did before. The gate runs
-      // before the call rather than inside it because `shouldSendWaitingPush`
-      // records the episode the moment it decides to send.
-      if (
-        !isPromptPushSuppressed({
-          worktreeId,
-          cliToolId,
-          instanceId,
-          waitingSince: promptWaitingSince,
-        })
-      ) {
-        void notifyPushSubscribers({
-          worktreeId,
-          worktreeName: worktree.name,
-          kind: 'prompt',
-          agentName: resolvedInstanceId,
-          instanceId: resolvedInstanceId,
-          waitingKind: 'prompt',
-          waitingSince: promptWaitingSince,
-          excerpt: promptDetection.promptData?.question ?? promptSaveContent,
-        }).catch(() => {});
-      }
-
-      observeWaitingEdge({
-        worktreeId,
-        cliToolId,
-        instanceId,
-        waiting: true,
-        kind: 'prompt',
-        now: promptObservedAt,
-      });
-
-      if (!isFullScreenTui) {
-        stopPolling(worktreeId, cliToolId, instanceId);
-      }
-
-      return true;
+      return savePromptMessage(ctx, promptDetection, result, isFullScreenTui);
     }
 
     // Validate response content is not empty
@@ -1609,42 +1952,7 @@ export async function checkForResponse(
       ? parseClaudeOutput(result.response)
       : undefined;
 
-    // Clean up responses
-    let cleanedResponse = result.response;
-    if (cliToolId === 'gemini') {
-      cleanedResponse = cleanGeminiResponse(result.response);
-    } else if (cliToolId === 'claude') {
-      cleanedResponse = cleanClaudeResponse(result.response);
-    } else if (cliToolId === 'copilot') {
-      const accumulatedContent = getAccumulatedContent(pollerKey);
-      const sourceContent = accumulatedContent || result.response;
-      cleanedResponse = cleanCopilotResponse(sourceContent);
-      cleanedResponse = truncateMessage(cleanedResponse, COPILOT_MAX_MESSAGE_LENGTH, COPILOT_TRUNCATION_MARKER);
-
-      clearTuiAccumulator(pollerKey);
-    } else if (cliToolId === 'opencode') {
-      // Issue #1911 defect 3: opencode wrote to the Layer-2 accumulator but never
-      // read it, so any turn longer than the pane was saved without its head.
-      //
-      // Read it only when the head is ACTUALLY gone, which is what
-      // `turnHeadTruncated` measures — deliberately NOT copilot's unconditional
-      // `accumulated || response`. The accumulator appends whatever the overlap
-      // check cannot match against the previous poll, and opencode rewrites rows
-      // in place while it works (`+ Thought: … · 12ms` becomes `· 579ms`, a
-      // pending patch row becomes the applied edit). Every such rewrite breaks
-      // the overlap and re-appends the lines above it, so preferring the
-      // accumulator for the common short answer would duplicate content that
-      // `result.response` already holds exactly. When the echo is off screen the
-      // frame is missing content outright, and a possible duplicate beats a
-      // guaranteed truncation.
-      const accumulatedContent = getAccumulatedContent(pollerKey);
-      const sourceContent = result.turnHeadTruncated && accumulatedContent
-        ? accumulatedContent
-        : result.response;
-      cleanedResponse = cleanOpenCodeResponse(sourceContent);
-
-      clearTuiAccumulator(pollerKey);
-    }
+    const cleanedResponse = cleanCompletedResponse(cliToolId, result, pollerKey);
 
     // If cleaned response is empty or just "[No content]", skip saving
     if (!cleanedResponse || cleanedResponse.trim() === '' || cleanedResponse === '[No content]') {
@@ -1665,90 +1973,8 @@ export async function checkForResponse(
     // the poller would append the same finished reply every 2 s.
     if (!lineCountIsCursor) {
       if (isDuplicateResponse(pollerKey, cleanedResponse)) {
-        // Issue #1695: this branch used to drop the response silently — the
-        // prompt-side guard above has logged its skip since #565, this one
-        // logged nothing at all, so a reply that never reached History left no
-        // trace anywhere. Same action name shape as its sibling so both skips
-        // are found by one grep.
-        logger.info('duplicate-response-skipped', { worktreeId, cliToolId, instanceId: resolvedInstanceId });
-        updateSessionState(db, worktreeId, cliToolId, result.lineCount, resolvedInstanceId);
-
-        // Issue #2399: the skip above is about the SCREEN, and until this Issue
-        // it also ended the tick for the TRANSCRIPT READER 100 lines below —
-        // which is the one consumer for whom "the frame has not changed" is not
-        // evidence of anything. A pull-mode agent closes its turn in its own
-        // file AFTER the pane has gone quiet, so the reader's single ask (on the
-        // poll that saved the scrape) is systematically too early, and every
-        // later poll returned here. Measured on codex 2026-09-07: one
-        // `codex-transcript-turn-open`, `task_complete` appended 1.8 s later,
-        // and then `duplicate-response-skipped` every 2 s until
-        // `MAX_POLLING_DURATION` ran out. The Markdown row was never written and
-        // the only thing left in History was the scrape — for a saturated pane,
-        // a single footer line.
-        //
-        // So the reader is re-asked from inside the skip, throttled by
-        // `claimStructuredHistoryRecheck` (once on the first duplicate tick,
-        // then every third — see `./response-dedup`). Deliberately the reader
-        // and nothing else: the scrape stays suppressed, the cursor has already
-        // been advanced above, and none of the bookkeeping the guard skips has a
-        // second producer to be asked about.
-        //
-        // Order over the alternative in the Issue (hoist the reader above the
-        // guard): the reader is a WRITE, and hoisting it would run that write on
-        // every one of the 900 ticks of a 30-minute cycle instead of on the ones
-        // that are owed an answer — the same argument the #2317 Phase D comment
-        // below makes for not letting the delegation test short-circuit it.
-        //
-        // What this does NOT do is retract the scraped row the earlier tick
-        // saved. Three reasons, and the first is decisive: nothing here can
-        // identify that row. The hash this guard matched is per pollerKey, not
-        // per turn — it survives the `resume` of a chain paused on a prompt —
-        // so the row it stands for may belong to an earlier turn entirely, and
-        // a scraped row carries no turn key to join on. Second, `archived` in
-        // this schema is the tombstone of an operator clearing History (#168),
-        // written by `archiveMessages` for a whole worktree; reusing it for
-        // "superseded" would make a clear and a handover indistinguishable in
-        // the table. Third, the scrape is not always junk — when a turn is
-        // interrupted the pane holds text the transcript's closed turn does not
-        // — and a duplicated row is visible and recoverable where a deleted one
-        // is neither. Two rows for one turn is the failure this trades for, and
-        // #2401 has already stopped the junk one being picked as a relay's
-        // answer.
-        //
-        // Issue #2436 narrowed what that trade costs, without changing the
-        // decision above. The row this skip cannot retract is now only ever one
-        // the poller had no reason to hold: a turn whose reader said
-        // `not_yet_closed` is held at the save path below rather than written,
-        // so on the ordinary codex turn there is no earlier row here to regret.
-        // What remains is the case the three reasons above are actually about —
-        // a scrape written when the reader could tell us nothing, and a
-        // transcript that closed later anyway — and for that the row stays,
-        // folded rather than deleted on the chat surface (`ChatMessageBubble`).
-        if (claimStructuredHistoryRecheck(pollerKey)) {
-          const recaptured = await captureStructuredHistoryTurn(worktreeId, cliToolId, instanceId, {
-            worktreePath: worktree.path,
-            transcriptPathHint: claudeMetadata?.logFilePath ?? null,
-          });
-          if (recaptured) {
-            settleStructuredHistoryRecheck(pollerKey);
-            // Issue #2436: the turn is now the agent's own Markdown, so a
-            // scrape held for it is exactly the second row this Issue exists
-            // to stop. Dropped, not written — the only case where dropping a
-            // held reply loses nothing.
-            discardPendingScrapedResponse(pollerKey);
-            logger.info('structured-history-recheck-captured', {
-              worktreeId,
-              cliToolId,
-              instanceId: resolvedInstanceId,
-            });
-            // The turn IS now in History, as the agent's own Markdown, so this
-            // tick recorded something and says so. Inert for the poller either
-            // way: `runPollTick` only reads this value after a stop the tick
-            // raised itself, and this branch raises none.
-            return true;
-          }
-        }
-        return false;
+        // `await`, so that a rejection still lands in the catch below.
+        return await recheckDuplicateResponse(ctx, result, claudeMetadata);
       }
     }
 
@@ -1854,83 +2080,11 @@ export async function checkForResponse(
       return false;
     }
 
-    // Issue #2041: the one write the structured path replaces. The scraped text
-    // is dropped, not saved-and-deduped, because the two renderings of one turn
-    // are not byte-comparable — the pane's copy is hard-wrapped at the pane
-    // width and gutter-prefixed, so no content check could ever recognise them
-    // as the same reply.
-    if (holdScrapedHistory) {
-      holdScrapedResponse(pollerKey, {
-        worktreeId,
-        cliToolId,
-        instanceId: resolvedInstanceId,
-        content: cleanedResponse,
-        // The instant the turn was JUDGED finished, not the instant the row is
-        // written. History sorts on this, and a row dated at the end of the
-        // hold would sort under the NEXT turn's prompt.
-        timestamp: new Date(),
-        summary: claudeMetadata?.summary,
-        logFileName: claudeMetadata?.logFileName,
-        requestId: claudeMetadata?.requestId,
-        worktreePath: worktree.path,
-        transcriptPathHint: claudeMetadata?.logFilePath ?? null,
-        expiresAt: Date.now() + PENDING_SCRAPE_HOLD_MS,
-      });
-      logger.info('structured-history-scrape-held', {
-        worktreeId,
-        cliToolId,
-        instanceId: resolvedInstanceId,
-        scrapedLength: cleanedResponse.length,
-        holdMs: PENDING_SCRAPE_HOLD_MS,
-      });
-
-      // The completion edge is announced HERE and not at the flush, because the
-      // turn finished now. A relay waiting on this session gets #2401's grace
-      // window to find a turn-keyed row, which is exactly the row the hold is
-      // waiting for; delaying the announcement by the hold would delay every
-      // delivery by it too.
-      onRelayTurnCompleted(worktreeId, cliToolId, resolvedInstanceId, false);
-    } else if (!suppressScrapedHistory) {
-      // Create new CLI tool message in database
-      const message = createMessage(db, {
-        worktreeId,
-        role: 'assistant',
-        content: cleanedResponse,
-        messageType: 'normal',
-        timestamp: new Date(),
-        cliToolId,
-        instanceId: resolvedInstanceId,
-        summary: claudeMetadata?.summary,
-        logFileName: claudeMetadata?.logFileName,
-        requestId: claudeMetadata?.requestId,
-      });
-
-      // Broadcast message to WebSocket clients
-      broadcastMessage('message', { worktreeId, message });
-
-      // Issue #2377: the scrape path's completion edge. `settled: false` is the
-      // whole difference from the gate's own announcement: this row was read off
-      // a SCREEN whose completion was judged by string analysis, so a relay
-      // waiting on this session re-reads after a few seconds of quiet before it
-      // delivers — the Issue's 「完了検知 + 数秒の静穏」 for the three tools that
-      // keep no transcript. Announced here rather than after the `if` because
-      // the suppressed branch means the gate already announced it, settled.
-      onRelayTurnCompleted(worktreeId, cliToolId, resolvedInstanceId, false);
-    } else {
-      // Issue #2436: a hold from an earlier tick of this same turn is now moot
-      // — the row it was waiting for exists.
-      if (structuredHistoryLive) discardPendingScrapedResponse(pollerKey);
-      logger.info('structured-history-scrape-suppressed', {
-        worktreeId,
-        cliToolId,
-        instanceId: resolvedInstanceId,
-        scrapedLength: cleanedResponse.length,
-        // Which of the two reasons suppressed it. Without this the Phase D case
-        // and the ordinary #2041/#2121 handover are one indistinguishable log
-        // line, and "History is missing a turn" has two very different causes.
-        reason: structuredHistoryLive ? 'structured-history' : 'geometry-delegated',
-      });
-    }
+    recordOrHoldScrapedResponse(ctx, cleanedResponse, claudeMetadata, {
+      structuredHistoryLive,
+      suppressScrapedHistory,
+      holdScrapedHistory,
+    });
 
     // Issue #1790: the agent has just produced a reply, so whatever it was
     // waiting for is over. Closing the episode here is what makes a *second*
