@@ -1716,19 +1716,3 @@ export const ErrorDisplay = memo(function ErrorDisplay({
     </div>
   );
 });
-
-// ============================================================================
-// Mobile Content Components (Issue #755)
-// ============================================================================
-
-/**
- * Issue #755: MobileContent / MobileInfoContent moved to
- * `WorktreeDetailMobile.tsx`. Re-exported here for backward compatibility so
- * existing imports of these symbols from WorktreeDetailSubComponents keep
- * working. New code should import from `@/components/worktree/WorktreeDetailMobile`.
- */
-export {
-  MobileContent,
-  MobileInfoContent,
-} from '@/components/worktree/WorktreeDetailMobile';
-
