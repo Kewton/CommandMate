@@ -20,8 +20,9 @@ import {
   isQuestionFreeTextNumeric,
   QUESTION_FREE_TEXT_MAX_LENGTH,
   readQuestionFreeText,
-  type PromptQuestionChoices,
 } from '@/components/worktree/prompt-decision-id';
+import { PromptStuckHint } from '@/components/worktree/PromptStuckHint';
+
 import {
   promptHeadingText,
 } from '@/components/worktree/prompt-answer';
@@ -31,6 +32,7 @@ import {
   optionTakesTypedText,
   readQuestionChoices,
   type PromptView,
+  type QuestionChoices,
 } from '@/lib/session/prompt-view';
 
 /** Animation duration for sheet transitions */
@@ -101,58 +103,6 @@ export interface MobilePromptSheetProps {
    * #2869 link, no Send count needed). Undefined or `true`: unchanged.
    */
   answerable?: boolean;
-}
-
-/**
- * The "Send is not working — use direct input" line (Issue #2869). The same
- * row as `PromptPanel`'s, restated here for the reason the typed-text patterns
- * above are: suites that mock `PromptPanel` still render this sheet.
- */
-function PromptStuckHint({
-  showStuckHint,
-  onSwitchToDirectInput,
-  answerable,
-}: Pick<MobilePromptSheetProps, 'showStuckHint' | 'onSwitchToDirectInput' | 'answerable'>) {
-  const t = useTranslations('worktree');
-  const linkLabel = t('promptResponse.stuckHintLink');
-  // Issue #2870: a window the route would refuse says so up front — no Send
-  // has to fail first — and offers the link whenever there is one to offer.
-  if (answerable === false) {
-    return (
-      <p data-testid="prompt-unanswerable-hint" className="mt-3 text-sm text-warning-foreground">
-        {t('promptResponse.unanswerable')}
-        {onSwitchToDirectInput && (
-          <>
-            {' '}
-            <button
-              type="button"
-              data-testid="prompt-stuck-hint-link"
-              onClick={onSwitchToDirectInput}
-              aria-label={linkLabel}
-              className="underline font-medium min-h-[44px] touch-manipulation"
-            >
-              {linkLabel}
-            </button>
-          </>
-        )}
-      </p>
-    );
-  }
-  if (!showStuckHint || !onSwitchToDirectInput) return null;
-  return (
-    <p data-testid="prompt-stuck-hint" className="mt-3 text-sm text-warning-foreground">
-      {t('promptResponse.stuckHint')}{' '}
-      <button
-        type="button"
-        data-testid="prompt-stuck-hint-link"
-        onClick={onSwitchToDirectInput}
-        aria-label={linkLabel}
-        className="underline font-medium min-h-[44px] touch-manipulation"
-      >
-        {linkLabel}
-      </button>
-    </p>
-  );
 }
 
 /**
@@ -305,6 +255,7 @@ export const MobilePromptSheet = memo(function MobilePromptSheet({
             showStuckHint={showStuckHint}
             onSwitchToDirectInput={onSwitchToDirectInput}
             answerable={answerable}
+            linkClassName="underline font-medium min-h-[44px] touch-manipulation"
           />
         </div>
       </div>
@@ -779,7 +730,7 @@ function StructuredQuestionChoices({
   disabled,
   onRespond,
 }: {
-  choices: PromptQuestionChoices;
+  choices: QuestionChoices;
   disabled: boolean;
   onRespond: (answer: string) => Promise<void>;
 }) {

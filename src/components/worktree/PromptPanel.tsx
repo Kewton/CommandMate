@@ -20,13 +20,15 @@ import {
   isQuestionFreeTextNumeric,
   QUESTION_FREE_TEXT_MAX_LENGTH,
   readQuestionFreeText,
-  type PromptQuestionChoices,
 } from '@/components/worktree/prompt-decision-id';
+import { PromptStuckHint } from '@/components/worktree/PromptStuckHint';
+
 import {
   derivePromptView,
   optionTakesTypedText,
   readQuestionChoices,
   type PromptView,
+  type QuestionChoices,
 } from '@/lib/session/prompt-view';
 import { ErrorBoundary } from '@/components/error/ErrorBoundary';
 import { Checkbox, RadioGroup, RadioGroupItem, Button, Spinner } from '@/components/ui';
@@ -128,64 +130,6 @@ export interface PromptPanelProps {
    * #2869 link, no Send count needed). Undefined or `true`: unchanged.
    */
   answerable?: boolean;
-}
-
-/** Props for {@link PromptStuckHint} */
-interface PromptStuckHintProps {
-  showStuckHint?: boolean;
-  onSwitchToDirectInput?: () => void;
-  /** Issue #2870. See {@link PromptPanelProps.answerable}. */
-  answerable?: boolean;
-}
-
-/**
- * The "Send is not working — use direct input" line under a prompt window
- * (Issue #2869). Renders nothing unless both props are given, so a caller that
- * passes neither keeps its pre-#2869 output. `MobilePromptSheet` draws its own
- * copy rather than importing this one: suites that mock this module for the
- * split pane still render the sheet.
- */
-function PromptStuckHint({ showStuckHint, onSwitchToDirectInput, answerable }: PromptStuckHintProps) {
-  const t = useTranslations('worktree');
-  const linkLabel = t('promptResponse.stuckHintLink');
-  // Issue #2870: a window the route would refuse says so up front — no Send
-  // has to fail first — and offers the link whenever there is one to offer.
-  if (answerable === false) {
-    return (
-      <p data-testid="prompt-unanswerable-hint" className="mt-3 text-sm text-warning-foreground">
-        {t('promptResponse.unanswerable')}
-        {onSwitchToDirectInput && (
-          <>
-            {' '}
-            <button
-              type="button"
-              data-testid="prompt-stuck-hint-link"
-              onClick={onSwitchToDirectInput}
-              aria-label={linkLabel}
-              className="underline font-medium hover:no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-warning-border rounded"
-            >
-              {linkLabel}
-            </button>
-          </>
-        )}
-      </p>
-    );
-  }
-  if (!showStuckHint || !onSwitchToDirectInput) return null;
-  return (
-    <p data-testid="prompt-stuck-hint" className="mt-3 text-sm text-warning-foreground">
-      {t('promptResponse.stuckHint')}{' '}
-      <button
-        type="button"
-        data-testid="prompt-stuck-hint-link"
-        onClick={onSwitchToDirectInput}
-        aria-label={linkLabel}
-        className="underline font-medium hover:no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-warning-border rounded"
-      >
-        {linkLabel}
-      </button>
-    </p>
-  );
 }
 
 /** The PC logs a failed respond outside production (Issue #3209: moved out of the handlers). */
@@ -660,7 +604,7 @@ function StructuredQuestionActions({
   disabled,
   onRespond,
 }: {
-  choices: PromptQuestionChoices;
+  choices: QuestionChoices;
   disabled: boolean;
   onRespond: (answer: string) => void;
 }) {
@@ -1118,6 +1062,7 @@ export const PromptPanel = memo(function PromptPanel({
           showStuckHint={showStuckHint}
           onSwitchToDirectInput={onSwitchToDirectInput}
           answerable={answerable}
+          linkClassName="underline font-medium hover:no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-warning-border rounded"
         />
       </div>
     </ErrorBoundary>
