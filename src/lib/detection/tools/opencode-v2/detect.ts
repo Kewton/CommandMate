@@ -51,6 +51,7 @@ import {
   stripAnsi,
 } from '../../cli-patterns';
 import { STATUS_REASON } from '../../status-reason';
+import { OPENCODE_V2_LIVE_REGION } from './live-region';
 import { createToolStatusDetector } from '../run-detection';
 import { OPENCODE_V2_VERIFIED_AGAINST } from '../verified-against';
 import type { DialogVerdict, NormalizedFrame, ToolStatusVerdict } from '../types';
@@ -152,6 +153,8 @@ export function endsWithTurnComplete(frame: NormalizedFrame): boolean {
 export const opencodeV2StatusDetector = createToolStatusDetector({
   tool: 'opencode-v2',
   verifiedAgainst: VERIFIED_AGAINST,
+  // Issue #3183: where the live part of the frame begins (`./live-region.ts`).
+  liveRegion: OPENCODE_V2_LIVE_REGION,
 
   // Issue #2991: every v2 dialog is recognised by `beforePrompt` below, so a
   // numbered list that reaches the generic parser is text in a reply (the UAT

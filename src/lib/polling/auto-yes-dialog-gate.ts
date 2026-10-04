@@ -54,9 +54,10 @@
  */
 
 import { normalizeFrame } from '@/lib/detection/tools/frame';
+import { isQuotedNumberedPrompt } from '@/lib/detection/tools/live-region';
 import { getToolStatusDetector } from '@/lib/detection/tools/registry';
 import type { CLIToolType } from '@/lib/cli-tools/types';
-import type { DialogVerdict } from '@/lib/detection/tools/types';
+import type { DialogVerdict, NormalizedFrame } from '@/lib/detection/tools/types';
 import { detectPrompt, type PromptDetectionResult } from '@/lib/detection/prompt-detector';
 import { stripAnsi, stripBoxDrawing, buildDetectPromptOptions } from '@/lib/detection/cli-patterns';
 import { detectAntigravityNumberedDialogPrompt } from '@/lib/detection/tools/antigravity/dialog';
@@ -237,13 +238,15 @@ const GATED_PROMPT_TYPE: PromptType = 'multiple_choice';
  *   `captureAndCleanOutput` produced: ANSI **and** box drawing already removed.
  *   Every `detectDialog` implementation is written against that spelling as well
  *   as the untouched one, so the same frame reaches the same verdict on both
- *   paths.
+ *   paths. Or (Issue #3183) the `NormalizedFrame` the poller built ONCE from
+ *   the raw capture for this tick — the same object its prompt reading used, so
+ *   both read one live region; that is what the poller passes.
  * @param env - Environment to read the kill switch from; injectable for tests
  */
 export function evaluateAutoYesDialogGate(
   cliToolId: CLIToolType,
   promptType: PromptType,
-  cleanOutput: string,
+  cleanOutput: string | NormalizedFrame,
   env: NodeJS.ProcessEnv = process.env,
 ): AutoYesDialogGateVerdict {
   // A tool nobody has measured is not gated whatever the table says. Belt and
@@ -311,7 +314,7 @@ export interface DialogPresenceVerdict {
 function judgeDialogPresence(
   cliToolId: CLIToolType,
   promptType: PromptType | undefined,
-  frame: string,
+  frame: string | NormalizedFrame,
   mode: AutoYesDialogGateMode,
 ): DialogPresenceVerdict {
   const detector = getToolStatusDetector(cliToolId);
@@ -320,7 +323,9 @@ function judgeDialogPresence(
     return { present: true, dialog: null, mode, gated: false };
   }
 
-  const dialog = detector.detectDialog(normalizeFrame(frame));
+  // Issue #3183: normalised for the tool, so the detector reads the tool's live
+  // region (and its veto) — never a whole-frame default.
+  const dialog = detector.detectDialog(typeof frame === 'string' ? normalizeFrame(frame, cliToolId) : frame);
 
   return { present: dialog !== null, dialog, mode, gated: true };
 }
@@ -368,7 +373,7 @@ function judgeDialogPresence(
 export function evaluateDialogPresence(
   cliToolId: CLIToolType,
   promptType: PromptType | undefined,
-  frame: string,
+  frame: string | NormalizedFrame,
 ): DialogPresenceVerdict {
   return judgeDialogPresence(
     cliToolId,
@@ -519,11 +524,19 @@ export function assessPromptAnswerability(
   }
 
   const isCommandCodeQuestion = commandCodeQuestion.kind === 'prompt';
-  const promptCheck = (commandCodeQuestion.kind === 'prompt' ? commandCodeQuestion.prompt : null)
+  const candidate = (commandCodeQuestion.kind === 'prompt' ? commandCodeQuestion.prompt : null)
     ?? toolDialog
     ?? detectPrompt(cleanOutput, buildDetectPromptOptions(cliToolId));
 
-  const presence = evaluateDialogPresence(cliToolId, promptCheck.promptData?.type, frame);
+  // Issue #3183: one frame, normalised once from the capture, for the
+  // quotation veto and the presence gate alike — the reading the status chain
+  // and the Auto-Yes poller apply, so Send is offered exactly when they agree.
+  const normalized = normalizeFrame(frame, cliToolId);
+  const promptCheck: PromptDetectionResult = isQuotedNumberedPrompt(normalized.liveRegion, candidate)
+    ? { isPrompt: false, cleanContent: cleanOutput }
+    : candidate;
+
+  const presence = evaluateDialogPresence(cliToolId, promptCheck.promptData?.type, normalized);
 
   return {
     promptCheck,

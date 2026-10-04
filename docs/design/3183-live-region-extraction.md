@@ -14,7 +14,7 @@ fixture の行番号は **ファイルの 1 始まりの物理行**（ANSI を�
 |---|---|
 | 操作部分の名前 | **live region**。`NormalizedFrame.liveRegion: LiveRegion` を足す（既存フィールドは変えない） |
 | 操作部分の定義 | 「画面の下端に、ツールがいま描いている入力の塊」。**入力欄（composer）が見えていればその塊の先頭から下**、見えていなければ**ダイアログ枠の先頭から下**、どちらも見つからなければ**画面全体**（＝今日の読み方） |
-| ツールごとの違い | `LiveRegionSpec`（入力欄の目印・ダイアログ枠の目印）の**宣言だけ**。宣言は共有の部品（`fencedComposer` / `bottomMostRow` / `ruleAboveOptionRun` など）を呼ぶ 1〜2 行で書く |
+| ツールごとの違い | `LiveRegionSpec`（入力欄の目印・ダイアログ枠の目印・`composerHidesDialogs`）の**宣言だけ**。宣言は共有の部品（`fencedComposer` / `bottomMostComposerRow` / `ruleAboveOptionRun` / `dialogTopFrom` など）を呼ぶ数行で書く |
 | 切り出す場所 | `normalizeFrame(output, tool?)` の中で 1 回だけ。`tool` を省いた呼び出しは今日と同じ結果（`anchor: 'none'`、画面全体） |
 | 共通の拒否規則 | 入力欄が見えているフレームでは、**入力欄より上にある選択肢・フッタ・ダイアログ文言は操作部分ではない**。この 1 規則を `runToolDetection`（状態）と Auto-Yes の両方が同じ関数で使う |
 | Auto-Yes の入力 | 今日は `stripBoxDrawing` 済みの文字列（罫線が消えた綴り）で `normalizeFrame` している。これを**生のキャプチャ**から作った `NormalizedFrame` 1 個に揃え、プロンプト検出・ダイアログ判定・codex の起動画面ガードに同じものを渡す |
@@ -82,111 +82,104 @@ Auto-Yes の拒否は「ゲートが `enforce` のツール（`auto-yes-dialog-g
 
 ### 2.1 型（`src/lib/detection/tools/types.ts` に追加）
 
-```ts
-/** live region が何を手がかりに決まったか。 */
-export type LiveRegionAnchor =
-  | 'composer' // 入力欄が見えている。start は入力欄の塊の先頭
-  | 'dialog'   // 入力欄は無く、ツールが宣言したダイアログ枠の先頭が見つかった
-  | 'none';    // どちらも見つからない（宣言が無い・綴りが足りない）。画面全体
+> 実装（段階 A・B）で確定した形。設計時の案（生の行 index、`spec` を引数に取る拒否関数）からの変更点は §8 にまとめた。
 
-/** 「いま操作できる部分」。NormalizedFrame ごとに 1 回だけ計算する。 */
+```ts
+export type LiveRegionAnchor = 'composer' | 'dialog' | 'none';
+
 export interface LiveRegion {
+  readonly tool: CLIToolType | null;      // どのツールの宣言で求めたか（tool なしで作ったフレームは null）
   readonly anchor: LiveRegionAnchor;
-  /** `stripAnsi(raw).split('\n')` の index。anchor === 'none' なら 0 */
-  readonly startRow: number;
-  /**
-   * anchor === 'composer' のときだけ: 入力欄の塊の最終行（claude なら下の罫線）。
-   * 「入力欄より下に描かれる操作部分」（agy の /feedback 分類メニュー）を読むための境界
-   */
-  readonly composerEndRow?: number;
-  /** startRow 以降の行。ANSI を除き、末尾の空行を落とした。空行の圧縮はしない */
-  readonly lines: readonly string[];
+  readonly startRow: number;              // contentLines の index（'none' なら 0）
+  readonly composerEndRow?: number;       // 'composer' のときだけ: 入力欄の塊の最終行
+  readonly composerAtBottom: boolean;     // 入力欄が画面の下端（その下に答えられるものが無い）
+  readonly composerHidesDialogs: boolean; // 宣言の composerHidesDialogs を写したもの
+  readonly lines: readonly string[];      // contentLines.slice(startRow)
 }
 
 export interface NormalizedFrame {
   // …既存 6 フィールドは変えない…
-  /** Issue #3183: いま操作できる部分。tool を渡さずに作ったフレームでは anchor: 'none' */
   readonly liveRegion: LiveRegion;
 }
 ```
 
-**index を `contentLines` ではなく生の行に取る理由**: `contentLines` は `normalizeTuiFrameForDetection` が空行の連続を 1 行に詰め、claude の footer で切った後の行で、
-生の行と index が合わない。codex の SGR 判定（`findCodexBottomGlyphRow` は `raw.split('\n')` の index を返す）と同じ座標系に揃える。
-`stripAnsi` は改行を消さないので、`raw.split('\n')` と `stripAnsi(raw).split('\n')` は行数・index が一致する。
+**index は `contentLines` に取る。** 既存のツール規則はどれも `frame.contentLines` を読んでいる
+（claude の `findClaudeInputBox`、codex の `findCodexContentEnd`、agy の #2845 述語、copilot の `findCopilotChromeStart`）。
+座標系を揃えることで、宣言は既存の関数をそのまま呼べ、規則は「自分の footer の行」と「入力欄の行」を同じ番号で比べられる。
+SGR を読む目印（codex）には `LiveRegionRows.raw` で生のキャプチャを渡す。
 
-### 2.2 宣言（`ToolDetectorSpec` に追加）
+`composerAtBottom` は「入力欄が見つかった」とは別の値である。codex の承認ダイアログでは、最下段の本物の `›` 行は
+ダイアログの上に残った利用者の発話（`codex-dialogs-0157/approval.txt` L24）で、region はそこから始まるが下端ではない
+（§7 codex）。拒否規則が見るのは `composerAtBottom` だけ。
+
+### 2.2 宣言（`ToolDetectorSpec.liveRegion`）
 
 ```ts
-/** Issue #3183: このツールの「操作部分の始まり」の目印。宣言だけ。 */
 export interface LiveRegionSpec {
-  /** 入力欄の目印。下から探して最初に当たった塊。必須 */
-  readonly composer: LiveRegionMarker;
-  /** 入力欄が無いとき、ダイアログ枠の先頭の目印。無いツールは省く（→ anchor: 'none'） */
-  readonly dialogTop?: LiveRegionMarker;
+  readonly composer: LiveRegionMarker;     // 必須
+  readonly dialogTop?: LiveRegionMarker;   // 入力欄が無いとき
+  readonly composerHidesDialogs: boolean;  // 答えを受ける画面がすべて入力欄を消すか
 }
-
-/** 共有の部品が返す。`locate` は塊の先頭行（と入力欄なら最終行）を返す、または null。 */
-export interface LiveRegionMarker {
-  locate(rows: LiveRegionRows): { start: number; end?: number } | null;
-}
-export interface LiveRegionRows {
-  /** raw.split('\n')（SGR を読む目印用） */
-  readonly raw: readonly string[];
-  /** stripAnsi(raw).split('\n') */
-  readonly plain: readonly string[];
-}
-
-export interface ToolDetectorSpec {
-  // …既存…
-  readonly liveRegion?: LiveRegionSpec;
-}
+export interface LiveRegionMarker { locate(rows: LiveRegionRows): LiveRegionHit | null; }
+export interface LiveRegionHit { start: number; end?: number; atBottom?: boolean; }
+export interface LiveRegionRows { raw: string; contentLines: readonly string[]; }
 ```
 
-ツール側は共有の部品を呼ぶだけにする（「宣言だけ」）。部品は新しいファイル `src/lib/detection/tools/live-region.ts` に置く:
+共有の部品（`src/lib/detection/tools/live-region.ts`）:
 
 | 部品 | 中身 | 使うツール |
 |---|---|---|
-| `fencedComposer({ glyph, maxFooterRows, maxBoxRows })` | 下端から `maxFooterRows` 行以内に閉じ罫線、その上 `maxBoxRows` 行以内に開き罫線、開き罫線の次の行が `glyph` で始まる。`findClaudeInputBox`（`composer-text.ts:170`）と `findCommandCodeChromeStart`（`cli-patterns.ts:2904`）は**同じ形の別実装**なので、この 1 つにまとめる | claude、command-code、agy、copilot 1.0.80 |
-| `bottomMostRow(pattern, { notBelow? })` | 下から読んで最初に `pattern` に当たった行 | agy（`ANTIGRAVITY_PROMPT_PATTERN`）、codex の綴りなし版（`CODEX_GENUINE_PROMPT_LINE`） |
-| `codexGlyphComposer()` | `findCodexBottomGlyphRow`（`tools/codex/cli-patterns.ts:352`）が `composer` と答えた行。`option` なら null（ダイアログ）。SGR が無ければ `bottomMostRow(CODEX_GENUINE_PROMPT_LINE)` に落ちる | codex |
-| `gutterComposerAboveFooter({ footer, separator })` | 下端近くの footer 行（`ctrl+p` / `ctrl+t`）とその上の `╹▀` 区切りがあるとき、区切りの上に続く `┃` 行の塊 | opencode、opencode-v2 |
-| `halfBlockComposer()` / `statusBarAtBottom()` | copilot 1.0.82 の `╻▄` / `╹▀` 囲み、最下行の状態バー（`readCopilotStatusBar`） | copilot |
-| `ruleAboveOptionRun({ rule, footer })` | 下から footer 行を探し、その上の番号付き選択肢の先頭から上へ、最初の罫線行 | claude、command-code、agy（ダイアログ枠） |
-| `boxTop({ corner })` | 下端の `╰` から上へ対応する `╭` | copilot（ダイアログ枠） |
-| `gutterBlockTop({ title })` | `┃` の塊のうち `title`（`△ Permission required` / `Questions`）の行 | opencode、opencode-v2（ダイアログ枠） |
+| `fencedComposer(find)` | ツール自身の構造的な finder（罫線・グリフ・罫線）が返す先頭行から最終行まで。下端に固定された塊なので `atBottom` は常に真 | claude（`findClaudeInputBox`）、command-code（`findCommandCodeChromeStart`。直下が `❯ 1.` なら質問ダイアログのカーソルとして拒否）、copilot（`findCopilotChromeStart`） |
+| `bottomMostComposerRow({ isComposerRow, atBottom })` | 下から最初に入力欄と認めた行。下端かどうかは宣言が決める | agy（空の `>`。下に番号行も `↑/↓ Navigate` も無ければ下端） |
+| codex 専用の目印（`tools/codex/live-region.ts`） | 最下段の `CODEX_GENUINE_PROMPT_LINE`（`findCodexComposerRow`、#892）から始まり、下端かどうかは `isCodexComposerAtBottom`（#2841: 生の SGR → 綴りなしの最終行） | codex |
+| `OPENCODE_GUTTER_COMPOSER`（`tools/opencode-gutter-live-region.ts`） | 下端 4 行以内の `ctrl+[tp]` footer、その上 3 行以内の `╹▀` 罫線、その上に続く `┃` 行の塊 | opencode、opencode-v2 |
+| `ruleAboveOptionRun({ footer, rule, maxRows })` | 下から footer、その上の `1.` の選択肢、そこから上で最初の罫線 | claude、command-code（ダイアログ枠） |
+| `dialogTopFrom(find)` | ツール自身の関数が返すダイアログ枠の先頭 | agy（`locateAntigravityDialogRegion`）、copilot（`╰` に対応する `╭`） |
+| `opencodeGutterDialogTop(title)` | 下端 60 行以内の `┃` 行で `title` に当たるもの | opencode（`△ Permission required`）、opencode-v2（同 ＋ `Questions`） |
 
-各ツールの宣言は `src/lib/detection/tools/<tool>/live-region.ts` に 1 つずつ置き、`detect.ts` は `liveRegion: CLAUDE_LIVE_REGION` のように参照するだけにする。
-7 ツールの目印の中身と根拠は 7 章。
+`composerHidesDialogs` は claude / codex / antigravity / command-code が `true`、copilot / opencode / opencode-v2 が `false`。
+copilot の `/model` picker（`copilot-live-1885/model-picker.txt`）と opencode 系の picker・command palette
+（`opencode-live-2046/w80/dialog-*.txt`、`opencode-v2-live-2971/*.txt` ほか）は、**入力欄を残したまま上に重ねて描かれる**ことを
+実装前の全 fixture 掃引で確かめた（入力欄が下端なのに状態が `waiting` / `detectDialog` が `picker` を返すフレームはこの 3 ツールだけ）。
+
+各ツールの宣言は `src/lib/detection/tools/<tool>/live-region.ts` に 1 つずつ置き、`<tool>/detect.ts` は `liveRegion: X_LIVE_REGION` で同じ物を参照する。
+`normalizeFrame` が読むのは `src/lib/detection/tools/live-region-specs.ts` の表で、両者が同一物であることは
+`tests/unit/detection/tools/live-region-markers.test.ts` が固定する。
 
 ### 2.3 切り出し（`normalizeFrame` の 1 回）
 
 ```ts
-// src/lib/detection/tools/frame.ts
 export function normalizeFrame(output: string, tool?: CLIToolType): NormalizedFrame
+export function liveRegionOf(frame: NormalizedFrame, tool: CLIToolType): LiveRegion
+export function withLiveRegion(frame: NormalizedFrame, tool: CLIToolType): NormalizedFrame
 ```
 
-- `tool` を渡すと `LIVE_REGION_SPECS[tool]`（新ファイル `tools/live-region-specs.ts`。各 `<tool>/live-region.ts` を集めた表）で `locateLiveRegion` を 1 回呼ぶ
-- `tool` を省いた呼び出し・宣言の無いツール（gemini / vibe-local）は `{ anchor: 'none', startRow: 0, lines: 全行 }`。**既存の呼び出し元はすべて今日と同じ値を得る**
-- `registry.ts` を import しない。`registry` → `<tool>/detect.ts` → `frame.ts`（`codex/detect.ts:545` が `normalizeFrame` を使う）の循環を作らないため、表は検出モジュールに依存しない葉のファイルに置く
-- `detectSessionStatus`（`status-detector.ts:230`）は `normalizeFrame(output, cliToolId)` に変える
+- `tool` を渡すと `LIVE_REGION_SPECS[tool]` で 1 回だけ切り出す。省くと `{ tool: null, anchor: 'none' }`（画面全体）
+- `liveRegionOf` / `withLiveRegion` は、別のツール（または tool なし）で作られたフレームを受けたときだけ切り出し直す。
+  `runToolDetection` と `detectDialog` の包みは必ずこれを通すので、tool を渡さずに作ったフレーム（既存のテスト）でもツールの宣言が効く
+- `registry.ts` は import しない（循環を避けるため、表は検出モジュールに依存しない）
+- `src/` の `normalizeFrame(` の呼び出しはすべて tool つき（`detector-contract.test.ts` が固定）
 
 ### 2.4 共通の拒否規則（1 か所）
 
-`src/lib/detection/tools/live-region.ts` に次の 2 つを置き、状態と Auto-Yes の両方がこれだけを呼ぶ。
+`src/lib/detection/tools/live-region.ts`:
 
 ```ts
-/** 入力欄が見えていて、その下に選択肢が 1 行も無い → 汎用の番号リスト推定は引用を読んだ */
-export function isPromptOutsideLiveRegion(frame: NormalizedFrame, prompt: PromptDetectionResult): boolean;
-
-/** 入力欄が見えていて、その下に何も描かれていない → どのツールのダイアログ規則も null を返すべき */
-export function isComposerLive(frame: NormalizedFrame): boolean;
+/** multiple_choice で、入力欄が下端、かつ composerHidesDialogs のツール → 引用 */
+export function isQuotedNumberedPrompt(region: LiveRegion, prompt: PromptDetectionResult): boolean;
+/** 入力欄が下端なら、numbered のダイアログ判定は常に、keys は composerHidesDialogs のツールだけ捨てる */
+export function vetoesDialog(region: LiveRegion, verdict: DialogVerdict | null): boolean;
 ```
 
-- `runToolDetection`（`run-detection.ts:113-137`）: プロンプトが見つかったら、`spec.isStalePrompt` の前に `isPromptOutsideLiveRegion` を見る。当たれば L118 と同じく無効化して先へ進む
-- `createToolStatusDetector` が返す `detectDialog` を `frame => isComposerLive(frame) ? null : spec.detectDialog(frame)` で包む。**ツールの `detectDialog` を 1 つも書き換えずに、全ツールに同じ拒否がかかる**
-- `beforePrompt` / `afterPrompt` の footer 読み（claude の選択リスト、command-code の 3 つ、agy の選択画面）は `frame.liveRegion.lines` を読むように変える（3 章）
+- `runToolDetection`: プロンプトが見つかったら、`spec.isStalePrompt` の前に `isQuotedNumberedPrompt` を見て無効化する
+- `createToolStatusDetector` が返す `detectDialog` は `vetoesDialog` で包まれる（ツールの `detectDialog` は書き換えない）
+- Auto-Yes 側: `detectPromptOnCleanFrame`（`response-checker.ts`）と `assessPromptAnswerability`（`auto-yes-dialog-gate.ts`）が同じ `isQuotedNumberedPrompt` を同じ region に対して呼ぶ
 
-「入力欄より下の行」は `composerEndRow + 1` 以降。agy の `/feedback` 分類メニュー（`tests/fixtures/antigravity-live-2364/dialog-feedback-category.txt`。入力欄の**下**に番号行を描く、`tests/unit/lib/polling/antigravity-quoted-dialog-autoyes.test.ts:194` が固定）を壊さないために `startRow` ではなくこの境界を使う。
+`isQuotedNumberedPrompt` が `composerHidesDialogs` を要るのは、入力欄の上に picker を重ねるツールでは「入力欄が下端」が
+「何も開いていない」の証明にならないから。copilot / opencode / opencode-v2 の番号リストは従来どおりそれぞれのダイアログ規則
+（3 ツールとも Auto-Yes ゲートは `enforce`、opencode-v2 は `requireVouchedPrompt`）が判定する。
+`tests/unit/polling/auto-yes-dialog-gate-opencode-v2-2984.test.ts` と `tests/unit/session/opencode-v2-body-numbered-list-2991.test.ts` は
+「その下の層が拒否する前は、候補として読まれていた」ことを対照として固定しており、この線引きはそれとも整合する。
 
 ### 2.5 既存の型・公開 API を壊さない理由
 
@@ -206,26 +199,26 @@ export function isComposerLive(frame: NormalizedFrame): boolean;
 |---|---|---|
 | `src/lib/detection/tools/types.ts` | `NormalizedFrame`（L47-60）、`ToolDetectorSpec`（L147-219） | 2.1 / 2.2 の型を足す |
 | `src/lib/detection/tools/frame.ts` | `normalizeFrame(output)`（L27） | `tool?` を足し、`liveRegion` を 1 回計算する |
-| `src/lib/detection/tools/live-region.ts`（新規） | — | 部品、`locateLiveRegion`、`isPromptOutsideLiveRegion`、`isComposerLive` |
+| `src/lib/detection/tools/live-region.ts`（新規） | — | 部品、`locateLiveRegion`、`isQuotedNumberedPrompt`、`vetoesDialog` |
 | `src/lib/detection/tools/live-region-specs.ts`（新規） / `tools/<tool>/live-region.ts`（新規 7 つ） | — | 7 ツールの宣言 |
 | `src/lib/detection/status-detector.ts` | L230 `normalizeFrame(output)` | `normalizeFrame(output, cliToolId)` |
-| `src/lib/detection/tools/run-detection.ts` | L113-137 で `isStalePrompt` / `requireVouchedPrompt` | その前に `isPromptOutsideLiveRegion`。`createToolStatusDetector` で `detectDialog` を包む |
-| `src/lib/detection/cli-patterns.ts` `codexActiveRegionLines`（L438） | 最下段の `›` 行より下を返す（綴りなし） | **削除**。`getCodexActiveDialog`（L451）・`getCodexLifecycleDialog`（L581）は `normalizeFrame(output, 'codex').liveRegion` の `composerEndRow + 1` 以降（anchor `'none'` なら全行）を読む。codex の宣言は生の SGR を先に読むので、綴りなしの入力では今日と同じ行（`CODEX_GENUINE_PROMPT_LINE` の最下段）に落ちる |
+| `src/lib/detection/tools/run-detection.ts` | L113-137 で `isStalePrompt` / `requireVouchedPrompt` | その前に `isQuotedNumberedPrompt`。`createToolStatusDetector` で `detectDialog` を包む |
+| `src/lib/detection/cli-patterns.ts` `codexActiveRegionLines`（L438） | 最下段の `›` 行より下を返す（綴りなし） | **削除**。目印の部分は `findCodexComposerRow`（export）に名前を変え、codex の宣言はこれで region の先頭を決める。`getCodexActiveDialog` / `getCodexLifecycleDialog` は `string \| NormalizedFrame` を受け、フレームなら `liveRegion` の入力欄より下、文字列なら同じ `findCodexComposerRow` で切る（`cli-tools/codex.ts` の起動待ちループは文字列のまま） |
 | `src/lib/detection/cli-patterns.ts` `isCodexPromptReady`（L389） | 最下段のダイアログ行より下に本物の入力行があるか | **残す**。問いが「入力欄が出たか」（起動待ち）で、live region の有無そのもの。中身を `liveRegion.anchor === 'composer'` と、その下にダイアログ行が無いことに書き換えるのは段階 B の任意項目（同じ答えになることを `tests/unit/cli-tools/codex*.test.ts` で確かめてから） |
-| `src/lib/detection/tools/codex/cli-patterns.ts` `isCodexComposerAtBottom`（L490） | 生の SGR → 綴りなしの 2 段で「最下段が入力欄か」 | codex の宣言 `codexGlyphComposer()` の中身として**移す**。`codex/detect.ts` の L208 / L395-402 / L408-414 は `isComposerLive(frame)` と共通拒否に置き換わり消える |
+| `src/lib/detection/tools/codex/cli-patterns.ts` `isCodexComposerAtBottom`（L490） | 生の SGR → 綴りなしの 2 段で「最下段が入力欄か」 | 関数は残し、**呼ぶのは codex の宣言（`tools/codex/live-region.ts`）だけ**にした（`detector-contract.test.ts` が固定）。`codex/detect.ts` の 3 か所は `liveRegionOf(frame, 'codex').composerAtBottom` を読む |
 | `src/lib/detection/tools/codex/detect.ts` `isCodexStalePrompt`（L119） | 答え済み承認の下に `• Ran` などがあるか（#1160） | **残す**。入力欄が描かれる前（承認に答えた直後、実行中）の古い承認ブロックで、live region の位置では区別できない（入力欄はまだ下に無い）。理由をコメントで残す |
-| `src/lib/detection/tools/codex/detect.ts` `isCodexModelPickerFrame`（L544-545） | `normalizeFrame(cleanOutput)`（綴りなし） | 呼び出し元（`auto-yes-poller.ts`）から `NormalizedFrame` を受ける形に変える |
+| `src/lib/detection/tools/codex/detect.ts` `isCodexModelPickerFrame`（L544-545） | `normalizeFrame(cleanOutput)`（綴りなし） | `string \| NormalizedFrame` を受ける。poller はその tick のフレームを渡す |
 | `src/lib/detection/tui-detection-frame.ts` | claude の footer で全ツールのフレームを切る（L59-87） | **段階 B では残す**。`detectPrompt` が内部で直接呼び（`prompt-detector.ts:194`、`prompt-detect-multiple-choice.ts:992`）、`NormalizedFrame` を持たない呼び出し元も多い。live region と同じ答えになる fixture（`tests/fixtures/tui-frame-footer-2776/` の 12 本）を `tui-frame-footer-2776.test.ts` が固定しているので、退役は 6 章の未決 6 で別に決める |
 | `src/lib/detection/tools/claude/detect.ts` `selectionFooterRows`（L128） | 入力欄があればその行以降、無ければ末尾 15 行 | `frame.liveRegion.lines` の末尾 15 行に置き換え（同じ入力欄を同じ部品で見つけるので答えは変わらない） |
 | `src/lib/detection/tools/claude/picker-chrome.ts` `hasPickerFooterBelow`（L179） | プレビュー枠の下に footer があるか（parser の中） | **置き換えない**。操作部分の始まりではなく、操作部分の中の枠の判定（1.2-5） |
-| `src/lib/detection/tools/antigravity/detect.ts` L68 / L89 / L116 / L135 | survey・選択画面・番号リストの 3 つで「下に入力欄があれば引用」 | L116 `isAntigravityQuotedNumberedList` と L135 `isStalePrompt` は共通拒否に置き換えて消す。L89 は `liveRegion.lines` を読む形に。L68 の survey は「末尾 3 行」という独自の近さの条件があるので**残す**（survey は入力欄の代わりに描かれ、宣言上は anchor `'none'` になる。理由をコメントで残す） |
-| `src/lib/detection/cli-patterns.ts` `locateAntigravityDialogRegion`（L2629） | footer の下に入力欄があれば null、境界行（`ANTIGRAVITY_DIALOG_BOUNDARY_PATTERN`、L2571）で始まりを決める | 入力欄の拒否部分を共通規則に移し、境界行の部分は agy の `dialogTop` 宣言として**再利用**する |
-| `src/lib/detection/tools/command-code/detect.ts` L191-192 / L303 / L326 と `selection-shape.ts` L289 / L346 / L358 / L370 | フッタが `lastLines` の下端にあるか（#2846） | anchor `'composer'` なら共通拒否で null。anchor `'dialog'` / `'none'` では今日の「下端」判定を `liveRegion.lines` に対して行う。`selection-shape.ts` の 4 関数は文字列 API のまま残し、呼び出し側が渡す文字列を `liveRegion.lines.join('\n')` に変える |
+| `src/lib/detection/tools/antigravity/detect.ts` L68 / L89 / L116 / L135 | survey・選択画面・番号リストの 3 つで「下に入力欄があれば引用」 | L116 `isAntigravityQuotedNumberedList` と L135 `isStalePrompt` は**削除**（共通拒否 `isQuotedNumberedPrompt` と agy の宣言 `bottomMostComposerRow` に移った）。L68 の survey と L89 の選択画面は**残す**: 判定の材料が「footer の行より下に入力欄があるか」で、入力欄の**下**に描かれる Switch Model picker（`picker-switch-model.txt`）を含むため、入力欄から下を見る live region とは向きが逆 |
+| `src/lib/detection/cli-patterns.ts` `locateAntigravityDialogRegion`（L2629） | footer の下に入力欄があれば null、境界行（`ANTIGRAVITY_DIALOG_BOUNDARY_PATTERN`、L2571）で始まりを決める | **そのまま残し**、agy の `dialogTop` 宣言として呼ぶ（`dialogTopFrom`）。agy の reader（`detectAntigravityNumberedDialogPrompt`）が使う関数でもある |
+| `src/lib/detection/tools/command-code/detect.ts` L191-192 / L303 / L326 と `selection-shape.ts` L289 / L346 / L358 / L370 | フッタが `lastLines` の下端にあるか（#2846） | `beforePrompt` の先頭で `liveRegionOf(frame, 'command-code').composerAtBottom` なら null（3 つのオーバーレイと質問ダイアログはどれも入力欄を消す）。`…AtBottom` の 4 関数は入力欄の無いフレームのために残す |
 | `src/lib/detection/selection-shape.ts` `readSelectionListShape`（L1171）・`hasDismissablePanelFooter`（L400） | クライアント部品が生の文字列から読む | **置き換えない**。ブラウザのバンドルに検出モジュールを入れない（`ChatSurface.tsx` などのクライアント部品）。状態の reason が決まった後の形の読み取りで、引用の判定はサーバ側の reason が先に済ませている |
 | `src/lib/detection/tools/opencode-v2/detect.ts` `requireVouchedPrompt`（L161） | `detectDialog` が認めない番号リストを無効化（#2991） | **残す**。共通拒否は入力欄が見えるときだけ働く。v2 では答えの最中（入力欄がまだ無い）の番号リストもあり、`requireVouchedPrompt` はそれも拒む。2 つは重なるが矛盾しない |
-| `src/lib/detection/tools/opencode/detect.ts` L136 | 承認ストリップを末尾 15 行で読む（窓の距離だけ） | anchor `'composer'` なら共通拒否。窓の距離に頼らなくなる |
-| `src/lib/detection/tools/copilot/detect.ts` / `cli-patterns.ts` L1860 / L2263 | 最下行の状態バー・picker footer | 宣言の `statusBarAtBottom` に同じ関数を使う。`isCopilotSelectionFrame` は残す（picker の判定であり、始まりの判定ではない） |
-| `src/lib/polling/response-checker.ts` `detectPromptOnCleanFrame`（L326） | 汎用 `detectPrompt(cleanOutput)`、agy だけ L404-409 で引用を拒否 | 第 6 引数に `frame?: NormalizedFrame` を足し、渡されたら**全ツールに** `isPromptOutsideLiveRegion` をかける。L404-409 の agy 専用の分岐は消す |
+| `src/lib/detection/tools/opencode/detect.ts` L136 | 承認ストリップを末尾 15 行で読む（窓の距離だけ） | **変えない**。opencode は picker を入力欄の上に重ねる（`composerHidesDialogs: false`）ので、入力欄が下端でも `keys` の判定は捨てない。承認ストリップは入力欄を消して描かれる（§7）ので、入力欄が下端のフレームでこの分岐が当たるのは引用だけだが、その判定は Auto-Yes ゲート（`enforce`）と窓の距離に任せたまま（§8） |
+| `src/lib/detection/tools/copilot/detect.ts` / `cli-patterns.ts` L1860 / L2263 | 最下行の状態バー・picker footer | 宣言の入力欄の目印は既存の `findCopilotChromeStart`（`fencedComposer`）。`isCopilotSelectionFrame` / `readCopilotStatusBar` は残す（picker・状態の判定であり、始まりの判定ではない）。copilot は picker を入力欄の上に重ねるので `composerHidesDialogs: false` |
+| `src/lib/polling/response-checker.ts` `detectPromptOnCleanFrame`（L326） | 汎用 `detectPrompt(cleanOutput)`、agy だけ L404-409 で引用を拒否 | 第 6 引数に `frame?: NormalizedFrame` を足し、渡されたら**全ツールに** `isQuotedNumberedPrompt` をかける。L404-409 の agy 専用の分岐は消す |
 | `src/lib/polling/response-checker.ts` `isNumberedDialogVouched`（L495） | `evaluateDialogPresence(…, frame)`（生） | 変えない（既に生を渡している）。中で `normalizeFrame(frame, tool)` になり live region が効く |
 | `src/lib/polling/auto-yes-dialog-gate.ts` L311-323 | `normalizeFrame(frame)`（Auto-Yes からは綴りなし） | `NormalizedFrame` を受ける。文字列なら `normalizeFrame(frame, tool)` |
 | `src/lib/polling/auto-yes-dialog-gate.ts` `assessPromptAnswerability`（L489-493） | 生の `frame` から `stripBoxDrawing(stripAnsi(frame))` を作り汎用 `detectPrompt` | 生の `frame` で `NormalizedFrame` を 1 回作り、`detectPromptOnCleanFrame(…, frame)` と `evaluateDialogPresence` に同じものを渡す |
@@ -259,7 +252,7 @@ export function isComposerLive(frame: NormalizedFrame): boolean;
 |---|---|---|---|
 | claude | `tests/unit/lib/detection/fixtures/claude-live-1708/bash-approval-taskpanel.txt` | `tests/fixtures/claude-idle-numbered-list-2457/live-2997/claude-reply-numbered-list-21284.txt`（`Do you want to proceed?` / `❯ 1. Yes` / `2. No` を返答として描いた実機） | 実機 |
 | codex | `tests/fixtures/codex-dialogs-0157/approval.txt` | `tests/fixtures/codex-dialogs-0157/quoted-approval-idle.txt`（承認ダイアログの文面を返答として描いた実機） | 実機 |
-| antigravity | `tests/fixtures/antigravity-live-2364/dialog-bash-oneline.txt` | `idle-after-deny.txt` の入力欄の上に `dialog-bash-oneline.txt` の L26-L39 を差し込んだ合成（`tests/unit/lib/polling/antigravity-quoted-dialog-autoyes.test.ts` の `quoteAboveComposer` と同じ作り方） | **合成**（6 章 未決 2） |
+| antigravity | `tests/fixtures/antigravity-live-2364/dialog-bash-oneline.txt` | `idle-after-deny.txt` の入力欄の上に `dialog-bash-oneline.txt` の L26-L38 を差し込んだ合成（`tests/unit/lib/polling/antigravity-quoted-dialog-autoyes.test.ts` の `quoteAboveComposer` と同じ作り方） | **合成**（6 章 未決 2） |
 | command-code | `tests/fixtures/command-code-live-2250/dialog-shell-command.txt` | `tests/fixtures/tui-frame-footer-2776/command-code-1.58.0-idle-quoted-footers.txt` の入力欄の上に `dialog-shell-command.txt` の L29-L40 を差し込んだ合成（`command-code-quoted-footer.test.ts` の `quotedAboveComposer` と同じ） | **合成**（未決 2） |
 | copilot | `tests/unit/lib/detection/fixtures/copilot-live-1885/permission-dialog.txt` | `copilot-live-1885/turn-complete.txt` の入力欄の上に `permission-dialog.txt` の L994-L1000 を枠なしで差し込んだ合成 | **合成**（未決 2） |
 | opencode | `tests/unit/lib/detection/fixtures/opencode-live-1893/permission-bash.txt`（`keys`: 状態は `waiting`、Auto-Yes は**答えない**のが正しい） | `tests/fixtures/opencode-agent-health-3021/quoted-dialog-reply-done.txt`（承認ストリップを返答と発話の両方に描いた実機） | 実機。陽性の Auto-Yes 側は未決 1 |
@@ -272,8 +265,11 @@ export function isComposerLive(frame: NormalizedFrame): boolean;
 
 ### 4.3 陽性・陰性対照の考え方
 
-- **変異で空虚な緑を防ぐ**: 陰性の各 fixture から入力欄の行だけを空行にした版を作り、同じテストが陽性側（`waiting`）に倒れることを確かめる（入力欄が判定の決め手になっていることの証明）。逆に陽性の各 fixture の最下段に入力欄の行を 1 行足すと `ready` に倒れること
-- **全 fixture の掃引**: `tests/unit/detection/tools/fixture-sweep.ts`（既存）で 7 ツールの fixture 全部に `normalizeFrame(raw, tool)` をかけ、`anchor` の分布（`composer` / `dialog` / `none`）を表で固定する。新しい採取を足したら表に足す（`command-code-quoted-footer.test.ts:377-378` と同じ流儀）
+- **変異で空虚な緑を防ぐ**（`live-region-quoted-dialog.test.ts` と `auto-yes-live-region-3183.test.ts`）:
+  - 陽性の下に陰性の入力欄の塊を描き足すと、claude / codex / antigravity / command-code の 4 ツールで `hasActivePrompt: false`・`waiting` 以外に倒れる。copilot と opencode 系は `composerHidesDialogs: false` で、この変異は live region の主張の外（§2.4）
+  - 陰性から入力欄の塊を消すと `waiting`・`hasActivePrompt: true` に倒れるのは antigravity。ほかの 6 ツールは入力欄の行頭グリフ（`❯` / `›`）で汎用 parser 自体が止まる（#287 の壁）か、ゲートが判定するので、入力欄を消しても live region 以外の防御が残る。agy の `>` だけがどちらにも当たらない（#2851 が Auto-Yes まで届いた理由）
+  - `LIVE_REGION_SPECS.antigravity.composer` を「何も見つけない」に差し替えると、同じ陰性が状態 `waiting` と Auto-Yes `responded` に**同時に**倒れ、戻すと同時に戻る
+- **目印の実測表**: §7 を `live-region-markers.test.ts` の表にした（24 行。最初の非空行が引用した物理行と一致すること）。全 fixture の anchor 分布は実装前の掃引で確かめ（§8）、表には「入力欄」「ダイアログ枠」「入力欄だが下端でない」の 3 種を各ツールで最低 1 本ずつ入れた
 
 ---
 
@@ -344,7 +340,7 @@ dev-reports/module-reference/**
 
 ### 段階 B の手順（この順で 1 コミットずつ）
 
-1. `isPromptOutsideLiveRegion` / `isComposerLive` と、それを使う `run-detection` の 2 か所。既存テストを全部流して緑を確認
+1. `isQuotedNumberedPrompt` / `vetoesDialog` と、それを使う `run-detection` の 2 か所。既存テストを全部流して緑を確認
 2. Auto-Yes の 1 個化（poller → response-checker → gate → answer-sender）。`auto-yes-live-region-3183.test.ts` の ①③
 3. codex: `codexActiveRegionLines` 削除、`isCodexComposerAtBottom` を宣言へ移す、`codex/detect.ts` の 3 か所を消す
 4. agy・command-code・claude・opencode の個別判定を 3 章の表どおり置き換え
@@ -394,20 +390,20 @@ dev-reports/module-reference/**
 
 | 項目 | 内容 |
 |---|---|
-| 入力欄の目印 | `codexGlyphComposer()` — 生の最下段の `›` 行を SGR で分類し `composer` ならその行が start（`findCodexBottomGlyphRow`、`tools/codex/cli-patterns.ts:352`）。SGR が無ければ最下段の `CODEX_GENUINE_PROMPT_LINE`（`cli-patterns.ts:368`、番号付き `› 1.` を除く） |
+| 入力欄の目印 | codex の目印（`tools/codex/live-region.ts`） — 生の最下段の `›` 行を SGR で分類し `composer` ならその行が start（`findCodexBottomGlyphRow`、`tools/codex/cli-patterns.ts:352`）。SGR が無ければ最下段の `CODEX_GENUINE_PROMPT_LINE`（`cli-patterns.ts:368`、番号付き `› 1.` を除く） |
 | 入力欄の根拠 | `tests/fixtures/codex-dialogs-0157/quoted-approval-idle.txt`（0.157.1）: 利用者の発話 L37 `› Reply with exactly…`、その中の引用 L40 `› 1. Yes, proceed (y)` と L42 footer、返答の引用 L45-49、入力欄 L997 `› Ask Codex to do anything`、状態行 L999-1000 |
 | | `tests/fixtures/claude-idle-numbered-list-2457/live-2997/codex-reply-dialog-glyph-01571.txt`（0.157.1）: 返答の引用 L33 `› 1. Yes, continue` / L34 / L35 `Press enter to continue`、入力欄 L57、状態行 L59-60 |
 | 注意 | 発話の行（L37）は綴りなしでは `CODEX_GENUINE_PROMPT_LINE` に当たる。生では SGR の dim で `transcript-echo` と分かれる（`tools/codex/cli-patterns.ts` の `readCodexGlyphRowKind`）。綴りなしの段は「最下段」なので L997 が勝つ |
 | ダイアログ枠の目印 | 宣言しない（codex はダイアログ中に入力欄を消し、ダイアログが下端を占める。入力欄が無ければ anchor `'none'` で今日と同じ） |
-| ダイアログの根拠（陽性） | `tests/fixtures/codex-dialogs-0157/approval.txt`: 発話 L24 `› Run the shell command: touch probe.txt`、質問 L987、`› 1. Yes, proceed (y)` L996、footer `Press enter to confirm or esc to cancel` L1000。最下段の `›` 行は L996（`option`）なので入力欄は無い |
+| ダイアログの根拠（陽性） | `tests/fixtures/codex-dialogs-0157/approval.txt`: 発話 L24 `› Run the shell command: touch probe.txt`、質問 L987、`› 1. Yes, proceed (y)` L996、footer `Press enter to confirm or esc to cancel` L1000。最下段の**本物の** `›` 行（番号付きを除く）は発話の L24 なので、region は anchor `'composer'`・start L24・`composerAtBottom: false`（生の最下段の `›` 行 L996 は SGR で `option`）。#892 の「入力行より下が active」と同じ切り方 |
 | | `tests/unit/lib/detection/fixtures/codex-live-1628/approval-run-command.txt`: 質問 L44、`› 1.` L51、footer L55 |
 
 ### antigravity
 
 | 項目 | 内容 |
 |---|---|
-| 入力欄の目印 | `fencedComposer({ glyph: ANTIGRAVITY_PROMPT_PATTERN, … })` — 罫線・`>`（空、または mode banner。`cli-patterns.ts:2468`）・罫線。罫線が無い綴りでは `bottomMostRow(ANTIGRAVITY_PROMPT_PATTERN)` |
-| 入力欄の根拠 | `tests/fixtures/antigravity-live-2364/idle-after-deny.txt`（1.1.27）: L41 `────`、L42 `>`、L43 `────`、L44 `? for shortcuts`。発話の行（L30 `> Using the Bash tool, …`）は `>` の後に文字があるので `ANTIGRAVITY_PROMPT_PATTERN`（`$` で終わる）に当たらない |
+| 入力欄の目印 | `bottomMostComposerRow` — 最下段の空の `>`（または mode banner。`ANTIGRAVITY_PROMPT_PATTERN`、`cli-patterns.ts:2468`）の行が start。その下に番号行（`ANTIGRAVITY_NUMBERED_OPTION_PATTERN`）も `↑/↓ Navigate`（`ANTIGRAVITY_SELECTION_LIST_PATTERN`）も無ければ下端 |
+| 入力欄の根拠 | `tests/fixtures/antigravity-live-2364/idle-after-deny.txt`（1.1.27）: L41 `────`、**L42 `>`（start）**、L43 `────`、L44 `? for shortcuts`。発話の行（L30 `> Using the Bash tool, …`）は `>` の後に文字があるので `ANTIGRAVITY_PROMPT_PATTERN`（`$` で終わる）に当たらない |
 | ダイアログ枠の目印 | footer `↑/↓ Navigate` から上で最初の境界行 `ANTIGRAVITY_DIALOG_BOUNDARY_PATTERN`（`cli-patterns.ts:2571`）の次の行 — 今日の `locateAntigravityDialogRegion`（L2629）の後半 |
 | ダイアログ枠の根拠 | `tests/fixtures/antigravity-live-2364/dialog-bash-oneline.txt`: L26 `Command`、L27 `────`、L29 `Requesting permission for:`、L32 `Do you want to proceed?`、L33 `> 1. Yes`、L36 `4. No`、L38 `↑/↓ Navigate · tab Amend · …`、L39 `esc to cancel`。入力欄は無い |
 | 入力欄の下の操作部分 | `tests/fixtures/antigravity-live-2364/dialog-feedback-category.txt`（入力欄の**下**に番号行）。`composerEndRow` より下を読む根拠（2.4） |
@@ -462,8 +458,28 @@ dev-reports/module-reference/**
 |---|---|---|---|---|
 | claude | 罫線・`❯`・罫線（下端 4 行以内） | 選択肢の先頭から上の最初の `─` 罫線 | 実機 | 実機 |
 | codex | 最下段の `›`（SGR で composer） | 宣言しない | 実機 | 実機 |
-| antigravity | 罫線・空の `>`・罫線 | `↑/↓ Navigate` から上の境界行 | 実機 | **合成**（実機は未確認） |
+| antigravity | 最下段の空の `>`（下に番号行・`↑/↓ Navigate` が無ければ下端） | `↑/↓ Navigate` から上の境界行 | 実機 | **合成**（実機は未確認） |
 | command-code | 罫線・`❯`・罫線（下端 4 行以内） | 選択肢の先頭から上の最初の `─` 罫線 | 実機（1.40.1） | **合成**（実機は footer の引用だけ） |
-| copilot | 罫線・`❯`・罫線＋状態バー（1.0.80）／`╻▄`・`┃`・`╹▀`（1.0.82） | `╰` に対応する `╭` | 実機（1.0.80） | **合成**（実機は未確認。1.0.82 のダイアログも未確認） |
+| copilot | cwd 行＋罫線・`❯`・罫線＋状態バー（1.0.80）／`╻▄`・`┃`・`╹▀`（1.0.82）（`findCopilotChromeStart`） | `╰` に対応する `╭` | 実機（1.0.80） | **合成**（実機は未確認。1.0.82 のダイアログも未確認） |
 | opencode | `┃` の塊＋`╹▀`＋`ctrl+p` footer | `┃  △ Permission required` | 実機（Auto-Yes は `keys` で答えない。未決 1） | 実機 |
 | opencode-v2 | `┃` の塊＋`╹▀`＋`ctrl+p` footer | `┃  △ Permission required` / `┃  Questions` | 実機（質問フォーム） | 実機 |
+
+---
+
+## 8. 実装で確定したこと（設計時の案からの差分）
+
+段階 A・B の実装（Issue #3183）で、設計時の案から次のとおり変えた。どれも実装前の全 fixture 掃引（`tests/fixtures/**`・`tests/unit/lib/detection/fixtures/**`・`tests/unit/detection/tools/claude/fixtures/**` の `.txt` をツール名でふるい分け、`normalizeFrame(raw, tool)` の anchor と、入力欄が下端なのに `waiting` / `detectDialog` 非 null / 汎用 parser が候補を読むフレームを列挙）か、既存テストの対照で決めた。
+
+| # | 設計時の案 | 実装 | 理由 |
+|---|---|---|---|
+| 1 | `startRow` は生の行の index | `contentLines` の index | 既存規則がすべて `contentLines` を読むため（§2.1） |
+| 2 | 共通拒否は全ツール | `isQuotedNumberedPrompt` は `composerHidesDialogs` のツールだけ。`vetoesDialog` は numbered なら全ツール、keys は `composerHidesDialogs` のツールだけ | 掃引で、copilot の `/model` picker と opencode 系の picker / palette 26 本が「入力欄が下端なのに開いている」と分かった。また `tests/unit/polling/auto-yes-dialog-gate-opencode-v2-2984.test.ts`（3 本）と `tests/unit/session/opencode-v2-body-numbered-list-2991.test.ts`（2 本）は「ゲート・`requireVouchedPrompt` の前の層では候補として読まれる」ことを対照として固定しており、これらの期待値は変えていない |
+| 3 | agy の入力欄は罫線で囲まれた塊 | 最下段の空の `>` の行（`bottomMostComposerRow`）。下に番号行か `↑/↓ Navigate` があれば下端ではない | #2845 の述語と同じ行を目印にするため。Switch Model picker は入力欄の**下**に描かれる（`picker-switch-model.txt` L41-L58）ので footer も条件に入れた |
+| 4 | codex の目印は SGR を先に読む `codexGlyphComposer()` | region の先頭は `findCodexComposerRow`（#892 の最下段の本物の `›`）、下端かどうかは `isCodexComposerAtBottom`（#2841） | 2 つの既存の読みをそのまま 1 つの目印の 2 つの半分にした。承認ダイアログでは先頭が発話の行になり下端ではない（§7 codex） |
+| 5 | `dialogTop` で、入力欄の無いフレームの引用も落とす | `dialogTop` は求めて `liveRegion` に載せるが、拒否規則は使わない | 入力欄の無いフレームで引用を落とす既存の規則（claude の footer 行頭判定、agy の `locateAntigravityDialogRegion` など）は現状で通っており、置き換える根拠となる失敗例が無い。§4.2 の追加対照（引用の下の本物）が陽性のままであることは既存テストが固定している |
+| 6 | `isAntigravitySelectionScreenOpen`（L89）を `liveRegion` で書き換え | 残す | #3 の picker が入力欄の下に描かれるため、「footer より下に入力欄があるか」という向きの判定が要る |
+| 7 | opencode L136 を共通拒否にかける | かけない | #2 の線引き。opencode の承認ストリップは入力欄を消して描かれ（`permission-bash.txt`）、`keys` なので Auto-Yes は答えない |
+| 8 | Auto-Yes の陽性 = `detectAndRespondToPrompt` が `responded` | claude / codex / antigravity / command-code / copilot は `responded`。opencode はゲートが `permission`・`keys` を認め `allowed: false`（オーケストレーターの裁定どおり）。opencode-v2 の質問フォームはゲートが `question`・`numbered` を認め `allowed: true` だが、画面経路では汎用 parser が `┃` に描かれた選択肢を読まず `no_prompt`（v2 の質問はエージェントの API で答える、#2945） | 実測 |
+| 9 | 全 fixture の anchor 分布を `fixture-sweep.ts` の表で固定 | §7 の 24 行を `live-region-markers.test.ts` で固定 | 掃引は実装前の確認に使い、固定するのは設計書に引いた行に絞った |
+| 10 | codex の起動画面ガード（poller L603）は文字列 | poller はその tick のフレームを `getCodexLifecycleDialog` と `isCodexModelPickerFrame` に渡す | 同じフレームを 4 か所すべてに渡すため。`cli-tools/codex.ts` の起動待ちは文字列のまま（同じ `findCodexComposerRow` で切る） |
+

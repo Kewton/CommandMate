@@ -20,6 +20,7 @@ import { STATUS_REASON } from '../../status-reason';
 import { detectOpenCodeModalOverlay } from '../../opencode-modal-overlay';
 import { detectOpenCodeDialog } from './prompt';
 import { STATUS_CHECK_LINE_COUNT } from '../frame';
+import { OPENCODE_LIVE_REGION } from './live-region';
 import { createToolStatusDetector } from '../run-detection';
 import { OPENCODE_VERIFIED_AGAINST } from '../verified-against';
 import { THINKING_TAIL_LINE_COUNT } from '@/config/thinking-constants';
@@ -90,6 +91,8 @@ export function readIdleEvidence(frame: NormalizedFrame): StatusEvidence {
 export const opencodeStatusDetector = createToolStatusDetector({
   tool: 'opencode',
   verifiedAgainst: VERIFIED_AGAINST,
+  // Issue #3183: where the live part of the frame begins (`./live-region.ts`).
+  liveRegion: OPENCODE_LIVE_REGION,
 
   afterThinking(frame): ToolStatusVerdict | null {
     // 2.5. OpenCode status detection (Issue #379)

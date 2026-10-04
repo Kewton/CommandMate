@@ -177,7 +177,7 @@ function readInputBoxStatusRow(contentLines: readonly string[]): string | null {
  * @returns True when the input box is live and agy is idle
  */
 export function isAntigravityReady(output: string): boolean {
-  const frame = normalizeFrame(output);
+  const frame = normalizeFrame(output, 'antigravity');
   if (ANTIGRAVITY_SELECTION_LIST_PATTERN.test(frame.lastLines)) return false;
   if (ANTIGRAVITY_TRUST_DIALOG_PATTERN.test(frame.lastLines)) return false;
 
