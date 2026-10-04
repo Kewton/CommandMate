@@ -34,6 +34,8 @@ import {
   buildDetectPromptOptions,
 } from '../cli-patterns';
 import { detectPrompt } from '../prompt-detector';
+import { withLiveRegion } from './frame';
+import { isQuotedNumberedPrompt, vetoesDialog } from './live-region';
 import { STATUS_REASON } from '../status-reason';
 import { resolveIdleEvidenceMode } from '@/config/detection-evidence-config';
 import { recordIdleEvidenceObservation } from '../idle-evidence-observation';
@@ -93,9 +95,13 @@ function resolveIdleEvidence(spec: ToolDetectorSpec, frame: NormalizedFrame): St
 /** Run the whole chain for one tool over one frame. */
 export function runToolDetection(
   spec: ToolDetectorSpec,
-  frame: NormalizedFrame,
+  input: NormalizedFrame,
   context: ToolDetectionContext = {},
 ): ToolStatusVerdict {
+  // Issue #3183: every branch below reads the tool's own live region, whoever
+  // built the frame.
+  const frame = withLiveRegion(input, spec.tool);
+
   // 0.x — the tool's own pre-prompt branches. A picker, a pager or a status bar
   // whose body the generic parser would misread as a numbered dialog.
   const early = spec.beforePrompt?.(frame) ?? null;
@@ -111,7 +117,13 @@ export function runToolDetection(
     : stripBoxDrawing(frame.lastLines);
   let promptDetection = detectPrompt(promptInput, promptOptions);
   if (promptDetection.isPrompt) {
-    if (spec.isStalePrompt?.(frame, promptDetection)) {
+    if (isQuotedNumberedPrompt(frame.liveRegion, promptDetection)) {
+      // Issue #3183: the input box is the bottom of the pane, so the numbered
+      // list sits in the conversation above it — a reply quoting a dialog
+      // (#2845 / #2991) or a dialog left in the scrollback. The same rule the
+      // Auto-Yes path applies (`detectPromptOnCleanFrame`), on the same region.
+      promptDetection = { ...promptDetection, isPrompt: false, promptData: undefined };
+    } else if (spec.isStalePrompt?.(frame, promptDetection)) {
       // Issue #1160: an ALREADY-ANSWERED block still inside the scan window.
       // Neutralise it so Auto-Yes and the sidebar never act on a dead prompt,
       // and let the chain continue to the tool's running/idle branches.
@@ -226,7 +238,17 @@ export function createToolStatusDetector(spec: ToolDetectorSpec): ToolStatusDete
     // caller which of the two it got, because the Auto-Yes gate must suppress
     // for "this tool has rules and this frame is not a dialog" and must NOT
     // suppress for "nobody has measured this tool yet".
-    detectDialog: spec.detectDialog ?? (() => null),
+    //
+    // Issue #3183: wrapped so every tool's reading gets the live-region veto in
+    // one place — a dialog on a frame whose input box is the bottom of the pane
+    // is a quotation, whatever the tool's own rule matched.
+    detectDialog: spec.detectDialog
+      ? (input) => {
+          const frame = withLiveRegion(input, spec.tool);
+          const verdict = spec.detectDialog!(frame);
+          return vetoesDialog(frame.liveRegion, verdict) ? null : verdict;
+        }
+      : () => null,
     hasDialogRules: spec.detectDialog !== undefined,
   };
 }

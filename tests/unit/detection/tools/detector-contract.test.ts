@@ -21,6 +21,8 @@
  * @vitest-environment node
  */
 
+import { readFileSync, readdirSync } from 'node:fs';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { CLI_TOOL_IDS } from '@/lib/cli-tools/types';
 import {
@@ -176,5 +178,54 @@ describe('[#1927] unknown_frame is defined and produced', () => {
     expect(
       isGeneratingStatus({ status: 'running', reason: STATUS_REASON.UNKNOWN_FRAME }),
     ).toBe(false);
+  });
+});
+
+describe('[#3183] the live region is located in one place', () => {
+  /** Every non-comment line of `src/` that mentions `name`, as `file:line`. */
+  function codeMentions(name: string): string[] {
+    const hits: string[] = [];
+    const walk = (dir: string): void => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) walk(full);
+        else if (/\.tsx?$/.test(entry.name)) {
+          readFileSync(full, 'utf8')
+            .split('\n')
+            .forEach((line, i) => {
+              const code = line.trim();
+              if (code.startsWith('*') || code.startsWith('//') || code.startsWith('/*')) return;
+              // A definition is not a use.
+              if (/\bfunction\s/.test(code)) return;
+              if (code.includes(name)) hits.push(`${path.relative(SRC, full)}:${i + 1}`);
+            });
+        }
+      }
+    };
+    walk(SRC);
+    return hits;
+  }
+  const SRC = path.resolve(__dirname, '../../../../src');
+
+  it('the per-tool extractions it replaced are gone', () => {
+    // codex's #892 region and agy's #2845 / #2851 quoted-list predicate.
+    expect(codeMentions('codexActiveRegionLines')).toEqual([]);
+    expect(codeMentions('isAntigravityQuotedNumberedList')).toEqual([]);
+  });
+
+  it("codex's #2841 reading is called only by its live-region declaration", () => {
+    expect(codeMentions('isCodexComposerAtBottom(').map(hit => hit.replace(/:\d+$/, ''))).toEqual([
+      path.join('lib', 'detection', 'tools', 'codex', 'live-region.ts'),
+    ]);
+  });
+
+  it('every normalizeFrame call in src names the tool', () => {
+    const calls = codeMentions('normalizeFrame(').filter(hit => !hit.startsWith(path.join('lib', 'detection', 'tools', 'frame.ts')));
+    expect(calls.length).toBeGreaterThan(0);
+    for (const hit of calls) {
+      const [file, line] = [hit.replace(/:\d+$/, ''), Number(hit.split(':').pop())];
+      const text = readFileSync(path.join(SRC, file), 'utf8').split('\n')[line - 1];
+      expect(text, hit).toMatch(/normalizeFrame\([^)]*,\s*[^)]+\)/);
+    }
   });
 });

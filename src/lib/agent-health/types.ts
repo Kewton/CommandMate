@@ -51,6 +51,12 @@ export interface AgentHealthCheck {
   /** Failure evidence (pane tail, hook JSON). At most {@link MAX_EVIDENCE_CHARS}. */
   evidence?: string;
   skipReason?: string;
+  /**
+   * The whole frames this check judged, written as captured (Issue #3183,
+   * `frame-archive.ts`). Present only when they were written: by default for a
+   * failing `screen-*` check, for every one with `CM_AGENT_HEALTH_SAVE_FRAMES=all`.
+   */
+  framePaths?: string[];
 }
 
 export interface AgentHealthToolResult {

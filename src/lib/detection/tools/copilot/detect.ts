@@ -17,6 +17,7 @@ import {
 import { detectPrompt } from '../../prompt-detector';
 import { STATUS_REASON } from '../../status-reason';
 import { detectCopilotDialog } from './prompt';
+import { COPILOT_LIVE_REGION } from './live-region';
 import { createToolStatusDetector } from '../run-detection';
 import { COPILOT_VERIFIED_AGAINST } from '../verified-against';
 import type { StatusEvidence } from '@/lib/session/status-evidence';
@@ -46,6 +47,8 @@ export function readIdleEvidence(frame: NormalizedFrame): StatusEvidence {
 export const copilotStatusDetector = createToolStatusDetector({
   tool: 'copilot',
   verifiedAgainst: VERIFIED_AGAINST,
+  // Issue #3183: where the live part of the frame begins (`./live-region.ts`).
+  liveRegion: COPILOT_LIVE_REGION,
 
   beforePrompt(frame) {
     // 0. Copilot: picker detection BEFORE thinking detection

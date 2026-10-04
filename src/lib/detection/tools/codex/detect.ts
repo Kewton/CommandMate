@@ -21,8 +21,6 @@ import {
   CODEX_EFFORT_PICKER_FOOTER_PATTERN,
   CODEX_APPROVAL_FOOTER_PATTERN,
   CODEX_PAGER_FOOTER_PATTERN,
-  CODEX_STATUS_BAR_PATTERN,
-  CODEX_TRAILED_STATUS_BAR_PATTERN,
   getCodexLifecycleDialog,
   stripBoxDrawing,
   buildDetectPromptOptions,
@@ -32,17 +30,17 @@ import { STATUS_REASON } from '../../status-reason';
 import {
   readCodexDialogFrame,
   findCodexBottomGlyphRow,
-  isCodexComposerAtBottom,
   reportCodexDialogFooterDrift,
 } from './cli-patterns';
 import { detectCodexDialog } from './prompt';
-import { STATUS_CHECK_LINE_COUNT, normalizeFrame } from '../frame';
+import { STATUS_CHECK_LINE_COUNT, liveRegionOf, normalizeFrame, withLiveRegion } from '../frame';
 import { findNumberedOptionBlock } from '../dialog-block';
+import { CODEX_LIVE_REGION, findCodexContentEnd, findCodexFooterBoundary } from './live-region';
 import { createToolStatusDetector } from '../run-detection';
 import { CODEX_VERIFIED_AGAINST } from '../verified-against';
 import { THINKING_TAIL_LINE_COUNT } from '@/config/thinking-constants';
 import type { PromptDetectionResult } from '../../prompt-detector';
-import type { ToolStatusVerdict } from '../types';
+import type { NormalizedFrame, ToolStatusVerdict } from '../types';
 
 /** codex-cli build these rules were read off (#1628 / #1829 / #1890; value in ../verified-against, #1929). */
 export const VERIFIED_AGAINST = CODEX_VERIFIED_AGAINST;
@@ -61,38 +59,6 @@ export const VERIFIED_AGAINST = CODEX_VERIFIED_AGAINST;
  */
 const CODEX_CONFIRMATION_FOOTER_PATTERN = /press\s+(?:number|enter)\s+to\s+confirm/i;
 const CODEX_NUMBERED_OPTION_PATTERN = /^\s*[❯›●]?\s*\d{1,2}[.)]\s/;
-
-/**
- * Index of the Codex status bar within the last 10 content rows, or -1.
- *
- * Issue #2818: a bar carrying a thread title or the Plan-mode badge after the
- * path (codex 0.154.0+) is the same bar, so it is a boundary too. Without it
- * such frames fell to branch D, whose 15-row tail still holds a finished
- * turn's `• Ran …` record, and an idle session read `running`.
- */
-function findCodexFooterBoundary(contentLines: readonly string[]): number {
-  for (let ci = contentLines.length - 1; ci >= Math.max(0, contentLines.length - 10); ci--) {
-    const line = contentLines[ci];
-    if (CODEX_STATUS_BAR_PATTERN.test(line) || CODEX_TRAILED_STATUS_BAR_PATTERN.test(line)) return ci;
-  }
-  return -1;
-}
-
-/**
- * Exclusive end of the conversation area — the row below the status bar, with
- * the padding above it walked off (Issue #1928).
- *
- * The same boundary branches 0.8 and 2.7 compute inline, named once so
- * `detectDialog` reads the region THEY read. Falls back to the whole frame when
- * the bar cannot be located, which is Issue #1150's drift case: there the tail
- * is the conversation, so the dialog rule still has the right rows.
- */
-function findCodexContentEnd(contentLines: readonly string[]): number {
-  const boundary = findCodexFooterBoundary(contentLines);
-  let end = boundary >= 0 ? boundary - 1 : contentLines.length - 1;
-  while (end >= 0 && contentLines[end].trim() === '') end--;
-  return end + 1;
-}
 
 /**
  * Issue #1160: decide whether a Codex prompt that detectPrompt() matched is a stale,
@@ -194,6 +160,8 @@ function isCodexDialogGlyphTail(raw: string): boolean {
 export const codexStatusDetector = createToolStatusDetector({
   tool: 'codex',
   verifiedAgainst: VERIFIED_AGAINST,
+  // Issue #3183: where the live part of the frame begins (`./live-region.ts`).
+  liveRegion: CODEX_LIVE_REGION,
 
   beforePrompt(frame): ToolStatusVerdict | null {
     const { contentLines } = frame;
@@ -205,7 +173,11 @@ export const codexStatusDetector = createToolStatusDetector({
     // dialog is up, so a composer at the bottom vetoes all of them at once, and
     // the chain goes on to the prompt / thinking / idle readings it would have
     // reached had the transcript not quoted anything.
-    if (isCodexComposerAtBottom(frame.raw, contentLines, findCodexContentEnd(contentLines))) {
+    //
+    // Issue #3183: "the composer is the bottom" is the live region's
+    // `composerAtBottom`, located once by `normalizeFrame` from
+    // `CODEX_LIVE_REGION` (the #2841 reading, unchanged).
+    if (liveRegionOf(frame, 'codex').composerAtBottom) {
       return null;
     }
 
@@ -248,7 +220,7 @@ export const codexStatusDetector = createToolStatusDetector({
     // interactive element and nothing but a keypress moves them: that is `waiting`.
     // Checked ahead of prompt detection because the transcript rows on screen 2 are
     // ordinary text that must not be read as options.
-    const codexLifecycleDialog = getCodexLifecycleDialog(frame.clean);
+    const codexLifecycleDialog = getCodexLifecycleDialog(withLiveRegion(frame, 'codex'));
     if (codexLifecycleDialog === 'hooks-list' || codexLifecycleDialog === 'hooks-detail') {
       return {
         status: 'waiting',
@@ -397,7 +369,7 @@ export const codexStatusDetector = createToolStatusDetector({
     // dialog — the same veto branch 0.6 applies to the status branches.
     return (
       isCodexStalePrompt(frame.contentLines) ||
-      isCodexComposerAtBottom(frame.raw, frame.contentLines, findCodexContentEnd(frame.contentLines))
+      liveRegionOf(frame, 'codex').composerAtBottom
     );
   },
 
@@ -409,12 +381,14 @@ export const codexStatusDetector = createToolStatusDetector({
     // Issue #2841: Auto-Yes and `respond` act on this answer, so it takes the
     // same veto as the status branches — before the lifecycle screens too, whose
     // wording (`Do you trust …`) can be quoted like any other.
-    const contentEnd = findCodexContentEnd(frame.contentLines);
-    if (isCodexComposerAtBottom(frame.raw, frame.contentLines, contentEnd)) return null;
+    // Issue #3183: the veto itself is applied by `createToolStatusDetector`'s
+    // wrapper from the live region, for every tool; this early return only
+    // saves the parse.
+    if (liveRegionOf(frame, 'codex').composerAtBottom) return null;
     return detectCodexDialog(frame, {
-      contentEnd,
+      contentEnd: findCodexContentEnd(frame.contentLines),
       stalePrompt: isCodexStalePrompt(frame.contentLines),
-      lifecycleDialog: getCodexLifecycleDialog(frame.clean),
+      lifecycleDialog: getCodexLifecycleDialog(withLiveRegion(frame, 'codex')),
     });
   },
 
@@ -539,10 +513,13 @@ export const codexStatusDetector = createToolStatusDetector({
  * `detectDialog` vouches for, so the same words quoted in a reply do not count.
  * `/prompt-response` does not call this and keeps accepting an answer.
  *
- * @param cleanOutput - The capture Auto-Yes judged (ANSI and box drawing stripped)
+ * @param cleanOutput - The capture Auto-Yes judged (ANSI and box drawing
+ *   stripped), or the frame the poller normalised once for the tick (Issue #3183)
  */
-export function isCodexModelPickerFrame(cleanOutput: string): boolean {
-  const frame = normalizeFrame(cleanOutput);
+export function isCodexModelPickerFrame(cleanOutput: string | NormalizedFrame): boolean {
+  const frame = typeof cleanOutput === 'string'
+    ? normalizeFrame(cleanOutput, 'codex')
+    : withLiveRegion(cleanOutput, 'codex');
   if (!codexStatusDetector.detectDialog(frame)) return false;
   const contentEnd = findCodexContentEnd(frame.contentLines);
   const block = findNumberedOptionBlock(stripBoxDrawing(frame.clean).split('\n'), contentEnd);
