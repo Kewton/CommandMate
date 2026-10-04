@@ -20,9 +20,8 @@ import { broadcast } from '@/lib/ws-server';
 import { CLI_TOOL_IDS, isValidInstanceId, type CLIToolType } from '@/lib/cli-tools/types';
 import {
   resolveSessionTargetStrict,
-  describeSessionTargetConflict,
-  INSTANCE_TOOL_CONFLICT,
 } from '@/lib/session/resolve-session-target';
+import { sessionTargetConflictResponse } from '@/lib/session/session-target-conflict-response';
 import { releaseAutoYes } from '@/lib/auto-yes-lifecycle';
 import { clearSessionStarting } from '@/lib/session/session-starting-state';
 import { createLogger } from '@/lib/logger';
@@ -91,14 +90,7 @@ export async function POST(
         requestedCliTool: targetCliTool ?? undefined,
       });
       if (!resolution.ok) {
-        return NextResponse.json(
-          {
-            error: describeSessionTargetConflict(resolution.conflict),
-            code: INSTANCE_TOOL_CONFLICT,
-            ...resolution.conflict,
-          },
-          { status: 400 }
-        );
+        return sessionTargetConflictResponse(resolution.conflict);
       }
       targets.push({
         cliToolId: resolution.target.cliToolId,

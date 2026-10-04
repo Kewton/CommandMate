@@ -64,11 +64,6 @@ import { useLocale, useTranslations } from 'next-intl';
 import type { AgentInstance, CLIToolType } from '@/lib/cli-tools/types';
 import { isAnswerablePromptData, type LivePromptData } from '@/types/models';
 import { TerminalSplitPane } from '@/components/worktree/TerminalSplitPane';
-import {
-  formatAgentModelLabel,
-  formatAgentSessionTooltip,
-  formatAgentSessionUsage,
-} from '@/components/worktree/WorktreeDetailSubComponents';
 import type { AgentSessionSnapshot } from '@/types/agent-session';
 import { TerminalDisplay } from '@/components/worktree/TerminalDisplay';
 import { getTerminalDisplayCompaction } from '@/config/terminal-display-compaction';
@@ -91,24 +86,15 @@ import { ChatSurface } from '@/components/worktree/ChatSurface';
 import { useChatSurfaceLiveState } from '@/hooks/useChatSurfaceLiveState';
 import { PaneResizer } from '@/components/worktree/PaneResizer';
 import { AutoYesToggle } from '@/components/worktree/AutoYesToggle';
-import {
-  useTerminalPanePolling,
-  type PanePromptState,
-} from '@/hooks/useTerminalPanePolling';
+import { useTerminalPanePolling } from '@/hooks/useTerminalPanePolling';
 import { useSplitMessages } from '@/hooks/useSplitMessages';
-import { usePendingMessages, type OptimisticSendOptions } from '@/hooks/usePendingMessages';
-import {
-  useConnectivity,
-  isServerConfirmedReachable,
-  isConnectionKnownDown,
-} from '@/hooks/useConnectivity';
+import { useOptimisticPaneMessages, useDiscardPending } from '@/hooks/useOptimisticPaneMessages';
 import { useHistoryPaneState } from '@/hooks/useHistoryPaneState';
 import { useComposerMaxHeight } from '@/hooks/useComposerHeight';
 import {
   COMPOSER_PANE_BODY_MIN_HEIGHT_PX,
   composerHeightScopeForSplit,
 } from '@/config/composer-height';
-import { worktreeApi } from '@/lib/api-client';
 import { buildPromptResponseBody } from '@/lib/prompt-response-body-builder';
 import { readSelectionListShape } from '@/lib/detection/selection-shape';
 import { withToolDecisionLabels } from '@/components/worktree/prompt-decision-id';
@@ -120,12 +106,9 @@ import type {
   HistoryPaneProps,
   SessionKillTarget,
 } from '@/types/terminal-split-pane';
-import { DEFAULT_SURFACE_MODE, type SurfaceMode } from '@/types/ui-state';
-import {
-  getSplitSurfaceModeStorageKey,
-  resolveSurfaceMode,
-  writeSurfaceMode,
-} from '@/config/surface-mode-config';
+import { getSplitSurfaceModeStorageKey } from '@/config/surface-mode-config';
+import { useSurfaceMode } from '@/hooks/useSurfaceMode';
+import { buildPaneSessionLabels } from '@/components/worktree/pane-session-labels';
 import { Tooltip } from '@/components/common/Tooltip';
 import { SessionStartingNotice } from '@/components/worktree/SessionStartingNotice';
 import {
@@ -175,6 +158,18 @@ export const DIRECT_INPUT_LABEL_MIN_CONTAINER_PX = 520;
  * Restated per surface rather than shared, like {@link optionTakesTypedText}
  * next door: these are 'use client' modules and suites mock them apart.
  */
+function splitOwnsKeyEvent(event: KeyboardEvent, splitIndex: number): boolean {
+  const target = event.target instanceof Element ? event.target : null;
+  const owner = target?.closest('[data-split-index]');
+  if (owner) {
+    if (Number(owner.getAttribute('data-split-index')) !== splitIndex) return false;
+  } else {
+    if (splitIndex !== 0) return false;
+    if (target?.closest('input, textarea, select, [contenteditable="true"]')) return false;
+  }
+  return true;
+}
+
 function isMultiSelectPrompt(promptData: LivePromptData | null | undefined): boolean {
   return promptData?.type === 'multiple_choice' && promptData.multiSelect === true;
 }
@@ -332,21 +327,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
     () => getSplitSurfaceModeStorageKey(worktreeId, splitIndex),
     [worktreeId, splitIndex],
   );
-  // SSR-safe first render: the deterministic default, replaced by the effect
-  // below once `?view=` / localStorage can actually be read (same shape as
-  // `useActivityBarState`, so there is no hydration mismatch to chase).
-  const [surfaceMode, setSurfaceModeState] = useState<SurfaceMode>(DEFAULT_SURFACE_MODE);
-  useEffect(() => {
-    setSurfaceModeState(resolveSurfaceMode(surfaceStorageKey));
-  }, [surfaceStorageKey]);
-
-  const handleSurfaceModeChange = useCallback(
-    (mode: SurfaceMode) => {
-      setSurfaceModeState(mode);
-      writeSurfaceMode(surfaceStorageKey, mode);
-    },
-    [surfaceStorageKey],
-  );
+  const { surfaceMode, handleSurfaceModeChange } = useSurfaceMode(surfaceStorageKey);
 
   // Read by the keydown listener so the listener itself never has to be torn
   // down and rebuilt on a mode change.
@@ -371,14 +352,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       if (!event.metaKey && !event.ctrlKey) return;
       if (event.key.toLowerCase() !== 'm') return;
 
-      const target = event.target instanceof Element ? event.target : null;
-      const owner = target?.closest('[data-split-index]');
-      if (owner) {
-        if (Number(owner.getAttribute('data-split-index')) !== splitIndex) return;
-      } else {
-        if (splitIndex !== 0) return;
-        if (target?.closest('input, textarea, select, [contenteditable="true"]')) return;
-      }
+      if (!splitOwnsKeyEvent(event, splitIndex)) return;
 
       event.preventDefault();
       handleSurfaceModeChange(surfaceModeRef.current === 'chat' ? 'terminal' : 'chat');
@@ -414,14 +388,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       if (!event.metaKey && !event.ctrlKey) return;
       if (event.key !== 'Enter') return;
 
-      const target = event.target instanceof Element ? event.target : null;
-      const owner = target?.closest('[data-split-index]');
-      if (owner) {
-        if (Number(owner.getAttribute('data-split-index')) !== splitIndex) return;
-      } else {
-        if (splitIndex !== 0) return;
-        if (target?.closest('input, textarea, select, [contenteditable="true"]')) return;
-      }
+      if (!splitOwnsKeyEvent(event, splitIndex)) return;
 
       const toggle = onToggleMaximizeRef.current;
       if (!toggle) return;
@@ -529,42 +496,15 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
     enabled: !disabled,
   });
 
-  // Issue #1121: optimistic-UI layer. Merges a just-sent message into this
-  // split's history as a pending bubble (< 100ms) before the send resolves, then
-  // reconciles it against the server echo (no duplicate) or surfaces a
-  // retry/discard error on failure. onSent refetches so reconciliation is prompt.
-  const sendMessageFn = useCallback(
-    (content: string, options: OptimisticSendOptions) =>
-      worktreeApi.sendMessage(worktreeId, content, options),
-    [worktreeId],
-  );
-  // Issue #2503: the same connection verdict the header pill renders (#2501),
-  // read here so a send made in a tunnel is held as "waiting" and resent once
-  // the server answers again, instead of failing after 30s of no network.
-  // Both halves read the *signals* rather than `status`, because both decide
-  // to act: `isServerConfirmedReachable` rather than `isOnline`, so a desktop
-  // carried by polling with the WebSocket down still counts as able to send;
-  // `isConnectionKnownDown` rather than `isOffline`, so a send is only held back
-  // from failing when something actually measured the network as gone.
-  const connectivity = useConnectivity();
-  const pendingConnectivity = useMemo(
-    () => ({
-      offline: isConnectionKnownDown(connectivity.signals),
-      reachable: isServerConfirmedReachable(connectivity.signals),
-    }),
-    [connectivity.signals],
-  );
   const {
     messages: mergedMessages,
     sendOptimistic,
     retry: retryPending,
     discard: discardPending,
-  } = usePendingMessages({
+  } = useOptimisticPaneMessages({
     worktreeId,
     serverMessages: splitMessages,
-    sendFn: sendMessageFn,
     onSent: refreshSplitMessages,
-    connectivity: pendingConnectivity,
   });
 
   // Issue #744: History visible/width. MVP keeps this common across splits
@@ -616,18 +556,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
     [refresh, refreshSplitMessages, onMessageSent],
   );
 
-  // Issue #1121: discarding a failed optimistic message removes its bubble and
-  // restores the text to the composer (via the existing insert-to-message
-  // pathway) so the user can edit and re-send.
-  const handleDiscardPending = useCallback(
-    (tempId: string) => {
-      const content = discardPending(tempId);
-      if (content) {
-        onHistoryInsertToMessage?.(content);
-      }
-    },
-    [discardPending, onHistoryInsertToMessage],
-  );
+  const handleDiscardPending = useDiscardPending(discardPending, onHistoryInsertToMessage);
 
   const handlePromptRespond = useCallback(
     async (answer: string, decisionId?: string | null): Promise<void> => {
@@ -1451,22 +1380,11 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   // re-enters the shared formatter to put the persona in front of it, so the
   // pane header and the header pill's tooltip cannot word it differently. Null
   // agent (every tool but opencode) returns the string unchanged.
-  const paneAgentModel = formatAgentModelLabel(agentModel, null, agentSession.session?.agent);
-  // Issue #2042: `$0.03 · 8.5K (1%)` — the same three values, in the same order,
-  // that opencode's own footer prints for the session this pane is attached to.
-  const paneAgentUsage = formatAgentSessionUsage(
-    agentSession.session,
-    agentSession.context,
-    t,
-    locale
-  );
-  const paneAgentUsageDetail = formatAgentSessionTooltip(
-    agentSession.session,
-    agentSession.context,
-    t,
-    locale
-  );
-
+  const {
+    model: paneAgentModel,
+    usage: paneAgentUsage,
+    usageDetail: paneAgentUsageDetail,
+  } = buildPaneSessionLabels(agentModel, agentSession, t, locale);
   return (
     <TerminalSplitPane
       worktreeId={worktreeId}
@@ -1507,6 +1425,3 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
 });
 
 export default TerminalSplitPaneContent;
-
-// Re-export for tests that want to inspect the polled-state shape.
-export type { PanePromptState };
