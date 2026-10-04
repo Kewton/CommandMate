@@ -11,12 +11,29 @@
 
 **[CommandMate 公式サイト（英語）→](https://kewton.github.io/CommandMate/)**
 
-> **まとまった時間がなくても、スマホから AI チームを動かす。**
+> **複数のコーディングエージェントを並列に。机を離れていても。**
 
-- 1 人で 1 日 10 本以上の PR
-- 月 $110〜$210: Claude Max + Command Code Goat
-- 指示の約 8 割をスマホから送信（作者の概算）
-- 2026 年 9 月にマージした PR 689 本（作者のリポジトリ合計）
+CommandMate は、いつも使っているコーディングエージェントを自分のマシンの 1 か所にまとめ、並べて動かし、Issue 単位で仕事を渡し、終わったかどうかを自分のチェックで決められるようにするツールです。
+
+| Level | CommandMate がすること | あなたの役割 |
+|-------|------------------------|--------------|
+| 1 — Parallel | 複数のコーディングエージェントを 1 か所から並べて動かす | Operator: 各エージェントに応える |
+| 2 — Delegate | Issue 単位で仕事を渡し、完了はエージェントの申告ではなく、あなたのチェック（lint・テスト）の結果で決める | Product / Tech lead: タスクを書き、結果を受け取る |
+| 3 — Manage | PM 役のエージェントが計画・割り当て・確認をまとめる。あなたは PM と話して承認する | Owner: 方向を決めて承認する |
+| Next — Learn | まだ作っていない。方向だけ: 過去の作業の記録から、仕事の進め方を良くしていく | — |
+
+**Anywhere:** どの Level でも、スマホのブラウザから応答・承認できる。机を離れても仕事が止まらない。
+
+多くの人は Level 2 で十分です。自分に合う Level で止めてかまいません。上を目指す必要はありません。
+
+記録した 1 回の run（PM → 開発リーダー → ワーカー）:
+
+- 4 Issue、ワーカー 4 つ（Command Code）、PM と開発リーダーは Claude Code
+- スマホ幅の Web UI からメッセージ 2 通＋タップ 3 回
+- 検証 4/4 合格、PR は CI 緑でマージ、UAT 4/4 GO
+- 依頼から報告まで 9 分 48 秒
+
+as observed（実測した範囲）: 2026-10-02 に記録した 1 回の run。ベンチマークではない。
 
 <p align="center">
   <img src="../images/demo-hero.ja.gif" width="560" alt="4 つの Issue の一覧、lead セッションへ打ち込まれた 1 通、サイドバーに並ぶ 4 つの worktree セッション、テストファイルを書く worker、そしてフェーズごとの表がついた最終報告" />
@@ -34,21 +51,37 @@
 
 ---
 
-## 3 つのレベル
+## 各レベル
 
-### Level 1 — 何体ものエージェントを 1 か所に、ポケットに
+### Level 1 — Parallel
 
-タスクごとに Git worktree とセッションを 1 つずつ。エージェントは合うものを選ぶ: Claude Code ・ Codex ・ Gemini CLI ・ Copilot ・ OpenCode（1.x と V2） ・ Antigravity ・ Command Code ・ ローカルモデル。入力待ちは画面からの推測ではなくエージェント自身の hook から読み、バッジやプッシュ通知としてスマホに届く。応答はブラウザから。
+Claude Code ・ Codex ・ Gemini CLI ・ Copilot ・ OpenCode（1.x と V2） ・ Antigravity ・ Command Code ・ ローカルモデルを並べて動かす。タスクごとに、Git worktree（リポジトリの作業用コピー）とセッションを 1 つずつ割り当てるので、2 つのエージェントが同じファイルを同時に書き換えることはない。どのエージェントがあなたを待っているかはバッジやプッシュ通知で届き、チャットのように応答できる。
 
-### Level 2 — チャットではなく、チームとして働かせる
+あなたの役割: Operator。各エージェントの質問を読み、応える。
 
-タスクは契約（goal・変更してよい範囲・ゲート）つきで渡り、裁定つきで戻ってくる。裁定はエージェントの要約ではなくゲートの exit code（`0` 合格・`20` 不合格・`21` 作業の証跡なし）。セッションの成果を別のエージェントに渡してレビューさせることもできる。
+### Level 2 — Delegate
 
-### Level 3 — 作って、保守までする AI チーム
+チャットの 1 通ではなく、Issue を渡す。Issue はタスク定義つきで渡る。タスク定義はリポジトリに置く短いファイルで、目的・エージェントが変更してよいファイル・通るべきチェックを書く。エージェントが止まると、CommandMate があなた自身のチェック（lint・型チェック・テスト）を実行し、エージェントの要約ではなくその結果で合否が決まる。
 
-lead セッションに 1 通送ると、複数の Issue を計画し、それぞれを契約つきで worker に渡し、ゲートを通ったものだけが PR になる。スケジュール実行で、席を外している間も仕事が進む。作者が毎日回している自動修正ループは、これらの部品で組んだ作者の運用例であって、製品のスイッチではない。
+```text
+Issues → Task contracts → Worktrees → Agents × N → Checks → PR
+```
+
+あなたの役割: Product / Tech lead。何を作るかを決め、合格したものを受け取る。セッションの成果を別のエージェントに渡してレビューさせることもできる。結果の返り方は [CLI 操作ガイド](../user-guide/cli-operations-guide.md#commandmate-verify) にあります。
+
+### Level 3 — Manage
+
+エージェント 1 体ずつではなく、PM 役のエージェント 1 体と話す。PM に 1 通送ると、Issue を計画し、Level 2 と同じようにそれぞれをエージェントに渡し、チェックに合格したものだけが PR になる。何かを書き換える手順はどれもあなたの承認を待つ。決めた時刻に PM を起動して、席を外している間に進めることもできる。[^author]
+
+あなたの役割: Owner。方向を決め、PM に応え、承認する。
+
+### Next — Learn
+
+まだ作っていない。方向だけを示す: 1 つひとつの作業が残す記録を使って、次の作業の進め方を良くしていく。
 
 各レベルの詳細は [公式サイト](https://kewton.github.io/CommandMate/) に、長い版は [CommandMate のしくみ](../user-guide/how-it-works.md) にあります。
+
+[^author]: 作者は、これらの部品と決まった時刻の起動を組み合わせて、毎日の自動修正を回している。これは作者自身の使い方であって、製品のスイッチではない。
 
 ---
 
@@ -70,12 +103,16 @@ commandmate init
 commandmate start --daemon
 ```
 
-- ブラウザで http://127.0.0.1:3000 を開きます。CommandMate は既定で `127.0.0.1` に bind します。`localhost` は環境によって `::1`（IPv6）を先に解決しますが、そこは CommandMate が listen していないアドレスで、別プロセスが掴んでいることがあります。
+- ブラウザで http://127.0.0.1:3000 を開きます。`localhost` ではなく `127.0.0.1` を使う理由は [CLI セットアップガイド](../user-guide/cli-setup-guide.md#ブラウザでアクセス) にあります。
 - インストールせずに試すなら `npx commandmate@latest`（必ず `@latest` を付ける）。理由と WSL2・アップデート・ソースからのビルドは [CLI セットアップガイド](../user-guide/cli-setup-guide.md) にあります。
-- スマホ通知は、`commandmate init` が `CM_VAPID_PUBLIC_KEY` / `CM_VAPID_PRIVATE_KEY` / `CM_VAPID_SUBJECT` を `.env` に書き込むまで出ません。[Webアプリ操作ガイド → スマホ通知](../user-guide/webapp-guide.md#スマホ通知プッシュ通知) を参照してください。
+- スマホ通知は `commandmate init` が設定します。届かないときは [Webアプリ操作ガイド → スマホ通知](../user-guide/webapp-guide.md#スマホ通知プッシュ通知) を参照してください。
 - スマホから使うには `commandmate remote` を実行します。Tailscale か Cloudflare でサーバーを公開し（公開インターネットに出す前に確認します）、ペアリング用の QR コードを表示します。
 
-最初に使うコマンド（あなたにも、エージェントにも）:
+### 最初に使うコマンド
+
+あなたにも、エージェントにも。Level ごとに分けています。
+
+**Level 1 — Parallel**
 
 | コマンド | すること |
 |---------|---------|
@@ -83,12 +120,22 @@ commandmate start --daemon
 | `commandmate remote` | QR コードでスマホとペアリングする |
 | `commandmate ls` | すべての worktree と、そのセッションの状態 |
 | `commandmate send <id> "Issue #101 を実装して" --instance codex` | 1 つのエージェントのセッションにメッセージを送る |
-| `commandmate send <id> --contract .commandmate/tasks/issue-101.yaml --instance codex` | 実行契約を渡す |
-| `commandmate wait <id> --instance codex --verify` | エージェントを待ち、ゲートを実行する: exit `0` / `20` / `21` |
 | `commandmate capture <id>` | セッションの現在の出力を読む |
 | `commandmate respond <id> "yes"` | エージェントが待っているプロンプトに応答する |
-| `commandmate skill list` | worktree ごとに導入できる公式 Catalog の Skill |
 | `commandmate update` | グローバルインストールを更新し、サーバーを再起動する |
+
+**Level 2 — Delegate**
+
+| コマンド | すること |
+|---------|---------|
+| `commandmate send <id> --contract .commandmate/tasks/issue-101.yaml --instance codex` | タスク定義を渡す |
+| `commandmate wait <id> --instance codex --verify` | エージェントを待ち、あなたのチェックを実行して合否を返す |
+
+**Level 3 — Manage**
+
+| コマンド | すること |
+|---------|---------|
+| `commandmate skill list` | worktree ごとに導入できる公式 Catalog の Skill（PM 役のエージェントが使う Skill を含む） |
 | `commandmate docs --section agent-operations` | エージェントに読ませるコマンドガイド全文 |
 
 すべてのコマンドとフラグは [CLI 操作ガイド](../user-guide/cli-operations-guide.md) に、オプション一覧は `commandmate --help` にあります。
@@ -97,9 +144,9 @@ commandmate start --daemon
 
 ## やらないこと
 
-- これは常駐エージェントではなく、1 回のランである。永久に回り続けるものは無く、明示的な承認なしに何かが書き換わることも無い。
-- コードを代わりに読んではくれない。ゲートが捕まえるのは、あなたのテストとチェックが捕まえる範囲だけである。
-- 別のエージェントによるレビューは、あなたが足す 1 ステップであって、ランナーが代わりにやってくれるものではない。
+- 裏で勝手に動き続けるものではない。1 つひとつの作業には始まりと終わりがあり、あなたが承認するまでリポジトリは書き換わらない。
+- コードを代わりに読んではくれない。チェックが捕まえるのは、あなたのテストと lint が捕まえる範囲だけである。
+- 別のエージェントによるレビューは、あなたが足す 1 ステップであって、CommandMate が代わりにやってくれるものではない。
 - 承認はいまも人のところに来る。Auto Yes は opt-in で、時間の上限つきで、あなたが指定したパターンで止まる。
 - tmux ・ Git worktree ・ ターミナル ・ エージェント CLI を置き換えるものではない。OS を再起動すればプロセスは終わる。残るのは記録である。
 
@@ -109,11 +156,11 @@ commandmate start --daemon
 
 | ドキュメント | 説明 |
 |-------------|------|
-| [CommandMate のしくみ](../user-guide/how-it-works.md) | 長い版: 実測、機能一覧、ユースケース、対応エージェント、セキュリティ、Vibe Engineering ワークフロー |
-| [チュートリアル](../user-guide/tutorial.md) | サンプルリポジトリを fork し、契約から検証済みの成果物までを 15 分ほどで体験する |
-| [クイックスタート](../user-guide/quick-start.md) | どのエージェントでも回る契約と検証の最小ループと、5 分の開発フロー |
+| [CommandMate のしくみ](../user-guide/how-it-works.md) | 長い版を Level 順に: Parallel・Delegate（契約・ゲート・Skill）・Manage・Next、続いて Anywhere・対応エージェント・セキュリティ・実測 |
+| [チュートリアル](../user-guide/tutorial.md) | サンプルリポジトリを fork し、タスク定義から、チェックに合格した成果物までを 15 分ほどで体験する |
+| [クイックスタート](../user-guide/quick-start.md) | どのエージェントでも回る「タスク定義を渡してチェックで確かめる」最小の流れと、5 分の開発フロー |
 | [CLI セットアップガイド](../user-guide/cli-setup-guide.md) | インストール、`npx`、初期設定、アップデート、ソースからのビルド |
-| [CLI 操作ガイド](../user-guide/cli-operations-guide.md) | CLI からのセッション操作: 実行契約、検証ゲート、Skill、エージェントインスタンス |
+| [CLI 操作ガイド](../user-guide/cli-operations-guide.md) | CLI からのセッション操作: タスク定義（実行契約）、チェック（検証ゲート）、Skill、エージェントインスタンス |
 | [Webアプリ操作ガイド](../user-guide/webapp-guide.md) | Web UI、スマホからのアクセス、アプリとしてのインストール（PWA）、プッシュ通知、対応ブラウザ |
 | [トラブルシューティング & FAQ](../user-guide/troubleshooting.md) | 固まったセッション、空白に見える `tmux attach`、ポート競合、スマホ・外出先からのアクセス |
 | [Skills 配布ガイド](../user-guide/skills.md) | 公式 Catalog の Skill を worktree へ導入する |

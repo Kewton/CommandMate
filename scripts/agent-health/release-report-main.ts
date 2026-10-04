@@ -17,6 +17,7 @@ import { spawnSync } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { BUG_LABEL, CATALOG_LABEL, METRICS_LABEL } from '@/lib/agent-health/dispatch';
 import { dispatchRecordPath, parseDispatchRecord } from '@/lib/agent-health/dispatch-record';
 import {
   compareMetrics,
@@ -350,7 +351,7 @@ export async function main(argv: readonly string[], overrides: Partial<ReleaseRe
   if (options.gh) {
     const byNumber = new Map<number, NonNullable<ReleaseReadinessModel['openIssues']>[number]>();
     let any = false;
-    for (const label of ['agent-health', 'metrics']) {
+    for (const label of [BUG_LABEL, CATALOG_LABEL, METRICS_LABEL]) {
       const issues = facts.openIssues(label);
       if (issues === null) continue;
       any = true;

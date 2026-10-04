@@ -43,6 +43,7 @@ import {
   TUI_EXIT_WAIT_MS,
 } from '@/config/cli-tool-timing-config';
 import { missingToolError } from './install-hints';
+import { withLaunchScreenCleared } from '@/lib/session/launch-screen';
 
 const logger = createLogger('cli-tools/antigravity');
 
@@ -288,7 +289,7 @@ export class AntigravityTool extends BaseCLITool {
         worktreePath,
       });
       const launchCommand = model ? `${base} --model ${shellSingleQuote(model)}` : base;
-      await sendKeys(sessionName, launchCommand, true);
+      await sendKeys(sessionName, withLaunchScreenCleared(launchCommand), true);
 
       // Wait for agy to initialize
       await new Promise((resolve) => setTimeout(resolve, ANTIGRAVITY_INIT_WAIT_MS));

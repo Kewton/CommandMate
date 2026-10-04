@@ -21,6 +21,7 @@ import {
   LOCAL_STORAGE_KEY,
   LOCAL_STORAGE_KEY_SPLIT_RATIO,
   LOCAL_STORAGE_KEY_AUTO_SAVE,
+  PREVIEW_DEBOUNCE_MS,
 } from '@/types/markdown-editor';
 
 // Issue #1275: this file asserts rendered wording (the save toast, the ESC
@@ -1956,6 +1957,28 @@ def hello():
 
       await waitFor(() => expect(textarea.value).toBe('key:\n  value'));
       expect(textarea.value).not.toContain('\t');
+    });
+  });
+
+  describe('Unmount cleanup (Issue #3186)', () => {
+    it('should cancel the pending preview update on unmount', async () => {
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const { unmount } = render(<MarkdownEditor {...defaultProps} />);
+      await waitForEditorReady();
+
+      vi.useFakeTimers();
+      const textarea = screen.getByTestId('markdown-editor-textarea');
+      fireEvent.change(textarea, { target: { value: 'typed right before unmount' } });
+      const before = vi.getTimerCount();
+      expect(before).toBeGreaterThan(0);
+
+      unmount();
+      expect(vi.getTimerCount()).toBeLessThan(before);
+      act(() => {
+        vi.advanceTimersByTime(PREVIEW_DEBOUNCE_MS * 2);
+      });
+      expect(errorSpy).not.toHaveBeenCalled();
+      errorSpy.mockRestore();
     });
   });
 });

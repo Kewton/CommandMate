@@ -137,9 +137,10 @@ describe('the README points at the setup (Issue #2123)', () => {
     { lang: 'ja', file: 'docs/ja/README.md' },
   ])('$file ($lang) names the variables and links the guide', ({ file }) => {
     // The Issue's table records "README.md: setup none, feature description none".
+    // Issue #3153 moved the variable names to the Web App Guide, which the README
+    // links to its push section; the guide is checked for them above.
     const text = read(file);
-    expect(text).toContain('CM_VAPID_PUBLIC_KEY');
     expect(text).toContain('commandmate init');
-    expect(text).toContain('webapp-guide.md');
+    expect(text).toMatch(/webapp-guide\.md#[^)]+\)/);
   });
 });

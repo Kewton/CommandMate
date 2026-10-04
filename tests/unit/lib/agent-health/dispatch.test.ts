@@ -54,8 +54,8 @@ describe('labels', () => {
   it('names the labels that are missing', () => {
     expect(parseLabelNames([{ name: 'agent-health' }, { name: 'bug' }])).toEqual(['agent-health', 'bug']);
     expect(parseLabelNames(null)).toBeNull();
-    expect(missingLabels(['agent-health', 'bug'])).toEqual(['metrics', 'security', 'auto-dispatched']);
-    expect(missingLabels(['agent-health', 'metrics', 'security', 'auto-dispatched'])).toEqual([]);
+    expect(missingLabels(['agent-health', 'bug'])).toEqual(['metrics', 'security', 'catalog-drift', 'auto-dispatched']);
+    expect(missingLabels(['agent-health', 'metrics', 'security', 'catalog-drift', 'auto-dispatched'])).toEqual([]);
   });
 });
 
@@ -290,5 +290,84 @@ describe('parseDispatchRecord runSuffix (#3045)', () => {
     const base = { schemaVersion: 1, date: '2026-10-01', status: 'sent', issues: [], deferred: [] };
     expect(parseDispatchRecord(JSON.stringify({ ...base, runSuffix: '../x' }))).toEqual(base);
     expect(parseDispatchRecord(JSON.stringify({ ...base, runSuffix: '1-2' }))?.runSuffix).toBe('1-2');
+  });
+});
+
+describe('catalog-drift Issues (#3159)', () => {
+  it('requires the catalog-drift label', () => {
+    expect(missingLabels(['agent-health', 'metrics', 'security', 'auto-dispatched'])).toEqual(['catalog-drift']);
+  });
+
+  it('takes only the owner\'s catalog-drift Issues that were not dispatched yet', () => {
+    expect(issueKind(issue(1, ['catalog-drift'], 'a'))).toBe('catalog');
+    expect(issueKind(issue(1, ['catalog-drift'], 'a', 'kewton'))).toBe('catalog');
+    expect(issueKind(issue(1, ['catalog-drift'], 'a', 'someone-else'))).toBeNull();
+    expect(issueKind(issue(1, ['catalog-drift', 'auto-dispatched'], 'a'))).toBeNull();
+    expect(issueKind(issue(1, ['catalog'], 'a'))).toBeNull();
+    expect(issueKind(issue(1, ['catalog-drift', 'metrics'], 'a'))).toBe('catalog');
+    expect(issueKind(issue(1, ['agent-health', 'catalog-drift'], 'a'))).toBe('bug');
+  });
+
+  it('orders bugs → catalog → metrics, and takes at most 1 catalog (oldest first)', () => {
+    const result = selectDispatchTargets([
+      issue(30, ['metrics', 'security'], '2026-08-01'),
+      issue(21, ['catalog-drift'], '2026-09-21'),
+      issue(20, ['catalog-drift'], '2026-09-20'),
+      issue(10, ['agent-health'], '2026-09-30'),
+    ]);
+    expect(result.issues.map((i) => [i.number, i.kind])).toEqual([
+      [10, 'bug'],
+      [20, 'catalog'],
+      [30, 'metrics'],
+    ]);
+    expect(result.deferred).toEqual([21]);
+  });
+
+  it('ignores other authors and dispatched catalog Issues entirely (not even deferred)', () => {
+    const result = selectDispatchTargets([
+      issue(1, ['catalog-drift'], '2026-09-01', 'attacker'),
+      issue(2, ['catalog-drift', 'auto-dispatched'], '2026-09-02'),
+    ]);
+    expect(result).toEqual({ issues: [], deferred: [] });
+  });
+
+  it('keeps the total cap at 5: catalog after bugs, metrics after catalog', () => {
+    const bugs = [1, 2, 3, 4].map((n) => issue(n, ['agent-health'], `2026-09-0${n}`));
+    const result = selectDispatchTargets([
+      issue(8, ['metrics'], '2026-08-01'),
+      issue(7, ['catalog-drift'], '2026-09-07'),
+      ...bugs,
+    ]);
+    expect(result.issues.map((i) => i.number)).toEqual([1, 2, 3, 4, 7]);
+    expect(result.deferred).toEqual([8]);
+
+    const full = selectDispatchTargets([
+      issue(7, ['catalog-drift'], '2026-09-07'),
+      ...[1, 2, 3, 4, 5].map((n) => issue(n, ['agent-health'], `2026-09-0${n}`)),
+    ]);
+    expect(full.issues.map((i) => i.number)).toEqual([1, 2, 3, 4, 5]);
+    expect(full.deferred).toEqual([7]);
+  });
+
+  it('adds the unattended-section term only when a catalog Issue is in the run', () => {
+    const terms = buildTerms('2026-10-05', [
+      { number: 3050, kind: 'bug', title: 'a' },
+      { number: 3160, kind: 'catalog', title: 'b' },
+    ]);
+    expect(terms).toContain('対象は 2 件（#3050 bug、#3160 catalog）');
+    expect(terms).toContain('本 run では PR の develop へのマージを進めてよい（利用者の明示的な許可）');
+    expect(terms).toContain(
+      '- catalog の Issue（#3160）は `/catalog-reconcile` の無人実行節に従う。worker への契約に「`.claude/skills/catalog-reconcile/SKILL.md` を読み、無人実行の節に従う」と書く（除外の追加・変更・削除はしない。判断が要る候補は外して Issue にコメントする）。その PR の本文には「無人実行」と書き、Issue を参照する'
+    );
+
+    const without = buildTerms('2026-10-05', [{ number: 3050, kind: 'bug', title: 'a' }]);
+    expect(without).not.toContain('catalog-reconcile');
+    expect(without).not.toContain('無人実行');
+  });
+
+  it('records a catalog Issue and reads it back', () => {
+    const issues = [{ number: 3160, kind: 'catalog' as const, title: 'b' }];
+    const record = buildDispatchRecord({ date: '2026-10-05', status: 'sent', sentAt: '2026-10-04T23:30:00.000Z', issues, deferred: [] });
+    expect(parseDispatchRecord(JSON.stringify(record))).toEqual(record);
   });
 });

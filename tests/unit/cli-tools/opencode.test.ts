@@ -118,6 +118,7 @@ import {
   resetOpencodePortAssignments,
 } from '@/lib/hooks/sources/opencode/ports';
 import { resetOpencodeLaunchSettings } from '@/lib/hooks/sources/opencode/launch-settings';
+import { withLaunchScreenCleared } from '@/lib/session/launch-screen';
 
 let sandbox: string;
 
@@ -318,7 +319,7 @@ describe('OpenCodeTool', () => {
 
       expect(sendKeys).toHaveBeenCalledWith(
         'mcbd-opencode-test-123',
-        `${PORT_ASSIGNMENT} 'opencode' --port 4242 --hostname 127.0.0.1`,
+        withLaunchScreenCleared(`${PORT_ASSIGNMENT} 'opencode' --port 4242 --hostname 127.0.0.1`),
         true
       );
       expect(attachOpencodeEventStream).toHaveBeenCalled();
@@ -429,7 +430,7 @@ describe('OpenCodeTool', () => {
       // belongs to, not whether its hooks are configured.
       expect(sendKeys).toHaveBeenCalledWith(
         'mcbd-opencode-test-123',
-        `${PORT_ASSIGNMENT} opencode`,
+        withLaunchScreenCleared(`${PORT_ASSIGNMENT} opencode`),
         true
       );
     });
@@ -471,7 +472,7 @@ describe('OpenCodeTool', () => {
       // behind #2403's server port, which every line carries.
       expect(sendKeys).toHaveBeenCalledWith(
         'mcbd-opencode-test-123',
-        `${PORT_ASSIGNMENT} opencode`,
+        withLaunchScreenCleared(`${PORT_ASSIGNMENT} opencode`),
         true
       );
     });

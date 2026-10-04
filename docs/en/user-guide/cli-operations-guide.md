@@ -1492,6 +1492,8 @@ commandmate instances <worktree-id> alias <instance-id> "New name"     # Rename
 commandmate instances <worktree-id> kill <instance-id>                 # Stop just that instance's session
 ```
 
+`kill` also disables Auto-Yes for the instances it stops (Auto-Yes of instances it did not stop is kept).
+
 ### Output Example (list)
 
 `commandmate instances <worktree-id>`:

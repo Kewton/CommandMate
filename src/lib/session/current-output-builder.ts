@@ -17,6 +17,11 @@ import { getSessionState, createMessage } from '@/lib/db';
 // when this instance was last handed a prompt.
 import { getLastUserMessageForInstance } from '@/lib/db/chat-db';
 import { observeUnclassifiedFrame } from '@/lib/detection/unclassified-frame-tracker';
+import {
+  getSessionStartingSince,
+  observeSessionStartingFrame,
+  startingStatusResult,
+} from '@/lib/session/session-starting-state';
 import { extractComposerText, type ComposerTextState } from '@/lib/detection/composer-text';
 import { matchUpstreamFault } from '@/lib/detection/upstream-faults';
 import {
@@ -565,6 +570,23 @@ export interface CurrentOutputPayload {
    */
   isDismissablePanelActive?: boolean;
   isUnclassifiedActive?: boolean;
+  /**
+   * Epoch ms this instance's launch began, or null when it is not starting
+   * (Issue #3179).
+   *
+   * Non-null from `beginAgentSession` until `startSession` returns or throws,
+   * bounded by the tool's readiness wait and released early by a dialog the
+   * launch does not answer — see `lib/session/session-starting-state`. While it
+   * is non-null the status is `running` / `starting` and `isPromptWaiting`,
+   * `isSelectionListActive`, `isPagerActive`, `isDismissablePanelActive` and
+   * `isUnclassifiedActive` are all false: the frame under a launch is a shell
+   * prompt and the launch line, or a trust dialog the launch answers itself,
+   * and nobody has to drive it. The screen shows "<agent> を起動中…" instead.
+   *
+   * Optional on the type for a server that predates the field; this builder
+   * always sets it.
+   */
+  startingSince?: number | null;
   /**
    * Whether {@link sessionStatus} rests on something positive (Issue #1926,
    * §4 D1 / §7).
@@ -1442,7 +1464,8 @@ export async function buildCurrentOutput(
   // surface is actually being watched at, which is exactly the property the
   // terminal snapshot already has. Gated on the merged verdict (`'running'`, not
   // the tmux-session-exists `isRunning`) so an idle pane reads no transcript.
-  if (payload.isRunning && payload.sessionStatus === 'running') {
+  // Issue #3179: not during a launch — there is no turn to publish yet.
+  if (payload.isRunning && payload.sessionStatus === 'running' && payload.startingSince == null) {
     // Issue #2248 made this an `await`, and it buys less than it looks like: the
     // expensive half — the transcript read and the broadcast — is detached
     // inside, so what is waited for is a worktree row and a Map lookup. What it
@@ -1603,6 +1626,10 @@ async function buildPayload(
     forgetLastKnownStatus(buildCompositeKey(worktreeId, cliToolId, instanceId));
     return {
       isRunning: false,
+      // Issue #3179: `beginAgentSession` runs before the pane is created, so a
+      // launch can be in progress with no tmux session yet. Read-only here —
+      // there is no frame to judge a dialog on.
+      startingSince: getSessionStartingSince(worktreeId, cliToolId, instanceId),
       sessionName,
       content: '',
       lineCount: 0,
@@ -1690,7 +1717,22 @@ async function buildPayload(
   const lastServerResponseTimestamp = getLastServerResponseTimestamp(compositeKey);
   const lastOutputTimestamp = lastServerResponseTimestamp ? new Date(lastServerResponseTimestamp) : undefined;
 
-  const statusResult = detectSessionStatus(output, cliToolId, lastOutputTimestamp);
+  const rawStatusResult = detectSessionStatus(output, cliToolId, lastOutputTimestamp);
+  // Issue #3179: a launch in progress. The frame is a shell prompt and the
+  // launch line, or a dialog the launch is about to answer, and none of the
+  // flags below may be read off it: the floor verdict raised the Navigate pad,
+  // the trust dialog raised the selection list / prompt sheet. A dialog that
+  // outstays the launch's own answer releases the record (a login, an unknown
+  // dialog), and from then on this is the ordinary verdict again.
+  const startingSince = observeSessionStartingFrame(
+    worktreeId,
+    cliToolId,
+    instanceId,
+    rawStatusResult.status === 'waiting' || rawStatusResult.hasActivePrompt,
+  );
+  const statusResult = startingSince === null
+    ? rawStatusResult
+    : startingStatusResult(rawStatusResult);
   // Issue #1912: every `running` reason that means "the agent is producing
   // output", not just `thinking_indicator`. opencode answers
   // `opencode_processing_indicator` for its `esc interrupt` footer, which is
@@ -1827,7 +1869,9 @@ async function buildPayload(
   // the guard cannot disagree about whether a prompt is open. What they are
   // still allowed to differ on is what to DO about it — see `blocksSend`, which
   // bounds the structured layer's veto over sends and leaves this flag alone.
-  const isPromptWaiting = promptResolution.waiting;
+  // Issue #3179: not while a launch is in progress. The scraper half is already
+  // neutralised above; this also drops a structured wait the launch inherited.
+  const isPromptWaiting = startingSince === null && promptResolution.waiting;
 
   // Issue #1726: the agent's own account of what it asked. It contributes only
   // where some other layer has already established that a dialog is on screen —
@@ -1923,7 +1967,9 @@ async function buildPayload(
           patterns: decisionOptions !== null ? promptWaiting.patterns : null,
         };
 
-  const promptData: PromptData | StructuredPromptWaitingData | null = scraperPromptWaiting
+  const promptData: PromptData | StructuredPromptWaitingData | null = startingSince !== null
+    ? null
+    : scraperPromptWaiting
     ? correctedPromptData ??
       scraperPromptData ??
       (structuredFacts ? buildStructuredPromptData(worktreeId, structuredFacts) : null)
@@ -2011,9 +2057,11 @@ async function buildPayload(
     eventSource.capabilities.eventIdentity,
     structuredEvents.pendingDecisions ?? [],
   );
+  // Issue #3179: a launch in progress is not a detection failure — its frame is
+  // the shell and the launch line — so no row, and the run starts afresh after.
   const unclassifiedVerdict = observeUnclassifiedFrame(
     compositeKey,
-    merged.isUnclassifiedActive && !answerableOverAgentApi,
+    merged.isUnclassifiedActive && !answerableOverAgentApi && startingSince === null,
   );
   if (unclassifiedVerdict.shouldRecord) {
     recordUnclassifiedFrame(db, {
@@ -2108,10 +2156,16 @@ async function buildPayload(
   // `sessionStatus` it sat next to one poll earlier. Observed before it is read
   // so a positive poll reports itself, which is what keeps the field from
   // looking stale on a healthy session.
+  // Issue #3179: the structured layer cannot override a launch in progress
+  // either — a `waiting` it inherited would put the answer sheet back.
+  const published = startingSince === null
+    ? merged
+    : { ...merged, status: 'running' as const, reason: STATUS_REASON.STARTING, thinking: false };
+
   observeStatusEvidence(compositeKey, {
-    status: merged.status,
-    reason: merged.reason,
-    evidence: merged.evidence,
+    status: published.status,
+    reason: published.reason,
+    evidence: published.evidence,
   });
   const lastKnown = getLastKnownStatus(compositeKey);
 
@@ -2119,19 +2173,19 @@ async function buildPayload(
     isRunning: true,
     sessionName,
     cliToolId,
-    sessionStatus: merged.status,
-    sessionStatusReason: merged.reason,
+    sessionStatus: published.status,
+    sessionStatusReason: published.reason,
     content: newContent,
     fullOutput: output,
     realtimeSnippet,
     lineCount: totalLines,
     lastCapturedLine,
     isComplete: isPromptWaiting,
-    isGenerating: merged.thinking,
-    thinking: merged.thinking,
+    isGenerating: published.thinking,
+    thinking: published.thinking,
     // Issue #2607: named after the tool actually running. A fixed "Claude" was
     // published for every agent, and `capture --json` readers took it at its word.
-    thinkingMessage: merged.thinking ? `${getCliToolDisplayName(cliToolId)} is thinking...` : null,
+    thinkingMessage: published.thinking ? `${getCliToolDisplayName(cliToolId)} is thinking...` : null,
     isPromptWaiting,
     promptData,
     ...(promptAnswerable !== undefined ? { promptAnswerable } : {}),
@@ -2147,11 +2201,12 @@ async function buildPayload(
     isSelectionListActive,
     isPagerActive,
     isDismissablePanelActive,
-    isUnclassifiedActive: merged.isUnclassifiedActive,
+    isUnclassifiedActive: startingSince === null && merged.isUnclassifiedActive,
+    startingSince,
     // Issue #1926: the same fact `isUnclassifiedActive` carries, named the way
     // §4 D1 names it. Published from the merged verdict so the two cannot
     // disagree on the wire.
-    statusEvidence: merged.evidence,
+    statusEvidence: published.evidence,
     lastKnownStatus: lastKnown?.status ?? null,
     lastKnownStatusAt: lastKnown?.at ?? null,
     lastServerResponseTimestamp,

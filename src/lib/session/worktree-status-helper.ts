@@ -18,6 +18,11 @@ import { CLI_TOOL_IDS, type CLIToolType } from '@/lib/cli-tools/types';
 import { captureSessionOutput } from './cli-session';
 import { detectSessionStatus } from '@/lib/detection/status-detector';
 import { STATUS_REASON } from '@/lib/detection/status-reason';
+import {
+  getSessionStartingSince,
+  observeSessionStartingFrame,
+  startingStatusResult,
+} from '@/lib/session/session-starting-state';
 import { deriveCliStatus, sessionStatusToActivityFlags } from './status-mapping';
 // Issue #2317: the tmux session is a SURFACE, not just a place to run a process.
 // Reached through `cli-session`, which is the gateway Issue #1922's import guard
@@ -264,6 +269,17 @@ export interface CliToolSessionStatus {
    * disconnection and an aggregate would name one of them.
    */
   eventSource?: AgentEventSourceStatus;
+  /**
+   * Epoch ms this instance's launch began, while it is still starting
+   * (Issue #3179), or absent.
+   *
+   * The same value `CurrentOutputPayload.startingSince` carries, from the same
+   * record (`lib/session/session-starting-state`). Absent rather than null when
+   * nothing is starting — the key-omission rule {@link model} follows, for its
+   * reason. Per instance only: {@link mergeSessionStatus} drops it, because two
+   * instances of a tool do not start together.
+   */
+  startingSince?: number;
 }
 
 /** Aggregated session status result for a worktree */
@@ -456,7 +472,11 @@ async function detectInstanceSessionStatus(
   // claude-only call sites use, and it now delegates here). What is new is that
   // six other specs exist to ask it with.
   let exitedReason: string | null = null;
-  if (isRunning) {
+  // Issue #3179: a launch in progress. Read before the liveness probe, because
+  // the pane of a launch that has not typed its command yet IS a bare shell
+  // prompt — the very frame the probe reads as "the tool exited".
+  let startingSince = getSessionStartingSince(worktreeId, cliToolId, instanceId);
+  if (isRunning && startingSince === null) {
     if (metrics) metrics.healthCheckCount++;
     const liveness = await probeToolSessionLiveness(sessionName, cliToolId);
     if (!liveness.alive) {
@@ -501,7 +521,18 @@ async function detectInstanceSessionStatus(
       const compositeKey = buildCompositeKey(worktreeId, cliToolId, instanceId);
       const lastServerResponseTs = getLastServerResponseTimestamp(compositeKey);
       const lastOutputTimestamp = lastServerResponseTs ? new Date(lastServerResponseTs) : undefined;
-      const statusResult = detectSessionStatus(output, cliToolId, lastOutputTimestamp);
+      const rawStatusResult = detectSessionStatus(output, cliToolId, lastOutputTimestamp);
+      // Issue #3179: the same neutral verdict `current-output-builder` publishes
+      // while a launch is in progress, fed the same dialog dwell.
+      startingSince = observeSessionStartingFrame(
+        worktreeId,
+        cliToolId,
+        instanceId,
+        rawStatusResult.status === 'waiting' || rawStatusResult.hasActivePrompt,
+      );
+      const statusResult = startingSince === null
+        ? rawStatusResult
+        : startingStatusResult(rawStatusResult);
 
       // Issue #1784: read the model / reasoning effort off the same frame the
       // detector just judged. Riding on this capture is the entire point — the
@@ -571,8 +602,10 @@ async function detectInstanceSessionStatus(
           hasActivePrompt: statusResult.hasActivePrompt,
         },
       });
-      isWaitingForResponse = isWaitingForResponse || peek.waiting;
-      structuredWaitingSince = peek.structured?.at ?? null;
+      // Issue #3179: not during a launch — a structured wait inherited there
+      // would light the orange dot for a dialog nobody has to answer.
+      isWaitingForResponse = isWaitingForResponse || (startingSince === null && peek.waiting);
+      structuredWaitingSince = startingSince === null ? peek.structured?.at ?? null : null;
       waitingKind = deriveWaitingKind({
         waiting: isWaitingForResponse,
         hasActivePrompt: statusResult.hasActivePrompt,
@@ -713,6 +746,7 @@ async function detectInstanceSessionStatus(
       ? { lastKnownStatus: lastKnown.status, lastKnownStatusAt: lastKnown.at }
       : {}),
     ...(eventSource !== null ? { eventSource } : {}),
+    ...(startingSince !== null ? { startingSince } : {}),
   };
 }
 

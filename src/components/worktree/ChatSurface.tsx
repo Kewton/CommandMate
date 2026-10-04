@@ -163,6 +163,11 @@ import {
   useChatTurnProgress,
   type ChatTurnProgressView,
 } from '@/hooks/useChatTurnProgress';
+import { SessionStartingNotice } from '@/components/worktree/SessionStartingNotice';
+import {
+  sessionStartingScopeKey,
+  useSessionStartingGate,
+} from '@/hooks/useSessionStartingGate';
 
 // ============================================================================
 // Constants
@@ -351,6 +356,16 @@ export interface ChatSurfaceLiveState {
    */
   isDismissablePanelActive?: boolean;
   isUnclassifiedActive?: boolean;
+  /**
+   * Epoch ms the agent began launching, while it is still starting (Issue
+   * #3179). `undefined` / `null` is "not starting" — including a caller or a
+   * server that predates the field.
+   *
+   * While set, the footer shows "<agent> を起動中…" instead of a dialog card,
+   * {@link resolveBlockedReason} answers null whatever else is set, and the
+   * in-flight bubble is not drawn — the launch is not a turn.
+   */
+  startingSince?: number | null;
 }
 
 /**
@@ -561,6 +576,9 @@ export function resolveBlockedReason(
   live: ChatSurfaceLiveState,
   frame?: string | null,
 ): ChatSurfaceBlockedReason | null {
+  // Issue #3179: a launch in progress has no dialog for anybody to drive — the
+  // trust screen on it is answered by the launch itself.
+  if (typeof live.startingSince === 'number') return null;
   if (live.isPagerActive) return 'pager';
   if (live.isSelectionListActive) return 'selectionList';
   // Issue #2369. `??`, not `||`: an explicit `false` from a server that knows
@@ -711,7 +729,10 @@ export const ChatSurface = memo(function ChatSurface({
   // `live.isRunning` is deliberately NOT ANDed in. It would be redundant — a
   // stopped session publishes `sessionStatus: 'idle'` — and re-admitting it to
   // the generating decision is the exact confusion this Issue exists to remove.
-  const isGenerating = live.sessionStatus === 'running';
+  // Issue #3179: a launch is published as `running` too, and is not a turn.
+  const startingSince = typeof live.startingSince === 'number' ? live.startingSince : null;
+  const isStarting = startingSince !== null;
+  const isGenerating = live.sessionStatus === 'running' && !isStarting;
   const pushedProgress = useChatTurnProgress({
     worktreeId,
     cliToolId,
@@ -878,6 +899,16 @@ export const ChatSurface = memo(function ChatSurface({
   const handleOpenTerminal = useCallback(() => {
     onSurfaceModeChange('terminal');
   }, [onSurfaceModeChange]);
+
+  // Issue #3179: the starting strip's link. Switching to the terminal surface
+  // alone would land on that surface's own starting notice; the reveal is
+  // shared, so the pane is what appears.
+  const startingScopeKey = sessionStartingScopeKey(worktreeId, instanceId ?? cliToolId ?? '');
+  const startingGate = useSessionStartingGate(startingScopeKey, startingSince);
+  const handleStartingShowTerminal = useCallback(() => {
+    startingGate.revealTerminal();
+    onSurfaceModeChange('terminal');
+  }, [startingGate, onSurfaceModeChange]);
 
   // --------------------------------------------------------------------
   // Seeing the key land (Issue #2297)
@@ -1231,6 +1262,22 @@ export const ChatSurface = memo(function ChatSurface({
           floats `absolute … z-10` inside the `relative` transcript box above,
           and this is a flex sibling below that box, so the two cannot overlap
           however tall the card gets. */}
+      {/* Issue #3179: the launch, in the footer where a dialog card would sit.
+          Not gated on the reveal: the transcript is what this surface shows, so
+          there is no pane here for the notice to stand in for. */}
+      {startingSince !== null && cliToolId ? (
+        <div
+          data-testid="chat-surface-starting"
+          className="flex shrink-0 flex-col gap-2 border-t border-border bg-surface px-3 py-2"
+        >
+          <SessionStartingNotice
+            cliToolId={cliToolId}
+            startingSince={startingSince}
+            onShowTerminal={handleStartingShowTerminal}
+            variant="strip"
+          />
+        </div>
+      ) : null}
       {blockedReason !== null && (
         <div
           data-testid="chat-surface-live"

@@ -168,7 +168,8 @@ describe('launch (D2)', () => {
       'begin',
       'createSession',
       'reserve',
-      'sendKeys:LAUNCH-LINE:true',
+      // #3180: typed behind `clear 2>/dev/null; printf '\033[3J'; `.
+      "sendKeys:clear 2>/dev/null; printf '\\033[3J'; LAUNCH-LINE:true",
       'attach',
     ]);
     expect(buildAgentLaunchCommandLine).toHaveBeenCalledWith({

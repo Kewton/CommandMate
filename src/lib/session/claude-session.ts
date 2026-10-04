@@ -50,6 +50,7 @@ import {
   SessionStartUnavailableError,
   isSafeSessionStartError,
 } from '@/lib/session/session-start-error';
+import { withLaunchScreenCleared } from '@/lib/session/launch-screen';
 
 const logger = createLogger('claude-session');
 
@@ -507,6 +508,11 @@ export interface HealthCheckResult {
  * reading as a zsh prompt. What changed is that six other tools can now be
  * asked the same question; see `lib/cli-tools/liveness-spec`.
  *
+ * Issue #3191: a `user@host …` prompt of 40 characters or more is now read as
+ * the shell too (claude's spec takes `SHELL_PROMPT_LINE_PATTERNS`), so a claude
+ * that was `/exit`ed into a long zsh / bash prompt is reported unhealthy and
+ * relaunched instead of timing out the next send.
+ *
  * @param sessionName - tmux session name
  * @returns HealthCheckResult with healthy status and optional reason
  */
@@ -812,7 +818,7 @@ export async function startClaudeSession(
       model === undefined ? baseLaunchCommand : `${baseLaunchCommand} --model ${shellQuote(model)}`;
 
     // Start Claude CLI in interactive mode using dynamically resolved path
-    await sendKeys(sessionName, launchCommand, true);
+    await sendKeys(sessionName, withLaunchScreenCleared(launchCommand), true);
 
     // Wait for Claude to initialize with dynamic detection (OCP-001)
     // Use constants instead of hardcoded values

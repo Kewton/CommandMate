@@ -128,6 +128,8 @@ interface CurrentOutputResponse {
    * a server that predates the field.
    */
   agentMode?: string;
+  /** Issue #3179: epoch ms the agent began launching, while it is still starting. */
+  startingSince?: number | null;
   autoYes?: {
     enabled: boolean;
     expiresAt: number | null;
@@ -350,6 +352,10 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   const [isUnclassifiedActive, setIsUnclassifiedActive] = useState(false);
   const [sessionStatus, setSessionStatus] = useState('');
   const [agentMode, setAgentMode] = useState<string>(AGENT_MODE_UNKNOWN);
+  // Issue #3179: the phone's docked controls (Navigate pad, prompt sheet, the
+  // composer's stop button and mode control) live outside `MobileTerminalTab`,
+  // so "the agent is still launching" reaches them through this poll too.
+  const [startingSince, setStartingSince] = useState<number | null>(null);
   // Issue #314: Track previous auto-yes enabled state for stop reason toast
   const prevAutoYesEnabledRef = useRef<boolean>(false);
   // Issue #314 / #499 Item 5: Pending stop reason toast (deferred until showToast is available)
@@ -807,6 +813,7 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       setIsUnclassifiedActive(data.isUnclassifiedActive ?? false);
       setSessionStatus(data.sessionStatus ?? '');
       setAgentMode(data.agentMode ?? AGENT_MODE_UNKNOWN);
+      setStartingSince(typeof data.startingSince === 'number' ? data.startingSince : null);
 
       // Issue #501: Update last server response timestamp for useAutoYes duplicate prevention
       setLastServerResponseTimestamp(data.lastServerResponseTimestamp ?? null);
@@ -1981,6 +1988,8 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     isUnclassifiedActive,
     sessionStatus,
     agentMode,
+    // Issue #3179: the phone's docked controls stand down while it is set.
+    startingSince,
     lastAutoResponse,
     loading,
     makeAutoYesToggleHandler,

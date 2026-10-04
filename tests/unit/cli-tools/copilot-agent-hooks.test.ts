@@ -34,6 +34,7 @@ import { CopilotTool } from '@/lib/cli-tools/copilot';
 import { resolveCopilotExecutable } from '@/lib/cli-tools/copilot-executable';
 import { getAgentEventGenerationStartedAt } from '@/lib/session/agent-event-state';
 import { buildCopilotReadyFrame } from '@tests/fixtures/copilot-folder-trust-1080';
+import { LAUNCH_SCREEN_CLEAR_PREFIX } from '@/lib/session/launch-screen';
 
 vi.mock('child_process', async () => {
   const actual = await vi.importActual<typeof import('child_process')>('child_process');
@@ -98,7 +99,10 @@ async function startSession(instanceId?: string): Promise<void> {
 /** The line `startSession` sent to the pane — `sendKeys(sessionName, command)`. */
 async function sentCommand(): Promise<string> {
   const { sendKeys } = await import('@/lib/tmux/tmux');
-  return String(vi.mocked(sendKeys).mock.calls.at(-1)?.[1]);
+  const typed = String(vi.mocked(sendKeys).mock.calls.at(-1)?.[1]);
+  // Issue #3180: typed behind `clear 2>/dev/null; printf '\033[3J'; `; the rest is the rendered line.
+  expect(typed.startsWith(LAUNCH_SCREEN_CLEAR_PREFIX)).toBe(true);
+  return typed.slice(LAUNCH_SCREEN_CLEAR_PREFIX.length);
 }
 
 beforeEach(async () => {

@@ -1,0 +1,54 @@
+{
+  "version": "0.44.1",
+  "date": "2026-10-04",
+  "highlight": {
+    "ja": "エージェントの起動中は、途中の画面の代わりに「起動中…」と経過時間を表示するようになりました。",
+    "en": "While an agent is starting, the screen now shows that it is starting and how long it has taken, instead of a half-drawn session."
+  },
+  "added": [
+    {
+      "ja": "エージェントの起動中は「起動中…」の案内を出し、5 秒を超えると経過時間も表示するようになりました。",
+      "en": "While an agent starts, a starting notice is shown, with the elapsed time after five seconds."
+    }
+  ],
+  "improved": [
+    {
+      "ja": "エージェントを起動するときに打ち込むコマンドの行が、ターミナルに残らなくなりました。",
+      "en": "The command line typed to launch an agent no longer stays in the terminal."
+    },
+    {
+      "ja": "remote コマンドで、ペアリングの期限の時刻と残り時間が QR コードの下に表示されるようになりました。",
+      "en": "The remote command now shows when the pairing expires and how much time is left, under the QR code."
+    }
+  ],
+  "fixed": [
+    {
+      "ja": "インスタンスを止めると、そのインスタンスの Auto Yes も切れるようにしました。",
+      "en": "Stopping an instance now also turns off its Auto Yes."
+    },
+    {
+      "ja": "シェルのプロンプトが長い環境で、Claude を終了した後に次の送信が失敗する問題を直しました。",
+      "en": "Fixed the next message failing after exiting Claude when the shell prompt is long."
+    },
+    {
+      "ja": "エージェントの起動に 30 秒以上かかったとき、画面が送信失敗と表示する問題を直しました。",
+      "en": "Fixed the screen reporting a failed send when an agent took more than 30 seconds to start."
+    },
+    {
+      "ja": "起動中に止めてすぐ起動し直すと、起動中の案内が早く消える問題を直しました。",
+      "en": "Fixed the starting notice disappearing early when an agent was stopped and started again right away."
+    },
+    {
+      "ja": "OpenCode V2 の承認で、選択肢が出ているのに「選択肢を読み取れませんでした」と表示される問題を直しました。",
+      "en": "Fixed OpenCode V2 approvals saying the options could not be read while the options were shown."
+    },
+    {
+      "ja": "ログイン画面を開いている間に、エラーになる通信をくり返していた問題を直しました。",
+      "en": "Fixed the login page repeatedly making requests that failed."
+    },
+    {
+      "ja": "期限切れのペアリングを、remote status が使用済みと表示する問題を直しました。",
+      "en": "Fixed remote status showing an expired pairing as used."
+    }
+  ]
+}

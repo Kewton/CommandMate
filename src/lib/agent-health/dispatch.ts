@@ -1,5 +1,5 @@
 /**
- * The daily hand-off of agent-health / metrics Issues to `/orchestrate` on
+ * The daily hand-off of agent-health / catalog-drift / metrics Issues to `/orchestrate` on
  * develop's Claude 3 (Issue #3045). Used by `scripts/agent-health/dispatch.ts`.
  *
  * Pure: which Issues go (author, labels, caps, order), whether Claude 3 is
@@ -25,14 +25,17 @@ export const DISPATCH_AUTHOR = 'kewton';
 
 export const BUG_LABEL = 'agent-health';
 export const METRICS_LABEL = 'metrics';
+/** Slash-command catalog drift, filed by the daily check (#3158) and fixed per `/catalog-reconcile`'s unattended section (#3159). */
+export const CATALOG_LABEL = 'catalog-drift';
 /** Performance Issues are filed automatically but fixed by a person, so dispatch skips them. */
 export const PERF_LABEL = 'perf';
 export const SECURITY_LABEL = 'security';
 export const DISPATCHED_LABEL = 'auto-dispatched';
 /** Labels the run relies on; the script never creates them (docs/user-guide/agent-health.md「自動依頼」). */
-export const REQUIRED_LABELS = [BUG_LABEL, METRICS_LABEL, SECURITY_LABEL, DISPATCHED_LABEL] as const;
+export const REQUIRED_LABELS = [BUG_LABEL, METRICS_LABEL, SECURITY_LABEL, CATALOG_LABEL, DISPATCHED_LABEL] as const;
 
 /** Every bug goes, within the total cap. */
+export const MAX_CATALOG_ISSUES = 1;
 export const MAX_METRICS_ISSUES = 2;
 export const MAX_TOTAL_ISSUES = 5;
 
@@ -92,6 +95,7 @@ export function issueKind(issue: CandidateIssue): DispatchIssueKind | null {
   if (issue.labels.includes(DISPATCHED_LABEL)) return null;
   if (issue.labels.includes(PERF_LABEL)) return null;
   if (issue.labels.includes(BUG_LABEL)) return 'bug';
+  if (issue.labels.includes(CATALOG_LABEL)) return 'catalog';
   if (issue.labels.includes(METRICS_LABEL)) return 'metrics';
   return null;
 }
@@ -104,17 +108,19 @@ function olderFirst(a: CandidateIssue, b: CandidateIssue): number {
 export interface DispatchSelection {
   /** In the order they are handed to orchestrate. */
   issues: DispatchIssue[];
-  /** Candidates over a cap, carried over to a later day (bugs first, then metrics, in priority order). */
+  /** Candidates over a cap, carried over to a later day (bugs, then catalog, then metrics, in priority order). */
   deferred: number[];
 }
 
 /**
- * Bugs (oldest first) → metrics (security first, then the rest; oldest first
- * within each). Bugs are all taken up to {@link MAX_TOTAL_ISSUES}; metrics up to
- * {@link MAX_METRICS_ISSUES} within what the total leaves. Anything over a cap is deferred.
+ * Bugs (oldest first) → catalog drift (oldest first) → metrics (security first,
+ * then the rest; oldest first within each). Bugs are all taken up to
+ * {@link MAX_TOTAL_ISSUES}; catalog up to {@link MAX_CATALOG_ISSUES} and metrics up to
+ * {@link MAX_METRICS_ISSUES}, each within what the total leaves. Anything over a cap is deferred.
  */
 export function selectDispatchTargets(candidates: readonly CandidateIssue[]): DispatchSelection {
   const bugs = candidates.filter((issue) => issueKind(issue) === 'bug').sort(olderFirst);
+  const catalog = candidates.filter((issue) => issueKind(issue) === 'catalog').sort(olderFirst);
   const metrics = candidates
     .filter((issue) => issueKind(issue) === 'metrics')
     .sort((a, b) => {
@@ -122,7 +128,8 @@ export function selectDispatchTargets(candidates: readonly CandidateIssue[]): Di
       return security !== 0 ? security : olderFirst(a, b);
     });
   const takenBugs = bugs.slice(0, MAX_TOTAL_ISSUES);
-  const metricsRoom = Math.min(MAX_METRICS_ISSUES, MAX_TOTAL_ISSUES - takenBugs.length);
+  const takenCatalog = catalog.slice(0, Math.min(MAX_CATALOG_ISSUES, MAX_TOTAL_ISSUES - takenBugs.length));
+  const metricsRoom = Math.min(MAX_METRICS_ISSUES, MAX_TOTAL_ISSUES - takenBugs.length - takenCatalog.length);
   const takenMetrics = metrics.slice(0, metricsRoom);
   const toIssue = (kind: DispatchIssueKind) => (issue: CandidateIssue): DispatchIssue => ({
     number: issue.number,
@@ -130,8 +137,12 @@ export function selectDispatchTargets(candidates: readonly CandidateIssue[]): Di
     title: issue.title,
   });
   return {
-    issues: [...takenBugs.map(toIssue('bug')), ...takenMetrics.map(toIssue('metrics'))],
-    deferred: [...bugs.slice(takenBugs.length), ...metrics.slice(takenMetrics.length)].map((issue) => issue.number),
+    issues: [...takenBugs.map(toIssue('bug')), ...takenCatalog.map(toIssue('catalog')), ...takenMetrics.map(toIssue('metrics'))],
+    deferred: [
+      ...bugs.slice(takenBugs.length),
+      ...catalog.slice(takenCatalog.length),
+      ...metrics.slice(takenMetrics.length),
+    ].map((issue) => issue.number),
   };
 }
 
@@ -227,10 +238,14 @@ export function buildRequest(issues: readonly DispatchIssue[], termsPath: string
   return `/orchestrate ${issues.map((issue) => issue.number).join(' ')} ${termsPath} の条件に従うこと`;
 }
 
+/** Where a catalog-drift worker is pointed: the skill file, so a worker other than Claude Code can read it too. */
+export const CATALOG_SKILL_PATH = '.claude/skills/catalog-reconcile/SKILL.md';
+
 /** The run's terms, written to the file `buildRequest` points at. */
 export function buildTerms(date: string, issues: readonly DispatchIssue[]): string {
   const numbers = issues.map((issue) => issue.number);
   const suffix = runSuffixOf(issues);
+  const catalog = issues.filter((issue) => issue.kind === 'catalog').map((issue) => `#${issue.number}`);
   return [
     `（agent-health の自動依頼 ${date}。以下は利用者が事前に決めた、この run の条件）`,
     '- 本 run では PR の develop へのマージを進めてよい（利用者の明示的な許可）。main へはマージしない',
@@ -238,6 +253,11 @@ export function buildTerms(date: string, issues: readonly DispatchIssue[]): stri
       ? '- 対象は 1 件だが、そのまま 1 件で実行する（1 件で動くことは確認済み）'
       : `- 対象は ${numbers.length} 件（${issues.map((issue) => `#${issue.number} ${issue.kind}`).join('、')}）`,
     '- `--full` は付けない（UAT を main の作業ディレクトリで走らせない）',
+    ...(catalog.length > 0
+      ? [
+          `- catalog の Issue（${catalog.join('、')}）は \`/catalog-reconcile\` の無人実行節に従う。worker への契約に「\`${CATALOG_SKILL_PATH}\` を読み、無人実行の節に従う」と書く（除外の追加・変更・削除はしない。判断が要る候補は外して Issue にコメントする）。その PR の本文には「無人実行」と書き、Issue を参照する`,
+        ]
+      : []),
     `- run のファイルは workspace/orchestration/runs/${date}/ に plan-${suffix}.md・summary-${suffix}.md・tasks-${suffix}.tsv の名前で書く（同じ日の別の run と上書きし合わないため）`,
     `- 完了後（途中で止まったときも）に \`npx tsx scripts/agent-health/release-report.ts --date ${date}\` を実行し、HTML を workspace/agent-health/${date}/release-readiness.html に書く`,
     '- 失敗した Issue を今日のうちに再依頼・再実行しない（翌日の日次に回す）',
@@ -305,7 +325,7 @@ export interface DispatchOptions {
 export const DISPATCH_USAGE = [
   'Usage: npx tsx scripts/agent-health/dispatch.ts [--state-dir <dir>] [--dry-run]',
   '',
-  `  Hands today's agent-health / metrics Issues to /orchestrate on ${DISPATCH_WORKTREE_ID} (${DISPATCH_INSTANCE_ID}).`,
+  `  Hands today's agent-health / catalog-drift / metrics Issues to /orchestrate on ${DISPATCH_WORKTREE_ID} (${DISPATCH_INSTANCE_ID}).`,
   '  --state-dir <dir>  where dispatch/<JST date>.json is written (default: $AGENT_HEALTH_DIR or ~/.commandmate/agent-health)',
   '  --dry-run          select and check only; print the request, send nothing and write nothing',
   '  -h, --help         show this help',

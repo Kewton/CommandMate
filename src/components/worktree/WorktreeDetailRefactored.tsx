@@ -238,6 +238,7 @@ const MobileComposer = memo(function MobileComposer({
   instanceId,
   onMessageSent,
   isSessionRunning,
+  isSessionStarting,
   isProcessing,
   showToast,
   pendingInsertText,
@@ -250,6 +251,8 @@ const MobileComposer = memo(function MobileComposer({
   instanceId?: string;
   onMessageSent?: (cliToolId: CLIToolType) => void;
   isSessionRunning?: boolean;
+  /** Issue #3179: the agent is still launching (see `MessageInput`). */
+  isSessionStarting?: boolean;
   /**
    * Issue #2406: "the agent is generating", the gate on the queued-send toast
    * (#806). A different question from `isSessionRunning` above, which asks
@@ -272,6 +275,7 @@ const MobileComposer = memo(function MobileComposer({
       cliToolId={cliToolId}
       instanceId={instanceId}
       isSessionRunning={isSessionRunning}
+      isSessionStarting={isSessionStarting}
       isProcessing={isProcessing}
       showToast={showToast}
       pendingInsertText={pendingInsertText}
@@ -410,6 +414,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     isUnclassifiedActive,
     sessionStatus,
     agentMode,
+    startingSince,
     lastAutoResponse,
     loading,
     makeAutoYesToggleHandler,
@@ -557,6 +562,12 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   const activeSessionRunning =
     (worktree?.sessionStatusByInstance?.[activeInstanceId] ?? worktree?.sessionStatusByCli?.[activeCliTab])
       ?.isRunning ?? false;
+  // Issue #3179: the active instance is still launching. Read off the
+  // controller's own `current-output` poll (the instance the phone targets),
+  // with the list's per-instance entry as the fallback a slower poll fills in.
+  const activeSessionStarting =
+    typeof startingSince === 'number'
+    || typeof worktree?.sessionStatusByInstance?.[activeInstanceId]?.startingSince === 'number';
 
   // --------------------------------------------------------------------------
   // Issue #2799: the phone's direct-input keyboard
@@ -1145,7 +1156,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                   onClose={closeDirectInput}
                 />
               ) : null}
-              {isSelectionListActive && !isMobileChatSurface && !showDirectInputKeyboard && (
+              {isSelectionListActive && !isMobileChatSurface && !showDirectInputKeyboard && !activeSessionStarting && (
                 <div className="px-2 pt-1 border-b border-border">
                   <NavigationButtons
                     worktreeId={worktreeId}
@@ -1181,6 +1192,8 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                   cliToolId={activeCliTab}
                   instanceId={activeInstanceId}
                   isSessionRunning={activeSessionRunning}
+                  // Issue #3179: no red stop button and no mode control on a launch.
+                  isSessionStarting={activeSessionStarting}
                   // Issue #2406: the phone never passed `isProcessing` at all, so
                   // the queued-send toast (#806) could not fire here even while
                   // the agent was mid-turn. Wired to the generating verdict — the
@@ -1249,7 +1262,9 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                 narrows #2755 for the duration of the mode — not a regression to
                 "fix": the tab bar's prompt badge (`hasPrompt`) stays up, and
                 `閉じる` brings the sheet straight back. */}
-            {!showDirectInputKeyboard && (!autoYesEnabled || isMultiSelectPrompt(state.prompt.data)) && (
+            {/* Issue #3179: nor while the agent is launching — a dialog on a
+                launch is the launch's to answer. */}
+            {!showDirectInputKeyboard && !activeSessionStarting && (!autoYesEnabled || isMultiSelectPrompt(state.prompt.data)) && (
               <MobilePromptSheet
                 promptData={mobilePromptData}
                 visible={state.prompt.visible}

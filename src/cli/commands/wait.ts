@@ -851,6 +851,18 @@ export async function pollWorktree(
         everRunning = true;
       }
 
+      // Issue #3179: the agent is still launching. Work in progress, so keep
+      // polling: no prompt or selection list is read off the launch's frame,
+      // the unclassified dwell does not run, and a pane that does not exist yet
+      // is not "never started". `everRunning` is deliberately left alone — a
+      // launch that then fails leaves no session, which is NOT_STARTED, not a
+      // completion. The server bounds the launch, so this cannot hold forever.
+      if (typeof data.startingSince === 'number') {
+        unclassifiedSince = null;
+        await sleep(POLL_INTERVAL_MS);
+        continue;
+      }
+
       // Issue #1839: done before any exit path so the turn is adopted even on a
       // poll that ends in a prompt — the same turn is still open when the human
       // answers and `--on-prompt human` resumes polling.

@@ -50,9 +50,33 @@
 | 対応 OS | macOS ・ Linux ・ Windows（WSL2）。ネイティブ Windows は非対応 | CommandMate は tmux に依存する |
 | ライセンス | MIT | `LICENSE` |
 
-### 作者の数字（LP ・ README の hero、Issue #3060）
+### hero の数字は実測 run（LP ・ README ・ llms.txt、Issue #3162）
 
-表記はこのとおりに書く。作者個人の実績で、製品の性能の主張ではない。
+LP ・ README（en / ja）・ `website/llms.txt` の hero に置く数字は、上の表の **3 層 run の行**から採る。
+表記はこのとおりに書き、3 つの面で同じものを使う（`tests/unit/website/landing-page.test.ts` が LP ・ README ・
+llms.txt の一致を見ている）。
+
+| en | ja | 上の表のどこから |
+|---|---|---|
+| 4 issues, 4 workers (Command Code), PM and dev lead on Claude Code | 4 Issue、ワーカー 4 つ（Command Code）、PM と開発リーダーは Claude Code | Run ・ Lead ・ Workers の列 |
+| 2 messages and 3 taps from a phone-width web UI | スマホ幅の Web UI からメッセージ 2 通＋タップ 3 回 | 結果の列 |
+| 4/4 checks passed, PRs merged with CI green, UAT 4/4 GO | 検証 4/4 合格、PR は CI 緑でマージ、UAT 4/4 GO | 結果の列 |
+| 9 min 48 s from request to report | 依頼から報告まで 9 分 48 秒 | 結果の列 |
+
+- 直下に必ず注記を添える。en: `As observed: one run, recorded on 2026-10-02. Not a benchmark.` /
+  ja: `as observed（実測した範囲）: 2026-10-02 に記録した 1 回の run。ベンチマークではない。`
+- 「1 request」「1 通で」とは書かない。記録はメッセージ 2 通＋タップ 3 回である
+- 記録はスマホ幅の Web UI での操作なので、「スマホ幅の Web UI から」と書く（実機のスマホとは書かない）
+- 1 回の run なので、速さの主張（always ・ every time ・ under 10 minutes など）に広げない
+
+### 作者の数字（hero には置かない）
+
+作者個人の実績で、製品の性能の主張ではない。Issue #3060 で hero に置いたが、作者の活動量の印象が強く
+製品の能力を示さないため、Issue #3162 で hero から外した。
+
+- 置いてよい場所は、LP の Level 3（月額だけ。PM と worker でプランを分けたチーム編成の証拠として、作者の実費と書く）と、
+  作者の名前で書く面（作者の投稿 ・ 作者の節）に限る。どこに置くときも作者の数字だと分かるように書く
+- 表記はこのとおりに書く。phone の割合は感覚値なので、置くなら必ず「estimate」と書く
 
 | 表記 | 出典 |
 |---|---|
@@ -253,3 +277,38 @@ Tailscale か Cloudflare を通り、Web UI の更新確認と Skills Catalog �
 | CommandMate の用法との差 | 原文の主語は "seasoned professionals" で、規律は**人が持っている**ことが前提。CommandMate はその規律を**仕組み側に置く**ので、主語が「専門知識を持たない人」まで広がる |
 | 脚注の例（en） | The term "vibe engineering" was coined by Simon Willison (2025). |
 | 脚注の例（ja） | "vibe engineering" は Simon Willison 氏が 2025 年に提唱した語です。 |
+
+---
+
+## 10. Level 名と人間の役割（Issue #3153）
+
+Level は「機能の高度さ」ではなく「**人間が AI 開発組織にどこまで関与するか**」で切る。README（en / ja）・LP ・
+`website/llms.txt` は、hero と Level 名をこの表のとおりに揃える（説明文は面ごとに自由に書いてよい）。
+
+| 項目 | 内容 |
+|---|---|
+| hero（en / ja 共通の主張） | Run multiple coding agents in parallel — even away from your desk. / 複数のコーディングエージェントを並列に。机を離れていても。 |
+| 定義文（hero の直下に置く） | CommandMate puts the coding agents you already use in one place on your own machine, so you can run them side by side, hand them work one issue at a time, and let your own checks decide when the work is done. |
+
+| Level | CommandMate がすること | 人間の役割 |
+|---|---|---|
+| Level 1 — Parallel | 複数のコーディングエージェントを 1 か所から並列に動かす | Operator（各エージェントに応える） |
+| Level 2 — Delegate | Issue 単位で渡し、完了はエージェントの申告ではなく利用者のチェック（lint ・ テスト）の結果で決める | Product / Tech lead（タスクを書き、合格したものを受け取る） |
+| Level 3 — Manage | PM 役のエージェントが計画 ・ 割り当て ・ 確認をまとめ、人は PM と話して承認する | Owner（方向を決めて承認する） |
+| Next — Learn | 未実装。方向のみ（下の上限を守る） | なし（未実装のため役割を書かない） |
+
+- **Anywhere（横軸）**: スマホは Level 1 の機能ではなく、全 Level を横断する軸として 1 行で書く（PC に張り付かなくても回せる）
+- **「多くの人は Level 2 で十分」と書く**。Level 3 へ誘導しない。階段の図を使っても「上るほど良い」とは書かない
+- Level 3 の「人は PM と話して承認する」は §7 の 4 行目（承認は人に来る）と同じ意味で書く。「人が要らない」方向に広げない
+- Level 3 の作者の運用（日次の自動修正）の但し書きは、Level の本文ではなく脚注か My setup 側に置く
+- 「安い worker」はモデルの安さの序列（§5）としてではなく、**作者の実費**（§1 の $110–$210: Claude Max + Command Code Goat）として書く
+
+### Next — Learn の書き方の上限
+
+| 上限 | 理由 |
+|---|---|
+| 未実装であることが分かるように書く（en: Not built yet / ja: まだ作っていない） | 機能が在ることの根拠（§4）が無い |
+| 方向だけを書く。README は 1〜2 文、LP は置くなら 1 行 | 方向以上のことは実装も実測も無い |
+| 数字を書かない（成功率 ・ 改善率 ・ 件数など） | §5「未計測の数字」 |
+| エージェントやモデルを比べない（「エージェント X は成功率 N%」のような例示も書かない） | §5「モデルの安さ・賢さの序列」 |
+| `loop` ・ `self-managing` ・ `runs 24/7` ・ `no supervision` を使わない | §5 ・ §7（常駐ではなく、承認は人に来る） |

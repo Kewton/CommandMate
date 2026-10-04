@@ -7,6 +7,8 @@
  *            If not specified, kills all sessions (backward compatible).
  *
  * Issue #4: Added individual session termination support
+ * Issue #3182: disables Auto-Yes for the killed instances
+ * Issue #3179: clears the "starting" record of the killed instances
  * Issue #1905: kills through `ICLITool.killSession`, not `lib/tmux` directly
  */
 
@@ -21,6 +23,9 @@ import {
   describeSessionTargetConflict,
   INSTANCE_TOOL_CONFLICT,
 } from '@/lib/session/resolve-session-target';
+import { buildCompositeKey, disableAutoYes } from '@/lib/auto-yes-state';
+import { stopAutoYesPolling } from '@/lib/auto-yes-poller';
+import { clearSessionStarting } from '@/lib/session/session-starting-state';
 import { createLogger } from '@/lib/logger';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 import { checkSessionOwnership, foreignSessionErrorBody } from '@/lib/cli-tools/session-ownership';
@@ -192,6 +197,28 @@ export async function POST(
 
       // Clean up session state for this instance
       deleteSessionState(db, id, cliToolId, instanceId);
+    }
+
+    // Issue #3182: Auto-Yes lives per worktree x instance with its own expiry,
+    // independent of the session. Left alone it survives the kill and silently
+    // approves the prompts of the next session started under the same instance.
+    // It is disabled for exactly the `targets` set the loop above walked, and
+    // for every one of them regardless of the kill outcome (no live session,
+    // failed kill, foreign session): disabling a state that is not in use is
+    // harmless, while skipping it would leave a stale grant behind. Instances
+    // outside `targets` are untouched.
+    //
+    // Issue #3179: the same set also drops its "starting" record. A launch
+    // killed mid-way keeps its `startSession` running until the tool's
+    // readiness wait runs out (agy: 30 x 1 s), and only its `finally` cleared
+    // the record — so the screen kept showing "starting" for a session that was
+    // already gone. Clearing an instance that was not starting is a no-op.
+    // Issue #3195: no token here — the record is dropped whichever launch wrote
+    // it; the killed launch's own `finally` then clears only its own record.
+    for (const { cliToolId, instanceId } of targets) {
+      disableAutoYes(id, cliToolId, undefined, instanceId);
+      stopAutoYesPolling(buildCompositeKey(id, cliToolId, instanceId));
+      clearSessionStarting(id, cliToolId, instanceId);
     }
 
     if (!anySessionRunning && skippedForeignSessions.length > 0) {

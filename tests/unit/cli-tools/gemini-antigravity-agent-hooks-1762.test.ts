@@ -35,6 +35,7 @@ import { removeTempDir } from '@tests/helpers/temp-dir';
 import { AntigravityTool } from '@/lib/cli-tools/antigravity';
 import { GeminiTool } from '@/lib/cli-tools/gemini';
 import { getAgentEventGenerationStartedAt } from '@/lib/session/agent-event-state';
+import { LAUNCH_SCREEN_CLEAR_PREFIX, withLaunchScreenCleared } from '@/lib/session/launch-screen';
 
 vi.mock('@/lib/tmux/tmux', () => ({
   hasSession: vi.fn().mockResolvedValue(false),
@@ -66,6 +67,15 @@ function makeTempDir(prefix: string): string {
 }
 
 /** Drive a `startSession` that polls, without waiting for real time. */
+/**
+ * The rendered launch line inside what `sendKeys` typed: Issue #3180 types it
+ * behind `clear 2>/dev/null; printf '\033[3J'; `, and the assertions below are about the line itself.
+ */
+function typedLaunchLine(typed: string): string {
+  expect(typed.startsWith(LAUNCH_SCREEN_CLEAR_PREFIX)).toBe(true);
+  return typed.slice(LAUNCH_SCREEN_CLEAR_PREFIX.length);
+}
+
 async function runStart(start: () => Promise<void>): Promise<void> {
   vi.useFakeTimers();
   try {
@@ -176,7 +186,7 @@ describe('GeminiTool.startSession', () => {
     expect(existsSync(settingsPath)).toBe(true);
     expect(readFileSync(settingsPath, 'utf8')).toContain(`--worktree-id 'wt-g'`);
 
-    const command = vi.mocked(sendKeys).mock.calls[0][1];
+    const command = typedLaunchLine(vi.mocked(sendKeys).mock.calls[0][1]);
     expect(command).toContain('tool=gemini&worktreeId=wt-g&instanceId=gemini-2');
     expect(command.endsWith(` 'gemini'`)).toBe(true);
   });
@@ -198,7 +208,7 @@ describe('GeminiTool.startSession', () => {
 
     // #2403's port is not hook injection: switching hooks off does not change
     // which CommandMate the agent belongs to.
-    expect(sendKeys).toHaveBeenCalledWith('mcbd-gemini-wt-g', `${PORT_ASSIGNMENT} gemini`, true);
+    expect(sendKeys).toHaveBeenCalledWith('mcbd-gemini-wt-g', withLaunchScreenCleared(`${PORT_ASSIGNMENT} gemini`), true);
     expect(existsSync(join(worktree, '.gemini', 'settings.json'))).toBe(false);
     // The fence is not part of the rollback: it costs nothing and protects the
     // scraper path too.
@@ -252,7 +262,7 @@ describe('AntigravityTool.startSession', () => {
     expect(existsSync(hooksPath)).toBe(true);
     expect(Object.keys(JSON.parse(readFileSync(hooksPath, 'utf8')))).toEqual(['commandmate']);
 
-    const command = vi.mocked(sendKeys).mock.calls[0][1];
+    const command = typedLaunchLine(vi.mocked(sendKeys).mock.calls[0][1]);
     // The only channel agy has: its payload carries no cwd and its config file
     // is shared by every worktree on the machine.
     expect(command).toContain('tool=antigravity&worktreeId=wt-a&instanceId=antigravity-2');
@@ -266,7 +276,7 @@ describe('AntigravityTool.startSession', () => {
       tool.startSession('wt-a', worktree, undefined, "model'; rm -rf ~ #")
     );
 
-    const command = vi.mocked(sendKeys).mock.calls[0][1];
+    const command = typedLaunchLine(vi.mocked(sendKeys).mock.calls[0][1]);
     expect(command.startsWith('CM_HOOK_URL=')).toBe(true);
     // Issue #989's escaping is unchanged by the prefix.
     expect(command.endsWith(`'agy' --model 'model'\\''; rm -rf ~ #'`)).toBe(true);
@@ -280,7 +290,7 @@ describe('AntigravityTool.startSession', () => {
 
     expect(sendKeys).toHaveBeenCalledWith(
       'mcbd-antigravity-wt-a',
-      `${PORT_ASSIGNMENT} agy --model 'Gemini 3.1 Pro (High)'`,
+      withLaunchScreenCleared(`${PORT_ASSIGNMENT} agy --model 'Gemini 3.1 Pro (High)'`),
       true
     );
     expect(existsSync(join(home, '.gemini', 'config', 'hooks.json'))).toBe(false);

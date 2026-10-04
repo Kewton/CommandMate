@@ -20,6 +20,7 @@ import {
   findFatalPattern,
   MAX_SHELL_PROMPT_LENGTH,
   SHELL_PROMPT_ENDINGS,
+  SHELL_PROMPT_LINE_PATTERNS,
 } from '@/lib/detection/tool-liveness';
 import { STATUS_REASON } from '@/lib/detection/status-reason';
 import { EXITED_STATUS_REASON } from '@/types/sidebar';
@@ -148,7 +149,10 @@ describe('[#2070] claude keeps every verdict it had (受入条件)', () => {
 
   it('declares NONE of the three fields the added tools take', () => {
     expect(claude.aliveTailLines).toBeNull();
-    expect(claude.shellPromptPatterns).toEqual([]);
+    // Issue #3191: claude now takes the `user@host …` line patterns like every
+    // other tool — the 40-character gate alone missed long prompts after
+    // `/exit`. See tool-liveness-3191.test.ts.
+    expect(claude.shellPromptPatterns).toEqual(SHELL_PROMPT_LINE_PATTERNS);
     expect(claude.unreadableIsExited).toBe(true);
   });
 });
