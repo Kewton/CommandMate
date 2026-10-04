@@ -47,7 +47,9 @@ export const SHELL_PROMPT_ENDINGS: readonly string[] = ['$', '%', '#'] as const;
  * reproduced on renders as `maenokota@MAENOnoMac-Studio work-codex %` — forty
  * characters exactly, i.e. one past this gate — so a codex session that had
  * genuinely fallen back to the shell read as alive. See
- * {@link SHELL_PROMPT_LINE_PATTERNS}.
+ * {@link SHELL_PROMPT_LINE_PATTERNS}. Issue #3191 found the same gap for claude
+ * (`… uat-repo-wt2 %`, 42 characters, after `/exit`), and claude now takes the
+ * line patterns too.
  */
 export const MAX_SHELL_PROMPT_LENGTH = 40;
 
