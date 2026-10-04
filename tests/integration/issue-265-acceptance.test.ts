@@ -80,7 +80,7 @@ const TEST_SESSION_OPTIONS = {
 const TEST_SESSION_NAME = 'mcbd-claude-test-worktree';
 
 /**
- * `sendKeys` calls with the Issue #3180 `clear 2>/dev/null; ` prefix taken off the launch
+ * `sendKeys` calls with the Issue #3180 `clear 2>/dev/null; printf '\033[3J'; ` prefix taken off the launch
  * line, so the launch is located by the binary it runs, as before.
  */
 function withoutLaunchScreenClear(calls: readonly (readonly unknown[])[]): unknown[][] {

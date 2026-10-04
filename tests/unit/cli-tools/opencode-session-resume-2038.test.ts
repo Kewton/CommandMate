@@ -122,7 +122,7 @@ const savedEnv: Record<string, string | undefined> = {};
 /** The command line `sendKeys` was asked to type into the pane. */
 function typedLaunchCommand(): string {
   const call = vi.mocked(sendKeys).mock.calls[0];
-  // Issue #3180: typed behind `clear 2>/dev/null; `; the rest is the rendered line.
+  // Issue #3180: typed behind `clear 2>/dev/null; printf '\033[3J'; `; the rest is the rendered line.
   const typed = String(call?.[1] ?? '');
   expect(typed.startsWith(LAUNCH_SCREEN_CLEAR_PREFIX)).toBe(true);
   return typed.slice(LAUNCH_SCREEN_CLEAR_PREFIX.length);

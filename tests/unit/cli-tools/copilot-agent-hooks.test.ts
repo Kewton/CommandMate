@@ -100,7 +100,7 @@ async function startSession(instanceId?: string): Promise<void> {
 async function sentCommand(): Promise<string> {
   const { sendKeys } = await import('@/lib/tmux/tmux');
   const typed = String(vi.mocked(sendKeys).mock.calls.at(-1)?.[1]);
-  // Issue #3180: typed behind `clear 2>/dev/null; `; the rest is the rendered line.
+  // Issue #3180: typed behind `clear 2>/dev/null; printf '\033[3J'; `; the rest is the rendered line.
   expect(typed.startsWith(LAUNCH_SCREEN_CLEAR_PREFIX)).toBe(true);
   return typed.slice(LAUNCH_SCREEN_CLEAR_PREFIX.length);
 }
