@@ -20,6 +20,7 @@ import {
   isQuestionFreeTextNumeric,
   QUESTION_FREE_TEXT_MAX_LENGTH,
   readPromptQuestionChoices,
+  readStructuredDecisionHeading,
   readQuestionFreeText,
   type PromptQuestionChoices,
 } from '@/components/worktree/prompt-decision-id';
@@ -479,7 +480,7 @@ function PromptPanelContent({
       <p className="text-foreground leading-relaxed">
         {isAnswerablePromptData(promptData)
           ? promptData.question
-          : t('unclassifiedTitle')}
+          : unclassifiedHeading(t, decisionId ? readStructuredDecisionHeading(promptData) : null)}
       </p>
 
       {/* Answering indicator */}
@@ -1281,3 +1282,20 @@ export const PromptPanel = memo(function PromptPanel({
 });
 
 export default PromptPanel;
+
+/**
+ * The heading of a payload nobody classified (Issue #3181). With addressable
+ * choices underneath it must not say the options could not be read.
+ */
+function unclassifiedHeading(
+  t: ReturnType<typeof useTranslations>,
+  heading: ReturnType<typeof readStructuredDecisionHeading>
+): string {
+  if (heading?.kind === 'approval') {
+    return heading.toolName
+      ? t('structuredApprovalTitle', { toolName: heading.toolName })
+      : t('structuredApprovalTitleNoTool');
+  }
+  if (heading?.kind === 'question') return t('structuredQuestionTitle');
+  return t('unclassifiedTitle');
+}

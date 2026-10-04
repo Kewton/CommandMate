@@ -232,3 +232,29 @@ export function readPromptQuestionChoices(
     ...(asked.custom === true ? { custom: true as const } : {}),
   };
 }
+
+/**
+ * What an unclassified payload's heading should say when it nevertheless
+ * carries addressable choices (Issue #3181).
+ *
+ * `null` means there is nothing to click, so the "could not read its options"
+ * heading is still the truth. `approval` is the three verdicts (with the tool
+ * name when the payload has one); `question` is a published question.
+ */
+export type StructuredDecisionHeading =
+  | { kind: 'approval'; toolName: string | null }
+  | { kind: 'question' };
+
+export function readStructuredDecisionHeading(
+  promptData: LivePromptData | null
+): StructuredDecisionHeading | null {
+  if (readPromptDecisionId(promptData) === null) return null;
+  const payload = promptData as { decisionOptions?: unknown; toolName?: unknown };
+  if (Array.isArray(payload.decisionOptions) && payload.decisionOptions.length > 0) {
+    return {
+      kind: 'approval',
+      toolName: typeof payload.toolName === 'string' && payload.toolName ? payload.toolName : null,
+    };
+  }
+  return readPromptQuestionChoices(promptData) ? { kind: 'question' } : null;
+}
