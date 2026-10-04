@@ -37,8 +37,8 @@ import {
   isInstanceSelector,
   INSTANCE_ALIAS_HELP_SUFFIX,
   INSTANCE_SELECTOR_ERROR,
-  resolveInstanceTarget,
 } from './instances';
+import { resolveCommandTarget } from './command-target';
 import { pickLatestReply, replyCandidates, requestRecentMessages } from '../utils/reply-ledger';
 
 /** Options for the reply command. */
@@ -122,11 +122,7 @@ says so in one line, and the exit code is 0. --json prints "reply": null.
         // Resolved exactly as `ask` resolves it: `--agent` alone names that
         // tool's primary instance (Issue #2479).
         const selector = options.instance ?? options.agent;
-        const target = selector
-          ? await resolveInstanceTarget(client, worktreeId, selector, options.agent)
-          : null;
-        const cliToolId = target ? target.cliToolId : options.agent;
-        const instanceId = target?.instanceId;
+        const { agent: cliToolId, instanceId } = await resolveCommandTarget(client, worktreeId, selector, options.agent);
 
         // Unlike `ask`, a failed read is not swallowed: there is no turn this
         // command completed that a fallback would be protecting.
