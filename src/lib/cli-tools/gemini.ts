@@ -35,15 +35,9 @@ import {
 } from '@/config/cli-tool-timing-config';
 import { missingToolError } from './install-hints';
 import { withLaunchScreenCleared } from '@/lib/session/launch-screen';
+import { getErrorMessage } from '@/lib/errors';
 
 const logger = createLogger('cli-tools/gemini');
-
-/**
- * Extract error message from unknown error type (DRY)
- */
-function getErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
 
 /** Wait for Gemini CLI to initialize after launch (banner + auth + dialog) */
 const GEMINI_INIT_WAIT_MS = 6000;
@@ -75,17 +69,6 @@ export class GeminiTool extends BaseCLITool {
   readonly id: CLIToolType = 'gemini';
   readonly name = 'Gemini CLI';
   readonly command = 'gemini';
-
-  /**
-   * Check if Gemini session is running for a worktree
-   *
-   * @param worktreeId - Worktree ID
-   * @returns True if session is running
-   */
-  async isRunning(worktreeId: string, instanceId?: string): Promise<boolean> {
-    const sessionName = this.getSessionName(worktreeId, instanceId);
-    return await hasSession(sessionName);
-  }
 
   /**
    * Start a new Gemini session for a worktree
