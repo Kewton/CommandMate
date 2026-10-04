@@ -94,7 +94,23 @@ export function readPromptDecisionId(promptData: LivePromptData | null): string 
   return readDecisionId(promptData);
 }
 
-/** What {@link readPromptQuestionChoices} answers with: the `QuestionChoices` of `prompt-view`. */
+/**
+ * What {@link readPromptQuestionChoices} answers with: the `QuestionChoices` of `prompt-view`.
+ *
+ * - `question`: The question text, as the agent wrote it.
+ * - `labels`: The option labels, in payload order.
+ *
+ *   Their POSITION is the answer: the panel sends `String(index + 1)` and
+ *   `resolveStructuredQuestionAnswer` resolves that against the same list, read
+ *   from `listPending()`. Both orders come from one parser
+ *   (`parseAskUserQuestionToolInput`) over the same `questions[0].options`, so
+ *   they agree by construction rather than by convention.
+ * - `questionCount`: How many questions the one call carries; only the first is answerable.
+ * - `custom`: Whether a typed answer is accepted besides the choices (Issue #2951) —
+ *   OpenCode V2's form field `custom: true`. The panel and the phone sheet
+ *   then offer an input; see {@link readQuestionFreeText}. Present only when
+ *   true.
+ */
 export type PromptQuestionChoices = QuestionChoices;
 
 /**
