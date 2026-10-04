@@ -44,16 +44,9 @@ import {
 } from '@/config/cli-tool-timing-config';
 import { missingToolError } from './install-hints';
 import { withLaunchScreenCleared } from '@/lib/session/launch-screen';
+import { getErrorMessage } from '@/lib/errors';
 
 const logger = createLogger('cli-tools/antigravity');
-
-/**
- * Extract error message from unknown error type (DRY).
- * Same pattern as codex.ts / claude-session.ts getErrorMessage().
- */
-function getErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
 
 /**
  * Single-quote a value for safe embedding in a shell command typed into a
@@ -195,17 +188,6 @@ export class AntigravityTool extends BaseCLITool {
   readonly id: CLIToolType = 'antigravity';
   readonly name = 'Antigravity CLI';
   readonly command = 'agy';
-
-  /**
-   * Check if an Antigravity session is running for a worktree.
-   *
-   * @param worktreeId - Worktree ID
-   * @returns True if session is running
-   */
-  async isRunning(worktreeId: string, instanceId?: string): Promise<boolean> {
-    const sessionName = this.getSessionName(worktreeId, instanceId);
-    return await hasSession(sessionName);
-  }
 
   /**
    * Start a new Antigravity session for a worktree.

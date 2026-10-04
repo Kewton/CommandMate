@@ -107,12 +107,8 @@ import { formatSessionNoteTimestamp } from '@/lib/date-utils';
 import { useChatSurfaceLiveState } from '@/hooks/useChatSurfaceLiveState';
 import { useTerminalPanePolling } from '@/hooks/useTerminalPanePolling';
 import { useSplitMessages } from '@/hooks/useSplitMessages';
-import { usePendingMessages, type OptimisticSendOptions } from '@/hooks/usePendingMessages';
-import {
-  useConnectivity,
-  isServerConfirmedReachable,
-  isConnectionKnownDown,
-} from '@/hooks/useConnectivity';
+import { type OptimisticSendOptions } from '@/hooks/usePendingMessages';
+import { useOptimisticPaneMessages, useDiscardPending } from '@/hooks/useOptimisticPaneMessages';
 import {
   useChatComposerInsert,
   useChatOptimisticSend,
@@ -122,9 +118,6 @@ import { useChatFileLinkScope } from '@/lib/chat/chat-file-link-scope';
 import { useChatToolActivityPreference } from '@/lib/chat/chat-tool-activity';
 import {
   buildModelByInstance,
-  formatAgentModelLabel,
-  formatAgentSessionTooltip,
-  formatAgentSessionUsage,
 } from '@/components/worktree/WorktreeDetailSubComponents';
 import { useRealtimeListener } from '@/hooks/useRealtimeConnection';
 import { useSpecialKeys } from '@/hooks/useSpecialKeys';
@@ -134,12 +127,10 @@ import { OPENCODE_LEADER_KEY } from '@/types/terminal-keys';
 import { NAV_KEY_REFRESH_DELAY_MS } from '@/config/ui-feedback-config';
 import { worktreeApi } from '@/lib/api-client';
 import { getTerminalDisplayCompaction } from '@/config/terminal-display-compaction';
-import {
-  getMobileSurfaceModeStorageKey,
-  resolveSurfaceMode,
-  writeSurfaceMode,
-} from '@/config/surface-mode-config';
-import { DEFAULT_SURFACE_MODE, type SurfaceMode } from '@/types/ui-state';
+import { getMobileSurfaceModeStorageKey } from '@/config/surface-mode-config';
+import { useSurfaceMode } from '@/hooks/useSurfaceMode';
+import { buildPaneSessionLabels } from '@/components/worktree/pane-session-labels';
+import type { SurfaceMode } from '@/types/ui-state';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 
 export interface MobileTerminalTabProps {
@@ -475,41 +466,15 @@ const MobileChatSurface = memo(function MobileChatSurface({
     instanceId,
   });
 
-  // Issue #2213: the same optimistic layer PC has had since #1121, wired the same
-  // way (`TerminalSplitPaneContent`) — the send is `worktreeApi.sendMessage` and
-  // `onSent` refetches so the bubble reconciles promptly rather than waiting for
-  // the next poll. The push from #2195 usually beats that refetch; both land on
-  // the same row id, and `usePendingMessages` consumes one echo per bubble.
-  const sendMessageFn = useCallback(
-    (content: string, options: OptimisticSendOptions) =>
-      worktreeApi.sendMessage(worktreeId, content, options),
-    [worktreeId],
-  );
-  // Issue #2503: the phone is the surface this is actually for. The same verdict
-  // MobileConnectionBanner shows (#2501) decides whether a send that could not
-  // get out is "送信待ち" or a failure — and, on the way back, triggers exactly
-  // one automatic resend of what is still waiting. Read through the two
-  // evidence-only helpers rather than the banner's verdict: holding a failure
-  // back needs proof the network is gone, not merely a socket that is closed.
-  const connectivity = useConnectivity();
-  const pendingConnectivity = useMemo(
-    () => ({
-      offline: isConnectionKnownDown(connectivity.signals),
-      reachable: isServerConfirmedReachable(connectivity.signals),
-    }),
-    [connectivity.signals],
-  );
   const {
     messages,
     sendOptimistic,
     retry: retryPending,
     discard: discardPending,
-  } = usePendingMessages({
+  } = useOptimisticPaneMessages({
     worktreeId,
     serverMessages,
-    sendFn: sendMessageFn,
     onSent: refresh,
-    connectivity: pendingConnectivity,
   });
 
   // Publish the send for the docked composer. Released on unmount, i.e. the
@@ -526,13 +491,7 @@ const MobileChatSurface = memo(function MobileChatSurface({
   // dropping it — PC does this through `onHistoryInsertToMessage`; here the
   // screen's own insert callback arrives over the same context.
   const insertToComposer = useChatComposerInsert();
-  const handleDiscardPending = useCallback(
-    (tempId: string) => {
-      const content = discardPending(tempId);
-      if (content) insertToComposer(content);
-    },
-    [discardPending, insertToComposer],
-  );
+  const handleDiscardPending = useDiscardPending(discardPending, insertToComposer);
 
   return (
     <ChatSurface
@@ -622,23 +581,11 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
   // means the row is not rendered at all.
   const modelByInstanceLabel = useCachedAgentModelLabel(worktreeId, resolvedInstanceId);
   const worktreesCache = useOptionalWorktreesCacheContext();
-  const sessionModelLabel = formatAgentModelLabel(
-    modelByInstanceLabel,
-    null,
-    agentSession.session?.agent
-  );
-  const sessionUsage = formatAgentSessionUsage(
-    agentSession.session,
-    agentSession.context,
-    t,
-    locale
-  );
-  const sessionUsageDetail = formatAgentSessionTooltip(
-    agentSession.session,
-    agentSession.context,
-    t,
-    locale
-  );
+  const {
+    model: sessionModelLabel,
+    usage: sessionUsage,
+    usageDetail: sessionUsageDetail,
+  } = buildPaneSessionLabels(modelByInstanceLabel, agentSession, t, locale);
 
   // --------------------------------------------------------------------------
   // The session note (Issue #2427)
@@ -750,18 +697,7 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
   // `?view=` / localStorage resolution in an effect — same shape as
   // `useActivityBarState`, so there is no hydration mismatch.
   const surfaceStorageKey = getMobileSurfaceModeStorageKey(worktreeId);
-  const [surfaceMode, setSurfaceMode] = useState<SurfaceMode>(DEFAULT_SURFACE_MODE);
-  useEffect(() => {
-    setSurfaceMode(resolveSurfaceMode(surfaceStorageKey));
-  }, [surfaceStorageKey]);
-
-  const handleSurfaceModeChange = useCallback(
-    (mode: SurfaceMode) => {
-      setSurfaceMode(mode);
-      writeSurfaceMode(surfaceStorageKey, mode);
-    },
-    [surfaceStorageKey],
-  );
+  const { surfaceMode, handleSurfaceModeChange } = useSurfaceMode(surfaceStorageKey);
 
   // Issue #2799: the pill is drawn unavailable while direct input is open, and
   // the tap is refused here too — `aria-disabled` alone does not stop it.

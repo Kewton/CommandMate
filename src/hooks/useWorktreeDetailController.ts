@@ -713,6 +713,10 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     const onMobile = isMobileRef.current;
     const requestedInstance = activeInstanceIdRef.current;
     const requestId = ++latestMessagesRequestIdRef.current;
+    const isStale = (): boolean =>
+      latestMessagesRequestIdRef.current !== requestId ||
+      activeCliTabRef.current !== requestedCliTool ||
+      (onMobile && activeInstanceIdRef.current !== requestedInstance);
     try {
       // Issue #1407: History renders conversation-pair cards, so count the limit in
       // pairs (turns) rather than raw rows (see useSplitMessages).
@@ -733,20 +737,12 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
         throw new Error(`Failed to fetch messages: ${response.status}`);
       }
       const data: ChatMessage[] = await response.json();
-      if (
-        latestMessagesRequestIdRef.current !== requestId ||
-        activeCliTabRef.current !== requestedCliTool ||
-        (onMobile && activeInstanceIdRef.current !== requestedInstance)
-      ) {
+      if (isStale()) {
         return;
       }
       actions.setMessages(parseMessageTimestamps(data));
     } catch (err) {
-      if (
-        latestMessagesRequestIdRef.current !== requestId ||
-        activeCliTabRef.current !== requestedCliTool ||
-        (onMobile && activeInstanceIdRef.current !== requestedInstance)
-      ) {
+      if (isStale()) {
         return;
       }
       console.error('[WorktreeDetailRefactored] Error fetching messages:', err);
@@ -763,6 +759,10 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     const onMobile = isMobileRef.current;
     const requestedInstance = activeInstanceIdRef.current;
     const requestId = ++latestCurrentOutputRequestIdRef.current;
+    const isStale = (): boolean =>
+      latestCurrentOutputRequestIdRef.current !== requestId ||
+      activeCliTabRef.current !== requestedCliTool ||
+      (onMobile && activeInstanceIdRef.current !== requestedInstance);
     try {
       const outputUrl = onMobile
         ? `/api/worktrees/${worktreeId}/current-output?cliTool=${requestedCliTool}&instance=${encodeURIComponent(requestedInstance)}`
@@ -772,11 +772,7 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
         return;
       }
       const data: CurrentOutputResponse = await response.json();
-      if (
-        latestCurrentOutputRequestIdRef.current !== requestId ||
-        activeCliTabRef.current !== requestedCliTool ||
-        (onMobile && activeInstanceIdRef.current !== requestedInstance)
-      ) {
+      if (isStale()) {
         return;
       }
       if (data.cliToolId && data.cliToolId !== requestedCliTool) {
@@ -842,11 +838,7 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
         }
       }
     } catch (err) {
-      if (
-        latestCurrentOutputRequestIdRef.current !== requestId ||
-        activeCliTabRef.current !== requestedCliTool ||
-        (onMobile && activeInstanceIdRef.current !== requestedInstance)
-      ) {
+      if (isStale()) {
         return;
       }
       console.error('[WorktreeDetailRefactored] Error fetching current output:', err);
@@ -917,7 +909,6 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     () => Array.from(new Set(visibleInstances.map((inst) => inst.cliTool))),
     [visibleInstances],
   );
-  const displayedAgents = isMobile ? mobileSelectedAgents : selectedAgents;
 
   // Issue #869/#874: keep activeInstanceId pointing at a currently-displayed
   // instance. PC uses the full roster; mobile uses the visible subset. When the
@@ -1018,11 +1009,6 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   // These tools render in alternate screen mode where menus appear at the top.
   // Auto-following new content to bottom would hide these menus.
   const disableAutoFollow = activeCliTab === 'opencode' || activeCliTab === 'copilot';
-
-  /** Issue #368: Callback for AgentSettingsPane to update selectedAgents */
-  const handleSelectedAgentsChange = useCallback((agents: CLIToolType[]) => {
-    setSelectedAgents(agents);
-  }, []);
 
   /**
    * Issue #869: Callback for AgentSettingsPane to update the agent instance
@@ -1161,9 +1147,7 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   }, [fileSearch, tabsActions]);
 
   /** Handle file save in editor - refresh tree to reflect changes (savedPath accepted for callback interface compatibility) */
-  const handleEditorSave = useCallback((_savedPath: string) => {
-    setFileTreeRefresh(prev => prev + 1);
-  }, []);
+  const handleEditorSave = handleFilePanelSave;
 
   /** Handle ActivityBar toggle (PC) */
   const handleActivityToggle = useCallback(
@@ -1904,7 +1888,6 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     diffContent,
     diffFilePath,
     disableAutoFollow,
-    displayedAgents,
     displayedInstances,
     editorFilePath,
     error,
@@ -1959,7 +1942,6 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     handleRename,
     handleReLogin,
     handleRetry,
-    handleSelectedAgentsChange,
     handleSetLoading,
     handleShowArchivedChange,
     handleUpload,
@@ -2003,9 +1985,7 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     pendingInsertText,
     pendingInsertTextMap,
     selectedAgents,
-    setActiveCliTab,
     setActiveInstanceId,
-    setEditorFilePath,
     setFocusedSplitIndex,
     setHistorySubTab,
     setIsEditorMaximized,
