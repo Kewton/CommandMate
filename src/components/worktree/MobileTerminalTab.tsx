@@ -79,6 +79,11 @@ import { Cpu, MessageSquare, StickyNote, TerminalSquare, Wrench } from 'lucide-r
 import { useLocale, useTranslations } from 'next-intl';
 import { TerminalDisplay } from '@/components/worktree/TerminalDisplay';
 import { TerminalEscapeHatch } from '@/components/worktree/TerminalEscapeHatch';
+import { SessionStartingNotice } from '@/components/worktree/SessionStartingNotice';
+import {
+  sessionStartingScopeKey,
+  useSessionStartingGate,
+} from '@/hooks/useSessionStartingGate';
 import { UnsentComposerBar, hasUnsentComposerText } from '@/components/worktree/UnsentComposerBar';
 import {
   OpencodeSidebarNotice,
@@ -817,8 +822,17 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
   // Issue #2254 added the `surfaceMode` term. The chat surface renders its own
   // hatch inside the dialog card, directly under the frame it acts on; this one
   // sits below the tab content and would be the second copy.
+  // Issue #3179: the agent is still launching — the pane gives way to
+  // "<agent> を起動中…" and the hatch stays down.
+  const startingGate = useSessionStartingGate(
+    sessionStartingScopeKey(worktreeId, resolvedInstanceId),
+    terminal.startingSince,
+  );
   const showEscapeHatch =
-    terminal.isUnclassifiedActive && !prompt.visible && surfaceMode !== 'chat';
+    terminal.isUnclassifiedActive
+    && !prompt.visible
+    && surfaceMode !== 'chat'
+    && !startingGate.starting;
 
   // Issue #1879: contents-only gate, identical to the PC one. Deliberately not
   // combined with `showEscapeHatch` — an unclassified overlay and a composer
@@ -856,6 +870,8 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
       // one the server judged.
       isDismissablePanelActive: terminal.isDismissablePanelActive,
       isUnclassifiedActive: terminal.isUnclassifiedActive,
+      // Issue #3179: same copy, same reason as the PC split.
+      startingSince: terminal.startingSince,
     }),
     [
       terminal.isRunning,
@@ -866,6 +882,7 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
       terminal.isPagerActive,
       terminal.isDismissablePanelActive,
       terminal.isUnclassifiedActive,
+      terminal.startingSince,
       prompt.visible,
       prompt.data,
     ],
@@ -1039,6 +1056,12 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
               onSurfaceModeChange={handleSurfaceModeChange}
             />
           </div>
+        ) : startingGate.noticeVisible && startingGate.startingSince !== null ? (
+          <SessionStartingNotice
+            cliToolId={cliToolId}
+            startingSince={startingGate.startingSince}
+            onShowTerminal={startingGate.revealTerminal}
+          />
         ) : (
           <TerminalDisplay
             output={terminal.output}

@@ -48,6 +48,14 @@ export interface MessageInputProps {
    */
   instanceId?: string;
   isSessionRunning?: boolean;
+  /**
+   * Issue #3179: the agent is still launching. The stop (interrupt) button stays
+   * disabled and the permission-mode control is not drawn: there is no turn to
+   * interrupt and no mode footer to cycle yet, and a red stop button on a
+   * launch read as "something is running that you should stop". Sending stays
+   * as {@link isSessionRunning} has it.
+   */
+  isSessionStarting?: boolean;
   /** Issue #485: Text to insert into message input from history or memo */
   pendingInsertText?: string | null;
   /** Issue #485: Callback to signal that pendingInsertText has been consumed */
@@ -210,7 +218,7 @@ function migrateLegacyDraftKey(worktreeId: string): void {
   }
 }
 
-export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSent, cliToolId, instanceId, isSessionRunning = false, pendingInsertText, onInsertConsumed, splitIndex = 0, onFocus, isProcessing = false, showToast, autoYesSlot, agentModeSlot, directInputSlot, onOptimisticSend, heightScope, maxHeight }: MessageInputProps) {
+export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSent, cliToolId, instanceId, isSessionRunning = false, isSessionStarting = false, pendingInsertText, onInsertConsumed, splitIndex = 0, onFocus, isProcessing = false, showToast, autoYesSlot, agentModeSlot, directInputSlot, onOptimisticSend, heightScope, maxHeight }: MessageInputProps) {
   const t = useTranslations('worktree');
   const [message, setMessage] = useState('');
   const [sending, setSending] = useState(false);
@@ -600,7 +608,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
       {/* Issue #2592: the permission-mode button, in this row rather than a
           new one. Renders nothing for a tool with no mode cycle and for a
           caller that passes no slot. */}
-      {agentModeSlot}
+      {isSessionStarting ? null : agentModeSlot}
     </>
   );
 
@@ -609,7 +617,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
       worktreeId={worktreeId}
       cliToolId={cliToolId || 'claude'}
       instanceId={instanceId}
-      disabled={!isSessionRunning}
+      disabled={!isSessionRunning || isSessionStarting}
     />
   );
 

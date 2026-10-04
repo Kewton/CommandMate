@@ -96,6 +96,7 @@ import {
   classifySkipReason,
 } from '@/lib/verification/run-verdict-vocabulary';
 import type { WorktreeVerificationState } from '@/hooks/useWorktreeVerification';
+import { formatElapsed } from '@/components/common/format-elapsed';
 
 /** Characters of the contract goal shown before the "…" (the pane is not a reader). */
 const GOAL_EXCERPT_LENGTH = 240;
@@ -209,19 +210,11 @@ function ContractSummary({ task }: { task: TaskView }) {
 }
 
 /**
- * Elapsed wall-clock for the run in flight.
- *
- * Not {@link formatGateDuration}: that formats a *gate's* measured duration and
- * rounds anything over ten seconds to whole seconds, so a five-minute run reads
- * `312s`. A run is the thing a human is waiting on, so it is spelled the way a
- * stopwatch does.
+ * Elapsed wall-clock for the run in flight. Issue #3179 moved the definition to
+ * `components/common/format-elapsed` so the session starting notice shares it;
+ * re-exported here under the name this module has always published.
  */
-export function formatElapsed(ms: number): string {
-  const seconds = Math.max(0, Math.floor(ms / 1000));
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  return `${minutes}m ${String(seconds % 60).padStart(2, '0')}s`;
-}
+export { formatElapsed };
 
 /**
  * The gates a run adds on top of the declared ones (`work-evidence`, `scope`,

@@ -37,6 +37,7 @@ import type {
 import { NAVIGATION_KEY_VALUES } from '../../types/terminal-keys';
 import { LIVENESS_CONFIRM_DELAY_MS } from '../../config/cli-tool-timing-config';
 import { TMUX_HISTORY_LIMIT } from '../../config/tmux-pane-config';
+import { clearSessionStarting } from '../session/session-starting-state';
 
 const execAsync = promisify(exec);
 
@@ -284,6 +285,12 @@ export abstract class BaseCLITool implements ICLITool {
         error
       );
       throw error;
+    } finally {
+      // Issue #3179: the launch is over, returned or thrown, so the screen
+      // stops showing it as starting. `beginAgentSession` wrote the record on
+      // the creation path; a reused pane never had one, and this is a no-op for
+      // it. `relaunchIfToolExited` comes through here too.
+      clearSessionStarting(worktreeId, this.id, instanceId);
     }
     const adopted = this.takeAdoptionMark(worktreeId, instanceId);
     if (adopted !== null) await this.warnIfHookUrlIsStale(worktreeId, adopted, instanceId);

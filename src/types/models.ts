@@ -266,6 +266,12 @@ export interface Worktree {
      * {@link AgentEventSourceView}.
      */
     eventSource?: AgentEventSourceView;
+    /**
+     * Epoch ms this instance's launch began, while it is still starting
+     * (Issue #3179), or absent. The UI shows "<agent> を起動中…" instead of the
+     * pane and keeps the stop button off while it is present.
+     */
+    startingSince?: number;
   } & SessionStatusReadingDetail & SessionWaitingDetail>>;
   /**
    * Armed Auto-Yes per agent instance (Issue #2512), keyed like
