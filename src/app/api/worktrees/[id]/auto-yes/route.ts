@@ -11,8 +11,7 @@ import { getWorktreeById } from '@/lib/db';
 import {
   resolveSessionTarget,
   resolveSessionTargetStrict,
-  describeSessionTargetConflict,
-  INSTANCE_TOOL_CONFLICT,
+  sessionTargetConflictResponse,
   type SessionTarget,
 } from '@/lib/session/resolve-session-target';
 import {
@@ -341,14 +340,7 @@ export async function POST(
       requestedCliTool: body.cliToolId as CLIToolType | undefined,
     });
     if (!resolution.ok) {
-      return NextResponse.json(
-        {
-          error: describeSessionTargetConflict(resolution.conflict),
-          code: INSTANCE_TOOL_CONFLICT,
-          ...resolution.conflict,
-        },
-        { status: 400 }
-      );
+      return sessionTargetConflictResponse(resolution.conflict);
     }
     const target = resolution.target;
     const cliToolId: CLIToolType = target.cliToolId;

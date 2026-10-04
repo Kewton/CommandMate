@@ -35,6 +35,7 @@
  */
 
 import type Database from 'better-sqlite3';
+import { NextResponse } from 'next/server';
 import { getWorktreeById } from '@/lib/db/worktree-db';
 import { getAgentInstance } from '@/lib/db/agent-instances-db';
 import { isCliToolType, type CLIToolType } from '@/lib/cli-tools/types';
@@ -276,5 +277,21 @@ export function describeSessionTargetConflict(conflict: SessionTargetConflict): 
     `Agent instance '${conflict.instanceId}' is registered as ${conflict.rosterCliTool}, `
     + `but ${conflict.requestedCliTool} was requested. `
     + `Omit the agent, pass ${conflict.rosterCliTool}, or update the instance's roster entry.`
+  );
+}
+
+/**
+ * The 400 a side-effecting route answers when the instance's declaration and
+ * the request disagree (see `resolveSessionTargetStrict`): the sentence, the
+ * machine-readable code, and the conflict's own fields spread into the body.
+ */
+export function sessionTargetConflictResponse(conflict: SessionTargetConflict): NextResponse {
+  return NextResponse.json(
+    {
+      error: describeSessionTargetConflict(conflict),
+      code: INSTANCE_TOOL_CONFLICT,
+      ...conflict,
+    },
+    { status: 400 }
   );
 }
