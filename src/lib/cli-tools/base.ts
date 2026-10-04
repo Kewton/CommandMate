@@ -37,7 +37,11 @@ import type {
 import { NAVIGATION_KEY_VALUES } from '../../types/terminal-keys';
 import { LIVENESS_CONFIRM_DELAY_MS } from '../../config/cli-tool-timing-config';
 import { TMUX_HISTORY_LIMIT } from '../../config/tmux-pane-config';
-import { clearSessionStarting } from '../session/session-starting-state';
+import {
+  clearSessionStarting,
+  issueSessionStartingToken,
+  runWithSessionStartingToken,
+} from '../session/session-starting-state';
 
 const execAsync = promisify(exec);
 
@@ -268,8 +272,14 @@ export abstract class BaseCLITool implements ICLITool {
     instanceId?: string,
     model?: string
   ): Promise<void> {
+    // Issue #3195: this launch's "starting" record is written under this token
+    // (see `session-starting-state`), so the `finally` below clears this
+    // launch's record and never a later launch's of the same instance.
+    const startingToken = issueSessionStartingToken();
     try {
-      await this.launchSession(worktreeId, worktreePath, instanceId, model);
+      await runWithSessionStartingToken(startingToken, () =>
+        this.launchSession(worktreeId, worktreePath, instanceId, model)
+      );
     } catch (error: unknown) {
       // Issue #2429: a launch that threw is reported as a failed start and as
       // nothing else. The mark is dropped rather than left behind so a later,
@@ -289,8 +299,10 @@ export abstract class BaseCLITool implements ICLITool {
       // Issue #3179: the launch is over, returned or thrown, so the screen
       // stops showing it as starting. `beginAgentSession` wrote the record on
       // the creation path; a reused pane never had one, and this is a no-op for
-      // it. `relaunchIfToolExited` comes through here too.
-      clearSessionStarting(worktreeId, this.id, instanceId);
+      // it. `relaunchIfToolExited` comes through here too. Issue #3195: only
+      // under this launch's token — a launch killed and started again has a
+      // newer record under this key, and it is not this launch's to end.
+      clearSessionStarting(worktreeId, this.id, instanceId, startingToken);
     }
     const adopted = this.takeAdoptionMark(worktreeId, instanceId);
     if (adopted !== null) await this.warnIfHookUrlIsStale(worktreeId, adopted, instanceId);

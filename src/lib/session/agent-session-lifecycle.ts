@@ -73,6 +73,11 @@ export function beginAgentSession(target: AgentInstanceRef, at: number = Date.no
   // `BaseCLITool.startSession` returns or throws (it clears the record in a
   // `finally`). First, so the screen stops reading the about-to-be-created pane
   // as a running agent before anything else here can fail.
+  // Issue #3195: the record is written under the token `startSession` is
+  // running the launch with (an `AsyncLocalStorage`, read inside
+  // `markSessionStarting`), which is how that `finally` knows the record is
+  // its own. A second call from the same launch (codex's
+  // `relaunchIntoSamePane`) rewrites the same launch's record.
   markSessionStarting(target.worktreeId, target.cliToolId, target.instanceId, at);
 
   const before = getAgentEventDropCounts(
