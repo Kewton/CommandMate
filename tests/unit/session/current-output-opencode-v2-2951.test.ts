@@ -60,9 +60,9 @@ import {
   type StructuredPromptWaitingData,
 } from '@/lib/session/structured-prompt';
 import {
-  readPromptDecisionId,
-  readPromptQuestionChoices,
-} from '@/components/worktree/prompt-decision-id';
+  readDecisionId as readPromptDecisionId,
+  readQuestionChoices as readPromptQuestionChoices,
+} from '@/lib/session/prompt-view';
 import { OPENCODE_QUESTION_TOOL_NAME } from '@/lib/hooks/pending-decision-kind';
 import type { AskUserQuestionSpec } from '@/lib/hooks/ask-user-question-payload';
 import type { CLIToolType } from '@/lib/cli-tools/types';

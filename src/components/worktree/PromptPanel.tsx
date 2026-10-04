@@ -25,7 +25,6 @@ import { PromptStuckHint } from '@/components/worktree/PromptStuckHint';
 
 import {
   derivePromptView,
-  optionTakesTypedText,
   readQuestionChoices,
   type PromptView,
   type QuestionChoices,
@@ -54,14 +53,6 @@ const BUTTON_PRIMARY_STYLES = 'bg-accent-600 text-white hover:bg-accent-700 focu
 
 /** Secondary button styles */
 const BUTTON_SECONDARY_STYLES = 'bg-surface border-2 border-input hover:bg-muted text-foreground focus:ring-ring';
-
-/**
- * Whether the answer panels send the operator's TEXT for an option rather than
- * its number (Issue #2573). Issue #3184: defined once in `lib/session/prompt-view`
- * (it was restated here and in `MobilePromptSheet`); re-exported under the old
- * name for the callers and tests that import it from the panel.
- */
-export { optionTakesTypedText };
 
 /** Re-exported from `prompt-answer`, where the pure helpers now live (Issue #3209). */
 export { promptQuestionKey };

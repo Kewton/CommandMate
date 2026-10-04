@@ -9,7 +9,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 
 // Import will be created in implementation phase
-import { PromptPanel, optionTakesTypedText } from '@/components/worktree/PromptPanel';
+import { PromptPanel } from '@/components/worktree/PromptPanel';
+import { optionTakesTypedText } from '@/lib/session/prompt-view';
 import { isTypedTextFieldOption } from '@/lib/detection/prompt-detect-multiple-choice';
 import type { YesNoPromptData, MultipleChoicePromptData } from '@/types/models';
 

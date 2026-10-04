@@ -22,11 +22,11 @@ import {
   type UnclassifiedFrameRecord,
 } from '@/types/models';
 import {
-  readPromptDecisionId,
-  readPromptQuestionChoices,
-  readStructuredDecisionHeading,
-} from '@/components/worktree/prompt-decision-id';
-import { optionTakesTypedText as panelOptionTakesTypedText } from '@/components/worktree/PromptPanel';
+  readDecisionId as readPromptDecisionId,
+  readQuestionChoices as readPromptQuestionChoices,
+  readDecisionHeading as readStructuredDecisionHeading,
+} from '@/lib/session/prompt-view';
+import { optionTakesTypedText as panelOptionTakesTypedText } from '@/lib/session/prompt-view';
 import {
   PROMPT_VIEW_ROWS,
   STORED_STRUCTURED_RECORD,
