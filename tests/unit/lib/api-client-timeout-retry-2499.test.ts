@@ -33,6 +33,7 @@ import { subscribeServerReachability } from '@/hooks/useConnectivity';
 import {
   API_GET_TIMEOUT_MS,
   API_MUTATION_TIMEOUT_MS,
+  getSendTimeoutMs,
   API_NO_TIMEOUT,
   API_POLL_TIMEOUT_MS,
   API_RETRY_BASE_DELAY_MS,
@@ -455,7 +456,7 @@ describe('[#2499] a write is never repeated', () => {
 
     const promise = worktreeApi.sendMessage('wt-2499', 'hello');
     const rejection = promise.catch((e: unknown) => e);
-    await vi.advanceTimersByTimeAsync(API_MUTATION_TIMEOUT_MS + 1);
+    await vi.advanceTimersByTimeAsync(getSendTimeoutMs() + 1); // #3194: send outlasts a launch
     const error = await rejection;
 
     // Not retried, but not unbounded either: the composer has to be told.

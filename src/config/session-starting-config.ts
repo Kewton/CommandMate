@@ -13,7 +13,7 @@
  * @module config/session-starting-config
  */
 
-import type { CLIToolType } from '@/lib/cli-tools/types';
+import { CLI_TOOL_IDS, type CLIToolType } from '@/lib/cli-tools/types';
 
 /**
  * Slack added on top of a tool's own readiness wait, so the starting display
@@ -47,6 +47,16 @@ const SESSION_STARTING_WAIT_MS: Partial<Record<CLIToolType, number>> = {
 export function getSessionStartingMaxMs(cliToolId: CLIToolType): number {
   return (SESSION_STARTING_WAIT_MS[cliToolId] ?? SESSION_STARTING_DEFAULT_WAIT_MS)
     + SESSION_STARTING_GRACE_MS;
+}
+
+/**
+ * The longest {@link getSessionStartingMaxMs} over every tool, in ms.
+ *
+ * A send to a worktree with no session launches the agent inside the request,
+ * so the client must wait at least this long (Issue #3194).
+ */
+export function getSessionStartingMaxMsAcrossTools(): number {
+  return Math.max(...CLI_TOOL_IDS.map(getSessionStartingMaxMs));
 }
 
 /**
