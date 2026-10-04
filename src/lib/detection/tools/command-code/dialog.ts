@@ -83,6 +83,7 @@ import {
 } from '../../selection-shape';
 import { findNumberedOptionBlock } from '../dialog-block';
 import type { PromptDetectionResult } from '../../types';
+import { truncateRawContent } from '../../truncate-raw-content';
 
 /**
  * How many rows of dialog this reader will parse.
@@ -206,25 +207,6 @@ const COMMAND_CODE_CONFIRM_ROW_PATTERN =
  */
 const COMMAND_CODE_QUESTION_HINT_BAR_PATTERN =
   /^[^\S\n]*Enter\s+to\s+select\b.*\|.*\bEsc\s+to\s+cancel[^\S\n]*$/i;
-
-/**
- * The same tail limits `prompt-detector.ts` applies to `rawContent`
- * (`RAW_CONTENT_MAX_LINES` / `RAW_CONTENT_MAX_CHARS`), restated because that
- * helper is private to it. A prompt row stores this text as its message body.
- *
- * In practice neither bound binds here — the region is at most
- * {@link COMMAND_CODE_QUESTION_MAX_REGION_ROWS} rows — which is the point: what
- * used to reach these consumers for this screen was the whole 1000-row pane.
- */
-const RAW_CONTENT_MAX_LINES = 200;
-const RAW_CONTENT_MAX_CHARS = 5000;
-
-function truncateRawContent(content: string): string {
-  const lines = content.split('\n');
-  const tail = lines.length > RAW_CONTENT_MAX_LINES ? lines.slice(-RAW_CONTENT_MAX_LINES) : lines;
-  const joined = tail.join('\n');
-  return joined.length > RAW_CONTENT_MAX_CHARS ? joined.slice(-RAW_CONTENT_MAX_CHARS) : joined;
-}
 
 /** What {@link readCommandCodeQuestionDialog} concluded about a frame. */
 export type CommandCodeQuestionReading =
