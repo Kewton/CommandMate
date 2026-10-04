@@ -2324,6 +2324,8 @@ commandmate instances <worktree-id> alias <instance-id> "新しい名前"    # a
 commandmate instances <worktree-id> kill <instance-id>                 # 該当インスタンスのセッションのみ停止
 ```
 
+`kill` は止めたインスタンスの Auto-Yes も無効にします（止めていない別インスタンスの Auto-Yes は残ります）。
+
 ### 出力例（一覧）
 
 `commandmate instances <worktree-id>`:
