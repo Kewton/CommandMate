@@ -4,6 +4,7 @@ import type { DetectPromptOptions, PromptDetectionResult } from './types';
 import type { SubmitMode } from '@/types/models';
 import { normalizeTuiFrameForDetection } from './tui-detection-frame';
 import { CLAUDE_MODEL_OVERLAY_FOOTER_PATTERN } from './cli-patterns';
+import { optionTakesTypedText } from '@/lib/session/prompt-view';
 import {
   ASK_USER_QUESTION_PICKER_FOOTER_PATTERN,
   findAskUserQuestionTabRow,
@@ -473,12 +474,7 @@ const TEXT_INPUT_PATTERNS: RegExp[] = [
  * at the start so Command Code's folded description (`Type something... Give me
  * a branch name …`) still matches. Command Code's reader
  * (`tools/command-code/dialog.ts`) marks the same rows with the same expression.
- */
-const TYPED_TEXT_FIELD_LABEL_PATTERNS: readonly RegExp[] = [
-  /^[^\S\n]*type\s+something\b/i,
-];
-
-/**
+ *
  * Whether typed text reaches this option as its answer (Issue #2573).
  *
  * `true` only for a `requiresTextInput` row whose label is a measured text field
@@ -493,8 +489,7 @@ const TYPED_TEXT_FIELD_LABEL_PATTERNS: readonly RegExp[] = [
 export function isTypedTextFieldOption(
   option: { readonly label: string; readonly requiresTextInput?: boolean },
 ): boolean {
-  return option.requiresTextInput === true
-    && TYPED_TEXT_FIELD_LABEL_PATTERNS.some((pattern) => pattern.test(option.label));
+  return optionTakesTypedText(option);
 }
 
 // ============================================================================
