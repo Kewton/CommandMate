@@ -164,7 +164,7 @@ Issue は「選択肢あり（画面の番号）」「選択肢あり（API）�
 
 ### 2.5 サーバーでの公開と、受け取り側の読み方
 
-- `buildCurrentOutput`（`current-output-builder.ts`）で `promptData` を決めた直後（`:1970` の後）に `const promptView = derivePromptView(promptData);` を計算し、payload の `promptData` の隣（`:2190`）に `promptView` として載せる。#2870 の `promptAnswerable` と同じく**追加フィールド**で、既存フィールドは並びも型も変えない。
+- `buildCurrentOutput`（`current-output-builder.ts`）で、payload の `promptData` の隣（`:2190`）に `promptView: derivePromptView(promptData)` として載せる。型は `promptView?: PromptView | null`（実装メモ: optional にした。セッションが動いていない早期 return の payload と、既存テストが組み立てる payload が持たないため。absent は null と同じに読む）。#2870 の `promptAnswerable` と同じく**追加フィールド**で、既存フィールドは並びも型も変えない。
 - 運ぶ経路は `promptAnswerable` が通っている所と同じ: `src/lib/realtime/types.ts`、`src/lib/realtime/terminal-broadcast.ts`、`src/cli/types/api-responses.ts`（CLI のミラー）、`src/hooks/useTerminalPanePolling.ts`、`src/hooks/useWorktreeDetailController.ts`（`grep -rln promptAnswerable src` で出る 11 ファイルが候補。どれが値を運ぶだけかは実装時に確認）。
 - 受け取り側は 1 つの読み関数を使う: `readPromptView(payload) = payload.promptView ?? derivePromptView(payload.promptData)`。`??` にするのは #2369 の `isDismissablePanelActive` と同じ理由で、`promptView` を出さない古いデーモンでも同じ関数で同じ結論になる。
 - ブラウザのコンポーネントのうち、reducer の `prompt.data` しか持たないもの（`PromptPanel` / `MobilePromptSheet` は props で `promptData` を受ける）は `derivePromptView(promptData)` を直接呼んでよい。**判断の中身は 1 関数にしかなく、サーバーと同じ関数**なので結論は一致する。reducer（`src/types/ui-state.ts` の `PromptState`）に `view` を足すかどうかは §6-4。
@@ -176,7 +176,7 @@ Issue は「選択肢あり（画面の番号）」「選択肢あり（API）�
 | `PromptData` union（閉じている） | 変えない | `PromptView` は別の型で、union を広げない。#1725 / #1738 の「答えを送る経路に劣化形を渡させない」性質はそのまま |
 | `isAnswerablePromptData()` | 残す | **型の絞り込み**に使う（`buildPromptResponseBody(answer, tool, promptData)` の引数を `PromptData` にする等）。見せ方を決める用途には使わなくする。`kind === 'screen-choices'` ⇔ `isAnswerablePromptData` を表テストで固定し（§4）、2 つが食い違えない |
 | `UNCLASSIFIED_PROMPT_TYPE` と `type: 'unclassified'` の値 | 変えない | `wait` の exit 10 JSON・`capture --prompts`・DB の `prompt_data` 列が外部契約として使っている |
-| `prompt-decision-id.ts` の 3 関数 | 中身を `prompt-view.ts` に移し、3 関数は `derivePromptView` を呼ぶ薄い互換ラッパーとして残す | 既存テスト（`PromptPanelQuestion-2039`、`PromptHeadingUnclassified-3181` 等）が import しているため。新しい呼び出しは増やさない |
+| `prompt-decision-id.ts` の 3 関数 | 中身を `prompt-view.ts` の `readDecisionId` / `readQuestionChoices` / `readDecisionHeading` に移し、3 関数はそれを呼ぶ薄い互換ラッパーとして残す（実装メモ: `derivePromptView` を呼ぶ形にはしなかった。旧 3 関数は `type` を見ないので、`derivePromptView` 経由にすると「`decisionId` を持つ画面プロンプト」等で答えが変わる。`derivePromptView` も同じ 3 関数を使うので判断の中身は 1 か所） | 既存テスト（`PromptPanelQuestion-2039`、`PromptHeadingUnclassified-3181` 等）が import しているため。新しい呼び出しは増やさない |
 | `current-output` の JSON | `promptView` を**追加**するだけ | 既存の CLI・スクリプトは知らないフィールドを無視する |
 | `wait` の exit 10 JSON | `type` / `options` / `status` の意味を変えない。`answerVia`（`'screen' \| 'api' \| 'terminal'`）を**追加** | `type: 'unclassified'` で分岐している既存の呼び出し側（`--auto-yes` dispatch 等、`wait.ts:62-68` のコメント）を壊さない |
 
@@ -200,7 +200,7 @@ Issue は「選択肢あり（画面の番号）」「選択肢あり（API）�
 | `src/hooks/useWorktreeDetailController.ts` | `:1236` 送信 body の型の絞り込み | **残す**（同上、理由コメント） |
 | `src/components/worktree/MobileTerminalTab.tsx` | `:863-864` で `isPromptWaiting` / `promptData` を ChatSurface に渡す | 変更なし（ChatSurface 側で `view` を導く） |
 | `src/hooks/useAutoYes.ts` | `:93` `if (!isAnswerablePromptData(promptData)) return;` | `if (derivePromptView(promptData)?.kind !== 'screen-choices') return;`。続く `resolveAutoAnswer(promptData)` には `PromptData` が要るので、型の絞り込みとして `isAnswerablePromptData` を 1 回残す（理由コメント）。`api-choices` をブラウザが答えないのは今と同じ（サーバーの `permission-adjudication` / `pending-decision-recheck` が答える） |
-| `src/cli/commands/wait.ts` | 自前定数 `:69`、`:950-953` で `options` が空なら `decisionOptions` | `readPromptView(data)` の `choices` から `options` を作る（`{number, label}` 形を保つ）。V2 質問でも選択肢が出る（§1.4-6 の修正）。`answerVia` を追加。`:1092` の合成出力（60 秒の未分類 dwell）は `type: 'unclassified'` のまま（外部契約）。自前定数は `prompt-view.ts` の定数を相対 import で読む |
+| `src/cli/commands/wait.ts` | 自前定数 `:69`、`:950-953` で `options` が空なら `decisionOptions` | 画面の `options` → `decisionOptions`（`reply` を含む生の形のまま）→ `readPromptView(data)` が API の質問と言うときだけその `choices` を `{number, label}` で、の順に使う（実装メモ: `decisionOptions` のフォールバックは view に関係なく残した。既存テスト `reports the verdicts a structured approval accepts (Issue #1898)` が `decisionId` の無い #2031 以前の形で書かれているため。`answerVia` は view だけから決める）。V2 質問でも選択肢が出る（§1.4-6 の修正）。`answerVia` を追加。`:1092` の合成出力（60 秒の未分類 dwell）は `type: 'unclassified'` のまま（外部契約）。自前定数は `prompt-view.ts` の定数を相対 import で読む |
 | `src/cli/commands/capture.ts` | 自前定数 `UNCLASSIFIED_FRAME_TYPE` `:56` で `--prompts` の行状態 | 状態語（`unclassified:hook-*` / `unclassified:detection-failed`）は外部契約なので残す。判定を `derivePromptView(p)?.kind === 'unreadable'` にし、自前定数を削除 |
 | `src/cli/types/api-responses.ts` | CLI 側 `PromptData` ミラー（`type: string`）、`'unclassified-frame'` 理由 | `promptView?: PromptView` を current-output 型に追加（型は `prompt-view.ts` から相対 import）。ミラーの緩さ（#1738）は変えない |
 | `src/lib/chat/chat-tool-approvals.ts` | `:546` `type === UNCLASSIFIED_PROMPT_TYPE \|\| status === 'unclassified'` → outcome `'unclassified'` | `derivePromptView(record)?.kind === 'unreadable'`（履歴行は §2.3 で必ず unreadable）。`status === 'unclassified'` 側は「型が壊れた行」の保険として残すか実装時に既存テスト（`chat-tool-approvals-2460` fixture）で決める |

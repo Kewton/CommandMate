@@ -145,6 +145,112 @@ describe('wait command action', () => {
     expect(output.options).toEqual([{ number: 1, label: 'Yes' }]);
   });
 
+  it('reports the choices of a question answered by decision id (Issue #3184)', async () => {
+    // OpenCode V2's question (#2100) carries a decision id and its choices on
+    // `askUserQuestion.labels`, with neither screen options nor verdicts. The
+    // panel numbered them as buttons while this reported `[]`.
+    const promptOutput = {
+      ...baseOutput,
+      isRunning: true,
+      isPromptWaiting: true,
+      sessionStatus: 'waiting' as const,
+      cliToolId: 'opencode-v2',
+      promptData: {
+        type: 'unclassified',
+        question: 'A dialog is open in wt1 …',
+        options: [],
+        status: 'pending',
+        decisionId: 'que_3184',
+        askUserQuestion: { question: 'Which branch?', labels: ['main', 'develop'], questionCount: 1 },
+      },
+    };
+    mockFetchSequence([{ data: promptOutput }]);
+
+    const { createWaitCommand } = await import('../../../../src/cli/commands/wait');
+    const cmd = createWaitCommand();
+    await cmd.parseAsync(['node', 'wait', 'wt1']);
+
+    expect(mockExit).toHaveBeenCalledWith(WaitExitCode.PROMPT_DETECTED);
+    const output = JSON.parse(mockConsoleLog.mock.calls[0][0]);
+    expect(output.type).toBe('unclassified');
+    expect(output.options).toEqual([
+      { number: 1, label: 'main' },
+      { number: 2, label: 'develop' },
+    ]);
+    expect(output.answerVia).toBe('api');
+  });
+
+  it.each([
+    [
+      'screen',
+      { type: 'yes_no', question: 'Continue?', options: ['yes', 'no'], status: 'pending' },
+    ],
+    [
+      'api',
+      {
+        type: 'unclassified',
+        question: 'A dialog is open in wt1 …',
+        options: [],
+        status: 'pending',
+        decisionId: 'per_3184',
+        decisionOptions: [{ number: 1, label: 'Allow once', reply: 'once' }],
+      },
+    ],
+    [
+      'terminal',
+      { type: 'unclassified', question: 'A dialog is open in wt1 …', options: [], status: 'pending', decisionId: null },
+    ],
+  ])('reports answerVia=%s from the shared prompt view (Issue #3184)', async (expected, promptData) => {
+    mockFetchSequence([
+      {
+        data: {
+          ...baseOutput,
+          isRunning: true,
+          isPromptWaiting: true,
+          sessionStatus: 'waiting' as const,
+          promptData,
+        },
+      },
+    ]);
+
+    const { createWaitCommand } = await import('../../../../src/cli/commands/wait');
+    const cmd = createWaitCommand();
+    await cmd.parseAsync(['node', 'wait', 'wt1']);
+
+    const output = JSON.parse(mockConsoleLog.mock.calls[0][0]);
+    expect(output.answerVia).toBe(expected);
+  });
+
+  it('prefers a published promptView over its own derivation (Issue #3184)', async () => {
+    mockFetchSequence([
+      {
+        data: {
+          ...baseOutput,
+          isRunning: true,
+          isPromptWaiting: true,
+          sessionStatus: 'waiting' as const,
+          promptData: { type: 'unclassified', question: 'q', options: [], status: 'pending' },
+          promptView: {
+            kind: 'api-choices',
+            heading: { kind: 'approval', toolName: null },
+            choices: [],
+            multiSelect: false,
+            freeText: null,
+            decisionId: 'per_published',
+            apiTarget: 'approval',
+          },
+        },
+      },
+    ]);
+
+    const { createWaitCommand } = await import('../../../../src/cli/commands/wait');
+    const cmd = createWaitCommand();
+    await cmd.parseAsync(['node', 'wait', 'wt1']);
+
+    const output = JSON.parse(mockConsoleLog.mock.calls[0][0]);
+    expect(output.answerVia).toBe('api');
+  });
+
   it('rejects invalid worktree ID', async () => {
     const { createWaitCommand } = await import('../../../../src/cli/commands/wait');
     const cmd = createWaitCommand();

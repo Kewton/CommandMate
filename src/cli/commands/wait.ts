@@ -37,6 +37,11 @@ import { TOKEN_WARNING, handleCommandError } from '../utils/command-helpers';
 import { runVerification, WORK_EVIDENCE_GATE_ID } from '../utils/verify-runner';
 import { WAIT_INSTANCE_OPTION_DESCRIPTION } from '../config/agent-target-options';
 import {
+  readPromptView,
+  UNCLASSIFIED_PROMPT_VIEW_TYPE,
+  type PromptView,
+} from '../../lib/session/prompt-view';
+import {
   isInstanceSelector,
   INSTANCE_ALIAS_HELP_SUFFIX,
   INSTANCE_SELECTOR_ERROR,
@@ -66,7 +71,23 @@ const SELECTION_LIST_PROMPT_TYPE = 'selection_list';
  * among them) keeps working and simply meets a kind it does not recognise,
  * whereas a new exit code reads as an infrastructure error to all of them.
  */
-const UNCLASSIFIED_PROMPT_TYPE = 'unclassified';
+//
+// Issue #3184: the value comes from `lib/session/prompt-view` rather than a copy
+// here — that module has no imports, so the CLI build compiles it.
+const UNCLASSIFIED_PROMPT_TYPE = UNCLASSIFIED_PROMPT_VIEW_TYPE;
+
+/**
+ * How the prompt reported on exit 10 is answered (Issue #3184): `screen` = the
+ * option number or y/n typed at the pane (`respond`), `api` = a decision
+ * delivered over the agent's own API (`respond <id> <number>`, no keys sent),
+ * `terminal` = nothing to offer, a human answers at the pane. Read off the
+ * shared view so `wait` and the browser cannot reach different conclusions.
+ */
+function waitAnswerVia(view: PromptView | null): 'screen' | 'api' | 'terminal' {
+  if (view?.kind === 'screen-choices') return 'screen';
+  if (view?.kind === 'api-choices') return 'api';
+  return 'terminal';
+}
 
 /**
  * Why `wait` decided the agent was done, printed on the completion line
@@ -947,10 +968,24 @@ export async function pollWorktree(
         // an empty list there told the caller a dialog was open and gave it
         // nothing to do about it, which is the whole of #1898-3 seen from the
         // pipeline's side.
+        //
+        // Issue #3184: and a QUESTION answered by decision id (OpenCode V2,
+        // #2100) carries neither — its choices are `askUserQuestion.labels`,
+        // numbered by position. The panel offered them as buttons while this
+        // reported `[]`. Which of these applies is the shared view's call
+        // (`readPromptView`), not a third reading of the raw fields here.
+        const promptView = readPromptView(data);
         const promptOptions =
           (data.promptData.options as unknown[])?.length
             ? (data.promptData.options as unknown[])
-            : (data.promptData.decisionOptions ?? []);
+            : data.promptData.decisionOptions?.length
+              ? data.promptData.decisionOptions
+              : promptView?.apiTarget === 'question'
+                ? promptView.choices.map((choice) => ({
+                    number: Number(choice.answer),
+                    label: choice.label,
+                  }))
+                : [];
         const promptOutput: WaitPromptOutput = {
           worktreeId,
           cliToolId: data.cliToolId || 'claude',
@@ -958,6 +993,7 @@ export async function pollWorktree(
           question: data.promptData.question || '',
           options: promptOptions,
           status: data.promptData.status || 'pending',
+          answerVia: waitAnswerVia(promptView),
           ...(data.promptData.approvalTarget !== undefined && {
             approvalTarget: data.promptData.approvalTarget,
           }),
@@ -1093,6 +1129,7 @@ export async function pollWorktree(
               question,
               options: [],
               status: 'pending',
+              answerVia: 'terminal',
             },
           };
         }

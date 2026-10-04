@@ -37,6 +37,11 @@
 import type { LivePromptData } from '@/types/models';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { OPENCODE_V2_DECISION_LABELS } from '@/lib/hooks/sources/opencode-v2/decision-labels';
+import {
+  readDecisionHeading,
+  readDecisionId,
+  readQuestionChoices,
+} from '@/lib/session/prompt-view';
 
 /**
  * A tool's own words for the approval verdicts, keyed by wire reply
@@ -83,9 +88,9 @@ export function withToolDecisionLabels<T extends LivePromptData | null>(
  * @returns The id, or null when the payload carries none
  */
 export function readPromptDecisionId(promptData: LivePromptData | null): string | null {
-  if (!promptData) return null;
-  const candidate = (promptData as { decisionId?: unknown }).decisionId;
-  return typeof candidate === 'string' && candidate !== '' ? candidate : null;
+  // Issue #3184: the read lives in `lib/session/prompt-view` now, shared with
+  // the server and the CLI; this name stays for the callers that import it.
+  return readDecisionId(promptData);
 }
 
 /** What {@link readPromptQuestionChoices} answers with. */
@@ -196,41 +201,8 @@ export function isQuestionFreeTextNumeric(text: string): boolean {
 export function readPromptQuestionChoices(
   promptData: LivePromptData | null
 ): PromptQuestionChoices | null {
-  if (readPromptDecisionId(promptData) === null) return null;
-  const payload = promptData as {
-    askUserQuestion?: {
-      question?: unknown;
-      labels?: unknown;
-      questionCount?: unknown;
-      custom?: unknown;
-    };
-    decisionOptions?: unknown;
-  };
-  if (Array.isArray(payload.decisionOptions) && payload.decisionOptions.length > 0) return null;
-
-  const asked = payload.askUserQuestion;
-  if (!asked || typeof asked.question !== 'string' || asked.question === '') return null;
-  if (!Array.isArray(asked.labels) || asked.labels.length === 0) return null;
-  const labels = asked.labels.filter(
-    (label): label is string => typeof label === 'string' && label !== ''
-  );
-  // Partial is worse than none: the numbers are positions in this list, so a
-  // list with a hole in it numbers every choice after the hole wrongly.
-  if (labels.length !== asked.labels.length) return null;
-
-  const questionCount = typeof asked.questionCount === 'number' ? asked.questionCount : 1;
-  // Gate 2's second half. Kept here rather than in the panel so that "may this
-  // be answered from the browser?" has one answer and one test, and so the
-  // panel's fallback stays the pre-#2039 read-only list rather than a picker
-  // whose submit the server would refuse.
-  if (questionCount !== 1) return null;
-
-  return {
-    question: asked.question,
-    labels,
-    questionCount,
-    ...(asked.custom === true ? { custom: true as const } : {}),
-  };
+  // Issue #3184: moved to `lib/session/prompt-view` unchanged (same three gates).
+  return readQuestionChoices(promptData);
 }
 
 /**
@@ -248,13 +220,6 @@ export type StructuredDecisionHeading =
 export function readStructuredDecisionHeading(
   promptData: LivePromptData | null
 ): StructuredDecisionHeading | null {
-  if (readPromptDecisionId(promptData) === null) return null;
-  const payload = promptData as { decisionOptions?: unknown; toolName?: unknown };
-  if (Array.isArray(payload.decisionOptions) && payload.decisionOptions.length > 0) {
-    return {
-      kind: 'approval',
-      toolName: typeof payload.toolName === 'string' && payload.toolName ? payload.toolName : null,
-    };
-  }
-  return readPromptQuestionChoices(promptData) ? { kind: 'question' } : null;
+  // Issue #3184: moved to `lib/session/prompt-view` unchanged.
+  return readDecisionHeading(promptData);
 }
