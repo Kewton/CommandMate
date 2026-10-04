@@ -240,18 +240,6 @@ export class CommandCodeTool extends BaseCLITool {
   }
 
   /**
-   * Check if a Command Code session is running for a worktree.
-   *
-   * @param worktreeId - Worktree ID
-   * @param instanceId - Agent instance ID (defaults to the primary instance)
-   * @returns True if session is running
-   */
-  async isRunning(worktreeId: string, instanceId?: string): Promise<boolean> {
-    const sessionName = this.getSessionName(worktreeId, instanceId);
-    return await hasSession(sessionName);
-  }
-
-  /**
    * Start a new Command Code session for a worktree.
    *
    * @param worktreeId - Worktree ID
