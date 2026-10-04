@@ -1,0 +1,17 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "entry": [
+    "scripts/*.{ts,mjs}",
+    "scripts/agent-health/*.ts",
+    "scripts/canary/cli.ts",
+    "scripts/history/*.ts",
+    "scripts/legacy-tmux-probe/probe.ts",
+    "scripts/measure-tile-polling/index.mjs",
+    "scripts/spike/*.{ts,mjs}",
+    ".agents/skills/*/scripts/*.ts",
+    ".claude/skills/*/scripts/*.ts",
+    "public/sw.js",
+    "src/i18n.ts"
+  ],
+  "ignore": ["website/**"]
+}

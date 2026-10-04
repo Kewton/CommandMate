@@ -71,3 +71,31 @@ export function buildPromptResponseBody(
 
   return body;
 }
+
+/**
+ * Build the request body for the `/respond` API (an approval the agent named
+ * by id). The primary instance is named by the tool id server-side, so
+ * `instanceId` is attached only when it differs from `cliTool`.
+ */
+export function buildDecisionRespondBody(
+  decisionId: string,
+  answer: string,
+  cliTool: string,
+  instanceId?: string,
+): { decisionId: string; answer: string; cliTool: string; instanceId?: string } {
+  return {
+    decisionId,
+    answer,
+    cliTool,
+    ...(instanceId && instanceId !== cliTool ? { instanceId } : {}),
+  };
+}
+
+/**
+ * Read a prompt-response / respond reply and say whether the server refused it
+ * (a 200 `{ success: false, reason }`). An unreadable body is not a refusal.
+ */
+export async function isPromptRefused(response: Response): Promise<boolean> {
+  const result = (await response.json().catch(() => null)) as { success?: unknown } | null;
+  return result?.success === false;
+}

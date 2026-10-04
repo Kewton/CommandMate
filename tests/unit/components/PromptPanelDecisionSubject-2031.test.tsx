@@ -36,7 +36,7 @@ import {
   buildStructuredPromptData,
   STRUCTURED_DECISION_OPTIONS,
 } from '@/lib/session/structured-prompt';
-import { readPromptDecisionId } from '@/components/worktree/prompt-decision-id';
+import { readDecisionId as readPromptDecisionId } from '@/lib/session/prompt-view';
 
 const DECISION_ID = 'per_0000000000000000000000000';
 

@@ -16,6 +16,7 @@ import {
   OPENCODE_PERMISSION_PATTERN,
   OPENCODE_SELECTION_LIST_PATTERN,
 } from '../../cli-patterns';
+import { positiveVerdict } from '../verdicts';
 import { STATUS_REASON } from '../../status-reason';
 import { detectOpenCodeModalOverlay } from '../../opencode-modal-overlay';
 import { detectOpenCodeDialog } from './prompt';
@@ -137,24 +138,12 @@ export const opencodeStatusDetector = createToolStatusDetector({
     // `wait` still stops for it (`isSelectionListActive` → exit 10) and the UI
     // renders NavigationButtons, which send exactly the keys the strip takes.
     if (OPENCODE_PERMISSION_PATTERN.test(frame.lastLines)) {
-      return {
-        status: 'waiting',
-        confidence: 'high',
-        reason: STATUS_REASON.OPENCODE_PERMISSION_PROMPT,
-        hasActivePrompt: false,
-        evidence: 'positive',
-      };
+      return positiveVerdict('waiting', STATUS_REASON.OPENCODE_PERMISSION_PROMPT);
     }
 
     // A. Check footer for processing indicator ("esc interrupt" replaces "ctrl+t variants..." during processing)
     if (OPENCODE_PROCESSING_INDICATOR.test(frame.lastLines)) {
-      return {
-        status: 'running',
-        confidence: 'high',
-        reason: STATUS_REASON.OPENCODE_PROCESSING_INDICATOR,
-        hasActivePrompt: false,
-        evidence: 'positive',
-      };
+      return positiveVerdict('running', STATUS_REASON.OPENCODE_PROCESSING_INDICATOR);
     }
 
     const { candidates, lastIndex } = findContentEnd(frame);
@@ -165,13 +154,7 @@ export const opencodeStatusDetector = createToolStatusDetector({
       .slice(Math.max(0, lastIndex - THINKING_TAIL_LINE_COUNT + 1), lastIndex + 1)
       .join('\n');
     if (detectThinking('opencode', contentThinkingWindow)) {
-      return {
-        status: 'running',
-        confidence: 'high',
-        reason: STATUS_REASON.THINKING_INDICATOR,
-        hasActivePrompt: false,
-        evidence: 'positive',
-      };
+      return positiveVerdict('running', STATUS_REASON.THINKING_INDICATOR);
     }
 
     // C. Check content area for selection list (Issue #473: fuzzy-search list detection)
@@ -181,13 +164,7 @@ export const opencodeStatusDetector = createToolStatusDetector({
       .slice(Math.max(0, lastIndex - STATUS_CHECK_LINE_COUNT + 1), lastIndex + 1)
       .join('\n');
     if (OPENCODE_SELECTION_LIST_PATTERN.test(candidates.join('\n'))) {
-      return {
-        status: 'waiting',
-        confidence: 'high',
-        reason: STATUS_REASON.OPENCODE_SELECTION_LIST,
-        hasActivePrompt: false,
-        evidence: 'positive',
-      };
+      return positiveVerdict('waiting', STATUS_REASON.OPENCODE_SELECTION_LIST);
     }
 
     // C2. A modal overlay painted over the transcript (Issue #2112).
@@ -223,13 +200,7 @@ export const opencodeStatusDetector = createToolStatusDetector({
     // production caller of `detectSessionStatus` passes the `capture-pane -e`
     // bytes (`lib/tmux/tmux.ts` always passes `-e`).
     if (detectOpenCodeModalOverlay(frame.raw) !== null) {
-      return {
-        status: 'waiting',
-        confidence: 'high',
-        reason: STATUS_REASON.OPENCODE_MODAL_OVERLAY,
-        hasActivePrompt: false,
-        evidence: 'positive',
-      };
+      return positiveVerdict('waiting', STATUS_REASON.OPENCODE_MODAL_OVERLAY);
     }
 
     // D. Check last few content lines for the finished-turn marker.
@@ -243,13 +214,7 @@ export const opencodeStatusDetector = createToolStatusDetector({
     // through to the heuristics rather than claiming a completion that never
     // happened, which is what design rule D1 asks for.
     if (OPENCODE_TURN_COMPLETE_PATTERN.test(contentCheckWindow)) {
-      return {
-        status: 'ready',
-        confidence: 'high',
-        reason: STATUS_REASON.OPENCODE_RESPONSE_COMPLETE,
-        hasActivePrompt: false,
-        evidence: 'positive',
-      };
+      return positiveVerdict('ready', STATUS_REASON.OPENCODE_RESPONSE_COMPLETE);
     }
 
     // E. Idle composer (Issue #473 found the row; Issue #1883 made it positive).
@@ -274,13 +239,7 @@ export const opencodeStatusDetector = createToolStatusDetector({
       .slice(Math.max(0, lastIndex - STATUS_CHECK_LINE_COUNT + 1), lastIndex + 1)
       .join('\n');
     if (OPENCODE_IDLE_COMPOSER_PATTERN.test(composerWindow)) {
-      return {
-        status: 'ready',
-        confidence: 'high',
-        reason: STATUS_REASON.INPUT_PROMPT,
-        hasActivePrompt: false,
-        evidence: 'positive',
-      };
+      return positiveVerdict('ready', STATUS_REASON.INPUT_PROMPT);
     }
 
     return null;

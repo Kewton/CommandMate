@@ -50,6 +50,7 @@ import {
   OPENCODE_V2_IDLE_COMPOSER_PATTERN,
   stripAnsi,
 } from '../../cli-patterns';
+import { positiveVerdict } from '../verdicts';
 import { STATUS_REASON } from '../../status-reason';
 import { OPENCODE_V2_LIVE_REGION } from './live-region';
 import { createToolStatusDetector } from '../run-detection';
@@ -173,22 +174,10 @@ export const opencodeV2StatusDetector = createToolStatusDetector({
   // with no Enter — see `detectDialog` below.
   beforePrompt(frame): ToolStatusVerdict | null {
     if (OPENCODE_V2_PERMISSION_PATTERN.test(frame.lastLines)) {
-      return {
-        status: 'waiting',
-        confidence: 'high',
-        reason: STATUS_REASON.OPENCODE_PERMISSION_PROMPT,
-        hasActivePrompt: false,
-        evidence: 'positive',
-      };
+      return positiveVerdict('waiting', STATUS_REASON.OPENCODE_PERMISSION_PROMPT);
     }
     if (OPENCODE_V2_QUESTION_PATTERN.test(frame.lastLines)) {
-      return {
-        status: 'waiting',
-        confidence: 'high',
-        reason: STATUS_REASON.OPENCODE_SELECTION_LIST,
-        hasActivePrompt: false,
-        evidence: 'positive',
-      };
+      return positiveVerdict('waiting', STATUS_REASON.OPENCODE_SELECTION_LIST);
     }
     // Issue #2971: a dialog opened over the composer keeps the footer (and
     // often the placeholder) on screen, so every rule below read it as `ready`
@@ -198,39 +187,21 @@ export const opencodeV2StatusDetector = createToolStatusDetector({
     // overlay, driven by ↑↓ + Enter and closed with `esc` — no number answers
     // it, hence `hasActivePrompt: false`.
     if (findOpencodeV2DialogTitle(stripAnsi(frame.raw)) !== null) {
-      return {
-        status: 'waiting',
-        confidence: 'high',
-        reason: STATUS_REASON.OPENCODE_MODAL_OVERLAY,
-        hasActivePrompt: false,
-        evidence: 'positive',
-      };
+      return positiveVerdict('waiting', STATUS_REASON.OPENCODE_MODAL_OVERLAY);
     }
     return null;
   },
 
   afterThinking(frame): ToolStatusVerdict | null {
     if (detectThinking('opencode-v2', frame.lastLines)) {
-      return {
-        status: 'running',
-        confidence: 'high',
-        reason: STATUS_REASON.THINKING_INDICATOR,
-        hasActivePrompt: false,
-        evidence: 'positive',
-      };
+      return positiveVerdict('running', STATUS_REASON.THINKING_INDICATOR);
     }
 
     // Issue #2965: the completion row as the last transcript row, with no
     // `esc interrupt` (ruled out just above) — a finished turn, whether or not
     // the footer made it into the capture.
     if (endsWithTurnComplete(frame)) {
-      return {
-        status: 'ready',
-        confidence: 'high',
-        reason: STATUS_REASON.OPENCODE_RESPONSE_COMPLETE,
-        hasActivePrompt: false,
-        evidence: 'positive',
-      };
+      return positiveVerdict('ready', STATUS_REASON.OPENCODE_RESPONSE_COMPLETE);
     }
 
     // The placeholder against the ANSI-stripped frame with its box drawing
@@ -240,13 +211,7 @@ export const opencodeV2StatusDetector = createToolStatusDetector({
       OPENCODE_V2_IDLE_COMPOSER_PATTERN.test(stripAnsi(frame.raw)) ||
       OPENCODE_V2_FOOTER_PATTERN.test(frame.lastLines)
     ) {
-      return {
-        status: 'ready',
-        confidence: 'high',
-        reason: STATUS_REASON.INPUT_PROMPT,
-        hasActivePrompt: false,
-        evidence: 'positive',
-      };
+      return positiveVerdict('ready', STATUS_REASON.INPUT_PROMPT);
     }
     return null;
   },
