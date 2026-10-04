@@ -7,8 +7,9 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db/db-instance';
-import { getWorktreeById, getAgentInstance, getAgentInstances } from '@/lib/db';
+import { getWorktreeById, getAgentInstance } from '@/lib/db';
 import { checkSessionOwnership, foreignSessionErrorBody } from '@/lib/cli-tools/session-ownership';
+import { collectFanOutTargets } from '@/lib/session/session-fan-out-targets';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { createLogger, generateRequestId } from '@/lib/logger';
 import { CLI_TOOL_IDS, isCliToolType, isValidInstanceId, type CLIToolType } from '@/lib/cli-tools/types';
@@ -94,24 +95,7 @@ export async function POST(
       const targetToolIds: readonly CLIToolType[] = body.cliToolId
         ? [body.cliToolId]
         : CLI_TOOL_IDS;
-      const seen = new Set<string>();
-      for (const tool of targetToolIds) {
-        const key = `${tool}:${tool}`;
-        if (!seen.has(key)) {
-          seen.add(key);
-          targets.push({ cliToolId: tool, instanceId: tool });
-        }
-      }
-      // Include additional registered instances of the targeted tools.
-      for (const ai of getAgentInstances(db, worktreeId)) {
-        if (targetToolIds.includes(ai.cliTool)) {
-          const key = `${ai.cliTool}:${ai.id}`;
-          if (!seen.has(key)) {
-            seen.add(key);
-            targets.push({ cliToolId: ai.cliTool, instanceId: ai.id });
-          }
-        }
-      }
+      targets.push(...collectFanOutTargets(db, worktreeId, targetToolIds));
     }
 
     // Issue #2865: a same-named session another CommandMate server created

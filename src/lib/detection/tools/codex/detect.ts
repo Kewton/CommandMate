@@ -42,6 +42,10 @@ import { THINKING_TAIL_LINE_COUNT } from '@/config/thinking-constants';
 import type { PromptDetectionResult } from '../../prompt-detector';
 import type { NormalizedFrame, ToolStatusVerdict } from '../types';
 
+function detectCodexPrompt(clean: string): PromptDetectionResult {
+  return detectPrompt(stripBoxDrawing(clean), buildDetectPromptOptions('codex'));
+}
+
 /** codex-cli build these rules were read off (#1628 / #1829 / #1890; value in ../verified-against, #1929). */
 export const VERIFIED_AGAINST = CODEX_VERIFIED_AGAINST;
 
@@ -202,10 +206,7 @@ export const codexStatusDetector = createToolStatusDetector({
         reason: STATUS_REASON.CODEX_PAGER,
         hasActivePrompt: false,
         evidence: 'positive',
-        promptDetection: detectPrompt(
-          stripBoxDrawing(frame.clean),
-          buildDetectPromptOptions('codex'),
-        ),
+        promptDetection: detectCodexPrompt(frame.clean),
       };
     }
 
@@ -228,10 +229,7 @@ export const codexStatusDetector = createToolStatusDetector({
         reason: STATUS_REASON.CODEX_HOOKS_REVIEW,
         hasActivePrompt: false,
         evidence: 'positive',
-        promptDetection: detectPrompt(
-          stripBoxDrawing(frame.clean),
-          buildDetectPromptOptions('codex'),
-        ),
+        promptDetection: detectCodexPrompt(frame.clean),
       };
     }
 
@@ -249,12 +247,7 @@ export const codexStatusDetector = createToolStatusDetector({
     // Issue #1150: the status bar is located via CODEX_STATUS_BAR_PATTERN (version-
     // independent; matches both legacy "N% left ·" and v0.141 "model · path" bars),
     // and since #2818 via CODEX_TRAILED_STATUS_BAR_PATTERN too (0.154+ "· <title>").
-    const codexFooterBoundary = findCodexFooterBoundary(contentLines);
-    let codexContentEnd =
-      codexFooterBoundary >= 0 ? codexFooterBoundary - 1 : contentLines.length - 1;
-    while (codexContentEnd >= 0 && contentLines[codexContentEnd].trim() === '') {
-      codexContentEnd--;
-    }
+    const codexContentEnd = findCodexContentEnd(contentLines) - 1;
     if (codexContentEnd >= 0) {
       const codexSelectionWindow = contentLines
         .slice(Math.max(0, codexContentEnd - STATUS_CHECK_LINE_COUNT + 1), codexContentEnd + 1)
@@ -269,10 +262,7 @@ export const codexStatusDetector = createToolStatusDetector({
         CODEX_PICKER_FOOTER_PATTERN.test(codexLastRow) ||
         CODEX_EFFORT_PICKER_FOOTER_PATTERN.test(codexLastRow)
       ) {
-        const codexPromptDetection = detectPrompt(
-          stripBoxDrawing(frame.clean),
-          buildDetectPromptOptions('codex'),
-        );
+        const codexPromptDetection = detectCodexPrompt(frame.clean);
         // Issue #1628: an approval request wears the same footer as a menu but is the
         // agent blocked on the human, so it must surface as an active prompt (exit 10
         // for `wait`, PromptPanel in the UI) instead of a navigable list. The #1160
@@ -337,10 +327,7 @@ export const codexStatusDetector = createToolStatusDetector({
       if (!codexDialogFrame.footerRecognised) {
         reportCodexDialogFooterDrift(codexDialogFrame.footer);
       }
-      const codexPromptDetection = detectPrompt(
-        stripBoxDrawing(frame.clean),
-        buildDetectPromptOptions('codex'),
-      );
+      const codexPromptDetection = detectCodexPrompt(frame.clean);
       if (codexPromptDetection.isPrompt) {
         return {
           status: 'waiting',

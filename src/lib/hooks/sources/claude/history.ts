@@ -74,7 +74,7 @@ import {
 } from '@/types/agent-transcript';
 import type { ChatMessage } from '@/types/models';
 import type { AgentInstanceRef } from '../types';
-import { isReadableFile, nextTurnOpensAt, resolveAssistantTimestampMs } from '../transcript-history';
+import { isReadableFile, nextTurnOpensAt, resolveAssistantTimestampMs, selectUnwrittenTurns } from '../transcript-history';
 import type { StructuredHistoryCaptureReport } from '@/lib/polling/structured-history-gate';
 import {
   buildClaudeTurns,
@@ -582,27 +582,7 @@ async function selectUnwrittenClaudeTurns(
   target: AgentInstanceRef,
   turns: readonly ClaudeTurnAccumulator[]
 ): Promise<PendingClaudeTurns> {
-  const [{ getDbInstance }, { findMessageByRequestId }] = await Promise.all([
-    import('@/lib/db/db-instance'),
-    import('@/lib/db'),
-  ]);
-  const db = getDbInstance();
-
-  for (let index = turns.length - 1; index >= 0; index -= 1) {
-    const requestId = claudeTurnRequestId(turns[index].promptUuid);
-    if (!findMessageByRequestId(db, target.worktreeId, requestId)) continue;
-    return {
-      turns: turns.slice(index + 1),
-      previousStartedAt: turns[index].startedAt,
-      anchored: true,
-    };
-  }
-
-  return {
-    turns: turns.slice(-1),
-    previousStartedAt: turns.length > 1 ? turns[turns.length - 2].startedAt : 0,
-    anchored: false,
-  };
+  return selectUnwrittenTurns(target, turns, (turn) => claudeTurnRequestId(turn.promptUuid));
 }
 
 /** What {@link selectUnwrittenClaudeTurns} answers. */
