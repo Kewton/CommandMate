@@ -24,6 +24,7 @@ import {
   expectedHookEvents,
 } from '@/lib/agent-health/hook-correlation';
 import { firstVersionLine, paneEvidence } from '@/lib/agent-health/report';
+import { archiveCheckFrames, type FrameArchive, type JudgedFrame } from '@/lib/agent-health/frame-archive';
 import {
   evaluateOpencodeV2LaunchLine,
   evaluateServerEvents,
@@ -89,6 +90,11 @@ export interface ProbeContext {
   /** Absolute epoch ms by which this tool must be done. */
   deadline: number;
   log: (message: string) => void;
+  /**
+   * Where a `screen-*` check's whole frame is kept (Issue #3183). Omitted, no
+   * frame is written — the unit tests that drive `probeTool` leave it out.
+   */
+  frameArchive?: FrameArchive | null;
 }
 
 export interface ProbeOutcome {
@@ -164,7 +170,10 @@ class ToolSession {
   /** From the running request's Enter to the end of that turn. */
   runningWindow: { from: number; to: number } | null = null;
 
-  constructor(private readonly ctx: ProbeContext) {
+  constructor(
+    private readonly ctx: ProbeContext,
+    private readonly version: string | null = null,
+  ) {
     this.name = `agent-health-${ctx.spec.tool}`;
   }
 
@@ -188,6 +197,23 @@ class ToolSession {
     this.ctx.log(`${this.spec.tool}: ${check.checkId} ${check.status} — ${check.summary}`);
   }
 
+  /**
+   * {@link record} for a check judged on frames: the frames are kept as
+   * captured when the archive says so (Issue #3183), and the check carries
+   * their paths.
+   */
+  recordJudged(check: AgentHealthCheck, frames: readonly JudgedFrame[]): void {
+    if (!this.ctx.selected(check.checkId)) return;
+    const kept = archiveCheckFrames(this.ctx.frameArchive, {
+      tool: this.spec.tool,
+      version: this.version,
+      check,
+      frames,
+    });
+    this.record(kept);
+    if (kept.framePaths) this.ctx.log(`${this.spec.tool}: ${check.checkId} frame → ${kept.framePaths.join(', ')}`);
+  }
+
   async look(): Promise<{ frame: string; clean: string; verdict: ScreenVerdict }> {
     const frame = await this.ctx.tmux.capture(this.name, this.spec.captureLines);
     this.lastFrame = frame;
@@ -205,7 +231,7 @@ class ToolSession {
   }
 
   recordScreen(checkId: ScreenCheckId, verdict: ScreenVerdict, frame: string, note?: string): void {
-    this.record({ checkId, ...evaluateScreen(checkId, verdict, frame, note) });
+    this.recordJudged({ checkId, ...evaluateScreen(checkId, verdict, frame, note) }, [{ frame }]);
   }
 
   /**
@@ -227,7 +253,10 @@ class ToolSession {
       // whatever is up.
       if (!result.closed) break;
     }
-    this.record({ checkId: 'screen-picker', ...evaluatePickerScreens(results) });
+    this.recordJudged(
+      { checkId: 'screen-picker', ...evaluatePickerScreens(results) },
+      results.map((result) => ({ screen: result.screen, frame: result.frame })),
+    );
   }
 
   private async openPicker(screen: PickerScreen, closeKey: PickerSpec['closeKey']): Promise<PickerScreenResult> {
@@ -429,12 +458,15 @@ class ToolSession {
       this.recordScreen('screen-approval', seen.verdict, seen.frame, '承認ダイアログは画面に出ていた');
       await this.refuse();
     } else {
-      this.record({
-        checkId: 'screen-approval',
-        status: 'fail',
-        summary: `期待: 「${prompt}」で承認ダイアログ（${dialog.source}）が出る。実際: ${DIALOG_APPEAR_MS / 1000} 秒以内に出なかった`,
-        evidence: paneEvidence(this.lastFrame),
-      });
+      this.recordJudged(
+        {
+          checkId: 'screen-approval',
+          status: 'fail',
+          summary: `期待: 「${prompt}」で承認ダイアログ（${dialog.source}）が出る。実際: ${DIALOG_APPEAR_MS / 1000} 秒以内に出なかった`,
+          evidence: paneEvidence(this.lastFrame),
+        },
+        [{ frame: this.lastFrame }],
+      );
     }
     await this.waitForTurnEnd(sentAt, async () => this.refuse());
   }
@@ -542,7 +574,7 @@ export async function probeTool(ctx: ProbeContext): Promise<ProbeOutcome> {
   }
   if (screens.length === 0 && !wantHooks && !wantSse) return { version, checks };
 
-  const session = new ToolSession(ctx);
+  const session = new ToolSession(ctx, version);
   const workDir = path.join(ctx.workRoot, spec.tool);
   fs.mkdirSync(workDir, { recursive: true });
   await execFileAsync('git', ['init', '-q'], { cwd: workDir, env: ctx.childEnv });
@@ -625,12 +657,15 @@ export async function probeTool(ctx: ProbeContext): Promise<ProbeOutcome> {
     ctx.log(`${spec.tool}: ${reason}`);
     for (const checkId of screens) {
       if (!session.checks.has(checkId)) {
-        session.record({
-          checkId,
-          status: 'fail',
-          summary: `期待: 確認を最後まで行う。実際: ${reason}`,
-          evidence: paneEvidence(session.lastFrame),
-        });
+        session.recordJudged(
+          {
+            checkId,
+            status: 'fail',
+            summary: `期待: 確認を最後まで行う。実際: ${reason}`,
+            evidence: paneEvidence(session.lastFrame),
+          },
+          [{ frame: session.lastFrame }],
+        );
       }
     }
   } finally {

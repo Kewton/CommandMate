@@ -482,4 +482,8 @@ dev-reports/module-reference/**
 | 8 | Auto-Yes の陽性 = `detectAndRespondToPrompt` が `responded` | claude / codex / antigravity / command-code / copilot は `responded`。opencode はゲートが `permission`・`keys` を認め `allowed: false`（オーケストレーターの裁定どおり）。opencode-v2 の質問フォームはゲートが `question`・`numbered` を認め `allowed: true` だが、画面経路では汎用 parser が `┃` に描かれた選択肢を読まず `no_prompt`（v2 の質問はエージェントの API で答える、#2945） | 実測 |
 | 9 | 全 fixture の anchor 分布を `fixture-sweep.ts` の表で固定 | §7 の 24 行を `live-region-markers.test.ts` で固定 | 掃引は実装前の確認に使い、固定するのは設計書に引いた行に絞った |
 | 10 | codex の起動画面ガード（poller L603）は文字列 | poller はその tick のフレームを `getCodexLifecycleDialog` と `isCodexModelPickerFrame` に渡す | 同じフレームを 4 か所すべてに渡すため。`cli-tools/codex.ts` の起動待ちは文字列のまま（同じ `findCodexComposerRow` で切る） |
+| 11 | レポートの check に `framePath`（1 つ） | `framePaths: string[]` | `screen-picker` は開いた選択画面ごとに 1 枚の画面を判定するため（`<tool>-screen-picker-<screen>.txt`） |
+| 12 | 合格時も保存するオプションは `--save-frames all` | 環境変数 `CM_AGENT_HEALTH_SAVE_FRAMES=all` | 引数の解析は `src/lib/agent-health/cli-args.ts` にあり、この Issue の変更範囲の外。`resolveFrameSaveMode` を差し替えれば引数に移せる |
+| 13 | 保存は `evaluateScreen` / `evaluatePickerScreens` の fail | それに加えて、承認ダイアログが出なかった fail と、時間切れ・異常で打ち切った `screen-*` の fail も、その時点の最後の画面を保存する（`probe-tool.ts` の `recordJudged`） | どれも「なぜ外れたか」を見るのに画面全体が要る。空の画面（一度も撮れていない）は書かない |
+| 14 | 保存先 `<レポートの置き場>/../frames/<date>/` | 同じ（`framesDirFor`）。`.txt` は `tmux.capture` の戻り値をそのまま、メタは同名 `.json` | オーケストレーターの裁定どおり |
 
