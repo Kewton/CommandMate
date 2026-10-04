@@ -88,6 +88,7 @@ import { MessageInput } from '@/components/worktree/MessageInput';
 import { OpencodeTurnDiffPanel } from '@/components/worktree/OpencodeTurnDiffPanel';
 import { HistoryPane, splitHistorySlotId } from '@/components/worktree/HistoryPane';
 import { ChatSurface } from '@/components/worktree/ChatSurface';
+import { useChatSurfaceLiveState } from '@/hooks/useChatSurfaceLiveState';
 import { PaneResizer } from '@/components/worktree/PaneResizer';
 import { AutoYesToggle } from '@/components/worktree/AutoYesToggle';
 import {
@@ -922,6 +923,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   // banner's "a wait nobody could read" case is therefore a visible prompt whose
   // payload is #1708's / #1725's degraded record, which ChatSurface reads
   // itself with `derivePromptView` (Issue #3184).
+  const chatLiveState = useChatSurfaceLiveState(terminal, prompt);
   const chatSurfaceSlot = useMemo(
     () => (
       <div
@@ -936,32 +938,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
             cliToolId={cliToolId}
             instanceId={resolvedInstanceId}
             history={historyPaneProps}
-            live={{
-              isRunning: terminal.isRunning,
-              // Issue #2445: without this the surface cannot tell "tmux says
-              // there is no session" from the hook's own pre-first-poll default.
-              attaching: terminal.attaching,
-              // Issue #2238: the generating verdict the surface actually gates
-              // its in-flight bubble on. `isRunning` above stays because the
-              // surface still reports on the session; it is no longer mistaken
-              // for the turn.
-              sessionStatus: terminal.sessionStatus,
-              isThinking: terminal.isThinking,
-              isPromptWaiting: prompt.visible,
-              promptData: prompt.data,
-              isSelectionListActive: terminal.isSelectionListActive,
-              isPagerActive: terminal.isPagerActive,
-              // Issue #2373: the field #2369 added and did not copy across. The
-              // surface falls back to reading `frame` when this is absent, so the
-              // card was already correct — but that fallback reads the raw
-              // capture's last 15 rows while the server read `frame.lastLines`,
-              // and an explicit `false` from the server could never win because it
-              // never arrived. Copied here so the server's answer is the answer.
-              isDismissablePanelActive: terminal.isDismissablePanelActive,
-              isUnclassifiedActive: terminal.isUnclassifiedActive,
-              // Issue #3179: the surface draws the starting strip from this.
-              startingSince: terminal.startingSince,
-            }}
+            live={chatLiveState}
             onSurfaceModeChange={handleSurfaceModeChange}
             // Issue #2254: the dialog card's frame. `terminal.output`, not
             // `terminal.realtimeSnippet` — see `ChatSurfaceProps.frame` for the
@@ -981,19 +958,9 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       worktreeId,
       cliToolId,
       resolvedInstanceId,
-      terminal.isRunning,
-      terminal.attaching,
-      terminal.sessionStatus,
-      terminal.isThinking,
-      terminal.isSelectionListActive,
-      terminal.isPagerActive,
-      terminal.isDismissablePanelActive,
-      terminal.isUnclassifiedActive,
-      terminal.startingSince,
+      chatLiveState,
       terminal.output,
       refresh,
-      prompt.visible,
-      prompt.data,
       handleSurfaceModeChange,
     ],
   );
