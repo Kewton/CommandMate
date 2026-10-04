@@ -205,6 +205,136 @@ async function readPaneTail(
   return readSqueezedPaneTail(client, worktreeId, cliToolId, instanceId, PANE_FALLBACK_TAIL);
 }
 
+/** Argument checks. A mocked `process.exit` returns, so nothing here stops early. */
+function validateAskArgs(worktreeId: string, message: string, options: AskOptions): void {
+  if (!isValidWorktreeId(worktreeId)) {
+    console.error('Error: Invalid worktree ID format.');
+    process.exit(ExitCode.CONFIG_ERROR);
+  }
+  if (message.trim() === '') {
+    console.error('Error: Message cannot be empty.');
+    process.exit(ExitCode.CONFIG_ERROR);
+  }
+  if (options.agent && !isCliToolId(options.agent)) {
+    console.error(`Error: Invalid agent. Must be one of: ${CLI_TOOL_IDS.join(', ')}`);
+    process.exit(ExitCode.CONFIG_ERROR);
+  }
+  if (options.instance && !isInstanceSelector(options.instance)) {
+    console.error(INSTANCE_SELECTOR_ERROR);
+    process.exit(ExitCode.CONFIG_ERROR);
+  }
+
+  // `--reply-to` / `--allow-relay-chain` only mean something under
+  // `--async`: without it `ask` returns the reply on stdout, and a second
+  // copy arriving in somebody's composer is a surprise, not a feature.
+  if (!options.async && (options.replyTo || options.allowRelayChain)) {
+    console.error('Error: --reply-to and --allow-relay-chain require --async.');
+    process.exit(ExitCode.CONFIG_ERROR);
+  }
+}
+
+/** `--async`: prints the relay id (or its JSON) and exits 0. */
+function printAsyncAck(
+  worktreeId: string,
+  instanceId: string | undefined,
+  agent: string | undefined,
+  relayId: string,
+  options: AskOptions,
+): void {
+  if (options.json) {
+    console.log(JSON.stringify({
+      worktreeId,
+      instanceId: instanceId ?? null,
+      cliToolId: agent ?? null,
+      relayId,
+      mode: 'async',
+    }, null, 2));
+  } else {
+    console.log(relayId);
+  }
+  console.error(
+    'Message sent. The reply will be delivered when the turn ends; '
+    + 'watch it with `commandmate relays`.'
+  );
+  process.exit(ExitCode.SUCCESS);
+}
+
+/** A non-success wait: prints the payload and exits with wait's code. */
+function reportWaitFailure(
+  result: Awaited<ReturnType<typeof pollWorktree>>,
+  worktreeId: string,
+  instanceId: string | undefined,
+  agent: string | undefined,
+  options: AskOptions,
+): void {
+  // Same stdout contract as `wait`: the prompt payload, and nothing
+  // else, so a caller can parse it without stripping progress lines.
+  if (result.output) {
+    console.log(JSON.stringify(result.output));
+  }
+  if (result.upstreamFault && options.json) {
+    console.log(JSON.stringify({
+      worktreeId,
+      instanceId: instanceId ?? null,
+      cliToolId: agent ?? null,
+      upstreamFault: result.upstreamFault,
+    }, null, 2));
+  }
+  process.exit(result.exitCode);
+}
+
+/** Reads the reply from the transcript, falling back to the pane. */
+async function readAskReply(
+  client: ApiClient,
+  worktreeId: string,
+  instanceId: string | undefined,
+  askedAt: number,
+  agent: string | undefined,
+): Promise<{ source: ReplySource; reply: string | null }> {
+  let source: ReplySource = 'history';
+  let reply = await readLatestReply(client, worktreeId, instanceId, askedAt, agent);
+  if (reply === null && agent) {
+    source = 'pane';
+    const pane = await readPaneTail(client, worktreeId, agent, instanceId);
+    const cleaned = pane === null ? '' : sanitizeReply(pane);
+    reply = cleaned === '' ? null : cleaned;
+  }
+  if (reply === null) {
+    source = 'none';
+  }
+  return { source, reply };
+}
+
+/** Prints the reply (or its JSON, or the no-reply warning). */
+function printAskReply(
+  worktreeId: string,
+  instanceId: string | undefined,
+  agent: string | undefined,
+  source: ReplySource,
+  reply: string | null,
+  options: AskOptions,
+): void {
+  if (options.json) {
+    console.log(JSON.stringify({
+      worktreeId,
+      instanceId: instanceId ?? null,
+      cliToolId: agent ?? null,
+      source,
+      reply,
+    }, null, 2));
+  } else if (reply === null) {
+    // Not an error exit: the turn DID end, and saying so on stderr keeps
+    // stdout empty rather than filling it with an apology a caller would
+    // paste into a report as the agent's answer.
+    console.error(
+      'Warning: the turn completed but no reply could be read '
+      + '(no transcript row and no readable pane).'
+    );
+  } else {
+    console.log(reply);
+  }
+}
+
 export function createAskCommand(): Command {
   const cmd = new Command('ask');
   cmd
@@ -253,30 +383,7 @@ a decision about that session's guard rails, not part of asking it a question.
 `)
     .action(async (worktreeId: string, message: string, options: AskOptions) => {
       try {
-        if (!isValidWorktreeId(worktreeId)) {
-          console.error('Error: Invalid worktree ID format.');
-          process.exit(ExitCode.CONFIG_ERROR);
-        }
-        if (message.trim() === '') {
-          console.error('Error: Message cannot be empty.');
-          process.exit(ExitCode.CONFIG_ERROR);
-        }
-        if (options.agent && !isCliToolId(options.agent)) {
-          console.error(`Error: Invalid agent. Must be one of: ${CLI_TOOL_IDS.join(', ')}`);
-          process.exit(ExitCode.CONFIG_ERROR);
-        }
-        if (options.instance && !isInstanceSelector(options.instance)) {
-          console.error(INSTANCE_SELECTOR_ERROR);
-          process.exit(ExitCode.CONFIG_ERROR);
-        }
-
-        // `--reply-to` / `--allow-relay-chain` only mean something under
-        // `--async`: without it `ask` returns the reply on stdout, and a second
-        // copy arriving in somebody's composer is a surprise, not a feature.
-        if (!options.async && (options.replyTo || options.allowRelayChain)) {
-          console.error('Error: --reply-to and --allow-relay-chain require --async.');
-          process.exit(ExitCode.CONFIG_ERROR);
-        }
+        validateAskArgs(worktreeId, message, options);
 
         const timeout = parseTimeout(options.timeout);
         const client = new ApiClient({ token: options.token });
@@ -333,22 +440,7 @@ a decision about that session's guard rails, not part of asking it a question.
         // the caller's own turn ends here and the answer arrives later, in their
         // composer, as a `relay` row.
         if (relayId) {
-          if (options.json) {
-            console.log(JSON.stringify({
-              worktreeId,
-              instanceId: instanceId ?? null,
-              cliToolId: agent ?? null,
-              relayId,
-              mode: 'async',
-            }, null, 2));
-          } else {
-            console.log(relayId);
-          }
-          console.error(
-            'Message sent. The reply will be delivered when the turn ends; '
-            + 'watch it with `commandmate relays`.'
-          );
-          process.exit(ExitCode.SUCCESS);
+          printAsyncAck(worktreeId, instanceId, agent, relayId, options);
           return;
         }
 
@@ -366,54 +458,13 @@ a decision about that session's guard rails, not part of asking it a question.
         });
 
         if (result.exitCode !== WaitExitCode.SUCCESS) {
-          // Same stdout contract as `wait`: the prompt payload, and nothing
-          // else, so a caller can parse it without stripping progress lines.
-          if (result.output) {
-            console.log(JSON.stringify(result.output));
-          }
-          if (result.upstreamFault && options.json) {
-            console.log(JSON.stringify({
-              worktreeId,
-              instanceId: instanceId ?? null,
-              cliToolId: agent ?? null,
-              upstreamFault: result.upstreamFault,
-            }, null, 2));
-          }
-          process.exit(result.exitCode);
+          reportWaitFailure(result, worktreeId, instanceId, agent, options);
           return;
         }
 
-        let source: ReplySource = 'history';
-        let reply = await readLatestReply(client, worktreeId, instanceId, askedAt, agent);
-        if (reply === null && agent) {
-          source = 'pane';
-          const pane = await readPaneTail(client, worktreeId, agent, instanceId);
-          const cleaned = pane === null ? '' : sanitizeReply(pane);
-          reply = cleaned === '' ? null : cleaned;
-        }
-        if (reply === null) {
-          source = 'none';
-        }
+        const { source, reply } = await readAskReply(client, worktreeId, instanceId, askedAt, agent);
 
-        if (options.json) {
-          console.log(JSON.stringify({
-            worktreeId,
-            instanceId: instanceId ?? null,
-            cliToolId: agent ?? null,
-            source,
-            reply,
-          }, null, 2));
-        } else if (reply === null) {
-          // Not an error exit: the turn DID end, and saying so on stderr keeps
-          // stdout empty rather than filling it with an apology a caller would
-          // paste into a report as the agent's answer.
-          console.error(
-            'Warning: the turn completed but no reply could be read '
-            + '(no transcript row and no readable pane).'
-          );
-        } else {
-          console.log(reply);
-        }
+        printAskReply(worktreeId, instanceId, agent, source, reply, options);
         process.exit(ExitCode.SUCCESS);
       } catch (error) {
         handleCommandError(error);
