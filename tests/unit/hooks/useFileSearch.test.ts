@@ -308,4 +308,17 @@ describe('useFileSearch', () => {
       expect(filtered).toHaveLength(1);
     });
   });
+
+  describe('Unmount cleanup', () => {
+    it('should cancel the pending debounced query on unmount', () => {
+      const { result, unmount } = renderHook(() => useFileSearch({ worktreeId: 'test' }));
+      act(() => {
+        result.current.setQuery('abc');
+      });
+      const before = vi.getTimerCount();
+      expect(before).toBeGreaterThan(0);
+      unmount();
+      expect(vi.getTimerCount()).toBeLessThan(before);
+    });
+  });
 });

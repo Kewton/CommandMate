@@ -17,6 +17,28 @@ describe('debounce', () => {
     vi.useRealTimers();
   });
 
+  it('cancel() should drop the pending call', () => {
+    const fn = vi.fn();
+    const debouncedFn = debounce(fn, 300);
+
+    debouncedFn();
+    debouncedFn.cancel();
+    vi.advanceTimersByTime(1000);
+    expect(fn).toHaveBeenCalledTimes(0);
+  });
+
+  it('should run normally when called again after cancel()', () => {
+    const fn = vi.fn();
+    const debouncedFn = debounce(fn, 300);
+
+    debouncedFn('a');
+    debouncedFn.cancel();
+    debouncedFn('b');
+    vi.advanceTimersByTime(300);
+    expect(fn).toHaveBeenCalledTimes(1);
+    expect(fn).toHaveBeenCalledWith('b');
+  });
+
   it('should delay function execution', async () => {
     const fn = vi.fn();
     const debouncedFn = debounce(fn, 300);

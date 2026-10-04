@@ -15,6 +15,26 @@
  * in a `finally`, success and failure alike — which also covers the
  * `relaunchIfToolExited` path, because that reuses `startSession`.
  *
+ * ## Whose record it is (Issue #3195)
+ *
+ * The key is (worktree, tool, instance), and a key outlives a launch: kill a
+ * launch mid-way and start the instance again, and the killed `startSession`
+ * is still in its readiness wait (agy: up to 30 s) while the new one writes
+ * the same key. When the old one finished, its `finally` deleted the new
+ * launch's record and the new "starting" display ended early.
+ *
+ * So every launch carries a token. `startSession` issues one
+ * ({@link issueSessionStartingToken}) and runs `launchSession` inside
+ * {@link runWithSessionStartingToken}; `markSessionStarting`, reached from
+ * `beginAgentSession` anywhere below that call, picks it up from the
+ * `AsyncLocalStorage`, and the `finally` clears with it — a record written
+ * under another token is left alone. A second mark under the same token (codex's
+ * `relaunchIntoSamePane`) rewrites the same launch's record, so the `finally`
+ * still clears it. A mark never replaces a record of a LATER launch (tokens
+ * only grow), so a killed launch that re-marks on its way out cannot take the
+ * key back from its successor. `clearSessionStarting` without a token — the
+ * kill-session route — drops the record whoever wrote it.
+ *
  * ## The escape hatches
  *
  * A starting display that never ends would hide a stuck launch, which is worse
@@ -40,6 +60,7 @@
  * @module lib/session/session-starting-state
  */
 
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { buildCompositeKey } from '@/lib/auto-yes-state';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { STATUS_REASON } from '@/lib/detection/status-reason';
@@ -52,6 +73,8 @@ import {
 /** One launch in progress. */
 interface SessionStartingRecord {
   cliToolId: CLIToolType;
+  /** The launch that wrote it (Issue #3195); only that launch's `finally` clears it. */
+  token: number;
   /** Epoch ms the launch began. */
   since: number;
   /** Epoch ms a dialog was first seen in the current unbroken run, or null. */
@@ -63,31 +86,73 @@ interface SessionStartingRecord {
 declare global {
   // eslint-disable-next-line no-var
   var __sessionStartingRecords: Map<string, SessionStartingRecord> | undefined;
+  // eslint-disable-next-line no-var
+  var __sessionStartingTokenSeq: { last: number } | undefined;
+  // eslint-disable-next-line no-var
+  var __sessionStartingTokenScope: AsyncLocalStorage<number> | undefined;
 }
 
 const records = globalThis.__sessionStartingRecords ??
   (globalThis.__sessionStartingRecords = new Map<string, SessionStartingRecord>());
 
+/** On `globalThis` like the map, so tokens keep growing across route bundles. */
+const tokenSeq = globalThis.__sessionStartingTokenSeq ??
+  (globalThis.__sessionStartingTokenSeq = { last: 0 });
+
+const tokenScope = globalThis.__sessionStartingTokenScope ??
+  (globalThis.__sessionStartingTokenScope = new AsyncLocalStorage<number>());
+
+/**
+ * A token for a launch about to begin (Issue #3195). Strictly greater than
+ * every token issued before it.
+ */
+export function issueSessionStartingToken(): number {
+  tokenSeq.last += 1;
+  return tokenSeq.last;
+}
+
+/**
+ * Run a launch under its token, so a `markSessionStarting` anywhere below it
+ * records the launch as this token's (Issue #3195).
+ *
+ * @param token - From {@link issueSessionStartingToken}
+ * @param fn - The launch
+ */
+export function runWithSessionStartingToken<T>(token: number, fn: () => T): T {
+  return tokenScope.run(token, fn);
+}
+
 /**
  * Record that a launch of this instance began.
+ *
+ * Under the launch's token: the one {@link runWithSessionStartingToken} is
+ * running, or a fresh one outside any. A record of a later launch is kept —
+ * this call is then a launch that was already superseded (Issue #3195).
  *
  * @param worktreeId - Worktree ID
  * @param cliToolId - Tool being launched
  * @param instanceId - Instance (defaults to the primary)
  * @param at - Epoch ms; defaults to now
+ * @returns The token the record was written under, or null when it was not written
  */
 export function markSessionStarting(
   worktreeId: string,
   cliToolId: CLIToolType,
   instanceId?: string,
   at: number = Date.now(),
-): void {
-  records.set(buildCompositeKey(worktreeId, cliToolId, instanceId), {
+): number | null {
+  const token = tokenScope.getStore() ?? issueSessionStartingToken();
+  const key = buildCompositeKey(worktreeId, cliToolId, instanceId);
+  const existing = records.get(key);
+  if (existing !== undefined && existing.token > token) return null;
+  records.set(key, {
     cliToolId,
+    token,
     since: at,
     promptSeenAt: null,
     released: false,
   });
+  return token;
 }
 
 /**
@@ -95,17 +160,25 @@ export function markSessionStarting(
  * `startSession`'s `finally`, where an exception would replace the launch's own
  * error — an id `buildCompositeKey` refuses could never have been recorded.
  *
+ * With a token, only that launch's record is dropped — a launch that was
+ * killed and replaced must not end its successor's display (Issue #3195).
+ * Without one (kill-session), the record is dropped whoever wrote it.
+ *
  * @param worktreeId - Worktree ID
  * @param cliToolId - Tool that was launched
  * @param instanceId - Instance (defaults to the primary)
+ * @param token - The launch's token; omit to drop any launch's record
  */
 export function clearSessionStarting(
   worktreeId: string,
   cliToolId: CLIToolType,
   instanceId?: string,
+  token?: number,
 ): void {
   try {
-    records.delete(buildCompositeKey(worktreeId, cliToolId, instanceId));
+    const key = buildCompositeKey(worktreeId, cliToolId, instanceId);
+    if (token !== undefined && records.get(key)?.token !== token) return;
+    records.delete(key);
   } catch {
     // Nothing was recorded under an id that does not compose into a key.
   }

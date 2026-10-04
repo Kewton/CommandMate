@@ -17,6 +17,7 @@ import {
   isIdempotentMethod,
   isRetryableStatus,
   resolveDefaultTimeoutMs,
+  getSendTimeoutMs,
 } from '@/config/api-timeout-config';
 // Issue #2501 owns the connection verdict; Issue #2499 feeds it. Imported as a
 // plain module function rather than through the hook because this file is not a
@@ -672,6 +673,8 @@ export const worktreeApi = {
     const created = await fetchApi<ChatMessage>(`/api/worktrees/${id}/send`, {
       method: 'POST',
       body: JSON.stringify(body),
+      // Issue #3194: with no session the server launches the agent inside this request.
+      timeoutMs: getSendTimeoutMs(),
     });
     return reviveMessageTimestamp(created);
   },

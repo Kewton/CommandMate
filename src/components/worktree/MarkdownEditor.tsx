@@ -408,6 +408,9 @@ export const MarkdownEditor = memo(function MarkdownEditor({
     []
   );
 
+  // Cancel a pending preview update on unmount so it cannot fire after teardown
+  useEffect(() => () => updatePreview.cancel(), [updatePreview]);
+
   /**
    * Load file content
    */
