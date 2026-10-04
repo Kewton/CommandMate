@@ -74,7 +74,10 @@ import {
   type AskUserQuestionEpisode,
   type StructuredPromptWaitingState,
 } from '@/lib/session/agent-event-state';
-import { resolvePromptWaiting } from '@/lib/session/prompt-waiting-composition';
+import {
+  isApiAnswerableStructuredWait,
+  resolvePromptWaiting,
+} from '@/lib/session/prompt-waiting-composition';
 import { DIALOG_PENDING_MAX_MS, isDeliveryExpired } from '@/lib/session/provisional-turn';
 import {
   forgetLastKnownStatus,
@@ -90,7 +93,6 @@ import { classifyLayerDisagreement, reportLayerDisagreement } from '@/lib/sessio
 import {
   buildStructuredPromptData,
   hasApiAnswerableDecision,
-  isAddressableDecision,
   structuredDecisionOptionsFor,
   type StructuredPromptFacts,
   type StructuredPromptWaitingData,
@@ -141,17 +143,6 @@ export { mergeStructuredStatus } from './structured-status-merge';
 export type { ScraperVerdict, MergedStatusVerdict } from './structured-status-merge';
 
 const logger = createLogger('current-output-builder');
-
-/**
- * Re-exported from `@/lib/session/status-evidence`, where Issue #1926 moved it
- * so `worktree-status-helper` — the second producer, and the one that drives the
- * header chip, `BranchStatusIndicator` and `commandmate ls` — could call the
- * same derivation instead of restating it.
- *
- * Kept exported here because #1924 published it from this module and the type is
- * imported by name elsewhere; the definition is one file away, not two.
- */
-export type { StatusEvidence };
 
 /**
  * Build the current-output payload for a worktree session.
@@ -414,9 +405,7 @@ function composePromptData({
   // bare "1" selects whatever the picker happens to be highlighting (#1681).
   const addressableDecisionId =
     promptWaiting !== null &&
-    promptWaiting.source === 'notification' &&
-    eventSource.capabilities.eventIdentity === 'permission-id' &&
-    isAddressableDecision(promptWaiting.decisionId)
+    isApiAnswerableStructuredWait(promptWaiting, eventSource.capabilities.eventIdentity)
       ? promptWaiting.decisionId
       : null;
   // Issue #2100 splits the two halves of #2031's single expression, because an
