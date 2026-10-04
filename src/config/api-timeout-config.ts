@@ -23,6 +23,8 @@
  * tested without a network is a decision that can be trusted.
  */
 
+import { getSessionStartingMaxMsAcrossTools } from '@/config/session-starting-config';
+
 // ============================================================================
 // Timeouts
 // ============================================================================
@@ -58,6 +60,25 @@ export const API_GET_TIMEOUT_MS = 10_000;
  * several seconds, so this bound exists to end a hang, not to police latency.
  */
 export const API_MUTATION_TIMEOUT_MS = 30_000;
+
+/**
+ * Room for the send itself, on top of the longest agent launch (Issue #3194).
+ *
+ * A send to a worktree with no session launches the agent inside the request,
+ * so the screen's send timeout is `longest launch wait + this`. Like
+ * {@link API_MUTATION_TIMEOUT_MS}, it is generous because a write is not
+ * retried: cutting it off early invites the user to send the same text twice.
+ */
+export const API_SEND_ALLOWANCE_MS = 30_000;
+
+/**
+ * Timeout for the screen's send request: every tool's launch wait (the longest
+ * one, which `getSessionStartingMaxMs` already pads) plus
+ * {@link API_SEND_ALLOWANCE_MS}.
+ */
+export function getSendTimeoutMs(): number {
+  return getSessionStartingMaxMsAcrossTools() + API_SEND_ALLOWANCE_MS;
+}
 
 /**
  * Ceiling for a request issued by a polling loop.
