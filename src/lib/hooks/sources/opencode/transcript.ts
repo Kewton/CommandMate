@@ -54,7 +54,13 @@
  */
 
 import { isPlainObject, readNestedString, readStringField } from '../event-mapper';
-import { separateTurnBody, TURN_REASONING_LABEL, type TurnRenderBlock } from '../turn-body';
+import {
+  collapseToLine,
+  separateTurnBody,
+  truncateTurnBody,
+  TURN_REASONING_LABEL,
+  type TurnRenderBlock,
+} from '../turn-body';
 
 /**
  * The field that groups assistant messages into one turn.
@@ -277,16 +283,6 @@ function renderToolPart(part: OpencodeTranscriptPart): string {
   return part.error ? `${head} _(error: ${collapseToLine(part.error)})_` : `${head} _(error)_`;
 }
 
-/**
- * A tool title on one line.
- *
- * A `bash` title is the command, and a heredoc puts newlines in it. Left alone
- * they would end the list item and turn the rest of the command into body text.
- */
-function collapseToLine(value: string): string {
-  return value.replace(/\s+/g, ' ').trim();
-}
-
 /** What one rendered turn is. */
 export interface OpencodeRenderedTurn {
   /** `ses_…`. */
@@ -359,11 +355,7 @@ export function renderOpencodeTurn(turn: OpencodeTurnAccumulator): OpencodeRende
   // now sits behind the prose, so what a 200 kB turn loses is the tail of its
   // thinking rather than the answer (Issue #2272).
   let body = separated.body;
-  if (body.length > MAX_OPENCODE_TURN_BODY_LENGTH) {
-    body =
-      body.slice(0, MAX_OPENCODE_TURN_BODY_LENGTH - OPENCODE_TURN_TRUNCATION_MARKER.length) +
-      OPENCODE_TURN_TRUNCATION_MARKER;
-  }
+  body = truncateTurnBody(body, MAX_OPENCODE_TURN_BODY_LENGTH, OPENCODE_TURN_TRUNCATION_MARKER);
 
   return {
     sessionId: turn.sessionId,

@@ -86,7 +86,7 @@
  */
 
 import { isPlainObject, readStringField } from '../event-mapper';
-import { separateTurnBody, type TurnRenderBlock } from '../turn-body';
+import { boundDetail, collapseToLine, separateTurnBody, truncateTurnBody, type TurnRenderBlock } from '../turn-body';
 
 /**
  * `~/.commandcode/projects` — the directory Command Code keeps one project's
@@ -370,15 +370,8 @@ function readToolDetail(input: unknown): string | null {
   return null;
 }
 
-/** A tool detail on one line. A heredoc `command` puts newlines in it. */
-function collapseToLine(value: string): string {
-  return value.replace(/\s+/g, ' ').trim();
-}
-
 function boundToolDetail(value: string): string {
-  return value.length <= MAX_COMMAND_CODE_TOOL_DETAIL_LENGTH
-    ? value
-    : `${value.slice(0, MAX_COMMAND_CODE_TOOL_DETAIL_LENGTH - 1)}…`;
+  return boundDetail(value, MAX_COMMAND_CODE_TOOL_DETAIL_LENGTH);
 }
 
 /** `message.meta`, when the entry has one. */
@@ -801,11 +794,7 @@ export function renderCommandCodeTurn(turn: CommandCodeTurnAccumulator): Command
   }
 
   let body = separateTurnBody(rendered).body;
-  if (body.length > MAX_COMMAND_CODE_TURN_BODY_LENGTH) {
-    body =
-      body.slice(0, MAX_COMMAND_CODE_TURN_BODY_LENGTH - COMMAND_CODE_TURN_TRUNCATION_MARKER.length) +
-      COMMAND_CODE_TURN_TRUNCATION_MARKER;
-  }
+  body = truncateTurnBody(body, MAX_COMMAND_CODE_TURN_BODY_LENGTH, COMMAND_CODE_TURN_TRUNCATION_MARKER);
 
   return {
     sessionId: turn.sessionId,

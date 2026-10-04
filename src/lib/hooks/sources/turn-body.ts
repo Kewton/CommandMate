@@ -142,6 +142,36 @@ export interface SeparatedTurnBody {
 }
 
 /**
+ * A tool title on one line.
+ *
+ * A `bash` title is the command, and a heredoc puts newlines in it. Left alone
+ * they would end the list item and turn the rest of the command into body text.
+ */
+export function collapseToLine(value: string): string {
+  return value.replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * A tool detail cut to `max` characters, the last one being `…`.
+ *
+ * The cap is each reader's own constant; the cut is the same in all of them.
+ */
+export function boundDetail(value: string, max: number): string {
+  return value.length <= max ? value : `${value.slice(0, max - 1)}…`;
+}
+
+/**
+ * A turn body cut to `max` characters, the tail being `marker`.
+ *
+ * The cap and the marker are each reader's own constants; the cut is the same
+ * in all of them.
+ */
+export function truncateTurnBody(body: string, max: number, marker: string): string {
+  if (body.length <= max) return body;
+  return body.slice(0, max - marker.length) + marker;
+}
+
+/**
  * Put one block inside a blockquote, line by line.
  *
  * Every line gets its own `> ` because a blockquote ends at the first line that
