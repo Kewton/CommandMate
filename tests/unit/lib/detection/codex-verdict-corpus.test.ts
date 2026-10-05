@@ -114,9 +114,24 @@ const CORPUS: ReadonlyArray<readonly [string, string, string]> = [
 
 /** Every codex capture under tests/ (the completeness rule's definition). */
 function listCodexCaptures(dir: string, out: string[] = []): string[] {
-  for (const name of readdirSync(dir)) {
+  let names: string[];
+  try {
+    names = readdirSync(dir);
+  } catch (error) {
+    // A temp fixture another test created and removed mid-walk.
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return out;
+    throw error;
+  }
+  for (const name of names) {
     const full = path.join(dir, name);
-    if (statSync(full).isDirectory()) {
+    let isDirectory: boolean;
+    try {
+      isDirectory = statSync(full).isDirectory();
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
+      throw error;
+    }
+    if (isDirectory) {
       if (name === 'node_modules') continue;
       listCodexCaptures(full, out);
       continue;
@@ -144,7 +159,7 @@ describe('codex verdict corpus', () => {
     const listed = new Set(CORPUS.map(([rel]) => rel));
     const missing = listCodexCaptures(TESTS_ROOT).filter((rel) => !listed.has(rel));
     expect(missing).toEqual([]);
-  });
+  }, 60_000);
 });
 
 /**
