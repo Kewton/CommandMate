@@ -844,7 +844,33 @@ export function closeAgentTurn(
  * See {@link SCRAPER_COMPLETION_POLLS} for why three, and for why closing here
  * does not complete a `commandmate wait`.
  *
+ * ## `mayClose` — when the screen is not allowed to close (Issue #3337)
+ *
+ * The caller passes false while the agent's own hooks are speaking for the
+ * pane and nothing says the `Stop` will not come. Then the counter still
+ * counts, but the turn stays open and the structured `running` stands.
+ *
+ * The screen's "finished composer" is a reading of one frame, and a frame of a
+ * live turn can be misread: codex 0.160.0's status row blinks between `•` and
+ * `◦`, and the `◦` half read `ready`, so three polls in a row closed a
+ * nine-minute codex turn and `capture --json` published `ready` in the middle
+ * of it (`tests/fixtures/codex-mid-turn-3337/`). An operator who sent on that
+ * `ready` interrupted the running turn. On a hooks source the agent itself
+ * reports the end, so the screen can only add a wrong answer there — except
+ * when the `Stop` is known not to come. Two cases say so:
+ *
+ *  - the turn has been unheard from for {@link TURN_STALE_AFTER_MS}: the
+ *    existing `stale` close, which `effectiveTurn` applies regardless of this
+ *    function. It stays the bound on a `Stop` that was simply lost.
+ *  - the frame shows the turn was abandoned — codex's `■ Conversation
+ *    interrupted` — which the caller folds into `mayClose`. Measured on codex
+ *    0.160.0 with hooks trusted: an Esc fires no `Stop`, twice out of twice.
+ *
+ * A source with no hooks (`scraper`) and a pull source (`sse`) pass true and
+ * keep the #1930 behaviour.
+ *
  * @param at - Epoch ms; defaults to now
+ * @param mayClose - Whether a third positive poll may close the turn
  * @returns Whether this poll closed the turn
  */
 export function observeScraperCompletionEvidence(
@@ -852,7 +878,8 @@ export function observeScraperCompletionEvidence(
   cliToolId: CLIToolType,
   instanceId: string | undefined,
   completed: boolean,
-  at: number = Date.now()
+  at: number = Date.now(),
+  mayClose: boolean = true
 ): boolean {
   const key = buildCompositeKey(worktreeId, cliToolId, instanceId);
   const turn = fencedTurn(key);
@@ -865,6 +892,7 @@ export function observeScraperCompletionEvidence(
 
   turn.scraperCompletionPolls += 1;
   if (turn.scraperCompletionPolls < SCRAPER_COMPLETION_POLLS) return false;
+  if (!mayClose) return false;
 
   turn.closedAt = at;
   turn.closedBy = 'scraper_evidence';

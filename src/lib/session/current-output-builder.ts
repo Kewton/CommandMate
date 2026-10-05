@@ -29,6 +29,7 @@ import {
   type CLIToolType,
 } from '@/lib/cli-tools/types';
 import { getAgentEventSource } from '@/lib/hooks/sources/registry';
+import { frameShowsAbandonedTurn } from '@/lib/detection/turn-abandoned';
 import { describeAgentEventSource } from '@/lib/hooks/sources/define-source';
 import type { AgentEventSource } from '@/lib/hooks/sources/types';
 import { getOpencodeProbedActivity } from '@/lib/hooks/sources/opencode/subscription';
@@ -708,11 +709,19 @@ async function buildPayload(
   // the scraper's to describe. What it deliberately does NOT do is complete a
   // `commandmate wait` — see SCRAPER_COMPLETION_POLLS, and #1839's measurement
   // of a 529 storm returning Claude to exactly this frame having run nothing.
+  //
+  // Issue #3337: and not while the agent's hooks speak for the pane, unless the
+  // frame shows the turn was abandoned (codex's `■ Conversation interrupted`,
+  // after which no `Stop` comes). A misread frame of a live codex turn closed
+  // it here and published `ready` mid-turn; the hook's own `Stop` is the end of
+  // the turn there, and `stale` stays the bound on a `Stop` that was lost.
   observeScraperCompletionEvidence(
     worktreeId,
     cliToolId,
     instanceId,
-    statusResult.status === 'ready' && evidence === 'positive'
+    statusResult.status === 'ready' && evidence === 'positive',
+    undefined,
+    structuredEvents.source.kind !== 'hooks' || frameShowsAbandonedTurn(cliToolId, output)
   );
 
   const structured = getStructuredSessionState(worktreeId, cliToolId, instanceId);

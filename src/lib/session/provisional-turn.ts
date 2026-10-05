@@ -82,7 +82,9 @@ export const TURN_ACTIVITY_EVENTS: ReadonlySet<AgentEventType> = new Set<AgentEv
  *    bound that stops a lost `Stop` from asserting `running` forever.
  *  - `scraper_evidence` — the terminal frame said "done" on
  *    {@link SCRAPER_COMPLETION_POLLS} consecutive polls with positive evidence.
- *    The screen, not the agent.
+ *    The screen, not the agent. On a hooks source only when the frame shows a
+ *    turn whose `Stop` is not coming, such as an interrupt (Issue #3337, see
+ *    `observeScraperCompletionEvidence`).
  *  - `resync_idle` — a source that can be re-read (`capabilities.resync`) was
  *    asked after a dropped transport and answered "not busy".
  *  - `generation` — the process that owned the turn was replaced.
