@@ -18,6 +18,7 @@
  */
 
 import { bugFlowSummary } from './bug-flow';
+import { hookObservationSummary } from './hook-observation';
 import { reportDateJst } from './report';
 import { severityRank } from './metrics-parse';
 import {
@@ -445,6 +446,10 @@ function evaluate(m: OkMeasurement, previous: MetricSnapshot | null): Evaluation
     case 'bug-flow':
       // Numbers only (Issue #3185): never a candidate, so no Issue is filed from it.
       return { candidates: [], summary: bugFlowSummary(m.items) };
+    case 'hook-observation':
+      // Observation only (Issue #3311): never a candidate until a later Issue
+      // decides, from these numbers, what should be one.
+      return { candidates: [], summary: hookObservationSummary(m.details) };
   }
 }
 

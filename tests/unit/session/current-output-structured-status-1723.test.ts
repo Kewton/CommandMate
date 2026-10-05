@@ -50,6 +50,7 @@ vi.mock('@/lib/polling/auto-yes-manager', () => ({
 import { captureSessionOutput } from '@/lib/session/cli-session';
 import { getLastServerResponseTimestamp } from '@/lib/polling/auto-yes-manager';
 import { buildCurrentOutput } from '@/lib/session/current-output-builder';
+import { resetDetectionDivergenceTracking } from '@/lib/session/detection-divergence';
 import {
   clearAgentStopEvents,
   recordAgentEvent,
@@ -341,5 +342,50 @@ describe('buildCurrentOutput: a session that is not running (Issue #1723)', () =
     expect(payload.sessionStatus).toBe('idle');
     expect(payload.sessionStatusReason).toBe('session_not_running');
     expect(divergenceLines()).toHaveLength(0);
+  });
+});
+
+describe('buildCurrentOutput: how long a disagreement lasted (Issue #3311)', () => {
+  const T0 = 1_900_000_000_000;
+
+  /** The `detection-divergence-resolved` lines emitted so far. */
+  function resolvedLines(): unknown[] {
+    return mockLogger.info.mock.calls.filter(([message]) => message === 'detection-divergence-resolved');
+  }
+
+  beforeEach(() => resetDetectionDivergenceTracking());
+
+  it('says once, when the two agree again, how long they disagreed and over how many polls', async () => {
+    freezeClock(T0);
+    record('stop');
+    await buildCurrentOutput(db, 'wt-1', 'claude', 'claude');
+    freezeClock(T0 + 1_500);
+    await buildCurrentOutput(db, 'wt-1', 'claude', 'claude');
+    expect(divergenceLines()).toHaveLength(2);
+    expect(resolvedLines()).toHaveLength(0);
+
+    freezeClock(T0 + 4_000);
+    record('user_prompt_submit');
+    await buildCurrentOutput(db, 'wt-1', 'claude', 'claude');
+    await buildCurrentOutput(db, 'wt-1', 'claude', 'claude');
+
+    // The per-poll line is unchanged: two, both from the disagreeing polls.
+    expect(divergenceLines()).toHaveLength(2);
+    expect(resolvedLines()).toEqual([
+      [
+        'detection-divergence-resolved',
+        { worktreeId: 'wt-1', cliToolId: 'claude', instanceId: 'claude', durationMs: 4_000, polls: 2 },
+      ],
+    ]);
+  });
+
+  it('says nothing for a session where the two never disagreed (control)', async () => {
+    freezeClock(T0);
+    record('user_prompt_submit');
+    await buildCurrentOutput(db, 'wt-1', 'claude', 'claude');
+    await buildCurrentOutput(db, 'wt-1', 'claude', 'claude');
+
+    expect(divergenceLines()).toHaveLength(0);
+    expect(resolvedLines()).toHaveLength(0);
   });
 });
