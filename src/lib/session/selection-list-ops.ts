@@ -32,7 +32,9 @@
  *     it the controls is a separate change.
  *  3. **opencode's model chords** are drawn on the chat card only. The
  *     terminal surface already carries them in `OpencodeQuickKeys`, on the same
- *     footer this pad sits in.
+ *     footer this pad sits in. That footer stays under the chat surface too, so
+ *     it withdraws its strip while the card is open on a selection list
+ *     (`isChatCardSelectionListOpen`, Issue #3336) — one copy of the keys.
  *
  * ## Two steps: read the frame, then decide
  *
@@ -66,6 +68,7 @@ import {
   readSelectionListShape,
   shouldOfferOptionNumbers,
 } from '@/lib/detection/selection-shape';
+import { extractDialogFrameTail } from '@/lib/chat/dialog-frame';
 import { PLAN_APPROVE_KEY_TOOL_IDS, SESSION_SCOPE_KEY_TOOL_IDS } from '@/types/terminal-keys';
 
 // ===========================================================================
@@ -125,7 +128,7 @@ export function readSelectionListFrame(frame: string | null | undefined): Select
   // whole pane and most frames are refused by the shape first.
   const numberKeyCount =
     shouldOfferOptionNumbers(shape) && readCommandCodeQuestionRegion(frame) === null
-      ? shape.optionCount
+      ? Math.min(shape.optionCount, countDialogOptions(frame))
       : 0;
 
   return {
@@ -134,6 +137,29 @@ export function readSelectionListFrame(frame: string | null | undefined): Select
     commitsDefaultOnEnter: shape.commitsDefaultOnEnter,
     offersPlanApprove: shape.offersPlanApprove,
   };
+}
+
+/**
+ * How many numbered options the DIALOG offers — counted on the rows the chat
+ * card draws for it, not on the pane's tail (Issue #3336).
+ *
+ * `readSelectionListShape` counts the last 40 rows with content. The card draws
+ * something else: `extractDialogFrameTail(frame, { selectionList: true })`,
+ * which for an inline tool (opencode's overlay, Command Code's picker and
+ * question screen) is the dialog's own rows. When the two windows differ, a
+ * numbered reply sitting within 40 rows of the bottom — above a dialog that has
+ * no numbers at all — was counted as the dialog's options, and the number row
+ * was drawn under a list it does not answer (on the terminal surface too, since
+ * #3305). Fixture: `tests/fixtures/selection-list-number-window-3336/`.
+ *
+ * The count is the SAME function the card runs, so the two cannot drift apart
+ * again; the caller takes the smaller of this and the tail's count. For a tool
+ * no cropper recognises, the card draws every compacted row of the pane —
+ * wider than the tail, because compaction collapses blank runs — and the tail
+ * stays the narrower bound there, exactly as before.
+ */
+function countDialogOptions(frame: string): number {
+  return readSelectionListShape(extractDialogFrameTail(frame, { selectionList: true })).optionCount;
 }
 
 /** Whether two readings say the same thing. */
