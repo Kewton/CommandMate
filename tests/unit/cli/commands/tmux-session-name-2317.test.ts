@@ -266,6 +266,10 @@ describe('attach (Issue #2867)', () => {
           ],
         },
       },
+      // Issue #3334: `/capture` answering 200 for that name — the server
+      // confirming the session is its own, which is what a writable attach
+      // now needs. This case is about the name, so it is given an owner.
+      { data: { output: '' } },
     ]);
 
     await runAttach(['wt1']);
