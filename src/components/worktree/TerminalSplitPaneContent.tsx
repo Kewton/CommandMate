@@ -84,7 +84,7 @@ import { usePromptStuckCounter } from '@/hooks/usePromptStuckCounter';
 import { MessageInput } from '@/components/worktree/MessageInput';
 import { OpencodeTurnDiffPanel } from '@/components/worktree/OpencodeTurnDiffPanel';
 import { HistoryPane, splitHistorySlotId } from '@/components/worktree/HistoryPane';
-import { ChatSurface } from '@/components/worktree/ChatSurface';
+import { ChatSurface, isChatCardSelectionListOpen } from '@/components/worktree/ChatSurface';
 import { useChatSurfaceLiveState } from '@/hooks/useChatSurfaceLiveState';
 import { PaneResizer } from '@/components/worktree/PaneResizer';
 import { AutoYesToggle } from '@/components/worktree/AutoYesToggle';
@@ -857,6 +857,12 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   // payload is #1708's / #1725's degraded record, which ChatSurface reads
   // itself with `derivePromptView` (Issue #3184).
   const chatLiveState = useChatSurfaceLiveState(terminal, prompt);
+  // Issue #3336: while the chat card is open on a selection list it carries
+  // opencode's model chords (`OpencodeModelKeys`, inside `SelectionListKeys`),
+  // so the footer's `OpencodeQuickKeys` would be the second copy of the same
+  // keys. The terminal surface has no card and keeps the strip as it was.
+  const hideOpencodeQuickKeys =
+    isChatSurface && isChatCardSelectionListOpen(chatLiveState, terminal.output, cliToolId);
   const chatSurfaceSlot = useMemo(
     () => (
       <div
@@ -1077,7 +1083,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
             because a 1-split pane still keeps 456px of terminal with the strip
             showing. Measured in
             `tests/e2e/desktop-opencode-quick-keys-2131.spec.ts`. */}
-        {terminal.isRunning ? (
+        {terminal.isRunning && !hideOpencodeQuickKeys ? (
           <OpencodeQuickKeys
             worktreeId={worktreeId}
             cliToolId={cliToolId}
@@ -1276,6 +1282,8 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       terminal.output,
       // Issue #2046: the opencode quick-key strip's session gate.
       agentSession.session,
+      // Issue #3336: and its chat-card gate.
+      hideOpencodeQuickKeys,
       terminal.composerText,
       // Issue #2592: the mode control's value and its four gate inputs.
       // `terminal.isSelectionListActive` / `isUnclassifiedActive` reach the memo

@@ -90,7 +90,11 @@ import {
   hasOpenCodeSidebarObstruction,
 } from '@/components/worktree/OpencodeSidebarNotice';
 import { OpencodeQuickKeys } from '@/components/worktree/OpencodeQuickKeys';
-import { ChatSurface, type ChatSurfaceLiveState } from '@/components/worktree/ChatSurface';
+import {
+  ChatSurface,
+  isChatCardSelectionListOpen,
+  type ChatSurfaceLiveState,
+} from '@/components/worktree/ChatSurface';
 // Issue #2427: the session note's storage-facing half lives with the PC split
 // header — one hook, one editor, one IME guard — so the phone and the desktop
 // cannot drift into two behaviours for one field. See that file's "Session
@@ -788,6 +792,11 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
   // nobody could read" case and the sheet cannot disagree about one frame — see
   // `ChatSurfaceLiveState` for why `isPromptWaiting` is `prompt.visible`.
   const chatLiveState: ChatSurfaceLiveState = useChatSurfaceLiveState(terminal, prompt);
+  // Issue #3336: the same gate as PC's footer — while the chat card is open on a
+  // selection list it carries opencode's model chords itself, so the strip
+  // below the tab would draw them a second time. The terminal surface keeps it.
+  const hideOpencodeQuickKeys =
+    surfaceMode === 'chat' && isChatCardSelectionListOpen(chatLiveState, terminal.output, cliToolId);
 
   return (
     <div className="relative flex flex-col h-full min-h-0">
@@ -1011,7 +1020,7 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
           every tool while the session is running, but OpencodeQuickKeys still
           returns null for anything other than opencode -- so on claude / codex /
           copilot this is an empty div exactly as it was before #2106. */}
-      {terminal.isRunning && !directInputOpen ? (
+      {terminal.isRunning && !directInputOpen && !hideOpencodeQuickKeys ? (
         <div className="shrink-0 px-2 pt-1" data-testid="mobile-quick-keys-slot">
           <OpencodeQuickKeys
             worktreeId={worktreeId}

@@ -23,6 +23,7 @@ import {
   evaluateHookCorrelation,
   expectedHookEvents,
 } from '@/lib/agent-health/hook-correlation';
+import { skipCheck } from '@/lib/agent-health/coverage';
 import { firstVersionLine, paneEvidence } from '@/lib/agent-health/report';
 import { archiveCheckFrames, type FrameArchive, type JudgedFrame } from '@/lib/agent-health/frame-archive';
 import {
@@ -40,6 +41,7 @@ import {
   type ScreenVerdict,
 } from '@/lib/agent-health/screen-checks';
 import {
+  AGENT_HEALTH_CHECK_IDS,
   PROBE_WORKTREE_ID,
   probeInstanceId,
   type AgentHealthCheck,
@@ -55,7 +57,7 @@ import {
   type ServerEventRecorder,
 } from './opencode-v2-server';
 import type { AgentHealthTmux } from './tmux-driver';
-import type { PickerScreen, PickerSpec, ToolProbeSpec } from './tool-table';
+import type { LimitedToolSpec, PickerScreen, PickerSpec, ToolProbeSpec } from './tool-table';
 
 const execFileAsync = promisify(execFile);
 
@@ -106,16 +108,17 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, Math.
 
 export async function readVersion(
   executable: string,
-  env: NodeJS.ProcessEnv
+  env: NodeJS.ProcessEnv,
+  args: readonly string[] = ['--version']
 ): Promise<{ version: string | null; error: string | null }> {
   try {
-    const { stdout, stderr } = await execFileAsync(executable, ['--version'], {
+    const { stdout, stderr } = await execFileAsync(executable, [...args], {
       timeout: VERSION_TIMEOUT_MS,
       env,
     });
     const version = firstVersionLine(stdout) ?? firstVersionLine(stderr);
     return version === null
-      ? { version: null, error: `${executable} --version は何も出力しなかった` }
+      ? { version: null, error: `${[executable, ...args].join(' ')} は何も出力しなかった` }
       : { version, error: null };
   } catch (error) {
     return { version: null, error: error instanceof Error ? error.message : String(error) };
@@ -542,7 +545,7 @@ export async function probeTool(ctx: ProbeContext): Promise<ProbeOutcome> {
     });
     for (const checkId of ['hook-correlation', 'screen-idle', 'screen-picker', 'screen-running', 'screen-approval', 'screen-quoted-dialog'] as const) {
       if (ctx.selected(checkId)) {
-        checks.push({ checkId, status: 'skip', summary: 'version が取れないため実行しない', skipReason: 'version fail' });
+        checks.push(skipCheck(checkId, 'prerequisite-failed', 'version が取れないため実行しない', 'version fail'));
       }
     }
     return { version: null, checks };
@@ -550,12 +553,14 @@ export async function probeTool(ctx: ProbeContext): Promise<ProbeOutcome> {
   checks.push({ checkId: 'version', status: 'pass', summary: `\`${spec.executable} --version\` → ${version}` });
 
   if (ctx.selected('screen-picker') && !spec.picker) {
-    checks.push({
-      checkId: 'screen-picker',
-      status: 'skip',
-      summary: '選択画面の定義が無いツール',
-      skipReason: `${spec.tool} は tool-table.ts に選択画面（picker）の定義が無い`,
-    });
+    checks.push(
+      skipCheck(
+        'screen-picker',
+        'no-definition',
+        '選択画面の定義が無いツール',
+        `${spec.tool} は tool-table.ts に選択画面（picker）の定義が無い`
+      )
+    );
   }
   const screens = (
     ['screen-idle', 'screen-picker', 'screen-running', 'screen-approval', 'screen-quoted-dialog'] as const
@@ -565,12 +570,16 @@ export async function probeTool(ctx: ProbeContext): Promise<ProbeOutcome> {
   const wantHooks = ctx.selected('hook-correlation') && mode === 'hooks';
   const wantSse = ctx.selected('hook-correlation') && mode === 'server-sse';
   if (ctx.selected('hook-correlation') && mode === 'skip') {
-    checks.push({
-      checkId: 'hook-correlation',
-      status: 'skip',
-      summary: 'hook を使わないツール（configScope: none）',
-      skipReason: `${spec.tool} は configScope: 'none'（イベントは hook ではなく自前の HTTP/SSE から読む）`,
-    });
+    // The events come from the tool's own HTTP server, which this check does
+    // not read: no definition of the check, not a tool without events.
+    checks.push(
+      skipCheck(
+        'hook-correlation',
+        'no-definition',
+        'hook を使わないツール（configScope: none）',
+        `${spec.tool} は configScope: 'none'（イベントは hook ではなく自前の HTTP/SSE から読む）`
+      )
+    );
   }
   if (screens.length === 0 && !wantHooks && !wantSse) return { version, checks };
 
@@ -633,12 +642,14 @@ export async function probeTool(ctx: ProbeContext): Promise<ProbeOutcome> {
     }
     if (ctx.selected('screen-approval') && !approvalJudged) {
       if (spec.approval.via === 'none') {
-        session.record({
-          checkId: 'screen-approval',
-          status: 'skip',
-          summary: '承認ダイアログを出さないツール',
-          skipReason: spec.approval.skipReason ?? `${spec.tool} は承認ダイアログを出さない`,
-        });
+        session.record(
+          skipCheck(
+            'screen-approval',
+            'not-shown',
+            '承認ダイアログを出さないツール',
+            spec.approval.skipReason ?? `${spec.tool} は承認ダイアログを出さない`
+          )
+        );
       } else {
         await session.approvalTurn(spec.prompts.approval);
         turns++;
@@ -706,4 +717,38 @@ export async function probeTool(ctx: ProbeContext): Promise<ProbeOutcome> {
   }
 
   return { version, checks: [...checks, ...session.checks.values()] };
+}
+
+/**
+ * A tool the probe does not launch (Issue #3313): `version` is read like any
+ * other tool's, and every other selected check is a skip with the spec's kind
+ * and reason — or `prerequisite-failed` when even the version could not be read.
+ */
+export async function probeLimitedTool(
+  spec: LimitedToolSpec,
+  childEnv: NodeJS.ProcessEnv,
+  selected: (checkId: AgentHealthCheckId) => boolean
+): Promise<ProbeOutcome> {
+  const { file, args } = spec.versionCommand;
+  const command = [file, ...args].join(' ');
+  const { version, error } = await readVersion(file, childEnv, args);
+  const checks: AgentHealthCheck[] = [
+    version === null
+      ? {
+          checkId: 'version',
+          status: 'fail',
+          summary: `期待: \`${command}\` が版を返す。実際: 取得できなかった`,
+          evidence: error ?? undefined,
+        }
+      : { checkId: 'version', status: 'pass', summary: `\`${command}\` → ${version}` },
+  ];
+  for (const checkId of AGENT_HEALTH_CHECK_IDS) {
+    if (checkId === 'version' || !selected(checkId)) continue;
+    checks.push(
+      version === null
+        ? skipCheck(checkId, 'prerequisite-failed', 'version が取れないため実行しない', 'version fail')
+        : skipCheck(checkId, spec.skip.kind, spec.skip.summary, spec.skip.reason)
+    );
+  }
+  return { version, checks };
 }

@@ -601,6 +601,23 @@ export function resolveBlockedReason(
   return null;
 }
 
+/**
+ * Is the dialog card drawing `SelectionListKeys` for this state? (Issue #3336)
+ *
+ * The same three conditions the card renders under: a frame to draw, a tool to
+ * send to (`dialogActions`), and the `selectionList` reason. A footer that sits
+ * under the chat surface reads this to keep its own copy of a control off the
+ * screen while the card is carrying it — opencode's model chords, which
+ * `OpencodeQuickKeys` drew a second time below the card's `OpencodeModelKeys`.
+ */
+export function isChatCardSelectionListOpen(
+  live: ChatSurfaceLiveState,
+  frame: string | null | undefined,
+  cliToolId: string | null | undefined,
+): boolean {
+  return Boolean(frame) && Boolean(cliToolId) && resolveBlockedReason(live, frame) === 'selectionList';
+}
+
 // ============================================================================
 // Component
 // ============================================================================

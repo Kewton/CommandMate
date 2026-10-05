@@ -597,6 +597,19 @@ export interface AgentEventSource {
    */
   eventIdentityOf(payload: Record<string, unknown>): string | null;
 
+  /**
+   * Whether this `user_prompt_submit` payload joins the turn already running
+   * rather than beginning one (Issue #3330).
+   *
+   * Claude Code fires `UserPromptSubmit` for every background-task notice it
+   * attaches to a running turn, and the prompt it reports is the notice. The
+   * answer is about the payload only — whether a turn is running is the
+   * state's question, and a joining prompt with no turn to join still opens
+   * one. Absent, or false, is the behaviour every source had before: each
+   * prompt is a new turn. Must never throw.
+   */
+  promptJoinsOpenTurn?(payload: Record<string, unknown>): boolean;
+
   /** Read this source's permission-request payload, or null when unreadable (S7). */
   parsePermissionRequest(payload: Record<string, unknown>): PermissionRequestPayload | null;
 

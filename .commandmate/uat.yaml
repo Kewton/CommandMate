@@ -49,6 +49,12 @@ env:
   up: |
     set -e
     mkdir -p {run_dir}/root
+    # codex's two shared files are keyed by $CODEX_HOME alone, so they cannot be
+    # moved without moving codex's login. Record their sha256 here; `down`
+    # compares and fails when the UAT build rewrote them. Never written back.
+    for f in "${CODEX_HOME:-$HOME/.codex}/hooks.json" "${CODEX_HOME:-$HOME/.codex}/commandmate/cmate-agent-event.sh"; do
+      printf '%s  %s\n' "$( [ -f "$f" ] && shasum -a 256 "$f" | cut -d' ' -f1 || echo absent )" "$f"
+    done > {run_dir}/codex-shared.sha256
     mkdir -p -m 700 /tmp/cmuat-{port}
     tmux -S /tmp/cmuat-{port}/tmux.sock new-session -d -s keepalive 'sleep 86400'
     env -i HOME="$HOME" PATH="$PATH" USER="$USER" LOGNAME="$LOGNAME" SHELL="$SHELL" \
@@ -56,6 +62,7 @@ env:
       TMUX="/tmp/cmuat-{port}/tmux.sock,$(lsof -t /tmp/cmuat-{port}/tmux.sock | head -1),0" \
       NODE_ENV=production CM_PORT={port} CM_BIND=127.0.0.1 \
       CM_DB_PATH={run_dir}/uat.db CM_ROOT_DIR={run_dir}/root \
+      CM_OPENCODE_V2_DIR={run_dir}/opencode-v2 CM_AGENT_HOOKS_DIR={run_dir}/hooks \
       nohup node dist/server/server.js > {run_dir}/server.log 2>&1 &
   # Stops ONLY what LISTENS on {port} (never a process merely connected to it,
   # CommandMate#2473), waits up to 10 s, then removes the private tmux server.
@@ -67,6 +74,11 @@ env:
     tmux -S /tmp/cmuat-{port}/tmux.sock kill-server 2>/dev/null || true
     rm -rf /tmp/cmuat-{port}
     ! lsof -nP -iTCP:{port} -sTCP:LISTEN -t >/dev/null
+    # Fail when the UAT build rewrote codex's shared hook or relay script.
+    while read -r h f; do
+      n=$( [ -f "$f" ] && shasum -a 256 "$f" | cut -d' ' -f1 || echo absent )
+      [ "$n" = "$h" ] || { echo "codex shared file changed during UAT: $f" >&2; exit 1; }
+    done < {run_dir}/codex-shared.sha256
   health: "curl -fsS -m 5 -o /dev/null http://127.0.0.1:{port}/api/worktrees"
   health_timeout_sec: 90
   port_range: [3010, 3030]
@@ -79,6 +91,10 @@ isolation:
     - "P=$(lsof -nP -iTCP:{port} -sTCP:LISTEN -t | head -1); ! lsof -p $P -Fn | sed -n 's/^n//p' | grep -E '\\.(db|sqlite)(-wal|-shm)?$' | grep -vF '{run_dir}/uat.db'"
     # Its tmux calls go to the private server: TMUX names the private socket.
     - "P=$(lsof -nP -iTCP:{port} -sTCP:LISTEN -t | head -1); ps eww -p $P | tr ' ' '\\n' | grep -q '^TMUX=/tmp/cmuat-{port}/tmux.sock,'"
+    # The two shared state directories live under the run (positive) and the
+    # server was not left pointing at the user's ~/.commandmate ones (negative).
+    - "P=$(lsof -nP -iTCP:{port} -sTCP:LISTEN -t | head -1); ps eww -p $P | tr ' ' '\\n' | grep -qxF 'CM_OPENCODE_V2_DIR={run_dir}/opencode-v2' && ps eww -p $P | tr ' ' '\\n' | grep -qxF 'CM_AGENT_HOOKS_DIR={run_dir}/hooks'"
+    - "P=$(lsof -nP -iTCP:{port} -sTCP:LISTEN -t | head -1); ! ps eww -p $P | tr ' ' '\\n' | grep -E '^CM_(OPENCODE_V2|AGENT_HOOKS)_DIR=' | grep -vF '{run_dir}/'"
     # The API sees only the sandbox root: every registered repository lives under {run_dir}/root.
     - "curl -fsS -m 5 http://127.0.0.1:{port}/api/repositories | python3 -c \"import json,sys; d=json.load(sys.stdin); r=d if isinstance(d,list) else d.get('repositories',[]); sys.exit(0 if all(str(x.get('path','')).startswith('{run_dir}/root') for x in r) else 1)\""
 report_dir: ".commandmate/uat"

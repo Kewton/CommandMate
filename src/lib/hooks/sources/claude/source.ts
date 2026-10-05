@@ -53,6 +53,7 @@ import {
 } from '../hook-event-vocabulary';
 import type { AgentEventSource, AgentLaunchContext, AgentLaunchPlan, Verdict } from '../types';
 import { claudeModelSwitchMapper, extractClaudeSwitchedModel } from './model-switch';
+import { isClaudeQueuedNoticePrompt } from './queued-notice';
 import { CLAUDE_CLI_TOOL_ID } from './tool-id';
 
 /**
@@ -176,6 +177,10 @@ export const claudeAgentEventSource: AgentEventSource = definePushHookSource({
   // the latch. `extractModel` runs before `modelFields`, and answers null for
   // every other event so the flat lookup above is unchanged for them.
   extractModel: extractClaudeSwitchedModel,
+
+  // Issue #3330. A background-task notice attached to the running turn fires
+  // `UserPromptSubmit` too, and continues that turn rather than opening one.
+  promptJoinsOpenTurn: isClaudeQueuedNoticePrompt,
 
   // S2.
   extractDetail: extractSnakeCaseEventDetail,
