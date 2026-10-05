@@ -329,6 +329,9 @@ tmux -L cm-agent-health kill-server
   `gh` が無い・失敗した・時間切れのときは skip。読む attempt は 30 まで（残りは `details.attemptsNotRead` に数だけ）。
   候補の条件（`metrics-types.ts` の `CI_FLAKY_*`）は最初の案で、数字を見て直す
 - 未使用のファイル（`unused` の knip `files`）の Issue には `needs-human` ラベルが付く。「候補に出たこと」と「消して安全なこと」は別なので、消す判断は人が行う（自動依頼の対象外）
+- knip の設定は `knip.json`（JSON なのでコメントは書けず、除外の理由はここに書く）。`entry` のうち `tests/fixtures/remote/*.cjs` は
+  `tests/unit/lib/remote/cloudflare-child-survival.test.ts` が `import` ではなくパスで `node` に起動させるため、knip からは
+  未使用に見える（knip の誤り、Issue #3315）。パスで起動するファイルを足したら、ここと `entry` に足す
 - 前回値が無い指標（初回・前回が skip のまま）は基準として記録するだけで、候補を出さない
 - security の検出が続いている間は `status: 'fail'`。前からあるものは `outstanding` に入り、AI はその日の起票枠（4 件）に
   余りがあるときだけ、まだ Issue の無いものを立てる（初日に見送った advisory も翌日以降に回る）
