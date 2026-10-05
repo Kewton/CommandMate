@@ -904,7 +904,10 @@ Everything the server sends except `fullOutput` is printed verbatim.
     "promptWaitingSource": null
   },
   "model": "claude-opus-5[1m]",
-  "reasoningEffort": null
+  "reasoningEffort": null,
+  "composerText": null,
+  "composerState": "empty",
+  "agentMode": "accept-edits"
 }
 ```
 
@@ -919,9 +922,27 @@ function names (`buildCurrentOutput` / `isClaudeRunning`) is the safer way to fi
 | `isRunning` | The tmux session exists and is healthy (`src/lib/session/claude-session.ts:543-556`). **It does not mean a turn is in progress** |
 | `sessionStatus` / `sessionStatusReason` | The state and what it rests on: a `hook_*` reason came from hooks, anything else from the scraper (`HOOK_STATUS_REASON` in `src/lib/session/status-mapping.ts`) |
 | `structuredEvents.*` / `lastStopEventAt` | The last hook event and the last `stop` timestamp. `null` when no hooks have arrived |
+| `composerText` | Text sitting **unsent** in the agent's input box, or `null` (Issue #1879). Only text a human typed is returned; a dim suggestion or placeholder never is. `composerState` says why a `null` is `null`. claude / codex only |
+| `composerState` | Why `composerText` is what it is (Issue #1879): `content` (real text is there) / `ghost` (only a suggestion or placeholder) / `empty` (the input box is empty) / `unsupported_tool` (this tool's input box has not been measured) / `no_composer` (no input box on the screen — also the answer for a session that is not running) |
+| `agentMode` | The agent's permission mode (Issue #2592), read off the screen: `default` / `manual` / `accept-edits` / `plan` / `auto` / `autopilot` / `bypass` / `dont-ask` / `build`, or `unknown` when it could not be read. **`unknown` does not mean "the default mode"; it means "not determined"** — the tool has no mode cycle, the screen shows no mode indicator, or the session is not running. Most tools draw nothing in their default mode, so the absence of an indicator cannot be read as `default` |
 
-To tell whether the screen is empty, read `realtimeSnippet.trim() === ''` together with `lineCount`.
-`content` is a delta, so it never answers that on its own.
+To tell whether the screen is empty, **look at `isRunning` first**.
+
+- `isRunning: false` — the session is not running. There is no screen at all, and `realtimeSnippet`
+  is an absent key (`lineCount` is `0`). That is a different state from "the screen is empty"
+- `isRunning: true` and `(realtimeSnippet ?? '').trim() === ''` — the session is running and its
+  screen is empty. Read it together with `lineCount` (a blank pane can still report 1001)
+
+Calling `.trim()` on `realtimeSnippet` directly throws for a session that is not running, because
+the key is not there. `content` is a delta, so it never answers that on its own.
+
+**When the session is not running (`isRunning: false`), the fields read off the screen are
+absent keys** — not `false`, not `null` (Issue #3300). That covers `autoYes` / `isPromptWaiting` /
+`promptData` / `thinking` / `thinkingMessage` / `isComplete` / `isGenerating` / `realtimeSnippet` /
+`lastCapturedLine` / `isSelectionListActive` / `lastServerResponseTimestamp` /
+`serverPollerActive`. With `jq`, state what absence means (`.isPromptWaiting // false`). Auto-Yes
+can be enabled for an instance that is not running, so read whether it is on from the `AUTO_YES`
+column of `commandmate instances <id>` (or `autoYesByInstance` in `commandmate ls --json`).
 
 #### `model` / `reasoningEffort` (Issue #1785)
 
@@ -1539,6 +1560,20 @@ gemini       Gemini  gemini    no       no
   }
 ]
 ```
+
+#### The `AUTO_YES` Column (Issue #3300)
+
+Whether Auto-Yes is on for that instance. Auto-Yes is kept per worktree × instance and can be
+enabled with no session running (`commandmate auto-yes <id> --enable --instance <instance-id>`), so
+a `RUNNING no` row can read `yes`.
+
+- It is read from the server's Auto-Yes state (`instances` in `GET /api/worktrees/<id>/auto-yes`) —
+  the same source as `autoYesByInstance` in `commandmate ls --json`. A listing makes one more
+  request for it, whatever the number of instances
+- Against an older server that does not answer that request, it is read from each session's
+  `current-output` `autoYes` as before; there, an instance that is not running reads `no` even when
+  Auto-Yes is on
+- `autoYes` in `--json` is the same value
 
 #### The `MODEL` / `EFFORT` Columns (Issue #1785)
 
