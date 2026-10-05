@@ -41,6 +41,7 @@ import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import type { ChatMessage } from '@/types/models';
 import { installVirtualLayout } from '@tests/helpers/virtual-layout';
+import { trackWindowTimers } from '@tests/helpers/track-window-timers';
 
 const SCROLL_CONTAINER_TESTID = 'chat-transcript-scroll-container';
 const FAB_TESTID = 'chat-transcript-jump-fab';
@@ -179,34 +180,16 @@ function renderTranscript(messages: ChatMessage[], liveTurn: LiveTurn = null) {
 describe('[#2283] ChatTranscript jump FAB', () => {
   const cleanups: Array<() => void> = [];
 
-  // @tanstack/virtual-core debounces the end of a scroll with a 150 ms
-  // `window.setTimeout` (`isScrollingResetDelay`) that its unmount cleanup does
-  // not clear. Under load the file can finish first, jsdom is torn down, and the
-  // timer then fires `Virtualizer.notify` -> react-dom -> `window is not
-  // defined` as an unhandled error that fails the shard. Record the timers set
-  // while a test runs and clear them after unmounting.
-  const pendingTimers = new Set<ReturnType<typeof setTimeout>>();
-  let restoreSetTimeout: (() => void) | null = null;
+  let releaseTimers: (() => void) | null = null;
 
   beforeEach(() => {
-    const original = window.setTimeout;
-    const call = original as unknown as (...a: unknown[]) => ReturnType<typeof setTimeout>;
-    window.setTimeout = ((...a: unknown[]) => {
-      const id = call.apply(window, a);
-      pendingTimers.add(id);
-      return id;
-    }) as unknown as typeof window.setTimeout;
-    restoreSetTimeout = () => {
-      window.setTimeout = original;
-    };
+    releaseTimers = trackWindowTimers();
   });
 
   afterEach(() => {
     cleanup();
-    restoreSetTimeout?.();
-    restoreSetTimeout = null;
-    for (const id of pendingTimers) clearTimeout(id);
-    pendingTimers.clear();
+    releaseTimers?.();
+    releaseTimers = null;
     while (cleanups.length) cleanups.pop()?.();
     aims.length = 0;
   });
