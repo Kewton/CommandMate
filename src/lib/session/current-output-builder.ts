@@ -517,6 +517,14 @@ async function buildPayload(
     // rather than aged out so the next session on this key starts with no
     // history instead of inheriting the last one's verdict.
     forgetLastKnownStatus(buildCompositeKey(worktreeId, cliToolId, instanceId));
+    // Issue #3300: nothing read off a frame is published here, and that includes
+    // `autoYes` — the key is absent, not `enabled: false`. Auto-Yes can still be
+    // armed for this instance (it is kept per worktree x instance, not per
+    // session); `GET /api/worktrees/:id/auto-yes` answers for it, which is what
+    // `commandmate instances` reads and what the browser re-seeds its toggles
+    // from (#902). Publishing the key here would make the browser's poll
+    // re-seed the toggle, and raise its stop-reason toast, from a session that
+    // is not running.
     return {
       isRunning: false,
       // Issue #3179: `beginAgentSession` runs before the pane is created, so a

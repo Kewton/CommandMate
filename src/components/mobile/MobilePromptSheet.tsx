@@ -9,6 +9,7 @@
 import { useState, useCallback, useId, useEffect, memo } from 'react';
 import { useTranslations } from 'next-intl';
 import type { LivePromptData, YesNoPromptData, MultipleChoicePromptData } from '@/types/models';
+import type { StructuredPromptWaitingData } from '@/lib/session/structured-prompt';
 import { isAnswerablePromptData } from '@/types/models';
 import { ErrorBoundary } from '@/components/error/ErrorBoundary';
 import { Checkbox, RadioGroup, RadioGroupItem, Spinner } from '@/components/ui';
@@ -313,6 +314,7 @@ function PromptContent({
   // the instruction text. The same split as `view.kind === 'screen-choices'`
   // (pinned by prompt-view-3184.test); what is SHOWN is decided by `view`.
   const screenPrompt = isAnswerablePromptData(promptData) ? promptData : null;
+  const structuredPrompt = screenPrompt === null ? (promptData as StructuredPromptWaitingData) : null;
 
   return (
     <div className="space-y-4">
@@ -328,6 +330,18 @@ function PromptContent({
         <div className="max-h-40 overflow-y-auto whitespace-pre-wrap text-sm text-muted-foreground bg-muted rounded p-2 border border-border">
           {screenPrompt.instructionText}
         </div>
+      )}
+
+      {/* Issue #3291: which question of the AskUserQuestion call this is (same as PromptPanel). */}
+      {promptData.type === 'multiple_choice' && promptData.askUserQuestion && (
+        <p className="text-xs text-muted-foreground" data-testid="ask-user-question-progress">
+          {promptData.askUserQuestion.questionCount > 1
+            ? t('askUserQuestionProgress', {
+                index: promptData.askUserQuestion.questionIndex + 1,
+                total: promptData.askUserQuestion.questionCount,
+              })
+            : t('askUserQuestionSource')}
+        </p>
       )}
 
       {/* Question */}
@@ -355,9 +369,9 @@ function PromptContent({
 
       {/* Issue #2945: an addressable approval / question the structured layer
           reported — the same controls `PromptPanel` draws on the PC. */}
-      {screenPrompt === null && (
+      {structuredPrompt !== null && (
         <StructuredDecisionContent
-          promptData={promptData}
+          promptData={structuredPrompt}
           view={view}
           disabled={isDisabled}
           onRespond={handleStructuredRespond}
@@ -502,6 +516,10 @@ const MultipleChoiceActions = memo(function MultipleChoiceActions({
                       {t('default')}
                     </span>
                   )}
+                  {/* Issue #3291: the picker's second line (same condition as PromptPanel). */}
+                  {option.description && (
+                    <p className="mt-0.5 text-sm text-muted-foreground break-words">{option.description}</p>
+                  )}
                 </div>
               </label>
             );
@@ -611,6 +629,10 @@ const MultiSelectActions = memo(function MultiSelectActions({
                 />
                 <div className="flex-1">
                   <span className="font-medium text-foreground">{option.number}. {option.label}</span>
+                  {/* Issue #3291: the picker's second line (same condition as PromptPanel). */}
+                  {option.description && (
+                    <p className="mt-0.5 text-sm text-muted-foreground break-words">{option.description}</p>
+                  )}
                 </div>
               </label>
             );
@@ -660,7 +682,8 @@ export default MobilePromptSheet;
  * mutually exclusive by construction — `readPromptQuestionChoices` answers null
  * whenever verdicts are published — and neither is drawn without a
  * `decisionId`, which is what makes a number here a verdict sent by id rather
- * than a keystroke. With neither, the sheet shows the message alone, as before.
+ * than a keystroke. With neither, the sheet shows the message and, when the
+ * agent's `askUserQuestion` is present, its question and label list (Issue #3291).
  */
 function StructuredDecisionContent({
   promptData,
@@ -668,24 +691,37 @@ function StructuredDecisionContent({
   disabled,
   onRespond,
 }: {
-  promptData: LivePromptData;
+  promptData: StructuredPromptWaitingData;
   /** Issue #3184: the sheet's {@link PromptView} of this payload. */
   view: PromptView;
   disabled: boolean;
   onRespond: (answer: string) => Promise<void>;
 }) {
-  const payload = promptData as { message?: unknown; decisionOptions?: unknown };
-  const message = typeof payload.message === 'string' ? payload.message : null;
+  const message = promptData.message;
   // Issue #3184: which of the two the payload offers is the view's call — the
   // same id-and-verdicts test this used to restate.
   const verdicts =
     view.apiTarget === 'approval'
-      ? (payload.decisionOptions as readonly StructuredDecisionOption[])
+      ? (promptData.decisionOptions as readonly StructuredDecisionOption[])
       : null;
   const question = view.apiTarget === 'question' ? readQuestionChoices(promptData) : null;
+  // Issue #3291: what the agent asked when nothing could read the screen — the
+  // same question + label list as PromptPanel's `unclassified-ask-user-question`.
+  const asked = promptData.askUserQuestion;
 
   return (
     <div className="space-y-3" data-testid="mobile-structured-decision">
+      {/* With a decision id the picker below draws the question itself. */}
+      {asked && !question && (
+        <div className="space-y-1" data-testid="unclassified-ask-user-question">
+          <p className="text-sm text-foreground break-words">{asked.question}</p>
+          <ul className="list-disc list-inside text-sm text-muted-foreground">
+            {asked.labels.map((label) => (
+              <li key={label}>{label}</li>
+            ))}
+          </ul>
+        </div>
+      )}
       {message && (
         <pre
           className="max-h-48 overflow-auto whitespace-pre-wrap break-all rounded border border-border bg-muted p-2 font-mono text-xs text-foreground"

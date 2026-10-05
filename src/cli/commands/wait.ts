@@ -242,13 +242,17 @@ function describePaneObstruction(data: CurrentOutputResponse): string {
  */
 const SUPPRESSION_FRESH_MS = 60_000;
 
-type LastSuppression = NonNullable<CurrentOutputResponse['autoYes']['lastSuppression']>;
+type LastSuppression = NonNullable<
+  NonNullable<CurrentOutputResponse['autoYes']>['lastSuppression']
+>;
 
 /** The suppression currently blocking this session, or null. */
 function activeSuppression(
   data: CurrentOutputResponse,
   now: number,
 ): { suppression: LastSuppression; ageSeconds: number } | null {
+  // No `autoYes` at all (a session that is not running, Issue #3300) reads as
+  // "nothing was withheld", the same as a null record.
   const suppression = data.autoYes?.lastSuppression;
   if (!suppression) return null;
   const ageMs = now - suppression.at;

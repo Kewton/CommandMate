@@ -166,6 +166,7 @@ Issue は「選択肢あり（画面の番号）」「選択肢あり（API）�
 
 - `buildCurrentOutput`（`current-output-builder.ts`）で、payload の `promptData` の隣（`:2190`）に `promptView: derivePromptView(promptData)` として載せる。型は `promptView?: PromptView | null`（実装メモ: optional にした。セッションが動いていない早期 return の payload と、既存テストが組み立てる payload が持たないため。absent は null と同じに読む）。#2870 の `promptAnswerable` と同じく**追加フィールド**で、既存フィールドは並びも型も変えない。
 - 運ぶ経路は `promptAnswerable` が通っている所と同じ: `src/lib/realtime/types.ts`、`src/lib/realtime/terminal-broadcast.ts`、`src/cli/types/api-responses.ts`（CLI のミラー）、`src/hooks/useTerminalPanePolling.ts`、`src/hooks/useWorktreeDetailController.ts`（`grep -rln promptAnswerable src` で出る 11 ファイルが候補。どれが値を運ぶだけかは実装時に確認）。
+  - 追記（#3232）: WebSocket（`terminal_snapshot`）には載せない。受け取る側は §6-4 のとおり自分で導くので、読み手が無かった。`src/lib/realtime/types.ts` と `src/lib/realtime/terminal-broadcast.ts` の欄は消した。HTTP の応答（`current-output`）の `promptView` は残す（CLI の `wait` が読む）。
 - 受け取り側は 1 つの読み関数を使う: `readPromptView(payload) = payload.promptView ?? derivePromptView(payload.promptData)`。`??` にするのは #2369 の `isDismissablePanelActive` と同じ理由で、`promptView` を出さない古いデーモンでも同じ関数で同じ結論になる。
 - ブラウザのコンポーネントのうち、reducer の `prompt.data` しか持たないもの（`PromptPanel` / `MobilePromptSheet` は props で `promptData` を受ける）は `derivePromptView(promptData)` を直接呼んでよい。**判断の中身は 1 関数にしかなく、サーバーと同じ関数**なので結論は一致する。reducer（`src/types/ui-state.ts` の `PromptState`）に `view` を足すかどうかは §6-4。
 

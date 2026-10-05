@@ -37,10 +37,11 @@
  */
 
 import React from 'react';
-import { describe, it, expect, vi, afterEach } from 'vitest';
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import type { ChatMessage } from '@/types/models';
 import { installVirtualLayout } from '@tests/helpers/virtual-layout';
+import { trackWindowTimers } from '@tests/helpers/track-window-timers';
 
 const SCROLL_CONTAINER_TESTID = 'chat-transcript-scroll-container';
 const FAB_TESTID = 'chat-transcript-jump-fab';
@@ -179,7 +180,16 @@ function renderTranscript(messages: ChatMessage[], liveTurn: LiveTurn = null) {
 describe('[#2283] ChatTranscript jump FAB', () => {
   const cleanups: Array<() => void> = [];
 
+  let releaseTimers: (() => void) | null = null;
+
+  beforeEach(() => {
+    releaseTimers = trackWindowTimers();
+  });
+
   afterEach(() => {
+    cleanup();
+    releaseTimers?.();
+    releaseTimers = null;
     while (cleanups.length) cleanups.pop()?.();
     aims.length = 0;
   });

@@ -57,7 +57,7 @@ export class VibeLocalTool extends BaseCLITool {
 
     const { sessionName, exists, live } = await this.resolveLaunchPane(worktreeId, worktreePath, instanceId, {
       logger,
-      liveAction: 'vibe-local-session',
+      liveAction: 'vibe-local-session-exists',
       relaunchAction: 'vibe-local-session-relaunch',
     });
     if (live) return;

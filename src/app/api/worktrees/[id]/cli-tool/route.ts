@@ -9,6 +9,7 @@ import { getWorktreeById, upsertWorktree } from '@/lib/db';
 import { CLI_TOOL_IDS, isCliToolType } from '@/lib/cli-tools/types';
 import { createLogger } from '@/lib/logger';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
+import { readJsonBody } from '@/lib/api/read-json-body';
 
 const logger = createLogger('api/cli-tool');
 
@@ -31,7 +32,9 @@ export async function PATCH(
     }
 
     // Parse request body
-    const body = await request.json();
+    const parsed = await readJsonBody(request);
+    if (!parsed.ok) return parsed.response;
+    const body = parsed.body;
     if (!body || typeof body !== 'object' || Array.isArray(body)) {
       return NextResponse.json(
         { error: 'Request body must be a JSON object' },

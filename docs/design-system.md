@@ -112,7 +112,7 @@ Tailwind からは `bg-background` / `bg-surface` / `text-accent-500` のよう�
    `bg-{status}-subtle` + `border-{status}-border` + `text-{status}-foreground` の tint トークンを使う
    （status = success / warning / danger / info。Issue #1112）。tint 面内のソリッドアクションボタンは
    反転 tint（`bg-{status}-foreground text-{status}-subtle`）とし、両テーマで AA コントラストを確保する。
-   常時ダーク島（`TerminalErrorFallback` 等の `*Terminal*` 面）はこのルールの対象外。
+   常時ダーク島（`src/components/Terminal.tsx` 等の `*Terminal*` 面）はこのルールの対象外。
 
 ### 直書き色の禁止と例外
 
@@ -162,9 +162,8 @@ grep で確認する運用とする。
 
 1. `*Terminal*` 面、および `src/app/worktrees/[id]/terminal/` の CLI ブランド識別色
    （`claude=bg-purple-600` / `codex=bg-blue-600` / `gemini=bg-green-600`）。
-2. `error/TerminalErrorFallback.tsx` — ターミナル配色に合わせた常時ダーク島（`*Terminal*` 名の別ファイルへ分離済み）。
-3. コードブロック／シンタックスハイライトの固定ダーク（`.prose pre` の `#0d1117` 系）。
-4. ~~4 ステータスに馴染まない装飾色でトークンが存在しないもの（例: ファイル種別アイコンの
+2. コードブロック／シンタックスハイライトの固定ダーク（`.prose pre` の `#0d1117` 系）。
+3. ~~4 ステータスに馴染まない装飾色でトークンが存在しないもの（例: ファイル種別アイコンの
    `text-pink-500`）。grep パターン（上記 9 色）に含まれない色に限り〜~~
    **#1892 で撤回。** この例外は「ガードの grep パターンに含まれない色なら残してよい」と読める形で
    書かれており、実際に `text-pink-500`（TreeNode）/ `text-teal-600`（gitPaneShared）/
@@ -310,7 +309,7 @@ UI の配色方針は次の 2 分類のみ。曖昧な「暗いまま」の島�
   `src/components/{ui,layout,home,review,repository,common,sidebar,providers,worktree,mobile,external-apps,error,auth}`。
   （worktree/mobile/external-apps は #1061、error/auth は #1116 で追加。）
 - **対象外（意図的な常時ダーク島・スコープ外）**:
-  - `*Terminal*` ソースファイル（`src/components/Terminal.tsx`、`error/TerminalErrorFallback.tsx` 等）。
+  - `*Terminal*` ソースファイル（`src/components/Terminal.tsx` 等）。
     ターミナル出力面は両テーマでダーク維持のため生ダークユーティリティを使う（#1079）。
     **新しい常時ダーク島をこの除外に足さないこと**: ファイル名の綴りに設計を預ける形なので、
     `*Terminal*` に当たらない面（`VerificationPane` がそうだった）は静かに漏れる。
