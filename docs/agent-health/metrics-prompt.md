@@ -57,8 +57,8 @@
        gh issue create --repo Kewton/CommandMate --label metrics --label enhancement --title "<title>" --body-file <file>
        # category が security のときは --label security も付ける
        # category が performance のときは --label perf も付ける（自動依頼の対象外。人が着手する）
-       # category が ci のときも --label perf を付ける（自動依頼の対象外。テストだけの修正でも原因が製品側にあることがあるので人が着手する。
-       #   専用の needs-human ラベルは無いので perf と同じ扱いにする）
+       # category が ci のときは --label needs-human を付ける（自動依頼の対象外。テストだけの修正でも原因が製品側にあることがあるので人が着手する。
+       #   性能の Issue ではないので perf は付けない）
        # metricId が unused で未使用のファイル（knip の files。title が「未使用のファイル」）のときは --label needs-human も付ける（自動依頼の対象外。消して安全かは人が判断する）
        ```
      - すでに 4 件立てていたら立てない（「見送り」として数える）

@@ -51,5 +51,5 @@ performance の Issue には JSON にある値だけを書き、本番ログの�
 | `ci-flaky` | `<file> > <name>` が develop の CI で落ちないようにする（不安定なら原因（タイマー・負荷・順序）を直す。製品側が原因なら製品側を直す。落ち続けるなら不具合として直す） | 翌日以降の計測で当該テストが `ci-flaky` の候補・継続から消える。`npx vitest run <file>` を繰り返しても落ちない |
 
 性能 4 行（`api-latency`・`log-volume`・`error-rate`・`server-process`）の Issue は `perf` ラベルが付き、自動依頼の対象外。着手は人が決める。
-`ci-flaky` の Issue も `perf` ラベルを付けて自動依頼の対象外にする（テストだけの修正でも原因が製品側にあることがあるため）。
+`ci-flaky` の Issue には `needs-human` ラベルを付けて自動依頼の対象外にする（テストだけの修正でも原因が製品側にあることがあるため。性能の Issue ではないので `perf` は付けない）。
 本文には JSON にあるテストのファイル名・名前・回数・SHA だけを書き、CI のログの中身は写さない。
