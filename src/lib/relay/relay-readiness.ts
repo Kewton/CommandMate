@@ -12,6 +12,10 @@
  *    is running. The relay waits for `ready` instead — the ledger is durable, so
  *    waiting costs nothing but time.
  *
+ *    Since Issue #3337 "mid-turn" is also the hooks' answer when they speak for
+ *    the pane (`lib/session/hook-turn-hold`, the rule `capture --json` reads):
+ *    the frame alone read a live codex turn as `ready`.
+ *
  * The prompt-dialog question is deliberately NOT asked here: `sendUserMessage`
  * already refuses a send that would land in an open dialog (#1708/#1737), and
  * duplicating that judgement would give the relay path its own second opinion
@@ -42,6 +46,7 @@ import { resolveSessionName } from '@/lib/cli-tools/session-name';
 import { checkWorktreeSessionOwnership } from '@/lib/cli-tools/worktree-session-ownership';
 import { captureSessionOutput } from '@/lib/session/cli-session';
 import { detectSessionStatus } from '@/lib/detection/status-detector';
+import { hookTurnHoldsPane } from '@/lib/session/hook-turn-hold';
 import { STATUS_CAPTURE_LINES } from '@/config/status-capture-config';
 import { createLogger } from '@/lib/logger';
 
@@ -84,6 +89,11 @@ export async function findRelayHoldReason(
       STATUS_CAPTURE_LINES,
       instanceId
     );
+    // Issue #3337: a turn the agent's hooks opened holds the pane at `running`
+    // whatever the frame reads — the rule `capture --json` publishes, read from
+    // the one place it is written. A frame of a live codex turn read `ready`,
+    // and a reply typed into it interrupted the turn.
+    if (hookTurnHoldsPane(worktreeId, cliToolId, instanceId, output)) return 'generating';
     const status = detectSessionStatus(output, cliToolId);
     // Only `running` holds. `waiting` is a dialog, which is the send path's
     // judgement to make (and its refusal is a retry); `idle` and `ready` both

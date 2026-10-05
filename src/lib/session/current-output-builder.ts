@@ -29,7 +29,7 @@ import {
   type CLIToolType,
 } from '@/lib/cli-tools/types';
 import { getAgentEventSource } from '@/lib/hooks/sources/registry';
-import { frameShowsAbandonedTurn } from '@/lib/detection/turn-abandoned';
+import { screenMayEndTurn } from '@/lib/session/hook-turn-hold';
 import { describeAgentEventSource } from '@/lib/hooks/sources/define-source';
 import type { AgentEventSource } from '@/lib/hooks/sources/types';
 import { getOpencodeProbedActivity } from '@/lib/hooks/sources/opencode/subscription';
@@ -715,13 +715,14 @@ async function buildPayload(
   // after which no `Stop` comes). A misread frame of a live codex turn closed
   // it here and published `ready` mid-turn; the hook's own `Stop` is the end of
   // the turn there, and `stale` stays the bound on a `Stop` that was lost.
+  // The rule is `hook-turn-hold`'s, which the relay's readiness check reads too.
   observeScraperCompletionEvidence(
     worktreeId,
     cliToolId,
     instanceId,
     statusResult.status === 'ready' && evidence === 'positive',
     undefined,
-    structuredEvents.source.kind !== 'hooks' || frameShowsAbandonedTurn(cliToolId, output)
+    screenMayEndTurn(structuredEvents.source.kind, cliToolId, output)
   );
 
   const structured = getStructuredSessionState(worktreeId, cliToolId, instanceId);
