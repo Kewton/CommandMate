@@ -1,6 +1,6 @@
 # UAT・日次確認の隔離（`CM_UAT_ISOLATION=1`）
 
-UAT や日次の実機確認で CommandMate のサーバーと CLI を動かすとき、ポート・DB・tmux・状態ディレクトリは `.commandmate/uat.yaml` で本番から分けている。それだけでは分けられない経路が 3 つあり、どれも利用者のログインに結び付いた場所にある（Issue #3360）。
+UAT や日次の実機確認で CommandMate のサーバーと CLI を動かすとき、ポート・DB・tmux・状態ディレクトリは `scripts/uat/run-server.sh`（`.commandmate/uat.yaml` の `env.up` / `env.down` が呼ぶ。Issue #3359）で本番から分けている。それだけでは分けられない経路が 3 つあり、どれも利用者のログインに結び付いた場所にある（Issue #3360）。
 
 1. **codex の共有ファイル** — `$CODEX_HOME/hooks.json`、relay（`$CODEX_HOME/commandmate/cmate-agent-event.sh`）、`config.toml` の hook の信頼。`CODEX_HOME` を移すと codex がログアウトする。
 2. **claude の利用者の hook** — `--settings` は `~/.claude/settings.json` に足されるだけで、置き換わらない。`CLAUDE_CONFIG_DIR` を移すと claude がログアウトする。
@@ -19,7 +19,7 @@ UAT や日次の実機確認で CommandMate のサーバーと CLI を動かす�
 
 ## 手順
 
-サーバーの起動は `.commandmate/uat.yaml` の `env.up` に書いてある（`env -i … CM_UAT_ISOLATION=1 …`）。`isolation.checks` が、動いているサーバーの環境に `CM_UAT_ISOLATION=1` があることを確かめる。
+サーバーは `scripts/uat/run-server.sh up` が起動する（`env -i … CM_UAT_ISOLATION=1 …`）。`.commandmate/uat.yaml` の `env.up` も、日次の実機確認（#3312）もこれを呼ぶ。`.commandmate/uat.yaml` の `isolation.checks` が、動いているサーバーの環境に `CM_UAT_ISOLATION=1` があることを確かめる。`up` は起動の前に codex の `hooks.json`・relay と antigravity の `~/.gemini/config/hooks.json` のハッシュを `{run_dir}/codex-shared.sha256` に記録し、`run-server.sh down` が比べて、変わっていれば失敗する（書き戻さない）。
 
 CLI は、同じビルドの CLI を絶対パスで呼び、クライアント用の HOME を分け、送り先を `CM_PORT` で固定する。
 
@@ -61,7 +61,7 @@ env -i HOME="$RUN_DIR/client-home" PATH="$PATH" CM_UAT_ISOLATION=1 \
 |------|----------------------------------------|
 | codex の場面すべて（起動の拒否） | codex のセッションの開始が `CM_UAT_ISOLATION=1: refusing to start codex` で失敗した（サーバーのログに `codex-hooks-shared-absent-readonly`・`codex-hooks-shared-differs-readonly`・`codex-hooks-shared-foreign-readonly`・`codex-hooks-shared-relay-differs-readonly` のどれかも出る）。共有の `hooks.json` か relay が無い・このビルドと違う・独自の hook が混ざっているので、本番と同じビルドで UAT するまで codex の場面は動かせない |
 | codex の hook を見る場面 | hook の確認の画面が出た（信頼が合っていない）。信頼せずに続けるので、そのセッションの hook は動かない。画面の読み取りだけで判定できる場面に限る |
-| codex の場面すべて | `~/.codex` の変化を一切許さない確認では skip。codex 自身が `config.toml` にフォルダの信頼（`{run_dir}` の下のパス）を、`version.json` に更新の知らせへの答えを書くのは防げない。`hooks.json` と relay の変化は `env.down` が検出する |
+| codex の場面すべて | `~/.codex` の変化を一切許さない確認では skip。codex 自身が `config.toml` にフォルダの信頼（`{run_dir}` の下のパス）を、`version.json` に更新の知らせへの答えを書くのは防げない。`hooks.json` と relay の変化は `run-server.sh down`（`env.down`）が検出する |
 | antigravity の場面すべて（起動の拒否） | antigravity のセッションの開始が `CM_UAT_ISOLATION=1: refusing to start antigravity` で失敗した（サーバーのログに `antigravity-hooks-config-differs-readonly` も出ることがある）。共有のファイルは relay を checkout のパスで書くので、worktree のビルドではほぼいつもこうなる |
 | claude の場面 | 利用者の `settings.json` にある設定（モデル・プラグイン・権限）を前提にする場面は skip。対象のリポジトリの `.claude/settings*.json` の hook は動く（UAT の `{run_dir}/root` のリポジトリには置かない） |
 | Schedule・日次まとめで codex・antigravity を使う場面 | いつも skip（隔離中は実行が拒否される）。claude の Schedule は `--setting-sources project,local` つきで動く |

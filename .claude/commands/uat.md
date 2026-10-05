@@ -210,6 +210,7 @@ done
 
 隔離したサーバーを `scripts/uat/run-server.sh` で起動する（`.commandmate/uat.yaml` の `up` と同じ処理。Issue #3359）。
 DB・`CM_ROOT_DIR`・私設 tmux（`/tmp/cmuat-<port>-<run id>/`）はすべて run の下に置かれ、本番の DB や tmux には触れない。
+サーバーは `CM_UAT_ISOLATION=1` で動き、codex・antigravity の共有の hook ファイルを書かない（Issue #3360。動きと skip の条件は `docs/user-guide/uat-isolation.md`）。
 日次確認・`run.ts` と共通のロックを取るので、別の UAT や日次確認が動いている間は失敗する（そのときは待つ）。
 
 ```bash
@@ -357,7 +358,7 @@ bash scripts/uat/run-server.sh down --run-dir dev-reports/issue/{issue_number}/u
 #### 8-2. 停止の確認
 
 `down` が exit 0 なら片付いている。exit 1 のときは、出力の理由（ほかの持ち主がポートを LISTEN している・
-`CM_DB_PATH` が run の下でない・codex の共有ファイルが変わった など）を報告し、**ポートだけを見て止めない**
+`CM_DB_PATH` が run の下でない・codex の共有ファイルや `~/.gemini/config/hooks.json` が変わった など）を報告し、**ポートだけを見て止めない**
 （`lsof … | xargs kill` を使わない。同じポートを取ったほかの UAT やプロセスを止めてしまう。Issue #3359）。
 ポートを調べるときは `-sTCP:LISTEN` を外さないこと（5-1 も同じ。Issue #2473）。
 

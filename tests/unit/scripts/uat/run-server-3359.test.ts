@@ -76,6 +76,9 @@ function baseEnv(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
     CM_UAT_SOCK_BASE: root,
     CM_UAT_SERVER_ENTRY: listenJs,
     CODEX_HOME: path.join(root, 'codex'),
+    // `up` hashes $HOME/.gemini/config/hooks.json and `down` compares it
+    // (Issue #3360): a private HOME keeps the user's real file out of the test.
+    HOME: path.join(root, 'home'),
     ...extra,
   };
 }
@@ -211,9 +214,12 @@ describe.skipIf(!HAS_TOOLS)('run-server.sh (Issue #3359)', () => {
       // The decided CODEX_HOME reaches the server through env -i (Issue #3358).
       const serverEnv = spawnSync('ps', ['eww', '-o', 'command=', '-p', String(pid)], { encoding: 'utf8' }).stdout;
       expect(serverEnv.split(' ')).toContain(`CODEX_HOME=${path.join(root, 'codex')}`);
-      expect(fs.readFileSync(path.join(runDir, 'codex-shared.sha256'), 'utf8').split('\n')[0]).toBe(
-        `CODEX_HOME  ${path.join(root, 'codex')}`
-      );
+      // The server runs in UAT isolation, set after env -i (Issue #3360).
+      expect(serverEnv.split(' ')).toContain('CM_UAT_ISOLATION=1');
+      const record = fs.readFileSync(path.join(runDir, 'codex-shared.sha256'), 'utf8').split('\n');
+      expect(record[0]).toBe(`CODEX_HOME  ${path.join(root, 'codex')}`);
+      // antigravity's shared file is recorded by absolute path under the server's HOME.
+      expect(record).toContain(`ABSOLUTE  absent  ${path.join(root, 'home', '.gemini', 'config', 'hooks.json')}`);
 
       const down = runScript(['down', '--run-dir', runDir]);
       expect(down.status, down.stderr).toBe(0);

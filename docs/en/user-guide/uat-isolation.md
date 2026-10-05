@@ -1,6 +1,6 @@
 # UAT and daily-check isolation (`CM_UAT_ISOLATION=1`)
 
-When a UAT or the daily real-environment check runs a CommandMate server and CLI, `.commandmate/uat.yaml` already separates the port, the DB, tmux and the state directories from production. Three paths are left that those cannot separate, because each lives where the user's login lives (Issue #3360).
+When a UAT or the daily real-environment check runs a CommandMate server and CLI, `scripts/uat/run-server.sh` (called by `env.up` / `env.down` of `.commandmate/uat.yaml`, Issue #3359) already separates the port, the DB, tmux and the state directories from production. Three paths are left that those cannot separate, because each lives where the user's login lives (Issue #3360).
 
 1. **codex's shared files** — `$CODEX_HOME/hooks.json`, the relay (`$CODEX_HOME/commandmate/cmate-agent-event.sh`) and the hook trust in `config.toml`. Moving `CODEX_HOME` logs codex out.
 2. **claude's user-level hooks** — `--settings` is added to `~/.claude/settings.json`, not substituted for it. Moving `CLAUDE_CONFIG_DIR` logs claude out.
@@ -19,7 +19,7 @@ A server and CLI started with `CM_UAT_ISOLATION=1` behave as follows. Without it
 
 ## Procedure
 
-The server start is in `env.up` of `.commandmate/uat.yaml` (`env -i … CM_UAT_ISOLATION=1 …`), and `isolation.checks` confirms `CM_UAT_ISOLATION=1` in the running server's environment.
+`scripts/uat/run-server.sh up` starts the server (`env -i … CM_UAT_ISOLATION=1 …`); `env.up` of `.commandmate/uat.yaml` and the daily real-environment check (#3312) both call it. `isolation.checks` in `.commandmate/uat.yaml` confirms `CM_UAT_ISOLATION=1` in the running server's environment. Before the start, `up` records the sha256 of codex's `hooks.json` and relay and of antigravity's `~/.gemini/config/hooks.json` in `{run_dir}/codex-shared.sha256`; `run-server.sh down` compares them and fails when one changed (it never writes them back).
 
 Call the CLI of the same build by absolute path, with its own client HOME and the target pinned by `CM_PORT`:
 
@@ -61,7 +61,7 @@ During the measurement, an `ls --json` with neither `CM_PORT` nor `.env` sent on
 |----------|-----------------------------------|
 | every codex scenario (launch refused) | The codex session start failed with `CM_UAT_ISOLATION=1: refusing to start codex` (the server log also has one of `codex-hooks-shared-absent-readonly`, `codex-hooks-shared-differs-readonly`, `codex-hooks-shared-foreign-readonly`, `codex-hooks-shared-relay-differs-readonly`). The shared `hooks.json` or relay is missing, differs from this build, or also holds the user's own hooks, so no codex scenario can run until the UAT uses the same build as production |
 | scenarios that observe codex hooks | The hook review screen appeared (trust does not match). It is answered without trust, so that session's hooks do not run; only screen-based judgements apply |
-| every codex scenario | Skip in a check that allows no change at all under `~/.codex`. codex itself writes folder trust (paths under `{run_dir}`) to `config.toml` and the update-notice answer to `version.json`; that cannot be prevented. Changes to `hooks.json` and the relay are detected by `env.down` |
+| every codex scenario | Skip in a check that allows no change at all under `~/.codex`. codex itself writes folder trust (paths under `{run_dir}`) to `config.toml` and the update-notice answer to `version.json`; that cannot be prevented. Changes to `hooks.json` and the relay are detected by `run-server.sh down` (`env.down`) |
 | every antigravity scenario (launch refused) | The antigravity session start failed with `CM_UAT_ISOLATION=1: refusing to start antigravity` (the server log may also have `antigravity-hooks-config-differs-readonly`). The shared file names the relay by checkout path, so this is almost always the case for a worktree build |
 | claude scenarios | Skip a scenario that relies on the user's `settings.json` (model, plugins, permissions). The target repository's `.claude/settings*.json` hooks do run (none are placed in the UAT's `{run_dir}/root` repositories) |
 | Schedule / daily-summary scenarios with codex or antigravity | Always skip (the run is refused under isolation). A claude Schedule runs, with `--setting-sources project,local` |

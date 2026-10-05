@@ -184,7 +184,8 @@ describe('.commandmate/uat.yaml (Issue #2590)', () => {
   });
 
   it('starts the server in UAT isolation and checks it on the running process (Issue #3360)', () => {
-    const [line] = logicalLines(spec.env.up).filter((l) => l.includes('dist/server/server.js'));
+    // Issue #3359: the server line lives in run-server.sh's cmd_up.
+    const [line] = logicalLines(upScript).filter((l) => l.includes('$SERVER_ENTRY'));
     const at = line.indexOf('CM_UAT_ISOLATION=1');
     expect(at, 'the server line must set CM_UAT_ISOLATION=1').toBeGreaterThan(line.indexOf('env -i'));
     expect(at).toBeLessThan(line.indexOf('nohup'));
@@ -194,41 +195,55 @@ describe('.commandmate/uat.yaml (Issue #2590)', () => {
   });
 
   describe('antigravity\'s shared hooks.json is recorded as an ABSOLUTE line and compared in down (Issue #3360)', () => {
-    const preamble = spec.env.up.slice(0, spec.env.up.indexOf('mkdir -p -m 700 /tmp/cmuat-'));
-    const down = spec.env.down ?? '';
-    const compare = down.slice(down.indexOf('CH=$(sed'));
-
+    // run-server.sh sourced: the record is written and checked exactly as `up`
+    // (write_shared_record) and `down` (check_shared_record) do, nothing starts.
     function setup() {
       const runDir = fs.mkdtempSync(path.join(os.tmpdir(), 'uat-3360-run-'));
       const home = path.join(runDir, 'home');
       fs.mkdirSync(path.join(home, '.gemini', 'config'), { recursive: true });
       const gemini = path.join(home, '.gemini', 'config', 'hooks.json');
       fs.writeFileSync(gemini, '{"commandmate":{}}\n');
+      const record = path.join(runDir, 'codex-shared.sha256');
       const env = { PATH: process.env.PATH ?? '', HOME: home } as unknown as NodeJS.ProcessEnv;
-      const run = (script: string) =>
-        spawnSync('bash', ['-c', script.replaceAll('{run_dir}', runDir)], { env, encoding: 'utf8' });
-      return { runDir, home, gemini, run };
+      const run = (body: string) =>
+        spawnSync('bash', ['-c', `. '${RUN_SERVER}'\n${body}`], { env, encoding: 'utf8' });
+      const up = () => run(`decide_codex_home || exit 1\nwrite_shared_record '${record}'`);
+      const down = () => run(`check_shared_record '${record}'`);
+      return { runDir, gemini, record, up, down };
     }
 
     it('writes `ABSOLUTE  <sha256>  <absolute path>` beside the CODEX_HOME-relative lines', () => {
-      const { runDir, gemini, run } = setup();
-      const res = run(preamble);
+      const { runDir, gemini, record, up } = setup();
+      const res = up();
       expect(res.status, res.stderr).toBe(0);
-      const record = fs.readFileSync(path.join(runDir, 'codex-shared.sha256'), 'utf8');
-      expect(record).toMatch(new RegExp(`^ABSOLUTE {2}[0-9a-f]{64} {2}${gemini.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'm'));
-      expect(record.split('\n')[0]).toMatch(/^CODEX_HOME {2}/);
+      const text = fs.readFileSync(record, 'utf8');
+      expect(text).toMatch(new RegExp(`^ABSOLUTE {2}[0-9a-f]{64} {2}${gemini.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'm'));
+      expect(text.split('\n')[0]).toMatch(/^CODEX_HOME {2}/);
+      fs.rmSync(runDir, { recursive: true, force: true });
     });
 
     it('down passes when nothing changed and fails naming the file when it did', () => {
-      const { gemini, run } = setup();
-      expect(run(preamble).status).toBe(0);
-      const unchanged = run(compare);
+      const { runDir, gemini, up, down } = setup();
+      expect(up().status).toBe(0);
+      const unchanged = down();
       expect(unchanged.status, unchanged.stderr).toBe(0);
 
       fs.writeFileSync(gemini, '{"commandmate":{"rewritten":true}}\n');
-      const changed = run(compare);
+      const changed = down();
       expect(changed.status).toBe(1);
-      expect(changed.stderr).toContain(`changed during UAT: ${gemini}`);
+      expect(changed.stderr).toContain(`shared agent hook file changed during the run: ${gemini}`);
+      fs.rmSync(runDir, { recursive: true, force: true });
+    });
+
+    it('records an absent file as absent and fails when the run created it', () => {
+      const { runDir, gemini, record, up, down } = setup();
+      fs.rmSync(gemini);
+      expect(up().status).toBe(0);
+      expect(fs.readFileSync(record, 'utf8')).toContain(`ABSOLUTE  absent  ${gemini}\n`);
+      expect(down().status).toBe(0);
+      fs.writeFileSync(gemini, '{}\n');
+      expect(down().status).toBe(1);
+      fs.rmSync(runDir, { recursive: true, force: true });
     });
   });
 
