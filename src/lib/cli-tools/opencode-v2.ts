@@ -45,7 +45,6 @@ import {
 } from '@/types/terminal-keys';
 import {
   hasSession,
-  createSession,
   capturePane,
   sendKeys,
   sendSpecialKeys,
@@ -83,7 +82,6 @@ import {
 } from '@/lib/hooks/sources/opencode-v2/tool-id';
 import { OPENCODE_V2_EXIT_COMMAND_TEXT, verifyGracefulExit } from './graceful-exit';
 import {
-  TUI_SESSION_CREATE_WAIT_MS,
   TUI_TEXT_INPUT_WAIT_MS,
   OPENCODE_V2_EXIT_WAIT_MS,
   OPENCODE_V2_COMPOSER_WAIT_MS,
@@ -273,8 +271,7 @@ export class OpenCodeV2Tool extends BaseCLITool {
 
     try {
       if (!exists) {
-        await createSession({ sessionName, workingDirectory: worktreePath });
-        await new Promise((resolve) => setTimeout(resolve, TUI_SESSION_CREATE_WAIT_MS));
+        await this.createLaunchPane(sessionName, worktreePath);
       }
 
       try {

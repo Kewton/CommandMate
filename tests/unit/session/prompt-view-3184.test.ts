@@ -11,7 +11,6 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   derivePromptView,
-  optionTakesTypedText,
   readPromptView,
   UNCLASSIFIED_PROMPT_VIEW_TYPE,
   type PromptViewSource,
@@ -22,11 +21,10 @@ import {
   type UnclassifiedFrameRecord,
 } from '@/types/models';
 import {
-  readPromptDecisionId,
-  readPromptQuestionChoices,
-  readStructuredDecisionHeading,
-} from '@/components/worktree/prompt-decision-id';
-import { optionTakesTypedText as panelOptionTakesTypedText } from '@/components/worktree/PromptPanel';
+  readDecisionId as readPromptDecisionId,
+  readQuestionChoices as readPromptQuestionChoices,
+  readDecisionHeading as readStructuredDecisionHeading,
+} from '@/lib/session/prompt-view';
 import {
   PROMPT_VIEW_ROWS,
   STORED_STRUCTURED_RECORD,
@@ -125,17 +123,6 @@ describe('invariants', () => {
     expect(UNCLASSIFIED_PROMPT_VIEW_TYPE).toBe(UNCLASSIFIED_PROMPT_TYPE);
   });
 
-  it('agrees with the panel\'s own text-field predicate (until A2 removes the copy)', () => {
-    for (const option of [
-      { label: 'Type something...', requiresTextInput: true },
-      { label: 'Type something.', requiresTextInput: false },
-      { label: 'No, tell Command Code what to do differently', requiresTextInput: true },
-      { label: 'Yes', requiresTextInput: false },
-    ]) {
-      expect(optionTakesTypedText(option)).toBe(panelOptionTakesTypedText(option));
-    }
-  });
-
   it('has no imports, so the CLI build can compile it (design §2.1)', () => {
     const source = readFileSync(
       path.resolve(__dirname, '../../../src/lib/session/prompt-view.ts'),
@@ -145,7 +132,7 @@ describe('invariants', () => {
   });
 });
 
-describe('prompt-decision-id compatibility wrappers keep their answers', () => {
+describe('the field readers agree with derivePromptView', () => {
   it.each(PROMPT_VIEW_ROWS.map((row) => [row.id, row] as const))('%s', (_id, row) => {
     const view = derivePromptView(row.data)!;
     if (view.kind === 'api-choices') {

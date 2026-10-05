@@ -62,7 +62,7 @@ import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from '
 import { Keyboard, X } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
 import type { AgentInstance, CLIToolType } from '@/lib/cli-tools/types';
-import { isAnswerablePromptData, type LivePromptData } from '@/types/models';
+import { isAnswerablePromptData } from '@/types/models';
 import { TerminalSplitPane } from '@/components/worktree/TerminalSplitPane';
 import type { AgentSessionSnapshot } from '@/types/agent-session';
 import { TerminalDisplay } from '@/components/worktree/TerminalDisplay';
@@ -95,7 +95,8 @@ import {
   COMPOSER_PANE_BODY_MIN_HEIGHT_PX,
   composerHeightScopeForSplit,
 } from '@/config/composer-height';
-import { buildPromptResponseBody } from '@/lib/prompt-response-body-builder';
+import { isMultiSelectPrompt } from '@/components/worktree/prompt-answer';
+import { buildDecisionRespondBody, buildPromptResponseBody, isPromptRefused } from '@/lib/prompt-response-body-builder';
 import { readSelectionListShape } from '@/lib/detection/selection-shape';
 import { withToolDecisionLabels } from '@/components/worktree/prompt-decision-id';
 import { derivePromptView } from '@/lib/session/prompt-view';
@@ -168,10 +169,6 @@ function splitOwnsKeyEvent(event: KeyboardEvent, splitIndex: number): boolean {
     if (target?.closest('input, textarea, select, [contenteditable="true"]')) return false;
   }
   return true;
-}
-
-function isMultiSelectPrompt(promptData: LivePromptData | null | undefined): boolean {
-  return promptData?.type === 'multiple_choice' && promptData.multiSelect === true;
 }
 
 export interface TerminalSplitPaneContentProps extends TerminalSplitPaneCoreProps {
@@ -578,16 +575,9 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
         // for it sends no promptType at all, which is the truthful answer to
         // "what kind of prompt is this?" when nobody could read the dialog.
         const requestBody = decisionId
-          ? {
-              decisionId,
-              answer,
-              cliTool: cliToolId,
-              // Same rule as buildPromptResponseBody: the primary instance is
-              // named by the tool id server-side, so sending it would be noise.
-              ...(resolvedInstanceId && resolvedInstanceId !== cliToolId
-                ? { instanceId: resolvedInstanceId }
-                : {}),
-            }
+          ? // Same rule as buildPromptResponseBody: the primary instance is
+            // named by the tool id server-side, so sending it would be noise.
+            buildDecisionRespondBody(decisionId, answer, cliToolId, resolvedInstanceId)
           : buildPromptResponseBody(
               answer,
               cliToolId,
@@ -615,8 +605,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
         // the dialog — so `ok` alone is not "answered". Clearing the card on a
         // refusal hid a dialog that was still open: the next poll put it
         // straight back, and nothing ever said why the answer went nowhere.
-        const result = (await response.json().catch(() => null)) as { success?: unknown } | null;
-        if (result?.success === false) {
+        if (await isPromptRefused(response)) {
           showToast?.(t('promptResponse.refused'), 'warning');
           await refresh();
           return;
