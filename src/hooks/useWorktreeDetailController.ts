@@ -47,6 +47,11 @@ import { useAppUpdate } from '@/contexts/AppUpdateContext';
 import { type AutoYesToggleParams } from '@/components/worktree/AutoYesToggle';
 import type { AutoYesStopReason } from '@/config/auto-yes-config';
 import type { CurrentOutputResponseBody } from '@/lib/session/current-output-types';
+import {
+  PANE_GATE_NOTHING_ARRIVED,
+  isSamePaneGateState,
+  type PaneGateState,
+} from '@/lib/session/pane-gate-state';
 import type { Worktree, ChatMessage, LivePromptData, FileContent } from '@/types/models';
 import { isAnswerablePromptData } from '@/types/models';
 import {
@@ -149,6 +154,29 @@ type CurrentOutputResponse = Pick<CurrentOutputResponseBody, 'isRunning'> &
   /** Issue #501: Whether server-side auto-yes poller is active */
   serverPollerActive?: boolean;
 };
+
+/**
+ * What this controller's poll last said about the frame of the agent it polls.
+ *
+ * The shared {@link PaneGateState} — the SAME frame facts the PC split reads off
+ * its own pane hook. The phone's composer and pads are docked outside
+ * `MobileTerminalTab`, which owns that hook, so the facts have to reach them
+ * through this controller's own poll (Issue #2592, #3179).
+ *
+ * Plus `offersPlanApprove` (Issue #2809): the frame is Command Code's plan
+ * review, where `Enter` runs the focused action, so the phone's docked pad drops
+ * it as ChatSurface's does (#2793). PC reads that off `terminal.output`; this
+ * controller keeps no frame (#736), only the boolean.
+ */
+interface ControllerPaneGateState extends PaneGateState {
+  offersPlanApprove: boolean;
+}
+
+/** {@link ControllerPaneGateState} before anything has arrived for the polled agent. */
+const CONTROLLER_PANE_GATE_NOTHING_ARRIVED: ControllerPaneGateState = Object.freeze({
+  ...PANE_GATE_NOTHING_ARRIVED,
+  offersPlanApprove: false,
+});
 
 // ============================================================================
 // Constants
@@ -337,31 +365,19 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   const [lastServerResponseTimestamp, setLastServerResponseTimestamp] = useState<number | null>(null);
   // Issue #501: Track whether server-side auto-yes poller is active
   const [serverPollerActive, setServerPollerActive] = useState(false);
-  // Issue #473: Track OpenCode TUI selection list state
-  const [isSelectionListActive, setIsSelectionListActive] = useState(false);
-  // Issue #1017: Track Codex pager/edit-previous mode (drives pager keys on mobile)
-  const [isPagerActive, setIsPagerActive] = useState(false);
   // Issue #2870: the status API's `promptAnswerable` for the prompt on show.
   // Kept beside the reducer's prompt slice rather than in it — this poll is the
   // only writer, and it rewrites it on every prompt it shows.
   const [promptAnswerable, setPromptAnswerable] = useState<boolean | undefined>(undefined);
-  // Issue #2809: the frame is Command Code's plan review, where `Enter` runs the
-  // focused action — so the phone's docked pad drops it, as ChatSurface's does
-  // (#2793). Only the boolean is kept: the frame itself is not mirrored (#736).
-  const [offersPlanApprove, setOffersPlanApprove] = useState(false);
-  // Issue #2592: what the phone's composer needs to decide whether the
-  // permission-mode button may be pressed, and what to put on its chip. The four
-  // flags below are the SAME frame facts the PC split reads off its own pane
-  // hook; the phone's composer is docked outside `MobileTerminalTab`, which owns
-  // that hook, so they have to reach it through this controller's own poll.
-  const [isDismissablePanelActive, setIsDismissablePanelActive] = useState(false);
-  const [isUnclassifiedActive, setIsUnclassifiedActive] = useState(false);
-  const [sessionStatus, setSessionStatus] = useState('');
-  const [agentMode, setAgentMode] = useState<string>(AGENT_MODE_UNKNOWN);
-  // Issue #3179: the phone's docked controls (Navigate pad, prompt sheet, the
-  // composer's stop button and mode control) live outside `MobileTerminalTab`,
-  // so "the agent is still launching" reaches them through this poll too.
-  const [startingSince, setStartingSince] = useState<number | null>(null);
+  // Issue #473 / #1017 / #2592 / #2809 / #3179: what the phone's docked controls
+  // (Navigate pad, prompt sheet, the composer's stop button and mode control)
+  // need to know about the active agent's frame. One state rather than a
+  // `useState` per fact (Issue #3304), so that going back to "nothing has
+  // arrived" when the polled agent changes is one assignment of one shared list
+  // and cannot leave a fact behind. See {@link ControllerPaneGateState}.
+  const [paneGate, setPaneGate] = useState<ControllerPaneGateState>(
+    CONTROLLER_PANE_GATE_NOTHING_ARRIVED,
+  );
   // Issue #314: Track previous auto-yes enabled state for stop reason toast
   const prevAutoYesEnabledRef = useRef<boolean>(false);
   // Issue #314 / #499 Item 5: Pending stop reason toast (deferred until showToast is available)
@@ -563,6 +579,11 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     if (prevWorktreeIdRef.current !== worktreeId) {
       // Clear messages immediately to prevent scroll animation on stale data
       actions.clearMessages();
+      // Issue #3304: the previous worktree's agent is not this one's, whatever
+      // tool tab the two share. Its prompt and frame facts go back to "nothing
+      // has arrived"; the initial load below fetches this worktree's.
+      actions.clearPrompt();
+      setPaneGate(CONTROLLER_PANE_GATE_NOTHING_ARRIVED);
       // Reset initial load flag to trigger fresh data fetch
       initialLoadCompletedRef.current = false;
       // Issue #736: terminal output reset is handled by the mobile terminal
@@ -798,24 +819,28 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
         actions.clearPrompt();
       }
 
-      // Issue #473: Update selection list state from server
-      setIsSelectionListActive(data.isSelectionListActive ?? false);
-      // Issue #1017: Update Codex pager/edit-previous mode from server
-      setIsPagerActive(data.isPagerActive ?? false);
-      // Issue #2809: read with the function the chat surface's card uses.
-      setOffersPlanApprove(
-        readSelectionListShape(data.realtimeSnippet || data.fullOutput).offersPlanApprove,
-      );
-      // Issue #2592: the mode itself and the three remaining gate inputs.
-      // Absent fields read as "nothing is on screen" / "no frame has landed",
-      // which is what every other flag above already does — and `agentMode`
-      // falls back to `unknown` rather than to a mode, because a server that
-      // does not publish it has told us nothing (see AGENT_MODE_UNKNOWN).
-      setIsDismissablePanelActive(data.isDismissablePanelActive ?? false);
-      setIsUnclassifiedActive(data.isUnclassifiedActive ?? false);
-      setSessionStatus(data.sessionStatus ?? '');
-      setAgentMode(data.agentMode ?? AGENT_MODE_UNKNOWN);
-      setStartingSince(typeof data.startingSince === 'number' ? data.startingSince : null);
+      const nextPaneGate: ControllerPaneGateState = {
+        // Issue #473: Update selection list state from server
+        isSelectionListActive: data.isSelectionListActive ?? false,
+        // Issue #1017: Update Codex pager/edit-previous mode from server
+        isPagerActive: data.isPagerActive ?? false,
+        // Issue #2809: read with the function the chat surface's card uses.
+        offersPlanApprove:
+          readSelectionListShape(data.realtimeSnippet || data.fullOutput).offersPlanApprove,
+        // Issue #2592: the mode itself and the three remaining gate inputs.
+        // Absent fields read as "nothing is on screen" / "no frame has landed",
+        // which is what every other flag above already does — and `agentMode`
+        // falls back to `unknown` rather than to a mode, because a server that
+        // does not publish it has told us nothing (see AGENT_MODE_UNKNOWN).
+        isDismissablePanelActive: data.isDismissablePanelActive ?? false,
+        isUnclassifiedActive: data.isUnclassifiedActive ?? false,
+        sessionStatus: data.sessionStatus ?? '',
+        agentMode: data.agentMode ?? AGENT_MODE_UNKNOWN,
+        startingSince: typeof data.startingSince === 'number' ? data.startingSince : null,
+      };
+      // A poll that repeats the previous answer keeps the previous object, so it
+      // re-renders nobody — what the per-fact `useState`s this replaced did.
+      setPaneGate(prev => (isSamePaneGateState(prev, nextPaneGate) ? prev : nextPaneGate));
 
       // Issue #501: Update last server response timestamp for useAutoYes duplicate prevention
       setLastServerResponseTimestamp(data.lastServerResponseTimestamp ?? null);
@@ -1039,23 +1064,39 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     setVibeLocalContextWindow(value);
   }, []);
 
-  // Issue #4: Immediately refresh data when CLI tab changes (without polling restart)
-  const prevCliTabRef = useRef<CLIToolType>(activeCliTab);
+  // Issue #4: Immediately refresh data when the polled agent changes (without
+  // polling restart).
+  //
+  // Issue #3304: "the polled agent" is whoever `fetchMessages` and
+  // `fetchCurrentOutput` ask about, which is not the tool tab alone. The phone
+  // asks about the active INSTANCE (#874), so switching between two instances of
+  // one tool changes it; PC's parent poll sends no `instance` and is answered
+  // for the tool's primary (id === cliTool), so there only the tool does. The
+  // key is built from the same three inputs the fetchers' stale guards compare,
+  // which also covers a viewport that crosses the breakpoint while an alias
+  // instance is active (the poll moves from the primary to the alias).
+  const polledAgentKey = `${activeCliTab}::${isMobile ? activeInstanceId : activeCliTab}`;
+  const prevPolledAgentKeyRef = useRef(polledAgentKey);
   useEffect(() => {
-    if (prevCliTabRef.current !== activeCliTab) {
-      prevCliTabRef.current = activeCliTab;
+    if (prevPolledAgentKeyRef.current !== polledAgentKey) {
+      prevPolledAgentKeyRef.current = polledAgentKey;
       // Clear stale data immediately for snappy UI.
       // Issue #736: terminal reset is owned by useTerminalPanePolling
       // (self-resets on the new cliToolId); only non-terminal state is cleared here.
       actions.clearMessages();
       actions.clearPrompt();
-      setIsSelectionListActive(false);
-      setOffersPlanApprove(false);
-      // Fetch fresh data for the new tab
+      // Issue #3304: all of the frame facts, as the pane hook does on the same
+      // change — not the selection list alone. Left in place, the previous
+      // agent's `ready` kept the mode button enabled over an agent nobody had
+      // heard from yet, and `shift+tab` on a permission dialog allows every edit
+      // (#2592).
+      setPaneGate(CONTROLLER_PANE_GATE_NOTHING_ARRIVED);
+      // Fetch fresh data for the new agent. Each call takes the next request id,
+      // so a response still in flight for the previous one is dropped (#597).
       void fetchMessages();
       void fetchCurrentOutput();
     }
-  }, [activeCliTab, actions, fetchMessages, fetchCurrentOutput]);
+  }, [polledAgentKey, actions, fetchMessages, fetchCurrentOutput]);
 
   // Issue #168: Re-fetch messages when showArchived toggle changes
   useEffect(() => {
@@ -1952,19 +1993,19 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     isMobile,
     isMoveDialogOpen,
     isReconnecting,
-    isSelectionListActive,
-    isPagerActive,
+    isSelectionListActive: paneGate.isSelectionListActive,
+    isPagerActive: paneGate.isPagerActive,
     // Issue #2870: MobilePromptSheet's `answerable`.
     promptAnswerable,
     // Issue #2809: the docked pad's Enter gate on a plan review.
-    offersPlanApprove,
+    offersPlanApprove: paneGate.offersPlanApprove,
     // Issue #2592: the phone composer's permission-mode control.
-    isDismissablePanelActive,
-    isUnclassifiedActive,
-    sessionStatus,
-    agentMode,
+    isDismissablePanelActive: paneGate.isDismissablePanelActive,
+    isUnclassifiedActive: paneGate.isUnclassifiedActive,
+    sessionStatus: paneGate.sessionStatus,
+    agentMode: paneGate.agentMode,
     // Issue #3179: the phone's docked controls stand down while it is set.
-    startingSince,
+    startingSince: paneGate.startingSince,
     lastAutoResponse,
     loading,
     makeAutoYesToggleHandler,
