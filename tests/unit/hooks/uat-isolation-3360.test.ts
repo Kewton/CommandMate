@@ -15,7 +15,11 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileS
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { removeTempDir } from '@tests/helpers/temp-dir';
-import { CLAUDE_UAT_SETTING_SOURCES, UAT_ISOLATION_ENV_VAR } from '@/config/uat-isolation';
+import {
+  CLAUDE_UAT_SETTING_SOURCES,
+  UAT_ISOLATION_ENV_VAR,
+  UatIsolationLaunchRefusedError,
+} from '@/config/uat-isolation';
 import {
   buildCodexLaunchPlan,
   getCodexHooksPath,
@@ -28,6 +32,8 @@ import {
 } from '@/lib/hooks/sources/codex/relay-install';
 import { writeAntigravityHooksConfig } from '@/lib/hooks/sources/antigravity/hooks-config';
 import { claudeAgentEventSource } from '@/lib/hooks/sources/claude/source';
+import { antigravityAgentEventSource } from '@/lib/hooks/sources/antigravity/source';
+import { buildCliArgs } from '@/lib/session/claude-executor';
 
 const MANAGED_ENV = [
   UAT_ISOLATION_ENV_VAR,
@@ -37,6 +43,7 @@ const MANAGED_ENV = [
   'CM_CODEX_HOOK_TRUST',
   'CM_PORT',
   'MCBD_PORT',
+  'HOME',
 ] as const;
 
 const RELAY_BODY = '#!/bin/sh\n# shipped relay\nexit 0\n';
@@ -65,6 +72,8 @@ beforeEach(() => {
   process.env.CODEX_HOME = codexHome;
   scratch = mkdtempSync(join(tmpdir(), 'uat-iso-scratch-'));
   process.env.CM_AGENT_HOOKS_DIR = join(scratch, 'hooks');
+  // antigravity's prepareLaunch resolves ~/.gemini/config/hooks.json from HOME.
+  process.env.HOME = join(scratch, 'home');
 });
 
 afterEach(() => {
@@ -119,7 +128,7 @@ describe('codex shared files under CM_UAT_ISOLATION=1', () => {
     expect(plan.env.CM_PERMISSION_HOOK_URL).toContain('http://127.0.0.1:3017/');
   });
 
-  it('leaves a shared file this build would change untouched, and launches without hooks', () => {
+  it('leaves a shared file this build would change untouched, and refuses the launch', () => {
     primeSharedCodexFilesAsProduction();
     const stale = '{\n  "hooks": {}\n}\n';
     writeFileSync(getCodexHooksPath(), stale);
@@ -128,12 +137,51 @@ describe('codex shared files under CM_UAT_ISOLATION=1', () => {
     expect(writeCodexHookSettings()).toBeNull();
     expect(readFileSync(getCodexHooksPath(), 'utf8')).toBe(stale);
 
+    // A bare codex would still read the shared, trusted hooks.json (and attach
+    // to the shared daemon without --no-daemon): production hooks in the UAT.
+    const launch = () =>
+      buildCodexLaunchPlan(
+        'codex',
+        { worktreeId: 'wt-uat', cliToolId: 'codex', instanceId: 'codex' },
+        { port: 3017, supportsNoDaemon: true }
+      );
+    expect(launch).toThrow(UatIsolationLaunchRefusedError);
+    expect(launch).toThrow(/same CommandMate build as the production server/);
+    expect(readFileSync(getCodexHooksPath(), 'utf8')).toBe(stale);
+  });
+
+  it('refuses the launch when the shared file is absent, and under CM_AGENT_HOOKS_INJECT=0', () => {
+    process.env[UAT_ISOLATION_ENV_VAR] = '1';
+    const target = { worktreeId: 'wt-uat', cliToolId: 'codex' as const, instanceId: 'codex' };
+    expect(() => buildCodexLaunchPlan('codex', target, { supportsNoDaemon: true })).toThrow(
+      UatIsolationLaunchRefusedError
+    );
+    expect(existsSync(getCodexHooksPath())).toBe(false);
+
+    process.env.CM_AGENT_HOOKS_INJECT = '0';
+    expect(() => buildCodexLaunchPlan('codex', target, { supportsNoDaemon: true })).toThrow(
+      /CM_AGENT_HOOKS_INJECT=0/
+    );
+  });
+
+  it('negative control: unset, a stale shared file is rewritten and the launch goes ahead', () => {
+    primeSharedCodexFilesAsProduction();
+    writeFileSync(getCodexHooksPath(), '{\n  "hooks": {}\n}\n');
+
     const plan = buildCodexLaunchPlan(
       'codex',
       { worktreeId: 'wt-uat', cliToolId: 'codex', instanceId: 'codex' },
-      { port: 3017, supportsNoDaemon: false }
+      { port: 3017, supportsNoDaemon: true }
     );
-    expect(plan).toEqual({ command: 'codex', settingsPath: null, env: {} });
+    expect(plan.settingsPath).toBe(getCodexHooksPath());
+    expect(plan.command).toContain('--no-daemon');
+  });
+
+  it('negative control: unset, CM_AGENT_HOOKS_INJECT=0 still launches bare codex', () => {
+    process.env.CM_AGENT_HOOKS_INJECT = '0';
+    expect(
+      buildCodexLaunchPlan('codex', { worktreeId: 'wt-uat', cliToolId: 'codex', instanceId: 'codex' })
+    ).toEqual({ command: 'codex', settingsPath: null, env: {} });
   });
 
   it('does not overwrite an installed relay whose bytes differ from the shipped one', () => {
@@ -237,5 +285,71 @@ describe('claude launch under CM_UAT_ISOLATION=1', () => {
 
     expect(plan.command).toContain(' --settings ');
     expect(plan.command).not.toContain('--setting-sources');
+  });
+});
+
+describe('antigravity launch under CM_UAT_ISOLATION=1', () => {
+  const context = {
+    target: { worktreeId: 'wt-uat', cliToolId: 'antigravity' as const, instanceId: 'antigravity' },
+    executablePath: 'agy',
+    worktreePath: '/tmp/uat-worktree',
+  };
+  const geminiHooks = () => join(scratch, 'home', '.gemini', 'config', 'hooks.json');
+
+  it('refuses the launch when the shared hooks.json is absent, and writes nothing', () => {
+    process.env[UAT_ISOLATION_ENV_VAR] = '1';
+
+    expect(() => antigravityAgentEventSource.prepareLaunch(context)).toThrow(
+      UatIsolationLaunchRefusedError
+    );
+    expect(existsSync(geminiHooks())).toBe(false);
+  });
+
+  it('refuses the launch when the shared hooks.json differs, and leaves it untouched', () => {
+    mkdirSync(join(scratch, 'home', '.gemini', 'config'), { recursive: true });
+    const foreign = '{\n  "commandmate": {"other": true}\n}\n';
+    writeFileSync(geminiHooks(), foreign);
+    process.env[UAT_ISOLATION_ENV_VAR] = '1';
+
+    expect(() => antigravityAgentEventSource.prepareLaunch(context)).toThrow(
+      /same CommandMate build as the production server/
+    );
+    expect(readFileSync(geminiHooks(), 'utf8')).toBe(foreign);
+  });
+
+  it('launches against a shared hooks.json that already matches this build', () => {
+    expect(antigravityAgentEventSource.prepareLaunch(context).settingsPath).toBe(geminiHooks());
+    process.env[UAT_ISOLATION_ENV_VAR] = '1';
+
+    const plan = antigravityAgentEventSource.prepareLaunch(context);
+    expect(plan.settingsPath).toBe(geminiHooks());
+    expect(plan.env.CM_HOOK_URL).toBeDefined();
+  });
+
+  it('negative control: unset, the file is written and the launch goes ahead', () => {
+    const plan = antigravityAgentEventSource.prepareLaunch(context);
+    expect(plan.settingsPath).toBe(geminiHooks());
+    expect(existsSync(geminiHooks())).toBe(true);
+  });
+});
+
+describe('claude -p (Schedules, daily summary) under CM_UAT_ISOLATION=1', () => {
+  it('drops the user setting source', () => {
+    process.env[UAT_ISOLATION_ENV_VAR] = '1';
+
+    const args = buildCliArgs('hello', 'claude', 'acceptEdits');
+    expect(args.slice(-2)).toEqual(['--setting-sources', CLAUDE_UAT_SETTING_SOURCES]);
+    expect(args.slice(0, 2)).toEqual(['-p', 'hello']);
+  });
+
+  it('negative control: unset, the args are unchanged', () => {
+    expect(buildCliArgs('hello', 'claude', 'acceptEdits')).toEqual([
+      '-p',
+      'hello',
+      '--output-format',
+      'text',
+      '--permission-mode',
+      'acceptEdits',
+    ]);
   });
 });

@@ -88,7 +88,11 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { homedir } from 'os';
 import { dirname, join } from 'path';
 import { resolveSafeDirectory } from '@/config/safe-directory';
-import { isUatIsolationEnabled } from '@/config/uat-isolation';
+import {
+  isUatIsolationEnabled,
+  UAT_SAME_BUILD_FIX,
+  UatIsolationLaunchRefusedError,
+} from '@/config/uat-isolation';
 import { isValidInstanceId } from '@/lib/cli-tools/types';
 import { getServerPort } from '@/lib/env';
 import type { AgentEventType } from '@/lib/hooks/agent-event-types';
@@ -703,8 +707,9 @@ export function writeCodexHookSettings(options: CodexHookOptions = {}): string |
  * so a file production has already written, byte-identical to what this build
  * would write, delivers this session's events to THIS server.
  *
- * Anything else is answered with null, which the launch plan turns into "start
- * codex without hooks": no file yet, a file this build would change (a newer or
+ * Anything else is answered with null, which the launch plan turns into a
+ * refused launch ({@link UatIsolationLaunchRefusedError}) — not "codex without
+ * hooks", because a bare codex reads the shared file anyway: no file yet, a file this build would change (a newer or
  * older CommandMate), or an installed relay whose bytes differ from the one this
  * build ships (the command string would match while running another script).
  *
@@ -783,19 +788,34 @@ export function buildCodexLaunchPlan(
   options: CodexHookOptions = {}
 ): AgentLaunchPlan {
   const bare: AgentLaunchPlan = { command: executablePath, settingsPath: null, env: {} };
-  if (!isHookInjectionEnabled()) return bare;
+  // Issue #3360: under UAT isolation every road to `bare` is refused instead.
+  // A bare codex still reads `$CODEX_HOME/hooks.json` — production's trusted
+  // hooks, with no correlation keys and no `--no-daemon` — so "without hooks"
+  // would really be "with production's hooks, posting to production".
+  const fallback = (reason: string, fix: string): AgentLaunchPlan => {
+    if (isUatIsolationEnabled()) throw new UatIsolationLaunchRefusedError('codex', reason, fix);
+    return bare;
+  };
+  if (!isHookInjectionEnabled()) {
+    return fallback('CM_AGENT_HOOKS_INJECT=0', 'Do not combine CM_AGENT_HOOKS_INJECT=0 with UAT isolation.');
+  }
 
   const instanceId = target.instanceId ?? CODEX_CLI_TOOL_ID;
   if (!isValidWorktreeId(target.worktreeId) || !isValidInstanceId(instanceId)) {
     // Both become URL parameters the receiver re-validates; a value that would
     // be rejected there is not worth injecting.
     logger.warn('codex-hooks-invalid-correlation-key', { worktreeId: target.worktreeId });
-    return bare;
+    return fallback('the worktree or instance id is not a valid correlation key', 'Use a valid worktree and instance id.');
   }
 
   try {
     const settingsPath = writeCodexHookSettings(options);
-    if (!settingsPath) return bare;
+    if (!settingsPath) {
+      return fallback(
+        `${getCodexHooksPath(options)} or its relay is missing or differs from what this build writes`,
+        UAT_SAME_BUILD_FIX
+      );
+    }
 
     const port = options.port ?? getServerPort();
     const query = new URLSearchParams({
@@ -832,10 +852,14 @@ export function buildCodexLaunchPlan(
       env,
     };
   } catch (error) {
+    if (error instanceof UatIsolationLaunchRefusedError) throw error;
     logger.warn('codex-hooks-config-write-failed', {
       worktreeId: target.worktreeId,
       error: error instanceof Error ? error.message : String(error),
     });
-    return bare;
+    return fallback(
+      `the hook config could not be prepared (${error instanceof Error ? error.message : String(error)})`,
+      UAT_SAME_BUILD_FIX
+    );
   }
 }

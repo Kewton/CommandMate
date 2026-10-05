@@ -16,6 +16,7 @@
  */
 
 import { execFile } from 'child_process';
+import { CLAUDE_UAT_SETTING_SOURCES, isUatIsolationEnabled } from '@/config/uat-isolation';
 import { sanitizeEnvForChildProcess } from '@/lib/security/env-sanitizer';
 import { stripAnsi } from '@/lib/detection/cli-patterns';
 import { CLI_TOOL_IDS } from '@/lib/cli-tools/types';
@@ -371,7 +372,14 @@ export function buildCliArgs(message: string, cliToolId: string, permission?: st
     }
     case 'claude':
     default:
-      return ['-p', message, '--output-format', 'text', '--permission-mode', permission ?? 'acceptEdits'];
+    {
+      const args = ['-p', message, '--output-format', 'text', '--permission-mode', permission ?? 'acceptEdits'];
+      // Issue #3360: the interactive launch's restriction, for `claude -p` too
+      // (Schedules, daily summary): under UAT isolation the user's own
+      // settings.json — whose hooks post to production — is not loaded.
+      if (isUatIsolationEnabled()) args.push('--setting-sources', CLAUDE_UAT_SETTING_SOURCES);
+      return args;
+    }
   }
 }
 

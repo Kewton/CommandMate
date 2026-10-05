@@ -411,7 +411,8 @@ export function mergeAntigravityHooksConfig(
  * Write `~/.gemini/config/hooks.json`.
  *
  * Under `CM_UAT_ISOLATION=1` (Issue #3360) nothing is written: an existing file
- * that already holds exactly this config is reused, anything else answers null.
+ * that already holds exactly this config is reused, anything else answers null
+ * (and `source.prepareLaunch` then refuses the launch).
  *
  * @returns The path written, or null when injection is off or not possible
  */
@@ -432,7 +433,7 @@ export function writeAntigravityHooksConfig(options: { path?: string } = {}): st
       // Issue #3360: the file is the user's, shared with their production
       // server, and names a relay by this checkout's path. A UAT server writes
       // nothing to it: one that already says exactly this is used as it is;
-      // anything else means a session without hooks.
+      // anything else answers null, which `prepareLaunch` refuses to launch.
       if (existing !== null && JSON.stringify(existing) === JSON.stringify(merged)) {
         return configPath;
       }

@@ -10,10 +10,10 @@ UAT や日次の実機確認で CommandMate のサーバーと CLI を動かす�
 
 | 対象 | `CM_UAT_ISOLATION=1` のときの動き |
 |------|----------------------------------|
-| codex の `hooks.json` と relay | 書かない。本番が書いたものがこのビルドの内容とバイト単位で同じなら、そのまま使う（送り先は起動時の環境変数 `CM_HOOK_URL` で UAT のサーバーになる）。違えば hook なしで起動する |
+| codex の `hooks.json` と relay | 書かない。本番が書いたものがこのビルドの内容とバイト単位で同じなら、そのまま使う（送り先は起動時の環境変数 `CM_HOOK_URL` で UAT のサーバーになる）。違えば**起動を拒否する**（セッションの開始が `CM_UAT_ISOLATION=1: refusing to start codex …` で失敗する）。素の codex も共有の `hooks.json` を読むので、「hook なしで起動」すると本番の信頼済みの hook が動いてしまうため。`CM_AGENT_HOOKS_INJECT=0` との組み合わせも同じ理由で拒否する |
 | codex の hook の信頼 | 信頼を与えない（与えると codex が `config.toml` に書く）。確認の画面が出たら「信頼せずに続ける」で答え、そのセッションは hook なしになる |
-| antigravity の `~/.gemini/config/hooks.json` | 書かない。同じ内容が既にあれば使い、違えば hook なしで起動する |
-| claude | `--setting-sources project,local` を付けて起動する。利用者の `settings.json`（hook とプラグインを含む）は読まれず、CommandMate の `--settings` とリポジトリの `.claude/settings*.json` は読まれる |
+| antigravity の `~/.gemini/config/hooks.json` | 書かない。同じ内容が既にあれば使い、無い・違えば**起動を拒否する**（agy は共有のファイルを必ず読むため。codex と同じ理由） |
+| claude | `--setting-sources project,local` を付けて起動する。利用者の `settings.json`（hook とプラグインを含む）は読まれず、CommandMate の `--settings` とリポジトリの `.claude/settings*.json` は読まれる。Schedule と日次まとめの `claude -p` にも同じ制限を付ける |
 | CLI（`ApiClient` を使うコマンド） | `.env` を一切読まない。`CM_PORT` が無ければ 3000 に送らず exit 2 で止まる |
 
 ## 手順
@@ -48,7 +48,7 @@ env -i HOME="$RUN_DIR/client-home" PATH="$PATH" CM_UAT_ISOLATION=1 \
 | codex | `config.toml` の hook の信頼 | 読んだだけ | `hooks.json` の 5 つの event に `trusted_hash` がある。ハッシュが今の内容に合っているかは読むだけでは分からない | できる（信頼を与えない。合っていなければ hook なし） |
 | codex | hook が UAT のサーバーに届くか | — | 測れない（本物の codex は `~/.codex` に履歴やセッションを書く。`CODEX_HOME` を移すとログアウトし、資格情報の複製はしない）。`hooks.json` に送り先は無く、relay は `CM_HOOK_URL` を先に見る（`scripts/hooks/cmate-agent-event.sh`）。起動計画は `CM_HOOK_URL` を UAT のポートにする（単体テストで確認） | できる（設計上） |
 | codex | `config.toml` のフォルダの信頼、`version.json` | コードを読んだ | 「このディレクトリを信頼するか」に `1`、更新の知らせに `3` を押すと、codex 自身が書く | できない |
-| antigravity | `~/.gemini/config/hooks.json` | コードを読んだ | relay を checkout のパスで書くので、worktree のビルドの内容は本番のものと違う | できる（書かない。実際には hook なしになる） |
+| antigravity | `~/.gemini/config/hooks.json` | コードを読んだ | relay を checkout のパスで書くので、worktree のビルドの内容は本番のものと違う | できる（書かない。worktree のビルドでは実際には起動を拒否する） |
 | CLI | `~/.commandmate/.env` | worktree のビルドの CLI を、一時の HOME に `CM_PORT=3996` の `.env` を置いて実行 | 読まなかった（worktree のビルドは cwd の `.env` を読む）。`CM_PORT` も `.env` も無いと 3000 に送った | できる（HOME を分け、`CM_UAT_ISOLATION=1`） |
 | CLI | 送り先 | `CM_PORT` をエクスポートして実行 | エクスポートした値が `.env` より優先 | できる |
 
@@ -56,10 +56,11 @@ env -i HOME="$RUN_DIR/client-home" PATH="$PATH" CM_UAT_ISOLATION=1 \
 
 ## skip にする条件（#3312 の設計が使う）
 
-| 場面 | skip（または hook なしの扱い）にする条件 |
+| 場面 | skip にする条件 |
 |------|----------------------------------------|
-| codex の hook を見る場面 | サーバーのログに `codex-hooks-shared-absent-readonly`・`codex-hooks-shared-differs-readonly`・`codex-hooks-shared-relay-differs-readonly` がある（共有ファイルが無い・このビルドと違う）。または hook の確認の画面が出た（信頼が合っていない）。そのセッションは hook なしで動くので、画面の読み取りだけで判定できる場面に限る |
+| codex の場面すべて（起動の拒否） | codex のセッションの開始が `CM_UAT_ISOLATION=1: refusing to start codex` で失敗した（サーバーのログに `codex-hooks-shared-absent-readonly`・`codex-hooks-shared-differs-readonly`・`codex-hooks-shared-relay-differs-readonly` のどれかも出る）。共有の `hooks.json` か relay が無い・このビルドと違うので、本番と同じビルドで UAT するまで codex の場面は動かせない |
+| codex の hook を見る場面 | hook の確認の画面が出た（信頼が合っていない）。信頼せずに続けるので、そのセッションの hook は動かない。画面の読み取りだけで判定できる場面に限る |
 | codex の場面すべて | `~/.codex` の変化を一切許さない確認では skip。codex 自身が `config.toml` にフォルダの信頼（`{run_dir}` の下のパス）を、`version.json` に更新の知らせへの答えを書くのは防げない。`hooks.json` と relay の変化は `env.down` が検出する |
-| antigravity の hook を見る場面 | サーバーのログに `antigravity-hooks-config-differs-readonly` がある。worktree のビルドではほぼいつもこうなる |
+| antigravity の場面すべて（起動の拒否） | antigravity のセッションの開始が `CM_UAT_ISOLATION=1: refusing to start antigravity` で失敗した（サーバーのログに `antigravity-hooks-config-differs-readonly` も出ることがある）。共有のファイルは relay を checkout のパスで書くので、worktree のビルドではほぼいつもこうなる |
 | claude の場面 | 利用者の `settings.json` にある設定（モデル・プラグイン・権限）を前提にする場面は skip。対象のリポジトリの `.claude/settings*.json` の hook は動く（UAT の `{run_dir}/root` のリポジトリには置かない） |
 | CLI の場面 | 上の手順で呼ぶ限り skip は無い。グローバルの `commandmate` を呼ぶ場面は作らない |
