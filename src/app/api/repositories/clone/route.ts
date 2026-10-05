@@ -110,10 +110,10 @@ export async function POST(request: NextRequest): Promise<NextResponse<CloneStar
           success: false,
           error: {
             category: 'validation',
-            code: 'EMPTY_URL',
+            code: 'INVALID_REQUEST_BODY',
             message: 'Invalid request body',
             recoverable: true,
-            suggestedAction: 'Send a JSON body with cloneUrl',
+            suggestedAction: 'Send a valid JSON request body',
           },
         },
         { status: 400 }

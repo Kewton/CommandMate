@@ -6,8 +6,10 @@
  * 500 plus an error-level log: a client mistake that reads as a server fault.
  * Reading the body through `readJsonBody` (src/lib/api/read-json-body.ts) answers
  * 400 instead. A bare read is allowed only with a `.catch(` right behind it, or
- * in the files below, which already turn the failure into a 400 in their own
- * try/catch (their wording differs, so they were left as they are).
+ * in the files listed below, each of which handles the parse failure in its own
+ * try/catch so it never reaches the route's outer catch (no 500). What this
+ * guard pins is that bare reads do not spread to new places where they would
+ * fall into an outer catch; it does not promise a 400 for the listed files.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -16,17 +18,22 @@ import { join, relative } from 'path';
 
 const API_DIR = join(process.cwd(), 'src/app/api');
 
-/** Files with their own try/catch → 400, and how many bare reads each holds. */
-const OWN_TRY_CATCH_400: Record<string, number> = {
+/**
+ * Files that parse the body bare but contain the failure themselves, with the
+ * number of bare reads each holds. Their wording differs, so they were left as is.
+ */
+const OWN_TRY_CATCH: Record<string, number> = {
+  // Answer 400 on a parse failure.
   'worktrees/[id]/auto-yes/route.ts': 1,
   'worktrees/[id]/direct-input/route.ts': 1,
   'worktrees/[id]/env/route.ts': 1,
-  'worktrees/[id]/interrupt/route.ts': 1,
   'worktrees/[id]/marp-render/route.ts': 1,
+  'remote/pair/route.ts': 1,
+  // The body is optional: a parse failure is treated as an empty body and the request goes on.
+  'worktrees/[id]/interrupt/route.ts': 1,
   'worktrees/[id]/opencode/diff/route.ts': 1,
   'worktrees/[id]/opencode/session/route.ts': 1,
   'worktrees/[id]/opencode/share/route.ts': 1,
-  'remote/pair/route.ts': 1,
 };
 
 function stripComments(source: string): string {
@@ -83,8 +90,8 @@ describe('src/app/api route bodies', () => {
       const n = countBareJsonReads(readFileSync(file, 'utf-8'));
       if (n > 0) found[relative(API_DIR, file)] = n;
     }
-    const offenders = Object.keys(found).filter((f) => !(f in OWN_TRY_CATCH_400));
+    const offenders = Object.keys(found).filter((f) => !(f in OWN_TRY_CATCH));
     expect(offenders, `use readJsonBody (src/lib/api/read-json-body.ts) instead of a bare req.json() in: ${offenders.join(', ')}`).toEqual([]);
-    expect(found).toEqual(OWN_TRY_CATCH_400);
+    expect(found).toEqual(OWN_TRY_CATCH);
   });
 });

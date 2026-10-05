@@ -232,6 +232,7 @@ describe('malformed JSON body → 400 in the remaining routes (#3295 sweep)', ()
       if (shape === 'files') expect(data).toEqual({ success: false, error: { code: 'INVALID_REQUEST', message: 'Invalid request body' } });
       if (shape === 'clone') {
         expect(data.success).toBe(false);
+        expect(data.error.code).toBe('INVALID_REQUEST_BODY');
         expect(data.error.message).toBe('Invalid request body');
       }
       expect(mockLogger.error).not.toHaveBeenCalled();
