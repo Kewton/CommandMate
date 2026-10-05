@@ -37,7 +37,13 @@ export function resolveOpencodePaneWidthChecked(
   const requested = process.env[OPENCODE_PANE_WIDTH_ENV];
   const width = resolveOpencodePaneWidth();
 
-  if (requested !== undefined && String(width) !== requested.trim()) {
+  // "Dropped" means the resolver fell back to the default. Compare the number
+  // the operator wrote, not its text: `0120` is applied as 120 (#3338).
+  const trimmed = requested?.trim();
+  const dropped =
+    trimmed !== undefined && (!/^\d+$/.test(trimmed) || Number.parseInt(trimmed, 10) !== width);
+
+  if (requested !== undefined && dropped) {
     logger.warn('opencode-pane-width-rejected', {
       requested,
       applied: width,

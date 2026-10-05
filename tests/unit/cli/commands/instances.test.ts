@@ -33,7 +33,7 @@ describe('instances command: list (default action)', () => {
         { id: 'codex-2', cliTool: 'codex', alias: 'Review', order: 1 },
       ] } },
       { data: { isRunning: true, autoYes: { enabled: false } } },
-      { data: { isRunning: false, autoYes: { enabled: true } } },
+      { data: { isRunning: false } },
     ]);
 
     const { createInstancesCommand } = await import('../../../../src/cli/commands/instances');

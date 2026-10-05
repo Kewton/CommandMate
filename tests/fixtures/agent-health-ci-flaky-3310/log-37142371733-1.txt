@@ -1,0 +1,4 @@
+Type Check	Install dependencies	﻿2026-10-03T17:57:18.0594440Z ##[group]Run npm ci --no-audit
+Type Check	Install dependencies	2026-10-03T18:02:21.3600391Z npm error code EIDLETIMEOUT
+Type Check	Install dependencies	2026-10-03T18:02:21.3606519Z npm error A complete log of this run can be found in: /home/ubuntu/.npm/_logs/2026-10-03T17_57_18_092Z-debug-0.log
+Type Check	Install dependencies	2026-10-03T18:02:21.4019701Z ##[error]The action 'Install dependencies' has timed out after 5 minutes.

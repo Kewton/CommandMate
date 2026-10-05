@@ -1192,8 +1192,8 @@ export function isAllowedSpecialKey(
  *
  * `invalidateCache()` fires the instant `tmux send-keys` returns, which is
  * BEFORE the CLI has drawn the consequence of the key. The next capture — the
- * chat surface's own `onKeysSent` refresh, or any of the pollers that share this
- * cache (the sidebar status probe, the global session poller) — therefore has a
+ * chat surface's own `onKeysSent` refresh, or any of the readers that share this
+ * cache (the sidebar status probe) — therefore has a
  * good chance of storing the PRE-repaint frame, and {@link CACHE_TTL_MS} then
  * serves that stale frame for five seconds. That is the "the highlight does not
  * move" report in Issue #2297: the send worked, the cache was invalidated, and

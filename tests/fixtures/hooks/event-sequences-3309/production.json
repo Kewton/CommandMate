@@ -1,0 +1,20 @@
+{
+  "issue-3289": {
+    "observedAt": "2026-10-04T18:56:04Z",
+    "tool": "claude",
+    "deliveries": [
+      { "event": "stop", "afterMs": 0 },
+      { "event": "user_prompt_submit", "afterMs": 540 },
+      { "event": "stop", "afterMs": 1473 }
+    ]
+  },
+  "issue-3301": {
+    "observedAt": "2026-10-04T15:18:59Z",
+    "tool": "claude",
+    "deliveries": [
+      { "event": "user_prompt_submit", "afterMs": 0 },
+      { "event": "stop", "afterMs": 2624 },
+      { "event": "user_prompt_submit", "afterMs": 2646 }
+    ]
+  }
+}

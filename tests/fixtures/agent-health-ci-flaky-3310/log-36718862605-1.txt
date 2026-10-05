@@ -1,0 +1,21 @@
+Unit Tests (shard 4/4)	UNKNOWN STEP	﻿2026-09-30T13:03:05.5418746Z Current runner version: '2.337.0'
+Unit Tests (shard 4/4)	UNKNOWN STEP	2026-09-30T13:07:52.8095367Z [90mstdout[2m | tests/unit/tmux.test.ts[2m > [22m[2mtmux library[2m > [22m[2mrenameSession[2m > [22m[2mrenames through an exact-match target and reports success
+Unit Tests (shard 4/4)	UNKNOWN STEP	2026-09-30T13:07:52.8288760Z [90mstdout[2m | tests/unit/tmux.test.ts[2m > [22m[2mtmux library[2m > [22m[2mrenameSession[2m > [22m[2mdrops the capture cache for both names
+Unit Tests (shard 4/4)	UNKNOWN STEP	2026-09-30T13:19:55.9456458Z [41m[1m FAIL [22m[49m tests/unit/status-detector-selection.test.ts[2m > [22m/current-output payload for the live agy permission pane (Issue #2270)[2m > [22mpublishes an answerable prompt, not an open selection list
+Unit Tests (shard 4/4)	UNKNOWN STEP	2026-09-30T13:19:55.9640682Z [2m Test Files [22m [1m[31m1 failed[39m[22m[2m | [22m[1m[32m452 passed[39m[22m[2m | [22m[33m1 skipped[39m[90m (454)[39m
+Unit Tests (shard 4/4)	UNKNOWN STEP	2026-09-30T13:19:56.0231707Z ##[error]Error: Test timed out in 5000ms.
+Unit Tests (shard 4/4)	UNKNOWN STEP	2026-09-30T13:19:56.4959525Z ##[error]Process completed with exit code 1.
+Unit Tests (shard 3/4)	UNKNOWN STEP	﻿2026-09-30T13:03:05.5542451Z Current runner version: '2.337.0'
+Unit Tests (shard 3/4)	UNKNOWN STEP	2026-09-30T13:09:36.6905808Z ##[error]The action 'Install dependencies' has timed out after 5 minutes.
+Unit Tests (shard 2/4)	UNKNOWN STEP	﻿2026-09-30T13:03:55.8331856Z Current runner version: '2.336.0'
+Unit Tests (shard 2/4)	UNKNOWN STEP	2026-09-30T13:13:22.1496457Z      [33m[2m✓[22m[39m stays FAIL when both runs fail, and retries only once [33m 789[2mms[22m[39m
+Unit Tests (shard 2/4)	UNKNOWN STEP	2026-09-30T13:21:44.0443360Z [41m[1m FAIL [22m[49m tests/unit/guards/no-procfs-env-fixtures.test.ts[2m > [22mno test points an env var into /proc, /sys or /dev[2m > [22mfinds nothing under tests/
+Unit Tests (shard 2/4)	UNKNOWN STEP	2026-09-30T13:21:44.0508053Z [2m Test Files [22m [1m[31m1 failed[39m[22m[2m | [22m[1m[32m454 passed[39m[22m[90m (455)[39m
+Unit Tests (shard 2/4)	UNKNOWN STEP	2026-09-30T13:21:44.0689294Z ##[error]Error: Test timed out in 5000ms.
+Unit Tests (shard 2/4)	UNKNOWN STEP	2026-09-30T13:21:44.3113797Z ##[error]Process completed with exit code 1.
+Unit Tests	UNKNOWN STEP	﻿2026-09-30T13:22:15.4557650Z Current runner version: '2.337.0'
+Unit Tests	UNKNOWN STEP	2026-09-30T13:22:15.5851772Z ##[group]Run echo "Unit Tests shards: ${RESULT}"
+Unit Tests	UNKNOWN STEP	2026-09-30T13:22:15.5852788Z [36;1mecho "Unit Tests shards: ${RESULT}"[0m
+Unit Tests	UNKNOWN STEP	2026-09-30T13:22:15.6829732Z   RESULT: failure
+Unit Tests	UNKNOWN STEP	2026-09-30T13:22:15.7050753Z Unit Tests shards: failure
+Unit Tests	UNKNOWN STEP	2026-09-30T13:22:15.7070666Z ##[error]Process completed with exit code 1.
