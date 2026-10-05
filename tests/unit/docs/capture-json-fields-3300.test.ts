@@ -12,6 +12,12 @@
  * sentence that must not be lost from them — `unknown` is not the default mode —
  * and does not claim the table is complete.
  *
+ * It also holds one consequence of what the guides now say. A session that is
+ * not running is answered with no `realtimeSnippet` key, and the guides used to
+ * tell a reader to judge an empty screen by calling `.trim()` on it — an
+ * expression that throws on exactly that response. The advice is free to be
+ * reworded; what must not come back is the unguarded read.
+ *
  * @vitest-environment node
  */
 import fs from 'node:fs';
@@ -49,6 +55,50 @@ function fieldRow(guide: string, field: string): string {
   }
   return rows[0];
 }
+
+/**
+ * `.trim()` called on `realtimeSnippet` itself: `realtimeSnippet.trim(`,
+ * `data.realtimeSnippet.trim(`. A read that survives an absent key has
+ * something between the two — `?.`, or a default closed off by a parenthesis.
+ */
+const UNGUARDED_SNIPPET_TRIM = /\brealtimeSnippet\s*\.\s*trim\s*\(/;
+
+/** The lines of `text` that read `realtimeSnippet` without allowing for its absence. */
+function unguardedSnippetReads(text: string): string[] {
+  return text.split('\n').filter((line) => UNGUARDED_SNIPPET_TRIM.test(line));
+}
+
+describe('[#3300] the guides never read realtimeSnippet as if it were always there', () => {
+  // Controls for the detector, both ways: it has to catch the advice as it
+  // stood, and it must not fire on the forms the advice is allowed to take.
+  it('the detector catches an unguarded read', () => {
+    for (const unguarded of [
+      "画面が空かどうかは `realtimeSnippet.trim() === ''` と `lineCount` で見る。",
+      "read `realtimeSnippet.trim() === ''` together with `lineCount`.",
+      'if (data.realtimeSnippet.trim() === "") {',
+      'realtimeSnippet . trim ()',
+    ]) {
+      expect(unguardedSnippetReads(unguarded)).toEqual([unguarded]);
+    }
+  });
+
+  it('the detector leaves guarded reads and plain mentions alone', () => {
+    for (const guarded of [
+      "isRunning && (realtimeSnippet ?? '').trim() === ''",
+      "realtimeSnippet?.trim() === ''",
+      "(data.realtimeSnippet || '').trim()",
+      '`realtimeSnippet` に直接 `.trim()` を呼ぶと例外になる',
+      'Calling `.trim()` on `realtimeSnippet` directly throws',
+      '| `realtimeSnippet` | pane 末尾 100 行 |',
+    ]) {
+      expect(unguardedSnippetReads(guarded)).toEqual([]);
+    }
+  });
+
+  it.each(GUIDES)('$language: no unguarded read anywhere in the guide', ({ file }) => {
+    expect(unguardedSnippetReads(read(file))).toEqual([]);
+  });
+});
 
 describe('[#3300] capture --json field table', () => {
   // Positive control for the reader: it finds a row that has been there since

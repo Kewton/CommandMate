@@ -1540,7 +1540,14 @@ commandmate capture <worktree-id> --instance codex-2 # 追加インスタンス�
 | `agentMode` | エージェントの権限モード（Issue #2592）。画面の表示から読んだ `default` / `manual` / `accept-edits` / `plan` / `auto` / `autopilot` / `bypass` / `dont-ask` / `build`、読めなければ `unknown`。**`unknown` は「既定のモード」ではなく「判定していない」**（モードの切り替えが無いツール・画面にモードの表示が無い・セッションが動いていない）。多くのツールは既定のモードで何も表示しないので、表示が無いことを `default` とは読めない |
 | `resolvedBy` / `conflict` | `cliToolId` を選んだ**解決段**と、roster と明示指定の矛盾（Issue #1884）。下記参照 |
 
-画面が空かどうかは `realtimeSnippet.trim() === ''` と `lineCount` で見る。
+画面が空かどうかは、**先に `isRunning` を見て**から判断する。
+
+- `isRunning: false` — セッションが動いていない。画面そのものが無く、`realtimeSnippet` はキーごと無い
+  （`lineCount` は `0`）。「画面が空」とは別の状態である
+- `isRunning: true` で `(realtimeSnippet ?? '').trim() === ''` — 動いていて、画面が空。`lineCount` と
+  合わせて見る（空白だけの pane でも 1001 になりうる）
+
+`realtimeSnippet` に直接 `.trim()` を呼ぶと、止まっているセッションではキーが無いので例外になる。
 `content` は差分なので単独では判断しない。
 
 **セッションが動いていないとき（`isRunning: false`）は、画面から読む欄がキーごと出ません**

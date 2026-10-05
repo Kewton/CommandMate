@@ -926,8 +926,15 @@ function names (`buildCurrentOutput` / `isClaudeRunning`) is the safer way to fi
 | `composerState` | Why `composerText` is what it is (Issue #1879): `content` (real text is there) / `ghost` (only a suggestion or placeholder) / `empty` (the input box is empty) / `unsupported_tool` (this tool's input box has not been measured) / `no_composer` (no input box on the screen — also the answer for a session that is not running) |
 | `agentMode` | The agent's permission mode (Issue #2592), read off the screen: `default` / `manual` / `accept-edits` / `plan` / `auto` / `autopilot` / `bypass` / `dont-ask` / `build`, or `unknown` when it could not be read. **`unknown` does not mean "the default mode"; it means "not determined"** — the tool has no mode cycle, the screen shows no mode indicator, or the session is not running. Most tools draw nothing in their default mode, so the absence of an indicator cannot be read as `default` |
 
-To tell whether the screen is empty, read `realtimeSnippet.trim() === ''` together with `lineCount`.
-`content` is a delta, so it never answers that on its own.
+To tell whether the screen is empty, **look at `isRunning` first**.
+
+- `isRunning: false` — the session is not running. There is no screen at all, and `realtimeSnippet`
+  is an absent key (`lineCount` is `0`). That is a different state from "the screen is empty"
+- `isRunning: true` and `(realtimeSnippet ?? '').trim() === ''` — the session is running and its
+  screen is empty. Read it together with `lineCount` (a blank pane can still report 1001)
+
+Calling `.trim()` on `realtimeSnippet` directly throws for a session that is not running, because
+the key is not there. `content` is a delta, so it never answers that on its own.
 
 **When the session is not running (`isRunning: false`), the fields read off the screen are
 absent keys** — not `false`, not `null` (Issue #3300). That covers `autoYes` / `isPromptWaiting` /
