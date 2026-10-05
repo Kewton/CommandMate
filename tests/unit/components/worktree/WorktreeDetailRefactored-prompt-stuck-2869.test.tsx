@@ -429,3 +429,56 @@ describe('[#2869] the stuck-prompt hint on the phone', () => {
     expect(screen.queryByTestId('prompt-stuck-hint')).not.toBeInTheDocument();
   });
 });
+
+describe('[#3294] the phone counts the window the sheet is drawing', () => {
+  beforeEach(() => {
+    scenario.prompt = { multiSelect: false };
+    window.localStorage.setItem(getMobileSurfaceModeStorageKey(WORKTREE_ID), 'chat');
+  });
+
+  /** The hook's 10 s reset timers, captured so a test can fire them by hand. */
+  function captureResetTimers(): Array<() => void> {
+    const fired: Array<() => void> = [];
+    const real = globalThis.setTimeout;
+    vi.spyOn(globalThis, 'setTimeout').mockImplementation(((fn: () => void, ms?: number, ...rest: unknown[]) => {
+      if (ms === 10_000) {
+        fired.push(fn);
+        return 0 as unknown as ReturnType<typeof setTimeout>;
+      }
+      return real(fn, ms, ...rest);
+    }) as typeof setTimeout);
+    return fired;
+  }
+
+  async function openKeyboardFromHint(): Promise<void> {
+    await screen.findByTestId('mobile-chat-surface');
+    await pressSend();
+    await pressSend();
+    await screen.findByTestId('prompt-stuck-hint');
+    fireEvent.click(screen.getByRole('button', { name: 'worktree.promptResponse.stuckHintLink' }));
+    await screen.findByTestId('mobile-direct-input-keyboard');
+  }
+
+  it('starts over when the keyboard hid the sheet for 10 s (no hint on return)', async () => {
+    await renderScreen();
+    const resets = captureResetTimers();
+    await openKeyboardFromHint();
+    expect(resets).toHaveLength(1);
+    await act(async () => {
+      resets[0]();
+    });
+    fireEvent.click(screen.getByTestId('direct-input-close'));
+    await screen.findByTestId('mobile-prompt-sheet');
+    expect(screen.queryByTestId('prompt-stuck-hint')).not.toBeInTheDocument();
+  });
+
+  it('keeps the hint when the keyboard is closed before the 10 s are up', async () => {
+    await renderScreen();
+    const resets = captureResetTimers();
+    await openKeyboardFromHint();
+    expect(resets).toHaveLength(1);
+    fireEvent.click(screen.getByTestId('direct-input-close'));
+    await screen.findByTestId('mobile-prompt-sheet');
+    expect(await screen.findByTestId('prompt-stuck-hint')).toBeInTheDocument();
+  });
+});

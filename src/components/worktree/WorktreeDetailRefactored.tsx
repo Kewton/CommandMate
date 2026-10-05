@@ -569,11 +569,18 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   // --------------------------------------------------------------------------
   // The same window shown again after two Sends in a row (refused, or keys
   // that did not change the frame) gets a line and a link to the keyboard.
+  // Counted on the window the sheet is actually drawing: the same gate that
+  // mounts `MobilePromptSheet` below (keyboard, launch and Auto-Yes hide it), so
+  // a window hidden for 10 s starts over, as on PC.
+  const showMobilePromptSheet =
+    !showDirectInputKeyboard
+    && !activeSessionStarting
+    && (!autoYesEnabled || isMultiSelectPrompt(state.prompt.data));
   const {
     showStuckHint: showPromptStuckHint,
     markSubmitted: markPromptSubmitted,
   } = usePromptStuckCounter({
-    promptData: state.prompt.visible ? state.prompt.data : null,
+    promptData: showMobilePromptSheet && state.prompt.visible ? state.prompt.data : null,
     targetKey: `${worktreeId}:${activeCliTab}:${activeInstanceId}`,
   });
 
@@ -1187,7 +1194,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                 `閉じる` brings the sheet straight back. */}
             {/* Issue #3179: nor while the agent is launching — a dialog on a
                 launch is the launch's to answer. */}
-            {!showDirectInputKeyboard && !activeSessionStarting && (!autoYesEnabled || isMultiSelectPrompt(state.prompt.data)) && (
+            {showMobilePromptSheet && (
               <MobilePromptSheet
                 promptData={mobilePromptData}
                 visible={state.prompt.visible}
