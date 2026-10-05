@@ -14,6 +14,7 @@ UAT や日次の実機確認で CommandMate のサーバーと CLI を動かす�
 | codex の hook の信頼 | 信頼を与えない（与えると codex が `config.toml` に書く）。確認の画面が出たら「信頼せずに続ける」で答え、そのセッションは hook なしになる |
 | antigravity の `~/.gemini/config/hooks.json` | 書かない。同じ内容が既にあれば使い、無い・違えば**起動を拒否する**（agy は共有のファイルを必ず読むため。codex と同じ理由） |
 | claude | `--setting-sources project,local` を付けて起動する。利用者の `settings.json`（hook とプラグインを含む）は読まれず、CommandMate の `--settings` とリポジトリの `.claude/settings*.json` は読まれる。Schedule と日次まとめの `claude -p` にも同じ制限を付ける |
+| Schedule・日次まとめの `codex exec`・`agy -p` | **実行を拒否する**（実行結果は failed、エラーは `CM_UAT_ISOLATION=1: refusing to start a headless codex run …`）。どちらも共有の `hooks.json` を必ず読み、非対話の実行には送り先（`CM_HOOK_URL`）も相関キーも渡らないので、hook は relay の既定（`CM_PORT`、無ければ 3000 = 本番）へ送る。実行ごとに hook を止める口も送り先を変える口も無い |
 | CLI（`ApiClient` を使うコマンド） | `.env` を一切読まない。`CM_PORT` が無ければ 3000 に送らず exit 2 で止まる |
 
 ## 手順
@@ -63,4 +64,5 @@ env -i HOME="$RUN_DIR/client-home" PATH="$PATH" CM_UAT_ISOLATION=1 \
 | codex の場面すべて | `~/.codex` の変化を一切許さない確認では skip。codex 自身が `config.toml` にフォルダの信頼（`{run_dir}` の下のパス）を、`version.json` に更新の知らせへの答えを書くのは防げない。`hooks.json` と relay の変化は `env.down` が検出する |
 | antigravity の場面すべて（起動の拒否） | antigravity のセッションの開始が `CM_UAT_ISOLATION=1: refusing to start antigravity` で失敗した（サーバーのログに `antigravity-hooks-config-differs-readonly` も出ることがある）。共有のファイルは relay を checkout のパスで書くので、worktree のビルドではほぼいつもこうなる |
 | claude の場面 | 利用者の `settings.json` にある設定（モデル・プラグイン・権限）を前提にする場面は skip。対象のリポジトリの `.claude/settings*.json` の hook は動く（UAT の `{run_dir}/root` のリポジトリには置かない） |
+| Schedule・日次まとめで codex・antigravity を使う場面 | いつも skip（隔離中は実行が拒否される）。claude の Schedule は `--setting-sources project,local` つきで動く |
 | CLI の場面 | 上の手順で呼ぶ限り skip は無い。グローバルの `commandmate` を呼ぶ場面は作らない |

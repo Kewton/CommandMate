@@ -14,6 +14,7 @@ A server and CLI started with `CM_UAT_ISOLATION=1` behave as follows. Without it
 | codex hook trust | Never granted (granting is codex writing `config.toml`). The review screen, if shown, is answered "continue without trusting", and that session has no hooks |
 | antigravity `~/.gemini/config/hooks.json` | Not written. Used when it already holds the same content; missing or different, the **launch is refused** (agy always reads the shared file, the same reason as codex) |
 | claude | Launched with `--setting-sources project,local`. The user's `settings.json` (hooks and plugins included) is not loaded; CommandMate's `--settings` and the repository's `.claude/settings*.json` are. The `claude -p` of Schedules and the daily summary gets the same restriction |
+| `codex exec` / `agy -p` of Schedules and the daily summary | **Refused** (the run fails with `CM_UAT_ISOLATION=1: refusing to start a headless codex run …`). Both always read the shared `hooks.json`, and a headless run carries no receiver URL (`CM_HOOK_URL`) and no correlation keys, so the hooks post to the relay's default (`CM_PORT`, else 3000 = production). There is no per-run way to turn them off or redirect them |
 | CLI (commands built on `ApiClient`) | Reads no `.env` at all. Without `CM_PORT` it exits 2 instead of sending to 3000 |
 
 ## Procedure
@@ -63,4 +64,5 @@ During the measurement, an `ls --json` with neither `CM_PORT` nor `.env` sent on
 | every codex scenario | Skip in a check that allows no change at all under `~/.codex`. codex itself writes folder trust (paths under `{run_dir}`) to `config.toml` and the update-notice answer to `version.json`; that cannot be prevented. Changes to `hooks.json` and the relay are detected by `env.down` |
 | every antigravity scenario (launch refused) | The antigravity session start failed with `CM_UAT_ISOLATION=1: refusing to start antigravity` (the server log may also have `antigravity-hooks-config-differs-readonly`). The shared file names the relay by checkout path, so this is almost always the case for a worktree build |
 | claude scenarios | Skip a scenario that relies on the user's `settings.json` (model, plugins, permissions). The target repository's `.claude/settings*.json` hooks do run (none are placed in the UAT's `{run_dir}/root` repositories) |
+| Schedule / daily-summary scenarios with codex or antigravity | Always skip (the run is refused under isolation). A claude Schedule runs, with `--setting-sources project,local` |
 | CLI scenarios | None, as long as the CLI is called as above. Do not build a scenario around the global `commandmate` |
