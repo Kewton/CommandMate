@@ -36,6 +36,7 @@ import { createLogger } from '@/lib/logger';
 import { broadcastTerminalSnapshotAfterInteraction } from '@/lib/realtime/terminal-broadcast';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 import { MAX_DIRECT_INPUT_EVENTS, isDirectInputEvent } from '@/types/direct-input';
+import { readJsonObjectBody } from '@/lib/api/read-json-body';
 
 const logger = createLogger('api/direct-input');
 
@@ -45,12 +46,9 @@ export async function POST(
 ) {
   const { id: requestedWorktreeId } = await params;
   const id = canonicalWorktreeId(requestedWorktreeId);
-  let body: Record<string, unknown>;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
-  }
+  const parsedBody = await readJsonObjectBody<Record<string, unknown>>(req);
+  if (!parsedBody.ok) return parsedBody.response;
+  const body = parsedBody.body;
 
   try {
     const { cliToolId, events, instanceId } = body;

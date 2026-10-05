@@ -12,7 +12,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { readJsonBody } from '@/lib/api/read-json-body';
+import { readJsonObjectBody } from '@/lib/api/read-json-body';
 import { isCliToolType, isValidInstanceId } from '@/lib/cli-tools/types';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { getWorktreeById } from '@/lib/db';
@@ -31,7 +31,7 @@ export async function POST(
   try {
     const { id: requestedWorktreeId } = await params;
     const id = canonicalWorktreeId(requestedWorktreeId);
-    const parsed = await readJsonBody(req);
+    const parsed = await readJsonObjectBody(req);
     if (!parsed.ok) return parsed.response;
     const { cliToolId, lines = 1000, instanceId } = parsed.body;
 

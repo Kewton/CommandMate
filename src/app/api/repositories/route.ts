@@ -27,7 +27,7 @@ import { findDuplicateScanRoots } from '@/lib/git/git-common-dir';
 import { cleanupMultipleWorktrees, createOwnedSessionKiller } from '@/lib/session-cleanup';
 import { cleanupRooms, broadcastMessage } from '@/lib/ws-server';
 import { createLogger } from '@/lib/logger';
-import { readJsonBody } from '@/lib/api/read-json-body';
+import { readJsonObjectBody } from '@/lib/api/read-json-body';
 
 const logger = createLogger('api/repositories');
 
@@ -113,7 +113,7 @@ export async function GET() {
  */
 export async function DELETE(request: NextRequest) {
   try {
-    const parsed = await readJsonBody(request);
+    const parsed = await readJsonObjectBody(request);
     if (!parsed.ok) {
       return NextResponse.json({ success: false, error: 'Invalid request body' }, { status: 400 });
     }
