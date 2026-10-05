@@ -40,6 +40,62 @@ export const CODEX_THINKING_PATTERN = /•\s*(Planning|Searching|Exploring|Runni
 export const CODEX_INTERRUPT_HINT_PATTERN = /esc to interrupt/;
 
 /**
+ * Codex's live status row itself, whatever its header says (Issue #3337).
+ *
+ * {@link CODEX_THINKING_PATTERN} names the row by a `•` and a fixed list of
+ * verbs, and codex-cli 0.160.0 draws the row two ways that list misses
+ * (`tests/fixtures/codex-mid-turn-3337/`, a live turn sampled every second):
+ *
+ *  - the bullet is a spinner that alternates `•` and `◦`, about half the frames
+ *    each — so a `◦ Working (43s • esc to interrupt)` frame read `ready`;
+ *  - the header is not always a verb from the list — `Reconnecting... waiting
+ *    for network` while codex retries the request.
+ *
+ * Anchored on the parenthesised elapsed time that precedes `esc to interrupt`
+ * (`(43s •`, `(1m 00s •`), which only the live row carries. The queued-steer
+ * row's `(press esc to interrupt and send immediately)` has no elapsed time,
+ * so it does not match — `steer-queued-running.txt` keeps its verdict.
+ */
+export const CODEX_LIVE_STATUS_ROW_PATTERN =
+  /^[•◦]\s.*\((?:\d+h\s*)?(?:\d+m\s*)?\d+s\s*•\s*esc to interrupt\)/m;
+
+/** The row codex prints when a turn is interrupted (Esc), measured on 0.160.0. */
+const CODEX_TURN_INTERRUPTED_ROW = /^■ Conversation interrupted\b/;
+
+/**
+ * The row codex keeps between the interruption and the composer while a shell
+ * the turn started is still running (`1 background terminal running · /ps to
+ * view · /stop to close`). Not content of the turn: it says the terminal is
+ * alive, not that the agent is.
+ */
+const CODEX_BACKGROUND_TERMINAL_ROW = /^\d+ background terminals? running\b/;
+
+/**
+ * Whether the frame shows a codex turn that was interrupted, as its last word
+ * (Issue #3337).
+ *
+ * The last non-blank row above the composer is `■ Conversation interrupted …`.
+ * An interrupted turn fires no `Stop` hook (measured on codex 0.160.0 with the
+ * hooks trusted: `UserPromptSubmit`, then nothing, after Esc), so this is the
+ * frame that says the agent's own end-of-turn report is not coming. A marker
+ * from an earlier turn is not the last row once anything follows it. A
+ * background-terminal row between the marker and the composer is skipped — an
+ * Esc during `sleep 90 && ls` leaves one there.
+ *
+ * @param lines - Pane rows, ANSI stripped
+ */
+export function isCodexTurnInterruptedFrame(lines: readonly string[]): boolean {
+  const composer = findCodexComposerRow(lines);
+  if (composer < 0) return false;
+  for (let i = composer - 1; i >= 0; i--) {
+    const row = lines[i].trim();
+    if (row === '' || CODEX_BACKGROUND_TERMINAL_ROW.test(row)) continue;
+    return CODEX_TURN_INTERRUPTED_ROW.test(row);
+  }
+  return false;
+}
+
+/**
  * How far above the last content row Codex's composer ("› …") may sit.
  *
  * Codex pins the composer and the status bar to the bottom of the pane, so the

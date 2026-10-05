@@ -37,6 +37,7 @@ import { detectCodexDialog } from './prompt';
 import { STATUS_CHECK_LINE_COUNT, liveRegionOf, normalizeFrame, withLiveRegion } from '../frame';
 import { findNumberedOptionBlock } from '../dialog-block';
 import { CODEX_LIVE_REGION, findCodexContentEnd, findCodexFooterBoundary } from './live-region';
+import { CODEX_LIVE_STATUS_ROW_PATTERN } from './patterns';
 import { createToolStatusDetector } from '../run-detection';
 import { CODEX_VERIFIED_AGAINST } from '../verified-against';
 import { THINKING_TAIL_LINE_COUNT } from '@/config/thinking-constants';
@@ -358,7 +359,12 @@ export const codexStatusDetector = createToolStatusDetector({
         const codexThinkingWindow = contentLines
           .slice(Math.max(0, lastContentIdx - THINKING_TAIL_LINE_COUNT + 1), lastContentIdx + 1)
           .join('\n');
-        if (detectThinking('codex', codexThinkingWindow)) {
+        // Issue #3337: or the live status row, whatever its bullet and header —
+        // codex 0.160.0's `◦ Working (43s • esc to interrupt)` frame reached B.
+        if (
+          detectThinking('codex', codexThinkingWindow) ||
+          CODEX_LIVE_STATUS_ROW_PATTERN.test(codexThinkingWindow)
+        ) {
           return positiveVerdict('running', STATUS_REASON.THINKING_INDICATOR);
         }
 
@@ -414,7 +420,11 @@ export const codexStatusDetector = createToolStatusDetector({
         codexTailIdx >= 0 &&
         CODEX_PROMPT_PATTERN.test(contentLines[codexTailIdx].trim()) &&
         !isCodexDialogGlyphTail(frame.raw);
-      if (!codexTailIsIdlePrompt && detectThinking('codex', frame.lastLines)) {
+      if (
+        !codexTailIsIdlePrompt &&
+        (detectThinking('codex', frame.lastLines) ||
+          CODEX_LIVE_STATUS_ROW_PATTERN.test(frame.lastLines))
+      ) {
         return positiveVerdict('running', STATUS_REASON.THINKING_INDICATOR);
       }
     }
