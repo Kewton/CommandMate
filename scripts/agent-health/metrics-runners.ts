@@ -4,7 +4,8 @@
  * performance, `metrics-perf.ts` (Issue #3054: the production log, `ps` and
  * `GET /api/worktrees` — read only; the server is never stopped or changed),
  * and for `bug-flow` `bug-flow.ts` (Issue #3185: `gh issue list`, read only),
- * and for `ci-flaky` `ci-flaky.ts` (Issue #3310: `gh run list` / `gh run view`, read only).
+ * for `ci-flaky` `ci-flaky.ts` (Issue #3310: `gh run list` / `gh run view`, read only),
+ * and for `hook-observation` `hook-observation.ts` (Issue #3311: the same log read).
  *
  * A runner never throws for a tool problem: a missing binary, no network, a
  * timeout or unreadable output all become `status: 'skip'` with the reason.
@@ -32,6 +33,7 @@ import {
   type TypeSafetyCounts,
 } from '@/lib/agent-health/metrics-parse';
 import { BUG_FLOW_WINDOW_DAYS, bugFlowWindowStart, measureBugFlow } from '@/lib/agent-health/bug-flow';
+import { measureHookObservation } from '@/lib/agent-health/hook-observation';
 import {
   attemptFailed,
   ciFlakyWindowStart,
@@ -479,7 +481,7 @@ export async function aggregateServerLog(files: readonly string[], now: Date): P
 }
 
 type LogAggregateResult = { ok: true; agg: LogAggregate } | { ok: false; reason: string };
-/** The three log metrics share one read per run. */
+/** The log metrics (the three performance ones and hook-observation) share one read per run. */
 const logAggregates = new WeakMap<RunnerContext, Promise<LogAggregateResult>>();
 
 function resolveServerLog(ctx: RunnerContext): string | null {
@@ -691,6 +693,7 @@ export const METRIC_RUNNERS: Record<MetricId, (ctx: RunnerContext) => Promise<Me
   'server-process': serverProcess,
   'bug-flow': bugFlow,
   'ci-flaky': ciFlaky,
+  'hook-observation': fromServerLog('hook-observation', (agg) => measureHookObservation(agg.hook)),
 };
 
 /**
@@ -712,6 +715,7 @@ export const RUN_ORDER: readonly MetricId[] = [
   'api-latency',
   'log-volume',
   'error-rate',
+  'hook-observation',
   'ci-flaky',
   'bug-flow',
 ];

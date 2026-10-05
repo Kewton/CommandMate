@@ -162,6 +162,14 @@ place, the same `UserPromptSubmit` arrives twice within 3 seconds and the later 
 duplicate. When only the dropped copy carried the mark (an older relay that does not send it landed
 first), the receiver puts the running turn back in place of the one the first copy re-opened.
 
+Each dropped delivery leaves one `agent-event-duplicate-dropped` line in the server log. The line
+carries the instance (`instanceId`), the session (`session`: the first 8 characters of the SHA-256
+of the session id — the id itself is never written), how long after the applied delivery with the
+same key it arrived (`sinceLastMs`) and the subtype (`detail`) (Issue #3311). A copy a few
+milliseconds behind and an event of another turn the window swallowed can be told apart from this
+line and the lines around it; the daily metrics (`hook-observation`, see the agent-health guide)
+count them.
+
 **The manual configuration may simply be deleted** (automatic injection sends the same events).
 Keeping it causes no double recording either, thanks to the dedup above.
 

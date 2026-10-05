@@ -162,6 +162,44 @@ describe('performance from the production log (Issue #3054)', () => {
   });
 });
 
+describe('hook-observation from the production log (Issue #3311)', () => {
+  const NOW = new Date('2026-10-05T21:30:00.000Z');
+  const at = (msAgo: number) => new Date(NOW.getTime() - msAgo).toISOString();
+  const HOUR = 60 * 60 * 1000;
+
+  it('reads the same log as the performance metrics and publishes counts only', async () => {
+    const route = (msAgo: number, event: string, data: Record<string, unknown>) =>
+      `[${at(msAgo)}] [INFO] [api/hooks-agent-event] ${event} ${JSON.stringify({ worktreeId: 'wt-secret', tool: 'claude', instanceId: 'claude', ...data })}`;
+    fs.mkdirSync(path.join(root, 'logs'), { recursive: true });
+    fs.writeFileSync(
+      path.join(root, 'logs', 'server.log'),
+      `${[
+        `[${at(30 * HOUR)}] [INFO] [boot] ready`,
+        // #3289: stop applied, a start 140 ms later, the next stop dropped 1.4 s after that
+        route(HOUR + 1540, 'agent-event-stop-applied', {}),
+        route(HOUR + 1400, 'agent-event-received', { event: 'user_prompt_submit' }),
+        route(HOUR, 'agent-event-duplicate-dropped', { event: 'stop', session: 'a1b2c3d4', sinceLastMs: 1540 }),
+        // a copy 6 ms behind
+        route(HOUR / 2 + 6, 'agent-event-received', { event: 'user_prompt_submit' }),
+        route(HOUR / 2, 'agent-event-duplicate-dropped', { event: 'user_prompt_submit', session: 'a1b2c3d4', sinceLastMs: 6 }),
+        `[${at(HOUR / 4)}] [INFO] [current-output-builder] detection-divergence-resolved {"worktreeId":"wt-secret","durationMs":4200,"polls":3}`,
+      ].join('\n')}\n`
+    );
+    const results = await measureAll(ctx({ serverLog: path.join(root, 'logs', 'server.log'), now: NOW }), ['hook-observation']);
+    expect(results[0]).toMatchObject({
+      metricId: 'hook-observation',
+      status: 'ok',
+      value: 1,
+      findings: {},
+      details: { duplicateDropped: 2, duplicateDroppedNotCopy: 1, duplicateDroppedCopy: 1, divergenceEpisodes: 1, divergenceMaxMs: 4200 },
+    });
+    expect(JSON.stringify(results)).not.toMatch(/wt-secret|a1b2c3d4/);
+
+    const none = await measureAll(ctx({ serverLog: null, now: NOW }), ['hook-observation']);
+    expect(none[0]).toMatchObject({ metricId: 'hook-observation', status: 'skip' });
+  });
+});
+
 describe('bug-flow (Issue #3185)', () => {
   const NOW = new Date('2026-10-04T00:00:00.000Z');
   const fakeGh = (script: string) => {

@@ -32,7 +32,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import fs from 'fs';
 import path from 'path';
 
-// Built inside vi.hoisted() rather than from tests/helpers/logger-mock:
+// Built inside vi.hoisted() rather than as a plain top-level `const`:
 // `@/lib/logger` is pulled in transitively by `cli-patterns` while the hoisted
 // vi.mock factory runs, so a plain `const` above the factory is still in the
 // temporal dead zone by then (same reason as the #1695 suite next door).

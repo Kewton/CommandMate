@@ -59,10 +59,12 @@ import {
 import { getAgentEventSource } from '@/lib/hooks/sources';
 import type { AgentEventSource, NormalizedAgentEvent } from '@/lib/hooks/sources';
 import {
+  agentEventKeyClaimedAt,
   isDuplicateAgentEvent,
   joinOpenTurnFromDuplicate,
   recordAgentEvent,
   recordAskUserQuestion,
+  shortSessionTag,
 } from '@/lib/session/agent-event-state';
 import { isSessionRunning } from '@/lib/session/cli-session';
 import { MAX_STRUCTURED_PROMPT_MESSAGE_LENGTH } from '@/lib/session/structured-prompt';
@@ -247,10 +249,21 @@ export async function POST(request: NextRequest) {
           sessionId: sessionId ?? null,
           joinsOpenTurn,
         });
+      // Issue #3311: enough to tell, from this line alone, which instance and
+      // which agent session the drop was in and how long after the applied
+      // delivery it came — a copy is a few ms behind, a second turn the window
+      // swallowed is not. The daily metrics count the second kind. `sessionId`
+      // is non-null here (the window only drops events that carry one) and is
+      // logged as a hash prefix, never as itself.
+      const claimedAt = agentEventKeyClaimedAt(worktree.id, tool, instanceParam, event, sessionId, detail);
       logger.info('agent-event-duplicate-dropped', {
         worktreeId: worktree.id,
         tool,
+        instanceId: instanceParam ?? tool,
         event,
+        detail,
+        session: sessionId ? shortSessionTag(sessionId) : null,
+        sinceLastMs: claimedAt === null ? null : receivedAt - claimedAt,
         ...(joinedOpenTurn ? { joinedOpenTurn } : {}),
       });
       return NextResponse.json(ACCEPTED, { status: 202 });
