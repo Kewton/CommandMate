@@ -53,7 +53,6 @@ import {
 } from '@/types/terminal-keys';
 import {
   hasSession,
-  createSession,
   capturePane,
   sendKeys,
   sendSpecialKey,
@@ -118,7 +117,6 @@ import {
 } from '@/lib/session/opencode-session-store';
 import { verifyGracefulExit } from './graceful-exit';
 import {
-  TUI_SESSION_CREATE_WAIT_MS,
   TUI_TEXT_INPUT_WAIT_MS,
   OPENCODE_EXIT_WAIT_MS,
   OPENCODE_INTERRUPT_SECOND_ESCAPE_DELAY_MS,
@@ -415,15 +413,7 @@ export class OpenCodeTool extends BaseCLITool {
       // exists; the resize below still runs, because a pane that was created
       // before #2047 carries the geometry of its own era either way.
       if (!exists) {
-        // Create tmux session. Scrollback depth comes from the shared
-        // TMUX_HISTORY_LIMIT default (Issue #1624) — do not re-hardcode it here.
-        await createSession({
-          sessionName,
-          workingDirectory: worktreePath,
-        });
-
-        // Wait a moment for the session to be created
-        await new Promise((resolve) => setTimeout(resolve, TUI_SESSION_CREATE_WAIT_MS));
+        await this.createLaunchPane(sessionName, worktreePath);
       }
 
       // Resize tmux window so opencode's right-hand sidebar stays hidden and

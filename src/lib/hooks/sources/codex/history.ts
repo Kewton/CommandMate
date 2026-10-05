@@ -53,7 +53,7 @@
 
 import { readdir } from 'fs/promises';
 import { homedir } from 'os';
-import { join, resolve, sep } from 'path';
+import { join } from 'path';
 import { buildCompositeKey } from '@/lib/auto-yes-state';
 import { readTranscriptTail, TRANSCRIPT_TAIL_BYTES } from '@/lib/history/transcript-tail';
 import {
@@ -65,7 +65,14 @@ import { advanceCapturedLineForTranscriptTurn } from '@/lib/assistant-response-s
 import { createLogger } from '@/lib/logger';
 import { codexPromptRequestId, codexTurnRequestId } from '@/types/agent-transcript';
 import type { AgentInstanceRef } from '../types';
-import { isReadableFile, nextTurnOpensAt, resolveAssistantTimestampMs, selectUnwrittenTurns } from '../transcript-history';
+import {
+  acceptPathUnderRoot,
+  isReadableFile,
+  nextTurnOpensAt,
+  resolveAssistantTimestampMs,
+  resolveSessionIdFromEvents,
+  selectUnwrittenTurns,
+} from '../transcript-history';
 import type { StructuredHistoryCaptureReport } from '@/lib/polling/structured-history-gate';
 import {
   buildCodexTurns,
@@ -176,27 +183,7 @@ export function resetCodexTranscriptSessions(): void {
  * keeps being the only record, which is merely the status quo.
  */
 export async function resolveCodexSessionId(target: AgentInstanceRef): Promise<string | null> {
-  const key = keyOf(target);
-  try {
-    const { getLastAgentEvent } = await import('@/lib/session/agent-event-state');
-    const sessionId = getLastAgentEvent(
-      target.worktreeId,
-      target.cliToolId,
-      target.instanceId
-    )?.sessionId;
-    if (typeof sessionId === 'string' && sessionId.length > 0) {
-      sessionPointers.set(key, sessionId);
-      return sessionId;
-    }
-  } catch (error) {
-    // A state module that cannot be reached is one that knows no session id.
-    logger.debug('codex-transcript-session-lookup-failed', {
-      worktreeId: target.worktreeId,
-      instanceId: target.instanceId ?? target.cliToolId,
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
-  return sessionPointers.get(key) ?? null;
+  return resolveSessionIdFromEvents(target, sessionPointers, keyOf(target), logger, 'codex-transcript-session-lookup-failed');
 }
 
 /**
@@ -230,12 +217,7 @@ export function codexSessionsRoot(codexHome: string): string {
  * @returns The resolved path, or null when it is not acceptable
  */
 export function acceptCodexRolloutPath(codexHome: string, candidate: string): string | null {
-  if (!candidate.endsWith(CODEX_ROLLOUT_EXTENSION)) return null;
-  if (candidate.includes('\0')) return null;
-  const root = resolve(codexSessionsRoot(codexHome));
-  const resolved = resolve(candidate);
-  if (resolved !== root && !resolved.startsWith(root + sep)) return null;
-  return resolved;
+  return acceptPathUnderRoot(codexSessionsRoot(codexHome), CODEX_ROLLOUT_EXTENSION, candidate);
 }
 
 /** Whether a file name is the rollout of this session. */

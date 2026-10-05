@@ -6,7 +6,7 @@
 
 'use client';
 
-import { useState, useCallback, useId, useMemo, useEffect, memo } from 'react';
+import { useState, useCallback, useId, useEffect, memo } from 'react';
 import { useTranslations } from 'next-intl';
 import type { LivePromptData, YesNoPromptData, MultipleChoicePromptData } from '@/types/models';
 import { isAnswerablePromptData } from '@/types/models';
@@ -15,24 +15,23 @@ import { Checkbox, RadioGroup, RadioGroupItem, Spinner } from '@/components/ui';
 import { usePromptAnimation } from '@/hooks/usePromptAnimation';
 import { useFocusTrap } from '@/hooks/useFocusTrap';
 import { useSwipeGesture } from '@/hooks/useSwipeGesture';
+import { usePromptAnswerState } from '@/hooks/usePromptAnswerState';
 import {
   isQuestionFreeTextNumeric,
   QUESTION_FREE_TEXT_MAX_LENGTH,
   readQuestionFreeText,
-  type PromptQuestionChoices,
 } from '@/components/worktree/prompt-decision-id';
+import { PromptStuckHint } from '@/components/worktree/PromptStuckHint';
+
 import {
-  initialCheckedNumbers,
-  initialSelectedOption,
   promptHeadingText,
-  promptQuestionKey,
 } from '@/components/worktree/prompt-answer';
 import type { StructuredDecisionOption } from '@/lib/session/structured-prompt';
 import {
   derivePromptView,
-  optionTakesTypedText,
   readQuestionChoices,
   type PromptView,
+  type QuestionChoices,
 } from '@/lib/session/prompt-view';
 
 /** Animation duration for sheet transitions */
@@ -40,14 +39,6 @@ const ANIMATION_DURATION_MS = 300;
 
 /** Swipe threshold to dismiss in pixels */
 const SWIPE_DISMISS_THRESHOLD = 100;
-
-/**
- * Whether the sheet sends the operator's TEXT for an option rather than its
- * number (Issue #2573). Issue #3184: defined once in `lib/session/prompt-view`
- * — a module neither surface's suites mock — instead of restated here and in
- * `PromptPanel`; re-exported under the old name.
- */
-export { optionTakesTypedText };
 
 /** Button style constants */
 const BUTTON_STYLES = {
@@ -103,58 +94,6 @@ export interface MobilePromptSheetProps {
    * #2869 link, no Send count needed). Undefined or `true`: unchanged.
    */
   answerable?: boolean;
-}
-
-/**
- * The "Send is not working — use direct input" line (Issue #2869). The same
- * row as `PromptPanel`'s, restated here for the reason the typed-text patterns
- * above are: suites that mock `PromptPanel` still render this sheet.
- */
-function PromptStuckHint({
-  showStuckHint,
-  onSwitchToDirectInput,
-  answerable,
-}: Pick<MobilePromptSheetProps, 'showStuckHint' | 'onSwitchToDirectInput' | 'answerable'>) {
-  const t = useTranslations('worktree');
-  const linkLabel = t('promptResponse.stuckHintLink');
-  // Issue #2870: a window the route would refuse says so up front — no Send
-  // has to fail first — and offers the link whenever there is one to offer.
-  if (answerable === false) {
-    return (
-      <p data-testid="prompt-unanswerable-hint" className="mt-3 text-sm text-warning-foreground">
-        {t('promptResponse.unanswerable')}
-        {onSwitchToDirectInput && (
-          <>
-            {' '}
-            <button
-              type="button"
-              data-testid="prompt-stuck-hint-link"
-              onClick={onSwitchToDirectInput}
-              aria-label={linkLabel}
-              className="underline font-medium min-h-[44px] touch-manipulation"
-            >
-              {linkLabel}
-            </button>
-          </>
-        )}
-      </p>
-    );
-  }
-  if (!showStuckHint || !onSwitchToDirectInput) return null;
-  return (
-    <p data-testid="prompt-stuck-hint" className="mt-3 text-sm text-warning-foreground">
-      {t('promptResponse.stuckHint')}{' '}
-      <button
-        type="button"
-        data-testid="prompt-stuck-hint-link"
-        onClick={onSwitchToDirectInput}
-        aria-label={linkLabel}
-        className="underline font-medium min-h-[44px] touch-manipulation"
-      >
-        {linkLabel}
-      </button>
-    </p>
-  );
 }
 
 /**
@@ -307,6 +246,7 @@ export const MobilePromptSheet = memo(function MobilePromptSheet({
             showStuckHint={showStuckHint}
             onSwitchToDirectInput={onSwitchToDirectInput}
             answerable={answerable}
+            linkClassName="underline font-medium min-h-[44px] touch-manipulation"
           />
         </div>
       </div>
@@ -339,54 +279,28 @@ function PromptContent({
   answerable,
 }: PromptContentProps) {
   const t = useTranslations('prompt');
-  const [selectedOption, setSelectedOption] = useState<number | null>(
-    () => initialSelectedOption(promptData),
-  );
-  /** Issue #2755: the boxes ticked on a checkbox question, in click order. */
-  const [checkedNumbers, setCheckedNumbers] = useState<readonly number[]>(
-    () => initialCheckedNumbers(promptData),
-  );
-  const [textInputValue, setTextInputValue] = useState('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
-
-  // Issue #2755: reset when the QUESTION changes, and only then — the sheet is
-  // not remounted between the questions of one `AskUserQuestion` call. Adjusted
-  // during render rather than in an effect, so nothing downstream ever sees the
-  // previous question's selection.
-  const questionKey = promptQuestionKey(promptData);
-  const [seenQuestionKey, setSeenQuestionKey] = useState(questionKey);
-  if (questionKey !== seenQuestionKey) {
-    setSeenQuestionKey(questionKey);
-    setSelectedOption(initialSelectedOption(promptData));
-    setCheckedNumbers(initialCheckedNumbers(promptData));
-    setTextInputValue('');
-  }
-
-  /** The checkbox question's options, or null when this is not one (#2755). */
-  const multiSelectOptions = promptData.type === 'multiple_choice'
-    && promptData.multiSelect === true
-    ? promptData.options
-    : null;
-
-  // Memoize selected option data
-  const selectedOptionData = useMemo(() => {
-    if (promptData.type !== 'multiple_choice') return null;
-    return promptData.options.find(opt => opt.number === selectedOption) ?? null;
-  }, [promptData, selectedOption]);
-
-  // Issue #2573: the same rule PromptPanel applies — only an option that IS a
-  // text field on screen gets the field, and its text; a menu row sends its number.
-  // Issue #2755: on a checkbox question the rule reads the TICKED rows instead.
-  const checkedTextFieldCount = useMemo(
-    () =>
-      (multiSelectOptions ?? []).filter(
-        (opt) => checkedNumbers.includes(opt.number) && optionTakesTypedText(opt),
-      ).length,
-    [multiSelectOptions, checkedNumbers],
-  );
-  const takesTypedText = multiSelectOptions !== null
-    ? checkedTextFieldCount > 0
-    : selectedOptionData !== null && optionTakesTypedText(selectedOptionData);
+  // The phone sends the bare answer and swallows a failed respond.
+  const {
+    selectedOption,
+    setSelectedOption,
+    checkedNumbers,
+    textInputValue,
+    setTextInputValue,
+    multiSelectOptions,
+    takesTypedText,
+    isBusy,
+    isDisabled,
+    handleToggleOption,
+    handleYesNoClick,
+    handleMultipleChoiceSubmit,
+    handleMultiSelectSubmit,
+    handleDecisionRespond: handleStructuredRespond,
+  } = usePromptAnswerState({
+    promptData,
+    answering,
+    answerable,
+    send: onRespond,
+  });
   // Issue #3184: what this payload is and how it is answered, from the one
   // shared function. The sheet sends with the payload's own decision id
   // (`handleStructuredRespond`), so the view is derived from the payload as is.
@@ -396,82 +310,6 @@ function PromptContent({
   // the instruction text. The same split as `view.kind === 'screen-choices'`
   // (pinned by prompt-view-3184.test); what is SHOWN is decided by `view`.
   const screenPrompt = isAnswerablePromptData(promptData) ? promptData : null;
-  const isBusy = answering || isSubmitting;
-  // Issue #2870: a window the route would refuse keeps its options on screen
-  // but nothing on it can be pressed.
-  const isDisabled = isBusy || answerable === false;
-
-  const handleToggleOption = useCallback((optionNumber: number, checked: boolean) => {
-    setCheckedNumbers((previous) =>
-      checked
-        ? previous.includes(optionNumber) ? previous : [...previous, optionNumber]
-        : previous.filter((n) => n !== optionNumber),
-    );
-  }, []);
-
-  // Handle yes/no button click
-  const handleYesNoClick = useCallback(async (answer: 'yes' | 'no') => {
-    if (isDisabled) return;
-    setIsSubmitting(true);
-    try {
-      await onRespond(answer);
-    } catch {
-      // Error handling silently
-    } finally {
-      setIsSubmitting(false);
-    }
-  }, [isDisabled, onRespond]);
-
-  // Handle multiple choice submit
-  const handleMultipleChoiceSubmit = useCallback(async () => {
-    if (isDisabled || selectedOption === null) return;
-    setIsSubmitting(true);
-    try {
-      const answer = takesTypedText && textInputValue.trim()
-        ? textInputValue.trim()
-        : selectedOption.toString();
-      await onRespond(answer);
-    } catch {
-      // Error handling silently
-    } finally {
-      setIsSubmitting(false);
-    }
-  }, [isDisabled, onRespond, selectedOption, takesTypedText, textInputValue]);
-
-  /**
-   * Submit a checkbox question (Issue #2755).
-   *
-   * Identical rule to `PromptPanel`'s: the ascending, de-duplicated set as
-   * `"1,3"`, or the free-text row's TEXT alone when that row is ticked.
-   */
-  const handleMultiSelectSubmit = useCallback(async () => {
-    if (isDisabled) return;
-    const numbers = [...checkedNumbers].sort((a, b) => a - b);
-    if (numbers.length === 0) return;
-    const answer = takesTypedText ? textInputValue.trim() : numbers.join(',');
-    if (answer === '') return;
-    setIsSubmitting(true);
-    try {
-      await onRespond(answer);
-    } catch {
-      // Error handling silently
-    } finally {
-      setIsSubmitting(false);
-    }
-  }, [isDisabled, onRespond, checkedNumbers, takesTypedText, textInputValue]);
-
-  // Issue #2945: a verdict or a choice number for an addressable decision.
-  const handleStructuredRespond = useCallback(async (answer: string) => {
-    if (isDisabled) return;
-    setIsSubmitting(true);
-    try {
-      await onRespond(answer);
-    } catch {
-      // Error handling silently
-    } finally {
-      setIsSubmitting(false);
-    }
-  }, [isDisabled, onRespond]);
 
   return (
     <div className="space-y-4">
@@ -883,7 +721,7 @@ function StructuredQuestionChoices({
   disabled,
   onRespond,
 }: {
-  choices: PromptQuestionChoices;
+  choices: QuestionChoices;
   disabled: boolean;
   onRespond: (answer: string) => Promise<void>;
 }) {

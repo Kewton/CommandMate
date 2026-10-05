@@ -134,11 +134,6 @@ export function isOpencodeV2StructuredHistoryLive(target: AgentInstanceRef): boo
   return getOpencodeV2Liveness(target).state === 'live';
 }
 
-/** The port an open subscription reads, or null. */
-export function getOpencodeV2SubscribedPort(target: AgentInstanceRef): number | null {
-  return subscriptions.get(opencodeV2KeyOf(target))?.port ?? null;
-}
-
 function handleFor(state: SubscriptionState): Subscription {
   return {
     close: async () => {

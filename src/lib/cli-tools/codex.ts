@@ -6,10 +6,7 @@
 import { BaseCLITool } from './base';
 import type { CLIToolType } from './types';
 import {
-  hasSession,
-  createSession,
   sendKeys,
-  killSession,
   sendSpecialKey,
   capturePane,
   getSessionWorkingDirectory,
@@ -42,11 +39,9 @@ import {
   buildAgentLaunchCommandLine,
 } from '@/lib/session/agent-session-lifecycle';
 import {
-  TUI_SESSION_CREATE_WAIT_MS,
   TUI_EXIT_WAIT_MS,
   CODEX_DIALOG_SETTLE_MS,
 } from '@/config/cli-tool-timing-config';
-import { missingToolError } from './install-hints';
 import { withLaunchScreenCleared } from '@/lib/session/launch-screen';
 import { getErrorMessage } from '@/lib/errors';
 
@@ -238,32 +233,22 @@ export class CodexTool extends BaseCLITool {
    */
   protected async launchSession(worktreeId: string, worktreePath: string, instanceId?: string): Promise<void> {
     // Check if Codex is installed
-    const codexAvailable = await this.isInstalled();
-    if (!codexAvailable) {
-      throw missingToolError(this);
-    }
+    await this.requireInstalled();
 
-    const sessionName = this.getSessionName(worktreeId, instanceId);
-
-    // Check if session already exists
-    const exists = await hasSession(sessionName);
-    if (exists) {
-      await this.reconcileExistingSession(sessionName, worktreePath);
-
-      // Issue #2070: this branch used to return unconditionally, and that is
-      // the second half of the reported bug. codex's own "1. Update now"
-      // replaces codex with `npm install` and exits; `Ctrl+C` twice quits it; a
-      // crash does the same. The tmux session survives all three, so `exists`
-      // stays true and the launch was skipped for a pane that had nothing but a
-      // shell prompt in it — leaving `kill-session` by hand as the only
-      // recovery. When the tool is gone we fall THROUGH and re-send the launch
-      // command into the same pane.
-      if (await this.isToolLive(sessionName, { confirm: true })) {
-        logger.info('codex-session-sessionname');
-        return;
-      }
-      logger.warn('codex-session-relaunch', { sessionName });
-    }
+    // Issue #2070: this branch used to return unconditionally, and that is
+    // the second half of the reported bug. codex's own "1. Update now"
+    // replaces codex with `npm install` and exits; `Ctrl+C` twice quits it; a
+    // crash does the same. The tmux session survives all three, so `exists`
+    // stays true and the launch was skipped for a pane that had nothing but a
+    // shell prompt in it — leaving `kill-session` by hand as the only
+    // recovery. When the tool is gone we fall THROUGH and re-send the launch
+    // command into the same pane.
+    const { sessionName, exists, live } = await this.resolveLaunchPane(worktreeId, worktreePath, instanceId, {
+      logger,
+      liveAction: 'codex-session-sessionname',
+      relaunchAction: 'codex-session-relaunch',
+    });
+    if (live) return;
 
     // Issue #1760: everything the previous codex process reported through this
     // (worktreeId, instanceId) belongs to a session that no longer exists, and
@@ -284,13 +269,7 @@ export class CodexTool extends BaseCLITool {
         // Create tmux session. Codex is inline-rendered, so its transcript lives in
         // the pane scrollback — depth comes from the shared TMUX_HISTORY_LIMIT
         // default (Issue #1624), do not re-hardcode it here.
-        await createSession({
-          sessionName,
-          workingDirectory: worktreePath,
-        });
-
-        // Wait a moment for the session to be created
-        await new Promise((resolve) => setTimeout(resolve, TUI_SESSION_CREATE_WAIT_MS));
+        await this.createLaunchPane(sessionName, worktreePath);
       }
 
       // Issue #1760: hand this session its correlation keys, writing codex's
@@ -850,28 +829,17 @@ export class CodexTool extends BaseCLITool {
    * @param worktreeId - Worktree ID
    */
   async killSession(worktreeId: string, instanceId?: string): Promise<void> {
-    const sessionName = this.getSessionName(worktreeId, instanceId);
-
-    try {
+    await this.requestExitAndKill(worktreeId, instanceId, {
+      logger,
+      stoppedAction: 'stopped-codex-session:sessionname',
       // Send Ctrl+D to exit Codex gracefully
-      const exists = await hasSession(sessionName);
-      if (exists) {
+      requestExit: async (sessionName) => {
         // Send Ctrl+D (ASCII 4)
         await sendSpecialKey(sessionName, 'C-d');
 
         // Wait a moment for Codex to exit
         await new Promise((resolve) => setTimeout(resolve, TUI_EXIT_WAIT_MS));
-      }
-
-      // Kill the tmux session
-      const killed = await killSession(sessionName);
-
-      if (killed) {
-        logger.info('stopped-codex-session:sessionname');
-      }
-    } catch (error: unknown) {
-      logger.error('session:stop-failed', { error: getErrorMessage(error) });
-      throw error;
-    }
+      },
+    });
   }
 }
