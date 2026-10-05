@@ -61,6 +61,7 @@ import { createLogger } from '@/lib/logger';
 import { buildAttachmentContentDisposition } from '@/lib/http/content-disposition';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 import type { FileReadOnlyReason } from '@/types/models';
+import { readJsonBody } from '@/lib/api/read-json-body';
 
 const logger = createLogger('api/files');
 
@@ -838,7 +839,11 @@ export async function PUT(
       return createErrorResponse('NOT_EDITABLE', 'File type is not editable');
     }
 
-    const body = await request.json();
+    const parsed = await readJsonBody(request);
+    if (!parsed.ok) {
+      return createErrorResponse('INVALID_REQUEST', 'Invalid request body');
+    }
+    const body = parsed.body;
     const { content } = body;
 
     if (content === undefined) {
@@ -889,7 +894,11 @@ export async function POST(
 
     const { worktree, relativePath } = result;
 
-    const body = await request.json();
+    const parsed = await readJsonBody(request);
+    if (!parsed.ok) {
+      return createErrorResponse('INVALID_REQUEST', 'Invalid request body');
+    }
+    const body = parsed.body;
     const { type, content } = body;
 
     if (!type || !['file', 'directory'].includes(type)) {
@@ -982,7 +991,11 @@ export async function PATCH(
 
     const { worktree, relativePath } = result;
 
-    const body = await request.json();
+    const parsed = await readJsonBody(request);
+    if (!parsed.ok) {
+      return createErrorResponse('INVALID_REQUEST', 'Invalid request body');
+    }
+    const body = parsed.body;
     const { action, newName, destination } = body;
 
     switch (action) {
