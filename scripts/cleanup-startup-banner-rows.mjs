@@ -16,33 +16,43 @@
  *
  * ## How a row is told apart (the "経路の見分け方" of #3293, plus the banner text)
  *
- * A candidate is an `assistant` row of `codex` or `vibe-local` that
+ * Every `assistant` row of `codex` or `vibe-local` whose text holds the startup
+ * screen's own words — `>_ OpenAI Codex (v` for codex, `O F F L I N E  A I  C O D I N G`
+ * or `vibe-local (vibe-coder)` for vibe-local — is looked at. It is a candidate
+ * only when all of these hold, checked in this order (the first that fails is
+ * the reason it is left):
  *
- *  1. carries the startup screen's own text near its top — `>_ OpenAI Codex (v`
- *     for codex, `vibe-local (vibe-coder)` or `O F F L I N E  A I  C O D I N G`
- *     for vibe-local — on one of its first {@link BANNER_HEAD_ROWS} non-empty rows;
- *  2. holds no echoed user message (a row that does is a turn glued under the
- *     banner, and deleting it would delete the reply too);
- *  3. matches one of the two paths that saved it:
+ *  1. `keyed-row`: it has no `request_id`. The transcript writers (codex's
+ *     `codex-turn:<id>` rows) key every row they write, and they also date a
+ *     reply 1 ms before the next message; the screen reads never key a codex or
+ *     vibe-local row;
+ *  2. `holds-echo`: it holds no echoed user message. A row that does is a turn
+ *     glued under the banner, and deleting it would delete the reply too;
+ *  3. `has-body`: it is the startup screen and nothing else — every non-empty
+ *     row is one the startup screen draws (see {@link isStartupScreenOnly}).
+ *     A reply that quotes the banner has rows of its own and is never a candidate;
+ *  4. `no-path-match`: it matches one of the two paths that saved it:
  *     - path A (the poller): the content keeps its colour escapes (`ESC[`);
  *     - path B (the pre-send flush): no colour escapes, and the next `user` row
  *       of the same worktree and instance is exactly 1 ms later.
  *
- * Rows that pass (1) but not (2) or (3) are reported as "left" with their ids,
- * for a person to look at. They are never deleted.
+ * The rows are matched as the saving code left them, not as the pane drew
+ * them: both paths drop the rows the tool's skip patterns name
+ * (`lib/detection/cli-patterns.ts`), which for vibe-local include the
+ * `🤖 vibe-local (vibe-coder)` row itself.
+ *
+ * Rows that are left are listed with their ids and reason, for a person to look
+ * at. They are never deleted.
  */
 
 import Database from 'better-sqlite3';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-/** How many non-empty rows from the top the banner text is looked for in. */
-export const BANNER_HEAD_ROWS = 5;
-
-/** The startup screens' own text, per tool. */
+/** The startup screens' own words, per tool: a row holding one is looked at. */
 export const BANNER_MARKERS = Object.freeze({
   codex: [/>_ OpenAI Codex \(v\d/],
-  'vibe-local': [/vibe-local \(vibe-coder\)/, /O F F L I N E\s+A I\s+C O D I N G/],
+  'vibe-local': [/O F F L I N E\s+A I\s+C O D I N G/, /vibe-local \(vibe-coder\)/],
 });
 
 /** An echoed user message: codex `› <text>`, vibe-local `ctx:N% ❯ <text>`. */
@@ -50,6 +60,36 @@ const ECHO_PATTERNS = Object.freeze({
   codex: /^›\s+\S/,
   'vibe-local': /^ctx:\d+%\s*[>❯]\s*\S/,
 });
+
+/** A row of drawing only: box drawing, block elements, braille (the logos and rules). */
+const ART_ROW = /^[\s\u2500-\u259F\u2800-\u28FF]+$/u;
+
+/** codex 0.160.0's banner row, the first row of its startup screen. */
+const CODEX_BANNER_ROW = /^>_ OpenAI Codex \(v[\d.]+[^)]*\)$/;
+
+/** codex's second banner row: the working directory. */
+const CODEX_CWD_ROW = /^[~/]/;
+
+/** The longest one-line tagline codex draws under the cwd (measured ones are ~50 characters). */
+const CODEX_TAGLINE_MAX = 120;
+
+/**
+ * The rows vibe-local's startup screen draws that survive the saving code's
+ * filter (measured on 1.3.3, `tests/fixtures/startup-screen-3293/`).
+ */
+const VIBE_LOCAL_STARTUP_ROWS = Object.freeze([
+  ART_ROW,
+  /^=+$/,
+  /^(Model|Ollama|Engine|Sidecar):\s/,
+  /O F F L I N E\s+A I\s+C O D I N G/,
+  /^v\d+\.\d+\.\d+\s+\/\//,
+  /^\S+\s+(Model|Sidecar|Mode|Engine|RAM|CWD)\s/,
+  /vibe-local|vibe-coder/,
+  /^\/help\s/,
+  /^IME/,
+  /^First time\? Try typing:/,
+  /^Type \/help for commands/,
+]);
 
 /** The offset the pre-send flush stamps its row with (ASSISTANT_TIMESTAMP_OFFSET_MS). */
 const FLUSH_OFFSET_MS = 1;
@@ -74,6 +114,7 @@ function hasColourEscapes(text) {
  * @property {string} role
  * @property {string | null} cli_tool_id
  * @property {string | null} instance_id
+ * @property {string | null} request_id
  * @property {string} content
  * @property {number} timestamp
  */
@@ -84,20 +125,67 @@ function instanceOf(row) {
 }
 
 /**
- * Does the row carry its tool's startup screen near its top?
+ * The row's non-empty rows, colour escapes off and trimmed.
+ *
+ * @param {MessageRow} row
+ * @returns {string[]}
+ */
+function nonEmptyRows(row) {
+  return stripAnsi(row.content)
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line !== '');
+}
+
+/**
+ * Does the row hold its tool's startup-screen words anywhere? (Rows that do are
+ * looked at; whether they are candidates is decided by {@link planCleanup}.)
  *
  * @param {MessageRow} row
  * @returns {boolean}
  */
-export function hasStartupBanner(row) {
+export function hasBannerText(row) {
   const markers = BANNER_MARKERS[/** @type {keyof typeof BANNER_MARKERS} */ (row.cli_tool_id)];
   if (!markers) return false;
-  const head = stripAnsi(row.content)
-    .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line !== '')
-    .slice(0, BANNER_HEAD_ROWS);
-  return head.some((line) => markers.some((marker) => marker.test(line)));
+  const text = stripAnsi(row.content);
+  return markers.some((marker) => marker.test(text));
+}
+
+/**
+ * codex 0.160.0: the banner row first, then the cwd, at most one tagline row,
+ * and the logo — nothing else.
+ *
+ * @param {string[]} rows - non-empty rows
+ * @returns {boolean}
+ */
+function isCodexStartupScreenOnly(rows) {
+  if (rows.length === 0 || !CODEX_BANNER_ROW.test(rows[0])) return false;
+  let index = 1;
+  if (index < rows.length && CODEX_CWD_ROW.test(rows[index])) index += 1;
+  if (index < rows.length && !ART_ROW.test(rows[index])) {
+    if (rows[index].length > CODEX_TAGLINE_MAX) return false;
+    index += 1;
+  }
+  return rows.slice(index).every((line) => ART_ROW.test(line));
+}
+
+/**
+ * Is every non-empty row of the saved content one the startup screen draws?
+ *
+ * @param {MessageRow} row
+ * @returns {boolean}
+ */
+export function isStartupScreenOnly(row) {
+  const rows = nonEmptyRows(row);
+  if (row.cli_tool_id === 'codex') return isCodexStartupScreenOnly(rows);
+  if (row.cli_tool_id === 'vibe-local') {
+    return (
+      rows.length > 0 &&
+      hasBannerText(row) &&
+      rows.every((line) => VIBE_LOCAL_STARTUP_ROWS.some((pattern) => pattern.test(line)))
+    );
+  }
+  return false;
 }
 
 /**
@@ -125,9 +213,10 @@ export function savedBy(row, userRows) {
 }
 
 /**
+ * @typedef {'keyed-row' | 'holds-echo' | 'has-body' | 'no-path-match'} LeftReason
  * @typedef {object} CleanupPlan
  * @property {{ id: string; path: 'A' | 'B' }[]} candidates
- * @property {{ id: string; reason: 'holds-echo' | 'no-path-match' }[]} left
+ * @property {{ id: string; reason: LeftReason }[]} left
  */
 
 /**
@@ -151,12 +240,17 @@ export function planCleanup(rows) {
   /** @type {CleanupPlan} */
   const plan = { candidates: [], left: [] };
   const assistants = rows
-    .filter((row) => row.role === 'assistant' && hasStartupBanner(row))
+    .filter((row) => row.role === 'assistant' && hasBannerText(row))
     .sort((a, b) => a.timestamp - b.timestamp);
 
   for (const row of assistants) {
-    if (holdsEcho(row)) {
-      plan.left.push({ id: row.id, reason: 'holds-echo' });
+    /** @type {LeftReason | null} */
+    let reason = null;
+    if (row.request_id !== null && row.request_id !== undefined && row.request_id !== '') reason = 'keyed-row';
+    else if (holdsEcho(row)) reason = 'holds-echo';
+    else if (!isStartupScreenOnly(row)) reason = 'has-body';
+    if (reason !== null) {
+      plan.left.push({ id: row.id, reason });
       continue;
     }
     const users = usersByInstance.get(`${row.worktree_id}\u0000${instanceOf(row)}`) ?? [];
@@ -177,7 +271,7 @@ export function loadRows(db) {
   return /** @type {MessageRow[]} */ (
     db
       .prepare(
-        `SELECT id, worktree_id, role, cli_tool_id, instance_id, content, timestamp
+        `SELECT id, worktree_id, role, cli_tool_id, instance_id, request_id, content, timestamp
          FROM chat_messages WHERE cli_tool_id IN ('codex', 'vibe-local')`
       )
       .all()

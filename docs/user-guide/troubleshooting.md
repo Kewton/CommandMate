@@ -61,31 +61,38 @@ Claude Code は `CLAUDECODE=1` を設定してネストを防止しています�
 
 ## 履歴の先頭に、codex / vibe-local の起動画面の吹き出しが残っている？
 
-以前の版では、codex と vibe-local の起動画面（`>_ OpenAI Codex (v…)` や vibe-local のバナー）が、返答の行として履歴に保存されていました（Issue #3293 で止めました）。既に保存された行は自動では消しません。消すときは、リポジトリの clone（`npm install` 済み）で次の手順を実行してください。
+以前の版では、codex と vibe-local の起動画面（`>_ OpenAI Codex (v…)` や vibe-local のバナー）が、返答の行として履歴に保存されていました（Issue #3293 で止めました）。既に保存された行は自動では消しません。消すときは、リポジトリの clone（`npm install` 済み）で次の手順を実行してください。`sqlite3` コマンドを使います（macOS には入っています）。
+
+**必ずサーバーを止めてから行ってください。** DB は WAL モードで、書き込みの一部は `cm.db-wal` にあります。`cp` で `cm.db` だけを写すと、その分が抜けた写しになり、件数が本体と違ったり、復元で履歴が欠けたりします。バックアップと復元は、SQLite のバックアップ機能（`.backup`）で行います。WAL の内容も含んだ、単独で整合したファイルができます。
 
 ```bash
 # 1. サーバーを止める
 commandmate stop
 
 # 2. バックアップを取る（DB の場所: グローバルインストールは ~/.commandmate/data/cm.db、
-#    CM_DB_PATH を設定していればその値）。cm.db-wal があれば一緒に写す
+#    CM_DB_PATH を設定していればその値）
 DB=~/.commandmate/data/cm.db
-cp -p "$DB" "$DB.bak-3335"
+sqlite3 "$DB" ".backup '$DB.bak-3335'"
 
-# 3. dry-run（既定）。DB は読み取り専用で開き、候補の件数と id だけを出す
+# 3. 写しで試す。バックアップから試行用の写しを作り、dry-run と --apply を写しに対して行う
+sqlite3 "$DB.bak-3335" ".backup '/tmp/cm-3335-try.db'"
+node scripts/cleanup-startup-banner-rows.mjs --db /tmp/cm-3335-try.db
+node scripts/cleanup-startup-banner-rows.mjs --db /tmp/cm-3335-try.db --apply
+
+# 4. 本体で dry-run（既定）。DB は読み取り専用で開き、候補の件数と id だけを出す。
+#    件数と id が 3 と同じであることを確かめる
 node scripts/cleanup-startup-banner-rows.mjs --db "$DB"
 
-# 4. 件数と id を確かめてから、--apply で候補だけを消す
+# 5. 本体で --apply。候補だけを消す
 node scripts/cleanup-startup-banner-rows.mjs --db "$DB" --apply
 
-# 5. サーバーを起動する
+# 6. サーバーを起動する
 commandmate start --daemon
 ```
 
-- 先にバックアップの写し（`cp "$DB.bak-3335" /tmp/try.db`）で 3・4 を試すと安全です
-- 候補は、codex / vibe-local の `assistant` 行のうち、先頭の数行に起動画面の文字があり、利用者の発言のエコーを含まず、保存した経路の形（色の制御文字が残っている、または直後の発言のちょうど 1 ms 前の時刻）に合う行だけです
-- 起動画面の文字はあるが条件に合わない行は「left」として id だけを出し、消しません。必要なら中身を見て判断してください
-- 元に戻すときは、サーバーを止めて `cp -p "$DB.bak-3335" "$DB"` で戻します
+- 候補は、codex / vibe-local の `assistant` 行のうち、次をすべて満たす行だけです: 転写の保存が付ける `request_id` が無い／利用者の発言のエコーを含まない／中身が起動画面の行だけで、返答の本文が無い／保存した経路の形（色の制御文字が残っている、または直後の発言のちょうど 1 ms 前の時刻）に合う
+- 起動画面の文字はあるが条件に合わない行は「left」として id と理由（`keyed-row`・`holds-echo`・`has-body`・`no-path-match`）だけを出し、消しません。必要なら中身を見て判断してください
+- 元に戻すときは、サーバーを止めてから、バックアップを本体へ戻します: `sqlite3 "$DB" ".restore '$DB.bak-3335'"`
 
 ## FAQ
 

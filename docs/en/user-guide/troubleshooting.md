@@ -61,31 +61,38 @@ Claude Code sets `CLAUDECODE=1` to prevent nesting. CommandMate removes this aut
 
 ## The History opens with a codex / vibe-local startup-screen bubble?
 
-Earlier versions saved codex's and vibe-local's startup screen (`>_ OpenAI Codex (v…)`, the vibe-local banner) as a reply row in History (stopped in Issue #3293). Rows that were already saved are not removed automatically. To remove them, run the following from a clone of the repository (after `npm install`).
+Earlier versions saved codex's and vibe-local's startup screen (`>_ OpenAI Codex (v…)`, the vibe-local banner) as a reply row in History (stopped in Issue #3293). Rows that were already saved are not removed automatically. To remove them, run the following from a clone of the repository (after `npm install`). It uses the `sqlite3` command (preinstalled on macOS).
+
+**Stop the server first.** The database runs in WAL mode, so part of what was written is in `cm.db-wal`. A `cp` of `cm.db` alone leaves that out: its count can differ from the real database, and restoring it can lose History. Back up and restore with SQLite's backup feature (`.backup`), which writes one self-contained, consistent file that includes the WAL's contents.
 
 ```bash
 # 1. Stop the server
 commandmate stop
 
 # 2. Back up the database (global install: ~/.commandmate/data/cm.db,
-#    or the value of CM_DB_PATH if you set one). Copy cm.db-wal too if it exists
+#    or the value of CM_DB_PATH if you set one)
 DB=~/.commandmate/data/cm.db
-cp -p "$DB" "$DB.bak-3335"
+sqlite3 "$DB" ".backup '$DB.bak-3335'"
 
-# 3. Dry run (the default). Opens the DB read-only and prints the candidate count and ids only
+# 3. Try it on a copy: make a trial copy from the backup, and run the dry run and --apply on it
+sqlite3 "$DB.bak-3335" ".backup '/tmp/cm-3335-try.db'"
+node scripts/cleanup-startup-banner-rows.mjs --db /tmp/cm-3335-try.db
+node scripts/cleanup-startup-banner-rows.mjs --db /tmp/cm-3335-try.db --apply
+
+# 4. Dry run on the real database (the default). Opens it read-only and prints the
+#    candidate count and ids only. Check they are the same as in step 3
 node scripts/cleanup-startup-banner-rows.mjs --db "$DB"
 
-# 4. Once the count and ids look right, delete only the candidates with --apply
+# 5. --apply on the real database: deletes the candidates only
 node scripts/cleanup-startup-banner-rows.mjs --db "$DB" --apply
 
-# 5. Start the server
+# 6. Start the server
 commandmate start --daemon
 ```
 
-- Trying steps 3 and 4 on a copy of the backup first (`cp "$DB.bak-3335" /tmp/try.db`) is the safe way
-- A candidate is a codex / vibe-local `assistant` row with the startup screen's text in its first few rows, no echoed user message in it, and the shape of the path that saved it (colour escapes still in it, or a timestamp exactly 1 ms before the next message)
-- Rows with the startup-screen text that do not meet those conditions are printed as "left", by id, and never deleted. Look at them yourself if needed
-- To undo, stop the server and restore with `cp -p "$DB.bak-3335" "$DB"`
+- A candidate is a codex / vibe-local `assistant` row that meets all of these: no `request_id` (the transcript writer sets one on every row it writes) / no echoed user message in it / nothing but startup-screen rows, no reply body / the shape of the path that saved it (colour escapes still in it, or a timestamp exactly 1 ms before the next message)
+- Rows with the startup-screen text that do not meet those conditions are printed as "left", with the id and the reason (`keyed-row`, `holds-echo`, `has-body`, `no-path-match`), and never deleted. Look at them yourself if needed
+- To undo, stop the server and restore the backup into the database: `sqlite3 "$DB" ".restore '$DB.bak-3335'"`
 
 ## FAQ
 
