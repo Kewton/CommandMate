@@ -987,6 +987,9 @@ export class OpenCodeTool extends BaseCLITool {
       // Issue #405: Invalidate cache after session kill
       invalidateCache(sessionName);
 
+      // Logged unconditionally: after a successful `/exit` no tmux kill runs, so
+      // there is no `killed` value to test, unlike `requestExitAndKill` in
+      // base.ts (logs only when the kill returned true) (#3232).
       logger.info('stopped-opencode-session:sessionname');
     } catch (error: unknown) {
       logger.error('session:stop-failed', { error: getErrorMessage(error) });

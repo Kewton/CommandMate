@@ -1192,6 +1192,7 @@ function notRunningStage(
   //         finished and its session was stopped.
   // Path B: agent completed task (sessionStatus === 'ready', input prompt detected)
   // Both indicate "no more work in progress" from wait command's perspective.
+  // (This stage handles Path A only; Path B is checked in `readyStage`.)
   //
   // Issue #1628 narrowed Path A: a session that was NEVER seen running is
   // "nothing to wait for" (NOT_STARTED), not a completion. See `everRunning`.
@@ -1200,12 +1201,6 @@ function notRunningStage(
     return exitWith({ exitCode: VerifyExitCode.NOT_STARTED });
   }
 
-  // Issue #1708 narrowed Path B: `ready` is only a completion when the frame
-  // was actually understood. A structured `hook_stop` over an unreadable
-  // pane is the degraded form of an overlay nobody could parse (see the note
-  // above), and reporting it as `Completed` is how a stalled worker gets
-  // merged. Path A is untouched — a session that went away really is
-  // finished, and carries no flag anyway.
   if (!data.isRunning) {
     console.error(
       `Completed: ${worktreeId} (basis=${COMPLETION_BASIS.SESSION_GONE}${selfResumeSuffix()})`,
@@ -1426,6 +1421,12 @@ async function readyStage(
   selfResumeStopAt: number | null,
   selfResumeSuffix: () => string,
 ): Promise<StageOutcome> {
+  // Issue #1708 narrowed Path B: `ready` is only a completion when the frame
+  // was actually understood. A structured `hook_stop` over an unreadable
+  // pane is the degraded form of an overlay nobody could parse (see the note
+  // above), and reporting it as `Completed` is how a stalled worker gets
+  // merged. Path A is untouched — a session that went away really is
+  // finished, and carries no flag anyway.
   if (data.sessionStatus === 'ready' && data.isUnclassifiedActive !== true) {
     const faultOutcome = upstreamFaultStage(poll, data);
     if (faultOutcome.kind !== 'next') return faultOutcome;

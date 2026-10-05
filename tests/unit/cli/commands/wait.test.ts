@@ -654,12 +654,12 @@ describe('Issue #520: sessionStatus completion detection', () => {
       expect(mockExit).toHaveBeenCalledWith(WaitExitCode.SUCCESS);
     });
 
-    // `isUnclassifiedActive` is raised by TWO states:
-    //   (running && default) || (ready && no_recent_output)
-    // The second is what a static unreadable overlay DEGRADES into once the
-    // Auto-Yes poller stamps lastServerResponseTimestamp — about 5s
-    // (STALE_OUTPUT_THRESHOLD_MS), twelve times faster than this dwell. So
-    // `ready` here means "still unreadable, and now stale too", not "finished".
+    // Current servers raise `isUnclassifiedActive` only with `running` and one of
+    // `no_recent_output` / `unknown_frame` / `default` (status-evidence.ts). The
+    // `ready`/`no_recent_output` shape below is the form a server that predates
+    // #1927 published once a static unreadable overlay went stale (~5s,
+    // STALE_OUTPUT_THRESHOLD_MS, far faster than this dwell). `ready` there
+    // means "still unreadable, and now stale too", not "finished".
     describe('the degraded `ready`/`no_recent_output` form is not a completion', () => {
       const degraded = {
         ...unclassified,

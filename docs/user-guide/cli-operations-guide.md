@@ -139,8 +139,8 @@ commandmate-main       main                  idle     -                         
 
 ### REASON列の意味（Issue #1926）
 
-STATUS の**根拠**です。同じ `ready` でも「エージェントが composer に戻った」（`input_prompt`）と
-「画面が読めないまま出力も止まったのでフォールバックで ready と呼んでいる」（`no_recent_output`）は
+STATUS の**根拠**です。同じ `ready` でも「エージェントが composer に戻った」（`input_prompt`）と、
+画面が読めないまま出力が止まった状態（`no_recent_output`。こちらは `running` で表示されます）は
 別物で、これまで表からは区別できませんでした。
 
 | 表示 | 意味 |
@@ -148,7 +148,7 @@ STATUS の**根拠**です。同じ `ready` でも「エージェントが compo
 | `input_prompt` | composer（入力プロンプト）を検出した |
 | `thinking_indicator` | 思考インジケータを検出した |
 | `prompt_detected` | 確認プロンプトを解析できた |
-| `<reason> (no evidence)` | **肯定的証拠なし**（`statusEvidence: 'none'`）。検出層が画面を分類できず、STATUS はフォールバック値です。現状は `default` と `no_recent_output` の 2 経路 |
+| `<reason> (no evidence)` | **肯定的証拠なし**（`statusEvidence: 'none'`）。STATUS はフォールバック値です。画面を分類できなかった場合（`running` で理由が `no_recent_output` / `unknown_frame` / `default`）のほか、分類はできたが肯定的な根拠が無い場合（例: どのツール別ルールも保証しない待機中の composer、`input_prompt`）にも付きます |
 | `-` | サーバーが理由を返さない。#1926 以前のサーバー／セッション未起動／そのツールに 2 つ以上のインスタンスがある（集約に単一の理由は無い）のいずれか |
 
 > `(no evidence)` の行は「完了した」ではありません。`commandmate capture <id> --pane` で
@@ -165,7 +165,7 @@ commandmate ls --json \
 
 | フィールド | 意味 |
 |---|---|
-| `sessionStatusByCli.<tool>.statusEvidence` | `'positive'`（何かが肯定的に確認した）／`'none'`（読めなかった） |
+| `sessionStatusByCli.<tool>.statusEvidence` | `'positive'`（何かが肯定的に確認した）／`'none'`（肯定的な裏付けが無い。読めなかった場合を含む） |
 | `sessionStatusByCli.<tool>.sessionStatusReason` | スクレイパーの理由コード |
 | `sessionStatusByCli.<tool>.lastKnownStatus` / `lastKnownStatusAt` | 最後に**肯定的に確認できた**状態とその時刻。サーバーのメモリ上に保持（TTL 30 分、再起動でクリア、セッション停止で破棄） |
 
@@ -577,16 +577,16 @@ opencode 以外のツールでは常に `null` です（そもそも判定しま
 
 #### `ready` は必ずしも「完了」ではありません
 
-`isUnclassifiedActive` は次の 2 状態で立ちます。
+`isUnclassifiedActive` は、`sessionStatus=running` で、理由が `no_recent_output` / `unknown_frame` /
+`default` のいずれかのときに立ちます（検出層のどの規則もそのフレームを読めなかった状態。Issue #2011）。
 
 ```
-(sessionStatus=running && reason=default) || (sessionStatus=ready && reason=no_recent_output)
+sessionStatus=running && reason ∈ {no_recent_output, unknown_frame, default}
 ```
 
-後者は**読めないオーバーレイが劣化した姿**です。出力が止まったフレームは、サーバの Auto-Yes ポーラが
-`lastServerResponseTimestamp` を打った時点から約 5 秒（`STALE_OUTPUT_THRESHOLD_MS`）で
-`running`/`default` → `ready`/`no_recent_output` に反転します。つまり `ready` でも
-「完了した」とは限らず、「まだ読めないうえに出力も止まった」という意味になり得ます。
+`no_recent_output` は、出力が約 5 秒（`STALE_OUTPUT_THRESHOLD_MS`）止まったフレームに付く理由で、
+`running` のまま出ます（以前は `ready` に反転していましたが、止まった作業を「完了」と呼ばないために廃止されました）。
+`ready` で `no_recent_output` を返すのは、この廃止より前のサーバーだけです。
 
 そのため **`isUnclassifiedActive` が立っている間は `wait` は完了判定を行いません**。
 本物の完了は `ready`/`input_prompt`（エージェントが composer に戻った状態）で、こちらはフラグを
@@ -1696,7 +1696,7 @@ commandmate capture "$WT" --json | jq -r 'select(.structuredEvents.source.degrad
 | 値 | 意味 |
 |---|---|
 | `statusEvidence: "positive"` | 完了マーカー・思考インジケータ・解析できたプロンプト・composer、あるいはエージェント自身の `Stop` が判定の根拠 |
-| `statusEvidence: "none"` | 対話中の画面なのに検出層が読めなかった。`sessionStatus` はフォールバック値。現状は `running`/`default` と `ready`/`no_recent_output` の 2 経路で、既存の `isUnclassifiedActive` と**同じ事実**（`statusEvidence === 'none'` ⇔ `isUnclassifiedActive === true`） |
+| `statusEvidence: "none"` | 判定に肯定的な裏付けが無い（画面が読めなかった場合を含む）。`sessionStatus` はフォールバック値。`isUnclassifiedActive` とは**別の事実**です（Issue #2011）。待機中の composer でどのツール別ルールも保証しないものは、`statusEvidence: "none"` でも分類済み（`isUnclassifiedActive: false`）で、`wait` は完了します |
 
 `lastKnownStatus` / `lastKnownStatusAt` は**最後に肯定的に確認できた状態**とその時刻です。
 `statusEvidence` が `"positive"` の間は `sessionStatus` と同じ値で、`"none"` になった瞬間から
