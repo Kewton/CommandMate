@@ -41,8 +41,10 @@ import { waitForVerification } from '@/lib/verification/gate-runner';
 import {
   clearAgentStopEvents,
   getLastStopEventAt,
+  getStructuredSessionState,
 } from '@/lib/session/agent-event-state';
 import { AUTH_EXCLUDED_PATHS } from '@/config/auth-config';
+import { freezeClock, unfreezeClock } from '@tests/helpers/frozen-clock';
 import { removeTempDir } from '@tests/helpers/temp-dir';
 
 declare module '@/lib/db/db-instance' {
@@ -459,6 +461,111 @@ describe('sessions with no contract are unaffected', () => {
     // `pending` is not an active status, so the task is never resolved at all.
     expect(listTaskEvents(db, task.id)).toHaveLength(0);
     expect(getTask(db, task.id)?.status).toBe('pending');
+  });
+});
+
+describe('a short turn the agent started for itself (Issue #3289)', () => {
+  /**
+   * The server log of 2026-10-05, claude 2.1.289: a `Stop`, the
+   * `UserPromptSubmit` of the turn a background task's completion notice opened
+   * 540 ms later, and that turn's `Stop` 1473 ms after the first. The second
+   * `Stop` was logged `agent-event-duplicate-dropped`, the turn stayed open, and
+   * `commandmate wait` did not return.
+   *
+   * The clock is driven by hand because the receiver stamps each delivery with
+   * `Date.now()`, and "inside the three-second window" has to be a fact of the
+   * case rather than of how fast the machine ran it.
+   */
+  const T = 1_800_000_000_000;
+  const PROMPT_AFTER_MS = 540;
+  const SECOND_STOP_AFTER_MS = 1473;
+  const SESSION = 'sess-3289';
+
+  afterEach(() => unfreezeClock());
+
+  /** Deliver one event at `T + afterMs`, in the shape the relay script posts. */
+  async function deliver(
+    event: string,
+    afterMs: number,
+    extra: { tool?: string; detail?: string } = {}
+  ) {
+    freezeClock(T + afterMs);
+    const response = await postEvent({
+      tool: 'claude',
+      event,
+      cwd: repo,
+      sessionId: SESSION,
+      ...extra,
+    });
+    expect(response.status).toBe(202);
+  }
+
+  it('applies the second stop, and the turn it ends is closed', async () => {
+    const task = seedTask({ status: 'running' });
+
+    await deliver('stop', 0);
+    expect(getLastStopEventAt(wtId, 'claude')).toBe(T);
+
+    await deliver('user_prompt_submit', PROMPT_AFTER_MS);
+    expect(getStructuredSessionState(wtId, 'claude')?.status).toBe('running');
+
+    await deliver('stop', SECOND_STOP_AFTER_MS);
+
+    expect(getLastStopEventAt(wtId, 'claude')).toBe(T + SECOND_STOP_AFTER_MS);
+    expect(getStructuredSessionState(wtId, 'claude')?.status).toBe('ready');
+    expect(listTaskEvents(db, task.id).map((event) => event.event)).toEqual([
+      'agent_idle',
+      'agent_idle',
+    ]);
+  });
+
+  it('still drops the second stop when no turn started in between', async () => {
+    // The control for the case above: same session, same two timestamps, and
+    // the only thing missing is the turn start.
+    const task = seedTask({ status: 'running' });
+
+    await deliver('stop', 0);
+    await deliver('stop', SECOND_STOP_AFTER_MS);
+
+    expect(getLastStopEventAt(wtId, 'claude')).toBe(T);
+    expect(listTaskEvents(db, task.id)).toHaveLength(1);
+  });
+
+  it('applies one stop per turn on a host that delivers every event twice (#1722)', async () => {
+    const task = seedTask({ status: 'running' });
+
+    await deliver('stop', 0);
+    await deliver('stop', 20);
+    await deliver('user_prompt_submit', PROMPT_AFTER_MS);
+    await deliver('user_prompt_submit', PROMPT_AFTER_MS + 20);
+    await deliver('stop', SECOND_STOP_AFTER_MS);
+    await deliver('stop', SECOND_STOP_AFTER_MS + 20);
+
+    // The 1st and the 5th delivery, and neither copy.
+    expect(listTaskEvents(db, task.id)).toHaveLength(2);
+    expect(getLastStopEventAt(wtId, 'claude')).toBe(T + SECOND_STOP_AFTER_MS);
+    expect(getStructuredSessionState(wtId, 'claude')?.status).toBe('ready');
+  });
+
+  it('does the same for the tools whose turns are opened by a tool event', async () => {
+    // Neither sends `user_prompt_submit` (`capabilities.supportedEvents`): the
+    // first event this server sees of an antigravity turn is `post_tool_use`,
+    // and of a Command Code turn `pre_tool_use`.
+    const cases = [
+      { tool: 'antigravity', event: 'post_tool_use', detail: 'run_command' },
+      { tool: 'command-code', event: 'pre_tool_use', detail: 'Bash' },
+    ] as const;
+
+    for (const { tool, event, detail } of cases) {
+      await deliver('stop', 0, { tool });
+      await deliver(event, PROMPT_AFTER_MS, { tool, detail });
+      expect(getStructuredSessionState(wtId, tool)?.status, tool).toBe('running');
+
+      await deliver('stop', SECOND_STOP_AFTER_MS, { tool });
+
+      expect(getLastStopEventAt(wtId, tool), tool).toBe(T + SECOND_STOP_AFTER_MS);
+      expect(getStructuredSessionState(wtId, tool)?.status, tool).toBe('ready');
+    }
   });
 });
 
