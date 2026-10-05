@@ -17,9 +17,18 @@ vi.mock('@/lib/db', () => ({
 vi.mock('@/lib/realtime/terminal-broadcast', () => ({
   broadcastTerminalSnapshotAfterInteraction: vi.fn().mockResolvedValue(undefined),
 }));
+// Issue #3290: the route now asks who owns the session before it calls the
+// gateway. This suite is about the request's shape, so the answer is "this
+// worktree" unless a test says otherwise; the real check against tmux is
+// exercised in foreign-session-routes-2865.test.ts.
+vi.mock('@/lib/cli-tools/session-ownership', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/cli-tools/session-ownership')>()),
+  checkSessionOwnership: vi.fn(),
+}));
 
 import { POST } from '@/app/api/worktrees/[id]/direct-input/route';
 import { sendDirectInput } from '@/lib/cli-tools/direct-input';
+import { checkSessionOwnership } from '@/lib/cli-tools/session-ownership';
 import { getWorktreeById } from '@/lib/db';
 import { broadcastTerminalSnapshotAfterInteraction } from '@/lib/realtime/terminal-broadcast';
 import { MAX_DIRECT_INPUT_EVENTS } from '@/types/direct-input';
@@ -41,6 +50,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(getWorktreeById).mockReturnValue({ id: 'wt-1' } as never);
   vi.mocked(sendDirectInput).mockResolvedValue('sent');
+  vi.mocked(checkSessionOwnership).mockResolvedValue({ verdict: 'owned', sessionPath: '/repo/wt-1' });
 });
 
 describe('[#2765] 受け付ける入力', () => {
@@ -113,5 +123,51 @@ describe('[#2765] 404 / 500', () => {
     const res = await POST(request({ cliToolId: 'claude', events: APPROVE }), params);
     expect(res.status).toBe(500);
     expect(await res.json()).toEqual({ error: 'Failed to send direct input to terminal' });
+  });
+});
+
+describe('[#3290] セッションの所有の確認（gateway を呼ぶ前）', () => {
+  it('別サーバーのセッションは 409（gateway を呼ばない。スナップショットも流さない）', async () => {
+    vi.mocked(checkSessionOwnership).mockResolvedValue({ verdict: 'foreign', sessionPath: '/other/wt-1' });
+
+    const res = await POST(request({ cliToolId: 'claude', events: APPROVE }), params);
+
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({
+      error: 'tmux session "mcbd-claude-wt-1" belongs to another CommandMate server',
+      code: 'session_owned_by_other_server',
+      sessionName: 'mcbd-claude-wt-1',
+      sessionPath: '/other/wt-1',
+    });
+    expect(sendDirectInput).not.toHaveBeenCalled();
+    expect(broadcastTerminalSnapshotAfterInteraction).not.toHaveBeenCalled();
+  });
+
+  it('セッションが無ければ 404（gateway を呼ばない）', async () => {
+    vi.mocked(checkSessionOwnership).mockResolvedValue({ verdict: 'absent', sessionPath: null });
+
+    const res = await POST(request({ cliToolId: 'claude', events: APPROVE }), params);
+
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: 'Session not found' });
+    expect(sendDirectInput).not.toHaveBeenCalled();
+  });
+
+  it('確かめる相手は、gateway が送る先と同じセッション（instanceId 込みの名前と、worktree の path）', async () => {
+    vi.mocked(getWorktreeById).mockReturnValue({ id: 'wt-1', path: '/repo/wt-1' } as never);
+
+    await POST(request({ cliToolId: 'command-code', events: APPROVE, instanceId: 'command-code-2' }), params);
+
+    expect(checkSessionOwnership).toHaveBeenCalledTimes(1);
+    expect(checkSessionOwnership).toHaveBeenCalledWith('mcbd-command-code-wt-1-2', '/repo/wt-1');
+    expect(sendDirectInput).toHaveBeenCalledWith('command-code', 'wt-1', APPROVE, 'command-code-2');
+  });
+
+  it('形の不正（400）と worktree 不在（404）では、tmux に所有を尋ねない', async () => {
+    await POST(request({ cliToolId: 'claude', events: [] }), params);
+    vi.mocked(getWorktreeById).mockReturnValue(undefined as never);
+    await POST(request({ cliToolId: 'claude', events: APPROVE }), params);
+
+    expect(checkSessionOwnership).not.toHaveBeenCalled();
   });
 });

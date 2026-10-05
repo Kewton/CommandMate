@@ -24,6 +24,7 @@ const createSession = vi.fn(async () => {});
 const sendKeys = vi.fn(async () => {});
 const capturePane = vi.fn(async () => 'captured');
 const killSession = vi.fn(async () => true);
+const sendDirectInputAndInvalidate = vi.fn(async () => {});
 
 vi.mock('@/lib/tmux/tmux', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/tmux/tmux')>();
@@ -35,6 +36,7 @@ vi.mock('@/lib/tmux/tmux', async (importOriginal) => {
     sendKeys: (...args: unknown[]) => sendKeys(...(args as [])),
     capturePane: (...args: unknown[]) => capturePane(...(args as [])),
     killSession: (...args: unknown[]) => killSession(...(args as [])),
+    sendDirectInputAndInvalidate: (...args: unknown[]) => sendDirectInputAndInvalidate(...(args as [])),
     listSessions: vi.fn(async () => []),
     reconcileSessionGeometry: vi.fn(async () => false),
     sendSpecialKey: vi.fn(async () => {}),
@@ -70,6 +72,7 @@ vi.mock('@/lib/db/db-instance', () => {
 import { POST as capture } from '@/app/api/worktrees/[id]/capture/route';
 import { POST as send } from '@/app/api/worktrees/[id]/send/route';
 import { POST as killSessionRoute } from '@/app/api/worktrees/[id]/kill-session/route';
+import { POST as directInput } from '@/app/api/worktrees/[id]/direct-input/route';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { resetForeignSessionWarningsForTesting } from '@/lib/tmux/session-ownership';
 
@@ -239,5 +242,70 @@ describe('[#2865] POST /kill-session', () => {
     });
     expect(codexKill).not.toHaveBeenCalled();
     expect(killSession).not.toHaveBeenCalled();
+  });
+});
+
+describe('[#3290] POST /direct-input', () => {
+  // The route #2865's grep did not return: it reaches tmux through
+  // `sendDirectInput`, so it kept looking the session up by name only.
+  const events = [{ type: 'text', text: 'rm -rf build' }, { type: 'key', key: 'Enter' }];
+
+  it('answers 409 with the ownership code and types nothing into a foreign session', async () => {
+    sessionPaths({ [CLAUDE_SESSION]: OTHER_SERVER_PATH });
+
+    const res = await directInput(request('direct-input', { cliToolId: 'claude', events }), params());
+    await settle();
+
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({
+      code: 'session_owned_by_other_server',
+      sessionName: CLAUDE_SESSION,
+      sessionPath: OTHER_SERVER_PATH,
+    });
+    expect(sendDirectInputAndInvalidate).not.toHaveBeenCalled();
+    expect(sendKeys).not.toHaveBeenCalled();
+  });
+
+  it('answers 409 when the foreign session_path cannot be read (fail safe)', async () => {
+    getSessionWorkingDirectory.mockResolvedValue(null);
+
+    const res = await directInput(request('direct-input', { cliToolId: 'claude', events }), params());
+
+    expect(res.status).toBe(409);
+    expect(sendDirectInputAndInvalidate).not.toHaveBeenCalled();
+  });
+
+  it('checks the instance\'s own session, not the primary\'s', async () => {
+    const instanceSession = `${CODEX_SESSION}-2`;
+    sessionPaths({ [instanceSession]: OTHER_SERVER_PATH });
+
+    const res = await directInput(
+      request('direct-input', { cliToolId: 'codex', instanceId: 'codex-2', events }),
+      params()
+    );
+
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ sessionName: instanceSession, sessionPath: OTHER_SERVER_PATH });
+    expect(sendDirectInputAndInvalidate).not.toHaveBeenCalled();
+  });
+
+  it('answers 404 and types nothing when there is no session', async () => {
+    hasSession.mockResolvedValue(false);
+
+    const res = await directInput(request('direct-input', { cliToolId: 'claude', events }), params());
+
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: 'Session not found' });
+    expect(sendDirectInputAndInvalidate).not.toHaveBeenCalled();
+  });
+
+  it('types into its own session exactly as before (control)', async () => {
+    const res = await directInput(request('direct-input', { cliToolId: 'claude', events }), params());
+    await settle();
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ success: true });
+    expect(sendDirectInputAndInvalidate).toHaveBeenCalledTimes(1);
+    expect(sendDirectInputAndInvalidate).toHaveBeenCalledWith(CLAUDE_SESSION, events);
   });
 });
