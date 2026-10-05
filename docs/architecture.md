@@ -196,13 +196,17 @@ graph TD
   押せる確定は既定のモデル（`~/.claude/settings.json`）を書き換える Enter だけになっていた。
   いまは選択リストの操作を `SelectionListKeys` 1 つが描き、何を出すかは
   `lib/session/selection-list-ops.ts`（`readSelectionListFrame` でフレームを読み、
-  `resolveSelectionListOps` で決める）だけが決める。カード・PC footer・スマホの docked の
-  3 か所が同じ部品を、同じフレーム（`PaneTerminalState.output` / poll の `fullOutput`）の
-  読み取りで載せる。**選択リストの操作を足すときは、このモジュールと部品に足す**（面ごとの
+  `resolveSelectionListOps` で決める）だけが決める。カード・PC footer・スマホの docked・
+  `/sessions` タイルのターミナル面（`SessionTile`、#3336）の 4 か所が同じ部品を、同じフレーム
+  （`PaneTerminalState.output` / poll の `fullOutput`）の読み取りで載せる。番号キーの数は、
+  末尾 40 行の数と、カードが描く範囲（`extractDialogFrameTail(frame, { selectionList: true })`）
+  の数の小さいほう（#3336。番号の無いダイアログの上の番号つき本文を数えない）。**選択リストの操作を足すときは、このモジュールと部品に足す**（面ごとの
   分岐に足さない）。
   面で違う点は同ファイルの冒頭に列挙した 3 つだけ: ターミナル面は「既定に設定」が出る間
   ラベルの無い Enter を出さない／Plan review の操作（#3139）と opencode のモデルのキーは
-  カードだけ
+  カードだけ。footer はチャット面でも出たままなので、カードが選択リストを開いている間
+  （`isChatCardSelectionListOpen`）は PC・スマホとも footer の `OpencodeQuickKeys` を出さない
+  （モデルのキーを 2 か所に出さない、#3336）。ターミナル面の footer は変えない
 - **スマホの docked はフレームを持たない**（画面の poll はペインの文字列を持たない、#736）。
   しかも docked はターミナル以外のタブ（History / Files / Tools / Info）でも出たままで、そこにはフレームを持つ
   `MobileTerminalTab` が居ない。そこで、タブに関係なく走っている `useWorktreeDetailController` の

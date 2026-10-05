@@ -242,9 +242,16 @@ describe('unused (knip)', () => {
       ],
     });
     const m = ok(measureKnip(text));
-    expect(Object.keys(m.findings).sort()).toEqual(['left-pad', 'old-tool']);
+    expect(Object.keys(m.findings).sort()).toEqual(['left-pad', 'old-tool', 'src/dead.ts']);
+    expect(m.value).toBe(2);
     expect(m.details).toEqual({ unusedExports: 3, unusedFiles: 1 });
     expect(measureKnip('knip crashed').status).toBe('skip');
+  });
+
+  it('saves the unused file paths as items (repo-relative) and reads per-issue files too', () => {
+    const m = ok(measureKnip(JSON.stringify({ files: ['src/a.ts', 'src/b.ts'], issues: [{ file: 'src/c.ts', files: [{ name: 'src/c.ts' }] }] })));
+    expect(m.items).toEqual({ 'src/a.ts': 1, 'src/b.ts': 1, 'src/c.ts': 1 });
+    expect(m.details).toEqual({ unusedExports: 0, unusedFiles: 3 });
   });
 });
 

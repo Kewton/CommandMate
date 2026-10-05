@@ -408,15 +408,17 @@ function names(value: unknown): string[] {
     .filter((name): name is string => name !== undefined);
 }
 
-/** `knip --reporter json`: unused dependencies are findings; unused exports are counted. */
+/** `knip --reporter json`: unused dependencies and files are findings (files keyed by repo-relative path); unused exports are counted. */
 export function measureKnip(text: string): MetricMeasurement {
   const json = parseJson(text);
   if (!isRecord(json) || !Array.isArray(json.issues)) return skip('unused', 'knip の JSON 出力に issues が無い');
   const findings: Record<string, MetricFinding> = {};
   const items: Record<string, number> = {};
   let exports = 0;
+  const unusedFiles = new Set<string>(names(json.files));
   for (const issue of json.issues) {
     if (!isRecord(issue)) continue;
+    for (const file of names(issue.files)) unusedFiles.add(file);
     exports += names(issue.exports).length + names(issue.types).length;
     for (const [field, label] of [
       ['dependencies', 'dependencies'],
@@ -432,13 +434,22 @@ export function measureKnip(text: string): MetricMeasurement {
       }
     }
   }
+  const dependencies = Object.keys(findings).length;
+  for (const file of unusedFiles) {
+    items[file] = 1;
+    findings[file] = {
+      target: file,
+      title: `chore: 未使用のファイル ${file} を確認する`,
+      evidence: `knip: ${file} はどこからも import されていない（消して安全かは別途確認する）`,
+    };
+  }
   return {
     metricId: 'unused',
     status: 'ok',
-    value: Object.keys(findings).length,
+    value: dependencies,
     items,
     findings,
-    details: { unusedExports: exports, unusedFiles: Array.isArray(json.files) ? json.files.length : 0 },
+    details: { unusedExports: exports, unusedFiles: unusedFiles.size },
   };
 }
 
