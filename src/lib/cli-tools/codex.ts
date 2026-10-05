@@ -814,6 +814,10 @@ export class CodexTool extends BaseCLITool {
         // Issue #1933: the tool describes its own composer; the sender no
         // longer keys three module-level tables on the id.
         composer: this.describeComposer(),
+        // Issue #3366: codex draws fast keystrokes only when the burst ends and
+        // turns an Enter that arrives before that into a newline, so Enter
+        // waits until the composer shows the body.
+        awaitTypedBody: true,
       });
 
       // Issue #405: Invalidate cache after sending message

@@ -66,6 +66,18 @@
  * bracketed paste, which the TUI reads as a unit), and Enter is withheld until
  * the composer shows the whole of it ({@link classifyPasteLanded}). The
  * measurements are in `docs/design/2464-long-body-repro-matrix.md`.
+ *
+ * Issue #3366 is the Enter arriving before the body on codex. codex 0.160.0
+ * holds fast keystrokes back as a "paste burst" and draws them only once the
+ * burst is over — measured at 200x1000: 34 characters after ~180 ms, 80 after
+ * ~380 ms, 135 after ~630 ms, 539 after ~2.2 s — and an Enter that lands inside
+ * the burst becomes a newline in the composer. The old fixed 100 ms wait pressed
+ * Enter there, and the read-back 200 ms later still saw the idle placeholder
+ * (the body had not been drawn yet), which it read as "the message left the
+ * box": `Message sent.`, with the body sitting unsent in the composer. So for
+ * codex, Enter now waits until the composer shows the typed body
+ * ({@link confirmTypedBodyLanded}); a body that never appears THROWS before
+ * Enter, as #2464 does for a paste.
  */
 
 import * as childProcess from 'child_process';
@@ -87,6 +99,7 @@ import {
 } from '@/config/cli-tool-timing-config';
 import { createLogger } from '@/lib/logger';
 import { clearComposer } from '@/lib/session/composer-clear';
+import { extractComposerText, SUPPORTED_COMPOSER_TOOLS } from '@/lib/detection/composer-text';
 
 const logger = createLogger('cli-tools/submit-verified-sender');
 
@@ -125,6 +138,22 @@ const PASTE_LANDED_POLL_MS = 100;
 
 /** Composer reads before a paste that has not fully appeared is abandoned (2 s). */
 const DEFAULT_PASTE_LANDED_ATTEMPTS = 20;
+
+/**
+ * How often the composer is read while a TYPED body is expected to appear in it
+ * (Issue #3366). codex draws a burst of keystrokes all at once when the burst
+ * ends, so the poll only decides how late after that moment Enter goes in.
+ */
+const TYPED_BODY_POLL_MS = 50;
+
+/**
+ * Composer reads before a typed body that has not appeared is abandoned (5 s).
+ *
+ * codex 0.160.0 drew a 539-character body ~2.2 s after `send-keys` — about 4 ms
+ * per character — and a typed body is at most {@link LITERAL_SEND_MAX_BYTES},
+ * so this is roughly twice the slowest draw measured, for a loaded machine.
+ */
+const DEFAULT_TYPED_BODY_ATTEMPTS = 100;
 
 /** Per-command timeout for `load-buffer` / `paste-buffer`, as for every other tmux call. */
 const PASTE_COMMAND_TIMEOUT_MS = 5000;
@@ -332,6 +361,23 @@ export interface SubmitVerifiedSendParams {
    * Default DEFAULT_PASTE_LANDED_ATTEMPTS (20, i.e. 2 s at the poll interval).
    */
   pasteLandedAttempts?: number;
+  /**
+   * Before Enter, wait until the composer shows the TYPED body (Issue #3366).
+   *
+   * For a TUI that draws fast keystrokes only once they stop arriving (codex's
+   * paste burst) and turns an Enter that arrives earlier into a newline. Only a
+   * tool whose composer `extractComposerText` can read (claude, codex) takes
+   * part; for any other the flag is ignored. A body that does not appear within
+   * {@link typedBodyAttempts} reads THROWS before Enter, with nothing submitted.
+   * Default false: the fixed {@link textInputWaitMs} alone, as before.
+   */
+  awaitTypedBody?: boolean;
+  /**
+   * Composer reads while waiting for a typed body (only with
+   * {@link awaitTypedBody}). Default DEFAULT_TYPED_BODY_ATTEMPTS (100, i.e. 5 s
+   * at the poll interval).
+   */
+  typedBodyAttempts?: number;
 }
 
 /**
@@ -751,6 +797,76 @@ async function confirmPasteLanded(params: {
   );
 }
 
+/** The text with every whitespace character removed — wrapping and indent proof. */
+function compactText(text: string): string {
+  return text.replace(/\s+/g, '');
+}
+
+/**
+ * The part of a typed body the composer reader can see (Issue #3366).
+ *
+ * The codex reader takes the composer as one run of non-blank rows, so a blank
+ * line inside the body ends what it returns: what it can show is the body up to
+ * its first blank line after the first non-blank one. Leading blank lines are
+ * kept — they are drawn as composer rows of their own and compact to nothing.
+ */
+function visibleTypedBody(message: string): string {
+  const lines = message.split('\n');
+  const first = lines.findIndex((line) => line.trim() !== '');
+  if (first < 0) return '';
+  const blank = lines.findIndex((line, index) => index > first && line.trim() === '');
+  return lines.slice(0, blank < 0 ? lines.length : blank).join('\n');
+}
+
+/**
+ * Wait until the composer shows the typed body; only then may Enter be pressed
+ * (Issue #3366).
+ *
+ * codex 0.160.0 keeps fast keystrokes in a "paste burst" and inserts them in
+ * one go when the burst ends, which took ~4 ms per character at 200x1000
+ * (`tests/fixtures/codex-send-burst-3366/`). Until then the composer shows its
+ * dim `Ask Codex to do anything`, and an Enter that lands in the burst becomes a
+ * newline under the body. The verdict is therefore "the composer's real (not
+ * dim) text is the body", read with `extractComposerText`, and nothing less:
+ * a prefix is not enough, because codex can draw the first keystrokes before it
+ * decides the rest are a burst.
+ *
+ * A body that never appears is taken back out and the send THROWS without
+ * Enter — nothing was submitted, so the caller must not print `Message sent.`.
+ *
+ * @throws Error when the composer does not show the body within the attempts
+ */
+async function confirmTypedBodyLanded(params: {
+  sessionName: string;
+  message: string;
+  cliToolId: CLIToolType;
+  composer: ComposerSpec;
+  attempts: number;
+}): Promise<void> {
+  const { sessionName, message, cliToolId, composer, attempts } = params;
+  const expected = compactText(visibleTypedBody(message));
+  if (expected === '') return;
+
+  let output = '';
+  for (let attempt = 0; attempt < Math.max(1, attempts); attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, TYPED_BODY_POLL_MS));
+    output = await capturePane(sessionName, { startLine: -composer.verifyCaptureLines });
+    const read = extractComposerText(output, cliToolId);
+    if (read.state === 'content' && compactText(read.text) === expected) return;
+  }
+
+  const bytes = Buffer.byteLength(message, 'utf8');
+  const shown = describeComposer(output, composer);
+  await withdrawUnsentBody(sessionName, cliToolId, composer);
+  invalidateCache(sessionName);
+  logger.error('typed-body-not-landed', { sessionName, cliToolId, bytes, attempts, shown });
+  throw new Error(
+    `Message body did not appear in the composer for session ${sessionName} within ` +
+      `${attempts * TYPED_BODY_POLL_MS}ms (it shows ${shown}); the message is ${bytes} bytes. ` +
+      'Enter was not pressed, so nothing was submitted (Issue #3366).'
+  );
+}
+
 /**
  * Empty the composer before the body is typed into it (Issue #1880).
  *
@@ -866,6 +982,8 @@ export async function sendMessageWithSubmitVerification(
     verifyAttempts = DEFAULT_VERIFY_ATTEMPTS,
     verifyDelayMs = TUI_MESSAGE_PROCESSED_WAIT_MS,
     pasteLandedAttempts = DEFAULT_PASTE_LANDED_ATTEMPTS,
+    awaitTypedBody = false,
+    typedBodyAttempts = DEFAULT_TYPED_BODY_ATTEMPTS,
   } = params;
   const submitEnterCount = params.submitEnterCount ?? composer.submitEnterCount;
 
@@ -896,10 +1014,20 @@ export async function sendMessageWithSubmitVerification(
     //    sent SIGINT — and a body starting with `-` was eaten by getopt and sent
     //    nowhere at all, with `rc 0`. All four measured on tmux 3.5a; the argv is
     //    built in `lib/tmux/key-sequence.ts`, which carries the table.
+    const typedAt = Date.now();
     await sendKeys(sessionName, message, false, { literal: true });
 
-    // 2. Let the TUI register the input before pressing Enter.
-    await new Promise((resolve) => setTimeout(resolve, textInputWaitMs));
+    // 2. Let the TUI register the input before pressing Enter. On codex that
+    //    means waiting until the body is drawn (Issue #3366): an Enter pressed
+    //    while codex still holds the keystrokes as a paste burst becomes a
+    //    newline, and the body stays unsent. The fixed wait stays as a floor.
+    if (awaitTypedBody && SUPPORTED_COMPOSER_TOOLS.has(cliToolId)) {
+      await confirmTypedBodyLanded({ sessionName, message, cliToolId, composer, attempts: typedBodyAttempts });
+    }
+    const remaining = textInputWaitMs - (Date.now() - typedAt);
+    if (remaining > 0) {
+      await new Promise((resolve) => setTimeout(resolve, remaining));
+    }
   }
 
   // 3. Submit as a separate command (double Enter for vibe-local's IME mode).
