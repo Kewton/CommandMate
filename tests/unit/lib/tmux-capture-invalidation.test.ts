@@ -146,6 +146,7 @@ import { sendPromptAnswer } from '@/lib/prompt-answer-sender';
 // to a 5000ms timeout, for a cost that is not the assertion. `vi.mock` calls
 // are hoisted above every import, so the mocks above still apply.
 import { cleanupWorktreeSessions } from '@/lib/session-cleanup';
+import { capturePane, sendKeys, sendSpecialKeys } from '@/lib/tmux/tmux';
 
 describe('tmux capture cache invalidation (Issue #405)', () => {
   beforeEach(() => {
@@ -178,9 +179,27 @@ describe('tmux capture cache invalidation (Issue #405)', () => {
 
   describe('codex.ts', () => {
     it('should invalidate cache after sendMessage', async () => {
-      const codex = new CodexTool();
-      await codex.sendMessage('test-wt', 'hello');
-      expect(invalidateCacheSpy).toHaveBeenCalledWith('mcbd-codex-test-wt');
+      // Issue #3366: codex presses Enter only once the composer shows the typed
+      // body, so between the body and Enter the mocked pane draws it there.
+      let typed = false;
+      vi.mocked(sendKeys).mockImplementation(async () => {
+        typed = true;
+      });
+      vi.mocked(sendSpecialKeys).mockImplementation(async () => {
+        typed = false;
+      });
+      vi.mocked(capturePane).mockImplementation(async () =>
+        typed ? '› hello\n\n  gpt-5 · /tmp/wt\n' : '❯ \n› '
+      );
+      try {
+        const codex = new CodexTool();
+        await codex.sendMessage('test-wt', 'hello');
+        expect(invalidateCacheSpy).toHaveBeenCalledWith('mcbd-codex-test-wt');
+      } finally {
+        vi.mocked(sendKeys).mockResolvedValue(undefined);
+        vi.mocked(sendSpecialKeys).mockResolvedValue(undefined);
+        vi.mocked(capturePane).mockResolvedValue('❯ \n› ');
+      }
     });
   });
 
