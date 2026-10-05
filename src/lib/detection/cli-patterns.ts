@@ -512,11 +512,12 @@ export { stripBoxDrawing };
  * prompt-detector.ts remains CLI tool independent (Issue #161 principle);
  * this function lives in cli-patterns.ts which already depends on CLIToolType.
  *
- * [Future extension memo (C-002)]
- * If CLI tool count grows significantly (currently 6), consider migrating
- * to a CLIToolConfig registry pattern where tool-specific settings
- * (including promptDetectionOptions) are managed in a Record<CLIToolType, CLIToolConfig>.
- * Migration threshold: 7th tool addition triggers registry pattern migration [D1-003].
+ * [Extension memo (C-002) — carried out]
+ * The memo asked for a registry pattern where tool-specific settings
+ * (including promptDetectionOptions) are managed in a Record<CLIToolType, ...>,
+ * with the 7th tool as the migration threshold [D1-003]. There are 9 tools
+ * today, and Issue #3230 made the move: the settings are the `promptOptions`
+ * column of CLI_TOOL_PATTERN_TABLE.
  *
  * @param cliToolId - CLI tool identifier
  * @returns DetectPromptOptions for the tool, or undefined for default behavior

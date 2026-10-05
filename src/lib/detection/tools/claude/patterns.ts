@@ -1,9 +1,10 @@
 /**
  * Claude Code's own detection patterns (Issue #1927).
  *
- * The regexes shared with other tools stay in `cli-patterns.ts`; what lives here
- * is what Issue #1927 had to measure to give Claude a §4 D1 idle rule, plus the
- * provenance of that measurement.
+ * What comes first is what Issue #1927 had to measure to give Claude a §4 D1
+ * idle rule, plus the provenance of that measurement. Below `VERIFIED_AGAINST`
+ * are the Claude patterns Issue #3217 moved here from `cli-patterns.ts`, which
+ * keeps the per-tool table and re-exports their public names.
  *
  * ## Why Claude needed a new rule at all
  *

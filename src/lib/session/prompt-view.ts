@@ -142,8 +142,9 @@ export function promptHeadingMessage(heading: PromptViewHeading): PromptHeadingM
 
 /**
  * The option labels measured to be a text field on screen (Issue #2573).
- * Restated from `TYPED_TEXT_FIELD_LABEL_PATTERNS` in
- * `lib/detection/prompt-detect-multiple-choice`, whose graph reaches `fs`.
+ * The one definition since Issue #3218: `isTypedTextFieldOption` in
+ * `lib/detection/prompt-detect-multiple-choice`, whose graph reaches `fs`,
+ * reads it through `optionTakesTypedText` below.
  */
 export const TYPED_TEXT_FIELD_LABEL_PATTERNS: readonly RegExp[] = [
   /^[^\S\n]*type\s+something\b/i,

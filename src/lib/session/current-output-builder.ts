@@ -372,9 +372,10 @@ function composePromptData({
   // all while an AskUserQuestion picker is up (§5.6) and a record that asserted
   // `waiting` from the invocation would go on asserting it long after a human
   // answered in the terminal.
-  // Issue #2040 moved the read to the top of this function (the decision entries
-  // publish the same episode's choices) and this line now re-uses it, so the two
-  // surfaces cannot describe different instants.
+  // Issue #2040 moved the read to the top of `buildPayload` — `readAgentEvents`
+  // takes it there today (the decision entries publish the same episode's
+  // choices) — and this line now re-uses it, so the two surfaces cannot describe
+  // different instants.
   const scraperPromptData = statusResult.promptDetection.promptData;
   const correctedPromptData =
     scraperPromptData && askUserQuestion
@@ -395,7 +396,9 @@ function composePromptData({
   // one of these three verdicts.
   //
   // Issue #2031 adds the fourth conjunct and folds the whole gate into ONE
-  // value. The three verdicts and the id they are delivered to are now derived
+  // value — today `promptWaiting !== null` here and the other three inside
+  // `isApiAnswerableStructuredWait` (Issue #3215).
+  // The three verdicts and the id they are delivered to are now derived
   // from the same expression, so they cannot be published apart — and "apart"
   // is not hypothetical, it is the state #1932 shipped: options were published
   // on the capability alone while `decisionId` was published nowhere at all, so
