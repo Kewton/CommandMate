@@ -30,6 +30,7 @@ import {
   getOpencodeV2StateDir,
   opencodeV2KeyOf,
 } from './secrets';
+import { getOrInitGlobal } from '../../../global-state';
 
 const logger = createLogger('lib/hooks/sources/opencode-v2/ports');
 
@@ -53,7 +54,7 @@ declare global {
   var __opencodeV2PortAssignments: Map<string, OpencodeV2PortAssignment> | undefined;
 }
 
-const assignments = (globalThis.__opencodeV2PortAssignments ??= new Map<
+const assignments = getOrInitGlobal('__opencodeV2PortAssignments', () => new Map<
   string,
   OpencodeV2PortAssignment
 >());

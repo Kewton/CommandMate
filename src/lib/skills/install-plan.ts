@@ -50,6 +50,7 @@ import {
   type SkillPlannedFile,
   type SkillPreviewWarningCode,
 } from '@/lib/skills/preview-diff';
+import { getOrInitGlobal } from '../global-state';
 
 // =============================================================================
 // Layout and limits
@@ -405,8 +406,7 @@ declare global {
   var __skillInstallPlans: PlanCacheState | undefined;
 }
 
-const cache: PlanCacheState =
-  globalThis.__skillInstallPlans ?? (globalThis.__skillInstallPlans = { records: new Map() });
+const cache: PlanCacheState = getOrInitGlobal('__skillInstallPlans', () => ({ records: new Map() }));
 
 function dropRecord(record: SkillInstallPlanRecord): void {
   cache.records.delete(record.token);

@@ -87,6 +87,7 @@
  * @module lib/hooks/sources/command-code/history
  */
 
+import { getOrInitGlobal } from '@/lib/global-state';
 import { readdir, stat } from 'fs/promises';
 import { homedir } from 'os';
 import { join } from 'path';
@@ -171,7 +172,7 @@ declare global {
  * Command Code sends `session_id` on all four of its events — but an event that
  * did not would otherwise blank the pointer mid-session.
  */
-const sessionPointers = (globalThis.__commandCodeTranscriptSessions ??= new Map<string, string>());
+const sessionPointers = getOrInitGlobal('__commandCodeTranscriptSessions', () => new Map<string, string>());
 
 /**
  * Where each session id's transcript was found.
@@ -181,7 +182,7 @@ const sessionPointers = (globalThis.__commandCodeTranscriptSessions ??= new Map<
  * directory scan — the project directory name is `slugify(cwd)` and not
  * derivable — and a scan on every finished turn is not something to do twice.
  */
-const transcriptPaths = (globalThis.__commandCodeTranscriptPaths ??= new Map<string, string>());
+const transcriptPaths = getOrInitGlobal('__commandCodeTranscriptPaths', () => new Map<string, string>());
 
 function keyOf(target: AgentInstanceRef): string {
   return buildCompositeKey(target.worktreeId, target.cliToolId, target.instanceId);

@@ -82,6 +82,7 @@ import {
 } from './sources/opencode/client';
 import { getAssignedOpencodePort } from './sources/opencode/ports';
 import type { AgentInstanceRef } from './sources/types';
+import { getOrInitGlobal } from '../global-state';
 
 /**
  * Longest session title kept.
@@ -157,8 +158,7 @@ declare global {
 }
 
 /** compositeKey -> the most recent session description for that instance. */
-const records = globalThis.__agentSessionTelemetry ??
-  (globalThis.__agentSessionTelemetry = new Map<string, AgentSessionRecord>());
+const records = getOrInitGlobal('__agentSessionTelemetry', () => new Map<string, AgentSessionRecord>());
 
 /** Record what the agent last said about this instance's session. */
 export function recordAgentSessionTelemetry(
@@ -354,12 +354,10 @@ export interface AgentSessionContextUsage {
 }
 
 /** compositeKey -> the last context occupancy measured for that instance. */
-const contextUsages = globalThis.__agentSessionContextUsage ??
-  (globalThis.__agentSessionContextUsage = new Map<string, AgentSessionContextUsage>());
+const contextUsages = getOrInitGlobal('__agentSessionContextUsage', () => new Map<string, AgentSessionContextUsage>());
 
 /** compositeKeys with a refresh in flight, so a poll storm makes one request. */
-const contextRefreshes = globalThis.__agentSessionContextRefreshes ??
-  (globalThis.__agentSessionContextRefreshes = new Set<string>());
+const contextRefreshes = getOrInitGlobal('__agentSessionContextRefreshes', () => new Set<string>());
 
 /**
  * The percentage opencode's own footer shows, by opencode's own rule.

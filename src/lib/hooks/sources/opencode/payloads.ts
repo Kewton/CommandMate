@@ -36,6 +36,7 @@ import {
 import type { PermissionRequestPayload } from '@/lib/hooks/permission-request-payload';
 import { isPlainObject, readNestedString, readStringField } from '../event-mapper';
 import type { PendingDecision } from '../types';
+import { getOrInitGlobal } from '../../../global-state';
 
 /**
  * Cap on remembered `callID -> tool name` pairs.
@@ -56,7 +57,7 @@ declare global {
   var __opencodeToolCallNames: Map<string, string> | undefined;
 }
 
-const toolCallNames = (globalThis.__opencodeToolCallNames ??= new Map<string, string>());
+const toolCallNames = getOrInitGlobal('__opencodeToolCallNames', () => new Map<string, string>());
 
 /** Record that a tool call has a name, seen on a `message.part.updated` frame. */
 export function rememberOpencodeToolCall(callId: string, toolName: string): void {

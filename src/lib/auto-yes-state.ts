@@ -15,6 +15,7 @@ import { isValidWorktreeId } from './security/path-validator';
 import { isCliToolType, type CLIToolType } from './cli-tools/types';
 import { createLogger } from '@/lib/logger';
 import type { AutoYesInstanceSummary } from '@/types/auto-yes';
+import { getOrInitGlobal } from './global-state';
 
 const logger = createLogger('auto-yes-state');
 
@@ -149,8 +150,7 @@ declare global {
 }
 
 /** In-memory storage for auto-yes states (globalThis for hot reload persistence) */
-const autoYesStates = globalThis.__autoYesStates ??
-  (globalThis.__autoYesStates = new Map<string, AutoYesState>());
+const autoYesStates = getOrInitGlobal('__autoYesStates', () => new Map<string, AutoYesState>());
 
 // =============================================================================
 // Utility Functions

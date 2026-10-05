@@ -51,6 +51,7 @@
  * @module lib/hooks/sources/codex/history
  */
 
+import { getOrInitGlobal } from '@/lib/global-state';
 import { readdir } from 'fs/promises';
 import { homedir } from 'os';
 import { join } from 'path';
@@ -145,7 +146,7 @@ declare global {
  * codex sends `session_id` on every event it delivers — but a future one that
  * did not would otherwise blank the pointer mid-session.
  */
-const sessionPointers = (globalThis.__codexTranscriptSessions ??= new Map<string, string>());
+const sessionPointers = getOrInitGlobal('__codexTranscriptSessions', () => new Map<string, string>());
 
 /**
  * Where each session id's rollout file was found.
@@ -156,7 +157,7 @@ const sessionPointers = (globalThis.__codexTranscriptSessions ??= new Map<string
  * session started, which is not derivable from the id — and a scan of 1,791
  * files on every finished turn is not something to do twice.
  */
-const rolloutPaths = (globalThis.__codexTranscriptPaths ??= new Map<string, string>());
+const rolloutPaths = getOrInitGlobal('__codexTranscriptPaths', () => new Map<string, string>());
 
 function keyOf(target: AgentInstanceRef): string {
   return buildCompositeKey(target.worktreeId, target.cliToolId, target.instanceId);

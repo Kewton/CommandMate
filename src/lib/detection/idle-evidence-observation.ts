@@ -19,6 +19,7 @@
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import type { IdleEvidenceMode } from '@/config/detection-evidence-config';
 import type { StatusEvidence } from '@/lib/session/status-evidence';
+import { getOrInitGlobal } from '../global-state';
 
 /** One tool's tally since the process started (or the last reset). */
 export interface IdleEvidenceObservation {
@@ -42,8 +43,7 @@ declare global {
 }
 
 const observations =
-  globalThis.__idleEvidenceObservations ??
-  (globalThis.__idleEvidenceObservations = new Map<string, IdleEvidenceObservation>());
+  getOrInitGlobal('__idleEvidenceObservations', () => new Map<string, IdleEvidenceObservation>());
 
 /**
  * Fold one frame's idle-evidence verdict into the tally for `tool`.

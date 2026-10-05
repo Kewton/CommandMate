@@ -76,6 +76,7 @@ import { resolveRelaySession } from '@/lib/relay/relay-session-ref';
 import { writeRelaySystemLine } from '@/lib/relay/relay-system-line';
 import type { SessionRelay } from '@/lib/relay/types';
 import { createLogger } from '@/lib/logger';
+import { getOrInitGlobal } from '../global-state';
 
 const logger = createLogger('relay-delivery');
 
@@ -195,7 +196,7 @@ declare global {
   var __relayPumpRunning: boolean | undefined;
 }
 
-const inFlight = (globalThis.__relayDeliveryInFlight ??= new Set<string>());
+const inFlight = getOrInitGlobal('__relayDeliveryInFlight', () => new Set<string>());
 
 /** Forget every in-flight delivery. Test seam. */
 export function resetRelayDeliveryState(): void {

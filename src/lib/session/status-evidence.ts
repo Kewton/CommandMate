@@ -53,6 +53,7 @@ import { STRUCTURED_STATE_MAX_AGE_MS } from '@/lib/session/agent-event-state';
 // The type lives in an import-free module so `src/cli/types/api-responses.ts`,
 // which cannot resolve `@/`, can share it. Re-exported under the same name.
 import type { StatusEvidence } from './status-evidence-type';
+import { getOrInitGlobal } from '../global-state';
 export type { StatusEvidence };
 
 /**
@@ -138,8 +139,7 @@ declare global {
 }
 
 const latches =
-  globalThis.__lastKnownStatusByKey ??
-  (globalThis.__lastKnownStatusByKey = new Map<string, LastKnownStatus>());
+  getOrInitGlobal('__lastKnownStatusByKey', () => new Map<string, LastKnownStatus>());
 
 /**
  * Cap on retained latches, so a long-lived server cannot grow one per worktree

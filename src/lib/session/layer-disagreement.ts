@@ -42,6 +42,7 @@ import { SELECTION_LIST_REASONS } from '@/lib/detection/status-detector';
 import { stripAnsi } from '@/lib/detection/cli-patterns';
 import { SELF_RESUME_PENDING_DETAIL } from '@/lib/hooks/agent-event-types';
 import { createLogger } from '@/lib/logger';
+import { getOrInitGlobal } from '../global-state';
 
 const logger = createLogger('layer-disagreement');
 
@@ -103,8 +104,7 @@ declare global {
   // eslint-disable-next-line no-var
   var __layerDisagreementReported: Set<string> | undefined;
 }
-const reported = globalThis.__layerDisagreementReported ??
-  (globalThis.__layerDisagreementReported = new Set<string>());
+const reported = getOrInitGlobal('__layerDisagreementReported', () => new Set<string>());
 
 /** Bound on {@link reported}; at the cap the set is cleared (worst case: one repeat line). */
 const REPORTED_CAP = 512;

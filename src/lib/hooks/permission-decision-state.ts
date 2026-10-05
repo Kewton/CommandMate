@@ -32,6 +32,7 @@
 
 import { buildCompositeKey } from '@/lib/auto-yes-state';
 import type { CLIToolType } from '@/lib/cli-tools/types';
+import { getOrInitGlobal } from '../global-state';
 
 /** What happened to one approval this server adjudicated. */
 export interface PermissionDecisionRecord {
@@ -80,8 +81,7 @@ declare global {
 }
 
 /** compositeKey -> the most recent adjudication for that session. */
-const lastDecisions = globalThis.__permissionDecisions ??
-  (globalThis.__permissionDecisions = new Map<string, PermissionDecisionRecord>());
+const lastDecisions = getOrInitGlobal('__permissionDecisions', () => new Map<string, PermissionDecisionRecord>());
 
 /**
  * Record how one approval was adjudicated.

@@ -61,6 +61,7 @@ import {
 } from './client';
 import { isOpencodeV2TurnEndEventType } from './history';
 import { opencodeV2KeyOf, readOpencodeV2Password } from './secrets';
+import { getOrInitGlobal } from '../../../global-state';
 
 const logger = createLogger('lib/hooks/sources/opencode-v2/usage');
 
@@ -204,7 +205,7 @@ declare global {
 }
 
 /** One refresh in flight per instance, on `globalThis` for #1736's reason. */
-const slots = (globalThis.__opencodeV2UsageRefreshes ??= new Map<string, UsageRefreshSlot>());
+const slots = getOrInitGlobal('__opencodeV2UsageRefreshes', () => new Map<string, UsageRefreshSlot>());
 
 /** Forget in-flight markers. Test seam. */
 export function resetOpencodeV2UsageRefreshes(): void {

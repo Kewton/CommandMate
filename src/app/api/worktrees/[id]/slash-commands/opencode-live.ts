@@ -45,6 +45,7 @@ import {
 } from '@/lib/hooks/sources/opencode/ports';
 import { OPENCODE_CLI_TOOL_ID } from '@/lib/hooks/sources/opencode/tool-id';
 import { createLogger } from '@/lib/logger';
+import { getOrInitGlobal } from '@/lib/global-state';
 
 const logger = createLogger('api/slash-commands/opencode-live');
 
@@ -80,7 +81,7 @@ declare global {
   var __opencodeLiveCommandCache: Map<string, OpencodeLiveEntry> | undefined;
 }
 
-const cache = (globalThis.__opencodeLiveCommandCache ??= new Map<string, OpencodeLiveEntry>());
+const cache = getOrInitGlobal('__opencodeLiveCommandCache', () => new Map<string, OpencodeLiveEntry>());
 
 /** Clear the cache. Tests only. */
 export function resetOpencodeLiveCommandCache(): void {

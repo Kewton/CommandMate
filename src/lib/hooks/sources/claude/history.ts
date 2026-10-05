@@ -56,6 +56,7 @@
  * @module lib/hooks/sources/claude/history
  */
 
+import { getOrInitGlobal } from '@/lib/global-state';
 import { open, type FileHandle } from 'fs/promises';
 import { homedir } from 'os';
 import { join } from 'path';
@@ -188,7 +189,7 @@ declare global {
  * mid-session. Same reasoning as `getLastKnownAgentModel`, which latches for the
  * same reason.
  */
-const sessionPointers = (globalThis.__claudeTranscriptSessions ??= new Map<string, string>());
+const sessionPointers = getOrInitGlobal('__claudeTranscriptSessions', () => new Map<string, string>());
 
 function keyOf(target: AgentInstanceRef): string {
   return buildCompositeKey(target.worktreeId, target.cliToolId, target.instanceId);

@@ -54,6 +54,7 @@
  */
 
 import { createLogger } from '@/lib/logger';
+import { getOrInitGlobal } from '../global-state';
 
 const logger = createLogger('publisher-registry');
 
@@ -143,12 +144,12 @@ declare global {
 export const UNROUTED_PUBLISH_WARN_INTERVAL_MS = 60_000;
 
 function unroutedState(): UnroutedPublishState {
-  return (globalThis.__realtimeUnroutedPublish ??= {
+  return getOrInitGlobal('__realtimeUnroutedPublish', () => ({
     total: 0,
     suppressed: 0,
     lastWarnedAt: null,
     operations: {},
-  });
+  }));
 }
 
 /**

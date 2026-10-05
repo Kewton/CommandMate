@@ -9,6 +9,7 @@ import { createLogger } from '@/lib/logger';
 import { settleStructuredHistoryRecheck } from './response-dedup';
 import { captureStructuredHistoryTurn } from './structured-history-gate';
 import { STOP_TRANSCRIPT_DEFERRED_DELAYS_MS } from '@/lib/hooks/stop-history-capture';
+import { getOrInitGlobal } from '../global-state';
 
 const logger = createLogger('response-poller');
 
@@ -80,7 +81,7 @@ declare global {
  * under `next dev` the poller's bundle and each route's bundle would otherwise
  * hold a private copy, and a held reply only one bundle can see is a lost one.
  */
-const pendingScrapedResponses = (globalThis.__pendingScrapedResponses ??= new Map<
+const pendingScrapedResponses = getOrInitGlobal('__pendingScrapedResponses', () => new Map<
   string,
   PendingScrapedResponse
 >());

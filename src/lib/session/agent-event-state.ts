@@ -84,6 +84,7 @@ import {
   type TurnCloseReason,
   type TurnRecord,
 } from '@/lib/session/provisional-turn';
+import { getOrInitGlobal } from '../global-state';
 
 // =============================================================================
 // In-memory State (globalThis, per the convention Issue #153 established)
@@ -152,16 +153,13 @@ declare global {
 }
 
 /** compositeKey -> epoch ms of the most recent stop event. */
-const lastStopEventAt = globalThis.__agentEventLastStopAt ??
-  (globalThis.__agentEventLastStopAt = new Map<string, number>());
+const lastStopEventAt = getOrInitGlobal('__agentEventLastStopAt', () => new Map<string, number>());
 
 /** compositeKey -> the most recent event of any kind. */
-const lastAgentEvent = globalThis.__agentEventLast ??
-  (globalThis.__agentEventLast = new Map<string, AgentEventRecord>());
+const lastAgentEvent = getOrInitGlobal('__agentEventLast', () => new Map<string, AgentEventRecord>());
 
 /** compositeKey -> epoch ms the current generation began. See {@link beginAgentEventGeneration}. */
-const generationStartedAt = globalThis.__agentEventGenerationStartedAt ??
-  (globalThis.__agentEventGenerationStartedAt = new Map<string, number>());
+const generationStartedAt = getOrInitGlobal('__agentEventGenerationStartedAt', () => new Map<string, number>());
 
 /**
  * compositeKey -> the turn this instance is in, or the last one it was in
@@ -179,12 +177,10 @@ const generationStartedAt = globalThis.__agentEventGenerationStartedAt ??
  * *inside* a turn and holding them apart is what let a generation bump retire
  * one and not the other.
  */
-const agentTurns = globalThis.__agentEventTurns ??
-  (globalThis.__agentEventTurns = new Map<string, TurnRecord>());
+const agentTurns = getOrInitGlobal('__agentEventTurns', () => new Map<string, TurnRecord>());
 
 /** compositeKey -> what this instance has had dropped, and why (Issue #1930). */
-const dropCounts = globalThis.__agentEventDrops ??
-  (globalThis.__agentEventDrops = new Map<string, AgentEventDropCounts>());
+const dropCounts = getOrInitGlobal('__agentEventDrops', () => new Map<string, AgentEventDropCounts>());
 
 /**
  * Monotonic suffix for {@link TurnRecord.turnId}.
@@ -195,16 +191,13 @@ const dropCounts = globalThis.__agentEventDrops ??
  * change of id as "a new turn began", so the collision would be a missed turn
  * boundary rather than a cosmetic clash.
  */
-const turnSequence = globalThis.__agentEventTurnSeq ??
-  (globalThis.__agentEventTurnSeq = { value: 0 });
+const turnSequence = getOrInitGlobal('__agentEventTurnSeq', () => ({ value: 0 }));
 
 /** compositeKey -> the `AskUserQuestion` call currently in flight (#1726). */
-const askUserQuestion = globalThis.__agentEventAskUserQuestion ??
-  (globalThis.__agentEventAskUserQuestion = new Map<string, AskUserQuestionEpisode>());
+const askUserQuestion = getOrInitGlobal('__agentEventAskUserQuestion', () => new Map<string, AskUserQuestionEpisode>());
 
 /** dedup key -> epoch ms it was first seen. See {@link isDuplicateAgentEvent}. */
-const recentEventKeys = globalThis.__agentEventRecentKeys ??
-  (globalThis.__agentEventRecentKeys = new Map<string, number>());
+const recentEventKeys = getOrInitGlobal('__agentEventRecentKeys', () => new Map<string, number>());
 
 /**
  * compositeKey -> (identity key -> epoch ms it was first seen) (Issue #1899).
@@ -214,12 +207,10 @@ const recentEventKeys = globalThis.__agentEventRecentKeys ??
  * another's ids and let a genuine re-delivery through on a quiet pane. See
  * {@link claimEventIdentity}.
  */
-const recentEventIdentities = globalThis.__agentEventRecentIdentities ??
-  (globalThis.__agentEventRecentIdentities = new Map<string, Map<string, number>>());
+const recentEventIdentities = getOrInitGlobal('__agentEventRecentIdentities', () => new Map<string, Map<string, number>>());
 
 /** compositeKey -> the agent's own "I am waiting for instructions" (#1786). */
-const awaitingInstruction = globalThis.__agentEventAwaitingInstruction ??
-  (globalThis.__agentEventAwaitingInstruction = new Map<string, AwaitingInstructionRecord>());
+const awaitingInstruction = getOrInitGlobal('__agentEventAwaitingInstruction', () => new Map<string, AwaitingInstructionRecord>());
 
 /**
  * compositeKey -> the last non-null model this instance reported (Issue #1783).
@@ -237,8 +228,7 @@ const awaitingInstruction = globalThis.__agentEventAwaitingInstruction ??
  * honest state for gemini, copilot, and any session that predates this server
  * process. See {@link getLastKnownAgentModel}.
  */
-const lastAgentModel = globalThis.__agentEventLastModel ??
-  (globalThis.__agentEventLastModel = new Map<string, string>());
+const lastAgentModel = getOrInitGlobal('__agentEventLastModel', () => new Map<string, string>());
 
 /**
  * compositeKey -> epoch ms of the report that last wrote {@link lastAgentModel}
@@ -254,8 +244,7 @@ const lastAgentModel = globalThis.__agentEventLastModel ??
  * now matters for the sessions where that hook does not arrive. See
  * {@link resolveAgentModel}.
  */
-const lastAgentModelAt = globalThis.__agentEventLastModelAt ??
-  (globalThis.__agentEventLastModelAt = new Map<string, number>());
+const lastAgentModelAt = getOrInitGlobal('__agentEventLastModelAt', () => new Map<string, number>());
 
 /**
  * What {@link capturedModelInfo} holds per instance (Issue #2361).
@@ -289,8 +278,7 @@ interface CapturedModelRecord extends ModelInfo {
  * stands until the process it described does not (see
  * {@link beginAgentEventGeneration} / {@link discardAgentEventState}).
  */
-const capturedModelInfo = globalThis.__agentCapturedModelInfo ??
-  (globalThis.__agentCapturedModelInfo = new Map<string, CapturedModelRecord>());
+const capturedModelInfo = getOrInitGlobal('__agentCapturedModelInfo', () => new Map<string, CapturedModelRecord>());
 
 /**
  * compositeKey -> the effort the *agent itself* last reported (Issue #2048).
@@ -318,8 +306,7 @@ const capturedModelInfo = globalThis.__agentCapturedModelInfo ??
  * variant is opencode running the model's default, not the previous choice
  * being withdrawn.
  */
-const reportedEffort = globalThis.__agentEventLastEffort ??
-  (globalThis.__agentEventLastEffort = new Map<string, string>());
+const reportedEffort = getOrInitGlobal('__agentEventLastEffort', () => new Map<string, string>());
 
 // =============================================================================
 // Model change detection (Issue #2357)
@@ -378,8 +365,7 @@ export type AgentModelChangeListener = (change: AgentModelChange) => void;
  * on `session_start`, so the first model a new agent process reports is
  * recorded as its starting model and announced to nobody.
  */
-const modelBaseline = globalThis.__agentModelBaseline ??
-  (globalThis.__agentModelBaseline = new Map<string, AgentModelBaseline>());
+const modelBaseline = getOrInitGlobal('__agentModelBaseline', () => new Map<string, AgentModelBaseline>());
 
 /**
  * Listeners for the model edge, on `globalThis` for the reason the maps above
@@ -389,8 +375,7 @@ const modelBaseline = globalThis.__agentModelBaseline ??
  * bundle notify only the listeners registered in the same bundle — which is
  * none, for the one that receives the hook.
  */
-const modelChangeListeners = globalThis.__agentModelChangeListeners ??
-  (globalThis.__agentModelChangeListeners = new Set<AgentModelChangeListener>());
+const modelChangeListeners = getOrInitGlobal('__agentModelChangeListeners', () => new Set<AgentModelChangeListener>());
 
 /**
  * A trailing reasoning-effort token in a model id (`gemini-3.7-flash-high`).
