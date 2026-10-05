@@ -370,7 +370,8 @@ describe('[#2798] no verdict of the existing codex fixture corpus moved', () => 
       '18:composer',
     ],
     [
-      'tests/unit/lib/detection/fixtures/codex-live-1890/composer-residual-multiline.txt', 'running', 'thinking_indicator', false,
+      // #3205: アイドルの 2 行の入力欄。以前はバグの判定を固定していた
+      'tests/unit/lib/detection/fixtures/codex-live-1890/composer-residual-multiline.txt', 'ready', 'input_prompt', false,
       '18:composer',
     ],
     ['tests/unit/lib/detection/fixtures/codex-live-1890/composer-residual-plain.txt', 'ready', 'input_prompt', false, '18:composer'],

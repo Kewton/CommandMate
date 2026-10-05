@@ -522,6 +522,39 @@ function comparePasteToken(token: PasteToken, message: string): PasteLandedState
 }
 
 /**
+ * The composer as {@link classifySubmit} reads it (Issue #3205).
+ *
+ * {@link readComposer}'s marker reader takes the bottom-most `›` row of the
+ * tail as the input line. A codex composer holding several lines draws its
+ * continuation rows under the `›` row, and when one of them itself begins with
+ * `›` — a body quoting a dialog's `› 1. Yes, proceed (y)` — that continuation
+ * row was read as the input line: its text is not the body's first line, so a
+ * body still sitting in the composer was classified `submitted` (F). Measured:
+ * `tests/fixtures/codex-multiline-composer-3205/tc104-raw-pane.txt`.
+ *
+ * So for codex a composer of two or more rows is read with
+ * `extractComposerText` — the #1890 reader `awaitTypedBody` already uses —
+ * and its first line is the input line. Every other frame (a one-row
+ * composer, an empty or ghost one, none at all, another tool) is read exactly
+ * as before.
+ */
+function readSubmitComposer(
+  output: string,
+  cliToolId: CLIToolType,
+  reader: ComposerSpec['reader'],
+  lines: string[],
+  windowLines: string[]
+): ComposerRead {
+  if (cliToolId === 'codex' && reader === 'input-line-marker') {
+    const read = extractComposerText(output, cliToolId);
+    if (read.state === 'content' && read.text.includes('\n')) {
+      return { kind: 'text', text: firstNonBlankLine(read.text), rows: read.text.split('\n') };
+    }
+  }
+  return readComposer(reader, lines, windowLines);
+}
+
+/**
  * Classify a captured pane into submitted / pending / replaced (Issue #1501).
  *
  * Version-independent by design — does NOT require the paste placeholder:
@@ -572,7 +605,7 @@ export function classifySubmit(
     return 'submitted';
   }
 
-  const composer = readComposer(composerSpec.reader, lines, windowLines);
+  const composer = readSubmitComposer(output, cliToolId, composerSpec.reader, lines, windowLines);
 
   // B. No composer visible (scrolled off / dialog / still starting), or the
   //    composer is empty => the message left the box => submitted.
