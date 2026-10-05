@@ -60,6 +60,22 @@ function resolveTarget(cliToolId = 'claude') {
 /** The roster read `attach` makes for the session name: unreadable, so the legacy name is used. */
 const NO_ROSTER = { data: {}, status: 200 };
 
+/** The namespaced name (Issue #2866) the server's routes address for the same session. */
+const NAMESPACED = 'mcbd-0a1b2c3d-claude-wt1';
+const NAMESPACED_TARGET = `=${NAMESPACED}:`;
+
+/** A roster that publishes the name the server uses (Issue #2867). */
+function rosterPublishing(sessionName: string) {
+  return { data: { agentInstances: [{ id: 'claude', cliToolId: 'claude', sessionName }] }, status: 200 };
+}
+
+/** The ownership 409, reporting the name the server checked. */
+function foreignFor(sessionName: string) {
+  return { data: { ...FOREIGN.data, error: `tmux session "${sessionName}" belongs to another CommandMate server`, sessionName }, status: 409 };
+}
+
+const OWN_CAPTURE = { data: { output: '' }, status: 200 };
+
 async function runAttach(argv: string[]): Promise<void> {
   const { createAttachCommand } = await import('@/cli/commands/attach');
   try {
@@ -141,13 +157,24 @@ describe('[#3334] attach to a session another CommandMate server owns', () => {
     expect(stderr()).toContain(`tmux attach -r -t '${TARGET}'`);
   });
 
-  it('attaches with keys enabled when the session is its own (control)', async () => {
-    mockFetchSequence([resolveTarget(), NO_ROSTER, { data: { output: '' }, status: 200 }]);
+  it('attaches with keys enabled when the server vouches for the name it published (control)', async () => {
+    mockFetchSequence([resolveTarget(), rosterPublishing(NAMESPACED), OWN_CAPTURE]);
 
     await runAttach(['wt1']);
 
-    expect(tmuxCalls).toContainEqual(['attach-session', '-t', TARGET]);
+    expect(tmuxCalls).toContainEqual(['attach-session', '-t', NAMESPACED_TARGET]);
     expect(stderr()).not.toContain('another CommandMate server');
+    expect(stderr()).not.toContain('READ-ONLY');
+  });
+
+  it('attaches read-only when the published name is another server\'s', async () => {
+    mockFetchSequence([resolveTarget(), rosterPublishing(NAMESPACED), foreignFor(NAMESPACED)]);
+
+    await runAttach(['wt1']);
+
+    expect(tmuxCalls).toContainEqual(['attach-session', '-r', '-t', NAMESPACED_TARGET]);
+    expect(writes()).toEqual([]);
+    expect(stderr()).toContain('belongs to another CommandMate server');
   });
 
   it('attaches as before when the server cannot say (control)', async () => {
@@ -162,10 +189,60 @@ describe('[#3334] attach to a session another CommandMate server owns', () => {
 
   it('switches with keys enabled from inside tmux when the session is its own (control)', async () => {
     process.env.TMUX = '/tmp/tmux-501/default,123,0';
-    mockFetchSequence([resolveTarget(), NO_ROSTER, { data: { output: '' }, status: 200 }]);
+    mockFetchSequence([resolveTarget(), rosterPublishing(NAMESPACED), OWN_CAPTURE]);
 
     await runAttach(['wt1']);
 
-    expect(tmuxCalls).toContainEqual(['switch-client', '-t', TARGET]);
+    expect(tmuxCalls).toContainEqual(['switch-client', '-t', NAMESPACED_TARGET]);
+  });
+});
+
+/**
+ * The namespaced name and the legacy name can both exist on one tmux socket —
+ * one this server's, the other another server's. When the roster cannot be
+ * read, `attach` connects to the legacy name, while the server's `capture`
+ * checks the namespaced one. Its answer is then about a different session and
+ * must not be read as "yours".
+ */
+describe('[#3334] the server checked a different name than the one attach opens', () => {
+  it('does not take a 200 about the namespaced name as owning the legacy one: read-only', async () => {
+    mockFetchSequence([resolveTarget(), NO_ROSTER, OWN_CAPTURE]);
+
+    await runAttach(['wt1']);
+
+    expect(tmuxCalls).toContainEqual(['attach-session', '-r', '-t', TARGET]);
+    expect(writes()).toEqual([]);
+    expect(stderr()).toContain(`Could not confirm that tmux session "${SESSION}" is this CommandMate server's`);
+    expect(stderr()).toContain('READ-ONLY');
+  });
+
+  it('refuses --live when the name could not be confirmed', async () => {
+    mockFetchSequence([resolveTarget(), NO_ROSTER, OWN_CAPTURE]);
+
+    await runAttach(['wt1', '--live']);
+
+    expect(mockExit).toHaveBeenCalledWith(ExitCode.UNEXPECTED_ERROR);
+    expect(tmuxCalls.map((argv) => argv[0])).toEqual(['has-session']);
+    expect(stderr()).toContain('--live would re-lay that session out');
+  });
+
+  it('refuses switch-client from inside tmux when the name could not be confirmed', async () => {
+    process.env.TMUX = '/tmp/tmux-501/default,123,0';
+    mockFetchSequence([resolveTarget(), NO_ROSTER, OWN_CAPTURE]);
+
+    await runAttach(['wt1']);
+
+    expect(mockExit).toHaveBeenCalledWith(ExitCode.UNEXPECTED_ERROR);
+    expect(tmuxCalls.some((argv) => argv[0] === 'switch-client')).toBe(false);
+    expect(stderr()).toContain(`tmux attach -r -t '${TARGET}'`);
+  });
+
+  it('does not take a 409 about the namespaced name as being about the legacy one either: read-only, saying which name was checked', async () => {
+    mockFetchSequence([resolveTarget(), NO_ROSTER, foreignFor(NAMESPACED)]);
+
+    await runAttach(['wt1']);
+
+    expect(tmuxCalls).toContainEqual(['attach-session', '-r', '-t', TARGET]);
+    expect(stderr()).toContain(`the server checked "${NAMESPACED}"`);
   });
 });

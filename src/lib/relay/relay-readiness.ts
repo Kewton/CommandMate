@@ -18,7 +18,9 @@
  * about a state the send path is the authority on. A refusal there is a retry
  * here.
  *
- * **Is it this server's session?** (Issue #3334) Asked before the pane is read.
+ * **Is it this server's session?** (Issue #3334) Asked first — before the
+ * pane is read, and before `isRunning()`, which reads the pane (claude) or
+ * resumes an event stream (opencode-v2) on its own.
  * `sendUserMessage` refuses a session another CommandMate server created under
  * the same name (#2865), but this check came first and read that pane to judge
  * it — the same order `sendUserMessage` itself was fixed out of. Such a session
@@ -62,14 +64,19 @@ export async function findRelayHoldReason(
   db?: Database.Database
 ): Promise<RelayHoldReason | null> {
   try {
-    const cliTool = CLIToolManager.getInstance().getTool(cliToolId);
-    if (!(await cliTool.isRunning(worktreeId, instanceId))) return 'session_stopped';
-
     // Issue #3334: the session name `sendUserMessage` will address, checked
-    // the way it checks it — before anything reads the pane.
+    // the way it checks it — before anything touches the session. That
+    // includes `isRunning()`: it is not a bare existence test for every tool.
+    // claude's reads the pane to judge its health, and opencode-v2's starts
+    // re-subscribing to the event stream of whatever server sits in the
+    // session's directory.
     const sessionName = resolveSessionName(cliToolId, worktreeId, instanceId);
     const ownership = await checkWorktreeSessionOwnership(worktreeId, sessionName, db);
     if (ownership === null || ownership.verdict === 'foreign') return 'foreign_session';
+    if (ownership.verdict === 'absent') return 'session_stopped';
+
+    const cliTool = CLIToolManager.getInstance().getTool(cliToolId);
+    if (!(await cliTool.isRunning(worktreeId, instanceId))) return 'session_stopped';
 
     const output = await captureSessionOutput(
       worktreeId,

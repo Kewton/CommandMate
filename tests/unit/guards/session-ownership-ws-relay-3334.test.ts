@@ -76,6 +76,15 @@ vi.mock('@/lib/tmux/tmux-control-mode-flags', () => ({
   isTmuxControlModeEnabled: () => true,
 }));
 
+// opencode-v2's `isRunning()` re-subscribes to the event stream of the server in
+// the session's directory (fire and forget). Spied, not replaced, so a call is
+// seen without anything being dialled.
+const opencodeV2Resume = vi.hoisted(() => vi.fn(async () => undefined));
+vi.mock('@/lib/hooks/sources/opencode-v2/runtime', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  resumeOpencodeV2EventStream: opencodeV2Resume,
+}));
+
 import { runMigrations } from '@/lib/db/db-migrations';
 import { upsertWorktree } from '@/lib/db';
 import { createRelay, listRelaysWithPendingPayload, stashRelayPayload } from '@/lib/db/relay-db';
@@ -131,6 +140,7 @@ beforeEach(async () => {
   transport.sendInput.mockReset().mockResolvedValue(undefined);
   transport.resize.mockReset().mockResolvedValue(undefined);
   transport.captureSnapshot.mockReset().mockResolvedValue('');
+  opencodeV2Resume.mockClear();
 });
 
 afterEach(async () => {
@@ -325,5 +335,65 @@ describe('[#3334] relay delivery', () => {
       'capture-pane',
       SESSION,
     ]);
+  });
+});
+
+/**
+ * `isRunning()` is not a bare existence test for every tool, so the ownership
+ * check has to come before it, not after. Codex's is `has-session`; these two
+ * do more with whatever session answers to the name.
+ */
+describe('[#3334] relay readiness asks ownership before isRunning()', () => {
+  const CLAUDE_SESSION = resolveSessionName('claude', WORKTREE_ID);
+  const OPENCODE_V2_SESSION = resolveSessionName('opencode-v2', WORKTREE_ID);
+
+  it('claude: does not read the pane of a session another server owns', async () => {
+    fakeTmux.addSession(CLAUDE_SESSION, OTHER_SERVER_PATH);
+    const { findRelayHoldReason } = await import('@/lib/relay/relay-readiness');
+
+    expect(await findRelayHoldReason(WORKTREE_ID, 'claude', 'claude', db)).toBe('foreign_session');
+    await settle();
+
+    expect(fakeTmux.askedSessionPathOf(CLAUDE_SESSION)).toBe(true);
+    expect(fakeTmux.touches()).toEqual([]);
+  });
+
+  it('claude: reads the pane of its own session (negative control)', async () => {
+    fakeTmux.addSession(CLAUDE_SESSION, WORKTREE_PATH);
+    const { findRelayHoldReason } = await import('@/lib/relay/relay-readiness');
+
+    expect(await findRelayHoldReason(WORKTREE_ID, 'claude', 'claude', db)).not.toBe('foreign_session');
+    await settle();
+
+    expect(fakeTmux.touches().map((touch) => [touch.subcommand, touch.target])).toContainEqual([
+      'capture-pane',
+      CLAUDE_SESSION,
+    ]);
+  });
+
+  it('opencode-v2: does not resume the event stream of a session another server owns', async () => {
+    fakeTmux.addSession(OPENCODE_V2_SESSION, OTHER_SERVER_PATH);
+    const { findRelayHoldReason } = await import('@/lib/relay/relay-readiness');
+
+    expect(await findRelayHoldReason(WORKTREE_ID, 'opencode-v2', 'opencode-v2', db)).toBe('foreign_session');
+    await settle();
+
+    expect(opencodeV2Resume).not.toHaveBeenCalled();
+    expect(fakeTmux.touches()).toEqual([]);
+  });
+
+  it('opencode-v2: resumes the event stream of its own session (negative control)', async () => {
+    // A worktree of its own: the tool throttles resume attempts per session
+    // name for the life of the process, and the case above may have used it.
+    const ownId = 'wt-3334-v2-own';
+    const ownPath = '/nonexistent-3334/this-server/wt-3334-v2-own';
+    upsertWorktree(db, worktree(ownId, ownPath));
+    fakeTmux.addSession(resolveSessionName('opencode-v2', ownId), ownPath);
+    const { findRelayHoldReason } = await import('@/lib/relay/relay-readiness');
+
+    expect(await findRelayHoldReason(ownId, 'opencode-v2', 'opencode-v2', db)).not.toBe('foreign_session');
+    await settle();
+
+    expect(opencodeV2Resume).toHaveBeenCalledWith(expect.anything(), ownPath);
   });
 });

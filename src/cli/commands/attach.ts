@@ -96,6 +96,18 @@ async function resolveTarget(
   };
 }
 
+/** The name `attach` will connect to, and whether the server published it. */
+export interface AttachSessionTarget {
+  sessionName: string;
+  /**
+   * True when the name came from the server's roster (Issue #2867); false when
+   * it is the legacy name assembled here because the roster could not supply
+   * one. Only a published name is the one the server's own routes address, so
+   * only a published name can be vouched for by them (Issue #3334).
+   */
+  published: boolean;
+}
+
 /**
  * The tmux session name the server uses for this (tool, instance) (Issue #2867).
  *
@@ -113,24 +125,44 @@ async function resolveAttachSessionName(
   worktreeId: string,
   cliToolId: string,
   instanceId: string | undefined
-): Promise<string> {
+): Promise<AttachSessionTarget> {
   const targetId = instanceId ?? cliToolId;
   try {
     const instances = await fetchAgentInstances(client, worktreeId);
     const published = instances.find((inst) => inst.id === targetId)?.sessionName;
     if (published) {
       validateSessionName(published);
-      return published;
+      return { sessionName: published, published: true };
     }
   } catch {
     // Fall through to the legacy name.
   }
-  return resolveLegacySessionName(cliToolId as CLIToolType, worktreeId, instanceId);
+  return {
+    sessionName: resolveLegacySessionName(cliToolId as CLIToolType, worktreeId, instanceId),
+    published: false,
+  };
 }
 
 /**
- * Whether the server says the session under this name is ANOTHER CommandMate
- * server's (Issue #3334). Returns that 409's body, or null.
+ * What the server could say about the session `attach` is about to open.
+ *
+ * - `owned`: the server's ownership check passed, for this very name.
+ * - `foreign`: the server answered 409 `session_owned_by_other_server` for
+ *   this very name.
+ * - `unconfirmed`: the server answered, but about a DIFFERENT name than the
+ *   one `attach` connects to — so its answer says nothing about this one.
+ * - `unanswered`: no ownership answer at all (a server older than #2865, a
+ *   failure, no server).
+ */
+export type AttachOwnership =
+  | { verdict: 'owned' }
+  | { verdict: 'foreign'; payload: ApiErrorPayload }
+  | { verdict: 'unconfirmed'; checkedName: string | null }
+  | { verdict: 'unanswered' };
+
+/**
+ * Ask the server whether the session `attach` is about to open is its own
+ * (Issue #3334).
  *
  * ## Why ask the server, and why through `capture`
  *
@@ -143,34 +175,48 @@ async function resolveAttachSessionName(
  * `lines: 1` is the cheapest of them, reads nothing it would not show anyway,
  * and sends tmux no key.
  *
- * Every other outcome — an owned session, a server older than #2865, a server
- * that cannot be reached — is null, and the attach goes on exactly as before:
- * the local `has-session` above has already said there is something to attach
- * to, and this probe exists only to stop typing into somebody else's session.
+ * ## The name has to be the same one
+ *
+ * The route checks the name IT resolves — the namespaced one, or the legacy
+ * one it adopted — which is exactly the name the roster publishes. When the
+ * roster could not be read, `attach` falls back to the legacy name, and a 200
+ * from `capture` is then about a different session: the namespaced name and
+ * the legacy name can both exist, one this server's and one another's. So a
+ * 200 counts as `owned` only for a published name, and a 409 counts as
+ * `foreign` only when the name it reports is the one being opened. Anything
+ * else the server answered is `unconfirmed`.
  */
-export async function findForeignSession(
+export async function checkAttachOwnership(
   client: ApiClient,
   worktreeId: string,
   cliToolId: string,
-  instanceId: string | undefined
-): Promise<ApiErrorPayload | null> {
+  instanceId: string | undefined,
+  target: AttachSessionTarget
+): Promise<AttachOwnership> {
   try {
     await client.post(`/api/worktrees/${worktreeId}/capture`, {
       cliToolId,
       lines: 1,
       ...(instanceId !== undefined && instanceId !== cliToolId ? { instanceId } : {}),
     });
-    return null;
+    return target.published ? { verdict: 'owned' } : { verdict: 'unconfirmed', checkedName: null };
   } catch (error) {
     if (error instanceof ApiError && error.statusCode === 409 && error.apiCode === FOREIGN_SESSION_ERROR_CODE) {
-      return error.payload ?? { code: FOREIGN_SESSION_ERROR_CODE };
+      const payload = error.payload ?? { code: FOREIGN_SESSION_ERROR_CODE };
+      const checkedName = typeof payload.sessionName === 'string' ? payload.sessionName : null;
+      if (checkedName === target.sessionName || (checkedName === null && target.published)) {
+        return { verdict: 'foreign', payload };
+      }
+      return { verdict: 'unconfirmed', checkedName };
     }
-    return null;
+    return { verdict: 'unanswered' };
   }
 }
 
 /**
- * What to do with an attach to another server's session (Issue #3334).
+ * What to do with an attach the server did not vouch for (Issue #3334): a
+ * session another server owns (`foreign`), or one whose owner could not be
+ * confirmed because the server checked a different name (`unconfirmed`).
  *
  * Attaching is the one path where the operator named the session themselves,
  * and looking at it can be what they came for — so the attach is not refused,
@@ -185,33 +231,42 @@ export async function findForeignSession(
  *
  * @returns the lines for stderr and whether to go on (read-only)
  */
-export function planForeignAttach(
-  payload: ApiErrorPayload,
+export function planGuardedAttach(
+  ownership: Extract<AttachOwnership, { verdict: 'foreign' | 'unconfirmed' }>,
   sessionName: string,
   options: { live?: boolean; insideTmux: boolean }
 ): { proceedReadOnly: boolean; lines: string[] } {
+  const reason = ownership.verdict === 'foreign'
+    ? foreignSessionMessage(ownership.payload)
+    : `Could not confirm that tmux session "${sessionName}" is this CommandMate server's: `
+      + (ownership.checkedName
+        ? `the server checked "${ownership.checkedName}", not that name.`
+        : 'the server did not publish the session name it uses, so its check was about a different name.');
   if (options.live) {
     return {
       proceedReadOnly: false,
-      lines: [
-        `Error: ${foreignSessionMessage(payload)}`,
-        '--live would re-lay that session out, so it was not attached.',
-      ],
+      lines: [`Error: ${reason}`, '--live would re-lay that session out, so it was not attached.'],
     };
   }
   if (options.insideTmux) {
     return {
       proceedReadOnly: false,
       lines: [
-        `Error: ${foreignSessionMessage(payload)}`,
+        `Error: ${reason}`,
         'Inside tmux this client can only switch to it with keys enabled, so it was not switched. '
           + 'To look at it read-only, from a terminal outside tmux run:',
         `  tmux attach -r -t '${exactSessionTarget(sessionName)}'`,
       ],
     };
   }
-  const where = typeof payload.sessionPath === 'string' && payload.sessionPath !== ''
-    ? ` (it was started in ${payload.sessionPath})`
+  if (ownership.verdict === 'unconfirmed') {
+    return {
+      proceedReadOnly: true,
+      lines: [`Warning: ${reason}`, 'Attaching READ-ONLY, so no key you type reaches it.'],
+    };
+  }
+  const where = typeof ownership.payload.sessionPath === 'string' && ownership.payload.sessionPath !== ''
+    ? ` (it was started in ${ownership.payload.sessionPath})`
     : '';
   return {
     proceedReadOnly: true,
@@ -365,7 +420,8 @@ export function createAttachCommand(): Command {
           process.exit(ExitCode.CONFIG_ERROR);
         }
 
-        const sessionName = await resolveAttachSessionName(client, worktreeId, cliToolId, instanceId);
+        const target = await resolveAttachSessionName(client, worktreeId, cliToolId, instanceId);
+        const { sessionName } = target;
 
         if (!runTmux(['has-session', '-t', exactSessionTarget(sessionName)])) {
           console.error(
@@ -376,11 +432,14 @@ export function createAttachCommand(): Command {
           process.exit(ExitCode.UNEXPECTED_ERROR);
         }
 
-        // Issue #3334: the name exists, but it may be another server's session.
+        // Issue #3334: the name exists, but it may be another server's session,
+        // and the server's check has to be about this very name.
         let readOnly = Boolean(options.readOnly);
-        const foreign = await findForeignSession(client, worktreeId, cliToolId, instanceId);
-        if (foreign) {
-          const plan = planForeignAttach(foreign, sessionName, {
+        // An `unanswered` probe (a server older than #2865, or none) attaches
+        // as before: `has-session` already found the name.
+        const ownership = await checkAttachOwnership(client, worktreeId, cliToolId, instanceId, target);
+        if (ownership.verdict === 'foreign' || ownership.verdict === 'unconfirmed') {
+          const plan = planGuardedAttach(ownership, sessionName, {
             live: options.live,
             insideTmux: Boolean(process.env.TMUX),
           });

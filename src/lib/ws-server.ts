@@ -88,6 +88,15 @@ interface ClientInfo {
   worktreeIds: Set<string>;
   terminalSubscription: TerminalSubscription | null;
   /**
+   * The tail of this socket's `terminal_input` / `terminal_resize` work
+   * (Issue #3334). Each write awaits an ownership check before it reaches tmux,
+   * and the dispatcher does not await a message before taking the next one, so
+   * without this chain the writes would land in the order their checks
+   * FINISHED: characters swapped, an Enter ahead of the line it ends, an old
+   * size applied last. Absent until the first write.
+   */
+  terminalWriteQueue?: Promise<void>;
+  /**
    * Whether a pong has been seen since the last heartbeat sweep (Issue #2502).
    *
    * The sweep reads it, then clears it and pings. A connection that arrives at
@@ -1064,7 +1073,28 @@ async function handleTerminalSubscribe(ws: WebSocket, message: WebSocketMessage)
   });
 }
 
-async function handleTerminalInput(ws: WebSocket, message: WebSocketMessage): Promise<void> {
+/**
+ * Run `task` after every terminal write this socket received before it
+ * (Issue #3334), so check-then-send pairs reach tmux in arrival order. A task
+ * that throws does not stall the ones behind it.
+ */
+function enqueueTerminalWrite(ws: WebSocket, task: () => Promise<void>): Promise<void> {
+  const clientInfo = clients.get(ws);
+  if (!clientInfo) return task();
+  const run = (clientInfo.terminalWriteQueue ?? Promise.resolve()).then(task, task);
+  clientInfo.terminalWriteQueue = run.catch(() => undefined);
+  return run;
+}
+
+function handleTerminalInput(ws: WebSocket, message: WebSocketMessage): Promise<void> {
+  return enqueueTerminalWrite(ws, () => runTerminalInput(ws, message));
+}
+
+function handleTerminalResize(ws: WebSocket, message: WebSocketMessage): Promise<void> {
+  return enqueueTerminalWrite(ws, () => runTerminalResize(ws, message));
+}
+
+async function runTerminalInput(ws: WebSocket, message: WebSocketMessage): Promise<void> {
   const clientInfo = clients.get(ws);
   const subscription = clientInfo?.terminalSubscription;
   if (!subscription) {
@@ -1093,7 +1123,7 @@ async function handleTerminalInput(ws: WebSocket, message: WebSocketMessage): Pr
   }
 }
 
-async function handleTerminalResize(ws: WebSocket, message: WebSocketMessage): Promise<void> {
+async function runTerminalResize(ws: WebSocket, message: WebSocketMessage): Promise<void> {
   const clientInfo = clients.get(ws);
   const subscription = clientInfo?.terminalSubscription;
   if (!subscription) {

@@ -229,6 +229,49 @@ describe('ws-server terminal handlers', () => {
     nowSpy.mockRestore();
   });
 
+  // Issue #3334: every write awaits an ownership check, and the dispatcher does
+  // not await one message before the next. Here the FIRST key's check is held
+  // back until after the later ones have finished theirs.
+  it('sends keys and resizes in the order they arrived even when their checks finish in reverse', async () => {
+    const { __internal } = await import('@/lib/ws-server');
+    const { ws } = createMockWebSocket();
+    __internal.resetStateForTest();
+    __internal.registerClientForTest(ws);
+    await __internal.handleTerminalSubscribe(ws, {
+      type: 'terminal_subscribe',
+      worktreeId: 'wt-1',
+      cliToolId: 'codex',
+    });
+
+    const reached: string[] = [];
+    mockSendInput.mockImplementation(async (_session: string, data: string) => {
+      reached.push(`input:${data}`);
+    });
+    mockResize.mockImplementation(async (_session: string, cols: number, rows: number) => {
+      reached.push(`resize:${cols}x${rows}`);
+    });
+    let releaseFirstCheck: (value: boolean) => void = () => {};
+    mockHasSession.mockImplementationOnce(
+      () => new Promise<boolean>((resolve) => { releaseFirstCheck = resolve; })
+    );
+
+    // As the dispatcher does it: fire and forget, in arrival order.
+    const pending = [
+      __internal.handleTerminalInput(ws, { type: 'terminal_input', data: 'l' }),
+      __internal.handleTerminalResize(ws, { type: 'terminal_resize', cols: 80, rows: 24 }),
+      __internal.handleTerminalInput(ws, { type: 'terminal_input', data: 's' }),
+      __internal.handleTerminalInput(ws, { type: 'terminal_input', data: '\r' }),
+    ];
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    // Nothing may overtake the key whose check is still running.
+    expect(reached).toEqual([]);
+
+    releaseFirstCheck(true);
+    await Promise.all(pending);
+
+    expect(reached).toEqual(['input:l', 'resize:80x24', 'input:s', 'input:\r']);
+  });
+
   it('rejects subscribe when worktree is not found', async () => {
     const { __internal } = await import('@/lib/ws-server');
     const { ws, sendMock } = createMockWebSocket();
