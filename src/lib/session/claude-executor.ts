@@ -914,7 +914,7 @@ export function describeCommandCodeFailure(
  * the production server wrote — whatever this process passes. A headless run is
  * started with none of the correlation keys or receiver URLs an interactive
  * launch puts in its environment, so those hooks fall back to the relay's
- * default (`CM_PORT`, else 3000): production. There is no per-run way to turn
+ * default port, which is the production server's. There is no per-run way to turn
  * them off or point them elsewhere, so in isolation the run is refused rather
  * than allowed to reach production. claude's `-p` is not here: it gets
  * `--setting-sources project,local` in {@link buildCliArgs}.
@@ -925,7 +925,7 @@ export function uatIsolationHeadlessRefusal(cliToolId: string): string | null {
   if (!shared) return null;
   return new UatIsolationLaunchRefusedError(
     `a headless ${cliToolId} run`,
-    `it reads the shared ${shared} and its hooks post to the relay's default (CM_PORT, else 3000)`,
+    `it reads the shared ${shared} and its hooks post to the relay's default port (the production server); see docs/user-guide/uat-isolation.md`,
     'Headless codex / antigravity runs (Schedules, daily summary) cannot be isolated; skip those scenarios in a UAT.'
   ).message;
 }
