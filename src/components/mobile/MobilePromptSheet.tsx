@@ -330,6 +330,18 @@ function PromptContent({
         </div>
       )}
 
+      {/* Issue #3291: which question of the AskUserQuestion call this is (same as PromptPanel). */}
+      {promptData.type === 'multiple_choice' && promptData.askUserQuestion && (
+        <p className="text-xs text-muted-foreground" data-testid="ask-user-question-progress">
+          {promptData.askUserQuestion.questionCount > 1
+            ? t('askUserQuestionProgress', {
+                index: promptData.askUserQuestion.questionIndex + 1,
+                total: promptData.askUserQuestion.questionCount,
+              })
+            : t('askUserQuestionSource')}
+        </p>
+      )}
+
       {/* Question */}
       <p className="text-foreground leading-relaxed">
         {promptHeadingText(t, view.heading)}
@@ -502,6 +514,10 @@ const MultipleChoiceActions = memo(function MultipleChoiceActions({
                       {t('default')}
                     </span>
                   )}
+                  {/* Issue #3291: the picker's second line (same condition as PromptPanel). */}
+                  {option.description && (
+                    <p className="mt-0.5 text-sm text-muted-foreground break-words">{option.description}</p>
+                  )}
                 </div>
               </label>
             );
@@ -611,6 +627,10 @@ const MultiSelectActions = memo(function MultiSelectActions({
                 />
                 <div className="flex-1">
                   <span className="font-medium text-foreground">{option.number}. {option.label}</span>
+                  {/* Issue #3291: the picker's second line (same condition as PromptPanel). */}
+                  {option.description && (
+                    <p className="mt-0.5 text-sm text-muted-foreground break-words">{option.description}</p>
+                  )}
                 </div>
               </label>
             );
@@ -683,9 +703,25 @@ function StructuredDecisionContent({
       ? (payload.decisionOptions as readonly StructuredDecisionOption[])
       : null;
   const question = view.apiTarget === 'question' ? readQuestionChoices(promptData) : null;
+  // Issue #3291: what the agent asked when nothing could read the screen — the
+  // same question + label list as PromptPanel's `unclassified-ask-user-question`.
+  const asked =
+    'type' in promptData && promptData.type === 'unclassified' ? promptData.askUserQuestion : undefined;
 
   return (
     <div className="space-y-3" data-testid="mobile-structured-decision">
+      {asked && (
+        <div className="space-y-1" data-testid="unclassified-ask-user-question">
+          <p className="text-sm text-foreground break-words">{asked.question}</p>
+          {!question && (
+            <ul className="list-disc list-inside text-sm text-muted-foreground">
+              {asked.labels.map((label) => (
+                <li key={label}>{label}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
       {message && (
         <pre
           className="max-h-48 overflow-auto whitespace-pre-wrap break-all rounded border border-border bg-muted p-2 font-mono text-xs text-foreground"
