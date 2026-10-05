@@ -318,7 +318,7 @@ export class CodexTool extends BaseCLITool {
         trustHooks: shouldTrustCodexHooks(worktreePath),
       });
 
-      logger.info('started-codex-session:sessionname');
+      logger.info('started-codex-session');
     } catch (error: unknown) {
       const errorMessage = getErrorMessage(error);
       throw new Error(`Failed to start Codex session: ${errorMessage}`);
@@ -614,7 +614,7 @@ export class CodexTool extends BaseCLITool {
           // Issue #890: number-key selection confirms instantly; no trailing Enter.
           await sendKeys(sessionName, '1', false);
           trustDialogHandled = true;
-          logger.info('auto-trusted-folder-for');
+          logger.info('auto-trusted-folder-for-codex');
           await new Promise((resolve) => setTimeout(resolve, CODEX_DIALOG_SETTLE_MS));
           continue;
         }
@@ -775,7 +775,7 @@ export class CodexTool extends BaseCLITool {
       }
       await new Promise((resolve) => setTimeout(resolve, pollInterval));
     }
-    logger.info('codex-prompt-not');
+    logger.info('codex-prompt-not-detected');
     throw new Error(
       'Codex prompt not ready: timed out waiting for the input prompt before sending'
     );
@@ -816,7 +816,7 @@ export class CodexTool extends BaseCLITool {
       // Issue #405: Invalidate cache after sending message
       invalidateCache(sessionName);
 
-      logger.info('sent-message-to-codex-session:sessionnam');
+      logger.info('sent-message-to-codex-session');
     } catch (error: unknown) {
       const errorMessage = getErrorMessage(error);
       throw new Error(`Failed to send message to Codex: ${errorMessage}`);
@@ -831,7 +831,7 @@ export class CodexTool extends BaseCLITool {
   async killSession(worktreeId: string, instanceId?: string): Promise<void> {
     await this.requestExitAndKill(worktreeId, instanceId, {
       logger,
-      stoppedAction: 'stopped-codex-session:sessionname',
+      stoppedAction: 'stopped-codex-session',
       // Send Ctrl+D to exit Codex gracefully
       requestExit: async (sessionName) => {
         // Send Ctrl+D (ASCII 4)

@@ -47,7 +47,7 @@ describe('instances table: MODEL / EFFORT columns', () => {
     mockFetchSequence([
       { data: ROSTER },
       { data: { isRunning: true, autoYes: { enabled: false }, model: 'claude-opus-5[1m]', reasoningEffort: 'xhigh' } },
-      { data: { isRunning: false, autoYes: { enabled: false }, model: null, reasoningEffort: null } },
+      { data: { isRunning: false, model: null, reasoningEffort: null } },
     ]);
 
     await runInstances(['wt1']);
@@ -75,7 +75,7 @@ describe('instances table: MODEL / EFFORT columns', () => {
     mockFetchSequence([
       { data: ROSTER },
       { data: { isRunning: true, autoYes: { enabled: true }, model: 'gpt-5.6-sol', reasoningEffort: null } },
-      { data: { isRunning: false, autoYes: { enabled: false }, model: null, reasoningEffort: null } },
+      { data: { isRunning: false, model: null, reasoningEffort: null } },
     ]);
 
     await runInstances(['wt1']);
@@ -103,7 +103,7 @@ describe('instances --json: model / reasoningEffort fields', () => {
     mockFetchSequence([
       { data: ROSTER },
       { data: { isRunning: true, autoYes: { enabled: false }, model: 'claude-opus-5[1m]', reasoningEffort: 'xhigh' } },
-      { data: { isRunning: false, autoYes: { enabled: false }, model: null, reasoningEffort: null } },
+      { data: { isRunning: false, model: null, reasoningEffort: null } },
     ]);
 
     await runInstances(['wt1', '--json']);
@@ -165,7 +165,7 @@ describe('instances --json: model / reasoningEffort fields', () => {
     mockFetchSequence([
       { data: ROSTER },
       { data: { isRunning: true, autoYes: { enabled: false } } },
-      { data: { isRunning: false, autoYes: { enabled: false } } },
+      { data: { isRunning: false } },
     ]);
 
     await runInstances(['wt1', '--json']);

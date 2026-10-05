@@ -157,7 +157,7 @@ describe('POST /api/worktrees/[id]/terminal', () => {
 
     expect(res.status).toBe(404);
     // R4F007: Fixed-string error
-    expect(json.error).toBe('Session not found. Use startSession API to create a session first.');
+    expect(json.error).toBe('Session not found. Start one first, for example with `commandmate send <worktree-id> "message"`.');
     // R3F001: Verify createSession is NOT called
     expect(sendKeys).not.toHaveBeenCalled();
     expect(mockSendMessage).not.toHaveBeenCalled();
