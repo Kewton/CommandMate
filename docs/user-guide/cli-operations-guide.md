@@ -1507,8 +1507,11 @@ commandmate capture <worktree-id> --instance codex-2 # 追加インスタンス�
   "model": "claude-opus-5[1m]",
   "reasoningEffort": null,
   "upstreamFault": null,
+  "composerText": null,
+  "composerState": "empty",
   "resolvedBy": "roster",
-  "conflict": null
+  "conflict": null,
+  "agentMode": "accept-edits"
 }
 ```
 
@@ -1532,10 +1535,22 @@ commandmate capture <worktree-id> --instance codex-2 # 追加インスタンス�
 | `structuredEvents.pendingDecisions[]` | そのインスタンスが保持している dialog（Issue #1930、`kind` / `questionOptions` は Issue #2040）。下記参照 |
 | `structuredEvents.session` | エージェント自身が申告した「いま入っている会話」（Issue #2040）。publish しないツールでは常に `null`。下記参照 |
 | `upstreamFault` | 画面に上流障害の署名があれば `{id, matchedText, at}`、無ければ `null`（Issue #1839）。**`null` は「健全」ではなく「既知の署名が無かった」** |
+| `composerText` | 入力欄にある**未送信のテキスト**。無ければ `null`（Issue #1879）。人が打った文字だけを返し、薄い色で出る候補・プレースホルダーは返さない。`null` の理由は `composerState` が区別する。claude / codex のみ |
+| `composerState` | `composerText` がその値になった理由（Issue #1879）: `content`（実際のテキストがある）／`ghost`（候補・プレースホルダーだけ）／`empty`（入力欄は空）／`unsupported_tool`（入力欄の読み方を計測していないツール）／`no_composer`（入力欄が画面に無い。セッションが動いていないときもこれ） |
+| `agentMode` | エージェントの権限モード（Issue #2592）。画面の表示から読んだ `default` / `manual` / `accept-edits` / `plan` / `auto` / `autopilot` / `bypass` / `dont-ask` / `build`、読めなければ `unknown`。**`unknown` は「既定のモード」ではなく「判定していない」**（モードの切り替えが無いツール・画面にモードの表示が無い・セッションが動いていない）。多くのツールは既定のモードで何も表示しないので、表示が無いことを `default` とは読めない |
 | `resolvedBy` / `conflict` | `cliToolId` を選んだ**解決段**と、roster と明示指定の矛盾（Issue #1884）。下記参照 |
 
 画面が空かどうかは `realtimeSnippet.trim() === ''` と `lineCount` で見る。
 `content` は差分なので単独では判断しない。
+
+**セッションが動いていないとき（`isRunning: false`）は、画面から読む欄がキーごと出ません**
+（`false` や `null` にはなりません。Issue #3300）。`autoYes` / `isPromptWaiting` / `promptData` /
+`thinking` / `thinkingMessage` / `isComplete` / `isGenerating` / `realtimeSnippet` /
+`lastCapturedLine` / `isSelectionListActive` / `lastServerResponseTimestamp` /
+`serverPollerActive` が該当します。`jq` で読むときは `.isPromptWaiting // false` のように、
+欄が無い場合の値を決めてください。Auto-Yes は止まっているインスタンスにも設定できるので、
+有効かどうかは `commandmate instances <id>` の `AUTO_YES` 列（または `commandmate ls --json` の
+`autoYesByInstance`）で確認します。
 
 #### `structuredEvents.pendingDecisions[]` の `kind` / `questionOptions`（Issue #2040）
 
@@ -2373,6 +2388,20 @@ opencode     opencode opencode yes      no        claude-sonnet-4.6          ses
   }
 ]
 ```
+
+#### `AUTO_YES` 列（Issue #3300）
+
+そのインスタンスの Auto-Yes が有効かどうかです。Auto-Yes は worktree × インスタンスごとに持ち、
+セッションが動いていなくても有効にできます
+（`commandmate auto-yes <id> --enable --instance <instance-id>`）。そのため `RUNNING no` の行でも
+`yes` になります。
+
+- サーバーが持つ Auto-Yes の状態（`GET /api/worktrees/<id>/auto-yes` の `instances`）から読みます。
+  `commandmate ls --json` の `autoYesByInstance` と同じ出どころです。一覧 1 回につき、
+  インスタンスの数によらず問い合わせが 1 回増えます
+- この問い合わせに答えない古いサーバーでは、これまでどおり各セッションの `current-output` の
+  `autoYes` を読みます。その場合、止まっているインスタンスは有効でも `no` と出ます
+- `--json` の `autoYes` も同じ値です
 
 #### `TMUX_SESSION` 列（Issue #2317）
 

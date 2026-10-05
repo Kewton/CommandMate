@@ -198,19 +198,42 @@ export interface WorktreeDetailResponse extends WorktreeItem {
  */
 export type { AutoYesSuppressionReason };
 
-// Mirrors: src/app/api/worktrees/[id]/current-output/route.ts response shape
-// [DR2-03] All server-side fields included
+/**
+ * Mirrors: src/lib/session/current-output-types.ts CurrentOutputResponseBody —
+ * what `GET /api/worktrees/[id]/current-output` answers. [DR2-03] Every
+ * top-level field of that type is declared here.
+ *
+ * Only `isRunning`, `content` and `lineCount` are on every response. The rest
+ * is optional, for one of two reasons:
+ *
+ *  - **the session is not running.** There is no frame, so nothing read off one
+ *    is sent: `autoYes`, `isPromptWaiting`, `promptData`, `thinking`,
+ *    `thinkingMessage`, `isComplete`, `isGenerating`, `fullOutput`,
+ *    `realtimeSnippet`, `lastCapturedLine`, `isSelectionListActive`,
+ *    `lastServerResponseTimestamp` and `serverPollerActive` are absent keys
+ *    there, not `false` / `null` (Issue #3300). A reader says what absence means
+ *    (`?? false`, `?? null`) rather than assuming the key;
+ *  - **the daemon is older than the field.** The CLI is routinely newer than the
+ *    server it dials (`npm i -g` does not restart a running daemon), so a field
+ *    this build's server always sends is still optional here.
+ *
+ * A copy rather than an import: the server type's import graph is over a
+ * hundred modules, dozens of them importing through `@/`, which
+ * `tsconfig.cli.json` (`"paths": {}`) cannot resolve. The copy is held to the
+ * original — field names and optionality — by
+ * tests/unit/cli/types/current-output-mirror-3300.test.ts.
+ */
 export interface CurrentOutputResponse {
   isRunning: boolean;
-  isComplete: boolean;
-  isPromptWaiting: boolean;
-  isGenerating: boolean;
+  isComplete?: boolean;
+  isPromptWaiting?: boolean;
+  isGenerating?: boolean;
   content: string;
-  fullOutput: string;
-  realtimeSnippet: string;
+  fullOutput?: string;
+  realtimeSnippet?: string;
   lineCount: number;
-  lastCapturedLine: number;
-  promptData: PromptData | null;
+  lastCapturedLine?: number;
+  promptData?: PromptData | null;
   /**
    * Whether `/prompt-response` would answer `promptData` right now (Issue #2870).
    * Present only for a screen-parsed prompt; absent with no prompt and for the
@@ -225,7 +248,14 @@ export interface CurrentOutputResponse {
    * compile it, and a copy here would be a second definition to drift.
    */
   promptView?: PromptView | null;
-  autoYes: {
+  /**
+   * Auto-Yes as this session's poll reads it. **Absent when the session is not
+   * running** — which is not "disabled": Auto-Yes is armed per worktree x
+   * instance and outlives the session it answers for, so a stopped instance can
+   * be armed. `GET /api/worktrees/[id]/auto-yes` answers for those too, and is
+   * what `commandmate instances` reads (Issue #3300).
+   */
+  autoYes?: {
     enabled: boolean;
     expiresAt: number | null;
     stopReason?: string;
@@ -254,8 +284,8 @@ export interface CurrentOutputResponse {
      */
     stopMatchedText?: string;
   };
-  thinking: boolean;
-  thinkingMessage: string | null;
+  thinking?: boolean;
+  thinkingMessage?: string | null;
   cliToolId?: string;
   /**
    * The tmux session name this instance actually runs (or would run) under
@@ -270,7 +300,7 @@ export interface CurrentOutputResponse {
    * falls back to the legacy construction in that case.
    */
   sessionName?: string;
-  isSelectionListActive: boolean;
+  isSelectionListActive?: boolean;
   /** Issue #1017: Codex pager/edit-previous mode (subset of isSelectionListActive). */
   isPagerActive?: boolean;
   /**
@@ -377,8 +407,8 @@ export interface CurrentOutputResponse {
   lastKnownStatus?: 'idle' | 'ready' | 'running' | 'waiting' | null;
   /** Epoch ms of {@link lastKnownStatus}, null when that is null (Issue #1926). */
   lastKnownStatusAt?: number | null;
-  lastServerResponseTimestamp: number | null;
-  serverPollerActive: boolean;
+  lastServerResponseTimestamp?: number | null;
+  serverPollerActive?: boolean;
   /**
    * Issue #520: session status from `detectSessionStatus()` — or, since Issue
    * #1723, from the agent's own lifecycle events when they are available and
@@ -859,6 +889,31 @@ export interface CurrentOutputResponse {
     at: number;
   } | null;
   /**
+   * Text sitting unsent in the agent's input box, or null (Issue #1879).
+   *
+   * Mirrors: src/lib/session/current-output-types.ts
+   * CurrentOutputPayload.composerText
+   *
+   * Only text a human typed is ever carried here. Null covers every other case
+   * — the box is empty, it holds only a dim suggestion or placeholder, it is
+   * not on screen, the tool's composer has not been measured, or the session is
+   * not running — and {@link composerState} says which. claude and codex only.
+   *
+   * Absent from a server older than #1879.
+   */
+  composerText?: string | null;
+  /**
+   * Which state {@link composerText} came from (Issue #1879): `content` (real
+   * text, carried above), `ghost` (only a dim suggestion / placeholder),
+   * `empty`, `unsupported_tool`, or `no_composer` (no input box on the frame,
+   * and the answer for a session that is not running).
+   *
+   * Mirrors: src/lib/detection/composer-text.ts ComposerTextState — typed as
+   * the wire's `string`, like `lastSuppression.reason`: a newer server may name
+   * a state this build has never heard of. Absent from a server older than #1879.
+   */
+  composerState?: string;
+  /**
    * Issue #1785: the model the session is running, or null when nothing knows.
    *
    * Mirrors: src/lib/session/current-output-types.ts CurrentOutputPayload.model
@@ -931,6 +986,27 @@ export interface CurrentOutputResponse {
     rosterCliTool: string;
     requestedCliTool: string;
   } | null;
+
+  /**
+   * Which permission mode the agent is in, read off the frame (Issue #2592):
+   * `default` / `manual` / `accept-edits` / `plan` / `auto` / `autopilot` /
+   * `bypass` / `dont-ask` / `build`, or `unknown`.
+   *
+   * Mirrors: src/lib/session/current-output-types.ts
+   * CurrentOutputResponseBody.agentMode (`AgentMode` in
+   * src/types/cli-tool-contracts.ts). The route attaches it; it is on the HTTP
+   * response and not on the WebSocket snapshot.
+   *
+   * **`unknown` is not a mode, and never means `default`.** It is the reader
+   * declining to answer: the tool has no mode cycle, no indicator was on the
+   * frame, or the session is not running. Most tools draw nothing in their base
+   * mode, so a frame with no indicator cannot be told from one captured
+   * mid-repaint or one whose footer scrolled away.
+   *
+   * Typed as the wire's `string` for the reason `lastSuppression.reason` is,
+   * and absent from a server older than #2592 — which is also not `default`.
+   */
+  agentMode?: string;
 
   /**
    * Whether the server's detection rules were read off the CLI build that is
@@ -1211,6 +1287,24 @@ export interface AutoYesSetResult {
     rosterCliTool: string;
     requestedCliTool: string;
   } | null;
+}
+
+/**
+ * Mirrors: src/app/api/worktrees/[id]/auto-yes/route.ts GET with no
+ * `?cliToolId` — the whole-worktree form (Issue #525 / #896). Only the map the
+ * CLI reads is declared; the body also carries the worktree default agent's
+ * state at the top level and an `agents` map keyed by cliToolId.
+ *
+ * `instances` holds every instance the server has an Auto-Yes state for, armed
+ * or not, keyed by instance id (the primary instance's id is its cliToolId). An
+ * instance with no entry has no state: it was never armed, or the state was
+ * released with the instance. Unlike `CurrentOutputResponse.autoYes` this does
+ * not depend on the session running (Issue #3300).
+ *
+ * Optional because a daemon older than #896 sends no such map.
+ */
+export interface AutoYesStatesResponse {
+  instances?: Record<string, { enabled: boolean; expiresAt: number | null }>;
 }
 
 /** wait exit 10 CLI extended output type */

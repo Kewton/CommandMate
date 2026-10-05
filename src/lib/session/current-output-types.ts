@@ -429,6 +429,13 @@ export interface CurrentOutputPayload {
    * value from `promptData` (`readPromptView`).
    */
   promptView?: PromptView | null;
+  /**
+   * Auto-Yes for this (worktree, instance), as the poll that built this payload
+   * read it. Absent when the session is not running, which does not mean
+   * "disabled": the state outlives the session, and
+   * `GET /api/worktrees/:id/auto-yes` serves it for every instance
+   * (Issue #3300).
+   */
   autoYes?: {
     enabled: boolean;
     expiresAt: number | null;
@@ -735,6 +742,14 @@ export interface SessionTargetResolution {
  * What `GET /api/worktrees/:id/current-output` returns (Issue #3229): the
  * builder's {@link CurrentOutputPayload} plus the two fields the route attaches
  * itself. `detector` is absent until the staleness cache is warm.
+ *
+ * The CLI cannot import this type — `tsconfig.cli.json` resolves no `@/`, and
+ * this module's imports are all `@/` — so `CurrentOutputResponse` in
+ * `src/cli/types/api-responses.ts` is a hand-written copy (Issue #3300).
+ * `tests/unit/cli/types/current-output-mirror-3300.test.ts` fails when a
+ * top-level field is added, removed, or made optional on one side only: give
+ * the copy the field too, and the field table in
+ * `docs/user-guide/cli-operations-guide.md` (ja / en).
  */
 export interface CurrentOutputResponseBody extends CurrentOutputPayload {
   agentMode: AgentMode;
