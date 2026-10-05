@@ -119,9 +119,16 @@ idempotent, but `agent_idle` in `task_events` **gains one row per delivery** (me
 
 So the endpoint treats events matching on
 `(worktreeId, cliTool, instance, event, sessionId)` **as one event within a 3-second window**. Both
-deliveries carry the same `session_id`, so the double delivery collapses while a different turn
-(a different `session_id`) does not. A call that sends no `sessionId` is **never collapsed** (there is
-nothing to tell them apart with, and losing a real event is worse than allowing a duplicate).
+deliveries carry the same `session_id`, so the double delivery collapses. A call that sends no
+`sessionId` is **never collapsed** (there is nothing to tell them apart with, and losing a real event
+is worse than allowing a duplicate).
+
+A `session_id` stays the same across turns, so the `session_id` alone cannot tell one turn from
+another. A `stop` is therefore **applied as the end of a different turn**, even inside the 3-second
+window, when a turn start from the same session (`user_prompt_submit` / `pre_tool_use` /
+`post_tool_use`) arrived between it and the previous `stop` (Issue #3289). With no turn start in
+between, the second `stop` is collapsed as before. Every event other than `stop` is still treated as
+one event within the 3-second window.
 
 **The manual configuration may simply be deleted** (automatic injection sends the same events).
 Keeping it causes no double recording either, thanks to the dedup above.

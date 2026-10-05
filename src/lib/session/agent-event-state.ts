@@ -78,6 +78,7 @@ import {
   isDecisionLive,
   MAX_PENDING_DECISIONS_PER_TURN,
   SCRAPER_COMPLETION_POLLS,
+  TURN_ACTIVITY_EVENTS,
   TURN_STALE_AFTER_MS,
   type PublishedTurn,
   type StructuredPendingDecision,
@@ -561,9 +562,13 @@ function observeAgentModel(
  * `applyTaskEvent` is not: each delivery writes its own `agent_idle` row, and a
  * reader counting rows would see one turn as two.
  *
- * A turn cannot end twice in three seconds, and both deliveries carry the same
- * `session_id`, so the window is generous relative to the real signal and tight
- * relative to anything it could wrongly swallow.
+ * Both deliveries carry the same `session_id` and land milliseconds apart, so
+ * the window is generous relative to the real signal. It is not tight relative
+ * to what it can wrongly swallow, which is what this comment used to say: "a
+ * turn cannot end twice in three seconds" is false of a turn the agent starts
+ * for itself, and Issue #3289 measured the `Stop`s of two turns 1473 ms apart.
+ * The clock cannot tell those from two deliveries of one, so for `stop` the
+ * window is reset by the start of a turn — see {@link isDuplicateAgentEvent}.
  */
 export const AGENT_EVENT_DEDUP_WINDOW_MS = 3000;
 
@@ -2687,6 +2692,62 @@ export function clearAskUserQuestion(
  * same correction applies to two `Notification`s of different types inside the
  * window, which were previously collapsed as well.
  *
+ * ## A `stop` after a turn start is another turn's (Issue #3289)
+ *
+ * Nothing in the key names a turn, and a `session_id` outlives one: every turn
+ * of a conversation carries the same id. So two `stop`s of one session inside
+ * the window share a key whether they are two deliveries of one turn or the
+ * ends of two, and the second used to be dropped either way. Claude 2.1.289
+ * was measured doing the latter — the completion notice of a background task
+ * opens a turn the moment the previous one ends, and that turn ended 1473 ms
+ * after the first `Stop`. Its `stop` was dropped, the turn it should have
+ * closed stayed open, and `commandmate wait` blocked on a finished agent until
+ * {@link STRUCTURED_STATE_MAX_AGE_MS}.
+ *
+ * What tells the two apart is what arrived in between. A delivery in
+ * {@link TURN_ACTIVITY_EVENTS} that is itself applied releases every `stop`
+ * its session has claimed ({@link releaseStopClaims}), so the next `stop` is a
+ * first delivery again, and that `stop`'s own copy is dropped behind it.
+ *
+ *  - **Those three events, not `user_prompt_submit` alone**, because they are
+ *    the ones the turn model opens a turn on, and the property is stated in its
+ *    terms: a turn this server opened is never left open by a `stop` dropped as
+ *    a copy. antigravity and Command Code send no `user_prompt_submit` at all —
+ *    their turns are opened by a tool event — and a narrower rule would leave
+ *    them where Claude was.
+ *  - **Only a turn start that was applied.** One dropped as a copy is recorded
+ *    by nobody and opens no turn, so it releases nothing: a turn start and the
+ *    `stop` that answers it are applied together or not at all.
+ *  - **Only the session that started the turn.** A turn start with no session
+ *    id releases nothing, for the reason the second paragraph gives; another
+ *    session's says nothing about this one's `stop` (codex can file a second
+ *    instance's turns under the first, #2874).
+ *  - **By order of arrival, not by timestamp.** The release is a deletion made
+ *    when the turn start is claimed, so it holds for deliveries inside one
+ *    millisecond, where comparing "turn started at" with "stop seen at" cannot.
+ *
+ * What this still cannot tell apart is `stop(A)`, `user_prompt_submit(B)`, and
+ * then a *late copy* of `stop(A)`. The copy is read as `stop(B)` and closes
+ * turn B early. Nothing it carries says otherwise — the copy that can be late
+ * is the relay's, and the relay rebuilds the body it posts (tool, event, cwd,
+ * session id) and drops the rest of the payload — and the order needs a hook
+ * the agent does not wait for. Claude Code runs its `Stop` hooks to completion
+ * before the next turn's `UserPromptSubmit` (in the measurement the prompt
+ * arrives 29 ms after the reply to the `Stop` and 540 ms after the `Stop`
+ * itself), `type: "http"` has no async form, and
+ * `scripts/hooks/cmate-agent-event.sh` posts with a foreground `curl`. That
+ * leaves a hand-written `"async": true` command hook, where the cost is a
+ * `wait` that returns one turn early — against a `wait` that does not return
+ * at all on the configuration CommandMate itself injects.
+ *
+ * The alternative was to put the turn in the key: a per-session counter, bumped
+ * by a turn start. It decides every case above the same way, the late copy
+ * included, and it needs a second map that has to outlive every key built from
+ * it — prune the counter while its key is still inside the window and the copy
+ * gets a different key and is applied — with a bound, a pruning rule and a test
+ * seam of its own. Releasing the claim keeps no state beyond the map that was
+ * already here, so {@link MAX_RECENT_EVENT_KEYS} bounds it as before.
+ *
  * @param at - Epoch ms; defaults to now
  * @param detail - The event's subtype, when it has one
  */
@@ -2701,20 +2762,40 @@ export function isDuplicateAgentEvent(
 ): boolean {
   if (!sessionId) return false;
 
-  const key = [
-    buildCompositeKey(worktreeId, cliToolId, instanceId),
-    event,
-    detail ?? '',
-    sessionId,
-  ].join(' ');
+  const composite = buildCompositeKey(worktreeId, cliToolId, instanceId);
+  const key = [composite, event, detail ?? '', sessionId].join(' ');
   const seenAt = recentEventKeys.get(key);
   if (seenAt !== undefined && at - seenAt < AGENT_EVENT_DEDUP_WINDOW_MS) {
     return true;
   }
 
   recentEventKeys.set(key, at);
+  if (TURN_ACTIVITY_EVENTS.has(event)) releaseStopClaims(composite, sessionId);
   pruneRecentEventKeys(at);
   return false;
+}
+
+/**
+ * Forget every `stop` one session of one instance has claimed (Issue #3289).
+ *
+ * Every subtype, which is why this walks the map instead of deleting one key:
+ * antigravity posts `stop` / `self_resume_pending` (#2614) beside the plain
+ * one, and the subtype sits in the middle of the key
+ * {@link isDuplicateAgentEvent} builds — `<instance> stop <detail> <session>`.
+ * The walk is over at most {@link MAX_RECENT_EVENT_KEYS} entries.
+ */
+function releaseStopClaims(composite: string, sessionId: string): void {
+  const prefix = `${composite} stop `;
+  const suffix = ` ${sessionId}`;
+  for (const key of recentEventKeys.keys()) {
+    if (
+      key.length >= prefix.length + suffix.length &&
+      key.startsWith(prefix) &&
+      key.endsWith(suffix)
+    ) {
+      recentEventKeys.delete(key);
+    }
+  }
 }
 
 /** Drop keys past the window, then the oldest survivors if still over the cap. */
@@ -2761,9 +2842,14 @@ export function getRecentEventKeyCount(): number {
  * arms on `session.status(busy)` and completes on the first `session.idle`
  * after arming, so the abort double-idle (19 ms apart, §5.3.2) never reaches
  * the ingest at all. Push hooks have no such gate: #1722's concatenated
- * settings really do post two `Stop`s for one turn, and
- * {@link isDuplicateAgentEvent} — which is what every hook receiver still
- * calls — is left untouched for them.
+ * settings really do post two `Stop`s for one turn, so they stay on the window
+ * in {@link isDuplicateAgentEvent}, which is what every hook receiver still
+ * calls.
+ *
+ * The window had the same defect there — Claude ends two turns inside three
+ * seconds when it resumes itself (Issue #3289) — and it is closed differently,
+ * because a push source has no gate to lean on and so cannot be exempted: on
+ * the window, a `stop` is released by the start of a turn instead.
  */
 export const LIFECYCLE_AGENT_EVENT_TYPES: readonly AgentEventType[] = ['stop', 'session_end'];
 
@@ -2821,6 +2907,9 @@ export type AgentEventDedupVerdict =
  *  3. **Anything else** — the time window, unchanged. That is every push
  *     source, and the identity-declaring source's `session.created` /
  *     `session.error`, which publish no id either but are not turn boundaries.
+ *     A push source's `stop` is on it too, and is released from it by the
+ *     start of a turn (#3289) — a rule of {@link isDuplicateAgentEvent}'s, not
+ *     of this function's.
  *
  * Calling this *claims* the key, exactly as {@link isDuplicateAgentEvent} does:
  * ask once per delivery and act on the answer.
