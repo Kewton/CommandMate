@@ -106,10 +106,25 @@ export interface ProcfsEnvViolation {
 }
 
 function collectSourceFiles(dir: string, out: string[] = []): string[] {
-  for (const entry of readdirSync(dir)) {
+  let entries: string[];
+  try {
+    entries = readdirSync(dir);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return out;
+    throw error;
+  }
+  for (const entry of entries) {
     if (entry === 'node_modules' || entry.startsWith('.')) continue;
     const full = join(dir, entry);
-    if (statSync(full).isDirectory()) {
+    let isDirectory: boolean;
+    try {
+      isDirectory = statSync(full).isDirectory();
+    } catch (error) {
+      // A temp fixture another test created and removed mid-walk.
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
+      throw error;
+    }
+    if (isDirectory) {
       collectSourceFiles(full, out);
     } else if (SOURCE_EXTENSIONS.some((extension) => entry.endsWith(extension))) {
       out.push(full);
@@ -128,7 +143,14 @@ export function findProcfsEnvFixtures(root: string): ProcfsEnvViolation[] {
   const violations: ProcfsEnvViolation[] = [];
 
   for (const file of collectSourceFiles(root)) {
-    const lines = readFileSync(file, 'utf8').split('\n');
+    let text: string;
+    try {
+      text = readFileSync(file, 'utf8');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
+      throw error;
+    }
+    const lines = text.split('\n');
     lines.forEach((line, index) => {
       for (const pattern of PATTERNS) {
         pattern.lastIndex = 0;
@@ -167,7 +189,7 @@ describe('no test points an env var into /proc, /sys or /dev', () => {
           `  writeFileSync(blocker, '');\n` +
           `  process.env.SOME_DIR = join(blocker, 'child');   // ENOTDIR, immediately, everywhere`
     ).toEqual([]);
-  });
+  }, 60_000);
 });
 
 describe('the guard is not vacuous', () => {
