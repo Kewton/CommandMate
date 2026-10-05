@@ -408,7 +408,7 @@ async function getClaudePath(): Promise<string> {
         cachedClaudePath = envClaudePath;
         return cachedClaudePath;
       } catch {
-        logger.info('claudepath-is-not-executable:envclaudepa');
+        logger.info('claude-path-env-not-executable');
         // Fall through to fallback paths
       }
     }
@@ -531,7 +531,7 @@ export async function isSessionHealthy(sessionName: string): Promise<HealthCheck
 async function ensureHealthySession(sessionName: string): Promise<boolean> {
   const result = await isSessionHealthy(sessionName);
   if (!result.healthy) {
-    logger.warn('session-sessionname-unhealthy:resultreas');
+    logger.warn('claude-session-unhealthy');
     await killSession(sessionName);
     return false;
   }
@@ -632,7 +632,7 @@ export async function isClaudeRunning(worktreeId: string, instanceId?: string): 
   // S2-F001: await + extract .healthy to maintain boolean return type
   const result = await isSessionHealthy(sessionName);
   if (!result.healthy) {
-    logger.warn('session-sessionname-unhealthy:resultreas');
+    logger.warn('claude-session-unhealthy');
     return false;
   }
   return true;
@@ -816,7 +816,7 @@ export async function startClaudeSession(
       if (!trustDialogOpen && CLAUDE_PROMPT_PATTERN.test(cleanOutput)) {
         // Wait for stability after prompt detection (CONS-007, DOC-001)
         await new Promise((resolve) => setTimeout(resolve, CLAUDE_POST_PROMPT_DELAY));
-        logger.info('claude-initialized-in');
+        logger.info('claude-initialized');
         initialized = true;
         break;
       }
@@ -859,7 +859,7 @@ export async function startClaudeSession(
       throw new SessionStartTimeoutError('Claude Code', sessionName, CLAUDE_INIT_TIMEOUT);
     }
 
-    logger.info('started-claude-session:sessionname');
+    logger.info('started-claude-session');
   } catch (error: unknown) {
     // MF-S2-002: Clear cached path on all failures (harmless for non-path failures)
     clearCachedClaudePath();

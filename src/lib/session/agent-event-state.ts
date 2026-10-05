@@ -38,6 +38,7 @@
  * @module lib/session/agent-event-state
  */
 
+import { createHash } from 'crypto';
 import { buildCompositeKey } from '@/lib/auto-yes-state';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import {
@@ -3030,7 +3031,7 @@ export function isDuplicateAgentEvent(
   if (!sessionId) return false;
 
   const composite = buildCompositeKey(worktreeId, cliToolId, instanceId);
-  const key = [composite, event, detail ?? '', sessionId].join(' ');
+  const key = dedupKey(composite, event, detail, sessionId);
   const seenAt = recentEventKeys.get(key);
   if (seenAt !== undefined && at - seenAt < AGENT_EVENT_DEDUP_WINDOW_MS) {
     return true;
@@ -3041,6 +3042,44 @@ export function isDuplicateAgentEvent(
   else if (event === 'stop') releaseTurnStartClaims(composite, sessionId);
   pruneRecentEventKeys(at);
   return false;
+}
+
+/** The key {@link isDuplicateAgentEvent} claims: `<instance> <event> <detail> <session>`. */
+function dedupKey(composite: string, event: AgentEventType, detail: string | null, sessionId: string): string {
+  return [composite, event, detail ?? '', sessionId].join(' ');
+}
+
+/**
+ * When the delivery that claimed this event's de-duplication key was received
+ * (Issue #3311), or null when nothing holds the key.
+ *
+ * Read by the receiver right after {@link isDuplicateAgentEvent} dropped an
+ * event — a drop does not move the claim — so `at - result` is how long after
+ * the applied delivery the dropped one came. That interval is what the daily
+ * metrics read to tell a copy (a few ms) from a second turn the window
+ * swallowed; it changes nothing here.
+ */
+export function agentEventKeyClaimedAt(
+  worktreeId: string,
+  cliToolId: CLIToolType,
+  instanceId: string | undefined,
+  event: AgentEventType,
+  sessionId: string | null | undefined,
+  detail: string | null = null
+): number | null {
+  if (!sessionId) return null;
+  const composite = buildCompositeKey(worktreeId, cliToolId, instanceId);
+  return recentEventKeys.get(dedupKey(composite, event, detail, sessionId)) ?? null;
+}
+
+/**
+ * The agent's session id in a form a log line may carry (Issue #3311): the
+ * first 8 hex characters of its SHA-256. Enough to tell the sessions of one
+ * instance apart in a day's log; the id itself is never written, because the
+ * daily metrics that read these lines are published.
+ */
+export function shortSessionTag(sessionId: string): string {
+  return createHash('sha256').update(sessionId).digest('hex').slice(0, 8);
 }
 
 /**

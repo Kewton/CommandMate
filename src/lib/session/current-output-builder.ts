@@ -113,6 +113,7 @@ import {
   type ScraperVerdict,
 } from './structured-status-merge';
 import { recordStructuredPrompt, recordUnclassifiedFrame } from './current-output-history-writers';
+import { trackDetectionDivergence } from './detection-divergence';
 
 // Issue #3215: the response types live in `current-output-types`. Re-exported
 // under the same names so every existing import of this module keeps resolving.
@@ -806,7 +807,8 @@ async function buildPayload(
   // where the two layers agree is silent — and including the disagreements this
   // merge deliberately does NOT act on (`applied: false`), because those are
   // exactly the cases the next Issues in the Epic have to decide about.
-  if (structured !== null && structured.status !== statusResult.status) {
+  const diverging = structured !== null && structured.status !== statusResult.status;
+  if (diverging) {
     logger.info('detection-divergence', {
       worktreeId,
       cliToolId,
@@ -818,6 +820,18 @@ async function buildPayload(
       structuredEvent: structured.event,
       structuredEventAt: structured.at,
       applied: merged.structuredApplied,
+    });
+  }
+  // Issue #3311: the length of a disagreement, said once when it ends. The line
+  // above is per poll and cannot carry it — see `detection-divergence.ts`.
+  const resolvedDivergence = trackDetectionDivergence(worktreeId, cliToolId, resolvedInstanceId, diverging);
+  if (resolvedDivergence !== null) {
+    logger.info('detection-divergence-resolved', {
+      worktreeId,
+      cliToolId,
+      instanceId: resolvedInstanceId,
+      durationMs: resolvedDivergence.durationMs,
+      polls: resolvedDivergence.polls,
     });
   }
 

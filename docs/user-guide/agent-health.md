@@ -286,14 +286,14 @@ tmux -L cm-agent-health kill-server
 - 08:00 に Command Code が今日のレポートの有無を確かめ、無ければ自分で確認を実行する（`docs/agent-health/watch-prompt.md`）
 - Command Code の Schedule の許可は `yolo` にすること（それ以外ではコマンドを実行できず、成功のまま何もしない。#2454）
 
-## メトリクス計測（セキュリティ・保守性・性能、Issue #3044 / #3054）
+## メトリクス計測（セキュリティ・保守性・性能・CI、Issue #3044 / #3054 / #3310）
 
-日次確認の前（06:30）に、セキュリティ脆弱性・ソフトウェア保守性・本番サーバーの性能の指標を **AI を使わず** 計測し、JSON に書く。
+日次確認の前（06:30）に、セキュリティ脆弱性・ソフトウェア保守性・本番サーバーの性能・develop の CI の不安定さの指標を **AI を使わず** 計測し、JSON に書く。
 起票するのは Schedule で動く AI（`docs/agent-health/metrics-prompt.md`）で、スクリプトは Issue を立てない。
 
 - 計測: `scripts/agent-health/metrics.ts`（外部ツールの呼び出し・ログの読み込み・`ps`・HTTP は `metrics-runners.ts`）。判定は純粋関数
   `src/lib/agent-health/metrics-parse.ts`（ツールの出力 → 計測値）・`metrics-perf.ts`（ログ行・`ps` → 性能の計測値）・
-  `metrics-rules.ts`（前回比・候補・並び・exit code）、
+  `ci-flaky.ts`（`gh run list`・`gh run view` の出力 → CI の計測値）・`metrics-rules.ts`（前回比・候補・並び・exit code）、
   型は `metrics-types.ts`（閾値の定数もここ）
 - 入口: `bash scripts/agent-health/metrics.sh --out <file>`。`daily.sh --sync-only` で同期してから `metrics.ts` を実行する。
   同期に失敗したら計測せず、`completedAt` と `scriptErrors` を持ち `metrics` が空の最小の JSON を書いて exit 2
@@ -317,11 +317,21 @@ tmux -L cm-agent-health kill-server
 | performance | `log-volume` | 本番ログの直近 24 時間の行数と `<tag> <event>` ごとの行数 | 24 時間の行数 | ある `<tag> <event>` が新たに 1 日 20,000 行以上／前回比 2 倍以上（前回 1,000 行以上のもの）。20,000 行以上のままなら `outstanding` |
 | performance | `error-rate` | 本番ログの直近 24 時間の `[ERROR]` 行を `<tag> <event>` ごとに | ERROR 行の合計 | ある `<tag> <event>` が新たに 1 日 50 行以上／前回比 2 倍以上（前回 50 行以上のもの）。50 行以上のままなら `outstanding` |
 | performance | `server-process` | サーバー（`logs/server.pid` の子の `node dist/server/server.js`）の RSS と CPU を 5 秒おきに 6 回（`ps -o rss=,%cpu=`）。あわせて `GET http://127.0.0.1:3000/api/worktrees` を 3 回順に呼び、中央値を `details.apiWorktreesMedianMs` に（401 などは `details.apiWorktreesError` に理由だけ） | RSS の最大（MB） | RSS が新たに 1,500MB 以上／前回比 +50% 以上／CPU 平均が新たに 50% 以上。RSS 1,500MB 以上のままなら `outstanding` |
+| ci | `ci-flaky` | 直近 7 日の develop の push の CI（`gh run list --branch develop --event push`）。失敗したか、やり直した run は、attempt ごとにジョブの結果（`gh run view <id> --attempt <n> --json jobs`）と、失敗したジョブのログ（`--log-failed`）の `FAIL <file> > <name>` の行を読む。失敗したジョブを SHA・ジョブ・attempt の単位で `records` に残し、**テストの失敗**（落ちたテストの名前つき）・**実行環境の障害**（キャンセル・タイムアウト・テストの段まで行かずに落ちた）・**その他**（テストの名前の無い失敗・集約のジョブ）に分け、`details` に件数と **やり直しでの成功**（同じ SHA で attempt によって結果が変わった）の数 | 不安定なテストの本数 | 同じ SHA でやり直して通った run で落ちていたテスト／別の SHA で 2 回以上落ちたテスト（間のコミットがテストと対象を変えたかは見ていない）。最初に落ちてから毎回落ちているテストは**落ち続け**（不具合）として別の種類で出す。前から出ているものは `outstanding` |
+| process | `hook-observation` | 本番ログの直近 24 時間（`log-volume` と同じ 1 回の読み込み）の hook の観測値（Issue #3311）。下の「hook の観測値」 | 写しでない破棄の数 | **なし**（観測だけ。候補にせず、Issue も立てない） |
 
 - **「新たに閾値を超えた」「前回より悪化した」だけが候補**（`candidates`）。前から超えているもの（1,500 行超の 14 本、
   複雑度 25 以上の 83 関数など）は起票せず、`value` と `details` の件数として残す
 - 性能の Issue には `perf` ラベルが付く。起票まで自動・修正は人が着手する（自動依頼の対象外）。自動で直させたいときは `perf` を外す
+- **ci**（Issue #3310）: `ci-flaky` の Issue には `needs-human` ラベルを付け、自動依頼（08:30）の対象にしない（テストだけの修正でも、
+  原因が製品側にあることがある。#3297 の 1 本は製品側が足したタイマーが原因だった）。公開リポジトリなので、JSON と Issue に載るのは
+  テストのファイル名と名前・回数・SHA・ジョブ名だけ（ログのほかの中身、パス・環境変数・エラーの文面は写さない）。
+  `gh` が無い・失敗した・時間切れのときは skip。読む attempt は 30 まで（残りは `details.attemptsNotRead` に数だけ）。
+  候補の条件（`metrics-types.ts` の `CI_FLAKY_*`）は最初の案で、数字を見て直す
 - 未使用のファイル（`unused` の knip `files`）の Issue には `needs-human` ラベルが付く。「候補に出たこと」と「消して安全なこと」は別なので、消す判断は人が行う（自動依頼の対象外）
+- knip の設定は `knip.json`（JSON なのでコメントは書けず、除外の理由はここに書く）。`entry` のうち `tests/fixtures/remote/*.cjs` は
+  `tests/unit/lib/remote/cloudflare-child-survival.test.ts` が `import` ではなくパスで `node` に起動させるため、knip からは
+  未使用に見える（knip の誤り、Issue #3315）。パスで起動するファイルを足したら、ここと `entry` に足す
 - 前回値が無い指標（初回・前回が skip のまま）は基準として記録するだけで、候補を出さない
 - security の検出が続いている間は `status: 'fail'`。前からあるものは `outstanding` に入り、AI はその日の起票枠（4 件）に
   余りがあるときだけ、まだ Issue の無いものを立てる（初日に見送った advisory も翌日以降に回る）
@@ -329,12 +339,31 @@ tmux -L cm-agent-health kill-server
   state に残り、次の実行はそれと比べる
 - **performance**（Issue #3054）: 本番ログは `scripts/agent-health/production-log.ts` の解決（main worktree の `logs/server.log`）と、
   同じディレクトリの `server.log.1`〜`.3` を読む。「直近 24 時間」は各行の先頭の ISO 時刻で絞る（ローテートの時刻に頼らない）。
-  ログが無い・読めない・24 時間分に満たない（最古の行が 24 時間より新しい）・窓の中に行が無いときは 3 指標とも skip。
+  ログが無い・読めない・24 時間分に満たない（最古の行が 24 時間より新しい）・窓の中に行が無いときは 3 指標とも skip（`hook-observation` も同じ）。
   `server.pid` が無い・そのプロセスが無いときは `server-process` だけ skip。本番サーバーを止めず、設定も変えない（読むのはログ・`ps`・`GET /api/worktrees` だけ）
   - security と同じく、**前から閾値を超えているものも `outstanding`**（初回から）。`fail` は候補か `outstanding` があるとき
   - 公開リポジトリのため、`title`・`evidence`・`details` に載るのは `<tag> <event>` の名前・件数・時間・内訳のフィールド名と数値だけ。
     ログ行の JSON の値（`worktreeId`・パス・メッセージ・エラーの文面）は写さない。識別子らしくない名前（パスなど）は `(other)` にまとめる
   - 閾値は `metrics-types.ts` の定数（2026-09-28〜10-01 の実測から決めた初期値）。計測は 30 秒程度（`ps` の 6 回 × 5 秒が大半）
+- **hook の観測値**（`hook-observation`、Issue #3311）: 判定は `src/lib/agent-health/hook-observation.ts`。category は `process`
+  （`bug-flow` と同じく fail にならず、`candidates` は常に空）。何を候補にするかは、2 週間ほど数字を見てから別の Issue で決める。
+  `details` に載るのは件数・時間・イベント名だけで、worktree・インスタンス・セッションの id は行の突き合わせにだけ使い、写さない
+  - `duplicateDropped`: `agent-event-duplicate-dropped`（受け口が 3 秒の窓で重複として捨てた配送）の行数
+  - `duplicateDroppedNotCopy`（= `value`）: そのうち**写しでない**もの。規則は 1 つ: 同じ worktree・ツール・インスタンスで、
+    捨てた配送が繰り返している前の配送（行の時刻 − `sinceLastMs`）より後、捨てた配送以前に、ターンの境目の反対側が適用されている。
+    `stop` を捨てたならターンの開始（`agent-event-received` の `user_prompt_submit` / `pre_tool_use` / `post_tool_use`）、
+    ターンの開始を捨てたなら `stop`（`agent-event-stop-applied`）。#3289（`stop` → 140 ms 後に開始 → 1.4 秒後の `stop` を捨てた）と
+    #3301（開始 → `stop` → 22 ms 後の開始を捨てた）はこれに当たり、数 ms の写しは当たらない。
+    `duplicateDroppedNotCopyEvents` はその内訳（`stop 1 / user_prompt_submit 1` の形）
+  - `duplicateDroppedCopy`: 写しと判定したもの。`duplicateDroppedUncorrelated`: #3311 より前の形式の行（`sinceLastMs` が無く判定できない）。
+    それ以外のイベント（`notification` など）の破棄は、境目が無いので写しに数える
+  - `divergenceLines`: `detection-divergence`（画面の判定とエージェントの申告が食い違ったポーリング 1 回につき 1 行）の行数
+  - `divergenceEpisodes`・`divergenceMedianMs`・`divergenceP90Ms`・`divergenceMaxMs`: 食い違いの回数と長さの分布。
+    サーバーは対象（worktree・ツール・インスタンス）ごとに食い違いが始まった時刻を持ち、一致に戻ったポーリングで
+    `detection-divergence-resolved`（`durationMs`・`polls`）を 1 行だけ出す。一致に戻る前に見られなくなった食い違いは数えない。
+    食い違いが無い日は長さが `null`
+  - ログの量: 新しい行は食い違いの終わりの 1 行だけ（`agent-event-duplicate-dropped` は項目が増えただけで行数は同じ）。
+    増え方は `log-volume` の `current-output-builder:detection-divergence-resolved` で確かめる
 - 全体は **10 分以内**（3 並列、ツールごとの上限あり。上限に達したものは skip）。2026-10-01 の実測（カバレッジなし）:
   54 秒・149 秒・140 秒（semgrep が最も長く 54〜140 秒）
 
@@ -370,8 +399,9 @@ interface MetricsReport {
   metrics: Array<{                 // metricId の順（上の表の順）
     metricId: 'npm-audit' | 'semgrep' | 'secrets' | 'file-size' | 'complexity'
       | 'duplication' | 'unused' | 'outdated' | 'type-safety' | 'coverage'
-      | 'api-latency' | 'log-volume' | 'error-rate' | 'server-process';
-    category: 'security' | 'maintainability' | 'performance';
+      | 'api-latency' | 'log-volume' | 'error-rate' | 'server-process'
+      | 'bug-flow' | 'ci-flaky' | 'hook-observation';
+    category: 'security' | 'maintainability' | 'performance' | 'process' | 'ci';
     status: 'pass' | 'fail' | 'skip';
     value: number | null;          // skip のとき null
     summary: string;
@@ -383,9 +413,10 @@ interface MetricsReport {
       delta?: number;              // 前回からの悪化量（指標の単位）
       score?: number;              // 保守性・性能の並び順の重み（悪化量 ÷ 閾値）
     }>;
-    outstanding?: Array<同上>;     // security・performance: 前から続いている検出
+    outstanding?: Array<同上>;     // security・performance・ci: 前から続いている検出
     skipReason?: string;
-    details?: Record<string, number | string>; // 起票しない件数（500 行超の本数など）
+    details?: Record<string, number | string | null>; // 起票しない件数（500 行超の本数・hook の観測値など）
+    records?: Array<Record<string, string | number | string[]>>; // ci-flaky: 失敗したジョブ 1 つ 1 行（sha・workflow・runId・attempt・job・kind・conclusion・tests）
   }>;
   queue: Array<{ key: string; metricId: string; source: 'candidate' | 'outstanding' }>; // 起票する順
   host: { commandmateCommit: string; node: string };
@@ -400,7 +431,7 @@ interface MetricsReport {
   日次確認より前に終わる
 - 依頼文 `docs/agent-health/metrics-prompt.md`、Issue のひな形 `docs/agent-health/metrics-issue-template.md`。
   識別子 `metrics:<metricId>:<対象>` で open の Issue を探し、あれば（その日の新規・悪化のときだけ）コメント、
-  無ければ起票する。**新規起票は 1 日 4 件まで**（`queue` の順: security の新規 → 悪化幅の大きい保守性 → performance の新規 → 続いている security → 続いている performance）
+  無ければ起票する。**新規起票は 1 日 4 件まで**（`queue` の順: security の新規 → 悪化幅の大きい保守性 → performance の新規 → ci の新規 → 続いている security → 続いている performance → 続いている ci）
 - ラベル `metrics`・`enhancement`（security は `security` も）を使う。無ければ作る:
   `gh label create metrics --repo Kewton/CommandMate --description "日次メトリクス計測が自動登録した改善 Issue"`
   （`security`・`enhancement` も同様。依頼文の手順 2 でも確かめる）
@@ -430,7 +461,7 @@ npx tsx scripts/agent-health/dispatch.ts --dry-run   # 選定と状態確認だ�
 - **対象**: `gh issue list --repo Kewton/CommandMate --state open` のうち、作成者が `kewton`（大文字小文字は区別しない。
   公開リポジトリのため、外部の人が書いた本文による指示の注入を防ぐ）・ラベル `agent-health`（バグ）か `catalog-drift`
   （スラッシュコマンドカタログのずれ、#3158 が起票）か `metrics`（改善）・ラベル `auto-dispatched` が無いもの。
-  複数のラベルがあれば バグ → カタログのずれ → 改善 の順に先のものとして扱う。ラベル `perf` が付いたもの（性能の Issue）と `needs-human` が付いたもの（人が判断する Issue。未使用のファイルなど）は除く
+  複数のラベルがあれば バグ → カタログのずれ → 改善 の順に先のものとして扱う。ラベル `perf` が付いたもの（性能の Issue）と `needs-human` が付いたもの（人が判断する Issue。未使用のファイル・不安定な CI のテストなど）は除く
 - **順番と上限**: バグ（作成が古い順）→ カタログのずれ（古い順）→ 改善（`security` → その他。それぞれ古い順）。
   バグは全件、カタログのずれは 1 件まで、改善は 2 件まで、合計 5 件まで。上限を超えたものは `deferred`（持ち越し）に入れる
 - **カタログのずれ**（#3159）: develop へのマージまで自動で進める。条件ファイルに「`/catalog-reconcile` の無人実行節に従う」

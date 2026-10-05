@@ -1,7 +1,7 @@
 /**
  * `npx tsx scripts/agent-health/metrics.ts [--out …] [--state …] [--only …] [--coverage|--no-coverage]`
  *
- * Measures security, maintainability (Issue #3044) and performance (Issue #3054)
+ * Measures security, maintainability (Issue #3044), performance (Issue #3054) and CI (Issue #3310)
  * metrics without any AI and writes `~/.commandmate/agent-health/metrics/<JST date>.json`. The
  * scheduled AI (docs/agent-health/metrics-prompt.md) files the candidates.
  * See docs/user-guide/agent-health.md "メトリクス計測".

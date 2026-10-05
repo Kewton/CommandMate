@@ -136,10 +136,11 @@ export function frameDecisionId(payload: Record<string, unknown>): string | null
  * The decision id ({@link frameDecisionId}) — the `per_…` / `frm_…` the reply
  * URL takes. An approval and the reply that settles it carry the SAME id, which
  * is why `classifyAgentEventDelivery` keys on `(event, detail, identity)`
- * rather than on the id alone. Every other frame (the `session.execution.*`
- * boundaries) answers null and keeps the time window, as v1's `session.idle`
- * does. The envelope's `evt_…` is not used, for v1's reason: nothing measured
- * says it is unique per frame.
+ * rather than on the id alone. Every other frame answers null. Of those only
+ * `session.execution.started` meets the time window (the `succeeded` /
+ * `failed` / `interrupted` boundaries are `stop`s, which it never suppresses —
+ * see `classifyAgentEventDelivery`). The envelope's `evt_…` is not used, for
+ * v1's reason: nothing measured says it is unique per frame.
  */
 export function opencodeV2EventIdentity(payload: Record<string, unknown>): string | null {
   return readEventIdentity(frameDecisionId(payload));

@@ -282,7 +282,7 @@ export async function POST(
         cliToolId,
         promptData: promptData,
       });
-      logger.info('sent-answer-to');
+      logger.info('prompt-answer-sent');
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       return NextResponse.json(
@@ -316,7 +316,7 @@ export async function POST(
     startPolling(id, cliToolId, instanceId);
     void broadcastTerminalSnapshotAfterInteraction(id, cliToolId, instanceId);
 
-    logger.info('resumed-polling-for');
+    logger.info('polling-resumed-after-answer');
 
     return NextResponse.json({
       success: true,
