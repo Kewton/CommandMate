@@ -11,7 +11,8 @@
     ".agents/skills/*/scripts/*.ts",
     ".claude/skills/*/scripts/*.ts",
     "public/sw.js",
-    "src/i18n.ts"
+    "src/i18n.ts",
+    "tests/fixtures/remote/*.cjs"
   ],
   "ignore": ["website/**"]
 }

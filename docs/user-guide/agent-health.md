@@ -322,6 +322,7 @@ tmux -L cm-agent-health kill-server
 | performance | `error-rate` | 本番ログの直近 24 時間の `[ERROR]` 行を `<tag> <event>` ごとに | ERROR 行の合計 | ある `<tag> <event>` が新たに 1 日 50 行以上／前回比 2 倍以上（前回 50 行以上のもの）。50 行以上のままなら `outstanding` |
 | performance | `server-process` | サーバー（`logs/server.pid` の子の `node dist/server/server.js`）の RSS と CPU を 5 秒おきに 6 回（`ps -o rss=,%cpu=`）。あわせて `GET http://127.0.0.1:3000/api/worktrees` を 3 回順に呼び、中央値を `details.apiWorktreesMedianMs` に（401 などは `details.apiWorktreesError` に理由だけ） | RSS の最大（MB） | RSS が新たに 1,500MB 以上／前回比 +50% 以上／CPU 平均が新たに 50% 以上。RSS 1,500MB 以上のままなら `outstanding` |
 | ci | `ci-flaky` | 直近 7 日の develop の push の CI（`gh run list --branch develop --event push`）。失敗したか、やり直した run は、attempt ごとにジョブの結果（`gh run view <id> --attempt <n> --json jobs`）と、失敗したジョブのログ（`--log-failed`）の `FAIL <file> > <name>` の行を読む。失敗したジョブを SHA・ジョブ・attempt の単位で `records` に残し、**テストの失敗**（落ちたテストの名前つき）・**実行環境の障害**（キャンセル・タイムアウト・テストの段まで行かずに落ちた）・**その他**（テストの名前の無い失敗・集約のジョブ）に分け、`details` に件数と **やり直しでの成功**（同じ SHA で attempt によって結果が変わった）の数 | 不安定なテストの本数 | 同じ SHA でやり直して通った run で落ちていたテスト／別の SHA で 2 回以上落ちたテスト（間のコミットがテストと対象を変えたかは見ていない）。最初に落ちてから毎回落ちているテストは**落ち続け**（不具合）として別の種類で出す。前から出ているものは `outstanding` |
+| process | `hook-observation` | 本番ログの直近 24 時間（`log-volume` と同じ 1 回の読み込み）の hook の観測値（Issue #3311）。下の「hook の観測値」 | 写しでない破棄の数 | **なし**（観測だけ。候補にせず、Issue も立てない） |
 
 - **「新たに閾値を超えた」「前回より悪化した」だけが候補**（`candidates`）。前から超えているもの（1,500 行超の 14 本、
   複雑度 25 以上の 83 関数など）は起票せず、`value` と `details` の件数として残す
@@ -332,6 +333,9 @@ tmux -L cm-agent-health kill-server
   `gh` が無い・失敗した・時間切れのときは skip。読む attempt は 30 まで（残りは `details.attemptsNotRead` に数だけ）。
   候補の条件（`metrics-types.ts` の `CI_FLAKY_*`）は最初の案で、数字を見て直す
 - 未使用のファイル（`unused` の knip `files`）の Issue には `needs-human` ラベルが付く。「候補に出たこと」と「消して安全なこと」は別なので、消す判断は人が行う（自動依頼の対象外）
+- knip の設定は `knip.json`（JSON なのでコメントは書けず、除外の理由はここに書く）。`entry` のうち `tests/fixtures/remote/*.cjs` は
+  `tests/unit/lib/remote/cloudflare-child-survival.test.ts` が `import` ではなくパスで `node` に起動させるため、knip からは
+  未使用に見える（knip の誤り、Issue #3315）。パスで起動するファイルを足したら、ここと `entry` に足す
 - 前回値が無い指標（初回・前回が skip のまま）は基準として記録するだけで、候補を出さない
 - security の検出が続いている間は `status: 'fail'`。前からあるものは `outstanding` に入り、AI はその日の起票枠（4 件）に
   余りがあるときだけ、まだ Issue の無いものを立てる（初日に見送った advisory も翌日以降に回る）
@@ -339,12 +343,31 @@ tmux -L cm-agent-health kill-server
   state に残り、次の実行はそれと比べる
 - **performance**（Issue #3054）: 本番ログは `scripts/agent-health/production-log.ts` の解決（main worktree の `logs/server.log`）と、
   同じディレクトリの `server.log.1`〜`.3` を読む。「直近 24 時間」は各行の先頭の ISO 時刻で絞る（ローテートの時刻に頼らない）。
-  ログが無い・読めない・24 時間分に満たない（最古の行が 24 時間より新しい）・窓の中に行が無いときは 3 指標とも skip。
+  ログが無い・読めない・24 時間分に満たない（最古の行が 24 時間より新しい）・窓の中に行が無いときは 3 指標とも skip（`hook-observation` も同じ）。
   `server.pid` が無い・そのプロセスが無いときは `server-process` だけ skip。本番サーバーを止めず、設定も変えない（読むのはログ・`ps`・`GET /api/worktrees` だけ）
   - security と同じく、**前から閾値を超えているものも `outstanding`**（初回から）。`fail` は候補か `outstanding` があるとき
   - 公開リポジトリのため、`title`・`evidence`・`details` に載るのは `<tag> <event>` の名前・件数・時間・内訳のフィールド名と数値だけ。
     ログ行の JSON の値（`worktreeId`・パス・メッセージ・エラーの文面）は写さない。識別子らしくない名前（パスなど）は `(other)` にまとめる
   - 閾値は `metrics-types.ts` の定数（2026-09-28〜10-01 の実測から決めた初期値）。計測は 30 秒程度（`ps` の 6 回 × 5 秒が大半）
+- **hook の観測値**（`hook-observation`、Issue #3311）: 判定は `src/lib/agent-health/hook-observation.ts`。category は `process`
+  （`bug-flow` と同じく fail にならず、`candidates` は常に空）。何を候補にするかは、2 週間ほど数字を見てから別の Issue で決める。
+  `details` に載るのは件数・時間・イベント名だけで、worktree・インスタンス・セッションの id は行の突き合わせにだけ使い、写さない
+  - `duplicateDropped`: `agent-event-duplicate-dropped`（受け口が 3 秒の窓で重複として捨てた配送）の行数
+  - `duplicateDroppedNotCopy`（= `value`）: そのうち**写しでない**もの。規則は 1 つ: 同じ worktree・ツール・インスタンスで、
+    捨てた配送が繰り返している前の配送（行の時刻 − `sinceLastMs`）より後、捨てた配送以前に、ターンの境目の反対側が適用されている。
+    `stop` を捨てたならターンの開始（`agent-event-received` の `user_prompt_submit` / `pre_tool_use` / `post_tool_use`）、
+    ターンの開始を捨てたなら `stop`（`agent-event-stop-applied`）。#3289（`stop` → 140 ms 後に開始 → 1.4 秒後の `stop` を捨てた）と
+    #3301（開始 → `stop` → 22 ms 後の開始を捨てた）はこれに当たり、数 ms の写しは当たらない。
+    `duplicateDroppedNotCopyEvents` はその内訳（`stop 1 / user_prompt_submit 1` の形）
+  - `duplicateDroppedCopy`: 写しと判定したもの。`duplicateDroppedUncorrelated`: #3311 より前の形式の行（`sinceLastMs` が無く判定できない）。
+    それ以外のイベント（`notification` など）の破棄は、境目が無いので写しに数える
+  - `divergenceLines`: `detection-divergence`（画面の判定とエージェントの申告が食い違ったポーリング 1 回につき 1 行）の行数
+  - `divergenceEpisodes`・`divergenceMedianMs`・`divergenceP90Ms`・`divergenceMaxMs`: 食い違いの回数と長さの分布。
+    サーバーは対象（worktree・ツール・インスタンス）ごとに食い違いが始まった時刻を持ち、一致に戻ったポーリングで
+    `detection-divergence-resolved`（`durationMs`・`polls`）を 1 行だけ出す。一致に戻る前に見られなくなった食い違いは数えない。
+    食い違いが無い日は長さが `null`
+  - ログの量: 新しい行は食い違いの終わりの 1 行だけ（`agent-event-duplicate-dropped` は項目が増えただけで行数は同じ）。
+    増え方は `log-volume` の `current-output-builder:detection-divergence-resolved` で確かめる
 - 全体は **10 分以内**（3 並列、ツールごとの上限あり。上限に達したものは skip）。2026-10-01 の実測（カバレッジなし）:
   54 秒・149 秒・140 秒（semgrep が最も長く 54〜140 秒）
 
@@ -380,7 +403,8 @@ interface MetricsReport {
   metrics: Array<{                 // metricId の順（上の表の順）
     metricId: 'npm-audit' | 'semgrep' | 'secrets' | 'file-size' | 'complexity'
       | 'duplication' | 'unused' | 'outdated' | 'type-safety' | 'coverage'
-      | 'api-latency' | 'log-volume' | 'error-rate' | 'server-process' | 'bug-flow' | 'ci-flaky';
+      | 'api-latency' | 'log-volume' | 'error-rate' | 'server-process'
+      | 'bug-flow' | 'ci-flaky' | 'hook-observation';
     category: 'security' | 'maintainability' | 'performance' | 'process' | 'ci';
     status: 'pass' | 'fail' | 'skip';
     value: number | null;          // skip のとき null
@@ -395,7 +419,7 @@ interface MetricsReport {
     }>;
     outstanding?: Array<同上>;     // security・performance・ci: 前から続いている検出
     skipReason?: string;
-    details?: Record<string, number | string | null>; // 起票しない件数（500 行超の本数など）
+    details?: Record<string, number | string | null>; // 起票しない件数（500 行超の本数・hook の観測値など）
     records?: Array<Record<string, string | number | string[]>>; // ci-flaky: 失敗したジョブ 1 つ 1 行（sha・workflow・runId・attempt・job・kind・conclusion・tests）
   }>;
   queue: Array<{ key: string; metricId: string; source: 'candidate' | 'outstanding' }>; // 起票する順

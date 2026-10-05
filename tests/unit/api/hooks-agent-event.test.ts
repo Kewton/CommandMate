@@ -19,8 +19,9 @@
  * @vitest-environment node
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi, type MockInstance } from 'vitest';
 import Database from 'better-sqlite3';
+import { createHash } from 'crypto';
 import { execFileSync } from 'child_process';
 import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
@@ -923,6 +924,78 @@ describe('a queued notice delivered twice, by the injected hook and a relay (Iss
       expect(turn?.turnId, `relayFirst=${relayFirst}`).not.toBe(opened?.turnId);
       expect(turn?.openedAt, `relayFirst=${relayFirst}`).toBe(T + at);
     }
+  });
+});
+
+describe('the duplicate-dropped line (Issue #3311)', () => {
+  /**
+   * One `agent-event-duplicate-dropped` line has to say which instance, which
+   * agent session and how long after the applied delivery the dropped one
+   * came — the daily metrics tell a copy from a swallowed turn by it. The
+   * session id is hashed: the metrics that read these lines are published.
+   */
+  const T = 1_800_000_000_000;
+  const SESSION = 'sess-3311-raw-id';
+
+  let logSpy: MockInstance<typeof console.log>;
+  beforeEach(() => {
+    logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+  });
+  afterEach(() => {
+    logSpy.mockRestore();
+    unfreezeClock();
+  });
+
+  async function deliver(afterMs: number, extra: Record<string, unknown> = {}) {
+    freezeClock(T + afterMs);
+    const response = await postEvent({ tool: 'claude', event: 'stop', cwd: repo, sessionId: SESSION, ...extra });
+    expect(response.status).toBe(202);
+  }
+
+  /** The raw text of every `agent-event-duplicate-dropped` line written so far. */
+  function droppedLines(): string[] {
+    return logSpy.mock.calls
+      .map((args) => String(args[0]))
+      .filter((line) => line.includes('agent-event-duplicate-dropped'));
+  }
+
+  /** The JSON a line carries, in either log format. */
+  function dataOf(line: string): Record<string, unknown> {
+    if (line.startsWith('{')) return (JSON.parse(line) as { data: Record<string, unknown> }).data;
+    return JSON.parse(line.slice(line.indexOf('{'))) as Record<string, unknown>;
+  }
+
+  it('names the instance, the hashed session, the interval and the subtype', async () => {
+    await deliver(0, { instanceId: 'cc-2', detail: 'end_turn' });
+    await deliver(7, { instanceId: 'cc-2', detail: 'end_turn' });
+
+    const lines = droppedLines();
+    expect(lines).toHaveLength(1);
+    expect(dataOf(lines[0])).toEqual({
+      worktreeId: wtId,
+      tool: 'claude',
+      instanceId: 'cc-2',
+      event: 'stop',
+      detail: 'end_turn',
+      session: createHash('sha256').update(SESSION).digest('hex').slice(0, 8),
+      sinceLastMs: 7,
+    });
+    expect(lines[0]).not.toContain(SESSION);
+  });
+
+  it('names the primary instance when the hook did not say one', async () => {
+    await deliver(0);
+    await deliver(1400);
+
+    const data = dataOf(droppedLines()[0]);
+    expect(data).toMatchObject({ instanceId: 'claude', detail: null, sinceLastMs: 1400 });
+  });
+
+  it('writes no line for a delivery that was applied (control)', async () => {
+    await deliver(0);
+    await deliver(5000);
+
+    expect(droppedLines()).toHaveLength(0);
   });
 });
 

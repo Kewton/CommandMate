@@ -56,7 +56,7 @@ import path from 'path';
 import { CACHE_MAX_CAPTURE_LINES } from '@/lib/tmux/tmux-capture-cache';
 import { usesAlternateScreen, type CLIToolType } from '@/lib/cli-tools/types';
 
-// Built inside vi.hoisted() rather than from tests/helpers/logger-mock, because
+// Built inside vi.hoisted() rather than as a plain top-level `const`, because
 // `@/lib/logger` is pulled in transitively by `cli-patterns` while the hoisted
 // vi.mock factory runs (same reason as the #1695 and #2250 suites).
 const mockLogger = vi.hoisted(() => {

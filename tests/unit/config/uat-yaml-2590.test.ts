@@ -21,7 +21,9 @@
  * assertions below read the script's `cmd_up` / `cmd_down`; what they hold is
  * unchanged. The script's behaviour is tests/unit/scripts/uat/run-server-3359.test.ts.
  */
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import YAML from 'yaml';
@@ -178,5 +180,84 @@ describe('.commandmate/uat.yaml (Issue #2590)', () => {
     expect(down).toMatch(/rc=1/);
     // Never writes back: the user's own changes must survive.
     expect(down).not.toMatch(/\bcp\b|\bmv\b|>\s*"?\$f/);
+  });
+
+  it('uses ONE decided CODEX_HOME for the record, the server (after env -i) and down (Issue #3358)', () => {
+    const up = spec.env.up;
+    const down = spec.env.down ?? '';
+    expect(up).toContain('"${CODEX_HOME:-$HOME/.codex}"');
+    expect(up).toContain('export CH="$(');
+    expect(up).toMatch(/printf 'CODEX_HOME {2}%s\\n' "\$CH"/);
+    const [line] = logicalLines(up).filter((l) => l.includes('dist/server/server.js'));
+    const at = line.indexOf('CODEX_HOME="$CH"');
+    expect(at, 'the server line must set CODEX_HOME').toBeGreaterThan(line.indexOf('env -i'));
+    expect(at).toBeLessThan(line.indexOf('nohup'));
+    // The record names the home; down reads it back instead of re-deriving it.
+    expect(down).toContain('s/^CODEX_HOME  //p');
+    expect(down).toContain('"$CH/$f"');
+    expect(down).not.toContain('$HOME/.codex');
+  });
+
+  describe('CODEX_HOME is made absolute and refused like the server refuses it (Issue #3358)', () => {
+    // Everything in `up` before the private tmux server starts: the decision, the
+    // refusal and the record. Nothing here starts a process.
+    const preamble = spec.env.up.slice(0, spec.env.up.indexOf('mkdir -p -m 700 /tmp/cmuat-'));
+
+    function runPreamble(codexHome: string | undefined, cwd: string) {
+      const runDir = fs.mkdtempSync(path.join(os.tmpdir(), 'uat-3358-run-'));
+      const env = { PATH: process.env.PATH ?? '', HOME: path.join(runDir, 'home') };
+      if (codexHome !== undefined) Object.assign(env, { CODEX_HOME: codexHome });
+      const res = spawnSync('bash', ['-c', `${preamble.replaceAll('{run_dir}', runDir)}\nprintf '%s' "$CH"`], {
+        cwd,
+        env: env as unknown as NodeJS.ProcessEnv,
+        encoding: 'utf8',
+      });
+      return { ...res, runDir };
+    }
+
+    it('starts the private tmux server with the decided CODEX_HOME, not the caller\'s', () => {
+      const [line] = logicalLines(spec.env.up).filter((l) => l.includes('new-session'));
+      expect(line.startsWith('CODEX_HOME="$CH" tmux -S ')).toBe(true);
+    });
+
+    it('turns a relative CODEX_HOME into an absolute one and records it', () => {
+      const cwd = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'uat-3358-cwd-')));
+      fs.mkdirSync(path.join(cwd, 'rel-codex'));
+      const res = runPreamble('rel-codex', cwd);
+      expect(res.status, res.stderr).toBe(0);
+      expect(res.stdout).toBe(path.join(cwd, 'rel-codex'));
+      expect(fs.readFileSync(path.join(res.runDir, 'codex-shared.sha256'), 'utf8')).toContain(
+        `CODEX_HOME  ${path.join(cwd, 'rel-codex')}\n`,
+      );
+    });
+
+    it('aborts with exit 1, before anything is written, for a value the server would replace', () => {
+      const cwd = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'uat-3358-cwd-')));
+      const link = path.join(cwd, 'to-dev');
+      fs.symlinkSync('/dev', link);
+      for (const value of ['/dev/shm/codex', '/proc/x', '/sys', link]) {
+        const res = runPreamble(value, cwd);
+        expect(res.status, `${value}: ${res.stderr}`).toBe(1);
+        expect(res.stderr).toContain('refused by the server');
+        expect(fs.existsSync(path.join(res.runDir, 'codex-shared.sha256')), value).toBe(false);
+        expect(fs.existsSync(path.join(res.runDir, 'root')), value).toBe(false);
+      }
+    });
+
+    it('aborts for an explicit CODEX_HOME that is not an existing directory', () => {
+      const res = runPreamble(path.join(os.tmpdir(), 'uat-3358-does-not-exist'), os.tmpdir());
+      expect(res.status).toBe(1);
+      expect(res.stderr).toContain('not an existing directory');
+    });
+
+    it('keeps its refused roots identical to the server\'s VIRTUAL_FILESYSTEM_ROOTS', () => {
+      const source = fs.readFileSync(path.join(REPO_ROOT, 'src/config/system-directories.ts'), 'utf8');
+      const serverRoots = [...source.match(/VIRTUAL_FILESYSTEM_ROOTS = \[([^\]]*)\]/)![1].matchAll(/'([^']+)'/g)].map((m) => m[1]);
+      expect(serverRoots.length).toBeGreaterThan(0);
+      const caseBlock = spec.env.up.match(/case "\$d" in\n([^)]*)\)/)![1];
+      const yamlRoots = caseBlock.split('|').map((x) => x.trim()).filter((x) => !x.endsWith('/*'));
+      expect(yamlRoots.sort()).toEqual([...serverRoots].sort());
+      expect(caseBlock.split('|').map((x) => x.trim()).filter((x) => x.endsWith('/*')).sort()).toEqual(serverRoots.map((r) => `${r}/*`).sort());
+    });
   });
 });
