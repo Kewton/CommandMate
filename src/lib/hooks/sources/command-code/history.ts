@@ -89,7 +89,7 @@
 
 import { readdir, stat } from 'fs/promises';
 import { homedir } from 'os';
-import { join, resolve, sep } from 'path';
+import { join } from 'path';
 import { buildCompositeKey } from '@/lib/auto-yes-state';
 import { readTranscriptTail, TRANSCRIPT_TAIL_BYTES } from '@/lib/history/transcript-tail';
 import {
@@ -102,7 +102,16 @@ import { createLogger } from '@/lib/logger';
 import { commandCodePromptRequestId, commandCodeTurnRequestId } from '@/types/agent-transcript';
 import type { ChatMessage } from '@/types/models';
 import type { AgentInstanceRef } from '../types';
-import { isReadableFile, nextTurnOpensAt, resolveAssistantTimestampMs, selectUnwrittenTurns } from '../transcript-history';
+import {
+  acceptPathUnderRoot,
+  growTurnRowTo,
+  isReadableFile,
+  nextTurnOpensAt,
+  refreshTurnRowsTo,
+  resolveAssistantTimestampMs,
+  resolveSessionIdFromEvents,
+  selectUnwrittenTurns,
+} from '../transcript-history';
 import type { StructuredHistoryCaptureReport } from '@/lib/polling/structured-history-gate';
 import {
   buildCommandCodeTurns,
@@ -202,27 +211,7 @@ export function resetCommandCodeTranscriptSessions(): void {
 export async function resolveCommandCodeSessionId(
   target: AgentInstanceRef
 ): Promise<string | null> {
-  const key = keyOf(target);
-  try {
-    const { getLastAgentEvent } = await import('@/lib/session/agent-event-state');
-    const sessionId = getLastAgentEvent(
-      target.worktreeId,
-      target.cliToolId,
-      target.instanceId
-    )?.sessionId;
-    if (typeof sessionId === 'string' && sessionId.length > 0) {
-      sessionPointers.set(key, sessionId);
-      return sessionId;
-    }
-  } catch (error) {
-    // A state module that cannot be reached is one that knows no session id.
-    logger.debug('command-code-transcript-session-lookup-failed', {
-      worktreeId: target.worktreeId,
-      instanceId: target.instanceId ?? target.cliToolId,
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
-  return sessionPointers.get(key) ?? null;
+  return resolveSessionIdFromEvents(target, sessionPointers, keyOf(target), logger, 'command-code-transcript-session-lookup-failed');
 }
 
 /** `<home>/.commandcode/projects`. */
@@ -248,12 +237,11 @@ export function commandCodeProjectsRoot(homeDir: string): string {
  * @returns The resolved path, or null when it is not acceptable
  */
 export function acceptCommandCodeTranscriptHint(homeDir: string, hint: string): string | null {
-  if (!hint.endsWith(COMMAND_CODE_TRANSCRIPT_EXTENSION)) return null;
-  if (hint.includes('\0')) return null;
-  const root = resolve(commandCodeProjectsRoot(homeDir));
-  const resolved = resolve(hint);
-  if (resolved !== root && !resolved.startsWith(root + sep)) return null;
-  return resolved;
+  return acceptPathUnderRoot(
+    commandCodeProjectsRoot(homeDir),
+    COMMAND_CODE_TRANSCRIPT_EXTENSION,
+    hint
+  );
 }
 
 /**
@@ -779,33 +767,7 @@ async function growCommandCodeTurnRow(
   rendered: CommandCodeRenderedTurn,
   path: string
 ): Promise<boolean> {
-  const instanceId = target.instanceId ?? target.cliToolId;
-  const previousLength = existing.content.length;
-  if (rendered.body.length <= previousLength) return false;
-
-  const [{ getDbInstance }, { updateMessageContent }, { broadcastMessage }] = await Promise.all([
-    import('@/lib/db/db-instance'),
-    import('@/lib/db'),
-    import('@/lib/ws-server'),
-  ]);
-
-  updateMessageContent(getDbInstance(), existing.id, rendered.body);
-  broadcastMessage('message_updated', {
-    worktreeId: target.worktreeId,
-    message: { ...existing, content: rendered.body },
-  });
-  logger.info('command-code-transcript-turn-updated', {
-    worktreeId: target.worktreeId,
-    instanceId,
-    sessionId: rendered.sessionId,
-    requestId: existing.requestId,
-    path,
-    previousLength,
-    bodyLength: rendered.body.length,
-    textBlocks: rendered.textBlocks,
-    toolBlocks: rendered.toolBlocks,
-  });
-  return true;
+  return growTurnRowTo(target, existing, rendered, path, logger, 'command-code-transcript-turn-updated');
 }
 
 /**
@@ -833,28 +795,12 @@ async function refreshCommandCodeTurnRows(
   candidates: readonly CommandCodeTurnAccumulator[],
   path: string
 ): Promise<number> {
-  if (candidates.length === 0) return 0;
-
-  const [{ getDbInstance }, { findMessageByRequestId }] = await Promise.all([
-    import('@/lib/db/db-instance'),
-    import('@/lib/db'),
-  ]);
-  const db = getDbInstance();
-
-  let updated = 0;
-  for (const turn of candidates) {
-    if (!isCommandCodeTurnWritable(turn)) continue;
-    const existing = findMessageByRequestId(
-      db,
-      target.worktreeId,
-      commandCodeTurnRequestId(turn.promptId)
-    );
-    if (!existing) continue;
-    if (await growCommandCodeTurnRow(target, existing, renderCommandCodeTurn(turn), path)) {
-      updated += 1;
-    }
-  }
-  return updated;
+  return refreshTurnRowsTo(target, candidates, path, {
+    isWritable: isCommandCodeTurnWritable,
+    requestIdOf: (turn) => commandCodeTurnRequestId(turn.promptId),
+    render: renderCommandCodeTurn,
+    grow: growCommandCodeTurnRow,
+  });
 }
 
 /**

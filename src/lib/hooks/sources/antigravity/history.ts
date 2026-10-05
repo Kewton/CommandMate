@@ -77,7 +77,7 @@
  */
 
 import { homedir } from 'os';
-import { join, resolve, sep } from 'path';
+import { join } from 'path';
 import { buildCompositeKey } from '@/lib/auto-yes-state';
 import { readTranscriptTail, TRANSCRIPT_TAIL_BYTES } from '@/lib/history/transcript-tail';
 import {
@@ -89,7 +89,14 @@ import { advanceCapturedLineForTranscriptTurn } from '@/lib/assistant-response-s
 import { createLogger } from '@/lib/logger';
 import { antigravityPromptRequestId, antigravityTurnRequestId } from '@/types/agent-transcript';
 import type { AgentInstanceRef } from '../types';
-import { isReadableFile, nextTurnOpensAt, resolveAssistantTimestampMs, selectUnwrittenTurns } from '../transcript-history';
+import {
+  acceptPathUnderRoot,
+  isReadableFile,
+  nextTurnOpensAt,
+  resolveAssistantTimestampMs,
+  resolveSessionIdFromEvents,
+  selectUnwrittenTurns,
+} from '../transcript-history';
 import type { ChatMessage } from '@/types/models';
 import type { StructuredHistoryCaptureReport } from '@/lib/polling/structured-history-gate';
 import {
@@ -361,27 +368,7 @@ async function resolveAntigravityStopAt(target: AgentInstanceRef): Promise<numbe
 export async function resolveAntigravityConversationId(
   target: AgentInstanceRef
 ): Promise<string | null> {
-  const key = keyOf(target);
-  try {
-    const { getLastAgentEvent } = await import('@/lib/session/agent-event-state');
-    const conversationId = getLastAgentEvent(
-      target.worktreeId,
-      target.cliToolId,
-      target.instanceId
-    )?.sessionId;
-    if (typeof conversationId === 'string' && conversationId.length > 0) {
-      conversationPointers.set(key, conversationId);
-      return conversationId;
-    }
-  } catch (error) {
-    // A state module that cannot be reached is one that knows no conversation.
-    logger.debug('antigravity-transcript-conversation-lookup-failed', {
-      worktreeId: target.worktreeId,
-      instanceId: target.instanceId ?? target.cliToolId,
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
-  return conversationPointers.get(key) ?? null;
+  return resolveSessionIdFromEvents(target, conversationPointers, keyOf(target), logger, 'antigravity-transcript-conversation-lookup-failed');
 }
 
 /**
@@ -439,12 +426,11 @@ export function acceptAntigravityTranscriptPath(
   agyHome: string,
   candidate: string
 ): string | null {
-  if (!candidate.endsWith(ANTIGRAVITY_TRANSCRIPT_EXTENSION)) return null;
-  if (candidate.includes('\0')) return null;
-  const root = resolve(antigravityBrainRoot(agyHome));
-  const resolved = resolve(candidate);
-  if (resolved !== root && !resolved.startsWith(root + sep)) return null;
-  return resolved;
+  return acceptPathUnderRoot(
+    antigravityBrainRoot(agyHome),
+    ANTIGRAVITY_TRANSCRIPT_EXTENSION,
+    candidate
+  );
 }
 
 /** What {@link captureAntigravityTranscriptTurn} needs from its caller. */
