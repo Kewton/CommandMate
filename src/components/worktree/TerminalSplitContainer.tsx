@@ -33,6 +33,7 @@
 
 'use client';
 
+import { TerminalSplitHiddenProvider } from './TerminalSplitHiddenContext';
 import React, {
   memo,
   useCallback,
@@ -782,6 +783,7 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
                 }
                 className="h-full"
               >
+                <TerminalSplitHiddenProvider value={hidden}>
                 {renderPane({
                   splitIndex: idx,
                   cliToolId: split.cliToolId,
@@ -797,6 +799,7 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
                   isMaximized: maximizedHere,
                   onToggleMaximize: maximizeHandlers[idx],
                 })}
+                </TerminalSplitHiddenProvider>
               </div>
               {!isGrid && !isLast ? (
                 <PaneResizerWrapper
