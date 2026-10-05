@@ -24,6 +24,7 @@ import {
   startingStatusResult,
 } from '@/lib/session/session-starting-state';
 import { deriveCliStatus, sessionStatusToActivityFlags } from './status-mapping';
+import { hookTurnHoldsPane } from './hook-turn-hold';
 // Issue #2317: the tmux session is a SURFACE, not just a place to run a process.
 // Reached through `cli-session`, which is the gateway Issue #1922's import guard
 // names — this module may not import `lib/tmux/**` itself.
@@ -605,6 +606,18 @@ async function detectInstanceSessionStatus(
       // Issue #3179: not during a launch — a structured wait inherited there
       // would light the orange dot for a dialog nobody has to answer.
       isWaitingForResponse = isWaitingForResponse || (startingSince === null && peek.waiting);
+      // Issue #3365: a codex turn its hooks opened is running until its `Stop`,
+      // whatever the frame reads — the rule `capture --json` applies (#3337),
+      // called rather than copied. In-memory reads only (no DB, no tmux), and
+      // only reached when nothing above already said waiting / processing.
+      if (
+        startingSince === null &&
+        !isWaitingForResponse &&
+        !isProcessing &&
+        hookTurnHoldsPane(worktreeId, cliToolId, instanceId, output)
+      ) {
+        isProcessing = true;
+      }
       structuredWaitingSince = startingSince === null ? peek.structured?.at ?? null : null;
       waitingKind = deriveWaitingKind({
         waiting: isWaitingForResponse,
