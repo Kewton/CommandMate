@@ -124,7 +124,8 @@ const CORPUS: ReadonlyArray<readonly [string, string, string]> = [
   ['unit/lib/detection/fixtures/codex-live-1671/turn-running-command.txt', 'running/thinking_indicator', 'running/thinking_indicator'],
   ['unit/lib/detection/fixtures/codex-live-1890/composer-placeholder-ask.txt', 'ready/input_prompt', 'ready/input_prompt'],
   ['unit/lib/detection/fixtures/codex-live-1890/composer-residual-leading-number.txt', 'ready/input_prompt', 'ready/input_prompt'],
-  ['unit/lib/detection/fixtures/codex-live-1890/composer-residual-multiline.txt', 'running/thinking_indicator', 'running/thinking_indicator'],
+  // #3205: アイドルの 2 行の入力欄。以前はバグの判定を固定していた
+  ['unit/lib/detection/fixtures/codex-live-1890/composer-residual-multiline.txt', 'ready/input_prompt', 'ready/input_prompt'],
   ['unit/lib/detection/fixtures/codex-live-1890/composer-residual-plain.txt', 'ready/input_prompt', 'ready/input_prompt'],
   ['unit/lib/detection/fixtures/codex-live-1890/composer-residual-slash.txt', 'ready/input_prompt', 'ready/input_prompt'],
   ['unit/lib/detection/fixtures/codex-live-1890/dialog-model-picker.txt', 'waiting/codex_selection_list', 'waiting/codex_selection_list'],

@@ -234,7 +234,8 @@ describe('[#2818] appending a thread title to a measured untitled bar moves no v
     ['tests/unit/lib/detection/fixtures/codex-live-1628/idle-ready.txt', 'ready/input_prompt/false'],
     ['tests/unit/lib/detection/fixtures/codex-live-1671/turn-running-command.txt', 'running/thinking_indicator/false'],
     ['tests/unit/lib/detection/fixtures/codex-live-1671/turn-complete-short-message.txt', 'ready/input_prompt/false'],
-    ['tests/unit/lib/detection/fixtures/codex-live-1890/composer-residual-multiline.txt', 'running/thinking_indicator/false'],
+    // #3205: アイドルの 2 行の入力欄。以前はバグの判定を固定していた
+    ['tests/unit/lib/detection/fixtures/codex-live-1890/composer-residual-multiline.txt', 'ready/input_prompt/false'],
   ];
 
   it.each(MEASURED)('%s → %s with or without a title', (path, verdict) => {
