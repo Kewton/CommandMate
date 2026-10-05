@@ -114,9 +114,16 @@ CM_AGENT_HOOKS_INJECT=0 commandmate start
 
 そのため受け口は `(worktreeId, cliTool, instance, event, sessionId)` が一致する
 イベントを **3 秒以内は 1 回として扱う**。両方の配送は同じ `session_id` を運ぶので
-二重配送は畳まれ、別ターン（別 `session_id`）は畳まれない。
+二重配送は畳まれる。
 `sessionId` を送らない呼び出しは**畳まない**（区別材料が無いため、
 実イベントを取りこぼすより重複を許す）。
+
+`session_id` はターンをまたいで同じなので、`session_id` だけでは別のターンを区別できない。
+そこで `stop` は、前の `stop` との間に同じセッションのターンの開始
+（`user_prompt_submit` / `pre_tool_use` / `post_tool_use`）を受けていれば、
+3 秒以内でも**別のターンの終了として適用する**（Issue #3289）。
+ターンの開始を受けていなければ、今までどおり 2 回目の `stop` を畳む。
+`stop` 以外のイベントは、今までどおり 3 秒以内は 1 回として扱う。
 
 **手動設定は削除して構わない**（自動注入が同じイベントを送る）。
 残す場合も上記 dedup で二重記録は起きない。
