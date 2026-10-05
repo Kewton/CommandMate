@@ -14,6 +14,7 @@ import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { createLogger, generateRequestId } from '@/lib/logger';
 import { CLI_TOOL_IDS, isCliToolType, isValidInstanceId, type CLIToolType } from '@/lib/cli-tools/types';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
+import { readOptionalJsonObjectBody } from '@/lib/api/read-json-body';
 
 const logger = createLogger('interrupt');
 
@@ -53,12 +54,9 @@ export async function POST(
     }
 
     // 2. リクエストボディを取得
-    let body: InterruptRequest = {};
-    try {
-      body = await request.json();
-    } catch {
-      // body is optional
-    }
+    const parsed = await readOptionalJsonObjectBody<InterruptRequest>(request);
+    if (!parsed.ok) return parsed.response;
+    const body = parsed.body;
 
     // Issue #868: validate the optional instance selector (embedded in session names).
     if (body.instanceId !== undefined && !isValidInstanceId(body.instanceId)) {

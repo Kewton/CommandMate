@@ -18,6 +18,7 @@ import { isValidWorktreeId } from '@/lib/security/path-validator';
 import { unstageFiles, handleGitApiError } from '@/lib/git/git-utils';
 import { validateFilesBody } from '@/lib/git/git-route-helpers';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
+import { readOptionalJsonObjectBody } from '@/lib/api/read-json-body';
 
 export async function POST(
   request: NextRequest,
@@ -43,7 +44,11 @@ export async function POST(
       );
     }
 
-    const body = await request.json().catch(() => ({}));
+    const parsed = await readOptionalJsonObjectBody(request);
+
+    if (!parsed.ok) return parsed.response;
+
+    const body = parsed.body;
     const result = validateFilesBody(body.files, worktree.path);
     if (result instanceof NextResponse) {
       return result;

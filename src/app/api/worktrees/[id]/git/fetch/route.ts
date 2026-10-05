@@ -18,6 +18,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { gitFetch, handleGitApiError } from '@/lib/git/git-utils';
 import { validateGitBranchName } from '@/lib/git/git-route-helpers';
 import { canonicalWorktreeId, resolveWorktreeOr404 } from '@/lib/git/git-route-worktree';
+import { readOptionalJsonObjectBody } from '@/lib/api/read-json-body';
 
 export async function POST(
   request: NextRequest,
@@ -31,7 +32,11 @@ export async function POST(
       return worktree;
     }
 
-    const body = await request.json().catch(() => ({}));
+    const parsed = await readOptionalJsonObjectBody(request);
+
+    if (!parsed.ok) return parsed.response;
+
+    const body = parsed.body;
     const { remote, prune } = body;
 
     // remote defaults to 'origin'; validate any user-supplied value (DR4-001).

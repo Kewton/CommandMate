@@ -14,7 +14,7 @@ import {
   buildAuthCookieOptions,
   DEFAULT_COOKIE_MAX_AGE_SECONDS,
 } from '@/lib/security/auth';
-import { readJsonBody } from '@/lib/api/read-json-body';
+import { readJsonObjectBody } from '@/lib/api/read-json-body';
 
 // Module-level rate limiter instance
 const rateLimiter = createRateLimiter();
@@ -53,7 +53,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const parsed = await readJsonBody(request);
+    const parsed = await readJsonObjectBody(request);
     if (!parsed.ok) return parsed.response;
     const body = parsed.body;
     const { token } = body;

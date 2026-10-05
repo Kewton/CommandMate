@@ -25,15 +25,10 @@ const API_DIR = join(process.cwd(), 'src/app/api');
 const OWN_TRY_CATCH: Record<string, number> = {
   // Answer 400 on a parse failure.
   'worktrees/[id]/auto-yes/route.ts': 1,
-  'worktrees/[id]/direct-input/route.ts': 1,
   'worktrees/[id]/env/route.ts': 1,
   'worktrees/[id]/marp-render/route.ts': 1,
   'remote/pair/route.ts': 1,
-  // The body is optional: a parse failure is treated as an empty body and the request goes on.
-  'worktrees/[id]/interrupt/route.ts': 1,
-  'worktrees/[id]/opencode/diff/route.ts': 1,
-  'worktrees/[id]/opencode/session/route.ts': 1,
-  'worktrees/[id]/opencode/share/route.ts': 1,
+  // (The optional-body routes moved to readOptionalJsonObjectBody in #3333.)
 };
 
 function stripComments(source: string): string {

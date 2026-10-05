@@ -11,7 +11,7 @@ import { CloneManager } from '@/lib/git/clone-manager';
 import { forkRepository, ForkError, type ForkErrorCode } from '@/lib/git/fork-manager';
 import type { CloneError, CloneErrorCategory } from '@/types/clone';
 import { createLogger } from '@/lib/logger';
-import { readJsonBody } from '@/lib/api/read-json-body';
+import { readJsonObjectBody } from '@/lib/api/read-json-body';
 
 const logger = createLogger('api/repositories-clone');
 
@@ -103,7 +103,7 @@ function forkErrorToResponse(err: ForkError): { status: number; error: CloneErro
  */
 export async function POST(request: NextRequest): Promise<NextResponse<CloneStartResponse | CloneErrorResponse>> {
   try {
-    const parsed = await readJsonBody(request);
+    const parsed = await readJsonObjectBody(request);
     if (!parsed.ok) {
       return NextResponse.json(
         {

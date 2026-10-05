@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { renderHook } from '@testing-library/react';
+import { act, renderHook } from '@testing-library/react';
 import { useAutoYes } from '@/hooks/useAutoYes';
 import type { PromptData } from '@/types/models';
 
@@ -172,7 +172,7 @@ describe('useAutoYes - promptType/defaultOptionNumber in request body (Issue #28
     expect(mockFetch).toHaveBeenCalledOnce();
   });
 
-  it('should reset lastAutoResponse when prompt clears', () => {
+  it('should reset lastAutoResponse when prompt clears', async () => {
     const promptData: PromptData = {
       type: 'yes_no',
       question: 'Continue?',
@@ -193,6 +193,11 @@ describe('useAutoYes - promptType/defaultOptionNumber in request body (Issue #28
       }
     );
 
+    // Issue #3331: set once the reply says the answer was taken, not on send.
+    expect(result.current.lastAutoResponse).toBeNull();
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
     expect(result.current.lastAutoResponse).toBe('y');
 
     // Clear prompt
