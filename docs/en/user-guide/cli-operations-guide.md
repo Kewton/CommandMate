@@ -127,15 +127,15 @@ commandmate-main       main                  idle     -                         
 ### REASON Column (Issue #1926)
 
 The **evidence** behind the STATUS beside it. The same `ready` can mean "the agent came back to its
-composer" (`input_prompt`) or "the frame could not be read and the output stopped, so `ready` is a
-fallback" (`no_recent_output`) — two different things the table could not tell apart before.
+composer" (`input_prompt`) or "the frame could not be read and the output stopped" (`no_recent_output`,
+which is shown with `running`) — two different things the table could not tell apart before.
 
 | Value | Meaning |
 |---|---|
 | `input_prompt` | A composer (input prompt) was detected |
 | `thinking_indicator` | A thinking indicator was detected |
 | `prompt_detected` | A confirmation prompt was parsed |
-| `<reason> (no evidence)` | **No positive evidence** (`statusEvidence: 'none'`). The detection layer could not classify the frame, so the STATUS beside it is a fallback rather than a reading. Today that is exactly the `default` and `no_recent_output` reasons |
+| `<reason> (no evidence)` | **No positive evidence** (`statusEvidence: 'none'`). The STATUS beside it is a fallback rather than a reading. This covers a frame the detection layer could not classify (`running` with reason `no_recent_output` / `unknown_frame` / `default`) and also a classified frame with no positive proof (for example an idle composer no tool-specific rule vouches for, `input_prompt`) |
 | `-` | The server gives no reason: it predates #1926, the session is not running, or the tool has two or more instances and the aggregate dropped the reason |
 
 > A `(no evidence)` row does not mean "finished". Check the raw pane with
@@ -153,7 +153,7 @@ commandmate ls --json \
 
 | Field | Meaning |
 |---|---|
-| `sessionStatusByCli.<tool>.statusEvidence` | `'positive'` (something confirmed it) / `'none'` (the frame could not be read) |
+| `sessionStatusByCli.<tool>.statusEvidence` | `'positive'` (something confirmed it) / `'none'` (no positive proof, including a frame that could not be read) |
 | `sessionStatusByCli.<tool>.sessionStatusReason` | The scraper's reason code |
 | `sessionStatusByCli.<tool>.lastKnownStatus` / `lastKnownStatusAt` | The last **positively confirmed** status and when. Held in server memory (TTL 30 minutes, cleared on restart, dropped when the session stops) |
 
@@ -432,17 +432,17 @@ ahead of long waits, not to stretch short ones).
 
 #### `ready` does not necessarily mean "complete"
 
-`isUnclassifiedActive` is raised in two states:
+`isUnclassifiedActive` is raised when `sessionStatus=running` and the reason is one of
+`no_recent_output`, `unknown_frame` or `default` (no detection rule could read the frame; Issue #2011):
 
 ```
-(sessionStatus=running && reason=default) || (sessionStatus=ready && reason=no_recent_output)
+sessionStatus=running && reason ∈ {no_recent_output, unknown_frame, default}
 ```
 
-The second one is **a degraded form of an unreadable overlay**. Roughly 5 seconds
-(`STALE_OUTPUT_THRESHOLD_MS`) after the server's Auto-Yes poller stamps
-`lastServerResponseTimestamp`, a frame whose output has stopped flips from `running`/`default` to
-`ready`/`no_recent_output`. So `ready` does not always mean "finished" — it can also mean "still
-unreadable, and now silent as well".
+`no_recent_output` is the reason for a frame whose output has stopped for roughly 5 seconds
+(`STALE_OUTPUT_THRESHOLD_MS`), and it is published with `running` (it used to flip to `ready`; that
+was abolished so a stalled worker is not called finished). Only a server that predates that change
+returns `ready`/`no_recent_output`.
 
 That is why **`wait` makes no completion decision while `isUnclassifiedActive` is set**. Genuine
 completion is `ready`/`input_prompt` (the agent is back at the composer), which never raises the

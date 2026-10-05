@@ -606,6 +606,9 @@ async function buildPayload(
   const newLines = lineCountIsCursor ? lines.slice(Math.max(0, lastCapturedLine)) : lines;
   const newContent = newLines.join('\n');
 
+  // The sequence from here to `startingStatusResult` is the same as in
+  // worktree-status-helper.ts; what follows differs on purpose and is not shared
+  // (#3215 "not touched").
   const compositeKey = buildCompositeKey(worktreeId, cliToolId, instanceId);
   const lastServerResponseTimestamp = getLastServerResponseTimestamp(compositeKey);
   const lastOutputTimestamp = lastServerResponseTimestamp ? new Date(lastServerResponseTimestamp) : undefined;
@@ -993,9 +996,9 @@ async function buildPayload(
     isDismissablePanelActive,
     isUnclassifiedActive: startingSince === null && merged.isUnclassifiedActive,
     startingSince,
-    // Issue #1926: the same fact `isUnclassifiedActive` carries, named the way
-    // §4 D1 names it. Published from the merged verdict so the two cannot
-    // disagree on the wire.
+    // Issue #1926: evidence strength, named the way §4 D1 names it. Not the same
+    // fact as `isUnclassifiedActive` (Issue #2011); published from the merged
+    // verdict so it agrees with the status it accompanies.
     statusEvidence: published.evidence,
     lastKnownStatus: lastKnown?.status ?? null,
     lastKnownStatusAt: lastKnown?.at ?? null,
