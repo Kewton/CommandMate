@@ -13,7 +13,9 @@
  * reports what the user was left with, so "the paths agree" is a property of
  * the rows rather than of somebody having edited each file. `expected` is what
  * the three handlers a person presses leave behind; `auto-yes.test.ts` says
- * what it can and cannot hold the hook to.
+ * what it can and cannot hold the hook to. `outcome` is what the paths that
+ * raise no toast — browser-side Auto-Yes and Command Code's plan review — are
+ * held to (Issue #3331, `../prompt-response-outcome-3331/`).
  *
  * Not a test file: vitest collects `*.test.*` only.
  */
@@ -36,6 +38,11 @@ export interface PromptResponseObserved {
 export interface PromptResponseCase {
   name: string;
   reply: PromptResponseReply;
+  /**
+   * What `readPromptResponseOutcome` makes of the reply; a request with no
+   * reply is `failed` (Issue #3331: what the paths with no toast are held to).
+   */
+  outcome: 'answered' | 'refused' | 'failed';
   expected: PromptResponseObserved;
 }
 
@@ -46,11 +53,13 @@ export const PROMPT_RESPONSE_CASES: readonly PromptResponseCase[] = [
   {
     name: '200 success — the answer was taken',
     reply: { status: 200, body: { success: true } },
+    outcome: 'answered',
     expected: { toast: null, cardKept: false, refetched: true },
   },
   {
     name: '200 success:false — the route refused it (#2468)',
     reply: { status: 200, body: { success: false, reason: 'prompt_no_longer_active', answer: '1' } },
+    outcome: 'refused',
     expected: { toast: REFUSED, cardKept: true, refetched: true },
   },
   {
@@ -63,16 +72,19 @@ export const PROMPT_RESPONSE_CASES: readonly PromptResponseCase[] = [
         reason: 'decision_not_found',
       },
     },
+    outcome: 'refused',
     expected: { toast: REFUSED, cardKept: true, refetched: true },
   },
   {
     name: '500 — the server failed',
     reply: { status: 500, body: { error: 'Failed to send answer to tmux: no server running' } },
+    outcome: 'failed',
     expected: { toast: FAILED, cardKept: true, refetched: true },
   },
   {
     name: 'no reply — the request itself failed',
     reply: 'network-error',
+    outcome: 'failed',
     expected: { toast: FAILED, cardKept: true, refetched: true },
   },
 ];

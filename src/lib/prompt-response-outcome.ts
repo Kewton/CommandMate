@@ -10,6 +10,9 @@
  * the PC split (`TerminalSplitPaneContent`), the detail screen's controller
  * (`useWorktreeDetailController`) and the phone's `/respond`
  * (`WorktreeDetailRefactored`) cannot disagree about a reply again.
+ *
+ * Issue #3331: browser-side Auto-Yes (`useAutoYes`) and Command Code's plan
+ * review (`PlanReviewControls`) read their replies here too.
  */
 
 import type { ToastType } from '@/types/markdown-editor';
@@ -39,21 +42,40 @@ interface PromptResponseReplyBody {
 }
 
 /**
- * Read a prompt-response / respond reply and say what became of the answer.
+ * A reply read once: the outcome, and the body it was read from (an empty
+ * object when the body was not a JSON object), for a caller that also shows
+ * the reply's own words.
+ */
+export interface PromptResponseReply {
+  outcome: PromptResponseOutcome;
+  body: Record<string, unknown>;
+}
+
+/**
+ * Read a prompt-response / respond reply and say what became of the answer,
+ * keeping the body. A `Response` body can be read only once, so a caller that
+ * needs `reason` / `message` reads them from here rather than reading the
+ * reply again (Issue #3331: `PlanReviewControls`).
  *
  * A refusal is usually a 200 `{ success: false, reason }` (Issue #2468), so
  * `ok` alone is not "answered". An unreadable 2xx body is not a refusal.
  */
-export async function readPromptResponseOutcome(response: Response): Promise<PromptResponseOutcome> {
+export async function readPromptResponseReply(response: Response): Promise<PromptResponseReply> {
   const parsed: unknown = await response.json().catch(() => null);
-  const body: PromptResponseReplyBody =
-    typeof parsed === 'object' && parsed !== null ? parsed : {};
+  const body: Record<string, unknown> =
+    typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, unknown>) : {};
+  const fields: PromptResponseReplyBody = body;
 
   if (response.ok) {
-    return body.success === false ? 'refused' : 'answered';
+    return { outcome: fields.success === false ? 'refused' : 'answered', body };
   }
-  const names = body.code === DECISION_NOT_FOUND || body.reason === DECISION_NOT_FOUND;
-  return response.status === 404 && names ? 'refused' : 'failed';
+  const names = fields.code === DECISION_NOT_FOUND || fields.reason === DECISION_NOT_FOUND;
+  return { outcome: response.status === 404 && names ? 'refused' : 'failed', body };
+}
+
+/** Read a prompt-response / respond reply and say what became of the answer. */
+export async function readPromptResponseOutcome(response: Response): Promise<PromptResponseOutcome> {
+  return (await readPromptResponseReply(response)).outcome;
 }
 
 /**

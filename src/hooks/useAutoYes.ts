@@ -7,6 +7,10 @@
  *
  * Issue #138: Added server-side duplicate prevention using lastServerResponseTimestamp.
  * If the server has responded within the last 3 seconds, the client skips responding.
+ *
+ * Issue #3331: `lastAutoResponse` is set only once the reply reads `answered`
+ * (`readPromptResponseOutcome`), so a refused or failed answer is no longer
+ * announced as "Auto responded".
  */
 
 'use client';
@@ -17,6 +21,7 @@ import { buildPromptResponseBody } from '@/lib/prompt-response-body-builder';
 import { generatePromptKey } from '@/lib/detection/prompt-key';
 import { isAnswerablePromptData } from '@/types/models';
 import { derivePromptView } from '@/lib/session/prompt-view';
+import { readPromptResponseOutcome } from '@/lib/prompt-response-outcome';
 import type { LivePromptData } from '@/types/models';
 
 /** Duplicate prevention window in milliseconds (3 seconds) */
@@ -47,7 +52,11 @@ export interface UseAutoYesParams {
 
 /** Return value of useAutoYes hook */
 export interface UseAutoYesReturn {
-  /** Most recent auto-response answer (for notification display) */
+  /**
+   * Most recent auto-response answer the server took (for notification
+   * display). Issue #3331: null while an answer is in flight, so two answers
+   * in a row that are the same string still reach the display as two changes.
+   */
   lastAutoResponse: string | null;
 }
 
@@ -70,6 +79,8 @@ export function useAutoYes({
   serverPollerActive,
 }: UseAutoYesParams): UseAutoYesReturn {
   const lastAutoRespondedRef = useRef<string | null>(null);
+  // Issue #3331: the latest send; a reply to an older one is not announced.
+  const sendSeqRef = useRef(0);
   const [lastAutoResponse, setLastAutoResponse] = useState<string | null>(null);
 
   useEffect(() => {
@@ -126,8 +137,13 @@ export function useAutoYes({
     const answer = resolveAutoAnswer(promptData);
     if (answer === null) return;
 
+    // Written before the reply: whatever it says, this approval is not answered
+    // again until the display changes (#3292 auto-yes.test.ts).
     lastAutoRespondedRef.current = promptKey;
-    setLastAutoResponse(answer);
+    // Issue #3331: announce nothing until the reply says the answer was taken.
+    // Clearing first also makes a repeat of the same answer a fresh change.
+    setLastAutoResponse(null);
+    const seq = ++sendSeqRef.current;
 
     // Issue #287: Use shared builder to include promptType and defaultOptionNumber
     // so the API can use cursor-key navigation even when promptCheck re-verification fails.
@@ -138,9 +154,14 @@ export function useAutoYes({
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(requestBody),
-    }).catch((err) => {
-      console.error('[useAutoYes] Failed to send auto-response:', err);
-    });
+    })
+      .then(readPromptResponseOutcome)
+      .then((outcome) => {
+        if (outcome === 'answered' && seq === sendSeqRef.current) setLastAutoResponse(answer);
+      })
+      .catch((err) => {
+        console.error('[useAutoYes] Failed to send auto-response:', err);
+      });
   }, [isPromptWaiting, promptData, autoYesEnabled, worktreeId, cliTool, lastServerResponseTimestamp, serverPollerActive]);
 
   return { lastAutoResponse };

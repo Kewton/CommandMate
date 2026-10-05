@@ -32,6 +32,7 @@
 import { useCallback, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import type { CLIToolType } from '@/lib/cli-tools/types';
+import { readPromptResponseReply } from '@/lib/prompt-response-outcome';
 
 export type PlanReviewControlAction = 'comment' | 'submit' | 'approve' | 'cancel';
 
@@ -57,11 +58,10 @@ interface PlanReviewError {
   message: string | null;
 }
 
-interface PromptResponseBody {
-  success?: boolean;
-  reason?: string;
-  message?: string;
-  error?: string;
+/** A body field shown to the user, when the reply carried it as text. */
+function textField(body: Record<string, unknown>, name: string): string | null {
+  const value = body[name];
+  return typeof value === 'string' ? value : null;
 }
 
 /**
@@ -109,16 +109,14 @@ export function PlanReviewControls({
             body: JSON.stringify(buildPlanReviewRequestBody(action, cliToolId, comment, instanceId)),
           },
         );
-        let data: PromptResponseBody = {};
-        try {
-          data = (await response.json()) as PromptResponseBody;
-        } catch {
-          data = {};
-        }
-        if (!response.ok || data.success !== true) {
+        // Issue #3331: read like every other answer to a dialog. A 2xx whose
+        // body has no `success` is now taken as delivered (it used to show the
+        // error); a refusal and a failure both still show it here.
+        const { outcome, body } = await readPromptResponseReply(response);
+        if (outcome !== 'answered') {
           setError({
-            reason: data.reason ?? null,
-            message: data.message ?? data.error ?? null,
+            reason: textField(body, 'reason'),
+            message: textField(body, 'message') ?? textField(body, 'error'),
           });
           return;
         }
