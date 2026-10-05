@@ -242,7 +242,7 @@ tmux -L cm-agent-health kill-server
 | maintainability | `file-size` | `src/` の行数（`wc -l` と同じ数え方） | 1,500 行超の本数 | 新たに 1,500 行を超えた／500 行以上のファイルが前回比 +200 行以上 |
 | maintainability | `complexity` | ESLint `complexity`（閾値 10）だけを、リポジトリの設定を使わず報告専用で実行 | 複雑度 25 以上の関数の数 | ファイル内最大の複雑度が新たに 25 以上／25 以上で前回比 +5 以上 |
 | maintainability | `duplication` | `npx jscpd@4 src`（最小 10 行） | 重複率（%） | 前回比 +0.5pt 以上 |
-| maintainability | `unused` | `npx knip@5 --reporter json` | 未使用の依存の数 | 前回に無い未使用の依存（未使用 export は件数だけ記録） |
+| maintainability | `unused` | `npx knip@5 --reporter json` | 未使用の依存の数（未使用ファイルのパスの集合も状態に保存） | 前回に無い未使用の依存・未使用のファイル（パスで比べる。未使用 export は件数だけ記録） |
 | maintainability | `outdated` | `npm outdated --json`（直接依存だけ） | メジャー 2 版以上遅れた数 | 新たにメジャー 2 版以上遅れた |
 | maintainability | `type-safety` | `src/` の型位置の `any`・`eslint-disable`・`@ts-ignore` の数 | 合計 | どれかが前回より増えた |
 | maintainability | `coverage` | `vitest run tests/unit --coverage`（**月曜（JST）だけ**） | 行カバレッジ（%） | 前回（前週）比 -2pt 以上 |
