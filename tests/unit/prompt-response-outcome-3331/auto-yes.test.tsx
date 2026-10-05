@@ -13,6 +13,9 @@
  * (it used to stay on screen) and when the same answer comes twice in a row
  * (the second used to show nothing).
  *
+ * A reply that lands after the screen moved to another worktree, tool or
+ * instance is not announced there.
+ *
  * @vitest-environment jsdom
  */
 
@@ -124,6 +127,70 @@ describe('[#3331] browser-side Auto-Yes announces only an answer that was taken'
     await settle();
 
     expect(seen).toEqual([null, '1', null, '1']);
+  });
+});
+
+describe('[#3331] a reply is announced only for the agent it was sent for', () => {
+  beforeEach(() => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  /** A fetch whose reply lands only when `land()` is called. */
+  function delayedFetch() {
+    let land: () => void = () => {};
+    const reply = new Promise<Response>((resolve) => {
+      land = () => resolve(jsonReply(200, { success: true }));
+    });
+    vi.stubGlobal('fetch', vi.fn(() => reply));
+    return { land: () => land() };
+  }
+
+  /** The same screen showing another agent, with nothing waiting yet. */
+  function switchedTo(change: Partial<UseAutoYesParams>): UseAutoYesParams {
+    return { ...params(approval('Do you want to proceed?')), isPromptWaiting: false, promptData: null, ...change };
+  }
+
+  it.each([
+    ['another tool', { cliTool: 'codex' }],
+    ['another instance of the same tool', { instanceId: 'claude-2' }],
+    ['another worktree', { worktreeId: 'wt-other' }],
+  ] as const)('switching to %s while the reply is pending: no notice there', async (_name, change) => {
+    const { land } = delayedFetch();
+    const { rerender } = render(<Harness {...params(approval('Do you want to proceed?'))} />);
+
+    rerender(<Harness {...switchedTo(change)} />);
+    land();
+    await settle();
+
+    expect(screen.queryByText(/Auto responded/)).not.toBeInTheDocument();
+  });
+
+  it('control: staying on the agent, the late reply is announced', async () => {
+    const { land } = delayedFetch();
+    const { rerender } = render(<Harness {...params(approval('Do you want to proceed?'))} />);
+
+    rerender(<Harness {...switchedTo({})} />);
+    land();
+    await settle();
+
+    expect(screen.getByText(NOTICE)).toBeInTheDocument();
+  });
+
+  it('control: switching away and back before the reply, it is announced on the agent it was for', async () => {
+    const { land } = delayedFetch();
+    const { rerender } = render(<Harness {...params(approval('Do you want to proceed?'))} />);
+
+    rerender(<Harness {...switchedTo({ cliTool: 'codex' })} />);
+    rerender(<Harness {...switchedTo({})} />);
+    land();
+    await settle();
+
+    expect(screen.getByText(NOTICE)).toBeInTheDocument();
   });
 });
 

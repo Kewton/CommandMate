@@ -48,6 +48,21 @@ export interface UseAutoYesParams {
   lastServerResponseTimestamp?: number | null;
   /** Whether server-side auto-yes poller is active (Issue #501) */
   serverPollerActive?: boolean;
+  /**
+   * The agent instance the prompt was read from (Issue #3331). Part of the
+   * target a reply is announced for: omitted, it is the tool's primary
+   * (id === cliTool), as in the controller's `polledAgentKey` (#3304).
+   */
+  instanceId?: string;
+}
+
+/**
+ * Who an answer is for: the worktree and the polled agent, built from the
+ * same inputs as the controller's `polledAgentKey` (#3304) — the tool and the
+ * instance, which is the tool's primary when none is named.
+ */
+function autoYesTargetKey(worktreeId: string, cliTool: string, instanceId: string | undefined): string {
+  return `${worktreeId}::${cliTool}::${instanceId ?? cliTool}`;
 }
 
 /** Return value of useAutoYes hook */
@@ -77,10 +92,18 @@ export function useAutoYes({
   autoYesEnabled,
   lastServerResponseTimestamp,
   serverPollerActive,
+  instanceId,
 }: UseAutoYesParams): UseAutoYesReturn {
   const lastAutoRespondedRef = useRef<string | null>(null);
   // Issue #3331: the latest send; a reply to an older one is not announced.
   const sendSeqRef = useRef(0);
+  // Issue #3331: who the screen shows now. A reply is announced only when it
+  // is still the one its answer was sent for — compared at the reply, like the
+  // controller's fetchers' stale guards, so switching away and back before the
+  // reply still announces it on the agent it was for.
+  const targetKey = autoYesTargetKey(worktreeId, cliTool, instanceId);
+  const currentTargetRef = useRef(targetKey);
+  currentTargetRef.current = targetKey;
   const [lastAutoResponse, setLastAutoResponse] = useState<string | null>(null);
 
   useEffect(() => {
@@ -144,6 +167,7 @@ export function useAutoYes({
     // Clearing first also makes a repeat of the same answer a fresh change.
     setLastAutoResponse(null);
     const seq = ++sendSeqRef.current;
+    const sentFor = targetKey;
 
     // Issue #287: Use shared builder to include promptType and defaultOptionNumber
     // so the API can use cursor-key navigation even when promptCheck re-verification fails.
@@ -157,12 +181,13 @@ export function useAutoYes({
     })
       .then(readPromptResponseOutcome)
       .then((outcome) => {
-        if (outcome === 'answered' && seq === sendSeqRef.current) setLastAutoResponse(answer);
+        const stillShown = seq === sendSeqRef.current && sentFor === currentTargetRef.current;
+        if (outcome === 'answered' && stillShown) setLastAutoResponse(answer);
       })
       .catch((err) => {
         console.error('[useAutoYes] Failed to send auto-response:', err);
       });
-  }, [isPromptWaiting, promptData, autoYesEnabled, worktreeId, cliTool, lastServerResponseTimestamp, serverPollerActive]);
+  }, [isPromptWaiting, promptData, autoYesEnabled, worktreeId, cliTool, targetKey, lastServerResponseTimestamp, serverPollerActive]);
 
   return { lastAutoResponse };
 }
