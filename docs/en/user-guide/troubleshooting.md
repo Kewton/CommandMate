@@ -59,6 +59,34 @@ tmux kill-session -t '=mcbd-claude-feature-123:'
 
 Claude Code sets `CLAUDECODE=1` to prevent nesting. CommandMate removes this automatically, but if it persists, run: `tmux set-environment -g -u CLAUDECODE`
 
+## The History opens with a codex / vibe-local startup-screen bubble?
+
+Earlier versions saved codex's and vibe-local's startup screen (`>_ OpenAI Codex (v…)`, the vibe-local banner) as a reply row in History (stopped in Issue #3293). Rows that were already saved are not removed automatically. To remove them, run the following from a clone of the repository (after `npm install`).
+
+```bash
+# 1. Stop the server
+commandmate stop
+
+# 2. Back up the database (global install: ~/.commandmate/data/cm.db,
+#    or the value of CM_DB_PATH if you set one). Copy cm.db-wal too if it exists
+DB=~/.commandmate/data/cm.db
+cp -p "$DB" "$DB.bak-3335"
+
+# 3. Dry run (the default). Opens the DB read-only and prints the candidate count and ids only
+node scripts/cleanup-startup-banner-rows.mjs --db "$DB"
+
+# 4. Once the count and ids look right, delete only the candidates with --apply
+node scripts/cleanup-startup-banner-rows.mjs --db "$DB" --apply
+
+# 5. Start the server
+commandmate start --daemon
+```
+
+- Trying steps 3 and 4 on a copy of the backup first (`cp "$DB.bak-3335" /tmp/try.db`) is the safe way
+- A candidate is a codex / vibe-local `assistant` row with the startup screen's text in its first few rows, no echoed user message in it, and the shape of the path that saved it (colour escapes still in it, or a timestamp exactly 1 ms before the next message)
+- Rows with the startup-screen text that do not meet those conditions are printed as "left", by id, and never deleted. Look at them yourself if needed
+- To undo, stop the server and restore with `cp -p "$DB.bak-3335" "$DB"`
+
 ## FAQ
 
 **Q: How do I use CommandMate from my phone?**

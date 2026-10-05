@@ -59,6 +59,34 @@ tmux kill-session -t '=mcbd-claude-feature-123:'
 
 Claude Code は `CLAUDECODE=1` を設定してネストを防止しています。CommandMate は自動で除去しますが、問題が続く場合は `tmux set-environment -g -u CLAUDECODE` を実行してください。
 
+## 履歴の先頭に、codex / vibe-local の起動画面の吹き出しが残っている？
+
+以前の版では、codex と vibe-local の起動画面（`>_ OpenAI Codex (v…)` や vibe-local のバナー）が、返答の行として履歴に保存されていました（Issue #3293 で止めました）。既に保存された行は自動では消しません。消すときは、リポジトリの clone（`npm install` 済み）で次の手順を実行してください。
+
+```bash
+# 1. サーバーを止める
+commandmate stop
+
+# 2. バックアップを取る（DB の場所: グローバルインストールは ~/.commandmate/data/cm.db、
+#    CM_DB_PATH を設定していればその値）。cm.db-wal があれば一緒に写す
+DB=~/.commandmate/data/cm.db
+cp -p "$DB" "$DB.bak-3335"
+
+# 3. dry-run（既定）。DB は読み取り専用で開き、候補の件数と id だけを出す
+node scripts/cleanup-startup-banner-rows.mjs --db "$DB"
+
+# 4. 件数と id を確かめてから、--apply で候補だけを消す
+node scripts/cleanup-startup-banner-rows.mjs --db "$DB" --apply
+
+# 5. サーバーを起動する
+commandmate start --daemon
+```
+
+- 先にバックアップの写し（`cp "$DB.bak-3335" /tmp/try.db`）で 3・4 を試すと安全です
+- 候補は、codex / vibe-local の `assistant` 行のうち、先頭の数行に起動画面の文字があり、利用者の発言のエコーを含まず、保存した経路の形（色の制御文字が残っている、または直後の発言のちょうど 1 ms 前の時刻）に合う行だけです
+- 起動画面の文字はあるが条件に合わない行は「left」として id だけを出し、消しません。必要なら中身を見て判断してください
+- 元に戻すときは、サーバーを止めて `cp -p "$DB.bak-3335" "$DB"` で戻します
+
 ## FAQ
 
 **Q: スマホからどうやって使う？**
