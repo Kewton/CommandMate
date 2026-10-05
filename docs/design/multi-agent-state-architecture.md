@@ -613,7 +613,7 @@ SSE permission.asked(per_2) ＋ Auto-Yes OFF
 - **`src/app/api/worktrees/[id]/prompt-response/route.ts`**（CLI `respond` の実経路。`getAskUserQuestion` を参照する前例あり）と `src/cli/commands/respond.ts`: scraper の `promptData` が無くても `pendingDecisions[].id` で応答できるようにする（#1898-3、DR2-010）。
 - **Web UI の応答経路も範囲に入れる（DR3-007・決定。DR2-010 の除外を解除）**: `src/app/api/worktrees/[id]/respond/route.ts`（`messageId` 必須の Web UI 経路）と `PromptPanelProps` に **`decisionId` を受ける口**を足し、`messageId` が無くても構造化 decision に応答できるようにする。**Phase 4 の作業**とし、Phase 4 が着地するまでは §7 の該当 3 行（未裁定 decision / `deliveryExpired` / `dialog_timeout`）の Web UI 欄を「**表示のみ。応答は TUI か CLI `respond`**」と明記して出す。現行の `PromptPanelProps` は `promptData: PanelPromptData | null` / `messageId: string | null` / `onRespond: (answer: string) => Promise<void>` しか持たないため、除外したままだと **「裁定待ちがある」と表示しながらその UI からは応答できない**画面を出荷することになり、discoverability 規約 1（判定を出したら操作手段も出す）に反する。
 - copilot source: `parseCopilotPermissionRequest` が文字列 `tool_input` を `{ patch }` に正規化（#1902）。
-- **copilot `~/.copilot/settings.json` の書き込みを原子化する（DR4-013）**: `writeCopilotHookSettings` は現行 `readCopilotSettings` → `mergeCopilotHookSettings` → `writeFileSync` の素の read-modify-write（ロックも temp+rename も無い）。**一時ファイル ＋ `rename` の原子的置換**にし、同一プロセス内の書き込みを直列化、プロセス間はロックファイル（`~/.copilot/.cmate.lock`）で排他する。取得できなければ書き込まず hooks なしで起動する（現行 fail-open と同じ方向）。書き込み前に 1 世代のバックアップを残す。**#1904 が URL を port 非依存にしても初回書き込みの競合は残る**（複数サーバ同時稼働は公式機能）。
+- **copilot `~/.copilot/settings.json` の書き込みを原子化する（DR4-013）**: #1904 より前の `writeCopilotHookSettings` は、読み込み → `mergeCopilotHookSettings` → `writeFileSync` の素の read-modify-write だった（ロックも temp+rename も無い）。以下の規約は #1904 で実装済み。**一時ファイル ＋ `rename` の原子的置換**にし、同一プロセス内の書き込みを直列化、プロセス間はロックファイル（`~/.copilot/.cmate.lock`）で排他する。取得できなければ書き込まず hooks なしで起動する（現行 fail-open と同じ方向）。書き込み前に 1 世代のバックアップを残す。**#1904 が URL を port 非依存にしても初回書き込みの競合は残る**（複数サーバ同時稼働は公式機能）。
 - dedup / eviction のカウンタを `structuredEvents` に露出（§7）。
 - **ソース入口の共通バリデータを 1 つ作る（DR4-001 / DR4-014）**: `src/lib/hooks/sources/event-mapper.ts` に **`readBoundedId`** を追加し（現行 `readStringField` / `readNestedString` は非空判定だけで長さ上限も文字種制約も無い。`boundDetail` のような slice が無い）、`sources/*/` が payload から id / sessionId / toolName を取り出す経路を**すべてこれに通す**。上限値は push 経路（`/api/hooks/agent-event`）の定数を**共有**し、2 箇所に分かれないようにする（§10 外部入力の表）。**不正値は破棄（切り詰めない）**。
 - **`payloads.ts` の `raw: payload`（受信 payload の全量保持）をやめる**（`toOpencodePendingPermission` / `toOpencodePendingQuestion`）。deny パターン照合に必要な部分だけを上限つきで切り出して保持する（DR4-009）。
@@ -858,7 +858,7 @@ SSE permission.asked(per_2) ＋ Auto-Yes OFF
 
 ### 10.9 global-singleton 設定ファイルの書き込み規約（DR4-013）
 
-対象は copilot の `~/.copilot/settings.json`（`configScope: 'global-singleton'`）。現行 `writeCopilotHookSettings` は `readCopilotSettings` → `mergeCopilotHookSettings` → `writeFileSync` の**素の read-modify-write**で、ロックも temp+rename も無い。CommandMate は `commandmate start --issue N --auto-port` による**複数サーバ同時稼働を公式にサポート**している。
+対象は copilot の `~/.copilot/settings.json`（`configScope: 'global-singleton'`）。#1904 より前の `writeCopilotHookSettings` は、読み込み → `mergeCopilotHookSettings` → `writeFileSync` の**素の read-modify-write**だった（ロックも temp+rename も無い）。下の規約は #1904 で実装済み。CommandMate は `commandmate start --issue N --auto-port` による**複数サーバ同時稼働を公式にサポート**している。
 
 1. 書き込みは**一時ファイル ＋ `rename` の原子的置換**にする（`writeFileSync` の直書きをやめる）。**`writeFileSync` の途中でプロセスが落ちるとユーザー自身の settings.json が切り詰められる**（同モジュールの docstring 自身が「イベントを失うのは回復可能だが、ユーザーの設定を上書きするのは回復不能」と述べている）。
 2. 同一プロセス内の書き込みを**直列化**し、プロセス間は**ロックファイル（`~/.copilot/.cmate.lock`）で排他**する。取得できなければ書き込まず hooks なしで起動する（現行の fail-open と同じ方向）。
