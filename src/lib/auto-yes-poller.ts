@@ -11,7 +11,7 @@
  */
 
 import type { CLIToolType } from './cli-tools/types';
-import { captureSessionOutput } from './session/cli-session';
+import { captureSessionOutput, isSessionRunning } from './session/cli-session';
 import { detectPromptOnCleanFrame } from './polling/response-checker';
 import {
   ANTIGRAVITY_PERMISSION_RECEIPT_WINDOW_MS,
@@ -58,6 +58,7 @@ import {
   calculateBackoffInterval,
   POLLING_INTERVAL_MS,
   COOLDOWN_INTERVAL_MS,
+  MAX_BACKOFF_MS,
   DUPLICATE_RETRY_EXPIRY_MS,
   MAX_CONCURRENT_POLLERS,
   THINKING_CHECK_LINE_COUNT,
@@ -93,6 +94,11 @@ export interface AutoYesPollerState {
    * printed for. Optional so hand-built states (tests) need not name it.
    */
   lastSkipWarnKey?: string | null;
+  /**
+   * Issue #3329: the last poll found no session to answer for. Logged once on
+   * each change, not on every poll. Optional so hand-built states need not name it.
+   */
+  waitingForSession?: boolean;
 }
 
 /** Result of starting a poller */
@@ -231,7 +237,8 @@ function incrementErrorCount(compositeKey: string): void {
     // poller — applied here directly rather than through `releaseAutoYes`:
     // that module reaches this one through the auto-yes-manager barrel, so
     // importing it back would be a cycle. `auto-yes-lifecycle-3184.test.ts`
-    // holds this call and the table row equal.
+    // holds this call and the table row equal. A missing session never gets
+    // here (Issue #3329): `pollAutoYes` waits for it instead of counting it.
     if (pollerState.consecutiveErrors >= AUTO_STOP_ERROR_THRESHOLD) {
       const worktreeId = extractWorktreeId(compositeKey);
       const cliToolId = extractCliToolId(compositeKey);
@@ -975,6 +982,11 @@ async function pollAutoYes(worktreeId: string, cliToolId: CLIToolType, instanceI
       instanceId,
     );
 
+    if (pollerState!.waitingForSession) {
+      pollerState!.waitingForSession = false;
+      logger.info('poller:session-appeared', { worktreeId, cliToolId, instanceId });
+    }
+
     const lines = cleanOutput.split('\n');
 
     // 3. Stop condition delta check (Issue #314)
@@ -1000,11 +1012,40 @@ async function pollAutoYes(worktreeId: string, cliToolId: CLIToolType, instanceI
       }
     }
   } catch (error) {
+    // Issue #3329: no session is not an error. Auto-Yes lives independently of
+    // the session it answers for (`auto-yes-lifecycle`), and `send --auto-yes`
+    // enables it before the session starts — so wait until `expiresAt`, at the
+    // backoff cap, instead of counting toward `consecutive_errors`.
+    if (await isSessionMissing(worktreeId, cliToolId, instanceId)) {
+      if (!pollerState!.waitingForSession) {
+        pollerState!.waitingForSession = true;
+        logger.info('poller:waiting-for-session', { worktreeId, cliToolId, instanceId });
+      }
+      scheduleNextPoll(worktreeId, cliToolId, instanceId, MAX_BACKOFF_MS);
+      return;
+    }
     incrementErrorCount(compositeKey);
     logger.warn('poller:poll-error', { worktreeId, cliToolId, instanceId, error: getErrorMessage(error) });
   }
 
   scheduleNextPoll(worktreeId, cliToolId, instanceId);
+}
+
+/**
+ * Whether a failed capture failed because the session does not exist
+ * (Issue #3329). Asked of tmux, not read off the error text. A check that
+ * itself fails answers "no", so the failure is counted as before.
+ */
+async function isSessionMissing(
+  worktreeId: string,
+  cliToolId: CLIToolType,
+  instanceId?: string,
+): Promise<boolean> {
+  try {
+    return !(await isSessionRunning(worktreeId, cliToolId, instanceId));
+  } catch {
+    return false;
+  }
 }
 
 /**
