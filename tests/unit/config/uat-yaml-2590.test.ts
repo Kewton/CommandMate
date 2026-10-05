@@ -172,42 +172,49 @@ describe('.commandmate/uat.yaml (Issue #2590)', () => {
   it('records codex shared-file hashes before the server starts and fails in down when they changed (Issue #3342)', () => {
     const up = upScript;
     const down = shellFunction('cmd_down');
-    expect(up).toContain('hooks.json');
-    expect(up).toContain('commandmate/cmate-agent-event.sh');
-    expect(up.indexOf('codex-shared.sha256')).toBeGreaterThan(-1);
-    expect(up.indexOf('codex-shared.sha256')).toBeLessThan(up.indexOf('$SERVER_ENTRY'));
-    expect(down).toContain('codex-shared.sha256');
-    expect(down).toMatch(/rc=1/);
+    const check = shellFunction('check_shared_record');
+    expect(runServer).toContain('CODEX_SHARED_FILES="hooks.json commandmate/cmate-agent-event.sh"');
+    expect(runServer).toContain('SHARED_RECORD_NAME="codex-shared.sha256"');
+    expect(up.indexOf('write_shared_record')).toBeGreaterThan(-1);
+    expect(up.indexOf('write_shared_record')).toBeLessThan(up.indexOf('$SERVER_ENTRY'));
+    expect(down).toContain('check_shared_record "$RUN_DIR/$SHARED_RECORD_NAME" || rc=1');
+    expect(check).toMatch(/rc=1/);
     // Never writes back: the user's own changes must survive.
-    expect(down).not.toMatch(/\bcp\b|\bmv\b|>\s*"?\$f/);
+    expect(`${down}\n${check}`).not.toMatch(/\bcp\b|\bmv\b|>\s*"?\$(f|base)/);
   });
 
   it('uses ONE decided CODEX_HOME for the record, the server (after env -i) and down (Issue #3358)', () => {
-    const up = spec.env.up;
-    const down = spec.env.down ?? '';
-    expect(up).toContain('"${CODEX_HOME:-$HOME/.codex}"');
-    expect(up).toContain('export CH="$(');
-    expect(up).toMatch(/printf 'CODEX_HOME {2}%s\\n' "\$CH"/);
-    const [line] = logicalLines(up).filter((l) => l.includes('dist/server/server.js'));
+    // Issue #3359: the decision lives in run-server.sh (decide_codex_home), up calls it.
+    const decide = shellFunction('decide_codex_home');
+    expect(decide).toContain('"${CODEX_HOME:-$HOME/.codex}"');
+    expect(decide).toContain('CH="$(');
+    expect(shellFunction('write_shared_record')).toMatch(/printf 'CODEX_HOME {2}%s\\n' "\$CH"/);
+    const [line] = logicalLines(upScript).filter((l) => l.includes('$SERVER_ENTRY'));
     const at = line.indexOf('CODEX_HOME="$CH"');
     expect(at, 'the server line must set CODEX_HOME').toBeGreaterThan(line.indexOf('env -i'));
     expect(at).toBeLessThan(line.indexOf('nohup'));
     // The record names the home; down reads it back instead of re-deriving it.
-    expect(down).toContain('s/^CODEX_HOME  //p');
-    expect(down).toContain('"$CH/$f"');
-    expect(down).not.toContain('$HOME/.codex');
+    const check = shellFunction('check_shared_record');
+    expect(check).toContain('CODEX_HOME) base="$rest"');
+    expect(check).toContain('"$base/$rest"');
+    expect(`${shellFunction('cmd_down')}\n${check}`).not.toContain('$HOME/.codex');
   });
 
   describe('CODEX_HOME is made absolute and refused like the server refuses it (Issue #3358)', () => {
-    // Everything in `up` before the private tmux server starts: the decision, the
-    // refusal and the record. Nothing here starts a process.
-    const preamble = spec.env.up.slice(0, spec.env.up.indexOf('mkdir -p -m 700 /tmp/cmuat-'));
-
+    // run-server.sh sourced: only its functions are defined, nothing starts.
+    // decide_codex_home then the record, as `up` does before the tmux server.
     function runPreamble(codexHome: string | undefined, cwd: string) {
       const runDir = fs.mkdtempSync(path.join(os.tmpdir(), 'uat-3358-run-'));
       const env = { PATH: process.env.PATH ?? '', HOME: path.join(runDir, 'home') };
       if (codexHome !== undefined) Object.assign(env, { CODEX_HOME: codexHome });
-      const res = spawnSync('bash', ['-c', `${preamble.replaceAll('{run_dir}', runDir)}\nprintf '%s' "$CH"`], {
+      const script = [
+        `. '${RUN_SERVER}'`,
+        'decide_codex_home || exit 1',
+        `mkdir -p '${runDir}/root'`,
+        `write_shared_record '${runDir}/codex-shared.sha256' || exit 1`,
+        `printf '%s' "$CH"`,
+      ].join('\n');
+      const res = spawnSync('bash', ['-c', script], {
         cwd,
         env: env as unknown as NodeJS.ProcessEnv,
         encoding: 'utf8',
@@ -216,8 +223,16 @@ describe('.commandmate/uat.yaml (Issue #2590)', () => {
     }
 
     it('starts the private tmux server with the decided CODEX_HOME, not the caller\'s', () => {
-      const [line] = logicalLines(spec.env.up).filter((l) => l.includes('new-session'));
+      const [line] = logicalLines(upScript).filter((l) => l.includes('new-session'));
       expect(line.startsWith('CODEX_HOME="$CH" tmux -S ')).toBe(true);
+    });
+
+    it('decides CODEX_HOME before up makes or starts anything', () => {
+      const at = upScript.indexOf('decide_codex_home || exit 1');
+      expect(at).toBeGreaterThan(-1);
+      for (const later of ['mkdir -p "$RUN_DIR"', 'run_lock_acquire', 'new-session', '$SERVER_ENTRY']) {
+        expect(at, later).toBeLessThan(upScript.indexOf(later));
+      }
     });
 
     it('turns a relative CODEX_HOME into an absolute one and records it', () => {
@@ -250,13 +265,34 @@ describe('.commandmate/uat.yaml (Issue #2590)', () => {
       expect(res.stderr).toContain('not an existing directory');
     });
 
+    it('compares in down against the recorded CODEX_HOME, not the caller\'s', () => {
+      const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'uat-3358-home-')));
+      fs.writeFileSync(path.join(home, 'hooks.json'), '{}\n');
+      const first = runPreamble(home, os.tmpdir());
+      expect(first.status, first.stderr).toBe(0);
+      const record = path.join(first.runDir, 'codex-shared.sha256');
+      const check = (env: Record<string, string>) =>
+        spawnSync('bash', ['-c', `. '${RUN_SERVER}'; check_shared_record '${record}'`], {
+          env: { PATH: process.env.PATH ?? '', HOME: os.tmpdir(), ...env } as unknown as NodeJS.ProcessEnv,
+          encoding: 'utf8',
+        });
+      // Unchanged, even with a different CODEX_HOME in the caller.
+      expect(check({ CODEX_HOME: '/nowhere' }).status).toBe(0);
+      fs.writeFileSync(path.join(home, 'hooks.json'), '{"changed":true}\n');
+      const changed = check({});
+      expect(changed.status).toBe(1);
+      expect(changed.stderr).toContain(`codex shared file changed during the run: ${home}/hooks.json`);
+      fs.rmSync(home, { recursive: true, force: true });
+      fs.rmSync(first.runDir, { recursive: true, force: true });
+    });
+
     it('keeps its refused roots identical to the server\'s VIRTUAL_FILESYSTEM_ROOTS', () => {
       const source = fs.readFileSync(path.join(REPO_ROOT, 'src/config/system-directories.ts'), 'utf8');
       const serverRoots = [...source.match(/VIRTUAL_FILESYSTEM_ROOTS = \[([^\]]*)\]/)![1].matchAll(/'([^']+)'/g)].map((m) => m[1]);
       expect(serverRoots.length).toBeGreaterThan(0);
-      const caseBlock = spec.env.up.match(/case "\$d" in\n([^)]*)\)/)![1];
-      const yamlRoots = caseBlock.split('|').map((x) => x.trim()).filter((x) => !x.endsWith('/*'));
-      expect(yamlRoots.sort()).toEqual([...serverRoots].sort());
+      const caseBlock = shellFunction('decide_codex_home').match(/case "\$d" in\n\s*([^)]*)\)/)![1];
+      const scriptRoots = caseBlock.split('|').map((x) => x.trim()).filter((x) => !x.endsWith('/*'));
+      expect(scriptRoots.sort()).toEqual([...serverRoots].sort());
       expect(caseBlock.split('|').map((x) => x.trim()).filter((x) => x.endsWith('/*')).sort()).toEqual(serverRoots.map((r) => `${r}/*`).sort());
     });
   });

@@ -173,6 +173,8 @@ beforeEach(() => {
   exitJs = path.join(root, 'exit.js');
   fs.writeFileSync(listenJs, LISTEN_JS);
   fs.writeFileSync(exitJs, EXIT_JS);
+  // An explicit CODEX_HOME must exist (Issue #3358).
+  fs.mkdirSync(path.join(root, 'codex'));
 });
 
 afterEach(() => {
@@ -206,6 +208,12 @@ describe.skipIf(!HAS_TOOLS)('run-server.sh (Issue #3359)', () => {
       // The lock outlives the `up` shell: its owner is the server.
       expect(fs.readFileSync(path.join(lockDir, 'owner'), 'utf8')).toContain(`pid=${pid}\n`);
       expect(await waitFor(() => listens(port, pid))).toBe(true);
+      // The decided CODEX_HOME reaches the server through env -i (Issue #3358).
+      const serverEnv = spawnSync('ps', ['eww', '-o', 'command=', '-p', String(pid)], { encoding: 'utf8' }).stdout;
+      expect(serverEnv.split(' ')).toContain(`CODEX_HOME=${path.join(root, 'codex')}`);
+      expect(fs.readFileSync(path.join(runDir, 'codex-shared.sha256'), 'utf8').split('\n')[0]).toBe(
+        `CODEX_HOME  ${path.join(root, 'codex')}`
+      );
 
       const down = runScript(['down', '--run-dir', runDir]);
       expect(down.status, down.stderr).toBe(0);

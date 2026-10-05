@@ -41,7 +41,7 @@
 
 set -u
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 . "$REPO_ROOT/scripts/uat/run-lock.sh"
 . "$REPO_ROOT/scripts/lib/port-pids.sh"
@@ -204,6 +204,96 @@ require_run_dir() {
     fi
 }
 
+# ------------------------------------------------------- shared-file record
+
+# codex's two shared files are keyed by $CODEX_HOME alone, so they cannot be
+# moved without moving codex's login. `up` decides ONE absolute CODEX_HOME (CH)
+# and uses it for the record, the private tmux server and the server (#3358);
+# `down` reads it back from the record instead of re-deriving it. The record is
+# compared, never written back.
+#
+# <run dir>/codex-shared.sha256, one line per entry, the first word saying what
+# the line is (add a new kind as one more `case` arm in each of the two
+# functions below):
+#   CODEX_HOME  <CH>          the decided home; the lines after it are relative to it
+#   <sha256|absent>  <path>   a file under CH, path relative to CH
+SHARED_RECORD_NAME="codex-shared.sha256"
+CODEX_SHARED_FILES="hooks.json commandmate/cmate-agent-event.sh"
+
+# sha_of <file> — its sha256, or "absent".
+sha_of() {
+    if [ -f "$1" ]; then
+        shasum -a 256 "$1" | cut -d' ' -f1
+    else
+        echo absent
+    fi
+}
+
+# decide_codex_home — sets CH. Returns 1 (with a message) for a value the run
+# must not start with. Writes nothing.
+#
+# Absolute, because a relative value means the server's cwd for CommandMate
+# and codex's own cwd for codex: two places. The server
+# (src/config/system-directories.ts, VIRTUAL_FILESYSTEM_ROOTS) swaps a
+# CODEX_HOME under /proc, /sys or /dev for ~/.codex, so the record would watch
+# one place while the server writes another: refused in the lexical and the
+# symlink-resolved form. An explicit value must already be a directory (a typo
+# would silently check nothing); the default may be absent (no codex here).
+decide_codex_home() {
+    local ch_real d
+    CH="$(python3 -c 'import os,sys; print(os.path.abspath(sys.argv[1]))' "${CODEX_HOME:-$HOME/.codex}")"
+    ch_real="$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$CH")"
+    if [ -z "$CH" ] || [ -z "$ch_real" ]; then
+        log "cannot resolve CODEX_HOME"
+        return 1
+    fi
+    for d in "$CH" "$ch_real"; do
+        case "$d" in
+            /proc|/proc/*|/sys|/sys/*|/dev|/dev/*)
+                log "CODEX_HOME is refused by the server (virtual filesystem): $d"
+                return 1
+                ;;
+        esac
+    done
+    if [ -n "${CODEX_HOME:-}" ] && [ ! -d "$CH" ]; then
+        log "CODEX_HOME is not an existing directory: $CH"
+        return 1
+    fi
+}
+
+# write_shared_record <record file> — needs CH.
+write_shared_record() {
+    local n
+    {
+        printf 'CODEX_HOME  %s\n' "$CH"
+        for n in $CODEX_SHARED_FILES; do
+            printf '%s  %s\n' "$(sha_of "$CH/$n")" "$n"
+        done
+    }>"$1"
+}
+
+# check_shared_record <record file> — 0 when nothing changed, 1 (with one
+# message per change) otherwise.
+check_shared_record() {
+    local kind rest base="" rc=0
+    while read -r kind rest; do
+        case "$kind" in
+            '') ;;
+            CODEX_HOME) base="$rest" ;;
+            *)
+                if [ -z "$base" ]; then
+                    log "$1: a file line before the CODEX_HOME line: $kind $rest"
+                    rc=1
+                elif [ "$(sha_of "$base/$rest")" != "$kind" ]; then
+                    log "codex shared file changed during the run: $base/$rest"
+                    rc=1
+                fi
+                ;;
+        esac
+    done <"$1"
+    return $rc
+}
+
 # ------------------------------------------------------------------------ up
 
 UP_TOKEN=""
@@ -240,7 +330,7 @@ remove_socket_dir_tmux_only() {
 }
 
 cmd_up() {
-    local run_id sock_dir sock codex_home f tmux_pid server_pid db i
+    local run_id sock_dir sock tmux_pid server_pid db i
     if [ -z "$PORT" ] || [ -z "$RUN_DIR" ]; then
         log "up needs --port and --run-dir"
         exit 2
@@ -251,6 +341,8 @@ cmd_up() {
             exit 2
             ;;
     esac
+    # Before anything is made or started (#3358).
+    decide_codex_home || exit 1
     mkdir -p "$RUN_DIR" || exit 1
     RUN_DIR="$(cd "$RUN_DIR" && pwd)"
 
@@ -285,13 +377,7 @@ cmd_up() {
     state_set "$UP_STATE" status starting
 
     mkdir -p "$RUN_DIR/root" || exit 1
-    # codex's two shared files are keyed by $CODEX_HOME alone, so they cannot be
-    # moved without moving codex's login. Record their sha256 here; `down`
-    # compares and fails when the run rewrote them. Never written back.
-    codex_home="${CODEX_HOME:-$HOME/.codex}"
-    for f in "$codex_home/hooks.json" "$codex_home/commandmate/cmate-agent-event.sh"; do
-        printf '%s  %s\n' "$([ -f "$f" ] && shasum -a 256 "$f" | cut -d' ' -f1 || echo absent)" "$f"
-    done >"$RUN_DIR/codex-shared.sha256" || exit 1
+    write_shared_record "$RUN_DIR/$SHARED_RECORD_NAME" || exit 1
 
     mkdir -m 700 "$sock_dir" || exit 1
     printf '%s\n' "$RUN_DIR" >"$sock_dir/run-dir" || exit 1
@@ -299,15 +385,17 @@ cmd_up() {
 
     # The tmux server is started from the caller's normal environment: one born
     # under `env -i` loses Keychain access and a claude session in it comes up
-    # logged out. Always -S: a bare tmux would reach the user's own server.
-    tmux -S "$sock" new-session -d -s keepalive 'sleep 86400' || exit 1
+    # logged out. Always -S: a bare tmux would reach the user's own server. Its
+    # environment is what a codex it launches inherits when hook setup fails and
+    # CommandMate leaves CODEX_HOME off the launch line, so it carries CH too.
+    CODEX_HOME="$CH" tmux -S "$sock" new-session -d -s keepalive 'sleep 86400' || exit 1
     tmux_pid="$(tmux -S "$sock" display-message -p '#{pid}' 2>/dev/null)"
     [ -n "$tmux_pid" ] || exit 1
     state_set "$UP_STATE" tmux_pid "$tmux_pid"
 
     cd "$REPO_ROOT" || exit 1
     env -i HOME="$HOME" PATH="$PATH" USER="${USER:-}" LOGNAME="${LOGNAME:-}" SHELL="${SHELL:-/bin/sh}" \
-        LANG="${LANG:-en_US.UTF-8}" TERM="${TERM:-xterm-256color}" \
+        CODEX_HOME="$CH" LANG="${LANG:-en_US.UTF-8}" TERM="${TERM:-xterm-256color}" \
         TMUX="$sock,$tmux_pid,0" \
         NODE_ENV=production CM_PORT="$PORT" CM_BIND=127.0.0.1 \
         CM_DB_PATH="$RUN_DIR/uat.db" CM_ROOT_DIR="$RUN_DIR/root" \
@@ -359,7 +447,7 @@ cmd_up() {
 # ---------------------------------------------------------------------- down
 
 cmd_down() {
-    local state token sock_dir rc=0 h f n
+    local state token sock_dir rc=0
     require_run_dir
     RUN_DIR="$(cd "$RUN_DIR" 2>/dev/null && pwd)" || {
         log "no run dir: refusing to stop anything by port"
@@ -385,14 +473,8 @@ cmd_down() {
     fi
 
     # Fail when the run rewrote codex's shared hook or relay script.
-    if [ -f "$RUN_DIR/codex-shared.sha256" ]; then
-        while read -r h f; do
-            n=$([ -f "$f" ] && shasum -a 256 "$f" | cut -d' ' -f1 || echo absent)
-            if [ "$n" != "$h" ]; then
-                log "codex shared file changed during the run: $f"
-                rc=1
-            fi
-        done <"$RUN_DIR/codex-shared.sha256"
+    if [ -f "$RUN_DIR/$SHARED_RECORD_NAME" ]; then
+        check_shared_record "$RUN_DIR/$SHARED_RECORD_NAME" || rc=1
     fi
     exit $rc
 }
@@ -414,15 +496,23 @@ cmd_cleanup() {
 
 # ---------------------------------------------------------------------- main
 
-SUBCOMMAND="${1:-}"
-[ $# -gt 0 ] && shift
-parse_args "$@"
-case "$SUBCOMMAND" in
-    up) cmd_up ;;
-    down) cmd_down ;;
-    cleanup) cmd_cleanup ;;
-    *)
-        echo "usage: run-server.sh up --port <port> --run-dir <dir> | down --run-dir <dir> | cleanup" >&2
-        exit 2
-        ;;
-esac
+main() {
+    local subcommand="${1:-}"
+    [ $# -gt 0 ] && shift
+    parse_args "$@"
+    case "$subcommand" in
+        up) cmd_up ;;
+        down) cmd_down ;;
+        cleanup) cmd_cleanup ;;
+        *)
+            echo "usage: run-server.sh up --port <port> --run-dir <dir> | down --run-dir <dir> | cleanup" >&2
+            exit 2
+            ;;
+    esac
+}
+
+# Sourcing defines the functions only (the tests call decide_codex_home and
+# the record functions without starting anything).
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+    main "$@"
+fi

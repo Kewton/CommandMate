@@ -33,7 +33,11 @@
 #     the daily check and `run.ts` is taken before `up` starts anything and
 #     released by `down` once the server is gone. The next `up` cleans what a
 #     killed run left behind, with the same checks.
-#   - codex's two shared files are hashed in `up` and compared in `down`.
+#   - codex's two shared files are hashed in `up` and compared in `down`,
+#     against ONE absolute CODEX_HOME that `up` decides (the caller's, else
+#     $HOME/.codex) and also hands to the server and the private tmux server.
+#     A value the server would refuse (/proc, /sys, /dev) or an explicit one
+#     that is not a directory stops `up` before anything starts (#3358).
 #
 # isolation.checks measures it on the running process, positive and negative,
 # before any test case runs. Each check fails when pointed at a server that is
