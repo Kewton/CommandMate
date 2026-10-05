@@ -154,8 +154,13 @@ A `UserPromptSubmit` that is not a notice still opens a new turn, even while one
 case when the operator interrupts a turn and sends again (Claude Code has no interrupt hook, and a
 resent prompt cannot be told apart from one joining the running turn by its hook alone, so it is
 treated as a new turn). Text the operator types into a running turn fires no `UserPromptSubmit` at
-all, so the turn does not change. The relay script (`cmate-agent-event.sh`) does not send `prompt`,
-so nothing changes on that path.
+all, so the turn does not change. The relay script (`cmate-agent-event.sh`) never sends the text of
+`prompt`; it sends `"queuedNotice": true` only when the `prompt` of a Claude `UserPromptSubmit` starts
+with `<task-notification>`, and the receiver reads that as the notice mark. The bodies it sends for
+codex and every other tool are unchanged. With both the automatic HTTP hook and a manual relay in
+place, the same `UserPromptSubmit` arrives twice within 3 seconds and the later copy is dropped as a
+duplicate. When only the dropped copy carried the mark (an older relay that does not send it landed
+first), the receiver puts the running turn back in place of the one the first copy re-opened.
 
 **The manual configuration may simply be deleted** (automatic injection sends the same events).
 Keeping it causes no double recording either, thanks to the dedup above.

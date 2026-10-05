@@ -26,13 +26,26 @@
 export const CLAUDE_TASK_NOTIFICATION_PREFIX = '<task-notification>';
 
 /**
+ * The body field the relay script (`scripts/hooks/cmate-agent-event.sh`) sets
+ * to `true` in place of the prompt.
+ *
+ * The relay rebuilds the body it posts and does not forward the prompt — the
+ * operator's text has no business in a request whose receiver needs one bit of
+ * it — so it answers the question below itself and sends the answer.
+ */
+export const QUEUED_NOTICE_FIELD = 'queuedNotice';
+
+/**
  * Whether this `UserPromptSubmit` payload is a queued background-task notice.
  *
- * Reads `prompt` and nothing else. A payload with no prompt — the relay
- * script's, which rebuilds the body and drops it — answers false, which is the
+ * Two shapes say so: Claude's own payload (the injected `type: "http"` hook),
+ * whose `prompt` starts with the tag, and the relay script's body, which
+ * carries {@link QUEUED_NOTICE_FIELD} `: true` instead. Anything else —
+ * including a relay too old to send the field — answers false, which is the
  * behaviour before this Issue.
  */
 export function isClaudeQueuedNoticePrompt(payload: Record<string, unknown>): boolean {
+  if (payload[QUEUED_NOTICE_FIELD] === true) return true;
   const prompt = payload.prompt;
   return typeof prompt === 'string' && prompt.trimStart().startsWith(CLAUDE_TASK_NOTIFICATION_PREFIX);
 }

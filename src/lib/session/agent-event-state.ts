@@ -130,6 +130,8 @@ declare global {
   // eslint-disable-next-line no-var
   var __agentEventDrops: Map<string, AgentEventDropCounts> | undefined;
   // eslint-disable-next-line no-var
+  var __agentEventReopenedTurns: Map<string, { turnId: string; replaced: TurnRecord }> | undefined;
+  // eslint-disable-next-line no-var
   var __agentEventTurnSeq: { value: number } | undefined;
   // eslint-disable-next-line no-var
   var __agentEventAskUserQuestion: Map<string, AskUserQuestionEpisode> | undefined;
@@ -182,6 +184,21 @@ const agentTurns = getOrInitGlobal('__agentEventTurns', () => new Map<string, Tu
 
 /** compositeKey -> what this instance has had dropped, and why (Issue #1930). */
 const dropCounts = getOrInitGlobal('__agentEventDrops', () => new Map<string, AgentEventDropCounts>());
+
+/**
+ * compositeKey -> the open turn the newest unmarked `user_prompt_submit`
+ * replaced, under the id of the turn it opened in its place (Issue #3330).
+ *
+ * Kept so that a copy of that delivery which carries the queued-notice mark,
+ * and is dropped as a duplicate, can still undo the re-open; see
+ * {@link joinOpenTurnFromDuplicate}. One entry per instance, overwritten by the
+ * next re-open, and only ever read while the turn it names is still the
+ * instance's turn.
+ */
+const reopenedTurns = getOrInitGlobal(
+  '__agentEventReopenedTurns',
+  () => new Map<string, { turnId: string; replaced: TurnRecord }>()
+);
 
 /**
  * Monotonic suffix for {@link TurnRecord.turnId}.
@@ -1486,7 +1503,7 @@ function openTurn(
     ? turn.pendingDecisions
     : [];
 
-  agentTurns.set(key, {
+  const opened: TurnRecord = {
     turnId: nextTurnId(record.at),
     sessionId: record.sessionId,
     openedAt: record.at,
@@ -1496,8 +1513,78 @@ function openTurn(
     displayEvent: displayOf(record),
     pendingDecisions: carried,
     scraperCompletionPolls: 0,
-  });
+  };
+  agentTurns.set(key, opened);
   boundTurnMap();
+
+  // Issue #3330: a prompt with no mark that replaced a running turn of its
+  // session. A marked copy of it may still arrive and be dropped as a repeat.
+  if (record.event === 'user_prompt_submit' && openHere) {
+    reopenedTurns.set(key, { turnId: opened.turnId, replaced: turn });
+    trimOldestEntries(reopenedTurns, MAX_RECENT_EVENT_KEYS);
+  }
+}
+
+/**
+ * Give a dropped copy's queued-notice mark its effect (Issue #3330).
+ *
+ * The injected `type: "http"` hook posts Claude's payload, prompt included,
+ * and is marked {@link AgentEventRecord.joinsOpenTurn} when the prompt is a
+ * queued notice. A hand-configured relay beside it posts the same event a few
+ * milliseconds earlier or later, and the two share the de-duplication key — so
+ * when the relay's copy lands first and carries no mark (an older relay, or a
+ * hook that never forwards it), it is the one applied, it re-opens the running
+ * turn, and the marked copy is dropped behind it.
+ *
+ * Called for a `user_prompt_submit` the window dropped and that carries the
+ * mark. When the instance's turn is still exactly the one an unmarked prompt
+ * opened in place of a running turn of the same session, the running turn is
+ * put back — under its own id and `openedAt` — with what the newer record had
+ * learned since (display, dialogs). Anything else, and this does nothing.
+ *
+ * The other ways to keep the mark were weighed and lost:
+ *
+ *  - **Put the mark in the de-duplication key.** Both copies are then applied,
+ *    but in arrival order: the unmarked one has already re-opened the turn by
+ *    the time the marked one joins it, so the id has moved either way.
+ *  - **Drop the unmarked copy instead.** Which copy is the duplicate is decided
+ *    by whichever lands first, and the first has already been applied.
+ *
+ * What it cannot tell apart: an unmarked prompt that really begins a turn (a
+ * resend after an interrupt) followed, inside the window, by a queued notice
+ * of the same session. The notice is read as a copy of the prompt and the two
+ * become one turn under the older id; the next `stop` closes it, which is the
+ * `stop` a `wait` holding either turn was waiting for.
+ *
+ * @returns Whether a turn was put back.
+ */
+export function joinOpenTurnFromDuplicate(
+  worktreeId: string,
+  cliToolId: CLIToolType,
+  instanceId: string | undefined,
+  record: Pick<AgentEventRecord, 'event' | 'sessionId' | 'joinsOpenTurn'>
+): boolean {
+  if (record.event !== 'user_prompt_submit' || record.joinsOpenTurn !== true) return false;
+
+  const key = buildCompositeKey(worktreeId, cliToolId, instanceId);
+  const reopened = reopenedTurns.get(key);
+  const current = fencedTurn(key);
+  if (!reopened || current === null || current.turnId !== reopened.turnId) return false;
+  if (current.closedAt !== null) return false;
+  if (!closesTurn(current, record.sessionId)) return false;
+  const { replaced } = reopened;
+  if (replaced.generationAt !== current.generationAt) return false;
+
+  agentTurns.set(key, {
+    ...replaced,
+    closedAt: null,
+    closedBy: null,
+    displayEvent: current.displayEvent,
+    pendingDecisions: current.pendingDecisions,
+    scraperCompletionPolls: 0,
+  });
+  reopenedTurns.delete(key);
+  return true;
 }
 
 /**
@@ -3225,6 +3312,7 @@ export function clearAgentStopEvents(): void {
   // Issue #1930: the turns, the dialogs they hold, and the tally of what was
   // dropped from them.
   agentTurns.clear();
+  reopenedTurns.clear();
   dropCounts.clear();
   askUserQuestion.clear();
   awaitingInstruction.clear();

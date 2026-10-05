@@ -9,6 +9,7 @@ import { describe, expect, it } from 'vitest';
 import {
   CLAUDE_TASK_NOTIFICATION_PREFIX,
   isClaudeQueuedNoticePrompt,
+  QUEUED_NOTICE_FIELD,
 } from '@/lib/hooks/sources/claude/queued-notice';
 import { getAgentEventSource } from '@/lib/hooks/sources/registry';
 import { CLI_TOOL_IDS } from '@/lib/cli-tools/types';
@@ -31,6 +32,13 @@ describe('isClaudeQueuedNoticePrompt', () => {
     expect(isClaudeQueuedNoticePrompt(payload('Implement the change'))).toBe(false);
     // Mentioning the tag is not being a notice.
     expect(isClaudeQueuedNoticePrompt(payload(`see ${NOTICE}`))).toBe(false);
+  });
+
+  it('is true for the relay script’s body, which carries the answer and no prompt', () => {
+    expect(isClaudeQueuedNoticePrompt({ event: 'user_prompt_submit', [QUEUED_NOTICE_FIELD]: true })).toBe(true);
+    // Only the boolean: a string is not the relay's answer.
+    expect(isClaudeQueuedNoticePrompt({ [QUEUED_NOTICE_FIELD]: 'true' })).toBe(false);
+    expect(isClaudeQueuedNoticePrompt({ [QUEUED_NOTICE_FIELD]: false })).toBe(false);
   });
 
   it('is false when there is no prompt to read', () => {

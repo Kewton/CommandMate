@@ -22,6 +22,7 @@ import {
   clearAgentStopEvents,
   getAgentTurn,
   getStructuredSessionState,
+  joinOpenTurnFromDuplicate,
   recordAgentEvent,
   type AgentEventRecord,
 } from '@/lib/session/agent-event-state';
@@ -136,5 +137,63 @@ describe('a prompt that is not a queued notice still opens a new turn (control)'
     deliver('user_prompt_submit', 63_000, { joinsOpenTurn: false });
 
     expect(turnAt(63_000)?.turnId).not.toBe(first?.turnId);
+  });
+});
+
+describe('joinOpenTurnFromDuplicate: a marked copy dropped behind an unmarked one', () => {
+  const marked = { event: 'user_prompt_submit' as const, sessionId: SESSION, joinsOpenTurn: true };
+
+  it('puts back the running turn the unmarked copy replaced', () => {
+    deliver('user_prompt_submit', 0);
+    const opened = turnAt(0);
+    deliver('pre_tool_use', 1_000, { detail: 'Bash' });
+    deliver('user_prompt_submit', 63_000);
+    expect(turnAt(63_000)?.turnId).not.toBe(opened?.turnId);
+
+    expect(joinOpenTurnFromDuplicate(WT, 'claude', undefined, marked)).toBe(true);
+
+    const turn = turnAt(63_006);
+    expect(turn?.turnId).toBe(opened?.turnId);
+    expect(turn?.openedAt).toBe(T);
+    expect(turn?.closedAt).toBeNull();
+    expect(turn?.displayEvent.event).toBe('user_prompt_submit');
+    // Once: the record is spent.
+    expect(joinOpenTurnFromDuplicate(WT, 'claude', undefined, marked)).toBe(false);
+  });
+
+  it('does nothing without the mark', () => {
+    deliver('user_prompt_submit', 0);
+    deliver('user_prompt_submit', 63_000);
+    const reopened = turnAt(63_000);
+
+    expect(
+      joinOpenTurnFromDuplicate(WT, 'claude', undefined, { ...marked, joinsOpenTurn: false })
+    ).toBe(false);
+    expect(turnAt(63_006)?.turnId).toBe(reopened?.turnId);
+  });
+
+  it('does nothing when the unmarked prompt opened a turn after a stop', () => {
+    deliver('user_prompt_submit', 0);
+    deliver('stop', 2_000);
+    deliver('user_prompt_submit', 2_540);
+    const second = turnAt(2_540);
+
+    expect(joinOpenTurnFromDuplicate(WT, 'claude', undefined, marked)).toBe(false);
+    expect(turnAt(2_546)?.turnId).toBe(second?.turnId);
+  });
+
+  it('does nothing once the re-opened turn has moved on, or for another session', () => {
+    deliver('user_prompt_submit', 0);
+    deliver('user_prompt_submit', 63_000);
+    const reopened = turnAt(63_000);
+
+    expect(
+      joinOpenTurnFromDuplicate(WT, 'claude', undefined, { ...marked, sessionId: 'sess-other' })
+    ).toBe(false);
+    expect(turnAt(63_006)?.turnId).toBe(reopened?.turnId);
+
+    deliver('stop', 64_000);
+    expect(joinOpenTurnFromDuplicate(WT, 'claude', undefined, marked)).toBe(false);
+    expect(turnAt(64_000)?.closedBy).toBe('stop');
   });
 });

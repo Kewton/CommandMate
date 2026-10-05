@@ -60,6 +60,7 @@ import { getAgentEventSource } from '@/lib/hooks/sources';
 import type { AgentEventSource, NormalizedAgentEvent } from '@/lib/hooks/sources';
 import {
   isDuplicateAgentEvent,
+  joinOpenTurnFromDuplicate,
   recordAgentEvent,
   recordAskUserQuestion,
 } from '@/lib/session/agent-event-state';
@@ -232,8 +233,26 @@ export async function POST(request: NextRequest) {
     // queued notice it attaches to a turn that is already running. Those that
     // get through join that turn rather than opening one (Issue #3330), so
     // whether the window drops them no longer decides the turn.
+    const joinsOpenTurn =
+      event === 'user_prompt_submit' && source.promptJoinsOpenTurn?.(payload) === true;
+
     if (isDuplicateAgentEvent(worktree.id, tool, instanceParam, event, sessionId, receivedAt, detail)) {
-      logger.info('agent-event-duplicate-dropped', { worktreeId: worktree.id, tool, event });
+      // Issue #3330: the mark is not part of the key, so the copy that carried
+      // it can be the one dropped — an unmarked relay copy landed first and
+      // re-opened the running turn. The mark still decides that turn.
+      const joinedOpenTurn =
+        joinsOpenTurn &&
+        joinOpenTurnFromDuplicate(worktree.id, tool, instanceParam, {
+          event,
+          sessionId: sessionId ?? null,
+          joinsOpenTurn,
+        });
+      logger.info('agent-event-duplicate-dropped', {
+        worktreeId: worktree.id,
+        tool,
+        event,
+        ...(joinedOpenTurn ? { joinedOpenTurn } : {}),
+      });
       return NextResponse.json(ACCEPTED, { status: 202 });
     }
 
@@ -262,8 +281,7 @@ export async function POST(request: NextRequest) {
         // Issue #3330: a background-task notice Claude attaches to its running
         // turn fires `UserPromptSubmit` as well. The source says which prompts
         // those are; the state decides whether there is a turn to join.
-        joinsOpenTurn:
-          event === 'user_prompt_submit' && source.promptJoinsOpenTurn?.(payload) === true,
+        joinsOpenTurn,
       },
       {
         // Issue #1903: the declared value, read off the source this route already

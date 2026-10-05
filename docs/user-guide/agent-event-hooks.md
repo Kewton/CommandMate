@@ -147,7 +147,11 @@ Claude Code は、キューにたまった通知（バックグラウンドの�
 利用者がターンを中断して送り直したときがこれに当たる（Claude Code には中断の hook が無く、
 送り直した文と実行中のターンへ加わる文を hook からは区別できないため、新しいターンとして扱う）。
 実行中のターンへ利用者が入力した文は、Claude Code が `UserPromptSubmit` を発火しないので、ターンは変わらない。
-中継スクリプト（`cmate-agent-event.sh`）は `prompt` を送らないので、その経路では今までどおりである。
+中継スクリプト（`cmate-agent-event.sh`）は `prompt` の本文を送らず、Claude の `UserPromptSubmit` の
+`prompt` が `<task-notification>` で始まるときだけ `"queuedNotice": true` を送る。受け口はこれを通知の印として読む。
+codex など Claude 以外の道具の本文は変わらない。
+自動の HTTP hook と手動の中継を併用していると、同じ `UserPromptSubmit` が 3 秒以内に 2 回届き、後に着いた方は重複として捨てられる。
+捨てられた方だけが印を持っていた（印を送らない古い中継が先に着いた）ときも、受け口は先の配送が開き直したターンを元のターンへ戻す。
 
 **手動設定は削除して構わない**（自動注入が同じイベントを送る）。
 残す場合も上記 dedup で二重記録は起きない。
