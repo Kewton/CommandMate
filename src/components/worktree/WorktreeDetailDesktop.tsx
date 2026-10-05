@@ -8,9 +8,8 @@
  * desktop layout body, delegating the layout frame to WorktreeDesktopLayout
  * (S1-003) and the terminal column to TerminalContainer.
  *
- * MarkdownEditor (dynamic, ssr:false) and its Editor Modal stay in the parent
- * orchestrator (S3-002); the parent renders the editor modal as a sibling of
- * this component. File editing is delegated up via onEditMarkdown elsewhere.
+ * Markdown editing lives in the file tab panel (FilePanelContent owns its own
+ * dynamic, ssr:false MarkdownEditor); there is no separate editor modal.
  *
  * Closure-dependency stability (S1-004): every value `renderSplitPane` closes
  * over (pendingInsertTextMap / handleInsertToSplit / handleInsertConsumed,
@@ -933,8 +932,6 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
           onWorktreeUpdate={onWorktreeUpdate}
         />
         {/* Issue #438: Desktop FileViewer modal replaced by FilePanelSplit in rightPaneMemo */}
-        {/* Issue #755 (S3-002): the Markdown Editor Modal stays in the parent
-            orchestrator and is rendered alongside this component. */}
         {/* Hidden file input for upload */}
         <input
           ref={fileInputRef}
