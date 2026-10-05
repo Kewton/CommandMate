@@ -593,6 +593,22 @@ sessionStatus=running && reason ∈ {no_recent_output, unknown_frame, default}
 立てないため従来どおり最初のポーリングで exit 0 になります。セッション自体が消えた場合も従来どおり
 exit 0 です。
 
+#### 次の依頼を送る前の待ちは `wait` で行う（Issue #3337）
+
+`capture --json` の `sessionStatus` を読んで `ready` になったら送る、という待ち方はしないでください。
+`sessionStatus` は 1 回の画面の読みを含む値で、ターンの途中で `ready` に見えることがありました
+（codex 0.160.0 の長いターンで、作業中の表示が読めなかったフレーム）。そこで送ると、実行中の
+ターンに割り込みます。`commandmate wait <id> --instance <name>` は、エージェント自身がターンの
+終わり（`Stop`）を報告するまで完了にしないので、こちらで待ってから送ります。
+
+サーバー側でも、codex が hooks を出しているとき（`structuredEvents.source.kind` が `hooks`）は、
+画面の読みだけでターンを閉じなくなりました。`Stop` が来ないと分かるとき — 30 分何も届かない
+（`closedBy: 'stale'`）か、画面が中断を示しているとき（`■ Conversation interrupted`。中断では
+`Stop` が来ないことを実測済み） — だけ、画面で閉じます（`closedBy: 'scraper_evidence'`）。
+リレーの返答の送信も、同じ規則で待ちます。Claude などほかのツールと、hooks の無いソースは、
+従来どおり画面でターンを閉じます（Claude の中断は、`Interrupted` の行が出る形と、送った文が
+入力欄に戻るだけの形があり、どちらも `Stop` が来ないため）。
+
 ### ターン成立の判定（Issue #1839）
 
 `wait` はこれまで「エージェントが composer に戻ったか」しか見ておらず、**そのターンが
@@ -1754,7 +1770,7 @@ commandmate capture "$WT" --json | jq -r 'select(.statusEvidence == "none") | .l
 | `turnId` | ターンの識別子（`turn-<openedAt>`）、無ければ `null` |
 | `openedAt` | 直近の `user_prompt_submit` / `pre_tool_use` / `post_tool_use` の時刻 |
 | `closedAt` | エージェントがターン終了（`Stop`）を報告した時刻 |
-| `closedBy` | 終了理由。現状は `'stop'` のみ |
+| `closedBy` | 終了理由: `'stop'`（エージェントの `Stop`）/ `'session_end'` / `'stale'` / `'scraper_evidence'`（画面。hooks のソースの codex では中断を示す画面のときだけ、Issue #3337）/ `'resync_idle'` / `'generation'` |
 
 > **`turnId` はまだ安定したターン同一性ではありません。** 現状サーバーが保持しているのは
 > **最新イベント 1 件だけ**なので、ターン途中の `pre_tool_use` で `openedAt` と `turnId` が

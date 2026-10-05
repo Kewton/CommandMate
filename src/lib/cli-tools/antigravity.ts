@@ -215,6 +215,29 @@ export class AntigravityTool extends BaseCLITool {
     beginAgentSession({ worktreeId, cliToolId: ANTIGRAVITY_CLI_TOOL_ID, instanceId });
 
     try {
+      // Start agy in interactive mode, optionally pinned to a model.
+      //
+      // Issue #1762: the launch merges CommandMate's named hook into
+      // `~/.gemini/config/hooks.json` — agy's single global config, shared with
+      // gemini's tree and with whatever the user has in it — and prefixes
+      // `CM_HOOK_URL`. That variable is the *only* correlation channel agy has:
+      // its payloads carry no `cwd`, its hooks run in `~/.gemini/config`, and
+      // one file serves every worktree on the machine. `--model` is appended
+      // after the rendered line, so the env assignments stay in front of the
+      // command. `CM_AGENT_HOOKS_INJECT=0` returns bare `agy`, unchanged.
+      // Under UAT isolation (Issue #3360) a shared file this build did not
+      // produce makes the plan throw.
+      const base = buildAgentLaunchCommandLine({
+        target: { worktreeId, cliToolId: ANTIGRAVITY_CLI_TOOL_ID, instanceId },
+        executablePath: this.command,
+        worktreePath,
+      });
+      const launchCommand = model ? `${base} --model ${shellSingleQuote(model)}` : base;
+
+      // Issue #3360: the plan above is built BEFORE the tmux session, because
+      // under UAT isolation it throws instead of launching — and a refused
+      // launch must not leave an empty pane that `isRunning()` reports as a
+      // started agy (the next send would then be refused a model change).
       // Issue #2070: creation only. On the relaunch path the pane already
       // exists and holds the transcript of the process that died in it; the
       // launch command is re-sent into that same pane.
@@ -226,22 +249,6 @@ export class AntigravityTool extends BaseCLITool {
         await this.createLaunchPane(sessionName, worktreePath);
       }
 
-      // Start agy in interactive mode, optionally pinned to a model.
-      //
-      // Issue #1762: the launch merges CommandMate's named hook into
-      // `~/.gemini/config/hooks.json` — agy's single global config, shared with
-      // gemini's tree and with whatever the user has in it — and prefixes
-      // `CM_HOOK_URL`. That variable is the *only* correlation channel agy has:
-      // its payloads carry no `cwd`, its hooks run in `~/.gemini/config`, and
-      // one file serves every worktree on the machine. `--model` is appended
-      // after the rendered line, so the env assignments stay in front of the
-      // command. `CM_AGENT_HOOKS_INJECT=0` returns bare `agy`, unchanged.
-      const base = buildAgentLaunchCommandLine({
-        target: { worktreeId, cliToolId: ANTIGRAVITY_CLI_TOOL_ID, instanceId },
-        executablePath: this.command,
-        worktreePath,
-      });
-      const launchCommand = model ? `${base} --model ${shellSingleQuote(model)}` : base;
       await sendKeys(sessionName, withLaunchScreenCleared(launchCommand), true);
 
       // Wait for agy to initialize

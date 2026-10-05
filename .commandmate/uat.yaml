@@ -16,7 +16,10 @@
 #     DB before, because settings resolution fell through to production. "It
 #     listens on another port" proves nothing. So `env -i` starts the server
 #     with no inherited variable and CM_DB_PATH / CM_ROOT_DIR /
-#     CM_OPENCODE_V2_DIR / CM_AGENT_HOOKS_DIR are set under {run_dir}. TMUX
+#     CM_OPENCODE_V2_DIR / CM_AGENT_HOOKS_DIR are set under {run_dir}, with
+#     CM_UAT_ISOLATION=1 (Issue #3360, docs/user-guide/uat-isolation.md) so the
+#     build writes none of the agents' shared hook files, grants no codex hook
+#     trust and reads no user-level claude settings. TMUX
 #     names a PRIVATE tmux server on /tmp/cmuat-{port}-<run id>/tmux.sock (the
 #     technique tests/unit/config/tmux-live-test-safety.test.ts prescribes),
 #     started first from the caller's normal environment, because a tmux server
@@ -35,7 +38,9 @@
 #     killed run left behind, with the same checks.
 #   - codex's two shared files are hashed in `up` and compared in `down`,
 #     against ONE absolute CODEX_HOME that `up` decides (the caller's, else
-#     $HOME/.codex) and also hands to the server and the private tmux server.
+#     $HOME/.codex) and also hands to the server and the private tmux server;
+#     so is antigravity's ~/.gemini/config/hooks.json (#3360). This is the
+#     check on CM_UAT_ISOLATION=1.
 #     A value the server would refuse (/proc, /sys, /dev) or an explicit one
 #     that is not a directory stops `up` before anything starts (#3358).
 #
@@ -45,14 +50,25 @@
 version: 1
 env:
   build: "npm run build:all"
-  # The shell that used to stand here (env -i, the private tmux server, the
-  # codex hashes) moved verbatim into scripts/uat/run-server.sh.
+  # The shell that used to stand here (env -i with CM_UAT_ISOLATION=1, the
+  # private tmux server, the shared-file hashes) moved verbatim into
+  # scripts/uat/run-server.sh.
   # tests/unit/config/uat-yaml-2590.test.ts holds the server line's shape there.
   up: "bash scripts/uat/run-server.sh up --port {port} --run-dir {run_dir}"
+  # The CLI for this run (Issue #3360) — the SAME build's CLI by absolute path,
+  # never the global `commandmate`; its own empty HOME, so neither
+  # ~/.commandmate/.env nor ~/.commandmate-security.log is touched; CM_PORT
+  # exported, and CM_UAT_ISOLATION=1 so that it reads no .env and exits 2
+  # instead of falling back to 3000 (production) when CM_PORT is missing:
+  #
+  #   mkdir -p {run_dir}/client-home
+  #   env -i HOME={run_dir}/client-home PATH="$PATH" CM_UAT_ISOLATION=1 \
+  #     CM_PORT={port} CM_BIND=127.0.0.1 node "$PWD/bin/commandmate.js" ls --json
+  #
   # Stops only the recorded server, after checking it LISTENS on {port} and its
   # CM_DB_PATH is under {run_dir} (CommandMate#2473, #3359); fails otherwise.
-  # Also removes the private tmux server and fails when codex's shared files
-  # changed during the run.
+  # Also removes the private tmux server and fails when codex's shared files or
+  # antigravity's ~/.gemini/config/hooks.json changed during the run.
   down: "bash scripts/uat/run-server.sh down --run-dir {run_dir}"
   health: "curl -fsS -m 5 -o /dev/null http://127.0.0.1:{port}/api/worktrees"
   health_timeout_sec: 90
@@ -74,6 +90,9 @@ isolation:
     # server was not left pointing at the user's ~/.commandmate ones (negative).
     - "P=$(lsof -nP -iTCP:{port} -sTCP:LISTEN -t | head -1); ps eww -p $P | tr ' ' '\\n' | grep -qxF 'CM_OPENCODE_V2_DIR={run_dir}/opencode-v2' && ps eww -p $P | tr ' ' '\\n' | grep -qxF 'CM_AGENT_HOOKS_DIR={run_dir}/hooks'"
     - "P=$(lsof -nP -iTCP:{port} -sTCP:LISTEN -t | head -1); ! ps eww -p $P | tr ' ' '\\n' | grep -E '^CM_(OPENCODE_V2|AGENT_HOOKS)_DIR=' | grep -vF '{run_dir}/'"
+    # It runs in UAT isolation (Issue #3360): no shared codex / antigravity
+    # write, no codex hook trust grant, no user-level claude settings.
+    - "P=$(lsof -nP -iTCP:{port} -sTCP:LISTEN -t | head -1); ps eww -p $P | tr ' ' '\\n' | grep -qxF 'CM_UAT_ISOLATION=1'"
     # The API sees only the sandbox root: every registered repository lives under {run_dir}/root.
     - "curl -fsS -m 5 http://127.0.0.1:{port}/api/repositories | python3 -c \"import json,sys; d=json.load(sys.stdin); r=d if isinstance(d,list) else d.get('repositories',[]); sys.exit(0 if all(str(x.get('path','')).startswith('{run_dir}/root') for x in r) else 1)\""
 report_dir: ".commandmate/uat"

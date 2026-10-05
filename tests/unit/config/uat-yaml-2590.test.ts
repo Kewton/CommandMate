@@ -183,6 +183,55 @@ describe('.commandmate/uat.yaml (Issue #2590)', () => {
     expect(`${down}\n${check}`).not.toMatch(/\bcp\b|\bmv\b|>\s*"?\$(f|base)/);
   });
 
+  it('starts the server in UAT isolation and checks it on the running process (Issue #3360)', () => {
+    const [line] = logicalLines(spec.env.up).filter((l) => l.includes('dist/server/server.js'));
+    const at = line.indexOf('CM_UAT_ISOLATION=1');
+    expect(at, 'the server line must set CM_UAT_ISOLATION=1').toBeGreaterThan(line.indexOf('env -i'));
+    expect(at).toBeLessThan(line.indexOf('nohup'));
+    expect(
+      spec.isolation.checks.some((c) => c.includes('ps eww') && c.includes("grep -qxF 'CM_UAT_ISOLATION=1'"))
+    ).toBe(true);
+  });
+
+  describe('antigravity\'s shared hooks.json is recorded as an ABSOLUTE line and compared in down (Issue #3360)', () => {
+    const preamble = spec.env.up.slice(0, spec.env.up.indexOf('mkdir -p -m 700 /tmp/cmuat-'));
+    const down = spec.env.down ?? '';
+    const compare = down.slice(down.indexOf('CH=$(sed'));
+
+    function setup() {
+      const runDir = fs.mkdtempSync(path.join(os.tmpdir(), 'uat-3360-run-'));
+      const home = path.join(runDir, 'home');
+      fs.mkdirSync(path.join(home, '.gemini', 'config'), { recursive: true });
+      const gemini = path.join(home, '.gemini', 'config', 'hooks.json');
+      fs.writeFileSync(gemini, '{"commandmate":{}}\n');
+      const env = { PATH: process.env.PATH ?? '', HOME: home } as unknown as NodeJS.ProcessEnv;
+      const run = (script: string) =>
+        spawnSync('bash', ['-c', script.replaceAll('{run_dir}', runDir)], { env, encoding: 'utf8' });
+      return { runDir, home, gemini, run };
+    }
+
+    it('writes `ABSOLUTE  <sha256>  <absolute path>` beside the CODEX_HOME-relative lines', () => {
+      const { runDir, gemini, run } = setup();
+      const res = run(preamble);
+      expect(res.status, res.stderr).toBe(0);
+      const record = fs.readFileSync(path.join(runDir, 'codex-shared.sha256'), 'utf8');
+      expect(record).toMatch(new RegExp(`^ABSOLUTE {2}[0-9a-f]{64} {2}${gemini.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'm'));
+      expect(record.split('\n')[0]).toMatch(/^CODEX_HOME {2}/);
+    });
+
+    it('down passes when nothing changed and fails naming the file when it did', () => {
+      const { gemini, run } = setup();
+      expect(run(preamble).status).toBe(0);
+      const unchanged = run(compare);
+      expect(unchanged.status, unchanged.stderr).toBe(0);
+
+      fs.writeFileSync(gemini, '{"commandmate":{"rewritten":true}}\n');
+      const changed = run(compare);
+      expect(changed.status).toBe(1);
+      expect(changed.stderr).toContain(`changed during UAT: ${gemini}`);
+    });
+  });
+
   it('uses ONE decided CODEX_HOME for the record, the server (after env -i) and down (Issue #3358)', () => {
     // Issue #3359: the decision lives in run-server.sh (decide_codex_home), up calls it.
     const decide = shellFunction('decide_codex_home');

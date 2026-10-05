@@ -265,13 +265,6 @@ export class CodexTool extends BaseCLITool {
     beginAgentSession({ worktreeId, cliToolId: CODEX_CLI_TOOL_ID, instanceId });
 
     try {
-      if (!exists) {
-        // Create tmux session. Codex is inline-rendered, so its transcript lives in
-        // the pane scrollback — depth comes from the shared TMUX_HISTORY_LIMIT
-        // default (Issue #1624), do not re-hardcode it here.
-        await this.createLaunchPane(sessionName, worktreePath);
-      }
-
       // Issue #1760: hand this session its correlation keys, writing codex's
       // hooks config first if it is not already there. codex has no
       // `--settings`, so the keys ride in environment assignments on the launch
@@ -280,12 +273,22 @@ export class CodexTool extends BaseCLITool {
       //
       // Falls back to the bare command on any failure and when
       // `CM_AGENT_HOOKS_INJECT=0`; a session that starts without hooks is the
-      // pre-#1760 status quo, and a session that fails to start is not.
+      // pre-#1760 status quo, and a session that fails to start is not. The one
+      // exception is UAT isolation (Issue #3360), where the plan throws instead —
+      // which is why it is built BEFORE the tmux session: a refused launch must
+      // not leave an empty pane that `isRunning()` reports as a started codex.
       const launchCommand = buildAgentLaunchCommandLine({
         target: { worktreeId, cliToolId: CODEX_CLI_TOOL_ID, instanceId },
         executablePath: this.command,
         worktreePath,
       });
+
+      if (!exists) {
+        // Create tmux session. Codex is inline-rendered, so its transcript lives in
+        // the pane scrollback — depth comes from the shared TMUX_HISTORY_LIMIT
+        // default (Issue #1624), do not re-hardcode it here.
+        await this.createLaunchPane(sessionName, worktreePath);
+      }
 
       // Issue #2068: re-send the SAME launch line into the SAME pane, for the
       // one case where a launch legitimately has to happen twice — codex's own

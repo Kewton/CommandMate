@@ -32,7 +32,11 @@
 #     a caller with no health check of its own; uat.yaml has one).
 #
 # Isolation of the server itself (env -i, CM_DB_PATH / CM_ROOT_DIR / TMUX ...)
-# is unchanged from #2590 / #3342; `.commandmate/uat.yaml` describes why.
+# is unchanged from #2590 / #3342; `.commandmate/uat.yaml` describes why. The
+# server also runs with CM_UAT_ISOLATION=1 (#3360,
+# docs/user-guide/uat-isolation.md): it writes none of the agents' shared hook
+# files, grants no codex hook trust and reads no user-level claude settings.
+# The shared-file record below is the check on that.
 #
 # Test hooks: CM_UAT_SOCK_BASE (default /tmp) moves the socket directories,
 # CM_UAT_SERVER_ENTRY (default dist/server/server.js) replaces the server.
@@ -217,6 +221,9 @@ require_run_dir() {
 # functions below):
 #   CODEX_HOME  <CH>          the decided home; the lines after it are relative to it
 #   <sha256|absent>  <path>   a file under CH, path relative to CH
+#   ABSOLUTE  <sha256|absent>  <path>
+#                             a shared file outside CH, by absolute path (#3360):
+#                             antigravity's ~/.gemini/config/hooks.json
 SHARED_RECORD_NAME="codex-shared.sha256"
 CODEX_SHARED_FILES="hooks.json commandmate/cmate-agent-event.sh"
 
@@ -269,17 +276,28 @@ write_shared_record() {
         for n in $CODEX_SHARED_FILES; do
             printf '%s  %s\n' "$(sha_of "$CH/$n")" "$n"
         done
+        # The server's os.homedir() is this $HOME (env -i passes it through).
+        n="$HOME/.gemini/config/hooks.json"
+        printf 'ABSOLUTE  %s  %s\n' "$(sha_of "$n")" "$n"
     }>"$1"
 }
 
 # check_shared_record <record file> — 0 when nothing changed, 1 (with one
 # message per change) otherwise.
 check_shared_record() {
-    local kind rest base="" rc=0
+    local kind rest base="" rc=0 h p
     while read -r kind rest; do
         case "$kind" in
             '') ;;
             CODEX_HOME) base="$rest" ;;
+            ABSOLUTE)
+                h=${rest%%  *}
+                p=${rest#*  }
+                if [ "$(sha_of "$p")" != "$h" ]; then
+                    log "shared agent hook file changed during the run: $p"
+                    rc=1
+                fi
+                ;;
             *)
                 if [ -z "$base" ]; then
                     log "$1: a file line before the CODEX_HOME line: $kind $rest"
@@ -397,7 +415,7 @@ cmd_up() {
     env -i HOME="$HOME" PATH="$PATH" USER="${USER:-}" LOGNAME="${LOGNAME:-}" SHELL="${SHELL:-/bin/sh}" \
         CODEX_HOME="$CH" LANG="${LANG:-en_US.UTF-8}" TERM="${TERM:-xterm-256color}" \
         TMUX="$sock,$tmux_pid,0" \
-        NODE_ENV=production CM_PORT="$PORT" CM_BIND=127.0.0.1 \
+        NODE_ENV=production CM_PORT="$PORT" CM_BIND=127.0.0.1 CM_UAT_ISOLATION=1 \
         CM_DB_PATH="$RUN_DIR/uat.db" CM_ROOT_DIR="$RUN_DIR/root" \
         CM_OPENCODE_V2_DIR="$RUN_DIR/opencode-v2" CM_AGENT_HOOKS_DIR="$RUN_DIR/hooks" \
         nohup node "$SERVER_ENTRY" >"$RUN_DIR/server.log" 2>&1 </dev/null &
@@ -472,7 +490,8 @@ cmd_down() {
         rc=1
     fi
 
-    # Fail when the run rewrote codex's shared hook or relay script.
+    # Fail when the run rewrote codex's shared hook or relay script, or
+    # antigravity's ~/.gemini/config/hooks.json.
     if [ -f "$RUN_DIR/$SHARED_RECORD_NAME" ]; then
         check_shared_record "$RUN_DIR/$SHARED_RECORD_NAME" || rc=1
     fi

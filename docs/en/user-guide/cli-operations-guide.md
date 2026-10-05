@@ -449,6 +449,23 @@ completion is `ready`/`input_prompt` (the agent is back at the composer), which 
 flag and therefore still exits 0 on the first poll. A session that disappeared entirely still exits 0
 as before.
 
+#### Wait with `wait`, not `sessionStatus`, before sending the next request (Issue #3337)
+
+Do not poll `capture --json` and send as soon as `sessionStatus` reads `ready`. `sessionStatus`
+includes a reading of a single frame, and it has read `ready` in the middle of a turn (a long codex
+0.160.0 turn whose working indicator the detector could not read). Sending then interrupts the
+running turn. `commandmate wait <id> --instance <name>` does not complete until the agent itself
+reports the end of the turn (`Stop`), so wait with it and then send.
+
+On the server, when codex's hooks speak for the pane (`structuredEvents.source.kind` is `hooks`),
+its turn is no longer closed by the screen alone. The screen closes it (`closedBy:
+'scraper_evidence'`) only when the `Stop` is known not to come — nothing heard for 30 minutes
+(`closedBy: 'stale'`), or a frame that shows the turn was interrupted (`■ Conversation
+interrupted`; an interrupt was measured to send no `Stop`). A relay reply waits by the same rule.
+Claude and the other tools, and any source without hooks, are still closed by the screen, as
+before (a Claude interrupt either prints an `Interrupted` row or just puts the prompt back in the
+composer, and neither sends a `Stop`).
+
 ### Progress Output
 
 Progress is written to stderr. Only the final result (JSON) goes to stdout.
