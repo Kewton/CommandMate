@@ -27,6 +27,7 @@ import {
 } from '@/lib/hooks/sources/opencode-v2/mappers';
 import {
   discardAgentEventState,
+  getAgentTurn,
   getLastAgentEvent,
   getPendingDecisions,
   getStructuredSessionState,
@@ -188,6 +189,42 @@ describe('D5: each event → the state CommandMate publishes', () => {
       expect(status(target)).toBe('running');
     }
   );
+
+  it.each([
+    'session.execution.succeeded',
+    'session.execution.interrupted',
+    'session.execution.failed',
+  ])('a turn that starts right after %s is opened (Issue #3301)', async (type) => {
+    // `session.execution.started` carries no id of its own, so it is judged on
+    // the three-second window, and `feed` stamps frames 10 ms apart: the second
+    // start is well inside the window of the first. What tells it from a copy
+    // is the end of the turn that arrived between them.
+    const target = freshTarget();
+    await feed(target, [frameOf('session.execution.started'), frameOf(type)]);
+    expect(status(target)).toBe('ready');
+    const ended = getAgentTurn(target.worktreeId, 'opencode-v2', 'opencode-v2');
+
+    await feed(target, [frameOf('session.execution.started')]);
+
+    const turn = getAgentTurn(target.worktreeId, 'opencode-v2', 'opencode-v2');
+    expect(turn?.turnId).not.toBe(ended?.turnId);
+    expect(turn?.closedAt).toBeNull();
+    expect(status(target)).toBe('running');
+  });
+
+  it('two starts with no end between them are still one turn start', async () => {
+    // The control for the case above: the same frame twice, 10 ms apart.
+    const target = freshTarget();
+    await feed(target, [frameOf('session.execution.started')]);
+    const opened = getAgentTurn(target.worktreeId, 'opencode-v2', 'opencode-v2');
+
+    await feed(target, [frameOf('session.execution.started')]);
+
+    expect(getAgentTurn(target.worktreeId, 'opencode-v2', 'opencode-v2')?.turnId).toBe(
+      opened?.turnId
+    );
+    expect(status(target)).toBe('running');
+  });
 
   it('ignores every other type, and records nothing for it', async () => {
     const target = freshTarget();

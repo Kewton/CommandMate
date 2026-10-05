@@ -40,6 +40,7 @@ import { parseTaskContract } from '@/lib/tasks/contract-parser';
 import { waitForVerification } from '@/lib/verification/gate-runner';
 import {
   clearAgentStopEvents,
+  getAgentTurn,
   getLastStopEventAt,
   getStructuredSessionState,
 } from '@/lib/session/agent-event-state';
@@ -565,6 +566,129 @@ describe('a short turn the agent started for itself (Issue #3289)', () => {
 
       expect(getLastStopEventAt(wtId, tool), tool).toBe(T + SECOND_STOP_AFTER_MS);
       expect(getStructuredSessionState(wtId, tool)?.status, tool).toBe('ready');
+    }
+  });
+});
+
+describe('a turn that began right after the previous one ended (Issue #3301)', () => {
+  /**
+   * The server log of 2026-10-04, a worker of Epic #3207: the
+   * `UserPromptSubmit` of a turn a background task's completion notice opened,
+   * that turn's `Stop` 2624 ms later, and the `UserPromptSubmit` of the next
+   * notice's turn 22 ms after the `Stop`. The second start was logged
+   * `agent-event-duplicate-dropped` — it is inside three seconds of the first —
+   * and the server went on publishing `ready` for an agent that was working.
+   */
+  const T = 1_800_000_000_000;
+  const STOP_AFTER_MS = 2624;
+  const NEXT_START_AFTER_MS = 2646;
+  const SESSION = 'sess-3301';
+
+  afterEach(() => unfreezeClock());
+
+  /** Deliver one event at `T + afterMs`, in the shape the relay script posts. */
+  async function deliver(
+    event: string,
+    afterMs: number,
+    extra: { tool?: string; detail?: string } = {}
+  ) {
+    freezeClock(T + afterMs);
+    const response = await postEvent({
+      tool: 'claude',
+      event,
+      cwd: repo,
+      sessionId: SESSION,
+      ...extra,
+    });
+    expect(response.status).toBe(202);
+  }
+
+  it('applies the second start, and the turn it begins is open', async () => {
+    const task = seedTask({ status: 'running' });
+
+    await deliver('user_prompt_submit', 0);
+    const first = getAgentTurn(wtId, 'claude');
+    expect(first?.openedAt).toBe(T);
+
+    await deliver('stop', STOP_AFTER_MS);
+    expect(getStructuredSessionState(wtId, 'claude')?.status).toBe('ready');
+
+    await deliver('user_prompt_submit', NEXT_START_AFTER_MS);
+
+    const second = getAgentTurn(wtId, 'claude');
+    expect(second?.openedAt).toBe(T + NEXT_START_AFTER_MS);
+    expect(second?.closedAt).toBeNull();
+    expect(second?.turnId).not.toBe(first?.turnId);
+    expect(getStructuredSessionState(wtId, 'claude')?.status).toBe('running');
+
+    // And that turn's stop closes it, inside three seconds of the previous one.
+    await deliver('stop', NEXT_START_AFTER_MS + 1000);
+
+    expect(getLastStopEventAt(wtId, 'claude')).toBe(T + NEXT_START_AFTER_MS + 1000);
+    expect(getStructuredSessionState(wtId, 'claude')?.status).toBe('ready');
+    expect(listTaskEvents(db, task.id).map((event) => event.event)).toEqual([
+      'agent_idle',
+      'agent_idle',
+    ]);
+  });
+
+  it('still counts a burst of starts as one turn start', async () => {
+    // The control for the case above. 2026-10-02T15:52:09.896Z / .900Z / .905Z:
+    // Claude Code attached three queued notices to a running turn and fired
+    // `UserPromptSubmit` for each. A `user_prompt_submit` that is applied opens
+    // a new turn, so two more of them would have re-opened it twice.
+    await deliver('user_prompt_submit', 0);
+    const opened = getAgentTurn(wtId, 'claude');
+
+    await deliver('user_prompt_submit', 4);
+    await deliver('user_prompt_submit', 9);
+
+    const turn = getAgentTurn(wtId, 'claude');
+    expect(turn?.turnId).toBe(opened?.turnId);
+    expect(turn?.openedAt).toBe(T);
+    expect(getStructuredSessionState(wtId, 'claude')?.status).toBe('running');
+  });
+
+  it('applies one start and one stop per turn on a host that delivers every event twice (#1722)', async () => {
+    const task = seedTask({ status: 'running' });
+
+    await deliver('user_prompt_submit', 0);
+    await deliver('user_prompt_submit', 20);
+    await deliver('stop', STOP_AFTER_MS);
+    await deliver('stop', STOP_AFTER_MS + 20);
+    await deliver('user_prompt_submit', NEXT_START_AFTER_MS);
+    await deliver('user_prompt_submit', NEXT_START_AFTER_MS + 20);
+
+    // The 5th delivery opened the turn, and its copy did not open another.
+    expect(getAgentTurn(wtId, 'claude')?.openedAt).toBe(T + NEXT_START_AFTER_MS);
+    expect(getStructuredSessionState(wtId, 'claude')?.status).toBe('running');
+
+    await deliver('stop', NEXT_START_AFTER_MS + 1000);
+    await deliver('stop', NEXT_START_AFTER_MS + 1020);
+
+    // The 3rd and the 7th delivery, and neither copy.
+    expect(listTaskEvents(db, task.id)).toHaveLength(2);
+    expect(getLastStopEventAt(wtId, 'claude')).toBe(T + NEXT_START_AFTER_MS + 1000);
+    expect(getStructuredSessionState(wtId, 'claude')?.status).toBe('ready');
+  });
+
+  it('does the same for the tools whose turns are opened by a tool event', async () => {
+    // Neither sends `user_prompt_submit` (`capabilities.supportedEvents`), and
+    // a short turn of either can call the one tool the previous turn called.
+    const cases = [
+      { tool: 'antigravity', event: 'post_tool_use', detail: 'run_command' },
+      { tool: 'command-code', event: 'pre_tool_use', detail: 'Bash' },
+    ] as const;
+
+    for (const { tool, event, detail } of cases) {
+      await deliver(event, 0, { tool, detail });
+      await deliver('stop', STOP_AFTER_MS, { tool });
+      expect(getStructuredSessionState(wtId, tool)?.status, tool).toBe('ready');
+
+      await deliver(event, NEXT_START_AFTER_MS, { tool, detail });
+
+      expect(getAgentTurn(wtId, tool)?.openedAt, tool).toBe(T + NEXT_START_AFTER_MS);
+      expect(getStructuredSessionState(wtId, tool)?.status, tool).toBe('running');
     }
   });
 });
