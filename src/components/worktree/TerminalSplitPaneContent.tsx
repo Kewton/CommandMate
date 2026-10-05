@@ -79,6 +79,7 @@ import {
   hasOpenCodeSidebarObstruction,
 } from '@/components/worktree/OpencodeSidebarNotice';
 import { PromptPanel } from '@/components/worktree/PromptPanel';
+import { useTerminalSplitHidden } from './TerminalSplitHiddenContext';
 import { usePromptStuckCounter } from '@/hooks/usePromptStuckCounter';
 import { MessageInput } from '@/components/worktree/MessageInput';
 import { OpencodeTurnDiffPanel } from '@/components/worktree/OpencodeTurnDiffPanel';
@@ -469,8 +470,14 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   // answer). Hiding the panel there left a screen nobody could answer, by hand
   // or automatically, until the operator turned Auto-Yes off. So a multi-select
   // prompt is shown whatever Auto-Yes is doing; nothing is auto-sent either way.
+  // Issue #3332: a split hidden behind another split's maximize (`display: none`,
+  // still mounted for #2261) draws no panel, so it counts none.
+  const hiddenByMaximize = useTerminalSplitHidden();
   const showPrompt =
-    prompt.visible && !isStarting && (!autoYesEnabled || isMultiSelectPrompt(prompt.data));
+    prompt.visible &&
+    !isStarting &&
+    !hiddenByMaximize &&
+    (!autoYesEnabled || isMultiSelectPrompt(prompt.data));
 
   // Issue #2869: the same prompt window shown again after two Sends in a row
   // (refused, or delivered to a frame that did not react) points the user at
