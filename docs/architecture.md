@@ -195,20 +195,26 @@ graph TD
   「このセッションのみ（`s`）」「既定に設定（Enter）」をカードにだけ足したため、ターミナル面で
   押せる確定は既定のモデル（`~/.claude/settings.json`）を書き換える Enter だけになっていた。
   いまは選択リストの操作を `SelectionListKeys` 1 つが描き、何を出すかは
-  `lib/session/selection-list-ops.ts` の `resolveSelectionListOps` だけが決める。カード・
-  PC footer・スマホの docked の 3 か所が同じ部品を同じフレーム（`PaneTerminalState.output`）で
-  載せる。**選択リストの操作を足すときは、この関数と部品に足す**（面ごとの分岐に足さない）。
+  `lib/session/selection-list-ops.ts`（`readSelectionListFrame` でフレームを読み、
+  `resolveSelectionListOps` で決める）だけが決める。カード・PC footer・スマホの docked の
+  3 か所が同じ部品を、同じフレーム（`PaneTerminalState.output` / poll の `fullOutput`）の
+  読み取りで載せる。**選択リストの操作を足すときは、このモジュールと部品に足す**（面ごとの
+  分岐に足さない）。
   面で違う点は同ファイルの冒頭に列挙した 3 つだけ: ターミナル面は「既定に設定」が出る間
   ラベルの無い Enter を出さない／Plan review の操作（#3139）と opencode のモデルのキーは
   カードだけ
-- **スマホの docked はフレームを持たない**（画面の poll はフラグだけを持つ、#736）。フレームは
-  `MobileTerminalTab` が `useReportSelectionListFrame` で報告し、docked が
-  `useReportedSelectionListFrame` で読む（worktree と instance で引く module store。
-  `useSessionStartingGate` と同じ形）。報告するのは**タブ自身の poll が選択リスト（pager を
-  除く）と言っている間だけ**。画面の poll が先に「選択リスト」と言った瞬間にタブが持っているのは
-  ダイアログが開く前のフレームで、そこにある番号つきの本文を番号キーにしないため。
-  ターミナルのタブを開いていない間（History など）は報告が無く、docked は矢印＋ Enter / Esc
-  だけになる
+- **スマホの docked はフレームを持たない**（画面の poll はペインの文字列を持たない、#736）。
+  しかも docked はターミナル以外のタブ（History / Files / Tools / Info）でも出たままで、そこにはフレームを持つ
+  `MobileTerminalTab` が居ない。そこで、タブに関係なく走っている `useWorktreeDetailController` の
+  `/current-output` poll が、`isSelectionListActive` を受け取ったのと**同じ応答**のフレーム
+  （`fullOutput`。pane hook が `terminal.output` として出すもの）を `readSelectionListFrame` で
+  読み、読み取り 4 欄（`SelectionListReading`: 番号キーの数／セッションだけの確定があるか／
+  Enter が既定を書くか／Plan review か）だけを `selectionListReading` として持つ。docked は
+  それを `SelectionListKeys` の `reading` に渡す（フレームを持つ面は `frame` を渡し、部品が同じ
+  関数で読む）。フラグと読み取りが同じ応答から同時に届くので、「フラグは立ったが読み取りは前の
+  画面」という描画は無い。読み取りは前と同じなら同じ object のままにする（フレームそのものを
+  持つと、ハイライトが動くたびに画面全体を描き直す）。選択リストでない応答のフレームは読まない
+  （本文の番号つきの行を番号キーにしないため）
 - **「チャット面の本体は `HistoryPane` をそのまま使う」という Epic #2192 の決定 1 は
   Issue #2232 で撤回された**。履歴ブラウザは 1 画面に多くのターンを俯瞰させたい、会話面は
   返信そのものを読ませたい、と必要な情報密度が正反対で 1 実装では両立しないため

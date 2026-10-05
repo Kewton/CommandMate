@@ -510,12 +510,8 @@ approval (Issue #1681).
 desktop, and the ones docked above the composer on a phone, show the same number keys and
 the same "This session only" / "Set as default". On the terminal surface the unlabelled Enter
 (↵) is not drawn while "Set as default" is — two buttons for one key are not put side by
-side.
-
-> **Note**: on a phone, the number keys and "This session only" / "Set as default" appear
-> **while the terminal tab is open**. On another tab (History, for one) the docked navigation
-> buttons are the arrow keys plus Enter / Esc only, and Enter there rewrites the default
-> model on Claude's `/model`.
+side. On a phone the docked buttons stay the same while a tab other than Terminal (History,
+Files, Tools, Info) is open.
 
 The "Open terminal" button **remains, as a secondary way out**. The card shows only the last
 few rows, so switch to the terminal surface from here when you need scrollback or search.

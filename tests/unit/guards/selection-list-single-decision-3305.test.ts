@@ -22,7 +22,8 @@
  *     JSX で載せるのは `SelectionListKeys.tsx` だけ
  *  2. `SelectionListKeys` を載せるのは、下の表の 3 つの面だけ
  *  3. `resolveSelectionListOps` を呼ぶのは `SelectionListKeys.tsx` だけ
- *  4. `readSelectionListShape` を直接呼ぶのは、下の表のファイルだけ
+ *  4. フレームを読む（`readSelectionListFrame`、その下の `readSelectionListShape`）のは、
+ *     下の表のファイルだけ
  *
  * 新しい面に選択リストの操作を出すとき、あるいは新しい部品を足すとき、ここが赤くなる。
  * そのときは表に理由を書く。書けないなら、足す場所が違う。
@@ -57,7 +58,9 @@ const MOUNTS: readonly { file: string; why: string }[] = [
   },
   {
     file: 'src/components/worktree/WorktreeDetailRefactored.tsx',
-    why: 'ターミナル面: スマホのドック。フレームは `MobileTerminalTab` の報告を読む。',
+    why:
+      'ターミナル面: スマホのドック。画面はフレームを持たないので（#736）、controller の poll が'
+      + '読んだ読み取り（`selectionListReading`）を渡す。',
   },
 ] as const;
 
@@ -69,20 +72,34 @@ const STRIPS: readonly string[] = [
   'OpencodeModelKeys',
 ];
 
-/** `readSelectionListShape` を直接呼んでよいファイルと、その理由。 */
-const SHAPE_READERS: readonly { file: string; why: string }[] = [
+/** `readSelectionListFrame`（フレーム → 読み取り）を呼んでよいファイルと、その理由。 */
+const FRAME_READERS: readonly { file: string; why: string }[] = [
   {
-    file: DECISION,
-    why: '判断そのもの。フレームの読み取りを、出す操作へ変える唯一の場所。',
+    file: PART,
+    why: 'フレームを持っている面（チャット面のカード、PC のフッタ）のために、部品が読む。',
   },
   {
     file: 'src/hooks/useWorktreeDetailController.ts',
     why:
-      'スマホの画面の poll（#2809）。この controller はフレームを持たない（#736）ので、'
-      + 'Plan review かどうかの boolean だけを自分で読んでドックへ渡す。同じ関数の同じ欄なので'
-      + '判断は食い違わないが、番号キーと確定ボタンはここからは出せない。そのためスマホで'
-      + 'ターミナル以外のタブを開いている間、ドックは矢印＋ Enter / Esc のままになる'
-      + '（#3305 の scope の外で、残っている差）。',
+      'スマホの画面の poll。ドックは History / Files / Tools のタブでも出たままで、そこには'
+      + 'フレームを持つターミナルのタブが無い。`isSelectionListActive` を受け取ったのと同じ'
+      + '応答のフレームをここで読み、読み取りだけを state に持つ（フレームは持たない、#736）。',
+  },
+] as const;
+
+/** その下の `readSelectionListShape` を直接呼んでよいファイルと、その理由。 */
+const SHAPE_READERS: readonly { file: string; why: string }[] = [
+  {
+    file: DECISION,
+    why: '`readSelectionListFrame` の中身。フレームの読み取りを、出す操作へ変える唯一の場所。',
+  },
+  {
+    file: 'src/hooks/useWorktreeDetailController.ts',
+    why:
+      '#2809 の `offersPlanApprove`（Plan review かどうかの boolean）。同じ欄が'
+      + '`selectionListReading` にあり、ドックはそちらを読むので、画面にはもう読み手が無い。'
+      + '#3304 が同じ行を `paneGate` へ移しているため、このブランチでは消していない'
+      + '（消すときは、この行を表から外す）。',
   },
 ] as const;
 
@@ -143,14 +160,20 @@ describe('[#3305] 何を出すかを決めるのは resolveSelectionListOps だ�
     expect(filesWhere((source) => callsFunction(source, 'resolveSelectionListOps'))).toEqual([PART]);
   });
 
-  it('フレームを直接読むのは、表のファイルだけ', () => {
+  it('フレームを読み取りにする（readSelectionListFrame）のは、表のファイルだけ', () => {
+    expect(filesWhere((source) => callsFunction(source, 'readSelectionListFrame'))).toEqual(
+      FRAME_READERS.map((e) => e.file).sort(),
+    );
+  });
+
+  it('その下の readSelectionListShape を直接呼ぶのは、表のファイルだけ', () => {
     expect(filesWhere((source) => callsFunction(source, 'readSelectionListShape'))).toEqual(
       SHAPE_READERS.map((e) => e.file).sort(),
     );
   });
 
   it('どの読み手にも理由が書いてある', () => {
-    for (const { file, why } of SHAPE_READERS) {
+    for (const { file, why } of [...FRAME_READERS, ...SHAPE_READERS]) {
       expect(existsSync(join(REPO_ROOT, file)), `${file} は表にあるが、ファイルが無い`).toBe(true);
       expect(why.length, `${file} に理由が要る`).toBeGreaterThan(20);
     }

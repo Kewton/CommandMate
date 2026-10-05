@@ -19,6 +19,12 @@
  * 本物の `WorktreeDetailRefactored`（本物の controller・`MobileContent`・`MobileTerminalTab`）。
  * 差し替えるのは pane の状態（`useTerminalPanePolling`）と `fetch` だけ。
  *
+ * スマホのドックだけは、フレームの出どころが違う。ドックのある画面はフレームを持たず
+ * （#736）、ドックは History / Files / Tools のタブでも出たままになる。そこで画面の poll
+ * （controller）が、`isSelectionListActive` を受け取ったのと同じ応答のフレームを読み、
+ * 読み取りだけを持つ。ターミナルのタブ（`MobileTerminalTab`）の pane の状態には依らない。
+ * 下の「スマホのドック」の 2 つの describe が、それを見る。
+ *
  * @vitest-environment jsdom
  */
 
@@ -225,7 +231,7 @@ interface PaneFlags {
   isPagerActive?: boolean;
 }
 
-/** タブ・分割ペインが自分の poll で持っている pane の状態。 */
+/** タブ・分割ペインが自分の poll で持っている pane の状態（PC のフッタは、これで決まる）。 */
 function mockPane(frame: string, flags: PaneFlags = {}): void {
   useTerminalPanePollingMock.mockReturnValue({
     terminal: {
@@ -270,8 +276,10 @@ function jsonResponse(body: unknown): Response {
 let keyPosts: Array<{ cliToolId: string; keys: string[]; instanceId?: string }> = [];
 
 /**
- * 画面自身の `/current-output` poll（スマホのドックの pad を立てるのはこの応答）と、
- * `/special-keys` の記録。`screenFlags` は画面の poll が見た状態で、タブの poll
+ * 画面自身の `/current-output` poll と、`/special-keys` の記録。
+ *
+ * スマホのドックは、この応答だけで決まる: pad を立てるフラグ（`screenFlags`）も、その下に
+ * 出す操作を決めるフレーム（`frame`）も、同じ 1 つの応答に載っている。タブの poll
  * （`mockPane`）とは別に与えられる — 実機でも 2 つは別々に届く。
  */
 function installFetch(frame: string, cliToolId: CLIToolType, screenFlags: PaneFlags = {}): void {
@@ -328,11 +336,17 @@ function installFetch(frame: string, cliToolId: CLIToolType, screenFlags: PaneFl
 
 interface SurfaceInput {
   cliToolId: CLIToolType;
+  /** その面が読むフレーム。スマホでは、画面の poll の応答に載るフレーム。 */
   frame: string;
   /** タブ・分割ペインの poll が見た状態（既定: 選択リスト）。 */
   pane?: PaneFlags;
   /** スマホの画面の poll が見た状態（既定: `pane` と同じ）。 */
   screen?: PaneFlags;
+  /**
+   * スマホのタブの pane が持っているフレーム（既定: `frame` と同じ）。ドックがタブの pane に
+   * 依らないことを見るために、画面の応答のフレームと変えられる。
+   */
+  paneFrame?: string;
 }
 
 interface Surface {
@@ -401,12 +415,12 @@ const PC_FOOTER: Surface = {
 
 const PHONE_DOCK: Surface = {
   name: 'ターミナル面: スマホのドック',
-  mount: async ({ cliToolId, frame, pane, screen: screenFlags }) => {
+  mount: async ({ cliToolId, frame, pane, screen: screenFlags, paneFrame }) => {
     mobileFlag.value = true;
     // このタブ（＝この instance）を開いた状態から始める。
     window.localStorage.setItem(`activeCliTab-${WORKTREE_ID}`, cliToolId);
     window.localStorage.setItem(`activeInstanceId-${WORKTREE_ID}`, cliToolId);
-    mockPane(frame, pane);
+    mockPane(paneFrame ?? frame, pane);
     installFetch(frame, cliToolId, screenFlags ?? pane);
     render(<WorktreeDetailRefactored worktreeId={WORKTREE_ID} />);
     await waitFor(() => {
@@ -631,16 +645,34 @@ describe('[#3305] ターミナル面: ページャには、番号キーも確定
   });
 });
 
-describe('[#3305] スマホのドック: タブの poll が選択リストを見ていない間は、今までどおりの pad', () => {
-  // ドックの pad を立てるのは画面の poll、フレームを持っているのはタブの poll。2 つは別々に
-  // 届くので、画面だけが先に「選択リスト」と言うことがある。そのときタブが持っているのは
-  // 選択リストになる前のフレームで、そこから番号キーや確定ボタンを決めてはいけない。
-  it('タブのフレームが番号つきでも、タブ自身が選択リストと言うまで番号キーを出さない', async () => {
+describe('[#3305] スマホのドック: 画面の poll の応答だけで決まる（タブの pane の状態に依らない）', () => {
+  // ドックの pad を立てるフラグと、その下に出す操作を決めるフレームは、画面の poll の同じ
+  // 1 つの応答に載っている。タブの poll は別に届くので、pane の状態が画面の応答と食い違う
+  // 瞬間がある。そのどちらの向きでも、ドックは画面の応答のとおりに出る。
+  it('タブの pane がまだ選択リストを見ていなくても、画面の応答が claude の /model なら確定ボタンが出る', async () => {
     const scope = await PHONE_DOCK.mount({
-      cliToolId: 'codex',
-      frame: CODEX_MODEL,
-      pane: { isSelectionListActive: false },
+      cliToolId: 'claude',
+      frame: CLAUDE_MODEL,
       screen: { isSelectionListActive: true },
+      // タブが持っているのは、ダイアログが開く前の画面。
+      paneFrame: CLAUDE_TRUST,
+      pane: { isSelectionListActive: false },
+    });
+
+    await waitFor(() => {
+      expect(readOps(scope)).toEqual(CASES[0].expected);
+    });
+    expect(enterControlCount(scope)).toBe(1);
+  });
+
+  it('タブの pane が claude の /model を持っていても、画面の応答が別の選択リストなら、そちらの操作が出る', async () => {
+    const scope = await PHONE_DOCK.mount({
+      cliToolId: 'claude',
+      // 画面の応答: フォルダの信頼（セッションだけの確定は無い）。
+      frame: CLAUDE_TRUST,
+      screen: { isSelectionListActive: true },
+      paneFrame: CLAUDE_MODEL,
+      pane: { isSelectionListActive: true },
     });
 
     const pad = within(scope).getByRole('toolbar', { name: NAV_TOOLBAR });
@@ -648,24 +680,25 @@ describe('[#3305] スマホのドック: タブの poll が選択リストを見
       .getAllByRole('button')
       .map((button) => button.getAttribute('aria-label'));
     expect(labels).toEqual(['Left', 'Up', 'Down', 'Right', 'Enter', 'Escape']);
-    expect(within(scope).queryByTestId('selection-number-keys')).not.toBeInTheDocument();
     expect(within(scope).queryByTestId('selection-commit-keys')).not.toBeInTheDocument();
+    expect(within(scope).queryByTestId('selection-number-keys')).not.toBeInTheDocument();
   });
 
-  it('タブがページャと言っているフレームは、画面がページャと言っていなくても番号キーにしない', async () => {
+  it('画面の応答がページャなら、タブの pane が何と言っていても番号キーを出さない', async () => {
     const scope = await PHONE_DOCK.mount({
       cliToolId: 'codex',
       frame: CODEX_MODEL,
-      pane: { isSelectionListActive: true, isPagerActive: true },
-      screen: { isSelectionListActive: true, isPagerActive: false },
+      screen: { isSelectionListActive: true, isPagerActive: true },
+      pane: { isSelectionListActive: true, isPagerActive: false },
     });
 
+    const pad = within(scope).getByRole('toolbar', { name: NAV_TOOLBAR });
+    expect(within(pad).getByRole('button', { name: 'Page Up' })).toBeInTheDocument();
     expect(within(scope).queryByTestId('selection-number-keys')).not.toBeInTheDocument();
     expect(within(scope).queryByTestId('selection-commit-keys')).not.toBeInTheDocument();
   });
 
-  // 陽性対照: 上の 2 つと同じフレームで、2 つの poll がそろって選択リストと言えば出る。
-  it('2 つの poll がそろえば、同じフレームから番号キーが出る', async () => {
+  it('番号キーを押すと、その番号がそのツールへ届く', async () => {
     const scope = await PHONE_DOCK.mount({ cliToolId: 'codex', frame: CODEX_MODEL });
 
     const numbers = await within(scope).findByTestId('selection-number-keys');
@@ -673,5 +706,68 @@ describe('[#3305] スマホのドック: タブの poll が選択リストを見
 
     fireEvent.click(within(numbers).getByTestId('selection-number-key-7'));
     expect(keyPosts).toEqual([{ cliToolId: 'codex', keys: ['7'] }]);
+  });
+});
+
+// ===========================================================================
+// スマホ: ターミナル以外のタブでも、ドックは同じ操作を出す
+// ===========================================================================
+
+describe('[#3305] スマホのドック: ターミナル以外のタブへ移っても、操作は変わらない', () => {
+  // ドックは History / Files / Tools のタブでも出たままになる。ターミナルのタブ
+  // （`MobileTerminalTab`）は、別のタブへ移るとアンマウントされる。ドックの判断がタブの持つ
+  // フレームに依っていると、タブを移った時点で「このセッションのみ」と注意文が消え、
+  // 既定のモデルを書き換えるラベルの無い Enter が戻る。この Issue が直す危険そのもの。
+  it('claude の /model を開いたまま History へ移る: 「このセッションのみ」「既定に設定」と注意文が残り、ラベルの無い Enter は出ない', async () => {
+    const scope = await PHONE_DOCK.mount({ cliToolId: 'claude', frame: CLAUDE_MODEL });
+    await within(scope).findByTestId('selection-commit-session');
+
+    fireEvent.click(screen.getByTestId('mobile-tab-history'));
+
+    // タブが替わった: ターミナルの表示は無くなり、History が出ている。
+    await waitFor(() => {
+      expect(screen.queryByTestId('terminal-display')).not.toBeInTheDocument();
+      expect(screen.getByTestId('history-pane')).toBeInTheDocument();
+    });
+
+    // ドックは、ターミナルのタブに居たときと同じ操作のまま。
+    await waitFor(() => {
+      expect(readOps(scope)).toEqual(CASES[0].expected);
+    });
+    const pad = within(scope).getByRole('toolbar', { name: NAV_TOOLBAR });
+    expect(within(pad).queryByRole('button', { name: 'Enter' })).not.toBeInTheDocument();
+    expect(enterControlCount(scope)).toBe(1);
+    expect(within(scope).getByTestId('selection-commit-warning')).toBeInTheDocument();
+
+    // 押せば、ここからもセッションだけに適用できる。
+    fireEvent.click(within(scope).getByTestId('selection-commit-session'));
+    expect(keyPosts).toEqual([{ cliToolId: 'claude', keys: [SESSION_SCOPE_KEY] }]);
+  });
+
+  it('番号つきの一覧（codex の /model）も、History へ移って番号キーが残る', async () => {
+    const scope = await PHONE_DOCK.mount({ cliToolId: 'codex', frame: CODEX_MODEL });
+    await within(scope).findByTestId('selection-number-keys');
+
+    fireEvent.click(screen.getByTestId('mobile-tab-history'));
+    await waitFor(() => {
+      expect(screen.queryByTestId('terminal-display')).not.toBeInTheDocument();
+    });
+
+    await waitFor(() => {
+      expect(readOps(scope)).toEqual(CASES[2].expected);
+    });
+  });
+
+  // 陰性対照: 残るのは「その画面に出ていた操作」で、タブを移ると何かが足されるわけではない。
+  it('`s` を受けないツールでは、History へ移っても矢印＋ Enter / Esc のまま', async () => {
+    const scope = await PHONE_DOCK.mount({ cliToolId: 'codex', frame: CLAUDE_MODEL });
+
+    fireEvent.click(screen.getByTestId('mobile-tab-history'));
+    await waitFor(() => {
+      expect(screen.queryByTestId('terminal-display')).not.toBeInTheDocument();
+    });
+
+    expect(readOps(scope)).toEqual(CASES[1].expected);
+    expect(enterControlCount(scope)).toBe(1);
   });
 });

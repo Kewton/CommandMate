@@ -43,6 +43,12 @@ import { useConfirm } from '@/components/ui/ConfirmDialog';
 import { useAutoYes } from '@/hooks/useAutoYes';
 import { buildPromptResponseBody, isPromptRefused } from '@/lib/prompt-response-body-builder';
 import { readSelectionListShape } from '@/lib/detection/selection-shape';
+import {
+  NO_SELECTION_LIST_READING,
+  isSameSelectionListReading,
+  readSelectionListFrame,
+  type SelectionListReading,
+} from '@/lib/session/selection-list-ops';
 import { useAppUpdate } from '@/contexts/AppUpdateContext';
 import { type AutoYesToggleParams } from '@/components/worktree/AutoYesToggle';
 import type { AutoYesStopReason } from '@/config/auto-yes-config';
@@ -328,6 +334,23 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   const [tabsState, tabsActions] = useFileTabs(worktreeId);
   // Mobile-only: file viewer path for modal display (desktop uses fileTabs)
   const [mobileFileViewerPath, setMobileFileViewerPath] = useState<string | null>(null);
+  // Issue #3305: what the selection list on the polled agent's frame offers —
+  // the phone's docked pad decides its controls from this (number keys, claude's
+  // "this session only" beside "set as default", no `Enter` on a plan review).
+  //
+  // Read HERE, off the same `/current-output` response `isSelectionListActive`
+  // comes from, because the pad stays up on the other tabs (History / Files /
+  // Tools / Info), where no terminal tab is mounted to hold a frame. The frame
+  // itself is still not kept (#736): only this reading is, and a poll that
+  // repeats it keeps the previous object, so it re-renders nobody.
+  //
+  // It means something only beside the `isSelectionListActive` of the response
+  // it was read from, and the pad reads it only while that flag is up — so it
+  // is not reset on its own when the polled agent changes: the flag is, and the
+  // next response writes both.
+  const [selectionListReading, setSelectionListReading] = useState<SelectionListReading>(
+    NO_SELECTION_LIST_READING,
+  );
   // Issue #525: Per-agent auto-yes state management.
   // Issue #896: re-keyed by *instanceId* so each agent instance has its own
   // auto-yes state (the primary instance's id === its cliToolId, preserving the
@@ -789,6 +812,19 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       // into a reducer slice. The mobile terminal tab owns its own
       // `useTerminalPanePolling` instance (like the PC split panes, #728); this
       // parent poll only keeps prompt / selection-list / Auto-Yes state in sync.
+
+      // Issue #3305: the selection list's reading, from the frame this response
+      // carries — `fullOutput`, the one the pane hook publishes as
+      // `terminal.output` and the chat surface's card and the PC footer read, so
+      // all three decide from the same rows. Only while this response says a
+      // selection list is up: the pad that reads it is drawn on that flag, and
+      // any other frame's numbered rows are not options.
+      const nextSelectionListReading = data.isSelectionListActive
+        ? readSelectionListFrame(data.fullOutput ?? data.realtimeSnippet)
+        : NO_SELECTION_LIST_READING;
+      setSelectionListReading(prev =>
+        isSameSelectionListReading(prev, nextSelectionListReading) ? prev : nextSelectionListReading,
+      );
 
       // Handle prompt state transitions
       if (data.isPromptWaiting && data.promptData) {
@@ -1976,6 +2012,8 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     pendingInsertText,
     pendingInsertTextMap,
     selectedAgents,
+    // Issue #3305: the docked selection-list pad's controls (see the state).
+    selectionListReading,
     setActiveInstanceId,
     setFocusedSplitIndex,
     setHistorySubTab,

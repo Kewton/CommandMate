@@ -1,15 +1,22 @@
 /**
  * 選択リストに出す操作の判断は 1 つ（Issue #3305）
  *
- * `resolveSelectionListOps` は、#2297 が `ChatSurface` の `case 'selectionList'` の中に
+ * `selection-list-ops` は、#2297 が `ChatSurface` の `case 'selectionList'` の中に
  * 書いた出し分け（番号キー、「このセッションのみ」／「既定に設定」、Plan review の Enter）を
  * そのまま外へ出したもの。チャット面のカードも、ターミナル面の pad も、これを読む。
  *
- * ここで固定するのは 2 つ:
+ * 2 段になっている: `readSelectionListFrame(frame)` がフレームを 4 つの欄の読み取りにし、
+ * `resolveSelectionListOps({ reading, cliToolId, surface, pager })` が出す操作を決める。
+ * 分けてあるのは、スマホの画面がフレームを持たないから（#736）。画面の poll が読み取りだけを
+ * 持ち、ドックの pad はそれを渡す。
+ *
+ * ここで固定するのは 3 つ:
  *
  *  1. 表のとおりに決まること（規則そのもの。実機の capture で確かめる）
  *  2. **面で変わるのは、ここに名前を書いた欄だけ**であること。番号キーと 2 つの確定ボタンは
  *     面で変わらない。この Issue の不具合は、その 2 つがチャット面にしか無かったこと。
+ *  3. 読み取りは、欄ごとに比べられる小さな値であること（画面の poll が、前と同じ読み取りなら
+ *     前の object を使い続けるため）。
  *
  * 3 つの面に実際に同じボタンが出るかは
  * `tests/unit/components/worktree/selection-list-surfaces-3305.test.tsx` が見る。
@@ -21,8 +28,12 @@ import { describe, expect, it } from 'vitest';
 import fs from 'fs';
 import path from 'path';
 import {
+  NO_SELECTION_LIST_READING,
+  isSameSelectionListReading,
+  readSelectionListFrame,
   resolveSelectionListOps,
   type SelectionListOps,
+  type SelectionListReading,
   type SelectionListSurface,
 } from '@/lib/session/selection-list-ops';
 import { PLAN_APPROVE_KEY_TOOL_IDS, SESSION_SCOPE_KEY_TOOL_IDS } from '@/types/terminal-keys';
@@ -47,13 +58,19 @@ const ASK_USER_QUESTION = capture(
 
 const SURFACES: readonly SelectionListSurface[] = ['chat', 'terminal'];
 
+/** フレームを読んで、出す操作を決める。どの面も、この 2 段を通る。 */
 function ops(
   frame: string | null | undefined,
   cliToolId: string,
   surface: SelectionListSurface,
   pager = false,
 ): SelectionListOps {
-  return resolveSelectionListOps({ frame, cliToolId, surface, pager });
+  return resolveSelectionListOps({
+    reading: readSelectionListFrame(frame),
+    cliToolId,
+    surface,
+    pager,
+  });
 }
 
 describe('[#3305] 前提: この suite が頼っているツールの宣言', () => {
@@ -240,4 +257,92 @@ describe('[#3305] ページャには pad だけ', () => {
     expect(ops(CODEX_MODEL, 'codex', 'terminal', false).numberKeyCount).toBe(7);
     expect(ops(CLAUDE_MODEL, 'claude', 'terminal', false).commitKeys).not.toBeNull();
   });
+});
+
+// ===========================================================================
+// 読み取り（フレーム → 4 つの欄）
+// ===========================================================================
+
+describe('[#3305] readSelectionListFrame: フレームが言っていることだけを、4 つの欄にする', () => {
+  it.each<[string, string, SelectionListReading]>([
+    [
+      'claude の /model',
+      CLAUDE_MODEL,
+      { numberKeyCount: 0, offersSessionScope: true, commitsDefaultOnEnter: true, offersPlanApprove: false },
+    ],
+    [
+      'claude のフォルダの信頼',
+      CLAUDE_TRUST,
+      { numberKeyCount: 0, offersSessionScope: false, commitsDefaultOnEnter: false, offersPlanApprove: false },
+    ],
+    [
+      'codex の /model',
+      CODEX_MODEL,
+      { numberKeyCount: 7, offersSessionScope: false, commitsDefaultOnEnter: false, offersPlanApprove: false },
+    ],
+    [
+      'Command Code の Plan review',
+      PLAN_REVIEW,
+      { numberKeyCount: 0, offersSessionScope: false, commitsDefaultOnEnter: false, offersPlanApprove: true },
+    ],
+    [
+      'Command Code の AskUserQuestion',
+      ASK_USER_QUESTION,
+      { numberKeyCount: 0, offersSessionScope: false, commitsDefaultOnEnter: false, offersPlanApprove: false },
+    ],
+  ])('%s', (_name, frame, expected) => {
+    expect(readSelectionListFrame(frame)).toEqual(expected);
+  });
+
+  it.each([['undefined', undefined], ['null', null], ['空文字', '']])(
+    'フレームが無い（%s）ときは「何も無い」の読み取り',
+    (_name, frame) => {
+      expect(readSelectionListFrame(frame)).toBe(NO_SELECTION_LIST_READING);
+    },
+  );
+
+  it('「何も無い」の読み取りからは、今までどおりの pad が出る', () => {
+    for (const surface of SURFACES) {
+      expect(
+        resolveSelectionListOps({ reading: NO_SELECTION_LIST_READING, cliToolId: 'claude', surface }),
+      ).toMatchObject({ padEnter: true, numberKeyCount: 0, commitKeys: null, planReview: false });
+    }
+  });
+
+  it('ツールで変わるのは次の段。同じ 1 つの読み取りから、ツールごとの操作が決まる', () => {
+    // 読み取りがツールを知っていると、画面の poll が持つ値がツールごとに要ることになる。
+    const reading = readSelectionListFrame(CLAUDE_MODEL);
+
+    expect(
+      resolveSelectionListOps({ reading, cliToolId: 'claude', surface: 'terminal' }).commitKeys,
+    ).not.toBeNull();
+    expect(
+      resolveSelectionListOps({ reading, cliToolId: 'codex', surface: 'terminal' }).commitKeys,
+    ).toBeNull();
+  });
+});
+
+describe('[#3305] isSameSelectionListReading: 同じ内容なら同じ、と言える', () => {
+  it('別々に読んだ同じフレームは、同じ読み取り', () => {
+    const a = readSelectionListFrame(CODEX_MODEL);
+    const b = readSelectionListFrame(CODEX_MODEL);
+
+    expect(a).not.toBe(b);
+    expect(isSameSelectionListReading(a, b)).toBe(true);
+  });
+
+  // 欄を足して比較に入れ忘れると、その欄だけ変わった読み取りが「同じ」になり、画面が
+  // 古い読み取りを持ち続ける。欄を 1 つずつ変えて、どれも「違う」になることを見る。
+  it.each(Object.keys(NO_SELECTION_LIST_READING) as Array<keyof SelectionListReading>)(
+    '`%s` だけが違えば、違う読み取り',
+    (key) => {
+      const base = readSelectionListFrame(CODEX_MODEL);
+      const changed: SelectionListReading = {
+        ...base,
+        [key]: typeof base[key] === 'number' ? (base[key] as number) + 1 : !base[key],
+      };
+
+      expect(isSameSelectionListReading(base, changed)).toBe(false);
+    },
+  );
 });

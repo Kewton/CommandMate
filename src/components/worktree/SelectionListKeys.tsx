@@ -16,23 +16,23 @@
  * terminal mounts were still the bare arrow pad, so the only commit they
  * offered on `/model` was the one that rewrites `~/.claude/settings.json`.
  *
- * What is drawn is decided by `resolveSelectionListOps()` and nowhere else.
- * This file adds no rule of its own — it is the arrow pad, then whatever that
- * function returned, in the order the card has always drawn them. The three
- * places the surfaces still differ are listed in that module's header.
+ * What is drawn is decided by `lib/session/selection-list-ops` and nowhere
+ * else. This file adds no rule of its own — it is the arrow pad, then whatever
+ * `resolveSelectionListOps()` returned, in the order the card has always drawn
+ * them. The three places the surfaces still differ are listed in that module's
+ * header.
  *
- * ## The phone's frame (the second half of this file)
+ * ## `frame` or `reading`
  *
- * The phone's pad is docked above the composer, outside the terminal tab, and
- * the screen it lives in does not hold the pane's frame — its own poll keeps
- * flags only. The tab does hold it (`useTerminalPanePolling`). So the tab
- * REPORTS the frame and the docked pad reads it, through a module store keyed
- * by worktree and instance — the arrangement `useSessionStartingGate` already
- * uses to share one fact between the surfaces showing one instance.
+ * A mount that holds the pane's frame passes it (`frame`) and this component
+ * reads it. The phone's docked pad holds none — its screen's poll keeps no pane
+ * text (Issue #736) — so that poll does the reading itself, off the response
+ * its `isSelectionListActive` came from, and the pad passes the result
+ * (`reading`). Either way it is `readSelectionListFrame()` over the frame the
+ * mount's own selection-list flag was raised for.
  */
 
-import { useEffect, useMemo, useSyncExternalStore } from 'react';
-import type { CLIToolType } from '@/lib/cli-tools/types';
+import { useMemo } from 'react';
 import { NavigationButtons } from '@/components/worktree/NavigationButtons';
 import {
   SelectionCommitKeys,
@@ -42,17 +42,24 @@ import {
 import { OpencodeModelKeys } from '@/components/worktree/OpencodeQuickKeys';
 import { PlanReviewControls } from '@/components/worktree/PlanReviewControls';
 import {
+  readSelectionListFrame,
   resolveSelectionListOps,
+  type SelectionListReading,
   type SelectionListSurface,
 } from '@/lib/session/selection-list-ops';
 
 export interface SelectionListKeysProps extends SelectionKeysProps {
   /**
    * The raw pane the list is on — `PaneTerminalState.output`, the frame the
-   * surface itself is showing. `null` / `undefined` means "no frame in hand",
-   * which draws the arrow pad alone.
+   * surface itself is showing. Read here unless `reading` is given; with
+   * neither, the arrow pad is drawn alone.
    */
-  frame: string | null | undefined;
+  frame?: string | null;
+  /**
+   * `readSelectionListFrame()` of that frame, from a caller that read it
+   * already and has no frame to pass. Used instead of reading `frame`.
+   */
+  reading?: SelectionListReading;
   /** Which surface this mount is on. See `resolveSelectionListOps`. */
   surface: SelectionListSurface;
   /**
@@ -60,13 +67,6 @@ export interface SelectionListKeysProps extends SelectionKeysProps {
    * and draws nothing under it — a pager's rows are a transcript, not options.
    */
   showPagerKeys?: boolean;
-  /**
-   * A reason to leave `Enter` off the pad that the CALLER read, on top of what
-   * the frame says here. The phone's screen passes its own poll's plan-review
-   * reading (Issue #2809), which also covers the tabs where no frame reaches
-   * this component.
-   */
-  hideEnterKey?: boolean;
 }
 
 export function SelectionListKeys({
@@ -75,13 +75,14 @@ export function SelectionListKeys({
   instanceId,
   onKeysSent,
   frame,
+  reading,
   surface,
   showPagerKeys = false,
-  hideEnterKey = false,
 }: SelectionListKeysProps) {
+  const read = useMemo(() => reading ?? readSelectionListFrame(frame), [reading, frame]);
   const ops = useMemo(
-    () => resolveSelectionListOps({ frame, cliToolId, surface, pager: showPagerKeys }),
-    [frame, cliToolId, surface, showPagerKeys],
+    () => resolveSelectionListOps({ reading: read, cliToolId, surface, pager: showPagerKeys }),
+    [read, cliToolId, surface, showPagerKeys],
   );
   const keyProps = { worktreeId, cliToolId, instanceId, onKeysSent };
 
@@ -89,11 +90,7 @@ export function SelectionListKeys({
     <div className="space-y-2">
       {/* The arrow pad stays FIRST and unconditional — it is the one control
           every measured selection list answers to. */}
-      <NavigationButtons
-        {...keyProps}
-        showPagerKeys={showPagerKeys}
-        hideEnterKey={hideEnterKey || !ops.padEnter}
-      />
+      <NavigationButtons {...keyProps} showPagerKeys={showPagerKeys} hideEnterKey={!ops.padEnter} />
       {ops.numberKeyCount > 0 ? (
         <SelectionNumberKeys {...keyProps} optionCount={ops.numberKeyCount} />
       ) : null}
@@ -112,82 +109,5 @@ export function SelectionListKeys({
           decides. */}
       {ops.opencodeModelKeys ? <OpencodeModelKeys {...keyProps} frame={frame} /> : null}
     </div>
-  );
-}
-
-// ===========================================================================
-// The phone's seam: the terminal tab reports its frame to the docked pad
-// ===========================================================================
-
-/** The pane a frame belongs to, or a docked pad is aimed at. */
-export interface SelectionListFrameTarget {
-  worktreeId: string;
-  cliToolId: CLIToolType;
-  /** Defaults to the primary instance (`=== cliToolId`) on both sides. */
-  instanceId?: string;
-}
-
-/**
- * `${worktreeId}:${instanceId}` → the frame that pane's selection list is on.
- *
- * Plain module scope, like `useSessionStartingGate`'s store: both ends are
- * client components of one page. The `globalThis` rule in module-reference is
- * for state shared between SERVER request handlers, whose bundles are split.
- */
-const reportedFrames = new Map<string, string>();
-const listeners = new Set<() => void>();
-
-function subscribe(listener: () => void): () => void {
-  listeners.add(listener);
-  return () => {
-    listeners.delete(listener);
-  };
-}
-
-function frameKey({ worktreeId, cliToolId, instanceId }: SelectionListFrameTarget): string {
-  return `${worktreeId}:${instanceId ?? cliToolId}`;
-}
-
-function setReportedFrame(key: string, frame: string | null): void {
-  if (frame === null) {
-    if (!reportedFrames.delete(key)) return;
-  } else {
-    if (reportedFrames.get(key) === frame) return;
-    reportedFrames.set(key, frame);
-  }
-  for (const listener of listeners) listener();
-}
-
-/**
- * Report the frame this pane's selection list is on, for the screen's docked
- * pad. `frame: null` reports nothing — the caller passes it whenever its OWN
- * snapshot is not a selection list, so a frame is never offered for a reading
- * its own flags do not back.
- *
- * The entry is dropped on unmount and when the target changes, so the store
- * never holds a frame from a tab that has left the screen or from the previous
- * instance — and a pad with no entry draws the arrow pad alone.
- */
-export function useReportSelectionListFrame({
-  frame,
-  ...target
-}: SelectionListFrameTarget & { frame: string | null }): void {
-  const key = frameKey(target);
-  useEffect(() => {
-    setReportedFrame(key, frame);
-  }, [key, frame]);
-  useEffect(() => () => setReportedFrame(key, null), [key]);
-}
-
-/**
- * The frame reported for `target`, or `null` when none has been — no terminal
- * tab on screen, or a tab whose pane is not on a selection list.
- */
-export function useReportedSelectionListFrame(target: SelectionListFrameTarget): string | null {
-  const key = frameKey(target);
-  return useSyncExternalStore(
-    subscribe,
-    () => reportedFrames.get(key) ?? null,
-    () => null,
   );
 }

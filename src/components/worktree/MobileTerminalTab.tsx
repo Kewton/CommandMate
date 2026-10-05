@@ -63,12 +63,6 @@
  * tab that takes vertical space by design (28px, inside #2106's budget), and
  * only while a model is known; see the component for the arithmetic.
  *
- * Issue #3305: this tab also REPORTS the frame its selection list is on. The
- * phone's selection-list pad is docked outside the tab, in a screen that holds
- * no frame, and it needs one to draw what the chat surface's card draws —
- * number keys, and claude's "this session only" beside "set as default". See
- * `useReportSelectionListFrame`.
- *
  * Issue #2799: while the phone's direct-input keyboard is open
  * (`directInputOpen`), this tab's own key pads — the unsent-input bar, the
  * opencode quick keys and the escape hatch — stand down (the keyboard stands
@@ -97,7 +91,6 @@ import {
 } from '@/components/worktree/OpencodeSidebarNotice';
 import { OpencodeQuickKeys } from '@/components/worktree/OpencodeQuickKeys';
 import { ChatSurface, type ChatSurfaceLiveState } from '@/components/worktree/ChatSurface';
-import { useReportSelectionListFrame } from '@/components/worktree/SelectionListKeys';
 // Issue #2427: the session note's storage-facing half lives with the PC split
 // header — one hook, one editor, one IME guard — so the phone and the desktop
 // cannot drift into two behaviours for one field. See that file's "Session
@@ -795,23 +788,6 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
   // nobody could read" case and the sheet cannot disagree about one frame — see
   // `ChatSurfaceLiveState` for why `isPromptWaiting` is `prompt.visible`.
   const chatLiveState: ChatSurfaceLiveState = useChatSurfaceLiveState(terminal, prompt);
-
-  // Issue #3305: the frame the docked selection-list pad decides its controls
-  // from — `terminal.output`, the one this tab hands the chat surface's card
-  // below, so the two surfaces read one frame.
-  //
-  // Reported only while THIS poll says a selection list is up. The docked pad
-  // is raised by the screen's own poll, which can say "selection list" a tick
-  // before this one does; the frame in hand is then the screen from before the
-  // dialog, and an ordinary numbered answer in it must not become number keys
-  // aimed at whatever just opened. A pager is left out for the same reason the
-  // pad draws nothing under it: its numbered rows are a transcript.
-  useReportSelectionListFrame({
-    worktreeId,
-    cliToolId,
-    instanceId,
-    frame: terminal.isSelectionListActive && !terminal.isPagerActive ? terminal.output : null,
-  });
 
   return (
     <div className="relative flex flex-col h-full min-h-0">
