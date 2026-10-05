@@ -1,0 +1,11 @@
+Unit Tests (shard 1/4)	UNKNOWN STEP	﻿2026-10-04T00:49:39.0636030Z Current runner version: '2.337.0'
+Unit Tests (shard 1/4)	UNKNOWN STEP	2026-10-04T00:50:35.7513392Z [90mstdout[2m | tests/unit/prompt-detector.test.ts[2m > [22m[2mPrompt Detector[2m > [22m[2mdetectPrompt[2m > [22m[2mPattern 1: (y/n) format[2m > [22m[2mshould detect simple yes/no prompt
+Unit Tests (shard 1/4)	UNKNOWN STEP	2026-10-04T00:50:35.7520223Z [90mstdout[2m | tests/unit/prompt-detector.test.ts[2m > [22m[2mPrompt Detector[2m > [22m[2mdetectPrompt[2m > [22m[2mPattern 1: (y/n) format[2m > [22m[2mshould detect yes/no prompt with newlines
+Unit Tests (shard 1/4)	UNKNOWN STEP	2026-10-04T00:55:47.9511856Z [2m Test Files [22m [1m[32m471 passed[39m[22m[90m (471)[39m
+Unit Tests (shard 1/4)	UNKNOWN STEP	2026-10-04T00:55:47.9690264Z ##[error]ReferenceError: window is not defined
+Unit Tests (shard 1/4)	UNKNOWN STEP	2026-10-04T00:55:48.0804856Z ##[error]Process completed with exit code 1.
+Unit Tests	Require every shard to pass	﻿2026-10-04T00:57:27.6590675Z ##[group]Run echo "Unit Tests shards: ${RESULT}"
+Unit Tests	Require every shard to pass	2026-10-04T00:57:27.6591682Z [36;1mecho "Unit Tests shards: ${RESULT}"[0m
+Unit Tests	Require every shard to pass	2026-10-04T00:57:27.7822925Z   RESULT: failure
+Unit Tests	Require every shard to pass	2026-10-04T00:57:27.8039197Z Unit Tests shards: failure
+Unit Tests	Require every shard to pass	2026-10-04T00:57:27.8058430Z ##[error]Process completed with exit code 1.

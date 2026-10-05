@@ -29,10 +29,12 @@
 3. `$METRICS` の `queue` を先頭から順に 1 件ずつ処理する。`queue[].key` と同じ `key` を持つ項目を
    `metrics[].candidates[]`（`source: "candidate"`）または `metrics[].outstanding[]`（`source: "outstanding"`）から探し、
    その `title`・`severity`・`evidence` と、属する `metrics[]` の `metricId`・`category`・`summary` を使う
-   - 並びはスクリプトが決めている（security の新規 → 悪化幅の大きい保守性 → performance の新規 → 残っている security →
-     残っている performance）。並べ替えない
+   - 並びはスクリプトが決めている（security の新規 → 悪化幅の大きい保守性 → performance の新規 → ci の新規 → 残っている security →
+     残っている performance → 残っている ci）。並べ替えない
    - performance（`api-latency`・`log-volume`・`error-rate`・`server-process`）の Issue には、計測 JSON の `title`・`evidence`・`summary` に
      ある値だけを書く。本番ログ（`logs/server.log*`）を自分で開いて行の中身（worktree の ID・パス・エラーの文面）を写さない（リポジトリは公開）
+   - ci（`ci-flaky`。develop の push の CI で落ちたテスト）の Issue も、計測 JSON の `title`・`evidence`・`summary` にある値
+     （テストのファイル名と名前、回数、SHA）だけを書く。CI のログを自分で開いて中身（パス・環境変数・エラーの文面）を写さない
    - 既存の Issue を探す（識別子は `key` そのもの。例 `metrics:npm-audit:ws`）:
      ```bash
      gh issue list --repo Kewton/CommandMate --label metrics --state open --search "\"<key>\" in:body" --json number,title,body
@@ -54,6 +56,8 @@
        gh issue create --repo Kewton/CommandMate --label metrics --label enhancement --title "<title>" --body-file <file>
        # category が security のときは --label security も付ける
        # category が performance のときは --label perf も付ける（自動依頼の対象外。人が着手する）
+       # category が ci のときも --label perf を付ける（自動依頼の対象外。テストだけの修正でも原因が製品側にあることがあるので人が着手する。
+       #   専用の needs-human ラベルは無いので perf と同じ扱いにする）
        ```
      - すでに 4 件立てていたら立てない（「見送り」として数える）
 4. `queue` が空なら何もしない（悪化が無い日は正常）
