@@ -2195,8 +2195,10 @@ export async function checkForResponse(
       logger.info('session-not-running');
       // `stopPolling` is what confirms a held scrape here; see
       // `flushPendingScrapedResponse` and `stopPollingByKey`. Requirement B of
-      // Issue #2436: this return is ~300 lines above the save path, so a hold
-      // released only down there would never be released at all.
+      // Issue #2436: this return comes long before the save path (~300 lines
+      // below when measured; a function of its own today,
+      // `recordCompletedResponse`), so a hold released only down there would
+      // never be released at all.
       stopPolling(worktreeId, cliToolId, instanceId);
       return false;
     }

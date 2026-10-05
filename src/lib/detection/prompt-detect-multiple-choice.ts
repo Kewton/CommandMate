@@ -478,12 +478,14 @@ const TEXT_INPUT_PATTERNS: RegExp[] = [
  * Whether typed text reaches this option as its answer (Issue #2573).
  *
  * `true` only for a `requiresTextInput` row whose label is a measured text field
- * ({@link TYPED_TEXT_FIELD_LABEL_PATTERNS}). Every other flagged row is a menu
+ * (`TYPED_TEXT_FIELD_LABEL_PATTERNS` in `lib/session/prompt-view`, read through
+ * {@link optionTakesTypedText}). Every other flagged row is a menu
  * row: it is answered by its NUMBER, and free text sent at it is swallowed while
  * the Enter after it confirms whatever is highlighted.
  *
- * Pure, and restated in `components/worktree/PromptPanel.tsx` for the answer
- * panels, which cannot import this module (its graph reaches `lib/env`'s `fs`);
+ * Pure, and since Issue #3218 a call to `optionTakesTypedText`, which the answer
+ * panels read directly (through `hooks/usePromptAnswerState`) because they
+ * cannot import this module (its graph reaches `lib/env`'s `fs`);
  * `tests/unit/components/PromptPanel.test.tsx` asserts the two agree.
  */
 export function isTypedTextFieldOption(
