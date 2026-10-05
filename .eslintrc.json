@@ -122,11 +122,12 @@
     },
     {
       "files": [
-        // 3) 段階解消 (staged removal, 15 files): the only progress metric.
+        // 3) 段階解消 (staged removal, 14 files): the only progress metric.
         // #1905 removed kill-session/route.ts: it kills through ICLITool.killSession now.
         // #1906 removed terminal/route.ts and send-user-message.ts: both dropped the
         // copilot sendKeys bypass and now send through ICLITool.sendMessage.
         // Issue #2655 removed the Assistant Chat conversation poller with the feature.
+        // Issue #3232 removed the global session poller: nothing had started it since 2026-04.
         "src/app/api/worktrees/\\[id\\]/capture/route.ts",
         "src/app/api/worktrees/\\[id\\]/clear-composer/route.ts",
         "src/app/api/worktrees/\\[id\\]/special-keys/route.ts",
@@ -134,7 +135,6 @@
         "src/components/Terminal.tsx",
         "src/lib/auto-yes-poller.ts",
         "src/lib/pasted-text-helper.ts",
-        "src/lib/polling/global-session-poller.ts",
         "src/lib/polling/response-checker.ts",
         "src/lib/prompt-answer-sender.ts",
         "src/lib/realtime/terminal-broadcast.ts",

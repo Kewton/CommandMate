@@ -26,18 +26,15 @@ export {
   getSessionName,
   isClaudeInstalled,
   isClaudeRunning,
-  getClaudeSessionState,
   waitForPrompt,
   startClaudeSession,
   sendMessageToClaude,
   captureClaudeOutput,
   stopClaudeSession,
-  restartClaudeSession,
 } from './claude-session'
 export type {
   HealthCheckResult,
   ClaudeSessionOptions,
-  ClaudeSessionState,
 } from './claude-session'
 
 // cli-session.ts: getSessionName conflicts with claude-session.ts, use direct import

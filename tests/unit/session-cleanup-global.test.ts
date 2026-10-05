@@ -40,11 +40,6 @@ vi.mock('@/lib/tmux/tmux-capture-cache', () => ({
   clearAllCache: vi.fn(),
 }));
 
-// Mock global-session-poller
-vi.mock('@/lib/polling/global-session-poller', () => ({
-  stopAllGlobalSessionPolling: vi.fn(),
-}));
-
 // Mock CLIToolManager
 vi.mock('@/lib/cli-tools/manager', () => ({
   CLIToolManager: {
@@ -77,25 +72,15 @@ vi.mock('@/lib/git/worktrees', () => ({
 
 import { cleanupGlobalSessions } from '@/lib/session-cleanup';
 import { CLI_TOOL_IDS } from '@/lib/cli-tools/types';
-import { stopAllGlobalSessionPolling } from '@/lib/polling/global-session-poller';
 import { hasSession, killSession } from '@/lib/tmux/tmux';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 
-const mockedStopAll = vi.mocked(stopAllGlobalSessionPolling);
 const mockedHasSession = vi.mocked(hasSession);
 const mockedKillSession = vi.mocked(killSession);
 
 describe('cleanupGlobalSessions', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-  });
-
-  it('should stop all global pollers', async () => {
-    mockedHasSession.mockResolvedValue(false);
-
-    await cleanupGlobalSessions();
-
-    expect(mockedStopAll).toHaveBeenCalledTimes(1);
   });
 
   it('should kill sessions that exist', async () => {

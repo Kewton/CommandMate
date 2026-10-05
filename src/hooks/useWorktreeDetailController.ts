@@ -13,8 +13,7 @@
  *
  * The parent WorktreeDetailRefactored.tsx is now a thin orchestrator that calls
  * this hook, destructures the returned values, and branches to the Desktop /
- * Mobile presentation. The dynamic MarkdownEditor (ssr:false) and its modal stay
- * in the parent (S3-002). pendingInsertText state lives in usePendingInsertText.
+ * Mobile presentation. pendingInsertText state lives in usePendingInsertText.
  *
  * Based on Issue #13 UX Improvement design specification.
  */
@@ -329,9 +328,6 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   const [tabsState, tabsActions] = useFileTabs(worktreeId);
   // Mobile-only: file viewer path for modal display (desktop uses fileTabs)
   const [mobileFileViewerPath, setMobileFileViewerPath] = useState<string | null>(null);
-  const [editorFilePath, setEditorFilePath] = useState<string | null>(null);
-  // Issue #104: Track editor maximized state to disable Modal close handlers
-  const [isEditorMaximized, setIsEditorMaximized] = useState(false);
   // Issue #525: Per-agent auto-yes state management.
   // Issue #896: re-keyed by *instanceId* so each agent instance has its own
   // auto-yes state (the primary instance's id === its cliToolId, preserving the
@@ -1100,8 +1096,7 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
 
   /**
    * Handle file select from FileTreeView
-   * Opens MarkdownEditor for .md files, file tab panel (desktop) or modal (mobile) for others
-   * [Stage 3 SF-004] Separate editorFilePath state to avoid conflict
+   * Opens the file tab panel (desktop) or the FileViewer modal (mobile) for every file, .md included
    * Issue #438: Uses file tabs instead of modal for non-editable files on desktop
    */
   const handleFileSelect = useCallback((path: string) => {
@@ -1138,22 +1133,16 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     setFileTreeRefresh(prev => prev + 1);
   }, []);
 
-  /** Handle MarkdownEditor close */
-  const handleEditorClose = useCallback(() => {
-    setEditorFilePath(null);
-  }, []);
-
   /**
    * [Issue #1108] Controller-owned part of the Files full view reset. The
    * FileTreeView toolbar button resets its own view state (expansion / cache /
    * scroll) and then calls this to clear search and close open file surfaces:
-   * desktop tabs plus the mobile file viewer / editor (mobile has no tabs).
+   * desktop tabs plus the mobile file viewer (mobile has no tabs).
    */
   const resetFileTreeView = useCallback(() => {
     fileSearch.clearSearch();
     tabsActions.closeAllTabs();
     setMobileFileViewerPath(null);
-    setEditorFilePath(null);
   }, [fileSearch, tabsActions]);
 
   /** Handle file save in editor - refresh tree to reflect changes (savedPath accepted for callback interface compatibility) */
@@ -1544,10 +1533,6 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       if (!response.ok) {
         throw new Error('Failed to delete');
       }
-      // Deleted successfully - close editor if the deleted file was open
-      if (editorFilePath === path || editorFilePath?.startsWith(`${path}/`)) {
-        setEditorFilePath(null);
-      }
       // Issue #438: Close file tab if the deleted file was open
       tabsActions.onFileDeleted(path);
       // Trigger FileTreeView refresh
@@ -1556,7 +1541,7 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       console.error('[WorktreeDetailRefactored] Failed to delete:', err);
       window.alert(tError('fileOps.failedToDelete'));
     }
-  }, [worktreeId, editorFilePath, tabsActions, tCommon, tError, confirm]);
+  }, [worktreeId, tabsActions, tCommon, tError, confirm]);
 
   // Issue #314 / #499 Item 5: Show stop reason toast when pending (deferred from fetchCurrentOutput)
   useEffect(() => {
@@ -1898,7 +1883,6 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     diffFilePath,
     disableAutoFollow,
     displayedInstances,
-    editorFilePath,
     error,
     fetchCurrentOutput,
     fileInputRef,
@@ -1912,7 +1896,6 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     handleDelete,
     handleDiffSelect,
     handleDirtyChange,
-    handleEditorClose,
     handleEditorSave,
     handleFileInputChange,
     handleFilePanelSave,
@@ -1965,7 +1948,6 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     historySubTab,
     historyUserOnly,
     isAuthExpired,
-    isEditorMaximized,
     isInfoModalOpen,
     isMobile,
     isMoveDialogOpen,
@@ -1997,7 +1979,6 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     setActiveInstanceId,
     setFocusedSplitIndex,
     setHistorySubTab,
-    setIsEditorMaximized,
     setWorktree,
     showArchived,
     showNewFileDialog,

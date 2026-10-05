@@ -15,7 +15,6 @@ import {
   OPENCODE_EXIT_WAIT_MS,
   VIBE_LOCAL_DOUBLE_ENTER_WAIT_MS,
   CLAUDE_ENV_SANITIZE_WAIT_MS,
-  CLAUDE_RESTART_DELAY_MS,
 } from '@/config/cli-tool-timing-config';
 
 describe('cli-tool-timing-config', () => {
@@ -29,7 +28,6 @@ describe('cli-tool-timing-config', () => {
     expect(OPENCODE_EXIT_WAIT_MS).toBe(2000);
     expect(VIBE_LOCAL_DOUBLE_ENTER_WAIT_MS).toBe(200);
     expect(CLAUDE_ENV_SANITIZE_WAIT_MS).toBe(100);
-    expect(CLAUDE_RESTART_DELAY_MS).toBe(1000);
   });
 
   it('exposes positive numbers for every constant', () => {
@@ -43,7 +41,6 @@ describe('cli-tool-timing-config', () => {
       OPENCODE_EXIT_WAIT_MS,
       VIBE_LOCAL_DOUBLE_ENTER_WAIT_MS,
       CLAUDE_ENV_SANITIZE_WAIT_MS,
-      CLAUDE_RESTART_DELAY_MS,
     ];
     for (const value of all) {
       expect(typeof value).toBe('number');
