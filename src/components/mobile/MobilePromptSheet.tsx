@@ -9,6 +9,7 @@
 import { useState, useCallback, useId, useEffect, memo } from 'react';
 import { useTranslations } from 'next-intl';
 import type { LivePromptData, YesNoPromptData, MultipleChoicePromptData } from '@/types/models';
+import type { StructuredPromptWaitingData } from '@/lib/session/structured-prompt';
 import { isAnswerablePromptData } from '@/types/models';
 import { ErrorBoundary } from '@/components/error/ErrorBoundary';
 import { Checkbox, RadioGroup, RadioGroupItem, Spinner } from '@/components/ui';
@@ -313,6 +314,7 @@ function PromptContent({
   // the instruction text. The same split as `view.kind === 'screen-choices'`
   // (pinned by prompt-view-3184.test); what is SHOWN is decided by `view`.
   const screenPrompt = isAnswerablePromptData(promptData) ? promptData : null;
+  const structuredPrompt = screenPrompt === null ? (promptData as StructuredPromptWaitingData) : null;
 
   return (
     <div className="space-y-4">
@@ -367,9 +369,9 @@ function PromptContent({
 
       {/* Issue #2945: an addressable approval / question the structured layer
           reported — the same controls `PromptPanel` draws on the PC. */}
-      {screenPrompt === null && (
+      {structuredPrompt !== null && (
         <StructuredDecisionContent
-          promptData={promptData}
+          promptData={structuredPrompt}
           view={view}
           disabled={isDisabled}
           onRespond={handleStructuredRespond}
@@ -689,25 +691,23 @@ function StructuredDecisionContent({
   disabled,
   onRespond,
 }: {
-  promptData: LivePromptData;
+  promptData: StructuredPromptWaitingData;
   /** Issue #3184: the sheet's {@link PromptView} of this payload. */
   view: PromptView;
   disabled: boolean;
   onRespond: (answer: string) => Promise<void>;
 }) {
-  const payload = promptData as { message?: unknown; decisionOptions?: unknown };
-  const message = typeof payload.message === 'string' ? payload.message : null;
+  const message = promptData.message;
   // Issue #3184: which of the two the payload offers is the view's call — the
   // same id-and-verdicts test this used to restate.
   const verdicts =
     view.apiTarget === 'approval'
-      ? (payload.decisionOptions as readonly StructuredDecisionOption[])
+      ? (promptData.decisionOptions as readonly StructuredDecisionOption[])
       : null;
   const question = view.apiTarget === 'question' ? readQuestionChoices(promptData) : null;
   // Issue #3291: what the agent asked when nothing could read the screen — the
   // same question + label list as PromptPanel's `unclassified-ask-user-question`.
-  const asked =
-    'type' in promptData && promptData.type === 'unclassified' ? promptData.askUserQuestion : undefined;
+  const asked = promptData.askUserQuestion;
 
   return (
     <div className="space-y-3" data-testid="mobile-structured-decision">
