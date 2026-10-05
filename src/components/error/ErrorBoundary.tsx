@@ -25,7 +25,7 @@ interface State {
  *
  * @example
  * ```tsx
- * <ErrorBoundary componentName="Terminal" fallback={<TerminalErrorFallback />}>
+ * <ErrorBoundary componentName="TerminalDisplay">
  *   <TerminalDisplay output={output} />
  * </ErrorBoundary>
  * ```

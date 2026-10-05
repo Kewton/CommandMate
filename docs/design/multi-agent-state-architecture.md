@@ -1321,7 +1321,7 @@ Phase 1 の実装（`feature/1922-tmux-import-guard`）で棚卸しをやり直�
 - **削除 2 件**: `NavigationButtons.tsx` / `TerminalEscapeHatch.tsx`。D4 が「Phase 1 に間に合わなくてよい」とした `NavigationKey` の型モジュール移設（`src/types/terminal-keys.ts`）を同じ commit で済ませたため、allowlist に載せる必要が無くなった。
 - 区分の内訳は結果として不変（**恒久除外 12 ／ 段階解消 19**）。
 
-**禁止パターンは 3 綴りでは足りない（実測）**。`@/lib/tmux/**`・`**/lib/tmux/**`・`./tmux/**` の 3 つは付録 A の 31 件を全件捕まえるが、`ignore` パッケージ（`no-restricted-imports` の実装が使う matcher）で直接測ると **`../tmux/x` と `../../tmux/x` と barrel の `@/lib/tmux` は素通りする**。`../tmux/**` は仮定の綴りではなく `src/lib/cli-tools/*.ts` が実際に使っている綴りであり、`src/lib/tmux/index.ts`（barrel）も実在する。したがって出荷した group は **`**/tmux/**` と `**/tmux` を足した 5 綴り**である（`@/config/tmux-pane-config` や `./tmux-capture-cache` には当たらないことを同時に確認済み）。
+**禁止パターンは 3 綴りでは足りない（実測）**。`@/lib/tmux/**`・`**/lib/tmux/**`・`./tmux/**` の 3 つは付録 A の 31 件を全件捕まえるが、`ignore` パッケージ（`no-restricted-imports` の実装が使う matcher）で直接測ると **`../tmux/x` と `../../tmux/x` と barrel の `@/lib/tmux` は素通りする**。`../tmux/**` は仮定の綴りではなく `src/lib/cli-tools/*.ts` が実際に使っている綴りであり、実装の時点では barrel `src/lib/tmux/index.ts` も実在した（Issue #3232 で削除。import する側は一度も無かった）。したがって出荷した group は **`**/tmux/**` と `**/tmux` を足した 5 綴り**である（`@/config/tmux-pane-config` や `./tmux-capture-cache` には当たらないことを同時に確認済み）。`**/tmux` は、barrel を作り直しても素通りしないように残す。
 
 **`overrides.files` の `[id]` は minimatch のキャラクタクラスである**。`src/app/api/worktrees/[id]/route.ts` をそのまま書くと `.../i/route.ts` にしか当たらず、**その 5 ファイルが投入直後に error になる**。`\[id\]` とエスケープすること（該当 7 エントリ）。
 

@@ -23,10 +23,6 @@
     "failedToDelete": "削除に失敗しました",
     "failedToMove": "移動に失敗しました"
   },
-  "terminal": {
-    "displayError": "ターミナル表示エラー",
-    "outputError": "ターミナル出力の表示中にエラーが発生しました"
-  },
   "history": {
     "loadError": "メッセージ履歴の読み込みエラー",
     "displayError": "履歴の表示中にエラーが発生しました"

@@ -437,7 +437,9 @@ describe('lib/tmux import guard: ESLint configuration', () => {
     // The design doc named three spellings. `**/tmux/**` and `**/tmux` were added
     // after measuring that the three leave `../tmux/x` (how every file in
     // `src/lib/cli-tools/` already spells it) and the `src/lib/tmux/index.ts`
-    // barrel wide open. See the positive controls below.
+    // barrel wide open. Issue #3232 deleted that barrel (nothing ever imported
+    // it); `**/tmux` stays so that re-creating one does not slip through. See
+    // the positive controls below.
     expect(entry[1].patterns[0].group).toEqual([
       '@/lib/tmux/**',
       '**/lib/tmux/**',
