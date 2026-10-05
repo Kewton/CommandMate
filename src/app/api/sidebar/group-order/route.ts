@@ -8,6 +8,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db/db-instance';
+import { readJsonBody } from '@/lib/api/read-json-body';
 import { getSidebarGroupOrder, setSidebarGroupOrder } from '@/lib/db/app-settings-db';
 
 export async function GET(): Promise<NextResponse> {
@@ -23,7 +24,11 @@ export async function GET(): Promise<NextResponse> {
 
 export async function PUT(request: Request): Promise<NextResponse> {
   try {
-    const body: unknown = await request.json();
+    const parsed = await readJsonBody<unknown>(request);
+    if (!parsed.ok) {
+      return NextResponse.json({ success: false, error: 'Invalid request body' }, { status: 400 });
+    }
+    const body = parsed.body;
 
     if (
       !body ||

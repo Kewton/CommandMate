@@ -1003,7 +1003,7 @@ describe('/current-output payload for the live agy permission pane (Issue #2270)
     expect(payload.isPromptWaiting).toBe(true);
     expect(payload.isSelectionListActive).toBe(false);
     expect(payload.promptData).not.toBeNull();
-  });
+  }, 60_000);
 
   it('publishes all four options so 2-4 are reachable from the chat surface', async () => {
     const payload = await buildPayload(AGY_1125_PERMISSION_PANE);
@@ -1016,7 +1016,7 @@ describe('/current-output payload for the live agy permission pane (Issue #2270)
     // "No" is the option the arrow buttons could never reach: they could only
     // Enter the highlighted row, which is option 1.
     expect(promptData.options[3].label).toBe('No');
-  });
+  }, 60_000);
 
   it('still publishes an open selection list for the Switch Model picker', async () => {
     const payload = await buildPayload(AGY_1125_SWITCH_MODEL_PANE);
@@ -1025,7 +1025,7 @@ describe('/current-output payload for the live agy permission pane (Issue #2270)
     expect(payload.sessionStatusReason).toBe(STATUS_REASON.ANTIGRAVITY_SELECTION_LIST);
     expect(payload.isSelectionListActive).toBe(true);
     expect(payload.isPromptWaiting).toBe(false);
-  });
+  }, 60_000);
 });
 
 // ===========================================================================

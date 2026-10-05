@@ -4,6 +4,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { readJsonBody } from '@/lib/api/read-json-body';
 import { getDbInstance } from '@/lib/db/db-instance';
 import { getMessageById, updatePromptData, getWorktreeById } from '@/lib/db';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
@@ -54,7 +55,9 @@ export async function POST(
   try {
     const { id: requestedWorktreeId } = await params;
     const id = canonicalWorktreeId(requestedWorktreeId);
-    const { messageId, decisionId, answer, cliTool: bodyCliTool, instanceId: bodyInstanceId } = await req.json();
+    const parsed = await readJsonBody(req);
+    if (!parsed.ok) return parsed.response;
+    const { messageId, decisionId, answer, cliTool: bodyCliTool, instanceId: bodyInstanceId } = parsed.body;
 
     // Validation. Issue #1932 made `messageId` optional when a `decisionId` is
     // offered; Issue #2040 makes both optional, so the one field every shape

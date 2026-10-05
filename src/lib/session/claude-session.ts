@@ -707,7 +707,7 @@ export async function startClaudeSession(
     const healthy = await ensureHealthySession(sessionName);
     if (healthy) {
       await reconcileSessionGeometry(sessionName);
-      logger.info('claude-session-sessionname');
+      logger.info('claude-session-exists');
       return;
     }
     // If not healthy, ensureHealthySession() already killed the session.
