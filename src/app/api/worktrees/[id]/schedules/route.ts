@@ -19,6 +19,7 @@ import { ALLOWED_CLI_TOOLS } from '@/lib/session/claude-executor';
 import { isValidCronExpression } from '@/config/cmate-constants';
 import { createLogger } from '@/lib/logger';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
+import { readOptionalJsonObjectBody } from '@/lib/api/read-json-body';
 
 const logger = createLogger('api/schedules');
 
@@ -84,7 +85,11 @@ export async function POST(
       return NextResponse.json({ error: `Worktree '${worktreeId}' not found` }, { status: 404 });
     }
 
-    const body = await request.json().catch(() => ({}));
+    const parsed = await readOptionalJsonObjectBody(request);
+
+    if (!parsed.ok) return parsed.response;
+
+    const body = parsed.body;
     const { cronExpression, cliToolId, enabled } = body;
 
     // Trim and validate required string fields

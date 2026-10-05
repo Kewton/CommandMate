@@ -26,6 +26,7 @@ import {
 import { syncSchedulesNow } from '@/lib/schedule-manager';
 import { createLogger } from '@/lib/logger';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
+import { readOptionalJsonObjectBody } from '@/lib/api/read-json-body';
 
 const logger = createLogger('api/cmate-schedules');
 
@@ -93,7 +94,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const resolved = resolveWorktree(id);
     if ('error' in resolved) return resolved.error;
 
-    const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+    const parsed = await readOptionalJsonObjectBody(request);
+
+    if (!parsed.ok) return parsed.response;
+
+    const body = parsed.body;
     const input = normalizeInput(body);
 
     const { valid, errors } = validateScheduleInput(input);
@@ -129,7 +134,11 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     const resolved = resolveWorktree(id);
     if ('error' in resolved) return resolved.error;
 
-    const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+    const parsed = await readOptionalJsonObjectBody(request);
+
+    if (!parsed.ok) return parsed.response;
+
+    const body = parsed.body;
     const name = typeof body.name === 'string' ? sanitizeContent(body.name).trim() : '';
     if (!name) {
       return NextResponse.json({ error: 'name is required' }, { status: 400 });
@@ -161,7 +170,11 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
     const resolved = resolveWorktree(id);
     if ('error' in resolved) return resolved.error;
 
-    const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+    const parsed = await readOptionalJsonObjectBody(request);
+
+    if (!parsed.ok) return parsed.response;
+
+    const body = parsed.body;
     const name = typeof body.name === 'string' ? sanitizeContent(body.name).trim() : '';
     if (!name) {
       return NextResponse.json({ error: 'name is required' }, { status: 400 });

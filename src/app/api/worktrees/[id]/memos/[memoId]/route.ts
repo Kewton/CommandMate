@@ -9,6 +9,7 @@ import { getDbInstance } from '@/lib/db/db-instance';
 import { getWorktreeById, getMemoById, updateMemo, deleteMemo } from '@/lib/db';
 import { createLogger } from '@/lib/logger';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
+import { readOptionalJsonObjectBody } from '@/lib/api/read-json-body';
 
 const logger = createLogger('api/memos');
 
@@ -54,7 +55,9 @@ export async function PUT(
     }
 
     // Parse request body
-    const body = await request.json().catch(() => ({}));
+    const parsed = await readOptionalJsonObjectBody(request);
+    if (!parsed.ok) return parsed.response;
+    const body = parsed.body;
     const { title, content } = body;
 
     // Validate title length

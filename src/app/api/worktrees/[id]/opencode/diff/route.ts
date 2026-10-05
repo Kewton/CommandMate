@@ -51,6 +51,7 @@ import {
   recordOpencodeRevertResult,
   refreshOpencodeTurnDiff,
 } from '@/lib/hooks/sources/opencode/diff';
+import { readOptionalJsonObjectBody } from '@/lib/api/read-json-body';
 
 const logger = createLogger('api/opencode-diff');
 
@@ -230,12 +231,11 @@ export async function POST(
     const { id: requestedWorktreeId } = await params;
     const worktreeId = canonicalWorktreeId(requestedWorktreeId);
 
-    let body: Record<string, unknown> = {};
-    try {
-      body = (await request.json()) as Record<string, unknown>;
-    } catch {
-      // An empty body is not an action; the validation below reports it.
-    }
+    const parsed = await readOptionalJsonObjectBody<Record<string, unknown>>(request);
+
+    if (!parsed.ok) return parsed.response;
+
+    const body = parsed.body;
 
     if (!isAction(body.action)) {
       return NextResponse.json(

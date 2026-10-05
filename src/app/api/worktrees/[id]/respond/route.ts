@@ -4,7 +4,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { readJsonBody } from '@/lib/api/read-json-body';
+import { readJsonObjectBody } from '@/lib/api/read-json-body';
 import { getDbInstance } from '@/lib/db/db-instance';
 import { getMessageById, updatePromptData, getWorktreeById } from '@/lib/db';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
@@ -55,7 +55,7 @@ export async function POST(
   try {
     const { id: requestedWorktreeId } = await params;
     const id = canonicalWorktreeId(requestedWorktreeId);
-    const parsed = await readJsonBody(req);
+    const parsed = await readJsonObjectBody(req);
     if (!parsed.ok) return parsed.response;
     const { messageId, decisionId, answer, cliTool: bodyCliTool, instanceId: bodyInstanceId } = parsed.body;
 
