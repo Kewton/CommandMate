@@ -457,12 +457,14 @@ includes a reading of a single frame, and it has read `ready` in the middle of a
 running turn. `commandmate wait <id> --instance <name>` does not complete until the agent itself
 reports the end of the turn (`Stop`), so wait with it and then send.
 
-On the server, a source whose hooks speak for the pane (`structuredEvents.source.kind` is `hooks`)
-no longer has its turn closed by the screen alone. The screen closes it (`closedBy:
+On the server, when codex's hooks speak for the pane (`structuredEvents.source.kind` is `hooks`),
+its turn is no longer closed by the screen alone. The screen closes it (`closedBy:
 'scraper_evidence'`) only when the `Stop` is known not to come — nothing heard for 30 minutes
-(`closedBy: 'stale'`), or a frame that shows the turn was interrupted (codex's `■ Conversation
-interrupted`, Claude's `⎿  Interrupted`; an interrupt was measured to send no `Stop` on both). A source without hooks is still closed
-by the screen, as before.
+(`closedBy: 'stale'`), or a frame that shows the turn was interrupted (`■ Conversation
+interrupted`; an interrupt was measured to send no `Stop`). A relay reply waits by the same rule.
+Claude and the other tools, and any source without hooks, are still closed by the screen, as
+before (a Claude interrupt either prints an `Interrupted` row or just puts the prompt back in the
+composer, and neither sends a `Stop`).
 
 ### Progress Output
 

@@ -710,12 +710,12 @@ async function buildPayload(
   // `commandmate wait` — see SCRAPER_COMPLETION_POLLS, and #1839's measurement
   // of a 529 storm returning Claude to exactly this frame having run nothing.
   //
-  // Issue #3337: and not while the agent's hooks speak for the pane, unless the
-  // frame shows the turn was abandoned (an interruption: codex's `■ Conversation
-  // interrupted`, Claude's `⎿  Interrupted`, after which no `Stop` comes).
-  // A misread frame of a live codex turn closed
-  // it here and published `ready` mid-turn; the hook's own `Stop` is the end of
-  // the turn there, and `stale` stays the bound on a `Stop` that was lost.
+  // Issue #3337: and, for codex, not while its hooks speak for the pane,
+  // unless the frame shows the turn was interrupted (`■ Conversation
+  // interrupted`, after which no `Stop` comes). A misread frame of a live codex
+  // turn closed it here and published `ready` mid-turn; the hook's own `Stop`
+  // is the end of the turn there, and `stale` stays the bound on a lost `Stop`.
+  // Other tools, Claude included, are closed by the screen as before.
   // The rule is `hook-turn-hold`'s, which the relay's readiness check reads too.
   observeScraperCompletionEvidence(
     worktreeId,

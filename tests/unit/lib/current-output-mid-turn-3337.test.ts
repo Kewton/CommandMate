@@ -45,7 +45,7 @@ import {
 } from '@/lib/session/agent-event-state';
 import { SCRAPER_COMPLETION_POLLS } from '@/lib/session/provisional-turn';
 import { detectSessionStatus } from '@/lib/detection/status-detector';
-import { frameShowsAbandonedTurn } from '@/lib/detection/turn-abandoned';
+import { screenMayCloseHookTurn } from '@/lib/detection/turn-abandoned';
 import { isCodexTurnInterruptedFrame } from '@/lib/detection/tools/codex/patterns';
 import { stripAnsi } from '@/lib/detection/cli-patterns';
 import type { CLIToolType } from '@/lib/cli-tools/types';
@@ -112,7 +112,8 @@ describe('[#3337] which codex frame says the turn was interrupted', () => {
   it('reads `■ Conversation interrupted` as the last row above the composer', () => {
     expect(isCodexTurnInterruptedFrame(rows(INTERRUPTED))).toBe(true);
     expect(isCodexTurnInterruptedFrame(rows(FIRST_TURN_INTERRUPTED))).toBe(true);
-    expect(frameShowsAbandonedTurn('codex', INTERRUPTED)).toBe(true);
+    expect(screenMayCloseHookTurn('codex', INTERRUPTED)).toBe(true);
+    expect(screenMayCloseHookTurn('codex', MID_TURN.workingHollow)).toBe(false);
   });
 
   it('does not read a live turn, a finished reply, or a marker something followed', () => {
@@ -130,8 +131,8 @@ describe('[#3337] which codex frame says the turn was interrupted', () => {
     expect(isCodexTurnInterruptedFrame(laterTurn)).toBe(false);
   });
 
-  it('answers false for a tool with no reader', () => {
-    expect(frameShowsAbandonedTurn('claude', INTERRUPTED)).toBe(false);
+  it('lets the screen close the turn of a tool with no policy', () => {
+    expect(screenMayCloseHookTurn('claude', INTERRUPTED)).toBe(true);
   });
 });
 

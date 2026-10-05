@@ -13,8 +13,8 @@
  *    waiting costs nothing but time.
  *
  *    Since Issue #3337 "mid-turn" is also the hooks' answer when they speak for
- *    the pane (`lib/session/hook-turn-hold`, the rule `capture --json` reads):
- *    the frame alone read a live codex turn as `ready`.
+ *    a codex pane (`lib/session/hook-turn-hold`, the rule `capture --json`
+ *    reads): the frame alone read a live codex turn as `ready`.
  *
  * The prompt-dialog question is deliberately NOT asked here: `sendUserMessage`
  * already refuses a send that would land in an open dialog (#1708/#1737), and
@@ -89,10 +89,11 @@ export async function findRelayHoldReason(
       STATUS_CAPTURE_LINES,
       instanceId
     );
-    // Issue #3337: a turn the agent's hooks opened holds the pane at `running`
-    // whatever the frame reads — the rule `capture --json` publishes, read from
-    // the one place it is written. A frame of a live codex turn read `ready`,
-    // and a reply typed into it interrupted the turn.
+    // Issue #3337: for a tool whose hook turns the screen may not end (codex),
+    // an open hook turn holds the pane at `running` whatever the frame reads —
+    // the rule `capture --json` publishes, read from the one place it is
+    // written. A frame of a live codex turn read `ready`, and a reply typed into
+    // it interrupted the turn.
     if (hookTurnHoldsPane(worktreeId, cliToolId, instanceId, output)) return 'generating';
     const status = detectSessionStatus(output, cliToolId);
     // Only `running` holds. `waiting` is a dialog, which is the send path's

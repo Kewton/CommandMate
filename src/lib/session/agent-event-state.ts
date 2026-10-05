@@ -847,7 +847,8 @@ export function closeAgentTurn(
  * ## `mayClose` — when the screen is not allowed to close (Issue #3337)
  *
  * The caller passes false while the agent's own hooks are speaking for the
- * pane and nothing says the `Stop` will not come. Then the counter still
+ * pane, the tool is one whose hook turns the screen may not end (codex;
+ * `lib/detection/turn-abandoned`), and nothing says the `Stop` will not come. Then the counter still
  * counts, but the turn stays open and the structured `running` stands.
  *
  * The screen's "finished composer" is a reading of one frame, and a frame of a
@@ -863,12 +864,12 @@ export function closeAgentTurn(
  *    existing `stale` close, which `effectiveTurn` applies regardless of this
  *    function. It stays the bound on a `Stop` that was simply lost.
  *  - the frame shows the turn was abandoned — codex's `■ Conversation
- *    interrupted`, Claude's `⎿  Interrupted` — which the caller folds into
- *    `mayClose`. Measured on codex 0.160.0 and Claude Code 2.1.289 with hooks:
- *    an Esc fires no `Stop` (`lib/detection/turn-abandoned`).
+ *    interrupted` — which the caller folds into `mayClose`. Measured on codex
+ *    0.160.0 with hooks: an Esc fires no `Stop`.
  *
- * A source with no hooks (`scraper`) and a pull source (`sse`) pass true and
- * keep the #1930 behaviour.
+ * A source with no hooks (`scraper`), a pull source (`sse`) and a hooks tool
+ * with no such policy (Claude among them) pass true and keep the #1930
+ * behaviour.
  *
  * @param at - Epoch ms; defaults to now
  * @param mayClose - Whether a third positive poll may close the turn
