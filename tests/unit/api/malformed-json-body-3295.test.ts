@@ -12,6 +12,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import Database from 'better-sqlite3';
 import fs from 'fs';
+import { randomUUID } from 'crypto';
 import os from 'os';
 import path from 'path';
 import { runMigrations } from '@/lib/db/db-migrations';
@@ -290,7 +291,7 @@ const SELF_READ: ReadRoute[] = [
   ['todos PATCH', 'PATCH', `${W}/todos`, '@/app/api/worktrees/[id]/todos/route', 'PATCH', {}, '{}'],
   ['todos/[todoId] PATCH', 'PATCH', `${W}/todos/TODO`, '@/app/api/worktrees/[id]/todos/[todoId]/route', 'PATCH', { todoId: 'TODO' }, '{}'],
   ['schedules POST', 'POST', `${W}/schedules`, '@/app/api/worktrees/[id]/schedules/route', 'POST', {}, '{}'],
-  ['schedules/[scheduleId] PUT', 'PUT', `${W}/schedules/s1`, '@/app/api/worktrees/[id]/schedules/[scheduleId]/route', 'PUT', { scheduleId: 's1' }],
+  ['schedules/[scheduleId] PUT', 'PUT', `${W}/schedules/SCHEDULE`, '@/app/api/worktrees/[id]/schedules/[scheduleId]/route', 'PUT', { scheduleId: 'SCHEDULE' }],
   ['cmate/schedules POST', 'POST', `${W}/cmate/schedules`, '@/app/api/worktrees/[id]/cmate/schedules/route', 'POST', {}, '{}'],
   ['cmate/schedules PATCH', 'PATCH', `${W}/cmate/schedules`, '@/app/api/worktrees/[id]/cmate/schedules/route', 'PATCH', {}, '{}'],
   ['cmate/schedules DELETE', 'DELETE', `${W}/cmate/schedules`, '@/app/api/worktrees/[id]/cmate/schedules/route', 'DELETE', {}, '{}'],
@@ -305,6 +306,11 @@ const SELF_READ: ReadRoute[] = [
 ];
 
 let seeded: Record<string, string> = {};
+// These two keep their syntax-error wording for the object check too.
+const BODY_CHECK_MESSAGE: Record<string, string> = {
+  'auto-yes POST': 'Invalid JSON body',
+  'marp-render POST': 'Invalid JSON body',
+};
 
 describe('non-object JSON body → 400 in routes that read the body themselves (#3333)', () => {
   beforeEach(() => {
@@ -321,7 +327,13 @@ describe('non-object JSON body → 400 in routes that read the body themselves (
     vi.clearAllMocks();
     mockLogger.withContext.mockReturnValue(mockLogger);
     // memo / todo routes look the row up before they read the body.
+    const scheduleId = randomUUID();
+    mockDb.prepare(
+      `INSERT INTO scheduled_executions (id, worktree_id, name, message, cron_expression, created_at, updated_at)
+       VALUES (?, ?, 'job', 'hi', '0 * * * *', 1, 1)`
+    ).run(scheduleId, WORKTREE_ID);
     seeded = {
+      SCHEDULE: scheduleId,
       MEMO: createMemo(mockDb, WORKTREE_ID, { position: 0 }).id,
       TODO: createTodo(mockDb, WORKTREE_ID, { content: 'x', position: 0 }).id,
     };
@@ -349,7 +361,8 @@ describe('non-object JSON body → 400 in routes that read the body themselves (
       consoleError.mockRestore();
 
       expect(response.status).toBe(400);
-      expect(await response.json()).toHaveProperty('error');
+      // The body check itself must answer, not an earlier id / 404 check.
+      expect(await response.json()).toEqual({ error: BODY_CHECK_MESSAGE[route[0]] ?? 'Invalid request body' });
       expect(mockLogger.error).not.toHaveBeenCalled();
       expect(consoleError).not.toHaveBeenCalled();
     });
