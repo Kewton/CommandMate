@@ -207,6 +207,7 @@ function updateLastServerResponseTimestamp(compositeKey: string, timestamp: numb
 
 /**
  * Reset error count for a poller and restore the default polling interval.
+ * Called on every successful capture (Issue #3329) and after an answer is sent.
  *
  * @param compositeKey - Composite key
  */
@@ -981,6 +982,10 @@ async function pollAutoYes(worktreeId: string, cliToolId: CLIToolType, instanceI
       captureLines,
       instanceId,
     );
+
+    // Issue #3329: a good capture ends the run of errors, so only failures in
+    // a row reach AUTO_STOP_ERROR_THRESHOLD — not ones scattered over hours.
+    resetErrorCount(compositeKey);
 
     if (pollerState!.waitingForSession) {
       pollerState!.waitingForSession = false;
