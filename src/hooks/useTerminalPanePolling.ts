@@ -64,8 +64,12 @@ import {
  */
 export const FOREIGN_SESSION_ERROR_CODE = 'session_owned_by_other_server';
 
-/** Whether a failed response is that 409's body. Never throws. */
-async function isForeignSessionResponse(response: Response): Promise<boolean> {
+/**
+ * Whether a failed response is that 409's body. Never throws. Shared with the
+ * worktree screen's parent poll (`useWorktreeDetailController`), which reads
+ * the same route.
+ */
+export async function isForeignSessionResponse(response: Response): Promise<boolean> {
   try {
     const body: unknown = await response.json();
     return typeof body === 'object' && body !== null

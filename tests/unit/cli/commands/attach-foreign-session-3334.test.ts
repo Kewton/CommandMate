@@ -11,8 +11,9 @@
  * operator named the session, and looking at it may be what they came for, so
  * the plain attach is not refused: it is made read-only. The two forms that
  * have no read-only shape — `--live`, and `switch-client` from inside tmux —
- * are refused before tmux is touched. An owned session, and a server that
- * cannot answer, attach exactly as before.
+ * are refused before tmux is touched. Only a session the server confirms as
+ * its own attaches writable, as before; when the owner is not known — no
+ * answer, a 404, an older server — it is treated like a foreign one.
  *
  * @vitest-environment node
  */
@@ -177,14 +178,43 @@ describe('[#3334] attach to a session another CommandMate server owns', () => {
     expect(stderr()).toContain('belongs to another CommandMate server');
   });
 
-  it('attaches as before when the server cannot say (control)', async () => {
-    // A server older than #2865 has no ownership 409; one that is down cannot
-    // answer at all. Neither is a reason to stop an attach `has-session` allowed.
-    mockFetchSequence([resolveTarget(), NO_ROSTER, { data: { error: 'Failed' }, status: 500 }]);
+  it.each([
+    ['a 404 (the namespaced session the server checked does not exist)', { data: { error: 'Session not found.' }, status: 404 }],
+    ['a 500', { data: { error: 'Failed' }, status: 500 }],
+    ['no response at all', undefined],
+  ])('attaches read-only when the server gives no ownership answer: %s', async (_label, capture) => {
+    mockFetchSequence(capture ? [resolveTarget(), NO_ROSTER, capture] : [resolveTarget(), NO_ROSTER]);
 
     await runAttach(['wt1']);
 
-    expect(tmuxCalls).toContainEqual(['attach-session', '-t', TARGET]);
+    expect(tmuxCalls).toContainEqual(['attach-session', '-r', '-t', TARGET]);
+    expect(writes()).toEqual([]);
+    expect(stderr()).toContain('gave no ownership answer');
+  });
+
+  it('attaches read-only even with a published name when the server gives no ownership answer', async () => {
+    // A server older than #2865 has no ownership check behind `capture`; it
+    // cannot vouch, so a published name alone is not enough.
+    mockFetchSequence([resolveTarget(), rosterPublishing(NAMESPACED), { data: { error: 'x' }, status: 404 }]);
+
+    await runAttach(['wt1']);
+
+    expect(tmuxCalls).toContainEqual(['attach-session', '-r', '-t', NAMESPACED_TARGET]);
+  });
+
+  it('refuses --live and switch-client when the server gives no ownership answer', async () => {
+    mockFetchSequence([resolveTarget(), NO_ROSTER, { data: { error: 'Session not found.' }, status: 404 }]);
+    await runAttach(['wt1', '--live']);
+    expect(mockExit).toHaveBeenCalledWith(ExitCode.UNEXPECTED_ERROR);
+    expect(tmuxCalls.map((argv) => argv[0])).toEqual(['has-session']);
+
+    tmuxCalls.length = 0;
+    mockExit.mockClear();
+    process.env.TMUX = '/tmp/tmux-501/default,123,0';
+    mockFetchSequence([resolveTarget(), NO_ROSTER, { data: { error: 'Session not found.' }, status: 404 }]);
+    await runAttach(['wt1']);
+    expect(mockExit).toHaveBeenCalledWith(ExitCode.UNEXPECTED_ERROR);
+    expect(tmuxCalls.some((argv) => argv[0] === 'switch-client')).toBe(false);
   });
 
   it('switches with keys enabled from inside tmux when the session is its own (control)', async () => {

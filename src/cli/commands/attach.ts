@@ -149,16 +149,16 @@ async function resolveAttachSessionName(
  * - `owned`: the server's ownership check passed, for this very name.
  * - `foreign`: the server answered 409 `session_owned_by_other_server` for
  *   this very name.
- * - `unconfirmed`: the server answered, but about a DIFFERENT name than the
- *   one `attach` connects to — so its answer says nothing about this one.
- * - `unanswered`: no ownership answer at all (a server older than #2865, a
- *   failure, no server).
+ * - `unconfirmed`: anything else — the owner is not known. The server answered
+ *   about a DIFFERENT name than the one `attach` connects to (`other-name`), or
+ *   gave no ownership answer at all (`no-answer`: any non-2xx such as the 404
+ *   for a namespaced session that does not exist, a server older than #2865,
+ *   no server).
  */
 export type AttachOwnership =
   | { verdict: 'owned' }
   | { verdict: 'foreign'; payload: ApiErrorPayload }
-  | { verdict: 'unconfirmed'; checkedName: string | null }
-  | { verdict: 'unanswered' };
+  | { verdict: 'unconfirmed'; why: 'other-name' | 'no-answer'; checkedName: string | null };
 
 /**
  * Ask the server whether the session `attach` is about to open is its own
@@ -183,8 +183,13 @@ export type AttachOwnership =
  * from `capture` is then about a different session: the namespaced name and
  * the legacy name can both exist, one this server's and one another's. So a
  * 200 counts as `owned` only for a published name, and a 409 counts as
- * `foreign` only when the name it reports is the one being opened. Anything
- * else the server answered is `unconfirmed`.
+ * `foreign` only when the name it reports is the one being opened.
+ *
+ * Every other outcome is `unconfirmed`, including no answer at all. A 404
+ * from `capture` is the common case of that: the roster could not be read, the
+ * name fell back to the legacy form, and the server's namespaced session does
+ * not exist — so the legacy session `has-session` found belongs to nobody this
+ * server can vouch for. Only a confirmed owner gets a writable attach.
  */
 export async function checkAttachOwnership(
   client: ApiClient,
@@ -199,7 +204,9 @@ export async function checkAttachOwnership(
       lines: 1,
       ...(instanceId !== undefined && instanceId !== cliToolId ? { instanceId } : {}),
     });
-    return target.published ? { verdict: 'owned' } : { verdict: 'unconfirmed', checkedName: null };
+    return target.published
+      ? { verdict: 'owned' }
+      : { verdict: 'unconfirmed', why: 'other-name', checkedName: null };
   } catch (error) {
     if (error instanceof ApiError && error.statusCode === 409 && error.apiCode === FOREIGN_SESSION_ERROR_CODE) {
       const payload = error.payload ?? { code: FOREIGN_SESSION_ERROR_CODE };
@@ -207,9 +214,9 @@ export async function checkAttachOwnership(
       if (checkedName === target.sessionName || (checkedName === null && target.published)) {
         return { verdict: 'foreign', payload };
       }
-      return { verdict: 'unconfirmed', checkedName };
+      return { verdict: 'unconfirmed', why: 'other-name', checkedName };
     }
-    return { verdict: 'unanswered' };
+    return { verdict: 'unconfirmed', why: 'no-answer', checkedName: null };
   }
 }
 
@@ -239,9 +246,11 @@ export function planGuardedAttach(
   const reason = ownership.verdict === 'foreign'
     ? foreignSessionMessage(ownership.payload)
     : `Could not confirm that tmux session "${sessionName}" is this CommandMate server's: `
-      + (ownership.checkedName
-        ? `the server checked "${ownership.checkedName}", not that name.`
-        : 'the server did not publish the session name it uses, so its check was about a different name.');
+      + (ownership.why === 'no-answer'
+        ? 'the server gave no ownership answer for it (an older server, a session it does not have, or no server).'
+        : ownership.checkedName
+          ? `the server checked "${ownership.checkedName}", not that name.`
+          : 'the server did not publish the session name it uses, so its check was about a different name.');
   if (options.live) {
     return {
       proceedReadOnly: false,
@@ -435,10 +444,10 @@ export function createAttachCommand(): Command {
         // Issue #3334: the name exists, but it may be another server's session,
         // and the server's check has to be about this very name.
         let readOnly = Boolean(options.readOnly);
-        // An `unanswered` probe (a server older than #2865, or none) attaches
-        // as before: `has-session` already found the name.
+        // Only a confirmed owner attaches writable; everything else is read-only
+        // or refused (`planGuardedAttach`).
         const ownership = await checkAttachOwnership(client, worktreeId, cliToolId, instanceId, target);
-        if (ownership.verdict === 'foreign' || ownership.verdict === 'unconfirmed') {
+        if (ownership.verdict !== 'owned') {
           const plan = planGuardedAttach(ownership, sessionName, {
             live: options.live,
             insideTmux: Boolean(process.env.TMUX),

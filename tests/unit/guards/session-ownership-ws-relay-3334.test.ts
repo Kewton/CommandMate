@@ -397,3 +397,69 @@ describe('[#3334] relay readiness asks ownership before isRunning()', () => {
     expect(opencodeV2Resume).toHaveBeenCalledWith(expect.anything(), ownPath);
   });
 });
+
+// =============================================================================
+// Terminal snapshot push
+// =============================================================================
+
+/**
+ * The push the response poller drives while a session generates. The poller
+ * was started by a send the route checked, but it keeps reading by name; when
+ * the session changes hands mid-poll, the next tick must neither read the
+ * other server's pane nor push it.
+ */
+describe('[#3334] terminal snapshot push', () => {
+  /** A tab watching the worktree room; returns the frames it received. */
+  async function watchingTab(): Promise<() => Array<Record<string, unknown>>> {
+    const { __internal } = await import('@/lib/ws-server');
+    __internal.resetStateForTest();
+    const tab = socket();
+    __internal.registerClientForTest(tab.ws);
+    __internal.handleMessage(tab.ws, { type: 'subscribe', worktreeId: WORKTREE_ID });
+    // Room frames arrive wrapped: `{ type: 'broadcast', worktreeId, data }`.
+    return () =>
+      tab
+        .sent()
+        .filter((event) => (event.data as { type?: unknown } | undefined)?.type === 'terminal_snapshot');
+  }
+
+  it('neither reads nor pushes a session another server owns (poller tick)', async () => {
+    const frames = await watchingTab();
+    fakeTmux.addSession(SESSION, OTHER_SERVER_PATH);
+    const { broadcastTerminalSnapshot } = await import('@/lib/realtime/terminal-broadcast');
+
+    await broadcastTerminalSnapshot(WORKTREE_ID, CLI_TOOL);
+    await settle();
+
+    expect(fakeTmux.askedSessionPathOf(SESSION)).toBe(true);
+    expect(fakeTmux.touches()).toEqual([]);
+    expect(frames()).toEqual([]);
+  }, 30_000);
+
+  it('neither reads nor pushes it after an interaction either', async () => {
+    const frames = await watchingTab();
+    fakeTmux.addSession(SESSION, OTHER_SERVER_PATH);
+    const { broadcastTerminalSnapshotAfterInteraction } = await import('@/lib/realtime/terminal-broadcast');
+
+    await broadcastTerminalSnapshotAfterInteraction(WORKTREE_ID, CLI_TOOL, undefined, [0]);
+    await settle();
+
+    expect(fakeTmux.touches()).toEqual([]);
+    expect(frames()).toEqual([]);
+  }, 30_000);
+
+  it('reads and pushes its own session (negative control)', async () => {
+    const frames = await watchingTab();
+    fakeTmux.addSession(SESSION, WORKTREE_PATH);
+    const { broadcastTerminalSnapshot } = await import('@/lib/realtime/terminal-broadcast');
+
+    await broadcastTerminalSnapshot(WORKTREE_ID, CLI_TOOL);
+    await settle();
+
+    expect(fakeTmux.touches().map((touch) => [touch.subcommand, touch.target])).toContainEqual([
+      'capture-pane',
+      SESSION,
+    ]);
+    expect(frames()).toHaveLength(1);
+  }, 30_000);
+});

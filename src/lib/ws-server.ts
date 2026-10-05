@@ -24,6 +24,10 @@ import { getWorktreeById } from './db';
 import { observeTmuxControlFirstOutputLatency } from './tmux/tmux-control-mode-metrics';
 import { getControlModeTmuxTransport } from './tmux/control-mode-tmux-transport';
 import { checkSessionOwnership } from './cli-tools/session-ownership';
+import {
+  FOREIGN_TERMINAL_SESSION_ERROR,
+  findTerminalSessionRefusal,
+} from './realtime/terminal-session-ownership';
 import { isTmuxControlModeEnabled } from './tmux/tmux-control-mode-flags';
 import { getExternalAppCache } from './external-apps/cache';
 import type { ExternalApp } from '@/types/external-apps';
@@ -923,30 +927,6 @@ function sendTerminalEvent(ws: WebSocket, data: Record<string, unknown>): void {
   }
 
   ws.send(JSON.stringify(data));
-}
-
-/** The `terminal_error` text for a session another CommandMate server owns. */
-const FOREIGN_TERMINAL_SESSION_ERROR = 'Session belongs to another CommandMate server';
-
-/**
- * Why the subscribed session may not be typed into / resized now, or null
- * (Issue #3334).
- *
- * The subscribe handler checks ownership once, but `terminal_input` and
- * `terminal_resize` address the session by its cached NAME for as long as the
- * socket lives. A session that ended and was started again by another
- * CommandMate server under the same name (#2865) would then receive this
- * client's keys, so the check is repeated before every write, the way the
- * routes repeat it per request. The worktree row is re-read by id because a
- * rename re-points the subscription (`migrateWorktreeRooms`); a row that is gone
- * cannot vouch for the session, which is refused for the same reason
- * `sendUserMessage` refuses it.
- */
-async function findTerminalSessionRefusal(worktreeId: string, sessionName: string): Promise<string | null> {
-  const worktree = getWorktreeById(getDbInstance(), worktreeId);
-  if (!worktree) return 'Worktree not found';
-  const ownership = await checkSessionOwnership(sessionName, worktree.path);
-  return ownership.verdict === 'foreign' ? FOREIGN_TERMINAL_SESSION_ERROR : null;
 }
 
 async function handleTerminalSubscribe(ws: WebSocket, message: WebSocketMessage): Promise<void> {

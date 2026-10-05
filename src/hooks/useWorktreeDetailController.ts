@@ -23,6 +23,7 @@ import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import { AGENT_MODE_UNKNOWN } from '@/types/cli-tool-contracts';
 import { useWorktreeUIState } from '@/hooks/useWorktreeUIState';
 import { useIsMobile } from '@/hooks/useIsMobile';
+import { isForeignSessionResponse } from '@/hooks/useTerminalPanePolling';
 import { useSidebarContext } from '@/contexts/SidebarContext';
 import { useOptionalWorktreesCacheContext } from '@/components/providers/WorktreesCacheProvider';
 import { type WorktreeStatus } from '@/components/mobile/MobileHeader';
@@ -824,6 +825,22 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
         : `/api/worktrees/${worktreeId}/current-output?cliTool=${requestedCliTool}`;
       const response = await fetchApiResponse(outputUrl, POLL_REQUEST_OPTIONS);
       if (!response.ok) {
+        // Issue #3334: the one refusal that will not go away on the next poll —
+        // the session under this name is another CommandMate server's (#2865).
+        // Returning left the last prompt sheet and selection-list pad of the
+        // session that WAS ours on screen, over a session no answer can reach
+        // (the routes refuse it). Same verdict the pane hook draws from the
+        // same 409: nothing of ours is waiting.
+        if (
+          response.status === 409
+          && (await isForeignSessionResponse(response))
+          && !isStale()
+        ) {
+          actions.clearPrompt();
+          setPromptAnswerable(undefined);
+          setSelectionListReading(NO_SELECTION_LIST_READING);
+          setPaneGate(CONTROLLER_PANE_GATE_NOTHING_ARRIVED);
+        }
         return;
       }
       const data: CurrentOutputResponse = await response.json();

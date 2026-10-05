@@ -1214,8 +1214,9 @@ The server's answer only counts when it is about **the very name being attached*
 cannot be read and the name falls back to the legacy form (`mcbd-<tool>-…`), the server checks the
 namespaced name, so its answer is about a different session (both names can exist at once). That is
 treated as **ownership not confirmed**: the attach is made read-only as above, and `--live` and the
-switch from inside tmux are refused. When the server gives no answer at all (older, or stopped), the
-attach goes ahead as before.
+switch from inside tmux are refused. No ownership answer at all — any non-2xx such as a 404, a
+stopped server, or an older server with no ownership check — is treated the same way. Only a session
+the server **confirms as its own** gets an attach that can send keys.
 
 When `send` / `capture` / `respond` and the other commands get the same 409, they exit with a message
 saying the session is another CommandMate server's and nothing was sent to it, read from it or stopped
