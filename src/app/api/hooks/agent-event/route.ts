@@ -41,101 +41,25 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db/db-instance';
-import { getWorktreeById } from '@/lib/db';
-import { isCliToolType, isValidInstanceId } from '@/lib/cli-tools/types';
-import type { CLIToolType } from '@/lib/cli-tools/types';
-import type { Worktree } from '@/types/models';
+import { applyAgentStopEvent } from '@/lib/hooks/agent-event-service';
 import {
-  applyAgentStopEvent,
-  resolveWorktreeByCwd,
-  validateHookCwd,
-} from '@/lib/hooks/agent-event-service';
-import {
-  AGENT_EVENT_TYPES,
-  isAgentEventType,
-  MAX_EVENT_DETAIL_LENGTH,
-  type AgentEventType,
-} from '@/lib/hooks/agent-event-types';
-import { getAgentEventSource } from '@/lib/hooks/sources';
-import type { AgentEventSource, NormalizedAgentEvent } from '@/lib/hooks/sources';
-import {
-  agentEventKeyClaimedAt,
-  isDuplicateAgentEvent,
-  joinOpenTurnFromDuplicate,
-  recordAgentEvent,
-  recordAskUserQuestion,
-  shortSessionTag,
-} from '@/lib/session/agent-event-state';
-import { isSessionRunning } from '@/lib/session/cli-session';
-import { MAX_STRUCTURED_PROMPT_MESSAGE_LENGTH } from '@/lib/session/structured-prompt';
+  applyAgentEventToState,
+  dropDuplicateAgentEvent,
+  readAgentEventRequest,
+  readEventDetail,
+  recordQuestionIfAsked,
+  resolveAgentEventWorktree,
+  warnIfCodexInstanceNotRunning,
+  type ResolvedAgentEvent,
+} from '@/lib/hooks/agent-event-intake';
 import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('api/hooks-agent-event');
-
-/** Bound on `sessionId`; it is an opaque agent-side identifier, only ever logged. */
-const MAX_SESSION_ID_LENGTH = 256;
 
 /** Identical body for every accepted request. See the module comment. */
 const ACCEPTED = { accepted: true } as const;
 
 const badRequest = (error: string) => NextResponse.json({ error }, { status: 400 });
-
-/** A string field, or undefined when absent or of the wrong type. */
-function readString(payload: Record<string, unknown>, key: string): string | undefined {
-  const value = payload[key];
-  return typeof value === 'string' && value !== '' ? value : undefined;
-}
-
-/**
- * The event, from either request shape, in the sending tool's own dialect.
- *
- * - **CommandMate's shape** (`{ tool, event, cwd }`) is what
- *   `scripts/hooks/cmate-agent-event.sh` and every hand-written hook from the
- *   #1549 guide send. The word is already resolved, so it is handed straight to
- *   the source — which is also the only channel antigravity has, since its
- *   payloads carry no event name at all (#1757 R2).
- * - **The agent's own payload** (`{ hook_event_name, cwd, session_id, … }`) is
- *   what an injected `type: "http"` hook sends, because that hook type posts the
- *   payload verbatim — the body is not configurable.
- *
- * Which spellings the second shape may use is the *source's* business, not this
- * route's (Issue #1759): Claude, codex and copilot say `Stop`, gemini says
- * `AfterAgent`, opencode says `session.idle`, and this function no longer knows
- * any of that.
- *
- * @param source - The source for the tool that sent this
- * @param payload - The request body
- * @param receivedAt - Epoch ms
- * @returns The normalised event, or an error string naming what was wrong
- */
-function readEvent(
-  source: AgentEventSource,
-  payload: Record<string, unknown>,
-  receivedAt: number
-): NormalizedAgentEvent | { error: string } {
-  const explicit = payload.event;
-  if (explicit !== undefined && !isAgentEventType(explicit)) {
-    return { error: `event must be one of: ${AGENT_EVENT_TYPES.join(', ')}` };
-  }
-
-  const normalized = source.normalizeEvent({
-    payload,
-    event: isAgentEventType(explicit) ? explicit : null,
-    receivedAt,
-  });
-  if (normalized) return normalized;
-
-  // Unmapped rather than absent: the caller named an event this tool's source
-  // does not recognise. It has already been counted (C8); the request is still
-  // refused, because a hook nobody can interpret is a configuration error the
-  // operator wants to hear about.
-  if (payload.hook_event_name !== undefined) {
-    return {
-      error: `hook_event_name is not a lifecycle event: ${String(payload.hook_event_name)}`,
-    };
-  }
-  return { error: `event must be one of: ${AGENT_EVENT_TYPES.join(', ')}` };
-}
 
 export async function POST(request: NextRequest) {
   try {
@@ -146,61 +70,16 @@ export async function POST(request: NextRequest) {
     const payload = body as Record<string, unknown>;
     const query = new URL(request.url).searchParams;
 
-    // The injected URL carries `tool`; the relay script and manual hooks put it
-    // in the body. Body first, so an operator's explicit value is never
-    // overridden by a stale URL.
-    const toolValue = readString(payload, 'tool') ?? query.get('tool') ?? undefined;
-    if (toolValue === undefined || !isCliToolType(toolValue)) {
-      return badRequest('tool must be a known CLI tool id');
+    // Tool, event, session id, instance, worktree id and `cwd`, in that order
+    // (Issue #3376: see `readAgentEventRequest`).
+    const parsed = readAgentEventRequest(payload, query);
+    if ('error' in parsed) {
+      return badRequest(parsed.error);
     }
-    const tool: CLIToolType = toolValue;
-
-    // Issue #1759: the tool decides how its own payload is read. Every tool has
-    // one — a tool with no implementation yet gets the compatibility source,
-    // which behaves exactly as this route did before the abstraction existed.
-    const source = getAgentEventSource(tool);
-
-    const receivedAt = Date.now();
-    const normalized = readEvent(source, payload, receivedAt);
-    if ('error' in normalized) {
-      return badRequest(normalized.error);
-    }
-    const event: AgentEventType = normalized.event;
-
-    const sessionId = readString(payload, 'sessionId') ?? readString(payload, 'session_id');
-    if (
-      payload.sessionId !== undefined &&
-      (typeof payload.sessionId !== 'string' || payload.sessionId.length > MAX_SESSION_ID_LENGTH)
-    ) {
-      return badRequest(
-        `sessionId must be a string of at most ${MAX_SESSION_ID_LENGTH} characters`
-      );
-    }
-
-    const instanceParam = readString(payload, 'instanceId') ?? query.get('instanceId') ?? undefined;
-    if (instanceParam !== undefined && !isValidInstanceId(instanceParam)) {
-      return badRequest('instanceId must be a safe, bounded identifier');
-    }
-
-    const worktreeIdParam =
-      readString(payload, 'worktreeId') ?? query.get('worktreeId') ?? undefined;
-
-    // `cwd` is only required when it is the sole way to find the worktree, but
-    // it is validated whenever it is sent: a malformed path is a client bug
-    // worth reporting even if this request did not need it.
-    const cwdSent = payload.cwd !== undefined;
-    const cwd = validateHookCwd(payload.cwd);
-    if (!cwd.ok && (cwdSent || worktreeIdParam === undefined)) {
-      return badRequest(`cwd rejected: ${cwd.reason}`);
-    }
+    const { tool, source, receivedAt, normalized, event, sessionId, instanceParam } = parsed;
 
     const db = getDbInstance();
-    let worktree: Worktree | null = null;
-    if (worktreeIdParam !== undefined) {
-      worktree = getWorktreeById(db, worktreeIdParam) ?? null;
-    } else if (cwd.ok) {
-      worktree = resolveWorktreeByCwd(db, cwd.cwd);
-    }
+    const worktree = resolveAgentEventWorktree(db, parsed.worktreeIdParam, parsed.cwd);
 
     if (!worktree) {
       // Accepted and dropped: a hook left configured after a worktree was
@@ -209,14 +88,18 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(ACCEPTED, { status: 202 });
     }
 
-    // The source pulls the subtype out of the payload in its own dialect
-    // (Issue #1759, S2); `detail` is the relay script's already-extracted value
-    // and stays as the fallback, because a hand-configured hook sends that and
-    // nothing else.
-    const detail =
-      normalized.detail ??
-      readString(payload, 'detail')?.slice(0, MAX_EVENT_DETAIL_LENGTH) ??
-      null;
+    const detail = readEventDetail(normalized, payload);
+    const ctx: ResolvedAgentEvent = {
+      worktree,
+      tool,
+      source,
+      instanceParam,
+      event,
+      sessionId,
+      receivedAt,
+      detail,
+      normalized,
+    };
 
     // Injection does not replace the user's own hooks, it is concatenated with
     // them, so anyone who followed the #1549 manual setup now delivers each
@@ -238,136 +121,15 @@ export async function POST(request: NextRequest) {
     const joinsOpenTurn =
       event === 'user_prompt_submit' && source.promptJoinsOpenTurn?.(payload) === true;
 
-    if (isDuplicateAgentEvent(worktree.id, tool, instanceParam, event, sessionId, receivedAt, detail)) {
-      // Issue #3330: the mark is not part of the key, so the copy that carried
-      // it can be the one dropped — an unmarked relay copy landed first and
-      // re-opened the running turn. The mark still decides that turn.
-      const joinedOpenTurn =
-        joinsOpenTurn &&
-        joinOpenTurnFromDuplicate(worktree.id, tool, instanceParam, {
-          event,
-          sessionId: sessionId ?? null,
-          joinsOpenTurn,
-        });
-      // Issue #3311: enough to tell, from this line alone, which instance and
-      // which agent session the drop was in and how long after the applied
-      // delivery it came — a copy is a few ms behind, a second turn the window
-      // swallowed is not. The daily metrics count the second kind. `sessionId`
-      // is non-null here (the window only drops events that carry one) and is
-      // logged as a hash prefix, never as itself.
-      const claimedAt = agentEventKeyClaimedAt(worktree.id, tool, instanceParam, event, sessionId, detail);
-      logger.info('agent-event-duplicate-dropped', {
-        worktreeId: worktree.id,
-        tool,
-        instanceId: instanceParam ?? tool,
-        event,
-        detail,
-        session: sessionId ? shortSessionTag(sessionId) : null,
-        sinceLastMs: claimedAt === null ? null : receivedAt - claimedAt,
-        ...(joinedOpenTurn ? { joinedOpenTurn } : {}),
-      });
+    if (dropDuplicateAgentEvent(ctx, joinsOpenTurn, logger)) {
       return NextResponse.json(ACCEPTED, { status: 202 });
     }
 
-    const recordOutcome = recordAgentEvent(
-      worktree.id,
-      tool,
-      instanceParam,
-      {
-        event,
-        at: receivedAt,
-        detail,
-        sessionId: sessionId ?? null,
-        // Issue #1725: `Notification.message` is the agent's own one-line summary
-        // ("Claude needs your permission to use Bash"). Kept for display beside
-        // the prompt it announces; `notification_type` (in `detail`) remains the
-        // only thing anything branches on (D3).
-        message:
-          readString(payload, 'message')?.slice(0, MAX_STRUCTURED_PROMPT_MESSAGE_LENGTH) ?? null,
-        // Issue #1783: which key holds the model is the source's business — it is
-        // `model` on claude and codex and `modelName` on antigravity — so this
-        // route reads the already-normalised value and never the payload. Already
-        // bounded at extraction; null for the tools that never send one, and for
-        // every Claude event except `SessionStart`, which is why the store latches
-        // the last non-null rather than the newest.
-        model: normalized.model,
-        // Issue #3330: a background-task notice Claude attaches to its running
-        // turn fires `UserPromptSubmit` as well. The source says which prompts
-        // those are; the state decides whether there is a turn to join.
-        joinsOpenTurn,
-      },
-      {
-        // Issue #1903: the declared value, read off the source this route already
-        // asked the registry for — never compared against a tool id. copilot
-        // fires `UserPromptSubmit` and then `SessionStart` 12-15 s later, and
-        // without this the second one erased the first one's `running`.
-        sessionStartMayArriveLate: source.capabilities.sessionStartMayArriveLate,
-      }
-    );
+    applyAgentEventToState(ctx, payload, joinsOpenTurn, logger);
 
-    if (!recordOutcome.recorded) {
-      // Never silent: a held frame is the one thing an operator debugging
-      // "my hooks fire and nothing happens" needs to be able to see.
-      logger.info('agent-event-held', {
-        worktreeId: worktree.id,
-        tool,
-        instanceId: instanceParam,
-        event,
-        reason: recordOutcome.skipped,
-      });
-    }
+    warnIfCodexInstanceNotRunning(ctx, logger);
 
-    if (event === 'user_prompt_submit' && tool === 'codex') {
-      // Issue #2874: codex 0.157+ runs hooks inside a machine-wide daemon whose
-      // environment belongs to whichever instance started it, so a turn can be
-      // filed under an instance that has no session at all. Detect and say so;
-      // routing is left alone. Not awaited — the hook is waiting on this reply —
-      // and never allowed to fail it.
-      const notifiedWorktreeId = worktree.id;
-      const notifiedInstanceId = instanceParam ?? tool;
-      void (async () => {
-        try {
-          if (!(await isSessionRunning(notifiedWorktreeId, tool, notifiedInstanceId))) {
-            logger.warn('agent-event-instance-not-running', {
-              worktreeId: notifiedWorktreeId,
-              tool,
-              instanceId: notifiedInstanceId,
-              event,
-              sessionId: sessionId ?? null,
-            });
-          }
-        } catch {
-          /* ignore */
-        }
-      })();
-    }
-
-    if (event === 'pre_tool_use') {
-      // Issue #1726: the one event whose *body* is the point. The injected hook
-      // carries `matcher: "AskUserQuestion"`, but `tool_name` is re-read here
-      // rather than trusted — the user's own settings.json is concatenated with
-      // the injected one (#1722), so a wider matcher can land other tools on
-      // this route, and a `Bash` payload must never be filed as a question.
-      //
-      // Recorded AFTER `recordAgentEvent`, which is what releases a previous
-      // question; the order matters because this event is the one exception to
-      // that release.
-      //
-      // Issue #1759: which fields hold the question is the source's business
-      // (S7). opencode's `question.asked` carries structured choices in a shape
-      // that shares no field name with Claude's `tool_input.questions`.
-      const spec = source.parseQuestion(payload);
-      if (spec) {
-        recordAskUserQuestion(worktree.id, tool, instanceParam, spec, receivedAt);
-        logger.info('ask-user-question-recorded', {
-          worktreeId: worktree.id,
-          tool,
-          instanceId: instanceParam,
-          questionCount: spec.questions.length,
-          optionCounts: spec.questions.map((q) => q.choices.length),
-        });
-      }
-    }
+    recordQuestionIfAsked(ctx, payload, logger);
 
     if (event !== 'stop') {
       // Recorded for operators wiring hooks up; no state change yet (#1549).
