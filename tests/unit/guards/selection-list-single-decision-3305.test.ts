@@ -20,7 +20,7 @@
  *
  *  1. 選択リストの下に並ぶ部品（番号キー、確定ボタン、Plan review、opencode のモデルのキー）を
  *     JSX で載せるのは `SelectionListKeys.tsx` だけ
- *  2. `SelectionListKeys` を載せるのは、下の表の 3 つの面だけ
+ *  2. `SelectionListKeys` を載せるのは、下の表の面だけ（#3336 で `/sessions` のタイルが加わって 4 つ）
  *  3. `resolveSelectionListOps` を呼ぶのは `SelectionListKeys.tsx` だけ
  *  4. フレームを読む（`readSelectionListFrame`、その下の `readSelectionListShape`）のは、
  *     下の表のファイルだけ
@@ -61,6 +61,12 @@ const MOUNTS: readonly { file: string; why: string }[] = [
     why:
       'ターミナル面: スマホのドック。画面はフレームを持たないので（#736）、controller の poll が'
       + '読んだ読み取り（`selectionListReading`）を渡す。',
+  },
+  {
+    file: 'src/components/sessions/SessionTile.tsx',
+    why:
+      'ターミナル面: `/sessions` のタイル（#3336）。#3305 が取り残した 4 つ目の面。'
+      + 'フレームは自分の `terminal.output`。',
   },
 ] as const;
 
