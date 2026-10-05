@@ -29,7 +29,7 @@ const logger = createLogger('response-poller');
 
 import { resolveExtractionStartIndex, isOpenCodeComplete, resolveOpenCodeTurnRegion } from '../response-extractor';
 import { isStartupScreenWithoutUserEcho } from './startup-screen';
-import { GEMINI_LOADING_INDICATORS } from './response-poller-core';
+import { GEMINI_LOADING_INDICATORS } from './response-poller-constants';
 import { incompleteResult, type ExtractionResult } from './response-checker-extraction-result';
 
 /**
