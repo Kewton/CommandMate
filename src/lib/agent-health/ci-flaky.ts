@@ -227,11 +227,17 @@ interface ShaOutcome {
   attempts: Array<{ passed: boolean; tests: Set<string> }>;
 }
 
-/**
- * The measurement. `value` is the number of flaky tests; the counts of the
- * three kinds are in `details`, each failed job of each attempt in `records`.
- */
-export function measureCiFlaky(runs: readonly CiRun[], attempts: readonly CiAttempt[], now: Date): CiFlakyMeasurement {
+interface Collected {
+  records: CiFailureRecord[];
+  outcomes: Map<string, ShaOutcome>;
+  counts: { test: number; infra: number; other: number };
+  failedAttempts: number;
+  failedTests: number;
+  attemptsNotRead: number;
+}
+
+/** Reads each attempt of each run: the failed jobs (records, counts) and the outcome per SHA. */
+function collectOutcomes(runs: readonly CiRun[], attempts: readonly CiAttempt[]): Collected {
   const read = new Map(attempts.map((a) => [`${a.runId}:${a.attempt}`, a]));
   const ordered = [...runs].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt) || a.id - b.id);
   const records: CiFailureRecord[] = [];
@@ -279,7 +285,14 @@ export function measureCiFlaky(runs: readonly CiRun[], attempts: readonly CiAtte
       outcome.attempts.push({ passed: !failed, tests });
     }
   }
+  return { records, outcomes, counts, failedAttempts, failedTests, attemptsNotRead };
+}
 
+/** The history of each failed test over the SHAs (oldest first), and how many SHAs passed on a rerun. */
+function buildHistories(
+  outcomes: Map<string, ShaOutcome>,
+  records: readonly CiFailureRecord[]
+): { histories: Map<string, TestHistory>; shaOrder: ShaOutcome[]; retrySuccesses: number } {
   const histories = new Map<string, TestHistory>();
   let retrySuccesses = 0;
   const shaOrder = [...outcomes.values()].sort((a, b) => a.firstAt - b.firstAt);
@@ -300,39 +313,63 @@ export function measureCiFlaky(runs: readonly CiRun[], attempts: readonly CiAtte
   for (const record of records) {
     for (const test of record.tests) histories.get(test)?.jobs.add(record.job);
   }
+  return { histories, shaOrder, retrySuccesses };
+}
 
-  /** Failed in the last attempt of every SHA (of its workflow) since it first failed. */
-  const failsEverySince = (test: string, history: TestHistory): boolean => {
-    const same = shaOrder.filter((o) => o.workflow === history.workflow);
-    const start = same.findIndex((o) => o.sha === history.shas[0]);
-    return same.slice(start).every((o) => o.attempts[o.attempts.length - 1]?.tests.has(test) === true);
+/** Failed in the last attempt of every SHA (of its workflow) since it first failed. */
+function failsEverySince(test: string, history: TestHistory, shaOrder: readonly ShaOutcome[]): boolean {
+  const same = shaOrder.filter((o) => o.workflow === history.workflow);
+  const start = same.findIndex((o) => o.sha === history.shas[0]);
+  return same.slice(start).every((o) => o.attempts[o.attempts.length - 1]?.tests.has(test) === true);
+}
+
+function buildFinding(test: string, history: TestHistory, isBroken: boolean): MetricFinding {
+  const kind = isBroken ? 'broken' : 'flaky';
+  const target = testTarget(test);
+  const shas = history.shas.slice(0, 5).map((sha) => sha.slice(0, 7)).join(', ');
+  const rerun = history.passedOnRerun > 0 ? `／やり直しで成功 ${history.passedOnRerun} 回` : '';
+  const unchecked = !isBroken && history.passedOnRerun === 0 ? '（間のコミットがテストと対象を変えたかは見ていない）' : '';
+  return {
+    target,
+    title: isBroken
+      ? `fix: 落ち続けるテスト ${shorten(test)} を直す（${history.shas.length} コミット続けて失敗）`
+      : `test: 不安定なテスト ${shorten(test)} を直す（${CI_FLAKY_WINDOW_DAYS} 日で失敗 ${history.failures} 回）`,
+    evidence: `${test}: 直近 ${CI_FLAKY_WINDOW_DAYS} 日の develop push で失敗 ${history.failures} 回（SHA ${history.shas.length} 個: ${shas}${rerun}）／ジョブ: ${[...history.jobs].join(', ')}${unchecked}`,
+    itemKeys: [`${kind}:${target}`],
   };
+}
 
+/** Flaky / broken candidates: `items` and `findings` by test, and the two counts. */
+function selectCandidates(
+  histories: Map<string, TestHistory>,
+  shaOrder: readonly ShaOutcome[]
+): { items: Record<string, number>; findings: Record<string, MetricFinding>; flaky: number; broken: number } {
   const items: Record<string, number> = {};
   const findings: Record<string, MetricFinding> = {};
   let flaky = 0;
   let broken = 0;
   for (const [test, history] of [...histories].sort(([a], [b]) => a.localeCompare(b))) {
     const repeated = history.shas.length >= CI_FLAKY_REPEAT_MIN_SHAS;
-    const isBroken = history.passedOnRerun === 0 && repeated && failsEverySince(test, history);
+    const isBroken = history.passedOnRerun === 0 && repeated && failsEverySince(test, history, shaOrder);
     if (!isBroken && history.passedOnRerun === 0 && !repeated) continue;
     const kind = isBroken ? 'broken' : 'flaky';
     if (isBroken) broken++;
     else flaky++;
-    const target = testTarget(test);
-    const shas = history.shas.slice(0, 5).map((sha) => sha.slice(0, 7)).join(', ');
-    const rerun = history.passedOnRerun > 0 ? `／やり直しで成功 ${history.passedOnRerun} 回` : '';
-    const unchecked = !isBroken && history.passedOnRerun === 0 ? '（間のコミットがテストと対象を変えたかは見ていない）' : '';
-    items[`${kind}:${target}`] = history.failures;
-    findings[target] = {
-      target,
-      title: isBroken
-        ? `fix: 落ち続けるテスト ${shorten(test)} を直す（${history.shas.length} コミット続けて失敗）`
-        : `test: 不安定なテスト ${shorten(test)} を直す（${CI_FLAKY_WINDOW_DAYS} 日で失敗 ${history.failures} 回）`,
-      evidence: `${test}: 直近 ${CI_FLAKY_WINDOW_DAYS} 日の develop push で失敗 ${history.failures} 回（SHA ${history.shas.length} 個: ${shas}${rerun}）／ジョブ: ${[...history.jobs].join(', ')}${unchecked}`,
-      itemKeys: [`${kind}:${target}`],
-    };
+    const finding = buildFinding(test, history, isBroken);
+    items[`${kind}:${finding.target}`] = history.failures;
+    findings[finding.target] = finding;
   }
+  return { items, findings, flaky, broken };
+}
+
+/**
+ * The measurement. `value` is the number of flaky tests; the counts of the
+ * three kinds are in `details`, each failed job of each attempt in `records`.
+ */
+export function measureCiFlaky(runs: readonly CiRun[], attempts: readonly CiAttempt[], now: Date): CiFlakyMeasurement {
+  const { records, outcomes, counts, failedAttempts, failedTests, attemptsNotRead } = collectOutcomes(runs, attempts);
+  const { histories, shaOrder, retrySuccesses } = buildHistories(outcomes, records);
+  const { items, findings, flaky, broken } = selectCandidates(histories, shaOrder);
 
   return {
     metricId: 'ci-flaky',
