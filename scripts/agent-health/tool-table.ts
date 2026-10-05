@@ -24,7 +24,11 @@ import { getCodexHome, getCodexHooksPath } from '@/lib/hooks/sources/codex/hooks
 import { getCodexRelayInstallPath } from '@/lib/hooks/sources/codex/relay-install';
 import { sameTomlWithoutMarker, type TrustStateComparator } from '@/lib/agent-health/config-guard';
 import type { PickerSettingsFormat } from '@/lib/agent-health/picker-settings';
-import type { AgentHealthTool } from '@/lib/agent-health/types';
+import type {
+  AgentHealthLimitedTool,
+  AgentHealthSkipKind,
+  AgentHealthTool,
+} from '@/lib/agent-health/types';
 
 export interface StartupDialog {
   id: string;
@@ -432,5 +436,69 @@ export const TOOL_PROBE_SPECS: Record<AgentHealthTool, ToolProbeSpec> = {
     launchEnv: (workDir) => ({ XDG_STATE_HOME: `${workDir}-xdg-state` }),
     guardedFiles: () => ({ hookConfig: [], trustState: [] }),
     server: 'opencode-v2',
+  },
+};
+
+/**
+ * A CLI the probe does not launch (Issue #3313): only `--version` is read,
+ * and every other check is a skip with this kind and reason. Why each is not
+ * launched is measured, not assumed — see each row.
+ */
+export interface LimitedToolSpec {
+  tool: AgentHealthLimitedTool;
+  /** The program and arguments that print the version without starting a session. */
+  versionCommand: { file: string; args: string[] };
+  /** What the other checks report, and why the tool is not launched. */
+  skip: { kind: AgentHealthSkipKind; summary: string; reason: string };
+}
+
+/** `~/.local/lib/vibe-local/vibe-coder.py`, where the vibe-local launcher looks for it. */
+export function vibeCoderScriptPath(): string {
+  return path.join(os.homedir(), '.local', 'lib', 'vibe-local', 'vibe-coder.py');
+}
+
+export const LIMITED_TOOL_SPECS: Record<AgentHealthLimitedTool, LimitedToolSpec> = {
+  // Starting gemini refreshes its OAuth token into `~/.gemini/oauth_creds.json`
+  // (the user's sign-in), and the credentials cannot be copied into an
+  // isolated home, so it is not started every morning. The state it would
+  // find is the one Issue #3313 measured on 2026-10-05.
+  gemini: {
+    tool: 'gemini',
+    versionCommand: { file: 'gemini', args: ['--version'] },
+    skip: {
+      kind: 'signed-out',
+      summary:
+        'gemini はこの環境でサインインできない（2026-10-05 の実測: 「This client is no longer supported for Gemini Code Assist for individuals」、Issue #3313）',
+      reason:
+        'サインインできない（2026-10-05 の実測、Issue #3313）。起動すると OAuth のトークン更新で利用者の ~/.gemini/oauth_creds.json を書き換えるため、毎朝は起動して確かめない',
+    },
+  },
+  // `vibe-local --version` is not a version flag: the launcher script checks
+  // Ollama (starting it with `open -a Ollama` / `ollama serve &` when it is
+  // down), then asks for permission on /dev/tty and starts a session. Its
+  // engine `vibe-coder.py` answers `--version` itself (`vibe-coder 1.3.3`).
+  'vibe-local': {
+    tool: 'vibe-local',
+    versionCommand: { file: 'python3', args: [vibeCoderScriptPath(), '--version'] },
+    skip: {
+      kind: 'unsupported',
+      summary: 'vibe-local は起動して確かめていない（agent-health が起動手順を持たない）',
+      reason:
+        '起動スクリプトが Ollama が止まっていれば起動し（open -a Ollama / ollama serve &）、/dev/tty で許可を訊き、~/.local/state/vibe-local にセッションを書くため、毎朝は起動しない。hook も持たない（AgentEventSource が無い）',
+    },
+  },
+  // Starting copilot rewrites `~/.copilot/config.json` (it is "managed
+  // automatically"; `recentModelIds` changes), CommandMate's launch writes the
+  // machine-wide `~/.copilot/settings.json` hooks, and the sign-in cannot be
+  // moved into an isolated `COPILOT_HOME` without copying credentials.
+  copilot: {
+    tool: 'copilot',
+    versionCommand: { file: 'copilot', args: ['--version'] },
+    skip: {
+      kind: 'unsupported',
+      summary: 'copilot は起動して確かめていない（agent-health が起動手順を持たない）',
+      reason:
+        '起動すると利用者の ~/.copilot/config.json を書き換え（recentModelIds）、CommandMate の起動は ~/.copilot/settings.json（マシンに 1 つ）に hook を書く。資格情報を別の COPILOT_HOME へ複製しないとサインインを隔離できないため、毎朝は起動しない（サインインの状態も確かめていない）',
+    },
   },
 };
