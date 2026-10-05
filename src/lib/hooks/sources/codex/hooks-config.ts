@@ -62,7 +62,9 @@
  * start. Those post too, with the environment variables unset; the relay omits
  * the correlation keys it does not have and the receiver falls back to
  * resolving the worktree from `cwd`, which is exactly the hand-configured
- * behaviour of Issue #1549. `CM_AGENT_HOOKS_INJECT=0` turns the whole thing off.
+ * behaviour of Issue #1549. `CM_AGENT_HOOKS_INJECT=0` turns the whole thing off;
+ * `CM_UAT_ISOLATION=1` keeps it on without writing any shared file (Issue #3360,
+ * {@link reuseCodexHookSettingsReadOnly}).
  *
  * ## The shared app-server daemon (Issue #2874)
  *
@@ -86,6 +88,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { homedir } from 'os';
 import { dirname, join } from 'path';
 import { resolveSafeDirectory } from '@/config/safe-directory';
+import { isUatIsolationEnabled } from '@/config/uat-isolation';
 import { isValidInstanceId } from '@/lib/cli-tools/types';
 import { getServerPort } from '@/lib/env';
 import type { AgentEventType } from '@/lib/hooks/agent-event-types';
@@ -105,7 +108,11 @@ import { sanitizeEnvForChildProcess } from '@/lib/security/env-sanitizer';
 import { isValidWorktreeId } from '@/lib/security/path-validator';
 import { isPlainObject } from '../event-mapper';
 import type { AgentInstanceRef, AgentLaunchPlan } from '../types';
-import { getInstalledCodexRelayPath, installCodexRelayScript } from './relay-install';
+import {
+  getCodexRelayInstallPath,
+  getInstalledCodexRelayPath,
+  installCodexRelayScript,
+} from './relay-install';
 import { CODEX_CLI_TOOL_ID } from './tool-id';
 
 const logger = createLogger('lib/hooks/sources/codex/hooks-config');
@@ -380,6 +387,10 @@ export function isCodexHookTrustBypassEnabled(): boolean {
  */
 export function shouldTrustCodexHooks(worktreePath: string): boolean {
   if (resolveCodexHookTrustPolicy() === 'never') return false;
+  // Issue #3360: a grant is codex writing the user's own `config.toml`, which a
+  // UAT / daily-check server must not cause. Declined, the hooks stay inert for
+  // that session — the "no hooks" case the UAT already has to tolerate.
+  if (isUatIsolationEnabled()) return false;
   try {
     // codex reads `<cwd>/.codex/hooks.json` as well as the home one, and a
     // review that includes a hook from the repository is a review this server
@@ -623,6 +634,11 @@ export function mergeCodexHookSettings(
   return base;
 }
 
+/** The bytes `hooks.json` should hold, given what it holds now. */
+function renderCodexHookSettings(existing: unknown, options: CodexHookOptions): string {
+  return `${JSON.stringify(mergeCodexHookSettings(existing, buildCodexHookSettings(options)), null, 2)}\n`;
+}
+
 /**
  * Write the hooks file, and answer where it is.
  *
@@ -635,6 +651,10 @@ export function mergeCodexHookSettings(
  */
 export function writeCodexHookSettings(options: CodexHookOptions = {}): string | null {
   const settingsPath = getCodexHooksPath(options);
+
+  // Issue #3360: UAT isolation never writes the shared files. See
+  // {@link reuseCodexHookSettingsReadOnly}.
+  if (isUatIsolationEnabled()) return reuseCodexHookSettingsReadOnly(options);
 
   // Issue #2315: put the relay where the generated file can name it without
   // naming a checkout, BEFORE the content is built — `buildCodexHookSettings`
@@ -663,11 +683,71 @@ export function writeCodexHookSettings(options: CodexHookOptions = {}): string |
     }
   }
 
-  const content = `${JSON.stringify(mergeCodexHookSettings(existing, buildCodexHookSettings(options)), null, 2)}\n`;
+  const content = renderCodexHookSettings(existing, options);
   if (previous === content) return settingsPath;
 
   mkdirSync(dirname(settingsPath), { recursive: true, mode: 0o700 });
   writeFileSync(settingsPath, content, { mode: 0o600 });
+  return settingsPath;
+}
+
+/**
+ * {@link writeCodexHookSettings} for a server in UAT isolation mode
+ * (`CM_UAT_ISOLATION=1`, Issue #3360): the same answer, with no write.
+ *
+ * `$CODEX_HOME/hooks.json`, the installed relay and the hook trust in
+ * `config.toml` are shared with the user's production server and live beside
+ * codex's login, so they cannot be moved for a UAT either. They do not need to
+ * be written to work for one: the file holds no port, worktree or instance —
+ * {@link buildCodexLaunchPlan} hands those to the session in its environment —
+ * so a file production has already written, byte-identical to what this build
+ * would write, delivers this session's events to THIS server.
+ *
+ * Anything else is answered with null, which the launch plan turns into "start
+ * codex without hooks": no file yet, a file this build would change (a newer or
+ * older CommandMate), or an installed relay whose bytes differ from the one this
+ * build ships (the command string would match while running another script).
+ *
+ * @returns The path when the shared file can be used as it is, else null
+ */
+export function reuseCodexHookSettingsReadOnly(options: CodexHookOptions = {}): string | null {
+  const settingsPath = getCodexHooksPath(options);
+
+  if (options.relayScriptPath === undefined) {
+    const shipped = resolveRelayScriptPath();
+    const installed = getCodexRelayInstallPath(getCodexHome(options));
+    try {
+      if (
+        shipped &&
+        existsSync(installed) &&
+        readFileSync(shipped, 'utf8') !== readFileSync(installed, 'utf8')
+      ) {
+        logger.info('codex-hooks-shared-relay-differs-readonly', { installed });
+        return null;
+      }
+    } catch {
+      return null;
+    }
+  }
+
+  let previous: string;
+  try {
+    if (!existsSync(settingsPath)) {
+      logger.info('codex-hooks-shared-absent-readonly', { settingsPath });
+      return null;
+    }
+    previous = readFileSync(settingsPath, 'utf8');
+    if (previous !== renderCodexHookSettings(JSON.parse(previous), options)) {
+      logger.info('codex-hooks-shared-differs-readonly', { settingsPath });
+      return null;
+    }
+  } catch (error) {
+    logger.warn('codex-hooks-config-unreadable', {
+      settingsPath,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
   return settingsPath;
 }
 

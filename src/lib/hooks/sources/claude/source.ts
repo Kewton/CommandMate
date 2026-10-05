@@ -31,6 +31,7 @@
  * @module lib/hooks/sources/claude/source
  */
 
+import { CLAUDE_UAT_SETTING_SOURCES, isUatIsolationEnabled } from '@/config/uat-isolation';
 import { AGENT_EVENT_TYPES } from '@/lib/hooks/agent-event-types';
 import { parseAskUserQuestionPayload } from '@/lib/hooks/ask-user-question-payload';
 import {
@@ -198,7 +199,7 @@ export const claudeAgentEventSource: AgentEventSource = definePushHookSource({
   // writes the settings file, falls back to the bare path on any failure, and is
   // covered byte-for-byte by `tests/unit/hooks/hook-settings-generator.test.ts`.
   prepareLaunch: ({ target, executablePath }: AgentLaunchContext): AgentLaunchPlan => {
-    const command = buildClaudeLaunchCommand(executablePath, {
+    const baseCommand = buildClaudeLaunchCommand(executablePath, {
       worktreeId: target.worktreeId,
       instanceId: target.instanceId,
       cliToolId: target.cliToolId,
@@ -208,13 +209,18 @@ export const claudeAgentEventSource: AgentEventSource = definePushHookSource({
     // return the bare executable — claiming a settings file in that case would
     // be telling the caller about a file that is not there.
     const settingsPath =
-      isHookInjectionEnabled() && command !== executablePath
+      isHookInjectionEnabled() && baseCommand !== executablePath
         ? getHookSettingsPath({
             worktreeId: target.worktreeId,
             instanceId: target.instanceId,
             cliToolId: target.cliToolId,
           })
         : null;
+    // Issue #3360: in UAT isolation the user's own `~/.claude/settings.json`
+    // (whose hooks post to production) is not loaded; `--settings` still is.
+    const command = isUatIsolationEnabled()
+      ? `${baseCommand} --setting-sources ${CLAUDE_UAT_SETTING_SOURCES}`
+      : baseCommand;
     // Empty, and the only source for which that is uninteresting: `--settings`
     // carries the correlation keys inside the file, so Claude never needed the
     // environment prefix the other four sources reached for (#1846).

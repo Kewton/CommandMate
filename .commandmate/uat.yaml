@@ -50,9 +50,11 @@ env:
     set -e
     mkdir -p {run_dir}/root
     # codex's two shared files are keyed by $CODEX_HOME alone, so they cannot be
-    # moved without moving codex's login. Record their sha256 here; `down`
-    # compares and fails when the UAT build rewrote them. Never written back.
-    for f in "${CODEX_HOME:-$HOME/.codex}/hooks.json" "${CODEX_HOME:-$HOME/.codex}/commandmate/cmate-agent-event.sh"; do
+    # moved without moving codex's login. CM_UAT_ISOLATION=1 (Issue #3360) makes
+    # the server write neither (nor antigravity's ~/.gemini/config/hooks.json);
+    # their sha256 is still recorded here and `down` fails when they changed —
+    # the detector stays as the check on the prevention. Never written back.
+    for f in "${CODEX_HOME:-$HOME/.codex}/hooks.json" "${CODEX_HOME:-$HOME/.codex}/commandmate/cmate-agent-event.sh" "$HOME/.gemini/config/hooks.json"; do
       printf '%s  %s\n' "$( [ -f "$f" ] && shasum -a 256 "$f" | cut -d' ' -f1 || echo absent )" "$f"
     done > {run_dir}/codex-shared.sha256
     mkdir -p -m 700 /tmp/cmuat-{port}
@@ -60,10 +62,20 @@ env:
     env -i HOME="$HOME" PATH="$PATH" USER="$USER" LOGNAME="$LOGNAME" SHELL="$SHELL" \
       LANG="${LANG:-en_US.UTF-8}" TERM="${TERM:-xterm-256color}" \
       TMUX="/tmp/cmuat-{port}/tmux.sock,$(lsof -t /tmp/cmuat-{port}/tmux.sock | head -1),0" \
-      NODE_ENV=production CM_PORT={port} CM_BIND=127.0.0.1 \
+      NODE_ENV=production CM_PORT={port} CM_BIND=127.0.0.1 CM_UAT_ISOLATION=1 \
       CM_DB_PATH={run_dir}/uat.db CM_ROOT_DIR={run_dir}/root \
       CM_OPENCODE_V2_DIR={run_dir}/opencode-v2 CM_AGENT_HOOKS_DIR={run_dir}/hooks \
       nohup node dist/server/server.js > {run_dir}/server.log 2>&1 &
+  # The CLI for this run (Issue #3360) — the SAME build's CLI by absolute path,
+  # never the global `commandmate`; its own empty HOME, so neither
+  # ~/.commandmate/.env nor ~/.commandmate-security.log is touched; CM_PORT
+  # exported, and CM_UAT_ISOLATION=1 so that it reads no .env and exits 2
+  # instead of falling back to 3000 (production) when CM_PORT is missing:
+  #
+  #   mkdir -p {run_dir}/client-home
+  #   env -i HOME={run_dir}/client-home PATH="$PATH" CM_UAT_ISOLATION=1 \
+  #     CM_PORT={port} CM_BIND=127.0.0.1 node "$PWD/bin/commandmate.js" ls --json
+  #
   # Stops ONLY what LISTENS on {port} (never a process merely connected to it,
   # CommandMate#2473), waits up to 10 s, then removes the private tmux server.
   # Written inline so it does not depend on where cmate-uat is installed.
@@ -77,7 +89,7 @@ env:
     # Fail when the UAT build rewrote codex's shared hook or relay script.
     while read -r h f; do
       n=$( [ -f "$f" ] && shasum -a 256 "$f" | cut -d' ' -f1 || echo absent )
-      [ "$n" = "$h" ] || { echo "codex shared file changed during UAT: $f" >&2; exit 1; }
+      [ "$n" = "$h" ] || { echo "shared agent hook file changed during UAT: $f" >&2; exit 1; }
     done < {run_dir}/codex-shared.sha256
   health: "curl -fsS -m 5 -o /dev/null http://127.0.0.1:{port}/api/worktrees"
   health_timeout_sec: 90
@@ -95,6 +107,9 @@ isolation:
     # server was not left pointing at the user's ~/.commandmate ones (negative).
     - "P=$(lsof -nP -iTCP:{port} -sTCP:LISTEN -t | head -1); ps eww -p $P | tr ' ' '\\n' | grep -qxF 'CM_OPENCODE_V2_DIR={run_dir}/opencode-v2' && ps eww -p $P | tr ' ' '\\n' | grep -qxF 'CM_AGENT_HOOKS_DIR={run_dir}/hooks'"
     - "P=$(lsof -nP -iTCP:{port} -sTCP:LISTEN -t | head -1); ! ps eww -p $P | tr ' ' '\\n' | grep -E '^CM_(OPENCODE_V2|AGENT_HOOKS)_DIR=' | grep -vF '{run_dir}/'"
+    # It runs in UAT isolation (Issue #3360): no shared codex / antigravity
+    # write, no codex hook trust grant, no user-level claude settings.
+    - "P=$(lsof -nP -iTCP:{port} -sTCP:LISTEN -t | head -1); ps eww -p $P | tr ' ' '\\n' | grep -qxF 'CM_UAT_ISOLATION=1'"
     # The API sees only the sandbox root: every registered repository lives under {run_dir}/root.
     - "curl -fsS -m 5 http://127.0.0.1:{port}/api/repositories | python3 -c \"import json,sys; d=json.load(sys.stdin); r=d if isinstance(d,list) else d.get('repositories',[]); sys.exit(0 if all(str(x.get('path','')).startswith('{run_dir}/root') for x in r) else 1)\""
 report_dir: ".commandmate/uat"

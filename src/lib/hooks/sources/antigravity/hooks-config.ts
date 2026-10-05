@@ -74,6 +74,7 @@
 
 import { homedir } from 'os';
 import { join } from 'path';
+import { isUatIsolationEnabled } from '@/config/uat-isolation';
 import { isValidInstanceId } from '@/lib/cli-tools/types';
 import { SELF_RESUME_PENDING_DETAIL, type AgentEventType } from '@/lib/hooks/agent-event-types';
 import {
@@ -409,6 +410,9 @@ export function mergeAntigravityHooksConfig(
 /**
  * Write `~/.gemini/config/hooks.json`.
  *
+ * Under `CM_UAT_ISOLATION=1` (Issue #3360) nothing is written: an existing file
+ * that already holds exactly this config is reused, anything else answers null.
+ *
  * @returns The path written, or null when injection is off or not possible
  */
 export function writeAntigravityHooksConfig(options: { path?: string } = {}): string | null {
@@ -423,10 +427,19 @@ export function writeAntigravityHooksConfig(options: { path?: string } = {}): st
   const configPath = getAntigravityHooksConfigPath(options);
   try {
     const existing = readJsonObjectFile(configPath);
-    writeJsonObjectFile(
-      configPath,
-      mergeAntigravityHooksConfig(existing, buildAntigravityHookConfig(relayPath))
-    );
+    const merged = mergeAntigravityHooksConfig(existing, buildAntigravityHookConfig(relayPath));
+    if (isUatIsolationEnabled()) {
+      // Issue #3360: the file is the user's, shared with their production
+      // server, and names a relay by this checkout's path. A UAT server writes
+      // nothing to it: one that already says exactly this is used as it is;
+      // anything else means a session without hooks.
+      if (existing !== null && JSON.stringify(existing) === JSON.stringify(merged)) {
+        return configPath;
+      }
+      logger.info('antigravity-hooks-config-differs-readonly', { configPath });
+      return null;
+    }
+    writeJsonObjectFile(configPath, merged);
     return configPath;
   } catch (error) {
     // Fail-open. A session that starts without hooks is the pre-#1762 status

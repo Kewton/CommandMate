@@ -148,4 +148,16 @@ describe('.commandmate/uat.yaml (Issue #2590)', () => {
     // Never writes back: the user's own changes must survive.
     expect(down).not.toMatch(/\bcp\b|\bmv\b|>\s*"?\$f/);
   });
+
+  it('starts the server in UAT isolation and checks it on the running process (Issue #3360)', () => {
+    const [line] = logicalLines(spec.env.up).filter((l) => l.includes('dist/server/server.js'));
+    const at = line.indexOf('CM_UAT_ISOLATION=1');
+    expect(at, 'the server line must set CM_UAT_ISOLATION=1').toBeGreaterThan(line.indexOf('env -i'));
+    expect(at).toBeLessThan(line.indexOf('nohup'));
+    expect(
+      spec.isolation.checks.some((c) => c.includes('ps eww') && c.includes("grep -qxF 'CM_UAT_ISOLATION=1'"))
+    ).toBe(true);
+    // antigravity's shared file joins codex's in the before/after hash.
+    expect(spec.env.up).toContain('.gemini/config/hooks.json');
+  });
 });
