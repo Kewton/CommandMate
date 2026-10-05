@@ -163,6 +163,23 @@ function isCodexDialogGlyphTail(raw: string): boolean {
   return findCodexBottomGlyphRow(raw)?.kind === 'option';
 }
 
+/**
+ * Issue #3205: the bottom content row as the idle/running branches read it.
+ *
+ * A composer holding several lines puts its continuation rows below the `›`
+ * row, so `lastRow` is then the composer's last line (`  world`), which is
+ * neither the `›` the idle branch looks for nor anything codex is working on —
+ * branch C read every such frame as `running`. When the live region's composer
+ * ends on `lastRow`, the composer's `›` row is returned instead, so its 2nd and
+ * later lines are read as composer text and never as transcript or a working
+ * row. Any other frame keeps `lastRow`.
+ */
+function codexTailRowAboveComposerText(frame: NormalizedFrame, lastRow: number): number {
+  const region = liveRegionOf(frame, 'codex');
+  if (region.anchor !== 'composer' || region.composerEndRow !== lastRow) return lastRow;
+  return region.startRow;
+}
+
 export const codexStatusDetector = createToolStatusDetector({
   tool: 'codex',
   verifiedAgainst: VERIFIED_AGAINST,
@@ -354,6 +371,8 @@ export const codexStatusDetector = createToolStatusDetector({
       while (lastContentIdx >= 0 && contentLines[lastContentIdx].trim() === '') {
         lastContentIdx--;
       }
+      // Issue #3205: a multi-line composer ends on its own `›` row here.
+      lastContentIdx = codexTailRowAboveComposerText(frame, lastContentIdx);
       if (lastContentIdx >= 0) {
         // A. Check content area for thinking indicators (wider window than the shared step)
         const codexThinkingWindow = contentLines
@@ -416,6 +435,8 @@ export const codexStatusDetector = createToolStatusDetector({
       while (codexTailIdx >= 0 && contentLines[codexTailIdx].trim() === '') {
         codexTailIdx--;
       }
+      // Issue #3205: as in 2.7, a multi-line composer is read from its `›` row.
+      codexTailIdx = codexTailRowAboveComposerText(frame, codexTailIdx);
       const codexTailIsIdlePrompt =
         codexTailIdx >= 0 &&
         CODEX_PROMPT_PATTERN.test(contentLines[codexTailIdx].trim()) &&
