@@ -12,6 +12,8 @@ codex と vibe-local は、起動画面（バナー）が返答の行として�
 - `tests/unit/lib/polling/response-checker-startup-screen-3293.test.ts`（経路 A: poller）
 - `tests/unit/lib/assistant-response-saver-startup-screen-3293.test.ts`（経路 B: 送信直前の退避）
 - `tests/unit/lib/detection/codex-verdict-corpus.test.ts`（codex の画面は全件ここに行を持つ）
+- `tests/unit/lib/polling/response-checker-codex-cursor-3335.test.ts`・`tests/unit/lib/assistant-response-saver-codex-cursor-3335.test.ts`（0.160.0 で入力欄に止まったカーソルから、誤った行を保存しない。Issue #3335）
+- `tests/unit/scripts/cleanup-startup-banner-rows-3335.test.ts`（既に保存された起動画面の行の掃除。Issue #3335）
 
 ## 採取
 

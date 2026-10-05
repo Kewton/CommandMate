@@ -29,6 +29,9 @@ export const METRICS_LABEL = 'metrics';
 export const CATALOG_LABEL = 'catalog-drift';
 /** Performance Issues are filed automatically but fixed by a person, so dispatch skips them. */
 export const PERF_LABEL = 'perf';
+
+/** Issues a person must judge (e.g. unused files: "reported" is not "safe to delete"), so dispatch skips them. */
+export const NEEDS_HUMAN_LABEL = 'needs-human';
 export const SECURITY_LABEL = 'security';
 export const DISPATCHED_LABEL = 'auto-dispatched';
 /** Labels the run relies on; the script never creates them (docs/user-guide/agent-health.md「自動依頼」). */
@@ -94,6 +97,7 @@ export function issueKind(issue: CandidateIssue): DispatchIssueKind | null {
   if (issue.author.toLowerCase() !== DISPATCH_AUTHOR) return null;
   if (issue.labels.includes(DISPATCHED_LABEL)) return null;
   if (issue.labels.includes(PERF_LABEL)) return null;
+  if (issue.labels.includes(NEEDS_HUMAN_LABEL)) return null;
   if (issue.labels.includes(BUG_LABEL)) return 'bug';
   if (issue.labels.includes(CATALOG_LABEL)) return 'catalog';
   if (issue.labels.includes(METRICS_LABEL)) return 'metrics';

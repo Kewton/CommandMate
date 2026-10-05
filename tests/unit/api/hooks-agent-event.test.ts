@@ -693,6 +693,239 @@ describe('a turn that began right after the previous one ended (Issue #3301)', (
   });
 });
 
+describe('a queued notice delivered into a running turn (Issue #3330)', () => {
+  /**
+   * The shape the injected `type: "http"` hook posts: Claude's own payload,
+   * prompt included. In the server logs of 2026-10-02 to 2026-10-05, 178
+   * deliveries like the second one below arrived with the turn still open, a
+   * median of 63.5 s after it opened, each matched by a
+   * `queue-operation: remove` of a `<task-notification>` in the transcript.
+   * Applying one re-opened the turn under a new id.
+   */
+  const T = 1_800_000_000_000;
+  const NOTICE_AFTER_MS = 63_500;
+  const STOP_AFTER_MS = 90_000;
+  const SESSION = 'sess-3330';
+  const NOTICE = '<task-notification>\n<status>completed</status>\n</task-notification>';
+
+  afterEach(() => unfreezeClock());
+
+  async function deliver(hookEventName: string, afterMs: number, prompt?: string) {
+    freezeClock(T + afterMs);
+    const response = await postEvent({
+      tool: 'claude',
+      hook_event_name: hookEventName,
+      cwd: repo,
+      session_id: SESSION,
+      ...(prompt === undefined ? {} : { prompt }),
+    });
+    expect(response.status).toBe(202);
+  }
+
+  it('keeps the turn open under its id, and that turn’s stop closes it', async () => {
+    const task = seedTask({ status: 'running' });
+
+    await deliver('UserPromptSubmit', 0, 'Implement the change');
+    const opened = getAgentTurn(wtId, 'claude');
+    expect(opened?.openedAt).toBe(T);
+
+    await deliver('UserPromptSubmit', NOTICE_AFTER_MS, NOTICE);
+
+    const joined = getAgentTurn(wtId, 'claude');
+    expect(joined?.turnId).toBe(opened?.turnId);
+    expect(joined?.openedAt).toBe(T);
+    expect(joined?.closedAt).toBeNull();
+    expect(getStructuredSessionState(wtId, 'claude')?.status).toBe('running');
+    // What `wait` reads (`turnSettled`): no stop at or after the turn it adopted.
+    expect(getLastStopEventAt(wtId, 'claude')).toBeNull();
+
+    await deliver('Stop', STOP_AFTER_MS);
+
+    const closed = getAgentTurn(wtId, 'claude');
+    expect(closed?.turnId).toBe(opened?.turnId);
+    expect(closed?.closedBy).toBe('stop');
+    expect(getLastStopEventAt(wtId, 'claude')).toBe(T + STOP_AFTER_MS);
+    expect(getLastStopEventAt(wtId, 'claude')).toBeGreaterThanOrEqual(closed?.openedAt ?? Infinity);
+    expect(getStructuredSessionState(wtId, 'claude')?.status).toBe('ready');
+    expect(listTaskEvents(db, task.id).map((event) => event.event)).toEqual(['agent_idle']);
+  });
+
+  it('opens a new turn for a prompt that is not a notice (control: interrupt and resend)', async () => {
+    await deliver('UserPromptSubmit', 0, 'Implement the change');
+    const opened = getAgentTurn(wtId, 'claude');
+
+    await deliver('UserPromptSubmit', NOTICE_AFTER_MS, 'Actually, do it differently');
+
+    const resent = getAgentTurn(wtId, 'claude');
+    expect(resent?.turnId).not.toBe(opened?.turnId);
+    expect(resent?.openedAt).toBe(T + NOTICE_AFTER_MS);
+  });
+
+  it('opens a new turn for a notice that arrives after the turn ended (#3289)', async () => {
+    await deliver('UserPromptSubmit', 0, 'Implement the change');
+    const first = getAgentTurn(wtId, 'claude');
+    await deliver('Stop', 2_000);
+    await deliver('UserPromptSubmit', 2_540, NOTICE);
+
+    const resumed = getAgentTurn(wtId, 'claude');
+    expect(resumed?.turnId).not.toBe(first?.turnId);
+    expect(resumed?.openedAt).toBe(T + 2_540);
+    expect(getStructuredSessionState(wtId, 'claude')?.status).toBe('running');
+  });
+
+  it('leaves the relay script’s prompt-less shape as it was', async () => {
+    // `scripts/hooks/cmate-agent-event.sh` rebuilds the body and drops the
+    // prompt, so nothing it posts can be told apart, and every prompt opens a
+    // turn as before this Issue.
+    await deliver('UserPromptSubmit', 0);
+    const opened = getAgentTurn(wtId, 'claude');
+    await deliver('UserPromptSubmit', NOTICE_AFTER_MS);
+
+    expect(getAgentTurn(wtId, 'claude')?.turnId).not.toBe(opened?.turnId);
+  });
+
+  it('does not read a notice into another tool’s prompt', async () => {
+    // Only a source that declares `promptJoinsOpenTurn` marks anything.
+    freezeClock(T);
+    await postEvent({ tool: 'codex', hook_event_name: 'UserPromptSubmit', cwd: repo, session_id: SESSION, prompt: 'go' });
+    const opened = getAgentTurn(wtId, 'codex');
+    freezeClock(T + NOTICE_AFTER_MS);
+    await postEvent({ tool: 'codex', hook_event_name: 'UserPromptSubmit', cwd: repo, session_id: SESSION, prompt: NOTICE });
+
+    expect(getAgentTurn(wtId, 'codex')?.turnId).not.toBe(opened?.turnId);
+  });
+});
+
+describe('a queued notice delivered twice, by the injected hook and a relay (Issue #3330)', () => {
+  /**
+   * A host with the #1549 manual relay beside the injected `type: "http"` hook
+   * posts every `UserPromptSubmit` twice, milliseconds apart and under one
+   * de-duplication key. The relay's body carries no prompt; a current relay
+   * says `queuedNotice: true` instead, an older one says nothing. Whichever
+   * copy lands first is applied and the second is dropped, and the turn must
+   * not move in either order.
+   */
+  const T = 1_800_000_000_000;
+  const NOTICE_AFTER_MS = 63_500;
+  const SESSION = 'sess-3330-twice';
+  const NOTICE = '<task-notification>\n<status>completed</status>\n</task-notification>';
+
+  afterEach(() => unfreezeClock());
+
+  /** The injected hook: Claude's own payload. */
+  async function http(afterMs: number, prompt: string) {
+    freezeClock(T + afterMs);
+    const response = await postEvent({
+      tool: 'claude',
+      hook_event_name: 'UserPromptSubmit',
+      cwd: repo,
+      session_id: SESSION,
+      prompt,
+    });
+    expect(response.status).toBe(202);
+  }
+
+  /** The relay script's rebuilt body. */
+  async function relay(afterMs: number, queuedNotice?: boolean) {
+    freezeClock(T + afterMs);
+    const response = await postEvent({
+      tool: 'claude',
+      event: 'user_prompt_submit',
+      cwd: repo,
+      sessionId: SESSION,
+      ...(queuedNotice === undefined ? {} : { queuedNotice }),
+    });
+    expect(response.status).toBe(202);
+  }
+
+  async function openTurn() {
+    await http(0, 'Implement the change');
+    await relay(8);
+    const opened = getAgentTurn(wtId, 'claude');
+    expect(opened?.openedAt).toBe(T);
+    return opened;
+  }
+
+  const orders = [
+    { name: 'relay first, then the injected hook', first: 'relay', second: 'http' },
+    { name: 'the injected hook first, then the relay', first: 'http', second: 'relay' },
+  ] as const;
+
+  for (const { name, first, second } of orders) {
+    it(`keeps the turn for a notice: ${name}`, async () => {
+      const task = seedTask({ status: 'running' });
+      const opened = await openTurn();
+
+      const deliver = (kind: 'relay' | 'http', afterMs: number) =>
+        kind === 'relay' ? relay(afterMs, true) : http(afterMs, NOTICE);
+      await deliver(first, NOTICE_AFTER_MS);
+      await deliver(second, NOTICE_AFTER_MS + 6);
+
+      const turn = getAgentTurn(wtId, 'claude');
+      expect(turn?.turnId).toBe(opened?.turnId);
+      expect(turn?.openedAt).toBe(T);
+      expect(turn?.closedAt).toBeNull();
+
+      freezeClock(T + 90_000);
+      await postEvent({ tool: 'claude', hook_event_name: 'Stop', cwd: repo, session_id: SESSION });
+      expect(getAgentTurn(wtId, 'claude')?.turnId).toBe(opened?.turnId);
+      expect(getAgentTurn(wtId, 'claude')?.closedBy).toBe('stop');
+      expect(listTaskEvents(db, task.id)).toHaveLength(1);
+    });
+  }
+
+  it('keeps the turn on a host with the relay alone, from its queuedNotice flag', async () => {
+    // No injected hook to fall back on: the flag is the only thing that says
+    // this prompt is a notice.
+    await relay(0);
+    const opened = getAgentTurn(wtId, 'claude');
+    await relay(NOTICE_AFTER_MS, true);
+
+    expect(getAgentTurn(wtId, 'claude')?.turnId).toBe(opened?.turnId);
+    expect(getAgentTurn(wtId, 'claude')?.openedAt).toBe(T);
+
+    // Control: the same relay with no flag re-opens it, as before.
+    await relay(NOTICE_AFTER_MS + 30_000);
+    expect(getAgentTurn(wtId, 'claude')?.turnId).not.toBe(opened?.turnId);
+  });
+
+  it('keeps the turn when an older relay with no flag lands first and the marked hook is dropped', async () => {
+    const opened = await openTurn();
+
+    await relay(NOTICE_AFTER_MS);
+    // The unmarked copy was applied and re-opened the turn …
+    expect(getAgentTurn(wtId, 'claude')?.turnId).not.toBe(opened?.turnId);
+
+    // … and the marked copy, dropped as its duplicate, puts it back.
+    await http(NOTICE_AFTER_MS + 6, NOTICE);
+
+    const turn = getAgentTurn(wtId, 'claude');
+    expect(turn?.turnId).toBe(opened?.turnId);
+    expect(turn?.openedAt).toBe(T);
+    expect(turn?.closedAt).toBeNull();
+    expect(getStructuredSessionState(wtId, 'claude')?.status).toBe('running');
+  });
+
+  it('opens a new turn for a prompt that is not a notice, in either order (control)', async () => {
+    for (const relayFirst of [true, false]) {
+      clearAgentStopEvents();
+      const opened = await openTurn();
+      const at = NOTICE_AFTER_MS;
+      if (relayFirst) {
+        await relay(at);
+        await http(at + 6, 'Actually, do it differently');
+      } else {
+        await http(at, 'Actually, do it differently');
+        await relay(at + 6);
+      }
+
+      const turn = getAgentTurn(wtId, 'claude');
+      expect(turn?.turnId, `relayFirst=${relayFirst}`).not.toBe(opened?.turnId);
+      expect(turn?.openedAt, `relayFirst=${relayFirst}`).toBe(T + at);
+    }
+  });
+});
+
 describe('authentication', () => {
   it('is not in the auth bypass list', () => {
     // The route carries no auth code of its own: middleware protects everything

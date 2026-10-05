@@ -1,0 +1,13 @@
+Unit Tests (shard 3/4)	UNKNOWN STEP	﻿2026-10-05T00:21:36.0167865Z Current runner version: '2.336.0'
+Unit Tests (shard 3/4)	UNKNOWN STEP	2026-10-05T00:22:36.3689858Z [90mstdout[2m | tests/unit/lib/clone-manager.test.ts[2m > [22m[2mCloneManager[2m > [22m[2mvalidateCloneRequest[2m > [22m[2mshould validate a valid HTTPS URL
+Unit Tests (shard 3/4)	UNKNOWN STEP	2026-10-05T00:22:36.3809504Z [90mstdout[2m | tests/unit/lib/clone-manager.test.ts[2m > [22m[2mCloneManager[2m > [22m[2mvalidateCloneRequest[2m > [22m[2mshould validate a valid SSH URL
+Unit Tests (shard 3/4)	UNKNOWN STEP	2026-10-05T00:28:16.0025595Z [41m[1m FAIL [22m[49m tests/unit/tmux-navigation.test.ts[2m > [22msendSpecialKeysAndInvalidate[2m > [22mshould call invalidateCache even after sending multiple keys
+Unit Tests (shard 3/4)	UNKNOWN STEP	2026-10-05T00:28:16.0116351Z [2m Test Files [22m [1m[31m1 failed[39m[22m[2m | [22m[1m[32m477 passed[39m[22m[90m (478)[39m
+Unit Tests (shard 3/4)	UNKNOWN STEP	2026-10-05T00:28:16.0348472Z ##[error]AssertionError: expected "vi.fn()" to be called 1 times, but got 2 times
+Unit Tests (shard 3/4)	UNKNOWN STEP	2026-10-05T00:28:16.1681227Z ##[error]Process completed with exit code 1.
+Unit Tests	UNKNOWN STEP	﻿2026-10-05T00:32:43.4767629Z Current runner version: '2.337.0'
+Unit Tests	UNKNOWN STEP	2026-10-05T00:32:43.6277311Z ##[group]Run echo "Unit Tests shards: ${RESULT}"
+Unit Tests	UNKNOWN STEP	2026-10-05T00:32:43.6278216Z [36;1mecho "Unit Tests shards: ${RESULT}"[0m
+Unit Tests	UNKNOWN STEP	2026-10-05T00:32:43.7571424Z   RESULT: failure
+Unit Tests	UNKNOWN STEP	2026-10-05T00:32:43.7796643Z Unit Tests shards: failure
+Unit Tests	UNKNOWN STEP	2026-10-05T00:32:43.7823238Z ##[error]Process completed with exit code 1.

@@ -1,6 +1,6 @@
 /**
- * Security, maintainability (Issue #3044) and performance (Issue #3054)
- * metrics measured before the daily agent-health check. `scripts/agent-health/metrics.ts` writes a
+ * Security, maintainability (Issue #3044), performance (Issue #3054) and CI
+ * (Issue #3310) metrics measured before the daily agent-health check. `scripts/agent-health/metrics.ts` writes a
  * {@link MetricsReport}; the scheduled AI (docs/agent-health/metrics-prompt.md)
  * turns its candidates into Issues, and the HTML view (#3046) only reads it.
  *
@@ -25,12 +25,16 @@ export const METRIC_IDS = [
   'error-rate',
   'server-process',
   'bug-flow',
+  'ci-flaky',
 ] as const;
 
 export type MetricId = (typeof METRIC_IDS)[number];
 
-/** `process`: how the work itself goes (Issue #3185); recorded only, never a candidate. */
-export type MetricCategory = 'security' | 'maintainability' | 'performance' | 'process';
+/**
+ * `process`: how the work itself goes (Issue #3185); recorded only, never a candidate.
+ * `ci`: how reliable develop's CI is (Issue #3310); filed like performance, never dispatched.
+ */
+export type MetricCategory = 'security' | 'maintainability' | 'performance' | 'process' | 'ci';
 
 export const METRIC_CATEGORY: Record<MetricId, MetricCategory> = {
   'npm-audit': 'security',
@@ -48,6 +52,7 @@ export const METRIC_CATEGORY: Record<MetricId, MetricCategory> = {
   'error-rate': 'performance',
   'server-process': 'performance',
   'bug-flow': 'process',
+  'ci-flaky': 'ci',
 };
 
 export function isMetricId(value: string): value is MetricId {
@@ -121,6 +126,15 @@ export const SERVER_API_CALLS = 3;
 export const SERVER_API_URL = 'http://127.0.0.1:3000/api/worktrees';
 export const SERVER_API_TIMEOUT_MS = 30_000;
 
+// ci (Issue #3310; first values — tune after looking at the numbers)
+
+/** ci-flaky: develop push runs created within this many days are read. */
+export const CI_FLAKY_WINDOW_DAYS = 7;
+/** ci-flaky: a test failing on this many different SHAs (no rerun involved) is a candidate. */
+export const CI_FLAKY_REPEAT_MIN_SHAS = 2;
+/** ci-flaky: at most this many attempts are read (`gh run view --attempt`); the rest are counted only. */
+export const CI_FLAKY_MAX_ATTEMPTS = 30;
+
 /** Whole run budget; a scheduled run is cut at 15 minutes and the AI still has to file Issues. */
 export const METRICS_BUDGET_SEC = 10 * 60;
 
@@ -164,7 +178,12 @@ export interface MetricResult {
   skipReason?: string;
   /** Counts kept for the record (e.g. files over 500 lines) — never filed. null: a rate with a 0 denominator. */
   details?: Record<string, number | string | null>;
+  /** One row per unit measured (ci-flaky: per SHA, job and attempt that failed) — never filed. */
+  records?: MetricRecord[];
 }
+
+/** A row of {@link MetricResult.records}; only names, ids and counts (the repository is public). */
+export type MetricRecord = Record<string, string | number | string[]>;
 
 export interface MetricsQueueEntry {
   key: string;
@@ -223,6 +242,7 @@ export type MetricMeasurement =
        */
       subjects?: Record<string, MetricFinding>;
       details?: Record<string, number | string | null>;
+      records?: MetricRecord[];
     }
   | { metricId: MetricId; status: 'skip'; reason: string };
 

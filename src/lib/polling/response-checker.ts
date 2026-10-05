@@ -1049,6 +1049,12 @@ function suppressCodexStartupScreen(
   // no scrollback, so the echo of such a turn has left the pane off the top and
   // "composer, no echo above it" holds for a finished reply. The reader asks
   // for the banner row as well, which that pane has lost with the echo.
+  //
+  // Issue #3335: on 0.160.0 the cursor this leaves (the composer row, 996) is
+  // also where it stays — the pane does not grow, so the replies of the
+  // session are drawn above it and the screen read takes none of them. That
+  // is by design: they reach History from codex's transcript. See the codex
+  // branch of `resolveExtractionStartIndex`.
   return readStartupScreenPastCursor('codex', ctx, response, endIndex);
 }
 

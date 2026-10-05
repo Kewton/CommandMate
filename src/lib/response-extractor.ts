@@ -267,6 +267,22 @@ export function resolveExtractionStartIndex(
   }
 
   // Branch 2b: Codex uses lastCapturedLine directly (Codex-specific TUI behavior)
+  //
+  // Issue #3335: on codex 0.160.0 this is NOT a read cursor, and it is left
+  // that way on purpose. 0.160.0 draws in the alternate screen — the capture is
+  // the 1000-row pane, the composer pinned to row 996, the transcript growing
+  // from the top — so after the startup screen the cursor is the composer row
+  // (996, the poller) or the row count (999/1000, the pre-send flush and the
+  // advance after a transcript turn), and every reply is drawn above it.
+  // Extraction from it is empty, and the reply reaches History from codex's own
+  // transcript, read on the Stop hook (`hooks/stop-history-capture.ts` →
+  // `hooks/sources/codex/history.ts`), not from the pane. The cost is stated:
+  // a 0.160.0 session whose codex hooks are not installed or not trusted gets
+  // no reply row from the pane either. What the screen read must not do is
+  // save a wrong row from the parked cursor: the poller stops at the composer
+  // (`collectCompletedResponse`), a re-read from the top (cursor >= totalLines,
+  // branch 1 above) is dropped by `lineCount <= lastCapturedLine`, and the flush
+  // reads nothing at or below the composer (`isCodexCursorAtOrBelowComposer`).
   if (cliToolId === 'codex') {
     return Math.max(0, lastCapturedLine);
   }

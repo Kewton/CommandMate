@@ -20,6 +20,12 @@ vi.mock('@/lib/cli-tools/manager', () => ({
   },
 }));
 vi.mock('@/lib/tmux/tmux-capture-cache', () => ({ invalidateCache: vi.fn() }));
+// Issue #3334: the push asks whether the session is this server's before it
+// reads it. These cases are about what is pushed for one that is; the refusal
+// is covered by tests/unit/guards/session-ownership-ws-relay-3334.test.ts.
+vi.mock('@/lib/realtime/terminal-session-ownership', () => ({
+  findTerminalSessionRefusal: vi.fn(async () => null),
+}));
 vi.mock('@/lib/session/current-output-builder', () => ({
   buildCurrentOutput: vi.fn(async () => ({
     isRunning: true,
