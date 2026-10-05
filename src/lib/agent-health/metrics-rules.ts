@@ -23,6 +23,7 @@
 
 import { bugFlowSummary } from './bug-flow';
 import { ciFlakySummary } from './ci-flaky';
+import { hookObservationSummary } from './hook-observation';
 import { reportDateJst } from './report';
 import { severityRank } from './metrics-parse';
 import {
@@ -454,6 +455,10 @@ function evaluate(m: OkMeasurement, previous: MetricSnapshot | null): Evaluation
       const evaluation = presenceRule(m, previous, true);
       return { ...evaluation, summary: perfSummary(ciFlakySummary(m.details), evaluation, previous) };
     }
+    case 'hook-observation':
+      // Observation only (Issue #3311): never a candidate until a later Issue
+      // decides, from these numbers, what should be one.
+      return { candidates: [], summary: hookObservationSummary(m.details) };
   }
 }
 

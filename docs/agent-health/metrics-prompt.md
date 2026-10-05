@@ -65,6 +65,8 @@
 4. `queue` が空なら何もしない（悪化が無い日は正常）
    - `bug-flow`（category `process`。直近 7 日の bug Issue の数と率）は数字だけを記録する指標で、`candidates` は常に空。
      `queue` に入らないので、この指標から Issue を立てない・コメントしない
+   - `hook-observation`（category `process`。hook の写しでない破棄の数・画面と申告の食い違いの回数と長さ）も同じく観測だけの指標。
+     `candidates` は常に空で、この指標から Issue を立てない・コメントしない
 5. 最後に、次の 1 行だけを出力して終わる
    ```
    AGENT_HEALTH_METRICS date=<YYYY-MM-DD> issues_created=<番号をカンマ区切り> issues_commented=<番号をカンマ区切り> skipped=<見送った queue の件数> exit=<EXIT の値>
