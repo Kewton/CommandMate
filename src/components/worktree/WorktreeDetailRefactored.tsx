@@ -570,10 +570,11 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   // The same window shown again after two Sends in a row (refused, or keys
   // that did not change the frame) gets a line and a link to the keyboard.
   // Counted on the window the sheet is actually drawing: the same gate that
-  // mounts `MobilePromptSheet` below (keyboard, launch and Auto-Yes hide it), so
+  // mounts `MobilePromptSheet` below (the phone layout, and not the keyboard, a launch or Auto-Yes), so
   // a window hidden for 10 s starts over, as on PC.
   const showMobilePromptSheet =
-    !showDirectInputKeyboard
+    isMobile
+    && !showDirectInputKeyboard
     && !activeSessionStarting
     && (!autoYesEnabled || isMultiSelectPrompt(state.prompt.data));
   const {

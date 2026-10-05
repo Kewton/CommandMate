@@ -34,10 +34,35 @@ vi.mock('next/navigation', () => ({
   useSearchParams: () => new URLSearchParams(),
 }));
 
-vi.mock('@/hooks/useIsMobile', () => ({
-  useIsMobile: () => true,
-  MOBILE_BREAKPOINT: 768,
-}));
+// A store, not a constant: the screen is `memo`, so flipping the layout has to
+// reach it through the hook's own subscription, as a window resize does.
+const { isMobileRef } = vi.hoisted(() => {
+  const listeners = new Set<() => void>();
+  return {
+    isMobileRef: {
+      current: true,
+      set(value: boolean) {
+        this.current = value;
+        listeners.forEach((l) => l());
+      },
+      subscribe(l: () => void) {
+        listeners.add(l);
+        return () => listeners.delete(l);
+      },
+    },
+  };
+});
+vi.mock('@/hooks/useIsMobile', async () => {
+  const { useSyncExternalStore } = await import('react');
+  return {
+    useIsMobile: () =>
+      useSyncExternalStore(
+        (l) => isMobileRef.subscribe(l),
+        () => isMobileRef.current,
+      ),
+    MOBILE_BREAKPOINT: 768,
+  };
+});
 
 vi.mock('@/contexts/SidebarContext', () => ({
   useSidebarContext: () => ({
@@ -84,6 +109,11 @@ vi.mock('@/components/worktree/TerminalDisplay', () => ({
       <div role="log" />
     </div>
   ),
+}));
+
+// Only the desktop layout draws the tree, and the fetch stub has no tree.
+vi.mock('@/components/worktree/FileTreeView', () => ({
+  FileTreeView: () => <div data-testid="file-tree-view" />,
 }));
 
 vi.mock('@/components/worktree/HistoryPane', () => ({
@@ -269,6 +299,7 @@ function installFetch(): void {
 }
 
 beforeEach(() => {
+  isMobileRef.current = true;
   window.localStorage.clear();
   window.sessionStorage.clear();
   window.history.replaceState({}, '', `/worktrees/${WORKTREE_ID}`);
@@ -480,5 +511,23 @@ describe('[#3294] the phone counts the window the sheet is drawing', () => {
     fireEvent.click(screen.getByTestId('direct-input-close'));
     await screen.findByTestId('mobile-prompt-sheet');
     expect(await screen.findByTestId('prompt-stuck-hint')).toBeInTheDocument();
+  });
+
+  it('starts over when the desktop layout hid the sheet for 10 s (no hint on return)', async () => {
+    await renderScreen();
+    const resets = captureResetTimers();
+    await screen.findByTestId('mobile-chat-surface');
+    await pressSend();
+    await pressSend();
+    await screen.findByTestId('prompt-stuck-hint');
+    act(() => isMobileRef.set(false));
+    await waitFor(() => expect(screen.queryByTestId('mobile-prompt-sheet')).not.toBeInTheDocument());
+    expect(resets).toHaveLength(1);
+    await act(async () => {
+      resets[0]();
+    });
+    act(() => isMobileRef.set(true));
+    await screen.findByTestId('mobile-prompt-sheet');
+    expect(screen.queryByTestId('prompt-stuck-hint')).not.toBeInTheDocument();
   });
 });

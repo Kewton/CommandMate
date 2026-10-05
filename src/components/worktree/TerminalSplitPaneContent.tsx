@@ -470,8 +470,8 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   // Issue #2869: the same prompt window shown again after two Sends in a row
   // (refused, or delivered to a frame that did not react) points the user at
   // direct input. Counted on the window `PromptPanel` is actually drawing — the
-  // same condition as `showPrompt` below, restated because the handler that
-  // calls `markSubmitted` is declared above it.
+  // `showPrompt` declared above (before the handler
+  // that calls `markSubmitted`), so the count and the drawing cannot drift apart.
   const {
     showStuckHint: showPromptStuckHint,
     markSubmitted: markPromptSubmitted,
