@@ -24,6 +24,7 @@ import {
   MAX_TODO_DETAIL_LENGTH,
 } from '@/config/todo-config';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
+import { readOptionalJsonObjectBody } from '@/lib/api/read-json-body';
 
 const logger = createLogger('api/worktree-todos');
 
@@ -85,7 +86,11 @@ export async function POST(
       );
     }
 
-    const body = await request.json().catch(() => ({}));
+    const parsed = await readOptionalJsonObjectBody(request);
+
+    if (!parsed.ok) return parsed.response;
+
+    const body = parsed.body;
     const { content, detail } = body;
 
     // Validate content presence.
@@ -172,7 +177,11 @@ export async function PATCH(
       );
     }
 
-    const body = await request.json().catch(() => ({}));
+    const parsed = await readOptionalJsonObjectBody(request);
+
+    if (!parsed.ok) return parsed.response;
+
+    const body = parsed.body;
     const todoIds = (body as { todoIds?: unknown }).todoIds;
 
     // The payload must be the complete set of the worktree's todo IDs, in the

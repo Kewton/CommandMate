@@ -267,6 +267,12 @@ export async function POST(
         { status: 400 }
       );
     }
+    if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+      return NextResponse.json(
+        { error: 'Invalid JSON body' },
+        { status: 400 }
+      );
+    }
 
     if (typeof body.enabled !== 'boolean') {
       return NextResponse.json(

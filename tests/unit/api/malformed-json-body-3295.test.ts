@@ -16,6 +16,8 @@ import os from 'os';
 import path from 'path';
 import { runMigrations } from '@/lib/db/db-migrations';
 import { upsertWorktree } from '@/lib/db';
+import { createMemo } from '@/lib/db/memo-db';
+import { createTodo } from '@/lib/db/worktree-todo-db';
 import type { Worktree } from '@/types/models';
 
 const mockLogger = vi.hoisted(() => ({
@@ -259,4 +261,105 @@ describe('malformed JSON body → 400 in the remaining routes (#3295 sweep)', ()
       expect(consoleError).not.toHaveBeenCalled();
     });
   }
+});
+
+// Routes that read the body themselves (`.catch(() => ({}))` or a local try/catch) and then
+// destructure it: a JSON `null` used to throw a TypeError into the outer catch (#3333).
+type ReadRoute = [label: string, method: string, urlPath: string, modulePath: string, exportName: string, extraParams: Record<string, string>, valid?: string];
+const W = `worktrees/${WORKTREE_ID}`;
+const GIT = '@/app/api/worktrees/[id]/git';
+const SELF_READ: ReadRoute[] = [
+  ['git/branch/create', 'POST', `${W}/git/branch/create`, `${GIT}/branch/create/route`, 'POST', {}, '{}'],
+  ['git/branch/delete', 'POST', `${W}/git/branch/delete`, `${GIT}/branch/delete/route`, 'POST', {}, '{}'],
+  ['git/checkout', 'POST', `${W}/git/checkout`, `${GIT}/checkout/route`, 'POST', {}, '{}'],
+  ['git/commit', 'POST', `${W}/git/commit`, `${GIT}/commit/route`, 'POST', {}, '{}'],
+  ['git/fetch', 'POST', `${W}/git/fetch`, `${GIT}/fetch/route`, 'POST', {}, '{"remote":"bad name"}'],
+  ['git/pull', 'POST', `${W}/git/pull`, `${GIT}/pull/route`, 'POST', {}, '{"rebase":true,"ffOnly":true}'],
+  ['git/push', 'POST', `${W}/git/push`, `${GIT}/push/route`, 'POST', {}, '{"remote":"bad name"}'],
+  ['git/reset', 'POST', `${W}/git/reset`, `${GIT}/reset/route`, 'POST', {}, '{}'],
+  ['git/revert', 'POST', `${W}/git/revert`, `${GIT}/revert/route`, 'POST', {}, '{}'],
+  ['git/stage', 'POST', `${W}/git/stage`, `${GIT}/stage/route`, 'POST', {}, '{}'],
+  ['git/unstage', 'POST', `${W}/git/unstage`, `${GIT}/unstage/route`, 'POST', {}, '{}'],
+  ['git/stash/apply', 'POST', `${W}/git/stash/apply`, `${GIT}/stash/apply/route`, 'POST', {}, '{"index":-1}'],
+  ['git/stash/pop', 'POST', `${W}/git/stash/pop`, `${GIT}/stash/pop/route`, 'POST', {}, '{"index":-1}'],
+  ['git/stash/push', 'POST', `${W}/git/stash/push`, `${GIT}/stash/push/route`, 'POST', {}],
+  ['memos POST', 'POST', `${W}/memos`, '@/app/api/worktrees/[id]/memos/route', 'POST', {}],
+  ['memos PATCH', 'PATCH', `${W}/memos`, '@/app/api/worktrees/[id]/memos/route', 'PATCH', {}, '{}'],
+  ['memos/[memoId] PUT', 'PUT', `${W}/memos/MEMO`, '@/app/api/worktrees/[id]/memos/[memoId]/route', 'PUT', { memoId: 'MEMO' }],
+  ['todos POST', 'POST', `${W}/todos`, '@/app/api/worktrees/[id]/todos/route', 'POST', {}, '{}'],
+  ['todos PATCH', 'PATCH', `${W}/todos`, '@/app/api/worktrees/[id]/todos/route', 'PATCH', {}, '{}'],
+  ['todos/[todoId] PATCH', 'PATCH', `${W}/todos/TODO`, '@/app/api/worktrees/[id]/todos/[todoId]/route', 'PATCH', { todoId: 'TODO' }, '{}'],
+  ['schedules POST', 'POST', `${W}/schedules`, '@/app/api/worktrees/[id]/schedules/route', 'POST', {}, '{}'],
+  ['schedules/[scheduleId] PUT', 'PUT', `${W}/schedules/s1`, '@/app/api/worktrees/[id]/schedules/[scheduleId]/route', 'PUT', { scheduleId: 's1' }],
+  ['cmate/schedules POST', 'POST', `${W}/cmate/schedules`, '@/app/api/worktrees/[id]/cmate/schedules/route', 'POST', {}, '{}'],
+  ['cmate/schedules PATCH', 'PATCH', `${W}/cmate/schedules`, '@/app/api/worktrees/[id]/cmate/schedules/route', 'PATCH', {}, '{}'],
+  ['cmate/schedules DELETE', 'DELETE', `${W}/cmate/schedules`, '@/app/api/worktrees/[id]/cmate/schedules/route', 'DELETE', {}, '{}'],
+  ['push/subscriptions DELETE', 'DELETE', 'push/subscriptions', '@/app/api/push/subscriptions/route', 'DELETE', {}, '{}'],
+  ['interrupt POST', 'POST', `${W}/interrupt`, '@/app/api/worktrees/[id]/interrupt/route', 'POST', {}, '{"instanceId":"../x"}'],
+  ['opencode/diff POST', 'POST', `${W}/opencode/diff`, '@/app/api/worktrees/[id]/opencode/diff/route', 'POST', {}, '{}'],
+  ['opencode/session POST', 'POST', `${W}/opencode/session`, '@/app/api/worktrees/[id]/opencode/session/route', 'POST', {}, '{}'],
+  ['opencode/share POST', 'POST', `${W}/opencode/share`, '@/app/api/worktrees/[id]/opencode/share/route', 'POST', {}, '{"instanceId":"../x"}'],
+  ['auto-yes POST', 'POST', `${W}/auto-yes`, '@/app/api/worktrees/[id]/auto-yes/route', 'POST', {}, '{}'],
+  ['marp-render POST', 'POST', `${W}/marp-render`, '@/app/api/worktrees/[id]/marp-render/route', 'POST', {}, '{}'],
+  ['direct-input POST', 'POST', `${W}/direct-input`, '@/app/api/worktrees/[id]/direct-input/route', 'POST', {}, '{}'],
+];
+
+let seeded: Record<string, string> = {};
+
+describe('non-object JSON body → 400 in routes that read the body themselves (#3333)', () => {
+  beforeEach(() => {
+    mockDb = new Database(':memory:');
+    runMigrations(mockDb);
+    upsertWorktree(mockDb, {
+      id: WORKTREE_ID,
+      name: 'wt',
+      path: os.tmpdir(),
+      repositoryPath: '/path/to/repo',
+      repositoryName: 'repo',
+      cliToolId: 'claude',
+    });
+    vi.clearAllMocks();
+    mockLogger.withContext.mockReturnValue(mockLogger);
+    // memo / todo routes look the row up before they read the body.
+    seeded = {
+      MEMO: createMemo(mockDb, WORKTREE_ID, { position: 0 }).id,
+      TODO: createTodo(mockDb, WORKTREE_ID, { content: 'x', position: 0 }).id,
+    };
+  });
+
+  afterEach(() => {
+    mockDb?.close();
+    mockDb = null;
+  });
+
+  async function callSelf([, method, urlPath, modulePath, exportName, extra]: ReadRoute, body: string) {
+    const mod = (await import(/* @vite-ignore */ modulePath)) as Record<string, Handler>;
+    const request = new NextRequest(`http://localhost:3000/api/${urlPath}`, {
+      method,
+      body,
+      headers: { 'Content-Type': 'application/json' },
+    });
+    return mod[exportName](request, { params: Promise.resolve({ id: WORKTREE_ID, ...Object.fromEntries(Object.entries(extra).map(([k, v]) => [k, seeded[v] ?? v])) }) });
+  }
+
+  for (const body of ['null', '[]', '1']) {
+    it.each(SELF_READ)(`%s: ${body} → 400, no error log`, async (...route) => {
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const response = await callSelf(route, body);
+      consoleError.mockRestore();
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toHaveProperty('error');
+      expect(mockLogger.error).not.toHaveBeenCalled();
+      expect(consoleError).not.toHaveBeenCalled();
+    });
+  }
+
+  it.each(SELF_READ.filter((r) => r[6] !== undefined))('%s: an ordinary object body still reaches the route’s own validation', async (...route) => {
+    const response = await callSelf(route, route[6] as string);
+
+    expect(response.status).not.toBe(500);
+    const data = await response.json();
+    expect(data.error).not.toBe('Invalid request body');
+  });
 });

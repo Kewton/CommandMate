@@ -26,6 +26,7 @@ import { createLogger } from '@/lib/logger';
 import { getPushDeliveryHealth, type PushDeliveryHealth } from '@/lib/push/delivery-health';
 import { LOCALE_COOKIE_NAME, resolveLocale } from '@/config/i18n-config';
 import { readJsonObjectBody } from '@/lib/api/read-json-body';
+import { readOptionalJsonObjectBody } from '@/lib/api/read-json-body';
 
 export const dynamic = 'force-dynamic';
 
@@ -201,7 +202,9 @@ export async function PATCH(request: Request) {
 
 export async function DELETE(request: Request) {
   try {
-    const body = (await request.json().catch(() => ({}))) as { endpoint?: unknown };
+    const parsed = await readOptionalJsonObjectBody(request);
+    if (!parsed.ok) return parsed.response;
+    const body = parsed.body;
     if (!isNonEmptyString(body.endpoint)) {
       return NextResponse.json({ error: 'endpoint is required' }, { status: 400 });
     }

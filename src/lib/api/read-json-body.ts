@@ -51,3 +51,28 @@ export async function readJsonObjectBody<T = any>(req: { json(): Promise<unknown
   }
   return { ok: true, body: body as T };
 }
+
+/**
+ * Like `readJsonObjectBody`, but the body is optional (Issue #3333).
+ *
+ * A missing, empty, or syntactically broken body is treated as `{}` so the route
+ * goes on with its defaults, as the routes' own `.catch(() => ({}))` did. Only a
+ * body that parses to something other than an object (`null`, an array, a
+ * number, a string) answers 400 `{ error: 'Invalid request body' }`.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- callers validate the fields themselves
+export async function readOptionalJsonObjectBody<T = any>(req: { json(): Promise<unknown> }): Promise<ReadJsonBodyResult<T>> {
+  let raw: unknown;
+  try {
+    raw = await req.json();
+  } catch {
+    return { ok: true, body: {} as T };
+  }
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    return {
+      ok: false,
+      response: NextResponse.json({ error: 'Invalid request body' }, { status: 400 }),
+    };
+  }
+  return { ok: true, body: raw as T };
+}
