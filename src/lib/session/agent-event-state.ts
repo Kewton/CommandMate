@@ -568,7 +568,10 @@ function observeAgentModel(
  * turn cannot end twice in three seconds" is false of a turn the agent starts
  * for itself, and Issue #3289 measured the `Stop`s of two turns 1473 ms apart.
  * The clock cannot tell those from two deliveries of one, so for `stop` the
- * window is reset by the start of a turn — see {@link isDuplicateAgentEvent}.
+ * window is reset by the start of a turn — and for the start of a turn, which
+ * happens twice in three seconds just as readily (Issue #3301), by a `stop`.
+ * See {@link isDuplicateAgentEvent}, which also records what the window turned
+ * out to be dropping for `user_prompt_submit`: not a second hook's delivery.
  */
 export const AGENT_EVENT_DEDUP_WINDOW_MS = 3000;
 
@@ -2748,6 +2751,103 @@ export function clearAskUserQuestion(
  * seam of its own. Releasing the claim keeps no state beyond the map that was
  * already here, so {@link MAX_RECENT_EVENT_KEYS} bounds it as before.
  *
+ * ## A turn start after a `stop` is another turn's (Issue #3301)
+ *
+ * The same defect from the other side. A turn start is on the window as well,
+ * and a turn can start twice in three seconds: logged on 2026-10-04, the
+ * `UserPromptSubmit` of a turn a background task's completion notice opened,
+ * that turn's `Stop` 2624 ms later, and the next notice's `UserPromptSubmit`
+ * 22 ms after the `Stop`. The second start was dropped as a copy of the first,
+ * so this server never opened the turn the agent was in and went on publishing
+ * the end of the previous one.
+ *
+ * So the release runs in both directions: a `stop` that is itself applied
+ * releases every turn start its session has claimed
+ * ({@link releaseTurnStartClaims}), and the next one is a first delivery
+ * again. Together the two releases leave the window comparing a delivery only
+ * with what has arrived since the last turn boundary this server applied — the
+ * one stretch in which "the same event again" can mean a copy.
+ *
+ *  - **All of {@link TURN_ACTIVITY_EVENTS}, every subtype**, for the reason the
+ *    other direction gives: antigravity's and Command Code's turns are opened
+ *    by a tool event, and a short turn of either can open with the tool the
+ *    previous one used.
+ *  - **Only a `stop` that names the session.** One with no session id is never
+ *    judged a copy, and cannot say whose turn it ended either.
+ *  - **Only a `stop` that was applied**, as with the turn start above — though
+ *    with both releases in place neither condition decides anything any more:
+ *    a delivery is dropped only while the one it copies holds its claim, and
+ *    that one released the other side of the boundary when it was applied.
+ *  - **Also for a `stop` that never reaches this function.**
+ *    {@link classifyAgentEventDelivery} lets the `stop` of a source that
+ *    declares an identity through before the window is consulted, and makes
+ *    the release itself. OpenCode V2 is the source that needs it: its
+ *    `session.execution.started` carries no id and is judged here.
+ *
+ * What the window still drops on this side is not the double delivery its
+ * constant describes. The injected settings register one `UserPromptSubmit`
+ * hook, and in the server logs of 2026-10-02 to 2026-10-05 a `Stop` —
+ * registered the same way — was dropped once, by the defect #3289 fixed. A
+ * `UserPromptSubmit` was dropped in 15 bursts, and the session transcripts say
+ * what each one was. Thirteen are Claude Code taking two or three
+ * background-task notices off its queue at once, after a tool result, and
+ * attaching them to the turn that is already running: it fires the hook once
+ * per notice, 4–21 ms apart, and the deliveries match the transcript's
+ * `queue-operation: remove` entries one for one. One is the operator
+ * submitting a prompt 804 ms into a running turn. One is the defect above.
+ * These are different prompts joining one turn, not copies of one event.
+ * Counting them as one is still right — a `user_prompt_submit` that is applied
+ * opens a new turn, and none of them begins one — and none has a `stop` before
+ * it, because the turn it joins has not ended. That is what makes a `stop` the
+ * thing to release on.
+ *
+ * What this cannot tell apart:
+ *
+ *  - `start(A)`, `stop(A)`, then a *late copy* of `start(A)`. The copy is read
+ *    as `start(B)` and opens a turn no `stop` is coming for: `running` is
+ *    published until the scraper has seen the composer on
+ *    {@link SCRAPER_COMPLETION_POLLS} polls, and a `commandmate wait` that
+ *    adopted the turn is left waiting for a `stop`. The copy has to arrive
+ *    after the whole turn and inside three seconds of the original; any later
+ *    and it was applied before this change too. Claude Code holds the turn
+ *    until its `UserPromptSubmit` hooks have answered (a stalled one is
+ *    cancelled at its timeout and only then does the session go on,
+ *    `docs/design/agent-hooks-live-verification.md` §5.3.3), `type: "http"`
+ *    has no async form, and the relay posts with a foreground `curl`; every
+ *    burst above landed before the model was called. That leaves the
+ *    hand-written `"async": true` command hook again, beside the injected one
+ *    and on a turn shorter than its delay — §5.3.6 measured one posting after
+ *    a four-second session had already finished.
+ *  - A tool event of turn A that arrives after `stop(A)`, inside three seconds
+ *    of one for the same tool: read as the first activity of a new turn, at
+ *    the same cost. It takes a tool hook the agent does not wait for, or a
+ *    tool call that outlives the turn that made it. Not measured per tool; in
+ *    the logs above no tool event arrives within three seconds of a `stop` of
+ *    codex or Command Code, of which there are about thirty.
+ *  - `start(A)`, `start(B)` with no `stop` of their session applied between
+ *    them. `start(B)` is dropped, as before. When the `Stop` was lost (every
+ *    hook failure is fail-open), the turn this server opened for A is still
+ *    open, so what it publishes stays true and `stop(B)` closes it. When the
+ *    `Stop` came without a session id, it closed that turn — {@link closesTurn}
+ *    reads an anonymous `stop` as the open turn's — and released nothing, so
+ *    the defect is as it was. That takes hand-written hooks that send the
+ *    session id on the turn start and not on the `Stop`.
+ *  - The late copy of `stop(A)` above, one step on. Read as `stop(B)`, it is
+ *    an applied `stop` and releases turn starts like any other, so a copy of
+ *    `start(B)` behind it is read as `start(C)`. Two unwaited copies in a row.
+ *
+ * The alternative was the agent's own name for the turn: Claude's payloads
+ * carry a `prompt_id` on `UserPromptSubmit` and on `Stop`. It could not be
+ * measured here whether a turn the agent starts for itself gets a new one on
+ * the hook channel (the transcript's `promptId` does change from one such turn
+ * to the next), nor whether the hooks of one burst share one — and if they do
+ * not, a key built on it turns each burst into that many turns. It would also
+ * cover one tool on one channel: the relay script does not forward the field,
+ * codex spells it `turn_id`, and copilot, gemini and antigravity carry nothing
+ * of the kind (#1757 R5), so all of them stay on the window either way. The
+ * counter described above is the remaining alternative, and it loses to a
+ * release here for the reasons it lost there.
+ *
  * @param at - Epoch ms; defaults to now
  * @param detail - The event's subtype, when it has one
  */
@@ -2771,6 +2871,7 @@ export function isDuplicateAgentEvent(
 
   recentEventKeys.set(key, at);
   if (TURN_ACTIVITY_EVENTS.has(event)) releaseStopClaims(composite, sessionId);
+  else if (event === 'stop') releaseTurnStartClaims(composite, sessionId);
   pruneRecentEventKeys(at);
   return false;
 }
@@ -2778,21 +2879,46 @@ export function isDuplicateAgentEvent(
 /**
  * Forget every `stop` one session of one instance has claimed (Issue #3289).
  *
- * Every subtype, which is why this walks the map instead of deleting one key:
- * antigravity posts `stop` / `self_resume_pending` (#2614) beside the plain
- * one, and the subtype sits in the middle of the key
- * {@link isDuplicateAgentEvent} builds — `<instance> stop <detail> <session>`.
- * The walk is over at most {@link MAX_RECENT_EVENT_KEYS} entries.
+ * Every subtype: antigravity posts `stop` / `self_resume_pending` (#2614)
+ * beside the plain one.
  */
 function releaseStopClaims(composite: string, sessionId: string): void {
-  const prefix = `${composite} stop `;
+  releaseClaims(composite, ['stop'], sessionId);
+}
+
+/**
+ * Forget every turn start one session of one instance has claimed
+ * (Issue #3301) — {@link releaseStopClaims} from the other side of the turn
+ * boundary.
+ *
+ * Every event in {@link TURN_ACTIVITY_EVENTS} and every subtype: a tool event's
+ * subtype is the tool's name, and a turn claims one key per tool it called.
+ */
+function releaseTurnStartClaims(composite: string, sessionId: string): void {
+  releaseClaims(composite, TURN_ACTIVITY_EVENTS, sessionId);
+}
+
+/**
+ * Forget every claim one session of one instance holds on `events`, whatever
+ * subtype it was made under.
+ *
+ * A walk instead of a lookup because the subtype sits in the middle of the key
+ * {@link isDuplicateAgentEvent} builds — `<instance> <event> <detail>
+ * <session>` — and the subtypes that were claimed are not known here. The walk
+ * is over at most {@link MAX_RECENT_EVENT_KEYS} entries.
+ */
+function releaseClaims(
+  composite: string,
+  events: Iterable<AgentEventType>,
+  sessionId: string
+): void {
+  const prefixes = Array.from(events, (event) => `${composite} ${event} `);
   const suffix = ` ${sessionId}`;
+  const claimedUnder = (key: string, prefix: string): boolean =>
+    key.length >= prefix.length + suffix.length && key.startsWith(prefix);
+
   for (const key of recentEventKeys.keys()) {
-    if (
-      key.length >= prefix.length + suffix.length &&
-      key.startsWith(prefix) &&
-      key.endsWith(suffix)
-    ) {
+    if (key.endsWith(suffix) && prefixes.some((prefix) => claimedUnder(key, prefix))) {
       recentEventKeys.delete(key);
     }
   }
@@ -2850,6 +2976,11 @@ export function getRecentEventKeyCount(): number {
  * seconds when it resumes itself (Issue #3289) — and it is closed differently,
  * because a push source has no gate to lean on and so cannot be exempted: on
  * the window, a `stop` is released by the start of a turn instead.
+ *
+ * Being exempt does not make a `stop` any less the end of a turn. The turn
+ * starts of a declared source are on the window whenever their frame carries
+ * no id, so the `stop` let through here releases them, as a `stop` on the
+ * window does (Issue #3301; {@link classifyAgentEventDelivery}).
  */
 export const LIFECYCLE_AGENT_EVENT_TYPES: readonly AgentEventType[] = ['stop', 'session_end'];
 
@@ -2903,13 +3034,16 @@ export type AgentEventDedupVerdict =
  *     twice by a re-sync racing the live stream") and never actually covered,
  *     since a re-sync is not obliged to land within three seconds.
  *  2. **No id, but the word ends something** — never suppressed. See
- *     {@link LIFECYCLE_AGENT_EVENT_TYPES}.
+ *     {@link LIFECYCLE_AGENT_EVENT_TYPES}. A `stop` that leaves by this rule
+ *     releases its session's turn starts from the window on the way (#3301):
+ *     rule 3 would have done it, and this `stop` never gets there.
  *  3. **Anything else** — the time window, unchanged. That is every push
  *     source, and the identity-declaring source's `session.created` /
- *     `session.error`, which publish no id either but are not turn boundaries.
- *     A push source's `stop` is on it too, and is released from it by the
- *     start of a turn (#3289) — a rule of {@link isDuplicateAgentEvent}'s, not
- *     of this function's.
+ *     `session.error`, which publish no id either but are not turn boundaries
+ *     — and OpenCode V2's `session.execution.started`, which is one. A push
+ *     source's `stop` is on it too, and is released from it by the start of a
+ *     turn (#3289), as a turn start is by a `stop` (#3301) — rules of
+ *     {@link isDuplicateAgentEvent}'s, not of this function's.
  *
  * Calling this *claims* the key, exactly as {@link isDuplicateAgentEvent} does:
  * ask once per delivery and act on the answer.
@@ -2940,6 +3074,13 @@ export function classifyAgentEventDelivery(
       return { duplicate: false };
     }
     if (LIFECYCLE_AGENT_EVENT_TYPES.includes(delivery.event)) {
+      // Issue #3301: this `stop` is applied without the window ever seeing it,
+      // so the release an applied `stop` owes its session's turn starts is made
+      // here. Those turn starts ARE on the window whenever their frame carries
+      // no id, which is every `session.execution.started` of OpenCode V2.
+      if (delivery.event === 'stop' && delivery.sessionId) {
+        releaseTurnStartClaims(composite, delivery.sessionId);
+      }
       return { duplicate: false };
     }
   }

@@ -124,11 +124,24 @@ deliveries carry the same `session_id`, so the double delivery collapses. A call
 is worse than allowing a duplicate).
 
 A `session_id` stays the same across turns, so the `session_id` alone cannot tell one turn from
-another. A `stop` is therefore **applied as the end of a different turn**, even inside the 3-second
-window, when a turn start from the same session (`user_prompt_submit` / `pre_tool_use` /
-`post_tool_use`) arrived between it and the previous `stop` (Issue #3289). With no turn start in
-between, the second `stop` is collapsed as before. Every event other than `stop` is still treated as
-one event within the 3-second window.
+another. An event is therefore not collapsed, even inside the 3-second window, when a turn boundary
+arrived in between.
+
+- A `stop` is **applied as the end of a different turn**, even inside the 3-second window, when a
+  turn start from the same session (`user_prompt_submit` / `pre_tool_use` / `post_tool_use`) arrived
+  between it and the previous `stop` (Issue #3289). With no turn start in between, the second `stop`
+  is collapsed as before.
+- A turn start (the three above) is **applied as the start of a different turn**, even inside the
+  3-second window, when a `stop` from the same session arrived between it and the previous event of
+  the same kind (Issue #3301). With no `stop` in between, the second one is collapsed as before.
+- Every other event (`notification` / `session_start` / `session_end`) is still treated as one event
+  within the 3-second window.
+
+Two or three `user_prompt_submit` events a few milliseconds apart, with no `stop` between them, also
+arrive without any manual configuration. When Claude Code hands queued notices (the completion
+notices of background tasks) to a turn that is already running, it fires `UserPromptSubmit` once per
+notice (confirmed by matching the server log against the session records, Issue #3301). They all
+belong to the same turn, so they are treated as one event.
 
 **The manual configuration may simply be deleted** (automatic injection sends the same events).
 Keeping it causes no double recording either, thanks to the dedup above.
