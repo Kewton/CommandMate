@@ -11,6 +11,9 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import Database from 'better-sqlite3';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import { runMigrations } from '@/lib/db/db-migrations';
 import { upsertWorktree } from '@/lib/db';
 import type { Worktree } from '@/types/models';
@@ -51,6 +54,27 @@ import { POST as promptResponsePOST } from '@/app/api/worktrees/[id]/prompt-resp
 import { POST as timersPOST } from '@/app/api/worktrees/[id]/timers/route';
 import { POST as specialKeysPOST } from '@/app/api/worktrees/[id]/special-keys/route';
 import { POST as clearComposerPOST } from '@/app/api/worktrees/[id]/clear-composer/route';
+import { PUT as filesPUT, POST as filesPOST, PATCH as filesPATCH } from '@/app/api/worktrees/[id]/files/[...path]/route';
+import { PATCH as cliToolPATCH } from '@/app/api/worktrees/[id]/cli-tool/route';
+import { PATCH as worktreePATCH } from '@/app/api/worktrees/[id]/route';
+import { PUT as notesPUT } from '@/app/api/worktrees/[id]/instances/notes/route';
+import { PUT as opencodeInstancePUT } from '@/app/api/worktrees/[id]/instances/opencode/route';
+import { POST as loginPOST } from '@/app/api/auth/login/route';
+import { POST as dailySummaryPOST, PUT as dailySummaryPUT } from '@/app/api/daily-summary/route';
+import { PATCH as externalAppPATCH } from '@/app/api/external-apps/[id]/route';
+import { POST as externalAppsPOST } from '@/app/api/external-apps/route';
+import { POST as claudeDonePOST } from '@/app/api/hooks/claude-done/route';
+import { PATCH as pushEscalationPATCH } from '@/app/api/push/escalation/route';
+import { POST as pushSubscriptionsPOST, PATCH as pushSubscriptionsPATCH } from '@/app/api/push/subscriptions/route';
+import { POST as relaysPOST } from '@/app/api/relays/route';
+import { PUT as repositoryPUT } from '@/app/api/repositories/[id]/route';
+import { POST as clonePOST } from '@/app/api/repositories/clone/route';
+import { PUT as restorePUT } from '@/app/api/repositories/restore/route';
+import { DELETE as repositoriesDELETE } from '@/app/api/repositories/route';
+import { POST as scanPOST } from '@/app/api/repositories/scan/route';
+import { PUT as groupOrderPUT } from '@/app/api/sidebar/group-order/route';
+import { PUT as templatePUT } from '@/app/api/templates/[id]/route';
+import { POST as templatesPOST } from '@/app/api/templates/route';
 
 const WORKTREE_ID = 'wt-3295';
 
@@ -118,4 +142,100 @@ describe('malformed JSON body → 400 Invalid request body (#3295)', () => {
     expect(await response.json()).not.toEqual({ error: 'Invalid request body' });
     expect(response.status).not.toBe(500);
   });
+});
+
+// Routes whose bodies are read after a #3295 sweep of the remaining bare `req.json()` calls.
+// `shape` is how the route words its input errors, so the assertion follows the route.
+type Shape = 'error' | 'success-error' | 'clone' | 'files';
+const TEMPLATE_ID = '123e4567-e89b-42d3-a456-426614174000';
+
+const SWEPT: Array<[string, string, string, Handler, Shape, string?]> = [
+  ['files PUT', 'PUT', `worktrees/${WORKTREE_ID}/files/a.md`, filesPUT as unknown as Handler, 'files'],
+  ['files POST', 'POST', `worktrees/${WORKTREE_ID}/files/a.md`, filesPOST as unknown as Handler, 'files'],
+  ['files PATCH', 'PATCH', `worktrees/${WORKTREE_ID}/files/a.md`, filesPATCH as unknown as Handler, 'files'],
+  ['cli-tool PATCH', 'PATCH', `worktrees/${WORKTREE_ID}/cli-tool`, cliToolPATCH as Handler, 'error'],
+  ['worktree PATCH', 'PATCH', `worktrees/${WORKTREE_ID}`, worktreePATCH as Handler, 'error'],
+  ['instances/notes PUT', 'PUT', `worktrees/${WORKTREE_ID}/instances/notes`, notesPUT as Handler, 'error'],
+  ['instances/opencode PUT', 'PUT', `worktrees/${WORKTREE_ID}/instances/opencode`, opencodeInstancePUT as Handler, 'error'],
+  ['auth/login POST', 'POST', 'auth/login', loginPOST as Handler, 'error'],
+  ['daily-summary POST', 'POST', 'daily-summary', dailySummaryPOST as Handler, 'error'],
+  ['daily-summary PUT', 'PUT', 'daily-summary', dailySummaryPUT as Handler, 'error'],
+  ['external-apps/[id] PATCH', 'PATCH', `external-apps/${WORKTREE_ID}`, externalAppPATCH as Handler, 'error', 'external-app'],
+  ['external-apps POST', 'POST', 'external-apps', externalAppsPOST as Handler, 'error'],
+  ['hooks/claude-done POST', 'POST', 'hooks/claude-done', claudeDonePOST as Handler, 'error'],
+  ['push/escalation PATCH', 'PATCH', 'push/escalation', pushEscalationPATCH as Handler, 'error'],
+  ['push/subscriptions POST', 'POST', 'push/subscriptions', pushSubscriptionsPOST as Handler, 'error'],
+  ['push/subscriptions PATCH', 'PATCH', 'push/subscriptions', pushSubscriptionsPATCH as Handler, 'error'],
+  ['relays POST', 'POST', 'relays', relaysPOST as Handler, 'error'],
+  ['repositories/[id] PUT', 'PUT', `repositories/${WORKTREE_ID}`, repositoryPUT as Handler, 'error'],
+  ['repositories/clone POST', 'POST', 'repositories/clone', clonePOST as Handler, 'clone'],
+  ['repositories/restore PUT', 'PUT', 'repositories/restore', restorePUT as Handler, 'success-error'],
+  ['repositories DELETE', 'DELETE', 'repositories', repositoriesDELETE as Handler, 'success-error'],
+  ['repositories/scan POST', 'POST', 'repositories/scan', scanPOST as Handler, 'error'],
+  ['sidebar/group-order PUT', 'PUT', 'sidebar/group-order', groupOrderPUT as Handler, 'success-error'],
+  ['templates/[id] PUT', 'PUT', `templates/${TEMPLATE_ID}`, templatePUT as Handler, 'error'],
+  ['templates POST', 'POST', 'templates', templatesPOST as Handler, 'error'],
+];
+
+function callSwept(handler: Handler, method: string, path: string, body: string) {
+  const request = new NextRequest(`http://localhost:3000/api/${path}`, {
+    method,
+    body,
+    headers: { 'Content-Type': 'application/json' },
+  });
+  const id = path.startsWith('templates/') ? TEMPLATE_ID : path.startsWith('worktrees/') ? WORKTREE_ID : path.split('/')[1];
+  return handler(request, {
+    params: Promise.resolve({ id, path: ['a.md'] } as { id: string }),
+  });
+}
+
+describe('malformed JSON body → 400 in the remaining routes (#3295 sweep)', () => {
+  let worktreeDir: string;
+
+  beforeEach(() => {
+    // The files route resolves the real path, so the worktree needs a directory.
+    worktreeDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cm-3295-')));
+    fs.writeFileSync(path.join(worktreeDir, 'a.md'), 'x');
+    mockDb = new Database(':memory:');
+    runMigrations(mockDb);
+    upsertWorktree(mockDb, {
+      id: WORKTREE_ID,
+      name: 'wt',
+      path: worktreeDir,
+      repositoryPath: '/path/to/repo',
+      repositoryName: 'repo',
+      cliToolId: 'claude',
+    });
+    mockDb.prepare(
+      `INSERT INTO external_apps (id, name, display_name, description, path_prefix, target_port, target_host, app_type, websocket_enabled, websocket_path_pattern, enabled, created_at, updated_at)
+       VALUES (?, 'app', 'App', NULL, 'app', 4000, 'localhost', 'other', 0, NULL, 1, 1, 1)`
+    ).run(WORKTREE_ID);
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    mockDb?.close();
+    mockDb = null;
+    fs.rmSync(worktreeDir, { recursive: true, force: true });
+  });
+
+  for (const body of ['this is not valid JSON', '']) {
+    it.each(SWEPT)(`%s: ${body === '' ? 'empty body' : 'broken JSON'} → 400 and no error log`, async (_label, method, path, handler, shape) => {
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const response = await callSwept(handler, method, path, body);
+      const data = await response.json();
+      consoleError.mockRestore();
+
+      expect(response.status).toBe(400);
+      if (shape === 'error') expect(data).toEqual({ error: 'Invalid request body' });
+      if (shape === 'success-error') expect(data).toEqual({ success: false, error: 'Invalid request body' });
+      if (shape === 'files') expect(data).toEqual({ success: false, error: { code: 'INVALID_REQUEST', message: 'Invalid request body' } });
+      if (shape === 'clone') {
+        expect(data.success).toBe(false);
+        expect(data.error.message).toBe('Invalid request body');
+      }
+      expect(mockLogger.error).not.toHaveBeenCalled();
+      expect(consoleError).not.toHaveBeenCalled();
+    });
+  }
 });

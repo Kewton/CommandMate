@@ -57,6 +57,7 @@ import {
 import { createLogger } from '@/lib/logger';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 import type { AgentInstance } from '@/lib/cli-tools/types';
+import { readJsonBody } from '@/lib/api/read-json-body';
 
 const logger = createLogger('api/instances/opencode');
 
@@ -166,7 +167,9 @@ export async function PUT(
       return NextResponse.json({ error: `Worktree '${id}' not found` }, { status: 404 });
     }
 
-    const body: unknown = await request.json();
+    const parsed = await readJsonBody<unknown>(request);
+    if (!parsed.ok) return parsed.response;
+    const body = parsed.body;
     if (typeof body !== 'object' || body === null || Array.isArray(body)) {
       return NextResponse.json({ error: 'Request body must be a JSON object' }, { status: 400 });
     }

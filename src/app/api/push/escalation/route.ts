@@ -17,6 +17,7 @@ import {
   setPushEscalationSettings,
 } from '@/lib/push';
 import { createLogger } from '@/lib/logger';
+import { readJsonBody } from '@/lib/api/read-json-body';
 
 export const dynamic = 'force-dynamic';
 
@@ -34,7 +35,9 @@ export function GET() {
 
 export async function PATCH(request: Request) {
   try {
-    const body: unknown = await request.json();
+    const parsed = await readJsonBody<unknown>(request);
+    if (!parsed.ok) return parsed.response;
+    const body = parsed.body;
     if (typeof body !== 'object' || body === null) {
       return NextResponse.json({ error: 'settings object is required' }, { status: 400 });
     }
