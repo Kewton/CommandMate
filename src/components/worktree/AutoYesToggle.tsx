@@ -10,7 +10,7 @@
 
 'use client';
 
-import React, { memo, useEffect, useState, useCallback } from 'react';
+import React, { memo, useEffect, useRef, useState, useCallback } from 'react';
 import { useTranslations } from 'next-intl';
 import { Switch } from '@/components/ui/Switch';
 import { AutoYesConfirmDialog } from './AutoYesConfirmDialog';
@@ -113,13 +113,26 @@ export const AutoYesToggle = memo(function AutoYesToggle({
   }, [enabled, expiresAt, onExpire]);
 
   // Auto-response notification (2 second display)
+  //
+  // Issue #3331: the dismiss timer is not tied to `lastAutoResponse` staying
+  // set. It used to be the effect's cleanup, so the value returning to null
+  // (useAutoYes clears it while the next answer is in flight) cancelled the
+  // timer and left the notice on screen for good. Each non-null value shows
+  // the notice once and restarts the timer; only unmounting cancels it.
+  const dismissTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (!lastAutoResponse) return;
 
     setNotification(`Auto responded: "${lastAutoResponse}"`);
-    const timeout = setTimeout(() => setNotification(null), NOTIFICATION_DISMISS_MS);
-    return () => clearTimeout(timeout);
+    if (dismissTimerRef.current) clearTimeout(dismissTimerRef.current);
+    dismissTimerRef.current = setTimeout(() => {
+      dismissTimerRef.current = null;
+      setNotification(null);
+    }, NOTIFICATION_DISMISS_MS);
   }, [lastAutoResponse]);
+  useEffect(() => () => {
+    if (dismissTimerRef.current) clearTimeout(dismissTimerRef.current);
+  }, []);
 
   // Issue #959: the UI presents as OFF the moment the countdown expires, even
   // before the parent's polled `enabled` prop catches up. Derive a single source
