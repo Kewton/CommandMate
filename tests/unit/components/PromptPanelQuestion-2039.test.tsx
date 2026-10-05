@@ -42,7 +42,7 @@ import {
   STRUCTURED_DECISION_OPTIONS,
   type StructuredPromptFacts,
 } from '@/lib/session/structured-prompt';
-import { readPromptDecisionId } from '@/components/worktree/prompt-decision-id';
+import { readDecisionId as readPromptDecisionId } from '@/lib/session/prompt-view';
 
 const QUESTION_ID = 'que_0000000000000000000000000';
 const PERMISSION_ID = 'per_0000000000000000000000000';

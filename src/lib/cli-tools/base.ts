@@ -9,8 +9,10 @@ import type { ICLITool, CLIToolType } from './types';
 import { resolveSessionName } from './session-name';
 import {
   capturePane,
+  createSession,
   getSessionWorkingDirectory,
   hasSession,
+  killSession,
   reconcileSessionGeometry,
   sendSpecialKey,
   type SessionGeometryOptions,
@@ -23,10 +25,12 @@ import { resolveGracefulExitSpec } from './graceful-exit';
 import { resolveLivenessSpec } from './liveness-spec';
 import { probeSessionLiveness } from './session-liveness';
 import { reportSessionStartFailure, reportStaleHookUrl } from './start-availability';
+import { missingToolError } from './install-hints';
 import { stripAnsi } from '../detection/ansi';
 import { getServerPort } from '../env';
 import { AGENT_EVENT_URL_ENV_VAR } from '../hooks/sources/launch-command';
-import { createLogger } from '../logger';
+import { createLogger, type Logger } from '../logger';
+import { getErrorMessage } from '../errors';
 import type {
   CaptureSpec,
   ComposerSpec,
@@ -36,7 +40,10 @@ import type {
   ToolLivenessSpec,
 } from '../../types/cli-tool-contracts';
 import { NAVIGATION_KEY_VALUES } from '../../types/terminal-keys';
-import { LIVENESS_CONFIRM_DELAY_MS } from '../../config/cli-tool-timing-config';
+import {
+  LIVENESS_CONFIRM_DELAY_MS,
+  TUI_SESSION_CREATE_WAIT_MS,
+} from '../../config/cli-tool-timing-config';
 import { TMUX_HISTORY_LIMIT } from '../../config/tmux-pane-config';
 import {
   clearSessionStarting,
@@ -708,6 +715,153 @@ export abstract class BaseCLITool implements ICLITool {
     }
     if (options.relaunch) {
       await this.relaunchIfToolExited(worktreeId, instanceId);
+    }
+  }
+
+  /**
+   * The install check a driver's `launchSession` opens with: a tool that is not
+   * installed stops the launch with {@link missingToolError}.
+   *
+   * copilot, opencode and OpenCode V2 do not call this. Each resolves the
+   * executable its launch line then names, so there the check and the line come
+   * from one measurement.
+   *
+   * @throws SessionStartUnavailableError when {@link isInstalled} answers false
+   */
+  protected async requireInstalled(): Promise<void> {
+    const available = await this.isInstalled();
+    if (!available) {
+      throw missingToolError(this);
+    }
+  }
+
+  /**
+   * The reuse decision a driver's `launchSession` makes before it types
+   * anything: name the session and, when its pane already exists, reconcile it
+   * ({@link reconcileExistingSession}) and ask whether the tool is still the
+   * thing drawing it ({@link isToolLive}, confirmed).
+   *
+   * Both log lines go through the caller's logger under the caller's action
+   * names, so each driver's log reads as it did when this sequence was written
+   * out in every one of them.
+   *
+   * opencode and OpenCode V2 keep their own copy: they hand the reconcile their
+   * pane geometry, resume their event stream on the live branch and release it
+   * on the relaunch branch.
+   *
+   * @param worktreeId - Worktree ID
+   * @param worktreePath - Worktree path
+   * @param instanceId - Agent instance ID (defaults to the primary instance)
+   * @param log.logger - The driver's logger
+   * @param log.liveAction - Logged when a live tool already holds the pane
+   * @param log.relaunchAction - Logged when the pane exists and its tool has exited
+   * @returns The session name; `exists` when its pane was already there; `live`
+   *   when the tool is still in it, so the caller has nothing to launch
+   * @throws {ForeignSessionError} From {@link reconcileExistingSession}
+   */
+  protected async resolveLaunchPane(
+    worktreeId: string,
+    worktreePath: string,
+    instanceId: string | undefined,
+    log: { logger: Logger; liveAction: string; relaunchAction: string }
+  ): Promise<{ sessionName: string; exists: boolean; live: boolean }> {
+    const sessionName = this.getSessionName(worktreeId, instanceId);
+
+    // Check if session already exists
+    const exists = await hasSession(sessionName);
+    if (exists) {
+      await this.reconcileExistingSession(sessionName, worktreePath);
+
+      // Issue #2070: this branch used to return unconditionally. A tmux session
+      // outlives the agent that was launched into it — a quit, a self-update, a
+      // crash — and the launch was then skipped for a pane holding nothing but a
+      // shell prompt, which left `kill-session` by hand as the only recovery.
+      // When the tool is gone we fall THROUGH and re-send the launch command
+      // into the same pane.
+      if (await this.isToolLive(sessionName, { confirm: true })) {
+        log.logger.info(log.liveAction);
+        return { sessionName, exists, live: true };
+      }
+      log.logger.warn(log.relaunchAction, { sessionName });
+    }
+    return { sessionName, exists, live: false };
+  }
+
+  /**
+   * Create the tmux session a launch types into, then wait
+   * {@link TUI_SESSION_CREATE_WAIT_MS} for it. Creation path only: on the #2070
+   * relaunch path the pane already exists and the caller does not come here.
+   *
+   * @param sessionName - tmux session name
+   * @param worktreePath - Worktree path, the session's working directory
+   */
+  protected async createLaunchPane(sessionName: string, worktreePath: string): Promise<void> {
+    // Create tmux session. Scrollback depth comes from the shared
+    // TMUX_HISTORY_LIMIT default (Issue #1624) — do not re-hardcode it here.
+    await createSession({
+      sessionName,
+      workingDirectory: worktreePath,
+    });
+
+    // Wait a moment for the session to be created
+    await new Promise((resolve) => setTimeout(resolve, TUI_SESSION_CREATE_WAIT_MS));
+  }
+
+  /**
+   * The stop sequence a driver's `killSession` runs: name the session, ask the
+   * tool to quit when its pane exists, kill the tmux session, run the driver's
+   * cleanup and log.
+   *
+   * The keys and waits that ask the tool to quit stay in each driver, as
+   * `requestExit`: they are measured per tool, and {@link gracefulExitSequence}
+   * describes them without sending them. Both log lines go through the caller's
+   * logger, the stop line under the caller's action name, so each driver's log
+   * reads as it did when this sequence was written out in every one of them.
+   *
+   * `afterKill` runs after the tmux kill and before the stop line, inside the
+   * same `try`, whether or not tmux had a session to kill.
+   *
+   * claude, opencode and OpenCode V2 keep their own `killSession`: claude hands
+   * the stop to `stopClaudeSession`, and the other two check the exit's
+   * postcondition and release what the instance held.
+   *
+   * @param worktreeId - Worktree ID
+   * @param instanceId - Agent instance ID (defaults to the primary instance)
+   * @param stop.logger - The driver's logger
+   * @param stop.stoppedAction - Logged when tmux reports it killed the session
+   * @param stop.requestExit - The driver's exit keys and the waits between them
+   * @param stop.afterKill - The driver's cleanup once the tmux kill has run
+   * @throws Whatever the sequence threw, unchanged, after logging `session:stop-failed`
+   */
+  protected async requestExitAndKill(
+    worktreeId: string,
+    instanceId: string | undefined,
+    stop: {
+      logger: Logger;
+      stoppedAction: string;
+      requestExit: (sessionName: string) => Promise<void>;
+      afterKill?: (sessionName: string) => void;
+    }
+  ): Promise<void> {
+    const sessionName = this.getSessionName(worktreeId, instanceId);
+
+    try {
+      const exists = await hasSession(sessionName);
+      if (exists) {
+        await stop.requestExit(sessionName);
+      }
+
+      // Kill the tmux session
+      const killed = await killSession(sessionName);
+
+      stop.afterKill?.(sessionName);
+
+      if (killed) {
+        stop.logger.info(stop.stoppedAction);
+      }
+    } catch (error: unknown) {
+      stop.logger.error('session:stop-failed', { error: getErrorMessage(error) });
+      throw error;
     }
   }
 

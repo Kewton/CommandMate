@@ -29,7 +29,6 @@ import {
 import type { StructuredDecisionOption } from '@/lib/session/structured-prompt';
 import {
   derivePromptView,
-  optionTakesTypedText,
   readQuestionChoices,
   type PromptView,
   type QuestionChoices,
@@ -40,14 +39,6 @@ const ANIMATION_DURATION_MS = 300;
 
 /** Swipe threshold to dismiss in pixels */
 const SWIPE_DISMISS_THRESHOLD = 100;
-
-/**
- * Whether the sheet sends the operator's TEXT for an option rather than its
- * number (Issue #2573). Issue #3184: defined once in `lib/session/prompt-view`
- * — a module neither surface's suites mock — instead of restated here and in
- * `PromptPanel`; re-exported under the old name.
- */
-export { optionTakesTypedText };
 
 /** Button style constants */
 const BUTTON_STYLES = {

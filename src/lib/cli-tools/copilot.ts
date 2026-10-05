@@ -19,12 +19,9 @@
 import { BaseCLITool } from './base';
 import type { CLIToolType } from './types';
 import {
-  hasSession,
-  createSession,
   sendKeys,
   sendSpecialKey,
   sendSpecialKeys,
-  killSession,
   capturePane,
 } from '../tmux/tmux';
 import { sendMessageWithSubmitVerification } from './submit-verified-sender';
@@ -45,7 +42,7 @@ import {
   COPILOT_SEND_ENTER_DELAY_MS,
   COPILOT_MODEL_SWITCH_TIMEOUT_MS,
 } from '@/config/copilot-constants';
-import { TUI_SESSION_CREATE_WAIT_MS, TUI_INTERRUPT_SETTLE_MS, COPILOT_EXIT_WAIT_MS } from '@/config/cli-tool-timing-config';
+import { TUI_INTERRUPT_SETTLE_MS, COPILOT_EXIT_WAIT_MS } from '@/config/cli-tool-timing-config';
 import {
   beginAgentSession,
   buildAgentLaunchCommandLine,
@@ -365,25 +362,12 @@ export class CopilotTool extends BaseCLITool {
       throw missingToolError(this);
     }
 
-    const sessionName = this.getSessionName(worktreeId, instanceId);
-
-    // Check if session already exists
-    const exists = await hasSession(sessionName);
-    if (exists) {
-      await this.reconcileExistingSession(sessionName, worktreePath);
-
-      // Issue #2070: this branch used to return unconditionally. A tmux session
-      // outlives the agent that was launched into it — a quit, a self-update, a
-      // crash — and the launch was then skipped for a pane holding nothing but a
-      // shell prompt, which left `kill-session` by hand as the only recovery.
-      // When the tool is gone we fall THROUGH and re-send the launch command
-      // into the same pane.
-      if (await this.isToolLive(sessionName, { confirm: true })) {
-        logger.info('copilot-session-exists');
-        return;
-      }
-      logger.warn('copilot-session-relaunch', { sessionName });
-    }
+    const { sessionName, exists, live } = await this.resolveLaunchPane(worktreeId, worktreePath, instanceId, {
+      logger,
+      liveAction: 'copilot-session-exists',
+      relaunchAction: 'copilot-session-relaunch',
+    });
+    if (live) return;
 
     // Issue #1761: fence this session off from the previous copilot process's
     // events. The state is keyed by (worktree, tool, instance), a key the new
@@ -407,15 +391,7 @@ export class CopilotTool extends BaseCLITool {
       // exists and holds the transcript of the process that died in it; the
       // launch command is re-sent into that same pane.
       if (!exists) {
-        // Create tmux session. Scrollback depth comes from the shared
-        // TMUX_HISTORY_LIMIT default (Issue #1624) — do not re-hardcode it here.
-        await createSession({
-          sessionName,
-          workingDirectory: worktreePath,
-        });
-
-        // Wait a moment for the session to be created
-        await new Promise((resolve) => setTimeout(resolve, TUI_SESSION_CREATE_WAIT_MS));
+        await this.createLaunchPane(sessionName, worktreePath);
       }
 
       // Issue #1761: hand this session its hook configuration, so structured
@@ -916,11 +892,10 @@ export class CopilotTool extends BaseCLITool {
    * @param instanceId - Optional agent instance ID (defaults to primary)
    */
   async killSession(worktreeId: string, instanceId?: string): Promise<void> {
-    const sessionName = this.getSessionName(worktreeId, instanceId);
-
-    try {
-      const exists = await hasSession(sessionName);
-      if (exists) {
+    await this.requestExitAndKill(worktreeId, instanceId, {
+      logger,
+      stoppedAction: 'stopped-copilot-session',
+      requestExit: async (sessionName) => {
         // Send Ctrl+C to interrupt any running operation
         await sendSpecialKey(sessionName, 'C-c');
         await new Promise((resolve) => setTimeout(resolve, TUI_INTERRUPT_SETTLE_MS));
@@ -931,17 +906,7 @@ export class CopilotTool extends BaseCLITool {
         await sendSpecialKeys(sessionName, ['Enter']);
 
         await new Promise((resolve) => setTimeout(resolve, COPILOT_EXIT_WAIT_MS));
-      }
-
-      // Kill the tmux session
-      const killed = await killSession(sessionName);
-
-      if (killed) {
-        logger.info('stopped-copilot-session');
-      }
-    } catch (error: unknown) {
-      logger.error('session:stop-failed', { error: getErrorMessage(error) });
-      throw error;
-    }
+      },
+    });
   }
 }
