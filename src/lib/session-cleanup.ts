@@ -12,7 +12,6 @@ import { stopPolling as stopResponsePolling, clearPromptHashCache } from './poll
 import { applyAutoYesStateRule, stopAutoYesPollersFor } from './auto-yes-lifecycle';
 import { stopScheduleForWorktree } from './schedule-manager';
 import { stopTimersForWorktree } from './timer-manager';
-import { stopAllGlobalSessionPolling } from './polling/global-session-poller';
 import { clearAllCache } from './tmux/tmux-capture-cache';
 import { CLI_TOOL_IDS, type CLIToolType } from './cli-tools/types';
 import { GLOBAL_SESSION_WORKTREE_ID } from './session/global-session-constants';
@@ -264,8 +263,7 @@ export function createOwnedSessionKiller(pathById: ReadonlyMap<string, string>):
 
 /**
  * Clean up all global assistant sessions.
- * Issue #649: Kill any orphaned mcbd-{cli_tool_id}-__global__ tmux sessions
- * and stop all global session pollers.
+ * Issue #649: Kill any orphaned mcbd-{cli_tool_id}-__global__ tmux sessions.
  *
  * Called during server shutdown and syncWorktreesAndCleanup.
  * Errors are logged but do not propagate (cleanup is best-effort).
@@ -273,9 +271,6 @@ export function createOwnedSessionKiller(pathById: ReadonlyMap<string, string>):
  * @returns Number of sessions killed
  */
 export async function cleanupGlobalSessions(): Promise<number> {
-  // Stop all global pollers first
-  stopAllGlobalSessionPolling();
-
   let sessionsKilled = 0;
   const manager = CLIToolManager.getInstance();
 
