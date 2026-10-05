@@ -899,7 +899,7 @@ function suppressGeminiStartupScreen(
 ): ExtractionResult | null {
   // Gemini-specific check
   if (cliToolId === 'gemini') {
-    const bannerCharCount = (response.match(/[░███]/g) || []).length;
+    const bannerCharCount = (response.match(/[░█]/g) || []).length;
     const totalChars = response.length;
     if (bannerCharCount > totalChars * 0.3) {
       return incompleteResult(totalLines);
@@ -1268,7 +1268,8 @@ function extractPartialResponse(ctx: ExtractionContext): ExtractionResult {
  * @param captureWindowLines - Size of the capture window `output` was produced with.
  *   Used only to decide whether the capture came back clipped (Issue #1670);
  *   defaults to the window `checkForResponse()` uses.
- * @returns Extracted response or null if incomplete
+ * @returns Null when there is no new output; otherwise the extraction result,
+ *   with `isComplete: false` when the response is not finished yet
  */
 export function extractResponse(
   output: string,
@@ -1533,6 +1534,9 @@ function extractCompletedTurn(
     const cleanOutput = stripAnsi(output);
     const tailLines = cleanOutput.split('\n').slice(-THINKING_TAIL_LINE_COUNT).join('\n');
     if (thinkingPattern.test(tailLines)) {
+      // Intended twin of the sweep in recordCompletedResponse: this one runs when
+      // working is visible on an unfinished frame, that one when a response is
+      // recorded (Issue #31).
       const answeredCount = markPendingPromptsAsAnswered(
         db,
         worktreeId,
@@ -1567,7 +1571,7 @@ function extractCompletedTurn(
   const lineCountIsCursor = !usesAlternateScreen(cliToolId) && !result.captureWindowSaturated;
 
   // Duplicate prevention
-  if (lineCountIsCursor && !result.bufferReset && result.lineCount === lastCapturedLine && !sessionState?.inProgressMessageId) {
+  if (lineCountIsCursor && !result.bufferReset && result.lineCount === lastCapturedLine) {
     return false;
   }
 
@@ -2101,7 +2105,9 @@ async function recordCompletedResponse(
     await recordClaudeConversation(db, worktreeId, cleanedResponse, cliToolId);
   }
 
-  // Mark any pending prompts as answered
+  // Mark any pending prompts as answered. Intended twin of the sweep in
+  // extractCompletedTurn (working visible on an unfinished frame); this one runs
+  // when a response is recorded (Issue #31).
   const answeredCount = markPendingPromptsAsAnswered(
     db,
     worktreeId,

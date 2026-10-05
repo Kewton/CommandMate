@@ -335,7 +335,6 @@ interface PromptCompositionInput {
   cliToolId: CLIToolType;
   output: string;
   statusResult: StatusDetectionResult;
-  scraperPromptWaiting: boolean;
   startingSince: number | null;
   promptWaiting: StructuredPromptWaitingState | null;
   askUserQuestion: AskUserQuestionEpisode | null;
@@ -360,12 +359,12 @@ function composePromptData({
   cliToolId,
   output,
   statusResult,
-  scraperPromptWaiting,
   startingSince,
   promptWaiting,
   askUserQuestion,
   eventSource,
 }: PromptCompositionInput): PromptComposition {
+  const scraperPromptWaiting = statusResult.hasActivePrompt;
   // Issue #1726: the agent's own account of what it asked. It contributes only
   // where some other layer has already established that a dialog is on screen —
   // this record decides no status of its own, because Claude emits nothing at
@@ -607,6 +606,9 @@ async function buildPayload(
   const newLines = lineCountIsCursor ? lines.slice(Math.max(0, lastCapturedLine)) : lines;
   const newContent = newLines.join('\n');
 
+  // The sequence from here to `startingStatusResult` is the same as in
+  // worktree-status-helper.ts; what follows differs on purpose and is not shared
+  // (#3215 "not touched").
   const compositeKey = buildCompositeKey(worktreeId, cliToolId, instanceId);
   const lastServerResponseTimestamp = getLastServerResponseTimestamp(compositeKey);
   const lastOutputTimestamp = lastServerResponseTimestamp ? new Date(lastServerResponseTimestamp) : undefined;
@@ -772,7 +774,6 @@ async function buildPayload(
     cliToolId,
     output,
     statusResult,
-    scraperPromptWaiting,
     startingSince,
     promptWaiting,
     askUserQuestion,
@@ -995,9 +996,9 @@ async function buildPayload(
     isDismissablePanelActive,
     isUnclassifiedActive: startingSince === null && merged.isUnclassifiedActive,
     startingSince,
-    // Issue #1926: the same fact `isUnclassifiedActive` carries, named the way
-    // §4 D1 names it. Published from the merged verdict so the two cannot
-    // disagree on the wire.
+    // Issue #1926: evidence strength, named the way §4 D1 names it. Not the same
+    // fact as `isUnclassifiedActive` (Issue #2011); published from the merged
+    // verdict so it agrees with the status it accompanies.
     statusEvidence: published.evidence,
     lastKnownStatus: lastKnown?.status ?? null,
     lastKnownStatusAt: lastKnown?.at ?? null,

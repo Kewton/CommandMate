@@ -100,7 +100,7 @@ const ACTIVE_INSTANCE_STORAGE_KEY_PREFIX = 'activeInstanceId-';
  * Fields whose name and type match `CurrentOutputResponseBody` (Issue #3229)
  * come from it: `isRunning` stays required, the rest stay optional. Hand-written
  * below: `promptData` (read through `LivePromptData`), `agentMode` (read as a
- * plain string), `content` and `autoYes` (this controller reads a looser shape).
+ * plain string) and `autoYes` (this controller reads a looser shape).
  */
 type CurrentOutputResponse = Pick<CurrentOutputResponseBody, 'isRunning'> &
   Partial<
@@ -129,7 +129,6 @@ type CurrentOutputResponse = Pick<CurrentOutputResponseBody, 'isRunning'> &
   > & {
   /** Issue #1738: may be the degraded structured form published since #1725. */
   promptData?: LivePromptData;
-  content?: string;
   /**
    * Issue #2592: which permission mode the agent is in, or `'unknown'`.
    *

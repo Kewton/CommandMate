@@ -580,6 +580,9 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   // Issue #2945: the approval / question the phone sheet is answering, when the
   // agent named it by id (opencode, OpenCode V2). Null for every scraper-read
   // prompt, which keeps those on `/prompt-response`.
+  // Read from the payload itself, unlike the PC panel's read off the shared view
+  // (TerminalSplitPaneContent): the sheet sends with the payload's own id
+  // (MobilePromptSheet.tsx). The two agree today (docs/design/3184-prompt-view-and-auto-yes-lifecycle.md).
   const mobilePromptDecisionId = readDecisionId(
     state.prompt.visible ? state.prompt.data : null,
   );

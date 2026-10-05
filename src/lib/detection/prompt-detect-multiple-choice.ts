@@ -452,29 +452,6 @@ const TEXT_INPUT_PATTERNS: RegExp[] = [
 ];
 
 /**
- * Labels of the rows measured to BE a text field on screen (Issue #2573).
- *
- * `requiresTextInput` (from {@link TEXT_INPUT_PATTERNS}) reads the WORDS of a
- * label — "tell … what to do differently", "custom", "enter …" — and says the
- * option is about the user's own text. It does not say where typed characters
- * land, and for two rows it flags alike the measured answer is opposite:
- *
- * | row | on screen | free text + Enter |
- * |-----|-----------|-------------------|
- * | Command Code `AskUserQuestion` `Type something...` (#2522) | a `TextInput` | lands in the field — the answer |
- * | Command Code permission `No, tell Command Code what to do differently` | a menu row | ignored; the Enter confirms the highlighted `1. Yes` |
- *
- * The second is how a "No + reason" was delivered as an approval. The same
- * words sit on codex's and copilot's approval rows (codex's also name letter
- * hotkeys, `(y)` / `(p)`), and the generic patterns match inside the command an
- * approval row quotes (`… commands that start with 'npm run custom'`).
- *
- * So this is an allowlist of what was measured, not a denylist of what went
- * wrong: a flagged row is a field only when its label is one of these. Anchored
- * at the start so Command Code's folded description (`Type something... Give me
- * a branch name …`) still matches. Command Code's reader
- * (`tools/command-code/dialog.ts`) marks the same rows with the same expression.
- *
  * Whether typed text reaches this option as its answer (Issue #2573).
  *
  * `true` only for a `requiresTextInput` row whose label is a measured text field

@@ -301,6 +301,9 @@ function PromptContent({
     answerable,
     send: onRespond,
   });
+  // Unlike PromptPanel, no `canRespondDecision` is passed: the panel's submit
+  // requires a decision id, while this sheet draws no controls without one
+  // (`StructuredDecisionContent`, #2945; pinned by MobilePromptSheetDecision-2945.test.tsx).
   // Issue #3184: what this payload is and how it is answered, from the one
   // shared function. The sheet sends with the payload's own decision id
   // (`handleStructuredRespond`), so the view is derived from the payload as is.

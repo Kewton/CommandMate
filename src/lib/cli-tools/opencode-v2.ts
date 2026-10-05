@@ -420,6 +420,9 @@ export class OpenCodeV2Tool extends BaseCLITool {
       }
       invalidateCache(sessionName);
       this.resumeAttemptedAt.delete(sessionName);
+      // Logged unconditionally: after a successful `/exit` no tmux kill runs, so
+      // there is no `killed` value to test, unlike `requestExitAndKill` in
+      // base.ts (logs only when the kill returned true) (#3232).
       logger.info('stopped-opencode-v2-session');
     } catch (error: unknown) {
       logger.error('session:stop-failed', { error: getErrorMessage(error) });

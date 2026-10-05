@@ -220,6 +220,8 @@ export async function growTurnRowTo(
   updatedEvent: string
 ): Promise<boolean> {
   const instanceId = target.instanceId ?? target.cliToolId;
+  // No `typeof previous !== 'string'` guard, unlike antigravity/history.ts:
+  // `chat_messages.content` is `TEXT NOT NULL`, so it is always a string here.
   const previousLength = existing.content.length;
   if (rendered.body.length <= previousLength) return false;
 

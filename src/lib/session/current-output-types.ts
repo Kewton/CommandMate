@@ -493,11 +493,11 @@ export interface CurrentOutputPayload {
    * it settles — "did anything actually confirm this?" — is exactly the question
    * an operator asks of a verdict they distrust.
    *
-   * Today it is the negation of {@link isUnclassifiedActive}, which is derived
-   * from it. The two are published side by side rather than one replacing the
-   * other because `isUnclassifiedActive` is an older CLI contract (`wait`'s
-   * `ready && !isUnclassifiedActive` rule) and this one is the reading Phase 3
-   * widens per tool.
+   * It is NOT the inverse of {@link isUnclassifiedActive} (Issue #2011): this
+   * asks whether a rule positively vouched for the verdict, while the flag asks
+   * whether any rule could read the frame at all, so an idle composer can be
+   * `'none'` and still classified. This one is the reading Phase 3 widens per
+   * tool; the flag is the older CLI contract (`wait`'s completion rule).
    */
   statusEvidence: StatusEvidence;
   /**
