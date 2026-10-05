@@ -527,7 +527,9 @@ describe('lib/tmux import guard: the allowlist', () => {
 describe('lib/tmux import guard: positive controls', () => {
   const eslint = makeEslint({ withAllowlist: true });
   // A file that is deliberately NOT on the allowlist, so the rule is live in it.
-  const UNEXEMPT = join(REPO_ROOT, 'src/lib/session/index.ts');
+  // Was the `src/lib/session` barrel until #3315 deleted it (nothing imported it);
+  // a sibling keeps every relative specifier below resolving to the same place.
+  const UNEXEMPT = join(REPO_ROOT, 'src/lib/session/worktree-status-helper.ts');
 
   const caught: [string, string, string][] = [
     ['aliased static import', "import { sendKeys } from '@/lib/tmux/tmux';", 'no-restricted-imports'],
@@ -612,11 +614,16 @@ describe('lib/tmux import guard: re-export leaks', () => {
     }
   });
 
-  it('keeps the session barrel on explicit named re-exports', () => {
-    // `export * from './claude-session'` would re-open the leak above the moment
-    // `claude-session.ts` grows a tmux re-export, and the diff would not show it.
-    const barrel = readFileSync(join(REPO_ROOT, 'src/lib/session/index.ts'), 'utf-8');
-    expect(barrel).not.toMatch(/^\s*export\s+\*/m);
+  it('has no session barrel, and would keep one on explicit named re-exports', () => {
+    // #3315 deleted `src/lib/session/index.ts`: nothing imported it. If it comes
+    // back, `export * from './claude-session'` would re-open the leak above the
+    // moment `claude-session.ts` grows a tmux re-export, and the diff would not
+    // show it — so a revived barrel must name every symbol it re-exports.
+    const barrelPath = join(REPO_ROOT, 'src/lib/session/index.ts');
+    if (existsSync(barrelPath)) {
+      expect(readFileSync(barrelPath, 'utf-8')).not.toMatch(/^\s*export\s+\*/m);
+    }
+    expect(existsSync(barrelPath), 'src/lib/session/index.ts was deleted by #3315').toBe(false);
   });
 });
 
