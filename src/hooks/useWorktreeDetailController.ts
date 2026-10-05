@@ -47,6 +47,7 @@ import { readSelectionListShape } from '@/lib/detection/selection-shape';
 import { useAppUpdate } from '@/contexts/AppUpdateContext';
 import { type AutoYesToggleParams } from '@/components/worktree/AutoYesToggle';
 import type { AutoYesStopReason } from '@/config/auto-yes-config';
+import type { CurrentOutputResponseBody } from '@/lib/session/current-output-types';
 import type { Worktree, ChatMessage, LivePromptData, FileContent } from '@/types/models';
 import { isAnswerablePromptData } from '@/types/models';
 import {
@@ -94,30 +95,42 @@ const ACTIVE_INSTANCE_STORAGE_KEY_PREFIX = 'activeInstanceId-';
 
 /** Props for WorktreeDetailRefactored component */
 
-/** API response shape for current output endpoint */
-interface CurrentOutputResponse {
-  isRunning: boolean;
-  cliToolId?: CLIToolType;
-  isGenerating?: boolean;
-  isPromptWaiting?: boolean;
+/**
+ * API response shape for current output endpoint.
+ *
+ * Fields whose name and type match `CurrentOutputResponseBody` (Issue #3229)
+ * come from it: `isRunning` stays required, the rest stay optional. Hand-written
+ * below: `promptData` (read through `LivePromptData`), `agentMode` (read as a
+ * plain string), `content` and `autoYes` (this controller reads a looser shape).
+ */
+type CurrentOutputResponse = Pick<CurrentOutputResponseBody, 'isRunning'> &
+  Partial<
+    Pick<
+      CurrentOutputResponseBody,
+      | 'cliToolId'
+      | 'isPromptWaiting'
+      /** Issue #2870: whether `/prompt-response` would answer `promptData`; absent when not judged. */
+      | 'promptAnswerable'
+      | 'fullOutput'
+      | 'realtimeSnippet'
+      | 'thinking'
+      /** Issue #473: OpenCode TUI selection list active flag */
+      | 'isSelectionListActive'
+      /** Issue #1017: Codex pager/edit-previous mode (subset of isSelectionListActive) */
+      | 'isPagerActive'
+      /** Issue #2369: a dismiss-only overlay is on the pane (`Esc to close`). */
+      | 'isDismissablePanelActive'
+      /** Issue #1017: the frame is on screen and nobody could classify it. */
+      | 'isUnclassifiedActive'
+      /** Issue #2238: the merged status verdict (`idle`/`ready`/`running`/`waiting`). */
+      | 'sessionStatus'
+      /** Issue #3179: epoch ms the agent began launching, while it is still starting. */
+      | 'startingSince'
+    >
+  > & {
   /** Issue #1738: may be the degraded structured form published since #1725. */
   promptData?: LivePromptData;
-  /** Issue #2870: whether `/prompt-response` would answer `promptData`; absent when not judged. */
-  promptAnswerable?: boolean;
   content?: string;
-  fullOutput?: string;
-  realtimeSnippet?: string;
-  thinking?: boolean;
-  /** Issue #473: OpenCode TUI selection list active flag */
-  isSelectionListActive?: boolean;
-  /** Issue #1017: Codex pager/edit-previous mode (subset of isSelectionListActive) */
-  isPagerActive?: boolean;
-  /** Issue #2369: a dismiss-only overlay is on the pane (`Esc to close`). */
-  isDismissablePanelActive?: boolean;
-  /** Issue #1017: the frame is on screen and nobody could classify it. */
-  isUnclassifiedActive?: boolean;
-  /** Issue #2238: the merged status verdict (`idle`/`ready`/`running`/`waiting`). */
-  sessionStatus?: string;
   /**
    * Issue #2592: which permission mode the agent is in, or `'unknown'`.
    *
@@ -128,8 +141,6 @@ interface CurrentOutputResponse {
    * a server that predates the field.
    */
   agentMode?: string;
-  /** Issue #3179: epoch ms the agent began launching, while it is still starting. */
-  startingSince?: number | null;
   autoYes?: {
     enabled: boolean;
     expiresAt: number | null;
@@ -139,7 +150,7 @@ interface CurrentOutputResponse {
   lastServerResponseTimestamp?: number | null;
   /** Issue #501: Whether server-side auto-yes poller is active */
   serverPollerActive?: boolean;
-}
+};
 
 // ============================================================================
 // Constants

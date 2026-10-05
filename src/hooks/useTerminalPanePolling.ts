@@ -44,6 +44,7 @@ import type { RealtimeEvent, TerminalSnapshotEvent, SessionStatusEvent } from '@
 import { extractComposerText } from '@/lib/detection/composer-text';
 import { buildRealtimeSnippet } from '@/lib/realtime-snippet';
 import { detectAgentMode } from '@/lib/detection/agent-mode';
+import type { CurrentOutputResponseBody } from '@/lib/session/current-output-types';
 import { promptFingerprint } from '@/hooks/usePromptStuckCounter';
 import { AGENT_MODE_UNKNOWN, type AgentMode } from '@/types/cli-tool-contracts';
 import {
@@ -251,26 +252,35 @@ export interface PanePromptState {
   answerable?: boolean;
 }
 
-interface CurrentOutputResponse {
-  isRunning?: boolean;
-  cliToolId?: CLIToolType;
-  /** Issue #2238: the merged generating verdict. See {@link PaneTerminalState.sessionStatus}. */
-  sessionStatus?: string;
-  isGenerating?: boolean;
-  isPromptWaiting?: boolean;
+/**
+ * Fields whose name, optionality and type match `CurrentOutputResponseBody`
+ * (Issue #3229). Every one is optional here: a server older than the field
+ * omits it. `promptData` and `structuredEvents` stay hand-written below
+ * because this pane reads a narrower shape than the payload carries.
+ */
+type CurrentOutputResponse = Partial<
+  Pick<
+    CurrentOutputResponseBody,
+    | 'isRunning'
+    | 'cliToolId'
+    /** Issue #2238: the merged generating verdict. See {@link PaneTerminalState.sessionStatus}. */
+    | 'sessionStatus'
+    | 'isPromptWaiting'
+    /** Issue #2870. See {@link PanePromptState.answerable}. */
+    | 'promptAnswerable'
+    | 'fullOutput'
+    | 'realtimeSnippet'
+    | 'thinking'
+    | 'isSelectionListActive'
+    | 'isPagerActive'
+    /** Issue #2369: absent on a daemon older than the field. */
+    | 'isDismissablePanelActive'
+    | 'isUnclassifiedActive'
+    /** Issue #3179. See {@link PaneTerminalState.startingSince}. */
+    | 'startingSince'
+  >
+> & {
   promptData?: LivePromptData;
-  /** Issue #2870. See {@link PanePromptState.answerable}. */
-  promptAnswerable?: boolean;
-  fullOutput?: string;
-  realtimeSnippet?: string;
-  thinking?: boolean;
-  isSelectionListActive?: boolean;
-  isPagerActive?: boolean;
-  /** Issue #2369: absent on a daemon older than the field. */
-  isDismissablePanelActive?: boolean;
-  isUnclassifiedActive?: boolean;
-  /** Issue #3179. See {@link PaneTerminalState.startingSince}. */
-  startingSince?: number | null;
   /**
    * Issue #2042: the two blocks that describe the conversation rather than the
    * screen. Only the two this pane renders are declared — the payload carries a
@@ -285,7 +295,7 @@ interface CurrentOutputResponse {
     /** Issue #2043. opencode only; absent on every other tool and every older daemon. */
     sessionDiff?: AgentSessionDiffView | null;
   };
-}
+};
 
 export interface UseTerminalPanePollingOptions {
   worktreeId: string;

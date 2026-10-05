@@ -8,6 +8,7 @@ import { getDbInstance } from '@/lib/db/db-instance';
 import { getWorktreeById } from '@/lib/db';
 import { CLI_TOOL_IDS, isValidInstanceId, type CLIToolType } from '@/lib/cli-tools/types';
 import { buildCurrentOutput } from '@/lib/session/current-output-builder';
+import type { CurrentOutputResponseBody } from '@/lib/session/current-output-types';
 import { resolveSessionTarget } from '@/lib/session/resolve-session-target';
 import { getDetectorStalenessSnapshot } from '@/lib/detection/version-probes';
 import { detectAgentMode } from '@/lib/detection/agent-mode';
@@ -143,8 +144,8 @@ export async function GET(
 
     return NextResponse.json(
       staleness === undefined
-        ? { ...payload, agentMode }
-        : { ...payload, agentMode, detector: { staleness } },
+        ? ({ ...payload, agentMode } satisfies CurrentOutputResponseBody)
+        : ({ ...payload, agentMode, detector: { staleness } } satisfies CurrentOutputResponseBody),
       { status: 200 }
     );
   } catch (error: unknown) {
