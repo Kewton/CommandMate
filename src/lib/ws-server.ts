@@ -24,6 +24,10 @@ import { getWorktreeById } from './db';
 import { observeTmuxControlFirstOutputLatency } from './tmux/tmux-control-mode-metrics';
 import { getControlModeTmuxTransport } from './tmux/control-mode-tmux-transport';
 import { checkSessionOwnership } from './cli-tools/session-ownership';
+import {
+  FOREIGN_TERMINAL_SESSION_ERROR,
+  findTerminalSessionRefusal,
+} from './realtime/terminal-session-ownership';
 import { isTmuxControlModeEnabled } from './tmux/tmux-control-mode-flags';
 import { getExternalAppCache } from './external-apps/cache';
 import type { ExternalApp } from '@/types/external-apps';
@@ -87,6 +91,15 @@ interface ClientInfo {
   ws: WebSocket;
   worktreeIds: Set<string>;
   terminalSubscription: TerminalSubscription | null;
+  /**
+   * The tail of this socket's `terminal_input` / `terminal_resize` work
+   * (Issue #3334). Each write awaits an ownership check before it reaches tmux,
+   * and the dispatcher does not await a message before taking the next one, so
+   * without this chain the writes would land in the order their checks
+   * FINISHED: characters swapped, an Enter ahead of the line it ends, an old
+   * size applied last. Absent until the first write.
+   */
+  terminalWriteQueue?: Promise<void>;
   /**
    * Whether a pong has been seen since the last heartbeat sweep (Issue #2502).
    *
@@ -966,7 +979,7 @@ async function handleTerminalSubscribe(ws: WebSocket, message: WebSocketMessage)
   if (ownership.verdict === 'foreign') {
     sendTerminalEvent(ws, {
       type: 'terminal_error',
-      error: 'Session belongs to another CommandMate server',
+      error: FOREIGN_TERMINAL_SESSION_ERROR,
     });
     return;
   }
@@ -996,15 +1009,20 @@ async function handleTerminalSubscribe(ws: WebSocket, message: WebSocketMessage)
     onError: (error) => {
       void (async () => {
         try {
-          const snapshot = await transport.captureSnapshot(sessionName, {
-            startLine: TERMINAL_FALLBACK_CAPTURE_LINES,
-          });
-          if (snapshot.length > 0) {
-            sendTerminalEvent(ws, {
-              type: 'terminal_output',
-              data: snapshot,
-              fallback: true,
+          // Issue #3334: the fallback reads the pane by name, later than the
+          // check above — a session that went away and came back under another
+          // server is not ours to show.
+          if ((await findTerminalSessionRefusal(worktreeId, sessionName)) === null) {
+            const snapshot = await transport.captureSnapshot(sessionName, {
+              startLine: TERMINAL_FALLBACK_CAPTURE_LINES,
             });
+            if (snapshot.length > 0) {
+              sendTerminalEvent(ws, {
+                type: 'terminal_output',
+                data: snapshot,
+                fallback: true,
+              });
+            }
           }
         } catch {
           // Best-effort snapshot fallback. The original control-mode error is still reported.
@@ -1035,7 +1053,28 @@ async function handleTerminalSubscribe(ws: WebSocket, message: WebSocketMessage)
   });
 }
 
-async function handleTerminalInput(ws: WebSocket, message: WebSocketMessage): Promise<void> {
+/**
+ * Run `task` after every terminal write this socket received before it
+ * (Issue #3334), so check-then-send pairs reach tmux in arrival order. A task
+ * that throws does not stall the ones behind it.
+ */
+function enqueueTerminalWrite(ws: WebSocket, task: () => Promise<void>): Promise<void> {
+  const clientInfo = clients.get(ws);
+  if (!clientInfo) return task();
+  const run = (clientInfo.terminalWriteQueue ?? Promise.resolve()).then(task, task);
+  clientInfo.terminalWriteQueue = run.catch(() => undefined);
+  return run;
+}
+
+function handleTerminalInput(ws: WebSocket, message: WebSocketMessage): Promise<void> {
+  return enqueueTerminalWrite(ws, () => runTerminalInput(ws, message));
+}
+
+function handleTerminalResize(ws: WebSocket, message: WebSocketMessage): Promise<void> {
+  return enqueueTerminalWrite(ws, () => runTerminalResize(ws, message));
+}
+
+async function runTerminalInput(ws: WebSocket, message: WebSocketMessage): Promise<void> {
   const clientInfo = clients.get(ws);
   const subscription = clientInfo?.terminalSubscription;
   if (!subscription) {
@@ -1050,6 +1089,11 @@ async function handleTerminalInput(ws: WebSocket, message: WebSocketMessage): Pr
   }
 
   try {
+    const refusal = await findTerminalSessionRefusal(subscription.worktreeId, subscription.sessionName);
+    if (refusal !== null) {
+      sendTerminalEvent(ws, { type: 'terminal_error', error: refusal });
+      return;
+    }
     await getControlModeTmuxTransport().sendInput(subscription.sessionName, input);
   } catch (error) {
     sendTerminalEvent(ws, {
@@ -1059,7 +1103,7 @@ async function handleTerminalInput(ws: WebSocket, message: WebSocketMessage): Pr
   }
 }
 
-async function handleTerminalResize(ws: WebSocket, message: WebSocketMessage): Promise<void> {
+async function runTerminalResize(ws: WebSocket, message: WebSocketMessage): Promise<void> {
   const clientInfo = clients.get(ws);
   const subscription = clientInfo?.terminalSubscription;
   if (!subscription) {
@@ -1075,6 +1119,12 @@ async function handleTerminalResize(ws: WebSocket, message: WebSocketMessage): P
   }
 
   try {
+    // Issue #3334: a resize changes the pane as surely as a key does.
+    const refusal = await findTerminalSessionRefusal(subscription.worktreeId, subscription.sessionName);
+    if (refusal !== null) {
+      sendTerminalEvent(ws, { type: 'terminal_error', error: refusal });
+      return;
+    }
     await getControlModeTmuxTransport().resize(subscription.sessionName, message.cols, message.rows);
   } catch (error) {
     sendTerminalEvent(ws, {

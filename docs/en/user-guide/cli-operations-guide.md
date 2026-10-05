@@ -1201,6 +1201,27 @@ When `$TMUX` is set (you called it from inside tmux) it uses `switch-client` ins
 client is on a **different tmux server** and cannot switch, it prints the quoted
 `tmux attach -t '=mcbd-…:'` and exits non-zero.
 
+When the session under that name belongs to **another CommandMate server** (the server answers 409
+`session_owned_by_other_server`), it changes course so that no key reaches it (Issue #3334):
+
+- A plain attach is **made read-only (`-r`)**, and says so on stderr. You can look; nothing you type
+  arrives
+- `--live` would change the other session's geometry, so it **does not attach** and exits non-zero
+- From inside tmux, `switch-client` has no read-only form, so it **does not switch**; it prints
+  `tmux attach -r -t '=mcbd-…:'` to run outside tmux and exits non-zero
+
+The server's answer only counts when it is about **the very name being attached**. When the roster
+cannot be read and the name falls back to the legacy form (`mcbd-<tool>-…`), the server checks the
+namespaced name, so its answer is about a different session (both names can exist at once). That is
+treated as **ownership not confirmed**: the attach is made read-only as above, and `--live` and the
+switch from inside tmux are refused. No ownership answer at all — any non-2xx such as a 404, a
+stopped server, or an older server with no ownership check — is treated the same way. Only a session
+the server **confirms as its own** gets an attach that can send keys.
+
+When `send` / `capture` / `respond` and the other commands get the same 409, they exit with a message
+saying the session is another CommandMate server's and nothing was sent to it, read from it or stopped
+(the exit code is the one a 409 always had, 99).
+
 ### Finding the session name
 
 ```bash

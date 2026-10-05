@@ -120,14 +120,43 @@ function withServerUrl(message: string, context?: ApiErrorContext): string {
 }
 
 /**
+ * The `code` the server sends with the 409 for a tmux session another
+ * CommandMate server created (Issue #2865). Spelled out rather than imported:
+ * the server's constant lives next to the tmux gateway, which the CLI must not
+ * load. `tests/unit/cli/utils/api-client-foreign-session-3334.test.ts` pins the
+ * two to the same string.
+ */
+export const FOREIGN_SESSION_ERROR_CODE = 'session_owned_by_other_server';
+
+/**
+ * Issue #3334: what the operator reads for that 409. It has to say three
+ * things the status alone does not: the session is another CommandMate
+ * server's, this command therefore did nothing to it, and where to go instead.
+ */
+export function foreignSessionMessage(payload?: ApiErrorPayload): string {
+  const name = typeof payload?.sessionName === 'string' && payload.sessionName !== ''
+    ? `"${payload.sessionName}" `
+    : '';
+  const where = typeof payload?.sessionPath === 'string' && payload.sessionPath !== ''
+    ? ` (it was started in ${payload.sessionPath})`
+    : '';
+  return (
+    `The tmux session ${name}belongs to another CommandMate server${where}, ` +
+    'so nothing was sent to it, read from it or stopped. ' +
+    'Use the CommandMate server that started it, or stop that session there first.'
+  );
+}
+
+/**
  * Classify API errors into user-friendly messages and exit codes.
  * [IA3-09] Covers: ECONNREFUSED, 400, 401/403, 404, 429, 500, timeout
  *
  * @param error - Error object or unknown
  * @param status - HTTP status code if available
  * @param payload - Parsed error body, when the response carried one (Issue #1637).
- *   Used for 5xx only: the 4xx messages below are already specific, and are
- *   pinned by tests as the CLI's own wording.
+ *   Used for 5xx, and for the foreign-session 409 (Issue #3334): the other 4xx
+ *   messages below are already specific, and are pinned by tests as the CLI's
+ *   own wording.
  * @param context - Which server answered, when the caller knows (Issue #2404).
  *   Read by the 404 branch only; the other messages do not send anyone looking
  *   in the wrong place.
@@ -171,6 +200,23 @@ export function handleApiError(
         // is the one that is wrong.
         return {
           message: withServerUrl('Resource not found. Check the worktree ID.', context),
+          exitCode: ExitCode.UNEXPECTED_ERROR,
+        };
+      case 409:
+        // Issue #3334: the one 409 every session route shares (#2865 / #3290).
+        // Without this it read "Unexpected HTTP status: 409", which does not say
+        // that nothing was done, nor why. Same exit code as that default branch,
+        // so a script branching on it sees no change. Every other 409 keeps the
+        // default wording below — the commands that own one (send's
+        // PROMPT_WAITING, verify's running run) already explain it themselves.
+        if (payload?.code === FOREIGN_SESSION_ERROR_CODE) {
+          return {
+            message: foreignSessionMessage(payload),
+            exitCode: ExitCode.UNEXPECTED_ERROR,
+          };
+        }
+        return {
+          message: `Unexpected HTTP status: ${status}`,
           exitCode: ExitCode.UNEXPECTED_ERROR,
         };
       case 429:
@@ -409,6 +455,9 @@ export interface ApiErrorPayload {
    * trip per mistake.
    */
   issues?: string[];
+  /** Issue #2865: sent with the foreign-session 409 (`session_owned_by_other_server`). */
+  sessionName?: string;
+  sessionPath?: string | null;
 }
 
 /**
