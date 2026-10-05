@@ -9,76 +9,47 @@
 # {port} {run_dir} {target}. `{pid}` is deliberately not used: the server is
 # started in the background, so every check finds it by its LISTENING port.
 #
-# ISOLATION IS THE POINT. A UAT server started from a worktree has grabbed the
-# production DB before, because settings resolution fell through to production.
-# "It listens on another port" proves nothing. So:
+# Starting and stopping live in scripts/uat/run-server.sh (Issue #3359), which
+# the daily check (#3312) shares. `up` and `down` only call it. It holds:
 #
-#   - `env -i` starts the server with no inherited variable (a CM_DB_PATH the
-#     caller exported would otherwise win), and CM_DB_PATH / CM_ROOT_DIR are set
-#     explicitly under {run_dir}.
-#   - tmux: the production code calls `tmux` with no socket argument, so it goes
-#     wherever TMUX points. TMUX is redirected to a PRIVATE server on
-#     /tmp/cmuat-{port}/tmux.sock (the technique tests/unit/config/
-#     tmux-live-test-safety.test.ts prescribes). That server is started first,
-#     from the caller's normal environment, because a tmux server born under
-#     `env -i` loses Keychain access and a claude session in it comes up logged
-#     out. Its pid is read off the socket with lsof, not with a tmux format
-#     string, because tmux's own pid format would collide with the Skill's
-#     `{pid}` placeholder. Every tmux command here names its socket with -S: with
-#     TMUX set in the caller (an agent running inside tmux), a bare
-#     `tmux kill-server` would hit the user's own server.
-#   - isolation.checks measures all of it on the running process, positive and
-#     negative, before any test case runs. Each check fails when pointed at a
-#     server that is not isolated (measured against the production :3000).
+#   - ISOLATION. A UAT server started from a worktree has grabbed the production
+#     DB before, because settings resolution fell through to production. "It
+#     listens on another port" proves nothing. So `env -i` starts the server
+#     with no inherited variable and CM_DB_PATH / CM_ROOT_DIR /
+#     CM_OPENCODE_V2_DIR / CM_AGENT_HOOKS_DIR are set under {run_dir}. TMUX
+#     names a PRIVATE tmux server on /tmp/cmuat-{port}-<run id>/tmux.sock (the
+#     technique tests/unit/config/tmux-live-test-safety.test.ts prescribes),
+#     started first from the caller's normal environment, because a tmux server
+#     born under `env -i` loses Keychain access and a claude session in it
+#     comes up logged out. Every tmux command names its socket with -S.
+#   - OWNERSHIP. Each run has its own id, so two runs on the same port never
+#     share a socket. `up` writes {run_dir}/uat-run.state (run id, socket dir,
+#     server pid, and CM_DB_PATH as read off that pid's own environment).
+#     `down` stops the recorded pid only when it is the one LISTENING on
+#     {port} and its CM_DB_PATH is under {run_dir}; otherwise it stops nothing
+#     and fails. It never kills by port alone, so another owner of {port} (a
+#     second UAT, anything else) is left running.
+#   - ONE RUN AT A TIME. A `mkdir` lock (scripts/uat/run-lock.sh) shared with
+#     the daily check and `run.ts` is taken before `up` starts anything and
+#     released by `down` once the server is gone. The next `up` cleans what a
+#     killed run left behind, with the same checks.
+#   - codex's two shared files are hashed in `up` and compared in `down`.
 #
-# The socket lives under /tmp rather than {run_dir} because a unix socket path is
-# capped at 104 bytes on macOS and {run_dir} is deep inside the worktree.
+# isolation.checks measures it on the running process, positive and negative,
+# before any test case runs. Each check fails when pointed at a server that is
+# not isolated (measured against the production :3000).
 version: 1
 env:
   build: "npm run build:all"
-  # A LITERAL block (`|`) with explicit backslash continuations, on purpose.
-  # The first version was a folded block (`>-`) whose continuation lines were
-  # indented deeper, and YAML keeps the line break before a more-indented line:
-  # `env -i …` became a command of its own (it printed the environment and
-  # exited) and `node` started with the CALLER's environment. The DB and port
-  # still looked isolated only because the caller happened to export CM_DB_PATH
-  # and CM_PORT already, so the bare assignment lines rewrote them; TMUX came
-  # through untouched and the server's tmux calls pointed at the user's own
-  # server. The tmux isolation check is what caught it (2026-09-16), and
-  # tests/unit/config/uat-yaml-2590.test.ts now holds the shape.
-  up: |
-    set -e
-    mkdir -p {run_dir}/root
-    # codex's two shared files are keyed by $CODEX_HOME alone, so they cannot be
-    # moved without moving codex's login. Record their sha256 here; `down`
-    # compares and fails when the UAT build rewrote them. Never written back.
-    for f in "${CODEX_HOME:-$HOME/.codex}/hooks.json" "${CODEX_HOME:-$HOME/.codex}/commandmate/cmate-agent-event.sh"; do
-      printf '%s  %s\n' "$( [ -f "$f" ] && shasum -a 256 "$f" | cut -d' ' -f1 || echo absent )" "$f"
-    done > {run_dir}/codex-shared.sha256
-    mkdir -p -m 700 /tmp/cmuat-{port}
-    tmux -S /tmp/cmuat-{port}/tmux.sock new-session -d -s keepalive 'sleep 86400'
-    env -i HOME="$HOME" PATH="$PATH" USER="$USER" LOGNAME="$LOGNAME" SHELL="$SHELL" \
-      LANG="${LANG:-en_US.UTF-8}" TERM="${TERM:-xterm-256color}" \
-      TMUX="/tmp/cmuat-{port}/tmux.sock,$(lsof -t /tmp/cmuat-{port}/tmux.sock | head -1),0" \
-      NODE_ENV=production CM_PORT={port} CM_BIND=127.0.0.1 \
-      CM_DB_PATH={run_dir}/uat.db CM_ROOT_DIR={run_dir}/root \
-      CM_OPENCODE_V2_DIR={run_dir}/opencode-v2 CM_AGENT_HOOKS_DIR={run_dir}/hooks \
-      nohup node dist/server/server.js > {run_dir}/server.log 2>&1 &
-  # Stops ONLY what LISTENS on {port} (never a process merely connected to it,
-  # CommandMate#2473), waits up to 10 s, then removes the private tmux server.
-  # Written inline so it does not depend on where cmate-uat is installed.
-  down: |
-    P=$(lsof -nP -iTCP:{port} -sTCP:LISTEN -t)
-    [ -z "$P" ] || kill $P
-    i=0; while [ $i -lt 20 ] && lsof -nP -iTCP:{port} -sTCP:LISTEN -t >/dev/null; do sleep 0.5; i=$((i+1)); done
-    tmux -S /tmp/cmuat-{port}/tmux.sock kill-server 2>/dev/null || true
-    rm -rf /tmp/cmuat-{port}
-    ! lsof -nP -iTCP:{port} -sTCP:LISTEN -t >/dev/null
-    # Fail when the UAT build rewrote codex's shared hook or relay script.
-    while read -r h f; do
-      n=$( [ -f "$f" ] && shasum -a 256 "$f" | cut -d' ' -f1 || echo absent )
-      [ "$n" = "$h" ] || { echo "codex shared file changed during UAT: $f" >&2; exit 1; }
-    done < {run_dir}/codex-shared.sha256
+  # The shell that used to stand here (env -i, the private tmux server, the
+  # codex hashes) moved verbatim into scripts/uat/run-server.sh.
+  # tests/unit/config/uat-yaml-2590.test.ts holds the server line's shape there.
+  up: "bash scripts/uat/run-server.sh up --port {port} --run-dir {run_dir}"
+  # Stops only the recorded server, after checking it LISTENS on {port} and its
+  # CM_DB_PATH is under {run_dir} (CommandMate#2473, #3359); fails otherwise.
+  # Also removes the private tmux server and fails when codex's shared files
+  # changed during the run.
+  down: "bash scripts/uat/run-server.sh down --run-dir {run_dir}"
   health: "curl -fsS -m 5 -o /dev/null http://127.0.0.1:{port}/api/worktrees"
   health_timeout_sec: 90
   port_range: [3010, 3030]
@@ -89,8 +60,12 @@ isolation:
     # It opened NO other sqlite file (negative) — production is
     # <checkout>/data/db.sqlite or ~/.../.commandmate/data/cm.db, and neither may appear.
     - "P=$(lsof -nP -iTCP:{port} -sTCP:LISTEN -t | head -1); ! lsof -p $P -Fn | sed -n 's/^n//p' | grep -E '\\.(db|sqlite)(-wal|-shm)?$' | grep -vF '{run_dir}/uat.db'"
-    # Its tmux calls go to the private server: TMUX names the private socket.
-    - "P=$(lsof -nP -iTCP:{port} -sTCP:LISTEN -t | head -1); ps eww -p $P | tr ' ' '\\n' | grep -q '^TMUX=/tmp/cmuat-{port}/tmux.sock,'"
+    # Its tmux calls go to the private server: TMUX names this run's own socket
+    # (recorded by `up`), which is under /tmp/cmuat-{port}-<run id>/.
+    - "P=$(lsof -nP -iTCP:{port} -sTCP:LISTEN -t | head -1); S=$(sed -n 's/^sock_dir=//p' {run_dir}/uat-run.state); case \"$S\" in /tmp/cmuat-{port}-?*) ;; *) exit 1 ;; esac; ps eww -p $P | tr ' ' '\\n' | grep -qF \"TMUX=$S/tmux.sock,\""
+    # The listener is the pid `up` recorded (a server on {port} that is not
+    # this run's would otherwise pass every check above).
+    - "P=$(lsof -nP -iTCP:{port} -sTCP:LISTEN -t | head -1); [ -n \"$P\" ] && [ \"$P\" = \"$(sed -n 's/^server_pid=//p' {run_dir}/uat-run.state)\" ]"
     # The two shared state directories live under the run (positive) and the
     # server was not left pointing at the user's ~/.commandmate ones (negative).
     - "P=$(lsof -nP -iTCP:{port} -sTCP:LISTEN -t | head -1); ps eww -p $P | tr ' ' '\\n' | grep -qxF 'CM_OPENCODE_V2_DIR={run_dir}/opencode-v2' && ps eww -p $P | tr ' ' '\\n' | grep -qxF 'CM_AGENT_HOOKS_DIR={run_dir}/hooks'"
