@@ -80,6 +80,9 @@
  *   visibility is the tile scope of `useHistoryPaneState`
  *   (`commandmate.sessions.tileHistoryVisible`, shown by default), so a tile
  *   and the worktree screen never close each other's History.
+ * - **Selection lists** (Issue #3336). The terminal surface mounts
+ *   `SelectionListKeys` under the frame, the part every other surface mounts,
+ *   so a picker is answerable here without switching back to chat.
  *
  * The surface itself is remembered per worktree — `useSessionTileSurfaceMode`.
  *
@@ -101,6 +104,7 @@ import { ChatSurface, type ChatSurfaceLiveState } from '@/components/worktree/Ch
 import { HistoryPane } from '@/components/worktree/HistoryPane';
 import { TerminalDisplay } from '@/components/worktree/TerminalDisplay';
 import { SessionStartingNotice } from '@/components/worktree/SessionStartingNotice';
+import { SelectionListKeys } from '@/components/worktree/SelectionListKeys';
 import { MessageInput } from '@/components/worktree/MessageInput';
 import { AutoYesToggle } from '@/components/worktree/AutoYesToggle';
 import { StatusDot } from '@/components/ui';
@@ -669,6 +673,31 @@ function SessionTileCard({
                 />
               )}
             </div>
+            {/* Issue #3336: the same part the PC split's footer mounts, on the
+                tile's terminal surface. Before it, a selection list could only
+                be driven from the chat card (#3305 gave the other two terminal
+                surfaces the part and left the tile out). Handed the frame the
+                tile is drawing, so what it offers — arrows, number keys,
+                claude's "this session only" / "set as default" — is
+                `resolveSelectionListOps`' decision, exactly as on PC. The row
+                scrolls inside a cap rather than growing: the stack's two floors
+                already add up to the body's (SESSION_TILE_BODY_FLOOR_CLASS). */}
+            {terminal.isSelectionListActive && !startingGate.starting ? (
+              <div
+                className="min-h-[3rem] min-w-0 max-h-[8rem] shrink overflow-y-auto border-t border-border p-2"
+                data-testid={`session-tile-selection-keys-${worktree.id}`}
+              >
+                <SelectionListKeys
+                  worktreeId={worktree.id}
+                  cliToolId={cliToolId}
+                  instanceId={resolvedInstanceId}
+                  onKeysSent={refresh}
+                  frame={terminal.output}
+                  surface="terminal"
+                  showPagerKeys={terminal.isPagerActive}
+                />
+              </div>
+            ) : null}
             {showStackedHistory && (
               <div
                 id={historyRegionId}

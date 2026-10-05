@@ -85,6 +85,10 @@ export { COMMAND_CODE_PLAN_REVIEW_FOOTER };
  * Bounded rather than unbounded because the alternative reads the transcript: a
  * markdown answer that happens to contain `1.` / `2.` sits hundreds of rows
  * above the dialog on a 200x1000 pane and must not be counted as options.
+ *
+ * Forty rows is still wider than an inline tool's dialog, so the number KEYS
+ * are not decided off this tail alone: `readSelectionListFrame` also counts on
+ * the rows the dialog card draws and takes the smaller (Issue #3336).
  */
 export const SELECTION_SHAPE_TAIL_LINE_COUNT = 40;
 

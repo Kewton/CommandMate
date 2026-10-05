@@ -4,11 +4,12 @@
  * SelectionListKeys — the controls a selection list gets, on every surface
  * (Issue #3305).
  *
- * One component, mounted in three places for the same frame:
+ * One component, mounted in four places for the same frame:
  *
  *  - the chat surface's dialog card (`ChatSurface`, `case 'selectionList'`);
  *  - the PC split's footer (`TerminalSplitPaneContent`), terminal surface;
- *  - the phone's docked pad (`WorktreeDetailRefactored`), terminal surface.
+ *  - the phone's docked pad (`WorktreeDetailRefactored`), terminal surface;
+ *  - a `/sessions` tile's terminal surface (`SessionTile`, Issue #3336).
  *
  * Before this Issue each of them chose its own controls. The card had learned
  * (Issue #2297) that claude's `/model` needs "this session only" (`s`) beside
