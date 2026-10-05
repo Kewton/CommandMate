@@ -27,7 +27,11 @@
  *     back, glued to the first reply);
  *  2. once a message has been echoed the reading is the one it was (陰性対照);
  *  3. a clipped capture is not asked (#1670): the echo of a turn longer than the
- *     window has scrolled out of it.
+ *     window has scrolled out of it;
+ *  4. a codex turn longer than the PANE is not a startup screen either. 0.160.0
+ *     draws in the alternate screen, so the echo of such a turn leaves the pane
+ *     off the top and (3) never fires — the capture is 1000 rows, not 10,000.
+ *     The banner leaves with it, and the banner is what the reading asks for.
  *
  * The frames are captures of the real tools — codex-cli 0.160.0 and vibe-local
  * 1.3.3, 200x1000 — see `tests/fixtures/startup-screen-3293/README.md`.
@@ -93,6 +97,11 @@ vi.mock('@/lib/tasks/task-transition-service', () => ({ applyEventToActiveTask: 
 
 import { checkForResponse, extractResponse } from '@/lib/polling/response-checker';
 import { stopPolling } from '@/lib/polling/response-poller-core';
+import {
+  buildCodexLongReplyPane,
+  codexLongReplyRow,
+  CODEX_LONG_REPLY_ADDED_ROWS,
+} from '../../../fixtures/startup-screen-3293/codex-0.160.0-long-reply-pane';
 
 // ---------------------------------------------------------------------------
 // Frames
@@ -106,6 +115,8 @@ const CODEX_BOOT_TYPED = read('startup-screen-3293/codex-0.160.0-boot-typed.txt'
 const CODEX_TRUST_DIALOG = read('startup-screen-3293/codex-0.160.0-dialog-trust.txt');
 const CODEX_TURN_INTERRUPTED = read('startup-screen-3293/codex-0.160.0-first-turn-interrupted.txt');
 const CODEX_TURN_REPLY = read('startup-screen-3293/codex-0.160.0-first-turn-reply.txt');
+const CODEX_OVERFLOW = read('startup-screen-3293/codex-0.160.0-overflow-interrupted.txt');
+const CODEX_LONG_REPLY = buildCodexLongReplyPane();
 const CODEX_0153_BOOT = read('codex-live-2310/idle-composer.txt');
 const CODEX_0153_SATURATED_TAIL = read('codex-live-2310/saturated-idle-tail.txt').split('\n');
 const CODEX_0155_TURN = read('codex-idle-composer-0155/idle-after-turn.txt');
@@ -236,35 +247,83 @@ describe('[#3293] extractResponse: with an echo on the pane the reading is uncha
 });
 
 describe('[#3293] extractResponse: a clipped capture is not asked (#1670)', () => {
-  // The reply and the chrome of a real saturated codex pane, WITHOUT the echo
-  // above them: the window of a turn longer than the capture window.
-  const echoRow = CODEX_0153_SATURATED_TAIL.findIndex(row => stripAnsi(row).startsWith('› Reply with exactly'));
-  const replyAndChrome = CODEX_0153_SATURATED_TAIL.slice(echoRow + 1);
+  // The window of a turn longer than the capture window: reconstructed
+  // scrollback, then the rows of a real pane from the row AFTER the echo down.
+  // The echo is not in it.
   const filler = (n: number): string[] => Array.from({ length: n }, (_, i) => `transcript row ${i + 1}`);
-  const pane = (windowLines: number): string =>
-    [...filler(windowLines - replyAndChrome.length), ...replyAndChrome].join('\n');
+  const rowsAfter = (capture: string[], echoPrefix: string): string[] =>
+    capture.slice(capture.findIndex(row => stripAnsi(row).startsWith(echoPrefix)) + 1);
+  const pane = (tail: string[], windowLines: number): string =>
+    [...filler(windowLines - tail.length), ...tail].join('\n');
 
-  it('the fixture premise: composer on the pane, no echo above it', () => {
-    const rows = pane(300).split('\n').map(stripAnsi);
-    expect(echoRow).toBeGreaterThanOrEqual(0);
-    expect(rows.some(row => row.startsWith('› Ask Codex to do anything'))).toBe(true);
-    expect(rows.filter(row => /^›\s+\S/.test(row))).toHaveLength(1);
+  const VIBE_TAIL = rowsAfter(VIBE_TURN_DONE.split('\n'), 'ctx:4% ❯ Reply with exactly');
+  const CODEX_TAIL = rowsAfter(CODEX_0153_SATURATED_TAIL, '› Reply with exactly');
+
+  it('the fixture premise: the input box is in each tail, the echo is not', () => {
+    const vibe = VIBE_TAIL.map(stripAnsi);
+    expect(vibe.length).toBeLessThan(VIBE_TURN_DONE.split('\n').length);
+    expect(vibe.filter(row => /^ctx:\d+%/.test(row))).toEqual(['ctx:4% ❯']);
+
+    const codex = CODEX_TAIL.map(stripAnsi);
+    expect(codex.length).toBeLessThan(CODEX_0153_SATURATED_TAIL.length);
+    expect(codex.filter(row => /^›\s+\S/.test(row))).toEqual(['› Ask Codex to do anything']);
   });
 
-  it('a saturated window with no echo in it still yields the reply', () => {
-    const result = extractResponse(pane(CACHE_MAX_CAPTURE_LINES), CACHE_MAX_CAPTURE_LINES - 1, 'codex');
+  it('vibe-local: a saturated window with no echo in it still yields the reply', () => {
+    const result = extractResponse(pane(VIBE_TAIL, CACHE_MAX_CAPTURE_LINES), CACHE_MAX_CAPTURE_LINES - 1, 'vibe-local');
+
+    expect(result?.captureWindowSaturated).toBe(true);
+    expect(stripAnsi(result!.response)).toContain('assistant: OK-3293');
+  });
+
+  it('対照 (vibe-local): the same rows in a window that is not clipped read as "no turn yet"', () => {
+    // What the guard decides. Not a frame a real pane produces — vibe-local
+    // keeps its scrollback, so below the window every echo since the session
+    // started is still in the capture.
+    const result = extractResponse(pane(VIBE_TAIL, 300), 0, 'vibe-local');
+
+    expect(result?.captureWindowSaturated).toBe(false);
+    expect(result?.response).toBe('');
+  });
+
+  it('codex: a saturated window with no echo in it still yields the reply', () => {
+    const result = extractResponse(pane(CODEX_TAIL, CACHE_MAX_CAPTURE_LINES), CACHE_MAX_CAPTURE_LINES - 1, 'codex');
 
     expect(result?.captureWindowSaturated).toBe(true);
     expect(stripAnsi(result!.response)).toContain('A worktree is a working directory for a Git repository.');
   });
 
-  it('対照: the same rows in a window that is not clipped read as "no turn yet"', () => {
-    // What the guard decides. Not a frame a real pane produces — below the
-    // window every echo since the session started is still in the capture.
-    const result = extractResponse(pane(300), 0, 'codex');
+  it('codex: the same rows are a reply in a window that is not clipped too — the banner is not among them', () => {
+    // For codex the guard is no longer what decides this frame: the banner row
+    // went with the echo, and without it the pane is not a startup screen.
+    const result = extractResponse(pane(CODEX_TAIL, 300), 0, 'codex');
 
     expect(result?.captureWindowSaturated).toBe(false);
-    expect(result?.response).toBe('');
+    expect(stripAnsi(result!.response)).toContain('A worktree is a working directory for a Git repository.');
+  });
+});
+
+describe('[#3293] extractResponse: a codex turn longer than the pane is read, not suppressed', () => {
+  // Both frames have the composer on row 996 and no echo above it, which is all
+  // the first version of this defense asked. See the premises in
+  // `startup-screen-3293.test.ts` for what each frame is.
+  it('codex 0.160.0, measured: the rows above the composer are extracted', () => {
+    const result = extractResponse(CODEX_OVERFLOW, 0, 'codex');
+
+    expect(result?.isComplete).toBe(true);
+    expect(stripAnsi(result!.response)).toContain('probe body line 1100 of 1100');
+    expect(stripAnsi(result!.response)).toContain('Conversation interrupted');
+  });
+
+  it('codex 0.160.0, a long reply: the reply is extracted down to its last row', () => {
+    const result = extractResponse(CODEX_LONG_REPLY, 0, 'codex');
+
+    expect(result?.isComplete).toBe(true);
+    const response = stripAnsi(result!.response);
+    expect(response).toContain(codexLongReplyRow(CODEX_LONG_REPLY_ADDED_ROWS).trim());
+    expect(response).toContain('Worked for 4s');
+    expect(response).not.toContain('Ask Codex to do anything');
+    expect(result?.lineCount).toBe(rowOf(CODEX_LONG_REPLY, '› Ask Codex to do anything'));
   });
 });
 
@@ -327,18 +386,60 @@ describe('[#3293] checkForResponse: no row is written for a startup screen', () 
     expect(saved[0]).not.toContain('O F F L I N E');
   });
 
-  it('codex 0.160.0: startup screen, then the first turn — the banner never reaches History', async () => {
-    wireLiveSessionState(0);
+  it('codex 0.160.0: startup screen, then the first turn — the scrape writes no row, where it used to write the banner', async () => {
+    // Stated as it is. The first spelling of this case ("no saved row holds the
+    // banner") passed with zero rows saved, so it said nothing.
+    //
+    // On 0.160.0 the scrape writes NO row for this sequence, and the second tick
+    // is not something this Issue changed: codex draws in the alternate screen
+    // with the composer pinned to row 996, so the cursor the startup screen
+    // leaves (996 — the same one the banner save left) is already below every
+    // row the reply is drawn on (7-12), and extraction from it is empty. The
+    // reply reaches History from codex's own transcript, not from the pane.
+    // What this Issue changed is the first tick, which used to write the banner.
+    //
+    // Where the scrape DOES save a codex reply is pinned by the cases around
+    // this one: the inline layout (0.155.1, below) and a 0.160.0 pane read from
+    // cursor 0 (the long reply, below).
+    const state = wireLiveSessionState(0);
+    const composerRow = rowOf(CODEX_BOOT, '› Ask Codex to do anything');
 
     captureSessionOutput.mockResolvedValue(CODEX_BOOT);
-    await checkForResponse('wt-1', 'codex');
-    captureSessionOutput.mockResolvedValue(CODEX_TURN_REPLY);
-    await checkForResponse('wt-1', 'codex');
+    expect(await checkForResponse('wt-1', 'codex')).toBe(false);
+    expect(state.cursor()).toBe(composerRow);
 
-    for (const saved of savedAssistantContents()) {
-      expect(saved).not.toContain('OpenAI Codex');
-      expect(saved).not.toContain('What are we cooking up?');
-    }
+    captureSessionOutput.mockResolvedValue(CODEX_TURN_REPLY);
+    expect(await checkForResponse('wt-1', 'codex')).toBe(false);
+    expect(state.cursor()).toBe(composerRow);
+
+    expect(createMessage).not.toHaveBeenCalled();
+  });
+
+  it('codex 0.160.0: a reply longer than the pane is saved — one row, the reply (陰性対照)', async () => {
+    // Cursor 0: a session whose startup screen was never read (started without a
+    // send, first message typed at the terminal). The pane has the composer and
+    // no echo, and it is a reply.
+    wireLiveSessionState(0);
+    captureSessionOutput.mockResolvedValue(CODEX_LONG_REPLY);
+
+    expect(await checkForResponse('wt-1', 'codex')).toBe(true);
+
+    const saved = savedAssistantContents();
+    expect(saved).toHaveLength(1);
+    expect(saved[0]).toContain(codexLongReplyRow(CODEX_LONG_REPLY_ADDED_ROWS).trim());
+    expect(saved[0].split('\n').filter(row => row.trim() !== '').length).toBeGreaterThan(900);
+    expect(saved[0]).not.toContain('Ask Codex to do anything');
+  });
+
+  it('codex 0.160.0, measured: an overflowed transcript is saved as it was before this Issue (陰性対照)', async () => {
+    wireLiveSessionState(0);
+    captureSessionOutput.mockResolvedValue(CODEX_OVERFLOW);
+
+    expect(await checkForResponse('wt-1', 'codex')).toBe(true);
+
+    const saved = savedAssistantContents();
+    expect(saved).toHaveLength(1);
+    expect(saved[0]).toContain('Conversation interrupted');
   });
 
   it('codex 0.155.1: a finished turn is saved as before (陰性対照)', async () => {

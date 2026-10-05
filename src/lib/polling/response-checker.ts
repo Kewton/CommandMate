@@ -1044,6 +1044,11 @@ function suppressCodexStartupScreen(
   //
   // The dialog itself never reaches this point: it has no composer, and it was
   // returned as a prompt by the early check in extractResponse.
+  //
+  // A turn longer than the pane does reach it, and has to pass. 0.160.0 keeps
+  // no scrollback, so the echo of such a turn has left the pane off the top and
+  // "composer, no echo above it" holds for a finished reply. The reader asks
+  // for the banner row as well, which that pane has lost with the echo.
   return readStartupScreenPastCursor('codex', ctx, response, endIndex);
 }
 

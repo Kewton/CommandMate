@@ -24,9 +24,24 @@
  * about the same pane. Each tool keeps its own reader, as the chrome readers in
  * `response-checker` do: the echo is a tool-specific measurement.
  *
- * Callers do not ask on a capture the window has clipped (#1670): the echo of a
- * turn longer than the window has scrolled out of it, and a startup screen is
- * never that tall.
+ * ## An echo that is missing because it has left the pane
+ *
+ * "No echo" is only evidence of "no turn" while every echo since the session
+ * started is still in the capture. Two things break that, and each tool is
+ * covered for the one it can meet:
+ *
+ *  - **the capture window clipped the scrollback** (#1670). Callers do not ask
+ *    on such a capture: the echo of a turn longer than the window has scrolled
+ *    out of it, and a startup screen is never that tall. This is all vibe-local
+ *    needs — it draws inline and keeps its scrollback.
+ *  - **the tool keeps no scrollback at all.** codex 0.160.0 draws in the
+ *    alternate screen (`#{alternate_on}` 1, `#{history_size}` 0) with the
+ *    composer pinned to row 996; the 0.157.1 captures have the same pinned
+ *    composer. The capture is 1000 rows however long the transcript is, the
+ *    window guard never fires, and a turn longer than the pane pushes its own
+ *    echo off the top. Such a frame has the composer and no echo above it, and
+ *    it is a finished reply. So codex is asked for a third thing, which only
+ *    its startup screen has: the banner row (see {@link CODEX_BANNER_ROW_PATTERN}).
  *
  * @module lib/polling/startup-screen
  */
@@ -47,7 +62,28 @@ const VIBE_LOCAL_PROMPT_ROW_PATTERN = /^ctx:\d+%\s*[>❯]/;
 const VIBE_LOCAL_PROMPT_ROW_WITH_TEXT_PATTERN = /^ctx:\d+%\s*[>❯]\s*\S/;
 
 /**
- * codex: the composer is located, and no transcript echo is above it.
+ * codex's banner row, `>_ OpenAI Codex (v0.160.0)`.
+ *
+ * The first thing codex draws and the top of its transcript: every echo is
+ * printed below it, so it leaves a pane whose transcript has outgrown it before
+ * the echo of that turn can. "Banner above the composer, no echo" is therefore
+ * a pane that has not had a turn, and "no banner, no echo" is one that has had
+ * a turn longer than itself — measured on 0.160.0, where the banner is not
+ * pinned and scrolls off with the transcript
+ * (`tests/fixtures/startup-screen-3293/codex-0.160.0-overflow-interrupted.txt`).
+ *
+ * The same text in every capture this repository holds, 0.146.0 to 0.160.0 —
+ * inside the box earlier versions drew around it
+ * (`│ >_ OpenAI Codex (v0.153.2) … │`) and on a row of its own on 0.160.0. A
+ * codex that words its banner differently is not read as a startup screen,
+ * which is the direction that saves the banner again rather than the one that
+ * drops a reply.
+ */
+const CODEX_BANNER_ROW_PATTERN = />_ OpenAI Codex \(v\d/;
+
+/**
+ * codex: the composer is located, no transcript echo is above it, and the
+ * banner is.
  *
  * `findCodexChromeStart` reads the composer by its SGR attributes (#2310), so a
  * message typed into it and not yet sent is still the composer, not an echo.
@@ -55,11 +91,20 @@ const VIBE_LOCAL_PROMPT_ROW_WITH_TEXT_PATTERN = /^ctx:\d+%\s*[>❯]\s*\S/;
 function isCodexStartupScreen(lines: readonly string[]): boolean {
   const chromeStart = findCodexChromeStart(lines);
   if (chromeStart < 0) return false;
-  return findCodexUserEchoIndex(lines, chromeStart, lines.length, true) < 0;
+  if (findCodexUserEchoIndex(lines, chromeStart, lines.length, true) >= 0) return false;
+
+  for (let i = 0; i < chromeStart; i++) {
+    if (CODEX_BANNER_ROW_PATTERN.test(stripAnsi(lines[i]))) return true;
+  }
+  return false;
 }
 
 /**
  * vibe-local: a prompt row is on the pane, and none of them holds text.
+ *
+ * No banner test here. vibe-local draws inline (`#{alternate_on}` 0, the
+ * history grows with every turn — measured on 1.3.3), so its echoes stay in the
+ * capture until the window clips it, and the callers' guard covers that.
  *
  * A row with text is read as an echo even while it is still the input box. The
  * row alone cannot tell the two apart: while a reply is being printed the newest
@@ -83,7 +128,8 @@ function isVibeLocalStartupScreen(lines: readonly string[]): boolean {
  * @param cliToolId - The tool the capture came from
  * @param lines - The whole capture, ANSI intact (codex's reader needs the attributes)
  * @returns True for a codex or vibe-local pane that has not had a turn; false for
- *   every other tool, and whenever the input box cannot be located
+ *   every other tool, whenever the input box cannot be located, and for a codex
+ *   pane whose banner is not above it
  */
 export function isStartupScreenWithoutUserEcho(
   cliToolId: CLIToolType,

@@ -39,6 +39,11 @@ import { captureSessionOutput } from '@/lib/session/cli-session';
 import { broadcastMessage } from '@/lib/ws-server';
 import { savePendingAssistantResponse } from '@/lib/assistant-response-saver';
 import { cleanScrollbackResponse } from '@/lib/response-cleaner';
+import {
+  buildCodexLongReplyPane,
+  codexLongReplyRow,
+  CODEX_LONG_REPLY_ADDED_ROWS,
+} from '../../fixtures/startup-screen-3293/codex-0.160.0-long-reply-pane';
 
 const mockCaptureSessionOutput = vi.mocked(captureSessionOutput);
 
@@ -48,6 +53,8 @@ const read = (rel: string): string => readFileSync(join(FIXTURES, rel), 'utf8');
 const CODEX_BOOT = read('startup-screen-3293/codex-0.160.0-boot-idle.txt');
 const CODEX_BOOT_TYPED = read('startup-screen-3293/codex-0.160.0-boot-typed.txt');
 const CODEX_TURN_REPLY = read('startup-screen-3293/codex-0.160.0-first-turn-reply.txt');
+const CODEX_OVERFLOW = read('startup-screen-3293/codex-0.160.0-overflow-interrupted.txt');
+const CODEX_LONG_REPLY = buildCodexLongReplyPane();
 const CODEX_0153_BOOT = read('codex-live-2310/idle-composer.txt');
 const CODEX_0153_SATURATED_TAIL = read('codex-live-2310/saturated-idle-tail.txt').split('\n');
 const CODEX_0155_TURN = read('codex-idle-composer-0155/idle-after-turn.txt');
@@ -151,26 +158,73 @@ describe('[#3293] savePendingAssistantResponse and the startup screen', () => {
     });
   });
 
+  describe('a codex turn longer than the pane is saved, not read as a startup screen', () => {
+    // codex 0.160.0 draws in the alternate screen: 1000 rows whatever the
+    // transcript holds, so the clipped-capture guard below (10,000 rows) never
+    // fires, and the echo of a long turn has left the pane off the top. The
+    // pane has the composer and no echo above it — and no banner either.
+    it('codex 0.160.0, a long reply: the first flush saves it', async () => {
+      const saved = await flush('codex', CODEX_LONG_REPLY);
+
+      expect(saved).not.toBeNull();
+      expect(assistantRows()).toHaveLength(1);
+      expect(saved?.content).toContain(codexLongReplyRow(CODEX_LONG_REPLY_ADDED_ROWS).trim());
+      expect(saved?.content.split('\n').length).toBeGreaterThan(900);
+      expect(saved?.content).toContain('Worked for 4s');
+      expect(saved?.content).not.toContain('Ask Codex to do anything');
+    });
+
+    it('codex 0.160.0, measured: an overflowed transcript is saved as it was before this Issue', async () => {
+      const saved = await flush('codex', CODEX_OVERFLOW);
+
+      expect(saved?.content).toContain('probe body line 1100 of 1100');
+      expect(saved?.content).toContain('Conversation interrupted');
+    });
+  });
+
   describe('a clipped capture is not asked (#1670)', () => {
-    // The reply and the chrome of a real saturated codex pane, without the echo
-    // above them: the window of a turn longer than the capture window.
-    const echoRow = CODEX_0153_SATURATED_TAIL.findIndex(row => stripAnsi(row).startsWith('› Reply with exactly'));
-    const replyAndChrome = CODEX_0153_SATURATED_TAIL.slice(echoRow + 1);
-    const pane = (windowLines: number): string =>
+    // The window of a turn longer than the capture window: reconstructed
+    // scrollback, then the rows of a real pane from the row AFTER the echo down.
+    const rowsAfter = (capture: string[], echoPrefix: string): string[] =>
+      capture.slice(capture.findIndex(row => stripAnsi(row).startsWith(echoPrefix)) + 1);
+    const pane = (tail: string[], windowLines: number): string =>
       [
-        ...Array.from({ length: windowLines - replyAndChrome.length }, (_, i) => `transcript row ${i + 1}`),
-        ...replyAndChrome,
+        ...Array.from({ length: windowLines - tail.length }, (_, i) => `transcript row ${i + 1}`),
+        ...tail,
       ].join('\n');
 
-    it('a saturated window with no echo in it still saves the reply', async () => {
-      const saved = await flush('codex', pane(CACHE_MAX_CAPTURE_LINES));
+    const VIBE_TAIL = rowsAfter(VIBE_TURN_DONE.split('\n'), 'ctx:4% ❯ Reply with exactly');
+    const CODEX_TAIL = rowsAfter(CODEX_0153_SATURATED_TAIL, '› Reply with exactly');
+
+    it('the fixture premise: the echo is not in either tail', () => {
+      expect(VIBE_TAIL.length).toBeLessThan(VIBE_TURN_DONE.split('\n').length);
+      expect(VIBE_TAIL.map(stripAnsi).some(row => /^ctx:\d+%\s*❯\s*\S/.test(row))).toBe(false);
+      expect(CODEX_TAIL.length).toBeLessThan(CODEX_0153_SATURATED_TAIL.length);
+      expect(CODEX_TAIL.map(stripAnsi).some(row => row.startsWith('› Reply with exactly'))).toBe(false);
+    });
+
+    it('vibe-local: a saturated window with no echo in it still saves the reply', async () => {
+      const saved = await flush('vibe-local', pane(VIBE_TAIL, CACHE_MAX_CAPTURE_LINES));
+
+      expect(saved?.content).toContain('assistant: OK-3293');
+    });
+
+    it('対照 (vibe-local): the same rows in a window that is not clipped read as "no turn yet"', async () => {
+      // What the guard decides. Not a frame a real pane produces — vibe-local
+      // keeps its scrollback.
+      expect(await flush('vibe-local', pane(VIBE_TAIL, 300))).toBeNull();
+    });
+
+    it('codex: a saturated window with no echo in it still saves the reply', async () => {
+      const saved = await flush('codex', pane(CODEX_TAIL, CACHE_MAX_CAPTURE_LINES));
 
       expect(saved?.content).toContain('A worktree is a working directory for a Git repository.');
     });
 
-    it('対照: the same rows in a window that is not clipped read as "no turn yet"', async () => {
-      expect(echoRow).toBeGreaterThanOrEqual(0);
-      expect(await flush('codex', pane(300))).toBeNull();
+    it('codex: the same rows are saved from a window that is not clipped too — the banner is not among them', async () => {
+      const saved = await flush('codex', pane(CODEX_TAIL, 300));
+
+      expect(saved?.content).toContain('A worktree is a working directory for a Git repository.');
     });
   });
 });
@@ -198,5 +252,12 @@ describe('[#3293] cleanScrollbackResponse is asked about the pane, not about the
   it('with the pane, both startup screens clean away', () => {
     expect(cleanScrollbackResponse(CODEX_BOOT, 'codex', CODEX_BOOT.split('\n'))).toBe('');
     expect(cleanScrollbackResponse(VIBE_BOOT, 'vibe-local', VIBE_BOOT.split('\n'))).toBe('');
+  });
+
+  it('with the pane, a codex reply longer than the pane does not', () => {
+    const cleaned = cleanScrollbackResponse(CODEX_LONG_REPLY, 'codex', CODEX_LONG_REPLY.split('\n'));
+
+    expect(cleaned.split('\n').length).toBeGreaterThan(900);
+    expect(cleaned).toContain('Worked for 4s');
   });
 });

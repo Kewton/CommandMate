@@ -1,7 +1,7 @@
 # startup-screen-3293 — codex と vibe-local の起動画面、実測（Issue #3293）
 
 codex と vibe-local は、起動画面（バナー）が返答の行として履歴に保存されていた。
-このディレクトリは、その起動画面と、起動時のダイアログ、最初のターンの画面である。
+このディレクトリは、その起動画面と、起動時のダイアログ、最初のターンの画面、transcript が画面より長くなった画面である。
 
 **raw のまま置いている。ANSI を剥がさないこと。** codex の入力欄とエコーは `›` の SGR 属性で
 しか見分けられない（`tests/fixtures/codex-live-2310/README.md` と同じ理由）。
@@ -42,6 +42,10 @@ codex -c features.daemon_auto_start=false -c check_for_update_on_startup=false \
   （`>_ OpenAI Codex (v0.160.0)`・cwd・ひとこと）と入力欄の位置は、本人の設定で採った
   `codex-0.160.0-first-turn-reply.txt` と同じ
 
+`codex-0.160.0-overflow-interrupted.txt` は、同じ日に、同じ起動のしかたの別のセッション
+（私設ソケット `tmux -L cm3293b`）で採った。1100 行の本文（1 行 60 文字ほど）を `load-buffer` と
+`paste-buffer -p -r` で入力欄に貼り付け、Enter で送り、3 秒後に Esc で止めて、その 2.5 秒後に採った。
+
 ### vibe-local の起動のしかた
 
 本物のラッパーを `vibe-local -y` で起動した（CommandMate と同じ引数）。`HOME` は使い捨てで、
@@ -63,6 +67,8 @@ codex -c features.daemon_auto_start=false -c check_for_update_on_startup=false \
 | `codex-0.160.0-boot-typed.txt` | 起動画面で、入力欄に文字を打って送っていない | バナー 1・2・4、入力欄 996、ステータスバー 998 |
 | `codex-0.160.0-first-turn-interrupted.txt` | 最初の発言を送り、Esc で止めた後 | バナー 1・2・4、エコー 7、`■ Conversation interrupted` 10、入力欄 996 |
 | `codex-0.160.0-first-turn-reply.txt` | 最初のターンが終わった画面（返答あり）。**出どころは下の節** | バナー 1・2・4、エコー 7、返答 10・12、入力欄 996 |
+| `codex-0.160.0-overflow-interrupted.txt` | **transcript が画面より長くなった画面**。1100 行の発言を貼り付けて送り、Esc で止めた後 | 発言の続きの行 0〜990（110 行目から）、`■ Conversation interrupted` 993、入力欄 996。**バナーも、エコーの先頭の行（`›`）も無い** |
+| `codex-0.160.0-long-reply-pane.ts` | **採取ではなく、組み立て**: 画面より長い返答の後の画面（下の節） | 返答の行 0〜991、`Worked for 4s` 993、入力欄 996 |
 | `vibe-local-1.3.3-boot-idle.txt` | **起動画面（入力待ち）** | バナー 1〜30、区切り 996、入力欄 `ctx:4% ❯` 997、フッター 998〜1000 |
 | `vibe-local-1.3.3-first-turn-done.txt` | 最初のターンが終わった画面 | バナー 1〜30、エコー 997、`assistant: OK-3293` 1001、新しい入力欄 1003 |
 
@@ -76,12 +82,26 @@ codex -c features.daemon_auto_start=false -c check_for_update_on_startup=false \
 置いた理由: ダミーの provider は返答しないので、**返答のある** 0.160.0 の画面はここでは採れない。
 陰性対照（エコーのある画面は今までどおり読まれる）に、実機の返答が要る。
 
+### `codex-0.160.0-long-reply-pane.ts`（組み立てた画面）
+
+ダミーの provider は返答しないので、**画面より長い返答**の画面は採れない。`buildCodexLongReplyPane()` は、
+`codex-0.160.0-first-turn-reply.txt` の返答の 1 行目の下に 1200 行を足し、
+`codex-0.160.0-overflow-interrupted.txt` で測った並び（transcript の末尾 994 行が 0〜993 行目、空行 2 つ、
+入力欄 996）に切り出す。描かれている行（返答の 1 行目の前までは画面の外。`Worked for …`、入力欄、
+ステータスバー、`? for shortcuts`）は元の capture のバイトのまま。作った文字は、足した 1200 行だけである。
+
 ## 測って分かったこと
 
 - **codex 0.160.0 は alternate screen に描く。** 起動画面でも、ターンの後でも `#{alternate_on}` は 1、
   `#{history_size}` は 0 で、capture は常に 1000 行。入力欄は下端（996 行目）に固定され、transcript は
-  上から伸びる。0.15x は入力欄が transcript のすぐ下に付いて動く、インラインの描画だった
-  （`tests/fixtures/codex-live-2310/`、`codex-idle-composer-0155/`）
+  上から伸びる。0.153〜0.155 は入力欄が transcript のすぐ下に付いて動く、インラインの描画だった
+  （`tests/fixtures/codex-live-2310/`、`codex-idle-composer-0155/`）。0.157.1 の capture
+  （`tests/fixtures/codex-dialogs-0157/`）は、枠つきのバナーのまま、入力欄が 996 行目に固定されている
+- **transcript が画面より長くなると、上の行から画面の外へ出る。バナーは固定されていない。**
+  1100 行の発言を送った画面（`codex-0.160.0-overflow-interrupted.txt`）では、バナーの 3 行とエコーの
+  先頭の行（`› …`）が消え、0 行目は発言の 110 行目になる。scrollback が無いので、消えた行は capture の
+  どこにも無い。transcript の末尾は 993 行目で、994・995 行目が空き、入力欄は 996 行目のまま。
+  この画面は「入力欄があり、その上にエコーが無い」が成り立つ。起動画面と違うのは、バナーの行が無いこと
 - codex 0.160.0 のバナーは枠が無い。0.15x の枠つきのバナーは、行が skip の規則（`│`、`╭─╮`）に
   当たって落ちていたが、0.160.0 の 3 行とロゴは、どの規則にも当たらない
 - フォルダの信頼の確認は、`1` を送っただけでは進まない（フッターは `enter continue · esc quit`）。

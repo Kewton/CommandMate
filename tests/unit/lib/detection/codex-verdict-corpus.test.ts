@@ -94,6 +94,7 @@ const CORPUS: ReadonlyArray<readonly [string, string, string]> = [
   ['fixtures/startup-screen-3293/codex-0.160.0-dialog-trust.txt', 'waiting/prompt_detected/prompt', 'waiting/prompt_detected/prompt'],
   ['fixtures/startup-screen-3293/codex-0.160.0-first-turn-interrupted.txt', 'ready/input_prompt', 'ready/input_prompt'],
   ['fixtures/startup-screen-3293/codex-0.160.0-first-turn-reply.txt', 'ready/input_prompt', 'ready/input_prompt'],
+  ['fixtures/startup-screen-3293/codex-0.160.0-overflow-interrupted.txt', 'ready/input_prompt', 'ready/input_prompt'],
   ['fixtures/tool-liveness-2070/codex-exited-01491.txt', 'waiting/prompt_detected/prompt', 'waiting/prompt_detected/prompt'],
   ['fixtures/tool-liveness-2070/codex-ready-01491.txt', 'ready/input_prompt', 'ready/input_prompt'],
   ['fixtures/tool-liveness-2070/codex-trust-dialog-01491.txt', 'waiting/prompt_detected/prompt', 'waiting/prompt_detected/prompt'],
