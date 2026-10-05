@@ -564,7 +564,8 @@ async function deliverOne(
   const hold = await findRelayHoldReason(
     requester.worktreeId,
     requester.cliToolId,
-    requester.instanceId
+    requester.instanceId,
+    db
   );
   if (hold) {
     logger.debug('relay-delivery-held', { relayId, kind, reason: hold });

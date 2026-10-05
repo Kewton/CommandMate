@@ -109,7 +109,7 @@ export class VibeLocalTool extends BaseCLITool {
       // Wait for vibe-local to initialize (banner + model loading)
       await new Promise((resolve) => setTimeout(resolve, VIBE_LOCAL_INIT_WAIT_MS));
 
-      logger.info('started-vibe-local-session:sessionname');
+      logger.info('started-vibe-local-session');
     } catch (error: unknown) {
       const errorMessage = getErrorMessage(error);
       throw new Error(`Failed to start Vibe Local session: ${errorMessage}`);
@@ -151,7 +151,7 @@ export class VibeLocalTool extends BaseCLITool {
       // Issue #405: Invalidate cache after sending message
       invalidateCache(sessionName);
 
-      logger.info('sent-message-to-vibe-local-session:sessi');
+      logger.info('sent-message-to-vibe-local-session');
     } catch (error: unknown) {
       const errorMessage = getErrorMessage(error);
       throw new Error(`Failed to send message to Vibe Local: ${errorMessage}`);
@@ -166,7 +166,7 @@ export class VibeLocalTool extends BaseCLITool {
   async killSession(worktreeId: string, instanceId?: string): Promise<void> {
     await this.requestExitAndKill(worktreeId, instanceId, {
       logger,
-      stoppedAction: 'stopped-vibe-local-session:sessionname',
+      stoppedAction: 'stopped-vibe-local-session',
       requestExit: async (sessionName) => {
         // Send Ctrl+C to interrupt any running operation
         await sendSpecialKey(sessionName, 'C-c');

@@ -8,7 +8,7 @@
  * skip patterns name. Measured in the Epic #3207 UAT (vibe-local):
  *
  * ```text
- * [cli-tools/vibe-local] started-vibe-local-session:sessionname
+ * [cli-tools/vibe-local] started-vibe-local-session
  * [assistant-response-saver] response:saved {"fromLine":0,"toLine":1001}
  * ```
  *

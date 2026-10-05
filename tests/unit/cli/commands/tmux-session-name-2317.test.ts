@@ -175,7 +175,7 @@ describe('instances', () => {
         },
       },
       { data: { isRunning: true, autoYes: { enabled: false } } },
-      { data: { isRunning: false, autoYes: { enabled: false } } },
+      { data: { isRunning: false } },
     ]);
   }
 
@@ -203,7 +203,7 @@ describe('instances', () => {
         },
       },
       { data: { isRunning: true, autoYes: { enabled: false } } },
-      { data: { isRunning: false, autoYes: { enabled: false } } },
+      { data: { isRunning: false } },
     ]);
     await runInstances(['wt1', '--json']);
 
@@ -266,6 +266,10 @@ describe('attach (Issue #2867)', () => {
           ],
         },
       },
+      // Issue #3334: `/capture` answering 200 for that name — the server
+      // confirming the session is its own, which is what a writable attach
+      // now needs. This case is about the name, so it is given an owner.
+      { data: { output: '' } },
     ]);
 
     await runAttach(['wt1']);
@@ -292,6 +296,8 @@ describe('attach (Issue #2867)', () => {
     expect(tmuxCalls).toContainEqual(['has-session', '-t', '=mcbd-codex-wt1-2:']);
   });
 
+  // Issue #3334: an older server cannot confirm it owns the name the CLI
+  // assembled, so the attach is made read-only (`-r`).
   it('assembles the legacy name when the server sends no sessionName (older server)', async () => {
     mockFetchSequence([
       resolveTarget('codex', 'codex-2'),
@@ -308,7 +314,7 @@ describe('attach (Issue #2867)', () => {
     await runAttach(['wt1', '--instance', 'codex-2']);
 
     expect(tmuxCalls).toContainEqual(['has-session', '-t', '=mcbd-codex-wt1-2:']);
-    expect(tmuxCalls).toContainEqual(['attach-session', '-t', '=mcbd-codex-wt1-2:']);
+    expect(tmuxCalls).toContainEqual(['attach-session', '-r', '-t', '=mcbd-codex-wt1-2:']);
   });
 
   it('refuses a published name that would not survive validateSessionName', async () => {

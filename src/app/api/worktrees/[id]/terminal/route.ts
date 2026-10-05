@@ -148,7 +148,7 @@ export async function POST(
     const sessionExists = await cliTool.isRunning(id, instanceId);
     if (!sessionExists) {
       return NextResponse.json(
-        { error: 'Session not found. Use startSession API to create a session first.' },
+        { error: 'Session not found. Start one first, for example with `commandmate send <worktree-id> "message"`.' },
         { status: 404 }
       );
     }

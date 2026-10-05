@@ -464,7 +464,7 @@ describe('[#2297] D. the card re-reads the pane after the TUI has repainted', ()
   it('refreshes twice for one press — once promptly, once past the repaint', async () => {
     // The bug: the route drops the shared capture-cache entry BEFORE the TUI has
     // repainted, so whichever reader captures first (this refresh, the sidebar
-    // probe, the global poller) stores the pre-repaint frame and CACHE_TTL_MS
+    // probe) stores the pre-repaint frame and CACHE_TTL_MS
     // serves it for five seconds. One refresh is not enough on its own.
     const onKeysSent = vi.fn();
     renderSurface({ onKeysSent });

@@ -12,6 +12,8 @@ import { clearResponseHashCache, renameResponseHashCacheKey } from './response-d
 import { renamePromptDedupSkips } from './prompt-dedup-state';
 import { checkForResponse, flushPendingScrapedResponse } from './response-checker';
 import { broadcastTerminalSnapshot } from '@/lib/realtime/terminal-broadcast';
+import { findTerminalSessionRefusal } from '@/lib/realtime/terminal-session-ownership';
+import { resolveSessionName } from '@/lib/cli-tools/session-name';
 import { getOrInitGlobal } from '../global-state';
 
 const logger = createLogger('response-poller');
@@ -384,6 +386,44 @@ async function runPollTick(target: PollTarget, owner: PollerOwner): Promise<void
     const startTime = coordinator.pollingStartTimes.get(pollerKey);
     if (startTime && Date.now() - startTime > MAX_POLLING_DURATION) {
       stopPollingByKey(pollerKey);
+      return;
+    }
+
+    // Issue #3334: whose session is it, asked before anything reads it. The
+    // chain was started by a send the route had checked, but it keeps reading
+    // by NAME: if the session ends mid-poll and another CommandMate server
+    // starts one under the same name (#2865), `checkForResponse` would capture
+    // that server's pane and save its reply / prompt into this worktree's chat
+    // and history, and the push below would show it. Such a tick reads,
+    // records and pushes nothing, and the chain ends — the same way
+    // `checkForResponse` ends it when the session is not running (or the
+    // worktree row is gone), since from this server's side the session it
+    // was watching is gone.
+    let refusal: string | null;
+    try {
+      refusal = await findTerminalSessionRefusal(
+        target.worktreeId,
+        resolveSessionName(target.cliToolId, target.worktreeId, target.instanceId)
+      );
+    } catch (error: unknown) {
+      // Could not tell whose it is: this tick reads nothing, and the chain
+      // tries again on the next one rather than ending a turn over a hiccup.
+      logger.error('poller:ownership-check-failed', {
+        pollerKey,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      if (!owner.superseded && !owner.stopped) {
+        scheduleTick(target, owner);
+      }
+      return;
+    }
+    if (refusal !== null) {
+      logger.warn('poller:session-refused', { pollerKey, generation: owner.generation, refusal });
+      // A chain retired while this check was in flight must not stop the one
+      // that replaced it (Issue #2223).
+      if (!owner.superseded && !owner.stopped) {
+        stopPollingByKey(pollerKey);
+      }
       return;
     }
 

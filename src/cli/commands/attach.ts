@@ -34,7 +34,15 @@ import { spawnSync } from 'child_process';
 import { Command } from 'commander';
 import { ExitCode } from '../types';
 import type { AttachOptions } from '../types';
-import { ApiClient, isValidWorktreeId, isValidInstanceId } from '../utils/api-client';
+import {
+  ApiClient,
+  ApiError,
+  FOREIGN_SESSION_ERROR_CODE,
+  foreignSessionMessage,
+  isValidWorktreeId,
+  isValidInstanceId,
+} from '../utils/api-client';
+import type { ApiErrorPayload } from '../utils/api-client';
 import { TOKEN_WARNING, handleCommandError } from '../utils/command-helpers';
 import { isCliToolId, DEFAULT_CLI_TOOL_ID } from '../config/cli-tool-ids';
 import { AGENT_OPTION_DESCRIPTION, INSTANCE_OPTION_DESCRIPTION } from '../config/agent-target-options';
@@ -88,6 +96,18 @@ async function resolveTarget(
   };
 }
 
+/** The name `attach` will connect to, and whether the server published it. */
+export interface AttachSessionTarget {
+  sessionName: string;
+  /**
+   * True when the name came from the server's roster (Issue #2867); false when
+   * it is the legacy name assembled here because the roster could not supply
+   * one. Only a published name is the one the server's own routes address, so
+   * only a published name can be vouched for by them (Issue #3334).
+   */
+  published: boolean;
+}
+
 /**
  * The tmux session name the server uses for this (tool, instance) (Issue #2867).
  *
@@ -105,19 +125,165 @@ async function resolveAttachSessionName(
   worktreeId: string,
   cliToolId: string,
   instanceId: string | undefined
-): Promise<string> {
+): Promise<AttachSessionTarget> {
   const targetId = instanceId ?? cliToolId;
   try {
     const instances = await fetchAgentInstances(client, worktreeId);
     const published = instances.find((inst) => inst.id === targetId)?.sessionName;
     if (published) {
       validateSessionName(published);
-      return published;
+      return { sessionName: published, published: true };
     }
   } catch {
     // Fall through to the legacy name.
   }
-  return resolveLegacySessionName(cliToolId as CLIToolType, worktreeId, instanceId);
+  return {
+    sessionName: resolveLegacySessionName(cliToolId as CLIToolType, worktreeId, instanceId),
+    published: false,
+  };
+}
+
+/**
+ * What the server could say about the session `attach` is about to open.
+ *
+ * - `owned`: the server's ownership check passed, for this very name.
+ * - `foreign`: the server answered 409 `session_owned_by_other_server` for
+ *   this very name.
+ * - `unconfirmed`: anything else — the owner is not known. The server answered
+ *   about a DIFFERENT name than the one `attach` connects to (`other-name`), or
+ *   gave no ownership answer at all (`no-answer`: any non-2xx such as the 404
+ *   for a namespaced session that does not exist, a server older than #2865,
+ *   no server).
+ */
+export type AttachOwnership =
+  | { verdict: 'owned' }
+  | { verdict: 'foreign'; payload: ApiErrorPayload }
+  | { verdict: 'unconfirmed'; why: 'other-name' | 'no-answer'; checkedName: string | null };
+
+/**
+ * Ask the server whether the session `attach` is about to open is its own
+ * (Issue #3334).
+ *
+ * ## Why ask the server, and why through `capture`
+ *
+ * `has-session` answers by name, and a name is all two servers on one tmux
+ * socket have in common (Issue #2865): a worktree directory called the same on
+ * both resolves to the same `mcbd-…` name. Only the server that holds the
+ * worktree row knows the directory its own session was started in, and every
+ * session route already compares that with tmux's `#{session_path}` and
+ * answers 409 `session_owned_by_other_server` when they differ. `capture` with
+ * `lines: 1` is the cheapest of them, reads nothing it would not show anyway,
+ * and sends tmux no key.
+ *
+ * ## The name has to be the same one
+ *
+ * The route checks the name IT resolves — the namespaced one, or the legacy
+ * one it adopted — which is exactly the name the roster publishes. When the
+ * roster could not be read, `attach` falls back to the legacy name, and a 200
+ * from `capture` is then about a different session: the namespaced name and
+ * the legacy name can both exist, one this server's and one another's. So a
+ * 200 counts as `owned` only for a published name, and a 409 counts as
+ * `foreign` only when the name it reports is the one being opened.
+ *
+ * Every other outcome is `unconfirmed`, including no answer at all. A 404
+ * from `capture` is the common case of that: the roster could not be read, the
+ * name fell back to the legacy form, and the server's namespaced session does
+ * not exist — so the legacy session `has-session` found belongs to nobody this
+ * server can vouch for. Only a confirmed owner gets a writable attach.
+ */
+export async function checkAttachOwnership(
+  client: ApiClient,
+  worktreeId: string,
+  cliToolId: string,
+  instanceId: string | undefined,
+  target: AttachSessionTarget
+): Promise<AttachOwnership> {
+  try {
+    await client.post(`/api/worktrees/${worktreeId}/capture`, {
+      cliToolId,
+      lines: 1,
+      ...(instanceId !== undefined && instanceId !== cliToolId ? { instanceId } : {}),
+    });
+    return target.published
+      ? { verdict: 'owned' }
+      : { verdict: 'unconfirmed', why: 'other-name', checkedName: null };
+  } catch (error) {
+    if (error instanceof ApiError && error.statusCode === 409 && error.apiCode === FOREIGN_SESSION_ERROR_CODE) {
+      const payload = error.payload ?? { code: FOREIGN_SESSION_ERROR_CODE };
+      const checkedName = typeof payload.sessionName === 'string' ? payload.sessionName : null;
+      if (checkedName === target.sessionName || (checkedName === null && target.published)) {
+        return { verdict: 'foreign', payload };
+      }
+      return { verdict: 'unconfirmed', why: 'other-name', checkedName };
+    }
+    return { verdict: 'unconfirmed', why: 'no-answer', checkedName: null };
+  }
+}
+
+/**
+ * What to do with an attach the server did not vouch for (Issue #3334): a
+ * session another server owns (`foreign`), or one whose owner could not be
+ * confirmed because the server checked a different name (`unconfirmed`).
+ *
+ * Attaching is the one path where the operator named the session themselves,
+ * and looking at it can be what they came for — so the attach is not refused,
+ * it is made read-only: tmux then delivers no key but the detach one. The two
+ * forms that cannot be made read-only are refused before tmux is touched:
+ *
+ * - `--live` re-lays the session out (`set-option` / `resize-window`), which
+ *   changes the other server's pane whether or not a key is typed;
+ * - inside tmux, `switch-client` has no read-only form (its `-r` TOGGLES the
+ *   client's mode, so it can just as well turn read-only off), and the manual
+ *   `attach -r` from outside tmux is printed instead.
+ *
+ * @returns the lines for stderr and whether to go on (read-only)
+ */
+export function planGuardedAttach(
+  ownership: Extract<AttachOwnership, { verdict: 'foreign' | 'unconfirmed' }>,
+  sessionName: string,
+  options: { live?: boolean; insideTmux: boolean }
+): { proceedReadOnly: boolean; lines: string[] } {
+  const reason = ownership.verdict === 'foreign'
+    ? foreignSessionMessage(ownership.payload)
+    : `Could not confirm that tmux session "${sessionName}" is this CommandMate server's: `
+      + (ownership.why === 'no-answer'
+        ? 'the server gave no ownership answer for it (an older server, a session it does not have, or no server).'
+        : ownership.checkedName
+          ? `the server checked "${ownership.checkedName}", not that name.`
+          : 'the server did not publish the session name it uses, so its check was about a different name.');
+  if (options.live) {
+    return {
+      proceedReadOnly: false,
+      lines: [`Error: ${reason}`, '--live would re-lay that session out, so it was not attached.'],
+    };
+  }
+  if (options.insideTmux) {
+    return {
+      proceedReadOnly: false,
+      lines: [
+        `Error: ${reason}`,
+        'Inside tmux this client can only switch to it with keys enabled, so it was not switched. '
+          + 'To look at it read-only, from a terminal outside tmux run:',
+        `  tmux attach -r -t '${exactSessionTarget(sessionName)}'`,
+      ],
+    };
+  }
+  if (ownership.verdict === 'unconfirmed') {
+    return {
+      proceedReadOnly: true,
+      lines: [`Warning: ${reason}`, 'Attaching READ-ONLY, so no key you type reaches it.'],
+    };
+  }
+  const where = typeof ownership.payload.sessionPath === 'string' && ownership.payload.sessionPath !== ''
+    ? ` (it was started in ${ownership.payload.sessionPath})`
+    : '';
+  return {
+    proceedReadOnly: true,
+    lines: [
+      `Warning: tmux session "${sessionName}" belongs to another CommandMate server${where}.`,
+      'Attaching READ-ONLY, so no key you type reaches it. To work in it, use the server that started it.',
+    ],
+  };
 }
 
 /**
@@ -263,7 +429,8 @@ export function createAttachCommand(): Command {
           process.exit(ExitCode.CONFIG_ERROR);
         }
 
-        const sessionName = await resolveAttachSessionName(client, worktreeId, cliToolId, instanceId);
+        const target = await resolveAttachSessionName(client, worktreeId, cliToolId, instanceId);
+        const { sessionName } = target;
 
         if (!runTmux(['has-session', '-t', exactSessionTarget(sessionName)])) {
           console.error(
@@ -274,16 +441,32 @@ export function createAttachCommand(): Command {
           process.exit(ExitCode.UNEXPECTED_ERROR);
         }
 
+        // Issue #3334: the name exists, but it may be another server's session,
+        // and the server's check has to be about this very name.
+        let readOnly = Boolean(options.readOnly);
+        // Only a confirmed owner attaches writable; everything else is read-only
+        // or refused (`planGuardedAttach`).
+        const ownership = await checkAttachOwnership(client, worktreeId, cliToolId, instanceId, target);
+        if (ownership.verdict !== 'owned') {
+          const plan = planGuardedAttach(ownership, sessionName, {
+            live: options.live,
+            insideTmux: Boolean(process.env.TMUX),
+          });
+          for (const line of plan.lines) console.error(line);
+          if (!plan.proceedReadOnly) process.exit(ExitCode.UNEXPECTED_ERROR);
+          readOnly = true;
+        }
+
         for (const line of buildAttachHints(cliToolId, worktreeId, sessionName, {
-          readOnly: options.readOnly,
+          readOnly,
           live: options.live,
         })) {
           console.error(line);
         }
 
         const status = options.live
-          ? attachLive(sessionName, Boolean(options.readOnly))
-          : attachOrSwitch(sessionName, Boolean(options.readOnly));
+          ? attachLive(sessionName, readOnly)
+          : attachOrSwitch(sessionName, readOnly);
         process.exit(status);
       } catch (error) {
         handleCommandError(error);

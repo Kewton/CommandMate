@@ -41,6 +41,13 @@ vi.mock('@/lib/db/db-instance', () => ({
 vi.mock('@/lib/ws-server', () => ({ broadcastMessage: vi.fn() }));
 vi.mock('@/lib/push', () => ({ notifyPushSubscribers: vi.fn(async () => {}) }));
 vi.mock('@/lib/conversation-logger', () => ({ recordClaudeConversation: vi.fn(async () => {}) }));
+// Issue #3334: every tick asks whose session it is before it reads. These
+// suites mock the pane, not tmux, so the question would reach the machine's
+// real tmux server; the session here is this server's by construction. The
+// refusal is covered by tests/unit/guards/session-ownership-ws-relay-3334.test.ts.
+vi.mock('@/lib/realtime/terminal-session-ownership', () => ({
+  findTerminalSessionRefusal: vi.fn(async () => null),
+}));
 vi.mock('@/lib/realtime/terminal-broadcast', () => ({
   broadcastTerminalSnapshot: vi.fn(async () => {}),
 }));

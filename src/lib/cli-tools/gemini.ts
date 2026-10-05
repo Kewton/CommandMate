@@ -130,7 +130,7 @@ export class GeminiTool extends BaseCLITool {
       // Handles trust dialog automatically if encountered
       await this.waitForReady(sessionName);
 
-      logger.info('started-gemini-session:sessionname');
+      logger.info('started-gemini-session');
     } catch (error: unknown) {
       const errorMessage = getErrorMessage(error);
       throw new Error(`Failed to start Gemini session: ${errorMessage}`);
@@ -161,7 +161,7 @@ export class GeminiTool extends BaseCLITool {
         if (!trustDialogHandled && output.includes('Do you trust this folder?')) {
           await sendSpecialKey(sessionName, 'Enter');
           trustDialogHandled = true;
-          logger.info('auto-trusted-folder-for');
+          logger.info('auto-trusted-folder-for-gemini');
           // Continue polling for prompt after trust dialog
         }
       } catch {
@@ -191,7 +191,7 @@ export class GeminiTool extends BaseCLITool {
       }
       await new Promise((resolve) => setTimeout(resolve, pollInterval));
     }
-    logger.info('gemini-prompt-not');
+    logger.info('gemini-prompt-not-detected');
   }
 
   /**
@@ -226,7 +226,7 @@ export class GeminiTool extends BaseCLITool {
       // Issue #405: Invalidate cache after sending message
       invalidateCache(sessionName);
 
-      logger.info('sent-message-to-gemini-session:sessionna');
+      logger.info('sent-message-to-gemini-session');
     } catch (error: unknown) {
       const errorMessage = getErrorMessage(error);
       throw new Error(`Failed to send message to Gemini: ${errorMessage}`);
@@ -241,7 +241,7 @@ export class GeminiTool extends BaseCLITool {
   async killSession(worktreeId: string, instanceId?: string): Promise<void> {
     await this.requestExitAndKill(worktreeId, instanceId, {
       logger,
-      stoppedAction: 'stopped-gemini-session:sessionname',
+      stoppedAction: 'stopped-gemini-session',
       requestExit: async (sessionName) => {
         // Send Ctrl+C to interrupt any running operation
         await sendSpecialKey(sessionName, 'C-c');

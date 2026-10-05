@@ -15,9 +15,14 @@
  * over a threshold and not new is `outstanding`, from the first run on, so
  * an already slow API or an already noisy log line is filed once the cap has
  * room. Its candidates are the newly crossed thresholds and the growth rules.
+ *
+ * CI (Issue #3310) is filed the same way: a flaky or broken test the previous
+ * run did not have is a candidate, one it had is outstanding (from the first
+ * run on).
  */
 
 import { bugFlowSummary } from './bug-flow';
+import { ciFlakySummary } from './ci-flaky';
 import { hookObservationSummary } from './hook-observation';
 import { reportDateJst } from './report';
 import { severityRank } from './metrics-parse';
@@ -446,6 +451,10 @@ function evaluate(m: OkMeasurement, previous: MetricSnapshot | null): Evaluation
     case 'bug-flow':
       // Numbers only (Issue #3185): never a candidate, so no Issue is filed from it.
       return { candidates: [], summary: bugFlowSummary(m.items) };
+    case 'ci-flaky': {
+      const evaluation = presenceRule(m, previous, true);
+      return { ...evaluation, summary: perfSummary(ciFlakySummary(m.details), evaluation, previous) };
+    }
     case 'hook-observation':
       // Observation only (Issue #3311): never a candidate until a later Issue
       // decides, from these numbers, what should be one.
@@ -456,8 +465,8 @@ function evaluate(m: OkMeasurement, previous: MetricSnapshot | null): Evaluation
 /**
  * One metric's result. Security metrics fail while any finding exists (a
  * high advisory is a problem whether or not it is new); maintainability
- * metrics fail only when something got worse; performance metrics fail while
- * anything is a candidate or outstanding; process metrics never fail.
+ * metrics fail only when something got worse; performance and ci metrics fail
+ * while anything is a candidate or outstanding; process metrics never fail.
  */
 export function evaluateMetric(measurement: MetricMeasurement, previous: MetricSnapshot | null): MetricResult {
   const category = METRIC_CATEGORY[measurement.metricId];
@@ -477,7 +486,7 @@ export function evaluateMetric(measurement: MetricMeasurement, previous: MetricS
   const failed =
     category === 'security'
       ? hasFindings
-      : category === 'performance'
+      : category === 'performance' || category === 'ci'
         ? evaluation.candidates.length + (evaluation.outstanding?.length ?? 0) > 0
         : category === 'process'
           ? false
@@ -491,14 +500,16 @@ export function evaluateMetric(measurement: MetricMeasurement, previous: MetricS
     candidates: evaluation.candidates,
     ...(evaluation.outstanding ? { outstanding: evaluation.outstanding } : {}),
     ...(measurement.details ? { details: measurement.details } : {}),
+    ...(measurement.records ? { records: measurement.records } : {}),
   };
 }
 
 /**
  * The order the AI files Issues in: security candidates (most severe first),
  * then maintainability candidates (largest worsening first), then performance
- * candidates (largest score first), then outstanding security findings (most
- * severe first), then outstanding performance entries (largest score first).
+ * candidates (largest score first), then ci candidates, then outstanding
+ * security findings (most severe first), then outstanding performance entries
+ * (largest score first), then outstanding ci entries.
  */
 export function buildQueue(results: readonly MetricResult[]): MetricsQueueEntry[] {
   type Ranked = MetricsQueueEntry & { rank: number };
@@ -507,16 +518,20 @@ export function buildQueue(results: readonly MetricResult[]): MetricsQueueEntry[
   const performance: Ranked[] = [];
   const outstanding: Ranked[] = [];
   const performanceOutstanding: Ranked[] = [];
+  const ci: Ranked[] = [];
+  const ciOutstanding: Ranked[] = [];
   for (const result of results) {
     for (const candidate of result.candidates) {
       const entry = { key: candidate.key, metricId: result.metricId, source: 'candidate' as const };
       if (result.category === 'security') security.push({ ...entry, rank: severityRank(candidate.severity) });
       else if (result.category === 'performance') performance.push({ ...entry, rank: candidate.score ?? 0 });
+      else if (result.category === 'ci') ci.push({ ...entry, rank: 0 });
       else maintainability.push({ ...entry, rank: candidate.score ?? 0 });
     }
     for (const candidate of result.outstanding ?? []) {
       const entry = { key: candidate.key, metricId: result.metricId, source: 'outstanding' as const };
       if (result.category === 'performance') performanceOutstanding.push({ ...entry, rank: candidate.score ?? 0 });
+      else if (result.category === 'ci') ciOutstanding.push({ ...entry, rank: 0 });
       else outstanding.push({ ...entry, rank: severityRank(candidate.severity) });
     }
   }
@@ -525,8 +540,10 @@ export function buildQueue(results: readonly MetricResult[]): MetricsQueueEntry[
     ...security.sort(byRank),
     ...maintainability.sort(byRank),
     ...performance.sort(byRank),
+    ...ci,
     ...outstanding.sort(byRank),
     ...performanceOutstanding.sort(byRank),
+    ...ciOutstanding,
   ].map(({ key, metricId, source }) => ({ key, metricId, source }));
 }
 

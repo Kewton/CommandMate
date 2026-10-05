@@ -224,3 +224,52 @@ describe('bug-flow (Issue #3185)', () => {
     expect(results[0]).toMatchObject({ metricId: 'bug-flow', status: 'ok', value: 1, details: { regressionRate: 1 } });
   });
 });
+
+describe('ci-flaky (Issue #3310)', () => {
+  const NOW = new Date('2026-10-05T10:00:00.000Z');
+  const FIXTURES = path.resolve(__dirname, '..', '..', '..', 'fixtures', 'agent-health-ci-flaky-3310');
+  const fakeGh = (script: string, name = 'fake-gh') => {
+    const file = path.join(root, name);
+    fs.writeFileSync(file, `#!/bin/sh\n${script}\n`, { mode: 0o755 });
+    return file;
+  };
+  // `run view <id> --repo <r> --attempt <n> (--json jobs | --log-failed)` → the fixture of that attempt
+  const replay = () =>
+    fakeGh(
+      [
+        'echo "$*" >> "$(dirname "$0")/calls"',
+        'case "$*" in',
+        `  "run list"*) cat '${FIXTURES}/run-list.json' ;;`,
+        `  *"--json jobs"*) cat "${FIXTURES}/jobs-$3-$7.json" ;;`,
+        `  *"--log-failed"*) cat "${FIXTURES}/log-$3-$7.txt" ;;`,
+        '  *) exit 9 ;;',
+        'esac',
+      ].join('\n'),
+      'replay-gh'
+    );
+
+  it('a missing gh, a failing gh and an exhausted budget are skips, not a crash of the run', async () => {
+    const missing = await measureAll(ctx({ now: NOW, ghCommand: 'cm-no-such-gh-3310' }), ['ci-flaky']);
+    expect(missing[0]).toMatchObject({ metricId: 'ci-flaky', status: 'skip' });
+    const failing = await measureAll(ctx({ now: NOW, ghCommand: fakeGh('echo "HTTP 401" >&2; exit 4') }), ['ci-flaky']);
+    expect(failing[0]).toMatchObject({ metricId: 'ci-flaky', status: 'skip' });
+    expect(failing[0].status === 'skip' && failing[0].reason).toContain('exit 4');
+    const late = await measureAll(ctx({ now: NOW, ghCommand: replay(), deadline: Date.now() - 1 }), ['ci-flaky']);
+    expect(late[0]).toMatchObject({ metricId: 'ci-flaky', status: 'skip', reason: '全体の時間上限に達したため実行しない' });
+  });
+
+  it('reads every attempt of the runs that failed or were rerun, and the failed logs only', async () => {
+    const results = await measureAll(ctx({ now: NOW, ghCommand: replay() }), ['ci-flaky']);
+    expect(results[0]).toMatchObject({
+      metricId: 'ci-flaky',
+      status: 'ok',
+      value: 2,
+      details: { runs: 200, testFailures: 4, infraFailures: 4, retrySuccesses: 2 },
+    });
+    const calls = fs.readFileSync(path.join(root, 'calls'), 'utf8').trim().split('\n');
+    expect(calls[0]).toMatch(/^run list --repo Kewton\/CommandMate --branch develop --event push --created >=2026-09-27 /);
+    expect(calls.filter((call) => call.endsWith('--json jobs'))).toHaveLength(8);
+    // the passing second attempts are not fetched for logs
+    expect(calls.filter((call) => call.endsWith('--log-failed'))).toHaveLength(6);
+  });
+});

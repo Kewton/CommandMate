@@ -105,7 +105,7 @@ ID                     NAME                  STATUS   REASON                    
 ---------------------  --------------------  -------  ------------------------------  -------  ---------------
 localllm-test          main                  ready    input_prompt                    claude   42:10
 commandmate            develop               running  thinking_indicator              claude   1:05:33
-commandmate-issue-518  feature/518-worktree  ready    no_recent_output (no evidence)  claude   off
+commandmate-issue-518  feature/518-worktree  running  no_recent_output (no evidence)  claude   off
 commandmate-issue-600  feature/600-sessions  waiting  prompt_detected                 claude   off
 commandmate-issue-644  feature/644-repos     waiting  -                               claude   03:12 (codex-2)
 commandmate-main       main                  idle     -                               claude   off
@@ -880,6 +880,7 @@ Everything the server sends except `fullOutput` is printed verbatim.
   "lineCount": 42,
   "lastCapturedLine": 42,
   "promptData": null,
+  "promptView": null,
   "autoYes": {
     "enabled": false,
     "expiresAt": null,
@@ -890,7 +891,12 @@ Everything the server sends except `fullOutput` is printed verbatim.
   "cliToolId": "claude",
   "isSelectionListActive": false,
   "isPagerActive": false,
+  "isDismissablePanelActive": false,
   "isUnclassifiedActive": false,
+  "startingSince": null,
+  "statusEvidence": "positive",
+  "lastKnownStatus": "running",
+  "lastKnownStatusAt": 1754296400123,
   "lastServerResponseTimestamp": null,
   "serverPollerActive": true,
   "sessionStatus": "running",
@@ -905,6 +911,10 @@ Everything the server sends except `fullOutput` is printed verbatim.
   },
   "model": "claude-opus-5[1m]",
   "reasoningEffort": null,
+  "promptDedup": {
+    "skippedCount": 0,
+    "lastSkippedAt": null
+  },
   "composerText": null,
   "composerState": "empty",
   "agentMode": "accept-edits"
@@ -912,16 +922,27 @@ Everything the server sends except `fullOutput` is printed verbatim.
 ```
 
 What each field actually means. The line numbers were measured on 2026-08-20; following the
-function names (`buildCurrentOutput` / `isClaudeRunning`) is the safer way to find them.
+function names (`buildCurrentOutput` / `isClaudeRunning`) is the safer way to find them (no line numbers are given below; they go stale).
 
 | Field | Meaning |
 |---|---|
 | `content` | Whatever the poller has not saved yet (`buildCurrentOutput`). **It is a delta only for tools whose line count is a usable cursor** — the scrollback tools (codex / gemini / vibe-local / antigravity) while the 10000-line capture window is unsaturated; there it is empty even on a healthy session once the poller has saved it. For the **alternate-screen tools (claude / opencode / copilot), and for any saturated window, it is the WHOLE capture** (the line count is pinned at the pane height / window size and no longer denotes a read position — Issues #1910 / #1670 / #1268) |
-| `realtimeSnippet` | The last 100 rows of the pane — the screen itself (`src/lib/session/current-output-builder.ts:712`) |
+| `realtimeSnippet` | The last 100 rows of the pane — the screen itself (`selectRealtimeSnippetRows` in `src/lib/session/current-output-builder.ts`) |
 | `lineCount` | The row count of the whole capture, blank rows included. A TUI is drawn on a 1000-row pane, so even a blank pane can report 1001 |
-| `isRunning` | The tmux session exists and is healthy (`src/lib/session/claude-session.ts:543-556`). **It does not mean a turn is in progress** |
+| `isRunning` | The tmux session exists and is healthy (`isClaudeRunning` / `isSessionHealthy` in `src/lib/session/claude-session.ts`). **It does not mean a turn is in progress** |
 | `sessionStatus` / `sessionStatusReason` | The state and what it rests on: a `hook_*` reason came from hooks, anything else from the scraper (`HOOK_STATUS_REASON` in `src/lib/session/status-mapping.ts`) |
+| `promptData` / `promptView` / `promptAnswerable` | The confirmation prompt parsed off the screen, and how it is shown and answered. `promptView` is a reading of `promptData` (Issue #3184): `null` with no prompt, absent from an older server. `promptAnswerable` says whether `/prompt-response` would answer it right now (Issue #2870) and is present **only for a prompt parsed off the screen** — with no prompt, or for the structured (hook / degraded) forms, the key is absent |
+| `isSelectionListActive` / `isPagerActive` / `isDismissablePanelActive` / `isUnclassifiedActive` | Flags for the shape of the screen. `isDismissablePanelActive` is a dismiss-only overlay whose footer offers `Esc to close` and nothing else (Issue #2369; disjoint from `isSelectionListActive`). Absent from an older server |
+| `startingSince` | Epoch ms at which the agent's launch began, while it is still starting; `null` otherwise (Issue #3179). While it is a number the session is `running` / `starting` and every dialog flag is `false` |
+| `promptDedup` | How many times the prompt de-duplication dropped a prompt, `{ skippedCount, lastSkippedAt }` (Issue #1695). `skippedCount` is cumulative for the life of the server process, not per turn. Absent from an older server |
+| `statusEvidence` / `lastKnownStatus` / `lastKnownStatusAt` | Whether the verdict rests on positive evidence (`'positive'` / `'none'`), and the last status that was positively confirmed with its time (Issue #1926). `lastKnownStatus` is held in server memory (TTL 30 minutes, cleared on restart, dropped when the session stops) |
 | `structuredEvents.*` / `lastStopEventAt` | The last hook event and the last `stop` timestamp. `null` when no hooks have arrived |
+| `structuredEvents.turnId` / `openedAt` / `closedAt` / `closedBy` | A provisional turn boundary (Issue #1926). **Not yet a stable turn identity** |
+| `structuredEvents.source` | The identifier and **declared** values of the tool's structured-event source (Issue #1924). It describes the source, not the session, so it is present even with no hooks and with the session stopped. `kind` / `liveness` / `degradedReason` / `probedActivity` say whether the source is alive right now (Issue #2054) |
+| `structuredEvents.sessionContext` / `sessionDiff` / `session` | Context-window usage (Issue #2042), the files this turn touched with their revert state (Issue #2043), and the conversation the agent says it is in (Issue #2040). `null` for tools that do not publish them |
+| `structuredEvents.pendingDecisions[]` | The dialogs the instance is holding (Issue #1930; `kind` / `questionOptions` from Issue #2040) |
+| `upstreamFault` | `{id, matchedText, at}` when the screen carries an upstream-fault signature, else `null` (Issue #1839). **`null` means "no known signature", not "healthy"** |
+| `resolvedBy` / `conflict` | Which stage of the server's precedence chain chose `cliToolId`, and a contradiction between the roster and an explicit `--instance` / `cliTool` (Issue #1884) |
 | `composerText` | Text sitting **unsent** in the agent's input box, or `null` (Issue #1879). Only text a human typed is returned; a dim suggestion or placeholder never is. `composerState` says why a `null` is `null`. claude / codex only |
 | `composerState` | Why `composerText` is what it is (Issue #1879): `content` (real text is there) / `ghost` (only a suggestion or placeholder) / `empty` (the input box is empty) / `unsupported_tool` (this tool's input box has not been measured) / `no_composer` (no input box on the screen — also the answer for a session that is not running) |
 | `agentMode` | The agent's permission mode (Issue #2592), read off the screen: `default` / `manual` / `accept-edits` / `plan` / `auto` / `autopilot` / `bypass` / `dont-ask` / `build`, or `unknown` when it could not be read. **`unknown` does not mean "the default mode"; it means "not determined"** — the tool has no mode cycle, the screen shows no mode indicator, or the session is not running. Most tools draw nothing in their default mode, so the absence of an indicator cannot be read as `default` |
@@ -1200,6 +1221,27 @@ When the session does not exist it exits non-zero and points at `commandmate ls`
 When `$TMUX` is set (you called it from inside tmux) it uses `switch-client` instead. If the current
 client is on a **different tmux server** and cannot switch, it prints the quoted
 `tmux attach -t '=mcbd-…:'` and exits non-zero.
+
+When the session under that name belongs to **another CommandMate server** (the server answers 409
+`session_owned_by_other_server`), it changes course so that no key reaches it (Issue #3334):
+
+- A plain attach is **made read-only (`-r`)**, and says so on stderr. You can look; nothing you type
+  arrives
+- `--live` would change the other session's geometry, so it **does not attach** and exits non-zero
+- From inside tmux, `switch-client` has no read-only form, so it **does not switch**; it prints
+  `tmux attach -r -t '=mcbd-…:'` to run outside tmux and exits non-zero
+
+The server's answer only counts when it is about **the very name being attached**. When the roster
+cannot be read and the name falls back to the legacy form (`mcbd-<tool>-…`), the server checks the
+namespaced name, so its answer is about a different session (both names can exist at once). That is
+treated as **ownership not confirmed**: the attach is made read-only as above, and `--live` and the
+switch from inside tmux are refused. No ownership answer at all — any non-2xx such as a 404, a
+stopped server, or an older server with no ownership check — is treated the same way. Only a session
+the server **confirms as its own** gets an attach that can send keys.
+
+When `send` / `capture` / `respond` and the other commands get the same 409, they exit with a message
+saying the session is another CommandMate server's and nothing was sent to it, read from it or stopped
+(the exit code is the one a 409 always had, 99).
 
 ### Finding the session name
 
