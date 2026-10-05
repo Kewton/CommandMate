@@ -136,6 +136,16 @@ describe('malformed JSON body → 400 Invalid request body (#3295)', () => {
     expect(await response.json()).toEqual({ error: 'Invalid request body' });
   });
 
+  for (const body of ['null', '[]', '1', '"text"']) {
+    it.each(ROUTES)(`%s: non-object body ${body} returns 400 and logs no error (#3333)`, async (route, handler) => {
+      const response = await call(handler, route, body);
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({ error: 'Invalid request body' });
+      expect(mockLogger.error).not.toHaveBeenCalled();
+    });
+  }
+
   it.each(ROUTES)('%s: well-formed JSON still reaches validation', async (route, handler) => {
     const response = await call(handler, route, JSON.stringify({}));
 
@@ -176,6 +186,11 @@ const SWEPT: Array<[string, string, string, Handler, Shape, string?]> = [
   ['templates/[id] PUT', 'PUT', `templates/${TEMPLATE_ID}`, templatePUT as Handler, 'error'],
   ['templates POST', 'POST', 'templates', templatesPOST as Handler, 'error'],
 ];
+
+const OWN_OBJECT_CHECK = new Set([
+  'cli-tool PATCH', 'worktree PATCH', 'instances/notes PUT', 'instances/opencode PUT',
+  'push/escalation PATCH', 'repositories/[id] PUT', 'daily-summary POST',
+]);
 
 function callSwept(handler: Handler, method: string, path: string, body: string) {
   const request = new NextRequest(`http://localhost:3000/api/${path}`, {
@@ -219,18 +234,23 @@ describe('malformed JSON body → 400 in the remaining routes (#3295 sweep)', ()
     fs.rmSync(worktreeDir, { recursive: true, force: true });
   });
 
-  for (const body of ['this is not valid JSON', '']) {
-    it.each(SWEPT)(`%s: ${body === '' ? 'empty body' : 'broken JSON'} → 400 and no error log`, async (_label, method, path, handler, shape) => {
+  for (const body of ['this is not valid JSON', '', 'null', '[]', '1']) {
+    it.each(SWEPT)(`%s: ${body === '' ? 'empty body' : body === 'this is not valid JSON' ? 'broken JSON' : `non-object ${body}`} → 400 and no error log`, async (_label, method, path, handler, shape) => {
       const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
       const response = await callSwept(handler, method, path, body);
       const data = await response.json();
       consoleError.mockRestore();
 
+      // push/escalation normalizes field by field, so an array falls back to defaults (200) by design.
+      if (_label === 'push/escalation PATCH' && body === '[]') return;
       expect(response.status).toBe(400);
-      if (shape === 'error') expect(data).toEqual({ error: 'Invalid request body' });
-      if (shape === 'success-error') expect(data).toEqual({ success: false, error: 'Invalid request body' });
-      if (shape === 'files') expect(data).toEqual({ success: false, error: { code: 'INVALID_REQUEST', message: 'Invalid request body' } });
-      if (shape === 'clone') {
+      // Routes that already checked for an object keep their own wording (#3333).
+      const ownCheck = body !== 'this is not valid JSON' && body !== '' && OWN_OBJECT_CHECK.has(_label);
+      if (ownCheck) expect(data).toHaveProperty('error');
+      else if (shape === 'error') expect(data).toEqual({ error: 'Invalid request body' });
+      else if (shape === 'success-error') expect(data).toEqual({ success: false, error: 'Invalid request body' });
+      else if (shape === 'files') expect(data).toEqual({ success: false, error: { code: 'INVALID_REQUEST', message: 'Invalid request body' } });
+      else if (shape === 'clone') {
         expect(data.success).toBe(false);
         expect(data.error.code).toBe('INVALID_REQUEST_BODY');
         expect(data.error.message).toBe('Invalid request body');

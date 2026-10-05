@@ -29,3 +29,25 @@ export async function readJsonBody<T = any>(req: { json(): Promise<unknown> }): 
     };
   }
 }
+
+/**
+ * Parse the request body as JSON and require it to be a plain object (Issue #3333).
+ *
+ * Routes that destructure the body would otherwise throw a TypeError on `null`
+ * and land in their outer catch as a 500. A syntax error, an empty body, or a
+ * body that is `null`, an array, or a primitive all return `{ ok: false, response }`
+ * with 400 `{ error: 'Invalid request body' }`.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- callers validate the fields themselves
+export async function readJsonObjectBody<T = any>(req: { json(): Promise<unknown> }): Promise<ReadJsonBodyResult<T>> {
+  const parsed = await readJsonBody<unknown>(req);
+  if (!parsed.ok) return parsed;
+  const body = parsed.body;
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+    return {
+      ok: false,
+      response: NextResponse.json({ error: 'Invalid request body' }, { status: 400 }),
+    };
+  }
+  return { ok: true, body: body as T };
+}

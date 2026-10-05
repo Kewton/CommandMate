@@ -21,7 +21,7 @@ import { resolveRelayTtlMs } from '@/lib/relay/relay-policy';
 import { isValidInstanceId } from '@/lib/cli-tools/types';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 import { createLogger } from '@/lib/logger';
-import { readJsonBody } from '@/lib/api/read-json-body';
+import { readJsonObjectBody } from '@/lib/api/read-json-body';
 
 const logger = createLogger('api/relays');
 
@@ -115,7 +115,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const parsed = await readJsonBody<CreateRelayBody>(request);
+    const parsed = await readJsonObjectBody<CreateRelayBody>(request);
     if (!parsed.ok) return parsed.response;
     const body = parsed.body;
 

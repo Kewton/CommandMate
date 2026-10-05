@@ -16,7 +16,7 @@ import {
   validateTemplateName,
   validateTemplateContent,
 } from '@/lib/api/template-helpers';
-import { readJsonBody } from '@/lib/api/read-json-body';
+import { readJsonObjectBody } from '@/lib/api/read-json-body';
 
 export async function PUT(
   request: NextRequest,
@@ -29,7 +29,7 @@ export async function PUT(
       return NextResponse.json({ error: 'Invalid template ID format' }, { status: 400 });
     }
 
-    const parsed = await readJsonBody(request);
+    const parsed = await readJsonObjectBody(request);
     if (!parsed.ok) return parsed.response;
     const body = parsed.body;
 

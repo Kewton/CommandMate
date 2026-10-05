@@ -25,7 +25,7 @@ import {
 import { createLogger } from '@/lib/logger';
 import { getPushDeliveryHealth, type PushDeliveryHealth } from '@/lib/push/delivery-health';
 import { LOCALE_COOKIE_NAME, resolveLocale } from '@/config/i18n-config';
-import { readJsonBody } from '@/lib/api/read-json-body';
+import { readJsonObjectBody } from '@/lib/api/read-json-body';
 
 export const dynamic = 'force-dynamic';
 
@@ -115,7 +115,7 @@ export function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const parsed = await readJsonBody<{
+    const parsed = await readJsonObjectBody<{
       subscription?: { endpoint?: unknown; keys?: { p256dh?: unknown; auth?: unknown } };
       deviceLabel?: unknown;
     }>(request);
@@ -155,7 +155,7 @@ export async function POST(request: Request) {
 
 export async function PATCH(request: Request) {
   try {
-    const parsed = await readJsonBody<{
+    const parsed = await readJsonObjectBody<{
       endpoint?: unknown;
       preferences?: { prompt?: unknown; completion?: unknown };
       acknowledgeDefaultsNotice?: unknown;
