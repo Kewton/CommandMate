@@ -335,7 +335,7 @@ export async function loadSlashCommands(basePath?: string): Promise<SlashCommand
 
   // Check if directory exists
   if (!fs.existsSync(commandsDir)) {
-    logger.warn('commands-directory-not-found:commandsdir');
+    logger.warn('commands-directory-not-found');
     return [];
   }
 

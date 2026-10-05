@@ -48,6 +48,19 @@ function resolveTarget(cliToolId: string, instanceId = cliToolId) {
   return { data: { cliToolId, instanceId, resolvedBy: 'worktree-default', conflict: null } };
 }
 
+/**
+ * The server confirming the session is its own (Issue #3334): the roster
+ * publishes the name and `capture` answers 200 for it. Since #3334 only such a
+ * session attaches with keys enabled; these suites are about what happens
+ * after that, so every attach here is given a server that vouches for it.
+ */
+function ownedBy(sessionName: string, instanceId: string, cliToolId = instanceId) {
+  return [
+    { data: { agentInstances: [{ id: instanceId, cliToolId, sessionName }] } },
+    { data: { output: '' } },
+  ];
+}
+
 async function runAttach(argv: string[]): Promise<void> {
   const { createAttachCommand } = await import('@/cli/commands/attach');
   try {
@@ -76,7 +89,7 @@ afterEach(() => {
 
 describe('resolving and attaching', () => {
   it('attaches to the session the roster names, with the exact-match target', async () => {
-    mockFetchSequence([resolveTarget('claude')]);
+    mockFetchSequence([resolveTarget('claude'), ...ownedBy('mcbd-claude-wt1', 'claude')]);
 
     await runAttach(['wt1']);
 
@@ -89,7 +102,7 @@ describe('resolving and attaching', () => {
   });
 
   it('attaches to an alias instance session, not the primary one', async () => {
-    mockFetchSequence([resolveTarget('codex', 'codex-2')]);
+    mockFetchSequence([resolveTarget('codex', 'codex-2'), ...ownedBy('mcbd-codex-wt1-2', 'codex-2', 'codex')]);
 
     await runAttach(['wt1', '--instance', 'codex-2']);
 
@@ -97,7 +110,7 @@ describe('resolving and attaching', () => {
   });
 
   it('adds -r for --read-only', async () => {
-    mockFetchSequence([resolveTarget('claude')]);
+    mockFetchSequence([resolveTarget('claude'), ...ownedBy('mcbd-claude-wt1', 'claude')]);
 
     await runAttach(['wt1', '--read-only']);
 
@@ -105,7 +118,7 @@ describe('resolving and attaching', () => {
   });
 
   it('exits non-zero and points at `ls` when the session is not there', async () => {
-    mockFetchSequence([resolveTarget('claude')]);
+    mockFetchSequence([resolveTarget('claude'), ...ownedBy('mcbd-claude-wt1', 'claude')]);
     tmuxStatus = (argv) => (argv[0] === 'has-session' ? 1 : 0);
 
     await runAttach(['wt1']);
@@ -119,7 +132,7 @@ describe('resolving and attaching', () => {
 
   it('switches the current client instead of nesting when already inside tmux', async () => {
     process.env.TMUX = '/tmp/tmux-501/default,123,0';
-    mockFetchSequence([resolveTarget('claude')]);
+    mockFetchSequence([resolveTarget('claude'), ...ownedBy('mcbd-claude-wt1', 'claude')]);
 
     await runAttach(['wt1']);
 
@@ -131,7 +144,7 @@ describe('resolving and attaching', () => {
     // The ambient `$TMUX` is a DIFFERENT tmux server — which is the case every
     // CommandMate agent runs under.
     process.env.TMUX = '/tmp/tmux-501/other,123,0';
-    mockFetchSequence([resolveTarget('claude')]);
+    mockFetchSequence([resolveTarget('claude'), ...ownedBy('mcbd-claude-wt1', 'claude')]);
     tmuxStatus = (argv) => (argv[0] === 'switch-client' ? 1 : 0);
 
     await runAttach(['wt1']);
@@ -145,7 +158,7 @@ describe('resolving and attaching', () => {
 
 describe('--live', () => {
   it('hands the geometry over, attaches, and hands it back', async () => {
-    mockFetchSequence([resolveTarget('claude')]);
+    mockFetchSequence([resolveTarget('claude'), ...ownedBy('mcbd-claude-wt1', 'claude')]);
 
     await runAttach(['wt1', '--live']);
 
@@ -165,7 +178,7 @@ describe('--live', () => {
   });
 
   it('hands the geometry back even when tmux exits non-zero', async () => {
-    mockFetchSequence([resolveTarget('claude')]);
+    mockFetchSequence([resolveTarget('claude'), ...ownedBy('mcbd-claude-wt1', 'claude')]);
     tmuxStatus = (argv) => (argv[0] === 'attach-session' ? 1 : 0);
 
     await runAttach(['wt1', '--live']);

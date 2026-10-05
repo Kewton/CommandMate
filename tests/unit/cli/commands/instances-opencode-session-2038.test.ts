@@ -45,7 +45,7 @@ const CLAUDE_ONLY_ROSTER = {
   agentInstances: [{ id: 'claude', cliTool: 'claude', alias: 'Claude', order: 0 }],
 };
 
-const STOPPED = { isRunning: false, autoYes: { enabled: false }, model: null, reasoningEffort: null };
+const STOPPED = { isRunning: false, model: null, reasoningEffort: null };
 
 async function runInstances(args: string[]): Promise<void> {
   const { createInstancesCommand } = await import('../../../../src/cli/commands/instances');

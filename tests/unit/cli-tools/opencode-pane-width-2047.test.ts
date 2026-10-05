@@ -317,6 +317,20 @@ describe('Issue #3296: the width warning is printed once per launch', () => {
     expect(resizeWidthFromExecFile()).toBe(120);
   });
 
+  it('applies a value with leading zeros and does not call it rejected (#3338)', async () => {
+    process.env[OPENCODE_PANE_WIDTH_ENV] = '0120';
+    await relaunch();
+    expect(resizeWidthFromExecFile()).toBe(120);
+    expect(widthWarns('opencode-pane-width-rejected')).toHaveLength(0);
+  });
+
+  it('still calls an out-of-bounds digit string rejected (#3338)', async () => {
+    process.env[OPENCODE_PANE_WIDTH_ENV] = '0020';
+    await relaunch();
+    expect(resizeWidthFromExecFile()).toBe(80);
+    expect(widthWarns('opencode-pane-width-rejected')).toHaveLength(1);
+  });
+
   it('stays silent on the creation path with a valid value', async () => {
     process.env[OPENCODE_PANE_WIDTH_ENV] = '120';
     await widthOnCreate();

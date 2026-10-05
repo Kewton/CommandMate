@@ -461,7 +461,7 @@ export class OpenCodeTool extends BaseCLITool {
         }
       }
 
-      logger.info('started-opencode-session:sessionname');
+      logger.info('started-opencode-session');
     } catch (error: unknown) {
       const errorMessage = getErrorMessage(error);
       throw new Error(`Failed to start OpenCode session: ${errorMessage}`);
@@ -766,7 +766,7 @@ export class OpenCodeTool extends BaseCLITool {
       // Issue #405: Invalidate cache after sending message
       invalidateCache(sessionName);
 
-      logger.info('sent-message-to-opencode-session:session');
+      logger.info('sent-message-to-opencode-session');
     } catch (error: unknown) {
       const errorMessage = getErrorMessage(error);
       throw new Error(`Failed to send message to OpenCode: ${errorMessage}`);
@@ -949,7 +949,7 @@ export class OpenCodeTool extends BaseCLITool {
       // Logged unconditionally: after a successful `/exit` no tmux kill runs, so
       // there is no `killed` value to test, unlike `requestExitAndKill` in
       // base.ts (logs only when the kill returned true) (#3232).
-      logger.info('stopped-opencode-session:sessionname');
+      logger.info('stopped-opencode-session');
     } catch (error: unknown) {
       logger.error('session:stop-failed', { error: getErrorMessage(error) });
       throw error;

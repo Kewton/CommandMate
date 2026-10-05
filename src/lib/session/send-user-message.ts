@@ -497,7 +497,7 @@ export async function sendUserMessage(
 
   // 8. Clear in-progress message ID (session state managed by savePendingAssistantResponse).
   clearInProgressMessageId(db, worktreeId, cliToolId, instanceId);
-  logger.info('cleared-in-progress-message-for');
+  logger.info('cleared-in-progress-message');
 
   // 9. Start polling for the CLI tool's response.
   startPolling(worktreeId, cliToolId, instanceId);
