@@ -154,7 +154,7 @@ commandmate ls --json \
 | Field | Meaning |
 |---|---|
 | `sessionStatusByCli.<tool>.statusEvidence` | `'positive'` (something confirmed it) / `'none'` (no positive proof, including a frame that could not be read) |
-| `sessionStatusByCli.<tool>.sessionStatusReason` | The scraper's reason code |
+| `sessionStatusByCli.<tool>.sessionStatusReason` | The scraper's reason code. Whether the pane is working (`isProcessing`) also folds in the agent's own hooks (`Stop` and the rest) by the rules `capture --json` applies, so right after a `Stop` it can read `isProcessing: false` while the working row is still on screen and this reason still says `thinking_indicator` (Issue #3377) |
 | `sessionStatusByCli.<tool>.lastKnownStatus` / `lastKnownStatusAt` | The last **positively confirmed** status and when. Held in server memory (TTL 30 minutes, cleared on restart, dropped when the session stops) |
 
 ### AUTO_YES Column (Issue #2575)

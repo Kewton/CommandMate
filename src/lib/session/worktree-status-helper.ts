@@ -16,7 +16,11 @@
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { CLI_TOOL_IDS, type CLIToolType } from '@/lib/cli-tools/types';
 import { captureSessionOutput } from './cli-session';
-import { detectSessionStatus } from '@/lib/detection/status-detector';
+import {
+  detectSessionStatus,
+  isGeneratingStatus,
+  type StatusDetectionResult,
+} from '@/lib/detection/status-detector';
 import { STATUS_REASON } from '@/lib/detection/status-reason';
 import {
   getSessionStartingSince,
@@ -25,6 +29,7 @@ import {
 } from '@/lib/session/session-starting-state';
 import { deriveCliStatus, sessionStatusToActivityFlags } from './status-mapping';
 import { hookTurnHoldsPane } from './hook-turn-hold';
+import { mergeStructuredStatus, staleReadyCandidate, type ScraperVerdict } from './structured-status-merge';
 // Issue #2317: the tmux session is a SURFACE, not just a place to run a process.
 // Reached through `cli-session`, which is the gateway Issue #1922's import guard
 // names — this module may not import `lib/tmux/**` itself.
@@ -47,7 +52,9 @@ import { observeWaitingEdge } from '@/lib/session/waiting-episode-state';
 // Issue #1784 promotes them to `getResolvedAgentModelInfo`, which folds in what
 // the capture below showed.
 import {
+  getPublishedAgentTurn,
   getResolvedAgentModelInfo,
+  getStructuredSessionState,
   isAwaitingInstruction,
   recordCapturedModelInfo,
 } from '@/lib/session/agent-event-state';
@@ -201,11 +208,14 @@ export interface CliToolSessionStatus {
    * an orange dot into a sentence, and what `commandmate ls` prints in its
    * REASON column.
    *
-   * Deliberately the SCRAPER's reason, not a `hook_` one: this object is built
-   * from `detectSessionStatus` alone (the list API does not run
-   * `mergeStructuredStatus`), and labelling a scraper verdict with a structured
-   * reason would misreport which layer decided. The merged reason is on
-   * `CurrentOutputResponse.sessionStatusReason`.
+   * Deliberately the SCRAPER's reason, not a `hook_` one: the reason is read
+   * from `detectSessionStatus` alone, and labelling a scraper verdict with a
+   * structured reason would misreport which layer decided. The merged reason is
+   * on `CurrentOutputResponse.sessionStatusReason`. Since Issue #3377 the
+   * agent's turn is folded into `isProcessing` (through `mergeStructuredStatus`,
+   * see `foldHookTurn`), so a pane its `Stop` ended can read not-processing
+   * beside a `thinking_indicator` reason here for the poll or two the working
+   * row stays painted.
    */
   sessionStatusReason?: string;
   /**
@@ -434,6 +444,75 @@ function broadcastPromptSweptToAnswered(worktreeId: string): (message: ChatMessa
   };
 }
 
+/** What {@link foldHookTurn} reads: one frame's verdict and the rows already read for it. */
+interface HookTurnFoldInput {
+  worktreeId: string;
+  cliToolId: CLIToolType;
+  instanceId: string;
+  output: string;
+  statusResult: StatusDetectionResult;
+  isUnclassified: boolean;
+  /** The frame's own `isProcessing`. */
+  isProcessing: boolean;
+  /** This instance's newest rows (newest first), or null when none were read. */
+  recentMessages: ChatMessage[] | null;
+}
+
+/**
+ * The list's `isProcessing` with the agent's own turn folded in, by the rules
+ * `capture --json` applies — called, not copied (Issue #3365, #3377).
+ *
+ * - **Widening** (#3365): a frame that reads not-processing is held at
+ *   processing by `hookTurnHoldsPane`, the #3337 rule the capture and the
+ *   relay read — a codex hook turn runs until its `Stop`.
+ * - **Narrowing** (#3377): a frame that reads processing is put through
+ *   `mergeStructuredStatus`, the capture's own merge, so the agent's `Stop`
+ *   ends it here on the poll it ends it there. Before this the list kept the
+ *   working row the frame still showed after `Stop` — measured 2026-10-06 at
+ *   ~4 s (codex) / ~2 s (claude) of `ready / hook_stop` in `capture --json`
+ *   beside `isProcessing: true` in `commandmate ls`.
+ *
+ * The merge's #2429 exception (a `Stop` older than the newest prompt does not
+ * end the work on screen) needs the newest prompt; it is taken from the rows
+ * the stale-prompt sweep already read, so the list adds no DB read. A prompt
+ * older than those 10 rows reads as none, which leaves the `Stop` standing —
+ * the merge's own answer to an unreadable ledger.
+ *
+ * The prompt-waiting input is not passed: a wait is `isWaitingForResponse`'s,
+ * and the caller does not reach here while one is up.
+ *
+ * In-memory reads only (no DB, no tmux).
+ */
+function foldHookTurn(input: HookTurnFoldInput): boolean {
+  const { worktreeId, cliToolId, instanceId, output, statusResult } = input;
+  if (!input.isProcessing) return hookTurnHoldsPane(worktreeId, cliToolId, instanceId, output);
+  const structured = getStructuredSessionState(worktreeId, cliToolId, instanceId);
+  if (structured === null) return true;
+  const scraper: ScraperVerdict = {
+    status: statusResult.status,
+    reason: statusResult.reason,
+    thinking: isGeneratingStatus(statusResult),
+    evidence: statusResult.evidence,
+    isUnclassifiedActive: input.isUnclassified,
+  };
+  const turn = getPublishedAgentTurn(worktreeId, cliToolId, instanceId);
+  const lastPromptAt = staleReadyCandidate(scraper, structured, turn)
+    ? newestPromptAt(input.recentMessages)
+    : null;
+  return mergeStructuredStatus(scraper, structured, null, turn, lastPromptAt).status === 'running';
+}
+
+/** Epoch ms of the newest user row among `messages`, or null. */
+function newestPromptAt(messages: ChatMessage[] | null): number | null {
+  let newest: number | null = null;
+  for (const message of messages ?? []) {
+    if (message.role !== 'user') continue;
+    const at = message.timestamp instanceof Date ? message.timestamp.getTime() : NaN;
+    if (Number.isFinite(at) && (newest === null || at > newest)) newest = at;
+  }
+  return newest;
+}
+
 /**
  * Detect the session status of a single (cliTool, instance) session.
  *
@@ -606,17 +685,17 @@ async function detectInstanceSessionStatus(
       // Issue #3179: not during a launch — a structured wait inherited there
       // would light the orange dot for a dialog nobody has to answer.
       isWaitingForResponse = isWaitingForResponse || (startingSince === null && peek.waiting);
-      // Issue #3365: a codex turn its hooks opened is running until its `Stop`,
-      // whatever the frame reads — the rule `capture --json` applies (#3337),
-      // called rather than copied. In-memory reads only (no DB, no tmux), and
-      // only reached when nothing above already said waiting / processing.
-      if (
-        startingSince === null &&
-        !isWaitingForResponse &&
-        !isProcessing &&
-        hookTurnHoldsPane(worktreeId, cliToolId, instanceId, output)
-      ) {
-        isProcessing = true;
+      // Issue #2214: the instance's newest rows, read once — for the sweep
+      // below, and for the #2429 comparison `foldHookTurn` may need.
+      const recentMessages = statusResult.hasActivePrompt
+        ? null
+        : getMessages(db, worktreeId, { limit: 10, cliToolId, instanceId });
+      // Issue #3365 / #3377: the agent's own turn, folded in by the rules
+      // `capture --json` applies. Not during a launch, and not over a wait.
+      if (startingSince === null && !isWaitingForResponse) {
+        isProcessing = foldHookTurn({
+          worktreeId, cliToolId, instanceId, output, statusResult, isUnclassified, isProcessing, recentMessages,
+        });
       }
       structuredWaitingSince = startingSince === null ? peek.structured?.at ?? null : null;
       waitingKind = deriveWaitingKind({
@@ -637,9 +716,8 @@ async function detectInstanceSessionStatus(
       });
 
       // Clean up stale pending prompts (scoped to this instance) if none is showing
-      if (!statusResult.hasActivePrompt) {
-        const messages = getMessages(db, worktreeId, { limit: 10, cliToolId, instanceId });
-        const hasPendingPrompt = messages.some(
+      if (recentMessages !== null) {
+        const hasPendingPrompt = recentMessages.some(
           msg => msg.messageType === 'prompt' && msg.promptData?.status !== 'answered'
         );
         if (hasPendingPrompt) {

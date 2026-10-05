@@ -166,7 +166,7 @@ commandmate ls --json \
 | フィールド | 意味 |
 |---|---|
 | `sessionStatusByCli.<tool>.statusEvidence` | `'positive'`（何かが肯定的に確認した）／`'none'`（肯定的な裏付けが無い。読めなかった場合を含む） |
-| `sessionStatusByCli.<tool>.sessionStatusReason` | スクレイパーの理由コード |
+| `sessionStatusByCli.<tool>.sessionStatusReason` | スクレイパーの理由コード。作業中かどうか（`isProcessing`）にはエージェント自身の hook（`Stop` など）も `capture --json` と同じ規則で反映されるため、`Stop` の直後は作業中の行が画面に残っていても `isProcessing: false` になり、理由は `thinking_indicator` のままのことがあります（Issue #3377） |
 | `sessionStatusByCli.<tool>.lastKnownStatus` / `lastKnownStatusAt` | 最後に**肯定的に確認できた**状態とその時刻。サーバーのメモリ上に保持（TTL 30 分、再起動でクリア、セッション停止で破棄） |
 
 ### AUTO_YES列の意味（Issue #2575）
