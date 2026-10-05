@@ -279,6 +279,24 @@ if [ "$EVENT" = "session_start" ] && [ -n "$HOOK_JSON" ]; then
     BODY="$BODY,\"model\":\"$(json_escape "$MODEL")\""
   fi
 fi
+# Issue #3330. Claude Code fires `UserPromptSubmit` for each background-task
+# notice it attaches to a turn that is already running, and the prompt it
+# reports is the notice, which starts with `<task-notification>`. The receiver
+# keeps the running turn for those instead of opening a new one — but it needs
+# only that one bit, so the bit is what is sent: the prompt itself is the
+# operator's text and is never forwarded. Claude only, so codex (whose shared
+# relay is a copy of this script) and every other tool keep the body they had.
+#
+# Matched on the raw payload: `"prompt"` immediately followed by its value, with
+# leading whitespace (raw or as a JSON escape) allowed. Text inside a string
+# cannot produce the match — its quotes are escaped — so a prompt that merely
+# mentions the tag, or a field of that name, does not set it.
+if [ "$EVENT" = "user_prompt_submit" ] && [ "$TOOL" = "claude" ] && [ -n "$HOOK_JSON" ]; then
+  if printf '%s' "$HOOK_JSON" | tr -d '\n' |
+    grep -Eq '"prompt"[[:space:]]*:[[:space:]]*"([[:space:]]|\\[nrt])*<task-notification>'; then
+    BODY="$BODY,\"queuedNotice\":true"
+  fi
+fi
 BODY="$BODY}"
 
 # Token via --header rather than the command line of a subprocess: argv is world

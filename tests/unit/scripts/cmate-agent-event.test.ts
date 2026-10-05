@@ -419,3 +419,77 @@ describe('correlation keys and the widened vocabulary (Issue #1722)', () => {
     expect(run(['--instance-id']).status).toBe(2);
   });
 });
+
+describe('a queued notice on UserPromptSubmit (Issue #3330)', () => {
+  // Synthetic payloads in the shape of Claude's `UserPromptSubmit`.
+  const NOTICE = '<task-notification>\n<status>completed</status>\n</task-notification>';
+  const submit = (prompt: string, extra: Record<string, unknown> = {}) =>
+    JSON.stringify({
+      session_id: 'sess-3330',
+      cwd: '/repos/wt-a',
+      hook_event_name: 'UserPromptSubmit',
+      prompt,
+      ...extra,
+    });
+
+  it('sends queuedNotice: true for a notice, and never the prompt', () => {
+    const result = run(['--stdin-json'], { stdin: submit(NOTICE) });
+
+    expect(result.status).toBe(0);
+    expect(body(result)).toEqual({
+      tool: 'claude',
+      event: 'user_prompt_submit',
+      cwd: '/repos/wt-a',
+      sessionId: 'sess-3330',
+      queuedNotice: true,
+    });
+    expect(result.curlArgs!.join('\n')).not.toContain('task-notification');
+  });
+
+  it('allows leading whitespace before the tag, raw or escaped', () => {
+    const escaped = run(['--stdin-json'], { stdin: submit(`\n  ${NOTICE}`) });
+    expect(body(escaped).queuedNotice).toBe(true);
+
+    const pretty = run(['--stdin-json'], {
+      stdin: `{\n  "hook_event_name": "UserPromptSubmit",\n  "cwd": "/r",\n  "prompt":   "${NOTICE.replace(/\n/g, '\\n')}"\n}`,
+    });
+    expect(body(pretty).queuedNotice).toBe(true);
+  });
+
+  it('sends neither the flag nor the prompt for a prompt the operator wrote', () => {
+    for (const prompt of ['Implement the change', `see ${NOTICE}`, 'quote the "prompt": "<task-notification>" field']) {
+      const result = run(['--stdin-json'], { stdin: submit(prompt) });
+
+      expect(result.status, prompt).toBe(0);
+      expect(body(result), prompt).toEqual({
+        tool: 'claude',
+        event: 'user_prompt_submit',
+        cwd: '/repos/wt-a',
+        sessionId: 'sess-3330',
+      });
+    }
+  });
+
+  it('reads only the prompt field, not another field holding the tag', () => {
+    const result = run(['--stdin-json'], { stdin: submit('go', { note: NOTICE }) });
+
+    expect(body(result)).not.toHaveProperty('queuedNotice');
+  });
+
+  it('leaves every other event and every other tool as it was', () => {
+    // codex's shared relay ($CODEX_HOME/commandmate/cmate-agent-event.sh) is a
+    // byte copy of this script, so its bodies must not change.
+    const codex = run(['--tool', 'codex', '--stdin-json'], { stdin: submit(NOTICE) });
+    expect(body(codex)).toEqual({
+      tool: 'codex',
+      event: 'user_prompt_submit',
+      cwd: '/repos/wt-a',
+      sessionId: 'sess-3330',
+    });
+
+    const stop = run(['--stdin-json'], {
+      stdin: JSON.stringify({ hook_event_name: 'Stop', cwd: '/r', prompt: NOTICE }),
+    });
+    expect(body(stop)).toEqual({ tool: 'claude', event: 'stop', cwd: '/r' });
+  });
+});
