@@ -146,8 +146,8 @@ describe('without the flag the run is what the weekly workflow already sees', ()
     const result = runSync(OFFLINE);
 
     expect(result.status).toBe(0);
-    // Verbatim the `source-warning:` line .github/workflows/catalog-drift.yml
-    // acts on. Issue #2036 must not change it: the workflow passes no port.
+    // Verbatim the `source-warning:` line the agent-health daily check (#3158)
+    // reads. Issue #2036 must not change it: that check passes no port.
     expect(result.stdout).toContain(
       '! opencode provider skipped: no loopback port given'
     );

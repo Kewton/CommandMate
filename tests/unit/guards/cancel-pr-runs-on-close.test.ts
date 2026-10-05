@@ -44,9 +44,8 @@ const WORKFLOW_PATH = join(
 
 /**
  * The CI workflow whose runs may be cancelled — and the only one. `publish.yml`
- * releases to npm, `pages.yml` deploys the site, `catalog-drift.yml` owns the
- * tracking issue; cancelling any of those mid-flight leaves real state
- * half-written, and none of them is what 6-2 declines to wait for.
+ * releases to npm, `pages.yml` deploys the site; cancelling either mid-flight
+ * leaves real state half-written, and neither is what 6-2 declines to wait for.
  */
 const CANCELLABLE_WORKFLOW = 'ci-pr.yml';
 

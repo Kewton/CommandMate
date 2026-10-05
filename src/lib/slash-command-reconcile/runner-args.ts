@@ -21,8 +21,8 @@
  * that opencode does not write it anywhere on disk that a later process can read
  * back. So there is nothing to guess and nothing to probe; the operator who
  * started the server is the only party that knows the number. Absent the flag the
- * provider stays skipped, which is what keeps the weekly workflow — which has no
- * opencode server and passes no flag — behaving exactly as it did before.
+ * provider stays skipped, which is what keeps the agent-health daily check — which
+ * starts no opencode server and passes no flag — behaving exactly as before.
  *
  * Nothing here is reachable from the app runtime; see the directory docblock in
  * `index.ts`.
@@ -98,8 +98,8 @@ Options:
                           The port belongs to an opencode server the operator
                           already started and cannot be read back off disk
                           (#1758 §5.9.2), so WITHOUT this flag the opencode
-                          provider is skipped — which is what the weekly
-                          catalog-drift workflow does. GET /command carries
+                          provider is skipped — which is what the daily
+                          agent-health catalog check does. GET /command carries
                           markdown commands and Skills only; the 16 TUI
                           built-ins (/agents … /variants) are client-side and
                           stay on their palette attestation (measured on
@@ -196,8 +196,8 @@ export function parseRunnerArgs(argv: readonly string[]): RunnerArgs {
  * The `opencode` field of `RunReconcileOptions` these arguments ask for.
  *
  * `false` without the flag: the provider stays skipped and the run keeps the
- * warning it has always printed, so a caller that passes nothing — the weekly
- * workflow — cannot tell this Issue landed.
+ * warning it has always printed, so a caller that passes nothing — the
+ * agent-health daily check — cannot tell this Issue landed.
  */
 export function opencodeOptionFromArgs(args: RunnerArgs): FetchOpencodeOptions | false {
   return args.opencodePort === undefined ? false : { port: args.opencodePort };

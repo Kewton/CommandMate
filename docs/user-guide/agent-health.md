@@ -540,14 +540,14 @@ npx tsx scripts/agent-health/catalog-check.ts --dry-run   # 判定と版の比�
 - **判定**: `npm run catalog:refresh -- --check` の出力を `parseCatalogCheckOutput`（`src/lib/slash-command-reconcile/check-report.ts`）で
   `drift`（新規コマンドあり、または attestation の陳腐化あり）・`clean`・`inconclusive`（ソースを照合できなかった）に分ける。exit code では判定しない
 - **opencode 1.x は対象外**（v2 がリリース済みのため）。`opencode provider skipped…` の警告は既知の状態として扱い、検査不能に数えない。
-  CI の週次 workflow の判定は変えないよう、`IGNORED_WARNING_PREFIXES` には足さずこのチェックの側で除く
+  既定の判定（`IGNORED_WARNING_PREFIXES`）は変えないよう、そこには足さずこのチェックの側で除く
 - **版の比較**: 当日の agent-health レポートの `tools[].version` と `src/config/slash-commands-attestations.json` の `version` を比べ、差を
   Issue 本文の「版の差」と最後の行に出す（opencode 1.x は除く）。**版の差だけでは `drift` にしない**（patch のたびに依頼が飛ぶのを防ぐ）
-- **Issue の同期**（作成者 `kewton` の open な `catalog-drift` の Issue だけを見る。CI の bot が立てた Issue は使わない）:
+- **Issue の同期**（作成者 `kewton` の open な `catalog-drift` の Issue だけを見る。以前の CI の週次 workflow（#3160 で廃止）の bot が立てた Issue は使わない）:
 
   | 判定 | open な Issue | 動作 |
   |---|---|---|
-  | drift | 無い | 新規作成（本文は `scripts/catalog-drift-report.ts` の形式。冒頭に「対応は `/catalog-reconcile` の無人実行節に従う」） |
+  | drift | 無い | 新規作成（本文は `formatTrackingIssueBody`（`check-report.ts`）の形式。冒頭に「対応は `/catalog-reconcile` の無人実行節に従う」） |
   | drift | ある | タイトルと本文を更新。タイトルの件数が動いたときだけコメント |
   | clean | ある | 「ずれ 0・検査不能なし」とコメントして close |
   | clean | 無い | 何もしない |

@@ -32,8 +32,8 @@ export const CATALOG_ISSUE_LABEL = TRACKING_ISSUE_LABEL;
  * provider needs a loopback server the schedule does not start, so its skip is
  * a known state here and not a reason for `inconclusive`.
  *
- * Added on this side rather than to IGNORED_WARNING_PREFIXES so the CI
- * workflow's verdict does not change. Prefix match, like the parser: it covers
+ * Added on this side rather than to IGNORED_WARNING_PREFIXES so the shared
+ * default verdict does not change. Prefix match, like the parser: it covers
  * `opencode provider skipped: no loopback port given …` and the runner's bare
  * `opencode provider skipped`, and never `opencode-v2 …` or an opencode fetch
  * failure (`http 4xx …`).
@@ -177,7 +177,8 @@ export interface TrackingIssue {
  * `gh issue list --label catalog-drift --state open --json number,title,author`
  * → open Issues the owner wrote (author compared case-insensitively), oldest
  * first; null when it is not that shape. An Issue written by anyone else (the
- * CI workflow's bot included) is neither updated nor closed.
+ * bot of the former weekly CI workflow, removed in #3160, included) is neither
+ * updated nor closed.
  */
 export function parseTrackingIssues(json: unknown): TrackingIssue[] | null {
   if (!Array.isArray(json)) return null;
@@ -221,7 +222,7 @@ export function closeComment(date: string): string {
   ].join('\n');
 }
 
-/** The tracking-issue body of `scripts/catalog-drift-report.ts`, with this run's header and the version gaps. */
+/** The tracking-issue body of `formatTrackingIssueBody` (`check-report.ts`), with this run's header and the version gaps. */
 export function catalogIssueBody(
   report: CatalogCheckReport,
   versions: VersionComparison,

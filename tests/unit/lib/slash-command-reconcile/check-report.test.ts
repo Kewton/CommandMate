@@ -3,7 +3,7 @@
  *
  * The drift fixture is a byte-for-byte capture of
  * `npm run catalog:refresh -- --check` on this branch (2026-08-06), including
- * the npm banner the workflow will also capture. The other fixtures keep that
+ * the npm banner the daily check (#3158) will also capture. The other fixtures keep that
  * exact shape and vary only what is under test, so the parser is never
  * validated against output that printSummary() could not produce.
  *
@@ -101,7 +101,7 @@ describe('parseCatalogCheckOutput — zero drift', () => {
 
   it('stays clean when the only warning is the known antigravity placeholder', () => {
     // Regression guard: this warning is on in every run. If it blocked, the
-    // workflow would report "inconclusive" forever and mean nothing.
+    // check would report "inconclusive" forever and mean nothing.
     const report = parseCatalogCheckOutput(CLEAN_KNOWN_WARNING, { exitCode: 0 });
     expect(report.status).toBe('clean');
     expect(report.newCount).toBe(0);
