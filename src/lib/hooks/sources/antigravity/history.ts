@@ -76,6 +76,7 @@
  * @module lib/hooks/sources/antigravity/history
  */
 
+import { getOrInitGlobal } from '@/lib/global-state';
 import { homedir } from 'os';
 import { join } from 'path';
 import { buildCompositeKey } from '@/lib/auto-yes-state';
@@ -174,7 +175,7 @@ declare global {
  * agy sends `conversationId` on every event it delivers — but a future one that
  * did not would otherwise blank the pointer mid-session.
  */
-const conversationPointers = (globalThis.__antigravityTranscriptConversations ??= new Map<
+const conversationPointers = getOrInitGlobal('__antigravityTranscriptConversations', () => new Map<
   string,
   string
 >());
@@ -221,7 +222,7 @@ interface UnsettledAntigravityTurns {
  * coverage #2438 shipped. Persisting it would make a row's repair depend on a
  * table that outlives the transcript window it can only be repaired from.
  */
-const unsettledTurns = (globalThis.__antigravityUnsettledTurns ??= new Map<
+const unsettledTurns = getOrInitGlobal('__antigravityUnsettledTurns', () => new Map<
   string,
   UnsettledAntigravityTurns
 >());
