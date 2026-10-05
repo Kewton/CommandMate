@@ -90,6 +90,7 @@ import { rememberOpencodeToolCall } from './payloads';
 import { notifyOpencodeUpdateAvailablePush } from './push';
 import { getAssignedOpencodePort } from './ports';
 import { createTurnGate, type TurnGate, type TurnObservation } from './turn-gate';
+import { getOrInitGlobal } from '../../../global-state';
 
 const logger = createLogger('lib/hooks/sources/opencode/subscription');
 
@@ -192,7 +193,7 @@ declare global {
   var __opencodeProbedActivity: Map<string, OpencodeProbedActivity> | undefined;
 }
 
-const subscriptions = (globalThis.__opencodeSubscriptions ??= new Map<
+const subscriptions = getOrInitGlobal('__opencodeSubscriptions', () => new Map<
   string,
   OpencodeSubscriptionState
 >());
@@ -218,7 +219,7 @@ const subscriptions = (globalThis.__opencodeSubscriptions ??= new Map<
  * Cleared when a new subscription opens on the key, and when the pane is closed:
  * a process that is gone has no degradation left to report.
  */
-const droppedLiveness = (globalThis.__opencodeDroppedLiveness ??= new Map<
+const droppedLiveness = getOrInitGlobal('__opencodeDroppedLiveness', () => new Map<
   string,
   SourceLiveness
 >());
@@ -240,7 +241,7 @@ export interface OpencodeProbedActivity {
  * that turn ends, so "is this pane working right now?" has no answer on the
  * stream and one `GET /session/status` is the whole of it.
  */
-const probedActivity = (globalThis.__opencodeProbedActivity ??= new Map<
+const probedActivity = getOrInitGlobal('__opencodeProbedActivity', () => new Map<
   string,
   OpencodeProbedActivity
 >());

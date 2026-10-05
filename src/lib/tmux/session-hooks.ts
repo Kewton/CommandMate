@@ -38,6 +38,7 @@ import {
 } from './session-hook-scripts';
 import { forgetGeometryDelegation, hasHumanClientAttached, isGeometryDelegated } from './geometry-delegation';
 import { createLogger } from '../logger';
+import { getOrInitGlobal } from '../global-state';
 
 const execFileAsync = promisify(execFile);
 const logger = createLogger('tmux-session-hooks');
@@ -56,7 +57,7 @@ declare global {
 }
 
 const ensured =
-  globalThis.__cmEnsuredSessionHooks ?? (globalThis.__cmEnsuredSessionHooks = new Set<string>());
+  getOrInitGlobal('__cmEnsuredSessionHooks', () => new Set<string>());
 
 /**
  * Reconcile a session's opt-in `client-attached` hooks with the environment.

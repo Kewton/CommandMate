@@ -32,6 +32,7 @@ import {
   type ScheduleState,
 } from './job-executor';
 import { createLogger } from '@/lib/logger';
+import { getOrInitGlobal } from './global-state';
 
 const logger = createLogger('schedule-manager');
 
@@ -275,16 +276,13 @@ declare global {
  * Get or initialize the global manager state.
  */
 function getManagerState(): ManagerState {
-  if (!globalThis.__scheduleManagerStates) {
-    globalThis.__scheduleManagerStates = {
+  return getOrInitGlobal('__scheduleManagerStates', () => ({
       timerId: null,
       schedules: new Map(),
       initialized: false,
       isSyncing: false,
       cmateFileCache: new Map(),
-    };
-  }
-  return globalThis.__scheduleManagerStates;
+    }));
 }
 
 // =============================================================================

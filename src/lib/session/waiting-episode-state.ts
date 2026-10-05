@@ -42,6 +42,7 @@ import { buildCompositeKey, COMPOSITE_KEY_SEPARATOR } from '@/lib/auto-yes-state
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { createLogger } from '@/lib/logger';
 import type { WaitingKind } from '@/lib/session/waiting-kind';
+import { getOrInitGlobal } from '../global-state';
 
 const logger = createLogger('waiting-episode-state');
 
@@ -60,12 +61,10 @@ declare global {
 }
 
 /** compositeKey -> the wait currently in progress for that instance. */
-const episodes = globalThis.__sessionWaitingEpisodes ??
-  (globalThis.__sessionWaitingEpisodes = new Map<string, WaitingEpisode>());
+const episodes = getOrInitGlobal('__sessionWaitingEpisodes', () => new Map<string, WaitingEpisode>());
 
 /** Subscribers to the edge. See the module docblock. */
-const listeners = globalThis.__sessionWaitingTransitionListeners ??
-  (globalThis.__sessionWaitingTransitionListeners = new Set<WaitingTransitionListener>());
+const listeners = getOrInitGlobal('__sessionWaitingTransitionListeners', () => new Set<WaitingTransitionListener>());
 
 /** One uninterrupted stretch of waiting by one agent instance. */
 export interface WaitingEpisode {

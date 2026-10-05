@@ -15,6 +15,7 @@
  * duplicate record and never a missed one.
  */
 
+import { getOrInitGlobal } from '../global-state';
 /**
  * globalThis pattern for hot reload persistence — Issue #153, as used by
  * auto-yes-state.ts and auto-yes-poller.ts.
@@ -55,8 +56,7 @@ interface UnclassifiedRun {
   recorded: boolean;
 }
 
-const runs = globalThis.__unclassifiedFrameRuns ??
-  (globalThis.__unclassifiedFrameRuns = new Map<string, UnclassifiedRun>());
+const runs = getOrInitGlobal('__unclassifiedFrameRuns', () => new Map<string, UnclassifiedRun>());
 
 /**
  * How long an unobserved run survives before it is dropped.

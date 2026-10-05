@@ -92,6 +92,7 @@
 
 import { getDbInstance } from '@/lib/db/db-instance';
 import { createLogger } from '@/lib/logger';
+import { getOrInitGlobal } from '../global-state';
 
 const logger = createLogger('push/prompt-card-state');
 
@@ -152,8 +153,7 @@ declare global {
 }
 
 /** worktreeId -> epoch ms the most recent prompt card was fanned out. */
-const cards = globalThis.__promptPushCards ??
-  (globalThis.__promptPushCards = new Map<string, number>());
+const cards = getOrInitGlobal('__promptPushCards', () => new Map<string, number>());
 
 function keyFor(worktreeId: string): string {
   return `${PROMPT_CARD_KEY_PREFIX}${worktreeId}`;

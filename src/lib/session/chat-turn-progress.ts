@@ -20,6 +20,7 @@ import {
 } from '@/lib/realtime/types';
 import { createLogger } from '@/lib/logger';
 import type { CLIToolType } from '@/lib/cli-tools/types';
+import { getOrInitGlobal } from '../global-state';
 
 // Issue #3215: the name is the one these lines have always been logged under.
 // It is what an operator greps for, so it did not move with the code.
@@ -111,7 +112,7 @@ declare global {
  * would each get a private copy, and two producers throttling against two
  * different maps is no throttle at all.
  */
-const chatTurnProgressState = (globalThis.__chatTurnProgressState ??= new Map<
+const chatTurnProgressState = getOrInitGlobal('__chatTurnProgressState', () => new Map<
   string,
   ChatTurnProgressState
 >());

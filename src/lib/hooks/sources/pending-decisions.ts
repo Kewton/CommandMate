@@ -32,6 +32,7 @@ import type {
   PendingDecision,
   Verdict,
 } from './types';
+import { getOrInitGlobal } from '../../global-state';
 
 const logger = createLogger('lib/hooks/sources/pending-decisions');
 
@@ -81,7 +82,7 @@ declare global {
   var __agentSourcePendingDecisions: Map<string, DecisionSlot[]> | undefined;
 }
 
-const pendingByInstance = (globalThis.__agentSourcePendingDecisions ??= new Map<
+const pendingByInstance = getOrInitGlobal('__agentSourcePendingDecisions', () => new Map<
   string,
   DecisionSlot[]
 >());

@@ -52,6 +52,7 @@ import { isHookInjectionEnabled } from '@/lib/hooks/hook-settings-generator';
 import { createLogger } from '@/lib/logger';
 import type { AgentInstanceRef } from '../types';
 import { fetchOpencodeHealth, OPENCODE_SERVER_HOST } from './client';
+import { getOrInitGlobal } from '../../../global-state';
 
 const logger = createLogger('lib/hooks/sources/opencode/ports');
 
@@ -83,7 +84,7 @@ declare global {
   var __opencodePortAssignments: Map<string, OpencodePortAssignment> | undefined;
 }
 
-const assignments = (globalThis.__opencodePortAssignments ??= new Map<
+const assignments = getOrInitGlobal('__opencodePortAssignments', () => new Map<
   string,
   OpencodePortAssignment
 >());

@@ -25,6 +25,7 @@ import { sweepSkillInstallPlans } from '@/lib/skills/install-plan';
 import { sweepSkillUninstallPlans } from '@/lib/skills/uninstall-plan';
 import { sweepSkillUpdatePlans } from '@/lib/skills/update-plan';
 import { isSkillSnapshotStoreInitialized, sweepSkillSnapshots } from '@/lib/skills/snapshot-store';
+import { getOrInitGlobal } from '../global-state';
 
 const logger = createLogger('lib/skills/plan-sweeper');
 
@@ -45,8 +46,7 @@ declare global {
   var __skillPlanSweeper: SweeperState | undefined;
 }
 
-const state: SweeperState =
-  globalThis.__skillPlanSweeper ?? (globalThis.__skillPlanSweeper = { timer: null });
+const state: SweeperState = getOrInitGlobal('__skillPlanSweeper', () => ({ timer: null }));
 
 /**
  * Reclaim everything whose TTL has passed, once.

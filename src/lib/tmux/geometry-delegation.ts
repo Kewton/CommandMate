@@ -43,6 +43,7 @@ import {
   buildShowSessionOptionValueArgs,
   countHumanClients,
 } from '../session/tmux-session-surface';
+import { getOrInitGlobal } from '../global-state';
 
 const execFileAsync = promisify(execFile);
 
@@ -77,12 +78,10 @@ declare global {
 }
 
 const cache =
-  globalThis.__cmGeometryDelegationCache ??
-  (globalThis.__cmGeometryDelegationCache = new Map<string, CacheEntry>());
+  getOrInitGlobal('__cmGeometryDelegationCache', () => new Map<string, CacheEntry>());
 
 const lastObserved =
-  globalThis.__cmGeometryDelegationEdge ??
-  (globalThis.__cmGeometryDelegationEdge = new Map<string, boolean>());
+  getOrInitGlobal('__cmGeometryDelegationEdge', () => new Map<string, boolean>());
 
 /**
  * Whether `@cm_delegated` is set to `1` on a session.

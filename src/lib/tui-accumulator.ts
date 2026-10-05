@@ -23,6 +23,7 @@ import {
   COPILOT_USER_ECHO_PATTERN,
   findCopilotChromeStart,
 } from './detection/cli-patterns';
+import { getOrInitGlobal } from './global-state';
 
 /**
  * State for accumulating TUI content across polling intervals.
@@ -66,8 +67,7 @@ declare global {
   var __tuiResponseAccumulator: Map<string, TuiAccumulatorState> | undefined;
 }
 
-const tuiResponseAccumulator = globalThis.__tuiResponseAccumulator ??
-  (globalThis.__tuiResponseAccumulator = new Map<string, TuiAccumulatorState>());
+const tuiResponseAccumulator = getOrInitGlobal('__tuiResponseAccumulator', () => new Map<string, TuiAccumulatorState>());
 
 /**
  * Normalize a single OpenCode TUI line by removing ANSI codes and border glyphs.

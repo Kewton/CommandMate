@@ -46,6 +46,7 @@ import {
   computeSha256Hex,
   digestMatches,
 } from '@/lib/skills/integrity';
+import { getOrInitGlobal } from '../global-state';
 
 // =============================================================================
 // Types
@@ -96,9 +97,7 @@ declare global {
   var __skillSnapshotStore: SnapshotStoreState | undefined;
 }
 
-const state: SnapshotStoreState =
-  globalThis.__skillSnapshotStore ??
-  (globalThis.__skillSnapshotStore = { rootDir: null, records: new Map(), totalBytes: 0 });
+const state: SnapshotStoreState = getOrInitGlobal('__skillSnapshotStore', () => ({ rootDir: null, records: new Map(), totalBytes: 0 }));
 
 const SNAPSHOT_FILE_SUFFIX = '.artifact';
 
