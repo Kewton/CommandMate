@@ -184,6 +184,11 @@ describe('.commandmate/uat.yaml (Issue #2590)', () => {
       return { ...res, runDir };
     }
 
+    it('starts the private tmux server with the decided CODEX_HOME, not the caller\'s', () => {
+      const [line] = logicalLines(spec.env.up).filter((l) => l.includes('new-session'));
+      expect(line.startsWith('CODEX_HOME="$CH" tmux -S ')).toBe(true);
+    });
+
     it('turns a relative CODEX_HOME into an absolute one and records it', () => {
       const cwd = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'uat-3358-cwd-')));
       fs.mkdirSync(path.join(cwd, 'rel-codex'));

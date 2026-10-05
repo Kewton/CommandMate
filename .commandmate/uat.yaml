@@ -84,7 +84,10 @@ env:
       done
     } > {run_dir}/codex-shared.sha256
     mkdir -p -m 700 /tmp/cmuat-{port}
-    tmux -S /tmp/cmuat-{port}/tmux.sock new-session -d -s keepalive 'sleep 86400'
+    # The private tmux server's own environment is what a codex it launches
+    # inherits when hook setup fails and CommandMate leaves CODEX_HOME off the
+    # launch line, so it carries the decided absolute value too.
+    CODEX_HOME="$CH" tmux -S /tmp/cmuat-{port}/tmux.sock new-session -d -s keepalive 'sleep 86400'
     env -i HOME="$HOME" PATH="$PATH" USER="$USER" LOGNAME="$LOGNAME" SHELL="$SHELL" \
       CODEX_HOME="$CH" LANG="${LANG:-en_US.UTF-8}" TERM="${TERM:-xterm-256color}" \
       TMUX="/tmp/cmuat-{port}/tmux.sock,$(lsof -t /tmp/cmuat-{port}/tmux.sock | head -1),0" \
