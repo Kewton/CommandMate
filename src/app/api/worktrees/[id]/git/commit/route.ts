@@ -20,6 +20,7 @@ import { isValidWorktreeId } from '@/lib/security/path-validator';
 import { gitCommit, getStagedStatus, getGitLog, handleGitApiError } from '@/lib/git/git-utils';
 import { MAX_COMMIT_MESSAGE_LENGTH } from '@/config/git-status-config';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
+import { readOptionalJsonObjectBody } from '@/lib/api/read-json-body';
 
 /**
  * Disallowed control characters in a commit message: all C0 controls and DEL,
@@ -53,7 +54,11 @@ export async function POST(
       );
     }
 
-    const body = await request.json().catch(() => ({}));
+    const parsed = await readOptionalJsonObjectBody(request);
+
+    if (!parsed.ok) return parsed.response;
+
+    const body = parsed.body;
     const { message, amend } = body;
 
     if (typeof message !== 'string' || message.trim().length === 0) {

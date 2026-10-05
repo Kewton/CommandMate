@@ -13,6 +13,7 @@ import { validateMemoReorderInput } from '@/lib/memo-reorder-validator';
 import { createLogger } from '@/lib/logger';
 import { MAX_MEMOS } from '@/config/memo-config';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
+import { readOptionalJsonObjectBody } from '@/lib/api/read-json-body';
 
 const logger = createLogger('api/memos');
 
@@ -85,7 +86,9 @@ export async function POST(
     }
 
     // Parse request body
-    const body = await request.json().catch(() => ({}));
+    const parsed = await readOptionalJsonObjectBody(request);
+    if (!parsed.ok) return parsed.response;
+    const body = parsed.body;
     const { title, content, position: requestedPosition } = body;
 
     // Validate title length
@@ -207,7 +210,9 @@ export async function PATCH(
     }
 
     // Parse request body
-    const body = await request.json().catch(() => ({}));
+    const parsed = await readOptionalJsonObjectBody(request);
+    if (!parsed.ok) return parsed.response;
+    const body = parsed.body;
     const memoIds = (body as { memoIds?: unknown }).memoIds;
 
     // Domain validation against the worktree's existing memos

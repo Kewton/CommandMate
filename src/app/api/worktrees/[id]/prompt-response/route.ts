@@ -12,7 +12,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { readJsonBody } from '@/lib/api/read-json-body';
+import { readJsonObjectBody } from '@/lib/api/read-json-body';
 import { getDbInstance } from '@/lib/db/db-instance';
 import { getWorktreeById } from '@/lib/db';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
@@ -41,7 +41,7 @@ export async function POST(
       );
     }
 
-    const parsed = await readJsonBody<PromptResponseRequest>(req);
+    const parsed = await readJsonObjectBody<PromptResponseRequest>(req);
     if (!parsed.ok) return parsed.response;
     const body = parsed.body;
     const validated = validatePromptResponseRequest(body);

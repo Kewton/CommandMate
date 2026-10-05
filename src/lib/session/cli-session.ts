@@ -37,6 +37,7 @@ import {
   forgetSessionStatus,
   publishSessionStatus,
 } from '@/lib/tmux/session-status-options';
+import { probeSession, type SessionPresence } from '@/lib/tmux/tmux';
 import { isLiveAttachEligibleSession } from './tmux-session-surface';
 
 const logger = createLogger('cli-session');
@@ -67,6 +68,26 @@ export async function isSessionRunning(
 ): Promise<boolean> {
   const { sessionName } = resolveSessionContext(worktreeId, cliToolId, instanceId);
   return getDefaultTransport().sessionExists(sessionName);
+}
+
+/**
+ * Whether the CLI tool session exists, keeping "could not tell" apart from
+ * "absent" (Issue #3329). Asks tmux directly rather than through the transport:
+ * both transports answer `sessionExists` with the same `tmux has-session`, and
+ * that boolean is exactly what loses the difference.
+ *
+ * @param worktreeId - Worktree ID
+ * @param cliToolId - CLI tool ID
+ * @param instanceId - Optional agent instance ID (defaults to primary)
+ * @returns `present`, `absent`, or `unknown`
+ */
+export async function getSessionPresence(
+  worktreeId: string,
+  cliToolId: CLIToolType,
+  instanceId?: string
+): Promise<SessionPresence> {
+  const { sessionName } = resolveSessionContext(worktreeId, cliToolId, instanceId);
+  return probeSession(sessionName);
 }
 
 /**

@@ -232,6 +232,39 @@ export async function hasSession(sessionName: string): Promise<boolean> {
   }
 }
 
+/** What `tmux has-session` could say about a session (Issue #3329). */
+export type SessionPresence = 'present' | 'absent' | 'unknown';
+
+/**
+ * Like {@link hasSession}, but keeps "tmux could not be asked" apart from "the
+ * session does not exist" (Issue #3329). `hasSession` folds both into `false`,
+ * which is right for its callers (nothing to send to, nothing to kill) and
+ * wrong for the Auto-Yes poller, which waits for an absent session but must
+ * count a failing tmux toward its error threshold.
+ *
+ * `has-session` exits 1 for a missing session, and also when no tmux server is
+ * running (measured on tmux 3.5a: `error connecting to ...`, exit 1) — no
+ * server means no session, so both are `absent`. A timeout (the child killed),
+ * a spawn failure (`ENOENT`: code is a string) or any other exit is `unknown`.
+ *
+ * @param sessionName - Name of the tmux session
+ * @returns `present`, `absent`, or `unknown` when tmux gave no answer
+ */
+export async function probeSession(sessionName: string): Promise<SessionPresence> {
+  try {
+    await execFileAsync('tmux', ['has-session', '-t', exactTarget(sessionName)], { timeout: DEFAULT_TIMEOUT });
+    return 'present';
+  } catch (error: unknown) {
+    const { code, killed } = (error ?? {}) as { code?: unknown; killed?: boolean };
+    if (code === 1 && !killed) {
+      // Same side effect as hasSession's false (Issue #2866).
+      dropLegacyAliasByLegacyName(sessionName);
+      return 'absent';
+    }
+    return 'unknown';
+  }
+}
+
 /**
  * The directory a session was created in, or null (Issue #2070).
  *

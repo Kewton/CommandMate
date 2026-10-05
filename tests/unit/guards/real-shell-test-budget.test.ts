@@ -41,6 +41,13 @@ describe('real-shell test budget (Issue #1950)', () => {
     expect(Date.now() - started).toBeGreaterThanOrEqual(5_000);
   });
 
+  it('applies the family budget on top of the CI default (Issue #3340)', (ctx) => {
+    // CI=true raises the global default to 20s, which would make the `sleep 6`
+    // check above pass even with the setup wiring deleted. This pins the
+    // effective budget itself, so the check stays meaningful on CI.
+    expect(ctx.task.timeout).toBe(REAL_SHELL_TEST_TIMEOUT_MS);
+  });
+
   it('keeps the subprocess guard reachable by staying under the test budget', () => {
     // The ordering IS the fix. Before #1950 the family's guards were 15_000
     // while the budget was vitest's 5_000 default, so no guard could ever fire:

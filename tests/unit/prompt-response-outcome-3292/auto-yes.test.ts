@@ -7,14 +7,8 @@
  * approval is answered ONCE and not again until the display changes — a
  * refused or failed answer must not turn every poll into another POST.
  *
- * NOT pinned here, and unchanged by #3292: the hook sets `lastAutoResponse`
- * before the reply arrives, so `AutoYesToggle` says "Auto responded" for a
- * refused or failed answer too. Setting it only once the reply reads
- * `answered` makes it asynchronous, and `tests/unit/hooks/useAutoYes.test.ts`
- * ("should reset lastAutoResponse when prompt clears") expects it
- * synchronously; taking it back afterwards would strand the toggle's notice,
- * whose dismiss timer is cleared when the value returns to null. #3292's
- * contract was to leave the hook alone in that case and report it.
+ * What the hook then announces ("Auto responded" only for an `answered`
+ * reply) is pinned per row in `../prompt-response-outcome-3331/` (Issue #3331).
  *
  * @vitest-environment jsdom
  */
