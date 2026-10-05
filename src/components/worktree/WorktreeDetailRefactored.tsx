@@ -32,7 +32,10 @@ import { MobileDirectInputKeyboard } from '@/components/mobile/MobileDirectInput
 import { ErrorBoundary } from '@/components/error/ErrorBoundary';
 import { MessageInput } from '@/components/worktree/MessageInput';
 import type { ShowToast } from '@/types/markdown-editor';
-import { NavigationButtons } from '@/components/worktree/NavigationButtons';
+import {
+  SelectionListKeys,
+  useReportedSelectionListFrame,
+} from '@/components/worktree/SelectionListKeys';
 import { Button } from '@/components/ui/Button';
 import { FileViewer } from '@/components/worktree/FileViewer';
 import {
@@ -247,6 +250,52 @@ const MobileComposer = memo(function MobileComposer({
       onOptimisticSend={optimisticSend}
       autoYesSlot={autoYesSlot}
       agentModeSlot={agentModeSlot}
+    />
+  );
+});
+
+/**
+ * The phone's docked selection-list controls (Issue #3305).
+ *
+ * The pad used to be a bare `NavigationButtons` here, because this screen holds
+ * no frame to decide anything else from — its poll keeps flags only (#736).
+ * The terminal tab does hold one, and now reports it; with it this draws what
+ * the chat surface's card draws for the same list (`SelectionListKeys`).
+ *
+ * Its own component so that a new frame re-renders this pad and not the screen.
+ *
+ * The hook returns `null` whenever no terminal tab is reporting for this agent
+ * — another mobile tab, a pane whose own snapshot is not a selection list yet,
+ * a just-switched instance — and `SelectionListKeys` draws the arrow pad alone
+ * for a missing frame, which is the pre-#3305 pad. `hideEnterKey` is the
+ * screen's own plan-review reading (#2809), which needs no frame from the tab.
+ */
+const MobileDockedSelectionListKeys = memo(function MobileDockedSelectionListKeys({
+  worktreeId,
+  cliToolId,
+  instanceId,
+  onKeysSent,
+  showPagerKeys,
+  hideEnterKey,
+}: {
+  worktreeId: string;
+  cliToolId: CLIToolType;
+  instanceId?: string;
+  onKeysSent?: () => void;
+  showPagerKeys: boolean;
+  hideEnterKey: boolean;
+}) {
+  const frame = useReportedSelectionListFrame({ worktreeId, cliToolId, instanceId });
+  return (
+    <SelectionListKeys
+      worktreeId={worktreeId}
+      cliToolId={cliToolId}
+      instanceId={instanceId}
+      onKeysSent={onKeysSent}
+      frame={frame}
+      surface="terminal"
+      showPagerKeys={showPagerKeys}
+      hideEnterKey={hideEnterKey}
     />
   );
 });
@@ -1081,7 +1130,10 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
               ) : null}
               {isSelectionListActive && !isMobileChatSurface && !showDirectInputKeyboard && !activeSessionStarting && (
                 <div className="px-2 pt-1 border-b border-border">
-                  <NavigationButtons
+                  {/* Issue #3305: the part the chat surface's card mounts, on
+                      the frame the terminal tab reports — number keys and
+                      claude's "this session only" / "set as default" included. */}
+                  <MobileDockedSelectionListKeys
                     worktreeId={worktreeId}
                     cliToolId={activeCliTab}
                     instanceId={activeInstanceId}

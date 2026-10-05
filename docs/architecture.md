@@ -174,7 +174,8 @@ graph TD
   決定 5 は Issue #2254 で撤回された**。チャット面は `resolveBlockedReason` が非 null の
   4 状態（pager / selectionList / unclassified / promptUnreadable）で、live 領域に
   **ペイン末尾を描いた `ChatDialogCard`**（切り出しは `lib/chat/dialog-frame.ts`）と
-  状態別の操作（`NavigationButtons` / `TerminalEscapeHatch` / `PromptAnswerKeys`）を出す。
+  状態別の操作（選択リストは `SelectionListKeys`、pager は `NavigationButtons`、ほかは
+  `TerminalEscapeHatch` / `PromptAnswerKeys`）を出す。
   切り出しは**空行圧縮 → 末尾 12〜20 行**の順で、逆順にすると codex のように内容がペイン
   上端に来るツールでカードが空になる（`capture-pane` は `TUI_PANE_HEIGHT` = 1000 行を
   そのまま返す。実測は `tests/fixtures/chat-dialog-card-2254/README.md`）。
@@ -185,10 +186,29 @@ graph TD
   検証するので（Issue #2046）全ツールが受け付ける。自由文字列は通さず、`/send` の
   `prompt_waiting` ガードも触っていない
 - **同じ操作 UI を 2 か所に出さない**。チャット面表示中は PC footer の `showNav` /
-  `showEscapeHatch`（`TerminalSplitPaneContent`）と、スマホの docked `NavigationButtons`
+  `showEscapeHatch`（`TerminalSplitPaneContent`）と、スマホの docked の選択リストの操作
   （`WorktreeDetailRefactored`）を落としてカード側へ寄せる。後者はタブ外にあるため
   `MobileTerminalTab` が `onSurfaceModeChange` で mount 時にもモードを上へ報告する。
   `PromptPanel` / `MobilePromptSheet` は対象外（答えられる待ちにカードを出さないため）
+- **寄せる先と寄せる元は、同じ操作を出す**（Issue #3305）。上の「2 か所に出さない」は、
+  2 つの面の操作が同じであることを前提にしている。#2297 が番号キーと Claude `/model` の
+  「このセッションのみ（`s`）」「既定に設定（Enter）」をカードにだけ足したため、ターミナル面で
+  押せる確定は既定のモデル（`~/.claude/settings.json`）を書き換える Enter だけになっていた。
+  いまは選択リストの操作を `SelectionListKeys` 1 つが描き、何を出すかは
+  `lib/session/selection-list-ops.ts` の `resolveSelectionListOps` だけが決める。カード・
+  PC footer・スマホの docked の 3 か所が同じ部品を同じフレーム（`PaneTerminalState.output`）で
+  載せる。**選択リストの操作を足すときは、この関数と部品に足す**（面ごとの分岐に足さない）。
+  面で違う点は同ファイルの冒頭に列挙した 3 つだけ: ターミナル面は「既定に設定」が出る間
+  ラベルの無い Enter を出さない／Plan review の操作（#3139）と opencode のモデルのキーは
+  カードだけ
+- **スマホの docked はフレームを持たない**（画面の poll はフラグだけを持つ、#736）。フレームは
+  `MobileTerminalTab` が `useReportSelectionListFrame` で報告し、docked が
+  `useReportedSelectionListFrame` で読む（worktree と instance で引く module store。
+  `useSessionStartingGate` と同じ形）。報告するのは**タブ自身の poll が選択リスト（pager を
+  除く）と言っている間だけ**。画面の poll が先に「選択リスト」と言った瞬間にタブが持っているのは
+  ダイアログが開く前のフレームで、そこにある番号つきの本文を番号キーにしないため。
+  ターミナルのタブを開いていない間（History など）は報告が無く、docked は矢印＋ Enter / Esc
+  だけになる
 - **「チャット面の本体は `HistoryPane` をそのまま使う」という Epic #2192 の決定 1 は
   Issue #2232 で撤回された**。履歴ブラウザは 1 画面に多くのターンを俯瞰させたい、会話面は
   返信そのものを読ませたい、と必要な情報密度が正反対で 1 実装では両立しないため

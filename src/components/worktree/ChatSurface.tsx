@@ -40,6 +40,12 @@
  * (`WorktreeDetailRefactored`) is gated the same way. `PromptPanel` /
  * `MobilePromptSheet` are NOT — see "What this deliberately does NOT do".
  *
+ * "One copy at a time" only works if the copies are the same control. For a
+ * selection list they were not, from Issue #2297 until Issue #3305: the card
+ * grew number keys and claude's two labelled commits, and the terminal mounts
+ * stayed the bare arrow pad. All three now mount `SelectionListKeys`, and what
+ * it draws is decided in `lib/session/selection-list-ops`.
+ *
  * ## Where the in-flight reply lives (Issue #2233 moved it)
  *
  * (1) and (2) used to be one footer strip below the transcript. That kept the
@@ -139,21 +145,9 @@ import { ChatDialogCard } from '@/components/worktree/ChatDialogCard';
 import { extractDialogFrameTail } from '@/lib/chat/dialog-frame';
 import { NavigationButtons } from '@/components/worktree/NavigationButtons';
 import { TerminalEscapeHatch } from '@/components/worktree/TerminalEscapeHatch';
-import {
-  DismissPanelKeys,
-  PromptAnswerKeys,
-  SelectionCommitKeys,
-  SelectionNumberKeys,
-} from '@/components/worktree/PromptAnswerKeys';
-import { OpencodeModelKeys } from '@/components/worktree/OpencodeQuickKeys';
-import { PlanReviewControls } from '@/components/worktree/PlanReviewControls';
-import {
-  hasDismissablePanelFooter,
-  readCommandCodeQuestionRegion,
-  readSelectionListShape,
-  shouldOfferOptionNumbers,
-} from '@/lib/detection/selection-shape';
-import { PLAN_APPROVE_KEY_TOOL_IDS, SESSION_SCOPE_KEY_TOOL_IDS } from '@/types/terminal-keys';
+import { DismissPanelKeys, PromptAnswerKeys } from '@/components/worktree/PromptAnswerKeys';
+import { SelectionListKeys } from '@/components/worktree/SelectionListKeys';
+import { hasDismissablePanelFooter } from '@/lib/detection/selection-shape';
 import type { ChatMessage, LivePromptData } from '@/types/models';
 import { derivePromptView } from '@/lib/session/prompt-view';
 import type { CLIToolType } from '@/lib/cli-tools/types';
@@ -945,40 +939,6 @@ export const ChatSurface = memo(function ChatSurface({
     }, DIALOG_REPAINT_REFRESH_MS);
   }, [onKeysSent]);
 
-  // --------------------------------------------------------------------
-  // What the selection list on screen is OFFERING (Issue #2297)
-  // --------------------------------------------------------------------
-  // Read off the very frame the card is drawing, never off `cliToolId`: the six
-  // tools disagree about what confirms, and two of them disagree with THEMSELVES
-  // between screens (claude's `/model` writes a global default where its other
-  // dialogs merely confirm). Computed only for a selection list, so a pager or
-  // an unclassified frame pays nothing.
-  const selectionShape = useMemo(
-    () => (blockedReason === 'selectionList' ? readSelectionListShape(frame) : null),
-    [blockedReason, frame],
-  );
-
-  // --------------------------------------------------------------------
-  // Command Code's footer-less question screen (Issue #2521)
-  // --------------------------------------------------------------------
-  // This ONE frame is a selection list whose numbers must not become buttons,
-  // and `readSelectionListShape` cannot say so: it reads `1.`…`4.` off the tail
-  // and no filter box, which for every screen measured for #2297 is exactly the
-  // shape that earns a number row. What is missing is not in the tail at all —
-  // Command Code's `AskUserQuestion` ends in a `Type something...` option that
-  // is a SEPARATE text input in the TUI (read off 1.53.1's `QuestionPrompt` /
-  // `SelectInput`), and #2521 withdrew the claim that the numbers on this screen
-  // are answerable keys rather than something #2522 still has to measure.
-  //
-  // So the suppression is scoped to the frame the new fallback identified, by
-  // the same reading the detector and the cropper use, and the all-CLI rules in
-  // `shouldOfferOptionNumbers` are left exactly as #2297 measured them: claude's
-  // trust dialog, codex's picker and copilot's `/permissions` keep their numbers.
-  const isCommandCodeQuestionFallback = useMemo(
-    () => blockedReason === 'selectionList' && readCommandCodeQuestionRegion(frame) !== null,
-    [blockedReason, frame],
-  );
-
   // How tall the selection list actually is (Issue #2326).
   //
   // The card's height cap is the only thing standing between the picker and
@@ -1025,71 +985,15 @@ export const ChatSurface = memo(function ChatSurface({
       // adds PgUp/PgDn/Home/End/q for the pager, exactly as the footer does.
       case 'pager':
         return <NavigationButtons {...keyProps} showPagerKeys />;
-      // Issue #2297. The arrow pad stays FIRST and unconditional — it is the one
-      // control every measured selection list answers to — and what goes under
-      // it is whatever this particular frame offers. Nothing here is chosen from
-      // the tool id except opencode's chords, because a tool id cannot tell
-      // claude's `/model` (Enter writes ~/.claude/settings.json) from claude's
-      // trust dialog (Enter confirms).
-      case 'selectionList': {
-        const shape = selectionShape;
-        // The two labelled commits, for a footer that names a session-scoped
-        // key — claude's `/model`, and any future screen that grows the same
-        // sentence. Gated on the tool DECLARING `s` as well, so the button can
-        // never be the 400 the route would answer for a tool that does not.
-        const showCommitKeys =
-          shape?.offersSessionScope === true &&
-          (SESSION_SCOPE_KEY_TOOL_IDS as readonly string[]).includes(cliToolId);
-        // Issue #2762. Command Code's plan review: the footer names `ctrl+a` as
-        // the ONLY way to approve, and the arrow pad above cannot send it. Gated
-        // on the tool declaring the key, exactly as `showCommitKeys` is, so the
-        // button can never be the 400 the route answers for anyone else.
-        const showPlanApprove =
-          shape?.offersPlanApprove === true &&
-          (PLAN_APPROVE_KEY_TOOL_IDS as readonly string[]).includes(cliToolId);
-        // Issue #2793. On the same screen `Enter` either opens a comment box or
-        // RUNS the focused action (`❯ Approve`), depending on a focus this card
-        // cannot show — so the pad leaves it out, and approving is the labelled
-        // `PlanReviewControls` Approve button alone (Issue #3139; #2762's
-        // `PlanApproveKeys` before it). Not gated on the tool: taking a key
-        // away is the safe direction. The approve-with-comments radio is not
-        // `offersPlanApprove` and keeps `Enter`, which is its documented confirm.
-        const hideEnterKey = shape?.offersPlanApprove === true;
-        return (
-          <div className="space-y-2">
-            <NavigationButtons {...keyProps} hideEnterKey={hideEnterKey} />
-            {/* Issue #2521 suppresses the row for the one frame whose numbers
-                have not been measured as answerable — see
-                `isCommandCodeQuestionFallback`. Every other numbered list is
-                decided by `shouldOfferOptionNumbers` alone, unchanged. */}
-            {shape && !isCommandCodeQuestionFallback && shouldOfferOptionNumbers(shape) ? (
-              <SelectionNumberKeys {...keyProps} optionCount={shape.optionCount} />
-            ) : null}
-            {showCommitKeys && shape ? (
-              <SelectionCommitKeys
-                {...keyProps}
-                commitsDefaultOnEnter={shape.commitsDefaultOnEnter}
-              />
-            ) : null}
-            {/* Issue #3139: comment / Submit review / Approve (confirmed) /
-                Cancel through `/prompt-response`'s `planReviewAction`. It
-                replaces #2762's one-tap `ctrl+a`, which ran the plan with no
-                confirmation. */}
-            {showPlanApprove ? <PlanReviewControls {...keyProps} /> : null}
-            {/* opencode has no numbered `/model` at all — switching models is
-                `ctrl+t` or a `ctrl+x` chord, and neither was reachable from
-                chat. Rendered for opencode, and for OpenCode V2 while the frame
-                shows one of its dialogs (#2983); the component decides. */}
-            <OpencodeModelKeys
-              worktreeId={worktreeId}
-              cliToolId={cliToolId}
-              frame={frame}
-              instanceId={instanceId}
-              onKeysSent={handleDialogKeysSent}
-            />
-          </div>
-        );
-      }
+      // Issue #2297 / #3305. What a selection list gets is decided off the very
+      // frame the card is drawing — never off `cliToolId` alone, because a tool
+      // id cannot tell claude's `/model` (Enter writes ~/.claude/settings.json)
+      // from claude's trust dialog (Enter confirms) — and it is decided in ONE
+      // place, `resolveSelectionListOps`, which the terminal surface's pads
+      // read too. Nothing is chosen here: a control added for a selection list
+      // belongs in `SelectionListKeys`, where both surfaces get it.
+      case 'selectionList':
+        return <SelectionListKeys {...keyProps} frame={frame} surface="chat" />;
       // Issue #2369. The footer named the one key that leaves, so that is the
       // whole control. Not `TerminalEscapeHatch` with its arrows hidden and not
       // `PromptAnswerKeys` alongside it: on a read-only panel every other key is
@@ -1136,8 +1040,6 @@ export const ChatSurface = memo(function ChatSurface({
     worktreeId,
     instanceId,
     handleDialogKeysSent,
-    selectionShape,
-    isCommandCodeQuestionFallback,
     frame,
     t,
   ]);

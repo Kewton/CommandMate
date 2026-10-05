@@ -37,7 +37,10 @@
  * ## The two selection-list toolbars this file also owns (Issue #2297)
  *
  * {@link SelectionNumberKeys} and {@link SelectionCommitKeys} are NOT this
- * toolbar under another name, and the difference is the point of #2297:
+ * toolbar under another name, and the difference is the point of #2297.
+ * Neither is mounted directly: `SelectionListKeys` draws both, on the chat card
+ * and on the terminal surface's pads alike, from one decision (Issue #3305 —
+ * #2297 had put them on the card only).
  *
  *  - this one is the fixed `1`–`9` / `y` / `n` pad for a dialog nobody could
  *    read, so it publishes every key it might need and lets the user match them
