@@ -23,6 +23,16 @@ vi.mock('@/config/cli-tool-timing-config', async (importOriginal) => {
 
 const calls: string[] = [];
 
+const { loggerMock } = vi.hoisted(() => {
+  const mock = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(), withContext: vi.fn() };
+  mock.withContext.mockReturnValue(mock);
+  return { loggerMock: mock };
+});
+vi.mock('@/lib/logger', () => ({
+  createLogger: vi.fn(() => loggerMock),
+  generateRequestId: vi.fn(() => 'test-request-id'),
+}));
+
 vi.mock('@/lib/tmux/tmux', () => ({
   hasSession: vi.fn(),
   createSession: vi.fn(async () => {
@@ -185,6 +195,45 @@ describe('launch (D2)', () => {
     await new OpenCodeV2Tool().startSession('wt', '/wt');
 
     expect(calls).toEqual(['resume']);
+  });
+});
+
+describe('CM_OPENCODE_PANE_WIDTH feedback (Issue #3296)', () => {
+  const rejectedWarns = (): unknown[][] =>
+    loggerMock.warn.mock.calls.filter(([name]) => name === 'opencode-pane-width-rejected');
+
+  beforeEach(() => {
+    loggerMock.warn.mockClear();
+  });
+
+  it.each(['wide', '39', '401'])('warns once when %s is dropped', async (raw) => {
+    vi.stubEnv('CM_OPENCODE_PANE_WIDTH', raw);
+    try {
+      vi.mocked(hasSession).mockResolvedValue(false);
+      await new OpenCodeV2Tool().startSession('wt', '/wt');
+      expect(rejectedWarns()).toHaveLength(1);
+      expect(rejectedWarns()[0][1]).toEqual({ requested: raw, applied: 80 });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('stays silent for an accepted value, including one at the v1 sidebar width', async () => {
+    vi.stubEnv('CM_OPENCODE_PANE_WIDTH', '150');
+    try {
+      vi.mocked(hasSession).mockResolvedValue(false);
+      await new OpenCodeV2Tool().startSession('wt', '/wt');
+      expect(rejectedWarns()).toHaveLength(0);
+      expect(loggerMock.warn.mock.calls.some(([n]) => n === 'opencode-pane-width-sidebar-visible')).toBe(false);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('stays silent when the variable is unset', async () => {
+    vi.mocked(hasSession).mockResolvedValue(false);
+    await new OpenCodeV2Tool().startSession('wt', '/wt');
+    expect(rejectedWarns()).toHaveLength(0);
   });
 });
 

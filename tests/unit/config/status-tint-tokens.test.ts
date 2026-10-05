@@ -9,8 +9,7 @@
  *  - the migrated feedback surfaces (Toast / DefaultErrorFallback /
  *    History-Prompt-ConnectionErrorFallback / ErrorDisplay / PromptPanel) no
  *    longer carry raw status-palette classes or status `dark:` pairs.
- *    TerminalErrorFallback (always-dark island) and accent-* dark: pairs are
- *    intentionally exempt — see docs/design-system.md.
+ *    accent-* dark: pairs are intentionally exempt — see docs/design-system.md.
  *
  * @vitest-environment node
  */
@@ -133,13 +132,8 @@ describe('Status tint tokens (Issue #1112)', () => {
       expectClean('PromptPanel.tsx', read('src/components/worktree/PromptPanel.tsx'));
     });
 
-    it('fallbacks.tsx (excluding the always-dark TerminalErrorFallback) uses tokens only', () => {
-      const content = read('src/components/error/fallbacks.tsx');
-      const start = content.indexOf('export function HistoryErrorFallback');
-      expect(start, 'HistoryErrorFallback must exist after TerminalErrorFallback').toBeGreaterThan(
-        content.indexOf('export function TerminalErrorFallback')
-      );
-      expectClean('fallbacks.tsx (non-terminal)', content.slice(start));
+    it('fallbacks.tsx uses tokens only', () => {
+      expectClean('fallbacks.tsx', read('src/components/error/fallbacks.tsx'));
     });
 
     it('ErrorDisplay in WorktreeDetailSubComponents.tsx uses tint tokens only', () => {

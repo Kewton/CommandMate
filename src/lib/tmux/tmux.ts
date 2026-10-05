@@ -206,18 +206,6 @@ export interface CapturePaneOptions {
 }
 
 /**
- * Check if tmux is installed and available
- */
-export async function isTmuxAvailable(): Promise<boolean> {
-  try {
-    await execFileAsync('tmux', ['-V'], { timeout: DEFAULT_TIMEOUT });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
  * Check if a tmux session exists
  *
  * @param sessionName - Name of the tmux session

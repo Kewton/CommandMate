@@ -74,8 +74,6 @@ import {
   clearCachedClaudePath,
   captureClaudeOutput,
   stopClaudeSession,
-  getClaudeSessionState,
-  restartClaudeSession,
   isSessionHealthy,
   type HealthCheckResult,
   CLAUDE_INIT_TIMEOUT,
@@ -1176,96 +1174,6 @@ describe('claude-session - Issue #265 improvements', () => {
 
       const result = await stopClaudeSession(TEST_WORKTREE_ID);
       expect(result).toBe(false);
-    });
-  });
-
-  describe('getClaudeSessionState()', () => {
-    it('should return session state when running', async () => {
-      vi.mocked(hasSession).mockResolvedValue(true);
-
-      const state = await getClaudeSessionState(TEST_WORKTREE_ID);
-
-      expect(state.sessionName).toBe(TEST_SESSION_NAME);
-      expect(state.isRunning).toBe(true);
-      expect(state.lastActivity).toBeInstanceOf(Date);
-    });
-
-    it('should return session state when not running', async () => {
-      vi.mocked(hasSession).mockResolvedValue(false);
-
-      const state = await getClaudeSessionState(TEST_WORKTREE_ID);
-
-      expect(state.sessionName).toBe(TEST_SESSION_NAME);
-      expect(state.isRunning).toBe(false);
-    });
-
-    it('should return existence-based state without health check (C-S3-002)', async () => {
-      // getClaudeSessionState uses hasSession (not isSessionHealthy), so a broken
-      // session still reports isRunning=true. This is by design for lightweight queries.
-      vi.mocked(hasSession).mockResolvedValue(true);
-      // Even if capturePane would show an error, getClaudeSessionState does not check it
-      vi.mocked(capturePane).mockResolvedValue('Claude Code cannot be launched inside another Claude Code session');
-
-      const state = await getClaudeSessionState(TEST_WORKTREE_ID);
-      expect(state.isRunning).toBe(true);
-      // capturePane should NOT be called by getClaudeSessionState
-      expect(capturePane).not.toHaveBeenCalled();
-    });
-  });
-
-  // ----- Coverage: restartClaudeSession -----
-  // NOTE: Placed BEFORE exec-overriding tests to avoid mock pollution
-  describe('restartClaudeSession()', () => {
-    it('should stop existing session then start a new one', async () => {
-      // Setup mocks for the full restart flow
-      vi.mocked(hasSession)
-        .mockResolvedValueOnce(true)   // stopClaudeSession -> hasSession (Ctrl+D path)
-        .mockResolvedValueOnce(false)  // startClaudeSession -> hasSession (no existing session)
-        ;
-      vi.mocked(sendKeys).mockResolvedValue();
-      vi.mocked(killSession).mockResolvedValue(true);
-      vi.mocked(createSession).mockResolvedValue();
-      vi.mocked(capturePane).mockResolvedValue('> ');
-
-      const promise = restartClaudeSession(TEST_SESSION_OPTIONS);
-
-      // stopClaudeSession: Ctrl+D wait (500ms)
-      await vi.advanceTimersByTimeAsync(500);
-      // restartClaudeSession: inter-restart delay (1000ms)
-      await vi.advanceTimersByTimeAsync(1000);
-      // startClaudeSession: sanitize delay (100ms) + poll intervals + post-prompt delay
-      await vi.advanceTimersByTimeAsync(100 + CLAUDE_INIT_POLL_INTERVAL * 2 + CLAUDE_POST_PROMPT_DELAY);
-
-      await expect(promise).resolves.toBeUndefined();
-
-      // Verify stop was attempted (killSession called by stopClaudeSession)
-      expect(killSession).toHaveBeenCalledWith(TEST_SESSION_NAME);
-      // Verify new session was created
-      expect(createSession).toHaveBeenCalled();
-    });
-
-    it('should handle stop failure gracefully and still attempt restart', async () => {
-      // stopClaudeSession: session doesn't exist
-      vi.mocked(hasSession)
-        .mockResolvedValueOnce(false)  // stopClaudeSession -> no session
-        .mockResolvedValueOnce(false)  // startClaudeSession -> hasSession
-        ;
-      vi.mocked(killSession).mockResolvedValue(false);
-      vi.mocked(sendKeys).mockResolvedValue();
-      vi.mocked(createSession).mockResolvedValue();
-      vi.mocked(capturePane).mockResolvedValue('> ');
-
-      const promise = restartClaudeSession(TEST_SESSION_OPTIONS);
-
-      // restartClaudeSession: inter-restart delay (1000ms)
-      await vi.advanceTimersByTimeAsync(1000);
-      // startClaudeSession: sanitize delay (100ms) + poll intervals + post-prompt delay
-      await vi.advanceTimersByTimeAsync(100 + CLAUDE_INIT_POLL_INTERVAL * 2 + CLAUDE_POST_PROMPT_DELAY);
-
-      await expect(promise).resolves.toBeUndefined();
-
-      // New session should still be created even if stop found no session
-      expect(createSession).toHaveBeenCalled();
     });
   });
 

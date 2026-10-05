@@ -6,7 +6,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { execFile } from 'child_process';
 import {
-  isTmuxAvailable,
   hasSession,
   listSessions,
   createSession,
@@ -43,49 +42,6 @@ describe('tmux library', () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
-  });
-
-  describe('isTmuxAvailable', () => {
-    it('should return true when tmux is available', async () => {
-      vi.mocked(execFile).mockImplementation((...args: unknown[]) => {
-        const callback = args[args.length - 1] as (err: Error | null, result: { stdout: string; stderr: string }) => void;
-        callback(null, { stdout: 'tmux 3.3a', stderr: '' });
-        return {} as ReturnType<typeof execFile>;
-      });
-
-      const result = await isTmuxAvailable();
-      expect(result).toBe(true);
-      expect(execFile).toHaveBeenCalledWith(
-        'tmux',
-        ['-V'],
-        { timeout: 5000 },
-        expect.any(Function)
-      );
-    });
-
-    it('should return false when tmux is not available', async () => {
-      vi.mocked(execFile).mockImplementation((...args: unknown[]) => {
-        const callback = args[args.length - 1] as (err: Error | null, result: { stdout: string; stderr: string }) => void;
-        callback(new Error('command not found'), { stdout: '', stderr: '' });
-        return {} as ReturnType<typeof execFile>;
-      });
-
-      const result = await isTmuxAvailable();
-      expect(result).toBe(false);
-    });
-
-    it('should handle timeout', async () => {
-      vi.mocked(execFile).mockImplementation((...args: unknown[]) => {
-        const callback = args[args.length - 1] as (err: Error | null, result: { stdout: string; stderr: string }) => void;
-        setTimeout(() => {
-          callback(new Error('timeout'), { stdout: '', stderr: '' });
-        }, 100);
-        return {} as ReturnType<typeof execFile>;
-      });
-
-      const result = await isTmuxAvailable();
-      expect(result).toBe(false);
-    });
   });
 
   describe('hasSession', () => {
