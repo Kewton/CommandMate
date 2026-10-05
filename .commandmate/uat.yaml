@@ -50,15 +50,22 @@ env:
     set -e
     mkdir -p {run_dir}/root
     # codex's two shared files are keyed by $CODEX_HOME alone, so they cannot be
-    # moved without moving codex's login. Record their sha256 here; `down`
-    # compares and fails when the UAT build rewrote them. Never written back.
-    for f in "${CODEX_HOME:-$HOME/.codex}/hooks.json" "${CODEX_HOME:-$HOME/.codex}/commandmate/cmate-agent-event.sh"; do
-      printf '%s  %s\n' "$( [ -f "$f" ] && shasum -a 256 "$f" | cut -d' ' -f1 || echo absent )" "$f"
-    done > {run_dir}/codex-shared.sha256
+    # moved without moving codex's login. Decide ONE absolute CODEX_HOME here (the
+    # caller's, else $HOME/.codex) and use it for this record, for the server
+    # (env -i below) and for `down`, which reads it back from the record. Record
+    # the files' sha256; `down` compares and fails when the UAT build rewrote them.
+    # Never written back.
+    export CH="${CODEX_HOME:-$HOME/.codex}"
+    {
+      printf 'CODEX_HOME  %s\n' "$CH"
+      for n in hooks.json commandmate/cmate-agent-event.sh; do
+        printf '%s  %s\n' "$( [ -f "$CH/$n" ] && shasum -a 256 "$CH/$n" | cut -d' ' -f1 || echo absent )" "$n"
+      done
+    } > {run_dir}/codex-shared.sha256
     mkdir -p -m 700 /tmp/cmuat-{port}
     tmux -S /tmp/cmuat-{port}/tmux.sock new-session -d -s keepalive 'sleep 86400'
     env -i HOME="$HOME" PATH="$PATH" USER="$USER" LOGNAME="$LOGNAME" SHELL="$SHELL" \
-      LANG="${LANG:-en_US.UTF-8}" TERM="${TERM:-xterm-256color}" \
+      CODEX_HOME="$CH" LANG="${LANG:-en_US.UTF-8}" TERM="${TERM:-xterm-256color}" \
       TMUX="/tmp/cmuat-{port}/tmux.sock,$(lsof -t /tmp/cmuat-{port}/tmux.sock | head -1),0" \
       NODE_ENV=production CM_PORT={port} CM_BIND=127.0.0.1 \
       CM_DB_PATH={run_dir}/uat.db CM_ROOT_DIR={run_dir}/root \
@@ -75,9 +82,13 @@ env:
     rm -rf /tmp/cmuat-{port}
     ! lsof -nP -iTCP:{port} -sTCP:LISTEN -t >/dev/null
     # Fail when the UAT build rewrote codex's shared hook or relay script.
+    # The first record line names the CODEX_HOME `up` decided on; the rest are
+    # sha256 + path relative to it.
+    CH=$(sed -n 's/^CODEX_HOME  //p;' {run_dir}/codex-shared.sha256 | head -1)
     while read -r h f; do
-      n=$( [ -f "$f" ] && shasum -a 256 "$f" | cut -d' ' -f1 || echo absent )
-      [ "$n" = "$h" ] || { echo "codex shared file changed during UAT: $f" >&2; exit 1; }
+      [ "$h" = CODEX_HOME ] && continue
+      n=$( [ -f "$CH/$f" ] && shasum -a 256 "$CH/$f" | cut -d' ' -f1 || echo absent )
+      [ "$n" = "$h" ] || { echo "codex shared file changed during UAT: $CH/$f" >&2; exit 1; }
     done < {run_dir}/codex-shared.sha256
   health: "curl -fsS -m 5 -o /dev/null http://127.0.0.1:{port}/api/worktrees"
   health_timeout_sec: 90

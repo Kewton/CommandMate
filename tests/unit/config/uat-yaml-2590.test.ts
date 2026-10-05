@@ -148,4 +148,19 @@ describe('.commandmate/uat.yaml (Issue #2590)', () => {
     // Never writes back: the user's own changes must survive.
     expect(down).not.toMatch(/\bcp\b|\bmv\b|>\s*"?\$f/);
   });
+
+  it('uses ONE decided CODEX_HOME for the record, the server (after env -i) and down (Issue #3358)', () => {
+    const up = spec.env.up;
+    const down = spec.env.down ?? '';
+    expect(up).toMatch(/export CH="\$\{CODEX_HOME:-\$HOME\/\.codex\}"/);
+    expect(up).toMatch(/printf 'CODEX_HOME {2}%s\\n' "\$CH"/);
+    const [line] = logicalLines(up).filter((l) => l.includes('dist/server/server.js'));
+    const at = line.indexOf('CODEX_HOME="$CH"');
+    expect(at, 'the server line must set CODEX_HOME').toBeGreaterThan(line.indexOf('env -i'));
+    expect(at).toBeLessThan(line.indexOf('nohup'));
+    // The record names the home; down reads it back instead of re-deriving it.
+    expect(down).toContain('s/^CODEX_HOME  //p');
+    expect(down).toContain('"$CH/$f"');
+    expect(down).not.toContain('$HOME/.codex');
+  });
 });
