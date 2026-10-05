@@ -8,6 +8,8 @@ hook のインスタンス取り違え）。`scripts/agent-health/run.ts` は、
 - Issue を立てるのはこのスクリプトではない。レポートを読んで Issue にするのは Schedule で動く AI（#2879）、
   レポートが今日出ているかを見張るのは #2880 の役目。
 - 実エージェントを起動し、1 ツールあたり最大 3 回モデルを呼ぶ（費用がかかる）。
+- 起動して確かめるのは上の 6 ツール。CommandMate が対応しているほかの 3 ツール（gemini・vibe-local・copilot）も、
+  レポートの行として `version` だけを毎朝読む（下の「version だけを読むツール」、Issue #3313）。
 
 ## 何を確かめるか
 
@@ -24,6 +26,36 @@ hook のインスタンス取り違え）。`scripts/agent-health/run.ts` は、
 | `screen-quoted-dialog` | そのツールの承認ダイアログの文面を本文で引用させた返答が終わった後の画面 | `ready`、`hasActivePrompt` が偽（#2841〜#2847 の型の回帰） |
 
 画面は本番と同じ形で撮る（200x1000。opencode・opencode-v2 は 80x200。行数は `resolveCaptureSpec(tool).statusLines`）。
+
+### skip の種類（Issue #3313）
+
+`skip` の check には必ず `skipKind` が入る。種類は skip を出す場所で渡す（`skipReason` の文面から推測しない。
+`src/lib/agent-health/coverage.ts` の `skipCheck`）。
+
+| `skipKind` | 要約での呼び方 | 出る場所 |
+|---|---|---|
+| `no-definition` | 検査の定義が無い | 選択画面の定義が無いツールの `screen-picker`。opencode の `hook-correlation`（イベントは hook ではなく自前の HTTP から読み、その経路の検査が無い） |
+| `not-shown` | このツールは、その画面を出さない | 承認ダイアログを出さないツール（opencode・opencode-v2）の `screen-approval` |
+| `signed-out` | サインインできない | gemini（下記） |
+| `unsupported` | ツールが未対応 | vibe-local・copilot の `version` 以外（下記） |
+| `timeout` | 時間切れ | 全体の時間上限に達して実行しなかったツール |
+| `prerequisite-failed` | version が取れず未実施 | `version` が fail したツールの残り |
+| `not-selected` | 今回の実行の対象外 | 表だけ。`--tools` / `--only` で外したもの |
+| `not-recorded` | 結果が記録されなかった | 表だけ。選んだのに結果が無いもの（スクリプトの異常） |
+
+### version だけを読むツール（gemini・vibe-local・copilot、Issue #3313）
+
+確認の実行（6 ツールすべてを選んだとき＝毎朝の実行）では、この 3 ツールも行として出す。起動はせず、`version` だけを読む。
+`version` 以外の check は、下の種類の `skip` になる（`scripts/agent-health/tool-table.ts` の `LIMITED_TOOL_SPECS`）。
+
+| ツール | `version` の読み方 | ほかの check | 起動して確かめない理由 |
+|---|---|---|---|
+| gemini | `gemini --version` | `signed-out` | この環境ではサインインできない（2026-10-05 の実測: 「This client is no longer supported for Gemini Code Assist for individuals」）。起動すると OAuth のトークン更新で利用者の `~/.gemini/oauth_creds.json` を書き換え、資格情報を一時ディレクトリへ複製しないと隔離できないため、毎朝は起動しない（サインインの状態は 2026-10-05 の実測を出している） |
+| vibe-local | `python3 ~/.local/lib/vibe-local/vibe-coder.py --version`（`vibe-coder 1.3.3`） | `unsupported` | `vibe-local --version` は版を出さずに起動スクリプトを走らせる（Ollama が止まっていれば起動し、`/dev/tty` で許可を訊き、セッションを始める）。hook も持たない |
+| copilot | `copilot --version` | `unsupported` | 起動すると利用者の `~/.copilot/config.json` を書き換え（`recentModelIds`）、CommandMate の起動は `~/.copilot/settings.json`（マシンに 1 つ）に hook を書く。資格情報を別の `COPILOT_HOME` へ複製しないとサインインを隔離できないため、サインインの状態も確かめていない |
+
+`version` が取れなければ fail（終了コード 1）になり、残りは `prerequisite-failed` の skip になる。起動して確かめる手順を
+足したツールは、この表から上の 6 ツールの側へ移す。
 
 ### opencode-v2 の起動と SSE（Issue #2937）
 
@@ -62,7 +94,7 @@ npx tsx scripts/agent-health/run.ts [--tools claude,codex,antigravity,opencode,c
 
 | オプション | 既定 | 説明 |
 |---|---|---|
-| `--tools` | 6 ツールすべて | 対象ツール |
+| `--tools` | 6 ツールすべて | 対象ツール（起動して確かめる 6 ツールから選ぶ）。6 ツールすべてを選んだときだけ、gemini・vibe-local・copilot の `version` も読む |
 | `--only` | 全チェック | 行うチェック（`version` は常に行う） |
 | `--out` | `~/.commandmate/agent-health/reports/<YYYY-MM-DD>.json`（JST の日付） | レポートの書き出し先 |
 | `--timeout-per-tool` | 150 | 1 ツールの持ち時間（秒）。時間切れのチェックは fail |
@@ -76,11 +108,34 @@ npx tsx scripts/agent-health/run.ts [--tools claude,codex,antigravity,opencode,c
 
 | exit | 意味 |
 |---|---|
-| `0` | すべて pass / skip |
+| `0` | すべて pass / skip（version だけを読むツールの skip を含む） |
 | `1` | fail が 1 つ以上 |
 | `2` | スクリプト自体の異常（引数の誤り・書き込み失敗・hook 設定を戻せなかった・選択画面の確認の前後でモデル／effort の設定が変わった・別の実行が進行中・中断） |
 
 どの場合もレポートは書く（2 の場合も書ける範囲で書く。書けなければ標準出力に出す）。
+
+### 要約（標準出力、Issue #3313）
+
+実行の最後に、レポートの `summary` と同じ行を標準出力に出す（`daily.sh` の出力に含まれ、見張り役が読む）。
+1 行目は必ず `pass N・fail N・skip N（<skip の種類> N・…）` の形で、3 つの数を並べる（「全項目 pass」とは書かない）。
+その後に 9 ツール × 7 check の表（Markdown）と、skip の理由（ツールと種類ごとに 1 行）が続く。例:
+
+```
+pass 38・fail 0・skip 25（検査の定義が無い 5・このツールは、その画面を出さない 2・サインインできない 6・ツールが未対応 12）
+
+| ツール | version | hook-correlation | screen-idle | screen-picker | screen-running | screen-approval | screen-quoted-dialog |
+|---|---|---|---|---|---|---|---|
+| claude | pass | pass | pass | pass | pass | pass | pass |
+| opencode | pass | skip（検査の定義が無い） | pass | skip（検査の定義が無い） | pass | skip（このツールは、その画面を出さない） | pass |
+| gemini（version のみ） | pass | skip（サインインできない） | … |
+…
+
+未実施の理由:
+- opencode screen-approval: このツールは、その画面を出さない — opencode の既定の権限設定は …
+- gemini hook-correlation, screen-idle, …: サインインできない — …
+```
+
+`--tools` / `--only` で外したマスも表には `skip（今回の実行の対象外）` として数える（理由の行には出さない）。
 
 ## レポートの形
 
@@ -93,7 +148,8 @@ interface AgentHealthReport {
   completedAt: string;        // ISO。#2880 はこの有無で「今日の結果がある」を判断する
   host: { commandmateCommit: string; node: string };
   tools: Array<{
-    tool: 'claude' | 'codex' | 'antigravity' | 'opencode' | 'command-code' | 'opencode-v2';
+    tool: 'claude' | 'codex' | 'antigravity' | 'opencode' | 'command-code' | 'opencode-v2'
+        | 'gemini' | 'vibe-local' | 'copilot';   // 後の 3 つは version だけ（6 ツールすべてを選んだとき）
     version: string | null;         // `<cli> --version` の 1 行目
     previousVersion: string | null; // 前回（state）の値
     versionChanged: boolean;        // 両方が分かっていて違うときだけ true
@@ -103,6 +159,7 @@ interface AgentHealthReport {
       summary: string;              // 1 行。何を期待し何が起きたか
       evidence?: string;            // 失敗時の証拠（画面の末尾 40 行、届いた hook）。4,000 文字まで
       skipReason?: string;
+      skipKind?: 'no-definition' | 'not-shown' | 'signed-out' | 'unsupported' | 'timeout' | 'prerequisite-failed'; // skip には必ず入る
       framePaths?: string[];        // 画面全体を保存したファイル（下の「画面の保存」）
     }>;
   }>;
@@ -118,6 +175,16 @@ interface AgentHealthReport {
   };
   scriptErrors?: string[];          // exit 2 のときの理由
   sync?: { status: 'ok' | 'failed'; before: string; after: string; reason?: string }; // daily.sh 経由のときだけ
+  coverage?: {                      // 9 ツール × 7 check の表（Issue #3313）。何も実行しなかったレポートには無い
+    checkIds: string[];
+    rows: Array<{
+      tool: string;
+      coverage: 'probed' | 'version-only';
+      cells: Record<string, { status: 'pass' | 'fail' | 'skip'; skipKind?: string }>; // skipKind は上の 6 種と not-selected・not-recorded
+    }>;
+    counts: { pass: number; fail: number; skip: number; skipByKind: Record<string, number> };
+  };
+  summary?: string[];               // 標準出力に出す要約と同じ行（上の「要約」）
 }
 ```
 
@@ -179,7 +246,7 @@ fixture にするには足りない）。
 
 ```bash
 cd <CommandMate のチェックアウト>
-npx tsx scripts/agent-health/run.ts                         # 6 ツール・全チェック（モデル呼び出しあり）
+npx tsx scripts/agent-health/run.ts                         # 6 ツール・全チェック（モデル呼び出しあり）＋ 3 ツールの version
 npx tsx scripts/agent-health/run.ts --only screen-idle      # 起動画面だけ（モデル呼び出しなし）
 npx tsx scripts/agent-health/run.ts --tools codex --out /tmp/agent-health-codex.json
 ```
@@ -200,7 +267,7 @@ tmux -L cm-agent-health kill-server
 
 ## 関連
 
-- 実装: `scripts/agent-health/`（実行）、`src/lib/agent-health/`（純粋関数とレポートの型）
+- 実装: `scripts/agent-health/`（実行）、`src/lib/agent-health/`（純粋関数とレポートの型。表と要約は `coverage.ts`）
 - テスト: `tests/unit/lib/agent-health/`、`tests/unit/scripts/agent-health/`
 - codex の画面判定を手で確かめる手順: [docs/design/codex-detection-corpus.md](../design/codex-detection-corpus.md)
 - 検出カナリア（claude / opencode のより細かいシナリオ）: `scripts/canary/`

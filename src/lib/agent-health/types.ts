@@ -8,7 +8,7 @@
  * renaming or removing one breaks both.
  */
 
-/** The six agent CLIs the daily check covers, in report order. */
+/** The six agent CLIs the daily check launches and drives, in report order. */
 export const AGENT_HEALTH_TOOLS = [
   'claude',
   'codex',
@@ -19,6 +19,21 @@ export const AGENT_HEALTH_TOOLS = [
 ] as const;
 
 export type AgentHealthTool = (typeof AGENT_HEALTH_TOOLS)[number];
+
+/**
+ * CLIs CommandMate supports that the probe does not drive (Issue #3313). They
+ * are still rows of the report: `version` is read every morning, and every
+ * other check is a `skip` whose kind says why (`tool-table.ts`
+ * `LIMITED_TOOL_SPECS`), so "35 pass" is never read as "every tool is fine".
+ */
+export const AGENT_HEALTH_LIMITED_TOOLS = ['gemini', 'vibe-local', 'copilot'] as const;
+
+export type AgentHealthLimitedTool = (typeof AGENT_HEALTH_LIMITED_TOOLS)[number];
+
+/** Every row of the report's tool × check table, in report order (Issue #3313). */
+export const AGENT_HEALTH_REPORT_TOOLS = [...AGENT_HEALTH_TOOLS, ...AGENT_HEALTH_LIMITED_TOOLS] as const;
+
+export type AgentHealthReportTool = (typeof AGENT_HEALTH_REPORT_TOOLS)[number];
 
 /**
  * Every check, in the order a tool's checks appear in the report.
@@ -43,6 +58,47 @@ export type AgentHealthCheckId = (typeof AGENT_HEALTH_CHECK_IDS)[number];
 
 export type AgentHealthCheckStatus = 'pass' | 'fail' | 'skip';
 
+/**
+ * Why a check was not done (Issue #3313). Set where the skip is produced —
+ * never guessed afterwards from `skipReason`'s wording.
+ *
+ * - `no-definition`: the probe has no definition of this check for the tool
+ *   (no picker in `tool-table.ts`; opencode's events come from its own HTTP
+ *   server, which `hook-correlation` does not read)
+ * - `not-shown`: the tool does not show that screen (no approval dialog by default)
+ * - `signed-out`: the tool cannot sign in
+ * - `unsupported`: the probe does not drive the tool (yet), or the tool lacks the feature
+ * - `timeout`: the run budget ran out before the tool's turn
+ * - `prerequisite-failed`: added — `version` failed, so nothing was launched
+ * - `not-selected`: added, table only — left out by `--tools` / `--only`
+ * - `not-recorded`: added, table only — selected, but the run recorded nothing
+ *   for it (a script error); kept visible instead of read as fine
+ */
+export const AGENT_HEALTH_SKIP_KINDS = [
+  'no-definition',
+  'not-shown',
+  'signed-out',
+  'unsupported',
+  'timeout',
+  'prerequisite-failed',
+  'not-selected',
+  'not-recorded',
+] as const;
+
+export type AgentHealthSkipKind = (typeof AGENT_HEALTH_SKIP_KINDS)[number];
+
+/** The words the summary uses for each kind. */
+export const AGENT_HEALTH_SKIP_KIND_LABELS: Record<AgentHealthSkipKind, string> = {
+  'no-definition': '検査の定義が無い',
+  'not-shown': 'このツールは、その画面を出さない',
+  'signed-out': 'サインインできない',
+  unsupported: 'ツールが未対応',
+  timeout: '時間切れ',
+  'prerequisite-failed': 'version が取れず未実施',
+  'not-selected': '今回の実行の対象外',
+  'not-recorded': '結果が記録されなかった',
+};
+
 export interface AgentHealthCheck {
   checkId: AgentHealthCheckId;
   status: AgentHealthCheckStatus;
@@ -51,6 +107,8 @@ export interface AgentHealthCheck {
   /** Failure evidence (pane tail, hook JSON). At most {@link MAX_EVIDENCE_CHARS}. */
   evidence?: string;
   skipReason?: string;
+  /** Set on every `skip` the run produces (Issue #3313). */
+  skipKind?: AgentHealthSkipKind;
   /**
    * The whole frames this check judged, written as captured (Issue #3183,
    * `frame-archive.ts`). Present only when they were written: by default for a
@@ -60,7 +118,7 @@ export interface AgentHealthCheck {
 }
 
 export interface AgentHealthToolResult {
-  tool: AgentHealthTool;
+  tool: AgentHealthReportTool;
   /** First line of `<cli> --version`, or null when it could not be read. */
   version: string | null;
   /** The version recorded by the previous run (state file), or null. */
@@ -110,6 +168,37 @@ export interface AgentHealthReport {
   scriptErrors?: string[];
   /** How the runner synced to origin/develop before this run (written by scripts/agent-health/daily.sh). */
   sync?: AgentHealthSync;
+  /** Every tool × every check, including what was not done (Issue #3313). Absent on a report that ran nothing. */
+  coverage?: AgentHealthCoverage;
+  /**
+   * What the watcher reads (Issue #3313): line 1 is `pass N・fail N・skip N（<kind> N・…）`,
+   * then the table, then why each skip was skipped. Also printed to stdout.
+   */
+  summary?: string[];
+}
+
+export interface AgentHealthCoverageCell {
+  status: AgentHealthCheckStatus;
+  /** Always set when `status` is `skip`. */
+  skipKind?: AgentHealthSkipKind;
+}
+
+export interface AgentHealthCoverageRow {
+  tool: AgentHealthReportTool;
+  /** `probed`: launched and driven. `version-only`: only `--version` is read (Issue #3313). */
+  coverage: 'probed' | 'version-only';
+  cells: Record<AgentHealthCheckId, AgentHealthCoverageCell>;
+}
+
+export interface AgentHealthCoverage {
+  checkIds: AgentHealthCheckId[];
+  rows: AgentHealthCoverageRow[];
+  counts: {
+    pass: number;
+    fail: number;
+    skip: number;
+    skipByKind: Partial<Record<AgentHealthSkipKind, number>>;
+  };
 }
 
 /** `before` / `after`: full commit SHAs. `reason` is set only when `status` is `failed`. */
@@ -122,13 +211,13 @@ export interface AgentHealthSync {
 
 /** `~/.commandmate/agent-health/state.json`. */
 export interface AgentHealthState {
-  versions: Partial<Record<AgentHealthTool, string>>;
+  versions: Partial<Record<AgentHealthReportTool, string>>;
 }
 
 /** The fixed correlation keys every probe session is launched with. */
 export const PROBE_WORKTREE_ID = 'agent-health-probe';
 
-export function probeInstanceId(tool: AgentHealthTool): string {
+export function probeInstanceId(tool: AgentHealthReportTool): string {
   return `${tool}-probe`;
 }
 
