@@ -1623,14 +1623,12 @@ interface CompletedTurn {
  *
  * @param ctx - What this tick is keyed by
  * @param output - The capture this tick made
- * @param sessionState - The session state row read before the capture, if any
  * @param lastCapturedLine - Its cursor, 0 when there is none
  * @returns What the tick goes on with, or `false` when the tick ends here
  */
 function extractCompletedTurn(
   ctx: ResponseCheckContext,
   output: string,
-  sessionState: ReturnType<typeof getSessionState>,
   lastCapturedLine: number
 ): CompletedTurn | false {
   const { db, worktreeId, cliToolId, instanceId, resolvedInstanceId, pollerKey } = ctx;
@@ -1703,7 +1701,14 @@ function extractCompletedTurn(
   }
 
   if (lineCountIsCursor && !result.bufferReset && result.lineCount <= lastCapturedLine) {
-    logger.info('already-saved-up-to-line-lastcapturedlin');
+    // Every poll of a finished, unchanged screen lands here, so it is debug.
+    logger.debug('already-saved-up-to-last-captured-line', {
+      worktreeId,
+      cliToolId,
+      instanceId: resolvedInstanceId,
+      lineCount: result.lineCount,
+      lastCapturedLine,
+    });
     return false;
   }
 
@@ -2317,7 +2322,7 @@ export async function checkForResponse(
     // Get worktree to verify it exists
     const worktree = getWorktreeById(db, worktreeId);
     if (!worktree) {
-      logger.error('worktree-worktreeid-not');
+      logger.error('worktree-not-found');
       stopPolling(worktreeId, cliToolId, instanceId);
       return false;
     }
@@ -2397,7 +2402,7 @@ export async function checkForResponse(
     // (Issue #1670) — a literal here would silently decouple the two.
     const output = await captureSessionOutput(worktreeId, cliToolId, CACHE_MAX_CAPTURE_LINES, instanceId);
 
-    const turn = extractCompletedTurn(ctx, output, sessionState, lastCapturedLine);
+    const turn = extractCompletedTurn(ctx, output, lastCapturedLine);
     if (!turn) {
       return false;
     }

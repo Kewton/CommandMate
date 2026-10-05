@@ -453,7 +453,7 @@ describe('double delivery', () => {
     expect(listTaskEvents(db, task.id)).toHaveLength(1);
   });
 
-  it('does not collapse two genuine turns, which carry different session ids', async () => {
+  it('does not collapse two stops from different sessions, which are two different turns', async () => {
     const task = seedTask({ instanceId: null });
 
     await post(claudePayload('stop.json', { sessionId: 'sess-a' }), injected('claude'));

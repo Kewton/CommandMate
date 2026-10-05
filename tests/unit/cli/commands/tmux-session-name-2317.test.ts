@@ -175,7 +175,7 @@ describe('instances', () => {
         },
       },
       { data: { isRunning: true, autoYes: { enabled: false } } },
-      { data: { isRunning: false, autoYes: { enabled: false } } },
+      { data: { isRunning: false } },
     ]);
   }
 
@@ -203,7 +203,7 @@ describe('instances', () => {
         },
       },
       { data: { isRunning: true, autoYes: { enabled: false } } },
-      { data: { isRunning: false, autoYes: { enabled: false } } },
+      { data: { isRunning: false } },
     ]);
     await runInstances(['wt1', '--json']);
 

@@ -118,7 +118,7 @@ ID                     NAME                  STATUS   REASON                    
 ---------------------  --------------------  -------  ------------------------------  -------  ---------------
 localllm-test          main                  ready    input_prompt                    claude   42:10
 commandmate            develop               running  thinking_indicator              claude   1:05:33
-commandmate-issue-518  feature/518-worktree  ready    no_recent_output (no evidence)  claude   off
+commandmate-issue-518  feature/518-worktree  running  no_recent_output (no evidence)  claude   off
 commandmate-issue-600  feature/600-sessions  waiting  prompt_detected                 claude   off
 commandmate-issue-644  feature/644-repos     waiting  -                               claude   03:12 (codex-2)
 commandmate-main       main                  idle     -                               claude   off
@@ -1455,6 +1455,7 @@ commandmate capture <worktree-id> --instance codex-2 # 追加インスタンス�
   "lineCount": 42,
   "lastCapturedLine": 42,
   "promptData": null,
+  "promptView": null,
   "autoYes": {
     "enabled": false,
     "expiresAt": null,
@@ -1465,7 +1466,9 @@ commandmate capture <worktree-id> --instance codex-2 # 追加インスタンス�
   "cliToolId": "claude",
   "isSelectionListActive": false,
   "isPagerActive": false,
+  "isDismissablePanelActive": false,
   "isUnclassifiedActive": false,
+  "startingSince": null,
   "statusEvidence": "positive",
   "lastKnownStatus": "running",
   "lastKnownStatusAt": 1754296400123,
@@ -1506,6 +1509,10 @@ commandmate capture <worktree-id> --instance codex-2 # 追加インスタンス�
   },
   "model": "claude-opus-5[1m]",
   "reasoningEffort": null,
+  "promptDedup": {
+    "skippedCount": 0,
+    "lastSkippedAt": null
+  },
   "upstreamFault": null,
   "composerText": null,
   "composerState": "empty",
@@ -1516,15 +1523,19 @@ commandmate capture <worktree-id> --instance codex-2 # 追加インスタンス�
 ```
 
 各フィールドの意味論は次のとおりです。行番号は 2026-08-20 時点の実測で、
-関数名（`buildCurrentOutput` / `isClaudeRunning`）で追うほうが安全です。
+関数名（`buildCurrentOutput` / `isClaudeRunning`）で追うほうが安全です（以下は行番号を書きません。すぐ古くなります）。
 
 | フィールド | 意味 |
 |---|---|
 | `content` | ポーラーがまだ保存していない分（`buildCurrentOutput`）。**行数がカーソルとして使えるツールでのみ差分**＝ scrollback を持つ codex / gemini / vibe-local / antigravity で、かつ capture window（10000 行）が未飽和のとき。この場合ポーラーが保存済みなら正常時でも空になる。**alternate screen のツール（claude / opencode / copilot）と、window 飽和時は capture 全体**（行数が pane 高さ・window 幅で pin され「読んだ位置」にならないため。Issue #1910 / #1670 / #1268） |
-| `realtimeSnippet` | pane 末尾 100 行（画面そのもの。`src/lib/session/current-output-builder.ts:712`） |
+| `realtimeSnippet` | pane 末尾 100 行（画面そのもの。`src/lib/session/current-output-builder.ts` の `selectRealtimeSnippetRows`） |
 | `lineCount` | capture 全体の行数（空白行を含む。TUI は 1000 行のペインに描かれるため、空白 pane でも 1001 になりうる） |
-| `isRunning` | tmux セッションが存在して healthy（`src/lib/session/claude-session.ts:543-556`）。**ターン進行中の意味ではない** |
+| `isRunning` | tmux セッションが存在して healthy（`src/lib/session/claude-session.ts` の `isClaudeRunning` / `isSessionHealthy`）。**ターン進行中の意味ではない** |
 | `sessionStatus` / `sessionStatusReason` | 状態と、その根拠（`hook_*` なら hooks 由来、それ以外はスクレイパー由来。`HOOK_STATUS_REASON` は `src/lib/session/status-mapping.ts`） |
+| `promptData` / `promptView` / `promptAnswerable` | 画面から解析した確認プロンプトと、その見せ方・答え方。`promptView` は `promptData` を読んだ結果（Issue #3184）で、プロンプトが無ければ `null`、古いサーバーでは無い。`promptAnswerable` は `/prompt-response` がいま答えられるか（Issue #2870）で、**画面から解析したプロンプトがあるときだけ**付き、プロンプトが無いとき・構造化（hook / 縮退）形のときはキーごと無い |
+| `isSelectionListActive` / `isPagerActive` / `isDismissablePanelActive` / `isUnclassifiedActive` | 画面の形のフラグ。`isDismissablePanelActive` は `Esc to close` しか出ない閉じるだけのオーバーレイ（Issue #2369、`isSelectionListActive` とは排他）。古いサーバーでは無い |
+| `startingSince` | エージェントの起動が始まった時刻（epoch ms）。起動中だけ数値で、それ以外は `null`（Issue #3179）。数値の間は `running` / `starting` で、ダイアログ系のフラグはすべて `false` |
+| `promptDedup` | 確認プロンプトの重複判定が捨てた回数 `{ skippedCount, lastSkippedAt }`（Issue #1695）。`skippedCount` はサーバープロセスの寿命の累計で、ターンごとではない。古いサーバーでは無い |
 | `structuredEvents.*` / `lastStopEventAt` | hooks の最終イベントと最終 `stop` 時刻。hooks が来ていなければ `null` |
 | `statusEvidence` / `lastKnownStatus` / `lastKnownStatusAt` | 判定が肯定的証拠に基づくか、と直前の確定状態（Issue #1926）。下記参照 |
 | `structuredEvents.turnId` / `openedAt` / `closedAt` / `closedBy` | ターンの暫定境界（Issue #1926）。**まだ安定した turn 同一性ではありません**。下記参照 |

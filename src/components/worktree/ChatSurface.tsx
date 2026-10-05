@@ -193,7 +193,7 @@ export const CHAT_SCROLL_CONTAINER_SELECTOR = `[data-testid="${CHAT_TRANSCRIPT_S
  * cache entry before answering. Neither is enough on its own, and the reason is
  * the shared cache rather than either of them: the entry is dropped BEFORE the
  * TUI has repainted, so whichever reader captures first — this refresh, the
- * sidebar status probe, the global session poller — stores the PRE-repaint frame
+ * sidebar status probe — stores the PRE-repaint frame
  * and `CACHE_TTL_MS` (5 s) then serves it to everyone. The user sees the
  * highlight fail to move and presses the key again.
  *
