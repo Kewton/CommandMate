@@ -83,6 +83,7 @@ import {
   ANTIGRAVITY_FULLY_IDLE_FIELD,
   ANTIGRAVITY_PERMISSION_TIMEOUT_SECONDS,
   buildAntigravityLaunchCommand,
+  inspectAntigravityHooksConfigReadOnly,
   writeAntigravityHooksConfig,
 } from './hooks-config';
 import { ANTIGRAVITY_CLI_TOOL_ID } from './tool-id';
@@ -300,11 +301,14 @@ export const antigravityAgentEventSource: AgentEventSource = definePushHookSourc
     // agy reads `~/.gemini/config/hooks.json` whatever this server passes, so
     // "without hooks" would mean production's hooks in the UAT session.
     if (settingsPath === null && isUatIsolationEnabled()) {
-      throw new UatIsolationLaunchRefusedError(
-        'antigravity',
-        '~/.gemini/config/hooks.json does not already hold what this build writes (or hook injection is off)',
-        UAT_SAME_BUILD_FIX
-      );
+      const inspection = inspectAntigravityHooksConfigReadOnly();
+      throw inspection.usable
+        ? new UatIsolationLaunchRefusedError(
+            'antigravity',
+            '~/.gemini/config/hooks.json could not be prepared',
+            UAT_SAME_BUILD_FIX
+          )
+        : new UatIsolationLaunchRefusedError('antigravity', inspection.reason, inspection.fix);
     }
     // #1846: the two correlation URLs are the plan's `env`. `worktreePath` is
     // in the context now and deliberately unused here — agy's config is one

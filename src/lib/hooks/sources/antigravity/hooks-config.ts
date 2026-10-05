@@ -74,7 +74,7 @@
 
 import { homedir } from 'os';
 import { join } from 'path';
-import { isUatIsolationEnabled } from '@/config/uat-isolation';
+import { isUatIsolationEnabled, UAT_SAME_BUILD_FIX } from '@/config/uat-isolation';
 import { isValidInstanceId } from '@/lib/cli-tools/types';
 import { SELF_RESUME_PENDING_DETAIL, type AgentEventType } from '@/lib/hooks/agent-event-types';
 import {
@@ -407,6 +407,57 @@ export function mergeAntigravityHooksConfig(
   return { ...existing, [ANTIGRAVITY_HOOK_NAME]: config };
 }
 
+/** What {@link inspectAntigravityHooksConfigReadOnly} found: usable as it is, or why not. */
+export type AntigravitySharedHooksInspection =
+  | { usable: true; configPath: string }
+  | { usable: false; reason: string; fix: string };
+
+/**
+ * Whether the shared `~/.gemini/config/hooks.json` may be used, unwritten, by a
+ * server in UAT isolation mode (`CM_UAT_ISOLATION=1`, Issue #3360).
+ *
+ * Usable only when the file holds CommandMate's named hook and nothing else,
+ * exactly as this build writes it. A comparison against the merge with what is
+ * there would keep the user's own hooks (one may post straight to production)
+ * and still compare equal, so any other top-level key is refused, with its own
+ * reason.
+ */
+export function inspectAntigravityHooksConfigReadOnly(
+  options: { path?: string } = {}
+): AntigravitySharedHooksInspection {
+  const configPath = getAntigravityHooksConfigPath(options);
+  if (!isHookInjectionEnabled()) {
+    return {
+      usable: false,
+      reason: 'CM_AGENT_HOOKS_INJECT=0',
+      fix: 'Do not combine CM_AGENT_HOOKS_INJECT=0 with UAT isolation.',
+    };
+  }
+  const relayPath = resolveRelayScriptPath();
+  if (!relayPath) {
+    return { usable: false, reason: 'this build ships no relay script', fix: UAT_SAME_BUILD_FIX };
+  }
+  const existing = readJsonObjectFile(configPath);
+  if (existing === null) {
+    logger.info('antigravity-hooks-config-absent-readonly', { configPath });
+    return { usable: false, reason: `${configPath} does not exist or cannot be read`, fix: UAT_SAME_BUILD_FIX };
+  }
+  if (Object.keys(existing).some((key) => key !== ANTIGRAVITY_HOOK_NAME)) {
+    logger.info('antigravity-hooks-config-foreign-readonly', { configPath });
+    return {
+      usable: false,
+      reason: `${configPath} also holds hooks (or keys) CommandMate did not write, which would run in the UAT session`,
+      fix: 'Skip antigravity scenarios in this UAT, or run it where the shared hooks file holds only the hook CommandMate writes.',
+    };
+  }
+  const own = mergeAntigravityHooksConfig(null, buildAntigravityHookConfig(relayPath));
+  if (JSON.stringify(existing) !== JSON.stringify(own)) {
+    logger.info('antigravity-hooks-config-differs-readonly', { configPath });
+    return { usable: false, reason: `${configPath} differs from what this build writes`, fix: UAT_SAME_BUILD_FIX };
+  }
+  return { usable: true, configPath };
+}
+
 /**
  * Write `~/.gemini/config/hooks.json`.
  *
@@ -427,19 +478,15 @@ export function writeAntigravityHooksConfig(options: { path?: string } = {}): st
 
   const configPath = getAntigravityHooksConfigPath(options);
   try {
-    const existing = readJsonObjectFile(configPath);
-    const merged = mergeAntigravityHooksConfig(existing, buildAntigravityHookConfig(relayPath));
     if (isUatIsolationEnabled()) {
       // Issue #3360: the file is the user's, shared with their production
       // server, and names a relay by this checkout's path. A UAT server writes
-      // nothing to it: one that already says exactly this is used as it is;
-      // anything else answers null, which `prepareLaunch` refuses to launch.
-      if (existing !== null && JSON.stringify(existing) === JSON.stringify(merged)) {
-        return configPath;
-      }
-      logger.info('antigravity-hooks-config-differs-readonly', { configPath });
-      return null;
+      // nothing to it; see {@link inspectAntigravityHooksConfigReadOnly}.
+      const inspection = inspectAntigravityHooksConfigReadOnly(options);
+      return inspection.usable ? inspection.configPath : null;
     }
+    const existing = readJsonObjectFile(configPath);
+    const merged = mergeAntigravityHooksConfig(existing, buildAntigravityHookConfig(relayPath));
     writeJsonObjectFile(configPath, merged);
     return configPath;
   } catch (error) {

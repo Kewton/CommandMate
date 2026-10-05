@@ -695,27 +695,36 @@ export function writeCodexHookSettings(options: CodexHookOptions = {}): string |
   return settingsPath;
 }
 
+/** What {@link inspectCodexSharedHooksReadOnly} found: usable as it is, or why not. */
+export type CodexSharedHooksInspection =
+  | { usable: true; settingsPath: string }
+  | { usable: false; reason: string; fix: string };
+
 /**
- * {@link writeCodexHookSettings} for a server in UAT isolation mode
- * (`CM_UAT_ISOLATION=1`, Issue #3360): the same answer, with no write.
+ * Whether the shared `$CODEX_HOME/hooks.json` may be used, unwritten, by a
+ * server in UAT isolation mode (`CM_UAT_ISOLATION=1`, Issue #3360).
  *
  * `$CODEX_HOME/hooks.json`, the installed relay and the hook trust in
  * `config.toml` are shared with the user's production server and live beside
  * codex's login, so they cannot be moved for a UAT either. They do not need to
  * be written to work for one: the file holds no port, worktree or instance —
  * {@link buildCodexLaunchPlan} hands those to the session in its environment —
- * so a file production has already written, byte-identical to what this build
- * would write, delivers this session's events to THIS server.
+ * so a file production has already written delivers this session's events to
+ * THIS server.
  *
- * Anything else is answered with null, which the launch plan turns into a
- * refused launch ({@link UatIsolationLaunchRefusedError}) — not "codex without
- * hooks", because a bare codex reads the shared file anyway: no file yet, a file this build would change (a newer or
- * older CommandMate), or an installed relay whose bytes differ from the one this
- * build ships (the command string would match while running another script).
- *
- * @returns The path when the shared file can be used as it is, else null
+ * Usable means exactly one thing: the file is byte-identical to what this build
+ * writes into an EMPTY file. Comparing against the merge with what is there
+ * ({@link mergeCodexHookSettings}) would not do — the merge keeps the user's own
+ * handlers, so a file holding a hand-written hook that posts straight to
+ * production would compare equal and run in the UAT session. So these are all
+ * unusable, each with its reason: no file, an unreadable one, hooks or keys
+ * CommandMate did not write, a file this build would change (a newer or older
+ * CommandMate), or an installed relay whose bytes differ from the one this build
+ * ships (the command string would match while running another script).
  */
-export function reuseCodexHookSettingsReadOnly(options: CodexHookOptions = {}): string | null {
+export function inspectCodexSharedHooksReadOnly(
+  options: CodexHookOptions = {}
+): CodexSharedHooksInspection {
   const settingsPath = getCodexHooksPath(options);
 
   if (options.relayScriptPath === undefined) {
@@ -728,40 +737,62 @@ export function reuseCodexHookSettingsReadOnly(options: CodexHookOptions = {}): 
         readFileSync(shipped, 'utf8') !== readFileSync(installed, 'utf8')
       ) {
         logger.info('codex-hooks-shared-relay-differs-readonly', { installed });
-        return null;
+        return { usable: false, reason: `the installed relay ${installed} differs from the one this build ships`, fix: UAT_SAME_BUILD_FIX };
       }
     } catch {
-      return null;
+      return { usable: false, reason: `the installed relay ${installed} could not be read`, fix: UAT_SAME_BUILD_FIX };
     }
   }
 
-  let previous: string;
   try {
     if (!existsSync(settingsPath)) {
       logger.info('codex-hooks-shared-absent-readonly', { settingsPath });
-      return null;
+      return { usable: false, reason: `${settingsPath} does not exist`, fix: UAT_SAME_BUILD_FIX };
     }
-    previous = readFileSync(settingsPath, 'utf8');
-    if (previous !== renderCodexHookSettings(JSON.parse(previous), options)) {
-      logger.info('codex-hooks-shared-differs-readonly', { settingsPath });
-      return null;
+    const previous = readFileSync(settingsPath, 'utf8');
+    if (previous === renderCodexHookSettings(null, options)) {
+      return { usable: true, settingsPath };
     }
+    if (previous === renderCodexHookSettings(JSON.parse(previous), options)) {
+      logger.info('codex-hooks-shared-foreign-readonly', { settingsPath });
+      return {
+        usable: false,
+        reason: `${settingsPath} also holds hooks (or keys) CommandMate did not write, which would run in the UAT session`,
+        fix: 'Skip codex scenarios in this UAT, or run it where the shared hooks file holds only the hooks CommandMate writes.',
+      };
+    }
+    logger.info('codex-hooks-shared-differs-readonly', { settingsPath });
+    return { usable: false, reason: `${settingsPath} differs from what this build writes`, fix: UAT_SAME_BUILD_FIX };
   } catch (error) {
     logger.warn('codex-hooks-config-unreadable', {
       settingsPath,
       error: error instanceof Error ? error.message : String(error),
     });
-    return null;
+    return { usable: false, reason: `${settingsPath} could not be read`, fix: UAT_SAME_BUILD_FIX };
   }
-  return settingsPath;
+}
+
+/**
+ * {@link writeCodexHookSettings} for a server in UAT isolation mode: the path
+ * when {@link inspectCodexSharedHooksReadOnly} finds the shared file usable,
+ * else null — which the launch plan turns into a refused launch
+ * ({@link UatIsolationLaunchRefusedError}), not "codex without hooks", because
+ * a bare codex reads the shared file anyway.
+ */
+export function reuseCodexHookSettingsReadOnly(options: CodexHookOptions = {}): string | null {
+  const inspection = inspectCodexSharedHooksReadOnly(options);
+  return inspection.usable ? inspection.settingsPath : null;
 }
 
 /**
  * The plan that starts codex for one instance.
  *
- * Never throws: hooks are an enhancement to a session that has to start anyway,
- * so anything that goes wrong here returns the bare executable — which is
- * byte-for-byte the pre-#1760 launch.
+ * Never throws outside UAT isolation: hooks are an enhancement to a session
+ * that has to start anyway, so anything that goes wrong here returns the bare
+ * executable — which is byte-for-byte the pre-#1760 launch. Under
+ * `CM_UAT_ISOLATION=1` (Issue #3360) each of those roads throws
+ * {@link UatIsolationLaunchRefusedError} instead: a bare codex still reads the
+ * shared, trusted `hooks.json`.
  *
  * The environment assignments are the per-session half of the design. The
  * hooks file cannot hold them (there is one file for the machine), the payload
@@ -811,6 +842,8 @@ export function buildCodexLaunchPlan(
   try {
     const settingsPath = writeCodexHookSettings(options);
     if (!settingsPath) {
+      const inspection = isUatIsolationEnabled() ? inspectCodexSharedHooksReadOnly(options) : null;
+      if (inspection && !inspection.usable) return fallback(inspection.reason, inspection.fix);
       return fallback(
         `${getCodexHooksPath(options)} or its relay is missing or differs from what this build writes`,
         UAT_SAME_BUILD_FIX

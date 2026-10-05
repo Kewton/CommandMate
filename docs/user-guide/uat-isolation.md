@@ -10,9 +10,9 @@ UAT や日次の実機確認で CommandMate のサーバーと CLI を動かす�
 
 | 対象 | `CM_UAT_ISOLATION=1` のときの動き |
 |------|----------------------------------|
-| codex の `hooks.json` と relay | 書かない。本番が書いたものがこのビルドの内容とバイト単位で同じなら、そのまま使う（送り先は起動時の環境変数 `CM_HOOK_URL` で UAT のサーバーになる）。違えば**起動を拒否する**（セッションの開始が `CM_UAT_ISOLATION=1: refusing to start codex …` で失敗する）。素の codex も共有の `hooks.json` を読むので、「hook なしで起動」すると本番の信頼済みの hook が動いてしまうため。`CM_AGENT_HOOKS_INJECT=0` との組み合わせも同じ理由で拒否する |
+| codex の `hooks.json` と relay | 書かない。本番が書いたものが、このビルドが空のファイルに書く内容とバイト単位で同じ（CommandMate の hook だけ）なら、そのまま使う（送り先は起動時の環境変数 `CM_HOOK_URL` で UAT のサーバーになる）。違えば**起動を拒否する**（セッションの開始が `CM_UAT_ISOLATION=1: refusing to start codex …` で失敗する）。利用者が独自に足した hook が混ざっている場合も拒否する（本番へ直接送る hook もありうるため。拒否の文がその理由を言う）。素の codex も共有の `hooks.json` を読むので、「hook なしで起動」すると本番の信頼済みの hook が動いてしまうため。`CM_AGENT_HOOKS_INJECT=0` との組み合わせも同じ理由で拒否する |
 | codex の hook の信頼 | 信頼を与えない（与えると codex が `config.toml` に書く）。確認の画面が出たら「信頼せずに続ける」で答え、そのセッションは hook なしになる |
-| antigravity の `~/.gemini/config/hooks.json` | 書かない。同じ内容が既にあれば使い、無い・違えば**起動を拒否する**（agy は共有のファイルを必ず読むため。codex と同じ理由） |
+| antigravity の `~/.gemini/config/hooks.json` | 書かない。CommandMate の hook だけで同じ内容が既にあれば使い、無い・違う・独自の hook が混ざっていれば**起動を拒否する**（agy は共有のファイルを必ず読むため。codex と同じ理由） |
 | claude | `--setting-sources project,local` を付けて起動する。利用者の `settings.json`（hook とプラグインを含む）は読まれず、CommandMate の `--settings` とリポジトリの `.claude/settings*.json` は読まれる。Schedule と日次まとめの `claude -p` にも同じ制限を付ける |
 | Schedule・日次まとめの `codex exec`・`agy -p` | **実行を拒否する**（実行結果は failed、エラーは `CM_UAT_ISOLATION=1: refusing to start a headless codex run …`）。どちらも共有の `hooks.json` を必ず読み、非対話の実行には送り先（`CM_HOOK_URL`）も相関キーも渡らないので、hook は relay の既定（`CM_PORT`、無ければ 3000 = 本番）へ送る。実行ごとに hook を止める口も送り先を変える口も無い |
 | CLI（`ApiClient` を使うコマンド） | `.env` を一切読まない。`CM_PORT` が無ければ 3000 に送らず exit 2 で止まる |
@@ -59,7 +59,7 @@ env -i HOME="$RUN_DIR/client-home" PATH="$PATH" CM_UAT_ISOLATION=1 \
 
 | 場面 | skip にする条件 |
 |------|----------------------------------------|
-| codex の場面すべて（起動の拒否） | codex のセッションの開始が `CM_UAT_ISOLATION=1: refusing to start codex` で失敗した（サーバーのログに `codex-hooks-shared-absent-readonly`・`codex-hooks-shared-differs-readonly`・`codex-hooks-shared-relay-differs-readonly` のどれかも出る）。共有の `hooks.json` か relay が無い・このビルドと違うので、本番と同じビルドで UAT するまで codex の場面は動かせない |
+| codex の場面すべて（起動の拒否） | codex のセッションの開始が `CM_UAT_ISOLATION=1: refusing to start codex` で失敗した（サーバーのログに `codex-hooks-shared-absent-readonly`・`codex-hooks-shared-differs-readonly`・`codex-hooks-shared-foreign-readonly`・`codex-hooks-shared-relay-differs-readonly` のどれかも出る）。共有の `hooks.json` か relay が無い・このビルドと違う・独自の hook が混ざっているので、本番と同じビルドで UAT するまで codex の場面は動かせない |
 | codex の hook を見る場面 | hook の確認の画面が出た（信頼が合っていない）。信頼せずに続けるので、そのセッションの hook は動かない。画面の読み取りだけで判定できる場面に限る |
 | codex の場面すべて | `~/.codex` の変化を一切許さない確認では skip。codex 自身が `config.toml` にフォルダの信頼（`{run_dir}` の下のパス）を、`version.json` に更新の知らせへの答えを書くのは防げない。`hooks.json` と relay の変化は `env.down` が検出する |
 | antigravity の場面すべて（起動の拒否） | antigravity のセッションの開始が `CM_UAT_ISOLATION=1: refusing to start antigravity` で失敗した（サーバーのログに `antigravity-hooks-config-differs-readonly` も出ることがある）。共有のファイルは relay を checkout のパスで書くので、worktree のビルドではほぼいつもこうなる |

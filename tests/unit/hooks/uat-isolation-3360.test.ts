@@ -150,6 +150,52 @@ describe('codex shared files under CM_UAT_ISOLATION=1', () => {
     expect(readFileSync(getCodexHooksPath(), 'utf8')).toBe(stale);
   });
 
+  it('refuses the launch when the shared file also holds a hook CommandMate did not write', () => {
+    // The user's own handler — here one that posts straight to production —
+    // merged by a production server: what this build would write into THIS
+    // file is the file itself, yet the user's hook would run in the UAT session.
+    mkdirSync(codexHome, { recursive: true });
+    writeFileSync(
+      getCodexHooksPath(),
+      JSON.stringify({
+        hooks: {
+          Stop: [{ hooks: [{ type: 'command', command: 'curl -s http://127.0.0.1:3000/api/mine' }] }],
+        },
+      })
+    );
+    primeSharedCodexFilesAsProduction();
+    const shared = readFileSync(getCodexHooksPath(), 'utf8');
+    expect(shared).toContain('/api/mine');
+    process.env[UAT_ISOLATION_ENV_VAR] = '1';
+
+    expect(writeCodexHookSettings()).toBeNull();
+    const launch = () =>
+      buildCodexLaunchPlan(
+        'codex',
+        { worktreeId: 'wt-uat', cliToolId: 'codex', instanceId: 'codex' },
+        { port: 3017, supportsNoDaemon: true }
+      );
+    expect(launch).toThrow(UatIsolationLaunchRefusedError);
+    expect(launch).toThrow(/hooks \(or keys\) CommandMate did not write/);
+    expect(readFileSync(getCodexHooksPath(), 'utf8')).toBe(shared);
+  });
+
+  it('negative control: unset, a shared file with the user\'s own hook still launches', () => {
+    mkdirSync(codexHome, { recursive: true });
+    writeFileSync(
+      getCodexHooksPath(),
+      JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command: 'echo mine' }] }] } })
+    );
+
+    const plan = buildCodexLaunchPlan(
+      'codex',
+      { worktreeId: 'wt-uat', cliToolId: 'codex', instanceId: 'codex' },
+      { port: 3017, supportsNoDaemon: true }
+    );
+    expect(plan.settingsPath).toBe(getCodexHooksPath());
+    expect(readFileSync(getCodexHooksPath(), 'utf8')).toContain('echo mine');
+  });
+
   it('refuses the launch when the shared file is absent, and under CM_AGENT_HOOKS_INJECT=0', () => {
     process.env[UAT_ISOLATION_ENV_VAR] = '1';
     const target = { worktreeId: 'wt-uat', cliToolId: 'codex' as const, instanceId: 'codex' };
@@ -315,6 +361,31 @@ describe('antigravity launch under CM_UAT_ISOLATION=1', () => {
       /same CommandMate build as the production server/
     );
     expect(readFileSync(geminiHooks(), 'utf8')).toBe(foreign);
+  });
+
+  it('refuses the launch when the shared hooks.json also holds a hook CommandMate did not write', () => {
+    mkdirSync(join(scratch, 'home', '.gemini', 'config'), { recursive: true });
+    writeFileSync(geminiHooks(), JSON.stringify({ mine: { command: 'curl -s http://127.0.0.1:3000/api/mine' } }));
+    // Merged by a production server: CommandMate's hook is exactly this build's.
+    expect(antigravityAgentEventSource.prepareLaunch(context).settingsPath).toBe(geminiHooks());
+    const shared = readFileSync(geminiHooks(), 'utf8');
+    expect(shared).toContain('/api/mine');
+    process.env[UAT_ISOLATION_ENV_VAR] = '1';
+
+    expect(writeAntigravityHooksConfig({ path: geminiHooks() })).toBeNull();
+    expect(() => antigravityAgentEventSource.prepareLaunch(context)).toThrow(UatIsolationLaunchRefusedError);
+    expect(() => antigravityAgentEventSource.prepareLaunch(context)).toThrow(
+      /hooks \(or keys\) CommandMate did not write/
+    );
+    expect(readFileSync(geminiHooks(), 'utf8')).toBe(shared);
+  });
+
+  it('negative control: unset, a shared hooks.json with the user\'s own hook still launches', () => {
+    mkdirSync(join(scratch, 'home', '.gemini', 'config'), { recursive: true });
+    writeFileSync(geminiHooks(), JSON.stringify({ mine: { command: 'echo mine' } }));
+
+    expect(antigravityAgentEventSource.prepareLaunch(context).settingsPath).toBe(geminiHooks());
+    expect(readFileSync(geminiHooks(), 'utf8')).toContain('echo mine');
   });
 
   it('launches against a shared hooks.json that already matches this build', () => {

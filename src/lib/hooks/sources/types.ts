@@ -630,9 +630,13 @@ export interface AgentEventSource {
    * The command that starts this agent, with whatever config it needs written
    * out first (S3 / S4 / S5).
    *
-   * Must never throw: injecting hooks is an enhancement to a session that has
-   * to start anyway, so a config that cannot be written costs the events and
-   * returns the bare executable.
+   * Must never throw, with one exception: injecting hooks is an enhancement to
+   * a session that has to start anyway, so a config that cannot be written
+   * costs the events and returns the bare executable. The exception is UAT
+   * isolation (`CM_UAT_ISOLATION=1`, Issue #3360): codex and antigravity throw
+   * `UatIsolationLaunchRefusedError` instead, because their bare executable
+   * still reads the user's shared hook config. Callers build the plan BEFORE
+   * creating the tmux session, so a refusal leaves no pane behind.
    *
    * Takes {@link AgentLaunchContext} rather than `(target, executablePath)`
    * since Issue #1846, so the one input a per-worktree config needs is inside
