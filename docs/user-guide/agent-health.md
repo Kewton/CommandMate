@@ -322,6 +322,9 @@ tmux -L cm-agent-health kill-server
   複雑度 25 以上の 83 関数など）は起票せず、`value` と `details` の件数として残す
 - 性能の Issue には `perf` ラベルが付く。起票まで自動・修正は人が着手する（自動依頼の対象外）。自動で直させたいときは `perf` を外す
 - 未使用のファイル（`unused` の knip `files`）の Issue には `needs-human` ラベルが付く。「候補に出たこと」と「消して安全なこと」は別なので、消す判断は人が行う（自動依頼の対象外）
+- knip の設定は `knip.json`（JSON なのでコメントは書けず、除外の理由はここに書く）。`entry` のうち `tests/fixtures/remote/*.cjs` は
+  `tests/unit/lib/remote/cloudflare-child-survival.test.ts` が `import` ではなくパスで `node` に起動させるため、knip からは
+  未使用に見える（knip の誤り、Issue #3315）。パスで起動するファイルを足したら、ここと `entry` に足す
 - 前回値が無い指標（初回・前回が skip のまま）は基準として記録するだけで、候補を出さない
 - security の検出が続いている間は `status: 'fail'`。前からあるものは `outstanding` に入り、AI はその日の起票枠（4 件）に
   余りがあるときだけ、まだ Issue の無いものを立てる（初日に見送った advisory も翌日以降に回る）
