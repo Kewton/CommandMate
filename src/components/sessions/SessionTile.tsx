@@ -80,6 +80,9 @@
  *   visibility is the tile scope of `useHistoryPaneState`
  *   (`commandmate.sessions.tileHistoryVisible`, shown by default), so a tile
  *   and the worktree screen never close each other's History.
+ * - **Selection lists** (Issue #3336). The terminal surface mounts
+ *   `SelectionListKeys` under the frame, the part every other surface mounts,
+ *   so a picker is answerable here without switching back to chat.
  *
  * The surface itself is remembered per worktree — `useSessionTileSurfaceMode`.
  *
@@ -101,6 +104,7 @@ import { ChatSurface, type ChatSurfaceLiveState } from '@/components/worktree/Ch
 import { HistoryPane } from '@/components/worktree/HistoryPane';
 import { TerminalDisplay } from '@/components/worktree/TerminalDisplay';
 import { SessionStartingNotice } from '@/components/worktree/SessionStartingNotice';
+import { SelectionListKeys } from '@/components/worktree/SelectionListKeys';
 import { MessageInput } from '@/components/worktree/MessageInput';
 import { AutoYesToggle } from '@/components/worktree/AutoYesToggle';
 import { StatusDot } from '@/components/ui';
@@ -206,6 +210,45 @@ export const SESSION_TILE_TERMINAL_ROW_CLASS = 'flex-[3_3_0%] min-h-[8.5rem]';
 
 /** History's share and floor under the terminal. See {@link SESSION_TILE_TERMINAL_ROW_CLASS}. */
 export const SESSION_TILE_HISTORY_ROW_CLASS = 'flex-[2_2_0%] min-h-[6.5rem]';
+
+/**
+ * The selection-list controls' row on the terminal surface (Issue #3336): a
+ * 3rem floor (one row of the arrow pad stays on screen) and an 8rem cap, past
+ * which the row scrolls instead of taking more of the stack.
+ */
+export const SESSION_TILE_SELECTION_KEYS_ROW_CLASS = 'min-h-[3rem] max-h-[8rem]';
+
+/**
+ * The body's floor while that row is on screen (Issue #3336).
+ *
+ * The two #2510 floors (8.5rem + 6.5rem) already add up to
+ * {@link SESSION_TILE_BODY_FLOOR_CLASS}, so a third row with a floor of its own
+ * did not fit: with History stacked and the composer grown to its bound, the
+ * body was 15rem and the stack wanted 18rem, and `overflow-hidden` cut History's
+ * bottom off. So the floor grows by the row's 3rem while the row is drawn, and
+ * the composer's bound (`useComposerMaxHeight`) is measured against that floor —
+ * the composer gives the row its height rather than History losing it.
+ */
+export const SESSION_TILE_BODY_FLOOR_WITH_SELECTION_KEYS_CLASS = 'min-h-[18rem]';
+
+/** {@link SESSION_TILE_BODY_FLOOR_WITH_SELECTION_KEYS_CLASS} in px (18rem at 16px). */
+export const SESSION_TILE_BODY_FLOOR_WITH_SELECTION_KEYS_PX = 288;
+
+/**
+ * The body's floor for this frame: the class the body is drawn with and the px
+ * the composer's bound is measured against, always the same pair (Issue #3336).
+ */
+export function sessionTileBodyFloor(selectionKeysVisible: boolean): {
+  className: string;
+  px: number;
+} {
+  return selectionKeysVisible
+    ? {
+        className: SESSION_TILE_BODY_FLOOR_WITH_SELECTION_KEYS_CLASS,
+        px: SESSION_TILE_BODY_FLOOR_WITH_SELECTION_KEYS_PX,
+      }
+    : { className: SESSION_TILE_BODY_FLOOR_CLASS, px: SESSION_TILE_BODY_FLOOR_PX };
+}
 
 /** DOM id of one tile's stacked History region — the header toggle's `aria-controls`. */
 export function sessionTileHistoryRegionId(worktreeId: string): string {
@@ -358,10 +401,10 @@ function SessionTileCard({
 
   // Issue #2598: the composer's height handle, bounded by what the body can give
   // up above its floor. Elements in state because the composer mounts only
-  // while the tile is on screen.
+  // while the tile is on screen. The bound itself is measured below, once the
+  // floor is known (Issue #3336).
   const [bodyEl, setBodyEl] = useState<HTMLDivElement | null>(null);
   const [composerEl, setComposerEl] = useState<HTMLDivElement | null>(null);
-  const composerMaxHeight = useComposerMaxHeight(bodyEl, composerEl, SESSION_TILE_BODY_FLOOR_PX);
 
   // Issue #2511: the tile profile, not the worktree screen's. A tile is one of
   // up to twenty live panes on one screen, and the profile is what keeps that
@@ -487,6 +530,13 @@ function SessionTileCard({
     sessionStartingScopeKey(worktree.id, resolvedInstanceId),
     terminal.startingSince,
   );
+
+  // Issue #3336: the selection-list controls under the terminal, and the body
+  // floor that makes room for them — see sessionTileBodyFloor.
+  const showSelectionKeys =
+    enabled && isTerminalSurface && terminal.isSelectionListActive && !startingGate.starting;
+  const bodyFloor = sessionTileBodyFloor(showSelectionKeys);
+  const composerMaxHeight = useComposerMaxHeight(bodyEl, composerEl, bodyFloor.px);
 
   // Issue #2510: ChatSurface's banner offers a way out to the terminal. Phase 1
   // had no terminal here and navigated to the worktree screen; the tile now has
@@ -629,7 +679,7 @@ function SessionTileCard({
           SESSION_TILE_BODY_FLOOR_CLASS. */}
       <div
         ref={setBodyEl}
-        className={`min-w-0 flex-1 overflow-hidden ${SESSION_TILE_BODY_FLOOR_CLASS}`}
+        className={`min-w-0 flex-1 overflow-hidden ${bodyFloor.className}`}
         data-testid={`session-tile-body-${worktree.id}`}
       >
         {enabled && isTerminalSurface ? (
@@ -669,6 +719,31 @@ function SessionTileCard({
                 />
               )}
             </div>
+            {/* Issue #3336: the same part the PC split's footer mounts, on the
+                tile's terminal surface. Before it, a selection list could only
+                be driven from the chat card (#3305 gave the other two terminal
+                surfaces the part and left the tile out). Handed the frame the
+                tile is drawing, so what it offers — arrows, number keys,
+                claude's "this session only" / "set as default" — is
+                `resolveSelectionListOps`' decision, exactly as on PC. The row
+                scrolls inside its cap, and the body's floor grows by its 3rem
+                floor while it is drawn (sessionTileBodyFloor). */}
+            {showSelectionKeys ? (
+              <div
+                className={`min-w-0 shrink overflow-y-auto border-t border-border p-2 ${SESSION_TILE_SELECTION_KEYS_ROW_CLASS}`}
+                data-testid={`session-tile-selection-keys-${worktree.id}`}
+              >
+                <SelectionListKeys
+                  worktreeId={worktree.id}
+                  cliToolId={cliToolId}
+                  instanceId={resolvedInstanceId}
+                  onKeysSent={refresh}
+                  frame={terminal.output}
+                  surface="terminal"
+                  showPagerKeys={terminal.isPagerActive}
+                />
+              </div>
+            ) : null}
             {showStackedHistory && (
               <div
                 id={historyRegionId}

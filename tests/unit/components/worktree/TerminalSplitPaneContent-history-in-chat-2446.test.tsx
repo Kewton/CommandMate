@@ -99,6 +99,9 @@ vi.mock('@/components/worktree/ChatSurface', () => ({
       data-message-count={String(messages.length)}
     />
   ),
+  // Issue #3336: the footer's opencode strip asks whether the card is open on a
+  // selection list. This suite stubs the surface, so no card is ever open.
+  isChatCardSelectionListOpen: () => false,
 }));
 
 vi.mock('@/components/worktree/TerminalDisplay', () => ({
