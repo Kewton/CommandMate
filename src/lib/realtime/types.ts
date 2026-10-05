@@ -10,7 +10,6 @@
 
 import type { ChatMessage, LivePromptData } from '@/types/models';
 import type { CLIToolType } from '@/lib/cli-tools/types';
-import type { PromptView } from '@/lib/session/prompt-view';
 
 export type RealtimeStatus = 'connecting' | 'connected' | 'disconnected' | 'error';
 
@@ -163,13 +162,6 @@ export interface TerminalSnapshotEvent {
    * `carriesAnswerable` in `useTerminalPanePolling`.
    */
   promptAnswerable?: boolean;
-  /**
-   * Issue #3184: `buildCurrentOutput`'s `promptView`, carried on the push so a
-   * client reads the same verdict the poll gets. Optional: a server older than
-   * #3184 sends none, and a reader then derives it from {@link promptData} with
-   * the same function (`readPromptView`).
-   */
-  promptView?: PromptView | null;
   isSelectionListActive: boolean;
   isPagerActive: boolean;
   /**

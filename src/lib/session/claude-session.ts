@@ -34,7 +34,6 @@ import { promisify } from 'util';
 import { access, constants } from 'fs/promises';
 import { createLogger } from '@/lib/logger';
 import { assertSessionNotForeign } from '@/lib/cli-tools/session-ownership';
-import { CLAUDE_RESTART_DELAY_MS } from '@/config/cli-tool-timing-config';
 import { resolveSessionName } from '@/lib/cli-tools/session-name';
 import { CLAUDE_CLI_TOOL_ID } from '@/lib/hooks/sources';
 import { shellQuote } from '@/lib/hooks/hook-settings-generator';
@@ -564,15 +563,6 @@ export interface ClaudeSessionOptions {
 }
 
 /**
- * Claude session state
- */
-export interface ClaudeSessionState {
-  sessionName: string;
-  isRunning: boolean;
-  lastActivity: Date;
-}
-
-/**
  * Get tmux session name for a worktree
  *
  * Issue #868: Supports additional agent instances. The primary instance
@@ -646,35 +636,6 @@ export async function isClaudeRunning(worktreeId: string, instanceId?: string): 
     return false;
   }
   return true;
-}
-
-/**
- * Get Claude session state
- *
- * C-S3-002: This function checks tmux session existence via hasSession() but
- * does NOT perform health checks (unlike isClaudeRunning()). This is intentional:
- * getClaudeSessionState() is a lightweight status query for UI display purposes,
- * while isClaudeRunning() performs the more expensive health check for operational
- * decisions (e.g., whether to recreate a session).
- *
- * If health-aware state is needed, callers should use isClaudeRunning() instead
- * or call ensureHealthySession() separately.
- *
- * @param worktreeId - Worktree ID
- * @returns Session state information (existence-based, not health-based)
- */
-export async function getClaudeSessionState(
-  worktreeId: string,
-  instanceId?: string
-): Promise<ClaudeSessionState> {
-  const sessionName = getSessionName(worktreeId, instanceId);
-  const isRunning = await hasSession(sessionName);
-
-  return {
-    sessionName,
-    isRunning,
-    lastActivity: new Date(),
-  };
 }
 
 /**
@@ -1001,32 +962,4 @@ export async function stopClaudeSession(worktreeId: string, instanceId?: string)
   // state about it.
   discardAgentEventState(worktreeId, 'claude', instanceId);
   return stopped;
-}
-
-/**
- * Restart a Claude session
- *
- * @param options - Session options
- *
- * @example
- * ```typescript
- * await restartClaudeSession({
- *   worktreeId: 'feature-foo',
- *   worktreePath: '/path/to/worktree',
- * });
- * ```
- */
-export async function restartClaudeSession(
-  options: ClaudeSessionOptions
-): Promise<void> {
-  const { worktreeId, instanceId } = options;
-
-  // Stop existing session
-  await stopClaudeSession(worktreeId, instanceId);
-
-  // Wait a moment before restarting
-  await new Promise((resolve) => setTimeout(resolve, CLAUDE_RESTART_DELAY_MS));
-
-  // Start new session
-  await startClaudeSession(options);
 }

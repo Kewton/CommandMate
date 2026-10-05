@@ -175,12 +175,6 @@ export const OPENCODE_V2_COMPOSER_WAIT_MS = 15000;
 export const CLAUDE_ENV_SANITIZE_WAIT_MS = 100;
 
 /**
- * Wait (ms) before restarting a Claude session, after the old session is stopped.
- * Site: claude-session restartClaudeSession().
- */
-export const CLAUDE_RESTART_DELAY_MS = 1000;
-
-/**
  * Wait (ms) between the two liveness readings that must agree before a reuse
  * path re-sends a launch command (Issue #2070).
  *
