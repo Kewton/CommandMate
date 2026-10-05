@@ -335,7 +335,6 @@ interface PromptCompositionInput {
   cliToolId: CLIToolType;
   output: string;
   statusResult: StatusDetectionResult;
-  scraperPromptWaiting: boolean;
   startingSince: number | null;
   promptWaiting: StructuredPromptWaitingState | null;
   askUserQuestion: AskUserQuestionEpisode | null;
@@ -360,12 +359,12 @@ function composePromptData({
   cliToolId,
   output,
   statusResult,
-  scraperPromptWaiting,
   startingSince,
   promptWaiting,
   askUserQuestion,
   eventSource,
 }: PromptCompositionInput): PromptComposition {
+  const scraperPromptWaiting = statusResult.hasActivePrompt;
   // Issue #1726: the agent's own account of what it asked. It contributes only
   // where some other layer has already established that a dialog is on screen —
   // this record decides no status of its own, because Claude emits nothing at
@@ -772,7 +771,6 @@ async function buildPayload(
     cliToolId,
     output,
     statusResult,
-    scraperPromptWaiting,
     startingSince,
     promptWaiting,
     askUserQuestion,
