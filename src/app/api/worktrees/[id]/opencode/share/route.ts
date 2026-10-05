@@ -57,6 +57,7 @@ import {
   type OpencodeShareState,
 } from '@/types/opencode-share';
 import type { AgentInstanceRef } from '@/lib/hooks/sources/types';
+import { readOptionalJsonObjectBody } from '@/lib/api/read-json-body';
 
 const logger = createLogger('api/opencode-share');
 
@@ -224,12 +225,11 @@ export async function POST(
     const missing = requireWorktree(worktreeId);
     if (missing) return missing;
 
-    let body: Record<string, unknown> = {};
-    try {
-      body = (await request.json()) as Record<string, unknown>;
-    } catch {
-      // An absent body means the primary instance; the default below covers it.
-    }
+    const parsed = await readOptionalJsonObjectBody<Record<string, unknown>>(request);
+
+    if (!parsed.ok) return parsed.response;
+
+    const body = parsed.body;
 
     const resolved = readInstanceId(worktreeId, body.instanceId);
     if ('error' in resolved) return resolved.error;

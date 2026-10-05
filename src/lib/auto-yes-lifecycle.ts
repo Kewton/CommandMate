@@ -79,6 +79,12 @@ export interface AutoYesLifecycleRule {
  * reason (no new reason was added), for the instance only. `server-shutdown`
  * deliberately does not persist anything: the state lives in memory, and a
  * restarted server starting with every grant off is the safe side.
+ *
+ * `consecutive-errors` is for real capture failures only: a session that
+ * exists but cannot be read. A session that does not exist (not started yet,
+ * or not started at all) is not one — the poller waits for it until
+ * `expiresAt`, at the backoff cap (Issue #3329), since the grant is
+ * independent of the session.
  */
 export const AUTO_YES_LIFECYCLE: Readonly<Record<AutoYesLifecycleEvent, AutoYesLifecycleRule>> = {
   'session-killed': { state: 'disable', poller: 'stop' },

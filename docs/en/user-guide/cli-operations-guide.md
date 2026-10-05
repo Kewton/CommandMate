@@ -1416,6 +1416,8 @@ commandmate auto-yes <worktree-id> --enable --instance codex-2  # Scoped to one 
 | `--instance <id>` | **The recommended way to name the target.** The instance ID; Auto-Yes is controlled independently of the other instances |
 | `--agent <id>` | A helper for instances that are not in the roster (unnecessary when `--instance` alone is enough) |
 
+Enabled for an instance whose session is not running, Auto-Yes stays on until it expires (`--duration`) and answers once the session starts (Issue #3329); while it waits it checks once a minute. It stops with `consecutive_errors` only when failures keep coming in a row: the session exists but its screen cannot be read or the answer cannot be sent, or tmux itself cannot be asked.
+
 ### The Target Agent Is the Worktree's Default (Issue #1909)
 
 `auto-yes <id> --enable` with neither `--instance` nor `--agent` targets the **worktree's default

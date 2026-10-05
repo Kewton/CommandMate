@@ -12,10 +12,13 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import Database from 'better-sqlite3';
 import fs from 'fs';
+import { randomUUID } from 'crypto';
 import os from 'os';
 import path from 'path';
 import { runMigrations } from '@/lib/db/db-migrations';
 import { upsertWorktree } from '@/lib/db';
+import { createMemo } from '@/lib/db/memo-db';
+import { createTodo } from '@/lib/db/worktree-todo-db';
 import type { Worktree } from '@/types/models';
 
 const mockLogger = vi.hoisted(() => ({
@@ -136,6 +139,16 @@ describe('malformed JSON body → 400 Invalid request body (#3295)', () => {
     expect(await response.json()).toEqual({ error: 'Invalid request body' });
   });
 
+  for (const body of ['null', '[]', '1', '"text"']) {
+    it.each(ROUTES)(`%s: non-object body ${body} returns 400 and logs no error (#3333)`, async (route, handler) => {
+      const response = await call(handler, route, body);
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({ error: 'Invalid request body' });
+      expect(mockLogger.error).not.toHaveBeenCalled();
+    });
+  }
+
   it.each(ROUTES)('%s: well-formed JSON still reaches validation', async (route, handler) => {
     const response = await call(handler, route, JSON.stringify({}));
 
@@ -176,6 +189,11 @@ const SWEPT: Array<[string, string, string, Handler, Shape, string?]> = [
   ['templates/[id] PUT', 'PUT', `templates/${TEMPLATE_ID}`, templatePUT as Handler, 'error'],
   ['templates POST', 'POST', 'templates', templatesPOST as Handler, 'error'],
 ];
+
+const OWN_OBJECT_CHECK = new Set([
+  'cli-tool PATCH', 'worktree PATCH', 'instances/notes PUT', 'instances/opencode PUT',
+  'push/escalation PATCH', 'repositories/[id] PUT', 'daily-summary POST',
+]);
 
 function callSwept(handler: Handler, method: string, path: string, body: string) {
   const request = new NextRequest(`http://localhost:3000/api/${path}`, {
@@ -219,18 +237,23 @@ describe('malformed JSON body → 400 in the remaining routes (#3295 sweep)', ()
     fs.rmSync(worktreeDir, { recursive: true, force: true });
   });
 
-  for (const body of ['this is not valid JSON', '']) {
-    it.each(SWEPT)(`%s: ${body === '' ? 'empty body' : 'broken JSON'} → 400 and no error log`, async (_label, method, path, handler, shape) => {
+  for (const body of ['this is not valid JSON', '', 'null', '[]', '1']) {
+    it.each(SWEPT)(`%s: ${body === '' ? 'empty body' : body === 'this is not valid JSON' ? 'broken JSON' : `non-object ${body}`} → 400 and no error log`, async (_label, method, path, handler, shape) => {
       const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
       const response = await callSwept(handler, method, path, body);
       const data = await response.json();
       consoleError.mockRestore();
 
+      // push/escalation normalizes field by field, so an array falls back to defaults (200) by design.
+      if (_label === 'push/escalation PATCH' && body === '[]') return;
       expect(response.status).toBe(400);
-      if (shape === 'error') expect(data).toEqual({ error: 'Invalid request body' });
-      if (shape === 'success-error') expect(data).toEqual({ success: false, error: 'Invalid request body' });
-      if (shape === 'files') expect(data).toEqual({ success: false, error: { code: 'INVALID_REQUEST', message: 'Invalid request body' } });
-      if (shape === 'clone') {
+      // Routes that already checked for an object keep their own wording (#3333).
+      const ownCheck = body !== 'this is not valid JSON' && body !== '' && OWN_OBJECT_CHECK.has(_label);
+      if (ownCheck) expect(data).toHaveProperty('error');
+      else if (shape === 'error') expect(data).toEqual({ error: 'Invalid request body' });
+      else if (shape === 'success-error') expect(data).toEqual({ success: false, error: 'Invalid request body' });
+      else if (shape === 'files') expect(data).toEqual({ success: false, error: { code: 'INVALID_REQUEST', message: 'Invalid request body' } });
+      else if (shape === 'clone') {
         expect(data.success).toBe(false);
         expect(data.error.code).toBe('INVALID_REQUEST_BODY');
         expect(data.error.message).toBe('Invalid request body');
@@ -239,4 +262,117 @@ describe('malformed JSON body → 400 in the remaining routes (#3295 sweep)', ()
       expect(consoleError).not.toHaveBeenCalled();
     });
   }
+});
+
+// Routes that read the body themselves (`.catch(() => ({}))` or a local try/catch) and then
+// destructure it: a JSON `null` used to throw a TypeError into the outer catch (#3333).
+type ReadRoute = [label: string, method: string, urlPath: string, modulePath: string, exportName: string, extraParams: Record<string, string>, valid?: string];
+const W = `worktrees/${WORKTREE_ID}`;
+const GIT = '@/app/api/worktrees/[id]/git';
+const SELF_READ: ReadRoute[] = [
+  ['git/branch/create', 'POST', `${W}/git/branch/create`, `${GIT}/branch/create/route`, 'POST', {}, '{}'],
+  ['git/branch/delete', 'POST', `${W}/git/branch/delete`, `${GIT}/branch/delete/route`, 'POST', {}, '{}'],
+  ['git/checkout', 'POST', `${W}/git/checkout`, `${GIT}/checkout/route`, 'POST', {}, '{}'],
+  ['git/commit', 'POST', `${W}/git/commit`, `${GIT}/commit/route`, 'POST', {}, '{}'],
+  ['git/fetch', 'POST', `${W}/git/fetch`, `${GIT}/fetch/route`, 'POST', {}, '{"remote":"bad name"}'],
+  ['git/pull', 'POST', `${W}/git/pull`, `${GIT}/pull/route`, 'POST', {}, '{"rebase":true,"ffOnly":true}'],
+  ['git/push', 'POST', `${W}/git/push`, `${GIT}/push/route`, 'POST', {}, '{"remote":"bad name"}'],
+  ['git/reset', 'POST', `${W}/git/reset`, `${GIT}/reset/route`, 'POST', {}, '{}'],
+  ['git/revert', 'POST', `${W}/git/revert`, `${GIT}/revert/route`, 'POST', {}, '{}'],
+  ['git/stage', 'POST', `${W}/git/stage`, `${GIT}/stage/route`, 'POST', {}, '{}'],
+  ['git/unstage', 'POST', `${W}/git/unstage`, `${GIT}/unstage/route`, 'POST', {}, '{}'],
+  ['git/stash/apply', 'POST', `${W}/git/stash/apply`, `${GIT}/stash/apply/route`, 'POST', {}, '{"index":-1}'],
+  ['git/stash/pop', 'POST', `${W}/git/stash/pop`, `${GIT}/stash/pop/route`, 'POST', {}, '{"index":-1}'],
+  ['git/stash/push', 'POST', `${W}/git/stash/push`, `${GIT}/stash/push/route`, 'POST', {}],
+  ['memos POST', 'POST', `${W}/memos`, '@/app/api/worktrees/[id]/memos/route', 'POST', {}],
+  ['memos PATCH', 'PATCH', `${W}/memos`, '@/app/api/worktrees/[id]/memos/route', 'PATCH', {}, '{}'],
+  ['memos/[memoId] PUT', 'PUT', `${W}/memos/MEMO`, '@/app/api/worktrees/[id]/memos/[memoId]/route', 'PUT', { memoId: 'MEMO' }],
+  ['todos POST', 'POST', `${W}/todos`, '@/app/api/worktrees/[id]/todos/route', 'POST', {}, '{}'],
+  ['todos PATCH', 'PATCH', `${W}/todos`, '@/app/api/worktrees/[id]/todos/route', 'PATCH', {}, '{}'],
+  ['todos/[todoId] PATCH', 'PATCH', `${W}/todos/TODO`, '@/app/api/worktrees/[id]/todos/[todoId]/route', 'PATCH', { todoId: 'TODO' }, '{}'],
+  ['schedules POST', 'POST', `${W}/schedules`, '@/app/api/worktrees/[id]/schedules/route', 'POST', {}, '{}'],
+  ['schedules/[scheduleId] PUT', 'PUT', `${W}/schedules/SCHEDULE`, '@/app/api/worktrees/[id]/schedules/[scheduleId]/route', 'PUT', { scheduleId: 'SCHEDULE' }],
+  ['cmate/schedules POST', 'POST', `${W}/cmate/schedules`, '@/app/api/worktrees/[id]/cmate/schedules/route', 'POST', {}, '{}'],
+  ['cmate/schedules PATCH', 'PATCH', `${W}/cmate/schedules`, '@/app/api/worktrees/[id]/cmate/schedules/route', 'PATCH', {}, '{}'],
+  ['cmate/schedules DELETE', 'DELETE', `${W}/cmate/schedules`, '@/app/api/worktrees/[id]/cmate/schedules/route', 'DELETE', {}, '{}'],
+  ['push/subscriptions DELETE', 'DELETE', 'push/subscriptions', '@/app/api/push/subscriptions/route', 'DELETE', {}, '{}'],
+  ['interrupt POST', 'POST', `${W}/interrupt`, '@/app/api/worktrees/[id]/interrupt/route', 'POST', {}, '{"instanceId":"../x"}'],
+  ['opencode/diff POST', 'POST', `${W}/opencode/diff`, '@/app/api/worktrees/[id]/opencode/diff/route', 'POST', {}, '{}'],
+  ['opencode/session POST', 'POST', `${W}/opencode/session`, '@/app/api/worktrees/[id]/opencode/session/route', 'POST', {}, '{}'],
+  ['opencode/share POST', 'POST', `${W}/opencode/share`, '@/app/api/worktrees/[id]/opencode/share/route', 'POST', {}, '{"instanceId":"../x"}'],
+  ['auto-yes POST', 'POST', `${W}/auto-yes`, '@/app/api/worktrees/[id]/auto-yes/route', 'POST', {}, '{}'],
+  ['marp-render POST', 'POST', `${W}/marp-render`, '@/app/api/worktrees/[id]/marp-render/route', 'POST', {}, '{}'],
+  ['direct-input POST', 'POST', `${W}/direct-input`, '@/app/api/worktrees/[id]/direct-input/route', 'POST', {}, '{}'],
+];
+
+let seeded: Record<string, string> = {};
+// These two keep their syntax-error wording for the object check too.
+const BODY_CHECK_MESSAGE: Record<string, string> = {
+  'auto-yes POST': 'Invalid JSON body',
+  'marp-render POST': 'Invalid JSON body',
+};
+
+describe('non-object JSON body → 400 in routes that read the body themselves (#3333)', () => {
+  beforeEach(() => {
+    mockDb = new Database(':memory:');
+    runMigrations(mockDb);
+    upsertWorktree(mockDb, {
+      id: WORKTREE_ID,
+      name: 'wt',
+      path: os.tmpdir(),
+      repositoryPath: '/path/to/repo',
+      repositoryName: 'repo',
+      cliToolId: 'claude',
+    });
+    vi.clearAllMocks();
+    mockLogger.withContext.mockReturnValue(mockLogger);
+    // memo / todo routes look the row up before they read the body.
+    const scheduleId = randomUUID();
+    mockDb.prepare(
+      `INSERT INTO scheduled_executions (id, worktree_id, name, message, cron_expression, created_at, updated_at)
+       VALUES (?, ?, 'job', 'hi', '0 * * * *', 1, 1)`
+    ).run(scheduleId, WORKTREE_ID);
+    seeded = {
+      SCHEDULE: scheduleId,
+      MEMO: createMemo(mockDb, WORKTREE_ID, { position: 0 }).id,
+      TODO: createTodo(mockDb, WORKTREE_ID, { content: 'x', position: 0 }).id,
+    };
+  });
+
+  afterEach(() => {
+    mockDb?.close();
+    mockDb = null;
+  });
+
+  async function callSelf([, method, urlPath, modulePath, exportName, extra]: ReadRoute, body: string) {
+    const mod = (await import(/* @vite-ignore */ modulePath)) as Record<string, Handler>;
+    const request = new NextRequest(`http://localhost:3000/api/${urlPath}`, {
+      method,
+      body,
+      headers: { 'Content-Type': 'application/json' },
+    });
+    return mod[exportName](request, { params: Promise.resolve({ id: WORKTREE_ID, ...Object.fromEntries(Object.entries(extra).map(([k, v]) => [k, seeded[v] ?? v])) }) });
+  }
+
+  for (const body of ['null', '[]', '1']) {
+    it.each(SELF_READ)(`%s: ${body} → 400, no error log`, async (...route) => {
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const response = await callSelf(route, body);
+      consoleError.mockRestore();
+
+      expect(response.status).toBe(400);
+      // The body check itself must answer, not an earlier id / 404 check.
+      expect(await response.json()).toEqual({ error: BODY_CHECK_MESSAGE[route[0]] ?? 'Invalid request body' });
+      expect(mockLogger.error).not.toHaveBeenCalled();
+      expect(consoleError).not.toHaveBeenCalled();
+    });
+  }
+
+  it.each(SELF_READ.filter((r) => r[6] !== undefined))('%s: an ordinary object body still reaches the route’s own validation', async (...route) => {
+    const response = await callSelf(route, route[6] as string);
+
+    expect(response.status).not.toBe(500);
+    const data = await response.json();
+    expect(data.error).not.toBe('Invalid request body');
+  });
 });

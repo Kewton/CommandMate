@@ -18,13 +18,13 @@ import { scanWorktrees } from '@/lib/git/worktrees';
 import { syncWorktreesAndCleanup } from '@/lib/session-cleanup';
 import fs from 'fs';
 import { createLogger } from '@/lib/logger';
-import { readJsonBody } from '@/lib/api/read-json-body';
+import { readJsonObjectBody } from '@/lib/api/read-json-body';
 
 const logger = createLogger('api/repositories-restore');
 
 export async function PUT(request: NextRequest) {
   try {
-    const parsed = await readJsonBody(request);
+    const parsed = await readJsonObjectBody(request);
     if (!parsed.ok) {
       return NextResponse.json({ success: false, error: 'Invalid request body' }, { status: 400 });
     }

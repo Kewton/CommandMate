@@ -20,7 +20,7 @@ import {
 } from '@/lib/daily-summary-generator';
 import type { DailyReport } from '@/lib/db/daily-report-db';
 import { SUMMARY_ALLOWED_TOOLS, MAX_USER_INSTRUCTION_LENGTH } from '@/config/review-config';
-import { readJsonBody } from '@/lib/api/read-json-body';
+import { readJsonBody, readJsonObjectBody } from '@/lib/api/read-json-body';
 
 // =============================================================================
 // Helpers
@@ -213,7 +213,7 @@ export async function POST(request: NextRequest) {
 
 export async function PUT(request: NextRequest) {
   try {
-    const parsed = await readJsonBody(request);
+    const parsed = await readJsonObjectBody(request);
     if (!parsed.ok) return parsed.response;
     const body = parsed.body;
     const { date, content } = body;

@@ -14,7 +14,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { readJsonBody } from '@/lib/api/read-json-body';
+import { readJsonObjectBody } from '@/lib/api/read-json-body';
 import { isCliToolType, isValidInstanceId, isPrimaryInstance } from '@/lib/cli-tools/types';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
@@ -61,7 +61,7 @@ export async function POST(
       return NextResponse.json({ error: 'Worktree not found' }, { status: 404 });
     }
 
-    const parsed = await readJsonBody(req);
+    const parsed = await readJsonObjectBody(req);
     if (!parsed.ok) return parsed.response;
     const body = parsed.body;
     const { cliToolId, message, delayMs, instanceId } = body;

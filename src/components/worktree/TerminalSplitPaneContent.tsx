@@ -79,6 +79,7 @@ import {
   hasOpenCodeSidebarObstruction,
 } from '@/components/worktree/OpencodeSidebarNotice';
 import { PromptPanel } from '@/components/worktree/PromptPanel';
+import { useTerminalSplitHidden } from './TerminalSplitHiddenContext';
 import { usePromptStuckCounter } from '@/hooks/usePromptStuckCounter';
 import { MessageInput } from '@/components/worktree/MessageInput';
 import { OpencodeTurnDiffPanel } from '@/components/worktree/OpencodeTurnDiffPanel';
@@ -474,14 +475,18 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
 
   // Issue #2869: the same prompt window shown again after two Sends in a row
   // (refused, or delivered to a frame that did not react) points the user at
-  // direct input. Counted on the window `PromptPanel` is actually drawing — the
-  // `showPrompt` declared above (before the handler
-  // that calls `markSubmitted`), so the count and the drawing cannot drift apart.
+  // direct input. Counted only on a window the user can see: `showPrompt`
+  // declared above (before the handler that calls `markSubmitted`) and not
+  // hidden behind another split's maximize (#3332). A hidden split still
+  // DRAWS its panel (under `display: none`) so the answer being edited in it
+  // survives the round trip; it just counts nothing.
+  const hiddenByMaximize = useTerminalSplitHidden();
+  const countPrompt = showPrompt && !hiddenByMaximize;
   const {
     showStuckHint: showPromptStuckHint,
     markSubmitted: markPromptSubmitted,
   } = usePromptStuckCounter({
-    promptData: showPrompt ? prompt.data : null,
+    promptData: countPrompt ? prompt.data : null,
     targetKey: `${worktreeId}:${cliToolId}:${resolvedInstanceId}`,
   });
 

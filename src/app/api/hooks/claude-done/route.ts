@@ -18,7 +18,7 @@ import { parseClaudeOutput } from '@/lib/claude-output';
 import { recordClaudeConversation } from '@/lib/conversation-logger';
 import { applyAgentStopEvent } from '@/lib/hooks/agent-event-service';
 import { createLogger } from '@/lib/logger';
-import { readJsonBody } from '@/lib/api/read-json-body';
+import { readJsonObjectBody } from '@/lib/api/read-json-body';
 
 const logger = createLogger('api/hooks-claude-done');
 
@@ -31,7 +31,7 @@ export async function POST(request: NextRequest) {
     const db = getDbInstance();
 
     // Parse request body
-    const parsedBody = await readJsonBody<ClaudeDoneRequest>(request);
+    const parsedBody = await readJsonObjectBody<ClaudeDoneRequest>(request);
     if (!parsedBody.ok) return parsedBody.response;
     const body = parsedBody.body;
 

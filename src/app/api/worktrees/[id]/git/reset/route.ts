@@ -26,6 +26,7 @@ import { getInitialBranch } from '@/lib/db';
 import { gitReset, getGitStatus, handleGitApiError } from '@/lib/git/git-utils';
 import { canonicalWorktreeId, resolveWorktreeOr404 } from '@/lib/git/git-route-worktree';
 import { COMMIT_HASH_PATTERN, type GitResetMode } from '@/types/git';
+import { readOptionalJsonObjectBody } from '@/lib/api/read-json-body';
 
 const VALID_MODES: ReadonlySet<GitResetMode> = new Set<GitResetMode>(['soft', 'mixed', 'hard']);
 
@@ -41,7 +42,11 @@ export async function POST(
       return worktree;
     }
 
-    const body = await request.json().catch(() => ({}));
+    const parsed = await readOptionalJsonObjectBody(request);
+
+    if (!parsed.ok) return parsed.response;
+
+    const body = parsed.body;
     const { target, mode, confirmBranch } = body;
 
     // mode allow-list.

@@ -2251,6 +2251,8 @@ commandmate auto-yes <worktree-id> --enable --instance codex-2  # 追加イン�
 | `--instance <id>` | **対象の推奨指定方法**。対象インスタンスID。他インスタンスと独立してAuto-Yesを制御 |
 | `--agent <id>` | roster に無いインスタンス向けの補助（`--instance` 単独で足りる場合は不要） |
 
+セッションが動いていないインスタンスで有効にしても、Auto-Yes は期限（`--duration`）まで有効のまま待ち、セッションが起動したら答えます（Issue #3329）。待っている間の確認は 1 分ごとです。止まる（`consecutive_errors`）のは、セッションはあるのに画面が読めない・答えを送れない失敗や、tmux に問い合わせられない失敗が続いたときです。
+
 ### 対象エージェントは worktree の既定（Issue #1909）
 
 `--instance` も `--agent` も付けない `auto-yes <id> --enable` は、
