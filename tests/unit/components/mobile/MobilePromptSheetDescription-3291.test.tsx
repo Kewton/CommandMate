@@ -84,4 +84,20 @@ describe('[#3291] phone sheet draws option descriptions and progress', () => {
     expect(screen.getByText('Blue')).toBeTruthy();
     expect(screen.getByText('Red')).toBeTruthy();
   });
+
+  it('unclassified with a decision id: the question text appears exactly once', () => {
+    const data = buildStructuredPromptData('wt-3291', {
+      source: 'notification',
+      message: 'Favourite colour?',
+      askUserQuestion: { question: 'Favourite colour?', labels: ['Blue', 'Red'], questionCount: 1 },
+      decisionOptions: null,
+      decisionId: 'frm_3291probeForm0000000000000000',
+    } as StructuredPromptFacts);
+    render(
+      <MobilePromptSheet promptData={data} visible answering={false} onRespond={vi.fn().mockResolvedValue(undefined)} />,
+    );
+    expect(screen.getByTestId('mobile-structured-question')).toBeTruthy();
+    expect(screen.queryByTestId('unclassified-ask-user-question')).toBeNull();
+    expect(screen.getAllByText('Favourite colour?').filter((el) => el.tagName === 'P')).toHaveLength(1);
+  });
 });

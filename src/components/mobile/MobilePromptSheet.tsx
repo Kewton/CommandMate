@@ -680,7 +680,8 @@ export default MobilePromptSheet;
  * mutually exclusive by construction — `readPromptQuestionChoices` answers null
  * whenever verdicts are published — and neither is drawn without a
  * `decisionId`, which is what makes a number here a verdict sent by id rather
- * than a keystroke. With neither, the sheet shows the message alone, as before.
+ * than a keystroke. With neither, the sheet shows the message and, when the
+ * agent's `askUserQuestion` is present, its question and label list (Issue #3291).
  */
 function StructuredDecisionContent({
   promptData,
@@ -710,16 +711,15 @@ function StructuredDecisionContent({
 
   return (
     <div className="space-y-3" data-testid="mobile-structured-decision">
-      {asked && (
+      {/* With a decision id the picker below draws the question itself. */}
+      {asked && !question && (
         <div className="space-y-1" data-testid="unclassified-ask-user-question">
           <p className="text-sm text-foreground break-words">{asked.question}</p>
-          {!question && (
-            <ul className="list-disc list-inside text-sm text-muted-foreground">
-              {asked.labels.map((label) => (
-                <li key={label}>{label}</li>
-              ))}
-            </ul>
-          )}
+          <ul className="list-disc list-inside text-sm text-muted-foreground">
+            {asked.labels.map((label) => (
+              <li key={label}>{label}</li>
+            ))}
+          </ul>
         </div>
       )}
       {message && (
