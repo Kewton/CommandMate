@@ -32,7 +32,7 @@ import { MobileDirectInputKeyboard } from '@/components/mobile/MobileDirectInput
 import { ErrorBoundary } from '@/components/error/ErrorBoundary';
 import { MessageInput } from '@/components/worktree/MessageInput';
 import type { ShowToast } from '@/types/markdown-editor';
-import { NavigationButtons } from '@/components/worktree/NavigationButtons';
+import { SelectionListKeys } from '@/components/worktree/SelectionListKeys';
 import { Button } from '@/components/ui/Button';
 import { FileViewer } from '@/components/worktree/FileViewer';
 import {
@@ -358,7 +358,8 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     isSelectionListActive,
     isPagerActive,
     promptAnswerable,
-    offersPlanApprove,
+    // Issue #3305: what the docked selection-list pad decides its controls from.
+    selectionListReading,
     // Issue #2592: the composer's permission-mode control reads these. The
     // phone's composer is docked outside `MobileTerminalTab` — which owns the
     // pane hook the PC split reads the same facts from — so they come off this
@@ -1099,14 +1100,23 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
               ) : null}
               {isSelectionListActive && !isMobileChatSurface && !showDirectInputKeyboard && !activeSessionStarting && (
                 <div className="px-2 pt-1 border-b border-border">
-                  <NavigationButtons
+                  {/* Issue #3305: the part the chat surface's card mounts —
+                      number keys, claude's "this session only" / "set as
+                      default", no `Enter` on a plan review (#2793 / #2809).
+                      This screen holds no frame (#736), so it passes the
+                      READING its own poll took off the response that raised
+                      `isSelectionListActive`. That is what keeps the pad the
+                      same on the other tabs (History / Files / Tools / Info),
+                      where no terminal tab is mounted: nothing here depends
+                      on one. */}
+                  <SelectionListKeys
                     worktreeId={worktreeId}
                     cliToolId={activeCliTab}
                     instanceId={activeInstanceId}
                     onKeysSent={fetchCurrentOutput}
+                    reading={selectionListReading}
+                    surface="terminal"
                     showPagerKeys={isPagerActive}
-                    // Issue #2809: no `Enter` on a plan review (see ChatSurface, #2793).
-                    hideEnterKey={offersPlanApprove}
                   />
                 </div>
               )}

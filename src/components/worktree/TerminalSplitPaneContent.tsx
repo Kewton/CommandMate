@@ -5,7 +5,8 @@
  * polling via `useTerminalPanePolling` and renders the full footer:
  *   - AutoYesToggle (Issue #740; per-split, keyed by this split's cliToolId so
  *     each CLI toggles auto-yes independently)
- *   - NavigationButtons (when CLI is in selection-list state, e.g. OpenCode)
+ *   - SelectionListKeys (when CLI is in selection-list state, e.g. OpenCode:
+ *     the arrow pad plus whatever that frame offers, Issue #3305)
  *   - OpencodeQuickKeys (opencode only, Issue #2046; collapsible since #2131)
  *   - PromptPanel (when /current-output reports isPromptWaiting)
  *   - MessageInput (always; carries draft persistence per splitIndex)
@@ -67,7 +68,7 @@ import { TerminalSplitPane } from '@/components/worktree/TerminalSplitPane';
 import type { AgentSessionSnapshot } from '@/types/agent-session';
 import { TerminalDisplay } from '@/components/worktree/TerminalDisplay';
 import { getTerminalDisplayCompaction } from '@/config/terminal-display-compaction';
-import { NavigationButtons } from '@/components/worktree/NavigationButtons';
+import { SelectionListKeys } from '@/components/worktree/SelectionListKeys';
 import { TerminalEscapeHatch } from '@/components/worktree/TerminalEscapeHatch';
 import { OpencodeQuickKeys } from '@/components/worktree/OpencodeQuickKeys';
 import { AgentModeControl } from '@/components/worktree/AgentModeControl';
@@ -102,7 +103,6 @@ import {
   readPromptResponseOutcome,
   type PromptResponseOutcome,
 } from '@/lib/prompt-response-outcome';
-import { readSelectionListShape } from '@/lib/detection/selection-shape';
 import { withToolDecisionLabels } from '@/components/worktree/prompt-decision-id';
 import { derivePromptView } from '@/lib/session/prompt-view';
 import { getCliToolDisplayName, getInstanceLabel } from '@/lib/cli-tools/types';
@@ -664,13 +664,6 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   const isSelectionListFrame = terminal.isSelectionListActive;
   // Issue #3179: and never while the agent is launching.
   const showNav = isSelectionListFrame && !isChatSurface && !isStarting;
-  // The same rule as ChatSurface (Issue #2793): on Command Code's plan
-  // review, `Enter` runs the focused action, and the pad cannot show focus.
-  // Read off `terminal.output`, the frame the chat surface's card reads (#2809).
-  const hideNavEnterKey = useMemo(
-    () => showNav && readSelectionListShape(terminal.output).offersPlanApprove === true,
-    [showNav, terminal.output],
-  );
   // Issue #2406: "this pane's agent is generating right now". The merged status
   // verdict is the only field that answers that question -- `terminal.isRunning`
   // has meant "a tmux session exists and is healthy" since Issue #2238, so it is
@@ -1006,14 +999,21 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       // footer costs the terminal. The footer is the `flex-shrink-0` half of the
       // pane's flex column; whatever it grows by, TerminalDisplay loses.
       <div ref={setFooterEl} className="space-y-2" data-testid={`split-footer-${splitIndex}`}>
+        {/* Issue #3305: the same part the chat surface's card mounts, handed
+            the same frame (`terminal.output`, #2809), so the two surfaces
+            cannot offer different controls for one selection list. What it
+            draws under the arrow pad — number keys, claude's "this session
+            only" / "set as default", no `Enter` on a plan review (#2793) — is
+            `resolveSelectionListOps`' decision, not this footer's. */}
         {showNav ? (
-          <NavigationButtons
+          <SelectionListKeys
             worktreeId={worktreeId}
             cliToolId={cliToolId}
             instanceId={resolvedInstanceId}
             onKeysSent={refresh}
+            frame={terminal.output}
+            surface="terminal"
             showPagerKeys={terminal.isPagerActive}
-            hideEnterKey={hideNavEnterKey}
           />
         ) : null}
         {showEscapeHatch ? (
@@ -1260,12 +1260,12 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
     ),
     [
       showNav,
-      // Issue #2809: the pad's Enter gate on a plan review.
-      hideNavEnterKey,
       showPrompt,
       showEscapeHatch,
       showUnsentComposerBar,
       // Issue #2095: the notice's gate, and the frame it re-reads to render.
+      // Issue #3305: `terminal.output` is also the frame the selection-list
+      // controls are decided from.
       showOpencodeSidebarNotice,
       terminal.realtimeSnippet,
       terminal.output,
