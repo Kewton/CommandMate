@@ -41,7 +41,12 @@ import { UPLOADABLE_EXTENSIONS, getMaxFileSize, isUploadableExtension } from '@/
 import { useToast } from '@/components/common/Toast';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
 import { useAutoYes } from '@/hooks/useAutoYes';
-import { buildPromptResponseBody, isPromptRefused } from '@/lib/prompt-response-body-builder';
+import { buildPromptResponseBody } from '@/lib/prompt-response-body-builder';
+import {
+  PROMPT_RESPONSE_NOTICES,
+  readPromptResponseOutcome,
+  type PromptResponseOutcome,
+} from '@/lib/prompt-response-outcome';
 import { readSelectionListShape } from '@/lib/detection/selection-shape';
 import { useAppUpdate } from '@/contexts/AppUpdateContext';
 import { type AutoYesToggleParams } from '@/components/worktree/AutoYesToggle';
@@ -1201,6 +1206,7 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   const handlePromptRespond = useCallback(
     async (answer: string): Promise<void> => {
       actions.setPromptAnswering(true);
+      let outcome: PromptResponseOutcome;
       try {
         // Issue #287: Use shared builder to include promptType and defaultOptionNumber
         // so the API can use cursor-key navigation even when promptCheck re-verification fails.
@@ -1227,22 +1233,25 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(requestBody),
         });
-        if (!response.ok) {
-          throw new Error(`Failed to send prompt response: ${response.status}`);
+        outcome = await readPromptResponseOutcome(response);
+      } catch (err) {
+        // The request got no reply at all.
+        console.error('[WorktreeDetailRefactored] Error sending prompt response:', err);
+        outcome = 'failed';
+      }
+      try {
+        // Issue #2468 / #3292: only `answered` clears the card. A refusal (a
+        // 200 `{ success: false, reason }`), a reply that is not 2xx and no
+        // reply at all leave it up and tell the user — the same contract as
+        // the split pane's `handlePromptRespond`.
+        if (outcome === 'answered') {
+          actions.clearPrompt();
+        } else {
+          const notice = PROMPT_RESPONSE_NOTICES[outcome];
+          showToast(tWorktree(notice.messageKey), notice.type);
         }
-        // Issue #2468: a refusal is a 200 `{ success: false, reason }`, so the
-        // card stays and the user is told why — the same contract as the split
-        // pane's `handlePromptRespond`.
-        if (await isPromptRefused(response)) {
-          showToast(tWorktree('promptResponse.refused'), 'warning');
-          await fetchCurrentOutput();
-          return;
-        }
-        actions.clearPrompt();
         // Immediately fetch current output to update terminal without waiting for polling
         await fetchCurrentOutput();
-      } catch (err) {
-        console.error('[WorktreeDetailRefactored] Error sending prompt response:', err);
       } finally {
         actions.setPromptAnswering(false);
       }

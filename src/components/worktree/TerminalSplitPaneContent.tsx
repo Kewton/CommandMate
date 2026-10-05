@@ -96,7 +96,12 @@ import {
   composerHeightScopeForSplit,
 } from '@/config/composer-height';
 import { isMultiSelectPrompt } from '@/components/worktree/prompt-answer';
-import { buildDecisionRespondBody, buildPromptResponseBody, isPromptRefused } from '@/lib/prompt-response-body-builder';
+import { buildDecisionRespondBody, buildPromptResponseBody } from '@/lib/prompt-response-body-builder';
+import {
+  PROMPT_RESPONSE_NOTICES,
+  readPromptResponseOutcome,
+  type PromptResponseOutcome,
+} from '@/lib/prompt-response-outcome';
 import { readSelectionListShape } from '@/lib/detection/selection-shape';
 import { withToolDecisionLabels } from '@/components/worktree/prompt-decision-id';
 import { derivePromptView } from '@/lib/session/prompt-view';
@@ -561,6 +566,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       // next display can tell whether it changed anything.
       markPromptSubmitted();
       setPromptAnswering(true);
+      let outcome: PromptResponseOutcome;
       try {
         // Issue #1932: an approval the agent named by id goes to `/respond`,
         // which delivers the verdict over the agent's own API. It cannot go to
@@ -597,23 +603,28 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
             body: JSON.stringify(requestBody),
           },
         );
-        if (!response.ok) {
-          throw new Error(`Failed to send prompt response: ${response.status}`);
-        }
+        outcome = await readPromptResponseOutcome(response);
+      } catch (err) {
+        // The request got no reply at all.
+        console.error('[TerminalSplitPaneContent] prompt response error:', err);
+        outcome = 'failed';
+      }
+      try {
         // Issue #2468: a refusal is a 200 `{ success: false, reason }` —
         // `prompt_no_longer_active` when the re-captured pane no longer reads as
         // the dialog — so `ok` alone is not "answered". Clearing the card on a
         // refusal hid a dialog that was still open: the next poll put it
         // straight back, and nothing ever said why the answer went nowhere.
-        if (await isPromptRefused(response)) {
-          showToast?.(t('promptResponse.refused'), 'warning');
-          await refresh();
-          return;
+        // Issue #3292: the same holds for a reply that is not 2xx and for no
+        // reply at all, which used to reach the console and nobody else. Only
+        // `answered` clears the card; everything else says so and leaves it.
+        if (outcome === 'answered') {
+          clearPrompt();
+        } else {
+          const notice = PROMPT_RESPONSE_NOTICES[outcome];
+          showToast?.(t(notice.messageKey), notice.type);
         }
-        clearPrompt();
         await refresh();
-      } catch (err) {
-        console.error('[TerminalSplitPaneContent] prompt response error:', err);
       } finally {
         setPromptAnswering(false);
       }

@@ -90,12 +90,3 @@ export function buildDecisionRespondBody(
     ...(instanceId && instanceId !== cliTool ? { instanceId } : {}),
   };
 }
-
-/**
- * Read a prompt-response / respond reply and say whether the server refused it
- * (a 200 `{ success: false, reason }`). An unreadable body is not a refusal.
- */
-export async function isPromptRefused(response: Response): Promise<boolean> {
-  const result = (await response.json().catch(() => null)) as { success?: unknown } | null;
-  return result?.success === false;
-}
