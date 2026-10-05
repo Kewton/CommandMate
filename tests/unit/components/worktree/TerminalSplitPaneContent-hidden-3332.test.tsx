@@ -186,13 +186,32 @@ async function reachHint(rerender: (ui: React.ReactElement) => void): Promise<vo
 }
 
 describe('[#3332] a split hidden by another split\'s maximize', () => {
-  it('draws no prompt panel while hidden, and draws it again when shown', async () => {
+  it('keeps drawing the prompt panel while hidden (display:none by the parent)', async () => {
     const { rerender } = render(split());
-    expect(screen.getByTestId('prompt-panel')).toBeInTheDocument();
     await act(async () => rerender(split(true)));
-    expect(screen.queryByTestId('prompt-panel')).not.toBeInTheDocument();
-    await act(async () => rerender(split(false)));
     expect(screen.getByTestId('prompt-panel')).toBeInTheDocument();
+  });
+
+  describe.each([
+    ['under 10 s', false],
+    ['10 s or more', true],
+  ])('the answer being edited, hidden %s', (_label, fire) => {
+    it('is still selected after the split comes back', async () => {
+      const { rerender } = render(split());
+      const resets = captureResetTimers();
+      const radios = screen.getAllByRole('radio');
+      expect(radios.length).toBeGreaterThan(1);
+      fireEvent.click(radios[1]);
+      expect(screen.getAllByRole('radio')[1]).toBeChecked();
+      await act(async () => rerender(split(true)));
+      if (fire) {
+        await act(async () => {
+          resets.forEach((r) => r());
+        });
+      }
+      await act(async () => rerender(split(false)));
+      expect(screen.getAllByRole('radio')[1]).toBeChecked();
+    });
   });
 
   it('starts over when hidden for 10 s (no hint on return)', async () => {

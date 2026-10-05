@@ -470,25 +470,23 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   // answer). Hiding the panel there left a screen nobody could answer, by hand
   // or automatically, until the operator turned Auto-Yes off. So a multi-select
   // prompt is shown whatever Auto-Yes is doing; nothing is auto-sent either way.
-  // Issue #3332: a split hidden behind another split's maximize (`display: none`,
-  // still mounted for #2261) draws no panel, so it counts none.
-  const hiddenByMaximize = useTerminalSplitHidden();
   const showPrompt =
-    prompt.visible &&
-    !isStarting &&
-    !hiddenByMaximize &&
-    (!autoYesEnabled || isMultiSelectPrompt(prompt.data));
+    prompt.visible && !isStarting && (!autoYesEnabled || isMultiSelectPrompt(prompt.data));
 
   // Issue #2869: the same prompt window shown again after two Sends in a row
   // (refused, or delivered to a frame that did not react) points the user at
-  // direct input. Counted on the window `PromptPanel` is actually drawing — the
-  // `showPrompt` declared above (before the handler
-  // that calls `markSubmitted`), so the count and the drawing cannot drift apart.
+  // direct input. Counted only on a window the user can see: `showPrompt`
+  // declared above (before the handler that calls `markSubmitted`) and not
+  // hidden behind another split's maximize (#3332). A hidden split still
+  // DRAWS its panel (under `display: none`) so the answer being edited in it
+  // survives the round trip; it just counts nothing.
+  const hiddenByMaximize = useTerminalSplitHidden();
+  const countPrompt = showPrompt && !hiddenByMaximize;
   const {
     showStuckHint: showPromptStuckHint,
     markSubmitted: markPromptSubmitted,
   } = usePromptStuckCounter({
-    promptData: showPrompt ? prompt.data : null,
+    promptData: countPrompt ? prompt.data : null,
     targetKey: `${worktreeId}:${cliToolId}:${resolvedInstanceId}`,
   });
 
