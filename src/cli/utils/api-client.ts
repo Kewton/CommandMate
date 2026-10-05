@@ -326,9 +326,11 @@ export class ApiClient {
   /**
    * The base URL this client actually dials (Issue #2404).
    *
-   * Resolved once in the constructor through the precedence in
-   * `loadClientEnv()` (`--base-url` > exported `CM_PORT` > `~/.commandmate/.env`
-   * > 3000), which is why it is read from here rather than re-derived by each
+   * Resolved once in the constructor: the `baseUrl` option when a caller passes
+   * one (there is no CLI flag for it), else `CM_PORT` / `CM_BIND` through the
+   * precedence in `loadClientEnv()` (exported > `~/.commandmate/.env` > 3000;
+   * under `CM_UAT_ISOLATION=1` exported only, never 3000), which is why it is
+   * read from here rather than re-derived by each
    * caller: a second derivation is a second answer, and "which server did this
    * command talk to" only helps if it is the one the request went to.
    */

@@ -53,7 +53,8 @@ env:
     # caller's, else $HOME/.codex) and use it for this record, for the server
     # (env -i below) and for `down`, which reads it back from the record. Record
     # the files' sha256; `down` compares and fails when the UAT build rewrote them.
-    # Never written back.
+    # Never written back. CM_UAT_ISOLATION=1 on the server line (Issue #3360) is
+    # what keeps the build from writing them; the record is the check on it.
     #
     # Absolute, because a relative value means the server's cwd for CommandMate
     # and codex's own cwd for codex: two places.
@@ -82,6 +83,10 @@ env:
       for n in hooks.json commandmate/cmate-agent-event.sh; do
         printf '%s  %s\n' "$( [ -f "$CH/$n" ] && shasum -a 256 "$CH/$n" | cut -d' ' -f1 || echo absent )" "$n"
       done
+      # Issue #3360: antigravity's shared file is not under CODEX_HOME, so it is
+      # its own line form: `ABSOLUTE  <sha256>  <absolute path>`.
+      g="$HOME/.gemini/config/hooks.json"
+      printf 'ABSOLUTE  %s  %s\n' "$( [ -f "$g" ] && shasum -a 256 "$g" | cut -d' ' -f1 || echo absent )" "$g"
     } > {run_dir}/codex-shared.sha256
     mkdir -p -m 700 /tmp/cmuat-{port}
     # The private tmux server's own environment is what a codex it launches
@@ -115,14 +120,17 @@ env:
     tmux -S /tmp/cmuat-{port}/tmux.sock kill-server 2>/dev/null || true
     rm -rf /tmp/cmuat-{port}
     ! lsof -nP -iTCP:{port} -sTCP:LISTEN -t >/dev/null
-    # Fail when the UAT build rewrote codex's shared hook or relay script.
-    # The first record line names the CODEX_HOME `up` decided on; the rest are
-    # sha256 + path relative to it.
+    # Fail when the UAT build rewrote codex's shared hook or relay script, or
+    # antigravity's ~/.gemini/config/hooks.json. CM_UAT_ISOLATION=1 (Issue
+    # #3360) keeps the server from writing any of them; this is the check on it.
+    # The first record line names the CODEX_HOME `up` decided on; the codex lines
+    # are sha256 + path relative to it; an ABSOLUTE line is sha256 + absolute path.
     CH=$(sed -n 's/^CODEX_HOME  //p;' {run_dir}/codex-shared.sha256 | head -1)
     while read -r h f; do
       [ "$h" = CODEX_HOME ] && continue
-      n=$( [ -f "$CH/$f" ] && shasum -a 256 "$CH/$f" | cut -d' ' -f1 || echo absent )
-      [ "$n" = "$h" ] || { echo "codex shared file changed during UAT: $CH/$f" >&2; exit 1; }
+      if [ "$h" = ABSOLUTE ]; then h=${f%%  *}; p=${f#*  }; else p="$CH/$f"; fi
+      n=$( [ -f "$p" ] && shasum -a 256 "$p" | cut -d' ' -f1 || echo absent )
+      [ "$n" = "$h" ] || { echo "shared agent hook file changed during UAT: $p" >&2; exit 1; }
     done < {run_dir}/codex-shared.sha256
   health: "curl -fsS -m 5 -o /dev/null http://127.0.0.1:{port}/api/worktrees"
   health_timeout_sec: 90
