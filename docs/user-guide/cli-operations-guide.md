@@ -603,8 +603,8 @@ exit 0 です。
 
 サーバー側でも、hooks を出しているソース（`structuredEvents.source.kind` が `hooks`）では、
 画面の読みだけでターンを閉じなくなりました。`Stop` が来ないと分かるとき — 30 分何も届かない
-（`closedBy: 'stale'`）か、画面が中断を示しているとき（codex の `■ Conversation interrupted`。
-中断では `Stop` が来ないことを実測済み） — だけ、画面で閉じます（`closedBy: 'scraper_evidence'`）。
+（`closedBy: 'stale'`）か、画面が中断を示しているとき（codex の `■ Conversation interrupted`、
+Claude の `⎿  Interrupted`。どちらも中断では `Stop` が来ないことを実測済み） — だけ、画面で閉じます（`closedBy: 'scraper_evidence'`）。
 hooks の無いソースは、従来どおり画面で閉じます。
 
 ### ターン成立の判定（Issue #1839）

@@ -461,7 +461,7 @@ On the server, a source whose hooks speak for the pane (`structuredEvents.source
 no longer has its turn closed by the screen alone. The screen closes it (`closedBy:
 'scraper_evidence'`) only when the `Stop` is known not to come — nothing heard for 30 minutes
 (`closedBy: 'stale'`), or a frame that shows the turn was interrupted (codex's `■ Conversation
-interrupted`; an interrupt was measured to send no `Stop`). A source without hooks is still closed
+interrupted`, Claude's `⎿  Interrupted`; an interrupt was measured to send no `Stop` on both). A source without hooks is still closed
 by the screen, as before.
 
 ### Progress Output

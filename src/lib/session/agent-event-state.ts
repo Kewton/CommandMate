@@ -863,8 +863,9 @@ export function closeAgentTurn(
  *    existing `stale` close, which `effectiveTurn` applies regardless of this
  *    function. It stays the bound on a `Stop` that was simply lost.
  *  - the frame shows the turn was abandoned — codex's `■ Conversation
- *    interrupted` — which the caller folds into `mayClose`. Measured on codex
- *    0.160.0 with hooks trusted: an Esc fires no `Stop`, twice out of twice.
+ *    interrupted`, Claude's `⎿  Interrupted` — which the caller folds into
+ *    `mayClose`. Measured on codex 0.160.0 and Claude Code 2.1.289 with hooks:
+ *    an Esc fires no `Stop` (`lib/detection/turn-abandoned`).
  *
  * A source with no hooks (`scraper`) and a pull source (`sse`) pass true and
  * keep the #1930 behaviour.

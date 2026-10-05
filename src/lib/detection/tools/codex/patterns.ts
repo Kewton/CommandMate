@@ -63,6 +63,14 @@ export const CODEX_LIVE_STATUS_ROW_PATTERN =
 const CODEX_TURN_INTERRUPTED_ROW = /^■ Conversation interrupted\b/;
 
 /**
+ * The row codex keeps between the interruption and the composer while a shell
+ * the turn started is still running (`1 background terminal running · /ps to
+ * view · /stop to close`). Not content of the turn: it says the terminal is
+ * alive, not that the agent is.
+ */
+const CODEX_BACKGROUND_TERMINAL_ROW = /^\d+ background terminals? running\b/;
+
+/**
  * Whether the frame shows a codex turn that was interrupted, as its last word
  * (Issue #3337).
  *
@@ -70,7 +78,9 @@ const CODEX_TURN_INTERRUPTED_ROW = /^■ Conversation interrupted\b/;
  * An interrupted turn fires no `Stop` hook (measured on codex 0.160.0 with the
  * hooks trusted: `UserPromptSubmit`, then nothing, after Esc), so this is the
  * frame that says the agent's own end-of-turn report is not coming. A marker
- * from an earlier turn is not the last row once anything follows it.
+ * from an earlier turn is not the last row once anything follows it. A
+ * background-terminal row between the marker and the composer is skipped — an
+ * Esc during `sleep 90 && ls` leaves one there.
  *
  * @param lines - Pane rows, ANSI stripped
  */
@@ -79,7 +89,7 @@ export function isCodexTurnInterruptedFrame(lines: readonly string[]): boolean {
   if (composer < 0) return false;
   for (let i = composer - 1; i >= 0; i--) {
     const row = lines[i].trim();
-    if (row === '') continue;
+    if (row === '' || CODEX_BACKGROUND_TERMINAL_ROW.test(row)) continue;
     return CODEX_TURN_INTERRUPTED_ROW.test(row);
   }
   return false;

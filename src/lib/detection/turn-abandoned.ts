@@ -15,17 +15,20 @@
 
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { stripAnsi } from './ansi';
+import { isClaudeTurnInterruptedFrame } from './tools/claude/patterns';
 import { isCodexTurnInterruptedFrame } from './tools/codex/patterns';
 
 /**
- * Per tool, the reading of an abandoned turn. Each one is measured: codex
- * 0.160.0 fires no `Stop` after Esc (`tests/fixtures/codex-mid-turn-3337/`).
- * Claude is absent on purpose — its `Notification(idle_prompt)` already
- * publishes `ready` over the hook channel some 60 s after a turn that ran
- * nothing (#1839), so it is not left at `running` until the stale bound.
+ * Per tool, the reading of an abandoned turn. Each one is measured: neither
+ * codex 0.160.0 nor Claude Code 2.1.289 fires a `Stop` after Esc
+ * (`tests/fixtures/codex-mid-turn-3337/`, `tests/fixtures/claude-interrupted-3337/`).
+ * Claude's `Notification(idle_prompt)` did not arrive in two and a half minutes
+ * after the interruption either, so without a reader its turn stayed `running`
+ * until the stale bound.
  */
-const ABANDONED_TURN_READERS: Partial<Record<CLIToolType, (lines: readonly string[]) => boolean>> = {
+const ABANDONED_TURN_READERS: Partial<Record<CLIToolType, (lines: string[]) => boolean>> = {
   codex: isCodexTurnInterruptedFrame,
+  claude: isClaudeTurnInterruptedFrame,
 };
 
 /**

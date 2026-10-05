@@ -374,3 +374,30 @@ export const CLAUDE_SESSION_ERROR_PATTERNS: readonly string[] = [
 export const CLAUDE_SESSION_ERROR_REGEX_PATTERNS: readonly RegExp[] = [
   /^Error:.*Claude Code/,
 ] as const;
+
+/** The row Claude Code prints under a turn interrupted with Esc, measured on 2.1.289. */
+const CLAUDE_TURN_INTERRUPTED_ROW = /^\s*⎿\s+Interrupted\b/;
+
+/**
+ * Whether the frame shows a Claude turn that was interrupted, as its last word
+ * (Issue #3337).
+ *
+ * The last non-blank row above the input box's footer
+ * ({@link findClaudeChromeStart}) is `⎿  Interrupted · What should Claude do
+ * instead?`. An interrupted turn fires no `Stop` hook, and no `idle_prompt`
+ * followed it in two and a half minutes (measured on 2.1.289,
+ * `tests/fixtures/claude-interrupted-3337/`). An interruption of an earlier turn
+ * stays in the transcript, but it is not the last row once anything follows it.
+ *
+ * @param lines - Pane rows, ANSI stripped
+ */
+export function isClaudeTurnInterruptedFrame(lines: string[]): boolean {
+  const chromeStart = findClaudeChromeStart(lines);
+  if (chromeStart < 0) return false;
+  for (let i = chromeStart - 1; i >= 0; i--) {
+    const row = lines[i];
+    if (row.trim() === '') continue;
+    return CLAUDE_TURN_INTERRUPTED_ROW.test(row);
+  }
+  return false;
+}

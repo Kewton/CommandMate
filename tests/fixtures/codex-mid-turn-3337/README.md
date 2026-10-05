@@ -9,6 +9,7 @@
 使っているテスト:
 
 - `tests/unit/lib/current-output-mid-turn-3337.test.ts`
+- `tests/unit/lib/turn-abandoned-interrupts-3337.test.ts`
 - `tests/unit/lib/detection/codex-verdict-corpus.test.ts`（codex の画面は全件ここに行を持つ）
 
 ## 採取
@@ -40,6 +41,7 @@ provider に届かないので、codex はターンを終えずに `Working` を
 | `codex-0.160.0-reconnecting-bullet.txt` | `• Reconnecting... waiting for network (54s • esc to interrupt)` | **`ready` / `input_prompt`** | `running` |
 | `codex-0.160.0-reconnecting-hollow.txt` | `◦ Reconnecting... waiting for network (55s • esc to interrupt)` | **`ready` / `input_prompt`** | `running` |
 | `codex-0.160.0-interrupted-idle.txt` | Esc で止めた 2.5 秒後。`■ Conversation interrupted - use /feedback if something went wrong` | `ready` | `ready`（陰性対照） |
+| `codex-0.160.0-interrupted-background-terminal.ts` | **採取ではなく、組み立て**。`interrupted-idle.txt` の 994 行目に `1 background terminal running · /ps to view · /stop to close` を書いた画面（下の節） | `ready` | `ready`（読み手は中断と読む） |
 
 ## 測って分かったこと
 
@@ -57,6 +59,16 @@ provider に届かないので、codex はターンを終えずに `Working` を
   として置き、hooks の確認で `Trust all and continue` を選んで測った。発言を送ると `SessionStart` と
   `UserPromptSubmit` が届き、Esc の後 15 秒待っても `Stop` は届かなかった（2 回とも）。
   hook の確認に答えた信頼は、使い捨ての `CODEX_HOME` に書かれた
+
+### `codex-0.160.0-interrupted-background-terminal.ts`（組み立てた画面）
+
+ダミーの provider は返答しないので、codex にコマンドを走らせられない。オーケストレーターの実機確認
+（隔離したサーバー、codex 0.160.0、hooks あり）で、`sleep 90 && ls` の実行中に Esc を押すと、画面の末尾は
+`■ Conversation interrupted …`、`1 background terminal running · /ps to view · /stop to close`、
+`› Ask Codex to do anything` の順になり、40 秒以上 `running` のままだった。この並びを、
+`codex-0.160.0-interrupted-idle.txt` の 994 行目（ターンの途中の画面で作業中の行がある行）に、
+その行を書いて組み立てた。ほかの行はバイトのまま。その行の属性（dim）は推測である。読み手は
+その行の前後の空行を飛ばすので、行の位置は判定を変えない。
 
 ## 採れなかったもの
 

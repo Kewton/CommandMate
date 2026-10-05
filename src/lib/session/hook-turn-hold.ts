@@ -17,7 +17,8 @@
  *  - `stale` — nothing heard for `TURN_STALE_AFTER_MS`, applied by the turn
  *    record itself;
  *  - a frame that shows the turn was abandoned
- *    ({@link frameShowsAbandonedTurn}: codex's `■ Conversation interrupted`).
+ *    ({@link frameShowsAbandonedTurn}: codex's `■ Conversation interrupted`,
+ *    Claude's `⎿  Interrupted`).
  *
  * A source with no hooks (`scraper`) and a pull source (`sse`) are not held:
  * the screen speaks for them, as before.
