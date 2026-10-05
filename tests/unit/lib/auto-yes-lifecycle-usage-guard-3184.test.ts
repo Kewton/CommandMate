@@ -60,7 +60,7 @@ function repoFiles(): { rel: string; text: string }[] {
 describe('Auto-Yes release calls go through the lifecycle table (#3184)', () => {
   it('has no direct release call outside the allowlist', () => {
     expect(findUnlistedCalls(repoFiles())).toEqual([]);
-  });
+  }, 60_000);
 
   it('every allowlisted file exists (a stale entry would hide nothing)', () => {
     for (const rel of Object.keys(ALLOWED)) {

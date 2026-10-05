@@ -43,8 +43,8 @@
  */
 
 import React from 'react';
-import { describe, it, expect, vi, afterEach } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import type { ChatMessage } from '@/types/models';
 import { ChatTranscript, type ChatTranscriptLiveTurn } from '@/components/worktree/ChatTranscript';
 import {
@@ -58,6 +58,7 @@ import {
   shouldShowLiveRoleHeader,
 } from '@/lib/chat/chat-transcript-view';
 import { installVirtualLayout } from '@tests/helpers/virtual-layout';
+import { trackWindowTimers } from '@tests/helpers/track-window-timers';
 
 const WORKTREE_ID = 'wt-2233';
 const SCROLL_CONTAINER = 'chat-transcript-scroll-container';
@@ -170,8 +171,16 @@ function stubScrollOffset(el: HTMLElement, totalHeight: number, viewport: number
 
 describe('[#2233] the live bubble is outside the virtual list', () => {
   let restoreLayout: (() => void) | undefined;
+  let releaseTimers: (() => void) | null = null;
+
+  beforeEach(() => {
+    releaseTimers = trackWindowTimers();
+  });
 
   afterEach(() => {
+    cleanup();
+    releaseTimers?.();
+    releaseTimers = null;
     restoreLayout?.();
     restoreLayout = undefined;
   });

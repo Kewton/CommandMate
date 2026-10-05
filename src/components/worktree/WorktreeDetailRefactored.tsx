@@ -17,7 +17,6 @@
 'use client';
 
 import React, { memo, useCallback, useEffect, useMemo, useState } from 'react';
-import dynamic from 'next/dynamic';
 import { useTranslations } from 'next-intl';
 import { MoreHorizontal } from 'lucide-react';
 import { Spinner } from '@/components/ui/Spinner';
@@ -36,40 +35,6 @@ import type { ShowToast } from '@/types/markdown-editor';
 import { NavigationButtons } from '@/components/worktree/NavigationButtons';
 import { Button } from '@/components/ui/Button';
 import { FileViewer } from '@/components/worktree/FileViewer';
-
-
-/**
- * Loading fallback for the dynamically imported MarkdownEditor.
- *
- * Issue #1277: extracted into a real component so it can call `useTranslations`
- * — next/dynamic renders `loading` as a component, and the main orchestrator's
- * `tWorktree` (from useWorktreeDetailController) is not in scope at module level.
- */
-function MarkdownEditorLoading() {
-  const tWorktree = useTranslations('worktree');
-  return (
-    <div className="flex items-center justify-center h-full bg-surface text-muted-foreground">
-      <Spinner size="lg" className="mr-2" />
-      <span>{tWorktree('detail.loadingEditor')}</span>
-    </div>
-  );
-}
-
-/**
- * Dynamic import of MarkdownEditor with SSR disabled.
- * highlight.js / rehype-highlight require browser APIs during rendering.
- * Uses .then() pattern because MarkdownEditor is a named export.
- */
-const MarkdownEditor = dynamic(
-  () =>
-    import('@/components/worktree/MarkdownEditor').then((mod) => ({
-      default: mod.MarkdownEditor,
-    })),
-  {
-    ssr: false,
-    loading: () => <MarkdownEditorLoading />,
-  }
-);
 import {
   LoadingIndicator,
   ErrorDisplay,
@@ -320,7 +285,6 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     diffFilePath,
     disableAutoFollow,
     displayedInstances,
-    editorFilePath,
     error,
     fetchCurrentOutput,
     fileInputRef,
@@ -334,7 +298,6 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     handleDelete,
     handleDiffSelect,
     handleDirtyChange,
-    handleEditorClose,
     handleEditorSave,
     handleFileInputChange,
     handleFilePanelSave,
@@ -383,7 +346,6 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     historySubTab,
     historyUserOnly,
     isAuthExpired,
-    isEditorMaximized,
     isInfoModalOpen,
     isMobile,
     isMoveDialogOpen,
@@ -417,7 +379,6 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     setActiveInstanceId,
     setFocusedSplitIndex,
     setHistorySubTab,
-    setIsEditorMaximized,
     setWorktree,
     showArchived,
     showNewFileDialog,
@@ -608,11 +569,19 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   // --------------------------------------------------------------------------
   // The same window shown again after two Sends in a row (refused, or keys
   // that did not change the frame) gets a line and a link to the keyboard.
+  // Counted on the window the sheet is actually drawing: the same gate that
+  // mounts `MobilePromptSheet` below (the phone layout, and not the keyboard, a launch or Auto-Yes), so
+  // a window hidden for 10 s starts over, as on PC.
+  const showMobilePromptSheet =
+    isMobile
+    && !showDirectInputKeyboard
+    && !activeSessionStarting
+    && (!autoYesEnabled || isMultiSelectPrompt(state.prompt.data));
   const {
     showStuckHint: showPromptStuckHint,
     markSubmitted: markPromptSubmitted,
   } = usePromptStuckCounter({
-    promptData: state.prompt.visible ? state.prompt.data : null,
+    promptData: showMobilePromptSheet && state.prompt.visible ? state.prompt.data : null,
     targetKey: `${worktreeId}:${activeCliTab}:${activeInstanceId}`,
   });
 
@@ -849,28 +818,6 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
           cancelLabel={tCommon('cancel')}
           endLabel={tCommon('end')}
         />
-        {/* Issue #755 (S3-002): the Markdown Editor Modal stays in the parent
-            orchestrator (dynamic import with ssr:false declared here) and is
-            rendered alongside WorktreeDetailDesktop. */}
-        {editorFilePath && (
-          <Modal
-            isOpen={true}
-            onClose={handleEditorClose}
-            title={editorFilePath.split('/').pop() || tWorktree('fileViewer.editor')}
-            size="full"
-            disableClose={isEditorMaximized}
-          >
-            <div className="h-[80vh]">
-              <MarkdownEditor
-                worktreeId={worktreeId}
-                filePath={editorFilePath}
-                onClose={handleEditorClose}
-                onSave={handleEditorSave}
-                onMaximizedChange={setIsEditorMaximized}
-              />
-            </div>
-          </Modal>
-        )}
       </ChatFileLinkProvider>
     );
   }
@@ -1248,7 +1195,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                 `閉じる` brings the sheet straight back. */}
             {/* Issue #3179: nor while the agent is launching — a dialog on a
                 launch is the launch's to answer. */}
-            {!showDirectInputKeyboard && !activeSessionStarting && (!autoYesEnabled || isMultiSelectPrompt(state.prompt.data)) && (
+            {showMobilePromptSheet && (
               <MobilePromptSheet
                 promptData={mobilePromptData}
                 visible={state.prompt.visible}

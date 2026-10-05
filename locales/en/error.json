@@ -23,10 +23,6 @@
     "failedToDelete": "Failed to delete",
     "failedToMove": "Failed to move"
   },
-  "terminal": {
-    "displayError": "Terminal display error",
-    "outputError": "An error occurred while displaying terminal output"
-  },
   "history": {
     "loadError": "Message history loading error",
     "displayError": "An error occurred while displaying history"

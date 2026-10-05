@@ -48,11 +48,12 @@
  */
 
 import React from 'react';
-import { describe, it, expect, vi, afterEach } from 'vitest';
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import type { ChatMessage } from '@/types/models';
 import { CHAT_ESTIMATED_MESSAGE_HEIGHT_PX } from '@/lib/chat/chat-transcript-view';
 import { installVirtualLayout } from '@tests/helpers/virtual-layout';
+import { trackWindowTimers } from '@tests/helpers/track-window-timers';
 
 const SCROLL_CONTAINER_TESTID = 'chat-transcript-scroll-container';
 
@@ -202,8 +203,16 @@ function renderTranscript(messages: ChatMessage[], isLoading = false) {
 
 describe('[#2283] ChatTranscript lands at the tail', () => {
   const cleanups: Array<() => void> = [];
+  let releaseTimers: (() => void) | null = null;
+
+  beforeEach(() => {
+    releaseTimers = trackWindowTimers();
+  });
 
   afterEach(() => {
+    cleanup();
+    releaseTimers?.();
+    releaseTimers = null;
     while (cleanups.length) cleanups.pop()?.();
     aims.length = 0;
   });

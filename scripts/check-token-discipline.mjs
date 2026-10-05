@@ -227,7 +227,7 @@ export const GUARDED_PATHSPECS = [
 export const TEST_FILE_EXCLUDE = /\.test\.|\.spec\.|__tests__/;
 
 /**
- * `*Terminal*` source files are excluded (incl. error/TerminalErrorFallback.tsx).
+ * `*Terminal*` source files are excluded.
  *
  * DO NOT REMOVE. The terminal output surfaces stay dark in BOTH themes, matching
  * the fixed xterm theme (#1079) — they use raw dark utilities on purpose. Drop

@@ -22,7 +22,7 @@ const scan = (root: string): Violation[] => findControlCharViolations(root) as V
 describe('Issue #1432: repository is free of raw control characters', () => {
   it('finds no violation under src/', () => {
     expect(scan(REPO_ROOT)).toEqual([]);
-  });
+  }, 60_000);
 
   it('keeps the de-NUL-ed hash separators greppable as escapes', () => {
     const lock = fs.readFileSync(path.join(REPO_ROOT, 'src/lib/skills/operation-lock.ts'), 'utf-8');

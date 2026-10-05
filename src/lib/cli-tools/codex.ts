@@ -245,7 +245,7 @@ export class CodexTool extends BaseCLITool {
     // command into the same pane.
     const { sessionName, exists, live } = await this.resolveLaunchPane(worktreeId, worktreePath, instanceId, {
       logger,
-      liveAction: 'codex-session-sessionname',
+      liveAction: 'codex-session-exists',
       relaunchAction: 'codex-session-relaunch',
     });
     if (live) return;

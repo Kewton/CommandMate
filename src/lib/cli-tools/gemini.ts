@@ -78,7 +78,7 @@ export class GeminiTool extends BaseCLITool {
 
     const { sessionName, exists, live } = await this.resolveLaunchPane(worktreeId, worktreePath, instanceId, {
       logger,
-      liveAction: 'gemini-session-sessionname',
+      liveAction: 'gemini-session-exists',
       relaunchAction: 'gemini-session-relaunch',
     });
     if (live) return;
