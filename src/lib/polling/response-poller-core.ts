@@ -47,15 +47,11 @@ export const MAX_POLLING_DURATION = 30 * 60 * 1000;
  */
 export const STALLED_TICK_TIMEOUT = 60 * 1000;
 
-/**
- * Gemini auth/loading state indicators that should not be treated as complete responses.
- * Braille spinner characters are shared with CLAUDE_SPINNER_CHARS in cli-patterns.ts.
- * Extracted to module level for clarity and to avoid re-creation on each call.
- */
-export const GEMINI_LOADING_INDICATORS: readonly string[] = [
-  'Waiting for auth',
-  '\u280b', '\u2819', '\u2839', '\u2838', '\u283c', '\u2834', '\u2826', '\u2827', '\u2807', '\u280f',
-];
+// Issue #3374: lives in `./response-poller-constants`, a module that imports
+// nothing, so `response-checker-extraction-steps` can read it without entering
+// the response-poller-core ⇄ response-checker cycle. Re-exported under the name
+// it had here, so no import site has to change.
+export { GEMINI_LOADING_INDICATORS } from './response-poller-constants';
 
 // ============================================================================
 // Poller State Management
