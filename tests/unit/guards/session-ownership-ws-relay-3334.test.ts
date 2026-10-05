@@ -34,6 +34,8 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import Database from 'better-sqlite3';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import type { WebSocket } from 'ws';
 
 vi.mock('child_process', async (importOriginal) =>
@@ -423,19 +425,6 @@ describe('[#3334] terminal snapshot push', () => {
         .filter((event) => (event.data as { type?: unknown } | undefined)?.type === 'terminal_snapshot');
   }
 
-  it('neither reads nor pushes a session another server owns (poller tick)', async () => {
-    const frames = await watchingTab();
-    fakeTmux.addSession(SESSION, OTHER_SERVER_PATH);
-    const { broadcastTerminalSnapshot } = await import('@/lib/realtime/terminal-broadcast');
-
-    await broadcastTerminalSnapshot(WORKTREE_ID, CLI_TOOL);
-    await settle();
-
-    expect(fakeTmux.askedSessionPathOf(SESSION)).toBe(true);
-    expect(fakeTmux.touches()).toEqual([]);
-    expect(frames()).toEqual([]);
-  }, 30_000);
-
   it('neither reads nor pushes it after an interaction either', async () => {
     const frames = await watchingTab();
     fakeTmux.addSession(SESSION, OTHER_SERVER_PATH);
@@ -461,5 +450,109 @@ describe('[#3334] terminal snapshot push', () => {
       SESSION,
     ]);
     expect(frames()).toHaveLength(1);
+  }, 30_000);
+});
+
+
+// =============================================================================
+// Response poller tick
+// =============================================================================
+
+/**
+ * The tick that drives the push above runs `checkForResponse` first: it
+ * captures the pane and saves a reply or a prompt into this worktree's chat and
+ * history, then announces it (`broadcastMessage`). Driven here through the
+ * poller itself — `startPolling` and one `POLLING_INTERVAL` — not by calling
+ * the functions it calls, so the order inside the tick is what is judged.
+ *
+ * The screen is a live codex approval dialog: something the tick saves (a
+ * prompt row) and announces when the session is this server's.
+ */
+describe('[#3334] response poller tick', () => {
+  /** A live codex 0.157 approval dialog (tests/fixtures/codex-dialogs-0157). */
+  const APPROVAL = readFileSync(
+    join(__dirname, '../../fixtures/codex-dialogs-0157/approval.txt'),
+    'utf-8'
+  );
+
+  function savedRows(worktreeId: string): number {
+    return (
+      db.prepare('SELECT COUNT(*) AS n FROM chat_messages WHERE worktree_id = ?').get(worktreeId) as { n: number }
+    ).n;
+  }
+
+  /** Every room frame the tab received, unwrapped. */
+  async function roomFrames(worktreeId: string): Promise<() => Array<Record<string, unknown>>> {
+    const { __internal } = await import('@/lib/ws-server');
+    __internal.resetStateForTest();
+    const tab = socket();
+    __internal.registerClientForTest(tab.ws);
+    __internal.handleMessage(tab.ws, { type: 'subscribe', worktreeId });
+    return () =>
+      tab
+        .sent()
+        .filter((event) => event.type === 'broadcast')
+        .map((event) => event.data as Record<string, unknown>);
+  }
+
+  /** Start a poller and let exactly one tick run. */
+  async function runOneTick(worktreeId: string): Promise<void> {
+    const poller = await import('@/lib/polling/response-poller-core');
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      poller.startPolling(worktreeId, CLI_TOOL);
+      await vi.advanceTimersByTimeAsync(poller.POLLING_INTERVAL);
+    } finally {
+      poller.stopAllPolling();
+      vi.useRealTimers();
+    }
+    await settle();
+  }
+
+  it('neither reads, saves nor announces a session another server owns, and ends the chain', async () => {
+    const frames = await roomFrames(WORKTREE_ID);
+    fakeTmux.addSession(SESSION, OTHER_SERVER_PATH);
+    fakeTmux.setPane(SESSION, APPROVAL);
+    const poller = await import('@/lib/polling/response-poller-core');
+    const ended: string[][] = [];
+
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      poller.startPolling(WORKTREE_ID, CLI_TOOL);
+      await vi.advanceTimersByTimeAsync(poller.POLLING_INTERVAL);
+      ended.push(poller.getActivePollers());
+    } finally {
+      poller.stopAllPolling();
+      vi.useRealTimers();
+    }
+    await settle();
+
+    expect(fakeTmux.askedSessionPathOf(SESSION)).toBe(true);
+    expect(fakeTmux.touches()).toEqual([]);
+    expect(savedRows(WORKTREE_ID)).toBe(0);
+    expect(frames()).toEqual([]);
+    // Ended the way a session that is not running ends it: no next tick armed.
+    expect(ended).toEqual([[]]);
+  }, 30_000);
+
+  it('reads, saves and announces its own session (negative control)', async () => {
+    // A worktree of its own: the capture cache and the prompt dedup are keyed
+    // by session / poller, and must not carry anything over from the case above.
+    const ownId = 'wt-3334-poll-own';
+    const ownPath = '/nonexistent-3334/this-server/wt-3334-poll-own';
+    const ownSession = resolveSessionName(CLI_TOOL, ownId);
+    upsertWorktree(db, worktree(ownId, ownPath));
+    const frames = await roomFrames(ownId);
+    fakeTmux.addSession(ownSession, ownPath);
+    fakeTmux.setPane(ownSession, APPROVAL);
+
+    await runOneTick(ownId);
+
+    expect(fakeTmux.touches().map((touch) => [touch.subcommand, touch.target])).toContainEqual([
+      'capture-pane',
+      ownSession,
+    ]);
+    expect(savedRows(ownId)).toBeGreaterThan(0);
+    expect(frames().length).toBeGreaterThan(0);
   }, 30_000);
 });
