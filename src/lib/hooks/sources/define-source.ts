@@ -127,6 +127,12 @@ export interface PushHookSourceSpec {
    * pins the capability half.
    */
   extractEventIdentity?: (payload: Record<string, unknown>) => string | null;
+  /**
+   * Whether a `user_prompt_submit` payload joins the running turn
+   * (Issue #3330). See `AgentEventSource.promptJoinsOpenTurn`; omit it and
+   * every prompt is a new turn.
+   */
+  promptJoinsOpenTurn?: (payload: Record<string, unknown>) => boolean;
   /** Subtype extraction for events whose rule did not fix one (S2). */
   extractDetail?: (event: AgentEventType, payload: Record<string, unknown>) => string | null;
   parsePermissionRequest: (payload: Record<string, unknown>) => PermissionRequestPayload | null;
@@ -216,6 +222,10 @@ export function definePushHookSource(spec: PushHookSourceSpec): AgentEventSource
       // what puts it on the time window `isDuplicateAgentEvent` has always
       // applied to it.
       return spec.extractEventIdentity?.(payload) ?? null;
+    },
+
+    promptJoinsOpenTurn(payload: Record<string, unknown>): boolean {
+      return spec.promptJoinsOpenTurn?.(payload) ?? false;
     },
 
     parsePermissionRequest: spec.parsePermissionRequest,

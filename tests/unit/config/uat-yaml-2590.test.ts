@@ -117,4 +117,35 @@ describe('.commandmate/uat.yaml (Issue #2590)', () => {
   it('writes its run output under .commandmate/uat, which .gitignore keeps out of the repository', () => {
     expect(spec.report_dir ?? '.commandmate/uat').toBe('.commandmate/uat');
   });
+
+  it('moves the shared opencode-v2 and hook directories under the run, after env -i (Issue #3342)', () => {
+    const [line] = logicalLines(spec.env.up).filter((l) => l.includes('dist/server/server.js'));
+    expect(line.startsWith('env -i ')).toBe(true);
+    const envEnd = line.indexOf('nohup');
+    for (const assignment of ['CM_OPENCODE_V2_DIR={run_dir}/opencode-v2', 'CM_AGENT_HOOKS_DIR={run_dir}/hooks']) {
+      const at = line.indexOf(assignment);
+      expect(at, `the server line must set ${assignment}`).toBeGreaterThan(line.indexOf('env -i'));
+      expect(at).toBeLessThan(envEnd);
+    }
+  });
+
+  it('checks on the running process that both directories point under the run, positive and negative (Issue #3342)', () => {
+    const checks = spec.isolation.checks.filter((c) => /OPENCODE_V2/.test(c));
+    expect(checks.length).toBeGreaterThanOrEqual(2);
+    expect(checks.some((c) => c.includes('ps eww') && c.includes('{run_dir}/opencode-v2') && c.includes('{run_dir}/hooks') && !c.includes('! '))).toBe(true);
+    expect(checks.some((c) => c.includes('! ps eww') && c.includes('grep -vF'))).toBe(true);
+  });
+
+  it('records codex shared-file hashes before the server starts and fails in down when they changed (Issue #3342)', () => {
+    const up = spec.env.up;
+    const down = spec.env.down ?? '';
+    expect(up).toContain('hooks.json');
+    expect(up).toContain('commandmate/cmate-agent-event.sh');
+    expect(up.indexOf('codex-shared.sha256')).toBeGreaterThan(-1);
+    expect(up.indexOf('codex-shared.sha256')).toBeLessThan(up.indexOf('dist/server/server.js'));
+    expect(down).toContain('codex-shared.sha256');
+    expect(down).toMatch(/exit 1/);
+    // Never writes back: the user's own changes must survive.
+    expect(down).not.toMatch(/\bcp\b|\bmv\b|>\s*"?\$f/);
+  });
 });

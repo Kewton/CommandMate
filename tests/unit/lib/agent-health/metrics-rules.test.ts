@@ -6,7 +6,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { parseMetricsArgs } from '@/lib/agent-health/metrics-args';
-import { measureFileSize, measureTypeSafety } from '@/lib/agent-health/metrics-parse';
+import { measureFileSize, measureKnip, measureTypeSafety } from '@/lib/agent-health/metrics-parse';
 import {
   addLogLine,
   createLogAggregate,
@@ -421,5 +421,27 @@ describe('performance (Issue #3054)', () => {
   it('--only accepts the performance metrics', () => {
     const parsed = parseMetricsArgs(['--only', 'api-latency,log-volume,error-rate,server-process']);
     expect(parsed).toMatchObject({ ok: true, options: { metrics: ['api-latency', 'log-volume', 'error-rate', 'server-process'] } });
+  });
+});
+
+describe('unused files (knip)', () => {
+  const knip = (files: string[]): MetricMeasurement => measureKnip(JSON.stringify({ files, issues: [] }));
+  const keysOf = (current: string[], previous: string[] | null): string[] =>
+    evaluateMetric(knip(current), previous === null ? null : snapshotOf(knip(previous))).candidates.map((c) => c.key);
+
+  it('3 -> 4 files: only the new path is a candidate', () => {
+    expect(keysOf(['a.ts', 'b.ts', 'c.ts', 'd.ts'], ['a.ts', 'b.ts', 'c.ts'])).toEqual(['metrics:unused:d.ts']);
+  });
+
+  it('same count with swapped content: the new path is a candidate', () => {
+    expect(keysOf(['a.ts', 'b.ts', 'x.ts'], ['a.ts', 'b.ts', 'c.ts'])).toEqual(['metrics:unused:x.ts']);
+  });
+
+  it('first run records a baseline without candidates', () => {
+    expect(keysOf(['a.ts', 'b.ts'], null)).toEqual([]);
+  });
+
+  it('unchanged set has no candidates', () => {
+    expect(keysOf(['a.ts'], ['a.ts'])).toEqual([]);
   });
 });

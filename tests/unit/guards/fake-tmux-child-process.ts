@@ -89,12 +89,15 @@ export function isReadOnlyProbe(invocation: TmuxInvocation): boolean {
 class FakeTmuxServer {
   /** Session name -> `#{session_path}`. */
   private sessions = new Map<string, string>();
+  /** Session name -> what `capture-pane` prints for it (Issue #3334). Empty when unset. */
+  private panes = new Map<string, string>();
   private invocations: TmuxInvocation[] = [];
   private refused: string[] = [];
 
   /** Forget every session and everything recorded. */
   reset(): void {
     this.sessions = new Map();
+    this.panes = new Map();
     this.invocations = [];
     this.refused = [];
   }
@@ -102,6 +105,15 @@ class FakeTmuxServer {
   /** Make `name` exist, created in `sessionPath`. */
   addSession(name: string, sessionPath: string): void {
     this.sessions.set(name, sessionPath);
+  }
+
+  /**
+   * What `capture-pane` returns for `name` (Issue #3334), so a suite can show a
+   * reader a screen worth saving and see whether it was saved. The capture is
+   * still recorded as a touch.
+   */
+  setPane(name: string, text: string): void {
+    this.panes.set(name, text);
   }
 
   /** Every tmux invocation so far, in order. */
@@ -151,6 +163,9 @@ class FakeTmuxServer {
       }
       if (subcommand === 'has-session') return { ok: true, stdout: '' };
       return { ok: true, stdout: `${renderFormat(argv[argv.length - 1], target, path)}\n` };
+    }
+    if (subcommand === 'capture-pane' && target !== null && this.panes.has(target)) {
+      return { ok: true, stdout: this.panes.get(target) ?? '' };
     }
     // Everything else is recorded as a touch and reported as having worked, so
     // a route that sends into a session it should have refused runs to the end

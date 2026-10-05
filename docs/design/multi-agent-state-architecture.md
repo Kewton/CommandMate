@@ -34,7 +34,7 @@ CommandMate は **7 種類**の Coding Agent CLI（`CLI_TOOL_IDS`: claude / code
 | waiting 解決 | `src/lib/session/prompt-waiting-composition.ts` の `resolvePromptWaiting`（#1737）。**waiting 判定の唯一の生成者**で、統合判定と send guard の両方が同じ出力を読む |
 | ツール抽象 | `src/lib/cli-tools/base.ts` の `BaseCLITool` と各 `*Tool`。起動・送信・中断・停止・セッション名を担う |
 | 運用者層 | discoverability 原則で定義される「運用者が読む層」：`capture --json` / `wait` stdout / `ls` / Web UI のチップ |
-| turn | ユーザー発話（`user_prompt_submit`）から `stop` までの 1 往復 |
+| turn | ユーザー発話（`user_prompt_submit`）から `stop` までの 1 往復（実行中の turn へ渡されたキューの通知の `user_prompt_submit` は、新しい turn を開かずにその turn へ加わる。#3330） |
 | 未開始（not-started） | セッションはあるが turn が一度も開いていない状態。`SessionStatus` としては `ready`（reason `input_prompt`）。`idle`（セッションが無い）とは別概念 |
 | unclassified フレーム | #1708 で**出荷済み**の「解釈できないフレーム」機構。`isUnclassifiedActive`（`current-output-builder`。**ガードの実体は `mergeStructuredStatus` 適用後の merged 値**）/ 型 `UnclassifiedFrameRecord`（**`src/types/models.ts`**）/ 観測 `observeUnclassifiedFrame`（`unclassified-frame-tracker`。server 側 dwell は `UNCLASSIFIED_RECORD_DWELL_MS` = 60 秒）/ `wait` 側 dwell `UNCLASSIFIED_DWELL_MS`（60 秒）と exit 10 `type:'unclassified'` からなる。**60 秒 dwell は server / CLI に独立した 2 本ある**（DR2-019。§4 D1 決定 2 の「新しいタイマーを作らない」は、この 2 本を 3 本にしないという意味） |
 | 2 つの `unclassified` の書き分け（DR3-017） | 語が同じで概念が違う。**(a) `BranchWaitingKind='unclassified'`**（`waiting-kind.ts` の `deriveWaitingKind`、#1786/#1787）は **`waiting` のときだけ**動き、`hasActivePrompt` でも `SELECTION_LIST_REASONS` でもない waiting を指す。**(b) `isUnclassifiedActive` / `statusEvidence:'none'`**（本書）は waiting と独立で `(running && default) \|\| (ready && no_recent_output)` 由来。sidebar は両方を同じ画面に出すため、本書では (a) を「**waitingKind の unclassified**」、(b) を「**証拠なし**」と必ず書き分ける。**D1 の拡大は `deriveWaitingKind` に影響しない**（`waiting` でないときは `null` を返すため） |

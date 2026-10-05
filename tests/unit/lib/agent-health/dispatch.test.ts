@@ -85,6 +85,19 @@ describe('issueKind', () => {
   });
 });
 
+describe('needs-human Issues', () => {
+  it('are never dispatch targets', () => {
+    expect(issueKind(issue(1, ['metrics', 'needs-human'], 'a', 'kewton'))).toBeNull();
+    expect(issueKind(issue(1, ['agent-health', 'needs-human'], 'a'))).toBeNull();
+    const result = selectDispatchTargets([
+      issue(1, ['metrics', 'needs-human'], '2026-08-01', 'kewton'),
+      issue(2, ['metrics'], '2026-08-02', 'kewton'),
+    ]);
+    expect(result.issues.map((i) => i.number)).toEqual([2]);
+    expect(result.deferred).toEqual([]);
+  });
+});
+
 describe('selectDispatchTargets', () => {
   it('orders bugs oldest first, then security metrics, then other metrics', () => {
     const result = selectDispatchTargets([

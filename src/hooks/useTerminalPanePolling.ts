@@ -9,7 +9,8 @@
  *  - terminal output / realtimeSnippet / isRunning / isThinking / sessionStatus
  *  - prompt state (visible / data / answering / messageId)
  *  - isSelectionListActive (Issue #473 navigation buttons)
- *  - attaching flag (R3-006): true until first successful fetch resolves
+ *  - attaching flag (R3-006): true until first successful fetch resolves, or
+ *    until the server says the session is another server's (Issue #3334)
  *  - autoScroll (per-pane)
  *
  * What it intentionally does NOT own:
@@ -54,6 +55,29 @@ import {
   selectPanePollIntervalMs,
   type PanePollingCadence,
 } from '@/config/pane-polling-cadence';
+
+/**
+ * The `code` of the `/current-output` 409 for a session another CommandMate
+ * server owns (Issue #2865). Spelled out because the server's constant sits
+ * next to the tmux gateway, which a client bundle must not import; pinned to it
+ * by `tests/unit/hooks/useTerminalPanePolling-foreign-session-3334.test.ts`.
+ */
+export const FOREIGN_SESSION_ERROR_CODE = 'session_owned_by_other_server';
+
+/**
+ * Whether a failed response is that 409's body. Never throws. Shared with the
+ * worktree screen's parent poll (`useWorktreeDetailController`), which reads
+ * the same route.
+ */
+export async function isForeignSessionResponse(response: Response): Promise<boolean> {
+  try {
+    const body: unknown = await response.json();
+    return typeof body === 'object' && body !== null
+      && (body as { code?: unknown }).code === FOREIGN_SESSION_ERROR_CODE;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Issue #2511: the numbers now live in `config/pane-polling-cadence` so the
@@ -594,7 +618,17 @@ export function useTerminalPanePolling({
       const response = await fetch(
         `/api/worktrees/${worktreeId}/current-output?cliTool=${requestedCli}&instance=${encodeURIComponent(requestedInstance)}`,
       );
-      if (!response.ok) return;
+      if (!response.ok) {
+        // Issue #3334: the one refusal that will not go away on the next poll.
+        // The route answers 409 for a same-named session another CommandMate
+        // server created (#2865) and shows none of it; returning here left the
+        // pane on "Attaching…" for good. It is reported as not running, which
+        // is what the worktree routes and the sidebar already say about it.
+        if (response.status === 409 && (await isForeignSessionResponse(response)) && !isStale()) {
+          applySnapshot({ isRunning: false, sessionStatus: 'idle' });
+        }
+        return;
+      }
       const data: CurrentOutputResponse = await response.json();
       if (isStale()) return;
       if (data.cliToolId && data.cliToolId !== requestedCli) {

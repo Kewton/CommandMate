@@ -507,11 +507,16 @@ approval (Issue #1681).
   buttons
 
 **The terminal surface gets the same buttons.** The navigation buttons above the composer on
-desktop, and the ones docked above the composer on a phone, show the same number keys and
-the same "This session only" / "Set as default". On the terminal surface the unlabelled Enter
+desktop, the ones docked above the composer on a phone, and the ones under the terminal of a
+`/sessions` tile show the same number keys and the same "This session only" / "Set as
+default". On the terminal surface the unlabelled Enter
 (↵) is not drawn while "Set as default" is — two buttons for one key are not put side by
 side. On a phone the docked buttons stay the same while a tab other than Terminal (History,
-Files, Tools, Info) is open.
+Files, Tools, Info) is open. Number keys are counted on the dialog the card shows, so a
+numbered reply above a dialog with no numbers does not turn into number keys. For opencode,
+while a selection list is open on the chat surface, the model keys appear only on the card:
+the opencode quick-key strip under the composer is hidden until the list closes (the
+terminal surface keeps it).
 
 The "Open terminal" button **remains, as a secondary way out**. The card shows only the last
 few rows, so switch to the terminal surface from here when you need scrollback or search.

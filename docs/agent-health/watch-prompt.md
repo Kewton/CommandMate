@@ -15,7 +15,8 @@
 3. `HAS_REPORT=0` でなければ、Antigravity の実行が失敗している。
    - まず、そのこと自体を Issue にする。識別子は `agent-health:antigravity:scheduled-run`。探し方・コメントの仕方・立て方は `docs/agent-health/daily-triage-prompt.md` の手順 4 と同じ。証拠には「今日のレポートが無い（または `completedAt` が無い）」と、`ls -la "$HOME/.commandmate/agent-health/reports/" | tail -5` の出力を書く
    - 次に、`docs/agent-health/daily-triage-prompt.md` を読み、手順 1〜4 を自分で実行する
-   - 最後に、次の 1 行だけを出力して終わる
+   - 最後に、要約と次の 1 行を出力して終わる
      ```
-     AGENT_HEALTH_WATCH date=<YYYY-MM-DD> status=took-over runner=command-code pass=<数> fail=<数> issues_created=<番号> issues_commented=<番号>
+     AGENT_HEALTH_WATCH date=<YYYY-MM-DD> status=took-over runner=command-code pass=<数> fail=<数> skip=<数> skip_kinds=<種類>:<数>,… issues_created=<番号> issues_commented=<番号>
      ```
+     `pass`・`fail`・`skip`・`skip_kinds` は、`daily-triage-prompt.md` の手順 2 の `COUNTS=`・`SKIP_KINDS=` と同じ値。この行の前に、同じ手順 4 の要約（1 行目から表・「未実施の理由:」まで）を出力する。skip を pass として数えない

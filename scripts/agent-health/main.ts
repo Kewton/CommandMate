@@ -49,18 +49,21 @@ import {
 } from '@/lib/agent-health/report';
 import { AGENT_HEALTH_TMUX_SOCKET, buildChildEnv } from '@/lib/agent-health/tmux-command';
 import { framesDirFor, resolveFrameSaveMode, type FrameArchive } from '@/lib/agent-health/frame-archive';
+import { buildCoverage, checksLimitedTools, skipCheck, summarizeCoverage } from '@/lib/agent-health/coverage';
 import {
+  AGENT_HEALTH_LIMITED_TOOLS,
   PROBE_WORKTREE_ID,
   type AgentHealthCheck,
+  type AgentHealthLimitedTool,
   type AgentHealthReport,
   type AgentHealthToolResult,
   type GlobalConfigRestoreEntry,
 } from '@/lib/agent-health/types';
 import { HookListener } from './hook-listener';
 import { locateServerLog, ServerLogWatch } from './production-log';
-import { probeTool, readVersion } from './probe-tool';
+import { probeLimitedTool, probeTool, readVersion } from './probe-tool';
 import { AgentHealthTmux } from './tmux-driver';
-import { TOOL_PROBE_SPECS } from './tool-table';
+import { LIMITED_TOOL_SPECS, TOOL_PROBE_SPECS } from './tool-table';
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..');
 const DEFAULT_DIR = path.join(os.homedir(), '.commandmate', 'agent-health');
@@ -205,6 +208,7 @@ async function run(options: AgentHealthOptions, startedAt: Date): Promise<AgentH
   const scriptErrors: string[] = [];
   const restoreEntries: GlobalConfigRestoreEntry[] = [];
   const results: AgentHealthToolResult[] = [];
+  const limitedRun: AgentHealthLimitedTool[] = [];
   const globalDeadline = startedAt.getTime() + RUN_BUDGET_SEC * 1000 - TEARDOWN_RESERVE_MS;
 
   const lockError = acquireLock(lockPath);
@@ -293,12 +297,14 @@ async function run(options: AgentHealthOptions, startedAt: Date): Promise<AgentH
         const { version } = await readVersion(spec.executable, childEnv);
         const skipped: AgentHealthCheck[] = options.checks
           .filter((checkId) => checkId !== 'version')
-          .map((checkId) => ({
-            checkId,
-            status: 'skip',
-            summary: `全体の時間上限（${RUN_BUDGET_SEC / 60} 分）に達したため実行しない`,
-            skipReason: 'run budget exhausted',
-          }));
+          .map((checkId) =>
+            skipCheck(
+              checkId,
+              'timeout',
+              `全体の時間上限（${RUN_BUDGET_SEC / 60} 分）に達したため実行しない`,
+              'run budget exhausted'
+            )
+          );
         results.push(
           buildToolResult({
             tool,
@@ -386,6 +392,21 @@ async function run(options: AgentHealthOptions, startedAt: Date): Promise<AgentH
 
       results.push(buildToolResult({ tool, version: outcome.version, previousVersion, checks: outcome.checks }));
     }
+
+    // Issue #3313: the tools the probe does not launch are rows too — on the
+    // daily run (every probed tool selected), not on a `--tools` retry.
+    if (checksLimitedTools(options.tools)) {
+      for (const tool of AGENT_HEALTH_LIMITED_TOOLS) {
+        const outcome = await probeLimitedTool(LIMITED_TOOL_SPECS[tool], childEnv, (checkId) =>
+          options.checks.includes(checkId)
+        );
+        log(`${tool}: version-only — ${outcome.checks[0].summary}`);
+        limitedRun.push(tool);
+        results.push(
+          buildToolResult({ tool, version: outcome.version, previousVersion: previousVersionOf(state, tool), checks: outcome.checks })
+        );
+      }
+    }
   } catch (error) {
     const message = error instanceof Error ? error.stack ?? error.message : String(error);
     log(`run aborted: ${message}`);
@@ -425,6 +446,12 @@ async function run(options: AgentHealthOptions, startedAt: Date): Promise<AgentH
     ...(scriptErrors.length > 0 ? { scriptErrors } : {}),
     ...(sync ? { sync } : {}),
   };
+  report.coverage = buildCoverage({
+    results,
+    selectedTools: [...options.tools, ...limitedRun],
+    selectedChecks: options.checks,
+  });
+  report.summary = summarizeCoverage(report.coverage, results);
 
   if (!writeReportOrPrint(outPath, report)) scriptErrors.push(`レポートを書けなかった: ${outPath}`);
   try {
@@ -439,6 +466,8 @@ async function run(options: AgentHealthOptions, startedAt: Date): Promise<AgentH
     const line = result.checks.map((check) => `${check.checkId}=${check.status}`).join(' ');
     log(`${result.tool} ${result.version ?? '(no version)'}${result.versionChanged ? ` (was ${result.previousVersion})` : ''}: ${line}`);
   }
+  // Issue #3313: what the watcher reads — the counts first, never "all pass".
+  process.stdout.write(`${report.summary.join('\n')}\n`);
   log(`exit ${exitCode}`);
   return exitCode;
 }
