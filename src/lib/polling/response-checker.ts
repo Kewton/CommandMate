@@ -59,6 +59,7 @@ import {
   clearTuiAccumulator,
 } from '../tui-accumulator';
 import { isDuplicatePrompt, normalizePromptForDedup } from './prompt-dedup';
+import { isStartupScreenWithoutUserEcho } from './startup-screen';
 import { hasRecentAntigravityPermissionReceipt } from './antigravity-permission-receipts';
 // Issue #2457: the same rollout table, `hasDialogRules` cross-check and
 // `detectDialog` seam Auto-Yes reads, reached through the presence helper rather
@@ -711,6 +712,10 @@ function findRecentUserPromptIndexInFrame(
 // screen rather than a reply, `null` when the response stands. They are declared
 // in the order extractResponse calls them — the comments inside say "above" and
 // "below" about each other and about the checks that ran before the call.
+//
+// Issue #3293 added the last two, codex and vibe-local. Theirs is the one result
+// here that is not incomplete: an empty COMPLETE one, for the reason given at
+// `readStartupScreenPastCursor`.
 
 /**
  * Claude: the startup banner, and an echoed prompt with no reply under it yet.
@@ -949,6 +954,120 @@ function suppressOpenCodeBanner(
   return null;
 }
 
+/**
+ * The result for a startup screen of a tool that reads its reply from the
+ * cursor: nothing to save, and the cursor moved past the screen (Issue #3293).
+ *
+ * The defenses above return an incomplete result and leave the cursor where it
+ * was. Where extraction is anchored on the echoed prompt (copilot,
+ * command-code, opencode) that costs nothing: once a turn exists, the banner
+ * above its echo is never read. codex and vibe-local start at
+ * `lastCapturedLine`. A cursor left at 0 would put the banner back on the first
+ * turn — vibe-local's first reply would be saved with the whole startup screen
+ * above it.
+ *
+ * So the screen is reported as read: a COMPLETE result with an empty response
+ * and the `lineCount` the banner save had. `checkForResponse` writes that
+ * cursor and saves nothing ("Validate response content is not empty"), which
+ * leaves every later tick with exactly the cursor it had before this Issue.
+ *
+ * Asked of the whole pane, by the reader the pre-send flush uses for the same
+ * question ({@link isStartupScreenWithoutUserEcho}), and not of a clipped
+ * capture: the echo of a turn longer than the window has scrolled out (#1670).
+ *
+ * @param tool - The tool the calling defense answers for
+ * @param ctx - What this call has read off the capture
+ * @param response - The response extracted from the frame
+ * @param endIndex - The line count `collectCompletedResponse` reported for it
+ * @returns The empty complete result to return, or null when the response stands
+ */
+function readStartupScreenPastCursor(
+  tool: 'codex' | 'vibe-local',
+  ctx: ExtractionContext,
+  response: string,
+  endIndex: number
+): ExtractionResult | null {
+  const { cliToolId, lines, lastCapturedLine, bufferReset, captureWindowSaturated } = ctx;
+
+  // An empty response is already what this would return.
+  if (cliToolId !== tool || !response || captureWindowSaturated) {
+    return null;
+  }
+  if (!isStartupScreenWithoutUserEcho(cliToolId, lines)) {
+    return null;
+  }
+
+  // Only when `checkForResponse` goes on to write the cursor, which is once per
+  // startup screen. vibe-local's cursor ends on the last row, so every later
+  // tick of the idle pane takes the buffer-reset branch, re-extracts the banner
+  // and arrives here again.
+  if (bufferReset || endIndex > lastCapturedLine) {
+    logger.info(`${tool} startup screen suppressed, response not saved`, {
+      responseLength: response.length,
+      lineCount: endIndex,
+    });
+  }
+
+  return {
+    response: '',
+    isComplete: true,
+    lineCount: endIndex,
+    bufferReset,
+    captureWindowSaturated,
+  };
+}
+
+/**
+ * Codex: the startup screen.
+ *
+ * @param ctx - What this call has read off the capture
+ * @param response - The response extracted from the frame
+ * @param endIndex - The line count `collectCompletedResponse` reported for it
+ * @returns The empty complete result to return, or null when the response stands
+ */
+function suppressCodexStartupScreen(
+  ctx: ExtractionContext,
+  response: string,
+  endIndex: number
+): ExtractionResult | null {
+  // Issue #3293: codex's startup screen is a complete, idle frame — composer
+  // drawn, no status line above it — so `hasPrompt && !isThinking` accepts it,
+  // and the rows from the cursor down were saved as the agent's first reply.
+  // On 0.160.0 that is `>_ OpenAI Codex (v0.160.0)`, the cwd, a tagline and the
+  // block-art logo (20 rows in `tests/fixtures/startup-screen-3293/`); on 0.15x
+  // the `Tip:` and usage notices under the banner box, whose own rows the skip
+  // patterns happen to drop.
+  //
+  // It took one poll of that screen. The frame the folder-trust dialog leaves
+  // behind when it is answered is this screen, and answering it with `respond`
+  // starts the poller.
+  //
+  // The dialog itself never reaches this point: it has no composer, and it was
+  // returned as a prompt by the early check in extractResponse.
+  return readStartupScreenPastCursor('codex', ctx, response, endIndex);
+}
+
+/**
+ * Vibe Local: the startup screen.
+ *
+ * @param ctx - What this call has read off the capture
+ * @param response - The response extracted from the frame
+ * @param endIndex - The line count `collectCompletedResponse` reported for it
+ * @returns The empty complete result to return, or null when the response stands
+ */
+function suppressVibeLocalStartupScreen(
+  ctx: ExtractionContext,
+  response: string,
+  endIndex: number
+): ExtractionResult | null {
+  // Issue #3293: vibe-local's startup screen ends in an empty `ctx:N% ❯` prompt
+  // row with nothing working, so it is accepted the same way. Its skip patterns
+  // name some banner rows (`Model  …`, `CWD  …`) and miss the rest — the
+  // launcher's `Model: …` / `Ollama: …` box, the logo, the hint rows — so most
+  // of the screen was saved (20 rows of the 1.3.3 capture in the same fixtures).
+  return readStartupScreenPastCursor('vibe-local', ctx, response, endIndex);
+}
+
 // The rest of extractResponse, split out one function per step (Issue #3213):
 // the completion rules, the completion branch they open, and the partial
 // reading a frame falls through to. They are declared in the order
@@ -1150,7 +1269,8 @@ function collectCompletedResponse(ctx: ExtractionContext): { response: string; e
  * The body of the completion branch of {@link extractResponse}, split out as it
  * was (Issue #3213). Every return is `extractResponse`'s own result: incomplete
  * when the reply's tail still shows a thinking indicator or the frame is a
- * startup screen, complete otherwise.
+ * startup screen, complete otherwise. (A codex or vibe-local startup screen is
+ * the exception — complete, with an empty response; Issue #3293.)
  *
  * @param ctx - What this call has read off the capture
  * @returns What `extractResponse` returns for this frame
@@ -1184,7 +1304,9 @@ function extractCompletedResponse(ctx: ExtractionContext): ExtractionResult {
     suppressCopilotLaunchScreen(cliToolId, response, totalLines) ??
     suppressCommandCodeLaunchScreen(cliToolId, response, totalLines, findRecentUserPromptIndex) ??
     suppressGeminiStartupScreen(cliToolId, response, totalLines) ??
-    suppressOpenCodeBanner(cliToolId, response, totalLines, cleanOutputToCheck);
+    suppressOpenCodeBanner(cliToolId, response, totalLines, cleanOutputToCheck) ??
+    suppressCodexStartupScreen(ctx, response, endIndex) ??
+    suppressVibeLocalStartupScreen(ctx, response, endIndex);
   if (startupScreen) {
     return startupScreen;
   }
