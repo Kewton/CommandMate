@@ -339,6 +339,10 @@ export class OpenCodeTool extends BaseCLITool {
 
     const target = opencodeTarget(worktreeId, instanceId);
 
+    // Issue #3296: resolved ONCE. The relaunch path uses it twice (reconcile and
+    // resize), and resolving at each site printed the same warn twice.
+    const paneWidth = resolveOpencodePaneWidthChecked();
+
     const exists = await hasSession(sessionName);
     if (exists) {
       // Issue #2047: the SAME width as the creation path below. These two used
@@ -347,7 +351,7 @@ export class OpenCodeTool extends BaseCLITool {
       // a reconnect would silently hand the detectors a geometry the creation
       // path had been moved away from.
       await this.reconcileExistingSession(sessionName, worktreePath, {
-        windowWidth: resolveOpencodePaneWidthChecked(),
+        windowWidth: paneWidth,
         windowHeight: OPENCODE_PANE_HEIGHT,
       });
       // Issue #2070: is opencode still the thing drawing this pane? The two
@@ -372,7 +376,7 @@ export class OpenCodeTool extends BaseCLITool {
         // the pane is the same one AND the process is the same process, so
         // fencing here would discard a still-valid verdict on every reconnect.
         await resumeOpencodeEventStream(target, worktreePath);
-        logger.info('opencode-session-sessionname');
+        logger.info('opencode-session-exists');
         return;
       }
       logger.warn('opencode-session-relaunch', { sessionName });
@@ -425,7 +429,7 @@ export class OpenCodeTool extends BaseCLITool {
         await execFileAsync('tmux', [
           // Issue #1156: exact-match target so resize never leaks to a prefix-colliding instance
           'resize-window', '-t', exactTarget(sessionName),
-          '-x', String(resolveOpencodePaneWidthChecked()), '-y', String(OPENCODE_PANE_HEIGHT),
+          '-x', String(paneWidth), '-y', String(OPENCODE_PANE_HEIGHT),
         ]);
       } catch {
         // Non-fatal: resize may fail in some environments
