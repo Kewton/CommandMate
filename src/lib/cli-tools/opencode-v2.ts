@@ -59,11 +59,8 @@ import {
 } from '../detection/cli-patterns';
 import { sendMessageWithSubmitVerification } from './submit-verified-sender';
 import { invalidateCache } from '../tmux/tmux-capture-cache';
-import {
-  OPENCODE_PANE_HEIGHT,
-  OPENCODE_PANE_WIDTH_ENV,
-  resolveOpencodePaneWidth,
-} from '@/config/tmux-pane-config';
+import { OPENCODE_PANE_HEIGHT } from '@/config/tmux-pane-config';
+import { resolveOpencodePaneWidthChecked } from './opencode-pane-width';
 import { createLogger } from '@/lib/logger';
 import { getErrorMessage } from '@/lib/errors';
 import {
@@ -256,14 +253,8 @@ export class OpenCodeV2Tool extends BaseCLITool {
 
     const sessionName = this.getSessionName(worktreeId, instanceId);
     const target = opencodeV2Target(worktreeId, instanceId);
-    const paneWidth = resolveOpencodePaneWidth();
-    // Issue #3296: tell the operator a dropped CM_OPENCODE_PANE_WIDTH, as v1 does.
-    // The "sidebar visible" (>=121) warn is NOT added: the width at which v2 starts
-    // painting a sidebar has not been measured.
-    const requestedWidth = process.env[OPENCODE_PANE_WIDTH_ENV];
-    if (requestedWidth !== undefined && String(paneWidth) !== requestedWidth.trim()) {
-      logger.warn('opencode-pane-width-rejected', { requested: requestedWidth, applied: paneWidth });
-    }
+    // Issue #3296: the "sidebar visible" warn is off for v2 (see opencode-pane-width.ts).
+    const paneWidth = resolveOpencodePaneWidthChecked({ warnSidebar: false });
     const geometry = { windowWidth: paneWidth, windowHeight: OPENCODE_PANE_HEIGHT };
 
     const exists = await hasSession(sessionName);
