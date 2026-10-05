@@ -217,8 +217,12 @@ export async function POST(request: NextRequest) {
 
     // Injection does not replace the user's own hooks, it is concatenated with
     // them, so anyone who followed the #1549 manual setup now delivers each
-    // event twice. Both copies name the same agent session, which is what makes
-    // them distinguishable from two genuine turns.
+    // event twice. Both copies name the same agent session and arrive inside
+    // the window — and so do the `stop`s of two short turns of one session,
+    // which the session id cannot tell from a copy (Issue #3289). The turn
+    // start that arrived between them can: `isDuplicateAgentEvent` sees every
+    // delivery in arrival order, and a turn start it applies releases that
+    // session's `stop`.
     if (isDuplicateAgentEvent(worktree.id, tool, instanceParam, event, sessionId, receivedAt, detail)) {
       logger.info('agent-event-duplicate-dropped', { worktreeId: worktree.id, tool, event });
       return NextResponse.json(ACCEPTED, { status: 202 });
