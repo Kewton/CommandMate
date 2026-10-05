@@ -680,6 +680,9 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   // Issue #3184: read off the shared view, whose `decisionId` is non-null
   // exactly when the payload is answered over the agent's API — an id with
   // nothing addressable behind it no longer reaches the panel as one.
+  // Read off the view, unlike the phone sheet's read of the payload's own id
+  // (WorktreeDetailRefactored): the panel takes the id as a prop and shows what
+  // the view says (PromptPanel `panelPromptView`). The two agree today.
   const promptDecisionId = derivePromptView(prompt.data)?.decisionId ?? null;
   // Issue #2945: the approval verdicts in the tool's own words (OpenCode V2
   // draws `Always allow`); the numbers they send are unchanged.
@@ -696,6 +699,9 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   // hidden during normal generation ('thinking_indicator') and at an idle input prompt
   // ('ready'), so Enter/'q' can never reach the composer.
   // Issue #2254 added the `!isChatSurface` term; the other three are unchanged.
+  // `!isSelectionListFrame` is redundant here: the shared hook
+  // (useTerminalPanePolling) already drops selection-list frames first, which is
+  // why MobileTerminalTab carries no such term.
   const showEscapeHatch =
     terminal.isUnclassifiedActive &&
     !isSelectionListFrame &&

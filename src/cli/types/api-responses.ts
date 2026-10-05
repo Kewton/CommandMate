@@ -2,8 +2,10 @@
  * CLI-side API Response Type Definitions
  * Issue #518: [DR1-06] All types include Mirrors comments for server-side traceability
  *
- * These types mirror server-side response shapes. Phase 2 will migrate to
- * shared types in src/types/api-contracts.ts.
+ * These types mirror server-side response shapes. Where a server module has no
+ * imports of its own (e.g. `lib/session/prompt-view`), it is imported here by
+ * relative path instead of restated, so the CLI build compiles it and there is
+ * no second definition to drift (see `promptView` below).
  */
 
 import type { PromptView } from '../../lib/session/prompt-view';
@@ -259,7 +261,7 @@ export interface CurrentOutputResponse {
    * The tmux session name this instance actually runs (or would run) under
    * (Issue #2886).
    *
-   * Mirrors: src/lib/session/current-output-builder.ts
+   * Mirrors: src/lib/session/current-output-types.ts
    * CurrentOutputPayload.sessionName — `getSessionName(worktreeId, instanceId)`
    * verbatim, namespace (#2866) and legacy-adoption included, so a consumer
    * never has to reconstruct `mcbd-${cliToolId}-${worktreeId}` itself.
@@ -405,7 +407,7 @@ export interface CurrentOutputResponse {
    * Diagnostic — it tells an operator whether hooks are arriving and for which
    * instance. No CLI verdict reads it; that is Issue #1723.
    *
-   * Mirrors: src/lib/session/current-output-builder.ts StructuredEventsPayload
+   * Mirrors: src/lib/session/current-output-types.ts StructuredEventsPayload
    */
   structuredEvents?: {
     lastEventType: string | null;
@@ -454,7 +456,7 @@ export interface CurrentOutputResponse {
      * deliberately NOT here — see the server-side type; what is published is
      * what a reader can act on.
      *
-     * Mirrors: src/lib/session/current-output-builder.ts PendingDecisionPayload.
+     * Mirrors: src/lib/session/current-output-types.ts PendingDecisionPayload.
      */
     pendingDecisions?: Array<{
       /** The agent's own id for it, or null for a source that publishes none. */
@@ -617,7 +619,7 @@ export interface CurrentOutputResponse {
      * Which agent event source speaks for this tool, and what it declares it can
      * do (Issue #1924).
      *
-     * Mirrors: src/lib/session/current-output-builder.ts StructuredSourcePayload.
+     * Mirrors: src/lib/session/current-output-types.ts StructuredSourcePayload.
      * Optional here and required there for the usual reason — this CLI can be
      * newer than the server it is pointed at, and a build from before #1924
      * sends no `source` at all.
@@ -805,7 +807,7 @@ export interface CurrentOutputResponse {
    * Issue #1839: the upstream (model API) fault visible on the live frame, or
    * null when no known signature matched.
    *
-   * Mirrors: src/lib/session/current-output-builder.ts
+   * Mirrors: src/lib/session/current-output-types.ts
    * CurrentOutputPayload.upstreamFault
    *
    * **null is not an all-clear.** It means no signature from
@@ -830,7 +832,7 @@ export interface CurrentOutputResponse {
    * Issue #2095: a second column sharing rows with the agent's transcript, or
    * null when the frame's layout could not be read as two columns.
    *
-   * Mirrors: src/lib/session/current-output-builder.ts
+   * Mirrors: src/lib/session/current-output-types.ts
    * CurrentOutputPayload.paneObstruction
    *
    * **null is not an all-clear**, for the same reason {@link upstreamFault}'s is
@@ -859,7 +861,7 @@ export interface CurrentOutputResponse {
   /**
    * Issue #1785: the model the session is running, or null when nothing knows.
    *
-   * Mirrors: src/lib/session/current-output-builder.ts CurrentOutputPayload.model
+   * Mirrors: src/lib/session/current-output-types.ts CurrentOutputPayload.model
    *
    * Optional *here* although the server always sends it, and the two are not in
    * conflict: this mirror also describes what an older daemon answers, and the
@@ -872,7 +874,7 @@ export interface CurrentOutputResponse {
   /**
    * Issue #1785: reasoning effort, or null when nothing knows.
    *
-   * Mirrors: src/lib/session/current-output-builder.ts
+   * Mirrors: src/lib/session/current-output-types.ts
    * CurrentOutputPayload.reasoningEffort — including the part where it is null
    * for every session until Issue #1784's extraction layer lands.
    */
@@ -904,7 +906,7 @@ export interface CurrentOutputResponse {
    * Issue #1884: which stage of the server's precedence chain picked
    * {@link CurrentOutputResponse.cliToolId}.
    *
-   * Mirrors: src/lib/session/current-output-builder.ts
+   * Mirrors: src/lib/session/current-output-types.ts
    * CurrentOutputPayload.resolvedBy — and, like `lastSuppression.reason`,
    * deliberately typed as the wire's `string` rather than the union this build
    * knows: a server newer than the CLI can name a stage this build has never
@@ -919,7 +921,7 @@ export interface CurrentOutputResponse {
   /**
    * Issue #1884: the explicit `?cliTool` the roster contradicts, or null.
    *
-   * Mirrors: src/lib/session/current-output-builder.ts
+   * Mirrors: src/lib/session/current-output-types.ts
    * CurrentOutputPayload.conflict. This is a read path, so the server resolves
    * the contradiction (roster wins) and answers 200 with it attached rather
    * than 400 — the commands that act refuse it instead (DR3-015).
