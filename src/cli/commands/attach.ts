@@ -34,7 +34,15 @@ import { spawnSync } from 'child_process';
 import { Command } from 'commander';
 import { ExitCode } from '../types';
 import type { AttachOptions } from '../types';
-import { ApiClient, isValidWorktreeId, isValidInstanceId } from '../utils/api-client';
+import {
+  ApiClient,
+  ApiError,
+  FOREIGN_SESSION_ERROR_CODE,
+  foreignSessionMessage,
+  isValidWorktreeId,
+  isValidInstanceId,
+} from '../utils/api-client';
+import type { ApiErrorPayload } from '../utils/api-client';
 import { TOKEN_WARNING, handleCommandError } from '../utils/command-helpers';
 import { isCliToolId, DEFAULT_CLI_TOOL_ID } from '../config/cli-tool-ids';
 import { AGENT_OPTION_DESCRIPTION, INSTANCE_OPTION_DESCRIPTION } from '../config/agent-target-options';
@@ -118,6 +126,100 @@ async function resolveAttachSessionName(
     // Fall through to the legacy name.
   }
   return resolveLegacySessionName(cliToolId as CLIToolType, worktreeId, instanceId);
+}
+
+/**
+ * Whether the server says the session under this name is ANOTHER CommandMate
+ * server's (Issue #3334). Returns that 409's body, or null.
+ *
+ * ## Why ask the server, and why through `capture`
+ *
+ * `has-session` answers by name, and a name is all two servers on one tmux
+ * socket have in common (Issue #2865): a worktree directory called the same on
+ * both resolves to the same `mcbd-…` name. Only the server that holds the
+ * worktree row knows the directory its own session was started in, and every
+ * session route already compares that with tmux's `#{session_path}` and
+ * answers 409 `session_owned_by_other_server` when they differ. `capture` with
+ * `lines: 1` is the cheapest of them, reads nothing it would not show anyway,
+ * and sends tmux no key.
+ *
+ * Every other outcome — an owned session, a server older than #2865, a server
+ * that cannot be reached — is null, and the attach goes on exactly as before:
+ * the local `has-session` above has already said there is something to attach
+ * to, and this probe exists only to stop typing into somebody else's session.
+ */
+export async function findForeignSession(
+  client: ApiClient,
+  worktreeId: string,
+  cliToolId: string,
+  instanceId: string | undefined
+): Promise<ApiErrorPayload | null> {
+  try {
+    await client.post(`/api/worktrees/${worktreeId}/capture`, {
+      cliToolId,
+      lines: 1,
+      ...(instanceId !== undefined && instanceId !== cliToolId ? { instanceId } : {}),
+    });
+    return null;
+  } catch (error) {
+    if (error instanceof ApiError && error.statusCode === 409 && error.apiCode === FOREIGN_SESSION_ERROR_CODE) {
+      return error.payload ?? { code: FOREIGN_SESSION_ERROR_CODE };
+    }
+    return null;
+  }
+}
+
+/**
+ * What to do with an attach to another server's session (Issue #3334).
+ *
+ * Attaching is the one path where the operator named the session themselves,
+ * and looking at it can be what they came for — so the attach is not refused,
+ * it is made read-only: tmux then delivers no key but the detach one. The two
+ * forms that cannot be made read-only are refused before tmux is touched:
+ *
+ * - `--live` re-lays the session out (`set-option` / `resize-window`), which
+ *   changes the other server's pane whether or not a key is typed;
+ * - inside tmux, `switch-client` has no read-only form (its `-r` TOGGLES the
+ *   client's mode, so it can just as well turn read-only off), and the manual
+ *   `attach -r` from outside tmux is printed instead.
+ *
+ * @returns the lines for stderr and whether to go on (read-only)
+ */
+export function planForeignAttach(
+  payload: ApiErrorPayload,
+  sessionName: string,
+  options: { live?: boolean; insideTmux: boolean }
+): { proceedReadOnly: boolean; lines: string[] } {
+  if (options.live) {
+    return {
+      proceedReadOnly: false,
+      lines: [
+        `Error: ${foreignSessionMessage(payload)}`,
+        '--live would re-lay that session out, so it was not attached.',
+      ],
+    };
+  }
+  if (options.insideTmux) {
+    return {
+      proceedReadOnly: false,
+      lines: [
+        `Error: ${foreignSessionMessage(payload)}`,
+        'Inside tmux this client can only switch to it with keys enabled, so it was not switched. '
+          + 'To look at it read-only, from a terminal outside tmux run:',
+        `  tmux attach -r -t '${exactSessionTarget(sessionName)}'`,
+      ],
+    };
+  }
+  const where = typeof payload.sessionPath === 'string' && payload.sessionPath !== ''
+    ? ` (it was started in ${payload.sessionPath})`
+    : '';
+  return {
+    proceedReadOnly: true,
+    lines: [
+      `Warning: tmux session "${sessionName}" belongs to another CommandMate server${where}.`,
+      'Attaching READ-ONLY, so no key you type reaches it. To work in it, use the server that started it.',
+    ],
+  };
 }
 
 /**
@@ -274,16 +376,29 @@ export function createAttachCommand(): Command {
           process.exit(ExitCode.UNEXPECTED_ERROR);
         }
 
+        // Issue #3334: the name exists, but it may be another server's session.
+        let readOnly = Boolean(options.readOnly);
+        const foreign = await findForeignSession(client, worktreeId, cliToolId, instanceId);
+        if (foreign) {
+          const plan = planForeignAttach(foreign, sessionName, {
+            live: options.live,
+            insideTmux: Boolean(process.env.TMUX),
+          });
+          for (const line of plan.lines) console.error(line);
+          if (!plan.proceedReadOnly) process.exit(ExitCode.UNEXPECTED_ERROR);
+          readOnly = true;
+        }
+
         for (const line of buildAttachHints(cliToolId, worktreeId, sessionName, {
-          readOnly: options.readOnly,
+          readOnly,
           live: options.live,
         })) {
           console.error(line);
         }
 
         const status = options.live
-          ? attachLive(sessionName, Boolean(options.readOnly))
-          : attachOrSwitch(sessionName, Boolean(options.readOnly));
+          ? attachLive(sessionName, readOnly)
+          : attachOrSwitch(sessionName, readOnly);
         process.exit(status);
       } catch (error) {
         handleCommandError(error);

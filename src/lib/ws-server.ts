@@ -916,6 +916,30 @@ function sendTerminalEvent(ws: WebSocket, data: Record<string, unknown>): void {
   ws.send(JSON.stringify(data));
 }
 
+/** The `terminal_error` text for a session another CommandMate server owns. */
+const FOREIGN_TERMINAL_SESSION_ERROR = 'Session belongs to another CommandMate server';
+
+/**
+ * Why the subscribed session may not be typed into / resized now, or null
+ * (Issue #3334).
+ *
+ * The subscribe handler checks ownership once, but `terminal_input` and
+ * `terminal_resize` address the session by its cached NAME for as long as the
+ * socket lives. A session that ended and was started again by another
+ * CommandMate server under the same name (#2865) would then receive this
+ * client's keys, so the check is repeated before every write, the way the
+ * routes repeat it per request. The worktree row is re-read by id because a
+ * rename re-points the subscription (`migrateWorktreeRooms`); a row that is gone
+ * cannot vouch for the session, which is refused for the same reason
+ * `sendUserMessage` refuses it.
+ */
+async function findTerminalSessionRefusal(worktreeId: string, sessionName: string): Promise<string | null> {
+  const worktree = getWorktreeById(getDbInstance(), worktreeId);
+  if (!worktree) return 'Worktree not found';
+  const ownership = await checkSessionOwnership(sessionName, worktree.path);
+  return ownership.verdict === 'foreign' ? FOREIGN_TERMINAL_SESSION_ERROR : null;
+}
+
 async function handleTerminalSubscribe(ws: WebSocket, message: WebSocketMessage): Promise<void> {
   const clientInfo = clients.get(ws);
   if (!clientInfo) {
@@ -966,7 +990,7 @@ async function handleTerminalSubscribe(ws: WebSocket, message: WebSocketMessage)
   if (ownership.verdict === 'foreign') {
     sendTerminalEvent(ws, {
       type: 'terminal_error',
-      error: 'Session belongs to another CommandMate server',
+      error: FOREIGN_TERMINAL_SESSION_ERROR,
     });
     return;
   }
@@ -996,15 +1020,20 @@ async function handleTerminalSubscribe(ws: WebSocket, message: WebSocketMessage)
     onError: (error) => {
       void (async () => {
         try {
-          const snapshot = await transport.captureSnapshot(sessionName, {
-            startLine: TERMINAL_FALLBACK_CAPTURE_LINES,
-          });
-          if (snapshot.length > 0) {
-            sendTerminalEvent(ws, {
-              type: 'terminal_output',
-              data: snapshot,
-              fallback: true,
+          // Issue #3334: the fallback reads the pane by name, later than the
+          // check above — a session that went away and came back under another
+          // server is not ours to show.
+          if ((await findTerminalSessionRefusal(worktreeId, sessionName)) === null) {
+            const snapshot = await transport.captureSnapshot(sessionName, {
+              startLine: TERMINAL_FALLBACK_CAPTURE_LINES,
             });
+            if (snapshot.length > 0) {
+              sendTerminalEvent(ws, {
+                type: 'terminal_output',
+                data: snapshot,
+                fallback: true,
+              });
+            }
           }
         } catch {
           // Best-effort snapshot fallback. The original control-mode error is still reported.
@@ -1050,6 +1079,11 @@ async function handleTerminalInput(ws: WebSocket, message: WebSocketMessage): Pr
   }
 
   try {
+    const refusal = await findTerminalSessionRefusal(subscription.worktreeId, subscription.sessionName);
+    if (refusal !== null) {
+      sendTerminalEvent(ws, { type: 'terminal_error', error: refusal });
+      return;
+    }
     await getControlModeTmuxTransport().sendInput(subscription.sessionName, input);
   } catch (error) {
     sendTerminalEvent(ws, {
@@ -1075,6 +1109,12 @@ async function handleTerminalResize(ws: WebSocket, message: WebSocketMessage): P
   }
 
   try {
+    // Issue #3334: a resize changes the pane as surely as a key does.
+    const refusal = await findTerminalSessionRefusal(subscription.worktreeId, subscription.sessionName);
+    if (refusal !== null) {
+      sendTerminalEvent(ws, { type: 'terminal_error', error: refusal });
+      return;
+    }
     await getControlModeTmuxTransport().resize(subscription.sessionName, message.cols, message.rows);
   } catch (error) {
     sendTerminalEvent(ws, {

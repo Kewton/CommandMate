@@ -2035,6 +2035,17 @@ commandmate attach <worktree-id> --live               # 端末サイズへ再レ
 現在のクライアントが**別の tmux サーバ**にいて切り替えられないときは、クォート済みの
 `tmux attach -t '=mcbd-…:'` を表示して非 0 で終了します。
 
+同じ名前のセッションが**別の CommandMate サーバのもの**（サーバが 409 `session_owned_by_other_server`
+を返す）だったときは、キーを届けないように振る舞いを変えます（Issue #3334）。
+
+- 既定の attach は **read-only（`-r`）に切り替えて** attach し、その旨を stderr に出します。中を見ることはできますが、打ったキーは届きません
+- `--live` は相手のセッションのジオメトリを変えるので、**attach せず**に非 0 で終了します
+- tmux の中から呼んだ場合も、`switch-client` に read-only の形が無いので**切り替えず**、tmux の外で打つ
+  `tmux attach -r -t '=mcbd-…:'` を表示して非 0 で終了します
+
+`send` / `capture` / `respond` などほかのコマンドが同じ 409 を受けたときも、「別の CommandMate サーバの
+セッションなので、送る・読む・止めるのどれもしなかった」と分かる文で終了します（終了コードは従来の 409 と同じ 99）。
+
 ### セッション名を知る
 
 ```bash

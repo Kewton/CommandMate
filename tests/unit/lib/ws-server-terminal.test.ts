@@ -297,8 +297,10 @@ describe('ws-server terminal handlers', () => {
     });
 
     onError?.(new Error('parser failed'));
-    await Promise.resolve();
-    await Promise.resolve();
+    // Issue #3334: the fallback now re-checks ownership (two tmux reads) before
+    // it captures, so two microtasks are no longer enough to reach the send.
+    // Flushed with a macrotask; the expectations below are unchanged.
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(mockCaptureSnapshot).toHaveBeenCalledWith(SESSION_NAME, { startLine: -200 });
     expect(sendMock).toHaveBeenCalledWith(JSON.stringify({
