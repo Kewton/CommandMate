@@ -899,7 +899,7 @@ function suppressGeminiStartupScreen(
 ): ExtractionResult | null {
   // Gemini-specific check
   if (cliToolId === 'gemini') {
-    const bannerCharCount = (response.match(/[░███]/g) || []).length;
+    const bannerCharCount = (response.match(/[░█]/g) || []).length;
     const totalChars = response.length;
     if (bannerCharCount > totalChars * 0.3) {
       return incompleteResult(totalLines);
@@ -1571,7 +1571,7 @@ function extractCompletedTurn(
   const lineCountIsCursor = !usesAlternateScreen(cliToolId) && !result.captureWindowSaturated;
 
   // Duplicate prevention
-  if (lineCountIsCursor && !result.bufferReset && result.lineCount === lastCapturedLine && !sessionState?.inProgressMessageId) {
+  if (lineCountIsCursor && !result.bufferReset && result.lineCount === lastCapturedLine) {
     return false;
   }
 
