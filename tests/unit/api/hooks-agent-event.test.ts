@@ -693,6 +693,109 @@ describe('a turn that began right after the previous one ended (Issue #3301)', (
   });
 });
 
+describe('a queued notice delivered into a running turn (Issue #3330)', () => {
+  /**
+   * The shape the injected `type: "http"` hook posts: Claude's own payload,
+   * prompt included. In the server logs of 2026-10-02 to 2026-10-05, 178
+   * deliveries like the second one below arrived with the turn still open, a
+   * median of 63.5 s after it opened, each matched by a
+   * `queue-operation: remove` of a `<task-notification>` in the transcript.
+   * Applying one re-opened the turn under a new id.
+   */
+  const T = 1_800_000_000_000;
+  const NOTICE_AFTER_MS = 63_500;
+  const STOP_AFTER_MS = 90_000;
+  const SESSION = 'sess-3330';
+  const NOTICE = '<task-notification>\n<status>completed</status>\n</task-notification>';
+
+  afterEach(() => unfreezeClock());
+
+  async function deliver(hookEventName: string, afterMs: number, prompt?: string) {
+    freezeClock(T + afterMs);
+    const response = await postEvent({
+      tool: 'claude',
+      hook_event_name: hookEventName,
+      cwd: repo,
+      session_id: SESSION,
+      ...(prompt === undefined ? {} : { prompt }),
+    });
+    expect(response.status).toBe(202);
+  }
+
+  it('keeps the turn open under its id, and that turn’s stop closes it', async () => {
+    const task = seedTask({ status: 'running' });
+
+    await deliver('UserPromptSubmit', 0, 'Implement the change');
+    const opened = getAgentTurn(wtId, 'claude');
+    expect(opened?.openedAt).toBe(T);
+
+    await deliver('UserPromptSubmit', NOTICE_AFTER_MS, NOTICE);
+
+    const joined = getAgentTurn(wtId, 'claude');
+    expect(joined?.turnId).toBe(opened?.turnId);
+    expect(joined?.openedAt).toBe(T);
+    expect(joined?.closedAt).toBeNull();
+    expect(getStructuredSessionState(wtId, 'claude')?.status).toBe('running');
+    // What `wait` reads (`turnSettled`): no stop at or after the turn it adopted.
+    expect(getLastStopEventAt(wtId, 'claude')).toBeNull();
+
+    await deliver('Stop', STOP_AFTER_MS);
+
+    const closed = getAgentTurn(wtId, 'claude');
+    expect(closed?.turnId).toBe(opened?.turnId);
+    expect(closed?.closedBy).toBe('stop');
+    expect(getLastStopEventAt(wtId, 'claude')).toBe(T + STOP_AFTER_MS);
+    expect(getLastStopEventAt(wtId, 'claude')).toBeGreaterThanOrEqual(closed?.openedAt ?? Infinity);
+    expect(getStructuredSessionState(wtId, 'claude')?.status).toBe('ready');
+    expect(listTaskEvents(db, task.id).map((event) => event.event)).toEqual(['agent_idle']);
+  });
+
+  it('opens a new turn for a prompt that is not a notice (control: interrupt and resend)', async () => {
+    await deliver('UserPromptSubmit', 0, 'Implement the change');
+    const opened = getAgentTurn(wtId, 'claude');
+
+    await deliver('UserPromptSubmit', NOTICE_AFTER_MS, 'Actually, do it differently');
+
+    const resent = getAgentTurn(wtId, 'claude');
+    expect(resent?.turnId).not.toBe(opened?.turnId);
+    expect(resent?.openedAt).toBe(T + NOTICE_AFTER_MS);
+  });
+
+  it('opens a new turn for a notice that arrives after the turn ended (#3289)', async () => {
+    await deliver('UserPromptSubmit', 0, 'Implement the change');
+    const first = getAgentTurn(wtId, 'claude');
+    await deliver('Stop', 2_000);
+    await deliver('UserPromptSubmit', 2_540, NOTICE);
+
+    const resumed = getAgentTurn(wtId, 'claude');
+    expect(resumed?.turnId).not.toBe(first?.turnId);
+    expect(resumed?.openedAt).toBe(T + 2_540);
+    expect(getStructuredSessionState(wtId, 'claude')?.status).toBe('running');
+  });
+
+  it('leaves the relay script’s prompt-less shape as it was', async () => {
+    // `scripts/hooks/cmate-agent-event.sh` rebuilds the body and drops the
+    // prompt, so nothing it posts can be told apart, and every prompt opens a
+    // turn as before this Issue.
+    await deliver('UserPromptSubmit', 0);
+    const opened = getAgentTurn(wtId, 'claude');
+    await deliver('UserPromptSubmit', NOTICE_AFTER_MS);
+
+    expect(getAgentTurn(wtId, 'claude')?.turnId).not.toBe(opened?.turnId);
+  });
+
+  it('does not read a notice into another tool’s prompt', async () => {
+    // Only a source that declares `promptJoinsOpenTurn` marks anything.
+    freezeClock(T);
+    await postEvent({ tool: 'codex', hook_event_name: 'UserPromptSubmit', cwd: repo, session_id: SESSION, prompt: 'go' });
+    const opened = getAgentTurn(wtId, 'codex');
+    freezeClock(T + NOTICE_AFTER_MS);
+    await postEvent({ tool: 'codex', hook_event_name: 'UserPromptSubmit', cwd: repo, session_id: SESSION, prompt: NOTICE });
+
+    expect(getAgentTurn(wtId, 'codex')?.turnId).not.toBe(opened?.turnId);
+  });
+});
+
 describe('authentication', () => {
   it('is not in the auth bypass list', () => {
     // The route carries no auth code of its own: middleware protects everything

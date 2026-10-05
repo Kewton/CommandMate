@@ -143,6 +143,20 @@ notices of background tasks) to a turn that is already running, it fires `UserPr
 notice (confirmed by matching the server log against the session records, Issue #3301). They all
 belong to the same turn, so they are treated as one event.
 
+A notice that arrives later than 3 seconds belongs to the same turn too. When the `prompt` of a
+Claude `UserPromptSubmit` starts with `<task-notification>` (a queued notice) and a turn of the same
+session is open, the receiver **adds it to that turn instead of opening a new one** (`turnId` and
+`openedAt` do not change, Issue #3330). When the turn is closed (after a `stop`), the notice opens a
+new turn as before. `commandmate wait` still completes on the `stop` of the turn it is waiting for
+when a notice is delivered in the middle of that turn.
+
+A `UserPromptSubmit` that is not a notice still opens a new turn, even while one is open. That is the
+case when the operator interrupts a turn and sends again (Claude Code has no interrupt hook, and a
+resent prompt cannot be told apart from one joining the running turn by its hook alone, so it is
+treated as a new turn). Text the operator types into a running turn fires no `UserPromptSubmit` at
+all, so the turn does not change. The relay script (`cmate-agent-event.sh`) does not send `prompt`,
+so nothing changes on that path.
+
 **The manual configuration may simply be deleted** (automatic injection sends the same events).
 Keeping it causes no double recording either, thanks to the dedup above.
 

@@ -949,6 +949,19 @@ export interface AgentEventRecord {
    * behaviour is what an event with nothing to say must keep producing.
    */
   promptSettled?: boolean;
+  /**
+   * Whether the source states that this `user_prompt_submit` joins the turn
+   * that is already running rather than beginning one (Issue #3330).
+   *
+   * The caller computes it from the payload, through the source's
+   * `promptJoinsOpenTurn`: Claude Code fires `UserPromptSubmit` once for each
+   * background-task notice it takes off its queue and attaches to a running
+   * turn, and the prompt it reports is the `<task-notification>` itself. Read
+   * only for `user_prompt_submit`, and only while a turn of the same session is
+   * open — see {@link applyTurnTransition}. Absent is `false`: a prompt that
+   * says nothing opens a new turn, as every prompt did before this Issue.
+   */
+  joinsOpenTurn?: boolean;
 }
 
 /**
@@ -1311,6 +1324,7 @@ export function isAwaitingInstruction(
  * | event                              | turn                    | dialog   | display |
  * |------------------------------------|-------------------------|----------|---------|
  * | `user_prompt_submit`               | **opens a new one**     | release  | yes     |
+ * | `user_prompt_submit` (joins, #3330)| continues, else opens   | release  | yes     |
  * | `pre_tool_use`                     | continues, else opens   | unchanged| yes     |
  * | `post_tool_use`                    | continues, else opens   | release  | yes     |
  * | `stop` (this session)              | **closes** `stop`       | release  | yes     |
@@ -1346,6 +1360,36 @@ export function isAwaitingInstruction(
  *    it: released, the record still said `waiting`, because the only thing it
  *    could read was the event that opened the dialog.
  *
+ * The `joins` row is the one exception to the first (Issue #3330). Claude Code
+ * fires `UserPromptSubmit` for every background-task notice it attaches to a
+ * turn that is already running, so a turn of an orchestrator that runs
+ * background work was re-opened once per notice. The source marks those
+ * deliveries ({@link AgentEventRecord.joinsOpenTurn}), and they continue the
+ * open turn of their session as a tool event does. In the server logs of
+ * 2026-10-02 to 2026-10-05, 188 of the 1,182 applied Claude
+ * `user_prompt_submit`s arrived with a turn of theirs still open, and the
+ * transcripts sort them as: 178 a queued notice (one `queue-operation: remove`
+ * of a `<task-notification>` per delivery), 0 a prompt the operator typed into
+ * the running turn (Claude attaches it without firing the hook), 0 a prompt
+ * sent after an interrupt, 6 after a turn that had ended with no `stop`
+ * applied, and 4 with nothing in the transcript to say. Only the first carry
+ * the mark; the others open a new turn, as before:
+ *
+ *  - **After an interrupt** there is nothing on the hook channel to tell the
+ *    prompt from one joining the turn — Claude Code has no interrupt hook, and
+ *    the prompt is the operator's own text either way — so the turn the
+ *    operator sent is a new one, which is what a resend is.
+ *  - **After a `Stop` this server never got** the turn it opened is over, and a
+ *    new one is right whatever the prompt was. A notice is the one case it
+ *    cannot see: a lost `Stop` followed by a notice that opens a turn of its
+ *    own is read as the notice joining the old turn, so the id does not change
+ *    and the notice turn's `stop` closes it — the same `stop` a `wait` holding
+ *    either turn was waiting for.
+ *
+ * Nothing in the row reads a clock. A burst of notices inside three seconds is
+ * still dropped by the window in front of it ({@link isDuplicateAgentEvent}),
+ * and dropped or applied, none of them moves the turn.
+ *
  * `idle_prompt` is the one row that publishes `ready` **without** closing the
  * turn, and that is a measurement rather than an oversight: #1839 caught Claude
  * emitting it 62 s into a turn that ran nothing, so it cannot be a turn
@@ -1361,7 +1405,9 @@ function applyTurnTransition(key: string, record: AgentEventRecord): void {
 
   switch (record.event) {
     case 'user_prompt_submit':
-      openTurn(key, record, generation, { continueOpen: false });
+      // Issue #3330: a queued notice the agent attached to its running turn
+      // continues that turn; any other prompt is a new one.
+      openTurn(key, record, generation, { continueOpen: record.joinsOpenTurn === true });
       releaseAllDecisions(key);
       return;
     case 'post_tool_use':
@@ -1409,7 +1455,8 @@ function displayOf(record: AgentEventRecord): TurnRecord['displayEvent'] {
  * Open a turn for this event, or move the display onto an open one.
  *
  * @param continueOpen - Whether an already-open turn of the same session is
- *   this event's turn. False for `user_prompt_submit`, which IS a new turn.
+ *   this event's turn. False for `user_prompt_submit`, which IS a new turn —
+ *   unless the source marked it as joining the running one (Issue #3330).
  */
 function openTurn(
   key: string,
@@ -2796,10 +2843,13 @@ export function clearAskUserQuestion(
  * `queue-operation: remove` entries one for one. One is the operator
  * submitting a prompt 804 ms into a running turn. One is the defect above.
  * These are different prompts joining one turn, not copies of one event.
- * Counting them as one is still right — a `user_prompt_submit` that is applied
- * opens a new turn, and none of them begins one — and none has a `stop` before
- * it, because the turn it joins has not ended. That is what makes a `stop` the
- * thing to release on.
+ * Counting them as one is still right — none of them begins a turn — and none
+ * has a `stop` before it, because the turn it joins has not ended. That is what
+ * makes a `stop` the thing to release on. Since Issue #3330 it no longer
+ * decides the turn either: a notice the window lets through is marked
+ * {@link AgentEventRecord.joinsOpenTurn} and continues the running turn, so a
+ * burst — and a notice minutes into the turn, which the window never saw as a
+ * repeat — leaves `turnId` where it was.
  *
  * What this cannot tell apart:
  *

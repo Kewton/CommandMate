@@ -229,7 +229,9 @@ export async function POST(request: NextRequest) {
     // tells the second start from a copy. What the window is left to drop is a
     // second start with no `stop` before it — which on Claude is mostly not a
     // copy at all, but Claude Code firing `UserPromptSubmit` once for each
-    // queued notice it attaches to a turn that is already running.
+    // queued notice it attaches to a turn that is already running. Those that
+    // get through join that turn rather than opening one (Issue #3330), so
+    // whether the window drops them no longer decides the turn.
     if (isDuplicateAgentEvent(worktree.id, tool, instanceParam, event, sessionId, receivedAt, detail)) {
       logger.info('agent-event-duplicate-dropped', { worktreeId: worktree.id, tool, event });
       return NextResponse.json(ACCEPTED, { status: 202 });
@@ -257,6 +259,11 @@ export async function POST(request: NextRequest) {
         // every Claude event except `SessionStart`, which is why the store latches
         // the last non-null rather than the newest.
         model: normalized.model,
+        // Issue #3330: a background-task notice Claude attaches to its running
+        // turn fires `UserPromptSubmit` as well. The source says which prompts
+        // those are; the state decides whether there is a turn to join.
+        joinsOpenTurn:
+          event === 'user_prompt_submit' && source.promptJoinsOpenTurn?.(payload) === true,
       },
       {
         // Issue #1903: the declared value, read off the source this route already
