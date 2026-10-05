@@ -14,6 +14,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { readJsonBody } from '@/lib/api/read-json-body';
 import { getDbInstance } from '@/lib/db/db-instance';
 import { getWorktreeById, saveInitialBranch, getInitialBranch } from '@/lib/db';
 import {
@@ -167,7 +168,9 @@ export async function POST(
     }
 
     // Parse request body
-    const body: SendMessageRequest = await request.json();
+    const parsed = await readJsonBody<SendMessageRequest>(request);
+    if (!parsed.ok) return parsed.response;
+    const body = parsed.body;
     const trimmedContent = typeof body.content === 'string' ? body.content.trim() : '';
 
     // Validate content

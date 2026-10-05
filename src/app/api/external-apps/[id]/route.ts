@@ -17,6 +17,7 @@ import {
 import { getExternalAppCache } from '@/lib/external-apps/cache';
 import type { UpdateExternalAppInput } from '@/types/external-apps';
 import { createLogger } from '@/lib/logger';
+import { readJsonBody } from '@/lib/api/read-json-body';
 
 const logger = createLogger('api/external-apps');
 
@@ -119,7 +120,9 @@ export async function PATCH(
       );
     }
 
-    const body = await request.json();
+    const parsed = await readJsonBody(request);
+    if (!parsed.ok) return parsed.response;
+    const body = parsed.body;
 
     // Validate input
     const errors = validateUpdateInput(body);

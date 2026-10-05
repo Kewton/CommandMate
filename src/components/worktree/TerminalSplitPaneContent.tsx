@@ -97,7 +97,12 @@ import {
   composerHeightScopeForSplit,
 } from '@/config/composer-height';
 import { isMultiSelectPrompt } from '@/components/worktree/prompt-answer';
-import { buildDecisionRespondBody, buildPromptResponseBody, isPromptRefused } from '@/lib/prompt-response-body-builder';
+import { buildDecisionRespondBody, buildPromptResponseBody } from '@/lib/prompt-response-body-builder';
+import {
+  PROMPT_RESPONSE_NOTICES,
+  readPromptResponseOutcome,
+  type PromptResponseOutcome,
+} from '@/lib/prompt-response-outcome';
 import { withToolDecisionLabels } from '@/components/worktree/prompt-decision-id';
 import { derivePromptView } from '@/lib/session/prompt-view';
 import { getCliToolDisplayName, getInstanceLabel } from '@/lib/cli-tools/types';
@@ -457,17 +462,26 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
     setDirectInputOpen(false);
   }, []);
 
+  // Issue #2755: Auto-Yes hides the answer panel, because the poller is
+  // supposed to be answering instead — and on a CHECKBOX question it is
+  // measured never to answer at all (`resolveBaseAnswer` returns null: a digit
+  // ticks a box and the confirm is a separate row, so a default is half an
+  // answer). Hiding the panel there left a screen nobody could answer, by hand
+  // or automatically, until the operator turned Auto-Yes off. So a multi-select
+  // prompt is shown whatever Auto-Yes is doing; nothing is auto-sent either way.
+  const showPrompt =
+    prompt.visible && !isStarting && (!autoYesEnabled || isMultiSelectPrompt(prompt.data));
+
   // Issue #2869: the same prompt window shown again after two Sends in a row
   // (refused, or delivered to a frame that did not react) points the user at
   // direct input. Counted on the window `PromptPanel` is actually drawing — the
-  // same condition as `showPrompt` below, restated because the handler that
-  // calls `markSubmitted` is declared above it.
+  // `showPrompt` declared above (before the handler
+  // that calls `markSubmitted`), so the count and the drawing cannot drift apart.
   const {
     showStuckHint: showPromptStuckHint,
     markSubmitted: markPromptSubmitted,
   } = usePromptStuckCounter({
-    promptData:
-      prompt.visible && (!autoYesEnabled || isMultiSelectPrompt(prompt.data)) ? prompt.data : null,
+    promptData: showPrompt ? prompt.data : null,
     targetKey: `${worktreeId}:${cliToolId}:${resolvedInstanceId}`,
   });
 
@@ -561,6 +575,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       // next display can tell whether it changed anything.
       markPromptSubmitted();
       setPromptAnswering(true);
+      let outcome: PromptResponseOutcome;
       try {
         // Issue #1932: an approval the agent named by id goes to `/respond`,
         // which delivers the verdict over the agent's own API. It cannot go to
@@ -597,23 +612,28 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
             body: JSON.stringify(requestBody),
           },
         );
-        if (!response.ok) {
-          throw new Error(`Failed to send prompt response: ${response.status}`);
-        }
+        outcome = await readPromptResponseOutcome(response);
+      } catch (err) {
+        // The request got no reply at all.
+        console.error('[TerminalSplitPaneContent] prompt response error:', err);
+        outcome = 'failed';
+      }
+      try {
         // Issue #2468: a refusal is a 200 `{ success: false, reason }` —
         // `prompt_no_longer_active` when the re-captured pane no longer reads as
         // the dialog — so `ok` alone is not "answered". Clearing the card on a
         // refusal hid a dialog that was still open: the next poll put it
         // straight back, and nothing ever said why the answer went nowhere.
-        if (await isPromptRefused(response)) {
-          showToast?.(t('promptResponse.refused'), 'warning');
-          await refresh();
-          return;
+        // Issue #3292: the same holds for a reply that is not 2xx and for no
+        // reply at all, which used to reach the console and nobody else. Only
+        // `answered` clears the card; everything else says so and leaves it.
+        if (outcome === 'answered') {
+          clearPrompt();
+        } else {
+          const notice = PROMPT_RESPONSE_NOTICES[outcome];
+          showToast?.(t(notice.messageKey), notice.type);
         }
-        clearPrompt();
         await refresh();
-      } catch (err) {
-        console.error('[TerminalSplitPaneContent] prompt response error:', err);
       } finally {
         setPromptAnswering(false);
       }
@@ -657,15 +677,6 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   // detector's floor, not an observation of a turn, so the toast does not call
   // the session busy — the same answer the phone gives since Issue #2775.
   const isGenerating = terminal.sessionStatus === 'running' && !cliStatusUnclassified;
-  // Issue #2755: Auto-Yes hides the answer panel, because the poller is
-  // supposed to be answering instead — and on a CHECKBOX question it is
-  // measured never to answer at all (`resolveBaseAnswer` returns null: a digit
-  // ticks a box and the confirm is a separate row, so a default is half an
-  // answer). Hiding the panel there left a screen nobody could answer, by hand
-  // or automatically, until the operator turned Auto-Yes off. So a multi-select
-  // prompt is shown whatever Auto-Yes is doing; nothing is auto-sent either way.
-  const showPrompt =
-    prompt.visible && !isStarting && (!autoYesEnabled || isMultiSelectPrompt(prompt.data));
   // Issue #1932: the approval this pane's dialog addresses, when the payload
   // names one. Null for every scraper-read prompt and for every source that
   // publishes no per-decision id, which is what keeps those on the pane path.

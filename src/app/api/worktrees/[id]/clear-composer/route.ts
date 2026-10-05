@@ -21,6 +21,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { readJsonBody } from '@/lib/api/read-json-body';
 import { isCliToolType, isValidInstanceId } from '@/lib/cli-tools/types';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { getWorktreeById } from '@/lib/db';
@@ -42,12 +43,9 @@ export async function POST(
   const { id: requestedWorktreeId } = await params;
   const id = canonicalWorktreeId(requestedWorktreeId);
 
-  let body: Record<string, unknown>;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
-  }
+  const parsed = await readJsonBody<Record<string, unknown>>(req);
+  if (!parsed.ok) return parsed.response;
+  const body = parsed.body;
 
   try {
     const { cliToolId, instanceId } = body;

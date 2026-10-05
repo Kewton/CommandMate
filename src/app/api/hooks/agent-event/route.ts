@@ -223,6 +223,13 @@ export async function POST(request: NextRequest) {
     // start that arrived between them can: `isDuplicateAgentEvent` sees every
     // delivery in arrival order, and a turn start it applies releases that
     // session's `stop`.
+    //
+    // The same holds the other way round (Issue #3301): two turns of one
+    // session can start inside the window, and the `stop` between them is what
+    // tells the second start from a copy. What the window is left to drop is a
+    // second start with no `stop` before it — which on Claude is mostly not a
+    // copy at all, but Claude Code firing `UserPromptSubmit` once for each
+    // queued notice it attaches to a turn that is already running.
     if (isDuplicateAgentEvent(worktree.id, tool, instanceParam, event, sessionId, receivedAt, detail)) {
       logger.info('agent-event-duplicate-dropped', { worktreeId: worktree.id, tool, event });
       return NextResponse.json(ACCEPTED, { status: 202 });

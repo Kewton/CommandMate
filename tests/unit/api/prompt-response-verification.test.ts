@@ -694,7 +694,7 @@ describe('POST /api/worktrees/:id/prompt-response - Error handling and edge case
     expect(data.error).toContain('Unknown error');
   });
 
-  it('should return 500 for malformed JSON body (outer catch)', async () => {
+  it('should return 400 for malformed JSON body', async () => {
     // Create a request with invalid JSON body
     const request = new Request('http://localhost:3000/api/worktrees/test-wt/prompt-response', {
       method: 'POST',
@@ -704,7 +704,8 @@ describe('POST /api/worktrees/:id/prompt-response - Error handling and edge case
 
     const response = await promptResponse(request, { params: Promise.resolve({ id: 'test-wt' }) });
 
-    expect(response.status).toBe(500);
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: 'Invalid request body' });
   });
 });
 

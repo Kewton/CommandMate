@@ -266,7 +266,12 @@ const MobileComposer = memo(function MobileComposer({
 import { useWorktreeDetailController } from '@/hooks/useWorktreeDetailController';
 import { withToolDecisionLabels } from '@/components/worktree/prompt-decision-id';
 import { readDecisionId } from '@/lib/session/prompt-view';
-import { buildDecisionRespondBody, isPromptRefused } from '@/lib/prompt-response-body-builder';
+import { buildDecisionRespondBody } from '@/lib/prompt-response-body-builder';
+import {
+  PROMPT_RESPONSE_NOTICES,
+  readPromptResponseOutcome,
+  type PromptResponseOutcome,
+} from '@/lib/prompt-response-outcome';
 import { isMultiSelectPrompt } from '@/components/worktree/prompt-answer';
 import { useNewOutputIndicator } from '@/hooks/useNewOutputIndicator';
 export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
@@ -570,11 +575,19 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   // --------------------------------------------------------------------------
   // The same window shown again after two Sends in a row (refused, or keys
   // that did not change the frame) gets a line and a link to the keyboard.
+  // Counted on the window the sheet is actually drawing: the same gate that
+  // mounts `MobilePromptSheet` below (the phone layout, and not the keyboard, a launch or Auto-Yes), so
+  // a window hidden for 10 s starts over, as on PC.
+  const showMobilePromptSheet =
+    isMobile
+    && !showDirectInputKeyboard
+    && !activeSessionStarting
+    && (!autoYesEnabled || isMultiSelectPrompt(state.prompt.data));
   const {
     showStuckHint: showPromptStuckHint,
     markSubmitted: markPromptSubmitted,
   } = usePromptStuckCounter({
-    promptData: state.prompt.visible ? state.prompt.data : null,
+    promptData: showMobilePromptSheet && state.prompt.visible ? state.prompt.data : null,
     targetKey: `${worktreeId}:${activeCliTab}:${activeInstanceId}`,
   });
 
@@ -605,6 +618,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
       // name (`TerminalSplitPaneContent`'s `handlePromptRespond`): `/respond`
       // delivers it over the agent's own API. `/prompt-response` would
       // re-capture the pane and refuse a dialog nobody parsed.
+      let outcome: PromptResponseOutcome;
       try {
         const response = await fetch(`/api/worktrees/${worktreeId}/respond`, {
           method: 'POST',
@@ -613,17 +627,21 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
             buildDecisionRespondBody(mobilePromptDecisionId, answer, activeCliTab, activeInstanceId),
           ),
         });
-        const refused = await isPromptRefused(response);
-        if (!response.ok || refused) {
-          showToast(tWorktree('promptResponse.refused'), 'warning');
-          await fetchCurrentOutput();
-          return;
-        }
-        handlePromptDismiss();
-        await fetchCurrentOutput();
+        outcome = await readPromptResponseOutcome(response);
       } catch (err) {
+        // The request got no reply at all.
         console.error('[WorktreeDetailRefactored] Error answering a decision:', err);
+        outcome = 'failed';
       }
+      // Issue #3292: the same contract as the controller's and the split
+      // pane's `handlePromptRespond` — only `answered` closes the sheet.
+      if (outcome === 'answered') {
+        handlePromptDismiss();
+      } else {
+        const notice = PROMPT_RESPONSE_NOTICES[outcome];
+        showToast(tWorktree(notice.messageKey), notice.type);
+      }
+      await fetchCurrentOutput();
     },
     [
       markPromptSubmitted,
@@ -1197,7 +1215,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                 `閉じる` brings the sheet straight back. */}
             {/* Issue #3179: nor while the agent is launching — a dialog on a
                 launch is the launch's to answer. */}
-            {!showDirectInputKeyboard && !activeSessionStarting && (!autoYesEnabled || isMultiSelectPrompt(state.prompt.data)) && (
+            {showMobilePromptSheet && (
               <MobilePromptSheet
                 promptData={mobilePromptData}
                 visible={state.prompt.visible}

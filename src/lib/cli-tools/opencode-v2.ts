@@ -59,7 +59,8 @@ import {
 } from '../detection/cli-patterns';
 import { sendMessageWithSubmitVerification } from './submit-verified-sender';
 import { invalidateCache } from '../tmux/tmux-capture-cache';
-import { OPENCODE_PANE_HEIGHT, resolveOpencodePaneWidth } from '@/config/tmux-pane-config';
+import { OPENCODE_PANE_HEIGHT } from '@/config/tmux-pane-config';
+import { resolveOpencodePaneWidthChecked } from './opencode-pane-width';
 import { createLogger } from '@/lib/logger';
 import { getErrorMessage } from '@/lib/errors';
 import {
@@ -252,7 +253,9 @@ export class OpenCodeV2Tool extends BaseCLITool {
 
     const sessionName = this.getSessionName(worktreeId, instanceId);
     const target = opencodeV2Target(worktreeId, instanceId);
-    const geometry = { windowWidth: resolveOpencodePaneWidth(), windowHeight: OPENCODE_PANE_HEIGHT };
+    // Issue #3296: the "sidebar visible" warn is off for v2 (see opencode-pane-width.ts).
+    const paneWidth = resolveOpencodePaneWidthChecked({ warnSidebar: false });
+    const geometry = { windowWidth: paneWidth, windowHeight: OPENCODE_PANE_HEIGHT };
 
     const exists = await hasSession(sessionName);
     if (exists) {

@@ -83,7 +83,7 @@ CommandMate は **7 種類**の Coding Agent CLI（`CLI_TOOL_IDS`: claude / code
 | 最新イベントが verdict（`getStructuredSessionState`） | copilot は `SessionStart` を `UserPromptSubmit` の 12〜15 秒後に送る | 生成中に verdict が null → scraper の ready（#1903） |
 | `PreToolUse` の非 allow ＝ ダイアログ予告（`reportPermissionRequestPending`） | copilot は全ツール呼び出しで `PreToolUse` を発火し大半は即実行 | Read 中も `waiting`、`wait` 偽 exit 10（#1901） |
 | permission は `post_tool_use` / `stop` で解除 | opencode は `permission.replied` を出す。承認後もツールは長く走る | 承認後も `waiting` 固着（#1898） |
-| 同一 (event, detail, session) の 3 秒以内は重複（`isDuplicateAgentEvent`。#3289 以降、`stop` だけは間にターンの開始（`TURN_ACTIVITY_EVENTS`）を受けていれば別のターンの終了として通す） | opencode は別 id の permission / question を連続で出し、turn-gate が既に重複排除している | 2 件目の承認が永久に未裁定、短い turn の `stop` 消失（#1899）。Claude でも、自分で再開した短い turn の `stop` が消えた（#3289） |
+| 同一 (event, detail, session) の 3 秒以内は重複（`isDuplicateAgentEvent`。#3289 以降、`stop` は間にターンの開始（`TURN_ACTIVITY_EVENTS`）を受けていれば別のターンの終了として通す。#3301 以降、ターンの開始も間に `stop` を受けていれば別のターンの開始として通す） | opencode は別 id の permission / question を連続で出し、turn-gate が既に重複排除している | 2 件目の承認が永久に未裁定、短い turn の `stop` 消失（#1899）。Claude でも、自分で再開した短い turn の `stop` が消えた（#3289）。短い turn の直後に始まった turn の開始も消えた（#3301。OpenCode V2 の `session.execution.started` も同じ窓に掛かり、`stop` が窓を通らないので `classifyAgentEventDelivery` の側で外す） |
 | 裁定は記録の後（`ingest` が notification を先に記録） | SSE では自分が裁定者 | 裁定済みでも prompt-waiting が開く（#1898） |
 | 再接続は状態を持ち越せる | SSE の再接続は `gate.reset()` で turn の武装を捨てる。**pending の再取得（`resyncPending` → `GET /permission` / `GET /question` の replay）は実装済み**で、未実装なのは **busy/idle の再取得**（`probeActivity` / `fetchOpencodeActivity` ＝ `GET /session/status` に本番の呼び出し元が 0 件）（DR2-011） | turn 途中の再接続で `stop` を合成できない（#1900） |
 

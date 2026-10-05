@@ -18,12 +18,17 @@ import { scanWorktrees } from '@/lib/git/worktrees';
 import { syncWorktreesAndCleanup } from '@/lib/session-cleanup';
 import fs from 'fs';
 import { createLogger } from '@/lib/logger';
+import { readJsonBody } from '@/lib/api/read-json-body';
 
 const logger = createLogger('api/repositories-restore');
 
 export async function PUT(request: NextRequest) {
   try {
-    const body = await request.json();
+    const parsed = await readJsonBody(request);
+    if (!parsed.ok) {
+      return NextResponse.json({ success: false, error: 'Invalid request body' }, { status: 400 });
+    }
+    const body = parsed.body;
     const { repositoryPath } = body;
 
     // Validate and resolve repository path (DRY: shared validation)

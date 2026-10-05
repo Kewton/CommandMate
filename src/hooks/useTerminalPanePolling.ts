@@ -47,6 +47,7 @@ import { detectAgentMode } from '@/lib/detection/agent-mode';
 import type { CurrentOutputResponseBody } from '@/lib/session/current-output-types';
 import { promptFingerprint } from '@/hooks/usePromptStuckCounter';
 import { AGENT_MODE_UNKNOWN, type AgentMode } from '@/types/cli-tool-contracts';
+import { PANE_GATE_NOTHING_ARRIVED, type PaneGateState } from '@/lib/session/pane-gate-state';
 import {
   DETAIL_PANE_POLLING_CADENCE,
   isGeneratingStatus,
@@ -124,7 +125,13 @@ function diffFileSignature(file: AgentSessionDiffFileView): string {
   return `${file.file ?? ''}:${file.status ?? ''}:${file.additions}:${file.deletions}`;
 }
 
-export interface PaneTerminalState {
+/**
+ * Extends {@link PaneGateState} (Issue #3304): the per-target frame facts are
+ * one list shared with the worktree screen's controller, so both surfaces start
+ * from, and fall back to, the same "nothing has arrived" values. The members
+ * are re-declared below only to keep their documentation where they are read.
+ */
+export interface PaneTerminalState extends PaneGateState {
   output: string;
   realtimeSnippet: string;
   /**
@@ -354,14 +361,9 @@ export function useTerminalPanePolling({
     realtimeSnippet: '',
     isRunning: false,
     isThinking: false,
-    sessionStatus: '',
-    isSelectionListActive: false,
-    isPagerActive: false,
-    isDismissablePanelActive: false,
-    isUnclassifiedActive: false,
+    // Issue #3304: sessionStatus, the four flags, agentMode and startingSince.
+    ...PANE_GATE_NOTHING_ARRIVED,
     composerText: '',
-    agentMode: AGENT_MODE_UNKNOWN,
-    startingSince: null,
     attaching: true,
     autoScroll: true,
   }));
@@ -648,18 +650,14 @@ export function useTerminalPanePolling({
       realtimeSnippet: '',
       isRunning: false,
       isThinking: false,
-      sessionStatus: '',
-      isSelectionListActive: false,
-      isPagerActive: false,
-      isDismissablePanelActive: false,
-      isUnclassifiedActive: false,
-      composerText: '',
       // Issue #2592: cleared for the same reason the output above is. A
       // different (worktree, tool, instance) is a different agent, and the
       // previous one's mode chip must not sit over the new pane while its first
       // frame is in flight — different tools do not even share a mode vocabulary.
-      agentMode: AGENT_MODE_UNKNOWN,
-      startingSince: null,
+      // Issue #3304: the list of what goes back is shared with the worktree
+      // screen's controller, which resets on the same change.
+      ...PANE_GATE_NOTHING_ARRIVED,
+      composerText: '',
       attaching: true,
     }));
     setPrompt({ visible: false, data: null, messageId: null, answering: false });

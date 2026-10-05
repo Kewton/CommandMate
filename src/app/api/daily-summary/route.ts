@@ -20,6 +20,7 @@ import {
 } from '@/lib/daily-summary-generator';
 import type { DailyReport } from '@/lib/db/daily-report-db';
 import { SUMMARY_ALLOWED_TOOLS, MAX_USER_INSTRUCTION_LENGTH } from '@/config/review-config';
+import { readJsonBody } from '@/lib/api/read-json-body';
 
 // =============================================================================
 // Helpers
@@ -116,7 +117,9 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
+    const parsed = await readJsonBody(request);
+    if (!parsed.ok) return parsed.response;
+    const body = parsed.body;
 
     // Body shape validation
     if (!body || typeof body !== 'object' || Array.isArray(body)) {
@@ -210,7 +213,9 @@ export async function POST(request: NextRequest) {
 
 export async function PUT(request: NextRequest) {
   try {
-    const body = await request.json();
+    const parsed = await readJsonBody(request);
+    if (!parsed.ok) return parsed.response;
+    const body = parsed.body;
     const { date, content } = body;
 
     // Validate date

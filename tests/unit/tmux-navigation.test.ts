@@ -4,7 +4,7 @@
  * @vitest-environment node
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // Mock dependencies for sendSpecialKeysAndInvalidate
 vi.mock('@/lib/tmux/tmux-capture-cache', () => ({
@@ -26,6 +26,7 @@ import {
   isAllowedSpecialKey,
   sendSpecialKeysAndInvalidate,
   SPECIAL_KEY_VALUES,
+  REPAINT_INVALIDATE_DELAY_MS,
 } from '@/lib/tmux/tmux';
 import {
   ANSWER_KEY_VALUES,
@@ -162,19 +163,40 @@ describe('isAllowedSpecialKey', () => {
 });
 
 describe('sendSpecialKeysAndInvalidate', () => {
+  // The product schedules a second invalidateCache() REPAINT_INVALIDATE_DELAY_MS
+  // later on a real timer (Issue #2297), and waits SPECIAL_KEY_DELAY_MS between
+  // keys. Fake timers keep both deterministic and stop one test's pending
+  // invalidation from firing inside the next test.
   beforeEach(() => {
+    vi.useFakeTimers();
     vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.clearAllTimers();
+    vi.useRealTimers();
   });
 
   it('should call sendSpecialKeys and then invalidateCache', async () => {
     // sendSpecialKeys is also mocked via child_process mock
     await sendSpecialKeysAndInvalidate('test-session', ['Up']);
     expect(invalidateCache).toHaveBeenCalledWith('test-session');
+    expect(invalidateCache).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(REPAINT_INVALIDATE_DELAY_MS);
+    expect(invalidateCache).toHaveBeenCalledTimes(2);
   });
 
   it('should call invalidateCache even after sending multiple keys', async () => {
-    await sendSpecialKeysAndInvalidate('test-session', ['Down', 'Down', 'Enter']);
+    const pending = sendSpecialKeysAndInvalidate('test-session', ['Down', 'Down', 'Enter']);
+    // Advance past the inter-key waits (100ms each).
+    await vi.advanceTimersByTimeAsync(300);
+    await pending;
     expect(invalidateCache).toHaveBeenCalledWith('test-session');
+    // Immediate call only; the repaint call has not been due yet.
     expect(invalidateCache).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(REPAINT_INVALIDATE_DELAY_MS);
+    expect(invalidateCache).toHaveBeenCalledTimes(2);
   });
 });
