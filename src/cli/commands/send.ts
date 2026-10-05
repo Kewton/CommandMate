@@ -398,6 +398,15 @@ worktree and send a short message that tells the agent to read that file.
           console.log(taskId);
         }
 
+        // A task whose message never arrived is a failed task, not a pending
+        // one: nothing is working on it and nothing ever will. Every step
+        // between the task row and the delivered message reports through this.
+        const failTask = async (): Promise<void> => {
+          if (taskId) {
+            await reportTaskStatus(client, taskId, 'failed');
+          }
+        };
+
         // --auto-yes: enable auto-yes first (unless --model is specified, then after send) [DR2-02]
         //
         // Issue #2771: claude is the exception to the exception. The deferral
@@ -406,7 +415,19 @@ worktree and send a short message that tells the agent to read that file.
         // contract send must have Auto-Yes on BEFORE the worker starts working.
         const deferAutoYes = Boolean(options.model) && agent !== 'claude';
         if (options.autoYes && !deferAutoYes) {
-          await enableAutoYes(client, worktreeId, options, autoYesDurationMs, agent, instanceId);
+          // Issue #3290: the server can refuse this — 409 when the session by
+          // that name belongs to another CommandMate server — and the command
+          // then stops here, after --contract created the task row and before
+          // anything is sent. That is the outcome a failed send has, so it gets
+          // the same record; left alone the row stayed `pending` for a message
+          // that never went out, which is the state #1608 removed for a bad
+          // --duration.
+          try {
+            await enableAutoYes(client, worktreeId, options, autoYesDurationMs, agent, instanceId);
+          } catch (error) {
+            await failTask();
+            throw error;
+          }
         }
 
         // Issue #2377: the relay is registered BEFORE the message goes out, so a
@@ -434,13 +455,7 @@ worktree and send a short message that tells the agent to read that file.
 
         await postMessage(client, worktreeId, sendBody, {
           relayId,
-          onFailure: async () => {
-            // A task whose message never arrived is a failed task, not a pending
-            // one: nothing is working on it and nothing ever will.
-            if (taskId) {
-              await reportTaskStatus(client, taskId, 'failed');
-            }
-          },
+          onFailure: failTask,
           promptWaitingFallback: promptWaitingFallback(worktreeId),
         });
         console.error('Message sent.');
@@ -456,7 +471,9 @@ worktree and send a short message that tells the agent to read that file.
         }
 
         // Issue #576: Enable auto-yes AFTER send when --model is specified
-        // This avoids auto-yes interfering with the /model command interaction
+        // This avoids auto-yes interfering with the /model command interaction.
+        // A failure here does not fail the task: the message was delivered and
+        // the task is running, which is what the row already says.
         if (options.autoYes && deferAutoYes) {
           await enableAutoYes(client, worktreeId, options, autoYesDurationMs, agent, instanceId);
         }

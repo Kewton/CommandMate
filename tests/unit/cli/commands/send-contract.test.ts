@@ -458,3 +458,145 @@ describe('send option validation happens before the task row is created', () => 
     });
   });
 });
+
+/**
+ * Issue #3290: enabling Auto-Yes sits between the task row and the send, and
+ * the server can now refuse it — 409 when the session by that name belongs to
+ * another CommandMate server. The command then stops with nothing sent, which
+ * is the outcome a failed send has, so the task has to end up in the same
+ * place: `failed`, not `pending` for a message nobody will ever deliver (the
+ * state Issue #1608 removed for a bad --duration).
+ */
+describe('send --contract --auto-yes when Auto-Yes cannot be enabled', () => {
+  const CONTRACT = ['--contract', '.commandmate/tasks/t.yaml'];
+  const FOREIGN_SESSION: RouteResponse = {
+    status: 409,
+    data: {
+      error: 'tmux session "mcbd-claude-wt1" belongs to another CommandMate server',
+      code: 'session_owned_by_other_server',
+      sessionName: 'mcbd-claude-wt1',
+      sessionPath: '/other-server/wt1',
+    },
+  };
+
+  /**
+   * `/send` answers 201 on purpose: a message that wrongly goes out is then a
+   * recorded call the assertions see, not a rejected request that looks the
+   * same as "nothing was sent".
+   */
+  function mockRoutesWithAutoYes(autoYes: RouteResponse) {
+    return mockRoutes([
+      { match: '/api/worktrees/wt1/tasks', response: TASK_CREATED },
+      { match: '/api/worktrees/wt1/auto-yes', response: autoYes },
+      { match: '/api/worktrees/wt1/send', response: SEND_OK },
+      {
+        match: '/api/worktrees/wt1/resolve-target',
+        method: 'GET',
+        response: {
+          status: 200,
+          data: { cliToolId: 'claude', instanceId: 'claude', resolvedBy: 'explicit', conflict: null },
+        },
+      },
+      { match: `/api/tasks/${TASK_ID}`, method: 'PATCH', response: { status: 200, data: {} } },
+    ]);
+  }
+
+  it('records the task as failed and sends nothing when enabling answers 409', async () => {
+    const calls = mockRoutesWithAutoYes(FOREIGN_SESSION);
+
+    const code = await runSendUntilExit(['wt1', ...CONTRACT, '--agent', 'claude', '--auto-yes']);
+
+    // The task row existed before the refusal — that is what makes it a leak.
+    expect(calls.findIndex((c) => c.url.includes('/tasks') && c.method === 'POST')).toBeLessThan(
+      calls.findIndex((c) => c.url.includes('/auto-yes'))
+    );
+    expect(calls.filter((c) => c.method === 'PATCH').map((c) => c.body)).toEqual([{ status: 'failed' }]);
+    expect(calls.filter((c) => c.url.includes('/send'))).toEqual([]);
+    expect(mockConsoleError).not.toHaveBeenCalledWith('Auto-yes enabled.');
+    expect(mockConsoleError).not.toHaveBeenCalledWith('Message sent.');
+    expect(code).toBeDefined();
+    expect(code).not.toBe(ExitCode.SUCCESS);
+  });
+
+  it('records the task as failed for any other refusal of the enable, too', async () => {
+    const calls = mockRoutesWithAutoYes({ status: 500, data: { error: 'Failed to set auto-yes state' } });
+
+    await runSendUntilExit(['wt1', ...CONTRACT, '--agent', 'claude', '--auto-yes']);
+
+    expect(calls.filter((c) => c.method === 'PATCH').map((c) => c.body)).toEqual([{ status: 'failed' }]);
+    expect(calls.filter((c) => c.url.includes('/send'))).toEqual([]);
+  });
+
+  it('still exits with the enable\'s error when recording the failure fails as well', async () => {
+    const calls = mockRoutes([
+      { match: '/api/worktrees/wt1/tasks', response: TASK_CREATED },
+      { match: '/api/worktrees/wt1/auto-yes', response: FOREIGN_SESSION },
+      { match: '/api/worktrees/wt1/send', response: SEND_OK },
+      { match: `/api/tasks/${TASK_ID}`, method: 'PATCH', response: { status: 500, data: {} } },
+    ]);
+
+    const code = await runSendUntilExit(['wt1', ...CONTRACT, '--auto-yes']);
+
+    expect(mockConsoleError).toHaveBeenCalledWith(`Warning: could not record task ${TASK_ID} as failed.`);
+    expect(calls.filter((c) => c.url.includes('/send'))).toEqual([]);
+    expect(code).toBeDefined();
+    expect(code).not.toBe(ExitCode.SUCCESS);
+  });
+
+  it('refuses a plain send the same way, with no task to record (control)', async () => {
+    const calls = mockRoutesWithAutoYes(FOREIGN_SESSION);
+
+    const code = await runSendUntilExit(['wt1', 'hello', '--agent', 'claude', '--auto-yes']);
+
+    expect(calls.filter((c) => c.method === 'PATCH')).toEqual([]);
+    expect(calls.filter((c) => c.url.includes('/send'))).toEqual([]);
+    expect(code).not.toBe(ExitCode.SUCCESS);
+  });
+
+  it('leaves the task running when the enable deferred behind --model fails after the send', async () => {
+    // With --model on copilot the enable runs AFTER the message (Issue #576).
+    // By then the message was delivered and the task is running; a failed
+    // enable does not take that back.
+    const calls = mockRoutes([
+      { match: '/api/worktrees/wt1/tasks', response: TASK_CREATED },
+      { match: '/api/worktrees/wt1/auto-yes', response: FOREIGN_SESSION },
+      { match: '/api/worktrees/wt1/send', response: SEND_OK },
+      {
+        match: '/api/worktrees/wt1/resolve-target',
+        method: 'GET',
+        response: {
+          status: 200,
+          data: { cliToolId: 'copilot', instanceId: 'copilot', resolvedBy: 'explicit', conflict: null },
+        },
+      },
+      { match: `/api/tasks/${TASK_ID}`, method: 'PATCH', response: { status: 200, data: {} } },
+    ]);
+
+    const code = await runSendUntilExit([
+      'wt1',
+      ...CONTRACT,
+      '--agent',
+      'copilot',
+      '--model',
+      'gpt-5-mini',
+      '--auto-yes',
+    ]);
+
+    expect(calls.findIndex((c) => c.url.includes('/send'))).toBeLessThan(
+      calls.findIndex((c) => c.url.includes('/auto-yes'))
+    );
+    expect(calls.filter((c) => c.method === 'PATCH').map((c) => c.body)).toEqual([{ status: 'running' }]);
+    expect(mockConsoleError).toHaveBeenCalledWith('Message sent.');
+    expect(code).not.toBe(ExitCode.SUCCESS);
+  });
+
+  it('marks the task running, not failed, when the enable succeeds (control)', async () => {
+    const calls = mockRoutesWithAutoYes({ status: 200, data: { enabled: true, expiresAt: 1 } });
+
+    await runSend(['wt1', ...CONTRACT, '--agent', 'claude', '--auto-yes']);
+
+    expect(calls.filter((c) => c.method === 'PATCH').map((c) => c.body)).toEqual([{ status: 'running' }]);
+    expect(calls.filter((c) => c.url.includes('/send'))).toHaveLength(1);
+    expect(mockConsoleError).toHaveBeenCalledWith('Message sent.');
+  });
+});
