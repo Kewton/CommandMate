@@ -402,7 +402,7 @@ describe('run-lock.sh (Issue #3359)', () => {
           });
           let out = '';
           child.stdout!.on('data', (chunk: Buffer) => (out += chunk.toString()));
-          child.on('exit', () => resolve(out.trim()));
+          child.on('close', () => resolve(out.trim()));
         })
       );
       const outcomes = await Promise.all(racers);
