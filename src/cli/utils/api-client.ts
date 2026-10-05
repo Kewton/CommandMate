@@ -10,6 +10,7 @@
 
 import { ExitCode } from '../types';
 import { readPackageVersion } from './package-info';
+import { isUatIsolationEnabled, UAT_ISOLATION_ENV_VAR } from '../../config/uat-isolation';
 import { loadClientEnv, resolveServerEndpoint } from './server-url';
 
 /** Maximum stop-pattern length [SEC4-06] */
@@ -303,6 +304,14 @@ export class ApiClient {
     // *under* process.env — see its doc comment for why that order is the reverse of the one
     // `status` uses. resolveServerEndpoint() then applies the same CM_BIND / CM_HTTPS_CERT +
     // CM_HTTPS_KEY rules as `status`, which the old hardcoded `http://localhost:` ignored.
+    // Issue #3360: in UAT isolation the default port 3000 is the user's production server,
+    // so a client that was not told where to go must not go anywhere.
+    if (!options?.baseUrl && isUatIsolationEnabled() && !process.env.CM_PORT) {
+      throw new ApiError(
+        `${UAT_ISOLATION_ENV_VAR}=1 requires CM_PORT: refusing to fall back to the default port 3000.`,
+        ExitCode.CONFIG_ERROR
+      );
+    }
     this.baseUrl = options?.baseUrl || resolveServerEndpoint(loadClientEnv()).url;
     this.token = resolveAuthToken(options);
 
@@ -317,9 +326,11 @@ export class ApiClient {
   /**
    * The base URL this client actually dials (Issue #2404).
    *
-   * Resolved once in the constructor through the precedence in
-   * `loadClientEnv()` (`--base-url` > exported `CM_PORT` > `~/.commandmate/.env`
-   * > 3000), which is why it is read from here rather than re-derived by each
+   * Resolved once in the constructor: the `baseUrl` option when a caller passes
+   * one (there is no CLI flag for it), else `CM_PORT` / `CM_BIND` through the
+   * precedence in `loadClientEnv()` (exported > `~/.commandmate/.env` > 3000;
+   * under `CM_UAT_ISOLATION=1` exported only, never 3000), which is why it is
+   * read from here rather than re-derived by each
    * caller: a second derivation is a second answer, and "which server did this
    * command talk to" only helps if it is the one the request went to.
    */

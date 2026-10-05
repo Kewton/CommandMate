@@ -16,6 +16,11 @@
  */
 
 import { execFile } from 'child_process';
+import {
+  CLAUDE_UAT_SETTING_SOURCES,
+  isUatIsolationEnabled,
+  UatIsolationLaunchRefusedError,
+} from '@/config/uat-isolation';
 import { sanitizeEnvForChildProcess } from '@/lib/security/env-sanitizer';
 import { stripAnsi } from '@/lib/detection/cli-patterns';
 import { CLI_TOOL_IDS } from '@/lib/cli-tools/types';
@@ -371,7 +376,14 @@ export function buildCliArgs(message: string, cliToolId: string, permission?: st
     }
     case 'claude':
     default:
-      return ['-p', message, '--output-format', 'text', '--permission-mode', permission ?? 'acceptEdits'];
+    {
+      const args = ['-p', message, '--output-format', 'text', '--permission-mode', permission ?? 'acceptEdits'];
+      // Issue #3360: the interactive launch's restriction, for `claude -p` too
+      // (Schedules, daily summary): under UAT isolation the user's own
+      // settings.json — whose hooks post to production — is not loaded.
+      if (isUatIsolationEnabled()) args.push('--setting-sources', CLAUDE_UAT_SETTING_SOURCES);
+      return args;
+    }
   }
 }
 
@@ -893,6 +905,37 @@ export function describeCommandCodeFailure(
  * @param options - Additional options (e.g., model for vibe-local)
  * @returns Execution result with output and status
  */
+/**
+ * Why a headless run of `cliToolId` may not happen under `CM_UAT_ISOLATION=1`,
+ * or null when it may (Issue #3360).
+ *
+ * `codex exec` and `agy -p` read the user's shared hook config —
+ * `$CODEX_HOME/hooks.json` and `~/.gemini/config/hooks.json`, the trusted files
+ * the production server wrote — whatever this process passes. A headless run is
+ * started with none of the correlation keys or receiver URLs an interactive
+ * launch puts in its environment, so those hooks fall back to the relay's
+ * default port, which is the production server's. There is no per-run way to turn
+ * them off or point them elsewhere, so in isolation the run is refused rather
+ * than allowed to reach production. claude's `-p` is not here: it gets
+ * `--setting-sources project,local` in {@link buildCliArgs}.
+ */
+export function uatIsolationHeadlessRefusal(cliToolId: string): string | null {
+  if (!isUatIsolationEnabled()) return null;
+  const shared = UAT_ISOLATION_SHARED_HOOK_FILES[cliToolId];
+  if (!shared) return null;
+  return new UatIsolationLaunchRefusedError(
+    `a headless ${cliToolId} run`,
+    `it reads the shared ${shared} and its hooks post to the relay's default port (the production server); see docs/user-guide/uat-isolation.md`,
+    'Headless codex / antigravity runs (Schedules, daily summary) cannot be isolated; skip those scenarios in a UAT.'
+  ).message;
+}
+
+/** Tools whose headless run reads a hook config shared with production (Issue #3360). */
+const UAT_ISOLATION_SHARED_HOOK_FILES: Readonly<Record<string, string>> = {
+  codex: '$CODEX_HOME/hooks.json',
+  antigravity: '~/.gemini/config/hooks.json',
+};
+
 export async function executeClaudeCommand(
   message: string,
   cwd: string,
@@ -908,6 +951,12 @@ export async function executeClaudeCommand(
       status: 'failed',
       error: `Invalid CLI tool: ${cliToolId}`,
     };
+  }
+
+  // Issue #3360: refused under UAT isolation before anything is spawned.
+  const refusal = uatIsolationHeadlessRefusal(cliToolId);
+  if (refusal) {
+    return { output: refusal, exitCode: null, status: 'failed', error: refusal };
   }
 
   // Validate message length

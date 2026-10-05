@@ -68,6 +68,12 @@ const PAIRS: ReadonlyArray<{ name: string; ja: string; en: string }> = [
     ja: 'docs/user-guide/how-it-works.md',
     en: 'docs/en/user-guide/how-it-works.md',
   },
+  {
+    // Issue #3360: the UAT isolation mode, its measurements and skip conditions.
+    name: 'uat-isolation',
+    ja: 'docs/user-guide/uat-isolation.md',
+    en: 'docs/en/user-guide/uat-isolation.md',
+  },
 ];
 
 /** Placeholders a translation must never ship with. */

@@ -135,8 +135,10 @@ export function beginAgentSession(target: AgentInstanceRef, at: number = Date.no
  * does not import a settings generator: which file gets written, and whether
  * one gets written at all, is the source's business.
  *
- * Never throws — see `AgentEventSource.prepareLaunch`. A tool whose config
- * could not be written starts bare, which is the pre-#1722 status quo.
+ * Never throws outside UAT isolation — see `AgentEventSource.prepareLaunch`. A
+ * tool whose config could not be written starts bare, which is the pre-#1722
+ * status quo. Under `CM_UAT_ISOLATION=1` codex and antigravity throw instead
+ * (Issue #3360), so call this before creating the tmux session.
  *
  * @param context - The instance, its executable, and the worktree it runs in
  * @returns The command, its environment, and the config file when one landed

@@ -53,7 +53,8 @@ env:
     # caller's, else $HOME/.codex) and use it for this record, for the server
     # (env -i below) and for `down`, which reads it back from the record. Record
     # the files' sha256; `down` compares and fails when the UAT build rewrote them.
-    # Never written back.
+    # Never written back. CM_UAT_ISOLATION=1 on the server line (Issue #3360) is
+    # what keeps the build from writing them; the record is the check on it.
     #
     # Absolute, because a relative value means the server's cwd for CommandMate
     # and codex's own cwd for codex: two places.
@@ -82,6 +83,10 @@ env:
       for n in hooks.json commandmate/cmate-agent-event.sh; do
         printf '%s  %s\n' "$( [ -f "$CH/$n" ] && shasum -a 256 "$CH/$n" | cut -d' ' -f1 || echo absent )" "$n"
       done
+      # Issue #3360: antigravity's shared file is not under CODEX_HOME, so it is
+      # its own line form: `ABSOLUTE  <sha256>  <absolute path>`.
+      g="$HOME/.gemini/config/hooks.json"
+      printf 'ABSOLUTE  %s  %s\n' "$( [ -f "$g" ] && shasum -a 256 "$g" | cut -d' ' -f1 || echo absent )" "$g"
     } > {run_dir}/codex-shared.sha256
     mkdir -p -m 700 /tmp/cmuat-{port}
     # The private tmux server's own environment is what a codex it launches
@@ -91,10 +96,20 @@ env:
     env -i HOME="$HOME" PATH="$PATH" USER="$USER" LOGNAME="$LOGNAME" SHELL="$SHELL" \
       CODEX_HOME="$CH" LANG="${LANG:-en_US.UTF-8}" TERM="${TERM:-xterm-256color}" \
       TMUX="/tmp/cmuat-{port}/tmux.sock,$(lsof -t /tmp/cmuat-{port}/tmux.sock | head -1),0" \
-      NODE_ENV=production CM_PORT={port} CM_BIND=127.0.0.1 \
+      NODE_ENV=production CM_PORT={port} CM_BIND=127.0.0.1 CM_UAT_ISOLATION=1 \
       CM_DB_PATH={run_dir}/uat.db CM_ROOT_DIR={run_dir}/root \
       CM_OPENCODE_V2_DIR={run_dir}/opencode-v2 CM_AGENT_HOOKS_DIR={run_dir}/hooks \
       nohup node dist/server/server.js > {run_dir}/server.log 2>&1 &
+  # The CLI for this run (Issue #3360) — the SAME build's CLI by absolute path,
+  # never the global `commandmate`; its own empty HOME, so neither
+  # ~/.commandmate/.env nor ~/.commandmate-security.log is touched; CM_PORT
+  # exported, and CM_UAT_ISOLATION=1 so that it reads no .env and exits 2
+  # instead of falling back to 3000 (production) when CM_PORT is missing:
+  #
+  #   mkdir -p {run_dir}/client-home
+  #   env -i HOME={run_dir}/client-home PATH="$PATH" CM_UAT_ISOLATION=1 \
+  #     CM_PORT={port} CM_BIND=127.0.0.1 node "$PWD/bin/commandmate.js" ls --json
+  #
   # Stops ONLY what LISTENS on {port} (never a process merely connected to it,
   # CommandMate#2473), waits up to 10 s, then removes the private tmux server.
   # Written inline so it does not depend on where cmate-uat is installed.
@@ -105,14 +120,17 @@ env:
     tmux -S /tmp/cmuat-{port}/tmux.sock kill-server 2>/dev/null || true
     rm -rf /tmp/cmuat-{port}
     ! lsof -nP -iTCP:{port} -sTCP:LISTEN -t >/dev/null
-    # Fail when the UAT build rewrote codex's shared hook or relay script.
-    # The first record line names the CODEX_HOME `up` decided on; the rest are
-    # sha256 + path relative to it.
+    # Fail when the UAT build rewrote codex's shared hook or relay script, or
+    # antigravity's ~/.gemini/config/hooks.json. CM_UAT_ISOLATION=1 (Issue
+    # #3360) keeps the server from writing any of them; this is the check on it.
+    # The first record line names the CODEX_HOME `up` decided on; the codex lines
+    # are sha256 + path relative to it; an ABSOLUTE line is sha256 + absolute path.
     CH=$(sed -n 's/^CODEX_HOME  //p;' {run_dir}/codex-shared.sha256 | head -1)
     while read -r h f; do
       [ "$h" = CODEX_HOME ] && continue
-      n=$( [ -f "$CH/$f" ] && shasum -a 256 "$CH/$f" | cut -d' ' -f1 || echo absent )
-      [ "$n" = "$h" ] || { echo "codex shared file changed during UAT: $CH/$f" >&2; exit 1; }
+      if [ "$h" = ABSOLUTE ]; then h=${f%%  *}; p=${f#*  }; else p="$CH/$f"; fi
+      n=$( [ -f "$p" ] && shasum -a 256 "$p" | cut -d' ' -f1 || echo absent )
+      [ "$n" = "$h" ] || { echo "shared agent hook file changed during UAT: $p" >&2; exit 1; }
     done < {run_dir}/codex-shared.sha256
   health: "curl -fsS -m 5 -o /dev/null http://127.0.0.1:{port}/api/worktrees"
   health_timeout_sec: 90
@@ -130,6 +148,9 @@ isolation:
     # server was not left pointing at the user's ~/.commandmate ones (negative).
     - "P=$(lsof -nP -iTCP:{port} -sTCP:LISTEN -t | head -1); ps eww -p $P | tr ' ' '\\n' | grep -qxF 'CM_OPENCODE_V2_DIR={run_dir}/opencode-v2' && ps eww -p $P | tr ' ' '\\n' | grep -qxF 'CM_AGENT_HOOKS_DIR={run_dir}/hooks'"
     - "P=$(lsof -nP -iTCP:{port} -sTCP:LISTEN -t | head -1); ! ps eww -p $P | tr ' ' '\\n' | grep -E '^CM_(OPENCODE_V2|AGENT_HOOKS)_DIR=' | grep -vF '{run_dir}/'"
+    # It runs in UAT isolation (Issue #3360): no shared codex / antigravity
+    # write, no codex hook trust grant, no user-level claude settings.
+    - "P=$(lsof -nP -iTCP:{port} -sTCP:LISTEN -t | head -1); ps eww -p $P | tr ' ' '\\n' | grep -qxF 'CM_UAT_ISOLATION=1'"
     # The API sees only the sandbox root: every registered repository lives under {run_dir}/root.
     - "curl -fsS -m 5 http://127.0.0.1:{port}/api/repositories | python3 -c \"import json,sys; d=json.load(sys.stdin); r=d if isinstance(d,list) else d.get('repositories',[]); sys.exit(0 if all(str(x.get('path','')).startswith('{run_dir}/root') for x in r) else 1)\""
 report_dir: ".commandmate/uat"
