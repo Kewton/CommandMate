@@ -19,7 +19,7 @@ vi.mock('@/lib/cli-tools/worktree-session-ownership', () => ({
 }));
 vi.mock('@/lib/session/cli-session', () => ({
   captureSessionOutput: vi.fn(),
-  isSessionRunning: vi.fn(),
+  getSessionPresence: vi.fn(),
 }));
 vi.mock('@/lib/polling/response-poller', () => ({ startPolling: vi.fn() }));
 vi.mock('@/lib/realtime/terminal-broadcast', () => ({
@@ -37,7 +37,7 @@ vi.mock('@/lib/db/db-instance', () => ({
   getDbInstance: () => ({ prepare: () => ({ get: () => undefined, run: () => undefined }) }),
 }));
 
-import { captureSessionOutput, isSessionRunning } from '@/lib/session/cli-session';
+import { captureSessionOutput, getSessionPresence } from '@/lib/session/cli-session';
 import { sendSpecialKeys } from '@/lib/tmux/tmux';
 import {
   getAutoYesState,
@@ -61,7 +61,7 @@ function sessionMissing(): void {
   vi.mocked(captureSessionOutput).mockRejectedValue(
     new Error(`Claude session claude-${WT} does not exist`),
   );
-  vi.mocked(isSessionRunning).mockResolvedValue(false);
+  vi.mocked(getSessionPresence).mockResolvedValue('absent');
 }
 
 describe('Issue #3329: Auto-Yes waits for a session that is not running', () => {
@@ -71,7 +71,7 @@ describe('Issue #3329: Auto-Yes waits for a session that is not running', () => 
     clearAllAutoYesStates();
     clearAllPollerStates();
     vi.mocked(captureSessionOutput).mockReset();
-    vi.mocked(isSessionRunning).mockReset();
+    vi.mocked(getSessionPresence).mockReset();
     vi.mocked(sendSpecialKeys).mockReset();
   });
 
@@ -118,7 +118,7 @@ describe('Issue #3329: Auto-Yes waits for a session that is not running', () => 
     expect(sendSpecialKeys).not.toHaveBeenCalled();
 
     // The session starts: a quiet frame first, then a prompt.
-    vi.mocked(isSessionRunning).mockResolvedValue(true);
+    vi.mocked(getSessionPresence).mockResolvedValue('present');
     vi.mocked(captureSessionOutput).mockResolvedValue('idle');
     await vi.advanceTimersByTimeAsync(MAX_BACKOFF_MS);
     const callsAfterAppear = vi.mocked(captureSessionOutput).mock.calls.length;
@@ -137,7 +137,7 @@ describe('Issue #3329: Auto-Yes waits for a session that is not running', () => 
 
   it('still stops with consecutive_errors when the session exists but capture keeps failing', async () => {
     vi.mocked(captureSessionOutput).mockRejectedValue(new Error('Failed to capture Claude output: boom'));
-    vi.mocked(isSessionRunning).mockResolvedValue(true);
+    vi.mocked(getSessionPresence).mockResolvedValue('present');
     setAutoYesEnabled(WT, 'claude', true, EIGHT_HOURS);
     startAutoYesPolling(WT, 'claude');
 
@@ -158,7 +158,7 @@ describe('Issue #3329: Auto-Yes waits for a session that is not running', () => 
       if (n % 2 === 1) throw new Error('Failed to capture Claude output: transient');
       return 'idle';
     });
-    vi.mocked(isSessionRunning).mockResolvedValue(true);
+    vi.mocked(getSessionPresence).mockResolvedValue('present');
     setAutoYesEnabled(WT, 'claude', true, EIGHT_HOURS);
     startAutoYesPolling(WT, 'claude');
 
@@ -173,9 +173,26 @@ describe('Issue #3329: Auto-Yes waits for a session that is not running', () => 
     expect(isPollerActive(KEY)).toBe(true);
   });
 
+  it('still stops when the capture works but sending the answer fails every time', async () => {
+    // The good capture must not end the run of errors: the poll did not finish.
+    vi.mocked(captureSessionOutput).mockResolvedValue('Select an option:\n\u276F 1. Yes\n  2. No');
+    vi.mocked(getSessionPresence).mockResolvedValue('present');
+    vi.mocked(sendSpecialKeys).mockRejectedValue(new Error('send-keys failed'));
+    setAutoYesEnabled(WT, 'claude', true, EIGHT_HOURS);
+    startAutoYesPolling(WT, 'claude');
+
+    await vi.advanceTimersByTimeAsync(60 * 60 * 1000);
+
+    expect(vi.mocked(sendSpecialKeys).mock.calls.length).toBeGreaterThanOrEqual(AUTO_STOP_ERROR_THRESHOLD);
+    const state = getAutoYesState(WT, 'claude');
+    expect(state?.enabled).toBe(false);
+    expect(state?.stopReason).toBe('consecutive_errors');
+    expect(isPollerActive(KEY)).toBe(false);
+  });
+
   it('counts the failure when the session check itself fails', async () => {
     vi.mocked(captureSessionOutput).mockRejectedValue(new Error('Claude session x does not exist'));
-    vi.mocked(isSessionRunning).mockRejectedValue(new Error('tmux unavailable'));
+    vi.mocked(getSessionPresence).mockRejectedValue(new Error('tmux unavailable'));
     setAutoYesEnabled(WT, 'claude', true, EIGHT_HOURS);
     startAutoYesPolling(WT, 'claude');
 

@@ -11,7 +11,7 @@
  */
 
 import type { CLIToolType } from './cli-tools/types';
-import { captureSessionOutput, isSessionRunning } from './session/cli-session';
+import { captureSessionOutput, getSessionPresence } from './session/cli-session';
 import { detectPromptOnCleanFrame } from './polling/response-checker';
 import {
   ANTIGRAVITY_PERMISSION_RECEIPT_WINDOW_MS,
@@ -207,7 +207,8 @@ function updateLastServerResponseTimestamp(compositeKey: string, timestamp: numb
 
 /**
  * Reset error count for a poller and restore the default polling interval.
- * Called on every successful capture (Issue #3329) and after an answer is sent.
+ * Called after every poll that ran to the end without an error (Issue #3329)
+ * and after an answer is sent.
  *
  * @param compositeKey - Composite key
  */
@@ -983,10 +984,6 @@ async function pollAutoYes(worktreeId: string, cliToolId: CLIToolType, instanceI
       instanceId,
     );
 
-    // Issue #3329: a good capture ends the run of errors, so only failures in
-    // a row reach AUTO_STOP_ERROR_THRESHOLD — not ones scattered over hours.
-    resetErrorCount(compositeKey);
-
     if (pollerState!.waitingForSession) {
       pollerState!.waitingForSession = false;
       logger.info('poller:session-appeared', { worktreeId, cliToolId, instanceId });
@@ -1003,6 +1000,13 @@ async function pollAutoYes(worktreeId: string, cliToolId: CLIToolType, instanceI
     const result = await detectAndRespondToPrompt(
       worktreeId, pollerState!, cliToolId, cleanOutput, lines, instanceId, rawOutput,
     );
+    // Issue #3329: a poll that ran to the end ends the run of errors, so only
+    // failures in a row reach AUTO_STOP_ERROR_THRESHOLD — not ones scattered
+    // over hours. Not on 'error': a capture that works followed by an answer
+    // that fails every time must still back off and stop.
+    if (result !== 'error') {
+      resetErrorCount(compositeKey);
+    }
     if (result === 'responded') {
       scheduleNextPoll(worktreeId, cliToolId, instanceId, COOLDOWN_INTERVAL_MS);
       return;
@@ -1038,8 +1042,9 @@ async function pollAutoYes(worktreeId: string, cliToolId: CLIToolType, instanceI
 
 /**
  * Whether a failed capture failed because the session does not exist
- * (Issue #3329). Asked of tmux, not read off the error text. A check that
- * itself fails answers "no", so the failure is counted as before.
+ * (Issue #3329). Asked of tmux (`has-session`'s exit code), not read off the
+ * error text. `unknown` — tmux timed out or could not be run — is not "absent":
+ * the failure is counted as before, so a broken tmux still stops Auto-Yes.
  */
 async function isSessionMissing(
   worktreeId: string,
@@ -1047,7 +1052,7 @@ async function isSessionMissing(
   instanceId?: string,
 ): Promise<boolean> {
   try {
-    return !(await isSessionRunning(worktreeId, cliToolId, instanceId));
+    return (await getSessionPresence(worktreeId, cliToolId, instanceId)) === 'absent';
   } catch {
     return false;
   }
