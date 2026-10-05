@@ -49,8 +49,8 @@ import { captureSessionOutput } from '@/lib/session/cli-session';
 import { getLastUserMessageForInstance } from '@/lib/db/chat-db';
 import { buildCurrentOutput } from '@/lib/session/current-output-builder';
 import { detectWorktreeSessionStatus } from '@/lib/session/worktree-status-helper';
-import { clearAgentStopEvents, recordAgentEvent } from '@/lib/session/agent-event-state';
-import { TURN_STALE_AFTER_MS } from '@/lib/session/provisional-turn';
+import { clearAgentStopEvents, getAgentTurn, recordAgentEvent } from '@/lib/session/agent-event-state';
+import { SCRAPER_COMPLETION_POLLS, TURN_STALE_AFTER_MS } from '@/lib/session/provisional-turn';
 import { clearLastKnownStatuses } from '@/lib/session/status-evidence';
 import { detectSessionStatus } from '@/lib/detection/status-detector';
 
@@ -63,6 +63,10 @@ const CODEX_WORKING = frame('codex-mid-turn-3337/codex-0.160.0-working-bullet.tx
 const CODEX_MID_TURN_READ_READY = frame('codex-live-2310/steer-queued-running.txt');
 /** codex after Esc: `■ Conversation interrupted` above the composer. */
 const CODEX_INTERRUPTED = frame('codex-mid-turn-3337/codex-0.160.0-interrupted-idle.txt');
+/** A codex composer after a reply: what a misread mid-turn frame looks like to the scraper. */
+const CODEX_IDLE_AFTER_REPLY = frame('startup-screen-3293/codex-0.160.0-first-turn-reply.txt');
+/** Claude after Esc: `⎿  Interrupted` above the input box (no policy). */
+const CLAUDE_INTERRUPTED = frame('claude-interrupted-3337/claude-2.1.289-interrupted.txt');
 /** Claude with its spinner still painted. */
 const CLAUDE_WORKING = [
   '> do the thing',
@@ -218,9 +222,43 @@ describe('[#3377] controls the structured layer does not reach', () => {
     expect(processing).toBe(capture.status === 'running');
   });
 
-  it('the interrupted codex frame: the list still reads it at once (unchanged; see the commit)', async () => {
+});
+
+describe('[#3377] Esc: the interrupted codex frame', () => {
+  it('one poll: the list is not processing and capture says ready / input_prompt', async () => {
+    post('codex', 'user_prompt_submit', Date.now() - 2_000);
+    const { processing, capture } = await both('codex', CODEX_INTERRUPTED);
+    expect(processing).toBe(false);
+    expect(capture).toEqual({ status: 'ready', reason: 'input_prompt' });
+  });
+
+  it('the record still closes on the SCRAPER_COMPLETION_POLLS-th frame, not before', async () => {
     post('codex', 'user_prompt_submit', Date.now() - 2_000);
     vi.mocked(captureSessionOutput).mockResolvedValue(CODEX_INTERRUPTED);
-    expect(await listProcessing('codex')).toBe(false);
+    for (let i = 1; i < SCRAPER_COMPLETION_POLLS; i++) await captureStatus('codex');
+    expect(getAgentTurn(WT, 'codex', 'codex')?.closedAt).toBeNull();
+    await captureStatus('codex');
+    expect(getAgentTurn(WT, 'codex', 'codex')?.closedBy).toBe('scraper_evidence');
+  });
+
+  it.each([
+    ['the working row', CODEX_WORKING],
+    ['a frame that reads ready (#3365)', CODEX_MID_TURN_READ_READY],
+    ['an idle-looking composer (#3337)', CODEX_IDLE_AFTER_REPLY],
+  ])('not interrupted, %s: both stay running for N polls, so wait does not complete before Stop', async (_name, pane) => {
+    post('codex', 'user_prompt_submit', Date.now() - 2_000);
+    for (let i = 0; i < SCRAPER_COMPLETION_POLLS + 2; i++) {
+      const { processing, capture } = await both('codex', pane);
+      expect(processing).toBe(true);
+      expect(capture.status).toBe('running');
+    }
+    expect(getAgentTurn(WT, 'codex', 'codex')?.closedAt).toBeNull();
+  });
+
+  it('claude (no policy) is unchanged: its interrupted frame stays running in capture until the record closes', async () => {
+    post('claude', 'user_prompt_submit', Date.now() - 2_000);
+    const { processing, capture } = await both('claude', CLAUDE_INTERRUPTED);
+    expect(processing).toBe(false);
+    expect(capture.status).toBe('running');
   });
 });

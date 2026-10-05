@@ -59,3 +59,16 @@ export function screenMayCloseHookTurn(cliToolId: CLIToolType, output: string): 
   if (!policy) return true;
   return policy.showsAbandonedTurn(stripAnsi(output).split('\n'));
 }
+
+/**
+ * Whether the frame shows that a hook turn of a listed tool was abandoned
+ * (Issue #3377) — the same reading {@link screenMayCloseHookTurn} closes on,
+ * false for a tool with no policy.
+ *
+ * @param output - The pane as captured (ANSI is stripped here)
+ */
+export function screenShowsAbandonedHookTurn(cliToolId: CLIToolType, output: string): boolean {
+  const policy = HOOK_TURN_SCREEN_POLICIES[cliToolId];
+  if (!policy) return false;
+  return policy.showsAbandonedTurn(stripAnsi(output).split('\n'));
+}

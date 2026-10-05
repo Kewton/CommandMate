@@ -28,7 +28,7 @@ import {
   startingStatusResult,
 } from '@/lib/session/session-starting-state';
 import { deriveCliStatus, sessionStatusToActivityFlags } from './status-mapping';
-import { hookTurnHoldsPane } from './hook-turn-hold';
+import { agentEventSourceKind, hookTurnHoldsPane, structuredStateForFrame } from './hook-turn-hold';
 import { mergeStructuredStatus, staleReadyCandidate, type ScraperVerdict } from './structured-status-merge';
 // Issue #2317: the tmux session is a SURFACE, not just a place to run a process.
 // Reached through `cli-session`, which is the gateway Issue #1922's import guard
@@ -54,7 +54,6 @@ import { observeWaitingEdge } from '@/lib/session/waiting-episode-state';
 import {
   getPublishedAgentTurn,
   getResolvedAgentModelInfo,
-  getStructuredSessionState,
   isAwaitingInstruction,
   recordCapturedModelInfo,
 } from '@/lib/session/agent-event-state';
@@ -486,7 +485,13 @@ interface HookTurnFoldInput {
 function foldHookTurn(input: HookTurnFoldInput): boolean {
   const { worktreeId, cliToolId, instanceId, output, statusResult } = input;
   if (!input.isProcessing) return hookTurnHoldsPane(worktreeId, cliToolId, instanceId, output);
-  const structured = getStructuredSessionState(worktreeId, cliToolId, instanceId);
+  const structured = structuredStateForFrame(
+    worktreeId,
+    cliToolId,
+    instanceId,
+    agentEventSourceKind(worktreeId, cliToolId, instanceId),
+    output
+  );
   if (structured === null) return true;
   const scraper: ScraperVerdict = {
     status: statusResult.status,
