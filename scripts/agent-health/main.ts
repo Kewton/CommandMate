@@ -3,7 +3,7 @@
  * CommandMate (Issue #2878). Entry point is `run.ts`; this is the run.
  *
  * Order of a run:
- *   1. parse arguments, take the run lock, start the hook listener
+ *   1. parse arguments, take the shared run lock (Issue #3359), start the hook listener
  *   2. per tool: `--version` → snapshot machine-singleton files →
  *      `prepareLaunch` → private tmux session → screens and turns → kill →
  *      restore the snapshots (sha256-proved) → scan the production log
@@ -47,6 +47,7 @@ import {
   reportDateJst,
   type AgentHealthExitCode,
 } from '@/lib/agent-health/report';
+import { acquireRunLock } from '@/lib/agent-health/run-lock';
 import { AGENT_HEALTH_TMUX_SOCKET, buildChildEnv } from '@/lib/agent-health/tmux-command';
 import { framesDirFor, resolveFrameSaveMode, type FrameArchive } from '@/lib/agent-health/frame-archive';
 import { buildCoverage, checksLimitedTools, skipCheck, summarizeCoverage } from '@/lib/agent-health/coverage';
@@ -101,26 +102,6 @@ function writeJson(file: string, value: unknown): void {
   const staging = `${file}.tmp-${process.pid}`;
   fs.writeFileSync(staging, `${JSON.stringify(value, null, 2)}\n`);
   fs.renameSync(staging, file);
-}
-
-function isAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/** One run at a time: the tmux socket label and the listener's hook config are shared. */
-function acquireLock(lockPath: string): string | null {
-  fs.mkdirSync(path.dirname(lockPath), { recursive: true });
-  const holder = Number.parseInt(readTextIfPresent(lockPath) ?? '', 10);
-  if (Number.isInteger(holder) && holder !== process.pid && isAlive(holder)) {
-    return `別の agent-health 実行（pid ${holder}）が進行中（${lockPath}）`;
-  }
-  fs.writeFileSync(lockPath, String(process.pid));
-  return null;
 }
 
 function emptyReport(startedAt: Date, errors: string[], syncedFrom: string | null = null): AgentHealthReport {
@@ -204,17 +185,19 @@ async function run(options: AgentHealthOptions, startedAt: Date): Promise<AgentH
     dir: framesDirFor(outPath, reportDateJst(startedAt)),
     mode: resolveFrameSaveMode(process.env),
   };
-  const lockPath = path.join(path.dirname(statePath), 'run.lock');
   const scriptErrors: string[] = [];
   const restoreEntries: GlobalConfigRestoreEntry[] = [];
   const results: AgentHealthToolResult[] = [];
   const limitedRun: AgentHealthLimitedTool[] = [];
   const globalDeadline = startedAt.getTime() + RUN_BUDGET_SEC * 1000 - TEARDOWN_RESERVE_MS;
 
-  const lockError = acquireLock(lockPath);
-  if (lockError) {
-    log(lockError);
-    writeReportOrPrint(outPath, emptyReport(startedAt, [lockError], options.syncedFrom));
+  // One run at a time: the tmux socket label and the listener's hook config are
+  // shared, and a UAT server (scripts/uat/run-server.sh) holds the same lock.
+  // Under daily.sh the lock is already held and passed down (CM_RUN_LOCK_TOKEN).
+  const lock = acquireRunLock({ label: 'agent-health' });
+  if (!lock.ok) {
+    log(lock.error);
+    writeReportOrPrint(outPath, emptyReport(startedAt, [lock.error], options.syncedFrom));
     return 2;
   }
 
@@ -254,7 +237,7 @@ async function run(options: AgentHealthOptions, startedAt: Date): Promise<AgentH
       await tmux?.teardown();
       await listener?.close().catch(() => undefined);
       fs.rmSync(workRoot, { recursive: true, force: true });
-      fs.rmSync(lockPath, { force: true });
+      lock.release();
       process.exit(2);
     })();
   };
@@ -459,7 +442,7 @@ async function run(options: AgentHealthOptions, startedAt: Date): Promise<AgentH
   } catch (error) {
     scriptErrors.push(`state を書けなかった: ${error instanceof Error ? error.message : String(error)}`);
   }
-  fs.rmSync(lockPath, { force: true });
+  lock.release();
 
   const exitCode = scriptErrors.length > 0 ? 2 : decideExitCode(report);
   for (const result of results) {

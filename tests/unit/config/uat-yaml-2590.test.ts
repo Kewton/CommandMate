@@ -15,6 +15,11 @@
  *
  * The lap itself (up -> health -> isolation.checks -> down) is run by hand when
  * the file changes; its record is in the PR that introduced the file.
+ *
+ * Issue #3359 moved the shell of `up` / `down` into scripts/uat/run-server.sh
+ * (shared with the daily check). The yaml now only calls it, so the shape
+ * assertions below read the script's `cmd_up` / `cmd_down`; what they hold is
+ * unchanged. The script's behaviour is tests/unit/scripts/uat/run-server-3359.test.ts.
  */
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -25,6 +30,7 @@ import YAML from 'yaml';
 
 const REPO_ROOT = path.resolve(__dirname, '../../..');
 const UAT_YAML = path.join(REPO_ROOT, '.commandmate/uat.yaml');
+const RUN_SERVER = path.join(REPO_ROOT, 'scripts/uat/run-server.sh');
 
 interface UatYaml {
   version: number;
@@ -41,6 +47,19 @@ interface UatYaml {
 }
 
 const spec = YAML.parse(fs.readFileSync(UAT_YAML, 'utf8')) as UatYaml;
+const runServer = fs.readFileSync(RUN_SERVER, 'utf8');
+
+/** The body of a shell function in run-server.sh (up to its closing brace at column 0). */
+function shellFunction(name: string): string {
+  const match = runServer.match(new RegExp(`^${name}\\(\\) \\{\\n([\\s\\S]*?)^\\}$`, 'm'));
+  expect(match, `run-server.sh must define ${name}()`).toBeTruthy();
+  return match![1];
+}
+
+/** What `up` runs: the script's cmd_up. */
+const upScript = shellFunction('cmd_up');
+/** What `down` runs: cmd_down and the verified stop it calls. */
+const downScript = `${shellFunction('cmd_down')}\n${shellFunction('stop_recorded')}`;
 
 /** Shell lines as bash sees them: a trailing backslash joins the next line. */
 function logicalLines(script: string): string[] {
@@ -48,7 +67,7 @@ function logicalLines(script: string): string[] {
     .replace(/\\\n\s*/g, ' ')
     .split('\n')
     .map((line) => line.trim())
-    .filter((line) => line.length > 0);
+    .filter((line) => line.length > 0 && !line.startsWith('#'));
 }
 
 describe('.commandmate/uat.yaml (Issue #2590)', () => {
@@ -69,19 +88,22 @@ describe('.commandmate/uat.yaml (Issue #2590)', () => {
   });
 
   it('starts the server on ONE logical line that clears the environment and sets every isolating variable', () => {
-    const serverLines = logicalLines(spec.env.up).filter((line) => line.includes('dist/server/server.js'));
+    expect(spec.env.up).toBe('bash scripts/uat/run-server.sh up --port {port} --run-dir {run_dir}');
+    const serverLines = logicalLines(upScript).filter((line) => line.includes('$SERVER_ENTRY'));
     expect(serverLines, 'exactly one line starts the server').toHaveLength(1);
+    expect(runServer).toContain('SERVER_ENTRY="${CM_UAT_SERVER_ENTRY:-dist/server/server.js}"');
     const [line] = serverLines;
     expect(line.startsWith('env -i '), `the server line must begin with env -i: ${line}`).toBe(true);
     for (const assignment of [
-      'CM_PORT={port}',
+      'CM_PORT="$PORT"',
       'CM_BIND=127.0.0.1',
-      'CM_DB_PATH={run_dir}/',
-      'CM_ROOT_DIR={run_dir}/',
+      'CM_DB_PATH="$RUN_DIR/',
+      'CM_ROOT_DIR="$RUN_DIR/',
       // The production code calls tmux with no socket argument, so TMUX decides
       // which server it reaches. It has to name the private socket, never the
       // caller's value (env -i drops that, and this puts the private one back).
-      'TMUX="/tmp/cmuat-{port}/tmux.sock,',
+      // Issue #3359: the socket is per run, /tmp/cmuat-<port>-<run id>/tmux.sock.
+      'TMUX="$sock,',
     ]) {
       expect(line, `the server line must set ${assignment}`).toContain(assignment);
     }
@@ -92,12 +114,18 @@ describe('.commandmate/uat.yaml (Issue #2590)', () => {
     for (const line of logicalLines(spec.env.up)) {
       expect(line, `a bare assignment line does not reach the server: ${line}`).not.toMatch(bareAssignment);
     }
+    // In run-server.sh plain assignments are its own variables; an isolating
+    // variable (or TMUX / NODE_ENV) on such a line is a broken continuation.
+    for (const line of logicalLines(upScript)) {
+      if (!bareAssignment.test(line)) continue;
+      expect(line, `a bare assignment line does not reach the server: ${line}`).not.toMatch(/\b(CM_[A-Z_]+|TMUX|NODE_ENV)=/);
+    }
   });
 
   it('never talks to a tmux server without naming its socket', () => {
     // With TMUX set in the caller, a bare `tmux kill-server` reaches the user's
     // own server. Every tmux command in up and down names the private socket.
-    for (const script of [spec.env.up, spec.env.down ?? '']) {
+    for (const script of [spec.env.up, spec.env.down ?? '', runServer]) {
       for (const line of logicalLines(script)) {
         for (const match of line.matchAll(/(?:^|[;&|(]\s*)tmux\s+(\S+)/g)) {
           expect(match[1], `tmux without -S: ${line}`).toBe('-S');
@@ -107,13 +135,16 @@ describe('.commandmate/uat.yaml (Issue #2590)', () => {
   });
 
   it('stops only what LISTENS on the port (CommandMate#2473)', () => {
-    const down = spec.env.down ?? '';
-    const lsofCalls = [...down.matchAll(/lsof\s[^\n;|)]*/g)].map((match) => match[0]);
-    expect(lsofCalls.length).toBeGreaterThan(0);
+    expect(spec.env.down).toBe('bash scripts/uat/run-server.sh down --run-dir {run_dir}');
+    // The port is looked up only through scripts/lib/port-pids.sh (LISTEN-only),
+    // and only to compare with the recorded pid (Issue #3359).
+    expect(downScript).toContain('find_listen_pids_by_port "$port"');
+    expect(runServer).toContain('. "$REPO_ROOT/scripts/lib/port-pids.sh"');
+    const lsofCalls = [...runServer.matchAll(/lsof\s[^\n;|)]*/g)].map((match) => match[0]);
     for (const call of lsofCalls) {
       expect(call, `lsof without the LISTEN filter: ${call}`).toContain('-sTCP:LISTEN');
     }
-    expect(down).not.toMatch(/\b(pkill|killall)\b/);
+    expect(runServer).not.toMatch(/\b(pkill|killall)\b/);
   });
 
   it('writes its run output under .commandmate/uat, which .gitignore keeps out of the repository', () => {
@@ -121,10 +152,10 @@ describe('.commandmate/uat.yaml (Issue #2590)', () => {
   });
 
   it('moves the shared opencode-v2 and hook directories under the run, after env -i (Issue #3342)', () => {
-    const [line] = logicalLines(spec.env.up).filter((l) => l.includes('dist/server/server.js'));
+    const [line] = logicalLines(upScript).filter((l) => l.includes('$SERVER_ENTRY'));
     expect(line.startsWith('env -i ')).toBe(true);
     const envEnd = line.indexOf('nohup');
-    for (const assignment of ['CM_OPENCODE_V2_DIR={run_dir}/opencode-v2', 'CM_AGENT_HOOKS_DIR={run_dir}/hooks']) {
+    for (const assignment of ['CM_OPENCODE_V2_DIR="$RUN_DIR/opencode-v2"', 'CM_AGENT_HOOKS_DIR="$RUN_DIR/hooks"']) {
       const at = line.indexOf(assignment);
       expect(at, `the server line must set ${assignment}`).toBeGreaterThan(line.indexOf('env -i'));
       expect(at).toBeLessThan(envEnd);
@@ -139,20 +170,22 @@ describe('.commandmate/uat.yaml (Issue #2590)', () => {
   });
 
   it('records codex shared-file hashes before the server starts and fails in down when they changed (Issue #3342)', () => {
-    const up = spec.env.up;
-    const down = spec.env.down ?? '';
-    expect(up).toContain('hooks.json');
-    expect(up).toContain('commandmate/cmate-agent-event.sh');
-    expect(up.indexOf('codex-shared.sha256')).toBeGreaterThan(-1);
-    expect(up.indexOf('codex-shared.sha256')).toBeLessThan(up.indexOf('dist/server/server.js'));
-    expect(down).toContain('codex-shared.sha256');
-    expect(down).toMatch(/exit 1/);
+    const up = upScript;
+    const down = shellFunction('cmd_down');
+    const check = shellFunction('check_shared_record');
+    expect(runServer).toContain('CODEX_SHARED_FILES="hooks.json commandmate/cmate-agent-event.sh"');
+    expect(runServer).toContain('SHARED_RECORD_NAME="codex-shared.sha256"');
+    expect(up.indexOf('write_shared_record')).toBeGreaterThan(-1);
+    expect(up.indexOf('write_shared_record')).toBeLessThan(up.indexOf('$SERVER_ENTRY'));
+    expect(down).toContain('check_shared_record "$RUN_DIR/$SHARED_RECORD_NAME" || rc=1');
+    expect(check).toMatch(/rc=1/);
     // Never writes back: the user's own changes must survive.
-    expect(down).not.toMatch(/\bcp\b|\bmv\b|>\s*"?\$f/);
+    expect(`${down}\n${check}`).not.toMatch(/\bcp\b|\bmv\b|>\s*"?\$(f|base)/);
   });
 
   it('starts the server in UAT isolation and checks it on the running process (Issue #3360)', () => {
-    const [line] = logicalLines(spec.env.up).filter((l) => l.includes('dist/server/server.js'));
+    // Issue #3359: the server line lives in run-server.sh's cmd_up.
+    const [line] = logicalLines(upScript).filter((l) => l.includes('$SERVER_ENTRY'));
     const at = line.indexOf('CM_UAT_ISOLATION=1');
     expect(at, 'the server line must set CM_UAT_ISOLATION=1').toBeGreaterThan(line.indexOf('env -i'));
     expect(at).toBeLessThan(line.indexOf('nohup'));
@@ -162,70 +195,90 @@ describe('.commandmate/uat.yaml (Issue #2590)', () => {
   });
 
   describe('antigravity\'s shared hooks.json is recorded as an ABSOLUTE line and compared in down (Issue #3360)', () => {
-    const preamble = spec.env.up.slice(0, spec.env.up.indexOf('mkdir -p -m 700 /tmp/cmuat-'));
-    const down = spec.env.down ?? '';
-    const compare = down.slice(down.indexOf('CH=$(sed'));
-
+    // run-server.sh sourced: the record is written and checked exactly as `up`
+    // (write_shared_record) and `down` (check_shared_record) do, nothing starts.
     function setup() {
       const runDir = fs.mkdtempSync(path.join(os.tmpdir(), 'uat-3360-run-'));
       const home = path.join(runDir, 'home');
       fs.mkdirSync(path.join(home, '.gemini', 'config'), { recursive: true });
       const gemini = path.join(home, '.gemini', 'config', 'hooks.json');
       fs.writeFileSync(gemini, '{"commandmate":{}}\n');
+      const record = path.join(runDir, 'codex-shared.sha256');
       const env = { PATH: process.env.PATH ?? '', HOME: home } as unknown as NodeJS.ProcessEnv;
-      const run = (script: string) =>
-        spawnSync('bash', ['-c', script.replaceAll('{run_dir}', runDir)], { env, encoding: 'utf8' });
-      return { runDir, home, gemini, run };
+      const run = (body: string) =>
+        spawnSync('bash', ['-c', `. '${RUN_SERVER}'\n${body}`], { env, encoding: 'utf8' });
+      const up = () => run(`decide_codex_home || exit 1\nwrite_shared_record '${record}'`);
+      const down = () => run(`check_shared_record '${record}'`);
+      return { runDir, gemini, record, up, down };
     }
 
     it('writes `ABSOLUTE  <sha256>  <absolute path>` beside the CODEX_HOME-relative lines', () => {
-      const { runDir, gemini, run } = setup();
-      const res = run(preamble);
+      const { runDir, gemini, record, up } = setup();
+      const res = up();
       expect(res.status, res.stderr).toBe(0);
-      const record = fs.readFileSync(path.join(runDir, 'codex-shared.sha256'), 'utf8');
-      expect(record).toMatch(new RegExp(`^ABSOLUTE {2}[0-9a-f]{64} {2}${gemini.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'm'));
-      expect(record.split('\n')[0]).toMatch(/^CODEX_HOME {2}/);
+      const text = fs.readFileSync(record, 'utf8');
+      expect(text).toMatch(new RegExp(`^ABSOLUTE {2}[0-9a-f]{64} {2}${gemini.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'm'));
+      expect(text.split('\n')[0]).toMatch(/^CODEX_HOME {2}/);
+      fs.rmSync(runDir, { recursive: true, force: true });
     });
 
     it('down passes when nothing changed and fails naming the file when it did', () => {
-      const { gemini, run } = setup();
-      expect(run(preamble).status).toBe(0);
-      const unchanged = run(compare);
+      const { runDir, gemini, up, down } = setup();
+      expect(up().status).toBe(0);
+      const unchanged = down();
       expect(unchanged.status, unchanged.stderr).toBe(0);
 
       fs.writeFileSync(gemini, '{"commandmate":{"rewritten":true}}\n');
-      const changed = run(compare);
+      const changed = down();
       expect(changed.status).toBe(1);
-      expect(changed.stderr).toContain(`changed during UAT: ${gemini}`);
+      expect(changed.stderr).toContain(`shared agent hook file changed during the run: ${gemini}`);
+      fs.rmSync(runDir, { recursive: true, force: true });
+    });
+
+    it('records an absent file as absent and fails when the run created it', () => {
+      const { runDir, gemini, record, up, down } = setup();
+      fs.rmSync(gemini);
+      expect(up().status).toBe(0);
+      expect(fs.readFileSync(record, 'utf8')).toContain(`ABSOLUTE  absent  ${gemini}\n`);
+      expect(down().status).toBe(0);
+      fs.writeFileSync(gemini, '{}\n');
+      expect(down().status).toBe(1);
+      fs.rmSync(runDir, { recursive: true, force: true });
     });
   });
 
   it('uses ONE decided CODEX_HOME for the record, the server (after env -i) and down (Issue #3358)', () => {
-    const up = spec.env.up;
-    const down = spec.env.down ?? '';
-    expect(up).toContain('"${CODEX_HOME:-$HOME/.codex}"');
-    expect(up).toContain('export CH="$(');
-    expect(up).toMatch(/printf 'CODEX_HOME {2}%s\\n' "\$CH"/);
-    const [line] = logicalLines(up).filter((l) => l.includes('dist/server/server.js'));
+    // Issue #3359: the decision lives in run-server.sh (decide_codex_home), up calls it.
+    const decide = shellFunction('decide_codex_home');
+    expect(decide).toContain('"${CODEX_HOME:-$HOME/.codex}"');
+    expect(decide).toContain('CH="$(');
+    expect(shellFunction('write_shared_record')).toMatch(/printf 'CODEX_HOME {2}%s\\n' "\$CH"/);
+    const [line] = logicalLines(upScript).filter((l) => l.includes('$SERVER_ENTRY'));
     const at = line.indexOf('CODEX_HOME="$CH"');
     expect(at, 'the server line must set CODEX_HOME').toBeGreaterThan(line.indexOf('env -i'));
     expect(at).toBeLessThan(line.indexOf('nohup'));
     // The record names the home; down reads it back instead of re-deriving it.
-    expect(down).toContain('s/^CODEX_HOME  //p');
-    expect(down).toContain('"$CH/$f"');
-    expect(down).not.toContain('$HOME/.codex');
+    const check = shellFunction('check_shared_record');
+    expect(check).toContain('CODEX_HOME) base="$rest"');
+    expect(check).toContain('"$base/$rest"');
+    expect(`${shellFunction('cmd_down')}\n${check}`).not.toContain('$HOME/.codex');
   });
 
   describe('CODEX_HOME is made absolute and refused like the server refuses it (Issue #3358)', () => {
-    // Everything in `up` before the private tmux server starts: the decision, the
-    // refusal and the record. Nothing here starts a process.
-    const preamble = spec.env.up.slice(0, spec.env.up.indexOf('mkdir -p -m 700 /tmp/cmuat-'));
-
+    // run-server.sh sourced: only its functions are defined, nothing starts.
+    // decide_codex_home then the record, as `up` does before the tmux server.
     function runPreamble(codexHome: string | undefined, cwd: string) {
       const runDir = fs.mkdtempSync(path.join(os.tmpdir(), 'uat-3358-run-'));
       const env = { PATH: process.env.PATH ?? '', HOME: path.join(runDir, 'home') };
       if (codexHome !== undefined) Object.assign(env, { CODEX_HOME: codexHome });
-      const res = spawnSync('bash', ['-c', `${preamble.replaceAll('{run_dir}', runDir)}\nprintf '%s' "$CH"`], {
+      const script = [
+        `. '${RUN_SERVER}'`,
+        'decide_codex_home || exit 1',
+        `mkdir -p '${runDir}/root'`,
+        `write_shared_record '${runDir}/codex-shared.sha256' || exit 1`,
+        `printf '%s' "$CH"`,
+      ].join('\n');
+      const res = spawnSync('bash', ['-c', script], {
         cwd,
         env: env as unknown as NodeJS.ProcessEnv,
         encoding: 'utf8',
@@ -234,8 +287,16 @@ describe('.commandmate/uat.yaml (Issue #2590)', () => {
     }
 
     it('starts the private tmux server with the decided CODEX_HOME, not the caller\'s', () => {
-      const [line] = logicalLines(spec.env.up).filter((l) => l.includes('new-session'));
+      const [line] = logicalLines(upScript).filter((l) => l.includes('new-session'));
       expect(line.startsWith('CODEX_HOME="$CH" tmux -S ')).toBe(true);
+    });
+
+    it('decides CODEX_HOME before up makes or starts anything', () => {
+      const at = upScript.indexOf('decide_codex_home || exit 1');
+      expect(at).toBeGreaterThan(-1);
+      for (const later of ['mkdir -p "$RUN_DIR"', 'run_lock_acquire', 'new-session', '$SERVER_ENTRY']) {
+        expect(at, later).toBeLessThan(upScript.indexOf(later));
+      }
     });
 
     it('turns a relative CODEX_HOME into an absolute one and records it', () => {
@@ -268,13 +329,34 @@ describe('.commandmate/uat.yaml (Issue #2590)', () => {
       expect(res.stderr).toContain('not an existing directory');
     });
 
+    it('compares in down against the recorded CODEX_HOME, not the caller\'s', () => {
+      const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'uat-3358-home-')));
+      fs.writeFileSync(path.join(home, 'hooks.json'), '{}\n');
+      const first = runPreamble(home, os.tmpdir());
+      expect(first.status, first.stderr).toBe(0);
+      const record = path.join(first.runDir, 'codex-shared.sha256');
+      const check = (env: Record<string, string>) =>
+        spawnSync('bash', ['-c', `. '${RUN_SERVER}'; check_shared_record '${record}'`], {
+          env: { PATH: process.env.PATH ?? '', HOME: os.tmpdir(), ...env } as unknown as NodeJS.ProcessEnv,
+          encoding: 'utf8',
+        });
+      // Unchanged, even with a different CODEX_HOME in the caller.
+      expect(check({ CODEX_HOME: '/nowhere' }).status).toBe(0);
+      fs.writeFileSync(path.join(home, 'hooks.json'), '{"changed":true}\n');
+      const changed = check({});
+      expect(changed.status).toBe(1);
+      expect(changed.stderr).toContain(`codex shared file changed during the run: ${home}/hooks.json`);
+      fs.rmSync(home, { recursive: true, force: true });
+      fs.rmSync(first.runDir, { recursive: true, force: true });
+    });
+
     it('keeps its refused roots identical to the server\'s VIRTUAL_FILESYSTEM_ROOTS', () => {
       const source = fs.readFileSync(path.join(REPO_ROOT, 'src/config/system-directories.ts'), 'utf8');
       const serverRoots = [...source.match(/VIRTUAL_FILESYSTEM_ROOTS = \[([^\]]*)\]/)![1].matchAll(/'([^']+)'/g)].map((m) => m[1]);
       expect(serverRoots.length).toBeGreaterThan(0);
-      const caseBlock = spec.env.up.match(/case "\$d" in\n([^)]*)\)/)![1];
-      const yamlRoots = caseBlock.split('|').map((x) => x.trim()).filter((x) => !x.endsWith('/*'));
-      expect(yamlRoots.sort()).toEqual([...serverRoots].sort());
+      const caseBlock = shellFunction('decide_codex_home').match(/case "\$d" in\n\s*([^)]*)\)/)![1];
+      const scriptRoots = caseBlock.split('|').map((x) => x.trim()).filter((x) => !x.endsWith('/*'));
+      expect(scriptRoots.sort()).toEqual([...serverRoots].sort());
       expect(caseBlock.split('|').map((x) => x.trim()).filter((x) => x.endsWith('/*')).sort()).toEqual(serverRoots.map((r) => `${r}/*`).sort());
     });
   });

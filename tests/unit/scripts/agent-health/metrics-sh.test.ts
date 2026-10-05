@@ -4,7 +4,8 @@
  * report (completedAt + scriptErrors) and exits 2 without measuring.
  *
  * A work clone under os.tmpdir() holds copies of both scripts and has no
- * `origin`, so the pull fails.
+ * `origin`, so the pull fails. daily.sh also needs scripts/uat/run-lock.sh
+ * (Issue #3359); its lock lands under TMPDIR, which is the sandbox.
  */
 
 import { execFileSync, spawnSync } from 'child_process';
@@ -30,11 +31,15 @@ beforeEach(() => {
     GIT_CONFIG_NOSYSTEM: '1',
     GIT_TERMINAL_PROMPT: '0',
     TMPDIR: root,
+    CM_RUN_LOCK_DIR: '',
+    CM_RUN_LOCK_TOKEN: '',
   };
   fs.mkdirSync(path.join(work, 'scripts', 'agent-health'), { recursive: true });
   for (const name of ['daily.sh', 'metrics.sh']) {
     fs.copyFileSync(path.join(SCRIPTS, name), path.join(work, 'scripts', 'agent-health', name));
   }
+  fs.mkdirSync(path.join(work, 'scripts', 'uat'), { recursive: true });
+  fs.copyFileSync(path.join(SCRIPTS, '..', 'uat', 'run-lock.sh'), path.join(work, 'scripts', 'uat', 'run-lock.sh'));
   const git = (...args: string[]) => execFileSync('git', args, { cwd: work, env, stdio: 'ignore' });
   git('init', '-q');
   git('add', '.');

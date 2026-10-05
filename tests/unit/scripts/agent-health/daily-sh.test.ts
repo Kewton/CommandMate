@@ -6,6 +6,9 @@
  * Everything happens under os.tmpdir(): a bare origin, a seed clone that pushes
  * to it, and a work clone holding a copy of daily.sh. `--sync-only` stops
  * before run.ts; `AGENT_HEALTH_NPM_INSTALL_CMD` only writes a marker file.
+ *
+ * Issue #3359: daily.sh also takes the shared run lock (scripts/uat/run-lock.sh,
+ * copied beside it), whose directory is moved under the sandbox.
  */
 
 import { execFileSync, spawnSync } from 'child_process';
@@ -15,6 +18,7 @@ import path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 const SCRIPT = path.resolve(__dirname, '../../../../scripts/agent-health/daily.sh');
+const RUN_LOCK = path.resolve(__dirname, '../../../../scripts/uat/run-lock.sh');
 
 let root: string;
 let origin: string;
@@ -23,6 +27,7 @@ let work: string;
 let marker: string;
 let out: string;
 let env: NodeJS.ProcessEnv;
+let lockDir: string;
 
 function baseEnv(): NodeJS.ProcessEnv {
   const next = Object.fromEntries(
@@ -36,6 +41,8 @@ function baseEnv(): NodeJS.ProcessEnv {
     GIT_CONFIG_NOSYSTEM: '1',
     GIT_TERMINAL_PROMPT: '0',
     AGENT_HEALTH_NPM_INSTALL_CMD: `touch '${marker}'`,
+    CM_RUN_LOCK_DIR: lockDir,
+    CM_RUN_LOCK_TOKEN: '',
   };
 }
 
@@ -76,6 +83,7 @@ beforeEach(() => {
   work = path.join(root, 'work');
   marker = path.join(root, 'npm-install-ran');
   out = path.join(root, 'reports', 'nested', 'report.json');
+  lockDir = path.join(root, 'run.lock');
   env = baseEnv();
 
   git(root, 'init', '-q', '--bare', origin);
@@ -83,6 +91,8 @@ beforeEach(() => {
   git(seed, 'checkout', '-q', '-b', 'develop');
   fs.mkdirSync(path.join(seed, 'scripts', 'agent-health'), { recursive: true });
   fs.copyFileSync(SCRIPT, path.join(seed, 'scripts', 'agent-health', 'daily.sh'));
+  fs.mkdirSync(path.join(seed, 'scripts', 'uat'), { recursive: true });
+  fs.copyFileSync(RUN_LOCK, path.join(seed, 'scripts', 'uat', 'run-lock.sh'));
   fs.writeFileSync(path.join(seed, 'package-lock.json'), '{"lockfileVersion":3}\n');
   fs.writeFileSync(path.join(seed, 'README.md'), 'seed\n');
   git(seed, 'add', '.');
@@ -215,5 +225,32 @@ describe('daily.sh failed sync', () => {
     expect(result.syncLine).toBe(`AGENT_HEALTH_SYNC status=failed reason=npm-install-failed before=${before.slice(0, 8)}`);
     expect(fs.existsSync(marker)).toBe(true);
     expectMinimalReport(before, 'npm-install-failed');
+  });
+});
+
+describe('daily.sh run lock (Issue #3359)', () => {
+  it('releases the shared lock when it is done (negative control: a normal run still passes)', () => {
+    const result = runDaily();
+    expect(result.status).toBe(0);
+    expect(field(result.syncLine, 'status')).toBe('ok');
+    expect(fs.existsSync(lockDir)).toBe(false);
+  });
+
+  it('does not sync while another live run holds the lock, and writes the minimal report', () => {
+    const before = git(work, 'rev-parse', 'HEAD');
+    pushToOrigin('README.md', 'changed\n');
+    fs.mkdirSync(lockDir);
+    fs.writeFileSync(path.join(lockDir, 'owner'), `pid=${process.pid}\nstarted_at=x\nlabel=uat\ntoken=uat-run\n`);
+
+    const result = runDaily();
+
+    expect(result.status).toBe(2);
+    expect(field(result.syncLine, 'status')).toBe('failed');
+    expect(field(result.syncLine, 'reason')).toBe('run-locked:');
+    expect(git(work, 'rev-parse', 'HEAD')).toBe(before);
+    const report = JSON.parse(fs.readFileSync(out, 'utf8')) as { scriptErrors: string[] };
+    expect(report.scriptErrors[0]).toContain('label uat');
+    // The other run's lock is left as it was.
+    expect(fs.readFileSync(path.join(lockDir, 'owner'), 'utf8')).toContain('token=uat-run');
   });
 });

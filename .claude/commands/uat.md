@@ -208,27 +208,38 @@ done
 
 #### 5-2. ビルドとサーバー起動
 
+隔離したサーバーを `scripts/uat/run-server.sh` で起動する（`.commandmate/uat.yaml` の `up` と同じ処理。Issue #3359）。
+DB・`CM_ROOT_DIR`・私設 tmux（`/tmp/cmuat-<port>-<run id>/`）はすべて run の下に置かれ、本番の DB や tmux には触れない。
+サーバーは `CM_UAT_ISOLATION=1` で動き、codex・antigravity の共有の hook ファイルを書かない（Issue #3360。動きと skip の条件は `docs/user-guide/uat-isolation.md`）。
+日次確認・`run.ts` と共通のロックを取るので、別の UAT や日次確認が動いている間は失敗する（そのときは待つ）。
+
 ```bash
-CM_PORT={UAT_PORT} ./scripts/stop.sh 2>/dev/null
-CM_PORT={UAT_PORT} ./scripts/build-and-start.sh --daemon
+npm run build:all
+bash scripts/uat/run-server.sh up --port {UAT_PORT} --run-dir dev-reports/issue/{issue_number}/uat/run
 ```
 
-ビルドに失敗した場合はエラーを報告して終了する。
+`./scripts/stop.sh` / `./scripts/build-and-start.sh` は使わない。前者はポートだけを見て止める（同じポートを取った別の持ち主を止めうる）、後者は worktree の `.env` から本番の DB に落ちうる。
+
+ビルドまたは起動に失敗した場合はエラーを報告して終了する（起動の途中で失敗しても、そのスクリプトが自分の作ったものだけを片付ける）。
 
 #### 5-3. サーバー起動確認
 
+起動には数十秒かかる。最大 90 秒待つ：
+
 ```bash
-curl -s http://localhost:{UAT_PORT}/api/worktrees | head -c 100
+for i in $(seq 1 90); do curl -fsS -m 5 -o /dev/null http://127.0.0.1:{UAT_PORT}/api/worktrees && break; sleep 1; done
 ```
 
 #### 5-4. テストデータ準備
 
-`--repo` で指定されたリポジトリをスキャンして登録する：
+隔離したサーバーは `CM_ROOT_DIR`（run の下の `root/`）の外のリポジトリを登録しない。`--repo` で指定されたリポジトリを
+run の下に clone してからスキャンして登録する（利用者のリポジトリそのものは触らない）：
 
 ```bash
-curl -s http://localhost:{UAT_PORT}/api/repositories/scan -X POST \
+git clone --quiet {repo_path} dev-reports/issue/{issue_number}/uat/run/root/$(basename {repo_path})
+curl -s http://127.0.0.1:{UAT_PORT}/api/repositories/scan -X POST \
   -H "Content-Type: application/json" \
-  -d '{"repositoryPath":"{repo_path}"}'
+  -d "{\"repositoryPath\":\"$(pwd)/dev-reports/issue/{issue_number}/uat/run/root/$(basename {repo_path})\"}"
 ```
 
 #### 5-5. セットアップ結果を記録
@@ -337,22 +348,28 @@ HTMLは自己完結型（外部CSS/JS依存なし）で、見やすいスタイ�
 #### 8-1. サーバー停止
 
 ```bash
-CM_PORT={UAT_PORT} ./scripts/stop.sh
+bash scripts/uat/run-server.sh down --run-dir dev-reports/issue/{issue_number}/uat/run
 ```
 
-#### 8-2. ポート解放確認
+`down` は 5-2 で記録したサーバーだけを止める。止める前に「ポートを LISTEN している pid ＝ 記録した pid」と
+「その pid の環境の `CM_DB_PATH` が run の下」を確かめ、合わなければ何も止めずに失敗する。私設 tmux サーバーと
+ソケットのディレクトリを片付け、共通のロックを外す。
+
+#### 8-2. 停止の確認
+
+`down` が exit 0 なら片付いている。exit 1 のときは、出力の理由（ほかの持ち主がポートを LISTEN している・
+`CM_DB_PATH` が run の下でない・codex の共有ファイルや `~/.gemini/config/hooks.json` が変わった など）を報告し、**ポートだけを見て止めない**
+（`lsof … | xargs kill` を使わない。同じポートを取ったほかの UAT やプロセスを止めてしまう。Issue #3359）。
+ポートを調べるときは `-sTCP:LISTEN` を外さないこと（5-1 も同じ。Issue #2473）。
+
+`down` が「pid … did not exit within 10 s」で失敗したときだけ、記録した pid がまだ LISTEN していることを確かめてから強制停止する：
 
 ```bash
-lsof -nP -iTCP:{UAT_PORT} -sTCP:LISTEN -t 2>/dev/null && echo "WARNING: Port still in use" || echo "Port released"
+RUN=dev-reports/issue/{issue_number}/uat/run
+P=$(lsof -nP -iTCP:{UAT_PORT} -sTCP:LISTEN -t 2>/dev/null)
+[ -n "$P" ] && [ "$P" = "$(sed -n 's/^server_pid=//p' $RUN/uat-run.state)" ] && kill -9 $P
+bash scripts/uat/run-server.sh down --run-dir $RUN
 ```
-
-ポートが解放されない場合は強制停止する：
-
-```bash
-lsof -nP -iTCP:{UAT_PORT} -sTCP:LISTEN -t 2>/dev/null | xargs kill -9 2>/dev/null
-```
-
-`-sTCP:LISTEN` を外さないこと（5-1 / 8-2 も同じ）。外すとそのポートに接続しているだけのプロセス（UAT 画面を開いているブラウザの network service など）まで返り、止めると他のタブの通信まで切れる（Issue #2473）。
 
 #### 8-3. 完了報告
 
