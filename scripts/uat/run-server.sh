@@ -4,7 +4,7 @@
 # (Issue #3359). `.commandmate/uat.yaml` calls it for `up` / `down`; the daily
 # check (#3312) is meant to call it too.
 #
-#   bash scripts/uat/run-server.sh up      --port <port> --run-dir <dir> [--wait-listen <sec>]
+#   bash scripts/uat/run-server.sh up      --port <port> --run-dir <dir> [--wait-listen <sec>] [--own-home]
 #   bash scripts/uat/run-server.sh down    --run-dir <dir>
 #   bash scripts/uat/run-server.sh cleanup
 #
@@ -37,6 +37,17 @@
 # docs/user-guide/uat-isolation.md): it writes none of the agents' shared hook
 # files, grants no codex hook trust and reads no user-level claude settings.
 # The shared-file record below is the check on that.
+#
+# --own-home (#3312, for the daily product-path check run as a dedicated OS
+# user): the server runs with CM_UAT_ISOLATION=own-home and
+# CM_UAT_DEDICATED_USER=$(id -un) instead. It then WRITES the agents' hook
+# files, but only inside that user's own HOME (the server checks the user, the
+# HOME and every path before each launch, and refuses otherwise). Put the
+# sockets and the lock under that HOME with CM_UAT_SOCK_BASE / CM_RUN_LOCK_DIR.
+# Its checks are .commandmate/uat-own-home.yaml.
+# `down` still records whether the shared files changed, and does not fail on
+# it: under own-home they are the dedicated user's, written on purpose. Without
+# --own-home nothing changes.
 #
 # Test hooks: CM_UAT_SOCK_BASE (default /tmp) moves the socket directories,
 # CM_UAT_SERVER_ENTRY (default dist/server/server.js) replaces the server.
@@ -178,6 +189,7 @@ cleanup_leftovers() {
 PORT=""
 RUN_DIR=""
 WAIT_LISTEN=0
+OWN_HOME=0
 parse_args() {
     while [ $# -gt 0 ]; do
         case "$1" in
@@ -192,6 +204,10 @@ parse_args() {
             --wait-listen)
                 WAIT_LISTEN="${2:-}"
                 shift 2 || shift
+                ;;
+            --own-home)
+                OWN_HOME=1
+                shift
                 ;;
             *)
                 log "unknown argument: $1"
@@ -350,7 +366,15 @@ remove_socket_dir_tmux_only() {
 }
 
 cmd_up() {
-    local run_id sock_dir sock tmux_pid server_pid db i
+    local run_id sock_dir sock tmux_pid server_pid db i isolation=1
+    # --own-home (#3312): appended after CM_UAT_ISOLATION=1 on the server line,
+    # so env sets the later value. Empty otherwise (the expansion below is the
+    # bash 3.2 `set -u` safe form of an empty array).
+    local own_home_env=()
+    if [ "$OWN_HOME" -eq 1 ]; then
+        isolation=own-home
+        own_home_env=(CM_UAT_ISOLATION=own-home "CM_UAT_DEDICATED_USER=$(id -un)")
+    fi
     if [ -z "$PORT" ] || [ -z "$RUN_DIR" ]; then
         log "up needs --port and --run-dir"
         exit 2
@@ -394,6 +418,7 @@ cmd_up() {
     state_set "$UP_STATE" port "$PORT"
     state_set "$UP_STATE" run_dir "$RUN_DIR"
     state_set "$UP_STATE" sock_dir "$sock_dir"
+    state_set "$UP_STATE" isolation "$isolation"
     state_set "$UP_STATE" status starting
 
     mkdir -p "$RUN_DIR/root" || exit 1
@@ -418,6 +443,7 @@ cmd_up() {
         CODEX_HOME="$CH" LANG="${LANG:-en_US.UTF-8}" TERM="${TERM:-xterm-256color}" \
         TMUX="$sock,$tmux_pid,0" \
         NODE_ENV=production CM_PORT="$PORT" CM_BIND=127.0.0.1 CM_UAT_ISOLATION=1 \
+        ${own_home_env[@]+"${own_home_env[@]}"} \
         CM_DB_PATH="$RUN_DIR/uat.db" CM_ROOT_DIR="$RUN_DIR/root" \
         CM_OPENCODE_V2_DIR="$RUN_DIR/opencode-v2" CM_AGENT_HOOKS_DIR="$RUN_DIR/hooks" \
         nohup node "$SERVER_ENTRY" >"$RUN_DIR/server.log" 2>&1 </dev/null &
@@ -494,9 +520,19 @@ cmd_down() {
 
     # Fail when the run rewrote codex's shared hook or relay script, or
     # antigravity's ~/.gemini/config/hooks.json, or copilot's
-    # ~/.copilot/settings.json.
+    # ~/.copilot/settings.json. Under --own-home (#3312) the change is recorded
+    # (the messages, and shared_changed in the state) but is not a failure.
     if [ -f "$RUN_DIR/$SHARED_RECORD_NAME" ]; then
-        check_shared_record "$RUN_DIR/$SHARED_RECORD_NAME" || rc=1
+        if [ "$(state_get "$state" isolation)" = "own-home" ]; then
+            if check_shared_record "$RUN_DIR/$SHARED_RECORD_NAME"; then
+                state_set "$state" shared_changed no
+            else
+                state_set "$state" shared_changed yes
+                log "own-home: the dedicated user's shared hook files changed (recorded, not a failure)"
+            fi
+        else
+            check_shared_record "$RUN_DIR/$SHARED_RECORD_NAME" || rc=1
+        fi
     fi
     exit $rc
 }
@@ -527,7 +563,7 @@ main() {
         down) cmd_down ;;
         cleanup) cmd_cleanup ;;
         *)
-            echo "usage: run-server.sh up --port <port> --run-dir <dir> | down --run-dir <dir> | cleanup" >&2
+            echo "usage: run-server.sh up --port <port> --run-dir <dir> [--own-home] | down --run-dir <dir> | cleanup" >&2
             exit 2
             ;;
     esac

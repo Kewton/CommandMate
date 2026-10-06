@@ -74,7 +74,7 @@
 
 import { homedir } from 'os';
 import { join } from 'path';
-import { isUatIsolationEnabled, UAT_SAME_BUILD_FIX } from '@/config/uat-isolation';
+import { sharedHookWritePolicy, UAT_SAME_BUILD_FIX } from '@/config/uat-isolation';
 import { isValidInstanceId } from '@/lib/cli-tools/types';
 import { SELF_RESUME_PENDING_DETAIL, type AgentEventType } from '@/lib/hooks/agent-event-types';
 import {
@@ -463,7 +463,9 @@ export function inspectAntigravityHooksConfigReadOnly(
  *
  * Under `CM_UAT_ISOLATION=1` (Issue #3360) nothing is written: an existing file
  * that already holds exactly this config is reused, anything else answers null
- * (and `source.prepareLaunch` then refuses the launch).
+ * (and `source.prepareLaunch` then refuses the launch). Under `own-home`
+ * (Issue #3312) it is written once the path checks out, else this throws
+ * `UatIsolationLaunchRefusedError`.
  *
  * @returns The path written, or null when injection is off or not possible
  */
@@ -477,8 +479,11 @@ export function writeAntigravityHooksConfig(options: { path?: string } = {}): st
   }
 
   const configPath = getAntigravityHooksConfigPath(options);
+  // Issue #3312: outside the fail-open `try` on purpose — under `own-home` a
+  // path outside the dedicated user's HOME refuses the launch.
+  const policy = sharedHookWritePolicy('antigravity', [configPath]);
   try {
-    if (isUatIsolationEnabled()) {
+    if (policy === 'read-only') {
       // Issue #3360: the file is the user's, shared with their production
       // server, and names a relay by this checkout's path. A UAT server writes
       // nothing to it; see {@link inspectAntigravityHooksConfigReadOnly}.

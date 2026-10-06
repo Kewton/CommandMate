@@ -114,25 +114,7 @@ export function installCodexRelayScript(
 
   if (sourcePath && sourcePath !== target) {
     try {
-      const desired = readFileSync(sourcePath, 'utf8');
-      const current = existsSync(target) ? readFileSync(target, 'utf8') : null;
-      if (current !== desired) {
-        mkdirSync(dirname(target), { recursive: true, mode: 0o700 });
-        // `.tmp` beside the target so the rename cannot cross a filesystem.
-        const staging = `${target}.tmp`;
-        try {
-          writeFileSync(staging, desired, { mode: 0o700 });
-          renameSync(staging, target);
-        } catch (error) {
-          try {
-            unlinkSync(staging);
-          } catch {
-            // Nothing to clean up, or nothing that can be.
-          }
-          throw error;
-        }
-        logger.info('codex-relay-installed', { target });
-      }
+      copyRelayIfChanged(sourcePath, target);
     } catch (error) {
       // An install that failed is not a launch that failed. If a previous
       // server already put a copy there, that copy is still the right path to
@@ -145,4 +127,64 @@ export function installCodexRelayScript(
   }
 
   return existsSync(target) ? target : null;
+}
+
+/**
+ * {@link installCodexRelayScript} for `CM_UAT_ISOLATION=own-home` (Issue #3312):
+ * every failure throws instead of being absorbed — no shipped relay, a copy
+ * that could not be written, an installed copy whose bytes still differ from
+ * the shipped one — so the launch plan refuses the launch rather than running
+ * the check against an older relay.
+ *
+ * @returns The installed path, byte-identical to `sourcePath`
+ * @throws When the relay is missing or could not be made identical
+ */
+export function installCodexRelayScriptOrThrow(codexHome: string, sourcePath: string | null): string {
+  if (!sourcePath) throw new Error('this build ships no relay script');
+  const target = getCodexRelayInstallPath(codexHome);
+  if (sourcePath !== target) copyRelayIfChanged(sourcePath, target);
+  if (!existsSync(target) || readFileSync(target, 'utf8') !== readFileSync(sourcePath, 'utf8')) {
+    throw new Error(`the installed relay ${target} differs from the one this build ships`);
+  }
+  return target;
+}
+
+/**
+ * Copy `sourcePath` to `target` when the bytes differ. Throws on any failure.
+ *
+ * The write goes through `<target>.tmp` and a rename, because the file being
+ * replaced is one a *running* codex session may be executing at that moment —
+ * truncating it in place would hand that session half a script. The temp file
+ * is removed first and then created exclusively (`wx`), so a symlink planted
+ * at that name is removed, never written through (Issue #3312).
+ */
+function copyRelayIfChanged(sourcePath: string, target: string): void {
+  const desired = readFileSync(sourcePath, 'utf8');
+  const current = existsSync(target) ? readFileSync(target, 'utf8') : null;
+  if (current === desired) return;
+  mkdirSync(dirname(target), { recursive: true, mode: 0o700 });
+  // `.tmp` beside the target so the rename cannot cross a filesystem.
+  const staging = getCodexRelayStagingPath(target);
+  try {
+    unlinkIfPresent(staging);
+    writeFileSync(staging, desired, { mode: 0o700, flag: 'wx' });
+    renameSync(staging, target);
+  } catch (error) {
+    unlinkIfPresent(staging);
+    throw error;
+  }
+  logger.info('codex-relay-installed', { target });
+}
+
+/** The temp file the relay is written to before it is renamed over `target`. */
+export function getCodexRelayStagingPath(target: string): string {
+  return `${target}.tmp`;
+}
+
+function unlinkIfPresent(file: string): void {
+  try {
+    unlinkSync(file);
+  } catch {
+    // Nothing to clean up, or nothing that can be.
+  }
 }

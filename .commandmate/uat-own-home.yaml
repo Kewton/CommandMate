@@ -1,0 +1,43 @@
+# .commandmate/uat-own-home.yaml — v1 (Issue #3312)
+#
+# The same contract as .commandmate/uat.yaml (cmate-uat, uat-yaml-contract.md),
+# for a run under a DEDICATED OS user: the daily product-path check (stage 2 of
+# #3312). Kept in its own file so .commandmate/uat.yaml carries no key the
+# cmate-uat contract does not know (an unknown key is put to the user on every
+# UAT).
+#
+# `up --own-home` starts the server with CM_UAT_ISOLATION=own-home and
+# CM_UAT_DEDICATED_USER=$(id -un), so it WRITES the agents' hook files — only
+# inside that user's own HOME, checked by the server before each launch
+# (docs/user-guide/uat-isolation.md). The caller puts the sockets and the lock
+# under that HOME (CM_UAT_SOCK_BASE, CM_RUN_LOCK_DIR). `down` records a change
+# to the shared files but does not fail on it here. .commandmate/uat.yaml (the
+# user's own UAT, CM_UAT_ISOLATION=1) is unchanged and is not this one; the
+# checks below run as the dedicated user, so $HOME is that user's.
+version: 1
+env:
+  build: "npm run build:all"
+  up: "bash scripts/uat/run-server.sh up --own-home --port {port} --run-dir {run_dir}"
+  down: "bash scripts/uat/run-server.sh down --run-dir {run_dir}"
+  health: "curl -fsS -m 5 -o /dev/null http://127.0.0.1:{port}/api/worktrees"
+  health_timeout_sec: 90
+  port_range: [3010, 3030]
+isolation:
+  checks:
+    # The run's own DB, and no other sqlite file (as above).
+    - "P=$(lsof -nP -iTCP:{port} -sTCP:LISTEN -t | head -1); lsof -p $P -Fn | grep -qxF 'n{run_dir}/uat.db'"
+    - "P=$(lsof -nP -iTCP:{port} -sTCP:LISTEN -t | head -1); ! lsof -p $P -Fn | sed -n 's/^n//p' | grep -E '\\.(db|sqlite)(-wal|-shm)?$' | grep -vF '{run_dir}/uat.db'"
+    # The listener is the pid `up` recorded.
+    - "P=$(lsof -nP -iTCP:{port} -sTCP:LISTEN -t | head -1); [ -n \"$P\" ] && [ \"$P\" = \"$(sed -n 's/^server_pid=//p' {run_dir}/uat-run.state)\" ]"
+    # Value: own-home, recorded as such, and not 1.
+    - "P=$(lsof -nP -iTCP:{port} -sTCP:LISTEN -t | head -1); ps eww -p $P | tr ' ' '\\n' | grep -qxF 'CM_UAT_ISOLATION=own-home' && ! ps eww -p $P | tr ' ' '\\n' | grep -qxF 'CM_UAT_ISOLATION=1' && grep -qxF 'isolation=own-home' {run_dir}/uat-run.state"
+    # User: the server runs as the dedicated user, names that user, and has that user's HOME.
+    - "P=$(lsof -nP -iTCP:{port} -sTCP:LISTEN -t | head -1); U=$(id -un); [ \"$(ps -o user= -p $P | tr -d ' ')\" = \"$U\" ] && ps eww -p $P | tr ' ' '\\n' | grep -qxF \"CM_UAT_DEDICATED_USER=$U\" && ps eww -p $P | tr ' ' '\\n' | grep -qxF \"HOME=$HOME\""
+    # Socket: the private tmux server's socket is this run's, under the dedicated user's HOME (not /tmp).
+    - "P=$(lsof -nP -iTCP:{port} -sTCP:LISTEN -t | head -1); S=$(sed -n 's/^sock_dir=//p' {run_dir}/uat-run.state); case \"$S\" in \"$HOME\"/*/cmuat-{port}-?*) ;; *) exit 1 ;; esac; ps eww -p $P | tr ' ' '\\n' | grep -qF \"TMUX=$S/tmux.sock,\""
+    # The two state directories under the run, positive and negative (as above).
+    - "P=$(lsof -nP -iTCP:{port} -sTCP:LISTEN -t | head -1); ps eww -p $P | tr ' ' '\\n' | grep -qxF 'CM_OPENCODE_V2_DIR={run_dir}/opencode-v2' && ps eww -p $P | tr ' ' '\\n' | grep -qxF 'CM_AGENT_HOOKS_DIR={run_dir}/hooks'"
+    - "P=$(lsof -nP -iTCP:{port} -sTCP:LISTEN -t | head -1); ! ps eww -p $P | tr ' ' '\\n' | grep -E '^CM_(OPENCODE_V2|AGENT_HOOKS)_DIR=' | grep -vF '{run_dir}/'"
+    # The API sees only the sandbox root.
+    - "curl -fsS -m 5 http://127.0.0.1:{port}/api/repositories | python3 -c \"import json,sys; d=json.load(sys.stdin); r=d if isinstance(d,list) else d.get('repositories',[]); sys.exit(0 if all(str(x.get('path','')).startswith('{run_dir}/root') for x in r) else 1)\""
+report_dir: ".commandmate/uat"

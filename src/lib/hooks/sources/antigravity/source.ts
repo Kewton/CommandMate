@@ -62,6 +62,7 @@
  */
 
 import {
+  getUatIsolationMode,
   isUatIsolationEnabled,
   UAT_SAME_BUILD_FIX,
   UatIsolationLaunchRefusedError,
@@ -301,6 +302,15 @@ export const antigravityAgentEventSource: AgentEventSource = definePushHookSourc
     // agy reads `~/.gemini/config/hooks.json` whatever this server passes, so
     // "without hooks" would mean production's hooks in the UAT session.
     if (settingsPath === null && isUatIsolationEnabled()) {
+      // Issue #3312: under `own-home` the file is written, not inspected, so a
+      // null here is a write that failed — still refused, never started bare.
+      if (getUatIsolationMode() === 'own-home') {
+        throw new UatIsolationLaunchRefusedError(
+          'antigravity',
+          '~/.gemini/config/hooks.json could not be prepared',
+          UAT_SAME_BUILD_FIX
+        );
+      }
       const inspection = inspectAntigravityHooksConfigReadOnly();
       throw inspection.usable
         ? new UatIsolationLaunchRefusedError(

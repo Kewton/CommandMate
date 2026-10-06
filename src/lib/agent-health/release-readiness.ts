@@ -10,6 +10,7 @@
  */
 
 import type { DispatchIssueKind, DispatchStatus } from './dispatch-record';
+import { PRODUCT_SKIP_STREAK_ALERT_DAYS, type ProductVerdict } from './product-judgement';
 
 // ---------------------------------------------------------------------------
 // Dates (JST, like the rest of agent-health)
@@ -510,6 +511,19 @@ export interface ReadinessFacts {
   /** false: gh could not list PRs, so "no PR" means "not known". */
   prLookupOk: boolean;
   deferred: number[];
+  /**
+   * The product-path check's final result for the day (stage 2, Issue #3312;
+   * `./product-judgement.ts`). Absent / null while stage 2 is not set up, and
+   * then nothing about it changes the verdict.
+   */
+  product?: ProductReadinessFact | null;
+}
+
+export interface ProductReadinessFact {
+  status: ProductVerdict;
+  reasons: string[];
+  /** Days in a row (ending today) whose result is `skip`. */
+  skipStreakDays: number;
 }
 
 export interface ReadinessDecision {
@@ -532,6 +546,9 @@ function issueList(numbers: readonly number[]): string {
  * 要判断: a dispatched Issue is unfinished (no PR, not merged, verify failed),
  * something was carried over, or a fact the NO-GO rules need is unreadable
  * (develop CI unknown or still running, the merged-PR list missing).
+ * The product-path check (Issue #3312), when it is set up: `fail` is NO-GO;
+ * `unknown`, `not-run` and a `skip` that has lasted
+ * {@link PRODUCT_SKIP_STREAK_ALERT_DAYS} days are 要判断.
  * GO: none of the above.
  */
 export function decideReadiness(facts: ReadinessFacts): ReadinessDecision {
@@ -598,7 +615,29 @@ export function decideReadiness(facts: ReadinessFacts): ReadinessDecision {
     notes.push(`マージ後の agent-health がまだ走っていない修正: ${issueList(unverified.map((row) => row.number))}`);
   }
 
+  const product = facts.product ?? null;
+  const productDetail = product && product.reasons.length > 0 ? `（${product.reasons.join(' ／ ')}）` : '';
+  if (product?.status === 'fail') {
+    noGo.push(`製品の経路の確認（第 2 段）が fail${productDetail}`);
+    noGoSteps.push('製品の経路の確認の失敗を確かめ、製品の不具合なら develop で直す（Issue の候補は needs-human）');
+  }
+
   // --- 要判断
+  if (product?.status === 'unknown') {
+    hold.push(`製品の経路の確認（第 2 段）の結果が unknown${productDetail}`);
+    holdSteps.push('製品の経路の確認が unknown になった理由（回収・漏れの判定・段の結果）を確かめる');
+  } else if (product?.status === 'not-run') {
+    hold.push(`製品の経路の確認（第 2 段）が未実施${productDetail}`);
+    holdSteps.push('製品の経路の確認の結果が無い理由（未起動・期限・公開の失敗）を確かめる');
+  } else if (product?.status === 'skip') {
+    if (product.skipStreakDays >= PRODUCT_SKIP_STREAK_ALERT_DAYS) {
+      hold.push(`製品の経路の確認（第 2 段）が ${product.skipStreakDays} 日続けて skip（要対応）${productDetail}`);
+      holdSteps.push('製品の経路の確認が skip し続ける条件（認証の期限など）を解消する');
+    } else {
+      notes.push(`製品の経路の確認（第 2 段）は skip${productDetail}`);
+    }
+  }
+
   const unfinished: string[] = [];
   for (const row of facts.dispatched) {
     if (row.pr === null) {
@@ -645,6 +684,7 @@ export function decideReadiness(facts: ReadinessFacts): ReadinessDecision {
       ? `dispatch した Issue（${facts.dispatched.length} 件）はすべてマージ済み`
       : 'dispatch した Issue は無い',
     '持ち越しは無い',
+    ...(product?.status === 'pass' ? ['製品の経路の確認（第 2 段）は pass'] : []),
   ];
   return { verdict: 'go', reasons, notes, nextSteps: ['`/release` を実行する'] };
 }

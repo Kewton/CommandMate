@@ -6,7 +6,7 @@ UAT や日次の実機確認で CommandMate のサーバーと CLI を動かす�
 2. **claude の利用者の hook** — `--settings` は `~/.claude/settings.json` に足されるだけで、置き換わらない。`CLAUDE_CONFIG_DIR` を移すと claude がログアウトする。
 3. **CLI の設定** — グローバルの CLI は cwd に関係なく `~/.commandmate/.env` を読む。何も指定しないと既定のポート 3000（本番）に送る。
 
-`CM_UAT_ISOLATION=1` を付けて起動したサーバーと CLI は、次のように動く。付けないときの動きは変わらない（`1` 以外の値は付けないのと同じ）。
+`CM_UAT_ISOLATION=1` を付けて起動したサーバーと CLI は、次のように動く。付けないときの動きは変わらない（`1` と `own-home` 以外の値は付けないのと同じ。`own-home` は末尾の節）。
 
 | 対象 | `CM_UAT_ISOLATION=1` のときの動き |
 |------|----------------------------------|
@@ -70,3 +70,38 @@ env -i HOME="$RUN_DIR/client-home" PATH="$PATH" CM_UAT_ISOLATION=1 \
 | claude の場面 | 利用者の `settings.json` にある設定（モデル・プラグイン・権限）を前提にする場面は skip。対象のリポジトリの `.claude/settings*.json` の hook は動く（UAT の `{run_dir}/root` のリポジトリには置かない） |
 | Schedule・日次まとめで codex・antigravity を使う場面 | いつも skip（隔離中は実行が拒否される）。claude の Schedule は `--setting-sources project,local` つきで動く |
 | CLI の場面 | 上の手順で呼ぶ限り skip は無い。グローバルの `commandmate` を呼ぶ場面は作らない |
+
+## 専用ユーザーで動かす（`CM_UAT_ISOLATION=own-home`、#3312）
+
+毎朝の製品の経路の確認（#3312 の第 2 段）を、専用の macOS ユーザー（例: `cmcheck`）で動かすための値。`1` の動きは変わらない。
+
+起動:
+
+```bash
+# 専用ユーザーとして。ソケットとロックはその HOME の下に置く
+CM_UAT_SOCK_BASE="$HOME/run" CM_RUN_LOCK_DIR="$HOME/run/run.lock" \
+  bash scripts/uat/run-server.sh up --own-home --port <port> --run-dir <dir>
+```
+
+`up --own-home` は、サーバーに `CM_UAT_ISOLATION=own-home` と `CM_UAT_DEDICATED_USER=$(id -un)` を渡す。検査の組は `.commandmate/uat-own-home.yaml`（`uat.yaml` と同じ形の別ファイル。値・ユーザー・ソケットの場所。`uat.yaml` に足すと cmate-uat が未知のキーとして毎回確認を求めるので分けた）。
+
+**許すもの:** その HOME の中の共有の hook のファイルを、このビルドが書くこと。codex の `$CODEX_HOME/hooks.json`・relay・hook の信頼（`config.toml`）、antigravity の `~/.gemini/config/hooks.json`、copilot の `~/.copilot/settings.json`、claude の `--settings` のファイル（`CM_AGENT_HOOKS_DIR`）。`1` のときの「読むだけ・違えば拒否」の代わりに書く。
+
+**起動の前の確認（エージェントを起動するたび）:** 満たさなければ、そのエージェントの起動を拒否する（`CM_UAT_ISOLATION=own-home: refusing to start <tool>: <理由>`）。
+
+- 実行しているユーザー（`os.userInfo().username`）が `CM_UAT_DEDICATED_USER` と一致する
+- `HOME` の実体が、そのユーザーのホームディレクトリ（アカウントの情報。`$HOME` ではない）の実体と同じで、持ち主がそのユーザー
+- 書き込み先（`CODEX_HOME`・`hooks.json`・relay とその一時ファイル `.tmp`・`config.toml`・`~/.gemini/config/hooks.json`・`~/.copilot/` と `settings.json`・そのバックアップ・一時ファイル・ロック・`CM_AGENT_HOOKS_DIR` と claude の設定ファイルそのもの）のそれぞれの実体のパス（symlink をたどる。まだ無いファイルは、在る祖先の実体で判定）が HOME の中で、持ち主がそのユーザー。行き先の無い symlink は拒否
+
+**残すもの（`1` と同じ）:**
+
+- hook の準備に失敗したときは起動を拒否する（素の起動に戻さない）。copilot の `config.json` に `hooks` があるときも拒否。codex の relay を更新できない・同梱版と違う、claude の設定ファイルを書けない（`CM_AGENT_HOOKS_INJECT=0` を含む）ときも拒否する。ほかの値では: codex は、未設定なら relay の更新の失敗を記録して古い relay のまま続け、`1` なら relay を書かず、同梱版と違う relay を見つけると起動を拒否する。claude は、未設定でも `1` でも設定ファイルを書けなければ hook なしの素の claude で起動する（`1` は `--setting-sources project,local` つき）
+- 一時ファイル（relay の `.tmp`、copilot の一時ファイル）は、先に消してから排他的に作る（置かれた symlink をたどって書かない。これはどの値でも同じ）
+- claude の起動の計画は tmux のセッションを作る前に組む（拒否したときに空のペインを残さない）
+- 送り先の固定（`CM_HOOK_URL` などを、その run のサーバーへ）
+- Schedule・日次まとめの `codex exec`・`agy -p` の拒否。claude は `--setting-sources project,local`
+- CLI は `.env` を読まず、`CM_PORT` が無ければ 3000 に落ちない
+
+`run-server.sh down` は、`own-home` のときは共有のファイルの前後の変化を記録する（メッセージと、状態のファイルの `shared_changed=yes|no`）が、不合格にしない。`--own-home` を付けないとき（利用者の UAT）は今までどおり不合格にする。
+
+本番の受け口の `agent-event-unresolved-target` のログには、`worktreeId`（hook が名乗ったとき）と `cwdHash`（`cwd` の SHA-256 の先頭 16 文字。`cwd` そのものは出さない）が載る。run の cwd のハッシュと突き合わせて、専用ユーザーの run から本番に届いた hook を数えるのに使う。

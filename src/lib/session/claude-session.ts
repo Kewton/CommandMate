@@ -733,18 +733,6 @@ export async function startClaudeSession(
   beginAgentSession({ worktreeId, cliToolId: CLAUDE_CLI_TOOL_ID, instanceId });
 
   try {
-    // Create tmux session. Scrollback depth comes from the shared
-    // TMUX_HISTORY_LIMIT default (Issue #1624) — do not re-hardcode it here.
-    // (Claude itself renders in the alternate screen and keeps history_size at 0,
-    // so the limit is inert for this tool; it still applies to the bare shell.)
-    await createSession({
-      sessionName,
-      workingDirectory: worktreePath,
-    });
-
-    // SF-S2-003: Sanitize environment after createSession, before launching Claude CLI
-    await sanitizeSessionEnvironment(sessionName);
-
     // Get Claude CLI path dynamically
     const claudePath = await getClaudePath();
 
@@ -765,6 +753,11 @@ export async function startClaudeSession(
     // Issue #1759: which config file gets written, and whether one is written
     // at all, belongs to the tool's `AgentEventSource` (S3/S4). Claude's
     // delegates to `buildClaudeLaunchCommand`, unchanged.
+    //
+    // Issue #3312: built BEFORE the tmux session, as codex's is. Under
+    // `CM_UAT_ISOLATION=own-home` the plan throws `UatIsolationLaunchRefusedError`
+    // (wrong user / HOME / write target, or a settings file it could not
+    // write), and a refused launch must not leave an empty pane behind.
     const baseLaunchCommand = buildAgentLaunchCommandLine({
       target: { worktreeId, cliToolId: CLAUDE_CLI_TOOL_ID, instanceId },
       executablePath: claudePath,
@@ -777,6 +770,18 @@ export async function startClaudeSession(
     // and the operator's `~/.claude/settings.json` (measured on 2.1.278).
     const launchCommand =
       model === undefined ? baseLaunchCommand : `${baseLaunchCommand} --model ${shellQuote(model)}`;
+
+    // Create tmux session. Scrollback depth comes from the shared
+    // TMUX_HISTORY_LIMIT default (Issue #1624) — do not re-hardcode it here.
+    // (Claude itself renders in the alternate screen and keeps history_size at 0,
+    // so the limit is inert for this tool; it still applies to the bare shell.)
+    await createSession({
+      sessionName,
+      workingDirectory: worktreePath,
+    });
+
+    // SF-S2-003: Sanitize environment after createSession, before launching Claude CLI
+    await sanitizeSessionEnvironment(sessionName);
 
     // Start Claude CLI in interactive mode using dynamically resolved path
     await sendKeys(sessionName, withLaunchScreenCleared(launchCommand), true);

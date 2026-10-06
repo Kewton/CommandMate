@@ -308,7 +308,7 @@ export class ApiClient {
     // so a client that was not told where to go must not go anywhere.
     if (!options?.baseUrl && isUatIsolationEnabled() && !process.env.CM_PORT) {
       throw new ApiError(
-        `${UAT_ISOLATION_ENV_VAR}=1 requires CM_PORT: refusing to fall back to the default port 3000.`,
+        `${UAT_ISOLATION_ENV_VAR}=${process.env[UAT_ISOLATION_ENV_VAR]} requires CM_PORT: refusing to fall back to the default port 3000.`,
         ExitCode.CONFIG_ERROR
       );
     }

@@ -138,7 +138,9 @@ export function beginAgentSession(target: AgentInstanceRef, at: number = Date.no
  * Never throws outside UAT isolation — see `AgentEventSource.prepareLaunch`. A
  * tool whose config could not be written starts bare, which is the pre-#1722
  * status quo. Under `CM_UAT_ISOLATION=1` codex and antigravity throw instead
- * (Issue #3360), so call this before creating the tmux session.
+ * (Issue #3360), and under `own-home` claude too when its settings directory
+ * is outside the dedicated user's HOME (Issue #3312), so call this before
+ * creating the tmux session.
  *
  * @param context - The instance, its executable, and the worktree it runs in
  * @returns The command, its environment, and the config file when one landed
