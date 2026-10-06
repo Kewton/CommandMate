@@ -223,7 +223,8 @@ require_run_dir() {
 #   <sha256|absent>  <path>   a file under CH, path relative to CH
 #   ABSOLUTE  <sha256|absent>  <path>
 #                             a shared file outside CH, by absolute path (#3360):
-#                             antigravity's ~/.gemini/config/hooks.json
+#                             antigravity's ~/.gemini/config/hooks.json and
+#                             copilot's ~/.copilot/settings.json (#3391)
 SHARED_RECORD_NAME="codex-shared.sha256"
 CODEX_SHARED_FILES="hooks.json commandmate/cmate-agent-event.sh"
 
@@ -277,8 +278,9 @@ write_shared_record() {
             printf '%s  %s\n' "$(sha_of "$CH/$n")" "$n"
         done
         # The server's os.homedir() is this $HOME (env -i passes it through).
-        n="$HOME/.gemini/config/hooks.json"
-        printf 'ABSOLUTE  %s  %s\n' "$(sha_of "$n")" "$n"
+        for n in "$HOME/.gemini/config/hooks.json" "$HOME/.copilot/settings.json"; do
+            printf 'ABSOLUTE  %s  %s\n' "$(sha_of "$n")" "$n"
+        done
     }>"$1"
 }
 
@@ -491,7 +493,8 @@ cmd_down() {
     fi
 
     # Fail when the run rewrote codex's shared hook or relay script, or
-    # antigravity's ~/.gemini/config/hooks.json.
+    # antigravity's ~/.gemini/config/hooks.json, or copilot's
+    # ~/.copilot/settings.json.
     if [ -f "$RUN_DIR/$SHARED_RECORD_NAME" ]; then
         check_shared_record "$RUN_DIR/$SHARED_RECORD_NAME" || rc=1
     fi

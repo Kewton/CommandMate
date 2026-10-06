@@ -15,7 +15,8 @@
  *     URL travels in the environment, so the hooks then reach THIS server), and
  *     otherwise refuses the launch ({@link UatIsolationLaunchRefusedError}) —
  *     a bare codex would still read the shared file and run production's hooks.
- *     antigravity's `~/.gemini/config/hooks.json` is handled the same way. It
+ *     antigravity's `~/.gemini/config/hooks.json` and copilot's
+ *     `~/.copilot/settings.json` (Issue #3391) are handled the same way. It
  *     also never answers the hook review with *trust*, which is codex writing
  *     `config.toml`.
  *  2. **claude's user-level hooks.** `--settings` is added to
@@ -58,10 +59,10 @@ export function isUatIsolationEnabled(
  * Thrown by a launch that would otherwise start an agent which reads a shared
  * hook config this server did not (and in this mode may not) write.
  *
- * Starting the agent "without hooks" is not an option for codex or antigravity:
- * the shared file is read regardless of what this server passes, so the
- * production server's hooks — already trusted — would run in the UAT session
- * and post to production. So the launch is refused, and the message says what
+ * Starting the agent "without hooks" is not an option for codex, antigravity
+ * or copilot: the shared file is read regardless of what this server passes,
+ * so the production server's hooks — already trusted — would run in the UAT
+ * session and post to production. So the launch is refused, and the message says what
  * makes it start.
  */
 export class UatIsolationLaunchRefusedError extends Error {
