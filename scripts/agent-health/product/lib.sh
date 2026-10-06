@@ -202,10 +202,13 @@ reclaim_server() {
 # remove_run_socket_dir <socket dir> <run dir> — the private tmux server and
 # its directory, when the directory's `run-dir` pointer names <run dir>.
 remove_run_socket_dir() {
-    local dir=$1 run_dir=$2
+    local dir=$1 run_dir=$2 sock
     [ -d "$dir" ] || return 0
     [ -f "$dir/run-dir" ] && [ "$(cat "$dir/run-dir")" = "$run_dir" ] || return 1
-    [ -e "$dir/tmux.sock" ] && tmux -S "$dir/tmux.sock" kill-server 2>/dev/null
+    sock="$dir/tmux.sock"
+    if [ -e "$sock" ]; then
+        tmux -S "$sock" kill-server 2>/dev/null || true
+    fi
     rm -rf "$dir"
 }
 

@@ -52,13 +52,14 @@ http
 setInterval(() => {}, 1 << 30);
 `;
 
-// tmux stub: `tmux -S <sock> <command> ...`. A regular file stands for the socket.
+// tmux stub: `tmux -S <sock> <command> ...`. A regular file stands for the
+// socket; every other command (stopping the server included) does nothing, and
+// the socket directory's removal takes the file with it.
 const FAKE_TMUX = `#!/bin/sh
 sock="$2"
 case "$3" in
   new-session) : > "$sock" ;;
   display-message) echo $$ ;;
-  kill-server) rm -f "$sock" ;;
 esac
 exit 0
 `;
