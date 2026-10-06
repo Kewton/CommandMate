@@ -1064,7 +1064,7 @@ contract's `autoYes` (when `mode: safe` is suppressing `multiple_choice`, switch
 When CommandMate cannot read a choice screen the agent drew, the prompt window says
 "CommandMate cannot operate this screen." and offers "Switch to direct input". With Auto-Yes on,
 CommandMate sends **one Enter** to that screen (confirming whatever is selected at that moment).
-On a screen it was sent to, the prompt window says "Auto-Yes sent Enter." instead of the warning and the link.
+On a screen it was sent to, the prompt window says "Auto-Yes sent Enter." instead of the warning and the link. The prompt window is normally hidden while Auto-Yes is on, but for a screen CommandMate cannot read (`promptAnswerable: false`) it is shown under Auto-Yes too, on PC and phone alike — as it is for a checkbox (multi-select) question, since Auto-Yes sends neither a number. A checkbox question is one flagged `multiSelect`, or a list whose options start with `[ ]` / `[x]` / `[X]` / `[✔]`.
 
 ```json
 "autoYes": {

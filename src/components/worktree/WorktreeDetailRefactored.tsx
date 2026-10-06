@@ -272,7 +272,7 @@ import {
   readPromptResponseOutcome,
   type PromptResponseOutcome,
 } from '@/lib/prompt-response-outcome';
-import { isMultiSelectPrompt } from '@/components/worktree/prompt-answer';
+import { showsPromptUnderAutoYes } from '@/components/worktree/prompt-answer';
 import { useNewOutputIndicator } from '@/hooks/useNewOutputIndicator';
 export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   worktreeId,
@@ -583,7 +583,8 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     isMobile
     && !showDirectInputKeyboard
     && !activeSessionStarting
-    && (!autoYesEnabled || isMultiSelectPrompt(state.prompt.data));
+    // Issue #3397: a screen CommandMate cannot read is shown under Auto-Yes too.
+    && (!autoYesEnabled || showsPromptUnderAutoYes(state.prompt.data, promptAnswerable));
   const {
     showStuckHint: showPromptStuckHint,
     markSubmitted: markPromptSubmitted,

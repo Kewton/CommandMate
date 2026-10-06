@@ -3,8 +3,9 @@
  *
  * Base rules (unchanged since Issue #479):
  * - yes/no prompt -> 'y'
- * - multiple_choice with `multiSelect: true` -> null (Issue #2755: the number
- *   ticks a box, the confirm is a separate row, so a default is half an answer)
+ * - multiple_choice with `multiSelect: true`, or option labels that wear a
+ *   checkbox (Issue #3397) -> null (Issue #2755: the number ticks a box, the
+ *   confirm is a separate row, so a default is half an answer)
  * - multiple_choice with default option -> default option number
  * - multiple_choice without default -> first option number
  * - option requiring text input -> null (skip)
@@ -23,6 +24,7 @@
 import { executeRegexWithTimeout, validateStopPattern } from '@/config/auto-yes-config';
 import type { PromptData, PromptType } from '@/types/models';
 import type { AutoYesSuppressionReason } from './auto-yes-suppression-reason';
+import { isMultiSelectPrompt } from '@/lib/prompt-answer-semantic';
 
 /** Auto-answer policy modes; mirrors AUTO_YES_MODES in lib/tasks/contract-parser. */
 export type AutoYesMode = 'off' | 'safe' | 'allow-listed';
@@ -82,7 +84,11 @@ function resolveBaseAnswer(promptData: PromptData): string | null {
     // Issue #2755: a checkbox question. A number ticks a box and the confirm is
     // a separate row, so "the default option" is not an answer — it is half of
     // one. Auto-Yes refuses the prompt instead of ticking something and stopping.
-    if (promptData.multiSelect === true) {
+    // Issue #3397: through the one checkbox reading (`isMultiSelectPrompt`), so
+    // a list the parser did not flag but whose labels wear boxes (`[ ]` / `[x]`
+    // / `[X]` / `[✔]`) is refused too — the sender answers such a list with
+    // Space→Next→Enter, which would tick the default and submit the list.
+    if (isMultiSelectPrompt(promptData)) {
       return null;
     }
 

@@ -109,7 +109,7 @@ function mockPane() {
   }));
 }
 
-function split(): React.ReactElement {
+function split(autoYesEnabled?: boolean): React.ReactElement {
   return (
     <TerminalSplitPaneContent
       worktreeId="w-3397"
@@ -118,7 +118,7 @@ function split(): React.ReactElement {
       availableInstances={[inst('codex')]}
       onInstanceChange={vi.fn()}
       onFocus={vi.fn()}
-      autoYes={{ onToggle: vi.fn() }}
+      autoYes={{ onToggle: vi.fn(), ...(autoYesEnabled === undefined ? {} : { enabled: autoYesEnabled }) }}
       history={{ showToast: vi.fn() }}
     />
   );
@@ -165,3 +165,40 @@ describe('[#3397] the PC prompt window and the Enter record', () => {
     expect(screen.getByTestId('prompt-stuck-hint-link')).toBeInTheDocument();
   });
 });
+
+/**
+ * Review round 3: Auto-Yes ON. The panel is hidden under Auto-Yes for a prompt
+ * Auto-Yes answers, and the Enter only goes out under Auto-Yes — so the
+ * `answerable === false` exception is what makes any of this visible.
+ */
+describe('[#3397] the PC prompt window under Auto-Yes', () => {
+  it('unreadable screen, Enter sent: shown, and says so', () => {
+    answerable = false;
+    autoYesEnterSent = true;
+    render(split(true));
+    expect(screen.getByTestId('prompt-auto-yes-enter-sent')).toBeInTheDocument();
+    expect(screen.queryByTestId('prompt-stuck-hint-link')).not.toBeInTheDocument();
+  });
+
+  it.each([[false], [undefined]])('unreadable screen, autoYesEnterSent %s: shown with the warning and the link', (value) => {
+    answerable = false;
+    autoYesEnterSent = value;
+    render(split(true));
+    expect(screen.getByTestId('prompt-unanswerable-hint')).toBeInTheDocument();
+    expect(screen.getByTestId('prompt-stuck-hint-link')).toBeInTheDocument();
+  });
+
+  it.each([[true], [undefined]])('readable screen (answerable %s): hidden as before', (value) => {
+    answerable = value;
+    autoYesEnterSent = false;
+    render(split(true));
+    expect(screen.queryByTestId('prompt-panel')).not.toBeInTheDocument();
+  });
+
+  it('control: Auto-Yes off, the readable screen is shown', () => {
+    answerable = true;
+    render(split(false));
+    expect(screen.getByTestId('prompt-panel')).toBeInTheDocument();
+  });
+});
+

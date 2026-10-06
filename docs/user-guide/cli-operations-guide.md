@@ -1895,7 +1895,7 @@ commandmate capture <worktree-id> --instance worker-7 --json | jq -r '.resolvedB
 エージェントが出した選択画面を CommandMate が読めないとき、プロンプト欄には
 「この画面は CommandMate から操作できません。」と「直接入力に切り替える」リンクが出ます。
 Auto-Yes が有効なら、この画面に **Enter を 1 回だけ**送ります（その時点で選ばれている選択肢で確定します）。
-送った画面では、プロンプト欄の警告とリンクの代わりに「Auto-Yes が Enter を送りました。」と出ます。
+送った画面では、プロンプト欄の警告とリンクの代わりに「Auto-Yes が Enter を送りました。」と出ます。Auto-Yes が有効な間はふつうプロンプト欄を出しませんが、CommandMate が読めない画面（`promptAnswerable: false`）では、Auto-Yes 中も PC・スマホともにプロンプト欄を出します（チェックボックスの複数選択と同じ扱い。Auto-Yes はこの 2 つに番号を送らないため）。チェックボックスは `multiSelect` の有無にかかわらず、選択肢が `[ ]` / `[x]` / `[X]` / `[✔]` で始まる一覧も含みます。
 
 ```json
 "autoYes": {

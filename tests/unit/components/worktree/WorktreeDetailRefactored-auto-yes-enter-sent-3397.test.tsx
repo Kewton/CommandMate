@@ -14,7 +14,7 @@
 
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { act, render, screen, within } from '@testing-library/react';
 import { getMobileSurfaceModeStorageKey } from '@/config/surface-mode-config';
 
 vi.mock('next/navigation', () => ({
@@ -207,13 +207,13 @@ function promptPayload(): Record<string, unknown> {
 }
 
 function autoYesPayload(): Record<string, unknown> {
-  if (scenario.enterFallback === undefined) return {};
+  if (scenario.enterFallback === undefined && !scenario.autoYes) return {};
   return {
     autoYes: {
-      enabled: true,
+      enabled: scenario.autoYes,
       expiresAt: null,
       lastSuppression: null,
-      lastEnterFallback: scenario.enterFallback,
+      ...(scenario.enterFallback === undefined ? {} : { lastEnterFallback: scenario.enterFallback }),
     },
   };
 }
@@ -377,3 +377,59 @@ describe('[#3397] the phone prompt sheet and the Enter record', () => {
     expect(within(sheet).queryByTestId('prompt-auto-yes-enter-sent')).not.toBeInTheDocument();
   });
 });
+
+/**
+ * Review round 3: Auto-Yes ON. The sheet is hidden under Auto-Yes for a
+ * prompt Auto-Yes answers, and the Enter only ever goes out under Auto-Yes —
+ * so without the `answerable === false` exception none of the lines above
+ * could be seen. Turning that exception off fails the first two cases here.
+ */
+describe('[#3397] the phone prompt sheet under Auto-Yes', () => {
+  beforeEach(() => {
+    scenario.prompt = { multiSelect: false };
+    scenario.autoYes = true;
+    window.localStorage.setItem(getMobileSurfaceModeStorageKey(WORKTREE_ID), 'chat');
+  });
+
+  /** Let the polls land (the sheet's Auto-Yes gate reads both responses). */
+  async function settle(): Promise<void> {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    });
+  }
+
+  it('unreadable screen, Enter sent: the sheet is shown and says so', async () => {
+    scenario.answerable = false;
+    scenario.enterFallback = SENT;
+    await renderScreen();
+    await settle();
+
+    const sheet = await screen.findByTestId('mobile-prompt-sheet');
+    expect(within(sheet).getByTestId('prompt-auto-yes-enter-sent')).toBeInTheDocument();
+    expect(within(sheet).queryByTestId('prompt-stuck-hint-link')).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['no-effect', { ...SENT, outcome: 'no-effect' }],
+    ['no record', null],
+  ])('unreadable screen, %s: the sheet is shown with the warning and the link', async (_label, record) => {
+    scenario.answerable = false;
+    scenario.enterFallback = record;
+    await renderScreen();
+    await settle();
+
+    const sheet = await screen.findByTestId('mobile-prompt-sheet');
+    expect(within(sheet).getByTestId('prompt-unanswerable-hint')).toBeInTheDocument();
+    expect(within(sheet).getByTestId('prompt-stuck-hint-link')).toBeInTheDocument();
+  });
+
+  it.each([[true], [undefined]])('readable screen (answerable %s): hidden as before — Auto-Yes answers it', async (value) => {
+    scenario.answerable = value;
+    scenario.enterFallback = null;
+    await renderScreen();
+    await settle();
+
+    expect(screen.queryByTestId('mobile-prompt-sheet')).not.toBeInTheDocument();
+  });
+});
+
