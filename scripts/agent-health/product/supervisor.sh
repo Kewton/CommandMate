@@ -48,6 +48,7 @@
 set -u
 
 PRODUCT_LOG_NAME=supervisor
+# shellcheck source=scripts/agent-health/product/lib.sh
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 
 if [ -z "${CM_PRODUCT_RUN_DIR:-}" ]; then
@@ -86,6 +87,10 @@ RUN_ID="$(date +%y%m%d%H%M%S)-$(printf '%04x' $RANDOM)"
 RUN_DIR="$PRODUCT_BASE/runs/$RUN_ID"
 LEDGER="$PRODUCT_BASE/ledger/$RUN_ID.json"
 STATE="$RUN_DIR/run.state"
+# -m 700 is meant for these directories themselves, not for their parents:
+# runs/ and ledger/ sit directly under the base made above, and the parents of
+# the socket base are the caller's (normally the dedicated user's HOME).
+# shellcheck disable=SC2174
 mkdir -p -m 700 "$PRODUCT_BASE/runs" "$PRODUCT_BASE/ledger" "$CM_UAT_SOCK_BASE" || exit 2
 mkdir -m 700 "$RUN_DIR" || exit 2
 

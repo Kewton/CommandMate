@@ -23,7 +23,9 @@
 
 PRODUCT_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PRODUCT_REPO_ROOT="$(cd "$PRODUCT_LIB_DIR/../../.." && pwd)"
+# shellcheck source=scripts/uat/run-lock.sh
 . "$PRODUCT_REPO_ROOT/scripts/uat/run-lock.sh"
+# shellcheck source=scripts/lib/port-pids.sh
 . "$PRODUCT_REPO_ROOT/scripts/lib/port-pids.sh"
 
 PRODUCT_LEDGER_PY="$PRODUCT_LIB_DIR/ledger.py"
@@ -189,6 +191,7 @@ product_lock_acquire() {
         fi
         return 1
     done
+    # shellcheck disable=SC2034 # read by the caller
     PRODUCT_LOCK_ERROR="could not take $dir after $attempt attempts"
     return 1
 }

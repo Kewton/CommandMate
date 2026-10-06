@@ -28,6 +28,7 @@
 set -u
 
 PRODUCT_LOG_NAME=deadline-guard
+# shellcheck source=scripts/agent-health/product/lib.sh
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 
 if [ -z "${CM_PRODUCT_RUN_DIR:-}" ] || [ ! -d "$CM_PRODUCT_RUN_DIR" ]; then
