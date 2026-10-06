@@ -95,6 +95,12 @@ export interface MobilePromptSheetProps {
    * #2869 link, no Send count needed). Undefined or `true`: unchanged.
    */
   answerable?: boolean;
+  /**
+   * Issue #3397: Auto-Yes sent its Enter to this window (`autoYes.lastEnterFallback`
+   * with `outcome: 'sent'` and `currentPrompt: true`). With `answerable: false`
+   * the hint says so instead of offering direct input.
+   */
+  autoYesEnterSent?: boolean;
 }
 
 /**
@@ -113,6 +119,7 @@ export const MobilePromptSheet = memo(function MobilePromptSheet({
   showStuckHint,
   onSwitchToDirectInput,
   answerable,
+  autoYesEnterSent,
 }: MobilePromptSheetProps) {
   const { shouldRender, animationClass } = usePromptAnimation({
     visible: visible && promptData !== null,
@@ -247,6 +254,7 @@ export const MobilePromptSheet = memo(function MobilePromptSheet({
             showStuckHint={showStuckHint}
             onSwitchToDirectInput={onSwitchToDirectInput}
             answerable={answerable}
+            autoYesEnterSent={autoYesEnterSent}
             linkClassName="underline font-medium min-h-[44px] touch-manipulation"
           />
         </div>

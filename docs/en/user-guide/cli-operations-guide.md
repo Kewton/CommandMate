@@ -901,7 +901,8 @@ Everything the server sends except `fullOutput` is printed verbatim.
   "autoYes": {
     "enabled": false,
     "expiresAt": null,
-    "lastSuppression": null
+    "lastSuppression": null,
+    "lastEnterFallback": null
   },
   "thinking": true,
   "thinkingMessage": "Claude is thinking...",
@@ -1057,6 +1058,55 @@ If `isPromptWaiting: true` and `lastSuppression.at` is recent, that session is *
 suppression right now**. Either answer it as a human with `commandmate respond`, or revisit the
 contract's `autoYes` (when `mode: safe` is suppressing `multiple_choice`, switching to
 [allow-listed](#use-an-allow-listed-auto-yes-policy-for-unattended-runs-issue-1684) is recommended).
+
+#### `autoYes.lastEnterFallback`: An Enter on an Unreadable Choice Screen (Issue #3397)
+
+When CommandMate cannot read a choice screen the agent drew, the prompt window says
+"CommandMate cannot operate this screen." and offers "Switch to direct input". With Auto-Yes on,
+CommandMate sends **one Enter** to that screen (confirming whatever is selected at that moment).
+On a screen it was sent to, the prompt window says "Auto-Yes sent Enter." instead of the warning and the link.
+
+```json
+"autoYes": {
+  "enabled": true,
+  "expiresAt": 1754300000000,
+  "lastSuppression": null,
+  "lastEnterFallback": {
+    "outcome": "sent",
+    "promptType": "multiple_choice",
+    "refusalReason": "unsupported_dialog_layout",
+    "sentAt": 1754296400000,
+    "at": 1754296400000,
+    "currentPrompt": true
+  }
+}
+```
+
+| Field | Meaning |
+|-------|---------|
+| `outcome` | `sent` (the Enter was sent) / `no-effect` (the same screen was still up afterwards; no second Enter is sent and the screen is left to a human) |
+| `promptType` | The type of the prompt the Enter was sent to |
+| `refusalReason` | Why the screen could not be operated (`unsupported_dialog_layout` / `prompt_no_longer_active`) |
+| `sentAt` | When the Enter was sent (epoch ms) |
+| `at` | When the record last changed (`sentAt`, or when `no-effect` was found) |
+| `currentPrompt` | Whether the record is about the same screen as this response's `promptData` |
+
+The Enter is sent only when **all** of the following hold:
+
+- the prompt window offers "Switch to direct input" for the screen (the same judgement as `promptAnswerable: false`);
+- there is evidence the focus is on a choice screen: the picker's footer is on screen but its layout could not be read (`unsupported_dialog_layout`), or the input box is not on screen (claude / codex);
+- **the input box is not on screen** (nothing is sent whether it holds text, is empty or shows a dim suggestion — this keeps an agent's reply that merely quotes a list from being "answered");
+- the same screen was seen on two polls in a row, and the agent has neither exited nor is still generating;
+- the contract's `autoYes` policy allows it (nothing is sent under `mode: off` / `safe` or on a `denyPatterns` match), and the session is not another server's;
+- it is not codex's launch screens or its `/model` picker.
+
+Only claude and codex are enabled by default. Switch it per tool with the `CM_AUTOYES_ENTER_FALLBACK`
+environment variable (same syntax as `CM_AUTOYES_DIALOG_GATE`).
+
+```bash
+CM_AUTOYES_ENTER_FALLBACK='*=disabled'       # never send it
+CM_AUTOYES_ENTER_FALLBACK='codex=disabled'   # stop it for codex only
+```
 
 ### `--pane`: Reading the Transcript (Issue #1623)
 

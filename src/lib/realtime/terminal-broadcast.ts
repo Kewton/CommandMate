@@ -92,6 +92,9 @@ function snapshotFingerprint(payload: Awaited<ReturnType<typeof buildCurrentOutp
     // the push, the same reason `sessionStatus` and the two dismiss-panel
     // fields above are here.
     payload.promptAnswerable ?? null,
+    // Issue #3397: so "Auto-Yes sent Enter" (and its `no-effect` follow-up)
+    // reaches the push even when the frame did not change.
+    payload.autoYes?.lastEnterFallback ?? null,
     payload.isSelectionListActive ?? false,
     payload.isPagerActive ?? false,
     // Issue #2369: in the fingerprint for the same reason `sessionStatus` is —
@@ -171,6 +174,9 @@ function emitTerminalSnapshot(
     // `JSON.stringify` (in `broadcast`) already drops from the wire on its own.
     // Defaulting it would turn "not judged" into a judgement.
     promptAnswerable: payload.promptAnswerable,
+    // Issue #3397: straight through, like `promptAnswerable` — undefined (and so
+    // off the wire) when the payload carries no `autoYes`.
+    autoYesEnterFallback: payload.autoYes?.lastEnterFallback,
     isSelectionListActive: payload.isSelectionListActive ?? false,
     isPagerActive: payload.isPagerActive ?? false,
     isDismissablePanelActive: payload.isDismissablePanelActive ?? false,

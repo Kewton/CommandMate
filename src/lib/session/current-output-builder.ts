@@ -57,6 +57,11 @@ import {
   buildCompositeKey,
 } from '@/lib/polling/auto-yes-manager';
 import { getLastPolicySuppression } from '@/lib/polling/auto-yes-suppression-state';
+import {
+  getLastEnterFallback,
+  publishEnterFallback,
+  type AutoYesEnterFallbackPublished,
+} from '@/lib/polling/auto-yes-enter-fallback';
 import { getPromptDedupSkips } from '@/lib/polling/prompt-dedup-state';
 import { STATUS_CAPTURE_LINES } from '@/config/status-capture-config';
 import { CACHE_MAX_CAPTURE_LINES, isCaptureWindowSaturated } from '@/lib/tmux/tmux-capture-cache';
@@ -673,6 +678,8 @@ interface RunningPayloadInput {
   promptData: PromptData | StructuredPromptWaitingData | null;
   promptAnswerable: boolean | undefined;
   autoYesState: ReturnType<typeof getAutoYesState>;
+  /** Issue #3397: the last Enter Auto-Yes sent, judged against this payload's prompt. */
+  lastEnterFallback: AutoYesEnterFallbackPublished | null;
   isSelectionListActive: boolean;
   isPagerActive: boolean;
   isDismissablePanelActive: boolean;
@@ -710,6 +717,7 @@ function buildRunningPayload({
   promptData,
   promptAnswerable,
   autoYesState,
+  lastEnterFallback,
   isSelectionListActive,
   isPagerActive,
   isDismissablePanelActive,
@@ -756,6 +764,9 @@ function buildRunningPayload({
       // Issue #1694: undefined (so the key is absent from the JSON) unless a
       // stop pattern actually fired — the state clears it on every other path.
       stopMatchedText: autoYesState?.stopMatchedText,
+      // Issue #3397: appended last, after the published fields above. Null when
+      // Auto-Yes never sent its Enter to an unreadable choice screen here.
+      lastEnterFallback,
     },
     isSelectionListActive,
     isPagerActive,
@@ -1243,6 +1254,13 @@ async function buildPayload(
     promptData,
     promptAnswerable,
     autoYesState,
+    // Issue #3397: judged against the screen-read prompt only — the one
+    // `promptAnswerable` is published for, and the one the poller sent its
+    // Enter to. A structured (hook / degraded) prompt is never that screen.
+    lastEnterFallback: publishEnterFallback(
+      getLastEnterFallback(worktreeId, cliToolId, instanceId),
+      promptAnswerable !== undefined ? statusResult.promptDetection.promptData : null,
+    ),
     isSelectionListActive,
     isPagerActive,
     isDismissablePanelActive,

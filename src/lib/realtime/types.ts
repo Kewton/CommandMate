@@ -10,6 +10,7 @@
 
 import type { ChatMessage, LivePromptData } from '@/types/models';
 import type { CLIToolType } from '@/lib/cli-tools/types';
+import type { AutoYesEnterFallbackPublished } from '@/lib/polling/auto-yes-enter-fallback';
 
 export type RealtimeStatus = 'connecting' | 'connected' | 'disconnected' | 'error';
 
@@ -162,6 +163,16 @@ export interface TerminalSnapshotEvent {
    * `carriesAnswerable` in `useTerminalPanePolling`.
    */
   promptAnswerable?: boolean;
+  /**
+   * Issue #3397: `autoYes.lastEnterFallback` of the same payload — the last
+   * Enter Auto-Yes sent to a choice screen CommandMate could not read — carried
+   * on the push the way {@link promptAnswerable} is, so the prompt window can
+   * say "Auto-Yes sent Enter" without waiting for the HTTP poll.
+   *
+   * Optional and straight through: absent when the session is not running
+   * (the payload has no `autoYes` then) and from a server older than the field.
+   */
+  autoYesEnterFallback?: AutoYesEnterFallbackPublished | null;
   isSelectionListActive: boolean;
   isPagerActive: boolean;
   /**
