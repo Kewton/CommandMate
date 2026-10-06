@@ -566,6 +566,8 @@ function readFrameVerdict(
   output: string,
 ): { compositeKey: string; statusResult: StatusDetectionResult } {
   const { worktreeId, cliToolId, instanceId } = ctx;
+  // The sequence up to `startingStatusResult` is deliberately kept identical to
+  // judgeFrame in current-output-builder.ts, not shared (#3319 item 37 decision).
   // Issue #501, #525, #896: Pass last server response timestamp using the
   // per-instance compositeKey. Auto-yes / last-response tracking is now
   // per-instance, so alias instances read their own poller timestamp.

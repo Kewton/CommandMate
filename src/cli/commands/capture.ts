@@ -12,7 +12,7 @@ import type { CurrentOutputResponse, PromptMessageResponse, WorktreeDetailRespon
 import { MAX_MESSAGES_LIMIT } from '../../config/history-display-config';
 import { ApiClient, isValidWorktreeId } from '../utils/api-client';
 import { TOKEN_WARNING, handleCommandError } from '../utils/command-helpers';
-import { isCliToolId, DEFAULT_CLI_TOOL_ID } from '../config/cli-tool-ids';
+import { isCliToolId, CLI_TOOL_IDS, DEFAULT_CLI_TOOL_ID } from '../config/cli-tool-ids';
 import { AGENT_OPTION_DESCRIPTION, INSTANCE_OPTION_DESCRIPTION } from '../config/agent-target-options';
 import {
   isInstanceSelector,
@@ -496,7 +496,7 @@ export function createCaptureCommand(): Command {
         }
 
         if (options.agent && !isCliToolId(options.agent)) {
-          console.error('Error: Invalid agent.');
+          console.error(`Error: Invalid agent. Must be one of: ${CLI_TOOL_IDS.join(', ')}`);
           process.exit(ExitCode.CONFIG_ERROR);
         }
 
