@@ -17,28 +17,14 @@ import { readCommandCodeReviewPage } from '@/lib/detection/selection-shape';
 import type { MultipleChoicePromptData, PromptData, PromptType, SubmitMode } from '@/types/models';
 import { isValidSubmitMode } from '@/types/models';
 import { invalidateCache } from './tmux/tmux-capture-cache';
+import { hasCheckboxOptions } from '@/lib/prompt-answer-semantic';
 import {
   TUI_MESSAGE_PROCESSED_WAIT_MS,
   TUI_TEXT_INPUT_WAIT_MS,
 } from '@/config/cli-tool-timing-config';
 
-/** Regex pattern to detect checkbox-style multi-select options */
-const CHECKBOX_OPTION_PATTERN = /^\[[ x]\] /;
-
-/**
- * Whether a numbered prompt is a checkbox (multi-select) list by its labels:
- * any option still wearing its `[ ]` / `[x]` box (Issue #287's reading, used
- * below to choose Space-then-Next over a plain Enter).
- *
- * Exported for Issue #3397: Auto-Yes's Enter on an unreadable choice screen
- * must leave a checkbox list alone, and it reads the list with THIS rule rather
- * than a copy, so the two cannot disagree about which screens are multi-select.
- * `promptData.multiSelect` (the parser's own flag, #2755) is the other reading
- * and is the caller's to check.
- */
-export function hasCheckboxOptions(options: readonly { label: string }[]): boolean {
-  return options.some(o => CHECKBOX_OPTION_PATTERN.test(o.label));
-}
+// Issue #3397: the checkbox reading (`hasCheckboxOptions`) lives in
+// `prompt-answer-semantic`, shared with the semantic resolver and Auto-Yes.
 
 /**
  * A validated SELECTION SET, as opposed to free text (Issue #2755).
@@ -973,7 +959,7 @@ export async function sendPromptAnswer(params: SendPromptAnswerParams): Promise<
 
     if (isMultiSelect && mcOptions !== null) {
       // Multi-select: toggle checkbox, then navigate to "Next" and submit
-      const checkboxCount = mcOptions.filter(o => CHECKBOX_OPTION_PATTERN.test(o.label)).length;
+      const checkboxCount = mcOptions.filter(o => hasCheckboxOptions([o])).length;
       const keys: string[] = [
         ...buildNavigationKeys(offset),  // 1. Navigate to target option
         'Space',                          // 2. Toggle checkbox

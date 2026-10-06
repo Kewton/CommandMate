@@ -29,6 +29,7 @@ import {
   enterFallbackScreenKey,
   forgetEnterFallback,
   forgetEnterFallbacksByWorktree,
+  getEnterFallbackSessionEpoch,
   judgeEnterFallback,
   recordEnterFallbackNoEffect,
   recordEnterFallbackSent,
@@ -37,7 +38,8 @@ import { applyEventToActiveTask } from './tasks/task-transition-service';
 import { getDbInstance } from './db/db-instance';
 import { recordAnsweredPrompt, type RecordAnsweredPromptResult } from './db/chat-db';
 import { checkWorktreeSessionOwnership } from './cli-tools/worktree-session-ownership';
-import { hasCheckboxOptions, sendPromptAnswer } from './prompt-answer-sender';
+import { sendPromptAnswer } from './prompt-answer-sender';
+import { isMultiSelectPrompt } from './prompt-answer-semantic';
 import { sendSpecialKeys } from './tmux/tmux';
 import { CLIToolManager } from './cli-tools/manager';
 import { stripAnsi, stripBoxDrawing, detectThinking, getCodexLifecycleDialog } from './detection/cli-patterns';
@@ -123,6 +125,14 @@ export interface AutoYesPollerState {
    * footer was redrawn reads `no_composer`) never gets one.
    */
   enterFallbackCandidateKey?: string | null;
+  /**
+   * Issue #3397: the session epoch (`getEnterFallbackSessionEpoch`) the two keys
+   * above belong to. `beginAgentSession` moves it on when a new process is
+   * created for this instance without the poller being stopped (a relaunch);
+   * the keys of the previous process's screens are then dropped, so the new
+   * process's identical dialog is not taken for the one that had its Enter.
+   */
+  enterFallbackEpoch?: number;
 }
 
 /** Result of starting a poller */
@@ -821,12 +831,13 @@ async function tryEnterFallback(
     return false;
   }
   // A checkbox list is out of scope whatever the parser's flag says: the
-  // sender's own reading (`[ ]` / `[x]` labels) counts too, so an Enter never
-  // submits a half-ticked list (Issue #3397, the base rules' #2755 reading
+  // labels' boxes (`[ ]` / `[x]` / `[X]` / `[✔]`, the one reading in
+  // `prompt-answer-semantic` the sender shares) count too, so an Enter never
+  // submits a half-ticked list (Issue #3397; the base rules' #2755 reading
   // covers `multiSelect` only).
   if (
     resolution.answer === null ||
-    (promptData.type === 'multiple_choice' && hasCheckboxOptions(promptData.options))
+    (promptData.type === 'multiple_choice' && isMultiSelectPrompt(promptData))
   ) {
     pollerState.enterFallbackCandidateKey = null;
     suppressUnclassifiedFrame(prompt, dialogGate);
@@ -1077,6 +1088,15 @@ export async function detectAndRespondToPrompt(
     // machine whose hook does not reach us. The price is that Auto-Yes leaves
     // such a machine's dialogs alone, which is why `logIfWithheldForWantOfReceipt`
     // says so.
+    // Issue #3397: a session begun since the last tick (a relaunch the poller
+    // outlived) starts with no screen that had its Enter.
+    const epoch = getEnterFallbackSessionEpoch(compositeKey);
+    if ((pollerState.enterFallbackEpoch ?? 0) !== epoch) {
+      pollerState.enterFallbackSentKey = null;
+      pollerState.enterFallbackCandidateKey = null;
+      pollerState.enterFallbackEpoch = epoch;
+    }
+
     const receiptScope = { worktreeId, instanceId };
     // Issue #3183: the ONE frame every judgement below reads — normalised once,
     // from the capture as captured (the input-box markers are rule rows the

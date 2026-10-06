@@ -53,14 +53,7 @@ import { resolveLivenessSpec } from '@/lib/cli-tools/liveness-spec';
 import { judgeToolLiveness } from '@/lib/detection/tool-liveness';
 import { extractComposerText, type ComposerTextState } from '@/lib/detection/composer-text';
 import { stripAnsi, detectThinking } from '@/lib/detection/cli-patterns';
-import { generatePromptKey } from '@/lib/detection/prompt-key';
-import {
-  buildCompositeKey,
-  filterCompositeKeysByWorktree,
-  THINKING_CHECK_LINE_COUNT,
-} from '@/lib/auto-yes-state';
-import type { PromptData, PromptType } from '@/types/models';
-import { getOrInitGlobal } from '../global-state';
+import { THINKING_CHECK_LINE_COUNT } from '@/lib/auto-yes-state';
 import {
   assessPromptAnswerability,
   UNSUPPORTED_DIALOG_LAYOUT_REASON,
@@ -242,172 +235,22 @@ export function judgeEnterFallback(
   return { eligible: true, refusalReason: refusal.reason, composerState };
 }
 
-/**
- * What tells two prompts apart for the published record: the type, the
- * question and the option labels.
- *
- * Not the poller's `promptFrameKey`: that one also carries the cursor and
- * `approvalTarget`, and the status API reads a different number of rows than
- * the poller does, so `approvalTarget` can differ between the two readings of
- * one screen. The record is matched against the status API's prompt (to say
- * "Auto-Yes sent Enter" under the window it was sent to), so it is keyed on
- * what both readings share.
- */
-export function enterFallbackScreenKey(promptData: PromptData): string {
-  const options =
-    promptData.type === 'multiple_choice'
-      ? promptData.options.map((o) => `${o.number}.${o.label}`)
-      : promptData.options;
-  return [generatePromptKey(promptData), ...options].join('\u0000');
-}
-
-// =============================================================================
-// The record
-// =============================================================================
-
-/**
- * - `sent` — Auto-Yes sent its Enter to the screen;
- * - `no-effect` — the same screen was still up after it, and Auto-Yes did not
- *   send another: the screen is a human's again.
- */
-export type AutoYesEnterFallbackOutcome = 'sent' | 'no-effect';
-
-/** The last Enter Auto-Yes sent for one session, as kept in memory. */
-export interface AutoYesEnterFallbackRecord {
-  outcome: AutoYesEnterFallbackOutcome;
-  /** Type of the prompt the Enter was sent to. */
-  promptType: PromptType;
-  /** The refusal the screen drew (the reason the prompt window offered direct input). */
-  refusalReason: PromptResponseRefusal['reason'];
-  /** Epoch ms the Enter was sent. */
-  sentAt: number;
-  /** Epoch ms of the last change: `sentAt`, or when `no-effect` was found. */
-  at: number;
-  /** {@link enterFallbackScreenKey} of the prompt. Never published. */
-  screenKey: string;
-}
-
-/**
- * The record as `current-output` publishes it (`autoYes.lastEnterFallback`)
- * and the terminal push carries it.
- */
-export interface AutoYesEnterFallbackPublished {
-  outcome: AutoYesEnterFallbackOutcome;
-  promptType: PromptType;
-  refusalReason: PromptResponseRefusal['reason'];
-  sentAt: number;
-  at: number;
-  /**
-   * Whether the record is about the prompt this payload publishes. The prompt
-   * window shows "Auto-Yes sent Enter" only when this is true and `outcome` is
-   * `sent`; a record about an earlier screen says nothing about this one.
-   */
-  currentPrompt: boolean;
-}
-
-declare global {
-  // eslint-disable-next-line no-var
-  var __autoYesEnterFallbacks: Map<string, AutoYesEnterFallbackRecord> | undefined;
-}
-
-/**
- * compositeKey -> the last Enter. `globalThis` for the reason
- * `auto-yes-suppression-state` gives: the poller writes it and the
- * `current-output` route reads it, and under `next dev` the two are bundled apart.
- */
-const lastEnterFallbacks = getOrInitGlobal(
-  '__autoYesEnterFallbacks',
-  () => new Map<string, AutoYesEnterFallbackRecord>(),
-);
-
-/**
- * Record that Auto-Yes sent its Enter to a screen.
- *
- * @param at - Epoch ms; defaults to now. Overridable so tests are deterministic.
- */
-export function recordEnterFallbackSent(
-  worktreeId: string,
-  cliToolId: CLIToolType,
-  instanceId: string | undefined,
-  sent: { promptType: PromptType; refusalReason: PromptResponseRefusal['reason']; screenKey: string },
-  at: number = Date.now(),
-): void {
-  lastEnterFallbacks.set(buildCompositeKey(worktreeId, cliToolId, instanceId), {
-    outcome: 'sent',
-    ...sent,
-    sentAt: at,
-    at,
-  });
-}
-
-/**
- * Record that the screen the last Enter went to is still up. A no-op when there
- * is no record, or when it is about another screen.
- *
- * @param at - Epoch ms; defaults to now
- */
-export function recordEnterFallbackNoEffect(
-  worktreeId: string,
-  cliToolId: CLIToolType,
-  instanceId: string | undefined,
-  screenKey: string,
-  at: number = Date.now(),
-): void {
-  const key = buildCompositeKey(worktreeId, cliToolId, instanceId);
-  const record = lastEnterFallbacks.get(key);
-  if (!record || record.screenKey !== screenKey) return;
-  lastEnterFallbacks.set(key, { ...record, outcome: 'no-effect', at });
-}
-
-/** @returns The last Enter for this session, or null when Auto-Yes never sent one. */
-export function getLastEnterFallback(
-  worktreeId: string,
-  cliToolId: CLIToolType,
-  instanceId?: string,
-): AutoYesEnterFallbackRecord | null {
-  return lastEnterFallbacks.get(buildCompositeKey(worktreeId, cliToolId, instanceId)) ?? null;
-}
-
-/**
- * The record as published, judged against the prompt the payload carries.
- *
- * @param promptData - The screen-read prompt of the same payload, or null
- */
-export function publishEnterFallback(
-  record: AutoYesEnterFallbackRecord | null,
-  promptData: PromptData | null | undefined,
-): AutoYesEnterFallbackPublished | null {
-  if (record === null) return null;
-  return {
-    outcome: record.outcome,
-    promptType: record.promptType,
-    refusalReason: record.refusalReason,
-    sentAt: record.sentAt,
-    at: record.at,
-    currentPrompt: promptData != null && enterFallbackScreenKey(promptData) === record.screenKey,
-  };
-}
-
-/**
- * Drop one session's record (Issue #3397). Called wherever the poller for it is
- * stopped — `stopAutoYesPolling`, which the kill-session route (through
- * `releaseAutoYes`), the Auto-Yes disable route and an expired / disabled grant
- * all reach. A record that outlived its session would read `currentPrompt: true`
- * against the same question on the NEXT session, and the window would say
- * "Auto-Yes sent Enter" about an Enter nobody sent there.
- */
-export function forgetEnterFallback(compositeKey: string): void {
-  lastEnterFallbacks.delete(compositeKey);
-}
-
-/** {@link forgetEnterFallback} for every instance of a worktree. */
-export function forgetEnterFallbacksByWorktree(worktreeId: string): void {
-  for (const key of filterCompositeKeysByWorktree([...lastEnterFallbacks.keys()], worktreeId)) {
-    lastEnterFallbacks.delete(key);
-  }
-}
-
-/** Drop every record: server shutdown (`stopAllAutoYesPolling`), and a test seam. */
-export function clearEnterFallbacks(): void {
-  lastEnterFallbacks.clear();
-}
+// The screen key, the record and the session epoch live in
+// `./auto-yes-enter-fallback-state` (Issue #3397, review round 2): a module with
+// no detection imports, so `agent-session-lifecycle` — on every tool's
+// `startSession` path — can expire the record without pulling this one in.
+export {
+  enterFallbackScreenKey,
+  recordEnterFallbackSent,
+  recordEnterFallbackNoEffect,
+  getLastEnterFallback,
+  publishEnterFallback,
+  forgetEnterFallback,
+  forgetEnterFallbacksByWorktree,
+  clearEnterFallbacks,
+  beginEnterFallbackSession,
+  getEnterFallbackSessionEpoch,
+  type AutoYesEnterFallbackOutcome,
+  type AutoYesEnterFallbackRecord,
+  type AutoYesEnterFallbackPublished,
+} from './auto-yes-enter-fallback-state';

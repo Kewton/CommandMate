@@ -44,6 +44,7 @@ import {
 } from '@/lib/session/agent-event-state';
 import { archiveSupersededSessionMessages } from '@/lib/session/session-generation-archive';
 import { markSessionStarting } from '@/lib/session/session-starting-state';
+import { beginEnterFallbackSession } from '@/lib/polling/auto-yes-enter-fallback-state';
 import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('lib/session/agent-session-lifecycle');
@@ -87,6 +88,11 @@ export function beginAgentSession(target: AgentInstanceRef, at: number = Date.no
   ).decisionEvicted;
 
   beginAgentEventGeneration(target.worktreeId, target.cliToolId, target.instanceId, at);
+
+  // Issue #3397: Auto-Yes's Enter belongs to the process whose screen it went
+  // to. A relaunch does not stop the Auto-Yes poller, so the record (and the
+  // poller's keys, through the epoch) are expired here, with the generation.
+  beginEnterFallbackSession(target.worktreeId, target.cliToolId, target.instanceId);
 
   const after = getAgentEventDropCounts(
     target.worktreeId,

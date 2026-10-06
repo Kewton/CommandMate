@@ -61,6 +61,8 @@ import {
   type AutoYesPollerState,
 } from '@/lib/auto-yes-poller';
 import { buildCompositeKey, clearAllAutoYesStates, disableAutoYes } from '@/lib/auto-yes-state';
+import { beginAgentSession } from '@/lib/session/agent-session-lifecycle';
+import { resetSessionStartingState } from '@/lib/session/session-starting-state';
 
 const REPO_ROOT = path.resolve(__dirname, '../../../..');
 const SERVER_FILE = path.join(REPO_ROOT, 'src/lib/session/current-output-types.ts');
@@ -347,6 +349,36 @@ describe('[#3397] a real response carries what the copy declares', () => {
       stopAllAutoYesPolling();
       const payload = await buildCurrentOutput({} as Database.Database, WT, 'claude');
       expect(payload.autoYes?.lastEnterFallback).toBeNull();
+    });
+  });
+
+  describe('a relaunch (no stop) expires the record (review round 2)', () => {
+    afterEach(() => resetSessionStartingState());
+
+    it('beginAgentSession → null', async () => {
+      recordEnterFallbackSent(WT, 'claude', undefined, {
+        promptType: 'multiple_choice',
+        refusalReason: 'unsupported_dialog_layout',
+        screenKey: enterFallbackScreenKey(promptOnFrame()),
+      });
+      beginAgentSession({ worktreeId: WT, cliToolId: 'claude' });
+      resetSessionStartingState();
+
+      const payload = await buildCurrentOutput({} as Database.Database, WT, 'claude');
+      expect(payload.autoYes?.lastEnterFallback).toBeNull();
+    });
+
+    it('another instance\'s relaunch leaves this record', async () => {
+      recordEnterFallbackSent(WT, 'claude', undefined, {
+        promptType: 'multiple_choice',
+        refusalReason: 'unsupported_dialog_layout',
+        screenKey: enterFallbackScreenKey(promptOnFrame()),
+      });
+      beginAgentSession({ worktreeId: WT, cliToolId: 'claude', instanceId: 'claude-2' });
+      resetSessionStartingState();
+
+      const payload = await buildCurrentOutput({} as Database.Database, WT, 'claude');
+      expect(payload.autoYes?.lastEnterFallback?.currentPrompt).toBe(true);
     });
   });
 });

@@ -44,13 +44,9 @@ let db: Database.Database;
 vi.mock('@/lib/db/db-instance', () => ({ getDbInstance: () => db }));
 
 const sendPromptAnswer = vi.fn(async (_params: { answer: string; promptData?: PromptData }) => {});
-vi.mock('@/lib/prompt-answer-sender', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/lib/prompt-answer-sender')>();
-  return {
-    hasCheckboxOptions: actual.hasCheckboxOptions,
-    sendPromptAnswer: (params: unknown) => sendPromptAnswer(params as { answer: string }),
-  };
-});
+vi.mock('@/lib/prompt-answer-sender', () => ({
+  sendPromptAnswer: (params: unknown) => sendPromptAnswer(params as { answer: string }),
+}));
 
 const sendSpecialKeys = vi.fn(async (_session: string, _keys: string[]) => {});
 vi.mock('@/lib/tmux/tmux', () => ({
@@ -139,7 +135,7 @@ import {
 } from '@/lib/polling/auto-yes-dialog-gate';
 import { extractComposerText } from '@/lib/detection/composer-text';
 import { detectSessionStatus } from '@/lib/detection/status-detector';
-import { enterFallbackScreenKey } from '@/lib/polling/auto-yes-enter-fallback';
+import { beginEnterFallbackSession, enterFallbackScreenKey } from '@/lib/polling/auto-yes-enter-fallback';
 import { stripAnsi, stripBoxDrawing } from '@/lib/detection/cli-patterns';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 
@@ -638,6 +634,63 @@ describe('[#3397] a checkbox list gets no Enter', () => {
     await ticks(state, CHECKBOX_LIST, 3);
     expect(sendSpecialKeys).not.toHaveBeenCalled();
     expect(getLastPolicySuppression(WT, 'claude')?.reason).toBe('unclassified-frame');
+  });
+
+  // Review round 2: the boxes the semantic reading (`prompt-answer-semantic`)
+  // has always counted — `[X]` and `[✔]` — are a checkbox list too.
+  it.each([
+    ['[X]', CHECKBOX_LIST.replace('[ ] node_modules', '[X] node_modules').replace(/\[ \] /g, '[X] ')],
+    ['[✔]', CHECKBOX_LIST.replace(/\[ \] /g, '[✔] ')],
+  ])('a list whose boxes read %s: no Enter', async (_label, raw) => {
+    const promptData = assessPromptAnswerability('claude', raw).promptCheck.promptData;
+    // Non-vacuous: the frame is read, eligible, and carries no `multiSelect` flag.
+    expect(promptData?.type).toBe('multiple_choice');
+    if (promptData?.type === 'multiple_choice') expect(promptData.multiSelect).not.toBe(true);
+    expect(judgeEnterFallback('claude', raw, { NODE_ENV: 'test' } as NodeJS.ProcessEnv).eligible).toBe(true);
+
+    const state = pollerState('claude');
+    await ticks(state, raw, 3);
+    expect(sendSpecialKeys).not.toHaveBeenCalled();
+  });
+});
+
+describe('[#3397] a relaunched session starts with no screen that had its Enter (review round 2)', () => {
+  it('the same screen on the new process gets its own Enter, and the old record is gone', async () => {
+    const state = pollerState('claude');
+    await ticks(state, CLAUDE_UNRECOGNISED_LIST, 2);
+    expect(enterCalls()).toHaveLength(1);
+
+    // `beginAgentSession` on a relaunch: the poller is NOT stopped.
+    beginEnterFallbackSession(WT, 'claude');
+    expect(getLastEnterFallback(WT, 'claude')).toBeNull();
+
+    // The new process draws the identical dialog (past the #306 duplicate window).
+    expireDuplicateGuard(state);
+    await ticks(state, CLAUDE_UNRECOGNISED_LIST, 2);
+
+    expect(enterCalls()).toHaveLength(2);
+    expect(getLastEnterFallback(WT, 'claude')?.outcome).toBe('sent');
+    expect(warn.mock.calls.some(([event]) => event === 'poller:auto-yes-enter-fallback-no-effect')).toBe(false);
+  });
+
+  it('control: without a new session, the same screen is no-effect, not a second Enter', async () => {
+    const state = pollerState('claude');
+    await ticks(state, CLAUDE_UNRECOGNISED_LIST, 2);
+    expireDuplicateGuard(state);
+    await ticks(state, CLAUDE_UNRECOGNISED_LIST, 2);
+
+    expect(enterCalls()).toHaveLength(1);
+    expect(getLastEnterFallback(WT, 'claude')?.outcome).toBe('no-effect');
+  });
+
+  it('another instance\'s new session leaves this one alone', async () => {
+    const state = pollerState('claude');
+    await ticks(state, CLAUDE_UNRECOGNISED_LIST, 2);
+    beginEnterFallbackSession(WT, 'claude', 'claude-2');
+    expect(getLastEnterFallback(WT, 'claude')?.outcome).toBe('sent');
+    expireDuplicateGuard(state);
+    await ticks(state, CLAUDE_UNRECOGNISED_LIST, 2);
+    expect(enterCalls()).toHaveLength(1);
   });
 });
 
