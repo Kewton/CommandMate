@@ -34,7 +34,9 @@
 import {
   assertUatOwnHomeWriteTargets,
   CLAUDE_UAT_SETTING_SOURCES,
+  getUatIsolationMode,
   isUatIsolationEnabled,
+  UatIsolationLaunchRefusedError,
 } from '@/config/uat-isolation';
 import { AGENT_EVENT_TYPES } from '@/lib/hooks/agent-event-types';
 import { parseAskUserQuestionPayload } from '@/lib/hooks/ask-user-question-payload';
@@ -205,16 +207,34 @@ export const claudeAgentEventSource: AgentEventSource = definePushHookSource({
   // covered byte-for-byte by `tests/unit/hooks/hook-settings-generator.test.ts`.
   prepareLaunch: ({ target, executablePath }: AgentLaunchContext): AgentLaunchPlan => {
     // Issue #3312: under `own-home` the settings file goes in only once its
-    // directory checks out inside the dedicated user's HOME; else the launch
-    // is refused.
-    if (isHookInjectionEnabled()) {
-      assertUatOwnHomeWriteTargets(CLAUDE_CLI_TOOL_ID, [getHookSettingsDirectory()]);
-    }
-    const baseCommand = buildClaudeLaunchCommand(executablePath, {
+    // directory and the file itself check out inside the dedicated user's
+    // HOME; else the launch is refused.
+    const ownHome = getUatIsolationMode() === 'own-home';
+    const hookTarget = {
       worktreeId: target.worktreeId,
       instanceId: target.instanceId,
       cliToolId: target.cliToolId,
-    });
+    };
+    if (isHookInjectionEnabled()) {
+      assertUatOwnHomeWriteTargets(CLAUDE_CLI_TOOL_ID, [
+        getHookSettingsDirectory(),
+        getHookSettingsPath(hookTarget),
+      ]);
+    }
+    const baseCommand = buildClaudeLaunchCommand(executablePath, hookTarget);
+    // Issue #3312: under `own-home` a claude without its settings file is a
+    // check that cannot see `hook_stop`, so injection switched off or a file
+    // that could not be written refuses the launch. `1` and normal mode keep
+    // starting the bare executable.
+    if (ownHome && baseCommand === executablePath) {
+      throw new UatIsolationLaunchRefusedError(
+        CLAUDE_CLI_TOOL_ID,
+        isHookInjectionEnabled() ? 'the hook settings file could not be written' : 'CM_AGENT_HOOKS_INJECT=0',
+        isHookInjectionEnabled()
+          ? 'Make CM_AGENT_HOOKS_DIR writable by the dedicated user.'
+          : 'Do not combine CM_AGENT_HOOKS_INJECT=0 with own-home.'
+      );
+    }
     // The path is reported only when the command actually names it. Injection
     // can be switched off (`CM_AGENT_HOOKS_INJECT=0`) or fail to write, and both
     // return the bare executable — claiming a settings file in that case would

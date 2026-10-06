@@ -79,7 +79,7 @@ done
 
 # A lock its supervisor left when it died (or was stopped above).
 lock="$PRODUCT_BASE/supervisor.lock"
-if [ -d "$lock" ] && ! product_lock_owner_alive "$lock"; then
+if [ -d "$lock" ] && product_lock_is_stale "$lock"; then
     rm -rf "$lock"
 fi
 

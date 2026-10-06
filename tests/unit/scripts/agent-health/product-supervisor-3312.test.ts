@@ -276,7 +276,7 @@ describe.skipIf(!HAS_TOOLS)('supervisor.sh (Issue #3312)', () => {
       await waitFor(() => fs.existsSync(path.join(base, 'paused-reclaim')), 'the first supervisor to pause');
 
       const second = supervise();
-      expect(second.status).toBe(75);
+      expect(second.status, second.stderr).toBe(75);
       expect(second.stderr).toContain('busy');
       expect(ledgers()).toHaveLength(1);
 
@@ -561,4 +561,70 @@ describe.skipIf(!HAS_TOOLS)('deadline-guard.sh (Issue #3312)', () => {
     },
     TEST_TIMEOUT
   );
+});
+
+describe.skipIf(!HAS_TOOLS)('the supervisor lock (Issue #3312, review of PR #3405)', () => {
+  const LIB = path.join(REPO_ROOT, 'scripts/agent-health/product/lib.sh');
+  const lockDir = () => path.join(base, 'supervisor.lock');
+
+  /** Sources lib.sh with PRODUCT_BASE set, then runs `body`. */
+  function lib(body: string) {
+    fs.mkdirSync(base, { recursive: true });
+    return spawnSync('bash', ['-c', `PRODUCT_BASE='${base}'\n. '${LIB}'\n${body}`], {
+      env: env(),
+      encoding: 'utf8',
+      timeout: 60_000,
+    });
+  }
+
+  it('a lock still being made (no owner yet) is not taken over: the second supervisor exits 75', () => {
+    fs.mkdirSync(lockDir(), { recursive: true });
+    const res = supervise({ CM_PRODUCT_STAGE_CMD: 'exit 0' });
+    expect(res.status).toBe(75);
+    expect(res.stderr).toContain('being taken by another supervisor');
+    expect(fs.existsSync(lockDir())).toBe(true);
+    expect(ledgers()).toEqual([]);
+  });
+
+  it('an ownerless lock older than a minute is taken over (its maker died)', () => {
+    fs.mkdirSync(lockDir(), { recursive: true });
+    spawnSync('touch', ['-t', '202601010000', lockDir()]);
+    const res = lib('product_lock_acquire test && echo HELD');
+    expect(res.status, res.stderr).toBe(0);
+    expect(res.stdout).toContain('HELD');
+  });
+
+  it('a lock whose owner is dead is taken over; one whose owner is alive is not', () => {
+    fs.mkdirSync(lockDir(), { recursive: true });
+    fs.writeFileSync(path.join(lockDir(), 'owner'), 'pid=999999\nlstart=x\nlabel=old\ntoken=t\n');
+    expect(lib('product_lock_acquire test && echo HELD').stdout).toContain('HELD');
+
+    fs.rmSync(lockDir(), { recursive: true, force: true });
+    fs.mkdirSync(lockDir());
+    const lstart = spawnSync('ps', ['-o', 'lstart=', '-p', String(process.pid)], {
+      encoding: 'utf8',
+      env: { ...process.env, LC_ALL: 'C' },
+    }).stdout.trim();
+    fs.writeFileSync(path.join(lockDir(), 'owner'), `pid=${process.pid}\nlstart=${lstart}\nlabel=alive\ntoken=t\n`);
+    const res = lib('product_lock_acquire test && echo HELD');
+    expect(res.stdout).not.toContain('HELD');
+    expect(res.stderr).toBe('');
+    expect(fs.readFileSync(path.join(lockDir(), 'owner'), 'utf8')).toContain('label=alive');
+  });
+
+  it('of supervisors racing for the lock, exactly one gets it', () => {
+    const racer = `( if product_lock_acquire race; then echo GOT; sleep 2; product_lock_release; else echo LOST; fi ) &`;
+    const res = lib(`${Array.from({ length: 8 }, () => racer).join('\n')}\nwait`);
+    expect(res.status, res.stderr).toBe(0);
+    const lines = res.stdout.split('\n').filter(Boolean);
+    expect(lines).toHaveLength(8);
+    expect(lines.filter((line) => line === 'GOT')).toHaveLength(1);
+  });
+
+  it('release removes only its own lock', () => {
+    fs.mkdirSync(lockDir(), { recursive: true });
+    fs.writeFileSync(path.join(lockDir(), 'owner'), `pid=${process.pid}\nlstart=x\nlabel=other\ntoken=theirs\n`);
+    lib('PRODUCT_LOCK_TOKEN=mine\nproduct_lock_release');
+    expect(fs.existsSync(lockDir())).toBe(true);
+  });
 });

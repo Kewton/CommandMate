@@ -91,11 +91,13 @@ CM_UAT_SOCK_BASE="$HOME/run" CM_RUN_LOCK_DIR="$HOME/run/run.lock" \
 
 - The user running the process (`os.userInfo().username`) is `CM_UAT_DEDICATED_USER`
 - `HOME` resolves to the same place as that user's home directory (from the account database, not `$HOME`) and is owned by that user
-- Every write target (`CODEX_HOME`, `hooks.json`, the relay, `config.toml`, `~/.gemini/config/hooks.json`, `~/.copilot/` and `settings.json`, `CM_AGENT_HOOKS_DIR`) resolves, symlinks followed, to a path inside HOME owned by that user (a file not created yet is judged by its nearest existing ancestor). A dangling symlink is refused
+- Every write target (`CODEX_HOME`, `hooks.json`, the relay and its `.tmp`, `config.toml`, `~/.gemini/config/hooks.json`, `~/.copilot/` and `settings.json` with its backup, temp file and lock, `CM_AGENT_HOOKS_DIR` and claude's settings file itself) resolves, symlinks followed, to a path inside HOME owned by that user (a file not created yet is judged by its nearest existing ancestor). A dangling symlink is refused
 
 **Kept (same as `1`):**
 
-- A failed hook setup refuses the launch (never a bare start). So does a `hooks` key in copilot's `config.json`
+- A failed hook setup refuses the launch (never a bare start). So does a `hooks` key in copilot's `config.json`. So do a codex relay that could not be updated or still differs from the shipped one, and a claude settings file that could not be written (`CM_AGENT_HOOKS_INJECT=0` included); with `1` or unset these still go on with the older relay / a bare claude
+- Temp files (the relay's `.tmp`, copilot's temp file) are removed and then created exclusively, so a planted symlink is never written through (whatever the value)
+- claude's launch plan is built before its tmux session, so a refusal leaves no empty pane
 - The receiver is pinned (`CM_HOOK_URL` and the others point at the run's server)
 - Headless `codex exec` / `agy -p` (Schedules, daily summary) are refused; claude gets `--setting-sources project,local`
 - The CLI reads no `.env` and never falls back to 3000 without `CM_PORT`

@@ -797,6 +797,11 @@ function withCopilotSettingsLock<T>(directory: string, write: () => T): T {
   }
 }
 
+/** The temp file {@link writeFileAtomic} writes before it renames it over `path`. */
+export function getCopilotSettingsTempPath(path: string): string {
+  return `${path}.${process.pid}.tmp`;
+}
+
 /**
  * Replace a file's contents without ever leaving it half-written.
  *
@@ -807,9 +812,16 @@ function withCopilotSettingsLock<T>(directory: string, write: () => T): T {
  * runs on (設計方針書 §10.9 決定 1).
  */
 function writeFileAtomic(path: string, contents: string): void {
-  const temp = `${path}.${process.pid}.tmp`;
+  const temp = getCopilotSettingsTempPath(path);
   try {
-    writeFileSync(temp, contents, { mode: 0o600 });
+    // Issue #3312: removed first and then created exclusively, so a symlink
+    // planted at the temp name is removed, never written through.
+    try {
+      unlinkSync(temp);
+    } catch {
+      // Not there: the usual case.
+    }
+    writeFileSync(temp, contents, { mode: 0o600, flag: 'wx' });
     renameSync(temp, path);
   } catch (error) {
     try {
@@ -936,6 +948,8 @@ export function writeCopilotHookSettings(options: CopilotHookSettingsOptions = {
     dirname(targetPath),
     targetPath,
     `${targetPath}${COPILOT_SETTINGS_BACKUP_SUFFIX}`,
+    getCopilotSettingsTempPath(targetPath),
+    join(dirname(targetPath), COPILOT_SETTINGS_LOCK_BASENAME),
   ]);
   if (policy === 'read-only') {
     // Issue #3391: the file is the user's, shared with their production server,

@@ -116,8 +116,10 @@ import { isPlainObject } from '../event-mapper';
 import type { AgentInstanceRef, AgentLaunchPlan } from '../types';
 import {
   getCodexRelayInstallPath,
+  getCodexRelayStagingPath,
   getInstalledCodexRelayPath,
   installCodexRelayScript,
+  installCodexRelayScriptOrThrow,
 } from './relay-install';
 import { CODEX_CLI_TOOL_ID } from './tool-id';
 
@@ -665,10 +667,12 @@ export function writeCodexHookSettings(options: CodexHookOptions = {}): string |
   // them, after checking every path below is inside the dedicated user's HOME
   // (and refuses the launch when one is not).
   const codexHome = getCodexHome(options);
+  const relayPath = getCodexRelayInstallPath(codexHome);
   const policy = sharedHookWritePolicy('codex', [
     codexHome,
     settingsPath,
-    getCodexRelayInstallPath(codexHome),
+    relayPath,
+    getCodexRelayStagingPath(relayPath),
     join(codexHome, 'config.toml'),
   ]);
   if (policy === 'read-only') return reuseCodexHookSettingsReadOnly(options);
@@ -680,7 +684,14 @@ export function writeCodexHookSettings(options: CodexHookOptions = {}): string |
   // between. Best-effort by construction: the installer never throws, and a
   // machine where it cannot write simply keeps whatever copy is already there.
   if (options.relayScriptPath === undefined) {
-    installCodexRelayScript(getCodexHome(options), resolveRelayScriptPath());
+    if (getUatIsolationMode() === 'own-home') {
+      // Issue #3312: a relay that could not be updated is a failed
+      // preparation here (the caller refuses the launch), not an older relay
+      // the check would quietly run against.
+      installCodexRelayScriptOrThrow(codexHome, resolveRelayScriptPath());
+    } else {
+      installCodexRelayScript(codexHome, resolveRelayScriptPath());
+    }
   }
 
   let existing: unknown = null;

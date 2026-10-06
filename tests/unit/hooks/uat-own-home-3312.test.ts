@@ -26,6 +26,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readdirSync,
+  readFileSync,
   realpathSync,
   symlinkSync,
   writeFileSync,
@@ -51,13 +52,16 @@ import {
 import {
   CODEX_RELAY_INSTALL_BASENAME,
   getCodexRelayInstallPath,
+  getCodexRelayStagingPath,
 } from '@/lib/hooks/sources/codex/relay-install';
+import { getHookSettingsPath } from '@/lib/hooks/hook-settings-generator';
 import { claudeAgentEventSource } from '@/lib/hooks/sources/claude/source';
 import { antigravityAgentEventSource } from '@/lib/hooks/sources/antigravity/source';
 import {
   buildCopilotLaunchCommand,
   COPILOT_LAUNCH_COMMAND,
   getCopilotSettingsPath,
+  getCopilotSettingsTempPath,
 } from '@/lib/hooks/sources/copilot/hook-settings';
 import { buildCliArgs, uatIsolationHeadlessRefusal } from '@/lib/session/claude-executor';
 
@@ -410,5 +414,129 @@ describe('what own-home keeps from 1', () => {
     expect(uatIsolationHeadlessRefusal('codex')).toMatch(/^CM_UAT_ISOLATION=own-home: refusing to start a headless codex run/);
     expect(uatIsolationHeadlessRefusal('antigravity')).not.toBeNull();
     expect(buildCliArgs('hi', 'claude').slice(-2)).toEqual(['--setting-sources', 'project,local']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The review of PR #3405 (Issue #3312): write targets checked to the file that
+// is really written (temp files included), temp files that never follow a
+// planted symlink, a relay that could not be updated, and a claude settings
+// file that could not be written.
+
+describe('every file own-home writes is checked, temp files included', () => {
+  const outsideFile = () => {
+    const file = join(outside, 'victim');
+    writeFileSync(file, 'keep\n');
+    return file;
+  };
+
+  it('codex: a relay temp file that is a symlink out of the HOME refuses the launch and is not written through', () => {
+    ownHome();
+    const victim = outsideFile();
+    const relay = getCodexRelayInstallPath(process.env.CODEX_HOME!);
+    mkdirSync(join(relay, '..'), { recursive: true });
+    symlinkSync(victim, getCodexRelayStagingPath(relay));
+    expect(() => buildCodexLaunchPlan('codex', CODEX_TARGET, { port: 3017 })).toThrow(/cmate-agent-event\.sh\.tmp resolves to/);
+    expect(readFileSync(victim, 'utf8')).toBe('keep\n');
+  });
+
+  it('negative control — unset: the planted temp symlink is replaced, not written through, and the relay installs', () => {
+    const victim = outsideFile();
+    const relay = getCodexRelayInstallPath(process.env.CODEX_HOME!);
+    mkdirSync(join(relay, '..'), { recursive: true });
+    symlinkSync(victim, getCodexRelayStagingPath(relay));
+    const plan = buildCodexLaunchPlan('codex', CODEX_TARGET, { port: 3017, supportsNoDaemon: false });
+    expect(plan.settingsPath).toBe(getCodexHooksPath());
+    expect(readFileSync(victim, 'utf8')).toBe('keep\n');
+    expect(readFileSync(relay, 'utf8')).toBe(RELAY_BODY);
+  });
+
+  it('claude: a settings file that is a symlink out of the HOME refuses the launch', () => {
+    ownHome();
+    const victim = outsideFile();
+    const settings = getHookSettingsPath({ worktreeId: 'wt-own-home', instanceId: 'claude', cliToolId: 'claude' });
+    mkdirSync(process.env.CM_AGENT_HOOKS_DIR!, { recursive: true });
+    symlinkSync(victim, settings);
+    expect(() => claudeAgentEventSource.prepareLaunch(launchContext('claude'))).toThrow(/resolves to .*victim, outside/);
+    expect(readFileSync(victim, 'utf8')).toBe('keep\n');
+  });
+
+  it('copilot: a temp file that is a symlink out of the HOME refuses the launch and is not written through', () => {
+    ownHome();
+    const victim = outsideFile();
+    mkdirSync(process.env.COPILOT_HOME!, { recursive: true });
+    symlinkSync(victim, getCopilotSettingsTempPath(getCopilotSettingsPath()));
+    const target = { worktreeId: 'wt-own-home', cliToolId: 'copilot', instanceId: 'copilot' } as const;
+    expect(() =>
+      buildCopilotLaunchCommand(COPILOT_LAUNCH_COMMAND, target, { relayScriptPath: '/opt/relay.sh' })
+    ).toThrow(UatIsolationLaunchRefusedError);
+    expect(readFileSync(victim, 'utf8')).toBe('keep\n');
+  });
+
+  it('negative control — unset: copilot replaces the planted temp symlink instead of writing through it', () => {
+    const victim = outsideFile();
+    mkdirSync(process.env.COPILOT_HOME!, { recursive: true });
+    symlinkSync(victim, getCopilotSettingsTempPath(getCopilotSettingsPath()));
+    const target = { worktreeId: 'wt-own-home', cliToolId: 'copilot', instanceId: 'copilot' } as const;
+    const plan = buildCopilotLaunchCommand(COPILOT_LAUNCH_COMMAND, target, { relayScriptPath: '/opt/relay.sh' });
+    expect(plan.settingsPath).toBe(getCopilotSettingsPath());
+    expect(readFileSync(victim, 'utf8')).toBe('keep\n');
+  });
+});
+
+describe('codex under own-home: a relay that could not be updated is a failed preparation', () => {
+  /** `commandmate` as a FILE: the relay's directory cannot be made, inside the HOME. */
+  function blockRelayDirectory(): void {
+    writeFileSync(join(process.env.CODEX_HOME!, 'commandmate'), 'not a directory\n');
+  }
+
+  it('refuses the launch instead of running with an older or missing relay', () => {
+    ownHome();
+    blockRelayDirectory();
+    expect(() => buildCodexLaunchPlan('codex', CODEX_TARGET, { port: 3017 })).toThrow(UatIsolationLaunchRefusedError);
+    expect(existsSync(getCodexHooksPath())).toBe(false);
+  });
+
+  it('refuses when this build ships no relay', () => {
+    ownHome();
+    process.chdir(scratch);
+    expect(() => buildCodexLaunchPlan('codex', CODEX_TARGET, { port: 3017 })).toThrow(/ships no relay/);
+  });
+
+  it('negative control — unset: the failed install is absorbed and codex still gets a plan', () => {
+    blockRelayDirectory();
+    const plan = buildCodexLaunchPlan('codex', CODEX_TARGET, { port: 3017, supportsNoDaemon: false });
+    expect(plan.settingsPath).toBe(getCodexHooksPath());
+  });
+});
+
+describe('claude under own-home: a settings file that could not be written refuses the launch', () => {
+  /** `CM_AGENT_HOOKS_DIR` as a FILE inside the HOME: the checks pass, the write fails. */
+  function blockHooksDirectory(): void {
+    mkdirSync(join(home, 'run'), { recursive: true });
+    writeFileSync(process.env.CM_AGENT_HOOKS_DIR!, 'not a directory\n');
+  }
+
+  it('own-home: refused, never the bare claude', () => {
+    ownHome();
+    blockHooksDirectory();
+    expect(() => claudeAgentEventSource.prepareLaunch(launchContext('claude'))).toThrow(
+      /refusing to start claude: the hook settings file could not be written/
+    );
+  });
+
+  it('own-home: CM_AGENT_HOOKS_INJECT=0 is refused too', () => {
+    ownHome();
+    process.env.CM_AGENT_HOOKS_INJECT = '0';
+    expect(() => claudeAgentEventSource.prepareLaunch(launchContext('claude'))).toThrow(/CM_AGENT_HOOKS_INJECT=0/);
+  });
+
+  it('negative control — 1 and unset: the bare claude, as before', () => {
+    blockHooksDirectory();
+    expect(claudeAgentEventSource.prepareLaunch(launchContext('claude'))).toMatchObject({ settingsPath: null });
+    process.env[UAT_ISOLATION_ENV_VAR] = '1';
+    const plan = claudeAgentEventSource.prepareLaunch(launchContext('claude'));
+    expect(plan.settingsPath).toBeNull();
+    expect(plan.command).toBe('/opt/bin/claude --setting-sources project,local');
   });
 });

@@ -116,8 +116,12 @@ file_uid() {
 
 # ------------------------------------------------------ supervisor lock
 
-# A mkdir lock at <base>/supervisor.lock, separate from scripts/uat/run-lock.sh.
-# `owner` holds pid and lstart, so a reused pid is not mistaken for the owner.
+# A mkdir lock at <base>/supervisor.lock, separate from scripts/uat/run-lock.sh
+# but built the same way. `owner` holds pid, lstart and a token, so a reused pid
+# is not mistaken for the owner. A directory with no owner file yet is one
+# being made right now (its maker is between mkdir and writing the owner) and
+# is protected for a minute, as run-lock.sh protects it; only after that is it
+# taken as left by a maker that died.
 
 product_lock_dir() {
     printf '%s/supervisor.lock\n' "$PRODUCT_BASE"
@@ -130,35 +134,70 @@ product_lock_owner_alive() {
     [ -n "$pid" ] && proc_matches "$pid" "$lstart"
 }
 
-# product_lock_acquire <label> — 0 when held, 1 when a live owner has it.
+# product_lock_is_stale <lock dir> — its owner is gone, or it has had no owner
+# for over a minute.
+product_lock_is_stale() {
+    local dir=$1
+    if [ ! -f "$dir/owner" ]; then
+        [ -n "$(find "$dir" -maxdepth 0 -mmin +1 2>/dev/null)" ]
+        return
+    fi
+    ! product_lock_owner_alive "$dir"
+}
+
+# product_lock_take_stale <lock dir> — moves a stale lock aside and removes it.
+# When the moved directory is not the one judged stale (another supervisor
+# took over in between and made a fresh one), it is put back.
+product_lock_take_stale() {
+    local dir=$1 judged aside
+    judged=$(run_lock_field "$dir" token)
+    aside="$dir.stale.$$.$RANDOM"
+    mv "$dir" "$aside" 2>/dev/null || return 0
+    if [ "$(run_lock_field "$aside" token)" != "$judged" ] || ! product_lock_is_stale "$aside"; then
+        [ -e "$dir" ] || mv "$aside" "$dir" 2>/dev/null || true
+        return 0
+    fi
+    product_log "took over a stale lock (pid $(run_lock_field "$aside" pid))"
+    rm -rf "$aside"
+}
+
+# product_lock_acquire <label> — 0 when held, 1 when someone else has it.
 product_lock_acquire() {
-    local dir aside tmp
+    local dir tmp attempt=0
     dir=$(product_lock_dir)
-    if ! mkdir "$dir" 2>/dev/null; then
-        if product_lock_owner_alive "$dir"; then
-            PRODUCT_LOCK_ERROR="busy: $(run_lock_field "$dir" label) pid $(run_lock_field "$dir" pid) holds $dir"
+    PRODUCT_LOCK_TOKEN="$$-$RANDOM$RANDOM"
+    while [ $attempt -lt 5 ]; do
+        attempt=$((attempt + 1))
+        if mkdir "$dir" 2>/dev/null; then
+            tmp="$dir/owner.tmp.$$"
+            if printf 'pid=%s\nlstart=%s\nlabel=%s\ntoken=%s\n' "$$" "$(proc_lstart $$)" "$1" "$PRODUCT_LOCK_TOKEN" >"$tmp" &&
+                mv -f "$tmp" "$dir/owner"; then
+                return 0
+            fi
+            rm -rf "$dir"
+            PRODUCT_LOCK_ERROR="could not write the owner of $dir"
             return 1
         fi
-        aside="$dir.stale.$$"
-        mv "$dir" "$aside" 2>/dev/null || {
-            PRODUCT_LOCK_ERROR="lost the race to take over the stale $dir"
-            return 1
-        }
-        rm -rf "$aside"
-        mkdir "$dir" 2>/dev/null || {
-            PRODUCT_LOCK_ERROR="lost the race for $dir"
-            return 1
-        }
-    fi
-    tmp="$dir/owner.tmp.$$"
-    printf 'pid=%s\nlstart=%s\nlabel=%s\n' "$$" "$(proc_lstart $$)" "$1" >"$tmp" && mv -f "$tmp" "$dir/owner"
+        if product_lock_is_stale "$dir"; then
+            product_lock_take_stale "$dir"
+            continue
+        fi
+        if [ -f "$dir/owner" ]; then
+            PRODUCT_LOCK_ERROR="busy: $(run_lock_field "$dir" label) pid $(run_lock_field "$dir" pid) holds $dir"
+        else
+            PRODUCT_LOCK_ERROR="busy: $dir is being taken by another supervisor right now"
+        fi
+        return 1
+    done
+    PRODUCT_LOCK_ERROR="could not take $dir after $attempt attempts"
+    return 1
 }
 
 # product_lock_release — only a lock this process holds.
 product_lock_release() {
     local dir
     dir=$(product_lock_dir)
-    [ "$(run_lock_field "$dir" pid)" = "$$" ] && rm -rf "$dir"
+    [ -n "${PRODUCT_LOCK_TOKEN:-}" ] && [ "$(run_lock_field "$dir" token)" = "$PRODUCT_LOCK_TOKEN" ] && rm -rf "$dir"
     return 0
 }
 

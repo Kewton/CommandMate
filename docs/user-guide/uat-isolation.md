@@ -91,11 +91,13 @@ CM_UAT_SOCK_BASE="$HOME/run" CM_RUN_LOCK_DIR="$HOME/run/run.lock" \
 
 - 実行しているユーザー（`os.userInfo().username`）が `CM_UAT_DEDICATED_USER` と一致する
 - `HOME` の実体が、そのユーザーのホームディレクトリ（アカウントの情報。`$HOME` ではない）の実体と同じで、持ち主がそのユーザー
-- 書き込み先（`CODEX_HOME`・`hooks.json`・relay・`config.toml`・`~/.gemini/config/hooks.json`・`~/.copilot/` と `settings.json`・`CM_AGENT_HOOKS_DIR`）のそれぞれの実体のパス（symlink をたどる。まだ無いファイルは、在る祖先の実体で判定）が HOME の中で、持ち主がそのユーザー。行き先の無い symlink は拒否
+- 書き込み先（`CODEX_HOME`・`hooks.json`・relay とその一時ファイル `.tmp`・`config.toml`・`~/.gemini/config/hooks.json`・`~/.copilot/` と `settings.json`・そのバックアップ・一時ファイル・ロック・`CM_AGENT_HOOKS_DIR` と claude の設定ファイルそのもの）のそれぞれの実体のパス（symlink をたどる。まだ無いファイルは、在る祖先の実体で判定）が HOME の中で、持ち主がそのユーザー。行き先の無い symlink は拒否
 
 **残すもの（`1` と同じ）:**
 
-- hook の準備に失敗したときは起動を拒否する（素の起動に戻さない）。copilot の `config.json` に `hooks` があるときも拒否
+- hook の準備に失敗したときは起動を拒否する（素の起動に戻さない）。copilot の `config.json` に `hooks` があるときも拒否。codex の relay を更新できない・同梱版と違う、claude の設定ファイルを書けない（`CM_AGENT_HOOKS_INJECT=0` を含む）ときも拒否する（`1` と未設定では、従来どおり古い relay・素の claude で続ける）
+- 一時ファイル（relay の `.tmp`、copilot の一時ファイル）は、先に消してから排他的に作る（置かれた symlink をたどって書かない。これはどの値でも同じ）
+- claude の起動の計画は tmux のセッションを作る前に組む（拒否したときに空のペインを残さない）
 - 送り先の固定（`CM_HOOK_URL` などを、その run のサーバーへ）
 - Schedule・日次まとめの `codex exec`・`agy -p` の拒否。claude は `--setting-sources project,local`
 - CLI は `.env` を読まず、`CM_PORT` が無ければ 3000 に落ちない
