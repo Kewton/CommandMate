@@ -109,6 +109,7 @@ import {
   readNewestPromptAt,
   staleReadyCandidate,
   summarizeAskUserQuestion,
+  type MergedStatusVerdict,
   type ScraperVerdict,
 } from './structured-status-merge';
 import { recordStructuredPrompt, recordUnclassifiedFrame } from './current-output-history-writers';
@@ -486,6 +487,328 @@ function composePromptData({
 
   return { structuredFacts, promptData, promptAnswerable };
 }
+/** What {@link judgeFrame} read off the frame, for the rest of {@link buildPayload}. */
+interface FrameJudgement {
+  compositeKey: string;
+  lastServerResponseTimestamp: ReturnType<typeof getLastServerResponseTimestamp>;
+  statusResult: StatusDetectionResult;
+  startingSince: number | null;
+  thinking: boolean;
+  scraperPromptWaiting: boolean;
+  isSelectionListActive: boolean;
+  isPagerActive: boolean;
+  isDismissablePanelActive: boolean;
+  evidence: StatusEvidence;
+  isUnclassifiedActive: boolean;
+}
+
+/**
+ * The scraper's verdict on the frame and the flags read off it (Issue #3272).
+ * Split out of {@link buildPayload} in the order it ran there; nothing here
+ * awaits.
+ */
+function judgeFrame(
+  worktreeId: string,
+  cliToolId: CLIToolType,
+  instanceId: string | undefined,
+  output: string,
+): FrameJudgement {
+  // The sequence from here to `startingStatusResult` is the same as in
+  // worktree-status-helper.ts; what follows differs on purpose and is not shared
+  // (#3215 "not touched").
+  const compositeKey = buildCompositeKey(worktreeId, cliToolId, instanceId);
+  const lastServerResponseTimestamp = getLastServerResponseTimestamp(compositeKey);
+  const lastOutputTimestamp = lastServerResponseTimestamp ? new Date(lastServerResponseTimestamp) : undefined;
+
+  const rawStatusResult = detectSessionStatus(output, cliToolId, lastOutputTimestamp);
+  // Issue #3179: a launch in progress. The frame is a shell prompt and the
+  // launch line, or a dialog the launch is about to answer, and none of the
+  // flags below may be read off it: the floor verdict raised the Navigate pad,
+  // the trust dialog raised the selection list / prompt sheet. A dialog that
+  // outstays the launch's own answer releases the record (a login, an unknown
+  // dialog), and from then on this is the ordinary verdict again.
+  const startingSince = observeSessionStartingFrame(
+    worktreeId,
+    cliToolId,
+    instanceId,
+    rawStatusResult.status === 'waiting' || rawStatusResult.hasActivePrompt,
+  );
+  const statusResult = startingSince === null
+    ? rawStatusResult
+    : startingStatusResult(rawStatusResult);
+  // Issue #1912: every `running` reason that means "the agent is producing
+  // output", not just `thinking_indicator`. opencode answers
+  // `opencode_processing_indicator` for its `esc interrupt` footer, which is
+  // the only signal it gives between the submitted prompt and the first
+  // transcript row — on a scraper-only session that stretch showed no
+  // thinking indicator at all.
+  const thinking = isGeneratingStatus(statusResult);
+  const scraperPromptWaiting = statusResult.hasActivePrompt;
+  const isSelectionListActive =
+    statusResult.status === 'waiting' && SELECTION_LIST_REASONS.has(statusResult.reason);
+  const isPagerActive = statusResult.reason === STATUS_REASON.CODEX_PAGER;
+  // Issue #2369: an overlay whose ONLY exit is the dismiss — Command Code's
+  // `/usage` panel, whose last row is `Press Esc to close`.
+  //
+  // A THIRD flag rather than a member of `SELECTION_LIST_REASONS`, and the
+  // separation is the fix rather than a nicety: `isSelectionListActive` is what
+  // the arrow pad is drawn from, and this screen has no highlight to move. Nor
+  // is it `isUnclassifiedActive` any more — the detector answers `waiting` for
+  // it, and `isUnclassifiedFrame` only ever says yes to `running` — which is
+  // exactly what stops the chat surface offering the eighteen-button
+  // hatch + answer-key card to a panel that accepts one key.
+  //
+  // `status === 'waiting'` is checked as well as the reason, the same shape
+  // `isSelectionListActive` above uses, so a future producer that publishes the
+  // token with some other status cannot silently turn the card into an Esc
+  // button.
+  const isDismissablePanelActive =
+    statusResult.status === 'waiting'
+    && statusResult.reason === STATUS_REASON.COMMAND_CODE_DISMISSABLE_PANEL;
+  // Issue #1497: the detection-independent nav hatch (#1017/#1494) is gated on
+  // isUnclassifiedActive. A static, unrecognized TUI overlay (e.g. Claude `/help`)
+  // whose frame stops changing degrades from `running`/`default` to
+  // `no_recent_output` once the Auto-Yes poller has stamped lastOutputTimestamp
+  // (its sole writer, auto-yes-poller.ts). That is still an interactive-but-
+  // unclassified frame — a real idle prompt (`❯`) is classified earlier as
+  // `input_prompt`, never as `no_recent_output` — so treat the timed-out fallback
+  // as unclassified too and keep the hatch open instead of stranding the user.
+  // Issue #1924, §4 D1 decision 2: stated as evidence. Issue #1927 moved that
+  // PRODUCER into the detector, because only the detector knows which rule
+  // answered — `input_prompt` is positive for a tool whose idle rule vouched for
+  // the frame and `'none'` for one whose rule declined, with the same status and
+  // the same reason on the wire.
+  const evidence: StatusEvidence = statusResult.evidence;
+  // Issue #2011: the flag is NOT that fact, and deriving it from `evidence` is
+  // the regression this Issue fixes. `'none'` is "I could not prove this pane is
+  // idle" — an ordinary Claude composer with no completion marker above it
+  // qualifies, and 7 of 8 live idle panes did on 2026-08-24. The flag's three
+  // consumers all ask the older, narrower question instead: `TerminalEscapeHatch`
+  // opens on a frame a human has to drive by hand, `wait` suppresses its
+  // completion check and eventually exits 10 on one, and `unclassified_frames`
+  // records it as a detection failure worth capturing as a fixture. That is
+  // `isUnclassifiedFrame` — the reason vocabulary, not the strength of the
+  // evidence behind a readable verdict.
+  const isUnclassifiedActive = isUnclassifiedFrame(statusResult.status, statusResult.reason);
+
+  return {
+    compositeKey,
+    lastServerResponseTimestamp,
+    statusResult,
+    startingSince,
+    thinking,
+    scraperPromptWaiting,
+    isSelectionListActive,
+    isPagerActive,
+    isDismissablePanelActive,
+    evidence,
+    isUnclassifiedActive,
+  };
+}
+
+/**
+ * The detection-divergence log lines (Issue #3272). Split out of
+ * {@link buildPayload} in the order it ran there; it only logs and tracks.
+ */
+function logDetectionDivergence(
+  worktreeId: string,
+  cliToolId: CLIToolType,
+  resolvedInstanceId: string,
+  statusResult: StatusDetectionResult,
+  structured: ReturnType<typeof structuredStateForFrame>,
+  merged: MergedStatusVerdict,
+): void {
+  // Issue #1723 §3: the field data this Epic is being built on. Every line is
+  // one poll where the screen and the agent disagreed about what the agent was
+  // doing, which is the only way to answer "how wrong was the scraper?" with a
+  // number instead of an anecdote. Emitted only on disagreement — a session
+  // where the two layers agree is silent — and including the disagreements this
+  // merge deliberately does NOT act on (`applied: false`), because those are
+  // exactly the cases the next Issues in the Epic have to decide about.
+  const diverging = structured !== null && structured.status !== statusResult.status;
+  if (diverging) {
+    logger.info('detection-divergence', {
+      worktreeId,
+      cliToolId,
+      instanceId: resolvedInstanceId,
+      scraperStatus: statusResult.status,
+      scraperReason: statusResult.reason,
+      structuredStatus: structured.status,
+      structuredReason: structured.reason,
+      structuredEvent: structured.event,
+      structuredEventAt: structured.at,
+      applied: merged.structuredApplied,
+    });
+  }
+  // Issue #3311: the length of a disagreement, said once when it ends. The line
+  // above is per poll and cannot carry it — see `detection-divergence.ts`.
+  const resolvedDivergence = trackDetectionDivergence(worktreeId, cliToolId, resolvedInstanceId, diverging);
+  if (resolvedDivergence !== null) {
+    logger.info('detection-divergence-resolved', {
+      worktreeId,
+      cliToolId,
+      instanceId: resolvedInstanceId,
+      durationMs: resolvedDivergence.durationMs,
+      polls: resolvedDivergence.polls,
+    });
+  }
+}
+
+/** What {@link buildRunningPayload} publishes for a running session. */
+interface RunningPayloadInput {
+  worktreeId: string;
+  cliToolId: CLIToolType;
+  instanceId: string | undefined;
+  sessionName: string;
+  published: MergedStatusVerdict;
+  merged: MergedStatusVerdict;
+  newContent: string;
+  output: string;
+  realtimeSnippet: string;
+  totalLines: number;
+  lastCapturedLine: number;
+  isPromptWaiting: boolean;
+  promptData: PromptData | StructuredPromptWaitingData | null;
+  promptAnswerable: boolean | undefined;
+  autoYesState: ReturnType<typeof getAutoYesState>;
+  isSelectionListActive: boolean;
+  isPagerActive: boolean;
+  isDismissablePanelActive: boolean;
+  startingSince: number | null;
+  lastKnown: ReturnType<typeof getLastKnownStatus>;
+  lastServerResponseTimestamp: ReturnType<typeof getLastServerResponseTimestamp>;
+  compositeKey: string;
+  stopEventAt: number | null;
+  structuredEvents: StructuredEventsPayload;
+  model: ReturnType<typeof getResolvedAgentModelInfo>['model'];
+  effort: ReturnType<typeof getResolvedAgentModelInfo>['effort'];
+  upstreamFaultMatch: ReturnType<typeof matchUpstreamFault>;
+  paneObstruction: OpenCodePaneObstruction | null;
+  composer: ReturnType<typeof extractComposerText>;
+}
+
+/**
+ * The payload of a running session (Issue #3272). Split out of
+ * {@link buildPayload} as it stood there, so the keys keep their order and the
+ * reads inside it keep theirs.
+ */
+function buildRunningPayload({
+  worktreeId,
+  cliToolId,
+  instanceId,
+  sessionName,
+  published,
+  merged,
+  newContent,
+  output,
+  realtimeSnippet,
+  totalLines,
+  lastCapturedLine,
+  isPromptWaiting,
+  promptData,
+  promptAnswerable,
+  autoYesState,
+  isSelectionListActive,
+  isPagerActive,
+  isDismissablePanelActive,
+  startingSince,
+  lastKnown,
+  lastServerResponseTimestamp,
+  compositeKey,
+  stopEventAt,
+  structuredEvents,
+  model,
+  effort,
+  upstreamFaultMatch,
+  paneObstruction,
+  composer,
+}: RunningPayloadInput): CurrentOutputPayload {
+  return {
+    isRunning: true,
+    sessionName,
+    cliToolId,
+    sessionStatus: published.status,
+    sessionStatusReason: published.reason,
+    content: newContent,
+    fullOutput: output,
+    realtimeSnippet,
+    lineCount: totalLines,
+    lastCapturedLine,
+    isComplete: isPromptWaiting,
+    isGenerating: published.thinking,
+    thinking: published.thinking,
+    // Issue #2607: named after the tool actually running. A fixed "Claude" was
+    // published for every agent, and `capture --json` readers took it at its word.
+    thinkingMessage: published.thinking ? `${getCliToolDisplayName(cliToolId)} is thinking...` : null,
+    isPromptWaiting,
+    promptData,
+    ...(promptAnswerable !== undefined ? { promptAnswerable } : {}),
+    // Issue #3184: appended next to the value it is derived from, not at the end
+    // — it is a reading of `promptData`, and only of it.
+    promptView: derivePromptView(promptData),
+    autoYes: {
+      enabled: autoYesState?.enabled ?? false,
+      expiresAt: autoYesState?.enabled ? autoYesState.expiresAt : null,
+      stopReason: autoYesState?.stopReason,
+      lastSuppression: getLastPolicySuppression(worktreeId, cliToolId, instanceId),
+      // Issue #1694: undefined (so the key is absent from the JSON) unless a
+      // stop pattern actually fired — the state clears it on every other path.
+      stopMatchedText: autoYesState?.stopMatchedText,
+    },
+    isSelectionListActive,
+    isPagerActive,
+    isDismissablePanelActive,
+    isUnclassifiedActive: startingSince === null && merged.isUnclassifiedActive,
+    startingSince,
+    // Issue #1926: evidence strength, named the way §4 D1 names it. Not the same
+    // fact as `isUnclassifiedActive` (Issue #2011); published from the merged
+    // verdict so it agrees with the status it accompanies.
+    statusEvidence: published.evidence,
+    lastKnownStatus: lastKnown?.status ?? null,
+    lastKnownStatusAt: lastKnown?.at ?? null,
+    lastServerResponseTimestamp,
+    serverPollerActive: isPollerActive(compositeKey),
+    lastStopEventAt: stopEventAt,
+    structuredEvents,
+    // Issue #1785: straight from the retention layer, unparsed. See the field
+    // docs on CurrentOutputPayload for why nothing is normalised on the way out.
+    model,
+    reasoningEffort: effort,
+    // Issue #1695: appended last on purpose — every field above is a published
+    // CLI contract and reordering them churns the diff for no reader's benefit.
+    promptDedup: getPromptDedupSkips(worktreeId, cliToolId, instanceId),
+    // Issue #1839: read from `realtimeSnippet`, the same rows an operator sees
+    // in `capture --json`, so what the field claims can be checked against what
+    // is printed next to it.
+    upstreamFault: upstreamFaultMatch
+      ? {
+          id: upstreamFaultMatch.fault.id,
+          matchedText: upstreamFaultMatch.matchedText,
+          at: Date.now(),
+        }
+      : null,
+    // Issue #2095: the same three keys as `upstreamFault`, read from the same
+    // rows, so an operator comparing the two is comparing like with like. The
+    // detector's `boxRight` / `rows` stay off the wire — they are how the rule
+    // decided, not what a caller acts on, and the payload is already a published
+    // contract wide enough to be hard to change.
+    paneObstruction: paneObstruction
+      ? {
+          id: paneObstruction.id,
+          matchedText: paneObstruction.matchedText,
+          at: Date.now(),
+        }
+      : null,
+    // Issue #1879: read from `output` — the RAW capture, still carrying the SGR
+    // attributes `capture-pane -e` fetched. Everything else in this function
+    // works on stripped text; this one deliberately does not, because dim is the
+    // only thing that separates Claude's ghost suggestion from text a human
+    // typed. Do not "tidy" this to read a stripped variable.
+    composerText: composer.state === 'content' ? composer.text : null,
+    composerState: composer.state,
+  };
+}
+
 
 /**
  * The payload itself, with no knowledge of how its (tool, instance) pair was
@@ -615,83 +938,19 @@ async function buildPayload(
   const newLines = lineCountIsCursor ? lines.slice(Math.max(0, lastCapturedLine)) : lines;
   const newContent = newLines.join('\n');
 
-  // The sequence from here to `startingStatusResult` is the same as in
-  // worktree-status-helper.ts; what follows differs on purpose and is not shared
-  // (#3215 "not touched").
-  const compositeKey = buildCompositeKey(worktreeId, cliToolId, instanceId);
-  const lastServerResponseTimestamp = getLastServerResponseTimestamp(compositeKey);
-  const lastOutputTimestamp = lastServerResponseTimestamp ? new Date(lastServerResponseTimestamp) : undefined;
-
-  const rawStatusResult = detectSessionStatus(output, cliToolId, lastOutputTimestamp);
-  // Issue #3179: a launch in progress. The frame is a shell prompt and the
-  // launch line, or a dialog the launch is about to answer, and none of the
-  // flags below may be read off it: the floor verdict raised the Navigate pad,
-  // the trust dialog raised the selection list / prompt sheet. A dialog that
-  // outstays the launch's own answer releases the record (a login, an unknown
-  // dialog), and from then on this is the ordinary verdict again.
-  const startingSince = observeSessionStartingFrame(
-    worktreeId,
-    cliToolId,
-    instanceId,
-    rawStatusResult.status === 'waiting' || rawStatusResult.hasActivePrompt,
-  );
-  const statusResult = startingSince === null
-    ? rawStatusResult
-    : startingStatusResult(rawStatusResult);
-  // Issue #1912: every `running` reason that means "the agent is producing
-  // output", not just `thinking_indicator`. opencode answers
-  // `opencode_processing_indicator` for its `esc interrupt` footer, which is
-  // the only signal it gives between the submitted prompt and the first
-  // transcript row — on a scraper-only session that stretch showed no
-  // thinking indicator at all.
-  const thinking = isGeneratingStatus(statusResult);
-  const scraperPromptWaiting = statusResult.hasActivePrompt;
-  const isSelectionListActive =
-    statusResult.status === 'waiting' && SELECTION_LIST_REASONS.has(statusResult.reason);
-  const isPagerActive = statusResult.reason === STATUS_REASON.CODEX_PAGER;
-  // Issue #2369: an overlay whose ONLY exit is the dismiss — Command Code's
-  // `/usage` panel, whose last row is `Press Esc to close`.
-  //
-  // A THIRD flag rather than a member of `SELECTION_LIST_REASONS`, and the
-  // separation is the fix rather than a nicety: `isSelectionListActive` is what
-  // the arrow pad is drawn from, and this screen has no highlight to move. Nor
-  // is it `isUnclassifiedActive` any more — the detector answers `waiting` for
-  // it, and `isUnclassifiedFrame` only ever says yes to `running` — which is
-  // exactly what stops the chat surface offering the eighteen-button
-  // hatch + answer-key card to a panel that accepts one key.
-  //
-  // `status === 'waiting'` is checked as well as the reason, the same shape
-  // `isSelectionListActive` above uses, so a future producer that publishes the
-  // token with some other status cannot silently turn the card into an Esc
-  // button.
-  const isDismissablePanelActive =
-    statusResult.status === 'waiting'
-    && statusResult.reason === STATUS_REASON.COMMAND_CODE_DISMISSABLE_PANEL;
-  // Issue #1497: the detection-independent nav hatch (#1017/#1494) is gated on
-  // isUnclassifiedActive. A static, unrecognized TUI overlay (e.g. Claude `/help`)
-  // whose frame stops changing degrades from `running`/`default` to
-  // `no_recent_output` once the Auto-Yes poller has stamped lastOutputTimestamp
-  // (its sole writer, auto-yes-poller.ts). That is still an interactive-but-
-  // unclassified frame — a real idle prompt (`❯`) is classified earlier as
-  // `input_prompt`, never as `no_recent_output` — so treat the timed-out fallback
-  // as unclassified too and keep the hatch open instead of stranding the user.
-  // Issue #1924, §4 D1 decision 2: stated as evidence. Issue #1927 moved that
-  // PRODUCER into the detector, because only the detector knows which rule
-  // answered — `input_prompt` is positive for a tool whose idle rule vouched for
-  // the frame and `'none'` for one whose rule declined, with the same status and
-  // the same reason on the wire.
-  const evidence: StatusEvidence = statusResult.evidence;
-  // Issue #2011: the flag is NOT that fact, and deriving it from `evidence` is
-  // the regression this Issue fixes. `'none'` is "I could not prove this pane is
-  // idle" — an ordinary Claude composer with no completion marker above it
-  // qualifies, and 7 of 8 live idle panes did on 2026-08-24. The flag's three
-  // consumers all ask the older, narrower question instead: `TerminalEscapeHatch`
-  // opens on a frame a human has to drive by hand, `wait` suppresses its
-  // completion check and eventually exits 10 on one, and `unclassified_frames`
-  // records it as a detection failure worth capturing as a fixture. That is
-  // `isUnclassifiedFrame` — the reason vocabulary, not the strength of the
-  // evidence behind a readable verdict.
-  const isUnclassifiedActive = isUnclassifiedFrame(statusResult.status, statusResult.reason);
+  const {
+    compositeKey,
+    lastServerResponseTimestamp,
+    statusResult,
+    startingSince,
+    thinking,
+    scraperPromptWaiting,
+    isSelectionListActive,
+    isPagerActive,
+    isDismissablePanelActive,
+    evidence,
+    isUnclassifiedActive,
+  } = judgeFrame(worktreeId, cliToolId, instanceId, output);
 
   // Issue #1723: the two-layer merge. Everything above this line is the string
   // analysis, unchanged and still the only source on a machine where no hook
@@ -807,40 +1066,7 @@ async function buildPayload(
     eventSource,
   });
 
-  // Issue #1723 §3: the field data this Epic is being built on. Every line is
-  // one poll where the screen and the agent disagreed about what the agent was
-  // doing, which is the only way to answer "how wrong was the scraper?" with a
-  // number instead of an anecdote. Emitted only on disagreement — a session
-  // where the two layers agree is silent — and including the disagreements this
-  // merge deliberately does NOT act on (`applied: false`), because those are
-  // exactly the cases the next Issues in the Epic have to decide about.
-  const diverging = structured !== null && structured.status !== statusResult.status;
-  if (diverging) {
-    logger.info('detection-divergence', {
-      worktreeId,
-      cliToolId,
-      instanceId: resolvedInstanceId,
-      scraperStatus: statusResult.status,
-      scraperReason: statusResult.reason,
-      structuredStatus: structured.status,
-      structuredReason: structured.reason,
-      structuredEvent: structured.event,
-      structuredEventAt: structured.at,
-      applied: merged.structuredApplied,
-    });
-  }
-  // Issue #3311: the length of a disagreement, said once when it ends. The line
-  // above is per poll and cannot carry it — see `detection-divergence.ts`.
-  const resolvedDivergence = trackDetectionDivergence(worktreeId, cliToolId, resolvedInstanceId, diverging);
-  if (resolvedDivergence !== null) {
-    logger.info('detection-divergence-resolved', {
-      worktreeId,
-      cliToolId,
-      instanceId: resolvedInstanceId,
-      durationMs: resolvedDivergence.durationMs,
-      polls: resolvedDivergence.polls,
-    });
-  }
+  logDetectionDivergence(worktreeId, cliToolId, resolvedInstanceId, statusResult, structured, merged);
 
   // Issue #1839 defined this window and Issue #2095 reuses it, so it is computed
   // once, here, above the first reader. The 100 rows are also what the payload
@@ -999,88 +1225,35 @@ async function buildPayload(
   });
   const lastKnown = getLastKnownStatus(compositeKey);
 
-  return {
-    isRunning: true,
-    sessionName,
+  return buildRunningPayload({
+    worktreeId,
     cliToolId,
-    sessionStatus: published.status,
-    sessionStatusReason: published.reason,
-    content: newContent,
-    fullOutput: output,
+    instanceId,
+    sessionName,
+    published,
+    merged,
+    newContent,
+    output,
     realtimeSnippet,
-    lineCount: totalLines,
+    totalLines,
     lastCapturedLine,
-    isComplete: isPromptWaiting,
-    isGenerating: published.thinking,
-    thinking: published.thinking,
-    // Issue #2607: named after the tool actually running. A fixed "Claude" was
-    // published for every agent, and `capture --json` readers took it at its word.
-    thinkingMessage: published.thinking ? `${getCliToolDisplayName(cliToolId)} is thinking...` : null,
     isPromptWaiting,
     promptData,
-    ...(promptAnswerable !== undefined ? { promptAnswerable } : {}),
-    // Issue #3184: appended next to the value it is derived from, not at the end
-    // — it is a reading of `promptData`, and only of it.
-    promptView: derivePromptView(promptData),
-    autoYes: {
-      enabled: autoYesState?.enabled ?? false,
-      expiresAt: autoYesState?.enabled ? autoYesState.expiresAt : null,
-      stopReason: autoYesState?.stopReason,
-      lastSuppression: getLastPolicySuppression(worktreeId, cliToolId, instanceId),
-      // Issue #1694: undefined (so the key is absent from the JSON) unless a
-      // stop pattern actually fired — the state clears it on every other path.
-      stopMatchedText: autoYesState?.stopMatchedText,
-    },
+    promptAnswerable,
+    autoYesState,
     isSelectionListActive,
     isPagerActive,
     isDismissablePanelActive,
-    isUnclassifiedActive: startingSince === null && merged.isUnclassifiedActive,
     startingSince,
-    // Issue #1926: evidence strength, named the way §4 D1 names it. Not the same
-    // fact as `isUnclassifiedActive` (Issue #2011); published from the merged
-    // verdict so it agrees with the status it accompanies.
-    statusEvidence: published.evidence,
-    lastKnownStatus: lastKnown?.status ?? null,
-    lastKnownStatusAt: lastKnown?.at ?? null,
+    lastKnown,
     lastServerResponseTimestamp,
-    serverPollerActive: isPollerActive(compositeKey),
-    lastStopEventAt: stopEventAt,
+    compositeKey,
+    stopEventAt,
     structuredEvents,
-    // Issue #1785: straight from the retention layer, unparsed. See the field
-    // docs on CurrentOutputPayload for why nothing is normalised on the way out.
     model,
-    reasoningEffort: effort,
-    // Issue #1695: appended last on purpose — every field above is a published
-    // CLI contract and reordering them churns the diff for no reader's benefit.
-    promptDedup: getPromptDedupSkips(worktreeId, cliToolId, instanceId),
-    // Issue #1839: read from `realtimeSnippet`, the same rows an operator sees
-    // in `capture --json`, so what the field claims can be checked against what
-    // is printed next to it.
-    upstreamFault: upstreamFaultMatch
-      ? {
-          id: upstreamFaultMatch.fault.id,
-          matchedText: upstreamFaultMatch.matchedText,
-          at: Date.now(),
-        }
-      : null,
-    // Issue #2095: the same three keys as `upstreamFault`, read from the same
-    // rows, so an operator comparing the two is comparing like with like. The
-    // detector's `boxRight` / `rows` stay off the wire — they are how the rule
-    // decided, not what a caller acts on, and the payload is already a published
-    // contract wide enough to be hard to change.
-    paneObstruction: paneObstruction
-      ? {
-          id: paneObstruction.id,
-          matchedText: paneObstruction.matchedText,
-          at: Date.now(),
-        }
-      : null,
-    // Issue #1879: read from `output` — the RAW capture, still carrying the SGR
-    // attributes `capture-pane -e` fetched. Everything else in this function
-    // works on stripped text; this one deliberately does not, because dim is the
-    // only thing that separates Claude's ghost suggestion from text a human
-    // typed. Do not "tidy" this to read a stripped variable.
-    composerText: composer.state === 'content' ? composer.text : null,
-    composerState: composer.state,
-  };
+    effort,
+    upstreamFaultMatch,
+    paneObstruction,
+    composer,
+  });
 }
