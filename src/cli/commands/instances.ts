@@ -15,7 +15,7 @@ import type { InstancesOptions } from '../types';
 import type { AgentInstance } from '../types/api-responses';
 import { ApiClient, ApiError, isValidWorktreeId, isValidInstanceId } from '../utils/api-client';
 import { TOKEN_WARNING, handleCommandError } from '../utils/command-helpers';
-import { isCliToolId } from '../config/cli-tool-ids';
+import { isCliToolId, CLI_TOOL_IDS } from '../config/cli-tool-ids';
 import {
   fetchAgentInstances,
   saveAgentInstances,
@@ -30,7 +30,11 @@ import { resolveSessionTarget, describeSessionTargetConflict } from '../utils/se
 // "the worktree id is wrong", and only the session's own identity can tell them
 // apart.
 import { describeServerMismatch, formatServerMismatchHint } from './whoami';
-import type { CurrentOutputResponse, OpencodeSessionsResponse } from '../types/api-responses';
+import type {
+  AutoYesStatesResponse,
+  CurrentOutputResponse,
+  OpencodeSessionsResponse,
+} from '../types/api-responses';
 // Issue #2317: the tmux session name each instance runs in, so `commandmate
 // attach` / `tmux attach` need no hand-assembly of `mcbd-<tool>-<wt>[-<suffix>]`.
 import { resolveSessionName } from '../../lib/cli-tools/session-name';
@@ -364,9 +368,44 @@ async function fetchOpencodeSessions(
 }
 
 /**
+ * Which instances have Auto-Yes armed, keyed by instance id, or null when the
+ * server does not say (Issue #3300).
+ *
+ * Auto-Yes is armed per worktree x instance and outlives the session it answers
+ * for (`auto-yes --enable` needs no session), so `current-output` cannot answer
+ * for it: a session that is not running is answered there with no `autoYes` key
+ * at all, and an armed, stopped instance was printed as `no`. This asks the
+ * state store instead — what `commandmate ls` prints from, for one worktree.
+ * An instance the map does not name has no state, which is "not armed".
+ *
+ * Null — never an error — when the request fails or the answer carries no
+ * `instances` map (a daemon older than #896). The caller then keeps each
+ * session's own reading, which is what this command printed before.
+ */
+async function fetchArmedAutoYes(
+  client: ApiClient,
+  worktreeId: string
+): Promise<Map<string, boolean> | null> {
+  try {
+    const response = await client.get<AutoYesStatesResponse>(
+      `/api/worktrees/${worktreeId}/auto-yes`
+    );
+    const states = response?.instances;
+    if (!states || typeof states !== 'object') return null;
+    return new Map(
+      Object.entries(states).map(([instanceId, state]) => [instanceId, state?.enabled === true])
+    );
+  } catch {
+    return null;
+  }
+}
+
+/**
  * List action: roster + live running/auto-yes status per instance.
  * Probes GET .../current-output?cliTool=&instance= per instance (same
  * endpoint capture.ts uses) since the roster itself carries no session state.
+ * Auto-Yes is not session state, and is read from GET .../auto-yes — see
+ * {@link fetchArmedAutoYes}.
  */
 async function listInstances(
   client: ApiClient,
@@ -380,7 +419,7 @@ async function listInstances(
   // roster without one has nothing to learn from it.
   const opencodeSessions = await fetchOpencodeSessions(client, worktreeId, instances);
 
-  const rows: InstanceRow[] = await Promise.all(
+  const sessionRows: InstanceRow[] = await Promise.all(
     instances.map(async (inst): Promise<InstanceRow> => {
       const query = new URLSearchParams({ cliTool: inst.cliTool, instance: inst.id });
       const output = await client.get<CurrentOutputResponse>(
@@ -391,6 +430,9 @@ async function listInstances(
         alias: inst.alias,
         cliTool: inst.cliTool,
         running: output.isRunning,
+        // The session's own reading: absent — so `false` — whenever the session
+        // is not running. Replaced below when the server names the armed
+        // instances itself (Issue #3300).
         autoYes: output.autoYes?.enabled ?? false,
         // Issue #1785: pass-through. `?? null` collapses "this daemon predates
         // the field" into the same null the server sends for "nothing knows" —
@@ -412,6 +454,14 @@ async function listInstances(
     })
   );
 
+  // Issue #3300: one request for the whole worktree, whatever the roster's
+  // size, and none for an empty one. Asked after the probes above, so the
+  // column is the latest of the readings this listing takes.
+  const armed = instances.length > 0 ? await fetchArmedAutoYes(client, worktreeId) : null;
+  const rows: InstanceRow[] = armed === null
+    ? sessionRows
+    : sessionRows.map(row => ({ ...row, autoYes: armed.get(row.instanceId) ?? false }));
+
   if (options.json) {
     console.log(JSON.stringify(rows, null, 2));
     return;
@@ -432,7 +482,7 @@ async function addInstance(
     process.exit(ExitCode.CONFIG_ERROR);
   }
   if (!isCliToolId(options.agent)) {
-    console.error('Error: Invalid --agent.');
+    console.error(`Error: Invalid --agent. Must be one of: ${CLI_TOOL_IDS.join(', ')}`);
     process.exit(ExitCode.CONFIG_ERROR);
   }
   if (options.id && !isValidInstanceId(options.id)) {

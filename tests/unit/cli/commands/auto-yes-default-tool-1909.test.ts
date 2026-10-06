@@ -43,6 +43,14 @@ vi.mock('@/lib/db/db-instance', () => {
   };
 });
 
+// Issue #3290: the POST asks who owns the session before it arms. These cases
+// are not about `#{session_path}` ownership and mock no tmux, so the check
+// decides by session name (see the helper's docblock) — which here is "no such
+// session" — rather than asking the tmux server of whoever runs the suite.
+vi.mock('@/lib/tmux/session-ownership', async (importOriginal) =>
+  (await import('@tests/unit/tmux/name-only-session-ownership')).nameOnlySessionOwnership(importOriginal)
+);
+
 vi.mock('@/lib/polling/auto-yes-manager', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/polling/auto-yes-manager')>();
   return {

@@ -31,10 +31,18 @@
  * @module lib/hooks/sources/claude/source
  */
 
+import {
+  assertUatOwnHomeWriteTargets,
+  CLAUDE_UAT_SETTING_SOURCES,
+  getUatIsolationMode,
+  isUatIsolationEnabled,
+  UatIsolationLaunchRefusedError,
+} from '@/config/uat-isolation';
 import { AGENT_EVENT_TYPES } from '@/lib/hooks/agent-event-types';
 import { parseAskUserQuestionPayload } from '@/lib/hooks/ask-user-question-payload';
 import {
   buildClaudeLaunchCommand,
+  getHookSettingsDirectory,
   getHookSettingsPath,
   isHookInjectionEnabled,
   PERMISSION_REQUEST_TIMEOUT_SECONDS,
@@ -53,6 +61,7 @@ import {
 } from '../hook-event-vocabulary';
 import type { AgentEventSource, AgentLaunchContext, AgentLaunchPlan, Verdict } from '../types';
 import { claudeModelSwitchMapper, extractClaudeSwitchedModel } from './model-switch';
+import { isClaudeQueuedNoticePrompt } from './queued-notice';
 import { CLAUDE_CLI_TOOL_ID } from './tool-id';
 
 /**
@@ -177,6 +186,10 @@ export const claudeAgentEventSource: AgentEventSource = definePushHookSource({
   // every other event so the flat lookup above is unchanged for them.
   extractModel: extractClaudeSwitchedModel,
 
+  // Issue #3330. A background-task notice attached to the running turn fires
+  // `UserPromptSubmit` too, and continues that turn rather than opening one.
+  promptJoinsOpenTurn: isClaudeQueuedNoticePrompt,
+
   // S2.
   extractDetail: extractSnakeCaseEventDetail,
 
@@ -193,23 +206,52 @@ export const claudeAgentEventSource: AgentEventSource = definePushHookSource({
   // writes the settings file, falls back to the bare path on any failure, and is
   // covered byte-for-byte by `tests/unit/hooks/hook-settings-generator.test.ts`.
   prepareLaunch: ({ target, executablePath }: AgentLaunchContext): AgentLaunchPlan => {
-    const command = buildClaudeLaunchCommand(executablePath, {
+    // Issue #3312: under `own-home` the settings file goes in only once its
+    // directory and the file itself check out inside the dedicated user's
+    // HOME; else the launch is refused.
+    const ownHome = getUatIsolationMode() === 'own-home';
+    const hookTarget = {
       worktreeId: target.worktreeId,
       instanceId: target.instanceId,
       cliToolId: target.cliToolId,
-    });
+    };
+    if (isHookInjectionEnabled()) {
+      assertUatOwnHomeWriteTargets(CLAUDE_CLI_TOOL_ID, [
+        getHookSettingsDirectory(),
+        getHookSettingsPath(hookTarget),
+      ]);
+    }
+    const baseCommand = buildClaudeLaunchCommand(executablePath, hookTarget);
+    // Issue #3312: under `own-home` a claude without its settings file is a
+    // check that cannot see `hook_stop`, so injection switched off or a file
+    // that could not be written refuses the launch. `1` and normal mode keep
+    // starting the bare executable.
+    if (ownHome && baseCommand === executablePath) {
+      throw new UatIsolationLaunchRefusedError(
+        CLAUDE_CLI_TOOL_ID,
+        isHookInjectionEnabled() ? 'the hook settings file could not be written' : 'CM_AGENT_HOOKS_INJECT=0',
+        isHookInjectionEnabled()
+          ? 'Make CM_AGENT_HOOKS_DIR writable by the dedicated user.'
+          : 'Do not combine CM_AGENT_HOOKS_INJECT=0 with own-home.'
+      );
+    }
     // The path is reported only when the command actually names it. Injection
     // can be switched off (`CM_AGENT_HOOKS_INJECT=0`) or fail to write, and both
     // return the bare executable — claiming a settings file in that case would
     // be telling the caller about a file that is not there.
     const settingsPath =
-      isHookInjectionEnabled() && command !== executablePath
+      isHookInjectionEnabled() && baseCommand !== executablePath
         ? getHookSettingsPath({
             worktreeId: target.worktreeId,
             instanceId: target.instanceId,
             cliToolId: target.cliToolId,
           })
         : null;
+    // Issue #3360: in UAT isolation the user's own `~/.claude/settings.json`
+    // (whose hooks post to production) is not loaded; `--settings` still is.
+    const command = isUatIsolationEnabled()
+      ? `${baseCommand} --setting-sources ${CLAUDE_UAT_SETTING_SOURCES}`
+      : baseCommand;
     // Empty, and the only source for which that is uninteresting: `--settings`
     // carries the correlation keys inside the file, so Claude never needed the
     // environment prefix the other four sources reached for (#1846).

@@ -69,6 +69,7 @@ import {
   SESSION_STARTING_PROMPT_GRACE_MS,
   getSessionStartingMaxMs,
 } from '@/config/session-starting-config';
+import { getOrInitGlobal } from '../global-state';
 
 /** One launch in progress. */
 interface SessionStartingRecord {
@@ -92,15 +93,12 @@ declare global {
   var __sessionStartingTokenScope: AsyncLocalStorage<number> | undefined;
 }
 
-const records = globalThis.__sessionStartingRecords ??
-  (globalThis.__sessionStartingRecords = new Map<string, SessionStartingRecord>());
+const records = getOrInitGlobal('__sessionStartingRecords', () => new Map<string, SessionStartingRecord>());
 
 /** On `globalThis` like the map, so tokens keep growing across route bundles. */
-const tokenSeq = globalThis.__sessionStartingTokenSeq ??
-  (globalThis.__sessionStartingTokenSeq = { last: 0 });
+const tokenSeq = getOrInitGlobal('__sessionStartingTokenSeq', () => ({ last: 0 }));
 
-const tokenScope = globalThis.__sessionStartingTokenScope ??
-  (globalThis.__sessionStartingTokenScope = new AsyncLocalStorage<number>());
+const tokenScope = getOrInitGlobal('__sessionStartingTokenScope', () => new AsyncLocalStorage<number>());
 
 /**
  * A token for a launch about to begin (Issue #3195). Strictly greater than

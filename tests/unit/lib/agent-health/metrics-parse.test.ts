@@ -8,6 +8,7 @@ import {
   classifyNpmAudit,
   countLines,
   countTypeSafety,
+  TYPE_SAFETY_COUNT_VERSION,
   describeAuditFix,
   fixedVersionOf,
   majorOf,
@@ -242,9 +243,16 @@ describe('unused (knip)', () => {
       ],
     });
     const m = ok(measureKnip(text));
-    expect(Object.keys(m.findings).sort()).toEqual(['left-pad', 'old-tool']);
+    expect(Object.keys(m.findings).sort()).toEqual(['left-pad', 'old-tool', 'src/dead.ts']);
+    expect(m.value).toBe(2);
     expect(m.details).toEqual({ unusedExports: 3, unusedFiles: 1 });
     expect(measureKnip('knip crashed').status).toBe('skip');
+  });
+
+  it('saves the unused file paths as items (repo-relative) and reads per-issue files too', () => {
+    const m = ok(measureKnip(JSON.stringify({ files: ['src/a.ts', 'src/b.ts'], issues: [{ file: 'src/c.ts', files: [{ name: 'src/c.ts' }] }] })));
+    expect(m.items).toEqual({ 'src/a.ts': 1, 'src/b.ts': 1, 'src/c.ts': 1 });
+    expect(m.details).toEqual({ unusedExports: 0, unusedFiles: 3 });
   });
 });
 
@@ -283,6 +291,90 @@ describe('type-safety', () => {
     ].join('\n');
     expect(countTypeSafety(text)).toEqual({ any: 4, eslintDisable: 2, tsIgnore: 1 });
     expect(ok(measureTypeSafety({ any: 4, eslintDisable: 2, tsIgnore: 1 })).value).toBe(7);
+  });
+
+  // Issue #3389: the regex counted English in comments, missed `T = any`, and
+  // read the `declare global { var … }` convention as a regression.
+  it('does not count "any" in comments or strings', () => {
+    const text = [
+      '// the key may be: any string',
+      '/* returns <any> of them, as any caller wants */',
+      'const s = "x: any";',
+      'const t = `as any ${1}`;',
+      "const u = 'see https://example.com: any';",
+      'export {};',
+    ].join('\n');
+    expect(countTypeSafety(text).any).toBe(0);
+  });
+
+  it('counts the any of a generic default and of an array type', () => {
+    const text = [
+      '// eslint-disable-next-line @typescript-eslint/no-explicit-any',
+      'export function f<T = any>(x: T): T { return x; }',
+      'let xs: any[] = [];',
+    ].join('\n');
+    expect(countTypeSafety(text)).toEqual({ any: 2, eslintDisable: 1, tsIgnore: 0 });
+  });
+
+  it('does not count the no-var suppression of a `declare global` var', () => {
+    const text = [
+      'declare global {',
+      '  // eslint-disable-next-line no-var',
+      '  var __state: number | undefined;',
+      '}',
+      '// eslint-disable-next-line no-var',
+      'var outside = 1;',
+      'export {};',
+    ].join('\n');
+    // the one outside `declare global` is a real suppression and still counts
+    expect(countTypeSafety(text).eslintDisable).toBe(1);
+  });
+
+  it('still counts other suppressions inside `declare global`', () => {
+    const text = [
+      'declare global {',
+      '  // eslint-disable-next-line no-var, @typescript-eslint/no-explicit-any',
+      '  var __a: any;',
+      '  // eslint-disable-next-line @typescript-eslint/no-explicit-any',
+      '  interface Window { b: any }',
+      '}',
+      'export {};',
+    ].join('\n');
+    expect(countTypeSafety(text)).toEqual({ any: 2, eslintDisable: 2, tsIgnore: 0 });
+  });
+
+  it('does not count directives inside strings or regex literals, nor JSX text', () => {
+    const text = [
+      "const re = /eslint-disable(?:-next-line)?/g;",
+      "const s = '// @ts-ignore';",
+      'export const C = () => <p>// eslint-disable here, pick: any</p>;',
+    ].join('\n');
+    expect(countTypeSafety(text, 'c.tsx')).toEqual({ any: 0, eslintDisable: 0, tsIgnore: 0 });
+  });
+
+  it('counts a comment that is a directive, not one that mentions it', () => {
+    const text = [
+      '// keep the `// eslint-disable-next-line no-var` above the var',
+      '/** never use @ts-ignore here */',
+      '/* eslint-disable-next-line no-console */',
+      '/**',
+      ' * @ts-ignore',
+      ' */',
+      'export {};',
+    ].join('\n');
+    expect(countTypeSafety(text)).toEqual({ any: 0, eslintDisable: 1, tsIgnore: 1 });
+  });
+
+  it('reads <any> as a type assertion in .ts and counts any inside JSX expressions in .tsx', () => {
+    expect(countTypeSafety('const a = <any>b;', 'a.ts').any).toBe(1);
+    expect(countTypeSafety('export const C = () => <p>{(x as any).y}</p>;', 'c.tsx').any).toBe(1);
+  });
+
+  it('marks the measurement with the counting version', () => {
+    expect(measureTypeSafety({ any: 0, eslintDisable: 0, tsIgnore: 0 })).toMatchObject({
+      countVersion: TYPE_SAFETY_COUNT_VERSION,
+    });
+    expect(TYPE_SAFETY_COUNT_VERSION).toBeGreaterThan(1);
   });
 });
 

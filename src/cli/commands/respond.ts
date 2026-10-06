@@ -15,14 +15,14 @@ import type {
 } from '../types/api-responses';
 import { ApiClient, ApiError, isValidWorktreeId } from '../utils/api-client';
 import { TOKEN_WARNING, handleCommandError } from '../utils/command-helpers';
-import { isCliToolId } from '../config/cli-tool-ids';
+import { isCliToolId, CLI_TOOL_IDS } from '../config/cli-tool-ids';
 import { AGENT_OPTION_DESCRIPTION, INSTANCE_OPTION_DESCRIPTION } from '../config/agent-target-options';
 import {
   isInstanceSelector,
   INSTANCE_ALIAS_HELP_SUFFIX,
   INSTANCE_SELECTOR_ERROR,
-  resolveInstanceTarget,
 } from './instances';
+import { resolveCommandTarget } from './command-target';
 
 /**
  * Whether this instance's agent can be answered by naming a decision
@@ -202,7 +202,7 @@ function validateRespondArgs(worktreeId: string, answer: string | undefined, opt
 
   // Validate agent if provided
   if (options.agent && !isCliToolId(options.agent)) {
-    console.error('Error: Invalid agent.');
+    console.error(`Error: Invalid agent. Must be one of: ${CLI_TOOL_IDS.join(', ')}`);
     process.exit(ExitCode.CONFIG_ERROR);
   }
 
@@ -460,12 +460,8 @@ export function createRespondCommand(): Command {
         // and falls back to the worktree default, so `--instance codex` alone
         // answered into a session that was never started. Resolve the tool the
         // instance is registered under first.
-        const target = options.instance
-          ? await resolveInstanceTarget(client, worktreeId, options.instance, options.agent)
-          : null;
-        const agent = target ? target.cliToolId : options.agent;
+        const { agent, instanceId } = await resolveCommandTarget(client, worktreeId, options.instance, options.agent);
         // Issue #2376: the resolved id. /prompt-response reads instance ids.
-        const instanceId = target?.instanceId;
 
         const body = buildPromptResponseBody(useDefault, answer, agent, instanceId, options.planReview);
 

@@ -114,9 +114,50 @@ CM_AGENT_HOOKS_INJECT=0 commandmate start
 
 そのため受け口は `(worktreeId, cliTool, instance, event, sessionId)` が一致する
 イベントを **3 秒以内は 1 回として扱う**。両方の配送は同じ `session_id` を運ぶので
-二重配送は畳まれ、別ターン（別 `session_id`）は畳まれない。
+二重配送は畳まれる。
 `sessionId` を送らない呼び出しは**畳まない**（区別材料が無いため、
 実イベントを取りこぼすより重複を許す）。
+
+`session_id` はターンをまたいで同じなので、`session_id` だけでは別のターンを区別できない。
+そこで、間にターンの境目を受けたイベントは、3 秒以内でも畳まない。
+
+- `stop` は、前の `stop` との間に同じセッションのターンの開始
+  （`user_prompt_submit` / `pre_tool_use` / `post_tool_use`）を受けていれば、
+  3 秒以内でも**別のターンの終了として適用する**（Issue #3289）。
+  ターンの開始を受けていなければ、今までどおり 2 回目の `stop` を畳む。
+- ターンの開始（上の 3 つ）は、前の同じイベントとの間に同じセッションの `stop` を受けていれば、
+  3 秒以内でも**別のターンの開始として適用する**（Issue #3301）。
+  `stop` を受けていなければ、今までどおり 2 回目を畳む。
+- それ以外のイベント（`notification` / `session_start` / `session_end`）は、
+  今までどおり 3 秒以内は 1 回として扱う。
+
+`stop` を挟まずに `user_prompt_submit` が数 ms の間隔で 2〜3 回届くことは、手動設定が無くても起きる。
+Claude Code は、キューにたまった通知（バックグラウンドのタスクの完了通知）を
+実行中のターンへまとめて渡すとき、通知 1 件ごとに `UserPromptSubmit` を発火する
+（サーバーのログとセッションの記録を突き合わせて確認した。Issue #3301）。
+どれも同じターンの中のイベントなので、1 回として扱う。
+
+3 秒より後に届いた通知も、同じターンの中のイベントである。Claude の `UserPromptSubmit` の
+`prompt` が `<task-notification>` で始まるとき（キューの通知）、同じセッションのターンが開いていれば、
+受け口は**新しいターンを開かずにそのターンへ加える**（`turnId` と `openedAt` は変わらない。Issue #3330）。
+ターンが閉じていれば（`stop` の後）、今までどおり通知が新しいターンを開く。
+`commandmate wait` は、待っているターンの途中に通知が差し込まれても、そのターンの `stop` で完了を返す。
+
+通知でない `UserPromptSubmit` は、ターンが開いていても今までどおり新しいターンを開く。
+利用者がターンを中断して送り直したときがこれに当たる（Claude Code には中断の hook が無く、
+送り直した文と実行中のターンへ加わる文を hook からは区別できないため、新しいターンとして扱う）。
+実行中のターンへ利用者が入力した文は、Claude Code が `UserPromptSubmit` を発火しないので、ターンは変わらない。
+中継スクリプト（`cmate-agent-event.sh`）は `prompt` の本文を送らず、Claude の `UserPromptSubmit` の
+`prompt` が `<task-notification>` で始まるときだけ `"queuedNotice": true` を送る。受け口はこれを通知の印として読む。
+codex など Claude 以外の道具の本文は変わらない。
+自動の HTTP hook と手動の中継を併用していると、同じ `UserPromptSubmit` が 3 秒以内に 2 回届き、後に着いた方は重複として捨てられる。
+捨てられた方だけが印を持っていた（印を送らない古い中継が先に着いた）ときも、受け口は先の配送が開き直したターンを元のターンへ戻す。
+
+捨てた配送は、サーバーのログに `agent-event-duplicate-dropped` として 1 行残る。この行には、
+インスタンス（`instanceId`）、セッション（`session`。セッション id の SHA-256 の先頭 8 文字で、id そのものは書かない）、
+同じキーで適用した前の配送からの経過（`sinceLastMs`）、細目（`detail`）が載る（Issue #3311）。
+数 ms の写しと、窓が飲み込んだ別のターンのイベントは、この行と前後の行から見分けられる。
+毎朝の計測（`hook-observation`、[agent-health](./agent-health.md)）がこれを数える。
 
 **手動設定は削除して構わない**（自動注入が同じイベントを送る）。
 残す場合も上記 dedup で二重記録は起きない。

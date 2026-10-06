@@ -118,7 +118,7 @@ ID                     NAME                  STATUS   REASON                    
 ---------------------  --------------------  -------  ------------------------------  -------  ---------------
 localllm-test          main                  ready    input_prompt                    claude   42:10
 commandmate            develop               running  thinking_indicator              claude   1:05:33
-commandmate-issue-518  feature/518-worktree  ready    no_recent_output (no evidence)  claude   off
+commandmate-issue-518  feature/518-worktree  running  no_recent_output (no evidence)  claude   off
 commandmate-issue-600  feature/600-sessions  waiting  prompt_detected                 claude   off
 commandmate-issue-644  feature/644-repos     waiting  -                               claude   03:12 (codex-2)
 commandmate-main       main                  idle     -                               claude   off
@@ -139,8 +139,8 @@ commandmate-main       main                  idle     -                         
 
 ### REASON列の意味（Issue #1926）
 
-STATUS の**根拠**です。同じ `ready` でも「エージェントが composer に戻った」（`input_prompt`）と
-「画面が読めないまま出力も止まったのでフォールバックで ready と呼んでいる」（`no_recent_output`）は
+STATUS の**根拠**です。同じ `ready` でも「エージェントが composer に戻った」（`input_prompt`）と、
+画面が読めないまま出力が止まった状態（`no_recent_output`。こちらは `running` で表示されます）は
 別物で、これまで表からは区別できませんでした。
 
 | 表示 | 意味 |
@@ -148,7 +148,7 @@ STATUS の**根拠**です。同じ `ready` でも「エージェントが compo
 | `input_prompt` | composer（入力プロンプト）を検出した |
 | `thinking_indicator` | 思考インジケータを検出した |
 | `prompt_detected` | 確認プロンプトを解析できた |
-| `<reason> (no evidence)` | **肯定的証拠なし**（`statusEvidence: 'none'`）。検出層が画面を分類できず、STATUS はフォールバック値です。現状は `default` と `no_recent_output` の 2 経路 |
+| `<reason> (no evidence)` | **肯定的証拠なし**（`statusEvidence: 'none'`）。STATUS はフォールバック値です。画面を分類できなかった場合（`running` で理由が `no_recent_output` / `unknown_frame` / `default`）のほか、分類はできたが肯定的な根拠が無い場合（例: どのツール別ルールも保証しない待機中の composer、`input_prompt`）にも付きます |
 | `-` | サーバーが理由を返さない。#1926 以前のサーバー／セッション未起動／そのツールに 2 つ以上のインスタンスがある（集約に単一の理由は無い）のいずれか |
 
 > `(no evidence)` の行は「完了した」ではありません。`commandmate capture <id> --pane` で
@@ -165,8 +165,8 @@ commandmate ls --json \
 
 | フィールド | 意味 |
 |---|---|
-| `sessionStatusByCli.<tool>.statusEvidence` | `'positive'`（何かが肯定的に確認した）／`'none'`（読めなかった） |
-| `sessionStatusByCli.<tool>.sessionStatusReason` | スクレイパーの理由コード |
+| `sessionStatusByCli.<tool>.statusEvidence` | `'positive'`（何かが肯定的に確認した）／`'none'`（肯定的な裏付けが無い。読めなかった場合を含む） |
+| `sessionStatusByCli.<tool>.sessionStatusReason` | スクレイパーの理由コード。作業中かどうか（`isProcessing`）にはエージェント自身の hook（`Stop` など）も `capture --json` と同じ規則で反映されるため、`Stop` の直後は作業中の行が画面に残っていても `isProcessing: false` になり、理由は `thinking_indicator` のままのことがあります（Issue #3377） |
 | `sessionStatusByCli.<tool>.lastKnownStatus` / `lastKnownStatusAt` | 最後に**肯定的に確認できた**状態とその時刻。サーバーのメモリ上に保持（TTL 30 分、再起動でクリア、セッション停止で破棄） |
 
 ### AUTO_YES列の意味（Issue #2575）
@@ -577,21 +577,37 @@ opencode 以外のツールでは常に `null` です（そもそも判定しま
 
 #### `ready` は必ずしも「完了」ではありません
 
-`isUnclassifiedActive` は次の 2 状態で立ちます。
+`isUnclassifiedActive` は、`sessionStatus=running` で、理由が `no_recent_output` / `unknown_frame` /
+`default` のいずれかのときに立ちます（検出層のどの規則もそのフレームを読めなかった状態。Issue #2011）。
 
 ```
-(sessionStatus=running && reason=default) || (sessionStatus=ready && reason=no_recent_output)
+sessionStatus=running && reason ∈ {no_recent_output, unknown_frame, default}
 ```
 
-後者は**読めないオーバーレイが劣化した姿**です。出力が止まったフレームは、サーバの Auto-Yes ポーラが
-`lastServerResponseTimestamp` を打った時点から約 5 秒（`STALE_OUTPUT_THRESHOLD_MS`）で
-`running`/`default` → `ready`/`no_recent_output` に反転します。つまり `ready` でも
-「完了した」とは限らず、「まだ読めないうえに出力も止まった」という意味になり得ます。
+`no_recent_output` は、出力が約 5 秒（`STALE_OUTPUT_THRESHOLD_MS`）止まったフレームに付く理由で、
+`running` のまま出ます（以前は `ready` に反転していましたが、止まった作業を「完了」と呼ばないために廃止されました）。
+`ready` で `no_recent_output` を返すのは、この廃止より前のサーバーだけです。
 
 そのため **`isUnclassifiedActive` が立っている間は `wait` は完了判定を行いません**。
 本物の完了は `ready`/`input_prompt`（エージェントが composer に戻った状態）で、こちらはフラグを
 立てないため従来どおり最初のポーリングで exit 0 になります。セッション自体が消えた場合も従来どおり
 exit 0 です。
+
+#### 次の依頼を送る前の待ちは `wait` で行う（Issue #3337）
+
+`capture --json` の `sessionStatus` を読んで `ready` になったら送る、という待ち方はしないでください。
+`sessionStatus` は 1 回の画面の読みを含む値で、ターンの途中で `ready` に見えることがありました
+（codex 0.160.0 の長いターンで、作業中の表示が読めなかったフレーム）。そこで送ると、実行中の
+ターンに割り込みます。`commandmate wait <id> --instance <name>` は、エージェント自身がターンの
+終わり（`Stop`）を報告するまで完了にしないので、こちらで待ってから送ります。
+
+サーバー側でも、codex が hooks を出しているとき（`structuredEvents.source.kind` が `hooks`）は、
+画面の読みだけでターンを閉じなくなりました。`Stop` が来ないと分かるとき — 30 分何も届かない
+（`closedBy: 'stale'`）か、画面が中断を示しているとき（`■ Conversation interrupted`。中断では
+`Stop` が来ないことを実測済み） — だけ、画面で閉じます（`closedBy: 'scraper_evidence'`）。
+リレーの返答の送信も、同じ規則で待ちます。Claude などほかのツールと、hooks の無いソースは、
+従来どおり画面でターンを閉じます（Claude の中断は、`Interrupted` の行が出る形と、送った文が
+入力欄に戻るだけの形があり、どちらも `Stop` が来ないため）。
 
 ### ターン成立の判定（Issue #1839）
 
@@ -1455,17 +1471,21 @@ commandmate capture <worktree-id> --instance codex-2 # 追加インスタンス�
   "lineCount": 42,
   "lastCapturedLine": 42,
   "promptData": null,
+  "promptView": null,
   "autoYes": {
     "enabled": false,
     "expiresAt": null,
-    "lastSuppression": null
+    "lastSuppression": null,
+    "lastEnterFallback": null
   },
   "thinking": true,
   "thinkingMessage": "Claude is thinking...",
   "cliToolId": "claude",
   "isSelectionListActive": false,
   "isPagerActive": false,
+  "isDismissablePanelActive": false,
   "isUnclassifiedActive": false,
+  "startingSince": null,
   "statusEvidence": "positive",
   "lastKnownStatus": "running",
   "lastKnownStatusAt": 1754296400123,
@@ -1506,22 +1526,33 @@ commandmate capture <worktree-id> --instance codex-2 # 追加インスタンス�
   },
   "model": "claude-opus-5[1m]",
   "reasoningEffort": null,
+  "promptDedup": {
+    "skippedCount": 0,
+    "lastSkippedAt": null
+  },
   "upstreamFault": null,
+  "composerText": null,
+  "composerState": "empty",
   "resolvedBy": "roster",
-  "conflict": null
+  "conflict": null,
+  "agentMode": "accept-edits"
 }
 ```
 
 各フィールドの意味論は次のとおりです。行番号は 2026-08-20 時点の実測で、
-関数名（`buildCurrentOutput` / `isClaudeRunning`）で追うほうが安全です。
+関数名（`buildCurrentOutput` / `isClaudeRunning`）で追うほうが安全です（以下は行番号を書きません。すぐ古くなります）。
 
 | フィールド | 意味 |
 |---|---|
 | `content` | ポーラーがまだ保存していない分（`buildCurrentOutput`）。**行数がカーソルとして使えるツールでのみ差分**＝ scrollback を持つ codex / gemini / vibe-local / antigravity で、かつ capture window（10000 行）が未飽和のとき。この場合ポーラーが保存済みなら正常時でも空になる。**alternate screen のツール（claude / opencode / copilot）と、window 飽和時は capture 全体**（行数が pane 高さ・window 幅で pin され「読んだ位置」にならないため。Issue #1910 / #1670 / #1268） |
-| `realtimeSnippet` | pane 末尾 100 行（画面そのもの。`src/lib/session/current-output-builder.ts:712`） |
+| `realtimeSnippet` | pane 末尾 100 行（画面そのもの。`src/lib/session/current-output-builder.ts` の `selectRealtimeSnippetRows`） |
 | `lineCount` | capture 全体の行数（空白行を含む。TUI は 1000 行のペインに描かれるため、空白 pane でも 1001 になりうる） |
-| `isRunning` | tmux セッションが存在して healthy（`src/lib/session/claude-session.ts:543-556`）。**ターン進行中の意味ではない** |
+| `isRunning` | tmux セッションが存在して healthy（`src/lib/session/claude-session.ts` の `isClaudeRunning` / `isSessionHealthy`）。**ターン進行中の意味ではない** |
 | `sessionStatus` / `sessionStatusReason` | 状態と、その根拠（`hook_*` なら hooks 由来、それ以外はスクレイパー由来。`HOOK_STATUS_REASON` は `src/lib/session/status-mapping.ts`） |
+| `promptData` / `promptView` / `promptAnswerable` | 画面から解析した確認プロンプトと、その見せ方・答え方。`promptView` は `promptData` を読んだ結果（Issue #3184）で、プロンプトが無ければ `null`、古いサーバーでは無い。`promptAnswerable` は `/prompt-response` がいま答えられるか（Issue #2870）で、**画面から解析したプロンプトがあるときだけ**付き、プロンプトが無いとき・構造化（hook / 縮退）形のときはキーごと無い |
+| `isSelectionListActive` / `isPagerActive` / `isDismissablePanelActive` / `isUnclassifiedActive` | 画面の形のフラグ。`isDismissablePanelActive` は `Esc to close` しか出ない閉じるだけのオーバーレイ（Issue #2369、`isSelectionListActive` とは排他）。古いサーバーでは無い |
+| `startingSince` | エージェントの起動が始まった時刻（epoch ms）。起動中だけ数値で、それ以外は `null`（Issue #3179）。数値の間は `running` / `starting` で、ダイアログ系のフラグはすべて `false` |
+| `promptDedup` | 確認プロンプトの重複判定が捨てた回数 `{ skippedCount, lastSkippedAt }`（Issue #1695）。`skippedCount` はサーバープロセスの寿命の累計で、ターンごとではない。古いサーバーでは無い |
 | `structuredEvents.*` / `lastStopEventAt` | hooks の最終イベントと最終 `stop` 時刻。hooks が来ていなければ `null` |
 | `statusEvidence` / `lastKnownStatus` / `lastKnownStatusAt` | 判定が肯定的証拠に基づくか、と直前の確定状態（Issue #1926）。下記参照 |
 | `structuredEvents.turnId` / `openedAt` / `closedAt` / `closedBy` | ターンの暫定境界（Issue #1926）。**まだ安定した turn 同一性ではありません**。下記参照 |
@@ -1532,10 +1563,31 @@ commandmate capture <worktree-id> --instance codex-2 # 追加インスタンス�
 | `structuredEvents.pendingDecisions[]` | そのインスタンスが保持している dialog（Issue #1930、`kind` / `questionOptions` は Issue #2040）。下記参照 |
 | `structuredEvents.session` | エージェント自身が申告した「いま入っている会話」（Issue #2040）。publish しないツールでは常に `null`。下記参照 |
 | `upstreamFault` | 画面に上流障害の署名があれば `{id, matchedText, at}`、無ければ `null`（Issue #1839）。**`null` は「健全」ではなく「既知の署名が無かった」** |
+| `composerText` | 入力欄にある**未送信のテキスト**。無ければ `null`（Issue #1879）。人が打った文字だけを返し、薄い色で出る候補・プレースホルダーは返さない。`null` の理由は `composerState` が区別する。claude / codex のみ |
+| `composerState` | `composerText` がその値になった理由（Issue #1879）: `content`（実際のテキストがある）／`ghost`（候補・プレースホルダーだけ）／`empty`（入力欄は空）／`unsupported_tool`（入力欄の読み方を計測していないツール）／`no_composer`（入力欄が画面に無い。セッションが動いていないときもこれ） |
+| `agentMode` | エージェントの権限モード（Issue #2592）。画面の表示から読んだ `default` / `manual` / `accept-edits` / `plan` / `auto` / `autopilot` / `bypass` / `dont-ask` / `build`、読めなければ `unknown`。**`unknown` は「既定のモード」ではなく「判定していない」**（モードの切り替えが無いツール・画面にモードの表示が無い・セッションが動いていない）。多くのツールは既定のモードで何も表示しないので、表示が無いことを `default` とは読めない |
 | `resolvedBy` / `conflict` | `cliToolId` を選んだ**解決段**と、roster と明示指定の矛盾（Issue #1884）。下記参照 |
 
-画面が空かどうかは `realtimeSnippet.trim() === ''` と `lineCount` で見る。
+画面が空かどうかは、**先に `isRunning` を見て**から判断する。
+
+- `isRunning: false` — セッションが動いていない。画面そのものが無く、`realtimeSnippet` はキーごと無い
+  （`lineCount` は `0`）。「画面が空」とは別の状態である
+- `isRunning: true` で `(realtimeSnippet ?? '').trim() === ''` — 動いていて、画面が空。`lineCount` と
+  合わせて見る（空白だけの pane でも 1001 になりうる）
+
+`realtimeSnippet` に直接 `.trim()` を呼ぶと、止まっているセッションではキーが無いので例外になる。
 `content` は差分なので単独では判断しない。
+
+**廃止の予定（Issue #3394）**: `isComplete` / `isGenerating` / `thinkingMessage` は廃止の予定です（次以降のマイナーの版で消す。#3395）。それまでは値を出し続けます。置き換え先は、`isComplete` → `isPromptWaiting`（同じ値。中身は「承認待ち」で、名前と合っていません）、`isGenerating` → `thinking`、`thinkingMessage` → `thinking` と `cliToolId` です。
+
+**セッションが動いていないとき（`isRunning: false`）は、画面から読む欄がキーごと出ません**
+（`false` や `null` にはなりません。Issue #3300）。`autoYes` / `isPromptWaiting` / `promptData` /
+`thinking` / `thinkingMessage` / `isComplete` / `isGenerating` / `realtimeSnippet` /
+`lastCapturedLine` / `isSelectionListActive` / `lastServerResponseTimestamp` /
+`serverPollerActive` が該当します。`jq` で読むときは `.isPromptWaiting // false` のように、
+欄が無い場合の値を決めてください。Auto-Yes は止まっているインスタンスにも設定できるので、
+有効かどうかは `commandmate instances <id>` の `AUTO_YES` 列（または `commandmate ls --json` の
+`autoYesByInstance`）で確認します。
 
 #### `structuredEvents.pendingDecisions[]` の `kind` / `questionOptions`（Issue #2040）
 
@@ -1696,7 +1748,7 @@ commandmate capture "$WT" --json | jq -r 'select(.structuredEvents.source.degrad
 | 値 | 意味 |
 |---|---|
 | `statusEvidence: "positive"` | 完了マーカー・思考インジケータ・解析できたプロンプト・composer、あるいはエージェント自身の `Stop` が判定の根拠 |
-| `statusEvidence: "none"` | 対話中の画面なのに検出層が読めなかった。`sessionStatus` はフォールバック値。現状は `running`/`default` と `ready`/`no_recent_output` の 2 経路で、既存の `isUnclassifiedActive` と**同じ事実**（`statusEvidence === 'none'` ⇔ `isUnclassifiedActive === true`） |
+| `statusEvidence: "none"` | 判定に肯定的な裏付けが無い（画面が読めなかった場合を含む）。`sessionStatus` はフォールバック値。`isUnclassifiedActive` とは**別の事実**です（Issue #2011）。待機中の composer でどのツール別ルールも保証しないものは、`statusEvidence: "none"` でも分類済み（`isUnclassifiedActive: false`）で、`wait` は完了します |
 
 `lastKnownStatus` / `lastKnownStatusAt` は**最後に肯定的に確認できた状態**とその時刻です。
 `statusEvidence` が `"positive"` の間は `sessionStatus` と同じ値で、`"none"` になった瞬間から
@@ -1721,7 +1773,7 @@ commandmate capture "$WT" --json | jq -r 'select(.statusEvidence == "none") | .l
 | `turnId` | ターンの識別子（`turn-<openedAt>`）、無ければ `null` |
 | `openedAt` | 直近の `user_prompt_submit` / `pre_tool_use` / `post_tool_use` の時刻 |
 | `closedAt` | エージェントがターン終了（`Stop`）を報告した時刻 |
-| `closedBy` | 終了理由。現状は `'stop'` のみ |
+| `closedBy` | 終了理由: `'stop'`（エージェントの `Stop`）/ `'session_end'` / `'stale'` / `'scraper_evidence'`（画面。hooks のソースの codex では中断を示す画面のときだけ、Issue #3337）/ `'resync_idle'` / `'generation'` |
 
 > **`turnId` はまだ安定したターン同一性ではありません。** 現状サーバーが保持しているのは
 > **最新イベント 1 件だけ**なので、ターン途中の `pre_tool_use` で `openedAt` と `turnId` が
@@ -1837,6 +1889,57 @@ commandmate capture <worktree-id> --instance worker-7 --json | jq -r '.resolvedB
 **いまポリシー抑止で停止**しています。`commandmate respond` で人間が応答するか、
 契約の `autoYes` を見直してください（`mode: safe` で `multiple_choice` が抑止される場合は
 [allow-listed への切り替え](#無人実行の-auto-yes-ポリシーは-allow-listed-を使うissue-1684)を推奨）。
+
+#### `autoYes.lastEnterFallback`: 読めない選択画面への Enter（Issue #3397）
+
+エージェントが出した選択画面を CommandMate が読めないとき、プロンプト欄には
+「この画面は CommandMate から操作できません。」と「直接入力に切り替える」リンクが出ます。
+Auto-Yes が有効なら、この画面に **Enter を 1 回だけ**送ります（その時点で選ばれている選択肢で確定します）。
+送った画面では、プロンプト欄の警告とリンクの代わりに「Auto-Yes が Enter を送りました。」と出ます。Auto-Yes が有効な間はふつうプロンプト欄を出しませんが、CommandMate が読めない画面（`promptAnswerable: false`）では、Auto-Yes 中も PC・スマホともにプロンプト欄を出します（チェックボックスの複数選択と同じ扱い。Auto-Yes はこの 2 つに番号を送らないため）。チェックボックスは `multiSelect` の有無にかかわらず、選択肢が `[ ]` / `[x]` / `[X]` / `[✔]` で始まる一覧も含みます。
+
+```json
+"autoYes": {
+  "enabled": true,
+  "expiresAt": 1754300000000,
+  "lastSuppression": null,
+  "lastEnterFallback": {
+    "outcome": "sent",
+    "promptType": "multiple_choice",
+    "refusalReason": "unsupported_dialog_layout",
+    "sentAt": 1754296400000,
+    "at": 1754296400000,
+    "currentPrompt": true
+  }
+}
+```
+
+| フィールド | 意味 |
+|-----------|------|
+| `outcome` | `sent`（Enter を送った）/ `no-effect`（Enter の後も同じ画面が残った。2 回目は送らず人に引き継ぐ） |
+| `promptType` | Enter を送った画面のプロンプトの型 |
+| `refusalReason` | 画面が操作できなかった理由（`unsupported_dialog_layout` / `prompt_no_longer_active`） |
+| `sentAt` | Enter を送った時刻（epoch ms） |
+| `at` | 最後に更新した時刻（`sentAt`、または `no-effect` を見つけた時刻） |
+| `currentPrompt` | この応答の `promptData` と同じ画面についての記録か |
+
+送るのは次の **すべて** を満たすときだけです。
+
+- プロンプト欄に「直接入力に切り替える」リンクが出る画面（`promptAnswerable: false` と同じ判定）
+- 選択画面に操作が移っている確証がある: 選択画面のフッターがあるのに配置が読めない（`unsupported_dialog_layout`）、または入力欄が画面に無い（claude / codex）
+- **入力欄が見えていない**（入力欄に文字がある・空・薄字の候補のどれでも送らない。返答が選択肢を引用しているだけの画面への誤送信を防ぐため）
+- 同じ画面を 2 回続けて見た、エージェントが終了していない・生成中でない
+- 実行契約の `autoYes` ポリシーが許す（`mode: off` / `safe`、`denyPatterns` 一致では送らない）、他サーバのセッションではない
+- codex の起動時の画面・`/model` の選択画面ではない
+
+`commandmate wait` は、報告するプロンプトについての記録（`currentPrompt: true`）があれば、stderr に 1 行添えます（`auto-yes sent Enter to this prompt …` / 効かなかったときは `… the same screen is still up (no-effect) …`）。exit 10 の JSON は変わりません。人向けの `capture`（`--json` なし）は本文だけを出すため、この記録は `--json` で読んでください。
+
+既定で有効なのは claude と codex だけです。環境変数 `CM_AUTOYES_ENTER_FALLBACK` で
+ツールごとに切り替えられます（`CM_AUTOYES_DIALOG_GATE` と同じ書式）。
+
+```bash
+CM_AUTOYES_ENTER_FALLBACK='*=disabled'       # 全ツールで送らない
+CM_AUTOYES_ENTER_FALLBACK='codex=disabled'   # codex だけ止める
+```
 
 ### `--pane`: transcript を読む（Issue #1623）
 
@@ -2012,6 +2115,24 @@ commandmate attach <worktree-id> --live               # 端末サイズへ再レ
 `$TMUX` が設定されている（tmux の中から呼んだ）場合は `switch-client` に切り替えます。
 現在のクライアントが**別の tmux サーバ**にいて切り替えられないときは、クォート済みの
 `tmux attach -t '=mcbd-…:'` を表示して非 0 で終了します。
+
+同じ名前のセッションが**別の CommandMate サーバのもの**（サーバが 409 `session_owned_by_other_server`
+を返す）だったときは、キーを届けないように振る舞いを変えます（Issue #3334）。
+
+- 既定の attach は **read-only（`-r`）に切り替えて** attach し、その旨を stderr に出します。中を見ることはできますが、打ったキーは届きません
+- `--live` は相手のセッションのジオメトリを変えるので、**attach せず**に非 0 で終了します
+- tmux の中から呼んだ場合も、`switch-client` に read-only の形が無いので**切り替えず**、tmux の外で打つ
+  `tmux attach -r -t '=mcbd-…:'` を表示して非 0 で終了します
+
+サーバの確認は、**attach する名前そのもの**についての答えでないと使いません。roster が読めずに旧形式の名前
+（`mcbd-<tool>-…`）へ落ちたとき、サーバが確かめるのは名前空間つきの名前なので、その答えは別のセッションの
+ことです（両方の名前が同時に在りえます）。このときは**持ち主を確かめられなかった**として、上と同じく
+read-only で attach し、`--live` と tmux の中からの切り替えは断ります。サーバが持ち主を答えない
+とき（404 などの 2xx 以外、停止中、持ち主の確認を持たない古いサーバ）も同じく「分からない」として扱います。
+キーを送れる attach になるのは、サーバが**自分のもの**と確かめられたときだけです。
+
+`send` / `capture` / `respond` などほかのコマンドが同じ 409 を受けたときも、「別の CommandMate サーバの
+セッションなので、送る・読む・止めるのどれもしなかった」と分かる文で終了します（終了コードは従来の 409 と同じ 99）。
 
 ### セッション名を知る
 
@@ -2211,6 +2332,8 @@ commandmate auto-yes <worktree-id> --enable --instance codex-2  # 追加イン�
 | `--instance <id>` | **対象の推奨指定方法**。対象インスタンスID。他インスタンスと独立してAuto-Yesを制御 |
 | `--agent <id>` | roster に無いインスタンス向けの補助（`--instance` 単独で足りる場合は不要） |
 
+セッションが動いていないインスタンスで有効にしても、Auto-Yes は期限（`--duration`）まで有効のまま待ち、セッションが起動したら答えます（Issue #3329）。待っている間の確認は 1 分ごとです。止まる（`consecutive_errors`）のは、セッションはあるのに画面が読めない・答えを送れない失敗や、tmux に問い合わせられない失敗が続いたときです。
+
 ### 対象エージェントは worktree の既定（Issue #1909）
 
 `--instance` も `--agent` も付けない `auto-yes <id> --enable` は、
@@ -2373,6 +2496,20 @@ opencode     opencode opencode yes      no        claude-sonnet-4.6          ses
   }
 ]
 ```
+
+#### `AUTO_YES` 列（Issue #3300）
+
+そのインスタンスの Auto-Yes が有効かどうかです。Auto-Yes は worktree × インスタンスごとに持ち、
+セッションが動いていなくても有効にできます
+（`commandmate auto-yes <id> --enable --instance <instance-id>`）。そのため `RUNNING no` の行でも
+`yes` になります。
+
+- サーバーが持つ Auto-Yes の状態（`GET /api/worktrees/<id>/auto-yes` の `instances`）から読みます。
+  `commandmate ls --json` の `autoYesByInstance` と同じ出どころです。一覧 1 回につき、
+  インスタンスの数によらず問い合わせが 1 回増えます
+- この問い合わせに答えない古いサーバーでは、これまでどおり各セッションの `current-output` の
+  `autoYes` を読みます。その場合、止まっているインスタンスは有効でも `no` と出ます
+- `--json` の `autoYes` も同じ値です
 
 #### `TMUX_SESSION` 列（Issue #2317）
 

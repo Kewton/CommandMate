@@ -43,6 +43,13 @@ vi.mock('@/lib/polling/response-checker', () => ({
   checkForResponse: stubs.checkForResponse,
   flushPendingScrapedResponse: vi.fn(() => false),
 }));
+// Issue #3334: every tick asks whose session it is before it reads. These
+// suites are about the chain's own bookkeeping, for a session that is this
+// server's; the refusal is covered by
+// tests/unit/guards/session-ownership-ws-relay-3334.test.ts.
+vi.mock('@/lib/realtime/terminal-session-ownership', () => ({
+  findTerminalSessionRefusal: vi.fn(async () => null),
+}));
 vi.mock('@/lib/realtime/terminal-broadcast', () => ({
   broadcastTerminalSnapshot: stubs.broadcastTerminalSnapshot,
 }));

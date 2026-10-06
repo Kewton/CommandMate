@@ -11,10 +11,9 @@ import { getWorktreeById } from '@/lib/db';
 import {
   resolveSessionTarget,
   resolveSessionTargetStrict,
-  describeSessionTargetConflict,
-  INSTANCE_TOOL_CONFLICT,
   type SessionTarget,
 } from '@/lib/session/resolve-session-target';
+import { sessionTargetConflictResponse } from '@/lib/session/session-target-conflict-response';
 import {
   getAutoYesState,
   setAutoYesEnabled,
@@ -30,9 +29,12 @@ import {
 import { recheckPendingDecisions } from '@/lib/hooks/pending-decision-recheck';
 import { isValidWorktreeId } from '@/lib/security/path-validator';
 import { CLI_TOOL_IDS, isValidInstanceId, type CLIToolType } from '@/lib/cli-tools/types';
+import { resolveSessionName } from '@/lib/cli-tools/session-name';
+import { checkSessionOwnership, foreignSessionErrorBody } from '@/lib/cli-tools/session-ownership';
 import { isAllowedDuration, DEFAULT_AUTO_YES_DURATION, validateStopPattern, type AutoYesDuration } from '@/config/auto-yes-config';
 import { createLogger } from '@/lib/logger';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
+import type { Worktree } from '@/types/models';
 
 const logger = createLogger('api/auto-yes');
 
@@ -117,8 +119,8 @@ function buildAutoYesResponse(
   return response;
 }
 
-/** Validate that the worktree exists; returns 404 response if not found */
-function validateWorktreeExists(worktreeId: string): NextResponse | null {
+/** The worktree row, or the 404 response to answer with when there is none */
+function findWorktreeOr404(worktreeId: string): Worktree | NextResponse {
   const db = getDbInstance();
   const worktree = getWorktreeById(db, worktreeId);
   if (!worktree) {
@@ -127,7 +129,7 @@ function validateWorktreeExists(worktreeId: string): NextResponse | null {
       { status: 404 }
     );
   }
-  return null;
+  return worktree;
 }
 
 /** Validate CLI tool ID */
@@ -151,8 +153,8 @@ export async function GET(
       );
     }
 
-    const notFound = validateWorktreeExists(id);
-    if (notFound) return notFound;
+    const found = findWorktreeOr404(id);
+    if (found instanceof NextResponse) return found;
 
     // Issue #525: cliToolId query parameter support
     // Issue #896: optional instanceId query parameter for per-instance state
@@ -252,14 +254,20 @@ export async function POST(
       );
     }
 
-    const notFound = validateWorktreeExists(id);
-    if (notFound) return notFound;
+    const worktree = findWorktreeOr404(id);
+    if (worktree instanceof NextResponse) return worktree;
 
     // [SEC-SF-001] JSON parse error handling
     let body;
     try {
       body = await request.json();
     } catch {
+      return NextResponse.json(
+        { error: 'Invalid JSON body' },
+        { status: 400 }
+      );
+    }
+    if (typeof body !== 'object' || body === null || Array.isArray(body)) {
       return NextResponse.json(
         { error: 'Invalid JSON body' },
         { status: 400 }
@@ -341,14 +349,7 @@ export async function POST(
       requestedCliTool: body.cliToolId as CLIToolType | undefined,
     });
     if (!resolution.ok) {
-      return NextResponse.json(
-        {
-          error: describeSessionTargetConflict(resolution.conflict),
-          code: INSTANCE_TOOL_CONFLICT,
-          ...resolution.conflict,
-        },
-        { status: 400 }
-      );
+      return sessionTargetConflictResponse(resolution.conflict);
     }
     const target = resolution.target;
     const cliToolId: CLIToolType = target.cliToolId;
@@ -361,6 +362,23 @@ export async function POST(
     let pendingDecisions: AutoYesResponse['pendingDecisions'];
     let state;
     if (body.enabled) {
+      // Issue #3290: a same-named session another CommandMate server created is
+      // not this worktree's to auto-answer. The poller already declines to act
+      // on one (#2865), so arming used to answer 200 and show ON over a session
+      // nothing would ever answer. Refused here, before any state is written,
+      // with the 409 the routes that type into a session give.
+      //
+      // Only `foreign` is refused. `absent` goes on: `commandmate send
+      // --auto-yes` arms ahead of the session it is about to start. And only
+      // arming is checked — turning Auto-Yes off below writes this server's own
+      // state and touches no pane, and refusing it would leave a grant nobody
+      // could withdraw.
+      const sessionName = resolveSessionName(cliToolId, id, instanceId);
+      const ownership = await checkSessionOwnership(sessionName, worktree.path);
+      if (ownership.verdict === 'foreign') {
+        return NextResponse.json(foreignSessionErrorBody(sessionName, ownership.sessionPath), { status: 409 });
+      }
+
       state = setAutoYesEnabled(
         id,
         cliToolId,

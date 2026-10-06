@@ -31,6 +31,7 @@
 import { buildCompositeKey } from '@/lib/auto-yes-state';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import type { ToolInputNormalization } from './tool-input-normalization';
+import { getOrInitGlobal } from '../global-state';
 
 /** What was normalised, for which tool call, and when. */
 export interface ToolInputNormalizationRecord extends ToolInputNormalization {
@@ -46,8 +47,7 @@ declare global {
 }
 
 /** compositeKey -> the most recent normalisation for that session. */
-const lastNormalizations = globalThis.__toolInputNormalizations ??
-  (globalThis.__toolInputNormalizations = new Map<string, ToolInputNormalizationRecord>());
+const lastNormalizations = getOrInitGlobal('__toolInputNormalizations', () => new Map<string, ToolInputNormalizationRecord>());
 
 /**
  * Record that `instanceId`'s last permission request arrived in a shape this

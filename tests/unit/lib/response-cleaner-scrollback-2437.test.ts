@@ -65,10 +65,20 @@ describe('[#2437] codex', () => {
 
   it('boots with no reply to keep, so the whole banner-and-composer frame cleans away', () => {
     // `idle-composer.txt` is a freshly launched codex: box-drawn banner, two
-    // notices, composer, status bar. Sliced at the composer's blank row, there
-    // is no transcript at all and the honest answer is an empty string.
-    const bootTail = tailFrom(join(CODEX_FIXTURES, 'idle-composer.txt'), 11);
-    expect(cleanScrollbackResponse(bootTail, 'codex')).toBe('');
+    // notices, composer, status bar. There is no transcript at all and the
+    // honest answer is an empty string.
+    //
+    // Issue #3293: the whole frame is the input, banner rows 0-9 included. This
+    // used to slice at row 11, which left only the composer and so showed the
+    // chrome cut and nothing else — the two notices (`Tip: …`, `• You have 2
+    // usage limit resets…`) match no skip pattern and were what the flush saved.
+    // On a first flush the rows past the cursor ARE the pane, so the pane is
+    // handed over with them, and a pane no message has been echoed on yet holds
+    // no reply.
+    const boot = tailFrom(join(CODEX_FIXTURES, 'idle-composer.txt'), 0);
+    expect(boot).toContain('OpenAI Codex');
+    expect(boot).toContain('usage limit resets');
+    expect(cleanScrollbackResponse(boot, 'codex', boot.split('\n'))).toBe('');
   });
 
   it('reads the composer by its SGR attributes, not by its placeholder wording', () => {

@@ -32,6 +32,7 @@
  * @module lib/hooks/sources/opencode-v2/subscription
  */
 
+import { getOrInitGlobal } from '@/lib/global-state';
 import { forgetAgentSessionTelemetry } from '@/lib/hooks/agent-session-telemetry';
 import { createLogger } from '@/lib/logger';
 import type {
@@ -98,13 +99,13 @@ declare global {
   var __opencodeV2EndedLiveness: Map<string, SourceLiveness> | undefined;
 }
 
-const subscriptions = (globalThis.__opencodeV2Subscriptions ??= new Map<
+const subscriptions = getOrInitGlobal('__opencodeV2Subscriptions', () => new Map<
   string,
   SubscriptionState
 >());
 
 /** The last liveness of a subscription that ended on its own, for `liveness()`. */
-const endedLiveness = (globalThis.__opencodeV2EndedLiveness ??= new Map<
+const endedLiveness = getOrInitGlobal('__opencodeV2EndedLiveness', () => new Map<
   string,
   SourceLiveness
 >());
@@ -132,11 +133,6 @@ export function getOpencodeV2Liveness(target: AgentInstanceRef): SourceLiveness 
  */
 export function isOpencodeV2StructuredHistoryLive(target: AgentInstanceRef): boolean {
   return getOpencodeV2Liveness(target).state === 'live';
-}
-
-/** The port an open subscription reads, or null. */
-export function getOpencodeV2SubscribedPort(target: AgentInstanceRef): number | null {
-  return subscriptions.get(opencodeV2KeyOf(target))?.port ?? null;
 }
 
 function handleFor(state: SubscriptionState): Subscription {

@@ -1,0 +1,42 @@
+  [38;2;99;168;248m>_ [1m[39mOpenAI Codex[0;2m (v0.160.0)[0m
+     [2m~/share/work/github_kewton/commandmate-tutorial[0m
+
+  [38;2;99;168;248mShall we make this terminal earn its keep?[39m
+
+
+[1;2m› [0mシェルで touch uat-3183-codex.txt を 1 回だけ実行し、終わったら done とだけ答えてください。
+
+
+[2m• [0m指定のコマンドを1回実行します。
+
+[1m[38;5;2m•[0m [1mRan[0m [38;2;137;180;250mtouch[38;2;205;214;244m uat-3183-codex.txt[39m
+[2m  └ (no output)[0m
+
+[2m• [0mdone
+
+[2m  Worked for 14s • 19:30
+
+
+[1m› [0mネットワークに出る確認です。シェルで curl -sI ]8;;https://example.com\https://example.com]8;;\ を 1 回だけ実行してください。サンドボックスで失敗したら、承認を求めて再実行してください。終わったら HTTP の 1 行目だけ答えてくださ
+  い。
+
+
+[2m• [0m指定のコマンドを1回実行し、サンドボックスで失敗した場合は承認を求めて再実行します。
+
+[1m[38;5;1m•[0m [1mFailed (exit 6)[0m [38;2;137;180;250mcurl[38;2;147;153;178m -[38;2;235;160;172msI[38;2;205;214;244m https://example.com[39m
+[2m  └ (no output)[0m
+
+[1m[38;5;2m•[0m [1mRan[0m [38;2;137;180;250mcurl[38;2;147;153;178m -[38;2;235;160;172msI[38;2;205;214;244m https://example.com[39m
+[2m  └ cf-ray: a45382ecf82da605-NRT[0m
+[2m    alt-svc: h3=":443"; ma=86400[0m
+
+[2m    + 9 lines (ctrl+t to expand)
+
+• [0mHTTP/2 200
+
+[2m  Worked for 17s • 19:30
+[0m
+[1m›[0m hello
+  world
+
+  [38;2;246;226;183mGPT-6.1-Sol xhigh[39m · [38;2;171;223;167m~/share/work/github_kewton/commandmate-tutorial[39m · [38;2;245;194;231mファイルを作成[39m

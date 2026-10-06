@@ -597,6 +597,19 @@ export interface AgentEventSource {
    */
   eventIdentityOf(payload: Record<string, unknown>): string | null;
 
+  /**
+   * Whether this `user_prompt_submit` payload joins the turn already running
+   * rather than beginning one (Issue #3330).
+   *
+   * Claude Code fires `UserPromptSubmit` for every background-task notice it
+   * attaches to a running turn, and the prompt it reports is the notice. The
+   * answer is about the payload only — whether a turn is running is the
+   * state's question, and a joining prompt with no turn to join still opens
+   * one. Absent, or false, is the behaviour every source had before: each
+   * prompt is a new turn. Must never throw.
+   */
+  promptJoinsOpenTurn?(payload: Record<string, unknown>): boolean;
+
   /** Read this source's permission-request payload, or null when unreadable (S7). */
   parsePermissionRequest(payload: Record<string, unknown>): PermissionRequestPayload | null;
 
@@ -617,9 +630,16 @@ export interface AgentEventSource {
    * The command that starts this agent, with whatever config it needs written
    * out first (S3 / S4 / S5).
    *
-   * Must never throw: injecting hooks is an enhancement to a session that has
-   * to start anyway, so a config that cannot be written costs the events and
-   * returns the bare executable.
+   * Must never throw, with one exception: injecting hooks is an enhancement to
+   * a session that has to start anyway, so a config that cannot be written
+   * costs the events and returns the bare executable. The exception is UAT
+   * isolation (`CM_UAT_ISOLATION=1`, Issue #3360): codex, antigravity and
+   * copilot (Issue #3391) throw `UatIsolationLaunchRefusedError` instead,
+   * because their bare executable still reads the user's shared hook config.
+   * Under `CM_UAT_ISOLATION=own-home` (Issue #3312) all four (claude too)
+   * throw it when a path they would write is not inside the dedicated user's
+   * HOME. Callers build the plan BEFORE
+   * creating the tmux session, so a refusal leaves no pane behind.
    *
    * Takes {@link AgentLaunchContext} rather than `(target, executablePath)`
    * since Issue #1846, so the one input a per-worktree config needs is inside

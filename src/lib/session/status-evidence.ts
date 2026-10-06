@@ -50,21 +50,11 @@ import { STATUS_REASON } from '@/lib/detection/status-reason';
 import type { SessionStatus } from '@/lib/detection/status-detector';
 import { STRUCTURED_STATE_MAX_AGE_MS } from '@/lib/session/agent-event-state';
 
-/**
- * Whether a status rests on something positive, or on the absence of a negative
- * (Issue #1924, §4 D1 決定 2).
- *
- * `'positive'` — a marker, a tool-specific idle-composer rule, or a structured
- * event said so. `'none'` — nothing on the frame could be read either way, and
- * the status is a fallback.
- *
- * The design policy adds this rather than a fifth `SessionStatus`: the value
- * domain stays four wide, because `src/cli/types/api-responses.ts` enumerates it
- * and a new member is a breaking change for every consumer older than the server
- * — including `commandmate-skills`' `orchestrate-monitor`, which reads
- * `capture --json` as its primary signal.
- */
-export type StatusEvidence = 'positive' | 'none';
+// The type lives in an import-free module so `src/cli/types/api-responses.ts`,
+// which cannot resolve `@/`, can share it. Re-exported under the same name.
+import type { StatusEvidence } from './status-evidence-type';
+import { getOrInitGlobal } from '../global-state';
+export type { StatusEvidence };
 
 /**
  * The reasons that mean "no rule could read this frame" (Issue #2011).
@@ -149,8 +139,7 @@ declare global {
 }
 
 const latches =
-  globalThis.__lastKnownStatusByKey ??
-  (globalThis.__lastKnownStatusByKey = new Map<string, LastKnownStatus>());
+  getOrInitGlobal('__lastKnownStatusByKey', () => new Map<string, LastKnownStatus>());
 
 /**
  * Cap on retained latches, so a long-lived server cannot grow one per worktree

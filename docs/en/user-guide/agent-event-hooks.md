@@ -119,9 +119,56 @@ idempotent, but `agent_idle` in `task_events` **gains one row per delivery** (me
 
 So the endpoint treats events matching on
 `(worktreeId, cliTool, instance, event, sessionId)` **as one event within a 3-second window**. Both
-deliveries carry the same `session_id`, so the double delivery collapses while a different turn
-(a different `session_id`) does not. A call that sends no `sessionId` is **never collapsed** (there is
-nothing to tell them apart with, and losing a real event is worse than allowing a duplicate).
+deliveries carry the same `session_id`, so the double delivery collapses. A call that sends no
+`sessionId` is **never collapsed** (there is nothing to tell them apart with, and losing a real event
+is worse than allowing a duplicate).
+
+A `session_id` stays the same across turns, so the `session_id` alone cannot tell one turn from
+another. An event is therefore not collapsed, even inside the 3-second window, when a turn boundary
+arrived in between.
+
+- A `stop` is **applied as the end of a different turn**, even inside the 3-second window, when a
+  turn start from the same session (`user_prompt_submit` / `pre_tool_use` / `post_tool_use`) arrived
+  between it and the previous `stop` (Issue #3289). With no turn start in between, the second `stop`
+  is collapsed as before.
+- A turn start (the three above) is **applied as the start of a different turn**, even inside the
+  3-second window, when a `stop` from the same session arrived between it and the previous event of
+  the same kind (Issue #3301). With no `stop` in between, the second one is collapsed as before.
+- Every other event (`notification` / `session_start` / `session_end`) is still treated as one event
+  within the 3-second window.
+
+Two or three `user_prompt_submit` events a few milliseconds apart, with no `stop` between them, also
+arrive without any manual configuration. When Claude Code hands queued notices (the completion
+notices of background tasks) to a turn that is already running, it fires `UserPromptSubmit` once per
+notice (confirmed by matching the server log against the session records, Issue #3301). They all
+belong to the same turn, so they are treated as one event.
+
+A notice that arrives later than 3 seconds belongs to the same turn too. When the `prompt` of a
+Claude `UserPromptSubmit` starts with `<task-notification>` (a queued notice) and a turn of the same
+session is open, the receiver **adds it to that turn instead of opening a new one** (`turnId` and
+`openedAt` do not change, Issue #3330). When the turn is closed (after a `stop`), the notice opens a
+new turn as before. `commandmate wait` still completes on the `stop` of the turn it is waiting for
+when a notice is delivered in the middle of that turn.
+
+A `UserPromptSubmit` that is not a notice still opens a new turn, even while one is open. That is the
+case when the operator interrupts a turn and sends again (Claude Code has no interrupt hook, and a
+resent prompt cannot be told apart from one joining the running turn by its hook alone, so it is
+treated as a new turn). Text the operator types into a running turn fires no `UserPromptSubmit` at
+all, so the turn does not change. The relay script (`cmate-agent-event.sh`) never sends the text of
+`prompt`; it sends `"queuedNotice": true` only when the `prompt` of a Claude `UserPromptSubmit` starts
+with `<task-notification>`, and the receiver reads that as the notice mark. The bodies it sends for
+codex and every other tool are unchanged. With both the automatic HTTP hook and a manual relay in
+place, the same `UserPromptSubmit` arrives twice within 3 seconds and the later copy is dropped as a
+duplicate. When only the dropped copy carried the mark (an older relay that does not send it landed
+first), the receiver puts the running turn back in place of the one the first copy re-opened.
+
+Each dropped delivery leaves one `agent-event-duplicate-dropped` line in the server log. The line
+carries the instance (`instanceId`), the session (`session`: the first 8 characters of the SHA-256
+of the session id — the id itself is never written), how long after the applied delivery with the
+same key it arrived (`sinceLastMs`) and the subtype (`detail`) (Issue #3311). A copy a few
+milliseconds behind and an event of another turn the window swallowed can be told apart from this
+line and the lines around it; the daily metrics (`hook-observation`, see the agent-health guide)
+count them.
 
 **The manual configuration may simply be deleted** (automatic injection sends the same events).
 Keeping it causes no double recording either, thanks to the dedup above.

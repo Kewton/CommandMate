@@ -3,7 +3,7 @@
  * CommandMate (Issue #2878). Entry point is `run.ts`; this is the run.
  *
  * Order of a run:
- *   1. parse arguments, take the run lock, start the hook listener
+ *   1. parse arguments, take the shared run lock (Issue #3359), start the hook listener
  *   2. per tool: `--version` → snapshot machine-singleton files →
  *      `prepareLaunch` → private tmux session → screens and turns → kill →
  *      restore the snapshots (sha256-proved) → scan the production log
@@ -47,20 +47,24 @@ import {
   reportDateJst,
   type AgentHealthExitCode,
 } from '@/lib/agent-health/report';
+import { acquireRunLock } from '@/lib/agent-health/run-lock';
 import { AGENT_HEALTH_TMUX_SOCKET, buildChildEnv } from '@/lib/agent-health/tmux-command';
 import { framesDirFor, resolveFrameSaveMode, type FrameArchive } from '@/lib/agent-health/frame-archive';
+import { buildCoverage, checksLimitedTools, skipCheck, summarizeCoverage } from '@/lib/agent-health/coverage';
 import {
+  AGENT_HEALTH_LIMITED_TOOLS,
   PROBE_WORKTREE_ID,
   type AgentHealthCheck,
+  type AgentHealthLimitedTool,
   type AgentHealthReport,
   type AgentHealthToolResult,
   type GlobalConfigRestoreEntry,
 } from '@/lib/agent-health/types';
 import { HookListener } from './hook-listener';
 import { locateServerLog, ServerLogWatch } from './production-log';
-import { probeTool, readVersion } from './probe-tool';
+import { probeLimitedTool, probeTool, readVersion } from './probe-tool';
 import { AgentHealthTmux } from './tmux-driver';
-import { TOOL_PROBE_SPECS } from './tool-table';
+import { LIMITED_TOOL_SPECS, TOOL_PROBE_SPECS } from './tool-table';
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..');
 const DEFAULT_DIR = path.join(os.homedir(), '.commandmate', 'agent-health');
@@ -98,26 +102,6 @@ function writeJson(file: string, value: unknown): void {
   const staging = `${file}.tmp-${process.pid}`;
   fs.writeFileSync(staging, `${JSON.stringify(value, null, 2)}\n`);
   fs.renameSync(staging, file);
-}
-
-function isAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/** One run at a time: the tmux socket label and the listener's hook config are shared. */
-function acquireLock(lockPath: string): string | null {
-  fs.mkdirSync(path.dirname(lockPath), { recursive: true });
-  const holder = Number.parseInt(readTextIfPresent(lockPath) ?? '', 10);
-  if (Number.isInteger(holder) && holder !== process.pid && isAlive(holder)) {
-    return `別の agent-health 実行（pid ${holder}）が進行中（${lockPath}）`;
-  }
-  fs.writeFileSync(lockPath, String(process.pid));
-  return null;
 }
 
 function emptyReport(startedAt: Date, errors: string[], syncedFrom: string | null = null): AgentHealthReport {
@@ -201,16 +185,19 @@ async function run(options: AgentHealthOptions, startedAt: Date): Promise<AgentH
     dir: framesDirFor(outPath, reportDateJst(startedAt)),
     mode: resolveFrameSaveMode(process.env),
   };
-  const lockPath = path.join(path.dirname(statePath), 'run.lock');
   const scriptErrors: string[] = [];
   const restoreEntries: GlobalConfigRestoreEntry[] = [];
   const results: AgentHealthToolResult[] = [];
+  const limitedRun: AgentHealthLimitedTool[] = [];
   const globalDeadline = startedAt.getTime() + RUN_BUDGET_SEC * 1000 - TEARDOWN_RESERVE_MS;
 
-  const lockError = acquireLock(lockPath);
-  if (lockError) {
-    log(lockError);
-    writeReportOrPrint(outPath, emptyReport(startedAt, [lockError], options.syncedFrom));
+  // One run at a time: the tmux socket label and the listener's hook config are
+  // shared, and a UAT server (scripts/uat/run-server.sh) holds the same lock.
+  // Under daily.sh the lock is already held and passed down (CM_RUN_LOCK_TOKEN).
+  const lock = acquireRunLock({ label: 'agent-health' });
+  if (!lock.ok) {
+    log(lock.error);
+    writeReportOrPrint(outPath, emptyReport(startedAt, [lock.error], options.syncedFrom));
     return 2;
   }
 
@@ -250,7 +237,7 @@ async function run(options: AgentHealthOptions, startedAt: Date): Promise<AgentH
       await tmux?.teardown();
       await listener?.close().catch(() => undefined);
       fs.rmSync(workRoot, { recursive: true, force: true });
-      fs.rmSync(lockPath, { force: true });
+      lock.release();
       process.exit(2);
     })();
   };
@@ -293,12 +280,14 @@ async function run(options: AgentHealthOptions, startedAt: Date): Promise<AgentH
         const { version } = await readVersion(spec.executable, childEnv);
         const skipped: AgentHealthCheck[] = options.checks
           .filter((checkId) => checkId !== 'version')
-          .map((checkId) => ({
-            checkId,
-            status: 'skip',
-            summary: `全体の時間上限（${RUN_BUDGET_SEC / 60} 分）に達したため実行しない`,
-            skipReason: 'run budget exhausted',
-          }));
+          .map((checkId) =>
+            skipCheck(
+              checkId,
+              'timeout',
+              `全体の時間上限（${RUN_BUDGET_SEC / 60} 分）に達したため実行しない`,
+              'run budget exhausted'
+            )
+          );
         results.push(
           buildToolResult({
             tool,
@@ -386,6 +375,21 @@ async function run(options: AgentHealthOptions, startedAt: Date): Promise<AgentH
 
       results.push(buildToolResult({ tool, version: outcome.version, previousVersion, checks: outcome.checks }));
     }
+
+    // Issue #3313: the tools the probe does not launch are rows too — on the
+    // daily run (every probed tool selected), not on a `--tools` retry.
+    if (checksLimitedTools(options.tools)) {
+      for (const tool of AGENT_HEALTH_LIMITED_TOOLS) {
+        const outcome = await probeLimitedTool(LIMITED_TOOL_SPECS[tool], childEnv, (checkId) =>
+          options.checks.includes(checkId)
+        );
+        log(`${tool}: version-only — ${outcome.checks[0].summary}`);
+        limitedRun.push(tool);
+        results.push(
+          buildToolResult({ tool, version: outcome.version, previousVersion: previousVersionOf(state, tool), checks: outcome.checks })
+        );
+      }
+    }
   } catch (error) {
     const message = error instanceof Error ? error.stack ?? error.message : String(error);
     log(`run aborted: ${message}`);
@@ -425,6 +429,12 @@ async function run(options: AgentHealthOptions, startedAt: Date): Promise<AgentH
     ...(scriptErrors.length > 0 ? { scriptErrors } : {}),
     ...(sync ? { sync } : {}),
   };
+  report.coverage = buildCoverage({
+    results,
+    selectedTools: [...options.tools, ...limitedRun],
+    selectedChecks: options.checks,
+  });
+  report.summary = summarizeCoverage(report.coverage, results);
 
   if (!writeReportOrPrint(outPath, report)) scriptErrors.push(`レポートを書けなかった: ${outPath}`);
   try {
@@ -432,13 +442,15 @@ async function run(options: AgentHealthOptions, startedAt: Date): Promise<AgentH
   } catch (error) {
     scriptErrors.push(`state を書けなかった: ${error instanceof Error ? error.message : String(error)}`);
   }
-  fs.rmSync(lockPath, { force: true });
+  lock.release();
 
   const exitCode = scriptErrors.length > 0 ? 2 : decideExitCode(report);
   for (const result of results) {
     const line = result.checks.map((check) => `${check.checkId}=${check.status}`).join(' ');
     log(`${result.tool} ${result.version ?? '(no version)'}${result.versionChanged ? ` (was ${result.previousVersion})` : ''}: ${line}`);
   }
+  // Issue #3313: what the watcher reads — the counts first, never "all pass".
+  process.stdout.write(`${report.summary.join('\n')}\n`);
   log(`exit ${exitCode}`);
   return exitCode;
 }

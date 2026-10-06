@@ -9,6 +9,7 @@
 
 import { createHash } from 'crypto';
 import type { CLIToolType } from '@/lib/cli-tools/types';
+import { getOrInitGlobal } from '../global-state';
 
 /**
  * In-memory cache: pollerKey -> SHA-256 hash of last saved prompt content.
@@ -27,8 +28,7 @@ declare global {
   var __promptHashCache: Map<string, string> | undefined;
 }
 
-const promptHashCache = globalThis.__promptHashCache ??
-  (globalThis.__promptHashCache = new Map<string, string>());
+const promptHashCache = getOrInitGlobal('__promptHashCache', () => new Map<string, string>());
 
 /**
  * Check if the given prompt content is a duplicate of the last saved prompt

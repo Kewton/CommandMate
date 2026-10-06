@@ -4,6 +4,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { readJsonObjectBody } from '@/lib/api/read-json-body';
 import { getDbInstance } from '@/lib/db/db-instance';
 import { getMessageById, updatePromptData, getWorktreeById } from '@/lib/db';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
@@ -54,7 +55,9 @@ export async function POST(
   try {
     const { id: requestedWorktreeId } = await params;
     const id = canonicalWorktreeId(requestedWorktreeId);
-    const { messageId, decisionId, answer, cliTool: bodyCliTool, instanceId: bodyInstanceId } = await req.json();
+    const parsed = await readJsonObjectBody(req);
+    if (!parsed.ok) return parsed.response;
+    const { messageId, decisionId, answer, cliTool: bodyCliTool, instanceId: bodyInstanceId } = parsed.body;
 
     // Validation. Issue #1932 made `messageId` optional when a `decisionId` is
     // offered; Issue #2040 makes both optional, so the one field every shape
@@ -279,7 +282,7 @@ export async function POST(
         cliToolId,
         promptData: promptData,
       });
-      logger.info('sent-answer-to');
+      logger.info('prompt-answer-sent');
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       return NextResponse.json(
@@ -313,7 +316,7 @@ export async function POST(
     startPolling(id, cliToolId, instanceId);
     void broadcastTerminalSnapshotAfterInteraction(id, cliToolId, instanceId);
 
-    logger.info('resumed-polling-for');
+    logger.info('polling-resumed-after-answer');
 
     return NextResponse.json({
       success: true,

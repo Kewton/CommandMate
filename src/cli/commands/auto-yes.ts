@@ -10,7 +10,7 @@ import type { AutoYesSetResult } from '../types/api-responses';
 import { ApiClient, isValidWorktreeId, isValidInstanceId, MAX_STOP_PATTERN_LENGTH } from '../utils/api-client';
 import { TOKEN_WARNING, handleCommandError } from '../utils/command-helpers';
 import { parseDurationToMs, ALLOWED_DURATIONS } from '../config/duration-constants';
-import { isCliToolId } from '../config/cli-tool-ids';
+import { isCliToolId, CLI_TOOL_IDS } from '../config/cli-tool-ids';
 import { AGENT_OPTION_DESCRIPTION, INSTANCE_OPTION_DESCRIPTION } from '../config/agent-target-options';
 import { resolveInstanceCliTool } from './instances';
 
@@ -90,7 +90,7 @@ export function createAutoYesCommand(): Command {
         }
 
         if (options.agent && !isCliToolId(options.agent)) {
-          console.error('Error: Invalid agent.');
+          console.error(`Error: Invalid agent. Must be one of: ${CLI_TOOL_IDS.join(', ')}`);
           process.exit(ExitCode.CONFIG_ERROR);
         }
 

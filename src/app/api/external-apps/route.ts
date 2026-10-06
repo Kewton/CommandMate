@@ -20,6 +20,7 @@ import { getExternalAppCache } from '@/lib/external-apps/cache';
 import { validateCreateInput } from '@/lib/external-apps/validation';
 import type { CreateExternalAppInput } from '@/types/external-apps';
 import { createLogger } from '@/lib/logger';
+import { readJsonObjectBody } from '@/lib/api/read-json-body';
 
 const logger = createLogger('api/external-apps');
 
@@ -52,7 +53,9 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const db = getDbInstance();
-    const body = await request.json();
+    const parsed = await readJsonObjectBody(request);
+    if (!parsed.ok) return parsed.response;
+    const body = parsed.body;
 
     // Validate input
     const errors = validateCreateInput(body);

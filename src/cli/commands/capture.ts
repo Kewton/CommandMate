@@ -12,7 +12,7 @@ import type { CurrentOutputResponse, PromptMessageResponse, WorktreeDetailRespon
 import { MAX_MESSAGES_LIMIT } from '../../config/history-display-config';
 import { ApiClient, isValidWorktreeId } from '../utils/api-client';
 import { TOKEN_WARNING, handleCommandError } from '../utils/command-helpers';
-import { isCliToolId, DEFAULT_CLI_TOOL_ID } from '../config/cli-tool-ids';
+import { isCliToolId, CLI_TOOL_IDS, DEFAULT_CLI_TOOL_ID } from '../config/cli-tool-ids';
 import { AGENT_OPTION_DESCRIPTION, INSTANCE_OPTION_DESCRIPTION } from '../config/agent-target-options';
 import {
   isInstanceSelector,
@@ -20,6 +20,7 @@ import {
   INSTANCE_SELECTOR_ERROR,
   resolveInstanceTarget,
 } from './instances';
+import { resolveCommandTarget } from './command-target';
 import { printMaybePaged } from '../utils/pager';
 import { squeezeTranscript } from '../../lib/tmux/transcript-squeeze';
 import { derivePromptView } from '../../lib/session/prompt-view';
@@ -495,7 +496,7 @@ export function createCaptureCommand(): Command {
         }
 
         if (options.agent && !isCliToolId(options.agent)) {
-          console.error('Error: Invalid agent.');
+          console.error(`Error: Invalid agent. Must be one of: ${CLI_TOOL_IDS.join(', ')}`);
           process.exit(ExitCode.CONFIG_ERROR);
         }
 
@@ -562,10 +563,7 @@ export function createCaptureCommand(): Command {
         // alone captured the wrong (claude-named) session. Resolve the tool the
         // instance is registered under before asking. Issue #1925: 'read-only',
         // because capture looks rather than acts — see resolvePaneCliTool.
-        const target = options.instance
-          ? await resolveInstanceTarget(client, worktreeId, options.instance, options.agent, 'read-only')
-          : null;
-        const agent = target ? target.cliToolId : options.agent;
+        const { target, agent } = await resolveCommandTarget(client, worktreeId, options.instance, options.agent, 'read-only');
 
         // Build path with optional cliTool/instance query parameters. Issue
         // #2376: the RESOLVED instance id — /current-output cannot read an alias.

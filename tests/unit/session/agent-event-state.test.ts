@@ -35,6 +35,7 @@ import { captureSessionOutput } from '@/lib/session/cli-session';
 import { buildCurrentOutput } from '@/lib/session/current-output-builder';
 import {
   AGENT_EVENT_DEDUP_WINDOW_MS,
+  classifyAgentEventDelivery,
   clearAgentStopEvents,
   getLastAgentEvent,
   getLastStopEventAt,
@@ -44,9 +45,16 @@ import {
   recordAgentStopEvent,
   STRUCTURED_PROMPT_PROVISIONAL_MAX_AGE_MS,
   STRUCTURED_STATE_MAX_AGE_MS,
+  type AgentEventDedupVerdict,
+  type AgentEventDelivery,
 } from '@/lib/session/agent-event-state';
-import type { AgentEventType } from '@/lib/hooks/agent-event-types';
+import {
+  AGENT_EVENT_TYPES,
+  SELF_RESUME_PENDING_DETAIL,
+  type AgentEventType,
+} from '@/lib/hooks/agent-event-types';
 import { getAgentEventSource } from '@/lib/hooks/sources/registry';
+import { TURN_ACTIVITY_EVENTS } from '@/lib/session/provisional-turn';
 
 const db = {} as Database.Database;
 
@@ -223,6 +231,577 @@ describe('duplicate suppression (Issue #1722)', () => {
       isDuplicateAgentEvent('wt-1', 'claude', 'claude', 'stop', `sess-${i}`, 1000 + i);
     }
     expect(getRecentEventKeyCount()).toBeLessThanOrEqual(600);
+  });
+});
+
+describe('a turn start between two stops (Issue #3289)', () => {
+  /**
+   * The window above rests on "a turn cannot end twice in three seconds", and a
+   * turn the agent starts for itself can. Measured on claude 2.1.289
+   * (2026-10-05): a `Stop`, the `UserPromptSubmit` of a turn opened by a
+   * background task's completion notice 540 ms later, and that turn's `Stop`
+   * 1473 ms after the first. The second `Stop` was dropped as a copy of the
+   * first, the turn it ended stayed open, and `commandmate wait` never returned.
+   */
+  const T = 1_000;
+  const PROMPT_AFTER_MS = 540;
+  const SECOND_STOP_AFTER_MS = 1473;
+  const SESSION = 'sess-1';
+
+  interface ClaimTarget {
+    worktree?: string;
+    instance?: string;
+    session?: string | null;
+    detail?: string | null;
+  }
+
+  /** Whether the delivery is dropped. Claims the key, as the receiver does. */
+  const dropped = (event: AgentEventType, at: number, target: ClaimTarget = {}): boolean =>
+    isDuplicateAgentEvent(
+      target.worktree ?? 'wt-1',
+      'claude',
+      target.instance ?? 'claude',
+      event,
+      target.session === undefined ? SESSION : target.session,
+      at,
+      target.detail ?? null
+    );
+
+  it('applies the stop of a short turn that started after the previous stop', () => {
+    expect(dropped('stop', T)).toBe(false);
+    expect(dropped('user_prompt_submit', T + PROMPT_AFTER_MS)).toBe(false);
+    expect(dropped('stop', T + SECOND_STOP_AFTER_MS)).toBe(false);
+  });
+
+  it('still drops every copy on a host that delivers each event twice (#1722)', () => {
+    const verdicts = [
+      dropped('stop', T),
+      dropped('stop', T + 20),
+      dropped('user_prompt_submit', T + PROMPT_AFTER_MS),
+      dropped('user_prompt_submit', T + PROMPT_AFTER_MS + 20),
+      dropped('stop', T + SECOND_STOP_AFTER_MS),
+      dropped('stop', T + SECOND_STOP_AFTER_MS + 20),
+    ];
+
+    // Applied: the 1st, 3rd and 5th. Dropped: the 2nd, 4th and 6th.
+    expect(verdicts).toEqual([false, true, false, true, false, true]);
+  });
+
+  it('goes by the order of arrival, not by the clock', () => {
+    // Three deliveries inside one millisecond are still three deliveries in an
+    // order, and the order is the only thing that says which turn a stop ends.
+    expect(dropped('stop', T)).toBe(false);
+    expect(dropped('user_prompt_submit', T)).toBe(false);
+    expect(dropped('stop', T)).toBe(false);
+
+    clearAgentStopEvents();
+
+    // Control: the same three timestamps with the turn start FIRST. The second
+    // stop has no turn start before it, so it is the copy it looks like.
+    expect(dropped('user_prompt_submit', T)).toBe(false);
+    expect(dropped('stop', T)).toBe(false);
+    expect(dropped('stop', T)).toBe(true);
+  });
+
+  describe('a copy of the previous stop that arrives after the next turn started', () => {
+    // `stop(A) -> user_prompt_submit(B) -> stop(a late copy of A)`. Nothing in
+    // the copy names its turn, so it cannot be told from `stop(B)`. The decision
+    // is to read it as `stop(B)`: the copy can only be late when a hook was
+    // configured not to be waited for, and a `wait` that returns early once is
+    // the smaller harm than one that never returns.
+    it('is read as the new turn\'s stop, and the real one that follows is the copy', () => {
+      expect(dropped('stop', T)).toBe(false);
+      expect(dropped('user_prompt_submit', T + PROMPT_AFTER_MS)).toBe(false);
+      expect(dropped('stop', T + PROMPT_AFTER_MS + 60)).toBe(false);
+      // Still one stop per turn start: the reset is spent by the stop above.
+      expect(dropped('stop', T + SECOND_STOP_AFTER_MS)).toBe(true);
+    });
+
+    it('is dropped as before when no turn started in between', () => {
+      expect(dropped('stop', T)).toBe(false);
+      expect(dropped('stop', T + PROMPT_AFTER_MS + 60)).toBe(true);
+      expect(dropped('stop', T + SECOND_STOP_AFTER_MS)).toBe(true);
+    });
+  });
+
+  describe('what counts as a turn start', () => {
+    /** A subtype each word really carries, so the keys look like delivered ones. */
+    const DETAIL: Record<AgentEventType, string | null> = {
+      stop: null,
+      notification: 'idle_prompt',
+      session_start: 'startup',
+      user_prompt_submit: null,
+      session_end: 'clear',
+      pre_tool_use: 'Bash',
+      post_tool_use: 'Bash',
+    };
+
+    it('is the three events the turn model opens a turn on', () => {
+      // antigravity sends `post_tool_use` and no `user_prompt_submit`; Command
+      // Code sends the two tool events and no `user_prompt_submit`. A reset
+      // keyed on `user_prompt_submit` alone would leave both where claude was.
+      expect([...TURN_ACTIVITY_EVENTS].sort()).toEqual(
+        ['post_tool_use', 'pre_tool_use', 'user_prompt_submit']
+      );
+
+      for (const event of TURN_ACTIVITY_EVENTS) {
+        clearAgentStopEvents();
+        expect(dropped('stop', T), event).toBe(false);
+        expect(dropped(event, T + PROMPT_AFTER_MS, { detail: DETAIL[event] }), event).toBe(false);
+        expect(dropped('stop', T + SECOND_STOP_AFTER_MS), event).toBe(false);
+      }
+    });
+
+    it('is none of the other events', () => {
+      const others = AGENT_EVENT_TYPES.filter(
+        (event) => event !== 'stop' && !TURN_ACTIVITY_EVENTS.has(event)
+      );
+      expect(others).toEqual(['notification', 'session_start', 'session_end']);
+
+      for (const event of others) {
+        clearAgentStopEvents();
+        expect(dropped('stop', T), event).toBe(false);
+        expect(dropped(event, T + PROMPT_AFTER_MS, { detail: DETAIL[event] }), event).toBe(false);
+        expect(dropped('stop', T + SECOND_STOP_AFTER_MS), event).toBe(true);
+      }
+    });
+
+    it('is not a turn start that was itself dropped as a copy', () => {
+      // A copy of a turn start is recorded by nobody and opens no turn, so it
+      // changes nothing for the stop that follows: one start and one stop are
+      // applied, and each one's copy is dropped.
+      expect(dropped('stop', T)).toBe(false);
+      expect(dropped('user_prompt_submit', T + PROMPT_AFTER_MS)).toBe(false);
+      expect(dropped('user_prompt_submit', T + PROMPT_AFTER_MS + 20)).toBe(true);
+      expect(dropped('stop', T + SECOND_STOP_AFTER_MS)).toBe(false);
+      expect(dropped('stop', T + SECOND_STOP_AFTER_MS + 20)).toBe(true);
+
+      clearAgentStopEvents();
+
+      // Until Issue #3301 this case pinned the sequence below with its second
+      // start dropped as a copy of the first — three seconds had not passed —
+      // and that turn's stop dropped behind it. A start that follows a stop is
+      // another turn's now, so all four are applied; the block for #3301 has
+      // the cases. It also leaves the rule in this test's name with nothing to
+      // act on: a start can only be dropped while the start it copies still
+      // holds its claim, and that start released every stop when it was applied.
+      expect(dropped('user_prompt_submit', T)).toBe(false);
+      expect(dropped('stop', T + 1000)).toBe(false);
+      expect(dropped('user_prompt_submit', T + 1500)).toBe(false);
+      expect(dropped('stop', T + 2000)).toBe(false);
+    });
+
+    it('is not a turn start that names no session', () => {
+      expect(dropped('stop', T)).toBe(false);
+      expect(dropped('user_prompt_submit', T + PROMPT_AFTER_MS, { session: null })).toBe(false);
+      expect(dropped('stop', T + SECOND_STOP_AFTER_MS)).toBe(true);
+    });
+  });
+
+  it('resets only the session, instance and worktree the turn started in', () => {
+    const elsewhere: ClaimTarget[] = [
+      { session: 'sess-2' },
+      { instance: 'claude-2' },
+      { worktree: 'wt-2' },
+    ];
+
+    for (const target of elsewhere) {
+      clearAgentStopEvents();
+      expect(dropped('stop', T)).toBe(false);
+      expect(dropped('user_prompt_submit', T + PROMPT_AFTER_MS, target)).toBe(false);
+      expect(dropped('stop', T + SECOND_STOP_AFTER_MS), JSON.stringify(target)).toBe(true);
+    }
+  });
+
+  it('resets a stop whatever subtype it carries', () => {
+    // antigravity's `Stop` with background work outstanding is posted as
+    // `stop` / `self_resume_pending` (#2614), and the turn that work wakes can
+    // end the same way a moment later.
+    const pending = { detail: SELF_RESUME_PENDING_DETAIL };
+
+    expect(dropped('stop', T, pending)).toBe(false);
+    expect(dropped('post_tool_use', T + PROMPT_AFTER_MS, { detail: 'run_command' })).toBe(false);
+    expect(dropped('stop', T + SECOND_STOP_AFTER_MS, pending)).toBe(false);
+    // Control: its own copy, with no turn start in between.
+    expect(dropped('stop', T + SECOND_STOP_AFTER_MS + 20, pending)).toBe(true);
+  });
+
+  it('leaves every other event on the window it had', () => {
+    const before: Array<[AgentEventType, string | null]> = [
+      ['notification', 'permission_prompt'],
+      ['session_start', 'startup'],
+      ['session_end', 'clear'],
+      ['pre_tool_use', 'Bash'],
+      ['post_tool_use', 'Bash'],
+    ];
+    for (const [event, detail] of before) {
+      expect(dropped(event, T, { detail }), event).toBe(false);
+    }
+
+    expect(dropped('user_prompt_submit', T + PROMPT_AFTER_MS)).toBe(false);
+
+    for (const [event, detail] of before) {
+      expect(dropped(event, T + SECOND_STOP_AFTER_MS, { detail }), event).toBe(true);
+    }
+    expect(dropped('user_prompt_submit', T + SECOND_STOP_AFTER_MS)).toBe(true);
+  });
+
+  it('takes the claim away instead of keeping a second record beside it', () => {
+    expect(dropped('stop', T)).toBe(false);
+    expect(getRecentEventKeyCount()).toBe(1);
+
+    // The turn start is one key in and the stop's key out.
+    expect(dropped('user_prompt_submit', T + PROMPT_AFTER_MS)).toBe(false);
+    expect(getRecentEventKeyCount()).toBe(1);
+  });
+
+  it('does not grow without bound as turns come and go', () => {
+    for (let i = 0; i < 2000; i++) {
+      const target = { session: `sess-${i}` };
+      dropped('stop', T + i, target);
+      dropped('user_prompt_submit', T + i, target);
+      dropped('stop', T + i, target);
+    }
+    expect(getRecentEventKeyCount()).toBeLessThanOrEqual(600);
+  });
+
+  it('reaches the push sources through classifyAgentEventDelivery as well', () => {
+    const classify = (event: AgentEventType, at: number) =>
+      classifyAgentEventDelivery({
+        worktreeId: 'wt-1',
+        cliToolId: 'codex',
+        instanceId: 'codex',
+        event,
+        detail: null,
+        sessionId: SESSION,
+        at,
+        identity: null,
+        identityKind: null,
+      });
+
+    expect(classify('stop', T)).toEqual({ duplicate: false });
+    expect(classify('user_prompt_submit', T + PROMPT_AFTER_MS)).toEqual({ duplicate: false });
+    expect(classify('stop', T + SECOND_STOP_AFTER_MS)).toEqual({ duplicate: false });
+    expect(classify('stop', T + SECOND_STOP_AFTER_MS + 20)).toEqual({
+      duplicate: true,
+      by: 'time-window',
+    });
+  });
+});
+
+describe('a turn start after a stop (Issue #3301)', () => {
+  /**
+   * The other half of #3289. A turn start is on the window too, and a turn can
+   * start twice in three seconds: the server log of 2026-10-04 has a turn
+   * opened by a background task's completion notice, its `Stop` 2624 ms later,
+   * and the `UserPromptSubmit` of the next notice's turn 22 ms after that. The
+   * second start was logged `agent-event-duplicate-dropped`, so the server
+   * never opened the turn the agent was in.
+   *
+   * The copies the window is there for look different. The same logs have 13
+   * bursts of two or three `UserPromptSubmit`s 4-21 ms apart, each one Claude
+   * Code attaching that many queued notices to a turn that is already running
+   * — and none of them has a `stop` inside it.
+   */
+  const T = 1_000;
+  const STOP_AFTER_MS = 2624;
+  const NEXT_START_AFTER_MS = 2646;
+  const SESSION = 'sess-1';
+
+  interface ClaimTarget {
+    worktree?: string;
+    instance?: string;
+    session?: string | null;
+    detail?: string | null;
+  }
+
+  /** Whether the delivery is dropped. Claims the key, as the receiver does. */
+  const dropped = (event: AgentEventType, at: number, target: ClaimTarget = {}): boolean =>
+    isDuplicateAgentEvent(
+      target.worktree ?? 'wt-1',
+      'claude',
+      target.instance ?? 'claude',
+      event,
+      target.session === undefined ? SESSION : target.session,
+      at,
+      target.detail ?? null
+    );
+
+  /** A subtype each word really carries, so the keys look like delivered ones. */
+  const DETAIL: Record<AgentEventType, string | null> = {
+    stop: null,
+    notification: 'idle_prompt',
+    session_start: 'startup',
+    user_prompt_submit: null,
+    session_end: 'clear',
+    pre_tool_use: 'Bash',
+    post_tool_use: 'Bash',
+  };
+
+  it('applies the start of a turn that began right after the previous one ended', () => {
+    expect(dropped('user_prompt_submit', T)).toBe(false);
+    expect(dropped('stop', T + STOP_AFTER_MS)).toBe(false);
+    expect(dropped('user_prompt_submit', T + NEXT_START_AFTER_MS)).toBe(false);
+    // And the turn that start opened can end inside three seconds of the
+    // previous stop: an applied start releases the stop (#3289).
+    expect(dropped('stop', T + NEXT_START_AFTER_MS + 1000)).toBe(false);
+  });
+
+  it('still counts a burst of starts with no stop between them as one', () => {
+    // 2026-10-02T15:52:09.896Z / .900Z / .905Z: three notices taken off the
+    // queue together, three `UserPromptSubmit`s, one turn.
+    expect(dropped('user_prompt_submit', T)).toBe(false);
+    expect(dropped('user_prompt_submit', T + 4)).toBe(true);
+    expect(dropped('user_prompt_submit', T + 9)).toBe(true);
+  });
+
+  it('still drops every copy on a host that delivers each event twice (#1722)', () => {
+    const verdicts = [
+      dropped('user_prompt_submit', T),
+      dropped('user_prompt_submit', T + 20),
+      dropped('stop', T + STOP_AFTER_MS),
+      dropped('stop', T + STOP_AFTER_MS + 20),
+      dropped('user_prompt_submit', T + NEXT_START_AFTER_MS),
+      dropped('user_prompt_submit', T + NEXT_START_AFTER_MS + 20),
+      dropped('stop', T + NEXT_START_AFTER_MS + 1000),
+      dropped('stop', T + NEXT_START_AFTER_MS + 1020),
+    ];
+
+    // Applied: the first of each pair. Dropped: its copy.
+    expect(verdicts).toEqual([false, true, false, true, false, true, false, true]);
+  });
+
+  it('goes by the order of arrival, not by the clock', () => {
+    expect(dropped('user_prompt_submit', T)).toBe(false);
+    expect(dropped('stop', T)).toBe(false);
+    expect(dropped('user_prompt_submit', T)).toBe(false);
+
+    clearAgentStopEvents();
+
+    // Control: the same three timestamps with the stop FIRST. The second start
+    // has no stop before it, so it is the copy it looks like.
+    expect(dropped('stop', T)).toBe(false);
+    expect(dropped('user_prompt_submit', T)).toBe(false);
+    expect(dropped('user_prompt_submit', T)).toBe(true);
+  });
+
+  describe('a copy of the turn start that arrives after the turn ended', () => {
+    // `start(A) -> stop(A) -> start(a late copy of A)`. Nothing in the copy
+    // names its turn, so it cannot be told from `start(B)`. The decision is to
+    // read it as `start(B)`: the copy can only be that late when a hook was
+    // configured not to be waited for, and the sequence it is mistaken for is
+    // the one the configuration CommandMate injects really produces.
+    it('is read as the next turn\'s start, and the real one that follows is the copy', () => {
+      expect(dropped('user_prompt_submit', T)).toBe(false);
+      expect(dropped('stop', T + 1000)).toBe(false);
+      expect(dropped('user_prompt_submit', T + 1060)).toBe(false);
+      // Still one start per stop: the release is spent by the start above.
+      expect(dropped('user_prompt_submit', T + 1500)).toBe(true);
+    });
+
+    it('is dropped as before when the turn has not ended', () => {
+      expect(dropped('user_prompt_submit', T)).toBe(false);
+      expect(dropped('user_prompt_submit', T + 1060)).toBe(true);
+      expect(dropped('user_prompt_submit', T + 1500)).toBe(true);
+    });
+  });
+
+  describe('what a stop releases', () => {
+    it('is the three events the turn model opens a turn on', () => {
+      // antigravity's turns are opened by `post_tool_use` and Command Code's by
+      // `pre_tool_use`; neither sends `user_prompt_submit`. Releasing that word
+      // alone would leave both where claude was.
+      for (const event of TURN_ACTIVITY_EVENTS) {
+        clearAgentStopEvents();
+        const detail = DETAIL[event];
+        expect(dropped(event, T, { detail }), event).toBe(false);
+        expect(dropped('stop', T + 1000), event).toBe(false);
+        expect(dropped(event, T + 1500, { detail }), event).toBe(false);
+        // Control: its own copy, with no stop in between.
+        expect(dropped(event, T + 1520, { detail }), event).toBe(true);
+      }
+    });
+
+    it('is every subtype of them', () => {
+      // The subtype of a tool event is the tool's name, and a turn uses several.
+      expect(dropped('pre_tool_use', T, { detail: 'Bash' })).toBe(false);
+      expect(dropped('pre_tool_use', T + 10, { detail: 'Read' })).toBe(false);
+      expect(dropped('post_tool_use', T + 20, { detail: 'Read' })).toBe(false);
+
+      expect(dropped('stop', T + 1000)).toBe(false);
+
+      expect(dropped('pre_tool_use', T + 1500, { detail: 'Bash' })).toBe(false);
+      expect(dropped('pre_tool_use', T + 1510, { detail: 'Read' })).toBe(false);
+      expect(dropped('post_tool_use', T + 1520, { detail: 'Read' })).toBe(false);
+    });
+
+    it('is none of the other events', () => {
+      const others: Array<[AgentEventType, string | null]> = [
+        ['notification', 'permission_prompt'],
+        ['session_start', 'startup'],
+        ['session_end', 'clear'],
+      ];
+      for (const [event, detail] of others) {
+        expect(dropped(event, T, { detail }), event).toBe(false);
+      }
+
+      expect(dropped('stop', T + 1000)).toBe(false);
+
+      for (const [event, detail] of others) {
+        expect(dropped(event, T + 1500, { detail }), event).toBe(true);
+      }
+    });
+  });
+
+  describe('what releases a turn start', () => {
+    it('is a stop, and no other event', () => {
+      const others = AGENT_EVENT_TYPES.filter((event) => event !== 'stop');
+      expect(others).toEqual([
+        'notification',
+        'session_start',
+        'user_prompt_submit',
+        'session_end',
+        'pre_tool_use',
+        'post_tool_use',
+      ]);
+
+      for (const event of others) {
+        clearAgentStopEvents();
+        expect(dropped('user_prompt_submit', T), event).toBe(false);
+        // 10 ms after the start, so that the `user_prompt_submit` row of this
+        // table is the copy it would be on the wire.
+        dropped(event, T + 10, { detail: DETAIL[event] });
+        expect(dropped('user_prompt_submit', T + 1500), event).toBe(true);
+      }
+    });
+
+    it('is a stop whatever subtype it carries', () => {
+      // antigravity's `Stop` with background work outstanding is posted as
+      // `stop` / `self_resume_pending` (#2614), and the turn that work wakes is
+      // opened by a `post_tool_use` a moment later.
+      const pending = { detail: SELF_RESUME_PENDING_DETAIL };
+      const tool = { detail: 'run_command' };
+
+      expect(dropped('post_tool_use', T, tool)).toBe(false);
+      expect(dropped('stop', T + 1000, pending)).toBe(false);
+      expect(dropped('post_tool_use', T + 1500, tool)).toBe(false);
+    });
+
+    it('is not a stop that names no session', () => {
+      // Such a stop is never judged a copy (it has nothing to be matched on),
+      // and for the same reason it cannot say whose turn it ended.
+      expect(dropped('user_prompt_submit', T)).toBe(false);
+      expect(dropped('stop', T + 1000, { session: null })).toBe(false);
+      expect(dropped('user_prompt_submit', T + 1500)).toBe(true);
+    });
+  });
+
+  it('releases only the session, instance and worktree the stop came from', () => {
+    const elsewhere: ClaimTarget[] = [
+      { session: 'sess-2' },
+      { instance: 'claude-2' },
+      { worktree: 'wt-2' },
+    ];
+
+    for (const target of elsewhere) {
+      clearAgentStopEvents();
+      expect(dropped('user_prompt_submit', T)).toBe(false);
+      expect(dropped('stop', T + 1000, target)).toBe(false);
+      expect(dropped('user_prompt_submit', T + 1500), JSON.stringify(target)).toBe(true);
+    }
+  });
+
+  it('takes the claims away instead of keeping a second record beside them', () => {
+    expect(dropped('user_prompt_submit', T)).toBe(false);
+    expect(dropped('pre_tool_use', T + 10, { detail: 'Bash' })).toBe(false);
+    expect(getRecentEventKeyCount()).toBe(2);
+
+    // The stop is one key in and both turn-start keys out.
+    expect(dropped('stop', T + 1000)).toBe(false);
+    expect(getRecentEventKeyCount()).toBe(1);
+  });
+
+  it('does not grow without bound as turns come and go', () => {
+    for (let i = 0; i < 2000; i++) {
+      const target = { session: `sess-${i}` };
+      dropped('user_prompt_submit', T + i, target);
+      dropped('stop', T + i, target);
+      dropped('user_prompt_submit', T + i, target);
+    }
+    expect(getRecentEventKeyCount()).toBeLessThanOrEqual(600);
+  });
+
+  describe('through classifyAgentEventDelivery', () => {
+    const delivery = (
+      source: Pick<AgentEventDelivery, 'cliToolId' | 'identityKind'>,
+      event: AgentEventType,
+      at: number,
+      sessionId: string | null = SESSION
+    ): AgentEventDedupVerdict =>
+      classifyAgentEventDelivery({
+        worktreeId: 'wt-1',
+        instanceId: source.cliToolId,
+        event,
+        detail: null,
+        sessionId,
+        at,
+        identity: null,
+        ...source,
+      });
+
+    it('reaches the push sources', () => {
+      const codex = { cliToolId: 'codex', identityKind: null } as const;
+
+      expect(delivery(codex, 'user_prompt_submit', T)).toEqual({ duplicate: false });
+      expect(delivery(codex, 'stop', T + STOP_AFTER_MS)).toEqual({ duplicate: false });
+      expect(delivery(codex, 'user_prompt_submit', T + NEXT_START_AFTER_MS)).toEqual({
+        duplicate: false,
+      });
+      expect(delivery(codex, 'user_prompt_submit', T + NEXT_START_AFTER_MS + 20)).toEqual({
+        duplicate: true,
+        by: 'time-window',
+      });
+    });
+
+    /**
+     * OpenCode V2 declares an identity, and the frames that bound its turns
+     * carry none: `session.execution.started` is a `user_prompt_submit` on the
+     * window, and `session.execution.succeeded` is a `stop` that is let through
+     * before the window is consulted. A release made only where the window
+     * claims a `stop` would never run for it.
+     */
+    const v2 = { cliToolId: 'opencode-v2', identityKind: 'permission-id' } as const;
+
+    it('reaches a source whose stop never goes on the window', () => {
+      expect(delivery(v2, 'user_prompt_submit', T)).toEqual({ duplicate: false });
+      expect(delivery(v2, 'stop', T + STOP_AFTER_MS)).toEqual({ duplicate: false });
+      expect(delivery(v2, 'user_prompt_submit', T + NEXT_START_AFTER_MS)).toEqual({
+        duplicate: false,
+      });
+      // Control: that start's own copy, with no stop in between.
+      expect(delivery(v2, 'user_prompt_submit', T + NEXT_START_AFTER_MS + 20)).toEqual({
+        duplicate: true,
+        by: 'time-window',
+      });
+    });
+
+    it('leaves that source\'s turn start on the window when the turn has not ended', () => {
+      expect(delivery(v2, 'user_prompt_submit', T)).toEqual({ duplicate: false });
+      expect(delivery(v2, 'user_prompt_submit', T + NEXT_START_AFTER_MS)).toEqual({
+        duplicate: true,
+        by: 'time-window',
+      });
+    });
+
+    it('is not released there by the other word that is let through, or by a stop with no session', () => {
+      expect(delivery(v2, 'user_prompt_submit', T)).toEqual({ duplicate: false });
+      expect(delivery(v2, 'session_end', T + 1000)).toEqual({ duplicate: false });
+      expect(delivery(v2, 'stop', T + 1100, null)).toEqual({ duplicate: false });
+      expect(delivery(v2, 'user_prompt_submit', T + 1500)).toEqual({
+        duplicate: true,
+        by: 'time-window',
+      });
+    });
   });
 });
 

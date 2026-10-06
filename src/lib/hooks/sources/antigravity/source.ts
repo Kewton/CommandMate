@@ -61,6 +61,12 @@
  * @module lib/hooks/sources/antigravity/source
  */
 
+import {
+  getUatIsolationMode,
+  isUatIsolationEnabled,
+  UAT_SAME_BUILD_FIX,
+  UatIsolationLaunchRefusedError,
+} from '@/config/uat-isolation';
 import { SELF_RESUME_PENDING_DETAIL, type AgentEventType } from '@/lib/hooks/agent-event-types';
 import {
   MAX_TOOL_NAME_LENGTH,
@@ -78,6 +84,7 @@ import {
   ANTIGRAVITY_FULLY_IDLE_FIELD,
   ANTIGRAVITY_PERMISSION_TIMEOUT_SECONDS,
   buildAntigravityLaunchCommand,
+  inspectAntigravityHooksConfigReadOnly,
   writeAntigravityHooksConfig,
 } from './hooks-config';
 import { ANTIGRAVITY_CLI_TOOL_ID } from './tool-id';
@@ -290,6 +297,29 @@ export const antigravityAgentEventSource: AgentEventSource = definePushHookSourc
   // so no worktree path is needed and `prepareLaunch` really does write it.
   prepareLaunch: ({ target, executablePath }: AgentLaunchContext): AgentLaunchPlan => {
     const settingsPath = writeAntigravityHooksConfig();
+    // Issue #3360: under UAT isolation the shared file is never written, and a
+    // file this build did not produce is refused rather than launched against —
+    // agy reads `~/.gemini/config/hooks.json` whatever this server passes, so
+    // "without hooks" would mean production's hooks in the UAT session.
+    if (settingsPath === null && isUatIsolationEnabled()) {
+      // Issue #3312: under `own-home` the file is written, not inspected, so a
+      // null here is a write that failed — still refused, never started bare.
+      if (getUatIsolationMode() === 'own-home') {
+        throw new UatIsolationLaunchRefusedError(
+          'antigravity',
+          '~/.gemini/config/hooks.json could not be prepared',
+          UAT_SAME_BUILD_FIX
+        );
+      }
+      const inspection = inspectAntigravityHooksConfigReadOnly();
+      throw inspection.usable
+        ? new UatIsolationLaunchRefusedError(
+            'antigravity',
+            '~/.gemini/config/hooks.json could not be prepared',
+            UAT_SAME_BUILD_FIX
+          )
+        : new UatIsolationLaunchRefusedError('antigravity', inspection.reason, inspection.fix);
+    }
     // #1846: the two correlation URLs are the plan's `env`. `worktreePath` is
     // in the context now and deliberately unused here — agy's config is one
     // file for the machine, so there is nothing per-worktree to write.

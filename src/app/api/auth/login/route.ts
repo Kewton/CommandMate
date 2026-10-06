@@ -14,6 +14,7 @@ import {
   buildAuthCookieOptions,
   DEFAULT_COOKIE_MAX_AGE_SECONDS,
 } from '@/lib/security/auth';
+import { readJsonObjectBody } from '@/lib/api/read-json-body';
 
 // Module-level rate limiter instance
 const rateLimiter = createRateLimiter();
@@ -52,7 +53,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const body = await request.json();
+    const parsed = await readJsonObjectBody(request);
+    if (!parsed.ok) return parsed.response;
+    const body = parsed.body;
     const { token } = body;
 
     // M3 fix: Validate token type and length to prevent DoS via oversized input.

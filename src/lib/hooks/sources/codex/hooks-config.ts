@@ -62,7 +62,9 @@
  * start. Those post too, with the environment variables unset; the relay omits
  * the correlation keys it does not have and the receiver falls back to
  * resolving the worktree from `cwd`, which is exactly the hand-configured
- * behaviour of Issue #1549. `CM_AGENT_HOOKS_INJECT=0` turns the whole thing off.
+ * behaviour of Issue #1549. `CM_AGENT_HOOKS_INJECT=0` turns the whole thing off;
+ * `CM_UAT_ISOLATION=1` keeps it on without writing any shared file (Issue #3360,
+ * {@link reuseCodexHookSettingsReadOnly}).
  *
  * ## The shared app-server daemon (Issue #2874)
  *
@@ -86,6 +88,13 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { homedir } from 'os';
 import { dirname, join } from 'path';
 import { resolveSafeDirectory } from '@/config/safe-directory';
+import {
+  getUatIsolationMode,
+  isUatIsolationEnabled,
+  sharedHookWritePolicy,
+  UAT_SAME_BUILD_FIX,
+  UatIsolationLaunchRefusedError,
+} from '@/config/uat-isolation';
 import { isValidInstanceId } from '@/lib/cli-tools/types';
 import { getServerPort } from '@/lib/env';
 import type { AgentEventType } from '@/lib/hooks/agent-event-types';
@@ -105,7 +114,13 @@ import { sanitizeEnvForChildProcess } from '@/lib/security/env-sanitizer';
 import { isValidWorktreeId } from '@/lib/security/path-validator';
 import { isPlainObject } from '../event-mapper';
 import type { AgentInstanceRef, AgentLaunchPlan } from '../types';
-import { getInstalledCodexRelayPath, installCodexRelayScript } from './relay-install';
+import {
+  getCodexRelayInstallPath,
+  getCodexRelayStagingPath,
+  getInstalledCodexRelayPath,
+  installCodexRelayScript,
+  installCodexRelayScriptOrThrow,
+} from './relay-install';
 import { CODEX_CLI_TOOL_ID } from './tool-id';
 
 const logger = createLogger('lib/hooks/sources/codex/hooks-config');
@@ -380,6 +395,12 @@ export function isCodexHookTrustBypassEnabled(): boolean {
  */
 export function shouldTrustCodexHooks(worktreePath: string): boolean {
   if (resolveCodexHookTrustPolicy() === 'never') return false;
+  // Issue #3360: a grant is codex writing the user's own `config.toml`, which a
+  // UAT / daily-check server must not cause. Declined, the hooks stay inert for
+  // that session — the "no hooks" case the UAT already has to tolerate.
+  // Issue #3312: under `own-home` the `config.toml` is the dedicated user's and
+  // was checked with the rest of `$CODEX_HOME` before the launch, so it may.
+  if (getUatIsolationMode() === 'shared-read-only') return false;
   try {
     // codex reads `<cwd>/.codex/hooks.json` as well as the home one, and a
     // review that includes a hook from the repository is a review this server
@@ -623,6 +644,11 @@ export function mergeCodexHookSettings(
   return base;
 }
 
+/** The bytes `hooks.json` should hold, given what it holds now. */
+function renderCodexHookSettings(existing: unknown, options: CodexHookOptions): string {
+  return `${JSON.stringify(mergeCodexHookSettings(existing, buildCodexHookSettings(options)), null, 2)}\n`;
+}
+
 /**
  * Write the hooks file, and answer where it is.
  *
@@ -636,6 +662,21 @@ export function mergeCodexHookSettings(
 export function writeCodexHookSettings(options: CodexHookOptions = {}): string | null {
   const settingsPath = getCodexHooksPath(options);
 
+  // Issue #3360: UAT isolation never writes the shared files. See
+  // {@link reuseCodexHookSettingsReadOnly}. Issue #3312: `own-home` writes
+  // them, after checking every path below is inside the dedicated user's HOME
+  // (and refuses the launch when one is not).
+  const codexHome = getCodexHome(options);
+  const relayPath = getCodexRelayInstallPath(codexHome);
+  const policy = sharedHookWritePolicy('codex', [
+    codexHome,
+    settingsPath,
+    relayPath,
+    getCodexRelayStagingPath(relayPath),
+    join(codexHome, 'config.toml'),
+  ]);
+  if (policy === 'read-only') return reuseCodexHookSettingsReadOnly(options);
+
   // Issue #2315: put the relay where the generated file can name it without
   // naming a checkout, BEFORE the content is built — `buildCodexHookSettings`
   // only reads what is installed, so an install that had not happened yet would
@@ -643,7 +684,14 @@ export function writeCodexHookSettings(options: CodexHookOptions = {}): string |
   // between. Best-effort by construction: the installer never throws, and a
   // machine where it cannot write simply keeps whatever copy is already there.
   if (options.relayScriptPath === undefined) {
-    installCodexRelayScript(getCodexHome(options), resolveRelayScriptPath());
+    if (getUatIsolationMode() === 'own-home') {
+      // Issue #3312: a relay that could not be updated is a failed
+      // preparation here (the caller refuses the launch), not an older relay
+      // the check would quietly run against.
+      installCodexRelayScriptOrThrow(codexHome, resolveRelayScriptPath());
+    } else {
+      installCodexRelayScript(codexHome, resolveRelayScriptPath());
+    }
   }
 
   let existing: unknown = null;
@@ -663,7 +711,7 @@ export function writeCodexHookSettings(options: CodexHookOptions = {}): string |
     }
   }
 
-  const content = `${JSON.stringify(mergeCodexHookSettings(existing, buildCodexHookSettings(options)), null, 2)}\n`;
+  const content = renderCodexHookSettings(existing, options);
   if (previous === content) return settingsPath;
 
   mkdirSync(dirname(settingsPath), { recursive: true, mode: 0o700 });
@@ -671,12 +719,104 @@ export function writeCodexHookSettings(options: CodexHookOptions = {}): string |
   return settingsPath;
 }
 
+/** What {@link inspectCodexSharedHooksReadOnly} found: usable as it is, or why not. */
+export type CodexSharedHooksInspection =
+  | { usable: true; settingsPath: string }
+  | { usable: false; reason: string; fix: string };
+
+/**
+ * Whether the shared `$CODEX_HOME/hooks.json` may be used, unwritten, by a
+ * server in UAT isolation mode (`CM_UAT_ISOLATION=1`, Issue #3360).
+ *
+ * `$CODEX_HOME/hooks.json`, the installed relay and the hook trust in
+ * `config.toml` are shared with the user's production server and live beside
+ * codex's login, so they cannot be moved for a UAT either. They do not need to
+ * be written to work for one: the file holds no port, worktree or instance —
+ * {@link buildCodexLaunchPlan} hands those to the session in its environment —
+ * so a file production has already written delivers this session's events to
+ * THIS server.
+ *
+ * Usable means exactly one thing: the file is byte-identical to what this build
+ * writes into an EMPTY file. Comparing against the merge with what is there
+ * ({@link mergeCodexHookSettings}) would not do — the merge keeps the user's own
+ * handlers, so a file holding a hand-written hook that posts straight to
+ * production would compare equal and run in the UAT session. So these are all
+ * unusable, each with its reason: no file, an unreadable one, hooks or keys
+ * CommandMate did not write, a file this build would change (a newer or older
+ * CommandMate), or an installed relay whose bytes differ from the one this build
+ * ships (the command string would match while running another script).
+ */
+export function inspectCodexSharedHooksReadOnly(
+  options: CodexHookOptions = {}
+): CodexSharedHooksInspection {
+  const settingsPath = getCodexHooksPath(options);
+
+  if (options.relayScriptPath === undefined) {
+    const shipped = resolveRelayScriptPath();
+    const installed = getCodexRelayInstallPath(getCodexHome(options));
+    try {
+      if (
+        shipped &&
+        existsSync(installed) &&
+        readFileSync(shipped, 'utf8') !== readFileSync(installed, 'utf8')
+      ) {
+        logger.info('codex-hooks-shared-relay-differs-readonly', { installed });
+        return { usable: false, reason: `the installed relay ${installed} differs from the one this build ships`, fix: UAT_SAME_BUILD_FIX };
+      }
+    } catch {
+      return { usable: false, reason: `the installed relay ${installed} could not be read`, fix: UAT_SAME_BUILD_FIX };
+    }
+  }
+
+  try {
+    if (!existsSync(settingsPath)) {
+      logger.info('codex-hooks-shared-absent-readonly', { settingsPath });
+      return { usable: false, reason: `${settingsPath} does not exist`, fix: UAT_SAME_BUILD_FIX };
+    }
+    const previous = readFileSync(settingsPath, 'utf8');
+    if (previous === renderCodexHookSettings(null, options)) {
+      return { usable: true, settingsPath };
+    }
+    if (previous === renderCodexHookSettings(JSON.parse(previous), options)) {
+      logger.info('codex-hooks-shared-foreign-readonly', { settingsPath });
+      return {
+        usable: false,
+        reason: `${settingsPath} also holds hooks (or keys) CommandMate did not write, which would run in the UAT session`,
+        fix: 'Skip codex scenarios in this UAT, or run it where the shared hooks file holds only the hooks CommandMate writes.',
+      };
+    }
+    logger.info('codex-hooks-shared-differs-readonly', { settingsPath });
+    return { usable: false, reason: `${settingsPath} differs from what this build writes`, fix: UAT_SAME_BUILD_FIX };
+  } catch (error) {
+    logger.warn('codex-hooks-config-unreadable', {
+      settingsPath,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return { usable: false, reason: `${settingsPath} could not be read`, fix: UAT_SAME_BUILD_FIX };
+  }
+}
+
+/**
+ * {@link writeCodexHookSettings} for a server in UAT isolation mode: the path
+ * when {@link inspectCodexSharedHooksReadOnly} finds the shared file usable,
+ * else null — which the launch plan turns into a refused launch
+ * ({@link UatIsolationLaunchRefusedError}), not "codex without hooks", because
+ * a bare codex reads the shared file anyway.
+ */
+export function reuseCodexHookSettingsReadOnly(options: CodexHookOptions = {}): string | null {
+  const inspection = inspectCodexSharedHooksReadOnly(options);
+  return inspection.usable ? inspection.settingsPath : null;
+}
+
 /**
  * The plan that starts codex for one instance.
  *
- * Never throws: hooks are an enhancement to a session that has to start anyway,
- * so anything that goes wrong here returns the bare executable — which is
- * byte-for-byte the pre-#1760 launch.
+ * Never throws outside UAT isolation: hooks are an enhancement to a session
+ * that has to start anyway, so anything that goes wrong here returns the bare
+ * executable — which is byte-for-byte the pre-#1760 launch. Under
+ * `CM_UAT_ISOLATION=1` (Issue #3360) each of those roads throws
+ * {@link UatIsolationLaunchRefusedError} instead: a bare codex still reads the
+ * shared, trusted `hooks.json`.
  *
  * The environment assignments are the per-session half of the design. The
  * hooks file cannot hold them (there is one file for the machine), the payload
@@ -703,19 +843,37 @@ export function buildCodexLaunchPlan(
   options: CodexHookOptions = {}
 ): AgentLaunchPlan {
   const bare: AgentLaunchPlan = { command: executablePath, settingsPath: null, env: {} };
-  if (!isHookInjectionEnabled()) return bare;
+  // Issue #3360: under UAT isolation every road to `bare` is refused instead.
+  // A bare codex still reads `$CODEX_HOME/hooks.json` — production's trusted
+  // hooks, with no correlation keys and no `--no-daemon` — so "without hooks"
+  // would really be "with production's hooks, posting to production".
+  const fallback = (reason: string, fix: string): AgentLaunchPlan => {
+    if (isUatIsolationEnabled()) throw new UatIsolationLaunchRefusedError('codex', reason, fix);
+    return bare;
+  };
+  if (!isHookInjectionEnabled()) {
+    return fallback('CM_AGENT_HOOKS_INJECT=0', 'Do not combine CM_AGENT_HOOKS_INJECT=0 with UAT isolation.');
+  }
 
   const instanceId = target.instanceId ?? CODEX_CLI_TOOL_ID;
   if (!isValidWorktreeId(target.worktreeId) || !isValidInstanceId(instanceId)) {
     // Both become URL parameters the receiver re-validates; a value that would
     // be rejected there is not worth injecting.
     logger.warn('codex-hooks-invalid-correlation-key', { worktreeId: target.worktreeId });
-    return bare;
+    return fallback('the worktree or instance id is not a valid correlation key', 'Use a valid worktree and instance id.');
   }
 
   try {
     const settingsPath = writeCodexHookSettings(options);
-    if (!settingsPath) return bare;
+    if (!settingsPath) {
+      const inspection =
+        getUatIsolationMode() === 'shared-read-only' ? inspectCodexSharedHooksReadOnly(options) : null;
+      if (inspection && !inspection.usable) return fallback(inspection.reason, inspection.fix);
+      return fallback(
+        `${getCodexHooksPath(options)} or its relay is missing or differs from what this build writes`,
+        UAT_SAME_BUILD_FIX
+      );
+    }
 
     const port = options.port ?? getServerPort();
     const query = new URLSearchParams({
@@ -752,10 +910,14 @@ export function buildCodexLaunchPlan(
       env,
     };
   } catch (error) {
+    if (error instanceof UatIsolationLaunchRefusedError) throw error;
     logger.warn('codex-hooks-config-write-failed', {
       worktreeId: target.worktreeId,
       error: error instanceof Error ? error.message : String(error),
     });
-    return bare;
+    return fallback(
+      `the hook config could not be prepared (${error instanceof Error ? error.message : String(error)})`,
+      UAT_SAME_BUILD_FIX
+    );
   }
 }

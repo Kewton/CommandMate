@@ -13,8 +13,7 @@
  *
  * The parent WorktreeDetailRefactored.tsx is now a thin orchestrator that calls
  * this hook, destructures the returned values, and branches to the Desktop /
- * Mobile presentation. The dynamic MarkdownEditor (ssr:false) and its modal stay
- * in the parent (S3-002). pendingInsertText state lives in usePendingInsertText.
+ * Mobile presentation. pendingInsertText state lives in usePendingInsertText.
  *
  * Based on Issue #13 UX Improvement design specification.
  */
@@ -24,6 +23,7 @@ import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import { AGENT_MODE_UNKNOWN } from '@/types/cli-tool-contracts';
 import { useWorktreeUIState } from '@/hooks/useWorktreeUIState';
 import { useIsMobile } from '@/hooks/useIsMobile';
+import { isForeignSessionResponse } from '@/hooks/useTerminalPanePolling';
 import { useSidebarContext } from '@/contexts/SidebarContext';
 import { useOptionalWorktreesCacheContext } from '@/components/providers/WorktreesCacheProvider';
 import { type WorktreeStatus } from '@/components/mobile/MobileHeader';
@@ -43,10 +43,27 @@ import { useToast } from '@/components/common/Toast';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
 import { useAutoYes } from '@/hooks/useAutoYes';
 import { buildPromptResponseBody } from '@/lib/prompt-response-body-builder';
+import {
+  PROMPT_RESPONSE_NOTICES,
+  readPromptResponseOutcome,
+  type PromptResponseOutcome,
+} from '@/lib/prompt-response-outcome';
 import { readSelectionListShape } from '@/lib/detection/selection-shape';
+import {
+  NO_SELECTION_LIST_READING,
+  isSameSelectionListReading,
+  readSelectionListFrame,
+  type SelectionListReading,
+} from '@/lib/session/selection-list-ops';
 import { useAppUpdate } from '@/contexts/AppUpdateContext';
 import { type AutoYesToggleParams } from '@/components/worktree/AutoYesToggle';
 import type { AutoYesStopReason } from '@/config/auto-yes-config';
+import type { CurrentOutputResponseBody } from '@/lib/session/current-output-types';
+import {
+  PANE_GATE_NOTHING_ARRIVED,
+  isSamePaneGateState,
+  type PaneGateState,
+} from '@/lib/session/pane-gate-state';
 import type { Worktree, ChatMessage, LivePromptData, FileContent } from '@/types/models';
 import { isAnswerablePromptData } from '@/types/models';
 import {
@@ -72,6 +89,10 @@ import { useHistoryFilters } from '@/hooks/useHistoryFilters';
 import { useDiffViewerState } from '@/hooks/useDiffViewerState';
 import { useVisibilityRecovery } from '@/hooks/useVisibilityRecovery';
 import { SESSION_INSTANCE_QUERY_PARAM } from '@/lib/sidebar-utils';
+import {
+  isAutoYesEnterSentToCurrentPrompt,
+  type AutoYesEnterFallbackReading,
+} from '@/lib/polling/auto-yes-enter-sent';
 
 // ============================================================================
 // Constants
@@ -94,30 +115,41 @@ const ACTIVE_INSTANCE_STORAGE_KEY_PREFIX = 'activeInstanceId-';
 
 /** Props for WorktreeDetailRefactored component */
 
-/** API response shape for current output endpoint */
-interface CurrentOutputResponse {
-  isRunning: boolean;
-  cliToolId?: CLIToolType;
-  isGenerating?: boolean;
-  isPromptWaiting?: boolean;
+/**
+ * API response shape for current output endpoint.
+ *
+ * Fields whose name and type match `CurrentOutputResponseBody` (Issue #3229)
+ * come from it: `isRunning` stays required, the rest stay optional. Hand-written
+ * below: `promptData` (read through `LivePromptData`), `agentMode` (read as a
+ * plain string) and `autoYes` (this controller reads a looser shape).
+ */
+type CurrentOutputResponse = Pick<CurrentOutputResponseBody, 'isRunning'> &
+  Partial<
+    Pick<
+      CurrentOutputResponseBody,
+      | 'cliToolId'
+      | 'isPromptWaiting'
+      /** Issue #2870: whether `/prompt-response` would answer `promptData`; absent when not judged. */
+      | 'promptAnswerable'
+      | 'fullOutput'
+      | 'realtimeSnippet'
+      | 'thinking'
+      /** Issue #473: OpenCode TUI selection list active flag */
+      | 'isSelectionListActive'
+      /** Issue #1017: Codex pager/edit-previous mode (subset of isSelectionListActive) */
+      | 'isPagerActive'
+      /** Issue #2369: a dismiss-only overlay is on the pane (`Esc to close`). */
+      | 'isDismissablePanelActive'
+      /** Issue #1017: the frame is on screen and nobody could classify it. */
+      | 'isUnclassifiedActive'
+      /** Issue #2238: the merged status verdict (`idle`/`ready`/`running`/`waiting`). */
+      | 'sessionStatus'
+      /** Issue #3179: epoch ms the agent began launching, while it is still starting. */
+      | 'startingSince'
+    >
+  > & {
   /** Issue #1738: may be the degraded structured form published since #1725. */
   promptData?: LivePromptData;
-  /** Issue #2870: whether `/prompt-response` would answer `promptData`; absent when not judged. */
-  promptAnswerable?: boolean;
-  content?: string;
-  fullOutput?: string;
-  realtimeSnippet?: string;
-  thinking?: boolean;
-  /** Issue #473: OpenCode TUI selection list active flag */
-  isSelectionListActive?: boolean;
-  /** Issue #1017: Codex pager/edit-previous mode (subset of isSelectionListActive) */
-  isPagerActive?: boolean;
-  /** Issue #2369: a dismiss-only overlay is on the pane (`Esc to close`). */
-  isDismissablePanelActive?: boolean;
-  /** Issue #1017: the frame is on screen and nobody could classify it. */
-  isUnclassifiedActive?: boolean;
-  /** Issue #2238: the merged status verdict (`idle`/`ready`/`running`/`waiting`). */
-  sessionStatus?: string;
   /**
    * Issue #2592: which permission mode the agent is in, or `'unknown'`.
    *
@@ -128,18 +160,41 @@ interface CurrentOutputResponse {
    * a server that predates the field.
    */
   agentMode?: string;
-  /** Issue #3179: epoch ms the agent began launching, while it is still starting. */
-  startingSince?: number | null;
   autoYes?: {
     enabled: boolean;
     expiresAt: number | null;
     stopReason?: AutoYesStopReason;
+    /** Issue #3397: the last Enter Auto-Yes sent to an unreadable choice screen. */
+    lastEnterFallback?: AutoYesEnterFallbackReading | null;
   };
   /** Issue #501: Server-side auto-yes response timestamp for client duplicate prevention */
   lastServerResponseTimestamp?: number | null;
   /** Issue #501: Whether server-side auto-yes poller is active */
   serverPollerActive?: boolean;
+};
+
+/**
+ * What this controller's poll last said about the frame of the agent it polls.
+ *
+ * The shared {@link PaneGateState} — the SAME frame facts the PC split reads off
+ * its own pane hook. The phone's composer and pads are docked outside
+ * `MobileTerminalTab`, which owns that hook, so the facts have to reach them
+ * through this controller's own poll (Issue #2592, #3179).
+ *
+ * Plus `offersPlanApprove` (Issue #2809): the frame is Command Code's plan
+ * review, where `Enter` runs the focused action, so the phone's docked pad drops
+ * it as ChatSurface's does (#2793). PC reads that off `terminal.output`; this
+ * controller keeps no frame (#736), only the boolean.
+ */
+interface ControllerPaneGateState extends PaneGateState {
+  offersPlanApprove: boolean;
 }
+
+/** {@link ControllerPaneGateState} before anything has arrived for the polled agent. */
+const CONTROLLER_PANE_GATE_NOTHING_ARRIVED: ControllerPaneGateState = Object.freeze({
+  ...PANE_GATE_NOTHING_ARRIVED,
+  offersPlanApprove: false,
+});
 
 // ============================================================================
 // Constants
@@ -319,9 +374,23 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   const [tabsState, tabsActions] = useFileTabs(worktreeId);
   // Mobile-only: file viewer path for modal display (desktop uses fileTabs)
   const [mobileFileViewerPath, setMobileFileViewerPath] = useState<string | null>(null);
-  const [editorFilePath, setEditorFilePath] = useState<string | null>(null);
-  // Issue #104: Track editor maximized state to disable Modal close handlers
-  const [isEditorMaximized, setIsEditorMaximized] = useState(false);
+  // Issue #3305: what the selection list on the polled agent's frame offers —
+  // the phone's docked pad decides its controls from this (number keys, claude's
+  // "this session only" beside "set as default", no `Enter` on a plan review).
+  //
+  // Read HERE, off the same `/current-output` response `isSelectionListActive`
+  // comes from, because the pad stays up on the other tabs (History / Files /
+  // Tools / Info), where no terminal tab is mounted to hold a frame. The frame
+  // itself is still not kept (#736): only this reading is, and a poll that
+  // repeats it keeps the previous object, so it re-renders nobody.
+  //
+  // It means something only beside the `isSelectionListActive` of the response
+  // it was read from, and the pad reads it only while that flag is up — so it
+  // is not reset on its own when the polled agent changes: the flag is, and the
+  // next response writes both.
+  const [selectionListReading, setSelectionListReading] = useState<SelectionListReading>(
+    NO_SELECTION_LIST_READING,
+  );
   // Issue #525: Per-agent auto-yes state management.
   // Issue #896: re-keyed by *instanceId* so each agent instance has its own
   // auto-yes state (the primary instance's id === its cliToolId, preserving the
@@ -331,31 +400,23 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   const [lastServerResponseTimestamp, setLastServerResponseTimestamp] = useState<number | null>(null);
   // Issue #501: Track whether server-side auto-yes poller is active
   const [serverPollerActive, setServerPollerActive] = useState(false);
-  // Issue #473: Track OpenCode TUI selection list state
-  const [isSelectionListActive, setIsSelectionListActive] = useState(false);
-  // Issue #1017: Track Codex pager/edit-previous mode (drives pager keys on mobile)
-  const [isPagerActive, setIsPagerActive] = useState(false);
   // Issue #2870: the status API's `promptAnswerable` for the prompt on show.
   // Kept beside the reducer's prompt slice rather than in it — this poll is the
   // only writer, and it rewrites it on every prompt it shows.
   const [promptAnswerable, setPromptAnswerable] = useState<boolean | undefined>(undefined);
-  // Issue #2809: the frame is Command Code's plan review, where `Enter` runs the
-  // focused action — so the phone's docked pad drops it, as ChatSurface's does
-  // (#2793). Only the boolean is kept: the frame itself is not mirrored (#736).
-  const [offersPlanApprove, setOffersPlanApprove] = useState(false);
-  // Issue #2592: what the phone's composer needs to decide whether the
-  // permission-mode button may be pressed, and what to put on its chip. The four
-  // flags below are the SAME frame facts the PC split reads off its own pane
-  // hook; the phone's composer is docked outside `MobileTerminalTab`, which owns
-  // that hook, so they have to reach it through this controller's own poll.
-  const [isDismissablePanelActive, setIsDismissablePanelActive] = useState(false);
-  const [isUnclassifiedActive, setIsUnclassifiedActive] = useState(false);
-  const [sessionStatus, setSessionStatus] = useState('');
-  const [agentMode, setAgentMode] = useState<string>(AGENT_MODE_UNKNOWN);
-  // Issue #3179: the phone's docked controls (Navigate pad, prompt sheet, the
-  // composer's stop button and mode control) live outside `MobileTerminalTab`,
-  // so "the agent is still launching" reaches them through this poll too.
-  const [startingSince, setStartingSince] = useState<number | null>(null);
+  // Issue #3397: whether Auto-Yes sent its Enter to the prompt on show
+  // (`isAutoYesEnterSentToCurrentPrompt` over `autoYes.lastEnterFallback`).
+  // Written and dropped exactly where `promptAnswerable` is.
+  const [promptAutoYesEnterSent, setPromptAutoYesEnterSent] = useState(false);
+  // Issue #473 / #1017 / #2592 / #2809 / #3179: what the phone's docked controls
+  // (Navigate pad, prompt sheet, the composer's stop button and mode control)
+  // need to know about the active agent's frame. One state rather than a
+  // `useState` per fact (Issue #3304), so that going back to "nothing has
+  // arrived" when the polled agent changes is one assignment of one shared list
+  // and cannot leave a fact behind. See {@link ControllerPaneGateState}.
+  const [paneGate, setPaneGate] = useState<ControllerPaneGateState>(
+    CONTROLLER_PANE_GATE_NOTHING_ARRIVED,
+  );
   // Issue #314: Track previous auto-yes enabled state for stop reason toast
   const prevAutoYesEnabledRef = useRef<boolean>(false);
   // Issue #314 / #499 Item 5: Pending stop reason toast (deferred until showToast is available)
@@ -557,6 +618,11 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     if (prevWorktreeIdRef.current !== worktreeId) {
       // Clear messages immediately to prevent scroll animation on stale data
       actions.clearMessages();
+      // Issue #3304: the previous worktree's agent is not this one's, whatever
+      // tool tab the two share. Its prompt and frame facts go back to "nothing
+      // has arrived"; the initial load below fetches this worktree's.
+      actions.clearPrompt();
+      setPaneGate(CONTROLLER_PANE_GATE_NOTHING_ARRIVED);
       // Reset initial load flag to trigger fresh data fetch
       initialLoadCompletedRef.current = false;
       // Issue #736: terminal output reset is handled by the mobile terminal
@@ -713,6 +779,10 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     const onMobile = isMobileRef.current;
     const requestedInstance = activeInstanceIdRef.current;
     const requestId = ++latestMessagesRequestIdRef.current;
+    const isStale = (): boolean =>
+      latestMessagesRequestIdRef.current !== requestId ||
+      activeCliTabRef.current !== requestedCliTool ||
+      (onMobile && activeInstanceIdRef.current !== requestedInstance);
     try {
       // Issue #1407: History renders conversation-pair cards, so count the limit in
       // pairs (turns) rather than raw rows (see useSplitMessages).
@@ -733,20 +803,12 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
         throw new Error(`Failed to fetch messages: ${response.status}`);
       }
       const data: ChatMessage[] = await response.json();
-      if (
-        latestMessagesRequestIdRef.current !== requestId ||
-        activeCliTabRef.current !== requestedCliTool ||
-        (onMobile && activeInstanceIdRef.current !== requestedInstance)
-      ) {
+      if (isStale()) {
         return;
       }
       actions.setMessages(parseMessageTimestamps(data));
     } catch (err) {
-      if (
-        latestMessagesRequestIdRef.current !== requestId ||
-        activeCliTabRef.current !== requestedCliTool ||
-        (onMobile && activeInstanceIdRef.current !== requestedInstance)
-      ) {
+      if (isStale()) {
         return;
       }
       console.error('[WorktreeDetailRefactored] Error fetching messages:', err);
@@ -763,20 +825,37 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     const onMobile = isMobileRef.current;
     const requestedInstance = activeInstanceIdRef.current;
     const requestId = ++latestCurrentOutputRequestIdRef.current;
+    const isStale = (): boolean =>
+      latestCurrentOutputRequestIdRef.current !== requestId ||
+      activeCliTabRef.current !== requestedCliTool ||
+      (onMobile && activeInstanceIdRef.current !== requestedInstance);
     try {
       const outputUrl = onMobile
         ? `/api/worktrees/${worktreeId}/current-output?cliTool=${requestedCliTool}&instance=${encodeURIComponent(requestedInstance)}`
         : `/api/worktrees/${worktreeId}/current-output?cliTool=${requestedCliTool}`;
       const response = await fetchApiResponse(outputUrl, POLL_REQUEST_OPTIONS);
       if (!response.ok) {
+        // Issue #3334: the one refusal that will not go away on the next poll —
+        // the session under this name is another CommandMate server's (#2865).
+        // Returning left the last prompt sheet and selection-list pad of the
+        // session that WAS ours on screen, over a session no answer can reach
+        // (the routes refuse it). Same verdict the pane hook draws from the
+        // same 409: nothing of ours is waiting.
+        if (
+          response.status === 409
+          && (await isForeignSessionResponse(response))
+          && !isStale()
+        ) {
+          actions.clearPrompt();
+          setPromptAnswerable(undefined);
+          setPromptAutoYesEnterSent(false);
+          setSelectionListReading(NO_SELECTION_LIST_READING);
+          setPaneGate(CONTROLLER_PANE_GATE_NOTHING_ARRIVED);
+        }
         return;
       }
       const data: CurrentOutputResponse = await response.json();
-      if (
-        latestCurrentOutputRequestIdRef.current !== requestId ||
-        activeCliTabRef.current !== requestedCliTool ||
-        (onMobile && activeInstanceIdRef.current !== requestedInstance)
-      ) {
+      if (isStale()) {
         return;
       }
       if (data.cliToolId && data.cliToolId !== requestedCliTool) {
@@ -788,32 +867,50 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       // `useTerminalPanePolling` instance (like the PC split panes, #728); this
       // parent poll only keeps prompt / selection-list / Auto-Yes state in sync.
 
+      // Issue #3305: the selection list's reading, from the frame this response
+      // carries — `fullOutput`, the one the pane hook publishes as
+      // `terminal.output` and the chat surface's card and the PC footer read, so
+      // all three decide from the same rows. Only while this response says a
+      // selection list is up: the pad that reads it is drawn on that flag, and
+      // any other frame's numbered rows are not options.
+      const nextSelectionListReading = data.isSelectionListActive
+        ? readSelectionListFrame(data.fullOutput ?? data.realtimeSnippet)
+        : NO_SELECTION_LIST_READING;
+      setSelectionListReading(prev =>
+        isSameSelectionListReading(prev, nextSelectionListReading) ? prev : nextSelectionListReading,
+      );
+
       // Handle prompt state transitions
       if (data.isPromptWaiting && data.promptData) {
         actions.showPrompt(data.promptData, `prompt-${Date.now()}`);
         setPromptAnswerable(data.promptAnswerable);
+        setPromptAutoYesEnterSent(isAutoYesEnterSentToCurrentPrompt(data.autoYes?.lastEnterFallback));
       } else if (!data.isPromptWaiting && state.prompt.visible) {
         actions.clearPrompt();
       }
 
-      // Issue #473: Update selection list state from server
-      setIsSelectionListActive(data.isSelectionListActive ?? false);
-      // Issue #1017: Update Codex pager/edit-previous mode from server
-      setIsPagerActive(data.isPagerActive ?? false);
-      // Issue #2809: read with the function the chat surface's card uses.
-      setOffersPlanApprove(
-        readSelectionListShape(data.realtimeSnippet || data.fullOutput).offersPlanApprove,
-      );
-      // Issue #2592: the mode itself and the three remaining gate inputs.
-      // Absent fields read as "nothing is on screen" / "no frame has landed",
-      // which is what every other flag above already does — and `agentMode`
-      // falls back to `unknown` rather than to a mode, because a server that
-      // does not publish it has told us nothing (see AGENT_MODE_UNKNOWN).
-      setIsDismissablePanelActive(data.isDismissablePanelActive ?? false);
-      setIsUnclassifiedActive(data.isUnclassifiedActive ?? false);
-      setSessionStatus(data.sessionStatus ?? '');
-      setAgentMode(data.agentMode ?? AGENT_MODE_UNKNOWN);
-      setStartingSince(typeof data.startingSince === 'number' ? data.startingSince : null);
+      const nextPaneGate: ControllerPaneGateState = {
+        // Issue #473: Update selection list state from server
+        isSelectionListActive: data.isSelectionListActive ?? false,
+        // Issue #1017: Update Codex pager/edit-previous mode from server
+        isPagerActive: data.isPagerActive ?? false,
+        // Issue #2809: read with the function the chat surface's card uses.
+        offersPlanApprove:
+          readSelectionListShape(data.realtimeSnippet || data.fullOutput).offersPlanApprove,
+        // Issue #2592: the mode itself and the three remaining gate inputs.
+        // Absent fields read as "nothing is on screen" / "no frame has landed",
+        // which is what every other flag above already does — and `agentMode`
+        // falls back to `unknown` rather than to a mode, because a server that
+        // does not publish it has told us nothing (see AGENT_MODE_UNKNOWN).
+        isDismissablePanelActive: data.isDismissablePanelActive ?? false,
+        isUnclassifiedActive: data.isUnclassifiedActive ?? false,
+        sessionStatus: data.sessionStatus ?? '',
+        agentMode: data.agentMode ?? AGENT_MODE_UNKNOWN,
+        startingSince: typeof data.startingSince === 'number' ? data.startingSince : null,
+      };
+      // A poll that repeats the previous answer keeps the previous object, so it
+      // re-renders nobody — what the per-fact `useState`s this replaced did.
+      setPaneGate(prev => (isSamePaneGateState(prev, nextPaneGate) ? prev : nextPaneGate));
 
       // Issue #501: Update last server response timestamp for useAutoYes duplicate prevention
       setLastServerResponseTimestamp(data.lastServerResponseTimestamp ?? null);
@@ -842,11 +939,7 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
         }
       }
     } catch (err) {
-      if (
-        latestCurrentOutputRequestIdRef.current !== requestId ||
-        activeCliTabRef.current !== requestedCliTool ||
-        (onMobile && activeInstanceIdRef.current !== requestedInstance)
-      ) {
+      if (isStale()) {
         return;
       }
       console.error('[WorktreeDetailRefactored] Error fetching current output:', err);
@@ -917,7 +1010,6 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     () => Array.from(new Set(visibleInstances.map((inst) => inst.cliTool))),
     [visibleInstances],
   );
-  const displayedAgents = isMobile ? mobileSelectedAgents : selectedAgents;
 
   // Issue #869/#874: keep activeInstanceId pointing at a currently-displayed
   // instance. PC uses the full roster; mobile uses the visible subset. When the
@@ -1019,11 +1111,6 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   // Auto-following new content to bottom would hide these menus.
   const disableAutoFollow = activeCliTab === 'opencode' || activeCliTab === 'copilot';
 
-  /** Issue #368: Callback for AgentSettingsPane to update selectedAgents */
-  const handleSelectedAgentsChange = useCallback((agents: CLIToolType[]) => {
-    setSelectedAgents(agents);
-  }, []);
-
   /**
    * Issue #869: Callback for AgentSettingsPane to update the agent instance
    * roster after a successful PATCH. The reconcile effect keeps activeInstanceId
@@ -1047,23 +1134,39 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     setVibeLocalContextWindow(value);
   }, []);
 
-  // Issue #4: Immediately refresh data when CLI tab changes (without polling restart)
-  const prevCliTabRef = useRef<CLIToolType>(activeCliTab);
+  // Issue #4: Immediately refresh data when the polled agent changes (without
+  // polling restart).
+  //
+  // Issue #3304: "the polled agent" is whoever `fetchMessages` and
+  // `fetchCurrentOutput` ask about, which is not the tool tab alone. The phone
+  // asks about the active INSTANCE (#874), so switching between two instances of
+  // one tool changes it; PC's parent poll sends no `instance` and is answered
+  // for the tool's primary (id === cliTool), so there only the tool does. The
+  // key is built from the same three inputs the fetchers' stale guards compare,
+  // which also covers a viewport that crosses the breakpoint while an alias
+  // instance is active (the poll moves from the primary to the alias).
+  const polledAgentKey = `${activeCliTab}::${isMobile ? activeInstanceId : activeCliTab}`;
+  const prevPolledAgentKeyRef = useRef(polledAgentKey);
   useEffect(() => {
-    if (prevCliTabRef.current !== activeCliTab) {
-      prevCliTabRef.current = activeCliTab;
+    if (prevPolledAgentKeyRef.current !== polledAgentKey) {
+      prevPolledAgentKeyRef.current = polledAgentKey;
       // Clear stale data immediately for snappy UI.
       // Issue #736: terminal reset is owned by useTerminalPanePolling
       // (self-resets on the new cliToolId); only non-terminal state is cleared here.
       actions.clearMessages();
       actions.clearPrompt();
-      setIsSelectionListActive(false);
-      setOffersPlanApprove(false);
-      // Fetch fresh data for the new tab
+      // Issue #3304: all of the frame facts, as the pane hook does on the same
+      // change — not the selection list alone. Left in place, the previous
+      // agent's `ready` kept the mode button enabled over an agent nobody had
+      // heard from yet, and `shift+tab` on a permission dialog allows every edit
+      // (#2592).
+      setPaneGate(CONTROLLER_PANE_GATE_NOTHING_ARRIVED);
+      // Fetch fresh data for the new agent. Each call takes the next request id,
+      // so a response still in flight for the previous one is dropped (#597).
       void fetchMessages();
       void fetchCurrentOutput();
     }
-  }, [activeCliTab, actions, fetchMessages, fetchCurrentOutput]);
+  }, [polledAgentKey, actions, fetchMessages, fetchCurrentOutput]);
 
   // Issue #168: Re-fetch messages when showArchived toggle changes
   useEffect(() => {
@@ -1104,8 +1207,7 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
 
   /**
    * Handle file select from FileTreeView
-   * Opens MarkdownEditor for .md files, file tab panel (desktop) or modal (mobile) for others
-   * [Stage 3 SF-004] Separate editorFilePath state to avoid conflict
+   * Opens the file tab panel (desktop) or the FileViewer modal (mobile) for every file, .md included
    * Issue #438: Uses file tabs instead of modal for non-editable files on desktop
    */
   const handleFileSelect = useCallback((path: string) => {
@@ -1142,28 +1244,20 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     setFileTreeRefresh(prev => prev + 1);
   }, []);
 
-  /** Handle MarkdownEditor close */
-  const handleEditorClose = useCallback(() => {
-    setEditorFilePath(null);
-  }, []);
-
   /**
    * [Issue #1108] Controller-owned part of the Files full view reset. The
    * FileTreeView toolbar button resets its own view state (expansion / cache /
    * scroll) and then calls this to clear search and close open file surfaces:
-   * desktop tabs plus the mobile file viewer / editor (mobile has no tabs).
+   * desktop tabs plus the mobile file viewer (mobile has no tabs).
    */
   const resetFileTreeView = useCallback(() => {
     fileSearch.clearSearch();
     tabsActions.closeAllTabs();
     setMobileFileViewerPath(null);
-    setEditorFilePath(null);
   }, [fileSearch, tabsActions]);
 
   /** Handle file save in editor - refresh tree to reflect changes (savedPath accepted for callback interface compatibility) */
-  const handleEditorSave = useCallback((_savedPath: string) => {
-    setFileTreeRefresh(prev => prev + 1);
-  }, []);
+  const handleEditorSave = handleFilePanelSave;
 
   /** Handle ActivityBar toggle (PC) */
   const handleActivityToggle = useCallback(
@@ -1218,6 +1312,7 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   const handlePromptRespond = useCallback(
     async (answer: string): Promise<void> => {
       actions.setPromptAnswering(true);
+      let outcome: PromptResponseOutcome;
       try {
         // Issue #287: Use shared builder to include promptType and defaultOptionNumber
         // so the API can use cursor-key navigation even when promptCheck re-verification fails.
@@ -1244,23 +1339,25 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(requestBody),
         });
-        if (!response.ok) {
-          throw new Error(`Failed to send prompt response: ${response.status}`);
+        outcome = await readPromptResponseOutcome(response);
+      } catch (err) {
+        // The request got no reply at all.
+        console.error('[WorktreeDetailRefactored] Error sending prompt response:', err);
+        outcome = 'failed';
+      }
+      try {
+        // Issue #2468 / #3292: only `answered` clears the card. A refusal (a
+        // 200 `{ success: false, reason }`), a reply that is not 2xx and no
+        // reply at all leave it up and tell the user — the same contract as
+        // the split pane's `handlePromptRespond`.
+        if (outcome === 'answered') {
+          actions.clearPrompt();
+        } else {
+          const notice = PROMPT_RESPONSE_NOTICES[outcome];
+          showToast(tWorktree(notice.messageKey), notice.type);
         }
-        // Issue #2468: a refusal is a 200 `{ success: false, reason }`, so the
-        // card stays and the user is told why — the same contract as the split
-        // pane's `handlePromptRespond`.
-        const result = (await response.json().catch(() => null)) as { success?: unknown } | null;
-        if (result?.success === false) {
-          showToast(tWorktree('promptResponse.refused'), 'warning');
-          await fetchCurrentOutput();
-          return;
-        }
-        actions.clearPrompt();
         // Immediately fetch current output to update terminal without waiting for polling
         await fetchCurrentOutput();
-      } catch (err) {
-        console.error('[WorktreeDetailRefactored] Error sending prompt response:', err);
       } finally {
         actions.setPromptAnswering(false);
       }
@@ -1551,10 +1648,6 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       if (!response.ok) {
         throw new Error('Failed to delete');
       }
-      // Deleted successfully - close editor if the deleted file was open
-      if (editorFilePath === path || editorFilePath?.startsWith(`${path}/`)) {
-        setEditorFilePath(null);
-      }
       // Issue #438: Close file tab if the deleted file was open
       tabsActions.onFileDeleted(path);
       // Trigger FileTreeView refresh
@@ -1563,7 +1656,7 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       console.error('[WorktreeDetailRefactored] Failed to delete:', err);
       window.alert(tError('fileOps.failedToDelete'));
     }
-  }, [worktreeId, editorFilePath, tabsActions, tCommon, tError, confirm]);
+  }, [worktreeId, tabsActions, tCommon, tError, confirm]);
 
   // Issue #314 / #499 Item 5: Show stop reason toast when pending (deferred from fetchCurrentOutput)
   useEffect(() => {
@@ -1904,9 +1997,7 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     diffContent,
     diffFilePath,
     disableAutoFollow,
-    displayedAgents,
     displayedInstances,
-    editorFilePath,
     error,
     fetchCurrentOutput,
     fileInputRef,
@@ -1920,7 +2011,6 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     handleDelete,
     handleDiffSelect,
     handleDirtyChange,
-    handleEditorClose,
     handleEditorSave,
     handleFileInputChange,
     handleFilePanelSave,
@@ -1959,7 +2049,6 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     handleRename,
     handleReLogin,
     handleRetry,
-    handleSelectedAgentsChange,
     handleSetLoading,
     handleShowArchivedChange,
     handleUpload,
@@ -1974,24 +2063,25 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     historySubTab,
     historyUserOnly,
     isAuthExpired,
-    isEditorMaximized,
     isInfoModalOpen,
     isMobile,
     isMoveDialogOpen,
     isReconnecting,
-    isSelectionListActive,
-    isPagerActive,
+    isSelectionListActive: paneGate.isSelectionListActive,
+    isPagerActive: paneGate.isPagerActive,
     // Issue #2870: MobilePromptSheet's `answerable`.
     promptAnswerable,
+    // Issue #3397: MobilePromptSheet's `autoYesEnterSent`.
+    promptAutoYesEnterSent,
     // Issue #2809: the docked pad's Enter gate on a plan review.
-    offersPlanApprove,
+    offersPlanApprove: paneGate.offersPlanApprove,
     // Issue #2592: the phone composer's permission-mode control.
-    isDismissablePanelActive,
-    isUnclassifiedActive,
-    sessionStatus,
-    agentMode,
+    isDismissablePanelActive: paneGate.isDismissablePanelActive,
+    isUnclassifiedActive: paneGate.isUnclassifiedActive,
+    sessionStatus: paneGate.sessionStatus,
+    agentMode: paneGate.agentMode,
     // Issue #3179: the phone's docked controls stand down while it is set.
-    startingSince,
+    startingSince: paneGate.startingSince,
     lastAutoResponse,
     loading,
     makeAutoYesToggleHandler,
@@ -2003,12 +2093,11 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     pendingInsertText,
     pendingInsertTextMap,
     selectedAgents,
-    setActiveCliTab,
+    // Issue #3305: the docked selection-list pad's controls (see the state).
+    selectionListReading,
     setActiveInstanceId,
-    setEditorFilePath,
     setFocusedSplitIndex,
     setHistorySubTab,
-    setIsEditorMaximized,
     setWorktree,
     showArchived,
     showNewFileDialog,

@@ -11,11 +11,8 @@
 import { BaseCLITool } from './base';
 import type { CLIToolType } from './types';
 import {
-  hasSession,
-  createSession,
   sendKeys,
   sendSpecialKey,
-  killSession,
   capturePane,
 } from '../tmux/tmux';
 import { sendMessageWithSubmitVerification } from './submit-verified-sender';
@@ -29,21 +26,13 @@ import {
 } from '@/lib/session/agent-session-lifecycle';
 import { createLogger } from '@/lib/logger';
 import {
-  TUI_SESSION_CREATE_WAIT_MS,
   TUI_INTERRUPT_SETTLE_MS,
   TUI_EXIT_WAIT_MS,
 } from '@/config/cli-tool-timing-config';
-import { missingToolError } from './install-hints';
 import { withLaunchScreenCleared } from '@/lib/session/launch-screen';
+import { getErrorMessage } from '@/lib/errors';
 
 const logger = createLogger('cli-tools/gemini');
-
-/**
- * Extract error message from unknown error type (DRY)
- */
-function getErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
 
 /** Wait for Gemini CLI to initialize after launch (banner + auth + dialog) */
 const GEMINI_INIT_WAIT_MS = 6000;
@@ -77,17 +66,6 @@ export class GeminiTool extends BaseCLITool {
   readonly command = 'gemini';
 
   /**
-   * Check if Gemini session is running for a worktree
-   *
-   * @param worktreeId - Worktree ID
-   * @returns True if session is running
-   */
-  async isRunning(worktreeId: string, instanceId?: string): Promise<boolean> {
-    const sessionName = this.getSessionName(worktreeId, instanceId);
-    return await hasSession(sessionName);
-  }
-
-  /**
    * Start a new Gemini session for a worktree
    * Launches `gemini` in interactive REPL mode within tmux
    *
@@ -96,30 +74,14 @@ export class GeminiTool extends BaseCLITool {
    */
   protected async launchSession(worktreeId: string, worktreePath: string, instanceId?: string): Promise<void> {
     // Check if Gemini is installed
-    const geminiAvailable = await this.isInstalled();
-    if (!geminiAvailable) {
-      throw missingToolError(this);
-    }
+    await this.requireInstalled();
 
-    const sessionName = this.getSessionName(worktreeId, instanceId);
-
-    // Check if session already exists
-    const exists = await hasSession(sessionName);
-    if (exists) {
-      await this.reconcileExistingSession(sessionName, worktreePath);
-
-      // Issue #2070: this branch used to return unconditionally. A tmux session
-      // outlives the agent that was launched into it — a quit, a self-update, a
-      // crash — and the launch was then skipped for a pane holding nothing but a
-      // shell prompt, which left `kill-session` by hand as the only recovery.
-      // When the tool is gone we fall THROUGH and re-send the launch command
-      // into the same pane.
-      if (await this.isToolLive(sessionName, { confirm: true })) {
-        logger.info('gemini-session-sessionname');
-        return;
-      }
-      logger.warn('gemini-session-relaunch', { sessionName });
-    }
+    const { sessionName, exists, live } = await this.resolveLaunchPane(worktreeId, worktreePath, instanceId, {
+      logger,
+      liveAction: 'gemini-session-exists',
+      relaunchAction: 'gemini-session-relaunch',
+    });
+    if (live) return;
 
     // Issue #1762: fence this instance's structured events off from the process
     // that used to hold the same (worktree, tool, instance) key. On the creation
@@ -138,15 +100,7 @@ export class GeminiTool extends BaseCLITool {
       // exists and holds the transcript of the process that died in it; the
       // launch command is re-sent into that same pane.
       if (!exists) {
-        // Create tmux session. Scrollback depth comes from the shared
-        // TMUX_HISTORY_LIMIT default (Issue #1624) — do not re-hardcode it here.
-        await createSession({
-          sessionName,
-          workingDirectory: worktreePath,
-        });
-
-        // Wait a moment for the session to be created
-        await new Promise((resolve) => setTimeout(resolve, TUI_SESSION_CREATE_WAIT_MS));
+        await this.createLaunchPane(sessionName, worktreePath);
       }
 
       // Start Gemini CLI in interactive mode (no flags = interactive REPL).
@@ -176,7 +130,7 @@ export class GeminiTool extends BaseCLITool {
       // Handles trust dialog automatically if encountered
       await this.waitForReady(sessionName);
 
-      logger.info('started-gemini-session:sessionname');
+      logger.info('started-gemini-session');
     } catch (error: unknown) {
       const errorMessage = getErrorMessage(error);
       throw new Error(`Failed to start Gemini session: ${errorMessage}`);
@@ -207,7 +161,7 @@ export class GeminiTool extends BaseCLITool {
         if (!trustDialogHandled && output.includes('Do you trust this folder?')) {
           await sendSpecialKey(sessionName, 'Enter');
           trustDialogHandled = true;
-          logger.info('auto-trusted-folder-for');
+          logger.info('auto-trusted-folder-for-gemini');
           // Continue polling for prompt after trust dialog
         }
       } catch {
@@ -237,7 +191,7 @@ export class GeminiTool extends BaseCLITool {
       }
       await new Promise((resolve) => setTimeout(resolve, pollInterval));
     }
-    logger.info('gemini-prompt-not');
+    logger.info('gemini-prompt-not-detected');
   }
 
   /**
@@ -249,20 +203,12 @@ export class GeminiTool extends BaseCLITool {
   async sendMessage(worktreeId: string, message: string, instanceId?: string): Promise<void> {
     const sessionName = this.getSessionName(worktreeId, instanceId);
 
-    // Check if session exists
-    const exists = await hasSession(sessionName);
-    if (!exists) {
-      throw new Error(
-        `Gemini session ${sessionName} does not exist. Start the session first.`
-      );
-    }
-
     // Issue #2070: the pane exists, but does the AGENT? An agent that quit,
     // updated itself or crashed leaves its tmux session behind, and the send
     // that followed used to sit in the readiness wait until it timed out —
     // leaving `kill-session` by hand as the only recovery. Relaunches into the
     // same pane when the tool is gone; costs one `capture-pane` when it is not.
-    await this.relaunchIfToolExited(worktreeId, instanceId);
+    await this.requireSession('Gemini', worktreeId, instanceId, { relaunch: true });
 
     try {
       // Verify Gemini is at prompt state before sending
@@ -280,7 +226,7 @@ export class GeminiTool extends BaseCLITool {
       // Issue #405: Invalidate cache after sending message
       invalidateCache(sessionName);
 
-      logger.info('sent-message-to-gemini-session:sessionna');
+      logger.info('sent-message-to-gemini-session');
     } catch (error: unknown) {
       const errorMessage = getErrorMessage(error);
       throw new Error(`Failed to send message to Gemini: ${errorMessage}`);
@@ -293,11 +239,10 @@ export class GeminiTool extends BaseCLITool {
    * @param worktreeId - Worktree ID
    */
   async killSession(worktreeId: string, instanceId?: string): Promise<void> {
-    const sessionName = this.getSessionName(worktreeId, instanceId);
-
-    try {
-      const exists = await hasSession(sessionName);
-      if (exists) {
+    await this.requestExitAndKill(worktreeId, instanceId, {
+      logger,
+      stoppedAction: 'stopped-gemini-session',
+      requestExit: async (sessionName) => {
         // Send Ctrl+C to interrupt any running operation
         await sendSpecialKey(sessionName, 'C-c');
         await new Promise((resolve) => setTimeout(resolve, TUI_INTERRUPT_SETTLE_MS));
@@ -305,17 +250,7 @@ export class GeminiTool extends BaseCLITool {
         // Send /quit to exit Gemini gracefully
         await sendKeys(sessionName, '/quit', true);
         await new Promise((resolve) => setTimeout(resolve, TUI_EXIT_WAIT_MS));
-      }
-
-      // Kill the tmux session
-      const killed = await killSession(sessionName);
-
-      if (killed) {
-        logger.info('stopped-gemini-session:sessionname');
-      }
-    } catch (error: unknown) {
-      logger.error('session:stop-failed', { error: getErrorMessage(error) });
-      throw error;
-    }
+      },
+    });
   }
 }

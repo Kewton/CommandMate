@@ -34,6 +34,7 @@ import {
 } from '@/lib/skills/integrity';
 import { getCurrentVersion } from '@/lib/version-checker';
 import type { SkillCatalogVersion } from '@/types/skills';
+import { getOrInitGlobal } from '../global-state';
 
 // =============================================================================
 // Types
@@ -348,8 +349,7 @@ declare global {
   var __skillArtifactDownloads: Map<string, Promise<SkillArtifactDownload>> | undefined;
 }
 
-const inFlight: Map<string, Promise<SkillArtifactDownload>> =
-  globalThis.__skillArtifactDownloads ?? (globalThis.__skillArtifactDownloads = new Map());
+const inFlight: Map<string, Promise<SkillArtifactDownload>> = getOrInitGlobal('__skillArtifactDownloads', () => new Map());
 
 /**
  * Reject as soon as the caller aborts, without cancelling a download that other

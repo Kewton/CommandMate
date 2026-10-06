@@ -29,6 +29,20 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 vi.mock('@/lib/tmux/session-ownership', () => ({
   assertSessionNotForeign: vi.fn(async () => ({ verdict: 'owned', sessionPath: null })),
 }));
+const { loggerMock } = vi.hoisted(() => {
+  const mock = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(), withContext: vi.fn() };
+  mock.withContext.mockReturnValue(mock);
+  return { loggerMock: mock };
+});
+vi.mock('@/lib/logger', () => ({
+  createLogger: vi.fn(() => loggerMock),
+  generateRequestId: vi.fn(() => 'test-request-id'),
+}));
+vi.mock('@/lib/cli-tools/session-liveness', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/cli-tools/session-liveness')>();
+  return { ...actual, probeSessionLiveness: vi.fn(actual.probeSessionLiveness) };
+});
+import { probeSessionLiveness } from '@/lib/cli-tools/session-liveness';
 import { makeTempDir, removeTempDir } from '@tests/helpers/temp-dir';
 import {
   OPENCODE_PANE_HEIGHT,
@@ -258,5 +272,69 @@ describe('Issue #2047: both launch paths size the pane from the same setting', (
     );
     const args = call?.[1] as string[];
     expect(args[args.indexOf('-y') + 1]).toBe(String(OPENCODE_PANE_HEIGHT));
+  });
+});
+
+describe('Issue #3296: the width warning is printed once per launch', () => {
+  const widthWarns = (name: string): unknown[][] =>
+    loggerMock.warn.mock.calls.filter(([n]) => n === name);
+
+  /** Existing pane whose opencode has exited: the path that used to resolve twice. */
+  async function relaunch(): Promise<void> {
+    vi.mocked(hasSession).mockResolvedValue(true);
+    vi.mocked(probeSessionLiveness).mockResolvedValue({ alive: false, reason: 'shell-prompt' });
+    await new OpenCodeTool().startSession('wt-3296', sandbox);
+  }
+
+  beforeEach(() => {
+    loggerMock.warn.mockClear();
+  });
+
+  afterEach(async () => {
+    const actual = await vi.importActual<typeof import('@/lib/cli-tools/session-liveness')>(
+      '@/lib/cli-tools/session-liveness'
+    );
+    vi.mocked(probeSessionLiveness).mockImplementation(actual.probeSessionLiveness);
+  });
+
+  it('warns once for a dropped value on the relaunch path', async () => {
+    process.env[OPENCODE_PANE_WIDTH_ENV] = 'wide';
+    await relaunch();
+    expect(widthWarns('opencode-session-relaunch')).toHaveLength(1);
+    expect(widthWarns('opencode-pane-width-rejected')).toHaveLength(1);
+  });
+
+  it('warns once for a sidebar-width value on the relaunch path', async () => {
+    process.env[OPENCODE_PANE_WIDTH_ENV] = '150';
+    await relaunch();
+    expect(widthWarns('opencode-pane-width-sidebar-visible')).toHaveLength(1);
+  });
+
+  it('uses the same width for the reconcile and the resize', async () => {
+    process.env[OPENCODE_PANE_WIDTH_ENV] = '120';
+    await relaunch();
+    expect(vi.mocked(reconcileSessionGeometry).mock.calls[0]?.[1]?.windowWidth).toBe(120);
+    expect(resizeWidthFromExecFile()).toBe(120);
+  });
+
+  it('applies a value with leading zeros and does not call it rejected (#3338)', async () => {
+    process.env[OPENCODE_PANE_WIDTH_ENV] = '0120';
+    await relaunch();
+    expect(resizeWidthFromExecFile()).toBe(120);
+    expect(widthWarns('opencode-pane-width-rejected')).toHaveLength(0);
+  });
+
+  it('still calls an out-of-bounds digit string rejected (#3338)', async () => {
+    process.env[OPENCODE_PANE_WIDTH_ENV] = '0020';
+    await relaunch();
+    expect(resizeWidthFromExecFile()).toBe(80);
+    expect(widthWarns('opencode-pane-width-rejected')).toHaveLength(1);
+  });
+
+  it('stays silent on the creation path with a valid value', async () => {
+    process.env[OPENCODE_PANE_WIDTH_ENV] = '120';
+    await widthOnCreate();
+    expect(widthWarns('opencode-pane-width-rejected')).toHaveLength(0);
+    expect(widthWarns('opencode-pane-width-sidebar-visible')).toHaveLength(0);
   });
 });

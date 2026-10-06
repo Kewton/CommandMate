@@ -26,6 +26,7 @@ import {
   buildDetectPromptOptions,
 } from '../../cli-patterns';
 import { detectPrompt } from '../../prompt-detector';
+import { activePromptVerdict, positiveVerdict, positiveVerdictWithPrompt } from '../verdicts';
 import { STATUS_REASON } from '../../status-reason';
 import {
   readCodexDialogFrame,
@@ -36,11 +37,16 @@ import { detectCodexDialog } from './prompt';
 import { STATUS_CHECK_LINE_COUNT, liveRegionOf, normalizeFrame, withLiveRegion } from '../frame';
 import { findNumberedOptionBlock } from '../dialog-block';
 import { CODEX_LIVE_REGION, findCodexContentEnd, findCodexFooterBoundary } from './live-region';
+import { CODEX_LIVE_STATUS_ROW_PATTERN } from './patterns';
 import { createToolStatusDetector } from '../run-detection';
 import { CODEX_VERIFIED_AGAINST } from '../verified-against';
 import { THINKING_TAIL_LINE_COUNT } from '@/config/thinking-constants';
 import type { PromptDetectionResult } from '../../prompt-detector';
 import type { NormalizedFrame, ToolStatusVerdict } from '../types';
+
+function detectCodexPrompt(clean: string): PromptDetectionResult {
+  return detectPrompt(stripBoxDrawing(clean), buildDetectPromptOptions('codex'));
+}
 
 /** codex-cli build these rules were read off (#1628 / #1829 / #1890; value in ../verified-against, #1929). */
 export const VERIFIED_AGAINST = CODEX_VERIFIED_AGAINST;
@@ -157,6 +163,23 @@ function isCodexDialogGlyphTail(raw: string): boolean {
   return findCodexBottomGlyphRow(raw)?.kind === 'option';
 }
 
+/**
+ * Issue #3205: the bottom content row as the idle/running branches read it.
+ *
+ * A composer holding several lines puts its continuation rows below the `›`
+ * row, so `lastRow` is then the composer's last line (`  world`), which is
+ * neither the `›` the idle branch looks for nor anything codex is working on —
+ * branch C read every such frame as `running`. When the live region's composer
+ * ends on `lastRow`, the composer's `›` row is returned instead, so its 2nd and
+ * later lines are read as composer text and never as transcript or a working
+ * row. Any other frame keeps `lastRow`.
+ */
+function codexTailRowAboveComposerText(frame: NormalizedFrame, lastRow: number): number {
+  const region = liveRegionOf(frame, 'codex');
+  if (region.anchor !== 'composer' || region.composerEndRow !== lastRow) return lastRow;
+  return region.startRow;
+}
+
 export const codexStatusDetector = createToolStatusDetector({
   tool: 'codex',
   verifiedAgainst: VERIFIED_AGAINST,
@@ -196,17 +219,7 @@ export const codexStatusDetector = createToolStatusDetector({
     // content must not be misread as one. CODEX_PAGER_FOOTER_PATTERN does not match the
     // genuine "/model" selection footer, so the 0.8 path below is unaffected (no regression).
     if (CODEX_PAGER_FOOTER_PATTERN.test(frame.lastLines)) {
-      return {
-        status: 'waiting',
-        confidence: 'high',
-        reason: STATUS_REASON.CODEX_PAGER,
-        hasActivePrompt: false,
-        evidence: 'positive',
-        promptDetection: detectPrompt(
-          stripBoxDrawing(frame.clean),
-          buildDetectPromptOptions('codex'),
-        ),
-      };
+      return positiveVerdictWithPrompt('waiting', STATUS_REASON.CODEX_PAGER, detectCodexPrompt(frame.clean));
     }
 
     // 0.75. Codex: the hooks review screens (Issue #1829)
@@ -222,17 +235,7 @@ export const codexStatusDetector = createToolStatusDetector({
     // ordinary text that must not be read as options.
     const codexLifecycleDialog = getCodexLifecycleDialog(withLiveRegion(frame, 'codex'));
     if (codexLifecycleDialog === 'hooks-list' || codexLifecycleDialog === 'hooks-detail') {
-      return {
-        status: 'waiting',
-        confidence: 'high',
-        reason: STATUS_REASON.CODEX_HOOKS_REVIEW,
-        hasActivePrompt: false,
-        evidence: 'positive',
-        promptDetection: detectPrompt(
-          stripBoxDrawing(frame.clean),
-          buildDetectPromptOptions('codex'),
-        ),
-      };
+      return positiveVerdictWithPrompt('waiting', STATUS_REASON.CODEX_HOOKS_REVIEW, detectCodexPrompt(frame.clean));
     }
 
     // 0.8. Codex: selection list detection BEFORE prompt detection (Issue #622)
@@ -249,12 +252,7 @@ export const codexStatusDetector = createToolStatusDetector({
     // Issue #1150: the status bar is located via CODEX_STATUS_BAR_PATTERN (version-
     // independent; matches both legacy "N% left ·" and v0.141 "model · path" bars),
     // and since #2818 via CODEX_TRAILED_STATUS_BAR_PATTERN too (0.154+ "· <title>").
-    const codexFooterBoundary = findCodexFooterBoundary(contentLines);
-    let codexContentEnd =
-      codexFooterBoundary >= 0 ? codexFooterBoundary - 1 : contentLines.length - 1;
-    while (codexContentEnd >= 0 && contentLines[codexContentEnd].trim() === '') {
-      codexContentEnd--;
-    }
+    const codexContentEnd = findCodexContentEnd(contentLines) - 1;
     if (codexContentEnd >= 0) {
       const codexSelectionWindow = contentLines
         .slice(Math.max(0, codexContentEnd - STATUS_CHECK_LINE_COUNT + 1), codexContentEnd + 1)
@@ -269,10 +267,7 @@ export const codexStatusDetector = createToolStatusDetector({
         CODEX_PICKER_FOOTER_PATTERN.test(codexLastRow) ||
         CODEX_EFFORT_PICKER_FOOTER_PATTERN.test(codexLastRow)
       ) {
-        const codexPromptDetection = detectPrompt(
-          stripBoxDrawing(frame.clean),
-          buildDetectPromptOptions('codex'),
-        );
+        const codexPromptDetection = detectCodexPrompt(frame.clean);
         // Issue #1628: an approval request wears the same footer as a menu but is the
         // agent blocked on the human, so it must surface as an active prompt (exit 10
         // for `wait`, PromptPanel in the UI) instead of a navigable list. The #1160
@@ -282,23 +277,9 @@ export const codexStatusDetector = createToolStatusDetector({
           isCodexApprovalRequest(codexPromptDetection, codexSelectionWindow) &&
           !isCodexStalePrompt(contentLines)
         ) {
-          return {
-            status: 'waiting',
-            confidence: 'high',
-            reason: STATUS_REASON.PROMPT_DETECTED,
-            hasActivePrompt: true,
-            evidence: 'positive',
-            promptDetection: codexPromptDetection,
-          };
+          return activePromptVerdict(STATUS_REASON.PROMPT_DETECTED, codexPromptDetection);
         }
-        return {
-          status: 'waiting',
-          confidence: 'high',
-          reason: STATUS_REASON.CODEX_SELECTION_LIST,
-          hasActivePrompt: false,
-          evidence: 'positive',
-          promptDetection: codexPromptDetection,
-        };
+        return positiveVerdictWithPrompt('waiting', STATUS_REASON.CODEX_SELECTION_LIST, codexPromptDetection);
       }
     }
 
@@ -337,28 +318,11 @@ export const codexStatusDetector = createToolStatusDetector({
       if (!codexDialogFrame.footerRecognised) {
         reportCodexDialogFooterDrift(codexDialogFrame.footer);
       }
-      const codexPromptDetection = detectPrompt(
-        stripBoxDrawing(frame.clean),
-        buildDetectPromptOptions('codex'),
-      );
+      const codexPromptDetection = detectCodexPrompt(frame.clean);
       if (codexPromptDetection.isPrompt) {
-        return {
-          status: 'waiting',
-          confidence: 'high',
-          reason: STATUS_REASON.PROMPT_DETECTED,
-          hasActivePrompt: true,
-          evidence: 'positive',
-          promptDetection: codexPromptDetection,
-        };
+        return activePromptVerdict(STATUS_REASON.PROMPT_DETECTED, codexPromptDetection);
       }
-      return {
-        status: 'waiting',
-        confidence: 'high',
-        reason: STATUS_REASON.CODEX_SELECTION_LIST,
-        hasActivePrompt: false,
-        evidence: 'positive',
-        promptDetection: codexPromptDetection,
-      };
+      return positiveVerdictWithPrompt('waiting', STATUS_REASON.CODEX_SELECTION_LIST, codexPromptDetection);
     }
 
     return null;
@@ -407,19 +371,20 @@ export const codexStatusDetector = createToolStatusDetector({
       while (lastContentIdx >= 0 && contentLines[lastContentIdx].trim() === '') {
         lastContentIdx--;
       }
+      // Issue #3205: a multi-line composer ends on its own `›` row here.
+      lastContentIdx = codexTailRowAboveComposerText(frame, lastContentIdx);
       if (lastContentIdx >= 0) {
         // A. Check content area for thinking indicators (wider window than the shared step)
         const codexThinkingWindow = contentLines
           .slice(Math.max(0, lastContentIdx - THINKING_TAIL_LINE_COUNT + 1), lastContentIdx + 1)
           .join('\n');
-        if (detectThinking('codex', codexThinkingWindow)) {
-          return {
-            status: 'running',
-            confidence: 'high',
-            reason: STATUS_REASON.THINKING_INDICATOR,
-            hasActivePrompt: false,
-            evidence: 'positive',
-          };
+        // Issue #3337: or the live status row, whatever its bullet and header —
+        // codex 0.160.0's `◦ Working (43s • esc to interrupt)` frame reached B.
+        if (
+          detectThinking('codex', codexThinkingWindow) ||
+          CODEX_LIVE_STATUS_ROW_PATTERN.test(codexThinkingWindow)
+        ) {
+          return positiveVerdict('running', STATUS_REASON.THINKING_INDICATOR);
         }
 
         // B. Check if the last content line is the idle › prompt.
@@ -442,13 +407,7 @@ export const codexStatusDetector = createToolStatusDetector({
           CODEX_PROMPT_PATTERN.test(contentLines[lastContentIdx].trim()) &&
           !isCodexDialogGlyphTail(frame.raw)
         ) {
-          return {
-            status: 'ready',
-            confidence: 'high',
-            reason: STATUS_REASON.INPUT_PROMPT,
-            hasActivePrompt: false,
-            evidence: 'positive',
-          };
+          return positiveVerdict('ready', STATUS_REASON.INPUT_PROMPT);
         }
 
         // C. Fallback: status bar present but neither thinking nor idle › detected.
@@ -456,13 +415,7 @@ export const codexStatusDetector = createToolStatusDetector({
         // • Ran/• Working indicators beyond the 5-line thinking window.
         // The status bar ("model · N% left · path") is always visible during Codex
         // sessions, and the only idle state (›) was checked in B above.
-        return {
-          status: 'running',
-          confidence: 'high',
-          reason: STATUS_REASON.THINKING_INDICATOR,
-          hasActivePrompt: false,
-          evidence: 'positive',
-        };
+        return positiveVerdict('running', STATUS_REASON.THINKING_INDICATOR);
       }
     } else {
       // D. Status-bar-independent running detection (Issue #1150, mitigation B).
@@ -482,18 +435,18 @@ export const codexStatusDetector = createToolStatusDetector({
       while (codexTailIdx >= 0 && contentLines[codexTailIdx].trim() === '') {
         codexTailIdx--;
       }
+      // Issue #3205: as in 2.7, a multi-line composer is read from its `›` row.
+      codexTailIdx = codexTailRowAboveComposerText(frame, codexTailIdx);
       const codexTailIsIdlePrompt =
         codexTailIdx >= 0 &&
         CODEX_PROMPT_PATTERN.test(contentLines[codexTailIdx].trim()) &&
         !isCodexDialogGlyphTail(frame.raw);
-      if (!codexTailIsIdlePrompt && detectThinking('codex', frame.lastLines)) {
-        return {
-          status: 'running',
-          confidence: 'high',
-          reason: STATUS_REASON.THINKING_INDICATOR,
-          hasActivePrompt: false,
-          evidence: 'positive',
-        };
+      if (
+        !codexTailIsIdlePrompt &&
+        (detectThinking('codex', frame.lastLines) ||
+          CODEX_LIVE_STATUS_ROW_PATTERN.test(frame.lastLines))
+      ) {
+        return positiveVerdict('running', STATUS_REASON.THINKING_INDICATOR);
       }
     }
 

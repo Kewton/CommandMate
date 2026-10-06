@@ -3,8 +3,9 @@
  *
  * Base rules (unchanged since Issue #479):
  * - yes/no prompt -> 'y'
- * - multiple_choice with `multiSelect: true` -> null (Issue #2755: the number
- *   ticks a box, the confirm is a separate row, so a default is half an answer)
+ * - multiple_choice with `multiSelect: true`, or option labels that wear a
+ *   checkbox (Issue #3397) -> null (Issue #2755: the number ticks a box, the
+ *   confirm is a separate row, so a default is half an answer)
  * - multiple_choice with default option -> default option number
  * - multiple_choice without default -> first option number
  * - option requiring text input -> null (skip)
@@ -22,6 +23,8 @@
 
 import { executeRegexWithTimeout, validateStopPattern } from '@/config/auto-yes-config';
 import type { PromptData, PromptType } from '@/types/models';
+import type { AutoYesSuppressionReason } from './auto-yes-suppression-reason';
+import { isMultiSelectPrompt } from '@/lib/prompt-answer-semantic';
 
 /** Auto-answer policy modes; mirrors AUTO_YES_MODES in lib/tasks/contract-parser. */
 export type AutoYesMode = 'off' | 'safe' | 'allow-listed';
@@ -43,42 +46,7 @@ export interface AutoYesPolicy {
   denyPatterns: string[];
 }
 
-/**
- * Why an auto-answer was withheld.
- *
- * `deny-pattern-unusable` is the fail-closed case: a deny pattern that cannot be
- * evaluated (unsafe, unparseable, or over-long) suppresses instead of being
- * skipped. Ignoring it would silently drop the protection the contract author
- * asked for, which is the more dangerous of the two directions.
- */
-export type AutoYesSuppressionReason =
-  | 'mode-off'
-  | 'deny-pattern'
-  | 'deny-pattern-unusable'
-  | 'type-not-allowed'
-  /**
-   * Issue #1829: not a policy verdict at all, but the same outcome recorded
-   * through the same channel. The prompt on screen is a CLI-lifecycle dialog
-   * whose answer belongs to the tool's own launch sequence, so the poller
-   * withheld one. Listed here so `capture --json` / `cmate wait` can name it
-   * instead of showing a session that has silently gone quiet.
-   */
-  | 'agent-launch-dialog'
-  /**
-   * Issue #1924 (§4 D1 decision 4): the generic estimator read a numbered list
-   * on the frame and the tool's own dialog detector did not vouch for it, so
-   * nothing was sent.
-   *
-   * Also not a policy verdict. It is the reason code for the one position that
-   * can stop #1896 — an agent quoting a numbered list in its *answer* and
-   * Auto-Yes replying `1` to the prose. `detectPrompt`'s generic estimate is
-   * true on that frame and the tool-specific `detectDialog` is false, and this
-   * names the gap instead of letting the session go quiet with no record.
-   *
-   * Declared in Phase 1 (Issue #1924) and recorded from Phase 3, when the
-   * tool-specific detectors that can disagree with the estimator exist.
-   */
-  | 'unclassified-frame';
+export type { AutoYesSuppressionReason };
 
 export interface AutoYesResolution {
   /** The answer to send, or null when nothing should be sent. */
@@ -116,7 +84,11 @@ function resolveBaseAnswer(promptData: PromptData): string | null {
     // Issue #2755: a checkbox question. A number ticks a box and the confirm is
     // a separate row, so "the default option" is not an answer — it is half of
     // one. Auto-Yes refuses the prompt instead of ticking something and stopping.
-    if (promptData.multiSelect === true) {
+    // Issue #3397: through the one checkbox reading (`isMultiSelectPrompt`), so
+    // a list the parser did not flag but whose labels wear boxes (`[ ]` / `[x]`
+    // / `[X]` / `[✔]`) is refused too — the sender answers such a list with
+    // Space→Next→Enter, which would tick the default and submit the list.
+    if (isMultiSelectPrompt(promptData)) {
       return null;
     }
 

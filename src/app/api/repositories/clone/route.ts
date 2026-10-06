@@ -11,6 +11,7 @@ import { CloneManager } from '@/lib/git/clone-manager';
 import { forkRepository, ForkError, type ForkErrorCode } from '@/lib/git/fork-manager';
 import type { CloneError, CloneErrorCategory } from '@/types/clone';
 import { createLogger } from '@/lib/logger';
+import { readJsonObjectBody } from '@/lib/api/read-json-body';
 
 const logger = createLogger('api/repositories-clone');
 
@@ -102,7 +103,23 @@ function forkErrorToResponse(err: ForkError): { status: number; error: CloneErro
  */
 export async function POST(request: NextRequest): Promise<NextResponse<CloneStartResponse | CloneErrorResponse>> {
   try {
-    const body = await request.json();
+    const parsed = await readJsonObjectBody(request);
+    if (!parsed.ok) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: {
+            category: 'validation',
+            code: 'INVALID_REQUEST_BODY',
+            message: 'Invalid request body',
+            recoverable: true,
+            suggestedAction: 'Send a valid JSON request body',
+          },
+        },
+        { status: 400 }
+      );
+    }
+    const body = parsed.body;
     const { cloneUrl, targetDir, fork } = body;
 
     // Validate cloneUrl is provided

@@ -46,8 +46,9 @@ import { isAddressableDecision } from '@/lib/session/structured-prompt';
  * Whether a structured wait is one the app answers over the agent's own API
  * (Issue #3184, design §6-2).
  *
- * The same three conjuncts `current-output-builder` requires before it
- * publishes a `decisionId` on the live payload (its `addressableDecisionId`):
+ * The three conjuncts `composePromptData` in `current-output-builder` requires
+ * — by calling this function (Issue #3215) — before it publishes a
+ * `decisionId` on the live payload (its `addressableDecisionId`):
  * the record came from `Notification(permission_prompt)` rather than being a
  * `permission-request` forecast, the tool's event source names each decision
  * by id (`eventIdentity: 'permission-id'`), and the record carries such an id.

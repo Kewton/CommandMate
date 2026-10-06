@@ -32,10 +32,12 @@ import {
   detectThinking,
   getCliToolPatterns,
   buildDetectPromptOptions,
+  usesFullFramePrompt,
 } from '../cli-patterns';
 import { detectPrompt } from '../prompt-detector';
 import { withLiveRegion } from './frame';
 import { isQuotedNumberedPrompt, vetoesDialog } from './live-region';
+import { activePromptVerdict, positiveVerdictWithPrompt, unreadVerdictWithPrompt } from './verdicts';
 import { STATUS_REASON } from '../status-reason';
 import { resolveIdleEvidenceMode } from '@/config/detection-evidence-config';
 import { recordIdleEvidenceObservation } from '../idle-evidence-observation';
@@ -56,21 +58,6 @@ import type {
  * which is `running` with no evidence, not `ready`.
  */
 const STALE_OUTPUT_THRESHOLD_MS: number = 5000;
-
-/**
- * Which tools hand the FULL frame to `detectPrompt` instead of the 15-line tail.
- *
- * Their multiple-choice prompts with descriptions can exceed 15 lines: Codex
- * approval prompts with long file lists, Claude "Yes, and don't ask again for:
- * git commit -m …" options that embed full commit messages. `detectPrompt`
- * applies its own 50-line window internally.
- */
-const FULL_FRAME_PROMPT_TOOLS: ReadonlySet<string> = new Set([
-  'opencode',
-  'codex',
-  'claude',
-  'copilot',
-]);
 
 /**
  * Resolve the `evidence` for a `ready` / `input_prompt` verdict from the generic
@@ -112,7 +99,7 @@ export function runToolDetection(
   // Gemini wraps prompts in box-drawing characters (╭╮╰╯│─) which prevent
   // detectPrompt() from recognizing the prompt content.
   const promptOptions = buildDetectPromptOptions(spec.tool);
-  const promptInput = FULL_FRAME_PROMPT_TOOLS.has(spec.tool)
+  const promptInput = usesFullFramePrompt(spec.tool)
     ? stripBoxDrawing(frame.clean)
     : stripBoxDrawing(frame.lastLines);
   let promptDetection = detectPrompt(promptInput, promptOptions);
@@ -137,14 +124,7 @@ export function runToolDetection(
       // stale block above, so the tool's own branches decide the status.
       promptDetection = { ...promptDetection, isPrompt: false, promptData: undefined };
     } else {
-      return {
-        status: 'waiting',
-        confidence: 'high',
-        reason: STATUS_REASON.PROMPT_DETECTED,
-        hasActivePrompt: true,
-        evidence: 'positive',
-        promptDetection,
-      };
+      return activePromptVerdict(STATUS_REASON.PROMPT_DETECTED, promptDetection);
     }
   }
 
@@ -156,14 +136,7 @@ export function runToolDetection(
   // 2. Thinking indicator detection — THINKING_TAIL_LINE_COUNT window (narrower).
   // CLI tool is actively processing (shows spinner, "Planning...", etc.)
   if (detectThinking(spec.tool, frame.thinkingLines)) {
-    return {
-      status: 'running',
-      confidence: 'high',
-      reason: STATUS_REASON.THINKING_INDICATOR,
-      hasActivePrompt: false,
-      evidence: 'positive',
-      promptDetection,
-    };
+    return positiveVerdictWithPrompt('running', STATUS_REASON.THINKING_INDICATOR, promptDetection);
   }
 
   // 2.x — the tool's own running and completion markers.
@@ -200,14 +173,7 @@ export function runToolDetection(
   if (context.lastOutputTimestamp) {
     const elapsed = Date.now() - context.lastOutputTimestamp.getTime();
     if (elapsed > STALE_OUTPUT_THRESHOLD_MS) {
-      return {
-        status: 'running',
-        confidence: 'low',
-        reason: STATUS_REASON.NO_RECENT_OUTPUT,
-        hasActivePrompt: false,
-        evidence: 'none',
-        promptDetection,
-      };
+      return unreadVerdictWithPrompt(STATUS_REASON.NO_RECENT_OUTPUT, promptDetection);
     }
   }
 
@@ -218,14 +184,7 @@ export function runToolDetection(
   // rules looked at this frame and found nothing, which is a statement about the
   // rules and an instruction to capture the frame as a fixture. `default` stays
   // the answer for a tool that has no chain of its own, where nothing looked.
-  return {
-    status: 'running',
-    confidence: 'low',
-    reason: spec.unreadableReason ?? STATUS_REASON.DEFAULT,
-    hasActivePrompt: false,
-    evidence: 'none',
-    promptDetection,
-  };
+  return unreadVerdictWithPrompt(spec.unreadableReason ?? STATUS_REASON.DEFAULT, promptDetection);
 }
 
 /** Bind the shared chain around one tool's declarations. */

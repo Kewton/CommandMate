@@ -102,7 +102,8 @@ const WAITING_ENTRY = {
 const NO_EVIDENCE_ENTRY = {
   isRunning: true,
   isWaitingForResponse: false,
-  isProcessing: false,
+  // The server reports an unreadable frame as `running`, never `ready` (#3338).
+  isProcessing: true,
   sessionStatusReason: 'no_recent_output',
   statusEvidence: 'none',
 };
@@ -149,7 +150,7 @@ const GUIDE_ROWS = [
     id: 'commandmate-issue-518',
     name: 'feature/518-worktree',
     cliToolId: 'claude',
-    ...READY_TOP,
+    ...RUNNING_TOP,
     sessionStatusByCli: { claude: NO_EVIDENCE_ENTRY },
     sessionStatusByInstance: { claude: NO_EVIDENCE_ENTRY },
     autoYesByInstance: {},

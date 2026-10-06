@@ -54,6 +54,14 @@ vi.mock('@/lib/db/db-instance', () => {
   };
 });
 
+// Issue #3290: the POST asks who owns the session before it arms. These cases
+// are not about `#{session_path}` ownership and mock no tmux, so the check
+// decides by session name (see the helper's docblock) — which here is "no such
+// session" — rather than asking the tmux server of whoever runs the suite.
+vi.mock('@/lib/tmux/session-ownership', async (importOriginal) =>
+  (await import('@tests/unit/tmux/name-only-session-ownership')).nameOnlySessionOwnership(importOriginal)
+);
+
 /**
  * Only the two poller entry points are replaced; state storage stays real so
  * the tests can read back the composite key that was actually written. Letting

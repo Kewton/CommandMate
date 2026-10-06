@@ -12,6 +12,7 @@
  */
 
 import { createHash } from 'crypto';
+import { getOrInitGlobal } from '../global-state';
 
 export interface DedupEvent {
   worktreeId: string;
@@ -43,8 +44,7 @@ declare global {
   var __notificationDedupLastSent: Map<string, { hash: string; at: number }> | undefined;
 }
 
-const lastSent = globalThis.__notificationDedupLastSent ??
-  (globalThis.__notificationDedupLastSent = new Map<string, { hash: string; at: number }>());
+const lastSent = getOrInitGlobal('__notificationDedupLastSent', () => new Map<string, { hash: string; at: number }>());
 
 function contentHash(content: string): string {
   return createHash('sha256').update(content).digest('hex');
@@ -99,8 +99,7 @@ interface WaitingPushRecord {
   escalated: boolean;
 }
 
-const waitingSent = globalThis.__waitingPushDedup ??
-  (globalThis.__waitingPushDedup = new Map<string, WaitingPushRecord>());
+const waitingSent = getOrInitGlobal('__waitingPushDedup', () => new Map<string, WaitingPushRecord>());
 
 /** One waiting notification, identified by the episode it belongs to. */
 export interface WaitingDedupEvent {

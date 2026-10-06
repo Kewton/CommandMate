@@ -17,7 +17,6 @@
 'use client';
 
 import React, { memo, useCallback, useEffect, useMemo, useState } from 'react';
-import dynamic from 'next/dynamic';
 import { useTranslations } from 'next-intl';
 import { MoreHorizontal } from 'lucide-react';
 import { Spinner } from '@/components/ui/Spinner';
@@ -33,44 +32,9 @@ import { MobileDirectInputKeyboard } from '@/components/mobile/MobileDirectInput
 import { ErrorBoundary } from '@/components/error/ErrorBoundary';
 import { MessageInput } from '@/components/worktree/MessageInput';
 import type { ShowToast } from '@/types/markdown-editor';
-import type { LivePromptData } from '@/types/models';
-import { NavigationButtons } from '@/components/worktree/NavigationButtons';
+import { SelectionListKeys } from '@/components/worktree/SelectionListKeys';
 import { Button } from '@/components/ui/Button';
 import { FileViewer } from '@/components/worktree/FileViewer';
-
-
-/**
- * Loading fallback for the dynamically imported MarkdownEditor.
- *
- * Issue #1277: extracted into a real component so it can call `useTranslations`
- * — next/dynamic renders `loading` as a component, and the main orchestrator's
- * `tWorktree` (from useWorktreeDetailController) is not in scope at module level.
- */
-function MarkdownEditorLoading() {
-  const tWorktree = useTranslations('worktree');
-  return (
-    <div className="flex items-center justify-center h-full bg-surface text-muted-foreground">
-      <Spinner size="lg" className="mr-2" />
-      <span>{tWorktree('detail.loadingEditor')}</span>
-    </div>
-  );
-}
-
-/**
- * Dynamic import of MarkdownEditor with SSR disabled.
- * highlight.js / rehype-highlight require browser APIs during rendering.
- * Uses .then() pattern because MarkdownEditor is a named export.
- */
-const MarkdownEditor = dynamic(
-  () =>
-    import('@/components/worktree/MarkdownEditor').then((mod) => ({
-      default: mod.MarkdownEditor,
-    })),
-  {
-    ssr: false,
-    loading: () => <MarkdownEditorLoading />,
-  }
-);
 import {
   LoadingIndicator,
   ErrorDisplay,
@@ -292,19 +256,6 @@ const MobileComposer = memo(function MobileComposer({
 // ============================================================================
 
 /**
- * Is this a CHECKBOX question? (Issue #2755)
- *
- * The same predicate `TerminalSplitPaneContent` applies to its own Auto-Yes
- * gate, restated here for the phone sheet. It is the one prompt shape Auto-Yes
- * never answers — `resolveBaseAnswer` returns null, because a digit ticks a box
- * and the confirm is a separate row — so hiding its sheet under Auto-Yes left a
- * live question answerable by nobody.
- */
-function isMultiSelectPrompt(promptData: LivePromptData | null | undefined): boolean {
-  return promptData?.type === 'multiple_choice' && promptData.multiSelect === true;
-}
-
-/**
  * WorktreeDetailRefactored - Integrated worktree detail component
  *
  * @example
@@ -313,10 +264,15 @@ function isMultiSelectPrompt(promptData: LivePromptData | null | undefined): boo
  * ```
  */
 import { useWorktreeDetailController } from '@/hooks/useWorktreeDetailController';
+import { withToolDecisionLabels } from '@/components/worktree/prompt-decision-id';
+import { readDecisionId } from '@/lib/session/prompt-view';
+import { buildDecisionRespondBody } from '@/lib/prompt-response-body-builder';
 import {
-  readPromptDecisionId,
-  withToolDecisionLabels,
-} from '@/components/worktree/prompt-decision-id';
+  PROMPT_RESPONSE_NOTICES,
+  readPromptResponseOutcome,
+  type PromptResponseOutcome,
+} from '@/lib/prompt-response-outcome';
+import { showsPromptUnderAutoYes } from '@/components/worktree/prompt-answer';
 import { useNewOutputIndicator } from '@/hooks/useNewOutputIndicator';
 export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   worktreeId,
@@ -334,7 +290,6 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     diffFilePath,
     disableAutoFollow,
     displayedInstances,
-    editorFilePath,
     error,
     fetchCurrentOutput,
     fileInputRef,
@@ -348,7 +303,6 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     handleDelete,
     handleDiffSelect,
     handleDirtyChange,
-    handleEditorClose,
     handleEditorSave,
     handleFileInputChange,
     handleFilePanelSave,
@@ -397,7 +351,6 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     historySubTab,
     historyUserOnly,
     isAuthExpired,
-    isEditorMaximized,
     isInfoModalOpen,
     isMobile,
     isMoveDialogOpen,
@@ -405,7 +358,9 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     isSelectionListActive,
     isPagerActive,
     promptAnswerable,
-    offersPlanApprove,
+    promptAutoYesEnterSent,
+    // Issue #3305: what the docked selection-list pad decides its controls from.
+    selectionListReading,
     // Issue #2592: the composer's permission-mode control reads these. The
     // phone's composer is docked outside `MobileTerminalTab` — which owns the
     // pane hook the PC split reads the same facts from — so they come off this
@@ -431,7 +386,6 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     setActiveInstanceId,
     setFocusedSplitIndex,
     setHistorySubTab,
-    setIsEditorMaximized,
     setWorktree,
     showArchived,
     showNewFileDialog,
@@ -622,18 +576,30 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   // --------------------------------------------------------------------------
   // The same window shown again after two Sends in a row (refused, or keys
   // that did not change the frame) gets a line and a link to the keyboard.
+  // Counted on the window the sheet is actually drawing: the same gate that
+  // mounts `MobilePromptSheet` below (the phone layout, and not the keyboard, a launch or Auto-Yes), so
+  // a window hidden for 10 s starts over, as on PC.
+  const showMobilePromptSheet =
+    isMobile
+    && !showDirectInputKeyboard
+    && !activeSessionStarting
+    // Issue #3397: a screen CommandMate cannot read is shown under Auto-Yes too.
+    && (!autoYesEnabled || showsPromptUnderAutoYes(state.prompt.data, promptAnswerable));
   const {
     showStuckHint: showPromptStuckHint,
     markSubmitted: markPromptSubmitted,
   } = usePromptStuckCounter({
-    promptData: state.prompt.visible ? state.prompt.data : null,
+    promptData: showMobilePromptSheet && state.prompt.visible ? state.prompt.data : null,
     targetKey: `${worktreeId}:${activeCliTab}:${activeInstanceId}`,
   });
 
   // Issue #2945: the approval / question the phone sheet is answering, when the
   // agent named it by id (opencode, OpenCode V2). Null for every scraper-read
   // prompt, which keeps those on `/prompt-response`.
-  const mobilePromptDecisionId = readPromptDecisionId(
+  // Read from the payload itself, unlike the PC panel's read off the shared view
+  // (TerminalSplitPaneContent): the sheet sends with the payload's own id
+  // (MobilePromptSheet.tsx). The two agree today (docs/design/3184-prompt-view-and-auto-yes-lifecycle.md).
+  const mobilePromptDecisionId = readDecisionId(
     state.prompt.visible ? state.prompt.data : null,
   );
   // Issue #2945: the verdicts in the tool's own words (OpenCode V2 draws
@@ -654,30 +620,30 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
       // name (`TerminalSplitPaneContent`'s `handlePromptRespond`): `/respond`
       // delivers it over the agent's own API. `/prompt-response` would
       // re-capture the pane and refuse a dialog nobody parsed.
+      let outcome: PromptResponseOutcome;
       try {
         const response = await fetch(`/api/worktrees/${worktreeId}/respond`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            decisionId: mobilePromptDecisionId,
-            answer,
-            cliTool: activeCliTab,
-            ...(activeInstanceId && activeInstanceId !== activeCliTab
-              ? { instanceId: activeInstanceId }
-              : {}),
-          }),
+          body: JSON.stringify(
+            buildDecisionRespondBody(mobilePromptDecisionId, answer, activeCliTab, activeInstanceId),
+          ),
         });
-        const result = (await response.json().catch(() => null)) as { success?: unknown } | null;
-        if (!response.ok || result?.success === false) {
-          showToast(tWorktree('promptResponse.refused'), 'warning');
-          await fetchCurrentOutput();
-          return;
-        }
-        handlePromptDismiss();
-        await fetchCurrentOutput();
+        outcome = await readPromptResponseOutcome(response);
       } catch (err) {
+        // The request got no reply at all.
         console.error('[WorktreeDetailRefactored] Error answering a decision:', err);
+        outcome = 'failed';
       }
+      // Issue #3292: the same contract as the controller's and the split
+      // pane's `handlePromptRespond` — only `answered` closes the sheet.
+      if (outcome === 'answered') {
+        handlePromptDismiss();
+      } else {
+        const notice = PROMPT_RESPONSE_NOTICES[outcome];
+        showToast(tWorktree(notice.messageKey), notice.type);
+      }
+      await fetchCurrentOutput();
     },
     [
       markPromptSubmitted,
@@ -865,28 +831,6 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
           cancelLabel={tCommon('cancel')}
           endLabel={tCommon('end')}
         />
-        {/* Issue #755 (S3-002): the Markdown Editor Modal stays in the parent
-            orchestrator (dynamic import with ssr:false declared here) and is
-            rendered alongside WorktreeDetailDesktop. */}
-        {editorFilePath && (
-          <Modal
-            isOpen={true}
-            onClose={handleEditorClose}
-            title={editorFilePath.split('/').pop() || tWorktree('fileViewer.editor')}
-            size="full"
-            disableClose={isEditorMaximized}
-          >
-            <div className="h-[80vh]">
-              <MarkdownEditor
-                worktreeId={worktreeId}
-                filePath={editorFilePath}
-                onClose={handleEditorClose}
-                onSave={handleEditorSave}
-                onMaximizedChange={setIsEditorMaximized}
-              />
-            </div>
-          </Modal>
-        )}
       </ChatFileLinkProvider>
     );
   }
@@ -1158,14 +1102,23 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
               ) : null}
               {isSelectionListActive && !isMobileChatSurface && !showDirectInputKeyboard && !activeSessionStarting && (
                 <div className="px-2 pt-1 border-b border-border">
-                  <NavigationButtons
+                  {/* Issue #3305: the part the chat surface's card mounts —
+                      number keys, claude's "this session only" / "set as
+                      default", no `Enter` on a plan review (#2793 / #2809).
+                      This screen holds no frame (#736), so it passes the
+                      READING its own poll took off the response that raised
+                      `isSelectionListActive`. That is what keeps the pad the
+                      same on the other tabs (History / Files / Tools / Info),
+                      where no terminal tab is mounted: nothing here depends
+                      on one. */}
+                  <SelectionListKeys
                     worktreeId={worktreeId}
                     cliToolId={activeCliTab}
                     instanceId={activeInstanceId}
                     onKeysSent={fetchCurrentOutput}
+                    reading={selectionListReading}
+                    surface="terminal"
                     showPagerKeys={isPagerActive}
-                    // Issue #2809: no `Enter` on a plan review (see ChatSurface, #2793).
-                    hideEnterKey={offersPlanApprove}
                   />
                 </div>
               )}
@@ -1264,7 +1217,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                 `閉じる` brings the sheet straight back. */}
             {/* Issue #3179: nor while the agent is launching — a dialog on a
                 launch is the launch's to answer. */}
-            {!showDirectInputKeyboard && !activeSessionStarting && (!autoYesEnabled || isMultiSelectPrompt(state.prompt.data)) && (
+            {showMobilePromptSheet && (
               <MobilePromptSheet
                 promptData={mobilePromptData}
                 visible={state.prompt.visible}
@@ -1275,6 +1228,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                 showStuckHint={showPromptStuckHint}
                 onSwitchToDirectInput={activeSessionRunning ? handleStuckSwitchToDirectInput : undefined}
                 answerable={promptAnswerable}
+                autoYesEnterSent={promptAutoYesEnterSent}
               />
             )}
 

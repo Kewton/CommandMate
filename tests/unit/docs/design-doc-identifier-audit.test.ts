@@ -242,6 +242,21 @@ const DECLARED: readonly Declared[] = [
     why: 'Issue #2655 が削除した poller。§4 D4 の pollers 行と付録 A の #19 行が Phase 1 時点の段階解消対象として引いており、両方に削除済みと注記した',
   },
   {
+    text: 'src/lib/polling/global-session-poller.ts',
+    category: 'history',
+    why: 'Issue #3232 が削除した poller（起動する経路が 2026-04 から無かった）。§4 D4 の pollers 行と付録 A の #20 行が Phase 1 時点の段階解消対象として引いており、両方に削除済みと注記した',
+  },
+  {
+    text: 'src/lib/session/index.ts',
+    category: 'history',
+    why: 'Issue #3315 が削除した barrel（import する側は無かった）。§4 D4 (d)・D5・§10.11・§13.2 S15・DR4-005 が「`export *` 再エクスポートの抜け穴の実例」として引いており、各所に設計時点の実例で削除済みと注記した',
+  },
+  {
+    text: 'src/lib/tmux/index.ts',
+    category: 'history',
+    why: 'Issue #3232 が削除した barrel（import する側は一度も無かった）。付録 A への追記が「禁止パターンは 3 綴りでは足りない」実測の根拠として引いており、同じ文に削除済みと注記した',
+  },
+  {
     text: 'tests/unit/hooks/sources/event-id-validation.test.ts',
     category: 'planned',
     why: '§11 が「新規」と明記したテスト。§13.2 S1〜S3 の受入条件の置き場',
@@ -353,7 +368,10 @@ describe('DECLARED is reviewable', () => {
       // than what a reader would have to already know. The split is unchanged.
       // Issue #2643 deleted `RecentSessionsList` (5 -> 6).
       // Issue #2655 deleted Assistant Chat's server side: seven more path spans (6 -> 13).
-      history: 13,
+      // Issue #3232 deleted the global session poller, which nothing started (13 -> 14),
+      // and the `src/lib/tmux` barrel, which nothing imported (14 -> 15).
+      // Issue #3315 deleted the `src/lib/session` barrel, which nothing imported (15 -> 16).
+      history: 16,
       external: 5,
       prose: 1,
       'test-only': 1,

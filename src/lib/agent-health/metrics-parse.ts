@@ -7,6 +7,7 @@
  * could not answer is not a finding.
  */
 
+import ts from 'typescript';
 import {
   AUDIT_MIN_SEVERITY,
   COMPLEXITY_ALERT,
@@ -408,15 +409,17 @@ function names(value: unknown): string[] {
     .filter((name): name is string => name !== undefined);
 }
 
-/** `knip --reporter json`: unused dependencies are findings; unused exports are counted. */
+/** `knip --reporter json`: unused dependencies and files are findings (files keyed by repo-relative path); unused exports are counted. */
 export function measureKnip(text: string): MetricMeasurement {
   const json = parseJson(text);
   if (!isRecord(json) || !Array.isArray(json.issues)) return skip('unused', 'knip の JSON 出力に issues が無い');
   const findings: Record<string, MetricFinding> = {};
   const items: Record<string, number> = {};
   let exports = 0;
+  const unusedFiles = new Set<string>(names(json.files));
   for (const issue of json.issues) {
     if (!isRecord(issue)) continue;
+    for (const file of names(issue.files)) unusedFiles.add(file);
     exports += names(issue.exports).length + names(issue.types).length;
     for (const [field, label] of [
       ['dependencies', 'dependencies'],
@@ -432,13 +435,22 @@ export function measureKnip(text: string): MetricMeasurement {
       }
     }
   }
+  const dependencies = Object.keys(findings).length;
+  for (const file of unusedFiles) {
+    items[file] = 1;
+    findings[file] = {
+      target: file,
+      title: `chore: 未使用のファイル ${file} を確認する`,
+      evidence: `knip: ${file} はどこからも import されていない（消して安全かは別途確認する）`,
+    };
+  }
   return {
     metricId: 'unused',
     status: 'ok',
-    value: Object.keys(findings).length,
+    value: dependencies,
     items,
     findings,
-    details: { unusedExports: exports, unusedFiles: Array.isArray(json.files) ? json.files.length : 0 },
+    details: { unusedExports: exports, unusedFiles: unusedFiles.size },
   };
 }
 
@@ -496,17 +508,107 @@ export interface TypeSafetyCounts {
   tsIgnore: number;
 }
 
-const ANY_TYPE = /(?:[:<,|&(]\s*|\bas\s+)any\b(?![\w$-])/g;
-const ESLINT_DISABLE = /eslint-disable(?:-next-line|-line)?(?![\w-])/g;
-const TS_IGNORE = /@ts-ignore\b/g;
+/**
+ * Bumped whenever {@link countTypeSafety} counts differently, so the previous
+ * value in the state file (counted the old way) is rebased instead of being
+ * read as a regression (see `evaluateAll` in metrics-rules.ts).
+ *
+ * 1: regular expressions over the whole text (comments and strings counted).
+ * 2: TypeScript's parser (Issue #3389) — `any` only as a type, directives
+ *    only in comments, and the `declare global` var suppression left out.
+ */
+export const TYPE_SAFETY_COUNT_VERSION = 2;
 
-/** Occurrences in one file's text. `any` counts type positions (`: any`, `as any`, `<any>`, `| any` …). */
-export function countTypeSafety(text: string): TypeSafetyCounts {
-  return {
-    any: text.match(ANY_TYPE)?.length ?? 0,
-    eslintDisable: text.match(ESLINT_DISABLE)?.length ?? 0,
-    tsIgnore: text.match(TS_IGNORE)?.length ?? 0,
+/** A directive is the start of a comment (as ESLint reads it); prose that mentions one is not. */
+const ESLINT_DISABLE = /^\/[/*]\s*eslint-disable(?:-next-line|-line)?(?![\w-])/;
+/** TypeScript reads `@ts-ignore` at the start of any line of a comment. */
+const TS_IGNORE = /^\s*(?:\/\/+|\/\*+|\*+)?\s*@ts-ignore\b/gm;
+/** Exactly `no-var` (an optional `-- reason` after it); a list with other rules still counts. */
+const NO_VAR_ONLY = /^\/\/\s*eslint-disable-next-line\s+no-var\s*(?:--.*)?$/;
+
+function scriptKindOf(fileName: string): ts.ScriptKind {
+  if (/\.tsx$/.test(fileName)) return ts.ScriptKind.TSX;
+  if (/\.jsx$/.test(fileName)) return ts.ScriptKind.JSX;
+  if (/\.[cm]?js$/.test(fileName)) return ts.ScriptKind.JS;
+  return ts.ScriptKind.TS;
+}
+
+function isJsDocNode(node: ts.Node): boolean {
+  return node.kind >= ts.SyntaxKind.FirstJSDocNode && node.kind <= ts.SyntaxKind.LastJSDocNode;
+}
+
+function isInDeclareGlobal(node: ts.Node): boolean {
+  for (let parent = node.parent; parent; parent = parent.parent) {
+    if (ts.isModuleDeclaration(parent) && (parent.flags & ts.NodeFlags.GlobalAugmentation) !== 0) return true;
+  }
+  return false;
+}
+
+/**
+ * Occurrences in one file's text, read with TypeScript's parser so that
+ * comments, strings, regex literals and JSX text are never mistaken for code
+ * (`fileName` picks .ts / .tsx parsing: `<any>x` is a type assertion in .ts).
+ *
+ * - `any`: every `any` keyword in a type position (`: any`, `as any`, `<any>`,
+ *   `| any`, `any[]`, a generic default `T = any` …). JSDoc types are comments.
+ * - `eslintDisable` / `tsIgnore`: directives — comments that are one, not
+ *   comments that mention one.
+ *
+ * The `// eslint-disable-next-line no-var` right above a `var` inside
+ * `declare global { … }` is not counted: that is the written convention for
+ * `globalThis` state (`declare global { var … }` + `getOrInitGlobal`, see the
+ * conventions section of docs/module-reference.md), where `var` is the only
+ * way to declare a global and `no-var` has to be suppressed. Counting it read
+ * every new piece of state as a regression (#3270). The ESLint config is not
+ * changed to drop the suppressions instead: that rewrites 116 places.
+ */
+export function countTypeSafety(text: string, fileName = 'source.ts'): TypeSafetyCounts {
+  const source = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true, scriptKindOf(fileName));
+  let any = 0;
+  const visitTypes = (node: ts.Node): void => {
+    if (node.kind === ts.SyntaxKind.AnyKeyword) any++;
+    ts.forEachChild(node, visitTypes);
   };
+  visitTypes(source);
+
+  // Comments are trivia around tokens; walk every token (getChildren) and
+  // collect the ranges before and after it, once each.
+  const comments = new Map<number, string>();
+  const jsxText: Array<[number, number]> = [];
+  const exempt = new Set<number>();
+  const collect = (ranges: ts.CommentRange[] | undefined) => {
+    for (const range of ranges ?? []) comments.set(range.pos, text.slice(range.pos, range.end));
+  };
+  const visitTokens = (node: ts.Node): void => {
+    if (isJsDocNode(node)) return;
+    if (node.kind === ts.SyntaxKind.JsxText) {
+      jsxText.push([node.pos, node.end]);
+      return;
+    }
+    collect(ts.getLeadingCommentRanges(text, node.pos));
+    collect(ts.getTrailingCommentRanges(text, node.end));
+    if (
+      ts.isVariableStatement(node) &&
+      (node.declarationList.flags & ts.NodeFlags.BlockScoped) === 0 &&
+      isInDeclareGlobal(node)
+    ) {
+      const leading = ts.getLeadingCommentRanges(text, node.pos) ?? [];
+      const last = leading[leading.length - 1];
+      if (last && NO_VAR_ONLY.test(text.slice(last.pos, last.end).trim())) exempt.add(last.pos);
+    }
+    for (const child of node.getChildren(source)) visitTokens(child);
+  };
+  visitTokens(source);
+
+  let eslintDisable = 0;
+  let tsIgnore = 0;
+  for (const [pos, comment] of comments) {
+    // A "comment" scanned from inside JSX text is text, not a comment.
+    if (exempt.has(pos) || jsxText.some(([start, end]) => pos >= start && pos < end)) continue;
+    if (ESLINT_DISABLE.test(comment)) eslintDisable++;
+    tsIgnore += comment.match(TS_IGNORE)?.length ?? 0;
+  }
+  return { any, eslintDisable, tsIgnore };
 }
 
 export function measureTypeSafety(counts: TypeSafetyCounts): MetricMeasurement {
@@ -516,6 +618,7 @@ export function measureTypeSafety(counts: TypeSafetyCounts): MetricMeasurement {
     value: counts.any + counts.eslintDisable + counts.tsIgnore,
     items: { any: counts.any, 'eslint-disable': counts.eslintDisable, 'ts-ignore': counts.tsIgnore },
     findings: {},
+    countVersion: TYPE_SAFETY_COUNT_VERSION,
   };
 }
 

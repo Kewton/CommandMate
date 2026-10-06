@@ -23,6 +23,7 @@ import {
 } from './detection/cli-patterns';
 import type { CLIToolType } from './cli-tools/types';
 import { normalizeOpenCodeLine, normalizeCopilotLine } from './tui-accumulator';
+import { isStartupScreenWithoutUserEcho } from './polling/startup-screen';
 import {
   COPILOT_MAX_MESSAGE_LENGTH,
   COPILOT_TRUNCATION_MARKER,
@@ -528,11 +529,38 @@ function findScrollbackChromeStart(lines: string[], cliToolId: CLIToolType): num
  * classify rows by their SGR attributes, and stripping first would destroy the
  * evidence they read.
  *
+ * ## The startup screen (Issue #3293)
+ *
+ * Neither step removes a banner. codex's and vibe-local's startup screens are
+ * mostly rows no pattern names — the version, the cwd, a tagline, a logo — so
+ * the first flush of a session, whose cursor is 0, saved the screen as a reply.
+ * What says "this is not a reply" is the pane, not the rows: no message has
+ * been echoed on it yet ({@link isStartupScreenWithoutUserEcho}, the same
+ * reading the poller makes). So the flush hands the pane over with the rows.
+ *
+ * It is a separate argument because `response` cannot answer for it. The rows
+ * past the cursor ordinarily hold a reply and no echo — the echo of the turn
+ * they belong to sits above the cursor — so asking the question of `response`
+ * would empty real replies. A caller that has only a slice omits `paneLines`
+ * and gets the two steps above and nothing else.
+ *
  * @param response - Raw capture, ANSI intact
  * @param cliToolId - The tool the capture came from
+ * @param paneLines - The whole capture `response` was sliced from, ANSI intact.
+ *   Omitted when the caller does not hold it, or when the capture came back
+ *   clipped by its window (#1670 — the echo may have scrolled out of it)
  * @returns Cleaned response, or an empty string when the capture was all chrome
+ *   or the pane has not had a turn yet
  */
-export function cleanScrollbackResponse(response: string, cliToolId: CLIToolType): string {
+export function cleanScrollbackResponse(
+  response: string,
+  cliToolId: CLIToolType,
+  paneLines?: readonly string[]
+): string {
+  if (paneLines && isStartupScreenWithoutUserEcho(cliToolId, paneLines)) {
+    return '';
+  }
+
   const allLines = response.split('\n');
   const chromeStart = findScrollbackChromeStart(allLines, cliToolId);
   const bodyLines = chromeStart >= 0 ? allLines.slice(0, chromeStart) : allLines;

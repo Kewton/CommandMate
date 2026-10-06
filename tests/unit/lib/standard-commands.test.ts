@@ -129,7 +129,7 @@ describe('STANDARD_COMMANDS', () => {
   // refresh against claude docs / codex 0.146.0 added 104 real commands.
   // 56 -> 159. The bans below are what actually protects the set; this number
   // only pins that a refresh was reviewed rather than applied blind.
-  // Issue #1767: +3 claude built-ins the weekly drift check surfaced — /agents,
+  // Issue #1767: +3 claude built-ins the catalog drift check surfaced — /agents,
   // /import, /list-agents, all real rows on code.claude.com/docs/en/commands.md.
   // 159 -> 162.
   // Issue #1913: copilot entered the catalog (68, from `copilot help commands`

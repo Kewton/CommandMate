@@ -28,6 +28,7 @@ import {
   RepositoryDbError,
 } from '@/lib/db/db-repository';
 import { MAX_DISPLAY_NAME_LENGTH } from '@/config/repository-config';
+import { readJsonBody } from '@/lib/api/read-json-body';
 
 export async function PUT(
   request: NextRequest,
@@ -40,7 +41,9 @@ export async function PUT(
       return NextResponse.json({ error: 'Invalid repository ID' }, { status: 400 });
     }
 
-    const body = await request.json();
+    const parsed = await readJsonBody(request);
+    if (!parsed.ok) return parsed.response;
+    const body = parsed.body;
 
     if (body === null || typeof body !== 'object') {
       return NextResponse.json({ error: 'Request body is required' }, { status: 400 });

@@ -35,7 +35,7 @@ import { WorktreeImage } from '@/components/common/WorktreeImage';
 import { classifyLink, resolveRelativePath, sanitizeHref, REHYPE_SANITIZE_SCHEMA } from '@/lib/link-utils';
 import { encodePathForUrl } from '@/lib/url-path-encoder';
 import { SHARED_REMARK_PLUGINS } from '@/lib/markdown';
-import type { Components } from 'react-markdown';
+import type { Components, Options } from 'react-markdown';
 
 // ============================================================================
 // Types
@@ -218,7 +218,7 @@ export const MarkdownPreview = memo(function MarkdownPreview({
   // would desync heading ids from the plain slugs `extractToc` (the inline TOC
   // sidebar's data source) produces. Running slug after sanitize assigns plain
   // ids that are never re-sanitized, so they match `extractToc` exactly.
-  const rehypePlugins = useMemo(
+  const rehypePlugins = useMemo<NonNullable<Options['rehypePlugins']>>(
     () => [rehypeRaw, [rehypeSanitize, REHYPE_SANITIZE_SCHEMA], rehypeSlug, rehypeHighlight],
     [],
   );
@@ -226,8 +226,7 @@ export const MarkdownPreview = memo(function MarkdownPreview({
   return (
     <ReactMarkdown
       remarkPlugins={SHARED_REMARK_PLUGINS}
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      rehypePlugins={rehypePlugins as any}
+      rehypePlugins={rehypePlugins}
       components={markdownComponents}
     >
       {content}

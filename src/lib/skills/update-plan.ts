@@ -80,6 +80,7 @@ import type {
   SkillInstallReceipt,
   SkillRiskLevel,
 } from '@/types/skills';
+import { getOrInitGlobal } from '../global-state';
 
 // =============================================================================
 // Vocabulary
@@ -417,8 +418,7 @@ declare global {
   var __skillUpdatePlans: UpdatePlanCacheState | undefined;
 }
 
-const cache: UpdatePlanCacheState =
-  globalThis.__skillUpdatePlans ?? (globalThis.__skillUpdatePlans = { records: new Map() });
+const cache: UpdatePlanCacheState = getOrInitGlobal('__skillUpdatePlans', () => ({ records: new Map() }));
 
 /** Token grammar. Anything else is rejected before the store is consulted. */
 export const SKILL_UPDATE_PLAN_TOKEN_PATTERN = /^[0-9a-f]{48}$/;

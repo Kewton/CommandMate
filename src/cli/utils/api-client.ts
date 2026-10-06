@@ -10,6 +10,7 @@
 
 import { ExitCode } from '../types';
 import { readPackageVersion } from './package-info';
+import { isUatIsolationEnabled, UAT_ISOLATION_ENV_VAR } from '../../config/uat-isolation';
 import { loadClientEnv, resolveServerEndpoint } from './server-url';
 
 /** Maximum stop-pattern length [SEC4-06] */
@@ -120,14 +121,43 @@ function withServerUrl(message: string, context?: ApiErrorContext): string {
 }
 
 /**
+ * The `code` the server sends with the 409 for a tmux session another
+ * CommandMate server created (Issue #2865). Spelled out rather than imported:
+ * the server's constant lives next to the tmux gateway, which the CLI must not
+ * load. `tests/unit/cli/utils/api-client-foreign-session-3334.test.ts` pins the
+ * two to the same string.
+ */
+export const FOREIGN_SESSION_ERROR_CODE = 'session_owned_by_other_server';
+
+/**
+ * Issue #3334: what the operator reads for that 409. It has to say three
+ * things the status alone does not: the session is another CommandMate
+ * server's, this command therefore did nothing to it, and where to go instead.
+ */
+export function foreignSessionMessage(payload?: ApiErrorPayload): string {
+  const name = typeof payload?.sessionName === 'string' && payload.sessionName !== ''
+    ? `"${payload.sessionName}" `
+    : '';
+  const where = typeof payload?.sessionPath === 'string' && payload.sessionPath !== ''
+    ? ` (it was started in ${payload.sessionPath})`
+    : '';
+  return (
+    `The tmux session ${name}belongs to another CommandMate server${where}, ` +
+    'so nothing was sent to it, read from it or stopped. ' +
+    'Use the CommandMate server that started it, or stop that session there first.'
+  );
+}
+
+/**
  * Classify API errors into user-friendly messages and exit codes.
  * [IA3-09] Covers: ECONNREFUSED, 400, 401/403, 404, 429, 500, timeout
  *
  * @param error - Error object or unknown
  * @param status - HTTP status code if available
  * @param payload - Parsed error body, when the response carried one (Issue #1637).
- *   Used for 5xx only: the 4xx messages below are already specific, and are
- *   pinned by tests as the CLI's own wording.
+ *   Used for 5xx, and for the foreign-session 409 (Issue #3334): the other 4xx
+ *   messages below are already specific, and are pinned by tests as the CLI's
+ *   own wording.
  * @param context - Which server answered, when the caller knows (Issue #2404).
  *   Read by the 404 branch only; the other messages do not send anyone looking
  *   in the wrong place.
@@ -171,6 +201,23 @@ export function handleApiError(
         // is the one that is wrong.
         return {
           message: withServerUrl('Resource not found. Check the worktree ID.', context),
+          exitCode: ExitCode.UNEXPECTED_ERROR,
+        };
+      case 409:
+        // Issue #3334: the one 409 every session route shares (#2865 / #3290).
+        // Without this it read "Unexpected HTTP status: 409", which does not say
+        // that nothing was done, nor why. Same exit code as that default branch,
+        // so a script branching on it sees no change. Every other 409 keeps the
+        // default wording below — the commands that own one (send's
+        // PROMPT_WAITING, verify's running run) already explain it themselves.
+        if (payload?.code === FOREIGN_SESSION_ERROR_CODE) {
+          return {
+            message: foreignSessionMessage(payload),
+            exitCode: ExitCode.UNEXPECTED_ERROR,
+          };
+        }
+        return {
+          message: `Unexpected HTTP status: ${status}`,
           exitCode: ExitCode.UNEXPECTED_ERROR,
         };
       case 429:
@@ -257,6 +304,14 @@ export class ApiClient {
     // *under* process.env — see its doc comment for why that order is the reverse of the one
     // `status` uses. resolveServerEndpoint() then applies the same CM_BIND / CM_HTTPS_CERT +
     // CM_HTTPS_KEY rules as `status`, which the old hardcoded `http://localhost:` ignored.
+    // Issue #3360: in UAT isolation the default port 3000 is the user's production server,
+    // so a client that was not told where to go must not go anywhere.
+    if (!options?.baseUrl && isUatIsolationEnabled() && !process.env.CM_PORT) {
+      throw new ApiError(
+        `${UAT_ISOLATION_ENV_VAR}=${process.env[UAT_ISOLATION_ENV_VAR]} requires CM_PORT: refusing to fall back to the default port 3000.`,
+        ExitCode.CONFIG_ERROR
+      );
+    }
     this.baseUrl = options?.baseUrl || resolveServerEndpoint(loadClientEnv()).url;
     this.token = resolveAuthToken(options);
 
@@ -271,9 +326,11 @@ export class ApiClient {
   /**
    * The base URL this client actually dials (Issue #2404).
    *
-   * Resolved once in the constructor through the precedence in
-   * `loadClientEnv()` (`--base-url` > exported `CM_PORT` > `~/.commandmate/.env`
-   * > 3000), which is why it is read from here rather than re-derived by each
+   * Resolved once in the constructor: the `baseUrl` option when a caller passes
+   * one (there is no CLI flag for it), else `CM_PORT` / `CM_BIND` through the
+   * precedence in `loadClientEnv()` (exported > `~/.commandmate/.env` > 3000;
+   * under `CM_UAT_ISOLATION=1` exported only, never 3000), which is why it is
+   * read from here rather than re-derived by each
    * caller: a second derivation is a second answer, and "which server did this
    * command talk to" only helps if it is the one the request went to.
    */
@@ -346,30 +403,7 @@ export class ApiClient {
    * [DR1-05] Generic type parameter specified at call site
    */
   async post<T>(path: string, body?: unknown): Promise<T> {
-    try {
-      const response = await fetch(`${this.baseUrl}${path}`, {
-        method: 'POST',
-        headers: this.getHeaders(),
-        body: body !== undefined ? JSON.stringify(body) : undefined,
-      });
-
-      if (!response.ok) {
-        // Issue #1637: read the body first — handleApiError needs it to surface
-        // the server's reason for a 5xx instead of "check the logs".
-        const payload = await readErrorPayload(response);
-        const errResult = handleApiError(null, response.status, payload, { serverUrl: this.baseUrl });
-        throw new ApiError(errResult.message, errResult.exitCode, response.status, payload);
-      }
-
-      // Handle 204 No Content
-      const text = await response.text();
-      if (!text) return undefined as T;
-      return JSON.parse(text) as T;
-    } catch (error) {
-      if (error instanceof ApiError) throw error;
-      const errResult = handleApiError(error);
-      throw new ApiError(errResult.message, errResult.exitCode);
-    }
+    return sendWithBody<T>(this.baseUrl, 'POST', this.getHeaders(), path, body);
   }
 
   /**
@@ -378,29 +412,41 @@ export class ApiClient {
    * [DR1-05] Generic type parameter specified at call site
    */
   async patch<T>(path: string, body?: unknown): Promise<T> {
-    try {
-      const response = await fetch(`${this.baseUrl}${path}`, {
-        method: 'PATCH',
-        headers: this.getHeaders(),
-        body: body !== undefined ? JSON.stringify(body) : undefined,
-      });
+    return sendWithBody<T>(this.baseUrl, 'PATCH', this.getHeaders(), path, body);
+  }
+}
 
-      if (!response.ok) {
-        // Issue #1637: read the body first — handleApiError needs it to surface
-        // the server's reason for a 5xx instead of "check the logs".
-        const payload = await readErrorPayload(response);
-        const errResult = handleApiError(null, response.status, payload, { serverUrl: this.baseUrl });
-        throw new ApiError(errResult.message, errResult.exitCode, response.status, payload);
-      }
+/** POST / PATCH share everything but the method; an empty body (204) is `undefined`. */
+async function sendWithBody<T>(
+  baseUrl: string,
+  method: 'POST' | 'PATCH',
+  headers: Record<string, string>,
+  path: string,
+  body?: unknown
+): Promise<T> {
+  try {
+    const response = await fetch(`${baseUrl}${path}`, {
+      method,
+      headers,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
 
-      const text = await response.text();
-      if (!text) return undefined as T;
-      return JSON.parse(text) as T;
-    } catch (error) {
-      if (error instanceof ApiError) throw error;
-      const errResult = handleApiError(error);
-      throw new ApiError(errResult.message, errResult.exitCode);
+    if (!response.ok) {
+      // Issue #1637: read the body first — handleApiError needs it to surface
+      // the server's reason for a 5xx instead of "check the logs".
+      const payload = await readErrorPayload(response);
+      const errResult = handleApiError(null, response.status, payload, { serverUrl: baseUrl });
+      throw new ApiError(errResult.message, errResult.exitCode, response.status, payload);
     }
+
+    // Handle 204 No Content
+    const text = await response.text();
+    if (!text) return undefined as T;
+    return JSON.parse(text) as T;
+  } catch (error) {
+    if (error instanceof ApiError) throw error;
+    const errResult = handleApiError(error);
+    throw new ApiError(errResult.message, errResult.exitCode);
   }
 }
 
@@ -420,6 +466,9 @@ export interface ApiErrorPayload {
    * trip per mistake.
    */
   issues?: string[];
+  /** Issue #2865: sent with the foreign-session 409 (`session_owned_by_other_server`). */
+  sessionName?: string;
+  sessionPath?: string | null;
 }
 
 /**

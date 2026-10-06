@@ -63,12 +63,17 @@ describe('Dynamic Import Patterns', () => {
     });
   });
 
-  describe('MarkdownEditor in WorktreeDetailRefactored.tsx', () => {
-    const filePath = path.join(SRC_ROOT, 'components/worktree/WorktreeDetailRefactored.tsx');
+  // The two surfaces that host the Markdown editor: the PC file tab panel and
+  // the phone's file viewer. Each declares its own dynamic import.
+  describe.each([
+    'components/worktree/FilePanelContent.tsx',
+    'components/worktree/FileViewer.tsx',
+  ])('MarkdownEditor in %s', (relativePath) => {
+    const filePath = path.join(SRC_ROOT, relativePath);
     let content: string;
 
     beforeAll(() => {
-      content = readSourceFile('components/worktree/WorktreeDetailRefactored.tsx');
+      content = readSourceFile(relativePath);
     });
 
     it('should exist as a file', () => {
@@ -104,12 +109,14 @@ describe('Dynamic Import Patterns', () => {
   describe('Consistent pattern with MermaidCodeBlock reference implementation', () => {
     let mermaidContent: string;
     let terminalContent: string;
-    let wdrContent: string;
+    let filePanelContent: string;
+    let fileViewerContent: string;
 
     beforeAll(() => {
       mermaidContent = readSourceFile('components/worktree/MermaidCodeBlock.tsx');
       terminalContent = readSourceFile('app/worktrees/[id]/terminal/page.tsx');
-      wdrContent = readSourceFile('components/worktree/WorktreeDetailRefactored.tsx');
+      filePanelContent = readSourceFile('components/worktree/FilePanelContent.tsx');
+      fileViewerContent = readSourceFile('components/worktree/FileViewer.tsx');
     });
 
     it('should follow the same .then((mod) => ({ default: mod.Xxx })) pattern', () => {
@@ -121,8 +128,9 @@ describe('Dynamic Import Patterns', () => {
       // Terminal page should use same pattern
       expect(terminalContent).toContain('default: mod.TerminalComponent');
 
-      // WorktreeDetailRefactored should use same pattern
-      expect(wdrContent).toContain('default: mod.MarkdownEditor');
+      // The MarkdownEditor hosts should use same pattern
+      expect(filePanelContent).toContain('default: mod.MarkdownEditor');
+      expect(fileViewerContent).toContain('default: mod.MarkdownEditor');
     });
   });
 });

@@ -22,6 +22,7 @@ import { createLogger } from '@/lib/logger';
 import { TIMER_CLEANUP_RETENTION_DAYS, TIMER_STATUS } from '@/config/timer-constants';
 import { sendUserMessage } from '@/lib/session/send-user-message';
 import type { CLIToolType } from './cli-tools/types';
+import { getOrInitGlobal } from './global-state';
 
 const logger = createLogger('timer-manager');
 
@@ -49,14 +50,11 @@ declare global {
 }
 
 function getState(): TimerManagerState {
-  if (!globalThis.__timerManagerState) {
-    globalThis.__timerManagerState = {
+  return getOrInitGlobal('__timerManagerState', () => ({
       timers: new Map(),
       timerWorktrees: new Map(),
       initialized: false,
-    };
-  }
-  return globalThis.__timerManagerState;
+    }));
 }
 
 // =============================================================================

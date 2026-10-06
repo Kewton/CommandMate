@@ -15,9 +15,15 @@
  * over a threshold and not new is `outstanding`, from the first run on, so
  * an already slow API or an already noisy log line is filed once the cap has
  * room. Its candidates are the newly crossed thresholds and the growth rules.
+ *
+ * CI (Issue #3310) is filed the same way: a flaky or broken test the previous
+ * run did not have is a candidate, one it had is outstanding (from the first
+ * run on).
  */
 
 import { bugFlowSummary } from './bug-flow';
+import { ciFlakySummary } from './ci-flaky';
+import { hookObservationSummary } from './hook-observation';
 import { reportDateJst } from './report';
 import { severityRank } from './metrics-parse';
 import {
@@ -59,6 +65,9 @@ import {
 
 type OkMeasurement = Extract<MetricMeasurement, { status: 'ok' }>;
 
+/** Appended to a summary when there is no previous snapshot to compare with. */
+const BASELINE_NOTE = '（初回: 基準として記録）';
+
 export function metricKey(metricId: MetricId, target: string): string {
   return `metrics:${metricId}:${target}`;
 }
@@ -99,7 +108,7 @@ function presenceRule(m: OkMeasurement, previous: MetricSnapshot | null, keepOut
   }
   const total = Object.keys(m.findings).length;
   const unit = m.metricId === 'npm-audit' ? `${m.value} 件（${total} パッケージ）` : `${total} 件`;
-  const baseline = previous === null ? '（初回: 基準として記録）' : '';
+  const baseline = previous === null ? BASELINE_NOTE : '';
   return {
     candidates,
     ...(keepOutstanding ? { outstanding } : {}),
@@ -135,7 +144,7 @@ function evaluateFileSize(m: OkMeasurement, previous: MetricSnapshot | null): Ev
   const over = Object.keys(m.findings).length;
   return {
     candidates,
-    summary: `${FILE_SIZE_LIMIT.toLocaleString('en-US')} 行超 ${over} 本（候補 ${candidates.length} 件）${previous === null ? '（初回: 基準として記録）' : ''}`,
+    summary: `${FILE_SIZE_LIMIT.toLocaleString('en-US')} 行超 ${over} 本（候補 ${candidates.length} 件）${previous === null ? BASELINE_NOTE : ''}`,
   };
 }
 
@@ -159,7 +168,7 @@ function evaluateComplexity(m: OkMeasurement, previous: MetricSnapshot | null): 
   }
   return {
     candidates,
-    summary: `複雑度 ${COMPLEXITY_ALERT} 以上の関数 ${m.value ?? 0} 個（候補 ${candidates.length} 件）${previous === null ? '（初回: 基準として記録）' : ''}`,
+    summary: `複雑度 ${COMPLEXITY_ALERT} 以上の関数 ${m.value ?? 0} 個（候補 ${candidates.length} 件）${previous === null ? BASELINE_NOTE : ''}`,
   };
 }
 
@@ -179,7 +188,7 @@ function evaluateDuplication(m: OkMeasurement, previous: MetricSnapshot | null):
       : [];
   return {
     candidates,
-    summary: `重複率 ${now}%${before === undefined ? '（初回: 基準として記録）' : `（前回比 ${sign(delta)}pt）`}`,
+    summary: `重複率 ${now}%${before === undefined ? BASELINE_NOTE : `（前回比 ${sign(delta)}pt）`}`,
   };
 }
 
@@ -194,7 +203,7 @@ function evaluateOutdated(m: OkMeasurement, previous: MetricSnapshot | null): Ev
   }
   return {
     candidates,
-    summary: `メジャー ${OUTDATED_MAJOR_LAG} 版以上遅れた直接依存 ${m.value ?? 0} 件（新規 ${candidates.length} 件）${previous === null ? '（初回: 基準として記録）' : ''}`,
+    summary: `メジャー ${OUTDATED_MAJOR_LAG} 版以上遅れた直接依存 ${m.value ?? 0} 件（新規 ${candidates.length} 件）${previous === null ? BASELINE_NOTE : ''}`,
   };
 }
 
@@ -219,7 +228,7 @@ function evaluateTypeSafety(m: OkMeasurement, previous: MetricSnapshot | null): 
           ),
         ]
       : [];
-  return { candidates, summary: `${text}${previous === null ? '（初回: 基準として記録）' : ''}` };
+  return { candidates, summary: `${text}${previous === null ? BASELINE_NOTE : ''}` };
 }
 
 function evaluateCoverage(m: OkMeasurement, previous: MetricSnapshot | null): Evaluation {
@@ -242,7 +251,7 @@ function evaluateCoverage(m: OkMeasurement, previous: MetricSnapshot | null): Ev
       : [];
   return {
     candidates,
-    summary: `lines ${now}%${before === undefined ? '（初回: 基準として記録）' : `（前回 ${before}%）`}`,
+    summary: `lines ${now}%${before === undefined ? BASELINE_NOTE : `（前回 ${before}%）`}`,
   };
 }
 
@@ -301,7 +310,7 @@ function subjectsOf(m: OkMeasurement): MetricFinding[] {
 }
 
 function perfSummary(text: string, evaluation: Pick<Evaluation, 'candidates' | 'outstanding'>, previous: MetricSnapshot | null): string {
-  const baseline = previous === null ? '（初回: 基準として記録）' : '';
+  const baseline = previous === null ? BASELINE_NOTE : '';
   return `${text}（候補 ${evaluation.candidates.length} 件・継続 ${evaluation.outstanding?.length ?? 0} 件）${baseline}`;
 }
 
@@ -445,14 +454,22 @@ function evaluate(m: OkMeasurement, previous: MetricSnapshot | null): Evaluation
     case 'bug-flow':
       // Numbers only (Issue #3185): never a candidate, so no Issue is filed from it.
       return { candidates: [], summary: bugFlowSummary(m.items) };
+    case 'ci-flaky': {
+      const evaluation = presenceRule(m, previous, true);
+      return { ...evaluation, summary: perfSummary(ciFlakySummary(m.details), evaluation, previous) };
+    }
+    case 'hook-observation':
+      // Observation only (Issue #3311): never a candidate until a later Issue
+      // decides, from these numbers, what should be one.
+      return { candidates: [], summary: hookObservationSummary(m.details) };
   }
 }
 
 /**
  * One metric's result. Security metrics fail while any finding exists (a
  * high advisory is a problem whether or not it is new); maintainability
- * metrics fail only when something got worse; performance metrics fail while
- * anything is a candidate or outstanding; process metrics never fail.
+ * metrics fail only when something got worse; performance and ci metrics fail
+ * while anything is a candidate or outstanding; process metrics never fail.
  */
 export function evaluateMetric(measurement: MetricMeasurement, previous: MetricSnapshot | null): MetricResult {
   const category = METRIC_CATEGORY[measurement.metricId];
@@ -472,7 +489,7 @@ export function evaluateMetric(measurement: MetricMeasurement, previous: MetricS
   const failed =
     category === 'security'
       ? hasFindings
-      : category === 'performance'
+      : category === 'performance' || category === 'ci'
         ? evaluation.candidates.length + (evaluation.outstanding?.length ?? 0) > 0
         : category === 'process'
           ? false
@@ -486,14 +503,16 @@ export function evaluateMetric(measurement: MetricMeasurement, previous: MetricS
     candidates: evaluation.candidates,
     ...(evaluation.outstanding ? { outstanding: evaluation.outstanding } : {}),
     ...(measurement.details ? { details: measurement.details } : {}),
+    ...(measurement.records ? { records: measurement.records } : {}),
   };
 }
 
 /**
  * The order the AI files Issues in: security candidates (most severe first),
  * then maintainability candidates (largest worsening first), then performance
- * candidates (largest score first), then outstanding security findings (most
- * severe first), then outstanding performance entries (largest score first).
+ * candidates (largest score first), then ci candidates, then outstanding
+ * security findings (most severe first), then outstanding performance entries
+ * (largest score first), then outstanding ci entries.
  */
 export function buildQueue(results: readonly MetricResult[]): MetricsQueueEntry[] {
   type Ranked = MetricsQueueEntry & { rank: number };
@@ -502,16 +521,20 @@ export function buildQueue(results: readonly MetricResult[]): MetricsQueueEntry[
   const performance: Ranked[] = [];
   const outstanding: Ranked[] = [];
   const performanceOutstanding: Ranked[] = [];
+  const ci: Ranked[] = [];
+  const ciOutstanding: Ranked[] = [];
   for (const result of results) {
     for (const candidate of result.candidates) {
       const entry = { key: candidate.key, metricId: result.metricId, source: 'candidate' as const };
       if (result.category === 'security') security.push({ ...entry, rank: severityRank(candidate.severity) });
       else if (result.category === 'performance') performance.push({ ...entry, rank: candidate.score ?? 0 });
+      else if (result.category === 'ci') ci.push({ ...entry, rank: 0 });
       else maintainability.push({ ...entry, rank: candidate.score ?? 0 });
     }
     for (const candidate of result.outstanding ?? []) {
       const entry = { key: candidate.key, metricId: result.metricId, source: 'outstanding' as const };
       if (result.category === 'performance') performanceOutstanding.push({ ...entry, rank: candidate.score ?? 0 });
+      else if (result.category === 'ci') ciOutstanding.push({ ...entry, rank: 0 });
       else outstanding.push({ ...entry, rank: severityRank(candidate.severity) });
     }
   }
@@ -520,9 +543,31 @@ export function buildQueue(results: readonly MetricResult[]): MetricsQueueEntry[
     ...security.sort(byRank),
     ...maintainability.sort(byRank),
     ...performance.sort(byRank),
+    ...ci,
     ...outstanding.sort(byRank),
     ...performanceOutstanding.sort(byRank),
+    ...ciOutstanding,
   ].map(({ key, metricId, source }) => ({ key, metricId, source }));
+}
+
+const countVersionOf = (counted: { countVersion?: number }): number => counted.countVersion ?? 1;
+
+/**
+ * A previous snapshot counted another way (Issue #3389: type-safety stopped
+ * counting comments) is not a comparison: the run is a baseline, and the
+ * summary says once, on this run, that the baseline was reset and from what.
+ * The state written after this run carries the new version, so the next run
+ * compares as usual.
+ */
+function evaluateRebased(m: OkMeasurement, previous: MetricSnapshot): MetricResult {
+  const from = countVersionOf(previous);
+  const to = countVersionOf(m);
+  const result = evaluateMetric(m, null);
+  return {
+    ...result,
+    summary: `${result.summary.replace(BASELINE_NOTE, '')}（数え方を版 ${from} から版 ${to} に変えたため基準を置き直した: 前回 ${previous.value ?? '-'}（${previous.measuredAt.slice(0, 10)}、旧い数え方）→ 今回 ${m.value ?? '-'}）`,
+    details: { ...(result.details ?? {}), countVersionFrom: from, countVersionTo: to },
+  };
 }
 
 /** Results in {@link METRIC_IDS} order, each compared with its previous snapshot. */
@@ -533,7 +578,13 @@ export function evaluateAll(
   const rank = (id: MetricId) => METRIC_IDS.indexOf(id);
   return [...measurements]
     .sort((a, b) => rank(a.metricId) - rank(b.metricId))
-    .map((m) => evaluateMetric(m, state?.metrics[m.metricId] ?? null));
+    .map((m) => {
+      const previous = state?.metrics[m.metricId] ?? null;
+      if (m.status === 'ok' && previous !== null && countVersionOf(m) !== countVersionOf(previous)) {
+        return evaluateRebased(m, previous);
+      }
+      return evaluateMetric(m, previous);
+    });
 }
 
 /**
@@ -549,7 +600,12 @@ export function nextMetricsState(
   const metrics: MetricsState['metrics'] = { ...(previous?.metrics ?? {}) };
   for (const m of measurements) {
     if (m.status !== 'ok') continue;
-    metrics[m.metricId] = { measuredAt: now.toISOString(), value: m.value, items: { ...m.items } };
+    metrics[m.metricId] = {
+      measuredAt: now.toISOString(),
+      value: m.value,
+      items: { ...m.items },
+      ...(m.countVersion !== undefined ? { countVersion: m.countVersion } : {}),
+    };
   }
   return { schemaVersion: 1, metrics };
 }
@@ -569,13 +625,18 @@ export function parseMetricsState(text: string | null): MetricsState | null {
   const metrics: MetricsState['metrics'] = {};
   for (const [id, snapshot] of Object.entries(raw)) {
     if (!isMetricId(id) || typeof snapshot !== 'object' || snapshot === null) continue;
-    const { measuredAt, value, items } = snapshot as Record<string, unknown>;
+    const { measuredAt, value, items, countVersion } = snapshot as Record<string, unknown>;
     if (typeof measuredAt !== 'string' || typeof items !== 'object' || items === null || Array.isArray(items)) continue;
     const clean: Record<string, number> = {};
     for (const [key, n] of Object.entries(items)) {
       if (typeof n === 'number' && Number.isFinite(n)) clean[key] = n;
     }
-    metrics[id] = { measuredAt, value: typeof value === 'number' ? value : null, items: clean };
+    metrics[id] = {
+      measuredAt,
+      value: typeof value === 'number' ? value : null,
+      items: clean,
+      ...(typeof countVersion === 'number' && Number.isInteger(countVersion) ? { countVersion } : {}),
+    };
   }
   return { schemaVersion: 1, metrics };
 }

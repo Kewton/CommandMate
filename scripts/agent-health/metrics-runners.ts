@@ -3,7 +3,9 @@
  * parsers in `src/lib/agent-health/metrics-parse.ts` (Issue #3044) and, for
  * performance, `metrics-perf.ts` (Issue #3054: the production log, `ps` and
  * `GET /api/worktrees` — read only; the server is never stopped or changed),
- * and for `bug-flow` `bug-flow.ts` (Issue #3185: `gh issue list`, read only).
+ * and for `bug-flow` `bug-flow.ts` (Issue #3185: `gh issue list`, read only),
+ * for `ci-flaky` `ci-flaky.ts` (Issue #3310: `gh run list` / `gh run view`, read only),
+ * and for `hook-observation` `hook-observation.ts` (Issue #3311: the same log read).
  *
  * A runner never throws for a tool problem: a missing binary, no network, a
  * timeout or unreadable output all become `status: 'skip'` with the reason.
@@ -31,6 +33,16 @@ import {
   type TypeSafetyCounts,
 } from '@/lib/agent-health/metrics-parse';
 import { BUG_FLOW_WINDOW_DAYS, bugFlowWindowStart, measureBugFlow } from '@/lib/agent-health/bug-flow';
+import { measureHookObservation } from '@/lib/agent-health/hook-observation';
+import {
+  attemptFailed,
+  ciFlakyWindowStart,
+  measureCiFlaky,
+  parseCiJobs,
+  parseCiRunList,
+  runsNeedingAttempts,
+  type CiAttempt,
+} from '@/lib/agent-health/ci-flaky';
 import {
   addLogLine,
   createLogAggregate,
@@ -48,6 +60,8 @@ import {
   type ProcessSample,
 } from '@/lib/agent-health/metrics-perf';
 import {
+  CI_FLAKY_MAX_ATTEMPTS,
+  CI_FLAKY_WINDOW_DAYS,
   COMPLEXITY_REPORT_MIN,
   PERF_LOG_MAX_ROTATED,
   SERVER_API_CALLS,
@@ -77,7 +91,7 @@ export interface RunnerContext {
   sampleIntervalMs?: number;
   /** server-process: the API to time; null → do not call it. */
   apiUrl?: string | null;
-  /** bug-flow: the `gh` executable (tests point it elsewhere). */
+  /** bug-flow / ci-flaky: the `gh` executable (tests point it elsewhere). */
   ghCommand?: string;
 }
 
@@ -391,7 +405,7 @@ async function outdated(ctx: RunnerContext): Promise<MetricMeasurement> {
 function typeSafety(ctx: RunnerContext): MetricMeasurement {
   const total: TypeSafetyCounts = { any: 0, eslintDisable: 0, tsIgnore: 0 };
   for (const file of listSourceFiles(ctx.repoRoot)) {
-    const counts = countTypeSafety(fs.readFileSync(path.join(ctx.repoRoot, file), 'utf8'));
+    const counts = countTypeSafety(fs.readFileSync(path.join(ctx.repoRoot, file), 'utf8'), file);
     total.any += counts.any;
     total.eslintDisable += counts.eslintDisable;
     total.tsIgnore += counts.tsIgnore;
@@ -467,7 +481,7 @@ export async function aggregateServerLog(files: readonly string[], now: Date): P
 }
 
 type LogAggregateResult = { ok: true; agg: LogAggregate } | { ok: false; reason: string };
-/** The three log metrics share one read per run. */
+/** The log metrics (the three performance ones and hook-observation) share one read per run. */
 const logAggregates = new WeakMap<RunnerContext, Promise<LogAggregateResult>>();
 
 function resolveServerLog(ctx: RunnerContext): string | null {
@@ -591,6 +605,77 @@ async function bugFlow(ctx: RunnerContext): Promise<MetricMeasurement> {
   return measureBugFlow(result.stdout, now);
 }
 
+// ── ci (Issue #3310) ───────────────────────────────────────────────────────
+
+const CI_REPO = 'Kewton/CommandMate';
+
+/**
+ * develop's push runs of the last 7 days; the jobs (and the failed logs) of
+ * every attempt of a run that did not pass or was rerun. A `gh` problem is a
+ * skip like any other tool's — a partial answer would misstate the counts.
+ */
+async function ciFlaky(ctx: RunnerContext): Promise<MetricMeasurement> {
+  const now = ctx.now ?? new Date();
+  const gh = ctx.ghCommand ?? 'gh';
+  // The search is by UTC date; one extra day so the exact 7-day cut is made on `createdAt`.
+  const since = new Date(ciFlakyWindowStart(now) - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  // `--created` also keeps the order newest-first (without it, `--branch` returned 2026-09-14 rows first).
+  const list = await runTool(
+    ctx,
+    'ci-flaky',
+    gh,
+    [
+      'run',
+      'list',
+      '--repo',
+      CI_REPO,
+      '--branch',
+      'develop',
+      '--event',
+      'push',
+      '--created',
+      `>=${since}`,
+      '--limit',
+      '1000',
+      '--json',
+      'databaseId,headSha,attempt,conclusion,status,workflowName,createdAt',
+    ],
+    60_000
+  );
+  if (isMeasurement(list)) return list;
+  if (list.code !== 0) {
+    return skip('ci-flaky', `gh run list が失敗した（直近 ${CI_FLAKY_WINDOW_DAYS} 日の develop push）: exit ${list.code} ${tail(list.stderr)}`);
+  }
+  const runs = parseCiRunList(list.stdout, now);
+  if (runs === null) return skip('ci-flaky', 'gh run list の出力が JSON でない');
+
+  const attempts: CiAttempt[] = [];
+  const wanted = runsNeedingAttempts(runs)
+    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
+    .flatMap((run) => Array.from({ length: run.attempt }, (_, i) => ({ run, attempt: i + 1 })))
+    .slice(0, CI_FLAKY_MAX_ATTEMPTS);
+  for (const { run, attempt } of wanted) {
+    const view = ['run', 'view', String(run.id), '--repo', CI_REPO, '--attempt', String(attempt)];
+    const jobsResult = await runTool(ctx, 'ci-flaky', gh, [...view, '--json', 'jobs'], 60_000);
+    if (isMeasurement(jobsResult)) return jobsResult;
+    const jobs = jobsResult.code === 0 ? parseCiJobs(jobsResult.stdout) : null;
+    if (jobs === null) {
+      return skip('ci-flaky', `gh run view --json jobs が失敗した（run ${run.id} attempt ${attempt}）: exit ${jobsResult.code} ${tail(jobsResult.stderr)}`);
+    }
+    let failedLog: string | null = null;
+    if (attemptFailed(jobs)) {
+      const logResult = await runTool(ctx, 'ci-flaky', gh, [...view, '--log-failed'], 180_000);
+      if (isMeasurement(logResult)) return logResult;
+      if (logResult.code !== 0) {
+        return skip('ci-flaky', `gh run view --log-failed が失敗した（run ${run.id} attempt ${attempt}）: exit ${logResult.code} ${tail(logResult.stderr)}`);
+      }
+      failedLog = logResult.stdout;
+    }
+    attempts.push({ runId: run.id, attempt, jobs, failedLog });
+  }
+  return measureCiFlaky(runs, attempts, now);
+}
+
 export const METRIC_RUNNERS: Record<MetricId, (ctx: RunnerContext) => Promise<MetricMeasurement> | MetricMeasurement> = {
   'npm-audit': npmAudit,
   semgrep,
@@ -607,6 +692,8 @@ export const METRIC_RUNNERS: Record<MetricId, (ctx: RunnerContext) => Promise<Me
   'error-rate': fromServerLog('error-rate', measureErrorRate),
   'server-process': serverProcess,
   'bug-flow': bugFlow,
+  'ci-flaky': ciFlaky,
+  'hook-observation': fromServerLog('hook-observation', (agg) => measureHookObservation(agg.hook)),
 };
 
 /**
@@ -628,6 +715,8 @@ export const RUN_ORDER: readonly MetricId[] = [
   'api-latency',
   'log-volume',
   'error-rate',
+  'hook-observation',
+  'ci-flaky',
   'bug-flow',
 ];
 

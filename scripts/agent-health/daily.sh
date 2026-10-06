@@ -11,6 +11,12 @@
 # stdout carries exactly one AGENT_HEALTH_SYNC line from this script; git and
 # npm output goes to stderr.
 #
+# The shared run lock (scripts/uat/run-lock.sh, Issue #3359) is held from
+# before the sync until run.ts has finished, so a UAT server or a manual
+# run.ts never runs alongside. run.ts inherits it through CM_RUN_LOCK_TOKEN.
+# When another run holds it, the minimal report says so (reason run-locked)
+# and the exit is 2, as for a failed sync.
+#
 # bash 3.2 compatible (macOS /bin/bash): no associative arrays, no mapfile.
 
 cd "$(dirname "$0")/../.." || exit 2
@@ -78,6 +84,19 @@ fail_sync() {
   ' || echo "daily.sh: could not write the report to $OUT" >&2
   exit 2
 }
+
+# 3. One run at a time (UAT, this check, a manual run.ts).
+# shellcheck source=scripts/uat/run-lock.sh
+. scripts/uat/run-lock.sh || fail_sync "run-lock: scripts/uat/run-lock.sh not found"
+CM_RUN_LOCK_TOKEN="daily-$$-$(date -u +%Y%m%d%H%M%S)-$RANDOM"
+if ! run_lock_acquire daily $$ "$CM_RUN_LOCK_TOKEN"; then
+  echo "daily.sh: $RUN_LOCK_ERROR" >&2
+  fail_sync "run-locked: $RUN_LOCK_ERROR"
+fi
+export CM_RUN_LOCK_TOKEN
+trap 'run_lock_release "$CM_RUN_LOCK_TOKEN"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 # 4. Never pull over local edits to tracked files.
 if [ -n "$(git status --porcelain --untracked-files=no)" ]; then

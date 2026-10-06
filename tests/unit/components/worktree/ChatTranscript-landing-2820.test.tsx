@@ -26,7 +26,8 @@
 
 import React, { useLayoutEffect, useRef } from 'react';
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { trackWindowTimers } from '@tests/helpers/track-window-timers';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import type { ChatMessage } from '@/types/models';
 import { separateTurnBody } from '@/lib/hooks/sources/turn-body';
 import { CHAT_TOOL_ACTIVITY_STORAGE_KEY } from '@/lib/chat/chat-tool-activity';
@@ -360,11 +361,13 @@ describe('[#2820] ChatTranscript lands on the head of the latest reply', () => {
   const cleanups: Array<() => void> = [];
 
   beforeEach(() => {
+    cleanups.push(trackWindowTimers());
     cleanups.push(installLayout());
     cleanups.push(installResizeObserver());
   });
 
   afterEach(() => {
+    cleanup();
     while (cleanups.length) cleanups.pop()?.();
     aims.length = 0;
     window.localStorage.clear();

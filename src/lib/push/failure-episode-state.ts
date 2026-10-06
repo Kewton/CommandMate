@@ -53,6 +53,7 @@
 
 import { buildCompositeKey } from '@/lib/auto-yes-state';
 import type { CLIToolType } from '@/lib/cli-tools/types';
+import { getOrInitGlobal } from '../global-state';
 
 /**
  * How long after notifying about an upstream fault this instance stays quiet
@@ -87,8 +88,7 @@ declare global {
   var __upstreamFaultPushState: Map<string, UpstreamFaultState> | undefined;
 }
 
-const states = globalThis.__upstreamFaultPushState ??
-  (globalThis.__upstreamFaultPushState = new Map<string, UpstreamFaultState>());
+const states = getOrInitGlobal('__upstreamFaultPushState', () => new Map<string, UpstreamFaultState>());
 
 /** Why {@link observeUpstreamFaultEdge} decided as it did. Goes into the log. */
 export type UpstreamFaultEdgeReason =

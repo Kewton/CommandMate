@@ -17,6 +17,8 @@ import type { CLIToolType } from '@/lib/cli-tools/types';
 import { createLogger } from '@/lib/logger';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { invalidateCache } from '@/lib/tmux/tmux-capture-cache';
+import { getOrInitGlobal } from '../global-state';
+import { findTerminalSessionRefusal } from './terminal-session-ownership';
 
 const logger = createLogger('terminal-broadcast');
 
@@ -38,8 +40,7 @@ declare global {
   var __terminalSnapshotVersions: Map<string, number> | undefined;
 }
 
-const versionCounters = globalThis.__terminalSnapshotVersions ??
-  (globalThis.__terminalSnapshotVersions = new Map<string, number>());
+const versionCounters = getOrInitGlobal('__terminalSnapshotVersions', () => new Map<string, number>());
 
 export const INTERACTION_SNAPSHOT_RETRY_DELAYS_MS = [100, 250, 500, 750] as const;
 
@@ -62,6 +63,7 @@ export async function broadcastTerminalSnapshot(
   if (!hasRoomSubscribers(worktreeId)) return;
 
   try {
+    if (!(await isPushableSession(worktreeId, cliToolId, instanceId))) return;
     const db = getDbInstance();
     const payload = await buildCurrentOutput(db, worktreeId, cliToolId, instanceId);
     emitTerminalSnapshot(worktreeId, cliToolId, payload, instanceId);
@@ -90,6 +92,9 @@ function snapshotFingerprint(payload: Awaited<ReturnType<typeof buildCurrentOutp
     // the push, the same reason `sessionStatus` and the two dismiss-panel
     // fields above are here.
     payload.promptAnswerable ?? null,
+    // Issue #3397: so "Auto-Yes sent Enter" (and its `no-effect` follow-up)
+    // reaches the push even when the frame did not change.
+    payload.autoYes?.lastEnterFallback ?? null,
     payload.isSelectionListActive ?? false,
     payload.isPagerActive ?? false,
     // Issue #2369: in the fingerprint for the same reason `sessionStatus` is —
@@ -103,11 +108,37 @@ function snapshotFingerprint(payload: Awaited<ReturnType<typeof buildCurrentOutp
   ]);
 }
 
+/**
+ * Whether the session under this (worktree, tool, instance)'s name may be read
+ * and pushed now (Issue #3334).
+ *
+ * `buildCurrentOutput` finds the session by name. The poller that drives this
+ * push was started by a send the route had checked, but it keeps ticking by
+ * name: if the session ends mid-poll and another CommandMate server starts one
+ * under the same name (#2865), the next tick would capture that server's pane
+ * and push it to this server's tabs. Asked before every capture, with the same
+ * check the WebSocket terminal uses; a refused session is not read and nothing
+ * is pushed — the HTTP poll (which answers 409) says what happened.
+ */
+async function isPushableSession(
+  worktreeId: string,
+  cliToolId: CLIToolType,
+  instanceId?: string,
+): Promise<boolean> {
+  const sessionName = CLIToolManager.getInstance().getTool(cliToolId).getSessionName(worktreeId, instanceId);
+  const refusal = await findTerminalSessionRefusal(worktreeId, sessionName);
+  if (refusal === null) return true;
+  logger.info('terminal-snapshot:refused', { worktreeId, cliToolId, instanceId, refusal });
+  return false;
+}
+
+/** `null` when the session may not be read now ({@link isPushableSession}). */
 async function captureFreshPayload(
   worktreeId: string,
   cliToolId: CLIToolType,
   instanceId?: string,
-): Promise<Awaited<ReturnType<typeof buildCurrentOutput>>> {
+): Promise<Awaited<ReturnType<typeof buildCurrentOutput>> | null> {
+  if (!(await isPushableSession(worktreeId, cliToolId, instanceId))) return null;
   const tool = CLIToolManager.getInstance().getTool(cliToolId);
   invalidateCache(tool.getSessionName(worktreeId, instanceId));
   return buildCurrentOutput(getDbInstance(), worktreeId, cliToolId, instanceId);
@@ -143,9 +174,9 @@ function emitTerminalSnapshot(
     // `JSON.stringify` (in `broadcast`) already drops from the wire on its own.
     // Defaulting it would turn "not judged" into a judgement.
     promptAnswerable: payload.promptAnswerable,
-    // Issue #3184: derived from `promptData` by the builder; `?? null` like
-    // `promptData` itself, since both say "no prompt" the same way.
-    promptView: payload.promptView ?? null,
+    // Issue #3397: straight through, like `promptAnswerable` — undefined (and so
+    // off the wire) when the payload carries no `autoYes`.
+    autoYesEnterFallback: payload.autoYes?.lastEnterFallback,
     isSelectionListActive: payload.isSelectionListActive ?? false,
     isPagerActive: payload.isPagerActive ?? false,
     isDismissablePanelActive: payload.isDismissablePanelActive ?? false,
@@ -171,12 +202,14 @@ export async function broadcastTerminalSnapshotAfterInteraction(
 
   try {
     const initialPayload = await captureFreshPayload(worktreeId, cliToolId, instanceId);
+    if (initialPayload === null) return;
     const initialFingerprint = snapshotFingerprint(initialPayload);
     emitTerminalSnapshot(worktreeId, cliToolId, initialPayload, instanceId);
 
     for (const delayMs of retryDelaysMs) {
       await new Promise(resolve => setTimeout(resolve, delayMs));
       const payload = await captureFreshPayload(worktreeId, cliToolId, instanceId);
+      if (payload === null) return;
       if (snapshotFingerprint(payload) !== initialFingerprint) {
         emitTerminalSnapshot(worktreeId, cliToolId, payload, instanceId);
         return;

@@ -162,9 +162,11 @@ describe('[#1926] sessionStatusByCli carries the reason and the evidence', () =>
   });
 
   it('reports the scraper reason, not a hook one', async () => {
-    // The list API does not run `mergeStructuredStatus`, so labelling its
-    // verdict with a `hook_` reason would misreport which layer decided. The
-    // merged reason lives on `CurrentOutputResponse.sessionStatusReason`.
+    // The list's reason is the scraper's: since #3377 the list runs
+    // `mergeStructuredStatus` for `isProcessing` and `lastKnownStatus` only, and
+    // labelling the screen's reason with a `hook_` one would misreport which
+    // layer read the frame. The merged reason lives on
+    // `CurrentOutputResponse.sessionStatusReason`.
     mockDetectedStatus('ready', STATUS_REASON.INPUT_PROMPT);
 
     const result = await detect();

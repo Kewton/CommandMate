@@ -35,6 +35,7 @@
 
 import { buildCompositeKey } from '@/lib/auto-yes-state';
 import type { CLIToolType } from '@/lib/cli-tools/types';
+import { getOrInitGlobal } from '../global-state';
 
 /** How often the dedup guard suppressed a prompt for one session, and when last. */
 export interface PromptDedupSkips {
@@ -59,8 +60,7 @@ declare global {
 }
 
 /** compositeKey -> running tally of suppressed prompts for that session. */
-const promptDedupSkips = globalThis.__promptDedupSkips ??
-  (globalThis.__promptDedupSkips = new Map<string, PromptDedupSkips>());
+const promptDedupSkips = getOrInitGlobal('__promptDedupSkips', () => new Map<string, PromptDedupSkips>());
 
 /**
  * Count one prompt the dedup guard suppressed for `instanceId`.

@@ -1,0 +1,14 @@
+Unit Tests (shard 2/4)	UNKNOWN STEP	﻿2026-10-04T17:21:25.7027205Z Current runner version: '2.336.0'
+Unit Tests (shard 2/4)	UNKNOWN STEP	2026-10-04T17:22:04.5211604Z [90mstdout[2m | tests/unit/lib/auto-yes-manager.test.ts[2m > [22m[2mauto-yes-manager[2m > [22m[2mstartAutoYesPolling[2m > [22m[2mshould start polling when auto-yes is enabled
+Unit Tests (shard 2/4)	UNKNOWN STEP	2026-10-04T17:22:04.5213639Z [90mstdout[2m | tests/unit/lib/auto-yes-manager.test.ts[2m > [22m[2mauto-yes-manager[2m > [22m[2mstartAutoYesPolling[2m > [22m[2mshould start polling when auto-yes is enabled
+Unit Tests (shard 2/4)	UNKNOWN STEP	2026-10-04T17:24:21.5763423Z      [33m[2m✓[22m[39m stays FAIL when both runs fail, and retries only once [33m 666[2mms[22m[39m
+Unit Tests (shard 2/4)	UNKNOWN STEP	2026-10-04T17:29:18.5851432Z [41m[1m FAIL [22m[49m tests/unit/guards/no-procfs-env-fixtures.test.ts[2m > [22mno test points an env var into /proc, /sys or /dev[2m > [22mfinds nothing under tests/
+Unit Tests (shard 2/4)	UNKNOWN STEP	2026-10-04T17:29:18.5852213Z [2m Test Files [22m [1m[31m1 failed[39m[22m[2m | [22m[1m[32m478 passed[39m[22m[90m (479)[39m
+Unit Tests (shard 2/4)	UNKNOWN STEP	2026-10-04T17:29:18.6532503Z ##[error]Error: Test timed out in 5000ms.
+Unit Tests (shard 2/4)	UNKNOWN STEP	2026-10-04T17:29:18.8455601Z ##[error]Process completed with exit code 1.
+Unit Tests	UNKNOWN STEP	﻿2026-10-04T17:31:24.7498540Z Current runner version: '2.337.0'
+Unit Tests	UNKNOWN STEP	2026-10-04T17:31:24.9038551Z ##[group]Run echo "Unit Tests shards: ${RESULT}"
+Unit Tests	UNKNOWN STEP	2026-10-04T17:31:24.9039696Z [36;1mecho "Unit Tests shards: ${RESULT}"[0m
+Unit Tests	UNKNOWN STEP	2026-10-04T17:31:24.9813589Z   RESULT: failure
+Unit Tests	UNKNOWN STEP	2026-10-04T17:31:25.0041743Z Unit Tests shards: failure
+Unit Tests	UNKNOWN STEP	2026-10-04T17:31:25.0061251Z ##[error]Process completed with exit code 1.

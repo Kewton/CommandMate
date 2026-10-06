@@ -101,6 +101,16 @@ describe('measureAll', () => {
   });
 });
 
+describe('type-safety parses each file as its own kind (Issue #3389)', () => {
+  it('reads <any> in .ts as a type and JSX text in .tsx as text', async () => {
+    fs.mkdirSync(path.join(root, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'src', 'a.ts'), 'const a = <any>b;\nexport {};\n');
+    fs.writeFileSync(path.join(root, 'src', 'c.tsx'), "export const C = () => <p>don't pick: any</p>;\n");
+    const [result] = await measureAll(ctx(), ['type-safety']);
+    expect(result).toMatchObject({ status: 'ok', items: { any: 1, 'eslint-disable': 0, 'ts-ignore': 0 } });
+  });
+});
+
 describe('performance from the production log (Issue #3054)', () => {
   const NOW = new Date('2026-10-01T21:30:00.000Z');
   const at = (hoursAgo: number) => new Date(NOW.getTime() - hoursAgo * 60 * 60 * 1000).toISOString();
@@ -162,6 +172,44 @@ describe('performance from the production log (Issue #3054)', () => {
   });
 });
 
+describe('hook-observation from the production log (Issue #3311)', () => {
+  const NOW = new Date('2026-10-05T21:30:00.000Z');
+  const at = (msAgo: number) => new Date(NOW.getTime() - msAgo).toISOString();
+  const HOUR = 60 * 60 * 1000;
+
+  it('reads the same log as the performance metrics and publishes counts only', async () => {
+    const route = (msAgo: number, event: string, data: Record<string, unknown>) =>
+      `[${at(msAgo)}] [INFO] [api/hooks-agent-event] ${event} ${JSON.stringify({ worktreeId: 'wt-secret', tool: 'claude', instanceId: 'claude', ...data })}`;
+    fs.mkdirSync(path.join(root, 'logs'), { recursive: true });
+    fs.writeFileSync(
+      path.join(root, 'logs', 'server.log'),
+      `${[
+        `[${at(30 * HOUR)}] [INFO] [boot] ready`,
+        // #3289: stop applied, a start 140 ms later, the next stop dropped 1.4 s after that
+        route(HOUR + 1540, 'agent-event-stop-applied', {}),
+        route(HOUR + 1400, 'agent-event-received', { event: 'user_prompt_submit' }),
+        route(HOUR, 'agent-event-duplicate-dropped', { event: 'stop', session: 'a1b2c3d4', sinceLastMs: 1540 }),
+        // a copy 6 ms behind
+        route(HOUR / 2 + 6, 'agent-event-received', { event: 'user_prompt_submit' }),
+        route(HOUR / 2, 'agent-event-duplicate-dropped', { event: 'user_prompt_submit', session: 'a1b2c3d4', sinceLastMs: 6 }),
+        `[${at(HOUR / 4)}] [INFO] [current-output-builder] detection-divergence-resolved {"worktreeId":"wt-secret","durationMs":4200,"polls":3}`,
+      ].join('\n')}\n`
+    );
+    const results = await measureAll(ctx({ serverLog: path.join(root, 'logs', 'server.log'), now: NOW }), ['hook-observation']);
+    expect(results[0]).toMatchObject({
+      metricId: 'hook-observation',
+      status: 'ok',
+      value: 1,
+      findings: {},
+      details: { duplicateDropped: 2, duplicateDroppedNotCopy: 1, duplicateDroppedCopy: 1, divergenceEpisodes: 1, divergenceMaxMs: 4200 },
+    });
+    expect(JSON.stringify(results)).not.toMatch(/wt-secret|a1b2c3d4/);
+
+    const none = await measureAll(ctx({ serverLog: null, now: NOW }), ['hook-observation']);
+    expect(none[0]).toMatchObject({ metricId: 'hook-observation', status: 'skip' });
+  });
+});
+
 describe('bug-flow (Issue #3185)', () => {
   const NOW = new Date('2026-10-04T00:00:00.000Z');
   const fakeGh = (script: string) => {
@@ -184,5 +232,54 @@ describe('bug-flow (Issue #3185)', () => {
     fs.writeFileSync(file, JSON.stringify(issues));
     const results = await measureAll(ctx({ now: NOW, ghCommand: fakeGh(`cat '${file}'`) }), ['bug-flow']);
     expect(results[0]).toMatchObject({ metricId: 'bug-flow', status: 'ok', value: 1, details: { regressionRate: 1 } });
+  });
+});
+
+describe('ci-flaky (Issue #3310)', () => {
+  const NOW = new Date('2026-10-05T10:00:00.000Z');
+  const FIXTURES = path.resolve(__dirname, '..', '..', '..', 'fixtures', 'agent-health-ci-flaky-3310');
+  const fakeGh = (script: string, name = 'fake-gh') => {
+    const file = path.join(root, name);
+    fs.writeFileSync(file, `#!/bin/sh\n${script}\n`, { mode: 0o755 });
+    return file;
+  };
+  // `run view <id> --repo <r> --attempt <n> (--json jobs | --log-failed)` → the fixture of that attempt
+  const replay = () =>
+    fakeGh(
+      [
+        'echo "$*" >> "$(dirname "$0")/calls"',
+        'case "$*" in',
+        `  "run list"*) cat '${FIXTURES}/run-list.json' ;;`,
+        `  *"--json jobs"*) cat "${FIXTURES}/jobs-$3-$7.json" ;;`,
+        `  *"--log-failed"*) cat "${FIXTURES}/log-$3-$7.txt" ;;`,
+        '  *) exit 9 ;;',
+        'esac',
+      ].join('\n'),
+      'replay-gh'
+    );
+
+  it('a missing gh, a failing gh and an exhausted budget are skips, not a crash of the run', async () => {
+    const missing = await measureAll(ctx({ now: NOW, ghCommand: 'cm-no-such-gh-3310' }), ['ci-flaky']);
+    expect(missing[0]).toMatchObject({ metricId: 'ci-flaky', status: 'skip' });
+    const failing = await measureAll(ctx({ now: NOW, ghCommand: fakeGh('echo "HTTP 401" >&2; exit 4') }), ['ci-flaky']);
+    expect(failing[0]).toMatchObject({ metricId: 'ci-flaky', status: 'skip' });
+    expect(failing[0].status === 'skip' && failing[0].reason).toContain('exit 4');
+    const late = await measureAll(ctx({ now: NOW, ghCommand: replay(), deadline: Date.now() - 1 }), ['ci-flaky']);
+    expect(late[0]).toMatchObject({ metricId: 'ci-flaky', status: 'skip', reason: '全体の時間上限に達したため実行しない' });
+  });
+
+  it('reads every attempt of the runs that failed or were rerun, and the failed logs only', async () => {
+    const results = await measureAll(ctx({ now: NOW, ghCommand: replay() }), ['ci-flaky']);
+    expect(results[0]).toMatchObject({
+      metricId: 'ci-flaky',
+      status: 'ok',
+      value: 2,
+      details: { runs: 200, testFailures: 4, infraFailures: 4, retrySuccesses: 2 },
+    });
+    const calls = fs.readFileSync(path.join(root, 'calls'), 'utf8').trim().split('\n');
+    expect(calls[0]).toMatch(/^run list --repo Kewton\/CommandMate --branch develop --event push --created >=2026-09-27 /);
+    expect(calls.filter((call) => call.endsWith('--json jobs'))).toHaveLength(8);
+    // the passing second attempts are not fetched for logs
+    expect(calls.filter((call) => call.endsWith('--log-failed'))).toHaveLength(6);
   });
 });

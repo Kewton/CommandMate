@@ -19,12 +19,9 @@
 import { BaseCLITool } from './base';
 import type { CLIToolType } from './types';
 import {
-  hasSession,
-  createSession,
   sendKeys,
   sendSpecialKey,
   sendSpecialKeys,
-  killSession,
   capturePane,
 } from '../tmux/tmux';
 import { sendMessageWithSubmitVerification } from './submit-verified-sender';
@@ -45,7 +42,7 @@ import {
   COPILOT_SEND_ENTER_DELAY_MS,
   COPILOT_MODEL_SWITCH_TIMEOUT_MS,
 } from '@/config/copilot-constants';
-import { TUI_SESSION_CREATE_WAIT_MS, TUI_INTERRUPT_SETTLE_MS, COPILOT_EXIT_WAIT_MS } from '@/config/cli-tool-timing-config';
+import { TUI_INTERRUPT_SETTLE_MS, COPILOT_EXIT_WAIT_MS } from '@/config/cli-tool-timing-config';
 import {
   beginAgentSession,
   buildAgentLaunchCommandLine,
@@ -349,17 +346,6 @@ export class CopilotTool extends BaseCLITool {
   }
 
   /**
-   * Check if Copilot session is running for a worktree
-   *
-   * @param worktreeId - Worktree ID
-   * @returns True if session is running
-   */
-  async isRunning(worktreeId: string, instanceId?: string): Promise<boolean> {
-    const sessionName = this.getSessionName(worktreeId, instanceId);
-    return await hasSession(sessionName);
-  }
-
-  /**
    * Start a new Copilot session for a worktree
    * Launches copilot in interactive mode within tmux
    *
@@ -376,25 +362,12 @@ export class CopilotTool extends BaseCLITool {
       throw missingToolError(this);
     }
 
-    const sessionName = this.getSessionName(worktreeId, instanceId);
-
-    // Check if session already exists
-    const exists = await hasSession(sessionName);
-    if (exists) {
-      await this.reconcileExistingSession(sessionName, worktreePath);
-
-      // Issue #2070: this branch used to return unconditionally. A tmux session
-      // outlives the agent that was launched into it — a quit, a self-update, a
-      // crash — and the launch was then skipped for a pane holding nothing but a
-      // shell prompt, which left `kill-session` by hand as the only recovery.
-      // When the tool is gone we fall THROUGH and re-send the launch command
-      // into the same pane.
-      if (await this.isToolLive(sessionName, { confirm: true })) {
-        logger.info('copilot-session-exists');
-        return;
-      }
-      logger.warn('copilot-session-relaunch', { sessionName });
-    }
+    const { sessionName, exists, live } = await this.resolveLaunchPane(worktreeId, worktreePath, instanceId, {
+      logger,
+      liveAction: 'copilot-session-exists',
+      relaunchAction: 'copilot-session-relaunch',
+    });
+    if (live) return;
 
     // Issue #1761: fence this session off from the previous copilot process's
     // events. The state is keyed by (worktree, tool, instance), a key the new
@@ -414,21 +387,6 @@ export class CopilotTool extends BaseCLITool {
     beginAgentSession({ worktreeId, cliToolId: COPILOT_CLI_TOOL_ID, instanceId });
 
     try {
-      // Issue #2070: creation only. On the relaunch path the pane already
-      // exists and holds the transcript of the process that died in it; the
-      // launch command is re-sent into that same pane.
-      if (!exists) {
-        // Create tmux session. Scrollback depth comes from the shared
-        // TMUX_HISTORY_LIMIT default (Issue #1624) — do not re-hardcode it here.
-        await createSession({
-          sessionName,
-          workingDirectory: worktreePath,
-        });
-
-        // Wait a moment for the session to be created
-        await new Promise((resolve) => setTimeout(resolve, TUI_SESSION_CREATE_WAIT_MS));
-      }
-
       // Issue #1761: hand this session its hook configuration, so structured
       // lifecycle events and Auto-Yes adjudication exist without the operator
       // having edited ~/.copilot/settings.json by hand.
@@ -441,12 +399,22 @@ export class CopilotTool extends BaseCLITool {
       //
       // Fails open in every branch: with `CM_AGENT_HOOKS_INJECT=0`, or with a
       // settings file that cannot be read or written, this is the bare launch
-      // command and nothing else.
+      // command and nothing else. The one exception is UAT isolation (Issue
+      // #3391), where the plan throws instead — which is why it is built BEFORE
+      // the tmux session: a refused launch must not leave an empty pane that
+      // `isRunning()` reports as a started copilot.
       const launchCommand = buildAgentLaunchCommandLine({
         target: { worktreeId, cliToolId: COPILOT_CLI_TOOL_ID, instanceId },
         executablePath: this.launchExecutable(resolved),
         worktreePath,
       });
+
+      // Issue #2070: creation only. On the relaunch path the pane already
+      // exists and holds the transcript of the process that died in it; the
+      // launch command is re-sent into that same pane.
+      if (!exists) {
+        await this.createLaunchPane(sessionName, worktreePath);
+      }
 
       // Start Copilot CLI in interactive mode
       await sendKeys(sessionName, withLaunchScreenCleared(launchCommand), true);
@@ -737,20 +705,12 @@ export class CopilotTool extends BaseCLITool {
   async sendMessage(worktreeId: string, message: string, instanceId?: string): Promise<void> {
     const sessionName = this.getSessionName(worktreeId, instanceId);
 
-    // Check if session exists
-    const exists = await hasSession(sessionName);
-    if (!exists) {
-      throw new Error(
-        `Copilot session ${sessionName} does not exist. Start the session first.`
-      );
-    }
-
     // Issue #2070: the pane exists, but does the AGENT? An agent that quit,
     // updated itself or crashed leaves its tmux session behind, and the send
     // that followed used to sit in the readiness wait until it timed out —
     // leaving `kill-session` by hand as the only recovery. Relaunches into the
     // same pane when the tool is gone; costs one `capture-pane` when it is not.
-    await this.relaunchIfToolExited(worktreeId, instanceId);
+    await this.requireSession('Copilot', worktreeId, instanceId, { relaunch: true });
 
     try {
       // Verify Copilot is at prompt state before sending
@@ -846,13 +806,7 @@ export class CopilotTool extends BaseCLITool {
   async sendModelCommand(worktreeId: string, modelName: string, instanceId?: string): Promise<void> {
     const sessionName = this.getSessionName(worktreeId, instanceId);
 
-    // Check if session exists
-    const exists = await hasSession(sessionName);
-    if (!exists) {
-      throw new Error(
-        `Copilot session ${sessionName} does not exist. Start the session first.`
-      );
-    }
+    await this.requireSession('Copilot', worktreeId, instanceId, { relaunch: false });
 
     try {
       const idle = await this.waitForPrompt(sessionName, COPILOT_MODEL_SWITCH_TIMEOUT_MS, 'idle');
@@ -941,11 +895,10 @@ export class CopilotTool extends BaseCLITool {
    * @param instanceId - Optional agent instance ID (defaults to primary)
    */
   async killSession(worktreeId: string, instanceId?: string): Promise<void> {
-    const sessionName = this.getSessionName(worktreeId, instanceId);
-
-    try {
-      const exists = await hasSession(sessionName);
-      if (exists) {
+    await this.requestExitAndKill(worktreeId, instanceId, {
+      logger,
+      stoppedAction: 'stopped-copilot-session',
+      requestExit: async (sessionName) => {
         // Send Ctrl+C to interrupt any running operation
         await sendSpecialKey(sessionName, 'C-c');
         await new Promise((resolve) => setTimeout(resolve, TUI_INTERRUPT_SETTLE_MS));
@@ -956,17 +909,7 @@ export class CopilotTool extends BaseCLITool {
         await sendSpecialKeys(sessionName, ['Enter']);
 
         await new Promise((resolve) => setTimeout(resolve, COPILOT_EXIT_WAIT_MS));
-      }
-
-      // Kill the tmux session
-      const killed = await killSession(sessionName);
-
-      if (killed) {
-        logger.info('stopped-copilot-session');
-      }
-    } catch (error: unknown) {
-      logger.error('session:stop-failed', { error: getErrorMessage(error) });
-      throw error;
-    }
+      },
+    });
   }
 }

@@ -13,6 +13,7 @@ import { getRepositoryByPath, createRepository } from '@/lib/db/db-repository';
 import { resolveAllowedPath, formatAllowedRoots } from '@/lib/fs/browse-roots';
 import { syncWorktreesAndCleanup } from '@/lib/session-cleanup';
 import { createLogger } from '@/lib/logger';
+import { readJsonObjectBody } from '@/lib/api/read-json-body';
 
 const logger = createLogger('api/repositories-scan');
 
@@ -63,7 +64,9 @@ function registerScannedRepositories(
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
+    const parsed = await readJsonObjectBody(request);
+    if (!parsed.ok) return parsed.response;
+    const body = parsed.body;
     const { repositoryPath } = body;
 
     // Validate input

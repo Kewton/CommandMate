@@ -57,7 +57,7 @@
 
 import { claudeHeadlessTurnId } from '@/types/agent-transcript';
 import { isPlainObject, readStringField } from '../event-mapper';
-import { separateTurnBody, type TurnRenderBlock } from '../turn-body';
+import { boundDetail, collapseToLine, separateTurnBody, truncateTurnBody, type TurnRenderBlock } from '../turn-body';
 
 /**
  * `~/.claude/projects/<slug>` — the directory Claude keeps one project's
@@ -511,15 +511,8 @@ function readToolDetail(input: unknown): string | null {
   return null;
 }
 
-/** A tool detail on one line. A heredoc `command` puts newlines in it. */
-function collapseToLine(value: string): string {
-  return value.replace(/\s+/g, ' ').trim();
-}
-
 function boundToolDetail(value: string): string {
-  return value.length <= MAX_CLAUDE_TOOL_DETAIL_LENGTH
-    ? value
-    : `${value.slice(0, MAX_CLAUDE_TOOL_DETAIL_LENGTH - 1)}…`;
+  return boundDetail(value, MAX_CLAUDE_TOOL_DETAIL_LENGTH);
 }
 
 /**
@@ -1048,11 +1041,7 @@ export function renderClaudeTurn(turn: ClaudeTurnAccumulator): ClaudeRenderedTur
   }
 
   let body = separateTurnBody(rendered).body;
-  if (body.length > MAX_CLAUDE_TURN_BODY_LENGTH) {
-    body =
-      body.slice(0, MAX_CLAUDE_TURN_BODY_LENGTH - CLAUDE_TURN_TRUNCATION_MARKER.length) +
-      CLAUDE_TURN_TRUNCATION_MARKER;
-  }
+  body = truncateTurnBody(body, MAX_CLAUDE_TURN_BODY_LENGTH, CLAUDE_TURN_TRUNCATION_MARKER);
 
   return {
     sessionId: turn.sessionId,

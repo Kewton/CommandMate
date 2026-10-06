@@ -40,12 +40,12 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { readJsonObjectBody } from '@/lib/api/read-json-body';
 import { isCliToolType, isValidInstanceId } from '@/lib/cli-tools/types';
 import {
   resolveSessionTargetStrict,
-  describeSessionTargetConflict,
-  INSTANCE_TOOL_CONFLICT,
 } from '@/lib/session/resolve-session-target';
+import { sessionTargetConflictResponse } from '@/lib/session/session-target-conflict-response';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { getWorktreeById } from '@/lib/db';
 import { getDbInstance } from '@/lib/db/db-instance';
@@ -70,7 +70,9 @@ export async function POST(
   try {
     const { id: requestedWorktreeId } = await params;
     const id = canonicalWorktreeId(requestedWorktreeId);
-    const { cliToolId, command, instanceId: rawInstanceId } = await req.json();
+    const parsed = await readJsonObjectBody(req);
+    if (!parsed.ok) return parsed.response;
+    const { cliToolId, command, instanceId: rawInstanceId } = parsed.body;
 
     // Validate cliToolId against known CLI tool types
     if (!cliToolId || typeof cliToolId !== 'string' || !isCliToolType(cliToolId)) {
@@ -126,14 +128,7 @@ export async function POST(
       requestedCliTool: cliToolId,
     });
     if (!resolution.ok) {
-      return NextResponse.json(
-        {
-          error: describeSessionTargetConflict(resolution.conflict),
-          code: INSTANCE_TOOL_CONFLICT,
-          ...resolution.conflict,
-        },
-        { status: 400 }
-      );
+      return sessionTargetConflictResponse(resolution.conflict);
     }
     const target = resolution.target;
 
@@ -153,7 +148,7 @@ export async function POST(
     const sessionExists = await cliTool.isRunning(id, instanceId);
     if (!sessionExists) {
       return NextResponse.json(
-        { error: 'Session not found. Use startSession API to create a session first.' },
+        { error: 'Session not found. Start one first, for example with `commandmate send <worktree-id> "message"`.' },
         { status: 404 }
       );
     }

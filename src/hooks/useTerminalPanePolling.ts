@@ -9,7 +9,8 @@
  *  - terminal output / realtimeSnippet / isRunning / isThinking / sessionStatus
  *  - prompt state (visible / data / answering / messageId)
  *  - isSelectionListActive (Issue #473 navigation buttons)
- *  - attaching flag (R3-006): true until first successful fetch resolves
+ *  - attaching flag (R3-006): true until first successful fetch resolves, or
+ *    until the server says the session is another server's (Issue #3334)
  *  - autoScroll (per-pane)
  *
  * What it intentionally does NOT own:
@@ -44,14 +45,43 @@ import type { RealtimeEvent, TerminalSnapshotEvent, SessionStatusEvent } from '@
 import { extractComposerText } from '@/lib/detection/composer-text';
 import { buildRealtimeSnippet } from '@/lib/realtime-snippet';
 import { detectAgentMode } from '@/lib/detection/agent-mode';
+import type { CurrentOutputResponseBody } from '@/lib/session/current-output-types';
 import { promptFingerprint } from '@/hooks/usePromptStuckCounter';
 import { AGENT_MODE_UNKNOWN, type AgentMode } from '@/types/cli-tool-contracts';
+import { PANE_GATE_NOTHING_ARRIVED, type PaneGateState } from '@/lib/session/pane-gate-state';
+import {
+  isAutoYesEnterSentToCurrentPrompt,
+  type AutoYesEnterFallbackReading,
+} from '@/lib/polling/auto-yes-enter-sent';
 import {
   DETAIL_PANE_POLLING_CADENCE,
   isGeneratingStatus,
   selectPanePollIntervalMs,
   type PanePollingCadence,
 } from '@/config/pane-polling-cadence';
+
+/**
+ * The `code` of the `/current-output` 409 for a session another CommandMate
+ * server owns (Issue #2865). Spelled out because the server's constant sits
+ * next to the tmux gateway, which a client bundle must not import; pinned to it
+ * by `tests/unit/hooks/useTerminalPanePolling-foreign-session-3334.test.ts`.
+ */
+export const FOREIGN_SESSION_ERROR_CODE = 'session_owned_by_other_server';
+
+/**
+ * Whether a failed response is that 409's body. Never throws. Shared with the
+ * worktree screen's parent poll (`useWorktreeDetailController`), which reads
+ * the same route.
+ */
+export async function isForeignSessionResponse(response: Response): Promise<boolean> {
+  try {
+    const body: unknown = await response.json();
+    return typeof body === 'object' && body !== null
+      && (body as { code?: unknown }).code === FOREIGN_SESSION_ERROR_CODE;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Issue #2511: the numbers now live in `config/pane-polling-cadence` so the
@@ -123,7 +153,13 @@ function diffFileSignature(file: AgentSessionDiffFileView): string {
   return `${file.file ?? ''}:${file.status ?? ''}:${file.additions}:${file.deletions}`;
 }
 
-export interface PaneTerminalState {
+/**
+ * Extends {@link PaneGateState} (Issue #3304): the per-target frame facts are
+ * one list shared with the worktree screen's controller, so both surfaces start
+ * from, and fall back to, the same "nothing has arrived" values. The members
+ * are re-declared below only to keep their documentation where they are read.
+ */
+export interface PaneTerminalState extends PaneGateState {
   output: string;
   realtimeSnippet: string;
   /**
@@ -249,28 +285,46 @@ export interface PanePromptState {
    * `/prompt-response` would answer it. Undefined when not judged.
    */
   answerable?: boolean;
+  /**
+   * Issue #3397: Auto-Yes sent its Enter to this window
+   * (`autoYes.lastEnterFallback` / the push's `autoYesEnterFallback`, read by
+   * `isAutoYesEnterSentToCurrentPrompt`). Carried exactly like
+   * {@link answerable}; false when not known.
+   */
+  autoYesEnterSent?: boolean;
 }
 
-interface CurrentOutputResponse {
-  isRunning?: boolean;
-  cliToolId?: CLIToolType;
-  /** Issue #2238: the merged generating verdict. See {@link PaneTerminalState.sessionStatus}. */
-  sessionStatus?: string;
-  isGenerating?: boolean;
-  isPromptWaiting?: boolean;
+/**
+ * Fields whose name, optionality and type match `CurrentOutputResponseBody`
+ * (Issue #3229). Every one is optional here: a server older than the field
+ * omits it. `promptData` and `structuredEvents` stay hand-written below
+ * because this pane reads a narrower shape than the payload carries.
+ */
+type CurrentOutputResponse = Partial<
+  Pick<
+    CurrentOutputResponseBody,
+    | 'isRunning'
+    | 'cliToolId'
+    /** Issue #2238: the merged generating verdict. See {@link PaneTerminalState.sessionStatus}. */
+    | 'sessionStatus'
+    | 'isPromptWaiting'
+    /** Issue #2870. See {@link PanePromptState.answerable}. */
+    | 'promptAnswerable'
+    | 'fullOutput'
+    | 'realtimeSnippet'
+    | 'thinking'
+    | 'isSelectionListActive'
+    | 'isPagerActive'
+    /** Issue #2369: absent on a daemon older than the field. */
+    | 'isDismissablePanelActive'
+    | 'isUnclassifiedActive'
+    /** Issue #3179. See {@link PaneTerminalState.startingSince}. */
+    | 'startingSince'
+    /** Issue #3397: only `lastEnterFallback` is read. See {@link PanePromptState.autoYesEnterSent}. */
+    | 'autoYes'
+  >
+> & {
   promptData?: LivePromptData;
-  /** Issue #2870. See {@link PanePromptState.answerable}. */
-  promptAnswerable?: boolean;
-  fullOutput?: string;
-  realtimeSnippet?: string;
-  thinking?: boolean;
-  isSelectionListActive?: boolean;
-  isPagerActive?: boolean;
-  /** Issue #2369: absent on a daemon older than the field. */
-  isDismissablePanelActive?: boolean;
-  isUnclassifiedActive?: boolean;
-  /** Issue #3179. See {@link PaneTerminalState.startingSince}. */
-  startingSince?: number | null;
   /**
    * Issue #2042: the two blocks that describe the conversation rather than the
    * screen. Only the two this pane renders are declared — the payload carries a
@@ -285,7 +339,7 @@ interface CurrentOutputResponse {
     /** Issue #2043. opencode only; absent on every other tool and every older daemon. */
     sessionDiff?: AgentSessionDiffView | null;
   };
-}
+};
 
 export interface UseTerminalPanePollingOptions {
   worktreeId: string;
@@ -344,14 +398,9 @@ export function useTerminalPanePolling({
     realtimeSnippet: '',
     isRunning: false,
     isThinking: false,
-    sessionStatus: '',
-    isSelectionListActive: false,
-    isPagerActive: false,
-    isDismissablePanelActive: false,
-    isUnclassifiedActive: false,
+    // Issue #3304: sessionStatus, the four flags, agentMode and startingSince.
+    ...PANE_GATE_NOTHING_ARRIVED,
     composerText: '',
-    agentMode: AGENT_MODE_UNKNOWN,
-    startingSince: null,
     attaching: true,
     autoScroll: true,
   }));
@@ -469,6 +518,11 @@ export function useTerminalPanePolling({
        * {@link carriesAnswerable}.
        */
       promptAnswerable?: boolean;
+      /**
+       * Issue #3397: `autoYes.lastEnterFallback` on the poll, the push's
+       * `autoYesEnterFallback`. See {@link carriesEnterFallback}.
+       */
+      autoYesEnterFallback?: AutoYesEnterFallbackReading | null;
     },
     /**
      * Whether this delivery path carries `promptAnswerable`. The poll always
@@ -482,6 +536,13 @@ export function useTerminalPanePolling({
      * nobody judged.
      */
     carriesAnswerable = false,
+    /**
+     * Issue #3397: whether this delivery path carries the Enter record — the
+     * poll always, the push when the server sends the key. Same rule as
+     * {@link carriesAnswerable}: when it does not, the last reading is kept for
+     * the same window and dropped for another.
+     */
+    carriesEnterFallback = false,
     ): void => {
       const nextOutput = data.fullOutput ?? data.realtimeSnippet ?? '';
       const rawUnclassified = data.isUnclassifiedActive === true
@@ -558,6 +619,9 @@ export function useTerminalPanePolling({
             answerable: carriesAnswerable
               ? data.promptAnswerable
               : sameWindow ? prev.answerable : undefined,
+            autoYesEnterSent: carriesEnterFallback
+              ? isAutoYesEnterSentToCurrentPrompt(data.autoYesEnterFallback)
+              : sameWindow ? prev.autoYesEnterSent : false,
           };
         });
       } else if (!data.isPromptWaiting && promptVisibleRef.current) {
@@ -582,14 +646,26 @@ export function useTerminalPanePolling({
       const response = await fetch(
         `/api/worktrees/${worktreeId}/current-output?cliTool=${requestedCli}&instance=${encodeURIComponent(requestedInstance)}`,
       );
-      if (!response.ok) return;
+      if (!response.ok) {
+        // Issue #3334: the one refusal that will not go away on the next poll.
+        // The route answers 409 for a same-named session another CommandMate
+        // server created (#2865) and shows none of it; returning here left the
+        // pane on "Attaching…" for good. It is reported as not running, which
+        // is what the worktree routes and the sidebar already say about it.
+        if (response.status === 409 && (await isForeignSessionResponse(response)) && !isStale()) {
+          applySnapshot({ isRunning: false, sessionStatus: 'idle' });
+        }
+        return;
+      }
       const data: CurrentOutputResponse = await response.json();
       if (isStale()) return;
       if (data.cliToolId && data.cliToolId !== requestedCli) {
         return;
       }
 
-      applySnapshot(data, true);
+      // Issue #3397: the Enter record rides on `autoYes`; the shared applier
+      // reads it under the push's name.
+      applySnapshot({ ...data, autoYesEnterFallback: data.autoYes?.lastEnterFallback }, true, true);
       // Issue #2042: only the poll carries these — the WebSocket push has no
       // `structuredEvents` — so they are applied here rather than in the shared
       // `applySnapshot`. The signature guard keeps the object identity stable
@@ -638,18 +714,14 @@ export function useTerminalPanePolling({
       realtimeSnippet: '',
       isRunning: false,
       isThinking: false,
-      sessionStatus: '',
-      isSelectionListActive: false,
-      isPagerActive: false,
-      isDismissablePanelActive: false,
-      isUnclassifiedActive: false,
-      composerText: '',
       // Issue #2592: cleared for the same reason the output above is. A
       // different (worktree, tool, instance) is a different agent, and the
       // previous one's mode chip must not sit over the new pane while its first
       // frame is in flight — different tools do not even share a mode vocabulary.
-      agentMode: AGENT_MODE_UNKNOWN,
-      startingSince: null,
+      // Issue #3304: the list of what goes back is shared with the worktree
+      // screen's controller, which resets on the same change.
+      ...PANE_GATE_NOTHING_ARRIVED,
+      composerText: '',
       attaching: true,
     }));
     setPrompt({ visible: false, data: null, messageId: null, answering: false });
@@ -718,11 +790,13 @@ export function useTerminalPanePolling({
         isPromptWaiting: snap.isPromptWaiting,
         promptData: snap.promptData ?? null,
         promptAnswerable: snap.promptAnswerable,
+        autoYesEnterFallback: snap.autoYesEnterFallback,
       // Issue #2887: a server that predates the field sends no such key at all
       // (not even `undefined` — `parseRealtimeEvent` unwraps parsed JSON, which
       // has no way to express a key with no value), so `in` is what tells "this
       // push judged the prompt" apart from "this push says nothing about it".
-      }, 'promptAnswerable' in snap);
+      // Issue #3397: the Enter record, by the same test.
+      }, 'promptAnswerable' in snap, 'autoYesEnterFallback' in snap);
     });
   }, [enabled, worktreeId, addListener, applySnapshot, markPushHealthy]);
 

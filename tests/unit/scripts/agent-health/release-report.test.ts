@@ -216,3 +216,35 @@ describe('release-report main open Issues (#3173)', () => {
     expect(html.split('issues/4004"').length - 1).toBe(1);
   });
 });
+
+describe('release-report main: the product-path check (Issue #3312)', () => {
+  const final = (date: string, status: string) =>
+    JSON.stringify({ schemaVersion: 1, date, status, reasons: [`実行: ${status}`], runId: 'r', sha: 'abc1234', reclaimedBy: 'supervisor' });
+
+  it('negative control: without a product/ directory the verdict ignores stage 2', async () => {
+    const { html } = await run(['--no-gh', '--no-audit']);
+    expect(html).not.toContain('製品の経路の確認');
+  });
+
+  it('a product/ directory without today\'s file is 未実施 (要判断)', async () => {
+    fs.mkdirSync(path.join(stateDir, 'product'), { recursive: true });
+    const { html } = await run(['--no-gh', '--no-audit']);
+    expect(html).toContain('製品の経路の確認（第 2 段）が未実施');
+  });
+
+  it('today\'s fail is a NO-GO ground', async () => {
+    write(path.join(stateDir, 'product', '2026-10-01.json'), final('2026-10-01', 'fail'));
+    const { html } = await run(['--no-gh', '--no-audit']);
+    expect(lines.join('\n')).toMatch(/verdict=no-go/);
+    expect(html).toContain('製品の経路の確認（第 2 段）が fail');
+  });
+
+  it('counts the skip streak from the earlier days\' files', async () => {
+    for (const date of ['2026-09-29', '2026-09-30', '2026-10-01']) {
+      write(path.join(stateDir, 'product', `${date}.json`), final(date, 'skip'));
+    }
+    const { html } = await run(['--no-gh', '--no-audit']);
+    expect(html).toContain('3 日続けて skip（要対応）');
+  });
+});
+

@@ -15,10 +15,7 @@
 import { BaseCLITool } from './base';
 import type { CLIToolType } from './types';
 import {
-  hasSession,
-  createSession,
   sendKeys,
-  killSession,
   sendSpecialKey,
   capturePane,
 } from '../tmux/tmux';
@@ -38,22 +35,11 @@ import {
   buildAgentLaunchCommandLine,
 } from '@/lib/session/agent-session-lifecycle';
 import { createLogger } from '@/lib/logger';
-import {
-  TUI_SESSION_CREATE_WAIT_MS,
-  TUI_EXIT_WAIT_MS,
-} from '@/config/cli-tool-timing-config';
-import { missingToolError } from './install-hints';
+import { TUI_EXIT_WAIT_MS } from '@/config/cli-tool-timing-config';
 import { withLaunchScreenCleared } from '@/lib/session/launch-screen';
+import { getErrorMessage } from '@/lib/errors';
 
 const logger = createLogger('cli-tools/antigravity');
-
-/**
- * Extract error message from unknown error type (DRY).
- * Same pattern as codex.ts / claude-session.ts getErrorMessage().
- */
-function getErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
 
 /**
  * Single-quote a value for safe embedding in a shell command typed into a
@@ -197,17 +183,6 @@ export class AntigravityTool extends BaseCLITool {
   readonly command = 'agy';
 
   /**
-   * Check if an Antigravity session is running for a worktree.
-   *
-   * @param worktreeId - Worktree ID
-   * @returns True if session is running
-   */
-  async isRunning(worktreeId: string, instanceId?: string): Promise<boolean> {
-    const sessionName = this.getSessionName(worktreeId, instanceId);
-    return await hasSession(sessionName);
-  }
-
-  /**
    * Start a new Antigravity session for a worktree.
    *
    * @param worktreeId - Worktree ID
@@ -220,30 +195,14 @@ export class AntigravityTool extends BaseCLITool {
    */
   protected async launchSession(worktreeId: string, worktreePath: string, instanceId?: string, model?: string): Promise<void> {
     // Check if agy is installed
-    const available = await this.isInstalled();
-    if (!available) {
-      throw missingToolError(this);
-    }
+    await this.requireInstalled();
 
-    const sessionName = this.getSessionName(worktreeId, instanceId);
-
-    // Check if session already exists
-    const exists = await hasSession(sessionName);
-    if (exists) {
-      await this.reconcileExistingSession(sessionName, worktreePath);
-
-      // Issue #2070: this branch used to return unconditionally. A tmux session
-      // outlives the agent that was launched into it — a quit, a self-update, a
-      // crash — and the launch was then skipped for a pane holding nothing but a
-      // shell prompt, which left `kill-session` by hand as the only recovery.
-      // When the tool is gone we fall THROUGH and re-send the launch command
-      // into the same pane.
-      if (await this.isToolLive(sessionName, { confirm: true })) {
-        logger.info('antigravity-session-exists');
-        return;
-      }
-      logger.warn('antigravity-session-relaunch', { sessionName });
-    }
+    const { sessionName, exists, live } = await this.resolveLaunchPane(worktreeId, worktreePath, instanceId, {
+      logger,
+      liveAction: 'antigravity-session-exists',
+      relaunchAction: 'antigravity-session-relaunch',
+    });
+    if (live) return;
 
     // Issue #1762: fence this instance's structured events off from the process
     // that used to hold the same (worktree, tool, instance) key. Creation path
@@ -256,23 +215,6 @@ export class AntigravityTool extends BaseCLITool {
     beginAgentSession({ worktreeId, cliToolId: ANTIGRAVITY_CLI_TOOL_ID, instanceId });
 
     try {
-      // Issue #2070: creation only. On the relaunch path the pane already
-      // exists and holds the transcript of the process that died in it; the
-      // launch command is re-sent into that same pane.
-      if (!exists) {
-        // Create tmux session with large history buffer for agy output
-        // (agy is inline-rendered and retains scrollback, like Codex)
-        // Scrollback depth comes from the shared TMUX_HISTORY_LIMIT default
-        // (Issue #1624) — do not re-hardcode it here.
-        await createSession({
-          sessionName,
-          workingDirectory: worktreePath,
-        });
-
-        // Wait a moment for the session to be created
-        await new Promise((resolve) => setTimeout(resolve, TUI_SESSION_CREATE_WAIT_MS));
-      }
-
       // Start agy in interactive mode, optionally pinned to a model.
       //
       // Issue #1762: the launch merges CommandMate's named hook into
@@ -283,12 +225,30 @@ export class AntigravityTool extends BaseCLITool {
       // one file serves every worktree on the machine. `--model` is appended
       // after the rendered line, so the env assignments stay in front of the
       // command. `CM_AGENT_HOOKS_INJECT=0` returns bare `agy`, unchanged.
+      // Under UAT isolation (Issue #3360) a shared file this build did not
+      // produce makes the plan throw.
       const base = buildAgentLaunchCommandLine({
         target: { worktreeId, cliToolId: ANTIGRAVITY_CLI_TOOL_ID, instanceId },
         executablePath: this.command,
         worktreePath,
       });
       const launchCommand = model ? `${base} --model ${shellSingleQuote(model)}` : base;
+
+      // Issue #3360: the plan above is built BEFORE the tmux session, because
+      // under UAT isolation it throws instead of launching — and a refused
+      // launch must not leave an empty pane that `isRunning()` reports as a
+      // started agy (the next send would then be refused a model change).
+      // Issue #2070: creation only. On the relaunch path the pane already
+      // exists and holds the transcript of the process that died in it; the
+      // launch command is re-sent into that same pane.
+      if (!exists) {
+        // Create tmux session with large history buffer for agy output
+        // (agy is inline-rendered and retains scrollback, like Codex)
+        // Scrollback depth comes from the shared TMUX_HISTORY_LIMIT default
+        // (Issue #1624) — do not re-hardcode it here.
+        await this.createLaunchPane(sessionName, worktreePath);
+      }
+
       await sendKeys(sessionName, withLaunchScreenCleared(launchCommand), true);
 
       // Wait for agy to initialize
@@ -378,20 +338,12 @@ export class AntigravityTool extends BaseCLITool {
   async sendMessage(worktreeId: string, message: string, instanceId?: string): Promise<void> {
     const sessionName = this.getSessionName(worktreeId, instanceId);
 
-    // Check if session exists
-    const exists = await hasSession(sessionName);
-    if (!exists) {
-      throw new Error(
-        `Antigravity session ${sessionName} does not exist. Start the session first.`
-      );
-    }
-
     // Issue #2070: the pane exists, but does the AGENT? An agent that quit,
     // updated itself or crashed leaves its tmux session behind, and the send
     // that followed used to sit in the readiness wait until it timed out —
     // leaving `kill-session` by hand as the only recovery. Relaunches into the
     // same pane when the tool is gone; costs one `capture-pane` when it is not.
-    await this.relaunchIfToolExited(worktreeId, instanceId);
+    await this.requireSession('Antigravity', worktreeId, instanceId, { relaunch: true });
 
     try {
       // Verify agy is at a ready prompt before sending
@@ -422,30 +374,20 @@ export class AntigravityTool extends BaseCLITool {
    * @param worktreeId - Worktree ID
    */
   async killSession(worktreeId: string, instanceId?: string): Promise<void> {
-    const sessionName = this.getSessionName(worktreeId, instanceId);
-
-    try {
-      const exists = await hasSession(sessionName);
-      if (exists) {
+    await this.requestExitAndKill(worktreeId, instanceId, {
+      logger,
+      stoppedAction: 'stopped-antigravity-session',
+      requestExit: async (sessionName) => {
         // Send Ctrl+D to exit agy gracefully
         await sendSpecialKey(sessionName, 'C-d');
 
         // Wait a moment for agy to exit
         await new Promise((resolve) => setTimeout(resolve, TUI_EXIT_WAIT_MS));
-      }
-
-      // Kill the tmux session
-      const killed = await killSession(sessionName);
-
-      // Invalidate cache so a later session reusing the name starts clean
-      invalidateCache(sessionName);
-
-      if (killed) {
-        logger.info('stopped-antigravity-session');
-      }
-    } catch (error: unknown) {
-      logger.error('session:stop-failed', { error: getErrorMessage(error) });
-      throw error;
-    }
+      },
+      afterKill: (sessionName) => {
+        // Invalidate cache so a later session reusing the name starts clean
+        invalidateCache(sessionName);
+      },
+    });
   }
 }

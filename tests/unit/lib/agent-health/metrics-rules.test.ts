@@ -6,7 +6,12 @@
 
 import { describe, expect, it } from 'vitest';
 import { parseMetricsArgs } from '@/lib/agent-health/metrics-args';
-import { measureFileSize, measureTypeSafety } from '@/lib/agent-health/metrics-parse';
+import {
+  measureFileSize,
+  measureKnip,
+  measureTypeSafety,
+  TYPE_SAFETY_COUNT_VERSION,
+} from '@/lib/agent-health/metrics-parse';
 import {
   addLogLine,
   createLogAggregate,
@@ -197,6 +202,14 @@ describe('skip and state', () => {
     expect(second.metrics.coverage).toEqual(first.metrics.coverage);
   });
 
+  it('keeps the counting version in the snapshot and reads it back (Issue #3389)', () => {
+    const state = nextMetricsState(null, [measureTypeSafety({ any: 1, eslintDisable: 2, tsIgnore: 3 })], NOW);
+    expect(state.metrics['type-safety']?.countVersion).toBe(TYPE_SAFETY_COUNT_VERSION);
+    expect(parseMetricsState(JSON.stringify(state))?.metrics['type-safety']?.countVersion).toBe(TYPE_SAFETY_COUNT_VERSION);
+    const junk = { metrics: { 'file-size': { measuredAt: 'x', items: {}, countVersion: 'two' } } };
+    expect(parseMetricsState(JSON.stringify(junk))?.metrics['file-size']).toEqual({ measuredAt: 'x', value: null, items: {} });
+  });
+
   it('round-trips through JSON and tolerates junk', () => {
     const state = nextMetricsState(null, [measureTypeSafety({ any: 1, eslintDisable: 2, tsIgnore: 3 })], NOW);
     expect(parseMetricsState(JSON.stringify(state))).toEqual(state);
@@ -206,6 +219,45 @@ describe('skip and state', () => {
     expect(
       parseMetricsState(JSON.stringify({ metrics: { bogus: {}, 'file-size': { measuredAt: 'x', items: { a: 'NaN', b: 2 } } } }))
     ).toEqual({ schemaVersion: 1, metrics: { 'file-size': { measuredAt: 'x', value: null, items: { b: 2 } } } });
+  });
+});
+
+describe('a new counting version rebases the previous value (Issue #3389)', () => {
+  // the state written before #3389: no countVersion, counted comments as any
+  const oldState = {
+    schemaVersion: 1 as const,
+    metrics: {
+      'type-safety': { measuredAt: '2026-10-05T21:30:00.000Z', value: 200, items: { any: 37, 'eslint-disable': 162, 'ts-ignore': 1 } },
+    },
+  };
+
+  it('no candidate from the change of counting, and the summary says the baseline was reset', () => {
+    const now = measureTypeSafety({ any: 40, eslintDisable: 60, tsIgnore: 1 });
+    const [result] = evaluateAll([now], oldState);
+    expect(result.candidates).toEqual([]);
+    expect(result.status).toBe('pass');
+    expect(result.summary).toContain(`数え方を版 1 から版 ${TYPE_SAFETY_COUNT_VERSION} に変えた`);
+    expect(result.summary).toContain('前回 200');
+    expect(result.summary).not.toContain('初回');
+    expect(result.details).toMatchObject({ countVersionFrom: 1, countVersionTo: TYPE_SAFETY_COUNT_VERSION });
+  });
+
+  it('says so only once: the next run compares with the rebased value as usual', () => {
+    const first = measureTypeSafety({ any: 3, eslintDisable: 60, tsIgnore: 1 });
+    const state = nextMetricsState(oldState, [first], NOW);
+    const [same] = evaluateAll([first], state);
+    expect(same.summary).not.toContain('数え方');
+    expect(same.candidates).toEqual([]);
+    const [worse] = evaluateAll([measureTypeSafety({ any: 4, eslintDisable: 60, tsIgnore: 1 })], state);
+    expect(worse.candidates.map((c) => c.title)).toEqual([expect.stringContaining('any +1')]);
+  });
+
+  it('a metric without a counting version is compared as before', () => {
+    const state = nextMetricsState(null, [measured('duplication', { percentage: 1.16 })], NOW);
+    expect(state.metrics.duplication?.countVersion).toBeUndefined();
+    const [worse] = evaluateAll([measured('duplication', { percentage: 1.66 })], state);
+    expect(worse.candidates).toHaveLength(1);
+    expect(worse.summary).not.toContain('数え方');
   });
 });
 
@@ -421,5 +473,27 @@ describe('performance (Issue #3054)', () => {
   it('--only accepts the performance metrics', () => {
     const parsed = parseMetricsArgs(['--only', 'api-latency,log-volume,error-rate,server-process']);
     expect(parsed).toMatchObject({ ok: true, options: { metrics: ['api-latency', 'log-volume', 'error-rate', 'server-process'] } });
+  });
+});
+
+describe('unused files (knip)', () => {
+  const knip = (files: string[]): MetricMeasurement => measureKnip(JSON.stringify({ files, issues: [] }));
+  const keysOf = (current: string[], previous: string[] | null): string[] =>
+    evaluateMetric(knip(current), previous === null ? null : snapshotOf(knip(previous))).candidates.map((c) => c.key);
+
+  it('3 -> 4 files: only the new path is a candidate', () => {
+    expect(keysOf(['a.ts', 'b.ts', 'c.ts', 'd.ts'], ['a.ts', 'b.ts', 'c.ts'])).toEqual(['metrics:unused:d.ts']);
+  });
+
+  it('same count with swapped content: the new path is a candidate', () => {
+    expect(keysOf(['a.ts', 'b.ts', 'x.ts'], ['a.ts', 'b.ts', 'c.ts'])).toEqual(['metrics:unused:x.ts']);
+  });
+
+  it('first run records a baseline without candidates', () => {
+    expect(keysOf(['a.ts', 'b.ts'], null)).toEqual([]);
+  });
+
+  it('unchanged set has no candidates', () => {
+    expect(keysOf(['a.ts'], ['a.ts'])).toEqual([]);
   });
 });

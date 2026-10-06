@@ -68,6 +68,7 @@ import {
   TerminalSquare,
   Wrench,
   X,
+  type LucideIcon,
 } from 'lucide-react';
 import ReactMarkdown, { defaultUrlTransform, type Components, type UrlTransform } from 'react-markdown';
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
@@ -335,6 +336,71 @@ export const CHAT_THINKING_TOGGLE_TESTID = 'chat-thinking-toggle';
 export const CHAT_THINKING_BODY_TESTID = 'chat-thinking-body';
 
 /**
+ * The one frame the thinking, tool-log and pane-scrape folds are drawn in.
+ *
+ * What differs between them is only the test ids, the group's data attribute,
+ * the icon, the label, the toggle's `aria-label` (the pane-scrape fold has none)
+ * and the `mt-2` on the group (that fold has none either).
+ */
+function ChatFoldFrame({
+  groupTestId,
+  toggleTestId,
+  bodyTestId,
+  groupData,
+  spaced = false,
+  Icon,
+  label,
+  collapseLabel,
+  expandLabel,
+  children,
+}: {
+  groupTestId: string;
+  toggleTestId: string;
+  bodyTestId: string;
+  groupData?: Record<string, number>;
+  spaced?: boolean;
+  Icon: LucideIcon;
+  label: string;
+  collapseLabel?: string;
+  expandLabel?: string;
+  children: React.ReactNode;
+}) {
+  const { isOpen, toggle } = useChatToolActivityDisclosure();
+
+  const Chevron = isOpen ? ChevronDown : ChevronRight;
+
+  return (
+    <div
+      data-testid={groupTestId}
+      {...groupData}
+      className={`${spaced ? 'mt-2 ' : ''}flex w-full flex-col gap-1`}
+    >
+      <button
+        type="button"
+        data-testid={toggleTestId}
+        onClick={toggle}
+        aria-expanded={isOpen}
+        aria-label={collapseLabel === undefined ? undefined : isOpen ? collapseLabel : expandLabel}
+        className={CHAT_TOOL_ACTIVITY_CHIP_CLASS}
+      >
+        <Icon size={12} aria-hidden="true" />
+        <span>{label}</span>
+        <Chevron size={12} aria-hidden="true" />
+      </button>
+
+      {isOpen && (
+        <div
+          data-testid={bodyTestId}
+          className="max-w-full border-l-2 border-border pl-2 text-muted-foreground"
+        >
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
  * The reasoning, behind one chip.
  *
  * Deliberately the same part as #2245's `ChatToolApprovalGroup`: a
@@ -356,40 +422,21 @@ export const ChatThinkingDisclosure = memo(function ChatThinkingDisclosure({
   children: React.ReactNode;
 }) {
   const t = useTranslations('worktree');
-  // [#2284] Not local state any more: the transcript's one toggle governs the
-  // reasoning, the tool log and the approval run together.
-  const { isOpen, toggle } = useChatToolActivityDisclosure();
-
-  const Chevron = isOpen ? ChevronDown : ChevronRight;
 
   return (
-    <div
-      data-testid={CHAT_THINKING_GROUP_TESTID}
-      data-thinking-blocks={blocks}
-      className="mt-2 flex w-full flex-col gap-1"
+    <ChatFoldFrame
+      groupTestId={CHAT_THINKING_GROUP_TESTID}
+      toggleTestId={CHAT_THINKING_TOGGLE_TESTID}
+      bodyTestId={CHAT_THINKING_BODY_TESTID}
+      groupData={{ 'data-thinking-blocks': blocks }}
+      spaced
+      Icon={Brain}
+      label={t('chatTranscript.thinking.summary', { count: blocks })}
+      collapseLabel={t('chatTranscript.thinking.collapse')}
+      expandLabel={t('chatTranscript.thinking.expand')}
     >
-      <button
-        type="button"
-        data-testid={CHAT_THINKING_TOGGLE_TESTID}
-        onClick={toggle}
-        aria-expanded={isOpen}
-        aria-label={isOpen ? t('chatTranscript.thinking.collapse') : t('chatTranscript.thinking.expand')}
-        className={CHAT_TOOL_ACTIVITY_CHIP_CLASS}
-      >
-        <Brain size={12} aria-hidden="true" />
-        <span>{t('chatTranscript.thinking.summary', { count: blocks })}</span>
-        <Chevron size={12} aria-hidden="true" />
-      </button>
-
-      {isOpen && (
-        <div
-          data-testid={CHAT_THINKING_BODY_TESTID}
-          className="max-w-full border-l-2 border-border pl-2 text-muted-foreground"
-        >
-          {children}
-        </div>
-      )}
-    </div>
+      {children}
+    </ChatFoldFrame>
   );
 });
 
@@ -428,38 +475,21 @@ export const ChatToolLogDisclosure = memo(function ChatToolLogDisclosure({
   children: React.ReactNode;
 }) {
   const t = useTranslations('worktree');
-  const { isOpen, toggle } = useChatToolActivityDisclosure();
-
-  const Chevron = isOpen ? ChevronDown : ChevronRight;
 
   return (
-    <div
-      data-testid={CHAT_TOOL_LOG_GROUP_TESTID}
-      data-tool-calls={toolCalls}
-      className="mt-2 flex w-full flex-col gap-1"
+    <ChatFoldFrame
+      groupTestId={CHAT_TOOL_LOG_GROUP_TESTID}
+      toggleTestId={CHAT_TOOL_LOG_TOGGLE_TESTID}
+      bodyTestId={CHAT_TOOL_LOG_BODY_TESTID}
+      groupData={{ 'data-tool-calls': toolCalls }}
+      spaced
+      Icon={Wrench}
+      label={t('chatTranscript.toolLog.summary', { count: toolCalls })}
+      collapseLabel={t('chatTranscript.toolLog.collapse')}
+      expandLabel={t('chatTranscript.toolLog.expand')}
     >
-      <button
-        type="button"
-        data-testid={CHAT_TOOL_LOG_TOGGLE_TESTID}
-        onClick={toggle}
-        aria-expanded={isOpen}
-        aria-label={isOpen ? t('chatTranscript.toolLog.collapse') : t('chatTranscript.toolLog.expand')}
-        className={CHAT_TOOL_ACTIVITY_CHIP_CLASS}
-      >
-        <Wrench size={12} aria-hidden="true" />
-        <span>{t('chatTranscript.toolLog.summary', { count: toolCalls })}</span>
-        <Chevron size={12} aria-hidden="true" />
-      </button>
-
-      {isOpen && (
-        <div
-          data-testid={CHAT_TOOL_LOG_BODY_TESTID}
-          className="max-w-full border-l-2 border-border pl-2 text-muted-foreground"
-        >
-          {children}
-        </div>
-      )}
-    </div>
+      {children}
+    </ChatFoldFrame>
   );
 });
 
@@ -572,36 +602,17 @@ export const ChatPaneScrapeDisclosure = memo(function ChatPaneScrapeDisclosure({
   children: React.ReactNode;
 }) {
   const t = useTranslations('worktree');
-  const { isOpen, toggle } = useChatToolActivityDisclosure();
-
-  const Chevron = isOpen ? ChevronDown : ChevronRight;
 
   return (
-    <div
-      data-testid={CHAT_PANE_SCRAPE_GROUP_TESTID}
-      className="flex w-full flex-col gap-1"
+    <ChatFoldFrame
+      groupTestId={CHAT_PANE_SCRAPE_GROUP_TESTID}
+      toggleTestId={CHAT_PANE_SCRAPE_TOGGLE_TESTID}
+      bodyTestId={CHAT_PANE_SCRAPE_BODY_TESTID}
+      Icon={TerminalSquare}
+      label={t('agentSource.kindScraper')}
     >
-      <button
-        type="button"
-        data-testid={CHAT_PANE_SCRAPE_TOGGLE_TESTID}
-        onClick={toggle}
-        aria-expanded={isOpen}
-        className={CHAT_TOOL_ACTIVITY_CHIP_CLASS}
-      >
-        <TerminalSquare size={12} aria-hidden="true" />
-        <span>{t('agentSource.kindScraper')}</span>
-        <Chevron size={12} aria-hidden="true" />
-      </button>
-
-      {isOpen && (
-        <div
-          data-testid={CHAT_PANE_SCRAPE_BODY_TESTID}
-          className="max-w-full border-l-2 border-border pl-2 text-muted-foreground"
-        >
-          {children}
-        </div>
-      )}
-    </div>
+      {children}
+    </ChatFoldFrame>
   );
 });
 

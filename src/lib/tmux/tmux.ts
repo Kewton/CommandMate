@@ -12,13 +12,10 @@ import { validateSessionName } from '@/lib/cli-tools/validation';
 import { TMUX_HISTORY_LIMIT, TUI_PANE_HEIGHT, TUI_PANE_WIDTH } from '@/config/tmux-pane-config';
 import { createLogger } from '@/lib/logger';
 import { NAVIGATION_KEY_VALUES, type NavigationKey, type TerminalKey } from '@/types/terminal-keys';
-import type { KeySequence } from '../../types/cli-tool-contracts';
 import { isDirectInputEvent, type DirectInputEvent } from '../../types/direct-input';
 import {
   escapeTrailingSemicolon,
   keySequenceArgs,
-  runKeySequence,
-  type KeySequenceTransport,
 } from './key-sequence';
 
 const execFileAsync = promisify(execFile);
@@ -206,18 +203,6 @@ export interface CapturePaneOptions {
 }
 
 /**
- * Check if tmux is installed and available
- */
-export async function isTmuxAvailable(): Promise<boolean> {
-  try {
-    await execFileAsync('tmux', ['-V'], { timeout: DEFAULT_TIMEOUT });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
  * Check if a tmux session exists
  *
  * @param sessionName - Name of the tmux session
@@ -241,6 +226,39 @@ export async function hasSession(sessionName: string): Promise<boolean> {
     // new-format name, so the next start uses the new-format name.
     dropLegacyAliasByLegacyName(sessionName);
     return false;
+  }
+}
+
+/** What `tmux has-session` could say about a session (Issue #3329). */
+export type SessionPresence = 'present' | 'absent' | 'unknown';
+
+/**
+ * Like {@link hasSession}, but keeps "tmux could not be asked" apart from "the
+ * session does not exist" (Issue #3329). `hasSession` folds both into `false`,
+ * which is right for its callers (nothing to send to, nothing to kill) and
+ * wrong for the Auto-Yes poller, which waits for an absent session but must
+ * count a failing tmux toward its error threshold.
+ *
+ * `has-session` exits 1 for a missing session, and also when no tmux server is
+ * running (measured on tmux 3.5a: `error connecting to ...`, exit 1) — no
+ * server means no session, so both are `absent`. A timeout (the child killed),
+ * a spawn failure (`ENOENT`: code is a string) or any other exit is `unknown`.
+ *
+ * @param sessionName - Name of the tmux session
+ * @returns `present`, `absent`, or `unknown` when tmux gave no answer
+ */
+export async function probeSession(sessionName: string): Promise<SessionPresence> {
+  try {
+    await execFileAsync('tmux', ['has-session', '-t', exactTarget(sessionName)], { timeout: DEFAULT_TIMEOUT });
+    return 'present';
+  } catch (error: unknown) {
+    const { code, killed } = (error ?? {}) as { code?: unknown; killed?: boolean };
+    if (code === 1 && !killed) {
+      // Same side effect as hasSession's false (Issue #2866).
+      dropLegacyAliasByLegacyName(sessionName);
+      return 'absent';
+    }
+    return 'unknown';
   }
 }
 
@@ -616,53 +634,6 @@ export async function sendKeys(
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     throw new Error(`Failed to send keys to tmux session: ${errorMessage}`);
-  }
-}
-
-/**
- * Send a whole {@link KeySequence} to a session (Issue #1933).
- *
- * The executor half of `./key-sequence`, bound to this module's `execFile`
- * transport. Literal steps go out through `send-keys -l --`, key steps through
- * `send-keys --` after their name is re-validated, and each step is its own
- * tmux invocation so a TUI cannot read the whole sequence as one paste.
- *
- * ## Status: the runner for `GracefulExitSpec.keys`, not yet its caller
- *
- * `ICLITool.gracefulExitSequence()` returns a `KeySequence[]`, so something has
- * to be able to run one; this is that something, and
- * `tests/unit/lib/key-sequence-1933.test.ts` drives it against a stubbed
- * `execFile`. The seven `killSession()` implementations do **not** call it yet,
- * and that is a deliberate scope line rather than an oversight: rerouting them
- * changes the argv of calls that `tests/unit/api/kill-session-cli-tool-gateway-1905.test.ts`
- * pins by exact arity, a file Issue #1933 may not edit — and it would buy no
- * behaviour, because the exit strings (`/exit`, `/quit`) are tool-owned
- * constants rather than tmux key names, so `-l` changes not one byte for them.
- * The user-typed message body, which `-l` changes a great deal for, goes through
- * {@link sendKeys}' `literal` option in the same commit. The Issue that is
- * allowed to touch that gateway test owns the rest of the move;
- * `tests/unit/cli-tools/graceful-exit-conformance-1933.test.ts` holds the
- * declarations equal to the implementations until then.
- *
- * @param sessionName - Target session name
- * @param steps - The sequence, in order
- * @throws {Error} If a key name is not allowed, or a tmux command fails
- */
-export async function sendKeySequence(
-  sessionName: string,
-  steps: readonly KeySequence[]
-): Promise<void> {
-  const transport: KeySequenceTransport = {
-    async run(args: string[]): Promise<void> {
-      await execFileAsync('tmux', args, { timeout: DEFAULT_TIMEOUT });
-    },
-  };
-
-  try {
-    await runKeySequence(exactTarget(sessionName), steps, transport);
-  } catch (error: unknown) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    throw new Error(`Failed to send key sequence to tmux session: ${errorMessage}`);
   }
 }
 
@@ -1171,8 +1142,8 @@ export function isAllowedSpecialKey(
  *
  * `invalidateCache()` fires the instant `tmux send-keys` returns, which is
  * BEFORE the CLI has drawn the consequence of the key. The next capture — the
- * chat surface's own `onKeysSent` refresh, or any of the pollers that share this
- * cache (the sidebar status probe, the global session poller) — therefore has a
+ * chat surface's own `onKeysSent` refresh, or any of the readers that share this
+ * cache (the sidebar status probe) — therefore has a
  * good chance of storing the PRE-repaint frame, and {@link CACHE_TTL_MS} then
  * serves that stale frame for five seconds. That is the "the highlight does not
  * move" report in Issue #2297: the send worked, the cache was invalidated, and

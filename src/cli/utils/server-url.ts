@@ -9,6 +9,7 @@
  */
 
 import { config as dotenvConfig } from 'dotenv';
+import { isUatIsolationEnabled } from '../../config/uat-isolation';
 import { getEnvPath } from './env-setup';
 
 /**
@@ -128,11 +129,17 @@ export function loadEnvFileValues(envPath?: string): Record<string, string> {
  * reported the .env port.
  *
  * Resolution order: `process.env` > `~/.commandmate/.env` > resolveServerEndpoint() defaults.
+ * Under `CM_UAT_ISOLATION=1` the file layer is skipped (Issue #3360).
  *
  * Neither of the two consults the file *alone*; {@link loadEnvFileValues} is the loader for
  * the question where the shell must not appear as a layer at all.
  */
 export function loadClientEnv(): ServerEnv {
+  // Issue #3360: a UAT / daily-check client (`CM_UAT_ISOLATION=1`) reads no .env at all —
+  // not ~/.commandmate/.env (global install), not ./.env (local) — so the target is only
+  // ever what the caller exported. ApiClient refuses to fall back to 3000 in this mode.
+  if (isUatIsolationEnabled()) return { ...process.env };
+
   // parseEnvFile() is a read-only lookup: left to its defaults dotenv would populate
   // process.env with every key the file defines, turning file values into "exported" ones
   // for the rest of the process — the precedence this function exists to avoid.

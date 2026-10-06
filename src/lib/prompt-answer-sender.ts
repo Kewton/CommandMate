@@ -17,13 +17,14 @@ import { readCommandCodeReviewPage } from '@/lib/detection/selection-shape';
 import type { MultipleChoicePromptData, PromptData, PromptType, SubmitMode } from '@/types/models';
 import { isValidSubmitMode } from '@/types/models';
 import { invalidateCache } from './tmux/tmux-capture-cache';
+import { hasCheckboxOptions } from '@/lib/prompt-answer-semantic';
 import {
   TUI_MESSAGE_PROCESSED_WAIT_MS,
   TUI_TEXT_INPUT_WAIT_MS,
 } from '@/config/cli-tool-timing-config';
 
-/** Regex pattern to detect checkbox-style multi-select options */
-const CHECKBOX_OPTION_PATTERN = /^\[[ x]\] /;
+// Issue #3397: the checkbox reading (`hasCheckboxOptions`) lives in
+// `prompt-answer-semantic`, shared with the semantic resolver and Auto-Yes.
 
 /**
  * A validated SELECTION SET, as opposed to free text (Issue #2755).
@@ -954,11 +955,11 @@ export async function sendPromptAnswer(params: SendPromptAnswerParams): Promise<
     // Multi-select prompts require: Space to toggle checkbox -> navigate to "Next" -> Enter.
     // Single-select prompts require: navigate to option -> Enter.
     // Note: multi-select detection is only possible when promptData succeeded (mcOptions available).
-    const isMultiSelect = mcOptions !== null && mcOptions.some(o => CHECKBOX_OPTION_PATTERN.test(o.label));
+    const isMultiSelect = mcOptions !== null && hasCheckboxOptions(mcOptions);
 
     if (isMultiSelect && mcOptions !== null) {
       // Multi-select: toggle checkbox, then navigate to "Next" and submit
-      const checkboxCount = mcOptions.filter(o => CHECKBOX_OPTION_PATTERN.test(o.label)).length;
+      const checkboxCount = mcOptions.filter(o => hasCheckboxOptions([o])).length;
       const keys: string[] = [
         ...buildNavigationKeys(offset),  // 1. Navigate to target option
         'Space',                          // 2. Toggle checkbox

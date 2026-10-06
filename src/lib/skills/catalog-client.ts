@@ -34,6 +34,7 @@ import { createLogger } from '@/lib/logger';
 import { validateSkillCatalog } from '@/lib/skills/schema';
 import type { SkillContractError } from '@/lib/skills/errors';
 import type { SkillCatalog } from '@/types/skills';
+import { getOrInitGlobal } from '../global-state';
 
 const logger = createLogger('lib/skills/catalog-client');
 
@@ -134,7 +135,7 @@ declare global {
   var __skillCatalogCache: SkillCatalogCache | undefined;
 }
 
-const cache: SkillCatalogCache = (globalThis.__skillCatalogCache ??= {
+const cache: SkillCatalogCache = getOrInitGlobal('__skillCatalogCache', () => ({
   catalog: null,
   validatedAt: 0,
   confirmedAt: 0,
@@ -142,7 +143,7 @@ const cache: SkillCatalogCache = (globalThis.__skillCatalogCache ??= {
   revision: null,
   rateLimitResetAt: null,
   inflight: null,
-});
+}));
 
 // =============================================================================
 // Internal helpers

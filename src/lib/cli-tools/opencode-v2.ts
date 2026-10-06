@@ -45,7 +45,6 @@ import {
 } from '@/types/terminal-keys';
 import {
   hasSession,
-  createSession,
   capturePane,
   sendKeys,
   sendSpecialKeys,
@@ -60,7 +59,8 @@ import {
 } from '../detection/cli-patterns';
 import { sendMessageWithSubmitVerification } from './submit-verified-sender';
 import { invalidateCache } from '../tmux/tmux-capture-cache';
-import { OPENCODE_PANE_HEIGHT, resolveOpencodePaneWidth } from '@/config/tmux-pane-config';
+import { OPENCODE_PANE_HEIGHT } from '@/config/tmux-pane-config';
+import { resolveOpencodePaneWidthChecked } from './opencode-pane-width';
 import { createLogger } from '@/lib/logger';
 import { getErrorMessage } from '@/lib/errors';
 import {
@@ -83,7 +83,6 @@ import {
 } from '@/lib/hooks/sources/opencode-v2/tool-id';
 import { OPENCODE_V2_EXIT_COMMAND_TEXT, verifyGracefulExit } from './graceful-exit';
 import {
-  TUI_SESSION_CREATE_WAIT_MS,
   TUI_TEXT_INPUT_WAIT_MS,
   OPENCODE_V2_EXIT_WAIT_MS,
   OPENCODE_V2_COMPOSER_WAIT_MS,
@@ -254,7 +253,9 @@ export class OpenCodeV2Tool extends BaseCLITool {
 
     const sessionName = this.getSessionName(worktreeId, instanceId);
     const target = opencodeV2Target(worktreeId, instanceId);
-    const geometry = { windowWidth: resolveOpencodePaneWidth(), windowHeight: OPENCODE_PANE_HEIGHT };
+    // Issue #3296: the "sidebar visible" warn is off for v2 (see opencode-pane-width.ts).
+    const paneWidth = resolveOpencodePaneWidthChecked({ warnSidebar: false });
+    const geometry = { windowWidth: paneWidth, windowHeight: OPENCODE_PANE_HEIGHT };
 
     const exists = await hasSession(sessionName);
     if (exists) {
@@ -273,8 +274,7 @@ export class OpenCodeV2Tool extends BaseCLITool {
 
     try {
       if (!exists) {
-        await createSession({ sessionName, workingDirectory: worktreePath });
-        await new Promise((resolve) => setTimeout(resolve, TUI_SESSION_CREATE_WAIT_MS));
+        await this.createLaunchPane(sessionName, worktreePath);
       }
 
       try {
@@ -365,13 +365,7 @@ export class OpenCodeV2Tool extends BaseCLITool {
   async sendMessage(worktreeId: string, message: string, instanceId?: string): Promise<void> {
     const sessionName = this.getSessionName(worktreeId, instanceId);
 
-    if (!(await hasSession(sessionName))) {
-      throw new Error(
-        `OpenCode V2 session ${sessionName} does not exist. Start the session first.`
-      );
-    }
-
-    await this.relaunchIfToolExited(worktreeId, instanceId);
+    await this.requireSession('OpenCode V2', worktreeId, instanceId, { relaunch: true });
 
     try {
       await this.waitForComposer(sessionName);
@@ -429,6 +423,9 @@ export class OpenCodeV2Tool extends BaseCLITool {
       }
       invalidateCache(sessionName);
       this.resumeAttemptedAt.delete(sessionName);
+      // Logged unconditionally: after a successful `/exit` no tmux kill runs, so
+      // there is no `killed` value to test, unlike `requestExitAndKill` in
+      // base.ts (logs only when the kill returned true) (#3232).
       logger.info('stopped-opencode-v2-session');
     } catch (error: unknown) {
       logger.error('session:stop-failed', { error: getErrorMessage(error) });

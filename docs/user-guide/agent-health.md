@@ -8,6 +8,8 @@ hook のインスタンス取り違え）。`scripts/agent-health/run.ts` は、
 - Issue を立てるのはこのスクリプトではない。レポートを読んで Issue にするのは Schedule で動く AI（#2879）、
   レポートが今日出ているかを見張るのは #2880 の役目。
 - 実エージェントを起動し、1 ツールあたり最大 3 回モデルを呼ぶ（費用がかかる）。
+- 起動して確かめるのは上の 6 ツール。CommandMate が対応しているほかの 3 ツール（gemini・vibe-local・copilot）も、
+  レポートの行として `version` だけを毎朝読む（下の「version だけを読むツール」、Issue #3313）。
 
 ## 何を確かめるか
 
@@ -24,6 +26,36 @@ hook のインスタンス取り違え）。`scripts/agent-health/run.ts` は、
 | `screen-quoted-dialog` | そのツールの承認ダイアログの文面を本文で引用させた返答が終わった後の画面 | `ready`、`hasActivePrompt` が偽（#2841〜#2847 の型の回帰） |
 
 画面は本番と同じ形で撮る（200x1000。opencode・opencode-v2 は 80x200。行数は `resolveCaptureSpec(tool).statusLines`）。
+
+### skip の種類（Issue #3313）
+
+`skip` の check には必ず `skipKind` が入る。種類は skip を出す場所で渡す（`skipReason` の文面から推測しない。
+`src/lib/agent-health/coverage.ts` の `skipCheck`）。
+
+| `skipKind` | 要約での呼び方 | 出る場所 |
+|---|---|---|
+| `no-definition` | 検査の定義が無い | 選択画面の定義が無いツールの `screen-picker`。opencode の `hook-correlation`（イベントは hook ではなく自前の HTTP から読み、その経路の検査が無い） |
+| `not-shown` | このツールは、その画面を出さない | 承認ダイアログを出さないツール（opencode・opencode-v2）の `screen-approval` |
+| `signed-out` | サインインできない | gemini（下記） |
+| `unsupported` | ツールが未対応 | vibe-local・copilot の `version` 以外（下記） |
+| `timeout` | 時間切れ | 全体の時間上限に達して実行しなかったツール |
+| `prerequisite-failed` | version が取れず未実施 | `version` が fail したツールの残り |
+| `not-selected` | 今回の実行の対象外 | 表だけ。`--tools` / `--only` で外したもの |
+| `not-recorded` | 結果が記録されなかった | 表だけ。選んだのに結果が無いもの（スクリプトの異常） |
+
+### version だけを読むツール（gemini・vibe-local・copilot、Issue #3313）
+
+確認の実行（6 ツールすべてを選んだとき＝毎朝の実行）では、この 3 ツールも行として出す。起動はせず、`version` だけを読む。
+`version` 以外の check は、下の種類の `skip` になる（`scripts/agent-health/tool-table.ts` の `LIMITED_TOOL_SPECS`）。
+
+| ツール | `version` の読み方 | ほかの check | 起動して確かめない理由 |
+|---|---|---|---|
+| gemini | `gemini --version` | `signed-out` | この環境ではサインインできない（2026-10-05 の実測: 「This client is no longer supported for Gemini Code Assist for individuals」）。起動すると OAuth のトークン更新で利用者の `~/.gemini/oauth_creds.json` を書き換え、資格情報を一時ディレクトリへ複製しないと隔離できないため、毎朝は起動しない（サインインの状態は 2026-10-05 の実測を出している） |
+| vibe-local | `python3 ~/.local/lib/vibe-local/vibe-coder.py --version`（`vibe-coder 1.3.3`） | `unsupported` | `vibe-local --version` は版を出さずに起動スクリプトを走らせる（Ollama が止まっていれば起動し、`/dev/tty` で許可を訊き、セッションを始める）。hook も持たない |
+| copilot | `copilot --version` | `unsupported` | 起動すると利用者の `~/.copilot/config.json` を書き換え（`recentModelIds`）、CommandMate の起動は `~/.copilot/settings.json`（マシンに 1 つ）に hook を書く。資格情報を別の `COPILOT_HOME` へ複製しないとサインインを隔離できないため、サインインの状態も確かめていない |
+
+`version` が取れなければ fail（終了コード 1）になり、残りは `prerequisite-failed` の skip になる。起動して確かめる手順を
+足したツールは、この表から上の 6 ツールの側へ移す。
 
 ### opencode-v2 の起動と SSE（Issue #2937）
 
@@ -62,7 +94,7 @@ npx tsx scripts/agent-health/run.ts [--tools claude,codex,antigravity,opencode,c
 
 | オプション | 既定 | 説明 |
 |---|---|---|
-| `--tools` | 6 ツールすべて | 対象ツール |
+| `--tools` | 6 ツールすべて | 対象ツール（起動して確かめる 6 ツールから選ぶ）。6 ツールすべてを選んだときだけ、gemini・vibe-local・copilot の `version` も読む |
 | `--only` | 全チェック | 行うチェック（`version` は常に行う） |
 | `--out` | `~/.commandmate/agent-health/reports/<YYYY-MM-DD>.json`（JST の日付） | レポートの書き出し先 |
 | `--timeout-per-tool` | 150 | 1 ツールの持ち時間（秒）。時間切れのチェックは fail |
@@ -76,11 +108,34 @@ npx tsx scripts/agent-health/run.ts [--tools claude,codex,antigravity,opencode,c
 
 | exit | 意味 |
 |---|---|
-| `0` | すべて pass / skip |
+| `0` | すべて pass / skip（version だけを読むツールの skip を含む） |
 | `1` | fail が 1 つ以上 |
 | `2` | スクリプト自体の異常（引数の誤り・書き込み失敗・hook 設定を戻せなかった・選択画面の確認の前後でモデル／effort の設定が変わった・別の実行が進行中・中断） |
 
 どの場合もレポートは書く（2 の場合も書ける範囲で書く。書けなければ標準出力に出す）。
+
+### 要約（標準出力、Issue #3313）
+
+実行の最後に、レポートの `summary` と同じ行を標準出力に出す（`daily.sh` の出力に含まれ、見張り役が読む）。
+1 行目は必ず `pass N・fail N・skip N（<skip の種類> N・…）` の形で、3 つの数を並べる（「全項目 pass」とは書かない）。
+その後に 9 ツール × 7 check の表（Markdown）と、skip の理由（ツールと種類ごとに 1 行）が続く。例:
+
+```
+pass 38・fail 0・skip 25（検査の定義が無い 5・このツールは、その画面を出さない 2・サインインできない 6・ツールが未対応 12）
+
+| ツール | version | hook-correlation | screen-idle | screen-picker | screen-running | screen-approval | screen-quoted-dialog |
+|---|---|---|---|---|---|---|---|
+| claude | pass | pass | pass | pass | pass | pass | pass |
+| opencode | pass | skip（検査の定義が無い） | pass | skip（検査の定義が無い） | pass | skip（このツールは、その画面を出さない） | pass |
+| gemini（version のみ） | pass | skip（サインインできない） | … |
+…
+
+未実施の理由:
+- opencode screen-approval: このツールは、その画面を出さない — opencode の既定の権限設定は …
+- gemini hook-correlation, screen-idle, …: サインインできない — …
+```
+
+`--tools` / `--only` で外したマスも表には `skip（今回の実行の対象外）` として数える（理由の行には出さない）。
 
 ## レポートの形
 
@@ -93,7 +148,8 @@ interface AgentHealthReport {
   completedAt: string;        // ISO。#2880 はこの有無で「今日の結果がある」を判断する
   host: { commandmateCommit: string; node: string };
   tools: Array<{
-    tool: 'claude' | 'codex' | 'antigravity' | 'opencode' | 'command-code' | 'opencode-v2';
+    tool: 'claude' | 'codex' | 'antigravity' | 'opencode' | 'command-code' | 'opencode-v2'
+        | 'gemini' | 'vibe-local' | 'copilot';   // 後の 3 つは version だけ（6 ツールすべてを選んだとき）
     version: string | null;         // `<cli> --version` の 1 行目
     previousVersion: string | null; // 前回（state）の値
     versionChanged: boolean;        // 両方が分かっていて違うときだけ true
@@ -103,6 +159,7 @@ interface AgentHealthReport {
       summary: string;              // 1 行。何を期待し何が起きたか
       evidence?: string;            // 失敗時の証拠（画面の末尾 40 行、届いた hook）。4,000 文字まで
       skipReason?: string;
+      skipKind?: 'no-definition' | 'not-shown' | 'signed-out' | 'unsupported' | 'timeout' | 'prerequisite-failed'; // skip には必ず入る
       framePaths?: string[];        // 画面全体を保存したファイル（下の「画面の保存」）
     }>;
   }>;
@@ -118,6 +175,16 @@ interface AgentHealthReport {
   };
   scriptErrors?: string[];          // exit 2 のときの理由
   sync?: { status: 'ok' | 'failed'; before: string; after: string; reason?: string }; // daily.sh 経由のときだけ
+  coverage?: {                      // 9 ツール × 7 check の表（Issue #3313）。何も実行しなかったレポートには無い
+    checkIds: string[];
+    rows: Array<{
+      tool: string;
+      coverage: 'probed' | 'version-only';
+      cells: Record<string, { status: 'pass' | 'fail' | 'skip'; skipKind?: string }>; // skipKind は上の 6 種と not-selected・not-recorded
+    }>;
+    counts: { pass: number; fail: number; skip: number; skipByKind: Record<string, number> };
+  };
+  summary?: string[];               // 標準出力に出す要約と同じ行（上の「要約」）
 }
 ```
 
@@ -173,13 +240,17 @@ fixture にするには足りない）。
    状態（claude の `~/.claude.json` のプロジェクト項目、各 CLI のセッション記録・履歴）は CLI の通常の動作として
    残る。
 
-同時に 2 つ走らないよう、state と同じディレクトリに `run.lock`（pid）を置く。
+同時に 2 つ走らないよう、UAT（`scripts/uat/run-server.sh`）・`daily.sh`・手動の `run.ts` が共通のロックを取る（Issue #3359）。
+ロックは `mkdir` で作るディレクトリ（原子的。中の `owner` に pid・開始時刻・種類・token）で、場所は `$CM_RUN_LOCK_DIR`、
+無ければ `<os.tmpdir()>/commandmate-run.lock`（テストが触る `~/.commandmate/` には置かない）。`daily.sh` は同期の前に取り、
+`run.ts` の終わりまで持つ（`run.ts` は `CM_RUN_LOCK_TOKEN` で受け継ぐ）。UAT は `up` の前から `down` の後まで持ち、
+その間の持ち主の pid はサーバのもの。持ち主の pid が死んでいるロックは取り直す。以前の `run.lock`（state の隣）は使わない。
 
 ## 手で実行する
 
 ```bash
 cd <CommandMate のチェックアウト>
-npx tsx scripts/agent-health/run.ts                         # 6 ツール・全チェック（モデル呼び出しあり）
+npx tsx scripts/agent-health/run.ts                         # 6 ツール・全チェック（モデル呼び出しあり）＋ 3 ツールの version
 npx tsx scripts/agent-health/run.ts --only screen-idle      # 起動画面だけ（モデル呼び出しなし）
 npx tsx scripts/agent-health/run.ts --tools codex --out /tmp/agent-health-codex.json
 ```
@@ -200,7 +271,7 @@ tmux -L cm-agent-health kill-server
 
 ## 関連
 
-- 実装: `scripts/agent-health/`（実行）、`src/lib/agent-health/`（純粋関数とレポートの型）
+- 実装: `scripts/agent-health/`（実行）、`src/lib/agent-health/`（純粋関数とレポートの型。表と要約は `coverage.ts`）
 - テスト: `tests/unit/lib/agent-health/`、`tests/unit/scripts/agent-health/`
 - codex の画面判定を手で確かめる手順: [docs/design/codex-detection-corpus.md](../design/codex-detection-corpus.md)
 - 検出カナリア（claude / opencode のより細かいシナリオ）: `scripts/canary/`
@@ -210,7 +281,7 @@ tmux -L cm-agent-health kill-server
 - 確認専用の worktree（`../commandmate-agent-health`）に `docs/agent-health/CMATE.example.md` の中身を `CMATE.md` として置く。CommandMate の Schedule 機能が毎日 07:00 に Antigravity（`agy -p`）で `docs/agent-health/daily-triage-prompt.md` の手順を実行し、結果を Issue にする
 - この worktree は常駐用で、ブランチ `agent-health-runner`（upstream は `origin/develop`。独自の commit は持たない）を使う。develop は本体の作業ディレクトリで使っているため同じブランチは使えない。作り方: `git worktree add -b agent-health-runner ../commandmate-agent-health origin/develop` のあと `git -C ../commandmate-agent-health branch --set-upstream-to=origin/develop`、`npm install --include=dev`、リポジトリの同期
 - 依頼文は `bash scripts/agent-health/daily.sh --out <レポート>` を呼ぶだけ。`daily.sh` が同期（`git pull --ff-only origin develop`）・依存の更新（同期の前後で `package-lock.json` が変わったときだけ `npm install --include=dev`）・`run.ts` の実行をまとめて行い、標準出力に `AGENT_HEALTH_SYNC status=ok|failed …` を 1 行出す
-- 同期に失敗すると（追跡ファイルの未コミットの変更 `dirty-worktree`・`pull-failed: <git の最後の行>`・`npm-install-failed`）確認を実行せず、`completedAt` と `scriptErrors` を持ち `tools` が空の最小のレポートを書いて exit 2 になる（08:00 の見張り役が「実行されなかった」と取り違えないため）
+- 同期に失敗すると（追跡ファイルの未コミットの変更 `dirty-worktree`・`pull-failed: <git の最後の行>`・`npm-install-failed`・ほかの実行（UAT など）が共通のロックを持っている `run-locked: <持ち主>`）確認を実行せず、`completedAt` と `scriptErrors` を持ち `tools` が空の最小のレポートを書いて exit 2 になる（08:00 の見張り役が「実行されなかった」と取り違えないため）
 - レポートの `sync`（`daily.sh` 経由のときだけ）: `status`（`ok` / `failed`）、`before` / `after`（同期の前後の commit。失敗時は両方とも前の commit）、`reason`（失敗の理由）。`run.ts` を手で実行したときは `sync` は無い
 - **worktree の片付けで削除しない**（CLAUDE.md の「恒久 worktree（クリーンアップ対象外）」）。消すと翌朝の Schedule が動かない
 - ラベル `agent-health` を作っておく: `gh label create agent-health --repo Kewton/CommandMate --description "日次ヘルスチェックが自動登録した Issue"`
@@ -219,14 +290,14 @@ tmux -L cm-agent-health kill-server
 - 08:00 に Command Code が今日のレポートの有無を確かめ、無ければ自分で確認を実行する（`docs/agent-health/watch-prompt.md`）
 - Command Code の Schedule の許可は `yolo` にすること（それ以外ではコマンドを実行できず、成功のまま何もしない。#2454）
 
-## メトリクス計測（セキュリティ・保守性・性能、Issue #3044 / #3054）
+## メトリクス計測（セキュリティ・保守性・性能・CI、Issue #3044 / #3054 / #3310）
 
-日次確認の前（06:30）に、セキュリティ脆弱性・ソフトウェア保守性・本番サーバーの性能の指標を **AI を使わず** 計測し、JSON に書く。
+日次確認の前（06:30）に、セキュリティ脆弱性・ソフトウェア保守性・本番サーバーの性能・develop の CI の不安定さの指標を **AI を使わず** 計測し、JSON に書く。
 起票するのは Schedule で動く AI（`docs/agent-health/metrics-prompt.md`）で、スクリプトは Issue を立てない。
 
 - 計測: `scripts/agent-health/metrics.ts`（外部ツールの呼び出し・ログの読み込み・`ps`・HTTP は `metrics-runners.ts`）。判定は純粋関数
   `src/lib/agent-health/metrics-parse.ts`（ツールの出力 → 計測値）・`metrics-perf.ts`（ログ行・`ps` → 性能の計測値）・
-  `metrics-rules.ts`（前回比・候補・並び・exit code）、
+  `ci-flaky.ts`（`gh run list`・`gh run view` の出力 → CI の計測値）・`metrics-rules.ts`（前回比・候補・並び・exit code）、
   型は `metrics-types.ts`（閾値の定数もここ）
 - 入口: `bash scripts/agent-health/metrics.sh --out <file>`。`daily.sh --sync-only` で同期してから `metrics.ts` を実行する。
   同期に失敗したら計測せず、`completedAt` と `scriptErrors` を持ち `metrics` が空の最小の JSON を書いて exit 2
@@ -242,31 +313,64 @@ tmux -L cm-agent-health kill-server
 | maintainability | `file-size` | `src/` の行数（`wc -l` と同じ数え方） | 1,500 行超の本数 | 新たに 1,500 行を超えた／500 行以上のファイルが前回比 +200 行以上 |
 | maintainability | `complexity` | ESLint `complexity`（閾値 10）だけを、リポジトリの設定を使わず報告専用で実行 | 複雑度 25 以上の関数の数 | ファイル内最大の複雑度が新たに 25 以上／25 以上で前回比 +5 以上 |
 | maintainability | `duplication` | `npx jscpd@4 src`（最小 10 行） | 重複率（%） | 前回比 +0.5pt 以上 |
-| maintainability | `unused` | `npx knip@5 --reporter json` | 未使用の依存の数 | 前回に無い未使用の依存（未使用 export は件数だけ記録） |
+| maintainability | `unused` | `npx knip@5 --reporter json` | 未使用の依存の数（未使用ファイルのパスの集合も状態に保存） | 前回に無い未使用の依存・未使用のファイル（パスで比べる。未使用 export は件数だけ記録） |
 | maintainability | `outdated` | `npm outdated --json`（直接依存だけ） | メジャー 2 版以上遅れた数 | 新たにメジャー 2 版以上遅れた |
-| maintainability | `type-safety` | `src/` の型位置の `any`・`eslint-disable`・`@ts-ignore` の数 | 合計 | どれかが前回より増えた |
+| maintainability | `type-safety` | `src/` の型位置の `any`・`eslint-disable`・`@ts-ignore` の数。TypeScript のパーサで読み、コメント・文字列・正規表現・JSX のテキストの中の `any` は数えず、ジェネリクスの既定 `T = any` は数える。`eslint-disable` と `@ts-ignore` はコメントの先頭にある指示だけを数え、`declare global { var … }` の `var` の直前の `// eslint-disable-next-line no-var`（`globalThis` の状態の決まりの書き方）は数えない（Issue #3389） | 合計 | どれかが前回より増えた |
 | maintainability | `coverage` | `vitest run tests/unit --coverage`（**月曜（JST）だけ**） | 行カバレッジ（%） | 前回（前週）比 -2pt 以上 |
 | performance | `api-latency` | 本番ログの直近 24 時間の `[WARN]` で JSON に `totalMs` を持つ行（今は `list:slow`）を `<tag> <event>` ごとに: 件数・p50・p95・最大・合計が最大の `…Ms` 内訳 | `api/worktrees list:slow` の p95（ms）。無ければ 0 | p95 が新たに 5,000ms 以上／件数 20 以上で p95 が前回比 +50% 以上。5,000ms 以上のままなら `outstanding` |
 | performance | `log-volume` | 本番ログの直近 24 時間の行数と `<tag> <event>` ごとの行数 | 24 時間の行数 | ある `<tag> <event>` が新たに 1 日 20,000 行以上／前回比 2 倍以上（前回 1,000 行以上のもの）。20,000 行以上のままなら `outstanding` |
 | performance | `error-rate` | 本番ログの直近 24 時間の `[ERROR]` 行を `<tag> <event>` ごとに | ERROR 行の合計 | ある `<tag> <event>` が新たに 1 日 50 行以上／前回比 2 倍以上（前回 50 行以上のもの）。50 行以上のままなら `outstanding` |
 | performance | `server-process` | サーバー（`logs/server.pid` の子の `node dist/server/server.js`）の RSS と CPU を 5 秒おきに 6 回（`ps -o rss=,%cpu=`）。あわせて `GET http://127.0.0.1:3000/api/worktrees` を 3 回順に呼び、中央値を `details.apiWorktreesMedianMs` に（401 などは `details.apiWorktreesError` に理由だけ） | RSS の最大（MB） | RSS が新たに 1,500MB 以上／前回比 +50% 以上／CPU 平均が新たに 50% 以上。RSS 1,500MB 以上のままなら `outstanding` |
+| ci | `ci-flaky` | 直近 7 日の develop の push の CI（`gh run list --branch develop --event push`）。失敗したか、やり直した run は、attempt ごとにジョブの結果（`gh run view <id> --attempt <n> --json jobs`）と、失敗したジョブのログ（`--log-failed`）の `FAIL <file> > <name>` の行を読む。失敗したジョブを SHA・ジョブ・attempt の単位で `records` に残し、**テストの失敗**（落ちたテストの名前つき）・**実行環境の障害**（キャンセル・タイムアウト・テストの段まで行かずに落ちた）・**その他**（テストの名前の無い失敗・集約のジョブ）に分け、`details` に件数と **やり直しでの成功**（同じ SHA で attempt によって結果が変わった）の数 | 不安定なテストの本数 | 同じ SHA でやり直して通った run で落ちていたテスト／別の SHA で 2 回以上落ちたテスト（間のコミットがテストと対象を変えたかは見ていない）。最初に落ちてから毎回落ちているテストは**落ち続け**（不具合）として別の種類で出す。前から出ているものは `outstanding` |
+| process | `hook-observation` | 本番ログの直近 24 時間（`log-volume` と同じ 1 回の読み込み）の hook の観測値（Issue #3311）。下の「hook の観測値」 | 写しでない破棄の数 | **なし**（観測だけ。候補にせず、Issue も立てない） |
 
 - **「新たに閾値を超えた」「前回より悪化した」だけが候補**（`candidates`）。前から超えているもの（1,500 行超の 14 本、
   複雑度 25 以上の 83 関数など）は起票せず、`value` と `details` の件数として残す
 - 性能の Issue には `perf` ラベルが付く。起票まで自動・修正は人が着手する（自動依頼の対象外）。自動で直させたいときは `perf` を外す
+- **ci**（Issue #3310）: `ci-flaky` の Issue には `needs-human` ラベルを付け、自動依頼（08:30）の対象にしない（テストだけの修正でも、
+  原因が製品側にあることがある。#3297 の 1 本は製品側が足したタイマーが原因だった）。公開リポジトリなので、JSON と Issue に載るのは
+  テストのファイル名と名前・回数・SHA・ジョブ名だけ（ログのほかの中身、パス・環境変数・エラーの文面は写さない）。
+  `gh` が無い・失敗した・時間切れのときは skip。読む attempt は 30 まで（残りは `details.attemptsNotRead` に数だけ）。
+  候補の条件（`metrics-types.ts` の `CI_FLAKY_*`）は最初の案で、数字を見て直す
+- 未使用のファイル（`unused` の knip `files`）の Issue には `needs-human` ラベルが付く。「候補に出たこと」と「消して安全なこと」は別なので、消す判断は人が行う（自動依頼の対象外）
+- knip の設定は `knip.json`（JSON なのでコメントは書けず、除外の理由はここに書く）。`entry` のうち `tests/fixtures/remote/*.cjs` は
+  `tests/unit/lib/remote/cloudflare-child-survival.test.ts` が `import` ではなくパスで `node` に起動させるため、knip からは
+  未使用に見える（knip の誤り、Issue #3315）。パスで起動するファイルを足したら、ここと `entry` に足す
 - 前回値が無い指標（初回・前回が skip のまま）は基準として記録するだけで、候補を出さない
+- 数え方を変えた指標（`countVersion` が前回値と違う。`type-safety` は Issue #3389 で版 2）は、前回値と比べずに基準を置き直す。
+  その日の `summary` に「数え方を版 1 から版 2 に変えたため基準を置き直した: 前回 … → 今回 …」と 1 回だけ出し、`details` に
+  `countVersionFrom` / `countVersionTo` を残す。state には新しい版で書くので、次の実行からはふつうに比べる
 - security の検出が続いている間は `status: 'fail'`。前からあるものは `outstanding` に入り、AI はその日の起票枠（4 件）に
   余りがあるときだけ、まだ Issue の無いものを立てる（初日に見送った advisory も翌日以降に回る）
 - 外部ツールが無い・失敗した・時間切れの指標は `status: 'skip'`（`skipReason` に理由）。skip した指標の前回値は
   state に残り、次の実行はそれと比べる
 - **performance**（Issue #3054）: 本番ログは `scripts/agent-health/production-log.ts` の解決（main worktree の `logs/server.log`）と、
   同じディレクトリの `server.log.1`〜`.3` を読む。「直近 24 時間」は各行の先頭の ISO 時刻で絞る（ローテートの時刻に頼らない）。
-  ログが無い・読めない・24 時間分に満たない（最古の行が 24 時間より新しい）・窓の中に行が無いときは 3 指標とも skip。
+  ログが無い・読めない・24 時間分に満たない（最古の行が 24 時間より新しい）・窓の中に行が無いときは 3 指標とも skip（`hook-observation` も同じ）。
   `server.pid` が無い・そのプロセスが無いときは `server-process` だけ skip。本番サーバーを止めず、設定も変えない（読むのはログ・`ps`・`GET /api/worktrees` だけ）
   - security と同じく、**前から閾値を超えているものも `outstanding`**（初回から）。`fail` は候補か `outstanding` があるとき
   - 公開リポジトリのため、`title`・`evidence`・`details` に載るのは `<tag> <event>` の名前・件数・時間・内訳のフィールド名と数値だけ。
     ログ行の JSON の値（`worktreeId`・パス・メッセージ・エラーの文面）は写さない。識別子らしくない名前（パスなど）は `(other)` にまとめる
   - 閾値は `metrics-types.ts` の定数（2026-09-28〜10-01 の実測から決めた初期値）。計測は 30 秒程度（`ps` の 6 回 × 5 秒が大半）
+- **hook の観測値**（`hook-observation`、Issue #3311）: 判定は `src/lib/agent-health/hook-observation.ts`。category は `process`
+  （`bug-flow` と同じく fail にならず、`candidates` は常に空）。何を候補にするかは、2 週間ほど数字を見てから別の Issue で決める。
+  `details` に載るのは件数・時間・イベント名だけで、worktree・インスタンス・セッションの id は行の突き合わせにだけ使い、写さない
+  - `duplicateDropped`: `agent-event-duplicate-dropped`（受け口が 3 秒の窓で重複として捨てた配送）の行数
+  - `duplicateDroppedNotCopy`（= `value`）: そのうち**写しでない**もの。規則は 1 つ: 同じ worktree・ツール・インスタンスで、
+    捨てた配送が繰り返している前の配送（行の時刻 − `sinceLastMs`）より後、捨てた配送以前に、ターンの境目の反対側が適用されている。
+    `stop` を捨てたならターンの開始（`agent-event-received` の `user_prompt_submit` / `pre_tool_use` / `post_tool_use`）、
+    ターンの開始を捨てたなら `stop`（`agent-event-stop-applied`）。#3289（`stop` → 140 ms 後に開始 → 1.4 秒後の `stop` を捨てた）と
+    #3301（開始 → `stop` → 22 ms 後の開始を捨てた）はこれに当たり、数 ms の写しは当たらない。
+    `duplicateDroppedNotCopyEvents` はその内訳（`stop 1 / user_prompt_submit 1` の形）
+  - `duplicateDroppedCopy`: 写しと判定したもの。`duplicateDroppedUncorrelated`: #3311 より前の形式の行（`sinceLastMs` が無く判定できない）。
+    それ以外のイベント（`notification` など）の破棄は、境目が無いので写しに数える
+  - `divergenceLines`: `detection-divergence`（画面の判定とエージェントの申告が食い違ったポーリング 1 回につき 1 行）の行数
+  - `divergenceEpisodes`・`divergenceMedianMs`・`divergenceP90Ms`・`divergenceMaxMs`: 食い違いの回数と長さの分布。
+    サーバーは対象（worktree・ツール・インスタンス）ごとに食い違いが始まった時刻を持ち、一致に戻ったポーリングで
+    `detection-divergence-resolved`（`durationMs`・`polls`）を 1 行だけ出す。一致に戻る前に見られなくなった食い違いは数えない。
+    食い違いが無い日は長さが `null`
+  - ログの量: 新しい行は食い違いの終わりの 1 行だけ（`agent-event-duplicate-dropped` は項目が増えただけで行数は同じ）。
+    増え方は `log-volume` の `current-output-builder:detection-divergence-resolved` で確かめる
 - 全体は **10 分以内**（3 並列、ツールごとの上限あり。上限に達したものは skip）。2026-10-01 の実測（カバレッジなし）:
   54 秒・149 秒・140 秒（semgrep が最も長く 54〜140 秒）
 
@@ -281,7 +385,7 @@ bash scripts/agent-health/metrics.sh --out "$HOME/.commandmate/agent-health/metr
 | オプション | 既定 | 説明 |
 |---|---|---|
 | `--out` | `~/.commandmate/agent-health/metrics/<YYYY-MM-DD>.json`（JST） | 計測結果の書き出し先 |
-| `--state` | `~/.commandmate/agent-health/metrics-state.json` | 前回値（`{ schemaVersion: 1, metrics: { <metricId>: { measuredAt, value, items } } }`）。実行の最後に更新する |
+| `--state` | `~/.commandmate/agent-health/metrics-state.json` | 前回値（`{ schemaVersion: 1, metrics: { <metricId>: { measuredAt, value, items, countVersion? } } }`。`countVersion` が無いのは版 1）。実行の最後に更新する |
 | `--only` | 全指標 | 計測する指標（カンマ区切り） |
 | `--coverage` / `--no-coverage` | 月曜（JST）だけ | カバレッジを強制する／しない |
 
@@ -302,8 +406,9 @@ interface MetricsReport {
   metrics: Array<{                 // metricId の順（上の表の順）
     metricId: 'npm-audit' | 'semgrep' | 'secrets' | 'file-size' | 'complexity'
       | 'duplication' | 'unused' | 'outdated' | 'type-safety' | 'coverage'
-      | 'api-latency' | 'log-volume' | 'error-rate' | 'server-process';
-    category: 'security' | 'maintainability' | 'performance';
+      | 'api-latency' | 'log-volume' | 'error-rate' | 'server-process'
+      | 'bug-flow' | 'ci-flaky' | 'hook-observation';
+    category: 'security' | 'maintainability' | 'performance' | 'process' | 'ci';
     status: 'pass' | 'fail' | 'skip';
     value: number | null;          // skip のとき null
     summary: string;
@@ -315,9 +420,10 @@ interface MetricsReport {
       delta?: number;              // 前回からの悪化量（指標の単位）
       score?: number;              // 保守性・性能の並び順の重み（悪化量 ÷ 閾値）
     }>;
-    outstanding?: Array<同上>;     // security・performance: 前から続いている検出
+    outstanding?: Array<同上>;     // security・performance・ci: 前から続いている検出
     skipReason?: string;
-    details?: Record<string, number | string>; // 起票しない件数（500 行超の本数など）
+    details?: Record<string, number | string | null>; // 起票しない件数（500 行超の本数・hook の観測値など）
+    records?: Array<Record<string, string | number | string[]>>; // ci-flaky: 失敗したジョブ 1 つ 1 行（sha・workflow・runId・attempt・job・kind・conclusion・tests）
   }>;
   queue: Array<{ key: string; metricId: string; source: 'candidate' | 'outstanding' }>; // 起票する順
   host: { commandmateCommit: string; node: string };
@@ -332,7 +438,7 @@ interface MetricsReport {
   日次確認より前に終わる
 - 依頼文 `docs/agent-health/metrics-prompt.md`、Issue のひな形 `docs/agent-health/metrics-issue-template.md`。
   識別子 `metrics:<metricId>:<対象>` で open の Issue を探し、あれば（その日の新規・悪化のときだけ）コメント、
-  無ければ起票する。**新規起票は 1 日 4 件まで**（`queue` の順: security の新規 → 悪化幅の大きい保守性 → performance の新規 → 続いている security → 続いている performance）
+  無ければ起票する。**新規起票は 1 日 4 件まで**（`queue` の順: security の新規 → 悪化幅の大きい保守性 → performance の新規 → ci の新規 → 続いている security → 続いている performance → 続いている ci）
 - ラベル `metrics`・`enhancement`（security は `security` も）を使う。無ければ作る:
   `gh label create metrics --repo Kewton/CommandMate --description "日次メトリクス計測が自動登録した改善 Issue"`
   （`security`・`enhancement` も同様。依頼文の手順 2 でも確かめる）
@@ -362,7 +468,7 @@ npx tsx scripts/agent-health/dispatch.ts --dry-run   # 選定と状態確認だ�
 - **対象**: `gh issue list --repo Kewton/CommandMate --state open` のうち、作成者が `kewton`（大文字小文字は区別しない。
   公開リポジトリのため、外部の人が書いた本文による指示の注入を防ぐ）・ラベル `agent-health`（バグ）か `catalog-drift`
   （スラッシュコマンドカタログのずれ、#3158 が起票）か `metrics`（改善）・ラベル `auto-dispatched` が無いもの。
-  複数のラベルがあれば バグ → カタログのずれ → 改善 の順に先のものとして扱う。ラベル `perf` が付いたもの（性能の Issue）は除く
+  複数のラベルがあれば バグ → カタログのずれ → 改善 の順に先のものとして扱う。ラベル `perf` が付いたもの（性能の Issue）と `needs-human` が付いたもの（人が判断する Issue。未使用のファイル・不安定な CI のテストなど）は除く
 - **順番と上限**: バグ（作成が古い順）→ カタログのずれ（古い順）→ 改善（`security` → その他。それぞれ古い順）。
   バグは全件、カタログのずれは 1 件まで、改善は 2 件まで、合計 5 件まで。上限を超えたものは `deferred`（持ち越し）に入れる
 - **カタログのずれ**（#3159）: develop へのマージまで自動で進める。条件ファイルに「`/catalog-reconcile` の無人実行節に従う」
@@ -437,14 +543,14 @@ npx tsx scripts/agent-health/catalog-check.ts --dry-run   # 判定と版の比�
 - **判定**: `npm run catalog:refresh -- --check` の出力を `parseCatalogCheckOutput`（`src/lib/slash-command-reconcile/check-report.ts`）で
   `drift`（新規コマンドあり、または attestation の陳腐化あり）・`clean`・`inconclusive`（ソースを照合できなかった）に分ける。exit code では判定しない
 - **opencode 1.x は対象外**（v2 がリリース済みのため）。`opencode provider skipped…` の警告は既知の状態として扱い、検査不能に数えない。
-  CI の週次 workflow の判定は変えないよう、`IGNORED_WARNING_PREFIXES` には足さずこのチェックの側で除く
+  既定の判定（`IGNORED_WARNING_PREFIXES`）は変えないよう、そこには足さずこのチェックの側で除く
 - **版の比較**: 当日の agent-health レポートの `tools[].version` と `src/config/slash-commands-attestations.json` の `version` を比べ、差を
   Issue 本文の「版の差」と最後の行に出す（opencode 1.x は除く）。**版の差だけでは `drift` にしない**（patch のたびに依頼が飛ぶのを防ぐ）
-- **Issue の同期**（作成者 `kewton` の open な `catalog-drift` の Issue だけを見る。CI の bot が立てた Issue は使わない）:
+- **Issue の同期**（作成者 `kewton` の open な `catalog-drift` の Issue だけを見る。以前の CI の週次 workflow（#3160 で廃止）の bot が立てた Issue は使わない）:
 
   | 判定 | open な Issue | 動作 |
   |---|---|---|
-  | drift | 無い | 新規作成（本文は `scripts/catalog-drift-report.ts` の形式。冒頭に「対応は `/catalog-reconcile` の無人実行節に従う」） |
+  | drift | 無い | 新規作成（本文は `formatTrackingIssueBody`（`check-report.ts`）の形式。冒頭に「対応は `/catalog-reconcile` の無人実行節に従う」） |
   | drift | ある | タイトルと本文を更新。タイトルの件数が動いたときだけコメント |
   | clean | ある | 「ずれ 0・検査不能なし」とコメントして close |
   | clean | 無い | 何もしない |
@@ -518,9 +624,58 @@ HTML を書けたら判定にかかわらず exit 0、引数の誤りやスク�
   agent-health で、その識別子のチェックがまだ `fail`
 - **要判断**: dispatch した Issue に未完了（PR 未作成・未マージ・verify 不合格）がある／持ち越しがある／
   develop HEAD の CI が実行中または取得できない／本日マージされた PR の一覧を取得できない
+- **製品の経路の確認（第 2 段、#3312）**: `~/.commandmate/agent-health/product/<date>.json` の最終の結果が `fail` なら **NO-GO**、
+  `unknown`・`未実施`（`not-run`）なら **要判断**、`skip` は 3 日続いたら **要判断**（要対応）。`product/` ディレクトリが無い間
+  （第 2 段を導入していない間）は判定に入れない
 - **GO**: 上のどれにも当たらない
 
 判定の理由はどの判定でも箇条書きで出す。判定に影響しない事実（前回リリース時の audit 値が無い、マージ後の agent-health が
 まだ走っていない修正など）は「参考」に出す。次の一手は GO なら `/release`、NO-GO なら直すもの、要判断なら決めること。
 
 orchestrate が途中で止まった日でも、手で実行すればその時点の状態で HTML が出る。
+
+## 製品の経路の確認（第 2 段、専用ユーザー、Issue #3312）
+
+07:00 の日次確認（第 1 段）は CLI を私設の tmux で起動して画面と hook を確かめるが、CommandMate のサーバーの経路
+（送る → hook の受信 → 状態 → `wait` → 返答 → 履歴）は通らない。第 2 段は、その経路を毎朝、**専用の macOS ユーザー**
+（例: `cmcheck`）で通す。設計は #3312 の設計書（第 6 版・第 7 版）。
+
+**まだ導入していないこと:** 専用ユーザーの作成と認証、launchd（監督役 07:15・期限の番人 07:52）の設定、場面（1 ターン・
+履歴・Auto-Yes・ログ）、漏れの判定（本番のログを数える部分）、利用者の側の取り込み役。今あるのは、下の仕組みとテストだけ。
+
+### 仕組み
+
+- **監督役** `scripts/agent-health/product/supervisor.sh`（専用ユーザーで実行）。順序は必ず
+  **排他 → 回収 → 安全確認 → 実行 → 後始末 → 確定**
+  - 排他: `$CM_PRODUCT_RUN_DIR/supervisor.lock`（`run-lock.sh` の共通のロックとは別）。2 つ目の監督役は exit 75 で何もしない
+  - 回収: 閉じていない前回までの台帳の資源を、資源ごとの本人確認のうえで止める。開始が遅れた日（`late-start`、既定 07:25 より後）も行う
+  - 安全確認: 回収で `unknown` が残っていない・ポートが 3000 でなく空いている・期限前。`run-server.sh up --own-home` の後、
+    `.commandmate/uat-own-home.yaml` の隔離の検査を動いているサーバーに対して実行する
+  - 実行: `CM_PRODUCT_STAGE_CMD`（場面は後の作業）を自分のプロセスグループで実行し、既定 07:45 に止める
+    （exit 0 = pass、3 = skip、それ以外 = fail、期限で止めたら unknown）
+  - 後始末: `run-server.sh down` の後、その run の台帳を回収する
+  - 確定: 実行の結果を `CM_PRODUCT_PUBLISH_DIR`（既定 `/Users/Shared/commandmate-check`）の `product-<date>.json` に公開する
+- **台帳** `$CM_PRODUCT_RUN_DIR/ledger/<run id>.json`（一時ファイル → `rename`）。資源を作る**前に** `planned`、作った直後に
+  `acquired`（pid・起動時刻 `ps -o lstart`・識別の情報）を書く。本人確認は、サーバー = pid・起動時刻・環境の `CM_DB_PATH`、
+  私設 tmux = ソケットのパスとその持ち主の uid、実行役 = pid・起動時刻・プロセスグループ。`planned` だけの資源は run id を含む名前
+  （run のディレクトリの `CM_DB_PATH`、ソケットのディレクトリの `run-dir`、実行役の引数 `cmcheck-product-stage-<run id>`）で探す。
+  合わないものは止めず `unknown` にし、その日は実行しない（pid の再利用で別のプロセスを止めない）
+- **期限の番人** `scripts/agent-health/product/deadline-guard.sh`: 監督役が生きていてもいなくても、その日の閉じていない台帳を回収し、
+  結果を `reclaim.by = deadline-guard` で公開する。期限（既定 07:50）を過ぎて生きている監督役は、台帳の pid と起動時刻が合えば止める。
+  期限の前なら何もしない（exit 75）
+- **実行の結果**（`src/lib/agent-health/product-result.ts`）: 日付・run id・SHA・開始と終了・段ごとの結果・後始末・回収・`late-start`・
+  利用量。認証の情報・プロンプトの本文・返答は載せない。公開は原子的（一時ファイル → `rename`）、`0644`、書き出し先や
+  ファイルが symlink なら拒否
+- **最終の結果**（`src/lib/agent-health/product-judgement.ts`、利用者の側）: 実行の結果と漏れの判定から、どれかが `fail` → `fail`、
+  どれかが `unknown` → `unknown`、JSON が無い・古い・run id や SHA が合わない → `not-run`（未実施）、skip は理由つきで `skip`、
+  全部 `pass` → `pass`。`~/.commandmate/agent-health/product/<date>.json` に置くと、リリース判断レポートが読む
+
+| 環境変数 | 既定 | 意味 |
+|---|---|---|
+| `CM_PRODUCT_RUN_DIR` | （必須） | 監督役のロック・台帳・run の置き場（専用ユーザーの HOME の下） |
+| `CM_PRODUCT_STAGE_CMD` | なし（実行は skip） | 実行の段のコマンド |
+| `CM_PRODUCT_PORT` | `3029` | run のサーバーのポート（3000 は拒否） |
+| `CM_PRODUCT_LATE_START` / `CM_PRODUCT_STOP_AT` / `CM_PRODUCT_FINAL_AT` | `07:25` / `07:45` / `07:50` | `HH:MM`（今日）か `@<epoch>` |
+| `CM_PRODUCT_PUBLISH_DIR` | `/Users/Shared/commandmate-check` | 実行の結果の公開先 |
+| `CM_UAT_SOCK_BASE` / `CM_RUN_LOCK_DIR` | `$CM_PRODUCT_RUN_DIR/sock` / `$CM_PRODUCT_RUN_DIR/run.lock` | 私設 tmux のソケットと `run-lock.sh` のロック |
+

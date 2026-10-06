@@ -6,6 +6,14 @@
  * grow `ICLITool` either — every hand-written `ICLITool` in the test suite would
  * stop type-checking. So the route calls this one function, which lives inside
  * the CLITool gateway and is therefore allowed to reach the transport.
+ *
+ * Issue #3290: this function finds the session by NAME and sends. Whether the
+ * session is this server's is not decided here — it takes no worktree path to
+ * compare `#{session_path}` with — so the caller has to have asked
+ * `checkSessionOwnership` first, as the route does. A caller that skips it types
+ * into whichever server owns the name;
+ * `tests/unit/guards/worktree-route-session-ownership-3290.test.ts` fails a
+ * worktree route that does.
  */
 
 import { CLIToolManager } from './manager';

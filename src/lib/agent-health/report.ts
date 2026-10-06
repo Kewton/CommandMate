@@ -14,7 +14,7 @@ import {
   type AgentHealthCheck,
   type AgentHealthReport,
   type AgentHealthState,
-  type AgentHealthTool,
+  type AgentHealthReportTool,
   type AgentHealthToolResult,
 } from './types';
 
@@ -64,7 +64,7 @@ export function sortChecks(checks: readonly AgentHealthCheck[]): AgentHealthChec
 }
 
 export function buildToolResult(input: {
-  tool: AgentHealthTool;
+  tool: AgentHealthReportTool;
   version: string | null;
   previousVersion: string | null;
   checks: readonly AgentHealthCheck[];
@@ -84,7 +84,7 @@ export function buildToolResult(input: {
 /** The previous version of `tool`, or null when the state has none. */
 export function previousVersionOf(
   state: AgentHealthState | null,
-  tool: AgentHealthTool
+  tool: AgentHealthReportTool
 ): string | null {
   const value = state?.versions?.[tool];
   return typeof value === 'string' && value !== '' ? value : null;
@@ -99,7 +99,7 @@ export function nextState(
   previous: AgentHealthState | null,
   tools: readonly AgentHealthToolResult[]
 ): AgentHealthState {
-  const versions: Partial<Record<AgentHealthTool, string>> = { ...(previous?.versions ?? {}) };
+  const versions: Partial<Record<AgentHealthReportTool, string>> = { ...(previous?.versions ?? {}) };
   for (const result of tools) {
     if (result.version !== null) versions[result.tool] = result.version;
   }
@@ -114,9 +114,9 @@ export function parseState(text: string | null): AgentHealthState | null {
     if (typeof parsed !== 'object' || parsed === null) return null;
     const versions = (parsed as { versions?: unknown }).versions;
     if (typeof versions !== 'object' || versions === null || Array.isArray(versions)) return null;
-    const clean: Partial<Record<AgentHealthTool, string>> = {};
+    const clean: Partial<Record<AgentHealthReportTool, string>> = {};
     for (const [key, value] of Object.entries(versions)) {
-      if (typeof value === 'string') clean[key as AgentHealthTool] = value;
+      if (typeof value === 'string') clean[key as AgentHealthReportTool] = value;
     }
     return { versions: clean };
   } catch {

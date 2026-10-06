@@ -74,8 +74,8 @@
  * tab-swipe gesture.
  */
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Cpu, MessageSquare, StickyNote, TerminalSquare, Wrench } from 'lucide-react';
+import { memo, useCallback, useEffect, useMemo, useRef } from 'react';
+import { Cpu, StickyNote } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
 import { TerminalDisplay } from '@/components/worktree/TerminalDisplay';
 import { TerminalEscapeHatch } from '@/components/worktree/TerminalEscapeHatch';
@@ -90,7 +90,11 @@ import {
   hasOpenCodeSidebarObstruction,
 } from '@/components/worktree/OpencodeSidebarNotice';
 import { OpencodeQuickKeys } from '@/components/worktree/OpencodeQuickKeys';
-import { ChatSurface, type ChatSurfaceLiveState } from '@/components/worktree/ChatSurface';
+import {
+  ChatSurface,
+  isChatCardSelectionListOpen,
+  type ChatSurfaceLiveState,
+} from '@/components/worktree/ChatSurface';
 // Issue #2427: the session note's storage-facing half lives with the PC split
 // header — one hook, one editor, one IME guard — so the phone and the desktop
 // cannot drift into two behaviours for one field. See that file's "Session
@@ -98,20 +102,14 @@ import { ChatSurface, type ChatSurfaceLiveState } from '@/components/worktree/Ch
 // threaded as a prop, which is the same wall `useCachedAgentModelLabel` below
 // hits and solves the same way.
 import {
-  SESSION_NOTE_OPEN_EVENT,
-  SessionNoteInput,
-  useSessionNote,
   type SessionNoteValue,
 } from '@/components/worktree/TerminalSplitPane';
 import { formatSessionNoteTimestamp } from '@/lib/date-utils';
+import { useChatSurfaceLiveState } from '@/hooks/useChatSurfaceLiveState';
 import { useTerminalPanePolling } from '@/hooks/useTerminalPanePolling';
 import { useSplitMessages } from '@/hooks/useSplitMessages';
-import { usePendingMessages, type OptimisticSendOptions } from '@/hooks/usePendingMessages';
-import {
-  useConnectivity,
-  isServerConfirmedReachable,
-  isConnectionKnownDown,
-} from '@/hooks/useConnectivity';
+import { type OptimisticSendOptions } from '@/hooks/usePendingMessages';
+import { useOptimisticPaneMessages, useDiscardPending } from '@/hooks/useOptimisticPaneMessages';
 import {
   useChatComposerInsert,
   useChatOptimisticSend,
@@ -121,24 +119,29 @@ import { useChatFileLinkScope } from '@/lib/chat/chat-file-link-scope';
 import { useChatToolActivityPreference } from '@/lib/chat/chat-tool-activity';
 import {
   buildModelByInstance,
-  formatAgentModelLabel,
-  formatAgentSessionTooltip,
-  formatAgentSessionUsage,
 } from '@/components/worktree/WorktreeDetailSubComponents';
-import { useRealtimeListener } from '@/hooks/useRealtimeConnection';
 import { useSpecialKeys } from '@/hooks/useSpecialKeys';
 import { useOptionalWorktreesCacheContext } from '@/components/providers/WorktreesCacheProvider';
-import { MODEL_CHANGED_EVENT_TYPE, type ModelChangedEvent, type RealtimeEvent } from '@/lib/realtime/types';
+import {
+  MODEL_CHANGE_HIGHLIGHT_MS,
+  useRecentModelChange,
+  type RecentModelChange,
+} from '@/components/worktree/MobileTerminalTabModelChange';
+import {
+  MobileSessionNoteEditor,
+  useMobileSessionNoteEditor,
+} from '@/components/worktree/MobileTerminalTabSessionNote';
+import { MobileSurfaceModeToggle } from '@/components/worktree/MobileSurfaceModeToggle';
+
+export { MODEL_CHANGE_HIGHLIGHT_MS };
 import { OPENCODE_LEADER_KEY } from '@/types/terminal-keys';
 import { NAV_KEY_REFRESH_DELAY_MS } from '@/config/ui-feedback-config';
 import { worktreeApi } from '@/lib/api-client';
 import { getTerminalDisplayCompaction } from '@/config/terminal-display-compaction';
-import {
-  getMobileSurfaceModeStorageKey,
-  resolveSurfaceMode,
-  writeSurfaceMode,
-} from '@/config/surface-mode-config';
-import { DEFAULT_SURFACE_MODE, type SurfaceMode } from '@/types/ui-state';
+import { getMobileSurfaceModeStorageKey } from '@/config/surface-mode-config';
+import { useSurfaceMode } from '@/hooks/useSurfaceMode';
+import { buildPaneSessionLabels } from '@/components/worktree/pane-session-labels';
+import type { SurfaceMode } from '@/types/ui-state';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 
 export interface MobileTerminalTabProps {
@@ -169,22 +172,6 @@ export interface MobileTerminalTabProps {
    */
   directInputOpen?: boolean;
 }
-
-/**
- * Issue #2193: the two segments of the surface control, in render order. Same
- * shape (and same reason for holding i18n KEYS rather than labels) as
- * `SURFACE_MODE_SEGMENTS` in `TerminalSplitPane`; kept separate because the
- * phone's control is a full-width labelled segmented control while PC's is a
- * pair of icon buttons in a crowded header row.
- */
-const MOBILE_SURFACE_SEGMENTS: readonly {
-  mode: SurfaceMode;
-  labelKey: string;
-  icon: typeof TerminalSquare;
-}[] = [
-  { mode: 'terminal', labelKey: 'surfaceMode.terminal', icon: TerminalSquare },
-  { mode: 'chat', labelKey: 'surfaceMode.chat', icon: MessageSquare },
-] as const;
 
 /**
  * Issue #2823: where both search bars start on the phone — 64px below the top
@@ -229,22 +216,6 @@ function useCachedAgentModelLabel(worktreeId: string, instanceId: string): strin
 }
 
 /**
- * How long the session row stays amber after a model change (Issue #2357).
- *
- * Five minutes, measured from the change's own timestamp rather than from
- * when the frame arrived, so a phone that reconnects late shows the notice
- * for the remainder of the same window rather than for a fresh one.
- */
-export const MODEL_CHANGE_HIGHLIGHT_MS = 5 * 60_000;
-
-/** A model change this tab has heard about and not yet dismissed. */
-interface RecentModelChange {
-  from: string;
-  to: string;
-  at: number;
-}
-
-/**
  * The keys that open opencode's model picker (Issue #2357).
  *
  * opencode has no `/model` — its picker is the `ctrl+x m` leader chord, the
@@ -256,22 +227,6 @@ const OPENCODE_MODEL_PICKER_KEYS: readonly string[] = [OPENCODE_LEADER_KEY, 'm']
 
 /** The slash command every non-opencode tool opens its picker with. */
 const MODEL_PICKER_COMMAND = '/model';
-
-/**
- * Whether a `model_changed` frame is about THIS tab's instance.
- *
- * `instance` is always resolved on the wire (`instanceId ?? cliToolId`), so
- * the comparison is against this tab's resolved id and nothing else.
- */
-function isModelChangeForInstance(
-  event: RealtimeEvent,
-  worktreeId: string,
-  instanceId: string
-): event is ModelChangedEvent {
-  if (event.type !== MODEL_CHANGED_EVENT_TYPE) return false;
-  const evt = event as Partial<ModelChangedEvent>;
-  return evt.worktreeId === worktreeId && evt.instance === instanceId;
-}
 
 /**
  * The phone's session row (Issue #2357).
@@ -474,41 +429,15 @@ const MobileChatSurface = memo(function MobileChatSurface({
     instanceId,
   });
 
-  // Issue #2213: the same optimistic layer PC has had since #1121, wired the same
-  // way (`TerminalSplitPaneContent`) — the send is `worktreeApi.sendMessage` and
-  // `onSent` refetches so the bubble reconciles promptly rather than waiting for
-  // the next poll. The push from #2195 usually beats that refetch; both land on
-  // the same row id, and `usePendingMessages` consumes one echo per bubble.
-  const sendMessageFn = useCallback(
-    (content: string, options: OptimisticSendOptions) =>
-      worktreeApi.sendMessage(worktreeId, content, options),
-    [worktreeId],
-  );
-  // Issue #2503: the phone is the surface this is actually for. The same verdict
-  // MobileConnectionBanner shows (#2501) decides whether a send that could not
-  // get out is "送信待ち" or a failure — and, on the way back, triggers exactly
-  // one automatic resend of what is still waiting. Read through the two
-  // evidence-only helpers rather than the banner's verdict: holding a failure
-  // back needs proof the network is gone, not merely a socket that is closed.
-  const connectivity = useConnectivity();
-  const pendingConnectivity = useMemo(
-    () => ({
-      offline: isConnectionKnownDown(connectivity.signals),
-      reachable: isServerConfirmedReachable(connectivity.signals),
-    }),
-    [connectivity.signals],
-  );
   const {
     messages,
     sendOptimistic,
     retry: retryPending,
     discard: discardPending,
-  } = usePendingMessages({
+  } = useOptimisticPaneMessages({
     worktreeId,
     serverMessages,
-    sendFn: sendMessageFn,
     onSent: refresh,
-    connectivity: pendingConnectivity,
   });
 
   // Publish the send for the docked composer. Released on unmount, i.e. the
@@ -525,13 +454,7 @@ const MobileChatSurface = memo(function MobileChatSurface({
   // dropping it — PC does this through `onHistoryInsertToMessage`; here the
   // screen's own insert callback arrives over the same context.
   const insertToComposer = useChatComposerInsert();
-  const handleDiscardPending = useCallback(
-    (tempId: string) => {
-      const content = discardPending(tempId);
-      if (content) insertToComposer(content);
-    },
-    [discardPending, insertToComposer],
-  );
+  const handleDiscardPending = useDiscardPending(discardPending, insertToComposer);
 
   return (
     <ChatSurface
@@ -620,24 +543,11 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
   // opencode agent). Null for every pane whose tool reports no model, and null
   // means the row is not rendered at all.
   const modelByInstanceLabel = useCachedAgentModelLabel(worktreeId, resolvedInstanceId);
-  const worktreesCache = useOptionalWorktreesCacheContext();
-  const sessionModelLabel = formatAgentModelLabel(
-    modelByInstanceLabel,
-    null,
-    agentSession.session?.agent
-  );
-  const sessionUsage = formatAgentSessionUsage(
-    agentSession.session,
-    agentSession.context,
-    t,
-    locale
-  );
-  const sessionUsageDetail = formatAgentSessionTooltip(
-    agentSession.session,
-    agentSession.context,
-    t,
-    locale
-  );
+  const {
+    model: sessionModelLabel,
+    usage: sessionUsage,
+    usageDetail: sessionUsageDetail,
+  } = buildPaneSessionLabels(modelByInstanceLabel, agentSession, t, locale);
 
   // --------------------------------------------------------------------------
   // The session note (Issue #2427)
@@ -648,65 +558,17 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
   // `WorktreeDetailRefactored` and therefore knows neither the worktree nor the
   // active instance — it raises a window event and this listener, which holds
   // both, answers it. Exactly the arrangement the terminal search already uses.
-  const { note: sessionNote, save: saveSessionNote } = useSessionNote(
-    worktreeId,
-    resolvedInstanceId
-  );
-  const [noteEditing, setNoteEditing] = useState(false);
-  useEffect(() => {
-    const open = () => setNoteEditing(true);
-    window.addEventListener(SESSION_NOTE_OPEN_EVENT, open);
-    return () => window.removeEventListener(SESSION_NOTE_OPEN_EVENT, open);
-  }, []);
-  // A different session is a different memo.
-  useEffect(() => {
-    setNoteEditing(false);
-  }, [worktreeId, resolvedInstanceId]);
-  const openNoteEditor = useCallback(() => setNoteEditing(true), []);
-  const closeNoteEditor = useCallback(() => setNoteEditing(false), []);
-  const commitNote = useCallback(
-    (text: string) => {
-      saveSessionNote(text);
-      setNoteEditing(false);
-    },
-    [saveSessionNote]
-  );
+  const { sessionNote, noteEditing, openNoteEditor, closeNoteEditor, commitNote } =
+    useMobileSessionNoteEditor(worktreeId, resolvedInstanceId);
   // Issue #2427: the row now has two reasons to exist. It was model-only, and a
   // note on a pane whose tool reports no model would otherwise have nowhere to
   // land — which is the pane the operator most needs a label on.
   const showSessionRow = sessionModelLabel !== null || sessionNote !== null;
 
-  // The most recent `model_changed` frame for THIS instance, held until it is
-  // dismissed or `MODEL_CHANGE_HIGHLIGHT_MS` has passed since the change. The
-  // frame comes from the server's edge (`agent-event-state`), which already
-  // applied every suppression rule; this tab compares nothing itself.
-  const [recentModelChange, setRecentModelChange] = useState<RecentModelChange | null>(null);
-  useRealtimeListener((event) => {
-    if (!isModelChangeForInstance(event, worktreeId, resolvedInstanceId)) return;
-    setRecentModelChange({ from: event.from, to: event.to, at: event.at });
-    // The label reads the list cache, which polls slowly while a socket is
-    // up; the frame IS the news that it is stale, so the list is re-read now
-    // rather than the row saying "changed to B" beside a label still reading A.
-    void worktreesCache?.refresh();
-  });
-  // Expire the highlight relative to the change's own timestamp. Keyed on `at`
-  // so a second change restarts the window, and cleared on unmount so a timer
-  // cannot fire into a torn-down tree.
-  useEffect(() => {
-    if (recentModelChange === null) return;
-    const remaining = recentModelChange.at + MODEL_CHANGE_HIGHLIGHT_MS - Date.now();
-    if (remaining <= 0) {
-      setRecentModelChange(null);
-      return;
-    }
-    const timer = setTimeout(() => setRecentModelChange(null), remaining);
-    return () => clearTimeout(timer);
-  }, [recentModelChange]);
-  const dismissModelChange = useCallback(() => setRecentModelChange(null), []);
-  // A different instance is a different session row: drop the notice with it.
-  useEffect(() => {
-    setRecentModelChange(null);
-  }, [worktreeId, resolvedInstanceId]);
+  const { recentModelChange, dismissModelChange } = useRecentModelChange(
+    worktreeId,
+    resolvedInstanceId
+  );
 
   // Opening the picker. opencode's is a chord through `/special-keys` (the
   // same request its quick-keys `models` button posts); every other tool takes
@@ -749,18 +611,7 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
   // `?view=` / localStorage resolution in an effect — same shape as
   // `useActivityBarState`, so there is no hydration mismatch.
   const surfaceStorageKey = getMobileSurfaceModeStorageKey(worktreeId);
-  const [surfaceMode, setSurfaceMode] = useState<SurfaceMode>(DEFAULT_SURFACE_MODE);
-  useEffect(() => {
-    setSurfaceMode(resolveSurfaceMode(surfaceStorageKey));
-  }, [surfaceStorageKey]);
-
-  const handleSurfaceModeChange = useCallback(
-    (mode: SurfaceMode) => {
-      setSurfaceMode(mode);
-      writeSurfaceMode(surfaceStorageKey, mode);
-    },
-    [surfaceStorageKey],
-  );
+  const { surfaceMode, handleSurfaceModeChange } = useSurfaceMode(surfaceStorageKey);
 
   // Issue #2799: the pill is drawn unavailable while direct input is open, and
   // the tap is refused here too — `aria-disabled` alone does not stop it.
@@ -850,43 +701,12 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
   // `prompt` object the mobile prompt sheet is driven by, so the banner's "a wait
   // nobody could read" case and the sheet cannot disagree about one frame — see
   // `ChatSurfaceLiveState` for why `isPromptWaiting` is `prompt.visible`.
-  const chatLiveState: ChatSurfaceLiveState = useMemo(
-    () => ({
-      isRunning: terminal.isRunning,
-      // Issue #2445: same copy, same reason as the PC split — the phone must
-      // not read the hook's initial `isRunning: false` as a dead session.
-      attaching: terminal.attaching,
-      // Issue #2238: same pair, same reason as the PC split — this is the field
-      // the in-flight bubble is gated on, and `isRunning` is not.
-      sessionStatus: terminal.sessionStatus,
-      isThinking: terminal.isThinking,
-      isPromptWaiting: prompt.visible,
-      promptData: prompt.data,
-      isSelectionListActive: terminal.isSelectionListActive,
-      isPagerActive: terminal.isPagerActive,
-      // Issue #2373: same copy, same reason as the PC split — without it the
-      // surface only ever sees `undefined` here and re-derives the verdict from
-      // the frame it was handed, which is a different slice of bytes than the
-      // one the server judged.
-      isDismissablePanelActive: terminal.isDismissablePanelActive,
-      isUnclassifiedActive: terminal.isUnclassifiedActive,
-      // Issue #3179: same copy, same reason as the PC split.
-      startingSince: terminal.startingSince,
-    }),
-    [
-      terminal.isRunning,
-      terminal.attaching,
-      terminal.sessionStatus,
-      terminal.isThinking,
-      terminal.isSelectionListActive,
-      terminal.isPagerActive,
-      terminal.isDismissablePanelActive,
-      terminal.isUnclassifiedActive,
-      terminal.startingSince,
-      prompt.visible,
-      prompt.data,
-    ],
-  );
+  const chatLiveState: ChatSurfaceLiveState = useChatSurfaceLiveState(terminal, prompt);
+  // Issue #3336: the same gate as PC's footer — while the chat card is open on a
+  // selection list it carries opencode's model chords itself, so the strip
+  // below the tab would draw them a second time. The terminal surface keeps it.
+  const hideOpencodeQuickKeys =
+    surfaceMode === 'chat' && isChatCardSelectionListOpen(chatLiveState, terminal.output, cliToolId);
 
   return (
     <div className="relative flex flex-col h-full min-h-0">
@@ -918,76 +738,14 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
           the terminal underneath is a permanently dark island, but this is
           chrome sitting on top of it, and it has to read on the chat surface
           too. */}
-      <div
-        role="group"
-        aria-label={t('surfaceMode.groupLabelMobile')}
-        data-testid="mobile-surface-mode-toggle"
-        // Issue #2357: `top-9` (36px = the 28px session row + the 8px gap the
-        // pill already keeps) while the row is showing, so the pill sits over
-        // the output as before rather than over the row.
-        className={`pointer-events-none absolute right-2 z-30 flex items-center gap-0.5 rounded-full border border-border bg-surface-2/95 p-0.5 shadow-lg backdrop-blur ${
-          showSessionRow ? 'top-9' : 'top-2'
-        }`}
-      >
-        {MOBILE_SURFACE_SEGMENTS.map(({ mode, labelKey, icon: Icon }) => {
-          const active = surfaceMode === mode;
-          const label = t(labelKey);
-          return (
-            <button
-              key={mode}
-              type="button"
-              onClick={() => handleSurfaceToggle(mode)}
-              aria-pressed={active}
-              aria-label={label}
-              aria-disabled={directInputOpen ? true : undefined}
-              title={label}
-              data-testid={`mobile-surface-mode-${mode}`}
-              className={`pointer-events-auto flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full transition-colors touch-manipulation ${
-                active
-                  ? 'bg-accent-500/20 text-accent-600 dark:text-accent-400'
-                  : 'text-muted-foreground'
-              } ${directInputOpen ? 'opacity-40' : ''}`}
-            >
-              <Icon size={18} aria-hidden="true" />
-            </button>
-          );
-        })}
-        {/* Issue #2821: the tool-activity toggle, on the chat surface only (the
-            terminal has nothing to fold). The transcript's own copy sits under
-            this pill, so it is withdrawn there (`hideCornerControls`) and drawn
-            here instead. The rule keeps it visibly apart from the two surface
-            segments, whose "selected" tint is close to its "on" tint. Not
-            subject to `directInputOpen`: direct input only opens on the
-            terminal surface, where this button is not drawn. */}
-        {surfaceMode === 'chat' ? (
-          <>
-            <span aria-hidden="true" className="mx-0.5 h-6 w-px bg-border" />
-            <button
-              type="button"
-              onClick={toggleToolActivity}
-              aria-pressed={showToolActivity}
-              aria-label={
-                showToolActivity
-                  ? t('chatTranscript.toolActivity.hide')
-                  : t('chatTranscript.toolActivity.show')
-              }
-              title={
-                showToolActivity
-                  ? t('chatTranscript.toolActivity.hide')
-                  : t('chatTranscript.toolActivity.show')
-              }
-              data-testid="mobile-chat-tool-activity-toggle"
-              className={`pointer-events-auto flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full transition-colors touch-manipulation ${
-                showToolActivity
-                  ? 'bg-accent-500/15 text-accent-700 dark:text-accent-400'
-                  : 'text-muted-foreground'
-              }`}
-            >
-              <Wrench size={18} aria-hidden="true" />
-            </button>
-          </>
-        ) : null}
-      </div>
+      <MobileSurfaceModeToggle
+        surfaceMode={surfaceMode}
+        showSessionRow={showSessionRow}
+        directInputOpen={directInputOpen}
+        onSurfaceToggle={handleSurfaceToggle}
+        showToolActivity={showToolActivity}
+        onToggleToolActivity={toggleToolActivity}
+      />
       {/* Issue #2106: the measured surface. The wrapper is what the flex column
           hands to TerminalDisplay (which is `h-full`), so its rect IS the
           terminal's visible height -- the number the collapse has to move.
@@ -1024,24 +782,12 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
           session row when there is one and at the tab's top edge when there is
           not, so it never covers the row it is editing. */}
       {noteEditing ? (
-        <div
-          data-testid="mobile-session-note-editor"
-          className={`absolute inset-x-2 z-40 rounded-md border border-border bg-surface p-2 shadow-lg ${
-            showSessionRow ? 'top-9' : 'top-2'
-          }`}
-        >
-          <SessionNoteInput
-            initialText={sessionNote?.text ?? ''}
-            onCommit={commitNote}
-            onCancel={closeNoteEditor}
-            ariaLabel={t('sessionNote.menuItem')}
-            placeholder={t('sessionNote.placeholder')}
-            testId="mobile-session-note-input"
-          />
-          <p className="mt-1 text-[10px] leading-tight text-muted-foreground">
-            {t('sessionNote.hint')}
-          </p>
-        </div>
+        <MobileSessionNoteEditor
+          showSessionRow={showSessionRow}
+          sessionNote={sessionNote}
+          onCommit={commitNote}
+          onCancel={closeNoteEditor}
+        />
       ) : null}
       <div ref={regionRef} className="flex-1 min-h-0 overflow-hidden" data-testid="mobile-terminal-region">
         {surfaceMode === 'chat' ? (
@@ -1110,7 +856,7 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
           every tool while the session is running, but OpencodeQuickKeys still
           returns null for anything other than opencode -- so on claude / codex /
           copilot this is an empty div exactly as it was before #2106. */}
-      {terminal.isRunning && !directInputOpen ? (
+      {terminal.isRunning && !directInputOpen && !hideOpencodeQuickKeys ? (
         <div className="shrink-0 px-2 pt-1" data-testid="mobile-quick-keys-slot">
           <OpencodeQuickKeys
             worktreeId={worktreeId}

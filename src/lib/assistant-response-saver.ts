@@ -35,6 +35,7 @@ import {
   cleanScrollbackResponse,
 } from './response-cleaner';
 import { usesAlternateScreen, type CLIToolType } from './cli-tools/types';
+import { findCodexChromeStart } from './detection/cli-patterns';
 import type { ChatMessage } from '@/types/models';
 import { createLogger } from '@/lib/logger';
 
@@ -127,6 +128,37 @@ function countCapturedLines(output: string): number {
 }
 
 /**
+ * Does a codex cursor start at or below the composer? (Issue #3335)
+ *
+ * Nothing at or below codex's composer is a reply: it is the composer, the
+ * status bar and `? for shortcuts`. On the inline layout (0.15x) a cursor
+ * rarely lands there, because the next turn is printed over the composer band
+ * and the composer moves down. On 0.160.0 it is where the cursor always is.
+ *
+ * codex 0.160.0 draws in the alternate screen: the capture is the pane, 1000
+ * rows, whatever the transcript holds, with the composer pinned to row 996.
+ * The row count this module stores is therefore NOT a read cursor for it — it
+ * settles at 999 or 1000 after the first read (here, or in
+ * {@link advanceCapturedLineForTranscriptTurn}) and never grows again, and
+ * the reply is drawn above it. The screen read does not take codex's reply
+ * from such a pane; the reply reaches History from codex's own transcript
+ * (`hooks/sources/codex/history.ts`). What this rule stops is the flush
+ * saving the chrome past the parked cursor as the reply — before #3335 a
+ * cursor of 999 saved `? for shortcuts`, and 997 or 998 the status bar.
+ *
+ * The composer is located by its SGR attributes (#2310), on the whole pane.
+ * A pane it cannot be found on keeps the reading it had.
+ *
+ * @param lines - The whole capture, ANSI intact
+ * @param cursor - The row the flush would start reading at
+ * @returns True when the rows from `cursor` down are all codex chrome
+ */
+export function isCodexCursorAtOrBelowComposer(lines: readonly string[], cursor: number): boolean {
+  const chromeStart = findCodexChromeStart(lines);
+  return chromeStart >= 0 && cursor >= chromeStart;
+}
+
+/**
  * Time offset (in milliseconds) for assistant message timestamp
  * Ensures assistant response appears before user message in chronological order
  * @constant
@@ -153,9 +185,16 @@ const ASSISTANT_TIMESTAMP_OFFSET_MS: number = 1;
  *
  * @param output - Raw output from CLI tool
  * @param cliToolId - CLI tool identifier
+ * @param paneLines - The whole capture `output` was sliced from, for the
+ *   startup-screen rule of {@link cleanScrollbackResponse} (Issue #3293). Only
+ *   that cleaner reads it; omitted, no tool's cleaning changes
  * @returns Cleaned response content
  */
-export function cleanCliResponse(output: string, cliToolId: CLIToolType): string {
+export function cleanCliResponse(
+  output: string,
+  cliToolId: CLIToolType,
+  paneLines?: readonly string[]
+): string {
   switch (cliToolId) {
     case 'claude':
       return cleanClaudeResponse(output);
@@ -169,7 +208,7 @@ export function cleanCliResponse(output: string, cliToolId: CLIToolType): string
     case 'command-code':
     case 'antigravity':
     case 'vibe-local':
-      return cleanScrollbackResponse(output, cliToolId);
+      return cleanScrollbackResponse(output, cliToolId, paneLines);
     default:
       return output.trim();
   }
@@ -376,7 +415,32 @@ export async function savePendingAssistantResponse(
     // 8. Clean the response.
     // Only scrollback-rendering tools reach this point (Issue #1292), so the
     // tool-specific cleaners in cleanCliResponse cover every remaining case.
-    const cleanedResponse = cleanCliResponse(newOutput, cliToolId);
+    //
+    // Issue #3293: the pane goes with the rows. On the first send of a session
+    // the cursor is 0 and "everything past it" is the tool's startup screen —
+    // measured on vibe-local as `response:saved {"fromLine":0,"toLine":1001}`
+    // 30 ms after `started-vibe-local-session`, and on codex as an assistant
+    // row holding the version, the cwd and the logo. A pane no message has been
+    // echoed on yet holds no reply, and that is a fact about the pane: the rows
+    // past the cursor ordinarily carry no echo either. It cleans to '', so the
+    // branch below moves the cursor exactly as the banner save used to.
+    //
+    // Not on a capture that came back at the size it was asked for: the window
+    // has clipped it, and the echo of a turn longer than the window is no longer
+    // in it. This is `isCaptureWindowSaturated` (#1670) against this module's
+    // own window, written out because `lib/tmux` is not imported from here
+    // (#1922).
+    const captureClipped = lines.length >= SESSION_OUTPUT_BUFFER_SIZE;
+    //
+    // Issue #3335: on codex, rows from the composer down are chrome, never a
+    // reply — and on 0.160.0 (alternate screen) that is where the cursor
+    // parks for the life of the session. Read as nothing, so the branch below
+    // moves the cursor as an empty clean would. See isCodexCursorAtOrBelowComposer.
+    const pastCodexComposer =
+      cliToolId === 'codex' && isCodexCursorAtOrBelowComposer(lines, effectiveLastCapturedLine);
+    const cleanedResponse = pastCodexComposer
+      ? ''
+      : cleanCliResponse(newOutput, cliToolId, captureClipped ? undefined : lines);
 
     // 9. Check if cleaned response is empty
     if (!cleanedResponse || cleanedResponse.trim() === '') {

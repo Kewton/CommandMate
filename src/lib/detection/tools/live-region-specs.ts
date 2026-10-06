@@ -5,7 +5,7 @@
  * `normalizeFrame` reads it, and the detector modules import `normalizeFrame`,
  * so going through `registry.ts` would close an import cycle. Each detector
  * declares the same object as its `ToolDetectorSpec.liveRegion`, and
- * `detector-contract.test.ts` holds the two to identity.
+ * `live-region-markers.test.ts` holds the two to identity.
  *
  * `gemini` and `vibe-local` have no measured frames and no declaration: their
  * frames carry the whole-frame region, which is the pre-#3183 reading.

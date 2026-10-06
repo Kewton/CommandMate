@@ -47,6 +47,7 @@ import {
   type HealthReportDigest,
   type OrchestrateTask,
   type PullRequestInfo,
+  type ReadinessFacts,
   type WorkflowRunInfo,
 } from '@/lib/agent-health/release-readiness';
 import {
@@ -54,6 +55,11 @@ import {
   type ReleaseReadinessModel,
 } from '@/lib/agent-health/release-readiness-html';
 import { reportDateJst } from '@/lib/agent-health/report';
+import {
+  countProductSkipStreak,
+  parseProductFinalResult,
+  type ProductFinalResult,
+} from '@/lib/agent-health/product-judgement';
 
 export interface ExecResult {
   status: number | null;
@@ -263,6 +269,34 @@ function loadHealthReports(reportsDir: string, date: string): HealthReportDigest
   return digests;
 }
 
+/**
+ * The product-path check's final result for `date` (stage 2, Issue #3312), from
+ * `<state dir>/product/<date>.json`. null while stage 2 is not set up (no
+ * `product/` directory), so the verdict is then unchanged; a missing or
+ * unreadable file for the day in an existing directory is `not-run`.
+ */
+function loadProductFact(productDir: string, date: string): ReadinessFacts['product'] {
+  let isDir = false;
+  try {
+    isDir = fs.statSync(productDir).isDirectory();
+  } catch {
+    isDir = false;
+  }
+  if (!isDir) return null;
+  const results: ProductFinalResult[] = [];
+  for (const name of listDir(productDir)) {
+    const parsed = /^(\d{4}-\d{2}-\d{2})\.json$/.exec(name);
+    if (!parsed || parsed[1] > date) continue;
+    const result = parseProductFinalResult(readText(path.join(productDir, name)));
+    if (result && result.date === parsed[1]) results.push(result);
+  }
+  const today = results.find((result) => result.date === date);
+  if (!today) {
+    return { status: 'not-run', reasons: [`product/${date}.json が無い、または読めない`], skipStreakDays: 0 };
+  }
+  return { status: today.status, reasons: today.reasons, skipStreakDays: countProductSkipStreak(results, date) };
+}
+
 function loadMetrics(metricsDir: string, date: string, releaseDate: string | null) {
   const dates = listDir(metricsDir)
     .filter((name) => /^\d{4}-\d{2}-\d{2}\.json$/.test(name))
@@ -426,6 +460,7 @@ export async function main(argv: readonly string[], overrides: Partial<ReleaseRe
     dispatched,
     prLookupOk: prs !== null,
     deferred: dispatch?.deferred ?? [],
+    product: loadProductFact(path.join(stateDir, 'product'), date),
   });
 
   const findingsText = options.findings ? readText(options.findings) : null;

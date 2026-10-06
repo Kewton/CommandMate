@@ -34,7 +34,6 @@ import { promisify } from 'util';
 import { access, constants } from 'fs/promises';
 import { createLogger } from '@/lib/logger';
 import { assertSessionNotForeign } from '@/lib/cli-tools/session-ownership';
-import { CLAUDE_RESTART_DELAY_MS } from '@/config/cli-tool-timing-config';
 import { resolveSessionName } from '@/lib/cli-tools/session-name';
 import { CLAUDE_CLI_TOOL_ID } from '@/lib/hooks/sources';
 import { shellQuote } from '@/lib/hooks/hook-settings-generator';
@@ -409,7 +408,7 @@ async function getClaudePath(): Promise<string> {
         cachedClaudePath = envClaudePath;
         return cachedClaudePath;
       } catch {
-        logger.info('claudepath-is-not-executable:envclaudepa');
+        logger.info('claude-path-env-not-executable');
         // Fall through to fallback paths
       }
     }
@@ -532,7 +531,7 @@ export async function isSessionHealthy(sessionName: string): Promise<HealthCheck
 async function ensureHealthySession(sessionName: string): Promise<boolean> {
   const result = await isSessionHealthy(sessionName);
   if (!result.healthy) {
-    logger.warn('session-sessionname-unhealthy:resultreas');
+    logger.warn('claude-session-unhealthy');
     await killSession(sessionName);
     return false;
   }
@@ -561,15 +560,6 @@ export interface ClaudeSessionOptions {
    * durable alternative is a per-instance setting, which this is not.
    */
   model?: string;
-}
-
-/**
- * Claude session state
- */
-export interface ClaudeSessionState {
-  sessionName: string;
-  isRunning: boolean;
-  lastActivity: Date;
 }
 
 /**
@@ -642,39 +632,10 @@ export async function isClaudeRunning(worktreeId: string, instanceId?: string): 
   // S2-F001: await + extract .healthy to maintain boolean return type
   const result = await isSessionHealthy(sessionName);
   if (!result.healthy) {
-    logger.warn('session-sessionname-unhealthy:resultreas');
+    logger.warn('claude-session-unhealthy');
     return false;
   }
   return true;
-}
-
-/**
- * Get Claude session state
- *
- * C-S3-002: This function checks tmux session existence via hasSession() but
- * does NOT perform health checks (unlike isClaudeRunning()). This is intentional:
- * getClaudeSessionState() is a lightweight status query for UI display purposes,
- * while isClaudeRunning() performs the more expensive health check for operational
- * decisions (e.g., whether to recreate a session).
- *
- * If health-aware state is needed, callers should use isClaudeRunning() instead
- * or call ensureHealthySession() separately.
- *
- * @param worktreeId - Worktree ID
- * @returns Session state information (existence-based, not health-based)
- */
-export async function getClaudeSessionState(
-  worktreeId: string,
-  instanceId?: string
-): Promise<ClaudeSessionState> {
-  const sessionName = getSessionName(worktreeId, instanceId);
-  const isRunning = await hasSession(sessionName);
-
-  return {
-    sessionName,
-    isRunning,
-    lastActivity: new Date(),
-  };
 }
 
 /**
@@ -746,7 +707,7 @@ export async function startClaudeSession(
     const healthy = await ensureHealthySession(sessionName);
     if (healthy) {
       await reconcileSessionGeometry(sessionName);
-      logger.info('claude-session-sessionname');
+      logger.info('claude-session-exists');
       return;
     }
     // If not healthy, ensureHealthySession() already killed the session.
@@ -772,18 +733,6 @@ export async function startClaudeSession(
   beginAgentSession({ worktreeId, cliToolId: CLAUDE_CLI_TOOL_ID, instanceId });
 
   try {
-    // Create tmux session. Scrollback depth comes from the shared
-    // TMUX_HISTORY_LIMIT default (Issue #1624) — do not re-hardcode it here.
-    // (Claude itself renders in the alternate screen and keeps history_size at 0,
-    // so the limit is inert for this tool; it still applies to the bare shell.)
-    await createSession({
-      sessionName,
-      workingDirectory: worktreePath,
-    });
-
-    // SF-S2-003: Sanitize environment after createSession, before launching Claude CLI
-    await sanitizeSessionEnvironment(sessionName);
-
     // Get Claude CLI path dynamically
     const claudePath = await getClaudePath();
 
@@ -804,6 +753,11 @@ export async function startClaudeSession(
     // Issue #1759: which config file gets written, and whether one is written
     // at all, belongs to the tool's `AgentEventSource` (S3/S4). Claude's
     // delegates to `buildClaudeLaunchCommand`, unchanged.
+    //
+    // Issue #3312: built BEFORE the tmux session, as codex's is. Under
+    // `CM_UAT_ISOLATION=own-home` the plan throws `UatIsolationLaunchRefusedError`
+    // (wrong user / HOME / write target, or a settings file it could not
+    // write), and a refused launch must not leave an empty pane behind.
     const baseLaunchCommand = buildAgentLaunchCommandLine({
       target: { worktreeId, cliToolId: CLAUDE_CLI_TOOL_ID, instanceId },
       executablePath: claudePath,
@@ -816,6 +770,18 @@ export async function startClaudeSession(
     // and the operator's `~/.claude/settings.json` (measured on 2.1.278).
     const launchCommand =
       model === undefined ? baseLaunchCommand : `${baseLaunchCommand} --model ${shellQuote(model)}`;
+
+    // Create tmux session. Scrollback depth comes from the shared
+    // TMUX_HISTORY_LIMIT default (Issue #1624) — do not re-hardcode it here.
+    // (Claude itself renders in the alternate screen and keeps history_size at 0,
+    // so the limit is inert for this tool; it still applies to the bare shell.)
+    await createSession({
+      sessionName,
+      workingDirectory: worktreePath,
+    });
+
+    // SF-S2-003: Sanitize environment after createSession, before launching Claude CLI
+    await sanitizeSessionEnvironment(sessionName);
 
     // Start Claude CLI in interactive mode using dynamically resolved path
     await sendKeys(sessionName, withLaunchScreenCleared(launchCommand), true);
@@ -855,7 +821,7 @@ export async function startClaudeSession(
       if (!trustDialogOpen && CLAUDE_PROMPT_PATTERN.test(cleanOutput)) {
         // Wait for stability after prompt detection (CONS-007, DOC-001)
         await new Promise((resolve) => setTimeout(resolve, CLAUDE_POST_PROMPT_DELAY));
-        logger.info('claude-initialized-in');
+        logger.info('claude-initialized');
         initialized = true;
         break;
       }
@@ -898,7 +864,7 @@ export async function startClaudeSession(
       throw new SessionStartTimeoutError('Claude Code', sessionName, CLAUDE_INIT_TIMEOUT);
     }
 
-    logger.info('started-claude-session:sessionname');
+    logger.info('started-claude-session');
   } catch (error: unknown) {
     // MF-S2-002: Clear cached path on all failures (harmless for non-path failures)
     clearCachedClaudePath();
@@ -1001,32 +967,4 @@ export async function stopClaudeSession(worktreeId: string, instanceId?: string)
   // state about it.
   discardAgentEventState(worktreeId, 'claude', instanceId);
   return stopped;
-}
-
-/**
- * Restart a Claude session
- *
- * @param options - Session options
- *
- * @example
- * ```typescript
- * await restartClaudeSession({
- *   worktreeId: 'feature-foo',
- *   worktreePath: '/path/to/worktree',
- * });
- * ```
- */
-export async function restartClaudeSession(
-  options: ClaudeSessionOptions
-): Promise<void> {
-  const { worktreeId, instanceId } = options;
-
-  // Stop existing session
-  await stopClaudeSession(worktreeId, instanceId);
-
-  // Wait a moment before restarting
-  await new Promise((resolve) => setTimeout(resolve, CLAUDE_RESTART_DELAY_MS));
-
-  // Start new session
-  await startClaudeSession(options);
 }

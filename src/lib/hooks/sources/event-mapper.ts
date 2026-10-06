@@ -25,6 +25,7 @@
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { MAX_EVENT_DETAIL_LENGTH, type AgentEventType } from '@/lib/hooks/agent-event-types';
 import type { NormalizedAgentEvent } from './types';
+import { getOrInitGlobal } from '../../global-state';
 
 /** What a mapper may fill in beyond the word itself. */
 export interface EventMapping {
@@ -115,7 +116,7 @@ export interface UnknownEventTally {
 /** Cap on remembered distinct names, so an unbounded vocabulary cannot grow this. */
 export const MAX_UNKNOWN_EVENT_NAMES = 32;
 
-const unknownEvents = (globalThis.__agentSourceUnknownEvents ??= new Map<
+const unknownEvents = getOrInitGlobal('__agentSourceUnknownEvents', () => new Map<
   string,
   UnknownEventTally
 >());

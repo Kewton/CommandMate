@@ -5,7 +5,8 @@
  * polling via `useTerminalPanePolling` and renders the full footer:
  *   - AutoYesToggle (Issue #740; per-split, keyed by this split's cliToolId so
  *     each CLI toggles auto-yes independently)
- *   - NavigationButtons (when CLI is in selection-list state, e.g. OpenCode)
+ *   - SelectionListKeys (when CLI is in selection-list state, e.g. OpenCode:
+ *     the arrow pad plus whatever that frame offers, Issue #3305)
  *   - OpencodeQuickKeys (opencode only, Issue #2046; collapsible since #2131)
  *   - PromptPanel (when /current-output reports isPromptWaiting)
  *   - MessageInput (always; carries draft persistence per splitIndex)
@@ -62,17 +63,12 @@ import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from '
 import { Keyboard, X } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
 import type { AgentInstance, CLIToolType } from '@/lib/cli-tools/types';
-import { isAnswerablePromptData, type LivePromptData } from '@/types/models';
+import { isAnswerablePromptData } from '@/types/models';
 import { TerminalSplitPane } from '@/components/worktree/TerminalSplitPane';
-import {
-  formatAgentModelLabel,
-  formatAgentSessionTooltip,
-  formatAgentSessionUsage,
-} from '@/components/worktree/WorktreeDetailSubComponents';
 import type { AgentSessionSnapshot } from '@/types/agent-session';
 import { TerminalDisplay } from '@/components/worktree/TerminalDisplay';
 import { getTerminalDisplayCompaction } from '@/config/terminal-display-compaction';
-import { NavigationButtons } from '@/components/worktree/NavigationButtons';
+import { SelectionListKeys } from '@/components/worktree/SelectionListKeys';
 import { TerminalEscapeHatch } from '@/components/worktree/TerminalEscapeHatch';
 import { OpencodeQuickKeys } from '@/components/worktree/OpencodeQuickKeys';
 import { AgentModeControl } from '@/components/worktree/AgentModeControl';
@@ -83,33 +79,31 @@ import {
   hasOpenCodeSidebarObstruction,
 } from '@/components/worktree/OpencodeSidebarNotice';
 import { PromptPanel } from '@/components/worktree/PromptPanel';
+import { useTerminalSplitHidden } from './TerminalSplitHiddenContext';
 import { usePromptStuckCounter } from '@/hooks/usePromptStuckCounter';
 import { MessageInput } from '@/components/worktree/MessageInput';
 import { OpencodeTurnDiffPanel } from '@/components/worktree/OpencodeTurnDiffPanel';
 import { HistoryPane, splitHistorySlotId } from '@/components/worktree/HistoryPane';
-import { ChatSurface } from '@/components/worktree/ChatSurface';
+import { ChatSurface, isChatCardSelectionListOpen } from '@/components/worktree/ChatSurface';
+import { useChatSurfaceLiveState } from '@/hooks/useChatSurfaceLiveState';
 import { PaneResizer } from '@/components/worktree/PaneResizer';
 import { AutoYesToggle } from '@/components/worktree/AutoYesToggle';
-import {
-  useTerminalPanePolling,
-  type PanePromptState,
-} from '@/hooks/useTerminalPanePolling';
+import { useTerminalPanePolling } from '@/hooks/useTerminalPanePolling';
 import { useSplitMessages } from '@/hooks/useSplitMessages';
-import { usePendingMessages, type OptimisticSendOptions } from '@/hooks/usePendingMessages';
-import {
-  useConnectivity,
-  isServerConfirmedReachable,
-  isConnectionKnownDown,
-} from '@/hooks/useConnectivity';
+import { useOptimisticPaneMessages, useDiscardPending } from '@/hooks/useOptimisticPaneMessages';
 import { useHistoryPaneState } from '@/hooks/useHistoryPaneState';
 import { useComposerMaxHeight } from '@/hooks/useComposerHeight';
 import {
   COMPOSER_PANE_BODY_MIN_HEIGHT_PX,
   composerHeightScopeForSplit,
 } from '@/config/composer-height';
-import { worktreeApi } from '@/lib/api-client';
-import { buildPromptResponseBody } from '@/lib/prompt-response-body-builder';
-import { readSelectionListShape } from '@/lib/detection/selection-shape';
+import { showsPromptUnderAutoYes } from '@/components/worktree/prompt-answer';
+import { buildDecisionRespondBody, buildPromptResponseBody } from '@/lib/prompt-response-body-builder';
+import {
+  PROMPT_RESPONSE_NOTICES,
+  readPromptResponseOutcome,
+  type PromptResponseOutcome,
+} from '@/lib/prompt-response-outcome';
 import { withToolDecisionLabels } from '@/components/worktree/prompt-decision-id';
 import { derivePromptView } from '@/lib/session/prompt-view';
 import { getCliToolDisplayName, getInstanceLabel } from '@/lib/cli-tools/types';
@@ -119,12 +113,9 @@ import type {
   HistoryPaneProps,
   SessionKillTarget,
 } from '@/types/terminal-split-pane';
-import { DEFAULT_SURFACE_MODE, type SurfaceMode } from '@/types/ui-state';
-import {
-  getSplitSurfaceModeStorageKey,
-  resolveSurfaceMode,
-  writeSurfaceMode,
-} from '@/config/surface-mode-config';
+import { getSplitSurfaceModeStorageKey } from '@/config/surface-mode-config';
+import { useSurfaceMode } from '@/hooks/useSurfaceMode';
+import { buildPaneSessionLabels } from '@/components/worktree/pane-session-labels';
 import { Tooltip } from '@/components/common/Tooltip';
 import { SessionStartingNotice } from '@/components/worktree/SessionStartingNotice';
 import {
@@ -174,8 +165,16 @@ export const DIRECT_INPUT_LABEL_MIN_CONTAINER_PX = 520;
  * Restated per surface rather than shared, like {@link optionTakesTypedText}
  * next door: these are 'use client' modules and suites mock them apart.
  */
-function isMultiSelectPrompt(promptData: LivePromptData | null | undefined): boolean {
-  return promptData?.type === 'multiple_choice' && promptData.multiSelect === true;
+function splitOwnsKeyEvent(event: KeyboardEvent, splitIndex: number): boolean {
+  const target = event.target instanceof Element ? event.target : null;
+  const owner = target?.closest('[data-split-index]');
+  if (owner) {
+    if (Number(owner.getAttribute('data-split-index')) !== splitIndex) return false;
+  } else {
+    if (splitIndex !== 0) return false;
+    if (target?.closest('input, textarea, select, [contenteditable="true"]')) return false;
+  }
+  return true;
 }
 
 export interface TerminalSplitPaneContentProps extends TerminalSplitPaneCoreProps {
@@ -331,21 +330,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
     () => getSplitSurfaceModeStorageKey(worktreeId, splitIndex),
     [worktreeId, splitIndex],
   );
-  // SSR-safe first render: the deterministic default, replaced by the effect
-  // below once `?view=` / localStorage can actually be read (same shape as
-  // `useActivityBarState`, so there is no hydration mismatch to chase).
-  const [surfaceMode, setSurfaceModeState] = useState<SurfaceMode>(DEFAULT_SURFACE_MODE);
-  useEffect(() => {
-    setSurfaceModeState(resolveSurfaceMode(surfaceStorageKey));
-  }, [surfaceStorageKey]);
-
-  const handleSurfaceModeChange = useCallback(
-    (mode: SurfaceMode) => {
-      setSurfaceModeState(mode);
-      writeSurfaceMode(surfaceStorageKey, mode);
-    },
-    [surfaceStorageKey],
-  );
+  const { surfaceMode, handleSurfaceModeChange } = useSurfaceMode(surfaceStorageKey);
 
   // Read by the keydown listener so the listener itself never has to be torn
   // down and rebuilt on a mode change.
@@ -370,14 +355,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       if (!event.metaKey && !event.ctrlKey) return;
       if (event.key.toLowerCase() !== 'm') return;
 
-      const target = event.target instanceof Element ? event.target : null;
-      const owner = target?.closest('[data-split-index]');
-      if (owner) {
-        if (Number(owner.getAttribute('data-split-index')) !== splitIndex) return;
-      } else {
-        if (splitIndex !== 0) return;
-        if (target?.closest('input, textarea, select, [contenteditable="true"]')) return;
-      }
+      if (!splitOwnsKeyEvent(event, splitIndex)) return;
 
       event.preventDefault();
       handleSurfaceModeChange(surfaceModeRef.current === 'chat' ? 'terminal' : 'chat');
@@ -413,14 +391,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       if (!event.metaKey && !event.ctrlKey) return;
       if (event.key !== 'Enter') return;
 
-      const target = event.target instanceof Element ? event.target : null;
-      const owner = target?.closest('[data-split-index]');
-      if (owner) {
-        if (Number(owner.getAttribute('data-split-index')) !== splitIndex) return;
-      } else {
-        if (splitIndex !== 0) return;
-        if (target?.closest('input, textarea, select, [contenteditable="true"]')) return;
-      }
+      if (!splitOwnsKeyEvent(event, splitIndex)) return;
 
       const toggle = onToggleMaximizeRef.current;
       if (!toggle) return;
@@ -492,17 +463,35 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
     setDirectInputOpen(false);
   }, []);
 
+  // Issue #2755: Auto-Yes hides the answer panel, because the poller is
+  // supposed to be answering instead — and on a CHECKBOX question it is
+  // measured never to answer at all (`resolveBaseAnswer` returns null: a digit
+  // ticks a box and the confirm is a separate row, so a default is half an
+  // answer). Hiding the panel there left a screen nobody could answer, by hand
+  // or automatically, until the operator turned Auto-Yes off. So a multi-select
+  // prompt is shown whatever Auto-Yes is doing; nothing is auto-sent either way.
+  // Issue #3397: and so is a screen CommandMate cannot read
+  // (`prompt.answerable === false`): Auto-Yes sends it at most one Enter, and
+  // the panel is where that — or the direct-input link when it did not take —
+  // is said. See `showsPromptUnderAutoYes`.
+  const showPrompt =
+    prompt.visible && !isStarting
+    && (!autoYesEnabled || showsPromptUnderAutoYes(prompt.data, prompt.answerable));
+
   // Issue #2869: the same prompt window shown again after two Sends in a row
   // (refused, or delivered to a frame that did not react) points the user at
-  // direct input. Counted on the window `PromptPanel` is actually drawing — the
-  // same condition as `showPrompt` below, restated because the handler that
-  // calls `markSubmitted` is declared above it.
+  // direct input. Counted only on a window the user can see: `showPrompt`
+  // declared above (before the handler that calls `markSubmitted`) and not
+  // hidden behind another split's maximize (#3332). A hidden split still
+  // DRAWS its panel (under `display: none`) so the answer being edited in it
+  // survives the round trip; it just counts nothing.
+  const hiddenByMaximize = useTerminalSplitHidden();
+  const countPrompt = showPrompt && !hiddenByMaximize;
   const {
     showStuckHint: showPromptStuckHint,
     markSubmitted: markPromptSubmitted,
   } = usePromptStuckCounter({
-    promptData:
-      prompt.visible && (!autoYesEnabled || isMultiSelectPrompt(prompt.data)) ? prompt.data : null,
+    promptData: countPrompt ? prompt.data : null,
     targetKey: `${worktreeId}:${cliToolId}:${resolvedInstanceId}`,
   });
 
@@ -528,42 +517,15 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
     enabled: !disabled,
   });
 
-  // Issue #1121: optimistic-UI layer. Merges a just-sent message into this
-  // split's history as a pending bubble (< 100ms) before the send resolves, then
-  // reconciles it against the server echo (no duplicate) or surfaces a
-  // retry/discard error on failure. onSent refetches so reconciliation is prompt.
-  const sendMessageFn = useCallback(
-    (content: string, options: OptimisticSendOptions) =>
-      worktreeApi.sendMessage(worktreeId, content, options),
-    [worktreeId],
-  );
-  // Issue #2503: the same connection verdict the header pill renders (#2501),
-  // read here so a send made in a tunnel is held as "waiting" and resent once
-  // the server answers again, instead of failing after 30s of no network.
-  // Both halves read the *signals* rather than `status`, because both decide
-  // to act: `isServerConfirmedReachable` rather than `isOnline`, so a desktop
-  // carried by polling with the WebSocket down still counts as able to send;
-  // `isConnectionKnownDown` rather than `isOffline`, so a send is only held back
-  // from failing when something actually measured the network as gone.
-  const connectivity = useConnectivity();
-  const pendingConnectivity = useMemo(
-    () => ({
-      offline: isConnectionKnownDown(connectivity.signals),
-      reachable: isServerConfirmedReachable(connectivity.signals),
-    }),
-    [connectivity.signals],
-  );
   const {
     messages: mergedMessages,
     sendOptimistic,
     retry: retryPending,
     discard: discardPending,
-  } = usePendingMessages({
+  } = useOptimisticPaneMessages({
     worktreeId,
     serverMessages: splitMessages,
-    sendFn: sendMessageFn,
     onSent: refreshSplitMessages,
-    connectivity: pendingConnectivity,
   });
 
   // Issue #744: History visible/width. MVP keeps this common across splits
@@ -615,18 +577,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
     [refresh, refreshSplitMessages, onMessageSent],
   );
 
-  // Issue #1121: discarding a failed optimistic message removes its bubble and
-  // restores the text to the composer (via the existing insert-to-message
-  // pathway) so the user can edit and re-send.
-  const handleDiscardPending = useCallback(
-    (tempId: string) => {
-      const content = discardPending(tempId);
-      if (content) {
-        onHistoryInsertToMessage?.(content);
-      }
-    },
-    [discardPending, onHistoryInsertToMessage],
-  );
+  const handleDiscardPending = useDiscardPending(discardPending, onHistoryInsertToMessage);
 
   const handlePromptRespond = useCallback(
     async (answer: string, decisionId?: string | null): Promise<void> => {
@@ -634,6 +585,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       // next display can tell whether it changed anything.
       markPromptSubmitted();
       setPromptAnswering(true);
+      let outcome: PromptResponseOutcome;
       try {
         // Issue #1932: an approval the agent named by id goes to `/respond`,
         // which delivers the verdict over the agent's own API. It cannot go to
@@ -648,16 +600,9 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
         // for it sends no promptType at all, which is the truthful answer to
         // "what kind of prompt is this?" when nobody could read the dialog.
         const requestBody = decisionId
-          ? {
-              decisionId,
-              answer,
-              cliTool: cliToolId,
-              // Same rule as buildPromptResponseBody: the primary instance is
-              // named by the tool id server-side, so sending it would be noise.
-              ...(resolvedInstanceId && resolvedInstanceId !== cliToolId
-                ? { instanceId: resolvedInstanceId }
-                : {}),
-            }
+          ? // Same rule as buildPromptResponseBody: the primary instance is
+            // named by the tool id server-side, so sending it would be noise.
+            buildDecisionRespondBody(decisionId, answer, cliToolId, resolvedInstanceId)
           : buildPromptResponseBody(
               answer,
               cliToolId,
@@ -677,24 +622,28 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
             body: JSON.stringify(requestBody),
           },
         );
-        if (!response.ok) {
-          throw new Error(`Failed to send prompt response: ${response.status}`);
-        }
+        outcome = await readPromptResponseOutcome(response);
+      } catch (err) {
+        // The request got no reply at all.
+        console.error('[TerminalSplitPaneContent] prompt response error:', err);
+        outcome = 'failed';
+      }
+      try {
         // Issue #2468: a refusal is a 200 `{ success: false, reason }` —
         // `prompt_no_longer_active` when the re-captured pane no longer reads as
         // the dialog — so `ok` alone is not "answered". Clearing the card on a
         // refusal hid a dialog that was still open: the next poll put it
         // straight back, and nothing ever said why the answer went nowhere.
-        const result = (await response.json().catch(() => null)) as { success?: unknown } | null;
-        if (result?.success === false) {
-          showToast?.(t('promptResponse.refused'), 'warning');
-          await refresh();
-          return;
+        // Issue #3292: the same holds for a reply that is not 2xx and for no
+        // reply at all, which used to reach the console and nobody else. Only
+        // `answered` clears the card; everything else says so and leaves it.
+        if (outcome === 'answered') {
+          clearPrompt();
+        } else {
+          const notice = PROMPT_RESPONSE_NOTICES[outcome];
+          showToast?.(t(notice.messageKey), notice.type);
         }
-        clearPrompt();
         await refresh();
-      } catch (err) {
-        console.error('[TerminalSplitPaneContent] prompt response error:', err);
       } finally {
         setPromptAnswering(false);
       }
@@ -725,13 +674,6 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   const isSelectionListFrame = terminal.isSelectionListActive;
   // Issue #3179: and never while the agent is launching.
   const showNav = isSelectionListFrame && !isChatSurface && !isStarting;
-  // The same rule as ChatSurface (Issue #2793): on Command Code's plan
-  // review, `Enter` runs the focused action, and the pad cannot show focus.
-  // Read off `terminal.output`, the frame the chat surface's card reads (#2809).
-  const hideNavEnterKey = useMemo(
-    () => showNav && readSelectionListShape(terminal.output).offersPlanApprove === true,
-    [showNav, terminal.output],
-  );
   // Issue #2406: "this pane's agent is generating right now". The merged status
   // verdict is the only field that answers that question -- `terminal.isRunning`
   // has meant "a tmux session exists and is healthy" since Issue #2238, so it is
@@ -745,15 +687,6 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   // detector's floor, not an observation of a turn, so the toast does not call
   // the session busy — the same answer the phone gives since Issue #2775.
   const isGenerating = terminal.sessionStatus === 'running' && !cliStatusUnclassified;
-  // Issue #2755: Auto-Yes hides the answer panel, because the poller is
-  // supposed to be answering instead — and on a CHECKBOX question it is
-  // measured never to answer at all (`resolveBaseAnswer` returns null: a digit
-  // ticks a box and the confirm is a separate row, so a default is half an
-  // answer). Hiding the panel there left a screen nobody could answer, by hand
-  // or automatically, until the operator turned Auto-Yes off. So a multi-select
-  // prompt is shown whatever Auto-Yes is doing; nothing is auto-sent either way.
-  const showPrompt =
-    prompt.visible && !isStarting && (!autoYesEnabled || isMultiSelectPrompt(prompt.data));
   // Issue #1932: the approval this pane's dialog addresses, when the payload
   // names one. Null for every scraper-read prompt and for every source that
   // publishes no per-decision id, which is what keeps those on the pane path.
@@ -761,6 +694,9 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   // Issue #3184: read off the shared view, whose `decisionId` is non-null
   // exactly when the payload is answered over the agent's API — an id with
   // nothing addressable behind it no longer reaches the panel as one.
+  // Read off the view, unlike the phone sheet's read of the payload's own id
+  // (WorktreeDetailRefactored): the panel takes the id as a prop and shows what
+  // the view says (PromptPanel `panelPromptView`). The two agree today.
   const promptDecisionId = derivePromptView(prompt.data)?.decisionId ?? null;
   // Issue #2945: the approval verdicts in the tool's own words (OpenCode V2
   // draws `Always allow`); the numbers they send are unchanged.
@@ -777,6 +713,9 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   // hidden during normal generation ('thinking_indicator') and at an idle input prompt
   // ('ready'), so Enter/'q' can never reach the composer.
   // Issue #2254 added the `!isChatSurface` term; the other three are unchanged.
+  // `!isSelectionListFrame` is redundant here: the shared hook
+  // (useTerminalPanePolling) already drops selection-list frames first, which is
+  // why MobileTerminalTab carries no such term.
   const showEscapeHatch =
     terminal.isUnclassifiedActive &&
     !isSelectionListFrame &&
@@ -922,6 +861,13 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   // banner's "a wait nobody could read" case is therefore a visible prompt whose
   // payload is #1708's / #1725's degraded record, which ChatSurface reads
   // itself with `derivePromptView` (Issue #3184).
+  const chatLiveState = useChatSurfaceLiveState(terminal, prompt);
+  // Issue #3336: while the chat card is open on a selection list it carries
+  // opencode's model chords (`OpencodeModelKeys`, inside `SelectionListKeys`),
+  // so the footer's `OpencodeQuickKeys` would be the second copy of the same
+  // keys. The terminal surface has no card and keeps the strip as it was.
+  const hideOpencodeQuickKeys =
+    isChatSurface && isChatCardSelectionListOpen(chatLiveState, terminal.output, cliToolId);
   const chatSurfaceSlot = useMemo(
     () => (
       <div
@@ -936,32 +882,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
             cliToolId={cliToolId}
             instanceId={resolvedInstanceId}
             history={historyPaneProps}
-            live={{
-              isRunning: terminal.isRunning,
-              // Issue #2445: without this the surface cannot tell "tmux says
-              // there is no session" from the hook's own pre-first-poll default.
-              attaching: terminal.attaching,
-              // Issue #2238: the generating verdict the surface actually gates
-              // its in-flight bubble on. `isRunning` above stays because the
-              // surface still reports on the session; it is no longer mistaken
-              // for the turn.
-              sessionStatus: terminal.sessionStatus,
-              isThinking: terminal.isThinking,
-              isPromptWaiting: prompt.visible,
-              promptData: prompt.data,
-              isSelectionListActive: terminal.isSelectionListActive,
-              isPagerActive: terminal.isPagerActive,
-              // Issue #2373: the field #2369 added and did not copy across. The
-              // surface falls back to reading `frame` when this is absent, so the
-              // card was already correct — but that fallback reads the raw
-              // capture's last 15 rows while the server read `frame.lastLines`,
-              // and an explicit `false` from the server could never win because it
-              // never arrived. Copied here so the server's answer is the answer.
-              isDismissablePanelActive: terminal.isDismissablePanelActive,
-              isUnclassifiedActive: terminal.isUnclassifiedActive,
-              // Issue #3179: the surface draws the starting strip from this.
-              startingSince: terminal.startingSince,
-            }}
+            live={chatLiveState}
             onSurfaceModeChange={handleSurfaceModeChange}
             // Issue #2254: the dialog card's frame. `terminal.output`, not
             // `terminal.realtimeSnippet` — see `ChatSurfaceProps.frame` for the
@@ -981,19 +902,9 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       worktreeId,
       cliToolId,
       resolvedInstanceId,
-      terminal.isRunning,
-      terminal.attaching,
-      terminal.sessionStatus,
-      terminal.isThinking,
-      terminal.isSelectionListActive,
-      terminal.isPagerActive,
-      terminal.isDismissablePanelActive,
-      terminal.isUnclassifiedActive,
-      terminal.startingSince,
+      chatLiveState,
       terminal.output,
       refresh,
-      prompt.visible,
-      prompt.data,
       handleSurfaceModeChange,
     ],
   );
@@ -1104,14 +1015,21 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       // footer costs the terminal. The footer is the `flex-shrink-0` half of the
       // pane's flex column; whatever it grows by, TerminalDisplay loses.
       <div ref={setFooterEl} className="space-y-2" data-testid={`split-footer-${splitIndex}`}>
+        {/* Issue #3305: the same part the chat surface's card mounts, handed
+            the same frame (`terminal.output`, #2809), so the two surfaces
+            cannot offer different controls for one selection list. What it
+            draws under the arrow pad — number keys, claude's "this session
+            only" / "set as default", no `Enter` on a plan review (#2793) — is
+            `resolveSelectionListOps`' decision, not this footer's. */}
         {showNav ? (
-          <NavigationButtons
+          <SelectionListKeys
             worktreeId={worktreeId}
             cliToolId={cliToolId}
             instanceId={resolvedInstanceId}
             onKeysSent={refresh}
+            frame={terminal.output}
+            surface="terminal"
             showPagerKeys={terminal.isPagerActive}
-            hideEnterKey={hideNavEnterKey}
           />
         ) : null}
         {showEscapeHatch ? (
@@ -1150,6 +1068,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
             showStuckHint={showPromptStuckHint}
             onSwitchToDirectInput={terminal.isRunning ? handleSwitchToDirectInput : undefined}
             answerable={prompt.answerable}
+            autoYesEnterSent={prompt.autoYesEnterSent}
           />
         ) : null}
         {/* Issue #2046: opencode only. The chords opencode's TUI is driven by
@@ -1170,7 +1089,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
             because a 1-split pane still keeps 456px of terminal with the strip
             showing. Measured in
             `tests/e2e/desktop-opencode-quick-keys-2131.spec.ts`. */}
-        {terminal.isRunning ? (
+        {terminal.isRunning && !hideOpencodeQuickKeys ? (
           <OpencodeQuickKeys
             worktreeId={worktreeId}
             cliToolId={cliToolId}
@@ -1358,17 +1277,19 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
     ),
     [
       showNav,
-      // Issue #2809: the pad's Enter gate on a plan review.
-      hideNavEnterKey,
       showPrompt,
       showEscapeHatch,
       showUnsentComposerBar,
       // Issue #2095: the notice's gate, and the frame it re-reads to render.
+      // Issue #3305: `terminal.output` is also the frame the selection-list
+      // controls are decided from.
       showOpencodeSidebarNotice,
       terminal.realtimeSnippet,
       terminal.output,
       // Issue #2046: the opencode quick-key strip's session gate.
       agentSession.session,
+      // Issue #3336: and its chat-card gate.
+      hideOpencodeQuickKeys,
       terminal.composerText,
       // Issue #2592: the mode control's value and its four gate inputs.
       // `terminal.isSelectionListActive` / `isUnclassifiedActive` reach the memo
@@ -1393,6 +1314,8 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       prompt.answering,
       // Issue #2870: PromptPanel's `answerable`.
       prompt.answerable,
+      // Issue #3397: PromptPanel's `autoYesEnterSent`.
+      prompt.autoYesEnterSent,
       handlePromptRespond,
       handlePromptDismiss,
       // Issue #2869: the stuck hint under the panel, and its link.
@@ -1484,22 +1407,11 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   // re-enters the shared formatter to put the persona in front of it, so the
   // pane header and the header pill's tooltip cannot word it differently. Null
   // agent (every tool but opencode) returns the string unchanged.
-  const paneAgentModel = formatAgentModelLabel(agentModel, null, agentSession.session?.agent);
-  // Issue #2042: `$0.03 · 8.5K (1%)` — the same three values, in the same order,
-  // that opencode's own footer prints for the session this pane is attached to.
-  const paneAgentUsage = formatAgentSessionUsage(
-    agentSession.session,
-    agentSession.context,
-    t,
-    locale
-  );
-  const paneAgentUsageDetail = formatAgentSessionTooltip(
-    agentSession.session,
-    agentSession.context,
-    t,
-    locale
-  );
-
+  const {
+    model: paneAgentModel,
+    usage: paneAgentUsage,
+    usageDetail: paneAgentUsageDetail,
+  } = buildPaneSessionLabels(agentModel, agentSession, t, locale);
   return (
     <TerminalSplitPane
       worktreeId={worktreeId}
@@ -1540,6 +1452,3 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
 });
 
 export default TerminalSplitPaneContent;
-
-// Re-export for tests that want to inspect the polled-state shape.
-export type { PanePromptState };

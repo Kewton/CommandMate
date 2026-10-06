@@ -38,6 +38,7 @@ import { codexAgentEventSource } from './codex/source';
 import { opencodeAgentEventSource } from './opencode/source';
 import { commandCodeAgentEventSource } from './command-code/source';
 import { opencodeV2AgentEventSource } from './opencode-v2/source';
+import { getOrInitGlobal } from '../../global-state';
 
 declare global {
   // eslint-disable-next-line no-var
@@ -46,10 +47,10 @@ declare global {
   var __agentEventLegacySources: Map<CLIToolType, AgentEventSource> | undefined;
 }
 
-const registered = (globalThis.__agentEventSources ??= new Map<CLIToolType, AgentEventSource>());
+const registered = getOrInitGlobal('__agentEventSources', () => new Map<CLIToolType, AgentEventSource>());
 
 /** Memoised compatibility sources, so repeated lookups return one object. */
-const legacy = (globalThis.__agentEventLegacySources ??= new Map<CLIToolType, AgentEventSource>());
+const legacy = getOrInitGlobal('__agentEventLegacySources', () => new Map<CLIToolType, AgentEventSource>());
 
 /**
  * Add or replace a tool's source.

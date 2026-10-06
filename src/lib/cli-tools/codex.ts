@@ -6,10 +6,7 @@
 import { BaseCLITool } from './base';
 import type { CLIToolType } from './types';
 import {
-  hasSession,
-  createSession,
   sendKeys,
-  killSession,
   sendSpecialKey,
   capturePane,
   getSessionWorkingDirectory,
@@ -42,22 +39,13 @@ import {
   buildAgentLaunchCommandLine,
 } from '@/lib/session/agent-session-lifecycle';
 import {
-  TUI_SESSION_CREATE_WAIT_MS,
   TUI_EXIT_WAIT_MS,
   CODEX_DIALOG_SETTLE_MS,
 } from '@/config/cli-tool-timing-config';
-import { missingToolError } from './install-hints';
 import { withLaunchScreenCleared } from '@/lib/session/launch-screen';
+import { getErrorMessage } from '@/lib/errors';
 
 const logger = createLogger('cli-tools/codex');
-
-/**
- * Extract error message from unknown error type (DRY)
- * Same pattern as claude-session.ts getErrorMessage()
- */
-function getErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
 
 /** Wait for Codex CLI to initialize after launch */
 const CODEX_INIT_WAIT_MS = 3000;
@@ -238,17 +226,6 @@ export class CodexTool extends BaseCLITool {
   readonly command = 'codex';
 
   /**
-   * Check if Codex session is running for a worktree
-   *
-   * @param worktreeId - Worktree ID
-   * @returns True if session is running
-   */
-  async isRunning(worktreeId: string, instanceId?: string): Promise<boolean> {
-    const sessionName = this.getSessionName(worktreeId, instanceId);
-    return await hasSession(sessionName);
-  }
-
-  /**
    * Start a new Codex session for a worktree
    *
    * @param worktreeId - Worktree ID
@@ -256,32 +233,22 @@ export class CodexTool extends BaseCLITool {
    */
   protected async launchSession(worktreeId: string, worktreePath: string, instanceId?: string): Promise<void> {
     // Check if Codex is installed
-    const codexAvailable = await this.isInstalled();
-    if (!codexAvailable) {
-      throw missingToolError(this);
-    }
+    await this.requireInstalled();
 
-    const sessionName = this.getSessionName(worktreeId, instanceId);
-
-    // Check if session already exists
-    const exists = await hasSession(sessionName);
-    if (exists) {
-      await this.reconcileExistingSession(sessionName, worktreePath);
-
-      // Issue #2070: this branch used to return unconditionally, and that is
-      // the second half of the reported bug. codex's own "1. Update now"
-      // replaces codex with `npm install` and exits; `Ctrl+C` twice quits it; a
-      // crash does the same. The tmux session survives all three, so `exists`
-      // stays true and the launch was skipped for a pane that had nothing but a
-      // shell prompt in it — leaving `kill-session` by hand as the only
-      // recovery. When the tool is gone we fall THROUGH and re-send the launch
-      // command into the same pane.
-      if (await this.isToolLive(sessionName, { confirm: true })) {
-        logger.info('codex-session-sessionname');
-        return;
-      }
-      logger.warn('codex-session-relaunch', { sessionName });
-    }
+    // Issue #2070: this branch used to return unconditionally, and that is
+    // the second half of the reported bug. codex's own "1. Update now"
+    // replaces codex with `npm install` and exits; `Ctrl+C` twice quits it; a
+    // crash does the same. The tmux session survives all three, so `exists`
+    // stays true and the launch was skipped for a pane that had nothing but a
+    // shell prompt in it — leaving `kill-session` by hand as the only
+    // recovery. When the tool is gone we fall THROUGH and re-send the launch
+    // command into the same pane.
+    const { sessionName, exists, live } = await this.resolveLaunchPane(worktreeId, worktreePath, instanceId, {
+      logger,
+      liveAction: 'codex-session-exists',
+      relaunchAction: 'codex-session-relaunch',
+    });
+    if (live) return;
 
     // Issue #1760: everything the previous codex process reported through this
     // (worktreeId, instanceId) belongs to a session that no longer exists, and
@@ -298,19 +265,6 @@ export class CodexTool extends BaseCLITool {
     beginAgentSession({ worktreeId, cliToolId: CODEX_CLI_TOOL_ID, instanceId });
 
     try {
-      if (!exists) {
-        // Create tmux session. Codex is inline-rendered, so its transcript lives in
-        // the pane scrollback — depth comes from the shared TMUX_HISTORY_LIMIT
-        // default (Issue #1624), do not re-hardcode it here.
-        await createSession({
-          sessionName,
-          workingDirectory: worktreePath,
-        });
-
-        // Wait a moment for the session to be created
-        await new Promise((resolve) => setTimeout(resolve, TUI_SESSION_CREATE_WAIT_MS));
-      }
-
       // Issue #1760: hand this session its correlation keys, writing codex's
       // hooks config first if it is not already there. codex has no
       // `--settings`, so the keys ride in environment assignments on the launch
@@ -319,12 +273,22 @@ export class CodexTool extends BaseCLITool {
       //
       // Falls back to the bare command on any failure and when
       // `CM_AGENT_HOOKS_INJECT=0`; a session that starts without hooks is the
-      // pre-#1760 status quo, and a session that fails to start is not.
+      // pre-#1760 status quo, and a session that fails to start is not. The one
+      // exception is UAT isolation (Issue #3360), where the plan throws instead —
+      // which is why it is built BEFORE the tmux session: a refused launch must
+      // not leave an empty pane that `isRunning()` reports as a started codex.
       const launchCommand = buildAgentLaunchCommandLine({
         target: { worktreeId, cliToolId: CODEX_CLI_TOOL_ID, instanceId },
         executablePath: this.command,
         worktreePath,
       });
+
+      if (!exists) {
+        // Create tmux session. Codex is inline-rendered, so its transcript lives in
+        // the pane scrollback — depth comes from the shared TMUX_HISTORY_LIMIT
+        // default (Issue #1624), do not re-hardcode it here.
+        await this.createLaunchPane(sessionName, worktreePath);
+      }
 
       // Issue #2068: re-send the SAME launch line into the SAME pane, for the
       // one case where a launch legitimately has to happen twice — codex's own
@@ -357,7 +321,7 @@ export class CodexTool extends BaseCLITool {
         trustHooks: shouldTrustCodexHooks(worktreePath),
       });
 
-      logger.info('started-codex-session:sessionname');
+      logger.info('started-codex-session');
     } catch (error: unknown) {
       const errorMessage = getErrorMessage(error);
       throw new Error(`Failed to start Codex session: ${errorMessage}`);
@@ -653,7 +617,7 @@ export class CodexTool extends BaseCLITool {
           // Issue #890: number-key selection confirms instantly; no trailing Enter.
           await sendKeys(sessionName, '1', false);
           trustDialogHandled = true;
-          logger.info('auto-trusted-folder-for');
+          logger.info('auto-trusted-folder-for-codex');
           await new Promise((resolve) => setTimeout(resolve, CODEX_DIALOG_SETTLE_MS));
           continue;
         }
@@ -814,7 +778,7 @@ export class CodexTool extends BaseCLITool {
       }
       await new Promise((resolve) => setTimeout(resolve, pollInterval));
     }
-    logger.info('codex-prompt-not');
+    logger.info('codex-prompt-not-detected');
     throw new Error(
       'Codex prompt not ready: timed out waiting for the input prompt before sending'
     );
@@ -829,21 +793,13 @@ export class CodexTool extends BaseCLITool {
   async sendMessage(worktreeId: string, message: string, instanceId?: string): Promise<void> {
     const sessionName = this.getSessionName(worktreeId, instanceId);
 
-    // Check if session exists
-    const exists = await hasSession(sessionName);
-    if (!exists) {
-      throw new Error(
-        `Codex session ${sessionName} does not exist. Start the session first.`
-      );
-    }
-
     // Issue #2070: the pane exists, but does the AGENT? codex's "1. Update now"
     // replaces it with `npm install` and exits, `Ctrl+C` twice quits it, a crash
     // does the same — and the send that follows used to sit in the readiness
     // wait until it timed out, leaving `kill-session` by hand as the only
     // recovery. Relaunches into the same pane when the tool is gone; costs one
     // `capture-pane` when it is not.
-    await this.relaunchIfToolExited(worktreeId, instanceId);
+    await this.requireSession('Codex', worktreeId, instanceId, { relaunch: true });
 
     try {
       // Verify Codex is at prompt state before sending
@@ -858,12 +814,16 @@ export class CodexTool extends BaseCLITool {
         // Issue #1933: the tool describes its own composer; the sender no
         // longer keys three module-level tables on the id.
         composer: this.describeComposer(),
+        // Issue #3366: codex draws fast keystrokes only when the burst ends and
+        // turns an Enter that arrives before that into a newline, so Enter
+        // waits until the composer shows the body.
+        awaitTypedBody: true,
       });
 
       // Issue #405: Invalidate cache after sending message
       invalidateCache(sessionName);
 
-      logger.info('sent-message-to-codex-session:sessionnam');
+      logger.info('sent-message-to-codex-session');
     } catch (error: unknown) {
       const errorMessage = getErrorMessage(error);
       throw new Error(`Failed to send message to Codex: ${errorMessage}`);
@@ -876,28 +836,17 @@ export class CodexTool extends BaseCLITool {
    * @param worktreeId - Worktree ID
    */
   async killSession(worktreeId: string, instanceId?: string): Promise<void> {
-    const sessionName = this.getSessionName(worktreeId, instanceId);
-
-    try {
+    await this.requestExitAndKill(worktreeId, instanceId, {
+      logger,
+      stoppedAction: 'stopped-codex-session',
       // Send Ctrl+D to exit Codex gracefully
-      const exists = await hasSession(sessionName);
-      if (exists) {
+      requestExit: async (sessionName) => {
         // Send Ctrl+D (ASCII 4)
         await sendSpecialKey(sessionName, 'C-d');
 
         // Wait a moment for Codex to exit
         await new Promise((resolve) => setTimeout(resolve, TUI_EXIT_WAIT_MS));
-      }
-
-      // Kill the tmux session
-      const killed = await killSession(sessionName);
-
-      if (killed) {
-        logger.info('stopped-codex-session:sessionname');
-      }
-    } catch (error: unknown) {
-      logger.error('session:stop-failed', { error: getErrorMessage(error) });
-      throw error;
-    }
+      },
+    });
   }
 }

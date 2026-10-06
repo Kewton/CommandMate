@@ -1,0 +1,10 @@
+Unit Tests (shard 2/4)	UNKNOWN STEP	﻿2026-09-30T06:44:55.2733119Z Current runner version: '2.337.0'
+Unit Tests (shard 2/4)	UNKNOWN STEP	2026-09-30T06:45:53.8243661Z npm error code ECONNRESET
+Unit Tests (shard 2/4)	UNKNOWN STEP	2026-09-30T06:45:53.8246165Z npm error A complete log of this run can be found in: /home/ubuntu/.npm/_logs/2026-09-30T06_45_21_800Z-debug-0.log
+Unit Tests (shard 2/4)	UNKNOWN STEP	2026-09-30T06:45:53.8905757Z ##[error]Process completed with exit code 1.
+Unit Tests	UNKNOWN STEP	﻿2026-09-30T06:51:51.2700671Z Current runner version: '2.337.0'
+Unit Tests	UNKNOWN STEP	2026-09-30T06:51:51.4056511Z ##[group]Run echo "Unit Tests shards: ${RESULT}"
+Unit Tests	UNKNOWN STEP	2026-09-30T06:51:51.4058022Z [36;1mecho "Unit Tests shards: ${RESULT}"[0m
+Unit Tests	UNKNOWN STEP	2026-09-30T06:51:51.4946143Z   RESULT: failure
+Unit Tests	UNKNOWN STEP	2026-09-30T06:51:51.5175070Z Unit Tests shards: failure
+Unit Tests	UNKNOWN STEP	2026-09-30T06:51:51.5198327Z ##[error]Process completed with exit code 1.

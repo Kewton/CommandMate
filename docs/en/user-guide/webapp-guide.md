@@ -486,7 +486,7 @@ that kind of screen directly under it. You answer it without leaving chat.
 | Kind of screen | What appears under the card |
 |------|--------------------|
 | A pager is open | Arrow keys plus PgUp / PgDn / Home / End / q |
-| A selection list is open | Arrow keys plus Enter / Esc |
+| A selection list is open | Arrow keys plus Enter / Esc. Depending on the screen, number keys or "This session only" / "Set as default" are added (see "The buttons a selection list gets" below) |
 | A screen nothing could classify | Arrows and Esc (Navigate) plus the digits 1-9, y / n and Enter |
 | Waiting, with options nobody could read | The digits 1-9, y / n and Enter |
 
@@ -494,13 +494,37 @@ that kind of screen directly under it. You answer it without leaving chat.
 currently highlighted, so on a numbered dialog an Enter meant as "no" can land as an
 approval (Issue #1681).
 
+**The buttons a selection list gets** grow with the screen that is open (Issue #2297 / #3305).
+
+- **A numbered list** (Codex's `/model`, for one) — one number key (1-9) per option, so you
+  pick by number instead of stepping there with the arrows. They are left out on a list
+  where a typed digit goes into a search box, and on a screen where pressing a number
+  commits on the spot (Claude's `/model`)
+- **Claude's `/model`** — the confirm button becomes two: **"This session only"** and
+  **"Set as default"**. "Set as default" (Enter) rewrites the default model for every session
+  you start from now on (`~/.claude/settings.json`). To change only the session in front of
+  you, press "This session only" (`s`). A note saying the same thing appears under the
+  buttons
+
+**The terminal surface gets the same buttons.** The navigation buttons above the composer on
+desktop, the ones docked above the composer on a phone, and the ones under the terminal of a
+`/sessions` tile show the same number keys and the same "This session only" / "Set as
+default". On the terminal surface the unlabelled Enter
+(↵) is not drawn while "Set as default" is — two buttons for one key are not put side by
+side. On a phone the docked buttons stay the same while a tab other than Terminal (History,
+Files, Tools, Info) is open. Number keys are counted on the dialog the card shows, so a
+numbered reply above a dialog with no numbers does not turn into number keys. For opencode,
+while a selection list is open on the chat surface, the model keys appear only on the card:
+the opencode quick-key strip under the composer is hidden until the list closes (the
+terminal surface keeps it).
+
 The "Open terminal" button **remains, as a secondary way out**. The card shows only the last
 few rows, so switch to the terminal surface from here when you need scrollback or search.
 
 While the card is up, **no control is duplicated**. The navigation buttons / Navigate pad
 above the composer on desktop, and the navigation buttons docked above the composer on a
-phone, defer to the card's copies while the chat surface is showing (on the terminal surface
-they behave exactly as before).
+phone, defer to the card's copies while the chat surface is showing (while the terminal
+surface is showing they are drawn above the composer, with the same buttons as the card).
 
 **An ordinary yes/no or numbered prompt raises neither a card nor a banner.** The answer
 panel on the input surface works as it is — the answer UI lives on the input surface rather

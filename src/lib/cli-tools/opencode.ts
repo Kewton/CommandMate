@@ -53,7 +53,6 @@ import {
 } from '@/types/terminal-keys';
 import {
   hasSession,
-  createSession,
   capturePane,
   sendKeys,
   sendSpecialKey,
@@ -72,10 +71,8 @@ import { ensureOpencodeConfig } from './opencode-config';
 import {
   OPENCODE_PANE_HEIGHT,
   OPENCODE_PANE_WIDTH,
-  OPENCODE_PANE_WIDTH_ENV,
-  OPENCODE_SIDEBAR_MIN_WIDTH,
-  resolveOpencodePaneWidth,
 } from '@/config/tmux-pane-config';
+import { resolveOpencodePaneWidthChecked } from './opencode-pane-width';
 import { execFile } from 'child_process';
 import { basename, extname } from 'path';
 import { promisify } from 'util';
@@ -118,7 +115,6 @@ import {
 } from '@/lib/session/opencode-session-store';
 import { verifyGracefulExit } from './graceful-exit';
 import {
-  TUI_SESSION_CREATE_WAIT_MS,
   TUI_TEXT_INPUT_WAIT_MS,
   OPENCODE_EXIT_WAIT_MS,
   OPENCODE_INTERRUPT_SECOND_ESCAPE_DELAY_MS,
@@ -133,21 +129,11 @@ import {
   findOpencodeSharedDataConflict,
 } from '@/lib/hooks/sources/opencode/log-diagnosis';
 import { withLaunchScreenCleared } from '@/lib/session/launch-screen';
+import { getErrorMessage } from '@/lib/errors';
 
 const logger = createLogger('cli-tools/opencode');
 
 const execFileAsync = promisify(execFile);
-
-/**
- * Extract error message from unknown error type (DRY)
- * Same pattern as claude-session.ts / codex.ts / gemini.ts / vibe-local.ts.
- * A shared version exists in src/lib/errors.ts (getErrorMessage), but CLI tool
- * modules use local copies to avoid importing the server-side error module.
- * [D1-002] Future refactoring candidate: extract to BaseCLITool or a shared util.
- */
-function getErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
 
 /** OpenCode TUI graceful exit command [D1-006] */
 export const OPENCODE_EXIT_COMMAND = '/exit';
@@ -169,49 +155,6 @@ export { OPENCODE_PANE_HEIGHT };
  * #2047) so a caller that needs the geometry gets both from one import.
  */
 export { OPENCODE_PANE_WIDTH };
-
-/**
- * {@link resolveOpencodePaneWidth}, plus the one-line operator feedback the
- * pure config module deliberately cannot emit (Issue #2047).
- *
- * `tmux-pane-config.ts` has no imports at all — that is a documented property
- * (#1906), and pulling the logger in there would make every consumer of a
- * constant depend on the logging stack. So the resolver stays silent and the
- * warning lives here, at the two call sites that actually resize a pane.
- *
- * Two things are worth telling the operator, and neither is an error:
- *
- * - the value was DROPPED (not an integer, or outside the accepted bounds), so
- *   the pane they are about to look at is the 80-column default rather than
- *   what they asked for;
- * - the value was ACCEPTED but lands at or above
- *   {@link OPENCODE_SIDEBAR_MIN_WIDTH}, where opencode 1.18.22 paints its
- *   right-hand sidebar into the same rows as the transcript. #2047 measured
- *   what that does to this repo's own readers — a saved "reply" made entirely
- *   of sidebar chrome, a status flip on an aborted turn, and a false idle
- *   composer off the session title. It is still allowed, because an operator
- *   who only ever reads the pane in the browser may want it; it is not silent.
- *
- * @returns Pane width in columns, ready to hand to `resize-window`.
- */
-function resolveOpencodePaneWidthChecked(): number {
-  const requested = process.env[OPENCODE_PANE_WIDTH_ENV];
-  const width = resolveOpencodePaneWidth();
-
-  if (requested !== undefined && String(width) !== requested.trim()) {
-    logger.warn('opencode-pane-width-rejected', {
-      requested,
-      applied: width,
-    });
-  } else if (width >= OPENCODE_SIDEBAR_MIN_WIDTH) {
-    logger.warn('opencode-pane-width-sidebar-visible', {
-      width,
-      sidebarMinWidth: OPENCODE_SIDEBAR_MIN_WIDTH,
-    });
-  }
-
-  return width;
-}
 
 /**
  * Interval between readiness polls while opencode paints its TUI (Issue #1908).
@@ -332,14 +275,6 @@ export class OpenCodeTool extends BaseCLITool {
   }
 
   /**
-   * Check if OpenCode session is running for a worktree
-   */
-  async isRunning(worktreeId: string, instanceId?: string): Promise<boolean> {
-    const sessionName = this.getSessionName(worktreeId, instanceId);
-    return await hasSession(sessionName);
-  }
-
-  /**
    * Start a new OpenCode session for a worktree
    * Launches `opencode` TUI in interactive mode within tmux
    *
@@ -359,6 +294,10 @@ export class OpenCodeTool extends BaseCLITool {
 
     const target = opencodeTarget(worktreeId, instanceId);
 
+    // Issue #3296: resolved ONCE. The relaunch path uses it twice (reconcile and
+    // resize), and resolving at each site printed the same warn twice.
+    const paneWidth = resolveOpencodePaneWidthChecked({ warnSidebar: true });
+
     const exists = await hasSession(sessionName);
     if (exists) {
       // Issue #2047: the SAME width as the creation path below. These two used
@@ -367,7 +306,7 @@ export class OpenCodeTool extends BaseCLITool {
       // a reconnect would silently hand the detectors a geometry the creation
       // path had been moved away from.
       await this.reconcileExistingSession(sessionName, worktreePath, {
-        windowWidth: resolveOpencodePaneWidthChecked(),
+        windowWidth: paneWidth,
         windowHeight: OPENCODE_PANE_HEIGHT,
       });
       // Issue #2070: is opencode still the thing drawing this pane? The two
@@ -392,7 +331,7 @@ export class OpenCodeTool extends BaseCLITool {
         // the pane is the same one AND the process is the same process, so
         // fencing here would discard a still-valid verdict on every reconnect.
         await resumeOpencodeEventStream(target, worktreePath);
-        logger.info('opencode-session-sessionname');
+        logger.info('opencode-session-exists');
         return;
       }
       logger.warn('opencode-session-relaunch', { sessionName });
@@ -433,15 +372,7 @@ export class OpenCodeTool extends BaseCLITool {
       // exists; the resize below still runs, because a pane that was created
       // before #2047 carries the geometry of its own era either way.
       if (!exists) {
-        // Create tmux session. Scrollback depth comes from the shared
-        // TMUX_HISTORY_LIMIT default (Issue #1624) — do not re-hardcode it here.
-        await createSession({
-          sessionName,
-          workingDirectory: worktreePath,
-        });
-
-        // Wait a moment for the session to be created
-        await new Promise((resolve) => setTimeout(resolve, TUI_SESSION_CREATE_WAIT_MS));
+        await this.createLaunchPane(sessionName, worktreePath);
       }
 
       // Resize tmux window so opencode's right-hand sidebar stays hidden and
@@ -453,7 +384,7 @@ export class OpenCodeTool extends BaseCLITool {
         await execFileAsync('tmux', [
           // Issue #1156: exact-match target so resize never leaks to a prefix-colliding instance
           'resize-window', '-t', exactTarget(sessionName),
-          '-x', String(resolveOpencodePaneWidthChecked()), '-y', String(OPENCODE_PANE_HEIGHT),
+          '-x', String(paneWidth), '-y', String(OPENCODE_PANE_HEIGHT),
         ]);
       } catch {
         // Non-fatal: resize may fail in some environments
@@ -530,7 +461,7 @@ export class OpenCodeTool extends BaseCLITool {
         }
       }
 
-      logger.info('started-opencode-session:sessionname');
+      logger.info('started-opencode-session');
     } catch (error: unknown) {
       const errorMessage = getErrorMessage(error);
       throw new Error(`Failed to start OpenCode session: ${errorMessage}`);
@@ -802,13 +733,6 @@ export class OpenCodeTool extends BaseCLITool {
   async sendMessage(worktreeId: string, message: string, instanceId?: string): Promise<void> {
     const sessionName = this.getSessionName(worktreeId, instanceId);
 
-    const exists = await hasSession(sessionName);
-    if (!exists) {
-      throw new Error(
-        `OpenCode session ${sessionName} does not exist. Start the session first.`
-      );
-    }
-
     // Issue #2070: the pane exists, but does the AGENT? An agent that quit,
     // updated itself or crashed leaves its tmux session behind, and the send
     // that followed used to sit in the readiness wait until it timed out —
@@ -820,7 +744,7 @@ export class OpenCodeTool extends BaseCLITool {
     // typing the message into a shell prompt. The relaunch reserves a port and
     // re-attaches, so the server path is available again by the time it is
     // tried. `sendMessageWithImage` reaches this through its own fallback.
-    await this.relaunchIfToolExited(worktreeId, instanceId);
+    await this.requireSession('OpenCode', worktreeId, instanceId, { relaunch: true });
 
     if (await this.trySendViaServer(opencodeTarget(worktreeId, instanceId), message)) {
       // Issue #405: the transcript grew, so the cached capture is stale — the
@@ -842,7 +766,7 @@ export class OpenCodeTool extends BaseCLITool {
       // Issue #405: Invalidate cache after sending message
       invalidateCache(sessionName);
 
-      logger.info('sent-message-to-opencode-session:session');
+      logger.info('sent-message-to-opencode-session');
     } catch (error: unknown) {
       const errorMessage = getErrorMessage(error);
       throw new Error(`Failed to send message to OpenCode: ${errorMessage}`);
@@ -896,12 +820,7 @@ export class OpenCodeTool extends BaseCLITool {
   ): Promise<void> {
     const sessionName = this.getSessionName(worktreeId, instanceId);
 
-    const exists = await hasSession(sessionName);
-    if (!exists) {
-      throw new Error(
-        `OpenCode session ${sessionName} does not exist. Start the session first.`
-      );
-    }
+    await this.requireSession('OpenCode', worktreeId, instanceId, { relaunch: false });
 
     const target = opencodeTarget(worktreeId, instanceId);
     if (await this.trySendViaServer(target, message, imagePath)) {
@@ -1027,7 +946,10 @@ export class OpenCodeTool extends BaseCLITool {
       // Issue #405: Invalidate cache after session kill
       invalidateCache(sessionName);
 
-      logger.info('stopped-opencode-session:sessionname');
+      // Logged unconditionally: after a successful `/exit` no tmux kill runs, so
+      // there is no `killed` value to test, unlike `requestExitAndKill` in
+      // base.ts (logs only when the kill returned true) (#3232).
+      logger.info('stopped-opencode-session');
     } catch (error: unknown) {
       logger.error('session:stop-failed', { error: getErrorMessage(error) });
       throw error;

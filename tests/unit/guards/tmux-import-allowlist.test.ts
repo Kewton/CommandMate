@@ -24,12 +24,12 @@
  * 1. **ESLint cannot hold the allowlist to a count.** `npm run lint` is `eslint .`
  *    since Issue #2736 — it covered `tests/` (#2719) and `scripts/` + `bin/` (#2732)
  *    before that, and now defaults to the whole repository — but a rule set has no way
- *    to say "these 22 files and no others are exempt": an added `overrides` entry is
+ *    to say "these 21 files and no others are exempt": an added `overrides` entry is
  *    always green. The count lives here. (Widening the scope is also how
  *    `server.ts:803` became visible at all — see `DYNAMIC_TMUX_IMPORT_EXEMPT`.)
  * 2. **`overrides.files` is matched with minimatch.** A literal Next.js dynamic
  *    segment written as `src/app/api/worktrees/[id]/route.ts` is a *character
- *    class* and matches `.../i/route.ts` — not the real directory. Five of the 22
+ *    class* and matches `.../i/route.ts` — not the real directory. Five of the 21
  *    entries have `[id]` in them; unescaped, they would silently stop exempting
  *    their file and lint would go red on day one. They are escaped as `\[id\]`.
  * 3. **ESLint 8's core `no-restricted-imports` never sees `await import()` or
@@ -88,7 +88,6 @@ const STAGED_REMOVAL = [
   'src/components/Terminal.tsx',
   'src/lib/auto-yes-poller.ts',
   'src/lib/pasted-text-helper.ts',
-  'src/lib/polling/global-session-poller.ts',
   'src/lib/polling/response-checker.ts',
   'src/lib/prompt-answer-sender.ts',
   'src/lib/realtime/terminal-broadcast.ts',
@@ -438,7 +437,9 @@ describe('lib/tmux import guard: ESLint configuration', () => {
     // The design doc named three spellings. `**/tmux/**` and `**/tmux` were added
     // after measuring that the three leave `../tmux/x` (how every file in
     // `src/lib/cli-tools/` already spells it) and the `src/lib/tmux/index.ts`
-    // barrel wide open. See the positive controls below.
+    // barrel wide open. Issue #3232 deleted that barrel (nothing ever imported
+    // it); `**/tmux` stays so that re-creating one does not slip through. See
+    // the positive controls below.
     expect(entry[1].patterns[0].group).toEqual([
       '@/lib/tmux/**',
       '**/lib/tmux/**',
@@ -468,16 +469,18 @@ describe('lib/tmux import guard: ESLint configuration', () => {
 });
 
 describe('lib/tmux import guard: the allowlist', () => {
-  it('is exactly 7 permanent + 15 staged files', () => {
+  it('is exactly 7 permanent + 14 staged files', () => {
     // 19 -> 18: #1905 moved `kill-session/route.ts` onto `ICLITool.killSession`.
     // 18 -> 16: #1906 moved `terminal/route.ts` and `send-user-message.ts` onto
     // `ICLITool.sendMessage` / `ICLITool.isRunning`, deleting the copilot
     // `sendKeys` + delayed-Enter bypass that was the reason both reached tmux.
     // 12 -> 7 and 16 -> 15: Issue #2655 deleted Assistant Chat — its five API
     // routes and its conversation poller.
+    // 15 -> 14: Issue #3232 deleted the global session poller, which nothing had
+    // started since its only caller went away.
     expect(PERMANENT_EXEMPT).toHaveLength(7);
-    expect(STAGED_REMOVAL).toHaveLength(15);
-    expect(ALLOWLIST).toHaveLength(22);
+    expect(STAGED_REMOVAL).toHaveLength(14);
+    expect(ALLOWLIST).toHaveLength(21);
   });
 
   it('keeps the two groups sorted, deduplicated and disjoint', () => {
@@ -524,7 +527,9 @@ describe('lib/tmux import guard: the allowlist', () => {
 describe('lib/tmux import guard: positive controls', () => {
   const eslint = makeEslint({ withAllowlist: true });
   // A file that is deliberately NOT on the allowlist, so the rule is live in it.
-  const UNEXEMPT = join(REPO_ROOT, 'src/lib/session/index.ts');
+  // Was the `src/lib/session` barrel until #3315 deleted it (nothing imported it);
+  // a sibling keeps every relative specifier below resolving to the same place.
+  const UNEXEMPT = join(REPO_ROOT, 'src/lib/session/worktree-status-helper.ts');
 
   const caught: [string, string, string][] = [
     ['aliased static import', "import { sendKeys } from '@/lib/tmux/tmux';", 'no-restricted-imports'],
@@ -609,11 +614,16 @@ describe('lib/tmux import guard: re-export leaks', () => {
     }
   });
 
-  it('keeps the session barrel on explicit named re-exports', () => {
-    // `export * from './claude-session'` would re-open the leak above the moment
-    // `claude-session.ts` grows a tmux re-export, and the diff would not show it.
-    const barrel = readFileSync(join(REPO_ROOT, 'src/lib/session/index.ts'), 'utf-8');
-    expect(barrel).not.toMatch(/^\s*export\s+\*/m);
+  it('has no session barrel, and would keep one on explicit named re-exports', () => {
+    // #3315 deleted `src/lib/session/index.ts`: nothing imported it. If it comes
+    // back, `export * from './claude-session'` would re-open the leak above the
+    // moment `claude-session.ts` grows a tmux re-export, and the diff would not
+    // show it — so a revived barrel must name every symbol it re-exports.
+    const barrelPath = join(REPO_ROOT, 'src/lib/session/index.ts');
+    if (existsSync(barrelPath)) {
+      expect(readFileSync(barrelPath, 'utf-8')).not.toMatch(/^\s*export\s+\*/m);
+    }
+    expect(existsSync(barrelPath), 'src/lib/session/index.ts was deleted by #3315').toBe(false);
   });
 });
 

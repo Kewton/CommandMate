@@ -26,6 +26,7 @@ import { buildCompositeKey } from '@/lib/auto-yes-state';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import type { PromptType } from '@/types/models';
 import type { AutoYesMode, AutoYesSuppressionReason } from './auto-yes-resolver';
+import { getOrInitGlobal } from '../global-state';
 
 /** What the policy withheld, and why — the log line's payload, made queryable. */
 export interface AutoYesPolicySuppression {
@@ -64,8 +65,7 @@ declare global {
 }
 
 /** compositeKey -> the most recent policy suppression for that session. */
-const lastPolicySuppressions = globalThis.__autoYesPolicySuppressions ??
-  (globalThis.__autoYesPolicySuppressions = new Map<string, AutoYesPolicySuppression>());
+const lastPolicySuppressions = getOrInitGlobal('__autoYesPolicySuppressions', () => new Map<string, AutoYesPolicySuppression>());
 
 /**
  * Record that the policy withheld an answer for `instanceId`'s current prompt.

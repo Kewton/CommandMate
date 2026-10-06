@@ -7,6 +7,190 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.44.3] - 2026-10-07
+
+> **Highlight**: 状態の表示と Auto-Yes の食い違いを直し、内部を大きく整理したリリースです。一覧の作業中の表示が `capture --json` と同じ規則・同じ時刻で切り替わるようになり（#3365 / #3377）、codex のターン中に `ready` と出る・送信が入力欄に残る・2 行以上の入力欄を生成中と読む問題を直しました（#3337 / #3366 / #3205）。Auto-Yes は、CommandMate が読めない選択画面に Enter を 1 回だけ送り（#3397）、複数選択の質問には答えず人に残します。あわせて整理 Epic #3207 で検出・セッション・UI の重複を 1 か所にまとめ、UAT・日次確認を本番から隔離して動かせるようにしました（#3359 / #3360）。
+
+### Added
+
+- **feat(auto-yes): CommandMate が読めない選択画面に Auto-Yes が Enter を 1 回送る** (#3397): 「この画面は CommandMate から操作できません」とリンクが出る選択画面で Auto-Yes が何も送らず止まっていたため、画面表示と同じ判定（`assessPromptAnswerability`）で読めない画面のうち、選択画面のフッターがある・入力欄が画面に無い画面に限って Enter を 1 回だけ送るようにした（入力欄が見えている画面・ポリシーが許さない画面・他サーバのセッション・codex の起動時の画面と `/model` の選択画面には送らず、チェックボックスの複数選択の画面（`[ ]` / `[x]` / `[X]` / `[✔]`）にも送らない。同じ画面を 2 回続けて見たうえで、送る直前にキャッシュを通さず画面を取り直して確かめ、効かなければ再送しない。記録はセッションの停止・再作成（hook の SessionStart を含む）と Auto-Yes の無効化で消える）。あわせて通常の Auto-Yes も、`multiSelect` の無い `[ ]` / `[x]` / `[X]` / `[✔]` の一覧には答えず、その一覧は Auto-Yes 中もプロンプト欄に出す。既定は claude と codex で、`CM_AUTOYES_ENTER_FALLBACK` で切り替えられる。送った記録は `capture --json` の `autoYes.lastEnterFallback` とターミナル配信（`autoYesEnterFallback`）に載り、読めない画面は Auto-Yes 中もプロンプト欄（PC・スマホ）に出し、送った画面では警告とリンクの代わりに「Auto-Yes が Enter を送りました。」と表示し、`commandmate wait` はそのプロンプトの報告に「Enter を送った」「送ったが画面が残った（no-effect）」の 1 行を stderr に添える。
+
+- **feat(uat): `CM_UAT_ISOLATION=1` で、UAT・日次確認のサーバーと CLI が本番と共有するファイルや設定に触れずに動くようにした** (#3360): codex の `hooks.json`・relay・hook の信頼と antigravity の `hooks.json` を書かず（同じ内容が既にあれば使い、無い・違えば起動を拒否。Schedule・日次まとめの `codex exec`・`agy -p` は隔離中は実行しない）、claude を対話も `-p` も `--setting-sources project,local` で起動して利用者の hook を動かさず、CLI は `.env` を読まずに `CM_PORT` が無ければ 3000（本番）へ送らず exit 2 で止まる。`.commandmate/uat.yaml` はこのモードでサーバーを起動し、測定の表と skip の条件は docs/user-guide/uat-isolation.md にある。付けないときの動きは変わらない。
+
+- **feat(uat): UAT の起動と停止を scripts/uat/run-server.sh にまとめ、自分が起動したサーバーだけを止め、UAT・日次確認・run.ts が共通のロックを取るようにした** (#3359): これまでの `.commandmate/uat.yaml` は tmux のソケットをポートだけで決め、`down` がポートを LISTEN している pid を止めていたため、同じポートを取った別の UAT やほかのプロセスを止めうった。run ごとの id でソケットを `/tmp/cmuat-<port>-<run id>/` に分け、起動した pid とその環境の `CM_DB_PATH` を run の下に記録し、止めるときは「LISTEN の pid ＝ 記録した pid」かつ「CM_DB_PATH が run の下」を確かめ、合わなければ何も止めずに失敗する。起動の途中で失敗したときは自分の作ったものだけを片付け、強制終了で残ったものは次の実行の始めに同じ確かめ方で片付ける。`mkdir` の原子的なロック（`$CM_RUN_LOCK_DIR`、無ければ `<tmpdir>/commandmate-run.lock`）を UAT（up の前から down の後まで）・`daily.sh`（同期の前から run.ts の後まで。取れないときは `run-locked` の最小レポートで exit 2）・手動の `run.ts` が共通に取り、以前の `run.lock` は使わない。`/uat` コマンドも同じスクリプトで起動・停止する。#3360 の `CM_UAT_ISOLATION=1` での起動と、codex の共有ファイルと `~/.gemini/config/hooks.json` のハッシュの前後比較もこのスクリプトが行う
+
+- **feat(agent-health): 未使用ファイルのパスの集合を計測の状態に保存し、前回に無いものを候補にする** (#3314): 毎朝の knip 計測は未使用ファイルの数しか見ておらず、数が同じで中身が入れ替わっても気づけなかった。パスを状態（metrics-state.json）に保存し、前回に無いパスを候補にした（初回は基準の記録のみ）。未使用 export は今までどおり件数だけ 。未使用ファイルの Issue には `needs-human` ラベルを付け、自動依頼（dispatch）の対象から外す（消して安全かは人が判断する）
+
+- **feat(agent-health): 日次確認のレポートに、9 ツール × 検査項目の表と、未実施の理由つきの要約を出す** (#3313): 2026-10-05 の朝は 6 ツール × 7 項目のうち 35 件 pass・7 件 skip で、「全項目 pass」と読み違えられた。skip には必ず理由の種類（検査の定義が無い／その画面を出さない／サインインできない／ツールが未対応／時間切れ など）を skip を出す場所で入れ、レポートの JSON に `coverage`（表）と `summary` を足した。要約は標準出力にも出し、1 行目は「pass N・fail N・skip N（理由の内訳）」の形にした。対象外だった gemini・vibe-local・copilot も行として出し、`version` を毎朝読む（gemini はサインインできない状態を、vibe-local・copilot は起動しない理由を表に出す）。終了コードの意味は変わらない
+
+- **feat(uat): 製品の経路の日次確認（第 2 段）を専用ユーザーで動かす土台を足した** (#3312): 毎朝 CommandMate のサーバーの経路を通す確認を、利用者の設定に触れない専用の OS ユーザーで動かすため、`CM_UAT_ISOLATION=own-home`（その HOME の中に限って codex・claude・antigravity・copilot の hook のファイルを書く。起動のたびに実行ユーザー・HOME・書き込み先の実体を確かめ、合わなければ起動を拒否）と `run-server.sh up --own-home`・その検査の組 `.commandmate/uat-own-home.yaml`（`uat.yaml` は変えない）を足し、監督役 `scripts/agent-health/product/supervisor.sh`（排他 → 回収 → 安全確認 → 実行 → 後始末 → 確定、07:45 で止めて 07:50 までに確定、台帳に資源を planned → acquired で記録し、pid・起動時刻・CM_DB_PATH 等で本人確認してから止める）と期限の番人 `deadline-guard.sh`、実行の結果の型と原子的な公開（`/Users/Shared/commandmate-check`、symlink を拒否）、利用者の側の最終の結果の判定を足した。リリース判断レポートは `~/.commandmate/agent-health/product/<date>.json` がある場合だけそれを読み、fail を NO-GO、unknown・未実施を要判断、3 日続く skip を要判断にする（`product/` が無い間は今までどおり）。本番の `agent-event-unresolved-target` のログに `worktreeId` と `cwdHash` を足した。専用ユーザーと launchd の導入・場面・漏れの判定はまだで、`CM_UAT_ISOLATION=1` と未設定の動きは変わらない。
+
+- **feat(agent-health): hook の重複破棄と画面・申告の食い違いを、毎朝の計測で観測できるようにする** (#3311): 本番のログに #3289・#3301 の並び（窓が別のターンのイベントを捨てた）があったのに、`agent-event-duplicate-dropped` にインスタンス・セッションが無く、`detection-divergence` からは食い違いの長さが分からず、数えても判定できなかった。破棄の行にインスタンス・セッション id の短いハッシュ（id そのものは書かない）・同じキーの前の受信からの経過（ms）・細目を足し、食い違いが一致に戻ったときに `detection-divergence-resolved`（長さ ms つき）を 1 行出すようにした。日次メトリクスに `hook-observation`（category `process`）を足し、写しでない破棄の数と食い違いの回数・長さの分布（中央値・p90・最大）を `details` に記録する。観測だけで、候補にも Issue にもしない
+
+- **feat(agent-health): 毎朝の計測に、develop の CI の不安定さの指標 ci-flaky を足す** (#3310): やり直しで通った run は最後の結果では「成功」になり、負荷で落ちたテストは誰かが気づいたときにしか Issue にならなかった。直近 7 日の develop の push の CI を attempt ごとに読み、失敗したジョブを SHA・ジョブ・attempt の単位で計測の JSON（`records`）に残し、テストの失敗（落ちたテストの名前つき）・実行環境の障害・やり直しでの成功を分けて数える。やり直しで通った run で落ちていたテストと、別の SHA で 2 回以上落ちたテストを不安定な候補、落ち続けるテストを別の種類として起票の対象にする（`needs-human` ラベルを付け、自動の依頼の対象にしない）。`gh` が使えない・時間切れのときは skip。ログはテストのファイル名と名前・回数だけを写す
+
+### Changed
+
+- **refactor(cleanup): 呼び出し元の無い `sendKeySequence` と、届かない opencode の起動画面の防御 `suppressOpenCodeBanner` を消した** (#3396): `sendKeySequence`（`src/lib/tmux/tmux.ts`）はどこからも呼ばれず、`suppressOpenCodeBanner`（`src/lib/polling/response-checker-extraction-steps.ts`）は opencode の完了判定が終了の印を要求するため起動画面が届かない。両方と、`sendKeySequence` だけを確かめていたテスト 2 本を削除した。`runKeySequence` と `gracefulExitSequence` は設計文書が名指ししているため残した。利用者に見える変化は無い。
+
+- **refactor(hooks): `POST /api/hooks/agent-event` の段を `src/lib/hooks/agent-event-intake.ts` の関数へ分けた** (#3376): 受け口の処理（読み取り・検証・重複の破棄・状態への適用・通知）が 1 本にまとまり複雑度 48 になっていたため、順序と `await` を変えずに段ごとの関数へ切り出し、`POST` を 12 にした。応答・ログ・副作用は変わらない。
+
+- **refactor(session): agent-event-state.ts を責務ごとの 7 モジュールに分割** (#3375): 3,401 行に育った構造化イベント状態のモジュールを、重複の窓・モデル・ターン・構造化状態・入力待ち・AskUserQuestion・イベント型の新しいモジュールへコメントごと移し、元のモジュールは同じ名前を再 export する（状態は globalThis の 1 か所のまま）。利用者に見える変化はない。
+
+- **refactor(polling): `response-checker.ts` を 2,486 行から 1,472 行に分け、抽出結果・ダイアログの 2 つのゲート・`extractResponse` の手順を別モジュールへ移した** (#3374): 日次メトリクス計測が 1,500 行超を検出したため。`response-checker-extraction-result.ts`・`response-checker-dialog-gate.ts`・`response-checker-extraction-steps.ts` へコメントごと移し、元のファイルは同じ名前を再 export する。`detectPrompt` の唯一の入口（ガード #2368）と tmux 直参照の許可リストを守るため `detectPromptOnCleanFrame`・`detectPromptWithOptions`・`extractResponse` は元のファイルに残した。利用者に見える変化は無い。
+
+- **refactor(agent-health): ci-flaky の measureCiFlaky を 4 つの段に分けて複雑度を 25 未満にした** (#3373): 39 あった複雑度を、集計・履歴・候補の選別・指摘の組み立てに分けて下げた。公開する名前・戻り値・値は変わらない
+
+- **ci(test): CI（CI=true）のテストの既定タイムアウトを 5 秒から 20 秒に延ばした** (#3340): CI のランナーはワーカーの検証と同じ機械で走り、負荷の下で変更していないテストが 5000ms を超えて落ちていたため、vitest.config.ts の testTimeout / hookTimeout を CI だけ 20 秒にした。手元は 5 秒のまま、実シェルの予算と it() 自身の指定は今までどおり優先される
+
+- **docs(cleanup): 11 件の小さな食い違い（ログ名・コメント・文書・テストの手書き応答）を直した** (#3338): 不具合 14 本の修正の途中で見つかった食い違いを、動き（値・応答・終了コード）を変えずに直した。ログ名 26 個は機械変換の名残から `<tool>-session-exists` の形に、完了した画面を読むたびに出ていた `already-saved-up-to-line-lastcapturedlin` は worktree・ツール・インスタンスを付けて debug に、`CM_OPENCODE_PANE_WIDTH=0120` は適用されたのに「退けられた」と出ていたのを出さないように、capture / terminal の 404 の文は `commandmate send` で起動する案内に、`ls` の出力例と `capture --json` の欄の表（ja・en）は今のサーバーの出力に合わせた。
+
+- **test(cli): CLI のエラー文 5 か所を長い形にそろえ、opencode の起動画面・wait の人待ちのテストを足した** (#3319): `Invalid agent.` / `Invalid --agent.` の 5 か所（capture・attach・auto-yes・respond・instances）を `Error: Invalid <名前>. Must be one of: <候補>` にそろえ（exit code は同じ）、`wait --on-prompt human` の待ちが後ろの段階へ進まないテスト 3 本と opencode の起動画面が返答にならないテストを足し、画面の判定の前半が 2 ファイルで同じなのは意図であるとコメントで残した。利用者に見える変化は、エージェント名を間違えたときのエラー文に候補が出ること。
+
+- **chore(quality): knip が未使用と報告するファイルを仕分け、使われていない 2 本を消し、パスで起動するテスト用スクリプトを knip の entry に足した** (#3315): 毎朝の計測の未使用ファイル 4 本を 1 本ずつ確かめた。`tests/fixtures/remote/*.cjs` の 2 本はテストがパスで `node` に起動させている（knip の誤り）ので `knip.json` の `entry` に足し、理由を docs/user-guide/agent-health.md に書いた。`tests/helpers/logger-mock.ts` と `src/lib/session/index.ts` はどこからも import されていなかったので消した。毎朝の計測の未使用ファイルは 4 本から 0 本になる。アプリの動きは変わらない
+
+- **test(hooks): hook のイベントの並びを仮想の時計で再生し、受信から `wait` の判定までを通す結合テストを足した** (#3309): #3289・#3301 は hook が届く並びと間隔で決まる不具合で、関数ごとの単体テストでは捕まらなかった。受信ルート → `agent-event-state` → `current-output` の応答 → `wait` の判定を、1 つの表（短いターンの連続、二重配送、遅れた写し、順序の逆転、antigravity・Command Code、#3330 のキューの通知、本番の #3289・#3301 の並び）で再生する。区別できない並びは「既知の制限」として今の動きで固定した。製品の動きの変更は無い
+
+- **docs(orchestrate): 対になる場所を探す段と、本文に無い指摘を最後まで処置する段を手順に入れる** (#3307): 2026-10-05 の不具合 19 項目のうち 16 項目が「片方にだけ足された・直された」形だったため、`.claude/commands/orchestrate.md` の契約の雛形（2-4-2）に実装前の「対になる場所を探す」項、2.5-4 に写しのずれを検出するテスト（必須・省略可、実際の応答）と同じ事例を各経路に当てるテストの決まり、Phase 6 の前（5-3）と 6-2 に「本文に無い指摘」を 1 件ずつ処置し未処置の PR はマージしない決まり、8-4 に意図して残した制限を Issue にする段を足し、`.claude/commands/bug-fix.md` の Phase 2 にも探す段と写しの決まりを足した。文書だけの変更で、コードの動きは変えていない
+
+- **refactor(session): 一覧の作業中の表示を決める `detectInstanceSessionStatus` を段ごとの関数に分ける** (#3273): 複雑度が 38 まで増えていたため、画面の判定（`readFrameVerdict`）・hook のターンとプロンプト待ちの反映（`foldAgentEventsIntoFrame`）・古いプロンプトの片付け（`sweepStalePendingPrompts`）・返り値の組み立て（`buildInstanceSessionStatus`）を同じファイルの関数へ順序を変えずに切り出し、どの関数も 15 以下にした。`await` の数と位置、tmux・DB の読み込み、戻り値は変わらず、利用者に見える変化はない。
+
+- **refactor(session): `capture --json` と `/current-output` の応答を組み立てる `buildPayload` を、画面の判定・食い違いのログ・応答の組み立ての 3 つの関数に分けた** (#3272): 複雑度が 39 あり読みにくかったため、順序を変えずに同じファイルの中の関数へ切り出して 21 にした。応答の形と値、判定と副作用の順序は変わらず、利用者に見える変化は無い。
+
+- **refactor(mobile): MobileTerminalTab の状態と描画の分岐を新しいフック・小コンポーネントに切り出した** (#3271): 複雑度 29 を 25 未満にするため、モデル変更通知・セッションメモ編集・サーフェス切替ピルを別ファイルへ移した。利用者に見える変化はない。
+
+- **refactor(types): MarkdownPreview の rehype プラグイン配列から `as any` を外す** (#3270): 日次の型安全の計測で `any`・`eslint-disable` が増えていたため、実際の型の `any` だった MarkdownPreview の rehype プラグイン配列を react-markdown の `Options['rehypePlugins']` で型付けし、`as any` と no-explicit-any の抑止を外した。利用者に見える動きの変化はない。
+
+- **refactor(cleanup): 使われていないコードと、結果に効かない記述を消した** (#3232): どこからも開かれない Markdown エディタのモーダル（Markdown の編集は、PC はファイルのタブ、スマホはファイルビューアでこれまでどおり行える）、始まる経路の無かったグローバルセッションのポーリング（`global-session-poller.ts`）、テストだけが呼んでいた 3 つの関数（`isTmuxAvailable` / `getClaudeSessionState` / `restartClaudeSession`）、一度も import されていない 2 ファイル（`src/lib/tmux/index.ts`、`TerminalErrorFallback.tsx` とその辞書の 2 キー）、呼び出しの無い `readCopilotSettings` を削除。WebSocket の `terminal_snapshot` から、受け取る側が読んでいなかった `promptView` を消した（HTTP の `current-output` の応答には残り、CLI の `wait` はそちらを読む）。あわせて、response-checker の正規表現の重複文字と重複防止の不要な条件、current-output-builder の composePromptData の冗長な引数、useWorktreeDetailController の未使用の content 欄の 4 か所を削除。振る舞いは変えていない。
+
+- **refactor(state): `globalThis.__*` の初期化を共通関数 `getOrInitGlobal` にまとめる** (#3231): `src/lib/global-state.ts` に `getOrInitGlobal` を新設し、`src/` の `globalThis.__*` の初期化（`x ?? (x = init)` / `x ??= init` / `if (!x)` の 3 通りの書き方）をその呼び出しにそろえた。プロパティ名・初期化のタイミング・初期値の式は変えていない。
+
+- **refactor(detection): ツールごとの検出パターンを 1 つの表にまとめる** (#3230): cli-patterns.ts の detectThinking と getCliToolPatterns に分かれていたツール別の switch を、Record<CLIToolType, …> の表 1 つから読む形にした。引数・戻り値・ログ・正規表現は変えていない
+
+- **refactor(session): current-output の応答の形に名前を付け、フックの手書きの型を Pick<> に置き換えた** (#3229): ルートが返す形を current-output-types.ts の CurrentOutputResponseBody にまとめ、useTerminalPanePolling.ts と useWorktreeDetailController.ts の CurrentOutputResponse をそこからの Pick<> にし、読まれていない isGenerating? を消した。型だけの変更で振る舞いは変えていない。
+
+- **refactor(ui): prompt-decision-id.ts の互換の関数と重複した型を消し、読み取りを prompt-view に一本化** (#3228): `prompt-decision-id.ts` の `readPromptDecisionId`・`readPromptQuestionChoices`・`readStructuredDecisionHeading` と型 2 つ、および `PromptPanel`・`MobilePromptSheet` の `optionTakesTypedText` 再 export を消し、テストは `lib/session/prompt-view` から取る。振る舞いは変えていない
+
+- **refactor(ui): 承認への応答の組み立てと読み取りを共通の関数にまとめた** (#3227): 分割画面・モバイル・コントローラの 3 か所にあった `/respond` の本文の組み立て、断られたかの読み取り、`isMultiSelectPrompt` を `prompt-response-body-builder.ts` と `prompt-answer.ts` へ移した。送る本文と動きは変えていない
+
+- **refactor(cleanup): 整理 Epic #3207 列 R の小さな整理（吹き出しの折りたたみ 3 つを 1 つの枠にまとめる）** (#3226): ChatMessageBubble.tsx の思考・ツールログ・ペイン書き写しの折りたたみを、ファイル内の非公開部品 ChatFoldFrame に集約し、WorktreeDetailSubComponents.tsx の未使用の再 export を削除した。描画される DOM は変えていない。
+
+- **refactor(api): worktrees API ルートの前処理（宛先の食い違い・ツールとインスタンスの検査・セッション所有の確認）を共通関数へまとめる** (#3225): 第 1 弾として send / terminal / kill-session / auto-yes の「宛先の食い違いを 400 で返す」部分を `src/lib/session/session-target-conflict-response.ts` の `sessionTargetConflictResponse()` に移した。応答（ステータス・本文のキー・文言）は変えていない
+
+- **refactor(cli): send / ask の重複した処理を共通の関数にまとめる** (#3224): send・respond・capture・ask・reply が `--instance` / `--agent` から宛先を解決していた 5 つの同じ処理を、新しい `src/cli/commands/command-target.ts` の `resolveCommandTarget` に移した。振る舞いは変えていない。
+
+- **refactor(cli): `wait` の `pollWorktree` を、段階ごとの関数に分ける** (#3223): `src/cli/commands/wait.ts` の `pollWorktree` の中に並んでいた処理を、同じファイルの export しない関数へ移した（exit 10 の応答 3 種＝承認・選択画面・読めない画面と、読めない画面・未起動のメッセージの組み立て）。待つ回数と順番、リクエストの回数と順番、標準エラーの文言、終了コードは変えていない。
+
+- **refactor(hooks): 転写の整形と hook 設定の同じ関数を 1 か所にまとめる** (#3222): 5 つの `transcript.ts` にあった同一の `collapseToLine` を `turn-body.ts` へ移した。転写の Markdown と振る舞いは変えていない。
+
+- **refactor(hooks): 4 つの transcript history.ts に 4 回ずつ書かれていた同じ処理をまとめる** (#3221): claude / codex / antigravity / command-code の history.ts にあった isReadableFile・resolveAssistantTimestampMs・nextTurnOpensAt を新モジュール transcript-history.ts へ移した。振る舞いは変えていない
+
+- **refactor(cli-tools): CLI ツール driver が写していた手順を基底クラスと共有モジュールへまとめる** (#3220): `isRunning`（`hasSession` を返すだけの override）を `base.ts` の既定実装へ移し、`getErrorMessage` の局所コピーを `src/lib/errors.ts` の import に替えた。振る舞いは変えていない。
+
+- **refactor(detection): tools/ 配下の同一関数の写しと手書きの判定結果を共通の関数にまとめる** (#3219): 第 1 弾として、`prompt-detector.ts`・`tools/antigravity/dialog.ts`・`tools/command-code/dialog.ts` に 3 つあった `truncateRawContent` と上限定数（200 行・5000 文字）を新規 `truncate-raw-content.ts` の 1 か所に移した。振る舞いは変えていない。
+
+- **refactor(detection): selection-shape.ts のうち Command Code 専用のコードを、ツールごとのファイルに分けていく** (#3218): 第 1 弾として、画面側と Command Code 側の両方が読む正規表現 `FILTER_INPUT_PATTERN` と `COMMAND_CODE_PLAN_REVIEW_FOOTER` を `src/lib/detection/selection-shape-patterns.ts` へ移し、`selection-shape.ts` から再 export した。振る舞いは変えていない。
+
+- **refactor(detection): cli-patterns.ts を、ツールごとの規則と、ツールに依らない小さなファイルに分けていく** (#3217): 第 1 弾として `isShellPaneCommand`・`PASTED_TEXT_*`・`stripBoxDrawing` を `src/lib/detection/shared/` へ移し、`cli-patterns.ts` から同じ名前で再 export した。振る舞いは変えていない。
+
+- **refactor(cli): サーバーの型を `src/cli/types/api-responses.ts` に手で写していたのを、import を持たない小さなファイルに置いて共有していく** (#3216): 第 1 弾として `StatusEvidence` を `src/lib/session/status-evidence-type.ts` へ移し、`status-evidence.ts` から同じ名前で再 export、`api-responses.ts` はそれを相対パスで import した。振る舞いは変えていない。
+
+- **refactor(session): `current-output-builder` を 4 つのモジュールに分け、`buildPayload` を段階ごとの関数にする** (#3215): `src/lib/session/current-output-builder.ts` に同居していた応答の型（`CurrentOutputPayload` / `StructuredEventsPayload` / `PendingDecisionPayload` / `PendingQuestionOptionPayload` / `StructuredSourcePayload` / `SessionTargetResolution`）を、コメントごと `src/lib/session/current-output-types.ts` へ移した。元のモジュールが同じ名前で再 export するので、既存の import はそのまま通る。応答のキーと実行時のコードは 1 つも変えていない（振る舞いの変更なし）。
+
+- **refactor(auto-yes): Auto-Yes の応答処理（`detectAndRespondToPrompt`）を、抑止と送信後の後処理の関数に分ける** (#3214): `src/lib/auto-yes-poller.ts` の `detectAndRespondToPrompt`（357 行）から、4 か所にあった「抑止を記録して 1 回だけ警告する」形を `suppressAndWarnOnce` に、codex の起動ダイアログ・`/model` ピッカー・ダイアログゲートの 3 つの判定を `suppressIfNotOursToAnswer` に、送信後の後処理を `finishAnsweredPrompt` に、同じファイルの中で分けた（いずれも export しない）。抑止の理由の文字列・警告のログ名・1 回だけ警告する仕組み・送信の順番を含め、振る舞いは変えていない。
+
+- **refactor(polling): `response-checker` の長い関数とまとまりを、切れ目に沿って分ける** (#3213): `src/lib/polling/response-checker.ts` の保留中の画面読み取り（held scrape、Issue #2436 の `PENDING_SCRAPE_HOLD_MS` / `holdScrapedResponse` / `flushPendingScrapedResponse` / `settleExpiredPendingScrapedResponse` と `globalThis.__pendingScrapedResponses`）を `src/lib/polling/pending-scraped-response.ts` へ移した。`response-checker.ts` は公開していた 4 つの名前をそのまま再 export するので、import 元は変わらない。振る舞い・ログ名・待ち時間・`globalThis` のプロパティ名は変えていない。
+
+- **refactor(ui): WorktreeDetailRefactored・WorktreeDetailDesktop の重複を整理していく** (#3212): 第 1 弾として `WorktreeDetailRefactored.tsx` の `readPromptDecisionId` の呼び出しを、中身と同じ `lib/session/prompt-view` の `readDecisionId` に向けた。振る舞いは変えていない。
+
+- **refactor(ui): useWorktreeDetailController の読まれていない戻り値と重複を整理** (#3211): `src/hooks/useWorktreeDetailController.ts` から、どこからも読まれていない戻り値（displayedAgents / handleSelectedAgentsChange / setActiveCliTab / setEditorFilePath）を削除。振る舞いは変えていない
+
+- **refactor(ui): PC の分割ペインとスマホのターミナルタブに二重に書かれていた処理を、それぞれ 1 か所にまとめた** (#3210): 第 1 弾として、チャット面に渡す状態の組み立てを `TerminalSplitPaneContent.tsx` と `MobileTerminalTab.tsx` から `src/hooks/useChatSurfaceLiveState.ts` へ移した。振る舞いは変えていない。
+
+- **refactor(ui): 承認ダイアログへの答え方の重複を PC とスマホで 1 か所にまとめる** (#3209): PromptPanel.tsx と MobilePromptSheet.tsx に別々にあった promptQuestionKey / initialSelectedOption / initialCheckedNumbers / promptHeadingText を prompt-answer.ts へ移した（PromptPanel は promptQuestionKey を同名で再 export）。振る舞いは変えていない
+
+- **docs(orchestrate): 整理の契約の型と、直す前に整える判断を手順に入れる** (#3208): 整理 Epic #3207 の決まりを、ふだんの手順書に入れた。`.claude/commands/orchestrate.md` に、整理（refactor）の Issue 用の契約の型（2-4-3: `scope.allow` に `tests/**` を入れない、goal に転記する「整理の決まり」、整理と振る舞いの変更を同じ PR に入れない、Epic #3207 の run の実測）、ワーカーが報告した重複を整理の Issue の候補として残し run の最後に起票するかを利用者に訊く段（1-2b、8-4）、「直す前に整える」の判断（2.5-4）を足した。`.claude/commands/bug-fix.md` の Phase 2 にも同じ判断を足した（写しの片方だけを直す形なら先に整理の PR で写しを 1 つにする、分岐を 1 つ足す形なら今の仕組みで扱えない理由を Issue に書く）。`.claude/prompts/refactoring-core.md` の冒頭に「整理は振る舞いを変えない。既存のテストを書き換えずに通す」を置き、カバレッジを上げるためのテストの追加は別の PR にすると書いた（カバレッジ 80% は整理の目標ではない）。文書だけの変更で、コードの動きは変えていない
+
+- **docs(module-reference): モジュール一覧を、整理 Epic の後の実物に合わせる** (#3207): 整理で新しくできた 36 モジュールの行を足し、消した 4 ファイルの行を消し、中身が移ったモジュール（cli-patterns.ts、current-output-builder.ts、response-checker.ts、wait.ts、selection-shape.ts ほか）の説明を直した。冒頭の globalThis の規約は、見本を getOrInitGlobal（src/lib/global-state.ts）にした。あわせて、整理で事実と合わなくなったソースのコメントを直し、/orchestrate の整理の決まりに「関数や定数などの名前を消す手順」を足した。振る舞いの変更は無い
+
+- **docs(orchestrate): 同じブランチに契約を積むときは scope.allow を前の契約との和集合にする** (#3204): scope ゲートは origin/develop 比のブランチ全体の差分を見るため、2 本目の契約にその契約で触る範囲だけを書くと、前の契約で入れたファイルが範囲外になり不合格になっていた（2026-10-04 の #3184 で 19 件、exit 20）。`.claude/commands/orchestrate.md` の 2-4 に和集合にする決まりを、3-4 に「前の契約のファイルだけによる scope の違反はワーカー起因ではない」を足した。文書だけの変更
+
+- **ci(catalog): 週次の catalog-drift workflow を止める** (#3160): カタログのずれの検知は agent-health の日次チェック（#3158）へ移ったため、`.github/workflows/catalog-drift.yml` と、それだけが使っていた `scripts/catalog-drift-report.ts` を削除し、同じ追跡 Issue に 2 つの仕組みが書き込む状態をなくした。`formatTrackingIssueBody` の既定の冒頭注記から workflow の名前を外し、コメント・docs を日次の検知に合わせた。ラベル `catalog-drift` と本文の隠しマーカーは変えない。
+
+### Deprecated
+
+- **chore(api): `capture --json` の `isComplete` / `isGenerating` / `thinkingMessage` を廃止の予定として告知した** (#3394): 3 欄は読み手が無く値も他の欄と重複しているため、次以降のマイナーの版で消す（#3395）。この版では値と形は変えず、型の `@deprecated` と ja・en の cli-operations-guide に置き換え先（`isPromptWaiting` / `thinking` / `thinking` と `cliToolId`）を書いた。
+
+### Fixed
+
+- **fix(uat): `CM_UAT_ISOLATION=1` のサーバーが copilot の共有 `~/.copilot/settings.json` を書き換えないようにした** (#3391): 隔離中の UAT・日次確認のサーバーが copilot を起動すると、本番と共有の `~/.copilot/settings.json`（と `.cmate-backup`）に checkout のパスの relay を書いていた。codex・antigravity と同じく、隔離中は書かず、このビルドが空のファイルに書く内容（CommandMate の hook だけ）と一致すれば読むだけで使い、無い・違う・独自の hook が混ざる・`config.json` に `hooks` がある場合は tmux のセッションを作る前に理由つきで起動を拒否する。`scripts/uat/run-server.sh` の前後のハッシュの比較にも `~/.copilot/settings.json` を足した。隔離していないときの動きは変わらない
+
+- **fix(agent-health): 日次の計測の type-safety が、コメントの英語を any と数え、決まりどおりの `declare global` の書き方を後退と読むのを直す** (#3389): `countTypeSafety` を正規表現から TypeScript のパーサに替え、型の位置の `any`（ジェネリクスの既定 `T = any` を含む）だけを数え、`eslint-disable` / `@ts-ignore` はコメントの先頭にある指示だけを数え、`declare global { var … }` の `var` に付く `no-var` の抑止は数えない。develop の値は any 38 → 3（実際の型の any は `src/lib/api/read-json-body.ts` の 3 本）、eslint-disable 174 → 56、ts-ignore 1 → 0。数え方の版（`countVersion`）を state に記録し、版が変わった日は前回値と比べずに基準を置き直して、そのことを日次の結果の summary に 1 回だけ出す（数え方の変更で Issue が起票されない）。
+
+- **test(uat): run-lock の競合のテストを、子の出力を読み終えてから確定するように直す** (#3383): `run-server-3359.test.ts` の「is never held by two callers at once」が、子の `exit`（stdio がまだ開いていることがある）で結果を確定していたため、CI の負荷の下で 1 本の出力を取りこぼして落ちていた。`close` で確定するようにした。ロックの実装は変えていない
+
+- **fix(session): 一覧の作業中の表示が、エージェントの `Stop` で `capture --json` と同じ時刻に終わるようにした** (#3377): ターンの終わりに作業中の行が画面に残っている間、`capture --json` は `ready / hook_stop` なのに一覧（`commandmate ls`・サイドバー）は `isProcessing: true` のまま codex で約 4 秒、claude で約 2 秒ずれていた。一覧も capture と同じ `mergeStructuredStatus` を呼んでターンの記録を反映するようにし、`Stop` の後は同じ poll で作業中でなくなる。#2429 の例外（`Stop` より新しいプロンプトがある間は作業中のまま）も同じ関数と同じ最新プロンプトの読み込みで判定し（読むのは画面が作業中で記録が `Stop` 済みの poll だけ）、一覧の確定状態（`lastKnownStatus`）も公開する値で保存する。Esc で中断した直後（codex の `■ Conversation interrupted`）は、一覧がすぐ作業中でなくなるのに `capture --json` が約 3 秒 `running` のままだったため、その画面では capture も構造化の `running` を採らず画面の `ready / input_prompt` を出すようにした（ターンの記録が 3 poll で閉じるのは今のまま。中断でない画面は Stop まで `running`）
+
+- **fix(codex): codex への送信で、入力した文が入力欄に表示されてから Enter を押すようにした** (#3366): codex 0.160.0 は速い打鍵を「paste burst」として溜め、打ち終わってから一度に描く（80 文字で約 380 ms）。その前に届いた Enter は改行になり、送信後の読み返しはまだ描かれていない入力欄の空表示を「送れた」と読んでいたため、文が入力欄に残ったまま `Message sent.` を返していた。入力欄に文全体が出るまで待ってから Enter を押し、5 秒待っても出ないときは文を消して送信の失敗を返す（Enter 後に文が残れば従来どおり Enter を再送する）
+
+- **fix(session): 一覧の isProcessing も hooks の codex の開いたターンを running とするようにした** (#3365): capture は #3337 の規則で running を返すのに、一覧（`commandmate ls`・サイドバー）は画面だけで判定し、画面が入力待ちに見える間は待機と表示して食い違っていた。一覧も `hookTurnHoldsPane` を呼び、Stop・中断の画面・stale・hooks の無いソース・Claude は従来どおりにした。
+
+- **fix(uat): UAT の up が、codex の共有ファイルの検査・サーバー・down で同じ CODEX_HOME を使うようにした** (#3358): 検査は呼び出し元の CODEX_HOME を見るのに、env -i がサーバーへ CODEX_HOME を渡さず、独自の CODEX_HOME を持つ環境では検査先とサーバーの書き込み先がずれていた。up の始めで絶対パスを 1 つに決め、記録・env -i・down の比較へ同じ値を使う（down は記録から読む）
+
+- **fix(uat): UAT のサーバーの opencode-v2 と hook のディレクトリを run の下へ隔離し、codex の共有ファイルの書き換えを失敗として検出する** (#3342): UAT のサーバーが本番の ~/.commandmate/opencode-v2 の記録を消し、~/.commandmate/hooks に UAT のポートを指す設定を残しうるため、CM_OPENCODE_V2_DIR と CM_AGENT_HOOKS_DIR を run の下に向け、isolation.checks に検査を足した。codex の hooks.json と relay は up 前後の sha256 を比べ、変わっていれば down が失敗する。
+
+- **fix(detection): codex のターンの途中で `capture --json` の `sessionStatus` が `ready` になっていたのを直し、hooks を出している codex では画面だけでターンを閉じないようにした** (#3337): codex 0.160.0 は作業中の行の記号を `•` と `◦` で点滅させ、再接続中は見出しが `Reconnecting...` になるが、検出は `•` と決まった動詞でしかこの行を読まず、`◦` の画面などが「入力待ち」と読まれていた。3 回続けて当たるとターンが `scraper_evidence` で閉じられ、ターンの途中で `ready` が出て、それを見て送った依頼が実行中のターンに割り込んだ。作業中の行を経過時間つきの `(… • esc to interrupt)` で読むようにし（`tests/fixtures/codex-mid-turn-3337/`）、hooks を出している codex では、画面の読みでターンを閉じるのを、`Stop` が来ないと分かる中断の画面（`■ Conversation interrupted`。バックグラウンドの端末の行を挟んでもよい。中断では `Stop` が来ないことを実測）のときだけにした。Claude などほかのツールと hooks の無いソースは従来どおり画面で閉じる（Claude の中断は `Interrupted` の行が出る形と、送った文が入力欄に戻るだけの形があり、どちらも `Stop` が来ない）。リレーの返答の送信の可否も同じ規則（`src/lib/session/hook-turn-hold.ts`）で判定し、hooks の codex でターンが開いている間は返答を送らずに待つ。次の依頼を送る前の待ちは `commandmate wait` で行うよう、CLI 操作ガイド（ja / en）に書いた
+
+- **fix(ui): 選択リストの操作を /sessions のタイルのターミナル面にも出し、番号キーはダイアログの範囲で数え、opencode のモデルのキーを 1 か所にする** (#3336): タイルのターミナル面には選択リストの操作が無く、チャット面に戻らないと選べなかったので、ほかのターミナル面と同じ矢印・番号キー・「このセッションのみ」「既定に設定」をフレームの下に出すようにした。番号キーは画面の末尾 40 行から数えていたため、番号の無いダイアログ（opencode の Select agent など）の上に番号つきの返答があると、その数の番号キーが出ていた。カードが描くダイアログの範囲でも数え、小さいほうを使うようにした。チャット面で opencode の選択リストを開くと、モデルのキーがカードとフッタの 2 か所に出ていたので、その間はフッタの帯を出さないようにした（ターミナル面は今までどおり）
+
+- **fix(history): codex 0.160.0 の画面の読み取りが、入力欄より下の行を返答として保存しないようにし、既に保存された起動画面の行を消す手順を足した** (#3335): codex 0.160.0 は alternate screen に描くので、行数のカーソルは入力欄の位置（996〜1000）に止まったまま動かない。画面の読み取りはこの版の返答を取り出さず、返答は codex の転写（Stop の hook）から履歴に入る、と決めてコードに書いた。そのうえで、送信直前の退避がカーソルの位置から読んでステータスバーや `? for shortcuts` を返答として保存していたのを止めた。#3293 より前に保存された codex / vibe-local の起動画面の行は自動では消さず、`node scripts/cleanup-startup-banner-rows.mjs --db <path>`（既定は dry-run、`--apply` で削除）で利用者が消せる。手順はトラブルシューティングの文書にある
+
+- **fix(security): 別の CommandMate サーバーの同名セッションに、attach・ターミナル入力・リレー配送からキーが届かないようにする** (#3334): #2865 / #3290 で `/api/worktrees/[id]/` の下のルートは別サーバーのセッションを 409 で断るようになったが、ほかの経路は名前だけで相手を決めていた。`commandmate attach` はサーバーに持ち主を確かめ、サーバーが接続する名前そのものを自分のものと確かめたときだけキー有効で attach し、別サーバーのセッションや持ち主が分からないとき（404・古いサーバー・応答なしを含む）は read-only（`-r`）で attach し（`--live` と tmux の中からの切り替えは断る）、WebSocket のターミナルは入力・リサイズ・フォールバックの取り込みのたびに持ち主を確かめ直して届いた順に送り、リレーの配送は `isRunning()` や画面の読み取りより前に持ち主を確かめて保留にし、応答の poller の tick とターミナルの画面の push も読む前に持ち主を確かめ、別サーバーのものは読まず、チャットと履歴に保存も配信もしない（poller はセッションが無いときと同じく止める）。画面のペインは「Attaching…」のまま止まらず「動いていない」と表示し、スマホの承認シートと選択リストの操作も消し、CLI はこの 409 を「別の CommandMate サーバーのセッションなので、送る・読む・止めるのどれもしなかった」と読める文で伝える（終了コードは従来どおり 99）
+
+- **fix(api): JSON の object ではない本文（null・配列・数値・文字列）を、分割代入するルートで 400 にした** (#3333): #3295 は構文エラーだけを 400 にしていたため、`terminal`・`respond`・`capture` などに `null` を送ると TypeError が外側の catch に落ちて 500 とエラーログになっていた。`readJsonObjectBody` と `readOptionalJsonObjectBody`（本文が無い・壊れているときは `{}` で進む）を足し、自分で本文を読む git・memos・todos・schedules などの経路も含めて切り替え、`{ error: 'Invalid request body' }`（files・clone などは各ルートの形）の 400 を返し、error ログを出さない。
+
+- **fix(ui): 別のペインの最大化で隠れたペインは、承認の表示を数えない** (#3332): 止まり検知の案内が出たペインを最大化で 10 秒以上隠して戻しても案内が残っていたため、隠れている間は止まり検知に承認を渡さないようにした（承認の欄は描いたままで、編集中の回答は残る）。10 秒以上隠すと戻したとき案内が消え、10 秒未満なら残る。ポーリングとスクロール位置は今までどおり保つ。
+
+- **fix(ui): ブラウザ側 Auto-Yes と Command Code の計画レビューも、承認の応答を共通の読み方で読む** (#3331): Auto-Yes はサーバーのポーラーが無いとき、断られた答え（200 の `success: false`・404 `decision_not_found`）や 500・通信の失敗でも「Auto responded」と出していた。応答を `readPromptResponseOutcome` で読み、受け付けられたときだけ出す（再送はしない）。通知は値が null に戻っても決まった時間で消え、同じ答えが 2 回続いても 2 回出る。計画レビューは 2xx で `success` の無い応答を失敗としていたが、ほかの経路と同じく届いたものとして扱う（拒否と失敗の表示は今までどおり画面の中に出る）
+
+- **fix(hooks): 実行中のターンに渡されたキューの通知で、ターンを付け替えない** (#3330): Claude Code はバックグラウンドの処理の完了通知を実行中のターンへ渡すたびに UserPromptSubmit を発火し、受け口はそのたびに新しいターンを開いていた（`turnId` と `openedAt` がターンの途中で変わる）。`prompt` が `<task-notification>` で始まり、同じセッションのターンが開いているときは、そのターンへ加えるようにした。`capture --json` の `turnId` は 1 つのターンの間変わらず、`commandmate wait` はそのターンの `stop` で完了を返す。通知でない入力（中断して送り直した文など）と、ターンが閉じた後の通知は、今までどおり新しいターンを開く。手で設定した中継スクリプト（cmate-agent-event.sh）は prompt の本文を送らずに通知かどうかだけ（`queuedNotice`）を送り、自動の hook と中継を併用して印のある方が重複として捨てられたときも、開き直したターンを元に戻す
+
+- **fix(auto-yes): セッションが動いていないインスタンスの Auto-Yes を、約 12 分で黙って無効にしないようにした** (#3329): ポーラーが「セッションが無い」を capture の失敗として数え、20 回目に consecutive_errors で止めていた。セッションが無いときは数えずに 1 分ごとに待つようにしたので、Auto-Yes は期限まで有効のままで、セッションが起動したら答える。セッションはあるのに読めない失敗が続いたときは、今までどおり止まる。セッションが無いかどうかは tmux の has-session の終了コードで見分け、tmux に問い合わせられない（タイムアウト・実行の失敗）ときは今までどおり数えて止まる。あわせて、連続エラーの数をポーリングが最後まで正常に終わった回でも 0 に戻すようにした（これまでは答えを送ったときだけ戻り、ときどきの失敗が長い時間で 20 回たまると、連続していなくても止まっていた。答えの送信に失敗した回は戻さない）
+
+- **fix(ui): ターミナル面の選択リストにも「このセッションのみ」「既定に設定」と番号キーを出す** (#3305): #2297 は選択リストの操作（番号キー、Claude の `/model` の「このセッションのみ（`s`）」「既定に設定（Enter）」と注意文）をチャット面のカードにだけ足したため、ターミナル面（PC の入力欄の上、スマホの入力欄の上のドック）で押せる確定は、利用者の既定のモデル（`~/.claude/settings.json`）を書き換える Enter だけで、注意文も無かった。「選択リストに何を出すか」の判断を `src/lib/session/selection-list-ops.ts`（`readSelectionListFrame` でフレームを読み、`resolveSelectionListOps` で決める）1 つにまとめ、チャット面のカード・PC のフッタ・スマホのドックが同じ部品 `SelectionListKeys` を載せるようにした。ターミナル面でも Claude の `/model` に「このセッションのみ」「既定に設定」と注意文が出て、番号つきの一覧（Codex の `/model` など）には番号キーが出る。ターミナル面では「既定に設定」が出ている間、ラベルの無い Enter（↵）は出さない。`s` を受けないツールと、フッタがセッションだけの確定を言わない画面は、今までどおり矢印＋ Enter / Esc。チャット面の表示は変えていない。スマホのドックのある画面はフレームを持たないので、画面の poll（`useWorktreeDetailController`）が、選択リストのフラグを受け取ったのと同じ応答のフレームを読み、読み取り（4 つの欄）だけを持ってドックへ渡す。ターミナルのタブに依らないので、スマホで履歴・ファイル・ツール・情報のタブを開いている間も、ドックには同じ操作が出る。Plan review の操作と opencode のモデルのキーは、今までどおりチャット面のカードだけに出る
+
+- **fix(mobile): スマホでエージェントのタブやインスタンスを切り替えた直後、モードのボタン（shift+tab）が前のエージェントの状態のまま押せる問題を修正** (#3304): スマホの画面のコントローラー（`useWorktreeDetailController`）は、取りにいく対象が変わっても `sessionStatus`・`agentMode`・`isDismissablePanelActive`・`isUnclassifiedActive`・`isPagerActive`・`startingSince` を前のエージェントの値のまま持ち、後始末そのものもツールが変わったときにしか走らなかった（同じツールの別インスタンスへの切り替えでは、次の定期の取得まで 2〜5 秒そのまま）。切り替え先が許可ダイアログを出していると、その間の shift+tab は「このセッションの全編集を許可」として届く。「まだ何も届いていない」の値の一覧を `PANE_GATE_NOTHING_ARRIVED`（`src/lib/session/pane-gate-state.ts`）の 1 つにし、PC の pane のフック（`useTerminalPanePolling`）とコントローラーの両方がそこから始まり、そこへ戻すようにした。コントローラーは、ツール・インスタンス（スマホの幅のとき）・worktree のどれかが変わったら、一覧と prompt・履歴を戻してすぐに取り直す。切り替えた直後のボタンは押せず、モードのチップは出ない。切り替え先の最初の応答が届くと、その状態で押せる・押せないが決まる。スマホで別インスタンスへ切り替えたとき、前のインスタンスの確認シートと履歴が次の取得まで残ることも無くなった。PC の表示は変わらない。
+
+- **fix(hooks): 短いターンの直後に始まったターンの開始が重複として捨てられ、エージェントが動いているのに「前のターンが終わった」のままになる問題を修正** (#3301): 重複の判定（`isDuplicateAgentEvent`、3 秒の窓）はターンの開始にもかかり、キーにターンを表すものが無いので、前のターンの開始から 3 秒以内に始まった次のターンの開始を、前の開始の写しとして捨てていた（本番のログ 2026-10-04: 開始の 2.62 秒後に `stop`、その 22 ms 後に次の開始）。サーバーはそのターンを開かず、状態の表示は `ready` のままで、そのターンの `stop` も捨てることがあった。`stop` を適用したら、そのインスタンス・セッションのターンの開始（`user_prompt_submit` / `pre_tool_use` / `post_tool_use`）を窓から外すようにした（#3289 の逆向き）。OpenCode V2 は `stop` が窓を通らないので、`classifyAgentEventDelivery` の側で同じように外す（`session.execution.started` が 3 秒以内に続くと、2 つ目のターンが開かなかった）。`stop` を挟まずに数 ms の間隔で届く `user_prompt_submit` は、今までどおり 1 回として扱う（これは二重配送ではなく、Claude Code がキューにたまった通知を実行中のターンへ渡すときに、通知 1 件ごとに `UserPromptSubmit` を発火するもの）。ターンの開始の写しが、そのターンの `stop` より後に届いた場合（待たれない hook を手で設定し、ターンがその遅れより短いときだけ起こる）は、写しに区別する材料が無いので次のターンの開始と読む。
+
+- **fix(cli): `commandmate instances` の AUTO_YES 列が、Auto-Yes を有効にした停止中のインスタンスで `no` になるのを直す** (#3300): 列を `current-output` の `autoYes` から読んでいたが、動いていないセッションの応答にはこのキーが無く、無いキーを `false` と読んでいた（CLI 側の応答の型がこの欄を必須と書いていたので、型からは分からなかった）。Auto-Yes は worktree × インスタンスごとの状態でセッションが無くても有効にできるので、`commandmate ls` と同じ出どころ（サーバーの Auto-Yes の状態。`GET /api/worktrees/:id/auto-yes` の `instances`）から読むようにした。一覧 1 回につき、インスタンスの数によらず問い合わせが 1 回増える。この問い合わせに答えない古いサーバーでは、今までどおりの読み方に戻る。あわせて、CLI 側の型で動いていないセッションの応答に無い 13 欄を省略可にし、`capture --json` に出ていたのに型と文書に無かった `agentMode`・`composerText`・`composerState` を、型と `cli-operations-guide.md`（ja / en）の欄の表に足した（`agentMode` の `unknown` は「既定のモード」ではなく「判定していない」）。同じ文書の「画面が空かどうか」の読み方は、`realtimeSnippet` をそのまま読む形（止まっているセッションではキーが無く例外になる）から、先に `isRunning` を見る形に直した。サーバー側の型と CLI 側の写しで、最上位の欄の名前か必須・省略可が食い違うとテストが落ちる
+
+- **docs(cli): `statusEvidence` と `isUnclassifiedActive` を別の事実とする説明に直し、古いコメントを直し、意図した違いに理由を足した** (#3298): cli-operations-guide（日英）とサーバー側の型・ビルダー・テストのコメントが、2 つを「同じ事実」「否定」と書き `ready`/`no_recent_output` 経路を残していたのを #2011 後の定義に直し、`Mirrors:` の先・`wait.ts` の Path B のコメントの位置・`extractResponse` の `@returns`・テスト名の誤りを直し、画面の実装の違い 7 か所に理由のコメントを足した
+
+- **fix(test): 負荷で落ちる 2 本のテストに余裕を持たせた** (#3297): no-procfs-env-fixtures の走査に 60 秒のタイムアウトを付け、走査中に消えたファイルは読み飛ばす。tmux-navigation の sendSpecialKeysAndInvalidate は偽タイマーにし、直後 1 回・250ms 後 2 回を固定した。status-detector-selection の agy 権限ペインの 3 本（resetModules 後の動的 import）に 60 秒のタイムアウトを付け、virtual-core が unmount 後も残す 150ms のスクロール終了タイマーを消す helper（tests/helpers/track-window-timers.ts）を足し、本物の virtualizer にスクロールを送る ChatTranscript の 4 テスト（jump-fab-2283、landing-2820、live-turn-2233、tail-anchor-2283）に入れた（ファイル終了後に window is not defined が出てシャードが落ちるのを防ぐ）。製品の動きは変わらない
+
+- **fix(cli-tools): 5 ツールのセッション既存ログ名をそろえ、opencode の起動し直しで幅の警告が 2 回出るのを 1 回にした** (#3296): ログ名が #480 の機械変換で `*-session-sessionname` 等になっていたため `<tool>-session-exists` にそろえ、opencode は `launchSession` 冒頭で幅を 1 回だけ解決する。opencode-v2 も `CM_OPENCODE_PANE_WIDTH` が退けられたとき warn を出す。
+
+- **fix(api): 壊れた JSON や空の本文を受けた API が 500 ではなく 400 `Invalid request body` を返すようにした（worktrees の terminal / send / respond / capture / prompt-response / timers など 31 か所）** (#3295): 本文の `req.json()` が外側の try の中にあり、構文エラーが catch で 500 とエラーログになっていた。共通の `readJsonBody` で先に読んで 400 を返し（各ルートの入力エラーの形に合わせる）、取りこぼしを `tests/unit/guards/route-json-body-guard-3295.test.ts` で防ぐ。正しい JSON での動きは変わらず、クライアントの誤りがエラー率に数えられなくなる
+
+- **fix(ui): 止まり検知が数える承認を、実際に描いている承認と同じ値から作るようにした** (#3294): スマホはシートを隠す条件（直接入力のキーボード・起動中・Auto-Yes）を見ずに数えていたため、10 秒以上隠れた後も案内が残っていた。PC とスマホそれぞれで「承認の部品を描くか」を 1 つの値にして、描画と数える対象の両方で使う。
+
+- **fix(history): codex と vibe-local の起動画面が、返答の吹き出しとして履歴に保存されるのを直した** (#3293): 起動画面は入力欄が出ていて作業中の表示が無いので、poller と送信直前の退避の両方が「完了した返答」と読み、読み取り位置（新しいセッションでは 0 行目）から下のバナーの行（版、作業ディレクトリ、ロゴなど）を返答として保存していた。この 2 つのツールにも、ほかの 5 つのツールと同じ「利用者の発言のエコーがまだ無い画面は返答ではない」の防御を足した（`src/lib/polling/startup-screen.ts`。入力欄が画面にあり、その上にエコーが無いとき。codex は、バナーの行（`>_ OpenAI Codex (v…)`）が入力欄より上にあることも確かめる。codex 0.160.0 は scrollback を持たず、画面より長い返答ではエコーが画面の外へ出るので、エコーが無いことだけでは起動画面と言えない。2 つの経路が同じ判定を読む）。保存はせず、読み取り位置だけを今までと同じ行まで進めるので、最初の返答の保存は変わらない。セッションを起動するたびに 1 つ増えていた、返答ではない「Assistant」の吹き出しと、その完了通知が出なくなる。既に保存された行は消さない
+
+- **fix(ui): 承認の送信が 2xx 以外で返ったとき、PC の画面に何も表示されない問題を修正** (#3292): 承認の応答を読む処理が 3 か所（PC の分割ペイン、詳細画面のコントローラー、スマホの `/respond`）に別々にあり、うち 2 か所は 2xx 以外を `throw` して `console.error` するだけだった。そのため PC とスマホの `/prompt-response` では、送信中の表示が消えてパネルが残るだけで、理由が分からなかった。応答の読み取りを 1 つの関数（`src/lib/prompt-response-outcome.ts` の `readPromptResponseOutcome`。結果は「受け付けた・断られた・失敗した」の 3 通り）にまとめ、3 か所とも同じ動きにした。受け付けられなかったときは、どの経路でも通知を出し、承認のカードを残し、画面を取り直す。通知の文言は 2 つで、承認がもう無いと応答が言っているとき（200 の `success: false`、`/respond` の 404 `decision_not_found`）は今までどおり「ダイアログの状態が変わったため送信できませんでした。画面を確認してください。」、それ以外の 2xx 以外（400 / 409 / 500 / 502 など）と通信の失敗は新しい「送信に失敗しました。もう一度お試しください。」になる。スマホの `/respond` は、これまで 2xx 以外をすべて前者の文言で出していたので、サーバー側の失敗のときの文言が変わる。200 の拒否の扱いと、成功したときの動きは変えていない。ブラウザ側の Auto-Yes（`useAutoYes`）は変えていない。
+
+- **fix(mobile): スマホの承認シートに、選択肢の説明と「何問目か」の行を出す** (#3291): `MobilePromptSheet` のラジオ・チェックボックスの一覧は番号とラベルしか描かず、`description` と AskUserQuestion の何問目かの行が PC（PromptPanel）にしか出なかった。PC と同じ条件で両方の一覧に説明を、シートの上部に進捗の行を出すようにした。画面を読めないとき（unclassified）の質問とラベル一覧も、PC と同じく出す（決定の id つきの質問では、質問文は 1 回だけ）
+
+- **fix(security): 直接入力と Auto-Yes の有効化が、別のサーバーが作った同名の tmux セッションに届かないようにする** (#3290): `POST /api/worktrees/[id]/direct-input` はセッションを名前だけで探して送っていたので、別の CommandMate サーバーが同じ名前の tmux セッションを持っていると、直接入力バーとスマホの直接入力キーボードで打ったキーがそのセッションに届き、応答は成功になっていた（#2865 が所有の確認を入れたとき、対象のルートを tmux の関数名の grep で決めたため、`sendDirectInput` 越しに tmux へ届くこのルートが漏れた）。ルートで `checkSessionOwnership` を呼び、`#{session_path}` がこの worktree のものでないセッションには、ほかのルートと同じ 409（`session_owned_by_other_server`）を返して何も送らない。セッションが無いときは今までどおり 404。`POST /api/worktrees/[id]/auto-yes` の有効化も同じ 409 で断る（今までは 200 を返して画面は ON と表示するが、ポーラーは応答しなかった）。無効化と、まだ起動していないセッションへの有効化は今までどおり通る。自分のセッションへの直接入力と Auto-Yes は変わらない。あわせて、`src/app/api/worktrees/[id]/` の下で tmux に届くルートを import のつながりから列挙し、列挙した各ルートに別サーバーのセッションを当てて「409 を返し、tmux に何も送らない」ことを確かめるガードを足した（`tests/unit/guards/worktree-route-session-ownership-3290.test.ts`。列挙に出たルートが、表にも理由つきの除外の一覧にも無ければ落ちる）。CLI の `commandmate send --contract --auto-yes` は、Auto-Yes の有効化が断られたとき（この 409 を含む）、作った task を `failed` にして終わる（今までは送信の前で止まり、task が `pending` のまま残った。メッセージは送らない）
+
+- **fix(hooks): 自分で再開した短いターンの `stop` が重複として捨てられ、`commandmate wait` が完了を返さない問題を修正** (#3289): 重複の判定（`isDuplicateAgentEvent`、3 秒の窓）のキーは「インスタンス・イベント・細目・セッション id」で、ターンを表すものが無かった。そのため同じセッションの `stop` は、別のターンのものでも 3 秒以内なら前の `stop` の写しとして捨てられ、2 つ目のターンが開いたままになっていた（実測 2026-10-05 / claude 2.1.289: バックグラウンドの処理の完了通知で始まったターンが、前の `stop` の 1.47 秒後に終わった）。ターンの開始（サーバーがターンを開く 3 つのイベント `user_prompt_submit` / `pre_tool_use` / `post_tool_use`）を受けたら、そのインスタンス・セッションの `stop` を窓から外すようにした。同じターンの `stop` が 2 回届く環境（#1722 の二重配送）では、今までどおり 2 回目を捨てる。`stop` 以外のイベントの判定と、opencode の経路（id による判定）は変えていない。前のターンの `stop` の写しが次のターンの開始より後に届いた場合（待たれない hook を手で設定したときだけ起こる）は、写しに区別する材料が無いので次のターンの終了と読み、`wait` は 1 ターン早く返る。
+
+- **fix(detection): codex の入力欄に 2 行以上の文字があっても、アイドルなら ready と判定する** (#3205): 入力欄の 2 行目以降が入力欄の外（作業中の行）として読まれ、アイドルの codex が running / thinking_indicator（生成中）と表示されていた。入力欄の範囲を送信側と同じ読み方（findCodexInputBox）で求め、入力欄の最終行が最下段なら `›` の行を最下段として読むようにした。あわせて、送信の確認（Enter の後の読み直し）が、複数行の本文の途中にある `›` で始まる行を入力行と取り違えて、入力欄に残った本文を「送信済み」と読むことも直した
+
+### Documentation
+
+- **docs(orchestrate): 整合性レビューを「試行中の段」として 2026-10-20 までの期限付きで orchestrate.md の 5-2b に書いた** (#3392): #3308 の試行を受けた利用者の判断（対象を絞って期限付きで続ける）が文書に無かったため、期限・対象・段・担当・再レビュー 3 回の上限・数え方・記録の様式・期限の集計手順を足した。常設はしない
+
 ## [0.44.2] - 2026-10-04
 
 > **Highlight**: 画面のうち「いま操作できる部分」（入力欄やダイアログ）の切り出しを全エージェント共通で 1 回だけ行うようにし、状態表示と Auto-Yes が同じものを読むようにした。会話に引用されたダイアログや footer の文字を本物の操作部分と読む不具合がツールごとに 1 件ずつ起きていた原因（判定がツール別に散っていたこと）を取り除いた。あわせて、承認ダイアログの見せ方・答え方をサーバー側の `promptView` で 1 か所で決め、PC・スマホ・チャット面・CLI が同じ結果を読むようにした。

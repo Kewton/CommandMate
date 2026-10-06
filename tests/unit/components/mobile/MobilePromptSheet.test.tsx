@@ -8,7 +8,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 
-import { MobilePromptSheet, optionTakesTypedText } from '@/components/mobile/MobilePromptSheet';
+import { MobilePromptSheet } from '@/components/mobile/MobilePromptSheet';
+import { optionTakesTypedText } from '@/lib/session/prompt-view';
 import type { MobilePromptSheetProps } from '@/components/mobile/MobilePromptSheet';
 import { isTypedTextFieldOption } from '@/lib/detection/prompt-detect-multiple-choice';
 import type { YesNoPromptData, MultipleChoicePromptData } from '@/types/models';

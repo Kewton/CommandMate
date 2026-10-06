@@ -51,9 +51,10 @@
  * @module lib/hooks/sources/codex/history
  */
 
-import { readdir, stat } from 'fs/promises';
+import { getOrInitGlobal } from '@/lib/global-state';
+import { readdir } from 'fs/promises';
 import { homedir } from 'os';
-import { join, resolve, sep } from 'path';
+import { join } from 'path';
 import { buildCompositeKey } from '@/lib/auto-yes-state';
 import { readTranscriptTail, TRANSCRIPT_TAIL_BYTES } from '@/lib/history/transcript-tail';
 import {
@@ -65,6 +66,14 @@ import { advanceCapturedLineForTranscriptTurn } from '@/lib/assistant-response-s
 import { createLogger } from '@/lib/logger';
 import { codexPromptRequestId, codexTurnRequestId } from '@/types/agent-transcript';
 import type { AgentInstanceRef } from '../types';
+import {
+  acceptPathUnderRoot,
+  isReadableFile,
+  nextTurnOpensAt,
+  resolveAssistantTimestampMs,
+  resolveSessionIdFromEvents,
+  selectUnwrittenTurns,
+} from '../transcript-history';
 import type { StructuredHistoryCaptureReport } from '@/lib/polling/structured-history-gate';
 import {
   buildCodexTurns,
@@ -137,7 +146,7 @@ declare global {
  * codex sends `session_id` on every event it delivers — but a future one that
  * did not would otherwise blank the pointer mid-session.
  */
-const sessionPointers = (globalThis.__codexTranscriptSessions ??= new Map<string, string>());
+const sessionPointers = getOrInitGlobal('__codexTranscriptSessions', () => new Map<string, string>());
 
 /**
  * Where each session id's rollout file was found.
@@ -148,7 +157,7 @@ const sessionPointers = (globalThis.__codexTranscriptSessions ??= new Map<string
  * session started, which is not derivable from the id — and a scan of 1,791
  * files on every finished turn is not something to do twice.
  */
-const rolloutPaths = (globalThis.__codexTranscriptPaths ??= new Map<string, string>());
+const rolloutPaths = getOrInitGlobal('__codexTranscriptPaths', () => new Map<string, string>());
 
 function keyOf(target: AgentInstanceRef): string {
   return buildCompositeKey(target.worktreeId, target.cliToolId, target.instanceId);
@@ -175,27 +184,7 @@ export function resetCodexTranscriptSessions(): void {
  * keeps being the only record, which is merely the status quo.
  */
 export async function resolveCodexSessionId(target: AgentInstanceRef): Promise<string | null> {
-  const key = keyOf(target);
-  try {
-    const { getLastAgentEvent } = await import('@/lib/session/agent-event-state');
-    const sessionId = getLastAgentEvent(
-      target.worktreeId,
-      target.cliToolId,
-      target.instanceId
-    )?.sessionId;
-    if (typeof sessionId === 'string' && sessionId.length > 0) {
-      sessionPointers.set(key, sessionId);
-      return sessionId;
-    }
-  } catch (error) {
-    // A state module that cannot be reached is one that knows no session id.
-    logger.debug('codex-transcript-session-lookup-failed', {
-      worktreeId: target.worktreeId,
-      instanceId: target.instanceId ?? target.cliToolId,
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
-  return sessionPointers.get(key) ?? null;
+  return resolveSessionIdFromEvents(target, sessionPointers, keyOf(target), logger, 'codex-transcript-session-lookup-failed');
 }
 
 /**
@@ -229,12 +218,7 @@ export function codexSessionsRoot(codexHome: string): string {
  * @returns The resolved path, or null when it is not acceptable
  */
 export function acceptCodexRolloutPath(codexHome: string, candidate: string): string | null {
-  if (!candidate.endsWith(CODEX_ROLLOUT_EXTENSION)) return null;
-  if (candidate.includes('\0')) return null;
-  const root = resolve(codexSessionsRoot(codexHome));
-  const resolved = resolve(candidate);
-  if (resolved !== root && !resolved.startsWith(root + sep)) return null;
-  return resolved;
+  return acceptPathUnderRoot(codexSessionsRoot(codexHome), CODEX_ROLLOUT_EXTENSION, candidate);
 }
 
 /** Whether a file name is the rollout of this session. */
@@ -587,27 +571,7 @@ async function selectUnwrittenCodexTurns(
   target: AgentInstanceRef,
   turns: readonly CodexTurnAccumulator[]
 ): Promise<PendingCodexTurns> {
-  const [{ getDbInstance }, { findMessageByRequestId }] = await Promise.all([
-    import('@/lib/db/db-instance'),
-    import('@/lib/db'),
-  ]);
-  const db = getDbInstance();
-
-  for (let index = turns.length - 1; index >= 0; index -= 1) {
-    const requestId = codexTurnRequestId(turns[index].turnId);
-    if (!findMessageByRequestId(db, target.worktreeId, requestId)) continue;
-    return {
-      turns: turns.slice(index + 1),
-      previousStartedAt: turns[index].startedAt,
-      anchored: true,
-    };
-  }
-
-  return {
-    turns: turns.slice(-1),
-    previousStartedAt: turns.length > 1 ? turns[turns.length - 2].startedAt : 0,
-    anchored: false,
-  };
+  return selectUnwrittenTurns(target, turns, (turn) => codexTurnRequestId(turn.turnId));
 }
 
 /**
@@ -631,14 +595,6 @@ async function locateCodexRollout(codexHome: string, sessionId: string): Promise
 
   rolloutPaths.set(memoKey, accepted);
   return accepted;
-}
-
-async function isReadableFile(path: string): Promise<boolean> {
-  try {
-    return (await stat(path)).isFile();
-  } catch {
-    return false;
-  }
 }
 
 /**
@@ -695,7 +651,7 @@ async function recordCodexUserTurns(
   return last;
 }
 
-/**
+/*
  * When the assistant row for this turn is dated.
  *
  * **The turn's LAST record, not its first (Issue #2273).** #2197 dated the reply
@@ -723,19 +679,6 @@ async function recordCodexUserTurns(
  * @param nextTurnOpensAt - Epoch ms of the next turn's user row, or null when
  *   this is the newest turn in the window
  */
-function resolveAssistantTimestampMs(
-  turn: CodexTurnAccumulator,
-  userRow: RecordedUserTurn,
-  lastRecordAt = 0,
-  nextTurnOpensAt: number | null = null
-): number {
-  const earliest =
-    userRow.timestampMs === null
-      ? turn.startedAt
-      : Math.max(turn.startedAt, userRow.timestampMs + 1);
-  const latest = nextTurnOpensAt === null ? Number.POSITIVE_INFINITY : nextTurnOpensAt - 1;
-  return Math.max(earliest, Math.min(lastRecordAt, latest));
-}
 
 /**
  * When each turn's last record was written (Issue #2273).
@@ -764,7 +707,7 @@ function lastCodexRecordAt(records: readonly CodexRolloutRecord[]): Map<string, 
   return at;
 }
 
-/**
+/*
  * The instant the next pending turn's prompt row carries, or null (Issue #2273).
  *
  * The user row's own timestamp when there is one, because that is what History
@@ -773,15 +716,6 @@ function lastCodexRecordAt(records: readonly CodexRolloutRecord[]): Map<string, 
  * prompt is while the previous turn was still running. The turn's start is the
  * fallback for a turn that produced no row at all.
  */
-function nextTurnOpensAt(
-  turns: readonly CodexTurnAccumulator[],
-  userRows: readonly RecordedUserTurn[],
-  index: number
-): number | null {
-  const next = turns[index + 1];
-  if (!next) return null;
-  return userRows[index + 1]?.timestampMs ?? next.startedAt;
-}
 
 /**
  * Write one rendered turn, unless it is already there.

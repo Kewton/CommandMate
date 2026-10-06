@@ -76,9 +76,9 @@
  * @module lib/hooks/sources/antigravity/history
  */
 
-import { stat } from 'fs/promises';
+import { getOrInitGlobal } from '@/lib/global-state';
 import { homedir } from 'os';
-import { join, resolve, sep } from 'path';
+import { join } from 'path';
 import { buildCompositeKey } from '@/lib/auto-yes-state';
 import { readTranscriptTail, TRANSCRIPT_TAIL_BYTES } from '@/lib/history/transcript-tail';
 import {
@@ -90,6 +90,14 @@ import { advanceCapturedLineForTranscriptTurn } from '@/lib/assistant-response-s
 import { createLogger } from '@/lib/logger';
 import { antigravityPromptRequestId, antigravityTurnRequestId } from '@/types/agent-transcript';
 import type { AgentInstanceRef } from '../types';
+import {
+  acceptPathUnderRoot,
+  isReadableFile,
+  nextTurnOpensAt,
+  resolveAssistantTimestampMs,
+  resolveSessionIdFromEvents,
+  selectUnwrittenTurns,
+} from '../transcript-history';
 import type { ChatMessage } from '@/types/models';
 import type { StructuredHistoryCaptureReport } from '@/lib/polling/structured-history-gate';
 import {
@@ -167,7 +175,7 @@ declare global {
  * agy sends `conversationId` on every event it delivers — but a future one that
  * did not would otherwise blank the pointer mid-session.
  */
-const conversationPointers = (globalThis.__antigravityTranscriptConversations ??= new Map<
+const conversationPointers = getOrInitGlobal('__antigravityTranscriptConversations', () => new Map<
   string,
   string
 >());
@@ -214,7 +222,7 @@ interface UnsettledAntigravityTurns {
  * coverage #2438 shipped. Persisting it would make a row's repair depend on a
  * table that outlives the transcript window it can only be repaired from.
  */
-const unsettledTurns = (globalThis.__antigravityUnsettledTurns ??= new Map<
+const unsettledTurns = getOrInitGlobal('__antigravityUnsettledTurns', () => new Map<
   string,
   UnsettledAntigravityTurns
 >());
@@ -361,27 +369,7 @@ async function resolveAntigravityStopAt(target: AgentInstanceRef): Promise<numbe
 export async function resolveAntigravityConversationId(
   target: AgentInstanceRef
 ): Promise<string | null> {
-  const key = keyOf(target);
-  try {
-    const { getLastAgentEvent } = await import('@/lib/session/agent-event-state');
-    const conversationId = getLastAgentEvent(
-      target.worktreeId,
-      target.cliToolId,
-      target.instanceId
-    )?.sessionId;
-    if (typeof conversationId === 'string' && conversationId.length > 0) {
-      conversationPointers.set(key, conversationId);
-      return conversationId;
-    }
-  } catch (error) {
-    // A state module that cannot be reached is one that knows no conversation.
-    logger.debug('antigravity-transcript-conversation-lookup-failed', {
-      worktreeId: target.worktreeId,
-      instanceId: target.instanceId ?? target.cliToolId,
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
-  return conversationPointers.get(key) ?? null;
+  return resolveSessionIdFromEvents(target, conversationPointers, keyOf(target), logger, 'antigravity-transcript-conversation-lookup-failed');
 }
 
 /**
@@ -439,12 +427,11 @@ export function acceptAntigravityTranscriptPath(
   agyHome: string,
   candidate: string
 ): string | null {
-  if (!candidate.endsWith(ANTIGRAVITY_TRANSCRIPT_EXTENSION)) return null;
-  if (candidate.includes('\0')) return null;
-  const root = resolve(antigravityBrainRoot(agyHome));
-  const resolved = resolve(candidate);
-  if (resolved !== root && !resolved.startsWith(root + sep)) return null;
-  return resolved;
+  return acceptPathUnderRoot(
+    antigravityBrainRoot(agyHome),
+    ANTIGRAVITY_TRANSCRIPT_EXTENSION,
+    candidate
+  );
 }
 
 /** What {@link captureAntigravityTranscriptTurn} needs from its caller. */
@@ -781,28 +768,7 @@ async function selectUnwrittenAntigravityTurns(
   target: AgentInstanceRef,
   turns: readonly AntigravityTurnAccumulator[]
 ): Promise<PendingAntigravityTurns> {
-  const [{ getDbInstance }, { findMessageByRequestId }] = await Promise.all([
-    import('@/lib/db/db-instance'),
-    import('@/lib/db'),
-  ]);
-  const db = getDbInstance();
-
-  for (let index = turns.length - 1; index >= 0; index -= 1) {
-    const turn = turns[index];
-    const requestId = antigravityTurnRequestId(turn.conversationId, turn.stepIndex);
-    if (!findMessageByRequestId(db, target.worktreeId, requestId)) continue;
-    return {
-      turns: turns.slice(index + 1),
-      previousStartedAt: turn.startedAt,
-      anchored: true,
-    };
-  }
-
-  return {
-    turns: turns.slice(-1),
-    previousStartedAt: turns.length > 1 ? turns[turns.length - 2].startedAt : 0,
-    anchored: false,
-  };
+  return selectUnwrittenTurns(target, turns, (turn) => antigravityTurnRequestId(turn.conversationId, turn.stepIndex));
 }
 
 /**
@@ -824,14 +790,6 @@ async function locateAntigravityTranscript(
   if (!accepted) return null;
 
   return (await isReadableFile(accepted)) ? accepted : null;
-}
-
-async function isReadableFile(path: string): Promise<boolean> {
-  try {
-    return (await stat(path)).isFile();
-  } catch {
-    return false;
-  }
 }
 
 /**
@@ -882,7 +840,7 @@ async function recordAntigravityUserTurn(
   return recorded;
 }
 
-/**
+/*
  * When the assistant row for this turn is dated.
  *
  * **The turn's LAST record, not its first (Issue #2273).** #2196 dated the reply
@@ -914,21 +872,8 @@ async function recordAntigravityUserTurn(
  * @param nextTurnOpensAt - Epoch ms of the next turn's user row, or null when
  *   this is the newest turn in the window
  */
-function resolveAssistantTimestampMs(
-  turn: AntigravityTurnAccumulator,
-  userRow: RecordedUserTurn,
-  lastRecordAt = 0,
-  nextTurnOpensAt: number | null = null
-): number {
-  const earliest =
-    userRow.timestampMs === null
-      ? turn.startedAt
-      : Math.max(turn.startedAt, userRow.timestampMs + 1);
-  const latest = nextTurnOpensAt === null ? Number.POSITIVE_INFINITY : nextTurnOpensAt - 1;
-  return Math.max(earliest, Math.min(lastRecordAt, latest));
-}
 
-/**
+/*
  * The instant the next pending turn's prompt row carries, or null (Issue #2273).
  *
  * The user row's own timestamp when there is one, because that is what History
@@ -937,15 +882,6 @@ function resolveAssistantTimestampMs(
  * prompt is while the previous turn was still running. The turn's start is the
  * fallback for a turn that produced no row at all.
  */
-function nextTurnOpensAt(
-  turns: readonly AntigravityTurnAccumulator[],
-  userRows: readonly RecordedUserTurn[],
-  index: number
-): number | null {
-  const next = turns[index + 1];
-  if (!next) return null;
-  return userRows[index + 1]?.timestampMs ?? next.startedAt;
-}
 
 /**
  * How many already-written turns are re-rendered and compared (Issue #2438).

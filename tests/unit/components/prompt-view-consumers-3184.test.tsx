@@ -24,7 +24,7 @@ vi.mock('next-intl', async () => {
 import { MobilePromptSheet } from '@/components/mobile/MobilePromptSheet';
 import { PromptPanel } from '@/components/worktree/PromptPanel';
 import { resolveBlockedReason } from '@/components/worktree/ChatSurface';
-import { readPromptDecisionId } from '@/components/worktree/prompt-decision-id';
+import { readDecisionId as readPromptDecisionId } from '@/lib/session/prompt-view';
 import { useAutoYes } from '@/hooks/useAutoYes';
 import { derivePromptView, type PromptView } from '@/lib/session/prompt-view';
 import { WaitExitCode } from '@/cli/types';

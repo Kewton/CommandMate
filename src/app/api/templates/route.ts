@@ -16,6 +16,7 @@ import {
   validateTemplateName,
   validateTemplateContent,
 } from '@/lib/api/template-helpers';
+import { readJsonObjectBody } from '@/lib/api/read-json-body';
 
 export async function GET() {
   try {
@@ -36,7 +37,9 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
+    const parsed = await readJsonObjectBody(request);
+    if (!parsed.ok) return parsed.response;
+    const body = parsed.body;
 
     const bodyError = validateRequestBody(body);
     if (bodyError) return bodyError;

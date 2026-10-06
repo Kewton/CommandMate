@@ -11,11 +11,8 @@
 import { BaseCLITool } from './base';
 import { OLLAMA_MODEL_PATTERN, isValidVibeLocalContextWindow, type CLIToolType } from './types';
 import {
-  hasSession,
-  createSession,
   sendKeys,
   sendSpecialKey,
-  killSession,
 } from '../tmux/tmux';
 import { sendMessageWithSubmitVerification } from './submit-verified-sender';
 import { invalidateCache } from '../tmux/tmux-capture-cache';
@@ -23,23 +20,15 @@ import { getDbInstance } from '../db/db-instance';
 import { getWorktreeById } from '../db';
 import { createLogger } from '@/lib/logger';
 import {
-  TUI_SESSION_CREATE_WAIT_MS,
   TUI_INTERRUPT_SETTLE_MS,
   TUI_EXIT_WAIT_MS,
   VIBE_LOCAL_DOUBLE_ENTER_WAIT_MS,
 } from '@/config/cli-tool-timing-config';
-import { missingToolError } from './install-hints';
 import { beginAgentSession } from '@/lib/session/agent-session-lifecycle';
 import { withLaunchScreenCleared } from '@/lib/session/launch-screen';
+import { getErrorMessage } from '@/lib/errors';
 
 const logger = createLogger('cli-tools/vibe-local');
-
-/**
- * Extract error message from unknown error type (DRY)
- */
-function getErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
 
 /**
  * Wait for vibe-local to initialize after launch.
@@ -57,14 +46,6 @@ export class VibeLocalTool extends BaseCLITool {
   readonly command = 'vibe-local';
 
   /**
-   * Check if vibe-local session is running for a worktree
-   */
-  async isRunning(worktreeId: string, instanceId?: string): Promise<boolean> {
-    const sessionName = this.getSessionName(worktreeId, instanceId);
-    return await hasSession(sessionName);
-  }
-
-  /**
    * Start a new vibe-local session for a worktree
    * Launches `vibe-local -y` in interactive mode within tmux
    *
@@ -72,29 +53,14 @@ export class VibeLocalTool extends BaseCLITool {
    * @param worktreePath - Worktree path
    */
   protected async launchSession(worktreeId: string, worktreePath: string, instanceId?: string): Promise<void> {
-    const vibeLocalAvailable = await this.isInstalled();
-    if (!vibeLocalAvailable) {
-      throw missingToolError(this);
-    }
+    await this.requireInstalled();
 
-    const sessionName = this.getSessionName(worktreeId, instanceId);
-
-    const exists = await hasSession(sessionName);
-    if (exists) {
-      await this.reconcileExistingSession(sessionName, worktreePath);
-
-      // Issue #2070: this branch used to return unconditionally. A tmux session
-      // outlives the agent that was launched into it — a quit, a self-update, a
-      // crash — and the launch was then skipped for a pane holding nothing but a
-      // shell prompt, which left `kill-session` by hand as the only recovery.
-      // When the tool is gone we fall THROUGH and re-send the launch command
-      // into the same pane.
-      if (await this.isToolLive(sessionName, { confirm: true })) {
-        logger.info('vibe-local-session');
-        return;
-      }
-      logger.warn('vibe-local-session-relaunch', { sessionName });
-    }
+    const { sessionName, exists, live } = await this.resolveLaunchPane(worktreeId, worktreePath, instanceId, {
+      logger,
+      liveAction: 'vibe-local-session-exists',
+      relaunchAction: 'vibe-local-session-relaunch',
+    });
+    if (live) return;
 
     // Issue #1759 / #2444: the one line every tool's creation path owes the
     // rest of the system. vibe-local emits no structured events, so the
@@ -111,15 +77,7 @@ export class VibeLocalTool extends BaseCLITool {
       // exists and holds the transcript of the process that died in it; the
       // launch command is re-sent into that same pane.
       if (!exists) {
-        // Create tmux session. Scrollback depth comes from the shared
-        // TMUX_HISTORY_LIMIT default (Issue #1624) — do not re-hardcode it here.
-        await createSession({
-          sessionName,
-          workingDirectory: worktreePath,
-        });
-
-        // Wait a moment for the session to be created
-        await new Promise((resolve) => setTimeout(resolve, TUI_SESSION_CREATE_WAIT_MS));
+        await this.createLaunchPane(sessionName, worktreePath);
       }
 
       // Read Ollama model and context window preferences from DB
@@ -151,7 +109,7 @@ export class VibeLocalTool extends BaseCLITool {
       // Wait for vibe-local to initialize (banner + model loading)
       await new Promise((resolve) => setTimeout(resolve, VIBE_LOCAL_INIT_WAIT_MS));
 
-      logger.info('started-vibe-local-session:sessionname');
+      logger.info('started-vibe-local-session');
     } catch (error: unknown) {
       const errorMessage = getErrorMessage(error);
       throw new Error(`Failed to start Vibe Local session: ${errorMessage}`);
@@ -167,19 +125,12 @@ export class VibeLocalTool extends BaseCLITool {
   async sendMessage(worktreeId: string, message: string, instanceId?: string): Promise<void> {
     const sessionName = this.getSessionName(worktreeId, instanceId);
 
-    const exists = await hasSession(sessionName);
-    if (!exists) {
-      throw new Error(
-        `Vibe Local session ${sessionName} does not exist. Start the session first.`
-      );
-    }
-
     // Issue #2070: the pane exists, but does the AGENT? An agent that quit,
     // updated itself or crashed leaves its tmux session behind, and the send
     // that followed used to sit in the readiness wait until it timed out —
     // leaving `kill-session` by hand as the only recovery. Relaunches into the
     // same pane when the tool is gone; costs one `capture-pane` when it is not.
-    await this.relaunchIfToolExited(worktreeId, instanceId);
+    await this.requireSession('Vibe Local', worktreeId, instanceId, { relaunch: true });
 
     try {
       // Issue #1471: Body/Enter separation + read-back submit verification via the
@@ -200,7 +151,7 @@ export class VibeLocalTool extends BaseCLITool {
       // Issue #405: Invalidate cache after sending message
       invalidateCache(sessionName);
 
-      logger.info('sent-message-to-vibe-local-session:sessi');
+      logger.info('sent-message-to-vibe-local-session');
     } catch (error: unknown) {
       const errorMessage = getErrorMessage(error);
       throw new Error(`Failed to send message to Vibe Local: ${errorMessage}`);
@@ -213,11 +164,10 @@ export class VibeLocalTool extends BaseCLITool {
    * @param worktreeId - Worktree ID
    */
   async killSession(worktreeId: string, instanceId?: string): Promise<void> {
-    const sessionName = this.getSessionName(worktreeId, instanceId);
-
-    try {
-      const exists = await hasSession(sessionName);
-      if (exists) {
+    await this.requestExitAndKill(worktreeId, instanceId, {
+      logger,
+      stoppedAction: 'stopped-vibe-local-session',
+      requestExit: async (sessionName) => {
         // Send Ctrl+C to interrupt any running operation
         await sendSpecialKey(sessionName, 'C-c');
         await new Promise((resolve) => setTimeout(resolve, TUI_INTERRUPT_SETTLE_MS));
@@ -225,17 +175,7 @@ export class VibeLocalTool extends BaseCLITool {
         // Send Ctrl+C again to ensure exit
         await sendSpecialKey(sessionName, 'C-c');
         await new Promise((resolve) => setTimeout(resolve, TUI_EXIT_WAIT_MS));
-      }
-
-      // Kill the tmux session
-      const killed = await killSession(sessionName);
-
-      if (killed) {
-        logger.info('stopped-vibe-local-session:sessionname');
-      }
-    } catch (error: unknown) {
-      logger.error('session:stop-failed', { error: getErrorMessage(error) });
-      throw error;
-    }
+      },
+    });
   }
 }

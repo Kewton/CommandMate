@@ -25,6 +25,8 @@ import {
 import { createLogger } from '@/lib/logger';
 import { getPushDeliveryHealth, type PushDeliveryHealth } from '@/lib/push/delivery-health';
 import { LOCALE_COOKIE_NAME, resolveLocale } from '@/config/i18n-config';
+import { readJsonObjectBody } from '@/lib/api/read-json-body';
+import { readOptionalJsonObjectBody } from '@/lib/api/read-json-body';
 
 export const dynamic = 'force-dynamic';
 
@@ -114,10 +116,12 @@ export function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const body = (await request.json()) as {
+    const parsed = await readJsonObjectBody<{
       subscription?: { endpoint?: unknown; keys?: { p256dh?: unknown; auth?: unknown } };
       deviceLabel?: unknown;
-    };
+    }>(request);
+    if (!parsed.ok) return parsed.response;
+    const body = parsed.body;
 
     const subscription = body.subscription;
     const endpoint = subscription?.endpoint;
@@ -152,11 +156,13 @@ export async function POST(request: Request) {
 
 export async function PATCH(request: Request) {
   try {
-    const body = (await request.json()) as {
+    const parsed = await readJsonObjectBody<{
       endpoint?: unknown;
       preferences?: { prompt?: unknown; completion?: unknown };
       acknowledgeDefaultsNotice?: unknown;
-    };
+    }>(request);
+    if (!parsed.ok) return parsed.response;
+    const body = parsed.body;
 
     if (!isNonEmptyString(body.endpoint)) {
       return NextResponse.json({ error: 'endpoint is required' }, { status: 400 });
@@ -196,7 +202,9 @@ export async function PATCH(request: Request) {
 
 export async function DELETE(request: Request) {
   try {
-    const body = (await request.json().catch(() => ({}))) as { endpoint?: unknown };
+    const parsed = await readOptionalJsonObjectBody(request);
+    if (!parsed.ok) return parsed.response;
+    const body = parsed.body;
     if (!isNonEmptyString(body.endpoint)) {
       return NextResponse.json({ error: 'endpoint is required' }, { status: 400 });
     }

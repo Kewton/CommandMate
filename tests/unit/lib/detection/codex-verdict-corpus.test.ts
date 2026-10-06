@@ -79,7 +79,20 @@ const CORPUS: ReadonlyArray<readonly [string, string, string]> = [
   ['fixtures/codex-live-2310/steer-queued-running.txt', 'ready/input_prompt', 'ready/input_prompt'],
   ['fixtures/codex-live-2310/turn-running.txt', 'running/thinking_indicator', 'running/thinking_indicator'],
   ['fixtures/codex-live-2310/turn-submitted-no-status.txt', 'ready/input_prompt', 'ready/input_prompt'],
+  ['fixtures/codex-mid-turn-3337/codex-0.160.0-interrupted-idle.txt', 'ready/input_prompt', 'ready/input_prompt'],
+  ['fixtures/codex-mid-turn-3337/codex-0.160.0-reconnecting-bullet.txt', 'running/thinking_indicator', 'running/thinking_indicator'],
+  ['fixtures/codex-mid-turn-3337/codex-0.160.0-reconnecting-hollow.txt', 'running/thinking_indicator', 'running/thinking_indicator'],
+  ['fixtures/codex-mid-turn-3337/codex-0.160.0-working-bullet.txt', 'running/thinking_indicator', 'running/thinking_indicator'],
+  ['fixtures/codex-mid-turn-3337/codex-0.160.0-working-hollow.txt', 'running/thinking_indicator', 'running/thinking_indicator'],
+  ['fixtures/codex-multiline-composer-3205/idle-composer-two-lines.txt', 'ready/input_prompt', 'ready/input_prompt'],
+  ['fixtures/codex-multiline-composer-3205/running-composer-two-lines.txt', 'running/thinking_indicator', 'running/thinking_indicator'],
+  ['fixtures/codex-multiline-composer-3205/tc104-raw-pane.txt', 'ready/input_prompt', 'waiting/prompt_detected/prompt'],
   ['fixtures/codex-quoted-footer-2774/idle-after-quoted-picker-footer.txt', 'ready/input_prompt', 'ready/input_prompt'],
+  ['fixtures/codex-send-burst-3366/body-landed.capture', 'ready/input_prompt', 'ready/input_prompt'],
+  ['fixtures/codex-send-burst-3366/stuck-after-enter-in-burst.capture', 'ready/input_prompt', 'ready/input_prompt'],
+  ['fixtures/codex-send-burst-3366/submitted-working.capture', 'running/thinking_indicator', 'running/thinking_indicator'],
+  ['fixtures/codex-send-burst-3366/typed-in-burst.capture', 'ready/input_prompt', 'ready/input_prompt'],
+  ['fixtures/codex-send-burst-3366/verify-after-enter-in-burst.capture', 'ready/input_prompt', 'ready/input_prompt'],
   ['fixtures/codex-thread-title-probe/idle-after-command.txt', 'ready/input_prompt', 'ready/input_prompt'],
   ['fixtures/codex-thread-title-probe/running-after-command.txt', 'running/thinking_indicator', 'running/thinking_indicator'],
   ['fixtures/codex-thread-title-probe/running-in-command.txt', 'running/thinking_indicator', 'running/thinking_indicator'],
@@ -89,6 +102,12 @@ const CORPUS: ReadonlyArray<readonly [string, string, string]> = [
   ['fixtures/codex-update-dialog-3020/update-dialog-01571.txt', 'waiting/prompt_detected/prompt', 'waiting/prompt_detected/prompt'],
   ['fixtures/long-body-2464/codex-idle.capture', 'ready/input_prompt', 'ready/input_prompt'],
   ['fixtures/long-body-2464/codex-pasted-content.capture', 'ready/input_prompt', 'ready/input_prompt'],
+  ['fixtures/startup-screen-3293/codex-0.160.0-boot-idle.txt', 'ready/input_prompt', 'ready/input_prompt'],
+  ['fixtures/startup-screen-3293/codex-0.160.0-boot-typed.txt', 'ready/input_prompt', 'ready/input_prompt'],
+  ['fixtures/startup-screen-3293/codex-0.160.0-dialog-trust.txt', 'waiting/prompt_detected/prompt', 'waiting/prompt_detected/prompt'],
+  ['fixtures/startup-screen-3293/codex-0.160.0-first-turn-interrupted.txt', 'ready/input_prompt', 'ready/input_prompt'],
+  ['fixtures/startup-screen-3293/codex-0.160.0-first-turn-reply.txt', 'ready/input_prompt', 'ready/input_prompt'],
+  ['fixtures/startup-screen-3293/codex-0.160.0-overflow-interrupted.txt', 'ready/input_prompt', 'ready/input_prompt'],
   ['fixtures/tool-liveness-2070/codex-exited-01491.txt', 'waiting/prompt_detected/prompt', 'waiting/prompt_detected/prompt'],
   ['fixtures/tool-liveness-2070/codex-ready-01491.txt', 'ready/input_prompt', 'ready/input_prompt'],
   ['fixtures/tool-liveness-2070/codex-trust-dialog-01491.txt', 'waiting/prompt_detected/prompt', 'waiting/prompt_detected/prompt'],
@@ -105,7 +124,8 @@ const CORPUS: ReadonlyArray<readonly [string, string, string]> = [
   ['unit/lib/detection/fixtures/codex-live-1671/turn-running-command.txt', 'running/thinking_indicator', 'running/thinking_indicator'],
   ['unit/lib/detection/fixtures/codex-live-1890/composer-placeholder-ask.txt', 'ready/input_prompt', 'ready/input_prompt'],
   ['unit/lib/detection/fixtures/codex-live-1890/composer-residual-leading-number.txt', 'ready/input_prompt', 'ready/input_prompt'],
-  ['unit/lib/detection/fixtures/codex-live-1890/composer-residual-multiline.txt', 'running/thinking_indicator', 'running/thinking_indicator'],
+  // #3205: アイドルの 2 行の入力欄。以前はバグの判定を固定していた
+  ['unit/lib/detection/fixtures/codex-live-1890/composer-residual-multiline.txt', 'ready/input_prompt', 'ready/input_prompt'],
   ['unit/lib/detection/fixtures/codex-live-1890/composer-residual-plain.txt', 'ready/input_prompt', 'ready/input_prompt'],
   ['unit/lib/detection/fixtures/codex-live-1890/composer-residual-slash.txt', 'ready/input_prompt', 'ready/input_prompt'],
   ['unit/lib/detection/fixtures/codex-live-1890/dialog-model-picker.txt', 'waiting/codex_selection_list', 'waiting/codex_selection_list'],
@@ -114,9 +134,24 @@ const CORPUS: ReadonlyArray<readonly [string, string, string]> = [
 
 /** Every codex capture under tests/ (the completeness rule's definition). */
 function listCodexCaptures(dir: string, out: string[] = []): string[] {
-  for (const name of readdirSync(dir)) {
+  let names: string[];
+  try {
+    names = readdirSync(dir);
+  } catch (error) {
+    // A temp fixture another test created and removed mid-walk.
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return out;
+    throw error;
+  }
+  for (const name of names) {
     const full = path.join(dir, name);
-    if (statSync(full).isDirectory()) {
+    let isDirectory: boolean;
+    try {
+      isDirectory = statSync(full).isDirectory();
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
+      throw error;
+    }
+    if (isDirectory) {
       if (name === 'node_modules') continue;
       listCodexCaptures(full, out);
       continue;
@@ -144,7 +179,7 @@ describe('codex verdict corpus', () => {
     const listed = new Set(CORPUS.map(([rel]) => rel));
     const missing = listCodexCaptures(TESTS_ROOT).filter((rel) => !listed.has(rel));
     expect(missing).toEqual([]);
-  });
+  }, 60_000);
 });
 
 /**

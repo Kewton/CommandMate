@@ -12,6 +12,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { readJsonObjectBody } from '@/lib/api/read-json-body';
 import { isCliToolType, isValidInstanceId } from '@/lib/cli-tools/types';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { getWorktreeById } from '@/lib/db';
@@ -30,7 +31,9 @@ export async function POST(
   try {
     const { id: requestedWorktreeId } = await params;
     const id = canonicalWorktreeId(requestedWorktreeId);
-    const { cliToolId, lines = 1000, instanceId } = await req.json();
+    const parsed = await readJsonObjectBody(req);
+    if (!parsed.ok) return parsed.response;
+    const { cliToolId, lines = 1000, instanceId } = parsed.body;
 
     // Validate cliToolId against known CLI tool types
     if (!cliToolId || typeof cliToolId !== 'string' || !isCliToolType(cliToolId)) {
@@ -83,7 +86,7 @@ export async function POST(
     // No auto-creation; return 404 if session does not exist
     if (ownership.verdict === 'absent') {
       return NextResponse.json(
-        { error: 'Session not found. Use startSession API to create a session first.' },
+        { error: 'Session not found. Start one first, for example with `commandmate send <worktree-id> "message"`.' },
         { status: 404 }
       );
     }

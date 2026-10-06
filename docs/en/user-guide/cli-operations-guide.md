@@ -105,7 +105,7 @@ ID                     NAME                  STATUS   REASON                    
 ---------------------  --------------------  -------  ------------------------------  -------  ---------------
 localllm-test          main                  ready    input_prompt                    claude   42:10
 commandmate            develop               running  thinking_indicator              claude   1:05:33
-commandmate-issue-518  feature/518-worktree  ready    no_recent_output (no evidence)  claude   off
+commandmate-issue-518  feature/518-worktree  running  no_recent_output (no evidence)  claude   off
 commandmate-issue-600  feature/600-sessions  waiting  prompt_detected                 claude   off
 commandmate-issue-644  feature/644-repos     waiting  -                               claude   03:12 (codex-2)
 commandmate-main       main                  idle     -                               claude   off
@@ -127,15 +127,15 @@ commandmate-main       main                  idle     -                         
 ### REASON Column (Issue #1926)
 
 The **evidence** behind the STATUS beside it. The same `ready` can mean "the agent came back to its
-composer" (`input_prompt`) or "the frame could not be read and the output stopped, so `ready` is a
-fallback" (`no_recent_output`) — two different things the table could not tell apart before.
+composer" (`input_prompt`) or "the frame could not be read and the output stopped" (`no_recent_output`,
+which is shown with `running`) — two different things the table could not tell apart before.
 
 | Value | Meaning |
 |---|---|
 | `input_prompt` | A composer (input prompt) was detected |
 | `thinking_indicator` | A thinking indicator was detected |
 | `prompt_detected` | A confirmation prompt was parsed |
-| `<reason> (no evidence)` | **No positive evidence** (`statusEvidence: 'none'`). The detection layer could not classify the frame, so the STATUS beside it is a fallback rather than a reading. Today that is exactly the `default` and `no_recent_output` reasons |
+| `<reason> (no evidence)` | **No positive evidence** (`statusEvidence: 'none'`). The STATUS beside it is a fallback rather than a reading. This covers a frame the detection layer could not classify (`running` with reason `no_recent_output` / `unknown_frame` / `default`) and also a classified frame with no positive proof (for example an idle composer no tool-specific rule vouches for, `input_prompt`) |
 | `-` | The server gives no reason: it predates #1926, the session is not running, or the tool has two or more instances and the aggregate dropped the reason |
 
 > A `(no evidence)` row does not mean "finished". Check the raw pane with
@@ -153,8 +153,8 @@ commandmate ls --json \
 
 | Field | Meaning |
 |---|---|
-| `sessionStatusByCli.<tool>.statusEvidence` | `'positive'` (something confirmed it) / `'none'` (the frame could not be read) |
-| `sessionStatusByCli.<tool>.sessionStatusReason` | The scraper's reason code |
+| `sessionStatusByCli.<tool>.statusEvidence` | `'positive'` (something confirmed it) / `'none'` (no positive proof, including a frame that could not be read) |
+| `sessionStatusByCli.<tool>.sessionStatusReason` | The scraper's reason code. Whether the pane is working (`isProcessing`) also folds in the agent's own hooks (`Stop` and the rest) by the rules `capture --json` applies, so right after a `Stop` it can read `isProcessing: false` while the working row is still on screen and this reason still says `thinking_indicator` (Issue #3377) |
 | `sessionStatusByCli.<tool>.lastKnownStatus` / `lastKnownStatusAt` | The last **positively confirmed** status and when. Held in server memory (TTL 30 minutes, cleared on restart, dropped when the session stops) |
 
 ### AUTO_YES Column (Issue #2575)
@@ -432,22 +432,39 @@ ahead of long waits, not to stretch short ones).
 
 #### `ready` does not necessarily mean "complete"
 
-`isUnclassifiedActive` is raised in two states:
+`isUnclassifiedActive` is raised when `sessionStatus=running` and the reason is one of
+`no_recent_output`, `unknown_frame` or `default` (no detection rule could read the frame; Issue #2011):
 
 ```
-(sessionStatus=running && reason=default) || (sessionStatus=ready && reason=no_recent_output)
+sessionStatus=running && reason ∈ {no_recent_output, unknown_frame, default}
 ```
 
-The second one is **a degraded form of an unreadable overlay**. Roughly 5 seconds
-(`STALE_OUTPUT_THRESHOLD_MS`) after the server's Auto-Yes poller stamps
-`lastServerResponseTimestamp`, a frame whose output has stopped flips from `running`/`default` to
-`ready`/`no_recent_output`. So `ready` does not always mean "finished" — it can also mean "still
-unreadable, and now silent as well".
+`no_recent_output` is the reason for a frame whose output has stopped for roughly 5 seconds
+(`STALE_OUTPUT_THRESHOLD_MS`), and it is published with `running` (it used to flip to `ready`; that
+was abolished so a stalled worker is not called finished). Only a server that predates that change
+returns `ready`/`no_recent_output`.
 
 That is why **`wait` makes no completion decision while `isUnclassifiedActive` is set**. Genuine
 completion is `ready`/`input_prompt` (the agent is back at the composer), which never raises the
 flag and therefore still exits 0 on the first poll. A session that disappeared entirely still exits 0
 as before.
+
+#### Wait with `wait`, not `sessionStatus`, before sending the next request (Issue #3337)
+
+Do not poll `capture --json` and send as soon as `sessionStatus` reads `ready`. `sessionStatus`
+includes a reading of a single frame, and it has read `ready` in the middle of a turn (a long codex
+0.160.0 turn whose working indicator the detector could not read). Sending then interrupts the
+running turn. `commandmate wait <id> --instance <name>` does not complete until the agent itself
+reports the end of the turn (`Stop`), so wait with it and then send.
+
+On the server, when codex's hooks speak for the pane (`structuredEvents.source.kind` is `hooks`),
+its turn is no longer closed by the screen alone. The screen closes it (`closedBy:
+'scraper_evidence'`) only when the `Stop` is known not to come — nothing heard for 30 minutes
+(`closedBy: 'stale'`), or a frame that shows the turn was interrupted (`■ Conversation
+interrupted`; an interrupt was measured to send no `Stop`). A relay reply waits by the same rule.
+Claude and the other tools, and any source without hooks, are still closed by the screen, as
+before (a Claude interrupt either prints an `Interrupted` row or just puts the prompt back in the
+composer, and neither sends a `Stop`).
 
 ### Progress Output
 
@@ -880,17 +897,24 @@ Everything the server sends except `fullOutput` is printed verbatim.
   "lineCount": 42,
   "lastCapturedLine": 42,
   "promptData": null,
+  "promptView": null,
   "autoYes": {
     "enabled": false,
     "expiresAt": null,
-    "lastSuppression": null
+    "lastSuppression": null,
+    "lastEnterFallback": null
   },
   "thinking": true,
   "thinkingMessage": "Claude is thinking...",
   "cliToolId": "claude",
   "isSelectionListActive": false,
   "isPagerActive": false,
+  "isDismissablePanelActive": false,
   "isUnclassifiedActive": false,
+  "startingSince": null,
+  "statusEvidence": "positive",
+  "lastKnownStatus": "running",
+  "lastKnownStatusAt": 1754296400123,
   "lastServerResponseTimestamp": null,
   "serverPollerActive": true,
   "sessionStatus": "running",
@@ -904,24 +928,62 @@ Everything the server sends except `fullOutput` is printed verbatim.
     "promptWaitingSource": null
   },
   "model": "claude-opus-5[1m]",
-  "reasoningEffort": null
+  "reasoningEffort": null,
+  "promptDedup": {
+    "skippedCount": 0,
+    "lastSkippedAt": null
+  },
+  "composerText": null,
+  "composerState": "empty",
+  "agentMode": "accept-edits"
 }
 ```
 
 What each field actually means. The line numbers were measured on 2026-08-20; following the
-function names (`buildCurrentOutput` / `isClaudeRunning`) is the safer way to find them.
+function names (`buildCurrentOutput` / `isClaudeRunning`) is the safer way to find them (no line numbers are given below; they go stale).
 
 | Field | Meaning |
 |---|---|
 | `content` | Whatever the poller has not saved yet (`buildCurrentOutput`). **It is a delta only for tools whose line count is a usable cursor** — the scrollback tools (codex / gemini / vibe-local / antigravity) while the 10000-line capture window is unsaturated; there it is empty even on a healthy session once the poller has saved it. For the **alternate-screen tools (claude / opencode / copilot), and for any saturated window, it is the WHOLE capture** (the line count is pinned at the pane height / window size and no longer denotes a read position — Issues #1910 / #1670 / #1268) |
-| `realtimeSnippet` | The last 100 rows of the pane — the screen itself (`src/lib/session/current-output-builder.ts:712`) |
+| `realtimeSnippet` | The last 100 rows of the pane — the screen itself (`selectRealtimeSnippetRows` in `src/lib/session/current-output-builder.ts`) |
 | `lineCount` | The row count of the whole capture, blank rows included. A TUI is drawn on a 1000-row pane, so even a blank pane can report 1001 |
-| `isRunning` | The tmux session exists and is healthy (`src/lib/session/claude-session.ts:543-556`). **It does not mean a turn is in progress** |
+| `isRunning` | The tmux session exists and is healthy (`isClaudeRunning` / `isSessionHealthy` in `src/lib/session/claude-session.ts`). **It does not mean a turn is in progress** |
 | `sessionStatus` / `sessionStatusReason` | The state and what it rests on: a `hook_*` reason came from hooks, anything else from the scraper (`HOOK_STATUS_REASON` in `src/lib/session/status-mapping.ts`) |
+| `promptData` / `promptView` / `promptAnswerable` | The confirmation prompt parsed off the screen, and how it is shown and answered. `promptView` is a reading of `promptData` (Issue #3184): `null` with no prompt, absent from an older server. `promptAnswerable` says whether `/prompt-response` would answer it right now (Issue #2870) and is present **only for a prompt parsed off the screen** — with no prompt, or for the structured (hook / degraded) forms, the key is absent |
+| `isSelectionListActive` / `isPagerActive` / `isDismissablePanelActive` / `isUnclassifiedActive` | Flags for the shape of the screen. `isDismissablePanelActive` is a dismiss-only overlay whose footer offers `Esc to close` and nothing else (Issue #2369; disjoint from `isSelectionListActive`). Absent from an older server |
+| `startingSince` | Epoch ms at which the agent's launch began, while it is still starting; `null` otherwise (Issue #3179). While it is a number the session is `running` / `starting` and every dialog flag is `false` |
+| `promptDedup` | How many times the prompt de-duplication dropped a prompt, `{ skippedCount, lastSkippedAt }` (Issue #1695). `skippedCount` is cumulative for the life of the server process, not per turn. Absent from an older server |
+| `statusEvidence` / `lastKnownStatus` / `lastKnownStatusAt` | Whether the verdict rests on positive evidence (`'positive'` / `'none'`), and the last status that was positively confirmed with its time (Issue #1926). `lastKnownStatus` is held in server memory (TTL 30 minutes, cleared on restart, dropped when the session stops) |
 | `structuredEvents.*` / `lastStopEventAt` | The last hook event and the last `stop` timestamp. `null` when no hooks have arrived |
+| `structuredEvents.turnId` / `openedAt` / `closedAt` / `closedBy` | A provisional turn boundary (Issue #1926). **Not yet a stable turn identity** |
+| `structuredEvents.source` | The identifier and **declared** values of the tool's structured-event source (Issue #1924). It describes the source, not the session, so it is present even with no hooks and with the session stopped. `kind` / `liveness` / `degradedReason` / `probedActivity` say whether the source is alive right now (Issue #2054) |
+| `structuredEvents.sessionContext` / `sessionDiff` / `session` | Context-window usage (Issue #2042), the files this turn touched with their revert state (Issue #2043), and the conversation the agent says it is in (Issue #2040). `null` for tools that do not publish them |
+| `structuredEvents.pendingDecisions[]` | The dialogs the instance is holding (Issue #1930; `kind` / `questionOptions` from Issue #2040) |
+| `upstreamFault` | `{id, matchedText, at}` when the screen carries an upstream-fault signature, else `null` (Issue #1839). **`null` means "no known signature", not "healthy"** |
+| `resolvedBy` / `conflict` | Which stage of the server's precedence chain chose `cliToolId`, and a contradiction between the roster and an explicit `--instance` / `cliTool` (Issue #1884) |
+| `composerText` | Text sitting **unsent** in the agent's input box, or `null` (Issue #1879). Only text a human typed is returned; a dim suggestion or placeholder never is. `composerState` says why a `null` is `null`. claude / codex only |
+| `composerState` | Why `composerText` is what it is (Issue #1879): `content` (real text is there) / `ghost` (only a suggestion or placeholder) / `empty` (the input box is empty) / `unsupported_tool` (this tool's input box has not been measured) / `no_composer` (no input box on the screen — also the answer for a session that is not running) |
+| `agentMode` | The agent's permission mode (Issue #2592), read off the screen: `default` / `manual` / `accept-edits` / `plan` / `auto` / `autopilot` / `bypass` / `dont-ask` / `build`, or `unknown` when it could not be read. **`unknown` does not mean "the default mode"; it means "not determined"** — the tool has no mode cycle, the screen shows no mode indicator, or the session is not running. Most tools draw nothing in their default mode, so the absence of an indicator cannot be read as `default` |
 
-To tell whether the screen is empty, read `realtimeSnippet.trim() === ''` together with `lineCount`.
-`content` is a delta, so it never answers that on its own.
+To tell whether the screen is empty, **look at `isRunning` first**.
+
+- `isRunning: false` — the session is not running. There is no screen at all, and `realtimeSnippet`
+  is an absent key (`lineCount` is `0`). That is a different state from "the screen is empty"
+- `isRunning: true` and `(realtimeSnippet ?? '').trim() === ''` — the session is running and its
+  screen is empty. Read it together with `lineCount` (a blank pane can still report 1001)
+
+Calling `.trim()` on `realtimeSnippet` directly throws for a session that is not running, because
+the key is not there. `content` is a delta, so it never answers that on its own.
+
+**Deprecation notice (Issue #3394)**: `isComplete` / `isGenerating` / `thinkingMessage` are scheduled for removal (in the next or a later minor release; #3395). Until then they keep being returned. Replacements: `isComplete` → `isPromptWaiting` (same value; it actually means "waiting for approval", so the name does not match), `isGenerating` → `thinking`, `thinkingMessage` → `thinking` and `cliToolId`.
+
+**When the session is not running (`isRunning: false`), the fields read off the screen are
+absent keys** — not `false`, not `null` (Issue #3300). That covers `autoYes` / `isPromptWaiting` /
+`promptData` / `thinking` / `thinkingMessage` / `isComplete` / `isGenerating` / `realtimeSnippet` /
+`lastCapturedLine` / `isSelectionListActive` / `lastServerResponseTimestamp` /
+`serverPollerActive`. With `jq`, state what absence means (`.isPromptWaiting // false`). Auto-Yes
+can be enabled for an instance that is not running, so read whether it is on from the `AUTO_YES`
+column of `commandmate instances <id>` (or `autoYesByInstance` in `commandmate ls --json`).
 
 #### `model` / `reasoningEffort` (Issue #1785)
 
@@ -996,6 +1058,57 @@ If `isPromptWaiting: true` and `lastSuppression.at` is recent, that session is *
 suppression right now**. Either answer it as a human with `commandmate respond`, or revisit the
 contract's `autoYes` (when `mode: safe` is suppressing `multiple_choice`, switching to
 [allow-listed](#use-an-allow-listed-auto-yes-policy-for-unattended-runs-issue-1684) is recommended).
+
+#### `autoYes.lastEnterFallback`: An Enter on an Unreadable Choice Screen (Issue #3397)
+
+When CommandMate cannot read a choice screen the agent drew, the prompt window says
+"CommandMate cannot operate this screen." and offers "Switch to direct input". With Auto-Yes on,
+CommandMate sends **one Enter** to that screen (confirming whatever is selected at that moment).
+On a screen it was sent to, the prompt window says "Auto-Yes sent Enter." instead of the warning and the link. The prompt window is normally hidden while Auto-Yes is on, but for a screen CommandMate cannot read (`promptAnswerable: false`) it is shown under Auto-Yes too, on PC and phone alike — as it is for a checkbox (multi-select) question, since Auto-Yes sends neither a number. A checkbox question is one flagged `multiSelect`, or a list whose options start with `[ ]` / `[x]` / `[X]` / `[✔]`.
+
+```json
+"autoYes": {
+  "enabled": true,
+  "expiresAt": 1754300000000,
+  "lastSuppression": null,
+  "lastEnterFallback": {
+    "outcome": "sent",
+    "promptType": "multiple_choice",
+    "refusalReason": "unsupported_dialog_layout",
+    "sentAt": 1754296400000,
+    "at": 1754296400000,
+    "currentPrompt": true
+  }
+}
+```
+
+| Field | Meaning |
+|-------|---------|
+| `outcome` | `sent` (the Enter was sent) / `no-effect` (the same screen was still up afterwards; no second Enter is sent and the screen is left to a human) |
+| `promptType` | The type of the prompt the Enter was sent to |
+| `refusalReason` | Why the screen could not be operated (`unsupported_dialog_layout` / `prompt_no_longer_active`) |
+| `sentAt` | When the Enter was sent (epoch ms) |
+| `at` | When the record last changed (`sentAt`, or when `no-effect` was found) |
+| `currentPrompt` | Whether the record is about the same screen as this response's `promptData` |
+
+The Enter is sent only when **all** of the following hold:
+
+- the prompt window offers "Switch to direct input" for the screen (the same judgement as `promptAnswerable: false`);
+- there is evidence the focus is on a choice screen: the picker's footer is on screen but its layout could not be read (`unsupported_dialog_layout`), or the input box is not on screen (claude / codex);
+- **the input box is not on screen** (nothing is sent whether it holds text, is empty or shows a dim suggestion — this keeps an agent's reply that merely quotes a list from being "answered");
+- the same screen was seen on two polls in a row, and the agent has neither exited nor is still generating;
+- the contract's `autoYes` policy allows it (nothing is sent under `mode: off` / `safe` or on a `denyPatterns` match), and the session is not another server's;
+- it is not codex's launch screens or its `/model` picker.
+
+When the prompt it reports has a record (`currentPrompt: true`), `commandmate wait` adds one line on stderr (`auto-yes sent Enter to this prompt …`, or `… the same screen is still up (no-effect) …` when it did not take). The exit-10 JSON is unchanged. Plain `capture` (without `--json`) prints the transcript only, so read the record with `--json`.
+
+Only claude and codex are enabled by default. Switch it per tool with the `CM_AUTOYES_ENTER_FALLBACK`
+environment variable (same syntax as `CM_AUTOYES_DIALOG_GATE`).
+
+```bash
+CM_AUTOYES_ENTER_FALLBACK='*=disabled'       # never send it
+CM_AUTOYES_ENTER_FALLBACK='codex=disabled'   # stop it for codex only
+```
 
 ### `--pane`: Reading the Transcript (Issue #1623)
 
@@ -1179,6 +1292,27 @@ When the session does not exist it exits non-zero and points at `commandmate ls`
 When `$TMUX` is set (you called it from inside tmux) it uses `switch-client` instead. If the current
 client is on a **different tmux server** and cannot switch, it prints the quoted
 `tmux attach -t '=mcbd-…:'` and exits non-zero.
+
+When the session under that name belongs to **another CommandMate server** (the server answers 409
+`session_owned_by_other_server`), it changes course so that no key reaches it (Issue #3334):
+
+- A plain attach is **made read-only (`-r`)**, and says so on stderr. You can look; nothing you type
+  arrives
+- `--live` would change the other session's geometry, so it **does not attach** and exits non-zero
+- From inside tmux, `switch-client` has no read-only form, so it **does not switch**; it prints
+  `tmux attach -r -t '=mcbd-…:'` to run outside tmux and exits non-zero
+
+The server's answer only counts when it is about **the very name being attached**. When the roster
+cannot be read and the name falls back to the legacy form (`mcbd-<tool>-…`), the server checks the
+namespaced name, so its answer is about a different session (both names can exist at once). That is
+treated as **ownership not confirmed**: the attach is made read-only as above, and `--live` and the
+switch from inside tmux are refused. No ownership answer at all — any non-2xx such as a 404, a
+stopped server, or an older server with no ownership check — is treated the same way. Only a session
+the server **confirms as its own** gets an attach that can send keys.
+
+When `send` / `capture` / `respond` and the other commands get the same 409, they exit with a message
+saying the session is another CommandMate server's and nothing was sent to it, read from it or stopped
+(the exit code is the one a 409 always had, 99).
 
 ### Finding the session name
 
@@ -1374,6 +1508,8 @@ commandmate auto-yes <worktree-id> --enable --instance codex-2  # Scoped to one 
 | `--instance <id>` | **The recommended way to name the target.** The instance ID; Auto-Yes is controlled independently of the other instances |
 | `--agent <id>` | A helper for instances that are not in the roster (unnecessary when `--instance` alone is enough) |
 
+Enabled for an instance whose session is not running, Auto-Yes stays on until it expires (`--duration`) and answers once the session starts (Issue #3329); while it waits it checks once a minute. It stops with `consecutive_errors` only when failures keep coming in a row: the session exists but its screen cannot be read or the answer cannot be sent, or tmux itself cannot be asked.
+
 ### The Target Agent Is the Worktree's Default (Issue #1909)
 
 `auto-yes <id> --enable` with neither `--instance` nor `--agent` targets the **worktree's default
@@ -1539,6 +1675,20 @@ gemini       Gemini  gemini    no       no
   }
 ]
 ```
+
+#### The `AUTO_YES` Column (Issue #3300)
+
+Whether Auto-Yes is on for that instance. Auto-Yes is kept per worktree × instance and can be
+enabled with no session running (`commandmate auto-yes <id> --enable --instance <instance-id>`), so
+a `RUNNING no` row can read `yes`.
+
+- It is read from the server's Auto-Yes state (`instances` in `GET /api/worktrees/<id>/auto-yes`) —
+  the same source as `autoYesByInstance` in `commandmate ls --json`. A listing makes one more
+  request for it, whatever the number of instances
+- Against an older server that does not answer that request, it is read from each session's
+  `current-output` `autoYes` as before; there, an instance that is not running reads `no` even when
+  Auto-Yes is on
+- `autoYes` in `--json` is the same value
 
 #### The `MODEL` / `EFFORT` Columns (Issue #1785)
 

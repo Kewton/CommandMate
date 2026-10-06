@@ -21,6 +21,7 @@ import {
   type MetricFinding,
   type MetricMeasurement,
 } from './metrics-types';
+import { addHookObservationLine, createHookObservationSamples, type HookObservationSamples } from './hook-observation';
 
 export type LogLevel = 'DEBUG' | 'INFO' | 'WARN' | 'ERROR';
 
@@ -104,6 +105,8 @@ export interface LogAggregate {
   byName: Record<string, number>;
   errors: Record<string, number>;
   latency: Record<string, LatencySamples>;
+  /** The lines `hook-observation` reads (Issue #3311), from the same pass. */
+  hook: HookObservationSamples;
 }
 
 export function createLogAggregate(now: Date, hours = PERF_LOG_WINDOW_HOURS): LogAggregate {
@@ -116,6 +119,7 @@ export function createLogAggregate(now: Date, hours = PERF_LOG_WINDOW_HOURS): Lo
     byName: {},
     errors: {},
     latency: {},
+    hook: createHookObservationSamples(),
   };
 }
 
@@ -148,6 +152,7 @@ export function addLogLine(agg: LogAggregate, raw: string): void {
   agg.lines++;
   agg.byName[line.name] = (agg.byName[line.name] ?? 0) + 1;
   if (line.level === 'ERROR') agg.errors[line.name] = (agg.errors[line.name] ?? 0) + 1;
+  addHookObservationLine(agg.hook, line);
   if (line.level !== 'WARN') return;
   const latency = latencyOf(line.data);
   if (latency === null) return;

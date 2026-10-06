@@ -127,6 +127,12 @@ export interface PushHookSourceSpec {
    * pins the capability half.
    */
   extractEventIdentity?: (payload: Record<string, unknown>) => string | null;
+  /**
+   * Whether a `user_prompt_submit` payload joins the running turn
+   * (Issue #3330). See `AgentEventSource.promptJoinsOpenTurn`; omit it and
+   * every prompt is a new turn.
+   */
+  promptJoinsOpenTurn?: (payload: Record<string, unknown>) => boolean;
   /** Subtype extraction for events whose rule did not fix one (S2). */
   extractDetail?: (event: AgentEventType, payload: Record<string, unknown>) => string | null;
   parsePermissionRequest: (payload: Record<string, unknown>) => PermissionRequestPayload | null;
@@ -145,6 +151,53 @@ export interface PushHookSourceSpec {
 }
 
 /**
+ * The event normalization both factories share: their two bodies were identical.
+ */
+function normalizeSpecEvent(
+  spec: Pick<
+    PushHookSourceSpec,
+    'cliToolId' | 'mappers' | 'extractDetail' | 'conversationIdFields' | 'toolCallIdFields' | 'modelFields' | 'extractModel'
+  >,
+  nativeEventNameFields: readonly string[],
+  raw: RawAgentEvent
+): NormalizedAgentEvent | null {
+  const receivedAt = raw.receivedAt ?? Date.now();
+  const nativeEventName =
+    nativeEventNameFields.length > 0
+      ? readFirstStringField(raw.payload, nativeEventNameFields)
+      : null;
+
+  // An event word the caller already resolved wins over the payload. This
+  // is the only channel antigravity has, and it is also how the relay
+  // script's `--event` reaches here for every other tool.
+  if (raw.event != null && isAgentEventType(raw.event)) {
+    return buildNormalizedEvent({ event: raw.event }, raw.payload, receivedAt, {
+      detail: spec.extractDetail,
+      conversationId: spec.conversationIdFields,
+      toolCallId: spec.toolCallIdFields,
+      modelFields: spec.modelFields,
+      extractModel: spec.extractModel,
+    });
+  }
+
+  const mapping = runEventMappers(spec.mappers, nativeEventName, raw.payload);
+  if (!mapping) {
+    // C8. Not an error: a tool emits more events than CommandMate has words
+    // for, and it grows more of them between releases.
+    recordUnknownEvent(spec.cliToolId, nativeEventName);
+    return null;
+  }
+
+  return buildNormalizedEvent(mapping, raw.payload, receivedAt, {
+    detail: spec.extractDetail,
+    conversationId: spec.conversationIdFields,
+    toolCallId: spec.toolCallIdFields,
+    modelFields: spec.modelFields,
+    extractModel: spec.extractModel,
+  });
+}
+
+/**
  * Build a push (hook) source from its differences.
  *
  * @returns A source whose transport is `push` and whose lifecycle methods are
@@ -160,40 +213,7 @@ export function definePushHookSource(spec: PushHookSourceSpec): AgentEventSource
     capabilities: spec.capabilities,
 
     normalizeEvent(raw: RawAgentEvent): NormalizedAgentEvent | null {
-      const receivedAt = raw.receivedAt ?? Date.now();
-      const nativeEventName =
-        nativeEventNameFields.length > 0
-          ? readFirstStringField(raw.payload, nativeEventNameFields)
-          : null;
-
-      // An event word the caller already resolved wins over the payload. This
-      // is the only channel antigravity has, and it is also how the relay
-      // script's `--event` reaches here for every other tool.
-      if (raw.event != null && isAgentEventType(raw.event)) {
-        return buildNormalizedEvent({ event: raw.event }, raw.payload, receivedAt, {
-          detail: spec.extractDetail,
-          conversationId: spec.conversationIdFields,
-          toolCallId: spec.toolCallIdFields,
-          modelFields: spec.modelFields,
-          extractModel: spec.extractModel,
-        });
-      }
-
-      const mapping = runEventMappers(spec.mappers, nativeEventName, raw.payload);
-      if (!mapping) {
-        // C8. Not an error: a tool emits more events than CommandMate has words
-        // for, and it grows more of them between releases.
-        recordUnknownEvent(spec.cliToolId, nativeEventName);
-        return null;
-      }
-
-      return buildNormalizedEvent(mapping, raw.payload, receivedAt, {
-        detail: spec.extractDetail,
-        conversationId: spec.conversationIdFields,
-        toolCallId: spec.toolCallIdFields,
-        modelFields: spec.modelFields,
-        extractModel: spec.extractModel,
-      });
+      return normalizeSpecEvent(spec, nativeEventNameFields, raw);
     },
 
     eventIdentityOf(payload: Record<string, unknown>): string | null {
@@ -202,6 +222,10 @@ export function definePushHookSource(spec: PushHookSourceSpec): AgentEventSource
       // what puts it on the time window `isDuplicateAgentEvent` has always
       // applied to it.
       return spec.extractEventIdentity?.(payload) ?? null;
+    },
+
+    promptJoinsOpenTurn(payload: Record<string, unknown>): boolean {
+      return spec.promptJoinsOpenTurn?.(payload) ?? false;
     },
 
     parsePermissionRequest: spec.parsePermissionRequest,
@@ -319,35 +343,7 @@ export function definePullEventSource(spec: PullEventSourceSpec): AgentEventSour
     capabilities: spec.capabilities,
 
     normalizeEvent(raw: RawAgentEvent): NormalizedAgentEvent | null {
-      const receivedAt = raw.receivedAt ?? Date.now();
-      const nativeEventName =
-        nativeEventNameFields.length > 0
-          ? readFirstStringField(raw.payload, nativeEventNameFields)
-          : null;
-
-      if (raw.event != null && isAgentEventType(raw.event)) {
-        return buildNormalizedEvent({ event: raw.event }, raw.payload, receivedAt, {
-          detail: spec.extractDetail,
-          conversationId: spec.conversationIdFields,
-          toolCallId: spec.toolCallIdFields,
-          modelFields: spec.modelFields,
-          extractModel: spec.extractModel,
-        });
-      }
-
-      const mapping = runEventMappers(spec.mappers, nativeEventName, raw.payload);
-      if (!mapping) {
-        recordUnknownEvent(spec.cliToolId, nativeEventName);
-        return null;
-      }
-
-      return buildNormalizedEvent(mapping, raw.payload, receivedAt, {
-        detail: spec.extractDetail,
-        conversationId: spec.conversationIdFields,
-        toolCallId: spec.toolCallIdFields,
-        modelFields: spec.modelFields,
-        extractModel: spec.extractModel,
-      });
+      return normalizeSpecEvent(spec, nativeEventNameFields, raw);
     },
 
     eventIdentityOf(payload: Record<string, unknown>): string | null {
