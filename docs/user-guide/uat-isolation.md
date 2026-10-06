@@ -95,7 +95,7 @@ CM_UAT_SOCK_BASE="$HOME/run" CM_RUN_LOCK_DIR="$HOME/run/run.lock" \
 
 **残すもの（`1` と同じ）:**
 
-- hook の準備に失敗したときは起動を拒否する（素の起動に戻さない）。copilot の `config.json` に `hooks` があるときも拒否。codex の relay を更新できない・同梱版と違う、claude の設定ファイルを書けない（`CM_AGENT_HOOKS_INJECT=0` を含む）ときも拒否する（`1` と未設定では、従来どおり古い relay・素の claude で続ける）
+- hook の準備に失敗したときは起動を拒否する（素の起動に戻さない）。copilot の `config.json` に `hooks` があるときも拒否。codex の relay を更新できない・同梱版と違う、claude の設定ファイルを書けない（`CM_AGENT_HOOKS_INJECT=0` を含む）ときも拒否する。ほかの値では: codex は、未設定なら relay の更新の失敗を記録して古い relay のまま続け、`1` なら relay を書かず、同梱版と違う relay を見つけると起動を拒否する。claude は、未設定でも `1` でも設定ファイルを書けなければ hook なしの素の claude で起動する（`1` は `--setting-sources project,local` つき）
 - 一時ファイル（relay の `.tmp`、copilot の一時ファイル）は、先に消してから排他的に作る（置かれた symlink をたどって書かない。これはどの値でも同じ）
 - claude の起動の計画は tmux のセッションを作る前に組む（拒否したときに空のペインを残さない）
 - 送り先の固定（`CM_HOOK_URL` などを、その run のサーバーへ）

@@ -628,3 +628,54 @@ describe.skipIf(!HAS_TOOLS)('the supervisor lock (Issue #3312, review of PR #340
     expect(fs.existsSync(lockDir())).toBe(true);
   });
 });
+
+describe.skipIf(!HAS_TOOLS)('deadline-guard.sh and a supervisor starting at the same time (Issue #3312)', () => {
+  it('does not remove a fresh lock made between its stale check and its takeover', () => {
+    // The stale lock: a dead owner. While the guard checks that pid, a `ps`
+    // stub on PATH swaps in a fresh lock owned by a live process (this test),
+    // as a supervisor starting at that moment would make it.
+    const lock = path.join(base, 'supervisor.lock');
+    const next = path.join(base, 'supervisor.lock.next');
+    fs.mkdirSync(lock, { recursive: true });
+    fs.writeFileSync(path.join(lock, 'owner'), 'pid=999999\nlstart=x\nlabel=dead\ntoken=old\n');
+    fs.mkdirSync(next);
+    const lstart = spawnSync('ps', ['-o', 'lstart=', '-p', String(process.pid)], {
+      encoding: 'utf8',
+      env: { ...process.env, LC_ALL: 'C' },
+    }).stdout.trim();
+    fs.writeFileSync(path.join(next, 'owner'), `pid=${process.pid}\nlstart=${lstart}\nlabel=fresh\ntoken=new\n`);
+
+    const stubBin = path.join(root, 'stub-bin');
+    fs.mkdirSync(stubBin);
+    fs.writeFileSync(
+      path.join(stubBin, 'ps'),
+      `#!/bin/sh
+case " $* " in
+  *" 999999 "*)
+    if [ -d '${next}' ]; then rm -rf '${lock}' && mv '${next}' '${lock}'; fi ;;
+esac
+exec /bin/ps "$@"
+`,
+      { mode: 0o755 }
+    );
+
+    const res = spawnSync('bash', [GUARD], {
+      cwd: REPO_ROOT,
+      env: { ...env(), PATH: `${stubBin}:${env().PATH}` },
+      encoding: 'utf8',
+      timeout: 60_000,
+    });
+    expect(res.status, res.stderr).toBe(0);
+    expect(fs.existsSync(next), 'the swap happened during the stale check').toBe(false);
+    expect(fs.readFileSync(path.join(lock, 'owner'), 'utf8')).toContain('token=new');
+  });
+
+  it('control: with no supervisor starting, the stale lock is taken away', () => {
+    const lock = path.join(base, 'supervisor.lock');
+    fs.mkdirSync(lock, { recursive: true });
+    fs.writeFileSync(path.join(lock, 'owner'), 'pid=999999\nlstart=x\nlabel=dead\ntoken=old\n');
+    const res = guard();
+    expect(res.status, res.stderr).toBe(0);
+    expect(fs.existsSync(lock)).toBe(false);
+  });
+});

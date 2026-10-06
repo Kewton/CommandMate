@@ -77,10 +77,13 @@ for file in "$PRODUCT_BASE"/ledger/*.json; do
     fi
 done
 
-# A lock its supervisor left when it died (or was stopped above).
+# A lock its supervisor left when it died (or was stopped above). Taken the
+# way the supervisor takes one: moved aside, and put back unless the moved one
+# is still the one judged stale — a supervisor starting in between has made a
+# fresh lock at that path, and it must not be removed.
 lock="$PRODUCT_BASE/supervisor.lock"
 if [ -d "$lock" ] && product_lock_is_stale "$lock"; then
-    rm -rf "$lock"
+    product_lock_take_stale "$lock"
 fi
 
 [ $handled -eq 0 ] && product_log "nothing to reclaim for $DATE"

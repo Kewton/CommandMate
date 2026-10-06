@@ -95,7 +95,7 @@ CM_UAT_SOCK_BASE="$HOME/run" CM_RUN_LOCK_DIR="$HOME/run/run.lock" \
 
 **Kept (same as `1`):**
 
-- A failed hook setup refuses the launch (never a bare start). So does a `hooks` key in copilot's `config.json`. So do a codex relay that could not be updated or still differs from the shipped one, and a claude settings file that could not be written (`CM_AGENT_HOOKS_INJECT=0` included); with `1` or unset these still go on with the older relay / a bare claude
+- A failed hook setup refuses the launch (never a bare start). So does a `hooks` key in copilot's `config.json`. So do a codex relay that could not be updated or still differs from the shipped one, and a claude settings file that could not be written (`CM_AGENT_HOOKS_INJECT=0` included). With the other values: codex, unset, logs a failed relay update and goes on with the older relay; with `1` it writes no relay and refuses the launch when the installed relay differs from the shipped one. claude, unset or `1`, starts bare (no hooks) when its settings file cannot be written (with `1`, carrying `--setting-sources project,local`)
 - Temp files (the relay's `.tmp`, copilot's temp file) are removed and then created exclusively, so a planted symlink is never written through (whatever the value)
 - claude's launch plan is built before its tmux session, so a refusal leaves no empty pane
 - The receiver is pinned (`CM_HOOK_URL` and the others point at the run's server)
