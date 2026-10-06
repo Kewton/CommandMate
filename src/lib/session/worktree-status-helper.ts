@@ -518,6 +518,279 @@ function foldHookTurn(input: HookTurnFoldInput): MergedStatusVerdict | null {
   return mergeStructuredStatus(scraper, structured, null, turn, lastPromptAt);
 }
 
+/** The (worktree, tool, instance) one probe reads, and the DB it reads it with (Issue #3273). */
+interface InstanceProbeContext {
+  db: ReturnType<typeof import('@/lib/db/db-instance').getDbInstance>;
+  worktreeId: string;
+  cliToolId: CLIToolType;
+  instanceId: string;
+}
+
+/**
+ * What {@link detectInstanceSessionStatus} learns from one probe's frame
+ * (Issue #3273: the locals it used to declare, held on one object so the steps
+ * below can each fill their part of it).
+ *
+ * Mutated in place, field by field and in the original order, so a step that
+ * throws part-way leaves exactly what the inline code used to leave before its
+ * `catch` ran.
+ */
+interface InstanceFrameState {
+  startingSince: number | null;
+  isWaitingForResponse: boolean;
+  isProcessing: boolean;
+  // Issue #1786: the waiting metadata the list API now publishes. Declared out
+  // here so the edge below is observed exactly once per probe, whatever happened
+  // inside the try — a session that is not running, and a capture that threw,
+  // are both "not waiting" and must end an episode that was open.
+  waitingKind: WaitingKind | null;
+  structuredWaitingSince: number | null;
+  // Issue #1926: what the frame said and whether it said it positively. Both
+  // stay null when there was no frame to read — the session is not running, or
+  // the capture threw — and the keys are then omitted from the result, which is
+  // the same rule `model` follows and for the same reason.
+  statusEvidence: StatusEvidence | null;
+  sessionStatusReason: string | null;
+  // Issue #2775: whether no rule could read the frame. False when there was no
+  // frame to read, like the two above, and published only when true.
+  isUnclassified: boolean;
+}
+
+/**
+ * The detector's verdict on a captured frame, written onto `frame` (Issue #3273:
+ * the first step of the capture's `try`, moved verbatim).
+ */
+function readFrameVerdict(
+  frame: InstanceFrameState,
+  ctx: InstanceProbeContext,
+  output: string,
+): { compositeKey: string; statusResult: StatusDetectionResult } {
+  const { worktreeId, cliToolId, instanceId } = ctx;
+  // Issue #501, #525, #896: Pass last server response timestamp using the
+  // per-instance compositeKey. Auto-yes / last-response tracking is now
+  // per-instance, so alias instances read their own poller timestamp.
+  const compositeKey = buildCompositeKey(worktreeId, cliToolId, instanceId);
+  const lastServerResponseTs = getLastServerResponseTimestamp(compositeKey);
+  const lastOutputTimestamp = lastServerResponseTs ? new Date(lastServerResponseTs) : undefined;
+  const rawStatusResult = detectSessionStatus(output, cliToolId, lastOutputTimestamp);
+  // Issue #3179: the same neutral verdict `current-output-builder` publishes
+  // while a launch is in progress, fed the same dialog dwell.
+  frame.startingSince = observeSessionStartingFrame(
+    worktreeId,
+    cliToolId,
+    instanceId,
+    rawStatusResult.status === 'waiting' || rawStatusResult.hasActivePrompt,
+  );
+  const statusResult = frame.startingSince === null
+    ? rawStatusResult
+    : startingStatusResult(rawStatusResult);
+
+  // Issue #1784: read the model / reasoning effort off the same frame the
+  // detector just judged. Riding on this capture is the entire point — the
+  // reasoning effort exists nowhere except the TUI's own chrome, and a
+  // dedicated `capture-pane` for it would add a tmux round-trip per
+  // instance per poll for a string that changes once a session. Pure and
+  // non-throwing; a frame that shows nothing latches nothing.
+  recordCapturedModelInfo(
+    worktreeId,
+    cliToolId,
+    instanceId,
+    extractModelInfo(cliToolId, output)
+  );
+  // Issue #1550: SessionStatus → activity flags lives in status-mapping.ts.
+  // Issue #2775: the detector's floor (`default` and the other two
+  // unclassified reasons) is `running` with nothing behind it, and it used to
+  // reach every dot and `commandmate ls` as `isProcessing: true` — "still
+  // working" for a frame nothing could read. `isUnclassifiedFrame` is the
+  // single producer of that fact (`current-output-builder` and therefore
+  // `wait` read the same one); this only changes how it is PROJECTED, never
+  // what the detector said.
+  frame.isUnclassified = isUnclassifiedFrame(statusResult.status, statusResult.reason);
+  ({ isWaitingForResponse: frame.isWaitingForResponse, isProcessing: frame.isProcessing } =
+    sessionStatusToActivityFlags(
+      statusResult.status,
+      frame.isUnclassified,
+    ));
+
+  // Issue #1926 read the same derivation `current-output-builder` used;
+  // Issue #1927 replaced the derivation with the detector's own answer, for
+  // both of them at once. §4 D1 決定 2's rule — one fact, one expression —
+  // is unchanged and now stronger: there is no expression left to keep in
+  // sync, because the layer that applied the rule is the layer that reports
+  // it. Latched here as well as in the builder because this is the loop the
+  // sidebar polls, so it is what keeps `lastKnownStatus` warm for the header
+  // chip and `commandmate ls`.
+  frame.sessionStatusReason = statusResult.reason;
+  frame.statusEvidence = statusResult.evidence;
+  return { compositeKey, statusResult };
+}
+
+/**
+ * The agent's own events folded onto `frame` (Issue #3273: the second step of
+ * the capture's `try`, moved verbatim).
+ */
+function foldAgentEventsIntoFrame(
+  frame: InstanceFrameState,
+  ctx: InstanceProbeContext,
+  output: string,
+  statusResult: StatusDetectionResult,
+  compositeKey: string,
+): void {
+  const { db, worktreeId, cliToolId, instanceId } = ctx;
+  // Issue #1786: fold in what the agent's own events know. Until now the
+  // list API — and therefore the sidebar, Home, Sessions, Review and the
+  // command palette — published the scraper's verdict alone, so a dialog
+  // only the structured layer could see (#1725's whole reason to exist) lit
+  // no dot anywhere. Read-only on purpose: see `peekPromptWaiting`.
+  //
+  // ORed onto the scraper's flag rather than replacing it with the
+  // resolution's `waiting`, which the Issue's text proposed. Measured
+  // against the code: that field is `hasActivePrompt || structured`, while
+  // this flag is `status === 'waiting'` — a strictly wider set, because a
+  // selection list and a Codex pager report `waiting` with
+  // `hasActivePrompt: false` (status-detector.ts, the SELECTION_LIST_REASONS
+  // returns). Assigning it verbatim would have turned every selection list
+  // in the sidebar from orange to green: a regression, in an Issue whose own
+  // non-functional requirement is that the dots must not get worse. The OR
+  // only ever widens `isWaitingForResponse`, never narrows it.
+  const peek = peekPromptWaiting({
+    worktreeId,
+    cliToolId,
+    instanceId,
+    scraper: {
+      status: statusResult.status,
+      reason: statusResult.reason,
+      hasActivePrompt: statusResult.hasActivePrompt,
+    },
+  });
+  // Issue #3179: not during a launch — a structured wait inherited there
+  // would light the orange dot for a dialog nobody has to answer.
+  frame.isWaitingForResponse = frame.isWaitingForResponse || (frame.startingSince === null && peek.waiting);
+  // Issue #3365 / #3377: the agent's own turn, folded in by the rules
+  // `capture --json` applies. Not during a launch, and not over a wait.
+  const folded = frame.startingSince === null && !frame.isWaitingForResponse
+    ? foldHookTurn({
+      db,
+      worktreeId,
+      cliToolId,
+      instanceId,
+      output,
+      statusResult,
+      isUnclassified: frame.isUnclassified,
+      isProcessing: frame.isProcessing,
+    })
+    : null;
+  if (folded !== null) frame.isProcessing = folded.status === 'running';
+  // Latched after the fold, with the verdict this poll publishes — the value
+  // and the order `current-output-builder` latches in (#3377). The REASON
+  // published below stays the screen's.
+  observeStatusEvidence(compositeKey, folded ?? {
+    status: statusResult.status,
+    reason: statusResult.reason,
+    evidence: statusResult.evidence,
+  });
+  frame.structuredWaitingSince = frame.startingSince === null ? peek.structured?.at ?? null : null;
+  frame.waitingKind = deriveWaitingKind({
+    waiting: frame.isWaitingForResponse,
+    hasActivePrompt: statusResult.hasActivePrompt,
+    scraperStatus: statusResult.status,
+    scraperReason: statusResult.reason,
+    // Issue #3184 (design §6-2): a wait the app answers over the agent's
+    // API is a `prompt` for the dots and the push body, as the panel's
+    // buttons say. Not during a launch, for the reason the line above
+    // ignores the structured record then.
+    apiAnswerable:
+      frame.startingSince === null &&
+      isApiAnswerableStructuredWait(
+        peek.structured,
+        getAgentEventSource(cliToolId).capabilities.eventIdentity,
+      ),
+  });
+}
+
+/**
+ * The stale pending-prompt sweep (Issue #3273: the last step of the capture's
+ * `try`, moved verbatim).
+ */
+function sweepStalePendingPrompts(
+  ctx: InstanceProbeContext,
+  statusResult: StatusDetectionResult,
+  getMessages: typeof GetMessagesFn,
+  markPendingPromptsAsAnswered: typeof MarkPendingFn,
+): void {
+  const { db, worktreeId, cliToolId, instanceId } = ctx;
+  // Clean up stale pending prompts (scoped to this instance) if none is showing
+  if (!statusResult.hasActivePrompt) {
+    const messages = getMessages(db, worktreeId, { limit: 10, cliToolId, instanceId });
+    const hasPendingPrompt = messages.some(
+      msg => msg.messageType === 'prompt' && msg.promptData?.status !== 'answered'
+    );
+    if (hasPendingPrompt) {
+      markPendingPromptsAsAnswered(
+        db,
+        worktreeId,
+        cliToolId,
+        instanceId,
+        broadcastPromptSweptToAnswered(worktreeId),
+      );
+    }
+  }
+}
+
+/** What {@link buildInstanceSessionStatus} assembles, besides the frame (Issue #3273). */
+interface InstanceStatusParts {
+  worktreeId: string;
+  cliToolId: CLIToolType;
+  instanceId: string;
+  isRunning: boolean;
+  exitedReason: string | null;
+  waitingSince: number | null;
+  model: string | null;
+  effort: string | null;
+  lastKnown: ReturnType<typeof getLastKnownStatus>;
+  eventSource: AgentEventSourceStatus | null;
+}
+
+/**
+ * The status object {@link detectInstanceSessionStatus} returns (Issue #3273:
+ * its `return` literal, moved verbatim — keys, order and omissions unchanged).
+ */
+function buildInstanceSessionStatus(
+  frame: InstanceFrameState,
+  parts: InstanceStatusParts,
+): CliToolSessionStatus {
+  const { worktreeId, cliToolId, instanceId, isRunning, exitedReason, model, effort, lastKnown, eventSource } = parts;
+  const { isWaitingForResponse, isProcessing, waitingKind, statusEvidence, sessionStatusReason, isUnclassified, startingSince } = frame;
+  return {
+    isRunning,
+    isWaitingForResponse,
+    isProcessing,
+    waitingKind,
+    waitingSince: parts.waitingSince,
+    // A dead session is not awaiting anything; the flag describes the process
+    // that reported it, and that process is gone.
+    awaitingInstruction: isRunning && isAwaitingInstruction(worktreeId, cliToolId, instanceId),
+    ...(model !== null ? { model } : {}),
+    ...(effort !== null ? { reasoningEffort: effort } : {}),
+    ...(statusEvidence !== null ? { statusEvidence } : {}),
+    ...(sessionStatusReason !== null ? { sessionStatusReason } : {}),
+    ...(isUnclassified ? { isUnclassified: true } : {}),
+    // Issue #2070: the one reason published for a session that is NOT running.
+    // `statusEvidence: 'positive'` is not a formality — tmux was asked, the
+    // pane was read, and a shell prompt was found where the agent's composer
+    // should be. That is an observation, which is the distinction §4 D1 draws
+    // (and the same call `current-output-builder` makes for `session_not_running`).
+    ...(exitedReason !== null
+      ? { sessionStatusReason: STATUS_REASON.EXITED, statusEvidence: 'positive' as const }
+      : {}),
+    ...(lastKnown !== null
+      ? { lastKnownStatus: lastKnown.status, lastKnownStatusAt: lastKnown.at }
+      : {}),
+    ...(eventSource !== null ? { eventSource } : {}),
+    ...(startingSince !== null ? { startingSince } : {}),
+  };
+}
+
 /**
  * Detect the session status of a single (cliTool, instance) session.
  *
@@ -560,7 +833,7 @@ async function detectInstanceSessionStatus(
   // Issue #3179: a launch in progress. Read before the liveness probe, because
   // the pane of a launch that has not typed its command yet IS a bare shell
   // prompt — the very frame the probe reads as "the tool exited".
-  let startingSince = getSessionStartingSince(worktreeId, cliToolId, instanceId);
+  const startingSince = getSessionStartingSince(worktreeId, cliToolId, instanceId);
   if (isRunning && startingSince === null) {
     if (metrics) metrics.healthCheckCount++;
     const liveness = await probeToolSessionLiveness(sessionName, cliToolId);
@@ -571,23 +844,16 @@ async function detectInstanceSessionStatus(
   }
 
   // Check status based on terminal state
-  let isWaitingForResponse = false;
-  let isProcessing = false;
-  // Issue #1786: the waiting metadata the list API now publishes. Declared out
-  // here so the edge below is observed exactly once per probe, whatever happened
-  // inside the try — a session that is not running, and a capture that threw,
-  // are both "not waiting" and must end an episode that was open.
-  let waitingKind: WaitingKind | null = null;
-  let structuredWaitingSince: number | null = null;
-  // Issue #1926: what the frame said and whether it said it positively. Both
-  // stay null when there was no frame to read — the session is not running, or
-  // the capture threw — and the keys are then omitted from the result, which is
-  // the same rule `model` follows and for the same reason.
-  let statusEvidence: StatusEvidence | null = null;
-  let sessionStatusReason: string | null = null;
-  // Issue #2775: whether no rule could read the frame. False when there was no
-  // frame to read, like the two above, and published only when true.
-  let isUnclassified = false;
+  const frame: InstanceFrameState = {
+    startingSince,
+    isWaitingForResponse: false,
+    isProcessing: false,
+    waitingKind: null,
+    structuredWaitingSince: null,
+    statusEvidence: null,
+    sessionStatusReason: null,
+    isUnclassified: false,
+  };
   if (isRunning) {
     try {
       // Issue #1933: the per-tool ladder that used to live here — and that made
@@ -600,142 +866,13 @@ async function detectInstanceSessionStatus(
       // counted as a tmux round-trip that was paid for.
       if (metrics) metrics.captureCount++;
       const output = await captureSessionOutput(worktreeId, cliToolId, captureLines, instanceId);
-      // Issue #501, #525, #896: Pass last server response timestamp using the
-      // per-instance compositeKey. Auto-yes / last-response tracking is now
-      // per-instance, so alias instances read their own poller timestamp.
-      const compositeKey = buildCompositeKey(worktreeId, cliToolId, instanceId);
-      const lastServerResponseTs = getLastServerResponseTimestamp(compositeKey);
-      const lastOutputTimestamp = lastServerResponseTs ? new Date(lastServerResponseTs) : undefined;
-      const rawStatusResult = detectSessionStatus(output, cliToolId, lastOutputTimestamp);
-      // Issue #3179: the same neutral verdict `current-output-builder` publishes
-      // while a launch is in progress, fed the same dialog dwell.
-      startingSince = observeSessionStartingFrame(
-        worktreeId,
-        cliToolId,
-        instanceId,
-        rawStatusResult.status === 'waiting' || rawStatusResult.hasActivePrompt,
-      );
-      const statusResult = startingSince === null
-        ? rawStatusResult
-        : startingStatusResult(rawStatusResult);
-
-      // Issue #1784: read the model / reasoning effort off the same frame the
-      // detector just judged. Riding on this capture is the entire point — the
-      // reasoning effort exists nowhere except the TUI's own chrome, and a
-      // dedicated `capture-pane` for it would add a tmux round-trip per
-      // instance per poll for a string that changes once a session. Pure and
-      // non-throwing; a frame that shows nothing latches nothing.
-      recordCapturedModelInfo(
-        worktreeId,
-        cliToolId,
-        instanceId,
-        extractModelInfo(cliToolId, output)
-      );
-      // Issue #1550: SessionStatus → activity flags lives in status-mapping.ts.
-      // Issue #2775: the detector's floor (`default` and the other two
-      // unclassified reasons) is `running` with nothing behind it, and it used to
-      // reach every dot and `commandmate ls` as `isProcessing: true` — "still
-      // working" for a frame nothing could read. `isUnclassifiedFrame` is the
-      // single producer of that fact (`current-output-builder` and therefore
-      // `wait` read the same one); this only changes how it is PROJECTED, never
-      // what the detector said.
-      isUnclassified = isUnclassifiedFrame(statusResult.status, statusResult.reason);
-      ({ isWaitingForResponse, isProcessing } = sessionStatusToActivityFlags(
-        statusResult.status,
-        isUnclassified,
-      ));
-
-      // Issue #1926 read the same derivation `current-output-builder` used;
-      // Issue #1927 replaced the derivation with the detector's own answer, for
-      // both of them at once. §4 D1 決定 2's rule — one fact, one expression —
-      // is unchanged and now stronger: there is no expression left to keep in
-      // sync, because the layer that applied the rule is the layer that reports
-      // it. Latched here as well as in the builder because this is the loop the
-      // sidebar polls, so it is what keeps `lastKnownStatus` warm for the header
-      // chip and `commandmate ls`.
-      sessionStatusReason = statusResult.reason;
-      statusEvidence = statusResult.evidence;
-
-      // Issue #1786: fold in what the agent's own events know. Until now the
-      // list API — and therefore the sidebar, Home, Sessions, Review and the
-      // command palette — published the scraper's verdict alone, so a dialog
-      // only the structured layer could see (#1725's whole reason to exist) lit
-      // no dot anywhere. Read-only on purpose: see `peekPromptWaiting`.
-      //
-      // ORed onto the scraper's flag rather than replacing it with the
-      // resolution's `waiting`, which the Issue's text proposed. Measured
-      // against the code: that field is `hasActivePrompt || structured`, while
-      // this flag is `status === 'waiting'` — a strictly wider set, because a
-      // selection list and a Codex pager report `waiting` with
-      // `hasActivePrompt: false` (status-detector.ts, the SELECTION_LIST_REASONS
-      // returns). Assigning it verbatim would have turned every selection list
-      // in the sidebar from orange to green: a regression, in an Issue whose own
-      // non-functional requirement is that the dots must not get worse. The OR
-      // only ever widens `isWaitingForResponse`, never narrows it.
-      const peek = peekPromptWaiting({
-        worktreeId,
-        cliToolId,
-        instanceId,
-        scraper: {
-          status: statusResult.status,
-          reason: statusResult.reason,
-          hasActivePrompt: statusResult.hasActivePrompt,
-        },
-      });
-      // Issue #3179: not during a launch — a structured wait inherited there
-      // would light the orange dot for a dialog nobody has to answer.
-      isWaitingForResponse = isWaitingForResponse || (startingSince === null && peek.waiting);
-      // Issue #3365 / #3377: the agent's own turn, folded in by the rules
-      // `capture --json` applies. Not during a launch, and not over a wait.
-      const folded = startingSince === null && !isWaitingForResponse
-        ? foldHookTurn({ db, worktreeId, cliToolId, instanceId, output, statusResult, isUnclassified, isProcessing })
-        : null;
-      if (folded !== null) isProcessing = folded.status === 'running';
-      // Latched after the fold, with the verdict this poll publishes — the value
-      // and the order `current-output-builder` latches in (#3377). The REASON
-      // published below stays the screen's.
-      observeStatusEvidence(compositeKey, folded ?? {
-        status: statusResult.status,
-        reason: statusResult.reason,
-        evidence: statusResult.evidence,
-      });
-      structuredWaitingSince = startingSince === null ? peek.structured?.at ?? null : null;
-      waitingKind = deriveWaitingKind({
-        waiting: isWaitingForResponse,
-        hasActivePrompt: statusResult.hasActivePrompt,
-        scraperStatus: statusResult.status,
-        scraperReason: statusResult.reason,
-        // Issue #3184 (design §6-2): a wait the app answers over the agent's
-        // API is a `prompt` for the dots and the push body, as the panel's
-        // buttons say. Not during a launch, for the reason the line above
-        // ignores the structured record then.
-        apiAnswerable:
-          startingSince === null &&
-          isApiAnswerableStructuredWait(
-            peek.structured,
-            getAgentEventSource(cliToolId).capabilities.eventIdentity,
-          ),
-      });
-
-      // Clean up stale pending prompts (scoped to this instance) if none is showing
-      if (!statusResult.hasActivePrompt) {
-        const messages = getMessages(db, worktreeId, { limit: 10, cliToolId, instanceId });
-        const hasPendingPrompt = messages.some(
-          msg => msg.messageType === 'prompt' && msg.promptData?.status !== 'answered'
-        );
-        if (hasPendingPrompt) {
-          markPendingPromptsAsAnswered(
-            db,
-            worktreeId,
-            cliToolId,
-            instanceId,
-            broadcastPromptSweptToAnswered(worktreeId),
-          );
-        }
-      }
+      const ctx: InstanceProbeContext = { db, worktreeId, cliToolId, instanceId };
+      const { compositeKey, statusResult } = readFrameVerdict(frame, ctx, output);
+      foldAgentEventsIntoFrame(frame, ctx, output, statusResult, compositeKey);
+      sweepStalePendingPrompts(ctx, statusResult, getMessages, markPendingPromptsAsAnswered);
     } catch {
       // If capture fails, assume processing
-      isProcessing = true;
+      frame.isProcessing = true;
     }
   }
 
@@ -746,9 +883,9 @@ async function detectInstanceSessionStatus(
     worktreeId,
     cliToolId,
     instanceId,
-    waiting: isWaitingForResponse,
-    kind: waitingKind,
-    structuredSince: structuredWaitingSince,
+    waiting: frame.isWaitingForResponse,
+    kind: frame.waitingKind,
+    structuredSince: frame.structuredWaitingSince,
   });
 
   // Issue #1783 / #1784: the model and reasoning effort, folded from the agent's
@@ -809,7 +946,11 @@ async function detectInstanceSessionStatus(
         // stops the tmux surface and the CLI table naming one session two ways.
         // An unclassified frame (#2775) is therefore `ready` here, as it is in
         // `commandmate ls`: the four-word vocabulary has no "cannot tell".
-        status: deriveCliStatus({ isRunning, isWaitingForResponse, isProcessing }),
+        status: deriveCliStatus({
+          isRunning,
+          isWaitingForResponse: frame.isWaitingForResponse,
+          isProcessing: frame.isProcessing,
+        }),
       });
     } else {
       // The session is gone. Drop the memos so a session created later under the
@@ -824,34 +965,18 @@ async function detectInstanceSessionStatus(
     });
   }
 
-  return {
+  return buildInstanceSessionStatus(frame, {
+    worktreeId,
+    cliToolId,
+    instanceId,
     isRunning,
-    isWaitingForResponse,
-    isProcessing,
-    waitingKind,
+    exitedReason,
     waitingSince,
-    // A dead session is not awaiting anything; the flag describes the process
-    // that reported it, and that process is gone.
-    awaitingInstruction: isRunning && isAwaitingInstruction(worktreeId, cliToolId, instanceId),
-    ...(model !== null ? { model } : {}),
-    ...(effort !== null ? { reasoningEffort: effort } : {}),
-    ...(statusEvidence !== null ? { statusEvidence } : {}),
-    ...(sessionStatusReason !== null ? { sessionStatusReason } : {}),
-    ...(isUnclassified ? { isUnclassified: true } : {}),
-    // Issue #2070: the one reason published for a session that is NOT running.
-    // `statusEvidence: 'positive'` is not a formality — tmux was asked, the
-    // pane was read, and a shell prompt was found where the agent's composer
-    // should be. That is an observation, which is the distinction §4 D1 draws
-    // (and the same call `current-output-builder` makes for `session_not_running`).
-    ...(exitedReason !== null
-      ? { sessionStatusReason: STATUS_REASON.EXITED, statusEvidence: 'positive' as const }
-      : {}),
-    ...(lastKnown !== null
-      ? { lastKnownStatus: lastKnown.status, lastKnownStatusAt: lastKnown.at }
-      : {}),
-    ...(eventSource !== null ? { eventSource } : {}),
-    ...(startingSince !== null ? { startingSince } : {}),
-  };
+    model,
+    effort,
+    lastKnown,
+    eventSource,
+  });
 }
 
 /**
