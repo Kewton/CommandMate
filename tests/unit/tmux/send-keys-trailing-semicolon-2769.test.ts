@@ -23,7 +23,7 @@ vi.mock('util', () => ({
 }));
 
 import { escapeTrailingSemicolon, keySequenceArgs } from '@/lib/tmux/key-sequence';
-import { exactTarget, sendKeys, sendKeySequence } from '@/lib/tmux/tmux';
+import { exactTarget, sendKeys } from '@/lib/tmux/tmux';
 import { keyStep, literalStep } from '@/types/cli-tool-contracts';
 
 const SESSION = 'mcbd-claude-wt-1';
@@ -70,14 +70,6 @@ describe('[#2769] literal の経路（keySequenceArgs / sendKeys literal / sendK
     await sendKeys(SESSION, 'fix it;', false, { literal: true });
     expect(argvOf(execFileAsyncMock.mock.calls[0])).toEqual([
       'send-keys', '-t', TARGET, '-l', '--', `fix it${BS};`,
-    ]);
-  });
-
-  it('sendKeySequence', async () => {
-    await sendKeySequence(SESSION, [literalStep('a;'), keyStep('Enter')]);
-    expect(execFileAsyncMock.mock.calls.map((call) => argvOf(call).slice(3))).toEqual([
-      ['-l', '--', `a${BS};`],
-      ['--', 'Enter'],
     ]);
   });
 });

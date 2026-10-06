@@ -10,8 +10,6 @@ import {
   stripAnsi,
   OPENCODE_PROMPT_PATTERN,
   OPENCODE_PROMPT_AFTER_RESPONSE,
-  OPENCODE_RESPONSE_COMPLETE,
-  OPENCODE_SKIP_PATTERNS,
   findCommandCodeChromeStart,
   findCopilotChromeStart,
   readCopilotStatusBar,
@@ -409,38 +407,6 @@ function suppressGeminiStartupScreen(
 }
 
 /**
- * OpenCode: the banner.
- *
- * @param cliToolId - CLI tool identifier
- * @param response - The response extracted from the frame
- * @param totalLines - Total line count in the buffer
- * @param cleanOutputToCheck - The ANSI-stripped text the completion rules were tested against
- * @returns The incomplete result to return, or null when the response stands
- */
-function suppressOpenCodeBanner(
-  cliToolId: CLIToolType,
-  response: string,
-  totalLines: number,
-  cleanOutputToCheck: string
-): ExtractionResult | null {
-  // OpenCode banner defense
-  if (cliToolId === 'opencode') {
-    const cleanResponse = stripAnsi(response);
-    if (cleanResponse.length < 50 || !OPENCODE_RESPONSE_COMPLETE.test(cleanOutputToCheck)) {
-      const contentLines = cleanResponse.split('\n').filter(line => {
-        const trimmed = line.trim();
-        return trimmed && !OPENCODE_SKIP_PATTERNS.some(p => p.test(trimmed));
-      });
-      if (contentLines.length === 0) {
-        return incompleteResult(totalLines);
-      }
-    }
-  }
-
-  return null;
-}
-
-/**
  * The result for a startup screen of a tool that reads its reply from the
  * cursor: nothing to save, and the cursor moved past the screen (Issue #3293).
  *
@@ -775,7 +741,7 @@ function collectCompletedResponse(ctx: ExtractionContext): { response: string; e
 export function extractCompletedResponse(ctx: ExtractionContext): ExtractionResult {
   const {
     cliToolId, totalLines, openCodeCleanLines, bufferReset, captureWindowSaturated,
-    cleanOutputToCheck, thinkingPattern, skipPatterns, findRecentUserPromptIndex,
+    thinkingPattern, skipPatterns, findRecentUserPromptIndex,
   } = ctx;
 
   const { response, endIndex } = collectCompletedResponse(ctx);
@@ -801,7 +767,6 @@ export function extractCompletedResponse(ctx: ExtractionContext): ExtractionResu
     suppressCopilotLaunchScreen(cliToolId, response, totalLines) ??
     suppressCommandCodeLaunchScreen(cliToolId, response, totalLines, findRecentUserPromptIndex) ??
     suppressGeminiStartupScreen(cliToolId, response, totalLines) ??
-    suppressOpenCodeBanner(cliToolId, response, totalLines, cleanOutputToCheck) ??
     suppressCodexStartupScreen(ctx, response, endIndex) ??
     suppressVibeLocalStartupScreen(ctx, response, endIndex);
   if (startupScreen) {
