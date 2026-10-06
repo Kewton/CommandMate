@@ -516,6 +516,8 @@ function judgeFrame(
   // The sequence from here to `startingStatusResult` is the same as in
   // worktree-status-helper.ts; what follows differs on purpose and is not shared
   // (#3215 "not touched").
+  // These six expressions are deliberately kept identical to the same sequence in
+  // worktree-status-helper.ts, not shared (#3319 item 37 decision).
   const compositeKey = buildCompositeKey(worktreeId, cliToolId, instanceId);
   const lastServerResponseTimestamp = getLastServerResponseTimestamp(compositeKey);
   const lastOutputTimestamp = lastServerResponseTimestamp ? new Date(lastServerResponseTimestamp) : undefined;

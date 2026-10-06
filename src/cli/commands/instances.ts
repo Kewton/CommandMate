@@ -15,7 +15,7 @@ import type { InstancesOptions } from '../types';
 import type { AgentInstance } from '../types/api-responses';
 import { ApiClient, ApiError, isValidWorktreeId, isValidInstanceId } from '../utils/api-client';
 import { TOKEN_WARNING, handleCommandError } from '../utils/command-helpers';
-import { isCliToolId } from '../config/cli-tool-ids';
+import { isCliToolId, CLI_TOOL_IDS } from '../config/cli-tool-ids';
 import {
   fetchAgentInstances,
   saveAgentInstances,
@@ -482,7 +482,7 @@ async function addInstance(
     process.exit(ExitCode.CONFIG_ERROR);
   }
   if (!isCliToolId(options.agent)) {
-    console.error('Error: Invalid --agent.');
+    console.error(`Error: Invalid --agent. Must be one of: ${CLI_TOOL_IDS.join(', ')}`);
     process.exit(ExitCode.CONFIG_ERROR);
   }
   if (options.id && !isValidInstanceId(options.id)) {

@@ -15,7 +15,7 @@ import type {
 } from '../types/api-responses';
 import { ApiClient, ApiError, isValidWorktreeId } from '../utils/api-client';
 import { TOKEN_WARNING, handleCommandError } from '../utils/command-helpers';
-import { isCliToolId } from '../config/cli-tool-ids';
+import { isCliToolId, CLI_TOOL_IDS } from '../config/cli-tool-ids';
 import { AGENT_OPTION_DESCRIPTION, INSTANCE_OPTION_DESCRIPTION } from '../config/agent-target-options';
 import {
   isInstanceSelector,
@@ -202,7 +202,7 @@ function validateRespondArgs(worktreeId: string, answer: string | undefined, opt
 
   // Validate agent if provided
   if (options.agent && !isCliToolId(options.agent)) {
-    console.error('Error: Invalid agent.');
+    console.error(`Error: Invalid agent. Must be one of: ${CLI_TOOL_IDS.join(', ')}`);
     process.exit(ExitCode.CONFIG_ERROR);
   }
 

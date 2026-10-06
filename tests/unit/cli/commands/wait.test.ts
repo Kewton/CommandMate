@@ -541,6 +541,30 @@ describe('Issue #520: sessionStatus completion detection', () => {
         expect.stringContaining('Selection list active on wt1'),
       );
     });
+
+    // Issue #3319 item 27: a held round ends the round. The frame below is
+    // also one a LATER stage would exit on (the session is not running), so
+    // this fails if the hold falls through instead of waiting.
+    it('a round held under --on-prompt human does not reach the later stages (selection list)', async () => {
+      vi.useFakeTimers();
+      const ready = { ...baseOutput, isRunning: true, sessionStatus: 'ready' as const };
+      mockFetchSequence([{ data: { ...selectionList, isRunning: false } }, { data: ready }]);
+
+      const { createWaitCommand } = await import('../../../../src/cli/commands/wait');
+      const promise = createWaitCommand().parseAsync([
+        'node', 'wait', 'wt1', '--on-prompt', 'human',
+      ]);
+      await vi.advanceTimersByTimeAsync(0);
+
+      // The first poll has been judged, and nothing has exited on it.
+      expect(mockConsoleError).toHaveBeenCalledWith(expect.stringContaining('Waiting for human response'));
+      expect(mockExit).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(6000);
+      await promise;
+      expect(mockExit).toHaveBeenCalledTimes(1);
+      expect(mockExit).toHaveBeenCalledWith(WaitExitCode.SUCCESS);
+    });
   });
 
   // Issue #1708: the detection layer is the single entry point every downstream
@@ -640,6 +664,29 @@ describe('Issue #520: sessionStatus completion detection', () => {
       expect(mockConsoleError).toHaveBeenCalledWith(
         expect.stringContaining('Unclassified interactive frame on wt1'),
       );
+    });
+
+    // Issue #3319 item 27: the dwell round that is held under --on-prompt human
+    // ends the round. The same frame, not running, is what a later stage exits on.
+    it('a dwelling round held under --on-prompt human does not reach the later stages', async () => {
+      vi.useFakeTimers();
+      const notRunning = { ...unclassified, isRunning: false };
+      mockFetchSequence([...repeat({ ...unclassified, isRunning: true }, 12), { data: notRunning }, { data: ready }]);
+
+      const { createWaitCommand } = await import('../../../../src/cli/commands/wait');
+      const promise = createWaitCommand().parseAsync([
+        'node', 'wait', 'wt1', '--on-prompt', 'human',
+      ]);
+      // 13th poll: dwell >= 60s on an unclassified frame that is also not running.
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      expect(mockConsoleError).toHaveBeenCalledWith(expect.stringContaining('Waiting for human response'));
+      expect(mockExit).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(10_000);
+      await promise;
+      expect(mockExit).toHaveBeenCalledTimes(1);
+      expect(mockExit).toHaveBeenCalledWith(WaitExitCode.SUCCESS);
     });
 
     it('reports a genuinely finished session as completed on the first poll', async () => {
@@ -1539,6 +1586,30 @@ describe('Issue #1725: a structured prompt with no options', () => {
     expect(mockConsoleError).toHaveBeenCalledWith(
       expect.stringContaining('Prompt detected on wt1'),
     );
+  });
+
+  // Issue #3319 item 27: a held round ends the round. The frame below is
+  // also one a LATER stage would exit on (the session is not running), so
+  // this fails if the hold falls through instead of waiting.
+  it('a round held under --on-prompt human does not reach the later stages (structured prompt)', async () => {
+    vi.useFakeTimers();
+    const ready = { ...baseOutput, isRunning: true, sessionStatus: 'ready' as const };
+    mockFetchSequence([{ data: { ...structuredPrompt, isRunning: false } }, { data: ready }]);
+
+    const { createWaitCommand } = await import('../../../../src/cli/commands/wait');
+    const promise = createWaitCommand().parseAsync([
+      'node', 'wait', 'wt1', '--on-prompt', 'human',
+    ]);
+    await vi.advanceTimersByTimeAsync(0);
+
+    // The first poll has been judged, and nothing has exited on it.
+    expect(mockConsoleError).toHaveBeenCalledWith(expect.stringContaining('Waiting for human response'));
+    expect(mockExit).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(6000);
+    await promise;
+    expect(mockExit).toHaveBeenCalledTimes(1);
+    expect(mockExit).toHaveBeenCalledWith(WaitExitCode.SUCCESS);
   });
 });
 
