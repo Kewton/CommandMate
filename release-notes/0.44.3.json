@@ -1,0 +1,82 @@
+{
+  "version": "0.44.3",
+  "date": "2026-10-07",
+  "highlight": {
+    "ja": "一覧の作業中の表示と capture の状態がずれないようになり、codex の状態や送信の不具合を直しました。Auto-Yes は、読めない選択画面に Enter を 1 回だけ送ります。",
+    "en": "The working indicator in the list now matches the captured status, and several codex status and send problems are fixed. Auto-Yes now sends Enter once on selection screens CommandMate cannot read."
+  },
+  "added": [
+    {
+      "ja": "CommandMate が読めない選択画面に、Auto-Yes が Enter を 1 回送り、送ったことを画面に表示するようになりました。",
+      "en": "Auto-Yes now sends Enter once on a selection screen CommandMate cannot read, and the screen shows that it did."
+    }
+  ],
+  "improved": [
+    {
+      "ja": "Auto-Yes は、複数選択の質問には答えずに残し、Auto-Yes 中もプロンプト欄に表示するようになりました。",
+      "en": "Auto-Yes now leaves multiple-choice questions with checkboxes for you and shows them in the prompt panel even while it is on."
+    }
+  ],
+  "fixed": [
+    {
+      "ja": "一覧の作業中の表示が、エージェントの作業の終わりと同じ時刻に切り替わるようにしました。",
+      "en": "The working indicator in the list now turns off at the same moment the agent finishes its turn."
+    },
+    {
+      "ja": "codex の作業中に、一覧や状態が待機中と表示される問題を直しました。",
+      "en": "Fixed codex showing as idle in the list and status while it was still working."
+    },
+    {
+      "ja": "codex への送信で、文が入力欄に残って送信されないことがある問題を直しました。",
+      "en": "Fixed messages to codex sometimes staying in the input box without being sent."
+    },
+    {
+      "ja": "codex の入力欄に 2 行以上の文字があると、生成中と表示される問題を直しました。",
+      "en": "Fixed codex being shown as generating when its input box held two or more lines of text."
+    },
+    {
+      "ja": "codex の起動画面や入力欄の下の行が、返答として履歴に保存される問題を直しました。",
+      "en": "Fixed the codex start screen and lines below its input box being saved to history as replies."
+    },
+    {
+      "ja": "短いターンの直後に始まったターンや、その終わりを見落とし、待ち続ける問題を直しました。",
+      "en": "Fixed turns that start right after a short one being missed, which left waits hanging."
+    },
+    {
+      "ja": "別の CommandMate サーバーが作った同じ名前のセッションに、入力や Auto-Yes が届かないようにしました。",
+      "en": "Input and Auto-Yes no longer reach a session with the same name created by another CommandMate server."
+    },
+    {
+      "ja": "セッションが動いていないインスタンスの Auto-Yes が、約 12 分で黙って無効になる問題を直しました。",
+      "en": "Fixed Auto-Yes silently turning off after about 12 minutes on an instance whose session was not running."
+    },
+    {
+      "ja": "Sessions 画面のタイルやターミナル面にも、選択リストの操作と番号キーを表示するようにしました。",
+      "en": "Selection list controls and number keys now also appear on the Sessions tiles and the terminal view."
+    },
+    {
+      "ja": "スマホの承認シートに、選択肢の説明と何問目かを表示するようにしました。",
+      "en": "The approval sheet on phones now shows each option's description and which question you are on."
+    },
+    {
+      "ja": "スマホでタブを切り替えた直後に、モードのボタンが前のエージェントの状態のまま押せる問題を直しました。",
+      "en": "Fixed the mode button on phones briefly acting on the previous agent right after switching tabs."
+    },
+    {
+      "ja": "承認の送信が失敗したとき、PC の画面に何も表示されない問題を直しました。",
+      "en": "Fixed nothing being shown on the PC view when sending an approval failed."
+    },
+    {
+      "ja": "別のペインの最大化で隠れた承認や、表示と食い違う承認が、止まり検知に数えられる問題を直しました。",
+      "en": "Fixed approvals hidden behind a maximized pane, or differing from what is shown, being counted by the stuck-prompt check."
+    },
+    {
+      "ja": "commandmate instances の AUTO_YES 列が、停止中のインスタンスで no と表示される問題を直しました。",
+      "en": "Fixed the AUTO_YES column of commandmate instances showing no for stopped instances that had Auto-Yes on."
+    },
+    {
+      "ja": "壊れた本文を受けた API が、500 ではなく 400 を返すようにしました。",
+      "en": "APIs now answer 400 instead of 500 when they receive a malformed request body."
+    }
+  ]
+}
