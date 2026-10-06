@@ -41,11 +41,13 @@ declare global {
   var __agentEventGenerationStartedAt: Map<string, number> | undefined;
   // eslint-disable-next-line no-var
   var __agentEventTurns: Map<string, TurnRecord> | undefined;
-  // eslint-disable-next-line no-var
-  var __agentEventReopenedTurns: Map<string, { turnId: string; replaced: TurnRecord }> | undefined;
-  // eslint-disable-next-line no-var
-  var __agentEventTurnSeq: { value: number } | undefined;
 }
+
+/** globalThis slots typed without `declare global { var }` (npm-publish-check.ts precedent) */
+const globalStore = globalThis as typeof globalThis & {
+  __agentEventReopenedTurns?: Map<string, { turnId: string; replaced: TurnRecord }>;
+  __agentEventTurnSeq?: { value: number };
+};
 
 /** compositeKey -> epoch ms the current generation began. See {@link beginAgentEventGeneration}. */
 export const generationStartedAt = getOrInitGlobal('__agentEventGenerationStartedAt', () => new Map<string, number>());
@@ -78,10 +80,10 @@ export const agentTurns = getOrInitGlobal('__agentEventTurns', () => new Map<str
  * next re-open, and only ever read while the turn it names is still the
  * instance's turn.
  */
-export const reopenedTurns = getOrInitGlobal(
-  '__agentEventReopenedTurns',
-  () => new Map<string, { turnId: string; replaced: TurnRecord }>()
-);
+export const reopenedTurns = (globalStore.__agentEventReopenedTurns ??= new Map<
+  string,
+  { turnId: string; replaced: TurnRecord }
+>());
 
 /**
  * Monotonic suffix for {@link TurnRecord.turnId}.
@@ -92,7 +94,7 @@ export const reopenedTurns = getOrInitGlobal(
  * change of id as "a new turn began", so the collision would be a missed turn
  * boundary rather than a cosmetic clash.
  */
-const turnSequence = getOrInitGlobal('__agentEventTurnSeq', () => ({ value: 0 }));
+const turnSequence = (globalStore.__agentEventTurnSeq ??= { value: 0 });
 
 // =============================================================================
 // Turn model (Issue #1930)

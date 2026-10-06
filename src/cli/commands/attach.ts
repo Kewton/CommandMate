@@ -151,7 +151,7 @@ async function resolveAttachSessionName(
  *   this very name.
  * - `unconfirmed`: anything else — the owner is not known. The server answered
  *   about a DIFFERENT name than the one `attach` connects to (`other-name`), or
- *   gave no ownership answer at all (`no-answer`: any non-2xx such as the 404
+ *   gave no ownership answer at all (`no-answer`, i.e. any non-2xx such as the 404
  *   for a namespaced session that does not exist, a server older than #2865,
  *   no server).
  */
