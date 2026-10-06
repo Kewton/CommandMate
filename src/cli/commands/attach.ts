@@ -44,7 +44,7 @@ import {
 } from '../utils/api-client';
 import type { ApiErrorPayload } from '../utils/api-client';
 import { TOKEN_WARNING, handleCommandError } from '../utils/command-helpers';
-import { isCliToolId, DEFAULT_CLI_TOOL_ID } from '../config/cli-tool-ids';
+import { isCliToolId, CLI_TOOL_IDS, DEFAULT_CLI_TOOL_ID } from '../config/cli-tool-ids';
 import { AGENT_OPTION_DESCRIPTION, INSTANCE_OPTION_DESCRIPTION } from '../config/agent-target-options';
 import { resolveSessionTarget, describeSessionTargetConflict } from '../utils/session-target';
 import { fetchAgentInstances } from '../utils/agent-instances';
@@ -409,7 +409,7 @@ export function createAttachCommand(): Command {
           process.exit(ExitCode.CONFIG_ERROR);
         }
         if (options.agent && !isCliToolId(options.agent)) {
-          console.error('Error: Invalid agent.');
+          console.error(`Error: Invalid agent. Must be one of: ${CLI_TOOL_IDS.join(', ')}`);
           process.exit(ExitCode.CONFIG_ERROR);
         }
         if (options.instance && !isValidInstanceId(options.instance)) {

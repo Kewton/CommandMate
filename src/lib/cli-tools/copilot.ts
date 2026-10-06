@@ -387,13 +387,6 @@ export class CopilotTool extends BaseCLITool {
     beginAgentSession({ worktreeId, cliToolId: COPILOT_CLI_TOOL_ID, instanceId });
 
     try {
-      // Issue #2070: creation only. On the relaunch path the pane already
-      // exists and holds the transcript of the process that died in it; the
-      // launch command is re-sent into that same pane.
-      if (!exists) {
-        await this.createLaunchPane(sessionName, worktreePath);
-      }
-
       // Issue #1761: hand this session its hook configuration, so structured
       // lifecycle events and Auto-Yes adjudication exist without the operator
       // having edited ~/.copilot/settings.json by hand.
@@ -406,12 +399,22 @@ export class CopilotTool extends BaseCLITool {
       //
       // Fails open in every branch: with `CM_AGENT_HOOKS_INJECT=0`, or with a
       // settings file that cannot be read or written, this is the bare launch
-      // command and nothing else.
+      // command and nothing else. The one exception is UAT isolation (Issue
+      // #3391), where the plan throws instead — which is why it is built BEFORE
+      // the tmux session: a refused launch must not leave an empty pane that
+      // `isRunning()` reports as a started copilot.
       const launchCommand = buildAgentLaunchCommandLine({
         target: { worktreeId, cliToolId: COPILOT_CLI_TOOL_ID, instanceId },
         executablePath: this.launchExecutable(resolved),
         worktreePath,
       });
+
+      // Issue #2070: creation only. On the relaunch path the pane already
+      // exists and holds the transcript of the process that died in it; the
+      // launch command is re-sent into that same pane.
+      if (!exists) {
+        await this.createLaunchPane(sessionName, worktreePath);
+      }
 
       // Start Copilot CLI in interactive mode
       await sendKeys(sessionName, withLaunchScreenCleared(launchCommand), true);

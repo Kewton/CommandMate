@@ -398,9 +398,15 @@ export interface CurrentOutputPayload {
   realtimeSnippet?: string;
   lineCount: number;
   lastCapturedLine?: number;
+  /**
+   * @deprecated 廃止の予定（次以降のマイナーの版で消す。#3395）。`isPromptWaiting` を使う。
+   * 値は `isPromptWaiting` と同じ（中身は「承認待ち」で、名前と合っていない）。
+   */
   isComplete?: boolean;
+  /** @deprecated 廃止の予定（次以降のマイナーの版で消す。#3395）。`thinking` を使う（同じ値）。 */
   isGenerating?: boolean;
   thinking?: boolean;
+  /** @deprecated 廃止の予定（次以降のマイナーの版で消す。#3395）。`thinking` と `cliToolId` から作る。 */
   thinkingMessage?: string | null;
   isPromptWaiting?: boolean;
   /**

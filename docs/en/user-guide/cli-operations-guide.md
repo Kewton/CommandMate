@@ -974,6 +974,8 @@ To tell whether the screen is empty, **look at `isRunning` first**.
 Calling `.trim()` on `realtimeSnippet` directly throws for a session that is not running, because
 the key is not there. `content` is a delta, so it never answers that on its own.
 
+**Deprecation notice (Issue #3394)**: `isComplete` / `isGenerating` / `thinkingMessage` are scheduled for removal (in the next or a later minor release; #3395). Until then they keep being returned. Replacements: `isComplete` → `isPromptWaiting` (same value; it actually means "waiting for approval", so the name does not match), `isGenerating` → `thinking`, `thinkingMessage` → `thinking` and `cliToolId`.
+
 **When the session is not running (`isRunning: false`), the fields read off the screen are
 absent keys** — not `false`, not `null` (Issue #3300). That covers `autoYes` / `isPromptWaiting` /
 `promptData` / `thinking` / `thinkingMessage` / `isComplete` / `isGenerating` / `realtimeSnippet` /

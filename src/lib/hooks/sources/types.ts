@@ -633,9 +633,9 @@ export interface AgentEventSource {
    * Must never throw, with one exception: injecting hooks is an enhancement to
    * a session that has to start anyway, so a config that cannot be written
    * costs the events and returns the bare executable. The exception is UAT
-   * isolation (`CM_UAT_ISOLATION=1`, Issue #3360): codex and antigravity throw
-   * `UatIsolationLaunchRefusedError` instead, because their bare executable
-   * still reads the user's shared hook config. Callers build the plan BEFORE
+   * isolation (`CM_UAT_ISOLATION=1`, Issue #3360): codex, antigravity and
+   * copilot (Issue #3391) throw `UatIsolationLaunchRefusedError` instead,
+   * because their bare executable still reads the user's shared hook config. Callers build the plan BEFORE
    * creating the tmux session, so a refusal leaves no pane behind.
    *
    * Takes {@link AgentLaunchContext} rather than `(target, executablePath)`

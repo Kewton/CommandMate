@@ -99,6 +99,15 @@
  * the bearer header without looking at where it is going, so a constant
  * destination is what keeps the token on loopback (設計方針書 §10.7).
  *
+ * ## UAT isolation (Issue #3391)
+ *
+ * Under `CM_UAT_ISOLATION=1` (Issue #3360) nothing in `~/.copilot` is written —
+ * not `settings.json`, not its backup, not the lock. The file is the user's,
+ * shared with their production server, and names a relay by this checkout's
+ * path. It is used as it is only when it already holds exactly what this build
+ * writes into an empty file ({@link inspectCopilotHookSettingsReadOnly});
+ * anything else refuses the launch, the way codex and antigravity do.
+ *
  * @module lib/hooks/sources/copilot/hook-settings
  */
 
@@ -117,6 +126,11 @@ import {
 import { homedir } from 'os';
 import { dirname, join } from 'path';
 import { resolveSafeDirectory } from '@/config/safe-directory';
+import {
+  isUatIsolationEnabled,
+  UAT_SAME_BUILD_FIX,
+  UatIsolationLaunchRefusedError,
+} from '@/config/uat-isolation';
 import { isValidInstanceId } from '@/lib/cli-tools/types';
 import { getServerPort } from '@/lib/env';
 import {
@@ -582,6 +596,14 @@ export function mergeCopilotHookSettings(
   return { ...existing, hooks: merged };
 }
 
+/** The bytes `settings.json` should hold, given what it holds now. */
+function renderCopilotHookSettings(
+  existing: Record<string, unknown>,
+  options: CopilotHookSettingsOptions
+): string {
+  return `${JSON.stringify(mergeCopilotHookSettings(existing, buildCopilotHookSettings(options)), null, 2)}\n`;
+}
+
 /** `''` when the file is not there; anything else throws. */
 function readFileOrEmpty(path: string): string {
   try {
@@ -799,21 +821,124 @@ function writeFileAtomic(path: string, contents: string): void {
 }
 
 /**
+ * The `config.json` that can erase `settingsPath`.
+ *
+ * Next to the settings file rather than via `getCopilotConfigPath()`: the
+ * config.json that can erase a settings.json is the one copilot reads from the
+ * same directory, and an overridden `settingsPath` must not be checked against
+ * a different home's config.
+ */
+function resolveCopilotConfigPathFor(
+  settingsPath: string,
+  options: CopilotHookSettingsOptions
+): string {
+  return options.configPath ?? join(dirname(settingsPath), 'config.json');
+}
+
+/** What {@link inspectCopilotHookSettingsReadOnly} found: usable as it is, or why not. */
+export type CopilotSharedHooksInspection =
+  | { usable: true; settingsPath: string }
+  | { usable: false; reason: string; fix: string };
+
+/**
+ * Whether the shared `~/.copilot/settings.json` may be used, unwritten, by a
+ * server in UAT isolation mode (`CM_UAT_ISOLATION=1`, Issue #3391).
+ *
+ * Usable means exactly one thing, as for codex and antigravity: the file is
+ * byte-identical to what this build writes into an EMPTY file. Comparing against
+ * the merge with what is there ({@link mergeCopilotHookSettings}) would not do —
+ * the merge keeps the user's own handlers, so a file holding a hand-written
+ * hook that posts straight to production would compare equal and run in the
+ * UAT session. The file holds no port, worktree or instance (they travel in the
+ * launch environment), so a file production wrote with the same build delivers
+ * this session's events to THIS server.
+ *
+ * A `hooks` key in copilot's `config.json` is refused too: copilot migrates it
+ * over `settings.json` at startup, so those hooks would be the ones that run. An
+ * unreadable `config.json` is refused rather than proceeded past, because here
+ * nothing may run that this server cannot show is its own.
+ */
+export function inspectCopilotHookSettingsReadOnly(
+  options: CopilotHookSettingsOptions = {}
+): CopilotSharedHooksInspection {
+  const settingsPath = options.settingsPath ?? getCopilotSettingsPath();
+  const configPath = resolveCopilotConfigPathFor(settingsPath, options);
+  if (!isCopilotHookInjectionEnabled()) {
+    return {
+      usable: false,
+      reason: 'CM_AGENT_HOOKS_INJECT=0',
+      fix: 'Do not combine CM_AGENT_HOOKS_INJECT=0 with UAT isolation.',
+    };
+  }
+
+  try {
+    const configHooks = inspectCopilotConfigHooks(configPath);
+    if (configHooks !== 'absent') {
+      logger.info('copilot-hook-config-json-readonly', { configPath, configHooks });
+      return {
+        usable: false,
+        reason:
+          configHooks === 'present'
+            ? `${configPath} has a "hooks" key, which copilot migrates over settings.json at startup`
+            : `${configPath} could not be parsed, so it may hold hooks copilot migrates over settings.json`,
+        fix: 'Skip copilot scenarios in this UAT, or run it where copilot\'s config.json holds no hooks.',
+      };
+    }
+
+    const raw = readFileOrEmpty(settingsPath);
+    if (raw === '') {
+      logger.info('copilot-hook-settings-absent-readonly', { settingsPath });
+      return { usable: false, reason: `${settingsPath} does not exist or is empty`, fix: UAT_SAME_BUILD_FIX };
+    }
+    if (raw === renderCopilotHookSettings({}, options)) {
+      return { usable: true, settingsPath };
+    }
+    if (raw === renderCopilotHookSettings(parseCopilotSettings(raw), options)) {
+      logger.info('copilot-hook-settings-foreign-readonly', { settingsPath });
+      return {
+        usable: false,
+        reason: `${settingsPath} also holds hooks (or keys) CommandMate did not write, which would run in the UAT session`,
+        fix: 'Skip copilot scenarios in this UAT, or run it where the shared settings file holds only the hooks CommandMate writes.',
+      };
+    }
+    logger.info('copilot-hook-settings-differs-readonly', { settingsPath });
+    return { usable: false, reason: `${settingsPath} differs from what this build writes`, fix: UAT_SAME_BUILD_FIX };
+  } catch (error) {
+    logger.warn('copilot-hook-settings-unreadable', {
+      settingsPath,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return { usable: false, reason: `${settingsPath} could not be read`, fix: UAT_SAME_BUILD_FIX };
+  }
+}
+
+/**
  * Merge the generated hooks into copilot's settings file and return its path.
  *
+ * Under `CM_UAT_ISOLATION=1` (Issue #3391) nothing is written: a file that
+ * already holds exactly this build's hooks is reused, anything else throws
+ * {@link UatIsolationLaunchRefusedError}.
+ *
+ * @throws {UatIsolationLaunchRefusedError} Under UAT isolation, when the shared
+ *   file cannot be used as it is
  * @throws {CopilotConfigHooksShadowError} When copilot's `config.json` still
  *   has a `hooks` key, which it migrates over this file at startup
  * @throws Anything the read, the merge or the write throws, plus a lock the
  *   file's other writers are holding. Callers must treat a throw as "launch
- *   without hooks" (fail-open).
+ *   without hooks" (fail-open), except the UAT isolation refusal.
  */
 export function writeCopilotHookSettings(options: CopilotHookSettingsOptions = {}): string {
+  if (isUatIsolationEnabled()) {
+    // Issue #3391: the file is the user's, shared with their production server,
+    // and names a relay by this checkout's path. A UAT server writes nothing to
+    // it; see {@link inspectCopilotHookSettingsReadOnly}.
+    const inspection = inspectCopilotHookSettingsReadOnly(options);
+    if (inspection.usable) return inspection.settingsPath;
+    throw new UatIsolationLaunchRefusedError(COPILOT_CLI_TOOL_ID, inspection.reason, inspection.fix);
+  }
+
   const settingsPath = options.settingsPath ?? getCopilotSettingsPath();
-  // Next to the settings file rather than via `getCopilotConfigPath()`: the
-  // config.json that can erase a settings.json is the one copilot reads from
-  // the same directory, and an overridden `settingsPath` must not be checked
-  // against a different home's config.
-  const configPath = options.configPath ?? join(dirname(settingsPath), 'config.json');
+  const configPath = resolveCopilotConfigPathFor(settingsPath, options);
 
   const configHooks = inspectCopilotConfigHooks(configPath);
   if (configHooks === 'present') throw new CopilotConfigHooksShadowError(configPath);
@@ -827,11 +952,7 @@ export function writeCopilotHookSettings(options: CopilotHookSettingsOptions = {
 
   return withCopilotSettingsLock(dirname(settingsPath), () => {
     const raw = readFileOrEmpty(settingsPath);
-    const merged = mergeCopilotHookSettings(
-      parseCopilotSettings(raw),
-      buildCopilotHookSettings(options)
-    );
-    const next = `${JSON.stringify(merged, null, 2)}\n`;
+    const next = renderCopilotHookSettings(parseCopilotSettings(raw), options);
 
     // Since #1904 the generated commands carry no port and no per-launch value,
     // so the common re-launch produces the bytes already on disk. Returning
@@ -890,11 +1011,16 @@ export function isCopilotHookInjectionEnabled(): boolean {
 /**
  * The command that launches copilot for one instance (S3 / S4 / S5).
  *
- * Never throws. Injection is an enhancement to a session that has to start
- * anyway, so every failure — the switch is off, an id would not survive the
- * receiver's own validation, the settings file is unreadable or unwritable —
- * returns the bare command and no settings path, which is byte-for-byte what
- * `cli-tools/copilot.ts` sent before this Issue.
+ * Never throws outside UAT isolation. Injection is an enhancement to a session
+ * that has to start anyway, so every failure — the switch is off, an id would
+ * not survive the receiver's own validation, the settings file is unreadable or
+ * unwritable — returns the bare command and no settings path, which is
+ * byte-for-byte what `cli-tools/copilot.ts` sent before this Issue.
+ *
+ * Under `CM_UAT_ISOLATION=1` (Issue #3391) each of those roads throws
+ * {@link UatIsolationLaunchRefusedError} instead, as codex's and antigravity's
+ * do: a bare copilot still reads the shared `~/.copilot/settings.json`, so
+ * "without hooks" would mean "with whatever hooks are in the user's file".
  *
  * @param executablePath - Normally {@link COPILOT_LAUNCH_COMMAND}
  * @param target - The instance being started
@@ -905,7 +1031,13 @@ export function buildCopilotLaunchCommand(
   options: CopilotHookSettingsOptions = {}
 ): AgentLaunchPlan {
   const bare: AgentLaunchPlan = { command: executablePath, settingsPath: null, env: {} };
-  if (!isCopilotHookInjectionEnabled()) return bare;
+  const fallback = (reason: string, fix: string): AgentLaunchPlan => {
+    if (isUatIsolationEnabled()) throw new UatIsolationLaunchRefusedError(COPILOT_CLI_TOOL_ID, reason, fix);
+    return bare;
+  };
+  if (!isCopilotHookInjectionEnabled()) {
+    return fallback('CM_AGENT_HOOKS_INJECT=0', 'Do not combine CM_AGENT_HOOKS_INJECT=0 with UAT isolation.');
+  }
 
   const instanceId = target.instanceId ?? COPILOT_CLI_TOOL_ID;
   if (!isValidInstanceId(instanceId) || !isValidWorktreeId(target.worktreeId)) {
@@ -913,7 +1045,7 @@ export function buildCopilotLaunchCommand(
     // be rejected there is not worth injecting, and a rejected event is worse
     // than no event because it is a 400 in the operator's log for every turn.
     logger.warn('copilot-hook-invalid-correlation-key', { worktreeId: target.worktreeId });
-    return bare;
+    return fallback('the worktree or instance id is not a valid correlation key', 'Use a valid worktree and instance id.');
   }
 
   try {
@@ -924,6 +1056,7 @@ export function buildCopilotLaunchCommand(
       env: buildCopilotHookEnvironment(target.worktreeId, instanceId, options),
     };
   } catch (error) {
+    if (error instanceof UatIsolationLaunchRefusedError) throw error;
     if (error instanceof CopilotConfigHooksShadowError) {
       // Its own reason code because it is the one failure here an operator can
       // fix: move `hooks` out of config.json and into settings.json, or let
@@ -938,6 +1071,6 @@ export function buildCopilotLaunchCommand(
       worktreeId: target.worktreeId,
       error: error instanceof Error ? error.message : String(error),
     });
-    return bare;
+    return fallback('~/.copilot/settings.json could not be prepared', UAT_SAME_BUILD_FIX);
   }
 }
