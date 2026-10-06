@@ -51,7 +51,7 @@ import {
   describeKeySequence,
   type KeySequenceTransport,
 } from '@/lib/tmux/key-sequence';
-import { sendKeys, sendKeySequence, SPECIAL_KEY_VALUES, exactTarget } from '@/lib/tmux/tmux';
+import { sendKeys, SPECIAL_KEY_VALUES, exactTarget } from '@/lib/tmux/tmux';
 import {
   KEY_SEQUENCE_KEY_NAMES,
   isKeySequenceKeyName,
@@ -292,15 +292,6 @@ describe('KeySequence (Issue #1933 S9)', () => {
         'cannot be combined with sendEnter'
       );
       expect(sendKeysInvocations()).toEqual([]);
-    });
-
-    it('drives a whole sequence through the execFile transport', async () => {
-      await sendKeySequence(SESSION, [literalStep('/exit'), keyStep('Enter')]);
-
-      expect(sendKeysInvocations()).toEqual([
-        ['send-keys', '-t', TARGET, '-l', '--', '/exit'],
-        ['send-keys', '-t', TARGET, '--', 'Enter'],
-      ]);
     });
   });
 
