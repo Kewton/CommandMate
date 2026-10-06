@@ -97,8 +97,14 @@ function finishedTurn(tool: Tool): number {
 
 const userRow = (at: number): ChatMessage =>
   ({ role: 'user', messageType: 'normal', timestamp: new Date(at) }) as unknown as ChatMessage;
+const assistantRow = (at: number): ChatMessage =>
+  ({ role: 'assistant', messageType: 'normal', timestamp: new Date(at) }) as unknown as ChatMessage;
 
 async function listProcessing(tool: Tool, rows: ChatMessage[] = []): Promise<boolean> {
+  return (await listStatus(tool, rows))?.isProcessing === true;
+}
+
+async function listStatus(tool: Tool, rows: ChatMessage[] = []) {
   const status = await detectWorktreeSessionStatus(
     WT,
     new Set([`${tool}-${WT}`]),
@@ -107,7 +113,7 @@ async function listProcessing(tool: Tool, rows: ChatMessage[] = []): Promise<boo
     vi.fn(),
     vi.fn(() => [] as AgentInstance[]),
   );
-  return status.sessionStatusByCli[tool]?.isProcessing === true;
+  return status.sessionStatusByCli[tool];
 }
 
 async function captureStatus(tool: Tool): Promise<{ status: string; reason: string }> {
@@ -166,6 +172,37 @@ describe('[#3377] after the agent\'s Stop, with the working row still painted', 
     const { processing, capture } = await both('codex', CODEX_WORKING, [userRow(promptAt)]);
     expect(capture.status).toBe('running');
     expect(processing).toBe(true);
+  });
+
+  it('stays processing when the newer prompt is pushed out of the newest 10 rows by assistant rows', async () => {
+    const stopAt = finishedTurn('codex');
+    const promptAt = stopAt + 100;
+    vi.mocked(getLastUserMessageForInstance).mockReturnValue(userRow(promptAt));
+    // Newest first, as getMessages returns them: 10 assistant rows after the prompt fill its window.
+    const rows = Array.from({ length: 10 }, (_, i) => assistantRow(promptAt + 1_000 - i * 10));
+    const { processing, capture } = await both('codex', CODEX_WORKING, rows);
+    expect(capture.status).toBe('running');
+    expect(processing).toBe(true);
+  });
+
+  it('latches the published answer: lastKnownStatus is ready once the Stop narrowed it', async () => {
+    finishedTurn('codex');
+    vi.mocked(captureSessionOutput).mockResolvedValue(CODEX_WORKING);
+    const status = await listStatus('codex');
+    expect(status?.isProcessing).toBe(false);
+    expect(status?.lastKnownStatus).toBe('ready');
+    // The reason the list publishes stays the screen's.
+    expect(status?.sessionStatusReason).toBe('thinking_indicator');
+    const capture = await captureStatus('codex');
+    expect(capture.status).toBe(status?.lastKnownStatus);
+  });
+
+  it('latches running while the hook turn holds a ready-looking codex frame (#3365)', async () => {
+    post('codex', 'user_prompt_submit', Date.now() - 2_000);
+    vi.mocked(captureSessionOutput).mockResolvedValue(CODEX_MID_TURN_READ_READY);
+    const status = await listStatus('codex');
+    expect(status?.isProcessing).toBe(true);
+    expect(status?.lastKnownStatus).toBe('running');
   });
 
   it('is not processing when the newest prompt is older than the Stop', async () => {

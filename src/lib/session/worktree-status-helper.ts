@@ -29,7 +29,13 @@ import {
 } from '@/lib/session/session-starting-state';
 import { deriveCliStatus, sessionStatusToActivityFlags } from './status-mapping';
 import { agentEventSourceKind, hookTurnHoldsPane, structuredStateForFrame } from './hook-turn-hold';
-import { mergeStructuredStatus, staleReadyCandidate, type ScraperVerdict } from './structured-status-merge';
+import {
+  mergeStructuredStatus,
+  readNewestPromptAt,
+  staleReadyCandidate,
+  type MergedStatusVerdict,
+  type ScraperVerdict,
+} from './structured-status-merge';
 // Issue #2317: the tmux session is a SURFACE, not just a place to run a process.
 // Reached through `cli-session`, which is the gateway Issue #1922's import guard
 // names — this module may not import `lib/tmux/**` itself.
@@ -443,8 +449,9 @@ function broadcastPromptSweptToAnswered(worktreeId: string): (message: ChatMessa
   };
 }
 
-/** What {@link foldHookTurn} reads: one frame's verdict and the rows already read for it. */
+/** What {@link foldHookTurn} reads: one frame's verdict, and the DB for the #2429 read. */
 interface HookTurnFoldInput {
+  db: ReturnType<typeof import('@/lib/db/db-instance').getDbInstance>;
   worktreeId: string;
   cliToolId: CLIToolType;
   instanceId: string;
@@ -453,13 +460,12 @@ interface HookTurnFoldInput {
   isUnclassified: boolean;
   /** The frame's own `isProcessing`. */
   isProcessing: boolean;
-  /** This instance's newest rows (newest first), or null when none were read. */
-  recentMessages: ChatMessage[] | null;
 }
 
 /**
- * The list's `isProcessing` with the agent's own turn folded in, by the rules
- * `capture --json` applies — called, not copied (Issue #3365, #3377).
+ * The capture's merged verdict when the agent's own turn changes the list's
+ * `isProcessing`, or null when it does not — by the rules `capture --json`
+ * applies, called rather than copied (Issue #3365, #3377).
  *
  * - **Widening** (#3365): a frame that reads not-processing is held at
  *   processing by `hookTurnHoldsPane`, the #3337 rule the capture and the
@@ -471,20 +477,25 @@ interface HookTurnFoldInput {
  *   ~4 s (codex) / ~2 s (claude) of `ready / hook_stop` in `capture --json`
  *   beside `isProcessing: true` in `commandmate ls`.
  *
+ * Both go through `mergeStructuredStatus`, and the caller latches the verdict
+ * returned here, so `lastKnownStatus` holds what the capture latches.
+ *
  * The merge's #2429 exception (a `Stop` older than the newest prompt does not
- * end the work on screen) needs the newest prompt; it is taken from the rows
- * the stale-prompt sweep already read, so the list adds no DB read. A prompt
- * older than those 10 rows reads as none, which leaves the `Stop` standing —
- * the merge's own answer to an unreadable ledger.
+ * end the work on screen) reads the newest prompt with `readNewestPromptAt` —
+ * the capture's own read — and only where the capture would: the frame reads
+ * generating and the turn record is a `Stop` (`staleReadyCandidate`). That is
+ * the list's one DB read beyond the sweep's, one row per instance per poll, and
+ * only in the poll or two between a `Stop` and the working row clearing (or for
+ * the whole turn of a tool that reports no turn start, such as Command Code).
  *
  * The prompt-waiting input is not passed: a wait is `isWaitingForResponse`'s,
  * and the caller does not reach here while one is up.
- *
- * In-memory reads only (no DB, no tmux).
  */
-function foldHookTurn(input: HookTurnFoldInput): boolean {
+function foldHookTurn(input: HookTurnFoldInput): MergedStatusVerdict | null {
   const { worktreeId, cliToolId, instanceId, output, statusResult } = input;
-  if (!input.isProcessing) return hookTurnHoldsPane(worktreeId, cliToolId, instanceId, output);
+  if (!input.isProcessing && !hookTurnHoldsPane(worktreeId, cliToolId, instanceId, output)) {
+    return null;
+  }
   const structured = structuredStateForFrame(
     worktreeId,
     cliToolId,
@@ -492,7 +503,7 @@ function foldHookTurn(input: HookTurnFoldInput): boolean {
     agentEventSourceKind(worktreeId, cliToolId, instanceId),
     output
   );
-  if (structured === null) return true;
+  if (structured === null) return null;
   const scraper: ScraperVerdict = {
     status: statusResult.status,
     reason: statusResult.reason,
@@ -502,20 +513,9 @@ function foldHookTurn(input: HookTurnFoldInput): boolean {
   };
   const turn = getPublishedAgentTurn(worktreeId, cliToolId, instanceId);
   const lastPromptAt = staleReadyCandidate(scraper, structured, turn)
-    ? newestPromptAt(input.recentMessages)
+    ? readNewestPromptAt(input.db, worktreeId, cliToolId, instanceId)
     : null;
-  return mergeStructuredStatus(scraper, structured, null, turn, lastPromptAt).status === 'running';
-}
-
-/** Epoch ms of the newest user row among `messages`, or null. */
-function newestPromptAt(messages: ChatMessage[] | null): number | null {
-  let newest: number | null = null;
-  for (const message of messages ?? []) {
-    if (message.role !== 'user') continue;
-    const at = message.timestamp instanceof Date ? message.timestamp.getTime() : NaN;
-    if (Number.isFinite(at) && (newest === null || at > newest)) newest = at;
-  }
-  return newest;
+  return mergeStructuredStatus(scraper, structured, null, turn, lastPromptAt);
 }
 
 /**
@@ -655,11 +655,6 @@ async function detectInstanceSessionStatus(
       // chip and `commandmate ls`.
       sessionStatusReason = statusResult.reason;
       statusEvidence = statusResult.evidence;
-      observeStatusEvidence(compositeKey, {
-        status: statusResult.status,
-        reason: statusResult.reason,
-        evidence: statusEvidence,
-      });
 
       // Issue #1786: fold in what the agent's own events know. Until now the
       // list API — and therefore the sidebar, Home, Sessions, Review and the
@@ -690,18 +685,20 @@ async function detectInstanceSessionStatus(
       // Issue #3179: not during a launch — a structured wait inherited there
       // would light the orange dot for a dialog nobody has to answer.
       isWaitingForResponse = isWaitingForResponse || (startingSince === null && peek.waiting);
-      // Issue #2214: the instance's newest rows, read once — for the sweep
-      // below, and for the #2429 comparison `foldHookTurn` may need.
-      const recentMessages = statusResult.hasActivePrompt
-        ? null
-        : getMessages(db, worktreeId, { limit: 10, cliToolId, instanceId });
       // Issue #3365 / #3377: the agent's own turn, folded in by the rules
       // `capture --json` applies. Not during a launch, and not over a wait.
-      if (startingSince === null && !isWaitingForResponse) {
-        isProcessing = foldHookTurn({
-          worktreeId, cliToolId, instanceId, output, statusResult, isUnclassified, isProcessing, recentMessages,
-        });
-      }
+      const folded = startingSince === null && !isWaitingForResponse
+        ? foldHookTurn({ db, worktreeId, cliToolId, instanceId, output, statusResult, isUnclassified, isProcessing })
+        : null;
+      if (folded !== null) isProcessing = folded.status === 'running';
+      // Latched after the fold, with the verdict this poll publishes — the value
+      // and the order `current-output-builder` latches in (#3377). The REASON
+      // published below stays the screen's.
+      observeStatusEvidence(compositeKey, folded ?? {
+        status: statusResult.status,
+        reason: statusResult.reason,
+        evidence: statusResult.evidence,
+      });
       structuredWaitingSince = startingSince === null ? peek.structured?.at ?? null : null;
       waitingKind = deriveWaitingKind({
         waiting: isWaitingForResponse,
@@ -721,8 +718,9 @@ async function detectInstanceSessionStatus(
       });
 
       // Clean up stale pending prompts (scoped to this instance) if none is showing
-      if (recentMessages !== null) {
-        const hasPendingPrompt = recentMessages.some(
+      if (!statusResult.hasActivePrompt) {
+        const messages = getMessages(db, worktreeId, { limit: 10, cliToolId, instanceId });
+        const hasPendingPrompt = messages.some(
           msg => msg.messageType === 'prompt' && msg.promptData?.status !== 'answered'
         );
         if (hasPendingPrompt) {
