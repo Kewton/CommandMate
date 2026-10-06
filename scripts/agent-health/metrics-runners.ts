@@ -405,7 +405,7 @@ async function outdated(ctx: RunnerContext): Promise<MetricMeasurement> {
 function typeSafety(ctx: RunnerContext): MetricMeasurement {
   const total: TypeSafetyCounts = { any: 0, eslintDisable: 0, tsIgnore: 0 };
   for (const file of listSourceFiles(ctx.repoRoot)) {
-    const counts = countTypeSafety(fs.readFileSync(path.join(ctx.repoRoot, file), 'utf8'));
+    const counts = countTypeSafety(fs.readFileSync(path.join(ctx.repoRoot, file), 'utf8'), file);
     total.any += counts.any;
     total.eslintDisable += counts.eslintDisable;
     total.tsIgnore += counts.tsIgnore;
