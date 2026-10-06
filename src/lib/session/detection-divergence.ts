@@ -14,6 +14,8 @@
  * one small entry per target, until the next poll of that target.
  */
 
+import { getOrInitGlobal } from '../global-state';
+
 /** When one target's current disagreement began and how many polls saw it. */
 interface DivergenceEpisode {
   startedAt: number;
@@ -28,17 +30,17 @@ export interface ResolvedDivergence {
   polls: number;
 }
 
-/** globalThis slot typed without `declare global { var }` (npm-publish-check.ts precedent) */
-const globalStore = globalThis as typeof globalThis & {
-  __detectionDivergenceEpisodes?: Map<string, DivergenceEpisode>;
-};
+declare global {
+  // eslint-disable-next-line no-var
+  var __detectionDivergenceEpisodes: Map<string, DivergenceEpisode> | undefined;
+}
 
 /**
  * On `globalThis` because the HTTP pull and the WebSocket push both build the
  * payload, and under `next dev` they are separate bundles: two maps would each
  * see half the polls.
  */
-const episodes = (globalStore.__detectionDivergenceEpisodes ??= new Map<string, DivergenceEpisode>());
+const episodes = getOrInitGlobal('__detectionDivergenceEpisodes', () => new Map<string, DivergenceEpisode>());
 
 function targetKey(worktreeId: string, cliToolId: string, instanceId: string): string {
   return `${worktreeId}\u0000${cliToolId}\u0000${instanceId}`;

@@ -69,6 +69,7 @@ import {
   SESSION_STARTING_PROMPT_GRACE_MS,
   getSessionStartingMaxMs,
 } from '@/config/session-starting-config';
+import { getOrInitGlobal } from '../global-state';
 
 /** One launch in progress. */
 interface SessionStartingRecord {
@@ -83,19 +84,21 @@ interface SessionStartingRecord {
   released: boolean;
 }
 
-/** globalThis slots typed without `declare global { var }` (npm-publish-check.ts precedent) */
-const globalStore = globalThis as typeof globalThis & {
-  __sessionStartingRecords?: Map<string, SessionStartingRecord>;
-  __sessionStartingTokenSeq?: { last: number };
-  __sessionStartingTokenScope?: AsyncLocalStorage<number>;
-};
+declare global {
+  // eslint-disable-next-line no-var
+  var __sessionStartingRecords: Map<string, SessionStartingRecord> | undefined;
+  // eslint-disable-next-line no-var
+  var __sessionStartingTokenSeq: { last: number } | undefined;
+  // eslint-disable-next-line no-var
+  var __sessionStartingTokenScope: AsyncLocalStorage<number> | undefined;
+}
 
-const records = (globalStore.__sessionStartingRecords ??= new Map<string, SessionStartingRecord>());
+const records = getOrInitGlobal('__sessionStartingRecords', () => new Map<string, SessionStartingRecord>());
 
 /** On `globalThis` like the map, so tokens keep growing across route bundles. */
-const tokenSeq = (globalStore.__sessionStartingTokenSeq ??= { last: 0 });
+const tokenSeq = getOrInitGlobal('__sessionStartingTokenSeq', () => ({ last: 0 }));
 
-const tokenScope = (globalStore.__sessionStartingTokenScope ??= new AsyncLocalStorage<number>());
+const tokenScope = getOrInitGlobal('__sessionStartingTokenScope', () => new AsyncLocalStorage<number>());
 
 /**
  * A token for a launch about to begin (Issue #3195). Strictly greater than
