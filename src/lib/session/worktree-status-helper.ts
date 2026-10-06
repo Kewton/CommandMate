@@ -16,7 +16,11 @@
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { CLI_TOOL_IDS, type CLIToolType } from '@/lib/cli-tools/types';
 import { captureSessionOutput } from './cli-session';
-import { detectSessionStatus } from '@/lib/detection/status-detector';
+import {
+  detectSessionStatus,
+  isGeneratingStatus,
+  type StatusDetectionResult,
+} from '@/lib/detection/status-detector';
 import { STATUS_REASON } from '@/lib/detection/status-reason';
 import {
   getSessionStartingSince,
@@ -24,7 +28,14 @@ import {
   startingStatusResult,
 } from '@/lib/session/session-starting-state';
 import { deriveCliStatus, sessionStatusToActivityFlags } from './status-mapping';
-import { hookTurnHoldsPane } from './hook-turn-hold';
+import { agentEventSourceKind, hookTurnHoldsPane, structuredStateForFrame } from './hook-turn-hold';
+import {
+  mergeStructuredStatus,
+  readNewestPromptAt,
+  staleReadyCandidate,
+  type MergedStatusVerdict,
+  type ScraperVerdict,
+} from './structured-status-merge';
 // Issue #2317: the tmux session is a SURFACE, not just a place to run a process.
 // Reached through `cli-session`, which is the gateway Issue #1922's import guard
 // names — this module may not import `lib/tmux/**` itself.
@@ -47,6 +58,7 @@ import { observeWaitingEdge } from '@/lib/session/waiting-episode-state';
 // Issue #1784 promotes them to `getResolvedAgentModelInfo`, which folds in what
 // the capture below showed.
 import {
+  getPublishedAgentTurn,
   getResolvedAgentModelInfo,
   isAwaitingInstruction,
   recordCapturedModelInfo,
@@ -201,11 +213,14 @@ export interface CliToolSessionStatus {
    * an orange dot into a sentence, and what `commandmate ls` prints in its
    * REASON column.
    *
-   * Deliberately the SCRAPER's reason, not a `hook_` one: this object is built
-   * from `detectSessionStatus` alone (the list API does not run
-   * `mergeStructuredStatus`), and labelling a scraper verdict with a structured
-   * reason would misreport which layer decided. The merged reason is on
-   * `CurrentOutputResponse.sessionStatusReason`.
+   * Deliberately the SCRAPER's reason, not a `hook_` one: the reason is read
+   * from `detectSessionStatus` alone, and labelling a scraper verdict with a
+   * structured reason would misreport which layer decided. The merged reason is
+   * on `CurrentOutputResponse.sessionStatusReason`. Since Issue #3377 the
+   * agent's turn is folded into `isProcessing` (through `mergeStructuredStatus`,
+   * see `foldHookTurn`), so a pane its `Stop` ended can read not-processing
+   * beside a `thinking_indicator` reason here for the poll or two the working
+   * row stays painted.
    */
   sessionStatusReason?: string;
   /**
@@ -434,6 +449,75 @@ function broadcastPromptSweptToAnswered(worktreeId: string): (message: ChatMessa
   };
 }
 
+/** What {@link foldHookTurn} reads: one frame's verdict, and the DB for the #2429 read. */
+interface HookTurnFoldInput {
+  db: ReturnType<typeof import('@/lib/db/db-instance').getDbInstance>;
+  worktreeId: string;
+  cliToolId: CLIToolType;
+  instanceId: string;
+  output: string;
+  statusResult: StatusDetectionResult;
+  isUnclassified: boolean;
+  /** The frame's own `isProcessing`. */
+  isProcessing: boolean;
+}
+
+/**
+ * The capture's merged verdict when the agent's own turn changes the list's
+ * `isProcessing`, or null when it does not — by the rules `capture --json`
+ * applies, called rather than copied (Issue #3365, #3377).
+ *
+ * - **Widening** (#3365): a frame that reads not-processing is held at
+ *   processing by `hookTurnHoldsPane`, the #3337 rule the capture and the
+ *   relay read — a codex hook turn runs until its `Stop`.
+ * - **Narrowing** (#3377): a frame that reads processing is put through
+ *   `mergeStructuredStatus`, the capture's own merge, so the agent's `Stop`
+ *   ends it here on the poll it ends it there. Before this the list kept the
+ *   working row the frame still showed after `Stop` — measured 2026-10-06 at
+ *   ~4 s (codex) / ~2 s (claude) of `ready / hook_stop` in `capture --json`
+ *   beside `isProcessing: true` in `commandmate ls`.
+ *
+ * Both go through `mergeStructuredStatus`, and the caller latches the verdict
+ * returned here, so `lastKnownStatus` holds what the capture latches.
+ *
+ * The merge's #2429 exception (a `Stop` older than the newest prompt does not
+ * end the work on screen) reads the newest prompt with `readNewestPromptAt` —
+ * the capture's own read — and only where the capture would: the frame reads
+ * generating and the turn record is a `Stop` (`staleReadyCandidate`). That is
+ * the list's one DB read beyond the sweep's, one row per instance per poll, and
+ * only in the poll or two between a `Stop` and the working row clearing (or for
+ * the whole turn of a tool that reports no turn start, such as Command Code).
+ *
+ * The prompt-waiting input is not passed: a wait is `isWaitingForResponse`'s,
+ * and the caller does not reach here while one is up.
+ */
+function foldHookTurn(input: HookTurnFoldInput): MergedStatusVerdict | null {
+  const { worktreeId, cliToolId, instanceId, output, statusResult } = input;
+  if (!input.isProcessing && !hookTurnHoldsPane(worktreeId, cliToolId, instanceId, output)) {
+    return null;
+  }
+  const structured = structuredStateForFrame(
+    worktreeId,
+    cliToolId,
+    instanceId,
+    agentEventSourceKind(worktreeId, cliToolId, instanceId),
+    output
+  );
+  if (structured === null) return null;
+  const scraper: ScraperVerdict = {
+    status: statusResult.status,
+    reason: statusResult.reason,
+    thinking: isGeneratingStatus(statusResult),
+    evidence: statusResult.evidence,
+    isUnclassifiedActive: input.isUnclassified,
+  };
+  const turn = getPublishedAgentTurn(worktreeId, cliToolId, instanceId);
+  const lastPromptAt = staleReadyCandidate(scraper, structured, turn)
+    ? readNewestPromptAt(input.db, worktreeId, cliToolId, instanceId)
+    : null;
+  return mergeStructuredStatus(scraper, structured, null, turn, lastPromptAt);
+}
+
 /**
  * Detect the session status of a single (cliTool, instance) session.
  *
@@ -571,11 +655,6 @@ async function detectInstanceSessionStatus(
       // chip and `commandmate ls`.
       sessionStatusReason = statusResult.reason;
       statusEvidence = statusResult.evidence;
-      observeStatusEvidence(compositeKey, {
-        status: statusResult.status,
-        reason: statusResult.reason,
-        evidence: statusEvidence,
-      });
 
       // Issue #1786: fold in what the agent's own events know. Until now the
       // list API — and therefore the sidebar, Home, Sessions, Review and the
@@ -606,18 +685,20 @@ async function detectInstanceSessionStatus(
       // Issue #3179: not during a launch — a structured wait inherited there
       // would light the orange dot for a dialog nobody has to answer.
       isWaitingForResponse = isWaitingForResponse || (startingSince === null && peek.waiting);
-      // Issue #3365: a codex turn its hooks opened is running until its `Stop`,
-      // whatever the frame reads — the rule `capture --json` applies (#3337),
-      // called rather than copied. In-memory reads only (no DB, no tmux), and
-      // only reached when nothing above already said waiting / processing.
-      if (
-        startingSince === null &&
-        !isWaitingForResponse &&
-        !isProcessing &&
-        hookTurnHoldsPane(worktreeId, cliToolId, instanceId, output)
-      ) {
-        isProcessing = true;
-      }
+      // Issue #3365 / #3377: the agent's own turn, folded in by the rules
+      // `capture --json` applies. Not during a launch, and not over a wait.
+      const folded = startingSince === null && !isWaitingForResponse
+        ? foldHookTurn({ db, worktreeId, cliToolId, instanceId, output, statusResult, isUnclassified, isProcessing })
+        : null;
+      if (folded !== null) isProcessing = folded.status === 'running';
+      // Latched after the fold, with the verdict this poll publishes — the value
+      // and the order `current-output-builder` latches in (#3377). The REASON
+      // published below stays the screen's.
+      observeStatusEvidence(compositeKey, folded ?? {
+        status: statusResult.status,
+        reason: statusResult.reason,
+        evidence: statusResult.evidence,
+      });
       structuredWaitingSince = startingSince === null ? peek.structured?.at ?? null : null;
       waitingKind = deriveWaitingKind({
         waiting: isWaitingForResponse,

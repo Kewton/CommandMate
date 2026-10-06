@@ -28,11 +28,11 @@
  */
 
 import type { CLIToolType } from '@/lib/cli-tools/types';
-import { screenMayCloseHookTurn } from '@/lib/detection/turn-abandoned';
+import { screenMayCloseHookTurn, screenShowsAbandonedHookTurn } from '@/lib/detection/turn-abandoned';
 import { describeAgentEventSource } from '@/lib/hooks/sources/define-source';
 import { getAgentEventSource } from '@/lib/hooks/sources/registry';
 import type { AgentEventSourceKind } from '@/lib/hooks/sources/types';
-import { getStructuredSessionState } from '@/lib/session/agent-event-state';
+import { getStructuredSessionState, type StructuredSessionState } from '@/lib/session/agent-event-state';
 
 /**
  * Whether the screen may end a turn the agent has not ended.
@@ -86,4 +86,45 @@ export function hookTurnHoldsPane(
   const kind = agentEventSourceKind(worktreeId, cliToolId, instanceId, now);
   if (screenMayEndTurn(kind, cliToolId, output)) return false;
   return getStructuredSessionState(worktreeId, cliToolId, instanceId, now)?.status === 'running';
+}
+
+/**
+ * The turn record's verdict as this frame lets it be published (Issue #3377).
+ *
+ * `getStructuredSessionState`, except that a `running` is dropped (null — the
+ * frame decides) when the hooks speak for the pane and the frame shows the
+ * turn was abandoned (codex's `■ Conversation interrupted`). That is the frame
+ * this module already lets the screen end the turn on, and the one the list
+ * already reads as not processing (`hookTurnHoldsPane` does not hold it).
+ * Without this, `capture --json` kept publishing `running` until
+ * `SCRAPER_COMPLETION_POLLS` such frames had closed the record — ~3 s on
+ * 2026-10-06 while the list said not processing.
+ *
+ * Only what is PUBLISHED changes: the record still closes on the third frame,
+ * as before. Every other frame — a misread mid-turn frame included — keeps the
+ * hooks' `running` (#3337), and a tool with no policy (Claude and the rest) is
+ * untouched.
+ *
+ * Read by `buildCurrentOutput` and the list's `foldHookTurn`.
+ *
+ * @param sourceKind - `structuredEvents.source.kind` for the pane
+ * @param output - The pane as captured
+ */
+export function structuredStateForFrame(
+  worktreeId: string,
+  cliToolId: CLIToolType,
+  instanceId: string | undefined,
+  sourceKind: AgentEventSourceKind,
+  output: string,
+  now: number = Date.now()
+): StructuredSessionState | null {
+  const state = getStructuredSessionState(worktreeId, cliToolId, instanceId, now);
+  if (
+    state?.status === 'running' &&
+    sourceKind === 'hooks' &&
+    screenShowsAbandonedHookTurn(cliToolId, output)
+  ) {
+    return null;
+  }
+  return state;
 }

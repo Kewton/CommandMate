@@ -29,7 +29,7 @@ import {
   type CLIToolType,
 } from '@/lib/cli-tools/types';
 import { getAgentEventSource } from '@/lib/hooks/sources/registry';
-import { screenMayEndTurn } from '@/lib/session/hook-turn-hold';
+import { screenMayEndTurn, structuredStateForFrame } from '@/lib/session/hook-turn-hold';
 import { describeAgentEventSource } from '@/lib/hooks/sources/define-source';
 import type { AgentEventSource } from '@/lib/hooks/sources/types';
 import { getOpencodeProbedActivity } from '@/lib/hooks/sources/opencode/subscription';
@@ -69,7 +69,6 @@ import {
   getPendingDecisions,
   getPublishedAgentTurn,
   getResolvedAgentModelInfo,
-  getStructuredSessionState,
   markStructuredPromptRecorded,
   observeScraperCompletionEvidence,
   type AskUserQuestionEpisode,
@@ -727,7 +726,15 @@ async function buildPayload(
     screenMayEndTurn(structuredEvents.source.kind, cliToolId, output)
   );
 
-  const structured = getStructuredSessionState(worktreeId, cliToolId, instanceId);
+  // Issue #3377: on a frame that shows the hook turn was abandoned, the record's
+  // `running` is not published — the rule the list reads too.
+  const structured = structuredStateForFrame(
+    worktreeId,
+    cliToolId,
+    instanceId,
+    structuredEvents.source.kind,
+    output
+  );
 
   // Issue #1725: the open-dialog half of the same merge, resolved before the
   // status merge because it decides one of its inputs. The rule itself — the

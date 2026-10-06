@@ -181,7 +181,9 @@ describe('[#3337] a hooks source keeps its turn open through a finished-looking 
     const payload = await pollWith('codex', INTERRUPTED, SCRAPER_COMPLETION_POLLS - 1);
 
     expect(getAgentTurn(WT, 'codex', undefined)?.closedAt).toBeNull();
-    expect(payload.sessionStatus).toBe('running');
+    // #3377: the record still needs 3 frames to close, but the interrupted frame publishes the screen's ready, as the list does.
+    expect(payload.sessionStatus).toBe('ready');
+    expect(payload.sessionStatusReason).toBe('input_prompt');
   });
 });
 
