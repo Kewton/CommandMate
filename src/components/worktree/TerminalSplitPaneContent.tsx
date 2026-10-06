@@ -1063,6 +1063,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
             showStuckHint={showPromptStuckHint}
             onSwitchToDirectInput={terminal.isRunning ? handleSwitchToDirectInput : undefined}
             answerable={prompt.answerable}
+            autoYesEnterSent={prompt.autoYesEnterSent}
           />
         ) : null}
         {/* Issue #2046: opencode only. The chords opencode's TUI is driven by
@@ -1308,6 +1309,8 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       prompt.answering,
       // Issue #2870: PromptPanel's `answerable`.
       prompt.answerable,
+      // Issue #3397: PromptPanel's `autoYesEnterSent`.
+      prompt.autoYesEnterSent,
       handlePromptRespond,
       handlePromptDismiss,
       // Issue #2869: the stuck hint under the panel, and its link.

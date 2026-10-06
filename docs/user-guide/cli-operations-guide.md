@@ -1931,6 +1931,8 @@ Auto-Yes が有効なら、この画面に **Enter を 1 回だけ**送ります
 - 実行契約の `autoYes` ポリシーが許す（`mode: off` / `safe`、`denyPatterns` 一致では送らない）、他サーバのセッションではない
 - codex の起動時の画面・`/model` の選択画面ではない
 
+`commandmate wait` は、報告するプロンプトについての記録（`currentPrompt: true`）があれば、stderr に 1 行添えます（`auto-yes sent Enter to this prompt …` / 効かなかったときは `… the same screen is still up (no-effect) …`）。exit 10 の JSON は変わりません。人向けの `capture`（`--json` なし）は本文だけを出すため、この記録は `--json` で読んでください。
+
 既定で有効なのは claude と codex だけです。環境変数 `CM_AUTOYES_ENTER_FALLBACK` で
 ツールごとに切り替えられます（`CM_AUTOYES_DIALOG_GATE` と同じ書式）。
 

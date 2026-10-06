@@ -322,6 +322,12 @@ describe('[#3397] Enter goes to an unreadable choice screen, once', () => {
     );
   });
 
+  it('the first sight records nothing as withheld, so `cmate wait` holds for Auto-Yes (#2463)', async () => {
+    const state = pollerState('claude');
+    expect(await tick(state, CLAUDE_UNRECOGNISED_LIST)).toBe('no_answer');
+    expect(getLastPolicySuppression(WT, 'claude')).toBeNull();
+  });
+
   it('does what an answered prompt does afterwards: audit row, response poller, push', async () => {
     const state = pollerState('claude');
     await ticks(state, CLAUDE_UNRECOGNISED_LIST, 2);

@@ -1100,6 +1100,8 @@ The Enter is sent only when **all** of the following hold:
 - the contract's `autoYes` policy allows it (nothing is sent under `mode: off` / `safe` or on a `denyPatterns` match), and the session is not another server's;
 - it is not codex's launch screens or its `/model` picker.
 
+When the prompt it reports has a record (`currentPrompt: true`), `commandmate wait` adds one line on stderr (`auto-yes sent Enter to this prompt …`, or `… the same screen is still up (no-effect) …` when it did not take). The exit-10 JSON is unchanged. Plain `capture` (without `--json`) prints the transcript only, so read the record with `--json`.
+
 Only claude and codex are enabled by default. Switch it per tool with the `CM_AUTOYES_ENTER_FALLBACK`
 environment variable (same syntax as `CM_AUTOYES_DIALOG_GATE`).
 

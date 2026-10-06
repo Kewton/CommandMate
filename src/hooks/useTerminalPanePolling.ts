@@ -50,6 +50,10 @@ import { promptFingerprint } from '@/hooks/usePromptStuckCounter';
 import { AGENT_MODE_UNKNOWN, type AgentMode } from '@/types/cli-tool-contracts';
 import { PANE_GATE_NOTHING_ARRIVED, type PaneGateState } from '@/lib/session/pane-gate-state';
 import {
+  isAutoYesEnterSentToCurrentPrompt,
+  type AutoYesEnterFallbackReading,
+} from '@/lib/polling/auto-yes-enter-sent';
+import {
   DETAIL_PANE_POLLING_CADENCE,
   isGeneratingStatus,
   selectPanePollIntervalMs,
@@ -281,6 +285,13 @@ export interface PanePromptState {
    * `/prompt-response` would answer it. Undefined when not judged.
    */
   answerable?: boolean;
+  /**
+   * Issue #3397: Auto-Yes sent its Enter to this window
+   * (`autoYes.lastEnterFallback` / the push's `autoYesEnterFallback`, read by
+   * `isAutoYesEnterSentToCurrentPrompt`). Carried exactly like
+   * {@link answerable}; false when not known.
+   */
+  autoYesEnterSent?: boolean;
 }
 
 /**
@@ -309,6 +320,8 @@ type CurrentOutputResponse = Partial<
     | 'isUnclassifiedActive'
     /** Issue #3179. See {@link PaneTerminalState.startingSince}. */
     | 'startingSince'
+    /** Issue #3397: only `lastEnterFallback` is read. See {@link PanePromptState.autoYesEnterSent}. */
+    | 'autoYes'
   >
 > & {
   promptData?: LivePromptData;
@@ -505,6 +518,11 @@ export function useTerminalPanePolling({
        * {@link carriesAnswerable}.
        */
       promptAnswerable?: boolean;
+      /**
+       * Issue #3397: `autoYes.lastEnterFallback` on the poll, the push's
+       * `autoYesEnterFallback`. See {@link carriesEnterFallback}.
+       */
+      autoYesEnterFallback?: AutoYesEnterFallbackReading | null;
     },
     /**
      * Whether this delivery path carries `promptAnswerable`. The poll always
@@ -518,6 +536,13 @@ export function useTerminalPanePolling({
      * nobody judged.
      */
     carriesAnswerable = false,
+    /**
+     * Issue #3397: whether this delivery path carries the Enter record — the
+     * poll always, the push when the server sends the key. Same rule as
+     * {@link carriesAnswerable}: when it does not, the last reading is kept for
+     * the same window and dropped for another.
+     */
+    carriesEnterFallback = false,
     ): void => {
       const nextOutput = data.fullOutput ?? data.realtimeSnippet ?? '';
       const rawUnclassified = data.isUnclassifiedActive === true
@@ -594,6 +619,9 @@ export function useTerminalPanePolling({
             answerable: carriesAnswerable
               ? data.promptAnswerable
               : sameWindow ? prev.answerable : undefined,
+            autoYesEnterSent: carriesEnterFallback
+              ? isAutoYesEnterSentToCurrentPrompt(data.autoYesEnterFallback)
+              : sameWindow ? prev.autoYesEnterSent : false,
           };
         });
       } else if (!data.isPromptWaiting && promptVisibleRef.current) {
@@ -635,7 +663,9 @@ export function useTerminalPanePolling({
         return;
       }
 
-      applySnapshot(data, true);
+      // Issue #3397: the Enter record rides on `autoYes`; the shared applier
+      // reads it under the push's name.
+      applySnapshot({ ...data, autoYesEnterFallback: data.autoYes?.lastEnterFallback }, true, true);
       // Issue #2042: only the poll carries these — the WebSocket push has no
       // `structuredEvents` — so they are applied here rather than in the shared
       // `applySnapshot`. The signature guard keeps the object identity stable
@@ -760,11 +790,13 @@ export function useTerminalPanePolling({
         isPromptWaiting: snap.isPromptWaiting,
         promptData: snap.promptData ?? null,
         promptAnswerable: snap.promptAnswerable,
+        autoYesEnterFallback: snap.autoYesEnterFallback,
       // Issue #2887: a server that predates the field sends no such key at all
       // (not even `undefined` — `parseRealtimeEvent` unwraps parsed JSON, which
       // has no way to express a key with no value), so `in` is what tells "this
       // push judged the prompt" apart from "this push says nothing about it".
-      }, 'promptAnswerable' in snap);
+      // Issue #3397: the Enter record, by the same test.
+      }, 'promptAnswerable' in snap, 'autoYesEnterFallback' in snap);
     });
   }, [enabled, worktreeId, addListener, applySnapshot, markPushHealthy]);
 

@@ -358,6 +358,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     isSelectionListActive,
     isPagerActive,
     promptAnswerable,
+    promptAutoYesEnterSent,
     // Issue #3305: what the docked selection-list pad decides its controls from.
     selectionListReading,
     // Issue #2592: the composer's permission-mode control reads these. The
@@ -1226,6 +1227,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                 showStuckHint={showPromptStuckHint}
                 onSwitchToDirectInput={activeSessionRunning ? handleStuckSwitchToDirectInput : undefined}
                 answerable={promptAnswerable}
+                autoYesEnterSent={promptAutoYesEnterSent}
               />
             )}
 

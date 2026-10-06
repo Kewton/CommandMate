@@ -792,9 +792,17 @@ async function tryEnterFallback(
   }
 
   // 4. Seen once: wait for the next tick to see the same screen again.
+  // Nothing is recorded as withheld here: Auto-Yes is about to answer, and a
+  // fresh `lastSuppression` would make `cmate wait` report the prompt to a
+  // human at once instead of holding for Auto-Yes (#2463).
   if (pollerState.enterFallbackCandidateKey !== frameKey) {
     pollerState.enterFallbackCandidateKey = frameKey;
-    suppressUnclassifiedFrame(prompt, dialogGate);
+    logger.debug('poller:auto-yes-enter-fallback-candidate', {
+      worktreeId,
+      cliToolId,
+      instanceId,
+      promptType: promptData.type,
+    });
     return false;
   }
 

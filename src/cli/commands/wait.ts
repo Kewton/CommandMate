@@ -335,6 +335,33 @@ function formatSuppressionNotice(suppression: LastSuppression, ageSeconds: numbe
 }
 
 /**
+ * One stderr line saying Auto-Yes pressed Enter on THIS prompt (Issue #3397), or
+ * null when the record is absent or about another screen.
+ *
+ * The prompt is one CommandMate could not read (the window offers direct input
+ * for it). `sent` — Auto-Yes confirmed whatever was selected; `no-effect` — the
+ * same screen outlived the Enter, no second one was sent, and it is a human's
+ * again. An outcome this CLI does not know is named verbatim (#1843's rule).
+ * `currentPrompt` is the server's judgement that the record is about the
+ * `promptData` of the same response, so an Enter sent to an earlier screen is
+ * never reported against this one.
+ */
+function formatEnterFallbackNotice(data: CurrentOutputResponse, now: number): string | null {
+  const record = data.autoYes?.lastEnterFallback;
+  if (!record || record.currentPrompt !== true) return null;
+  const detail = `refusal=${record.refusalReason} promptType=${record.promptType}`;
+  const ago = `(${Math.max(0, Math.round((now - record.at) / 1000))}s ago)`;
+  if (record.outcome === 'sent') {
+    return `  auto-yes sent Enter to this prompt (CommandMate could not read it): ${detail} ${ago}`;
+  }
+  if (record.outcome === 'no-effect') {
+    return `  auto-yes sent Enter to this prompt, but the same screen is still up (no-effect); ` +
+      `answer it in the terminal: ${detail} ${ago}`;
+  }
+  return `  auto-yes Enter record for this prompt: outcome=${record.outcome} ${detail} ${ago}`;
+}
+
+/**
  * Whether this server publishes a real turn record (Issue #1930).
  *
  * `dialogPendingMaxMs` landed with the turn model and is set on every payload a
@@ -1029,6 +1056,9 @@ function promptStage(poll: PollContext, state: PollState, data: CurrentOutputRes
       if (suppressed) {
         console.error(formatSuppressionNotice(suppressed.suppression, suppressed.ageSeconds));
       }
+      // Issue #3397: and whether Auto-Yes already pressed Enter on it.
+      const enterNotice = formatEnterFallbackNotice(data, Date.now());
+      if (enterNotice) console.error(enterNotice);
       return { kind: 'wait' };
     }
 
@@ -1072,6 +1102,9 @@ function promptStage(poll: PollContext, state: PollState, data: CurrentOutputRes
     if (suppressed) {
       console.error(formatSuppressionNotice(suppressed.suppression, suppressed.ageSeconds));
     }
+    // Issue #3397: stderr only, like the notice above; the exit-10 payload is unchanged.
+    const enterNotice = formatEnterFallbackNotice(data, Date.now());
+    if (enterNotice) console.error(enterNotice);
 
     return exitWith({ exitCode: WaitExitCode.PROMPT_DETECTED, output: promptOutput });
   }
