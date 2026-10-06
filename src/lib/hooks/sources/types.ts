@@ -635,7 +635,10 @@ export interface AgentEventSource {
    * costs the events and returns the bare executable. The exception is UAT
    * isolation (`CM_UAT_ISOLATION=1`, Issue #3360): codex, antigravity and
    * copilot (Issue #3391) throw `UatIsolationLaunchRefusedError` instead,
-   * because their bare executable still reads the user's shared hook config. Callers build the plan BEFORE
+   * because their bare executable still reads the user's shared hook config.
+   * Under `CM_UAT_ISOLATION=own-home` (Issue #3312) all four (claude too)
+   * throw it when a path they would write is not inside the dedicated user's
+   * HOME. Callers build the plan BEFORE
    * creating the tmux session, so a refusal leaves no pane behind.
    *
    * Takes {@link AgentLaunchContext} rather than `(target, executablePath)`

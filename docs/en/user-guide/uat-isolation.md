@@ -6,7 +6,7 @@ When a UAT or the daily real-environment check runs a CommandMate server and CLI
 2. **claude's user-level hooks** — `--settings` is added to `~/.claude/settings.json`, not substituted for it. Moving `CLAUDE_CONFIG_DIR` logs claude out.
 3. **the CLI's settings** — the global CLI reads `~/.commandmate/.env` whatever the cwd, and with nothing set it sends to the default port 3000 (production).
 
-A server and CLI started with `CM_UAT_ISOLATION=1` behave as follows. Without it nothing changes (any value other than `1` counts as unset).
+A server and CLI started with `CM_UAT_ISOLATION=1` behave as follows. Without it nothing changes (any value other than `1` or `own-home` counts as unset; `own-home` is described at the end).
 
 | Target | With `CM_UAT_ISOLATION=1` |
 |--------|---------------------------|
@@ -70,3 +70,36 @@ During the measurement, an `ls --json` with neither `CM_PORT` nor `.env` sent on
 | claude scenarios | Skip a scenario that relies on the user's `settings.json` (model, plugins, permissions). The target repository's `.claude/settings*.json` hooks do run (none are placed in the UAT's `{run_dir}/root` repositories) |
 | Schedule / daily-summary scenarios with codex or antigravity | Always skip (the run is refused under isolation). A claude Schedule runs, with `--setting-sources project,local` |
 | CLI scenarios | None, as long as the CLI is called as above. Do not build a scenario around the global `commandmate` |
+
+## Running as a dedicated user (`CM_UAT_ISOLATION=own-home`, #3312)
+
+The value for running the daily product-path check (stage 2 of #3312) as a dedicated macOS user (for example `cmcheck`). The behaviour of `1` is unchanged.
+
+Start:
+
+```bash
+# As the dedicated user. Sockets and the lock go under that HOME
+CM_UAT_SOCK_BASE="$HOME/run" CM_RUN_LOCK_DIR="$HOME/run/run.lock" \
+  bash scripts/uat/run-server.sh up --own-home --port <port> --run-dir <dir>
+```
+
+`up --own-home` passes `CM_UAT_ISOLATION=own-home` and `CM_UAT_DEDICATED_USER=$(id -un)` to the server. Its set of checks is `own_home` in `.commandmate/uat.yaml` (value, user, socket location).
+
+**Allowed:** this build writes the shared hook files inside that HOME: codex's `$CODEX_HOME/hooks.json`, relay and hook trust (`config.toml`), antigravity's `~/.gemini/config/hooks.json`, copilot's `~/.copilot/settings.json`, and claude's `--settings` file (`CM_AGENT_HOOKS_DIR`). They are written instead of the "read only, refuse when different" of `1`.
+
+**Checked before every agent launch:** otherwise that launch is refused (`CM_UAT_ISOLATION=own-home: refusing to start <tool>: <reason>`).
+
+- The user running the process (`os.userInfo().username`) is `CM_UAT_DEDICATED_USER`
+- `HOME` resolves to the same place as that user's home directory (from the account database, not `$HOME`) and is owned by that user
+- Every write target (`CODEX_HOME`, `hooks.json`, the relay, `config.toml`, `~/.gemini/config/hooks.json`, `~/.copilot/` and `settings.json`, `CM_AGENT_HOOKS_DIR`) resolves, symlinks followed, to a path inside HOME owned by that user (a file not created yet is judged by its nearest existing ancestor). A dangling symlink is refused
+
+**Kept (same as `1`):**
+
+- A failed hook setup refuses the launch (never a bare start). So does a `hooks` key in copilot's `config.json`
+- The receiver is pinned (`CM_HOOK_URL` and the others point at the run's server)
+- Headless `codex exec` / `agy -p` (Schedules, daily summary) are refused; claude gets `--setting-sources project,local`
+- The CLI reads no `.env` and never falls back to 3000 without `CM_PORT`
+
+Under `own-home`, `run-server.sh down` records whether the shared files changed (the messages, and `shared_changed=yes|no` in the state file) but does not fail on it. Without `--own-home` (the user's UAT) it still fails.
+
+The production receiver's `agent-event-unresolved-target` log carries `worktreeId` (when the hook named one) and `cwdHash` (the first 16 hex characters of the SHA-256 of `cwd`; `cwd` itself is never logged), so hooks from a dedicated-user run that reached production can be counted against the hash of the run's cwd.

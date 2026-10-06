@@ -128,6 +128,7 @@ import { dirname, join } from 'path';
 import { resolveSafeDirectory } from '@/config/safe-directory';
 import {
   isUatIsolationEnabled,
+  sharedHookWritePolicy,
   UAT_SAME_BUILD_FIX,
   UatIsolationLaunchRefusedError,
 } from '@/config/uat-isolation';
@@ -928,7 +929,15 @@ export function inspectCopilotHookSettingsReadOnly(
  *   without hooks" (fail-open), except the UAT isolation refusal.
  */
 export function writeCopilotHookSettings(options: CopilotHookSettingsOptions = {}): string {
-  if (isUatIsolationEnabled()) {
+  // Issue #3312: under `own-home` the file, its backup and its lock directory
+  // are written once they check out inside the dedicated user's HOME.
+  const targetPath = options.settingsPath ?? getCopilotSettingsPath();
+  const policy = sharedHookWritePolicy(COPILOT_CLI_TOOL_ID, [
+    dirname(targetPath),
+    targetPath,
+    `${targetPath}${COPILOT_SETTINGS_BACKUP_SUFFIX}`,
+  ]);
+  if (policy === 'read-only') {
     // Issue #3391: the file is the user's, shared with their production server,
     // and names a relay by this checkout's path. A UAT server writes nothing to
     // it; see {@link inspectCopilotHookSettingsReadOnly}.
@@ -937,7 +946,7 @@ export function writeCopilotHookSettings(options: CopilotHookSettingsOptions = {
     throw new UatIsolationLaunchRefusedError(COPILOT_CLI_TOOL_ID, inspection.reason, inspection.fix);
   }
 
-  const settingsPath = options.settingsPath ?? getCopilotSettingsPath();
+  const settingsPath = targetPath;
   const configPath = resolveCopilotConfigPathFor(settingsPath, options);
 
   const configHooks = inspectCopilotConfigHooks(configPath);
@@ -1065,7 +1074,12 @@ export function buildCopilotLaunchCommand(
         worktreeId: target.worktreeId,
         configPath: error.configPath,
       });
-      return bare;
+      // Issue #3312: only `own-home` writes and so can get here isolated; a
+      // bare copilot would run the hooks in config.json, so it is refused.
+      return fallback(
+        `${error.configPath} has a "hooks" key, which copilot migrates over settings.json at startup`,
+        'Move the hooks out of copilot\'s config.json.'
+      );
     }
     logger.warn('copilot-hook-settings-write-failed', {
       worktreeId: target.worktreeId,

@@ -39,6 +39,7 @@
  * §8.1, `docs/design/opencode-server-live-verification.md` §5.2.3).
  */
 
+import { createHash } from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db/db-instance';
 import { applyAgentStopEvent } from '@/lib/hooks/agent-event-service';
@@ -60,6 +61,11 @@ const logger = createLogger('api/hooks-agent-event');
 const ACCEPTED = { accepted: true } as const;
 
 const badRequest = (error: string) => NextResponse.json({ error }, { status: 400 });
+
+/** `cwdHash` of `agent-event-unresolved-target`: SHA-256 of `cwd`, first 16 hex characters (Issue #3312). */
+function hashUnresolvedCwd(cwd: string): string {
+  return createHash('sha256').update(cwd).digest('hex').slice(0, 16);
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -84,7 +90,20 @@ export async function POST(request: NextRequest) {
     if (!worktree) {
       // Accepted and dropped: a hook left configured after a worktree was
       // removed is a normal state, not an error the agent can act on.
-      logger.info('agent-event-unresolved-target', { tool, event });
+      //
+      // Issue #3312: enough to tell, from this log alone, which run a stray
+      // event came from (a daily check whose hooks reached this server):
+      //   worktreeId — the id the hook URL named, when it named one
+      //   cwdHash    — the first 16 hex characters of the SHA-256 of `cwd`, for
+      //                events that carry no id. `cwd` itself is never logged:
+      //                it is a path on someone's disk, and the hash is enough
+      //                to match a run that knows its own cwd.
+      logger.info('agent-event-unresolved-target', {
+        tool,
+        event,
+        ...(parsed.worktreeIdParam !== undefined ? { worktreeId: parsed.worktreeIdParam } : {}),
+        ...(parsed.cwd.ok ? { cwdHash: hashUnresolvedCwd(parsed.cwd.cwd) } : {}),
+      });
       return NextResponse.json(ACCEPTED, { status: 202 });
     }
 

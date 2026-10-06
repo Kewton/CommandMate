@@ -31,11 +31,16 @@
  * @module lib/hooks/sources/claude/source
  */
 
-import { CLAUDE_UAT_SETTING_SOURCES, isUatIsolationEnabled } from '@/config/uat-isolation';
+import {
+  assertUatOwnHomeWriteTargets,
+  CLAUDE_UAT_SETTING_SOURCES,
+  isUatIsolationEnabled,
+} from '@/config/uat-isolation';
 import { AGENT_EVENT_TYPES } from '@/lib/hooks/agent-event-types';
 import { parseAskUserQuestionPayload } from '@/lib/hooks/ask-user-question-payload';
 import {
   buildClaudeLaunchCommand,
+  getHookSettingsDirectory,
   getHookSettingsPath,
   isHookInjectionEnabled,
   PERMISSION_REQUEST_TIMEOUT_SECONDS,
@@ -199,6 +204,12 @@ export const claudeAgentEventSource: AgentEventSource = definePushHookSource({
   // writes the settings file, falls back to the bare path on any failure, and is
   // covered byte-for-byte by `tests/unit/hooks/hook-settings-generator.test.ts`.
   prepareLaunch: ({ target, executablePath }: AgentLaunchContext): AgentLaunchPlan => {
+    // Issue #3312: under `own-home` the settings file goes in only once its
+    // directory checks out inside the dedicated user's HOME; else the launch
+    // is refused.
+    if (isHookInjectionEnabled()) {
+      assertUatOwnHomeWriteTargets(CLAUDE_CLI_TOOL_ID, [getHookSettingsDirectory()]);
+    }
     const baseCommand = buildClaudeLaunchCommand(executablePath, {
       worktreeId: target.worktreeId,
       instanceId: target.instanceId,

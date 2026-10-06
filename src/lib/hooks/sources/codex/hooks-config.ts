@@ -89,7 +89,9 @@ import { homedir } from 'os';
 import { dirname, join } from 'path';
 import { resolveSafeDirectory } from '@/config/safe-directory';
 import {
+  getUatIsolationMode,
   isUatIsolationEnabled,
+  sharedHookWritePolicy,
   UAT_SAME_BUILD_FIX,
   UatIsolationLaunchRefusedError,
 } from '@/config/uat-isolation';
@@ -394,7 +396,9 @@ export function shouldTrustCodexHooks(worktreePath: string): boolean {
   // Issue #3360: a grant is codex writing the user's own `config.toml`, which a
   // UAT / daily-check server must not cause. Declined, the hooks stay inert for
   // that session — the "no hooks" case the UAT already has to tolerate.
-  if (isUatIsolationEnabled()) return false;
+  // Issue #3312: under `own-home` the `config.toml` is the dedicated user's and
+  // was checked with the rest of `$CODEX_HOME` before the launch, so it may.
+  if (getUatIsolationMode() === 'shared-read-only') return false;
   try {
     // codex reads `<cwd>/.codex/hooks.json` as well as the home one, and a
     // review that includes a hook from the repository is a review this server
@@ -657,8 +661,17 @@ export function writeCodexHookSettings(options: CodexHookOptions = {}): string |
   const settingsPath = getCodexHooksPath(options);
 
   // Issue #3360: UAT isolation never writes the shared files. See
-  // {@link reuseCodexHookSettingsReadOnly}.
-  if (isUatIsolationEnabled()) return reuseCodexHookSettingsReadOnly(options);
+  // {@link reuseCodexHookSettingsReadOnly}. Issue #3312: `own-home` writes
+  // them, after checking every path below is inside the dedicated user's HOME
+  // (and refuses the launch when one is not).
+  const codexHome = getCodexHome(options);
+  const policy = sharedHookWritePolicy('codex', [
+    codexHome,
+    settingsPath,
+    getCodexRelayInstallPath(codexHome),
+    join(codexHome, 'config.toml'),
+  ]);
+  if (policy === 'read-only') return reuseCodexHookSettingsReadOnly(options);
 
   // Issue #2315: put the relay where the generated file can name it without
   // naming a checkout, BEFORE the content is built — `buildCodexHookSettings`
@@ -842,7 +855,8 @@ export function buildCodexLaunchPlan(
   try {
     const settingsPath = writeCodexHookSettings(options);
     if (!settingsPath) {
-      const inspection = isUatIsolationEnabled() ? inspectCodexSharedHooksReadOnly(options) : null;
+      const inspection =
+        getUatIsolationMode() === 'shared-read-only' ? inspectCodexSharedHooksReadOnly(options) : null;
       if (inspection && !inspection.usable) return fallback(inspection.reason, inspection.fix);
       return fallback(
         `${getCodexHooksPath(options)} or its relay is missing or differs from what this build writes`,
