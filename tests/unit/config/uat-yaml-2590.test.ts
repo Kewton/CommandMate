@@ -247,6 +247,56 @@ describe('.commandmate/uat.yaml (Issue #2590)', () => {
     });
   });
 
+  describe('copilot\'s shared settings.json is recorded as an ABSOLUTE line and compared in down (Issue #3391)', () => {
+    function setup() {
+      const runDir = fs.mkdtempSync(path.join(os.tmpdir(), 'uat-3391-run-'));
+      const home = path.join(runDir, 'home');
+      fs.mkdirSync(path.join(home, '.copilot'), { recursive: true });
+      const copilot = path.join(home, '.copilot', 'settings.json');
+      fs.writeFileSync(copilot, '{"hooks":{}}\n');
+      const record = path.join(runDir, 'codex-shared.sha256');
+      const env = { PATH: process.env.PATH ?? '', HOME: home } as unknown as NodeJS.ProcessEnv;
+      const run = (body: string) =>
+        spawnSync('bash', ['-c', `. '${RUN_SERVER}'\n${body}`], { env, encoding: 'utf8' });
+      const up = () => run(`decide_codex_home || exit 1\nwrite_shared_record '${record}'`);
+      const down = () => run(`check_shared_record '${record}'`);
+      return { runDir, copilot, record, up, down };
+    }
+
+    it('writes `ABSOLUTE  <sha256>  <absolute path>` for ~/.copilot/settings.json', () => {
+      const { runDir, copilot, record, up } = setup();
+      const res = up();
+      expect(res.status, res.stderr).toBe(0);
+      const text = fs.readFileSync(record, 'utf8');
+      expect(text).toMatch(new RegExp(`^ABSOLUTE {2}[0-9a-f]{64} {2}${copilot.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'm'));
+      fs.rmSync(runDir, { recursive: true, force: true });
+    });
+
+    it('down passes when nothing changed and fails naming the file when it did', () => {
+      const { runDir, copilot, up, down } = setup();
+      expect(up().status).toBe(0);
+      const unchanged = down();
+      expect(unchanged.status, unchanged.stderr).toBe(0);
+
+      fs.writeFileSync(copilot, '{"hooks":{"Stop":[]}}\n');
+      const changed = down();
+      expect(changed.status).toBe(1);
+      expect(changed.stderr).toContain(`shared agent hook file changed during the run: ${copilot}`);
+      fs.rmSync(runDir, { recursive: true, force: true });
+    });
+
+    it('records an absent file as absent and fails when the run created it', () => {
+      const { runDir, copilot, record, up, down } = setup();
+      fs.rmSync(copilot);
+      expect(up().status).toBe(0);
+      expect(fs.readFileSync(record, 'utf8')).toContain(`ABSOLUTE  absent  ${copilot}\n`);
+      expect(down().status).toBe(0);
+      fs.writeFileSync(copilot, '{}\n');
+      expect(down().status).toBe(1);
+      fs.rmSync(runDir, { recursive: true, force: true });
+    });
+  });
+
   it('uses ONE decided CODEX_HOME for the record, the server (after env -i) and down (Issue #3358)', () => {
     // Issue #3359: the decision lives in run-server.sh (decide_codex_home), up calls it.
     const decide = shellFunction('decide_codex_home');
