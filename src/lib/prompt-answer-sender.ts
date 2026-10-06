@@ -26,6 +26,21 @@ import {
 const CHECKBOX_OPTION_PATTERN = /^\[[ x]\] /;
 
 /**
+ * Whether a numbered prompt is a checkbox (multi-select) list by its labels:
+ * any option still wearing its `[ ]` / `[x]` box (Issue #287's reading, used
+ * below to choose Space-then-Next over a plain Enter).
+ *
+ * Exported for Issue #3397: Auto-Yes's Enter on an unreadable choice screen
+ * must leave a checkbox list alone, and it reads the list with THIS rule rather
+ * than a copy, so the two cannot disagree about which screens are multi-select.
+ * `promptData.multiSelect` (the parser's own flag, #2755) is the other reading
+ * and is the caller's to check.
+ */
+export function hasCheckboxOptions(options: readonly { label: string }[]): boolean {
+  return options.some(o => CHECKBOX_OPTION_PATTERN.test(o.label));
+}
+
+/**
  * A validated SELECTION SET, as opposed to free text (Issue #2755).
  *
  * `"1,3"` does not match `/^\d+$/`, which is the shape every guard in this
@@ -954,7 +969,7 @@ export async function sendPromptAnswer(params: SendPromptAnswerParams): Promise<
     // Multi-select prompts require: Space to toggle checkbox -> navigate to "Next" -> Enter.
     // Single-select prompts require: navigate to option -> Enter.
     // Note: multi-select detection is only possible when promptData succeeded (mcOptions available).
-    const isMultiSelect = mcOptions !== null && mcOptions.some(o => CHECKBOX_OPTION_PATTERN.test(o.label));
+    const isMultiSelect = mcOptions !== null && hasCheckboxOptions(mcOptions);
 
     if (isMultiSelect && mcOptions !== null) {
       // Multi-select: toggle checkbox, then navigate to "Next" and submit

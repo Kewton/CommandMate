@@ -44,9 +44,13 @@ let db: Database.Database;
 vi.mock('@/lib/db/db-instance', () => ({ getDbInstance: () => db }));
 
 const sendPromptAnswer = vi.fn(async (_params: { answer: string; promptData?: PromptData }) => {});
-vi.mock('@/lib/prompt-answer-sender', () => ({
-  sendPromptAnswer: (params: unknown) => sendPromptAnswer(params as { answer: string }),
-}));
+vi.mock('@/lib/prompt-answer-sender', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/prompt-answer-sender')>();
+  return {
+    hasCheckboxOptions: actual.hasCheckboxOptions,
+    sendPromptAnswer: (params: unknown) => sendPromptAnswer(params as { answer: string }),
+  };
+});
 
 const sendSpecialKeys = vi.fn(async (_session: string, _keys: string[]) => {});
 vi.mock('@/lib/tmux/tmux', () => ({
@@ -71,7 +75,17 @@ vi.mock('@/lib/db/chat-db', async (importOriginal) => {
   };
 });
 
-vi.mock('@/lib/session/cli-session', () => ({ captureSessionOutput: vi.fn(async () => '') }));
+/**
+ * The capture taken past the cache just before the Enter (#3397 finding 1):
+ * the last tick's raw frame unless a test says the real pane is different.
+ */
+let lastTickRaw = '';
+let freshPane: string | null = null;
+const captureSessionOutputFresh = vi.fn(async () => freshPane ?? lastTickRaw);
+vi.mock('@/lib/session/cli-session', () => ({
+  captureSessionOutput: vi.fn(async () => ''),
+  captureSessionOutputFresh: () => captureSessionOutputFresh(),
+}));
 const startPolling = vi.fn();
 vi.mock('@/lib/polling/response-poller', () => ({ startPolling: (...a: unknown[]) => startPolling(...a) }));
 const broadcastAfterInteraction = vi.fn().mockResolvedValue(undefined);
@@ -204,6 +218,7 @@ function pollerState(tool: CLIToolType): AutoYesPollerState {
 
 /** One poller tick over `raw`, exactly as `pollAutoYes` hands it over. */
 function tick(state: AutoYesPollerState, raw: string, withRaw = true): Promise<string> {
+  lastTickRaw = raw;
   const clean = stripBoxDrawing(stripAnsi(raw));
   return detectAndRespondToPrompt(
     WT,
@@ -238,6 +253,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   ownership.mockImplementation(async () => ({ verdict: 'owned', sessionPath: null }));
   policy = null;
+  freshPane = null;
+  lastTickRaw = '';
   clearPolicySuppressions();
   clearEnterFallbacks();
   delete process.env[AUTO_YES_ENTER_FALLBACK_ENV_VAR];
@@ -556,3 +573,71 @@ describe('[#3397] judgeEnterFallback', () => {
     expect(judgeEnterFallback('codex', CODEX_UNRECOGNISED_LIST, NO_ENV).eligible).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Codex consistency review (#3397, second round)
+// ---------------------------------------------------------------------------
+
+describe('[#3397] the Enter is decided on a capture taken past the cache', () => {
+  it('a stale cached frame read twice: the real pane has its input box back, nothing is sent', async () => {
+    // Both ticks see the redraw caught without its input box (what the 5s
+    // capture cache can hand back twice); the pane itself already shows the box.
+    freshPane = `${AGENT_WROTE_A_LIST}\n\n${claudeComposerTail('composer-empty')}`;
+    const state = pollerState('claude');
+    await ticks(state, CLAUDE_UNRECOGNISED_LIST, 2);
+
+    expect(captureSessionOutputFresh).toHaveBeenCalledTimes(1);
+    expect(sendSpecialKeys).not.toHaveBeenCalled();
+    expect(getLastEnterFallback(WT, 'claude')).toBeNull();
+  });
+
+  it('the fresh pane shows another screen: nothing is sent', async () => {
+    freshPane = CLAUDE_UNRECOGNISED_LIST.replace('Kubernetes', 'Bare metal');
+    const state = pollerState('claude');
+    await ticks(state, CLAUDE_UNRECOGNISED_LIST, 2);
+    expect(sendSpecialKeys).not.toHaveBeenCalled();
+  });
+
+  it('control: the fresh pane is the same screen, the Enter goes', async () => {
+    const state = pollerState('claude');
+    await ticks(state, CLAUDE_UNRECOGNISED_LIST, 2);
+    expect(captureSessionOutputFresh).toHaveBeenCalledTimes(1);
+    expect(enterCalls()).toHaveLength(1);
+  });
+
+  it('the first tick takes no fresh capture (the cache is only bypassed right before a key)', async () => {
+    const state = pollerState('claude');
+    await tick(state, CLAUDE_UNRECOGNISED_LIST);
+    expect(captureSessionOutputFresh).not.toHaveBeenCalled();
+  });
+});
+
+describe('[#3397] a checkbox list gets no Enter', () => {
+  /** claude's checkbox picker as the generic parser reads it: boxes on the labels, no `multiSelect` flag. */
+  const CHECKBOX_LIST = [
+    '⏺ Pick the caches to clear',
+    '',
+    '❯ 1. [ ] node_modules',
+    '  2. [ ] dist',
+    '  3. [ ] .next',
+    '',
+    '  Which ones?',
+  ].join('\n');
+
+  it('the frame is what the finding describes: eligible, boxes on the labels, no multiSelect flag', () => {
+    expect(judgeEnterFallback('claude', CHECKBOX_LIST, { NODE_ENV: 'test' } as NodeJS.ProcessEnv).eligible).toBe(true);
+    const promptData = assessPromptAnswerability('claude', CHECKBOX_LIST).promptCheck.promptData;
+    expect(promptData?.type).toBe('multiple_choice');
+    if (promptData?.type !== 'multiple_choice') return;
+    expect(promptData.multiSelect).not.toBe(true);
+    expect(promptData.options[0].label).toBe('[ ] node_modules');
+  });
+
+  it('no Enter, however many ticks', async () => {
+    const state = pollerState('claude');
+    await ticks(state, CHECKBOX_LIST, 3);
+    expect(sendSpecialKeys).not.toHaveBeenCalled();
+    expect(getLastPolicySuppression(WT, 'claude')?.reason).toBe('unclassified-frame');
+  });
+});
+

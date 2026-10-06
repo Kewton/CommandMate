@@ -54,7 +54,11 @@ import { judgeToolLiveness } from '@/lib/detection/tool-liveness';
 import { extractComposerText, type ComposerTextState } from '@/lib/detection/composer-text';
 import { stripAnsi, detectThinking } from '@/lib/detection/cli-patterns';
 import { generatePromptKey } from '@/lib/detection/prompt-key';
-import { buildCompositeKey, THINKING_CHECK_LINE_COUNT } from '@/lib/auto-yes-state';
+import {
+  buildCompositeKey,
+  filterCompositeKeysByWorktree,
+  THINKING_CHECK_LINE_COUNT,
+} from '@/lib/auto-yes-state';
 import type { PromptData, PromptType } from '@/types/models';
 import { getOrInitGlobal } from '../global-state';
 import {
@@ -384,7 +388,26 @@ export function publishEnterFallback(
   };
 }
 
-/** Drop every record. Test seam. */
+/**
+ * Drop one session's record (Issue #3397). Called wherever the poller for it is
+ * stopped — `stopAutoYesPolling`, which the kill-session route (through
+ * `releaseAutoYes`), the Auto-Yes disable route and an expired / disabled grant
+ * all reach. A record that outlived its session would read `currentPrompt: true`
+ * against the same question on the NEXT session, and the window would say
+ * "Auto-Yes sent Enter" about an Enter nobody sent there.
+ */
+export function forgetEnterFallback(compositeKey: string): void {
+  lastEnterFallbacks.delete(compositeKey);
+}
+
+/** {@link forgetEnterFallback} for every instance of a worktree. */
+export function forgetEnterFallbacksByWorktree(worktreeId: string): void {
+  for (const key of filterCompositeKeysByWorktree([...lastEnterFallbacks.keys()], worktreeId)) {
+    lastEnterFallbacks.delete(key);
+  }
+}
+
+/** Drop every record: server shutdown (`stopAllAutoYesPolling`), and a test seam. */
 export function clearEnterFallbacks(): void {
   lastEnterFallbacks.clear();
 }

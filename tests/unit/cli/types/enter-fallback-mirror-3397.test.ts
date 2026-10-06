@@ -54,6 +54,13 @@ import {
 } from '@/lib/polling/auto-yes-enter-fallback';
 import { buildClaude1000RowPermissionFrame } from '../../../fixtures/claude-1000-row-prompt';
 import type { PromptData } from '@/types/models';
+import {
+  stopAllAutoYesPolling,
+  stopAutoYesPolling,
+  validatePollingContext,
+  type AutoYesPollerState,
+} from '@/lib/auto-yes-poller';
+import { buildCompositeKey, clearAllAutoYesStates, disableAutoYes } from '@/lib/auto-yes-state';
 
 const REPO_ROOT = path.resolve(__dirname, '../../../..');
 const SERVER_FILE = path.join(REPO_ROOT, 'src/lib/session/current-output-types.ts');
@@ -300,5 +307,46 @@ describe('[#3397] a real response carries what the copy declares', () => {
     });
     const payload = await buildCurrentOutput({} as Database.Database, WT, 'claude');
     expect(payload.autoYes?.lastEnterFallback).toBeNull();
+  });
+
+  describe('the record does not outlive the poller (review finding 3)', () => {
+    function recordForThisFrame(): void {
+      recordEnterFallbackSent(WT, 'claude', undefined, {
+        promptType: 'multiple_choice',
+        refusalReason: 'unsupported_dialog_layout',
+        screenKey: enterFallbackScreenKey(promptOnFrame()),
+      });
+    }
+
+    afterEach(() => clearAllAutoYesStates());
+
+    it('control: with the record in place, it is published for this prompt', async () => {
+      recordForThisFrame();
+      const payload = await buildCurrentOutput({} as Database.Database, WT, 'claude');
+      expect(payload.autoYes?.lastEnterFallback?.currentPrompt).toBe(true);
+    });
+
+    it('stopAutoYesPolling (kill-session, the disable route) → null', async () => {
+      recordForThisFrame();
+      stopAutoYesPolling(buildCompositeKey(WT, 'claude'));
+      const payload = await buildCurrentOutput({} as Database.Database, WT, 'claude');
+      expect(payload.autoYes?.lastEnterFallback).toBeNull();
+    });
+
+    it('Auto-Yes disabled or expired, seen by the poller → null', async () => {
+      recordForThisFrame();
+      disableAutoYes(WT, 'claude');
+      const state = { cliToolId: 'claude', instanceId: 'claude' } as AutoYesPollerState;
+      expect(validatePollingContext(buildCompositeKey(WT, 'claude'), state)).toBe('expired');
+      const payload = await buildCurrentOutput({} as Database.Database, WT, 'claude');
+      expect(payload.autoYes?.lastEnterFallback).toBeNull();
+    });
+
+    it('server shutdown (stopAllAutoYesPolling) → null', async () => {
+      recordForThisFrame();
+      stopAllAutoYesPolling();
+      const payload = await buildCurrentOutput({} as Database.Database, WT, 'claude');
+      expect(payload.autoYes?.lastEnterFallback).toBeNull();
+    });
   });
 });
