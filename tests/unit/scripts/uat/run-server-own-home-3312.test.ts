@@ -1,6 +1,7 @@
 /**
- * Issue #3312 — `run-server.sh up --own-home` and the `own_home` set in
- * `.commandmate/uat.yaml`.
+ * Issue #3312 — `run-server.sh up --own-home` and its own set of checks,
+ * `.commandmate/uat-own-home.yaml` (kept out of `.commandmate/uat.yaml`, whose
+ * cmate-uat contract puts any unknown key to the user on every UAT).
  *
  * `down` runs for real here against a hand-written state with no server pid
  * and no socket directory, so nothing is started (no node, no tmux): it only
@@ -167,23 +168,32 @@ describe('run-server.sh up --own-home (Issue #3312), by shape', () => {
   });
 });
 
-describe('.commandmate/uat.yaml own_home set (Issue #3312)', () => {
-  const spec = YAML.parse(fs.readFileSync(path.join(REPO_ROOT, '.commandmate/uat.yaml'), 'utf8')) as {
-    env: { up: string };
+describe('.commandmate/uat-own-home.yaml (Issue #3312)', () => {
+  interface Spec {
+    version: number;
+    env: { up: string; down: string; health: string; port_range: [number, number] };
     isolation: { checks: string[] };
-    own_home: { up: string; down: string; checks: string[] };
-  };
+  }
+  const read = (name: string) =>
+    YAML.parse(fs.readFileSync(path.join(REPO_ROOT, '.commandmate', name), 'utf8')) as Spec & Record<string, unknown>;
+  const spec = read('uat-own-home.yaml');
+  const userSpec = read('uat.yaml');
 
-  it('starts with --own-home and leaves the user\'s UAT set as it was', () => {
-    expect(spec.own_home.up).toBe('bash scripts/uat/run-server.sh up --own-home --port {port} --run-dir {run_dir}');
-    expect(spec.own_home.down).toBe('bash scripts/uat/run-server.sh down --run-dir {run_dir}');
-    expect(spec.env.up).not.toContain('--own-home');
-    expect(spec.isolation.checks.some((c) => c.includes("grep -qxF 'CM_UAT_ISOLATION=1'"))).toBe(true);
-    expect(spec.isolation.checks.join('\n')).not.toContain('own-home');
+  it('is a contract-v1 file of its own that starts with --own-home; uat.yaml has no extra key and no own-home', () => {
+    expect(spec.version).toBe(1);
+    expect(Object.keys(spec).sort()).toEqual(Object.keys(userSpec).sort());
+    expect(Object.keys(spec.env).sort()).toEqual(Object.keys(userSpec.env).sort());
+    expect(spec.env.up).toBe('bash scripts/uat/run-server.sh up --own-home --port {port} --run-dir {run_dir}');
+    expect(spec.env.down).toBe('bash scripts/uat/run-server.sh down --run-dir {run_dir}');
+    expect(spec.env.port_range[0]).toBeGreaterThan(3000);
+    expect(Object.keys(userSpec)).not.toContain('own_home');
+    expect(userSpec.env.up).not.toContain('--own-home');
+    expect(userSpec.isolation.checks.some((c) => c.includes("grep -qxF 'CM_UAT_ISOLATION=1'"))).toBe(true);
+    expect(fs.readFileSync(path.join(REPO_ROOT, '.commandmate/uat.yaml'), 'utf8')).not.toContain('own-home');
   });
 
   it('checks the value, the user and the socket location on the running process', () => {
-    const checks = spec.own_home.checks.join('\n');
+    const checks = spec.isolation.checks.join('\n');
     expect(checks).toContain("grep -qxF 'CM_UAT_ISOLATION=own-home'");
     expect(checks).toContain("! ps eww -p $P | tr ' ' '\\n' | grep -qxF 'CM_UAT_ISOLATION=1'");
     expect(checks).toContain('grep -qxF "CM_UAT_DEDICATED_USER=$U"');
@@ -193,7 +203,7 @@ describe('.commandmate/uat.yaml own_home set (Issue #3312)', () => {
   });
 
   it('its socket check accepts a socket under the dedicated HOME and refuses /tmp', () => {
-    const check = spec.own_home.checks.find((c) => c.includes('case "$S" in'))!;
+    const check = spec.isolation.checks.find((c) => c.includes('case "$S" in'))!;
     const caseOnly = check.slice(check.indexOf('S=$('), check.indexOf('esac;') + 'esac;'.length);
     const run = (sockDir: string) => {
       fs.writeFileSync(path.join(runDir, 'uat-run.state'), `sock_dir=${sockDir}\n`);

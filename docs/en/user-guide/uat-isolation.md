@@ -83,7 +83,7 @@ CM_UAT_SOCK_BASE="$HOME/run" CM_RUN_LOCK_DIR="$HOME/run/run.lock" \
   bash scripts/uat/run-server.sh up --own-home --port <port> --run-dir <dir>
 ```
 
-`up --own-home` passes `CM_UAT_ISOLATION=own-home` and `CM_UAT_DEDICATED_USER=$(id -un)` to the server. Its set of checks is `own_home` in `.commandmate/uat.yaml` (value, user, socket location).
+`up --own-home` passes `CM_UAT_ISOLATION=own-home` and `CM_UAT_DEDICATED_USER=$(id -un)` to the server. Its set of checks is `.commandmate/uat-own-home.yaml` (a separate file in the same shape as `uat.yaml`: value, user, socket location; kept apart because cmate-uat asks about any unknown key in `uat.yaml` on every run).
 
 **Allowed:** this build writes the shared hook files inside that HOME: codex's `$CODEX_HOME/hooks.json`, relay and hook trust (`config.toml`), antigravity's `~/.gemini/config/hooks.json`, copilot's `~/.copilot/settings.json`, and claude's `--settings` file (`CM_AGENT_HOOKS_DIR`). They are written instead of the "read only, refuse when different" of `1`.
 

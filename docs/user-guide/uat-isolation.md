@@ -83,7 +83,7 @@ CM_UAT_SOCK_BASE="$HOME/run" CM_RUN_LOCK_DIR="$HOME/run/run.lock" \
   bash scripts/uat/run-server.sh up --own-home --port <port> --run-dir <dir>
 ```
 
-`up --own-home` は、サーバーに `CM_UAT_ISOLATION=own-home` と `CM_UAT_DEDICATED_USER=$(id -un)` を渡す。検査の組は `.commandmate/uat.yaml` の `own_home`（値・ユーザー・ソケットの場所）。
+`up --own-home` は、サーバーに `CM_UAT_ISOLATION=own-home` と `CM_UAT_DEDICATED_USER=$(id -un)` を渡す。検査の組は `.commandmate/uat-own-home.yaml`（`uat.yaml` と同じ形の別ファイル。値・ユーザー・ソケットの場所。`uat.yaml` に足すと cmate-uat が未知のキーとして毎回確認を求めるので分けた）。
 
 **許すもの:** その HOME の中の共有の hook のファイルを、このビルドが書くこと。codex の `$CODEX_HOME/hooks.json`・relay・hook の信頼（`config.toml`）、antigravity の `~/.gemini/config/hooks.json`、copilot の `~/.copilot/settings.json`、claude の `--settings` のファイル（`CM_AGENT_HOOKS_DIR`）。`1` のときの「読むだけ・違えば拒否」の代わりに書く。
 

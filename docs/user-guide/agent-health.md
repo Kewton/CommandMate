@@ -624,9 +624,58 @@ HTML を書けたら判定にかかわらず exit 0、引数の誤りやスク�
   agent-health で、その識別子のチェックがまだ `fail`
 - **要判断**: dispatch した Issue に未完了（PR 未作成・未マージ・verify 不合格）がある／持ち越しがある／
   develop HEAD の CI が実行中または取得できない／本日マージされた PR の一覧を取得できない
+- **製品の経路の確認（第 2 段、#3312）**: `~/.commandmate/agent-health/product/<date>.json` の最終の結果が `fail` なら **NO-GO**、
+  `unknown`・`未実施`（`not-run`）なら **要判断**、`skip` は 3 日続いたら **要判断**（要対応）。`product/` ディレクトリが無い間
+  （第 2 段を導入していない間）は判定に入れない
 - **GO**: 上のどれにも当たらない
 
 判定の理由はどの判定でも箇条書きで出す。判定に影響しない事実（前回リリース時の audit 値が無い、マージ後の agent-health が
 まだ走っていない修正など）は「参考」に出す。次の一手は GO なら `/release`、NO-GO なら直すもの、要判断なら決めること。
 
 orchestrate が途中で止まった日でも、手で実行すればその時点の状態で HTML が出る。
+
+## 製品の経路の確認（第 2 段、専用ユーザー、Issue #3312）
+
+07:00 の日次確認（第 1 段）は CLI を私設の tmux で起動して画面と hook を確かめるが、CommandMate のサーバーの経路
+（送る → hook の受信 → 状態 → `wait` → 返答 → 履歴）は通らない。第 2 段は、その経路を毎朝、**専用の macOS ユーザー**
+（例: `cmcheck`）で通す。設計は #3312 の設計書（第 6 版・第 7 版）。
+
+**まだ導入していないこと:** 専用ユーザーの作成と認証、launchd（監督役 07:15・期限の番人 07:52）の設定、場面（1 ターン・
+履歴・Auto-Yes・ログ）、漏れの判定（本番のログを数える部分）、利用者の側の取り込み役。今あるのは、下の仕組みとテストだけ。
+
+### 仕組み
+
+- **監督役** `scripts/agent-health/product/supervisor.sh`（専用ユーザーで実行）。順序は必ず
+  **排他 → 回収 → 安全確認 → 実行 → 後始末 → 確定**
+  - 排他: `$CM_PRODUCT_RUN_DIR/supervisor.lock`（`run-lock.sh` の共通のロックとは別）。2 つ目の監督役は exit 75 で何もしない
+  - 回収: 閉じていない前回までの台帳の資源を、資源ごとの本人確認のうえで止める。開始が遅れた日（`late-start`、既定 07:25 より後）も行う
+  - 安全確認: 回収で `unknown` が残っていない・ポートが 3000 でなく空いている・期限前。`run-server.sh up --own-home` の後、
+    `.commandmate/uat-own-home.yaml` の隔離の検査を動いているサーバーに対して実行する
+  - 実行: `CM_PRODUCT_STAGE_CMD`（場面は後の作業）を自分のプロセスグループで実行し、既定 07:45 に止める
+    （exit 0 = pass、3 = skip、それ以外 = fail、期限で止めたら unknown）
+  - 後始末: `run-server.sh down` の後、その run の台帳を回収する
+  - 確定: 実行の結果を `CM_PRODUCT_PUBLISH_DIR`（既定 `/Users/Shared/commandmate-check`）の `product-<date>.json` に公開する
+- **台帳** `$CM_PRODUCT_RUN_DIR/ledger/<run id>.json`（一時ファイル → `rename`）。資源を作る**前に** `planned`、作った直後に
+  `acquired`（pid・起動時刻 `ps -o lstart`・識別の情報）を書く。本人確認は、サーバー = pid・起動時刻・環境の `CM_DB_PATH`、
+  私設 tmux = ソケットのパスとその持ち主の uid、実行役 = pid・起動時刻・プロセスグループ。`planned` だけの資源は run id を含む名前
+  （run のディレクトリの `CM_DB_PATH`、ソケットのディレクトリの `run-dir`、実行役の引数 `cmcheck-product-stage-<run id>`）で探す。
+  合わないものは止めず `unknown` にし、その日は実行しない（pid の再利用で別のプロセスを止めない）
+- **期限の番人** `scripts/agent-health/product/deadline-guard.sh`: 監督役が生きていてもいなくても、その日の閉じていない台帳を回収し、
+  結果を `reclaim.by = deadline-guard` で公開する。期限（既定 07:50）を過ぎて生きている監督役は、台帳の pid と起動時刻が合えば止める。
+  期限の前なら何もしない（exit 75）
+- **実行の結果**（`src/lib/agent-health/product-result.ts`）: 日付・run id・SHA・開始と終了・段ごとの結果・後始末・回収・`late-start`・
+  利用量。認証の情報・プロンプトの本文・返答は載せない。公開は原子的（一時ファイル → `rename`）、`0644`、書き出し先や
+  ファイルが symlink なら拒否
+- **最終の結果**（`src/lib/agent-health/product-judgement.ts`、利用者の側）: 実行の結果と漏れの判定から、どれかが `fail` → `fail`、
+  どれかが `unknown` → `unknown`、JSON が無い・古い・run id や SHA が合わない → `not-run`（未実施）、skip は理由つきで `skip`、
+  全部 `pass` → `pass`。`~/.commandmate/agent-health/product/<date>.json` に置くと、リリース判断レポートが読む
+
+| 環境変数 | 既定 | 意味 |
+|---|---|---|
+| `CM_PRODUCT_RUN_DIR` | （必須） | 監督役のロック・台帳・run の置き場（専用ユーザーの HOME の下） |
+| `CM_PRODUCT_STAGE_CMD` | なし（実行は skip） | 実行の段のコマンド |
+| `CM_PRODUCT_PORT` | `3029` | run のサーバーのポート（3000 は拒否） |
+| `CM_PRODUCT_LATE_START` / `CM_PRODUCT_STOP_AT` / `CM_PRODUCT_FINAL_AT` | `07:25` / `07:45` / `07:50` | `HH:MM`（今日）か `@<epoch>` |
+| `CM_PRODUCT_PUBLISH_DIR` | `/Users/Shared/commandmate-check` | 実行の結果の公開先 |
+| `CM_UAT_SOCK_BASE` / `CM_RUN_LOCK_DIR` | `$CM_PRODUCT_RUN_DIR/sock` / `$CM_PRODUCT_RUN_DIR/run.lock` | 私設 tmux のソケットと `run-lock.sh` のロック |
+

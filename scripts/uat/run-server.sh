@@ -44,6 +44,7 @@
 # files, but only inside that user's own HOME (the server checks the user, the
 # HOME and every path before each launch, and refuses otherwise). Put the
 # sockets and the lock under that HOME with CM_UAT_SOCK_BASE / CM_RUN_LOCK_DIR.
+# Its checks are .commandmate/uat-own-home.yaml.
 # `down` still records whether the shared files changed, and does not fail on
 # it: under own-home they are the dedicated user's, written on purpose. Without
 # --own-home nothing changes.
