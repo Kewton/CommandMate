@@ -101,6 +101,16 @@ describe('measureAll', () => {
   });
 });
 
+describe('type-safety parses each file as its own kind (Issue #3389)', () => {
+  it('reads <any> in .ts as a type and JSX text in .tsx as text', async () => {
+    fs.mkdirSync(path.join(root, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'src', 'a.ts'), 'const a = <any>b;\nexport {};\n');
+    fs.writeFileSync(path.join(root, 'src', 'c.tsx'), "export const C = () => <p>don't pick: any</p>;\n");
+    const [result] = await measureAll(ctx(), ['type-safety']);
+    expect(result).toMatchObject({ status: 'ok', items: { any: 1, 'eslint-disable': 0, 'ts-ignore': 0 } });
+  });
+});
+
 describe('performance from the production log (Issue #3054)', () => {
   const NOW = new Date('2026-10-01T21:30:00.000Z');
   const at = (hoursAgo: number) => new Date(NOW.getTime() - hoursAgo * 60 * 60 * 1000).toISOString();

@@ -246,6 +246,11 @@ export type MetricMeasurement =
       subjects?: Record<string, MetricFinding>;
       details?: Record<string, number | string | null>;
       records?: MetricRecord[];
+      /**
+       * How the values were counted (absent: 1). A previous snapshot counted
+       * another way is not compared with: it is rebased (Issue #3389).
+       */
+      countVersion?: number;
     }
   | { metricId: MetricId; status: 'skip'; reason: string };
 
@@ -254,6 +259,8 @@ export interface MetricSnapshot {
   measuredAt: string;
   value: number | null;
   items: Record<string, number>;
+  /** The measurement's {@link MetricMeasurement} `countVersion`; absent: 1. */
+  countVersion?: number;
 }
 
 /** `~/.commandmate/agent-health/metrics-state.json` */

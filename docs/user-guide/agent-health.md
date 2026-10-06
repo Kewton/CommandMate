@@ -315,7 +315,7 @@ tmux -L cm-agent-health kill-server
 | maintainability | `duplication` | `npx jscpd@4 src`（最小 10 行） | 重複率（%） | 前回比 +0.5pt 以上 |
 | maintainability | `unused` | `npx knip@5 --reporter json` | 未使用の依存の数（未使用ファイルのパスの集合も状態に保存） | 前回に無い未使用の依存・未使用のファイル（パスで比べる。未使用 export は件数だけ記録） |
 | maintainability | `outdated` | `npm outdated --json`（直接依存だけ） | メジャー 2 版以上遅れた数 | 新たにメジャー 2 版以上遅れた |
-| maintainability | `type-safety` | `src/` の型位置の `any`・`eslint-disable`・`@ts-ignore` の数 | 合計 | どれかが前回より増えた |
+| maintainability | `type-safety` | `src/` の型位置の `any`・`eslint-disable`・`@ts-ignore` の数。TypeScript のパーサで読み、コメント・文字列・正規表現・JSX のテキストの中の `any` は数えず、ジェネリクスの既定 `T = any` は数える。`eslint-disable` と `@ts-ignore` はコメントの先頭にある指示だけを数え、`declare global { var … }` の `var` の直前の `// eslint-disable-next-line no-var`（`globalThis` の状態の決まりの書き方）は数えない（Issue #3389） | 合計 | どれかが前回より増えた |
 | maintainability | `coverage` | `vitest run tests/unit --coverage`（**月曜（JST）だけ**） | 行カバレッジ（%） | 前回（前週）比 -2pt 以上 |
 | performance | `api-latency` | 本番ログの直近 24 時間の `[WARN]` で JSON に `totalMs` を持つ行（今は `list:slow`）を `<tag> <event>` ごとに: 件数・p50・p95・最大・合計が最大の `…Ms` 内訳 | `api/worktrees list:slow` の p95（ms）。無ければ 0 | p95 が新たに 5,000ms 以上／件数 20 以上で p95 が前回比 +50% 以上。5,000ms 以上のままなら `outstanding` |
 | performance | `log-volume` | 本番ログの直近 24 時間の行数と `<tag> <event>` ごとの行数 | 24 時間の行数 | ある `<tag> <event>` が新たに 1 日 20,000 行以上／前回比 2 倍以上（前回 1,000 行以上のもの）。20,000 行以上のままなら `outstanding` |
@@ -337,6 +337,9 @@ tmux -L cm-agent-health kill-server
   `tests/unit/lib/remote/cloudflare-child-survival.test.ts` が `import` ではなくパスで `node` に起動させるため、knip からは
   未使用に見える（knip の誤り、Issue #3315）。パスで起動するファイルを足したら、ここと `entry` に足す
 - 前回値が無い指標（初回・前回が skip のまま）は基準として記録するだけで、候補を出さない
+- 数え方を変えた指標（`countVersion` が前回値と違う。`type-safety` は Issue #3389 で版 2）は、前回値と比べずに基準を置き直す。
+  その日の `summary` に「数え方を版 1 から版 2 に変えたため基準を置き直した: 前回 … → 今回 …」と 1 回だけ出し、`details` に
+  `countVersionFrom` / `countVersionTo` を残す。state には新しい版で書くので、次の実行からはふつうに比べる
 - security の検出が続いている間は `status: 'fail'`。前からあるものは `outstanding` に入り、AI はその日の起票枠（4 件）に
   余りがあるときだけ、まだ Issue の無いものを立てる（初日に見送った advisory も翌日以降に回る）
 - 外部ツールが無い・失敗した・時間切れの指標は `status: 'skip'`（`skipReason` に理由）。skip した指標の前回値は
@@ -382,7 +385,7 @@ bash scripts/agent-health/metrics.sh --out "$HOME/.commandmate/agent-health/metr
 | オプション | 既定 | 説明 |
 |---|---|---|
 | `--out` | `~/.commandmate/agent-health/metrics/<YYYY-MM-DD>.json`（JST） | 計測結果の書き出し先 |
-| `--state` | `~/.commandmate/agent-health/metrics-state.json` | 前回値（`{ schemaVersion: 1, metrics: { <metricId>: { measuredAt, value, items } } }`）。実行の最後に更新する |
+| `--state` | `~/.commandmate/agent-health/metrics-state.json` | 前回値（`{ schemaVersion: 1, metrics: { <metricId>: { measuredAt, value, items, countVersion? } } }`。`countVersion` が無いのは版 1）。実行の最後に更新する |
 | `--only` | 全指標 | 計測する指標（カンマ区切り） |
 | `--coverage` / `--no-coverage` | 月曜（JST）だけ | カバレッジを強制する／しない |
 
