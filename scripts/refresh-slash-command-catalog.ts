@@ -16,10 +16,10 @@
  * Issue #2036: `--opencode-port <port>` reconciles the opencode catalog against
  * `GET /command` on a loopback opencode server. Before it, `RunReconcileOptions
  * .opencode` had no caller anywhere in the repository, so the option's `false`
- * default was the only value it could ever hold and every run — the weekly
- * catalog-drift workflow included — reported opencode as skipped. The flag is
- * opt-in and stays opt-in: the workflow does not pass it (there is no opencode
- * server on a CI runner), so its run is byte-for-byte what it was.
+ * default was the only value it could ever hold and every run reported opencode
+ * as skipped. The flag is opt-in and stays opt-in: the agent-health daily check
+ * (Issue #3158) does not pass it (it starts no opencode server), so its run is
+ * byte-for-byte what it would have been without the flag.
  *
  * Usage (`--help` prints the same list; it lives in
  * src/lib/slash-command-reconcile/runner-args.ts so a test can read it):
@@ -246,9 +246,9 @@ async function main(): Promise<void> {
     codex: args.skipCodex ? false : args.codexRef ? { ref: args.codexRef } : {},
     antigravity: args.skipAntigravity ? false : {},
     // Issue #2036: `false` unless --opencode-port was given, which is what keeps
-    // the weekly workflow's run identical to the one it made before this flag
+    // a run without the flag identical to the one made before this flag
     // existed. Deliberately NOT printed in printSummary(): check-report.ts parses
-    // that report line by line and .github/workflows/catalog-drift.yml acts on
+    // that report line by line and the agent-health daily check (#3158) acts on
     // the verdict, so the report's shape is an interface, not a scratch pad.
     opencode: opencodeOptionFromArgs(args),
     // Issue #1704: lets the engine notice when a new entry would silently

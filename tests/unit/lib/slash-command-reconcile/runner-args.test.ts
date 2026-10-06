@@ -9,8 +9,8 @@
  *
  * So the assertions here are about *reachability*: that a typed port becomes an
  * option object, that the option object reaches the provider's fetch, and that
- * the absent flag still produces the exact skip the weekly catalog-drift
- * workflow has always seen.
+ * the absent flag still produces the exact skip a run without the flag (the
+ * agent-health daily check, Issue #3158) has always seen.
  *
  * @vitest-environment node
  */
@@ -221,7 +221,7 @@ describe('runReconcile carries the opencode option to the provider (Issue #2036)
 
     // Verbatim from the Issue's `source-warning:` line, so a change to the
     // wording has to be a decision rather than an accident: check-report.ts
-    // matches warnings by prefix and .github/workflows/catalog-drift.yml acts
+    // matches warnings by prefix and the agent-health daily check (#3158) acts
     // on the verdict that produces.
     expect(result.warnings).toContain(
       'opencode provider skipped: no loopback port given ' +

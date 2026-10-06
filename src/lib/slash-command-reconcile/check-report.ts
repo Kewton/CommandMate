@@ -3,8 +3,9 @@
  *
  * `scripts/refresh-slash-command-catalog.ts --check` is fail-soft by design: it
  * exits 0 whether it found 104 missing commands or could not reach a single
- * source. Exit code therefore carries no signal, and the weekly drift workflow
- * has to read the *report* instead. This module owns that reading so the
+ * source. Exit code therefore carries no signal, and the agent-health daily
+ * check (Issue #3158, `src/lib/agent-health/catalog-check.ts`) has to read the
+ * *report* instead. This module owns that reading so the
  * regexes are unit-tested against real captured output rather than guessed at
  * inside a YAML `run:` block.
  *
@@ -79,12 +80,11 @@ export interface CatalogCheckReport {
 }
 
 /**
- * Warning prefixes the weekly check treats as a known state rather than a
- * signal.
+ * Warning prefixes every caller treats as a known state rather than a signal.
  *
  * Only the antigravity placeholder qualifies: `providers/antigravity.ts`
  * returns that warning unconditionally until Issue #1489 Phase 2 lands, so it
- * is on in *every* run. Treating it as blocking would make the workflow report
+ * is on in *every* run. Treating it as blocking would make the check report
  * "inconclusive" forever, which is just as useless as reporting "clean"
  * forever.
  *
@@ -92,8 +92,8 @@ export interface CatalogCheckReport {
  * once the provider is implemented, a real antigravity failure surfaces as
  * `http 404 for …` / `fetch failed for …` / `… parsed to zero commands`, none
  * of which match this prefix, so it correctly turns the run inconclusive.
- * Everything not listed here blocks — see the workflow comment in
- * .github/workflows/catalog-drift.yml.
+ * Everything not listed here blocks; a caller widens the list for itself only
+ * (`isIgnoredWarning`'s `extraPrefixes`).
  */
 export const IGNORED_WARNING_PREFIXES: readonly string[] = [
   'antigravity provider not implemented yet',
@@ -103,8 +103,8 @@ export const IGNORED_WARNING_PREFIXES: readonly string[] = [
  * True when `warning` is a known permanent state rather than a real outage.
  *
  * `extraPrefixes` widens the allowlist for one caller only (Issue #3158: the
- * agent-health daily check also ignores the opencode 1.x skip, while the CI
- * workflow keeps treating it as blocking).
+ * agent-health daily check also ignores the opencode 1.x skip, while the
+ * default list keeps treating it as blocking).
  */
 export function isIgnoredWarning(warning: string, extraPrefixes: readonly string[] = []): boolean {
   return [...IGNORED_WARNING_PREFIXES, ...extraPrefixes].some((prefix) => warning.startsWith(prefix));
@@ -314,7 +314,7 @@ export function parseCatalogCheckOutput(
  *
  * Issue #2026: a run can be at `drift` with zero new commands — an upstream
  * removal makes an attestation stale while giving the tool nothing to add — and
- * titling that "未反映 0 件" would read as a bug in the workflow rather than as
+ * titling that "未反映 0 件" would read as a bug in the check rather than as
  * work to do. The two cases get different headlines.
  */
 export function trackingIssueTitle(report: CatalogCheckReport): string {
@@ -340,7 +340,7 @@ export interface TrackingIssueBodyMeta {
   maxReportChars?: number;
   /**
    * Quote lines under the marker saying who rewrites this issue (Issue #3158).
-   * Defaults to the weekly workflow's note.
+   * Defaults to the overwrite note alone; the daily check names itself here.
    */
   headerNote?: readonly string[];
   /** Extra lines placed just before the `### 対応` section (Issue #3158). */
@@ -374,10 +374,7 @@ export function formatTrackingIssueBody(
 
   const sections: string[] = [
     TRACKING_ISSUE_MARKER,
-    ...(meta.headerNote ?? [
-      '> このIssueは `.github/workflows/catalog-drift.yml` が週次で自動更新します。',
-      '> 本文を手で編集しても次回の実行で上書きされます。',
-    ]),
+    ...(meta.headerNote ?? ['> 本文を手で編集しても次回の実行で上書きされます。']),
     '',
     `## ${headline}`,
     '',

@@ -304,8 +304,8 @@ const ciWorkflow = readWorkflow(CI_WORKFLOW);
  * Every `actions/setup-node` step of a job that can land on a self-hosted
  * runner. `runs-on` here is itself an expression (fork PRs fall back to
  * `ubuntu-latest`), so the test for "can be self-hosted" is whether the literal
- * appears in it at all — a job pinned to `ubuntu-latest`, such as
- * catalog-drift.yml's, is genuinely outside this rule and keeps its cache.
+ * appears in it at all — a job pinned to `ubuntu-latest` is genuinely outside
+ * this rule and may keep its cache.
  */
 function selfHostedSetupNodeSteps(): Array<{ jobId: string; step: WorkflowStep }> {
   return Object.entries(ciWorkflow.jobs ?? {}).flatMap(([jobId, job]) => {
@@ -447,22 +447,5 @@ describe(`${CI_WORKFLOW}: concurrency (Issue #2329)`, () => {
 
   it('never lets a push run and a pull request run collide', () => {
     expect(groupFor(pushRun('develop', 2329))).not.toBe(groupFor(pullRequestRun(2329, 111)));
-  });
-});
-
-describe('workflows that cannot reach a self-hosted runner keep their cache', () => {
-  /**
-   * Not a loophole: on GitHub-hosted images the npm cache restores at
-   * 130-180 MB/s and is a clear win. Asserting it explicitly keeps the rule
-   * above readable as "condition on the runner", not "caching is bad".
-   */
-  it('catalog-drift.yml still caches npm on ubuntu-latest', () => {
-    const drift = readWorkflow('catalog-drift.yml');
-    const cached = Object.values(drift.jobs ?? {})
-      .flatMap((job) => job.steps ?? [])
-      .filter((step) => (step.uses ?? '').startsWith('actions/setup-node'))
-      .map((step) => step.with?.cache);
-
-    expect(cached).toEqual(['npm']);
   });
 });

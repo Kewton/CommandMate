@@ -91,8 +91,8 @@ export interface RunReconcileOptions extends ReconcileOptions {
    * so the default was not a default but the only reachable value, and every run
    * printed `opencode provider skipped: no loopback port given`. The runner now
    * builds it from that flag (`runner-args.ts#opencodeOptionFromArgs`); a caller
-   * that passes nothing still gets the skip, which is what keeps the weekly
-   * catalog-drift workflow — which has no opencode server — unchanged.
+   * that passes nothing still gets the skip, which is what keeps the agent-health
+   * daily check (Issue #3158) — which starts no opencode server — unchanged.
    */
   opencode?: FetchOpencodeOptions | false;
 }
