@@ -39,6 +39,7 @@
  */
 
 import { buildCompositeKey } from '@/lib/auto-yes-state';
+import { beginEnterFallbackSession } from '@/lib/polling/auto-yes-enter-fallback-state';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 // Issue #1899: type-only, so nothing in the source registry's module graph —
 // `better-sqlite3` included — is pulled into this module at runtime.
@@ -381,6 +382,11 @@ export function recordAgentEvent(
     // new tmux session is. Recorded from the event's own timestamp, so the
     // event that opens a generation is never stale against it.
     generationStartedAt.set(key, record.at);
+    // Issue #3397: and Auto-Yes's Enter belonged to the previous process's
+    // screen. Only here — past `isLateSessionStart` above, and past the
+    // duplicate window the intake applies before calling this — so a late or
+    // repeated `SessionStart` never expires the record of the live process.
+    beginEnterFallbackSession(worktreeId, cliToolId, instanceId);
     // Issue #1930: and the turn the previous process was in ends with it. Done
     // here rather than inside the transition below so the two paths into a new
     // generation — this one and `beginAgentEventGeneration` — close the turn in

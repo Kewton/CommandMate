@@ -89,6 +89,10 @@ import { useHistoryFilters } from '@/hooks/useHistoryFilters';
 import { useDiffViewerState } from '@/hooks/useDiffViewerState';
 import { useVisibilityRecovery } from '@/hooks/useVisibilityRecovery';
 import { SESSION_INSTANCE_QUERY_PARAM } from '@/lib/sidebar-utils';
+import {
+  isAutoYesEnterSentToCurrentPrompt,
+  type AutoYesEnterFallbackReading,
+} from '@/lib/polling/auto-yes-enter-sent';
 
 // ============================================================================
 // Constants
@@ -160,6 +164,8 @@ type CurrentOutputResponse = Pick<CurrentOutputResponseBody, 'isRunning'> &
     enabled: boolean;
     expiresAt: number | null;
     stopReason?: AutoYesStopReason;
+    /** Issue #3397: the last Enter Auto-Yes sent to an unreadable choice screen. */
+    lastEnterFallback?: AutoYesEnterFallbackReading | null;
   };
   /** Issue #501: Server-side auto-yes response timestamp for client duplicate prevention */
   lastServerResponseTimestamp?: number | null;
@@ -398,6 +404,10 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   // Kept beside the reducer's prompt slice rather than in it — this poll is the
   // only writer, and it rewrites it on every prompt it shows.
   const [promptAnswerable, setPromptAnswerable] = useState<boolean | undefined>(undefined);
+  // Issue #3397: whether Auto-Yes sent its Enter to the prompt on show
+  // (`isAutoYesEnterSentToCurrentPrompt` over `autoYes.lastEnterFallback`).
+  // Written and dropped exactly where `promptAnswerable` is.
+  const [promptAutoYesEnterSent, setPromptAutoYesEnterSent] = useState(false);
   // Issue #473 / #1017 / #2592 / #2809 / #3179: what the phone's docked controls
   // (Navigate pad, prompt sheet, the composer's stop button and mode control)
   // need to know about the active agent's frame. One state rather than a
@@ -838,6 +848,7 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
         ) {
           actions.clearPrompt();
           setPromptAnswerable(undefined);
+          setPromptAutoYesEnterSent(false);
           setSelectionListReading(NO_SELECTION_LIST_READING);
           setPaneGate(CONTROLLER_PANE_GATE_NOTHING_ARRIVED);
         }
@@ -873,6 +884,7 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       if (data.isPromptWaiting && data.promptData) {
         actions.showPrompt(data.promptData, `prompt-${Date.now()}`);
         setPromptAnswerable(data.promptAnswerable);
+        setPromptAutoYesEnterSent(isAutoYesEnterSentToCurrentPrompt(data.autoYes?.lastEnterFallback));
       } else if (!data.isPromptWaiting && state.prompt.visible) {
         actions.clearPrompt();
       }
@@ -2059,6 +2071,8 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     isPagerActive: paneGate.isPagerActive,
     // Issue #2870: MobilePromptSheet's `answerable`.
     promptAnswerable,
+    // Issue #3397: MobilePromptSheet's `autoYesEnterSent`.
+    promptAutoYesEnterSent,
     // Issue #2809: the docked pad's Enter gate on a plan review.
     offersPlanApprove: paneGate.offersPlanApprove,
     // Issue #2592: the phone composer's permission-mode control.

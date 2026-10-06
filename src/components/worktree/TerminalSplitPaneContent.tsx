@@ -97,7 +97,7 @@ import {
   COMPOSER_PANE_BODY_MIN_HEIGHT_PX,
   composerHeightScopeForSplit,
 } from '@/config/composer-height';
-import { isMultiSelectPrompt } from '@/components/worktree/prompt-answer';
+import { showsPromptUnderAutoYes } from '@/components/worktree/prompt-answer';
 import { buildDecisionRespondBody, buildPromptResponseBody } from '@/lib/prompt-response-body-builder';
 import {
   PROMPT_RESPONSE_NOTICES,
@@ -470,8 +470,13 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   // answer). Hiding the panel there left a screen nobody could answer, by hand
   // or automatically, until the operator turned Auto-Yes off. So a multi-select
   // prompt is shown whatever Auto-Yes is doing; nothing is auto-sent either way.
+  // Issue #3397: and so is a screen CommandMate cannot read
+  // (`prompt.answerable === false`): Auto-Yes sends it at most one Enter, and
+  // the panel is where that — or the direct-input link when it did not take —
+  // is said. See `showsPromptUnderAutoYes`.
   const showPrompt =
-    prompt.visible && !isStarting && (!autoYesEnabled || isMultiSelectPrompt(prompt.data));
+    prompt.visible && !isStarting
+    && (!autoYesEnabled || showsPromptUnderAutoYes(prompt.data, prompt.answerable));
 
   // Issue #2869: the same prompt window shown again after two Sends in a row
   // (refused, or delivered to a frame that did not react) points the user at
@@ -1063,6 +1068,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
             showStuckHint={showPromptStuckHint}
             onSwitchToDirectInput={terminal.isRunning ? handleSwitchToDirectInput : undefined}
             answerable={prompt.answerable}
+            autoYesEnterSent={prompt.autoYesEnterSent}
           />
         ) : null}
         {/* Issue #2046: opencode only. The chords opencode's TUI is driven by
@@ -1308,6 +1314,8 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       prompt.answering,
       // Issue #2870: PromptPanel's `answerable`.
       prompt.answerable,
+      // Issue #3397: PromptPanel's `autoYesEnterSent`.
+      prompt.autoYesEnterSent,
       handlePromptRespond,
       handlePromptDismiss,
       // Issue #2869: the stuck hint under the panel, and its link.

@@ -1475,7 +1475,8 @@ commandmate capture <worktree-id> --instance codex-2 # 追加インスタンス�
   "autoYes": {
     "enabled": false,
     "expiresAt": null,
-    "lastSuppression": null
+    "lastSuppression": null,
+    "lastEnterFallback": null
   },
   "thinking": true,
   "thinkingMessage": "Claude is thinking...",
@@ -1888,6 +1889,57 @@ commandmate capture <worktree-id> --instance worker-7 --json | jq -r '.resolvedB
 **いまポリシー抑止で停止**しています。`commandmate respond` で人間が応答するか、
 契約の `autoYes` を見直してください（`mode: safe` で `multiple_choice` が抑止される場合は
 [allow-listed への切り替え](#無人実行の-auto-yes-ポリシーは-allow-listed-を使うissue-1684)を推奨）。
+
+#### `autoYes.lastEnterFallback`: 読めない選択画面への Enter（Issue #3397）
+
+エージェントが出した選択画面を CommandMate が読めないとき、プロンプト欄には
+「この画面は CommandMate から操作できません。」と「直接入力に切り替える」リンクが出ます。
+Auto-Yes が有効なら、この画面に **Enter を 1 回だけ**送ります（その時点で選ばれている選択肢で確定します）。
+送った画面では、プロンプト欄の警告とリンクの代わりに「Auto-Yes が Enter を送りました。」と出ます。Auto-Yes が有効な間はふつうプロンプト欄を出しませんが、CommandMate が読めない画面（`promptAnswerable: false`）では、Auto-Yes 中も PC・スマホともにプロンプト欄を出します（チェックボックスの複数選択と同じ扱い。Auto-Yes はこの 2 つに番号を送らないため）。チェックボックスは `multiSelect` の有無にかかわらず、選択肢が `[ ]` / `[x]` / `[X]` / `[✔]` で始まる一覧も含みます。
+
+```json
+"autoYes": {
+  "enabled": true,
+  "expiresAt": 1754300000000,
+  "lastSuppression": null,
+  "lastEnterFallback": {
+    "outcome": "sent",
+    "promptType": "multiple_choice",
+    "refusalReason": "unsupported_dialog_layout",
+    "sentAt": 1754296400000,
+    "at": 1754296400000,
+    "currentPrompt": true
+  }
+}
+```
+
+| フィールド | 意味 |
+|-----------|------|
+| `outcome` | `sent`（Enter を送った）/ `no-effect`（Enter の後も同じ画面が残った。2 回目は送らず人に引き継ぐ） |
+| `promptType` | Enter を送った画面のプロンプトの型 |
+| `refusalReason` | 画面が操作できなかった理由（`unsupported_dialog_layout` / `prompt_no_longer_active`） |
+| `sentAt` | Enter を送った時刻（epoch ms） |
+| `at` | 最後に更新した時刻（`sentAt`、または `no-effect` を見つけた時刻） |
+| `currentPrompt` | この応答の `promptData` と同じ画面についての記録か |
+
+送るのは次の **すべて** を満たすときだけです。
+
+- プロンプト欄に「直接入力に切り替える」リンクが出る画面（`promptAnswerable: false` と同じ判定）
+- 選択画面に操作が移っている確証がある: 選択画面のフッターがあるのに配置が読めない（`unsupported_dialog_layout`）、または入力欄が画面に無い（claude / codex）
+- **入力欄が見えていない**（入力欄に文字がある・空・薄字の候補のどれでも送らない。返答が選択肢を引用しているだけの画面への誤送信を防ぐため）
+- 同じ画面を 2 回続けて見た、エージェントが終了していない・生成中でない
+- 実行契約の `autoYes` ポリシーが許す（`mode: off` / `safe`、`denyPatterns` 一致では送らない）、他サーバのセッションではない
+- codex の起動時の画面・`/model` の選択画面ではない
+
+`commandmate wait` は、報告するプロンプトについての記録（`currentPrompt: true`）があれば、stderr に 1 行添えます（`auto-yes sent Enter to this prompt …` / 効かなかったときは `… the same screen is still up (no-effect) …`）。exit 10 の JSON は変わりません。人向けの `capture`（`--json` なし）は本文だけを出すため、この記録は `--json` で読んでください。
+
+既定で有効なのは claude と codex だけです。環境変数 `CM_AUTOYES_ENTER_FALLBACK` で
+ツールごとに切り替えられます（`CM_AUTOYES_DIALOG_GATE` と同じ書式）。
+
+```bash
+CM_AUTOYES_ENTER_FALLBACK='*=disabled'       # 全ツールで送らない
+CM_AUTOYES_ENTER_FALLBACK='codex=disabled'   # codex だけ止める
+```
 
 ### `--pane`: transcript を読む（Issue #1623）
 

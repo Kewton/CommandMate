@@ -4,6 +4,7 @@
 
 import type { useTranslations } from 'next-intl';
 import type { LivePromptData } from '@/types/models';
+import { isMultiSelectPrompt as isMultiSelectPromptData } from '@/lib/prompt-answer-semantic';
 import { promptHeadingMessage, type PromptViewHeading } from '@/lib/session/prompt-view';
 
 /**
@@ -79,5 +80,24 @@ export function promptHeadingText(
  * live question answerable by nobody.
  */
 export function isMultiSelectPrompt(promptData: LivePromptData | null | undefined): boolean {
-  return promptData?.type === 'multiple_choice' && promptData.multiSelect === true;
+  // Issue #3397: the reading Auto-Yes refuses on (`resolveBaseAnswer`), so the
+  // panel is shown for exactly the lists it will not answer — the flag, or
+  // labels that wear a checkbox.
+  return promptData?.type === 'multiple_choice' && isMultiSelectPromptData(promptData);
+}
+
+/**
+ * Whether the prompt window is drawn while Auto-Yes is on (Issue #2755 /
+ * #3397): only for a prompt Auto-Yes does not answer by number — a checkbox
+ * question, or a screen CommandMate cannot read (`answerable === false`, the
+ * status API's `promptAnswerable`). On the second, Auto-Yes sends at most one
+ * Enter, and the window is where "Auto-Yes sent Enter" — or, when it did not
+ * take, the warning and the direct-input link — is said. A readable
+ * single-choice prompt (answerable true or not judged) stays hidden.
+ */
+export function showsPromptUnderAutoYes(
+  promptData: LivePromptData | null | undefined,
+  answerable: boolean | undefined,
+): boolean {
+  return isMultiSelectPrompt(promptData) || answerable === false;
 }

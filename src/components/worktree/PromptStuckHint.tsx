@@ -20,6 +20,14 @@ export interface PromptStuckHintProps {
    * status API's `promptAnswerable`.
    */
   answerable?: boolean;
+  /**
+   * Issue #3397: Auto-Yes sent its Enter to this window. Read only together
+   * with `answerable === false` — the one window Auto-Yes sends it to — and
+   * then said in place of the warning and the link. A window the Enter did not
+   * move on comes back with this false (`outcome: 'no-effect'`), and the
+   * warning and the link with it.
+   */
+  autoYesEnterSent?: boolean;
   /** The link's class: the PC and the phone sheet differ only here. */
   linkClassName: string;
 }
@@ -33,10 +41,18 @@ export function PromptStuckHint({
   showStuckHint,
   onSwitchToDirectInput,
   answerable,
+  autoYesEnterSent,
   linkClassName,
 }: PromptStuckHintProps) {
   const t = useTranslations('worktree');
   const linkLabel = t('promptResponse.stuckHintLink');
+  if (answerable === false && autoYesEnterSent === true) {
+    return (
+      <p data-testid="prompt-auto-yes-enter-sent" role="status" className="mt-3 text-sm text-muted-foreground">
+        {t('promptResponse.autoYesEnterSent')}
+      </p>
+    );
+  }
   // Issue #2870: a window the route would refuse says so up front — no Send
   // has to fail first — and offers the link whenever there is one to offer.
   if (answerable === false) {

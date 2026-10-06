@@ -1110,7 +1110,8 @@
     "failed": "送信に失敗しました。もう一度お試しください。",
     "stuckHint": "送信がうまくいかない場合は、直接入力モードで操作してください。",
     "stuckHintLink": "直接入力に切り替える",
-    "unanswerable": "この画面は CommandMate から操作できません。直接入力モードで操作してください。"
+    "unanswerable": "この画面は CommandMate から操作できません。直接入力モードで操作してください。",
+    "autoYesEnterSent": "Auto-Yes が Enter を送りました。"
   },
   "dismissPanelKeys": {
     "toolbarLabel": "この画面を閉じる",

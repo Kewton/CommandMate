@@ -25,6 +25,7 @@ import type {
   AgentSourceCapabilities,
 } from '@/lib/hooks/sources/types';
 import type { AutoYesPolicySuppression } from '@/lib/polling/auto-yes-suppression-state';
+import type { AutoYesEnterFallbackPublished } from '@/lib/polling/auto-yes-enter-fallback';
 import type { PromptDedupSkips } from '@/lib/polling/prompt-dedup-state';
 import type { AgentEventDropCounts } from '@/lib/session/agent-event-state';
 import type { PublishedTurn } from '@/lib/session/provisional-turn';
@@ -465,6 +466,18 @@ export interface CurrentOutputPayload {
      * `src/lib/auto-yes-state.ts`.
      */
     stopMatchedText?: string;
+    /**
+     * The last Enter Auto-Yes sent to a choice screen CommandMate could not read
+     * (the one the prompt window offers direct input for), or null when it never
+     * sent one (Issue #3397).
+     *
+     * `outcome: 'no-effect'` means the same screen was still up after the
+     * Enter and Auto-Yes did not send another — a human has to answer it.
+     * `currentPrompt` says whether the record is about the prompt this payload
+     * publishes; the prompt window reads "Auto-Yes sent Enter" only for
+     * `outcome: 'sent'` with `currentPrompt: true`.
+     */
+    lastEnterFallback: AutoYesEnterFallbackPublished | null;
   };
   isSelectionListActive?: boolean;
   isPagerActive?: boolean;

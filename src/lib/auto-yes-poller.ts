@@ -11,7 +11,7 @@
  */
 
 import type { CLIToolType } from './cli-tools/types';
-import { captureSessionOutput, getSessionPresence } from './session/cli-session';
+import { captureSessionOutput, captureSessionOutputFresh, getSessionPresence } from './session/cli-session';
 import { detectPromptOnCleanFrame } from './polling/response-checker';
 import {
   ANTIGRAVITY_PERMISSION_RECEIPT_WINDOW_MS,
@@ -23,12 +23,24 @@ import { isCodexModelPickerFrame } from './detection/tools/codex/detect';
 import { normalizeFrame } from './detection/tools/frame';
 import type { NormalizedFrame } from './detection/tools/types';
 import { recordPolicySuppression, type AutoYesPolicySuppression } from './polling/auto-yes-suppression-state';
-import { evaluateAutoYesDialogGate } from './polling/auto-yes-dialog-gate';
+import { evaluateAutoYesDialogGate, type AutoYesDialogGateVerdict } from './polling/auto-yes-dialog-gate';
+import {
+  clearEnterFallbacks,
+  enterFallbackScreenKey,
+  forgetEnterFallback,
+  forgetEnterFallbacksByWorktree,
+  getEnterFallbackSessionEpoch,
+  judgeEnterFallback,
+  recordEnterFallbackNoEffect,
+  recordEnterFallbackSent,
+} from './polling/auto-yes-enter-fallback';
 import { applyEventToActiveTask } from './tasks/task-transition-service';
 import { getDbInstance } from './db/db-instance';
 import { recordAnsweredPrompt, type RecordAnsweredPromptResult } from './db/chat-db';
 import { checkWorktreeSessionOwnership } from './cli-tools/worktree-session-ownership';
 import { sendPromptAnswer } from './prompt-answer-sender';
+import { isMultiSelectPrompt } from './prompt-answer-semantic';
+import { sendSpecialKeys } from './tmux/tmux';
 import { CLIToolManager } from './cli-tools/manager';
 import { stripAnsi, stripBoxDrawing, detectThinking, getCodexLifecycleDialog } from './detection/cli-patterns';
 import { generatePromptKey } from './detection/prompt-key';
@@ -99,6 +111,28 @@ export interface AutoYesPollerState {
    * each change, not on every poll. Optional so hand-built states need not name it.
    */
   waitingForSession?: boolean;
+  /**
+   * Issue #3397: `promptFrameKey` of the screen Auto-Yes last sent its Enter
+   * to. Kept until an Enter goes to another screen — not cleared by a tick with
+   * no prompt — so the same screen coming back is never sent a second Enter
+   * (a repaint between two ticks would otherwise look like a new screen).
+   */
+  enterFallbackSentKey?: string | null;
+  /**
+   * Issue #3397: `promptFrameKey` of the screen the previous tick found
+   * eligible for the Enter. The Enter goes only to a screen seen eligible on two
+   * ticks in a row, so a frame caught mid-repaint (#2457's reply before its
+   * footer was redrawn reads `no_composer`) never gets one.
+   */
+  enterFallbackCandidateKey?: string | null;
+  /**
+   * Issue #3397: the session epoch (`getEnterFallbackSessionEpoch`) the two keys
+   * above belong to. `beginAgentSession` moves it on when a new process is
+   * created for this instance without the poller being stopped (a relaunch);
+   * the keys of the previous process's screens are then dropped, so the new
+   * process's identical dialog is not taken for the one that had its Enter.
+   */
+  enterFallbackEpoch?: number;
 }
 
 /** Result of starting a poller */
@@ -553,15 +587,30 @@ function suppressAndWarnOnce(
 }
 
 /**
+ * What `suppressIfNotOursToAnswer` decided: carry on and answer, the prompt was
+ * left alone (and recorded), or the dialog gate refused it (Issue #3397: the
+ * caller tries the Enter fallback before recording the refusal).
+ */
+type NotOursToAnswerVerdict =
+  | { kind: 'ours' }
+  | { kind: 'left-alone' }
+  | { kind: 'dialog-gate-refused'; dialogGate: AutoYesDialogGateVerdict };
+
+/**
  * Issue #3214: steps 3, 3.2 and 3.5 of `detectAndRespondToPrompt` -- the frames
  * that read as a prompt and are still not Auto-Yes's to answer, judged in the
  * order they always were. "The detection above" in the comments below is that
  * function's step 1.
  *
+ * Issue #3397: step 3.5 no longer records its refusal here. It hands the gate's
+ * verdict back so `tryEnterFallback` can look at the frame first, and records
+ * through {@link suppressUnclassifiedFrame} when that sends nothing. Steps 3 and
+ * 3.2 still win: an Enter never reaches codex's launch dialogs or its `/model`
+ * picker.
+ *
  * @param frame - The tick's one normalised frame (Issue #3183)
- * @returns true when the prompt was left alone; the caller returns `no_answer`
  */
-function suppressIfNotOursToAnswer(prompt: JudgedPrompt, frame: NormalizedFrame): boolean {
+function suppressIfNotOursToAnswer(prompt: JudgedPrompt, frame: NormalizedFrame): NotOursToAnswerVerdict {
   const { cliToolId, promptData, frameKey } = prompt;
 
   // 3. Issue #1829: codex's own launch dialogs are CodexTool.waitForReady()'s
@@ -594,7 +643,7 @@ function suppressIfNotOursToAnswer(prompt: JudgedPrompt, frame: NormalizedFrame)
       'poller:auto-yes-skipped-launch-dialog',
       { dialog: launchDialog, promptType: promptData.type },
     );
-    return true;
+    return { kind: 'left-alone' };
   }
 
   // 3.2. Issue #3062: codex's `/model` picker (both stages) is not ours to
@@ -612,7 +661,7 @@ function suppressIfNotOursToAnswer(prompt: JudgedPrompt, frame: NormalizedFrame)
       'poller:auto-yes-skipped-model-picker',
       { promptType: promptData.type },
     );
-    return true;
+    return { kind: 'left-alone' };
   }
 
   // 3.5. Issue #1928 (§4 D1 decision 4): the generic numbered-list inference is
@@ -638,22 +687,246 @@ function suppressIfNotOursToAnswer(prompt: JudgedPrompt, frame: NormalizedFrame)
     frame,
   );
   if (!dialogGate.allowed) {
-    suppressAndWarnOnce(
-      prompt,
-      { reason: 'unclassified-frame', mode: null, promptType: promptData.type },
-      `${frameKey}\u0000${dialogGate.dialog?.kind ?? ''}\u0000${dialogGate.mode}`,
-      'poller:auto-yes-skipped-unclassified-frame',
-      {
-        promptType: promptData.type,
-        dialogKind: dialogGate.dialog?.kind ?? null,
-        answerMode: dialogGate.dialog?.answerMode ?? null,
-        gateMode: dialogGate.mode,
-      },
-    );
-    return true;
+    return { kind: 'dialog-gate-refused', dialogGate };
   }
 
-  return false;
+  return { kind: 'ours' };
+}
+
+/**
+ * Step 3.5's record: the tool's dialog detector did not vouch for the frame and
+ * nothing was sent (Issue #1928). Split out of `suppressIfNotOursToAnswer` by
+ * Issue #3397, unchanged, so it runs after `tryEnterFallback` declined.
+ */
+function suppressUnclassifiedFrame(prompt: JudgedPrompt, dialogGate: AutoYesDialogGateVerdict): void {
+  const { promptData, frameKey } = prompt;
+  suppressAndWarnOnce(
+    prompt,
+    { reason: 'unclassified-frame', mode: null, promptType: promptData.type },
+    `${frameKey}\u0000${dialogGate.dialog?.kind ?? ''}\u0000${dialogGate.mode}`,
+    'poller:auto-yes-skipped-unclassified-frame',
+    {
+      promptType: promptData.type,
+      dialogKind: dialogGate.dialog?.kind ?? null,
+      answerMode: dialogGate.dialog?.answerMode ?? null,
+      gateMode: dialogGate.mode,
+    },
+  );
+}
+
+/**
+ * The audit row's `answer` for the Enter (Issue #3397): not a digit, so the
+ * History reads as "Auto-Yes pressed Enter" rather than as a chosen option.
+ */
+export const AUTO_YES_ENTER_FALLBACK_ANSWER = '[Enter]';
+
+/**
+ * Issue #3397: is the fresh capture still the screen the Enter was decided for?
+ * Re-reads it the way one tick does — prompt reading, the same `promptFrameKey`,
+ * codex's launch dialogs and `/model` picker, the dialog gate refusing with no
+ * dialog vouched for, and `judgeEnterFallback` (input box off screen, tool
+ * alive, not thinking). The policy and the checkbox rule read `promptData`,
+ * which the equal `promptFrameKey` already pins (type, question, options).
+ */
+function isStillEnterFallbackScreen(prompt: JudgedPrompt, fresh: string): boolean {
+  const { worktreeId, cliToolId, instanceId, frameKey } = prompt;
+  const clean = stripBoxDrawing(stripAnsi(fresh));
+  const frame = normalizeFrame(fresh, cliToolId);
+  const detection = detectPromptOnCleanFrame(
+    clean,
+    cliToolId,
+    clean.split('\n'),
+    fresh,
+    { worktreeId, instanceId },
+    frame,
+  );
+  if (!detection.isPrompt || !detection.promptData) return false;
+  if (promptFrameKey(detection.promptData) !== frameKey) return false;
+  if (cliToolId === 'codex' && (getCodexLifecycleDialog(frame) || isCodexModelPickerFrame(frame))) {
+    return false;
+  }
+  const gate = evaluateAutoYesDialogGate(cliToolId, detection.promptData.type, frame);
+  if (gate.allowed || gate.dialog !== null) return false;
+  return judgeEnterFallback(cliToolId, fresh).eligible;
+}
+
+/**
+ * Issue #3397: a frame the dialog gate refused may still be a choice screen
+ * CommandMate cannot read — the one the prompt window offers direct input for.
+ * Send ONE Enter there (confirm whatever is selected), under every condition
+ * `judgeEnterFallback` and this function check; otherwise record the refusal as
+ * step 3.5 always did.
+ *
+ * Order, each one able to stop the Enter:
+ *  1. `judgeEnterFallback` (rollout table, refusal, composer off screen, tool
+ *     alive, not thinking) — and the gate must not have vouched for a dialog it
+ *     refused to type into (opencode's `keys` strip, #1893);
+ *  2. the screen already had its Enter: record `no-effect`, send nothing;
+ *  3. the contract policy, exactly as step 4 applies it (mode, allow-listed
+ *     types, deny patterns over the question, options and `approvalTarget`);
+ *     a prompt the base rules would not answer (multi-select, typed text) gets
+ *     nothing either;
+ *  4. the screen must have been eligible on the previous tick as well;
+ *  5. the session must be this server's (#2865);
+ *  6. a capture taken now, past the capture cache, must still be that screen
+ *     ({@link isStillEnterFallbackScreen}).
+ *
+ * @returns true when the Enter was sent; the caller returns `responded`
+ */
+async function tryEnterFallback(
+  prompt: JudgedPrompt,
+  promptDetection: PromptDetectionResult,
+  dialogGate: AutoYesDialogGateVerdict,
+  rawOutput: string | undefined,
+): Promise<boolean> {
+  const { worktreeId, cliToolId, instanceId, pollerState, promptData, frameKey } = prompt;
+
+  const judgement = dialogGate.dialog === null ? judgeEnterFallback(cliToolId, rawOutput) : null;
+  if (judgement === null || !judgement.eligible) {
+    pollerState.enterFallbackCandidateKey = null;
+    suppressUnclassifiedFrame(prompt, dialogGate);
+    return false;
+  }
+
+  const screenKey = enterFallbackScreenKey(promptData);
+
+  // 2. The Enter did not move the screen on. Another one would be a guess.
+  if (pollerState.enterFallbackSentKey === frameKey) {
+    pollerState.enterFallbackCandidateKey = null;
+    recordEnterFallbackNoEffect(worktreeId, cliToolId, instanceId, screenKey);
+    suppressUnclassifiedFrame(prompt, dialogGate);
+    warnOncePerFrame(pollerState, `${frameKey}\u0000enter-fallback-no-effect`, 'poller:auto-yes-enter-fallback-no-effect', {
+      worktreeId,
+      cliToolId,
+      instanceId,
+      promptType: promptData.type,
+      refusalReason: judgement.refusalReason,
+    });
+    return false;
+  }
+
+  // 3. The contract policy, as step 4 reads it.
+  const policy = getSessionAutoYesPolicy(worktreeId, cliToolId, instanceId);
+  const resolution = resolveAutoAnswerWithPolicy(promptData, policy);
+  if (resolution.suppressedBy) {
+    pollerState.enterFallbackCandidateKey = null;
+    suppressAndWarnOnce(
+      prompt,
+      {
+        reason: resolution.suppressedBy,
+        mode: policy?.mode ?? null,
+        promptType: promptData.type,
+        pattern: resolution.pattern,
+      },
+      `${frameKey}\u0000${resolution.suppressedBy}\u0000${policy?.mode ?? ''}\u0000${resolution.pattern ?? ''}`,
+      'poller:auto-yes-suppressed-by-policy',
+      {
+        reason: resolution.suppressedBy,
+        mode: policy?.mode ?? null,
+        pattern: resolution.pattern,
+        promptType: promptData.type,
+        enterFallback: true,
+      },
+    );
+    return false;
+  }
+  // A checkbox list is out of scope whatever the parser's flag says: the
+  // labels' boxes (`[ ]` / `[x]` / `[X]` / `[✔]`, the one reading in
+  // `prompt-answer-semantic` the sender shares) count too, so an Enter never
+  // submits a half-ticked list (Issue #3397; the base rules' #2755 reading
+  // covers `multiSelect` only).
+  if (
+    resolution.answer === null ||
+    (promptData.type === 'multiple_choice' && isMultiSelectPrompt(promptData))
+  ) {
+    pollerState.enterFallbackCandidateKey = null;
+    suppressUnclassifiedFrame(prompt, dialogGate);
+    return false;
+  }
+
+  // 4. Seen once: wait for the next tick to see the same screen again.
+  // Nothing is recorded as withheld here: Auto-Yes is about to answer, and a
+  // fresh `lastSuppression` would make `cmate wait` report the prompt to a
+  // human at once instead of holding for Auto-Yes (#2463).
+  if (pollerState.enterFallbackCandidateKey !== frameKey) {
+    pollerState.enterFallbackCandidateKey = frameKey;
+    logger.debug('poller:auto-yes-enter-fallback-candidate', {
+      worktreeId,
+      cliToolId,
+      instanceId,
+      promptType: promptData.type,
+    });
+    return false;
+  }
+
+  // 5. Never another server's session (Issue #2865).
+  const sessionName = CLIToolManager.getInstance().getTool(cliToolId).getSessionName(worktreeId, instanceId);
+  const ownership = await checkWorktreeSessionOwnership(worktreeId, sessionName);
+  if (ownership === null || ownership.verdict === 'foreign') {
+    warnOncePerFrame(
+      pollerState,
+      `${frameKey}\u0000${sessionName}\u0000${ownership ? 'foreign' : 'worktree_not_found'}`,
+      'poller:auto-yes-skipped-foreign-session',
+      {
+        worktreeId,
+        cliToolId,
+        instanceId,
+        sessionName,
+        sessionPath: ownership?.sessionPath ?? null,
+        reason: ownership ? 'foreign' : 'worktree_not_found',
+        enterFallback: true,
+      },
+    );
+    return false;
+  }
+
+  // 6. The last look before the key, at a capture taken NOW. The two ticks of
+  // step 4 read through the capture cache, whose TTL is longer than the poll
+  // interval, so "seen twice" can be one stale frame read twice: a redraw caught
+  // with its input box missing (#2457's repaint) while the real pane already
+  // has the box back. Everything that decided the Enter is judged again on the
+  // fresh frame; any difference sends nothing, and the next tick starts over.
+  const fresh = await captureSessionOutputFresh(
+    worktreeId,
+    cliToolId,
+    (rawOutput ?? '').split('\n').length,
+    instanceId,
+  );
+  if (!isStillEnterFallbackScreen(prompt, fresh)) {
+    pollerState.enterFallbackCandidateKey = null;
+    logger.debug('poller:auto-yes-enter-fallback-fresh-frame-differs', {
+      worktreeId,
+      cliToolId,
+      instanceId,
+      promptType: promptData.type,
+    });
+    return false;
+  }
+
+  try {
+    await sendSpecialKeys(sessionName, ['Enter']);
+  } finally {
+    invalidateCache(sessionName);
+  }
+
+  pollerState.enterFallbackSentKey = frameKey;
+  pollerState.enterFallbackCandidateKey = null;
+  recordEnterFallbackSent(worktreeId, cliToolId, instanceId, {
+    promptType: promptData.type,
+    refusalReason: judgement.refusalReason,
+    screenKey,
+  });
+  logger.info('poller:auto-yes-enter-fallback-sent', {
+    worktreeId,
+    cliToolId,
+    instanceId,
+    promptType: promptData.type,
+    refusalReason: judgement.refusalReason,
+    composerState: judgement.composerState,
+  });
+
+  await finishAnsweredPrompt(prompt, promptDetection, AUTO_YES_ENTER_FALLBACK_ANSWER);
+  return true;
 }
 
 /**
@@ -815,6 +1088,15 @@ export async function detectAndRespondToPrompt(
     // machine whose hook does not reach us. The price is that Auto-Yes leaves
     // such a machine's dialogs alone, which is why `logIfWithheldForWantOfReceipt`
     // says so.
+    // Issue #3397: a session begun since the last tick (a relaunch the poller
+    // outlived) starts with no screen that had its Enter.
+    const epoch = getEnterFallbackSessionEpoch(compositeKey);
+    if ((pollerState.enterFallbackEpoch ?? 0) !== epoch) {
+      pollerState.enterFallbackSentKey = null;
+      pollerState.enterFallbackCandidateKey = null;
+      pollerState.enterFallbackEpoch = epoch;
+    }
+
     const receiptScope = { worktreeId, instanceId };
     // Issue #3183: the ONE frame every judgement below reads — normalised once,
     // from the capture as captured (the input-box markers are rule rows the
@@ -836,6 +1118,7 @@ export async function detectAndRespondToPrompt(
       pollerState.lastAnsweredPromptKey = null;
       pollerState.lastAnsweredAt = null;
       pollerState.lastSkipWarnKey = null;
+      pollerState.enterFallbackCandidateKey = null;
       if (cliToolId === 'antigravity' && !promptDetection.isPrompt) {
         logIfWithheldForWantOfReceipt(worktreeId, instanceId, compositeKey, () =>
           detectPromptOnCleanFrame(cleanOutput, cliToolId, precomputedLines, rawOutput),
@@ -864,8 +1147,19 @@ export async function detectAndRespondToPrompt(
 
     // 3., 3.2., 3.5. Frames that are not Auto-Yes's to answer: see
     // `suppressIfNotOursToAnswer`.
-    if (suppressIfNotOursToAnswer(judged, frame)) {
+    const notOurs = suppressIfNotOursToAnswer(judged, frame);
+    if (notOurs.kind !== 'dialog-gate-refused') {
+      pollerState.enterFallbackCandidateKey = null;
+    }
+    if (notOurs.kind === 'left-alone') {
       return 'no_answer';
+    }
+    // 3.6. Issue #3397: a refused frame may be a choice screen CommandMate
+    // cannot read; with Auto-Yes on it gets one Enter. See `tryEnterFallback`.
+    if (notOurs.kind === 'dialog-gate-refused') {
+      return (await tryEnterFallback(judged, promptDetection, notOurs.dialogGate, rawOutput))
+        ? 'responded'
+        : 'no_answer';
     }
 
     // 4. Resolve auto answer under the execution contract's policy (Issue #1547).
@@ -1171,6 +1465,10 @@ export function startAutoYesPolling(
  * @param compositeKey - Composite key (worktreeId:cliToolId)
  */
 export function stopAutoYesPolling(compositeKey: string): void {
+  // Issue #3397: before the early return — the disable route and the session
+  // cleanup call this for an instance whose poller may already be gone, and the
+  // Enter record must not outlive the grant or the session either way.
+  forgetEnterFallback(compositeKey);
   const pollerState = getPollerState(compositeKey);
   if (!pollerState) return;
 
@@ -1195,6 +1493,7 @@ export function stopAllAutoYesPolling(): void {
     logger.info('poller:stopped', { compositeKey: key, reason: 'shutdown' });
   }
   autoYesPollerStates.clear();
+  clearEnterFallbacks();
 }
 
 /**
@@ -1225,6 +1524,8 @@ export function stopAutoYesPollingByWorktree(worktreeId: string): void {
     worktreeId
   );
   pollerKeys.forEach(key => stopAutoYesPolling(key));
+  // Issue #3397: and the records of instances whose poller had already stopped.
+  forgetEnterFallbacksByWorktree(worktreeId);
 }
 
 /**

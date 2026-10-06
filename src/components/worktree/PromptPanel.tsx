@@ -121,6 +121,12 @@ export interface PromptPanelProps {
    * #2869 link, no Send count needed). Undefined or `true`: unchanged.
    */
   answerable?: boolean;
+  /**
+   * Issue #3397: Auto-Yes sent its Enter to this window (`autoYes.lastEnterFallback`
+   * with `outcome: 'sent'` and `currentPrompt: true`). With `answerable: false`
+   * the hint says so instead of offering direct input.
+   */
+  autoYesEnterSent?: boolean;
 }
 
 /** The PC logs a failed respond outside production (Issue #3209: moved out of the handlers). */
@@ -1016,6 +1022,7 @@ export const PromptPanel = memo(function PromptPanel({
   showStuckHint,
   onSwitchToDirectInput,
   answerable,
+  autoYesEnterSent,
 }: PromptPanelProps) {
   const { shouldRender, animationClass } = usePromptAnimation({
     visible: visible && promptData !== null,
@@ -1053,6 +1060,7 @@ export const PromptPanel = memo(function PromptPanel({
           showStuckHint={showStuckHint}
           onSwitchToDirectInput={onSwitchToDirectInput}
           answerable={answerable}
+          autoYesEnterSent={autoYesEnterSent}
           linkClassName="underline font-medium hover:no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-warning-border rounded"
         />
       </div>

@@ -288,6 +288,31 @@ export interface CurrentOutputResponse {
      * bytes; a trailing `…[truncated]` marker means it was cut.
      */
     stopMatchedText?: string;
+    /**
+     * Mirrors: src/lib/polling/auto-yes-enter-fallback.ts AutoYesEnterFallbackPublished
+     * (Issue #3397). The last Enter Auto-Yes sent to a choice screen
+     * CommandMate could not read, or null when it never sent one. Optional for
+     * a server older than #3397. Field names, optionality and wire types are
+     * held to the server's by tests/unit/cli/types/enter-fallback-mirror-3397.test.ts.
+     */
+    lastEnterFallback?: {
+      /**
+       * `sent`, or `no-effect` when the same screen was still up after the
+       * Enter and Auto-Yes left it to a human. The wire's `string`, as for
+       * `lastSuppression.reason`: a newer server may name an outcome this CLI
+       * has not heard of.
+       */
+      outcome: string;
+      promptType: string;
+      /** `unsupported_dialog_layout` or `prompt_no_longer_active`. */
+      refusalReason: string;
+      /** Epoch ms the Enter was sent. */
+      sentAt: number;
+      /** Epoch ms of the last change (`sentAt`, or when `no-effect` was found). */
+      at: number;
+      /** Whether the record is about the prompt in this same response. */
+      currentPrompt: boolean;
+    } | null;
   };
   thinking?: boolean;
   /** @deprecated 廃止の予定（次以降のマイナーの版で消す。#3395）。`thinking` と `cliToolId` から作る。 */

@@ -29,16 +29,25 @@ import type { MultipleChoiceOption, MultipleChoicePromptData, PromptData, Prompt
 const CHECKBOX_OPTION_PATTERN = /^\[[ xX\u2714]\] /;
 
 /**
+ * Whether any option still wears a checkbox (`[ ]`, `[x]`, `[X]`, `[✔]`).
+ *
+ * Issue #3397: the ONE reading of a checkbox label. `prompt-answer-sender`
+ * (Space→Next instead of a plain Enter) and Auto-Yes's Enter on an unreadable
+ * choice screen read it here, so the three paths agree on which lists are
+ * multi-select; the sender used to carry a narrower copy (`[ ]` / `[x]` only).
+ */
+export function hasCheckboxOptions(options: readonly { label: string }[]): boolean {
+  return options.some(o => CHECKBOX_OPTION_PATTERN.test(o.label));
+}
+
+/**
  * Whether this prompt is a checkbox question (Issue #2755).
  *
  * Either reading counts: the payload saying so, or a label that still wears its
  * box. See {@link CHECKBOX_OPTION_PATTERN} for why both are needed.
  */
-function isMultiSelectPrompt(promptData: MultipleChoicePromptData): boolean {
-  return (
-    promptData.multiSelect === true ||
-    promptData.options.some(o => CHECKBOX_OPTION_PATTERN.test(o.label))
-  );
+export function isMultiSelectPrompt(promptData: MultipleChoicePromptData): boolean {
+  return promptData.multiSelect === true || hasCheckboxOptions(promptData.options);
 }
 
 /** Labels that mean "approve" (e.g. "Yes", "Yes, allow all edits ..."). */
