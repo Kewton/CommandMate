@@ -1577,6 +1577,8 @@ commandmate capture <worktree-id> --instance codex-2 # 追加インスタンス�
 `realtimeSnippet` に直接 `.trim()` を呼ぶと、止まっているセッションではキーが無いので例外になる。
 `content` は差分なので単独では判断しない。
 
+**廃止の予定（Issue #3394）**: `isComplete` / `isGenerating` / `thinkingMessage` は廃止の予定です（次以降のマイナーの版で消す。#3395）。それまでは値を出し続けます。置き換え先は、`isComplete` → `isPromptWaiting`（同じ値。中身は「承認待ち」で、名前と合っていません）、`isGenerating` → `thinking`、`thinkingMessage` → `thinking` と `cliToolId` です。
+
 **セッションが動いていないとき（`isRunning: false`）は、画面から読む欄がキーごと出ません**
 （`false` や `null` にはなりません。Issue #3300）。`autoYes` / `isPromptWaiting` / `promptData` /
 `thinking` / `thinkingMessage` / `isComplete` / `isGenerating` / `realtimeSnippet` /
