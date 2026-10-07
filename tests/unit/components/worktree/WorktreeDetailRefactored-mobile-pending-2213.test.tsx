@@ -243,7 +243,7 @@ describe('[#2213] mobile screen: composer send → pending row on the chat surfa
         }
         if (typeof url === 'string' && url.includes('/current-output')) {
           return Promise.resolve(
-            jsonResponse({ isRunning: false, isGenerating: false, content: '', thinking: false }),
+            jsonResponse({ isRunning: false, content: '', thinking: false }),
           );
         }
         return Promise.resolve(
@@ -374,7 +374,7 @@ describe('[#2395] mobile screen: palette entry point and composer target', () =>
         }
         if (typeof url === 'string' && url.includes('/current-output')) {
           return Promise.resolve(
-            jsonResponse({ isRunning: false, isGenerating: false, content: '', thinking: false }),
+            jsonResponse({ isRunning: false, content: '', thinking: false }),
           );
         }
         return Promise.resolve(

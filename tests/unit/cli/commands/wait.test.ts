@@ -21,9 +21,7 @@ afterEach(() => {
 
 const baseOutput = {
   isRunning: false,
-  isComplete: true,
   isPromptWaiting: false,
-  isGenerating: false,
   content: 'done',
   fullOutput: 'done',
   realtimeSnippet: '',
@@ -32,7 +30,6 @@ const baseOutput = {
   promptData: null,
   autoYes: { enabled: false, expiresAt: null },
   thinking: false, // [S2-01] boolean type (was '' string)
-  thinkingMessage: null,
   cliToolId: 'claude',
   isSelectionListActive: false,
   lastServerResponseTimestamp: null,
@@ -278,7 +275,6 @@ describe('Issue #520: sessionStatus completion detection', () => {
     const readyOutput = {
       ...baseOutput,
       isRunning: true,
-      isComplete: false,
       isPromptWaiting: false,
       sessionStatus: 'ready' as const,
       sessionStatusReason: 'input_prompt',
@@ -296,7 +292,6 @@ describe('Issue #520: sessionStatus completion detection', () => {
     const runningOutput = {
       ...baseOutput,
       isRunning: true,
-      isComplete: false,
       isPromptWaiting: false,
       sessionStatus: 'running' as const,
       sessionStatusReason: 'thinking_indicator',
@@ -304,7 +299,6 @@ describe('Issue #520: sessionStatus completion detection', () => {
     const readyOutput = {
       ...baseOutput,
       isRunning: true,
-      isComplete: false,
       isPromptWaiting: false,
       sessionStatus: 'ready' as const,
       sessionStatusReason: 'input_prompt',
@@ -329,7 +323,6 @@ describe('Issue #520: sessionStatus completion detection', () => {
     const waitingOutput = {
       ...baseOutput,
       isRunning: true,
-      isComplete: false,
       isPromptWaiting: false,
       sessionStatus: 'waiting' as const,
       sessionStatusReason: 'claude_selection_list',
@@ -373,7 +366,6 @@ describe('Issue #520: sessionStatus completion detection', () => {
     const oldServerRunning = {
       ...baseOutput,
       isRunning: true,
-      isComplete: false,
       isPromptWaiting: false,
       sessionStatus: undefined,
       sessionStatusReason: undefined,
@@ -402,7 +394,6 @@ describe('Issue #520: sessionStatus completion detection', () => {
     const noRecentOutput = {
       ...baseOutput,
       isRunning: true,
-      isComplete: false,
       isPromptWaiting: false,
       sessionStatus: 'ready' as const,
       sessionStatusReason: 'no_recent_output',
@@ -421,7 +412,6 @@ describe('Issue #520: sessionStatus completion detection', () => {
     const runningOutput = {
       ...baseOutput,
       isRunning: true,
-      isComplete: false,
       isPromptWaiting: false,
       content: 'output-1',
       sessionStatus: 'running' as const,
@@ -430,7 +420,6 @@ describe('Issue #520: sessionStatus completion detection', () => {
     const readyOutput = {
       ...baseOutput,
       isRunning: true,
-      isComplete: false,
       isPromptWaiting: false,
       content: 'output-1', // same content (would stall)
       sessionStatus: 'ready' as const,
@@ -475,7 +464,6 @@ describe('Issue #520: sessionStatus completion detection', () => {
       const running = {
         ...baseOutput,
         isRunning: true,
-        isComplete: false,
         sessionStatus: 'running' as const,
         sessionStatusReason: 'thinking_indicator',
       };
@@ -499,7 +487,6 @@ describe('Issue #520: sessionStatus completion detection', () => {
     const selectionList = {
       ...baseOutput,
       isRunning: true,
-      isComplete: false,
       isPromptWaiting: false,
       promptData: null,
       cliToolId: 'codex',
@@ -575,7 +562,6 @@ describe('Issue #520: sessionStatus completion detection', () => {
     const unclassified = {
       ...baseOutput,
       isRunning: true,
-      isComplete: false,
       isPromptWaiting: false,
       promptData: null,
       isSelectionListActive: false,
@@ -805,7 +791,6 @@ describe('Issue #520: sessionStatus completion detection', () => {
     const runningOutput = {
       ...baseOutput,
       isRunning: true,
-      isComplete: false,
       isPromptWaiting: false,
       sessionStatus: 'running' as const,
       sessionStatusReason: 'thinking_indicator',
@@ -1115,7 +1100,6 @@ describe('Issue #1544: wait --verify / --require-work', () => {
     const runningOutput = {
       ...baseOutput,
       isRunning: true,
-      isComplete: false,
       sessionStatus: 'running' as const,
     };
     mockFetchRoutes([
@@ -1521,7 +1505,6 @@ describe('Issue #1725: a structured prompt with no options', () => {
   const structuredPrompt = {
     ...baseOutput,
     isRunning: true,
-    isComplete: true,
     isPromptWaiting: true,
     sessionStatus: 'waiting' as const,
     sessionStatusReason: 'hook_permission_prompt',
@@ -1652,7 +1635,6 @@ describe('Issue #2521 / #2522: a Command Code question screen is a blocked agent
     return {
       ...baseOutput,
       isRunning: true,
-      isComplete: false,
       isPromptWaiting: verdict.hasActivePrompt,
       promptData: verdict.hasActivePrompt
         ? (verdict.promptDetection.promptData as unknown as Record<string, unknown>)

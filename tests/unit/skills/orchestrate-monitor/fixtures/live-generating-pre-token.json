@@ -7,10 +7,7 @@
   "realtimeSnippet": "\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\u001b[1m\u001b[38;5;220m✳\u001b[0m \u001b[38;5;220mCascading… \u001b[38;5;246m(19s)\u001b[39m\n\u001b[38;5;244m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n\u001b[38;5;246m❯ \u001b[39m\n\u001b[38;5;244m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n\u001b[39m  \u001b[38;5;246m⏸ manual mode on · esc to interrupt · ← for agents\u001b[39m                                                                                        \u001b[38;5;114m\u001b]8;id=1p3x3n;https://claude.ai/code/session_FIXTUREONLY000000000000\u001b\\/rc\u001b[38;5;246m\u001b]8;;\u001b\\ · focus\u001b[39m\n",
   "lineCount": 1001,
   "lastCapturedLine": 0,
-  "isComplete": false,
-  "isGenerating": false,
   "thinking": false,
-  "thinkingMessage": null,
   "isPromptWaiting": false,
   "promptData": null,
   "autoYes": {

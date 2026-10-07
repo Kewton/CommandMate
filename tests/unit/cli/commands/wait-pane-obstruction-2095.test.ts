@@ -39,9 +39,7 @@ afterEach(() => {
  */
 const sidebarOnPayload = (overrides: Record<string, unknown> = {}) => ({
   isRunning: true,
-  isComplete: false,
   isPromptWaiting: false,
-  isGenerating: true,
   content: 'frame',
   fullOutput: 'frame',
   realtimeSnippet: 'frame',
@@ -50,7 +48,6 @@ const sidebarOnPayload = (overrides: Record<string, unknown> = {}) => ({
   promptData: null,
   autoYes: { enabled: false, expiresAt: null },
   thinking: false,
-  thinkingMessage: null,
   cliToolId: 'opencode',
   isSelectionListActive: false,
   isUnclassifiedActive: true,
@@ -127,7 +124,6 @@ describe('wait names the sidebar on an unclassified opencode frame (Issue #2095)
           sessionStatus: 'ready',
           sessionStatusReason: 'opencode_response_complete',
           isUnclassifiedActive: false,
-          isGenerating: false,
           paneObstruction: null,
         }),
       },

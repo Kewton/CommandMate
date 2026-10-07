@@ -316,7 +316,6 @@ describe('WorktreeDetailRefactored', () => {
           json: () =>
             Promise.resolve({
               isRunning: true,
-              isGenerating: false,
               content: 'Terminal output',
               thinking: false,
             }),
@@ -705,7 +704,6 @@ describe('WorktreeDetailRefactored', () => {
             json: () =>
               Promise.resolve({
                 isRunning: true,
-                isGenerating: true,
                 content: 'Output',
                 thinking: true,
               }),
@@ -1149,7 +1147,6 @@ describe('WorktreeDetailRefactored', () => {
             json: () =>
               Promise.resolve({
                 isRunning: true,
-                isGenerating: false,
                 content: 'Terminal output',
                 thinking: false,
               }),
@@ -1370,7 +1367,6 @@ describe('WorktreeDetailRefactored', () => {
             json: () =>
               Promise.resolve({
                 isRunning: true,
-                isGenerating: false,
                 content: 'Terminal output',
                 thinking: false,
               }),
@@ -1436,7 +1432,6 @@ describe('WorktreeDetailRefactored', () => {
             json: () =>
               Promise.resolve({
                 isRunning: true,
-                isGenerating: false,
                 content: 'Terminal output',
                 thinking: false,
               }),

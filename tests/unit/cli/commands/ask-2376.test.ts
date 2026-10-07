@@ -31,9 +31,7 @@ afterEach(() => {
 /** A frame that says "the turn ended", as `wait`'s own tests spell it. */
 const completedFrame = {
   isRunning: true,
-  isComplete: true,
   isPromptWaiting: false,
-  isGenerating: false,
   content: 'done',
   fullOutput: 'done',
   realtimeSnippet: '',
@@ -42,7 +40,6 @@ const completedFrame = {
   promptData: null,
   autoYes: { enabled: false, expiresAt: null },
   thinking: false,
-  thinkingMessage: null,
   cliToolId: 'codex',
   isSelectionListActive: false,
   lastServerResponseTimestamp: null,

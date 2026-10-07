@@ -151,9 +151,7 @@ function currentOutputAt(now: number, events: TimelineEvent[], options: Timeline
   const ready = last?.event === 'stop';
   return {
     isRunning: !gone,
-    isComplete: false,
     isPromptWaiting: false,
-    isGenerating: false,
     // Changes with every event, so --stall-timeout sees the agent's activity.
     content: `frame-${seen.length}`,
     fullOutput: `frame-${seen.length}`,
@@ -163,7 +161,6 @@ function currentOutputAt(now: number, events: TimelineEvent[], options: Timeline
     promptData: null,
     autoYes: { enabled: true, expiresAt: null },
     thinking: false,
-    thinkingMessage: null,
     cliToolId: 'antigravity',
     isSelectionListActive: false,
     lastServerResponseTimestamp: null,

@@ -38,9 +38,7 @@ const MEASURED_529_LINE =
 /** A session at its composer: what every path below starts from. */
 const readyBase = {
   isRunning: true,
-  isComplete: false,
   isPromptWaiting: false,
-  isGenerating: false,
   content: 'frame',
   fullOutput: 'frame',
   realtimeSnippet: 'frame',
@@ -49,7 +47,6 @@ const readyBase = {
   promptData: null,
   autoYes: { enabled: false, expiresAt: null },
   thinking: false,
-  thinkingMessage: null,
   cliToolId: 'claude',
   isSelectionListActive: false,
   lastServerResponseTimestamp: null,
