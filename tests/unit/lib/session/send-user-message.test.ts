@@ -742,9 +742,7 @@ describe('a copilot --model send that waits out a running turn (Issue #2630)', (
       const lastStopEventAt = Date.now() >= NEW_STOP_AT ? NEW_STOP_AT : PREVIOUS_STOP_AT;
       return {
         isRunning: true,
-        isComplete: false,
         isPromptWaiting: false,
-        isGenerating: false,
         content: 'frame',
         fullOutput: 'frame',
         realtimeSnippet: 'frame',
@@ -753,7 +751,6 @@ describe('a copilot --model send that waits out a running turn (Issue #2630)', (
         promptData: null,
         autoYes: { enabled: false, expiresAt: null },
         thinking: false,
-        thinkingMessage: null,
         cliToolId: 'copilot',
         isSelectionListActive: false,
         lastServerResponseTimestamp: null,

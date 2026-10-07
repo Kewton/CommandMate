@@ -19,9 +19,7 @@ afterEach(() => {
 
 const sampleOutput = {
   isRunning: true,
-  isComplete: false,
   isPromptWaiting: false,
-  isGenerating: true,
   content: 'Hello from agent',
   fullOutput: 'Full output with lots of text',
   realtimeSnippet: 'snippet...',
@@ -30,7 +28,6 @@ const sampleOutput = {
   promptData: null,
   autoYes: { enabled: false, expiresAt: null },
   thinking: '',
-  thinkingMessage: null,
   cliToolId: 'claude',
   isSelectionListActive: false,
   lastServerResponseTimestamp: null,

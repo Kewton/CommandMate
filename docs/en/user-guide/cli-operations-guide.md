@@ -889,9 +889,7 @@ Everything the server sends except `fullOutput` is printed verbatim.
 ```json
 {
   "isRunning": true,
-  "isComplete": false,
   "isPromptWaiting": false,
-  "isGenerating": true,
   "content": "",
   "realtimeSnippet": "(last 100 rows)",
   "lineCount": 42,
@@ -905,7 +903,6 @@ Everything the server sends except `fullOutput` is printed verbatim.
     "lastEnterFallback": null
   },
   "thinking": true,
-  "thinkingMessage": "Claude is thinking...",
   "cliToolId": "claude",
   "isSelectionListActive": false,
   "isPagerActive": false,
@@ -975,11 +972,11 @@ To tell whether the screen is empty, **look at `isRunning` first**.
 Calling `.trim()` on `realtimeSnippet` directly throws for a session that is not running, because
 the key is not there. `content` is a delta, so it never answers that on its own.
 
-**Deprecation notice (Issue #3394)**: `isComplete` / `isGenerating` / `thinkingMessage` are scheduled for removal (in the next or a later minor release; #3395). Until then they keep being returned. Replacements: `isComplete` → `isPromptWaiting` (same value; it actually means "waiting for approval", so the name does not match), `isGenerating` → `thinking`, `thinkingMessage` → `thinking` and `cliToolId`.
+**Removed in v0.45.0 (#3395)**: `isComplete` / `isGenerating` / `thinkingMessage` (deprecated in #3394) are no longer returned. Replacements: `isComplete` → `isPromptWaiting` (same value; it actually means "waiting for approval", so the name does not match), `isGenerating` → `thinking`, `thinkingMessage` → `thinking` and `cliToolId`.
 
 **When the session is not running (`isRunning: false`), the fields read off the screen are
 absent keys** — not `false`, not `null` (Issue #3300). That covers `autoYes` / `isPromptWaiting` /
-`promptData` / `thinking` / `thinkingMessage` / `isComplete` / `isGenerating` / `realtimeSnippet` /
+`promptData` / `thinking` / `realtimeSnippet` /
 `lastCapturedLine` / `isSelectionListActive` / `lastServerResponseTimestamp` /
 `serverPollerActive`. With `jq`, state what absence means (`.isPromptWaiting // false`). Auto-Yes
 can be enabled for an instance that is not running, so read whether it is on from the `AUTO_YES`

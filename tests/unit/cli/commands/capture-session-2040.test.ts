@@ -27,9 +27,7 @@ afterEach(() => {
 /** An opencode payload as a #2040 server sends it. */
 const output = {
   isRunning: true,
-  isComplete: false,
   isPromptWaiting: true,
-  isGenerating: false,
   content: '',
   fullOutput: 'lots of text',
   realtimeSnippet: 'snippet...',

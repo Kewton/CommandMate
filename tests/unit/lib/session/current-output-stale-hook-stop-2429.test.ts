@@ -103,7 +103,6 @@ describe('[#2429] a Stop older than the newest prompt stops deciding the status'
     const fixed = await payloadFor();
     expect(fixed.sessionStatus).toBe('running');
     expect(fixed.sessionStatusReason).toBe('thinking_indicator');
-    expect(fixed.isGenerating).toBe(true);
   });
 
   it('scopes the ledger read to the (worktree, tool, instance) being polled', async () => {

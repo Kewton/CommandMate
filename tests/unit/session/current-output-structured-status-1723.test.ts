@@ -56,7 +56,7 @@ import {
   recordAgentEvent,
 } from '@/lib/session/agent-event-state';
 import type { AgentEventType } from '@/lib/hooks/agent-event-types';
-import { CLI_TOOL_IDS, getCliToolDisplayName, type CLIToolType } from '@/lib/cli-tools/types';
+import { CLI_TOOL_IDS, type CLIToolType } from '@/lib/cli-tools/types';
 import { buildClaude1000RowPermissionFrame } from '../../fixtures/claude-1000-row-prompt';
 
 const db = {} as Database.Database;
@@ -129,7 +129,6 @@ describe('buildCurrentOutput: a stop event ends the turn (Issue #1723)', () => {
     expect(after.sessionStatus).toBe('ready');
     expect(after.sessionStatusReason).toBe('hook_stop');
     expect(after.thinking).toBe(false);
-    expect(after.isGenerating).toBe(false);
     // Issue #1927 (DR2-003): NOT cleared any more. `UNREADABLE_FRAME` is a
     // frame the scraper could not classify, and a structured `ready` over a
     // frame nobody could read is exactly the case #1708's hatch exists for —
@@ -176,8 +175,6 @@ describe('buildCurrentOutput: a submitted prompt keeps the session running (Issu
     expect(after.sessionStatus).toBe('running');
     expect(after.sessionStatusReason).toBe('hook_prompt_submit');
     expect(after.thinking).toBe(true);
-    expect(after.isGenerating).toBe(true);
-    expect(after.thinkingMessage).toBe('Claude is thinking...');
   });
 
   it('leaves the unclassified hatch open while it does so', async () => {
@@ -206,8 +203,6 @@ describe('buildCurrentOutput: thinkingMessage names the running tool (Issue #260
     const payload = await buildCurrentOutput(db, 'wt-1', tool, tool);
 
     expect(payload.thinking).toBe(true);
-    expect(payload.thinkingMessage).toBe(`${getCliToolDisplayName(tool)} is thinking...`);
-    expect(payload.thinkingMessage).not.toContain('Claude');
   });
 
   it('publishes the Antigravity name for the session the Issue was reported on', async () => {
@@ -216,7 +211,6 @@ describe('buildCurrentOutput: thinkingMessage names the running tool (Issue #260
     const payload = await buildCurrentOutput(db, 'wt-1', 'antigravity', 'antigravity');
 
     expect(payload.cliToolId).toBe('antigravity');
-    expect(payload.thinkingMessage).toBe('Antigravity is thinking...');
   });
 
   it('stays null once the turn is over', async () => {
@@ -226,7 +220,6 @@ describe('buildCurrentOutput: thinkingMessage names the running tool (Issue #260
     const payload = await buildCurrentOutput(db, 'wt-1', 'antigravity', 'antigravity');
 
     expect(payload.thinking).toBe(false);
-    expect(payload.thinkingMessage).toBeNull();
   });
 });
 

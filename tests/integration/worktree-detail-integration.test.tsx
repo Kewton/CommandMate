@@ -134,7 +134,6 @@ describe('WorktreeDetailRefactored Integration', () => {
           json: () =>
             Promise.resolve({
               isRunning: true,
-              isGenerating: false,
               content: mockTerminalOutput,
               realtimeSnippet: '',
               thinking: false,
@@ -208,7 +207,6 @@ describe('WorktreeDetailRefactored Integration', () => {
             json: () =>
               Promise.resolve({
                 isRunning: true,
-                isGenerating: false,
                 isPromptWaiting: true,
                 promptData: {
                   type: 'yes_no',
@@ -303,7 +301,6 @@ describe('WorktreeDetailRefactored Integration', () => {
             json: () =>
               Promise.resolve({
                 isRunning: true,
-                isGenerating: false,
                 isPromptWaiting: true,
                 promptData: {
                   type: 'yes_no',
@@ -360,7 +357,6 @@ describe('WorktreeDetailRefactored Integration', () => {
             json: () =>
               Promise.resolve({
                 isRunning: true,
-                isGenerating: true,
                 content: mockTerminalOutput,
                 thinking: true,
               }),
@@ -426,7 +422,6 @@ describe('WorktreeDetailRefactored Integration', () => {
             json: () =>
               Promise.resolve({
                 isRunning: true,
-                isGenerating: false,
                 isPromptWaiting: true,
                 promptData: {
                   type: 'yes_no',
@@ -494,7 +489,6 @@ describe('WorktreeDetailRefactored Integration', () => {
             json: () =>
               Promise.resolve({
                 isRunning: true,
-                isGenerating: false,
                 isPromptWaiting: true,
                 promptData: {
                   type: 'yes_no',
@@ -568,7 +562,6 @@ describe('WorktreeDetailRefactored Integration', () => {
             json: () =>
               Promise.resolve({
                 isRunning: true,
-                isGenerating: false,
                 isPromptWaiting: true,
                 promptData: {
                   type: 'multiple_choice',

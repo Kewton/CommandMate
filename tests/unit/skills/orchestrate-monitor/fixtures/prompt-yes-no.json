@@ -7,10 +7,7 @@
   "realtimeSnippet": "⏺ Bash(rm -rf build/)\n\nDo you want to proceed?\n❯ 1. Yes\n  2. No, and tell Claude what to do differently",
   "lineCount": 188,
   "lastCapturedLine": 188,
-  "isComplete": true,
-  "isGenerating": false,
   "thinking": false,
-  "thinkingMessage": null,
   "isPromptWaiting": true,
   "promptData": {
     "type": "yes_no",

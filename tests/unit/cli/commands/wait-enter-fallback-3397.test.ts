@@ -40,9 +40,7 @@ const SENT = {
 /** A prompt CommandMate could not read, with Auto-Yes OFF so the report is immediate. */
 const promptFrame = (lastEnterFallback: unknown) => ({
   isRunning: true,
-  isComplete: true,
   isPromptWaiting: true,
-  isGenerating: false,
   content: 'claude',
   fullOutput: 'claude',
   realtimeSnippet: '',
@@ -65,7 +63,6 @@ const promptFrame = (lastEnterFallback: unknown) => ({
     ...(lastEnterFallback === undefined ? {} : { lastEnterFallback }),
   },
   thinking: false,
-  thinkingMessage: null,
   cliToolId: 'claude',
   sessionStatus: 'waiting',
   sessionStatusReason: 'prompt_detected',

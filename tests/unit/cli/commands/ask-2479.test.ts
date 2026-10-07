@@ -128,9 +128,7 @@ function frame(
 ) {
   return {
     isRunning: state !== 'absent',
-    isComplete: state === 'ready',
     isPromptWaiting: false,
-    isGenerating: state === 'running',
     content: state,
     fullOutput: state,
     realtimeSnippet: '',
@@ -139,7 +137,6 @@ function frame(
     promptData: null,
     autoYes: { enabled: false, expiresAt: null },
     thinking: false,
-    thinkingMessage: null,
     cliToolId,
     resolvedBy,
     isSelectionListActive: false,
