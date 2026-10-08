@@ -642,6 +642,12 @@ hooks 設定を使って観測した結果です（詳細は
   60 秒後に届くため、採用すると同じ誤判定が 1 分遅れで再現します
 - 完了しない間は stderr に理由（`turnStartedAt` と `lastStopEventAt`）を出し続けます。
   最終的には `--timeout` で exit 124 になります — 「ゴミを 0 で通す」より「止める」ほうが安全です
+- 例外（Issue #3429）: 最新の送信を `Stop` が答えた**後**に、送信なしで開いたターン（実測: `Stop` の
+  3 秒後に届いた `pre_tool_use(AskUserQuestion)`）には `Stop` が来ません。次をすべて満たすとき、
+  60 秒待ってからその `Stop` で完了します（stderr に `completing on that stop` の Note が出ます）。
+  サーバーがそのターンを `closedBy: scraper_evidence` / `stale` で閉じている／チャット台帳の最新の
+  送信より `lastStopEventAt` が新しい／60 秒間画面が変わらない。上流障害（最新の送信に `Stop` が
+  無い）は従来どおり `--timeout` まで待ちます。`--timeout` / `--stall-timeout` が短ければそちらが優先です
 
 #### `ask` の上流障害と `id=context-limit`（Issue #3011）
 
