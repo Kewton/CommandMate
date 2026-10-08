@@ -51,6 +51,7 @@ import {
   GitBranchNotMergedError,
   GitBranchCheckedOutElsewhereError,
   GitDirtyError,
+  GitTimeoutError,
   GitCurrentBranchError,
   GitDefaultBranchError,
 } from '@/lib/git/git-errors';
@@ -424,6 +425,38 @@ describe('checkoutBranch (Issue #781)', () => {
     await expect(checkoutBranch('/repo', { branch: 'nope' })).rejects.toBeInstanceOf(
       GitBranchNotFoundError
     );
+  });
+});
+
+describe('checkoutBranch fail-closed status (Issue #3436)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockExistsSync.mockReturnValue(false);
+  });
+
+  it('does not checkout when status --porcelain fails (non-force)', async () => {
+    const calls: string[][] = [];
+    mockExecFileAsync.mockImplementation(async (_file: string, args: string[]) => {
+      calls.push(args);
+      if (args.join(' ').includes('status --porcelain')) throw new Error('boom');
+      return { stdout: '' };
+    });
+
+    await expect(checkoutBranch('/repo', { branch: 'feature/x' })).rejects.toBeInstanceOf(
+      GitTimeoutError
+    );
+    expect(calls.find((a) => a[0] === 'switch')).toBeUndefined();
+  });
+
+  it('force checkout does not consult status', async () => {
+    const calls: string[][] = [];
+    mockExecFileAsync.mockImplementation(async (_file: string, args: string[]) => {
+      calls.push(args);
+      return { stdout: '' };
+    });
+
+    await checkoutBranch('/repo', { branch: 'feature/x', force: true });
+    expect(calls.find((a) => a.includes('status'))).toBeUndefined();
   });
 });
 
