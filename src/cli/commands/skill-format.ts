@@ -113,6 +113,18 @@ export function formatInstallRoots(roots: readonly string[] | undefined, primary
   return roots && roots.length > 1 ? roots.join(', ') : primary;
 }
 
+/**
+ * The working-tree mark after the branch (Issue #3445). An unread `git status`
+ * is flagged as unknown rather than dirty, and never as clean.
+ */
+export function formatWorkingTreeMark(target: {
+  workingTreeDirty: boolean;
+  workingTreeUnknown?: boolean;
+}): string {
+  if (target.workingTreeUnknown) return ' [working tree status unknown]';
+  return target.workingTreeDirty ? ' [working tree dirty]' : '';
+}
+
 /** The install preview: what lands, where, at what risk, and what stands in the way. */
 export function formatInstallPlan(plan: SkillInstallPlan): string {
   const { skill, target, stats } = plan;
@@ -121,7 +133,7 @@ export function formatInstallPlan(plan: SkillInstallPlan): string {
     skill.summary,
     '',
     `Target:       ${target.repositoryName} / ${target.worktreeName} (${target.worktreeId})`,
-    `Branch:       ${target.branch ?? `(${target.headState})`}${target.workingTreeDirty ? ' [working tree dirty]' : ''}`,
+    `Branch:       ${target.branch ?? `(${target.headState})`}${formatWorkingTreeMark(target)}`,
     `Install root: ${formatInstallRoots(target.installRoots, target.installRoot)}`,
     `Risk:         ${skill.effectiveRisk} — ${skill.riskRationale}`,
     `Compatibility: ${skill.compatibility.commandmate.status} — ${skill.compatibility.commandmate.message}`,
@@ -173,7 +185,7 @@ export function formatUpdatePlan(plan: SkillUpdatePlan): string {
     `Update plan: ${skill.name} (${skill.id}) ${update.fromVersion} -> ${update.toVersion}`,
     '',
     `Target:       ${target.repositoryName} / ${target.worktreeName} (${target.worktreeId})`,
-    `Branch:       ${target.branch ?? `(${target.headState})`}${target.workingTreeDirty ? ' [working tree dirty]' : ''}`,
+    `Branch:       ${target.branch ?? `(${target.headState})`}${formatWorkingTreeMark(target)}`,
     `Install root: ${formatInstallRoots(target.installRoots, target.installRoot)}`,
     `Risk:         ${securityDiff.risk.from.effective} -> ${securityDiff.risk.to.effective}${securityDiff.risk.increased ? ' [RISK INCREASE]' : ''}`,
     `Compatibility: ${skill.compatibility.commandmate.status} — ${skill.compatibility.commandmate.message}`,
@@ -248,7 +260,7 @@ export function formatUninstallPlan(plan: SkillUninstallPlan): string {
     `Uninstall plan: ${skill.id} ${skill.version}`,
     '',
     `Target:       ${target.repositoryName} / ${target.worktreeName} (${target.worktreeId})`,
-    `Branch:       ${target.branch ?? '(detached)'}${target.workingTreeDirty ? ' [working tree dirty]' : ''}`,
+    `Branch:       ${target.branch ?? '(detached)'}${formatWorkingTreeMark(target)}`,
     `Install root: ${target.installRoot}`,
     `Risk:         ${skill.effectiveRisk}`,
     `Files:        ${stats.removable} removable, ${stats.modified} locally modified, ${stats.missing} missing, ${stats.unknown} unmanaged, ${stats.irregular} irregular`,

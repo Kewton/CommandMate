@@ -165,6 +165,7 @@
     "workingTree": "作業ツリー",
     "workingTreeClean": "未コミットの変更なし",
     "workingTreeDirty": "未コミットの変更あり",
+    "workingTreeStatusUnknown": "未コミットの変更の有無を確認できませんでした",
     "workingTreeUnknown": "未確認",
     "sessionRunning": "このworktreeではセッションが稼働中です。",
     "branchFreshnessNotice": "ここに表示しているブランチは直近のworktree同期時点の値です。CommandMateはinstall plan生成時に現在のブランチとコミットを解決し、差異があればそこで報告します。"
@@ -215,6 +216,7 @@
       "unbornHead": "このworktreeにはまだコミットがありません。",
       "headUnresolved": "現在のコミットを解決できませんでした。",
       "workingTreeDirty": "このworktreeには未コミットの変更があるため、導入内容が作業中の変更と混ざります。",
+      "workingTreeStatusUnknown": "git status を読めなかったため、このworktreeに未コミットの変更があるか分かりません。変更がある場合、導入内容が作業中の変更と混ざります。",
       "pathGitIgnored": "一部の書き込み先はgitのignore対象です。導入したファイルはgit statusに現れません。",
       "diffTruncated": "一部の差分は大きすぎるため省略されています。",
       "binaryContent": "一部のファイルはバイナリのため差分を表示できません。",

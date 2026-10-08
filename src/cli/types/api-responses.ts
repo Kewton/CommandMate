@@ -1543,6 +1543,8 @@ export interface SkillInstallPlan {
     branch: string | null;
     headState: string;
     workingTreeDirty: boolean;
+    /** `git status` could not be read; `workingTreeDirty` is the fail-safe guess (#3445). */
+    workingTreeUnknown?: boolean;
     /** Repository-relative; the server never serves a machine-absolute path. */
     installRoot: string;
     /** Every root the package is placed into, primary first (#1460). */
@@ -1653,6 +1655,8 @@ export interface SkillUninstallPlan {
     repositoryName: string;
     branch: string | null;
     workingTreeDirty: boolean;
+    /** `git status` could not be read; `workingTreeDirty` is the fail-safe guess (#3445). */
+    workingTreeUnknown?: boolean;
     installRoot: string;
   };
   skill: { id: string; version: string; effectiveRisk: string };
@@ -1704,6 +1708,8 @@ export interface SkillUpdatePlan {
     branch: string | null;
     headState: string;
     workingTreeDirty: boolean;
+    /** `git status` could not be read; `workingTreeDirty` is the fail-safe guess (#3445). */
+    workingTreeUnknown?: boolean;
     /** Repository-relative; the server never serves a machine-absolute path. */
     installRoot: string;
     /** Every recorded root the update rewrites, primary first (#1460). */
