@@ -363,6 +363,11 @@ export interface SkillUninstallTargetDto {
   headState: SkillGitTargetState['headState'];
   headCommit: string | null;
   workingTreeDirty: boolean;
+  /**
+   * `git status` could not be read (Issue #3445). `workingTreeDirty` is then
+   * true as the fail-safe guess; present only when true.
+   */
+  workingTreeUnknown?: boolean;
   installRoot: string;
   currentTreeHash: string;
 }
@@ -674,6 +679,7 @@ export function createSkillUninstallPlan(
       headState: input.git.headState,
       headCommit: input.git.headCommit,
       workingTreeDirty: input.git.dirty,
+      ...(input.git.dirtyUnknown ? { workingTreeUnknown: true } : {}),
       installRoot: assessment.installRoot,
       currentTreeHash: assessment.currentTreeHash,
     },

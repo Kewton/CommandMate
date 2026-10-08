@@ -48,6 +48,7 @@ import {
 import {
   SKILL_DIFF_MAX_TOTAL_BYTES,
   SkillPreviewWarning,
+  workingTreeWarning,
   buildUnifiedDiff,
   computeSkillTreeHash,
   isBinaryContent,
@@ -260,6 +261,11 @@ export interface SkillUpdateTargetDto {
   headState: SkillGitTargetState['headState'];
   headCommit: string | null;
   workingTreeDirty: boolean;
+  /**
+   * `git status` could not be read (Issue #3445). `workingTreeDirty` is then
+   * true as the fail-safe guess; present only when true.
+   */
+  workingTreeUnknown?: boolean;
   /** Primary install root; the binding's tree hashes are anchored here. */
   installRoot: string;
   /** Every recorded root, primary first. The receipt's set is authoritative (#1460). */
@@ -1042,7 +1048,8 @@ export function createSkillUpdatePlan(input: CreateSkillUpdatePlanInput): SkillU
   if (input.git.headState === 'detached') warnings.push(SkillPreviewWarning.DETACHED_HEAD);
   if (input.git.headState === 'unborn') warnings.push(SkillPreviewWarning.UNBORN_HEAD);
   if (input.git.headState === 'unknown') warnings.push(SkillPreviewWarning.HEAD_UNRESOLVED);
-  if (input.git.dirty) warnings.push(SkillPreviewWarning.WORKING_TREE_DIRTY);
+  const dirtyWarning = workingTreeWarning(input.git);
+  if (dirtyWarning) warnings.push(dirtyWarning);
   if (anyBinary) warnings.push(SkillPreviewWarning.BINARY_CONTENT);
   if (anyTruncated) warnings.push(SkillPreviewWarning.DIFF_TRUNCATED);
   if (roots.some((root) => root.existing.truncated)) {
@@ -1102,6 +1109,7 @@ export function createSkillUpdatePlan(input: CreateSkillUpdatePlanInput): SkillU
       headState: input.git.headState,
       headCommit: input.git.headCommit,
       workingTreeDirty: input.git.dirty,
+      ...(input.git.dirtyUnknown ? { workingTreeUnknown: true } : {}),
       installRoot: primary.rel,
       installRoots: roots.map((root) => root.rel),
       roots: roots.map((root) => ({

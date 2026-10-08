@@ -303,6 +303,11 @@ export interface SkillPlanTargetDto {
   headState: SkillGitTargetState['headState'];
   headCommit: string | null;
   workingTreeDirty: boolean;
+  /**
+   * `git status` could not be read (Issue #3445). `workingTreeDirty` is then
+   * true as the fail-safe guess; present only when true.
+   */
+  workingTreeUnknown?: boolean;
   /** Repository-relative primary install root (`.agents/skills/<id>`). */
   installRoot: string;
   /** Every repository-relative root the package will be placed into, primary first (#1460). */
@@ -791,6 +796,7 @@ export async function createSkillInstallPlan(
       headState: git.headState,
       headCommit: git.headCommit,
       workingTreeDirty: git.dirty,
+      ...(git.dirtyUnknown ? { workingTreeUnknown: true } : {}),
       installRoot: primary.preview.installRoot,
       installRoots,
       currentTreeHash: primary.preview.currentTreeHash,

@@ -139,7 +139,11 @@ export function SkillInstallPlanPreview({ plan }: SkillInstallPlanPreviewProps) 
             {t(HEAD_STATE_LABEL_KEY[target.headState] ?? 'plan.headState.unknown')}
           </Field>
           <Field label={t('target.workingTree')}>
-            {target.workingTreeDirty ? t('target.workingTreeDirty') : t('target.workingTreeClean')}
+            {target.workingTreeUnknown
+              ? t('target.workingTreeStatusUnknown')
+              : target.workingTreeDirty
+                ? t('target.workingTreeDirty')
+                : t('target.workingTreeClean')}
           </Field>
           <Field label={t('plan.installRoot')}>
             <span className="break-all font-mono text-xs">
@@ -367,7 +371,11 @@ export function SkillUninstallPlanPreview({ plan }: SkillUninstallPlanPreviewPro
           <span className="break-all font-mono text-xs">{target.installRoot}</span>
         </Field>
         <Field label={t('target.workingTree')}>
-          {target.workingTreeDirty ? t('target.workingTreeDirty') : t('target.workingTreeClean')}
+          {target.workingTreeUnknown
+              ? t('target.workingTreeStatusUnknown')
+              : target.workingTreeDirty
+                ? t('target.workingTreeDirty')
+                : t('target.workingTreeClean')}
         </Field>
       </dl>
 

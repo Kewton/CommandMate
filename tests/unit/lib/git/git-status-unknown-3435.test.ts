@@ -117,3 +117,28 @@ describe('readSkillGitTargetState when status cannot be read (Issue #3435)', () 
     expect((await readSkillGitTargetState('/repo')).dirty).toBe(true);
   });
 });
+
+describe('readSkillGitTargetState marks an unread status as unknown (Issue #3445)', () => {
+  const sha = 'a'.repeat(40);
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('sets dirtyUnknown alongside the fail-safe dirty', async () => {
+    stubGit(timeoutError(), { 'symbolic-ref': 'main\n', 'rev-parse HEAD': `${sha}\n` });
+
+    const state = await readSkillGitTargetState('/repo');
+
+    expect(state.dirty).toBe(true);
+    expect(state.dirtyUnknown).toBe(true);
+  });
+
+  it('leaves the key out on success (clean or dirty)', async () => {
+    stubGit({ stdout: '' }, { 'symbolic-ref': 'main\n', 'rev-parse HEAD': `${sha}\n` });
+    expect('dirtyUnknown' in (await readSkillGitTargetState('/repo'))).toBe(false);
+
+    stubGit({ stdout: ' M a.ts\n' }, { 'symbolic-ref': 'main\n', 'rev-parse HEAD': `${sha}\n` });
+    expect('dirtyUnknown' in (await readSkillGitTargetState('/repo'))).toBe(false);
+  });
+});
