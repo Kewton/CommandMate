@@ -532,6 +532,26 @@ function endedByOwnStop(key: string): boolean {
   return turn !== null && turn.closedAt !== null && turn.closedBy === 'stop';
 }
 
+/**
+ * Whether a `pre_tool_use` from a source that reports its prompts falls outside
+ * any turn: the instance's last turn was ended by the agent's own `stop` and
+ * nothing has opened one since (Issue #3446).
+ *
+ * The same reading {@link applyTurnTransition} uses to leave such an event's
+ * turn closed (#3437), exposed so the intake can decide the question that event
+ * carries on the same facts. Asked after the event was applied, it still holds,
+ * because the transition did not open a turn; for a source that does not report
+ * its prompts it is always false, because that event opened one.
+ */
+export function isPreToolUseOutsideTurn(
+  worktreeId: string,
+  cliToolId: CLIToolType,
+  instanceId: string | undefined,
+  promptOpensTurns: boolean
+): boolean {
+  return promptOpensTurns && endedByOwnStop(buildCompositeKey(worktreeId, cliToolId, instanceId));
+}
+
 /** The three fields the turn keeps from a record. */
 function displayOf(record: AgentEventRecord): TurnRecord['displayEvent'] {
   return { event: record.event, at: record.at, detail: record.detail };
