@@ -1168,6 +1168,7 @@ export const DesktopHeader = memo(function DesktopHeader({
     truncatedDescription ?? '',
     gitStatus?.currentBranch ?? '',
     gitStatus?.isDirty ? 'dirty' : '',
+    gitStatus?.statusUnknown ? 'status-unknown' : '',
     showKillButton ? 'end' : '',
     awaitingInstruction ? 'awaiting' : '',
     appUpdateKey,
@@ -1239,6 +1240,15 @@ export const DesktopHeader = memo(function DesktopHeader({
                 </span>
                 {gitStatus.isDirty && (
                   <span className="text-warning" title={tWorktree('git.uncommittedChanges')}>*</span>
+                )}
+                {gitStatus.statusUnknown && (
+                  <span
+                    className="text-muted-foreground"
+                    title={tWorktree('git.statusUnknown')}
+                    data-testid="desktop-git-status-unknown"
+                  >
+                    ?
+                  </span>
                 )}
               </>
             )}

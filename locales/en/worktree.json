@@ -877,6 +877,7 @@
   },
   "git": {
     "uncommittedChanges": "Uncommitted changes",
+    "statusUnknown": "Could not check for uncommitted changes (git status failed)",
     "askAi": "Ask AI",
     "askAiTooltip": "Draft the current state into the AI chat (nothing is sent automatically)",
     "advancedOperations": "Advanced operations",
@@ -972,6 +973,8 @@
       "refreshing": "Checking the remote...",
       "loading": "Loading git status...",
       "uncommitted": "uncommitted",
+      "statusUnknown": "changes unknown",
+      "statusUnknownTooltip": "git status could not be read, so whether there are uncommitted changes is unknown. Refresh to try again.",
       "aheadTooltip": "commits ahead of upstream as of the last fetch (the live remote may differ)",
       "behindTooltip": "commits behind upstream as of the last fetch (the live remote may differ)",
       "lastFetch": "Last fetch: {relative}",
