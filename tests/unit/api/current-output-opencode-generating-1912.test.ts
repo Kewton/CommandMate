@@ -65,9 +65,7 @@ interface CurrentOutputBody {
   isRunning: boolean;
   sessionStatus?: string;
   sessionStatusReason?: string;
-  isGenerating?: boolean;
   thinking?: boolean;
-  thinkingMessage?: string | null;
 }
 
 function call(query: string): Promise<Response> {
@@ -122,10 +120,7 @@ describe('GET /api/worktrees/:id/current-output — opencode isGenerating (Issue
 
     expect(body.sessionStatus).toBe('running');
     expect(body.sessionStatusReason).toBe('opencode_processing_indicator');
-    expect(body.isGenerating).toBe(true);
     expect(body.thinking).toBe(true);
-    // Issue #2607: the tool's own name, not a fixed "Claude".
-    expect(body.thinkingMessage).toBe('OpenCode is thinking...');
   });
 
   it('sets isGenerating while opencode works on an answered numbered prompt', async () => {
@@ -134,7 +129,6 @@ describe('GET /api/worktrees/:id/current-output — opencode isGenerating (Issue
     const body = (await (await call('')).json()) as CurrentOutputBody;
 
     expect(body.sessionStatusReason).toBe('opencode_processing_indicator');
-    expect(body.isGenerating).toBe(true);
   });
 
   it('leaves isGenerating false once the turn is complete', async () => {
@@ -143,8 +137,6 @@ describe('GET /api/worktrees/:id/current-output — opencode isGenerating (Issue
     const body = (await (await call('')).json()) as CurrentOutputBody;
 
     expect(body.sessionStatus).toBe('ready');
-    expect(body.isGenerating).toBe(false);
-    expect(body.thinkingMessage).toBeNull();
   });
 
   it('leaves isGenerating false while a permission dialog is open', async () => {
@@ -153,6 +145,5 @@ describe('GET /api/worktrees/:id/current-output — opencode isGenerating (Issue
     const body = (await (await call('')).json()) as CurrentOutputBody;
 
     expect(body.sessionStatus).toBe('waiting');
-    expect(body.isGenerating).toBe(false);
   });
 });

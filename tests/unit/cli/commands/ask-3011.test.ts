@@ -49,9 +49,7 @@ function startServer(upstreamFault: { id: string; matchedText: string } | null):
     if (url.pathname.endsWith('/current-output')) {
       return Promise.resolve(json({
         isRunning: true,
-        isComplete: true,
         isPromptWaiting: false,
-        isGenerating: false,
         content: 'ready',
         fullOutput: 'ready',
         realtimeSnippet: '',
@@ -60,7 +58,6 @@ function startServer(upstreamFault: { id: string; matchedText: string } | null):
         promptData: null,
         autoYes: { enabled: false, expiresAt: null },
         thinking: false,
-        thinkingMessage: null,
         cliToolId: 'command-code',
         isSelectionListActive: false,
         lastServerResponseTimestamp: null,

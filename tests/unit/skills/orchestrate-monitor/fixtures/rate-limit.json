@@ -7,10 +7,7 @@
   "realtimeSnippet": "⏺ Continuing...\n\nClaude usage limit reached. Your limit will reset at 3pm (Asia/Tokyo).\n\n> ",
   "lineCount": 240,
   "lastCapturedLine": 240,
-  "isComplete": false,
-  "isGenerating": false,
   "thinking": false,
-  "thinkingMessage": null,
   "isPromptWaiting": false,
   "promptData": null,
   "autoYes": {

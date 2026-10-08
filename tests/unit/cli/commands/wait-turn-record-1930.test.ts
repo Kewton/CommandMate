@@ -137,9 +137,7 @@ const composer = (
   structured: Record<string, unknown> = {},
 ) => ({
   isRunning: true,
-  isComplete: false,
   isPromptWaiting: false,
-  isGenerating: false,
   content: 'frame',
   fullOutput: 'frame',
   realtimeSnippet: 'frame',
@@ -148,7 +146,6 @@ const composer = (
   promptData: null,
   autoYes: { enabled: false, expiresAt: null },
   thinking: false,
-  thinkingMessage: null,
   cliToolId: 'copilot',
   isSelectionListActive: false,
   lastServerResponseTimestamp: null,

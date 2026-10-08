@@ -241,7 +241,6 @@ function setupSuccessfulFetch() {
         json: () =>
           Promise.resolve({
             isRunning: true,
-            isGenerating: false,
             content: 'Terminal output',
             thinking: false,
           }),
@@ -375,7 +374,6 @@ describe('Issue #266 Acceptance Tests: Tab switching preserves input content', (
             json: () =>
               Promise.resolve({
                 isRunning: true,
-                isGenerating: false,
                 content: 'Terminal output',
                 thinking: false,
               }),

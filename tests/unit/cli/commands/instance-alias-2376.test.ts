@@ -53,9 +53,7 @@ function ambiguous() {
 
 const readyFrame = {
   isRunning: true,
-  isComplete: true,
   isPromptWaiting: false,
-  isGenerating: false,
   content: 'done',
   fullOutput: 'done',
   realtimeSnippet: '',
@@ -64,7 +62,6 @@ const readyFrame = {
   promptData: null,
   autoYes: { enabled: false, expiresAt: null },
   thinking: false,
-  thinkingMessage: null,
   cliToolId: 'codex',
   isSelectionListActive: false,
   lastServerResponseTimestamp: null,

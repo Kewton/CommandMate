@@ -28,9 +28,7 @@ afterEach(() => {
 /** The payload as the server sends it, minus the two fields under test. */
 const baseOutput = {
   isRunning: true,
-  isComplete: false,
   isPromptWaiting: false,
-  isGenerating: true,
   content: 'Hello from agent',
   fullOutput: 'Full output with lots of text',
   realtimeSnippet: 'snippet...',
@@ -39,7 +37,6 @@ const baseOutput = {
   promptData: null,
   autoYes: { enabled: false, expiresAt: null },
   thinking: false,
-  thinkingMessage: null,
   cliToolId: 'claude',
   sessionStatus: 'running',
   sessionStatusReason: 'thinking_indicator',

@@ -7,10 +7,7 @@
   "realtimeSnippet": "⏺ Reading src/lib/session/current-output-builder.ts\n\n· Cerebrating… (esc to interrupt)\n  ↓ 1.4k tokens",
   "lineCount": 152,
   "lastCapturedLine": 150,
-  "isComplete": false,
-  "isGenerating": true,
   "thinking": true,
-  "thinkingMessage": "Claude is thinking...",
   "isPromptWaiting": false,
   "promptData": null,
   "autoYes": {
