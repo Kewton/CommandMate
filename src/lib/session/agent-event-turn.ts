@@ -376,6 +376,7 @@ export function fenceTurnForNewGeneration(key: string, at: number): void {
  * | `user_prompt_submit`               | **opens a new one**     | release  | yes     |
  * | `user_prompt_submit` (joins, #3330)| continues, else opens   | release  | yes     |
  * | `pre_tool_use`                     | continues, else opens   | unchanged| yes     |
+ * | `pre_tool_use` (after its stop)    | unchanged (#3437)       | unchanged| no      |
  * | `post_tool_use`                    | continues, else opens   | release  | yes     |
  * | `stop` (this session)              | **closes** `stop`       | release  | yes     |
  * | `stop` (another session)           | unchanged               | unchanged| no      |
@@ -440,6 +441,22 @@ export function fenceTurnForNewGeneration(key: string, at: number): void {
  * still dropped by the window in front of it ({@link isDuplicateAgentEvent}),
  * and dropped or applied, none of them moves the turn.
  *
+ * The `after its stop` row is the other exception (Issue #3437), and it is
+ * narrower than it reads: it applies only to a source that reports its
+ * prompts ({@link AgentEventRecord.promptOpensTurns}), and only when the
+ * instance's last turn was closed by the agent's own `stop`. In production on
+ * 2026-10-07 a Claude `PreToolUse(AskUserQuestion)` landed 2.5 s after the
+ * `Stop`, with no `UserPromptSubmit`, no picker on the pane (the scraper read
+ * `ready` throughout), and nothing in the session's transcript after the
+ * `Stop` — something other than the conversation the `Stop` had just ended.
+ * It opened a turn whose `stop` never came, and a `wait` adopted that turn.
+ * Every turn of such a source begins with its prompt, and a tool call that
+ * continues past a `Stop` (a Stop hook that blocks) still reports its
+ * `post_tool_use`, which opens the turn as before. Sources whose turns begin
+ * with a tool event are untouched: Command Code's `pre_tool_use` and
+ * antigravity's self-resume `post_tool_use` (#2614) open turns because
+ * neither sends `user_prompt_submit`.
+ *
  * `idle_prompt` is the one row that publishes `ready` **without** closing the
  * turn, and that is a measurement rather than an oversight: #1839 caught Claude
  * emitting it 62 s into a turn that ran nothing, so it cannot be a turn
@@ -472,6 +489,11 @@ export function applyTurnTransition(key: string, record: AgentEventRecord): void
       // Deliberately leaves the dialog alone (Issue #1726). It is the
       // `AskUserQuestion` invocation, and a picker being *about to be drawn* is
       // not a fact this state can carry.
+      //
+      // Issue #3437: and from a source that reports its prompts, it is not the
+      // start of a turn when the agent's own `Stop` is the last thing that
+      // ended one. See the `after its stop` row above.
+      if (record.promptOpensTurns === true && endedByOwnStop(key)) return;
       openTurn(key, record, generation, { continueOpen: true });
       return;
     case 'stop':
@@ -494,6 +516,20 @@ export function applyTurnTransition(key: string, record: AgentEventRecord): void
       record.event satisfies never;
       return;
   }
+}
+
+/**
+ * Whether this instance's turn was last ended by the agent's own `stop`, with
+ * nothing opening a turn since (Issue #3437).
+ *
+ * Only `stop`: every other close is this server's own inference (`stale`,
+ * `scraper_evidence`, `resync_idle`) or a session that went away
+ * (`session_end`, `generation`), and an agent that keeps working after one of
+ * those must be allowed to open the turn it is in.
+ */
+function endedByOwnStop(key: string): boolean {
+  const turn = fencedTurn(key);
+  return turn !== null && turn.closedAt !== null && turn.closedBy === 'stop';
 }
 
 /** The three fields the turn keeps from a record. */

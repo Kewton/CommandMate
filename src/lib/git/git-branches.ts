@@ -320,7 +320,11 @@ export async function checkoutBranch(
   // checked_out_elsewhere guard above.
   if (!force) {
     const status = await execGitCommand(['status', '--porcelain'], worktreePath);
-    if (status !== null && status.length > 0) {
+    // Fail-closed: a failed/timed-out status (null) must not be read as clean.
+    if (status === null) {
+      throw new GitTimeoutError('Could not verify working tree state');
+    }
+    if (status.length > 0) {
       throw new GitDirtyError('Working tree has uncommitted changes');
     }
   }

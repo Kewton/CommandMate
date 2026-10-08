@@ -117,4 +117,16 @@ export interface AgentEventRecord {
    * says nothing opens a new turn, as every prompt did before this Issue.
    */
   joinsOpenTurn?: boolean;
+  /**
+   * Whether the delivering source reports the prompt that begins each of its
+   * turns — it declares `user_prompt_submit` in `supportedEvents` (Issue #3437).
+   *
+   * The caller computes it from the source's capabilities. Read only for
+   * `pre_tool_use`: from such a source, a `pre_tool_use` arriving after the
+   * agent's own `Stop` with no prompt in between is not the start of a turn,
+   * so it does not open one — see {@link applyTurnTransition}. Absent is
+   * `false`: a source whose turns begin with a tool event (Command Code) opens
+   * them on `pre_tool_use`, as every source did before this Issue.
+   */
+  promptOpensTurns?: boolean;
 }

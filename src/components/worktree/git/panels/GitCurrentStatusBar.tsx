@@ -154,6 +154,17 @@ export const GitCurrentStatusBar = memo(function GitCurrentStatusBar({
               {gitStatus.currentBranch}
             </span>
 
+            {/* Issue #3435: status could not be read — never shown as clean */}
+            {gitStatus.statusUnknown && (
+              <span
+                className="inline-flex items-center rounded px-2 py-0.5 text-xs font-medium bg-muted text-muted-foreground border border-border"
+                data-testid="git-status-unknown-badge"
+                title={t('git.currentStatus.statusUnknownTooltip')}
+              >
+                {t('git.currentStatus.statusUnknown')}
+              </span>
+            )}
+
             {/* Dirty badge */}
             {gitStatus.isDirty && (
               <span
