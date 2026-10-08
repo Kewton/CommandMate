@@ -165,6 +165,7 @@
     "workingTree": "Working tree",
     "workingTreeClean": "No uncommitted changes",
     "workingTreeDirty": "Has uncommitted changes",
+    "workingTreeStatusUnknown": "Could not check for uncommitted changes",
     "workingTreeUnknown": "Not inspected",
     "sessionRunning": "A session is currently running in this worktree.",
     "branchFreshnessNotice": "The branch shown here comes from the last worktree scan. CommandMate resolves the live branch and commit when it builds the install plan, and reports any difference there."
@@ -215,6 +216,7 @@
       "unbornHead": "This worktree has no commit yet.",
       "headUnresolved": "The current commit could not be resolved.",
       "workingTreeDirty": "This worktree has uncommitted changes, so the install would mix with work in progress.",
+      "workingTreeStatusUnknown": "git status could not be read, so this worktree may have uncommitted changes that the install would mix with.",
       "pathGitIgnored": "Some destination paths are ignored by git, so the installed files would not show up in git status.",
       "diffTruncated": "Some diffs were too large to show in full.",
       "binaryContent": "Some files are binary, so no diff can be shown for them.",
