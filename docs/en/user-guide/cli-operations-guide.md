@@ -449,6 +449,24 @@ completion is `ready`/`input_prompt` (the agent is back at the composer), which 
 flag and therefore still exits 0 on the first poll. A session that disappeared entirely still exits 0
 as before.
 
+#### A turn that stops with background work left is held (Issues #2614 / #3430 / #3451)
+
+An agent can close its turn while background work is still running (a `schedule` timer, a command
+sent to the background, a `Monitor`) and report that it will resume by itself once that work finishes
+(a `stop` whose `structuredEvents.lastEventDetail` is `self_resume_pending`). Even if the worker looks
+finished, `wait` does not report completion then: it **holds that `stop` for up to 30 minutes
+(`SELF_RESUME_HOLD_MS`)**.
+
+- While held, stderr shows `ended its turn with background work still running` and the wait continues
+  (the final output carries `heldForSelfResume=<seconds>`)
+- The hold ends when the agent resumes, opens a new turn and the next `stop` arrives; that `stop` completes the wait
+- The 30 minutes are counted from the `stop` (or from this `wait`'s first sight of it, whichever is later).
+  If the agent has not resumed by then, `wait` prints `Note: ... completing on that stop` and completes on that `stop`
+- Applies to **Antigravity** (Issue #2614) and **Claude** (Issue #3430: an unfinished `run_in_background`
+  `Bash`, `Monitor` or background subagent, read from the transcript; when it cannot be determined the `stop`
+  counts as complete, as before). The `stop` of any other tool is not held
+- `--timeout` / `--stall-timeout` win when shorter than 30 minutes (exit 124 can fire during a hold)
+
 #### Wait with `wait`, not `sessionStatus`, before sending the next request (Issue #3337)
 
 Do not poll `capture --json` and send as soon as `sessionStatus` reads `ready`. `sessionStatus`

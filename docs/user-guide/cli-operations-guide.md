@@ -593,6 +593,23 @@ sessionStatus=running && reason ∈ {no_recent_output, unknown_frame, default}
 立てないため従来どおり最初のポーリングで exit 0 になります。セッション自体が消えた場合も従来どおり
 exit 0 です。
 
+#### バックグラウンド作業を残して止まったターンは保留される（Issue #2614 / #3430 / #3451）
+
+エージェントが「未完了のバックグラウンド作業（`schedule` のタイマー、バックグラウンドで走らせたコマンド、
+`Monitor` など）を残したまま、作業が終われば自分で再開する」と報告してターンを閉じることがあります
+（`structuredEvents.lastEventDetail` が `self_resume_pending` の `stop`）。ワーカーが作業を終えたように
+見えても、このとき `wait` は完了を返さず、**その `stop` を最大 30 分（`SELF_RESUME_HOLD_MS`）保留**します。
+
+- 保留中は stderr に `ended its turn with background work still running` と出し、待機を続けます
+  （完了後の出力には `heldForSelfResume=<秒>` が付きます）
+- 保留が解けるのは、エージェントが再開して新しいターンが始まり、次の `stop` が届いたとき。その `stop` で完了とします
+- 30 分は `stop` の時刻（無ければこの `wait` が最初に見た時刻）から数えます。上限に達しても再開しなければ、
+  `Note: ... completing on that stop` を出してその `stop` で完了とします
+- 対象のツールは **Antigravity**（Issue #2614）と **Claude**（Issue #3430。`run_in_background` の `Bash`・
+  `Monitor`・バックグラウンドのサブエージェントが未完了のとき。transcript から判定し、判定できなければ
+  従来どおり完了扱い）です。ほかのツールの `stop` は保留しません
+- `--timeout` / `--stall-timeout` は 30 分より短ければそちらが優先です（保留の途中でも exit 124 になります）
+
 #### 次の依頼を送る前の待ちは `wait` で行う（Issue #3337）
 
 `capture --json` の `sessionStatus` を読んで `ready` になったら送る、という待ち方はしないでください。
