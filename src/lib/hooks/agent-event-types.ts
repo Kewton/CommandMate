@@ -150,11 +150,12 @@ declare module './sources/types' {
      * that declares `true` is promising to write exactly that detail, and
      * `commandmate wait` holds a completion on it only when this says so.
      * `false` means "this tool's stop carries nothing CommandMate reads as
-     * such", not "this tool never resumes itself" — Claude Code does, and its
-     * `Stop` payload's `background_tasks` is the unmeasured candidate.
+     * such", not "this tool never resumes itself".
      *
-     * `true` for antigravity alone, whose `Stop` payload carries `fullyIdle`
-     * ("true if all background tasks are done", agy's own hook contract).
+     * `true` for antigravity, whose `Stop` payload carries `fullyIdle`
+     * ("true if all background tasks are done", agy's own hook contract), and
+     * for claude since Issue #3430, whose transcript shows the background tasks
+     * not yet notified (`./sources/claude/self-resume`).
      * Pinned by value for every source in
      * `tests/unit/hooks/sources/capabilities.test.ts`.
      */

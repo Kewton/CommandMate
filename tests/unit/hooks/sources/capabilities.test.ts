@@ -55,8 +55,11 @@
  * - `stopReportsSelfResume` (Issue #2614) — read by `commandmate wait`, which
  *   holds a completion on a `stop` whose detail says the agent will resume by
  *   itself. Flipping antigravity to `false` lets `wait` report agy's
- *   `schedule` stops as the end of the work again (the 2026-09-17 incident);
- *   flipping any other source to `true` promises a detail nothing writes.
+ *   `schedule` stops as the end of the work again (the 2026-09-17 incident),
+ *   and claude to `false` does the same to its background `Bash` / `Monitor`
+ *   stops (the 2026-10-08 incident, Issue #3430, reddened by
+ *   `claude-self-resume-3430.test.ts`); flipping any other source to `true`
+ *   promises a detail nothing writes.
  *   Reddened by `tests/unit/hooks/sources/antigravity-self-resume-2614.test.ts`
  *   as well as here.
  *
@@ -132,7 +135,8 @@ const TABLE: Record<string, DeclaredRow> = {
     eventIdentity: null,
     resync: 'none',
     transcriptHistory: 'pull',
-    stopReportsSelfResume: false,
+    // Issue #3430: a `Stop` whose transcript shows unnotified background work.
+    stopReportsSelfResume: true,
   },
   codex: {
     permissionHookPredictsDialog: true,
@@ -329,10 +333,10 @@ describe('[#1924] AgentSourceCapabilities — the table of §4 D3', () => {
 
   it('names exactly one source whose stop can say it will resume by itself (#2614)', () => {
     // agy is the one tool whose `Stop` payload is known to state it (`fullyIdle`)
-    // and whose hook passes it on. Claude Code resumes itself too, but only an
-    // empty `background_tasks` has been captured, so it stays false until a
-    // non-empty one is.
+    // and whose hook passes it on. Issue #3430 added claude, which reads it off
+    // its transcript rather than the payload (only an empty `background_tasks`
+    // has been captured) — so the title's "one" now reads "one per mechanism".
     const selfResuming = Object.keys(TABLE).filter((id) => TABLE[id].stopReportsSelfResume);
-    expect(selfResuming).toEqual(['antigravity']);
+    expect(selfResuming).toEqual(['claude', 'antigravity']);
   });
 });

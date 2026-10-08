@@ -38,7 +38,11 @@ import {
   isUatIsolationEnabled,
   UatIsolationLaunchRefusedError,
 } from '@/config/uat-isolation';
-import { AGENT_EVENT_TYPES } from '@/lib/hooks/agent-event-types';
+import {
+  AGENT_EVENT_TYPES,
+  SELF_RESUME_PENDING_DETAIL,
+  type AgentEventType,
+} from '@/lib/hooks/agent-event-types';
 import { parseAskUserQuestionPayload } from '@/lib/hooks/ask-user-question-payload';
 import {
   buildClaudeLaunchCommand,
@@ -62,6 +66,7 @@ import {
 import type { AgentEventSource, AgentLaunchContext, AgentLaunchPlan, Verdict } from '../types';
 import { claudeModelSwitchMapper, extractClaudeSwitchedModel } from './model-switch';
 import { isClaudeQueuedNoticePrompt } from './queued-notice';
+import { claudeStopLeavesBackgroundWork } from './self-resume';
 import { CLAUDE_CLI_TOOL_ID } from './tool-id';
 
 /**
@@ -103,6 +108,24 @@ export function encodeClaudeVerdict(verdict: Verdict): Record<string, unknown> {
       decision: { behavior: 'allow' },
     },
   };
+}
+
+/**
+ * The subtype of one Claude event.
+ *
+ * Every event but `stop` is the shared snake_case reading (S2). A `stop` is
+ * {@link SELF_RESUME_PENDING_DETAIL} when the session's transcript shows
+ * background work that has not been notified yet (Issue #3430), and has no
+ * subtype otherwise — which is what every Claude `stop` had before.
+ */
+export function extractClaudeEventDetail(
+  event: AgentEventType,
+  payload: Record<string, unknown>
+): string | null {
+  if (event === 'stop' && claudeStopLeavesBackgroundWork(payload)) {
+    return SELF_RESUME_PENDING_DETAIL;
+  }
+  return extractSnakeCaseEventDetail(event, payload);
 }
 
 /**
@@ -149,11 +172,12 @@ export const claudeAgentEventSource: AgentEventSource = definePushHookSource({
     // JSONL when the poller asks (#2121); the gate dispatches on this word
     // rather than on the tool id.
     transcriptHistory: 'pull',
-    // Issue #2614. Claude Code does resume itself (background tasks, session
-    // crons), and its `Stop` payload carries `background_tasks` /
-    // `session_crons` — but only the empty form has been captured, so nothing
-    // reads them yet and this stays false until a non-empty one is measured.
-    stopReportsSelfResume: false,
+    // Issue #3430 (#2614 for Claude). A `Stop` whose transcript shows a
+    // background `Bash` / `Monitor` / subagent not yet notified carries
+    // `SELF_RESUME_PENDING_DETAIL`: the notification opens the next turn by
+    // itself. The payload's `background_tasks` is still unread — only its empty
+    // form has been captured. See `./self-resume` and `extractDetail` below.
+    stopReportsSelfResume: true,
   },
 
   // S1. A plain name table is enough *for this tool* — one native name, one
@@ -190,8 +214,8 @@ export const claudeAgentEventSource: AgentEventSource = definePushHookSource({
   // `UserPromptSubmit` too, and continues that turn rather than opening one.
   promptJoinsOpenTurn: isClaudeQueuedNoticePrompt,
 
-  // S2.
-  extractDetail: extractSnakeCaseEventDetail,
+  // S2, plus the `Stop` that leaves background work behind (Issue #3430).
+  extractDetail: extractClaudeEventDetail,
 
   // S7. Both parsers are strict and answer null for anything they cannot vouch
   // for; the callers turn null into "no structured data", which degrades to the
