@@ -349,13 +349,16 @@ describe.skipIf(!HAS_TOOLS)('supervisor.sh (Issue #3312)', () => {
       await waitFor(() => fs.existsSync(path.join(base, 'paused-cleanup')), 'the supervisor to reach cleanup');
       process.kill(sup.pid!, 'SIGKILL');
       await waitFor(() => !alive(sup.pid!), 'the supervisor to die');
-      const server = serverPid(ledgers()[0]);
+      const [left] = ledgers();
+      const oldRunId = left.runId;
+      const server = serverPid(left);
       expect(alive(server)).toBe(true);
 
       const next = supervise({ CM_PRODUCT_STAGE_CMD: 'exit 0' });
       expect(next.status, next.stderr).toBe(0);
       expect(alive(server)).toBe(false);
-      expect(ledgers()[0].status).toBe('reclaimed');
+      // By run id, not file-name order: runs started in the same second sort randomly (#3460).
+      expect(ledgers().find((ledger) => ledger.runId === oldRunId)!.status).toBe('reclaimed');
       expect(published().stages.find((stage) => stage.id === 'run')).toMatchObject({ status: 'pass' });
       expect(pidsUnderRoot()).toEqual([]);
     },
@@ -508,7 +511,9 @@ describe.skipIf(!HAS_TOOLS)('supervisor.sh (Issue #3312)', () => {
       await waitFor(() => fs.existsSync(path.join(base, 'paused-up')), 'the server to be up');
       process.kill(sup.pid!, 'SIGKILL');
       await waitFor(() => !alive(sup.pid!), 'the supervisor to die');
-      const server = serverPid(ledgers()[0]);
+      const [left] = ledgers();
+      const oldRunId = left.runId;
+      const server = serverPid(left);
 
       const res = supervise({ CM_PRODUCT_STAGE_CMD: 'exit 0', CM_PRODUCT_LATE_START: `@${nowSec() - 60}` });
       expect(res.status, res.stderr).toBe(0);
@@ -516,7 +521,8 @@ describe.skipIf(!HAS_TOOLS)('supervisor.sh (Issue #3312)', () => {
       const result = published();
       expect(result.lateStart).toBe(true);
       expect(result.stages.map((stage) => stage.id)).toEqual(['reclaim']);
-      expect(ledgers()[1].resources).toEqual([]);
+      // The late run is the one that is not the old run (by id, not file-name order, #3460).
+      expect(ledgers().find((ledger) => ledger.runId !== oldRunId)!.resources).toEqual([]);
       expect(judgeProductRun({ date: DATE, runResult: result, leak: 'pass', now: new Date() }).status).toBe('skip');
     },
     TEST_TIMEOUT
