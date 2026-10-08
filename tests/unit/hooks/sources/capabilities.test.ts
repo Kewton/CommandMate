@@ -331,11 +331,11 @@ describe('[#1924] AgentSourceCapabilities — the table of §4 D3', () => {
     expect(scraperOnly).toEqual(['gemini', 'copilot']);
   });
 
-  it('names exactly one source whose stop can say it will resume by itself (#2614)', () => {
+  it('names the sources whose stop can say it will resume by itself: antigravity (#2614) and claude (#3430)', () => {
     // agy is the one tool whose `Stop` payload is known to state it (`fullyIdle`)
     // and whose hook passes it on. Issue #3430 added claude, which reads it off
     // its transcript rather than the payload (only an empty `background_tasks`
-    // has been captured) — so the title's "one" now reads "one per mechanism".
+    // has been captured) — so the list is one source per mechanism.
     const selfResuming = Object.keys(TABLE).filter((id) => TABLE[id].stopReportsSelfResume);
     expect(selfResuming).toEqual(['claude', 'antigravity']);
   });
