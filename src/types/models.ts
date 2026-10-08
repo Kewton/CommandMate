@@ -59,8 +59,19 @@ export interface GitStatus {
   isBranchMismatch: boolean;
   /** Short commit hash (e.g., "abc1234") */
   commitHash: string;
-  /** True if there are uncommitted changes */
+  /**
+   * True if there are uncommitted changes. False when the tree is clean OR when
+   * `git status` could not be read — check `statusUnknown` before treating
+   * false as "clean".
+   */
   isDirty: boolean;
+  /**
+   * True when `git status --porcelain` failed (typically the 1s read timeout
+   * under load), so `isDirty` carries no information (Issue #3435).
+   * - undefined / false: `isDirty` is authoritative
+   * Optional so existing readers and producers keep working unchanged.
+   */
+  statusUnknown?: boolean;
   /**
    * Remote difference (Issue #779).
    * - undefined: not computed (getGitStatus path / GET /api/worktrees/[id] payload)

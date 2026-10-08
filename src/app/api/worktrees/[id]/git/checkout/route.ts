@@ -68,7 +68,13 @@ export async function POST(
     const status = await getGitStatus(worktree.path, initialBranch);
 
     return NextResponse.json(
-      { success: true, currentBranch: status.currentBranch, isDirty: status.isDirty },
+      {
+        success: true,
+        currentBranch: status.currentBranch,
+        isDirty: status.isDirty,
+        // Issue #3435: an unread status is not "clean".
+        ...(status.statusUnknown ? { statusUnknown: true } : {}),
+      },
       { status: 200 }
     );
   } catch (error) {

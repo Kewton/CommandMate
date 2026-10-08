@@ -173,7 +173,7 @@ export interface SkillGitTargetState {
   branch: string | null;
   /** Full 40-hex HEAD commit, or null on an unborn HEAD. */
   headCommit: string | null;
-  /** The worktree has uncommitted changes. */
+  /** The worktree has uncommitted changes (also true when `git status` could not be read). */
   dirty: boolean;
 }
 
@@ -484,7 +484,10 @@ export async function readSkillGitTargetState(
     headState,
     branch: branch && branch.length > 0 ? branch : null,
     headCommit: commit,
-    dirty: status !== null && status.length > 0,
+    // Issue #3435: an unread `status` (null, e.g. the 1s timeout) must not
+    // read as clean. This flag only drives the advisory WORKING_TREE_DIRTY
+    // warning and the target display, so the fail-safe side is "dirty".
+    dirty: status === null || status.length > 0,
   };
 }
 

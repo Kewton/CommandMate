@@ -63,7 +63,8 @@ export function toSkillTargetOption(worktree: Worktree): SkillTargetOption {
     repositoryName: worktree.repositoryDisplayName ?? worktree.repositoryName,
     syncedBranch: worktree.branch ?? null,
     liveBranch: worktree.gitStatus?.currentBranch ?? null,
-    dirty: worktree.gitStatus ? worktree.gitStatus.isDirty : null,
+    // Issue #3435: an unread `git status` is unknown, not clean.
+    dirty: worktree.gitStatus && !worktree.gitStatus.statusUnknown ? worktree.gitStatus.isDirty : null,
     agents: [...new Set(agents)],
     sessionRunning: worktree.isSessionRunning === true,
   };
