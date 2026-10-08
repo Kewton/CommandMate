@@ -46,9 +46,7 @@ const autoYesOn = { enabled: true, expiresAt: null };
 
 const baseOutput = {
   isRunning: true,
-  isComplete: false,
   isPromptWaiting: false,
-  isGenerating: false,
   content: 'agy',
   fullOutput: 'agy',
   realtimeSnippet: '',
@@ -57,7 +55,6 @@ const baseOutput = {
   promptData: null,
   autoYes: autoYesOn,
   thinking: false,
-  thinkingMessage: null,
   cliToolId: 'antigravity',
   isSelectionListActive: false,
   lastServerResponseTimestamp: null,

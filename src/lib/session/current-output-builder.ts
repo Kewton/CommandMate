@@ -25,7 +25,6 @@ import { createLogger } from '@/lib/logger';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import {
   capturedLineCountIsCursor,
-  getCliToolDisplayName,
   type CLIToolType,
 } from '@/lib/cli-tools/types';
 import { getAgentEventSource } from '@/lib/hooks/sources/registry';
@@ -744,12 +743,7 @@ function buildRunningPayload({
     realtimeSnippet,
     lineCount: totalLines,
     lastCapturedLine,
-    isComplete: isPromptWaiting,
-    isGenerating: published.thinking,
     thinking: published.thinking,
-    // Issue #2607: named after the tool actually running. A fixed "Claude" was
-    // published for every agent, and `capture --json` readers took it at its word.
-    thinkingMessage: published.thinking ? `${getCliToolDisplayName(cliToolId)} is thinking...` : null,
     isPromptWaiting,
     promptData,
     ...(promptAnswerable !== undefined ? { promptAnswerable } : {}),

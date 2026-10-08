@@ -1,5 +1,5 @@
 /**
- * The thirteen `current-output` fields a session that is not running is
+ * The ten `current-output` fields a session that is not running is
  * answered without (Issue #3300, item 11 of #3232).
  *
  * The CLI's copy of the response type declared all of them required. Shared by
@@ -13,9 +13,6 @@ export const FIELDS_ABSENT_WHEN_NOT_RUNNING = [
   'autoYes',
   'isPromptWaiting',
   'thinking',
-  'thinkingMessage',
-  'isComplete',
-  'isGenerating',
   'fullOutput',
   'realtimeSnippet',
   'lastCapturedLine',

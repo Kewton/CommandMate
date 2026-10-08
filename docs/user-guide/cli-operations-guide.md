@@ -1463,9 +1463,7 @@ commandmate capture <worktree-id> --instance codex-2 # 追加インスタンス�
 ```json
 {
   "isRunning": true,
-  "isComplete": false,
   "isPromptWaiting": false,
-  "isGenerating": true,
   "content": "",
   "realtimeSnippet": "(last 100 rows)",
   "lineCount": 42,
@@ -1479,7 +1477,6 @@ commandmate capture <worktree-id> --instance codex-2 # 追加インスタンス�
     "lastEnterFallback": null
   },
   "thinking": true,
-  "thinkingMessage": "Claude is thinking...",
   "cliToolId": "claude",
   "isSelectionListActive": false,
   "isPagerActive": false,
@@ -1578,11 +1575,11 @@ commandmate capture <worktree-id> --instance codex-2 # 追加インスタンス�
 `realtimeSnippet` に直接 `.trim()` を呼ぶと、止まっているセッションではキーが無いので例外になる。
 `content` は差分なので単独では判断しない。
 
-**廃止の予定（Issue #3394）**: `isComplete` / `isGenerating` / `thinkingMessage` は廃止の予定です（次以降のマイナーの版で消す。#3395）。それまでは値を出し続けます。置き換え先は、`isComplete` → `isPromptWaiting`（同じ値。中身は「承認待ち」で、名前と合っていません）、`isGenerating` → `thinking`、`thinkingMessage` → `thinking` と `cliToolId` です。
+**v0.45.0 で削除（#3395）**: `isComplete` / `isGenerating` / `thinkingMessage`（#3394 で廃止を告知）は応答に含まれません。置き換え先は、`isComplete` → `isPromptWaiting`（同じ値。中身は「承認待ち」で、名前と合っていません）、`isGenerating` → `thinking`、`thinkingMessage` → `thinking` と `cliToolId` です。
 
 **セッションが動いていないとき（`isRunning: false`）は、画面から読む欄がキーごと出ません**
 （`false` や `null` にはなりません。Issue #3300）。`autoYes` / `isPromptWaiting` / `promptData` /
-`thinking` / `thinkingMessage` / `isComplete` / `isGenerating` / `realtimeSnippet` /
+`thinking` / `realtimeSnippet` /
 `lastCapturedLine` / `isSelectionListActive` / `lastServerResponseTimestamp` /
 `serverPollerActive` が該当します。`jq` で読むときは `.isPromptWaiting // false` のように、
 欄が無い場合の値を決めてください。Auto-Yes は止まっているインスタンスにも設定できるので、

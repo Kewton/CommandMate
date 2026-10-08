@@ -101,6 +101,14 @@ describe('agent-event-state', () => {
 });
 
 describe('buildCurrentOutput exposure', () => {
+  it('has no isComplete / isGenerating / thinkingMessage keys (removed in #3395)', async () => {
+    const payload = await buildCurrentOutput(db, 'wt-1', 'claude', 'claude');
+
+    expect(payload).not.toHaveProperty('isComplete');
+    expect(payload).not.toHaveProperty('isGenerating');
+    expect(payload).not.toHaveProperty('thinkingMessage');
+  });
+
   it('is null for a session whose agent has no hook wired up', async () => {
     const payload = await buildCurrentOutput(db, 'wt-1', 'claude', 'claude');
 
@@ -125,7 +133,6 @@ describe('buildCurrentOutput exposure', () => {
     // The detector's verdict is untouched: same frame in, same verdict out.
     expect({ ...after, lastStopEventAt: null }).toEqual({ ...before, lastStopEventAt: null });
     expect(after.sessionStatus).toBe(before.sessionStatus);
-    expect(after.isComplete).toBe(before.isComplete);
   });
 
   it('surfaces the timestamp for a session that is no longer running', async () => {

@@ -162,7 +162,6 @@ describe('Issue #1723: a posted Stop reaches current-output', () => {
     const after = await buildCurrentOutput(db, WORKTREE_ID, 'claude', INSTANCE_ID);
     expect(after.sessionStatus).toBe('ready');
     expect(after.sessionStatusReason).toBe('hook_stop');
-    expect(after.isGenerating).toBe(false);
     // Issue #1927 (DR2-003): the hatch is NOT cleared here any more, and this
     // frame is why. `UNREADABLE_FRAME` carries no evidence of any kind, so
     // "the agent says it stopped" is the only thing anyone knows about it —

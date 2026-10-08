@@ -121,9 +121,7 @@ async function observeWait(data: LivePromptData): Promise<Conclusion> {
     {
       data: {
         isRunning: true,
-        isComplete: false,
         isPromptWaiting: true,
-        isGenerating: false,
         content: '',
         fullOutput: '',
         realtimeSnippet: '',
@@ -132,7 +130,6 @@ async function observeWait(data: LivePromptData): Promise<Conclusion> {
         promptData: data,
         autoYes: { enabled: false, expiresAt: null },
         thinking: false,
-        thinkingMessage: null,
         cliToolId: 'claude',
         isSelectionListActive: false,
         lastServerResponseTimestamp: null,
