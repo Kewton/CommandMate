@@ -130,6 +130,7 @@ export {
   getAgentTurn,
   getPendingDecisions,
   getPublishedAgentTurn,
+  isPreToolUseOutsideTurn,
   joinOpenTurnFromDuplicate,
   observeScraperCompletionEvidence,
 } from '@/lib/session/agent-event-turn';
