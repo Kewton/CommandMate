@@ -598,6 +598,11 @@ cmate-agent-event.sh [--tool ID] [--event EVENT] [--cwd PATH] [--session-id ID]
 Claude Code は hook に `{"session_id":"...","hook_event_name":"Stop","cwd":"..."}` を
 **stdin の JSON** で渡すので `--stdin-json` を付ける。対応づけは §2 のとおり。
 
+中継スクリプトは Stop の payload のうち `transcript_path` だけを同じ名前で転送する
+（`.claude/projects` 配下の `.jsonl` を指す絶対パスのときだけ。他の項目や本文は送らない）。
+受け口はこれで transcript を読み、完了通知の届いていないバックグラウンドの作業が残っていれば、
+その Stop を自己再開の保留として扱う（Issue #3430・#3450）。`--stdin-json` が無いと送られない。
+
 ポートを変えている worktree では `command` の前に `CM_PORT=3135 ` を付ける。
 
 > `--stdin-json` を付けないと stdin を読まないので、hook が stdin を渡さない構成でも
