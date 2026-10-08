@@ -45,6 +45,7 @@
      ```bash
      gh issue create --repo Kewton/CommandMate --label agent-health --label bug --title "<タイトル>" --body-file <file>
      ```
+   - 本文の「起動モデル」には、手順 2 で出した要約の「起動したモデル:」節にある、そのツールの行のラベルを書く（`launchedModel` が無い古いレポート、読めなかったとき、節に行が無いときは `不明`。自分で推測して書かない）
    - 新しく立てる Issue が 3 件を超えるときは、4 件目以降を 1 件の Issue（識別子 `agent-health:batch:<日付>`）にまとめる
 4. 最後に、手順 1 の要約（1 行目から表・「未実施の理由:」まで）をそのまま出力し、その後に次の 1 行を出力して終わる
    ```

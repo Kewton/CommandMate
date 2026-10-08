@@ -572,6 +572,12 @@ harm than the lost event. Use `--strict` where a failure must be detected, such 
 Claude Code hands the hook `{"session_id":"...","hook_event_name":"Stop","cwd":"..."}` as **JSON on
 stdin**, so pass `--stdin-json`. The mapping is the one in §2.
 
+Of the Stop payload the relay forwards `transcript_path`, under the same name, and nothing else
+(only when it is an absolute path to a `.jsonl` under `.claude/projects`; no other field and no
+text). The receiver reads that transcript and, when background work with no completion notice is
+still pending, treats the Stop as one the agent will resume from by itself (Issue #3430, #3450).
+Without `--stdin-json` it is not sent.
+
 On a worktree running a different port, prefix `command` with `CM_PORT=3135 `.
 
 > Without `--stdin-json` the script does not read stdin, so it does not block on a setup that passes

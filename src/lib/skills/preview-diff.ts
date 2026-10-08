@@ -101,6 +101,8 @@ export const SkillPreviewWarning = {
   HEAD_UNRESOLVED: 'SKILL_PREVIEW_HEAD_UNRESOLVED',
   /** The worktree has uncommitted changes. */
   WORKING_TREE_DIRTY: 'SKILL_PREVIEW_WORKING_TREE_DIRTY',
+  /** `git status` could not be read, so uncommitted changes may exist (Issue #3445). */
+  WORKING_TREE_STATUS_UNKNOWN: 'SKILL_PREVIEW_WORKING_TREE_STATUS_UNKNOWN',
   /** At least one destination path is ignored or excluded by git. */
   PATH_GIT_IGNORED: 'SKILL_PREVIEW_PATH_GIT_IGNORED',
   /** At least one diff body was cut short. */
@@ -175,6 +177,11 @@ export interface SkillGitTargetState {
   headCommit: string | null;
   /** The worktree has uncommitted changes (also true when `git status` could not be read). */
   dirty: boolean;
+  /**
+   * `git status` could not be read, so `dirty` is the fail-safe guess rather
+   * than a fact (Issue #3445). Present only when true, like `GitStatus.statusUnknown`.
+   */
+  dirtyUnknown?: boolean;
 }
 
 /** A file the package would write, as the diff builder needs it. */
@@ -488,6 +495,9 @@ export async function readSkillGitTargetState(
     // read as clean. This flag only drives the advisory WORKING_TREE_DIRTY
     // warning and the target display, so the fail-safe side is "dirty".
     dirty: status === null || status.length > 0,
+    // Issue #3445: say the guess is a guess, so the display can tell "has
+    // changes" from "could not check". Absent on success (shape unchanged).
+    ...(status === null ? { dirtyUnknown: true } : {}),
   };
 }
 
@@ -812,6 +822,18 @@ export function buildSkillPreviewDiff(input: BuildPreviewInput): SkillPreviewDif
   };
 }
 
+/**
+ * The working-tree caveat for a target (Issue #3445): an unread status is still
+ * a caveat (fail-safe), but worded as "could not check" rather than "dirty".
+ */
+export function workingTreeWarning(
+  git: Pick<SkillGitTargetState, 'dirty' | 'dirtyUnknown'>
+): SkillPreviewWarningCode | null {
+  if (git.dirtyUnknown) return SkillPreviewWarning.WORKING_TREE_STATUS_UNKNOWN;
+  if (git.dirty) return SkillPreviewWarning.WORKING_TREE_DIRTY;
+  return null;
+}
+
 function collectWarnings(
   input: BuildPreviewInput,
   entries: readonly SkillDiffEntry[],
@@ -822,7 +844,8 @@ function collectWarnings(
   if (input.git.headState === 'detached') warnings.push(SkillPreviewWarning.DETACHED_HEAD);
   if (input.git.headState === 'unborn') warnings.push(SkillPreviewWarning.UNBORN_HEAD);
   if (input.git.headState === 'unknown') warnings.push(SkillPreviewWarning.HEAD_UNRESOLVED);
-  if (input.git.dirty) warnings.push(SkillPreviewWarning.WORKING_TREE_DIRTY);
+  const dirtyWarning = workingTreeWarning(input.git);
+  if (dirtyWarning) warnings.push(dirtyWarning);
   if (entries.some((entry) => entry.gitIgnored)) warnings.push(SkillPreviewWarning.PATH_GIT_IGNORED);
   if (stats.truncatedFiles > 0) warnings.push(SkillPreviewWarning.DIFF_TRUNCATED);
   if (stats.binaryFiles > 0) warnings.push(SkillPreviewWarning.BINARY_CONTENT);

@@ -481,3 +481,26 @@ describe('consumeSkillUninstallPlan — the token contract', () => {
     ).toThrowError(/SKILL_PLAN_NOT_INSTALLABLE/);
   });
 });
+
+describe('createSkillUninstallPlan — unread git status (Issue #3445)', () => {
+  it('reports workingTreeUnknown and keeps the fail-safe dirty flag', () => {
+    install();
+
+    const result = createSkillUninstallPlan({
+      actor: ACTOR,
+      worktree: { id: WORKTREE_ID, name: 'demo-worktree', path: worktree, repositoryName: 'CommandMate' },
+      skillId: SKILL_ID,
+      installRootAbs: installRoot(),
+      git: { ...GIT, dirty: true, dirtyUnknown: true },
+    });
+
+    expect(result.dto.target.workingTreeDirty).toBe(true);
+    expect(result.dto.target.workingTreeUnknown).toBe(true);
+  });
+
+  it('leaves workingTreeUnknown out when status was read', () => {
+    install();
+
+    expect('workingTreeUnknown' in plan().dto.target).toBe(false);
+  });
+});

@@ -380,8 +380,8 @@ export function shortSessionTag(sessionId: string): string {
 /**
  * Forget every `stop` one session of one instance has claimed (Issue #3289).
  *
- * Every subtype: antigravity posts `stop` / `self_resume_pending` (#2614)
- * beside the plain one.
+ * Every subtype: antigravity (#2614) and claude (#3430) post `stop` /
+ * `self_resume_pending` beside the plain one.
  */
 function releaseStopClaims(composite: string, sessionId: string): void {
   releaseClaims(composite, ['stop'], sessionId);

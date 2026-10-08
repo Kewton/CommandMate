@@ -178,6 +178,7 @@ export const PREVIEW_WARNING_LABEL_KEY: Record<string, string> = {
   SKILL_PREVIEW_UNBORN_HEAD: 'plan.warning.unbornHead',
   SKILL_PREVIEW_HEAD_UNRESOLVED: 'plan.warning.headUnresolved',
   SKILL_PREVIEW_WORKING_TREE_DIRTY: 'plan.warning.workingTreeDirty',
+  SKILL_PREVIEW_WORKING_TREE_STATUS_UNKNOWN: 'plan.warning.workingTreeStatusUnknown',
   SKILL_PREVIEW_PATH_GIT_IGNORED: 'plan.warning.pathGitIgnored',
   SKILL_PREVIEW_DIFF_TRUNCATED: 'plan.warning.diffTruncated',
   SKILL_PREVIEW_BINARY_CONTENT: 'plan.warning.binaryContent',
