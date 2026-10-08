@@ -354,9 +354,12 @@ verify:
       mutex: cpu.heavy
 success:
   requireWorkEvidence: true
+  requireCommit: true  # コミット前の状態を合格にしない（#3430: ワーカーが途中でターンを閉じ、未コミットのまま exit 0 になった）
   requireScopeClean: true
 ```
 
+- **`requireCommit: true` を外さない**（#3430）。外すと未コミットの変更も作業証跡に数え、ワーカーがコミット前に
+  ターンを閉じたとき `wait --verify` が exit 0 を返す。契約の「1 つにコミットする」と裁定をそろえる。
 - **契約は未コミットで配ってよい**。`work-evidence` / `scope` ゲートは変更集合から契約ファイル自身を
   除外する（#1580）ので、契約を置いただけの worktree が「作業済み」に見えることはない。
 - `scope.allow` は**Issueが触ると宣言した範囲**を書く。広すぎる allow は scope ゲートを無力化し、
@@ -604,6 +607,7 @@ verify:
   gates: [lint, typecheck]   # テスト全体は PR の CI で見る（下の「検証ゲート」）
 success:
   requireWorkEvidence: true
+  requireCommit: true  # 上の雛形と同じ（#3430: コミット前の状態を合格にしない）
   requireScopeClean: true
 ```
 
