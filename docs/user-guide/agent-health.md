@@ -153,6 +153,28 @@ pass 38・fail 0・skip 25（検査の定義が無い 5・このツールは、�
 
 `--tools` / `--only` で外したマスも表には `skip（今回の実行の対象外）` として数える（理由の行には出さない）。
 
+最後に、起動したツールごとのモデルを 1 行ずつ出す（Issue #3438。pass の check は evidence を残さないので、どのモデルで確かめたかはここで読む）。
+
+```
+起動したモデル:
+- claude: Haiku 4.5（画面）
+- antigravity: gemini-3.5-flash-low（hook）
+- opencode: Claude Sonnet 5.5（画面・設定: github-copilot/claude-sonnet-5.5）
+- opencode-v2: Mistral Large 4 Ollama Cloud（画面下端・プロバイダ名を含む・設定: ollama-cloud/mistral-large-4）
+- command-code: 不明
+```
+
+モデルは、ツール自身が見せたものだけを読む（`src/lib/agent-health/launched-model.ts`）。推測では埋めない。
+
+| 読む場所 | ツール | 括弧内 |
+|---|---|---|
+| 画面（本番の `model-info-extractor`。claude のバナー、codex の下端、antigravity のバー、command-code の `# models:` 行、opencode の `▣  Build · <モデル>` の行。opencode-v2 は `▣` の無い `Build · <モデル> · 721ms` の行） | 全ツール | `画面` |
+| hook の payload の model（claude の `SessionStart`、antigravity の `modelName` など） | hook を使うツール | `hook` |
+| opencode の入力欄の下の `Build · <モデル> <プロバイダ>`（ターン前で上の行が無いとき。ANSI を除くとモデルとプロバイダの境目が無いので、まとめて残す） | opencode・opencode-v2 | `画面下端・プロバイダ名を含む` |
+
+上の順に、最初に読めたものを使う。どれも読めなければ `不明`。`設定:` は起動前に複製した `model.json` の `recent[0]`（`<providerID>/<modelID>`）で、
+読めた値と見比べるために並べる（代わりには使わない）。version だけを読むツールは起動しないので出さない。
+
 ## レポートの形
 
 子 Issue #2879 の AI はこれだけを読む。フィールドの追加はよいが、名前の変更・削除は #2879 と #2880 を壊す。
@@ -178,6 +200,11 @@ interface AgentHealthReport {
       skipKind?: 'no-definition' | 'not-shown' | 'signed-out' | 'unsupported' | 'timeout' | 'prerequisite-failed'; // skip には必ず入る
       framePaths?: string[];        // 画面全体を保存したファイル（下の「画面の保存」）
     }>;
+    launchedModel?: {               // 起動したモデル（Issue #3438）。起動しなかったツールと #3438 より前のレポートには無い（読む側は「不明」）
+      model: string | null;         // 読めなければ null（不明）
+      source?: 'screen' | 'screen-footer' | 'hook'; // model を読んだ場所
+      seeded?: string;              // 複製した model.json の recent[0]（opencode / opencode-v2）
+    };
   }>;
   safety: {
     globalConfigRestored: Array<{

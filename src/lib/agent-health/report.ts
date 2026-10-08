@@ -12,6 +12,7 @@ import {
   EVIDENCE_PANE_LINES,
   MAX_EVIDENCE_CHARS,
   type AgentHealthCheck,
+  type AgentHealthLaunchedModel,
   type AgentHealthReport,
   type AgentHealthState,
   type AgentHealthReportTool,
@@ -68,6 +69,8 @@ export function buildToolResult(input: {
   version: string | null;
   previousVersion: string | null;
   checks: readonly AgentHealthCheck[];
+  /** Issue #3438: left out when the tool was not launched. */
+  launchedModel?: AgentHealthLaunchedModel;
 }): AgentHealthToolResult {
   return {
     tool: input.tool,
@@ -78,6 +81,7 @@ export function buildToolResult(input: {
       ...check,
       ...(check.evidence !== undefined ? { evidence: truncateEvidence(check.evidence) } : {}),
     })),
+    ...(input.launchedModel ? { launchedModel: input.launchedModel } : {}),
   };
 }
 
