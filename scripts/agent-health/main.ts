@@ -62,7 +62,7 @@ import {
 } from '@/lib/agent-health/types';
 import { HookListener } from './hook-listener';
 import { locateServerLog, ServerLogWatch } from './production-log';
-import { probeLimitedTool, probeTool, readVersion } from './probe-tool';
+import { probeLimitedTool, probeTool, readVersion, type ProbeOutcome } from './probe-tool';
 import { AgentHealthTmux } from './tmux-driver';
 import { LIMITED_TOOL_SPECS, TOOL_PROBE_SPECS } from './tool-table';
 
@@ -319,7 +319,7 @@ async function run(options: AgentHealthOptions, startedAt: Date): Promise<AgentH
         readPickerSettings(readTextIfPresent(pickerSettings.path), pickerSettings.format, pickerSettings.keys);
       const settingsBefore = readSettings();
 
-      let outcome: { version: string | null; checks: AgentHealthCheck[] };
+      let outcome: ProbeOutcome;
       try {
         outcome = await probeTool({
           spec,
@@ -373,7 +373,15 @@ async function run(options: AgentHealthOptions, startedAt: Date): Promise<AgentH
         ];
       }
 
-      results.push(buildToolResult({ tool, version: outcome.version, previousVersion, checks: outcome.checks }));
+      results.push(
+        buildToolResult({
+          tool,
+          version: outcome.version,
+          previousVersion,
+          checks: outcome.checks,
+          launchedModel: outcome.launchedModel,
+        })
+      );
     }
 
     // Issue #3313: the tools the probe does not launch are rows too — on the

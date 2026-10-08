@@ -24,6 +24,15 @@ import {
   expectedHookEvents,
 } from '@/lib/agent-health/hook-correlation';
 import { skipCheck } from '@/lib/agent-health/coverage';
+import {
+  laterScreenModel,
+  launchedModelLabel,
+  readHookModel,
+  readScreenModel,
+  readSeededModel,
+  resolveLaunchedModel,
+  type ScreenModelReading,
+} from '@/lib/agent-health/launched-model';
 import { firstVersionLine, paneEvidence } from '@/lib/agent-health/report';
 import { archiveCheckFrames, type FrameArchive, type JudgedFrame } from '@/lib/agent-health/frame-archive';
 import { judgeServerEvents, judgeTurnScreen, turnEndedUnauthorized } from '@/lib/agent-health/model-auth';
@@ -43,6 +52,7 @@ import {
   probeInstanceId,
   type AgentHealthCheck,
   type AgentHealthCheckId,
+  type AgentHealthLaunchedModel,
 } from '@/lib/agent-health/types';
 import type { AgentEventSource } from '@/lib/hooks/sources/types';
 import type { HookListener } from './hook-listener';
@@ -99,6 +109,8 @@ export interface ProbeContext {
 export interface ProbeOutcome {
   version: string | null;
   checks: AgentHealthCheck[];
+  /** Issue #3438: set once the tool was launched; left out when it never was. */
+  launchedModel?: AgentHealthLaunchedModel;
 }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
@@ -162,6 +174,14 @@ export function seedStateFiles(seeds: Array<{ from: string; to: string }>): stri
   return copied;
 }
 
+function readTextOrNull(file: string): string | null {
+  try {
+    return fs.readFileSync(file, 'utf8');
+  } catch {
+    return null;
+  }
+}
+
 /** Everything one session needs; one instance per tool. */
 class ToolSession {
   readonly name: string;
@@ -173,6 +193,8 @@ class ToolSession {
   runningTurnUnauthorized = false;
   /** Any turn did. */
   anyTurnUnauthorized = false;
+  /** The model the frames looked at so far show (Issue #3438). */
+  screenModel: ScreenModelReading | null = null;
 
   constructor(
     private readonly ctx: ProbeContext,
@@ -221,6 +243,7 @@ class ToolSession {
   async look(): Promise<{ frame: string; clean: string; verdict: ScreenVerdict }> {
     const frame = await this.ctx.tmux.capture(this.name, this.spec.captureLines);
     this.lastFrame = frame;
+    this.screenModel = laterScreenModel(this.screenModel, readScreenModel(this.spec.cliToolId, frame));
     const result = detectSessionStatus(frame, this.spec.cliToolId);
     return {
       frame,
@@ -639,8 +662,10 @@ export async function probeTool(ctx: ProbeContext): Promise<ProbeOutcome> {
     }
   }
   const command = buildProbeLaunchCommand(spec, rendered, workDir);
+  let seededModel: string | null = null;
   for (const seeded of seedStateFiles(spec.seedFiles?.(workDir) ?? [])) {
     ctx.log(`${spec.tool}: seeded ${seeded}`);
+    if (path.basename(seeded) === 'model.json') seededModel = readSeededModel(readTextOrNull(seeded));
   }
   ctx.log(`${spec.tool}: launching — ${command}`);
 
@@ -732,6 +757,13 @@ export async function probeTool(ctx: ProbeContext): Promise<ProbeOutcome> {
     }
   }
 
+  const launchedModel = resolveLaunchedModel({
+    screen: session.screenModel,
+    hook: readHookModel(spec.cliToolId, ctx.listener.forTool(spec.tool)),
+    seeded: seededModel,
+  });
+  ctx.log(`${spec.tool}: model ${launchedModelLabel(launchedModel)}`);
+
   if (wantHooks) {
     const verdict = evaluateHookCorrelation(ctx.listener.forTool(spec.tool), {
       tool: spec.tool,
@@ -742,7 +774,7 @@ export async function probeTool(ctx: ProbeContext): Promise<ProbeOutcome> {
     session.record({ checkId: 'hook-correlation', ...verdict });
   }
 
-  return { version, checks: [...checks, ...session.checks.values()] };
+  return { version, checks: [...checks, ...session.checks.values()], launchedModel };
 }
 
 /**

@@ -27,6 +27,7 @@ import {
   type AgentHealthSkipKind,
   type AgentHealthToolResult,
 } from './types';
+import { launchedModelLabel } from './launched-model';
 
 /** A `skip` check. Every place that skips goes through this, so the kind is never left out. */
 export function skipCheck(
@@ -152,5 +153,12 @@ export function summarizeCoverage(
     }
   }
   if (reasons.length > 0) lines.push('', '未実施の理由:', ...reasons);
+
+  // Issue #3438: a pass keeps no evidence, so this is where the model a tool
+  // ran on is told. Version-only rows are never launched.
+  const models = coverage.rows
+    .filter((row) => row.coverage === 'probed' && results.some((entry) => entry.tool === row.tool))
+    .map((row) => `- ${row.tool}: ${launchedModelLabel(results.find((entry) => entry.tool === row.tool)?.launchedModel)}`);
+  if (models.length > 0) lines.push('', '起動したモデル:', ...models);
   return lines;
 }
