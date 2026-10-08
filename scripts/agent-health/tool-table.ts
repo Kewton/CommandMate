@@ -139,6 +139,21 @@ export function userStateHome(env: Readonly<Record<string, string | undefined>> 
 }
 
 /**
+ * The user's opencode model pick (`opencode/model.json`, `recent[0]` is the
+ * model the TUI starts on), copied into the isolated `XDG_STATE_HOME` that
+ * `launchEnv` sets — shared by opencode (v1, Issue #3021) and opencode-v2
+ * (Issue #3428), which keep it in the same file.
+ */
+function opencodeModelSeed(workDir: string): Array<{ from: string; to: string }> {
+  return [
+    {
+      from: path.join(userStateHome(), 'opencode', 'model.json'),
+      to: path.join(`${workDir}-xdg-state`, 'opencode', 'model.json'),
+    },
+  ];
+}
+
+/**
  * codex's update offer while it is still the bottom of the pane (Issue #3020):
  * the last option row, then only its footer (`enter continue · esc skip` in
  * 0.157.1, `Press enter to continue` in 0.149.1) and blank rows. Anchored to
@@ -361,12 +376,7 @@ export const TOOL_PROBE_SPECS: Record<AgentHealthTool, ToolProbeSpec> = {
     // `Qwen3 Coder 30B` here), which answered every turn with "No models
     // loaded" — no running screen, no finished-turn marker. Only the model
     // pick is copied; the prompt history stays out.
-    seedFiles: (workDir) => [
-      {
-        from: path.join(userStateHome(), 'opencode', 'model.json'),
-        to: path.join(`${workDir}-xdg-state`, 'opencode', 'model.json'),
-      },
-    ],
+    seedFiles: opencodeModelSeed,
     guardedFiles: () => ({ hookConfig: [], trustState: [] }),
   },
 
@@ -434,6 +444,14 @@ export const TOOL_PROBE_SPECS: Record<AgentHealthTool, ToolProbeSpec> = {
     // the run's temp dir, outside the repo the agent sees), so none of the
     // user's files is written, rather than compared afterwards.
     launchEnv: (workDir) => ({ XDG_STATE_HOME: `${workDir}-xdg-state` }),
+    // Issue #3428: opencode2 2.0.18 reads and writes the model pick in the same
+    // `$XDG_STATE_HOME/opencode/model.json` as v1 (only its TUI tabs move to
+    // `opencode/<channel>/tui/`). With that file absent it fell to the first
+    // listed model (`Mistral Large 4`, Ollama Cloud on 2026-10-08), which the
+    // provider refused. Only the model pick is copied — not `service.json`,
+    // the locks or the history; credentials live in `$XDG_DATA_HOME`, which
+    // the probe does not redirect.
+    seedFiles: opencodeModelSeed,
     guardedFiles: () => ({ hookConfig: [], trustState: [] }),
     server: 'opencode-v2',
   },
