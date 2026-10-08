@@ -9,8 +9,8 @@
  * - the screen, through the production reader
  *   (`@/lib/detection/model-info-extractor`): claude's banner, codex's footer,
  *   antigravity's bar, command-code's `# models:` row, opencode's `▣  Build ·
- *   <model>` step row. opencode2 draws the step row without `▣`
- *   (`Build · <model> · 721ms`), read here with the same shape.
+ *   <model>` step row and opencode2's `Build · <model> · 721ms` (no `▣`, read
+ *   there since #3443).
  * - opencode's composer bar (`┃  Build · <model> <provider>`), the last resort:
  *   after `stripAnsi` the model and the provider are one string (see
  *   `OPENCODE_STEP_MODEL_PATTERN`'s comment), so it is kept whole and marked
@@ -41,13 +41,6 @@ const SOURCE_LABELS: Record<AgentHealthLaunchedModelSource, string> = {
 
 const MAX_MODEL_CHARS = 64;
 
-/**
- * opencode2's step row (`     Build · Mistral Large 4 · 721ms`): v1's
- * `▣  Build · <model> · <duration>` without the `▣`. The duration is required,
- * so a line that merely has two dots does not read as one.
- */
-const OPENCODE_STEP_ROW_PATTERN = /^\s*(?:▣\s+)?[A-Za-z][A-Za-z0-9-]*\s+·\s+([^·]+?)\s+·\s+[\d.]+\s?m?s\s*$/;
-
 /** opencode's composer bar: `┃  Build · <model> <provider>[ · <variant>]`. */
 const OPENCODE_COMPOSER_BAR_PATTERN = /^\s*┃\s+[A-Za-z][A-Za-z0-9-]*\s+·\s+([^·]+?)(?:\s+·\s+\S+)?\s*$/;
 
@@ -74,12 +67,9 @@ function scanFromEnd(frame: string, pattern: RegExp): string | null {
 /** The model one frame shows, or null when it shows none. */
 export function readScreenModel(cliToolId: CLIToolType, frame: string): ScreenModelReading | null {
   if (!frame) return null;
-  const opencode = cliToolId === 'opencode' || cliToolId === 'opencode-v2';
-  const read = extractModelInfo(opencode ? 'opencode' : cliToolId, frame).model;
+  const read = extractModelInfo(cliToolId, frame).model;
   if (read) return { model: read, source: 'screen' };
-  if (!opencode) return null;
-  const step = scanFromEnd(frame, OPENCODE_STEP_ROW_PATTERN);
-  if (step) return { model: step, source: 'screen' };
+  if (cliToolId !== 'opencode' && cliToolId !== 'opencode-v2') return null;
   const bar = scanFromEnd(frame, OPENCODE_COMPOSER_BAR_PATTERN);
   return bar ? { model: bar, source: 'screen-footer' } : null;
 }

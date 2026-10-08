@@ -8,6 +8,7 @@
 <!-- agent-health:<tool>:<checkId> -->
 **種別**: 日次ヘルスチェックが見つけた不具合（自動登録）
 **ツール**: <tool> <version>（前回 <previousVersion>、版の変化: <versionChanged>）
+**起動モデル**: <launchedModel>（レポートの `tools[].launchedModel`。読めない・無い古いレポートは `不明`）
 **チェック**: `<checkId>` — <summary>
 **確認日**: <YYYY-MM-DD>（やり直しでも失敗）
 

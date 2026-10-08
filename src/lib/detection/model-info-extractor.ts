@@ -41,6 +41,7 @@
  * | copilot     | footer:  `← open sidebar · … · tab next tab      GPT-5 mini · Medium` |
  * | copilot     | notice:  `● Model changed from gpt-5.6-terra (xhigh) to gpt-5-mini (medium) for this session.` |
  * | opencode    | step:    `▣  Build · GPT-5.6 Luna · 3.1s`                          |
+ * | opencode2   | step:    `Build · Mistral Large 4 · 253ms` (no `▣`, 2.0.18, #3443)  |
  *
  * The copilot and opencode rows were added by Issue #1912 and read off the live
  * fixtures #1885 / #1895 / #1893 / #1896 recorded, not off a fresh capture.
@@ -729,6 +730,59 @@ function readOpencodeStepMarker(line: string): ModelInfo | null {
   return isPlausibleModelLabel(model) ? { model, effort: null } : null;
 }
 
+/**
+ * opencode2's step row (Issue #3443): v1's marker without the `▣`.
+ *
+ * Measured on opencode2 2.0.18 (`tests/fixtures/opencode-agent-health-3420/`):
+ *
+ *   `     Error: Unauthorized`
+ *   `     Build · Mistral Large 4 · 721ms`
+ *   `  ┃`                                   (the next user turn, or the composer)
+ *
+ * Without the `▣` the shape `<word> · <text> · <duration>` is ordinary prose, so
+ * it is only read under three guards, each of which a v1 step row also meets:
+ *
+ * - the duration is required (a row with two `·` and nothing timed is not one);
+ * - the row is transcript text, not inside a `┃` block — the user's own input
+ *   and shell output are drawn inside one, the composer bar too;
+ * - the next non-blank row opens a `┃` block (the next user turn or the
+ *   composer): the step row closes a reply, so a reply line that merely has the
+ *   shape is followed by more reply, or by the step row itself.
+ *
+ * No /g. No nested quantifiers: `[^·]+?` is bounded by literal `·`.
+ */
+export const OPENCODE_V2_STEP_MODEL_PATTERN =
+  /^\s*[A-Za-z][A-Za-z0-9-]*\s+·\s+([^·]+?)\s+·\s+[\d.]+\s?m?s\s*$/;
+
+/** A row that opens or continues opencode's `┃` block (a user turn or the composer). */
+const OPENCODE_BLOCK_ROW_PATTERN = /^\s*[┃╹]/;
+
+function readOpencodeV2StepRow(lines: readonly string[], index: number): ModelInfo | null {
+  const match = OPENCODE_V2_STEP_MODEL_PATTERN.exec(lines[index]);
+  if (!match) return null;
+  const model = match[1].trim();
+  if (!isPlausibleModelLabel(model)) return null;
+  for (let next = index + 1; next < lines.length; next++) {
+    if (lines[next].trim() === '') continue;
+    return OPENCODE_BLOCK_ROW_PATTERN.test(lines[next]) ? { model, effort: null } : null;
+  }
+  return null;
+}
+
+/**
+ * The lowest opencode step row, `▣` (v1) or not (opencode2, #3443). Both tool
+ * ids read both shapes: `opencode` may be running a 2.x binary, and a v1 frame
+ * never draws a `▣`-less row that passes {@link readOpencodeV2StepRow}'s guards.
+ */
+function readOpencodeStepRow(captureText: string): ModelInfo | null {
+  const lines = captureText.split('\n').map((line) => stripAnsi(line));
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const result = readOpencodeStepMarker(lines[i]) ?? readOpencodeV2StepRow(lines, i);
+    if (result) return result;
+  }
+  return null;
+}
+
 // =============================================================================
 // Command Code (Issue #2358)
 // =============================================================================
@@ -843,7 +897,7 @@ function scanFromEnd(
  * Pure and side-effect free. Never throws, and answers `{ model: null, effort:
  * null }` for every tool it has no rule for (gemini / vibe-local — neither
  * prints a model on its pane in any captured frame; copilot and opencode were
- * added by Issue #1912) and for every frame that does not show the chrome it
+ * added by Issue #1912, opencode-v2 by #3443) and for every frame that does not show the chrome it
  * looks for.
  *
  * **Answering null is a correct outcome, not a failure.** tmux keeps a
@@ -895,7 +949,8 @@ export function extractModelInfo(cliToolId: CLIToolType, captureText: string): M
       return sameModel(bar.model!, notice.model!) ? { model: bar.model, effort: notice.effort } : bar;
     }
     case 'opencode':
-      return scanFromEnd(captureText, readOpencodeStepMarker) ?? unknown();
+    case 'opencode-v2':
+      return readOpencodeStepRow(captureText) ?? unknown();
     case 'command-code':
       // Issue #2358. The banner is the only source — hooks carry no model — and
       // bottom-up is the same "last banner wins" rule Claude uses: a relaunch in
