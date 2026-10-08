@@ -14,7 +14,7 @@ import {
   type ConflictResult,
 } from './git-exec';
 import { getDefaultBranch } from './git-default-branch';
-import { GitResetDefaultBranchError } from './git-errors';
+import { GitResetDefaultBranchError, GitTimeoutError } from './git-errors';
 
 const logger = createLogger('git-reset');
 
@@ -38,7 +38,8 @@ export interface ResetOptions {
  */
 async function isDefaultBranchForReset(worktreePath: string): Promise<boolean> {
   const current = await execGitCommand(['rev-parse', '--abbrev-ref', 'HEAD'], worktreePath);
-  if (current === null) return false;
+  // Fail-closed: an unreadable HEAD must not be treated as "not the default branch".
+  if (current === null) throw new GitTimeoutError('Could not verify current branch');
   const currentBranch = current.trim();
 
   const def = await getDefaultBranch(worktreePath);
