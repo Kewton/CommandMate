@@ -81,7 +81,8 @@ TUI を 1 つのペインで動かす。確認も同じ経路で起動する。
   通ることを確かめる。`--standalone` に落ちたら（本番と違う経路なので）起動せず、`version` 以外の check を fail にする
 - パスワードとポートの記録は実行の一時ディレクトリの下（`CM_OPENCODE_V2_DIR`）。利用者の `~/.commandmate/opencode-v2/` には書かない
 - TUI の状態（入力履歴・モデルの選択など。利用者の背景サービスの `service.json` と同じ `~/.local/state/opencode/`）は、
-  起動行の前に `XDG_STATE_HOME=<一時ディレクトリ>` を付けて一時ディレクトリへ向ける
+  起動行の前に `XDG_STATE_HOME=<一時ディレクトリ>` を付けて一時ディレクトリへ向ける。モデルの選択（v1 と同じ `opencode/model.json`）だけは
+  利用者のものを読み取り専用で一時ディレクトリへ複製し、日常使うモデルで起動する（#3428。入力履歴・`service.json`・ロックは複製しない）
 - `hook-correlation` の枠では、自前 serve の `/api/event` を本番のクライアント（`opencode-v2/client.ts`）で購読し、
   `sleep 20` のターンの間に `session.execution.started` と `session.execution.succeeded` が届けば pass。
   受け取った `type` の一覧（重複除去）を summary に残す（イベント名が変わったときに何に変わったかが読める）
@@ -97,7 +98,7 @@ TUI を 1 つのペインで動かす。確認も同じ経路で起動する。
 | antigravity | なし | `sleep` の依頼の時点で訊かれる | Esc | 定義なし（skip） |
 | opencode | なし（前に `XDG_STATE_HOME=<一時ディレクトリ>`。利用者の `opencode/model.json` だけを読み取り専用で複製してモデル選択を引き継ぐ、#3021） | 出ない（skip） | — | 定義なし（skip） |
 | command-code | `--trust --skip-onboarding --no-auto-update`（CommandMate と同じ） | `sleep` の依頼の時点で訊かれる | Esc | 定義なし（skip） |
-| opencode-v2 | なし（前に `XDG_STATE_HOME=<一時ディレクトリ>`） | 出ない（skip。既定のルールで `shell` は確認なしに走る） | — | 定義なし（skip） |
+| opencode-v2 | なし（前に `XDG_STATE_HOME=<一時ディレクトリ>`。v1 と同じく利用者の `opencode/model.json` だけを複製してモデル選択を引き継ぐ、#3428） | 出ない（skip。既定のルールで `shell` は確認なしに走る） | — | 定義なし（skip） |
 
 ## コマンドライン
 
