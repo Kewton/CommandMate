@@ -36,12 +36,27 @@ hook のインスタンス取り違え）。`scripts/agent-health/run.ts` は、
 |---|---|---|
 | `no-definition` | 検査の定義が無い | 選択画面の定義が無いツールの `screen-picker`。opencode の `hook-correlation`（イベントは hook ではなく自前の HTTP から読み、その経路の検査が無い） |
 | `not-shown` | このツールは、その画面を出さない | 承認ダイアログを出さないツール（opencode・opencode-v2）の `screen-approval` |
-| `signed-out` | サインインできない | gemini（下記） |
+| `signed-out` | サインインできない | gemini（下記）。起動したツールのモデル（provider）が `Error: Unauthorized` を返し、ターンが応答なしで終わったときの `screen-running`・`screen-quoted-dialog`・`hook-correlation`（下記「モデルの認可エラー」） |
 | `unsupported` | ツールが未対応 | vibe-local・copilot の `version` 以外（下記） |
 | `timeout` | 時間切れ | 全体の時間上限に達して実行しなかったツール |
 | `prerequisite-failed` | version が取れず未実施 | `version` が fail したツールの残り |
 | `not-selected` | 今回の実行の対象外 | 表だけ。`--tools` / `--only` で外したもの |
 | `not-recorded` | 結果が記録されなかった | 表だけ。選んだのに結果が無いもの（スクリプトの異常） |
+
+### モデルの認可エラー（Issue #3420）
+
+モデル（provider）が資格情報を拒んでターンが応答なしで終わると、実行中の画面も返答も `session.execution.succeeded` も無く、
+検出の不具合と見分けがつかない（2026-10-08、opencode-v2 の `Mistral Large 4`・Ollama Cloud）。資格情報は利用者のもので、
+コードでは直らない。そこで次の条件をすべて満たすときだけ、fail を `signed-out` の skip にする
+（`src/lib/agent-health/model-auth.ts`。判定していればの summary は `skipReason` に、画面の末尾は `evidence` に残す）。
+
+- 期待どおりなら pass のまま（skip にするのは fail になる判定だけ）
+- 判定した画面に、依頼を送る前の画面より多く `Error: Unauthorized` だけの行がある（依頼の `┃` 枠の中の文字は数えない）
+- `hook-correlation`（SSE）は、さらに未着が `session.execution.succeeded` だけで、`session.execution.failed` が届いている
+  （running のターンを送ったときはそのターンの間に。画面の条件もそのターンで見る）
+
+#3021 の「No models loaded」は probe 自身の状態の隔離が原因で、probe 側で直したため、従来どおり fail にする。
+skip が続くときは、利用者がそのツールのモデルの資格情報（2026-10-08 の opencode-v2 は Ollama Cloud）を直す。
 
 ### version だけを読むツール（gemini・vibe-local・copilot、Issue #3313）
 
