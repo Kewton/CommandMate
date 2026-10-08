@@ -415,7 +415,8 @@
       "artifact-diagramming": "Load guidance for drawing diagrams in artifacts that stay legible in light and dark themes",
       "claude-in-chrome": "Have Claude carry out a task in your browser through Claude in Chrome",
       "plugin-authoring": "Load the reference Claude uses to write a mod",
-      "slides": "Make a new Claude Slides presentation from your brief"
+      "slides": "Make a new Claude Slides presentation from your brief",
+      "daybreak": "Turn Daybreak on or off"
     }
   },
   "session": {

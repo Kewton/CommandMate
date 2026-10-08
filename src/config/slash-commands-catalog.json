@@ -3908,6 +3908,16 @@
       ],
       "isStandard": true,
       "source": "standard"
+    },
+    {
+      "name": "daybreak",
+      "descriptionKey": "slashCommands.descriptions.daybreak",
+      "category": "standard-util",
+      "cliTools": [
+        "codex"
+      ],
+      "isStandard": true,
+      "source": "standard"
     }
   ]
 }

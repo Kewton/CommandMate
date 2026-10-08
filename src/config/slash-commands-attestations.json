@@ -175,10 +175,10 @@
     },
     {
       "tool": "codex",
-      "version": "0.160.0",
-      "source": "openai/codex, codex-rs/tui/src/slash_command.rs at tag rust-v0.157.1 — every `enum SlashCommand` variant except the two whose description() is the internal \"DO NOT USE\" marker (MemoryDrop / MemoryUpdate). 62 variants, 60 active. Names are not the identifiers: the enum carries #[strum(serialize_all = \"kebab-case\")] with per-variant overrides, so AutoReview reads as \"approve\", MultiAgents as \"subagents\" and ElevateSandbox as \"setup-default-sandbox\" (Pwd / Pets / Stop keep their to_string spelling). Read 2026-09-28 (#2914): diffing the enum against rust-v0.154.0 (the #2497 read) adds Voice, Tui, Daemon and Warnings and removes SandboxReadRoot (\"sandbox-add-read-dir\") and Personality, so the set moves 58 -> 60.",
-      "observedAt": "2026-10-03",
-      "issue": 3151,
+      "version": "0.161.0",
+      "source": "openai/codex, codex-rs/tui/src/slash_command.rs at tag rust-v0.161.0 — every `enum SlashCommand` variant except the two whose description() is the internal \"DO NOT USE\" marker (MemoryDrop / MemoryUpdate). 63 variants, 61 active. Names are not the identifiers: the enum carries #[strum(serialize_all = \"kebab-case\")] with per-variant overrides, so AutoReview reads as \"approve\", MultiAgents as \"subagents\" and ElevateSandbox as \"setup-default-sandbox\" (Pwd / Pets / Stop keep their to_string spelling). Read 2026-09-28 (#2914): diffing the enum against rust-v0.154.0 (the #2497 read) adds Voice, Tui, Daemon and Warnings and removes SandboxReadRoot (\"sandbox-add-read-dir\") and Personality, so the set moves 58 -> 60. Read 2026-10-08 (#3423): rust-v0.161.0 adds Daybreak (\"daybreak\"), 60 -> 61.",
+      "observedAt": "2026-10-08",
+      "issue": 3423,
       "commands": [
         "agents",
         "app",
@@ -191,6 +191,7 @@
         "compact",
         "copy",
         "daemon",
+        "daybreak",
         "debug-config",
         "delete",
         "diff",

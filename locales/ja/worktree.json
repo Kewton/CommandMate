@@ -415,7 +415,8 @@
       "artifact-diagramming": "アーティファクトにライト・ダーク両方で読める図を描くためのガイダンスを読み込み",
       "claude-in-chrome": "Claude in Chrome 経由でブラウザ上の作業を Claude に依頼",
       "plugin-authoring": "mod を書くときに Claude が使うリファレンスを読み込み",
-      "slides": "指示から Claude Slides のプレゼンテーションを作成"
+      "slides": "指示から Claude Slides のプレゼンテーションを作成",
+      "daybreak": "Daybreak のオン・オフを切り替え"
     }
   },
   "session": {
