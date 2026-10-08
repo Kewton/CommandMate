@@ -967,6 +967,12 @@ interface PollState {
   selfResumeHeldMs: number;
   /** Whether any poll of this wait was held for a self-resume (Issue #2614). */
   selfResumeHeld: boolean;
+  /**
+   * The orphan turn being held: its `openedAt`, and when this wait first saw it
+   * as one (CLI clock). Null when none is (Issue #3429). See
+   * {@link releaseOrphanTurn}.
+   */
+  orphanTurnHold: { openedAt: number; since: number } | null;
 }
 
 /**
@@ -1285,10 +1291,92 @@ function upstreamFaultStage(poll: PollContext, data: CurrentOutputResponse): Sta
 }
 
 /**
- * Stage of a `ready` frame: the agent has not reported the end of the turn this
- * wait adopted (Issue #1839). Held.
+ * How long `wait` holds an orphan turn — see {@link releaseOrphanTurn} — before
+ * completing on the `Stop` that answered the newest prompt (Issue #3429).
+ *
+ * The same 60 s {@link PENDING_PROMPT_HOLD_MS} gives a lost `Stop` on the other
+ * side of a prompt. It starts after the server has already closed the turn on
+ * the screen's word (`scraper_evidence` takes consecutive positive polls), and
+ * is restarted by any change to the frame, so a pane that is still drawing is
+ * never released. `--timeout` and `--stall-timeout` below it still win.
  */
-function unsettledTurnStage(poll: PollContext, state: PollState, data: CurrentOutputResponse): StageOutcome {
+const ORPHAN_TURN_HOLD_MS = PENDING_PROMPT_HOLD_MS;
+
+/**
+ * Whether the unsettled turn this wait adopted is an orphan the agent will never
+ * send a `Stop` for, held for {@link ORPHAN_TURN_HOLD_MS} (Issue #3429).
+ *
+ * Measured 2026-10-08 on claude 2.1.294: the agent's `Stop` landed at
+ * 23:41:32.759Z, and a `pre_tool_use(AskUserQuestion)` hook landed 3 s after it
+ * (23:41:35.219Z) with no prompt in between and no dialog on the screen. That
+ * event opened a turn, `wait` adopted it, and no `Stop` ever came for it; the
+ * server closed it as `scraper_evidence` ~11 s later, but #1839's gate has no
+ * bound, so the wait polled the composer for 3 hours and exited 124.
+ *
+ * All of these, or the gate holds as before:
+ *  - the server publishes the turn record and closed this very turn on a reason
+ *    that is not the agent's (`scraper_evidence` / `stale`): the server itself
+ *    stopped believing the turn was running;
+ *  - the newest prompt in the chat ledger was answered: `lastStopEventAt` is at
+ *    or after it. This is what separates the orphan from #1839's 529, whose
+ *    prompt has no `Stop` after it — that one keeps holding to `--timeout`;
+ *  - the frame has not changed for {@link ORPHAN_TURN_HOLD_MS}.
+ */
+async function releaseOrphanTurn(
+  poll: PollContext,
+  state: PollState,
+  data: CurrentOutputResponse,
+): Promise<boolean> {
+  const { client, worktreeId, options } = poll;
+  const events = data.structuredEvents;
+  const closedByScreen = events?.closedBy === 'scraper_evidence' || events?.closedBy === 'stale';
+  if (
+    !events ||
+    !publishesTurnRecord(data) ||
+    !reportsTurnBoundaries(data) ||
+    events.closedAt == null ||
+    events.openedAt == null ||
+    !closedByScreen ||
+    events.openedAt !== state.turnStartedAt ||
+    !state.promptLedgerReadable
+  ) {
+    state.orphanTurnHold = null;
+    return false;
+  }
+
+  const ledger = await readNewestPromptAt(client, worktreeId, options, data);
+  state.promptLedgerReadable = ledger.readable;
+  if (!ledger.readable || ledger.submittedAt === null || outstandingPrompt(data, ledger.submittedAt)) {
+    state.orphanTurnHold = null;
+    return false;
+  }
+
+  const now = Date.now();
+  const openedAt = events.openedAt;
+  const hold =
+    state.orphanTurnHold?.openedAt === openedAt ? state.orphanTurnHold : { openedAt, since: now };
+  state.orphanTurnHold = hold;
+  const quietMs = now - Math.max(hold.since, state.lastActivityTime);
+  if (quietMs < ORPHAN_TURN_HOLD_MS) return false;
+
+  console.error(
+    `Note: ${worktreeId} answered its newest prompt with a stop ` +
+      `(lastStopEventAt=${data.lastStopEventAt}), and the turn opened after it ` +
+      `(turnStartedAt=${state.turnStartedAt}, ${describeTurnClose(data)}) has had no prompt, ` +
+      `no stop and no new output for ${Math.round(quietMs / 1000)}s; completing on that stop.`,
+  );
+  return true;
+}
+
+/**
+ * Stage of a `ready` frame: the agent has not reported the end of the turn this
+ * wait adopted (Issue #1839). Held, except for an orphan turn (Issue #3429).
+ */
+async function unsettledTurnStage(
+  poll: PollContext,
+  state: PollState,
+  data: CurrentOutputResponse,
+): Promise<StageOutcome> {
   const { worktreeId } = poll;
 
   // Issue #1839: `ready` off the terminal frame is the agent's composer,
@@ -1299,6 +1387,7 @@ function unsettledTurnStage(poll: PollContext, state: PollState, data: CurrentOu
   // non-null — that missing `Stop` is the difference between "finished"
   // and "never ran", and it is the only signal that carries it.
   if (!turnSettled(data, state.turnStartedAt)) {
+    if (await releaseOrphanTurn(poll, state, data)) return { kind: 'next' };
     console.error(
       `Waiting: ${worktreeId} is back at its composer, but its agent has not reported ` +
         `the end of this turn (turnStartedAt=${state.turnStartedAt}, ` +
@@ -1468,7 +1557,7 @@ async function readyStage(
     const faultOutcome = upstreamFaultStage(poll, data);
     if (faultOutcome.kind !== 'next') return faultOutcome;
 
-    const turnOutcome = unsettledTurnStage(poll, state, data);
+    const turnOutcome = await unsettledTurnStage(poll, state, data);
     if (turnOutcome.kind !== 'next') return turnOutcome;
 
     const holdOutcome = selfResumeHoldStage(poll, state, data, selfResumeStopAt);
@@ -1519,6 +1608,7 @@ export async function pollWorktree(
     selfResumeHold: null,
     selfResumeHeldMs: 0,
     selfResumeHeld: false,
+    orphanTurnHold: null,
   };
   const autoYesGraceSeconds = options.autoYesGrace ?? AUTO_YES_GRACE_DEFAULT_SECONDS;
   const autoYesGraceMs = autoYesGraceSeconds * 1000;
