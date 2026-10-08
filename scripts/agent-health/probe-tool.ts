@@ -26,11 +26,8 @@ import {
 import { skipCheck } from '@/lib/agent-health/coverage';
 import { firstVersionLine, paneEvidence } from '@/lib/agent-health/report';
 import { archiveCheckFrames, type FrameArchive, type JudgedFrame } from '@/lib/agent-health/frame-archive';
-import {
-  evaluateOpencodeV2LaunchLine,
-  evaluateServerEvents,
-  evaluateServerLeftovers,
-} from '@/lib/agent-health/server-events';
+import { judgeServerEvents, judgeTurnScreen, turnEndedUnauthorized } from '@/lib/agent-health/model-auth';
+import { evaluateOpencodeV2LaunchLine, evaluateServerLeftovers } from '@/lib/agent-health/server-events';
 import {
   countMatches,
   evaluatePickerScreens,
@@ -172,6 +169,10 @@ class ToolSession {
   lastFrame = '';
   /** From the running request's Enter to the end of that turn. */
   runningWindow: { from: number; to: number } | null = null;
+  /** The running turn ended in the provider's `Error: Unauthorized` (Issue #3420). */
+  runningTurnUnauthorized = false;
+  /** Any turn did. */
+  anyTurnUnauthorized = false;
 
   constructor(
     private readonly ctx: ProbeContext,
@@ -235,6 +236,22 @@ class ToolSession {
 
   recordScreen(checkId: ScreenCheckId, verdict: ScreenVerdict, frame: string, note?: string): void {
     this.recordJudged({ checkId, ...evaluateScreen(checkId, verdict, frame, note) }, [{ frame }]);
+  }
+
+  /**
+   * {@link recordScreen} for a frame of a turn: a fail on a turn the model
+   * provider refused (`Error: Unauthorized`, new since `before`) becomes a
+   * `signed-out` skip (Issue #3420).
+   */
+  recordTurnScreen(checkId: ScreenCheckId, verdict: ScreenVerdict, frame: string, before: string): void {
+    this.recordJudged(judgeTurnScreen(checkId, verdict, frame, before), [{ frame }]);
+  }
+
+  /** Remember whether the turn that started at `before` ended in the provider's refusal. */
+  private noteTurnEnd(before: string): boolean {
+    const unauthorized = turnEndedUnauthorized(before, this.lastFrame);
+    if (unauthorized) this.anyTurnUnauthorized = true;
+    return unauthorized;
   }
 
   /**
@@ -477,7 +494,8 @@ class ToolSession {
   /** `sleep 20`: judge the running screen; where it asks first, judge that dialog too. */
   async runningTurn(): Promise<boolean> {
     const dialog = this.spec.approval.dialog;
-    const baseline = countMatches(stripAnsi(this.lastFrame), dialog);
+    const before = this.lastFrame;
+    const baseline = countMatches(stripAnsi(before), dialog);
     const sentAt = await this.submit(this.spec.prompts.running);
     const limit = Date.now() + this.bounded(RUNNING_APPEAR_MS);
     let running: { frame: string; verdict: ScreenVerdict } | null = null;
@@ -492,7 +510,7 @@ class ToolSession {
       last = await this.look();
     }
     const seen = running ?? last;
-    this.recordScreen('screen-running', seen.verdict, seen.frame);
+    this.recordTurnScreen('screen-running', seen.verdict, seen.frame, before);
 
     let approvalJudged = false;
     await this.waitForTurnEnd(
@@ -512,18 +530,23 @@ class ToolSession {
       baseline
     );
     this.runningWindow = { from: sentAt, to: Date.now() };
+    this.runningTurnUnauthorized = this.noteTurnEnd(before);
     return approvalJudged;
   }
 
   async quotedTurn(): Promise<void> {
+    const before = this.lastFrame;
     const sentAt = await this.submit(this.spec.prompts.quoted);
     const done = await this.waitForTurnEnd(sentAt);
-    this.recordScreen('screen-quoted-dialog', done.verdict, done.frame);
+    this.noteTurnEnd(before);
+    this.recordTurnScreen('screen-quoted-dialog', done.verdict, done.frame, before);
   }
 
   async plainTurn(): Promise<void> {
+    const before = this.lastFrame;
     const sentAt = await this.submit('Reply with the single word OK.');
     await this.waitForTurnEnd(sentAt);
+    this.noteTurnEnd(before);
   }
 }
 
@@ -689,11 +712,14 @@ export async function probeTool(ctx: ProbeContext): Promise<ProbeOutcome> {
 
   if (serverPort !== null) {
     if (wantSse) {
-      const verdict = evaluateServerEvents(recorder?.events ?? [], {
-        window: session.runningWindow ?? undefined,
-        streamError: recorder?.error ?? null,
-      });
-      session.record({ checkId: 'hook-correlation', ...verdict });
+      session.record(
+        judgeServerEvents(recorder?.events ?? [], {
+          window: session.runningWindow ?? undefined,
+          streamError: recorder?.error ?? null,
+          // The events judged are the running turn's when it ran (Issue #3420).
+          unauthorized: session.runningWindow ? session.runningTurnUnauthorized : session.anyTurnUnauthorized,
+        })
+      );
     }
     const leftovers = await collectServerLeftovers(serverPort);
     await releaseProbeServer(target);

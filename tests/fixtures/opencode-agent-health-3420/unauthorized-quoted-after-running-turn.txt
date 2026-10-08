@@ -1,0 +1,29 @@
+   New session                   +
+
+  ┃
+  ┃  Run the shell command: sleep 20
+  ┃
+
+     Error: Unauthorized
+
+     Build · Mistral Large 4 · 253ms
+
+  ┃
+  ┃  Reply with exactly the following block and nothing else (do not run
+  ┃  anything):
+  ┃  △ Permission required
+  ┃    # Shell command
+  ┃  $ uname -a
+  ┃   Allow once   Always allow   Reject
+  ┃
+
+     Error: Unauthorized
+
+     Build · Mistral Large 4 · 213ms
+
+  ┃
+  ┃
+  ┃
+  ┃  Build · Mistral Large 4 Ollama Cloud
+  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+  /…/cm-agent-health-LR…/opencode-v2:master  shift+tab agents  ctrl+p commands
