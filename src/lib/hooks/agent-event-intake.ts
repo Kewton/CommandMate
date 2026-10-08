@@ -327,6 +327,10 @@ export function applyAgentEventToState(
       // turn fires `UserPromptSubmit` as well. The source says which prompts
       // those are; the state decides whether there is a turn to join.
       joinsOpenTurn,
+      // Issue #3437: read off the declaration, never the tool id. A source that
+      // reports its prompts opens its turns on them, so a `pre_tool_use` after
+      // its own `Stop` with no prompt since does not begin one.
+      promptOpensTurns: source.capabilities.supportedEvents.includes('user_prompt_submit'),
     },
     {
       // Issue #1903: the declared value, read off the source this route already
