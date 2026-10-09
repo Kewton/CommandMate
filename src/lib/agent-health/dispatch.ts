@@ -39,8 +39,8 @@ export const REQUIRED_LABELS = [BUG_LABEL, METRICS_LABEL, SECURITY_LABEL, CATALO
 
 /** Every bug goes, within the total cap. */
 export const MAX_CATALOG_ISSUES = 1;
-export const MAX_METRICS_ISSUES = 2;
-export const MAX_TOTAL_ISSUES = 5;
+export const MAX_METRICS_ISSUES = 4;
+export const MAX_TOTAL_ISSUES = 8;
 
 /** Auto-Yes window for the run (a `commandmate send --duration` value). */
 export const DISPATCH_AUTO_YES_DURATION = '8h';
