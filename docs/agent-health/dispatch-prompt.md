@@ -21,7 +21,7 @@
    - スクリプトが行うこと:
      1. `gh issue list --repo Kewton/CommandMate --state open` から、作成者が `kewton`・ラベル `agent-health`（バグ）か `catalog-drift`
         （スラッシュコマンドカタログのずれ）か `metrics`（改善）・ラベル `auto-dispatched` が無いものを選ぶ。
-        順番はバグ（古い順）→ カタログのずれ（古い順）→ 改善（`security` → その他）。カタログのずれは 1 件まで、改善は 2 件まで、合計 5 件まで。溢れは持ち越し
+        順番はバグ（古い順）→ カタログのずれ（古い順）→ 改善（`security` → その他）。カタログのずれは 1 件まで、改善は 4 件まで、合計 8 件まで。溢れは持ち越し
      2. 対象が 0 件なら送らずに終わる（`status=no-target`）
      3. `commandmate ls --json` で Claude 3 の状態を見る。作業中・プロンプト待ちなら送らずに終わる（`status=skipped-busy`。翌日に持ち越し）。
         セッションが無ければ `send` が起動する（起動直後の `exit 99` は 2 分後に 1 回だけ再送）
