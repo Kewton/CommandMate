@@ -1048,8 +1048,7 @@ PR を出す前に、次も確かめる:
 
 ## Phase 6: PR作成・マージ
 
-PR の作成とマージは、次の 2 本のスクリプトを呼ぶ（#3477）。`/pr-merge-pipeline`（ワーカーに `/create-pr` を送る流れ）は
-並列オーケストレーションでは使わない。止まる条件と run の記録を持たないためである。
+PR の作成とマージは、次の 2 本のスクリプトを呼ぶ（#3477）。ワーカーに `/create-pr` を送る流れは使わない。止まる条件と run の記録を持たないためである。
 
 - `scripts/orchestrate/publish-pr.mjs`（6-1）: push・module-reference の断片の控え（`runs/$DATE/module-reference-<N>.md`）・PR の作成。記録の `pr` 段
 - `scripts/orchestrate/merge-pr.mjs`（6-2・6-3）: develop が進んでいれば試しのマージ・CI の待ち（落ちたジョブは HEAD ごとに 1 回だけ再実行）・
@@ -1414,7 +1413,7 @@ gh issue list --repo Kewton/CommandMate --state open --search "<ファイル名�
 - `/bug-fix`: バグ調査→修正→テスト（バグIssueに送信）
 - `/cause-analysis`: 根本原因分析（他エージェント経由、バグIssueのPhase 2.5で使用）
 - `/current-situation`: 不具合事象の整理とIssue登録
-- `/pr-merge-pipeline`: PR作成からマージ完了まで
+- `scripts/orchestrate/publish-pr.mjs` / `merge-pr.mjs`: PR作成からマージ完了まで（Phase 6）
 - `/uat`: 受入テスト
 - `/uat-fix-loop`: UAT不合格時の修正ループ
 - `/issues-exec-plan`: 複数Issueの実行計画策定
