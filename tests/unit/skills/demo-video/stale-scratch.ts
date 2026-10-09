@@ -1,8 +1,8 @@
 /**
- * Sweeping of `.commandmate-demo-vitest-<pid>` scratch dirs left in $HOME (#3025).
+ * Sweeping of `.commandmate-demo-vitest-<pid>` scratch dirs left behind (#3025).
  *
- * `env-scripts.test.ts` has to create its scratch dir under the real $HOME and
- * removes it in `afterAll`. A killed or timed-out run never reaches `afterAll`,
+ * `env-scripts.test.ts` creates its scratch dir under the OS temp dir (the real
+ * $HOME until #3479) and removes it in `afterAll`. A killed or timed-out run never reaches `afterAll`,
  * so the dir stays behind. The next run collects the ones whose owner is gone.
  */
 import fs from 'node:fs';
@@ -34,7 +34,7 @@ export function isStaleScratchDir(name: string): boolean {
   return pid !== null && !isPidAlive(pid);
 }
 
-/** Remove stale scratch dirs directly under `home`; returns the names removed. */
+/** Remove stale scratch dirs directly under `home` (any base dir); returns the names removed. */
 export function sweepStaleScratchDirs(home: string): string[] {
   const removed: string[] = [];
   for (const entry of fs.readdirSync(home, { withFileTypes: true })) {
