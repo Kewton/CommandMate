@@ -3,6 +3,8 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const orchestrate = readFileSync(join(process.cwd(), '.claude/commands/orchestrate.md'), 'utf-8');
+// Since #3481 the worked example lives in docs/orchestrate/; 2-4 points there.
+const contractEvidence = readFileSync(join(process.cwd(), 'docs/orchestrate/contract.md'), 'utf-8');
 
 describe('orchestrate.md: 画面・CLI に見える変化を含む Issue の契約 (#3476)', () => {
   it('2-4 に小見出しがあり、2-4-1 より前にある', () => {
@@ -21,9 +23,10 @@ describe('orchestrate.md: 画面・CLI に見える変化を含む Issue の契�
   });
 
   it('#3397 の例がある', () => {
-    expect(orchestrate).toContain('例（#3397');
-    expect(orchestrate).toContain('useTerminalPanePolling');
-    expect(orchestrate).toContain('TerminalSplitPaneContent');
+    const evidence = `${orchestrate}\n${contractEvidence}`;
+    expect(evidence).toContain('例（#3397');
+    expect(evidence).toContain('useTerminalPanePolling');
+    expect(evidence).toContain('TerminalSplitPaneContent');
   });
 
   it('2-4-2 の対になる場所に「表示されない条件」の項目がある', () => {

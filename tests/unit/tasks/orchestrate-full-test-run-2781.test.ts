@@ -29,9 +29,12 @@ const ORCHESTRATE_PATH = '.claude/commands/orchestrate.md';
 const ISSUE_CREATE_PATH = '.claude/commands/issue-create.md';
 // Since #3477 the 2-4-2 goal template lives with the contract generator; 2-4-2 points there.
 const GOAL_TEMPLATE_PATH = 'scripts/orchestrate/templates/goal.md';
+// Since #3481 the measurement behind 2-4-2 lives in docs/orchestrate/; 2-4-2 points there.
+const CONTRACT_EVIDENCE_PATH = 'docs/orchestrate/contract.md';
 const orchestrate = readFileSync(path.join(REPO_ROOT, ORCHESTRATE_PATH), 'utf-8');
 const goalTemplate = readFileSync(path.join(REPO_ROOT, GOAL_TEMPLATE_PATH), 'utf-8');
 const issueCreate = readFileSync(path.join(REPO_ROOT, ISSUE_CREATE_PATH), 'utf-8');
+const contractEvidence = readFileSync(path.join(REPO_ROOT, CONTRACT_EVIDENCE_PATH), 'utf-8');
 
 /** The body of `### <id>. …`, up to the next `### ` heading. */
 function section(id: string): string {
@@ -80,7 +83,7 @@ describe('[#2781] 2-4-2: the goal template still defaults to "do not run the ful
 });
 
 describe('[#2781] 2-4-2: the reason the condition is narrow is recorded', () => {
-  const body = section('2-4-2');
+  const body = `${section('2-4-2')}\n${contractEvidence}`;
 
   it('names the asymmetry: verify takes the mutex, the worker does not', () => {
     expect(body).toContain('mutex: cpu.heavy');
