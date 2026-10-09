@@ -185,7 +185,16 @@ export interface MermaidFence {
   lines: FenceLine[];
 }
 
-const FENCE_OPEN = /^ {0,3}(`{3,}|~{3,})(.*)$/;
+const FENCE_OPEN = /^( {0,3})(`{3,}|~{3,})(.*)$/;
+/** A list item whose first line is the fence (`- ```mermaid`, `1. ```mermaid`). */
+const LIST_ITEM_PREFIX = /^ {0,3}(?:[-*+]|\d{1,9}[.)]) {1,4}(?=`{3,}|~{3,})/;
+
+/** Count of leading spaces in `text` from `from`, up to `max`. */
+function leadingSpaces(text: string, from: number, to: number, max: number): number {
+  let n = 0;
+  while (n < max && from + n < to && text[from + n] === ' ') n += 1;
+  return n;
+}
 const QUOTE_MARKER = /^ {0,3}>[ \t]?/;
 
 interface RawLine {
@@ -228,10 +237,18 @@ export function findMermaidFences(text: string): MermaidFence[] {
 
   for (let i = 0; i < lines.length; i++) {
     const { depth, contentStart } = stripQuotes(text, lines[i], Number.POSITIVE_INFINITY);
-    const open = FENCE_OPEN.exec(text.slice(contentStart, lines[i].end));
+    // A fence opening a list item sits behind the item's marker; the item's
+    // following lines are indented by the marker's width (CommonMark).
+    const item = LIST_ITEM_PREFIX.exec(text.slice(contentStart, lines[i].end));
+    const itemIndent = item ? item[0].length : 0;
+    const open = FENCE_OPEN.exec(text.slice(contentStart + itemIndent, lines[i].end));
     if (!open) continue;
-    const marker = open[1];
-    const info = open[2].trim();
+    // Markdown removes up to the opening fence's own indentation from every
+    // body line (micromark `code-fenced`), so the body is compared — and the
+    // offsets mapped — with it removed.
+    const fenceIndent = open[1].length;
+    const marker = open[2];
+    const info = open[3].trim();
     if (marker[0] === '`' && info.includes('`')) continue; // not a fence
     const closeRe = new RegExp(`^ {0,3}${marker[0] === '`' ? '`' : '~'}{${marker.length},}[ \\t]*$`);
 
@@ -240,9 +257,18 @@ export function findMermaidFences(text: string): MermaidFence[] {
     for (let j = i + 1; j < lines.length; j++) {
       const inner = stripQuotes(text, lines[j], depth);
       if (inner.depth < depth) break; // the quote ended, and the fence with it
+      let lineStart = inner.contentStart;
+      const lineEnd = lines[j].end;
+      if (itemIndent > 0) {
+        const spaces = leadingSpaces(text, lineStart, lineEnd, itemIndent);
+        const blank = text.slice(lineStart, lineEnd).trim().length === 0;
+        if (!blank && spaces < itemIndent) break; // the list item ended
+        lineStart += spaces;
+      }
       last = j;
-      if (closeRe.test(text.slice(inner.contentStart, lines[j].end))) break;
-      body.push({ rawStart: inner.contentStart, length: lines[j].end - inner.contentStart, bodyOffset: 0 });
+      if (closeRe.test(text.slice(lineStart, lineEnd))) break;
+      lineStart += leadingSpaces(text, lineStart, lineEnd, fenceIndent);
+      body.push({ rawStart: lineStart, length: lineEnd - lineStart, bodyOffset: 0 });
     }
 
     if (info.split(/[ \t]/)[0] === 'mermaid') {

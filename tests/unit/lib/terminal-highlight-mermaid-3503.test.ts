@@ -387,3 +387,64 @@ describe('[#3503] hits in a quoted diagram and an identical plain one', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Indented fences (1-3 spaces) and fences in list items
+// ---------------------------------------------------------------------------
+
+describe('[#3503] indented fences', () => {
+  const INDENTED = ['Text.', '', '  ```mermaid', '  graph TD', '  A[kappa]', '  ```', '', 'after kappa'].join('\n');
+
+  it('drop the opening fence’s indentation from the body, as Markdown does', () => {
+    const [fence] = findMermaidFences(INDENTED);
+    expect(fence.body).toBe('graph TD\nA[kappa]');
+    for (const line of fence.lines) {
+      expect(INDENTED.slice(line.rawStart, line.rawStart + line.length)).toBe(
+        fence.body.slice(line.bodyOffset, line.bodyOffset + line.length),
+      );
+    }
+  });
+
+  it('remove at most the opener’s indentation from a line indented further', () => {
+    const [fence] = findMermaidFences(' ```mermaid\n   graph TD\n ```');
+    expect(fence.body).toBe('  graph TD');
+  });
+
+  it('a list item opened by the fence strips the item’s width too', () => {
+    const raw = ['- ```mermaid', '  graph TD', '  A[kappa]', '  ```', '', 'after'].join('\n');
+    const [fence] = findMermaidFences(raw);
+    expect(fence.body).toBe('graph TD\nA[kappa]');
+    expect(raw.slice(fence.fenceEnd)).toBe('\n\nafter');
+  });
+
+  it('a list item ends the fence where the item ends', () => {
+    const raw = ['1. ```mermaid', '   graph TD', 'not in the item'].join('\n');
+    const [fence] = findMermaidFences(raw);
+    expect(fence.body).toBe('graph TD');
+  });
+
+  it('a hit in an indented diagram opens and marks that diagram’s source', () => {
+    const container = mount(`<p>Text.</p>\n${block('graph TD\nA[kappa]', 'kappa')}\n<p>after kappa</p>`);
+    applyHistoryHighlights(container, hitsOf(INDENTED, 'kappa'), -1, NAMESPACE, { sourceText: INDENTED });
+    const ranges = marked();
+    expect(ranges.map((r) => r.toString())).toEqual(['kappa', 'kappa']);
+    expect(insideSource(ranges[0])).toBe(true);
+    expect(insideSource(ranges[1])).toBe(false);
+    expect(container.querySelector('details')!.open).toBe(true);
+  });
+
+  it('a form not handled (nested 4+ deep) is still never put on another diagram', () => {
+    const raw = ['- a', '  - b', '    ```mermaid', '    graph TD', '    A[kappa]', '    ```', '', '```mermaid', 'graph LR', 'B[kappa]', '```'].join('\n');
+    // Only the top-level fence is recognized; the nested one stays unpaired.
+    const container = mount(
+      `<ul><li>a<ul><li>b\n${block('graph TD\nA[kappa]', 'x')}</li></ul></li></ul>\n${block('graph LR\nB[kappa]', 'y')}`,
+    );
+    applyHistoryHighlights(container, hitsOf(raw, 'kappa'), -1, NAMESPACE, { sourceText: raw });
+    const sources = container.querySelectorAll(`[${MERMAID_SOURCE_ATTR}]`);
+    // Exactly one mark on the top-level diagram (its own hit), none from the
+    // nested diagram's hit on either source.
+    const onTopLevel = marked().filter((r) => sources[1].contains(r.startContainer));
+    expect(onTopLevel.map((r) => r.toString())).toEqual(['kappa']);
+    expect(marked().filter((r) => sources[0].contains(r.startContainer))).toEqual([]);
+  });
+});
+

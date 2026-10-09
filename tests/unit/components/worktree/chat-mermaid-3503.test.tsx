@@ -498,5 +498,46 @@ describe('[#3503] search highlights reach the folded source', () => {
       scroll.restore();
     }
   });
+
+  // -------------------------------------------------------------------------
+  // A fence indented by 2 spaces (opening, body and closing lines alike)
+  // -------------------------------------------------------------------------
+
+  const INDENTED = ['The answer.', '', '  ```mermaid', '  graph TD', '  A[sentinel]', '  ```'].join('\n');
+
+  it.each([
+    ['ChatTranscript', 'chat-search'],
+    ['HistoryPane', 'history-search-2'],
+  ])('%s: a hit in an indented diagram opens and marks that diagram’s source', async (surface) => {
+    const scroll = captureScroll();
+    try {
+      const messages = [
+        message({ id: 'u-1', role: 'user', content: 'draw', requestId: undefined }),
+        message({ content: INDENTED }),
+      ];
+      if (surface === 'ChatTranscript') {
+        render(<ChatTranscript messages={messages} worktreeId="wt-3503" cliToolId="opencode" onFilePathClick={vi.fn()} />);
+        fireEvent.click(screen.getByTestId('chat-transcript-search-toggle'));
+        fireEvent.change(screen.getByLabelText('worktree.history.search.keywordLabel'), {
+          target: { value: 'sentinel' },
+        });
+      } else {
+        render(<HistoryPane messages={messages} worktreeId="wt-3503" onFilePathClick={vi.fn()} splitIndex={2} />);
+        fireEvent.click(screen.getByRole('button', { name: /search/i }));
+        fireEvent.change(screen.getByLabelText(/keyword/i), { target: { value: 'sentinel' } });
+      }
+      // The one hit is the current one: scrolled to from the source, which opens.
+      // (Queried inside waitFor: the row may re-render while the search settles.)
+      await waitFor(() => {
+        const sources = Array.from(document.querySelectorAll(`[${MERMAID_SOURCE_ATTR}]`));
+        expect(sources).toHaveLength(1);
+        expect(sources[0].textContent).toBe('graph TD\nA[sentinel]');
+        expect(scroll.targets).toContain(sources[0]);
+        expect((sources[0].closest('details') as HTMLDetailsElement).open).toBe(true);
+      });
+    } finally {
+      scroll.restore();
+    }
+  });
 });
 
