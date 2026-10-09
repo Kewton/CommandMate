@@ -156,7 +156,7 @@ import { Skeleton } from '@/components/ui';
 import type { ChatMessage } from '@/types/models';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import type { ShowToast } from '@/types/markdown-editor';
-import { useHistorySearch } from '@/hooks/useHistorySearch';
+import { useHighlightReapplyTick, useHistorySearch } from '@/hooks/useHistorySearch';
 import { copyToClipboard } from '@/lib/clipboard-utils';
 import { normalizeChatFilePath } from '@/lib/chat/chat-file-path';
 import { probeChatFilePath } from '@/lib/chat/chat-file-probe';
@@ -945,6 +945,15 @@ export const ChatTranscript = memo(function ChatTranscript({
 
   const isSearchActive = isSearchOpen && matchPositions.length > 0;
 
+  // [Issue #3503] The raw text each hit's offsets index into. A Markdown body's
+  // mermaid fences are drawn as diagrams with their source folded underneath,
+  // so the highlighter needs the text as written to place hits inside and after
+  // them (`applyHistoryHighlights`' `sourceText`).
+  const searchSourceById = useMemo(
+    () => new Map(searchableMessages.map((m) => [m.id, m.content])),
+    [searchableMessages],
+  );
+
   // ---------------------------------------------------------------
   // Tool activity (Issue #2284)
   // ---------------------------------------------------------------
@@ -1325,6 +1334,10 @@ export const ChatTranscript = memo(function ChatTranscript({
     rowVirtualizer.scrollToIndex(rowIndex, { align: 'center' });
   }, [isSearchOpen, currentMatch, messageRowIndexById, rowVirtualizer]);
 
+  // [Issue #3503] Re-apply once a mermaid diagram in a mounted row has drawn
+  // (or been redrawn for a new theme): its row changed height under the marks.
+  const diagramSettledTick = useHighlightReapplyTick(scrollContainerRef, isSearchActive);
+
   // Apply per-message highlights to whatever is mounted, and bring the current
   // match into view.
   useLayoutEffect(() => {
@@ -1348,6 +1361,7 @@ export const ChatTranscript = memo(function ChatTranscript({
         match.ranges,
         isCurrent ? currentMatch.localIndex : -1,
         highlightNamespace,
+        { sourceText: searchSourceById.get(match.messageId) },
       );
       if (isCurrent && element instanceof HTMLElement) currentMatchElement = element;
     }
@@ -1359,7 +1373,15 @@ export const ChatTranscript = memo(function ChatTranscript({
     return () => {
       clearHistoryHighlights(highlightNamespace);
     };
-  }, [isSearchOpen, matchPositions, currentMatch, highlightNamespace, renderedRange]);
+  }, [
+    isSearchOpen,
+    matchPositions,
+    currentMatch,
+    highlightNamespace,
+    renderedRange,
+    searchSourceById,
+    diagramSettledTick,
+  ]);
 
   // ---------------------------------------------------------------
   // Row rendering

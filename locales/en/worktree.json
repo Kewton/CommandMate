@@ -818,7 +818,8 @@
     "loading": "Loading diagram...",
     "errorTitle": "Diagram Error",
     "emptyCode": "Diagram code is empty",
-    "renderError": "Failed to render diagram"
+    "renderError": "Failed to render diagram",
+    "source": "Source"
   },
   "imageViewer": {
     "loadError": "Failed to load image"

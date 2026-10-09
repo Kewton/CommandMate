@@ -22,13 +22,13 @@
 
 'use client';
 
-import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef, type RefObject } from 'react';
 import {
   TERMINAL_SEARCH_MAX_MATCHES,
   SEARCH_DEBOUNCE_MS,
   SEARCH_MIN_QUERY_LENGTH,
 } from '@/hooks/useTerminalSearch';
-import type { MatchPosition } from '@/lib/terminal-highlight';
+import { MERMAID_BLOCK_SETTLED_EVENT, type MatchPosition } from '@/lib/terminal-highlight';
 import type { ChatMessage } from '@/types/models';
 
 /**
@@ -301,4 +301,28 @@ export function useHistorySearch({
     nextMatch,
     prevMatch,
   };
+}
+
+/**
+ * [Issue #3503] A counter that moves whenever a mermaid block inside
+ * `containerRef` finishes drawing (or fails), while `enabled`.
+ *
+ * Highlight effects list it as a dependency, so the marks are re-applied after a
+ * diagram that was still loading when the search ran — or that was redrawn for a
+ * new theme — has changed its row's height. Off while no search is shown: a
+ * diagram settling then re-renders nothing.
+ */
+export function useHighlightReapplyTick(
+  containerRef: RefObject<HTMLElement | null>,
+  enabled: boolean
+): number {
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!enabled || !container) return;
+    const bump = () => setTick((n) => n + 1);
+    container.addEventListener(MERMAID_BLOCK_SETTLED_EVENT, bump);
+    return () => container.removeEventListener(MERMAID_BLOCK_SETTLED_EVENT, bump);
+  }, [containerRef, enabled]);
+  return tick;
 }

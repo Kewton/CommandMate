@@ -30,6 +30,7 @@ import rehypeHighlight from 'rehype-highlight';
 import 'highlight.js/styles/github-dark.css';
 import { X, AlertTriangle, FileText, Eye } from 'lucide-react';
 import { MermaidCodeBlock } from '@/components/worktree/MermaidCodeBlock';
+import { isMermaidPreChild } from '@/components/worktree/mermaid-block-utils';
 import { CodeBlockWithCopy } from '@/components/common/CodeBlockWithCopy';
 import { WorktreeImage } from '@/components/common/WorktreeImage';
 import { classifyLink, resolveRelativePath, sanitizeHref, REHYPE_SANITIZE_SCHEMA } from '@/lib/link-utils';
@@ -75,20 +76,6 @@ export interface LargeFileWarningProps {
 // ============================================================================
 // MarkdownPreview Component
 // ============================================================================
-
-/**
- * Detects whether a `<pre>`'s child is a mermaid fenced block. react-markdown
- * passes the (unrendered) `<code>` element as the pre's only child; mermaid
- * blocks carry a `language-mermaid` class. Such blocks render a diagram rather
- * than copyable source, so the `pre` renderer must not wrap them with a copy
- * button. (Issue #983)
- */
-function isMermaidPreChild(children: React.ReactNode): boolean {
-  const child = React.Children.toArray(children)[0];
-  if (!React.isValidElement(child)) return false;
-  const className = (child.props as { className?: string }).className;
-  return typeof className === 'string' && className.split(' ').includes('language-mermaid');
-}
 
 /**
  * Renders markdown content with GFM, syntax highlighting, XSS protection,
@@ -155,11 +142,13 @@ export const MarkdownPreview = memo(function MarkdownPreview({
       // renderer fires only for fenced/indented code (never inline code), so
       // inline code is never decorated or forced onto its own line. The wrapper
       // sits outside the scrollable <pre> so the button stays pinned. Mermaid
-      // blocks render a diagram, not copyable source, so they keep a plain
-      // <pre> (no button) exactly as the default renderer produced.
+      // blocks render a diagram, not copyable source, so they get no button.
+      // [Issue #3503] Nor a <pre>: the diagram frame (diagram + folded source,
+      // `MermaidCodeBlock`) is its own block, and `.prose pre` would paint it
+      // on the always-dark code canvas.
       pre: ({ children }) => {
         if (isMermaidPreChild(children)) {
-          return <pre>{children}</pre>;
+          return <>{children}</>;
         }
         return (
           <CodeBlockWithCopy>
