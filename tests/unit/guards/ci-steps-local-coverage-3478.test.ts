@@ -229,6 +229,14 @@ const EXCLUDED: readonly {
     allow: [{ pattern: /^npm run test:e2e$/, why: 'the excluded check itself' }],
   },
   {
+    // [Issue #3481] Declared like `claudemd-size`, but not as a verify gate: the gate list in
+    // .commandmate/verify.yaml is pinned by tests/unit/verification/verify-config.test.ts.
+    match: { key: 'orchestrate-size › Check orchestrate.md size' },
+    reason:
+      'Locally the same script runs inside the unit gates: tests/unit/docs/orchestrate-size-3481.test.ts calls checkOrchestrateSize() from scripts/check-orchestrate-size.mjs, the one owner of the cap.',
+    allow: [{ pattern: /^node scripts\/check-orchestrate-size\.mjs$/, why: 'the size check itself, run locally through the unit test' }],
+  },
+  {
     match: { key: 'security-audit › Run security audit' },
     reason: 'Posts the dependency tree to the npm registry; a registry outage is not a verdict about the diff (#2313), and the result does not depend on the worker\'s change.',
     allow: [

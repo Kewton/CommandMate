@@ -36,6 +36,16 @@ const goalTemplate = readFileSync(path.join(REPO_ROOT, GOAL_TEMPLATE_PATH), 'utf
 const issueCreate = readFileSync(path.join(REPO_ROOT, ISSUE_CREATE_PATH), 'utf-8');
 const contractEvidence = readFileSync(path.join(REPO_ROOT, CONTRACT_EVIDENCE_PATH), 'utf-8');
 
+// Since #3481 (2 本目) the run-time-optional procedures live in docs/orchestrate/; the body section points there.
+/** The `## <heading>` section of docs/orchestrate/<file>, up to the next `## ` heading. */
+function docSection(file: string, heading: string): string {
+  const doc = readFileSync(path.join(REPO_ROOT, 'docs/orchestrate', file), 'utf-8');
+  const start = doc.indexOf(`\n## ${heading}\n`);
+  expect(start, `docs/orchestrate/${file} has no \`## ${heading}\``).toBeGreaterThanOrEqual(0);
+  const end = doc.indexOf('\n## ', start + 1);
+  return doc.slice(start, end === -1 ? undefined : end);
+}
+
 /** The body of `### <id>. …`, up to the next `### ` heading. */
 function section(id: string): string {
   const lines = orchestrate.split('\n');
@@ -103,7 +113,7 @@ describe('[#2781] 2-4-2: the reason the condition is narrow is recorded', () => 
 });
 
 describe('[#2781] 3-4: a gate whose tests all passed is not the worker’s fault', () => {
-  const body = section('3-4');
+  const body = `${section('3-4')}\n${docSection('exit-codes.md', '3-4 20 の対応')}`;
 
   it('lists "zero failed tests but exit 1" under the not-worker-caused verdicts', () => {
     const marker = '**ワーカー起因ではない**';

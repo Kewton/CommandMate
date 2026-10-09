@@ -31,11 +31,14 @@ name: CI
 #   CLAUDE.md size check                  12    0.1m     0.2m    10
 #   Token discipline                      12    0.1m     0.2m    10
 #   Route export guard                     -       -        -    10
+#   orchestrate.md size check              -       -        -    10
 #
 # `Route export guard` is new in Issue #1946 and therefore has no history in
 # that sample. It is the same shape as the three rows above it — a checkout and
 # one dependency-free Node script — and measured 0.3s over 128 route entries on
 # a developer machine, so it takes the same policy floor of 10.
+# `orchestrate.md size check` (Issue #3481) is the same shape again: one stat of
+# one file, so it takes the floor of 10 too.
 #
 # [Issue #2638] `Unit Tests` was split into four matrix shards
 # (`npm run test:unit -- --shard=N/4`, 407 files each) plus the `Unit Tests`
@@ -135,6 +138,24 @@ jobs:
       # The script is dependency-free, so no npm install is needed.
       - name: Check CLAUDE.md size
         run: node scripts/check-claudemd-size.mjs
+
+  orchestrate-size:
+    name: orchestrate.md size check
+    # [self-hosted] See `claudemd-size` above: self-hosted, except for a pull
+    # request opened from a fork, which falls back to `ubuntu-latest`.
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'self-hosted' || 'ubuntu-latest' }}
+    timeout-minutes: 10 # same shape as claudemd-size (one stat of one file); floor of the policy
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # [Issue #3481] `/orchestrate` loads .claude/commands/orchestrate.md whole,
+      # so the runbook body has a hard byte cap; measurements, rationale and
+      # on-demand procedures belong in docs/orchestrate/. Same shape as the
+      # CLAUDE.md check: the limit lives in the script, never here. The script is
+      # dependency-free, so no npm install is needed.
+      - name: Check orchestrate.md size
+        run: node scripts/check-orchestrate-size.mjs
 
   control-chars:
     name: Control character check

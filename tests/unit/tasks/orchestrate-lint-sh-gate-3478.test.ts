@@ -43,9 +43,12 @@ const FALLBACK_EXCLUDED: readonly { id: string; reason: string }[] = [];
 describe('orchestrate.md 3-3: 完了検出の退避経路の --gates 一覧 (#3478)', () => {
   /** The `--gates` value of the fallback command, with its line continuation joined. */
   const fallbackGates = (): string[] => {
-    const start = orchestrate.indexOf('**完了検出が壊れているときは `verify --gates` へ退避する。**');
-    expect(start, 'fallback paragraph not found').toBeGreaterThanOrEqual(0);
-    const block = /```bash\n([\s\S]*?)```/.exec(orchestrate.slice(start));
+    expect(orchestrate, 'fallback paragraph not found').toContain('**完了検出が壊れているときは `verify --gates` へ退避する。**');
+    // Since #3481 (2 本目) the fallback command lives in docs/orchestrate/workers.md; 3-3 points there.
+    const workers = readFileSync(join(process.cwd(), 'docs/orchestrate/workers.md'), 'utf-8');
+    const start = workers.indexOf('\n## 3-3 完了検出が壊れたときの退避\n');
+    expect(start, 'fallback section not found in docs/orchestrate/workers.md').toBeGreaterThanOrEqual(0);
+    const block = /```bash\n([\s\S]*?)```/.exec(workers.slice(start));
     expect(block, 'fallback code block not found').not.toBeNull();
     const joined = (block?.[1] ?? '').replace(/\\\n/g, '');
     const match = /commandmatedev verify "\$WT" --gates (\S+)/.exec(joined);

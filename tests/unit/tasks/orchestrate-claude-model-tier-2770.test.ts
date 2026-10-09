@@ -38,6 +38,16 @@ const AGENTS_DIR = path.join(REPO_ROOT, '.claude/agents');
 
 const orchestrate = readFileSync(path.join(REPO_ROOT, ORCHESTRATE_PATH), 'utf-8');
 
+// Since #3481 (2 本目) the run-time-optional procedures live in docs/orchestrate/; the body section points there.
+/** The `## <heading>` section of docs/orchestrate/<file>, up to the next `## ` heading. */
+function docSection(file: string, heading: string): string {
+  const doc = readFileSync(path.join(REPO_ROOT, 'docs/orchestrate', file), 'utf-8');
+  const start = doc.indexOf(`\n## ${heading}\n`);
+  expect(start, `docs/orchestrate/${file} has no \`## ${heading}\``).toBeGreaterThanOrEqual(0);
+  const end = doc.indexOf('\n## ', start + 1);
+  return doc.slice(start, end === -1 ? undefined : end);
+}
+
 /** The body of `### <id>. …`, up to the next `### ` heading. */
 function section(id: string): string {
   const lines = orchestrate.split('\n');
@@ -175,11 +185,11 @@ describe('/orchestrate 3-4 / 3-5 / 3-5b: where each tier goes after two failures
   });
 
   it('3-5 switches an Antigravity Issue to opus, never to sonnet', () => {
-    expect(section('3-5')).toContain('set_claude_model "$WT_PATH" opus');
+    expect(`${section('3-5')}\n${docSection('switching.md', '3-5 Antigravity から Claude への切り替え')}`).toContain('set_claude_model "$WT_PATH" opus');
   });
 
   it('3-5b kills the session first, clears the model, and sends a new contract', () => {
-    const body = section('3-5b');
+    const body = `${section('3-5b')}\n${docSection('switching.md', '3-5b sonnet から opus への格上げ')}`;
     const kill = body.indexOf('commandmatedev instances "$WT" kill claude');
     const clear = body.indexOf('set_claude_model "$WT_PATH" opus');
     const send = body.indexOf('issue-${issue}-opus.yaml');

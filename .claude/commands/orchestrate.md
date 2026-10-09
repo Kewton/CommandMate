@@ -10,6 +10,46 @@ developブランチをオーケストレーターとして、複数Issueの並�
 
 **原則**: オーケストレーターはコードに触れない。制御と判断のみ。
 
+## 必ず守ること
+
+**実測・根拠は docs/orchestrate/ へ。本体には規則を 1 行だけ書く。** 根拠は「根拠: docs/orchestrate/<file>.md#<見出し>」の行で指し、
+run のたびには読まない手順（exit code ごとの対処・担当の切り替え・monitor）は、本体に「いつ・どの文書を読むか」を書いて docs/orchestrate/ に置く。
+本体のバイト数の上限は `scripts/check-orchestrate-size.mjs` が持つ（CI の `orchestrate-size`）。超えたら、実測・根拠を docs/orchestrate/ へ移す。
+下は、本文に散らばった必須・禁止の規則を 1 行ずつ集めたもの。括弧は元の見出しで、規則は元の場所にも残っている。
+
+- オーケストレーターはコードに触れない。制御と判断のみ（概要）
+- develop ブランチ上で実行する。契約系フラグ（`--contract` / `--verify`）が使えることを最初に確かめる（前提条件）
+- 送り先は `--instance` で指定し、send / wait / capture / respond で同じ値を渡す（Phase 0）
+- ワーカーに `/model` を送らない。Claude のモデルは起動時に `.claude/settings.local.json` で決める（Phase 0）
+- 迷ったら難（opus）にする。迷ったら Claude に回す（1-2b）
+- worktree の `npm install` では `--include=dev` を省かない（2-2）
+- `requireCommit: true` を外さない（2-4）
+- 同じブランチに契約を積むときは、`scope.allow` を前の契約の allow との和集合にする（2-4）
+- `.sh` を触る Issue では `gates` に `lint-sh` を足す（2-4）
+- `CHANGELOG.md` と `docs/module-reference.md` を `scope.allow` に入れない。ワーカーには断片を書かせる（2-4-1）
+- 整理と、振る舞いの変更を同じ PR に入れない。整理の契約の `scope.allow` に `tests/**` を入れない（2-4-3）
+- tmux・セッションに触れる Issue は、2-5 の 4 項目を契約に転記する（2-5）
+- 実機でエージェント CLI・サーバーを動かす Issue は、隔離の項目を契約に転記する（2-6）
+- 2.5 の分析の依頼は契約を使わない（素の send）（2.5-1）
+- assign.tsv / tasks.tsv を stdin で読まない（fd 3 から読む）（3-1）
+- send が exit 99 なら、待つ前に画面を見る（3-1）
+- send の stdout はパイプで切らずファイルに落とし、送信後に `started=1` を確かめる（3-1）
+- monitor の COMPLETE 判定をマージ可否の裁定に使わない。裁定は `wait --verify` の exit code（3-2）
+- `wait` には `--instance "$AGENT"` と `--on-prompt human` を付ける（3-3）
+- 裁定が作業の終わりのものだと確かめてから Auto-Yes を切る。合格の記録は再利用しない（3-3）
+- Antigravity 担当は、完了の合図（`IMPL_COMPLETED`）を確かめてから裁定する（3-3）
+- 不合格は先にワーカー起因かを判定する。再指示は同一 worktree につき最大 2 回（3-4）
+- 再指示の後の裁定は `wait` → `verify --task` の 2 段で行う（3-4）
+- ワーカーに「lint/tsc/test を実行して結果を報告して」と送らない（5-1）
+- 未処置の指摘（5-3）が残っている PR はマージしない（5-3）
+- 検証の順番待ちの間に、オーケストレーターが worktree にコミットしない（5-3）
+- 同時 CI は 3〜4 本。1 本に落とすのも失敗である（6-1）
+- `MERGEABLE` を組み合わせがコンパイルできる証拠にしない。refresh → tsc ＋ 影響テストを通してからマージする（6-2）
+- PR の `pull_request` run を手でキャンセルしない（6-2）
+- `bucket` に `fail` / `cancel` が 1 つでもあればマージしない。判定はスクリプトで行う（6-3）
+- 断片が無い PR・`check` が exit 0 にならない PR はマージしない（6-4）
+- 起票の前に同じ不具合の開いている Issue を探す。起票はユーザーの了承を得てから行う（8-3）
+
 ## 使用方法
 - `/orchestrate [Issue番号1] [Issue番号2] ...`
 - `/orchestrate [Issue番号1] [Issue番号2] --phase design` （設計フェーズまで）
@@ -118,10 +158,9 @@ done
 2. 本物の後退か、数え方の誤りかを分ける
 3. 数え方の誤りなら、計測を直す Issue を先に立てる。この Issue の契約には「数え方を変えない」（2-4-3）を書く
 
-実測（2026-10-06 #3270）: 「型安全の後退（any +1、eslint-disable +2）」を目標にしたワーカーは、コメントの英語の「any」を言い換え、
-決まりどおりの `declare global { var … }` を別の書き方に戻した。数だけが合い、実際の改善は無かった。
-原因は計測の誤りで（#3389 で修正）、契約の検証（lint・typecheck・unit-related）は通っていた。
 PR の前に `node scripts/count-suppressions.mjs --base origin/develop` を走らせ、0 でなければ止める（verify.yaml のゲートにはしない）。
+
+根拠: docs/orchestrate/difficulty.md#1-2-計測の誤りを目標にした実測
 
 ### 1-2b. 難易度判定と担当割当
 
@@ -162,13 +201,15 @@ PR の前に `node scripts/count-suppressions.mjs --base origin/develop` を走�
 根拠: docs/orchestrate/difficulty.md#1-2b-重複の報告の行き先の根拠
 
 **確定 diff は、対象のコードを読んでから書く**: 起票で確定 diff を書くときは、対象の範囲を `sed -n '<開始>,<終了>p' <file>` などで
-実際に読んでから書く。#2936（2026-09-28）は実コードを読まずに「既存の `else` ブロックを入れ子にする」修正案を書き、
-契約の作成時に過大と気づいて `else if` 1 段に直した（Issue も更新）。確定 diff の誤りは、「易」の前提をそのまま崩す。
+実際に読んでから書く。
+
+根拠: docs/orchestrate/difficulty.md#1-2b-確定-diff-を読まずに書いた例
 
 **Claude の中の振り分け（opus / sonnet）— 2026-09-30 改定（Sonnet 5.5）**
 
 Claude の担当は、Issue の中で**ワーカーが自分で見つけなければならないもの**の大きさで opus と sonnet に分ける。
-2026-09-30 に Sonnet 5.5（`sonnet` が指すモデル）が出たので、パイロットの「中」を「危険な領域・依存だけ」から「**選択肢か手順が本文で閉じている判断・設計**」まで広げた（根拠は下の実測）。
+
+根拠: docs/orchestrate/difficulty.md#1-2b-中の範囲を広げた経緯
 
 | 難易度 | 担当 | モデル | 条件 |
 |---|---|---|---|
@@ -192,9 +233,7 @@ Claude の担当は、Issue の中で**ワーカーが自分で見つけなけ�
 条件は、実装そのものが自動の受入基準（描画結果の class・DOM・e2e など）で一意に決まること。
 実機の項目は、担当に関係なく UAT（Phase 7）で確かめる。
 
-- 「難」にしない例: #2616（アイコンの差し替え）。描画された svg の class でテストに固定でき、実機の項目は「見分けやすいか」の確認だけだった。
-  2026-09-17 にこの行で「難」にして Claude に回したが、変更は 6 ファイル・86 行で、コミットまで約 4.5 分だった
-- 「難」にする例: 実機の CLI やブラウザの画面を見ないと、直し方や合否が決まらないもの（実画面の遷移に依存する検出の修正など）
+根拠: docs/orchestrate/difficulty.md#1-2b-検証の注の例
 
 **迷ったら Claude に回す。** 判定の根拠は 1 行で plan.md に残す（1-5）。
 Phase 8 の改善案（8-3）は、この根拠と実際の結果を突き合わせて書く。
@@ -206,10 +245,10 @@ Phase 8 の改善案（8-3）は、この根拠と実際の結果を突き合わ
 **新規 worktree では信頼ダイアログがほぼ必ず出る**（2026-09-20 の run、#2770 で実測）ので、
 exit 99 を受けたら**待たずにまず画面を見る**。手順は 3-1 の「冷間起動の失敗」に書いてある。
 
-判定の背景（2026-09-17 のパイロット、#2595 / PR #2602）: テスト 1 ファイル・原因と確定仕様あり・
-受入基準がすべて自動、という Issue を Antigravity に回したところ、作業ルールをすべて守って
-実装は 5 分で終わった。Antigravity は `.claude/commands` を読まないので、`/pm-auto-issue2dev`
+Antigravity は `.claude/commands` を読まないので、`/pm-auto-issue2dev`
 のような多段ワークフローは使えない。Issue 本文だけで実装が決まる粒度のものに限る。
+
+根拠: docs/orchestrate/difficulty.md#1-2b-判定の背景
 
 ### 1-3. 依存関係の分析
 
@@ -235,15 +274,9 @@ mkdir -p workspace/orchestration/runs/$DATE
 ```
 
 **run の記録**（#3477）: 各 Issue の段（`contract` / `send` / `verify` / `review`（5-2b）/ `findings`（5-3）/ `precheck` / `pr` / `ci` / `merge`。
-この順が run の順で、整合性レビューと指摘の処置は PR の前、CI はゲートと並走（6-1-1））が終わるたびに、`scripts/orchestrate/run-log.mjs` で 1 行を追記する。置き場所は `workspace/orchestration/runs/$DATE/run-$RUN_ISSUES.jsonl`
-（1 行 1 段の JSON。issue・段・結果・HEAD・task id・契約・担当とモデル・所要時間・時刻）。追記だけなので、同じフォルダの別の run の
-ファイルは上書きしない。`verify` / `review` / `findings` / `precheck` / `ci` / `merge` は HEAD つきでしか記録できない（その HEAD にだけ効く）。
-`status` の `next` は、**最新の HEAD について満たしていない最初の段**: 後の段が通った後で前の段が `fail` になればそこへ戻り、
-HEAD が変われば検証・確認をやり直す（`skip` は通ったと数える。対象外の段も `skip` を記録する。ただし `verify` / `findings` / `precheck` は `ok` だけ）。
-`verify` / `review` / `findings` は**作業の HEAD**（ワーカーの最後のコミット）で、ほかの段は**公開する HEAD** で見る。develop の取り込みや
-module-reference の一本化を重ねた HEAD の記録には、`--work-head <作業の HEAD>` で作業の HEAD も書く（公開のスクリプトと precheck は自分で書く）。
-この規則は `publish-pr.mjs` / `merge-pr.mjs` の止まる条件と同じ関数（`unmetStage`）なので、再開先と公開側の判定はずれない。
-`verify` は `scripts/orchestrate/wait-verify.mjs`（3-3）、`precheck` は `scripts/orchestrate/precheck.mjs`（6-1-1）が自分で書く。
+この順が run の順で、整合性レビューと指摘の処置は PR の前、CI はゲートと並走（6-1-1））が終わるたびに、`scripts/orchestrate/run-log.mjs` で 1 行を追記する。置き場所は `workspace/orchestration/runs/$DATE/run-$RUN_ISSUES.jsonl`。
+記録の中身（1 行の項目）と `status` の `next` の決まり（作業の HEAD と公開する HEAD・`skip` の扱い・`--work-head`）は、HEAD を重ねたコミットを手で記録するときと、再開先が思ったものと違うときに docs/orchestrate/run-log.md#1-5-記録の中身と-next-の決まり を読む。
+
 **セッションが落ちたら、会話の記録ではなくこれを読んで再開する**:
 
 ```bash
@@ -296,8 +329,9 @@ cd "../commandmate-issue-{N}" && npm install --include=dev
 ```
 
 `--include=dev` は省かないこと。シェルが `NODE_ENV=production` だと devDependencies（vitest / eslint など）が入らない。
-そうなると、ワーカーの確認コマンドも検証ゲートも動かない。2026-09-17 の run では 3 つの worktree すべてで起き、
-ワーカーが自力で補った（Claude は `npm install --include=dev`、Antigravity は main dir の `node_modules` をコピー）。
+そうなると、ワーカーの確認コマンドも検証ゲートも動かない。
+
+根拠: docs/orchestrate/contract.md#2-2-devdependencies-を入れる理由
 
 ### 2-3. CommandMateへの登録確認
 
@@ -367,10 +401,7 @@ node scripts/orchestrate/contract.mjs generate \
   --config "workspace/orchestration/runs/$DATE/contract-<N>.yaml" --worktree "$WT_PATH"
 ```
 
-- 生成器は、出力する契約を正準のパーサー（`src/lib/tasks/contract-parser.ts`）と同じ制約で検査する（title 200 文字・gate の形と重複・scope の形）。
-- **goal が 8,000 文字を超えると生成が失敗する**（契約の上限）。Issue 本文を要点に縮めた `issueBodyFile` を渡し直す
-- `scope` に `CHANGELOG.md` / `docs/module-reference.md` を書くと生成が失敗する（2-4-1）。`requireCommit: true` は常に入る
-- 同じ設定で再実行しても契約は変わらない（`unchanged`）。中身の違う契約が既にあると止まる。送信前に直すときだけ `--force`
+- 生成が失敗したとき・止まったときは docs/orchestrate/contract.md#2-4-生成器が止まる条件 を読む（検査する制約・goal の上限・scope に書けないファイル・再実行と `--force`）
 - 2-4-2 の差し替え（テスト全体）は雛形に入っていない。生成した契約に手で足す
 - `kind: refactor` では 2-4-3 の整理の決まりが goal に入り、gates の既定が `[lint, typecheck]` になる。`tests/` の下の glob を scope に書くと生成が失敗する
 
@@ -383,8 +414,8 @@ node scripts/orchestrate/contract.mjs generate \
   ファイル集合をそのまま使う。
 - **同じブランチに契約を積むとき**（設計の契約の後の実装の契約、実装を 2 本に分けたときの 2 本目など）は、
   `scope.allow` を**前の契約の allow との和集合**にする。scope ゲートは origin/develop 比のブランチ全体の差分を
-  見るので、その契約で触る範囲だけを書くと、前の契約で入れたファイルが範囲外になる
-  （2026-10-04 #3184 で実測。19 件が範囲外になり exit 20）。
+  見るので、その契約で触る範囲だけを書くと、前の契約で入れたファイルが範囲外になる。
+  根拠: docs/orchestrate/contract.md#2-4-和集合にする実測
 - `verify.gates` を絞ると**絞ったゲートしか裁定しない**。`unit-related` は、変更に関係するテストと、
   リポジトリのファイルを読むテストだけを実行する（`scripts/run-related-unit-tests.mjs`。import されない
   ファイルが変わったときはテスト全体に切り替わる）。テスト全体の合否は CI の `Unit Tests` で見るので、
@@ -397,9 +428,7 @@ node scripts/orchestrate/contract.mjs generate \
   goal の受入基準に「`tests/setup.ts` に、その置き場所をテスト用の一時パスへ向ける既定を足す
   （`CM_OPENCODE_PORT_FILE` / `CM_OPENCODE_V2_DIR` と同じ形）」を書く。`scope.allow` に `tests/setup.ts` を入れ、
   共通設定の変更なので `gates` は `unit` にする。
-  #2934 で `CM_OPENCODE_V2_DIR` を足したときにこれが無く、起動処理を走らせるテストが利用者の
-  `~/.commandmate/opencode-v2/` を消していた（#2948 で修正）。`env-clean` は `~/.commandmate` **直下**の増減しか見ないので、
-  その下の中身が消えても捕まらない。
+  根拠: docs/orchestrate/contract.md#2-4-home-配下の置き場所の実例
 
 #### 画面・CLI に見える変化を含む Issue
 
@@ -438,8 +467,9 @@ node scripts/orchestrate/contract.mjs generate \
 
 **契約付き send では、goal の先頭にスラッシュコマンドを書いても起動しない。** 送信本文は
 `## 実行契約`（変更可能パス・完了条件）から始まり、goal はその後ろの `## タスク` に入るため、
-`/pm-auto-issue2dev 2598` は平文として届く（2026-09-17 #2598 で実測。ワーカーは skill を呼ばずに
-直接実装した）。goal には**スラッシュコマンドに頼らず、実装に必要な指示をすべて書く**。
+`/pm-auto-issue2dev 2598` は平文として届く。goal には**スラッシュコマンドに頼らず、実装に必要な指示をすべて書く**。
+
+根拠: docs/orchestrate/contract.md#2-4-2-スラッシュコマンドが起動しなかった実測
 
 - **Claude 担当**: 従来どおり Issue 本文（事象・原因・対応方針・受入基準）と 2-4-1 の作業ルールを書く。
   Claude は指示が薄くても Issue レビューや設計相当の確認を自発的に行う。
@@ -475,9 +505,7 @@ goal の雛形は **`scripts/orchestrate/templates/goal.md` が持つ**（#3477�
 **対のテストでは破損が見えない Issue**（テストの共通設定・ヘルパーを変える、広い範囲の rename）**だけ**である。
 **Issue の受入基準に `npm run test:unit` と書いてあることは、差し替えの理由にならない。**
 
-理由は排他が片側にしか無いこと: `verify` の重いゲートは `mutex: cpu.heavy` を取るが、
-**ワーカーが goal の指示で直接叩く `npm run test:unit` は mutex を取らない**。
-両者が同じマシンで重なると、テストが全部通っているのにティアダウンの race でゲートが落ちる。
+根拠: docs/orchestrate/contract.md#2-4-2-差し替えの条件の理由
 
 根拠: docs/orchestrate/contract.md#2-4-2-差し替えの条件を狭めた実測
 
@@ -553,45 +581,20 @@ PR の前の確認（6-1-1 の `scripts/orchestrate/precheck.mjs`）を `--kind 
 **採用の基準**: 写しが 1 つになって行が減るか、長い関数が短くなるなら採用する。
 行が増えて、重複が引数の受け渡しに置き換わるだけなら採用しない。
 写しをまとめる手順の契約は `mergesCopies: true` にして（`git diff --shortstat` の 1 行が入る）、ワーカーに行数で判定させる。
-実測: 採用しなかった手順は 9 つ。
+
+根拠: docs/orchestrate/refactor.md#2-4-3-採用の基準の実測
 
 根拠: docs/orchestrate/contract.md#2-4-3-採用しなかった手順
 
 根拠: docs/orchestrate/contract.md#2-4-3-置き場所と同期の理由
 
-**ファイルを消す手順**: 消す前に、`docs/` の設計文書がそのファイルを名指ししていないかを確かめる（`grep -rn '<ファイルのパス>' docs/`）。
-名指しされているファイルは消さない。文書を直すかどうかは、別の Issue で決める。
-実測: R-3 は、CI の `tests/unit/docs/design-doc-identifier-audit.test.ts` で落ちた。設計文書が名指しする 2 ファイルを元に戻した。
-
-**関数や定数などの名前を消す手順**: ファイルを消す手順と同じ決まりを、関数・定数・型などの名前を消すときにも使う。
-消す前に、設計文書がその名前を名指ししていないかを確かめる（`grep -rn '<名前>' docs/design/`）。名指しされている名前は消さない。
-PR を出す前に `npx vitest run tests/unit/docs/design-doc-identifier-audit.test.ts` を実行する。
-実測: N-5 は、消した未使用の関数 `readCopilotSettings` を設計文書が名指ししていて、同じテストで落ちた。その関数は元に戻した。
-
-**コメント**: 書き換えずに移す。整理の結果、説明が合わなくなったコメントは、その PR では直さない。
-オーケストレーターが一覧に残し、最後にコメントだけの PR で直す。
-
-**同じ列の手順を 1 本の PR にまとめる**: 同じ列（同じ Issue）の手順は、同じブランチにコミットを積んでよい。CI の周回が減る。
-後の手順の契約の `scope.allow` には、前の手順が作ったファイル（`changelog.d/<N>.md` など）を入れる。
-実測: W-2 は入れ忘れて、scope ゲートが不合格と出た。
-
-**テストが自分どうしの比較になる変更**: 互換の関数を消すと、それを確かめていたテストは、同じ関数どうしを比べることになる。
-テストを消したり、題名を変えたりしない。PR に書いて、利用者に訊く。実測: 列 T（#3228）。
-
-**範囲外の食い違い**: ワーカーは直さずに報告する（雛形の「本文に無い指摘」）。
-オーケストレーターは、仕分け用の Issue 1 本に、番号を付けて集める。実測: #3232 に 48 件（2026-10-05 07:20 時点）。
-写し（重複）の報告は、整理の Issue の候補として残す（1-2b、8-4）。
-
-**検証ゲート**: 契約のゲートは `lint` と `typecheck` にする。テスト全体は PR の CI で見る。
-`unit-related` は 1 回 13〜22 分かかり、`cpu.heavy` で直列になるためである。
-ローカルの裁定がテストを含まないので、マージは CI の `Unit Tests` が `pass` になってから行う（6-2 の例外と同じ扱い）。
+整理の Issue の契約を起案するとき（`kind: refactor`）と、整理の PR がゲートや CI で落ちたときは、docs/orchestrate/refactor.md#2-4-3-整理の-issue-でだけ使う手順 を読み、その手順（ファイルや名前を消す前の確かめ方・コメント・同じ列の手順・テストが自分どうしの比較になる変更・範囲外の食い違い・検証ゲート）に従う。
 
 ### 2-4-4. 新しい仕組みの設計の事前レビュー（試行中の段、2026-11-06 まで）
 
-5-2b の整合性レビューはマージの前の段で、設計の穴を実装の後に見つける。#3397（読めない選択画面に Auto-Yes が Enter を送る）は
-整合性レビューを 3 回受け（3 件 → 2 件 → 3 件）、1 往復で約 45 分かかった。指摘はコードの書き方ではなく設計の穴だった
-（画面のキャッシュの寿命 5 秒と確認の間隔 2 秒、停止を通らないセッションの作り直しの経路、Auto-Yes 中は親がプロンプト欄を出さないこと）。
-そこで、最終の契約をワーカーに送る**前**に、設計の要点を Codex に 1 回見せる。**期限つきの試行**で、常設しない。
+5-2b の整合性レビューはマージの前の段で、設計の穴を実装の後に見つける。そこで、最終の契約をワーカーに送る**前**に、設計の要点を Codex に 1 回見せる。**期限つきの試行**で、常設しない。
+
+根拠: docs/orchestrate/contract.md#2-4-4-事前レビューを足した理由
 
 - **期限:** 2026-11-06 まで（4 週間）。期限の日に、下の記録を集計して、続ける・入れる・やめるの判断案を書き、Codex のレビューを受けてから利用者に伺う
 - **対象の条件:** 危険な領域（hook・セッション・検出・ポーリング／Auto-Yes・tmux・security・応答の形・隔離）で、**状態・副作用・寿命を変える** Issue。
@@ -599,18 +602,10 @@ PR を出す前に `npx vitest run tests/unit/docs/design-doc-identifier-audit.t
   対象でないもの（表示だけの変更・docs だけ・テストだけ・状態や寿命に触れない修正）は飛ばし、飛ばした理由を plan.md に 1 行残す
 - **置き場所:** 実行契約の起案（2-4）の後、最終の契約を送る（3-1）前。**バグは Phase 2.5（原因の分析）の後**に行う。
   レビューで変わった scope と受入基準は、最終の契約に反映してから送る
-- **書くもの（半ページ）:** 「何が・いつ・どの経路で起きるか」。入力の取り方、状態の寿命と消える条件、同じ値を読む他の経路、画面に出る条件。
-  **事実と見立てを分け、参照したコード（file:line）と未確認の事項を必ず書く**
-- **Codex への依頼の形:** `--agent codex` に 1 本ずつ（セッションは直列）。半ページの文書を渡し、「設計の穴（寿命・経路・競合・他の読み手）を、
-  守るべき条件・全経路・対照のテストの形で挙げてほしい」と頼む。コードの書き方の指摘は求めない
-- **指摘の契約への入れ方:** 指摘を契約の goal に「守るべき条件」「全経路の一覧」「対照のテスト（陽性・陰性）」として書き、
-  scope と受入基準を直す。採らない指摘は理由を plan.md に残す
+- **書くもの・依頼の形・指摘の契約への入れ方・記録:** 対象の Issue では docs/orchestrate/trials.md#2-4-4-事前レビューの書き方と記録 を読み、その手順で行う
 - **依頼文は送る前に利用者に見せる**（高難易度の意思決定の既存の決まりと同じ）。承認を得てから送る
 - **5-2b は残す。** 事前レビューをした Issue も 5-2b の対象に含める
-- **記録（総時間と再レビューの回数の比較）:** 5-2b と同じ run のフォルダの `consistency-review.md` の表に「事前レビューの有無」の列を足して記録する（新しい表は作らない）。
-  事前レビューの待ち時間を含む 1 本あたりの総時間と、5-2b の再レビューの回数を、有無で比べる
-- **期限の集計の手順:** 1. 各 run の `consistency-review.md` を、事前レビューの有無で分けて合計する（総時間・再レビュー回数・独自の発見）
-  2. 続ける・入れる・やめるの判断案を書く 3. Codex のレビューを受ける 4. 利用者に伺う
+- **期限の集計の手順:** 期限の日に docs/orchestrate/trials.md#2-4-4-期限の集計の手順 を読む
 
 ### 2-5. tmux / セッションに触れる Issue の追加ルール（必須）
 
@@ -659,8 +654,8 @@ Phase 1-2 で `bug` ラベルと分類されたIssueに対して、他エージ�
 判定は 1-2b の「原因」の観点と同じ基準（`バグで、原因が file:line まで特定されていない`）で行う。
 2.5 が生む成果物は「再現パスの特定・根本原因・対策案」の 3 つで、**それが本文に既にあるなら、
 委譲しても同じものを書き直させるだけ**である。スキップしたことと理由は plan.md に 1 行残す。
-（2026-09-20 の run で #2780 / #2781 の 2 件をこの理由でスキップした。どちらも原因を file:line の表で
-特定し、実測と検証済みの確定パッチまで本文に載せていた）
+
+根拠: docs/orchestrate/contract.md#25-原因が本文にあってスキップした例
 
 ### 2.5-1. 他エージェントに分析依頼
 
@@ -668,33 +663,7 @@ Phase 1-2 で `bug` ラベルと分類されたIssueに対して、他エージ�
 `--verify` は必ず `work-evidence` ゲートを含む（`--gates` で外そうとしても `wait --verify` は
 全ゲート要求になる）ため、成功した分析ほど exit 21 になる。契約付き委任は**変更を伴う委任**にだけ使う。
 
-develop worktree上でバグIssueごとに根本原因分析を実行する：
-
-```bash
-WORKTREE_ID="mycodebranchdesk-develop"
-
-for bug_issue in $BUG_ISSUES; do
-  ISSUE_BODY=$(gh issue view "$bug_issue" --repo Kewton/CommandMate --json body -q '.body')
-
-  # 必ず --agent copilot 等でclaude以外のエージェントを指定
-  commandmatedev send "$WORKTREE_ID" "Issue #${bug_issue} の根本原因分析を実施してください。コードを変更せず分析のみ行い、結果をテキストで出力してください。
-
-## Issue内容
-${ISSUE_BODY}
-
-## 分析要求
-1. 事象の再現パスをコード上で特定
-2. 根本原因を特定（直接原因、設計上の問題、類似リスク）
-3. 対策案を策定（即座対策、恒久対策、予防策）" \
-    --agent copilot --model claude-sonnet-5 --auto-yes --duration 1h
-
-  commandmatedev capture "$WORKTREE_ID" --instance copilot --pane --tail 20
-  # 画面のモデル表記を確認し、想定外のモデルで動いていないかを確かめる
-
-  commandmatedev wait "$WORKTREE_ID" --instance copilot --timeout 3600 --on-prompt agent
-  commandmatedev capture "$WORKTREE_ID" --instance copilot
-done
-```
+バグ Issue ごとの分析の依頼は、develop worktree の上で 1 本ずつ送る。送るときは docs/orchestrate/workers.md#25-1-分析の依頼の送り方 を読み、その送り方（`--agent copilot --model claude-sonnet-5`・モデル表記の確認・`wait --on-prompt agent`）で送る。
 
 ### 2.5-2. 分析結果のIssue追記
 
@@ -719,11 +688,12 @@ gh issue edit "$bug_issue" --repo Kewton/CommandMate --body "${CURRENT_BODY}${AN
 
 - **写しが要るとき（1 つにできないとき）**: ずれを検出するテストを足す。**欄の名前の一致だけでは足りない。**
   必須・省略可、値の型まで比べる。テストは、手で作った応答ではなく、**実際の応答**（実装が返す値）を使う
-  （#3300: 欄の名前は同じで、必須か省略可かが違った。テストは、サーバーが返さない形の応答を手で作っていた）
+  根拠: docs/orchestrate/contract.md#25-4-写しと全経路のテストの実例
 - **「全部の場所が同じ決まりを守る」とき**: **同じ事例を各経路に当てるテスト**で固定する
   （例: 別サーバーのセッションを各ルートに当て、409 が返ることと、送信されないことを確かめる）。
-  名前の grep の列挙を、取りこぼしの検査にしない（#3290: grep の語に掛からない経路が 1 本漏れた）。
+  名前の grep の列挙を、取りこぼしの検査にしない。
   import があることだけで合格にしない
+  根拠: docs/orchestrate/contract.md#25-4-写しと全経路のテストの実例
 
 写しがあるかは、分析結果の「類似リスク」と、直す箇所の関数名・文言の grep で確かめる。
 判断の結果は、Issue への追記（2.5-2）に含め、plan.md にも 1 行残す。
@@ -797,11 +767,11 @@ done 3< "workspace/orchestration/runs/$DATE/assign.tsv"
 
 **assign.tsv を stdin で読まない**（2026-09-30 実測）: `while read …; done < assign.tsv` にすると、
 ループの中の `commandmatedev`（`ls` / `send` / `capture`）が stdin を読み、残りの行を消費する。
-その run では 1 件目の `send` の前でループが止まり、**約 90 分、ワーカーが 1 人も起動していないのに「送信中」と報告した**
-（send の出力ファイルは 1 つも作られず、`GET /api/worktrees/<WT>/tasks` は空だった）。
 上の雛形は fd 3 から読むので、ループの中のコマンドに `</dev/null` を付けなくてよい。雛形を書き換えて使うときも、
 stdin で読む形に戻さないこと。ループを使わずに 1 件ずつ送るときは、各 `commandmatedev` に `</dev/null` を付ける。
 `task MISSING` が出たら、その Issue は送れていない。`send-<issue>.err` を読み、3-1 の「冷間起動の失敗」に従って再送する。
+
+根拠: docs/orchestrate/workers.md#3-1-assigntsv-を-stdin-で読んで止まった実測
 
 **モデルの確認結果の扱い**:
 
@@ -825,18 +795,7 @@ send の後に task が `cliToolId` / `instanceId` = 担当に紐づいている
   **待つ前に画面を見る。** 待ってから再送する手順だと、新規 worktree でほぼ必ず出る信頼ダイアログに
   2 分を払ったうえで 2 回目も同じ exit 99 になる（#2770 で実測）。
 
-  ```bash
-  SCREEN=$(commandmatedev capture "$WT" --instance "$AGENT" --pane --tail 30)
-  ```
-
-  | 画面 | 対応 |
-  |---|---|
-  | 信頼ダイアログ（`Do you trust the contents of this project?`） | `tmux send-keys -t "=mcbd-<agent>-<worktree-id>:" Enter` で確定 → **待たずに再送** |
-  | 既にプロンプト（入力欄の枠が出ている） | **待たずに再送**（送信枠に間に合わなかっただけ） |
-  | まだ起動中（バナーも入力欄も無い） | 約 2 分待ってから 1 回だけ再送する |
-
-  再送では task が作り直されるので、tasks.tsv の task id を差し替える。
-  再送も exit 99 なら、もう一度画面を見る（同じ表で分岐する）。再指示回数には数えない（3-4）。
+  exit 99 を受けたら docs/orchestrate/exit-codes.md#3-1-冷間起動の失敗-exit-99 を読み、画面ごとの表（信頼ダイアログ・既にプロンプト・まだ起動中）で分岐して再送する。
 
 - **スラッシュコマンドは CommandMate リポジトリの worktree でのみ有効**。外部リポジトリの worker に
   送ると `Unknown command` で無反応になる（send は exit 0、composer も空なので気づけない）。
@@ -854,54 +813,7 @@ send の後に task が `cliToolId` / `instanceId` = 担当に紐づいている
 commandmatedev ls --branch feature/
 ```
 
-より詳細な監視は orchestrate-monitor skill を使う。契約付き委任では**タスク状態を一次ソース**に
-できるので、`hooks-task.sh` を併せて読み込む:
-
-```bash
-MONITOR_HOOKS_BASE=origin/develop \
-.claude/skills/orchestrate-monitor/scripts/monitor.sh \
-  --verbose \
-  --hooks .claude/skills/orchestrate-monitor/scripts/hooks-git.sh \
-  --hooks .claude/skills/orchestrate-monitor/scripts/hooks-task.sh \
-  --interval 20 --idle-threshold 8 <worktree-id> ... 2>&1 | tee monitor.log
-```
-
-介入先の tmux セッションは capture の `cliToolId` から導出されるので**指定は不要**（#1601）。
-既定インスタンス以外を見るときだけ `<worktree-id>@<instance-id>`（例 `w1@codex-2`）で指定する。
-**Antigravity のワーカーは `<worktree-id>@antigravity` で渡す**（worktree の既定は claude なので、
-付けないと Claude のペインを見る）。
-
-Antigravity のワーカーの画面判定の目印（#2606 の修正の経緯を含む）は、monitor の表示と画面が食い違うときに docs/orchestrate/antigravity.md#3-2-画面判定の目印と経緯 を読む。
-
-Antigravity のワーカーについては次のように扱う:
-
-- `hooks-task.sh` は引き続き**必ず**付け、完了の一次ソースにする。ポーラーのカーソルが画面の最終行を
-  越えていると、`realtimeSnippet` にも `content` にもペインの行が無く、そのポーリングは `IDLE` になる
-- 着手の確認は `GENERATING` / `PROMPT` の行で行える。補助として
-  `commandmatedev capture "$WT" --instance antigravity --prompts --limit 5`（Auto-Yes が応答した
-  許可ダイアログが時刻つきで並ぶ）や commits / uncommitted の増加も使える
-- レート制限・API エラー（再送）の目印は Claude の文言のままで、agy の画面では当てにしない
-  （agy のその画面は実機キャプチャが無い）
-- 画面を見るときは `commandmatedev capture "$WT" --instance antigravity --pane --tail 30` を使う
-  （`--json` の `realtimeSnippet` / `content` は agy の画面では空行ばかりになることがある）
-
-**起動直後に `monitor hooks ERROR` が出ていないことを確認する（#1728）。** 出ていたら
-worktree-id が checkout に解決できておらず、`commits` / `uncommitted` は**測定値ではなく恒久 0** で、
-「未起動 idle を COMPLETE と誤報しない」STARTED ガードが実質的に無効になっている。
-その場合は checkout の親ディレクトリを渡して回避する:
-
-```bash
-MONITOR_WORKTREE_ROOT=.. MONITOR_HOOKS_BASE=origin/develop \
-.claude/skills/orchestrate-monitor/scripts/monitor.sh ... # 以下同じ
-```
-
-**ログを `grep` で絞るときは `ERROR|WARN|alive` をパターンに必ず含めること。** 上の
-`| tee` なら全部残るが、実運用でよくやる
-`| grep -Ei "STALL|IDLE|BLOCKED|PROMPT|COMPLETE|NOT_STARTED|ERROR|FAIL"` 形だと、
-フック側の診断（上記）と監視自身の生存報告（`monitor: alive (poll=N, …)`、既定 10 ポーリングごと）が
-落ちる。2026-08-06 に監視が **exit 144 で沈黙終了**し、ワーカー 2 本が約 25 分間無監視のまま
-走り続けたのはこれが理由である。`alive` が途切れた所が最後に生きていたポーリングで、
-異常終了時は `caught SIG…` / `exiting on poll round …` が stderr に出る。
+より詳細な監視は orchestrate-monitor skill を使う。monitor を起動するときは docs/orchestrate/workers.md#3-2-monitor-の起動と読み方 を読み、その手順（`hooks-task.sh` を付ける・Antigravity のワーカーは `<worktree-id>@antigravity` で渡す・起動直後に `monitor hooks ERROR` が無いことを確かめる・ログを絞るときは `ERROR|WARN|alive` を含める）で動かす。
 
 **monitor の COMPLETE 判定をマージ可否の裁定に使わないこと。** 裁定は 3-3 の
 `wait --verify` の exit code である。
@@ -934,47 +846,30 @@ done 3< "workspace/orchestration/runs/$DATE/tasks.tsv"
   切った後に `capture --json` の `autoYes.enabled` を読み直し、切れていなければ 3 回まで再試行する。切れなかったら警告を出し、
   記録の要約に `auto-yes=NOT-disabled` と残す。切り直しだけをするときは `wait-verify.mjs --auto-yes-off --wt "$WT" --instance "$AGENT"`（切れなければ exit 1）。
   20 の再指示（3-4）の send には `--auto-yes --duration 3h` を付け直す
-- **完了の確定**（下の 2 つの手順と同じことをスクリプトが行う）: Antigravity（と `--require-signal` を付けた担当）は、
-  行全体が `IMPL_COMPLETED` の行が画面に出るまで 30 秒ごとに待つ。次に、直近の検証の開始時刻（`verify history`）と
-  最後のターン終了（`capture --json` の `lastStopEventAt`）と最後のコミットの時刻と作業ツリーを比べる。検証の開始の後にコミットがあるか、
-  最後のターン終了より前に始まって作業ツリーに変更があれば、検証は途中の状態を見ているので `verify "$WT" --task "$TASK_ID"` でやり直し、
-  その結果を記録する。時刻が読めないときは推測せず、記録の要約に `run-start=unknown` / `last-stop=unknown` と残す
+- 完了の確定（合図を待つ・検証の開始時刻と最後のターン終了とコミットを比べる）はスクリプトが行う。中身は exit 3 の理由を読むときに docs/orchestrate/workers.md#3-3-wait-verifymjs-が行う完了の確定 を読む
 - **合格の記録は再利用しない。** 合格は task・契約（そのゲートの定義）・その task の開始時の env-clean の基準に結び付いていて、
   HEAD だけでは同じ確認と言えない（同じブランチに次の契約を送った直後も HEAD は同じ）。呼ぶたびに待って検証する。
   落ちた後の再開では、`run-log.mjs status` で `verify=ok` の Issue を呼び直さない（終わった task を `wait --verify` で裁定し直すと、
   紐づかない再検証になり #3118 の形で exit 20 になる）。裁定をやり直すときは `--after-reinstruct --task "$TASK_ID"`
 - 再指示の後（3-4）は `--after-reinstruct --task "$TASK_ID"` を付ける。`--verify` を付けない wait → `verify --task` の 2 段になる
-- Antigravity のワーカーでは、Auto-Yes が許可ダイアログに応答している間も、wait のログに
-  `Prompt detected … Waiting for human response...` が繰り返し出る。応答済みかどうかは
-  `capture --prompts` の `[answered:auto]` で確かめる。このログだけを見て介入しないこと。
+- Antigravity のワーカーの wait のログに `Prompt detected` が繰り返し出ても、それだけを見て介入しない。確かめ方は docs/orchestrate/antigravity.md#3-3-wait-のログの-prompt-detected を読む
 - `--verify` は完了検出**後**に全ゲート（`work-evidence` ＋ `scope` ＋ verify.yaml の宣言ゲート）を
   実行し、その結果を exit code にする。ここが「完了したが壊れていた」を目視から exit code へ
   移す一点である。
 - 契約の `gates` が `unit-related` のとき、`--verify` の裁定はテスト全体を含まない。テスト全体の合否は CI の `Unit Tests` で見る（6-2 の例外）。
 
-**Antigravity 担当は、完了の合図（`IMPL_COMPLETED`）を確かめてから裁定する。** agy は作業の途中でも
-ターンを閉じることがある。例えば、バックグラウンドで起動したコマンドの終了を `schedule`（数十秒後に自分を起こす）で待つとき。
-wait はそのターン終了を完了（`basis=hook_stop`）と読むので、作業が終わる前に検証が走る。
+**Antigravity 担当は、完了の合図（`IMPL_COMPLETED`）を確かめてから裁定する。**
+
+根拠: docs/orchestrate/antigravity.md#3-3-途中でターンを閉じる理由
 
 `wait-verify.mjs` を通さずに待ったとき（3-5・3-5b の `commandmatedev wait --verify` など）や、exit 3 の理由を確かめるときは、docs/orchestrate/antigravity.md#3-3-完了の合図を手で確かめる を読み、その手順で合図と検証の開始時刻を確かめる。
 
 **完了検出が壊れているときは `verify --gates` へ退避する。** `wait --verify` はゲートの前に
-完了検出を通すので、検出層の欠陥が裁定そのものを止める。2026-08-24 に #2011（`isUnclassifiedActive`
-の回帰）でこれが起き、**3 ワーカーの `wait --verify` が `Unclassified interactive frame …
-Waiting for human response...` を並べたまま 18 分空転した**（`--on-prompt human` なので
-exit 10 にもならない）。退避手順:
+完了検出を通すので、検出層の欠陥が裁定そのものを止める。
 
-```bash
-# 完了検出を経由せずゲートだけ回す（--gates を渡すと scope が選択されず exit 99 に落ちない）
-commandmatedev verify "$WT" --gates token-discipline,control-chars,claudemd-size,route-exports,\
-build-cli,build-server,lint,lint-sh,build,typecheck,integration,unit
-```
+退避手順は docs/orchestrate/workers.md#3-3-完了検出が壊れたときの退避 を読む（`verify --gates` に渡すゲートの一覧と、そのとき落ちる `work-evidence` / `scope` を手で照合する方法）。
 
-この一覧は `.commandmate/verify.yaml` の宣言ゲートと同じ集合にする（`tests/unit/tasks/orchestrate-lint-sh-gate-3478.test.ts` が固定。入れないゲートは理由つきでそのテストの除外に書く）。
-
-このとき `work-evidence` と `scope` は落ちるので、**オーケストレーターが手で照合する**
-（commits ≥ 1 かつ作業ツリークリーン／`git diff --name-only origin/develop...HEAD` を契約の
-`allow` と `deny` に突き合わせる）。ワーカーが完了しているかは commits と作業ツリーの状態で見る。
+根拠: docs/orchestrate/workers.md#3-3-完了検出が壊れた実例
 
 ### 3-4. exit code 分岐
 
@@ -1002,48 +897,7 @@ commandmatedev verify show "$RUN_ID" --json | jq '.gates[] | select(.status != "
 
 **先に、不合格がワーカー起因かを判定する。** 再指示と切替の回数に数えるのは、ワーカー起因の不合格だけである。
 
-- **ワーカー起因**: `lint` / `typecheck` / `unit` など宣言ゲートの失敗、`scope` 違反、`work-evidence` の不足、
-  および `env-clean` の違反のうちワーカーのコマンドが作ったもの
-- **ワーカー起因ではない**: 宣言ゲートが落ちたが、**そのゲートの出力で失敗したテストが 0 件**のもの
-  （ティアダウンの race。`Test Files N passed / Tests M passed` なのに exit 1 で、原因が
-  `EnvironmentTeardownError` などの未処理 rejection 1 件だけ）。**負荷が下がってから
-  `commandmatedev verify "$WT" --task "$TASK_ID" --gates <落ちたゲート>` で単独再実行し、再現しなければワーカー起因ではない**（契約で定義したゲートは task に紐づかないと見つからないので `--task` を付ける）
-  （2026-09-20 の #2771 で実測。原因は 2-4-2 の「差し替えの条件」にある mutex の非対称）
-- **ワーカー起因ではない**: `scope` の違反が、すべて同じブランチの前の契約のコミットで入ったファイルであるもの
-  （契約の書き方の誤り。`git show --name-only <この契約のコミット>` がすべて allow の中なら、ワーカー起因ではない。2-4 の和集合を参照）
-- **ワーカー起因ではない**: `env-clean` の違反のうち、ワーカーの作業と結び付かないもの。
-  2026-09-17 のパイロットでは、`env-clean` だけが FAIL して exit 20 になった。違反は次の 3 件で、いずれもワーカーと無関係だった:
-  - 別リポジトリの orchestrate が消した `mcbd-*` セッション（`-`）
-  - 別プロセスの TCP listener（`-`）
-  - ワーカーの最初のツール呼び出しより前の時刻が名前に入った `~/.commandmate-test-<ms>`（`+`）
-
-  `~/.commandmate-demo-vitest-<pid>`（`+`）は、#3479 より前のコードの `env-scripts.test.ts` だけが作る
-  （#3479 から作業場所は OS の一時ディレクトリで、`$HOME` には作らない）。base が #3479 より古いブランチの
-  テストが並行で動いていると現れ、このワーカー起因ではないことがある（2026-09-28 の 2 本並行の run。別の worktree の
-  生きたテストのものは #2954 で `other` に分かれる）。`[unattributed]` で残ったら、
-  `commandmatedev verify "$WT" --task "$TASK_ID" --gates env-clean` を再実行して、その項目が消えていれば合格として扱う。
-
-  帰属は次の 3 つで確かめる:
-  - ワーカーが実行したコマンド: `capture --prompts --limit 100` の `Run this command?` と、そこに書かれた `start with '<cmd>'`
-  - 最初のツール呼び出しの時刻
-  - 違反項目の時刻（`~/.commandmate-test-<ms>` の `<ms>` など）
-
-  ワーカー起因でないと判定した場合の扱い:
-  - 残りのゲートがすべて PASS なら、オーケストレーターの裁定で合格として扱う
-  - 裁定の根拠は PR の Test plan と summary に書く
-  - ワーカーには再指示しない
-
-**合図の前に始まった検証**（Antigravity 担当。3-3 の「完了の合図」）で `env-clean` だけが落ちたとき:
-
-- 違反は、ワーカー自身がまだ動かしていたもの（バックグラウンドのテスト実行の listener `[self]`、
-  テストが作って後で消す `$HOME` 直下のエントリなど）であることが多い。`~/.commandmate-demo-vitest-*` は
-  #3479 から作られない（#3395 はこの形で、ワーカー自身のまだ動いていたテストが作ったものだった）
-- 合図の後に `commandmatedev verify "$WT" --task "$TASK_ID" --gates env-clean` を再実行する
-  （`work-evidence` と `scope` も一緒に走る）
-- 再実行が PASS で、かつ 3-3 の確認で「最後のコミットが検証の開始より前・作業ツリーに変更なし」なら、合格として扱う。
-  **再指示・切替の回数には数えない**。裁定の根拠は PR の Test plan と summary に書く
-- 再実行でも落ちたら、残っている違反について、下のワーカー起因の判定に戻る
-- #2605 がこの形だった: 検証の開始は 01:28、合図は 01:33。再実行は PASS で、コミットも変わっていなかった
+exit 20 を受けたら docs/orchestrate/exit-codes.md#3-4-20-の対応 を読み、その判定（ワーカー起因・ワーカー起因ではない 3 つの形・合図の前に始まった検証）で、再指示するか、オーケストレーターの裁定で合格として扱うかを決める。
 
 ワーカー起因なら、失敗ゲートと `logTail` を添えて同じ worker に再指示する（契約は据え置き。再送は素の send でよく、
 `--instance "$AGENT"` を付ける）。再指示は **同一 worktree につき最大2回**。
@@ -1060,10 +914,9 @@ commandmatedev verify "$WT" --task "$TASK_ID" --json
 
 `--task` を付ければゲートは契約の `verify.gates` ＋必須の builtin（work-evidence / scope / env-clean）になるので `--gates` は要らない。
 
-exit code の読み方は上の表と同じ。理由:
-- `wait --verify` は進行中（running / waiting_input / verifying）の task にしか紐づかない（`IN_FLIGHT_TASK_STATUSES`）。1 回目の検証で task は終了済みになる
-- 紐づかないと scope は SKIP、env-clean は「ベースライン無し」の ERROR で exit 20 になり、ゲートも契約ではなく verify.yaml 全部になる
-- 2026-10-03 #3099 の実測: 宣言ゲートは unit 全体 1283 秒を含めて全 PASS なのに exit 20 になった
+exit code の読み方は上の表と同じ。
+
+根拠: docs/orchestrate/exit-codes.md#3-4-再指示の後に-2-段で裁定する理由
 
 **21 の対応**（作業証跡ゼロ）: ワーカーは1行も書いていない。ほぼ常に起動側の問題なので capture で切り分ける。
 
@@ -1071,79 +924,21 @@ exit code の読み方は上の表と同じ。理由:
 commandmatedev capture "$WT" --instance "$AGENT" --pane --tail 30
 ```
 
-- **composer に本文が残っている** → Enter 未確定。`tmux send-keys -t "mcbd-${AGENT}-$WT" Enter` で確定させる
-  （`commandmatedev respond` は空文字を受け付けず exit 2 になるのでここでは使えない）。
-  tmux セッション名は `mcbd-<エージェント>-<worktree-id>` である（Antigravity なら `mcbd-antigravity-<worktree-id>`）
-- **Antigravity のアンケート画面**（`How's the CLI experience so far? [1] Good … [0] Skip`）で止まっている →
-  Auto-Yes は答えず、`respond "0"` は `prompt_no_longer_active` になる。
-  `tmux send-keys -t "mcbd-antigravity-$WT" -l -- 0` で閉じる（2026-09-09 実測。2026-09-17 のパイロットでは出なかった）
-- **権限プロンプトで停止** → Enter で承認。monitor.sh に自動承認させる場合、送信先は
-  capture の `cliToolId` から `mcbd-<cliToolId>-<worktree-id>[-<suffix>]` が導出されるので
-  **オプション指定は要らない**（#1601）。`--session-prefix` は導出できないセッションを見るための
-  escape hatch で、渡すと導出を丸ごとバイパスするため**混在フリートでは使わない**
-  （例えば `mcbd-claude` を渡すと codex / copilot のワーカーまで claude 扱いに固定され、
-  存在しないペインへ撃つことになる）。届かなかった介入は stderr に `NOT delivered` と出る
-- **セッションが起動していない** → `commandmatedev ls` で存在確認、必要なら再送
-- 判別のための知見は orchestrate-monitor skill の STARTED ガード（`verify-completion.sh`）を参照
+画面ごとの対応（composer の未確定・Antigravity のアンケート画面・権限プロンプト・セッションの未起動）は、exit 21 を受けたら docs/orchestrate/exit-codes.md#3-4-21-の対応 を読み、その手順で切り分ける。
 
 ### 3-5. Antigravity から Claude への切り替え
 
 Antigravity 担当の Issue が、ワーカー起因の不合格を 2 回再指示しても合格しなかったとき（3-4 の 3 回目）に行う。
 ユーザーには確認しない（2026-09-17 合意）。切り替えたことは 8-2 と 8-3 に必ず書く。
 
-1. **Antigravity のセッションだけを止める**。他のインスタンスは止めない。
-   ```bash
-   commandmatedev instances "$WT" kill antigravity
-   commandmatedev instances "$WT"        # antigravity の RUNNING が no であること
-   ```
-   止めるのは、次の task を作る**前**にする。env-clean のベースラインは task を作った時点で採られ、
-   ベースラインにあったセッションが後から消えると違反になるため。
-2. **Claude 用の契約** `.commandmate/tasks/issue-<N>-claude.yaml` を作る。
-   - `scope` / `verify` / `success` は元の契約と同じにする
-   - goal には、Claude 担当の通常の goal（2-4-2）に次の「引き継ぎ」節を足す
-     ```markdown
-     ## 引き継ぎ（前任: Antigravity、検証不合格 N 回）
-     - 前任のコミット: <git log --oneline origin/develop..HEAD の出力>
-     - 不合格だったゲートと logTail: <verify --json の該当部分。2 回分>
-     - 前任の変更を読み、正しい部分は残し、誤っている部分は直すこと。作り直してもよい。
-     - コミットは前任のコミットに追加してよい（1 つにまとめなくてよい）。
-     ```
-   - 前任のコミットがあるため、`work-evidence` は Claude が何もしなくても PASS する。
-     Claude が実際に作業したかは、commits の増加と 3-3 のゲートで確かめる
-3. **Claude に送る**。tasks.tsv の担当を `claude` に更新する（元の行は残し、切替の行を追記する）。
-   ```bash
-   AGENT=claude; MODEL=opus          # 切替先は常に opus。sonnet には切り替えない
-   set_claude_model "$WT_PATH" opus  # 3-1 の関数。前の run の sonnet 指定が残っていても消える
-   commandmatedev send "$WT" --contract ".commandmate/tasks/issue-${issue}-claude.yaml" \
-     --instance claude --auto-yes --duration 3h \
-     > "workspace/orchestration/runs/$DATE/send-${issue}-claude.out" 2>&1
-   commandmatedev wait "$WT" --instance claude --on-prompt human --verify --timeout 10800
-   ```
-4. 以降は通常の Claude 担当として 3-4 に従う（ワーカー起因の不合格 2 回で人間へエスカレーション）。
+切り替えるときは docs/orchestrate/switching.md#3-5-antigravity-から-claude-への切り替え を読み、その手順 1〜4（Antigravity のセッションだけを止める・引き継ぎ節つきの Claude 用の契約を作る・opus で送る・以降は 3-4 に従う）で進める。
 
 ### 3-5b. sonnet から opus への格上げ
 
 Claude（sonnet）担当の Issue が、ワーカー起因の不合格を 2 回再指示しても合格しなかったとき（3-4 の 3 回目）に行う。
 ユーザーには確認しない。格上げしたことは 8-2 と 8-3 に必ず書く。**モデルは起動時に固定されるので、セッションを作り直す以外に上げる方法は無い。**
 
-1. **Claude のセッションだけを止める**（task を作る**前**に。理由は 3-5 の手順 1 と同じ）。
-   ```bash
-   commandmatedev instances "$WT" kill claude
-   commandmatedev instances "$WT"        # claude の RUNNING が no であること
-   ```
-2. **モデルの指定を外す**: `set_claude_model "$WT_PATH" opus`（3-1 の関数。`model` キーを消して既定の opus に戻す）
-3. **opus 用の契約** `.commandmate/tasks/issue-<N>-opus.yaml` を作る。`scope` / `verify` / `success` は元の契約と同じ。
-   goal は Claude 担当の通常の goal（2-4-2。**sonnet 用の 2 行は外す**）に、3-5 と同じ形の「引き継ぎ」節を足す（見出しは `## 引き継ぎ（前任: Claude sonnet、検証不合格 N 回）`）
-4. **送って、モデルを確かめてから待つ**。tasks.tsv には切替の行を追記する（元の行は残す）。
-   ```bash
-   AGENT=claude; MODEL=opus
-   commandmatedev send "$WT" --contract ".commandmate/tasks/issue-${issue}-opus.yaml" \
-     --instance claude --auto-yes --duration 3h \
-     > "workspace/orchestration/runs/$DATE/send-${issue}-opus.out" 2>&1
-   commandmatedev capture "$WT" --instance claude --json | jq -r '.model'   # opus を含むこと
-   commandmatedev wait "$WT" --instance claude --on-prompt human --verify --timeout 10800
-   ```
-5. 以降は通常の Claude（opus）担当として 3-4 に従う（ワーカー起因の不合格 2 回で人間へエスカレーション）。
+格上げするときは docs/orchestrate/switching.md#3-5b-sonnet-から-opus-への格上げ を読み、その手順 1〜5（Claude のセッションだけを止める・モデルの指定を外す・opus 用の契約を作る・送ってモデルを確かめてから待つ・以降は 3-4 に従う）で進める。
 
 **`--phase design` 指定時**: 全ワーカーの設計フェーズ完了を確認して終了。
 
@@ -1224,28 +1019,9 @@ orchestrate の道具の置き場所は #3477 で `scripts/orchestrate/`（`lint
 - **段:** ワーカーの完了の後・PR の前。依頼したときの HEAD を記録し、その後の変更と区別する。ワーカーの「対になる場所を探した結果」（2-4-2）を入力に使い、レビューの独自の発見を見分ける
 - **担当:** Codex（暫定。優位が実証されたとは扱わない）。Claude を足すのは、重大な変更・ワーカーが「未確認」と書いた所・判断が割れた所（隔離・所有・security に限らない）
 - **再レビュー:** 自動は 3 回まで。3 回目の後に重大な指摘が残ったら、**止めて人の判断へ**（別の Issue に送ってマージしない）
-- **Codex のセッション:** 1 つを直列で使う。依頼は 1 本ずつ（ロック）。待ち時間を記録する
-- **数え方（期限の集計で使う）:** 延べではなく、重複・既報（ワーカーが報告済み・5-3 で処置できた）を除いた「レビューの独自の発見」を、**動作／説明／テスト** と **新規／既存** の 2 軸で数える。指摘の正しさは、一部を別の判定者（Codex と Claude の相互）で再判定する。費用は 1 本あたり、待ち時間・再指示・修正を含めた総時間で測る。後の段（CI・ガード・実機・UAT）で見つかった漏れも記録する
+- **進め方と記録:** 対象の PR でレビューするときは docs/orchestrate/trials.md#5-2b-整合性レビューの進め方と記録 を読み、その手順（Codex のセッション・数え方・記録の様式・再指示の書き方・前回の指摘の確かめ方）で行う
 
-**記録の様式。** 置き場所は `workspace/orchestration/runs/<date>/consistency-review.md`。1 レビュー 1 行の表にする。
-
-```
-| # | Issue | 担当 | 依頼した HEAD | 時間（待ちを含む） | 指摘 | 独自の発見（重複・既報を除く） | 種類（動作／説明／テスト） | 新規／既存 | 再判定 | 処置 | 事前レビューの有無 |
-```
-
-**再指示の書き方（#3397 で前回の指摘の一部の未対応が続いた）。** 整合性レビューの指摘で再指示するときは、指摘の文をそのまま貼らず、
-**守るべき条件・全経路・対照のテストに言い換えて**契約に書く。守るべき条件は 1 文で、全経路は直す場所の一覧で、対照のテストは陽性と陰性の組で示す。
-
-**再レビューでは、前回の指摘が解消したかを先に確かめる。** 新しい指摘を探す前に、前回の指摘を 1 件ずつ「解消／一部未対応／未対応」に判定して記録する。
-
-**2026-10-20 の集計の手順。**
-
-1. 各 run の `consistency-review.md` の表を合計する（独自の発見を 動作／説明／テスト × 新規／既存 で数え、1 本あたりの総時間を出す）
-2. 続ける・入れる・やめるの判断案を書く
-3. 判断案について Codex のレビューを受ける
-4. 利用者に伺う（#3308 と同じ流れ）
-
-前の記録（`runs/2026-10-05/consistency-review-trial.md`）を基準線として参照する。
+**2026-10-20 の集計の手順。** 期限の日に docs/orchestrate/trials.md#5-2b-2026-10-20-の集計の手順 を読む。
 
 ### 5-3. 「本文に無い指摘」を処置する（Phase 6 の前・マージの条件）
 
@@ -1257,15 +1033,16 @@ orchestrate の道具の置き場所は #3477 で `scripts/orchestrate/`（`lint
 
 計測の誤り（数え方の穴）の報告は、ワーカーに直させない。計測の誤りは、別の Issue にして計測を直す（#3270 → #3389）。
 
-**未処置の指摘が残っている PR は、マージしない。** 報告を一覧に残すだけでは、指摘は最後まで処置されない
-（#2011 のコミット文は「`api-responses.ts` は scope 外なので直していない。要追随」と書いたが、追跡する Issue にならず、
-後に #3298 として出た。#1899 の「hook を受ける側は直していない」も #3289 になった）。
+**未処置の指摘が残っている PR は、マージしない。** 報告を一覧に残すだけでは、指摘は最後まで処置されない。
+
+根拠: docs/orchestrate/ci-merge.md#5-3-未処置の指摘が残った実例
 
 PR を出す前に、次も確かめる:
 
-- **ガードのテスト（`tests/unit/guards`）を全部通す。** 実測（2026-10-05 #3291）: レビューを通った後に CI のガードで落ちた
-- **検証の順番待ちの間に、オーケストレーターが worktree にコミットしない。** 実測（2026-10-05 #3292・#3295）:
-  コミットした結果、変更が scope の外に出て scope ゲートが落ちた
+- **ガードのテスト（`tests/unit/guards`）を全部通す。**
+- **検証の順番待ちの間に、オーケストレーターが worktree にコミットしない。**
+
+根拠: docs/orchestrate/ci-merge.md#5-3-pr-の前の確認の実測
 
 ---
 
@@ -1294,9 +1071,7 @@ PR の作成とマージは、次の 2 本のスクリプトを呼ぶ（#3477）
 
 ### 6-1. 同時 CI は 3〜4 本。**1 本に落とすのも失敗である**
 
-CI は使い捨ての self-hosted ランナー 8 台（2026-09-18 時点）で、PR あたり 14 ジョブを回すので
-（#2638 で Unit Tests を 4 本に分割）、同時本数を上げると 1 本あたりが
-伸びる。**が、伸び始めるのは 4 本を超えてからで、3〜4 本まではほぼ無償である。**
+根拠: docs/orchestrate/ci-merge.md#6-1-同時本数の前提
 
 根拠: docs/orchestrate/ci-merge.md#6-1-同時に回す本数の実測
 
@@ -1313,11 +1088,11 @@ echo "exit=$?"   # 0 → PR がある（作った・既に開いていた・マ�
 ### 6-1-1. PR はゲートの**前**に出す（CI とローカルゲートを並走させる）
 
 `wait --verify` / `verify --gates` のローカルゲートと CI は**同じテストを見ている**。
-順に回すと 1 issue あたり約 22 分（ローカル 10.8 分 ＋ CI 10.8 分）を直列で払う。
 
 **PR の前は速い確認（`scripts/orchestrate/precheck.mjs`、#3477）だけを通して PR を出し、
-残りのゲート（`integration` / `unit` / `build`）は CI と並走させる。** 実測でローカルゲートの
-85〜90% は `unit` 単独（545〜584 秒）なので、**1 issue あたり約 10 分が消える。**
+残りのゲート（`integration` / `unit` / `build`）は CI と並走させる。**
+
+根拠: docs/orchestrate/ci-merge.md#6-1-1-並走させる理由
 
 ```bash
 # 段の順: verify（3-3）→ review（5-2b）→ findings（5-3）→ precheck → PR → CI（残りのゲートと並走）→ merge
@@ -1326,28 +1101,16 @@ node scripts/orchestrate/precheck.mjs --run-dir "workspace/orchestration/runs/$D
 echo "exit=$?"   # 0 → PR を出す / 1 → runs/$DATE/precheck-<issue>-<sha>.log で落ちた段を読み、再指示 / 2 → 作業ツリーが汚れている
 ```
 
-- 段: 断片の検査（`node scripts/changelog-fragments.mjs check`）・削除した `it` / `describe` の数（0 でなければ落とす。契約の決定が許したときだけ `--allow-removed-tests`）・
-  変更したファイルの ESLint・`.sh` を変えたら `node scripts/run-lint-sh-if-changed.mjs`・整理と計測の Issue だけ `node scripts/count-suppressions.mjs`（2-4-3）・
-  `tsc --noEmit`・関係するテスト（`vitest related` ＋ 変更したテスト・変更したパスを名指しするテスト・`tests/unit/guards`・`tests/unit/docs`）
-- 結果は run の記録の `precheck` 段に HEAD つきで書く。**同じ HEAD・同じ引数（`--base` / `--kind` / `--metrics` / `--allow-removed-tests` / `--build`）の `ok` があれば
-  走らせずに再利用する**（どの段も、コミットされた木と引数だけを読む。落ちた後の再実行でも同じテストを 2 回走らせない）。
-  同じ HEAD の `verify=ok` が通した verify.yaml のゲートのうち、同じ確認になるもの（`lint` → ESLint、`typecheck` → tsc、`lint-sh` → lint-sh）の段も走らせない。
-  契約が定義したゲート（`<id>@contract`）と、テストのゲート（`unit` / `unit-related`。選ぶテストが違う）は、どの段の代わりにもならない
-- 関係するテストは `tests/unit` に限る（`vitest related --dir tests/unit`）。integration / e2e は CI が見る
+- precheck の段（何を走らせるか）と、結果を走らせずに再利用する条件は、precheck が落ちたときと、走らずに再利用されたことを確かめるときに docs/orchestrate/ci-merge.md#6-1-1-precheck-の段と再利用 を読む
 - **build は PR の前の確認に入れない（CI の `Build` と並走させる）。** その代わり、マージの前に CI の `Build` が `pass` であること、
   または同じ HEAD の precheck の記録に `build=ok`・`build-cli=ok`・`build-server=ok` があること（`--build` を付けて走らせたとき。CI の `Build` と同じ 3 つ）を確かめる（6-2・6-3）
-- 作業ツリーに契約（`.commandmate/tasks/`）と `dev-reports/` 以外の変更があると、その HEAD の結果にならないので exit 2 で止まる
-
-壊れた PR で CI を焼くリスクは、先に通す確認でほぼ潰せる。両方が緑になってからマージするので
-裁定の強さは変わらない。
 
 ### 6-2. マージは「先行をマージ → 後続を refresh → tsc ＋ 影響テスト → マージ」
 
 **`gh pr view --json mergeable` の `MERGEABLE` は「テキスト衝突が無い」しか意味しない。
-組み合わせがコンパイルできる証拠ではない。** 2026-08-22 に、単独でどちらも全ゲート緑・CI 11/11 の
-2 本を続けてマージして develop の `tsc` と `test:unit` を壊した（一方が関数を rename し、
-他方のテストが旧名を使っていた）。同型の統合破壊はこの run で 2 件あり、**どちらも
-`npx tsc --noEmit` と影響テストのローカル実行で捕まった**。
+組み合わせがコンパイルできる証拠ではない。**
+
+根拠: docs/orchestrate/ci-merge.md#6-2-統合破壊の実測
 
 マージの条件の 1 つとして、**未処置の指摘（5-3）が残っている PR はマージしない**。
 
@@ -1368,9 +1131,9 @@ echo "exit=$?"   # 0 → マージ済み / 1 → 出力の欠けたもの・落�
 機械的に解決してよい衝突は、`docs/module-reference.md` などの共有ファイルでだけ起こりうる。CHANGELOG の断片は
 Issue ごとに別ファイル（`changelog.d/<N>.md`）で、`CHANGELOG.md` はリリースまで書き換えないので、ここでは衝突しない（2-4-1）。
 
-**マーカー走査を共有ファイル（`docs/module-reference.md` など）の決め打ちにしないこと。** 2026-08-22 に JSDoc ブロックコメントの
-内側へ落ちた衝突マーカーをコミットした事例がある（**コメント内なので `tsc` は exit 0、
-関連テストも緑**だった）。
+**マーカー走査を共有ファイル（`docs/module-reference.md` など）の決め打ちにしないこと。**
+
+根拠: docs/orchestrate/ci-merge.md#6-2-コメントの中の衝突マーカーの実例
 
 上記が通れば**フル CI の完走を待たずにマージしてよい**。develop 側の CI（12〜25 分）が安全網に
 なる。**最後の 1 本だけ**はフル CI を待つ。
@@ -1394,8 +1157,9 @@ precheck にも build が無いので、ローカルのどの裁定もビルド�
 ### 6-3. マージ前に `fail` / `cancel` が無いことを機械的に確認する
 
 `gh pr checks <PR> --json name,bucket` を読み、**`bucket` に `fail` / `cancel` が 1 つでも
-あればマージしない**。2026-08-22 に「10 pass / 1 fail（Build）」の PR を、fail を目視で見落として
-マージし develop のビルドを壊した。判定は目視ではなくスクリプトで行うこと。
+あればマージしない**。判定は目視ではなくスクリプトで行うこと。
+
+根拠: docs/orchestrate/ci-merge.md#6-3-fail-を見落とした実例
 
 `merge-pr.mjs` がこの判定を行う（落ちたジョブは HEAD ごとに 1 回だけ `gh run rerun --failed` で再実行し、それでも落ちればマージしない）。
 `pending` の扱いは 6-2 に従う: **6-2 のローカルゲート（refresh → マーカー走査 → `tsc` →
@@ -1439,28 +1203,13 @@ cat "workspace/orchestration/runs/$DATE/module-reference-<N>.md"
 awk -F'|' '/^\| `/{print $2}' docs/module-reference.md | sort | uniq -d
 ```
 
-CHANGELOG の断片は、同じタイミングで PR ブランチ上で次を確認する:
-
-```bash
-# changelog.d/<N>.md がこの PR のコミットに含まれている（未コミットの断片は出ない）
-git diff --name-status origin/develop...HEAD -- changelog.d/   # 状態 A（追加）の changelog.d/<N>.md の 1 行だけであること
-# 断片の書式が通る（他の断片も含めて全件を検証する）
-node scripts/changelog-fragments.mjs check; echo "CHECK=$?"     # CHECK=0 であること
-```
-
-既存のテストが消えていないことも、同じタイミングで確認する（`unit-related` のゲートはテストが消えたことを検出できない。2-4-2 の #2936）:
-
-```bash
-# 削除された it / describe / test の行数。0 であること
-git diff origin/develop...HEAD -- 'tests/**' | grep -cE '^-\s*(it|describe|test)\('
-```
-
-0 でなければ、差分を読んで意図を確かめる（名前の変更・移動なら理由が本文かコミットメッセージにあるか）。
+`changelog.d/<N>.md` がこの PR のコミットにあることと断片の書式、消えた `it` / `describe` の数は、`publish-pr.mjs`・`merge-pr.mjs` と precheck（6-1-1）が確かめる。手で確かめるときは docs/orchestrate/ci-merge.md#6-4-断片と消えたテストを手で確かめる を読む。
 
 **断片が無い PR はマージしない**（`publish-pr.mjs`・`merge-pr.mjs` が止まる）。`changelog.d/<N>.md` がコミットに含まれていない PR も、
-module-reference の断片が無い PR も同じ扱いにする。リリースノートに載らない Issue が出る
-（過去に実際に発生し、後追いで docs PR が必要になった）。`check` が exit 0 にならない PR もマージしない
+module-reference の断片が無い PR も同じ扱いにする。リリースノートに載らない Issue が出る。`check` が exit 0 にならない PR もマージしない
 （リリース時の `apply` は、1 つでも不正な断片があると何も書かずに止まる）。
+
+根拠: docs/orchestrate/ci-merge.md#6-4-断片が無い-pr-の実例
 
 **`--phase pr` 指定時**: PR作成・マージ完了を確認して終了。
 
@@ -1586,8 +1335,8 @@ gh issue list --repo Kewton/CommandMate --state open --search "<ファイル名�
 
 見つかったら新しく起票せず、その Issue に追加の事実をコメントする。自動起票の Issue は残す
 （翌朝の Schedule は `agent-health:<tool>:<checkId>` を本文に持つ開いた Issue を探してコメントするので、手で起票した別の Issue では重複を防げない）。
-2026-09-30 に 2 回、この確認をせずに重複を起票した: #3024（日次確認が 36 分前に #3021 / #3022 を起票済み）と
-#3031（同じ朝に別のセッションかワーカーが #3026 を起票済み）。
+
+根拠: docs/orchestrate/report.md#8-3-重複を起票した実例
 
 **bug として新しく起票するときの「分類」節**:
 
