@@ -267,8 +267,21 @@ exit 99 を受けたら**待たずにまず画面を見る**。手順は 3-1 の
 ### 1-5. 実行計画の記録
 
 ```bash
-DATE=$(date +%Y-%m-%d)
+DATE=$(date +%Y-%m-%d)      # run の開始日。日付をまたいでも変えない（run のディレクトリは引数で渡す）
+RUN_ISSUES=<最小>-<最大>     # run の Issue の範囲（例 3477-3481）。記録のファイル名に入れ、同じ日の別の run と分ける
 mkdir -p workspace/orchestration/runs/$DATE
+```
+
+**run の記録**（#3477）: 各 Issue の段（`contract` / `send` / `verify` / `precheck` / `pr` / `review` / `findings` / `ci` / `merge`）が
+終わるたびに、`scripts/orchestrate/run-log.mjs` で 1 行を追記する。置き場所は `workspace/orchestration/runs/$DATE/run-$RUN_ISSUES.jsonl`
+（1 行 1 段の JSON。issue・段・結果・HEAD・task id・契約・担当とモデル・所要時間・時刻）。追記だけなので、同じフォルダの別の run の
+ファイルは上書きしない。**セッションが落ちたら、会話の記録ではなくこれを読んで再開する**:
+
+```bash
+node scripts/orchestrate/run-log.mjs append --run-dir "workspace/orchestration/runs/$DATE" --issues "$RUN_ISSUES" \
+  --issue <N> --stage verify --result ok --head <sha> --duration-sec <秒>
+node scripts/orchestrate/run-log.mjs status --run-dir "workspace/orchestration/runs/$DATE" --issues "$RUN_ISSUES"
+# → #<N>  reached=verify  next=precheck  head=<sha>  send=ok verify=ok   （次に行う段が next）
 ```
 
 実行計画を `workspace/orchestration/runs/$DATE/plan.md` に出力：
@@ -358,6 +371,36 @@ success:
   requireScopeClean: true
 ```
 
+**契約は `scripts/orchestrate/contract.mjs` で作る**（#3477）。Issue ごとに設定ファイル（YAML か JSON）を 1 つ書き、
+そこから上の形の契約を生成する。goal は `scripts/orchestrate/templates/` の雛形（2-4-1・2-4-2）から組み立てるので、
+手で転記しない。
+
+```bash
+# 設定は run のディレクトリに置く（workspace/ は git に無視される）。Issue 本文は gh で取ってファイルにする
+gh issue view <N> --json body -q .body > "workspace/orchestration/runs/$DATE/issue-<N>.md"
+cat > "workspace/orchestration/runs/$DATE/contract-<N>.yaml" <<'YAML'
+issue: <N>
+key: "<N>"                # 契約のファイル名 issue-<key>.yaml。同じブランチの 2 本目は "<N>-opus" など（断片は <N> のまま）
+title: "<Issueタイトル>"
+kind: feature             # feature | bug | refactor | docs（CHANGELOG の節とコミットの type の既定）
+agent: claude             # claude | antigravity
+model: opus               # opus | sonnet（antigravity は書かない）
+gates: [lint, typecheck, unit-related]
+scope: ["src/lib/<module>/**", "tests/unit/<module>/**"]   # changelog.d/<N>.md は自動で足される
+decisions: []             # Issue の「決めること」への答え（goal の「この契約での決定」になる）
+changelog: { section: Added }   # 節の上書き（既定は kind から）。最低の版を上げるなら bump: minor を足す
+commit: { type: feat, scope: <scope> }
+issueBodyFile: issue-<N>.md     # 設定ファイルからの相対パス
+YAML
+node scripts/orchestrate/contract.mjs generate \
+  --config "workspace/orchestration/runs/$DATE/contract-<N>.yaml" --worktree "$WT_PATH"
+```
+
+- **goal が 8,000 文字を超えると生成が失敗する**（契約の上限）。Issue 本文を要点に縮めた `issueBodyFile` を渡し直す
+- `scope` に `CHANGELOG.md` / `docs/module-reference.md` を書くと生成が失敗する（2-4-1）。`requireCommit: true` は常に入る
+- 同じ設定で再実行しても契約は変わらない（`unchanged`）。中身の違う契約が既にあると止まる。送信前に直すときだけ `--force`
+- 2-4-2 の差し替え（テスト全体）と 2-4-3 の整理の決まりは雛形に入っていない。生成した契約に手で足す
+
 - **`requireCommit: true` を外さない**（#3430）。外すと未コミットの変更も作業証跡に数え、ワーカーがコミット前に
   ターンを閉じたとき `wait --verify` が exit 0 を返す。契約の「1 つにコミットする」と裁定をそろえる。
 - **契約は未コミットで配ってよい**。`work-evidence` / `scope` ゲートは変更集合から契約ファイル自身を
@@ -393,44 +436,8 @@ success:
 - **module-reference**: ワーカーが `dev-reports/module-reference/issue-<N>.md` に書き（commit には入らない）、
   従来どおりオーケストレーターがマージ時に本体へ一本化する（6-4）
 
-契約の「作業ルール（厳守）」に次をそのまま転記する:
-
-> - **`CHANGELOG.md` と `docs/module-reference.md` を編集しないでください**（scope 外です）。
->   代わりに次の 2 ファイルを書いてください。`changelog.d/<N>.md` は**実装と同じコミットに含めます**。
->   `dev-reports/module-reference/issue-<N>.md` は `dev-reports/` 配下なので commit には入りません。
->   - `changelog.d/<N>.md` — リリース時に `CHANGELOG.md` へ移される **1 エントリ**
->     （2 行目。先頭は `- **<type>(<scope>): …** (#<N>): …`）。どの節
->     （`### Added` / `### Changed` / `### Fixed`）に入るかを 1 行目にコメントで書く。
->     書き終えたら `node scripts/changelog-fragments.mjs check` を実行し、exit 0 であることを確かめる。
->     **形式は次の実例に合わせてください**（develop の `CHANGELOG.md` にある実エントリを丸ごと 1 本。
->     エントリは**ファイル中では 1 行**で、下で折り返して見えるのは表示上の都合です）:
->
->     ```markdown
->     <!-- ### Fixed -->
->     - **fix(cli): `send` 直後の `wait` が「まだ始まっていない」を完了と読む問題を修正** (#1975): `wait` が `sessionStatus==='ready'` を完了と判定する直前に、**「このインスタンスに最後に渡されたプロンプト」と「エージェント自身が最後に報告したターン終了（`lastStopEventAt`）」を突き合わせる**ゲートを追加。`send` 直後は最新の構造化イベントが直前ターンの `stop` のままなので #1839 の `adoptTurnStart()` が何も採用せず、`turnStartedAt === null` が「決着済み」と読まれてアイドル composer をそのまま完了にしていた（隔離サーバ実測 2026-08-22 / copilot 1.0.80: `send`→`wait` 5 回中 3 回が約 0.3 秒・`basis=scraper_ready`・成果物ゼロで exit 0）。ゲートは `GET /api/worktrees/:id/messages?limit=1&unit=pairs` を `--instance`（無指定ならサーバが解決した `cliToolId`）でスコープして読む。**hook を出さないツールは挙動不変** — `structuredEvents.source.capabilities.supportedEvents`（#1924 の宣言値）が `stop` とターン開始語の両方を宣言しているソースだけがこのゲートに入り、legacy-relay（`supportedEvents: []`）と #1924 以前のサーバは従来経路のまま台帳も引かない。保留は `PENDING_PROMPT_HOLD_MS`=60 秒で打ち切り（hooks は全経路 fail-open なので `Stop` の取りこぼしで `wait` が返らなくなってはいけない）、`--timeout` / `--stall-timeout` はそれより短ければ従来どおり優先される。完了行の `basis=` は、エージェントが最新プロンプトの終了を報告していれば `hook_stop` になる（`scraper_ready` は「画面しか言っていない」という文書どおりの意味に戻る）。
->     ```
->
->     - `- **` で始めること — 集計は `changelog-fragments.mjs check` と `grep -cE '^- \*\*'` なので、外れると `check` が不合格にし、エントリとしても数えられません。
->     - `(#<N>)` は要約の**外**（`**` を閉じた後）に置き、`<N>` をファイル名と揃えること — `（Issue #<N>）` を要約の中に埋めると `check` が不合格にします。
->     - `<type>` は CLAUDE.md のコミットメッセージ規約と同じ語彙（`feat` / `fix` / `docs` / `refactor` / `test` / `chore` / `ci` / `style`）— 断片の検証（上の check）はこれ以外を不合格にし、リリースノート作成時の分類にも使います。
->     - 1 エントリ＝1 行（折らない）— `CHANGELOG.md` は 1 エントリ 1 行で運用しており、`check` も 3 行目以降に空行以外があると不合格にします。本文がどれだけ長くても改行を入れません。
->   - `dev-reports/module-reference/issue-<N>.md` — `docs/module-reference.md` の表に足す注記を
->     **行キー（`| \`path\` |`）ごと**に列挙する。既存行への追記なら「どの行に何を足すか」を書く。
->     **既存行に足すときは `grep -n '^| \`<path>\`' docs/module-reference.md` を実行し、その出力
->     （行番号つきの行キー）を断片に書き写してから**書くこと。0 件だった行への追記を指示しない
->     （新しい行を足すなら「新規行」と明記する）。**ファイルの行が 0 件なら、親ディレクトリの行
->     （`grep -n '^| \`<dir>/\`' docs/module-reference.md`。例 `src/lib/agent-health/`）も探し、あればそこに足す。**
->     足すものが無ければ「追記なし」の 1 行でよい。実例:
->
->     ```markdown
->     ## 既存行への追記
->     - `src/lib/session/worktree-status-helper.ts` — 実在確認: `docs/module-reference.md:103`（行番号は確認時点のもの）
->       追記内容: 「private `getStatusCaptureLines()` を削除し `resolveCaptureSpec(cliToolId).statusLines` に置換（Issue #1933）」
->
->     ## 新規行
->     追記なし
->     ```
-> - 断片が無いとリリースノートと module-reference に載らない。**実装と同じ commit の時点で書くこと。**
+契約の「作業ルール（厳守）」に入る断片の書き方（実例つき）は **`scripts/orchestrate/templates/fragment-rules.md` が持つ**（#3477。ここには写さない）。
+`scripts/orchestrate/contract.mjs`（2-4）が `<N>` を Issue 番号に置き換えて goal に入れるので、手で転記しない。
 
 **なぜこうするか（2026-08-22 の実測）**: 全ワーカーが `CHANGELOG.md` の同じ節に追記すると、
 **1 本マージするたびに残りの PR が全部 CONFLICTING になり、refresh → CI 全周やり直しが必要**になる。
@@ -481,41 +488,8 @@ CHANGELOG 側が**形式**の誤りで断片を見れば分かるのに対し、
   省かない。ワーカーが質問を書いてターンを終えると、Auto-Yes は答えられない。wait はそれを完了と読むので、
   作業が途中のまま検証に進み、exit 20 か 21 になる。
 
-```yaml
-goal: |
-  https://github.com/Kewton/CommandMate/issues/<N> を実装する。
-  スラッシュコマンドは使わず、このメッセージの手順どおりに直接実装すること。
-  確認や質問は求めず、最後まで自分で進めること。
-
-  ## 事象 / 原因 / 確定仕様 / 受入基準
-  <Issue 本文から転記。原因は file:line つきで>
-
-  ## 実装の進め方
-  1. まず対象ファイルを読み、上の説明が実コードと合っているか確かめる。
-     食い違っていたら実コードを正とし、判断をコミットメッセージ本文に書く。
-  2. テストの陽性対照・陰性対照は、実リポジトリのファイルを書き換えずに示す
-     （`os.tmpdir()` 配下に `fs.mkdtempSync` で作り、`afterEach` で必ず削除する）。
-  3. 確認に使うコマンドは `npx vitest run <対のテスト>`、`npm run lint`、`npx tsc --noEmit` の 3 つだけにする。
-     テスト全体（`npm run test:unit`）は実行しないこと。全体は検証ゲートか CI が実行する。
-     <差し替えてよいのは「テストの共通設定・ヘルパーを変える」「広い範囲の rename」など、
-      対のテストでは破損が見えない Issue だけ。**Issue の受入基準に `npm run test:unit` と
-      書いてあることは差し替えの理由にならない**（下の「差し替えの条件」を参照）>
-  4. コマンドはすべてフォアグラウンドで実行し、終わるまで待ってから次の手順へ進む。
-
-  ## 作業ルール（厳守）
-  - 変更してよいのは <scope.allow と同じ範囲> と、下の 2 つの断片ファイルだけ。
-  - tmux セッション、サーバ、バックグラウンドプロセスを起動しない。
-    `$HOME` 配下にファイルを作らない（一時ファイルは `os.tmpdir()` 配下のみ）。
-  - worktree の外（`$HOME`、`/tmp` など）に既にあるファイルやディレクトリは、確認のためでも消したり書き換えたりしない。
-    確認は `os.tmpdir()` 配下に作った一時ディレクトリ（private HOME など）の中で行う。
-  - 既存の `it(...)` / `describe(...)` を消したり名前を変えたりしない。変更が要ると判断したら、本文に無い指摘として報告する。
-  - <2-4-1 の転記ブロック（断片ファイル 2 本と実例）>
-  - コミットは 1 つにまとめる。メッセージは `<type>(<scope>): <要約> (#<N>)`。
-    `.commandmate/tasks/issue-<N>.yaml` と `dev-reports/` はコミットに含めない。
-    `changelog.d/<N>.md` は実装と同じコミットに含める。
-  - push と PR 作成はしない（オーケストレーターが行う）。
-  - すべて終わったら、最後に `IMPL_COMPLETED` とだけ出力する。
-```
+goal の雛形は **`scripts/orchestrate/templates/goal.md` が持つ**（#3477。ここには写さない）。担当で雛形を分けず、
+`scripts/orchestrate/contract.mjs`（2-4）が Issue ごとの設定から埋める（sonnet には上の 1 行も足す）。
 
 実例: パイロットの契約（#2595）は、この雛形のとおりに書いて一度で通った（goal は 3,282 文字。上限は 8,000 文字）。
 Antigravity は、雛形にあるルールのうち次のものをすべて守った:
@@ -857,10 +831,18 @@ while IFS="$(printf '\t')" read -r issue AGENT MODEL <&3; do
   echo "exit=$? issue=${issue}"
   TASK_ID=$(head -1 "workspace/orchestration/runs/$DATE/send-${issue}.out")
   # 送れたことは exit code ではなく、サーバーに task ができたことで確かめる
-  curl -s "http://localhost:3000/api/worktrees/$WT/tasks" \
-    | jq -e --arg id "$TASK_ID" '.tasks[] | select(.id == $id)' > /dev/null \
-    && echo "task ok issue=${issue} id=${TASK_ID}" || echo "task MISSING issue=${issue}"
+  if curl -s "http://localhost:3000/api/worktrees/$WT/tasks" \
+    | jq -e --arg id "$TASK_ID" '.tasks[] | select(.id == $id)' > /dev/null; then
+    SENT=ok; echo "task ok issue=${issue} id=${TASK_ID}"
+  else
+    SENT=fail; echo "task MISSING issue=${issue}"
+  fi
   printf '%s\t%s\t%s\t%s\t%s\n' "$issue" "$WT" "$AGENT" "$TASK_ID" "$MODEL" >> "workspace/orchestration/runs/$DATE/tasks.tsv"
+  # run の記録（1-5）。送った HEAD を残す。再開時は status の next=send の Issue だけ送り直す
+  WT_DIR=$(commandmatedev ls --json | jq -r --arg id "$WT" '.[] | select(.id == $id) | .path')
+  node scripts/orchestrate/run-log.mjs append --run-dir "workspace/orchestration/runs/$DATE" --issues "$RUN_ISSUES" \
+    --issue "$issue" --stage send --result "$SENT" --head "$(git -C "$WT_DIR" rev-parse HEAD)" --task "$TASK_ID" \
+    --contract ".commandmate/tasks/issue-${issue}.yaml" --agent "$AGENT" --model "$MODEL"
   if [ "$AGENT" = claude ]; then
     # 起動したセッションが実際にどのモデルで動いているかを確かめる（SessionStart の hook とバナーから読まれる）
     GOT=$(commandmatedev capture "$WT" --instance claude --json | jq -r '.model // ""' | tr 'A-Z' 'a-z')
@@ -1603,7 +1585,7 @@ summary.md の末尾に「振り分けの改善案」節を書き、完了報告
 
 1. **事実**: Issue、担当、何が起きたか（ゲート名・時刻・コマンド）
 2. **原因の見立て**: 判定表のどの観点が外れたか。または、道具のどの欠陥か
-3. **改善案**: 判定表の条件の足し引き、goal の雛形（2-4-2）の追記、道具の Issue 起票の要否。
+3. **改善案**: 判定表の条件の足し引き、goal の雛形（2-4-2。`scripts/orchestrate/templates/goal.md`）の追記、道具の Issue 起票の要否。
    起票はユーザーの了承を得てから行う
 
 **起票の前に、同じ不具合の開いている Issue を探す**（UAT の指摘・ワーカーの報告・8-3 の改善案のどれでも）。

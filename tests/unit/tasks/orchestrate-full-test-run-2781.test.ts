@@ -27,7 +27,10 @@ import path from 'path';
 const REPO_ROOT = path.resolve(__dirname, '../../..');
 const ORCHESTRATE_PATH = '.claude/commands/orchestrate.md';
 const ISSUE_CREATE_PATH = '.claude/commands/issue-create.md';
+// Since #3477 the 2-4-2 goal template lives with the contract generator; 2-4-2 points there.
+const GOAL_TEMPLATE_PATH = 'scripts/orchestrate/templates/goal.md';
 const orchestrate = readFileSync(path.join(REPO_ROOT, ORCHESTRATE_PATH), 'utf-8');
+const goalTemplate = readFileSync(path.join(REPO_ROOT, GOAL_TEMPLATE_PATH), 'utf-8');
 const issueCreate = readFileSync(path.join(REPO_ROOT, ISSUE_CREATE_PATH), 'utf-8');
 
 /** The body of `### <id>. …`, up to the next `### ` heading. */
@@ -43,7 +46,11 @@ function section(id: string): string {
 }
 
 describe('[#2781] 2-4-2: the goal template still defaults to "do not run the full suite"', () => {
-  const body = section('2-4-2');
+  const body = `${section('2-4-2')}\n${goalTemplate}`;
+
+  it('points 2-4-2 at the template file', () => {
+    expect(section('2-4-2')).toContain(GOAL_TEMPLATE_PATH);
+  });
 
   it('keeps the default instruction verbatim', () => {
     expect(body).toContain('テスト全体（`npm run test:unit`）は実行しないこと。全体は検証ゲートか CI が実行する。');
