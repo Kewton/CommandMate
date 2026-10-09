@@ -11,12 +11,13 @@ import path from 'node:path';
 import process from 'node:process';
 import { spawnSync } from 'node:child_process';
 import { latestByStage, unmetStage } from './run-log.mjs';
+import { IGNORED_DIRTY, dirtyPaths } from './dirty-tree.mjs';
+
+export { IGNORED_DIRTY, dirtyPaths };
 
 export const DEFAULT_REPO = 'Kewton/CommandMate';
 /** The branch PRs go to (6-x: feature → develop). The remote ref is `origin/<base>`. */
 export const DEFAULT_BASE_BRANCH = 'develop';
-/** Files the orchestrator leaves in a worktree that are not the worker's work. */
-export const IGNORED_DIRTY = ['.commandmate/tasks/', 'dev-reports/'];
 /** Files the orchestrator may commit on the PR branch after the checks (6-4: the module-reference fold). */
 export const ORCHESTRATOR_FILES = ['docs/module-reference.md'];
 /**
@@ -65,13 +66,6 @@ export function ghJson(run, args) {
   const { status, stdout, stderr } = run('gh', args);
   if (status !== 0) throw new Error(`gh ${args.join(' ')} failed: ${(stderr || stdout).trim()}`);
   return JSON.parse(stdout);
-}
-
-/** Changed paths other than the contract and dev-reports (`git status --porcelain`). */
-export function dirtyPaths(run, worktree) {
-  return lines(git(run, worktree, ['status', '--porcelain']))
-    .map((line) => line.replace(/^\S+\s+/, ''))
-    .filter((file) => !IGNORED_DIRTY.some((prefix) => file.startsWith(prefix)));
 }
 
 /**

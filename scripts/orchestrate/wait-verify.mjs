@@ -45,6 +45,7 @@ import process from 'node:process';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { appendRecord } from './run-log.mjs';
+import { dirtyPaths } from './dirty-tree.mjs';
 
 export const DEFAULT_TIMEOUT_SEC = 10800;
 export const DEFAULT_SIGNAL_TIMEOUT_SEC = 1800;
@@ -56,8 +57,6 @@ export const VERDICT_EXIT_CODES = [0, 20, 21];
 export const UNCONFIRMED_EXIT = 3;
 /** Instances whose turn end is not trusted as completion without the signal (3-3, #2605). */
 export const SIGNAL_INSTANCES = ['antigravity'];
-/** Files the orchestrator leaves in a worktree that are not the worker's work. */
-const IGNORED_DIRTY = ['.commandmate/tasks/', 'dev-reports/'];
 const EXIT_MEANINGS = {
   0: 'passed',
   20: 'failed',
@@ -127,16 +126,6 @@ function git(run, worktree, args) {
   const { status, stdout, stderr } = run('git', ['-C', worktree, ...args]);
   if (status !== 0) throw new Error(`git ${args.join(' ')} failed in ${worktree}: ${stderr.trim()}`);
   return stdout;
-}
-
-/** Changed paths other than the contract and dev-reports (`git status --porcelain`). */
-function dirtyPaths(run, worktree) {
-  return git(run, worktree, ['status', '--porcelain'])
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => line.replace(/^\S+\s+/, ''))
-    .filter((file) => !IGNORED_DIRTY.some((prefix) => file.startsWith(prefix)));
 }
 
 function readJson(run, cli, args, cwd) {
