@@ -16,6 +16,7 @@ import { execFileSync, spawnSync } from 'child_process';
 import {
   CI_SHELLCHECK_VERSION,
   DEFAULT_BASE,
+  GATE_NOTICE_LOG_PREFIX,
   listChangedFiles,
   main,
   parseArgs,
@@ -23,6 +24,7 @@ import {
   selectShellScripts,
 } from '../../../scripts/run-lint-sh-if-changed.mjs';
 import { removeTempDir } from '@tests/helpers/temp-dir';
+import { GATE_NOTICE_LOG_PREFIX as CLI_GATE_NOTICE_LOG_PREFIX } from '@/cli/utils/verify-runner';
 
 const REPO_ROOT = process.cwd();
 
@@ -113,6 +115,8 @@ describe('main (decisions)', () => {
     expect(s.run()).toBe(0);
     expect(s.lintSh).toHaveBeenCalledTimes(1);
     expect(s.warnings.join('\n')).toMatch(/WARNING: shellcheck 0\.9\.0 .*CI pins 0\.11\.0/);
+    // Last line, so the stored log tail keeps it and the CLI can show it.
+    expect(s.logs.at(-1)).toBe(`${GATE_NOTICE_LOG_PREFIX} linted with shellcheck 0.9.0; CI pins 0.11.0`);
   });
 
   it('warns that the change was NOT linted and exits 0 when shellcheck is missing', () => {
@@ -120,6 +124,22 @@ describe('main (decisions)', () => {
     expect(s.run()).toBe(0);
     expect(s.lintSh).not.toHaveBeenCalled();
     expect(s.warnings.join('\n')).toContain('NOT linted');
+    expect(s.logs.at(-1)?.startsWith(`${GATE_NOTICE_LOG_PREFIX} `)).toBe(true);
+    expect(s.logs.at(-1)).toContain('NOT linted');
+  });
+
+  it('writes no notice when it linted with the CI version or had nothing to lint', () => {
+    const linted = setup(['scripts/x.sh']);
+    linted.run();
+    const skipped = setup(['src/a.ts']);
+    skipped.run();
+    for (const s of [linted, skipped]) {
+      expect(s.logs.some((line) => line.startsWith(GATE_NOTICE_LOG_PREFIX))).toBe(false);
+    }
+  });
+
+  it('uses the same notice prefix the CLI reads', () => {
+    expect(GATE_NOTICE_LOG_PREFIX).toBe(CLI_GATE_NOTICE_LOG_PREFIX);
   });
 
   it('fails closed when the diff cannot be computed', () => {
@@ -168,9 +188,19 @@ describe('listChangedFiles (real git)', () => {
     git(repo, 'commit', '-q', '-m', 'change');
     fs.writeFileSync(path.join(repo, 'dirty.sh'), 'echo dirty\n');
 
+    // Both sides of the rename: `old.sh` is gone from the tree lint:sh scans.
     expect(listChangedFiles({ cwd: repo, base: 'base' }).sort()).toEqual(
-      ['added.sh', 'gone.sh', 'keep.sh', 'new.sh'].sort()
+      ['added.sh', 'gone.sh', 'keep.sh', 'new.sh', 'old.sh'].sort()
     );
+  });
+
+  it('reports the .sh side of a rename that changes the extension (.sh -> .inc)', () => {
+    git(repo, 'mv', 'old.sh', 'old.inc');
+    git(repo, 'commit', '-q', '-m', 'rename to .inc');
+
+    const changed = listChangedFiles({ cwd: repo, base: 'base' });
+    expect(changed).toContain('old.sh');
+    expect(selectShellScripts(changed)).toEqual(['old.sh']);
   });
 
   it('throws when the base ref does not exist', () => {

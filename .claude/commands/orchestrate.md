@@ -1066,8 +1066,10 @@ exit 10 にもならない）。退避手順:
 ```bash
 # 完了検出を経由せずゲートだけ回す（--gates を渡すと scope が選択されず exit 99 に落ちない）
 commandmatedev verify "$WT" --gates token-discipline,control-chars,claudemd-size,route-exports,\
-build-cli,build-server,lint,build,typecheck,integration,unit
+build-cli,build-server,lint,lint-sh,build,typecheck,integration,unit
 ```
+
+この一覧は `.commandmate/verify.yaml` の宣言ゲートと同じ集合にする（`tests/unit/tasks/orchestrate-lint-sh-gate-3478.test.ts` が固定。入れないゲートは理由つきでそのテストの除外に書く）。
 
 このとき `work-evidence` と `scope` は落ちるので、**オーケストレーターが手で照合する**
 （commits ≥ 1 かつ作業ツリークリーン／`git diff --name-only origin/develop...HEAD` を契約の

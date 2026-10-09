@@ -11,8 +11,9 @@
  * contract can only narrow the gate list, not make a gate conditional.
  *
  * Decisions (Issue #3478):
- *   - Changed `.sh` = `git diff --name-only --diff-filter=ACMRD <base>...HEAD`.
+ *   - Changed `.sh` = `git diff --name-only --no-renames --diff-filter=ACMRD <base>...HEAD`.
  *     Deletions count: removing a file another script `source`s breaks `-x`.
+ *     Both sides of a rename count (`--no-renames`), so `x.sh -> x.inc` runs it.
  *     Only committed changes count — the verify gates judge commits.
  *     No `.sh` in that list → print a line saying so and exit 0 without
  *     looking for shellcheck at all.
@@ -38,6 +39,20 @@ import { fileURLToPath } from 'url';
 export const CI_SHELLCHECK_VERSION = '0.11.0';
 
 export const DEFAULT_BASE = 'origin/develop';
+
+/**
+ * Prefix of a line that `commandmate verify` / `wait --verify` print beside a
+ * PASS (Issue #3478). Mirrors GATE_NOTICE_LOG_PREFIX in
+ * src/cli/utils/verify-runner.ts; the unit test pins the two together.
+ *
+ * Why a marker and not a `skipped` gate: the runner aggregates any `skipped`
+ * gate to RESULT error (exit 99), which would turn "shellcheck is not
+ * installed" into "no verdict" — the opposite of the decision to warn and
+ * continue. And the CLI prints no log for a passed gate, so a plain warning on
+ * stderr never reached the user. The marker is written last so it survives
+ * the stored log tail's byte cap.
+ */
+export const GATE_NOTICE_LOG_PREFIX = '[cmate-notice]';
 
 /**
  * @param {string[]} argv
@@ -68,13 +83,18 @@ export function parseArgs(argv) {
  * Files changed on this branch since it left `base`, including deletions and
  * both sides of a rename.
  *
+ * `--no-renames`, as in scope-gate.ts: with rename detection on, `--name-only`
+ * reports only the destination, so `a.sh -> a.inc` would show no `.sh` at all
+ * even though a file `lint:sh` scanned (and others may `source`) is gone.
+ * Without it the pair is a deletion plus an addition, both reported.
+ *
  * @param {{ cwd: string, base: string }} options
  * @returns {string[]}
  */
 export function listChangedFiles({ cwd, base }) {
   const out = execFileSync(
     'git',
-    ['diff', '--name-only', '--diff-filter=ACMRD', `${base}...HEAD`],
+    ['diff', '--name-only', '--no-renames', '--diff-filter=ACMRD', `${base}...HEAD`],
     { cwd, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] }
   );
   return out
@@ -179,6 +199,10 @@ export function main(argv, deps = {}) {
         `The .sh changes above were NOT linted; CI's Lint job runs shellcheck ${CI_SHELLCHECK_VERSION} and will. ` +
         'Exiting 0 without a shellcheck verdict.'
     );
+    log(
+      `${GATE_NOTICE_LOG_PREFIX} shellcheck is not installed: ${shellScripts.length} changed .sh NOT linted ` +
+        `(passed without a shellcheck verdict; CI runs ${CI_SHELLCHECK_VERSION})`
+    );
     return 0;
   }
   if (version !== CI_SHELLCHECK_VERSION) {
@@ -188,7 +212,11 @@ export function main(argv, deps = {}) {
     );
   }
 
-  return lintSh(cwd);
+  const exitCode = lintSh(cwd);
+  if (version !== CI_SHELLCHECK_VERSION) {
+    log(`${GATE_NOTICE_LOG_PREFIX} linted with shellcheck ${version}; CI pins ${CI_SHELLCHECK_VERSION}`);
+  }
+  return exitCode;
 }
 
 const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
