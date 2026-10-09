@@ -1,6 +1,6 @@
 {
   "name": "commandmate",
-  "version": "0.44.3",
+  "version": "0.45.0",
   "description": "No long blocks of time? Run an AI team from your phone. Git worktree sessions, task contracts and verification gates for Claude Code, Codex, Gemini CLI, Copilot, OpenCode, Antigravity and Command Code.",
   "keywords": [
     "ai-agents",

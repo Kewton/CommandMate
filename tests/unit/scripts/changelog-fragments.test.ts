@@ -502,10 +502,30 @@ describe('bump declaration (Issue #3480)', () => {
       });
 
     it('prints the floor and fails below it', () => {
-      const frags = fs.readdirSync(path.join(REPO_ROOT, 'changelog.d'));
-      expect(frags).toContain('3395.md');
-      expect(run('--current', '0.44.3').stdout.trim()).toMatch(/^\d+\.\d+\.\d+$/);
-      expect(run('--current', '0.44.3', '--next', '0.44.4').status).toBe(1);
+      // The script resolves changelog.d from its own location, so run a copy in a
+      // temporary root. The repository's own fragments are consumed by every release.
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cf-bump-cli-'));
+      try {
+        fs.mkdirSync(path.join(root, 'scripts'));
+        fs.mkdirSync(path.join(root, 'changelog.d'));
+        fs.copyFileSync(
+          path.join(REPO_ROOT, 'scripts', 'changelog-fragments.mjs'),
+          path.join(root, 'scripts', 'changelog-fragments.mjs'),
+        );
+        fs.writeFileSync(
+          path.join(root, 'changelog.d', '3395.md'),
+          '<!-- ### Removed -->\n<!-- bump: minor -->\n- **chore(api): x** (#3395): y\n',
+        );
+        const runIn = (...a: string[]) =>
+          child_process.spawnSync(process.execPath, ['scripts/changelog-fragments.mjs', 'bump-floor', ...a], {
+            cwd: root,
+            encoding: 'utf-8',
+          });
+        expect(runIn('--current', '0.44.3').stdout.trim()).toBe('0.45.0');
+        expect(runIn('--current', '0.44.3', '--next', '0.44.4').status).toBe(1);
+      } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+      }
     });
 
     it('exits 2 without --current', () => {

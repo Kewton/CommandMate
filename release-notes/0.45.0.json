@@ -1,0 +1,41 @@
+{
+  "version": "0.45.0",
+  "date": "2026-10-09",
+  "highlight": {
+    "ja": "capture --json の読まれていない 3 つの欄を予告どおり削除しました。Claude がバックグラウンドの作業を残したときに wait が完了と読む問題も直しました。",
+    "en": "Three unused fields of capture --json were removed as announced. wait no longer treats a turn as finished while Claude still has background work."
+  },
+  "added": [],
+  "improved": [
+    {
+      "ja": "capture --json の isComplete・isGenerating・thinkingMessage を廃止しました。isPromptWaiting と thinking を使ってください。",
+      "en": "Removed isComplete, isGenerating and thinkingMessage from capture --json. Use isPromptWaiting and thinking instead."
+    }
+  ],
+  "fixed": [
+    {
+      "ja": "Claude がバックグラウンドの作業を残してターンを閉じたとき、wait が完了と読む問題を直しました。",
+      "en": "Fixed wait treating a turn as finished when Claude closed it with background work still running."
+    },
+    {
+      "ja": "終わりの合図が届かないターンで、wait がタイムアウトまで待ち続ける問題を直しました。",
+      "en": "Fixed wait spinning until its timeout on a turn whose end was never reported."
+    },
+    {
+      "ja": "git の状態を読めなかった worktree を「変更なし」と表示しないようにし、その状態ではブランチの切り替えを止めるようにしました。",
+      "en": "A worktree whose git status could not be read is no longer shown as unchanged, and branch switching stops in that case."
+    },
+    {
+      "ja": "スキルの画面と CLI が、git の状態を読めなかったときに「変更あり」ではなく「不明」と表示するようにしました。",
+      "en": "The skills view and CLI now show unknown instead of changed when git status could not be read."
+    },
+    {
+      "ja": "OpenCode V2 の画面から使っているモデル名を読めるようにしました。",
+      "en": "The model in use is now read from the OpenCode V2 screen."
+    },
+    {
+      "ja": "依存パッケージを更新し、既知の脆弱性を解消しました。",
+      "en": "Updated dependencies to fix known vulnerabilities."
+    }
+  ]
+}
