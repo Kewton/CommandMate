@@ -49,7 +49,6 @@ Every command in `.claude/commands/`. Follow the link for the full definition of
 | [`/pm-auto-design2dev`](../../../.claude/commands/pm-auto-design2dev.md) | Automate design review through implementation (design review, work plan, TDD implementation) |
 | [`/pm-auto-dev`](../../../.claude/commands/pm-auto-dev.md) | Automate Issue development end to end (TDD, tests, report) |
 | [`/pm-auto-issue2dev`](../../../.claude/commands/pm-auto-issue2dev.md) | Automate Issue review through implementation (Issue review, design review, work plan, TDD implementation) |
-| [`/pr-merge-pipeline`](../../../.claude/commands/pr-merge-pipeline.md) | Automate PR creation, CI, sequential merges, and integration verification across several Issues |
 | [`/progress-report`](../../../.claude/commands/progress-report.md) | Produce a development progress summary and report blockers |
 | [`/refactoring`](../../../.claude/commands/refactoring.md) | Improve code quality, apply design patterns, and pay down technical debt |
 | [`/tdd-impl`](../../../.claude/commands/tdd-impl.md) | Implement to a high standard using test-driven development |
