@@ -4,15 +4,27 @@
  * Wrapper component for ReactMarkdown's code block.
  * Conditionally renders MermaidDiagram for mermaid language.
  *
+ * Since Issue #3503 a mermaid block is the diagram AND its source: a folded
+ * "Source" under the diagram (open when the diagram fails), holding the fence
+ * body as text. The file preview, chat and History all draw a mermaid fence
+ * through this one component.
+ *
  * @module components/worktree/MermaidCodeBlock
  */
 
 'use client';
 
-import React from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { useTranslations } from 'next-intl';
 import { Spinner } from '@/components/ui/Spinner';
+import {
+  MERMAID_BLOCK_SETTLED_EVENT,
+  MERMAID_SOURCE_ATTR,
+  SEARCH_SKIP_ATTR,
+} from '@/lib/terminal-highlight';
+import { isMermaidLanguage } from './mermaid-block-utils';
+import type { MermaidRenderState } from './MermaidDiagram';
 
 /**
  * Dynamic import of MermaidDiagram with SSR disabled
@@ -83,15 +95,54 @@ function extractCodeString(
   return String(children);
 }
 
+/** Test id of the frame holding one mermaid diagram and its source. */
+export const MERMAID_BLOCK_TESTID = 'mermaid-block-frame';
+/** Test id of the folded source under a diagram. */
+export const MERMAID_SOURCE_TESTID = 'mermaid-source';
+
+const SKIP = { [SEARCH_SKIP_ATTR]: 'true' } as const;
+const SOURCE = { [MERMAID_SOURCE_ATTR]: 'true' } as const;
+
 /**
- * Check if the code block is mermaid
+ * One mermaid fence: the diagram, then its source folded underneath.
  *
- * @param className - CSS class name from ReactMarkdown
- * @returns True if the code block is mermaid
+ * - The source is the fence body as a text child — React escapes it, it is
+ *   never parsed as HTML.
+ * - It is rendered from the first paint and never re-keyed, so its text nodes
+ *   are the same before the diagram loads, after it draws, and after a theme
+ *   redraw: a search highlight placed on it stays where it is.
+ * - The diagram side and the "Source" label carry `data-search-skip`, so search
+ *   counts only the source body (see `lib/terminal-highlight`).
+ * - Closed by default; open when the diagram failed, so the error is shown with
+ *   the text that caused it.
  */
-function isMermaidLanguage(className?: string): boolean {
-  if (!className) return false;
-  return className.split(' ').includes('language-mermaid');
+function MermaidBlock({ code }: { code: string }): React.JSX.Element {
+  const t = useTranslations('worktree');
+  const [failed, setFailed] = useState(false);
+  const frameRef = useRef<HTMLDivElement>(null);
+
+  const handleRenderState = useCallback((state: MermaidRenderState) => {
+    setFailed(state === 'error');
+    frameRef.current?.dispatchEvent(new CustomEvent(MERMAID_BLOCK_SETTLED_EVENT, { bubbles: true }));
+  }, []);
+
+  // hast gives a fence's text with one trailing newline; the source shows the
+  // body as written (and as search finds it in the raw message).
+  const source = code.endsWith('\n') ? code.slice(0, -1) : code;
+
+  return (
+    <div ref={frameRef} data-testid={MERMAID_BLOCK_TESTID} className="mermaid-block">
+      <div {...SKIP} className="mermaid-figure">
+        <MermaidDiagram code={code} onRenderStateChange={handleRenderState} />
+      </div>
+      <details data-testid={MERMAID_SOURCE_TESTID} className="mermaid-source" open={failed || undefined}>
+        <summary {...SKIP}>{t('mermaid.source')}</summary>
+        <pre>
+          <code {...SOURCE}>{source}</code>
+        </pre>
+      </details>
+    </div>
+  );
 }
 
 /**
@@ -119,7 +170,7 @@ export function MermaidCodeBlock({
   // Fenced mermaid blocks render as a diagram.
   if (isMermaidLanguage(className)) {
     const code = extractCodeString(children);
-    return <MermaidDiagram code={code} />;
+    return <MermaidBlock code={code} />;
   }
 
   // Everything else — inline code and non-mermaid block code — renders as a

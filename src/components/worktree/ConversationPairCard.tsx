@@ -21,6 +21,7 @@ import { formatMessageTimestamp } from '@/lib/date-utils';
 import { splitFilePathParts } from '@/lib/chat/chat-transcript-view';
 import { SHARED_REMARK_PLUGINS } from '@/lib/markdown';
 import { ChatFileLink } from '@/components/worktree/ChatMessageBubble';
+import { MERMAID_MARKDOWN_COMPONENTS } from '@/components/worktree/mermaid-markdown';
 
 // ============================================================================
 // Types
@@ -212,7 +213,8 @@ const COLLAPSED_MARKDOWN_MAX_HEIGHT = 'max-h-[3.25rem]';
  * The existing affordance survives the change: {@link MessageContent} is spliced
  * into the text children of every block element the linkifier can safely reach.
  * `code` and `pre` are left alone — a path inside a fence is part of a command,
- * not a link, and a `<button>` there would break selection and copy.
+ * not a link, and a `<button>` there would break selection and copy. Except a
+ * ```mermaid fence (#3503), which is drawn as a diagram.
  */
 const AssistantMarkdown = memo(function AssistantMarkdown({
   content,
@@ -249,6 +251,10 @@ const AssistantMarkdown = memo(function AssistantMarkdown({
           {children}
         </ChatFileLink>
       ),
+      // [#3503] A ```mermaid fence is drawn as a diagram with its source folded
+      // under it — the same frame chat and the file preview use. Every other
+      // `code` / `pre` renders as react-markdown's default did.
+      ...MERMAID_MARKDOWN_COMPONENTS,
     };
   }, [onFilePathClick]);
 

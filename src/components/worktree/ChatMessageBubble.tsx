@@ -84,6 +84,11 @@ import { classifyChatLink, normalizeChatFilePath } from '@/lib/chat/chat-file-pa
 import { splitChatUserBody, useChatImageScope } from '@/lib/chat/chat-image';
 import { ChatImage } from '@/components/worktree/ChatImage';
 import { ChatVideo } from '@/components/worktree/ChatVideo';
+import { MERMAID_MARKDOWN_COMPONENTS } from '@/components/worktree/mermaid-markdown';
+import {
+  CHAT_SEARCH_SECTION_REASONING,
+  CHAT_SEARCH_SECTION_TOOL_LOG,
+} from '@/components/worktree/chat-search-sections';
 import {
   chatMarkdownCopyText,
   chatMarkdownFullCopyText,
@@ -841,7 +846,10 @@ const CHAT_SANITIZE_SCHEMA = {
  * unfenced `<T>` in ordinary prose. File paths stay clickable by splicing the
  * linkifier into the block elements it can safely reach; `code` and `pre` are
  * left alone, since a path inside a fence is part of a command and a `<button>`
- * there would break selection and copy.
+ * there would break selection and copy. The one exception (#3503): with
+ * `renderDiagrams`, a ```mermaid fence is drawn by the shared
+ * `MERMAID_MARKDOWN_COMPONENTS` — the answer, the reasoning and the tool log
+ * alike, since all three take this one `components` map.
  *
  * Since #2272 the reasoning is lifted out ({@link splitChatThinking}) and drawn
  * as a chip under the answer, and since #2284 the trailing tool section is too
@@ -858,9 +866,18 @@ const CHAT_SANITIZE_SCHEMA = {
 export const ChatMarkdownBody = memo(function ChatMarkdownBody({
   content,
   onFilePathClick,
+  renderDiagrams = false,
 }: {
   content: string;
   onFilePathClick: (path: string) => void;
+  /**
+   * [Issue #3503] Draw ```mermaid fences as diagrams (with their source folded
+   * underneath). Only a saved row passes `true` — the settled bubble — because a
+   * body still being written or still being replaced would redraw a diagram on
+   * every frame, and a half-written fence is a syntax error. Live and pending
+   * bodies keep the default and show the fence as code.
+   */
+  renderDiagrams?: boolean;
 }) {
   const components = useMemo<Components>(() => {
     const linkify = (children: React.ReactNode): React.ReactNode =>
@@ -917,8 +934,11 @@ export const ChatMarkdownBody = memo(function ChatMarkdownBody({
           />
         );
       },
+      // [#3503] `code` / `pre` stay react-markdown's defaults unless diagrams
+      // are on; with them on, only a mermaid fence renders differently.
+      ...(renderDiagrams ? MERMAID_MARKDOWN_COMPONENTS : {}),
     };
-  }, [onFilePathClick]);
+  }, [onFilePathClick, renderDiagrams]);
 
   // [#2459] All three renders below — body, reasoning, tool log — take the same
   // shared remark list, so the Issue's broken bold URL is repaired wherever the
@@ -950,26 +970,32 @@ export const ChatMarkdownBody = memo(function ChatMarkdownBody({
       </ReactMarkdown>
       {split.reasoning !== null && (
         <ChatThinkingDisclosure blocks={split.reasoningBlocks}>
-          <ReactMarkdown
-            remarkPlugins={SHARED_REMARK_PLUGINS}
-            rehypePlugins={rehypePlugins}
-            urlTransform={chatUrlTransform}
-            components={components}
-          >
-            {split.reasoning}
-          </ReactMarkdown>
+          {/* [#3503] Tells search which part of the raw text this is drawn
+              from (`chatSearchSections`); `contents` keeps the layout as is. */}
+          <div data-search-section={CHAT_SEARCH_SECTION_REASONING} className="contents">
+            <ReactMarkdown
+              remarkPlugins={SHARED_REMARK_PLUGINS}
+              rehypePlugins={rehypePlugins}
+              urlTransform={chatUrlTransform}
+              components={components}
+            >
+              {split.reasoning}
+            </ReactMarkdown>
+          </div>
         </ChatThinkingDisclosure>
       )}
       {split.toolCalls > 0 && (
         <ChatToolLogDisclosure toolCalls={split.toolCalls}>
-          <ReactMarkdown
-            remarkPlugins={SHARED_REMARK_PLUGINS}
-            rehypePlugins={rehypePlugins}
-            urlTransform={chatUrlTransform}
-            components={components}
-          >
-            {split.toolLog}
-          </ReactMarkdown>
+          <div data-search-section={CHAT_SEARCH_SECTION_TOOL_LOG} className="contents">
+            <ReactMarkdown
+              remarkPlugins={SHARED_REMARK_PLUGINS}
+              rehypePlugins={rehypePlugins}
+              urlTransform={chatUrlTransform}
+              components={components}
+            >
+              {split.toolLog}
+            </ReactMarkdown>
+          </div>
         </ChatToolLogDisclosure>
       )}
     </>
@@ -1374,7 +1400,11 @@ export const ChatMessageBubble = memo(function ChatMessageBubble({
         ) : (
           <div data-message-id={message.id} data-markdown={isMarkdown ? 'true' : undefined} className={bodyClassName}>
             {isMarkdown ? (
-              <ChatMarkdownBody content={message.content} onFilePathClick={onFilePathClick} />
+              <ChatMarkdownBody
+                content={message.content}
+                onFilePathClick={onFilePathClick}
+                renderDiagrams
+              />
             ) : isUser ? (
               <ChatUserBody content={plainBody} onFilePathClick={onFilePathClick} />
             ) : (
