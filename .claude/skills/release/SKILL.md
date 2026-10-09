@@ -83,6 +83,18 @@ CURRENT_VERSION=$(node -p "require('./package.json').version")
 - `minor`: `0.10.0` → `0.11.0`
 - `major`: `0.10.0` → `1.0.0`
 
+#### 最低の版の確認（Issue #3480）
+
+断片の `<!-- bump: minor|major -->` 宣言が示す最低の版を、計算した（または直接指定された）`NEXT_VERSION` が下回るなら**中断**する。
+
+```bash
+node scripts/changelog-fragments.mjs bump-floor --current "$CURRENT_VERSION" --next "$NEXT_VERSION"
+# exit 0 = 通る。exit 1 = 中断（現在以下／最低の版未満／不正な断片）
+node scripts/changelog-fragments.mjs bump-floor --current "$CURRENT_VERSION"   # 最低の版だけ表示
+```
+
+exit 1 のとき、標準エラーの最低の版と宣言した断片の Issue 番号（例: `#3395`）をユーザーに表示し、より大きい版で指定し直すよう伝えて止まる。版の方針は `docs/release-guide.md` の「バージョン判断基準」。
+
 ### 1-3. 安全ガード
 
 ```bash

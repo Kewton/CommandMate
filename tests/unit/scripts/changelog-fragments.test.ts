@@ -14,6 +14,8 @@ import {
   readFragments,
   renderSection,
   applyFragments,
+  computeBumpFloor,
+  checkNextVersion,
 } from '../../../scripts/changelog-fragments.mjs';
 
 const REPO_ROOT = path.resolve(__dirname, '../../..');
@@ -403,5 +405,111 @@ describe('Guard: real repository changelog.d', () => {
       'Write the entry to changelog.d/<N>.md instead (see changelog.d/README.md); ' +
         '`node scripts/changelog-fragments.mjs apply` writes CHANGELOG.md at release time.'
     ).toEqual([]);
+  });
+});
+
+describe('bump declaration (Issue #3480)', () => {
+  const ENTRY = '- **feat(cli): x** (#7): body';
+  const frag = (section: string, bump: 'minor' | 'major' | null = null) => ({
+    issue: 7,
+    section,
+    bump,
+  });
+
+  it('parses a declaration on line 2', () => {
+    const r = parseFragment('7.md', `<!-- ### Removed -->\n<!-- bump: minor -->\n${ENTRY}\n`);
+    expect(r.errors).toEqual([]);
+    expect(r.bump).toBe('minor');
+    expect(r.entry).toBe(ENTRY);
+  });
+
+  it('has no bump without a declaration', () => {
+    const r = parseFragment('7.md', `<!-- ### Fixed -->\n${ENTRY}\n`);
+    expect(r.errors).toEqual([]);
+    expect(r.bump).toBeNull();
+  });
+
+  it.each([
+    ['invalid value', `<!-- ### Fixed -->\n<!-- bump: patch -->\n${ENTRY}\n`],
+    ['declaration before the section comment', `<!-- bump: minor -->\n<!-- ### Fixed -->\n${ENTRY}\n`],
+    ['declaration split over lines', `<!-- ### Fixed -->\n<!-- bump:\nminor -->\n${ENTRY}\n`],
+    ['declaration after the entry', `<!-- ### Fixed -->\n${ENTRY}\n<!-- bump: minor -->\n`],
+    ['declaration without an entry', `<!-- ### Fixed -->\n<!-- bump: minor -->\n`],
+  ])('rejects %s', (_name, content) => {
+    expect(parseFragment('7.md', content).errors.length).toBeGreaterThan(0);
+  });
+
+  it('apply does not emit the declaration line', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cf-bump-'));
+    try {
+      fs.mkdirSync(path.join(root, 'changelog.d'));
+      fs.writeFileSync(path.join(root, 'CHANGELOG.md'), '# Changelog\n\n## [Unreleased]\n\n## [0.1.0] - 2026-01-01\n');
+      fs.writeFileSync(path.join(root, 'changelog.d', '7.md'), `<!-- ### Removed -->\n<!-- bump: minor -->\n${ENTRY}\n`);
+      applyFragments({ root, version: '0.2.0', date: '2026-10-09' });
+      const out = fs.readFileSync(path.join(root, 'CHANGELOG.md'), 'utf-8');
+      expect(out).toContain(ENTRY);
+      expect(out).not.toContain('bump');
+    } finally {
+      removeTempDir(root);
+    }
+  });
+
+  describe('computeBumpFloor / checkNextVersion', () => {
+    it('no declaration: patch passes', () => {
+      expect(computeBumpFloor('0.44.3', [frag('Fixed')]).floor).toBe('0.44.4');
+      expect(checkNextVersion('0.44.3', '0.44.4', [frag('Fixed')]).ok).toBe(true);
+    });
+
+    it('bump: minor rejects patch, accepts minor and major', () => {
+      const f = [frag('Removed', 'minor')];
+      expect(computeBumpFloor('0.44.3', f)).toMatchObject({ floor: '0.45.0', issues: [7] });
+      expect(checkNextVersion('0.44.3', '0.44.4', f).ok).toBe(false);
+      expect(checkNextVersion('0.44.3', '0.44.9', f).ok).toBe(false);
+      expect(checkNextVersion('0.44.3', '0.45.0', f).ok).toBe(true);
+      expect(checkNextVersion('0.44.3', '1.0.0', f).ok).toBe(true);
+    });
+
+    it('bump: major rejects minor on 0.x and needs the next major on 1.x', () => {
+      const f = [frag('Changed', 'major')];
+      expect(computeBumpFloor('0.44.3', f).floor).toBe('1.0.0');
+      expect(checkNextVersion('0.44.3', '0.45.0', f).ok).toBe(false);
+      expect(checkNextVersion('0.44.3', '1.0.0', f).ok).toBe(true);
+      expect(computeBumpFloor('1.2.3', f).floor).toBe('2.0.0');
+      expect(computeBumpFloor('1.2.3', [frag('Changed', 'minor')]).floor).toBe('1.3.0');
+    });
+
+    it('takes the larger of several declarations', () => {
+      const f = [frag('Removed', 'minor'), { issue: 8, section: 'Changed', bump: 'major' as const }];
+      expect(computeBumpFloor('0.44.3', f)).toMatchObject({ floor: '1.0.0', issues: [8] });
+    });
+
+    it('rejects a version at or below the current one', () => {
+      expect(checkNextVersion('0.44.3', '0.44.3', []).ok).toBe(false);
+      expect(checkNextVersion('0.44.3', '0.44.2', []).ok).toBe(false);
+      expect(checkNextVersion('0.44.3', 'abc', []).ok).toBe(false);
+    });
+
+    it('a Deprecated-only fragment is the same as no declaration', () => {
+      expect(computeBumpFloor('0.44.3', [frag('Deprecated', 'minor')]).floor).toBe('0.44.4');
+    });
+  });
+
+  describe('bump-floor CLI', () => {
+    const run = (...a: string[]) =>
+      child_process.spawnSync(process.execPath, ['scripts/changelog-fragments.mjs', 'bump-floor', ...a], {
+        cwd: REPO_ROOT,
+        encoding: 'utf-8',
+      });
+
+    it('prints the floor and fails below it', () => {
+      const frags = fs.readdirSync(path.join(REPO_ROOT, 'changelog.d'));
+      expect(frags).toContain('3395.md');
+      expect(run('--current', '0.44.3').stdout.trim()).toMatch(/^\d+\.\d+\.\d+$/);
+      expect(run('--current', '0.44.3', '--next', '0.44.4').status).toBe(1);
+    });
+
+    it('exits 2 without --current', () => {
+      expect(run().status).toBe(2);
+    });
   });
 });
