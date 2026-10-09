@@ -11,21 +11,27 @@
  *   lint-sh        node scripts/run-lint-sh-if-changed.mjs (only when a .sh changed, #3478)
  *   suppressions   node scripts/count-suppressions.mjs (refactor / metrics Issues only, #3483)
  *   tsc            npx tsc --noEmit
- *   related        npx vitest related --run <changed src/scripts code>
+ *   build          npm run build (only with --build; otherwise the PR's CI Build decides, 6-2 / 6-3)
+ *   related        npx vitest related --run --dir tests/unit <changed src/scripts code>
  *   tests          npx vitest run <changed tests> <tests naming a changed path> tests/unit/guards tests/unit/docs
  *
  * The result goes to the `precheck` stage of `run-log.mjs` with the HEAD it
- * ran on. An `ok` precheck for the same HEAD is reused instead of run again,
- * and a step the `verify` stage already passed on that HEAD (`lint` covers
- * eslint, `typecheck` tsc, `unit` / `unit-related` the tests, `lint-sh` lint-sh)
- * is not run twice.
+ * ran on. An `ok` precheck for the same HEAD and the same options (base, kind,
+ * metrics, allow-removed-tests, build) is reused instead of run again — every
+ * step reads only the committed tree (a dirty tree is refused) and the options.
+ * A step the `verify` stage already passed on that HEAD is not run twice only
+ * where the two are the same check on the same tree: verify.yaml's `lint`
+ * covers eslint, `typecheck` tsc, `lint-sh` lint-sh. A gate the contract
+ * defined (`<id>@contract`) covers nothing, and no test gate covers the test
+ * steps (`unit-related` selects tests differently, so its pass says nothing
+ * about the guards or the tests naming a changed path).
  *
  * Exit code: 0 ok (or reused), 1 a step failed, 2 usage error or a dirty tree
  * (the result would not belong to HEAD).
  *
  * Usage:
  *   node scripts/orchestrate/precheck.mjs --run-dir <dir> --issues <range> --issue <N> --worktree <path>
- *        [--base origin/develop] [--kind <feature|bug|refactor|docs>] [--metrics] [--allow-removed-tests] [--force]
+ *        [--base origin/develop] [--kind <feature|bug|refactor|docs>] [--metrics] [--build] [--allow-removed-tests] [--force]
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -42,9 +48,9 @@ export const COVERED_BY_GATE = {
   eslint: ['lint'],
   tsc: ['typecheck'],
   'lint-sh': ['lint-sh'],
-  related: ['unit', 'unit-related'],
-  tests: ['unit', 'unit-related'],
 };
+/** Run only when asked (`--build`); the PR's CI Build is the default judge (6-2 / 6-3). */
+export const OPTIONAL_STEPS = ['build'];
 /** Always part of the test step (2-4-2: the guards are never left out). */
 export const ALWAYS_TESTS = ['tests/unit/guards', 'tests/unit/docs'];
 /** Files the orchestrator leaves in a worktree that are not the worker's work. */
@@ -110,7 +116,7 @@ export function countRemovedTests(diffText) {
  * @param {{ base: string, kind?: string, metrics?: boolean, namingTests?: string[] }} options
  * @returns {Record<string, { command: [string, string[]] | null, reason?: string }>}
  */
-export function planSteps({ changed, deleted }, { base, kind, metrics = false, namingTests = [] }) {
+export function planSteps({ changed, deleted }, { base, kind, metrics = false, build = false, namingTests = [] }) {
   /** @type {Record<string, { command: [string, string[]] | null, reason?: string }>} */
   const plan = {};
   const lintable = changed.filter((file) => CODE_FILE.test(file));
@@ -129,9 +135,11 @@ export function planSteps({ changed, deleted }, { base, kind, metrics = false, n
       ? { command: ['node', ['scripts/count-suppressions.mjs', '--base', base]] }
       : { command: null, reason: 'not a refactor / metrics Issue' };
   plan.tsc = { command: ['npx', ['tsc', '--noEmit']] };
+  if (build) plan.build = { command: ['npm', ['run', 'build']] };
+  // `--dir tests/unit`: the same tree the unit gates cover; integration / e2e are CI's.
   plan.related =
     sources.length > 0
-      ? { command: ['npx', ['vitest', 'related', '--run', '--passWithNoTests', ...sources]] }
+      ? { command: ['npx', ['vitest', 'related', '--run', '--dir', 'tests/unit', '--passWithNoTests', ...sources]] }
       : { command: null, reason: 'no changed src/scripts code' };
   plan.tests = { command: ['npx', ['vitest', 'run', ...tests, ...ALWAYS_TESTS]] };
   return plan;
@@ -145,11 +153,20 @@ export function parseNote(note) {
   return steps;
 }
 
-/** Gate ids the verify stage passed, from its `passed=a,b` note (wait-verify.mjs). */
+/**
+ * Gate ids the verify stage passed, from its `passed=a,b` note (wait-verify.mjs).
+ * Contract-defined gates (`<id>@contract`) keep their suffix, so they never
+ * match a verify.yaml gate id in COVERED_BY_GATE.
+ */
 export function passedGates(verifyRecord) {
   if (!verifyRecord || verifyRecord.result !== 'ok') return [];
   const match = /(?:^|\s)passed=(\S+)/.exec(verifyRecord.note ?? '');
   return match && match[1] !== '-' ? match[1].split(',') : [];
+}
+
+/** The options a precheck result depends on, as one token of its note. */
+export function optionsToken({ base, kind, metrics, allowRemovedTests, build }) {
+  return `opts=base:${base},kind:${kind ?? '-'},metrics:${metrics},allow-removed:${allowRemovedTests},build:${build}`;
 }
 
 function git(run, worktree, args) {
@@ -162,13 +179,13 @@ const lines = (text) => text.split('\n').map((l) => l.trim()).filter(Boolean);
 
 const USAGE = `Usage:
   node scripts/orchestrate/precheck.mjs --run-dir <dir> --issues <range> --issue <N> --worktree <path>
-       [--base ${DEFAULT_BASE}] [--kind <feature|bug|refactor|docs>] [--metrics] [--allow-removed-tests] [--force]`;
+       [--base ${DEFAULT_BASE}] [--kind <feature|bug|refactor|docs>] [--metrics] [--build] [--allow-removed-tests] [--force]`;
 
 const FLAGS = { '--run-dir': 'runDir', '--issues': 'issues', '--issue': 'issue', '--worktree': 'worktree', '--base': 'base', '--kind': 'kind' };
-const SWITCHES = { '--metrics': 'metrics', '--allow-removed-tests': 'allowRemovedTests', '--force': 'force' };
+const SWITCHES = { '--metrics': 'metrics', '--build': 'build', '--allow-removed-tests': 'allowRemovedTests', '--force': 'force' };
 
 export function parseArgs(argv) {
-  const options = { base: DEFAULT_BASE, metrics: false, allowRemovedTests: false, force: false };
+  const options = { base: DEFAULT_BASE, metrics: false, build: false, allowRemovedTests: false, force: false };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (SWITCHES[arg]) options[SWITCHES[arg]] = true;
@@ -222,21 +239,24 @@ export function main(argv, deps = {}) {
     const deleted = lines(git(run, o.worktree, ['diff', '--name-only', '--no-renames', '--diff-filter=D', range]));
     const plan = planSteps(
       { changed, deleted },
-      { base: o.base, kind: o.kind, metrics: o.metrics, namingTests: findNaming(o.worktree, [...changed, ...deleted]) }
+      { base: o.base, kind: o.kind, metrics: o.metrics, build: o.build, namingTests: findNaming(o.worktree, [...changed, ...deleted]) }
     );
-    const toRun = STEPS.filter((step) => plan[step].command !== null || step === 'removed-tests');
+    const steps = [...STEPS, ...OPTIONAL_STEPS.filter((step) => plan[step])];
+    const toRun = steps.filter((step) => plan[step].command !== null || step === 'removed-tests');
+    const opts = optionsToken(o);
 
     const { records } = readRecords(o.runDir, o.issues);
     if (!o.force) {
       const previous = findLatest(records, { issue, stage: 'precheck', head });
       if (previous && previous.result === 'ok') {
-        const steps = parseNote(previous.note);
-        const missing = toRun.filter((step) => steps[step] !== 'ok');
-        if (missing.length === 0) {
+        const done = parseNote(previous.note);
+        const missing = toRun.filter((step) => done[step] !== 'ok');
+        const sameOptions = (previous.note ?? '').split(/\s+/).includes(opts);
+        if (missing.length === 0 && sameOptions) {
           log(`precheck #${issue} reused: ok at ${short} (${previous.at}) — pass --force to run again`);
           return 0;
         }
-        log(`precheck #${issue}: the ok record at ${short} did not run ${missing.join(', ')} — running`);
+        log(`precheck #${issue}: the ok record at ${short} ${sameOptions ? `did not run ${missing.join(', ')}` : 'was taken with other options'} — running`);
       }
     }
     const verified = passedGates(findLatest(records, { issue, stage: 'verify', head }));
@@ -246,7 +266,7 @@ export function main(argv, deps = {}) {
     fs.writeFileSync(logFile, `precheck #${issue} ${head} base=${o.base}\n`);
     const started = now();
     const results = {};
-    for (const step of STEPS) {
+    for (const step of steps) {
       const { command, reason } = plan[step];
       if (step === 'removed-tests') {
         const removed = countRemovedTests(git(run, o.worktree, ['diff', '--unified=0', '--no-color', range, '--', 'tests']));
@@ -275,7 +295,7 @@ export function main(argv, deps = {}) {
     }
 
     const result = Object.values(results).includes('fail') ? 'fail' : 'ok';
-    const note = STEPS.map((step) => `${step}=${results[step]}`).join(' ');
+    const note = `${steps.map((step) => `${step}=${results[step]}`).join(' ')} ${opts}`;
     const durationSec = Math.round((now().getTime() - started.getTime()) / 1000);
     const { file } = appendRecord(o.runDir, o.issues, { issue, stage: 'precheck', result, head, durationSec, note }, now());
     log(`precheck #${issue} ${short} ${result}: ${note}`);

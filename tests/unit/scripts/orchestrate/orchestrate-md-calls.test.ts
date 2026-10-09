@@ -98,3 +98,52 @@ describe('5-1 records a contract-less verify', () => {
     expect(block).toContain('--head "$(git -C "$WT_DIR" rev-parse HEAD)"');
   });
 });
+
+describe('build moved to CI: the merge waits for it (#3477 review 3)', () => {
+  it('6-1-1 says build runs beside CI and points at the merge condition', () => {
+    const body = section('6-1-1');
+    expect(body).toContain('**build は PR の前の確認に入れない（CI の `Build` と並走させる）。**');
+    expect(body).toContain('6-2・6-3');
+  });
+
+  it('6-2 and 6-3 both require Build pass, or a build=ok precheck for the HEAD being merged', () => {
+    for (const id of ['6-2', '6-3']) {
+      const body = section(id);
+      expect(body, id).toMatch(/`Build` (が|のチェックも) `pass` になってからマージする/);
+      expect(body, id).toContain('`build=ok`');
+    }
+  });
+
+  it('6-3 checks it with a block that parses and reads the run record of this HEAD', () => {
+    const block = bashBlocks(section('6-3')).find((b) => b.includes('select(.name == "Build" and .bucket == "pass")')) ?? '';
+    expect(block).not.toBe('');
+    parses(block);
+    expect(block).toContain('.stage == "precheck"');
+    expect(block).toContain('.head == $h');
+    expect(block).toContain('NOT mergeable');
+  });
+
+  it('6-1-1 passes --build through flags precheck.mjs accepts', () => {
+    expect(parsePrecheckArgs(['--run-dir', 'r', '--issues', '1', '--issue', '1', '--worktree', '/w', '--build']).options?.build).toBe(true);
+  });
+});
+
+describe('3-3 says the verdict is confirmed and never reused (#3477 review 1, 2, 4)', () => {
+  const body = section('3-3');
+
+  it('documents exit 3 here and in the 3-4 table', () => {
+    expect(body).toContain('**3 は「裁定を作業の終わりに結び付けられない」**');
+    expect(section('3-4').split('\n').some((line) => line.startsWith('| `3` |'))).toBe(true);
+  });
+
+  it('does not offer reuse or --force any more', () => {
+    expect(body).toContain('**合格の記録は再利用しない。**');
+    expect(body).not.toContain('`--force`');
+  });
+
+  it('names the Auto-Yes read-back and the recovery call', () => {
+    expect(body).toContain('`autoYes.enabled`');
+    expect(body).toContain('wait-verify.mjs --auto-yes-off');
+    expect(parseWaitVerifyArgs(['--auto-yes-off', '--wt', 'w', '--instance', 'claude']).error).toBeUndefined();
+  });
+});

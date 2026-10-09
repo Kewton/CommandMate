@@ -87,7 +87,8 @@ describe('planSteps', () => {
       { base, namingTests: ['tests/unit/docs-x.test.ts', 'tests/unit/a.test.ts'] }
     );
     expect(plan.eslint.command).toEqual(['npx', ['eslint', 'src/lib/a.ts', 'tests/unit/a.test.ts', 'tests/integration/b.test.ts']]);
-    expect(plan.related.command).toEqual(['npx', ['vitest', 'related', '--run', '--passWithNoTests', 'src/lib/a.ts']]);
+    // --dir tests/unit: related picks unit tests only, like the unit gates (#3477 review 5).
+    expect(plan.related.command).toEqual(['npx', ['vitest', 'related', '--run', '--dir', 'tests/unit', '--passWithNoTests', 'src/lib/a.ts']]);
     expect(plan.tests.command).toEqual([
       'npx',
       ['vitest', 'run', 'tests/unit/a.test.ts', 'tests/unit/docs-x.test.ts', ...ALWAYS_TESTS],
@@ -297,7 +298,8 @@ describe('main: the same HEAD is not checked twice', () => {
     });
     const h = harness();
     expect(main(argv(), h.deps)).toBe(0);
-    expect(h.checks().map((c) => c.args[0])).toEqual(['scripts/changelog-fragments.mjs']);
+    // lint / typecheck cover eslint / tsc; unit-related covers no test step (#3477 review 5).
+    expect(h.checks().map((c) => c.args[0])).toEqual(['scripts/changelog-fragments.mjs', 'vitest', 'vitest']);
     expect(h.out.join('\n')).toMatch(/tsc ok \(verify passed typecheck at aaaaaaa\)/);
   });
 
@@ -306,5 +308,47 @@ describe('main: the same HEAD is not checked twice', () => {
     const h = harness();
     main(argv(), h.deps);
     expect(h.checks().map((c) => c.args[0])).toContain('tsc');
+  });
+});
+
+describe('review fixes (#3477 PR 2)', () => {
+  it('a unit / unit-related pass does not stand in for the test steps', () => {
+    appendRecord(runDir, '3477', { issue: 3477, stage: 'verify', result: 'ok', head: HEAD_A, note: 'passed=lint,typecheck,unit,unit-related failed=-' });
+    const h = harness();
+    main(argv(), h.deps);
+    expect(h.checks().filter((c) => c.args[0] === 'vitest').map((c) => c.args[1])).toEqual(['related', 'run']);
+  });
+
+  it('a gate the contract defined covers nothing', () => {
+    appendRecord(runDir, '3477', { issue: 3477, stage: 'verify', result: 'ok', head: HEAD_A, note: 'passed=lint@contract,typecheck@contract failed=-' });
+    expect(passedGates(readRecords(runDir, '3477').records[0])).toEqual(['lint@contract', 'typecheck@contract']);
+    const h = harness();
+    main(argv(), h.deps);
+    expect(h.checks().map((c) => c.args[0])).toEqual(expect.arrayContaining(['eslint', 'tsc']));
+  });
+
+  it('an ok record taken with other options is not reused', () => {
+    main(argv('--allow-removed-tests'), harness().deps);
+    const strict = harness();
+    main(argv(), strict.deps);
+    expect(strict.checks().length).toBeGreaterThan(0);
+    expect(strict.out.join('\n')).toMatch(/was taken with other options/);
+    // …and the same options reuse it.
+    const same = harness();
+    main(argv(), same.deps);
+    expect(same.checks()).toEqual([]);
+  });
+
+  it('--build adds npm run build and records it; without it there is no build step', () => {
+    const h = harness();
+    expect(main(argv('--build'), h.deps)).toBe(0);
+    expect(h.checks().map((c) => `${c.command} ${c.args.join(' ')}`)).toContain('npm run build');
+    expect(parseNote(readRecords(runDir, '3477').records[0].note).build).toBe('ok');
+    expect(readRecords(runDir, '3477').records[0].note).toContain('build:true');
+    expect(planSteps({ changed: [], deleted: [] }, { base: 'origin/develop' }).build).toBeUndefined();
+  });
+
+  it('a failed build fails the precheck', () => {
+    expect(main(argv('--build'), harness({ fail: ['npm run'] }).deps)).toBe(1);
   });
 });

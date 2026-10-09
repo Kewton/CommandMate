@@ -27,11 +27,13 @@ import {
   contractPath,
   contractYaml,
   isolationRules,
+  namesOneFile,
   normalizeConfig,
   readTemplate,
   writeContract,
 } from '../../../../scripts/orchestrate/contract.mjs';
 import { MAX_PATTERN_LENGTH, MAX_TITLE_LENGTH, parseTaskContract } from '@/lib/tasks/contract-parser';
+import { ScopeMatcher } from '@/lib/verification/scope-gate';
 import { parseFragment } from '../../../../scripts/changelog-fragments.mjs';
 
 const SCRIPT = path.resolve(__dirname, '../../../../scripts/orchestrate/contract.mjs');
@@ -487,5 +489,44 @@ describe('refactor rules (2-4-3, moved to templates/refactor-rules.md)', () => {
     fs.writeFileSync(file, 'a\n#! >>> merges-copies-only\nb\n');
     expect(() => readTemplate(file)).toThrow(/has no "#! <<< merges-copies-only"/);
     expect(readTemplate(file, { include: ['merges-copies-only'] })).toBe('a\nb\n');
+  });
+});
+
+describe('refactor scope: a file, not a directory (#3477 review 6)', () => {
+  const refactor = { ...base, kind: 'refactor', scope: ['src/lib/x/**'], refactor: { mergesCopies: true } };
+  const NAMED = 'tests/unit/x/a.test.ts';
+  const SIBLING = 'tests/unit/x/b.test.ts';
+  const admits = (pattern: string, file: string) => !new ScopeMatcher({ allow: [pattern], deny: [] }).isViolation(file);
+
+  it.each([
+    ['tests/unit', SIBLING],
+    ['tests/unit/', SIBLING],
+    ['tests/unit/x', SIBLING],
+    ['tests', SIBLING],
+    ['tests/unit/x/*.test.ts', SIBLING],
+    ['tests/unit/{x,y}/a.test.ts', 'tests/unit/y/a.test.ts'],
+    ['**/*.test.ts', SIBLING],
+  ])('rejects %j — the scope gate admits a second test (%s) through it', (pattern, second) => {
+    expect(() => normalizeConfig({ ...refactor, scope: ['src/lib/x/**', pattern] })).toThrow(/names test files one by one/);
+    expect(namesOneFile(pattern)).toBe(false);
+    expect(admits(pattern, NAMED) || pattern.includes('{')).toBe(true);
+    expect(admits(pattern, second)).toBe(true);
+  });
+
+  it('rejects a last segment that is not a file name', () => {
+    expect(namesOneFile('tests/unit/x/.hidden')).toBe(false);
+    expect(namesOneFile('tests/unit/x/fixtures')).toBe(false);
+  });
+
+  it.each([NAMED, 'tests/unit/proxy/[...path]/route.test.ts'])('accepts %j — the scope gate admits that file and no sibling', (pattern) => {
+    expect(normalizeConfig({ ...refactor, scope: ['src/lib/x/**', pattern] }).scope).toContain(pattern);
+    expect(namesOneFile(pattern)).toBe(true);
+    expect(admits(pattern, pattern)).toBe(true);
+    expect(admits(pattern, pattern.replace(/[^/]+$/, 'other.test.ts'))).toBe(false);
+    expect(admits(pattern, `${pattern}/nested.test.ts`)).toBe(true); // a file has nothing beneath it in git
+  });
+
+  it('leaves other kinds alone', () => {
+    expect(normalizeConfig({ ...base, scope: ['tests/unit'] }).scope).toContain('tests/unit');
   });
 });

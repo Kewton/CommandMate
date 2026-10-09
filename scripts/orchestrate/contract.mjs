@@ -117,6 +117,20 @@ export function readTemplate(file, { include = [] } = {}) {
   return kept.join('\n');
 }
 
+/**
+ * Whether a scope pattern names exactly one file. The scope gate
+ * (src/lib/verification/scope-gate.ts `globToRegExp`) lets a pattern that
+ * matches a directory match everything beneath it, so `tests/unit` and
+ * `tests/unit/` mean `tests/unit/**`. A file is a pattern with no glob
+ * character (`*`, `?`, `{`; `[` `]` are literal there) whose last segment has an
+ * extension, like `tests/unit/x/a.test.ts`.
+ */
+export function namesOneFile(pattern) {
+  if (/[*?{]/.test(pattern) || pattern.endsWith('/')) return false;
+  const last = pattern.split('/').pop() ?? '';
+  return /^[^.].*\.[A-Za-z0-9]+$/.test(last);
+}
+
 function stringList(value, name, problems) {
   if (value === undefined) return [];
   if (!Array.isArray(value) || value.some((item) => typeof item !== 'string' || item.trim() === '')) {
@@ -196,7 +210,9 @@ export function normalizeConfig(raw, options = {}) {
   // 2-4-3: a refactor must not rewrite tests — only the tests the contract names, for their import lines.
   if (kindName === 'refactor') {
     for (const pattern of scope) {
-      if (pattern.startsWith('tests/') && /[*?[{]/.test(pattern)) {
+      // `tests`, `tests/…`, and anything that starts with a wildcard (`**/*.test.ts`) can reach tests/.
+      const reachesTests = pattern === 'tests' || pattern.startsWith('tests/') || /^[*?{]/.test(pattern);
+      if (reachesTests && !namesOneFile(pattern)) {
         problems.push(`scope: a refactor names test files one by one, not "${pattern}" (2-4-3)`);
       }
     }
