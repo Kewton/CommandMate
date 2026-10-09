@@ -10,6 +10,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import { spawnSync } from 'node:child_process';
+import { latestByStage, unmetStage } from './run-log.mjs';
 
 export const DEFAULT_REPO = 'Kewton/CommandMate';
 /** The branch PRs go to (6-x: feature → develop). The remote ref is `origin/<base>`. */
@@ -19,17 +20,22 @@ export const IGNORED_DIRTY = ['.commandmate/tasks/', 'dev-reports/'];
 /** Files the orchestrator may commit on the PR branch after the checks (6-4: the module-reference fold). */
 export const ORCHESTRATOR_FILES = ['docs/module-reference.md'];
 /**
- * What the run record must hold for the work HEAD before it is published or
- * merged. `review` takes `skip` for an Issue 5-2b does not cover (docs only,
+ * What the run record must hold before anything is published or merged, and
+ * the orchestrate.md step that writes it. The rule for each (which HEAD, which
+ * results pass) is run-log.mjs `unmetStage` — the one `status` resumes by:
+ * verify / review / findings on the work HEAD, precheck on the HEAD that is
+ * published. `review` takes `skip` for an Issue 5-2b does not cover (docs only,
  * tests only): the orchestrator records that decision instead of leaving the
  * stage empty, so a forgotten review and a review that does not apply differ.
  */
 export const REQUIRED_RECORDS = [
-  { stage: 'verify', accept: ['ok'], why: '3-3 / 5-1' },
-  { stage: 'review', accept: ['ok', 'skip'], why: '5-2b' },
-  { stage: 'findings', accept: ['ok'], why: '5-3' },
-  { stage: 'precheck', accept: ['ok'], why: '6-1-1' },
+  { stage: 'verify', why: '3-3 / 5-1' },
+  { stage: 'review', why: '5-2b' },
+  { stage: 'findings', why: '5-3' },
+  { stage: 'precheck', why: '6-1-1' },
 ];
+/** 6-2: the sweep runs over every tracked file, never a fixed list of shared files. */
+export const MARKER_PATTERN = '^(<<<<<<< |>>>>>>> |={7}$)';
 
 export function defaultRun(command, args, { cwd, env } = {}) {
   const result = spawnSync(command, args, {
@@ -105,27 +111,44 @@ export function workHeads(run, worktree, head) {
   return heads;
 }
 
+/** The worker's last commit under `head` (the last of workHeads). */
+export function workHeadOf(run, worktree, head) {
+  const heads = workHeads(run, worktree, head);
+  return heads[heads.length - 1] ?? head;
+}
+
 /**
- * What the run record lacks for `heads` (workHeads): for each required stage,
- * the latest record of this Issue taken on one of those commits must be an
- * accepted result. A later fail on the same work replaces an earlier ok.
+ * What the run record lacks at `{ head, workHead }`: REQUIRED_RECORDS judged by
+ * run-log.mjs `unmetStage`, so a publish stops exactly where `status` says the
+ * run has to resume.
  */
 export function missingRecords(records, issue, heads) {
-  const short = heads[0] ? heads[0].slice(0, 7) : '-';
-  const missing = [];
-  for (const { stage, accept, why } of REQUIRED_RECORDS) {
-    let latest = null;
-    for (let i = records.length - 1; i >= 0; i--) {
-      const record = records[i];
-      if (record.issue === issue && record.stage === stage && heads.includes(record.head)) {
-        latest = record;
-        break;
-      }
-    }
-    if (!latest) missing.push(`${stage}: no record for ${short} (${why})`);
-    else if (!accept.includes(latest.result)) missing.push(`${stage}: ${latest.result} at ${latest.head.slice(0, 7)} (${why})`);
-  }
-  return missing;
+  const stages = latestByStage(records, issue);
+  return REQUIRED_RECORDS.map(({ stage, why }) => {
+    const reason = unmetStage(stage, stages[stage], heads);
+    return reason ? `${reason} (${why})` : null;
+  }).filter(Boolean);
+}
+
+/** Tracked files with a conflict marker line (`git grep` exits 1 when there are none). */
+export function markerFiles(run, worktree) {
+  const out = run('git', ['-C', worktree, 'grep', '-l', '-E', MARKER_PATTERN, '--', '.']);
+  if (out.status === 1) return [];
+  if (out.status !== 0) throw new Error(`git grep failed in ${worktree}: ${out.stderr.trim()}`);
+  return lines(out.stdout);
+}
+
+/**
+ * Whether an open PR of another branch is for `issue`: its title names
+ * `(#N)`, its body references it the way /create-pr writes it (`Closes #N`,
+ * also Fixes / Resolves / Refs), or its branch carries the number
+ * (`feature/<N>-…`, `feature/<N>b-…`).
+ */
+export function refersToIssue(pr, issue) {
+  const n = String(issue);
+  if (String(pr.title ?? '').includes(`(#${n})`)) return true;
+  if (new RegExp(`\\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?|refs?)\\s*:?\\s+#${n}(?!\\d)`, 'i').test(String(pr.body ?? ''))) return true;
+  return new RegExp(`(?:^|/)${n}(?!\\d)`).test(String(pr.headRefName ?? ''));
 }
 
 export function moduleReferenceFragment(worktree, issue) {

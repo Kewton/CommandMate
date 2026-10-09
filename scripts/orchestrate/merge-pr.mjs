@@ -8,20 +8,27 @@
  *      records the merge (if missing) and closes the Issue (if still open), so a
  *      rerun after a crash ends where the first run would have;
  *   2. the tree is clean (exit 2);
- *   3. the run record has verify / review / findings / precheck for the work
- *      HEAD (pr-common.mjs REQUIRED_RECORDS) and the fragments are there (6-4);
+ *   3. the run record has verify / review / findings for the work HEAD
+ *      (pr-common.mjs REQUIRED_RECORDS, judged by run-log.mjs `unmetStage` like
+ *      `status`) and the fragments are there (6-4);
  *   4. 6-2's refresh, when develop has moved: `git merge origin/develop` (a
  *      conflict is aborted and left to the orchestrator — 6-2 resolves it by
- *      meaning), the conflict-marker sweep over every tracked file, `tsc
- *      --noEmit`, the PR's tests (`CI=true`), then `git push`. A local HEAD the
- *      PR does not have yet is checked the same way before it is pushed;
+ *      meaning). Then, on whatever HEAD is to be merged — refreshed here, pushed
+ *      by publish-pr.mjs after a refresh, or not pushed yet — the conflict-marker
+ *      sweep over every tracked file, and precheck.mjs (tsc, `vitest related`
+ *      over the imports, the tests naming a changed path, the guards …) unless
+ *      the run record already has `precheck=ok` for that very HEAD. Only then
+ *      `git push`;
  *   5. the PR's checks (6-3): no `fail` / `cancel` in `bucket` — a failed job is
  *      re-run once per HEAD (`gh run rerun --failed`, recorded in the `ci` stage
  *      so a rerun after a crash does not re-run it again); `Build` is `pass`
- *      unless the precheck of this HEAD has `build=ok`; `Unit Tests` is `pass`
- *      when the contract's test gate is `unit-related` (its verify note names it,
- *      or `--unit-related`); with `--last` every check is `pass` (6-2: only the
- *      last PR waits for the full CI). Anything else `pending` is not waited for;
+ *      unless the precheck of this HEAD built what the CI `Build` builds
+ *      (`build`, `build-cli`, `build-server` all `ok`); `Unit Tests` is `pass`
+ *      unless the verification passed verify.yaml's full `unit` gate — a
+ *      `unit-related` or a refactor contract (lint / typecheck only) waits for
+ *      it (2-4-3, 6-2), and `--unit-related` forces the wait; with `--last`
+ *      every check is `pass` (6-2: only the last PR waits for the full CI).
+ *      Anything else `pending` is not waited for;
  *   6. `gh pr merge --squash --match-head-commit <HEAD>`, recorded in the
  *      `merge` stage, then `gh issue close` unless `--close -`.
  *
@@ -36,8 +43,8 @@
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
-import { appendRecord, findLatest, readRecords } from './run-log.mjs';
-import { findTestsNaming, parseNote, passedGates } from './precheck.mjs';
+import { appendRecord, findLatest, latestByStage, readRecords, unmetStage } from './run-log.mjs';
+import { BUILD_STEPS, findTestsNaming, main as runPrecheck, optionsFromNote, parseNote, passedGates } from './precheck.mjs';
 import {
   DEFAULT_BASE_BRANCH,
   DEFAULT_REPO,
@@ -48,18 +55,16 @@ import {
   ghJson,
   git,
   lines,
+  markerFiles,
   missingRecords,
   prsOfBranch,
-  workHeads,
+  workHeadOf,
 } from './pr-common.mjs';
 
 export const DEFAULT_CI_TIMEOUT_SEC = 3600;
 export const DEFAULT_POLL_SEC = 30;
 export const BUILD_CHECK = 'Build';
 export const UNIT_CHECK = 'Unit Tests';
-/** 6-2: the sweep runs over every tracked file, never a fixed list of shared files. */
-export const MARKER_PATTERN = '^(<<<<<<< |>>>>>>> |={7}$)';
-const TEST_FILE = /^tests\/unit\/.+\.test\.tsx?$/;
 /** `bucket` values that settle a check without failing it. */
 const SETTLED_OK = ['pass', 'skipping'];
 
@@ -96,6 +101,23 @@ export function runIdsOf(checks) {
 /** Whether the contract's test gate was `unit-related` (verify.yaml's or the contract's, wait-verify.mjs's note). */
 export function judgedByUnitRelated(verifyRecord) {
   return passedGates(verifyRecord).some((gate) => gate === 'unit-related' || gate === 'unit-related@contract');
+}
+
+/**
+ * Whether the verification ran the whole unit suite: verify.yaml's `unit`
+ * gate passed. A contract-defined `unit@contract` runs the contract's command,
+ * not verify.yaml's, so it does not count; `unit-related` and a refactor's
+ * lint / typecheck do not either. Anything short of it waits for CI's `Unit Tests`.
+ */
+export function ranFullUnit(verifyRecord) {
+  return passedGates(verifyRecord).includes('unit');
+}
+
+/** Whether a precheck record built everything CI's `Build` builds (`build`, `build:cli`, `build:server`). */
+export function builtLikeCi(precheckRecord) {
+  if (!precheckRecord || precheckRecord.result !== 'ok') return false;
+  const steps = parseNote(precheckRecord.note);
+  return BUILD_STEPS.every((step) => steps[step] === 'ok');
 }
 
 const USAGE = `Usage:
@@ -185,9 +207,9 @@ export function main(argv, deps = {}) {
   const baseRef = `origin/${o.base}`;
   const started = now();
 
-  const record = (stage, result, head, note) => {
+  const record = (stage, result, head, note, workHead = null) => {
     const durationSec = Math.round((now().getTime() - started.getTime()) / 1000);
-    const { file } = appendRecord(o.runDir, o.issues, { issue, stage, result, head, durationSec, note }, now());
+    const { file } = appendRecord(o.runDir, o.issues, { issue, stage, result, head, workHead, durationSec, note }, now());
     log(`${stage} #${issue} ${head.slice(0, 7)} ${result}: ${note} -> ${file}`);
   };
 
@@ -238,10 +260,12 @@ export function main(argv, deps = {}) {
       return 2;
     }
 
-    // 3. The records of the work, and the fragments.
+    // 3. The records of the work, and the fragments. The precheck of the HEAD
+    //    to merge is step 4's: that HEAD may not exist yet.
+    const workHead = workHeadOf(run, o.worktree, head);
     let { records } = readRecords(o.runDir, o.issues);
     const problems = [
-      ...missingRecords(records, issue, workHeads(run, o.worktree, head)),
+      ...missingRecords(records, issue, { head, workHead }).filter((reason) => !reason.startsWith('precheck:')),
       ...fragmentProblems(run, { worktree: o.worktree, runDir: o.runDir, issue, baseRef }),
     ];
     if (problems.length > 0) {
@@ -249,7 +273,7 @@ export function main(argv, deps = {}) {
       return 1;
     }
 
-    // 4. 6-2's refresh, and the local gate on a HEAD the PR has not seen.
+    // 4. 6-2's refresh, then the local gate on the HEAD to merge.
     git(run, o.worktree, ['fetch', 'origin', o.base]);
     let refreshed = false;
     const behind = run('git', ['-C', o.worktree, 'merge-base', '--is-ancestor', baseRef, 'HEAD']).status !== 0;
@@ -258,47 +282,46 @@ export function main(argv, deps = {}) {
       if (merge.status !== 0) {
         const conflicts = lines(run('git', ['-C', o.worktree, 'diff', '--name-only', '--diff-filter=U']).stdout);
         run('git', ['-C', o.worktree, 'merge', '--abort']);
-        record('merge', 'fail', head, `refresh=conflict ${conflicts.join(',') || '-'}`);
+        record('merge', 'fail', head, `refresh=conflict ${conflicts.join(',') || '-'}`, workHead);
         error(`merge #${issue}: ${baseRef} conflicts in ${conflicts.join(', ') || '(see git)'} — resolve by meaning (6-2), commit, and run again`);
         return 1;
       }
       refreshed = true;
       head = git(run, o.worktree, ['rev-parse', 'HEAD']).trim();
     }
-    if (refreshed || head !== pr.headRefOid) {
-      const steps = [];
-      const markers = run('git', ['-C', o.worktree, 'grep', '-l', '-E', MARKER_PATTERN, '--', '.']);
-      steps.push(['marker', markers.status === 1 ? 'ok' : 'fail', markers.stdout.trim()]);
-      const tsc = run('npx', ['tsc', '--noEmit'], { cwd: o.worktree });
-      steps.push(['tsc', tsc.status === 0 ? 'ok' : 'fail', tsc.stdout.trim()]);
-      const range = `${baseRef}...HEAD`;
-      const changed = lines(git(run, o.worktree, ['diff', '--name-only', '--no-renames', '--diff-filter=ACMR', range]));
-      const deleted = lines(git(run, o.worktree, ['diff', '--name-only', '--no-renames', '--diff-filter=D', range]));
-      const tests = [...new Set([...changed.filter((f) => TEST_FILE.test(f)), ...findNaming(o.worktree, [...changed, ...deleted])])].sort();
-      if (tests.length > 0) {
-        const vitest = run('npx', ['vitest', 'run', ...tests], { cwd: o.worktree, env: { CI: 'true' } });
-        steps.push(['tests', vitest.status === 0 ? 'ok' : 'fail', `${vitest.stdout}${vitest.stderr}`.trim().split('\n').slice(-20).join('\n')]);
-      } else steps.push(['tests', 'skip', '']);
-      const note = `refresh=${refreshed ? 'merged' : 'unpushed'} ${steps.map(([name, result]) => `${name}=${result}`).join(' ')}`;
-      const failed = steps.filter(([, result]) => result === 'fail');
-      if (failed.length > 0) {
-        record('merge', 'fail', head, note);
-        for (const [name, , output] of failed) error(`  ${name}:\n${output}`);
-        error(`merge #${issue}: the refreshed ${head.slice(0, 7)} is not pushed — fix it on the branch and run again`);
+    const markers = markerFiles(run, o.worktree);
+    if (markers.length > 0) {
+      record('merge', 'fail', head, `refresh=${refreshed ? 'merged' : '-'} marker=fail ${markers.join(',')}`, workHead);
+      error(`merge #${issue}: conflict markers in ${markers.join(', ')} at ${head.slice(0, 7)} — not pushed`);
+      return 1;
+    }
+    // The precheck is recorded per HEAD, so a HEAD pushed earlier (publish-pr.mjs
+    // after a refresh) is checked here too unless it already passed.
+    if (unmetStage('precheck', latestByStage(records, issue).precheck, { head, workHead })) {
+      const workPrecheck = findLatest(records, { issue, stage: 'precheck', head: workHead, result: 'ok' });
+      const code = runPrecheck(
+        [
+          '--run-dir', o.runDir, '--issues', o.issues, '--issue', String(issue), '--worktree', o.worktree,
+          ...optionsFromNote(workPrecheck?.note, baseRef),
+        ],
+        { run, now, log, error, findTestsNaming: findNaming }
+      );
+      if (code !== 0) {
+        error(`merge #${issue}: the precheck of ${head.slice(0, 7)} did not pass${refreshed ? ' after the refresh' : ''} — not pushed`);
         return 1;
       }
+    }
+    if (head !== pr.headRefOid) {
       const push = run('git', ['-C', o.worktree, 'push', 'origin', `HEAD:${branch}`]);
       if (push.status !== 0) throw new Error(`git push failed: ${(push.stderr || push.stdout).trim()}`);
-      log(`merge #${issue}: ${note}; pushed ${head.slice(0, 7)}`);
+      log(`merge #${issue}: refresh=${refreshed ? 'merged' : 'unpushed'} marker=ok precheck=ok; pushed ${head.slice(0, 7)}`);
     }
 
     // 5. The checks of this HEAD.
     records = readRecords(o.runDir, o.issues).records;
-    const precheck = findLatest(records, { issue, stage: 'precheck', head });
-    const needBuild = !(precheck && precheck.result === 'ok' && parseNote(precheck.note).build === 'ok');
-    const heads = workHeads(run, o.worktree, head);
-    const verify = [...records].reverse().find((r) => r.issue === issue && r.stage === 'verify' && heads.includes(r.head)) ?? null;
-    const need = { needBuild, needUnit: o.unitRelated || judgedByUnitRelated(verify), last: o.last };
+    const needBuild = !builtLikeCi(findLatest(records, { issue, stage: 'precheck', head }));
+    const verify = latestByStage(records, issue).verify ?? null;
+    const need = { needBuild, needUnit: o.unitRelated || !ranFullUnit(verify), last: o.last };
     const rerunDone = records.some((r) => r.issue === issue && r.stage === 'ci' && r.head === head && /(^| )rerun=/.test(r.note ?? ''));
     let rerun = rerunDone;
     const deadline = now().getTime() + Number(o.ciTimeout) * 1000;
@@ -306,7 +329,7 @@ export function main(argv, deps = {}) {
     for (;;) {
       const current = viewPr(pr.number);
       if (current.state === 'MERGED') {
-        record('merge', 'ok', current.headRefOid, `pr=#${pr.number} merged-elsewhere`);
+        record('merge', 'ok', current.headRefOid, `pr=#${pr.number} merged-elsewhere`, current.headRefOid === head ? workHead : null);
         log(`merge #${issue}: #${pr.number} was merged meanwhile — issue ${o.close}: ${closeIssue(pr.number)}`);
         return 0;
       }
@@ -325,7 +348,7 @@ export function main(argv, deps = {}) {
           const names = verdict.failed.map((check) => `${check.name}:${check.bucket}`).join(',');
           const ids = runIdsOf(verdict.failed);
           if (rerun || ids.length === 0) {
-            record('ci', 'fail', head, `checks=${verdict.summary} failed=${names}${rerun ? ' after-rerun' : ''}`);
+            record('ci', 'fail', head, `checks=${verdict.summary} failed=${names}${rerun ? ' after-rerun' : ''}`, workHead);
             error(`merge #${issue}: not merged — ${names} (6-3)`);
             return 1;
           }
@@ -334,7 +357,7 @@ export function main(argv, deps = {}) {
             if (again.status !== 0) throw new Error(`gh run rerun ${id} failed: ${(again.stderr || again.stdout).trim()}`);
           }
           rerun = true;
-          record('ci', 'fail', head, `checks=${verdict.summary} failed=${names} rerun=${ids.join(',')}`);
+          record('ci', 'fail', head, `checks=${verdict.summary} failed=${names} rerun=${ids.join(',')}`, workHead);
         } else if (verdict.state === 'ok') break;
       }
       if (now().getTime() >= deadline) {
@@ -343,16 +366,16 @@ export function main(argv, deps = {}) {
       }
       sleep(Number(o.poll) * 1000);
     }
-    record('ci', 'ok', head, `checks=${verdict.summary} build=${needBuild ? 'pass' : 'precheck'} unit=${need.needUnit ? 'pass' : '-'}${o.last ? ' last=all-pass' : ''}`);
+    record('ci', 'ok', head, `checks=${verdict.summary} build=${needBuild ? 'pass' : 'precheck'} unit=${need.needUnit ? 'pass' : '-'}${o.last ? ' last=all-pass' : ''}`, workHead);
 
     // 6. Merge exactly this HEAD, then the Issue.
     const merged = run('gh', ['pr', 'merge', String(pr.number), '--repo', o.repo, '--squash', '--match-head-commit', head]);
     if (merged.status !== 0) {
-      record('merge', 'fail', head, `pr=#${pr.number} gh-merge-failed`);
+      record('merge', 'fail', head, `pr=#${pr.number} gh-merge-failed`, workHead);
       error(`merge #${issue}: gh pr merge failed: ${(merged.stderr || merged.stdout).trim()}`);
       return 1;
     }
-    record('merge', 'ok', head, `pr=#${pr.number} squash`);
+    record('merge', 'ok', head, `pr=#${pr.number} squash`, workHead);
     log(`merge #${issue}: #${pr.number} merged — issue ${o.close}: ${closeIssue(pr.number)}`);
     return 0;
   } catch (err) {

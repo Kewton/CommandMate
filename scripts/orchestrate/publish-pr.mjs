@@ -4,18 +4,23 @@
  *
  * In order, stopping at the first that does not hold:
  *   1. the tree is clean (exit 2) — what is pushed is the HEAD the records name;
- *   2. the run record has verify / review / findings / precheck for this work
- *      HEAD (pr-common.mjs REQUIRED_RECORDS; 6-1-1's order puts them all before
- *      the PR) and the fragments are there (6-4);
+ *   2. the run record has verify / review / findings for the work HEAD and a
+ *      precheck for the HEAD that is pushed (pr-common.mjs REQUIRED_RECORDS,
+ *      judged by run-log.mjs `unmetStage` like `status`; 6-1-1's order puts them
+ *      all before the PR). A HEAD that merges develop or folds module-reference
+ *      on top of the work therefore needs its own precheck. No tracked file has
+ *      a conflict marker, and the fragments are there (6-4);
  *   3. the module-reference fragment is copied into the run directory, because
  *      dev-reports/ is never committed and goes with the worktree;
  *   4. `git push -u origin <branch>` (never forced);
  *   5. the PR is opened only when the branch has no open PR — a rerun after a
  *      crash finds the one it opened and records it instead. A merged PR on the
  *      branch means the Issue's work is in: nothing is pushed. An open PR of
- *      another branch whose title names `(#<N>)` stops the run (two PRs for one
- *      Issue), unless `--allow-other-pr`.
- * The result goes to the `pr` stage of `run-log.mjs` with the PR number.
+ *      another branch that refers to the Issue (`(#<N>)` in the title, `Closes
+ *      #<N>` and the like in the body as /create-pr writes it, or the number in
+ *      the branch) stops the run (two PRs for one Issue), unless `--allow-other-pr`.
+ * The result goes to the `pr` stage of `run-log.mjs` with the PR number, the
+ * pushed HEAD and the work HEAD under it.
  *
  * Exit code: 0 published (or already open / merged), 1 a condition failed or a
  * command failed, 2 usage error or a dirty tree.
@@ -39,11 +44,13 @@ import {
   fragmentProblems,
   ghJson,
   git,
+  markerFiles,
   missingRecords,
   moduleReferenceBackup,
   moduleReferenceFragment,
   prsOfBranch,
-  workHeads,
+  refersToIssue,
+  workHeadOf,
 } from './pr-common.mjs';
 
 const USAGE = `Usage:
@@ -132,8 +139,14 @@ export function main(argv, deps = {}) {
       error(`publish #${issue}: ${o.worktree} is on ${branch}, not an Issue branch — pass --branch`);
       return 2;
     }
+    const workHead = workHeadOf(run, o.worktree, head);
     const record = (prNumber, note) => {
-      const { file } = appendRecord(o.runDir, o.issues, { issue, stage: 'pr', result: 'ok', head, note: `pr=#${prNumber} ${note}` }, now());
+      const { file } = appendRecord(
+        o.runDir,
+        o.issues,
+        { issue, stage: 'pr', result: 'ok', head, workHead, note: `pr=#${prNumber} ${note}` },
+        now()
+      );
       log(`recorded -> ${file}`);
     };
 
@@ -144,14 +157,17 @@ export function main(argv, deps = {}) {
     }
 
     const { records } = readRecords(o.runDir, o.issues);
+    const markers = markerFiles(run, o.worktree);
     const problems = [
-      ...missingRecords(records, issue, workHeads(run, o.worktree, head)),
+      ...missingRecords(records, issue, { head, workHead }),
+      ...(markers.length > 0 ? [`conflict markers in ${markers.join(', ')} (6-2)`] : []),
       ...fragmentProblems(run, { worktree: o.worktree, runDir: o.runDir, issue, baseRef }),
     ];
     if (!open && !o.allowOtherPr) {
-      const others = ghJson(run, ['pr', 'list', '--repo', o.repo, '--state', 'open', '--search', `${issue} in:title`, '--json', 'number,title,headRefName']);
+      // Every open PR, filtered here: a search would miss a body reference or a branch name.
+      const others = ghJson(run, ['pr', 'list', '--repo', o.repo, '--state', 'open', '--limit', '500', '--json', 'number,title,body,headRefName']);
       for (const pr of others) {
-        if (pr.headRefName !== branch && pr.title.includes(`(#${issue})`)) {
+        if (pr.headRefName !== branch && refersToIssue(pr, issue)) {
           problems.push(`#${pr.number} (${pr.headRefName}) is already open for #${issue} — pass --allow-other-pr if both are meant`);
         }
       }

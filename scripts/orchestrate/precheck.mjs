@@ -11,7 +11,9 @@
  *   lint-sh        node scripts/run-lint-sh-if-changed.mjs (only when a .sh changed, #3478)
  *   suppressions   node scripts/count-suppressions.mjs (refactor / metrics Issues only, #3483)
  *   tsc            npx tsc --noEmit
- *   build          npm run build (only with --build; otherwise the PR's CI Build decides, 6-2 / 6-3)
+ *   build          npm run build        ┐ only with --build: the three steps of CI's `Build` job
+ *   build-cli      npm run build:cli    │ (.github/workflows/ci-pr.yml), so build / build-cli /
+ *   build-server   npm run build:server ┘ build-server all ok stands in for it (6-2 / 6-3)
  *   related        npx vitest related --run --dir tests/unit <changed src/scripts code>
  *   tests          npx vitest run <changed tests> <tests naming a changed path> tests/unit/guards tests/unit/docs
  *
@@ -39,6 +41,7 @@ import process from 'node:process';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { appendRecord, findLatest, readRecords } from './run-log.mjs';
+import { workHeadOf } from './pr-common.mjs';
 
 export const DEFAULT_BASE = 'origin/develop';
 /** Run order: cheap and decisive first, the test runs last. */
@@ -49,8 +52,14 @@ export const COVERED_BY_GATE = {
   tsc: ['typecheck'],
   'lint-sh': ['lint-sh'],
 };
-/** Run only when asked (`--build`); the PR's CI Build is the default judge (6-2 / 6-3). */
-export const OPTIONAL_STEPS = ['build'];
+/**
+ * Run only when asked (`--build`); the PR's CI Build is the default judge (6-2 / 6-3).
+ * They are the steps of CI's `Build` job, one for one: a pass of `npm run build`
+ * alone says nothing about the CLI or the server build, so all three are needed
+ * before merge-pr.mjs stops waiting for `Build`.
+ */
+export const BUILD_STEPS = ['build', 'build-cli', 'build-server'];
+export const OPTIONAL_STEPS = [...BUILD_STEPS];
 /** Always part of the test step (2-4-2: the guards are never left out). */
 export const ALWAYS_TESTS = ['tests/unit/guards', 'tests/unit/docs'];
 /** Files the orchestrator leaves in a worktree that are not the worker's work. */
@@ -135,7 +144,11 @@ export function planSteps({ changed, deleted }, { base, kind, metrics = false, b
       ? { command: ['node', ['scripts/count-suppressions.mjs', '--base', base]] }
       : { command: null, reason: 'not a refactor / metrics Issue' };
   plan.tsc = { command: ['npx', ['tsc', '--noEmit']] };
-  if (build) plan.build = { command: ['npm', ['run', 'build']] };
+  if (build) {
+    plan.build = { command: ['npm', ['run', 'build']] };
+    plan['build-cli'] = { command: ['npm', ['run', 'build:cli']] };
+    plan['build-server'] = { command: ['npm', ['run', 'build:server']] };
+  }
   // `--dir tests/unit`: the same tree the unit gates cover; integration / e2e are CI's.
   plan.related =
     sources.length > 0
@@ -167,6 +180,29 @@ export function passedGates(verifyRecord) {
 /** The options a precheck result depends on, as one token of its note. */
 export function optionsToken({ base, kind, metrics, allowRemovedTests, build }) {
   return `opts=base:${base},kind:${kind ?? '-'},metrics:${metrics},allow-removed:${allowRemovedTests},build:${build}`;
+}
+
+/**
+ * The precheck flags of an earlier record's `opts=` token (optionsToken), for
+ * running the same precheck on another HEAD (merge-pr.mjs after a refresh).
+ * Without a token, the defaults with `fallbackBase`.
+ */
+export function optionsFromNote(note, fallbackBase = DEFAULT_BASE) {
+  const token = String(note ?? '').split(/\s+/).find((part) => part.startsWith('opts='));
+  if (!token) return ['--base', fallbackBase];
+  /** @type {Record<string, string>} */
+  const values = {};
+  for (const pair of token.slice('opts='.length).split(',')) {
+    const at = pair.indexOf(':');
+    if (at > 0) values[pair.slice(0, at)] = pair.slice(at + 1);
+  }
+  return [
+    '--base', values.base || fallbackBase,
+    ...(values.kind && values.kind !== '-' ? ['--kind', values.kind] : []),
+    ...(values.metrics === 'true' ? ['--metrics'] : []),
+    ...(values['allow-removed'] === 'true' ? ['--allow-removed-tests'] : []),
+    ...(values.build === 'true' ? ['--build'] : []),
+  ];
 }
 
 function git(run, worktree, args) {
@@ -297,7 +333,10 @@ export function main(argv, deps = {}) {
     const result = Object.values(results).includes('fail') ? 'fail' : 'ok';
     const note = `${steps.map((step) => `${step}=${results[step]}`).join(' ')} ${opts}`;
     const durationSec = Math.round((now().getTime() - started.getTime()) / 1000);
-    const { file } = appendRecord(o.runDir, o.issues, { issue, stage: 'precheck', result, head, durationSec, note }, now());
+    // The work HEAD under this one: a precheck of a refreshed HEAD stands for the
+    // published HEAD, not for the worker's checks (run-log.mjs WORK_STAGES).
+    const workHead = workHeadOf(run, o.worktree, head);
+    const { file } = appendRecord(o.runDir, o.issues, { issue, stage: 'precheck', result, head, workHead, durationSec, note }, now());
     log(`precheck #${issue} ${short} ${result}: ${note}`);
     log(`recorded -> ${file} (log: ${logFile})`);
     return result === 'ok' ? 0 : 1;

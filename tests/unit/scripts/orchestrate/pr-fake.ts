@@ -29,7 +29,7 @@ export interface FakeState {
   markers: string;
   failCommands: string[];
   prs: Pr[];
-  otherOpen: { number: number; title: string; headRefName: string }[];
+  otherOpen: { number: number; title: string; headRefName: string; body?: string }[];
   /** One answer per `gh pr checks` call; the last repeats. */
   checks: Check[][];
   issueState: 'OPEN' | 'CLOSED';
@@ -77,6 +77,7 @@ export function fakeGit(overrides: Partial<FakeState> = {}) {
       if (verb === 'diff' && sub.includes('--diff-filter=U')) return ok(state.mergeConflict.join('\n'));
       if (verb === 'diff' && sub.includes('--diff-filter=ACMR')) return ok(state.changed.join('\n'));
       if (verb === 'diff' && sub.includes('--diff-filter=D')) return ok('');
+      if (verb === 'diff' && sub.includes('--unified=0')) return ok('');
       if (verb === 'fetch') return ok();
       if (verb === 'merge-base') return state.behind ? failed('', 1) : ok();
       if (verb === 'merge' && sub.includes('--abort')) return ok();

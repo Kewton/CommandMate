@@ -13,9 +13,15 @@
  * and `<issues>` is the run's Issue range (`3477-3481`, `3477,3480`) so two runs
  * on the same day never write to the same file.
  *
+ * A record names the HEAD it holds for (`head`) and, when that HEAD only
+ * merges develop or folds module-reference on top of the worker's commit, the
+ * work HEAD under it (`workHead`). `unmetStage` judges the worker's checks on
+ * the work HEAD and the rest on the published HEAD; `status` and the publishing
+ * scripts (pr-common.mjs) both use it.
+ *
  * Usage:
  *   node scripts/orchestrate/run-log.mjs append --run-dir <dir> --issues <range> --issue <N>
- *        --stage <stage> --result <ok|fail|skip> [--head <sha>] [--task <id>] [--contract <path>]
+ *        --stage <stage> --result <ok|fail|skip> [--head <sha>] [--work-head <sha>] [--task <id>] [--contract <path>]
  *        [--agent <claude|antigravity>] [--model <opus|sonnet|->] [--duration-sec <n>] [--note <text>]
  *   node scripts/orchestrate/run-log.mjs status --run-dir <dir> --issues <range> [--json]
  */
@@ -34,6 +40,21 @@ export const STAGES = ['contract', 'send', 'verify', 'review', 'findings', 'prec
 export const HEAD_BOUND_STAGES = ['verify', 'review', 'findings', 'precheck', 'ci', 'merge'];
 export const RESULTS = ['ok', 'fail', 'skip'];
 const PASSED = new Set(['ok', 'skip']);
+/**
+ * The checks of the worker's own work: judged on the work HEAD (`workHead`),
+ * the worker's last commit. Every other HEAD-bound stage is judged on the HEAD
+ * that is published — the work HEAD, or a commit on top of it that only merges
+ * develop (6-2) or folds module-reference (6-4). Such a commit needs its own
+ * precheck; it does not need the worker's checks again.
+ */
+export const WORK_STAGES = ['verify', 'review', 'findings'];
+/** Results that pass a stage. `skip` stands for "does not apply" only where that can be true (5-2b). */
+export const ACCEPTED = {
+  verify: ['ok'],
+  findings: ['ok'],
+  precheck: ['ok'],
+};
+const accepts = (stage, result) => (ACCEPTED[stage] ?? [...PASSED]).includes(result);
 const ISSUES_PATTERN = /^\d+(?:[-,]\d+)*$/;
 
 export function runLogPath(runDir, issues) {
@@ -56,6 +77,9 @@ export function makeRecord(input, now = new Date()) {
   if (!RESULTS.includes(input.result)) problems.push(`result: must be one of ${RESULTS.join(' / ')} (got ${input.result})`);
   const head = optionalString(input.head);
   if (head !== null && !/^[0-9a-f]{7,40}$/.test(head)) problems.push(`head: must be a commit sha (got ${head})`);
+  const workHead = optionalString(input.workHead);
+  if (workHead !== null && !/^[0-9a-f]{7,40}$/.test(workHead)) problems.push(`work-head: must be a commit sha (got ${workHead})`);
+  if (workHead !== null && head === null) problems.push('work-head: needs --head (the published HEAD built on it)');
   if (head === null && HEAD_BOUND_STAGES.includes(input.stage)) {
     problems.push(`head: required for ${input.stage} (its result holds only for the HEAD it ran on)`);
   }
@@ -70,6 +94,8 @@ export function makeRecord(input, now = new Date()) {
     stage: input.stage,
     result: input.result,
     head,
+    // Only when the published HEAD is not the work itself (a refresh / fold on top).
+    ...(workHead !== null && workHead !== head ? { workHead } : {}),
     taskId: optionalString(input.taskId),
     contract: optionalString(input.contract),
     agent: optionalString(input.agent),
@@ -133,44 +159,71 @@ export function findLatest(records, criteria) {
   return null;
 }
 
+/** The latest record of each stage for one Issue (any HEAD). */
+export function latestByStage(records, issue) {
+  /** @type {Record<string, any>} */
+  const stages = {};
+  for (const record of records) if (record.issue === issue) stages[record.stage] = record;
+  return stages;
+}
+
 /**
- * Per Issue: where to resume. The HEAD is the latest one recorded; each stage
- * is satisfied by its latest record when that passed (`ok` / `skip`) and, for a
- * HEAD-bound stage, was taken on that HEAD. `next` is the first stage that is
- * not satisfied — so a stage that failed after later ones passed is where the
- * run goes back to, and a moved HEAD re-opens every check. A merged Issue is done.
+ * Why `stage` is not satisfied at `{ head, workHead }`, or null. The one rule
+ * both `status` and the publishing scripts (pr-common.mjs) judge by: the
+ * latest record of the stage passes, and — for a HEAD-bound stage — was taken
+ * on the work HEAD (WORK_STAGES) or on the published HEAD (the rest).
+ */
+export function unmetStage(stage, record, { head, workHead }) {
+  const target = WORK_STAGES.includes(stage) ? workHead ?? head : head;
+  const short = target ? target.slice(0, 7) : '-';
+  if (!record) return HEAD_BOUND_STAGES.includes(stage) ? `${stage}: no result for ${short}` : `${stage}: no result`;
+  if (HEAD_BOUND_STAGES.includes(stage) && record.head !== target) return `${stage}: no result for ${short}`;
+  if (!accepts(stage, record.result)) return `${stage}: ${record.result} at ${record.head ? record.head.slice(0, 7) : '-'}`;
+  return null;
+}
+
+/**
+ * The HEADs an Issue is at, read from its records: the latest recorded HEAD,
+ * and the work HEAD that HEAD was built on (its `workHead`, else itself).
+ */
+export function headsOf(records, issue) {
+  let head = null;
+  let workHead = null;
+  for (const record of records) {
+    if (record.issue !== issue || !record.head) continue;
+    if (record.head !== head) workHead = null;
+    head = record.head;
+    if (record.workHead) workHead = record.workHead;
+  }
+  return { head, workHead: workHead ?? head };
+}
+
+/**
+ * Per Issue: where to resume. Each stage is judged by unmetStage at the
+ * Issue's HEADs (headsOf). `next` is the first stage that is not satisfied —
+ * so a stage that failed after later ones passed is where the run goes back
+ * to, and a moved HEAD re-opens every check. A merged Issue is done.
  */
 export function summarize(records) {
-  const byIssue = new Map();
-  for (const record of records) {
-    if (!byIssue.has(record.issue)) byIssue.set(record.issue, { stages: {}, head: null });
-    const item = byIssue.get(record.issue);
-    item.stages[record.stage] = record;
-    if (record.head) item.head = record.head;
-  }
-  return [...byIssue.entries()]
-    .sort(([a], [b]) => a - b)
-    .map(([issue, { stages, head }]) => {
-      const short = head ? head.slice(0, 7) : '-';
-      const unmet = (stage) => {
-        const record = stages[stage];
-        if (stage === 'contract' && !record && stages.send && PASSED.has(stages.send.result)) return null;
-        if (!record) return HEAD_BOUND_STAGES.includes(stage) ? `${stage}: no result for ${short}` : `${stage}: no result`;
-        if (HEAD_BOUND_STAGES.includes(stage) && record.head !== head) return `${stage}: no result for ${short}`;
-        if (!PASSED.has(record.result)) return `${stage}: ${record.result} at ${record.head ? record.head.slice(0, 7) : '-'}`;
-        return null;
-      };
-      if (stages.merge && PASSED.has(stages.merge.result)) {
-        return { issue, reached: 'merge', next: null, reason: null, head, stages };
-      }
-      let reached = null;
-      for (const stage of STAGES) {
-        const reason = unmet(stage);
-        if (reason) return { issue, reached, next: stage, reason, head, stages };
-        reached = stage;
-      }
-      return { issue, reached, next: null, reason: null, head, stages };
-    });
+  const issues = [...new Set(records.map((record) => record.issue))].sort((a, b) => a - b);
+  return issues.map((issue) => {
+    const stages = latestByStage(records, issue);
+    const { head, workHead } = headsOf(records, issue);
+    const unmet = (stage) => {
+      if (stage === 'contract' && !stages.contract && stages.send && PASSED.has(stages.send.result)) return null;
+      return unmetStage(stage, stages[stage], { head, workHead });
+    };
+    if (stages.merge && PASSED.has(stages.merge.result)) {
+      return { issue, reached: 'merge', next: null, reason: null, head, workHead, stages };
+    }
+    let reached = null;
+    for (const stage of STAGES) {
+      const reason = unmet(stage);
+      if (reason) return { issue, reached, next: stage, reason, head, workHead, stages };
+      reached = stage;
+    }
+    return { issue, reached, next: null, reason: null, head, workHead, stages };
+  });
 }
 
 function formatStatus(summary, skipped) {
@@ -180,7 +233,7 @@ function formatStatus(summary, skipped) {
       .map((stage) => `${stage}=${item.stages[stage].result}`)
       .join(' ');
     lines.push(
-      `#${item.issue}\treached=${item.reached ?? '-'}\tnext=${item.next ?? 'done'}\thead=${item.head ?? '-'}\t${stageText}` +
+      `#${item.issue}\treached=${item.reached ?? '-'}\tnext=${item.next ?? 'done'}\thead=${item.head ?? '-'}${item.workHead && item.workHead !== item.head ? `\twork=${item.workHead}` : ''}\t${stageText}` +
         (item.reason ? `\t(${item.reason})` : '')
     );
   }
@@ -189,7 +242,7 @@ function formatStatus(summary, skipped) {
 }
 
 const USAGE = `Usage:
-  node scripts/orchestrate/run-log.mjs append --run-dir <dir> --issues <range> --issue <N> --stage <${STAGES.join('|')}> --result <${RESULTS.join('|')}> [--head <sha>] [--task <id>] [--contract <path>] [--agent <name>] [--model <name>] [--duration-sec <n>] [--note <text>]
+  node scripts/orchestrate/run-log.mjs append --run-dir <dir> --issues <range> --issue <N> --stage <${STAGES.join('|')}> --result <${RESULTS.join('|')}> [--head <sha>] [--work-head <sha>] [--task <id>] [--contract <path>] [--agent <name>] [--model <name>] [--duration-sec <n>] [--note <text>]
   node scripts/orchestrate/run-log.mjs status --run-dir <dir> --issues <range> [--json]`;
 
 const FLAGS = {
@@ -199,6 +252,7 @@ const FLAGS = {
   '--stage': 'stage',
   '--result': 'result',
   '--head': 'head',
+  '--work-head': 'workHead',
   '--task': 'taskId',
   '--contract': 'contract',
   '--agent': 'agent',

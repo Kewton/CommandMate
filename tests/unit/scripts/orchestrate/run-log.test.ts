@@ -15,10 +15,13 @@ import {
   STAGES,
   appendRecord,
   findLatest,
+  headsOf,
+  main,
   makeRecord,
   readRecords,
   runLogPath,
   summarize,
+  unmetStage,
 } from '../../../../scripts/orchestrate/run-log.mjs';
 
 const SCRIPT = path.resolve(__dirname, '../../../../scripts/orchestrate/run-log.mjs');
@@ -240,5 +243,65 @@ describe('CLI: stop half-way, re-run, continue', () => {
   it('exits 2 without --run-dir or --issues', () => {
     expect(run('status', '--issues', '3477').status).toBe(2);
     expect(run('append', '--run-dir', runDir).status).toBe(2);
+  });
+});
+
+describe('the work HEAD and the published HEAD (#3477 review of PR 3, 3c-5)', () => {
+  const HEAD_M = 'c'.repeat(40);
+  const rec = (stage: string, result: string, minute: number, head?: string, workHead?: string) =>
+    makeRecord({ issue: 1, stage, result, head, workHead }, at(minute));
+
+  it('records workHead only when the published HEAD is not the work itself', () => {
+    expect(rec('pr', 'ok', 0, HEAD_M, HEAD_A).workHead).toBe(HEAD_A);
+    expect('workHead' in rec('pr', 'ok', 0, HEAD_A, HEAD_A)).toBe(false);
+    expect(() => makeRecord({ issue: 1, stage: 'pr', result: 'ok', workHead: HEAD_A })).toThrow(/work-head/);
+    expect(() => makeRecord({ issue: 1, stage: 'pr', result: 'ok', head: HEAD_M, workHead: 'x' })).toThrow(/work-head/);
+  });
+
+  it('resumes at ci after a refresh, judging verify / review / findings on the work HEAD (positive control)', () => {
+    const records = [
+      rec('send', 'ok', 0, HEAD_A),
+      rec('verify', 'ok', 1, HEAD_A),
+      rec('review', 'ok', 2, HEAD_A),
+      rec('findings', 'ok', 3, HEAD_A),
+      rec('precheck', 'ok', 4, HEAD_A),
+      rec('precheck', 'ok', 5, HEAD_M, HEAD_A),
+      rec('pr', 'ok', 6, HEAD_M, HEAD_A),
+      rec('ci', 'fail', 7, HEAD_M, HEAD_A),
+    ];
+    const [item] = summarize(records);
+    expect(item).toMatchObject({ head: HEAD_M, workHead: HEAD_A, next: 'ci', reached: 'pr' });
+    expect(headsOf(records, 1)).toEqual({ head: HEAD_M, workHead: HEAD_A });
+  });
+
+  it('still needs a precheck of the published HEAD itself', () => {
+    const [item] = summarize([
+      rec('send', 'ok', 0, HEAD_A),
+      rec('verify', 'ok', 1, HEAD_A),
+      rec('review', 'ok', 2, HEAD_A),
+      rec('findings', 'ok', 3, HEAD_A),
+      rec('precheck', 'ok', 4, HEAD_A),
+      rec('merge', 'fail', 5, HEAD_M, HEAD_A),
+    ]);
+    expect(item.next).toBe('precheck');
+    expect(item.reason).toMatch(/precheck: no result for ccccccc/);
+  });
+
+  it('a new worker commit is its own work HEAD again', () => {
+    const records = [rec('send', 'ok', 0, HEAD_A), rec('pr', 'ok', 0, HEAD_M, HEAD_A), rec('verify', 'ok', 1, HEAD_B)];
+    expect(headsOf(records, 1)).toEqual({ head: HEAD_B, workHead: HEAD_B });
+    expect(summarize(records)[0].next).toBe('review');
+  });
+
+  it('judges a stage by the same function the publishing scripts use', () => {
+    expect(unmetStage('verify', rec('verify', 'ok', 0, HEAD_A), { head: HEAD_M, workHead: HEAD_A })).toBeNull();
+    expect(unmetStage('precheck', rec('precheck', 'ok', 0, HEAD_A), { head: HEAD_M, workHead: HEAD_A })).toMatch(/no result for ccccccc/);
+    expect(unmetStage('verify', rec('verify', 'skip', 0, HEAD_A), { head: HEAD_A, workHead: HEAD_A })).toMatch(/verify: skip/);
+    expect(unmetStage('review', rec('review', 'skip', 0, HEAD_A), { head: HEAD_A, workHead: HEAD_A })).toBeNull();
+  });
+
+  it('takes --work-head on the command line', () => {
+    expect(main(['append', '--run-dir', runDir, '--issues', '1', '--issue', '1', '--stage', 'pr', '--result', 'ok', '--head', HEAD_M, '--work-head', HEAD_A])).toBe(0);
+    expect(readRecords(runDir, '1').records[0]).toMatchObject({ head: HEAD_M, workHead: HEAD_A });
   });
 });

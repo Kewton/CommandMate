@@ -188,3 +188,23 @@ describe('6-1 opens the PR through publish-pr.mjs, 6-2 merges through merge-pr.m
     expect(section('6-4')).toContain('cat "workspace/orchestration/runs/$DATE/module-reference-<N>.md"');
   });
 });
+
+describe('Phase 6 after the review of PR 3 (#3477)', () => {
+  it('names the precheck of the published HEAD, the shared rule and the body references', () => {
+    const phase6 = orchestrate.slice(orchestrate.indexOf('## Phase 6'), orchestrate.indexOf('### 6-1.'));
+    expect(phase6).toContain('**公開する HEAD**');
+    expect(phase6).toContain('`unmetStage`');
+    expect(phase6).toContain('`Closes #<N>`');
+  });
+
+  it('6-3 waives Build only with the three build steps, in a block that still parses', () => {
+    const block = bashBlocks(section('6-3')).find((b) => b.includes('NOT mergeable')) ?? '';
+    parses(block);
+    for (const step of ['build=ok', 'build-cli=ok', 'build-server=ok']) expect(block).toContain(step);
+  });
+
+  it('6-2 waits for Unit Tests on a contract that did not run the whole suite', () => {
+    expect(section('6-2')).toContain('整理の契約（`lint`・`typecheck` だけ、2-4-3）も同じ');
+    expect(section('6-2')).toContain('`vitest related --dir tests/unit`');
+  });
+});

@@ -13,7 +13,8 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { appendRecord, readRecords } from '../../../../scripts/orchestrate/run-log.mjs';
 import { defaultBody, main, parseArgs, prNumberFromUrl, validate } from '../../../../scripts/orchestrate/publish-pr.mjs';
-import { HEAD_A, HEAD_B, fakeGit, openPr } from './pr-fake';
+import { DEVELOP, HEAD_A, HEAD_B, HEAD_M, fakeGit, openPr } from './pr-fake';
+import { refersToIssue } from '../../../../scripts/orchestrate/pr-common.mjs';
 
 let tmp: string;
 let runDir: string;
@@ -77,8 +78,8 @@ describe('main: stops before publishing', () => {
     const fake = fakeGit();
     const { code, err } = runMain(fake);
     expect(code).toBe(1);
-    expect(err).toContain('review: no record for aaaaaaa');
-    expect(err).toContain('findings: no record for aaaaaaa');
+    expect(err).toContain('review: no result for aaaaaaa');
+    expect(err).toContain('findings: no result for aaaaaaa');
     expect(fake.gitCalls('push')).toHaveLength(0);
     expect(fake.ghCalls('pr create')).toHaveLength(0);
   });
@@ -88,7 +89,7 @@ describe('main: stops before publishing', () => {
     const fake = fakeGit();
     const { code, err } = runMain(fake);
     expect(code).toBe(1);
-    expect(err).toContain('precheck: no record for aaaaaaa');
+    expect(err).toContain('precheck: no result for aaaaaaa');
   });
 
   it('stops on a failed precheck recorded after an ok one', () => {
@@ -180,5 +181,58 @@ describe('main: publishes once', () => {
     expect(runMain(fake).code).toBe(1);
     expect(fake.ghCalls('pr create')).toHaveLength(0);
     expect(readRecords(runDir, '3477').records.filter((r) => r.stage === 'pr')).toHaveLength(0);
+  });
+});
+
+describe('#3477 review of PR 3: what a publish checks', () => {
+  const refreshed = () =>
+    fakeGit({ head: HEAD_M, firstParent: [`${HEAD_M} ${HEAD_A} ${DEVELOP}`, `${HEAD_A} ${DEVELOP}`] });
+
+  it('does not push a HEAD that merged develop on the work until that HEAD has its own precheck (3c-3)', () => {
+    recordReady(HEAD_A);
+    const fake = refreshed();
+    const { code, err } = runMain(fake);
+    expect(code).toBe(1);
+    expect(err).toContain('precheck: no result for ccccccc');
+    expect(fake.gitCalls('push')).toHaveLength(0);
+  });
+
+  it('pushes it once the precheck of that HEAD passed, and records both HEADs (3c-5)', () => {
+    recordReady(HEAD_A);
+    appendRecord(runDir, '3477', { issue: 3477, stage: 'precheck', result: 'ok', head: HEAD_M, workHead: HEAD_A });
+    const fake = refreshed();
+    expect(runMain(fake).code).toBe(0);
+    const pr = readRecords(runDir, '3477').records.find((r) => r.stage === 'pr');
+    expect(pr).toMatchObject({ head: HEAD_M, workHead: HEAD_A });
+  });
+
+  it('stops on conflict markers in a tracked file', () => {
+    recordReady();
+    const fake = fakeGit({ markers: 'src/lib/x.ts\n' });
+    const { code, err } = runMain(fake);
+    expect(code).toBe(1);
+    expect(err).toContain('conflict markers in src/lib/x.ts');
+    expect(fake.gitCalls('push')).toHaveLength(0);
+  });
+
+  it('finds a PR of another branch that refers to the Issue in its body, as /create-pr writes it (3c-6)', () => {
+    recordReady();
+    const fake = fakeGit({
+      otherOpen: [{ number: 78, title: 'feat: add publish', headRefName: 'feature/publish', body: '## Summary\n\nCloses #3477\n' }],
+    });
+    const { code, err } = runMain(fake);
+    expect(code).toBe(1);
+    expect(err).toContain('#78 (feature/publish) is already open for #3477');
+    expect(fake.ghCalls('pr create')).toHaveLength(0);
+  });
+
+  it('matches title, body and branch references, and not other numbers', () => {
+    expect(refersToIssue({ title: 'x (#3477)' }, 3477)).toBe(true);
+    for (const body of ['Closes #3477', 'fixes #3477.', 'Resolves #3477', 'Refs #3477', 'Fixed #3477']) {
+      expect(refersToIssue({ title: 'x', body }, 3477), body).toBe(true);
+    }
+    expect(refersToIssue({ title: 'x', headRefName: 'feature/3477b-worktree' }, 3477)).toBe(true);
+    expect(refersToIssue({ title: 'x (#34770)', body: 'Closes #34771', headRefName: 'feature/34770-x' }, 3477)).toBe(false);
+    expect(refersToIssue({ title: 'x', body: 'see #3477 for context', headRefName: 'feature/other' }, 3477)).toBe(false);
   });
 });
