@@ -151,6 +151,7 @@
     "vitest": "^4.1.2"
   },
   "overrides": {
-    "@xmldom/xmldom": "^0.9.12"
+    "@xmldom/xmldom": "^0.9.12",
+    "postcss": "$postcss"
   }
 }
