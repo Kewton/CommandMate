@@ -599,11 +599,80 @@ cleanup_failed_boot() {
   fi
 }
 
+# Issue #3463: an answer on the port is not proof the answer came from us.
+# pick_port's probe is not a hold, so another process can take the port between
+# the probe and the server's bind; the server then dies of EADDRINUSE, and for
+# the moment before it does, `curl` gets the other process's 200. Readiness
+# therefore also asks who LISTENS on the port and requires every listener to be
+# the server started above — SERVER_PID itself, a process in its process group
+# (tsx forks the child that owns the listener), or a descendant of SERVER_PID
+# (the group check is only meaningful when `set -m` gave it its own group).
+
+# The PIDs listening on TCP <port>, one per line (cf. scripts/lib/port-pids.sh:
+# `-sTCP:LISTEN`, so a client connected TO the port is not counted). Returns 2
+# when neither lsof nor fuser exists and nobody can be named.
+listener_pids() {
+  if command -v lsof >/dev/null 2>&1; then
+    lsof -nP -iTCP:"$1" -sTCP:LISTEN -t 2>/dev/null | grep -E '^[0-9]+$' | sort -u
+  elif command -v fuser >/dev/null 2>&1; then
+    fuser "$1"/tcp 2>/dev/null | tr -s ' ' '\n' | grep -E '^[0-9]+$' | sort -u
+  else
+    return 2
+  fi
+  return 0
+}
+
+pid_is_ours() {
+  local pid="$1" pgid hops=0
+  if [ -n "${SERVER_PGID:-}" ] && [ "$SERVER_PGID" = "$SERVER_PID" ]; then
+    pgid="$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d ' ')"
+    [ "$pgid" = "$SERVER_PGID" ] && return 0
+  fi
+  while [ -n "$pid" ] && [ "$pid" -gt 1 ] && [ "$hops" -lt 64 ]; do
+    [ "$pid" = "$SERVER_PID" ] && return 0
+    pid="$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')"
+    hops=$((hops + 1))
+  done
+  return 1
+}
+
+# Prints the foreign listeners, if any. Returns 0 when every listener is ours,
+# 1 when one is not, 2 when no listener is visible (yet), 3 when this host has
+# no way to name a listener.
+#
+# A listener that exits between the lookup and the check is skipped rather
+# than counted as foreign: a vanished PID says nothing about whose it was, and
+# a transient miss must never shoot the right server. It only waits longer.
+check_listener_owner() {
+  local pids pid seen=0 foreign=""
+  pids="$(listener_pids "$PORT")" || return 3
+  for pid in $pids; do
+    kill -0 "$pid" 2>/dev/null || ps -p "$pid" >/dev/null 2>&1 || continue
+    seen=1
+    pid_is_ours "$pid" || foreign="$foreign $pid"
+  done
+  if [ -n "$foreign" ]; then
+    printf '%s' "${foreign# }"
+    return 1
+  fi
+  [ "$seen" -eq 1 ] || return 2
+  return 0
+}
+
+describe_listeners() {
+  local pid cmd
+  for pid in $1; do
+    cmd="$(ps -o command= -p "$pid" 2>/dev/null | cut -c1-200)"
+    printf '%s\n' "  pid $pid: ${cmd:-command unavailable}" >&2
+  done
+}
+
 # `/` is requested rather than trusting the "Ready" log line: under `tsx
 # server.ts` the route is compiled on first request, and a bootstrap crash only
 # surfaces then (see the AsyncLocalStorage note in server.ts).
 attempt=0
 ready=0
+answered_unowned=0
 while [ "$attempt" -lt "$READY_TIMEOUT" ]; do
   attempt=$((attempt + 1))
   if ! kill -0 "$SERVER_PID" 2>/dev/null; then
@@ -612,8 +681,34 @@ while [ "$attempt" -lt "$READY_TIMEOUT" ]; do
     die "server exited before becoming ready"
   fi
   if curl -fsS -o /dev/null --max-time 10 "$BASE_URL/" 2>/dev/null; then
-    ready=1
-    break
+    foreign="$(check_listener_owner)"
+    owner=$?
+    case "$owner" in
+      0)
+        ready=1
+        break
+        ;;
+      1)
+        cleanup_failed_boot
+        printf '%s\n' "--- listeners on port $PORT ---" >&2
+        describe_listeners "$foreign"
+        printf '%s\n' "--- last 30 lines of $LOG_FILE ---" >&2
+        tail -n 30 "$LOG_FILE" >&2 2>/dev/null || true
+        die "port $PORT is answered by pid $foreign, not by the server env-up started (pid $SERVER_PID); another process took the port"
+        ;;
+      3)
+        # No lsof and no fuser: the owner cannot be named on this host, which
+        # is no evidence against the server. Say so once and keep the
+        # HTTP answer as the verdict, as before #3463.
+        log "cannot tell who listens on port $PORT (neither lsof nor fuser found); trusting the HTTP answer"
+        ready=1
+        break
+        ;;
+      *)
+        # Answered, but no listener visible yet: wait, never fail on it.
+        answered_unowned=1
+        ;;
+    esac
   fi
   sleep 1
 done
@@ -622,6 +717,9 @@ if [ "$ready" -ne 1 ]; then
   cleanup_failed_boot
   printf '%s\n' "--- last 30 lines of $LOG_FILE ---" >&2
   tail -n 30 "$LOG_FILE" >&2 2>/dev/null || true
+  if [ "$answered_unowned" -eq 1 ]; then
+    die "server did not answer $BASE_URL/ from a listener env-up could tie to pid $SERVER_PID within ${READY_TIMEOUT}s"
+  fi
   die "server did not answer $BASE_URL/ within ${READY_TIMEOUT}s"
 fi
 
