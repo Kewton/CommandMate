@@ -35,6 +35,8 @@ MAJOR.MINOR.PATCH
 | リファクタリング（動作変更なし） | PATCH |
 | 依存関係のアップデート（動作変更なし） | PATCH |
 
+**0.x の方針（Issue #3480）**: 公開した欄・コマンド・設定の削除や破壊的な変更は **minor** を上げる（1.0.0 以降は major）。Deprecated（告知だけ）は宣言しない。CHANGELOG の節（Removed 等）は破壊的かどうかの判定に使えないため、該当する断片の 2 行目に `<!-- bump: minor -->`（または `major`）を宣言する（形式は `changelog.d/README.md`）。`/release` は Phase 1 で `node scripts/changelog-fragments.mjs bump-floor --current <現在の版> --next <次の版>` を実行し、下回る版なら中断する。
+
 ---
 
 ## リリースフロー全体像
