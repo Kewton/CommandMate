@@ -111,6 +111,40 @@ export function parseFlakyMarker(
 }
 
 /**
+ * Marker a gate's OWN command writes to say something about a PASS that the
+ * verdict alone hides (Issue #3478) — e.g. `lint-sh` passing because shellcheck
+ * is not installed, so nothing was linted. Mirrors GATE_NOTICE_LOG_PREFIX in
+ * scripts/run-lint-sh-if-changed.mjs (pinned by its unit test).
+ *
+ * Unlike `[mutex]` / `[flaky]`, the gate writes this, not the runner, so it is
+ * a message from the gate rather than evidence about it. It is printed only
+ * beside a gate whose log is otherwise not shown (a PASS); a failing gate's log
+ * is echoed whole and already carries the line.
+ *
+ * Not a `skipped` status: the runner aggregates `skipped` to RESULT error
+ * (exit 99, no verdict), which would turn a deliberate "warn and continue"
+ * into "could not judge".
+ */
+export const GATE_NOTICE_LOG_PREFIX = '[cmate-notice]';
+
+/** Notice lines, anchored to the start of a line like the other markers. */
+const GATE_NOTICE_PATTERN = /^\[cmate-notice\] (.+)$/gm;
+
+/** Longest notice echoed; a gate cannot flood the verdict lines through it. */
+const MAX_NOTICE_LENGTH = 200;
+
+/**
+ * Read a gate's notices out of its log tail (Issue #3478).
+ * @returns The notice texts in output order; empty when there are none.
+ */
+export function parseGateNotices(logTail: string | null | undefined): string[] {
+  if (!logTail) return [];
+  return Array.from(logTail.matchAll(GATE_NOTICE_PATTERN), (match) =>
+    match[1].trim().slice(0, MAX_NOTICE_LENGTH)
+  ).filter((text) => text !== '');
+}
+
+/**
  * Lines of a failing gate's log echoed to stderr before the rest becomes a
  * count (#1683).
  *
@@ -294,6 +328,12 @@ function reportGates(gates: VerificationGateResultView[], reported: Set<number>)
     // anything actionable, which defeats the point of a CLI verdict.
     if (gate.status !== 'passed' && gate.logTail) {
       console.error(formatLogTailForDisplay(gate));
+    } else if (gate.status === 'passed') {
+      // A PASS prints no log, so a gate that passed without really checking
+      // (Issue #3478) would otherwise be indistinguishable from one that did.
+      for (const notice of parseGateNotices(gate.logTail)) {
+        console.error(`NOTICE ${gate.gateId}: ${notice}`);
+      }
     }
   }
 }
