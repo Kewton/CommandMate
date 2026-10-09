@@ -374,6 +374,9 @@ success:
   ファイルが変わったときはテスト全体に切り替わる）。テスト全体の合否は CI の `Unit Tests` で見るので、
   `unit-related` で裁定した PR は 6-2 の例外に従う。テストの共通設定・ヘルパーの変更や広い範囲の rename
   など、テスト全体が必要な Issue では `gates: [lint, typecheck, unit]` にする（#2639）。
+- **`.sh` を触る Issue**（`scope.allow` に `.sh` が入りうる。`scripts/**` など）では、`gates` に `lint-sh` を足す
+  （例: `gates: [lint, lint-sh, typecheck, unit-related]`）。`lint-sh` は `.sh` の変更が無ければ何もせず合格するので、
+  迷ったら足してよい。`lint` は ESLint だけで、shellcheck（CI の Lint ジョブの `npm run lint:sh`）は見ない（#3478）。
 - **`$HOME` 配下に新しい置き場所（ファイル・ディレクトリ・環境変数で移せる場所）を足す Issue** では、
   goal の受入基準に「`tests/setup.ts` に、その置き場所をテスト用の一時パスへ向ける既定を足す
   （`CM_OPENCODE_PORT_FILE` / `CM_OPENCODE_V2_DIR` と同じ形）」を書く。`scope.allow` に `tests/setup.ts` を入れ、
@@ -1286,6 +1289,9 @@ Phase 3 で `wait --verify` が exit 0 を返していれば、そのワーカ�
 for each worktree:
   commandmatedev verify "$WT" --json > "verify-${WT}.json"; echo "exit=$?"
 ```
+
+**CI にあって手元のゲートに無い手順は、`tests/unit/guards/ci-steps-local-coverage-3478.test.ts` の除外の一覧（理由つき）にだけ置く**（#3478）。
+shellcheck は `lint-sh` ゲート（`scripts/run-lint-sh-if-changed.mjs`。`.sh` を変えたときだけ `npm run lint:sh`）が見る。`.claude/skills/**` は `lint:sh` の走査に入っていない（#3477 で置き場所が決まってから足す）。
 
 **ワーカーに「lint/tsc/test を実行して結果を報告して」と送らないこと。** 報告文の解析は
 「全部 Pass です」という散文を信じることであり、`wait --verify` / `verify` の exit code が
