@@ -15,6 +15,16 @@ const REPO_ROOT = path.resolve(__dirname, '../../..');
 const ORCHESTRATE_PATH = '.claude/commands/orchestrate.md';
 const orchestrate = readFileSync(path.join(REPO_ROOT, ORCHESTRATE_PATH), 'utf-8');
 
+// Since #3481 (2 本目) the run-time-optional procedures live in docs/orchestrate/; the body section points there.
+/** The `## <heading>` section of docs/orchestrate/<file>, up to the next `## ` heading. */
+function docSection(file: string, heading: string): string {
+  const doc = readFileSync(path.join(REPO_ROOT, 'docs/orchestrate', file), 'utf-8');
+  const start = doc.indexOf(`\n## ${heading}\n`);
+  expect(start, `docs/orchestrate/${file} has no \`## ${heading}\``).toBeGreaterThanOrEqual(0);
+  const end = doc.indexOf('\n## ', start + 1);
+  return doc.slice(start, end === -1 ? undefined : end);
+}
+
 /** The body of `### <id>. …`, up to the next `### ` heading. */
 function section(id: string): string {
   const lines = orchestrate.split('\n');
@@ -49,7 +59,7 @@ describe('orchestrate re-instruct verification (Issue #3118)', () => {
   });
 
   it('3-5 (switch to a new contract) keeps `wait ... --verify`', () => {
-    expect(section('3-5')).toMatch(/wait .*--verify/);
+    expect(`${section('3-5')}\n${docSection('switching.md', '3-5 Antigravity から Claude への切り替え')}`).toMatch(/wait .*--verify/);
   });
 });
 
@@ -75,6 +85,6 @@ describe('orchestrate 3-4 verify commands are bound to the task (Issue #3123)', 
   });
 
   it('3-3 keeps the `--gates token-discipline` fallback', () => {
-    expect(section('3-3')).toContain('--gates token-discipline');
+    expect(`${section('3-3')}\n${docSection('workers.md', '3-3 完了検出が壊れたときの退避')}`).toContain('--gates token-discipline');
   });
 });

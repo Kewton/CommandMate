@@ -66,3 +66,15 @@ commandmatedev capture "$WT" --instance antigravity --pane --tail 40 \
     どちらも無ければ、検証は最終状態を見ている。exit 0 はそのまま採用し、exit 20 は 3-4 の「合図の前に始まった検証」に従う
 - #2605 の値: 検証の開始が 01:28:40.776Z、最後のターン終了が 01:33:41.574Z（`before-signal`）。
   最後のワーカーのコミットは 01:27:47 で、作業ツリーはクリーンだった
+
+## 3-3 途中でターンを閉じる理由
+
+agy は作業の途中でも
+ターンを閉じることがある。例えば、バックグラウンドで起動したコマンドの終了を `schedule`（数十秒後に自分を起こす）で待つとき。
+wait はそのターン終了を完了（`basis=hook_stop`）と読むので、作業が終わる前に検証が走る。
+
+## 3-3 wait のログの Prompt detected
+
+- Antigravity のワーカーでは、Auto-Yes が許可ダイアログに応答している間も、wait のログに
+  `Prompt detected … Waiting for human response...` が繰り返し出る。応答済みかどうかは
+  `capture --prompts` の `[answered:auto]` で確かめる。このログだけを見て介入しないこと。

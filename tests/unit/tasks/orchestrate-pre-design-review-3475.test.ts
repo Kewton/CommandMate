@@ -4,6 +4,16 @@ import { join } from 'node:path';
 
 const orchestrate = readFileSync(join(process.cwd(), '.claude/commands/orchestrate.md'), 'utf-8');
 
+// Since #3481 (2 本目) the run-time-optional procedures live in docs/orchestrate/; the body section points there.
+/** The `## <heading>` section of docs/orchestrate/<file>, up to the next `## ` heading. */
+function docSection(file: string, heading: string): string {
+  const doc = readFileSync(join(process.cwd(), 'docs/orchestrate', file), 'utf-8');
+  const start = doc.indexOf(`\n## ${heading}\n`);
+  expect(start, `docs/orchestrate/${file} has no \`## ${heading}\``).toBeGreaterThanOrEqual(0);
+  const end = doc.indexOf('\n## ', start + 1);
+  return doc.slice(start, end === -1 ? undefined : end);
+}
+
 function section(start: string, end: string): string {
   const s = orchestrate.indexOf(start);
   const e = orchestrate.indexOf(end, s + start.length);
@@ -13,7 +23,7 @@ function section(start: string, end: string): string {
 }
 
 describe('orchestrate.md: 設計の事前レビュー（試行中の段）(#3475)', () => {
-  const stage = section('### 2-4-4. 新しい仕組みの設計の事前レビュー', '### 2-5.');
+  const stage = `${section('### 2-4-4. 新しい仕組みの設計の事前レビュー', '### 2-5.')}\n${docSection('trials.md', '2-4-4 事前レビューの書き方と記録')}`;
 
   it('段の見出しが 2-4-3 の後・2-5 の前にあり、期限が書いてある', () => {
     const i243 = orchestrate.indexOf('### 2-4-3.');
@@ -39,12 +49,12 @@ describe('orchestrate.md: 設計の事前レビュー（試行中の段）(#3475
 
   it('記録は consistency-review.md の表に列を足す形で、Phase 0 の一覧にも入っている', () => {
     expect(stage).toContain('「事前レビューの有無」の列');
-    expect(orchestrate).toContain('| 処置 | 事前レビューの有無 |');
+    expect(`${orchestrate}\n${docSection('trials.md', '5-2b 整合性レビューの進め方と記録')}`).toContain('| 処置 | 事前レビューの有無 |');
     expect(orchestrate).toContain('2-4-4 新しい仕組みの設計の事前レビュー');
   });
 
   it('5-2b に再指示の書き方と前回の指摘の解消の確認がある', () => {
-    const s = section('### 5-2b.', '### 5-3.');
+    const s = `${section('### 5-2b.', '### 5-3.')}\n${docSection('trials.md', '5-2b 整合性レビューの進め方と記録')}`;
     expect(s).toContain('守るべき条件・全経路・対照のテストに言い換えて');
     expect(s).toContain('再レビューでは、前回の指摘が解消したかを先に確かめる');
   });

@@ -43,6 +43,9 @@ gates:
   - id: claudemd-size
     command: "node scripts/check-claudemd-size.mjs"
     timeoutSec: 120
+  # [Issue #3481] orchestrate.md のバイト数の上限（scripts/check-orchestrate-size.mjs、CI ジョブ orchestrate-size）は
+  # ここにゲートとして足していない。ゲートの一覧は tests/unit/verification/verify-config.test.ts が固定しているため。
+  # 手元では tests/unit/docs/orchestrate-size-3481.test.ts が同じスクリプトを呼び、unit / unit-related ゲートで走る。
   # [Issue #1946] route.ts が Next の許さない名前を export していないかを見る。
   # PR #1943 の `export const SERVER_CAPABILITIES` は lint / typecheck / unit を
   # 素通りして develop の build を壊した。Next の route 型チェックは `next build` が
