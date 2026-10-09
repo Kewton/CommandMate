@@ -138,7 +138,7 @@ npx playwright install chromium   # 未導入なら実行（導入済みなら n
 0. **`$HOME` が実ログイン HOME なら exit 2 で止まる**（Issue #2380。`dscl` / `getent` / `~user` 展開で引いた登録 HOME と `pwd -P` で比較。symlink も見抜く。バイパスは無い）。転写の配置も seed 生成もサーバ起動もその後なので、実 HOME の `~/.claude/projects` には何も書かれない
 1. 使い捨て git リポジトリ `cmdemo-app`（3 commit + worktree 2 本。`src/components/layout/Header.tsx` と `.commandmate/agents.yaml`（5 体の roster 宣言）を `main` に持つ）を `$HOME/.commandmate-demo/seed/` に生成
 2. `WORKTREE_REPOS=<seed> CM_DB_PATH=$HOME/.commandmate-demo/cm.db CM_PORT=<空きポート>` で `node_modules/.bin/tsx server.ts` を起動し、PID を state ファイルに保存
-3. `curl -fsS http://127.0.0.1:<port>/` が通るまで待つ
+3. `curl -fsS http://127.0.0.1:<port>/` が通り、かつそのポートの待ち受け（`lsof -nP -iTCP:<port> -sTCP:LISTEN -t`、無ければ `fuser`）がすべて起動した PID・そのプロセスグループ・その子孫であるまで待つ（Issue #3463）。他のプロセスが待ち受けていれば起動失敗として止まる。lsof も fuser も無い環境では HTTP の応答だけで判定する
 4. `PUT /api/settings/default-agents` で既定エージェントを 5 体にし、claude / codex の**偽転写の骨格**を `$HOME` 配下に置いて、`POST /api/hooks/agent-event` に `SessionStart`（session id 付き）を 1 本ずつ送る。id とパスは `state.env` の `CM_DEMO_{CLAUDE,CODEX}_SESSION_ID` / `CM_DEMO_{CLAUDE,CODEX}_TRANSCRIPT` に入る
 
 `CM_DEMO_PORT` / `CM_DEMO_HOME` / `CM_DEMO_READY_TIMEOUT` / `CODEX_HOME` で上書きできる。
