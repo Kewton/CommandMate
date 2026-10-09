@@ -1,16 +1,18 @@
 /**
- * The demo-video env tests must not leave anything in the user's home (#1553).
+ * The demo-video env tests must not leave anything in the user's home (#1553),
+ * and since #3479 must not create anything there at all.
  *
- * `env-scripts.test.ts` has to put its scratch dir under $HOME — env-up.sh
- * refuses anywhere else, because validateDbPath rejects /tmp and /var as system
- * directories. That makes forgetting to remove it a leak into a real home
- * directory: one `.commandmate-demo-vitest-<pid>` per `npm run test:unit`, with
- * nothing to ever collect them. Eight had accumulated before this guard existed.
+ * `env-scripts.test.ts` used to put its scratch dir under $HOME, so forgetting
+ * to remove it was a leak into a real home directory: one
+ * `.commandmate-demo-vitest-<pid>` per `npm run test:unit`. Eight had
+ * accumulated before this guard existed. Even removed on time, the dir was a
+ * `$HOME` entry for every env-clean gate on the machine while the run lasted
+ * (#3479), so it now lives under the OS temp dir.
  *
  * A hook that runs last cannot be observed from inside its own file, so this
- * test runs that file in a child process with `HOME` pointed at a scratch
- * directory and inspects what survives. `os.homedir()` returns `$HOME` on
- * POSIX, so the child's scratch dir lands where this test can see it.
+ * test runs that file in a child process with `HOME` and `TMPDIR` pointed at
+ * scratch directories and inspects what survives in each. `os.homedir()` and
+ * `os.tmpdir()` follow those variables on POSIX.
  *
  * @vitest-environment node
  */
@@ -38,6 +40,8 @@ const TARGET = 'tests/unit/skills/demo-video/env-scripts.test.ts';
 const TEST_NAME = 'refuses to start on top of an existing state file';
 
 const SCRATCH_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'demo-video-home-'));
+/** The child's `os.tmpdir()`, where its scratch dir is now made (#3479). */
+const SCRATCH_TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'demo-video-tmp-'));
 
 function leftovers(home: string): string[] {
   return fs.readdirSync(home).filter((entry) => entry.startsWith('.commandmate-demo-vitest-'));
@@ -71,6 +75,7 @@ beforeAll(() => {
     env: {
       ...process.env,
       HOME: SCRATCH_HOME,
+      TMPDIR: SCRATCH_TMP,
       NODE_ENV: 'test',
       // Belt: keep the child's summary colourless wherever it runs, so local
       // and CI see the same bytes. Braces: `passedTestCount` strips ANSI anyway,
@@ -84,6 +89,7 @@ beforeAll(() => {
 
 afterAll(() => {
   removeTempDir(SCRATCH_HOME);
+  removeTempDir(SCRATCH_TMP);
 });
 
 describe('env-scripts.test.ts cleans up after itself', () => {
@@ -97,6 +103,19 @@ describe('env-scripts.test.ts cleans up after itself', () => {
 
   it('leaves no .commandmate-demo-vitest-* directory behind in $HOME', () => {
     expect(leftovers(SCRATCH_HOME)).toEqual([]);
+  });
+
+  it('creates nothing in $HOME at all (#3479)', () => {
+    // Not just "no demo-vitest dir": while the run lasts, anything in the real
+    // home is an entry every parallel worktree's env-clean gate can see.
+    expect(fs.readdirSync(SCRATCH_HOME)).toEqual([]);
+  });
+
+  it('leaves no .commandmate-demo-vitest-* directory behind in its temp dir (#3479)', () => {
+    // The probe case passing proves the scratch dir existed; env-scripts makes
+    // it under `os.tmpdir()`, which the child resolves to SCRATCH_TMP. Its own
+    // 'scratch location' case pins that it is not under the home.
+    expect(leftovers(SCRATCH_TMP)).toEqual([]);
   });
 
   it('counts the child summary whether or not vitest coloured it', () => {

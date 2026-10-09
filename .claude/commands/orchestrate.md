@@ -1110,9 +1110,11 @@ commandmatedev verify show "$RUN_ID" --json | jq '.gates[] | select(.status != "
   - 別プロセスの TCP listener（`-`）
   - ワーカーの最初のツール呼び出しより前の時刻が名前に入った `~/.commandmate-test-<ms>`（`+`）
 
-  並行するワーカーのテストが一時的に作る `~/.commandmate-demo-vitest-<pid>`（`+`）も、このワーカー起因ではないことがある
-  （2026-09-28、2 本を並行した run で、互いのテストが作ったものを `env-clean` が違反に数えた。道具の側は #2954 で直す）。
-  直るまでは、`commandmatedev verify "$WT" --task "$TASK_ID" --gates env-clean` を再実行して、その項目が消えていれば合格として扱う。
+  `~/.commandmate-demo-vitest-<pid>`（`+`）は、#3479 より前のコードの `env-scripts.test.ts` だけが作る
+  （#3479 から作業場所は OS の一時ディレクトリで、`$HOME` には作らない）。base が #3479 より古いブランチの
+  テストが並行で動いていると現れ、このワーカー起因ではないことがある（2026-09-28 の 2 本並行の run。別の worktree の
+  生きたテストのものは #2954 で `other` に分かれる）。`[unattributed]` で残ったら、
+  `commandmatedev verify "$WT" --task "$TASK_ID" --gates env-clean` を再実行して、その項目が消えていれば合格として扱う。
 
   帰属は次の 3 つで確かめる:
   - ワーカーが実行したコマンド: `capture --prompts --limit 100` の `Run this command?` と、そこに書かれた `start with '<cmd>'`
@@ -1127,7 +1129,8 @@ commandmatedev verify show "$RUN_ID" --json | jq '.gates[] | select(.status != "
 **合図の前に始まった検証**（Antigravity 担当。3-3 の「完了の合図」）で `env-clean` だけが落ちたとき:
 
 - 違反は、ワーカー自身がまだ動かしていたもの（バックグラウンドのテスト実行の listener `[self]`、
-  テストが作って後で消す `~/.commandmate-demo-vitest-*` など）であることが多い
+  テストが作って後で消す `$HOME` 直下のエントリなど）であることが多い。`~/.commandmate-demo-vitest-*` は
+  #3479 から作られない（#3395 はこの形で、ワーカー自身のまだ動いていたテストが作ったものだった）
 - 合図の後に `commandmatedev verify "$WT" --task "$TASK_ID" --gates env-clean` を再実行する
   （`work-evidence` と `scope` も一緒に走る）
 - 再実行が PASS で、かつ 3-3 の確認で「最後のコミットが検証の開始より前・作業ツリーに変更なし」なら、合格として扱う。

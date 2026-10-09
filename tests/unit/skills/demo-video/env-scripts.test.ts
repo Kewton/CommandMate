@@ -16,6 +16,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { removeTempDir } from '@tests/helpers/temp-dir';
+import { isPathWithin } from '@/config/system-directories';
 import { CLI_TOOL_IDS } from '@/lib/cli-tools/types';
 import { claudeProjectSlug } from '@/lib/hooks/sources/claude/transcript';
 import { findCodexRolloutPath } from '@/lib/hooks/sources/codex/history';
@@ -27,15 +28,22 @@ const SCRIPTS = path.join(REPO_ROOT, '.claude/skills/demo-video/scripts');
 const ENV_UP = path.join(SCRIPTS, 'env-up.sh');
 const ENV_DOWN = path.join(SCRIPTS, 'env-down.sh');
 
-// env-up refuses a state dir outside $HOME (validateDbPath rejects /tmp and
-// /var as system directories), so the scratch dir has to live under $HOME.
-//
-// Issue #2380: env-up ALSO refuses to run with $HOME set to the login home,
-// because it plants fake agent transcripts under `~/.claude/projects` and
+// Issue #2380: env-up refuses to run with $HOME set to the login home, because
+// it plants fake agent transcripts under `~/.claude/projects` and
 // `~/.codex/sessions`. So the scratch dir doubles as the HOME every script
 // here runs with: SCRATCH_HOME is `$HOME` for the child, and the demo state
 // dir sits inside it the way it would under /Users/Shared/cmdemo-home.
-const SCRATCH_HOME = path.join(os.homedir(), `.commandmate-demo-vitest-${process.pid}`);
+//
+// Issue #3479: it lives under the OS temp dir, NOT the real $HOME. It used to
+// be `~/.commandmate-demo-vitest-<pid>` because env-up requires the state dir
+// to be under `$HOME` and a real demo's validateDbPath rejects /tmp and /var —
+// but the `$HOME` env-up checks is the child's, which is SCRATCH_HOME itself,
+// and the stub server never runs validateDbPath. In the real home the dir was
+// a `$HOME` entry for every env-clean gate on the machine while a run was in
+// flight (#3395 failed on its own still-running test's dir). The physical path
+// (`/private/var/...` on macOS) so `pwd -P` in the scripts agrees with it.
+const SCRATCH_BASE = fs.realpathSync(os.tmpdir());
+const SCRATCH_HOME = path.join(SCRATCH_BASE, `.commandmate-demo-vitest-${process.pid}`);
 const DEMO_HOME = path.join(SCRATCH_HOME, '.commandmate-demo');
 const STATE_FILE = path.join(DEMO_HOME, 'state.env');
 const STUB = path.join(SCRATCH_HOME, 'stub-server.js');
@@ -215,8 +223,9 @@ async function portListening(port: number): Promise<boolean> {
 }
 
 beforeAll(async () => {
-  // Collect dirs left by runs that were killed before afterAll (#3025).
-  sweepStaleScratchDirs(os.homedir());
+  // Collect dirs left by runs that were killed before afterAll (#3025). Only
+  // under the temp dir: this file no longer writes to, or sweeps, the real home.
+  sweepStaleScratchDirs(SCRATCH_BASE);
   TEST_PORT = await reserveDemoPortPair();
   removeTempDir(SCRATCH_HOME);
   fs.mkdirSync(DEMO_HOME, { recursive: true });
@@ -286,11 +295,10 @@ afterEach(() => {
   fs.rmSync(REQUEST_LOG, { force: true });
 });
 
-// The scratch dir has to sit under $HOME (env-up refuses anything else, because
-// validateDbPath rejects /tmp and /var), which makes leaving it behind a leak
-// into a real user's home: one directory per `npm run test:unit`, never
-// collected. afterAll still runs when a test — or beforeAll — fails, and the
-// removal is force/recursive so it cannot throw and mask that failure.
+// Leaving the scratch dir behind is a leak: one directory per
+// `npm run test:unit`, collected only by the next run's sweep. afterAll still
+// runs when a test — or beforeAll — fails, and the removal is force/recursive
+// so it cannot throw and mask that failure.
 // `no-home-leftovers.test.ts` runs this file in a child process and asserts the
 // directory is gone afterwards, so deleting this hook turns that test red.
 afterAll(() => {
@@ -320,6 +328,23 @@ describe('demo port band', () => {
     expect(PORT_BAND_START + PORT_BAND_PAIRS * 2 - 1).toBeLessThan(EPHEMERAL_PORT_FLOOR);
     expect(TEST_PORT).toBeGreaterThanOrEqual(PORT_BAND_START);
     expect(TEST_PORT + 1).toBeLessThan(EPHEMERAL_PORT_FLOOR);
+  });
+});
+
+describe('scratch location (Issue #3479)', () => {
+  it('keeps the scratch dir out of the real home, so env-clean never sees it', () => {
+    // A dir under the real $HOME was a `$HOME` entry for every parallel
+    // worktree's env-clean gate, and for this worker's own gate while its tests
+    // were still running (#3395: `.commandmate-demo-vitest-36552 [unattributed]`).
+    expect(isPathWithin(SCRATCH_HOME, os.homedir())).toBe(false);
+    expect(isPathWithin(SCRATCH_HOME, LOGIN_HOME)).toBe(false);
+    // Negative control: the check does see a path that is in the home.
+    expect(isPathWithin(path.join(os.homedir(), '.commandmate-demo-vitest-1'), os.homedir())).toBe(true);
+  });
+
+  it('is still a real directory that env-up accepts as an isolated HOME', () => {
+    expect(fs.statSync(SCRATCH_HOME).isDirectory()).toBe(true);
+    expect(isPathWithin(DEMO_HOME, SCRATCH_HOME)).toBe(true);
   });
 });
 
