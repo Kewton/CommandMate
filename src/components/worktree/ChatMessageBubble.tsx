@@ -51,7 +51,7 @@
  * tokens that are unreadable on a light ground. Nothing else here may be dark.
  */
 
-import React, { memo, useCallback, useMemo, useState } from 'react';
+import React, { memo, useCallback, useMemo } from 'react';
 import { useTranslations } from 'next-intl';
 import {
   AlertCircle,
@@ -62,9 +62,7 @@ import {
   Copy,
   CopyPlus,
   Loader2,
-  MessageCircleQuestion,
   RotateCcw,
-  ShieldCheck,
   TerminalSquare,
   Wrench,
   X,
@@ -95,10 +93,25 @@ import {
   splitChatMarkdownBody,
 } from '@/lib/chat/chat-markdown-body';
 import {
-  countToolApprovalEntries,
-  type ToolApprovalEntry,
-  type ToolApprovalOutcome,
-} from '@/lib/chat/chat-tool-approvals';
+  CHAT_BUBBLE_ROW_CLASS,
+  CHAT_TOOL_ACTIVITY_CHIP_CLASS,
+  useChatToolActivityDisclosure,
+} from '@/components/worktree/chat-bubble-tool-activity';
+
+export {
+  CHAT_BUBBLE_ROW_CLASS,
+  ChatToolActivityProvider,
+  CHAT_TOOL_ACTIVITY_OPEN,
+  CHAT_TOOL_ACTIVITY_CHIP_CLASS,
+  useChatToolActivityDisclosure,
+  type ChatToolActivityState,
+} from '@/components/worktree/chat-bubble-tool-activity';
+export {
+  CHAT_TOOL_APPROVAL_GROUP_TESTID,
+  CHAT_TOOL_APPROVAL_TOGGLE_TESTID,
+  CHAT_TOOL_APPROVAL_ENTRY_TESTID,
+  ChatToolApprovalGroup,
+} from '@/components/worktree/ChatToolApprovalGroup';
 
 // ============================================================================
 // Bubble geometry
@@ -194,8 +207,6 @@ export const CHAT_TURN_HEADER_TESTID = 'chat-turn-header';
 /** The clock inside a header: `18:59`, or `18:18 → 18:33` (Issue #2458). */
 export const CHAT_TURN_TIME_TESTID = 'chat-turn-time';
 
-/** The row a bubble sits in. Alignment is the bubble's own `ml-auto` / `mr-auto`. */
-export const CHAT_BUBBLE_ROW_CLASS = 'flex w-full flex-col gap-1 pb-3';
 
 /** Wrapping rules every body obeys, Markdown or not. */
 export const CHAT_BUBBLE_BODY_BASE_CLASS =
@@ -211,90 +222,6 @@ export const CHAT_BUBBLE_BODY_BASE_CLASS =
  * the same measure and the same namespace.
  */
 export const CHAT_BUBBLE_MARKDOWN_BODY_CLASS = `${CHAT_BUBBLE_BODY_BASE_CLASS} chat-md`;
-
-// ============================================================================
-// Tool activity (Issue #2284)
-// ============================================================================
-
-/** What the transcript has decided about the folded logs beneath it. */
-export interface ChatToolActivityState {
-  /** True while every folded tool row in this subtree should be open. */
-  readonly showAll: boolean;
-}
-
-/**
- * The transcript-wide answer to "is tool activity showing?".
- *
- * A context rather than a prop threaded through four components because the
- * three things it governs are at three different depths — the approval group is
- * a ROW of the virtual list, the tool log and the reasoning are inside a
- * Markdown body inside a bubble — and because the live and held bubbles reach
- * `ChatMarkdownBody` by a different path from the settled one. A prop would
- * have to be added to every one of those signatures, and the first renderer
- * that forgot to pass it would silently opt itself out of the toggle.
- *
- * Defaulting to folded matters: `ChatMessageBubble` is rendered directly by
- * several suites and by `HistoryPane`'s neighbours with no provider above it,
- * and "no provider" has to mean the same thing as "the reader has not asked for
- * the logs".
- */
-const ChatToolActivityContext = React.createContext<ChatToolActivityState>({ showAll: false });
-
-/** Publishes the transcript's verdict to every chip below it. */
-export const ChatToolActivityProvider = ChatToolActivityContext.Provider;
-
-/**
- * The value one row wears while it is holding a search hit (Issue #2284).
- *
- * A module constant, not an object literal at the call site: the provider's
- * value is compared by identity, and a fresh `{ showAll: true }` per render
- * would re-render every chip in every matched row on every keystroke.
- */
-export const CHAT_TOOL_ACTIVITY_OPEN: ChatToolActivityState = { showAll: true };
-
-/**
- * What all three folded logs are drawn as: one `rounded-full` chip.
- *
- * #2245 gave the approval run this shape and #2272 copied it for the reasoning;
- * #2284 adds the tool log and turns the third copy into the one constant. They
- * have to look the same because they ARE the same thing to a reader — a
- * subordinate log they may want and do not want first — and three chips that
- * differed by a padding value would read as three different kinds of row.
- */
-export const CHAT_TOOL_ACTIVITY_CHIP_CLASS = [
-  'mr-auto flex w-fit max-w-full items-center gap-1.5 rounded-full border border-border',
-  'bg-surface-2 px-2.5 py-1 text-xs text-muted-foreground transition-colors',
-  'hover:bg-muted hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-].join(' ');
-
-/**
- * One folded chip's open/closed state, obeying the transcript's toggle.
- *
- * The rule the Issue asks for is "the toggle sets every chip, and a chip the
- * reader opened by hand stays open until the toggle moves again". That is
- * exactly React's documented shape for adjusting state when a prop changes,
- * with the transcript's verdict as the prop: the local override records WHICH
- * verdict it was taken against, so the moment the verdict changes the override
- * stops applying and every chip in the column agrees again. No effect, no
- * subscription, and nothing to clean up when a virtualized row unmounts.
- *
- * @returns Whether this chip is open, and the click handler that flips it
- */
-export function useChatToolActivityDisclosure(): {
-  isOpen: boolean;
-  toggle: () => void;
-} {
-  const { showAll } = React.useContext(ChatToolActivityContext);
-  const [override, setOverride] = useState<{ against: boolean; isOpen: boolean } | null>(null);
-
-  const isOpen = override !== null && override.against === showAll ? override.isOpen : showAll;
-  const toggle = useCallback(
-    () => setOverride({ against: showAll, isOpen: !isOpen }),
-    [showAll, isOpen],
-  );
-
-  return { isOpen, toggle };
-}
 
 // ============================================================================
 // Body text (Issue #2245)
@@ -999,201 +926,6 @@ export const ChatMarkdownBody = memo(function ChatMarkdownBody({
         </ChatToolLogDisclosure>
       )}
     </>
-  );
-});
-
-// ============================================================================
-// Tool approvals (Issue #2245)
-// ============================================================================
-
-/** The collapsible row a run of approval dialogs is drawn as. */
-export const CHAT_TOOL_APPROVAL_GROUP_TESTID = 'chat-tool-approval-group';
-/** The disclosure control on that row. */
-export const CHAT_TOOL_APPROVAL_TOGGLE_TESTID = 'chat-tool-approval-toggle';
-/** One chip inside an opened group. */
-export const CHAT_TOOL_APPROVAL_ENTRY_TESTID = 'chat-tool-approval-entry';
-
-/** The `chatTranscript.toolApproval.*` key describing each outcome. */
-const OUTCOME_LABEL_KEY: Record<ToolApprovalOutcome, string> = {
-  human: 'chatTranscript.toolApproval.answeredByHuman',
-  auto: 'chatTranscript.toolApproval.autoApproved',
-  terminal: 'chatTranscript.toolApproval.answeredInTerminal',
-  pending: 'chatTranscript.toolApproval.awaitingAnswer',
-  unclassified: 'chatTranscript.toolApproval.unclassified',
-  unknown: 'chatTranscript.toolApproval.resolved',
-};
-
-/**
- * The same map for a QUESTION row (Issue #2460).
- *
- * One entry differs, and it is the one that was wrong on screen: a question
- * Auto-Yes answered was labelled "auto-APPROVED", which reads as a permission
- * decision on a dialog nobody ever saw as a question. Everything else — who
- * answered, awaiting an answer, resolved — says the same thing about both kinds
- * and is deliberately not duplicated into a second vocabulary.
- */
-const QUESTION_OUTCOME_LABEL_KEY: Record<ToolApprovalOutcome, string> = {
-  ...OUTCOME_LABEL_KEY,
-  auto: 'chatTranscript.toolApproval.autoAnswered',
-};
-
-/**
- * A run of tool-approval dialogs, as one collapsed row.
- *
- * ## Why a group rather than one chip per row
- *
- * Chips are an improvement over 2 KB bubbles even one at a time, but the shape
- * of the data is runs: 41 consecutive `Approve Bash?` rows between two sentences
- * on the codex worktree, 13 on the antigravity one. Forty-one one-line chips is
- * still forty-one rows of scrolling between a question and its answer. Closed by
- * default, therefore — and openable, because the information is not deleted,
- * only folded.
- *
- * ## What the summary counts (Issue #2460)
- *
- * Approvals, questions and loose submit confirmations, each on its own, from the
- * FOLDED chips. `entries.length` and `messageIds.length` are both wrong here for
- * the same reason from opposite ends: the second counts the rows the producers
- * duplicated (three, for the measured two-question call) and the first counts
- * chips of mixed kinds under one noun. `data-approval-count` keeps meaning "how
- * many chips", which is what #2245's tests read it for, and the breakdown lives
- * beside it in three attributes of its own.
- *
- * ## Why nothing but open/closed is remembered
- *
- * Open/closed is the reader's, and since Issue #2284 it is the READER'S for the
- * whole column: {@link useChatToolActivityDisclosure} answers to the
- * transcript's one tool-activity toggle, with a per-chip override that lasts
- * until that toggle moves again. Everything else is derived
- * from `entries` on every render, with nothing cached: `promptData.status` flips
- * pending → answered through a `message_updated` push, and a chip that
- * remembered its own outcome would keep saying "awaiting answer" after the
- * dialog was answered — or, since #2460, would keep counting an answered
- * question as an approval.
- */
-export const ChatToolApprovalGroup = memo(function ChatToolApprovalGroup({
-  entries,
-}: {
-  entries: ToolApprovalEntry[];
-}) {
-  const t = useTranslations('worktree');
-  // [#2284] The transcript's toggle reaches this run too: approvals, the tool
-  // log and the reasoning are one kind of thing and answer to one control.
-  const { isOpen, toggle } = useChatToolActivityDisclosure();
-
-  if (entries.length === 0) return null;
-
-  const Chevron = isOpen ? ChevronDown : ChevronRight;
-  const counts = countToolApprovalEntries(entries);
-  const hasQuestions = counts.questions + counts.confirmations > 0;
-  const hasApprovals = counts.approvals > 0;
-
-  // Every non-empty count, in one order, joined by the locale's own separator:
-  // `ツール承認 1 件・質問 2 件`. A zero is not printed — "questions · 0" tells
-  // the reader to look for something that is not there.
-  const summarySegments: string[] = [];
-  if (hasApprovals) {
-    summarySegments.push(t('chatTranscript.toolApproval.summary', { count: counts.approvals }));
-  }
-  if (counts.questions > 0) {
-    summarySegments.push(
-      t('chatTranscript.toolApproval.summaryQuestions', { count: counts.questions }),
-    );
-  }
-  if (counts.confirmations > 0) {
-    // Alone, a confirmation has to name what it confirms ("質問の送信確認"); beside
-    // the questions it belongs to, the short form is enough and the long one
-    // repeats the word "question" twice in one chip.
-    summarySegments.push(
-      t(
-        hasApprovals || counts.questions > 0
-          ? 'chatTranscript.toolApproval.summaryConfirmations'
-          : 'chatTranscript.toolApproval.summaryConfirmationsOnly',
-        { count: counts.confirmations },
-      ),
-    );
-  }
-
-  // The toggle names what it opens. A group of questions that says "show the
-  // tool approvals" is the same mislabelling as the summary, one control lower.
-  const toggleSuffix = hasQuestions && hasApprovals ? 'Mixed' : hasQuestions ? 'Questions' : '';
-  const Icon = hasApprovals ? ShieldCheck : MessageCircleQuestion;
-
-  return (
-    <div
-      data-testid={CHAT_TOOL_APPROVAL_GROUP_TESTID}
-      data-approval-count={entries.length}
-      data-approvals={counts.approvals}
-      data-questions={counts.questions}
-      data-confirmations={counts.confirmations}
-      className={`${CHAT_BUBBLE_ROW_CLASS} items-start`}
-    >
-      <button
-        type="button"
-        data-testid={CHAT_TOOL_APPROVAL_TOGGLE_TESTID}
-        onClick={toggle}
-        aria-expanded={isOpen}
-        aria-label={t(
-          `chatTranscript.toolApproval.${isOpen ? 'collapse' : 'expand'}${toggleSuffix}`,
-        )}
-        className={CHAT_TOOL_ACTIVITY_CHIP_CLASS}
-      >
-        <Icon size={12} aria-hidden="true" />
-        <span>{summarySegments.join(t('chatTranscript.toolApproval.summarySeparator'))}</span>
-        <Chevron size={12} aria-hidden="true" />
-      </button>
-
-      {isOpen && (
-        <ul
-          data-testid="chat-tool-approval-list"
-          className="mr-auto flex w-full max-w-full flex-col gap-1 pl-1"
-        >
-          {entries.map((entry) => {
-            const isQuestion = entry.kind === 'question';
-            const outcomeKey = isQuestion ? QUESTION_OUTCOME_LABEL_KEY : OUTCOME_LABEL_KEY;
-            const fallbackLabelKey = !isQuestion
-              ? 'chatTranscript.toolApproval.unlabeled'
-              : entry.phase === 'confirmation'
-                ? 'chatTranscript.toolApproval.submitConfirmation'
-                : 'chatTranscript.toolApproval.unlabeledQuestion';
-
-            return (
-              <li
-                key={entry.id}
-                data-testid={CHAT_TOOL_APPROVAL_ENTRY_TESTID}
-                data-approval-outcome={entry.outcome}
-                data-approval-kind={entry.kind}
-                data-approval-phase={entry.phase}
-                data-approval-confirmation={entry.confirmationOutcome}
-                data-approval-audit={entry.isPermissionAudit ? 'true' : undefined}
-                data-approval-merged={entry.messageIds.length}
-                className="flex max-w-full flex-wrap items-baseline gap-x-2 gap-y-0.5 text-xs text-muted-foreground"
-              >
-                {entry.phase === 'confirmation' && entry.label && (
-                  <span data-testid="chat-tool-approval-phase">
-                    {t('chatTranscript.toolApproval.submitConfirmation')}
-                  </span>
-                )}
-                <span className="min-w-0 break-words [word-break:break-word] font-mono text-foreground">
-                  {entry.label || t(fallbackLabelKey)}
-                </span>
-                <span data-testid="chat-tool-approval-outcome">{t(outcomeKey[entry.outcome])}</span>
-                {/* [#2460] The confirmer, beside the answerer rather than over
-                    it: the measured set was answered by Auto-Yes and submitted
-                    by a person, and one outcome cannot say both. */}
-                {entry.confirmationOutcome && (
-                  <span data-testid="chat-tool-approval-confirmation">
-                    {t('chatTranscript.toolApproval.confirmation', {
-                      outcome: t(QUESTION_OUTCOME_LABEL_KEY[entry.confirmationOutcome]),
-                    })}
-                  </span>
-                )}
-              </li>
-            );
-          })}
-        </ul>
-      )}
-    </div>
   );
 });
 
