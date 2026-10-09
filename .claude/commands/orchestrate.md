@@ -292,6 +292,7 @@ mkdir -p workspace/orchestration/runs/$DATE
 ファイルは上書きしない。`verify` / `review` / `findings` / `precheck` / `ci` / `merge` は HEAD つきでしか記録できない（その HEAD にだけ効く）。
 `status` の `next` は、**最新の HEAD について満たしていない最初の段**: 後の段が通った後で前の段が `fail` になればそこへ戻り、
 HEAD が変われば検証・確認をやり直す（`skip` は通ったと数える。対象外の段も `skip` を記録する）。
+`verify` は `scripts/orchestrate/wait-verify.mjs`（3-3）、`precheck` は `scripts/orchestrate/precheck.mjs`（6-1-1）が自分で書く。
 **セッションが落ちたら、会話の記録ではなくこれを読んで再開する**:
 
 ```bash
@@ -409,6 +410,7 @@ changelog: { section: Added }   # 節の上書き（既定は kind から）。�
 commit: { type: feat, scope: <scope> }
 issueBodyFile: issue-<N>.md     # 設定ファイルからの相対パス
 # isolatedLiveCheck: [server, tmux]   # 隔離した実機の確認を許す（2-5 は tmux、2-6 は server）。起動の禁止の文が隔離の手順に置き換わる
+# refactor: { mergesCopies: true }    # kind: refactor では必須（2-4-3）。写しをまとめる手順は true、長い関数を分ける手順は false
 YAML
 node scripts/orchestrate/contract.mjs generate \
   --config "workspace/orchestration/runs/$DATE/contract-<N>.yaml" --worktree "$WT_PATH"
@@ -418,7 +420,8 @@ node scripts/orchestrate/contract.mjs generate \
 - **goal が 8,000 文字を超えると生成が失敗する**（契約の上限）。Issue 本文を要点に縮めた `issueBodyFile` を渡し直す
 - `scope` に `CHANGELOG.md` / `docs/module-reference.md` を書くと生成が失敗する（2-4-1）。`requireCommit: true` は常に入る
 - 同じ設定で再実行しても契約は変わらない（`unchanged`）。中身の違う契約が既にあると止まる。送信前に直すときだけ `--force`
-- 2-4-2 の差し替え（テスト全体）と 2-4-3 の整理の決まりは雛形に入っていない。生成した契約に手で足す
+- 2-4-2 の差し替え（テスト全体）は雛形に入っていない。生成した契約に手で足す
+- `kind: refactor` では 2-4-3 の整理の決まりが goal に入り、gates の既定が `[lint, typecheck]` になる。`tests/` の下の glob を scope に書くと生成が失敗する
 
 - **`requireCommit: true` を外さない**（#3430）。外すと未コミットの変更も作業証跡に数え、ワーカーがコミット前に
   ターンを閉じたとき `wait --verify` が exit 0 を返す。契約の「1 つにコミットする」と裁定をそろえる。
@@ -603,7 +606,7 @@ Issue と契約は「変える場所」を名指しし、ワーカーはそこ�
 
 - **`scope.allow` に `tests/**` を入れない。** テストを書き換えると、scope ゲートが不合格にする。
   import 行の付け替えが要るテストだけを、ファイルを名指しで入れる
-- **goal に「整理の決まり」を書く**（下の転記ブロック）
+- **goal に「整理の決まり」を書く**（下の雛形。`contract.mjs` が `kind: refactor` で入れる）
 - **整理と、振る舞いの変更を同じ PR に入れない。** 不具合の修正や機能の追加は、別の Issue・別の PR にする
 
 ```yaml
@@ -621,32 +624,22 @@ success:
   requireScopeClean: true
 ```
 
-契約の「作業ルール（厳守）」に、次の「整理の決まり」をそのまま転記する:
-
-> - **振る舞いを変えない。** 新しい分岐・正規表現・文言・ログ名・待ち時間・キーの並びを足さない、変えない。
-> - **`tests/` の下のファイルは変えない**（scope の外。変えると検証で不合格になる）。
->   変えてよいのは、この契約が名指ししたテストの import 行だけ。
-> - **写しをまとめるときは、新しいモジュール（新しいファイル）に置く。** 元のモジュールは、同じ名前を再 export する。
->   既存の import 元（`src/` も `tests/` も）は書き換えない。
-> - **新しいモジュールは、元のモジュールを直接も間接も import しない（循環を作らない）。** `npx vitest run tests/unit/guards/import-cycles-baseline-3482.test.ts` で、基準線に無い循環が無いことを確かめる。
-> - **コメントは一緒に、書き換えずに移す。** 整理の結果、説明が合わなくなったコメントも直さない。「本文に無い指摘」として報告する。
-> - **`await` を足さない。** 「無いと確かめてから入れる」処理の間に `await` を足すと、同時に走った処理が二重に入れる隙ができる。
-> - **見つけた食い違いや不具合は直さない。** コミットメッセージ本文に「本文に無い指摘: `<file>:<line>` `<内容>`」と書いて報告する。
-> - **テストを変えずには通らないと分かったら、無理に通さない。** 変更をすべて元に戻し、理由を
->   `dev-reports/refactor/issue-<N>.md` に書いて、最後に `IMPL_BLOCKED` とだけ出力して終わる。
-> - **`git diff --shortstat` で、消した行が足した行より多くならないなら、採用しない。** 変更を戻して、行数と理由を
->   `dev-reports/refactor/issue-<N>.md` に書き、`IMPL_BLOCKED` で終わる。
-> - **数え方を変えない。** 計測のコード・除外の一覧・抑止のコメント（`eslint-disable`・`@ts-ignore`・`knip` の ignore など）を足して
->   数字を下げない。数え方に誤りがあると思ったら、変えずに「本文に無い指摘」として報告する（計測を直すのは別の Issue）。
-> - **どう届いたかを書く。** コミット本文に、数字が変わった箇所ごとに「何をどう変えたか」（例: 関数を分けた・型を付けた・未使用を消した）を書く。
->   言い換え・書き方の変更だけで数が変わった箇所は、そう書く。
+契約の「作業ルール（厳守）」に入る「整理の決まり」は **`scripts/orchestrate/templates/refactor-rules.md` が持つ**（#3477。ここには写さない）。
+`scripts/orchestrate/contract.mjs`（2-4）が、設定の `kind: refactor` のときに `<N>` を Issue 番号に置き換えて goal に入れるので、手で転記しない。
+設定には `refactor: { mergesCopies: true }`（写しをまとめる手順）か `false`（長い関数を分ける手順）を必ず書く。
+決まりの見出し（本文は雛形）: 振る舞いを変えない／`tests/` の下のファイルは変えない／写しは新しいモジュールに置く／循環を作らない／
+コメントは書き換えずに移す／`await` を足さない／見つけた食い違いや不具合は直さない／テストを変えずには通らないなら `IMPL_BLOCKED`／
+`git diff --shortstat` で行が減らないなら採用しない（`mergesCopies: true` のときだけ）／
+数え方を変えない（計測のコード・除外の一覧・抑止のコメントを足して数字を下げない）／
+どう届いたかを書く（言い換え・書き方の変更だけで数が変わった箇所は、そう書く）。
 
 **数字だけの変更を止める確認（#3483）**: 整理・計測の Issue の PR を出す前に、オーケストレーターが
-`node scripts/count-suppressions.mjs --base origin/develop` を走らせる。追加された抑止のコメントと、計測の設定
+PR の前の確認（6-1-1 の `scripts/orchestrate/precheck.mjs`）を `--kind refactor`（計測の Issue は `--metrics`）で走らせる。
+その中で `node scripts/count-suppressions.mjs --base origin/develop` が走る。追加された抑止のコメントと、計測の設定
 （`src/lib/agent-health/metrics*.ts`・`scripts/agent-health/metrics*.ts`）の変更が 0 でなければ、PR の前に止めて再指示する。
-上の 2 つの決まり（数え方を変えない・どう届いたかを書く）の最後の 1 行は、すべての整理の契約に書く。
+雛形の 2 つの決まり（数え方を変えない・どう届いたかを書く）は、すべての整理の契約に入る。
 
-最後の 1 行（`git diff --shortstat`）は、写しをまとめる手順の契約にだけ書く。長い関数を分ける手順には書かない（下の「採用の基準」）。
+`git diff --shortstat` の 1 行は、写しをまとめる手順の契約（`mergesCopies: true`）にだけ入る。長い関数を分ける手順（`false`）には入らない（下の「採用の基準」）。
 
 ワーカーが `IMPL_BLOCKED` で終わったら、オーケストレーターは理由のファイルを読む。
 置き場所などの指示を変えてやり直すか、その手順を採用しないと決めて Issue に書く。
@@ -657,7 +650,7 @@ success:
 
 **採用の基準**: 写しが 1 つになって行が減るか、長い関数が短くなるなら採用する。
 行が増えて、重複が引数の受け渡しに置き換わるだけなら採用しない。
-写しをまとめる手順の契約には、転記ブロックの最後の 1 行を書き、ワーカーに行数で判定させる。
+写しをまとめる手順の契約は `mergesCopies: true` にして（`git diff --shortstat` の 1 行が入る）、ワーカーに行数で判定させる。
 実測: 採用しなかった手順は 9 つ。
 
 | 手順 | 採用しなかった理由 |
@@ -704,7 +697,7 @@ PR を出す前に `npx vitest run tests/unit/docs/design-doc-identifier-audit.t
 **テストが自分どうしの比較になる変更**: 互換の関数を消すと、それを確かめていたテストは、同じ関数どうしを比べることになる。
 テストを消したり、題名を変えたりしない。PR に書いて、利用者に訊く。実測: 列 T（#3228）。
 
-**範囲外の食い違い**: ワーカーは直さずに報告する（転記ブロックの「本文に無い指摘」）。
+**範囲外の食い違い**: ワーカーは直さずに報告する（雛形の「本文に無い指摘」）。
 オーケストレーターは、仕分け用の Issue 1 本に、番号を付けて集める。実測: #3232 に 48 件（2026-10-05 07:20 時点）。
 写し（重複）の報告は、整理の Issue の候補として残す（1-2b、8-4）。
 
@@ -1052,16 +1045,42 @@ MONITOR_WORKTREE_ROOT=.. MONITOR_HOOKS_BASE=origin/develop \
 
 ### 3-3. 完了待機と検証（`wait --verify`）
 
+**`scripts/orchestrate/wait-verify.mjs` で待つ**（#3477）。`commandmatedev wait --verify` を呼び、裁定が**作業の終わりの状態のもの**だと
+確かめてから（下の「完了の合図」と「合図の前に始まった検証」をスクリプトが行う）Auto-Yes を切り、判定の行（`GATE` / `RESULT` / `Completed`）を
+1 行に要約して、run の記録（1-5）の `verify` 段に、検証が見た HEAD つきで書く。
+exit code は裁定（0 / 20 / 21）か wait のもの（10 / 124 …）なので、3-4 の表がそのまま使える。
+**3 は「裁定を作業の終わりに結び付けられない」**（合図が `--signal-timeout`（既定 1800 秒）の間に出ない・検証の開始の後にコミットがあり `--task` が無い・
+再検証の最中にコミットされた・合格なのに作業ツリーに未コミットの変更がある）。記録は `fail`。capture で状況を見て、待ち直すか再指示する。
+1 は記録の失敗、2 は引数の誤り。
+
 ```bash
-for each worktree:   # AGENT は tasks.tsv の担当
-  commandmatedev wait "$WT" --instance "$AGENT" --on-prompt human --verify --timeout 10800 \
-    > "workspace/orchestration/runs/$DATE/wait-${issue}.log" 2>&1
-  echo "exit=$?"
+# tasks.tsv（3-1）は 1 行 = "<issue>\t<WT>\t<AGENT>\t<TASK_ID>\t<MODEL>"。fd 3 から読む（3-1 の注と同じ理由）
+while IFS="$(printf '\t')" read -r issue WT AGENT TASK_ID MODEL <&3; do
+  WT_DIR=$(commandmatedev ls --json | jq -r --arg id "$WT" '.[] | select(.id == $id) | .path')
+  node scripts/orchestrate/wait-verify.mjs --run-dir "workspace/orchestration/runs/$DATE" --issues "$RUN_ISSUES" \
+    --issue "$issue" --wt "$WT" --worktree "$WT_DIR" --instance "$AGENT" --task "$TASK_ID" --model "$MODEL"
+  echo "exit=$? issue=${issue}"   # wait のログは runs/$DATE/wait-<issue>.log
+done 3< "workspace/orchestration/runs/$DATE/tasks.tsv"
 ```
 
-- `--instance "$AGENT"` を必ず付ける（`wait` に `--agent` は無い。付けないと既定の claude を待つ）。
-- `--on-prompt human` を必ず付ける。既定（`agent`）はプロンプト検出で即 exit 10 を返すため、
+- スクリプトは `wait` に `--instance "$AGENT"` を必ず付ける（`wait` に `--agent` は無い。付けないと既定の claude を待つ）。
+- `--on-prompt human` も必ず付ける。既定（`agent`）はプロンプト検出で即 exit 10 を返すため、
   監督ループが空回りする。
+- **裁定が作業の終わりのものだと確かめてから Auto-Yes を切る**（`auto-yes "$WT" --disable --instance "$AGENT"`）。ワーカーが
+  `/create-pr` などを composer に残していると、生きた Auto-Yes の Enter で確定してしまう。exit 124 / 10 と exit 3 の「作業中かもしれない」側では切らない。
+  切った後に `capture --json` の `autoYes.enabled` を読み直し、切れていなければ 3 回まで再試行する。切れなかったら警告を出し、
+  記録の要約に `auto-yes=NOT-disabled` と残す。切り直しだけをするときは `wait-verify.mjs --auto-yes-off --wt "$WT" --instance "$AGENT"`（切れなければ exit 1）。
+  20 の再指示（3-4）の send には `--auto-yes --duration 3h` を付け直す
+- **完了の確定**（下の 2 つの手順と同じことをスクリプトが行う）: Antigravity（と `--require-signal` を付けた担当）は、
+  行全体が `IMPL_COMPLETED` の行が画面に出るまで 30 秒ごとに待つ。次に、直近の検証の開始時刻（`verify history`）と
+  最後のターン終了（`capture --json` の `lastStopEventAt`）と最後のコミットの時刻と作業ツリーを比べる。検証の開始の後にコミットがあるか、
+  最後のターン終了より前に始まって作業ツリーに変更があれば、検証は途中の状態を見ているので `verify "$WT" --task "$TASK_ID"` でやり直し、
+  その結果を記録する。時刻が読めないときは推測せず、記録の要約に `run-start=unknown` / `last-stop=unknown` と残す
+- **合格の記録は再利用しない。** 合格は task・契約（そのゲートの定義）・その task の開始時の env-clean の基準に結び付いていて、
+  HEAD だけでは同じ確認と言えない（同じブランチに次の契約を送った直後も HEAD は同じ）。呼ぶたびに待って検証する。
+  落ちた後の再開では、`run-log.mjs status` で `verify=ok` の Issue を呼び直さない（終わった task を `wait --verify` で裁定し直すと、
+  紐づかない再検証になり #3118 の形で exit 20 になる）。裁定をやり直すときは `--after-reinstruct --task "$TASK_ID"`
+- 再指示の後（3-4）は `--after-reinstruct --task "$TASK_ID"` を付ける。`--verify` を付けない wait → `verify --task` の 2 段になる
 - Antigravity のワーカーでは、Auto-Yes が許可ダイアログに応答している間も、wait のログに
   `Prompt detected … Waiting for human response...` が繰り返し出る。応答済みかどうかは
   `capture --prompts` の `[answered:auto]` で確かめる。このログだけを見て介入しないこと。
@@ -1137,6 +1156,7 @@ build-cli,build-server,lint,lint-sh,build,typecheck,integration,unit
 | `21` | 作業証跡ゼロ（未着手） | 下記「21 の対応」 |
 | `10` | プロンプト検出 | `commandmatedev capture <WT> --instance "$AGENT"` で内容確認 → `commandmatedev respond <WT> "<番号>" --instance "$AGENT"` → 再度 wait |
 | `124` | タイムアウト | capture で状況確認 → 追加指示 or ユーザーに報告 |
+| `3` | 裁定を作業の終わりに結び付けられない（`wait-verify.mjs`、3-3） | 記録の要約の `unconfirmed:` の理由を読む。作業中なら待ち直し、未コミットなら再指示 |
 
 以降の `capture` / `respond` / `send` にも、すべて `--instance "$AGENT"` を付ける。
 
@@ -1339,17 +1359,23 @@ commandmatedev send <worktree-id> "設計書の以下の点を修正してくだ
 
 ### 5-1. 検証ゲートの実行
 
-Phase 3 で `wait --verify` が exit 0 を返していれば、そのワーカーの品質は**既に裁定済み**なので
-このフェーズは飛ばしてよい。契約無しで委任した場合（`--contract` が使えない CLI など）だけ、
-オーケストレーターが直接ゲートを回す:
+Phase 3 の `scripts/orchestrate/wait-verify.mjs`（3-3）が exit 0 を返し、run の記録にその HEAD の `verify=ok` があれば
+（`run-log.mjs status` で確かめる）、そのワーカーの品質は**既に裁定済み**なのでこのフェーズは飛ばしてよい。
+契約無しで委任した場合（`--contract` が使えない CLI など）だけ、オーケストレーターが直接ゲートを回し、結果を run の記録に書く:
 
 ```bash
-for each worktree:
-  commandmatedev verify "$WT" --json > "verify-${WT}.json"; echo "exit=$?"
+while IFS="$(printf '\t')" read -r issue WT AGENT TASK_ID MODEL <&3; do
+  WT_DIR=$(commandmatedev ls --json | jq -r --arg id "$WT" '.[] | select(.id == $id) | .path')
+  commandmatedev verify "$WT" --json > "workspace/orchestration/runs/$DATE/verify-${issue}.json"; RC=$?; echo "exit=$RC"
+  node scripts/orchestrate/run-log.mjs append --run-dir "workspace/orchestration/runs/$DATE" --issues "$RUN_ISSUES" \
+    --issue "$issue" --stage verify --result "$([ "$RC" = 0 ] && echo ok || echo fail)" \
+    --head "$(git -C "$WT_DIR" rev-parse HEAD)" --agent "$AGENT" --note "exit=$RC (verify without a contract)"
+done 3< "workspace/orchestration/runs/$DATE/tasks.tsv"
 ```
 
 **CI にあって手元のゲートに無い手順は、`tests/unit/guards/ci-steps-local-coverage-3478.test.ts` の除外の一覧（理由つき）にだけ置く**（#3478）。
-shellcheck は `lint-sh` ゲート（`scripts/run-lint-sh-if-changed.mjs`。`.sh` を変えたときだけ `npm run lint:sh`）が見る。`.claude/skills/**` は `lint:sh` の走査に入っていない（#3477 で置き場所が決まってから足す）。
+shellcheck は `lint-sh` ゲート（`scripts/run-lint-sh-if-changed.mjs`。`.sh` を変えたときだけ `npm run lint:sh`）が見る。
+orchestrate の道具の置き場所は #3477 で `scripts/orchestrate/`（`lint:sh` の走査の中）に決まったので、`.claude/skills/**` は走査に足さない。
 
 **ワーカーに「lint/tsc/test を実行して結果を報告して」と送らないこと。** 報告文の解析は
 「全部 Pass です」という散文を信じることであり、`wait --verify` / `verify` の exit code が
@@ -1458,11 +1484,30 @@ refresh のやり直し）。
 `wait --verify` / `verify --gates` のローカルゲートと CI は**同じテストを見ている**。
 順に回すと 1 issue あたり約 22 分（ローカル 10.8 分 ＋ CI 10.8 分）を直列で払う。
 
-**速い 3 本（`lint` / `typecheck` / `build`、合計 40 秒前後）だけ先に通したら PR を出し、
-残りのゲート（`integration` / `unit`）は CI と並走させる。** 実測でローカルゲートの
+**PR の前は速い確認（`scripts/orchestrate/precheck.mjs`、#3477）だけを通して PR を出し、
+残りのゲート（`integration` / `unit` / `build`）は CI と並走させる。** 実測でローカルゲートの
 85〜90% は `unit` 単独（545〜584 秒）なので、**1 issue あたり約 10 分が消える。**
 
-壊れた PR で CI を焼くリスクは、先に通す 3 本でほぼ潰せる。両方が緑になってからマージするので
+```bash
+# 段の順: verify（3-3）→ review（5-2b）→ findings（5-3）→ precheck → PR → CI（残りのゲートと並走）→ merge
+node scripts/orchestrate/precheck.mjs --run-dir "workspace/orchestration/runs/$DATE" --issues "$RUN_ISSUES" \
+  --issue "$issue" --worktree "$WT_DIR"            # 整理の Issue は --kind refactor、計測の Issue は --metrics を足す
+echo "exit=$?"   # 0 → PR を出す / 1 → runs/$DATE/precheck-<issue>-<sha>.log で落ちた段を読み、再指示 / 2 → 作業ツリーが汚れている
+```
+
+- 段: 断片の検査（`node scripts/changelog-fragments.mjs check`）・削除した `it` / `describe` の数（0 でなければ落とす。契約の決定が許したときだけ `--allow-removed-tests`）・
+  変更したファイルの ESLint・`.sh` を変えたら `node scripts/run-lint-sh-if-changed.mjs`・整理と計測の Issue だけ `node scripts/count-suppressions.mjs`（2-4-3）・
+  `tsc --noEmit`・関係するテスト（`vitest related` ＋ 変更したテスト・変更したパスを名指しするテスト・`tests/unit/guards`・`tests/unit/docs`）
+- 結果は run の記録の `precheck` 段に HEAD つきで書く。**同じ HEAD・同じ引数（`--base` / `--kind` / `--metrics` / `--allow-removed-tests` / `--build`）の `ok` があれば
+  走らせずに再利用する**（どの段も、コミットされた木と引数だけを読む。落ちた後の再実行でも同じテストを 2 回走らせない）。
+  同じ HEAD の `verify=ok` が通した verify.yaml のゲートのうち、同じ確認になるもの（`lint` → ESLint、`typecheck` → tsc、`lint-sh` → lint-sh）の段も走らせない。
+  契約が定義したゲート（`<id>@contract`）と、テストのゲート（`unit` / `unit-related`。選ぶテストが違う）は、どの段の代わりにもならない
+- 関係するテストは `tests/unit` に限る（`vitest related --dir tests/unit`）。integration / e2e は CI が見る
+- **build は PR の前の確認に入れない（CI の `Build` と並走させる）。** その代わり、マージの前に CI の `Build` が `pass` であること、
+  または同じ HEAD の precheck の記録に `build=ok` があること（`--build` を付けて走らせたとき）を確かめる（6-2・6-3）
+- 作業ツリーに契約（`.commandmate/tasks/`）と `dev-reports/` 以外の変更があると、その HEAD の結果にならないので exit 2 で止まる
+
+壊れた PR で CI を焼くリスクは、先に通す確認でほぼ潰せる。両方が緑になってからマージするので
 裁定の強さは変わらない。
 
 ### 6-2. マージは「先行をマージ → 後続を refresh → tsc ＋ 影響テスト → マージ」
@@ -1496,7 +1541,11 @@ Issue ごとに別ファイル（`changelog.d/<N>.md`）で、`CHANGELOG.md` は
 なる。**最後の 1 本だけ**はフル CI を待つ。
 
 **例外: 契約の `gates` が `unit-related` の PR は、CI の `Unit Tests` が `pass` になってからマージする**（#2639）。
-ローカルの裁定がテスト全体を含まないため。ほかのジョブの扱いは上のとおり。
+ローカルの裁定がテスト全体を含まないため。
+
+**例外: build。CI の `Build` が `pass` になってからマージする**（#3477）。6-1-1 で build を PR の前の確認から外し、契約の既定のゲートにも
+precheck にも build が無いので、ローカルのどの裁定もビルドを見ていない。ただし、マージする HEAD（refresh の後の HEAD）の precheck の記録に
+`build=ok` があれば（`precheck.mjs --build`）、`Build` の `pending` は待たなくてよい。ほかのジョブの扱いは上のとおり。
 
 マージ（または close）すると、**その PR の `pull_request` run は
 `.github/workflows/cancel-pr-runs-on-close.yml` が自動で止める**（Issue #2330）。**手でキャンセル
@@ -1516,6 +1565,16 @@ Issue ごとに別ファイル（`changelog.d/<N>.md`）で、`CHANGELOG.md` は
 待つと 1 issue あたり 12〜25 分が消える。**最後の 1 本だけ**は全 `pass` を待つ。
 
 `unit-related` で裁定した PR では、`Unit Tests` のチェックが `pass` になってからマージする（6-2 の例外）。
+`Build` のチェックも `pass` になってからマージする（6-2 の例外。マージする HEAD の precheck の記録に `build=ok` があるときだけ、その `pending` は待たなくてよい）。
+
+```bash
+# Build が pass か、マージする HEAD に build=ok の precheck の記録があるか。どちらも無ければマージしない
+gh pr checks "$PR" --json name,bucket | jq -e '.[] | select(.name == "Build" and .bucket == "pass")' > /dev/null \
+  || jq -e --arg h "$(git -C "$WT_DIR" rev-parse HEAD)" --argjson n "$issue" \
+       'select(.issue == $n and .stage == "precheck" and .head == $h and .result == "ok" and (.note | test("(^| )build=ok( |$)")))' \
+       "workspace/orchestration/runs/$DATE/run-$RUN_ISSUES.jsonl" > /dev/null \
+  || echo "NOT mergeable: Build is not pass and there is no build=ok precheck for this HEAD"
+```
 
 ### 6-4. module-reference の断片を本体へ一本化する（オーケストレーターの仕事）
 

@@ -23,6 +23,7 @@
  *   commit: { type: feat, scope: orchestrate }
  *   issueBody: "…"           # or issueBodyFile: <path relative to the config>
  *   isolatedLiveCheck: [server, tmux]   # allow an isolated live check (orchestrate.md 2-5 / 2-6)
+ *   refactor: { mergesCopies: true }    # kind: refactor only, and required there (orchestrate.md 2-4-3)
  *
  * The checks below hold the OUTPUT contract to the limits of the canonical
  * parser (src/lib/tasks/contract-parser.ts `parseTaskContract`), so a config
@@ -43,6 +44,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const TEMPLATE_DIR = path.join(HERE, 'templates');
 export const GOAL_TEMPLATE = path.join(TEMPLATE_DIR, 'goal.md');
 export const FRAGMENT_RULES_TEMPLATE = path.join(TEMPLATE_DIR, 'fragment-rules.md');
+export const REFACTOR_RULES_TEMPLATE = path.join(TEMPLATE_DIR, 'refactor-rules.md');
 
 // Same bounds as src/lib/tasks/contract-parser.ts (and GATE_ID_PATTERN of verify-config.ts).
 export const MAX_GOAL_LENGTH = 8000;
@@ -57,6 +59,8 @@ const ISOLATION_SECTIONS = { tmux: '2-5', server: '2-6' };
 export const REPO_URL = 'https://github.com/Kewton/CommandMate';
 export const SHARED_FILES = ['CHANGELOG.md', 'docs/module-reference.md'];
 export const DEFAULT_GATES = ['lint', 'typecheck', 'unit-related'];
+/** 2-4-3: a refactor is judged by lint / typecheck locally; the full suite runs in the PR's CI. */
+export const REFACTOR_DEFAULT_GATES = ['lint', 'typecheck'];
 export const UNIT_RELATED_GATE = {
   id: 'unit-related',
   command: 'node scripts/run-related-unit-tests.mjs --base origin/develop',
@@ -86,13 +90,45 @@ export class ContractConfigError extends Error {
   }
 }
 
-/** A template with its `#!` note lines removed. */
-export function readTemplate(file) {
-  return fs
-    .readFileSync(file, 'utf8')
-    .split('\n')
-    .filter((line) => !line.startsWith('#!'))
-    .join('\n');
+const SECTION_MARK = /^#! (>>>|<<<) ([a-z-]+)$/;
+
+/**
+ * A template with its `#!` note lines removed. Lines between `#! >>> <name>` and
+ * `#! <<< <name>` are kept only when `<name>` is in `include`.
+ *
+ * @param {string} file
+ * @param {{ include?: string[] }} [options]
+ */
+export function readTemplate(file, { include = [] } = {}) {
+  let skipping = null;
+  const kept = [];
+  for (const line of fs.readFileSync(file, 'utf8').split('\n')) {
+    const mark = line.match(SECTION_MARK);
+    if (mark) {
+      const [, edge, name] = mark;
+      if (edge === '>>>' && skipping === null && !include.includes(name)) skipping = name;
+      else if (edge === '<<<' && skipping === name) skipping = null;
+      continue;
+    }
+    if (skipping !== null || line.startsWith('#!')) continue;
+    kept.push(line);
+  }
+  if (skipping !== null) throw new Error(`${file}: "#! >>> ${skipping}" has no "#! <<< ${skipping}"`);
+  return kept.join('\n');
+}
+
+/**
+ * Whether a scope pattern names exactly one file. The scope gate
+ * (src/lib/verification/scope-gate.ts `globToRegExp`) lets a pattern that
+ * matches a directory match everything beneath it, so `tests/unit` and
+ * `tests/unit/` mean `tests/unit/**`. A file is a pattern with no glob
+ * character (`*`, `?`, `{`; `[` `]` are literal there) whose last segment has an
+ * extension, like `tests/unit/x/a.test.ts`.
+ */
+export function namesOneFile(pattern) {
+  if (/[*?{]/.test(pattern) || pattern.endsWith('/')) return false;
+  const last = pattern.split('/').pop() ?? '';
+  return /^[^.].*\.[A-Za-z0-9]+$/.test(last);
 }
 
 function stringList(value, name, problems) {
@@ -146,7 +182,8 @@ export function normalizeConfig(raw, options = {}) {
     problems.push(`model: only a claude worker has a model (got ${raw.model} for ${agent})`);
   }
 
-  const gates = raw.gates === undefined ? [...DEFAULT_GATES] : stringList(raw.gates, 'gates', problems);
+  const defaultGates = kindName === 'refactor' ? REFACTOR_DEFAULT_GATES : DEFAULT_GATES;
+  const gates = raw.gates === undefined ? [...defaultGates] : stringList(raw.gates, 'gates', problems);
   if (raw.gates !== undefined && gates.length === 0) problems.push('gates: at least one gate is required');
   if (gates.length > MAX_GATE_IDS) problems.push(`gates: at most ${MAX_GATE_IDS} (got ${gates.length})`);
   gates.forEach((id, index) => {
@@ -169,6 +206,17 @@ export function normalizeConfig(raw, options = {}) {
     else if (pattern.startsWith('/')) problems.push(`${at}: must be relative to the worktree root (got "${pattern}")`);
     else if (pattern.split('/').includes('..')) problems.push(`${at}: must not escape the worktree root with ".." (got "${pattern}")`);
   });
+
+  // 2-4-3: a refactor must not rewrite tests — only the tests the contract names, for their import lines.
+  if (kindName === 'refactor') {
+    for (const pattern of scope) {
+      // `tests`, `tests/…`, and anything that starts with a wildcard (`**/*.test.ts`) can reach tests/.
+      const reachesTests = pattern === 'tests' || pattern.startsWith('tests/') || /^[*?{]/.test(pattern);
+      if (reachesTests && !namesOneFile(pattern)) {
+        problems.push(`scope: a refactor names test files one by one, not "${pattern}" (2-4-3)`);
+      }
+    }
+  }
 
   const decisions = stringList(raw.decisions, 'decisions', problems);
 
@@ -203,6 +251,19 @@ export function normalizeConfig(raw, options = {}) {
     }
   }
 
+  // Whether the `git diff --shortstat` rule applies is the step's own call (2-4-3
+  // "採用の基準"), so a refactor config has to say it; nothing else may.
+  let mergesCopies = null;
+  if (kindName === 'refactor') {
+    if (typeof raw.refactor?.mergesCopies !== 'boolean') {
+      problems.push('refactor.mergesCopies: required for kind refactor — true merges copies (adds the shortstat rule), false splits a long function');
+    } else {
+      mergesCopies = raw.refactor.mergesCopies;
+    }
+  } else if (raw.refactor !== undefined) {
+    problems.push(`refactor: only for kind refactor (got kind ${kindName})`);
+  }
+
   if (problems.length > 0) throw new ContractConfigError(problems);
   return {
     issue,
@@ -221,6 +282,7 @@ export function normalizeConfig(raw, options = {}) {
     commitScope,
     issueBody: issueBody === null ? null : issueBody.trim(),
     isolatedLiveCheck,
+    mergesCopies,
   };
 }
 
@@ -293,6 +355,12 @@ export function renderGoal(config) {
   if (config.bump) {
     sectionLines.push(`  2 行目は最低の版の宣言 \`<!-- bump: ${config.bump} -->\`、エントリは 3 行目。`);
   }
+  const refactorRules =
+    config.kind === 'refactor'
+      ? readTemplate(REFACTOR_RULES_TEMPLATE, { include: config.mergesCopies ? ['merges-copies-only'] : [] })
+          .replaceAll('<N>', String(config.issue))
+          .trimEnd()
+      : '';
   const prefix = config.commitScope ? `${config.commitType}(${config.commitScope})` : config.commitType;
 
   const goal = fill(readTemplate(GOAL_TEMPLATE), {
@@ -303,6 +371,7 @@ export function renderGoal(config) {
     SCOPE: config.scope.join(', '),
     TIER_RULE: config.model === 'sonnet' ? `- ${SONNET_RULE}` : '',
     PROCESS_RULE: processRule(config),
+    REFACTOR_RULES: refactorRules,
     FRAGMENT_RULES: fragmentRules,
     CHANGELOG_SECTION: sectionLines.join('\n'),
     COMMIT_PREFIX: prefix,

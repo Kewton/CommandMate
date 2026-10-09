@@ -20,16 +20,20 @@ import {
   FRAGMENT_RULES_TEMPLATE,
   GOAL_TEMPLATE,
   MAX_GOAL_LENGTH,
+  REFACTOR_DEFAULT_GATES,
+  REFACTOR_RULES_TEMPLATE,
   SONNET_RULE,
   buildContract,
   contractPath,
   contractYaml,
   isolationRules,
+  namesOneFile,
   normalizeConfig,
   readTemplate,
   writeContract,
 } from '../../../../scripts/orchestrate/contract.mjs';
 import { MAX_PATTERN_LENGTH, MAX_TITLE_LENGTH, parseTaskContract } from '@/lib/tasks/contract-parser';
+import { ScopeMatcher } from '@/lib/verification/scope-gate';
 import { parseFragment } from '../../../../scripts/changelog-fragments.mjs';
 
 const SCRIPT = path.resolve(__dirname, '../../../../scripts/orchestrate/contract.mjs');
@@ -390,5 +394,139 @@ describe('fragment line numbers follow the minimum-version declaration (#3480)',
     expect(parseFragment('3477.md', `<!-- ### Added -->\n<!-- bump: minor -->\n${entry}\n`).errors).toEqual([]);
     expect(parseFragment('3477.md', `<!-- ### Added -->\n<!-- bump: minor -->\n${entry}\nmore\n`).errors).toHaveLength(1);
     expect(parseFragment('3477.md', `<!-- ### Added -->\n${entry}\nmore\n`).errors).toHaveLength(1);
+  });
+});
+
+describe('refactor rules (2-4-3, moved to templates/refactor-rules.md)', () => {
+  const refactor = { ...base, kind: 'refactor', scope: ['src/lib/x/**'], refactor: { mergesCopies: true } };
+  const SHORTSTAT = '- **`git diff --shortstat` で、消した行が足した行より多くならないなら、採用しない。**';
+
+  it('puts the rules into a refactor goal only, with the Issue number', () => {
+    const goal = buildContract(normalizeConfig(refactor)).goal;
+    expect(goal).toContain('- **振る舞いを変えない。**');
+    expect(goal).toContain('`dev-reports/refactor/issue-3477.md` に書いて、最後に `IMPL_BLOCKED` とだけ出力して終わる。');
+    expect(goal).not.toContain('<N>');
+    expect(goal).not.toMatch(/^#!/m);
+    expect(goal).not.toMatch(/\n{3,}/);
+    expect(buildContract(normalizeConfig(base)).goal).not.toContain('振る舞いを変えない');
+  });
+
+  it('sits in the work rules, after the test rule and before the fragment rules', () => {
+    const goal = buildContract(normalizeConfig(refactor)).goal;
+    const tests = goal.indexOf('既存の `it(...)` / `describe(...)` を消したり');
+    const rules = goal.indexOf('- **振る舞いを変えない。**');
+    const fragments = goal.indexOf('- **`CHANGELOG.md` と `docs/module-reference.md` を編集しないでください**');
+    expect(goal.indexOf('## 作業ルール（厳守）')).toBeLessThan(tests);
+    expect(tests).toBeLessThan(rules);
+    expect(rules).toBeLessThan(fragments);
+  });
+
+  it('carries the shortstat rule only for a step that merges copies', () => {
+    expect(buildContract(normalizeConfig(refactor)).goal).toContain(SHORTSTAT);
+    const split = buildContract(normalizeConfig({ ...refactor, refactor: { mergesCopies: false } })).goal;
+    expect(split).not.toContain('git diff --shortstat');
+    // The rules after it are still there.
+    expect(split).toContain('- **数え方を変えない。**');
+    expect(split).toContain('- **どう届いたかを書く。**');
+  });
+
+  it('requires refactor.mergesCopies for a refactor, and rejects it elsewhere', () => {
+    expect(() => normalizeConfig({ ...refactor, refactor: undefined })).toThrow(/refactor.mergesCopies: required/);
+    expect(() => normalizeConfig({ ...refactor, refactor: { mergesCopies: 'yes' } })).toThrow(/refactor.mergesCopies/);
+    expect(() => normalizeConfig({ ...base, refactor: { mergesCopies: true } })).toThrow(/refactor: only for kind refactor/);
+  });
+
+  it('names test files one by one: a glob under tests/ is rejected', () => {
+    expect(() => normalizeConfig({ ...refactor, scope: ['src/lib/x/**', 'tests/**'] })).toThrow(/names test files one by one/);
+    expect(() => normalizeConfig({ ...refactor, scope: ['tests/unit/x/*.test.ts'] })).toThrow(/names test files one by one/);
+    expect(normalizeConfig({ ...refactor, scope: ['src/lib/x/**', 'tests/unit/x/a.test.ts'] }).scope).toContain('tests/unit/x/a.test.ts');
+    // Other kinds keep tests/** (2-4).
+    expect(normalizeConfig({ ...base, scope: ['tests/**'] }).scope).toContain('tests/**');
+  });
+
+  it('defaults a refactor to lint / typecheck (the full suite runs in the PR CI)', () => {
+    const contract = buildContract(normalizeConfig(refactor));
+    expect(REFACTOR_DEFAULT_GATES).toEqual(['lint', 'typecheck']);
+    expect(contract.verify).toEqual({ gates: ['lint', 'typecheck'] });
+    expect(buildContract(normalizeConfig({ ...refactor, gates: ['lint', 'typecheck', 'unit'] })).verify.gates).toEqual([
+      'lint',
+      'typecheck',
+      'unit',
+    ]);
+  });
+
+  it('keeps every rule of the 2-4-3 block (before #3477)', () => {
+    const text = readTemplate(REFACTOR_RULES_TEMPLATE, { include: ['merges-copies-only'] });
+    const leads = [
+      '- **振る舞いを変えない。**',
+      '- **`tests/` の下のファイルは変えない**',
+      '- **写しをまとめるときは、新しいモジュール（新しいファイル）に置く。**',
+      '- **新しいモジュールは、元のモジュールを直接も間接も import しない（循環を作らない）。**',
+      '- **コメントは一緒に、書き換えずに移す。**',
+      '- **`await` を足さない。**',
+      '- **見つけた食い違いや不具合は直さない。**',
+      '- **テストを変えずには通らないと分かったら、無理に通さない。**',
+      SHORTSTAT,
+      '- **数え方を変えない。**',
+      '- **どう届いたかを書く。**',
+    ];
+    expect(text.split('\n').filter((line) => line.startsWith('- **'))).toEqual(
+      leads.map((lead) => expect.stringContaining(lead))
+    );
+    expect(text.trimEnd().split('\n')).toHaveLength(17);
+  });
+
+  it('the orchestrate.md section points at the template instead of carrying the block', () => {
+    const orchestrate = fs.readFileSync(path.resolve(__dirname, '../../../../.claude/commands/orchestrate.md'), 'utf8');
+    const start = orchestrate.indexOf('### 2-4-3.');
+    const section = orchestrate.slice(start, orchestrate.indexOf('\n### ', start + 4));
+    expect(section).toContain('scripts/orchestrate/templates/refactor-rules.md');
+    expect(section.split('\n').filter((line) => line.startsWith('> - **'))).toEqual([]);
+  });
+
+  it('readTemplate refuses an unclosed section', () => {
+    const file = path.join(tmp, 'broken.md');
+    fs.writeFileSync(file, 'a\n#! >>> merges-copies-only\nb\n');
+    expect(() => readTemplate(file)).toThrow(/has no "#! <<< merges-copies-only"/);
+    expect(readTemplate(file, { include: ['merges-copies-only'] })).toBe('a\nb\n');
+  });
+});
+
+describe('refactor scope: a file, not a directory (#3477 review 6)', () => {
+  const refactor = { ...base, kind: 'refactor', scope: ['src/lib/x/**'], refactor: { mergesCopies: true } };
+  const NAMED = 'tests/unit/x/a.test.ts';
+  const SIBLING = 'tests/unit/x/b.test.ts';
+  const admits = (pattern: string, file: string) => !new ScopeMatcher({ allow: [pattern], deny: [] }).isViolation(file);
+
+  it.each([
+    ['tests/unit', SIBLING],
+    ['tests/unit/', SIBLING],
+    ['tests/unit/x', SIBLING],
+    ['tests', SIBLING],
+    ['tests/unit/x/*.test.ts', SIBLING],
+    ['tests/unit/{x,y}/a.test.ts', 'tests/unit/y/a.test.ts'],
+    ['**/*.test.ts', SIBLING],
+  ])('rejects %j — the scope gate admits a second test (%s) through it', (pattern, second) => {
+    expect(() => normalizeConfig({ ...refactor, scope: ['src/lib/x/**', pattern] })).toThrow(/names test files one by one/);
+    expect(namesOneFile(pattern)).toBe(false);
+    expect(admits(pattern, NAMED) || pattern.includes('{')).toBe(true);
+    expect(admits(pattern, second)).toBe(true);
+  });
+
+  it('rejects a last segment that is not a file name', () => {
+    expect(namesOneFile('tests/unit/x/.hidden')).toBe(false);
+    expect(namesOneFile('tests/unit/x/fixtures')).toBe(false);
+  });
+
+  it.each([NAMED, 'tests/unit/proxy/[...path]/route.test.ts'])('accepts %j — the scope gate admits that file and no sibling', (pattern) => {
+    expect(normalizeConfig({ ...refactor, scope: ['src/lib/x/**', pattern] }).scope).toContain(pattern);
+    expect(namesOneFile(pattern)).toBe(true);
+    expect(admits(pattern, pattern)).toBe(true);
+    expect(admits(pattern, pattern.replace(/[^/]+$/, 'other.test.ts'))).toBe(false);
+    expect(admits(pattern, `${pattern}/nested.test.ts`)).toBe(true); // a file has nothing beneath it in git
+  });
+
+  it('leaves other kinds alone', () => {
+    expect(normalizeConfig({ ...base, scope: ['tests/unit'] }).scope).toContain('tests/unit');
   });
 });

@@ -1,6 +1,7 @@
 #! 契約の goal の雛形（/orchestrate 2-4-2）。持ち主はこのファイル（#3477）。orchestrate.md には写さない。
 #! scripts/orchestrate/contract.mjs が `{{…}}` を Issue ごとの設定で埋め、`#!` で始まる行を落とす。
 #! 担当（Claude / Antigravity）で雛形を分けない。Antigravity は `.claude/commands` を読まないので、どの節も省かない。
+#! `{{REFACTOR_RULES}}` には kind: refactor のときだけ refactor-rules.md（2-4-3 の整理の決まり）が入る。
 #! `{{ISSUE_BODY}}` には Issue 本文（事象 / 原因 / 確定仕様 / 受入基準）が入る。原因は file:line つきで書かれていること。
 {{ISSUE_URL}} を実装する（{{KIND_LABEL}}）。
 スラッシュコマンドは使わず、このメッセージの手順どおりに直接実装すること。
@@ -28,6 +29,7 @@
 - worktree の外（`$HOME`、`/tmp` など）に既にあるファイルやディレクトリは、確認のためでも消したり書き換えたりしない。本番（ポート 3000）に何も送らない。
   確認は `os.tmpdir()` 配下に作った一時ディレクトリ（private HOME など）の中で行う。
 - 既存の `it(...)` / `describe(...)` を消したり名前を変えたりしない（上の「決定」が許したものを除く）。既存のテストの期待値も含め、変更が要ると判断したら、変えずに本文に無い指摘として報告する。
+{{REFACTOR_RULES}}
 {{FRAGMENT_RULES}}
 {{CHANGELOG_SECTION}}
 - コミットは 1 つにまとめる。メッセージは `{{COMMIT_PREFIX}}: <要約> (#{{ISSUE}})`。本文に、決めたこと・確かめたこと・本文に無い指摘を書く。
