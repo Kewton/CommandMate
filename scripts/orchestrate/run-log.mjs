@@ -24,8 +24,14 @@ import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
-/** In run order. `status` reports the furthest one that passed. */
-export const STAGES = ['contract', 'send', 'verify', 'precheck', 'pr', 'review', 'findings', 'ci', 'merge'];
+/**
+ * In run order: the consistency review (5-2b) and the out-of-body findings
+ * (5-3) come before the PR, the fast local check (precheck) right before it,
+ * and the PR's CI runs alongside the remaining gates (6-1-1) before the merge.
+ */
+export const STAGES = ['contract', 'send', 'verify', 'review', 'findings', 'precheck', 'pr', 'ci', 'merge'];
+/** Stages whose result holds only for the HEAD it was taken on; a new HEAD needs them again. */
+export const HEAD_BOUND_STAGES = ['verify', 'review', 'findings', 'precheck', 'ci', 'merge'];
 export const RESULTS = ['ok', 'fail', 'skip'];
 const PASSED = new Set(['ok', 'skip']);
 const ISSUES_PATTERN = /^\d+(?:[-,]\d+)*$/;
@@ -50,6 +56,9 @@ export function makeRecord(input, now = new Date()) {
   if (!RESULTS.includes(input.result)) problems.push(`result: must be one of ${RESULTS.join(' / ')} (got ${input.result})`);
   const head = optionalString(input.head);
   if (head !== null && !/^[0-9a-f]{7,40}$/.test(head)) problems.push(`head: must be a commit sha (got ${head})`);
+  if (head === null && HEAD_BOUND_STAGES.includes(input.stage)) {
+    problems.push(`head: required for ${input.stage} (its result holds only for the HEAD it ran on)`);
+  }
   let durationSec = null;
   if (input.durationSec !== undefined && input.durationSec !== null && input.durationSec !== '') {
     durationSec = Number(input.durationSec);
@@ -125,27 +134,42 @@ export function findLatest(records, criteria) {
 }
 
 /**
- * Per Issue: the latest record of each stage, the furthest stage that passed,
- * and the next one. A `fail` after an `ok` on the same stage un-passes it.
+ * Per Issue: where to resume. The HEAD is the latest one recorded; each stage
+ * is satisfied by its latest record when that passed (`ok` / `skip`) and, for a
+ * HEAD-bound stage, was taken on that HEAD. `next` is the first stage that is
+ * not satisfied — so a stage that failed after later ones passed is where the
+ * run goes back to, and a moved HEAD re-opens every check. A merged Issue is done.
  */
 export function summarize(records) {
   const byIssue = new Map();
-  const heads = new Map();
   for (const record of records) {
-    if (!byIssue.has(record.issue)) byIssue.set(record.issue, {});
-    byIssue.get(record.issue)[record.stage] = record;
-    if (record.head) heads.set(record.issue, record.head);
+    if (!byIssue.has(record.issue)) byIssue.set(record.issue, { stages: {}, head: null });
+    const item = byIssue.get(record.issue);
+    item.stages[record.stage] = record;
+    if (record.head) item.head = record.head;
   }
   return [...byIssue.entries()]
     .sort(([a], [b]) => a - b)
-    .map(([issue, stages]) => {
-      let reachedIndex = -1;
-      STAGES.forEach((stage, index) => {
-        if (stages[stage] && PASSED.has(stages[stage].result)) reachedIndex = index;
-      });
-      const reached = reachedIndex === -1 ? null : STAGES[reachedIndex];
-      const next = reached === 'merge' ? null : STAGES[reachedIndex + 1];
-      return { issue, reached, next, head: heads.get(issue) ?? null, stages };
+    .map(([issue, { stages, head }]) => {
+      const short = head ? head.slice(0, 7) : '-';
+      const unmet = (stage) => {
+        const record = stages[stage];
+        if (stage === 'contract' && !record && stages.send && PASSED.has(stages.send.result)) return null;
+        if (!record) return HEAD_BOUND_STAGES.includes(stage) ? `${stage}: no result for ${short}` : `${stage}: no result`;
+        if (HEAD_BOUND_STAGES.includes(stage) && record.head !== head) return `${stage}: no result for ${short}`;
+        if (!PASSED.has(record.result)) return `${stage}: ${record.result} at ${record.head ? record.head.slice(0, 7) : '-'}`;
+        return null;
+      };
+      if (stages.merge && PASSED.has(stages.merge.result)) {
+        return { issue, reached: 'merge', next: null, reason: null, head, stages };
+      }
+      let reached = null;
+      for (const stage of STAGES) {
+        const reason = unmet(stage);
+        if (reason) return { issue, reached, next: stage, reason, head, stages };
+        reached = stage;
+      }
+      return { issue, reached, next: null, reason: null, head, stages };
     });
 }
 
@@ -156,7 +180,8 @@ function formatStatus(summary, skipped) {
       .map((stage) => `${stage}=${item.stages[stage].result}`)
       .join(' ');
     lines.push(
-      `#${item.issue}\treached=${item.reached ?? '-'}\tnext=${item.next ?? 'done'}\thead=${item.head ?? '-'}\t${stageText}`
+      `#${item.issue}\treached=${item.reached ?? '-'}\tnext=${item.next ?? 'done'}\thead=${item.head ?? '-'}\t${stageText}` +
+        (item.reason ? `\t(${item.reason})` : '')
     );
   }
   if (skipped.length > 0) lines.push(`skipped unreadable line(s): ${skipped.join(', ')}`);

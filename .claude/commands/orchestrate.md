@@ -272,16 +272,19 @@ RUN_ISSUES=<最小>-<最大>     # run の Issue の範囲（例 3477-3481）。
 mkdir -p workspace/orchestration/runs/$DATE
 ```
 
-**run の記録**（#3477）: 各 Issue の段（`contract` / `send` / `verify` / `precheck` / `pr` / `review` / `findings` / `ci` / `merge`）が
-終わるたびに、`scripts/orchestrate/run-log.mjs` で 1 行を追記する。置き場所は `workspace/orchestration/runs/$DATE/run-$RUN_ISSUES.jsonl`
+**run の記録**（#3477）: 各 Issue の段（`contract` / `send` / `verify` / `review`（5-2b）/ `findings`（5-3）/ `precheck` / `pr` / `ci` / `merge`。
+この順が run の順で、整合性レビューと指摘の処置は PR の前、CI はゲートと並走（6-1-1））が終わるたびに、`scripts/orchestrate/run-log.mjs` で 1 行を追記する。置き場所は `workspace/orchestration/runs/$DATE/run-$RUN_ISSUES.jsonl`
 （1 行 1 段の JSON。issue・段・結果・HEAD・task id・契約・担当とモデル・所要時間・時刻）。追記だけなので、同じフォルダの別の run の
-ファイルは上書きしない。**セッションが落ちたら、会話の記録ではなくこれを読んで再開する**:
+ファイルは上書きしない。`verify` / `review` / `findings` / `precheck` / `ci` / `merge` は HEAD つきでしか記録できない（その HEAD にだけ効く）。
+`status` の `next` は、**最新の HEAD について満たしていない最初の段**: 後の段が通った後で前の段が `fail` になればそこへ戻り、
+HEAD が変われば検証・確認をやり直す（`skip` は通ったと数える。対象外の段も `skip` を記録する）。
+**セッションが落ちたら、会話の記録ではなくこれを読んで再開する**:
 
 ```bash
 node scripts/orchestrate/run-log.mjs append --run-dir "workspace/orchestration/runs/$DATE" --issues "$RUN_ISSUES" \
   --issue <N> --stage verify --result ok --head <sha> --duration-sec <秒>
 node scripts/orchestrate/run-log.mjs status --run-dir "workspace/orchestration/runs/$DATE" --issues "$RUN_ISSUES"
-# → #<N>  reached=verify  next=precheck  head=<sha>  send=ok verify=ok   （次に行う段が next）
+# → #<N>  reached=verify  next=review  head=<sha>  send=ok verify=ok  (review: no result for <sha>)   （次に行う段が next）
 ```
 
 実行計画を `workspace/orchestration/runs/$DATE/plan.md` に出力：
@@ -391,11 +394,13 @@ decisions: []             # Issue の「決めること」への答え（goal �
 changelog: { section: Added }   # 節の上書き（既定は kind から）。最低の版を上げるなら bump: minor を足す
 commit: { type: feat, scope: <scope> }
 issueBodyFile: issue-<N>.md     # 設定ファイルからの相対パス
+# isolatedLiveCheck: [server, tmux]   # 隔離した実機の確認を許す（2-5 は tmux、2-6 は server）。起動の禁止の文が隔離の手順に置き換わる
 YAML
 node scripts/orchestrate/contract.mjs generate \
   --config "workspace/orchestration/runs/$DATE/contract-<N>.yaml" --worktree "$WT_PATH"
 ```
 
+- 生成器は、出力する契約を正準のパーサー（`src/lib/tasks/contract-parser.ts`）と同じ制約で検査する（title 200 文字・gate の形と重複・scope の形）。
 - **goal が 8,000 文字を超えると生成が失敗する**（契約の上限）。Issue 本文を要点に縮めた `issueBodyFile` を渡し直す
 - `scope` に `CHANGELOG.md` / `docs/module-reference.md` を書くと生成が失敗する（2-4-1）。`requireCommit: true` は常に入る
 - 同じ設定で再実行しても契約は変わらない（`unchanged`）。中身の違う契約が既にあると止まる。送信前に直すときだけ `--force`
@@ -671,6 +676,7 @@ PR を出す前に `npx vitest run tests/unit/docs/design-doc-identifier-audit.t
 
 `src/lib/tmux/**`・セッション名・`tmux` コマンドそのものを扱う Issue（#1163 / #1621 Phase 3 /
 #1623 / #1624 など）では、**次の 4 項目を契約の「作業ルール（厳守）」にそのまま転記する**。
+契約を `contract.mjs` で作るときは、設定に `isolatedLiveCheck: [tmux]` を書く（下の 4 項目が起動の禁止の文と置き換わって入る。手で転記しない）。
 
 > - **実 tmux を触る検証は必ず `tmux -L <専用socket>` で行う。** `-L` / `-S` は `$TMUX` より優先される。
 >   ワーカーは tmux ペインの中で動いていて `$TMUX` が既定サーバを指しているため、フラグ無しの
@@ -691,6 +697,7 @@ unit ゲートで同型を弾くが、契約側にも明示すること。
 
 実機でエージェント CLI や CommandMate のサーバーを動かして確かめる Issue では、**次の項目を契約の「作業ルール（厳守）」に転記する**
 （tmux を触るなら 2-5 の 4 項目も一緒に転記する）。
+契約を `contract.mjs` で作るときは、設定に `isolatedLiveCheck: [server]`（tmux も触るなら `[server, tmux]`）を書く（下の項目が起動の禁止の文と置き換わって入る）。
 
 > - **CommandMate のサーバーは別ポート（`CM_PORT`）・一時データベースで動かす。** `CM_DB_PATH` は worktree の `data/` 配下などに置く
 >   （`/tmp` は検証で拒まれる）。起動後に `lsof -p <pid> | grep '\.db'` で、本番のデータベースを掴んでいないことを確かめる。

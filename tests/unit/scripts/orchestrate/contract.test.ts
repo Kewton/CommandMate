@@ -24,11 +24,13 @@ import {
   buildContract,
   contractPath,
   contractYaml,
+  isolationRules,
   normalizeConfig,
   readTemplate,
   writeContract,
 } from '../../../../scripts/orchestrate/contract.mjs';
-import { parseTaskContract } from '@/lib/tasks/contract-parser';
+import { MAX_PATTERN_LENGTH, MAX_TITLE_LENGTH, parseTaskContract } from '@/lib/tasks/contract-parser';
+import { parseFragment } from '../../../../scripts/changelog-fragments.mjs';
 
 const SCRIPT = path.resolve(__dirname, '../../../../scripts/orchestrate/contract.mjs');
 
@@ -267,5 +269,126 @@ describe('writeContract / CLI', () => {
 
   it('exits 2 on a usage error', () => {
     expect(spawnSync(process.execPath, [SCRIPT, 'nope'], { encoding: 'utf8' }).status).toBe(2);
+  });
+});
+
+describe('the generator rejects exactly what the contract parser rejects', () => {
+  /** Generator verdict and parser verdict for the same config. */
+  function verdicts(config: Record<string, unknown>) {
+    let generated: string | null = null;
+    let generatorAccepts = true;
+    try {
+      generated = contractYaml(normalizeConfig(config));
+    } catch {
+      generatorAccepts = false;
+    }
+    // What the parser says about the same contract, built without the generator's checks.
+    const unchecked = {
+      version: 1,
+      title: `Issue #${config.issue}: ${config.title}`,
+      goal: 'g',
+      scope: { allow: [...(config.scope as string[]), `changelog.d/${config.issue}.md`], deny: [] },
+      verify: { gates: config.gates ?? ['lint'] },
+      success: { requireWorkEvidence: true, requireCommit: true, requireScopeClean: true },
+    };
+    let parserAccepts = true;
+    try {
+      parseTaskContract(generated ?? JSON.stringify(unchecked), 'contract');
+    } catch {
+      parserAccepts = false;
+    }
+    return { generatorAccepts, parserAccepts };
+  }
+
+  const prefix = 'Issue #3477: '.length;
+
+  it.each([
+    ['a title at the 200-character limit', { title: 'あ'.repeat(MAX_TITLE_LENGTH - prefix) }, true],
+    ['a title one over the limit', { title: 'あ'.repeat(MAX_TITLE_LENGTH - prefix + 1) }, false],
+    ['a duplicated gate', { gates: ['lint', 'lint'] }, false],
+    ['a gate id the runner cannot resolve', { gates: ['Lint'] }, false],
+    ['an empty gate list', { gates: [] }, false],
+    ['an absolute scope path', { scope: ['/etc/**'] }, false],
+    ['a scope that leaves the worktree', { scope: ['src/../../x'] }, false],
+    ['a scope pattern over 200 characters', { scope: [`src/${'a'.repeat(MAX_PATTERN_LENGTH)}`] }, false],
+    ['a scope with a NUL byte', { scope: ['src/\0x'] }, false],
+    ['an ordinary scope', { scope: ['src/lib/**', 'tests/unit/**'] }, true],
+  ])('%s', (_name, override, accepted) => {
+    const result = verdicts({ ...base, ...override });
+    expect(result.parserAccepts).toBe(accepted);
+    expect(result.generatorAccepts).toBe(accepted);
+  });
+});
+
+describe('isolated live checks (2-5 / 2-6)', () => {
+  const BAN = 'tmux セッション、サーバー、バックグラウンドプロセスを起動しない。';
+  const orchestrate = fs.readFileSync(path.resolve(__dirname, '../../../../.claude/commands/orchestrate.md'), 'utf8');
+
+  it('bans starting processes by default', () => {
+    expect(buildContract(normalizeConfig(base)).goal).toContain(BAN);
+  });
+
+  it.each([
+    [['tmux'], ['2-5'], ['2-6']],
+    [['server'], ['2-6'], ['2-5']],
+    [['server', 'tmux'], ['2-5', '2-6'], []],
+  ])('isolatedLiveCheck %j replaces the ban with the isolation rules', (kinds, present, absent) => {
+    const goal = buildContract(normalizeConfig({ ...base, isolatedLiveCheck: kinds })).goal;
+    expect(goal).not.toContain(BAN);
+    expect(goal).toContain('`$HOME` 配下にファイルを作らない');
+    const rules = isolationRules(orchestrate);
+    for (const id of present) expect(goal).toContain(rules[id]);
+    for (const id of absent) expect(goal).not.toContain(rules[id]);
+  });
+
+  it('takes the rules from orchestrate.md, the one owner', () => {
+    const rules = isolationRules(orchestrate);
+    expect(rules['2-5']).toContain('tmux -L <専用socket>');
+    expect(rules['2-6']).toContain('CM_DB_PATH');
+  });
+
+  it('rejects an unknown kind', () => {
+    expect(() => normalizeConfig({ ...base, isolatedLiveCheck: ['docker'] })).toThrow(/isolatedLiveCheck/);
+  });
+});
+
+describe('moved without losing a word (2-4-2 before #3477)', () => {
+  const goal = () => buildContract(normalizeConfig(base)).goal;
+
+  it('allows the scope and the two fragment files', () => {
+    expect(goal()).toContain(
+      '- 変更してよいのは scope.allow の範囲（scripts/orchestrate/**, tests/unit/scripts/orchestrate/**, changelog.d/3477.md）と、下の 2 つの断片ファイル（`changelog.d/3477.md` と `dev-reports/module-reference/issue-3477.md`）だけ。'
+    );
+  });
+
+  it('says where to do the checks instead', () => {
+    expect(goal()).toContain('確認は `os.tmpdir()` 配下に作った一時ディレクトリ（private HOME など）の中で行う。');
+  });
+
+  it('routes a needed test change to the out-of-body report', () => {
+    expect(goal()).toMatch(/既存の `it\(\.\.\.\)` \/ `describe\(\.\.\.\)` を消したり名前を変えたりしない.*本文に無い指摘として報告する。/);
+  });
+});
+
+describe('fragment line numbers follow the minimum-version declaration (#3480)', () => {
+  it('says line 2 and "line 3 onwards" without a declaration', () => {
+    const goal = buildContract(normalizeConfig(base)).goal;
+    expect(goal).toContain('（2 行目。先頭は');
+    expect(goal).toContain('`check` も 3 行目以降に空行以外があると不合格にします');
+    expect(goal).not.toMatch(/\{\{[A-Z_]+\}\}/);
+  });
+
+  it('says line 3 and "line 4 onwards" with one', () => {
+    const goal = buildContract(normalizeConfig({ ...base, changelog: { bump: 'minor' } })).goal;
+    expect(goal).toContain('（3 行目。2 行目は最低の版の宣言 `<!-- bump: minor -->`。先頭は');
+    expect(goal).toContain('`check` も 4 行目以降に空行以外があると不合格にします');
+    expect(goal).not.toContain('（2 行目。先頭は');
+  });
+
+  it('matches what changelog-fragments.mjs actually accepts', () => {
+    const entry = '- **feat(orchestrate): x** (#3477): y';
+    expect(parseFragment('3477.md', `<!-- ### Added -->\n<!-- bump: minor -->\n${entry}\n`).errors).toEqual([]);
+    expect(parseFragment('3477.md', `<!-- ### Added -->\n<!-- bump: minor -->\n${entry}\nmore\n`).errors).toHaveLength(1);
+    expect(parseFragment('3477.md', `<!-- ### Added -->\n${entry}\nmore\n`).errors).toHaveLength(1);
   });
 });

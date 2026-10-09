@@ -1,10 +1,11 @@
 #! 契約の「作業ルール（厳守）」に入る断片の書き方（/orchestrate 2-4-1 の転記ブロック）。持ち主はこのファイル（#3477）。
-#! scripts/orchestrate/contract.mjs が `<N>` を Issue 番号に置き換え、`#!` で始まる行を落として goal に入れる。
+#! scripts/orchestrate/contract.mjs が `<N>` を Issue 番号に、`{{ENTRY_LINE}}` / `{{AFTER_ENTRY_LINE}}` を最低の版の宣言（#3480）の
+#! 有無に合わせた行番号に置き換え（宣言なし: 2 行目 / 3 行目、宣言あり: 3 行目 / 4 行目）、`#!` で始まる行を落として goal に入れる。
 - **`CHANGELOG.md` と `docs/module-reference.md` を編集しないでください**（scope 外です）。
   代わりに次の 2 ファイルを書いてください。`changelog.d/<N>.md` は**実装と同じコミットに含めます**。
   `dev-reports/module-reference/issue-<N>.md` は `dev-reports/` 配下なので commit には入りません。
   - `changelog.d/<N>.md` — リリース時に `CHANGELOG.md` へ移される **1 エントリ**
-    （2 行目。先頭は `- **<type>(<scope>): …** (#<N>): …`）。どの節
+    （{{ENTRY_LINE}}。先頭は `- **<type>(<scope>): …** (#<N>): …`）。どの節
     （`### Added` / `### Changed` / `### Fixed`）に入るかを 1 行目にコメントで書く。
     書き終えたら `node scripts/changelog-fragments.mjs check` を実行し、exit 0 であることを確かめる。
     **形式は次の実例に合わせてください**（develop の `CHANGELOG.md` にある実エントリを丸ごと 1 本。
@@ -18,7 +19,7 @@
     - `- **` で始めること — 集計は `changelog-fragments.mjs check` と `grep -cE '^- \*\*'` なので、外れると `check` が不合格にし、エントリとしても数えられません。
     - `(#<N>)` は要約の**外**（`**` を閉じた後）に置き、`<N>` をファイル名と揃えること — `（Issue #<N>）` を要約の中に埋めると `check` が不合格にします。
     - `<type>` は CLAUDE.md のコミットメッセージ規約と同じ語彙（`feat` / `fix` / `docs` / `refactor` / `test` / `chore` / `ci` / `style`）— 断片の検証（上の check）はこれ以外を不合格にし、リリースノート作成時の分類にも使います。
-    - 1 エントリ＝1 行（折らない）— `CHANGELOG.md` は 1 エントリ 1 行で運用しており、`check` も 3 行目以降に空行以外があると不合格にします。本文がどれだけ長くても改行を入れません。
+    - 1 エントリ＝1 行（折らない）— `CHANGELOG.md` は 1 エントリ 1 行で運用しており、`check` も {{AFTER_ENTRY_LINE}}以降に空行以外があると不合格にします。本文がどれだけ長くても改行を入れません。
   - `dev-reports/module-reference/issue-<N>.md` — `docs/module-reference.md` の表に足す注記を
     **行キー（`| \`path\` |`）ごと**に列挙する。既存行への追記なら「どの行に何を足すか」を書く。
     **既存行に足すときは `grep -n '^| \`<path>\`' docs/module-reference.md` を実行し、その出力

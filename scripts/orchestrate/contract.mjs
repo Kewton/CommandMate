@@ -22,6 +22,12 @@
  *   changelog: { section: Added, bump: minor }   # section overrides the kind default
  *   commit: { type: feat, scope: orchestrate }
  *   issueBody: "…"           # or issueBodyFile: <path relative to the config>
+ *   isolatedLiveCheck: [server, tmux]   # allow an isolated live check (orchestrate.md 2-5 / 2-6)
+ *
+ * The checks below hold the OUTPUT contract to the limits of the canonical
+ * parser (src/lib/tasks/contract-parser.ts `parseTaskContract`), so a config
+ * that generates is a contract `send --contract` accepts. A .mjs cannot import
+ * the TS parser at run time; the test compares the two verdicts instead.
  *
  * Usage:
  *   node scripts/orchestrate/contract.mjs generate --config <file> [--worktree <dir>] [--out <file>] [--stdout] [--force]
@@ -38,8 +44,16 @@ export const TEMPLATE_DIR = path.join(HERE, 'templates');
 export const GOAL_TEMPLATE = path.join(TEMPLATE_DIR, 'goal.md');
 export const FRAGMENT_RULES_TEMPLATE = path.join(TEMPLATE_DIR, 'fragment-rules.md');
 
-/** Same bound as `MAX_GOAL_LENGTH` in src/lib/tasks/contract-parser.ts. */
+// Same bounds as src/lib/tasks/contract-parser.ts (and GATE_ID_PATTERN of verify-config.ts).
 export const MAX_GOAL_LENGTH = 8000;
+export const MAX_TITLE_LENGTH = 200;
+export const MAX_PATTERN_LENGTH = 200;
+export const MAX_SCOPE_PATTERNS = 200;
+export const MAX_GATE_IDS = 32;
+export const GATE_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,31}$/;
+export const ORCHESTRATE_PATH = path.resolve(HERE, '../../.claude/commands/orchestrate.md');
+/** isolatedLiveCheck kind → the orchestrate.md section whose rules the goal carries. */
+const ISOLATION_SECTIONS = { tmux: '2-5', server: '2-6' };
 export const REPO_URL = 'https://github.com/Kewton/CommandMate';
 export const SHARED_FILES = ['CHANGELOG.md', 'docs/module-reference.md'];
 export const DEFAULT_GATES = ['lint', 'typecheck', 'unit-related'];
@@ -112,6 +126,10 @@ export function normalizeConfig(raw, options = {}) {
 
   const title = typeof raw.title === 'string' ? raw.title.trim() : '';
   if (!title) problems.push('title: required');
+  const fullTitle = `Issue #${issue}: ${title}`;
+  if (fullTitle.length > MAX_TITLE_LENGTH) {
+    problems.push(`title: the contract title "Issue #${issue}: …" is ${fullTitle.length} characters, at most ${MAX_TITLE_LENGTH}`);
+  }
 
   const kindName = raw.kind === undefined ? 'feature' : raw.kind;
   const kind = KINDS[kindName];
@@ -130,6 +148,11 @@ export function normalizeConfig(raw, options = {}) {
 
   const gates = raw.gates === undefined ? [...DEFAULT_GATES] : stringList(raw.gates, 'gates', problems);
   if (raw.gates !== undefined && gates.length === 0) problems.push('gates: at least one gate is required');
+  if (gates.length > MAX_GATE_IDS) problems.push(`gates: at most ${MAX_GATE_IDS} (got ${gates.length})`);
+  gates.forEach((id, index) => {
+    if (!GATE_ID_PATTERN.test(id)) problems.push(`gates[${index}]: "${id}" must match ${GATE_ID_PATTERN.source}`);
+    else if (gates.indexOf(id) !== index) problems.push(`gates[${index}]: duplicate gate id "${id}"`);
+  });
 
   const fragment = `changelog.d/${issue}.md`;
   const scope = stringList(raw.scope, 'scope', problems);
@@ -138,6 +161,14 @@ export function normalizeConfig(raw, options = {}) {
     if (scope.includes(shared)) problems.push(`scope: ${shared} is shared — the worker writes a fragment instead (2-4-1)`);
   }
   if (!scope.includes(fragment)) scope.push(fragment);
+  if (scope.length > MAX_SCOPE_PATTERNS) problems.push(`scope: at most ${MAX_SCOPE_PATTERNS} patterns (got ${scope.length})`);
+  scope.forEach((pattern, index) => {
+    const at = `scope[${index}]`;
+    if (pattern.length > MAX_PATTERN_LENGTH) problems.push(`${at}: at most ${MAX_PATTERN_LENGTH} characters (got ${pattern.length})`);
+    else if (pattern.includes('\0')) problems.push(`${at}: must not contain a NUL byte`);
+    else if (pattern.startsWith('/')) problems.push(`${at}: must be relative to the worktree root (got "${pattern}")`);
+    else if (pattern.split('/').includes('..')) problems.push(`${at}: must not escape the worktree root with ".." (got "${pattern}")`);
+  });
 
   const decisions = stringList(raw.decisions, 'decisions', problems);
 
@@ -165,6 +196,13 @@ export function normalizeConfig(raw, options = {}) {
     }
   }
 
+  const isolatedLiveCheck = stringList(raw.isolatedLiveCheck, 'isolatedLiveCheck', problems);
+  for (const kind of isolatedLiveCheck) {
+    if (!(kind in ISOLATION_SECTIONS)) {
+      problems.push(`isolatedLiveCheck: must list ${Object.keys(ISOLATION_SECTIONS).join(' / ')} (got ${kind})`);
+    }
+  }
+
   if (problems.length > 0) throw new ContractConfigError(problems);
   return {
     issue,
@@ -182,10 +220,48 @@ export function normalizeConfig(raw, options = {}) {
     commitType,
     commitScope,
     issueBody: issueBody === null ? null : issueBody.trim(),
+    isolatedLiveCheck,
   };
 }
 
 /** Replace `{{NAME}}`; a line that is only a placeholder whose value is empty is dropped. */
+/**
+ * The rules 2-5 / 2-6 tell the orchestrator to transcribe, keyed by section id,
+ * read from orchestrate.md (their only owner) with the `> ` stripped.
+ */
+export function isolationRules(orchestrate = fs.readFileSync(ORCHESTRATE_PATH, 'utf8')) {
+  /** @type {Record<string, string>} */
+  const rules = {};
+  for (const id of Object.values(ISOLATION_SECTIONS)) {
+    const lines = orchestrate.split('\n');
+    const start = lines.findIndex((line) => line.startsWith(`### ${id}.`));
+    if (start === -1) throw new Error(`orchestrate.md has no ### ${id}. section`);
+    const rest = lines.slice(start + 1);
+    const end = rest.findIndex((line) => line.startsWith('### ') || line.startsWith('## '));
+    const block = (end === -1 ? rest : rest.slice(0, end)).filter((line) => line.startsWith('>'));
+    if (block.length === 0) throw new Error(`orchestrate.md ### ${id}. has no rules to transcribe`);
+    rules[id] = block.map((line) => line.replace(/^> ?/, '')).join('\n');
+  }
+  return rules;
+}
+
+const PROCESS_BAN =
+  '- tmux セッション、サーバー、バックグラウンドプロセスを起動しない。`$HOME` 配下にファイルを作らない（一時ファイルは `os.tmpdir()` 配下のみ）。';
+
+function processRule(config) {
+  if (config.isolatedLiveCheck.length === 0) return PROCESS_BAN;
+  const rules = isolationRules();
+  const ids = Object.entries(ISOLATION_SECTIONS)
+    .filter(([kind]) => config.isolatedLiveCheck.includes(kind))
+    .map(([, id]) => id)
+    .sort();
+  return [
+    `- 実機の確認のために tmux セッション・サーバー・プロセスを起動してよいのは、次の隔離の手順（/orchestrate ${ids.join('・')}）に従うときだけ。それ以外では起動しない。` +
+      '`$HOME` 配下にファイルを作らない（一時ファイルは `os.tmpdir()` 配下のみ）。',
+    ...ids.map((id) => rules[id]),
+  ].join('\n');
+}
+
 function fill(template, values) {
   const valueOf = (match, name) => {
     if (!(name in values)) throw new Error(`template placeholder ${match} has no value`);
@@ -208,10 +284,14 @@ export function renderGoal(config) {
       ? ''
       : `\n## この契約での決定（Issue の「決めること」への答え。これに従う）\n${config.decisions.map((d) => `- ${d}`).join('\n')}`;
   const issueBody = config.issueBody ? `\n## Issue 本文\n${config.issueBody}` : '';
-  const fragmentRules = readTemplate(FRAGMENT_RULES_TEMPLATE).replaceAll('<N>', String(config.issue)).trimEnd();
+  // changelog-fragments.mjs: the entry follows the optional `<!-- bump: … -->` line (#3480).
+  const fragmentRules = fill(readTemplate(FRAGMENT_RULES_TEMPLATE).replaceAll('<N>', String(config.issue)), {
+    ENTRY_LINE: config.bump ? `3 行目。2 行目は最低の版の宣言 \`<!-- bump: ${config.bump} -->\`` : '2 行目',
+    AFTER_ENTRY_LINE: config.bump ? '4 行目' : '3 行目',
+  }).trimEnd();
   const sectionLines = [`- この Issue の断片は、1 行目を \`<!-- ### ${config.section} -->\` にする。`];
   if (config.bump) {
-    sectionLines.push(`  2 行目に最低の版の宣言 \`<!-- bump: ${config.bump} -->\` を書き、エントリは 3 行目に置く。`);
+    sectionLines.push(`  2 行目は最低の版の宣言 \`<!-- bump: ${config.bump} -->\`、エントリは 3 行目。`);
   }
   const prefix = config.commitScope ? `${config.commitType}(${config.commitScope})` : config.commitType;
 
@@ -222,6 +302,7 @@ export function renderGoal(config) {
     ISSUE_BODY: issueBody,
     SCOPE: config.scope.join(', '),
     TIER_RULE: config.model === 'sonnet' ? `- ${SONNET_RULE}` : '',
+    PROCESS_RULE: processRule(config),
     FRAGMENT_RULES: fragmentRules,
     CHANGELOG_SECTION: sectionLines.join('\n'),
     COMMIT_PREFIX: prefix,
@@ -243,7 +324,7 @@ export function buildContract(config) {
   if (config.gates.includes('unit-related')) verify.gateDefinitions = [{ ...UNIT_RELATED_GATE }];
   return {
     version: 1,
-    title: `Issue #${config.issue}: ${config.title}`,
+    title: `Issue #${config.issue}: ${config.title}`, // length checked in normalizeConfig
     goal: renderGoal(config),
     scope: { allow: config.scope, deny: [] },
     verify,

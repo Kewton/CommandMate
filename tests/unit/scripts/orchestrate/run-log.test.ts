@@ -70,6 +70,9 @@ describe('makeRecord', () => {
     [{ issue: 0, stage: 'send', result: 'ok' }, /issue/],
     [{ issue: 1, stage: 'send', result: 'ok', head: 'HEAD' }, /head/],
     [{ issue: 1, stage: 'send', result: 'ok', durationSec: '-1' }, /duration/],
+    // A check is only reusable for the HEAD it ran on, so it must say which.
+    [{ issue: 1, stage: 'verify', result: 'ok' }, /head: required for verify/],
+    [{ issue: 1, stage: 'review', result: 'skip' }, /head: required for review/],
   ])('rejects %j', (input, message) => {
     expect(() => makeRecord(input)).toThrow(message);
   });
@@ -98,7 +101,7 @@ describe('append and read back', () => {
   it('survives a line torn by a crash: the next append starts on a new line', () => {
     appendRecord(runDir, '3477', { issue: 3477, stage: 'send', result: 'ok' }, at(0));
     fs.appendFileSync(path.join(runDir, 'run-3477.jsonl'), '{"issue":3477,"stage":"ver');
-    appendRecord(runDir, '3477', { issue: 3477, stage: 'verify', result: 'ok' }, at(5));
+    appendRecord(runDir, '3477', { issue: 3477, stage: 'verify', result: 'ok', head: HEAD_A }, at(5));
     const { records, skipped } = readRecords(runDir, '3477');
     expect(records.map((r: { stage: string }) => r.stage)).toEqual(['send', 'verify']);
     expect(skipped).toEqual([2]);
@@ -119,29 +122,82 @@ describe('summarize: where to resume', () => {
       record(3477, 'send', 'ok', 0, HEAD_A),
       record(3480, 'send', 'ok', 1),
       record(3477, 'verify', 'ok', 20, HEAD_B),
-      record(3480, 'verify', 'fail', 25),
+      record(3480, 'verify', 'fail', 25, HEAD_A),
     ]);
+    // 5-2b: the consistency review comes after verify and before the PR.
     expect(summary.map((s) => [s.issue, s.reached, s.next, s.head])).toEqual([
-      [3477, 'verify', 'precheck', HEAD_B],
-      [3480, 'send', 'verify', null],
+      [3477, 'verify', 'review', HEAD_B],
+      [3480, 'send', 'verify', HEAD_A],
     ]);
   });
 
   it('counts skip as passed and a later fail as not passed', () => {
     const [item] = summarize([
       record(1, 'send', 'ok', 0),
-      record(1, 'verify', 'ok', 1),
-      record(1, 'precheck', 'skip', 2),
-      record(1, 'verify', 'fail', 3),
+      record(1, 'verify', 'ok', 1, HEAD_A),
+      record(1, 'review', 'skip', 2, HEAD_A),
+      record(1, 'verify', 'fail', 3, HEAD_A),
     ]);
     expect(item.stages.verify.result).toBe('fail');
-    expect(item.reached).toBe('precheck');
+    expect(item.stages.review.result).toBe('skip');
+    expect(item.reached).toBe('send');
+    expect(item.next).toBe('verify');
   });
 
   it('says done after merge', () => {
-    const [item] = summarize(STAGES.map((stage: string, i: number) => record(1, stage, 'ok', i)));
+    const [item] = summarize(STAGES.map((stage: string, i: number) => record(1, stage, 'ok', i, HEAD_A)));
     expect(item.reached).toBe('merge');
     expect(item.next).toBeNull();
+  });
+
+  it('goes back to a stage that failed after later stages passed (verify=ok → precheck=ok → verify=fail)', () => {
+    const [item] = summarize([
+      record(1, 'send', 'ok', 0, HEAD_A),
+      record(1, 'verify', 'ok', 1, HEAD_A),
+      record(1, 'review', 'ok', 2, HEAD_A),
+      record(1, 'findings', 'ok', 3, HEAD_A),
+      record(1, 'precheck', 'ok', 4, HEAD_A),
+      record(1, 'verify', 'fail', 5, HEAD_A),
+    ]);
+    expect(item.next).toBe('verify');
+    expect(item.reached).toBe('send');
+    expect(item.reason).toMatch(/verify: fail at aaaaaaa/);
+  });
+
+  it('re-runs every HEAD-bound check when the HEAD moves', () => {
+    const [item] = summarize([
+      record(1, 'send', 'ok', 0, HEAD_A),
+      record(1, 'verify', 'ok', 1, HEAD_A),
+      record(1, 'review', 'ok', 2, HEAD_A),
+      record(1, 'findings', 'ok', 3, HEAD_A),
+      record(1, 'precheck', 'ok', 4, HEAD_A),
+      record(1, 'pr', 'ok', 5),
+      // A re-instruction moved the branch; only verify has run on the new HEAD.
+      record(1, 'verify', 'ok', 6, HEAD_B),
+    ]);
+    expect(item.head).toBe(HEAD_B);
+    expect(item.next).toBe('review');
+    expect(item.reason).toMatch(/review: no result for bbbbbbb/);
+  });
+
+  it('does not let a passed later stage stand in for a missing earlier one', () => {
+    const [item] = summarize([
+      record(1, 'send', 'ok', 0, HEAD_A),
+      record(1, 'verify', 'ok', 1, HEAD_A),
+      record(1, 'precheck', 'ok', 2, HEAD_A),
+      record(1, 'pr', 'ok', 3),
+    ]);
+    expect(item.next).toBe('review');
+  });
+
+  it('keeps the PR order of 5-2b / 5-3 / 6-1-1: review, findings, precheck, pr, ci, merge', () => {
+    expect(STAGES).toEqual(['contract', 'send', 'verify', 'review', 'findings', 'precheck', 'pr', 'ci', 'merge']);
+  });
+
+  it('takes a send as the contract having been made', () => {
+    const [item] = summarize([record(1, 'send', 'ok', 0, HEAD_A)]);
+    expect(item.reached).toBe('send');
+    expect(item.next).toBe('verify');
   });
 
   it('findLatest matches on issue, stage, head and result', () => {
@@ -168,7 +224,7 @@ describe('CLI: stop half-way, re-run, continue', () => {
 
     expect(run('append', ...common(), '--issue', '3477', '--stage', 'verify', '--result', 'ok', '--head', HEAD_B, '--duration-sec', '900').status).toBe(0);
     const second = run('status', ...common());
-    expect(second.stdout).toContain(`#3477\treached=verify\tnext=precheck\thead=${HEAD_B}\tsend=ok verify=ok`);
+    expect(second.stdout).toContain(`#3477\treached=verify\tnext=review\thead=${HEAD_B}\tsend=ok verify=ok`);
   });
 
   it('says so when nothing is recorded yet', () => {
