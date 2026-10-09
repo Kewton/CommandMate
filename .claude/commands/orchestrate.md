@@ -1442,13 +1442,22 @@ PR を出す前に、次も確かめる:
 
 ## Phase 6: PR作成・マージ
 
-`/pr-merge-pipeline` コマンドの内容を実行する：
+PR の作成とマージは、次の 2 本のスクリプトを呼ぶ（#3477）。`/pr-merge-pipeline`（ワーカーに `/create-pr` を送る流れ）は
+並列オーケストレーションでは使わない。止まる条件と run の記録を持たないためである。
 
-```
-/pr-merge-pipeline {issue_numbers}
-```
+- `scripts/orchestrate/publish-pr.mjs`（6-1）: push・module-reference の断片の控え（`runs/$DATE/module-reference-<N>.md`）・PR の作成。記録の `pr` 段
+- `scripts/orchestrate/merge-pr.mjs`（6-2・6-3）: develop が進んでいれば試しのマージ・CI の待ち（落ちたジョブは HEAD ごとに 1 回だけ再実行）・
+  squash でマージ・Issue のクローズ（`--close -` なら閉じない。1 本の Issue を複数の PR に分けたときの途中の PR など）。記録の `ci`・`merge` 段
 
-詳細は `/pr-merge-pipeline` コマンドを参照。ただし**並列オーケストレーションでは次の 3 つを守る**。
+**止まる条件。** どちらも、作業の HEAD について run の記録に `verify=ok`（3-3・5-1）・`review=ok`（5-2b）・`findings=ok`（5-3）・`precheck=ok`（6-1-1）が
+無ければ、何も公開せずに止まり、欠けたものを出す（exit 1）。**5-2b の対象でない Issue は `review` 段に `skip` を記録しておく**
+（忘れたレビューと、対象でないレビューを区別するため）。記録は、ワーカーの最後のコミットのものを、その上の develop の取り込み（6-2）と
+module-reference の一本化だけのコミット（6-4）を越えて使う。`changelog.d/<N>.md` がコミットに無い・module-reference の断片が無いときも止まる（6-4）。
+
+**二重に実行しない。** ブランチに開いた PR があれば作らない（push だけして、その PR を記録する）。別のブランチの開いた PR の題名に `(#<N>)` があれば止まる。
+マージ済みの PR はマージしない（記録が無ければ記録し、Issue が開いていれば閉じるだけ）。どちらも、途中で落ちた後に同じ引数で再実行すると続きから同じ結果になる。
+
+ただし**並列オーケストレーションでは次を守る**。
 
 ### 6-1. 同時 CI は 3〜4 本。**1 本に落とすのも失敗である**
 
@@ -1478,6 +1487,14 @@ refresh のやり直し）。
 取り違えないこと。**
 
 裁定が終わったワーカーが 5 本目以降になったら、PR を作らずに待たせる。worktree は残してよい。
+
+PR は 6-1-1 の確認（precheck）が通ってから出す:
+
+```bash
+node scripts/orchestrate/publish-pr.mjs --run-dir "workspace/orchestration/runs/$DATE" --issues "$RUN_ISSUES" \
+  --issue "$issue" --worktree "$WT_DIR" --label feature   # ラベルは種類に応じて feature / bug / documentation / refactor
+echo "exit=$?"   # 0 → PR がある（作った・既に開いていた・マージ済み） / 1 → 出力の欠けた記録・断片を埋めて再実行 / 2 → 作業ツリーが汚れている
+```
 
 ### 6-1-1. PR はゲートの**前**に出す（CI とローカルゲートを並走させる）
 
@@ -1520,15 +1537,18 @@ echo "exit=$?"   # 0 → PR を出す / 1 → runs/$DATE/precheck-<issue>-<sha>.
 
 マージの条件の 1 つとして、**未処置の指摘（5-3）が残っている PR はマージしない**。
 
-1 本マージするたびに、残りの各 PR で次を順に行う:
+1 本マージするたびに、残りの各 PR で `merge-pr.mjs` を呼ぶ。develop が進んでいれば、次を順に行ってからマージする:
+`git fetch` と `git merge origin/develop`（衝突したら `git merge --abort` して止まる）→ 衝突の印の走査（全追跡ファイル）→
+`npx tsc --noEmit`（実際の統合破壊はここで出る）→ `CI=true npx vitest run <PR が変えたテストと、PR が変えたパスを名指しするテスト>`
+（型に出ない相互作用はここで出る）→ `git push`。どれかが落ちたら push せずに止まる（記録の `merge` 段に `fail`）。
 
 ```bash
-git fetch origin && git merge origin/develop     # 衝突は意味を見て解消（機械解決は module-reference などの共有ファイルだけ）
-git grep -l -E '^(<<<<<<< |>>>>>>> |={7}$)' -- .  # 0 件であること。ここは必ず全追跡ファイルを走査する
-npx tsc --noEmit                                  # 実際の統合破壊はここで出る
-CI=true npx vitest run <衝突したファイルに関係するテスト>   # 型に出ない相互作用はここで出る
-git push
+node scripts/orchestrate/merge-pr.mjs --run-dir "workspace/orchestration/runs/$DATE" --issues "$RUN_ISSUES" \
+  --issue "$issue" --worktree "$WT_DIR"            # 最後の 1 本は --last。Issue を閉じないときは --close -
+echo "exit=$?"   # 0 → マージ済み / 1 → 出力の欠けたもの・落ちた段を読む / 2 → 作業ツリーが汚れている / 124 → CI が --ci-timeout（既定 3600 秒）に収まらない
 ```
+
+衝突で止まったときは、意味を見て解消（機械解決は module-reference などの共有ファイルだけ）してコミットし、同じ引数で再実行する。
 
 機械的に解決してよい衝突は、`docs/module-reference.md` などの共有ファイルでだけ起こりうる。CHANGELOG の断片は
 Issue ごとに別ファイル（`changelog.d/<N>.md`）で、`CHANGELOG.md` はリリースまで書き換えないので、ここでは衝突しない（2-4-1）。
@@ -1560,12 +1580,15 @@ precheck にも build が無いので、ローカルのどの裁定もビルド�
 あればマージしない**。2026-08-22 に「10 pass / 1 fail（Build）」の PR を、fail を目視で見落として
 マージし develop のビルドを壊した。判定は目視ではなくスクリプトで行うこと。
 
+`merge-pr.mjs` がこの判定を行う（落ちたジョブは HEAD ごとに 1 回だけ `gh run rerun --failed` で再実行し、それでも落ちればマージしない）。
 `pending` の扱いは 6-2 に従う: **6-2 のローカルゲート（refresh → マーカー走査 → `tsc` →
 影響テスト）を通していれば `pending` は待たなくてよい**。develop 側の CI が安全網になるからで、
 待つと 1 issue あたり 12〜25 分が消える。**最後の 1 本だけ**は全 `pass` を待つ。
 
 `unit-related` で裁定した PR では、`Unit Tests` のチェックが `pass` になってからマージする（6-2 の例外）。
 `Build` のチェックも `pass` になってからマージする（6-2 の例外。マージする HEAD の precheck の記録に `build=ok` があるときだけ、その `pending` は待たなくてよい）。
+
+`merge-pr.mjs` が `Build` について見る条件は次と同じ（手で確かめるときもこれを使う）:
 
 ```bash
 # Build が pass か、マージする HEAD に build=ok の precheck の記録があるか。どちらも無ければマージしない
@@ -1584,10 +1607,13 @@ CHANGELOG は書き写さない。ワーカーがコミットした `changelog.d
 `CHANGELOG.md` へ集約する（2-4-1）。
 
 ```bash
-D=<worktree>
-# module-reference: 行キーごとに既存行の注記セルへ追記（行を増やさない）
-cat "$D/dev-reports/module-reference/issue-<N>.md"
+# module-reference: 行キーごとに既存行の注記セルへ追記（行を増やさない）。
+# publish-pr.mjs が PR を出すときに run のディレクトリへ控えている（dev-reports/ は worktree と一緒に消える）
+cat "workspace/orchestration/runs/$DATE/module-reference-<N>.md"
 ```
+
+一本化のコミットは `docs/module-reference.md` だけを変える。`merge-pr.mjs` はこのコミットを越えてワーカーのコミットの記録を使う
+（ほかのファイルも変えたコミットを足すと、記録はその HEAD のものではなくなり、止まる）。
 
 一本化したら**必ず機械的に検証する**:
 
@@ -1614,7 +1640,7 @@ git diff origin/develop...HEAD -- 'tests/**' | grep -cE '^-\s*(it|describe|test)
 
 0 でなければ、差分を読んで意図を確かめる（名前の変更・移動なら理由が本文かコミットメッセージにあるか）。
 
-**断片が無い PR はマージしない。** `changelog.d/<N>.md` がコミットに含まれていない PR も、
+**断片が無い PR はマージしない**（`publish-pr.mjs`・`merge-pr.mjs` が止まる）。`changelog.d/<N>.md` がコミットに含まれていない PR も、
 module-reference の断片が無い PR も同じ扱いにする。リリースノートに載らない Issue が出る
 （過去に実際に発生し、後追いで docs PR が必要になった）。`check` が exit 0 にならない PR もマージしない
 （リリース時の `apply` は、1 つでも不正な断片があると何も書かずに止まる）。

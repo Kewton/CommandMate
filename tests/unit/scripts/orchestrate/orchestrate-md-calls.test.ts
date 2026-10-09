@@ -14,6 +14,8 @@ import { spawnSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
 import { parseArgs as parseWaitVerifyArgs } from '../../../../scripts/orchestrate/wait-verify.mjs';
 import { parseArgs as parsePrecheckArgs } from '../../../../scripts/orchestrate/precheck.mjs';
+import { parseArgs as parsePublishArgs } from '../../../../scripts/orchestrate/publish-pr.mjs';
+import { parseArgs as parseMergeArgs } from '../../../../scripts/orchestrate/merge-pr.mjs';
 
 const orchestrate = fs.readFileSync(path.resolve(__dirname, '../../../../.claude/commands/orchestrate.md'), 'utf8');
 
@@ -145,5 +147,44 @@ describe('3-3 says the verdict is confirmed and never reused (#3477 review 1, 2,
     expect(body).toContain('`autoYes.enabled`');
     expect(body).toContain('wait-verify.mjs --auto-yes-off');
     expect(parseWaitVerifyArgs(['--auto-yes-off', '--wt', 'w', '--instance', 'claude']).error).toBeUndefined();
+  });
+});
+
+describe('6-1 opens the PR through publish-pr.mjs, 6-2 merges through merge-pr.mjs (#3477 PR 3)', () => {
+  const publish = bashBlocks(section('6-1')).find((b) => b.includes('scripts/orchestrate/publish-pr.mjs')) ?? '';
+  const merge = bashBlocks(section('6-2')).find((b) => b.includes('scripts/orchestrate/merge-pr.mjs')) ?? '';
+
+  it('has bash blocks that call the scripts and parse', () => {
+    expect(publish).not.toBe('');
+    expect(merge).not.toBe('');
+    parses(publish);
+    parses(merge);
+  });
+
+  it('passes flags the scripts accept', () => {
+    const p = parsePublishArgs(scriptArgs(publish, 'scripts/orchestrate/publish-pr.mjs'));
+    expect(p.error).toBeUndefined();
+    expect(p.options).toMatchObject({ issue: '$issue', worktree: '$WT_DIR', label: 'feature' });
+    const m = parseMergeArgs(scriptArgs(merge, 'scripts/orchestrate/merge-pr.mjs'));
+    expect(m.error).toBeUndefined();
+    expect(m.options).toMatchObject({ issue: '$issue', worktree: '$WT_DIR', close: '$issue' });
+  });
+
+  it('6-2 no longer hand-writes the refresh, and names the flags its comment offers', () => {
+    expect(section('6-2')).not.toMatch(/^git fetch origin && git merge origin\/develop/m);
+    expect(merge).toContain('--last');
+    expect(merge).toContain('--close -');
+    expect(parseMergeArgs(['--run-dir', 'r', '--issues', '1', '--issue', '1', '--worktree', '/w', '--last', '--close', '-']).error).toBeUndefined();
+  });
+
+  it('Phase 6 states the stop conditions and the no-double-run rule', () => {
+    const phase6 = orchestrate.slice(orchestrate.indexOf('## Phase 6'), orchestrate.indexOf('### 6-1.'));
+    expect(phase6).toContain('**止まる条件。**');
+    expect(phase6).toContain('`review` 段に `skip` を記録しておく');
+    expect(phase6).toContain('**二重に実行しない。**');
+  });
+
+  it('6-4 reads the fragment from the run directory copy publish-pr.mjs makes', () => {
+    expect(section('6-4')).toContain('cat "workspace/orchestration/runs/$DATE/module-reference-<N>.md"');
   });
 });
