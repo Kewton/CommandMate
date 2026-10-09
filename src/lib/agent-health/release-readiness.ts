@@ -539,26 +539,16 @@ function issueList(numbers: readonly number[]): string {
   return numbers.map((n) => `#${n}`).join(', ');
 }
 
-/**
- * NO-GO: develop HEAD CI red / a PR merged today whose checks are not green /
- * more high+ production advisories than at the last release / a dispatched
- * bug's agent-health check still fails on develop after its fix merged.
- * 要判断: a dispatched Issue is unfinished (no PR, not merged, verify failed),
- * something was carried over, or a fact the NO-GO rules need is unreadable
- * (develop CI unknown or still running, the merged-PR list missing).
- * The product-path check (Issue #3312), when it is set up: `fail` is NO-GO;
- * `unknown`, `not-run` and a `skip` that has lasted
- * {@link PRODUCT_SKIP_STREAK_ALERT_DAYS} days are 要判断.
- * GO: none of the above.
- */
-export function decideReadiness(facts: ReadinessFacts): ReadinessDecision {
-  const noGo: string[] = [];
-  const hold: string[] = [];
-  const notes: string[] = [];
-  const noGoSteps: string[] = [];
-  const holdSteps: string[] = [];
+interface ReadinessAccumulator {
+  noGo: string[];
+  hold: string[];
+  notes: string[];
+  noGoSteps: string[];
+  holdSteps: string[];
+}
 
-  // --- NO-GO
+function collectDevelopCi(facts: ReadinessFacts, acc: ReadinessAccumulator): void {
+  const { noGo, hold, notes, noGoSteps, holdSteps } = acc;
   if (facts.developCi === 'failure') {
     noGo.push('develop HEAD の CI が赤');
     noGoSteps.push('develop HEAD の CI の失敗を直す（失敗したジョブのログから原因を特定し、fix PR を develop へ）');
@@ -571,7 +561,10 @@ export function decideReadiness(facts: ReadinessFacts): ReadinessDecision {
   } else if (facts.developCi === 'none') {
     notes.push('develop HEAD にはまだ CI の実行が無い');
   }
+}
 
+function collectMergedToday(facts: ReadinessFacts, acc: ReadinessAccumulator): void {
+  const { noGo, hold, noGoSteps, holdSteps } = acc;
   if (facts.mergedToday === null) {
     hold.push('本日マージされた PR の一覧を取得できなかった');
     holdSteps.push('`gh pr list --state merged --base develop` で本日マージされた PR のチェックを確かめる');
@@ -586,7 +579,10 @@ export function decideReadiness(facts: ReadinessFacts): ReadinessDecision {
       noGoSteps.push(`${issueList(notGreen.map((pr) => pr.number))} のチェックを確かめ、赤なら develop で直す`);
     }
   }
+}
 
+function collectAudit(facts: ReadinessFacts, acc: ReadinessAccumulator): void {
+  const { noGo, notes, noGoSteps } = acc;
   const { current, atLastRelease } = facts.audit;
   if (current !== null && atLastRelease !== null && current > atLastRelease) {
     noGo.push(`npm audit --omit=dev の high 以上が前回リリース時より増えた（${atLastRelease} → ${current}）`);
@@ -598,7 +594,10 @@ export function decideReadiness(facts: ReadinessFacts): ReadinessDecision {
         : 'npm audit の前回リリース時の値が無いため比較していない'
     );
   }
+}
 
+function collectDispatchedBugs(facts: ReadinessFacts, acc: ReadinessAccumulator): void {
+  const { noGo, notes, noGoSteps } = acc;
   const reproduced = facts.dispatched.filter((row) => row.kind === 'bug' && row.reproducedFail === true);
   if (reproduced.length > 0) {
     noGo.push(
@@ -614,15 +613,24 @@ export function decideReadiness(facts: ReadinessFacts): ReadinessDecision {
   if (unverified.length > 0) {
     notes.push(`マージ後の agent-health がまだ走っていない修正: ${issueList(unverified.map((row) => row.number))}`);
   }
+}
 
-  const product = facts.product ?? null;
-  const productDetail = product && product.reasons.length > 0 ? `（${product.reasons.join(' ／ ')}）` : '';
+function productDetailOf(product: ProductReadinessFact | null): string {
+  return product && product.reasons.length > 0 ? `（${product.reasons.join(' ／ ')}）` : '';
+}
+
+function collectProductFail(product: ProductReadinessFact | null, acc: ReadinessAccumulator): void {
+  const { noGo, noGoSteps } = acc;
+  const productDetail = productDetailOf(product);
   if (product?.status === 'fail') {
     noGo.push(`製品の経路の確認（第 2 段）が fail${productDetail}`);
     noGoSteps.push('製品の経路の確認の失敗を確かめ、製品の不具合なら develop で直す（Issue の候補は needs-human）');
   }
+}
 
-  // --- 要判断
+function collectProductHold(product: ProductReadinessFact | null, acc: ReadinessAccumulator): void {
+  const { hold, notes, holdSteps } = acc;
+  const productDetail = productDetailOf(product);
   if (product?.status === 'unknown') {
     hold.push(`製品の経路の確認（第 2 段）の結果が unknown${productDetail}`);
     holdSteps.push('製品の経路の確認が unknown になった理由（回収・漏れの判定・段の結果）を確かめる');
@@ -637,7 +645,10 @@ export function decideReadiness(facts: ReadinessFacts): ReadinessDecision {
       notes.push(`製品の経路の確認（第 2 段）は skip${productDetail}`);
     }
   }
+}
 
+function collectDispatchProgress(facts: ReadinessFacts, acc: ReadinessAccumulator): void {
+  const { hold, notes, holdSteps } = acc;
   const unfinished: string[] = [];
   for (const row of facts.dispatched) {
     if (row.pr === null) {
@@ -660,6 +671,36 @@ export function decideReadiness(facts: ReadinessFacts): ReadinessDecision {
   if (facts.dispatchStatus === 'skipped-busy') {
     notes.push('本日の依頼は orchestrate の実行中のため見送られた（skipped-busy）');
   }
+}
+
+/**
+ * NO-GO: develop HEAD CI red / a PR merged today whose checks are not green /
+ * more high+ production advisories than at the last release / a dispatched
+ * bug's agent-health check still fails on develop after its fix merged.
+ * 要判断: a dispatched Issue is unfinished (no PR, not merged, verify failed),
+ * something was carried over, or a fact the NO-GO rules need is unreadable
+ * (develop CI unknown or still running, the merged-PR list missing).
+ * The product-path check (Issue #3312), when it is set up: `fail` is NO-GO;
+ * `unknown`, `not-run` and a `skip` that has lasted
+ * {@link PRODUCT_SKIP_STREAK_ALERT_DAYS} days are 要判断.
+ * GO: none of the above.
+ */
+export function decideReadiness(facts: ReadinessFacts): ReadinessDecision {
+  const acc: ReadinessAccumulator = { noGo: [], hold: [], notes: [], noGoSteps: [], holdSteps: [] };
+
+  // --- NO-GO
+  collectDevelopCi(facts, acc);
+  collectMergedToday(facts, acc);
+  collectAudit(facts, acc);
+  collectDispatchedBugs(facts, acc);
+  const product = facts.product ?? null;
+  collectProductFail(product, acc);
+
+  // --- 要判断
+  collectProductHold(product, acc);
+  collectDispatchProgress(facts, acc);
+  const { noGo, hold, notes, noGoSteps, holdSteps } = acc;
+  const { current, atLastRelease } = facts.audit;
 
   if (noGo.length > 0) {
     return { verdict: 'no-go', reasons: [...noGo, ...hold], notes, nextSteps: [...noGoSteps, ...holdSteps] };
