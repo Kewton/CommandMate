@@ -1,0 +1,33 @@
+{
+  "$comment": [
+    "Module-scope import cycles in src/ accepted as of the last update (Issue #3482).",
+    "Each entry is a ring rotated to start at its smallest path; the last file imports the first.",
+    "Update with `node scripts/import-cycles.mjs --write-baseline` and write the reason in the commit message body."
+  ],
+  "cycles": [
+    [
+      "src/cli/commands/quickstart.ts",
+      "src/cli/program.ts"
+    ],
+    [
+      "src/components/worktree/ChatImage.tsx",
+      "src/components/worktree/ChatMessageBubble.tsx"
+    ],
+    [
+      "src/components/worktree/ChatMessageBubble.tsx",
+      "src/components/worktree/ChatVideo.tsx"
+    ],
+    [
+      "src/lib/auto-yes-poller.ts",
+      "src/lib/polling/response-checker.ts",
+      "src/lib/polling/response-poller-core.ts",
+      "src/lib/realtime/terminal-broadcast.ts",
+      "src/lib/session/current-output-builder.ts",
+      "src/lib/polling/auto-yes-manager.ts"
+    ],
+    [
+      "src/lib/polling/response-checker.ts",
+      "src/lib/polling/response-poller-core.ts"
+    ]
+  ]
+}
