@@ -18,6 +18,7 @@ import {
   countRemovedTests,
   findTestsNaming,
   main,
+  optionsFromNote,
   parseNote,
   passedGates,
   planSteps,
@@ -61,6 +62,9 @@ function harness({
         if (sub.includes('--diff-filter=ACMR')) return { status: 0, stdout: changed.join('\n'), stderr: '' };
         if (sub.includes('--diff-filter=D')) return { status: 0, stdout: deleted.join('\n'), stderr: '' };
         if (sub.includes('--unified=0')) return { status: 0, stdout: testsDiff, stderr: '' };
+        // workHeadOf (pr-common.mjs): HEAD is the worker's own commit.
+        if (sub[0] === 'log' && sub.includes('--first-parent')) return { status: 0, stdout: `${head} ${'f'.repeat(40)}\n`, stderr: '' };
+        if (sub[0] === 'diff-tree') return { status: 0, stdout: `${changed[0] ?? 'src/a.ts'}\n`, stderr: '' };
         throw new Error(`unexpected git ${sub.join(' ')}`);
       }
       const name = `${command} ${args.slice(0, 2).join(' ')}`;
@@ -350,5 +354,43 @@ describe('review fixes (#3477 PR 2)', () => {
 
   it('a failed build fails the precheck', () => {
     expect(main(argv('--build'), harness({ fail: ['npm run'] }).deps)).toBe(1);
+  });
+});
+
+describe('#3477 review of PR 3: precheck of another HEAD', () => {
+  it('--build runs the three steps of CI Build (build, build:cli, build:server) and records each (3c-2)', () => {
+    const h = harness();
+    expect(main(argv('--build'), h.deps)).toBe(0);
+    const commands = h.checks().map((c) => `${c.command} ${c.args.join(' ')}`);
+    expect(commands).toEqual(expect.arrayContaining(['npm run build', 'npm run build:cli', 'npm run build:server']));
+    const steps = parseNote(readRecords(runDir, '3477').records[0].note);
+    expect(steps).toMatchObject({ build: 'ok', 'build-cli': 'ok', 'build-server': 'ok' });
+  });
+
+  it('a failed server build fails the precheck', () => {
+    expect(main(argv('--build'), harness({ fail: ['npm run build:server'] }).deps)).toBe(1);
+    expect(parseNote(readRecords(runDir, '3477').records[0].note)['build-server']).toBe('fail');
+  });
+
+  it('records the work HEAD under a HEAD that merged develop (3c-5)', () => {
+    const h = harness();
+    const deps = {
+      ...h.deps,
+      run: (command: string, args: string[]) => {
+        const sub = args.slice(2);
+        if (command === 'git' && sub[0] === 'log') return { status: 0, stdout: `${HEAD_A} ${HEAD_B} ${'d'.repeat(40)}\n${HEAD_B} ${'d'.repeat(40)}\n`, stderr: '' };
+        return h.deps.run(command, args);
+      },
+    };
+    expect(main(argv(), deps)).toBe(0);
+    expect(readRecords(runDir, '3477').records[0]).toMatchObject({ head: HEAD_A, workHead: HEAD_B });
+  });
+
+  it('reads the options back from a note for the same precheck on another HEAD', () => {
+    expect(optionsFromNote('tsc=ok opts=base:origin/develop,kind:refactor,metrics:true,allow-removed:true,build:true')).toEqual([
+      '--base', 'origin/develop', '--kind', 'refactor', '--metrics', '--allow-removed-tests', '--build',
+    ]);
+    expect(optionsFromNote('opts=base:origin/main,kind:-,metrics:false,allow-removed:false,build:false')).toEqual(['--base', 'origin/main']);
+    expect(optionsFromNote(undefined, 'origin/develop')).toEqual(['--base', 'origin/develop']);
   });
 });

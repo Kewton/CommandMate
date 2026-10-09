@@ -291,7 +291,10 @@ mkdir -p workspace/orchestration/runs/$DATE
 （1 行 1 段の JSON。issue・段・結果・HEAD・task id・契約・担当とモデル・所要時間・時刻）。追記だけなので、同じフォルダの別の run の
 ファイルは上書きしない。`verify` / `review` / `findings` / `precheck` / `ci` / `merge` は HEAD つきでしか記録できない（その HEAD にだけ効く）。
 `status` の `next` は、**最新の HEAD について満たしていない最初の段**: 後の段が通った後で前の段が `fail` になればそこへ戻り、
-HEAD が変われば検証・確認をやり直す（`skip` は通ったと数える。対象外の段も `skip` を記録する）。
+HEAD が変われば検証・確認をやり直す（`skip` は通ったと数える。対象外の段も `skip` を記録する。ただし `verify` / `findings` / `precheck` は `ok` だけ）。
+`verify` / `review` / `findings` は**作業の HEAD**（ワーカーの最後のコミット）で、ほかの段は**公開する HEAD** で見る。develop の取り込みや
+module-reference の一本化を重ねた HEAD の記録には、`--work-head <作業の HEAD>` で作業の HEAD も書く（公開のスクリプトと precheck は自分で書く）。
+この規則は `publish-pr.mjs` / `merge-pr.mjs` の止まる条件と同じ関数（`unmetStage`）なので、再開先と公開側の判定はずれない。
 `verify` は `scripts/orchestrate/wait-verify.mjs`（3-3）、`precheck` は `scripts/orchestrate/precheck.mjs`（6-1-1）が自分で書く。
 **セッションが落ちたら、会話の記録ではなくこれを読んで再開する**:
 
@@ -1442,13 +1445,26 @@ PR を出す前に、次も確かめる:
 
 ## Phase 6: PR作成・マージ
 
-`/pr-merge-pipeline` コマンドの内容を実行する：
+PR の作成とマージは、次の 2 本のスクリプトを呼ぶ（#3477）。`/pr-merge-pipeline`（ワーカーに `/create-pr` を送る流れ）は
+並列オーケストレーションでは使わない。止まる条件と run の記録を持たないためである。
 
-```
-/pr-merge-pipeline {issue_numbers}
-```
+- `scripts/orchestrate/publish-pr.mjs`（6-1）: push・module-reference の断片の控え（`runs/$DATE/module-reference-<N>.md`）・PR の作成。記録の `pr` 段
+- `scripts/orchestrate/merge-pr.mjs`（6-2・6-3）: develop が進んでいれば試しのマージ・CI の待ち（落ちたジョブは HEAD ごとに 1 回だけ再実行）・
+  squash でマージ・Issue のクローズ（`--close -` なら閉じない。1 本の Issue を複数の PR に分けたときの途中の PR など）。記録の `ci`・`merge` 段
 
-詳細は `/pr-merge-pipeline` コマンドを参照。ただし**並列オーケストレーションでは次の 3 つを守る**。
+**止まる条件。** どちらも、run の記録に、**作業の HEAD**（ワーカーの最後のコミット）の `verify=ok`（3-3・5-1）・`review=ok`（5-2b）・`findings=ok`（5-3）と、
+**公開する HEAD**（push する・マージする HEAD）の `precheck=ok`（6-1-1）が無ければ、何も公開せずに止まり、欠けたものを出す（exit 1）。
+**5-2b の対象でない Issue は `review` 段に `skip` を記録しておく**（忘れたレビューと、対象でないレビューを区別するため）。
+公開する HEAD は、作業の HEAD そのものか、その上に develop の取り込み（6-2）と module-reference の一本化だけのコミット（6-4）を重ねたもの。
+重ねたときは、その HEAD の precheck が要る（`merge-pr.mjs` は無ければ自分で走らせ、`publish-pr.mjs` は止まる）。
+この判定は `run-log.mjs status` と同じ関数（`unmetStage`）で行い、記録には両方の HEAD を書く（`head` と `workHead`）ので、再開先と公開側の判定がずれない。
+衝突の印が追跡ファイルにある・`changelog.d/<N>.md` がコミットに無い・module-reference の断片が無いときも止まる（6-4）。
+
+**二重に実行しない。** ブランチに開いた PR があれば作らない（push だけして、その PR を記録する）。別のブランチの開いた PR が同じ Issue を指していれば止まる
+（題名の `(#<N>)`、`/create-pr` が書く本文の `Closes #<N>`（`Fixes` / `Resolves` / `Refs` も）、ブランチ名の番号）。
+マージ済みの PR はマージしない（記録が無ければ記録し、Issue が開いていれば閉じるだけ）。どちらも、途中で落ちた後に同じ引数で再実行すると続きから同じ結果になる。
+
+ただし**並列オーケストレーションでは次を守る**。
 
 ### 6-1. 同時 CI は 3〜4 本。**1 本に落とすのも失敗である**
 
@@ -1479,6 +1495,14 @@ refresh のやり直し）。
 
 裁定が終わったワーカーが 5 本目以降になったら、PR を作らずに待たせる。worktree は残してよい。
 
+PR は 6-1-1 の確認（precheck）が通ってから出す:
+
+```bash
+node scripts/orchestrate/publish-pr.mjs --run-dir "workspace/orchestration/runs/$DATE" --issues "$RUN_ISSUES" \
+  --issue "$issue" --worktree "$WT_DIR" --label feature   # ラベルは種類に応じて feature / bug / documentation / refactor
+echo "exit=$?"   # 0 → PR がある（作った・既に開いていた・マージ済み） / 1 → 出力の欠けた記録・断片を埋めて再実行 / 2 → 作業ツリーが汚れている
+```
+
 ### 6-1-1. PR はゲートの**前**に出す（CI とローカルゲートを並走させる）
 
 `wait --verify` / `verify --gates` のローカルゲートと CI は**同じテストを見ている**。
@@ -1504,7 +1528,7 @@ echo "exit=$?"   # 0 → PR を出す / 1 → runs/$DATE/precheck-<issue>-<sha>.
   契約が定義したゲート（`<id>@contract`）と、テストのゲート（`unit` / `unit-related`。選ぶテストが違う）は、どの段の代わりにもならない
 - 関係するテストは `tests/unit` に限る（`vitest related --dir tests/unit`）。integration / e2e は CI が見る
 - **build は PR の前の確認に入れない（CI の `Build` と並走させる）。** その代わり、マージの前に CI の `Build` が `pass` であること、
-  または同じ HEAD の precheck の記録に `build=ok` があること（`--build` を付けて走らせたとき）を確かめる（6-2・6-3）
+  または同じ HEAD の precheck の記録に `build=ok`・`build-cli=ok`・`build-server=ok` があること（`--build` を付けて走らせたとき。CI の `Build` と同じ 3 つ）を確かめる（6-2・6-3）
 - 作業ツリーに契約（`.commandmate/tasks/`）と `dev-reports/` 以外の変更があると、その HEAD の結果にならないので exit 2 で止まる
 
 壊れた PR で CI を焼くリスクは、先に通す確認でほぼ潰せる。両方が緑になってからマージするので
@@ -1520,15 +1544,19 @@ echo "exit=$?"   # 0 → PR を出す / 1 → runs/$DATE/precheck-<issue>-<sha>.
 
 マージの条件の 1 つとして、**未処置の指摘（5-3）が残っている PR はマージしない**。
 
-1 本マージするたびに、残りの各 PR で次を順に行う:
+1 本マージするたびに、残りの各 PR で `merge-pr.mjs` を呼ぶ。develop が進んでいれば `git fetch` と `git merge origin/develop`（衝突したら
+`git merge --abort` して止まる）を行い、**マージする HEAD について**（取り込んだ HEAD・`publish-pr.mjs` が先に push した取り込みの HEAD・未 push の HEAD のどれでも）
+衝突の印の走査（全追跡ファイル）と、その HEAD の precheck（`precheck.mjs`。`npx tsc --noEmit` で実際の統合破壊が出て、`vitest related --dir tests/unit` が import の関係
+（`@/` の alias を含む）で選ぶテストと、変えたパスを名指しするテスト・ガードで、型に出ない相互作用が出る）を通してから `git push` する。
+precheck は作業の HEAD の precheck と同じ引数で走り、同じ HEAD の `precheck=ok` が記録にあれば走らせない。どれかが落ちたら push せずに止まる。
 
 ```bash
-git fetch origin && git merge origin/develop     # 衝突は意味を見て解消（機械解決は module-reference などの共有ファイルだけ）
-git grep -l -E '^(<<<<<<< |>>>>>>> |={7}$)' -- .  # 0 件であること。ここは必ず全追跡ファイルを走査する
-npx tsc --noEmit                                  # 実際の統合破壊はここで出る
-CI=true npx vitest run <衝突したファイルに関係するテスト>   # 型に出ない相互作用はここで出る
-git push
+node scripts/orchestrate/merge-pr.mjs --run-dir "workspace/orchestration/runs/$DATE" --issues "$RUN_ISSUES" \
+  --issue "$issue" --worktree "$WT_DIR"            # 最後の 1 本は --last。Issue を閉じないときは --close -
+echo "exit=$?"   # 0 → マージ済み / 1 → 出力の欠けたもの・落ちた段を読む / 2 → 作業ツリーが汚れている / 124 → CI が --ci-timeout（既定 3600 秒）に収まらない
 ```
+
+衝突で止まったときは、意味を見て解消（機械解決は module-reference などの共有ファイルだけ）してコミットし、同じ引数で再実行する。
 
 機械的に解決してよい衝突は、`docs/module-reference.md` などの共有ファイルでだけ起こりうる。CHANGELOG の断片は
 Issue ごとに別ファイル（`changelog.d/<N>.md`）で、`CHANGELOG.md` はリリースまで書き換えないので、ここでは衝突しない（2-4-1）。
@@ -1541,11 +1569,13 @@ Issue ごとに別ファイル（`changelog.d/<N>.md`）で、`CHANGELOG.md` は
 なる。**最後の 1 本だけ**はフル CI を待つ。
 
 **例外: 契約の `gates` が `unit-related` の PR は、CI の `Unit Tests` が `pass` になってからマージする**（#2639）。
-ローカルの裁定がテスト全体を含まないため。
+ローカルの裁定がテスト全体を含まないため。整理の契約（`lint`・`typecheck` だけ、2-4-3）も同じ。`merge-pr.mjs` は、検証が verify.yaml の `unit`
+（テスト全体）を通していないかぎり `Unit Tests` を待つ（契約が定義した `unit@contract` は代わりにしない）。
 
 **例外: build。CI の `Build` が `pass` になってからマージする**（#3477）。6-1-1 で build を PR の前の確認から外し、契約の既定のゲートにも
 precheck にも build が無いので、ローカルのどの裁定もビルドを見ていない。ただし、マージする HEAD（refresh の後の HEAD）の precheck の記録に
-`build=ok` があれば（`precheck.mjs --build`）、`Build` の `pending` は待たなくてよい。ほかのジョブの扱いは上のとおり。
+`build=ok` があれば（`precheck.mjs --build`）、`Build` の `pending` は待たなくてよい。`--build` は CI の `Build` と同じ 3 つ
+（`npm run build`・`build:cli`・`build:server`）を走らせ、`build=ok`・`build-cli=ok`・`build-server=ok` が揃ったときだけ代わりになる。ほかのジョブの扱いは上のとおり。
 
 マージ（または close）すると、**その PR の `pull_request` run は
 `.github/workflows/cancel-pr-runs-on-close.yml` が自動で止める**（Issue #2330）。**手でキャンセル
@@ -1560,18 +1590,21 @@ precheck にも build が無いので、ローカルのどの裁定もビルド�
 あればマージしない**。2026-08-22 に「10 pass / 1 fail（Build）」の PR を、fail を目視で見落として
 マージし develop のビルドを壊した。判定は目視ではなくスクリプトで行うこと。
 
+`merge-pr.mjs` がこの判定を行う（落ちたジョブは HEAD ごとに 1 回だけ `gh run rerun --failed` で再実行し、それでも落ちればマージしない）。
 `pending` の扱いは 6-2 に従う: **6-2 のローカルゲート（refresh → マーカー走査 → `tsc` →
 影響テスト）を通していれば `pending` は待たなくてよい**。develop 側の CI が安全網になるからで、
 待つと 1 issue あたり 12〜25 分が消える。**最後の 1 本だけ**は全 `pass` を待つ。
 
-`unit-related` で裁定した PR では、`Unit Tests` のチェックが `pass` になってからマージする（6-2 の例外）。
-`Build` のチェックも `pass` になってからマージする（6-2 の例外。マージする HEAD の precheck の記録に `build=ok` があるときだけ、その `pending` は待たなくてよい）。
+`unit-related` で裁定した PR（と、テスト全体を通していない整理の PR）では、`Unit Tests` のチェックが `pass` になってからマージする（6-2 の例外）。
+`Build` のチェックも `pass` になってからマージする（6-2 の例外。マージする HEAD の precheck の記録に `build=ok`（と `build-cli=ok`・`build-server=ok`）があるときだけ、その `pending` は待たなくてよい）。
+
+`merge-pr.mjs` が `Build` について見る条件は次と同じ（手で確かめるときもこれを使う）:
 
 ```bash
 # Build が pass か、マージする HEAD に build=ok の precheck の記録があるか。どちらも無ければマージしない
 gh pr checks "$PR" --json name,bucket | jq -e '.[] | select(.name == "Build" and .bucket == "pass")' > /dev/null \
   || jq -e --arg h "$(git -C "$WT_DIR" rev-parse HEAD)" --argjson n "$issue" \
-       'select(.issue == $n and .stage == "precheck" and .head == $h and .result == "ok" and (.note | test("(^| )build=ok( |$)")))' \
+       'select(.issue == $n and .stage == "precheck" and .head == $h and .result == "ok" and (.note | test("(^| )build=ok( |$)") and test("(^| )build-cli=ok( |$)") and test("(^| )build-server=ok( |$)")))' \
        "workspace/orchestration/runs/$DATE/run-$RUN_ISSUES.jsonl" > /dev/null \
   || echo "NOT mergeable: Build is not pass and there is no build=ok precheck for this HEAD"
 ```
@@ -1584,10 +1617,13 @@ CHANGELOG は書き写さない。ワーカーがコミットした `changelog.d
 `CHANGELOG.md` へ集約する（2-4-1）。
 
 ```bash
-D=<worktree>
-# module-reference: 行キーごとに既存行の注記セルへ追記（行を増やさない）
-cat "$D/dev-reports/module-reference/issue-<N>.md"
+# module-reference: 行キーごとに既存行の注記セルへ追記（行を増やさない）。
+# publish-pr.mjs が PR を出すときに run のディレクトリへ控えている（dev-reports/ は worktree と一緒に消える）
+cat "workspace/orchestration/runs/$DATE/module-reference-<N>.md"
 ```
+
+一本化のコミットは `docs/module-reference.md` だけを変える。`merge-pr.mjs` はこのコミットを越えてワーカーのコミットの `verify`・`review`・`findings` を使い、
+一本化の後の HEAD の precheck は自分で走らせる（ほかのファイルも変えたコミットを足すと、そのコミットが作業の HEAD になり、`verify` から止まる）。
 
 一本化したら**必ず機械的に検証する**:
 
@@ -1614,7 +1650,7 @@ git diff origin/develop...HEAD -- 'tests/**' | grep -cE '^-\s*(it|describe|test)
 
 0 でなければ、差分を読んで意図を確かめる（名前の変更・移動なら理由が本文かコミットメッセージにあるか）。
 
-**断片が無い PR はマージしない。** `changelog.d/<N>.md` がコミットに含まれていない PR も、
+**断片が無い PR はマージしない**（`publish-pr.mjs`・`merge-pr.mjs` が止まる）。`changelog.d/<N>.md` がコミットに含まれていない PR も、
 module-reference の断片が無い PR も同じ扱いにする。リリースノートに載らない Issue が出る
 （過去に実際に発生し、後追いで docs PR が必要になった）。`check` が exit 0 にならない PR もマージしない
 （リリース時の `apply` は、1 つでも不正な断片があると何も書かずに止まる）。
