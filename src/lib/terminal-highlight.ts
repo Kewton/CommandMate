@@ -157,6 +157,16 @@ function collectTextNodes(container: Element): TextNodeEntry[] {
   return textNodes;
 }
 
+/** One body line of a fence: where it is in the raw text and in the body. */
+interface FenceLine {
+  /** Raw offset of the line's content (after any `> ` quote markers). */
+  rawStart: number;
+  /** Length of that content. */
+  length: number;
+  /** Offset of the same content inside {@link MermaidFence.body}. */
+  bodyOffset: number;
+}
+
 /** One ```mermaid fence in the raw text, by offset. */
 export interface MermaidFence {
   /** Start of the opening fence line. */
@@ -165,57 +175,95 @@ export interface MermaidFence {
   bodyStart: number;
   /** End of the last body line (its newline excluded). */
   bodyEnd: number;
-  /** End of the closing fence line (or of the text, if the fence never closes). */
+  /** End of the closing fence line (or of the fence's last line, if it never closes). */
   fenceEnd: number;
   /** The body as Markdown reads it — what the source element shows. */
   body: string;
+  /** How many `>` block-quote markers the fence sits behind (0 = not quoted). */
+  quoteDepth: number;
+  /** Each body line, so a raw offset behind `> ` maps into {@link body}. */
+  lines: FenceLine[];
 }
 
 const FENCE_OPEN = /^ {0,3}(`{3,}|~{3,})(.*)$/;
+const QUOTE_MARKER = /^ {0,3}>[ \t]?/;
+
+interface RawLine {
+  start: number;
+  end: number;
+}
+
+/** Strip up to `max` block-quote markers; how many were stripped and where the rest starts. */
+function stripQuotes(text: string, line: RawLine, max: number): { depth: number; contentStart: number } {
+  let depth = 0;
+  let contentStart = line.start;
+  while (depth < max) {
+    const marker = QUOTE_MARKER.exec(text.slice(contentStart, line.end));
+    if (!marker) break;
+    contentStart += marker[0].length;
+    depth += 1;
+  }
+  return { depth, contentStart };
+}
 
 /**
- * [Issue #3503] Find the ```mermaid fences in a Markdown string. Other fences are
+ * [Issue #3503] Find the ```mermaid fences in a Markdown string, including ones
+ * inside a block quote (`> ```mermaid` — every saved opencode row opens with a
+ * `> **Thinking**` quote, and a diagram can sit in it). A quoted fence's body is
+ * its lines with the quote markers taken off, which is what Markdown renders;
+ * the fence ends at its closing line or where the quote ends. Other fences are
  * tracked only so a ```mermaid line inside them is not mistaken for an opener.
  */
 export function findMermaidFences(text: string): MermaidFence[] {
   const fences: MermaidFence[] = [];
-  const lines: Array<{ start: number; end: number; next: number }> = [];
+  const lines: RawLine[] = [];
   let cursor = 0;
   while (cursor <= text.length) {
     const nl = text.indexOf('\n', cursor);
     const end = nl === -1 ? text.length : nl;
-    lines.push({ start: cursor, end, next: nl === -1 ? text.length : nl + 1 });
+    lines.push({ start: cursor, end });
     if (nl === -1) break;
     cursor = nl + 1;
   }
 
   for (let i = 0; i < lines.length; i++) {
-    const open = FENCE_OPEN.exec(text.slice(lines[i].start, lines[i].end));
+    const { depth, contentStart } = stripQuotes(text, lines[i], Number.POSITIVE_INFINITY);
+    const open = FENCE_OPEN.exec(text.slice(contentStart, lines[i].end));
     if (!open) continue;
     const marker = open[1];
     const info = open[2].trim();
     if (marker[0] === '`' && info.includes('`')) continue; // not a fence
     const closeRe = new RegExp(`^ {0,3}${marker[0] === '`' ? '`' : '~'}{${marker.length},}[ \\t]*$`);
-    let close = -1;
+
+    const body: FenceLine[] = [];
+    let last = i;
     for (let j = i + 1; j < lines.length; j++) {
-      if (closeRe.test(text.slice(lines[j].start, lines[j].end))) {
-        close = j;
-        break;
-      }
+      const inner = stripQuotes(text, lines[j], depth);
+      if (inner.depth < depth) break; // the quote ended, and the fence with it
+      last = j;
+      if (closeRe.test(text.slice(inner.contentStart, lines[j].end))) break;
+      body.push({ rawStart: inner.contentStart, length: lines[j].end - inner.contentStart, bodyOffset: 0 });
     }
-    const lastBody = close === -1 ? lines.length - 1 : close - 1;
+
     if (info.split(/[ \t]/)[0] === 'mermaid') {
-      const bodyStart = lines[i].next;
-      const bodyEnd = lastBody > i ? lines[lastBody].end : bodyStart;
+      let offset = 0;
+      for (const line of body) {
+        line.bodyOffset = offset;
+        offset += line.length + 1;
+      }
+      const bodyStart = body.length > 0 ? lines[i + 1].start : lines[i].end;
+      const bodyEnd = body.length > 0 ? body[body.length - 1].rawStart + body[body.length - 1].length : bodyStart;
       fences.push({
         fenceStart: lines[i].start,
         bodyStart,
         bodyEnd,
-        fenceEnd: close === -1 ? text.length : lines[close].end,
-        body: text.slice(bodyStart, bodyEnd),
+        fenceEnd: lines[last].end,
+        body: body.map((line) => text.slice(line.rawStart, line.rawStart + line.length)).join('\n'),
+        quoteDepth: depth,
+        lines: body,
       });
     }
-    i = close === -1 ? lines.length : close;
+    i = last;
   }
   return fences;
 }
@@ -233,26 +281,94 @@ function occurrences(haystack: string, needle: string): number[] {
   }
 }
 
+type Span = { start: number; end: number };
+
+/** Sorted, merged copy of `spans`. */
+function normalizeSpans(spans: Span[]): Span[] {
+  const sorted = spans.filter((s) => s.end > s.start).sort((x, y) => x.start - y.start);
+  const out: Span[] = [];
+  for (const span of sorted) {
+    const prev = out[out.length - 1];
+    if (prev && span.start <= prev.end) prev.end = Math.max(prev.end, span.end);
+    else out.push({ ...span });
+  }
+  return out;
+}
+
+/** `base` with every span of `cut` removed (both normalized). */
+function subtractSpans(base: Span[], cut: Span[]): Span[] {
+  let out = base.map((s) => ({ ...s }));
+  for (const c of cut) {
+    out = out.flatMap((s) => {
+      if (c.end <= s.start || c.start >= s.end) return [s];
+      const parts: Span[] = [];
+      if (c.start > s.start) parts.push({ start: s.start, end: c.start });
+      if (c.end < s.end) parts.push({ start: c.end, end: s.end });
+      return parts;
+    });
+  }
+  return out;
+}
+
+/** `spans` limited to [from, to). */
+function clipSpans(spans: Span[], from: number, to: number): Span[] {
+  return spans
+    .map((s) => ({ start: Math.max(s.start, from), end: Math.min(s.end, to) }))
+    .filter((s) => s.end > s.start);
+}
+
+/** Offsets of `needle` inside each span of `text`, in order, never across spans. */
+function occurrencesIn(text: string, spans: Span[], needle: string): number[] {
+  return spans.flatMap((span) =>
+    occurrences(text.slice(span.start, span.end), needle)
+      .filter((idx) => span.start + idx + needle.length <= span.end)
+      .map((idx) => span.start + idx),
+  );
+}
+
+const inSpans = (spans: Span[], pos: number): boolean =>
+  spans.some((s) => pos >= s.start && pos < s.end);
+
+/**
+ * [Issue #3503] A part of a message drawn somewhere of its own — chat folds the
+ * `> **Thinking**` and tool-log sections out of the answer and draws each under
+ * a chip, in a different order from the raw text. `ranges` are where the part is
+ * in the raw text; the DOM drawing it carries `data-search-section="<key>"`.
+ */
+export interface HighlightSection {
+  key: string;
+  ranges: MatchPosition[];
+}
+
+/** [Issue #3503] Marks the element a {@link HighlightSection} is drawn in. */
+export const SEARCH_SECTION_ATTR = 'data-search-section';
+
+interface SourceOnScreen {
+  domStart: number;
+  domEnd: number;
+  text: string;
+}
+
 /**
  * [Issue #3503] Translate offsets into the raw message text to offsets into the
  * container's (skip-filtered) text, for a message whose mermaid fences are drawn
  * as diagrams with their source folded underneath.
  *
  * The raw text and the DOM no longer line up there: the fence lines are not
- * drawn, the diagram is not counted, and a "Source" summary is not counted
- * either. So the text is cut at each fence that has a source element on screen
- * (paired by equal body, in order):
+ * drawn, the diagram is not counted, a "Source" summary is not counted, quote
+ * markers are not drawn, and chat draws the reasoning and the tool log in their
+ * own place. So the message is first cut into regions — each
+ * {@link HighlightSection} the caller names, and the rest — matched to the DOM
+ * by `data-search-section`. Inside a region, raw fences and on-screen sources
+ * are paired in order by equal body, and:
  *
- * - a hit inside a fence body maps to the same offset inside that body's source
- *   element — the body is shown verbatim;
+ * - a hit inside a paired fence body maps to the same place in that source;
+ * - a hit inside a fence that could not be paired (its source is not on
+ *   screen, or the bodies do not line up) is `null` — never another diagram's;
  * - a hit between fences is the n-th occurrence of its text in that stretch of
- *   raw text, and maps to the n-th occurrence of the same text in the matching
- *   stretch of the DOM — which survives whatever Markdown syntax the stretch has;
+ *   raw text (fences left out), and maps to the n-th occurrence of the same text
+ *   in the matching stretch of the region's DOM (sources left out);
  * - a hit on a fence line (```mermaid itself) has nothing on screen: `null`.
- *
- * A fence that could not be paired (one inside a blockquote, say, whose raw
- * lines carry `> `) is simply part of a stretch, and its hits still land on its
- * source by occurrence.
  *
  * Returns `null` when the container shows no mermaid source at all, so the
  * caller keeps the plain offset-equals-offset behaviour every other message has.
@@ -262,62 +378,117 @@ function mapRawPositionsToDom(
   textNodes: TextNodeEntry[],
   sourceText: string,
   positions: MatchPosition[],
+  sections: HighlightSection[],
 ): Array<MatchPosition | null> | null {
   const sourceElements = Array.from(container.querySelectorAll(`[${MERMAID_SOURCE_ATTR}]`));
   if (sourceElements.length === 0) return null;
   const fences = findMermaidFences(sourceText);
-
   const domText = textNodes.map((entry) => entry.node.nodeValue ?? '').join('');
-  const pairs: Array<{ fence: MermaidFence; domStart: number; domEnd: number }> = [];
-  let fenceCursor = 0;
-  for (const element of sourceElements) {
-    const inside = textNodes.filter((entry) => element.contains(entry.node));
-    if (inside.length === 0) continue;
-    const domStart = inside[0].start;
-    const domEnd = inside[inside.length - 1].end;
-    const shown = domText.slice(domStart, domEnd);
-    for (let k = fenceCursor; k < fences.length; k++) {
-      if (fences[k].body === shown) {
-        pairs.push({ fence: fences[k], domStart, domEnd });
-        fenceCursor = k + 1;
-        break;
+
+  // Which region a DOM node belongs to: the named section it is drawn in, or ''.
+  const sectionKeys = new Set(sections.map((section) => section.key));
+  const regionOfNode = (node: Node): string => {
+    const holder = (node.nodeType === Node.TEXT_NODE ? node.parentElement : (node as Element))
+      ?.closest(`[${SEARCH_SECTION_ATTR}]`);
+    const key = holder && container.contains(holder) ? holder.getAttribute(SEARCH_SECTION_ATTR) : null;
+    return key !== null && sectionKeys.has(key) ? key : '';
+  };
+
+  const sectionRaw = new Map(sections.map((section) => [section.key, normalizeSpans(section.ranges)]));
+  const allSectionRaw = normalizeSpans(sections.flatMap((section) => section.ranges));
+  const regions = ['', ...sectionKeys].map((key) => {
+    const raw =
+      key === '' ? subtractSpans([{ start: 0, end: sourceText.length }], allSectionRaw) : sectionRaw.get(key)!;
+    const dom = normalizeSpans(
+      textNodes.filter((entry) => regionOfNode(entry.node) === key).map(({ start, end }) => ({ start, end })),
+    );
+    const regionFences = fences.filter((fence) => inSpans(raw, fence.fenceStart));
+    const sources: SourceOnScreen[] = [];
+    for (const element of sourceElements) {
+      if (regionOfNode(element) !== key) continue;
+      const inside = textNodes.filter((entry) => element.contains(entry.node));
+      if (inside.length === 0) continue;
+      const domStart = inside[0].start;
+      const domEnd = inside[inside.length - 1].end;
+      sources.push({ domStart, domEnd, text: domText.slice(domStart, domEnd) });
+    }
+
+    // Pair in order by equal body. Equal counts must match one-to-one; otherwise
+    // a source takes the next fence with its body.
+    const pairs: Array<{ fence: MermaidFence; source: SourceOnScreen }> = [];
+    if (
+      regionFences.length === sources.length &&
+      regionFences.every((fence, k) => fence.body === sources[k].text)
+    ) {
+      regionFences.forEach((fence, k) => pairs.push({ fence, source: sources[k] }));
+    } else {
+      let cursor = 0;
+      for (const source of sources) {
+        for (let k = cursor; k < regionFences.length; k++) {
+          if (regionFences[k].body === source.text) {
+            pairs.push({ fence: regionFences[k], source });
+            cursor = k + 1;
+            break;
+          }
+        }
       }
     }
-  }
 
-  // Stretches of raw text between paired fences, each with its DOM counterpart.
-  const gaps: Array<{ rawStart: number; rawEnd: number; domStart: number; domEnd: number }> = [];
-  let rawStart = 0;
-  let domStart = 0;
-  for (const pair of pairs) {
-    gaps.push({ rawStart, rawEnd: pair.fence.fenceStart, domStart, domEnd: pair.domStart });
-    rawStart = pair.fence.fenceEnd;
-    domStart = pair.domEnd;
-  }
-  gaps.push({ rawStart, rawEnd: sourceText.length, domStart, domEnd: domText.length });
+    // Stretches between paired fences, each with its DOM counterpart. Every
+    // fence and every source is left out of the stretches, so a word between
+    // diagrams can only land on text between diagrams.
+    const fenceSpans = normalizeSpans(regionFences.map((f) => ({ start: f.fenceStart, end: f.fenceEnd })));
+    const sourceSpans = normalizeSpans(sources.map((src) => ({ start: src.domStart, end: src.domEnd })));
+    const gaps: Array<{ raw: Span[]; dom: Span[]; rawFrom: number; rawTo: number }> = [];
+    let rawFrom = 0;
+    let domFrom = 0;
+    const bounds = [
+      ...pairs.map((pair) => ({
+        rawStart: pair.fence.fenceStart,
+        rawEnd: pair.fence.fenceEnd,
+        domStart: pair.source.domStart,
+        domEnd: pair.source.domEnd,
+      })),
+      { rawStart: Number.POSITIVE_INFINITY, rawEnd: 0, domStart: Number.POSITIVE_INFINITY, domEnd: 0 },
+    ];
+    for (const bound of bounds) {
+      gaps.push({
+        raw: subtractSpans(clipSpans(raw, rawFrom, bound.rawStart), fenceSpans),
+        dom: subtractSpans(clipSpans(dom, domFrom, bound.domStart), sourceSpans),
+        rawFrom,
+        rawTo: bound.rawStart,
+      });
+      rawFrom = bound.rawEnd;
+      domFrom = bound.domEnd;
+    }
+    return { raw, fences: regionFences, pairs, gaps };
+  });
 
   const lowerRaw = sourceText.toLowerCase();
   const lowerDom = domText.toLowerCase();
 
   return positions.map((pos) => {
     const length = pos.end - pos.start;
-    const pair = pairs.find((p) => pos.start >= p.fence.fenceStart && pos.start < p.fence.fenceEnd);
-    if (pair) {
-      const { bodyStart, bodyEnd } = pair.fence;
-      if (pos.start < bodyStart || pos.start >= bodyEnd) return null;
-      const start = pair.domStart + (pos.start - bodyStart);
-      return { start, end: Math.min(start + length, pair.domEnd) };
+    const region = regions.find((r) => inSpans(r.raw, pos.start));
+    if (!region) return null;
+
+    const fence = region.fences.find((f) => pos.start >= f.fenceStart && pos.start < f.fenceEnd);
+    if (fence) {
+      const pair = region.pairs.find((p) => p.fence === fence);
+      if (!pair) return null;
+      const line = fence.lines.find((l) => pos.start >= l.rawStart && pos.start < l.rawStart + l.length);
+      if (!line) return null;
+      const start = pair.source.domStart + line.bodyOffset + (pos.start - line.rawStart);
+      return { start, end: Math.min(start + length, pair.source.domEnd) };
     }
-    const gap = gaps.find((g) => pos.start >= g.rawStart && pos.start < g.rawEnd);
+
+    const gap = region.gaps.find((g) => pos.start >= g.rawFrom && pos.start < g.rawTo);
     if (!gap) return null;
     const needle = lowerRaw.slice(pos.start, pos.end);
-    const ordinal = occurrences(lowerRaw.slice(gap.rawStart, gap.rawEnd), needle).indexOf(
-      pos.start - gap.rawStart,
-    );
-    const onScreen = occurrences(lowerDom.slice(gap.domStart, gap.domEnd), needle);
+    const ordinal = occurrencesIn(lowerRaw, gap.raw, needle).indexOf(pos.start);
+    const onScreen = occurrencesIn(lowerDom, gap.dom, needle);
     if (ordinal === -1 || ordinal >= onScreen.length) return null;
-    const start = gap.domStart + onScreen[ordinal];
-    return { start, end: start + length };
+    return { start: onScreen[ordinal], end: onScreen[ordinal] + length };
   });
 }
 
@@ -386,6 +557,12 @@ export interface HighlightOptions {
    * `mapRawPositionsToDom`). Without it, offsets are DOM offsets as before.
    */
   sourceText?: string;
+  /**
+   * Parts of `sourceText` drawn in a place of their own (chat's reasoning and
+   * tool-log chips). Without it the whole text is one region in raw order — how
+   * History draws it.
+   */
+  sections?: HighlightSection[];
 }
 
 function applyHighlightsInternal(
@@ -403,7 +580,13 @@ function applyHighlightsInternal(
   const textNodes = collectTextNodes(container);
   const positions: Array<MatchPosition | null> =
     (options?.sourceText !== undefined
-      ? mapRawPositionsToDom(container, textNodes, options.sourceText, matchPositions)
+      ? mapRawPositionsToDom(
+          container,
+          textNodes,
+          options.sourceText,
+          matchPositions,
+          options.sections ?? [],
+        )
       : null) ?? matchPositions;
   const ranges = positions.map((pos) => (pos ? buildRange(textNodes, pos.start, pos.end) : null));
   ranges.forEach((range) => {

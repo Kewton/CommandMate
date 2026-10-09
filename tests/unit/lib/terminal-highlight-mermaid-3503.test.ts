@@ -22,6 +22,7 @@ import {
   findMermaidFences,
   makeHistoryNamespace,
   MERMAID_SOURCE_ATTR,
+  SEARCH_SECTION_ATTR,
   SEARCH_SKIP_ATTR,
   type MatchPosition,
 } from '@/lib/terminal-highlight';
@@ -288,3 +289,101 @@ describe('[#3503] messages without a drawn diagram are unchanged (negative contr
     expect(withSource).toEqual(marked().map((r) => r.toString()));
   });
 });
+
+// ---------------------------------------------------------------------------
+// Quoted fences and sections drawn elsewhere (chat's reasoning chip)
+// ---------------------------------------------------------------------------
+
+const QUOTED = ['> **Thinking**', '>', '> ```mermaid', '> graph TD', '> A[omega]', '> ```', '', 'Answer.', '', '```mermaid', 'graph TD', 'A[omega]', '```'].join('\n');
+const SAME_BODY = 'graph TD\nA[omega]';
+
+describe('[#3503] fences inside a block quote', () => {
+  it('are found, with the quote markers taken off the body', () => {
+    const fences = findMermaidFences(QUOTED);
+    expect(fences.map((f) => [f.body, f.quoteDepth])).toEqual([
+      [SAME_BODY, 1],
+      [SAME_BODY, 0],
+    ]);
+    const [quoted] = fences;
+    for (const line of quoted.lines) {
+      expect(QUOTED.slice(line.rawStart, line.rawStart + line.length)).toBe(
+        quoted.body.slice(line.bodyOffset, line.bodyOffset + line.length),
+      );
+    }
+  });
+
+  it('end where the quote ends, even without a closing line', () => {
+    const raw = '> ```mermaid\n> graph TD\n> A-->B\n\nafter';
+    const [fence] = findMermaidFences(raw);
+    expect(fence.body).toBe('graph TD\nA-->B');
+    expect(raw.slice(fence.fenceEnd)).toBe('\n\nafter');
+  });
+
+  it('nested quotes keep their depth', () => {
+    const raw = '> > ```mermaid\n> > graph LR\n> > ```';
+    expect(findMermaidFences(raw).map((f) => [f.body, f.quoteDepth])).toEqual([['graph LR', 2]]);
+  });
+});
+
+describe('[#3503] hits in a quoted diagram and an identical plain one', () => {
+  /** History: one region, raw order — the quote is drawn where it is. */
+  const HISTORY_DOM =
+    `<blockquote><p><strong>Thinking</strong></p>\n${block(SAME_BODY, 'omega')}</blockquote>\n` +
+    `<p>Answer.</p>\n${block(SAME_BODY, 'omega')}`;
+
+  /** Chat: the answer first, the reasoning after it in a section of its own. */
+  const CHAT_DOM =
+    `<p>Answer.</p>\n${block(SAME_BODY, 'omega')}` +
+    `<button>Thinking (1)</button><div ${SEARCH_SECTION_ATTR}="chat-reasoning">${block(SAME_BODY, 'omega')}</div>`;
+  const REASONING = [{ key: 'chat-reasoning', ranges: [{ start: 0, end: QUOTED.indexOf('\n\nAnswer.') + 1 }] }];
+
+  function sourceOf(range: Range): Element | null {
+    return range.startContainer.parentElement?.closest(`[${MERMAID_SOURCE_ATTR}]`) ?? null;
+  }
+
+  it('History: each hit opens its own diagram’s source', () => {
+    const container = mount(HISTORY_DOM);
+    applyHistoryHighlights(container, hitsOf(QUOTED, 'omega'), -1, NAMESPACE, { sourceText: QUOTED });
+    const sources = container.querySelectorAll(`[${MERMAID_SOURCE_ATTR}]`);
+    const ranges = marked();
+    expect(ranges.map((r) => r.toString())).toEqual(['omega', 'omega']);
+    expect(ranges.map(sourceOf)).toEqual([sources[0], sources[1]]);
+    expect(Array.from(container.querySelectorAll('details')).map((d) => d.open)).toEqual([true, true]);
+  });
+
+  it('chat: the reasoning’s hit goes to the reasoning section, the answer’s to the answer', () => {
+    const container = mount(CHAT_DOM);
+    applyHistoryHighlights(container, hitsOf(QUOTED, 'omega'), -1, NAMESPACE, {
+      sourceText: QUOTED,
+      sections: REASONING,
+    });
+    const section = container.querySelector(`[${SEARCH_SECTION_ATTR}]`)!;
+    const [reasoningHit, answerHit] = marked();
+    expect(section.contains(sourceOf(reasoningHit))).toBe(true);
+    expect(sourceOf(answerHit)).not.toBeNull();
+    expect(section.contains(sourceOf(answerHit))).toBe(false);
+  });
+
+  it('chat with the reasoning chip shut: its hit is not put on the answer’s diagram', () => {
+    const container = mount(`<p>Answer.</p>\n${block(SAME_BODY, 'omega')}<button>Thinking (1)</button>`);
+    applyHistoryHighlights(container, hitsOf(QUOTED, 'omega'), 0, NAMESPACE, {
+      sourceText: QUOTED,
+      sections: REASONING,
+    });
+    // Only the answer's hit is markable; the reasoning's (current) has no place.
+    const ranges = marked();
+    expect(ranges).toHaveLength(1);
+    expect(sourceOf(ranges[0])).not.toBeNull();
+    expect(container.querySelector('#' + NAMESPACE.fallbackOverlayId)).toBeNull();
+  });
+
+  it('negative control: no sections behaves exactly as an empty list', () => {
+    const container = mount(RENDERED);
+    applyHistoryHighlights(container, hitsOf(RAW, 'alpha'), -1, NAMESPACE, { sourceText: RAW });
+    const plain = marked().map((r) => [r.startContainer, r.startOffset]);
+    registry.clear();
+    applyHistoryHighlights(container, hitsOf(RAW, 'alpha'), -1, NAMESPACE, { sourceText: RAW, sections: [] });
+    expect(marked().map((r) => [r.startContainer, r.startOffset])).toEqual(plain);
+  });
+});
+

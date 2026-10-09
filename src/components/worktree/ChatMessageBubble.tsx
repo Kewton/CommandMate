@@ -86,6 +86,10 @@ import { ChatImage } from '@/components/worktree/ChatImage';
 import { ChatVideo } from '@/components/worktree/ChatVideo';
 import { MERMAID_MARKDOWN_COMPONENTS } from '@/components/worktree/mermaid-markdown';
 import {
+  CHAT_SEARCH_SECTION_REASONING,
+  CHAT_SEARCH_SECTION_TOOL_LOG,
+} from '@/components/worktree/chat-search-sections';
+import {
   chatMarkdownCopyText,
   chatMarkdownFullCopyText,
   splitChatMarkdownBody,
@@ -966,26 +970,32 @@ export const ChatMarkdownBody = memo(function ChatMarkdownBody({
       </ReactMarkdown>
       {split.reasoning !== null && (
         <ChatThinkingDisclosure blocks={split.reasoningBlocks}>
-          <ReactMarkdown
-            remarkPlugins={SHARED_REMARK_PLUGINS}
-            rehypePlugins={rehypePlugins}
-            urlTransform={chatUrlTransform}
-            components={components}
-          >
-            {split.reasoning}
-          </ReactMarkdown>
+          {/* [#3503] Tells search which part of the raw text this is drawn
+              from (`chatSearchSections`); `contents` keeps the layout as is. */}
+          <div data-search-section={CHAT_SEARCH_SECTION_REASONING} className="contents">
+            <ReactMarkdown
+              remarkPlugins={SHARED_REMARK_PLUGINS}
+              rehypePlugins={rehypePlugins}
+              urlTransform={chatUrlTransform}
+              components={components}
+            >
+              {split.reasoning}
+            </ReactMarkdown>
+          </div>
         </ChatThinkingDisclosure>
       )}
       {split.toolCalls > 0 && (
         <ChatToolLogDisclosure toolCalls={split.toolCalls}>
-          <ReactMarkdown
-            remarkPlugins={SHARED_REMARK_PLUGINS}
-            rehypePlugins={rehypePlugins}
-            urlTransform={chatUrlTransform}
-            components={components}
-          >
-            {split.toolLog}
-          </ReactMarkdown>
+          <div data-search-section={CHAT_SEARCH_SECTION_TOOL_LOG} className="contents">
+            <ReactMarkdown
+              remarkPlugins={SHARED_REMARK_PLUGINS}
+              rehypePlugins={rehypePlugins}
+              urlTransform={chatUrlTransform}
+              components={components}
+            >
+              {split.toolLog}
+            </ReactMarkdown>
+          </div>
         </ChatToolLogDisclosure>
       )}
     </>

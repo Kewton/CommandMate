@@ -400,4 +400,103 @@ describe('[#3503] search highlights reach the folded source', () => {
     expect(markedTexts(name)).toEqual(['sentinel']);
     expectSourceHit(name);
   });
+
+  // -------------------------------------------------------------------------
+  // A diagram inside the leading `> **Thinking**` quote, and the same diagram
+  // again in the answer: each hit must open and mark ITS diagram's source.
+  // -------------------------------------------------------------------------
+
+  const QUOTED_THEN_PLAIN = [
+    '> **Thinking**',
+    '>',
+    '> ```mermaid',
+    '> graph TD',
+    '> A[sentinel]',
+    '> ```',
+    '',
+    'The answer.',
+    '',
+    '```mermaid',
+    'graph TD',
+    'A[sentinel]',
+    '```',
+  ].join('\n');
+
+  function captureScroll(): { targets: Element[]; restore: () => void } {
+    const targets: Element[] = [];
+    const original = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = function (this: Element) {
+      targets.push(this);
+    };
+    return { targets, restore: () => (Element.prototype.scrollIntoView = original) };
+  }
+
+  it('ChatTranscript: the hit in the reasoning lands on the reasoning’s diagram, the other on the answer’s', async () => {
+    const scroll = captureScroll();
+    try {
+      render(
+        <ChatTranscript
+          messages={[
+            message({ id: 'u-1', role: 'user', content: 'draw', requestId: undefined }),
+            message({ content: QUOTED_THEN_PLAIN }),
+          ]}
+          worktreeId="wt-3503"
+          cliToolId="opencode"
+          onFilePathClick={vi.fn()}
+        />,
+      );
+      fireEvent.click(screen.getByTestId('chat-transcript-search-toggle'));
+      fireEvent.change(screen.getByLabelText('worktree.history.search.keywordLabel'), {
+        target: { value: 'sentinel' },
+      });
+      await waitFor(() => expect(screen.getByRole('status').textContent).toBe('1/2'));
+      // The current hit (1st in the raw text) is the one in the reasoning.
+      const thinking = await screen.findByTestId(CHAT_THINKING_BODY_TESTID);
+      const thinkingSource = thinking.querySelector(`[${MERMAID_SOURCE_ATTR}]`) as HTMLElement;
+      await waitFor(() => expect(scroll.targets).toContain(thinkingSource));
+      expect((thinkingSource.closest('details') as HTMLDetailsElement).open).toBe(true);
+      // The other hit is marked inside the answer's diagram, not the reasoning's.
+      await waitFor(() => expect(markedTexts('chat-search')).toEqual(['sentinel']));
+      const [other] = registry.get('chat-search')!.ranges;
+      const otherSource = other.startContainer.parentElement?.closest(`[${MERMAID_SOURCE_ATTR}]`);
+      expect(otherSource).not.toBeNull();
+      expect(thinking.contains(otherSource!)).toBe(false);
+      expect((otherSource!.closest('details') as HTMLDetailsElement).open).toBe(true);
+    } finally {
+      scroll.restore();
+    }
+  });
+
+  it('HistoryPane: the hit in the later, unquoted diagram lands on the later diagram', async () => {
+    const scroll = captureScroll();
+    try {
+      render(
+        <HistoryPane
+          messages={[
+            message({ id: 'u-1', role: 'user', content: 'draw', requestId: undefined }),
+            message({ content: QUOTED_THEN_PLAIN }),
+          ]}
+          worktreeId="wt-3503"
+          onFilePathClick={vi.fn()}
+          splitIndex={2}
+        />,
+      );
+      fireEvent.click(screen.getByRole('button', { name: /search/i }));
+      fireEvent.change(screen.getByLabelText(/keyword/i), { target: { value: 'sentinel' } });
+      await waitFor(() => expect(markedTexts('history-search-2')).toEqual(['sentinel']));
+
+      const sources = Array.from(document.querySelectorAll(`[${MERMAID_SOURCE_ATTR}]`));
+      expect(sources).toHaveLength(2);
+      expect(sources[0].closest('blockquote')).not.toBeNull();
+      expect(sources[1].closest('blockquote')).toBeNull();
+      // Non-current = the 2nd raw hit → the later diagram's source.
+      const [later] = registry.get('history-search-2')!.ranges;
+      expect(sources[1].contains(later.startContainer)).toBe(true);
+      // Current = the 1st raw hit → the quoted diagram's source.
+      await waitFor(() => expect(scroll.targets).toContain(sources[0]));
+    } finally {
+      scroll.restore();
+    }
+  });
 });
+

@@ -162,7 +162,12 @@ import { normalizeChatFilePath } from '@/lib/chat/chat-file-path';
 import { probeChatFilePath } from '@/lib/chat/chat-file-probe';
 import { useChatFileLinkScope } from '@/lib/chat/chat-file-link-scope';
 import { ChatImageScopeProvider, type ChatImageScope } from '@/lib/chat/chat-image';
-import { applyHistoryHighlights, clearHistoryHighlights } from '@/lib/terminal-highlight';
+import {
+  applyHistoryHighlights,
+  clearHistoryHighlights,
+  type HighlightOptions,
+} from '@/lib/terminal-highlight';
+import { chatSearchSections } from './chat-search-sections';
 import { HISTORY_STICK_TO_BOTTOM_THRESHOLD_PX, isNearBottom } from '@/lib/history-virtualization';
 import {
   buildChatTranscriptRows,
@@ -190,6 +195,17 @@ import {
 } from './ChatMessageBubble';
 import { CHAT_LIVE_TURN_TESTID, ChatLiveTurnBubble } from './ChatLiveTurnBubble';
 import { HistorySearchBar } from './HistorySearchBar';
+
+/**
+ * [Issue #3503] The highlighter's options for one message: the raw text, and
+ * where its reasoning / tool-log sections are — this surface draws them under
+ * chips, after the answer, not in raw order.
+ */
+function searchHighlightOptions(sourceText: string | undefined): HighlightOptions {
+  return sourceText === undefined
+    ? {}
+    : { sourceText, sections: chatSearchSections(sourceText) };
+}
 
 // ============================================================================
 // Constants
@@ -1361,7 +1377,7 @@ export const ChatTranscript = memo(function ChatTranscript({
         match.ranges,
         isCurrent ? currentMatch.localIndex : -1,
         highlightNamespace,
-        { sourceText: searchSourceById.get(match.messageId) },
+        searchHighlightOptions(searchSourceById.get(match.messageId)),
       );
       if (isCurrent && element instanceof HTMLElement) currentMatchElement = element;
     }
