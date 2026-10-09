@@ -593,6 +593,23 @@ sessionStatus=running && reason ∈ {no_recent_output, unknown_frame, default}
 立てないため従来どおり最初のポーリングで exit 0 になります。セッション自体が消えた場合も従来どおり
 exit 0 です。
 
+#### バックグラウンド作業を残して止まったターンは保留される（Issue #2614 / #3430 / #3451）
+
+エージェントが「未完了のバックグラウンド作業（`schedule` のタイマー、バックグラウンドで走らせたコマンド、
+`Monitor` など）を残したまま、作業が終われば自分で再開する」と報告してターンを閉じることがあります
+（`structuredEvents.lastEventDetail` が `self_resume_pending` の `stop`）。ワーカーが作業を終えたように
+見えても、このとき `wait` は完了を返さず、**その `stop` を最大 30 分（`SELF_RESUME_HOLD_MS`）保留**します。
+
+- 保留中は stderr に `ended its turn with background work still running` と出し、待機を続けます
+  （完了後の出力には `heldForSelfResume=<秒>` が付きます）
+- 保留が解けるのは、エージェントが再開して新しいターンが始まり、次の `stop` が届いたとき。その `stop` で完了とします
+- 30 分は `stop` の時刻（無ければこの `wait` が最初に見た時刻）から数えます。上限に達しても再開しなければ、
+  `Note: ... completing on that stop` を出してその `stop` で完了とします
+- 対象のツールは **Antigravity**（Issue #2614）と **Claude**（Issue #3430。`run_in_background` の `Bash`・
+  `Monitor`・バックグラウンドのサブエージェントが未完了のとき。transcript から判定し、判定できなければ
+  従来どおり完了扱い）です。ほかのツールの `stop` は保留しません
+- `--timeout` / `--stall-timeout` は 30 分より短ければそちらが優先です（保留の途中でも exit 124 になります）
+
 #### 次の依頼を送る前の待ちは `wait` で行う（Issue #3337）
 
 `capture --json` の `sessionStatus` を読んで `ready` になったら送る、という待ち方はしないでください。
@@ -642,6 +659,12 @@ hooks 設定を使って観測した結果です（詳細は
   60 秒後に届くため、採用すると同じ誤判定が 1 分遅れで再現します
 - 完了しない間は stderr に理由（`turnStartedAt` と `lastStopEventAt`）を出し続けます。
   最終的には `--timeout` で exit 124 になります — 「ゴミを 0 で通す」より「止める」ほうが安全です
+- 例外（Issue #3429）: 最新の送信を `Stop` が答えた**後**に、送信なしで開いたターン（実測: `Stop` の
+  3 秒後に届いた `pre_tool_use(AskUserQuestion)`）には `Stop` が来ません。次をすべて満たすとき、
+  60 秒待ってからその `Stop` で完了します（stderr に `completing on that stop` の Note が出ます）。
+  サーバーがそのターンを `closedBy: scraper_evidence` / `stale` で閉じている／チャット台帳の最新の
+  送信より `lastStopEventAt` が新しい／60 秒間画面が変わらない。上流障害（最新の送信に `Stop` が
+  無い）は従来どおり `--timeout` まで待ちます。`--timeout` / `--stall-timeout` が短ければそちらが優先です
 
 #### `ask` の上流障害と `id=context-limit`（Issue #3011）
 
@@ -1463,9 +1486,7 @@ commandmate capture <worktree-id> --instance codex-2 # 追加インスタンス�
 ```json
 {
   "isRunning": true,
-  "isComplete": false,
   "isPromptWaiting": false,
-  "isGenerating": true,
   "content": "",
   "realtimeSnippet": "(last 100 rows)",
   "lineCount": 42,
@@ -1479,7 +1500,6 @@ commandmate capture <worktree-id> --instance codex-2 # 追加インスタンス�
     "lastEnterFallback": null
   },
   "thinking": true,
-  "thinkingMessage": "Claude is thinking...",
   "cliToolId": "claude",
   "isSelectionListActive": false,
   "isPagerActive": false,
@@ -1578,11 +1598,11 @@ commandmate capture <worktree-id> --instance codex-2 # 追加インスタンス�
 `realtimeSnippet` に直接 `.trim()` を呼ぶと、止まっているセッションではキーが無いので例外になる。
 `content` は差分なので単独では判断しない。
 
-**廃止の予定（Issue #3394）**: `isComplete` / `isGenerating` / `thinkingMessage` は廃止の予定です（次以降のマイナーの版で消す。#3395）。それまでは値を出し続けます。置き換え先は、`isComplete` → `isPromptWaiting`（同じ値。中身は「承認待ち」で、名前と合っていません）、`isGenerating` → `thinking`、`thinkingMessage` → `thinking` と `cliToolId` です。
+**v0.45.0 で削除（#3395）**: `isComplete` / `isGenerating` / `thinkingMessage`（#3394 で廃止を告知）は応答に含まれません。置き換え先は、`isComplete` → `isPromptWaiting`（同じ値。中身は「承認待ち」で、名前と合っていません）、`isGenerating` → `thinking`、`thinkingMessage` → `thinking` と `cliToolId` です。
 
 **セッションが動いていないとき（`isRunning: false`）は、画面から読む欄がキーごと出ません**
 （`false` や `null` にはなりません。Issue #3300）。`autoYes` / `isPromptWaiting` / `promptData` /
-`thinking` / `thinkingMessage` / `isComplete` / `isGenerating` / `realtimeSnippet` /
+`thinking` / `realtimeSnippet` /
 `lastCapturedLine` / `isSelectionListActive` / `lastServerResponseTimestamp` /
 `serverPollerActive` が該当します。`jq` で読むときは `.isPromptWaiting // false` のように、
 欄が無い場合の値を決めてください。Auto-Yes は止まっているインスタンスにも設定できるので、

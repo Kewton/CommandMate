@@ -24,6 +24,7 @@ import type { AgentEventSource, NormalizedAgentEvent } from '@/lib/hooks/sources
 import {
   agentEventKeyClaimedAt,
   isDuplicateAgentEvent,
+  isPreToolUseOutsideTurn,
   joinOpenTurnFromDuplicate,
   recordAgentEvent,
   recordAskUserQuestion,
@@ -139,6 +140,47 @@ function readSessionId(
     return { error: `sessionId must be a string of at most ${MAX_SESSION_ID_LENGTH} characters` };
   }
   return { sessionId };
+}
+
+/** An agent-type name a log line may carry as itself: short, and no path or prose. */
+const LOGGABLE_AGENT_TYPE = /^[A-Za-z0-9_.:-]{1,64}$/;
+
+/**
+ * Who sent a hook, in a form a log line may carry (Issue #3446).
+ *
+ * The payload's own identifiers — the agent session, the subagent (`agent_id`
+ * and `agent_type`, which Claude adds when a subagent's hook fires), the
+ * transcript and the tool call — each as {@link shortSessionTag}'s hash prefix,
+ * so the session and the transcript path are never written. A hash still lets
+ * an operator tell whether two lines came from the same sender, and check a
+ * line against a transcript by hashing its ids the same way. `agent_type` is a
+ * name, kept as itself only when it looks like one.
+ *
+ * Only for the lines that need it — a question recorded or set aside, a
+ * `pre_tool_use` that opened no turn — never for every delivery.
+ */
+export function hookSenderTags(
+  payload: Record<string, unknown>,
+  sessionId: string | undefined
+): Record<string, string | null> {
+  const tag = (value: string | undefined): string | null =>
+    value === undefined ? null : shortSessionTag(value);
+  const agentType = readString(payload, 'agent_type');
+  return {
+    session: tag(sessionId),
+    agent: tag(readString(payload, 'agent_id')),
+    agentType: agentType !== undefined && LOGGABLE_AGENT_TYPE.test(agentType) ? agentType : null,
+    transcript: tag(readString(payload, 'transcript_path')),
+    toolUse: tag(readString(payload, 'tool_use_id')),
+  };
+}
+
+/**
+ * Whether the source opens its turns on its prompts (Issue #3437): read off the
+ * declaration, never the tool id.
+ */
+function promptOpensTurns(source: AgentEventSource): boolean {
+  return source.capabilities.supportedEvents.includes('user_prompt_submit');
 }
 
 /** The instance, the worktree id and `cwd` the event names, or an error string. */
@@ -327,6 +369,10 @@ export function applyAgentEventToState(
       // turn fires `UserPromptSubmit` as well. The source says which prompts
       // those are; the state decides whether there is a turn to join.
       joinsOpenTurn,
+      // Issue #3437: read off the declaration, never the tool id. A source that
+      // reports its prompts opens its turns on them, so a `pre_tool_use` after
+      // its own `Stop` with no prompt since does not begin one.
+      promptOpensTurns: promptOpensTurns(source),
     },
     {
       // Issue #1903: the declared value, read off the source this route already
@@ -346,6 +392,24 @@ export function applyAgentEventToState(
       instanceId: instanceParam,
       event,
       reason: recordOutcome.skipped,
+    });
+    return;
+  }
+
+  // Issue #3446: the delivery #3437 keeps from opening a turn is the one whose
+  // sender nobody could name afterwards, so it is logged with the payload's
+  // identifiers. Asked after the event was applied: the turn is still closed by
+  // the agent's own `stop` exactly when the transition declined to open one.
+  if (
+    event === 'pre_tool_use' &&
+    isPreToolUseOutsideTurn(worktree.id, tool, instanceParam, promptOpensTurns(source))
+  ) {
+    logger.info('agent-event-pre-tool-use-outside-turn', {
+      worktreeId: worktree.id,
+      tool,
+      instanceId: instanceParam,
+      detail,
+      ...hookSenderTags(payload, sessionId),
     });
   }
 }
@@ -388,7 +452,7 @@ export function recordQuestionIfAsked(
   payload: Record<string, unknown>,
   logger: AgentEventLogger
 ): void {
-  const { worktree, tool, source, instanceParam, event, receivedAt } = ctx;
+  const { worktree, tool, source, instanceParam, event, sessionId, receivedAt } = ctx;
   if (event === 'pre_tool_use') {
     // Issue #1726: the one event whose *body* is the point. The injected hook
     // carries `matcher: "AskUserQuestion"`, but `tool_name` is re-read here
@@ -404,15 +468,32 @@ export function recordQuestionIfAsked(
     // (S7). opencode's `question.asked` carries structured choices in a shape
     // that shares no field name with Claude's `tool_input.questions`.
     const spec = source.parseQuestion(payload);
-    if (spec) {
-      recordAskUserQuestion(worktree.id, tool, instanceParam, spec, receivedAt);
-      logger.info('ask-user-question-recorded', {
-        worktreeId: worktree.id,
-        tool,
-        instanceId: instanceParam,
-        questionCount: spec.questions.length,
-        optionCounts: spec.questions.map((q) => q.choices.length),
-      });
+    if (!spec) return;
+
+    const fields = {
+      worktreeId: worktree.id,
+      tool,
+      instanceId: instanceParam,
+      questionCount: spec.questions.length,
+      optionCounts: spec.questions.map((q) => q.choices.length),
+      ...hookSenderTags(payload, sessionId),
+    };
+
+    // Issue #3446: a question asked outside any turn — after the agent's own
+    // `stop`, with no prompt since, the event #3437 keeps from opening a turn —
+    // is not filed. Measured on 2026-10-07: such a `PreToolUse(AskUserQuestion)`
+    // was nowhere in the session's transcript and the pane showed no picker,
+    // so a record of it is a question nobody is being asked. Not filing it,
+    // rather than filing it and teaching every reader to ignore it, keeps the
+    // episode's one meaning — "the picker on screen asks this". The `stop`
+    // before it has already released any earlier question, so nothing is left
+    // waiting. A question inside a turn is untouched: there the turn is open.
+    if (isPreToolUseOutsideTurn(worktree.id, tool, instanceParam, promptOpensTurns(source))) {
+      logger.info('ask-user-question-outside-turn', fields);
+      return;
     }
+
+    recordAskUserQuestion(worktree.id, tool, instanceParam, spec, receivedAt);
+    logger.info('ask-user-question-recorded', fields);
   }
 }

@@ -24,6 +24,7 @@ const logger = createLogger('git-status');
  * - Uses execFile for security (no shell interpretation)
  * - 1 second timeout to prevent UI blocking
  * - Returns (unknown) on error without exposing details to client
+ * - A failed `status --porcelain` yields `statusUnknown: true` (never "clean", Issue #3435)
  */
 export async function getGitStatus(
   worktreePath: string,
@@ -47,7 +48,11 @@ export async function getGitStatus(
   }
 
   const commitHash = commitOutput ?? '(unknown)';
-  const isDirty = statusOutput !== null && statusOutput.length > 0;
+  // Issue #3435: a failed `status` (null, typically the 1s timeout) is NOT
+  // clean. isDirty stays boolean for existing readers; statusUnknown says the
+  // value carries no information.
+  const statusUnknown = statusOutput === null;
+  const isDirty = !statusUnknown && statusOutput.length > 0;
 
   // Determine branch mismatch
   // No mismatch if:
@@ -66,6 +71,8 @@ export async function getGitStatus(
     isBranchMismatch,
     commitHash,
     isDirty,
+    // Only present when unknown, so successful payloads stay byte-identical.
+    ...(statusUnknown ? { statusUnknown: true } : {}),
   };
 }
 

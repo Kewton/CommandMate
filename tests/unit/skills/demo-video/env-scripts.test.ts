@@ -16,6 +16,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { removeTempDir } from '@tests/helpers/temp-dir';
+import { isPathWithin } from '@/config/system-directories';
 import { CLI_TOOL_IDS } from '@/lib/cli-tools/types';
 import { claudeProjectSlug } from '@/lib/hooks/sources/claude/transcript';
 import { findCodexRolloutPath } from '@/lib/hooks/sources/codex/history';
@@ -27,15 +28,22 @@ const SCRIPTS = path.join(REPO_ROOT, '.claude/skills/demo-video/scripts');
 const ENV_UP = path.join(SCRIPTS, 'env-up.sh');
 const ENV_DOWN = path.join(SCRIPTS, 'env-down.sh');
 
-// env-up refuses a state dir outside $HOME (validateDbPath rejects /tmp and
-// /var as system directories), so the scratch dir has to live under $HOME.
-//
-// Issue #2380: env-up ALSO refuses to run with $HOME set to the login home,
-// because it plants fake agent transcripts under `~/.claude/projects` and
+// Issue #2380: env-up refuses to run with $HOME set to the login home, because
+// it plants fake agent transcripts under `~/.claude/projects` and
 // `~/.codex/sessions`. So the scratch dir doubles as the HOME every script
 // here runs with: SCRATCH_HOME is `$HOME` for the child, and the demo state
 // dir sits inside it the way it would under /Users/Shared/cmdemo-home.
-const SCRATCH_HOME = path.join(os.homedir(), `.commandmate-demo-vitest-${process.pid}`);
+//
+// Issue #3479: it lives under the OS temp dir, NOT the real $HOME. It used to
+// be `~/.commandmate-demo-vitest-<pid>` because env-up requires the state dir
+// to be under `$HOME` and a real demo's validateDbPath rejects /tmp and /var —
+// but the `$HOME` env-up checks is the child's, which is SCRATCH_HOME itself,
+// and the stub server never runs validateDbPath. In the real home the dir was
+// a `$HOME` entry for every env-clean gate on the machine while a run was in
+// flight (#3395 failed on its own still-running test's dir). The physical path
+// (`/private/var/...` on macOS) so `pwd -P` in the scripts agrees with it.
+const SCRATCH_BASE = fs.realpathSync(os.tmpdir());
+const SCRATCH_HOME = path.join(SCRATCH_BASE, `.commandmate-demo-vitest-${process.pid}`);
 const DEMO_HOME = path.join(SCRATCH_HOME, '.commandmate-demo');
 const STATE_FILE = path.join(DEMO_HOME, 'state.env');
 const STUB = path.join(SCRATCH_HOME, 'stub-server.js');
@@ -85,11 +93,21 @@ const LIVE_SESSIONS = [
  * Port band this file allocates its demo port pair from.
  *
  * Chosen to sit clear of everything else the suite or the app binds (3000/3001,
- * 3011, 3100-3135, 3399+, 3999, 4000, 4200-4299, 4242, 4321, 5000, 6030, 8501)
- * and below the OS ephemeral range (49152+ on macOS), so a reservation here
- * cannot lose a race with a socket the kernel handed out.
+ * 3011, 3100-3135, 3399+, 3999, 4000, 4200-4299, 4242, 4321, 5000, 6030, 8501,
+ * 20241) and below the OS ephemeral range on every platform the suite runs on,
+ * so a port here is never handed out by the kernel to a `listen(0)` or an
+ * outgoing connection.
+ *
+ * "Every platform" is the point (Issue #3462). This was 34000, which is below
+ * macOS's range (49152+) but inside Linux's (32768-60999, measured in the CI
+ * runner image), so on CI the pair `beforeAll` probed free could be taken by
+ * any concurrent test worker between one env-up and the next: the probe is not
+ * a hold, and each env-up re-binds the port. The ceiling is pinned by the
+ * 'demo port band' test below.
  */
-const PORT_BAND_START = 34000;
+const PORT_BAND_START = 24000;
+/** The lowest ephemeral port of any platform the suite runs on (Linux's default). */
+const EPHEMERAL_PORT_FLOOR = 32768;
 
 /** The tmux session namespace the namespaced stub mints (Issue #3079). */
 const DEMO_NS = '0a1b2c3d';
@@ -205,8 +223,9 @@ async function portListening(port: number): Promise<boolean> {
 }
 
 beforeAll(async () => {
-  // Collect dirs left by runs that were killed before afterAll (#3025).
-  sweepStaleScratchDirs(os.homedir());
+  // Collect dirs left by runs that were killed before afterAll (#3025). Only
+  // under the temp dir: this file no longer writes to, or sweeps, the real home.
+  sweepStaleScratchDirs(SCRATCH_BASE);
   TEST_PORT = await reserveDemoPortPair();
   removeTempDir(SCRATCH_HOME);
   fs.mkdirSync(DEMO_HOME, { recursive: true });
@@ -276,11 +295,10 @@ afterEach(() => {
   fs.rmSync(REQUEST_LOG, { force: true });
 });
 
-// The scratch dir has to sit under $HOME (env-up refuses anything else, because
-// validateDbPath rejects /tmp and /var), which makes leaving it behind a leak
-// into a real user's home: one directory per `npm run test:unit`, never
-// collected. afterAll still runs when a test — or beforeAll — fails, and the
-// removal is force/recursive so it cannot throw and mask that failure.
+// Leaving the scratch dir behind is a leak: one directory per
+// `npm run test:unit`, collected only by the next run's sweep. afterAll still
+// runs when a test — or beforeAll — fails, and the removal is force/recursive
+// so it cannot throw and mask that failure.
 // `no-home-leftovers.test.ts` runs this file in a child process and asserts the
 // directory is gone afterwards, so deleting this hook turns that test red.
 afterAll(() => {
@@ -303,24 +321,51 @@ function stubEnv(): Record<string, string> {
   };
 }
 
+describe('demo port band', () => {
+  it('sits wholly below every ephemeral range, so no other process is handed the pair', () => {
+    // Issue #3462: a band inside Linux's 32768-60999 lost its port to the CI
+    // shard's own test workers between two env-up runs.
+    expect(PORT_BAND_START + PORT_BAND_PAIRS * 2 - 1).toBeLessThan(EPHEMERAL_PORT_FLOOR);
+    expect(TEST_PORT).toBeGreaterThanOrEqual(PORT_BAND_START);
+    expect(TEST_PORT + 1).toBeLessThan(EPHEMERAL_PORT_FLOOR);
+  });
+});
+
+describe('scratch location (Issue #3479)', () => {
+  it('keeps the scratch dir out of the real home, so env-clean never sees it', () => {
+    // A dir under the real $HOME was a `$HOME` entry for every parallel
+    // worktree's env-clean gate, and for this worker's own gate while its tests
+    // were still running (#3395: `.commandmate-demo-vitest-36552 [unattributed]`).
+    expect(isPathWithin(SCRATCH_HOME, os.homedir())).toBe(false);
+    expect(isPathWithin(SCRATCH_HOME, LOGIN_HOME)).toBe(false);
+    // Negative control: the check does see a path that is in the home.
+    expect(isPathWithin(path.join(os.homedir(), '.commandmate-demo-vitest-1'), os.homedir())).toBe(true);
+  });
+
+  it('is still a real directory that env-up accepts as an isolated HOME', () => {
+    expect(fs.statSync(SCRATCH_HOME).isDirectory()).toBe(true);
+    expect(isPathWithin(DEMO_HOME, SCRATCH_HOME)).toBe(true);
+  });
+});
+
 describe('env-up refuses configurations that could reach a live instance', () => {
   it('refuses port 3000', () => {
     const result = run(ENV_UP, [], { ...stubEnv(), CM_DEMO_PORT: '3000' });
-    expect(result.status).not.toBe(0);
+    expect(result.status, result.stderr).not.toBe(0);
     expect(result.stderr).toContain('must not be 3000');
     expect(fs.existsSync(STATE_FILE)).toBe(false);
   });
 
   it('refuses a state dir outside $HOME', () => {
     const result = run(ENV_UP, [], { ...stubEnv(), CM_DEMO_HOME: '/tmp/commandmate-demo' });
-    expect(result.status).not.toBe(0);
+    expect(result.status, result.stderr).not.toBe(0);
     expect(result.stderr).toContain('must live under $HOME');
   });
 
   it('refuses to start on top of an existing state file', () => {
     fs.writeFileSync(STATE_FILE, 'CM_DEMO_PID=1\n');
     const result = run(ENV_UP, [], stubEnv());
-    expect(result.status).not.toBe(0);
+    expect(result.status, result.stderr).not.toBe(0);
     expect(result.stderr).toContain('run env-down.sh first');
     fs.rmSync(STATE_FILE);
   });
@@ -330,7 +375,7 @@ describe('env-up boots an isolated instance', () => {
   it('waits for the port to answer, records state and seeds three worktrees', async () => {
     const result = run(ENV_UP, [], stubEnv());
     expect(result.stderr).toBe('');
-    expect(result.status).toBe(0);
+    expect(result.status, result.stderr).toBe(0);
 
     const state = readState();
     expect(state.CM_DEMO_PORT).toBe(String(TEST_PORT));
@@ -354,7 +399,8 @@ describe('env-up boots an isolated instance', () => {
     // constants, so env-up derives them from the directories it just created
     // and hands them on through state.env. record-scenes.test.ts runs the
     // product function over the same directory names.
-    expect(run(ENV_UP, [], stubEnv()).status).toBe(0);
+    const up = run(ENV_UP, [], stubEnv());
+    expect(up.status, up.stderr).toBe(0);
     const state = readState();
 
     expect(state.CM_DEMO_PRIMARY_WORKTREE_ID).toBe('cmdemo-app');
@@ -394,7 +440,8 @@ describe('env-up boots an isolated instance', () => {
     // before the branches exist. Committed on the feature branch they would be
     // changes outside the allow list, and the contract-verify take would film
     // its own harness failing the gate.
-    expect(run(ENV_UP, [], stubEnv()).status).toBe(0);
+    const up = run(ENV_UP, [], stubEnv());
+    expect(up.status, up.stderr).toBe(0);
     const state = readState();
     const onMain = (relative: string) =>
       spawnSync('git', ['-C', state.CM_DEMO_SEED_REPO, 'ls-tree', '--name-only', 'main', relative], {
@@ -428,7 +475,8 @@ describe('env-up boots an isolated instance', () => {
     // gate command is run here, in the worktree, before a server exists. This
     // runs the seed's own gate a second time to show it really passes, and
     // then breaks the work it judges to show the gate is not vacuous.
-    expect(run(ENV_UP, [], stubEnv()).status).toBe(0);
+    const up = run(ENV_UP, [], stubEnv());
+    expect(up.status, up.stderr).toBe(0);
     const state = readState();
     const gate = () =>
       spawnSync('node', ['--test'], { cwd: state.CM_DEMO_WORKTREE_PATH, encoding: 'utf8' });
@@ -455,7 +503,7 @@ describe('env-up boots an isolated instance', () => {
       CM_DEMO_PROC_MATCH: 'stub-wrong-port.js',
       CM_DEMO_READY_TIMEOUT: '3',
     });
-    expect(result.status).not.toBe(0);
+    expect(result.status, result.stderr).not.toBe(0);
     expect(result.stderr).toContain('did not answer');
     expect(fs.existsSync(STATE_FILE)).toBe(false);
     // The stub bound TEST_PORT+1; if boot cleanup had not run it would still be
@@ -471,7 +519,7 @@ describe('env-up boots an isolated instance', () => {
       CM_DEMO_PROC_MATCH: 'stub-exits.js',
       CM_DEMO_READY_TIMEOUT: '30',
     });
-    expect(result.status).not.toBe(0);
+    expect(result.status, result.stderr).not.toBe(0);
     expect(result.stderr).toContain('exited before becoming ready');
     expect(fs.existsSync(STATE_FILE)).toBe(false);
   }, 60_000);
@@ -479,7 +527,8 @@ describe('env-up boots an isolated instance', () => {
 
 describe('env-down stops exactly what env-up started', () => {
   it('refuses a pid whose command line no longer matches', () => {
-    expect(run(ENV_UP, [], stubEnv()).status).toBe(0);
+    const up = run(ENV_UP, [], stubEnv());
+    expect(up.status, up.stderr).toBe(0);
     const state = readState();
 
     const rewritten = fs
@@ -494,7 +543,8 @@ describe('env-down stops exactly what env-up started', () => {
   }, 60_000);
 
   it('refuses a state file that records port 3000', () => {
-    expect(run(ENV_UP, [], stubEnv()).status).toBe(0);
+    const up = run(ENV_UP, [], stubEnv());
+    expect(up.status, up.stderr).toBe(0);
     const state = readState();
     fs.writeFileSync(
       STATE_FILE,
@@ -508,7 +558,8 @@ describe('env-down stops exactly what env-up started', () => {
   }, 60_000);
 
   it('kills the server, frees the port and removes the state file and seed', async () => {
-    expect(run(ENV_UP, [], stubEnv()).status).toBe(0);
+    const up = run(ENV_UP, [], stubEnv());
+    expect(up.status, up.stderr).toBe(0);
     const state = readState();
 
     const result = run(ENV_DOWN, []);
@@ -520,7 +571,8 @@ describe('env-down stops exactly what env-up started', () => {
   }, 60_000);
 
   it('--purge removes the demo database together with its WAL sidecars', () => {
-    expect(run(ENV_UP, [], stubEnv()).status).toBe(0);
+    const up = run(ENV_UP, [], stubEnv());
+    expect(up.status, up.stderr).toBe(0);
     const state = readState();
     // The stub never opens SQLite, so stand the sidecars up explicitly: what is
     // being fixed is that `rm cm.db` alone left megabytes of -wal behind.
@@ -536,7 +588,8 @@ describe('env-down stops exactly what env-up started', () => {
   }, 60_000);
 
   it('kills the sessions this run accounts for and leaves the developer\'s alone', () => {
-    expect(run(ENV_UP, [], stubEnv()).status).toBe(0);
+    const up = run(ENV_UP, [], stubEnv());
+    expect(up.status, up.stderr).toBe(0);
     const state = readState();
 
     // What fake-agent.sh --record-to would have written.
@@ -570,7 +623,8 @@ describe('env-down stops exactly what env-up started', () => {
   }, 60_000);
 
   it('kills the namespaced sessions of this server, and not another server\'s (Issue #3079)', () => {
-    expect(run(ENV_UP, [], { ...stubEnv(), STUB_NAMESPACE: DEMO_NS }).status).toBe(0);
+    const up = run(ENV_UP, [], { ...stubEnv(), STUB_NAMESPACE: DEMO_NS });
+    expect(up.status, up.stderr).toBe(0);
     const state = readState();
     expect(state.CM_DEMO_SESSION_NAMESPACE).toBe(DEMO_NS);
 
@@ -612,7 +666,8 @@ describe('env-down stops exactly what env-up started', () => {
     // The demo DB outlives a plain env-down, and with it a namespace an earlier
     // case minted; a server that has none starts from no DB at all.
     for (const suffix of ['', '-wal', '-shm']) fs.rmSync(path.join(DEMO_HOME, `cm.db${suffix}`), { force: true });
-    expect(run(ENV_UP, [], stubEnv()).status).toBe(0);
+    const up = run(ENV_UP, [], stubEnv());
+    expect(up.status, up.stderr).toBe(0);
     const state = readState();
     expect(state).toHaveProperty('CM_DEMO_SESSION_NAMESPACE', '');
 
@@ -664,7 +719,7 @@ describe('env-up refuses to plant transcripts in the login home (Issue #2380)', 
       ? fs.readdirSync(path.join(LOGIN_HOME, '.claude/projects')).length
       : -1;
     const result = run(ENV_UP, [], { ...stubEnv(), HOME: LOGIN_HOME });
-    expect(result.status).toBe(2);
+    expect(result.status, result.stderr).toBe(2);
     expect(result.stderr).toContain('is the login home directory');
     expect(result.stderr).toContain('HOME=/Users/Shared/cmdemo-home');
     // Nothing was written or started: no state file, no seed, no server on the
@@ -684,7 +739,7 @@ describe('env-up refuses to plant transcripts in the login home (Issue #2380)', 
     fs.symlinkSync(LOGIN_HOME, link);
     try {
       const result = run(ENV_UP, [], { ...stubEnv(), HOME: link });
-      expect(result.status).toBe(2);
+      expect(result.status, result.stderr).toBe(2);
       expect(result.stderr).toContain('is the login home directory');
       expect(fs.existsSync(STATE_FILE)).toBe(false);
     } finally {
@@ -695,11 +750,11 @@ describe('env-up refuses to plant transcripts in the login home (Issue #2380)', 
 
   it('exits 2 when HOME is unset or points nowhere', () => {
     const unset = run(ENV_UP, [], { ...stubEnv(), HOME: undefined });
-    expect(unset.status).toBe(2);
+    expect(unset.status, unset.stderr).toBe(2);
     expect(unset.stderr).toContain('HOME is not set');
 
     const nowhere = run(ENV_UP, [], { ...stubEnv(), HOME: path.join(SCRATCH_HOME, 'does-not-exist') });
-    expect(nowhere.status).toBe(2);
+    expect(nowhere.status, nowhere.stderr).toBe(2);
     expect(nowhere.stderr).toContain('HOME does not exist');
     expect(fs.existsSync(STATE_FILE)).toBe(false);
   });
@@ -716,7 +771,7 @@ describe('env-up refuses to plant transcripts in the login home (Issue #2380)', 
     // same env, and the guard lets it through to the next check.
     fs.writeFileSync(STATE_FILE, 'CM_DEMO_PID=1\n');
     const result = run(ENV_UP, [], stubEnv());
-    expect(result.status).toBe(1);
+    expect(result.status, result.stderr).toBe(1);
     expect(result.stderr).toContain('run env-down.sh first');
     expect(result.stderr).not.toContain('login home');
     fs.rmSync(STATE_FILE);
@@ -725,7 +780,8 @@ describe('env-up refuses to plant transcripts in the login home (Issue #2380)', 
 
 describe('env-up plants the transcripts and announces the sessions (Issue #2380)', () => {
   it('writes a claude project file and a codex rollout under the isolated HOME', async () => {
-    expect(run(ENV_UP, [], stubEnv()).status).toBe(0);
+    const up = run(ENV_UP, [], stubEnv());
+    expect(up.status, up.stderr).toBe(0);
     const state = readState();
 
     expect(state.CM_DEMO_CLAUDE_SESSION_ID).toMatch(UUID);
@@ -764,7 +820,8 @@ describe('env-up plants the transcripts and announces the sessions (Issue #2380)
 
   it('honours $CODEX_HOME the way the reader does', async () => {
     const codexHome = path.join(SCRATCH_HOME, 'codex-elsewhere');
-    expect(run(ENV_UP, [], { ...stubEnv(), CODEX_HOME: codexHome }).status).toBe(0);
+    const up = run(ENV_UP, [], { ...stubEnv(), CODEX_HOME: codexHome });
+    expect(up.status, up.stderr).toBe(0);
     const state = readState();
     expect(state.CM_DEMO_CODEX_TRANSCRIPT.startsWith(path.join(codexHome, 'sessions') + path.sep)).toBe(true);
     await expect(findCodexRolloutPath(codexHome, state.CM_DEMO_CODEX_SESSION_ID)).resolves.toBe(
@@ -776,7 +833,8 @@ describe('env-up plants the transcripts and announces the sessions (Issue #2380)
   }, 60_000);
 
   it('tells the server the session ids and the default agents, the way a CLI would', () => {
-    expect(run(ENV_UP, [], stubEnv()).status).toBe(0);
+    const up = run(ENV_UP, [], stubEnv());
+    expect(up.status, up.stderr).toBe(0);
     const state = readState();
     const seen = requests();
 
@@ -816,7 +874,8 @@ describe('env-up plants the transcripts and announces the sessions (Issue #2380)
   }, 60_000);
 
   it('seeds the five-agent roster and the file the delegation reply links to', () => {
-    expect(run(ENV_UP, [], stubEnv()).status).toBe(0);
+    const up = run(ENV_UP, [], stubEnv());
+    expect(up.status, up.stderr).toBe(0);
     const state = readState();
     const onMain = (relative: string) =>
       spawnSync('git', ['-C', state.CM_DEMO_SEED_REPO, 'show', `main:${relative}`], { encoding: 'utf8' });
@@ -845,7 +904,8 @@ describe('env-up plants the transcripts and announces the sessions (Issue #2380)
 
 describe('env-down cleans up what #2380 added', () => {
   it('removes the planted transcripts, and only those', () => {
-    expect(run(ENV_UP, [], stubEnv()).status).toBe(0);
+    const up = run(ENV_UP, [], stubEnv());
+    expect(up.status, up.stderr).toBe(0);
     const state = readState();
     // A neighbour in the same project directory that this run did not plant.
     const neighbour = path.join(path.dirname(state.CM_DEMO_CLAUDE_TRANSCRIPT), 'someone-elses.jsonl');
@@ -860,7 +920,8 @@ describe('env-down cleans up what #2380 added', () => {
   }, 60_000);
 
   it('leaves a transcript alone when the state file points it somewhere else', () => {
-    expect(run(ENV_UP, [], stubEnv()).status).toBe(0);
+    const up = run(ENV_UP, [], stubEnv());
+    expect(up.status, up.stderr).toBe(0);
     const decoy = path.join(SCRATCH_HOME, 'not-a-transcript.jsonl');
     fs.writeFileSync(decoy, 'keep me');
     fs.writeFileSync(

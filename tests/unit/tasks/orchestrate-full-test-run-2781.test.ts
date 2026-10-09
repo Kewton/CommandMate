@@ -27,8 +27,24 @@ import path from 'path';
 const REPO_ROOT = path.resolve(__dirname, '../../..');
 const ORCHESTRATE_PATH = '.claude/commands/orchestrate.md';
 const ISSUE_CREATE_PATH = '.claude/commands/issue-create.md';
+// Since #3477 the 2-4-2 goal template lives with the contract generator; 2-4-2 points there.
+const GOAL_TEMPLATE_PATH = 'scripts/orchestrate/templates/goal.md';
+// Since #3481 the measurement behind 2-4-2 lives in docs/orchestrate/; 2-4-2 points there.
+const CONTRACT_EVIDENCE_PATH = 'docs/orchestrate/contract.md';
 const orchestrate = readFileSync(path.join(REPO_ROOT, ORCHESTRATE_PATH), 'utf-8');
+const goalTemplate = readFileSync(path.join(REPO_ROOT, GOAL_TEMPLATE_PATH), 'utf-8');
 const issueCreate = readFileSync(path.join(REPO_ROOT, ISSUE_CREATE_PATH), 'utf-8');
+const contractEvidence = readFileSync(path.join(REPO_ROOT, CONTRACT_EVIDENCE_PATH), 'utf-8');
+
+// Since #3481 (2 本目) the run-time-optional procedures live in docs/orchestrate/; the body section points there.
+/** The `## <heading>` section of docs/orchestrate/<file>, up to the next `## ` heading. */
+function docSection(file: string, heading: string): string {
+  const doc = readFileSync(path.join(REPO_ROOT, 'docs/orchestrate', file), 'utf-8');
+  const start = doc.indexOf(`\n## ${heading}\n`);
+  expect(start, `docs/orchestrate/${file} has no \`## ${heading}\``).toBeGreaterThanOrEqual(0);
+  const end = doc.indexOf('\n## ', start + 1);
+  return doc.slice(start, end === -1 ? undefined : end);
+}
 
 /** The body of `### <id>. …`, up to the next `### ` heading. */
 function section(id: string): string {
@@ -43,7 +59,11 @@ function section(id: string): string {
 }
 
 describe('[#2781] 2-4-2: the goal template still defaults to "do not run the full suite"', () => {
-  const body = section('2-4-2');
+  const body = `${section('2-4-2')}\n${goalTemplate}`;
+
+  it('points 2-4-2 at the template file', () => {
+    expect(section('2-4-2')).toContain(GOAL_TEMPLATE_PATH);
+  });
 
   it('keeps the default instruction verbatim', () => {
     expect(body).toContain('テスト全体（`npm run test:unit`）は実行しないこと。全体は検証ゲートか CI が実行する。');
@@ -73,7 +93,7 @@ describe('[#2781] 2-4-2: the goal template still defaults to "do not run the ful
 });
 
 describe('[#2781] 2-4-2: the reason the condition is narrow is recorded', () => {
-  const body = section('2-4-2');
+  const body = `${section('2-4-2')}\n${contractEvidence}`;
 
   it('names the asymmetry: verify takes the mutex, the worker does not', () => {
     expect(body).toContain('mutex: cpu.heavy');
@@ -93,7 +113,7 @@ describe('[#2781] 2-4-2: the reason the condition is narrow is recorded', () => 
 });
 
 describe('[#2781] 3-4: a gate whose tests all passed is not the worker’s fault', () => {
-  const body = section('3-4');
+  const body = `${section('3-4')}\n${docSection('exit-codes.md', '3-4 20 の対応')}`;
 
   it('lists "zero failed tests but exit 1" under the not-worker-caused verdicts', () => {
     const marker = '**ワーカー起因ではない**';

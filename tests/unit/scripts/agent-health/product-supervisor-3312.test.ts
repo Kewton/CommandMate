@@ -278,7 +278,9 @@ describe.skipIf(!HAS_TOOLS)('supervisor.sh (Issue #3312)', () => {
       const second = supervise();
       expect(second.status, second.stderr).toBe(75);
       expect(second.stderr).toContain('busy');
-      expect(ledgers()).toHaveLength(1);
+      const firstLedgers = ledgers();
+      expect(firstLedgers).toHaveLength(1);
+      const oldRunId = firstLedgers[0].runId;
 
       process.kill(first.pid!, 'SIGKILL');
       await waitFor(() => !alive(first.pid!), 'the first supervisor to die');
@@ -286,7 +288,13 @@ describe.skipIf(!HAS_TOOLS)('supervisor.sh (Issue #3312)', () => {
 
       const third = supervise({ CM_PRODUCT_STAGE_CMD: 'exit 0' });
       expect(third.status, third.stderr).toBe(0);
-      const [old, current] = ledgers();
+      // Picked by run id, not by file-name order: a run id is the start second
+      // plus a random suffix, so two runs started within the same second sort
+      // in random order (#3447).
+      const all = ledgers();
+      expect(all).toHaveLength(2);
+      const old = all.find((ledger) => ledger.runId === oldRunId)!;
+      const current = all.find((ledger) => ledger.runId !== oldRunId)!;
       expect(old.status).toBe('reclaimed');
       expect(current.reclaimedRuns).toEqual([old.runId]);
       expect(published().reclaim).toMatchObject({ status: 'pass', reclaimed: [old.runId] });
@@ -341,13 +349,16 @@ describe.skipIf(!HAS_TOOLS)('supervisor.sh (Issue #3312)', () => {
       await waitFor(() => fs.existsSync(path.join(base, 'paused-cleanup')), 'the supervisor to reach cleanup');
       process.kill(sup.pid!, 'SIGKILL');
       await waitFor(() => !alive(sup.pid!), 'the supervisor to die');
-      const server = serverPid(ledgers()[0]);
+      const [left] = ledgers();
+      const oldRunId = left.runId;
+      const server = serverPid(left);
       expect(alive(server)).toBe(true);
 
       const next = supervise({ CM_PRODUCT_STAGE_CMD: 'exit 0' });
       expect(next.status, next.stderr).toBe(0);
       expect(alive(server)).toBe(false);
-      expect(ledgers()[0].status).toBe('reclaimed');
+      // By run id, not file-name order: runs started in the same second sort randomly (#3460).
+      expect(ledgers().find((ledger) => ledger.runId === oldRunId)!.status).toBe('reclaimed');
       expect(published().stages.find((stage) => stage.id === 'run')).toMatchObject({ status: 'pass' });
       expect(pidsUnderRoot()).toEqual([]);
     },
@@ -500,7 +511,9 @@ describe.skipIf(!HAS_TOOLS)('supervisor.sh (Issue #3312)', () => {
       await waitFor(() => fs.existsSync(path.join(base, 'paused-up')), 'the server to be up');
       process.kill(sup.pid!, 'SIGKILL');
       await waitFor(() => !alive(sup.pid!), 'the supervisor to die');
-      const server = serverPid(ledgers()[0]);
+      const [left] = ledgers();
+      const oldRunId = left.runId;
+      const server = serverPid(left);
 
       const res = supervise({ CM_PRODUCT_STAGE_CMD: 'exit 0', CM_PRODUCT_LATE_START: `@${nowSec() - 60}` });
       expect(res.status, res.stderr).toBe(0);
@@ -508,7 +521,8 @@ describe.skipIf(!HAS_TOOLS)('supervisor.sh (Issue #3312)', () => {
       const result = published();
       expect(result.lateStart).toBe(true);
       expect(result.stages.map((stage) => stage.id)).toEqual(['reclaim']);
-      expect(ledgers()[1].resources).toEqual([]);
+      // The late run is the one that is not the old run (by id, not file-name order, #3460).
+      expect(ledgers().find((ledger) => ledger.runId !== oldRunId)!.resources).toEqual([]);
       expect(judgeProductRun({ date: DATE, runResult: result, leak: 'pass', now: new Date() }).status).toBe('skip');
     },
     TEST_TIMEOUT

@@ -109,6 +109,8 @@ export interface CheckoutResponse {
   success: true;
   currentBranch: string;
   isDirty: boolean;
+  /** Present (true) only when the post-op `git status` could not be read (Issue #3435). */
+  statusUnknown?: boolean;
 }
 
 /**
@@ -189,6 +191,8 @@ export interface ResetResponse {
   success: true;
   currentBranch: string;
   isDirty: boolean;
+  /** Present (true) only when the post-op `git status` could not be read (Issue #3435). */
+  statusUnknown?: boolean;
 }
 
 /**

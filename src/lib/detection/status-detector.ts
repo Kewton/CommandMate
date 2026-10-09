@@ -154,7 +154,7 @@ export const SELECTION_LIST_REASONS = new Set<string>([
  * The `running` reasons that mean "the agent is producing output right now"
  * (Issue #1912).
  *
- * `current-output-builder` derives `thinking` / `isGenerating` from this, and it
+ * `current-output-builder` derives `thinking` from this, and it
  * was a single `=== THINKING_INDICATOR` comparison until opencode grew a second
  * one: branch A of the opencode block answers `opencode_processing_indicator`
  * for the footer that reads `esc interrupt`, which is opencode's ONLY signal

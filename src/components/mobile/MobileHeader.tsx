@@ -200,6 +200,15 @@ export function MobileHeader({
                   {gitStatus.isDirty && (
                     <span className="text-warning" title={tWorktree('git.uncommittedChanges')}>*</span>
                   )}
+                  {gitStatus.statusUnknown && (
+                    <span
+                      className="text-muted-foreground"
+                      title={tWorktree('git.statusUnknown')}
+                      data-testid="mobile-git-status-unknown"
+                    >
+                      ?
+                    </span>
+                  )}
                 </>
               )}
             </div>

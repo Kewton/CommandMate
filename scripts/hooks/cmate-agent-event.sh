@@ -297,6 +297,26 @@ if [ "$EVENT" = "user_prompt_submit" ] && [ "$TOOL" = "claude" ] && [ -n "$HOOK_
     BODY="$BODY,\"queuedNotice\":true"
   fi
 fi
+# Issue #3450. On a Claude `Stop` the receiver reads the session's transcript
+# for background work that has not been notified yet (#3430), and it finds the
+# transcript by the payload's `transcript_path`. An injected `type: "http"` Stop
+# hook posts the payload verbatim, but a hand-configured Stop hook (§3 of
+# docs/user-guide/agent-event-hooks.md, Issue #1549) comes through here, so the
+# field is forwarded under its own name — the one field, never the rest of the
+# payload. Claude's `stop` only, so codex (whose shared relay is a copy of this
+# script) and every other tool keep the body they had.
+#
+# Only a path the receiver could accept is sent: absolute, under a
+# `.claude/projects` directory and ending in `.jsonl`. The receiver checks it
+# again against its own home; anything else would be ignored there anyway.
+if [ "$EVENT" = "stop" ] && [ "$TOOL" = "claude" ] && [ -n "$HOOK_JSON" ]; then
+  TRANSCRIPT_PATH="$(json_string_field "$HOOK_JSON" 'transcript_path')"
+  case "$TRANSCRIPT_PATH" in
+    /*/.claude/projects/*.jsonl)
+      BODY="$BODY,\"transcript_path\":\"$(json_escape "$TRANSCRIPT_PATH")\""
+      ;;
+  esac
+fi
 BODY="$BODY}"
 
 # Token via --header rather than the command line of a subprocess: argv is world

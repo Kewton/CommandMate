@@ -21,9 +21,7 @@ afterEach(() => {
 
 const baseOutput = {
   isRunning: true,
-  isComplete: false,
   isPromptWaiting: false,
-  isGenerating: false,
   content: '',
   fullOutput: '',
   realtimeSnippet: '',
@@ -32,7 +30,6 @@ const baseOutput = {
   promptData: null,
   autoYes: { enabled: false, expiresAt: null },
   thinking: false,
-  thinkingMessage: null,
   cliToolId: 'antigravity',
   isSelectionListActive: false,
   lastServerResponseTimestamp: null,

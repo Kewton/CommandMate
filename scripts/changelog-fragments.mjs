@@ -6,6 +6,7 @@
  *   node scripts/changelog-fragments.mjs check
  *   node scripts/changelog-fragments.mjs preview
  *   node scripts/changelog-fragments.mjs apply --version <X.Y.Z> --date <YYYY-MM-DD>
+ *   node scripts/changelog-fragments.mjs bump-floor --current <X.Y.Z> [--next <X.Y.Z>]
  */
 import fs from 'fs';
 import path from 'path';
@@ -25,6 +26,7 @@ export const SECTION_ORDER = [
 
 const SECTION_PATTERN = /^<!-- ### (Added|Changed|Deprecated|Removed|Fixed|Security|Performance|Refactored|Documentation) -->$/;
 const ENTRY_PATTERN = /^- \*\*(feat|fix|docs|style|refactor|test|chore|ci)(\([^)]+\))?: .+?\*\* \(#(\d+)\): .+$/;
+const BUMP_PATTERN = /^<!-- bump: (minor|major) -->$/;
 const FILE_NAME_PATTERN = /^(\d+)\.md$/;
 
 /**
@@ -32,13 +34,14 @@ const FILE_NAME_PATTERN = /^(\d+)\.md$/;
  *
  * @param {string} fileName
  * @param {string} content
- * @returns {{ issue: number | null, section: string | null, entry: string | null, errors: string[] }}
+ * @returns {{ issue: number | null, section: string | null, bump: 'minor' | 'major' | null, entry: string | null, errors: string[] }}
  */
 export function parseFragment(fileName, content) {
   const errors = [];
   let issue = null;
   let section = null;
   let entry = null;
+  let bump = null;
 
   const fileMatch = fileName.match(FILE_NAME_PATTERN);
   if (!fileMatch) {
@@ -50,7 +53,7 @@ export function parseFragment(fileName, content) {
   const lines = content.split(/\r?\n/);
   if (lines.length === 0 || (lines.length === 1 && lines[0].trim() === '')) {
     errors.push('Fragment file is empty');
-    return { issue, section, entry, errors };
+    return { issue, section, bump, entry, errors };
   }
 
   const firstLine = lines[0];
@@ -61,15 +64,27 @@ export function parseFragment(fileName, content) {
     section = sectionMatch[1];
   }
 
-  if (lines.length < 2 || lines[1].trim() === '') {
-    errors.push('Fragment must contain an entry on line 2');
-  } else {
-    const secondLine = lines[1];
-    const entryMatch = secondLine.match(ENTRY_PATTERN);
-    if (!entryMatch) {
-      errors.push(`Invalid second line: "${secondLine}". Must match /^- \\*\\*(feat|fix|docs|style|refactor|test|chore|ci)(\\([^)]+\\))?: .+?\\*\\* \\(#(\\d+)\\): .+$/`);
+  // Optional bump declaration (Issue #3480): line 2, right after the section comment.
+  let entryIndex = 1;
+  if (lines.length > 1 && /^<!--\s*bump\b/.test(lines[1])) {
+    const bumpMatch = lines[1].match(BUMP_PATTERN);
+    if (!bumpMatch) {
+      errors.push(`Invalid bump declaration: "${lines[1]}". Must match ${BUMP_PATTERN}`);
     } else {
-      entry = secondLine;
+      bump = bumpMatch[1];
+    }
+    entryIndex = 2;
+  }
+
+  if (lines.length <= entryIndex || lines[entryIndex].trim() === '') {
+    errors.push(`Fragment must contain an entry on line ${entryIndex + 1}`);
+  } else {
+    const entryLine = lines[entryIndex];
+    const entryMatch = entryLine.match(ENTRY_PATTERN);
+    if (!entryMatch) {
+      errors.push(`Invalid line ${entryIndex + 1}: "${entryLine}". Must match /^- \\*\\*(feat|fix|docs|style|refactor|test|chore|ci)(\\([^)]+\\))?: .+?\\*\\* \\(#(\\d+)\\): .+$/`);
+    } else {
+      entry = entryLine;
       const entryIssue = parseInt(entryMatch[3], 10);
       if (issue !== null && entryIssue !== issue) {
         errors.push(`Issue number in entry (#${entryIssue}) does not match file name (#${issue})`);
@@ -77,20 +92,20 @@ export function parseFragment(fileName, content) {
     }
   }
 
-  for (let i = 2; i < lines.length; i++) {
+  for (let i = entryIndex + 1; i < lines.length; i++) {
     if (lines[i].trim() !== '') {
       errors.push(`Unexpected non-empty content on line ${i + 1}: "${lines[i]}"`);
     }
   }
 
-  return { issue, section, entry, errors };
+  return { issue, section, bump, entry, errors };
 }
 
 /**
  * Reads all fragments in the given directory.
  *
  * @param {string} dir
- * @returns {{ fragments: Array<{ fileName: string, issue: number, section: string, entry: string }>, errors: string[] }}
+ * @returns {{ fragments: Array<{ fileName: string, issue: number, section: string, bump: 'minor' | 'major' | null, entry: string }>, errors: string[] }}
  */
 export function readFragments(dir) {
   if (!fs.existsSync(dir)) {
@@ -116,6 +131,7 @@ export function readFragments(dir) {
         fileName,
         issue: result.issue,
         section: result.section,
+        bump: result.bump,
         entry: result.entry,
       });
     }
@@ -166,6 +182,77 @@ export function renderSection(fragments) {
   }
 
   return renderedSections.join('\n\n');
+}
+
+const BUMP_RANK = { patch: 0, minor: 1, major: 2 };
+
+/**
+ * @param {string} version
+ * @returns {[number, number, number] | null}
+ */
+export function parseVersion(version) {
+  const m = /^(\d+)\.(\d+)\.(\d+)$/.exec(version ?? '');
+  return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
+}
+
+function compareVersions(a, b) {
+  for (let i = 0; i < 3; i++) {
+    if (a[i] !== b[i]) return a[i] - b[i];
+  }
+  return 0;
+}
+
+/**
+ * Lowest version the next release may take, from the fragments' bump declarations
+ * (Issue #3480). No declaration => patch bump of `current`. Deprecated fragments
+ * announce only and never raise the floor.
+ *
+ * @param {string} current X.Y.Z
+ * @param {Array<{ issue: number, section: string, bump?: 'minor' | 'major' | null }>} fragments
+ * @returns {{ floor: string, level: 'patch' | 'minor' | 'major', issues: number[] }}
+ */
+export function computeBumpFloor(current, fragments) {
+  const cur = parseVersion(current);
+  if (!cur) throw new Error(`Invalid current version: "${current}"`);
+
+  let level = 'patch';
+  for (const f of fragments) {
+    if (f.bump && f.section !== 'Deprecated' && BUMP_RANK[f.bump] > BUMP_RANK[level]) level = f.bump;
+  }
+  const issues = fragments
+    .filter(f => f.bump && f.section !== 'Deprecated' && f.bump === level)
+    .map(f => f.issue)
+    .sort((a, b) => a - b);
+
+  const [x, y, z] = cur;
+  let floor;
+  if (level === 'major') floor = x === 0 ? [1, 0, 0] : [x + 1, 0, 0];
+  else if (level === 'minor') floor = [x, y + 1, 0];
+  else floor = [x, y, z + 1];
+  return { floor: floor.join('.'), level, issues };
+}
+
+/**
+ * Checks that `next` is above `current` and not below the declared floor.
+ *
+ * @returns {{ ok: boolean, floor: string, issues: number[], reason: string | null }}
+ */
+export function checkNextVersion(current, next, fragments) {
+  const { floor, level, issues } = computeBumpFloor(current, fragments);
+  const n = parseVersion(next);
+  if (!n) return { ok: false, floor, issues, reason: `Invalid next version: "${next}"` };
+  if (compareVersions(n, parseVersion(current)) <= 0) {
+    return { ok: false, floor, issues, reason: `Next version ${next} is not above current ${current}` };
+  }
+  if (compareVersions(n, parseVersion(floor)) < 0) {
+    return {
+      ok: false,
+      floor,
+      issues,
+      reason: `Next version ${next} is below the floor ${floor} declared by bump: ${level} (Issue ${issues.map(i => `#${i}`).join(', ')})`,
+    };
+  }
+  return { ok: true, floor, issues, reason: null };
 }
 
 /**
@@ -251,7 +338,8 @@ if (isMain) {
   const USAGE = `Usage:
   node scripts/changelog-fragments.mjs check
   node scripts/changelog-fragments.mjs preview
-  node scripts/changelog-fragments.mjs apply --version <X.Y.Z> --date <YYYY-MM-DD>`;
+  node scripts/changelog-fragments.mjs apply --version <X.Y.Z> --date <YYYY-MM-DD>
+  node scripts/changelog-fragments.mjs bump-floor --current <X.Y.Z> [--next <X.Y.Z>]`;
 
   if (command === 'check') {
     const dir = path.join(root, 'changelog.d');
@@ -280,6 +368,43 @@ if (isMain) {
       process.exit(0);
     }
     console.log(renderSection(fragments));
+    process.exit(0);
+  }
+
+  if (command === 'bump-floor') {
+    let current = null;
+    let next = null;
+    for (let i = 1; i < args.length; i++) {
+      if (args[i] === '--current' && i + 1 < args.length) {
+        current = args[++i];
+      } else if (args[i] === '--next' && i + 1 < args.length) {
+        next = args[++i];
+      } else {
+        console.error(USAGE);
+        process.exit(2);
+      }
+    }
+    if (!current || !parseVersion(current)) {
+      console.error(USAGE);
+      process.exit(2);
+    }
+    const { fragments, errors } = readFragments(path.join(root, 'changelog.d'));
+    if (errors.length > 0) {
+      for (const err of errors) {
+        console.error(err);
+      }
+      process.exit(1);
+    }
+    if (next === null) {
+      console.log(computeBumpFloor(current, fragments).floor);
+      process.exit(0);
+    }
+    const result = checkNextVersion(current, next, fragments);
+    if (!result.ok) {
+      console.error(result.reason);
+      process.exit(1);
+    }
+    console.log(next);
     process.exit(0);
   }
 

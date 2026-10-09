@@ -830,6 +830,9 @@ describe('the repository\'s own .commandmate/verify.yaml', () => {
     // trip over. That rule, the gate/CI command parity and the mutex decision
     // are asserted in tests/unit/guards/verify-build-integration-gates.test.ts
     // and tests/unit/guards/verify-heavy-gate-mutex.test.ts.
+    //
+    // [Issue #3478] `lint-sh` joined: CI's shellcheck step, run only when the
+    // branch touches a `.sh` (the path condition lives in the script).
     expect(config?.gates.map((g) => g.id)).toEqual([
       'token-discipline',
       'control-chars',
@@ -838,6 +841,7 @@ describe('the repository\'s own .commandmate/verify.yaml', () => {
       'build-cli',
       'build-server',
       'lint',
+      'lint-sh',
       'build',
       'typecheck',
       'integration',
@@ -851,6 +855,7 @@ describe('the repository\'s own .commandmate/verify.yaml', () => {
       'npm run build:cli',
       'npm run build:server',
       'npm run lint',
+      'node scripts/run-lint-sh-if-changed.mjs --base origin/develop',
       'npm run build',
       'npx tsc --noEmit',
       'npm run test:integration',

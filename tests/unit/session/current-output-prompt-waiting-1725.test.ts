@@ -133,7 +133,6 @@ describe('the OR truth table (Issue #1725)', () => {
     expect(payload.sessionStatus).toBe('waiting');
     expect(payload.sessionStatusReason).toBe('hook_permission_prompt');
     expect(payload.thinking).toBe(false);
-    expect(payload.isGenerating).toBe(false);
   });
 
   it('scraper=true / structured=false -> waiting, with the parsed prompt', async () => {

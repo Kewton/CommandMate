@@ -271,7 +271,6 @@ function setupFetchMock() {
         json: () =>
           Promise.resolve({
             isRunning: false,
-            isGenerating: false,
             content: '',
             thinking: false,
           }),

@@ -208,7 +208,7 @@ export type { AutoYesSuppressionReason };
  *
  *  - **the session is not running.** There is no frame, so nothing read off one
  *    is sent: `autoYes`, `isPromptWaiting`, `promptData`, `thinking`,
- *    `thinkingMessage`, `isComplete`, `isGenerating`, `fullOutput`,
+ *    `fullOutput`,
  *    `realtimeSnippet`, `lastCapturedLine`, `isSelectionListActive`,
  *    `lastServerResponseTimestamp` and `serverPollerActive` are absent keys
  *    there, not `false` / `null` (Issue #3300). A reader says what absence means
@@ -225,14 +225,7 @@ export type { AutoYesSuppressionReason };
  */
 export interface CurrentOutputResponse {
   isRunning: boolean;
-  /**
-   * @deprecated 廃止の予定（次以降のマイナーの版で消す。#3395）。`isPromptWaiting` を使う。
-   * 値は `isPromptWaiting` と同じ（中身は「承認待ち」で、名前と合っていない）。
-   */
-  isComplete?: boolean;
   isPromptWaiting?: boolean;
-  /** @deprecated 廃止の予定（次以降のマイナーの版で消す。#3395）。`thinking` を使う（同じ値）。 */
-  isGenerating?: boolean;
   content: string;
   fullOutput?: string;
   realtimeSnippet?: string;
@@ -315,8 +308,6 @@ export interface CurrentOutputResponse {
     } | null;
   };
   thinking?: boolean;
-  /** @deprecated 廃止の予定（次以降のマイナーの版で消す。#3395）。`thinking` と `cliToolId` から作る。 */
-  thinkingMessage?: string | null;
   cliToolId?: string;
   /**
    * The tmux session name this instance actually runs (or would run) under
@@ -1552,6 +1543,8 @@ export interface SkillInstallPlan {
     branch: string | null;
     headState: string;
     workingTreeDirty: boolean;
+    /** `git status` could not be read; `workingTreeDirty` is the fail-safe guess (#3445). */
+    workingTreeUnknown?: boolean;
     /** Repository-relative; the server never serves a machine-absolute path. */
     installRoot: string;
     /** Every root the package is placed into, primary first (#1460). */
@@ -1662,6 +1655,8 @@ export interface SkillUninstallPlan {
     repositoryName: string;
     branch: string | null;
     workingTreeDirty: boolean;
+    /** `git status` could not be read; `workingTreeDirty` is the fail-safe guess (#3445). */
+    workingTreeUnknown?: boolean;
     installRoot: string;
   };
   skill: { id: string; version: string; effectiveRisk: string };
@@ -1713,6 +1708,8 @@ export interface SkillUpdatePlan {
     branch: string | null;
     headState: string;
     workingTreeDirty: boolean;
+    /** `git status` could not be read; `workingTreeDirty` is the fail-safe guess (#3445). */
+    workingTreeUnknown?: boolean;
     /** Repository-relative; the server never serves a machine-absolute path. */
     installRoot: string;
     /** Every recorded root the update rewrites, primary first (#1460). */

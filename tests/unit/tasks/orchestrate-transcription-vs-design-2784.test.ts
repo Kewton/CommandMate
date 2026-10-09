@@ -25,6 +25,9 @@ import path from 'path';
 const REPO_ROOT = path.resolve(__dirname, '../../..');
 const ORCHESTRATE_PATH = '.claude/commands/orchestrate.md';
 const orchestrate = readFileSync(path.join(REPO_ROOT, ORCHESTRATE_PATH), 'utf-8');
+// Since #3481 the evidence behind 1-2b lives in docs/orchestrate/; 1-2b points there.
+const DIFFICULTY_EVIDENCE_PATH = 'docs/orchestrate/difficulty.md';
+const difficultyEvidence = readFileSync(path.join(REPO_ROOT, DIFFICULTY_EVIDENCE_PATH), 'utf-8');
 
 /** The `| 観点 | 条件 |` row of the 1-2b difficulty table whose first cell is `label`. */
 function criterionRow(label: string): string {
@@ -71,7 +74,7 @@ describe('[#2784] 1-2b: the 設計 criterion is about who designs', () => {
 });
 
 describe('[#2784] 1-2b: the evidence for the line is recorded', () => {
-  const body = orchestrate.slice(orchestrate.indexOf('### 1-2b.'), orchestrate.indexOf('### 1-3.'));
+  const body = `${orchestrate.slice(orchestrate.indexOf('### 1-2b.'), orchestrate.indexOf('### 1-3.'))}\n${difficultyEvidence}`;
 
   it('names all three issues that landed with a full-text guard test', () => {
     for (const issue of ['#2770', '#2780', '#2781']) {

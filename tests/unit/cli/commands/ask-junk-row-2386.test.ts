@@ -80,9 +80,7 @@ const json = (data: unknown, status = 200): Response =>
 /** A frame that says "the turn ended", as `wait`'s own tests spell it. */
 const completedFrame = (cliToolId: string) => ({
   isRunning: true,
-  isComplete: true,
   isPromptWaiting: false,
-  isGenerating: false,
   content: 'done',
   fullOutput: 'done',
   realtimeSnippet: '',
@@ -91,7 +89,6 @@ const completedFrame = (cliToolId: string) => ({
   promptData: null,
   autoYes: { enabled: false, expiresAt: null },
   thinking: false,
-  thinkingMessage: null,
   cliToolId,
   isSelectionListActive: false,
   lastServerResponseTimestamp: null,

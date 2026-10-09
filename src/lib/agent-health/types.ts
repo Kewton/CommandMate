@@ -125,6 +125,35 @@ export interface AgentHealthToolResult {
   previousVersion: string | null;
   versionChanged: boolean;
   checks: AgentHealthCheck[];
+  /**
+   * The model the tool was launched on, as the tool itself showed it (Issue
+   * #3438, `launched-model.ts`). Absent on a tool that was not launched (a
+   * version-only row, `version` failed, the budget ran out) and on a report
+   * written before #3438 — readers show both as 不明.
+   */
+  launchedModel?: AgentHealthLaunchedModel;
+}
+
+/**
+ * Where {@link AgentHealthLaunchedModel.model} was read.
+ *
+ * - `screen`: the tool's banner, footer or step row, through the production reader
+ * - `screen-footer`: opencode's composer bar; the provider name is part of the value
+ * - `hook`: a hook payload's model (claude's `SessionStart`, antigravity's `modelName`)
+ */
+export type AgentHealthLaunchedModelSource = 'screen' | 'screen-footer' | 'hook';
+
+export interface AgentHealthLaunchedModel {
+  /** Verbatim, or null when neither the screen nor a hook showed one (不明). Never guessed. */
+  model: string | null;
+  /** Set whenever `model` is. */
+  source?: AgentHealthLaunchedModelSource;
+  /**
+   * The model pick the probe copied into the isolated state before launch
+   * (`model.json`'s `recent[0]` as `<providerID>/<modelID>`, opencode / opencode-v2).
+   * Kept beside `model` to compare, never used in its place.
+   */
+  seeded?: string;
 }
 
 /** One machine-singleton file the run had to touch, and whether it is back. */

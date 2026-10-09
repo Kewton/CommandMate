@@ -7,6 +7,106 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.45.0] - 2026-10-09
+
+> **Highlight**: `capture --json` の読まれていない 3 欄（`isComplete`・`isGenerating`・`thinkingMessage`）を、v0.44.3 での告知どおり削除しました（#3395。読んでいた場合は `isPromptWaiting`・`thinking` へ置き換えが必要なため、マイナーの版です）。あわせて、Claude がバックグラウンドの作業を残してターンを閉じたときに `wait` が完了と読まないようにし（#3430・#3429）、git の状態を読めなかったときに「変更なし」と表示しないようにしました（#3435・#3436）。依存の脆弱性の更新（sharp・ws ほか）と、orchestrate の道具のスクリプト化・手順書の分割（#3477・#3481）も含みます。
+
+### Added
+
+- **feat(quality): `src/` の import の循環を基準線と比べるガードを追加** (#3482): 整理や分割で新しいモジュールが既存の循環に入っても lint・型検査・テストは通っていた（#3374）。TypeScript の compiler API で値の import のグラフを作る `scripts/import-cycles.mjs` と、基準線（今ある 5 本）に無い循環が増えると落ちるガード `tests/unit/guards/import-cycles-baseline-3482.test.ts` を足した。`import type` と動的 `import()` は数えない。基準線の更新は `node scripts/import-cycles.mjs --write-baseline`。
+
+- **feat(release): 断片に最低の版の宣言（`<!-- bump: minor|major -->`）を足し、`/release` が下回る版を中断するようにした** (#3480): 「次は patch では出せない」（公開した欄の削除など）が PR の本文にしか残らず `/release patch` で 0.44.4 を作れたため、断片の 2 行目に節と独立した宣言を置けるようにし、`changelog-fragments.mjs bump-floor --current <版> [--next <版>]` が最低の版を返す／下回る・現在以下の版を exit 1 にする。`check` は不正な宣言を不合格にし、`apply` は宣言の行を CHANGELOG に出さない。
+
+- **feat(verify): `.sh` を変えたブランチで shellcheck を走らせる `lint-sh` 検証ゲートと、CI の手順と手元のゲートを突き合わせるガードを追加** (#3478): CI の Lint ジョブの `npm run lint:sh` を手元のどのゲートも走らせておらず、手元で全部通った PR が CI の shellcheck で落ちていた。`scripts/run-lint-sh-if-changed.mjs` が `--base`（既定 `origin/develop`）との差分に `.sh` の追加・変更・削除・rename（rename は元と先の両方）があるときだけ `npm run lint:sh` を走らせ、無ければ何もせず合格する。shellcheck が未導入・版違いのときは警告して続け、`commandmate verify` / `wait --verify` は合格の行の直後に `NOTICE lint-sh: … NOT linted` を出す（未検査の合格が見分けられる）。`.commandmate/verify.yaml` に `lint-sh` ゲートとして足し、CI の各手順（実行内容を含む）が手元のゲートか理由つきの除外の一覧のどちらかにあることをテストで固定した。
+
+- **feat(orchestrate): 契約の生成・run の記録・完了待ちの検証・PR の前の確認・PR の作成とマージをスクリプトにしてリポジトリに入れた** (#3477): `scripts/orchestrate/contract.mjs` が Issue ごとの設定（担当・モデル・ゲート・scope・決定・CHANGELOG の節と最低の版）から実行契約を作り（`requireCommit: true` を常に入れ、`changelog.d/<N>.md` を scope に足し、goal が 8,000 文字を超えたら失敗）、`scripts/orchestrate/run-log.mjs` が `workspace/orchestration/runs/<date>/run-<Issue の範囲>.jsonl` に 1 段 1 行で記録して `status` で最新の HEAD について満たしていない最初の段（次に行う段）を返す。隔離した実機の確認を許す設定（`isolatedLiveCheck`）では、起動の禁止の文を `/orchestrate` 2-5・2-6 の隔離の手順に置き換える。これまで run ごとにセッションの一時領域で作り直していたため、run の中の直しが残らず、セッションが落ちると会話の記録から進み具合を読み直していた。契約の作業ルールの雛形は `scripts/orchestrate/templates/` が持ち、`/orchestrate` の 2-4-1・2-4-2・2-4-3 はそこを指す（整理の決まりは `kind: refactor` の契約に入り、`git diff --shortstat` の決まりは写しをまとめる手順（`refactor.mergesCopies: true`）にだけ入る）。`scripts/orchestrate/wait-verify.mjs` は `commandmatedev wait --verify` を `--instance`・`--on-prompt human` つきで呼び、裁定が作業の終わりの状態のものだと確かめてから（Antigravity は `IMPL_COMPLETED` の行を待ち、検証の開始の後にコミットがあるか、最後のターン終了より前に始まって変更があれば `verify --task` でやり直す。結び付けられなければ exit 3）Auto-Yes を切って読み直し（3 回まで再試行。`--auto-yes-off` で切り直しだけもできる）、判定の行の要約を run の記録の `verify` 段に検証が見た HEAD つきで書く（合格は task・契約・env-clean の基準に結び付くので再利用しない）。`scripts/orchestrate/precheck.mjs` は PR の前に、断片の検査・削除したテストの数・変更したファイルの ESLint・`.sh` を変えたときの shellcheck・整理と計測の Issue の抑止のコメントの数・`tsc --noEmit`・関係するテストを走らせて `precheck` 段に HEAD つきで書き、同じ HEAD・同じ引数の合格の記録と、同じ HEAD の検証が通した verify.yaml の `lint`・`typecheck`・`lint-sh` が見る段は走らせ直さない（契約が定義したゲートとテストのゲートの合格は代わりにしない。関係するテストは `tests/unit` に限る）。build は CI と並走させ、マージは CI の `Build` の `pass` か、マージする HEAD の `precheck --build` の `build=ok` を待つ。整理の契約の scope は、`tests/` の下をファイルの名指しでしか書けない（ディレクトリの指定は配下全部を許すので拒む）。`scripts/orchestrate/publish-pr.mjs` は push・module-reference の断片の run のディレクトリへの控え・PR の作成を行い（ブランチに開いた PR があれば作らず、別のブランチの開いた PR が題名の `(#N)`・本文の `Closes #N` など・ブランチ名で同じ Issue を指していれば止まる）、`scripts/orchestrate/merge-pr.mjs` は develop が進んでいれば取り込み（衝突したら取り消して止まる）、マージする HEAD について衝突の印の走査と precheck（`vitest related` で import の関係から選ぶテストを含む。同じ HEAD の合格の記録が無ければ、先に push 済みの HEAD でも走らせる）を通してから push し、CI を待ち（`fail` / `cancel` は HEAD ごとに 1 回だけ失敗したジョブを再実行。`Build` は `pass` か precheck の `build`・`build:cli`・`build:server` の合格、テスト全体（verify.yaml の `unit`）を通していない PR（`unit-related`・整理）は `Unit Tests` の `pass`、最後の 1 本は `--last` で全部の `pass`）、HEAD を指定して squash でマージし、Issue を閉じる（`--close -` なら閉じない）。どちらも、作業の HEAD（ワーカーの最後のコミット）の `verify=ok`・`review=ok`（5-2b の対象でなければ `skip`）・`findings=ok` と公開する HEAD の `precheck=ok` が run の記録に無いか（この判定は `run-log.mjs status` と同じ関数で行い、記録に公開する HEAD と作業の HEAD を両方書くので、再開先がずれない）、`changelog.d/<N>.md` か module-reference の断片が無ければ、何も公開せずに欠けたものを出して止まり、マージ済みの PR はマージし直さないので、落ちた後の再実行で続きから同じ結果になる。`/orchestrate` の 3-3・5-1・6-1・6-1-1・6-2・6-3・6-4 は手で書いていたコマンドの代わりにこれらを呼ぶ。
+
+### Changed
+
+- **refactor(orchestrate): 作業ツリーの汚れの一覧と判定を dirty-tree.mjs の 1 つにまとめた** (#3495): pr-common・precheck・wait-verify に写しで書かれていた IGNORED_DIRTY と dirtyPaths を 1 か所にし、片方だけ直して判定が食い違うのを防ぐ。振る舞いは変わらない（利用者に見える変化なし）。
+
+- **chore(catalog): codex の /daybreak をスラッシュコマンドカタログに追加し attestation を 0.161.0 で採り直し** (#3423): 無人実行。codex の attestation を rust-v0.161.0 の読み取り（61 件）に更新
+
+### Removed
+
+- **chore(api): current-output（`capture --json`）の応答から isComplete / isGenerating / thinkingMessage を削除** (#3395): v0.44.3（#3394）で廃止を告知した欄を消した。置き換え先は、`isComplete` → `isPromptWaiting`、`isGenerating` → `thinking`、`thinkingMessage` → `thinking` と `cliToolId`。これらの欄を読んでいた利用者は、置き換え先を読むよう直す必要がある。
+
+### Fixed
+
+- **fix(orchestrate): `/pr-merge-pipeline` を廃止し、`/uat-fix-loop` の PR 作成とマージを publish-pr.mjs・merge-pr.mjs 経由にした** (#3494): 修正の PR だけ merge commit で develop に入り、CI・試しのマージ・記録の確認も通らなかったため。マージは squash だけになり、修正の PR も orchestrate と同じ止まる条件を通る。
+
+- **fix(verify): demo-video の env-scripts テストが作業場所を実の `$HOME` ではなく OS の一時ディレクトリに作るようにした** (#3479): `~/.commandmate-demo-vitest-<pid>` が実行中ずっと `$HOME` 直下にあり、同じマシンのどの契約検証の `env-clean` にも `+` として見えていた（#3395 では、検証の時点でまだ動いていたワーカー自身のテストのものが `[unattributed]` で不合格になった）。子の `$HOME` は作業場所そのもので、スタブのサーバーは DB パスの検証を通らないため、本番の制限（`validateDbPath`）は変えずに一時ディレクトリへ移した。テストの実行中・実行後に `$HOME` へ何も作らない
+
+- **fix(deps): ws を 8.22.0 に更新し、high の脆弱性 GHSA-96hv-2xvq-fx4p を解消** (#3469): ws 8.19.0 に tiny fragments によるメモリ枯渇 DoS の advisory があったため、lock を更新。`package.json` は変更なし。
+
+- **fix(deps): undici を 7.30.0 へ更新** (#3468): jsdom 経由の間接依存 undici 7.24.0 に high の advisory（SOCKS5 ProxyAgent の TLS 検証回避、WebSocket DoS ほか 5 件）があったため、ロックを修正版 7.30.0 へ上げた。
+
+- **fix(deps): postcss を修正版へ更新** (#3467): postcss を 8.5.29 へ上げ、next 同梱の 8.4.31 も overrides で同じ版に揃えて `npm audit --omit=dev` の postcss の advisory（パス・トラバーサル／任意ファイル読み取り）を解消。
+
+- **fix(deps): picomatch を修正版へ更新** (#3466): `npm audit --omit=dev` が報告していた picomatch の ReDoS (GHSA-c2c7-rcm5-vvqj) を解消するため、lock 内の picomatch を 4.0.7（間接依存の 2.x 系は 2.3.2）へ更新した。
+
+- **fix(demo-video): env-up.sh の準備完了で、待ち受けているのが自分の起動したサーバーかを確かめる** (#3463): `kill -0` と `curl /` の成功だけで準備完了としていたため、空きを確かめた後に別のプロセスがポートを取ると、自分のサーバーが EADDRINUSE で落ちる前の一瞬に別のサーバーの 200 を準備完了と読み、それをデモの対象にしうる。`lsof -sTCP:LISTEN`（無ければ Linux の `fuser`）で待ち受けの pid を引き、起動した pid・そのプロセスグループ・その子孫以外が待ち受けていれば起動の失敗として止まる（別のプロセスには触れない）。待ち受けがまだ見えない間は待ち続け、どちらの道具も無い環境では従来どおり HTTP の応答で判定する。
+
+- **test(demo-video): env-scripts テストのポート帯を Linux のエフェメラル範囲の外へ移し、env-up の失敗時に stderr を出す** (#3462): 予約帯 34000 番台は Linux（CI ランナー 32768-60999）のエフェメラル範囲の内側で、beforeAll で空きを確かめたポートを同じ shard の他のワーカーが次の env-up までに取りえた。帯を 24000 番台へ移して上限をテストで固定し、env-up の呼び出しはすべて `expect(status, stderr)` の形にそろえた
+
+- **fix(agent-health): supervisor テストで古い run の台帳を run id で選ぶ** (#3460): kill -9 in cleanup と late start のテストが ledgers()（ファイル名順）の並びで古い run / 新しい run を決めていたのを、run id で選ぶ形に直した（#3447 と同じ形、製品側は変更なし）
+
+- **docs(cli): wait が自己再開予定の Stop を最大 30 分保留することを cli-operations-guide（ja/en）に追記** (#3451): 条件・上限・対象ツール（Antigravity / Claude）・--timeout / --stall-timeout との関係を書いた。
+
+- **fix(agent-health): 手動設定の中継スクリプト経由の Claude の Stop でもバックグラウンドの作業の残りを読む** (#3450): `scripts/hooks/cmate-agent-event.sh` が Claude の Stop の payload から `transcript_path` だけを転送する（`.claude/projects` 配下の `.jsonl` の絶対パスのときのみ）。#1549 の手動設定でも #3430 の自己再開の保留が効く
+
+- **fix(session): self_resume_pending を送る source の注記を antigravity と claude に合わせる** (#3449): releaseStopClaims のコメントと capabilities テストの題名が「antigravity だけ」と読めたのを直した（振る舞いは不変）
+
+- **fix(agent-health): supervisor の引き継ぎテストが同じ秒に始まった run の台帳の並びで落ちないようにした** (#3447): `product-supervisor-3312.test.ts` の「a second supervisor exits 75 …」は台帳をファイル名順に並べて先頭を古い run とみなしていたが、run id は開始秒＋乱数の接尾辞のため、同じ秒に始まった 2 つの run は乱数の順に並び、新しい run の台帳（`closed`）を古い方として読んでいた。古い run の id を先に控えて id で選ぶようにした（製品側の変更なし）
+
+- **fix(agent-health): エージェント自身の Stop の後に送信なしで届いた AskUserQuestion を質問として記録しない** (#3446): #3441 でターンを開かなくした会話外の `pre_tool_use(AskUserQuestion)` が、画面にピッカーが無いのに質問のレコードを残していた。直近のターンが自身の Stop で閉じたまま（プロンプトを報告するツールのみ。#3441 と同じ判定）なら記録せず `ask-user-question-outside-turn` を記録する。質問の記録・会話外の `pre_tool_use` のログには、送り主を後から特定できるよう session・agent・transcript・tool_use の識別子をハッシュの先頭 8 桁で残す（本文・パスは残さない）。ターンの中の質問の記録と応答は変わらない。
+
+- **fix(skills): git status を読めなかったとき skills の計画と CLI が「変更あり」ではなく「不明」と出す** (#3445): install / update / uninstall の計画に `workingTreeUnknown`（読めたときはキー無し）と警告 `SKILL_PREVIEW_WORKING_TREE_STATUS_UNKNOWN` を足し、画面（ja / en）と CLI（`[working tree status unknown]`）で未コミットの変更ありと区別する。clean とは表示しない
+
+- **fix(agent-health): 自動起票の Issue 本文に起動モデルを載せる** (#3444): Issue のひな形に「起動モデル」欄を足し、日次確認の手順に要約の「起動したモデル:」節からラベルを書く手順を足した（無い古い報告は「不明」）。目印 `agent-health:<tool>:<checkId>` は変えない
+
+- **fix(detection): opencode-v2 の画面からモデル名を読む** (#3443): opencode2 2.0.18 は step 行を `▣` 無し（`Build · <モデル> · 253ms`）で描くうえ、`extractModelInfo` に `opencode-v2` の分岐が無かったため、capture の `model` などにモデル名が出ていなかった。`▣` 無しの行は所要時間つき・`┃` の外・次の行が `┃`（次のターンか入力欄）のときだけ読む。日次確認（agent-health）の同じ行の読み取りはこの共通の読み取りに寄せた。
+
+- **fix(agent-health): 日次確認の報告にツールごとの起動モデルを残す** (#3438): pass の check は evidence を残さないため、どのモデルで確かめたかが報告から読めなかった。レポートの各ツールに `launchedModel`（画面・hook から読めたモデル。読めなければ「不明」。opencode / opencode-v2 は複製した `model.json` の `recent[0]` も並べる）を足し、要約の最後に「起動したモデル:」を出す。この項目の無い古いレポートは「不明」として読む。
+
+- **fix(agent-health): Stop の直後に送信なしで届いた pre_tool_use で新しいターンを開かない** (#3437): 送信（`user_prompt_submit`）を報告するソース（Claude）では、エージェント自身の `Stop` でターンが閉じた後、送信の無いまま届いた `pre_tool_use` を新しいターンの始まりとして扱わない。2026-10-07 の本番で `Stop` の 2.5 秒後に届いた `PreToolUse(AskUserQuestion)` が Stop の来ないターンを開き、`wait` がその終了を待ち続けていた。通常のターン、`post_tool_use` で始まるターン、Command Code・antigravity の自己再開（#2614）は従来どおり
+
+- **fix(git): ブランチ切替の dirty 確認が失敗・timeout したとき切替を止める** (#3436): `status --porcelain` が null（失敗・timeout）を返すと未コミット変更の上で checkout が進みえたため、GitTimeoutError（504）で拒否する。reset のデフォルトブランチ判定も HEAD を読めないときは拒否する。
+
+- **fix(git): git status を読めなかった worktree を「変更なし」と表示しない** (#3435): `getGitStatus` は `git status --porcelain` の失敗（負荷時の 1 秒 timeout）を clean と報告していた。失敗時は `statusUnknown: true` を返し、Git ペイン・デスクトップ/モバイルのヘッダー・スキルの対象選択は「変更の有無が不明」と表示する。スキルのプレビューは不明を dirty 側（警告を出す側）に倒す
+
+- **fix(agent-health): Claude がバックグラウンドの作業を残してターンを閉じたとき wait が完了と読まないようにする** (#3430): Claude の Stop の時点で transcript に完了通知の届いていないバックグラウンドの作業（Bash の background 実行・Monitor・バックグラウンドのサブエージェント）があれば `self_resume_pending` を付け、Claude の source が `stopReportsSelfResume: true` を宣言する。`wait` はその Stop を #2614 と同じく最大 30 分保留し、作業の通知で開いた次のターンの Stop で完了とする。あわせて `/orchestrate` の契約の雛形に `requireCommit: true` を足し、コミット前の状態を合格にしない
+
+- **fix(cli): `wait` が Stop の届かないターンで `--timeout` まで空回りしないようにする** (#3429): 最新の送信を `Stop` が答えた後に送信なしで開き、サーバーが画面の証拠で閉じたターンは、画面が 60 秒変わらなければその `Stop` で完了する（上流障害で `Stop` が無い送信は従来どおり待つ）
+
+- **fix(agent-health): opencode-v2 の probe が利用者のモデル選択で起動する** (#3428): 一時の `XDG_STATE_HOME` へ利用者の `opencode/model.json` だけを読み取り専用で複製する（#3021 の v1 と同じ形）。空の状態で既定の `Mistral Large 4` が選ばれ `Error: Unauthorized` で 3 チェックが失敗していた
+
+- **fix(deps): 間接依存 markdown-it を 14.3.2 に更新** (#3427): smartquotes と linkify の二次計算量（GHSA-6v5v-wf23-fmfq、GHSA-253c-mchw-3w2r）を解消した。
+
+- **fix(agent-health): モデルの認可エラーで終わったターンを検査不能（skip）として報告する** (#3420): opencode-v2 のモデル（provider）が `Error: Unauthorized` を返して応答なしで終わったターンでは、`screen-running`・`screen-quoted-dialog`・`hook-correlation`（SSE）を fail にせず `signed-out` の skip にする（#3421 #3422 も同じ原因）。そのターンで新しく出た認可エラーの行と、SSE では `session.execution.failed` の着信を条件にし、他のモデルエラーや認可エラーの無い失敗は従来どおり fail
+
+- **fix(deps): 間接依存 nanoid を 3.3.20 に更新** (#3419): GHSA-2v37-7h3g-55p8（high、size 0 で無限ループ）を解消した。
+
+- **fix(deps): 間接依存 lodash-es を 4.18.1 に更新** (#3418): GHSA-r5fr-rjxr-66jc（high、`_.template` のコード注入）を解消した。mermaid 配下の chevrotain が lodash-es を 4.17.23 に固定していたため、langium を 4.4.0、chevrotain を 13.2.0 に上げた。
+
+- **fix(deps): 間接依存 linkify-it を 5.0.2 に更新** (#3417): GHSA-22p9-wv53-3rq4 と GHSA-v245-v573-v5vm（high、二次計算量による DoS）を package-lock.json のみの更新で解消
+
+- **fix(agent-health): git の読み取りが 1 秒のタイムアウトで打ち切られたときの `git:command-failed` を ERROR から warn に下げる** (#3416): 本番ログの 127 件はすべて負荷時の `status --porcelain` 等のタイムアウト（stderr 空）だった。git が非 0 で終わった本当の失敗は ERROR のまま。ログに worktree 名（basename）と `timedOut` / `timeoutMs` を足し、次の計測で呼び出し元を数えられるようにした
+
+- **fix(deps): source-map-js を 1.2.2 に更新し、high の脆弱性を解消** (#3409): postcss・next 内の postcss・css-tree 経由の間接依存 source-map-js 1.2.1 に advisory GHSA-68fv-2mgg-jv7q があったため、lock を更新。`package.json` は変更なし。
+
+- **fix(deps): sharp を 0.35.5 に更新し、high の脆弱性 3 件を解消** (#3408): `next` の optionalDependency である sharp 0.34.5 に libvips / libheif / librsvg 由来の advisory があったため、lock を更新。`package.json` は変更なし。
+
+### Documentation
+
+- **docs(orchestrate): 数字だけを合わせる変更を防ぐ 3 つの決まりと、抑止コメントを数える確認を足した** (#3483): 計測の値を目標にした Issue で、数え方を変える・言い換えで数から外す変更が入らないよう、整理の契約に「数え方を変えない」「どう届いたかを書く」を、計測が起票した Issue に「まず内訳を確かめる」を追記。PR の前に `node scripts/count-suppressions.mjs --base <ref>` が抑止コメントと計測設定の変更を数える。
+
+- **docs(orchestrate): orchestrate.md を手順の本体と docs/orchestrate/ の根拠・手順に分け、本体のバイト数に上限を置いた** (#3481): 手順の本体が 151,691 バイトまで膨らみ、長い run の要約で途中から切られ、規則が根拠の文章に埋もれていたため、根拠と実測・試行の記録・担当ごとのメモと、run のたびには読まない手順（exit code ごとの対処・担当の切り替え・monitor・整理の Issue の手順・試行の段の進め方）を文言を変えずに `docs/orchestrate/` の 11 ファイルへ移した。本体には「根拠: docs/orchestrate/<file>.md#<見出し>」の 1 行と「いつ・どの文書を読むか」を残し、冒頭に散らばった必須・禁止の規則を 1 行ずつ集めた「必ず守ること」の節を置いた。本体は 107,511 バイトになり、`scripts/check-orchestrate-size.mjs`（上限 118,000 バイト）を CI の `orchestrate-size` で検査し、本体から `docs/orchestrate/` への参照の見出しの実在もテストで確かめる（手順は変えていない）。
+
+- **docs(orchestrate): 画面・CLI に見える変化を含む Issue の契約に、経路図・変更する段だけの scope・経路ごとの表示の確認・実際の応答とのつながりの決まりを足した** (#3476): 部品だけを範囲にすると文言が描画されないまま検証に合格した（#3397）ため、orchestrate.md の 2-4 に小見出しを足し、2-4-2 の「対になる場所を探す」に「表示されない条件」を足した。
+
+- **docs(orchestrate): 危険な領域の設計を実装の前に Codex へ見せる事前レビュー段（2-4-4、2026-11-06 までの試行）と、5-2b の再指示の決まりを足した** (#3475): 整合性レビューは実装の後で設計の穴を見つけるため #3397 で 3 往復かかった。状態・副作用・寿命を変える Issue は最終の契約の前に設計の要点を 1 回レビューし、総時間と再レビュー回数を記録して比べる。5-2b では再指示を守るべき条件・全経路・対照のテストに言い換え、再レビューで前回の指摘の解消を先に確かめる。
+
 ## [0.44.3] - 2026-10-07
 
 > **Highlight**: 状態の表示と Auto-Yes の食い違いを直し、内部を大きく整理したリリースです。一覧の作業中の表示が `capture --json` と同じ規則・同じ時刻で切り替わるようになり（#3365 / #3377）、codex のターン中に `ready` と出る・送信が入力欄に残る・2 行以上の入力欄を生成中と読む問題を直しました（#3337 / #3366 / #3205）。Auto-Yes は、CommandMate が読めない選択画面に Enter を 1 回だけ送り（#3397）、複数選択の質問には答えず人に残します。あわせて整理 Epic #3207 で検出・セッション・UI の重複を 1 か所にまとめ、UAT・日次確認を本番から隔離して動かせるようにしました（#3359 / #3360）。

@@ -139,6 +139,10 @@ const MUST_STAY_PARALLEL = [
   'build-server',
   'build',
   'lint',
+  // [Issue #3478] Seconds when no `.sh` changed (it exits before shellcheck),
+  // and shellcheck over ~30 scripts otherwise. No timer, no port, no exit code
+  // that load can flip — the same footing as `lint`.
+  'lint-sh',
   'typecheck',
 ];
 

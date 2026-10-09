@@ -2,7 +2,9 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-const orchestrate = readFileSync(join(process.cwd(), '.claude/commands/orchestrate.md'), 'utf-8');
+const body = readFileSync(join(process.cwd(), '.claude/commands/orchestrate.md'), 'utf-8');
+// Since #3481 (2 本目) how to run and count the review lives in docs/orchestrate/trials.md; 5-2b points there.
+const orchestrate = `${body}\n${readFileSync(join(process.cwd(), 'docs/orchestrate/trials.md'), 'utf-8')}`;
 
 describe('orchestrate.md: 整合性レビュー（試行中の段）(#3392)', () => {
   it('節があり、期限・対象・再レビューの上限・数え方が書いてある', () => {

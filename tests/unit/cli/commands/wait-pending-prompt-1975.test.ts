@@ -116,9 +116,7 @@ const COPILOT_EVENTS = [
  */
 const composer = (overrides: Record<string, unknown> = {}) => ({
   isRunning: true,
-  isComplete: false,
   isPromptWaiting: false,
-  isGenerating: false,
   content: 'frame',
   fullOutput: 'frame',
   realtimeSnippet: 'frame',
@@ -127,7 +125,6 @@ const composer = (overrides: Record<string, unknown> = {}) => ({
   promptData: null,
   autoYes: { enabled: false, expiresAt: null },
   thinking: false,
-  thinkingMessage: null,
   cliToolId: 'copilot',
   isSelectionListActive: false,
   lastServerResponseTimestamp: null,

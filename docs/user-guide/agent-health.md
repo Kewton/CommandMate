@@ -36,12 +36,27 @@ hook のインスタンス取り違え）。`scripts/agent-health/run.ts` は、
 |---|---|---|
 | `no-definition` | 検査の定義が無い | 選択画面の定義が無いツールの `screen-picker`。opencode の `hook-correlation`（イベントは hook ではなく自前の HTTP から読み、その経路の検査が無い） |
 | `not-shown` | このツールは、その画面を出さない | 承認ダイアログを出さないツール（opencode・opencode-v2）の `screen-approval` |
-| `signed-out` | サインインできない | gemini（下記） |
+| `signed-out` | サインインできない | gemini（下記）。起動したツールのモデル（provider）が `Error: Unauthorized` を返し、ターンが応答なしで終わったときの `screen-running`・`screen-quoted-dialog`・`hook-correlation`（下記「モデルの認可エラー」） |
 | `unsupported` | ツールが未対応 | vibe-local・copilot の `version` 以外（下記） |
 | `timeout` | 時間切れ | 全体の時間上限に達して実行しなかったツール |
 | `prerequisite-failed` | version が取れず未実施 | `version` が fail したツールの残り |
 | `not-selected` | 今回の実行の対象外 | 表だけ。`--tools` / `--only` で外したもの |
 | `not-recorded` | 結果が記録されなかった | 表だけ。選んだのに結果が無いもの（スクリプトの異常） |
+
+### モデルの認可エラー（Issue #3420）
+
+モデル（provider）が資格情報を拒んでターンが応答なしで終わると、実行中の画面も返答も `session.execution.succeeded` も無く、
+検出の不具合と見分けがつかない（2026-10-08、opencode-v2 の `Mistral Large 4`・Ollama Cloud）。資格情報は利用者のもので、
+コードでは直らない。そこで次の条件をすべて満たすときだけ、fail を `signed-out` の skip にする
+（`src/lib/agent-health/model-auth.ts`。判定していればの summary は `skipReason` に、画面の末尾は `evidence` に残す）。
+
+- 期待どおりなら pass のまま（skip にするのは fail になる判定だけ）
+- 判定した画面に、依頼を送る前の画面より多く `Error: Unauthorized` だけの行がある（依頼の `┃` 枠の中の文字は数えない）
+- `hook-correlation`（SSE）は、さらに未着が `session.execution.succeeded` だけで、`session.execution.failed` が届いている
+  （running のターンを送ったときはそのターンの間に。画面の条件もそのターンで見る）
+
+#3021 の「No models loaded」は probe 自身の状態の隔離が原因で、probe 側で直したため、従来どおり fail にする。
+skip が続くときは、利用者がそのツールのモデルの資格情報（2026-10-08 の opencode-v2 は Ollama Cloud）を直す。
 
 ### version だけを読むツール（gemini・vibe-local・copilot、Issue #3313）
 
@@ -66,7 +81,8 @@ TUI を 1 つのペインで動かす。確認も同じ経路で起動する。
   通ることを確かめる。`--standalone` に落ちたら（本番と違う経路なので）起動せず、`version` 以外の check を fail にする
 - パスワードとポートの記録は実行の一時ディレクトリの下（`CM_OPENCODE_V2_DIR`）。利用者の `~/.commandmate/opencode-v2/` には書かない
 - TUI の状態（入力履歴・モデルの選択など。利用者の背景サービスの `service.json` と同じ `~/.local/state/opencode/`）は、
-  起動行の前に `XDG_STATE_HOME=<一時ディレクトリ>` を付けて一時ディレクトリへ向ける
+  起動行の前に `XDG_STATE_HOME=<一時ディレクトリ>` を付けて一時ディレクトリへ向ける。モデルの選択（v1 と同じ `opencode/model.json`）だけは
+  利用者のものを読み取り専用で一時ディレクトリへ複製し、日常使うモデルで起動する（#3428。入力履歴・`service.json`・ロックは複製しない）
 - `hook-correlation` の枠では、自前 serve の `/api/event` を本番のクライアント（`opencode-v2/client.ts`）で購読し、
   `sleep 20` のターンの間に `session.execution.started` と `session.execution.succeeded` が届けば pass。
   受け取った `type` の一覧（重複除去）を summary に残す（イベント名が変わったときに何に変わったかが読める）
@@ -82,7 +98,7 @@ TUI を 1 つのペインで動かす。確認も同じ経路で起動する。
 | antigravity | なし | `sleep` の依頼の時点で訊かれる | Esc | 定義なし（skip） |
 | opencode | なし（前に `XDG_STATE_HOME=<一時ディレクトリ>`。利用者の `opencode/model.json` だけを読み取り専用で複製してモデル選択を引き継ぐ、#3021） | 出ない（skip） | — | 定義なし（skip） |
 | command-code | `--trust --skip-onboarding --no-auto-update`（CommandMate と同じ） | `sleep` の依頼の時点で訊かれる | Esc | 定義なし（skip） |
-| opencode-v2 | なし（前に `XDG_STATE_HOME=<一時ディレクトリ>`） | 出ない（skip。既定のルールで `shell` は確認なしに走る） | — | 定義なし（skip） |
+| opencode-v2 | なし（前に `XDG_STATE_HOME=<一時ディレクトリ>`。v1 と同じく利用者の `opencode/model.json` だけを複製してモデル選択を引き継ぐ、#3428） | 出ない（skip。既定のルールで `shell` は確認なしに走る） | — | 定義なし（skip） |
 
 ## コマンドライン
 
@@ -137,6 +153,28 @@ pass 38・fail 0・skip 25（検査の定義が無い 5・このツールは、�
 
 `--tools` / `--only` で外したマスも表には `skip（今回の実行の対象外）` として数える（理由の行には出さない）。
 
+最後に、起動したツールごとのモデルを 1 行ずつ出す（Issue #3438。pass の check は evidence を残さないので、どのモデルで確かめたかはここで読む）。
+
+```
+起動したモデル:
+- claude: Haiku 4.5（画面）
+- antigravity: gemini-3.5-flash-low（hook）
+- opencode: Claude Sonnet 5.5（画面・設定: github-copilot/claude-sonnet-5.5）
+- opencode-v2: Mistral Large 4 Ollama Cloud（画面下端・プロバイダ名を含む・設定: ollama-cloud/mistral-large-4）
+- command-code: 不明
+```
+
+モデルは、ツール自身が見せたものだけを読む（`src/lib/agent-health/launched-model.ts`）。推測では埋めない。
+
+| 読む場所 | ツール | 括弧内 |
+|---|---|---|
+| 画面（本番の `model-info-extractor`。claude のバナー、codex の下端、antigravity のバー、command-code の `# models:` 行、opencode の `▣  Build · <モデル>` の行。opencode-v2 は `▣` の無い `Build · <モデル> · 721ms` の行） | 全ツール | `画面` |
+| hook の payload の model（claude の `SessionStart`、antigravity の `modelName` など） | hook を使うツール | `hook` |
+| opencode の入力欄の下の `Build · <モデル> <プロバイダ>`（ターン前で上の行が無いとき。ANSI を除くとモデルとプロバイダの境目が無いので、まとめて残す） | opencode・opencode-v2 | `画面下端・プロバイダ名を含む` |
+
+上の順に、最初に読めたものを使う。どれも読めなければ `不明`。`設定:` は起動前に複製した `model.json` の `recent[0]`（`<providerID>/<modelID>`）で、
+読めた値と見比べるために並べる（代わりには使わない）。version だけを読むツールは起動しないので出さない。
+
 ## レポートの形
 
 子 Issue #2879 の AI はこれだけを読む。フィールドの追加はよいが、名前の変更・削除は #2879 と #2880 を壊す。
@@ -162,6 +200,11 @@ interface AgentHealthReport {
       skipKind?: 'no-definition' | 'not-shown' | 'signed-out' | 'unsupported' | 'timeout' | 'prerequisite-failed'; // skip には必ず入る
       framePaths?: string[];        // 画面全体を保存したファイル（下の「画面の保存」）
     }>;
+    launchedModel?: {               // 起動したモデル（Issue #3438）。起動しなかったツールと #3438 より前のレポートには無い（読む側は「不明」）
+      model: string | null;         // 読めなければ null（不明）
+      source?: 'screen' | 'screen-footer' | 'hook'; // model を読んだ場所
+      seeded?: string;              // 複製した model.json の recent[0]（opencode / opencode-v2）
+    };
   }>;
   safety: {
     globalConfigRestored: Array<{

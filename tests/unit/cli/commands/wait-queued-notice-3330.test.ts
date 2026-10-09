@@ -124,9 +124,7 @@ const composer = (
   structured: Record<string, unknown> = {},
 ) => ({
   isRunning: true,
-  isComplete: false,
   isPromptWaiting: false,
-  isGenerating: false,
   content: 'frame',
   fullOutput: 'frame',
   realtimeSnippet: 'frame',
@@ -135,7 +133,6 @@ const composer = (
   promptData: null,
   autoYes: { enabled: false, expiresAt: null },
   thinking: false,
-  thinkingMessage: null,
   cliToolId: 'copilot',
   isSelectionListActive: false,
   lastServerResponseTimestamp: null,
@@ -189,7 +186,7 @@ const STOP_AT = NOW + 8_000;
 /** The running frame of the turn this wait adopts. */
 const running = (structured: Record<string, unknown>) =>
   composer(
-    { sessionStatus: 'running', sessionStatusReason: 'hook_pre_tool_use', isGenerating: true },
+    { sessionStatus: 'running', sessionStatusReason: 'hook_pre_tool_use' },
     structured,
   );
 

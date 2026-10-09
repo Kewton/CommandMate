@@ -61,12 +61,34 @@ export async function execGitCommand(
     return stdout.trim();
   } catch (error) {
     // Log error server-side only (no client exposure)
-    logger.error('git:command-failed', {
+    const fields = {
       args: args.join(' '),
+      worktree: path.basename(cwd),
       error: error instanceof Error ? error.message : 'Unknown error',
-    });
+    };
+    // Issue #3416: a read killed by the 1s timeout is an EXPECTED outcome on a
+    // loaded host (callers already degrade null to '(unknown)' / not dirty), so
+    // it is a warn. Any other failure (git exited non-zero) stays an ERROR.
+    if (isExecTimeout(error)) {
+      logger.warn('git:command-failed', { ...fields, timedOut: true, timeoutMs: GIT_COMMAND_TIMEOUT_MS });
+    } else {
+      logger.error('git:command-failed', fields);
+    }
     return null;
   }
+}
+
+/**
+ * True when execFile rejected because the child was killed by `timeout`
+ * (Node sets `killed` and leaves stderr empty) rather than because git failed.
+ */
+function isExecTimeout(error: unknown): boolean {
+  const err = error as { code?: string | number; killed?: boolean } | null;
+  return (
+    err?.killed === true ||
+    err?.code === 'ERR_CHILD_PROCESS_EXEC_TIMEOUT' ||
+    err?.code === 'ETIMEDOUT'
+  );
 }
 
 /**
@@ -116,10 +138,7 @@ export async function execGitCommandCapture(
     return { ok: true, stdout: stdout.trim(), stderr: stderr ?? '', timedOut: false };
   } catch (error) {
     const err = error as Error & { code?: string | number; killed?: boolean; stderr?: string };
-    const timedOut =
-      err.killed === true ||
-      err.code === 'ERR_CHILD_PROCESS_EXEC_TIMEOUT' ||
-      err.code === 'ETIMEDOUT';
+    const timedOut = isExecTimeout(err);
     return {
       ok: false,
       stdout: '',

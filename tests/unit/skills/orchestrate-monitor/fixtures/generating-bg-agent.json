@@ -7,10 +7,7 @@
   "realtimeSnippet": "⏺ Dispatching workers\n\n· Waiting for 3 background agents to finish (esc to interrupt)",
   "lineCount": 210,
   "lastCapturedLine": 208,
-  "isComplete": false,
-  "isGenerating": false,
   "thinking": false,
-  "thinkingMessage": null,
   "isPromptWaiting": false,
   "promptData": null,
   "autoYes": {

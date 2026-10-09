@@ -26,6 +26,16 @@ const REPO_ROOT = path.resolve(__dirname, '../../..');
 const ORCHESTRATE_PATH = '.claude/commands/orchestrate.md';
 const orchestrate = readFileSync(path.join(REPO_ROOT, ORCHESTRATE_PATH), 'utf-8');
 
+// Since #3481 (2 本目) the run-time-optional procedures live in docs/orchestrate/; the body section points there.
+/** The `## <heading>` section of docs/orchestrate/<file>, up to the next `## ` heading. */
+function docSection(file: string, heading: string): string {
+  const doc = readFileSync(path.join(REPO_ROOT, 'docs/orchestrate', file), 'utf-8');
+  const start = doc.indexOf(`\n## ${heading}\n`);
+  expect(start, `docs/orchestrate/${file} has no \`## ${heading}\``).toBeGreaterThanOrEqual(0);
+  const end = doc.indexOf('\n## ', start + 1);
+  return doc.slice(start, end === -1 ? undefined : end);
+}
+
 /** The body of `### <id>. …`, up to the next `### ` heading. */
 function section(id: string): string {
   const lines = orchestrate.split('\n');
@@ -46,7 +56,7 @@ function errorRow(needle: string): string {
 }
 
 describe('[#2780] 3-1: capture comes before any wait', () => {
-  const body = section('3-1');
+  const body = `${section('3-1')}\n${docSection('exit-codes.md', '3-1 冷間起動の失敗 exit 99')}`;
 
   it('tells the orchestrator to look at the screen before waiting', () => {
     expect(body).toMatch(/待つ前に画面を見る/);

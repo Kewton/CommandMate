@@ -225,11 +225,12 @@ export const readLivePidCwd: PidCwdResolver = (pid) => {
 };
 
 /**
- * `tests/unit/skills/demo-video/env-scripts.test.ts` creates
- * `~/.commandmate-demo-vitest-<pid>` for the length of its run — in the real
- * `$HOME`, because `env-up.sh` refuses `/tmp` and `/var` (#2954). The name
- * carries the pid of the test process that made it, which is the one `$HOME`
- * entry whose owner can be established.
+ * `tests/unit/skills/demo-video/env-scripts.test.ts` created
+ * `~/.commandmate-demo-vitest-<pid>` for the length of its run, in the real
+ * `$HOME` (#2954). Since #3479 it makes the dir under the OS temp dir instead;
+ * this stays for checkouts that predate that. The name carries the pid of the
+ * test process that made it, which is the one `$HOME` entry whose owner can be
+ * established.
  */
 const DEMO_VITEST_HOME_ENTRY = /^\.commandmate-demo-vitest-([1-9]\d*)$/;
 

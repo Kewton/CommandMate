@@ -162,60 +162,63 @@ commandmatedev send <worktree-id> \
 
 ## Step 4: 再PR・再マージ
 
-### 4-1. 既存PRの状態確認
+PR の作成とマージは `/orchestrate` の Phase 6 と同じ 2 本のスクリプトで行う（#3494）。
+マージは squash だけ（`--merge` は使わない）。スクリプトは run の記録に、作業の HEAD の `verify=ok`・`review=ok`（対象外なら `skip`）・`findings=ok` と、
+公開する HEAD の `precheck=ok` が無ければ何も公開せずに止まる。修正の PR もこの記録を満たす。
 
 ```bash
-for issue_num in {issue_numbers}; do
-  gh pr list --repo Kewton/CommandMate \
-    --head "feature/${issue_num}-worktree" \
-    --state all --json number,state -q '.[0] | "\(.number) \(.state)"'
+DATE=$(date +%Y-%m-%d); RUN_DIR="workspace/orchestration/runs/$DATE"; mkdir -p "$RUN_DIR"
+RUN_ISSUES="{issue_numbers をカンマ区切り}"
+```
+
+### 4-1. 修正結果の記録（verify・review・findings）
+
+各 Issue で、ワーカーの最後のコミット（作業の HEAD）について記録する。
+
+```bash
+for issue in {issue_numbers}; do
+  WT=<worktree-id>; WT_DIR=$(commandmatedev ls --json | jq -r --arg id "$WT" '.[] | select(.id == $id) | .path')
+  # 3-1 の待機を wait-verify.mjs に替えれば verify は自動で記録される。手で待ったときは verify を走らせて記録する
+  commandmatedev verify "$WT" --json > "$RUN_DIR/verify-${issue}.json"; RC=$?
+  node scripts/orchestrate/run-log.mjs append --run-dir "$RUN_DIR" --issues "$RUN_ISSUES" \
+    --issue "$issue" --stage verify --result "$([ "$RC" = 0 ] && echo ok || echo fail)" \
+    --head "$(git -C "$WT_DIR" rev-parse HEAD)" --note "exit=$RC (uat-fix-loop)"
+  # 整合性レビュー（orchestrate 5-2b）の対象でなければ skip、本文に無い指摘（5-3）が無ければ ok
+  for stage in review findings; do
+    node scripts/orchestrate/run-log.mjs append --run-dir "$RUN_DIR" --issues "$RUN_ISSUES" \
+      --issue "$issue" --stage "$stage" --result ok --head "$(git -C "$WT_DIR" rev-parse HEAD)"
+  done
+  node scripts/orchestrate/precheck.mjs --run-dir "$RUN_DIR" --issues "$RUN_ISSUES" --issue "$issue" --worktree "$WT_DIR"
+  echo "exit=$?"   # 0 → PR を出す / 1 → runs/$DATE/precheck-<issue>-<sha>.log を読み再指示
 done
 ```
 
-### 4-2. PRの状態に応じた対応
+### 4-2. PR の作成（既存の PR の確認を含む）
 
-- **OPEN**: pushで自動更新済み。CIの通過を待つ。
-  ```bash
-  gh pr checks <PR_NUM> --repo Kewton/CommandMate --watch
-  ```
-
-- **MERGED**: 修正コミットのための新規PR作成が必要。
-  ```bash
-  commandmatedev send <worktree-id> "/create-pr" --auto-yes --duration 1h
-  commandmatedev wait <worktree-id> --timeout 600
-  ```
-
-- **CLOSED**: 再オープンまたは新規PR作成。
-  ```bash
-  commandmatedev send <worktree-id> "/create-pr" --auto-yes --duration 1h
-  commandmatedev wait <worktree-id> --timeout 600
-  ```
-
-### 4-3. CI通過待ち
+ブランチに開いた PR があれば作らず push だけして記録する。マージ済みの PR・別ブランチで同じ Issue を指す開いた PR も `publish-pr.mjs` が見る。
 
 ```bash
-for each PR:
-  gh pr checks <PR_NUM> --repo Kewton/CommandMate --watch
+node scripts/orchestrate/publish-pr.mjs --run-dir "$RUN_DIR" --issues "$RUN_ISSUES" \
+  --issue "$issue" --worktree "$WT_DIR" --label bug
+echo "exit=$?"   # 0 → PR がある / 1 → 欠けた記録・断片を埋めて再実行 / 2 → 作業ツリーが汚れている
 ```
 
-CI失敗時はワーカーに修正指示（最大3回）。
+### 4-3. CI 通過待ち・マージ（順次）
 
-### 4-4. マージ（順次）
+CI の待ち（落ちたジョブは HEAD ごとに 1 回だけ再実行）・develop の取り込みと試しのマージの検査・squash でのマージは `merge-pr.mjs` が行う。
+マージするたびに残りの PR でも呼ぶ。最後の 1 本は `--last`、Issue を閉じないときは `--close -`。
 
 ```bash
-for each PR:
-  # コンフリクト確認
-  gh pr view <PR_NUM> --repo Kewton/CommandMate --json mergeable
+node scripts/orchestrate/merge-pr.mjs --run-dir "$RUN_DIR" --issues "$RUN_ISSUES" \
+  --issue "$issue" --worktree "$WT_DIR"
+echo "exit=$?"   # 0 → マージ済み / 1 → 出力の欠けたもの・落ちた段を読む（CI 失敗はワーカーに修正指示、最大3回） / 2 → 作業ツリーが汚れている / 124 → CI が収まらない
+```
 
-  # コンフリクト時はワーカーに rebase 指示
-  # （必要に応じて）
+マージ後は develop を更新してビルドを検証する:
 
-  # マージ
-  gh pr merge <PR_NUM> --merge --repo Kewton/CommandMate
-
-  # develop更新・ビルド検証
-  git pull origin develop
-  npm run lint && npx tsc --noEmit && npm run test:unit && npm run build
+```bash
+git pull origin develop
+npm run lint && npx tsc --noEmit && npm run test:unit && npm run build
 ```
 
 ### 4-5. コンフリクト発生時
@@ -351,6 +354,6 @@ UAT修正ループが最大リトライ回数（{max_retry}回）に達しまし
 ## 関連コマンド
 
 - `/uat`: 受入テスト実行（このコマンドの前提）
-- `/pr-merge-pipeline`: PR作成→マージ（修正PR用に内部で使用）
+- `scripts/orchestrate/publish-pr.mjs` / `merge-pr.mjs`: PR作成→squashマージ（修正PRでも使用。`/orchestrate` Phase 6 と共通）
 - `/create-pr`: 単一ワーカーでのPR作成
 - `/orchestrate`: 上位オーケストレーション（開発〜UAT全体統括）

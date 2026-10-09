@@ -5,6 +5,9 @@
 # ゲートは CI（.github/workflows/ci-pr.yml）12 ジョブのうち 11 本を宣言している。
 # lint / type-check / test-unit / test-integration / build（3 ステップを 3 ゲートに分解）と、
 # 静的ガード 4 本（token-discipline / control-chars / claudemd-size / route-exports）。
+# [Issue #3478] Lint ジョブの 2 ステップ目（shellcheck）は `lint-sh` ゲートが受け持つ。
+# CI の手順ごとの対応（どのゲートが受け持つか／意図して手元に置かない理由）は
+# tests/unit/guards/ci-steps-local-coverage-3478.test.ts が一覧で固定している。
 #
 # [Issue #1882] 静的ガードは CI と**同じスクリプト**（scripts/check-*.mjs）を呼ぶ。
 # verify.yaml へ検査本体（grep や上限値）をコピーすると同じ検査の実装が 2 箇所に増え、
@@ -40,6 +43,9 @@ gates:
   - id: claudemd-size
     command: "node scripts/check-claudemd-size.mjs"
     timeoutSec: 120
+  # [Issue #3481] orchestrate.md のバイト数の上限（scripts/check-orchestrate-size.mjs、CI ジョブ orchestrate-size）は
+  # ここにゲートとして足していない。ゲートの一覧は tests/unit/verification/verify-config.test.ts が固定しているため。
+  # 手元では tests/unit/docs/orchestrate-size-3481.test.ts が同じスクリプトを呼び、unit / unit-related ゲートで走る。
   # [Issue #1946] route.ts が Next の許さない名前を export していないかを見る。
   # PR #1943 の `export const SERVER_CAPABILITIES` は lint / typecheck / unit を
   # 素通りして develop の build を壊した。Next の route 型チェックは `next build` が
@@ -76,6 +82,16 @@ gates:
   - id: lint
     command: "npm run lint"
     timeoutSec: 900
+  # [Issue #3478] CI の Lint ジョブの `Shell script lint`（`npm run lint:sh`）を手元で捕まえる。
+  # PR #3405 は lint / typecheck / unit-related / integration がすべて緑のまま、CI で
+  # shellcheck（SC2034・SC1091・SC2174）に落ちた。`lint:sh` は `npm run lint` に入っていない。
+  # ゲートにはパスの条件を書けないので、条件はコマンドの側に置く: `<base>...HEAD` で
+  # `.sh` の追加・変更・rename・削除があれば `npm run lint:sh` を走らせ、無ければ何もせず exit 0。
+  # shellcheck が未導入・版違い（CI は 0.11.0）は警告で続ける（スクリプト冒頭のコメント参照）。
+  # mutex は付けない（秒で終わる。verify-heavy-gate-mutex.test.ts の MUST_STAY_PARALLEL）。
+  - id: lint-sh
+    command: "node scripts/run-lint-sh-if-changed.mjs --base origin/develop"
+    timeoutSec: 300
   # [Issue #1994] **`build` は `typecheck` より前に置くこと。順序が意味を持つ唯一の箇所。**
   # tsconfig.json の include には `.next/types/**/*.ts` が在るので、`tsc --noEmit` は
   # 前回のビルドが生成した route 型ガードを読む。route を rename / 削除した diff では

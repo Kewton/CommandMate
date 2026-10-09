@@ -21,6 +21,12 @@ export const OPENCODE_V2_REQUIRED_EVENT_TYPES: readonly string[] = [
   'session.execution.succeeded',
 ];
 
+/** The required frame a turn the model never answered lacks (Issue #3420). */
+export const OPENCODE_V2_SUCCEEDED_EVENT_TYPE = 'session.execution.succeeded';
+
+/** What the server sends instead when the turn failed (seen with `Error: Unauthorized`, Issue #3420). */
+export const OPENCODE_V2_EXECUTION_FAILED_EVENT_TYPE = 'session.execution.failed';
+
 /** The launch wrapper's file name — what a production launch line runs. */
 export const OPENCODE_V2_LAUNCH_SCRIPT_NAME = 'launch.sh';
 
