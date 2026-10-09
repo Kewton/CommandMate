@@ -18,6 +18,7 @@ import { describe, it, expect } from 'vitest';
 
 const REPO_ROOT = path.resolve(__dirname, '../../..');
 const ORCHESTRATE_PATH = '.claude/commands/orchestrate.md';
+const FRAGMENT_RULES_PATH = 'scripts/orchestrate/templates/fragment-rules.md';
 
 const read = (relative: string): string =>
   readFileSync(path.join(REPO_ROOT, relative), 'utf8');
@@ -37,11 +38,15 @@ function section241(): string[] {
   return end === -1 ? rest : rest.slice(0, end);
 }
 
-/** The blockquote the orchestrator transcribes verbatim into every contract, `> ` stripped. */
+/**
+ * The block that goes verbatim into every contract. Since #3477 it lives in the
+ * generator's template (2-4-1 points there), minus the template's `#!` notes.
+ */
 function transcribedBlock(): string[] {
-  return section241()
-    .filter((line) => line.startsWith('>'))
-    .map((line) => line.replace(/^> ?/, ''));
+  expect(section241().join('\n')).toContain(FRAGMENT_RULES_PATH);
+  return read(FRAGMENT_RULES_PATH)
+    .split('\n')
+    .filter((line) => !line.startsWith('#!'));
 }
 
 interface Fence {
@@ -182,7 +187,7 @@ describe('/orchestrate 2-4-1 module-reference fragment', () => {
 });
 
 describe('/orchestrate 2-4-1 pre-existing instructions', () => {
-  const body = section241().join('\n');
+  const body = [...section241(), ...transcribedBlock()].join('\n');
 
   it('still keeps both shared files out of scope.allow', () => {
     expect(body).toContain(
