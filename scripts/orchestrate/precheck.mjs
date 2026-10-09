@@ -42,6 +42,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { appendRecord, findLatest, readRecords } from './run-log.mjs';
 import { workHeadOf } from './pr-common.mjs';
+import { dirtyPaths } from './dirty-tree.mjs';
 
 export const DEFAULT_BASE = 'origin/develop';
 /** Run order: cheap and decisive first, the test runs last. */
@@ -62,8 +63,6 @@ export const BUILD_STEPS = ['build', 'build-cli', 'build-server'];
 export const OPTIONAL_STEPS = [...BUILD_STEPS];
 /** Always part of the test step (2-4-2: the guards are never left out). */
 export const ALWAYS_TESTS = ['tests/unit/guards', 'tests/unit/docs'];
-/** Files the orchestrator leaves in a worktree that are not the worker's work. */
-const IGNORED_DIRTY = ['.commandmate/tasks/', 'dev-reports/'];
 const CODE_FILE = /\.(?:[cm]?js|jsx|tsx?)$/;
 const TEST_FILE = /^tests\/unit\/.+\.test\.tsx?$/;
 const RELATED_SOURCE = /^(?:src|scripts)\/.+\.(?:[cm]?js|jsx|tsx?)$/;
@@ -262,9 +261,7 @@ export function main(argv, deps = {}) {
   try {
     const head = git(run, o.worktree, ['rev-parse', 'HEAD']).trim();
     const short = head.slice(0, 7);
-    const dirty = lines(git(run, o.worktree, ['status', '--porcelain']))
-      .map((line) => line.replace(/^\S+\s+/, ''))
-      .filter((file) => !IGNORED_DIRTY.some((prefix) => file.startsWith(prefix)));
+    const dirty = dirtyPaths(run, o.worktree);
     if (dirty.length > 0) {
       error(`precheck #${issue}: uncommitted changes in ${o.worktree} — the result would not belong to ${short}:\n  ${dirty.join('\n  ')}`);
       return 2;
