@@ -75,7 +75,9 @@ export type NewTaskSendResult = (
   /**
    * The auto-yes route answered 2xx, so the server holds Auto-Yes armed, but
    * the answer did not give its expiry. Not recorded as armed: a resend arms
-   * again (the route is idempotent) rather than skip on a guessed expiry.
+   * again rather than skip on a guessed expiry. Arming again is safe but not a
+   * no-op: the server sets enabledAt / expiresAt from its own clock on every
+   * call, so a resend moves the expiry later.
    */
   autoYesStateUnknown?: true;
 };

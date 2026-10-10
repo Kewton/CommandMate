@@ -325,6 +325,8 @@
     "autoYesLabel": "Auto-Yes",
     "autoYesActive": "On for this agent, {remaining} left. Left as it is.",
     "autoYesKeep": "Leave off",
+    "autoYesKeepUnknown": "Leave as it is (state unknown)",
+    "autoYesUnknown": "Could not confirm the Auto-Yes state; it may be on for this agent.",
     "autoYesEnableFor": "Turn on for {duration}",
     "autoYesScope": "Applies to this agent until it expires, not only to this request.",
     "send": "Send",

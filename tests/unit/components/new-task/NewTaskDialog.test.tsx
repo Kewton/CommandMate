@@ -563,6 +563,10 @@ describe('[#3511] NewTaskDialog — the close lock always ends', () => {
     // time), so no countdown is shown and the choice stays: a resend arms again.
     expect(screen.queryByTestId('new-task-auto-yes-active')).toBeNull();
     expect(screen.getByTestId('new-task-auto-yes')).toHaveValue('3600000');
+    // Never asserted off: the unknown notice shows and "keep (off)" wording is gone.
+    expect(screen.getByTestId('new-task-auto-yes-unknown')).toBeInTheDocument();
+    expect(screen.getByTestId('new-task-auto-yes')).toHaveTextContent('newTask.autoYesKeepUnknown');
+    expect(screen.getByTestId('new-task-auto-yes').textContent).not.toMatch(/autoYesKeep(?!Unknown)/);
     fireEvent.click(screen.getByTestId('new-task-send'));
     await act(async () => {
       await vi.advanceTimersByTimeAsync(0);
@@ -570,6 +574,13 @@ describe('[#3511] NewTaskDialog — the close lock always ends', () => {
     expect(server.calls.filter((c) => c.url.endsWith('/auto-yes'))).toHaveLength(2);
     expect(sendCalls()).toHaveLength(1);
     expect(screen.queryByTestId('new-task-dialog')).toBeNull();
+  });
+
+  it('keeps the plain "Leave off" wording for a target whose state is known off (negative control, #3563)', async () => {
+    renderShell({ worktreeId: 'wt-a-main', instanceId: 'codex-2' });
+    await openDialog();
+    expect(screen.getByTestId('new-task-auto-yes').textContent).toMatch(/autoYesKeep(?!Unknown)/);
+    expect(screen.queryByTestId('new-task-auto-yes-unknown')).toBeNull();
   });
 
   it('sends and closes as before when the bodies arrive (negative control)', async () => {
