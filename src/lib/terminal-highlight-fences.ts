@@ -4,6 +4,11 @@
  * (split out of terminal-highlight.ts, Issue #3517).
  */
 
+import type { Code, Root, RootContent } from 'mdast';
+import remarkParse from 'remark-parse';
+import { unified, type Processor } from 'unified';
+import { SHARED_REMARK_PLUGINS } from '@/lib/markdown';
+
 /** One body line of a fence: where it is in the raw text and in the body. */
 interface FenceLine {
   /** Raw offset of the line's content (after any `> ` quote markers). */
@@ -34,11 +39,7 @@ export interface MermaidFence {
 
 const FENCE_OPEN = /^( {0,3})(`{3,}|~{3,})(.*)$/;
 /** A list item whose first line is the fence (`- ```mermaid`, `1. ```mermaid`). */
-const LIST_ITEM_PREFIX = /^ {0,3}(?:[-*+]|(\d{1,9})[.)]) {1,4}(?=`{3,}|~{3,})/;
-/** A line that starts a list item of its own (any marker, any content). */
-const LIST_ITEM_START = /^ {0,3}(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)/;
-/** A line that is not paragraph text: a heading, a fence, a thematic break, an HTML block. */
-const NOT_PARAGRAPH = /^ {0,3}(?:#{1,6}(?:[ \t]|$)|`{3,}|~{3,}|(?:[-*_][ \t]*){3,}$|<)/;
+const LIST_ITEM_PREFIX = /^ {0,3}(?:[-*+]|\d{1,9}[.)]) {1,4}(?=`{3,}|~{3,})/;
 
 /** Count of leading spaces in `text` from `from`, up to `max`. */
 function leadingSpaces(text: string, from: number, to: number, max: number): number {
@@ -66,28 +67,32 @@ function stripQuotes(text: string, line: RawLine, max: number): { depth: number;
   return { depth, contentStart };
 }
 
-/**
- * Whether the line before `lines[index]` ends a top-level paragraph that a
- * list item on `lines[index]` would interrupt. Decided by the block that line
- * belongs to, read upward through its run of non-blank lines (quote markers
- * taken off): not when it is blank, indented (a list item's continuation), or
- * another block's line, and not when the run holds a list item's first line —
- * then the run is that item's paragraph and the next marker is the list's next
- * item, not an interruption (CommonMark; micromark `list`). An approximation of
- * micromark's block state — the structural mapping (`fenceFromRawRange`) is
- * what a rendered diagram uses.
- */
-function interruptsParagraph(text: string, lines: RawLine[], index: number): boolean {
-  const contentOf = (line: RawLine): string =>
-    text.slice(stripQuotes(text, line, Number.POSITIVE_INFINITY).contentStart, line.end);
-  const before = contentOf(lines[index - 1]);
-  if (before.trim().length === 0 || /^[ \t]/.test(before) || NOT_PARAGRAPH.test(before)) return false;
-  for (let k = index - 1; k >= 0; k--) {
-    const content = contentOf(lines[k]);
-    if (content.trim().length === 0) break;
-    if (LIST_ITEM_START.test(content)) return false;
+/** Markdown as the transcript renderers parse it: remark with the shared plugins. */
+let markdownParser: Processor<Root> | null = null;
+
+/** Every ```mermaid code node in `node`, in document order. */
+function mermaidCodeNodes(node: Root | RootContent, out: Code[] = []): Code[] {
+  if (node.type === 'code') {
+    if (node.lang === 'mermaid') out.push(node);
+  } else if ('children' in node) {
+    for (const child of node.children) mermaidCodeNodes(child, out);
   }
-  return true;
+  return out;
+}
+
+/**
+ * [Issue #3544] Where Markdown opens a ```mermaid fence in `text`: the offset of
+ * each code node's opening fence, from remark — the parser the renderers use,
+ * with the same plugins — so what counts as a fence is what is drawn as one.
+ */
+function mermaidOpenings(text: string): Set<number> {
+  markdownParser ??= unified().use(remarkParse).use(SHARED_REMARK_PLUGINS) as unknown as Processor<Root>;
+  const openings = new Set<number>();
+  for (const node of mermaidCodeNodes(markdownParser.parse(text))) {
+    const offset = node.position?.start.offset;
+    if (offset !== undefined) openings.add(offset);
+  }
+  return openings;
 }
 
 /**
@@ -95,11 +100,19 @@ function interruptsParagraph(text: string, lines: RawLine[], index: number): boo
  * inside a block quote (`> ```mermaid` — every saved opencode row opens with a
  * `> **Thinking**` quote, and a diagram can sit in it). A quoted fence's body is
  * its lines with the quote markers taken off, which is what Markdown renders;
- * the fence ends at its closing line or where the quote ends. Other fences are
- * tracked only so a ```mermaid line inside them is not mistaken for an opener.
+ * the fence ends at its closing line or where the quote ends.
+ *
+ * [Issue #3544] Which lines open a fence is Markdown's call, not the line
+ * pattern's: a line counts only when remark opens a ```mermaid code node there
+ * ({@link mermaidOpenings}) — never a `2. ```mermaid` that is paragraph text,
+ * nor a ```mermaid line inside another fence. The line pattern then reads the
+ * body. This is the fallback for a region whose sources name no raw range
+ * (`chatMarkdownRawOffsets` could not line chat's part up with the message);
+ * a fence nested past what the pattern reads (4+ columns) stays unread here.
  */
 export function findMermaidFences(text: string): MermaidFence[] {
   const fences: MermaidFence[] = [];
+  const openings = mermaidOpenings(text);
   const lines: RawLine[] = [];
   let cursor = 0;
   while (cursor <= text.length) {
@@ -114,16 +127,16 @@ export function findMermaidFences(text: string): MermaidFence[] {
     const { depth, contentStart } = stripQuotes(text, lines[i], Number.POSITIVE_INFINITY);
     // A fence opening a list item sits behind the item's marker; the item's
     // following lines are indented by the marker's width (CommonMark).
-    let item = LIST_ITEM_PREFIX.exec(text.slice(contentStart, lines[i].end));
-    // [Issue #3525] An ordered list may interrupt a paragraph only when it
-    // starts at 1 (CommonMark): `text\n2. ```mermaid` is paragraph text, not a
-    // list item holding a fence.
-    if (item && item[1] !== undefined && Number(item[1]) !== 1 && i > 0 && interruptsParagraph(text, lines, i)) {
-      item = null;
-    }
+    const item = LIST_ITEM_PREFIX.exec(text.slice(contentStart, lines[i].end));
     const itemIndent = item ? item[0].length : 0;
     const open = FENCE_OPEN.exec(text.slice(contentStart + itemIndent, lines[i].end));
     if (!open) continue;
+    // [Issue #3544] Only a line Markdown itself opens a ```mermaid fence on is
+    // one (`text\n  more\n2. ```mermaid` is paragraph text; a ```mermaid line
+    // inside another fence is that fence's text). A line it does not open one
+    // on claims no lines, so a real fence after it is still read.
+    const openedAt = contentStart + itemIndent + open[1].length;
+    if (!openings.has(openedAt)) continue;
     // Markdown removes up to the opening fence's own indentation from every
     // body line (micromark `code-fenced`), so the body is compared — and the
     // offsets mapped — with it removed.
