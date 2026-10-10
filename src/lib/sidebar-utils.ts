@@ -890,3 +890,47 @@ export function isBranchKeptInPlace(
     KEEP_IN_PLACE_STATUSES.has(current.status)
   );
 }
+
+// ============================================================================
+// Sidebar open/close shortcut (Issue #3512)
+// ============================================================================
+
+/**
+ * Width of the collapsed icon rail in px. Not scaled by the display-size factor:
+ * the open/close button sits in a cell this wide at the left edge in both states,
+ * and an unscaled cell is what keeps it at the same spot (`SidebarPanelToggle`).
+ */
+export const SIDEBAR_RAIL_WIDTH = 56;
+
+type ToggleSidebarChordEvent = Pick<
+  KeyboardEvent,
+  'key' | 'code' | 'metaKey' | 'ctrlKey' | 'shiftKey' | 'altKey' | 'isComposing' | 'keyCode'
+>;
+
+/**
+ * Mod+B — opens / closes the PC sidebar (the VS Code binding).
+ *
+ * Shift and Alt are refused so Mod+Shift+B (the browsers' bookmarks bar) stays
+ * the browser's. `code` covers layouts whose B key is not a Latin "b".
+ * Registered for the `?` overlay as `toggleSidebar` in
+ * `src/config/keyboard-shortcuts.ts`.
+ */
+export function isToggleSidebarChord(event: ToggleSidebarChordEvent): boolean {
+  if (event.isComposing === true || event.keyCode === 229) return false;
+  if (event.shiftKey || event.altKey) return false;
+  if (!event.metaKey && !event.ctrlKey) return false;
+  return event.key.toLowerCase() === 'b' || event.code === 'KeyB';
+}
+
+/**
+ * Whether Mod+B must be left alone because the keystroke belongs to a text
+ * entry: form fields, contentEditable, and the terminal pane (`role="log"`),
+ * where Ctrl+B is tmux's prefix. Same rule as the palette's `isTypingTarget`.
+ */
+export function isSidebarShortcutBlockedTarget(target: EventTarget | null): boolean {
+  if (typeof HTMLElement === 'undefined' || !(target instanceof HTMLElement)) return false;
+  const tag = target.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
+  if (target.isContentEditable) return true;
+  return target.closest('[role="log"]') !== null;
+}

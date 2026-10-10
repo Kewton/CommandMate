@@ -99,6 +99,7 @@
   "back": "Back",
   "menu": "Menu",
   "sidebar": {
+    "railLabel": "App navigation",
     "open": "Open sidebar",
     "close": "Close sidebar",
     "branchNavigation": "Branch navigation",

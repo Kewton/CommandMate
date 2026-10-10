@@ -41,16 +41,22 @@
  *
  * Issue #3510:
  *   - 歯車メニューの中身は共通の `SettingsMenu`（サイドバー下部と同じ部品）。
+ *
+ * Issue #3512:
+ *   - The #747 sidebar toggle is gone from the top of the bar. The sidebar's
+ *     open/close button now sits at the top-left of the sidebar itself and, when
+ *     it is closed, at the top of the app-wide icon rail (`SidebarRail`), which
+ *     stands to the left of this bar. Roles: the rail (56px) moves between
+ *     screens; this bar (48px) moves between the panes of one worktree.
  */
 
 'use client';
 
 import React, { memo, useCallback, useRef } from 'react';
 import { useTranslations } from 'next-intl';
-import { Menu, Settings } from 'lucide-react';
+import { Settings } from 'lucide-react';
 import { ACTIVITIES, type ActivityId } from '@/config/activity-bar-config';
 import { Tooltip } from '@/components/common/Tooltip';
-import { useSidebarContext } from '@/contexts/SidebarContext';
 import { SettingsMenu, SettingsMenuTrigger } from '@/components/layout/SettingsMenu';
 
 export interface ActivityBarProps {
@@ -73,8 +79,7 @@ const ACTIVITY_PANE_ID = 'worktree-activity-pane';
 /**
  * Issue #2645: the settings menu at the bottom of the ActivityBar.
  *
- * Outside the tablist for the same reason as the sidebar toggle (#747): it is
- * not an activity, so it must not join the roving-tabindex navigation or the
+ * Outside the tablist: it is not an activity, so it must not join the roving-tabindex navigation or the
  * tab count.
  *
  * Issue #3510: the menu itself is the shared `SettingsMenu`, the same one the
@@ -109,10 +114,6 @@ export const ActivityBar = memo(function ActivityBar({
 }: ActivityBarProps) {
   const t = useTranslations('worktree');
   const buttonRefs = useRef<Array<HTMLButtonElement | null>>([]);
-
-  // Issue #747: the Branches-sidebar toggle is hosted at the top of the
-  // ActivityBar and drives the sidebar directly via SidebarContext.
-  const { isOpen: isSidebarOpen, toggle: toggleSidebar } = useSidebarContext();
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLButtonElement>, index: number, activity: ActivityId) => {
@@ -152,26 +153,6 @@ export const ActivityBar = memo(function ActivityBar({
       data-testid="activity-bar"
       className={`flex flex-col items-stretch w-12 flex-shrink-0 bg-muted border-r border-border ${className}`.trim()}
     >
-      {/* Issue #747: Sidebar (Branches) toggle. Rendered OUTSIDE the tablist so
-          it is excluded from the roving-tabindex Arrow/Home/End navigation and
-          does not change the tab count or WAI-ARIA tablist semantics. */}
-      <Tooltip content={t('activityBar.toggleSidebar')} placement="right">
-        <button
-          type="button"
-          data-testid="activity-bar-toggle-sidebar"
-          onClick={toggleSidebar}
-          aria-label={t('activityBar.toggleSidebar')}
-          aria-expanded={isSidebarOpen}
-          className="flex items-center justify-center h-12 w-12 text-muted-foreground transition-colors hover:text-surface-foreground hover:bg-muted-foreground/10 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-inset"
-        >
-          <Menu size={20} aria-hidden="true" />
-        </button>
-      </Tooltip>
-      {/* Separator between the sidebar toggle and the activity tabs */}
-      <div
-        className="mx-2 my-1 border-b border-border"
-        aria-hidden="true"
-      />
       <div
         id={ACTIVITY_BAR_ID}
         role="tablist"

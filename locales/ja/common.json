@@ -99,6 +99,7 @@
   "back": "戻る",
   "menu": "メニュー",
   "sidebar": {
+    "railLabel": "アプリのナビゲーション",
     "open": "サイドバーを開く",
     "close": "サイドバーを閉じる",
     "branchNavigation": "ブランチナビゲーション",

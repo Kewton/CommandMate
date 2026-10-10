@@ -21,9 +21,9 @@ vi.mock('next-intl', async () => {
   return createRealIntlMock('en');
 });
 
-// Issue #747: ActivityBar now reads/controls the sidebar via useSidebarContext().
-// Mock the hook so the component can render without a SidebarProvider and so the
-// toggle behaviour (click → toggle, aria-expanded ← isOpen) can be asserted.
+// Issue #747 / #3512: the ActivityBar no longer reads the sidebar context (the
+// toggle moved to the sidebar and the icon rail). The mock stays so the
+// settings-menu test below can still assert the sidebar is never toggled.
 const sidebarMock = vi.hoisted(() => ({ isOpen: true, toggle: vi.fn() }));
 vi.mock('@/contexts/SidebarContext', () => ({
   useSidebarContext: () => ({ isOpen: sidebarMock.isOpen, toggle: sidebarMock.toggle }),
@@ -169,53 +169,22 @@ describe('ActivityBar', () => {
     });
   });
 
-  describe('Sidebar toggle (Issue #747)', () => {
-    it('renders the sidebar toggle button at the top with data-testid and aria-label', () => {
+  // Issue #3512: the #747 toggle left the ActivityBar. Its behaviour (click →
+  // toggle, aria-expanded ← isOpen, accessible name) is now pinned on the new
+  // button in tests/unit/components/layout/SidebarPanelToggle-3512.test.tsx.
+  describe('Sidebar toggle moved out (Issue #3512)', () => {
+    it('no longer renders the sidebar toggle at the top of the bar', () => {
       render(<ActivityBar active="files" onToggle={() => {}} />);
-      const toggle = screen.getByTestId('activity-bar-toggle-sidebar');
-      expect(toggle).toBeInTheDocument();
-      expect(toggle).toHaveAttribute('aria-label', 'Toggle sidebar');
+      expect(screen.queryByTestId('activity-bar-toggle-sidebar')).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Toggle sidebar' })).toBeNull();
+      // The tablist is the first thing in the bar now.
+      expect(screen.getByTestId('activity-bar').firstElementChild).toBe(screen.getByRole('tablist'));
     });
 
-    it('calls the sidebar context toggle when clicked', () => {
+    it('keeps the 10 tabs and the settings gear', () => {
       render(<ActivityBar active="files" onToggle={() => {}} />);
-      fireEvent.click(screen.getByTestId('activity-bar-toggle-sidebar'));
-      expect(sidebarMock.toggle).toHaveBeenCalledTimes(1);
-    });
-
-    it('reflects the open sidebar state via aria-expanded=true', () => {
-      sidebarMock.isOpen = true;
-      render(<ActivityBar active="files" onToggle={() => {}} />);
-      expect(screen.getByTestId('activity-bar-toggle-sidebar')).toHaveAttribute(
-        'aria-expanded',
-        'true'
-      );
-    });
-
-    it('reflects the closed sidebar state via aria-expanded=false', () => {
-      sidebarMock.isOpen = false;
-      render(<ActivityBar active="files" onToggle={() => {}} />);
-      expect(screen.getByTestId('activity-bar-toggle-sidebar')).toHaveAttribute(
-        'aria-expanded',
-        'false'
-      );
-    });
-
-    it('is NOT a tab and lives outside the tablist (tab count stays 10)', () => {
-      render(<ActivityBar active="files" onToggle={() => {}} />);
-      const toggle = screen.getByTestId('activity-bar-toggle-sidebar');
-      // Regression guard: keeping the toggle out of the tablist preserves the
-      // roving-tabindex keyboard navigation and the WAI-ARIA tab count.
-      expect(toggle).not.toHaveAttribute('role', 'tab');
-      expect(screen.getByRole('tablist')).not.toContainElement(toggle);
       expect(screen.getAllByRole('tab')).toHaveLength(10);
-    });
-
-    it('does not trigger the activity onToggle when the sidebar toggle is clicked', () => {
-      const onToggle = vi.fn();
-      render(<ActivityBar active="files" onToggle={onToggle} />);
-      fireEvent.click(screen.getByTestId('activity-bar-toggle-sidebar'));
-      expect(onToggle).not.toHaveBeenCalled();
+      expect(screen.getByTestId('activity-bar-settings')).toBeInTheDocument();
     });
   });
 

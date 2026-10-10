@@ -39,6 +39,7 @@ export const SHORTCUT_SCOPES: readonly ShortcutScope[] = [
 /**
  * The registered shortcuts. Mirrors the bindings scattered across the app:
  *   - command palette toggle + Escape (CommandPalette.tsx)
+ *   - sidebar open/close (useSidebarToggleShortcut, Issue #3512)
  *   - terminal search (TerminalDisplay.tsx)
  *   - output-surface toggle (TerminalSplitPaneContent.tsx, Issue #2193)
  *   - composer submit / newline (MessageInput.tsx)
@@ -46,6 +47,10 @@ export const SHORTCUT_SCOPES: readonly ShortcutScope[] = [
  */
 export const KEYBOARD_SHORTCUTS: readonly KeyboardShortcut[] = [
   { id: 'commandPalette', keys: [MOD_KEY_TOKEN, 'K'], scope: 'global' },
+  // Issue #3512: Mod+B opens / closes the PC sidebar. Not Mod+Shift+B (the
+  // browsers' bookmarks bar); the handler stands down in text fields and the
+  // terminal pane, where Ctrl+B is tmux's prefix.
+  { id: 'toggleSidebar', keys: [MOD_KEY_TOKEN, 'B'], scope: 'global' },
   { id: 'keyboardHelp', keys: ['?'], scope: 'global' },
   { id: 'closeOverlay', keys: ['Esc'], scope: 'global' },
   { id: 'navigateList', keys: ['↑', '↓'], scope: 'global' },

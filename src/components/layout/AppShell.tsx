@@ -22,6 +22,10 @@
  * Issue #3511: both branches sit inside `NewTaskProvider` and mount the New
  * task dialog host, so the dialog opens from the list screens and the worktree
  * screen alike (the worktree screen reports its own destination through it).
+ *
+ * Issue #3512: on the PC a closed sidebar leaves `SidebarRail` (56px icon
+ * column) in its place, and Mod+B opens / closes the sidebar. The phone branch
+ * is unchanged (#3515).
  */
 
 'use client';
@@ -33,6 +37,8 @@ import { useLayoutConfig } from '@/hooks/useLayoutConfig';
 import { usePcDisplaySizeContext } from '@/contexts/PcDisplaySizeContext';
 import { Sidebar } from './Sidebar';
 import { Header } from './Header';
+import { SidebarRail } from './SidebarRail';
+import { useSidebarToggleShortcut } from './useSidebarToggleShortcut';
 import { RepositoryTabBar, REPOSITORY_TAB_BAR_HEIGHT } from './RepositoryTabBar';
 import { GlobalMobileNav } from '@/components/mobile/GlobalMobileNav';
 import { MobileConnectionBanner } from '@/components/mobile/MobileConnectionBanner';
@@ -45,6 +51,7 @@ import { NewTaskDialogHost } from '@/components/new-task/NewTaskDialogHost';
 import {
   shouldShowRepositoryTabBar,
   DEFAULT_REPO_TAB_BAR_MODE,
+  SIDEBAR_RAIL_WIDTH,
 } from '@/lib/sidebar-utils';
 import { Z_INDEX } from '@/config/z-index';
 
@@ -107,9 +114,12 @@ export const AppShell = memo(function AppShell({ children }: AppShellProps) {
     width,
     setWidth,
     repoTabBarMode,
+    toggle,
   } = useSidebarContext();
   const isMobile = useIsMobile();
   const { showSidebar, showGlobalNav } = useLayoutConfig();
+  // Issue #3512: Mod+B. Desktop only — the phone's drawer is untouched (#3515).
+  useSidebarToggleShortcut(!isMobile && showSidebar, toggle);
   // Issue #915: scale fixed-px sidebar width by the PC display-size factor.
   const { factor } = usePcDisplaySizeContext();
 
@@ -227,7 +237,7 @@ export const AppShell = memo(function AppShell({ children }: AppShellProps) {
         {/* Repository tab strip, above the header (Issue #2374) */}
         {showRepositoryTabBar && <RepositoryTabBar />}
 
-        {/* Header with 5-screen navigation */}
+        {/* Screen header: title + connection status + app update (Issue #3512) */}
         {showGlobalNav && <Header />}
 
         <div className="flex flex-1 min-h-0">
@@ -264,11 +274,34 @@ export const AppShell = memo(function AppShell({ children }: AppShellProps) {
             </aside>
           )}
 
-          {/* Main content - paddingLeft matches sidebar width */}
+          {/* Issue #3512: the icon rail that stands in for the closed sidebar,
+              at the same top offset. Its first cell is the open/close button,
+              at the spot the open sidebar has it. */}
+          {showSidebar && !isOpen && (
+            <aside
+              data-testid="sidebar-rail-container"
+              className={`
+                fixed left-0
+                ${showGlobalNav ? 'top-16 h-[calc(100vh-4rem)]' : 'top-0 h-full'}
+                border-r border-border
+              `}
+              style={{
+                width: `${SIDEBAR_RAIL_WIDTH}px`,
+                zIndex: Z_INDEX.SIDEBAR,
+                ...sidebarOffsetStyle,
+              }}
+            >
+              <SidebarRail />
+            </aside>
+          )}
+
+          {/* Main content - paddingLeft matches the sidebar (or the rail) width */}
           <main
             ref={mainRef}
             className="flex-1 min-w-0 h-full overflow-hidden transition-[padding] duration-300 ease-out"
-            style={{ paddingLeft: showSidebar && isOpen ? `${displayWidth}px` : 0 }}
+            style={{
+              paddingLeft: showSidebar ? `${isOpen ? displayWidth : SIDEBAR_RAIL_WIDTH}px` : 0,
+            }}
             role="main"
             data-view-transition="content"
           >
