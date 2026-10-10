@@ -13,6 +13,7 @@ import { useLocale, useTranslations } from 'next-intl';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import rehypeSanitize from 'rehype-sanitize';
 import rehypeHighlight from 'rehype-highlight';
+import { rehypeSearchRawText, searchRawProps } from '@/lib/terminal-highlight';
 import type { ConversationPair } from '@/types/conversation';
 import type { ChatMessage } from '@/types/models';
 import { isAgentAuthoredMarkdown } from '@/types/agent-transcript';
@@ -235,12 +236,12 @@ const AssistantMarkdown = memo(function AssistantMarkdown({
         )
       );
     return {
-      p: ({ children }) => <p>{linkify(children)}</p>,
-      li: ({ children }) => <li>{linkify(children)}</li>,
-      td: ({ children }) => <td>{linkify(children)}</td>,
-      th: ({ children }) => <th>{linkify(children)}</th>,
-      strong: ({ children }) => <strong>{linkify(children)}</strong>,
-      em: ({ children }) => <em>{linkify(children)}</em>,
+      p: ({ children, ...props }) => <p {...searchRawProps(props)}>{linkify(children)}</p>,
+      li: ({ children, ...props }) => <li {...searchRawProps(props)}>{linkify(children)}</li>,
+      td: ({ children, ...props }) => <td {...searchRawProps(props)}>{linkify(children)}</td>,
+      th: ({ children, ...props }) => <th {...searchRawProps(props)}>{linkify(children)}</th>,
+      strong: ({ children, ...props }) => <strong {...searchRawProps(props)}>{linkify(children)}</strong>,
+      em: ({ children, ...props }) => <em {...searchRawProps(props)}>{linkify(children)}</em>,
       // [#2345] A Markdown link's destination is consumed by the parser, so it
       // never reaches the linkifier above and used to render as a bare `<a>`
       // that navigated this tab away from CommandMate. Chat's renderer, not a
@@ -261,7 +262,9 @@ const AssistantMarkdown = memo(function AssistantMarkdown({
   // [#2459] The remark half is shared with Chat and MarkdownPreview so a fix to
   // how a bare URL ends lands on all three at once; the rehype half stays local
   // because this surface deliberately has no `rehypeRaw`.
-  const rehypePlugins = useMemo(() => [rehypeSanitize, rehypeHighlight], []);
+  // [#3523] `rehypeSearchRawText` marks where each element's text is in
+  // `content`, so a search hit after `**`, `#`, a link… lands on its word.
+  const rehypePlugins = useMemo(() => [rehypeSanitize, rehypeSearchRawText, rehypeHighlight], []);
 
   return (
     <ReactMarkdown

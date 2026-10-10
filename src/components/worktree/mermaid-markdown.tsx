@@ -35,7 +35,9 @@ export const MERMAID_MARKDOWN_COMPONENTS: Pick<Components, 'code' | 'pre'> = {
         {children}
       </MermaidCodeBlock>
     ) : (
-      <code {...rest} className={className}>
+      // [Issue #3523] `className` first: the attributes come out in the order
+      // react-markdown's own `<code>` writes them (search's mark comes after).
+      <code className={className} {...rest}>
         {children}
       </code>
     ),

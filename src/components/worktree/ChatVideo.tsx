@@ -39,6 +39,7 @@ export const ChatVideo = memo(function ChatVideo({
   label,
   fallback,
   onFilePathClick,
+  searchRaw,
 }: {
   /** The image `src` / link `href` as written. */
   target: string | undefined;
@@ -47,6 +48,12 @@ export const ChatVideo = memo(function ChatVideo({
   /** Drawn when `target` is not an in-worktree video. */
   fallback: React.ReactNode;
   onFilePathClick: (path: string) => void;
+  /**
+   * [Issue #3523] The search mark of the link / image this video replaces
+   * (`searchRawProps`), kept on the link under it: search places hits in the
+   * label, and the paragraph around it still adds up.
+   */
+  searchRaw?: Record<string, string>;
 }) {
   const t = useTranslations('worktree');
   const { worktreeId, worktreePath } = useChatImageScope();
@@ -57,7 +64,7 @@ export const ChatVideo = memo(function ChatVideo({
 
   const href = target.trim();
   const link = (
-    <ChatFileLink href={href} onFilePathClick={onFilePathClick}>
+    <ChatFileLink {...searchRaw} href={href} onFilePathClick={onFilePathClick}>
       {label}
     </ChatFileLink>
   );
