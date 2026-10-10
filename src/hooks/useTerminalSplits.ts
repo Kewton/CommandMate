@@ -56,6 +56,24 @@ export interface UseTerminalSplitsReturn {
   addSplit: () => void;
   removeSplit: () => void;
   /**
+   * Issue #3514: jump straight to `count` splits (the Action bar's layout
+   * icons). Equivalent to pressing add / remove until the count matches — new
+   * splits take unused roster instances in roster order, removed ones come off
+   * the end — so the 2x2 grid, the equal grid widths and the maximize reset are
+   * the ones `addSplit` / `removeSplit` already produce. Clamped to
+   * MIN_SPLITS..MAX_SPLITS and to the number of roster instances (a split
+   * cannot be opened without a distinct instance to show). Picking the current
+   * count is a no-op.
+   */
+  setSplitCount: (count: number) => void;
+  /**
+   * Issue #3514: append a split showing `instanceId` (the header "+" with the
+   * `new-split` placement). Returns `false` — and changes nothing — at
+   * MAX_SPLITS, for an instance not on the roster, or for one another split
+   * already shows (S1-002).
+   */
+  openInstanceInNewSplit: (instanceId: string) => boolean;
+  /**
    * Assign agent instance `instanceId` to split `idx`.
    *
    * Issue #786 / #869 (D-1 / S3-005): returns `true` only when the change is
@@ -173,6 +191,38 @@ function syncGridRowHeights(config: TerminalSplitConfig): TerminalSplitConfig {
  */
 function equalGridWidths(): number[] {
   return Array.from({ length: GRID_SPLIT_COUNT }, () => 1 / GRID_SPLIT_COUNT);
+}
+
+/**
+ * Append one split entry, sizing it the way `addSplit` always has (Issue #3514
+ * factored this out so the layout icons and the header "+" share it).
+ *
+ * The caller guarantees room (`< MAX_SPLITS`) and a distinct instance.
+ */
+function appendSplitEntry(prev: TerminalSplitConfig, entry: TerminalSplitEntry): TerminalSplitConfig {
+  const splits = [...prev.splits, entry];
+  // Issue #2421: the 4th split is a LAYOUT-MODE change (row -> 2x2 grid), so
+  // the 1-D ratios stop describing the layout and the grid opens equal
+  // instead of inheriting a lopsided column split from the 3-split row.
+  if (isGridLayout(splits.length)) {
+    return syncGridRowHeights({ ...prev, splits, widths: equalGridWidths() });
+  }
+  const lastIdx = prev.widths.length - 1;
+  const lastWidth = prev.widths[lastIdx];
+  const halved = lastWidth / 2;
+  const newWidths = [...prev.widths];
+  newWidths[lastIdx] = halved;
+  newWidths.push(halved);
+  return syncGridRowHeights({ ...prev, splits, widths: newWidths });
+}
+
+/** Drop the last split, re-normalizing widths (Issue #739) — `removeSplit`'s body. */
+function dropLastSplit(prev: TerminalSplitConfig): TerminalSplitConfig {
+  const splits = prev.splits.slice(0, -1);
+  const widths = normalizeWidths(prev.widths.slice(0, -1));
+  // Issue #2421: leaving the grid drops `rowHeights` (there are no rows to
+  // describe), which is what restores the pre-#2421 payload shape.
+  return syncGridRowHeights({ ...prev, splits, widths });
 }
 
 /**
@@ -420,20 +470,7 @@ export function useTerminalSplits(
       const used = new Set(prev.splits.map(s => s.instanceId));
       const next = pickUnusedInstance(instancesRef.current, used);
       if (!next) return prev; // no spare instance to assign
-      const splits = [...prev.splits, { cliToolId: next.cliTool, instanceId: next.id }];
-      // Issue #2421: the 4th split is a LAYOUT-MODE change (row -> 2x2 grid), so
-      // the 1-D ratios stop describing the layout and the grid opens equal
-      // instead of inheriting a lopsided column split from the 3-split row.
-      if (isGridLayout(splits.length)) {
-        return syncGridRowHeights({ ...prev, splits, widths: equalGridWidths() });
-      }
-      const lastIdx = prev.widths.length - 1;
-      const lastWidth = prev.widths[lastIdx];
-      const halved = lastWidth / 2;
-      const newWidths = [...prev.widths];
-      newWidths[lastIdx] = halved;
-      newWidths.push(halved);
-      return syncGridRowHeights({ ...prev, splits, widths: newWidths });
+      return appendSplitEntry(prev, { cliToolId: next.cliTool, instanceId: next.id });
     });
   }, []);
 
@@ -444,12 +481,47 @@ export function useTerminalSplits(
     setMaximizedIndex(null);
     setConfig(prev => {
       if (prev.splits.length <= MIN_SPLITS) return prev;
-      const splits = prev.splits.slice(0, -1);
-      const widths = normalizeWidths(prev.widths.slice(0, -1));
-      // Issue #2421: leaving the grid drops `rowHeights` (there are no rows to
-      // describe), which is what restores the pre-#2421 payload shape.
-      return syncGridRowHeights({ ...prev, splits, widths });
+      return dropLastSplit(prev);
     });
+  }, []);
+
+  const setSplitCount = useCallback((count: number) => {
+    const current = configRef.current.splits.length;
+    const target = Math.max(
+      MIN_SPLITS,
+      Math.min(Math.floor(count), MAX_SPLITS, Math.max(instancesRef.current.length, MIN_SPLITS)),
+    );
+    if (!Number.isFinite(target) || target === current) return;
+    // Issue #2261: same rule as add / remove — a layout change restores.
+    setMaximizedIndex(null);
+    setConfig(prev => {
+      let next = prev;
+      while (next.splits.length > target && next.splits.length > MIN_SPLITS) {
+        next = dropLastSplit(next);
+      }
+      while (next.splits.length < target) {
+        const used = new Set(next.splits.map(s => s.instanceId));
+        const inst = pickUnusedInstance(instancesRef.current, used);
+        if (!inst) break;
+        next = appendSplitEntry(next, { cliToolId: inst.cliTool, instanceId: inst.id });
+      }
+      return next;
+    });
+  }, []);
+
+  const openInstanceInNewSplit = useCallback((instanceId: string): boolean => {
+    const current = configRef.current;
+    if (current.splits.length >= MAX_SPLITS) return false;
+    const target = instancesRef.current.find(i => i.id === instanceId);
+    if (!target) return false;
+    if (current.splits.some(s => s.instanceId === instanceId)) return false;
+    setMaximizedIndex(null);
+    setConfig(prev => {
+      if (prev.splits.length >= MAX_SPLITS) return prev;
+      if (prev.splits.some(s => s.instanceId === instanceId)) return prev;
+      return appendSplitEntry(prev, { cliToolId: target.cliTool, instanceId });
+    });
+    return true;
   }, []);
 
   // Clamp focusedSplitIndex when splits shrink.
@@ -575,6 +647,8 @@ export function useTerminalSplits(
     setRowHeights,
     addSplit,
     removeSplit,
+    setSplitCount,
+    openInstanceInNewSplit,
     setSplitInstance,
     setSplitWidth,
     resetWidths,

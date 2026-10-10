@@ -854,6 +854,13 @@ interface DesktopHeaderProps {
    * visible chip lives on the split pane's own header, which has the width.
    */
   agentSessionByInstance?: Readonly<Record<string, AgentSessionSnapshot>>;
+  /**
+   * Issue #3514: the "+" that adds an agent, drawn at the right end of the
+   * agent pills. A slot rather than the control itself so this module keeps no
+   * dependency on the roster write (the parent owns the roster and the split
+   * placement). Omitted renders nothing — the pre-#3514 row.
+   */
+  agentAddControl?: React.ReactNode;
 }
 
 /** Status indicator configuration is imported from @/config/status-colors (SF1) */
@@ -1014,6 +1021,7 @@ export const DesktopHeader = memo(function DesktopHeader({
   onKillSession,
   verificationChip,
   agentSessionByInstance,
+  agentAddControl,
 }: DesktopHeaderProps) {
   const tWorktree = useTranslations('worktree');
   const locale = useLocale();
@@ -1514,6 +1522,9 @@ export const DesktopHeader = memo(function DesktopHeader({
                   {tWorktree('awaitingInstruction.badge')}
                 </span>
               )}
+
+              {/* Issue #3514: add an agent — the right end of the agent row. */}
+              {agentAddControl}
             </div>
           );
         })()}

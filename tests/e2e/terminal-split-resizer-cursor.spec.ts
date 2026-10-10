@@ -47,9 +47,8 @@ test.describe('Terminal split — PaneResizer cursor non-residue (AC-27 #1)', ()
     await ensureFilesActivityVisible(page);
 
     // Grow to 3 splits → 2 split-gap resizers (split-resizer-0 / -1).
-    const addBtn = page.locator('[data-testid="add-terminal-split"]');
-    await addBtn.click();
-    await addBtn.click();
+    // Issue #3514: the "+ / -" stepper became layout icons (1-4).
+    await page.locator('[data-testid="split-layout-3"]').click();
     await expect(
       page.locator('[data-testid^="terminal-split-pane-"]'),
     ).toHaveCount(3);

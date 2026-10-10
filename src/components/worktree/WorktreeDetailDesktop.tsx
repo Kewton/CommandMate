@@ -33,7 +33,12 @@ import { ActivityPane, type ActivityContentMap } from '@/components/worktree/Act
 import type { ActivityId } from '@/config/activity-bar-config';
 import { FileTreeView } from '@/components/worktree/FileTreeView';
 import { FilePanelSplit } from '@/components/worktree/FilePanelSplit';
-import { TerminalSplitContainer } from '@/components/worktree/TerminalSplitContainer';
+import {
+  TerminalSplitContainer,
+  type InstancePlacementRequest,
+} from '@/components/worktree/TerminalSplitContainer';
+import { AgentAddMenu } from '@/components/worktree/AgentAddMenu';
+import type { AgentPlacement } from '@/config/terminal-split-config';
 import { TerminalSplitPaneContent } from '@/components/worktree/TerminalSplitPaneContent';
 import { MemoPane } from '@/components/worktree/MemoPane';
 import { TodoPane } from '@/components/worktree/TodoPane';
@@ -389,6 +394,51 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
     [setActiveInstanceId],
   );
 
+  /**
+   * Issue #3514: the header "+" (AgentAddMenu).
+   *
+   * The menu PATCHes the roster and reports where the user asked to open the
+   * new agent; that becomes a token-stamped placement request the split
+   * container applies once the new roster reaches it. `splitCount` is mirrored
+   * up from the container so the menu can refuse `new-split` at the ceiling.
+   */
+  const [splitCount, setSplitCount] = useState(1);
+  const [instancePlacementRequest, setInstancePlacementRequest] =
+    useState<InstancePlacementRequest | null>(null);
+  const placementTokenRef = React.useRef(0);
+  const handleAgentAdded = useCallback(
+    (instance: AgentInstance, placement: AgentPlacement) => {
+      if (placement === 'roster-only') return;
+      placementTokenRef.current += 1;
+      setInstancePlacementRequest({
+        instanceId: instance.id,
+        placement,
+        token: placementTokenRef.current,
+      });
+    },
+    [],
+  );
+
+  const agentAddControl = useMemo(
+    () => (
+      <AgentAddMenu
+        worktreeId={worktreeId}
+        instances={instances}
+        splitCount={splitCount}
+        onInstancesChange={onAgentInstancesChange}
+        onAdded={handleAgentAdded}
+      />
+    ),
+    [worktreeId, instances, splitCount, onAgentInstancesChange, handleAgentAdded],
+  );
+
+  // Issue #3514: the branch each split's composer names ("To: <agent> ·
+  // <branch>"). The header's own rule: the checked-out branch unless git could
+  // not tell, then the worktree's name.
+  const currentBranch = worktree?.gitStatus?.currentBranch;
+  const composerBranchName =
+    currentBranch && currentBranch !== '(unknown)' ? currentBranch : worktreeName;
+
   // Issue #2656: route an instance picked in the sidebar's sessions view
   // through the same path as a header pill click (split 0 if shown nowhere,
   // focus move if another split shows it). The token guard keeps a re-created
@@ -438,6 +488,7 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
       onDropInstance,
       isMaximized: paneIsMaximized,
       onToggleMaximize,
+      showFocusFrame: paneShowFocusFrame,
     }: {
       splitIndex: number;
       cliToolId: CLIToolType;
@@ -451,6 +502,8 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
       /** Issue #2261: container-owned maximize state + toggle for this split. */
       isMaximized: boolean;
       onToggleMaximize: () => void;
+      /** Issue #3514: frame the selected split (focused, and >1 split open). */
+      showFocusFrame?: boolean;
     }) => {
       const panePendingInsert = pendingInsertTextMap.get(splitIndex) ?? null;
       // Issue #525 / #740 / #896: auto-yes state is per-INSTANCE in
@@ -546,6 +599,10 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
           // renders the title-bar toggle and owns the keyboard chord.
           isMaximized={paneIsMaximized}
           onToggleMaximize={onToggleMaximize}
+          // Issue #3514: the selected-split frame and the composer's
+          // "To: <agent> · <branch>" line.
+          showFocusFrame={paneShowFocusFrame ?? false}
+          branchName={composerBranchName}
           // Issue #1171: the split builds its own kill-target snapshot and calls
           // this to open the confirm dialog for exactly the session it shows.
           onRequestSessionEnd={onRequestSessionEnd}
@@ -584,6 +641,8 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
       onRequestSessionEnd,
       // Issue #2042: stable (useCallback with no deps); listed for exhaustive-deps.
       handleAgentSessionChange,
+      // Issue #3514: changes with the checked-out branch only.
+      composerBranchName,
     ],
   );
 
@@ -603,6 +662,9 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
         onActiveInstanceChange={setActiveInstanceId}
         // Issue #1152: route header pill selections into the primary split.
         headerInstanceSelection={headerInstanceSelection}
+        // Issue #3514: show an agent added from the header "+".
+        instancePlacementRequest={instancePlacementRequest}
+        onSplitCountChange={setSplitCount}
       />
     ),
     // setFocusedSplitIndex / setActiveInstanceId are stable callbacks, and
@@ -610,7 +672,7 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
     // destabilize the memo beyond the existing per-render cadence.
     // headerInstanceSelection changes only on a header pill click (a user
     // action, not the polling cadence), so re-creating the region then is fine.
-    [worktreeId, instances, rosterReady, renderSplitPane, setFocusedSplitIndex, showToast, setActiveInstanceId, headerInstanceSelection],
+    [worktreeId, instances, rosterReady, renderSplitPane, setFocusedSplitIndex, showToast, setActiveInstanceId, headerInstanceSelection, instancePlacementRequest],
   );
 
   /**
@@ -873,6 +935,8 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
             // Issue #2042: cost / context for the pills' tooltips. Sparse — only
             // instances with an open split have an entry.
             agentSessionByInstance={agentSessionByInstance}
+            // Issue #3514: "+" at the right end of the agent pills.
+            agentAddControl={agentAddControl}
             // Issue #2064: always rendered. It used to hide itself on a
             // worktree with no task row, which put the Verification entry point
             // out of reach of exactly the people who have never sent a contract.

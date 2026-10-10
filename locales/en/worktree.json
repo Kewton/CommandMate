@@ -515,8 +515,6 @@
     "hideFiles": "Hide open files",
     "equalizeWidths": "Equal widths",
     "equalizeWidthsHint": "Equalize terminal widths and reset History width",
-    "addSplit": "Add split",
-    "removeSplit": "Remove split",
     "selectInstance": "Select agent instance for {split}",
     "moreActions": "More actions",
     "searchTerminal": "Search terminal",
@@ -531,7 +529,13 @@
     "maximizeShortcutHint": "⌘ / Ctrl + Shift + Enter",
     "maximizedStatus": "Split {split} maximized",
     "loading": "Loading…",
-    "sessionEnded": "The session has ended. Send a message to start a new session."
+    "sessionEnded": "The session has ended. Send a message to start a new session.",
+    "layoutGroupLabel": "Split layout",
+    "layoutSplits": "{count, plural, one {# split} other {# splits}}",
+    "composerTarget": "To: {agent} · {branch}",
+    "composerTargetNoBranch": "To: {agent}",
+    "composerTargetLabel": "This input sends to {agent} on {branch}",
+    "composerTargetLabelNoBranch": "This input sends to {agent}"
   },
   "surfaceMode": {
     "groupLabel": "Output surface for {split}",
@@ -1670,5 +1674,25 @@
     "noteInstanceFlag": "--instance is how a command names its target. --agent is only for starting an ad-hoc session the roster does not know, and wait has no --agent at all.",
     "noteWaitOnPrompt": "wait carries --on-prompt human so it keeps waiting when the agent asks something. Without it the default (agent) exits 10 the moment a prompt is detected.",
     "noteRespondNumber": "respond does not interpret its answer. Send the NUMBER of the option: \"yes\" is typed, ignored, and followed by Enter, which picks whatever the default option happens to be."
+  },
+  "agentAdd": {
+    "button": "Add agent",
+    "title": "Add agent",
+    "tool": "Agent",
+    "notInstalled": "{name} (not installed)",
+    "installedUnknown": "Could not check which agents are installed; every agent is listed.",
+    "noInstalled": "No agent CLI is installed.",
+    "name": "Name (optional)",
+    "namePlaceholder": "e.g. Review",
+    "placement": "Open in",
+    "placementNewSplit": "New split",
+    "placementReplace": "Replace the current split",
+    "placementRosterOnly": "Add only",
+    "placementNewSplitFull": "All {max} splits are in use",
+    "startHint": "The session starts when you send the first message.",
+    "submit": "Add",
+    "cancel": "Cancel",
+    "saveError": "Could not add the agent.",
+    "maxReached": "Up to {max} agents per branch"
   }
 }

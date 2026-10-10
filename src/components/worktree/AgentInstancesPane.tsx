@@ -87,6 +87,7 @@ import {
   isAgentSourceDegraded,
 } from '@/components/worktree/WorktreeDetailSubComponents';
 import { AGENT_SOURCE_POLL_INTERVAL_MS } from '@/config/agent-source-config';
+import { defaultAlias, nextInstanceId } from '@/components/worktree/AgentAddMenu';
 import type { AgentEventSourceView, Worktree } from '@/types/models';
 
 // ============================================================================
@@ -178,27 +179,9 @@ export interface AgentInstancesPaneProps {
 // Helpers
 // ============================================================================
 
-/**
- * Generate a unique, validator-safe instance id for a new instance of
- * `cliTool`. Claims the primary id (`=== cliTool`) when it is still free so the
- * backward-compatible session/poller keys stay anchored; otherwise allocates
- * the smallest free `{cliTool}-{n}` suffix (n >= 2).
- */
-function nextInstanceId(cliTool: CLIToolType, existing: AgentInstance[]): string {
-  const ids = new Set(existing.map((inst) => inst.id));
-  if (!ids.has(cliTool)) return cliTool;
-  let n = 2;
-  while (ids.has(`${cliTool}-${n}`)) n++;
-  return `${cliTool}-${n}`;
-}
-
-/** Default alias for a freshly-added instance (tool name, suffixed when extra). */
-function defaultAlias(cliTool: CLIToolType, id: string): string {
-  const name = getCliToolDisplayName(cliTool);
-  if (id === cliTool) return name;
-  const suffix = id.slice(cliTool.length + 1);
-  return suffix ? `${name} ${suffix}` : name;
-}
+// `nextInstanceId` / `defaultAlias` live in AgentAddMenu (Issue #3514) so the
+// header's "+" and this pane's "Add instance" allocate ids and aliases the same
+// way.
 
 /**
  * Which machinery is speaking for each roster row (Issue #2054).
