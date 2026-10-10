@@ -33,10 +33,8 @@ import { ActivityPane, type ActivityContentMap } from '@/components/worktree/Act
 import type { ActivityId } from '@/config/activity-bar-config';
 import { FileTreeView } from '@/components/worktree/FileTreeView';
 import { FilePanelSplit } from '@/components/worktree/FilePanelSplit';
-import {
-  TerminalSplitContainer,
-  type InstancePlacementRequest,
-} from '@/components/worktree/TerminalSplitContainer';
+import { TerminalSplitContainer } from '@/components/worktree/TerminalSplitContainer';
+import { useTerminalSplitPlacement } from '@/hooks/useTerminalSplitPlacement';
 import { AgentAddMenu } from '@/components/worktree/AgentAddMenu';
 import type { AgentPlacement } from '@/config/terminal-split-config';
 import { TerminalSplitPaneContent } from '@/components/worktree/TerminalSplitPaneContent';
@@ -403,20 +401,16 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
    * up from the container so the menu can refuse `new-split` at the ceiling.
    */
   const [splitCount, setSplitCount] = useState(1);
-  const [instancePlacementRequest, setInstancePlacementRequest] =
-    useState<InstancePlacementRequest | null>(null);
-  const placementTokenRef = React.useRef(0);
+  const {
+    request: instancePlacementRequest,
+    requestPlacement,
+    handleApplied: handleInstancePlacementApplied,
+  } = useTerminalSplitPlacement();
   const handleAgentAdded = useCallback(
     (instance: AgentInstance, placement: AgentPlacement) => {
-      if (placement === 'roster-only') return;
-      placementTokenRef.current += 1;
-      setInstancePlacementRequest({
-        instanceId: instance.id,
-        placement,
-        token: placementTokenRef.current,
-      });
+      requestPlacement(instance.id, placement);
     },
-    [],
+    [requestPlacement],
   );
 
   const agentAddControl = useMemo(
@@ -664,6 +658,7 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
         headerInstanceSelection={headerInstanceSelection}
         // Issue #3514: show an agent added from the header "+".
         instancePlacementRequest={instancePlacementRequest}
+        onInstancePlacementApplied={handleInstancePlacementApplied}
         onSplitCountChange={setSplitCount}
       />
     ),
@@ -672,7 +667,7 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
     // destabilize the memo beyond the existing per-render cadence.
     // headerInstanceSelection changes only on a header pill click (a user
     // action, not the polling cadence), so re-creating the region then is fine.
-    [worktreeId, instances, rosterReady, renderSplitPane, setFocusedSplitIndex, showToast, setActiveInstanceId, headerInstanceSelection, instancePlacementRequest],
+    [worktreeId, instances, rosterReady, renderSplitPane, setFocusedSplitIndex, showToast, setActiveInstanceId, headerInstanceSelection, instancePlacementRequest, handleInstancePlacementApplied],
   );
 
   /**

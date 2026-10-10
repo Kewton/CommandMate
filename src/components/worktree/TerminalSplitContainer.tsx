@@ -225,6 +225,13 @@ export interface TerminalSplitContainerProps {
    * it takes focus. Applied once per token, as soon as `instances` holds it.
    */
   instancePlacementRequest?: InstancePlacementRequest | null;
+  /**
+   * Issue #3514: called with the request's token once it has been handled
+   * (placed, or focus moved to the split already showing it). The parent must
+   * drop that request: the guard against re-applying it lives in a ref, and a
+   * remount of this container resets it.
+   */
+  onInstancePlacementApplied?: (token: number) => void;
   /** Issue #3514: published whenever the split count changes (the "+" needs it). */
   onSplitCountChange?: (count: number) => void;
 }
@@ -239,6 +246,7 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
   onActiveInstanceChange,
   headerInstanceSelection,
   instancePlacementRequest,
+  onInstancePlacementApplied,
   onSplitCountChange,
 }: TerminalSplitContainerProps) {
   const {
@@ -355,23 +363,24 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
     if (instancePlacementRequest.token === lastPlacementTokenRef.current) return;
     const { instanceId, placement } = instancePlacementRequest;
     if (!instances.some((inst) => inst.id === instanceId)) return; // roster not here yet
-    lastPlacementTokenRef.current = instancePlacementRequest.token;
+    const { token } = instancePlacementRequest;
+    lastPlacementTokenRef.current = token;
     const current = splitsRef.current;
     const shownIdx = current.findIndex((s) => s.instanceId === instanceId);
     if (shownIdx !== -1) {
       setFocusedSplitIndex(shownIdx);
-      return;
-    }
-    if (placement === 'new-split' && openInstanceInNewSplit(instanceId)) {
+    } else if (placement === 'new-split' && openInstanceInNewSplit(instanceId)) {
       onActiveInstanceChange?.(instanceId);
-      return;
+    } else {
+      // `replace`, or a `new-split` that found no room: the focused split.
+      const targetIdx = Math.min(focusedSplitIndex, current.length - 1);
+      if (setSplitInstance(targetIdx, instanceId)) {
+        setFocusedSplitIndex(targetIdx);
+        onActiveInstanceChange?.(instanceId);
+      }
     }
-    // `replace`, or a `new-split` that found no room: the focused split.
-    const targetIdx = Math.min(focusedSplitIndex, current.length - 1);
-    if (setSplitInstance(targetIdx, instanceId)) {
-      setFocusedSplitIndex(targetIdx);
-      onActiveInstanceChange?.(instanceId);
-    }
+    // Handled either way: the parent drops it so a remount cannot re-apply it.
+    onInstancePlacementApplied?.(token);
   }, [
     instancePlacementRequest,
     instances,
@@ -380,6 +389,7 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
     setSplitInstance,
     setFocusedSplitIndex,
     onActiveInstanceChange,
+    onInstancePlacementApplied,
   ]);
 
   // Issue #3514: the header "+" disables `new-split` at the ceiling.

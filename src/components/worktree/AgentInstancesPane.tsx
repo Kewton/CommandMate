@@ -88,6 +88,7 @@ import {
 } from '@/components/worktree/WorktreeDetailSubComponents';
 import { AGENT_SOURCE_POLL_INTERVAL_MS } from '@/config/agent-source-config';
 import { defaultAlias, nextInstanceId } from '@/components/worktree/AgentAddMenu';
+import { useAgentInstancesRoster, type RosterBuilder } from '@/hooks/useAgentInstancesRoster';
 import type { AgentEventSourceView, Worktree } from '@/types/models';
 
 // ============================================================================
@@ -466,40 +467,35 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
     await agentDefaults.applyToUnchanged();
   }, [canApplyToUnchanged, agentDefaults, confirm, t, rosterToolOrder]);
 
-  /** Normalize order to array index and PATCH the full roster. */
+  /**
+   * PATCH the full roster through the shared per-worktree queue (Issue #3514).
+   * Each operation is a builder run against the LATEST roster when its turn
+   * comes, so it cannot overwrite — or re-allocate an id taken by — a write the
+   * header's "+" issued while this one was waiting.
+   */
+  const writeRoster = useAgentInstancesRoster(worktreeId, instances, onInstancesChange);
   const persist = useCallback(
-    async (next: AgentInstance[]) => {
-      const normalized = next.map((inst, order) => ({ ...inst, order }));
+    async (build: RosterBuilder) => {
       setSaving(true);
       setError(null);
       try {
-        const response = await fetch(`/api/worktrees/${worktreeId}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ agentInstances: normalized }),
-        });
-        if (response.ok) {
-          onInstancesChange(normalized);
-        } else {
-          setError(t('agentInstanceSaveError'));
-        }
-      } catch {
-        setError(t('agentInstanceSaveError'));
+        const result = await writeRoster(build);
+        if (result.status === 'failed') setError(t('agentInstanceSaveError'));
       } finally {
         setSaving(false);
       }
     },
-    [worktreeId, onInstancesChange, t]
+    [writeRoster, t]
   );
 
   const handleAdd = useCallback(() => {
     if (instances.length >= MAX_AGENT_INSTANCES) return;
-    const id = nextInstanceId(addToolId, instances);
-    const next: AgentInstance[] = [
-      ...instances,
-      { id, cliTool: addToolId, alias: defaultAlias(addToolId, id), order: instances.length },
-    ];
-    void persist(next);
+    const tool = addToolId;
+    void persist((base) => {
+      if (base.length >= MAX_AGENT_INSTANCES) return null;
+      const id = nextInstanceId(tool, base);
+      return [...base, { id, cliTool: tool, alias: defaultAlias(tool, id), order: base.length }];
+    });
   }, [addToolId, instances, persist]);
 
   const handleDelete = useCallback(
@@ -514,20 +510,46 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
       ) {
         return;
       }
-      void persist(instances.filter((inst) => inst.id !== id));
+      void persist((base) =>
+        base.length <= MIN_AGENT_INSTANCES || !base.some((inst) => inst.id === id)
+          ? null
+          : base.filter((inst) => inst.id !== id)
+      );
     },
     [instances, persist, confirm, tCommon]
   );
 
-  const handleMove = useCallback(
-    (index: number, direction: -1 | 1) => {
-      const target = index + direction;
-      if (target < 0 || target >= instances.length) return;
-      const next = [...instances];
-      [next[index], next[target]] = [next[target], next[index]];
-      void persist(next);
+  /**
+   * Move the instance shown at `from` to the slot of the one shown at `to`.
+   * Resolved by id against the latest roster (Issue #3514), so a row added or
+   * removed meanwhile does not make an index point at the wrong instance.
+   */
+  const reorderTo = useCallback(
+    (from: number, to: number) => {
+      if (from === to || from < 0 || to < 0 || from >= instances.length || to >= instances.length) {
+        return;
+      }
+      const movedId = instances[from].id;
+      const targetId = instances[to].id;
+      void persist((base) => {
+        const fromIdx = base.findIndex((inst) => inst.id === movedId);
+        const toIdx = base.findIndex((inst) => inst.id === targetId);
+        if (fromIdx === -1 || toIdx === -1 || fromIdx === toIdx) return null;
+        const next = [...base];
+        const [moved] = next.splice(fromIdx, 1);
+        next.splice(toIdx, 0, moved);
+        return next;
+      });
     },
     [instances, persist]
+  );
+
+  const handleMove = useCallback(
+    (index: number, direction: -1 | 1) => {
+      // Adjacent swap == moving onto the neighbour's slot.
+      reorderTo(index, index + direction);
+    },
+    [reorderTo]
   );
 
   /** Commit an alias edit (from blur / Enter). Clears the draft either way. */
@@ -541,20 +563,11 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
       });
       const inst = instances.find((item) => item.id === id);
       if (!inst || value === inst.alias) return;
-      void persist(instances.map((item) => (item.id === id ? { ...item, alias: value } : item)));
-    },
-    [instances, persist]
-  );
-
-  const reorderTo = useCallback(
-    (from: number, to: number) => {
-      if (from === to || from < 0 || to < 0 || from >= instances.length || to >= instances.length) {
-        return;
-      }
-      const next = [...instances];
-      const [moved] = next.splice(from, 1);
-      next.splice(to, 0, moved);
-      void persist(next);
+      void persist((base) =>
+        base.some((item) => item.id === id)
+          ? base.map((item) => (item.id === id ? { ...item, alias: value } : item))
+          : null
+      );
     },
     [instances, persist]
   );

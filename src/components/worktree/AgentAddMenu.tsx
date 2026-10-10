@@ -43,6 +43,7 @@ import {
   type AgentPlacement,
 } from '@/config/terminal-split-config';
 import { DEFAULT_AGENTS_ENDPOINT } from '@/config/default-agents';
+import { useAgentInstancesRoster } from '@/hooks/useAgentInstancesRoster';
 import { Modal } from '@/components/ui/Modal';
 import { Tooltip } from '@/components/common/Tooltip';
 
@@ -80,6 +81,12 @@ export function defaultAlias(cliTool: CLIToolType, id: string): string {
  * told — an older server, a network error, an unexpected body — and the menu
  * then lists every tool rather than refusing all of them: "could not check" is
  * not "nothing is installed".
+ *
+ * An EMPTY list is treated the same as `null`. The server
+ * (`src/config/installed-agents-cache.ts`) rounds a failed probe to `[]` and
+ * still answers 200, so `[]` cannot be told apart from "the check failed" —
+ * and refusing every tool on that answer would lock the "+" on a machine whose
+ * agents are installed. A non-empty list is trusted as is.
  */
 export async function fetchInstalledAgentTools(): Promise<CLIToolType[] | null> {
   try {
@@ -90,9 +97,11 @@ export async function fetchInstalledAgentTools(): Promise<CLIToolType[] | null> 
     const installed = (body as { installed?: unknown }).installed;
     if (!Array.isArray(installed)) return null;
     const known = new Set<string>(CLI_TOOL_IDS);
-    return installed.filter(
+    const list = installed.filter(
       (id): id is CLIToolType => typeof id === 'string' && known.has(id),
     );
+    // `[]` may be a failed probe (see above): unknown, not "none installed".
+    return list.length > 0 ? list : null;
   } catch {
     return null;
   }
@@ -138,7 +147,7 @@ export const AgentAddMenu = memo(function AgentAddMenu({
   const [open, setOpen] = useState(false);
   // `undefined` = not read yet, `null` = could not be read (list everything).
   const [installed, setInstalled] = useState<CLIToolType[] | null | undefined>(undefined);
-  const [toolId, setToolId] = useState<CLIToolType | ''>('');
+  const [pickedToolId, setToolId] = useState<CLIToolType | ''>('');
   const [name, setName] = useState('');
   const [placement, setPlacement] = useState<AgentPlacement>(() =>
     resolveDefaultAgentPlacement(splitCount),
@@ -147,6 +156,8 @@ export const AgentAddMenu = memo(function AgentAddMenu({
   const [error, setError] = useState<string | null>(null);
 
   const atMax = instances.length >= MAX_AGENT_INSTANCES;
+  // Issue #3514: the same per-worktree write queue AgentInstancesPane uses.
+  const writeRoster = useAgentInstancesRoster(worktreeId, instances, onInstancesChange);
 
   const isToolSelectable = useCallback(
     (id: CLIToolType) => installed == null || installed.includes(id),
@@ -171,11 +182,11 @@ export const AgentAddMenu = memo(function AgentAddMenu({
     };
   }, [open]);
 
-  // Keep the chosen tool selectable once the installed list arrives.
-  useEffect(() => {
-    if (installed === undefined) return;
-    setToolId((prev) => (prev && isToolSelectable(prev) ? prev : firstSelectable));
-  }, [installed, isToolSelectable, firstSelectable]);
+  // The tool the form submits: the user's pick while it is selectable, else the
+  // first selectable one. Derived (not synced by an effect) so there is no
+  // render where the list has arrived but no tool is chosen yet.
+  const toolId: CLIToolType | '' =
+    pickedToolId && isToolSelectable(pickedToolId) ? pickedToolId : firstSelectable;
 
   // The split count can change while the form is open (or between openings);
   // never leave an impossible placement selected.
@@ -202,38 +213,39 @@ export const AgentAddMenu = memo(function AgentAddMenu({
       e.preventDefault();
       if (!toolId || !isToolSelectable(toolId) || atMax || saving) return;
       if (!isAgentPlacementAvailable(placement, splitCount)) return;
-      const id = nextInstanceId(toolId, instances);
-      const alias = name.trim() || defaultAlias(toolId, id);
-      const added: AgentInstance = { id, cliTool: toolId, alias, order: instances.length };
-      const next = [...instances, added].map((inst, order) => ({ ...inst, order }));
+      const tool = toolId;
+      const chosenPlacement = placement;
+      const trimmed = name.trim();
+      // Built against the LATEST roster when the shared queue reaches it (Issue
+      // #3514), so a pane write still in flight is kept and its ids are not
+      // re-allocated here.
+      let added: AgentInstance | null = null;
       setSaving(true);
       setError(null);
       try {
-        const response = await fetch(`/api/worktrees/${worktreeId}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ agentInstances: next }),
+        const result = await writeRoster((base) => {
+          if (base.length >= MAX_AGENT_INSTANCES) return null;
+          const id = nextInstanceId(tool, base);
+          added = { id, cliTool: tool, alias: trimmed || defaultAlias(tool, id), order: base.length };
+          return [...base, added];
         });
-        if (!response.ok) {
+        if (result.status !== 'saved' || added === null) {
           setError(t('agentAdd.saveError'));
           return;
         }
-        onInstancesChange(next);
-        onAdded?.(added, placement);
+        const saved = result.roster.find((inst) => inst.id === (added as AgentInstance).id);
+        onAdded?.(saved ?? added, chosenPlacement);
         setOpen(false);
-      } catch {
-        setError(t('agentAdd.saveError'));
       } finally {
         setSaving(false);
       }
     },
-    [toolId, isToolSelectable, atMax, saving, placement, splitCount, instances, name, worktreeId, t, onInstancesChange, onAdded],
+    [toolId, isToolSelectable, atMax, saving, placement, splitCount, name, writeRoster, t, onAdded],
   );
 
   const buttonLabel = atMax
     ? t('agentAdd.maxReached', { max: MAX_AGENT_INSTANCES })
     : t('agentAdd.button');
-  const noneInstalled = Array.isArray(installed) && installed.length === 0;
   const canSubmit =
     !saving && !atMax && installed !== undefined && toolId !== '' && isToolSelectable(toolId);
 
@@ -283,11 +295,6 @@ export const AgentAddMenu = memo(function AgentAddMenu({
           {installed === null && (
             <p data-testid="agent-add-installed-unknown" className="text-xs text-muted-foreground">
               {t('agentAdd.installedUnknown')}
-            </p>
-          )}
-          {noneInstalled && (
-            <p data-testid="agent-add-none-installed" className="text-xs text-warning">
-              {t('agentAdd.noInstalled')}
             </p>
           )}
 

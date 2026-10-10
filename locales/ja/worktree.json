@@ -1681,7 +1681,6 @@
     "tool": "エージェント",
     "notInstalled": "{name}（未インストール）",
     "installedUnknown": "インストール済みかを確認できなかったため、すべてのエージェントを表示しています。",
-    "noInstalled": "インストール済みのエージェント CLI がありません。",
     "name": "名前（任意）",
     "namePlaceholder": "例: レビュー",
     "placement": "開く場所",

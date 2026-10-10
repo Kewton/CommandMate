@@ -1681,7 +1681,6 @@
     "tool": "Agent",
     "notInstalled": "{name} (not installed)",
     "installedUnknown": "Could not check which agents are installed; every agent is listed.",
-    "noInstalled": "No agent CLI is installed.",
     "name": "Name (optional)",
     "namePlaceholder": "e.g. Review",
     "placement": "Open in",

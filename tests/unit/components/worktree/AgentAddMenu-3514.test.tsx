@@ -90,6 +90,27 @@ describe('[#3514] AgentAddMenu', () => {
     expect(screen.getByTestId('agent-add-installed-unknown')).toBeInTheDocument();
   });
 
+  it('treats an empty installed list as "could not check": every tool is selectable', async () => {
+    // The server rounds a failed probe to `[]` with a 200 (installed-agents-cache).
+    mockFetch({ installed: [] });
+    renderMenu();
+    await openMenu();
+    expect(option('claude').disabled).toBe(false);
+    expect(option('gemini').disabled).toBe(false);
+    expect(screen.getByTestId('agent-add-installed-unknown')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId('agent-add-submit')).not.toBeDisabled());
+  });
+
+  it('trusts a non-empty installed list: ["claude"] leaves only claude selectable', async () => {
+    mockFetch({ installed: ['claude'] });
+    renderMenu();
+    await openMenu();
+    expect(option('claude').disabled).toBe(false);
+    expect(option('codex').disabled).toBe(true);
+    expect(option('gemini').disabled).toBe(true);
+    expect(screen.queryByTestId('agent-add-installed-unknown')).toBeNull();
+  });
+
   it('defaults to a new split while there is room', async () => {
     renderMenu({ splitCount: 3 });
     await openMenu();

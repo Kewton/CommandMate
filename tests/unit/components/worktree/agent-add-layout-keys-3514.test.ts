@@ -37,7 +37,6 @@ const KEYS: Record<string, Record<string, string[]>> = {
     tool: [],
     notInstalled: ['{name}'],
     installedUnknown: [],
-    noInstalled: [],
     name: [],
     namePlaceholder: [],
     placement: [],
