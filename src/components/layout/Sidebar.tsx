@@ -23,6 +23,7 @@
  * Issue #2656: a third view, "sessions", lists one row per agent instance (status first); a row opens its branch with ?instance=.
  * Issue #2706: フッターの言語セレクトの左に設定ボタン（`/more` へのリンク）。スマホのブランチ画面には他に設定への入口が無い。
  * Issue #2709: フッターの設定ボタンは PC ではモーダル、スマホでは `/more` へ。
+ * Issue #3510: フッターのテーマ切替とログアウトは共通の設定メニュー（`SettingsMenu`）へ移した。
  */
 
 'use client';
@@ -32,7 +33,7 @@ import { TransitionLink } from '@/components/view-transitions/TransitionLink';
 import { usePathname } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { useViewTransitionRouter } from '@/components/providers/ViewTransitionsProvider';
-import { AlignJustify, CircleCheck, Database, Settings, type LucideIcon } from 'lucide-react';
+import { AlignJustify, CircleCheck, Database, Ellipsis, Settings, type LucideIcon } from 'lucide-react';
 import {
   DndContext,
   PointerSensor,
@@ -61,8 +62,7 @@ import { Button, GroupIcon, Input, Skeleton, StatusDot } from '@/components/ui';
 import { Tooltip } from '@/components/common/Tooltip';
 import { TruncationTooltip } from '@/components/common/TruncationTooltip';
 import { LocaleSwitcher } from '@/components/common/LocaleSwitcher';
-import { ThemeToggle } from '@/components/common/ThemeToggle';
-import { LogoutButton } from '@/components/common/LogoutButton';
+import { SettingsMenu, SettingsMenuTrigger } from '@/components/layout/SettingsMenu';
 import { useToast } from '@/components/common/Toast';
 import { ATTENTION_REVIEW_HREF } from '@/config/review-config';
 import { useAttentionCount } from '@/hooks/useAttentionCount';
@@ -682,8 +682,9 @@ export const Sidebar = memo(function Sidebar() {
         )}
       </div>
 
-      {/* Footer: Settings + Language Switcher + Theme Toggle + Logout */}
-      <div className="flex-shrink-0 px-4 py-3 border-t border-sidebar-border space-y-2">
+      {/* Footer: Settings + Language Switcher + settings menu (Issue #3510:
+          theme and logout moved into the menu) */}
+      <div className="flex-shrink-0 px-4 py-3 border-t border-sidebar-border">
         <div className="flex items-center gap-2">
           {/* Issue #2706: the only way into /more from a branch screen on a
               phone — `/worktrees/*` renders no GlobalMobileNav. */}
@@ -691,9 +692,8 @@ export const Sidebar = memo(function Sidebar() {
           <div className="flex-1 min-w-0">
             <LocaleSwitcher />
           </div>
-          <ThemeToggle />
+          <SidebarSettingsMenu onNavigate={closeMobileDrawer} />
         </div>
-        <LogoutButton />
       </div>
     </nav>
   );
@@ -1162,5 +1162,32 @@ function SidebarSettingsButton({ onNavigate }: { onNavigate: () => void }) {
         <Settings size={20} aria-hidden="true" />
       </TransitionLink>
     </Tooltip>
+  );
+}
+
+/**
+ * Issue #3510: the shared settings menu, opened from the right end of the
+ * footer row. The PC chrome preferences (display size, repository tabs) are
+ * included here — the sidebar is on every PC screen, the Header is not.
+ */
+function SidebarSettingsMenu({ onNavigate }: { onNavigate: () => void }) {
+  const t = useTranslations('common');
+  const label = t('settingsMenu.trigger');
+
+  return (
+    <SettingsMenu testIdPrefix="sidebar-settings-menu" side="top" align="end" showDisplayPreferences onNavigate={onNavigate}>
+      <Tooltip content={label} placement="top" className="flex-shrink-0">
+        <SettingsMenuTrigger asChild>
+          <button
+            type="button"
+            data-testid="sidebar-settings-menu"
+            aria-label={label}
+            className="p-1.5 rounded-md text-sidebar-muted hover:text-sidebar-foreground hover:bg-sidebar-hover focus:outline-none focus:ring-2 focus:ring-ring transition-colors"
+          >
+            <Ellipsis size={20} aria-hidden="true" />
+          </button>
+        </SettingsMenuTrigger>
+      </Tooltip>
+    </SettingsMenu>
   );
 }

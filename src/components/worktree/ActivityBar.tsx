@@ -38,32 +38,20 @@
  * Issue #2709:
  *   - 歯車メニューの「設定」は `/more` へ遷移せず設定モーダルを開く。開くのは
  *     `onCloseAutoFocus` の `queueMicrotask` で、Radix がフォーカスを歯車へ戻した後。
+ *
+ * Issue #3510:
+ *   - 歯車メニューの中身は共通の `SettingsMenu`（サイドバー下部と同じ部品）。
  */
 
 'use client';
 
 import React, { memo, useCallback, useRef } from 'react';
 import { useTranslations } from 'next-intl';
-import { useTheme } from 'next-themes';
 import { Menu, Settings } from 'lucide-react';
 import { ACTIVITIES, type ActivityId } from '@/config/activity-bar-config';
 import { Tooltip } from '@/components/common/Tooltip';
 import { useSidebarContext } from '@/contexts/SidebarContext';
-import { useAuthEnabled } from '@/contexts/AuthContext';
-import { useLocaleSwitch } from '@/hooks/useLocaleSwitch';
-import { useViewTransitionRouter } from '@/components/providers/ViewTransitionsProvider';
-import { useSettingsDialog } from '@/contexts/SettingsDialogContext';
-import { LOCALE_LABELS, SUPPORTED_LOCALES } from '@/config/i18n-config';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/DropdownMenu';
+import { SettingsMenu, SettingsMenuTrigger } from '@/components/layout/SettingsMenu';
 
 export interface ActivityBarProps {
   /** Currently active activity, or null when ActivityPane is closed. */
@@ -82,46 +70,24 @@ export interface ActivityBarProps {
 const ACTIVITY_BAR_ID = 'worktree-activity-bar';
 const ACTIVITY_PANE_ID = 'worktree-activity-pane';
 
-const GITHUB_URL = 'https://github.com/kewton/MyCodeBranchDesk';
-
 /**
  * Issue #2645: the settings menu at the bottom of the ActivityBar.
  *
  * Outside the tablist for the same reason as the sidebar toggle (#747): it is
  * not an activity, so it must not join the roving-tabindex navigation or the
- * tab count. Local to this file on purpose.
+ * tab count.
+ *
+ * Issue #3510: the menu itself is the shared `SettingsMenu`, the same one the
+ * sidebar footer opens; only the gear button is local to this file.
  */
 function ActivityBarSettingsMenu() {
   const t = useTranslations('worktree');
-  const router = useViewTransitionRouter();
-  const { theme, setTheme } = useTheme();
-  const { currentLocale, switchLocale } = useLocaleSwitch();
-  const authEnabled = useAuthEnabled();
-  const { open: openSettings } = useSettingsDialog();
-  // Issue #2709: raised by the Settings item, read once the menu has closed.
-  // The modal must open AFTER Radix has restored focus to the gear, not
-  // instead of it: the modal's focus trap records whatever is focused at open
-  // time as the element to return to when it closes. Suppressing Radix's
-  // restore would leave that as <body> and lose the way back.
-  const openSettingsAfterClose = useRef(false);
   const label = t('activityBar.settings');
-  // Read at render time (not module scope) so a test can stub it.
-  const appVersion = process.env.NEXT_PUBLIC_APP_VERSION;
-
-  // Same flow as LogoutButton: always land on /login, even if the call fails.
-  const handleLogout = useCallback(async () => {
-    try {
-      await fetch('/api/auth/logout', { method: 'POST' });
-      window.location.href = '/login';
-    } catch {
-      window.location.href = '/login';
-    }
-  }, []);
 
   return (
-    <DropdownMenu>
+    <SettingsMenu testIdPrefix="activity-bar-settings" side="right" align="end">
       <Tooltip content={label} placement="right">
-        <DropdownMenuTrigger asChild>
+        <SettingsMenuTrigger asChild>
           <button
             type="button"
             data-testid="activity-bar-settings"
@@ -130,66 +96,9 @@ function ActivityBarSettingsMenu() {
           >
             <Settings size={20} aria-hidden="true" />
           </button>
-        </DropdownMenuTrigger>
+        </SettingsMenuTrigger>
       </Tooltip>
-      <DropdownMenuContent
-        side="right"
-        align="end"
-        className="w-56"
-        onCloseAutoFocus={() => {
-          if (!openSettingsAfterClose.current) return;
-          openSettingsAfterClose.current = false;
-          // Radix's own onCloseAutoFocus handler (which focuses the trigger)
-          // runs right after this one in the same task — composeEventHandlers
-          // would skip it entirely if we called preventDefault() here. The
-          // microtask therefore lands after the gear has focus, which is what
-          // the modal's focus trap records as the element to return to.
-          queueMicrotask(openSettings);
-        }}
-      >
-        <DropdownMenuLabel data-testid="activity-bar-settings-version">
-          {t('activityBar.settingsMenu.version', {
-            version: appVersion ? `v${appVersion}` : '-',
-          })}
-        </DropdownMenuLabel>
-        <DropdownMenuItem
-          onSelect={() => {
-            openSettingsAfterClose.current = true;
-          }}
-        >
-          {t('activityBar.settingsMenu.settings')}
-        </DropdownMenuItem>
-        <DropdownMenuItem onSelect={() => router.push('/skills')}>
-          {t('activityBar.settingsMenu.skills')}
-        </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        <DropdownMenuLabel>{t('activityBar.settingsMenu.theme')}</DropdownMenuLabel>
-        <DropdownMenuRadioGroup value={theme ?? 'system'} onValueChange={(value) => setTheme(value)}>
-          <DropdownMenuRadioItem value="light">{t('activityBar.settingsMenu.themeLight')}</DropdownMenuRadioItem>
-          <DropdownMenuRadioItem value="dark">{t('activityBar.settingsMenu.themeDark')}</DropdownMenuRadioItem>
-          <DropdownMenuRadioItem value="system">{t('activityBar.settingsMenu.themeSystem')}</DropdownMenuRadioItem>
-        </DropdownMenuRadioGroup>
-        <DropdownMenuLabel>{t('activityBar.settingsMenu.language')}</DropdownMenuLabel>
-        <DropdownMenuRadioGroup value={currentLocale} onValueChange={(value) => switchLocale(value)}>
-          {SUPPORTED_LOCALES.map((locale) => (
-            <DropdownMenuRadioItem key={locale} value={locale}>
-              {LOCALE_LABELS[locale]}
-            </DropdownMenuRadioItem>
-          ))}
-        </DropdownMenuRadioGroup>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem asChild>
-          <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer">
-            {t('activityBar.settingsMenu.github')}
-          </a>
-        </DropdownMenuItem>
-        {authEnabled && (
-          <DropdownMenuItem onSelect={() => { void handleLogout(); }}>
-            {t('activityBar.settingsMenu.logout')}
-          </DropdownMenuItem>
-        )}
-      </DropdownMenuContent>
-    </DropdownMenu>
+    </SettingsMenu>
   );
 }
 
