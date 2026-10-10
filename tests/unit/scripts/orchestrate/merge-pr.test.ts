@@ -362,6 +362,43 @@ describe('main: merges once', () => {
     expect(fake.ghCalls('pr merge')[0].args).toContain(HEAD_M);
   });
 
+  describe('options of the refresh precheck (#3527)', () => {
+    const REFACTOR = 'tsc=ok opts=base:origin/develop,kind:refactor,metrics:false,allow-removed:false,build:false';
+    const recordWork = () => {
+      appendRecord(runDir, '3477', { issue: 3477, stage: 'verify', result: 'ok', head: HEAD_A, note: 'exit=0(passed) passed=lint,typecheck failed=-' });
+      appendRecord(runDir, '3477', { issue: 3477, stage: 'review', result: 'ok', head: HEAD_A });
+      appendRecord(runDir, '3477', { issue: 3477, stage: 'findings', result: 'ok', head: HEAD_A });
+    };
+    const kinds = (fake: ReturnType<typeof fakeGit>) =>
+      fake.calls.some((c) => c.command === 'node' && c.args[0] === 'scripts/count-suppressions.mjs');
+
+    it('takes kind:refactor from the precheck of the published HEAD when the work HEAD has none', () => {
+      recordWork();
+      appendRecord(runDir, '3477', { issue: 3477, stage: 'precheck', result: 'ok', head: HEAD_B, note: REFACTOR });
+      const fake = fakeGit({ prs: [openPr()], behind: true, checks: [GREEN] });
+      expect(runMain(fake).code).toBe(0);
+      expect(kinds(fake)).toBe(true);
+    });
+
+    it('keeps using the precheck of the work HEAD when there is one (negative control)', () => {
+      recordWork();
+      appendRecord(runDir, '3477', { issue: 3477, stage: 'precheck', result: 'ok', head: HEAD_B, note: REFACTOR });
+      appendRecord(runDir, '3477', { issue: 3477, stage: 'precheck', result: 'ok', head: HEAD_A, note: 'tsc=ok opts=base:origin/develop,kind:-,metrics:false,allow-removed:false,build:false' });
+      const fake = fakeGit({ prs: [openPr()], behind: true, checks: [GREEN] });
+      expect(runMain(fake).code).toBe(0);
+      expect(kinds(fake)).toBe(false);
+    });
+
+    it('stops without pushing when no precheck=ok exists to take the options from', () => {
+      recordWork();
+      const fake = fakeGit({ prs: [openPr()], behind: true, checks: [GREEN] });
+      const { code, err } = runMain(fake);
+      expect(code).toBe(1);
+      expect(err).toContain('no precheck=ok record');
+      expect(fake.gitCalls('push')).toHaveLength(0);
+    });
+  });
+
   it('a precheck build=ok of the pre-refresh HEAD does not waive Build for the merged HEAD', () => {
     recordReady();
     appendRecord(runDir, '3477', { issue: 3477, stage: 'precheck', result: 'ok', head: HEAD_A, note: 'build=ok' });

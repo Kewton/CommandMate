@@ -298,11 +298,20 @@ export function main(argv, deps = {}) {
     // The precheck is recorded per HEAD, so a HEAD pushed earlier (publish-pr.mjs
     // after a refresh) is checked here too unless it already passed.
     if (unmetStage('precheck', latestByStage(records, issue).precheck, { head, workHead })) {
-      const workPrecheck = findLatest(records, { issue, stage: 'precheck', head: workHead, result: 'ok' });
+      // The options come from the precheck of the work HEAD; when a fold commit on top made the
+      // precheck run on the published HEAD only, from the Issue's latest precheck=ok (any HEAD).
+      // Without either the options would be guessed (kind lost → suppressions=skip): stop (#3527).
+      const workPrecheck =
+        findLatest(records, { issue, stage: 'precheck', head: workHead, result: 'ok' }) ??
+        findLatest(records, { issue, stage: 'precheck', result: 'ok' });
+      if (!workPrecheck) {
+        error(`merge #${issue}: no precheck=ok record to take the options from (kind etc.) — run precheck.mjs on the work HEAD first; not pushed`);
+        return 1;
+      }
       const code = runPrecheck(
         [
           '--run-dir', o.runDir, '--issues', o.issues, '--issue', String(issue), '--worktree', o.worktree,
-          ...optionsFromNote(workPrecheck?.note, baseRef),
+          ...optionsFromNote(workPrecheck.note, baseRef),
         ],
         { run, now, log, error, findTestsNaming: findNaming }
       );
