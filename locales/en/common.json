@@ -25,9 +25,7 @@
   "nav": {
     "sessions": "Sessions",
     "repositories": "Repositories",
-    "repositoriesShort": "Repos",
     "review": "Review",
-    "reviewReport": "Review/Report",
     "more": "Settings",
     "skills": "Skills"
   },

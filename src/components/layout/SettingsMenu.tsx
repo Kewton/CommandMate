@@ -1,7 +1,8 @@
 /**
  * SettingsMenu — the one settings popover (Issue #3510).
  *
- * The sidebar footer and the ActivityBar gear both open this menu, so the
+ * The sidebar footer and the icon-rail gear (`SidebarRail`; the ActivityBar
+ * gear until #3512) both open this menu, so the
  * entries that used to be spread over those two places and the global Header
  * live in one list: Settings… · Skills · theme · language · display size ·
  * repository-tab strip · GitHub · version · logout.
@@ -119,7 +120,7 @@ function DisplayPreferenceItems() {
  *
  * @example
  * ```tsx
- * <SettingsMenu testIdPrefix="activity-bar-settings" side="right" align="end">
+ * <SettingsMenu testIdPrefix="sidebar-rail-settings" side="right" align="end">
  *   <SettingsMenuTrigger asChild><button aria-label="Settings">…</button></SettingsMenuTrigger>
  * </SettingsMenu>
  * ```
@@ -132,7 +133,7 @@ export function SettingsMenu({
   showDisplayPreferences = false,
   onNavigate,
 }: SettingsMenuProps) {
-  // The wording predates this menu (ActivityBar, #2645) and is pinned by the
+  // The wording predates this menu (the ActivityBar gear, #2645) and is pinned by the
   // worktree key test, so it stays under `worktree.activityBar.settingsMenu`.
   const t = useTranslations('worktree');
   const router = useViewTransitionRouter();

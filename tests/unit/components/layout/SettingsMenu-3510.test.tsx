@@ -1,9 +1,10 @@
 /**
- * Shared settings menu: sidebar footer + ActivityBar gear (Issue #3510)
+ * Shared settings menu: sidebar footer + icon-rail gear (Issue #3510; the
+ * ActivityBar gear it was shared with became the rail's in #3512)
  *
  * The sidebar half mounts the real `Sidebar` inside the real providers, so the
  * menu reads the same SidebarContext / PcDisplaySizeContext the app does. The
- * ActivityBar half is covered by ActivityBar.test.tsx and the #2709 files; this
+ * rail half is covered by SidebarRail-settings-menu-2645 and the #2709 files; this
  * file only adds what they do not pin: Esc closes and focus goes back to the
  * button that opened it, for both hosts.
  * @vitest-environment jsdom
@@ -13,7 +14,7 @@ import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vite
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import React from 'react';
 import { Sidebar } from '@/components/layout/Sidebar';
-import { ActivityBar } from '@/components/worktree/ActivityBar';
+import { SidebarRail } from '@/components/layout/SidebarRail';
 import { ToastProvider } from '@/components/common/Toast';
 import { SidebarProvider } from '@/contexts/SidebarContext';
 import { PcDisplaySizeProvider } from '@/contexts/PcDisplaySizeContext';
@@ -292,14 +293,16 @@ describe('Settings menu (Issue #3510)', () => {
     });
   });
 
-  describe('ActivityBar gear', () => {
+  // Issue #3512: the ActivityBar gear was removed; the icon rail's gear is the
+  // menu's other host now.
+  describe('icon rail gear (was: ActivityBar gear)', () => {
     it('closes on Escape and gives focus back to the gear', async () => {
       render(
         <Wrapper>
-          <ActivityBar active="files" onToggle={() => {}} />
+          <SidebarRail />
         </Wrapper>
       );
-      const gear = screen.getByTestId('activity-bar-settings');
+      const gear = screen.getByTestId('sidebar-rail-settings');
       openWithKeyboard(gear);
 
       fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' });

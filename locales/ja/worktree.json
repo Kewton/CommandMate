@@ -1063,7 +1063,6 @@
     }
   },
   "activityBar": {
-    "toggleSidebar": "サイドバーを切り替え",
     "label": "アクティビティバー",
     "files": "ファイルツリー",
     "git": "Git",
@@ -1075,7 +1074,6 @@
     "skills": "スキル",
     "verification": "検証",
     "env": "環境変数",
-    "settings": "設定",
     "settingsMenu": {
       "settings": "設定",
       "skills": "スキル",

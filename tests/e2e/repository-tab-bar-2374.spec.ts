@@ -74,9 +74,9 @@ const MANY_WORKTREES: StubWorktree[] = Array.from({ length: 8 }, (_, i) =>
 );
 
 async function stubWorktrees(page: Page, worktrees: StubWorktree[]): Promise<void> {
-  // Start collapsed. The sidebar toggle only exists on the worktree-detail
-  // ActivityBar, and Phase 1 of this Issue is precisely that the collapsed
+  // Start collapsed. Phase 1 of this Issue is precisely that the collapsed
   // state survives a load — so seeding it is also the assertion's premise.
+  // (The toggle itself is the sidebar's / icon rail's since #3512.)
   await page.addInitScript(
     ([openKey, cacheKey, order]) => {
       window.localStorage.setItem(openKey as string, 'false');

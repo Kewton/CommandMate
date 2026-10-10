@@ -25,9 +25,7 @@
   "nav": {
     "sessions": "セッション",
     "repositories": "リポジトリ",
-    "repositoriesShort": "リポジトリ",
     "review": "レビュー",
-    "reviewReport": "レビュー/レポート",
     "more": "設定",
     "skills": "スキル"
   },
