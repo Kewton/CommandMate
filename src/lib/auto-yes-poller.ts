@@ -6,8 +6,9 @@
  *
  * Issue #525: Composite key migration (worktreeId:cliToolId) for per-agent auto-yes.
  *
- * Dependencies: auto-yes-state.ts (one-way dependency).
- * auto-yes-poller.ts -> auto-yes-state.ts
+ * Dependencies: auto-yes-state.ts (composite keys / state), polling/* (prompt
+ * detection, resolver, policy, dialog gate, enter fallback, poller state),
+ * cli-tools/*, session/cli-session.ts, tmux/*, detection/*, db/*, tasks/*.
  */
 
 import type { CLIToolType } from './cli-tools/types';
