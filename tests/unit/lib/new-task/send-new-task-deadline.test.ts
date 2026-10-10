@@ -59,13 +59,13 @@ describe('[#3511] sendNewTask — a body that never finishes', () => {
 
     expect(await settleAfter(promise, autoYesTimeout - 1)).toBe(false);
     expect(await settleAfter(promise, 1)).toBe(true);
-    const now = Date.now();
+    // Issue #3563: the timeout's clock is not the server's enabling time, so no expiry is claimed.
     expect(await promise).toEqual({
       ok: false,
       kind: 'failed',
       status: 0,
       detail: `Request timed out after ${autoYesTimeout}ms`,
-      armedAutoYes: { enabled: true, expiresAt: now + HOUR },
+      autoYesStateUnknown: true,
     });
     expect(request.mock.calls.map(([url]) => url)).toEqual(['/api/worktrees/wt/auto-yes']);
   });
@@ -105,5 +105,47 @@ describe('[#3511] sendNewTask — a body that never finishes', () => {
     const boom = new Error('boom');
     await expect(withinDeadline(() => Promise.reject(boom), 10)).rejects.toBe(boom);
     expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+describe('[#3563] sendNewTask — an Auto-Yes expiry is never guessed', () => {
+  it('never reports an expiry later than the server enabled it + duration, however late the body times out', async () => {
+    const enabledAt = Date.now();
+    const serverExpiry = enabledAt + HOUR;
+    const request = vi.fn(async (url: string) => (url.endsWith('/auto-yes') ? stalledBody(200) : jsonResponse({}, 201)));
+    const promise = sendNewTask(input(HOUR), request);
+    await vi.advanceTimersByTimeAsync(resolveDefaultTimeoutMs('POST'));
+    const result = await promise;
+    expect(Date.now()).toBeGreaterThan(enabledAt);
+    expect(result.armedAutoYes === undefined || result.armedAutoYes.expiresAt <= serverExpiry).toBe(true);
+    expect(result.armedAutoYes).toBeUndefined();
+    expect(result.autoYesStateUnknown).toBe(true);
+  });
+
+  it('treats a 2xx without a readable expiry as unknown and still sends', async () => {
+    const request = vi.fn(async (url: string) =>
+      url.endsWith('/auto-yes') ? jsonResponse({ enabled: true }) : jsonResponse({ id: 'm1' }, 201),
+    );
+    const result = await sendNewTask(input(HOUR), request);
+    expect(result).toEqual({ ok: true, autoYesStateUnknown: true });
+  });
+
+  it('keeps the server-reported expiry as confirmed (negative control)', async () => {
+    const request = vi.fn(async (url: string) =>
+      url.endsWith('/auto-yes') ? jsonResponse({ enabled: true, expiresAt: 42 }) : jsonResponse({ id: 'm1' }, 201),
+    );
+    const result = await sendNewTask(input(HOUR), request);
+    expect(result).toEqual({ ok: true, armedAutoYes: { enabled: true, expiresAt: 42 } });
+  });
+
+  it('a resend after the timeout arms again rather than skipping', async () => {
+    const calls: string[] = [];
+    const request = vi.fn(async (url: string) => {
+      calls.push(url);
+      return url.endsWith('/auto-yes') ? jsonResponse({ enabled: true, expiresAt: 7 }) : jsonResponse({ id: 'm1' }, 201);
+    });
+    // The dialog records nothing as armed after an unknown result, so it passes the chosen duration again.
+    await sendNewTask(input(HOUR), request);
+    expect(calls).toEqual(['/api/worktrees/wt/auto-yes', '/api/worktrees/wt/send']);
   });
 });

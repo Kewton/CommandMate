@@ -104,6 +104,8 @@ export function NewTaskDialog() {
   // list payload is a snapshot from opening time; after an arm whose send then
   // failed, the server holds the new state and the dialog must show it, and a
   // resend must not arm again.
+  // Targets whose Auto-Yes answer gave no expiry: possibly on, never shown as off (Issue #3563).
+  const [unknownHere, setUnknownHere] = useState<Record<string, true>>({});
   const [armedHere, setArmedHere] = useState<Record<string, ArmedAutoYes>>({});
 
   useEffect(() => {
@@ -183,6 +185,7 @@ export function NewTaskDialog() {
   // Expired counts as off, as in AutoYesToggle: no "00:00 left" shown as on,
   // and arming is offered again.
   const armedAutoYes = isAutoYesActive(knownAutoYes) ? knownAutoYes : null;
+  const autoYesUnknown = targetState ? unknownHere[`${worktreeId}:${targetState.instance.id}`] === true : false;
 
   // Re-render once a second while an armed Auto-Yes counts down; the render
   // that finds it expired drops `armedAutoYes`, which stops this.
@@ -257,8 +260,16 @@ export function NewTaskDialog() {
     setCloseLocked(false);
     if (!mountedRef.current) return;
     const { armedAutoYes: armedNow } = result;
+    const targetKey = `${target.worktreeId}:${target.instanceId}`;
+    if (result.autoYesStateUnknown) {
+      setUnknownHere((prev) => ({ ...prev, [targetKey]: true }));
+    }
     if (armedNow) {
-      setArmedHere((prev) => ({ ...prev, [`${target.worktreeId}:${target.instanceId}`]: armedNow }));
+      setUnknownHere((prev) => {
+        const { [targetKey]: _dropped, ...rest } = prev;
+        return rest;
+      });
+      setArmedHere((prev) => ({ ...prev, [targetKey]: armedNow }));
       setAutoYesChoice(null);
     }
     if (!result.ok) {
@@ -505,7 +516,7 @@ export function NewTaskDialog() {
                       }}
                       className={FIELD_CLASS}
                     >
-                      <option value="">{t('newTask.autoYesKeep')}</option>
+                      <option value="">{t(autoYesUnknown ? 'newTask.autoYesKeepUnknown' : 'newTask.autoYesKeep')}</option>
                       {ALLOWED_DURATIONS.map((duration) => (
                         <option key={duration} value={duration}>
                           {t('newTask.autoYesEnableFor', {
@@ -514,6 +525,11 @@ export function NewTaskDialog() {
                         </option>
                       ))}
                     </select>
+                    {autoYesUnknown && (
+                      <p className="mt-1 text-xs text-warning-foreground" data-testid="new-task-auto-yes-unknown">
+                        {t('newTask.autoYesUnknown')}
+                      </p>
+                    )}
                     <p className="mt-1 text-xs text-muted-foreground">{t('newTask.autoYesScope')}</p>
                     {autoYesChoice !== null && (
                       <p className="mt-1 text-xs text-warning-foreground" data-testid="new-task-auto-yes-risk">

@@ -515,8 +515,6 @@
     "hideFiles": "開いているファイルを非表示",
     "equalizeWidths": "均等幅",
     "equalizeWidthsHint": "ターミナル幅を均等にし、履歴幅を初期値に戻す",
-    "addSplit": "分割を追加",
-    "removeSplit": "分割を削除",
     "selectInstance": "{split} のエージェントインスタンスを選択",
     "moreActions": "その他の操作",
     "searchTerminal": "ターミナル内を検索",
@@ -531,7 +529,13 @@
     "maximizeShortcutHint": "⌘ / Ctrl + Shift + Enter",
     "maximizedStatus": "{split} を最大化中",
     "loading": "読込中...",
-    "sessionEnded": "セッションは終了しています。送信すると新しいセッションが起動します。"
+    "sessionEnded": "セッションは終了しています。送信すると新しいセッションが起動します。",
+    "layoutGroupLabel": "分割の並べ方",
+    "layoutSplits": "{count} 分割",
+    "composerTarget": "To: {agent} · {branch}",
+    "composerTargetNoBranch": "To: {agent}",
+    "composerTargetLabel": "この入力欄は {branch} の {agent} に送信します",
+    "composerTargetLabelNoBranch": "この入力欄は {agent} に送信します"
   },
   "surfaceMode": {
     "groupLabel": "{split} の出力面",
@@ -1668,5 +1672,24 @@
     "noteInstanceFlag": "送り先を指定するのは --instance です。--agent は roster に無いインスタンスをアドホックに起動するためのもので、wait には --agent 自体がありません。",
     "noteWaitOnPrompt": "wait には --on-prompt human を付けてあります。付けないと既定の agent モードになり、プロンプトを検出した時点で exit 10 で即座に終了します。",
     "noteRespondNumber": "respond は回答を意味解決しません。選択肢は番号で送ってください。「yes」は入力されたあと無視され、続く Enter がその時点の既定選択を選んでしまいます。"
+  },
+  "agentAdd": {
+    "button": "エージェントを追加",
+    "title": "エージェントを追加",
+    "tool": "エージェント",
+    "notInstalled": "{name}（未インストール）",
+    "installedUnknown": "インストール済みかを確認できなかったため、すべてのエージェントを表示しています。",
+    "name": "名前（任意）",
+    "namePlaceholder": "例: レビュー",
+    "placement": "開く場所",
+    "placementNewSplit": "新しい分割",
+    "placementReplace": "今の分割を置き換え",
+    "placementRosterOnly": "追加だけ",
+    "placementNewSplitFull": "分割は {max} つすべて使用中です",
+    "startHint": "セッションは最初のメッセージを送ったときに起動します。",
+    "submit": "追加",
+    "cancel": "キャンセル",
+    "saveError": "エージェントを追加できませんでした。",
+    "maxReached": "1 つのブランチに追加できるのは {max} 件までです"
   }
 }

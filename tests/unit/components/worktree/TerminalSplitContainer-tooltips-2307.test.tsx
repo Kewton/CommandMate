@@ -42,9 +42,12 @@ function revealTooltip(trigger: HTMLElement): string {
   return screen.getByRole('tooltip', { hidden: true }).textContent ?? '';
 }
 
+// Issue #3514: the Add / Remove split buttons became the layout icons 1-4.
 const TARGET_TESTIDS = [
-  'add-terminal-split',
-  'remove-terminal-split',
+  'split-layout-1',
+  'split-layout-2',
+  'split-layout-3',
+  'split-layout-4',
   'equalize-split-widths',
   'toggle-maximize-split',
   'toggle-history-pane',
@@ -75,8 +78,9 @@ describe('[#2307] TerminalSplitContainer Action-bar hover discoverability', () =
   it('shows the Add-split Tooltip on hover after the delay', () => {
     vi.useFakeTimers();
     setup();
-    expect(revealTooltip(screen.getByTestId('add-terminal-split'))).toBe(
-      'worktree.terminal.addSplit',
+    // Issue #3514: "add a split" is now the next layout icon.
+    expect(revealTooltip(screen.getByTestId('split-layout-2'))).toBe(
+      'worktree.terminal.layoutSplits',
     );
     vi.useRealTimers();
   });
@@ -84,8 +88,9 @@ describe('[#2307] TerminalSplitContainer Action-bar hover discoverability', () =
   it('shows the Remove-split Tooltip on hover after the delay', () => {
     vi.useFakeTimers();
     setup();
-    expect(revealTooltip(screen.getByTestId('remove-terminal-split'))).toBe(
-      'worktree.terminal.removeSplit',
+    // Issue #3514: "back to fewer splits" is the lower layout icon.
+    expect(revealTooltip(screen.getByTestId('split-layout-1'))).toBe(
+      'worktree.terminal.layoutSplits',
     );
     vi.useRealTimers();
   });
@@ -101,14 +106,13 @@ describe('[#2307] TerminalSplitContainer Action-bar hover discoverability', () =
 
   it('keeps aria-label / data-testid unchanged on every wrapped button', () => {
     setup();
-    expect(screen.getByTestId('add-terminal-split')).toHaveAttribute(
-      'aria-label',
-      'worktree.terminal.addSplit',
-    );
-    expect(screen.getByTestId('remove-terminal-split')).toHaveAttribute(
-      'aria-label',
-      'worktree.terminal.removeSplit',
-    );
+    // Issue #3514: the layout icons share their label with their Tooltip.
+    for (const count of [1, 2, 3, 4]) {
+      expect(screen.getByTestId(`split-layout-${count}`)).toHaveAttribute(
+        'aria-label',
+        'worktree.terminal.layoutSplits',
+      );
+    }
     expect(screen.getByTestId('equalize-split-widths')).toHaveAttribute(
       'aria-label',
       'worktree.terminal.equalizeWidthsHint',

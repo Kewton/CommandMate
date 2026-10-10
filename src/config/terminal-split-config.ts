@@ -292,3 +292,46 @@ export function normalizeSplitConfig(value: unknown): TerminalSplitConfig | null
   }
   return normalized;
 }
+
+/**
+ * Issue #3514: the split counts the Action bar offers as layout icons, in
+ * render order. One icon per count (1 = one pane, 2 / 3 = a row, 4 = the 2x2
+ * grid) replaces the old "n / 4 splits + -" stepper, so the layout is picked by
+ * what it looks like rather than by counting clicks.
+ */
+export const SPLIT_LAYOUT_COUNTS: readonly number[] = Array.from(
+  { length: MAX_SPLITS - MIN_SPLITS + 1 },
+  (_, i) => MIN_SPLITS + i,
+);
+
+/**
+ * Issue #3514: where an agent added from the header's "+" opens.
+ *
+ * - `new-split`   — appended as a new split (impossible at {@link MAX_SPLITS})
+ * - `replace`     — swapped into the focused split, replacing what it showed
+ * - `roster-only` — registered on the roster only; no split changes
+ */
+export type AgentPlacement = 'new-split' | 'replace' | 'roster-only';
+
+/** Issue #3514: the placements in render order. */
+export const AGENT_PLACEMENTS: readonly AgentPlacement[] = ['new-split', 'replace', 'roster-only'];
+
+/**
+ * Issue #3514: whether `placement` can be chosen with `splitCount` splits open.
+ * Only `new-split` is ever unavailable — at the ceiling there is no room.
+ */
+export function isAgentPlacementAvailable(placement: AgentPlacement, splitCount: number): boolean {
+  return placement !== 'new-split' || splitCount < MAX_SPLITS;
+}
+
+/**
+ * Issue #3514: the placement the "+" form starts on.
+ *
+ * `new-split` while there is room, because adding an agent is most often done
+ * to watch it beside the current one. At the ceiling `new-split` cannot be
+ * chosen and the default is `replace` — not `roster-only` — so the agent the
+ * user just asked for still appears on screen, in the split they are looking at.
+ */
+export function resolveDefaultAgentPlacement(splitCount: number): AgentPlacement {
+  return isAgentPlacementAvailable('new-split', splitCount) ? 'new-split' : 'replace';
+}

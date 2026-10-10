@@ -259,6 +259,17 @@ export interface TerminalSplitPaneContentProps extends TerminalSplitPaneCoreProp
    * here, so a pre-#2261 caller keeps the composer's Shift+Enter untouched.
    */
   onToggleMaximize?: () => void;
+  /**
+   * Issue #3514: frame this split as the selected one. Passed straight through
+   * to `TerminalSplitPane`; the container decides (focused, and >1 split).
+   */
+  showFocusFrame?: boolean;
+  /**
+   * Issue #3514: the branch this split's composer sends into, for the
+   * "To: <agent> · <branch>" line above the input. Omitted (or empty) shows
+   * the agent alone.
+   */
+  branchName?: string | null;
 }
 
 export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
@@ -285,6 +296,8 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   onAgentSessionChange,
   isMaximized = false,
   onToggleMaximize,
+  showFocusFrame = false,
+  branchName,
 }: TerminalSplitPaneContentProps) {
   // Issue #869: resolve the instance id this split targets. Defaults to the
   // primary instance (`=== cliToolId`) so pre-#869 single-instance behavior —
@@ -1009,6 +1022,18 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
     [historyVisible, historyColumnSlot, chatSurfaceSlot, splitIndex],
   );
 
+  // Issue #3514: who this split's composer sends to. The composer stays per
+  // split (sharing it is out of scope); this line only says where THIS one
+  // goes, which a 2x2 of identical inputs otherwise leaves to the header above.
+  const composerAgentLabel = getInstanceLabel(instance ?? { cliTool: cliToolId });
+  const composerBranch = branchName?.trim() ? branchName.trim() : null;
+  const composerTargetText = composerBranch
+    ? t('terminal.composerTarget', { agent: composerAgentLabel, branch: composerBranch })
+    : t('terminal.composerTargetNoBranch', { agent: composerAgentLabel });
+  const composerTargetAria = composerBranch
+    ? t('terminal.composerTargetLabel', { agent: composerAgentLabel, branch: composerBranch })
+    : t('terminal.composerTargetLabelNoBranch', { agent: composerAgentLabel });
+
   const footerSlot = useMemo(
     () => (
       // Issue #2131: `data-testid` so the PC height spec can measure what the
@@ -1127,6 +1152,14 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
             onClose={handleDirectInputClose}
           />
         ) : null}
+        <div
+          data-testid={`split-composer-target-${splitIndex}`}
+          aria-label={composerTargetAria}
+          title={composerTargetAria}
+          className="truncate text-[11px] leading-none text-muted-foreground"
+        >
+          {composerTargetText}
+        </div>
         <MessageInput
           worktreeId={worktreeId}
           onMessageSent={handleMessageSent}
@@ -1353,6 +1386,9 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       // `agentSessionSignature`), so it re-runs the memo when the file list
       // actually changes and not on every 2s poll that repeats it.
       agentSession.diff,
+      // Issue #3514: the "To: <agent> · <branch>" line (strings, memo-safe).
+      composerTargetText,
+      composerTargetAria,
     ],
   );
 
@@ -1441,6 +1477,10 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       // Issue #2261: the title bar's half of the maximize toggle.
       isMaximized={isMaximized}
       onToggleMaximize={onToggleMaximize}
+      // Issue #3514: the selected-split frame, and End in the "…" menu under
+      // the same condition the × button uses (a handler and a live session).
+      showFocusFrame={showFocusFrame}
+      onEndSession={onRequestSessionEnd && terminal.isRunning ? handleRequestSessionEnd : undefined}
       terminal={surfaceMode === 'chat' ? chatSlot : terminalSlot}
       footer={footerSlot}
       bodyRef={setPaneBodyEl}
