@@ -5,12 +5,27 @@
  * Issue #331: Token authentication - logout button
  *
  * Shows a logout button only when authentication is enabled.
- * Used in both desktop sidebar and mobile header.
+ * Issue #3510: the sidebar footer no longer mounts it — logout moved into the
+ * shared settings menu, which calls {@link logout} below.
  */
 
 import { useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { useAuthEnabled } from '@/contexts/AuthContext';
+
+/**
+ * Ends the session and lands on /login — even when the call fails, so a dead
+ * server cannot leave the user stuck on a page they can no longer use.
+ * Shared with the settings menu (Issue #3510).
+ */
+export async function logout(): Promise<void> {
+  try {
+    await fetch('/api/auth/logout', { method: 'POST' });
+    window.location.href = '/login';
+  } catch {
+    window.location.href = '/login';
+  }
+}
 
 /**
  * LogoutButton - displays a logout button when auth is enabled
@@ -27,13 +42,7 @@ export function LogoutButton() {
 
   async function handleLogout() {
     setLoading(true);
-    try {
-      await fetch('/api/auth/logout', { method: 'POST' });
-      window.location.href = '/login';
-    } catch {
-      // Force redirect even on error
-      window.location.href = '/login';
-    }
+    await logout();
   }
 
   return (
