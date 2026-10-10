@@ -72,6 +72,15 @@
  * height away from it. The keyboard itself is docked in the screen's bottom
  * bar, not here: this tab lives inside the scrolling `<main>` and under the
  * tab-swipe gesture.
+ *
+ * Issue #3515: the "To: <agent> · <branch>" line #3514 put above each PC
+ * split's composer, in the same words (`terminal.composerTarget*`), so the
+ * phone says where the docked composer below this tab sends. It floats over
+ * the bottom-left of the output region instead of taking a row, for the same
+ * #2106 budget the surface pill obeys (with the session row the terminal has
+ * 6px left above the 250px floor at 360x640), and it stands down while the
+ * direct-input keyboard is open (the keys then go to the terminal, not to the
+ * composer).
  */
 
 import { memo, useCallback, useEffect, useMemo, useRef } from 'react';
@@ -142,7 +151,7 @@ import { getMobileSurfaceModeStorageKey } from '@/config/surface-mode-config';
 import { useSurfaceMode } from '@/hooks/useSurfaceMode';
 import { buildPaneSessionLabels } from '@/components/worktree/pane-session-labels';
 import type { SurfaceMode } from '@/types/ui-state';
-import type { CLIToolType } from '@/lib/cli-tools/types';
+import { getInstanceLabel, type CLIToolType } from '@/lib/cli-tools/types';
 
 export interface MobileTerminalTabProps {
   worktreeId: string;
@@ -213,6 +222,44 @@ function useCachedAgentModelLabel(worktreeId: string, instanceId: string): strin
     const worktree = worktrees?.find((entry) => entry.id === worktreeId);
     return buildModelByInstance(worktree?.sessionStatusByInstance)[instanceId] ?? null;
   }, [worktrees, worktreeId, instanceId]);
+}
+
+/**
+ * The composer's destination for one instance of this worktree (Issue #3515).
+ *
+ * The PC's `TerminalSplitPaneContent` words, from the PC's inputs: the
+ * instance's alias-aware label (`getInstanceLabel`), and the branch the way
+ * `WorktreeDetailDesktop` picks it — the checked-out branch unless git could
+ * not tell, then the worktree's name. Read from the worktrees cache for the
+ * reason `useCachedAgentModelLabel` gives; with no provider above there is no
+ * branch and the line is "To: <agent>".
+ */
+function useCachedComposerTarget(
+  worktreeId: string,
+  cliToolId: CLIToolType,
+  instanceId: string,
+): { text: string; label: string } {
+  const t = useTranslations('worktree');
+  const cache = useOptionalWorktreesCacheContext();
+  const worktrees = cache?.worktrees;
+  return useMemo(() => {
+    const worktree = worktrees?.find((entry) => entry.id === worktreeId);
+    const instance = worktree?.agentInstances?.find((entry) => entry.id === instanceId);
+    const agent = getInstanceLabel(instance ?? { cliTool: cliToolId });
+    const currentBranch = worktree?.gitStatus?.currentBranch;
+    const rawBranch =
+      currentBranch && currentBranch !== '(unknown)' ? currentBranch : worktree?.name;
+    const branch = rawBranch?.trim() ? rawBranch.trim() : null;
+    return branch
+      ? {
+          text: t('terminal.composerTarget', { agent, branch }),
+          label: t('terminal.composerTargetLabel', { agent, branch }),
+        }
+      : {
+          text: t('terminal.composerTargetNoBranch', { agent }),
+          label: t('terminal.composerTargetLabelNoBranch', { agent }),
+        };
+  }, [worktrees, worktreeId, instanceId, cliToolId, t]);
 }
 
 /**
@@ -548,6 +595,8 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
     usage: sessionUsage,
     usageDetail: sessionUsageDetail,
   } = buildPaneSessionLabels(modelByInstanceLabel, agentSession, t, locale);
+  // Issue #3515: where the docked composer below this tab sends.
+  const composerTarget = useCachedComposerTarget(worktreeId, cliToolId, resolvedInstanceId);
 
   // --------------------------------------------------------------------------
   // The session note (Issue #2427)
@@ -789,7 +838,7 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
           onCancel={closeNoteEditor}
         />
       ) : null}
-      <div ref={regionRef} className="flex-1 min-h-0 overflow-hidden" data-testid="mobile-terminal-region">
+      <div ref={regionRef} className="relative flex-1 min-h-0 overflow-hidden" data-testid="mobile-terminal-region">
         {surfaceMode === 'chat' ? (
           <div className="h-full min-h-0" data-testid="mobile-chat-surface">
             <MobileChatSurface
@@ -822,6 +871,20 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
             searchBarTopClassName={MOBILE_SEARCH_BAR_TOP_CLASS}
           />
         )}
+        {/* Issue #3515: the PC composer's "To:" line, overlaid (see the module
+            doc). Left-aligned and capped short of the scroll FAB at
+            `bottom-4 right-4`; `pointer-events-none`, so the output under it
+            still scrolls. */}
+        {!directInputOpen ? (
+          <div
+            data-testid="mobile-composer-target"
+            aria-label={composerTarget.label}
+            title={composerTarget.label}
+            className="pointer-events-none absolute bottom-1 left-2 z-10 max-w-[70%] truncate rounded bg-surface-2/90 px-1.5 text-[11px] leading-4 text-muted-foreground"
+          >
+            {composerTarget.text}
+          </div>
+        ) : null}
       </div>
       {/* Issue #2799: the three pads below stand down while the direct-input
           keyboard is open — it stands in for them, and the terminal needs

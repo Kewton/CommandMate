@@ -25,7 +25,8 @@
  * Issue #2709: フッターの設定ボタンは PC ではモーダル、スマホでは `/more` へ。
  * Issue #3509: one-line rows; Needs attention preview; filter/View/Sort toolbar; detached rows fold into "Other".
  * Issue #3510: フッターは共通の設定メニュー（`SettingsMenu`）を開くボタン 1 つ。設定・言語・テーマ・ログアウトはメニューの中。
- * Issue #3512: PC の上部はロゴ＋開閉 → New task → 検索（⌘K）→ 移動先 3 行（`SidebarTopControls`）。スマホの引き出しは変えない。
+ * Issue #3512: PC の上部はロゴ＋開閉 → New task → 検索（⌘K）→ 移動先 3 行（`SidebarTopControls`）。
+ * Issue #3515: スマホの引き出しも同じ並び。開閉は「閉じる（×）」、キー表示なし（`SidebarTopControls drawer`）。
  */
 
 'use client';
@@ -182,8 +183,8 @@ export const Sidebar = memo(function Sidebar() {
   } = useSidebarContext();
   const t = useTranslations('common');
   const pathname = usePathname() ?? '';
-  // Issue #3512: the logo / open-close / New task / search rows are PC chrome;
-  // the mobile drawer keeps its header as it was (#3515).
+  // Issue #3512 / #3515: the logo / open-close / New task / search rows. The
+  // drawer draws them too, with a close button and without the key hint.
   const isMobile = useIsMobile();
   const { count: attentionCount } = useAttentionCount();
   const [searchQuery, setSearchQuery] = useState('');
@@ -581,7 +582,7 @@ export const Sidebar = memo(function Sidebar() {
     >
       {/* Issue #3512: logo + open/close, New task, search. First child, so the
           open/close cell sits at the sidebar's top-left like the rail's. */}
-      {!isMobile && <SidebarTopControls />}
+      <SidebarTopControls drawer={isMobile} />
 
       {/* Header */}
       <div

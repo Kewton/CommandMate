@@ -24,8 +24,14 @@
  * screen alike (the worktree screen reports its own destination through it).
  *
  * Issue #3512: on the PC a closed sidebar leaves `SidebarRail` (56px icon
- * column) in its place, and Mod+B opens / closes the sidebar. The phone branch
- * is unchanged (#3515).
+ * column) in its place, and Mod+B opens / closes the sidebar.
+ *
+ * Issue #3515: the phone's drawer pads itself by the safe-area insets, so its
+ * top row clears the status bar and the settings button at its foot clears the
+ * home indicator (the bottom tab bar steps aside while it is open, #2642). It
+ * is never wider than 85% of the screen, so the overlay that closes it stays
+ * tappable on a narrow phone. Its contents (close button, New task, search,
+ * destinations, list, settings menu) are `Sidebar`'s.
  */
 
 'use client';
@@ -118,7 +124,7 @@ export const AppShell = memo(function AppShell({ children }: AppShellProps) {
   } = useSidebarContext();
   const isMobile = useIsMobile();
   const { showSidebar, showGlobalNav } = useLayoutConfig();
-  // Issue #3512: Mod+B. Desktop only — the phone's drawer is untouched (#3515).
+  // Issue #3512: Mod+B. Desktop only — the phone's drawer has its own close button (#3515).
   useSidebarToggleShortcut(!isMobile && showSidebar, toggle);
   // Issue #915: scale fixed-px sidebar width by the PC display-size factor.
   const { factor } = usePcDisplaySizeContext();
@@ -206,7 +212,7 @@ export const AppShell = memo(function AppShell({ children }: AppShellProps) {
             <aside
               data-testid="sidebar-container"
               className={`
-                fixed left-0 top-0 h-full w-72 z-50
+                fixed left-0 top-0 h-full w-72 max-w-[85vw] z-50 bg-sidebar pt-safe pb-safe
                 ${SIDEBAR_TRANSITION}
                 ${isMobileDrawerOpen ? 'translate-x-0' : '-translate-x-full'}
               `}
