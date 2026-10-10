@@ -63,6 +63,7 @@ import React, {
   memo,
   useCallback,
   useEffect,
+  useId,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -245,9 +246,87 @@ export function resolvePopoverMaxHeight(
   return Math.max(0, Math.min(cap, Math.floor(room)));
 }
 
-/** `window.innerHeight`, or `fallback` where there is no window. */
-function viewportHeightOr(fallback: number): number {
-  return typeof window === 'undefined' ? fallback : window.innerHeight;
+/**
+ * `window.innerHeight`, kept current while the caller is mounted (Issue #3513).
+ *
+ * The lists that drop from the strip and the breadcrumb stay open while the
+ * window is resized, so their `resolvePopoverMaxHeight` cap must follow the
+ * new height, not the one read when they opened. Infinity where there is no
+ * window, which leaves the cap alone.
+ */
+export function useViewportHeight(): number {
+  const [height, setHeight] = useState(() =>
+    typeof window === 'undefined' ? Number.POSITIVE_INFINITY : window.innerHeight
+  );
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const onResize = () => setHeight(window.innerHeight);
+    onResize();
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+  return height;
+}
+
+// ============================================================================
+// One branch list at a time (Issue #3513)
+// ============================================================================
+
+/** Document event naming the owner that just opened a branch list. */
+const BRANCH_LIST_OPEN_EVENT = 'commandmate:repository-branch-list-open';
+
+/**
+ * Tell every branch-list owner (the strip, the worktree breadcrumb) that
+ * `ownerId` opened its list, so the others close theirs. `null` is "nobody":
+ * every open list closes — what picking a branch does, even one whose route is
+ * already on screen (the pathname does not change, so nothing else would).
+ */
+function announceBranchListOpen(ownerId: string | null): void {
+  if (typeof document === 'undefined') return;
+  document.dispatchEvent(new CustomEvent(BRANCH_LIST_OPEN_EVENT, { detail: ownerId }));
+}
+
+/**
+ * Keep at most one branch list open across owners: announce when this owner's
+ * list opens, and call `close` when another owner opens one (or a branch is
+ * picked anywhere). The owners are separate components with separate state,
+ * hence a document event rather than a shared context.
+ *
+ * @param isOpen - Whether this owner has any list open
+ * @param close - Closes everything this owner has open
+ */
+export function useExclusiveBranchList(isOpen: boolean, close: () => void): void {
+  const ownerId = useId();
+  useEffect(() => {
+    if (isOpen) announceBranchListOpen(ownerId);
+  }, [isOpen, ownerId]);
+  useEffect(() => {
+    if (!isOpen || typeof document === 'undefined') return;
+    const onOpen = (event: Event) => {
+      if ((event as CustomEvent<string | null>).detail !== ownerId) close();
+    };
+    document.addEventListener(BRANCH_LIST_OPEN_EVENT, onOpen);
+    return () => document.removeEventListener(BRANCH_LIST_OPEN_EVENT, onOpen);
+  }, [isOpen, ownerId, close]);
+}
+
+/**
+ * What picking a branch from any branch list does (Issue #3513): close every
+ * open list, select it in `WorktreeSelectionContext` (selected id, cached
+ * detail, and the "viewed" mark that clears its unread dot), then navigate.
+ * Shared by the strip and the worktree breadcrumb so the two cannot drift.
+ */
+export function useOpenWorktreeFromBranchList(): (worktreeId: string) => void {
+  const { selectWorktree } = useWorktreeSelection();
+  const router = useViewTransitionRouter();
+  return useCallback(
+    (worktreeId: string) => {
+      announceBranchListOpen(null);
+      void selectWorktree(worktreeId);
+      router.push(`/worktrees/${worktreeId}`);
+    },
+    [selectWorktree, router]
+  );
 }
 
 /**
@@ -354,10 +433,9 @@ export function useRepositoryBranchGroups({
 export const RepositoryTabBar = memo(function RepositoryTabBar() {
   const t = useTranslations('common');
   const pathname = usePathname();
-  const router = useViewTransitionRouter();
+  const openWorktree = useOpenWorktreeFromBranchList();
   const { sortKey, sortDirection, repositoryOrder } = useSidebarContext();
-  const { worktrees, repositories, selectedWorktreeId, selectWorktree } =
-    useWorktreeSelection();
+  const { worktrees, repositories, selectedWorktreeId } = useWorktreeSelection();
   // Issue #915: the band follows the PC display-size factor, like sidebar width.
   const { factor } = usePcDisplaySizeContext();
 
@@ -452,6 +530,8 @@ export const RepositoryTabBar = memo(function RepositoryTabBar() {
 
   // ---- dismissal ----
   const isAnythingOpen = openRepository !== null || isOverflowMenuOpen;
+  // Issue #3513: the breadcrumb's list and this strip's never show together.
+  useExclusiveBranchList(isAnythingOpen, closeAll);
   useEffect(() => {
     if (!isAnythingOpen) return;
 
@@ -507,10 +587,9 @@ export const RepositoryTabBar = memo(function RepositoryTabBar() {
   const handleBranchClick = useCallback(
     (branchId: string) => {
       closeAll();
-      void selectWorktree(branchId);
-      router.push(`/worktrees/${branchId}`);
+      openWorktree(branchId);
     },
-    [closeAll, selectWorktree, router]
+    [closeAll, openWorktree]
   );
 
   const handleOverflowSelect = useCallback(
@@ -733,6 +812,7 @@ export function RepositoryBranchPopover({
 }) {
   const t = useTranslations('common');
   const panelRef = useRef<HTMLDivElement>(null);
+  const viewportHeight = useViewportHeight();
 
   // Move focus into the list on open so ArrowDown from the tab lands somewhere
   // useful, and so Escape has something to return focus from.
@@ -772,7 +852,7 @@ export function RepositoryBranchPopover({
           maxHeight: `${resolvePopoverMaxHeight(
             anchor.bottom,
             Math.round(POPOVER_MAX_VISIBLE_ROWS * POPOVER_ROW_HEIGHT * factor),
-            viewportHeightOr(Number.POSITIVE_INFINITY)
+            viewportHeight
           )}px`,
         }}
       >
@@ -820,6 +900,7 @@ function OverflowMenu({
   onSelect: (repositoryName: string) => void;
 }) {
   const t = useTranslations('common');
+  const viewportHeight = useViewportHeight();
   const anchor = anchorRef.current?.getBoundingClientRect();
 
   if (typeof document === 'undefined' || !anchor) return null;
@@ -856,7 +937,7 @@ function OverflowMenu({
           maxHeight: `${resolvePopoverMaxHeight(
             anchor.bottom,
             POPOVER_MAX_VISIBLE_ROWS * POPOVER_ROW_HEIGHT,
-            viewportHeightOr(Number.POSITIVE_INFINITY)
+            viewportHeight
           )}px`,
         }}
       >

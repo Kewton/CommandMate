@@ -54,6 +54,14 @@ vi.mock('@/contexts/SidebarContext', async (importOriginal) => ({
   useSidebarContext: () => sidebarState.value,
 }));
 
+// The cache provider wraps its children in WorktreeSelectionProvider; here the
+// selection is a stub so a pick can be observed (Issue #3513 review).
+const mockSelectWorktree = vi.fn(async () => {});
+vi.mock('@/contexts/WorktreeSelectionContext', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/contexts/WorktreeSelectionContext')>()),
+  useWorktreeSelection: () => ({ selectWorktree: mockSelectWorktree }),
+}));
+
 import { DesktopHeader } from '@/components/worktree/WorktreeDetailSubComponents';
 
 function worktree(overrides: Partial<Worktree> & Pick<Worktree, 'id'>): Worktree {
@@ -95,6 +103,7 @@ function renderHeader(props: { worktreeId?: string; worktreeName: string; reposi
 
 beforeEach(() => {
   mockPush.mockReset();
+  mockSelectWorktree.mockClear();
   cacheState.value = { worktrees: WORKTREES, repositories: [] };
   sidebarState.value = sidebar();
 });
@@ -196,6 +205,7 @@ describe('WorktreeBreadcrumb in DesktopHeader (Issue #3513)', () => {
       const popover = screen.getByTestId('repository-tab-popover');
       fireEvent.click(within(popover).getByText('fix/3513'));
 
+      expect(mockSelectWorktree).toHaveBeenCalledWith('beta-fix');
       expect(mockPush).toHaveBeenCalledWith('/worktrees/beta-fix');
       expect(screen.queryByTestId('repository-tab-popover')).toBeNull();
     });

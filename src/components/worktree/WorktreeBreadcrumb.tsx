@@ -13,7 +13,9 @@
  *
  * The ▾ opens the strip's own branch list (`RepositoryBranchPopover`) over the
  * strip's own grouping (`useRepositoryBranchGroups`), so a row here is the same
- * `BranchListItem` the sidebar and the tab draw.
+ * `BranchListItem` the sidebar and the tab draw. Picking a row goes through the
+ * strip's own `useOpenWorktreeFromBranchList` (select, viewed mark, navigate),
+ * and only one of the two lists is ever open (`useExclusiveBranchList`).
  *
  * ## When there is no ▾
  *
@@ -21,9 +23,11 @@
  * the sidebar's sort and order settings. Without the cache (isolated renders),
  * for a worktree the cache does not list yet, or under a sidebar context that
  * carries no sort settings, the branch renders as plain text — exactly what
- * the header drew before. The sidebar context is only read once the cache is
- * there: the app mounts `WorktreesCacheProvider` inside `SidebarProvider`, and
- * the worktree screen's controller already requires the latter.
+ * the header drew before. The sidebar and selection contexts are only read
+ * once the cache is there: the app mounts `WorktreesCacheProvider` inside
+ * `SidebarProvider` (which the worktree screen's controller already requires),
+ * and the cache provider itself wraps its children in
+ * `WorktreeSelectionProvider`.
  *
  * @module components/worktree/WorktreeBreadcrumb
  */
@@ -36,9 +40,10 @@ import { ChevronDown } from 'lucide-react';
 import { useSidebarContext } from '@/contexts/SidebarContext';
 import { useOptionalWorktreesCacheContext } from '@/components/providers/WorktreesCacheProvider';
 import { usePcDisplaySizeContext } from '@/contexts/PcDisplaySizeContext';
-import { useViewTransitionRouter } from '@/components/providers/ViewTransitionsProvider';
 import {
   RepositoryBranchPopover,
+  useExclusiveBranchList,
+  useOpenWorktreeFromBranchList,
   useRepositoryBranchGroups,
   type AnchorRect,
 } from '@/components/layout/RepositoryTabBar';
@@ -158,7 +163,8 @@ function BranchSwitcher({
   repositoryOrder: string[];
 }) {
   const t = useTranslations('common');
-  const router = useViewTransitionRouter();
+  // Issue #3513: the strip's own pick (select → viewed mark → navigate).
+  const openWorktree = useOpenWorktreeFromBranchList();
   const { factor } = usePcDisplaySizeContext();
   const groups = useRepositoryBranchGroups({
     worktrees,
@@ -178,6 +184,9 @@ function BranchSwitcher({
     const rect = buttonRef.current?.getBoundingClientRect();
     if (rect) setAnchor({ left: rect.left, right: rect.right, bottom: rect.bottom });
   }, []);
+
+  // Issue #3513: opening this closes the strip's list, and the other way round.
+  useExclusiveBranchList(anchor !== null, close);
 
   // Same dismissal rules as the tab strip: a click outside, or Escape (which
   // hands focus back to the ▾). Clicks inside a strip panel are the list's own.
@@ -211,9 +220,9 @@ function BranchSwitcher({
   const handleBranchClick = useCallback(
     (branchId: string) => {
       close();
-      router.push(`/worktrees/${branchId}`);
+      openWorktree(branchId);
     },
-    [close, router]
+    [close, openWorktree]
   );
 
   if (!group) return <>{worktreeName}</>;
