@@ -83,9 +83,11 @@ import { splitChatUserBody, useChatImageScope } from '@/lib/chat/chat-image';
 import { ChatImage } from '@/components/worktree/ChatImage';
 import { ChatVideo } from '@/components/worktree/ChatVideo';
 import { MERMAID_MARKDOWN_COMPONENTS } from '@/components/worktree/mermaid-markdown';
+import { MermaidRawOffsetContext } from '@/components/worktree/mermaid-raw-offset';
 import {
   CHAT_SEARCH_SECTION_REASONING,
   CHAT_SEARCH_SECTION_TOOL_LOG,
+  chatMarkdownRawOffsets,
 } from '@/components/worktree/chat-search-sections';
 import {
   chatMarkdownCopyText,
@@ -884,44 +886,56 @@ export const ChatMarkdownBody = memo(function ChatMarkdownBody({
   // reads the same function, and a second hand-written composition here is
   // exactly how the screen and the clipboard came to disagree.
   const split = useMemo(() => splitChatMarkdownBody(content), [content]);
+  // [#3525] Each part's offsets back to `content`, so a drawn diagram's source
+  // tells search where its fence is in the message (only diagrams read it).
+  const rawOffsets = useMemo(
+    () => (renderDiagrams ? chatMarkdownRawOffsets(content, split) : null),
+    [renderDiagrams, content, split],
+  );
 
   return (
     <>
-      <ReactMarkdown
-        remarkPlugins={SHARED_REMARK_PLUGINS}
-        rehypePlugins={rehypePlugins}
-        urlTransform={chatUrlTransform}
-        components={components}
-      >
-        {split.body}
-      </ReactMarkdown>
+      <MermaidRawOffsetContext.Provider value={rawOffsets?.body ?? null}>
+        <ReactMarkdown
+          remarkPlugins={SHARED_REMARK_PLUGINS}
+          rehypePlugins={rehypePlugins}
+          urlTransform={chatUrlTransform}
+          components={components}
+        >
+          {split.body}
+        </ReactMarkdown>
+      </MermaidRawOffsetContext.Provider>
       {split.reasoning !== null && (
         <ChatThinkingDisclosure blocks={split.reasoningBlocks}>
           {/* [#3503] Tells search which part of the raw text this is drawn
               from (`chatSearchSections`); `contents` keeps the layout as is. */}
           <div data-search-section={CHAT_SEARCH_SECTION_REASONING} className="contents">
-            <ReactMarkdown
-              remarkPlugins={SHARED_REMARK_PLUGINS}
-              rehypePlugins={rehypePlugins}
-              urlTransform={chatUrlTransform}
-              components={components}
-            >
-              {split.reasoning}
-            </ReactMarkdown>
+            <MermaidRawOffsetContext.Provider value={rawOffsets?.reasoning ?? null}>
+              <ReactMarkdown
+                remarkPlugins={SHARED_REMARK_PLUGINS}
+                rehypePlugins={rehypePlugins}
+                urlTransform={chatUrlTransform}
+                components={components}
+              >
+                {split.reasoning}
+              </ReactMarkdown>
+            </MermaidRawOffsetContext.Provider>
           </div>
         </ChatThinkingDisclosure>
       )}
       {split.toolCalls > 0 && (
         <ChatToolLogDisclosure toolCalls={split.toolCalls}>
           <div data-search-section={CHAT_SEARCH_SECTION_TOOL_LOG} className="contents">
-            <ReactMarkdown
-              remarkPlugins={SHARED_REMARK_PLUGINS}
-              rehypePlugins={rehypePlugins}
-              urlTransform={chatUrlTransform}
-              components={components}
-            >
-              {split.toolLog}
-            </ReactMarkdown>
+            <MermaidRawOffsetContext.Provider value={rawOffsets?.toolLog ?? null}>
+              <ReactMarkdown
+                remarkPlugins={SHARED_REMARK_PLUGINS}
+                rehypePlugins={rehypePlugins}
+                urlTransform={chatUrlTransform}
+                components={components}
+              >
+                {split.toolLog}
+              </ReactMarkdown>
+            </MermaidRawOffsetContext.Provider>
           </div>
         </ChatToolLogDisclosure>
       )}

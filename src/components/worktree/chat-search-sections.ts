@@ -26,7 +26,14 @@
 
 import { CHAT_THINKING_LABEL, splitChatThinking } from '@/lib/chat/chat-thinking';
 import { splitToolLog } from '@/lib/chat/chat-tool-log';
-import type { HighlightSection, MatchPosition } from '@/lib/terminal-highlight';
+import type { ChatMarkdownBodySplit } from '@/lib/chat/chat-markdown-body';
+import {
+  alignDerivedText,
+  IDENTITY_RAW_OFFSET,
+  type HighlightSection,
+  type MatchPosition,
+  type RawOffsetMapper,
+} from '@/lib/terminal-highlight';
 
 /** `data-search-section` of the reasoning chip's Markdown. */
 export const CHAT_SEARCH_SECTION_REASONING = 'chat-reasoning';
@@ -87,4 +94,45 @@ export function chatSearchSections(content: string): HighlightSection[] {
   const reasoning = reasoningRanges(tools.prose, proseStart);
   if (reasoning.length > 0) sections.push({ key: CHAT_SEARCH_SECTION_REASONING, ranges: reasoning });
   return sections;
+}
+
+/**
+ * [Issue #3525] For each part `ChatMarkdownBody` hands react-markdown, how an
+ * offset into that part maps back to `content` — so a mermaid source can name
+ * where its fence is in the message search runs on. `null` for a part whose
+ * lines cannot be lined up with the message's (search then pairs that part's
+ * diagrams by body, as before).
+ *
+ * - answer: `content` itself when nothing was folded; otherwise the lines left
+ *   once the tool log and the reasoning are out (blank runs collapsed, ends
+ *   trimmed), lined up against the lines outside both sections;
+ * - reasoning: the `> **Thinking**` quotes' lines, unquoted, against the
+ *   reasoning section's lines;
+ * - tool log: the trailing quoted section unquoted (or the legacy leading run
+ *   as is), against the tool-log section's lines.
+ */
+export function chatMarkdownRawOffsets(
+  content: string,
+  split: ChatMarkdownBodySplit,
+): { body: RawOffsetMapper | null; reasoning: RawOffsetMapper | null; toolLog: RawOffsetMapper | null } {
+  if (!split.folded) return { body: IDENTITY_RAW_OFFSET, reasoning: null, toolLog: null };
+  const sections = chatSearchSections(content);
+  const rangesOf = (key: string): MatchPosition[] =>
+    sections.find((section) => section.key === key)?.ranges ?? [];
+  const folded = sections.flatMap((section) => section.ranges).sort((a, b) => a.start - b.start);
+  const answer: MatchPosition[] = [];
+  let from = 0;
+  for (const range of folded) {
+    if (range.start > from) answer.push({ start: from, end: range.start });
+    from = Math.max(from, range.end);
+  }
+  if (from <= content.length) answer.push({ start: from, end: content.length + 1 });
+  return {
+    body: alignDerivedText(split.body, content, answer),
+    reasoning:
+      split.reasoning === null
+        ? null
+        : alignDerivedText(split.reasoning, content, rangesOf(CHAT_SEARCH_SECTION_REASONING)),
+    toolLog: split.toolCalls > 0 ? alignDerivedText(split.toolLog, content, rangesOf(CHAT_SEARCH_SECTION_TOOL_LOG)) : null,
+  };
 }
