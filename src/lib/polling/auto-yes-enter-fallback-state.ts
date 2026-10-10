@@ -23,7 +23,7 @@ import type { PromptResponseRefusal } from './auto-yes-dialog-gate';
  * What tells two prompts apart for the published record: the type, the
  * question and the option labels.
  *
- * Not the poller's `promptFrameKey`: that one also carries the cursor and
+ * Not the poller's `promptFrameKey` (in `auto-yes-poller-state.ts`): that one also carries the cursor and
  * `approvalTarget`, and the status API reads a different number of rows than
  * the poller does, so `approvalTarget` can differ between the two readings of
  * one screen. The record is matched against the status API's prompt (to say
