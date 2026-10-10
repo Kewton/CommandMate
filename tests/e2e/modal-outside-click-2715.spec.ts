@@ -19,12 +19,20 @@
 import { test, expect, type Page } from '@playwright/test';
 import { EXIT_ANIMATION_DURATION_MS } from '@/config/ui-feedback-config';
 
-const HEADER_SETTINGS = 'header nav a[aria-haspopup="dialog"]';
+/**
+ * Issue #3510 / #3512: the global Header no longer carries a settings link.
+ * The settings modal opens from the sidebar footer's settings menu
+ * (`sidebar-settings-menu`) → "Settings…" (`sidebar-settings-menu-settings`).
+ */
+const SIDEBAR_SETTINGS_MENU = '[data-testid="sidebar-settings-menu"]';
+const SIDEBAR_SETTINGS_ITEM = '[data-testid="sidebar-settings-menu-settings"]';
 
 async function openSettingsModal(page: Page): Promise<void> {
   await page.goto('/sessions');
-  await page.locator(HEADER_SETTINGS).waitFor();
-  await page.locator(HEADER_SETTINGS).click();
+  await page.locator(SIDEBAR_SETTINGS_MENU).waitFor();
+  await page.locator(SIDEBAR_SETTINGS_MENU).click();
+  await page.locator(SIDEBAR_SETTINGS_ITEM).waitFor();
+  await page.locator(SIDEBAR_SETTINGS_ITEM).click();
   await page.locator('[role="dialog"]').waitFor();
 }
 
