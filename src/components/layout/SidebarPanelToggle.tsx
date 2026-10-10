@@ -16,6 +16,12 @@
  * Replaces the ActivityBar hamburger (#747) and the never-mounted
  * `SidebarToggle`.
  *
+ * Issue #3515: the phone's drawer draws the same button in the same cell with
+ * `onClose`. There it only closes (the drawer is opened from the mobile header
+ * and the bottom tab bar), so it is an × named `sidebar.close`, without the
+ * tooltip a touch screen cannot hover and without `aria-expanded`, which
+ * describes the PC sidebar's state, not the drawer's.
+ *
  * @module components/layout/SidebarPanelToggle
  */
 
@@ -23,7 +29,7 @@
 
 import React from 'react';
 import { useTranslations } from 'next-intl';
-import { PanelLeftClose, PanelLeftOpen } from 'lucide-react';
+import { PanelLeftClose, PanelLeftOpen, X } from 'lucide-react';
 import { useSidebarContext } from '@/contexts/SidebarContext';
 import { Tooltip } from '@/components/common/Tooltip';
 import { SIDEBAR_TOGGLE_CELL_PADDING, SIDEBAR_TOGGLE_SIZE } from '@/lib/sidebar-utils';
@@ -31,9 +37,19 @@ import { SIDEBAR_TOGGLE_CELL_PADDING, SIDEBAR_TOGGLE_SIZE } from '@/lib/sidebar-
 export interface SidebarPanelToggleProps {
   /** `sidebar-panel-toggle` in the sidebar, `sidebar-rail-toggle` in the rail. */
   testId: string;
+  /**
+   * Issue #3515: the mobile drawer's close button. Given, the button is an ×
+   * that calls this instead of toggling the PC sidebar.
+   */
+  onClose?: () => void;
 }
 
-export function SidebarPanelToggle({ testId }: SidebarPanelToggleProps) {
+const BUTTON_CLASS =
+  'flex items-center justify-center rounded-md text-sidebar-muted transition-colors hover:bg-sidebar-hover hover:text-sidebar-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring';
+
+const BUTTON_STYLE = { width: `${SIDEBAR_TOGGLE_SIZE}px`, height: `${SIDEBAR_TOGGLE_SIZE}px` };
+
+export function SidebarPanelToggle({ testId, onClose }: SidebarPanelToggleProps) {
   const t = useTranslations('common');
   const { isOpen, toggle } = useSidebarContext();
   const label = isOpen ? t('sidebar.close') : t('sidebar.open');
@@ -45,19 +61,32 @@ export function SidebarPanelToggle({ testId }: SidebarPanelToggleProps) {
       className="flex flex-shrink-0"
       style={{ padding: `${SIDEBAR_TOGGLE_CELL_PADDING}px` }}
     >
-      <Tooltip content={label} placement={isOpen ? 'bottom' : 'right'}>
+      {onClose ? (
         <button
           type="button"
           data-testid={testId}
-          onClick={toggle}
-          aria-label={label}
-          aria-expanded={isOpen}
-          style={{ width: `${SIDEBAR_TOGGLE_SIZE}px`, height: `${SIDEBAR_TOGGLE_SIZE}px` }}
-          className="flex items-center justify-center rounded-md text-sidebar-muted transition-colors hover:bg-sidebar-hover hover:text-sidebar-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          onClick={onClose}
+          aria-label={t('sidebar.close')}
+          style={BUTTON_STYLE}
+          className={BUTTON_CLASS}
         >
-          <Icon size={20} aria-hidden="true" />
+          <X size={20} aria-hidden="true" />
         </button>
-      </Tooltip>
+      ) : (
+        <Tooltip content={label} placement={isOpen ? 'bottom' : 'right'}>
+          <button
+            type="button"
+            data-testid={testId}
+            onClick={toggle}
+            aria-label={label}
+            aria-expanded={isOpen}
+            style={BUTTON_STYLE}
+            className={BUTTON_CLASS}
+          >
+            <Icon size={20} aria-hidden="true" />
+          </button>
+        </Tooltip>
+      )}
     </div>
   );
 }
