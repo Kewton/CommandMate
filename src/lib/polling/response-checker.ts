@@ -43,7 +43,12 @@ import {
   getAccumulatedContent,
   clearTuiAccumulator,
 } from '../tui-accumulator';
-import { isDuplicatePrompt, normalizePromptForDedup } from './prompt-dedup';
+import {
+  claimDuplicatePromptSkipLog,
+  isDuplicatePrompt,
+  normalizePromptForDedup,
+  resetDuplicatePromptSkipStreak,
+} from './prompt-dedup';
 import { recordPromptDedupSkip } from './prompt-dedup-state';
 import {
   isDuplicateResponse,
@@ -647,6 +652,15 @@ function extractCompletedTurn(
   const result = extractResponse(output, lastCapturedLine, cliToolId, CACHE_MAX_CAPTURE_LINES);
 
   if (!result || !result.isComplete) {
+    // Issue #3538: an unfinished frame was read and carries no live prompt (the
+    // early prompt check in `extractResponse` would have returned it complete),
+    // so a run of duplicate prompt ticks is over; the hash is kept — see the
+    // helper. Only when the frame WAS read: a null result is extraction being
+    // skipped on the line count ("no new output"), which says nothing about
+    // whether the prompt is still on screen, and neither do the cursor returns
+    // further down.
+    if (result) resetDuplicatePromptSkipStreak(pollerKey);
+
     // DR-004 windowing: Only check tail lines
     const { thinkingPattern } = getCliToolPatterns(cliToolId);
     const cleanOutput = stripAnsi(output);
@@ -739,7 +753,19 @@ function savePromptMessage(
     // classified (#1676) look identical from the CLI — both say "nothing was
     // recorded". Count the skip so the payload can tell them apart.
     recordPromptDedupSkip(worktreeId, cliToolId, instanceId);
-    logger.info('duplicate-prompt-skipped', { worktreeId, cliToolId });
+    // Issue #3538: the tally above is counted on every tick; the log line is
+    // not. A full-screen TUI sits on its prompt for as long as it stays
+    // unanswered, a duplicate every 2 s. The first tick of a run logs exactly
+    // as before; after that one line per `DUPLICATE_PROMPT_SKIP_LOG_TICK_INTERVAL`
+    // ticks, with the run length and how many ticks went unlogged (#3519).
+    const skipLog = claimDuplicatePromptSkipLog(pollerKey);
+    if (skipLog.log) {
+      logger.info('duplicate-prompt-skipped', {
+        worktreeId,
+        cliToolId,
+        ...(skipLog.consecutive > 1 ? { consecutive: skipLog.consecutive, suppressed: skipLog.suppressed } : {}),
+      });
+    }
     return false;
   }
 
@@ -1439,6 +1465,9 @@ export async function checkForResponse(
     if (promptIsLive) {
       return savePromptMessage(ctx, promptDetection, result, isFullScreenTui);
     }
+    // Issue #3538: a finished frame without a live prompt ends the run of
+    // duplicate prompt ticks, as an unfinished one does in `extractCompletedTurn`.
+    resetDuplicatePromptSkipStreak(pollerKey);
 
     // Validate response content is not empty
     if (!result.response || result.response.trim() === '') {
