@@ -296,6 +296,11 @@ function parseSkillFile(skillDirPath: string, skillName: string): SlashCommand |
       filePath: path.relative(process.cwd(), skillPath),
     };
   } catch (error) {
+    // A skill directory without SKILL.md (e.g. `synced/`, `codex-primary-runtime/`) is normal (Issue #3520)
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      logger.debug('skill-file-not-found-skipping');
+      return null;
+    }
     logger.error('error-parsing-skill-file-skillpath:', { error: error instanceof Error ? error.message : String(error) });
     return null;
   }
