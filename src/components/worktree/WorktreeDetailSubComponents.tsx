@@ -54,7 +54,10 @@ import {
 import { getInstanceLabel, type AgentInstance, type CLIToolType } from '@/lib/cli-tools/types';
 import { useCopyFeedback } from '@/hooks/useCopyFeedback';
 import { AGENT_INSTANCE_DND_MIME } from '@/components/worktree/TerminalSplitPane';
-import { PcDisplaySizeSelector } from '@/components/layout/PcDisplaySizeSelector';
+import {
+  WorktreeBreadcrumbBranch,
+  WorktreeBreadcrumbRepository,
+} from '@/components/worktree/WorktreeBreadcrumb';
 import { AppUpdateButton } from '@/components/common/AppUpdateButton';
 import { useAppUpdate } from '@/contexts/AppUpdateContext';
 
@@ -775,6 +778,12 @@ export const WorktreeInfoFields = memo(function WorktreeInfoFields({
 
 /** Props for DesktopHeader component */
 interface DesktopHeaderProps {
+  /**
+   * Issue #3513: the worktree on screen, so the breadcrumb's ▾ can open its
+   * repository's branch list with this one marked. Omitted renders the name
+   * without the ▾.
+   */
+  worktreeId?: string;
   worktreeName: string;
   repositoryName: string;
   description?: string;
@@ -1002,6 +1011,7 @@ function useDesktopHeaderFit(
 
 /** Desktop header with worktree name, repository, status, and info button */
 export const DesktopHeader = memo(function DesktopHeader({
+  worktreeId,
   worktreeName,
   repositoryName,
   description: worktreeDescription,
@@ -1227,15 +1237,21 @@ export const DesktopHeader = memo(function DesktopHeader({
         {/* Worktree name, memo, and repository. Issue #2481: gives way before
             the verification chip on a narrow header (`shrink-4` against the
             chip's 1), down to a floor that keeps the start of the name
-            readable. A whole-number factor on purpose — see the chip below. */}
+            readable. A whole-number factor on purpose — see the chip below.
+            Issue #3513: a breadcrumb. The branch is the heading, with a ▾
+            that opens the tab strip's branch list; the repository stays on
+            the small line because the strip is not always on screen and two
+            repositories can each have a `develop`. */}
         <div className="flex flex-col min-w-[6rem] shrink-4">
           <h1 className="text-lg font-semibold text-foreground truncate max-w-[200px] leading-tight">
-            {worktreeName}
+            <WorktreeBreadcrumbBranch
+              worktreeId={worktreeId}
+              worktreeName={worktreeName}
+              repositoryName={repositoryName}
+            />
           </h1>
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <span className="truncate max-w-[200px]">
-              {repositoryName}
-            </span>
+            <WorktreeBreadcrumbRepository repositoryName={repositoryName} />
             {gitStatus && gitStatus.currentBranch !== '(unknown)' && (
               <>
                 <span className="text-muted-foreground">/</span>
@@ -1571,11 +1587,9 @@ export const DesktopHeader = memo(function DesktopHeader({
             which never shrinks (#2481), so it is never clipped; a narrow
             header folds agent pills instead. */}
         <AppUpdateButton />
-        {/* Issue #917: PC display-size selector. The global Header (where it
-            also lives) is suppressed on /worktrees/[id] (useLayoutConfig
-            showGlobalNav:false), so it is surfaced here too. PC only — the
-            selector returns null on mobile. */}
-        <PcDisplaySizeSelector />
+        {/* Issue #3513: the PC display-size selector (#917) is no longer here.
+            It moved to the settings menu at the foot of the sidebar and the
+            icon rail (#3510 / #3512), the same as it left the global Header. */}
       <Button
         variant="ghost"
         type="button"

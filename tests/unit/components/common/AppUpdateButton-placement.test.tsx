@@ -77,7 +77,8 @@ describe('AppUpdateButton in DesktopHeader (Issue #2654)', () => {
     // #2481: the group never shrinks, so nothing inside it can be clipped.
     expect(controls.className).toMatch(/\bflex-shrink-0\b/);
 
-    expect(comesBefore(button, screen.getByTestId('pc-display-size-select'))).toBe(true);
+    // Issue #3513: the display-size selector left this group (settings menu).
+    expect(screen.queryByTestId('pc-display-size-select')).toBeNull();
     expect(comesBefore(button, screen.getByTestId('desktop-info-button'))).toBe(true);
   });
 

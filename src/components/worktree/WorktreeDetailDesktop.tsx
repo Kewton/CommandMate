@@ -902,6 +902,7 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
         <div className="flex flex-col flex-1 min-h-0 min-w-0">
           {/* Desktop Header with status and info */}
           <DesktopHeader
+            worktreeId={worktreeId}
             worktreeName={worktreeName}
             repositoryName={
               worktree?.repositoryDisplayName ??
