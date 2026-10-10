@@ -23,11 +23,12 @@
  * Issue #2656: a third view, "sessions", lists one row per agent instance (status first); a row opens its branch with ?instance=.
  * Issue #2706: フッターの言語セレクトの左に設定ボタン（`/more` へのリンク）。スマホのブランチ画面には他に設定への入口が無い。
  * Issue #2709: フッターの設定ボタンは PC ではモーダル、スマホでは `/more` へ。
+ * Issue #3509: one-line rows; Needs attention preview; filter/View/Sort toolbar; detached rows fold into "Other".
  */
 
 'use client';
 
-import React, { memo, useState, useMemo, useCallback, useEffect, useLayoutEffect, useRef, useDeferredValue, useId } from 'react';
+import React, { memo, useState, useMemo, useCallback, useEffect, useLayoutEffect, useRef, useDeferredValue } from 'react';
 import { TransitionLink } from '@/components/view-transitions/TransitionLink';
 import { usePathname } from 'next/navigation';
 import { useTranslations } from 'next-intl';
@@ -56,8 +57,10 @@ import {
   UNCLASSIFIED_STATUS_DOT_CLASS,
   UNCLASSIFIED_STATUS_LABEL_KEY,
 } from '@/components/sidebar/BranchStatusIndicator';
-import { SortSelector } from '@/components/sidebar/SortSelector';
-import { Button, GroupIcon, Input, Skeleton, StatusDot } from '@/components/ui';
+import { NeedsAttentionSection } from '@/components/sidebar/NeedsAttentionSection';
+import { OtherBranchesGroup } from '@/components/sidebar/OtherBranchesGroup';
+import { SidebarListToolbar } from '@/components/sidebar/SidebarListToolbar';
+import { Button, GroupIcon, Skeleton, StatusDot } from '@/components/ui';
 import { Tooltip } from '@/components/common/Tooltip';
 import { TruncationTooltip } from '@/components/common/TruncationTooltip';
 import { LocaleSwitcher } from '@/components/common/LocaleSwitcher';
@@ -65,7 +68,7 @@ import { ThemeToggle } from '@/components/common/ThemeToggle';
 import { LogoutButton } from '@/components/common/LogoutButton';
 import { useToast } from '@/components/common/Toast';
 import { ATTENTION_REVIEW_HREF } from '@/config/review-config';
-import { useAttentionCount } from '@/hooks/useAttentionCount';
+import { useAttentionCount, selectAttentionWorktrees } from '@/hooks/useAttentionCount';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { useSettingsDialog } from '@/contexts/SettingsDialogContext';
 import { repositoryApi, ApiError } from '@/lib/api-client';
@@ -79,10 +82,9 @@ import {
   buildSessionRows,
   buildSessionRowHref,
   sortSessionRows,
-  isValidViewMode,
+  partitionOtherBranches,
 } from '@/lib/sidebar-utils';
 import { useWorktreeList } from '@/hooks/useWorktreeList';
-import type { ViewMode } from '@/lib/sidebar-utils';
 import type { BranchGroup, SessionRow } from '@/lib/sidebar-utils';
 
 // ============================================================================
@@ -231,6 +233,15 @@ export const Sidebar = memo(function Sidebar() {
   const visibleWorktrees = useMemo(
     () => filterWorktreesByVisibility(worktrees, hiddenRepositoryPaths),
     [worktrees, hiddenRepositoryPaths]
+  );
+
+  // Issue #3509: Needs attention counts the UNFILTERED list, exactly as Review's
+  // approval tab does (see NeedsAttentionSection for why hidden repositories
+  // stay in). `visibleWorktreeIds` is only used to label those rows.
+  const attentionWorktrees = useMemo(() => selectAttentionWorktrees(worktrees), [worktrees]);
+  const visibleWorktreeIds = useMemo(
+    () => new Set(visibleWorktrees.map((wt) => wt.id)),
+    [visibleWorktrees]
   );
 
   // Convert worktrees to sidebar items
@@ -574,30 +585,24 @@ export const Sidebar = memo(function Sidebar() {
             />
           </li>
         </ul>
-        <div
-          data-testid="sidebar-list-controls"
-          className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-2 gap-y-1.5 px-2"
-        >
-          <ViewModeSelect viewMode={viewMode} onChange={setViewMode} />
-          <span className="whitespace-nowrap text-xs text-sidebar-muted">{t('sort.label')}</span>
-          <SortSelector />
-        </div>
       </div>
 
-      {/* Search */}
-      <div className="flex-shrink-0 px-4 py-3 border-b border-sidebar-border">
-        {/* Issue #1073: use the Input primitive defaults (border-input, semantic
-            text/placeholder) instead of the old gray overrides. Only bg-background
-            is kept so the field stays distinct from the light slate-50 sidebar
-            panel (in dark the primitive's recessed surface already contrasts). */}
-        <Input
-          type="text"
-          placeholder={t('sidebar.searchBranches')}
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          className="bg-background shadow-none"
-        />
-      </div>
+      {/* Issue #3509: a few waiting worktrees + the way to Review's approval list. */}
+      <NeedsAttentionSection
+        worktrees={attentionWorktrees}
+        visibleWorktreeIds={visibleWorktreeIds}
+        selectedWorktreeId={selectedWorktreeId}
+        onSelect={handleBranchClick}
+        onNavigate={closeMobileDrawer}
+      />
+
+      {/* Issue #3509: filter + View + Sort, shared by all three views. */}
+      <SidebarListToolbar
+        searchQuery={searchQuery}
+        onSearchChange={setSearchQuery}
+        viewMode={viewMode}
+        onViewModeChange={setViewMode}
+      />
 
       {/* Branch list */}
       <div
@@ -664,6 +669,7 @@ export const Sidebar = memo(function Sidebar() {
                     onToggle={() => toggleGroup(group.repositoryName)}
                     onBranchClick={handleBranchClick}
                     isDragDisabled={!!searchQuery.trim()}
+                    isFiltering={!!searchQuery.trim()}
                   />
                 );
               })}
@@ -738,6 +744,7 @@ function SortableGroupItem({
   onToggle,
   onBranchClick,
   isDragDisabled,
+  isFiltering,
 }: {
   group: BranchGroup;
   isExpanded: boolean;
@@ -745,6 +752,8 @@ function SortableGroupItem({
   onToggle: () => void;
   onBranchClick: (branchId: string) => void;
   isDragDisabled: boolean;
+  /** The filter field is in use: "Other" opens (Issue #3509) */
+  isFiltering: boolean;
 }) {
   const {
     attributes,
@@ -762,8 +771,15 @@ function SortableGroupItem({
     opacity: isDragging ? 0.5 : 1,
   };
 
+  // Issue #3509: detached worktrees fold into "Other (n)" — except the selected,
+  // waiting and running ones, which stay in place.
+  const { shown, other } = useMemo(
+    () => partitionOtherBranches(group.branches, selectedWorktreeId),
+    [group.branches, selectedWorktreeId]
+  );
+
   return (
-    <div ref={setNodeRef} style={style} className="w-full min-w-0">
+    <div ref={setNodeRef} style={style} className="w-full min-w-0 pt-2">
       <GroupHeader
         repositoryName={group.repositoryName}
         branchCount={group.branches.length}
@@ -774,7 +790,7 @@ function SortableGroupItem({
         dragHandleAttributes={isDragDisabled ? undefined : attributes}
       />
       {isExpanded &&
-        group.branches.map((branch) => (
+        shown.map((branch) => (
           <BranchListItem
             key={branch.id}
             branch={branch}
@@ -783,6 +799,14 @@ function SortableGroupItem({
             showRepositoryName={false}
           />
         ))}
+      {isExpanded && other.length > 0 && (
+        <OtherBranchesGroup
+          branches={other}
+          selectedWorktreeId={selectedWorktreeId}
+          onBranchClick={onBranchClick}
+          forceExpanded={isFiltering}
+        />
+      )}
     </div>
   );
 }
@@ -870,8 +894,8 @@ function GroupHeader({
         onClick={onClick}
         aria-expanded={isExpanded}
         className="
-          flex-1 min-w-0 flex items-center gap-2 px-2 py-2
-          text-xs font-semibold text-sidebar-muted uppercase tracking-wider
+          flex-1 min-w-0 flex items-center gap-2 px-2 py-1
+          text-xs font-normal text-sidebar-muted
           focus:outline-none focus:ring-2 focus:ring-inset focus:ring-ring
           transition-colors
         "
@@ -926,45 +950,6 @@ function SidebarNavLink({
 }
 
 /**
- * View mode select (Issue #2648): the list layout as words instead of an icon.
- * Renders two cells of the header's controls grid — the label and the select.
- */
-function ViewModeSelect({
-  viewMode,
-  onChange,
-}: {
-  viewMode: ViewMode;
-  onChange: (mode: ViewMode) => void;
-}) {
-  const t = useTranslations('common');
-  const selectId = useId();
-
-  return (
-    <>
-      <label htmlFor={selectId} className="whitespace-nowrap text-xs text-sidebar-muted">
-        {t('sidebar.viewLabel')}
-      </label>
-      <select
-        id={selectId}
-        data-testid="view-mode-select"
-        value={viewMode}
-        onChange={(event) => {
-          const next = event.target.value;
-          // The <select> can only emit the values rendered below; the guard is
-          // for the type.
-          if (isValidViewMode(next)) onChange(next);
-        }}
-        className="w-full min-w-0 truncate rounded border border-sidebar-border bg-sidebar px-1.5 py-1 text-xs text-sidebar-foreground hover:bg-sidebar-hover focus:outline-none focus:ring-2 focus:ring-ring"
-      >
-        <option value="grouped">{t('sidebar.viewMode.grouped')}</option>
-        <option value="flat">{t('sidebar.viewMode.flat')}</option>
-        <option value="sessions">{t('sidebar.viewMode.sessions')}</option>
-      </select>
-    </>
-  );
-}
-
-/**
  * One agent instance in the sessions view (Issue #2656): status dot, agent
  * label (bold), then branch · repository (muted). Selected = its branch is the
  * one open, so every row of that branch is highlighted.
@@ -989,7 +974,7 @@ const SessionListItem = memo(function SessionListItem({
       data-session-key={row.key}
       onClick={() => onClick(row)}
       aria-current={isSelected ? 'true' : undefined}
-      className={`w-full min-w-0 px-4 py-2 flex items-center gap-3 text-left hover:bg-sidebar-hover transition-colors focus:outline-none focus:ring-2 focus:ring-inset focus:ring-ring ${
+      className={`w-full min-w-0 min-h-[34px] px-3 py-1.5 flex items-center gap-2 text-left hover:bg-sidebar-hover transition-colors focus:outline-none focus:ring-2 focus:ring-inset focus:ring-ring ${
         isSelected ? 'bg-sidebar-hover border-l-2 border-accent-500' : 'border-l-2 border-transparent'
       }`}
     >
@@ -999,11 +984,10 @@ const SessionListItem = memo(function SessionListItem({
         label={row.exited ? `${statusLabel} (${t('branchItem.agentExited')})` : statusLabel}
         className={unclassified ? UNCLASSIFIED_STATUS_DOT_CLASS : undefined}
       />
-      <span className="min-w-0 flex-1">
-        <span className="block truncate text-sm font-semibold text-sidebar-foreground">{row.label}</span>
-        <span className="block truncate text-xs text-sidebar-muted">
-          {row.branchName} · {row.repositoryName}
-        </span>
+      {/* Issue #3509: one line — the agent first, then where it runs, muted. */}
+      <span className="flex-shrink-0 max-w-[45%] truncate text-sm font-semibold text-sidebar-foreground">{row.label}</span>
+      <span className="min-w-0 flex-1 truncate text-xs text-sidebar-muted">
+        {row.branchName} · {row.repositoryName}
       </span>
     </button>
   );

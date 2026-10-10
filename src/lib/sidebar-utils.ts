@@ -804,3 +804,54 @@ export function shouldShowRepositoryTabBar(
   if (mode === 'always') return true;
   return !isSidebarOpen;
 }
+
+// ============================================================================
+// "Other" bucket for detached worktrees (Issue #3509)
+// ============================================================================
+
+/**
+ * Name `parseWorktreeList` gives a worktree on a detached HEAD
+ * (`detached-<commit>`, `src/lib/git/worktrees.ts`). Same character class as
+ * the commit capture there, so a branch merely *named* `detached-…/x` is not
+ * folded away.
+ */
+const DETACHED_BRANCH_NAME_PATTERN = /^detached-[a-z0-9]+$/;
+
+/** Whether a sidebar row is a detached-HEAD worktree (Issue #3509). */
+export function isDetachedBranchName(name: string): boolean {
+  return DETACHED_BRANCH_NAME_PATTERN.test(name);
+}
+
+/**
+ * Split one repository's rows into the ones shown in place and the ones folded
+ * into "Other (n)" (Issue #3509).
+ *
+ * Only detached worktrees are folded, and never one the user must not lose
+ * sight of: the selected row, a waiting row (the `waiting` the dot paints, or
+ * the worktree-level one Needs attention counts) or a working one (`running` / `generating`). Order is
+ * preserved on both sides, so the sort the user picked still holds.
+ *
+ * @param branches - One group's rows, already sorted
+ * @param selectedId - The open worktree, or null
+ */
+export function partitionOtherBranches(
+  branches: ReadonlyArray<SidebarBranchItem>,
+  selectedId: string | null
+): { shown: SidebarBranchItem[]; other: SidebarBranchItem[] } {
+  const shown: SidebarBranchItem[] = [];
+  const other: SidebarBranchItem[] = [];
+  for (const branch of branches) {
+    const status = resolveBranchStatus(branch);
+    const keepInPlace =
+      !isDetachedBranchName(branch.name) ||
+      branch.id === selectedId ||
+      status === 'waiting' ||
+      // The worktree-level flag (`isWaitingForResponse`, which is what Needs
+      // attention counts) as well, in case the per-instance map disagrees.
+      branch.status === 'waiting' ||
+      status === 'running' ||
+      status === 'generating';
+    (keepInPlace ? shown : other).push(branch);
+  }
+  return { shown, other };
+}
