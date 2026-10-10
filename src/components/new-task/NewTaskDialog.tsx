@@ -551,6 +551,7 @@ export function NewTaskDialog() {
           </span>
           <button
             type="button"
+            data-testid="new-task-cancel"
             onClick={handleClose}
             disabled={sending}
             className="px-4 py-2 text-sm font-medium text-foreground bg-muted hover:bg-muted/80 rounded-lg transition-colors disabled:opacity-50"

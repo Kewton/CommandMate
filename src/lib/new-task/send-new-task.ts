@@ -17,11 +17,14 @@
  *    running, then types the request.
  *
  * Every refusal comes back as a {@link NewTaskSendResult} the dialog can name;
- * nothing here throws.
+ * nothing here throws, and nothing here waits forever: each request — its
+ * headers AND its JSON body — must finish within the transport's own timeout
+ * for that request ({@link withinDeadline}). `fetchApiResponse` bounds only the
+ * wait for headers, and the dialog cannot be closed until this returns.
  */
 
 import { ApiError, fetchApiResponse, type ApiRequestOptions } from '@/lib/api-client';
-import { getSendTimeoutMs } from '@/config/api-timeout-config';
+import { getSendTimeoutMs, resolveDefaultTimeoutMs } from '@/config/api-timeout-config';
 import type { AutoYesDuration } from '@/config/auto-yes-config';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import type { NewTaskTarget } from './recent-targets';
@@ -142,6 +145,31 @@ function transportFailure(error: unknown): NewTaskSendResult {
   return { ok: false, kind: 'failed', status: 0, detail };
 }
 
+/**
+ * Run one request — the fetch and the reading of its body — under a single
+ * deadline of `timeoutMs`, the same budget `fetchApiResponse` gives the fetch.
+ * Past it the work is abandoned and this rejects with the client's own
+ * `timeout` ApiError, so a body that never finishes arriving cannot hold the
+ * caller (Issue #3511).
+ */
+export function withinDeadline<T>(work: () => Promise<T>, timeoutMs: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new ApiError(`Request timed out after ${timeoutMs}ms`, 0, undefined, 'timeout'));
+    }, timeoutMs);
+    work().then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
 /** Arm Auto-Yes when asked, then send. */
 export async function sendNewTask(
   input: SendNewTaskInput,
@@ -152,47 +180,66 @@ export async function sendNewTask(
   const headers = { 'Content-Type': 'application/json' };
 
   let armedAutoYes: ArmedAutoYes | undefined;
-  if (input.autoYesDuration !== null) {
+  const duration = input.autoYesDuration;
+  if (duration !== null) {
+    // Set once the route has answered 2xx: from then on the server holds it armed.
+    let armedOnServer = false;
+    let refusal: NewTaskSendResult | null;
     try {
-      const response = await request(`${base}/auto-yes`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          enabled: true,
-          cliToolId,
-          instanceId: target.instanceId,
-          duration: input.autoYesDuration,
-        }),
-      });
-      if (!response.ok) {
-        const { error } = await readErrorBody(response);
-        return { ok: false, kind: 'auto_yes_failed', status: response.status, detail: error };
-      }
-      armedAutoYes = await readArmedState(response, input.autoYesDuration);
+      refusal = await withinDeadline(async (): Promise<NewTaskSendResult | null> => {
+        const response = await request(`${base}/auto-yes`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            enabled: true,
+            cliToolId,
+            instanceId: target.instanceId,
+            duration,
+          }),
+        });
+        if (!response.ok) {
+          const { error } = await readErrorBody(response);
+          return { ok: false, kind: 'auto_yes_failed', status: response.status, detail: error };
+        }
+        armedOnServer = true;
+        armedAutoYes = await readArmedState(response, duration);
+        return null;
+      }, resolveDefaultTimeoutMs('POST'));
     } catch (error) {
-      const failure = transportFailure(error);
-      return failure.ok ? failure : { ...failure, kind: 'auto_yes_failed' };
+      if (!armedOnServer) {
+        const failure = transportFailure(error);
+        return failure.ok ? failure : { ...failure, kind: 'auto_yes_failed' };
+      }
+      // Armed, but its body never finished: nothing is sent, and the dialog
+      // shows Auto-Yes on for the requested duration so a resend does not re-arm.
+      return { ...transportFailure(error), armedAutoYes: { enabled: true, expiresAt: Date.now() + duration } };
     }
+    if (refusal) return refusal;
   }
 
   const withArmed = (result: NewTaskSendResult): NewTaskSendResult =>
     armedAutoYes ? { ...result, armedAutoYes } : result;
 
   const model = input.model?.trim() || undefined;
+  // With no session the server launches the agent inside this request (Issue #3194).
+  const sendTimeoutMs = getSendTimeoutMs();
   try {
-    const response = await request(`${base}/send`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({
-        content: input.content,
-        cliToolId,
-        instanceId: target.instanceId,
-        ...(model ? { model } : {}),
-      }),
-      // With no session the server launches the agent inside this request (Issue #3194).
-      timeoutMs: getSendTimeoutMs(),
-    });
-    return withArmed(await interpretSendResponse(response, { modelRequested: model !== undefined }));
+    return withArmed(
+      await withinDeadline(async () => {
+        const response = await request(`${base}/send`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            content: input.content,
+            cliToolId,
+            instanceId: target.instanceId,
+            ...(model ? { model } : {}),
+          }),
+          timeoutMs: sendTimeoutMs,
+        });
+        return interpretSendResponse(response, { modelRequested: model !== undefined });
+      }, sendTimeoutMs),
+    );
   } catch (error) {
     return withArmed(transportFailure(error));
   }

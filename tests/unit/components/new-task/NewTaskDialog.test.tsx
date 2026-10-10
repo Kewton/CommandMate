@@ -29,6 +29,9 @@ import { KeyboardShortcutsOverlay } from '@/components/common/KeyboardShortcutsO
 import { KeyboardShortcutsProvider } from '@/contexts/KeyboardShortcutsContext';
 import { readRecentTargets, pushRecentTarget } from '@/lib/new-task/recent-targets';
 import { SEND_RESPONSE_CODES } from '@/lib/new-task/send-new-task';
+import { PromptPanel } from '@/components/worktree/PromptPanel';
+import { API_MUTATION_TIMEOUT_MS } from '@/config/api-timeout-config';
+import type { YesNoPromptData } from '@/types/models';
 import {
   buildRepositories,
   buildWorktrees,
@@ -65,12 +68,16 @@ function OpenButton() {
   );
 }
 
-function renderShell(screenTarget?: { worktreeId: string; instanceId: string }) {
+function renderShell(
+  screenTarget?: { worktreeId: string; instanceId: string },
+  extra?: React.ReactNode,
+) {
   return render(
     <ToastProvider>
       <KeyboardShortcutsProvider>
         <NewTaskProvider>
           {screenTarget && <ScreenTarget {...screenTarget} />}
+          {extra}
           <OpenButton />
           <NewTaskDialogHost />
           <KeyboardShortcutsOverlay />
@@ -122,6 +129,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   window.localStorage.clear();
 });
@@ -472,5 +480,127 @@ describe('[#3511] NewTaskDialog — never opens over another modal', () => {
     // The panel plays its exit animation as data-state="closed"; that does not block.
     pressOpenChord();
     expect(await screen.findByTestId('new-task-message')).toBeInTheDocument();
+  });
+});
+
+describe('[#3511] NewTaskDialog — only a real modal holds it back', () => {
+  const YES_NO: YesNoPromptData = {
+    type: 'yes_no',
+    question: 'Continue?',
+    options: ['yes', 'no'],
+    status: 'pending',
+  };
+  // The panel the terminal pane renders inline: role="dialog" aria-modal, no focus trap.
+  const inlinePromptPanel = (
+    <PromptPanel promptData={YES_NO} messageId="p1" visible answering={false} onRespond={async () => {}} />
+  );
+
+  it('opens by the chord and by openNewTask() while an inline PromptPanel is on screen', async () => {
+    renderShell(undefined, inlinePromptPanel);
+    expect(screen.getByTestId('prompt-panel')).toHaveAttribute('aria-modal', 'true');
+
+    expect(await openDialog()).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('new-task-cancel'));
+    expect(screen.queryByTestId('new-task-dialog')).toBeNull();
+
+    fireEvent.click(screen.getByTestId('open-new-task'));
+    expect(await screen.findByTestId('new-task-message')).toBeInTheDocument();
+  });
+
+  it('opens while the only modal-looking element sits in a display:none split', async () => {
+    // TerminalSplitContainer hides a split behind a maximized one with
+    // `display: none` and keeps it mounted.
+    renderShell(
+      undefined,
+      <div data-testid="hidden-split" style={{ display: 'none' }}>
+        {inlinePromptPanel}
+      </div>,
+    );
+    expect(screen.getByTestId('hidden-split')).toContainElement(screen.getByTestId('prompt-panel'));
+
+    fireEvent.click(screen.getByTestId('open-new-task'));
+    expect(await screen.findByTestId('new-task-message')).toBeInTheDocument();
+  });
+});
+
+describe('[#3511] NewTaskDialog — the close lock always ends', () => {
+  it('fails the send once a body that never finishes passes the transport timeout, and can close again', async () => {
+    renderShell({ worktreeId: 'wt-a-main', instanceId: 'codex-2' });
+    const textarea = await openDialog();
+    fireEvent.change(screen.getByTestId('new-task-auto-yes'), { target: { value: '3600000' } });
+    fireEvent.change(textarea, { target: { value: 'go' } });
+
+    vi.useFakeTimers();
+    vi.mocked(fetch).mockImplementationOnce(async (url) => {
+      server.calls.push({ url: String(url), method: 'POST', body: undefined });
+      // Headers say 200; the JSON body never arrives.
+      return {
+        ok: true,
+        status: 200,
+        redirected: false,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: () => new Promise(() => {}),
+        text: () => new Promise(() => {}),
+      } as unknown as Response;
+    });
+    fireEvent.click(screen.getByTestId('new-task-send'));
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(API_MUTATION_TIMEOUT_MS - 1);
+    });
+    expect(server.calls.filter((c) => c.url.endsWith('/auto-yes'))).toHaveLength(1);
+    fireEvent.click(screen.getByTestId('external-close'));
+    expect(screen.getByTestId('new-task-dialog')).toBeInTheDocument();
+    expect(screen.queryByTestId('new-task-error')).toBeNull();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    expect(screen.getByTestId('new-task-error')).toHaveAttribute('data-kind', 'failed');
+    expect(screen.getByTestId('new-task-error-detail')).toHaveTextContent(`Request timed out after ${API_MUTATION_TIMEOUT_MS}ms`);
+    expect(sendCalls()).toEqual([]);
+    // The route answered 2xx, so Auto-Yes is on; a resend must not arm again.
+    expect(screen.getByTestId('new-task-auto-yes-active')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('external-close'));
+    expect(screen.queryByTestId('new-task-dialog')).toBeNull();
+  });
+
+  it('sends and closes as before when the bodies arrive (negative control)', async () => {
+    renderShell({ worktreeId: 'wt-a-main', instanceId: 'codex-2' });
+    const textarea = await openDialog();
+    fireEvent.change(screen.getByTestId('new-task-auto-yes'), { target: { value: '3600000' } });
+    fireEvent.change(textarea, { target: { value: 'go' } });
+    vi.useFakeTimers();
+    fireEvent.click(screen.getByTestId('new-task-send'));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(sendCalls()).toHaveLength(1);
+    expect(nav.push).toHaveBeenCalledWith('/worktrees/wt-a-main?instance=codex-2');
+    expect(screen.queryByTestId('new-task-dialog')).toBeNull();
+  });
+});
+
+describe('[#3511] the ? help never stacks with New task', () => {
+  it('does not open the help on ? while New task is open, even off the text fields', async () => {
+    renderShell();
+    await openDialog();
+    const cancel = screen.getByTestId('new-task-cancel');
+    cancel.focus();
+    expect(cancel).toHaveFocus();
+    fireEvent.keyDown(cancel, { key: '?' });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.queryByTestId('keyboard-shortcuts-overlay')).toBeNull();
+  });
+
+  it('opens the help on ? once New task is closed (negative control)', async () => {
+    renderShell();
+    await openDialog();
+    fireEvent.click(screen.getByTestId('new-task-cancel'));
+    expect(screen.queryByTestId('new-task-dialog')).toBeNull();
+    fireEvent.keyDown(document.body, { key: '?' });
+    expect(await screen.findByTestId('keyboard-shortcuts-overlay')).toBeInTheDocument();
   });
 });

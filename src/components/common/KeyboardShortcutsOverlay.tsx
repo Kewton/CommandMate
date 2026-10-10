@@ -10,7 +10,9 @@
  * command palette's shared `isTypingTarget` guard (input / textarea / select /
  * contentEditable / terminal `role="log"`) and additionally ignores IME
  * composition (`isComposing` / keyCode 229), matching the composer's flow. It
- * also stands down while the command palette is open so the two never stack.
+ * also stands down while the command palette is open so the two never stack,
+ * and while the New task dialog is open (Issue #3511; New task in turn does not
+ * open over this overlay).
  *
  * SSR-safe: 'use client' and platform detection runs only after mount.
  */
@@ -24,6 +26,7 @@ import { Kbd } from '@/components/ui/Kbd';
 import { isTypingTarget } from '@/components/common/CommandPalette';
 import { useKeyboardShortcuts } from '@/contexts/KeyboardShortcutsContext';
 import { useCommandPalette } from '@/contexts/CommandPaletteContext';
+import { useNewTask } from '@/contexts/NewTaskContext';
 import {
   KEYBOARD_SHORTCUTS,
   groupShortcutsByScope,
@@ -43,6 +46,7 @@ const OVERLAY_SHORTCUTS = [...KEYBOARD_SHORTCUTS, ...NEW_TASK_SHORTCUTS];
 export function KeyboardShortcutsOverlay() {
   const { open, setOpen } = useKeyboardShortcuts();
   const { open: paletteOpen } = useCommandPalette();
+  const { isOpen: newTaskOpen } = useNewTask();
   const t = useTranslations('keyboardShortcuts');
 
   // Resolve the platform mod symbol only after mount (SSR safety).
@@ -58,9 +62,14 @@ export function KeyboardShortcutsOverlay() {
   useEffect(() => {
     paletteOpenRef.current = paletteOpen;
   }, [paletteOpen]);
+  const newTaskOpenRef = useRef(newTaskOpen);
+  useEffect(() => {
+    newTaskOpenRef.current = newTaskOpen;
+  }, [newTaskOpen]);
 
   // Single global `?` listener. Guarded against typing / IME / palette-open so
-  // it never steals the keystroke from a text-entry context (Issue #1130).
+  // it never steals the keystroke from a text-entry context (Issue #1130), and
+  // against an open New task dialog so the two never stack (Issue #3511).
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       if (event.key !== '?') return;
@@ -68,6 +77,7 @@ export function KeyboardShortcutsOverlay() {
       if (event.isComposing || event.keyCode === 229) return;
       if (isTypingTarget(event.target)) return;
       if (paletteOpenRef.current) return;
+      if (newTaskOpenRef.current) return;
       if (openRef.current) return;
       event.preventDefault();
       setOpen(true);
