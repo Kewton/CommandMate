@@ -33,6 +33,23 @@
 ## 5-2b 整合性レビューの進め方と記録
 
 - **Codex のセッション:** 1 つを直列で使う。依頼は 1 本ずつ（ロック）。待ち時間を記録する
+- **依頼の手順:** run ごとに `review-<N>.sh` を手で写さず、`scripts/orchestrate/consistency-review.mjs` を 1 回呼ぶ（#3528）。
+  `--brief` には、その Issue の変更の種類と特に見たいこと（数行）だけを書く。依頼文の残り（目的・対象・手順・出力の形・触ってはいけないもの・`DONE:` の締め方）は
+  雛形 `scripts/orchestrate/templates/consistency-review.md` から作られ、再レビュー（`--rereview --previous <前回の review-<N>.md>`）は
+  `consistency-review-rereview.md` が前回の指摘ごとの判定を先に書かせる
+
+```bash
+node scripts/orchestrate/consistency-review.mjs --run-dir "workspace/orchestration/runs/$DATE" --issues "$RUN_ISSUES" \
+  --issue <N> --head <sha> --brief "workspace/orchestration/runs/$DATE/brief-review-<N>.txt"
+# 再レビュー: … --rereview --previous "workspace/orchestration/runs/$DATE/review-<N>.md"
+```
+
+  スクリプトが行うこと: worktree（既定 `../commandmate-issue-<N>`、`--worktree` で指定）の HEAD が `--head` と同じかを確かめる → Codex のロック
+  （`workspace/proposals/<date>/.lock` を mkdir で取る。ほかの Codex への依頼と共有）→ `capture --instance codex --json` の `sessionStatus` が
+  ready を 3 回続けて読むまで待つ → `ask <wt> <依頼文> --instance codex --timeout 2400 --json` → 返答の本文（行頭の `> **Thinking (` より前。
+  本文が `> **Thinking**` を引用していても切れない）を `review-<N>.md` に保存（2 回目からは `review-<N>b.md`・`c`…。依頼文・JSON・stderr も同じ名前で残す）→
+  `DONE:` 行があれば下の表に 1 行を足し、run の記録に `review=ok`、無ければ・依頼が失敗したら `review=fail`。exit は 0（`DONE:` あり）／1（失敗。記録済み）／2（引数の誤り。何も送らない）。
+  表の「独自の発見」から「事前レビューの有無」までの列は `未` で入るので、返答を読んで埋める
 - **数え方（期限の集計で使う）:** 延べではなく、重複・既報（ワーカーが報告済み・5-3 で処置できた）を除いた「レビューの独自の発見」を、**動作／説明／テスト** と **新規／既存** の 2 軸で数える。指摘の正しさは、一部を別の判定者（Codex と Claude の相互）で再判定する。費用は 1 本あたり、待ち時間・再指示・修正を含めた総時間で測る。後の段（CI・ガード・実機・UAT）で見つかった漏れも記録する
 
 **記録の様式。** 置き場所は `workspace/orchestration/runs/<date>/consistency-review.md`。1 レビュー 1 行の表にする。
