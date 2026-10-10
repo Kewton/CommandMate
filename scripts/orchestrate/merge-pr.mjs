@@ -369,7 +369,13 @@ export function main(argv, deps = {}) {
     record('ci', 'ok', head, `checks=${verdict.summary} build=${needBuild ? 'pass' : 'precheck'} unit=${need.needUnit ? 'pass' : '-'}${o.last ? ' last=all-pass' : ''}`, workHead);
 
     // 6. Merge exactly this HEAD, then the Issue.
-    const merged = run('gh', ['pr', 'merge', String(pr.number), '--repo', o.repo, '--squash', '--match-head-commit', head]);
+    // A fold (6-4) on top of the work must not name the squash commit: with a
+    // distinct work HEAD, pass its subject the way GitHub words its default.
+    const subject = workHead && workHead !== head ? git(run, o.worktree, ['log', '-1', '--format=%s', workHead]).trim() : '';
+    const merged = run('gh', [
+      'pr', 'merge', String(pr.number), '--repo', o.repo, '--squash', '--match-head-commit', head,
+      ...(subject ? ['--subject', `${subject} (#${pr.number})`] : []),
+    ]);
     if (merged.status !== 0) {
       record('merge', 'fail', head, `pr=#${pr.number} gh-merge-failed`, workHead);
       error(`merge #${issue}: gh pr merge failed: ${(merged.stderr || merged.stdout).trim()}`);

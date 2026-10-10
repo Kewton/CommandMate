@@ -35,6 +35,8 @@ export interface FakeState {
   issueState: 'OPEN' | 'CLOSED';
   createdNumber: number;
   pushFails: boolean;
+  /** `%s` of a commit by sha; others get the default subject. */
+  subjects: Record<string, string>;
 }
 
 export function fakeGit(overrides: Partial<FakeState> = {}) {
@@ -56,6 +58,7 @@ export function fakeGit(overrides: Partial<FakeState> = {}) {
     issueState: 'OPEN',
     createdNumber: 9001,
     pushFails: false,
+    subjects: {},
     ...overrides,
   };
   const calls: Call[] = [];
@@ -71,7 +74,7 @@ export function fakeGit(overrides: Partial<FakeState> = {}) {
       if (verb === 'rev-parse') return ok(sub.includes('--abbrev-ref') ? `${state.branch}\n` : `${state.head}\n`);
       if (verb === 'status') return ok(state.status);
       if (verb === 'log' && sub.includes('--first-parent')) return ok(state.firstParent.join('\n'));
-      if (verb === 'log') return ok(sub.includes('--format=%s') ? 'feat(orchestrate): publish and merge (#3477)\n' : 'body line\n');
+      if (verb === 'log') return ok(sub.includes('--format=%s') ? `${state.subjects[sub[sub.length - 1]] ?? 'feat(orchestrate): publish and merge (#3477)'}\n` : 'body line\n');
       if (verb === 'diff-tree') return ok((state.commitFiles[sub[sub.length - 1]] ?? []).join('\n'));
       if (verb === 'diff' && sub.includes('--name-status')) return ok(state.changelogStatus);
       if (verb === 'diff' && sub.includes('--diff-filter=U')) return ok(state.mergeConflict.join('\n'));

@@ -279,6 +279,24 @@ describe('main: stops before merging', () => {
   });
 });
 
+describe('main: squash subject over a fold', () => {
+  it("passes the worker's subject with the PR number as --subject", () => {
+    recordReady();
+    appendRecord(runDir, '3477', { issue: 3477, stage: 'precheck', result: 'ok', head: HEAD_M, workHead: HEAD_A, note: 'tsc=ok' });
+    const fake = fakeGit({
+      head: HEAD_M,
+      firstParent: [`${HEAD_M} ${HEAD_A} ${DEVELOP}`, `${HEAD_A} ${DEVELOP}`],
+      commitFiles: { [HEAD_A]: ['scripts/orchestrate/merge-pr.mjs'] },
+      subjects: { [HEAD_M]: 'docs(module-reference): 一本化', [HEAD_A]: 'fix(orchestrate): worker subject' },
+      prs: [openPr({ headRefOid: HEAD_M })],
+      checks: [GREEN],
+    });
+    expect(runMain(fake).code).toBe(0);
+    const args = fake.ghCalls('pr merge')[0].args;
+    expect(args.slice(-2)).toEqual(['--subject', 'fix(orchestrate): worker subject (#4242)']);
+  });
+});
+
 describe('main: merges once', () => {
   it('merges the HEAD with --squash and closes the Issue (negative control)', () => {
     recordReady();
