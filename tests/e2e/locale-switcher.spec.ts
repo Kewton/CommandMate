@@ -20,11 +20,29 @@
  *      (`common.repositories.add`), which is on this page and is translated
  *      (Issue #2643).
  *
- * The `[data-testid="locale-switcher"]` lives in the sidebar, which is a closed
- * drawer on mobile — so only the desktop specs assert on it.
+ * [Issue #3510] The sidebar footer's language `<select>` is gone: the language
+ * is the "Language" radio group of the shared settings menu, opened from the
+ * footer's only button (`sidebar-settings-menu`). The sidebar is a closed
+ * drawer on mobile — so only the desktop specs drive it.
  */
 
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page, type Locator } from '@playwright/test';
+
+/** Opens the sidebar footer's settings menu and returns the language radio item. */
+async function openLanguageItem(page: Page, label: 'English' | '日本語'): Promise<Locator> {
+  await page.getByTestId('sidebar-settings-menu').click();
+  const item = page.getByRole('menuitemradio', { name: label });
+  await expect(item).toBeVisible();
+  return item;
+}
+
+/** Asserts which language the menu shows as selected, then closes the menu. */
+async function expectSelectedLanguage(page: Page, label: 'English' | '日本語'): Promise<void> {
+  const item = await openLanguageItem(page, label);
+  await expect(item).toHaveAttribute('aria-checked', 'true');
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('menu')).toHaveCount(0);
+}
 
 /** iPhone 13 logical viewport, used by the mobile describe below. */
 const MOBILE_VIEWPORT = { width: 390, height: 844 };
@@ -34,10 +52,8 @@ test.describe('Locale Switcher', () => {
     await page.goto('/');
     await page.waitForLoadState('networkidle');
 
-    // LocaleSwitcher select should exist with value "en"
-    const select = page.locator('[data-testid="locale-switcher"]');
-    await expect(select).toBeVisible();
-    await expect(select).toHaveValue('en');
+    // The settings menu should show English as the selected language
+    await expectSelectedLanguage(page, 'English');
 
     // English text should be visible
     await expect(page.getByTestId('home-add-repository')).toHaveText('Add Repository');
@@ -58,9 +74,8 @@ test.describe('Locale Switcher', () => {
     // Japanese text should be visible
     await expect(page.getByTestId('home-add-repository')).toHaveText('リポジトリを追加');
 
-    // LocaleSwitcher should show "ja"
-    const select = page.locator('[data-testid="locale-switcher"]');
-    await expect(select).toHaveValue('ja');
+    // The settings menu should show 日本語 as the selected language
+    await expectSelectedLanguage(page, '日本語');
   });
 
   test('should persist locale across page reload via Cookie', async ({ page, context }) => {
@@ -68,15 +83,15 @@ test.describe('Locale Switcher', () => {
     await page.waitForLoadState('networkidle');
 
     // Switch through the UI so the cookie under test is the one the app writes
-    // (setLocaleCookie), not one the test planted. selectOption triggers a reload.
-    await page.locator('[data-testid="locale-switcher"]').selectOption('ja');
+    // (setLocaleCookie), not one the test planted. Choosing the item triggers a reload.
+    await (await openLanguageItem(page, '日本語')).click();
     await expect(page.getByTestId('home-add-repository')).toHaveText('リポジトリを追加');
 
     // Reload and verify persistence
     await page.reload();
     await page.waitForLoadState('networkidle');
     await expect(page.getByTestId('home-add-repository')).toHaveText('リポジトリを追加');
-    await expect(page.locator('[data-testid="locale-switcher"]')).toHaveValue('ja');
+    await expectSelectedLanguage(page, '日本語');
 
     // Verify the security flags setLocaleCookie promises
     const cookies = await context.cookies();
@@ -102,8 +117,7 @@ test.describe('Locale Switcher', () => {
     await expect(page.getByTestId('home-add-repository')).toHaveText('Add Repository');
     await expect(page.getByTestId('home-add-repository')).toBeVisible();
 
-    const select = page.locator('[data-testid="locale-switcher"]');
-    await expect(select).toHaveValue('en');
+    await expectSelectedLanguage(page, 'English');
   });
 });
 
