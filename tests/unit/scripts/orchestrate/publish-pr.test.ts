@@ -125,6 +125,38 @@ describe('main: stops before publishing', () => {
   });
 });
 
+describe('main: PR title over a fold', () => {
+  const FOLD = 'docs(module-reference): #3477 の注記を一本化';
+  const folded = (extra = {}) =>
+    fakeGit({
+      head: HEAD_M,
+      firstParent: [`${HEAD_M} ${HEAD_A}`, `${HEAD_A} ${DEVELOP}`],
+      commitFiles: { [HEAD_M]: ['docs/module-reference.md'], [HEAD_A]: ['scripts/orchestrate/merge-pr.mjs'] },
+      subjects: { [HEAD_M]: FOLD, [HEAD_A]: 'fix(orchestrate): worker subject (#3477)' },
+      ...extra,
+    });
+  const titleOf = (fake: ReturnType<typeof fakeGit>) => {
+    const args = fake.ghCalls('pr create')[0].args;
+    return args[args.indexOf('--title') + 1];
+  };
+
+  it("titles the PR with the worker's commit, not the fold on top", () => {
+    recordReady(HEAD_A);
+    appendRecord(runDir, '3477', { issue: 3477, stage: 'precheck', result: 'ok', head: HEAD_M, workHead: HEAD_A });
+    const fake = folded();
+    expect(runMain(fake).code).toBe(0);
+    expect(titleOf(fake)).toBe('fix(orchestrate): worker subject (#3477)');
+  });
+
+  it('keeps --title first', () => {
+    recordReady(HEAD_A);
+    appendRecord(runDir, '3477', { issue: 3477, stage: 'precheck', result: 'ok', head: HEAD_M, workHead: HEAD_A });
+    const fake = folded();
+    expect(runMain(fake, '--title', 'chosen').code).toBe(0);
+    expect(titleOf(fake)).toBe('chosen');
+  });
+});
+
 describe('main: publishes once', () => {
   it('pushes, opens the PR to develop, backs up the fragment and records the pr stage (negative control)', () => {
     recordReady();
