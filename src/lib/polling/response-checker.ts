@@ -43,7 +43,7 @@ import {
   getAccumulatedContent,
   clearTuiAccumulator,
 } from '../tui-accumulator';
-import { isDuplicatePrompt, normalizePromptForDedup } from './prompt-dedup';
+import { claimDuplicatePromptSkipLog, isDuplicatePrompt, normalizePromptForDedup } from './prompt-dedup';
 import { recordPromptDedupSkip } from './prompt-dedup-state';
 import {
   isDuplicateResponse,
@@ -739,7 +739,19 @@ function savePromptMessage(
     // classified (#1676) look identical from the CLI — both say "nothing was
     // recorded". Count the skip so the payload can tell them apart.
     recordPromptDedupSkip(worktreeId, cliToolId, instanceId);
-    logger.info('duplicate-prompt-skipped', { worktreeId, cliToolId });
+    // Issue #3538: the tally above is counted on every tick; the log line is
+    // not. A full-screen TUI sits on its prompt for as long as it stays
+    // unanswered, a duplicate every 2 s. The first tick of a run logs exactly
+    // as before; after that one line per `DUPLICATE_PROMPT_SKIP_LOG_TICK_INTERVAL`
+    // ticks, with the run length and how many ticks went unlogged (#3519).
+    const skipLog = claimDuplicatePromptSkipLog(pollerKey);
+    if (skipLog.log) {
+      logger.info('duplicate-prompt-skipped', {
+        worktreeId,
+        cliToolId,
+        ...(skipLog.consecutive > 1 ? { consecutive: skipLog.consecutive, suppressed: skipLog.suppressed } : {}),
+      });
+    }
     return false;
   }
 
