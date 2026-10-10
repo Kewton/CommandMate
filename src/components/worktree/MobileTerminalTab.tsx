@@ -151,7 +151,7 @@ import { getMobileSurfaceModeStorageKey } from '@/config/surface-mode-config';
 import { useSurfaceMode } from '@/hooks/useSurfaceMode';
 import { buildPaneSessionLabels } from '@/components/worktree/pane-session-labels';
 import type { SurfaceMode } from '@/types/ui-state';
-import { getInstanceLabel, type CLIToolType } from '@/lib/cli-tools/types';
+import { getInstanceLabel, type AgentInstance, type CLIToolType } from '@/lib/cli-tools/types';
 
 export interface MobileTerminalTabProps {
   worktreeId: string;
@@ -180,6 +180,14 @@ export interface MobileTerminalTabProps {
    * suite that mounts this tab with just `worktreeId` / `cliToolId` stays valid.
    */
   directInputOpen?: boolean;
+  /**
+   * Issue #3515: the branch the docked composer's "To:" line names — the
+   * detail screen's checked-out branch, else the worktree's name (the PC rule,
+   * resolved by `MobileContent`). Absent → "To: <agent>".
+   */
+  branchName?: string | null;
+  /** Issue #3515: the detail screen's roster, for the "To:" line's alias. */
+  instances?: readonly AgentInstance[];
 }
 
 /**
@@ -225,31 +233,26 @@ function useCachedAgentModelLabel(worktreeId: string, instanceId: string): strin
 }
 
 /**
- * The composer's destination for one instance of this worktree (Issue #3515).
+ * The composer's destination for this tab (Issue #3515).
  *
  * The PC's `TerminalSplitPaneContent` words, from the PC's inputs: the
- * instance's alias-aware label (`getInstanceLabel`), and the branch the way
- * `WorktreeDetailDesktop` picks it — the checked-out branch unless git could
- * not tell, then the worktree's name. Read from the worktrees cache for the
- * reason `useCachedAgentModelLabel` gives; with no provider above there is no
- * branch and the line is "To: <agent>".
+ * instance's alias-aware label (`getInstanceLabel`, looked up in the detail
+ * screen's roster) and the branch the detail screen resolved the way
+ * `WorktreeDetailDesktop` does (`branchName`, see `MobileContent`). Both come
+ * from the detail screen, not from the `/api/worktrees` list cache, which
+ * carries no `gitStatus`. With no branch the line is "To: <agent>".
  */
-function useCachedComposerTarget(
-  worktreeId: string,
+function useComposerTarget(
   cliToolId: CLIToolType,
   instanceId: string,
+  instances: readonly AgentInstance[] | undefined,
+  branchName: string | null | undefined,
 ): { text: string; label: string } {
   const t = useTranslations('worktree');
-  const cache = useOptionalWorktreesCacheContext();
-  const worktrees = cache?.worktrees;
   return useMemo(() => {
-    const worktree = worktrees?.find((entry) => entry.id === worktreeId);
-    const instance = worktree?.agentInstances?.find((entry) => entry.id === instanceId);
+    const instance = instances?.find((entry) => entry.id === instanceId);
     const agent = getInstanceLabel(instance ?? { cliTool: cliToolId });
-    const currentBranch = worktree?.gitStatus?.currentBranch;
-    const rawBranch =
-      currentBranch && currentBranch !== '(unknown)' ? currentBranch : worktree?.name;
-    const branch = rawBranch?.trim() ? rawBranch.trim() : null;
+    const branch = branchName?.trim() ? branchName.trim() : null;
     return branch
       ? {
           text: t('terminal.composerTarget', { agent, branch }),
@@ -259,7 +262,7 @@ function useCachedComposerTarget(
           text: t('terminal.composerTargetNoBranch', { agent }),
           label: t('terminal.composerTargetLabelNoBranch', { agent }),
         };
-  }, [worktrees, worktreeId, instanceId, cliToolId, t]);
+  }, [instances, instanceId, cliToolId, branchName, t]);
 }
 
 /**
@@ -557,6 +560,8 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
   disableAutoFollow,
   onSurfaceModeChange,
   directInputOpen = false,
+  branchName,
+  instances,
 }: MobileTerminalTabProps) {
   const { terminal, prompt, agentSession, setAutoScroll, refresh } = useTerminalPanePolling({
     worktreeId,
@@ -596,7 +601,7 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
     usageDetail: sessionUsageDetail,
   } = buildPaneSessionLabels(modelByInstanceLabel, agentSession, t, locale);
   // Issue #3515: where the docked composer below this tab sends.
-  const composerTarget = useCachedComposerTarget(worktreeId, cliToolId, resolvedInstanceId);
+  const composerTarget = useComposerTarget(cliToolId, resolvedInstanceId, instances, branchName);
 
   // --------------------------------------------------------------------------
   // The session note (Issue #2427)

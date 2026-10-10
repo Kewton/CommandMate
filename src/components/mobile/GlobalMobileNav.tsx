@@ -20,6 +20,7 @@ import { useOptionalSidebarContext } from '@/contexts/SidebarContext';
 import { AttentionBadgeBubble } from '@/components/layout/AttentionBadge';
 import { useAttentionCount } from '@/hooks/useAttentionCount';
 import { ATTENTION_REVIEW_HREF } from '@/config/review-config';
+import { MOBILE_DRAWER_OPENER_PROPS } from './mobile-drawer-opener';
 
 /**
  * Mobile navigation tab definition.
@@ -83,6 +84,7 @@ export function GlobalMobileNav() {
           <button
             type="button"
             data-testid="mobile-nav-open-sidebar"
+            {...MOBILE_DRAWER_OPENER_PROPS}
             onClick={sidebar.openMobileDrawer}
             className="flex flex-col items-center justify-center flex-1 h-full text-xs text-muted-foreground hover:text-foreground transition-colors"
           >

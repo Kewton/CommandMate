@@ -5,10 +5,12 @@
  * docked below this tab, so the tab draws it, in the same words
  * (`terminal.composerTarget*` from the real `locales/en/worktree.json`) and
  * from the same inputs the PC uses: the instance's alias-aware label and the
- * checked-out branch, falling back to the worktree's name.
+ * DETAIL screen's checked-out branch (`MobileContent` resolves it like
+ * `WorktreeDetailDesktop`), falling back to the worktree's name. The list
+ * cache (`/api/worktrees`, no `gitStatus`) is never read for it.
  *
- * Negative controls: no worktrees cache above → "To: <agent>" and nothing
- * else changes; the direct-input keyboard open → the line stands down.
+ * Negative controls: no git info → the worktree name; no branch at all →
+ * "To: <agent>"; the direct-input keyboard open → the line stands down.
  *
  * @vitest-environment jsdom
  */
@@ -87,10 +89,14 @@ vi.mock('@/hooks/useRealtimeConnection', async () => {
 });
 
 import { MobileTerminalTab } from '@/components/worktree/MobileTerminalTab';
+import { MobileContent } from '@/components/worktree/WorktreeDetailMobile';
+import type { Worktree } from '@/types/models';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import enWorktree from '../../../../locales/en/worktree.json';
 
 const WORKTREE_ID = 'wt-3515-target';
+
+type MobileContentProps = React.ComponentProps<typeof MobileContent>;
 
 const refreshMock = vi.fn(() => Promise.resolve());
 
@@ -123,25 +129,44 @@ function format(template: string, values: Record<string, string>): string {
   return template.replace(/\{(\w+)\}/g, (_, key: string) => values[key] ?? '');
 }
 
-function publishWorktree(worktree: Record<string, unknown> | null): void {
-  cacheState.value = worktree
-    ? {
-        worktrees: [
-          { id: 'wt-other', name: 'other', gitStatus: { currentBranch: 'wrong-branch' } },
-          { id: WORKTREE_ID, ...worktree },
-        ],
-        refresh: vi.fn(() => Promise.resolve()),
-      }
-    : null;
+const CACHE_ONLY_BRANCH = 'cache-only-branch';
+
+/**
+ * The list cache, as `/api/worktrees` really publishes it: no `gitStatus`.
+ * One row carries a branch anyway, so a line that read the cache would show it.
+ */
+function publishListCache(): void {
+  cacheState.value = {
+    worktrees: [{ id: WORKTREE_ID, name: 'wt-name', gitStatus: { currentBranch: CACHE_ONLY_BRANCH } }],
+    refresh: vi.fn(() => Promise.resolve()),
+  };
 }
 
-function renderTab(props: { cliToolId?: CLIToolType; instanceId?: string; directInputOpen?: boolean } = {}) {
+function detailWorktree(overrides: Partial<Worktree> = {}): Worktree {
+  return { id: WORKTREE_ID, name: 'wt-name', path: '/tmp/wt', repositoryPath: '/tmp/repo', repositoryName: 'repo', ...overrides } as Worktree;
+}
+
+/** The detail screen's terminal tab, mounted the way the phone mounts it. */
+function renderThroughDetail(worktree: Worktree | null, extra: Partial<MobileContentProps> = {}) {
+  const props = {
+    activeTab: 'terminal',
+    worktreeId: WORKTREE_ID,
+    worktree,
+    messages: [],
+    cliToolId: 'claude',
+    ...extra,
+  } as unknown as MobileContentProps;
+  return render(<MobileContent {...props} />);
+}
+
+function renderTab(props: { cliToolId?: CLIToolType; instanceId?: string; directInputOpen?: boolean; branchName?: string | null } = {}) {
   return render(
     <MobileTerminalTab
       worktreeId={WORKTREE_ID}
       cliToolId={props.cliToolId ?? 'claude'}
       instanceId={props.instanceId}
       directInputOpen={props.directInputOpen}
+      branchName={props.branchName}
     />,
   );
 }
@@ -151,6 +176,7 @@ beforeEach(() => {
   localStorage.clear();
   realtimeListeners.clear();
   mockPaneState();
+  publishListCache();
 });
 
 afterEach(() => {
@@ -159,8 +185,9 @@ afterEach(() => {
 
 describe('MobileTerminalTab composer target (Issue #3515)', () => {
   it('says the agent and the checked-out branch, in the PC words', () => {
-    publishWorktree({ name: 'wt-name', gitStatus: { currentBranch: 'feature/3515-x' } });
-    renderTab();
+    // Positive control: the worktree name and the current branch differ, and
+    // the branch comes from the DETAIL screen's git info.
+    renderThroughDetail(detailWorktree({ gitStatus: { currentBranch: 'feature/3515-x', initialBranch: 'main', isBranchMismatch: true, commitHash: 'abc', isDirty: false } }));
     const line = screen.getByTestId('mobile-composer-target');
     expect(line).toHaveTextContent(
       format(enWorktree.terminal.composerTarget, { agent: 'Claude', branch: 'feature/3515-x' }),
@@ -169,23 +196,31 @@ describe('MobileTerminalTab composer target (Issue #3515)', () => {
       'aria-label',
       format(enWorktree.terminal.composerTargetLabel, { agent: 'Claude', branch: 'feature/3515-x' }),
     );
+    expect(line).not.toHaveTextContent(CACHE_ONLY_BRANCH);
   });
 
   it('uses the instance alias and falls back to the worktree name when git cannot tell', () => {
-    publishWorktree({
-      name: 'wt-name',
-      gitStatus: { currentBranch: '(unknown)' },
-      agentInstances: [{ id: 'claude-2', cliTool: 'claude', alias: 'Reviewer', order: 1 }],
-    });
-    renderTab({ instanceId: 'claude-2' });
+    renderThroughDetail(
+      detailWorktree({ gitStatus: { currentBranch: '(unknown)', initialBranch: null, isBranchMismatch: false, commitHash: '', isDirty: false } }),
+      {
+        instanceId: 'claude-2',
+        instances: [{ id: 'claude-2', cliTool: 'claude', alias: 'Reviewer', order: 1 }],
+      } as Partial<MobileContentProps>,
+    );
     expect(screen.getByTestId('mobile-composer-target')).toHaveTextContent(
       format(enWorktree.terminal.composerTarget, { agent: 'Reviewer', branch: 'wt-name' }),
     );
   });
 
+  it('falls back to the worktree name when the detail has no git info, never the list cache (negative control)', () => {
+    renderThroughDetail(detailWorktree());
+    const line = screen.getByTestId('mobile-composer-target');
+    expect(line).toHaveTextContent(format(enWorktree.terminal.composerTarget, { agent: 'Claude', branch: 'wt-name' }));
+    expect(line).not.toHaveTextContent(CACHE_ONLY_BRANCH);
+  });
+
   it('floats over the output region instead of taking a row (#2106 budget)', () => {
-    publishWorktree({ name: 'wt-name' });
-    renderTab();
+    renderTab({ branchName: 'main' });
     const region = screen.getByTestId('mobile-terminal-region');
     const line = screen.getByTestId('mobile-composer-target');
     expect(region).toContainElement(line);
@@ -194,8 +229,7 @@ describe('MobileTerminalTab composer target (Issue #3515)', () => {
     expect(line.className).toContain('pointer-events-none');
   });
 
-  it('names only the agent with no worktrees cache above (negative control)', () => {
-    publishWorktree(null);
+  it('names only the agent with no branch given (negative control)', () => {
     renderTab({ cliToolId: 'codex' });
     expect(screen.getByTestId('mobile-composer-target')).toHaveTextContent(
       format(enWorktree.terminal.composerTargetNoBranch, { agent: 'Codex' }),
@@ -204,8 +238,7 @@ describe('MobileTerminalTab composer target (Issue #3515)', () => {
   });
 
   it('stands down while the direct-input keyboard is open (negative control)', () => {
-    publishWorktree({ name: 'wt-name' });
-    renderTab({ directInputOpen: true });
+    renderTab({ directInputOpen: true, branchName: 'main' });
     expect(screen.queryByTestId('mobile-composer-target')).toBeNull();
   });
 });
