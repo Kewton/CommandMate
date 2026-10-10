@@ -16,8 +16,15 @@ import { buildRange, collectTextNodes, type MatchPosition } from './terminal-hig
 import { mapRawPositionsToDom, openFoldedSource, type HighlightSection } from './terminal-highlight-mermaid';
 
 export type { MatchPosition } from './terminal-highlight-dom';
-export { SEARCH_SKIP_ATTR, MERMAID_SOURCE_ATTR, MERMAID_BLOCK_SETTLED_EVENT } from './terminal-highlight-dom';
-export { findMermaidFences, type MermaidFence } from './terminal-highlight-fences';
+export {
+  SEARCH_SKIP_ATTR,
+  MERMAID_SOURCE_ATTR,
+  MERMAID_RAW_START_ATTR,
+  MERMAID_RAW_END_ATTR,
+  MERMAID_BLOCK_SETTLED_EVENT,
+} from './terminal-highlight-dom';
+export { findMermaidFences, fenceFromRawRange, type MermaidFence } from './terminal-highlight-fences';
+export { alignDerivedText, IDENTITY_RAW_OFFSET, type RawOffsetMapper } from './terminal-highlight-offsets';
 export { SEARCH_SECTION_ATTR, type HighlightSection } from './terminal-highlight-mermaid';
 
 /**

@@ -26,6 +26,17 @@ export const SEARCH_SKIP_ATTR = 'data-search-skip';
 export const MERMAID_SOURCE_ATTR = 'data-mermaid-source';
 
 /**
+ * [Issue #3525] On the {@link MERMAID_SOURCE_ATTR} element: where the fence it
+ * shows is in the message as written — the start of the opening fence and the
+ * end of the fence (react-markdown's `node.position`, mapped back to the raw
+ * text). Absent when the surface could not map it; search then pairs fences
+ * and sources by body as before.
+ */
+export const MERMAID_RAW_START_ATTR = 'data-mermaid-raw-start';
+/** [Issue #3525] See {@link MERMAID_RAW_START_ATTR}. */
+export const MERMAID_RAW_END_ATTR = 'data-mermaid-raw-end';
+
+/**
  * [Issue #3503] Fired (bubbling) from a mermaid block whenever its diagram
  * finishes drawing or fails. The diagram is drawn late — a dynamic import, an
  * async render, and again on a theme switch — so a search highlighter listens

@@ -14,16 +14,19 @@
 
 'use client';
 
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useContext, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { useTranslations } from 'next-intl';
 import { Spinner } from '@/components/ui/Spinner';
 import {
   MERMAID_BLOCK_SETTLED_EVENT,
+  MERMAID_RAW_END_ATTR,
+  MERMAID_RAW_START_ATTR,
   MERMAID_SOURCE_ATTR,
   SEARCH_SKIP_ATTR,
 } from '@/lib/terminal-highlight';
 import { isMermaidLanguage } from './mermaid-block-utils';
+import { MermaidRawOffsetContext } from './mermaid-raw-offset';
 import type { MermaidRenderState } from './MermaidDiagram';
 
 /**
@@ -95,6 +98,15 @@ function extractCodeString(
   return String(children);
 }
 
+/** react-markdown's hast node for the code element: where it was in the input. */
+function nodeRange(node: unknown): { start: number; end: number } | null {
+  const position = (node as { position?: { start?: { offset?: unknown }; end?: { offset?: unknown } } } | undefined)
+    ?.position;
+  const start = position?.start?.offset;
+  const end = position?.end?.offset;
+  return typeof start === 'number' && typeof end === 'number' ? { start, end } : null;
+}
+
 /** Test id of the frame holding one mermaid diagram and its source. */
 export const MERMAID_BLOCK_TESTID = 'mermaid-block-frame';
 /** Test id of the folded source under a diagram. */
@@ -116,7 +128,7 @@ const SOURCE = { [MERMAID_SOURCE_ATTR]: 'true' } as const;
  * - Closed by default; open when the diagram failed, so the error is shown with
  *   the text that caused it.
  */
-function MermaidBlock({ code }: { code: string }): React.JSX.Element {
+function MermaidBlock({ code, node }: { code: string; node?: unknown }): React.JSX.Element {
   const t = useTranslations('worktree');
   const [failed, setFailed] = useState(false);
   const frameRef = useRef<HTMLDivElement>(null);
@@ -130,6 +142,17 @@ function MermaidBlock({ code }: { code: string }): React.JSX.Element {
   // body as written (and as search finds it in the raw message).
   const source = code.endsWith('\n') ? code.slice(0, -1) : code;
 
+  // [Issue #3525] Where this fence is in the message as written, for search to
+  // pair a hit with this source by structure rather than by a line pattern.
+  const toRaw = useContext(MermaidRawOffsetContext);
+  const range = nodeRange(node);
+  const rawStart = range && toRaw ? toRaw(range.start) : null;
+  const rawEnd = range && toRaw ? toRaw(range.end) : null;
+  const rawRange =
+    rawStart !== null && rawEnd !== null && rawEnd > rawStart
+      ? { [MERMAID_RAW_START_ATTR]: String(rawStart), [MERMAID_RAW_END_ATTR]: String(rawEnd) }
+      : {};
+
   return (
     <div ref={frameRef} data-testid={MERMAID_BLOCK_TESTID} className="mermaid-block">
       <div {...SKIP} className="mermaid-figure">
@@ -138,7 +161,7 @@ function MermaidBlock({ code }: { code: string }): React.JSX.Element {
       <details data-testid={MERMAID_SOURCE_TESTID} className="mermaid-source" open={failed || undefined}>
         <summary {...SKIP}>{t('mermaid.source')}</summary>
         <pre>
-          <code {...SOURCE}>{source}</code>
+          <code {...SOURCE} {...rawRange}>{source}</code>
         </pre>
       </details>
     </div>
@@ -166,11 +189,12 @@ function MermaidBlock({ code }: { code: string }): React.JSX.Element {
 export function MermaidCodeBlock({
   className,
   children,
+  node,
 }: MermaidCodeBlockProps): React.JSX.Element {
   // Fenced mermaid blocks render as a diagram.
   if (isMermaidLanguage(className)) {
     const code = extractCodeString(children);
-    return <MermaidBlock code={code} />;
+    return <MermaidBlock code={code} node={node} />;
   }
 
   // Everything else — inline code and non-mermaid block code — renders as a

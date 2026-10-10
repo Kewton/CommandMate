@@ -4,8 +4,14 @@
  * diagrams (split out of terminal-highlight.ts, Issue #3517).
  */
 
-import { MERMAID_SOURCE_ATTR, type MatchPosition, type TextNodeEntry } from './terminal-highlight-dom';
-import { findMermaidFences, type MermaidFence } from './terminal-highlight-fences';
+import {
+  MERMAID_RAW_END_ATTR,
+  MERMAID_RAW_START_ATTR,
+  MERMAID_SOURCE_ATTR,
+  type MatchPosition,
+  type TextNodeEntry,
+} from './terminal-highlight-dom';
+import { fenceFromRawRange, findMermaidFences, type MermaidFence } from './terminal-highlight-fences';
 
 /** Offsets of every (overlapping) occurrence of `needle` in `haystack`. */
 function occurrences(haystack: string, needle: string): number[] {
@@ -86,6 +92,29 @@ interface SourceOnScreen {
   domStart: number;
   domEnd: number;
   text: string;
+  element: Element;
+}
+
+/**
+ * [Issue #3525] The fences of a region as Markdown drew them: each source
+ * element names its fence's raw range ({@link MERMAID_RAW_START_ATTR}), so
+ * fence and source pair directly. `null` unless every source in the region
+ * names a range that reads back as a fence with that source's body, inside the
+ * region and in order — then the region pairs by body instead.
+ */
+function structuralFences(sourceText: string, raw: Span[], sources: SourceOnScreen[]): MermaidFence[] | null {
+  if (sources.length === 0) return null;
+  const fences: MermaidFence[] = [];
+  for (const source of sources) {
+    const start = Number.parseInt(source.element.getAttribute(MERMAID_RAW_START_ATTR) ?? '', 10);
+    const end = Number.parseInt(source.element.getAttribute(MERMAID_RAW_END_ATTR) ?? '', 10);
+    if (!Number.isInteger(start) || !Number.isInteger(end) || !inSpans(raw, start)) return null;
+    const fence = fenceFromRawRange(sourceText, start, end, source.text);
+    const prev = fences[fences.length - 1];
+    if (!fence || (prev && fence.fenceStart < prev.fenceEnd)) return null;
+    fences.push(fence);
+  }
+  return fences;
 }
 
 /**
@@ -99,7 +128,10 @@ interface SourceOnScreen {
  * own place. So the message is first cut into regions — each
  * {@link HighlightSection} the caller names, and the rest — matched to the DOM
  * by `data-search-section`. Inside a region, raw fences and on-screen sources
- * are paired in order by equal body, and:
+ * are paired by the raw range each source names (Issue #3525: the fence as
+ * Markdown parsed it — nested lists, tabs, quoted tool logs), or, when a source
+ * names none, by matching fences found line by line ({@link findMermaidFences})
+ * in order by equal body, and:
  *
  * - a hit inside a paired fence body maps to the same place in that source;
  * - a hit inside a fence that could not be paired (its source is not on
@@ -121,7 +153,8 @@ export function mapRawPositionsToDom(
 ): Array<MatchPosition | null> | null {
   const sourceElements = Array.from(container.querySelectorAll(`[${MERMAID_SOURCE_ATTR}]`));
   if (sourceElements.length === 0) return null;
-  const fences = findMermaidFences(sourceText);
+  let lineFences: MermaidFence[] | null = null;
+  const fencesByLine = (): MermaidFence[] => (lineFences ??= findMermaidFences(sourceText));
   const domText = textNodes.map((entry) => entry.node.nodeValue ?? '').join('');
 
   // Which region a DOM node belongs to: the named section it is drawn in, or ''.
@@ -141,7 +174,6 @@ export function mapRawPositionsToDom(
     const dom = normalizeSpans(
       textNodes.filter((entry) => regionOfNode(entry.node) === key).map(({ start, end }) => ({ start, end })),
     );
-    const regionFences = fences.filter((fence) => inSpans(raw, fence.fenceStart));
     const sources: SourceOnScreen[] = [];
     for (const element of sourceElements) {
       if (regionOfNode(element) !== key) continue;
@@ -149,13 +181,17 @@ export function mapRawPositionsToDom(
       if (inside.length === 0) continue;
       const domStart = inside[0].start;
       const domEnd = inside[inside.length - 1].end;
-      sources.push({ domStart, domEnd, text: domText.slice(domStart, domEnd) });
+      sources.push({ domStart, domEnd, text: domText.slice(domStart, domEnd), element });
     }
+    const structural = structuralFences(sourceText, raw, sources);
+    const regionFences = structural ?? fencesByLine().filter((fence) => inSpans(raw, fence.fenceStart));
 
     // Pair in order by equal body. Equal counts must match one-to-one; otherwise
     // a source takes the next fence with its body.
     const pairs: Array<{ fence: MermaidFence; source: SourceOnScreen }> = [];
-    if (
+    if (structural) {
+      structural.forEach((fence, k) => pairs.push({ fence, source: sources[k] }));
+    } else if (
       regionFences.length === sources.length &&
       regionFences.every((fence, k) => fence.body === sources[k].text)
     ) {

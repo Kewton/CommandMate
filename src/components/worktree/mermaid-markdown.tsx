@@ -27,9 +27,13 @@ import { isMermaidLanguage, isMermaidPreChild } from './mermaid-block-utils';
  * so spreading it into a memoised map adds no new identity per render.
  */
 export const MERMAID_MARKDOWN_COMPONENTS: Pick<Components, 'code' | 'pre'> = {
-  code: ({ node: _node, className, children, ...rest }) =>
+  // [Issue #3525] The hast node goes to the mermaid block: its `position` is
+  // where the fence is in the input, which search pairs the source with.
+  code: ({ node, className, children, ...rest }) =>
     isMermaidLanguage(className) ? (
-      <MermaidCodeBlock className={className}>{children}</MermaidCodeBlock>
+      <MermaidCodeBlock className={className} node={node}>
+        {children}
+      </MermaidCodeBlock>
     ) : (
       <code {...rest} className={className}>
         {children}
