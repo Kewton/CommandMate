@@ -1,0 +1,38 @@
+{
+  "version": "0.45.1",
+  "date": "2026-10-10",
+  "highlight": {
+    "ja": "チャットと履歴で mermaid の図が描かれるようになり、履歴検索の強調が正しい位置に当たるようになりました。",
+    "en": "Mermaid diagrams now render in chat and History, and History search highlights now land on the right text."
+  },
+  "added": [
+    {
+      "ja": "チャットの回答と履歴で、mermaid のコードが図として表示されるようになりました（ダークテーマにも対応）。",
+      "en": "Mermaid code in chat answers and History is now drawn as a diagram, including in the dark theme."
+    },
+    {
+      "ja": "ファイルを単独で開いたページでも、mermaid のコードが図として表示されるようになりました。",
+      "en": "Mermaid code is now drawn as a diagram when a file is opened on its own page."
+    }
+  ],
+  "improved": [
+    {
+      "ja": "画面が止まっている間に同じ内容のログが繰り返し出ていたのを減らし、サーバーのログ量を大きく減らしました。",
+      "en": "The server log no longer repeats the same line while a screen stays unchanged, which greatly reduces its size."
+    }
+  ],
+  "fixed": [
+    {
+      "ja": "履歴検索の強調が、太字やリンクなどの記法の文字数だけずれていた問題を直しました。",
+      "en": "Fixed History search highlights being shifted by the length of formatting such as bold text and links."
+    },
+    {
+      "ja": "履歴検索で、mermaid の図の中のヒットが強調されないことがある問題を直しました。",
+      "en": "Fixed History search sometimes not highlighting matches inside mermaid diagrams."
+    },
+    {
+      "ja": "スキルのフォルダに説明ファイルが無いだけで、サーバーのログにエラーが出ていた問題を直しました。",
+      "en": "Fixed the server log reporting an error for skill folders that simply have no description file."
+    }
+  ]
+}

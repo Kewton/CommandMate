@@ -869,6 +869,47 @@
     border-top: 1px solid rgb(var(--border));
     margin: 0.9em 0;
   }
+
+  /*
+   * [Issue #3503] A mermaid block (`MermaidCodeBlock`): the diagram, then its
+   * source folded underneath. Used by the file preview (`.prose`), chat
+   * (`.chat-md`) and History (`.assistant-md`) alike.
+   *
+   * The diagram sits on a canvas of its own that follows the theme — NOT the
+   * always-dark `pre` canvas fenced code uses: mermaid draws with its `default`
+   * theme on light and its `dark` theme on dark (`MermaidDiagram`), and each
+   * needs the matching background to stay legible. The folded source is code
+   * and keeps the surface's `pre` styling.
+   */
+  .mermaid-block {
+    margin: 0.55em 0;
+    max-width: 100%;
+  }
+  .mermaid-figure {
+    background-color: rgb(var(--surface));
+    color: rgb(var(--surface-foreground));
+    border: 1px solid rgb(var(--border));
+    border-radius: 6px;
+    padding: 0.6em;
+    max-width: 100%;
+    overflow-x: auto;
+  }
+  .mermaid-figure svg {
+    max-width: 100%;
+    height: auto;
+  }
+  .mermaid-source {
+    margin-top: 0.3em;
+    font-size: 0.85em;
+  }
+  .mermaid-source > summary {
+    cursor: pointer;
+    color: rgb(var(--muted-foreground));
+    user-select: none;
+  }
+  .mermaid-source > pre {
+    margin-top: 0.3em;
+  }
 }
 
 /*

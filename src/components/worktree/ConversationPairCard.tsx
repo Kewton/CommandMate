@@ -13,6 +13,7 @@ import { useLocale, useTranslations } from 'next-intl';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import rehypeSanitize from 'rehype-sanitize';
 import rehypeHighlight from 'rehype-highlight';
+import { rehypeSearchRawText, searchRawProps } from '@/lib/terminal-highlight';
 import type { ConversationPair } from '@/types/conversation';
 import type { ChatMessage } from '@/types/models';
 import { isAgentAuthoredMarkdown } from '@/types/agent-transcript';
@@ -21,6 +22,7 @@ import { formatMessageTimestamp } from '@/lib/date-utils';
 import { splitFilePathParts } from '@/lib/chat/chat-transcript-view';
 import { SHARED_REMARK_PLUGINS } from '@/lib/markdown';
 import { ChatFileLink } from '@/components/worktree/ChatMessageBubble';
+import { MERMAID_MARKDOWN_COMPONENTS } from '@/components/worktree/mermaid-markdown';
 
 // ============================================================================
 // Types
@@ -212,7 +214,8 @@ const COLLAPSED_MARKDOWN_MAX_HEIGHT = 'max-h-[3.25rem]';
  * The existing affordance survives the change: {@link MessageContent} is spliced
  * into the text children of every block element the linkifier can safely reach.
  * `code` and `pre` are left alone — a path inside a fence is part of a command,
- * not a link, and a `<button>` there would break selection and copy.
+ * not a link, and a `<button>` there would break selection and copy. Except a
+ * ```mermaid fence (#3503), which is drawn as a diagram.
  */
 const AssistantMarkdown = memo(function AssistantMarkdown({
   content,
@@ -233,12 +236,12 @@ const AssistantMarkdown = memo(function AssistantMarkdown({
         )
       );
     return {
-      p: ({ children }) => <p>{linkify(children)}</p>,
-      li: ({ children }) => <li>{linkify(children)}</li>,
-      td: ({ children }) => <td>{linkify(children)}</td>,
-      th: ({ children }) => <th>{linkify(children)}</th>,
-      strong: ({ children }) => <strong>{linkify(children)}</strong>,
-      em: ({ children }) => <em>{linkify(children)}</em>,
+      p: ({ children, ...props }) => <p {...searchRawProps(props)}>{linkify(children)}</p>,
+      li: ({ children, ...props }) => <li {...searchRawProps(props)}>{linkify(children)}</li>,
+      td: ({ children, ...props }) => <td {...searchRawProps(props)}>{linkify(children)}</td>,
+      th: ({ children, ...props }) => <th {...searchRawProps(props)}>{linkify(children)}</th>,
+      strong: ({ children, ...props }) => <strong {...searchRawProps(props)}>{linkify(children)}</strong>,
+      em: ({ children, ...props }) => <em {...searchRawProps(props)}>{linkify(children)}</em>,
       // [#2345] A Markdown link's destination is consumed by the parser, so it
       // never reaches the linkifier above and used to render as a bare `<a>`
       // that navigated this tab away from CommandMate. Chat's renderer, not a
@@ -249,13 +252,19 @@ const AssistantMarkdown = memo(function AssistantMarkdown({
           {children}
         </ChatFileLink>
       ),
+      // [#3503] A ```mermaid fence is drawn as a diagram with its source folded
+      // under it — the same frame chat and the file preview use. Every other
+      // `code` / `pre` renders as react-markdown's default did.
+      ...MERMAID_MARKDOWN_COMPONENTS,
     };
   }, [onFilePathClick]);
 
   // [#2459] The remark half is shared with Chat and MarkdownPreview so a fix to
   // how a bare URL ends lands on all three at once; the rehype half stays local
   // because this surface deliberately has no `rehypeRaw`.
-  const rehypePlugins = useMemo(() => [rehypeSanitize, rehypeHighlight], []);
+  // [#3523] `rehypeSearchRawText` marks where each element's text is in
+  // `content`, so a search hit after `**`, `#`, a link… lands on its word.
+  const rehypePlugins = useMemo(() => [rehypeSanitize, rehypeSearchRawText, rehypeHighlight], []);
 
   return (
     <ReactMarkdown

@@ -298,11 +298,20 @@ export function main(argv, deps = {}) {
     // The precheck is recorded per HEAD, so a HEAD pushed earlier (publish-pr.mjs
     // after a refresh) is checked here too unless it already passed.
     if (unmetStage('precheck', latestByStage(records, issue).precheck, { head, workHead })) {
-      const workPrecheck = findLatest(records, { issue, stage: 'precheck', head: workHead, result: 'ok' });
+      // The options come from the precheck of the work HEAD; when a fold commit on top made the
+      // precheck run on the published HEAD only, from the Issue's latest precheck=ok (any HEAD).
+      // Without either the options would be guessed (kind lost → suppressions=skip): stop (#3527).
+      const workPrecheck =
+        findLatest(records, { issue, stage: 'precheck', head: workHead, result: 'ok' }) ??
+        findLatest(records, { issue, stage: 'precheck', result: 'ok' });
+      if (!workPrecheck) {
+        error(`merge #${issue}: no precheck=ok record to take the options from (kind etc.) — run precheck.mjs on the work HEAD first; not pushed`);
+        return 1;
+      }
       const code = runPrecheck(
         [
           '--run-dir', o.runDir, '--issues', o.issues, '--issue', String(issue), '--worktree', o.worktree,
-          ...optionsFromNote(workPrecheck?.note, baseRef),
+          ...optionsFromNote(workPrecheck.note, baseRef),
         ],
         { run, now, log, error, findTestsNaming: findNaming }
       );
@@ -369,7 +378,13 @@ export function main(argv, deps = {}) {
     record('ci', 'ok', head, `checks=${verdict.summary} build=${needBuild ? 'pass' : 'precheck'} unit=${need.needUnit ? 'pass' : '-'}${o.last ? ' last=all-pass' : ''}`, workHead);
 
     // 6. Merge exactly this HEAD, then the Issue.
-    const merged = run('gh', ['pr', 'merge', String(pr.number), '--repo', o.repo, '--squash', '--match-head-commit', head]);
+    // A fold (6-4) on top of the work must not name the squash commit: with a
+    // distinct work HEAD, pass its subject the way GitHub words its default.
+    const subject = workHead && workHead !== head ? git(run, o.worktree, ['log', '-1', '--format=%s', workHead]).trim() : '';
+    const merged = run('gh', [
+      'pr', 'merge', String(pr.number), '--repo', o.repo, '--squash', '--match-head-commit', head,
+      ...(subject ? ['--subject', `${subject} (#${pr.number})`] : []),
+    ]);
     if (merged.status !== 0) {
       record('merge', 'fail', head, `pr=#${pr.number} gh-merge-failed`, workHead);
       error(`merge #${issue}: gh pr merge failed: ${(merged.stderr || merged.stdout).trim()}`);

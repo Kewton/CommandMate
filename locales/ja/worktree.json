@@ -818,7 +818,8 @@
     "loading": "図を読み込み中...",
     "errorTitle": "図のエラー",
     "emptyCode": "図のコードが空です",
-    "renderError": "図の描画に失敗しました"
+    "renderError": "図の描画に失敗しました",
+    "source": "ソース"
   },
   "imageViewer": {
     "loadError": "画像の読み込みに失敗しました"

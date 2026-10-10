@@ -197,7 +197,8 @@ export function main(argv, deps = {}) {
       return 0;
     }
 
-    const title = o.title ?? git(run, o.worktree, ['log', '-1', '--format=%s', head]).trim();
+    // The worker's commit names the work; a fold on top (6-4) must not name the PR.
+    const title = o.title ?? git(run, o.worktree, ['log', '-1', '--format=%s', workHead]).trim();
     let bodyFile = o.bodyFile;
     let tmpDir = null;
     if (!bodyFile) {

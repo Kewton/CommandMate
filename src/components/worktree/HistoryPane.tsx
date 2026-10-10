@@ -18,7 +18,7 @@ import { Checkbox, Skeleton } from '@/components/ui';
 import type { ChatMessage } from '@/types/models';
 import { useConversationHistory } from '@/hooks/useConversationHistory';
 import { splitHistorySlotId } from '@/hooks/useHistoryPaneState';
-import { useHistorySearch } from '@/hooks/useHistorySearch';
+import { useHighlightReapplyTick, useHistorySearch } from '@/hooks/useHistorySearch';
 import { ConversationPairCard } from './ConversationPairCard';
 import { HistorySearchBar } from './HistorySearchBar';
 import { HISTORY_PANE_ID } from './TerminalContainer';
@@ -365,6 +365,15 @@ export const HistoryPane = memo(function HistoryPane({
 
   const isSearchActive = isSearchOpen && matchPositions.length > 0;
 
+  // [Issue #3503] The raw text each hit's offsets index into. A Markdown body's
+  // mermaid fences are drawn as diagrams with their source folded underneath,
+  // so the highlighter needs the text as written to place hits inside and after
+  // them (`applyHistoryHighlights`' `sourceText`).
+  const searchSourceById = useMemo(
+    () => new Map(searchableMessages.map((m) => [m.id, m.content])),
+    [searchableMessages],
+  );
+
   /**
    * How many rows in view arrived from another agent session (Issue #2377).
    *
@@ -493,6 +502,10 @@ export const HistoryPane = memo(function HistoryPane({
     rowVirtualizer.scrollToIndex(rowIndex, { align: 'center' });
   }, [isSearchOpen, currentMatch, messageIdToPairId, pairRowIndexById, rowVirtualizer]);
 
+  // [Issue #3503] Re-apply once a mermaid diagram in a mounted card has drawn
+  // (or been redrawn for a new theme): its card changed height under the marks.
+  const diagramSettledTick = useHighlightReapplyTick(scrollContainerRef, isSearchActive);
+
   // (4) Apply per-message highlights to the mounted matches and scroll the
   // current match into view. Re-runs when the mounted window changes
   // (`renderedRange`) so off-screen matches get highlighted once scrolled in.
@@ -511,7 +524,9 @@ export const HistoryPane = memo(function HistoryPane({
       if (!el) continue; // off-screen row not mounted yet; applied on next mount
       const isCurrent = currentMatch?.messageId === match.messageId;
       const localIdx = isCurrent ? currentMatch.localIndex : -1;
-      applyHistoryHighlights(el, match.ranges, localIdx, highlightNamespace);
+      applyHistoryHighlights(el, match.ranges, localIdx, highlightNamespace, {
+        sourceText: searchSourceById.get(match.messageId),
+      });
       if (isCurrent && el instanceof HTMLElement) {
         currentMatchElement = el;
       }
@@ -524,7 +539,16 @@ export const HistoryPane = memo(function HistoryPane({
     return () => {
       clearHistoryHighlights(highlightNamespace);
     };
-  }, [isSearchOpen, matchPositions, currentMatch, autoExpandedIds, highlightNamespace, renderedRange]);
+  }, [
+    isSearchOpen,
+    matchPositions,
+    currentMatch,
+    autoExpandedIds,
+    highlightNamespace,
+    renderedRange,
+    searchSourceById,
+    diagramSettledTick,
+  ]);
 
   // Save scroll position when the search opens; restore it when search closes.
   useEffect(() => {

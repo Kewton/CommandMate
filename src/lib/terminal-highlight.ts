@@ -12,11 +12,22 @@
  * Security: SEC-TS-002 - CSS Custom Highlight API avoids DOM manipulation (no XSS risk)
  */
 
-/** Match position in container.textContent */
-export interface MatchPosition {
-  start: number;
-  end: number;
-}
+import { buildRange, collectTextNodes, type MatchPosition } from './terminal-highlight-dom';
+import { mapRawPositionsToDom, openFoldedSource, type HighlightSection } from './terminal-highlight-mermaid';
+import { mapMarkdownPositionsToDom } from './terminal-highlight-markdown';
+
+export type { MatchPosition } from './terminal-highlight-dom';
+export {
+  SEARCH_SKIP_ATTR,
+  MERMAID_SOURCE_ATTR,
+  MERMAID_RAW_START_ATTR,
+  MERMAID_RAW_END_ATTR,
+  MERMAID_BLOCK_SETTLED_EVENT,
+} from './terminal-highlight-dom';
+export { findMermaidFences, fenceFromRawRange, type MermaidFence } from './terminal-highlight-fences';
+export { alignDerivedText, IDENTITY_RAW_OFFSET, type RawOffsetMapper } from './terminal-highlight-offsets';
+export { SEARCH_SECTION_ATTR, type HighlightSection } from './terminal-highlight-mermaid';
+export { SEARCH_RAW_ATTR, rehypeSearchRawText, searchRawProps } from './terminal-highlight-markdown';
 
 /**
  * [Issue #716] Highlight namespace abstraction.
@@ -102,45 +113,6 @@ export function isCSSHighlightSupported(): boolean {
   );
 }
 
-/**
- * Collect text nodes with cumulative offsets from a container element.
- */
-function collectTextNodes(container: Element): Array<{ node: Text; start: number; end: number }> {
-  const textNodes: Array<{ node: Text; start: number; end: number }> = [];
-  let offset = 0;
-  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
-  let node: Text | null;
-  while ((node = walker.nextNode() as Text | null)) {
-    const len = node.nodeValue?.length ?? 0;
-    textNodes.push({ node, start: offset, end: offset + len });
-    offset += len;
-  }
-  return textNodes;
-}
-
-/**
- * Create a Range for a given [posStart, posEnd) span across text nodes.
- */
-function buildRange(
-  textNodes: Array<{ node: Text; start: number; end: number }>,
-  posStart: number,
-  posEnd: number
-): Range | null {
-  const range = document.createRange();
-  let startSet = false;
-
-  for (const { node, start, end } of textNodes) {
-    if (!startSet && posStart < end && posStart >= start) {
-      range.setStart(node, posStart - start);
-      startSet = true;
-    }
-    if (startSet && posEnd <= end) {
-      range.setEnd(node, posEnd - start);
-      return range;
-    }
-  }
-  return startSet ? range : null;
-}
 
 // ============================================================================
 // Internal namespace-aware implementations
@@ -154,11 +126,31 @@ function clearHighlightsInternal(namespace: HighlightNamespace): void {
   document.getElementById(namespace.fallbackOverlayId)?.remove();
 }
 
+/**
+ * [Issue #3503] Optional input for a highlight call.
+ */
+export interface HighlightOptions {
+  /**
+   * The raw text `matchPositions` index into. Given for a message rendered as
+   * Markdown, so hits around and inside mermaid diagrams can be placed (see
+   * `mapRawPositionsToDom`), and hits after Markdown markers (Issue #3523, see
+   * `mapMarkdownPositionsToDom`). Without it, offsets are DOM offsets as before.
+   */
+  sourceText?: string;
+  /**
+   * Parts of `sourceText` drawn in a place of their own (chat's reasoning and
+   * tool-log chips). Without it the whole text is one region in raw order — how
+   * History draws it.
+   */
+  sections?: HighlightSection[];
+}
+
 function applyHighlightsInternal(
   container: Element,
   matchPositions: MatchPosition[],
   currentIndex: number,
-  namespace: HighlightNamespace
+  namespace: HighlightNamespace,
+  options?: HighlightOptions
 ): void {
   if (matchPositions.length === 0) {
     clearHighlightsInternal(namespace);
@@ -166,17 +158,35 @@ function applyHighlightsInternal(
   }
 
   const textNodes = collectTextNodes(container);
+  const positions: Array<MatchPosition | null> =
+    (options?.sourceText !== undefined
+      ? (mapRawPositionsToDom(
+          container,
+          textNodes,
+          options.sourceText,
+          matchPositions,
+          options.sections ?? [],
+        ) ??
+        // [Issue #3523] No mermaid source on screen: place hits through the
+        // raw ranges Markdown left on its elements; a hit it cannot place keeps
+        // its offset as before.
+        mapMarkdownPositionsToDom(container, textNodes, options.sourceText, matchPositions)?.map(
+          (pos, k) => pos ?? matchPositions[k],
+        ))
+      : null) ?? matchPositions;
+  const ranges = positions.map((pos) => (pos ? buildRange(textNodes, pos.start, pos.end) : null));
+  ranges.forEach((range) => {
+    if (range) openFoldedSource(range, container);
+  });
 
   // Build current match range (always needed for scrolling/overlay)
-  const currentPos = matchPositions[currentIndex];
-  const currentRange = currentPos ? buildRange(textNodes, currentPos.start, currentPos.end) : null;
+  const currentRange = ranges[currentIndex] ?? null;
 
   if (isCSSHighlightSupported()) {
     const allRanges: Range[] = [];
 
-    matchPositions.forEach((pos, idx) => {
+    ranges.forEach((range, idx) => {
       if (idx === currentIndex) return;
-      const range = buildRange(textNodes, pos.start, pos.end);
       if (range) allRanges.push(range);
     });
 
@@ -307,12 +317,16 @@ export function clearHistoryHighlights(
  *   `HISTORY_SEARCH_NAMESPACE` so existing single-pane / mobile callers are
  *   unaffected. Passing a per-split namespace prevents simultaneously-mounted
  *   HistoryPanes from clobbering each other's CSS.highlights entries.
+ * @param options - [Issue #3503] Optional. `sourceText` is the message as
+ *   written; pass it for a Markdown body so hits inside / after mermaid
+ *   diagrams land on the folded source and the right text.
  */
 export function applyHistoryHighlights(
   container: Element,
   matchPositions: MatchPosition[],
   currentIndex: number,
-  namespace: HighlightNamespace = HISTORY_SEARCH_NAMESPACE
+  namespace: HighlightNamespace = HISTORY_SEARCH_NAMESPACE,
+  options?: HighlightOptions
 ): void {
-  applyHighlightsInternal(container, matchPositions, currentIndex, namespace);
+  applyHighlightsInternal(container, matchPositions, currentIndex, namespace, options);
 }

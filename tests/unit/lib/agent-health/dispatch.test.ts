@@ -115,29 +115,26 @@ describe('selectDispatchTargets', () => {
     expect(result.deferred).toEqual([]);
   });
 
-  it('takes at most 2 metrics and defers the rest', () => {
-    const result = selectDispatchTargets([
-      issue(1, ['metrics'], '2026-09-01'),
-      issue(2, ['metrics'], '2026-09-02'),
-      issue(3, ['metrics'], '2026-09-03'),
-    ]);
-    expect(result.issues.map((i) => i.number)).toEqual([1, 2]);
-    expect(result.deferred).toEqual([3]);
+  it('takes at most 4 metrics and defers the rest', () => {
+    const metrics = [1, 2, 3, 4, 5].map((n) => issue(n, ['metrics'], `2026-09-0${n}`));
+    const result = selectDispatchTargets(metrics);
+    expect(result.issues.map((i) => i.number)).toEqual([1, 2, 3, 4]);
+    expect(result.deferred).toEqual([5]);
   });
 
-  it('caps the total at 5: bugs first, overflowing bugs and all metrics deferred', () => {
+  it('caps the total at 8: bugs first, overflowing bugs and all metrics deferred', () => {
+    const bugs = [1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => issue(n, ['agent-health'], `2026-09-0${n}`));
+    const result = selectDispatchTargets([issue(19, ['metrics', 'security'], '2026-08-01'), ...bugs]);
+    expect(result.issues.map((i) => i.number)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(result.deferred).toEqual([9, 19]);
+  });
+
+  it('fills the room bugs leave with up to 4 metrics', () => {
     const bugs = [1, 2, 3, 4, 5, 6].map((n) => issue(n, ['agent-health'], `2026-09-0${n}`));
-    const result = selectDispatchTargets([issue(9, ['metrics', 'security'], '2026-08-01'), ...bugs]);
-    expect(result.issues.map((i) => i.number)).toEqual([1, 2, 3, 4, 5]);
-    expect(result.deferred).toEqual([6, 9]);
-  });
-
-  it('fills the room bugs leave with up to 2 metrics', () => {
-    const bugs = [1, 2, 3, 4].map((n) => issue(n, ['agent-health'], `2026-09-0${n}`));
-    const metrics = [7, 8].map((n) => issue(n, ['metrics'], `2026-09-0${n}`));
+    const metrics = [17, 18, 19].map((n) => issue(n, ['metrics'], `2026-09-${n}`));
     const result = selectDispatchTargets([...metrics, ...bugs]);
-    expect(result.issues.map((i) => i.number)).toEqual([1, 2, 3, 4, 7]);
-    expect(result.deferred).toEqual([8]);
+    expect(result.issues.map((i) => i.number)).toEqual([1, 2, 3, 4, 5, 6, 17, 18]);
+    expect(result.deferred).toEqual([19]);
   });
 
   it('ignores other authors and dispatched Issues entirely (not even deferred)', () => {
@@ -344,22 +341,22 @@ describe('catalog-drift Issues (#3159)', () => {
     expect(result).toEqual({ issues: [], deferred: [] });
   });
 
-  it('keeps the total cap at 5: catalog after bugs, metrics after catalog', () => {
-    const bugs = [1, 2, 3, 4].map((n) => issue(n, ['agent-health'], `2026-09-0${n}`));
+  it('keeps the total cap at 8: catalog after bugs, metrics after catalog', () => {
+    const bugs = [1, 2, 3, 4, 5, 6, 7].map((n) => issue(n, ['agent-health'], `2026-09-0${n}`));
     const result = selectDispatchTargets([
-      issue(8, ['metrics'], '2026-08-01'),
-      issue(7, ['catalog-drift'], '2026-09-07'),
+      issue(18, ['metrics'], '2026-08-01'),
+      issue(17, ['catalog-drift'], '2026-09-17'),
       ...bugs,
     ]);
-    expect(result.issues.map((i) => i.number)).toEqual([1, 2, 3, 4, 7]);
-    expect(result.deferred).toEqual([8]);
+    expect(result.issues.map((i) => i.number)).toEqual([1, 2, 3, 4, 5, 6, 7, 17]);
+    expect(result.deferred).toEqual([18]);
 
     const full = selectDispatchTargets([
-      issue(7, ['catalog-drift'], '2026-09-07'),
-      ...[1, 2, 3, 4, 5].map((n) => issue(n, ['agent-health'], `2026-09-0${n}`)),
+      issue(17, ['catalog-drift'], '2026-09-17'),
+      ...[1, 2, 3, 4, 5, 6, 7, 8].map((n) => issue(n, ['agent-health'], `2026-09-0${n}`)),
     ]);
-    expect(full.issues.map((i) => i.number)).toEqual([1, 2, 3, 4, 5]);
-    expect(full.deferred).toEqual([7]);
+    expect(full.issues.map((i) => i.number)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(full.deferred).toEqual([17]);
   });
 
   it('adds the unattended-section term only when a catalog Issue is in the run', () => {
