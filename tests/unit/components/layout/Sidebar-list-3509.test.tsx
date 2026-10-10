@@ -299,3 +299,69 @@ describe('Group headings (Issue #3509)', () => {
     expect(header.className).toMatch(/text-xs/);
   });
 });
+
+describe('"Other" under the hover-freeze (Issue #3509 review)', () => {
+  const at = (day: number) => new Date(`2026-10-0${day}T00:00:00Z`);
+  const BEFORE: Worktree[] = [
+    wt({ id: 'newer', name: 'feature/newer', isSessionRunning: false, updatedAt: at(3) }),
+    wt({ id: 'older', name: 'feature/older', isSessionRunning: false, updatedAt: at(2) }),
+    wt({ id: 'det', name: 'detached-abc1234', isSessionRunning: false, updatedAt: at(1) }),
+  ];
+
+  function renderLive(initial: Worktree[]) {
+    const ui = (list: Worktree[]) => (
+      <SidebarProvider>
+        <WorktreeSelectionProvider externalWorktrees={list} externalRepositories={[]}>
+          <Sidebar />
+        </WorktreeSelectionProvider>
+      </SidebarProvider>
+    );
+    const result = render(ui(initial));
+    return (next: Worktree[]) => result.rerender(ui(next));
+  }
+
+  it.each([
+    ['waiting', { isSessionRunning: true, isWaitingForResponse: true }],
+    ['running', { isSessionRunning: true, isProcessing: true }],
+  ] as const)('takes a detached row out of "Other" when it turns %s while frozen (positive control)', async (_label, change) => {
+    const update = renderLive(BEFORE);
+    await screen.findByTestId('branch-group-other-toggle');
+    expect(branchRowNames()).not.toContain('detached-abc1234');
+
+    fireEvent.mouseEnter(screen.getByTestId('branch-list'));
+    update(BEFORE.map((w) => (w.id === 'det' ? ({ ...w, ...change } as Worktree) : w)));
+
+    await waitFor(() => {
+      expect(branchRowNames()).toContain('detached-abc1234');
+    });
+    expect(screen.queryByTestId('branch-group-other-toggle')).not.toBeInTheDocument();
+  });
+
+  it('keeps a detached row running only at the worktree level (no per-instance map) out of "Other"', async () => {
+    // No `sessionStatusByInstance`: toBranchItem builds the legacy map (idle),
+    // while `isProcessing` makes the worktree-level status `running`.
+    renderLive([BEFORE[0], { ...BEFORE[2], isSessionRunning: true, isProcessing: true } as Worktree]);
+    await waitFor(() => expect(branchRowNames()).toContain('detached-abc1234'));
+    expect(screen.queryByTestId('branch-group-other-toggle')).not.toBeInTheDocument();
+  });
+
+  it('keeps the frozen order of rows whose state did not change (negative control)', async () => {
+    const update = renderLive(BEFORE);
+    await screen.findByTestId('branch-group-other-toggle');
+    expect(branchRowNames()).toEqual(['feature/newer', 'feature/older']);
+
+    fireEvent.mouseEnter(screen.getByTestId('branch-list'));
+    // Swap the timestamps: unfrozen, this would reorder the two rows.
+    update(
+      BEFORE.map((w) =>
+        w.id === 'newer' ? { ...w, updatedAt: at(1) } : w.id === 'older' ? { ...w, updatedAt: at(4) } : w
+      )
+    );
+
+    // Give the deferred value and the memo a chance to run.
+    await waitFor(() => {
+      expect(screen.getByTestId('branch-group-other-toggle')).toHaveTextContent('Other (1)');
+    });
+    expect(branchRowNames()).toEqual(['feature/newer', 'feature/older']);
+  });
+});

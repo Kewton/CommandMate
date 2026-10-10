@@ -822,35 +822,47 @@ export function isDetachedBranchName(name: string): boolean {
   return DETACHED_BRANCH_NAME_PATTERN.test(name);
 }
 
+/** Statuses that keep a detached row out of "Other" (Issue #3509). */
+const KEEP_IN_PLACE_STATUSES: ReadonlySet<BranchStatus> = new Set<BranchStatus>([
+  'waiting',
+  'running',
+  'generating',
+]);
+
 /**
  * Split one repository's rows into the ones shown in place and the ones folded
  * into "Other (n)" (Issue #3509).
  *
  * Only detached worktrees are folded, and never one the user must not lose
- * sight of: the selected row, a waiting row (the `waiting` the dot paints, or
- * the worktree-level one Needs attention counts) or a working one (`running` / `generating`). Order is
- * preserved on both sides, so the sort the user picked still holds.
+ * sight of: the selected row, or a waiting / running / generating one. The
+ * status is read at BOTH levels — the aggregated per-instance map (the dot) and
+ * the worktree-level `status` (`isWaitingForResponse` / `isProcessing`, which is
+ * what Needs attention counts and what a payload without the map carries) — so
+ * a disagreement between the two never folds a live row away.
  *
- * @param branches - One group's rows, already sorted
+ * `currentById` is the live version of each row. The sidebar's hover-freeze
+ * hands in row objects from when the cursor entered the list; the freeze holds
+ * the ORDER only, so the decision is made on the current state when it is
+ * known. Order is preserved on both sides, so the sort (or freeze) still holds.
+ *
+ * @param branches - One group's rows, already sorted (possibly frozen)
  * @param selectedId - The open worktree, or null
+ * @param currentById - Live rows by id; a row missing from it is judged as given
  */
 export function partitionOtherBranches(
   branches: ReadonlyArray<SidebarBranchItem>,
-  selectedId: string | null
+  selectedId: string | null,
+  currentById?: ReadonlyMap<string, SidebarBranchItem>
 ): { shown: SidebarBranchItem[]; other: SidebarBranchItem[] } {
   const shown: SidebarBranchItem[] = [];
   const other: SidebarBranchItem[] = [];
   for (const branch of branches) {
-    const status = resolveBranchStatus(branch);
+    const current = currentById?.get(branch.id) ?? branch;
     const keepInPlace =
-      !isDetachedBranchName(branch.name) ||
-      branch.id === selectedId ||
-      status === 'waiting' ||
-      // The worktree-level flag (`isWaitingForResponse`, which is what Needs
-      // attention counts) as well, in case the per-instance map disagrees.
-      branch.status === 'waiting' ||
-      status === 'running' ||
-      status === 'generating';
+      !isDetachedBranchName(current.name) ||
+      current.id === selectedId ||
+      KEEP_IN_PLACE_STATUSES.has(resolveBranchStatus(current)) ||
+      KEEP_IN_PLACE_STATUSES.has(current.status);
     (keepInPlace ? shown : other).push(branch);
   }
   return { shown, other };

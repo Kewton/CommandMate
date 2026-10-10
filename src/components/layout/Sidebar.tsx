@@ -247,6 +247,14 @@ export const Sidebar = memo(function Sidebar() {
   // Convert worktrees to sidebar items
   const branchItems = useMemo(() => visibleWorktrees.map(toBranchItem), [visibleWorktrees]);
 
+  // Issue #3509: the live rows by id. The hover-freeze below holds the list
+  // ORDER, so the rows it renders can be stale; whether a detached row folds
+  // into "Other" is decided on these instead.
+  const liveBranchById = useMemo(
+    () => new Map(branchItems.map((item) => [item.id, item])),
+    [branchItems]
+  );
+
   // Defer poll-driven branchItems updates so the list order only changes when
   // React's scheduler has idle time (i.e. the pointer is not moving).
   // This prevents visible reorders while the user's cursor is in transit toward
@@ -670,6 +678,7 @@ export const Sidebar = memo(function Sidebar() {
                     onBranchClick={handleBranchClick}
                     isDragDisabled={!!searchQuery.trim()}
                     isFiltering={!!searchQuery.trim()}
+                    liveBranchById={liveBranchById}
                   />
                 );
               })}
@@ -745,6 +754,7 @@ function SortableGroupItem({
   onBranchClick,
   isDragDisabled,
   isFiltering,
+  liveBranchById,
 }: {
   group: BranchGroup;
   isExpanded: boolean;
@@ -754,6 +764,8 @@ function SortableGroupItem({
   isDragDisabled: boolean;
   /** The filter field is in use: "Other" opens (Issue #3509) */
   isFiltering: boolean;
+  /** Current rows by id, for the "Other" decision under the hover-freeze */
+  liveBranchById: ReadonlyMap<string, SidebarBranchItem>;
 }) {
   const {
     attributes,
@@ -774,8 +786,8 @@ function SortableGroupItem({
   // Issue #3509: detached worktrees fold into "Other (n)" — except the selected,
   // waiting and running ones, which stay in place.
   const { shown, other } = useMemo(
-    () => partitionOtherBranches(group.branches, selectedWorktreeId),
-    [group.branches, selectedWorktreeId]
+    () => partitionOtherBranches(group.branches, selectedWorktreeId, liveBranchById),
+    [group.branches, selectedWorktreeId, liveBranchById]
   );
 
   return (

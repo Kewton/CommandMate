@@ -77,3 +77,46 @@ describe('partitionOtherBranches (Issue #3509)', () => {
     expect(ids(other)).toEqual(['d1', 'd2']);
   });
 });
+
+describe('partitionOtherBranches reads both status levels (Issue #3509 review)', () => {
+  it.each([
+    ['no map, worktree-level running', item({ id: 'd', name: 'detached-abc', status: 'running' })],
+    ['no map, worktree-level generating', item({ id: 'd', name: 'detached-abc', status: 'generating' })],
+    ['map idle, worktree-level running', item({ id: 'd', name: 'detached-abc', status: 'running', cliStatus: { claude: 'idle' } })],
+    ['map running, worktree-level idle', item({ id: 'd', name: 'detached-abc', status: 'idle', cliStatus: { claude: 'running' } })],
+    ['map idle, worktree-level waiting', item({ id: 'd', name: 'detached-abc', status: 'waiting', cliStatus: { claude: 'idle' } })],
+  ])('keeps the row in place: %s (positive control)', (_label, branch) => {
+    const { shown, other } = partitionOtherBranches([branch], null);
+    expect(ids(shown)).toEqual(['d']);
+    expect(other).toEqual([]);
+  });
+
+  it('still folds a detached row idle at both levels (negative control)', () => {
+    const { other } = partitionOtherBranches(
+      [item({ id: 'd', name: 'detached-abc', status: 'idle', cliStatus: { claude: 'idle' } })],
+      null
+    );
+    expect(ids(other)).toEqual(['d']);
+  });
+});
+
+describe('partitionOtherBranches judges the current row, not a frozen one (Issue #3509 review)', () => {
+  const frozen = [item({ id: 'a' }), item({ id: 'd', name: 'detached-abc', status: 'idle' })];
+
+  it.each(['waiting', 'running', 'generating'] as const)(
+    'keeps a frozen-idle row that is now %s in place, in the frozen order',
+    (status) => {
+      const current = new Map([['d', item({ id: 'd', name: 'detached-abc', status })]]);
+      const { shown, other } = partitionOtherBranches(frozen, null, current);
+      expect(ids(shown)).toEqual(['a', 'd']);
+      expect(other).toEqual([]);
+      // The frozen object itself is what is returned: only the decision is live.
+      expect(shown[1]).toBe(frozen[1]);
+    }
+  );
+
+  it('folds as before when the current row is unchanged (negative control)', () => {
+    const current = new Map(frozen.map((b) => [b.id, b]));
+    expect(ids(partitionOtherBranches(frozen, null, current).other)).toEqual(['d']);
+  });
+});
