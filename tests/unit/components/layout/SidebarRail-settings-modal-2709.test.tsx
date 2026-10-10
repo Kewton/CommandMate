@@ -1,5 +1,10 @@
 /**
- * ActivityBar settings menu → settings modal (Issue #2709)
+ * Icon-rail settings menu → settings modal (Issue #2709)
+ *
+ * Was ActivityBar-settings-modal-2709.test.tsx. #3512 removed the ActivityBar
+ * gear; on the PC worktree screen the menu is now opened from the icon rail
+ * (sidebar closed) or the sidebar footer (sidebar open, pinned by
+ * Sidebar-settings-modal-2709.test.tsx). Same four intents, on the rail's gear.
  *
  * The point of this file is where focus ends up, so neither
  * `useSettingsDialog` nor `Modal` is mocked: the real provider drives a real
@@ -13,7 +18,7 @@
 import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import React from 'react';
-import { ActivityBar } from '@/components/worktree/ActivityBar';
+import { SidebarRail } from '@/components/layout/SidebarRail';
 import { Modal } from '@/components/ui/Modal';
 import { SettingsDialogProvider, useSettingsDialog } from '@/contexts/SettingsDialogContext';
 import { installRadixJsdomPolyfills } from '@tests/helpers/radix-jsdom';
@@ -25,14 +30,21 @@ vi.mock('next-intl', async () => {
   return createRealIntlMock('en');
 });
 
-const sidebarMock = vi.hoisted(() => ({ isOpen: true, toggle: vi.fn() }));
+const sidebarMock = vi.hoisted(() => ({ isOpen: false, toggle: vi.fn() }));
 vi.mock('@/contexts/SidebarContext', () => ({
   useSidebarContext: () => ({ isOpen: sidebarMock.isOpen, toggle: sidebarMock.toggle }),
+  useOptionalSidebarContext: () => null,
 }));
+
+vi.mock('@/hooks/useAttentionCount', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/hooks/useAttentionCount')>();
+  return { ...actual, useAttentionCount: () => ({ count: 0, worktrees: [] }) };
+});
 
 const routerMock = vi.hoisted(() => ({ push: vi.fn(), replace: vi.fn() }));
 vi.mock('next/navigation', () => ({
   useRouter: () => routerMock,
+  usePathname: () => '/worktrees/wt-1',
 }));
 
 vi.mock('next-themes', () => ({
@@ -58,19 +70,19 @@ function ProbeModal() {
 function Fixture() {
   return (
     <SettingsDialogProvider>
-      <ActivityBar active={null} onToggle={vi.fn()} />
+      <SidebarRail />
       <ProbeModal />
     </SettingsDialogProvider>
   );
 }
 
 function openMenu(): HTMLElement {
-  const gear = screen.getByTestId('activity-bar-settings');
+  const gear = screen.getByTestId('sidebar-rail-settings');
   fireEvent.keyDown(gear, { key: 'Enter' });
   return gear;
 }
 
-describe('ActivityBar settings menu opens the settings modal (Issue #2709)', () => {
+describe('Icon-rail settings menu opens the settings modal (Issue #2709, moved from the ActivityBar by #3512)', () => {
   beforeAll(() => {
     installRadixJsdomPolyfills();
   });

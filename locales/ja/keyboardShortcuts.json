@@ -7,6 +7,7 @@
     "editor": "ファイルエディタ"
   },
   "shortcuts": {
+    "toggleSidebar": "サイドバーを開く／閉じる",
     "commandPalette": "コマンドパレットを開く",
     "keyboardHelp": "キーボードショートカットを表示",
     "closeOverlay": "オーバーレイ・ダイアログを閉じる",

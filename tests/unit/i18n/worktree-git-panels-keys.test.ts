@@ -246,9 +246,7 @@ const REQUIRED: Record<string, string[]> = {
     'git.aiPrompts.forcePush',
     'git.aiPrompts.forcePushAhead',
     'git.aiPrompts.forcePushCurrentBranch',
-    'activityBar.toggleSidebar',
     'activityBar.label',
-    'activityBar.settings',
     'activityBar.settingsMenu.settings',
     'activityBar.settingsMenu.skills',
     'activityBar.settingsMenu.theme',
@@ -518,6 +516,17 @@ describe('worktree git/panel i18n keys (Issue #1277)', () => {
       }
     }
   );
+
+  // Issue #3512: the ActivityBar lost its sidebar toggle and its settings gear.
+  describe('removed ActivityBar toggle / gear keys (Issue #3512)', () => {
+    it.each(LOCALES)('%s/worktree.json has neither activityBar.toggleSidebar nor activityBar.settings', (locale) => {
+      const dict = load(locale, 'worktree');
+      expect(resolve(dict, 'activityBar.toggleSidebar')).toBeUndefined();
+      expect(resolve(dict, 'activityBar.settings')).toBeUndefined();
+      // The shared menu's wording stays under activityBar.settingsMenu.
+      expect(typeof resolve(dict, 'activityBar.settingsMenu.settings')).toBe('string');
+    });
+  });
 
   describe('removed Home button keys (Issue #2647)', () => {
     it.each(LOCALES)('%s/worktree.json has neither detail.goBack nor detail.home', (locale) => {

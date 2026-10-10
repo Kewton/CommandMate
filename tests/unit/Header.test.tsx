@@ -5,6 +5,7 @@
 /**
  * Unit tests for Header component
  * Issue #600: UX refresh - PC 5-screen horizontal navigation
+ * Issue #3512: the Header is the screen name + connection status + update
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -24,11 +25,6 @@ vi.mock('next/link', () => ({
   default: ({ href, children, className, ...props }: { href: string; children: React.ReactNode; className?: string; [key: string]: unknown }) => (
     <a href={href} className={className} {...props}>{children}</a>
   ),
-}));
-
-// Mock next-themes so the header-mounted ThemeToggle (Issue #1071) renders deterministically
-vi.mock('next-themes', () => ({
-  useTheme: () => ({ theme: 'dark', setTheme: vi.fn() }),
 }));
 
 // Issue #1206: resolve labels through the real dictionary instead of the global
@@ -59,79 +55,26 @@ describe('Header', () => {
     expect(screen.getByText('MyApp')).toBeDefined();
   });
 
-  it('should render 4 navigation links: Sessions, Repos, Review/Report, Settings', () => {
+  // Issue #3512: the screen links, the logo link, GitHub and the theme toggle
+  // left the Header. Where each former `it` now lives is listed in the commit
+  // body; the link / aria-current cases moved to
+  // tests/unit/components/layout/Header.test.tsx (sidebar + icon rail).
+  it('should render the screen name instead of navigation links (Issue #3512)', () => {
+    mockPathname.mockReturnValue('/sessions');
     render(<Header />);
-    expect(screen.getByText('Sessions')).toBeDefined();
-    expect(screen.getByText('Repos')).toBeDefined();
-    expect(screen.getByText('Review/Report')).toBeDefined();
-    expect(screen.getByText('Settings')).toBeDefined();
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Sessions');
+    expect(screen.queryByText('Repos')).toBeNull();
+    expect(screen.queryByText('Review/Report')).toBeNull();
     expect(screen.queryByText('Home')).toBeNull();
     expect(screen.queryByText('Chat')).toBeNull();
   });
 
-  it('should have correct hrefs for navigation links', () => {
+  it('has no links and no navigation landmark (Issue #3512)', () => {
     render(<Header />);
-    const sessionsLink = screen.getByText('Sessions').closest('a');
-    const reposLink = screen.getByText('Repos').closest('a');
-    const reviewLink = screen.getByText('Review/Report').closest('a');
-    const moreLink = screen.getByText('Settings').closest('a');
-
-    expect(sessionsLink?.getAttribute('href')).toBe('/sessions');
-    expect(reposLink?.getAttribute('href')).toBe('/repositories');
-    expect(reviewLink?.getAttribute('href')).toBe('/review');
-    expect(moreLink?.getAttribute('href')).toBe('/more');
-  });
-
-  it('should not mark any nav link active on / (Issue #2642)', () => {
-    mockPathname.mockReturnValue('/');
-    render(<Header />);
-    const nav = screen.getByRole('navigation');
-    expect(nav.querySelectorAll('a[aria-current="page"]').length).toBe(0);
-  });
-
-  it('keeps the logo linking to / (Issue #2642)', () => {
-    render(<Header />);
-    expect(screen.getByText('CommandMate').closest('a')?.getAttribute('href')).toBe('/');
-  });
-
-  it('has no / or /chat link inside the nav (Issue #2642)', () => {
-    render(<Header />);
-    const nav = screen.getByRole('navigation');
-    expect(nav.querySelector('a[href="/"]')).toBeNull();
-    expect(nav.querySelector('a[href="/chat"]')).toBeNull();
-  });
-
-  it('should highlight the active Sessions link when on /sessions', () => {
-    mockPathname.mockReturnValue('/sessions');
-    render(<Header />);
-    const sessionsLink = screen.getByText('Sessions').closest('a');
-    expect(sessionsLink?.className).toContain('text-accent-600');
-  });
-
-  it('should highlight the active Review/Report link when on /review', () => {
-    mockPathname.mockReturnValue('/review');
-    render(<Header />);
-    const reviewLink = screen.getByText('Review/Report').closest('a');
-    expect(reviewLink?.className).toContain('text-accent-600');
-  });
-
-  it('should still render GitHub link', () => {
-    render(<Header />);
-    const githubLink = screen.getByText('GitHub').closest('a');
-    expect(githubLink).toBeDefined();
-    expect(githubLink?.getAttribute('href')).toContain('github.com');
-    expect(githubLink?.getAttribute('target')).toBe('_blank');
-  });
-
-  it('should have nav element with role navigation', () => {
-    render(<Header />);
-    const nav = screen.getByRole('navigation');
-    expect(nav).toBeDefined();
-  });
-
-  it('should render the ThemeToggle in the header (Issue #1071)', () => {
-    render(<Header />);
-    expect(screen.getByTestId('theme-toggle')).toBeInTheDocument();
+    expect(screen.queryAllByRole('link')).toHaveLength(0);
+    expect(screen.queryByRole('navigation')).toBeNull();
+    expect(screen.queryByText('GitHub')).toBeNull();
+    expect(screen.queryByTestId('theme-toggle')).toBeNull();
   });
 
   it('should apply a translucent backdrop-blur header with an opaque fallback (Issue #1049)', () => {
@@ -147,34 +90,35 @@ describe('Header', () => {
   });
 
   describe('i18n (Issue #1206)', () => {
-    it('renders every nav label in Japanese under the ja locale', () => {
+    it('renders every screen name in Japanese under the ja locale', () => {
       intlLocale.current = 'ja';
-      render(<Header />);
-
-      expect(screen.getByText('セッション')).toBeDefined();
-      expect(screen.getByText('リポジトリ')).toBeDefined();
-      expect(screen.getByText('レビュー/レポート')).toBeDefined();
-      expect(screen.getByText('設定')).toBeDefined();
-    });
-
-    it('leaves no English nav label behind under the ja locale', () => {
-      intlLocale.current = 'ja';
-      render(<Header />);
-
-      for (const label of ['Sessions', 'Repos', 'Review/Report', 'Settings']) {
-        expect(screen.queryByText(label), `"${label}" is still hardcoded English`).toBeNull();
+      const cases: Array<[string, string]> = [
+        ['/sessions', 'セッション'],
+        ['/repositories', 'リポジトリ'],
+        ['/review', 'レビュー'],
+        ['/more', '設定'],
+      ];
+      for (const [pathname, label] of cases) {
+        mockPathname.mockReturnValue(pathname);
+        const { unmount } = render(<Header />);
+        expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(label);
+        unmount();
       }
     });
 
-    it('keeps hrefs and active state locale-independent', () => {
+    it('leaves no English screen name behind under the ja locale', () => {
       intlLocale.current = 'ja';
-      mockPathname.mockReturnValue('/repositories');
-      render(<Header />);
-
-      const reposLink = screen.getByText('リポジトリ').closest('a');
-      expect(reposLink?.getAttribute('href')).toBe('/repositories');
-      expect(reposLink?.className).toContain('text-accent-600');
-      expect(reposLink?.getAttribute('aria-current')).toBe('page');
+      for (const [pathname, label] of [
+        ['/sessions', 'Sessions'],
+        ['/repositories', 'Repositories'],
+        ['/review', 'Review'],
+        ['/more', 'Settings'],
+      ] as const) {
+        mockPathname.mockReturnValue(pathname);
+        const { unmount } = render(<Header />);
+        expect(screen.queryByText(label), `"${label}" is still hardcoded English`).toBeNull();
+        unmount();
+      }
     });
   });
 });

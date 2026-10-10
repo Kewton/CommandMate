@@ -1067,7 +1067,6 @@
     }
   },
   "activityBar": {
-    "toggleSidebar": "Toggle sidebar",
     "label": "Activity Bar",
     "files": "File Tree",
     "git": "Git",
@@ -1079,7 +1078,6 @@
     "skills": "Skills",
     "verification": "Verification",
     "env": "Env",
-    "settings": "Settings",
     "settingsMenu": {
       "settings": "Settings",
       "skills": "Skills",

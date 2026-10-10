@@ -1,7 +1,8 @@
 /**
  * SettingsMenu — the one settings popover (Issue #3510).
  *
- * The sidebar footer and the ActivityBar gear both open this menu, so the
+ * The sidebar footer and the icon-rail gear (`SidebarRail`; the ActivityBar
+ * gear until #3512) both open this menu, so the
  * entries that used to be spread over those two places and the global Header
  * live in one list: Settings… · Skills · theme · language · display size ·
  * repository-tab strip · GitHub · version · logout.
@@ -13,7 +14,9 @@
  * for: Esc closes, focus returns to the trigger, arrow keys reach every item.
  *
  * "Settings…" keeps the #2709 split: the PC opens the settings modal, the
- * phone goes to `/more` (a two-column dialog has nowhere to go at 390px).
+ * phone goes to `/more` (a two-column dialog has nowhere to go at 390px). It is
+ * an `<a href="/more">`, so a modified / middle click opens /more in a new tab
+ * as the old Header link did (#3512).
  *
  * @module components/layout/SettingsMenu
  */
@@ -46,6 +49,14 @@ import {
 } from '@/components/ui/DropdownMenu';
 
 const GITHUB_URL = 'https://github.com/kewton/MyCodeBranchDesk';
+
+/**
+ * A click the browser should handle itself on a link: anything but a plain
+ * primary-button click (⌘/Ctrl/Shift/Alt, middle button).
+ */
+function isModifiedClick(event: React.MouseEvent): boolean {
+  return event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey;
+}
 
 /** Wrap the host's button in this (with `asChild`) to make it the menu trigger. */
 export const SettingsMenuTrigger = DropdownMenuTrigger;
@@ -119,7 +130,7 @@ function DisplayPreferenceItems() {
  *
  * @example
  * ```tsx
- * <SettingsMenu testIdPrefix="activity-bar-settings" side="right" align="end">
+ * <SettingsMenu testIdPrefix="sidebar-rail-settings" side="right" align="end">
  *   <SettingsMenuTrigger asChild><button aria-label="Settings">…</button></SettingsMenuTrigger>
  * </SettingsMenu>
  * ```
@@ -132,7 +143,7 @@ export function SettingsMenu({
   showDisplayPreferences = false,
   onNavigate,
 }: SettingsMenuProps) {
-  // The wording predates this menu (ActivityBar, #2645) and is pinned by the
+  // The wording predates this menu (the ActivityBar gear, #2645) and is pinned by the
   // worktree key test, so it stays under `worktree.activityBar.settingsMenu`.
   const t = useTranslations('worktree');
   const router = useViewTransitionRouter();
@@ -147,6 +158,9 @@ export function SettingsMenu({
   // time as the element to return to when it closes. Suppressing Radix's
   // restore would leave that as <body> and lose the way back.
   const openSettingsAfterClose = useRef(false);
+  // Issue #3512: the click on "Settings…" being handled, read by the onSelect
+  // Radix calls from inside that same click.
+  const settingsClick = useRef<React.MouseEvent<HTMLAnchorElement> | null>(null);
   // Read at render time (not module scope) so a test can stub it.
   const appVersion = process.env.NEXT_PUBLIC_APP_VERSION;
 
@@ -181,8 +195,19 @@ export function SettingsMenu({
             version: appVersion ? `v${appVersion}` : '-',
           })}
         </DropdownMenuLabel>
+        {/* Issue #3512: a real link to /more, like the old Header entry (#2709).
+            A ⌘/Ctrl/Shift/Alt or non-primary click is left to the browser (new
+            tab / window) and selects nothing. A plain click (Enter is turned
+            into one by Radix) runs onSelect, which stops the browser's own
+            navigation there: preventing it in the link's onClick would also
+            make Radix skip its select handler, and the menu would stay open. */}
         <DropdownMenuItem
+          asChild
           onSelect={() => {
+            const click = settingsClick.current;
+            settingsClick.current = null;
+            if (click && isModifiedClick(click)) return;
+            click?.preventDefault();
             if (isMobile) {
               navigate('/more');
               return;
@@ -190,7 +215,15 @@ export function SettingsMenu({
             openSettingsAfterClose.current = true;
           }}
         >
-          {t('activityBar.settingsMenu.settings')}
+          <a
+            href="/more"
+            data-testid={`${testIdPrefix}-settings`}
+            onClick={(event) => {
+              settingsClick.current = event;
+            }}
+          >
+            {t('activityBar.settingsMenu.settings')}
+          </a>
         </DropdownMenuItem>
         <DropdownMenuItem onSelect={() => navigate('/skills')}>
           {t('activityBar.settingsMenu.skills')}

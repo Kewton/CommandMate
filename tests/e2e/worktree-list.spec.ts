@@ -16,6 +16,8 @@
  *   - Search is "Search branches..." in the sidebar, not "Search worktrees".
  *   - Sort is a dropdown (Updated / Repository name / Branch name / Status) with a worded direction toggle (Newest first / Oldest first, …), not Name / Updated / Path buttons with ↑↓ text.
  *   - "Refresh" is the "Sync branches" button.
+ *   - [Issue #3512] The header is the screen name + status only; GitHub is a
+ *     settings-menu item (sidebar footer / icon rail).
  *
  * These specs assert app chrome only, so they hold with zero worktrees — which
  * is what the server under test always has (playwright.config.ts pins
@@ -98,8 +100,10 @@ test.describe('Home Page', () => {
   });
 
   test('should navigate to header navigation link', async ({ page }) => {
-    // Check GitHub link
-    const githubLink = page.getByRole('link', { name: /GitHub/i });
+    // Issue #3512: GitHub left the header; it is an item of the shared settings
+    // menu, opened from the sidebar footer (the desktop sidebar is open here).
+    await page.getByTestId('sidebar-settings-menu').click();
+    const githubLink = page.getByRole('menuitem', { name: /GitHub/i });
     await expect(githubLink).toBeVisible();
     await expect(githubLink).toHaveAttribute('href', /github/i);
     await expect(githubLink).toHaveAttribute('target', '_blank');

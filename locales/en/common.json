@@ -25,9 +25,7 @@
   "nav": {
     "sessions": "Sessions",
     "repositories": "Repositories",
-    "repositoriesShort": "Repos",
     "review": "Review",
-    "reviewReport": "Review/Report",
     "more": "Settings",
     "skills": "Skills"
   },
@@ -99,6 +97,7 @@
   "back": "Back",
   "menu": "Menu",
   "sidebar": {
+    "railLabel": "App navigation",
     "open": "Open sidebar",
     "close": "Close sidebar",
     "branchNavigation": "Branch navigation",
