@@ -76,6 +76,7 @@ import {
   writeSurfaceMode,
 } from '@/config/surface-mode-config';
 import { usePromptStuckCounter } from '@/hooks/usePromptStuckCounter';
+import { useNewTaskScreenTarget } from '@/hooks/useNewTaskScreenTarget';
 
 // ============================================================================
 // Types
@@ -405,6 +406,11 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     worktreeName,
     worktreeStatus,
   } = useWorktreeDetailController({ worktreeId });
+
+  // Issue #3511: New task opened on this screen starts on this worktree and
+  // the agent selected here. Both layouts, one report: `activeInstanceId` is
+  // what the PC header and the phone's tabs both select.
+  useNewTaskScreenTarget(worktreeId, activeInstanceId);
 
   // Issue #2498: the re-login button's label. The screen's other namespaces
   // arrive from the controller; `auth` is only needed for this one string.

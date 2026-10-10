@@ -290,5 +290,51 @@
       "loadError": "設定を読み込めませんでした。",
       "opencodeSharedData": "OpenCode と OpenCode V2 が両方入っています。両者は ~/.local/share/opencode を共有しており、V2 が変えたデータベースを OpenCode（1.x）が読めずに起動に失敗することがあります。その場合は V2 だけを使うか、1.x のデータの置き場所を分けてください。"
     }
+  },
+  "newTask": {
+    "title": "新しいタスク",
+    "loading": "ブランチを読み込んでいます…",
+    "loadError": "ブランチの一覧を読み込めませんでした。",
+    "noTargets": "送り先にできるエージェントのあるブランチがありません。",
+    "recentLabel": "最近の送り先",
+    "repositoryLabel": "リポジトリ",
+    "branchLabel": "ブランチ",
+    "agentLabel": "エージェント",
+    "agentStatus": {
+      "running": "稼働中",
+      "starting": "起動中",
+      "stopped": "停止中"
+    },
+    "willStart": "{agent} を起動して送ります。",
+    "startingNotice": "{agent} は起動中です。送れなかったときは少し待ってから送り直してください。",
+    "messageLabel": "依頼",
+    "messagePlaceholder": "エージェントへの依頼を書く",
+    "modelLabel": "モデル",
+    "modelPlaceholder": "既定のまま",
+    "modelHintLaunch": "セッションを起動するときに使います。",
+    "modelHintSwitch": "稼働中のセッションをこのモデルに切り替えます。",
+    "modelUnavailable": {
+      "unsupported": "{agent} は送信時のモデル指定に対応していません。",
+      "running": "{agent} は稼働中です。モデルは起動時にだけ指定できます（変えるにはセッションを止めてから）。"
+    },
+    "autoYesLabel": "Auto-Yes",
+    "autoYesActive": "このエージェントで有効（残り {remaining}）。変更しません。",
+    "autoYesKeep": "変えない（無効のまま）",
+    "autoYesEnableFor": "{duration} 有効にする",
+    "autoYesScope": "この依頼だけでなく、期限まで このエージェントに効きます。",
+    "send": "送る",
+    "sending": "送信中…",
+    "sendHint": "で送る",
+    "sentToast": "{target} に送りました。クリックで戻ります。",
+    "errors": {
+      "auto_yes_failed": "Auto-Yes を有効にできなかったため、送っていません。",
+      "prompt_waiting": "{agent} は確認待ちのため、送っていません。ブランチの画面で応答してから送り直してください。",
+      "conflict": "セッションが依頼を受け付けませんでした。",
+      "starting": "{agent} は起動中です。少し待ってから送り直してください。",
+      "start_failed": "{agent} を起動できませんでした。",
+      "model_rejected": "モデル指定が受け付けられませんでした。消すか変えてから送り直してください。",
+      "invalid": "依頼が受け付けられませんでした。",
+      "failed": "送信に失敗しました。接続を確かめて送り直してください。"
+    }
   }
 }

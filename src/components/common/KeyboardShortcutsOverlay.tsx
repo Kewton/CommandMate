@@ -3,8 +3,8 @@
  *
  * The `?` keyboard-shortcuts help modal. Mounted once under AppShell (next to
  * the CommandPalette). It owns the single global `?` keydown listener and reads
- * the shortcut list from the central registry (@/config/keyboard-shortcuts),
- * grouping it by scope and rendering each binding with <Kbd> caps.
+ * the shortcut list from the central registry (@/config/keyboard-shortcuts)
+ * plus New task's rows (Issue #3511), grouping it by scope and rendering each binding with <Kbd> caps.
  *
  * The `?` key never opens the overlay while the user is typing: it reuses the
  * command palette's shared `isTypingTarget` guard (input / textarea / select /
@@ -25,10 +25,19 @@ import { isTypingTarget } from '@/components/common/CommandPalette';
 import { useKeyboardShortcuts } from '@/contexts/KeyboardShortcutsContext';
 import { useCommandPalette } from '@/contexts/CommandPaletteContext';
 import {
+  KEYBOARD_SHORTCUTS,
   groupShortcutsByScope,
   isMacPlatform,
   resolveShortcutKey,
 } from '@/config/keyboard-shortcuts';
+import { NEW_TASK_SHORTCUTS } from '@/lib/new-task/new-task-shortcut';
+
+/**
+ * The registry plus New task's two rows (Issue #3511). Appended here because
+ * the registry module is outside that Issue's change set; the rows render in
+ * the same scope groups as everything else.
+ */
+const OVERLAY_SHORTCUTS = [...KEYBOARD_SHORTCUTS, ...NEW_TASK_SHORTCUTS];
 
 /** Global keyboard-shortcuts help overlay opened by `?`. */
 export function KeyboardShortcutsOverlay() {
@@ -68,7 +77,7 @@ export function KeyboardShortcutsOverlay() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [setOpen]);
 
-  const groups = groupShortcutsByScope();
+  const groups = groupShortcutsByScope(OVERLAY_SHORTCUTS);
 
   return (
     <Modal isOpen={open} onClose={() => setOpen(false)} title={t('title')} size="md">
