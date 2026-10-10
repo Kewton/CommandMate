@@ -531,7 +531,7 @@
     "loading": "Loading…",
     "sessionEnded": "The session has ended. Send a message to start a new session.",
     "layoutGroupLabel": "Split layout",
-    "layoutSplits": "{count, plural, one {# split} other {# splits}}",
+    "layoutSplits": "Split layout: {count}",
     "composerTarget": "To: {agent} · {branch}",
     "composerTargetNoBranch": "To: {agent}",
     "composerTargetLabel": "This input sends to {agent} on {branch}",
