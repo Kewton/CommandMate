@@ -67,20 +67,6 @@ export interface AutoYesPollerState {
 }
 
 /**
- * Issue #2995: print a "did not answer" line as WARN once per frame.
- *
- * The poller re-reads a static pane every 2s, so a frame Auto-Yes leaves alone
- * (a reply quoting `1. Yes / 2. No`, a launch dialog, a policy-withheld prompt,
- * a foreign session) would otherwise print the same WARN on every tick. The
- * first one stays WARN -- it is what tells a silently stalled worker apart --
- * and repeats for the same frame drop to `debug`. The frame is identified by
- * the event, `promptFrameKey()` and the event's own detail; a different
- * prompt, a different reason, or a tick with no prompt / an answer sent (both
- * clear the key) makes the next line WARN again.
- * `recordPolicySuppression()` is not throttled: `capture --json` and `wait`
- * read the latest record, not the log.
- */
-/**
  * Issue #2995: what makes two ticks "the same prompt" for `warnOncePerFrame`.
  *
  * `generatePromptKey` alone is type + question, and the question the detector
@@ -98,6 +84,20 @@ export function promptFrameKey(promptData: PromptData): string {
   return [generatePromptKey(promptData), options, promptData.approvalTarget ?? ''].join('\u0000');
 }
 
+/**
+ * Issue #2995: print a "did not answer" line as WARN once per frame.
+ *
+ * The poller re-reads a static pane every 2s, so a frame Auto-Yes leaves alone
+ * (a reply quoting `1. Yes / 2. No`, a launch dialog, a policy-withheld prompt,
+ * a foreign session) would otherwise print the same WARN on every tick. The
+ * first one stays WARN -- it is what tells a silently stalled worker apart --
+ * and repeats for the same frame drop to `debug`. The frame is identified by
+ * the event, `promptFrameKey()` and the event's own detail; a different
+ * prompt, a different reason, or a tick with no prompt / an answer sent (both
+ * clear the key) makes the next line WARN again.
+ * `recordPolicySuppression()` is not throttled: `capture --json` and `wait`
+ * read the latest record, not the log.
+ */
 export function warnOncePerFrame(
   pollerState: AutoYesPollerState,
   frameKey: string,

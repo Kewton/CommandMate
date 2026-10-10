@@ -8,6 +8,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as path from 'path';
 import * as fs from 'fs';
+import * as os from 'os';
 import type {
   SlashCommand,
   SlashCommandCategory,
@@ -397,6 +398,40 @@ describe('loadSkills', () => {
       expect(skills[0].description).toBe('A skill');
       expect(skills[0].category).toBe('skill');
       expect(skills[0].source).toBe('skill');
+    } finally {
+      removeTempDir(testDir);
+    }
+  });
+
+  it('should not log ERROR for a skill directory without SKILL.md (Issue #3520)', async () => {
+    const testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-skills-3520-'));
+    try {
+      fs.mkdirSync(path.join(testDir, '.claude', 'skills', 'no-skill-md'), { recursive: true });
+
+      const { loadSkills } = await import('@/lib/slash-commands');
+      const skills = await loadSkills(testDir);
+
+      expect(skills).toHaveLength(0);
+      expect(mockLogger.error).not.toHaveBeenCalled();
+    } finally {
+      removeTempDir(testDir);
+    }
+  });
+
+  it('should still log ERROR for non-ENOENT failures reading SKILL.md (Issue #3520)', async () => {
+    const testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-skills-3520-'));
+    try {
+      // SKILL.md is a directory: statSync succeeds, readFileSync throws EISDIR
+      fs.mkdirSync(path.join(testDir, '.claude', 'skills', 'broken', 'SKILL.md'), { recursive: true });
+
+      const { loadSkills } = await import('@/lib/slash-commands');
+      const skills = await loadSkills(testDir);
+
+      expect(skills).toHaveLength(0);
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        'error-parsing-skill-file-skillpath:',
+        expect.anything()
+      );
     } finally {
       removeTempDir(testDir);
     }
