@@ -19,6 +19,8 @@
     "editorOutdent": "Outdent line or selection",
     "editorTabFocus": "Toggle whether Tab moves focus",
     "editorSave": "Save file",
-    "editorFullscreen": "Toggle fullscreen editor"
+    "editorFullscreen": "Toggle fullscreen editor",
+    "newTask": "New task — send a request to any agent",
+    "newTaskSend": "Send from the New task dialog"
   }
 }

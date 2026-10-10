@@ -18,6 +18,10 @@
  *
  * Issue #2651: both branches mount the What's-new dialog next to the
  * version-drift banner.
+ *
+ * Issue #3511: both branches sit inside `NewTaskProvider` and mount the New
+ * task dialog host, so the dialog opens from the list screens and the worktree
+ * screen alike (the worktree screen reports its own destination through it).
  */
 
 'use client';
@@ -36,6 +40,8 @@ import { CommandPalette } from '@/components/common/CommandPalette';
 import { KeyboardShortcutsOverlay } from '@/components/common/KeyboardShortcutsOverlay';
 import { VersionMismatchBanner } from './VersionMismatchBanner';
 import { WhatsNewDialog } from '@/components/common/WhatsNewDialog';
+import { NewTaskProvider } from '@/contexts/NewTaskContext';
+import { NewTaskDialogHost } from '@/components/new-task/NewTaskDialogHost';
 import {
   shouldShowRepositoryTabBar,
   DEFAULT_REPO_TAB_BAR_MODE,
@@ -153,49 +159,122 @@ export const AppShell = memo(function AppShell({ children }: AppShellProps) {
   // Mobile layout with drawer
   if (isMobile) {
     return (
-      <div data-testid="app-shell" className="h-screen flex flex-col">
-        {/* Connection status (Issue #2501). First in the column, and in flow
-            rather than floating, so its height comes out of <main> and it can
-            never cover the composer or the bottom tab bar (cf. #2271). Renders
-            nothing while connected. */}
-        <MobileConnectionBanner />
+      <NewTaskProvider>
+        <div data-testid="app-shell" className="h-screen flex flex-col">
+          {/* Connection status (Issue #2501). First in the column, and in flow
+              rather than floating, so its height comes out of <main> and it can
+              never cover the composer or the bottom tab bar (cf. #2271). Renders
+              nothing while connected. */}
+          <MobileConnectionBanner />
 
-        {/* Mobile drawer overlay */}
-        {isMobileDrawerOpen && (
-          <div
-            data-testid="drawer-overlay"
-            className="fixed inset-0 bg-black/50 z-40"
-            onClick={closeMobileDrawer}
-            aria-hidden="true"
-          />
-        )}
+          {/* Mobile drawer overlay */}
+          {isMobileDrawerOpen && (
+            <div
+              data-testid="drawer-overlay"
+              className="fixed inset-0 bg-black/50 z-40"
+              onClick={closeMobileDrawer}
+              aria-hidden="true"
+            />
+          )}
 
-        {/* Mobile drawer - uses z-50 (above overlay z-40) for proper stacking */}
-        {showSidebar && (
-          <aside
-            data-testid="sidebar-container"
-            className={`
-              fixed left-0 top-0 h-full w-72 z-50
-              ${SIDEBAR_TRANSITION}
-              ${isMobileDrawerOpen ? 'translate-x-0' : '-translate-x-full'}
-            `}
-            role="complementary"
+          {/* Mobile drawer - uses z-50 (above overlay z-40) for proper stacking */}
+          {showSidebar && (
+            <aside
+              data-testid="sidebar-container"
+              className={`
+                fixed left-0 top-0 h-full w-72 z-50
+                ${SIDEBAR_TRANSITION}
+                ${isMobileDrawerOpen ? 'translate-x-0' : '-translate-x-full'}
+              `}
+              role="complementary"
+            >
+              <Sidebar />
+            </aside>
+          )}
+
+          {/* Main content */}
+          <main
+            className={`flex-1 min-h-0 overflow-hidden ${showGlobalNav ? 'pb-nav-safe' : ''}`}
+            role="main"
+            data-view-transition="content"
           >
-            <Sidebar />
-          </aside>
-        )}
+            {children}
+          </main>
 
-        {/* Main content */}
-        <main
-          className={`flex-1 min-h-0 overflow-hidden ${showGlobalNav ? 'pb-nav-safe' : ''}`}
-          role="main"
-          data-view-transition="content"
-        >
-          {children}
-        </main>
+          {/* Global mobile nav (bottom tab bar) */}
+          {showGlobalNav && <GlobalMobileNav />}
 
-        {/* Global mobile nav (bottom tab bar) */}
-        {showGlobalNav && <GlobalMobileNav />}
+          {/* Global command palette (⌘K / Ctrl+K) - single instance (Issue #1053) */}
+          <CommandPalette />
+          {/* Global keyboard-shortcuts help overlay (?) - single instance (Issue #1130) */}
+          <KeyboardShortcutsOverlay />
+          {/* Version-drift reload nudge (#1338/#1356) - app-wide, single instance. */}
+          <VersionMismatchBanner />
+          {/* What's new after an update (Issue #2651) - app-wide, single instance. */}
+          <WhatsNewDialog />
+          {/* New task (Mod+Shift+O / openNewTask) - single instance (Issue #3511) */}
+          <NewTaskDialogHost />
+        </div>
+      </NewTaskProvider>
+    );
+  }
+
+  // Desktop layout with fixed sidebar and padding-based content shift
+  // Issue #112: Using transform for better performance (GPU-accelerated)
+  return (
+    <NewTaskProvider>
+      <div data-testid="app-shell" className="h-screen flex flex-col">
+        {/* Repository tab strip, above the header (Issue #2374) */}
+        {showRepositoryTabBar && <RepositoryTabBar />}
+
+        {/* Header with 5-screen navigation */}
+        {showGlobalNav && <Header />}
+
+        <div className="flex flex-1 min-h-0">
+          {/* Desktop sidebar - fixed position with transform animation (Issue #112) */}
+          {/* Width is dynamic (drag-resizable); stored in SidebarContext + localStorage */}
+          {showSidebar && (
+            <aside
+              ref={sidebarRef}
+              data-testid="sidebar-container"
+              className={`
+                fixed left-0
+                ${showGlobalNav ? 'top-16 h-[calc(100vh-4rem)]' : 'top-0 h-full'}
+                border-r border-border
+                ${SIDEBAR_TRANSITION}
+                ${isOpen ? 'translate-x-0' : '-translate-x-full'}
+              `}
+              style={{
+                width: `${displayWidth}px`,
+                zIndex: Z_INDEX.SIDEBAR,
+                ...sidebarOffsetStyle,
+              }}
+              role="complementary"
+              aria-hidden={!isOpen}
+            >
+              <Sidebar />
+              <ResizeHandle
+                currentWidth={displayWidth}
+                minWidth={minWidth}
+                maxWidth={maxWidth}
+                sidebarRef={sidebarRef}
+                mainRef={mainRef}
+                onWidthChange={handleWidthChange}
+              />
+            </aside>
+          )}
+
+          {/* Main content - paddingLeft matches sidebar width */}
+          <main
+            ref={mainRef}
+            className="flex-1 min-w-0 h-full overflow-hidden transition-[padding] duration-300 ease-out"
+            style={{ paddingLeft: showSidebar && isOpen ? `${displayWidth}px` : 0 }}
+            role="main"
+            data-view-transition="content"
+          >
+            {children}
+          </main>
+        </div>
 
         {/* Global command palette (⌘K / Ctrl+K) - single instance (Issue #1053) */}
         <CommandPalette />
@@ -205,75 +284,10 @@ export const AppShell = memo(function AppShell({ children }: AppShellProps) {
         <VersionMismatchBanner />
         {/* What's new after an update (Issue #2651) - app-wide, single instance. */}
         <WhatsNewDialog />
+        {/* New task (Mod+Shift+O / openNewTask) - single instance (Issue #3511) */}
+        <NewTaskDialogHost />
       </div>
-    );
-  }
-
-  // Desktop layout with fixed sidebar and padding-based content shift
-  // Issue #112: Using transform for better performance (GPU-accelerated)
-  return (
-    <div data-testid="app-shell" className="h-screen flex flex-col">
-      {/* Repository tab strip, above the header (Issue #2374) */}
-      {showRepositoryTabBar && <RepositoryTabBar />}
-
-      {/* Header with 5-screen navigation */}
-      {showGlobalNav && <Header />}
-
-      <div className="flex flex-1 min-h-0">
-        {/* Desktop sidebar - fixed position with transform animation (Issue #112) */}
-        {/* Width is dynamic (drag-resizable); stored in SidebarContext + localStorage */}
-        {showSidebar && (
-          <aside
-            ref={sidebarRef}
-            data-testid="sidebar-container"
-            className={`
-              fixed left-0
-              ${showGlobalNav ? 'top-16 h-[calc(100vh-4rem)]' : 'top-0 h-full'}
-              border-r border-border
-              ${SIDEBAR_TRANSITION}
-              ${isOpen ? 'translate-x-0' : '-translate-x-full'}
-            `}
-            style={{
-              width: `${displayWidth}px`,
-              zIndex: Z_INDEX.SIDEBAR,
-              ...sidebarOffsetStyle,
-            }}
-            role="complementary"
-            aria-hidden={!isOpen}
-          >
-            <Sidebar />
-            <ResizeHandle
-              currentWidth={displayWidth}
-              minWidth={minWidth}
-              maxWidth={maxWidth}
-              sidebarRef={sidebarRef}
-              mainRef={mainRef}
-              onWidthChange={handleWidthChange}
-            />
-          </aside>
-        )}
-
-        {/* Main content - paddingLeft matches sidebar width */}
-        <main
-          ref={mainRef}
-          className="flex-1 min-w-0 h-full overflow-hidden transition-[padding] duration-300 ease-out"
-          style={{ paddingLeft: showSidebar && isOpen ? `${displayWidth}px` : 0 }}
-          role="main"
-          data-view-transition="content"
-        >
-          {children}
-        </main>
-      </div>
-
-      {/* Global command palette (⌘K / Ctrl+K) - single instance (Issue #1053) */}
-      <CommandPalette />
-      {/* Global keyboard-shortcuts help overlay (?) - single instance (Issue #1130) */}
-      <KeyboardShortcutsOverlay />
-      {/* Version-drift reload nudge (#1338/#1356) - app-wide, single instance. */}
-      <VersionMismatchBanner />
-      {/* What's new after an update (Issue #2651) - app-wide, single instance. */}
-      <WhatsNewDialog />
-    </div>
+    </NewTaskProvider>
   );
 });
 
