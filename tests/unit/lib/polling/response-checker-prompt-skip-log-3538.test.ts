@@ -72,6 +72,11 @@ const PROMPT_A = readFileSync(
 );
 /** The same dialog asking about a different command — a new prompt, same layout. */
 const PROMPT_B = PROMPT_A.replace('sleep 25; echo finished', 'sleep 26; echo finished');
+/** Copilot mid-turn, no prompt on screen (same live capture set). */
+const WORKING = readFileSync(
+  path.resolve(__dirname, '../detection/fixtures/copilot-live-1885/turn-running-thinking.txt'),
+  'utf8',
+);
 
 function skipLogs(): Array<Record<string, unknown>> {
   return mockLogger.info.mock.calls
@@ -175,5 +180,26 @@ describe('Issue #3538: duplicate-prompt-skipped is thinned at the skip site', ()
 
     expect(skipLogs()).toHaveLength(2);
     expect(getPromptDedupSkips(WT, 'copilot', 'copilot-2').skippedCount).toBe(1);
+  });
+
+  it('a tick without the prompt ends the run, so the prompt coming back logs its first duplicate', async () => {
+    captureSessionOutput.mockResolvedValue(PROMPT_A);
+    await ticks(2);
+    expect(skipLogs()).toHaveLength(1);
+
+    captureSessionOutput.mockResolvedValue(WORKING);
+    expect(await checkForResponse(WT, 'copilot')).toBe(false);
+
+    captureSessionOutput.mockResolvedValue(PROMPT_A);
+    // The hash is kept, so the returning prompt is still not saved again …
+    expect(await checkForResponse(WT, 'copilot')).toBe(false);
+    expect(savedPrompts()).toBe(1);
+    // … but its duplicate is the first of a new run and logs, in the first-tick shape.
+    expect(skipLogs()).toEqual([
+      { worktreeId: WT, cliToolId: 'copilot' },
+      { worktreeId: WT, cliToolId: 'copilot' },
+    ]);
+    // The #1695 tally counts both skips.
+    expect(getPromptDedupSkips(WT, 'copilot').skippedCount).toBe(2);
   });
 });

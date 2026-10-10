@@ -18,6 +18,7 @@ import {
   clearPromptHashCache,
   isDuplicatePrompt,
   renamePromptHashCacheKey,
+  resetDuplicatePromptSkipStreak,
 } from '@/lib/polling/prompt-dedup';
 import { DUPLICATE_RESPONSE_SKIP_LOG_TICK_INTERVAL } from '@/lib/polling/response-dedup';
 
@@ -111,5 +112,41 @@ describe('Issue #3538: duplicate-prompt-skipped is thinned', () => {
   it('counts are per pollerKey', () => {
     loggedTicks(KEY, 5);
     expect(claimDuplicatePromptSkipLog(OTHER).consecutive).toBe(1);
+  });
+
+  it('resetDuplicatePromptSkipStreak ends the run but keeps the hash', () => {
+    isDuplicatePrompt(KEY, 'prompt A');
+    loggedTicks(KEY, 5);
+
+    resetDuplicatePromptSkipStreak(KEY);
+
+    // The guard still suppresses the same prompt (#565) …
+    expect(isDuplicatePrompt(KEY, 'prompt A')).toBe(true);
+    // … but its next duplicate is the first of a new run.
+    expect(claimDuplicatePromptSkipLog(KEY)).toEqual({ log: true, consecutive: 1, suppressed: 0 });
+  });
+
+  it('a rename that replaces the target hash replaces its count, even when the source has none', () => {
+    // Target: a different prompt, 5 duplicate ticks into its run.
+    isDuplicatePrompt(OTHER, 'prompt B');
+    loggedTicks(OTHER, 5);
+    // Source: a hash with no duplicate ticks yet.
+    isDuplicatePrompt(KEY, 'prompt A');
+
+    renamePromptHashCacheKey(KEY, OTHER);
+
+    expect(isDuplicatePrompt(OTHER, 'prompt A')).toBe(true);
+    expect(claimDuplicatePromptSkipLog(OTHER)).toEqual({ log: true, consecutive: 1, suppressed: 0 });
+  });
+
+  it('a rename that replaces the target hash carries the source count over the target one', () => {
+    isDuplicatePrompt(OTHER, 'prompt B');
+    loggedTicks(OTHER, 5);
+    isDuplicatePrompt(KEY, 'prompt A');
+    loggedTicks(KEY, 2);
+
+    renamePromptHashCacheKey(KEY, OTHER);
+
+    expect(claimDuplicatePromptSkipLog(OTHER).consecutive).toBe(3);
   });
 });

@@ -118,6 +118,23 @@ export function claimDuplicatePromptSkipLog(pollerKey: string): DuplicatePromptS
 }
 
 /**
+ * End the current run of duplicate prompt ticks for this pollerKey without
+ * touching the cached hash (Issue #3538).
+ *
+ * Called by `response-checker` on every tick that does not reach the prompt
+ * guard with a live prompt — a working screen, an unfinished frame, a reply.
+ * The prompt is no longer on screen, so if the same prompt comes back the next
+ * duplicate is the first of a new run and logs. The hash stays: whether the
+ * returning prompt is saved again is the guard's question (#565), and this
+ * Issue only thins the log line.
+ *
+ * @param pollerKey - Poller key ("worktreeId:cliToolId")
+ */
+export function resetDuplicatePromptSkipStreak(pollerKey: string): void {
+  duplicatePromptSkipStreak.delete(pollerKey);
+}
+
+/**
  * Clear the prompt hash cache for a specific pollerKey.
  * Called during session cleanup / stopPolling.
  *
@@ -145,14 +162,21 @@ export function clearPromptHashCache(pollerKey: string): void {
 export function renamePromptHashCacheKey(oldKey: string, newKey: string): void {
   if (oldKey === newKey) return;
   const hash = promptHashCache.get(oldKey);
+  const streak = duplicatePromptSkipStreak.get(oldKey);
   promptHashCache.delete(oldKey);
-  if (hash !== undefined) promptHashCache.set(newKey, hash);
+  duplicatePromptSkipStreak.delete(oldKey);
+  if (hash === undefined) return;
+  promptHashCache.set(newKey, hash);
 
   // Issue #3538: the skip count moves with the hash, so a rename mid-run does
-  // not restart the thinning and log as if a new run had begun.
-  const streak = duplicatePromptSkipStreak.get(oldKey);
-  duplicatePromptSkipStreak.delete(oldKey);
-  if (streak !== undefined) duplicatePromptSkipStreak.set(newKey, streak);
+  // not restart the thinning and log as if a new run had begun. Whenever the
+  // hash under `newKey` is replaced, so is its count — a count left over from
+  // the hash that was there before is about a different prompt.
+  if (streak !== undefined) {
+    duplicatePromptSkipStreak.set(newKey, streak);
+  } else {
+    duplicatePromptSkipStreak.delete(newKey);
+  }
 }
 
 /**

@@ -43,7 +43,12 @@ import {
   getAccumulatedContent,
   clearTuiAccumulator,
 } from '../tui-accumulator';
-import { claimDuplicatePromptSkipLog, isDuplicatePrompt, normalizePromptForDedup } from './prompt-dedup';
+import {
+  claimDuplicatePromptSkipLog,
+  isDuplicatePrompt,
+  normalizePromptForDedup,
+  resetDuplicatePromptSkipStreak,
+} from './prompt-dedup';
 import { recordPromptDedupSkip } from './prompt-dedup-state';
 import {
   isDuplicateResponse,
@@ -1423,6 +1428,9 @@ export async function checkForResponse(
 
     const turn = extractCompletedTurn(ctx, output, lastCapturedLine);
     if (!turn) {
+      // Issue #3538: no prompt on this frame, so a run of duplicate prompt
+      // ticks is over (the hash is kept — see the helper).
+      resetDuplicatePromptSkipStreak(pollerKey);
       return false;
     }
     const { result, isFullScreenTui, lineCountIsCursor } = turn;
@@ -1451,6 +1459,8 @@ export async function checkForResponse(
     if (promptIsLive) {
       return savePromptMessage(ctx, promptDetection, result, isFullScreenTui);
     }
+    // Issue #3538: as above — a finished frame without a live prompt ends the run.
+    resetDuplicatePromptSkipStreak(pollerKey);
 
     // Validate response content is not empty
     if (!result.response || result.response.trim() === '') {
