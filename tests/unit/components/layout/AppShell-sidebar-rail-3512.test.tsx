@@ -12,7 +12,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, within } from '@testing-library/react';
 import React from 'react';
 
 vi.mock('next-intl', async () => {
@@ -77,6 +77,8 @@ vi.mock('@/components/layout/RepositoryTabBar', () => ({
 import { AppShell } from '@/components/layout/AppShell';
 import { SidebarProvider } from '@/contexts/SidebarContext';
 import { SIDEBAR_RAIL_WIDTH } from '@/lib/sidebar-utils';
+import { BranchCheckoutDropdown } from '@/components/worktree/git/BranchCheckoutDropdown';
+import type { BranchInfo } from '@/types/git';
 
 function renderShell(initialOpen: boolean, children: React.ReactNode = <div>Content</div>) {
   return render(
@@ -181,5 +183,53 @@ describe('Mod+B (Issue #3512)', () => {
     const event = new KeyboardEvent('keydown', { key: 'b', metaKey: true, cancelable: true, bubbles: true });
     window.dispatchEvent(event);
     expect(event.defaultPrevented).toBe(false);
+  });
+
+  // Review fix: a modal on screen owns the keyboard. The Git checkout
+  // confirmation is a plain role="dialog" aria-modal div (no tabindex), which
+  // `isAnyModalOpen()` counts since #3563.
+  describe('while a modal is on screen', () => {
+    const branches: BranchInfo[] = [
+      { name: 'main', isCurrent: true, isRemote: false, isDefault: true, upstream: null, aheadBehind: null, checkedOutWorktreePath: null },
+      { name: 'feature/x', isCurrent: false, isRemote: false, isDefault: false, upstream: null, aheadBehind: null, checkedOutWorktreePath: null },
+    ];
+
+    function renderWithCheckout() {
+      renderShell(
+        true,
+        <BranchCheckoutDropdown
+          branches={branches}
+          busy={false}
+          actionError={null}
+          hasRunningSession={false}
+          isMobile={false}
+          onCheckout={vi.fn()}
+        />,
+      );
+      fireEvent.click(screen.getByTestId('branch-checkout-dropdown-toggle'));
+      fireEvent.click(screen.getByRole('menuitem', { name: /feature\/x/ }));
+      return screen.getByTestId('branch-checkout-confirm');
+    }
+
+    it('does nothing with the checkout confirmation open and its Cancel focused', () => {
+      const dialog = renderWithCheckout();
+      const cancel = within(dialog).getByRole('button', { name: 'Cancel' });
+      cancel.focus();
+      expect(document.activeElement).toBe(cancel);
+
+      pressModB(cancel);
+      expect(screen.queryByTestId('sidebar-rail-container')).toBeNull();
+      pressModB(window, { metaKey: false, ctrlKey: true });
+      expect(screen.queryByTestId('sidebar-rail-container')).toBeNull();
+    });
+
+    it('works again once the confirmation is closed (negative control)', () => {
+      const dialog = renderWithCheckout();
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+      expect(screen.queryByTestId('branch-checkout-confirm')).toBeNull();
+
+      pressModB();
+      expect(screen.getByTestId('sidebar-rail-container')).toBeInTheDocument();
+    });
   });
 });

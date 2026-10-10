@@ -123,7 +123,10 @@ export function SidebarRail() {
     <nav
       data-testid="sidebar-rail"
       aria-label={t('sidebar.railLabel')}
-      className="flex h-full flex-col items-center gap-1 bg-sidebar px-2 py-2 text-sidebar-foreground"
+      // No padding above or beside the first cell: the open/close cell is
+      // 8 + 40 + 8 px, exactly this width, and starts at the top-left like the
+      // open sidebar's (SidebarPanelToggle).
+      className="flex h-full flex-col items-center gap-1 bg-sidebar pb-2 text-sidebar-foreground"
       style={{ width: `${SIDEBAR_RAIL_WIDTH}px` }}
     >
       <SidebarPanelToggle testId="sidebar-rail-toggle" />

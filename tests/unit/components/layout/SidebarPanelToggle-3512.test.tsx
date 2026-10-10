@@ -54,14 +54,19 @@ describe('SidebarPanelToggle (Issue #3512)', () => {
     expect(sidebarMock.toggle).toHaveBeenCalledTimes(1);
   });
 
-  it('is the same 40px button in both places, so the spot does not move', () => {
+  it('is the same px-sized button in a px cell in both places, so the spot does not move', () => {
     const { unmount } = render(<SidebarPanelToggle testId="sidebar-panel-toggle" />);
-    const openClass = screen.getByTestId('sidebar-panel-toggle').className;
+    const open = screen.getByTestId('sidebar-panel-toggle');
+    const openShape = [open.className, open.style.cssText, (open.closest('[data-sidebar-toggle-cell]') as HTMLElement).style.cssText];
     unmount();
     sidebarMock.isOpen = false;
     render(<SidebarPanelToggle testId="sidebar-rail-toggle" />);
-    expect(screen.getByTestId('sidebar-rail-toggle').className).toBe(openClass);
-    expect(openClass).toMatch(/\bh-10\b/);
-    expect(openClass).toMatch(/\bw-10\b/);
+    const closed = screen.getByTestId('sidebar-rail-toggle');
+    expect([closed.className, closed.style.cssText, (closed.closest('[data-sidebar-toggle-cell]') as HTMLElement).style.cssText]).toEqual(openShape);
+    // px, not rem: the display-size cascade must not move or grow it.
+    expect(open.style.width).toBe('40px');
+    expect(open.style.height).toBe('40px');
+    expect(openShape[2]).toBe('padding: 8px;');
+    expect(open.className).not.toMatch(/\b[hw]-\d/);
   });
 });

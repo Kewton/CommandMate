@@ -902,6 +902,16 @@ export function isBranchKeptInPlace(
  */
 export const SIDEBAR_RAIL_WIDTH = 56;
 
+/**
+ * The open/close button's cell, in px (Issue #3512). The cell is the first
+ * thing at the top-left of both the open sidebar and the rail, with no rem
+ * padding around it, so the button sits at (8px, 8px) of the column in both
+ * states and at every display size (the rem cascade scales Tailwind spacing,
+ * not inline px). 8 + 40 + 8 is the rail's 56px.
+ */
+export const SIDEBAR_TOGGLE_CELL_PADDING = 8;
+export const SIDEBAR_TOGGLE_SIZE = SIDEBAR_RAIL_WIDTH - 2 * SIDEBAR_TOGGLE_CELL_PADDING;
+
 type ToggleSidebarChordEvent = Pick<
   KeyboardEvent,
   'key' | 'code' | 'metaKey' | 'ctrlKey' | 'shiftKey' | 'altKey' | 'isComposing' | 'keyCode'

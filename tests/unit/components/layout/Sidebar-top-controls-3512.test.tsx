@@ -92,9 +92,9 @@ afterEach(() => {
 describe('Sidebar top on the PC (Issue #3512)', () => {
   it('orders logo + open/close, New task, search, then the destinations', () => {
     renderSidebar();
-    const header = screen.getByTestId('sidebar-header');
+    const sidebar = screen.getByTestId('sidebar');
     const order = Array.from(
-      header.querySelectorAll(
+      sidebar.querySelectorAll(
         '[data-testid="sidebar-panel-toggle"], [data-testid="sidebar-logo"], [data-testid="sidebar-new-task"], [data-testid="sidebar-search"], [data-testid="sidebar-nav"]',
       ),
     ).map((el) => el.getAttribute('data-testid'));
@@ -108,13 +108,18 @@ describe('Sidebar top on the PC (Issue #3512)', () => {
     expect(screen.getByTestId('sidebar-logo')).toHaveAttribute('href', '/');
   });
 
-  it('puts the open/close button first in the header, in the left cell the rail uses', () => {
+  it('puts the open/close button first in the sidebar, in the left cell the rail uses', () => {
     renderSidebar();
     const toggle = screen.getByTestId('sidebar-panel-toggle');
     expect(toggle).toHaveAccessibleName('Close sidebar');
     expect(toggle).toHaveAttribute('aria-expanded', 'true');
-    // Same padding as the rail (px-2 py-2), so the 40px button lands on the same spot.
-    expect(screen.getByTestId('sidebar-header')).toHaveClass('px-2', 'py-2');
+    // The top controls are the sidebar's first child and the toggle's px cell
+    // is their first descendant: nothing in rem pads it (placement test:
+    // SidebarToggle-placement-3512).
+    expect(screen.getByTestId('sidebar').firstElementChild).toBe(screen.getByTestId('sidebar-top-controls'));
+    expect(screen.getByTestId('sidebar-top-controls').querySelector('[data-sidebar-toggle-cell]')).toBe(
+      toggle.closest('[data-sidebar-toggle-cell]'),
+    );
     fireEvent.click(toggle);
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
   });

@@ -579,12 +579,15 @@ export const Sidebar = memo(function Sidebar() {
       className="h-full flex flex-col bg-sidebar text-sidebar-foreground"
       role="navigation"
     >
+      {/* Issue #3512: logo + open/close, New task, search. First child, so the
+          open/close cell sits at the sidebar's top-left like the rail's. */}
+      {!isMobile && <SidebarTopControls />}
+
       {/* Header */}
       <div
         data-testid="sidebar-header"
         className="flex-shrink-0 space-y-2 border-b border-sidebar-border px-2 py-2"
       >
-        {!isMobile && <SidebarTopControls />}
         <ul data-testid="sidebar-nav" className="space-y-0.5">
           <li className="flex min-w-0 items-center gap-1">
             <SidebarNavLink

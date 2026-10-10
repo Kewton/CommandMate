@@ -5,6 +5,9 @@
  * New task and the ⌘K search row. The destinations (Repositories + sync,
  * Sessions, Review) follow in `Sidebar.tsx`.
  *
+ * Rendered as the sidebar's first child, above the padded header, so the
+ * open/close cell is at the column's top-left (see `SidebarPanelToggle`).
+ *
  * PC only: `Sidebar` does not render this in the mobile drawer (#3515 owns the
  * phone), where the drawer is opened from the mobile header instead.
  *
@@ -46,8 +49,10 @@ export function SidebarTopControls() {
   const modKey = useModKeyLabel();
 
   return (
-    <div data-testid="sidebar-top-controls" className="space-y-0.5">
-      <div className="flex min-w-0 items-center gap-1">
+    <div data-testid="sidebar-top-controls" className="flex-shrink-0">
+      {/* First in the sidebar, no padding around it: the toggle cell starts at
+          the column's top-left, where the rail has it too. */}
+      <div className="flex min-w-0 items-center">
         <SidebarPanelToggle testId="sidebar-panel-toggle" />
         <TransitionLink
           href="/"
@@ -60,32 +65,34 @@ export function SidebarTopControls() {
           <span className="truncate text-sm font-bold text-sidebar-foreground">CommandMate</span>
         </TransitionLink>
       </div>
-      <button
-        type="button"
-        data-testid="sidebar-new-task"
-        onClick={() => openNewTask()}
-        aria-haspopup="dialog"
-        className={ROW_CLASS}
-      >
-        <SquarePen className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
-        <span className="min-w-0 flex-1 truncate">{tCommon('newTask.title')}</span>
-      </button>
-      <button
-        type="button"
-        data-testid="sidebar-search"
-        onClick={() => setPaletteOpen(true)}
-        aria-label={tPalette('mobileTrigger')}
-        className={ROW_CLASS}
-      >
-        <Search className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
-        <span className="min-w-0 flex-1 truncate">{tPalette('searchAction')}</span>
-        {modKey && (
-          <span className="flex flex-shrink-0 items-center gap-0.5" aria-hidden="true">
-            <Kbd>{modKey}</Kbd>
-            <Kbd>K</Kbd>
-          </span>
-        )}
-      </button>
+      <div className="space-y-0.5 px-2">
+        <button
+          type="button"
+          data-testid="sidebar-new-task"
+          onClick={() => openNewTask()}
+          aria-haspopup="dialog"
+          className={ROW_CLASS}
+        >
+          <SquarePen className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
+          <span className="min-w-0 flex-1 truncate">{tCommon('newTask.title')}</span>
+        </button>
+        <button
+          type="button"
+          data-testid="sidebar-search"
+          onClick={() => setPaletteOpen(true)}
+          aria-label={tPalette('mobileTrigger')}
+          className={ROW_CLASS}
+        >
+          <Search className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
+          <span className="min-w-0 flex-1 truncate">{tPalette('searchAction')}</span>
+          {modKey && (
+            <span className="flex flex-shrink-0 items-center gap-0.5" aria-hidden="true">
+              <Kbd>{modKey}</Kbd>
+              <Kbd>K</Kbd>
+            </span>
+          )}
+        </button>
+      </div>
     </div>
   );
 }

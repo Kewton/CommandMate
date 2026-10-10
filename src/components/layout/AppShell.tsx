@@ -149,9 +149,23 @@ export const AppShell = memo(function AppShell({ children }: AppShellProps) {
   // offset overrides those classes; with the band down nothing is written and
   // the classes stand exactly as they did, which is what #1070's assertions
   // pin.
+  //
+  // Issue #3512: in the default "collapsed" mode the band appears BECAUSE the
+  // sidebar closed. Drawn above the header it would push the header and the
+  // icon rail down by its height, moving the open/close button the user just
+  // clicked. So in that case the band goes below the header, to the right of
+  // the rail (`bandBesideRail`), and the rail keeps the top the open sidebar
+  // had. A band that is up in both states ("always") stays above the header
+  // and offsets the sidebar and the rail alike.
+  const bandBesideRail =
+    showRepositoryTabBar &&
+    showSidebar &&
+    !isOpen &&
+    !shouldShowRepositoryTabBar(repoTabBarMode ?? DEFAULT_REPO_TAB_BAR_MODE, true);
+  const bandAboveHeader = showRepositoryTabBar && !bandBesideRail;
   const bandHeight = Math.round(REPOSITORY_TAB_BAR_HEIGHT * factor);
   const sidebarTop = bandHeight + (showGlobalNav ? HEADER_HEIGHT : 0);
-  const sidebarOffsetStyle = showRepositoryTabBar
+  const sidebarOffsetStyle = bandAboveHeader
     ? { top: `${sidebarTop}px`, height: `calc(100vh - ${sidebarTop}px)` }
     : {};
 
@@ -235,10 +249,17 @@ export const AppShell = memo(function AppShell({ children }: AppShellProps) {
     <NewTaskProvider>
       <div data-testid="app-shell" className="h-screen flex flex-col">
         {/* Repository tab strip, above the header (Issue #2374) */}
-        {showRepositoryTabBar && <RepositoryTabBar />}
+        {bandAboveHeader && <RepositoryTabBar />}
 
         {/* Screen header: title + connection status + app update (Issue #3512) */}
         {showGlobalNav && <Header />}
+
+        {/* Issue #3512: the "collapsed"-mode band, beside the icon rail. */}
+        {bandBesideRail && (
+          <div data-testid="repository-tab-bar-beside-rail" style={{ marginLeft: `${SIDEBAR_RAIL_WIDTH}px` }}>
+            <RepositoryTabBar />
+          </div>
+        )}
 
         <div className="flex flex-1 min-h-0">
           {/* Desktop sidebar - fixed position with transform animation (Issue #112) */}
