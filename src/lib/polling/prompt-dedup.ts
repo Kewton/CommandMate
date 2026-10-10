@@ -14,9 +14,14 @@
  * The run of duplicate ticks is counted here, the same way `response-dedup`
  * counts `duplicate-response-skipped` (#3519): the line is written on the first
  * tick of a run and then once per {@link DUPLICATE_PROMPT_SKIP_LOG_TICK_INTERVAL}
- * ticks. The count is about one particular cached hash, so it lives and dies
- * with it — the functions below that drop or move the hash drop or move the
- * count too, and nothing else touches it.
+ * ticks. The count is about one particular cached hash, so it never outlives
+ * it — the functions below that drop or move the hash drop or move the count
+ * too. The one exception runs the other way: a tick that reads a frame with no
+ * live prompt on it ends the run without touching the hash
+ * ({@link resetDuplicatePromptSkipStreak}), because the prompt left the screen
+ * while the guard still has to keep it from being saved twice. A returning
+ * prompt is then still suppressed, but its first duplicate logs as the first
+ * of a new run.
  *
  * Only the log line is thinned. `recordPromptDedupSkip` (#1695) is still called
  * on every duplicate tick; its tally is what `capture --json` reports.

@@ -652,6 +652,15 @@ function extractCompletedTurn(
   const result = extractResponse(output, lastCapturedLine, cliToolId, CACHE_MAX_CAPTURE_LINES);
 
   if (!result || !result.isComplete) {
+    // Issue #3538: an unfinished frame was read and carries no live prompt (the
+    // early prompt check in `extractResponse` would have returned it complete),
+    // so a run of duplicate prompt ticks is over; the hash is kept — see the
+    // helper. Only when the frame WAS read: a null result is extraction being
+    // skipped on the line count ("no new output"), which says nothing about
+    // whether the prompt is still on screen, and neither do the cursor returns
+    // further down.
+    if (result) resetDuplicatePromptSkipStreak(pollerKey);
+
     // DR-004 windowing: Only check tail lines
     const { thinkingPattern } = getCliToolPatterns(cliToolId);
     const cleanOutput = stripAnsi(output);
@@ -1428,9 +1437,6 @@ export async function checkForResponse(
 
     const turn = extractCompletedTurn(ctx, output, lastCapturedLine);
     if (!turn) {
-      // Issue #3538: no prompt on this frame, so a run of duplicate prompt
-      // ticks is over (the hash is kept — see the helper).
-      resetDuplicatePromptSkipStreak(pollerKey);
       return false;
     }
     const { result, isFullScreenTui, lineCountIsCursor } = turn;
@@ -1459,7 +1465,8 @@ export async function checkForResponse(
     if (promptIsLive) {
       return savePromptMessage(ctx, promptDetection, result, isFullScreenTui);
     }
-    // Issue #3538: as above — a finished frame without a live prompt ends the run.
+    // Issue #3538: a finished frame without a live prompt ends the run of
+    // duplicate prompt ticks, as an unfinished one does in `extractCompletedTurn`.
     resetDuplicatePromptSkipStreak(pollerKey);
 
     // Validate response content is not empty

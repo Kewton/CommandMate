@@ -57,6 +57,7 @@ vi.mock('@/lib/realtime/terminal-broadcast', () => ({ broadcastTerminalSnapshot:
 
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
+import { getSessionState } from '@/lib/db';
 import { checkForResponse } from '@/lib/polling/response-checker';
 import { stopPolling } from '@/lib/polling/response-poller-core';
 import { DUPLICATE_PROMPT_SKIP_LOG_TICK_INTERVAL } from '@/lib/polling/prompt-dedup';
@@ -200,6 +201,30 @@ describe('Issue #3538: duplicate-prompt-skipped is thinned at the skip site', ()
       { worktreeId: WT, cliToolId: 'copilot' },
     ]);
     // The #1695 tally counts both skips.
+    expect(getPromptDedupSkips(WT, 'copilot').skippedCount).toBe(2);
+  });
+
+  it('a tick that skips extraction on the line count does not end the run', async () => {
+    captureSessionOutput.mockResolvedValue(PROMPT_A);
+    await ticks(2);
+    expect(skipLogs()).toHaveLength(1);
+
+    // The same frame read against a cursor 6 lines past it: `extractResponse`
+    // answers "no new output" (null) without looking at the frame, and the
+    // shortfall is too small to count as a buffer reset. The prompt is still
+    // on screen; nothing here says otherwise.
+    const frameLines = PROMPT_A.replace(/\n+$/, '').split('\n').length;
+    vi.mocked(getSessionState).mockReturnValueOnce({
+      lastCapturedLine: frameLines + 6,
+      inProgressMessageId: null,
+    } as unknown as ReturnType<typeof getSessionState>);
+    expect(await checkForResponse(WT, 'copilot')).toBe(false);
+
+    // Back to the ordinary cursor: the next duplicate continues the run.
+    await checkForResponse(WT, 'copilot');
+
+    expect(skipLogs()).toHaveLength(1);
+    expect(savedPrompts()).toBe(1);
     expect(getPromptDedupSkips(WT, 'copilot').skippedCount).toBe(2);
   });
 });
