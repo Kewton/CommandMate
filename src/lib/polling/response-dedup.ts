@@ -38,6 +38,17 @@
  * hash, and the worktree rename all have to treat the two the same, and the
  * only way to guarantee that without touching `response-poller-core` (which
  * owns those three calls) is for one function to clear both.
+ *
+ * ## The third cache: how often the skip says so (#3519)
+ *
+ * The skip logs `duplicate-response-skipped` so a reply missing from History
+ * leaves a grep-able trace (#1695). Logged on every tick, a screen that stays
+ * up writes that line every 2 s for the whole cycle — 51,933 lines in 24 h,
+ * 80% of the server log. The run of duplicate ticks is counted here so the line
+ * is written on the first tick of a run and then once per
+ * {@link DUPLICATE_RESPONSE_SKIP_LOG_TICK_INTERVAL} ticks. The count is about
+ * one particular cached hash, so it lives and dies with it for the same reason
+ * the recheck does.
  */
 
 import { createHash } from 'crypto';
@@ -58,6 +69,8 @@ declare global {
   var __responseHashCache: Map<string, string> | undefined;
   // eslint-disable-next-line no-var
   var __structuredHistoryRecheckCache: Map<string, number> | undefined;
+  // eslint-disable-next-line no-var
+  var __duplicateResponseSkipStreak: Map<string, number> | undefined;
 }
 
 const responseHashCache = getOrInitGlobal('__responseHashCache', () => new Map<string, string>());
@@ -93,6 +106,37 @@ const structuredHistoryRecheckCache = getOrInitGlobal('__structuredHistoryRechec
 export const STRUCTURED_HISTORY_RECHECK_TICK_INTERVAL = 3;
 
 /**
+ * In-memory cache: pollerKey -> how many duplicate ticks in a row the current
+ * cached hash has been skipped (Issue #3519). Absence means none yet.
+ *
+ * On `globalThis` for the same reason `responseHashCache` is, and cleared and
+ * moved at exactly the same moments — see the module comment. A new
+ * (non-duplicate) response restarts it in {@link isDuplicateResponse}.
+ */
+const duplicateResponseSkipStreak = getOrInitGlobal('__duplicateResponseSkipStreak', () => new Map<string, number>());
+
+/**
+ * How many duplicate ticks separate two `duplicate-response-skipped` lines
+ * (Issue #3519).
+ *
+ * At the poller's 2 s tick this is one line a minute while a finished screen
+ * stays up, so a 900-tick cycle writes 30 lines instead of 899. The first tick
+ * of a run always logs, so the #1695 trace — "this reply was skipped, at this
+ * time" — is still there for every run; what is dropped is the repetition.
+ */
+export const DUPLICATE_RESPONSE_SKIP_LOG_TICK_INTERVAL = 30;
+
+/** What {@link claimDuplicateResponseSkipLog} answers for one duplicate tick. */
+export interface DuplicateResponseSkipLogClaim {
+  /** true when this tick should write `duplicate-response-skipped` */
+  log: boolean;
+  /** 1-based position of this tick in the current run of duplicate ticks */
+  consecutive: number;
+  /** ticks skipped without a log line since the previous logged one */
+  suppressed: number;
+}
+
+/**
  * Check whether the given response content was already saved during the current
  * polling cycle for the same pollerKey. If it is new, updates the cache.
  *
@@ -108,7 +152,31 @@ export function isDuplicateResponse(pollerKey: string, content: string): boolean
   }
 
   responseHashCache.set(pollerKey, hash);
+  // Issue #3519: a new response starts a new run of duplicate ticks.
+  duplicateResponseSkipStreak.delete(pollerKey);
   return false;
+}
+
+/**
+ * Count one duplicate tick for this pollerKey and say whether it should be
+ * logged (Issue #3519).
+ *
+ * A claim, like {@link claimStructuredHistoryRecheck}: it advances the count, so
+ * call it exactly once per duplicate tick. Logs on the first tick of a run and
+ * then on every {@link DUPLICATE_RESPONSE_SKIP_LOG_TICK_INTERVAL}th tick after
+ * it (ticks 1, 1+N, 1+2N, …).
+ *
+ * @param pollerKey - Poller key ("worktreeId:instanceId")
+ * @returns Whether to log, the run length so far, and the ticks left unlogged
+ *   since the previous line
+ */
+export function claimDuplicateResponseSkipLog(pollerKey: string): DuplicateResponseSkipLogClaim {
+  const consecutive = (duplicateResponseSkipStreak.get(pollerKey) ?? 0) + 1;
+  duplicateResponseSkipStreak.set(pollerKey, consecutive);
+
+  const log = (consecutive - 1) % DUPLICATE_RESPONSE_SKIP_LOG_TICK_INTERVAL === 0;
+  const suppressed = consecutive === 1 ? 0 : DUPLICATE_RESPONSE_SKIP_LOG_TICK_INTERVAL - 1;
+  return { log, consecutive, suppressed };
 }
 
 /**
@@ -197,6 +265,8 @@ export function claimStructuredHistoryRecheck(pollerKey: string): boolean {
 export function clearResponseHashCache(pollerKey: string): void {
   responseHashCache.delete(pollerKey);
   structuredHistoryRecheckCache.delete(pollerKey);
+  // Issue #3519: the skip count is about the same hash.
+  duplicateResponseSkipStreak.delete(pollerKey);
 }
 
 /**
@@ -225,4 +295,10 @@ export function renameResponseHashCacheKey(oldKey: string, newKey: string): void
   const ticksToWait = structuredHistoryRecheckCache.get(oldKey);
   structuredHistoryRecheckCache.delete(oldKey);
   if (ticksToWait !== undefined) structuredHistoryRecheckCache.set(newKey, ticksToWait);
+
+  // Issue #3519: the skip count moves with the hash too, so a rename mid-run
+  // does not restart the thinning and log as if a new run had begun.
+  const streak = duplicateResponseSkipStreak.get(oldKey);
+  duplicateResponseSkipStreak.delete(oldKey);
+  if (streak !== undefined) duplicateResponseSkipStreak.set(newKey, streak);
 }
