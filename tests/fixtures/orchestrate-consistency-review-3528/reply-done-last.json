@@ -1,0 +1,7 @@
+{
+  "worktreeId": "reviewer",
+  "instanceId": "codex",
+  "cliToolId": "codex",
+  "source": "history",
+  "reply": "（0）前回の指摘の判定：**解消**。\n\n（2）指摘\n\n- **P3：段落直後の番号つきフェンス** / 種類 (e)\n\nDONE: 前回の指摘は解消。新しい指摘 1 件（この PR で直すべきもの 0 件）"
+}
