@@ -4,10 +4,15 @@
  * Two existing routes, nothing new on the server:
  *
  * 1. `POST /api/worktrees/[id]/auto-yes` — only when the user chose to arm
- *    Auto-Yes and it is not armed already. Armed BEFORE the send, the order
- *    `commandmate send --auto-yes` uses, so a dialog the agent raises on its
- *    first turn is already covered. The route arms ahead of a session that does
- *    not exist yet (its `absent` ownership verdict goes on).
+ *    Auto-Yes and it is not armed already. Always armed BEFORE the send, so a
+ *    dialog the agent raises on its first turn is already covered. (The CLI is
+ *    not the same everywhere: `commandmate send --auto-yes` arms first too,
+ *    except with `--model` on a non-claude agent, where it arms AFTER the send
+ *    so Auto-Yes does not answer copilot's `/model` interaction —
+ *    `deferAutoYes` in `src/cli/commands/send.ts`. New task does not defer.)
+ *    The route arms ahead of a session that does not exist yet (its `absent`
+ *    ownership verdict goes on). When arming succeeds and the send then fails,
+ *    the result still carries the armed state, because the server keeps it.
  * 2. `POST /api/worktrees/[id]/send` — starts the session when it is not
  *    running, then types the request.
  *
@@ -52,9 +57,31 @@ export type NewTaskFailureKind =
   /** 5xx, no reply, a timeout. */
   | 'failed';
 
-export type NewTaskSendResult =
+/** Auto-Yes as this call left it armed on the server. */
+export interface ArmedAutoYes {
+  enabled: true;
+  expiresAt: number;
+}
+
+export type NewTaskSendResult = (
   | { ok: true }
-  | { ok: false; kind: NewTaskFailureKind; status: number; detail: string | null };
+  | { ok: false; kind: NewTaskFailureKind; status: number; detail: string | null }
+) & {
+  /** Present only when this call armed Auto-Yes — whether or not the send then went out. */
+  armedAutoYes?: ArmedAutoYes;
+};
+
+/** The armed state the auto-yes route answered with; the duration from now if it named none. */
+async function readArmedState(response: Response, duration: AutoYesDuration): Promise<ArmedAutoYes> {
+  try {
+    const body: unknown = await response.json();
+    const expiresAt = body && typeof body === 'object' ? (body as Record<string, unknown>).expiresAt : null;
+    if (typeof expiresAt === 'number') return { enabled: true, expiresAt };
+  } catch {
+    // Fall through to the requested duration.
+  }
+  return { enabled: true, expiresAt: Date.now() + duration };
+}
 
 /** Read `{ error, code }` off an error body; anything else reads as empty. */
 async function readErrorBody(response: Response): Promise<{ error: string | null; code: string | null }> {
@@ -124,6 +151,7 @@ export async function sendNewTask(
   const base = `/api/worktrees/${encodeURIComponent(target.worktreeId)}`;
   const headers = { 'Content-Type': 'application/json' };
 
+  let armedAutoYes: ArmedAutoYes | undefined;
   if (input.autoYesDuration !== null) {
     try {
       const response = await request(`${base}/auto-yes`, {
@@ -140,11 +168,15 @@ export async function sendNewTask(
         const { error } = await readErrorBody(response);
         return { ok: false, kind: 'auto_yes_failed', status: response.status, detail: error };
       }
+      armedAutoYes = await readArmedState(response, input.autoYesDuration);
     } catch (error) {
       const failure = transportFailure(error);
       return failure.ok ? failure : { ...failure, kind: 'auto_yes_failed' };
     }
   }
+
+  const withArmed = (result: NewTaskSendResult): NewTaskSendResult =>
+    armedAutoYes ? { ...result, armedAutoYes } : result;
 
   const model = input.model?.trim() || undefined;
   try {
@@ -160,8 +192,8 @@ export async function sendNewTask(
       // With no session the server launches the agent inside this request (Issue #3194).
       timeoutMs: getSendTimeoutMs(),
     });
-    return await interpretSendResponse(response, { modelRequested: model !== undefined });
+    return withArmed(await interpretSendResponse(response, { modelRequested: model !== undefined }));
   } catch (error) {
-    return transportFailure(error);
+    return withArmed(transportFailure(error));
   }
 }

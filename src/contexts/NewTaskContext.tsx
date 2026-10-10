@@ -23,10 +23,12 @@ import React, {
   useCallback,
   useContext,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
 import type { NewTaskTarget } from '@/lib/new-task/recent-targets';
+import { isAnyModalOpen } from '@/lib/new-task/modal-open';
 
 export interface NewTaskContextValue {
   /** Whether the dialog is open. */
@@ -35,10 +37,19 @@ export interface NewTaskContextValue {
   requestedTarget: NewTaskTarget | null;
   /** The worktree and agent the current screen shows, or null on a list screen. */
   screenTarget: NewTaskTarget | null;
-  /** Open the dialog, optionally on a given destination. No-op without a provider. */
+  /**
+   * Open the dialog, optionally on a given destination. No-op without a
+   * provider, and while another modal is open (`isAnyModalOpen`).
+   */
   openNewTask: (target?: NewTaskTarget) => void;
-  /** Close it. No-op without a provider. */
+  /** Close it. No-op without a provider, and while a send is in flight (`setCloseLocked`). */
   closeNewTask: () => void;
+  /**
+   * The dialog holds this while a send is in flight, so no caller can close it
+   * under a request whose answer (navigate / record / toast, or the reason it
+   * failed) still has to land in it.
+   */
+  setCloseLocked: (locked: boolean) => void;
 }
 
 /** Reports the screen's current destination; `null` when it goes away. */
@@ -53,6 +64,7 @@ export const NEW_TASK_DEFAULT_VALUE: NewTaskContextValue = {
   screenTarget: null,
   openNewTask: noop,
   closeNewTask: noop,
+  setCloseLocked: noop,
 };
 
 const NewTaskContext = createContext<NewTaskContextValue>(NEW_TASK_DEFAULT_VALUE);
@@ -63,11 +75,21 @@ export function NewTaskProvider({ children }: { children: ReactNode }) {
   const [requestedTarget, setRequestedTarget] = useState<NewTaskTarget | null>(null);
   const [screenTarget, setScreenTargetState] = useState<NewTaskTarget | null>(null);
 
+  const closeLockedRef = useRef(false);
+
   const openNewTask = useCallback((target?: NewTaskTarget) => {
+    // Covers the shortcut and every button alike: never over another modal.
+    if (isAnyModalOpen()) return;
     setRequestedTarget(target ?? null);
     setIsOpen(true);
   }, []);
-  const closeNewTask = useCallback(() => setIsOpen(false), []);
+  const closeNewTask = useCallback(() => {
+    if (closeLockedRef.current) return;
+    setIsOpen(false);
+  }, []);
+  const setCloseLocked = useCallback((locked: boolean) => {
+    closeLockedRef.current = locked;
+  }, []);
 
   // Keeps the previous object when nothing changed, so a re-report does not
   // re-render the dialog's consumers.
@@ -82,8 +104,8 @@ export function NewTaskProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo<NewTaskContextValue>(
-    () => ({ isOpen, requestedTarget, screenTarget, openNewTask, closeNewTask }),
-    [isOpen, requestedTarget, screenTarget, openNewTask, closeNewTask],
+    () => ({ isOpen, requestedTarget, screenTarget, openNewTask, closeNewTask, setCloseLocked }),
+    [isOpen, requestedTarget, screenTarget, openNewTask, closeNewTask, setCloseLocked],
   );
 
   return (

@@ -56,9 +56,11 @@ import {
   resolveInitialTarget,
   resolveModelAvailability,
   resolveWorktreeInstances,
+  isAutoYesActive,
 } from '@/lib/new-task/new-task-targets';
 import {
   sendNewTask,
+  type ArmedAutoYes,
   type NewTaskSendResult,
 } from '@/lib/new-task/send-new-task';
 import { isSendNewTaskChord } from '@/lib/new-task/new-task-shortcut';
@@ -78,7 +80,7 @@ type ListState =
 type Failure = Extract<NewTaskSendResult, { ok: false }>;
 
 export function NewTaskDialog() {
-  const { requestedTarget, screenTarget, closeNewTask } = useNewTask();
+  const { requestedTarget, screenTarget, closeNewTask, setCloseLocked } = useNewTask();
   const router = useRouter();
   const { showToast } = useToast();
   const t = useTranslations('common');
@@ -97,14 +99,33 @@ export function NewTaskDialog() {
   const [isMac, setIsMac] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const mountedRef = useRef(true);
+  const sendingRef = useRef(false);
+  // Auto-Yes this dialog armed, per destination (`<worktree>:<instance>`). The
+  // list payload is a snapshot from opening time; after an arm whose send then
+  // failed, the server holds the new state and the dialog must show it, and a
+  // resend must not arm again.
+  const [armedHere, setArmedHere] = useState<Record<string, ArmedAutoYes>>({});
 
   useEffect(() => {
     mountedRef.current = true;
     setIsMac(isMacPlatform());
     return () => {
       mountedRef.current = false;
+      setCloseLocked(false);
     };
-  }, []);
+  }, [setCloseLocked]);
+
+  /**
+   * Every way out of the dialog — the × button, Esc, a backdrop click, Cancel —
+   * comes through here, and does nothing while a send is in flight. `Modal`
+   * calls `onClose` from its × without consulting `disableClose`, so the guard
+   * cannot rely on that prop; the provider's lock covers `closeNewTask()` called
+   * from anywhere else.
+   */
+  const handleClose = useCallback(() => {
+    if (sendingRef.current) return;
+    closeNewTask();
+  }, [closeNewTask]);
 
   // The start position is decided once, from what was known when it opened.
   const initialCandidatesRef = useRef<Array<NewTaskTarget | null>>([
@@ -156,9 +177,15 @@ export function NewTaskDialog() {
   const modelAvailability = targetState
     ? resolveModelAvailability(targetState.instance.cliTool, targetState)
     : null;
-  const armedAutoYes = targetState?.autoYes ?? null;
+  const knownAutoYes = targetState
+    ? armedHere[`${worktreeId}:${targetState.instance.id}`] ?? targetState.autoYes
+    : null;
+  // Expired counts as off, as in AutoYesToggle: no "00:00 left" shown as on,
+  // and arming is offered again.
+  const armedAutoYes = isAutoYesActive(knownAutoYes) ? knownAutoYes : null;
 
-  // Re-render once a second while an armed Auto-Yes counts down.
+  // Re-render once a second while an armed Auto-Yes counts down; the render
+  // that finds it expired drops `armedAutoYes`, which stops this.
   const [, setNow] = useState(0);
   useEffect(() => {
     if (!armedAutoYes) return;
@@ -215,6 +242,8 @@ export function NewTaskDialog() {
   const handleSubmit = useCallback(async () => {
     if (!canSend || !worktree || !targetState) return;
     const target: NewTaskTarget = { worktreeId: worktree.id, instanceId: targetState.instance.id };
+    sendingRef.current = true;
+    setCloseLocked(true);
     setSending(true);
     setFailure(null);
     const result = await sendNewTask({
@@ -224,7 +253,14 @@ export function NewTaskDialog() {
       model: modelAvailability?.selectable ? model : undefined,
       autoYesDuration: armedAutoYes ? null : autoYesChoice,
     });
+    sendingRef.current = false;
+    setCloseLocked(false);
     if (!mountedRef.current) return;
+    const { armedAutoYes: armedNow } = result;
+    if (armedNow) {
+      setArmedHere((prev) => ({ ...prev, [`${target.worktreeId}:${target.instanceId}`]: armedNow }));
+      setAutoYesChoice(null);
+    }
     if (!result.ok) {
       setFailure(result);
       setSending(false);
@@ -249,6 +285,7 @@ export function NewTaskDialog() {
     armedAutoYes,
     autoYesChoice,
     closeNewTask,
+    setCloseLocked,
     router,
     showToast,
     t,
@@ -273,7 +310,7 @@ export function NewTaskDialog() {
     : null;
 
   return (
-    <Modal isOpen onClose={closeNewTask} title={t('newTask.title')} size="md" disableClose={sending}>
+    <Modal isOpen onClose={handleClose} title={t('newTask.title')} size="md" disableClose={sending}>
       <div data-testid="new-task-dialog" className="space-y-4" onKeyDown={handleKeyDown}>
         {list.status === 'loading' && (
           <p className="text-sm text-muted-foreground" data-testid="new-task-loading">
@@ -452,7 +489,7 @@ export function NewTaskDialog() {
                 <label htmlFor="new-task-auto-yes" className={LABEL_CLASS}>
                   {t('newTask.autoYesLabel')}
                 </label>
-                {armedAutoYes && armedAutoYes.expiresAt !== null ? (
+                {armedAutoYes ? (
                   <p className="text-sm text-foreground" data-testid="new-task-auto-yes-active">
                     {t('newTask.autoYesActive', { remaining: formatTimeRemaining(armedAutoYes.expiresAt) })}
                   </p>
@@ -514,7 +551,7 @@ export function NewTaskDialog() {
           </span>
           <button
             type="button"
-            onClick={closeNewTask}
+            onClick={handleClose}
             disabled={sending}
             className="px-4 py-2 text-sm font-medium text-foreground bg-muted hover:bg-muted/80 rounded-lg transition-colors disabled:opacity-50"
           >

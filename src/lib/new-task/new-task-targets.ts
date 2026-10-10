@@ -163,3 +163,16 @@ export function resolveModelAvailability(
   }
   return { selectable: false, reason: 'unsupported' };
 }
+
+/**
+ * Whether an armed Auto-Yes is still in force at `now` — the same test
+ * `AutoYesToggle` applies (`expiresAt - Date.now() <= 0` is expired). The
+ * server drops an expired state on its next read; the dialog must not keep
+ * showing "00:00 left" as on until then.
+ */
+export function isAutoYesActive(
+  autoYes: AutoYesInstanceSummary | null | undefined,
+  now: number = Date.now(),
+): autoYes is AutoYesInstanceSummary & { expiresAt: number } {
+  return !!autoYes && autoYes.enabled && typeof autoYes.expiresAt === 'number' && autoYes.expiresAt - now > 0;
+}

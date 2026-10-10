@@ -7,6 +7,7 @@ import {
   buildRepositoryOptions,
   describeTargetState,
   findTarget,
+  isAutoYesActive,
   resolveInitialTarget,
   resolveModelAvailability,
   resolveWorktreeInstances,
@@ -116,5 +117,17 @@ describe('[#3511] resolveModelAvailability — mirrors the send route', () => {
     for (const tool of ['codex', 'gemini', 'opencode', 'vibe-local'] as const) {
       expect(resolveModelAvailability(tool, stopped)).toEqual({ selectable: false, reason: 'unsupported' });
     }
+  });
+});
+
+describe('[#3511] isAutoYesActive — AutoYesToggle\'s expiry test', () => {
+  const now = 1_000_000;
+  it('is on only while time is left', () => {
+    expect(isAutoYesActive({ enabled: true, expiresAt: now + 1 }, now)).toBe(true);
+    expect(isAutoYesActive({ enabled: true, expiresAt: now }, now)).toBe(false);
+    expect(isAutoYesActive({ enabled: true, expiresAt: now - 1 }, now)).toBe(false);
+    expect(isAutoYesActive({ enabled: true, expiresAt: null }, now)).toBe(false);
+    expect(isAutoYesActive({ enabled: false, expiresAt: now + 1 }, now)).toBe(false);
+    expect(isAutoYesActive(null, now)).toBe(false);
   });
 });

@@ -25,6 +25,8 @@ import { NewTaskProvider, useNewTask } from '@/contexts/NewTaskContext';
 import { NewTaskDialogHost } from '@/components/new-task/NewTaskDialogHost';
 import { ToastProvider } from '@/components/common/Toast';
 import { useNewTaskScreenTarget } from '@/hooks/useNewTaskScreenTarget';
+import { KeyboardShortcutsOverlay } from '@/components/common/KeyboardShortcutsOverlay';
+import { KeyboardShortcutsProvider } from '@/contexts/KeyboardShortcutsContext';
 import { readRecentTargets, pushRecentTarget } from '@/lib/new-task/recent-targets';
 import { SEND_RESPONSE_CODES } from '@/lib/new-task/send-new-task';
 import {
@@ -37,6 +39,10 @@ type Answer = { status: number; body: unknown };
 const server = vi.hoisted(() => ({
   send: { status: 201, body: {} } as { status: number; body: unknown },
   calls: [] as Array<{ url: string; method: string; body: unknown }>,
+  /** When set, `/send` answers only once this resolves. */
+  sendGate: null as Promise<void> | null,
+  /** Overrides the list payload's worktrees. */
+  worktrees: null as unknown[] | null,
 }));
 
 function ScreenTarget({ worktreeId, instanceId }: { worktreeId: string; instanceId: string }) {
@@ -45,22 +51,31 @@ function ScreenTarget({ worktreeId, instanceId }: { worktreeId: string; instance
 }
 
 function OpenButton() {
-  const { openNewTask } = useNewTask();
+  const { openNewTask, closeNewTask } = useNewTask();
   return (
-    <button type="button" data-testid="open-new-task" onClick={() => openNewTask()}>
-      open
-    </button>
+    <>
+      <button type="button" data-testid="open-new-task" onClick={() => openNewTask()}>
+        open
+      </button>
+      {/* Somebody else closing it (the dialog's own controls aside). */}
+      <button type="button" data-testid="external-close" onClick={() => closeNewTask()}>
+        close
+      </button>
+    </>
   );
 }
 
 function renderShell(screenTarget?: { worktreeId: string; instanceId: string }) {
   return render(
     <ToastProvider>
-      <NewTaskProvider>
-        {screenTarget && <ScreenTarget {...screenTarget} />}
-        <OpenButton />
-        <NewTaskDialogHost />
-      </NewTaskProvider>
+      <KeyboardShortcutsProvider>
+        <NewTaskProvider>
+          {screenTarget && <ScreenTarget {...screenTarget} />}
+          <OpenButton />
+          <NewTaskDialogHost />
+          <KeyboardShortcutsOverlay />
+        </NewTaskProvider>
+      </KeyboardShortcutsProvider>
     </ToastProvider>,
   );
 }
@@ -83,6 +98,8 @@ beforeEach(() => {
   nav.push.mockClear();
   server.calls = [];
   server.send = { status: 201, body: { id: 'm1' } };
+  server.sendGate = null;
+  server.worktrees = null;
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url: string, init?: RequestInit) => {
@@ -90,10 +107,15 @@ beforeEach(() => {
       const body = init?.body ? JSON.parse(String(init.body)) : undefined;
       server.calls.push({ url, method, body });
       if (url === '/api/worktrees' && method === 'GET') {
-        return jsonResponse({ worktrees: buildWorktrees(), repositories: buildRepositories() });
+        return jsonResponse({ worktrees: server.worktrees ?? buildWorktrees(), repositories: buildRepositories() });
       }
-      if (url.endsWith('/auto-yes')) return jsonResponse({ enabled: true, expiresAt: Date.now() + 3600000 });
-      if (url.endsWith('/send')) return jsonResponse(server.send.body, server.send.status);
+      if (url.endsWith('/auto-yes')) {
+        return jsonResponse({ enabled: true, expiresAt: Date.now() + Number(body?.duration ?? 3600000), pollingStarted: true });
+      }
+      if (url.endsWith('/send')) {
+        if (server.sendGate) await server.sendGate;
+        return jsonResponse(server.send.body, server.send.status);
+      }
       return jsonResponse({}, 404);
     }),
   );
@@ -326,5 +348,129 @@ describe('[#3511] NewTaskDialog — sending', () => {
     const error = await screen.findByTestId('new-task-error');
     expect(error).toHaveAttribute('data-kind', 'failed');
     expect(screen.getByTestId('new-task-dialog')).toBeInTheDocument();
+  });
+});
+
+describe('[#3511] NewTaskDialog — cannot be closed while a send is in flight', () => {
+  function gateSend() {
+    let release: () => void = () => {};
+    server.sendGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    return () => release();
+  }
+
+  it('stays through ×, Esc, a backdrop click and closeNewTask(), then finishes the send', async () => {
+    const release = gateSend();
+    renderShell({ worktreeId: 'wt-a-main', instanceId: 'codex-2' });
+    const textarea = await openDialog();
+    fireEvent.change(textarea, { target: { value: 'long running' } });
+    fireEvent.click(screen.getByTestId('new-task-send'));
+    await waitFor(() => expect(sendCalls()).toHaveLength(1));
+
+    fireEvent.click(screen.getByRole('button', { name: 'common.close' }));
+    fireEvent.keyDown(document, { key: 'Escape' });
+    const backdrop = screen.getByTestId('modal-backdrop-surface');
+    fireEvent.mouseDown(backdrop);
+    fireEvent.mouseUp(backdrop);
+    fireEvent.click(backdrop);
+    fireEvent.click(screen.getByTestId('external-close'));
+    expect(screen.getByTestId('new-task-dialog')).toBeInTheDocument();
+
+    await act(async () => {
+      release();
+    });
+    await waitFor(() => expect(nav.push).toHaveBeenCalledWith('/worktrees/wt-a-main?instance=codex-2'));
+    expect(screen.queryByTestId('new-task-dialog')).toBeNull();
+    expect(readRecentTargets()[0]).toEqual({ worktreeId: 'wt-a-main', instanceId: 'codex-2' });
+    expect(await screen.findByTestId('toast-action-button')).toHaveTextContent('common.newTask.sentToast');
+  });
+
+  it('closes on × when nothing is being sent (negative control)', async () => {
+    renderShell({ worktreeId: 'wt-a-main', instanceId: 'codex-2' });
+    await openDialog();
+    fireEvent.click(screen.getByRole('button', { name: 'common.close' }));
+    expect(screen.queryByTestId('new-task-dialog')).toBeNull();
+  });
+
+  it('closes on closeNewTask() again after a failed send', async () => {
+    server.send = { status: 500, body: { error: 'Failed to send message' } };
+    renderShell({ worktreeId: 'wt-a-main', instanceId: 'codex-2' });
+    const textarea = await openDialog();
+    fireEvent.change(textarea, { target: { value: 'go' } });
+    fireEvent.click(screen.getByTestId('new-task-send'));
+    await screen.findByTestId('new-task-error');
+    fireEvent.click(screen.getByTestId('external-close'));
+    expect(screen.queryByTestId('new-task-dialog')).toBeNull();
+  });
+});
+
+describe('[#3511] NewTaskDialog — Auto-Yes shown as the server holds it', () => {
+  it('after an arm whose send failed, shows it on and does not arm again on resend', async () => {
+    server.send = { status: 409, body: { error: 'prompt up', code: SEND_RESPONSE_CODES.promptWaiting } };
+    renderShell({ worktreeId: 'wt-a-main', instanceId: 'codex-2' });
+    const textarea = await openDialog();
+    fireEvent.change(screen.getByTestId('new-task-auto-yes'), { target: { value: '3600000' } });
+    fireEvent.change(textarea, { target: { value: 'go' } });
+    fireEvent.click(screen.getByTestId('new-task-send'));
+
+    await screen.findByTestId('new-task-error');
+    expect(screen.getByTestId('new-task-auto-yes-active')).toHaveTextContent('common.newTask.autoYesActive');
+    expect(screen.queryByTestId('new-task-auto-yes')).toBeNull();
+
+    server.send = { status: 201, body: { id: 'm1' } };
+    fireEvent.click(screen.getByTestId('new-task-send'));
+    await waitFor(() => expect(nav.push).toHaveBeenCalled());
+    expect(server.calls.filter((c) => c.url.endsWith('/auto-yes'))).toHaveLength(1);
+    expect(sendCalls()).toHaveLength(2);
+  });
+
+  function withClaudeAutoYesExpiringAt(expiresAt: number) {
+    const worktrees = buildWorktrees();
+    worktrees[0].autoYesByInstance = { claude: { enabled: true, expiresAt } };
+    server.worktrees = worktrees;
+  }
+
+  it('treats an expired Auto-Yes as off and offers arming again', async () => {
+    withClaudeAutoYesExpiringAt(Date.now() - 1000);
+    renderShell({ worktreeId: 'wt-a-main', instanceId: 'claude' });
+    await openDialog();
+    expect(screen.queryByTestId('new-task-auto-yes-active')).toBeNull();
+    expect(screen.getByTestId('new-task-auto-yes')).toHaveValue('');
+  });
+
+  it('flips to off when the countdown reaches zero while open', async () => {
+    withClaudeAutoYesExpiringAt(Date.now() + 1200);
+    renderShell({ worktreeId: 'wt-a-main', instanceId: 'claude' });
+    await openDialog();
+    expect(screen.getByTestId('new-task-auto-yes-active')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId('new-task-auto-yes')).toBeInTheDocument(), { timeout: 3000 });
+    expect(screen.queryByTestId('new-task-auto-yes-active')).toBeNull();
+  });
+});
+
+describe('[#3511] NewTaskDialog — never opens over another modal', () => {
+  it('ignores the chord and openNewTask() while the ? help is open', async () => {
+    renderShell();
+    fireEvent.keyDown(window, { key: '?' });
+    expect(await screen.findByTestId('keyboard-shortcuts-overlay')).toBeInTheDocument();
+
+    pressOpenChord();
+    fireEvent.click(screen.getByTestId('open-new-task'));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.queryByTestId('new-task-dialog')).toBeNull();
+    expect(server.calls).toEqual([]);
+  });
+
+  it('opens once the help has closed (negative control)', async () => {
+    renderShell();
+    fireEvent.keyDown(window, { key: '?' });
+    await screen.findByTestId('keyboard-shortcuts-overlay');
+    fireEvent.keyDown(document, { key: 'Escape' });
+    // The panel plays its exit animation as data-state="closed"; that does not block.
+    pressOpenChord();
+    expect(await screen.findByTestId('new-task-message')).toBeInTheDocument();
   });
 });

@@ -292,7 +292,6 @@ describe('[#3511] New task reads the real send / auto-yes routes', () => {
         routeRequest,
       );
 
-      expect(result).toEqual({ ok: true });
       expect(routeRequest.mock.calls.map(([url]) => url)).toEqual([
         `/api/worktrees/${WORKTREE_ID}/auto-yes`,
         `/api/worktrees/${WORKTREE_ID}/send`,
@@ -300,6 +299,25 @@ describe('[#3511] New task reads the real send / auto-yes routes', () => {
       const state = getAutoYesState(WORKTREE_ID, 'codex', 'codex');
       expect(state?.enabled).toBe(true);
       expect((state?.expiresAt ?? 0) - Date.now()).toBeGreaterThan(3500000);
+      // The armed state comes back exactly as the route answered it.
+      expect(result).toEqual({ ok: true, armedAutoYes: { enabled: true, expiresAt: state?.expiresAt } });
+    });
+
+    it('reports the armed Auto-Yes even when the send after it fails', async () => {
+      codex.running = true;
+      sendUserMessage.mockResolvedValue({ ok: false, stage: 'prompt_waiting', error: 'prompt up' });
+      const result = await sendNewTask(
+        { target: { worktreeId: WORKTREE_ID, instanceId: 'codex' }, cliToolId: 'codex', content: 'go', autoYesDuration: 3600000 },
+        routeRequest,
+      );
+
+      const state = getAutoYesState(WORKTREE_ID, 'codex', 'codex');
+      expect(state?.enabled).toBe(true);
+      expect(result).toMatchObject({
+        ok: false,
+        kind: 'prompt_waiting',
+        armedAutoYes: { enabled: true, expiresAt: state?.expiresAt },
+      });
     });
 
     it('sends nothing when arming Auto-Yes is refused', async () => {
