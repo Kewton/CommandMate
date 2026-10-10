@@ -18,6 +18,8 @@ import { FileContent } from '@/types/models';
 import { ImageViewer } from '@/components/worktree/ImageViewer';
 import { VideoViewer } from '@/components/worktree/VideoViewer';
 import { MarkdownToc } from '@/components/worktree/MarkdownToc';
+import { MermaidCodeBlock } from '@/components/worktree/MermaidCodeBlock';
+import { isMermaidLanguage, isMermaidPreChild } from '@/components/worktree/mermaid-block-utils';
 import { CodeBlockWithCopy } from '@/components/common/CodeBlockWithCopy';
 import { extractToc, TOC_VISIBLE_STORAGE_KEY } from '@/lib/markdown-toc';
 
@@ -225,6 +227,10 @@ export default function FileViewerPage() {
                       // block code does (and gets a copy button via the `pre`
                       // renderer below). Detect inline via the class instead.
                       code: ({ className, children, ...props }: { className?: string; children?: React.ReactNode }) => {
+                        // Issue #3522: ```mermaid becomes a diagram frame.
+                        if (isMermaidLanguage(className)) {
+                          return <MermaidCodeBlock className={className}>{children}</MermaidCodeBlock>;
+                        }
                         const isInline = !className || !className.includes('language-');
                         if (isInline) {
                           return (
@@ -242,13 +248,20 @@ export default function FileViewerPage() {
                       // Issue #981: wrap code blocks with a copy button. The
                       // wrapper sits outside the scrollable <pre> so the button
                       // stays pinned to the top-right while code scrolls.
-                      pre: ({ children }: { children?: React.ReactNode }) => (
-                        <CodeBlockWithCopy>
-                          <pre className="overflow-x-auto">
-                            {children}
-                          </pre>
-                        </CodeBlockWithCopy>
-                      ),
+                      // Issue #3522: a mermaid fence is its own block (diagram
+                      // frame), so it is passed through without <pre>/copy.
+                      pre: ({ children }: { children?: React.ReactNode }) => {
+                        if (isMermaidPreChild(children)) {
+                          return <>{children}</>;
+                        }
+                        return (
+                          <CodeBlockWithCopy>
+                            <pre className="overflow-x-auto">
+                              {children}
+                            </pre>
+                          </CodeBlockWithCopy>
+                        );
+                      },
                       table: ({ children }: { children?: React.ReactNode }) => (
                         <div className="overflow-x-auto">
                           <table className="border-collapse border border-gray-300">
