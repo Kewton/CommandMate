@@ -8,7 +8,9 @@
  * that quoted `> **Thinking**` in a finding lost the rest of its findings and
  * its `DONE:` line. The reply (`ask --json`'s `reply`) is the answer followed
  * by the thinking section, which starts on a line of its own with
- * `> **Thinking (<n>)**`; only that line ends the answer (extractReplyBody).
+ * `> **Thinking (<n>)**`, and/or the tool-call section `> **Tool calls (<n>)**`
+ * (a reply may carry only the latter); only the earlier of those lines ends
+ * the answer (extractReplyBody, Issue #3539).
  *
  * One call does what the hand-written script and docs/orchestrate/trials.md
  * did by hand:
@@ -66,14 +68,14 @@ export const TABLE_HEADER = [
 ];
 
 /**
- * The line that opens the thinking section of an `ask --json` reply. Only a
- * line that starts with it ends the answer: the answer may quote
- * `> **Thinking**` (the hand-written split on `> **Thinking` lost findings and
- * the `DONE:` line that way).
+ * The line that opens the thinking or tool-call section of an `ask --json`
+ * reply. Only a line that starts with it ends the answer: the answer may quote
+ * `> **Thinking**` / `> **Tool calls**` (the hand-written split on
+ * `> **Thinking` lost findings and the `DONE:` line that way).
  */
-export const THINKING_START = /\n> \*\*Thinking \(/;
+export const THINKING_START = /\n> \*\*(?:Thinking|Tool calls) \(/;
 
-/** The answer of a reply: everything before the first thinking section. */
+/** The answer of a reply: everything before the first thinking / tool-call section. */
 export function extractReplyBody(reply) {
   const text = String(reply ?? '');
   const match = THINKING_START.exec(text);
