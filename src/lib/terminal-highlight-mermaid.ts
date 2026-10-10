@@ -130,8 +130,8 @@ function structuralFences(sourceText: string, raw: Span[], sources: SourceOnScre
  * by `data-search-section`. Inside a region, raw fences and on-screen sources
  * are paired by the raw range each source names (Issue #3525: the fence as
  * Markdown parsed it — nested lists, tabs, quoted tool logs), or, when a source
- * names none, by matching fences found line by line ({@link findMermaidFences})
- * in order by equal body, and:
+ * names none, by matching fences found in the raw text ({@link findMermaidFences};
+ * Issue #3544: only where Markdown opens one) in order by equal body, and:
  *
  * - a hit inside a paired fence body maps to the same place in that source;
  * - a hit inside a fence that could not be paired (its source is not on

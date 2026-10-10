@@ -63,6 +63,31 @@ describe('extractReplyBody: the answer ends only at the thinking section', () =>
     expect(findDoneLine(extractReplyBody(text))).toBe('DONE: 前回の指摘は解消。新しい指摘 1 件（この PR で直すべきもの 0 件）');
   });
 
+  it('drops a tool-calls-only section and keeps the DONE: line (#3539)', () => {
+    const text = reply('reply-tool-calls-only.json');
+    const body = extractReplyBody(text);
+    expect(body).not.toContain('Tool calls');
+    expect(body).not.toContain('ツール呼び出しの節の中');
+    expect(findDoneLine(body)).toBe('DONE: 指摘なし');
+    // positive control: the thinking-only delimiter leaves the section in the body.
+    expect(text.split(/\n> \*\*Thinking \(/)[0]).toContain('Tool calls');
+  });
+
+  it('cuts at the earlier of thinking and tool calls (#3539)', () => {
+    const body = extractReplyBody(reply('reply-thinking-and-tool-calls.json'));
+    expect(body).not.toContain('差分を読みます');
+    expect(body).not.toContain('Tool calls');
+    expect(findDoneLine(body)).toBe('DONE: 指摘なし');
+  });
+
+  it('keeps the answer when it quotes `> **Tool calls**` (#3539)', () => {
+    const body = extractReplyBody(reply('reply-quotes-tool-calls.json'));
+    expect(body).toContain('> **Tool calls** の節を引用した行');
+    expect(body).toContain('確信度 **高**');
+    expect(findDoneLine(body)).toBe('DONE: 指摘 1 件（この PR で直すべきもの 1 件）');
+    expect(body).not.toContain('ツール呼び出しの節の中');
+  });
+
   it('reads the finding count of a DONE: line', () => {
     expect(findingCount('DONE: 指摘 2 件（うち、この PR で直すべきもの 1 件）')).toBe(2);
     expect(findingCount('DONE: 指摘なし')).toBe(0);
