@@ -5,7 +5,7 @@
  * @vitest-environment jsdom
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, fireEvent, act } from '@testing-library/react';
 import React from 'react';
 import { Sidebar, parseGroupCollapsed } from '@/components/layout/Sidebar';
@@ -14,6 +14,7 @@ import { SidebarProvider, useSidebarContext } from '@/contexts/SidebarContext';
 import { WorktreeSelectionProvider } from '@/contexts/WorktreeSelectionContext';
 import type { Worktree } from '@/types/models';
 import { ATTENTION_REVIEW_HREF } from '@/config/review-config';
+import { installRadixJsdomPolyfills } from '@tests/helpers/radix-jsdom';
 
 // Issue #2684: Mock TransitionLink to verify nav links use it
 const mockTransitionLink = vi.fn(
@@ -1589,31 +1590,46 @@ describe('Sidebar', () => {
       );
     }
 
+    // Issue #3510: the footer holds one button that opens the shared settings
+    // menu; the #2706 entry is its "Settings" item. On the phone (the case
+    // #2706 was about) that item goes to /more.
+    beforeAll(() => installRadixJsdomPolyfills());
+    afterEach(() => {
+      Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: 1024 });
+    });
+
+    function setPhoneWidth(): void {
+      Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: 390 });
+    }
+
     it('renders the settings entry in the footer pointing to /more', async () => {
+      setPhoneWidth();
       render(
         <Wrapper>
           <Sidebar />
         </Wrapper>
       );
 
-      const link = await screen.findByTestId('sidebar-settings');
-      expect(link.tagName).toBe('A');
-      expect(link.getAttribute('href')).toBe('/more');
-      expect(link.getAttribute('aria-label')).toBe('Settings');
-      expect(link.querySelector('svg')).not.toBeNull();
-      expect(link.closest('[data-testid="tooltip-wrapper"]')?.className).toContain('flex-shrink-0');
+      const trigger = await screen.findByTestId('sidebar-settings-menu');
+      expect(trigger.tagName).toBe('BUTTON');
+      expect(trigger).toHaveAccessibleName('Settings');
+      expect(trigger.querySelector('svg')).not.toBeNull();
 
       // 位置
-      const select = screen.getByTestId('locale-switcher');
-      expect(link.compareDocumentPosition(select) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
-      expect(link.closest('[data-testid="sidebar"]')).not.toBeNull();
-      expect(link.closest('[data-testid="sidebar-header"]')).toBeNull();
+      expect(trigger.closest('[data-testid="sidebar"]')).not.toBeNull();
+      expect(trigger.closest('[data-testid="sidebar-header"]')).toBeNull();
 
-      // 既存要素が消えていないこと
-      expect(screen.getByTestId('locale-switcher')).toBeInTheDocument();
+      fireEvent.keyDown(trigger, { key: 'Enter' });
+      fireEvent.click(screen.getByRole('menuitem', { name: 'Settings' }));
+      expect(mockPush).toHaveBeenCalledWith('/more');
+
+      // 言語もメニューから届く
+      fireEvent.keyDown(trigger, { key: 'Enter' });
+      expect(screen.getByRole('menuitemradio', { name: 'English' })).toHaveAttribute('data-state', 'checked');
     });
 
     it('closes the mobile drawer when clicked', async () => {
+      setPhoneWidth();
       render(
         <Wrapper>
           <DrawerProbe />
@@ -1624,9 +1640,9 @@ describe('Sidebar', () => {
       fireEvent.click(screen.getByTestId('drawer-probe'));
       expect(screen.getByTestId('drawer-probe')).toHaveAttribute('data-open', 'true');
 
-      const link = await screen.findByTestId('sidebar-settings');
-      link.addEventListener('click', (event) => event.preventDefault());
-      fireEvent.click(link);
+      const trigger = await screen.findByTestId('sidebar-settings-menu');
+      fireEvent.keyDown(trigger, { key: 'Enter' });
+      fireEvent.click(screen.getByRole('menuitem', { name: 'Settings' }));
       expect(screen.getByTestId('drawer-probe')).toHaveAttribute('data-open', 'false');
     });
   });
