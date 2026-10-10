@@ -1,29 +1,28 @@
 /**
- * Whether some modal dialog is already up (Issue #3511).
+ * Whether some modal dialog is already up (Issue #3511, #3563).
  *
  * New task does not open over another modal — the `?` help, settings, a
  * confirmation — the same way it stands down while the command palette is
  * open: two focus traps would fight over the keyboard.
  *
  * Read from the DOM rather than from each dialog's context because those
- * dialogs keep their open state in a dozen unrelated places. Only a real modal
- * counts, which takes three things:
+ * dialogs keep their open state in a dozen unrelated places. A modal is:
  *
  * - `role="dialog"` with `aria-modal="true"`, not playing its exit animation
  *   (`data-state="closed"` is already closing).
- * - A focus trap: `Modal` renders its panel with `tabindex="-1"`, and
- *   `useFocusTrap` gives its container one when it engages (the mobile sheets).
- *   `role="dialog" aria-modal` alone is not enough — `PromptPanel` carries both
- *   while rendered inline in a terminal pane, without trapping anything.
- * - Being displayed: nothing on the way up is `display: none` or `hidden`. A
- *   split hidden behind a maximized one (`TerminalSplitContainer`) stays
- *   mounted, dialogs and all.
+ * - Not the inline `PromptPanel`, which carries both attributes while rendered
+ *   in a terminal pane without blocking anything. It is excluded by its
+ *   `data-testid`. `tabindex` is no signal: `FullScreenModal` and `FileViewer`
+ *   are real modals that render none (Issue #3563).
+ * - Displayed: nothing on the way up is `display: none` or `hidden`. A split
+ *   hidden behind a maximized one (`TerminalSplitContainer`) stays mounted,
+ *   dialogs and all.
  *
  * SSR-safe.
  */
 
 export const OPEN_MODAL_SELECTOR =
-  '[role="dialog"][aria-modal="true"][tabindex]:not([data-state="closed"])';
+  '[role="dialog"][aria-modal="true"]:not([data-state="closed"]):not([data-testid="prompt-panel"])';
 
 /** Whether `element` and every ancestor are displayed. */
 export function isDisplayed(element: Element): boolean {

@@ -72,18 +72,28 @@ export type NewTaskSendResult = (
 ) & {
   /** Present only when this call armed Auto-Yes — whether or not the send then went out. */
   armedAutoYes?: ArmedAutoYes;
+  /**
+   * The auto-yes route answered 2xx, so the server holds Auto-Yes armed, but
+   * the answer did not give its expiry. Not recorded as armed: a resend arms
+   * again (the route is idempotent) rather than skip on a guessed expiry.
+   */
+  autoYesStateUnknown?: true;
 };
 
-/** The armed state the auto-yes route answered with; the duration from now if it named none. */
-async function readArmedState(response: Response, duration: AutoYesDuration): Promise<ArmedAutoYes> {
+/**
+ * The armed state the auto-yes route answered with, or null when the body does
+ * not name an expiry. The server decides the expiry from when it enabled, so
+ * it is never guessed from this side's clock (Issue #3563).
+ */
+async function readArmedState(response: Response): Promise<ArmedAutoYes | null> {
   try {
     const body: unknown = await response.json();
     const expiresAt = body && typeof body === 'object' ? (body as Record<string, unknown>).expiresAt : null;
     if (typeof expiresAt === 'number') return { enabled: true, expiresAt };
   } catch {
-    // Fall through to the requested duration.
+    // Unknown.
   }
-  return { enabled: true, expiresAt: Date.now() + duration };
+  return null;
 }
 
 /** Read `{ error, code }` off an error body; anything else reads as empty. */
@@ -180,6 +190,8 @@ export async function sendNewTask(
   const headers = { 'Content-Type': 'application/json' };
 
   let armedAutoYes: ArmedAutoYes | undefined;
+  // Armed on the server, but the answer gave no expiry.
+  let stateUnknown = false;
   const duration = input.autoYesDuration;
   if (duration !== null) {
     // Set once the route has answered 2xx: from then on the server holds it armed.
@@ -202,7 +214,8 @@ export async function sendNewTask(
           return { ok: false, kind: 'auto_yes_failed', status: response.status, detail: error };
         }
         armedOnServer = true;
-        armedAutoYes = await readArmedState(response, duration);
+        armedAutoYes = (await readArmedState(response)) ?? undefined;
+        stateUnknown = armedAutoYes === undefined;
         return null;
       }, resolveDefaultTimeoutMs('POST'));
     } catch (error) {
@@ -210,15 +223,16 @@ export async function sendNewTask(
         const failure = transportFailure(error);
         return failure.ok ? failure : { ...failure, kind: 'auto_yes_failed' };
       }
-      // Armed, but its body never finished: nothing is sent, and the dialog
-      // shows Auto-Yes on for the requested duration so a resend does not re-arm.
-      return { ...transportFailure(error), armedAutoYes: { enabled: true, expiresAt: Date.now() + duration } };
+      // Armed, but its body never finished: nothing is sent. The expiry is
+      // unknown (the timeout's clock is not the server's enabling time), so
+      // the state is reported unknown and a resend arms again.
+      return { ...transportFailure(error), autoYesStateUnknown: true };
     }
     if (refusal) return refusal;
   }
 
   const withArmed = (result: NewTaskSendResult): NewTaskSendResult =>
-    armedAutoYes ? { ...result, armedAutoYes } : result;
+    armedAutoYes ? { ...result, armedAutoYes } : stateUnknown ? { ...result, autoYesStateUnknown: true } : result;
 
   const model = input.model?.trim() || undefined;
   // With no session the server launches the agent inside this request (Issue #3194).
