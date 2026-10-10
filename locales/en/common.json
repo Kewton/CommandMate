@@ -111,6 +111,11 @@
     "retryLoadBranches": "Retry",
     "dragToReorderGroup": "Drag to reorder group",
     "viewLabel": "View",
+    "needsAttention": "Needs attention",
+    "openInReview": "Open in Review",
+    "attentionMoreInReview": "+{count} more in Review",
+    "hiddenRepository": "Hidden repository",
+    "otherBranches": "Other ({count})",
     "viewMode": {
       "grouped": "Repository",
       "flat": "Branch",
@@ -289,6 +294,52 @@
       "saveError": "Could not save.",
       "loadError": "Could not load the setting.",
       "opencodeSharedData": "OpenCode and OpenCode V2 are both installed. They share ~/.local/share/opencode, and V2 changes the database in ways OpenCode 1.x cannot read — if OpenCode fails to start, use OpenCode V2 only or give OpenCode 1.x its own data directory."
+    }
+  },
+  "newTask": {
+    "title": "New task",
+    "loading": "Loading branches…",
+    "loadError": "Could not load the branch list.",
+    "noTargets": "No branch has an agent to send to.",
+    "recentLabel": "Recent",
+    "repositoryLabel": "Repository",
+    "branchLabel": "Branch",
+    "agentLabel": "Agent",
+    "agentStatus": {
+      "running": "running",
+      "starting": "starting",
+      "stopped": "stopped"
+    },
+    "willStart": "{agent} is not running. It will be started, then the request is sent.",
+    "startingNotice": "{agent} is still starting. If the send is refused, wait a moment and send again.",
+    "messageLabel": "Request",
+    "messagePlaceholder": "What should the agent do?",
+    "modelLabel": "Model",
+    "modelPlaceholder": "Default",
+    "modelHintLaunch": "Applied when the session starts.",
+    "modelHintSwitch": "Switches the running session to this model.",
+    "modelUnavailable": {
+      "unsupported": "{agent} does not take a model on send.",
+      "running": "{agent} is already running. A model can only be set when it starts — stop the session first to switch."
+    },
+    "autoYesLabel": "Auto-Yes",
+    "autoYesActive": "On for this agent, {remaining} left. Left as it is.",
+    "autoYesKeep": "Leave off",
+    "autoYesEnableFor": "Turn on for {duration}",
+    "autoYesScope": "Applies to this agent until it expires, not only to this request.",
+    "send": "Send",
+    "sending": "Sending…",
+    "sendHint": "to send",
+    "sentToast": "Sent to {target}. Click to go back.",
+    "errors": {
+      "auto_yes_failed": "Auto-Yes could not be turned on, so nothing was sent.",
+      "prompt_waiting": "{agent} is waiting on a prompt, so nothing was sent. Answer it on the branch screen, then send again.",
+      "conflict": "The session refused the request.",
+      "starting": "{agent} is still starting. Wait a moment and send again.",
+      "start_failed": "{agent} could not be started.",
+      "model_rejected": "The model was not accepted. Clear it or change it, then send again.",
+      "invalid": "The request was not accepted.",
+      "failed": "Sending failed. Check the connection and send again."
     }
   }
 }

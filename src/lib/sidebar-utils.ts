@@ -804,3 +804,89 @@ export function shouldShowRepositoryTabBar(
   if (mode === 'always') return true;
   return !isSidebarOpen;
 }
+
+// ============================================================================
+// "Other" bucket for detached worktrees (Issue #3509)
+// ============================================================================
+
+/**
+ * Name `parseWorktreeList` gives a worktree on a detached HEAD
+ * (`detached-<commit>`, `src/lib/git/worktrees.ts`). Same character class as
+ * the commit capture there, so a branch merely *named* `detached-…/x` is not
+ * folded away.
+ */
+const DETACHED_BRANCH_NAME_PATTERN = /^detached-[a-z0-9]+$/;
+
+/** Whether a sidebar row is a detached-HEAD worktree (Issue #3509). */
+export function isDetachedBranchName(name: string): boolean {
+  return DETACHED_BRANCH_NAME_PATTERN.test(name);
+}
+
+/** Statuses that keep a detached row out of "Other" (Issue #3509). */
+const KEEP_IN_PLACE_STATUSES: ReadonlySet<BranchStatus> = new Set<BranchStatus>([
+  'waiting',
+  'running',
+  'generating',
+]);
+
+/**
+ * Split one repository's rows into the ones shown in place and the ones folded
+ * into "Other (n)" (Issue #3509).
+ *
+ * Only detached worktrees are folded, and never one the user must not lose
+ * sight of: the selected row, or a waiting / running / generating one. The
+ * status is read at BOTH levels — the aggregated per-instance map (the dot) and
+ * the worktree-level `status` (`isWaitingForResponse` / `isProcessing`, which is
+ * what Needs attention counts and what a payload without the map carries) — so
+ * a disagreement between the two never folds a live row away.
+ *
+ * `currentById` is the live version of each row. The sidebar's hover-freeze
+ * hands in row objects from when the cursor entered the list; the freeze holds
+ * the ORDER only, so the decision is made on the current state when it is
+ * known. Order is preserved on both sides, so the sort (or freeze) still holds.
+ *
+ * @param branches - One group's rows, already sorted (possibly frozen)
+ * @param selectedId - The open worktree, or null
+ * `stickyIds` are rows that stay in place whatever their state: the sidebar
+ * passes the rows that were visible during the current hover-freeze, so a row
+ * can leave "Other" while frozen but is only folded back once the freeze ends
+ * (a visible row never disappears under the cursor).
+ *
+ * @param currentById - Live rows by id; a row missing from it is judged as given
+ * @param stickyIds - Rows kept in place regardless of state (hover-freeze)
+ */
+export function partitionOtherBranches(
+  branches: ReadonlyArray<SidebarBranchItem>,
+  selectedId: string | null,
+  currentById?: ReadonlyMap<string, SidebarBranchItem>,
+  stickyIds?: ReadonlySet<string>
+): { shown: SidebarBranchItem[]; other: SidebarBranchItem[] } {
+  const shown: SidebarBranchItem[] = [];
+  const other: SidebarBranchItem[] = [];
+  for (const branch of branches) {
+    const keepInPlace =
+      stickyIds?.has(branch.id) === true || isBranchKeptInPlace(branch, selectedId, currentById);
+    (keepInPlace ? shown : other).push(branch);
+  }
+  return { shown, other };
+}
+
+/**
+ * The per-row half of {@link partitionOtherBranches}: whether this row stays
+ * out of "Other" on its own merits (not detached, selected, or waiting /
+ * running / generating at either status level), judged on `currentById`'s row
+ * when there is one.
+ */
+export function isBranchKeptInPlace(
+  branch: SidebarBranchItem,
+  selectedId: string | null,
+  currentById?: ReadonlyMap<string, SidebarBranchItem>
+): boolean {
+  const current = currentById?.get(branch.id) ?? branch;
+  return (
+    !isDetachedBranchName(current.name) ||
+    current.id === selectedId ||
+    KEEP_IN_PLACE_STATUSES.has(resolveBranchStatus(current)) ||
+    KEEP_IN_PLACE_STATUSES.has(current.status)
+  );
+}

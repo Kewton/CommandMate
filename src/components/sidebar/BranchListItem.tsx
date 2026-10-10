@@ -3,6 +3,9 @@
  *
  * Individual branch item in the sidebar list.
  * Shows branch name, repository, status, and unread indicator.
+ *
+ * Issue #3509: one line (~34px). The next action and the description moved to
+ * the selected row and the tooltip; see the comments at the render below.
  */
 
 'use client';
@@ -10,6 +13,7 @@
 import React, { memo, useRef, useState, useEffect, useCallback, useMemo } from 'react';
 import ReactDOM from 'react-dom';
 import { useTranslations } from 'next-intl';
+import { Check } from 'lucide-react';
 import type { SidebarBranchItem } from '@/types/sidebar';
 import {
   aggregateCliStatus,
@@ -80,6 +84,7 @@ function BranchTooltip({
   anchorRef,
   nextActionLabel,
   unclassified,
+  awaitingInstructionLabel,
 }: {
   id: string;
   branch: SidebarBranchItem;
@@ -92,6 +97,11 @@ function BranchTooltip({
    * not print the `ready` underneath it.
    */
   unclassified: boolean;
+  /**
+   * Issue #3509: the row's "ready for work" mark is a bare check, so the words
+   * go here. Null when the branch is not awaiting an instruction.
+   */
+  awaitingInstructionLabel: string | null;
 }) {
   // Start off-screen so tooltip is never briefly visible at (0,0) before coords are set
   const [coords, setCoords] = useState({ top: -9999, left: -9999 });
@@ -172,6 +182,9 @@ function BranchTooltip({
       */}
       {nextActionLabel && (
         <p className="text-sidebar-muted whitespace-nowrap">Next: {nextActionLabel}</p>
+      )}
+      {awaitingInstructionLabel && (
+        <p className="text-success-foreground whitespace-nowrap">{awaitingInstructionLabel}</p>
       )}
       {branch.description && (
         <p className="text-sidebar-muted mt-1 border-t border-sidebar-border pt-1 whitespace-pre-wrap break-words">
@@ -270,6 +283,9 @@ export const BranchListItem = memo(function BranchListItem({
   // Every other status keeps it in the tooltip alone: "Running…" on every row
   // is noise that would make the two rows that matter harder to spot.
   const showInlineNextAction = (isWaiting || awaitingInstruction) && nextActionLabel !== null;
+  // Issue #3509: the selected row shows it for every status (the tooltip is
+  // suppressed on the selected row, so this is where it goes instead).
+  const showNextActionLine = nextActionLabel !== null && (showInlineNextAction || isSelected);
   // ---- end #1787 ----
 
   // Issue #676 (A): selected branches never show the tooltip so a stuck
@@ -347,14 +363,20 @@ export const BranchListItem = memo(function BranchListItem({
       aria-describedby={showTooltip ? tooltipId : undefined}
       aria-label={!showRepositoryName ? `${branch.name} - ${branch.repositoryName}` : undefined}
       className={`
-        group relative w-full px-4 py-3 flex flex-col gap-1
+        group relative w-full min-h-[34px] px-3 py-1.5 flex flex-col justify-center gap-0.5
         hover:bg-sidebar-hover transition-colors
         focus:outline-none focus:ring-2 focus:ring-inset focus:ring-ring
         ${isSelected ? 'bg-sidebar-hover border-l-2 border-accent-500' : 'border-l-2 border-transparent'}
       `}
     >
-      {/* Main row: aggregated CLI status, info, unread */}
-      <div className="flex items-center gap-3 w-full">
+      {/*
+        Issue #3509: one line — dot, name, (repository), marks. The name is the
+        only flexible cell, so at 224px it gets every pixel the fixed marks do
+        not need. The status lives in the dot alone (see BranchStatusIndicator):
+        amber pulse = a prompt is waiting, green check mark = ready for work,
+        hollow gray ring = cannot tell, green glow = running, gray = idle.
+      */}
+      <div className="flex items-center gap-2 w-full min-w-0">
         {/*
           Aggregated CLI tool status (Issue #867): a single icon replaces the
           per-agent dots. The most significant status is shown; hover/focus
@@ -385,46 +407,32 @@ export const BranchListItem = memo(function BranchListItem({
           </div>
         )}
 
-        {/* Branch info */}
-        <div className="flex-1 min-w-0 text-left">
-          <p className="text-sm font-medium text-sidebar-foreground truncate">
-            {branch.name}
+        <p className="flex-1 min-w-0 text-left text-sm text-sidebar-foreground truncate">
+          {branch.name}
+        </p>
+        {showRepositoryName && (
+          <p className="flex-shrink min-w-0 max-w-[40%] text-xs text-sidebar-muted truncate">
+            {branch.repositoryName}
           </p>
-          {showRepositoryName && (
-            <p className="text-xs text-sidebar-muted truncate">
-              {branch.repositoryName}
-            </p>
-          )}
-          {/*
-            Issue #1787: what to do next, spelled out. Amber for "you are
-            blocking it", green for "it is done and waiting for work" — the two
-            must never be confusable, which is why this is not one neutral color.
-          */}
-          {showInlineNextAction && (
-            <p
-              data-testid="branch-next-action"
-              className={`text-xs font-medium truncate ${
-                isWaiting ? 'text-warning-foreground' : 'text-success-foreground'
-              }`}
-            >
-              {nextActionLabel}
-            </p>
-          )}
-        </div>
+        )}
 
         {/*
           Issue #1787: `awaitingInstruction` (the agent said its turn is over) is
           a SECONDARY state deliberately styled green, so it can never be read as
           the amber "needs your answer" case. Shown even while waiting is amber,
           because both can be true across two agents in one branch.
+          Issue #3509: a check mark instead of the "Ready for work" pill, which
+          alone took a third of a 224px row. The words stay for screen readers,
+          in the title and in the tooltip.
         */}
         {awaitingInstruction && (
           <span
             data-testid="awaiting-instruction-badge"
-            className="flex-shrink-0 rounded-full bg-success-subtle px-1.5 py-0.5 text-[10px] font-medium leading-4 text-success-foreground"
+            className="flex-shrink-0 inline-flex h-4 w-4 items-center justify-center rounded-full bg-success-subtle text-success-foreground"
             title={tWorktree('awaitingInstruction.label')}
           >
-            {tWorktree('awaitingInstruction.badge')}
+            <Check className="h-3 w-3" strokeWidth={3} aria-hidden="true" />
+            <span className="sr-only">{tWorktree('awaitingInstruction.badge')}</span>
           </span>
         )}
 
@@ -438,16 +446,36 @@ export const BranchListItem = memo(function BranchListItem({
         )}
       </div>
 
-      {/* Description display (shown for all branches with description) */}
-      {branch.description && (
-        <div
-          data-testid="branch-description"
-          className="pl-6 pr-2 mt-1 text-left"
+      {/*
+        Issue #1787: what to do next, spelled out. Amber for "you are blocking
+        it", green for "it is done and waiting for work" — the two must never be
+        confusable, which is why this is not one neutral color.
+        Issue #3509: the row is one line, so this second line is shown on the
+        selected row only — and, for the two states that need it, on devices
+        that cannot hover (`hover: none`), where the tooltip never opens.
+      */}
+      {showNextActionLine && (
+        <p
+          data-testid="branch-next-action"
+          className={`pl-6 text-left text-xs font-medium truncate ${
+            isSelected ? 'block' : 'hidden [@media(hover:none)]:block'
+          } ${
+            isWaiting
+              ? 'text-warning-foreground'
+              : awaitingInstruction
+                ? 'text-success-foreground'
+                : 'text-sidebar-muted'
+          }`}
         >
-          <p className="text-xs text-sidebar-muted line-clamp-2">
-            {branch.description}
-          </p>
-        </div>
+          {nextActionLabel}
+        </p>
+      )}
+
+      {/* Issue #3509: the description moved to the tooltip; the selected row keeps one line of it. */}
+      {isSelected && branch.description && (
+        <p data-testid="branch-description" className="pl-6 text-left text-xs text-sidebar-muted truncate">
+          {branch.description}
+        </p>
       )}
 
       {/* Tooltip: portal to document.body to escape overflow clipping (Issue #651) */}
@@ -458,6 +486,7 @@ export const BranchListItem = memo(function BranchListItem({
         anchorRef={buttonRef}
         nextActionLabel={nextActionLabel}
         unclassified={isUnclassified}
+        awaitingInstructionLabel={awaitingInstruction ? tWorktree('awaitingInstruction.badge') : null}
       />
     </button>
   );

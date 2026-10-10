@@ -19,6 +19,8 @@
     "editorOutdent": "行・選択範囲をアウトデント",
     "editorTabFocus": "Tab キーのフォーカス移動を切り替え",
     "editorSave": "ファイルを保存",
-    "editorFullscreen": "全画面エディタを切り替え"
+    "editorFullscreen": "全画面エディタを切り替え",
+    "newTask": "新しいタスク（どのエージェントにも依頼を送る）",
+    "newTaskSend": "新しいタスクのダイアログから送る"
   }
 }
