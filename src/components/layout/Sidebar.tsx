@@ -83,6 +83,7 @@ import {
   buildSessionRowHref,
   sortSessionRows,
   partitionOtherBranches,
+  isBranchKeptInPlace,
 } from '@/lib/sidebar-utils';
 import { useWorktreeList } from '@/hooks/useWorktreeList';
 import type { BranchGroup, SessionRow } from '@/lib/sidebar-utils';
@@ -278,6 +279,15 @@ export const Sidebar = memo(function Sidebar() {
   } | null>(null);
   const freezeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Issue #3509: the rows visible (outside "Other") at any point of the current
+  // freeze. The freeze holds what is under the cursor still, so a row may LEAVE
+  // "Other" while frozen (it turned waiting / running / selected) but no visible
+  // row may be folded INTO it until the freeze is released. Null = no freeze.
+  const stickyShownIdsRef = useRef<Set<string> | null>(null);
+  // The rows shown outside "Other" in the last committed render, for the
+  // snapshot a new freeze starts from (same idea as displayedItemsRef).
+  const displayedShownIdsRef = useRef<Set<string>>(new Set());
+
   // Issue #2058: bumped ONLY when a freeze is released, never when one is
   // activated. Release is the transition the user is waiting to see, and
   // nothing else re-renders the sidebar until the next poll (30s, or 60s with
@@ -303,6 +313,8 @@ export const Sidebar = memo(function Sidebar() {
       freezeTimerRef.current = null;
     }
     frozenBranchItemsRef.current = null;
+    // Issue #3509: the freeze is over, so rows may fold into "Other" again.
+    stickyShownIdsRef.current = null;
   }, []);
 
   const effectiveBranchItems = useMemo(() => {
@@ -326,8 +338,28 @@ export const Sidebar = memo(function Sidebar() {
   // before paint). handleListMouseEnter reads this to freeze exactly what
   // the user is seeing — not just the live branchItems closure.
   const displayedItemsRef = useRef<SidebarBranchItem[]>(effectiveBranchItems);
+
+  // Issue #3509: rows held in place during a freeze (see stickyShownIdsRef), and
+  // the rows this render shows outside "Other". Recomputed every render: the
+  // freeze itself lives in refs and never triggers a render of its own.
+  const stickyShownIds = stickyShownIdsRef.current;
+  const shownIds = new Set(
+    effectiveBranchItems
+      .filter(
+        (item) =>
+          stickyShownIds?.has(item.id) === true ||
+          isBranchKeptInPlace(item, selectedWorktreeId, liveBranchById)
+      )
+      .map((item) => item.id)
+  );
+
   useLayoutEffect(() => {
     displayedItemsRef.current = effectiveBranchItems;
+    displayedShownIdsRef.current = shownIds;
+    // While frozen, everything shown now stays shown until the release.
+    if (stickyShownIdsRef.current) {
+      for (const id of shownIds) stickyShownIdsRef.current.add(id);
+    }
     // Issue #2058: the first arrival of data is not a reorder, so it must not
     // be suppressed. Discard the stale empty snapshot here (the memo above has
     // already rendered the live items) so a later poll is free to re-freeze a
@@ -358,6 +390,7 @@ export const Sidebar = memo(function Sidebar() {
     // New freeze: silently lock in the currently-displayed order.
     // No setFreezeVersion → no re-render on hover, so nothing can flash.
     frozenBranchItemsRef.current = { items: displayedItemsRef.current, expiresAt: Infinity };
+    stickyShownIdsRef.current = new Set(displayedShownIdsRef.current);
   }, []);
 
   // Hold freeze for 1s after cursor leaves (covers click + re-render settling),
@@ -679,6 +712,7 @@ export const Sidebar = memo(function Sidebar() {
                     isDragDisabled={!!searchQuery.trim()}
                     isFiltering={!!searchQuery.trim()}
                     liveBranchById={liveBranchById}
+                    stickyShownIds={stickyShownIds}
                   />
                 );
               })}
@@ -755,6 +789,7 @@ function SortableGroupItem({
   isDragDisabled,
   isFiltering,
   liveBranchById,
+  stickyShownIds,
 }: {
   group: BranchGroup;
   isExpanded: boolean;
@@ -766,6 +801,8 @@ function SortableGroupItem({
   isFiltering: boolean;
   /** Current rows by id, for the "Other" decision under the hover-freeze */
   liveBranchById: ReadonlyMap<string, SidebarBranchItem>;
+  /** Rows held outside "Other" until the hover-freeze ends, or null */
+  stickyShownIds: ReadonlySet<string> | null;
 }) {
   const {
     attributes,
@@ -785,10 +822,15 @@ function SortableGroupItem({
 
   // Issue #3509: detached worktrees fold into "Other (n)" — except the selected,
   // waiting and running ones, which stay in place.
-  const { shown, other } = useMemo(
-    () => partitionOtherBranches(group.branches, selectedWorktreeId, liveBranchById),
-    [group.branches, selectedWorktreeId, liveBranchById]
+  // Not memoised: `stickyShownIds` is a ref-held Set that grows in place during
+  // a freeze, so it cannot serve as a dependency. The work is O(rows).
+  const { shown, other } = partitionOtherBranches(
+    group.branches,
+    selectedWorktreeId,
+    liveBranchById,
+    stickyShownIds ?? undefined
   );
+
 
   return (
     <div ref={setNodeRef} style={style} className="w-full min-w-0 pt-2">

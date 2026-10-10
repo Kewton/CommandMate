@@ -847,23 +847,46 @@ const KEEP_IN_PLACE_STATUSES: ReadonlySet<BranchStatus> = new Set<BranchStatus>(
  *
  * @param branches - One group's rows, already sorted (possibly frozen)
  * @param selectedId - The open worktree, or null
+ * `stickyIds` are rows that stay in place whatever their state: the sidebar
+ * passes the rows that were visible during the current hover-freeze, so a row
+ * can leave "Other" while frozen but is only folded back once the freeze ends
+ * (a visible row never disappears under the cursor).
+ *
  * @param currentById - Live rows by id; a row missing from it is judged as given
+ * @param stickyIds - Rows kept in place regardless of state (hover-freeze)
  */
 export function partitionOtherBranches(
   branches: ReadonlyArray<SidebarBranchItem>,
   selectedId: string | null,
-  currentById?: ReadonlyMap<string, SidebarBranchItem>
+  currentById?: ReadonlyMap<string, SidebarBranchItem>,
+  stickyIds?: ReadonlySet<string>
 ): { shown: SidebarBranchItem[]; other: SidebarBranchItem[] } {
   const shown: SidebarBranchItem[] = [];
   const other: SidebarBranchItem[] = [];
   for (const branch of branches) {
-    const current = currentById?.get(branch.id) ?? branch;
     const keepInPlace =
-      !isDetachedBranchName(current.name) ||
-      current.id === selectedId ||
-      KEEP_IN_PLACE_STATUSES.has(resolveBranchStatus(current)) ||
-      KEEP_IN_PLACE_STATUSES.has(current.status);
+      stickyIds?.has(branch.id) === true || isBranchKeptInPlace(branch, selectedId, currentById);
     (keepInPlace ? shown : other).push(branch);
   }
   return { shown, other };
+}
+
+/**
+ * The per-row half of {@link partitionOtherBranches}: whether this row stays
+ * out of "Other" on its own merits (not detached, selected, or waiting /
+ * running / generating at either status level), judged on `currentById`'s row
+ * when there is one.
+ */
+export function isBranchKeptInPlace(
+  branch: SidebarBranchItem,
+  selectedId: string | null,
+  currentById?: ReadonlyMap<string, SidebarBranchItem>
+): boolean {
+  const current = currentById?.get(branch.id) ?? branch;
+  return (
+    !isDetachedBranchName(current.name) ||
+    current.id === selectedId ||
+    KEEP_IN_PLACE_STATUSES.has(resolveBranchStatus(current)) ||
+    KEEP_IN_PLACE_STATUSES.has(current.status)
+  );
 }

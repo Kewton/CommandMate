@@ -120,3 +120,17 @@ describe('partitionOtherBranches judges the current row, not a frozen one (Issue
     expect(ids(partitionOtherBranches(frozen, null, current).other)).toEqual(['d']);
   });
 });
+
+describe('partitionOtherBranches stickyIds (Issue #3509 review 2)', () => {
+  const det = item({ id: 'd', name: 'detached-abc', status: 'idle' });
+
+  it('keeps a sticky row in place even when it would fold (positive control)', () => {
+    const { shown, other } = partitionOtherBranches([det], null, undefined, new Set(['d']));
+    expect(ids(shown)).toEqual(['d']);
+    expect(other).toEqual([]);
+  });
+
+  it('folds it when it is not sticky (negative control)', () => {
+    expect(ids(partitionOtherBranches([det], null, undefined, new Set(['x'])).other)).toEqual(['d']);
+  });
+});

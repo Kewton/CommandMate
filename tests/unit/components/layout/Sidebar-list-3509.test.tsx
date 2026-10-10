@@ -365,3 +365,88 @@ describe('"Other" under the hover-freeze (Issue #3509 review)', () => {
     expect(branchRowNames()).toEqual(['feature/newer', 'feature/older']);
   });
 });
+
+describe('No visible row is folded into "Other" while frozen (Issue #3509 review 2)', () => {
+  const at = (day: number) => new Date(`2026-10-0${day}T00:00:00Z`);
+  const ROWS: Worktree[] = [
+    wt({ id: 'newer', name: 'feature/newer', isSessionRunning: false, updatedAt: at(3) }),
+    wt({ id: 'det', name: 'detached-abc1234', isSessionRunning: true, isWaitingForResponse: true, updatedAt: at(2) }),
+    wt({ id: 'older', name: 'feature/older', isSessionRunning: false, updatedAt: at(1) }),
+  ];
+  const IDLE = (list: Worktree[]) =>
+    list.map((w) => (w.id === 'det' ? ({ ...w, isSessionRunning: false, isWaitingForResponse: false } as Worktree) : w));
+
+  function renderLive(initial: Worktree[]) {
+    const ui = (list: Worktree[]) => (
+      <SidebarProvider>
+        <WorktreeSelectionProvider externalWorktrees={list} externalRepositories={[]}>
+          <Sidebar />
+        </WorktreeSelectionProvider>
+      </SidebarProvider>
+    );
+    const result = render(ui(initial));
+    return (next: Worktree[]) => result.rerender(ui(next));
+  }
+
+  it('keeps a waiting → idle detached row and the row below it in place until the freeze ends (positive control)', async () => {
+    const update = renderLive(ROWS);
+    await waitFor(() => {
+      expect(branchRowNames()).toEqual(['feature/newer', 'detached-abc1234', 'feature/older']);
+    });
+    expect(screen.queryByTestId('branch-group-other-toggle')).not.toBeInTheDocument();
+
+    const list = screen.getByTestId('branch-list');
+    fireEvent.mouseEnter(list);
+    update(IDLE(ROWS));
+
+    // Let the update land (the frozen order is what is rendered).
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(branchRowNames()).toEqual(['feature/newer', 'detached-abc1234', 'feature/older']);
+    expect(screen.queryByTestId('branch-group-other-toggle')).not.toBeInTheDocument();
+
+    // Release: the existing 1s delay after the cursor leaves, then it folds.
+    fireEvent.mouseLeave(list);
+    await waitFor(
+      () => {
+        expect(screen.getByTestId('branch-group-other-toggle')).toHaveTextContent('Other (1)');
+      },
+      { timeout: 3000 }
+    );
+    expect(branchRowNames()).toEqual(['feature/newer', 'feature/older']);
+  });
+
+  it('keeps a detached row whose selection moved away in place until the freeze ends', async () => {
+    const idle = IDLE(ROWS);
+    renderLive(idle);
+    fireEvent.click(await screen.findByTestId('branch-group-other-toggle'));
+    const detRow = () =>
+      screen.getAllByTestId('branch-list-item').find((el) => el.querySelector('p')?.textContent === 'detached-abc1234')!;
+    fireEvent.click(detRow());
+    // Selected: out of "Other", which then holds nothing and disappears.
+    await waitFor(() => expect(screen.queryByTestId('branch-group-other-toggle')).not.toBeInTheDocument());
+
+    const list = screen.getByTestId('branch-list');
+    fireEvent.mouseEnter(list);
+    const newer = screen.getAllByTestId('branch-list-item').find((el) => el.querySelector('p')?.textContent === 'feature/newer')!;
+    fireEvent.click(newer);
+    await waitFor(() => expect(newer).toHaveAttribute('aria-current', 'true'));
+    expect(branchRowNames()).toEqual(['feature/newer', 'detached-abc1234', 'feature/older']);
+
+    fireEvent.mouseLeave(list);
+    await waitFor(
+      () => {
+        expect(screen.getByTestId('branch-group-other-toggle')).toHaveTextContent('Other (1)');
+      },
+      { timeout: 3000 }
+    );
+  });
+
+  it('folds a row that turns idle right away when the list is not hovered (negative control)', async () => {
+    const update = renderLive(ROWS);
+    await waitFor(() => expect(branchRowNames()).toContain('detached-abc1234'));
+    update(IDLE(ROWS));
+    await waitFor(() => {
+      expect(screen.getByTestId('branch-group-other-toggle')).toHaveTextContent('Other (1)');
+    });
+  });
+});
