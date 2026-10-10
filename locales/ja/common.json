@@ -325,6 +325,8 @@
     "autoYesLabel": "Auto-Yes",
     "autoYesActive": "このエージェントで有効（残り {remaining}）。変更しません。",
     "autoYesKeep": "変えない（無効のまま）",
+    "autoYesKeepUnknown": "変えない（状態は不明）",
+    "autoYesUnknown": "Auto-Yes の状態を確認できませんでした（有効になっている可能性があります）。",
     "autoYesEnableFor": "{duration} 有効にする",
     "autoYesScope": "この依頼だけでなく、期限まで このエージェントに効きます。",
     "send": "送る",
