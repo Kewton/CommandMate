@@ -47,6 +47,7 @@ import { isDuplicatePrompt, normalizePromptForDedup } from './prompt-dedup';
 import { recordPromptDedupSkip } from './prompt-dedup-state';
 import {
   isDuplicateResponse,
+  claimDuplicateResponseSkipLog,
   claimStructuredHistoryRecheck,
   markStructuredHistoryRecheckPending,
   settleStructuredHistoryRecheck,
@@ -920,7 +921,21 @@ async function recheckDuplicateResponse(
   // logged nothing at all, so a reply that never reached History left no
   // trace anywhere. Same action name shape as its sibling so both skips
   // are found by one grep.
-  logger.info('duplicate-response-skipped', { worktreeId, cliToolId, instanceId: resolvedInstanceId });
+  //
+  // Issue #3519: but not on every tick. A finished screen that stays up is a
+  // duplicate on each of the cycle's 900 ticks, and logging all of them was
+  // 51,933 lines a day. The first tick of a run logs exactly as before; after
+  // that one line per `DUPLICATE_RESPONSE_SKIP_LOG_TICK_INTERVAL` ticks, with
+  // the run length and how many ticks went unlogged since the last line.
+  const skipLog = claimDuplicateResponseSkipLog(pollerKey);
+  if (skipLog.log) {
+    logger.info('duplicate-response-skipped', {
+      worktreeId,
+      cliToolId,
+      instanceId: resolvedInstanceId,
+      ...(skipLog.consecutive > 1 ? { consecutive: skipLog.consecutive, suppressed: skipLog.suppressed } : {}),
+    });
+  }
   updateSessionState(db, worktreeId, cliToolId, result.lineCount, resolvedInstanceId);
 
   // Issue #2399: the skip above is about the SCREEN, and until this Issue
