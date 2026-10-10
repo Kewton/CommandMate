@@ -111,6 +111,11 @@
     "retryLoadBranches": "再試行",
     "dragToReorderGroup": "ドラッグでグループを並べ替え",
     "viewLabel": "表示",
+    "needsAttention": "要対応",
+    "openInReview": "Review で開く",
+    "attentionMoreInReview": "ほか {count} 件を Review で見る",
+    "hiddenRepository": "非表示のリポジトリ",
+    "otherBranches": "その他（{count}）",
     "viewMode": {
       "grouped": "リポジトリ",
       "flat": "ブランチ",

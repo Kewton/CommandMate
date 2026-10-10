@@ -111,6 +111,11 @@
     "retryLoadBranches": "Retry",
     "dragToReorderGroup": "Drag to reorder group",
     "viewLabel": "View",
+    "needsAttention": "Needs attention",
+    "openInReview": "Open in Review",
+    "attentionMoreInReview": "+{count} more in Review",
+    "hiddenRepository": "Hidden repository",
+    "otherBranches": "Other ({count})",
     "viewMode": {
       "grouped": "Repository",
       "flat": "Branch",
