@@ -8,8 +8,14 @@
  * Rendered as the sidebar's first child, above the padded header, so the
  * open/close cell is at the column's top-left (see `SidebarPanelToggle`).
  *
- * PC only: `Sidebar` does not render this in the mobile drawer (#3515 owns the
- * phone), where the drawer is opened from the mobile header instead.
+ * Issue #3515: the phone's drawer renders the same rows with `drawer`. The
+ * open/close cell becomes the drawer's close button (×), the ⌘K key hint is
+ * not drawn (a phone has no keyboard to press it on), and every row closes the
+ * drawer before it acts, so the New task dialog and the command palette open
+ * on a clear screen and the logo lands on `/` with the drawer shut. The drawer
+ * copy carries its own test ids for the container and the close button
+ * (`sidebar-drawer-top-controls` / `sidebar-drawer-close`): the button does a
+ * different thing from the PC toggle, and the PC ids keep naming the PC rows.
  *
  * @module components/layout/SidebarTopControls
  */
@@ -23,6 +29,7 @@ import { TransitionLink } from '@/components/view-transitions/TransitionLink';
 import { Kbd } from '@/components/ui/Kbd';
 import { useCommandPalette } from '@/contexts/CommandPaletteContext';
 import { useNewTask } from '@/contexts/NewTaskContext';
+import { useSidebarContext } from '@/contexts/SidebarContext';
 import { isMacPlatform } from '@/config/keyboard-shortcuts';
 import { SidebarPanelToggle } from './SidebarPanelToggle';
 
@@ -41,21 +48,35 @@ function useModKeyLabel(): string | null {
   return modKey;
 }
 
-export function SidebarTopControls() {
+export interface SidebarTopControlsProps {
+  /** Issue #3515: rendered inside the phone's drawer (see the module doc). */
+  drawer?: boolean;
+}
+
+export function SidebarTopControls({ drawer = false }: SidebarTopControlsProps) {
   const tCommon = useTranslations('common');
   const tPalette = useTranslations('commandPalette');
   const { setOpen: setPaletteOpen } = useCommandPalette();
   const { openNewTask } = useNewTask();
+  const { closeMobileDrawer } = useSidebarContext();
   const modKey = useModKeyLabel();
+  const showKeyHint = !drawer && modKey !== null;
+  // The PC sidebar stays where it is; the drawer gets out of the way first.
+  const leaveDrawer = drawer ? closeMobileDrawer : undefined;
 
   return (
-    <div data-testid="sidebar-top-controls" className="flex-shrink-0">
+    <div data-testid={drawer ? 'sidebar-drawer-top-controls' : 'sidebar-top-controls'} className="flex-shrink-0">
       {/* First in the sidebar, no padding around it: the toggle cell starts at
           the column's top-left, where the rail has it too. */}
       <div className="flex min-w-0 items-center">
-        <SidebarPanelToggle testId="sidebar-panel-toggle" />
+        {drawer ? (
+          <SidebarPanelToggle testId="sidebar-drawer-close" onClose={closeMobileDrawer} />
+        ) : (
+          <SidebarPanelToggle testId="sidebar-panel-toggle" />
+        )}
         <TransitionLink
           href="/"
+          onClick={leaveDrawer}
           data-testid="sidebar-logo"
           className="flex min-w-0 items-center gap-2 rounded-md px-1 py-1 transition-opacity hover:opacity-80 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
@@ -69,7 +90,10 @@ export function SidebarTopControls() {
         <button
           type="button"
           data-testid="sidebar-new-task"
-          onClick={() => openNewTask()}
+          onClick={() => {
+            leaveDrawer?.();
+            openNewTask();
+          }}
           aria-haspopup="dialog"
           className={ROW_CLASS}
         >
@@ -79,13 +103,16 @@ export function SidebarTopControls() {
         <button
           type="button"
           data-testid="sidebar-search"
-          onClick={() => setPaletteOpen(true)}
+          onClick={() => {
+            leaveDrawer?.();
+            setPaletteOpen(true);
+          }}
           aria-label={tPalette('mobileTrigger')}
           className={ROW_CLASS}
         >
           <Search className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
           <span className="min-w-0 flex-1 truncate">{tPalette('searchAction')}</span>
-          {modKey && (
+          {showKeyHint && (
             <span className="flex flex-shrink-0 items-center gap-0.5" aria-hidden="true">
               <Kbd>{modKey}</Kbd>
               <Kbd>K</Kbd>

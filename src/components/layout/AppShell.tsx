@@ -24,13 +24,21 @@
  * screen alike (the worktree screen reports its own destination through it).
  *
  * Issue #3512: on the PC a closed sidebar leaves `SidebarRail` (56px icon
- * column) in its place, and Mod+B opens / closes the sidebar. The phone branch
- * is unchanged (#3515).
+ * column) in its place, and Mod+B opens / closes the sidebar.
+ *
+ * Issue #3515: the phone's drawer pads itself by the safe-area insets, so its
+ * top row clears the status bar and the settings button at its foot clears the
+ * home indicator (the bottom tab bar steps aside while it is open, #2642). It
+ * is never wider than 85% of the screen, so the overlay that closes it stays
+ * tappable on a narrow phone. Its contents (close button, New task, search,
+ * destinations, list, settings menu) are `Sidebar`'s. When it closes with
+ * focus inside it, focus moves to the opener on screen (`mobile-drawer-opener`),
+ * so a dialog or the palette opened from it returns focus there on close.
  */
 
 'use client';
 
-import React, { memo, useCallback, useRef, type ReactNode } from 'react';
+import React, { memo, useCallback, useLayoutEffect, useRef, type ReactNode } from 'react';
 import { useSidebarContext } from '@/contexts/SidebarContext';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { useLayoutConfig } from '@/hooks/useLayoutConfig';
@@ -42,6 +50,7 @@ import { useSidebarToggleShortcut } from './useSidebarToggleShortcut';
 import { RepositoryTabBar, REPOSITORY_TAB_BAR_HEIGHT } from './RepositoryTabBar';
 import { GlobalMobileNav } from '@/components/mobile/GlobalMobileNav';
 import { MobileConnectionBanner } from '@/components/mobile/MobileConnectionBanner';
+import { focusMobileDrawerOpener } from '@/components/mobile/mobile-drawer-opener';
 import { CommandPalette } from '@/components/common/CommandPalette';
 import { KeyboardShortcutsOverlay } from '@/components/common/KeyboardShortcutsOverlay';
 import { VersionMismatchBanner } from './VersionMismatchBanner';
@@ -118,7 +127,7 @@ export const AppShell = memo(function AppShell({ children }: AppShellProps) {
   } = useSidebarContext();
   const isMobile = useIsMobile();
   const { showSidebar, showGlobalNav } = useLayoutConfig();
-  // Issue #3512: Mod+B. Desktop only — the phone's drawer is untouched (#3515).
+  // Issue #3512: Mod+B. Desktop only — the phone's drawer has its own close button (#3515).
   useSidebarToggleShortcut(!isMobile && showSidebar, toggle);
   // Issue #915: scale fixed-px sidebar width by the PC display-size factor.
   const { factor } = usePcDisplaySizeContext();
@@ -173,6 +182,28 @@ export const AppShell = memo(function AppShell({ children }: AppShellProps) {
   const sidebarRef = useRef<HTMLElement>(null);
   const mainRef = useRef<HTMLElement>(null);
 
+  // Issue #3515: when the phone's drawer closes with focus inside it (or on
+  // nothing, as after a tap on iOS), hand focus to the opener on screen. A
+  // layout effect, so it lands before the passive effects of the New task
+  // dialog (`useFocusTrap`) and the command palette record "where focus was"
+  // in the same commit — they then return focus to the opener, not to a button
+  // in the closed drawer. Only on the open → closed edge, never on mount.
+  const mobileDrawerRef = useRef<HTMLElement>(null);
+  const wasMobileDrawerOpenRef = useRef(isMobileDrawerOpen);
+  useLayoutEffect(() => {
+    const wasOpen = wasMobileDrawerOpenRef.current;
+    wasMobileDrawerOpenRef.current = isMobileDrawerOpen;
+    if (!isMobile || !wasOpen || isMobileDrawerOpen) return;
+    const active = document.activeElement;
+    const focusInDrawer =
+      active instanceof HTMLElement && mobileDrawerRef.current?.contains(active) === true;
+    if (focusInDrawer || active === null || active === document.body) {
+      if (!focusMobileDrawerOpener() && focusInDrawer) {
+        (active as HTMLElement).blur();
+      }
+    }
+  }, [isMobile, isMobileDrawerOpen]);
+
   // Called only on mouseup — persists final width to React state + localStorage.
   // newWidth is in display space; convert back to medium-base before storing so
   // it survives size changes without compounding the factor.
@@ -204,9 +235,10 @@ export const AppShell = memo(function AppShell({ children }: AppShellProps) {
           {/* Mobile drawer - uses z-50 (above overlay z-40) for proper stacking */}
           {showSidebar && (
             <aside
+              ref={mobileDrawerRef}
               data-testid="sidebar-container"
               className={`
-                fixed left-0 top-0 h-full w-72 z-50
+                fixed left-0 top-0 h-full w-72 max-w-[85vw] z-50 bg-sidebar pt-safe pb-safe
                 ${SIDEBAR_TRANSITION}
                 ${isMobileDrawerOpen ? 'translate-x-0' : '-translate-x-full'}
               `}
