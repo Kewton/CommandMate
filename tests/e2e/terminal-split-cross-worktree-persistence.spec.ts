@@ -35,7 +35,8 @@ test.describe('Terminal split — cross-worktree persistence (AC-27 #2)', () => 
     page,
   }) => {
     const panes = page.locator('[data-testid^="terminal-split-pane-"]');
-    const addBtn = page.locator('[data-testid="add-terminal-split"]');
+    // Issue #3514: the "+ / -" stepper became layout icons (1-4).
+    const layoutBtn = (count: number) => page.locator(`[data-testid="split-layout-${count}"]`);
 
     // Worktree A: grow to 3 splits (default starts at 1).
     await page.goto(`/worktrees/${E2E_WORKTREE_A}`);
@@ -43,8 +44,7 @@ test.describe('Terminal split — cross-worktree persistence (AC-27 #2)', () => 
       page.locator('[data-testid="terminal-split-container"]'),
     ).toBeVisible();
     await expect(panes).toHaveCount(1);
-    await addBtn.click();
-    await addBtn.click();
+    await layoutBtn(3).click();
     await expect(panes).toHaveCount(3);
 
     // Switch to worktree B: starts at the default (1), unaffected by A.
@@ -55,7 +55,7 @@ test.describe('Terminal split — cross-worktree persistence (AC-27 #2)', () => 
     await expect(panes).toHaveCount(1);
 
     // Modify B → 2 splits.
-    await addBtn.click();
+    await layoutBtn(2).click();
     await expect(panes).toHaveCount(2);
 
     // Back to A: must restore A's 3 splits (not B's 2).

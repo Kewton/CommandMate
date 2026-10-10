@@ -3,8 +3,10 @@
  *
  * Single split within `TerminalSplitContainer`. Renders:
  *  - Header: agent-instance selector (with "other-split-uses" excluded) +
- *    output-surface toggle (Issue #2193) + terminal-search button (Issue #47) +
- *    maximize / restore toggle (Issue #2261).
+ *    output-surface toggle (Issue #2193, labelled "Terminal" / "Chat" since
+ *    Issue #3514) + terminal-search button (Issue #47) + maximize / restore
+ *    toggle (Issue #2261) + a "…" menu gathering maximize / search / end
+ *    session (Issue #3514). The selected split carries an accent frame.
  *  - Body: caller-supplied terminal content (TerminalDisplay).
  *  - Footer: caller-supplied navigation / prompt / message input.
  *
@@ -20,7 +22,17 @@
 'use client';
 
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronDown, Maximize2, MessageSquare, Minimize2, StickyNote, TerminalSquare } from 'lucide-react';
+import {
+  ChevronDown,
+  Maximize2,
+  MessageSquare,
+  Minimize2,
+  MoreHorizontal,
+  Search,
+  StickyNote,
+  TerminalSquare,
+  X,
+} from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import {
   getInstanceLabel,
@@ -66,10 +78,12 @@ export const AGENT_INSTANCE_DND_MIME = 'application/x-commandmate-agent-instance
 const SURFACE_MODE_SEGMENTS: readonly {
   mode: SurfaceMode;
   labelKey: string;
+  /** Issue #3514: the visible word on the segment ("Terminal" / "Chat"). */
+  textKey: string;
   icon: typeof TerminalSquare;
 }[] = [
-  { mode: 'terminal', labelKey: 'surfaceMode.showTerminal', icon: TerminalSquare },
-  { mode: 'chat', labelKey: 'surfaceMode.showChat', icon: MessageSquare },
+  { mode: 'terminal', labelKey: 'surfaceMode.showTerminal', textKey: 'surfaceMode.terminal', icon: TerminalSquare },
+  { mode: 'chat', labelKey: 'surfaceMode.showChat', textKey: 'surfaceMode.chat', icon: MessageSquare },
 ] as const;
 
 // ---------------------------------------------------------------------------
@@ -469,6 +483,17 @@ export interface TerminalSplitPaneProps {
    * before.
    */
   onToggleMaximize?: () => void;
+  /**
+   * Issue #3514: draw the accent frame that marks the selected split. The
+   * container sets it only for the focused split, and only while more than one
+   * split is open. Defaults to false (no frame), the pre-#3514 look.
+   */
+  showFocusFrame?: boolean;
+  /**
+   * Issue #3514: end this split's session, offered as an item of the header's
+   * "…" menu. Omitted (no running session, or no handler) leaves the item out.
+   */
+  onEndSession?: () => void;
   /** Optional inline width (flex-grow ratio). When omitted, parent controls layout. */
   style?: React.CSSProperties;
   /**
@@ -507,6 +532,8 @@ export const TerminalSplitPane = memo(function TerminalSplitPane({
   onSurfaceModeChange,
   isMaximized = false,
   onToggleMaximize,
+  showFocusFrame = false,
+  onEndSession,
   terminal,
   footer,
   bodyRef,
@@ -620,6 +647,9 @@ export const TerminalSplitPane = memo(function TerminalSplitPane({
   // so the drop affordance always wins.
   const focusRingClass =
     dragOverState === null ? ' focus-within:ring-1 focus-within:ring-accent-500/30' : '';
+  // Issue #3514: the selected split is framed in accent, so which pane the
+  // header "+" / the Action bar's maximize will act on is visible at a glance.
+  const borderClass = showFocusFrame ? 'border-accent-500' : 'border-border';
 
   const handleSearchClick = useCallback(() => {
     // Issue #47: dispatch terminal-wide search-open event; TerminalDisplay listens.
@@ -656,11 +686,12 @@ export const TerminalSplitPane = memo(function TerminalSplitPane({
       aria-label={splitLabel}
       data-testid={`terminal-split-pane-${splitIndex}`}
       data-split-index={splitIndex}
+      data-focused={showFocusFrame ? 'true' : undefined}
       style={style}
       // Issue #1079: the pane is a card (rounded, clipped, hairline border).
       // Focus is expressed subtly via `focus-within` (a soft accent ring) instead
       // of the old flashy full-perimeter accent border.
-      className={`flex flex-col min-w-0 h-full rounded-lg overflow-hidden border border-border bg-surface${focusRingClass}${dragRingClass}`}
+      className={`flex flex-col min-w-0 h-full rounded-lg overflow-hidden border ${borderClass} bg-surface${focusRingClass}${dragRingClass}`}
       onFocusCapture={handleFocusCapture}
       onMouseDown={onFocus}
       // Issue #786: drop target handlers. Separate event system from
@@ -738,7 +769,7 @@ export const TerminalSplitPane = memo(function TerminalSplitPane({
             data-testid={`surface-mode-toggle-${splitIndex}`}
             className="flex flex-shrink-0 items-center gap-0.5 rounded border border-border bg-surface p-0.5"
           >
-            {SURFACE_MODE_SEGMENTS.map(({ mode, labelKey, icon: Icon }) => {
+            {SURFACE_MODE_SEGMENTS.map(({ mode, labelKey, textKey, icon: Icon }) => {
               const active = surfaceMode === mode;
               const label = t(labelKey);
               return (
@@ -756,6 +787,9 @@ export const TerminalSplitPane = memo(function TerminalSplitPane({
                     }`}
                   >
                     <Icon size={14} aria-hidden="true" />
+                    {/* Issue #3514: a word beside the icon, so the two surfaces
+                        are told apart without hovering. */}
+                    <span className="ml-1 text-[11px] leading-none">{t(textKey)}</span>
                   </button>
                 </Tooltip>
               );
@@ -899,6 +933,57 @@ export const TerminalSplitPane = memo(function TerminalSplitPane({
             </button>
           </Tooltip>
         ) : null}
+
+        {/* Issue #3514: the "…" menu — maximize, search and end session in one
+            place, the same three actions the row's icons offer, so the header
+            reads the same in every split (and the actions stay reachable when a
+            narrow split clips the row). */}
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            data-testid={`split-more-menu-${splitIndex}`}
+            aria-label={t('terminal.moreActions')}
+            className="flex flex-shrink-0 items-center justify-center px-1 py-0.5 rounded text-muted-foreground hover:text-surface-foreground hover:bg-muted-foreground/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring data-[state=open]:ring-2 data-[state=open]:ring-ring transition-colors"
+          >
+            <MoreHorizontal size={14} aria-hidden="true" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="min-w-[12rem]">
+            {onToggleMaximize ? (
+              <DropdownMenuItem
+                data-testid={`split-more-maximize-${splitIndex}`}
+                onSelect={onToggleMaximize}
+              >
+                {isMaximized ? (
+                  <Minimize2 size={14} aria-hidden="true" className="opacity-70" />
+                ) : (
+                  <Maximize2 size={14} aria-hidden="true" className="opacity-70" />
+                )}
+                {isMaximized
+                  ? t('terminal.restoreSplits')
+                  : t('terminal.maximizeSplit', { split: splitLabel })}
+              </DropdownMenuItem>
+            ) : null}
+            <DropdownMenuItem
+              data-testid={`split-more-search-${splitIndex}`}
+              onSelect={handleSearchClick}
+            >
+              <Search size={14} aria-hidden="true" className="opacity-70" />
+              {t('terminal.searchTerminal')}
+            </DropdownMenuItem>
+            {onEndSession ? (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  data-testid={`split-more-end-session-${splitIndex}`}
+                  onSelect={onEndSession}
+                  className="text-danger-foreground focus:text-danger-foreground"
+                >
+                  <X size={14} aria-hidden="true" />
+                  {t('terminal.endSession')}
+                </DropdownMenuItem>
+              </>
+            ) : null}
+          </DropdownMenuContent>
+        </DropdownMenu>
 
         {/* Issue #2427: the note editor, absolutely positioned UNDER the header
             so opening it never changes the header's height — this row sits above

@@ -6,8 +6,11 @@
  * cannot show a 200-column agent TUI, and the tmux pane geometry is independent
  * of the browser pane, so the grid is a display change only. Owns:
  *  - split configuration via `useTerminalSplits` (worktreeId-scoped)
- *  - add / remove buttons (disabled at the MIN / MAX boundary and while
- *    a PaneResizer drag is in progress)
+ *  - the layout icons (1 / 2 / 3 / 4 splits, Issue #3514 — they replaced the
+ *    "n / 4 splits + -" stepper), disabled for counts the roster cannot fill
+ *    and while a PaneResizer drag is in progress
+ *  - placing an agent added from the header's "+" (Issue #3514) into a new
+ *    split or the focused one, once the roster that contains it arrives
  *  - History / "Open Files" visibility toggles in the Action bar (Issue #841,
  *    made the SOLE entry point by Issue #2259 — the vertical collapse strips
  *    are gone), reading the persisted state in useHistoryPaneState /
@@ -48,8 +51,10 @@ import {
   History,
   PanelRight,
   AlignHorizontalDistributeCenter,
-  Plus,
-  Minus,
+  Square,
+  Columns2,
+  Columns3,
+  LayoutGrid,
   Maximize2,
   Minimize2,
 } from 'lucide-react';
@@ -61,6 +66,8 @@ import {
   toGridTrackFractions,
   MIN_SPLITS,
   isGridLayout,
+  SPLIT_LAYOUT_COUNTS,
+  type AgentPlacement,
 } from '@/config/terminal-split-config';
 import { useTerminalSplits } from '@/hooks/useTerminalSplits';
 import {
@@ -97,6 +104,30 @@ function gridRowOf(idx: number): number {
   return idx < 2 ? 1 : 3;
 }
 
+/**
+ * Issue #3514: the glyph for each layout icon — what the terminal area will
+ * look like, so 4 reads as the 2x2 grid it actually becomes.
+ */
+const SPLIT_LAYOUT_ICONS: Record<number, typeof Square> = {
+  1: Square,
+  2: Columns2,
+  3: Columns3,
+  4: LayoutGrid,
+};
+
+/**
+ * Issue #3514: a request to show a just-added agent instance. Token-stamped for
+ * the reason `headerInstanceSelection` is: the container applies it exactly
+ * once, and only after `instances` contains the new id (the roster PATCH and
+ * this request land together, but the request must never be dropped because it
+ * raced the roster).
+ */
+export interface InstancePlacementRequest {
+  instanceId: string;
+  placement: Exclude<AgentPlacement, 'roster-only'>;
+  token: number;
+}
+
 /** Render-prop signature: each pane is supplied externally so the
  *  container does not need to know about MessageInput / TerminalDisplay. */
 export interface RenderTerminalSplitPaneArgs {
@@ -118,6 +149,12 @@ export interface RenderTerminalSplitPaneArgs {
    * Stable per-index reference.
    */
   onDropInstance: (instanceId: string) => void;
+  /**
+   * Issue #3514: draw the "this is the selected split" frame. True for the
+   * focused split only while more than one split is open — a lone split is
+   * trivially the selected one, and a permanent accent border would be noise.
+   */
+  showFocusFrame?: boolean;
   /**
    * Issue #2261: whether THIS split is the one currently filling the terminal
    * row. Drives the pressed state of the pane's own maximize/restore toggle.
@@ -181,6 +218,22 @@ export interface TerminalSplitContainerProps {
    * nowhere, it is bound to split 0. When split 0 already shows it, it is a no-op.
    */
   headerInstanceSelection?: { instanceId: string; token: number } | null;
+  /**
+   * Issue #3514: show an agent the header's "+" just added. `new-split` appends
+   * a split (falling back to `replace` if the ceiling was reached meanwhile);
+   * `replace` swaps it into the focused split. Either way the split that shows
+   * it takes focus. Applied once per token, as soon as `instances` holds it.
+   */
+  instancePlacementRequest?: InstancePlacementRequest | null;
+  /**
+   * Issue #3514: called with the request's token once it has been handled
+   * (placed, or focus moved to the split already showing it). The parent must
+   * drop that request: the guard against re-applying it lives in a ref, and a
+   * remount of this container resets it.
+   */
+  onInstancePlacementApplied?: (token: number) => void;
+  /** Issue #3514: published whenever the split count changes (the "+" needs it). */
+  onSplitCountChange?: (count: number) => void;
 }
 
 export const TerminalSplitContainer = memo(function TerminalSplitContainer({
@@ -192,14 +245,17 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
   showToast,
   onActiveInstanceChange,
   headerInstanceSelection,
+  instancePlacementRequest,
+  onInstancePlacementApplied,
+  onSplitCountChange,
 }: TerminalSplitContainerProps) {
   const {
     splits,
     widths,
     rowHeights,
     setRowHeights,
-    addSplit,
-    removeSplit,
+    setSplitCount,
+    openInstanceInNewSplit,
     setSplitInstance,
     setSplitWidth,
     resetWidths,
@@ -290,6 +346,56 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
       setFocusedSplitIndex(0);
     }
   }, [headerInstanceSelection, setSplitInstance, setFocusedSplitIndex]);
+
+  /**
+   * Issue #3514: place an agent added from the header's "+".
+   *
+   * Waits for the roster: the request and the PATCHed roster are set in the
+   * same handler, but a request whose instance is not in `instances` yet is
+   * kept (not consumed) and retried when the roster changes, so it can never
+   * be lost to ordering. A `new-split` takes focus through the same
+   * "last added" path the layout icons use; a `replace` focuses the split it
+   * replaced. Either way the active instance follows, as it does on a drop.
+   */
+  const lastPlacementTokenRef = useRef(0);
+  useEffect(() => {
+    if (!instancePlacementRequest) return;
+    if (instancePlacementRequest.token === lastPlacementTokenRef.current) return;
+    const { instanceId, placement } = instancePlacementRequest;
+    if (!instances.some((inst) => inst.id === instanceId)) return; // roster not here yet
+    const { token } = instancePlacementRequest;
+    lastPlacementTokenRef.current = token;
+    const current = splitsRef.current;
+    const shownIdx = current.findIndex((s) => s.instanceId === instanceId);
+    if (shownIdx !== -1) {
+      setFocusedSplitIndex(shownIdx);
+    } else if (placement === 'new-split' && openInstanceInNewSplit(instanceId)) {
+      onActiveInstanceChange?.(instanceId);
+    } else {
+      // `replace`, or a `new-split` that found no room: the focused split.
+      const targetIdx = Math.min(focusedSplitIndex, current.length - 1);
+      if (setSplitInstance(targetIdx, instanceId)) {
+        setFocusedSplitIndex(targetIdx);
+        onActiveInstanceChange?.(instanceId);
+      }
+    }
+    // Handled either way: the parent drops it so a remount cannot re-apply it.
+    onInstancePlacementApplied?.(token);
+  }, [
+    instancePlacementRequest,
+    instances,
+    focusedSplitIndex,
+    openInstanceInNewSplit,
+    setSplitInstance,
+    setFocusedSplitIndex,
+    onActiveInstanceChange,
+    onInstancePlacementApplied,
+  ]);
+
+  // Issue #3514: the header "+" disables `new-split` at the ceiling.
+  useEffect(() => {
+    onSplitCountChange?.(splits.length);
+  }, [splits.length, onSplitCountChange]);
 
   // After lastAddedIndex changes, focus the textarea in that pane.
   useEffect(() => {
@@ -401,8 +507,9 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
     setHistoryWidth(DEFAULT_HISTORY_WIDTH);
   }, [resetWidths, setHistoryWidth]);
 
-  const canAdd = splits.length < MAX_SPLITS && !isResizing;
-  const canRemove = splits.length > MIN_SPLITS && !isResizing;
+  // Issue #3514: a layout needs one distinct roster instance per split, so the
+  // icons above the roster size are disabled rather than silently doing nothing.
+  const maxSelectableSplits = Math.max(MIN_SPLITS, Math.min(MAX_SPLITS, instances.length));
   // Nothing to equalize when there is a single split AND History is hidden.
   const canEqualize = splits.length > MIN_SPLITS || historyVisible;
 
@@ -543,50 +650,59 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
     >
       {/* Action bar */}
       <div className="flex items-center gap-1 px-2 py-1 bg-surface border-b border-border flex-shrink-0">
-        {/* Issue #2261: while a split is maximized the split count is no longer
-            what the row is showing, so the label says which split is filling it
-            instead — the one line that explains why the other panes vanished. */}
-        <span
-          data-testid="split-count-label"
-          className="text-xs text-muted-foreground tabular-nums mr-1 truncate"
-        >
-          {isMaximized
-            ? t('terminal.maximizedStatus', { split: (maximizedIndex ?? 0) + 1 })
-            : `${splits.length} / ${MAX_SPLITS} splits`}
-        </span>
+        {/* Issue #2261: while a split is maximized the label says which split is
+            filling the row — the one line that explains why the other panes
+            vanished. Issue #3514: the "n / 4 splits" count it showed otherwise
+            is gone; the pressed layout icon says the same thing. */}
+        {isMaximized ? (
+          <span
+            data-testid="split-count-label"
+            className="text-xs text-muted-foreground tabular-nums mr-1 truncate"
+          >
+            {t('terminal.maximizedStatus', { split: (maximizedIndex ?? 0) + 1 })}
+          </span>
+        ) : null}
 
         {/*
-          Issue #1079: the layout-operation controls (+Split / -Split / Equal)
-          are lucide icon ghost buttons with tooltips. They form the LEFT group;
-          an `ml-auto` hairline separator pushes the History / Files panel
-          toggles to the RIGHT group ("layout ops | panel visibility").
+          Issue #3514: the layout icons (1 / 2 / 3 / 4) replace the "+ / -"
+          stepper. One click goes straight to the layout; 4 is the 2x2 grid.
+          Together with Equal / Maximize they form the LEFT group; an `ml-auto`
+          hairline separator pushes the History / Files panel toggles to the
+          RIGHT group ("layout ops | panel visibility", Issue #1079).
         */}
-        <Tooltip content={t('terminal.addSplit')} placement="bottom">
-          <button
-            type="button"
-            onClick={addSplit}
-            disabled={!canAdd}
-            aria-disabled={!canAdd}
-            aria-label={t('terminal.addSplit')}
-            data-testid="add-terminal-split"
-            className="flex items-center justify-center h-7 w-7 rounded text-muted-foreground hover:text-surface-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-ring transition-colors"
-          >
-            <Plus className="w-4 h-4" aria-hidden="true" />
-          </button>
-        </Tooltip>
-        <Tooltip content={t('terminal.removeSplit')} placement="bottom">
-          <button
-            type="button"
-            onClick={removeSplit}
-            disabled={!canRemove}
-            aria-disabled={!canRemove}
-            aria-label={t('terminal.removeSplit')}
-            data-testid="remove-terminal-split"
-            className="flex items-center justify-center h-7 w-7 rounded text-muted-foreground hover:text-surface-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-ring transition-colors"
-          >
-            <Minus className="w-4 h-4" aria-hidden="true" />
-          </button>
-        </Tooltip>
+        <div
+          role="group"
+          aria-label={t('terminal.layoutGroupLabel')}
+          data-testid="split-layout-picker"
+          className="flex items-center gap-0.5 rounded border border-border p-0.5"
+        >
+          {SPLIT_LAYOUT_COUNTS.map((count) => {
+            const Icon = SPLIT_LAYOUT_ICONS[count] ?? Square;
+            const active = splits.length === count;
+            const disabled = isResizing || count > maxSelectableSplits;
+            const label = t('terminal.layoutSplits', { count });
+            return (
+              <Tooltip key={count} content={label} placement="bottom">
+                <button
+                  type="button"
+                  onClick={() => setSplitCount(count)}
+                  disabled={disabled}
+                  aria-disabled={disabled}
+                  aria-pressed={active}
+                  aria-label={label}
+                  data-testid={`split-layout-${count}`}
+                  className={`flex items-center justify-center h-6 w-6 rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                    active
+                      ? 'bg-accent-500/15 text-accent-600 dark:text-accent-400'
+                      : 'text-muted-foreground hover:text-surface-foreground hover:bg-muted'
+                  }`}
+                >
+                  <Icon className="w-3.5 h-3.5" aria-hidden="true" />
+                </button>
+              </Tooltip>
+            );
+          })}
+        </div>
 
         {/*
           Issue #861: equalize terminal split widths (each → 1/n) and reset the
@@ -795,6 +911,7 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
                   onInstanceChange: instanceChangeHandlers[idx],
                   onFocus: focusHandlers[idx],
                   isFocused: focusedSplitIndex === idx,
+                  showFocusFrame: splits.length > MIN_SPLITS && focusedSplitIndex === idx,
                   onDropInstance: dropHandlers[idx],
                   isMaximized: maximizedHere,
                   onToggleMaximize: maximizeHandlers[idx],
