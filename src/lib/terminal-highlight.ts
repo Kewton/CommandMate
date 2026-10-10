@@ -14,6 +14,7 @@
 
 import { buildRange, collectTextNodes, type MatchPosition } from './terminal-highlight-dom';
 import { mapRawPositionsToDom, openFoldedSource, type HighlightSection } from './terminal-highlight-mermaid';
+import { mapMarkdownPositionsToDom } from './terminal-highlight-markdown';
 
 export type { MatchPosition } from './terminal-highlight-dom';
 export {
@@ -26,6 +27,7 @@ export {
 export { findMermaidFences, fenceFromRawRange, type MermaidFence } from './terminal-highlight-fences';
 export { alignDerivedText, IDENTITY_RAW_OFFSET, type RawOffsetMapper } from './terminal-highlight-offsets';
 export { SEARCH_SECTION_ATTR, type HighlightSection } from './terminal-highlight-mermaid';
+export { SEARCH_RAW_ATTR, rehypeSearchRawText, searchRawProps } from './terminal-highlight-markdown';
 
 /**
  * [Issue #716] Highlight namespace abstraction.
@@ -131,7 +133,8 @@ export interface HighlightOptions {
   /**
    * The raw text `matchPositions` index into. Given for a message rendered as
    * Markdown, so hits around and inside mermaid diagrams can be placed (see
-   * `mapRawPositionsToDom`). Without it, offsets are DOM offsets as before.
+   * `mapRawPositionsToDom`), and hits after Markdown markers (Issue #3523, see
+   * `mapMarkdownPositionsToDom`). Without it, offsets are DOM offsets as before.
    */
   sourceText?: string;
   /**
@@ -157,13 +160,19 @@ function applyHighlightsInternal(
   const textNodes = collectTextNodes(container);
   const positions: Array<MatchPosition | null> =
     (options?.sourceText !== undefined
-      ? mapRawPositionsToDom(
+      ? (mapRawPositionsToDom(
           container,
           textNodes,
           options.sourceText,
           matchPositions,
           options.sections ?? [],
-        )
+        ) ??
+        // [Issue #3523] No mermaid source on screen: place hits through the
+        // raw ranges Markdown left on its elements; a hit it cannot place keeps
+        // its offset as before.
+        mapMarkdownPositionsToDom(container, textNodes, options.sourceText, matchPositions)?.map(
+          (pos, k) => pos ?? matchPositions[k],
+        ))
       : null) ?? matchPositions;
   const ranges = positions.map((pos) => (pos ? buildRange(textNodes, pos.start, pos.end) : null));
   ranges.forEach((range) => {

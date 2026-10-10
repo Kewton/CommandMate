@@ -71,6 +71,7 @@ import {
 import ReactMarkdown, { defaultUrlTransform, type Components, type UrlTransform } from 'react-markdown';
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
 import rehypeHighlight from 'rehype-highlight';
+import { rehypeSearchRawText, searchRawProps, type RawOffsetMapper } from '@/lib/terminal-highlight';
 import type { ChatMessage } from '@/types/models';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { isAgentAuthoredMarkdown } from '@/types/agent-transcript';
@@ -818,12 +819,12 @@ export const ChatMarkdownBody = memo(function ChatMarkdownBody({
         ),
       );
     return {
-      p: ({ children }) => <p>{linkify(children)}</p>,
-      li: ({ children }) => <li>{linkify(children)}</li>,
-      td: ({ children }) => <td>{linkify(children)}</td>,
-      th: ({ children }) => <th>{linkify(children)}</th>,
-      strong: ({ children }) => <strong>{linkify(children)}</strong>,
-      em: ({ children }) => <em>{linkify(children)}</em>,
+      p: ({ children, ...props }) => <p {...searchRawProps(props)}>{linkify(children)}</p>,
+      li: ({ children, ...props }) => <li {...searchRawProps(props)}>{linkify(children)}</li>,
+      td: ({ children, ...props }) => <td {...searchRawProps(props)}>{linkify(children)}</td>,
+      th: ({ children, ...props }) => <th {...searchRawProps(props)}>{linkify(children)}</th>,
+      strong: ({ children, ...props }) => <strong {...searchRawProps(props)}>{linkify(children)}</strong>,
+      em: ({ children, ...props }) => <em {...searchRawProps(props)}>{linkify(children)}</em>,
       // [#2345] The one element the linkifier above cannot reach: a Markdown
       // link's destination is consumed by the parser, so it is never a text
       // child of anything. Its children are deliberately NOT linkified — a path
@@ -843,6 +844,7 @@ export const ChatMarkdownBody = memo(function ChatMarkdownBody({
             label={children}
             fallback={link}
             onFilePathClick={onFilePathClick}
+            searchRaw={searchRawProps(rest)}
           />
         );
       },
@@ -850,16 +852,19 @@ export const ChatMarkdownBody = memo(function ChatMarkdownBody({
       // worktree and drawn as alt text + link otherwise — never as a raw
       // `<img src>`, which the browser resolved against the screen's URL.
       // [#3121] `![](clip.mp4)` in this worktree is drawn as a video instead.
-      img: ({ src, alt }) => {
+      // [#3523] The image's search mark goes on whatever is drawn instead.
+      img: ({ src, alt, ...props }) => {
         const source = typeof src === 'string' ? src : undefined;
+        const searchRaw = searchRawProps(props);
         return (
           <ChatVideo
             target={source}
             label={alt || source}
             fallback={
-              <ChatImage src={source} alt={alt} onFilePathClick={onFilePathClick} />
+              <ChatImage src={source} alt={alt} onFilePathClick={onFilePathClick} searchRaw={searchRaw} />
             }
             onFilePathClick={onFilePathClick}
+            searchRaw={searchRaw}
           />
         );
       },
@@ -872,10 +877,6 @@ export const ChatMarkdownBody = memo(function ChatMarkdownBody({
   // [#2459] All three renders below — body, reasoning, tool log — take the same
   // shared remark list, so the Issue's broken bold URL is repaired wherever the
   // splitter happened to put it.
-  const rehypePlugins = useMemo(
-    () => [[rehypeSanitize, CHAT_SANITIZE_SCHEMA], rehypeHighlight] as NonNullable<React.ComponentProps<typeof ReactMarkdown>['rehypePlugins']>,
-    [],
-  );
 
   // [#2272] / [#2284] The answer, then the chips. `<ReactMarkdown>` inside a
   // chip is an ELEMENT, not a render: nothing of it reaches the DOM while the
@@ -887,18 +888,25 @@ export const ChatMarkdownBody = memo(function ChatMarkdownBody({
   // exactly how the screen and the clipboard came to disagree.
   const split = useMemo(() => splitChatMarkdownBody(content), [content]);
   // [#3525] Each part's offsets back to `content`, so a drawn diagram's source
-  // tells search where its fence is in the message (only diagrams read it).
-  const rawOffsets = useMemo(
-    () => (renderDiagrams ? chatMarkdownRawOffsets(content, split) : null),
-    [renderDiagrams, content, split],
-  );
+  // tells search where its fence is in the message. [#3523] Every element's
+  // text reads them too (`rehypeSearchRawText`), diagrams or not.
+  const rawOffsets = useMemo(() => chatMarkdownRawOffsets(content, split), [content, split]);
+  const rehypePlugins = useMemo(() => {
+    const forPart = (toRaw: RawOffsetMapper | null) =>
+      [
+        [rehypeSanitize, CHAT_SANITIZE_SCHEMA],
+        [rehypeSearchRawText, { toRaw }],
+        rehypeHighlight,
+      ] as NonNullable<React.ComponentProps<typeof ReactMarkdown>['rehypePlugins']>;
+    return { body: forPart(rawOffsets.body), reasoning: forPart(rawOffsets.reasoning), toolLog: forPart(rawOffsets.toolLog) };
+  }, [rawOffsets]);
 
   return (
     <>
-      <MermaidRawOffsetContext.Provider value={rawOffsets?.body ?? null}>
+      <MermaidRawOffsetContext.Provider value={renderDiagrams ? rawOffsets.body : null}>
         <ReactMarkdown
           remarkPlugins={SHARED_REMARK_PLUGINS}
-          rehypePlugins={rehypePlugins}
+          rehypePlugins={rehypePlugins.body}
           urlTransform={chatUrlTransform}
           components={components}
         >
@@ -910,10 +918,10 @@ export const ChatMarkdownBody = memo(function ChatMarkdownBody({
           {/* [#3503] Tells search which part of the raw text this is drawn
               from (`chatSearchSections`); `contents` keeps the layout as is. */}
           <div data-search-section={CHAT_SEARCH_SECTION_REASONING} className="contents">
-            <MermaidRawOffsetContext.Provider value={rawOffsets?.reasoning ?? null}>
+            <MermaidRawOffsetContext.Provider value={renderDiagrams ? rawOffsets.reasoning : null}>
               <ReactMarkdown
                 remarkPlugins={SHARED_REMARK_PLUGINS}
-                rehypePlugins={rehypePlugins}
+                rehypePlugins={rehypePlugins.reasoning}
                 urlTransform={chatUrlTransform}
                 components={components}
               >
@@ -926,10 +934,10 @@ export const ChatMarkdownBody = memo(function ChatMarkdownBody({
       {split.toolCalls > 0 && (
         <ChatToolLogDisclosure toolCalls={split.toolCalls}>
           <div data-search-section={CHAT_SEARCH_SECTION_TOOL_LOG} className="contents">
-            <MermaidRawOffsetContext.Provider value={rawOffsets?.toolLog ?? null}>
+            <MermaidRawOffsetContext.Provider value={renderDiagrams ? rawOffsets.toolLog : null}>
               <ReactMarkdown
                 remarkPlugins={SHARED_REMARK_PLUGINS}
-                rehypePlugins={rehypePlugins}
+                rehypePlugins={rehypePlugins.toolLog}
                 urlTransform={chatUrlTransform}
                 components={components}
               >

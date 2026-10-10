@@ -44,11 +44,13 @@ function ChatImageFallback({
   alt,
   kind,
   onFilePathClick,
+  searchRaw,
 }: {
   src: string;
   alt: string;
   kind: 'external' | 'file' | 'none';
   onFilePathClick: (path: string) => void;
+  searchRaw?: Record<string, string>;
 }) {
   const t = useTranslations('worktree');
   const label = alt || t('conversation.imageUnavailable');
@@ -70,6 +72,7 @@ function ChatImageFallback({
   }
   return (
     <span
+      {...searchRaw}
       data-testid={CHAT_IMAGE_FALLBACK_TESTID}
       className="inline-flex max-w-full flex-wrap items-center gap-1 align-middle text-muted-foreground"
     >
@@ -84,10 +87,18 @@ export const ChatImage = memo(function ChatImage({
   src,
   alt,
   onFilePathClick,
+  searchRaw,
 }: {
   src: string | undefined;
   alt: string | undefined;
   onFilePathClick: (path: string) => void;
+  /**
+   * [Issue #3523] The `<img>`'s search mark (`searchRawProps`), put on what is
+   * drawn instead. An image has no text of its own in the message, so search
+   * leaves the alt text / link / loading text drawn here out, and the paragraph
+   * around it still adds up.
+   */
+  searchRaw?: Record<string, string>;
 }) {
   const t = useTranslations('worktree');
   const { worktreeId, worktreePath } = useChatImageScope();
@@ -102,7 +113,7 @@ export const ChatImage = memo(function ChatImage({
   if (source.kind !== 'worktree' || !worktreeId) {
     const kind = source.kind === 'worktree' ? 'file' : source.kind;
     return (
-      <ChatImageFallback src={rawSrc} alt={altText} kind={kind} onFilePathClick={onFilePathClick} />
+      <ChatImageFallback src={rawSrc} alt={altText} kind={kind} onFilePathClick={onFilePathClick} searchRaw={searchRaw} />
     );
   }
 
@@ -114,6 +125,7 @@ export const ChatImage = memo(function ChatImage({
       lazy
       loadingFallback={
         <span
+          {...searchRaw}
           data-testid={CHAT_IMAGE_LOADING_TESTID}
           className="flex h-40 w-full max-w-sm items-center justify-center rounded-md border border-border bg-muted text-xs text-muted-foreground"
         >
@@ -121,7 +133,7 @@ export const ChatImage = memo(function ChatImage({
         </span>
       }
       errorFallback={
-        <ChatImageFallback src={rawSrc} alt={altText} kind="file" onFilePathClick={onFilePathClick} />
+        <ChatImageFallback src={rawSrc} alt={altText} kind="file" onFilePathClick={onFilePathClick} searchRaw={searchRaw} />
       }
       className="block h-auto max-w-full rounded-md border border-border object-contain"
       style={{ maxHeight: CHAT_IMAGE_MAX_HEIGHT_PX }}
