@@ -44,6 +44,11 @@ vi.mock('next-themes', () => ({
   useTheme: () => ({ theme: themeMock.theme, setTheme: themeMock.setTheme }),
 }));
 
+const localeMock = vi.hoisted(() => ({ switchLocale: vi.fn() }));
+vi.mock('@/hooks/useLocaleSwitch', () => ({
+  useLocaleSwitch: () => ({ currentLocale: 'en', switchLocale: localeMock.switchLocale }),
+}));
+
 const settingsDialogMock = vi.hoisted(() => ({ open: vi.fn(), close: vi.fn() }));
 vi.mock('@/contexts/SettingsDialogContext', () => ({
   useSettingsDialog: () => ({ isOpen: false, open: settingsDialogMock.open, close: settingsDialogMock.close }),
@@ -132,7 +137,7 @@ describe('Settings menu (Issue #3510)', () => {
       expect(trigger.tagName).toBe('BUTTON');
       expect(trigger).toHaveAttribute('aria-haspopup', 'menu');
       expect(trigger).toHaveAttribute('aria-expanded', 'false');
-      expect(trigger).toHaveAttribute('aria-label', 'More settings');
+      expect(trigger).toHaveAccessibleName('Settings');
       expect(trigger.closest('[data-testid="sidebar"]')).not.toBeNull();
     });
 
@@ -221,14 +226,26 @@ describe('Settings menu (Issue #3510)', () => {
       expect(mockPush).toHaveBeenCalledWith('/skills');
     });
 
-    it('no longer renders the standalone theme toggle or logout button in the footer', async () => {
-      await renderSidebar(1024);
+    it('leaves the menu button as the only control in the footer', async () => {
+      const trigger = await renderSidebar(1024);
+      const footer = screen.getByTestId('sidebar-footer');
+      const controls = footer.querySelectorAll('button, a[href], select, input, textarea, [tabindex]');
+      expect(Array.from(controls)).toEqual([trigger]);
+      // The entries that used to sit next to it are gone from the sidebar.
       const sidebar = screen.getByTestId('sidebar');
+      expect(within(sidebar).queryByTestId('sidebar-settings')).toBeNull();
+      expect(within(sidebar).queryByTestId('locale-switcher')).toBeNull();
       expect(within(sidebar).queryByTestId('theme-toggle')).toBeNull();
-      expect(within(sidebar).queryByTestId('theme-toggle-placeholder')).toBeNull();
-      // #2706 / #2709 entry points stay where they were.
-      expect(within(sidebar).getByTestId('sidebar-settings')).toBeInTheDocument();
-      expect(within(sidebar).getByTestId('locale-switcher')).toBeInTheDocument();
+      expect(within(sidebar).queryByTestId('logout-button')).toBeNull();
+    });
+
+    it('switches the language from the menu', async () => {
+      const trigger = await renderSidebar(1024);
+      openWithKeyboard(trigger);
+      expect(screen.getByRole('menuitemradio', { name: 'English' })).toHaveAttribute('data-state', 'checked');
+
+      fireEvent.click(screen.getByRole('menuitemradio', { name: '日本語' }));
+      expect(localeMock.switchLocale).toHaveBeenCalledWith('ja');
     });
   });
 

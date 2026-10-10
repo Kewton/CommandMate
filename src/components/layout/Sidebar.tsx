@@ -23,7 +23,7 @@
  * Issue #2656: a third view, "sessions", lists one row per agent instance (status first); a row opens its branch with ?instance=.
  * Issue #2706: フッターの言語セレクトの左に設定ボタン（`/more` へのリンク）。スマホのブランチ画面には他に設定への入口が無い。
  * Issue #2709: フッターの設定ボタンは PC ではモーダル、スマホでは `/more` へ。
- * Issue #3510: フッターのテーマ切替とログアウトは共通の設定メニュー（`SettingsMenu`）へ移した。
+ * Issue #3510: フッターは共通の設定メニュー（`SettingsMenu`）を開くボタン 1 つ。設定・言語・テーマ・ログアウトはメニューの中。
  */
 
 'use client';
@@ -33,7 +33,7 @@ import { TransitionLink } from '@/components/view-transitions/TransitionLink';
 import { usePathname } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { useViewTransitionRouter } from '@/components/providers/ViewTransitionsProvider';
-import { AlignJustify, CircleCheck, Database, Ellipsis, Settings, type LucideIcon } from 'lucide-react';
+import { AlignJustify, CircleCheck, Database, Settings, type LucideIcon } from 'lucide-react';
 import {
   DndContext,
   PointerSensor,
@@ -61,13 +61,10 @@ import { SortSelector } from '@/components/sidebar/SortSelector';
 import { Button, GroupIcon, Input, Skeleton, StatusDot } from '@/components/ui';
 import { Tooltip } from '@/components/common/Tooltip';
 import { TruncationTooltip } from '@/components/common/TruncationTooltip';
-import { LocaleSwitcher } from '@/components/common/LocaleSwitcher';
 import { SettingsMenu, SettingsMenuTrigger } from '@/components/layout/SettingsMenu';
 import { useToast } from '@/components/common/Toast';
 import { ATTENTION_REVIEW_HREF } from '@/config/review-config';
 import { useAttentionCount } from '@/hooks/useAttentionCount';
-import { useIsMobile } from '@/hooks/useIsMobile';
-import { useSettingsDialog } from '@/contexts/SettingsDialogContext';
 import { repositoryApi, ApiError } from '@/lib/api-client';
 import { toBranchItem } from '@/types/sidebar';
 import type { SidebarBranchItem } from '@/types/sidebar';
@@ -682,18 +679,11 @@ export const Sidebar = memo(function Sidebar() {
         )}
       </div>
 
-      {/* Footer: Settings + Language Switcher + settings menu (Issue #3510:
-          theme and logout moved into the menu) */}
-      <div className="flex-shrink-0 px-4 py-3 border-t border-sidebar-border">
-        <div className="flex items-center gap-2">
-          {/* Issue #2706: the only way into /more from a branch screen on a
-              phone — `/worktrees/*` renders no GlobalMobileNav. */}
-          <SidebarSettingsButton onNavigate={closeMobileDrawer} />
-          <div className="flex-1 min-w-0">
-            <LocaleSwitcher />
-          </div>
-          <SidebarSettingsMenu onNavigate={closeMobileDrawer} />
-        </div>
+      {/* Footer (Issue #3510): one button that opens the shared settings
+          menu. Settings… (#2706 / #2709), language, theme, logout and the PC
+          display preferences are all inside it. */}
+      <div data-testid="sidebar-footer" className="flex-shrink-0 px-4 py-3 border-t border-sidebar-border">
+        <SidebarSettingsMenu onNavigate={closeMobileDrawer} />
       </div>
     </nav>
   );
@@ -1117,77 +1107,32 @@ const SyncButton = memo(function SyncButton({
 });
 
 /**
- * Issue #2706: the settings entry in the sidebar footer, left of the
- * language select. An anchor rather than a button so a modified click still
- * opens /more in a new tab, and so #2709 can turn a plain left-click into
- * the PC settings modal without changing the markup.
- */
-function SidebarSettingsButton({ onNavigate }: { onNavigate: () => void }) {
-  const t = useTranslations('common');
-  const isMobile = useIsMobile();
-  const { open: openSettings } = useSettingsDialog();
-  const label = t('settings.title');
-
-  // Issue #2709: on PC a plain left-click opens the settings modal instead of
-  // navigating. The phone keeps the page — a two-column dialog has nowhere to
-  // go at 390px, and /more is the target of its own tab in GlobalMobileNav.
-  // A modified click stays a link on both, so /more still opens in a new tab.
-  const handleClick = useCallback(
-    (event: React.MouseEvent<HTMLAnchorElement>) => {
-      // The drawer closes either way; on PC it is already closed.
-      onNavigate();
-      if (isMobile) return;
-      if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
-        return;
-      }
-      event.preventDefault();
-      openSettings();
-    },
-    [isMobile, onNavigate, openSettings]
-  );
-
-  return (
-    // `flex-shrink-0` goes on the Tooltip, not on the link: the wrapper span is
-    // what sits in the footer's flex row (Issue #2307), so the link's own
-    // shrink rule would never be consulted.
-    <Tooltip content={label} placement="top" className="flex-shrink-0">
-      <TransitionLink
-        href="/more"
-        data-testid="sidebar-settings"
-        aria-label={label}
-        aria-haspopup={isMobile ? undefined : 'dialog'}
-        onClick={handleClick}
-        className="p-1.5 rounded-md text-sidebar-muted hover:text-sidebar-foreground hover:bg-sidebar-hover focus:outline-none focus:ring-2 focus:ring-ring transition-colors"
-      >
-        <Settings size={20} aria-hidden="true" />
-      </TransitionLink>
-    </Tooltip>
-  );
-}
-
-/**
- * Issue #3510: the shared settings menu, opened from the right end of the
- * footer row. The PC chrome preferences (display size, repository tabs) are
- * included here — the sidebar is on every PC screen, the Header is not.
+ * Issue #3510: the only control in the sidebar footer — it opens the shared
+ * settings menu. It replaced the #2706 settings link, the language select, the
+ * theme toggle and the logout button; all of them are items of the menu now.
+ *
+ * "Settings…" inside keeps #2709: the PC opens the modal, the phone (where
+ * `/worktrees/*` renders no GlobalMobileNav, so this is the only way in) goes
+ * to `/more`. Items that navigate close the mobile drawer via `onNavigate`.
+ * The PC chrome preferences (display size, repository tabs) are included here
+ * because the sidebar is on every PC screen.
  */
 function SidebarSettingsMenu({ onNavigate }: { onNavigate: () => void }) {
   const t = useTranslations('common');
-  const label = t('settingsMenu.trigger');
+  const label = t('settings.title');
 
   return (
-    <SettingsMenu testIdPrefix="sidebar-settings-menu" side="top" align="end" showDisplayPreferences onNavigate={onNavigate}>
-      <Tooltip content={label} placement="top" className="flex-shrink-0">
-        <SettingsMenuTrigger asChild>
-          <button
-            type="button"
-            data-testid="sidebar-settings-menu"
-            aria-label={label}
-            className="p-1.5 rounded-md text-sidebar-muted hover:text-sidebar-foreground hover:bg-sidebar-hover focus:outline-none focus:ring-2 focus:ring-ring transition-colors"
-          >
-            <Ellipsis size={20} aria-hidden="true" />
-          </button>
-        </SettingsMenuTrigger>
-      </Tooltip>
+    <SettingsMenu testIdPrefix="sidebar-settings-menu" side="top" align="start" showDisplayPreferences onNavigate={onNavigate}>
+      <SettingsMenuTrigger asChild>
+        <button
+          type="button"
+          data-testid="sidebar-settings-menu"
+          className="flex w-full items-center gap-2 px-2 py-1.5 rounded-md text-sm text-sidebar-muted hover:text-sidebar-foreground hover:bg-sidebar-hover focus:outline-none focus:ring-2 focus:ring-ring transition-colors"
+        >
+          <Settings size={20} aria-hidden="true" />
+          <span className="truncate">{label}</span>
+        </button>
+      </SettingsMenuTrigger>
     </SettingsMenu>
   );
 }
