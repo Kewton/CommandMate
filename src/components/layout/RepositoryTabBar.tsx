@@ -78,6 +78,7 @@ import { useWorktreeSelection } from '@/contexts/WorktreeSelectionContext';
 import { usePcDisplaySizeContext } from '@/contexts/PcDisplaySizeContext';
 import { useViewTransitionRouter } from '@/components/providers/ViewTransitionsProvider';
 import { BranchListItem } from '@/components/sidebar/BranchListItem';
+import { BRANCH_ROW_ACTIONS_ATTR } from '@/components/sidebar/BranchRowActions';
 import { GroupIcon } from '@/components/ui/GroupIcon';
 import { StatusDot } from '@/components/ui/StatusDot';
 import { useWorktreeList } from '@/hooks/useWorktreeList';
@@ -544,6 +545,9 @@ export const RepositoryTabBar = memo(function RepositoryTabBar() {
       if (overflowButtonRef.current?.contains(target)) return;
       const inPanel = (target as Element).closest?.('[data-repository-tab-panel]');
       if (inPanel) return;
+      // Issue #3576: a row's "…" menu is portalled out of the popover; picking
+      // from it must not close the list underneath first.
+      if ((target as Element).closest?.(`[${BRANCH_ROW_ACTIONS_ATTR}]`)) return;
       closeAll();
     };
     const onKeyDown = (event: KeyboardEvent) => {

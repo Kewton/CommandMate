@@ -191,7 +191,13 @@
   "branchItem": {
     "cliToolStatus": "CLI tool status",
     "hasUnread": "Has unread messages",
-    "agentExited": "exited"
+    "agentExited": "exited",
+    "actions": "Actions for {name}",
+    "openInNewTab": "Open in new tab",
+    "copyBranchName": "Copy branch name",
+    "copyPath": "Copy path",
+    "copied": "Copied",
+    "copyFailed": "Could not copy"
   },
   "connection": {
     "reconnecting": "Reconnecting",

@@ -100,9 +100,9 @@ describe('BranchListItem', () => {
       );
 
       const item = screen.getByTestId('branch-list-item');
-      // Issue #1073: selected background migrated to the `bg-sidebar-hover`
-      // token; the accent left border remains the primary selection marker.
-      expect(item.className).toMatch(/bg-sidebar-hover|selected|border-l|border-accent/);
+      // Issue #3576: the selected row is the stronger `bg-sidebar-border` fill
+      // (one step past the hover fill); the left accent bar is gone.
+      expect(item.className).toMatch(/(^|\s)bg-sidebar-border(\s|$)/);
     });
 
     it('should not apply selected styling when not selected', () => {
@@ -115,7 +115,8 @@ describe('BranchListItem', () => {
       );
 
       const item = screen.getByTestId('branch-list-item');
-      // border-accent-500 is the selected marker; unselected must not have it.
+      // Issue #3576: the selected fill is the marker; unselected must not have it.
+      expect(item.className).not.toMatch(/(^|\s)bg-sidebar-border(\s|$)/);
       expect(item.className).not.toMatch(/border-accent-500/);
     });
 
@@ -128,7 +129,8 @@ describe('BranchListItem', () => {
         />
       );
 
-      const button = screen.getByRole('button');
+      // Issue #3576: the selected row also carries its "…" button.
+      const button = screen.getByTestId('branch-list-item');
       expect(button).toHaveAttribute('aria-current', 'true');
     });
   });
@@ -712,7 +714,8 @@ describe('BranchListItem', () => {
         />
       );
 
-      fireEvent.mouseEnter(screen.getByRole('button'));
+      // Issue #3576: the selected row also carries its "…" button.
+      fireEvent.mouseEnter(screen.getByTestId('branch-list-item'));
       // Wait long enough to confirm tooltip does NOT appear (isSelected suppresses it)
       await new Promise((r) => setTimeout(r, 300));
       expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
@@ -727,7 +730,8 @@ describe('BranchListItem', () => {
         />
       );
 
-      fireEvent.mouseEnter(screen.getByRole('button'));
+      // Issue #3576: the selected row also carries its "…" button.
+      fireEvent.mouseEnter(screen.getByTestId('branch-list-item'));
       const button = screen.getByTestId('branch-list-item');
       expect(button).not.toHaveAttribute('aria-describedby');
     });
