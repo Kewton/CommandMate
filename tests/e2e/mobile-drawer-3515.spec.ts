@@ -65,6 +65,38 @@ test.describe('[Issue #3515] mobile drawer at 390x844', () => {
     });
   }
 
+  test('[Issue #3575] the list toolbar is one row and its View / Sort menu stays on screen', async ({ page }) => {
+    await page.goto('/repositories');
+    await expect(page.getByTestId('app-shell')).toBeVisible();
+    await page.getByTestId('mobile-nav-open-sidebar').click();
+    await expectDrawerOpen(page);
+
+    const container = page.getByTestId('sidebar-container');
+    const search = container.getByPlaceholder(/Search branches/i);
+    const optionsTrigger = container.getByTestId('sidebar-list-options');
+    const [searchBox, triggerBox] = await Promise.all([search.boundingBox(), optionsTrigger.boundingBox()]);
+    expect(searchBox && triggerBox).toBeTruthy();
+    expect(Math.abs(searchBox!.y + searchBox!.height / 2 - (triggerBox!.y + triggerBox!.height / 2))).toBeLessThanOrEqual(2);
+    expect(triggerBox!.x + triggerBox!.width).toBeLessThanOrEqual(VIEWPORT.width);
+
+    await optionsTrigger.click();
+    const menu = page.getByTestId('sidebar-list-options-menu');
+    await expect(menu).toBeVisible();
+    const menuBox = await menu.boundingBox();
+    expect(menuBox).not.toBeNull();
+    expect(menuBox!.x).toBeGreaterThanOrEqual(0);
+    expect(menuBox!.y).toBeGreaterThanOrEqual(0);
+    expect(menuBox!.x + menuBox!.width).toBeLessThanOrEqual(VIEWPORT.width);
+    expect(menuBox!.y + menuBox!.height).toBeLessThanOrEqual(VIEWPORT.height);
+
+    await menu.getByRole('menuitemradio', { name: 'Session', exact: true }).click();
+    await expect(optionsTrigger).toHaveAttribute('data-view-mode', 'sessions');
+    await page.keyboard.press('Escape');
+    await expect(menu).toHaveCount(0);
+    await expect(optionsTrigger).toBeFocused();
+    await expectDrawerOpen(page);
+  });
+
   test('worktree screen: ☰ opens it, × and the overlay close it', async ({ page }) => {
     await mockOpencodeWorktreeApi(page, DRAWER_WORKTREE, 'claude');
     await seedOpencodeActiveInstance(page, DRAWER_WORKTREE, 'claude');

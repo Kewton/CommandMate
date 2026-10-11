@@ -85,6 +85,14 @@ describe('SidebarRail (Issue #3512)', () => {
     expect(rail).toHaveAttribute('aria-label', 'App navigation');
   });
 
+  it('lists the destinations as Sessions → Repositories → Review, the same order as the open sidebar (Issue #3577)', () => {
+    render(<SidebarRail />);
+    const links = Array.from(
+      screen.getByTestId('sidebar-rail').querySelectorAll('a[data-testid^="sidebar-rail-"]'),
+    ).map((el) => el.getAttribute('data-testid'));
+    expect(links).toEqual(['sidebar-rail-sessions', 'sidebar-rail-repositories', 'sidebar-rail-review']);
+  });
+
   it('every entry has a name (icon-only buttons and links)', () => {
     render(<SidebarRail />);
     expect(screen.getByTestId('sidebar-rail-toggle')).toHaveAccessibleName('Open sidebar');
