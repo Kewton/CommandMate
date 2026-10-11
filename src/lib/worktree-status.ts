@@ -74,3 +74,110 @@ export async function patchWorktreeStatus(
   }
   return (await response.json()) as Worktree;
 }
+
+// ============================================================================
+// Saves vs. fetches already on the wire (Issue #3594)
+// ============================================================================
+
+/**
+ * A counter that moves on every successful save. A fetch notes it when it
+ * STARTS; when its reply lands, any worktree saved after that point keeps the
+ * saved value, because the reply was read from the server before the save and
+ * would put the old status back (Done → a late poll says Ready → Ready).
+ */
+let statusSaveGeneration = 0;
+
+/** Latest successful save per worktree id. */
+const savedStatuses = new Map<string, { generation: number; status: WorktreeLifecycleStatus | null }>();
+
+/** Per-worktree tail of the save queue (see {@link saveWorktreeStatus}). */
+const saveQueues = new Map<string, Promise<unknown>>();
+
+/** Note this when a fetch of worktree data starts. */
+export function currentWorktreeStatusGeneration(): number {
+  return statusSaveGeneration;
+}
+
+/** Record a save the server has accepted. */
+export function markWorktreeStatusSaved(
+  worktreeId: string,
+  status: WorktreeLifecycleStatus | null
+): void {
+  statusSaveGeneration += 1;
+  savedStatuses.set(worktreeId, { generation: statusSaveGeneration, status });
+}
+
+/**
+ * The status a fetch reply should show for one worktree: the reply's own,
+ * unless a save landed after the fetch started — then the saved one.
+ */
+export function resolveFetchedWorktreeStatus(
+  worktreeId: string,
+  fetchedStatus: Worktree['status'],
+  fetchStartedAt: number
+): Worktree['status'] {
+  const saved = savedStatuses.get(worktreeId);
+  return saved && saved.generation > fetchStartedAt ? saved.status : fetchedStatus;
+}
+
+/**
+ * {@link resolveFetchedWorktreeStatus} over one worktree. Returns the same
+ * object when nothing is overridden.
+ */
+export function applySavedWorktreeStatus<T extends Pick<Worktree, 'id' | 'status'>>(
+  worktree: T,
+  fetchStartedAt: number
+): T {
+  const status = resolveFetchedWorktreeStatus(worktree.id, worktree.status, fetchStartedAt);
+  return status === worktree.status ? worktree : { ...worktree, status };
+}
+
+/**
+ * {@link applySavedWorktreeStatus} over a list. Returns the same array when
+ * nothing is overridden.
+ */
+export function applySavedWorktreeStatuses<T extends Pick<Worktree, 'id' | 'status'>>(
+  worktrees: T[],
+  fetchStartedAt: number
+): T[] {
+  let changed = false;
+  const next = worktrees.map((worktree) => {
+    const applied = applySavedWorktreeStatus(worktree, fetchStartedAt);
+    if (applied !== worktree) changed = true;
+    return applied;
+  });
+  return changed ? next : worktrees;
+}
+
+/**
+ * Save a worktree's status in pick order. Saves of the same worktree wait for
+ * the previous one to settle (whatever its outcome), so the last pick is the
+ * last PATCH the server sees. A successful save is recorded with
+ * {@link markWorktreeStatusSaved} before the promise resolves.
+ */
+export function saveWorktreeStatus(
+  worktreeId: string,
+  status: WorktreeLifecycleStatus | null
+): Promise<Worktree> {
+  const previous = saveQueues.get(worktreeId) ?? Promise.resolve();
+  const save = previous
+    .catch(() => undefined)
+    .then(() => patchWorktreeStatus(worktreeId, status))
+    .then((updated) => {
+      markWorktreeStatusSaved(worktreeId, status);
+      return updated;
+    });
+  const tail = save.catch(() => undefined);
+  saveQueues.set(worktreeId, tail);
+  void tail.then(() => {
+    if (saveQueues.get(worktreeId) === tail) saveQueues.delete(worktreeId);
+  });
+  return save;
+}
+
+/** Exported only for tests — forget every recorded save and queue. */
+export function __resetWorktreeStatusSaves(): void {
+  statusSaveGeneration = 0;
+  savedStatuses.clear();
+  saveQueues.clear();
+}

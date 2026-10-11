@@ -13,7 +13,7 @@
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { renderHook, waitFor } from '@testing-library/react';
+import { renderHook, waitFor, act } from '@testing-library/react';
 import type { Worktree } from '@/types/models';
 
 vi.mock('next/navigation', () => ({
@@ -63,6 +63,7 @@ vi.mock('@/components/common/Toast', async (importOriginal) => {
 });
 
 import { useWorktreeDetailController } from '@/hooks/useWorktreeDetailController';
+import { __resetWorktreeStatusSaves, saveWorktreeStatus } from '@/lib/worktree-status';
 
 const WORKTREE_ID = 'wt-3594';
 
@@ -123,5 +124,90 @@ describe('[#3594] the detail screen follows the list status', () => {
     cache.worktrees = [{ ...WORKTREE }, { ...WORKTREE, id: 'wt-other', status: 'done' }];
     rerender();
     expect(result.current.worktree?.status).toBe('in_progress');
+  });
+});
+
+describe('[#3594] a late detail reply does not undo a newer status', () => {
+  /** Detail GETs wait for the test; everything else answers at once. */
+  function deferredDetailFetch() {
+    const detailReplies: Array<(status: string) => void> = [];
+    global.fetch = vi.fn((input: unknown, init?: RequestInit) => {
+      const url = String(input);
+      if (init?.method === 'PATCH') {
+        const status = JSON.parse(String(init.body)).status;
+        return Promise.resolve(jsonReply(200, { ...WORKTREE, status }));
+      }
+      if (url.includes('/current-output')) return Promise.resolve(jsonReply(200, { isRunning: false }));
+      if (url.includes('/messages')) return Promise.resolve(jsonReply(200, []));
+      if (url.includes('/auto-yes')) return Promise.resolve(jsonReply(200, { instances: {} }));
+      if (url.endsWith(`/api/worktrees/${WORKTREE_ID}`)) {
+        return new Promise((resolve) =>
+          detailReplies.push((status) => resolve(jsonReply(200, { ...WORKTREE, status })))
+        );
+      }
+      return Promise.resolve(jsonReply(404, {}));
+    }) as unknown as typeof fetch;
+    return detailReplies;
+  }
+
+  afterEach(() => __resetWorktreeStatusSaves());
+
+  it('keeps Done saved from a row while an older detail GET answers Ready', async () => {
+    __resetWorktreeStatusSaves();
+    const detailReplies = deferredDetailFetch();
+    cache.worktrees = [{ ...WORKTREE }];
+    const { result, rerender } = renderHook(() => useWorktreeDetailController({ worktreeId: WORKTREE_ID }));
+    await waitFor(() => expect(detailReplies.length).toBeGreaterThan(0));
+
+    // The row's "…" saves Done and the list brings it in.
+    await act(async () => {
+      await saveWorktreeStatus(WORKTREE_ID, 'done');
+    });
+    cache.worktrees = [{ ...WORKTREE, status: 'done' }];
+    rerender();
+    await waitFor(() => expect(result.current.worktree?.status).toBe('done'));
+
+    await act(async () => detailReplies[0]('ready'));
+    expect(result.current.worktree?.status).toBe('done');
+  });
+
+  it('keeps a status taken from the list while an older detail GET answers the old one', async () => {
+    __resetWorktreeStatusSaves();
+    const detailReplies = deferredDetailFetch();
+    cache.worktrees = [{ ...WORKTREE }];
+    const { result, rerender } = renderHook(() => useWorktreeDetailController({ worktreeId: WORKTREE_ID }));
+    await waitFor(() => expect(detailReplies.length).toBeGreaterThan(0));
+
+    // Changed elsewhere (another tab): only the list knows.
+    cache.worktrees = [{ ...WORKTREE, status: 'done' }];
+    rerender();
+    await act(async () => detailReplies[0]('in_progress'));
+    expect(result.current.worktree?.status).toBe('done');
+  });
+
+  it('takes the server value from a detail GET that started after the change (negative control)', async () => {
+    __resetWorktreeStatusSaves();
+    const detailReplies = deferredDetailFetch();
+    cache.worktrees = [{ ...WORKTREE }];
+    const { result, rerender } = renderHook(() => useWorktreeDetailController({ worktreeId: WORKTREE_ID }));
+    await waitFor(() => expect(detailReplies.length).toBeGreaterThan(0));
+    await act(async () => {
+      await saveWorktreeStatus(WORKTREE_ID, 'done');
+    });
+    cache.worktrees = [{ ...WORKTREE, status: 'done' }];
+    rerender();
+    await act(async () => detailReplies[0]('done'));
+
+    const before = detailReplies.length;
+    let retry!: Promise<void>;
+    act(() => {
+      retry = result.current.handleRetry();
+    });
+    await waitFor(() => expect(detailReplies.length).toBe(before + 1));
+    await act(async () => {
+      detailReplies[before]('in_review');
+      await retry;
+    });
+    expect(result.current.worktree?.status).toBe('in_review');
   });
 });

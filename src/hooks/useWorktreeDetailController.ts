@@ -26,6 +26,11 @@ import { useIsMobile } from '@/hooks/useIsMobile';
 import { isForeignSessionResponse } from '@/hooks/useTerminalPanePolling';
 import { useSidebarContext } from '@/contexts/SidebarContext';
 import { useOptionalWorktreesCacheContext } from '@/components/providers/WorktreesCacheProvider';
+import {
+  applySavedWorktreeStatus,
+  currentWorktreeStatusGeneration,
+  saveWorktreeStatus,
+} from '@/lib/worktree-status';
 import { type WorktreeStatus } from '@/components/mobile/MobileHeader';
 import { type MobileTab } from '@/components/mobile/MobileTabBar';
 import { useFileSearch } from '@/hooks/useFileSearch';
@@ -318,10 +323,17 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   // applied, so a value just saved here is not undone by an older list.
   const cachedLifecycleStatus = cache?.worktrees.find((w) => w.id === worktreeId)?.status;
   const lastCachedLifecycleStatusRef = useRef(cachedLifecycleStatus);
+  // Each sync taken from the list, numbered, so a detail fetch that started
+  // before it cannot overwrite it with the older value it read (see fetchWorktree).
+  const statusSyncRef = useRef<{ seq: number; status: Worktree['status'] | undefined }>({
+    seq: 0,
+    status: undefined,
+  });
   useEffect(() => {
     if (lastCachedLifecycleStatusRef.current === cachedLifecycleStatus) return;
     lastCachedLifecycleStatusRef.current = cachedLifecycleStatus;
     if (cachedLifecycleStatus === undefined) return;
+    statusSyncRef.current = { seq: statusSyncRef.current.seq + 1, status: cachedLifecycleStatus };
     setWorktree((current) =>
       current && current.id === worktreeId && current.status !== cachedLifecycleStatus
         ? { ...current, status: cachedLifecycleStatus }
@@ -668,6 +680,10 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
 
   /** Fetch worktree metadata */
   const fetchWorktree = useCallback(async (): Promise<Worktree | null> => {
+    // Issue #3594: note where saves and list syncs stood when this request
+    // left, so its reply cannot put back a status changed in the meantime.
+    const statusGeneration = currentWorktreeStatusGeneration();
+    const statusSyncSeq = statusSyncRef.current.seq;
     try {
       const response = await fetchApiResponse(`/api/worktrees/${worktreeId}`, POLL_REQUEST_OPTIONS);
       // Issue #2498: an expired session resolves as the /login HTML page with
@@ -687,7 +703,14 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       if (formatError) {
         throw formatError;
       }
-      const data: Worktree = await response.json();
+      const fetched: Worktree = await response.json();
+      // Issue #3594: a status saved (from any row's "…") or taken from the list
+      // after this request started is newer than what the reply read.
+      let data = applySavedWorktreeStatus(fetched, statusGeneration);
+      const sync = statusSyncRef.current;
+      if (sync.seq > statusSyncSeq && sync.status !== undefined && data.status !== sync.status) {
+        data = { ...data, status: sync.status };
+      }
       setWorktree(data);
       // Skip setState when value is unchanged to prevent unnecessary re-renders
       if (data.selectedAgents) {
@@ -1302,15 +1325,10 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   /** Handle worktree status change via dropdown */
   const handleWorktreeStatusChange = useCallback(async (newStatus: 'ready' | 'in_progress' | 'in_review' | 'done' | null) => {
     try {
-      const response = await fetch(`/api/worktrees/${worktreeId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: newStatus }),
-      });
-      if (response.ok) {
-        const updated = await response.json();
-        setWorktree(updated);
-      }
+      // Issue #3594: through the shared per-worktree queue, so it is ordered
+      // with the row "…" saves and recorded against in-flight fetches.
+      const updated = await saveWorktreeStatus(worktreeId, newStatus);
+      setWorktree(updated);
     } catch {
       // Silently handle
     }

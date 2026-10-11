@@ -13,7 +13,7 @@
 
 'use client';
 
-import React, { memo, useRef, useState, useEffect, useCallback, useMemo } from 'react';
+import React, { createContext, memo, useContext, useRef, useState, useEffect, useCallback, useMemo } from 'react';
 import ReactDOM from 'react-dom';
 import { useTranslations } from 'next-intl';
 import { Check } from 'lucide-react';
@@ -29,7 +29,7 @@ import { BranchRowActions } from '@/components/sidebar/BranchRowActions';
 import { useToast } from '@/components/common/Toast';
 import { useOptionalWorktreesCacheContext } from '@/components/providers/WorktreesCacheProvider';
 import {
-  patchWorktreeStatus,
+  saveWorktreeStatus,
   worktreeStatusLabelKey,
   WORKTREE_STATUS_BADGE_CLASSES,
   WORKTREE_STATUS_DOT_CLASSES,
@@ -51,6 +51,17 @@ export interface BranchListItemProps {
   /** Whether to show the repository name inline (Issue #651: hidden in grouped view) */
   showRepositoryName?: boolean;
 }
+
+// ============================================================================
+// Worktree status pill (Issue #3594)
+// ============================================================================
+
+/**
+ * Whether rows draw the worktree status pill (or its dot). PC lists do (the
+ * default); the phone's drawer provides `false` — there the status is only in
+ * the row's "…" menu, and the row looks as it did before #3594.
+ */
+export const BranchRowStatusPillContext = createContext(true);
 
 // ============================================================================
 // Row card (Issue #3576)
@@ -350,6 +361,7 @@ export const BranchListItem = memo(function BranchListItem({
   const statusRequestRef = useRef(0);
   const savedStatus = branch.worktreeStatus ?? null;
   const worktreeStatus = pendingStatus !== undefined ? pendingStatus : savedStatus;
+  const showStatusPill = useContext(BranchRowStatusPillContext);
 
   // A new value from the list (ours, or one set elsewhere) replaces the pick.
   useEffect(() => {
@@ -361,7 +373,8 @@ export const BranchListItem = memo(function BranchListItem({
       const request = ++statusRequestRef.current;
       setPendingStatus(next);
       try {
-        await patchWorktreeStatus(branch.id, next);
+        // Queued per worktree, so the last pick is the last PATCH.
+        await saveWorktreeStatus(branch.id, next);
       } catch {
         // A later pick owns the row now; its own outcome decides what shows.
         if (request !== statusRequestRef.current) return;
@@ -516,7 +529,7 @@ export const BranchListItem = memo(function BranchListItem({
             to a dot of the same colour. The words stay in the title and for
             screen readers.
           */}
-          {worktreeStatus && (
+          {showStatusPill && worktreeStatus && (
             <span
               data-testid="branch-worktree-status"
               data-status={worktreeStatus}

@@ -258,7 +258,7 @@ export function WorktreeCard({ worktree, onSessionKilled }: WorktreeCardProps) {
               </div>
             )}
 
-            {/* Status badge (read-only in card; editable in detail header) */}
+            {/* Status badge (read-only in card; changed from the branch row "…" → Status menu or the Info field, Issue #3594) */}
             {currentStatus && (
               <div>
                 <span className={`px-2 py-1 text-xs font-medium rounded ${

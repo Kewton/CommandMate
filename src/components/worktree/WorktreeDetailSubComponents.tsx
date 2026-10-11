@@ -61,7 +61,7 @@ import {
 import { AppUpdateButton } from '@/components/common/AppUpdateButton';
 import { useAppUpdate } from '@/contexts/AppUpdateContext';
 import { useDesktopHeaderFit } from '@/hooks/useDesktopHeaderFit';
-import { WORKTREE_STATUS_OPTIONS } from '@/lib/worktree-status';
+import { saveWorktreeStatus, WORKTREE_STATUS_OPTIONS } from '@/lib/worktree-status';
 
 // ============================================================================
 // Constants
@@ -629,15 +629,10 @@ export const WorktreeInfoFields = memo(function WorktreeInfoFields({
             const val = e.target.value;
             const newStatus = val === '' ? null : val as 'ready' | 'in_progress' | 'in_review' | 'done';
             try {
-              const response = await fetch(`/api/worktrees/${worktree.id}`, {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ status: newStatus }),
-              });
-              if (response.ok && onWorktreeUpdate) {
-                const updated = await response.json();
-                onWorktreeUpdate(updated);
-              }
+              // Issue #3594: the shared per-worktree queue orders this with the
+              // row "…" saves and keeps in-flight fetches from undoing it.
+              const updated = await saveWorktreeStatus(worktree.id, newStatus);
+              onWorktreeUpdate?.(updated);
             } catch {
               // Silently handle
             }

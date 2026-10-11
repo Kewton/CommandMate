@@ -17,11 +17,14 @@
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import React from 'react';
+import fs from 'fs';
+import path from 'path';
 import { BranchListItem, __resetMouseEnterSuppression } from '@/components/sidebar/BranchListItem';
 import { DesktopHeader, WorktreeInfoFields } from '@/components/worktree/WorktreeDetailSubComponents';
 import { ToastProvider } from '@/components/common/Toast';
 import { toBranchItem, type SidebarBranchItem } from '@/types/sidebar';
 import type { Worktree } from '@/types/models';
+import { __resetWorktreeStatusSaves } from '@/lib/worktree-status';
 import { installRadixJsdomPolyfills } from '@tests/helpers/radix-jsdom';
 
 vi.mock('next-intl', async () => {
@@ -83,6 +86,7 @@ beforeAll(() => installRadixJsdomPolyfills());
 
 beforeEach(() => {
   __resetMouseEnterSuppression();
+  __resetWorktreeStatusSaves();
   refresh.mockClear();
 });
 
@@ -287,5 +291,51 @@ describe('where the status select lives (Issue #3594)', () => {
       'In Review',
       'Done',
     ]);
+  });
+});
+
+describe('two picks in a row (Issue #3594, review follow-up)', () => {
+  beforeEach(() => __resetWorktreeStatusSaves());
+  afterEach(() => __resetWorktreeStatusSaves());
+
+  it('PATCHes the later pick only after the earlier one settles, so Done is the last save', async () => {
+    const replies: Array<() => void> = [];
+    const bodies: unknown[] = [];
+    const fetchMock = vi.fn(
+      (_url: string, init?: RequestInit) =>
+        new Promise((resolve) => {
+          const status = JSON.parse(String(init?.body)).status;
+          bodies.push(status);
+          replies.push(() => resolve({ ok: true, status: 200, json: async () => ({ id: 'wt-other', status }) }));
+        })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    renderRow();
+    openStatusSubmenu();
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'Ready' }));
+    openStatusSubmenu();
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'Done' }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(bodies).toEqual(['ready']);
+    expect(screen.getByTestId('branch-worktree-status')).toHaveAttribute('data-status', 'done');
+
+    replies[0]();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(bodies).toEqual(['ready', 'done']);
+    replies[1]();
+    await waitFor(() => expect(refresh).toHaveBeenCalled());
+  });
+});
+
+describe('WorktreeCard says where the status is changed (Issue #3594)', () => {
+  const source = fs.readFileSync(path.join(process.cwd(), 'src/components/worktree/WorktreeCard.tsx'), 'utf8');
+
+  it('points at the row "…" Status menu and the Info field', () => {
+    expect(source).toContain('branch row "…" → Status menu or the Info field');
+  });
+
+  it('no longer points at the detail header, which lost its select', () => {
+    expect(source).not.toContain('editable in detail header');
   });
 });

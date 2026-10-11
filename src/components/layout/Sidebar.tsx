@@ -56,6 +56,7 @@ import { useWorktreeSelection } from '@/contexts/WorktreeSelectionContext';
 import { useSidebarContext } from '@/contexts/SidebarContext';
 import {
   BranchListItem,
+  BranchRowStatusPillContext,
   SIDEBAR_ROW_INSET_CLASS,
   sidebarRowCardClass,
 } from '@/components/sidebar/BranchListItem';
@@ -635,6 +636,9 @@ export const Sidebar = memo(function Sidebar() {
   };
 
   return (
+    // Issue #3594: the worktree status pill is a PC affordance; the phone's
+    // drawer keeps its rows as they were (the status is in the "…" menu).
+    <BranchRowStatusPillContext.Provider value={!isMobile}>
     <nav
       data-testid="sidebar"
       aria-label={t('sidebar.branchNavigation')}
@@ -767,6 +771,7 @@ export const Sidebar = memo(function Sidebar() {
         <SidebarSettingsMenu onNavigate={closeMobileDrawer} />
       </div>
     </nav>
+    </BranchRowStatusPillContext.Provider>
   );
 });
 

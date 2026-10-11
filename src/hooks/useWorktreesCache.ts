@@ -22,6 +22,7 @@ import {
 } from '@/lib/api-client';
 import { useRealtime } from '@/hooks/useRealtimeConnection';
 import type { RealtimeEvent } from '@/lib/realtime/types';
+import { applySavedWorktreeStatuses, currentWorktreeStatusGeneration } from '@/lib/worktree-status';
 
 /** Polling interval when at least one session is running (5s) */
 export const POLLING_INTERVAL_ACTIVE = 5000;
@@ -205,6 +206,9 @@ export function useWorktreesCache(
       if (lastFetchFailedRef.current && worktreesRef.current.length === 0) {
         setIsLoading(true);
       }
+      // Issue #3594: a status saved while this request is out must not be
+      // undone by its (older) reply — see applySavedWorktreeStatuses.
+      const statusGeneration = currentWorktreeStatusGeneration();
       const response = await fetch('/api/worktrees');
       // Issue #2059: an unauthenticated request resolves as the /login HTML
       // page with status 200, and a proxy interstitial resolves as HTML too.
@@ -223,7 +227,7 @@ export function useWorktreesCache(
         throw formatError;
       }
       const data = await response.json();
-      const wts = data.worktrees ?? [];
+      const wts = applySavedWorktreeStatuses<Worktree>(data.worktrees ?? [], statusGeneration);
       const repos = data.repositories ?? [];
       // Mark polling state updates as low-priority transitions so urgent
       // user interactions (clicks, keypresses) are never blocked by a
