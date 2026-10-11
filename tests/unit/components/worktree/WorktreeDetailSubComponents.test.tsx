@@ -759,17 +759,23 @@ describe('DesktopHeader agent-row idle collapse + overflow (Issue #1078)', () =>
     expect(screen.getByTestId('desktop-agent-status-claude-5').getAttribute('aria-label')).toBe(
       'Agent 5: Idle'
     );
-    // Idle dots never overflow — they are narrow.
-    expect(screen.queryByTestId('desktop-agent-status-overflow')).toBeNull();
+    // Issue #3593: the five idle ones are the "N others" list, and none of
+    // them waits for an answer, so the trigger carries no amber count.
+    expect(screen.getByTestId('desktop-agent-status-overflow').textContent).toContain('5');
+    expect(screen.getByTestId('desktop-session-others-waiting').textContent).toBe('');
   });
 
   it('all idle: every instance renders as an icon-only dot, no overflow', () => {
+    // Issue #3593: every instance stays reachable; only the current one (the
+    // first, with no active instance given) is labelled inline, the other
+    // five are rows of the "N others" list.
     render(<DesktopHeader {...baseProps} instances={roster(6)} />);
     for (let i = 0; i < 6; i += 1) {
       expect(screen.getByTestId(`desktop-agent-status-claude-${i}`)).toBeDefined();
-      expect(screen.queryByText(`Agent ${i}: Idle`)).toBeNull();
+      if (i > 0) expect(screen.queryByText(`Agent ${i}: Idle`)).toBeNull();
     }
-    expect(screen.queryByTestId('desktop-agent-status-overflow')).toBeNull();
+    expect(screen.getByText('Agent 0: Idle')).toBeDefined();
+    expect(screen.getByTestId('desktop-agent-status-overflow').textContent).toContain('5');
   });
 
   it('6 all working: keeps 4 pills inline and folds the remaining 2 into "+N"', () => {
@@ -784,14 +790,15 @@ describe('DesktopHeader agent-row idle collapse + overflow (Issue #1078)', () =>
         sessionStatusByInstance={sessionStatusByInstance}
       />
     );
-    // First 4 remain inline as pills.
-    for (let i = 0; i < 4; i += 1) {
+    // Issue #3593: one labelled pill (the current session) whatever the count;
+    // the other five are rows of the closed "N others" list.
+    for (let i = 0; i < 6; i += 1) {
       expect(screen.getByTestId(`desktop-agent-status-claude-${i}`)).toBeDefined();
     }
-    // The rest collapse into a "+2" overflow trigger (closed menu → not inline).
     const overflow = screen.getByTestId('desktop-agent-status-overflow');
-    expect(overflow.textContent).toContain('+2');
-    expect(screen.queryByTestId('desktop-agent-status-claude-5')).toBeNull();
+    expect(overflow.textContent).toContain('5');
+    expect(overflow.getAttribute('aria-expanded')).toBe('false');
+    expect(screen.getByTestId('desktop-session-others-list')).not.toBeVisible();
     // Issue #1078: folded working sessions still surface the living glow so a
     // running instance stays visible at a glance even when collapsed.
     const overflowDot = overflow.querySelector('span');
