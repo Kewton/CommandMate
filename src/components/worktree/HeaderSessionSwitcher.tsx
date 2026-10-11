@@ -37,7 +37,14 @@
  *
  * The list is portalled to `document.body` and always mounted (`hidden` while
  * closed), so the header's horizontal clip cannot cut it and each row keeps
- * its `desktop-agent-status-<id>` handle.
+ * its `desktop-agent-status-<id>` handle. Its height is capped at the room
+ * left below the trigger and it scrolls inside (the repository strip's lists
+ * do the same, `resolvePopoverMaxHeight`); a row reached with the keyboard is
+ * scrolled into view. A row's tooltip is drawn above the list.
+ *
+ * "Add session…" opens the "+" form: focus moves to the trigger first, so the
+ * form hands it back there when it closes (the row itself is hidden by then).
+ * It is off on the "+"'s own condition and says why in the "+"'s words.
  *
  * @module components/worktree/HeaderSessionSwitcher
  */
@@ -52,6 +59,7 @@ import { StatusDot } from '@/components/ui/StatusDot';
 import { Tooltip } from '@/components/common/Tooltip';
 import { Z_INDEX } from '@/config/z-index';
 import { countWaitingInstances } from '@/lib/agent-status-display';
+import { MAX_AGENT_INSTANCES } from '@/lib/cli-tools/types';
 import type { BranchStatus } from '@/types/sidebar';
 
 /** One session as the field draws it. Resolved by `DesktopHeader`. */
@@ -89,7 +97,10 @@ export interface HeaderSessionSwitcherProps {
   draggingInstanceId: string | null;
   /** Opens the "+" add-agent form; omitted leaves "Add session…" out of the list. */
   onAddSession?: () => void;
-  /** Whether "Add session…" can do anything now (the "+" may be at its limit). */
+  /**
+   * Whether "Add session…" can do anything now: false on the "+"'s own
+   * condition (the roster is at MAX_AGENT_INSTANCES), which the row then states.
+   */
   canAddSession?: boolean;
 }
 
@@ -99,6 +110,31 @@ const OTHERS_TRIGGER_WIDTH = 'w-[7.5rem]';
 
 /** Selector of the list's focusable rows (sessions and "Add session…"). */
 const ITEM_SELECTOR = '[data-switcher-item]:not([disabled])';
+
+/** Gap (px) between the trigger and the list. */
+const LIST_GAP = 4;
+/** Room (px) kept free below the list at the viewport's bottom edge. */
+const LIST_VIEWPORT_MARGIN = 8;
+/**
+ * A row's tooltip layer: one above the list (`Z_INDEX.POPOVER`). The shared
+ * Tooltip's default (`z-40`) is under the list, which would hide the bubble.
+ */
+const ROW_TOOLTIP_Z_INDEX = Z_INDEX.POPOVER + 1;
+
+/**
+ * The list's max-height: the room left between the trigger's bottom (plus the
+ * gap) and the viewport's bottom margin. Never negative.
+ */
+function resolveListMaxHeight(triggerBottom: number, viewportHeight: number): number {
+  return Math.max(0, Math.floor(viewportHeight - (triggerBottom + LIST_GAP) - LIST_VIEWPORT_MARGIN));
+}
+
+/** Focus a row and bring it into the list's scrolled view. */
+function focusItem(item: HTMLElement | undefined): void {
+  if (!item) return;
+  item.focus();
+  item.scrollIntoView?.({ block: 'nearest' });
+}
 
 export function HeaderSessionSwitcher({
   current,
@@ -112,12 +148,15 @@ export function HeaderSessionSwitcher({
 }: HeaderSessionSwitcherProps): React.ReactElement {
   const t = useTranslations('worktree');
   const listId = useId();
+  const addLimitId = useId();
   const triggerRef = useRef<HTMLButtonElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
   // Which item to focus once the list is shown ('first' / 'last'), or none.
   const [pendingFocus, setPendingFocus] = useState<'first' | 'last' | null>(null);
-  const [position, setPosition] = useState<{ top: number; right: number } | null>(null);
+  const [position, setPosition] = useState<{ top: number; right: number; maxHeight: number } | null>(
+    null,
+  );
   const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
   // The rows as they were when a drag left the list; drawn until `dragend`.
   const [frozenOthers, setFrozenOthers] = useState<HeaderSessionEntry[] | null>(null);
@@ -165,7 +204,11 @@ export function HeaderSessionSwitcher({
     const place = () => {
       const rect = triggerRef.current?.getBoundingClientRect();
       if (!rect) return;
-      setPosition({ top: rect.bottom + 4, right: Math.max(4, window.innerWidth - rect.right) });
+      setPosition({
+        top: rect.bottom + LIST_GAP,
+        right: Math.max(4, window.innerWidth - rect.right),
+        maxHeight: resolveListMaxHeight(rect.bottom, window.innerHeight),
+      });
     };
     place();
     window.addEventListener('resize', place);
@@ -175,7 +218,7 @@ export function HeaderSessionSwitcher({
   useEffect(() => {
     if (!open || pendingFocus === null) return;
     const items = Array.from(listRef.current?.querySelectorAll<HTMLElement>(ITEM_SELECTOR) ?? []);
-    (pendingFocus === 'first' ? items[0] : items[items.length - 1])?.focus();
+    focusItem(pendingFocus === 'first' ? items[0] : items[items.length - 1]);
     setPendingFocus(null);
   }, [open, pendingFocus]);
 
@@ -216,7 +259,7 @@ export function HeaderSessionSwitcher({
     (e: React.KeyboardEvent<HTMLDivElement>) => {
       const items = Array.from(listRef.current?.querySelectorAll<HTMLElement>(ITEM_SELECTOR) ?? []);
       const index = items.indexOf(document.activeElement as HTMLElement);
-      const focusAt = (i: number) => items[(i + items.length) % items.length]?.focus();
+      const focusAt = (i: number) => focusItem(items[(i + items.length) % items.length]);
       switch (e.key) {
         case 'ArrowDown':
           e.preventDefault();
@@ -296,8 +339,10 @@ export function HeaderSessionSwitcher({
     [close, onSelect],
   );
 
+  // Focus goes to the trigger before the form opens: the form returns focus to
+  // whatever held it when it opened, and this row is hidden by then.
   const handleAddClick = useCallback(() => {
-    close(false);
+    close(true);
     onAddSession?.();
   }, [close, onAddSession]);
 
@@ -321,13 +366,14 @@ export function HeaderSessionSwitcher({
         zIndex: Z_INDEX.POPOVER,
         top: position?.top ?? 0,
         right: position?.right ?? 0,
+        ...(position ? { maxHeight: `${position.maxHeight}px` } : {}),
       }}
-      className={`fixed flex w-72 max-w-[calc(100vw-8px)] flex-col gap-0.5 rounded-md border border-border bg-surface p-1 text-surface-foreground shadow-lg transition-opacity${
+      className={`fixed flex w-72 overflow-y-auto overscroll-contain max-w-[calc(100vw-8px)] flex-col gap-0.5 rounded-md border border-border bg-surface p-1 text-surface-foreground shadow-lg transition-opacity${
         listInert ? ' pointer-events-none opacity-40' : ''
       }`}
     >
       {rows.map((entry) => (
-        <Tooltip key={entry.id} content={entry.tooltip} placement="bottom">
+        <Tooltip key={entry.id} content={entry.tooltip} placement="bottom" zIndex={ROW_TOOLTIP_Z_INDEX}>
           {/* Issue #1061: draggable session row (aria-pressed: never the current one) — 残置 */}
           <button
             type="button"
@@ -367,11 +413,22 @@ export function HeaderSessionSwitcher({
             data-testid="desktop-session-add"
             onClick={handleAddClick}
             disabled={!canAddSession}
-            className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm text-foreground outline-none hover:bg-muted focus-visible:bg-muted focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-40"
+            aria-describedby={canAddSession ? undefined : addLimitId}
+            className="flex w-full flex-shrink-0 items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm text-foreground outline-none hover:bg-muted focus-visible:bg-muted focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-40"
           >
             <Plus className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
             {t('agentStatus.addSession')}
           </button>
+          {!canAddSession && (
+            // The "+" says the same in its label and tooltip (AgentAddMenu).
+            <p
+              id={addLimitId}
+              data-testid="desktop-session-add-limit"
+              className="flex-shrink-0 px-2 pb-1 text-xs text-muted-foreground"
+            >
+              {t('agentAdd.maxReached', { max: MAX_AGENT_INSTANCES })}
+            </p>
+          )}
         </>
       )}
     </div>

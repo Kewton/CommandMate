@@ -272,4 +272,64 @@ test.describe('Header session field (Issue #3593)', () => {
     );
     await expect(page.getByTestId('desktop-session-others-list')).toBeHidden();
   });
+
+  test('a short screen: the list scrolls, the last row and "Add session…" are reachable, and the form hands focus back', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1440, height: 360 });
+    // 9 sessions: one under the limit, so "Add session…" is on.
+    await openScreen(page, { count: 9 });
+    const trigger = page.getByTestId('desktop-agent-status-overflow');
+    await trigger.focus();
+    await page.keyboard.press('ArrowUp');
+    const add = page.getByTestId('desktop-session-add');
+    await expect(add).toBeFocused();
+    const list = page.getByTestId('desktop-session-others-list');
+    const sizes = await list.evaluate((el) => ({ scroll: el.scrollHeight, client: el.clientHeight }));
+    expect(sizes.scroll).toBeGreaterThan(sizes.client);
+    const addBox = await box(add);
+    expect(addBox.y + addBox.height).toBeLessThanOrEqual(360);
+    await page.keyboard.press('ArrowUp');
+    const lastRow = page.getByTestId('desktop-agent-status-gemini-3');
+    await expect(lastRow).toBeFocused();
+    await expect(lastRow).toBeInViewport({ ratio: 1 });
+
+    // The row's tooltip is drawn above the list.
+    const z = await page.evaluate(() => {
+      const bubble = document.querySelector('[role="tooltip"]');
+      const listEl = document.querySelector('[data-testid="desktop-session-others-list"]');
+      return bubble && listEl
+        ? { bubble: Number(getComputedStyle(bubble).zIndex), list: Number(getComputedStyle(listEl).zIndex) }
+        : null;
+    });
+    expect(z).not.toBeNull();
+    expect(z!.bubble).toBeGreaterThan(z!.list);
+
+    // Add session → the form → Escape: focus is back on "N more".
+    await page.keyboard.press('End');
+    await expect(add).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(page.getByTestId('agent-add-form')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.getByTestId('agent-add-form')).toBeHidden();
+    await expect(trigger).toBeFocused();
+  });
+
+  test('a tall screen: the list does not scroll; at 10 sessions "Add session…" is off and says why', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await openScreen(page, { count: 3 });
+    const list = await openList(page);
+    const sizes = await list.evaluate((el) => ({ scroll: el.scrollHeight, client: el.clientHeight }));
+    expect(sizes.scroll).toBe(sizes.client);
+    await expect(page.getByTestId('desktop-session-add')).toBeEnabled();
+    await expect(page.getByTestId('desktop-session-add-limit')).toHaveCount(0);
+
+    await openScreen(page, { count: 10 });
+    await openList(page);
+    await expect(page.getByTestId('desktop-session-add')).toBeDisabled();
+    await expect(page.getByTestId('desktop-session-add-limit')).toHaveText('Up to 10 agents per branch');
+    await expect(page.getByTestId('agent-add-button')).toBeDisabled();
+  });
 });

@@ -48,7 +48,12 @@ import {
   type AgentSessionSnapshot,
   type AgentSessionView,
 } from '@/types/agent-session';
-import { getInstanceLabel, type AgentInstance, type CLIToolType } from '@/lib/cli-tools/types';
+import {
+  getInstanceLabel,
+  MAX_AGENT_INSTANCES,
+  type AgentInstance,
+  type CLIToolType,
+} from '@/lib/cli-tools/types';
 import { useCopyFeedback } from '@/hooks/useCopyFeedback';
 import { AGENT_INSTANCE_DND_MIME } from '@/components/worktree/TerminalSplitPane';
 import {
@@ -1263,6 +1268,8 @@ export const DesktopHeader = memo(function DesktopHeader({
               onDragEnd={handleAgentDragEnd}
               draggingInstanceId={draggingInstanceId}
               onAddSession={agentAddControl ? handleAddSession : undefined}
+              // The "+" (AgentAddMenu) is off on the same condition.
+              canAddSession={(instances?.length ?? 0) < MAX_AGENT_INSTANCES}
             />
 
             {/* Issue #3514: add an agent — the right end of the agent row. */}
