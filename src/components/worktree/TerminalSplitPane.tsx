@@ -599,7 +599,11 @@ export const TerminalSplitPane = memo(function TerminalSplitPane({
       // preventDefault marks this element as a valid drop target.
       e.preventDefault();
       const classification = classifyDrag();
-      e.dataTransfer.dropEffect = classification === 'forbidden' ? 'none' : 'move';
+      // Issue #3593: 'move' even for a forbidden drag. A real browser fires no
+      // `drop` once `dropEffect` is 'none', so the container's refusal toast
+      // ("X is already in use by split N") could never show; the red ring
+      // still says "not here" while hovering, and the drop is refused.
+      e.dataTransfer.dropEffect = 'move';
       setDragOverState(prev => (prev === classification ? prev : classification));
     },
     [dropEnabled, classifyDrag],

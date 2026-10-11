@@ -1,7 +1,12 @@
 {
   "agentStatus": {
-    "moreAgents": "他 {count} 件のエージェント",
-    "overflowTrigger": "他のエージェント"
+    "overflowTrigger": "他のエージェント",
+    "otherSessions": "ほか {count}",
+    "otherSessionsLabel": "ほかのセッション {count} 件",
+    "otherSessionsWaitingLabel": "ほかのセッション {count} 件（うち {waiting} 件が応答待ち）",
+    "otherSessionsList": "ほかのセッション",
+    "inSplit": "分割 {index}",
+    "addSession": "セッションを追加…"
   },
   "toc": {
     "title": "目次",

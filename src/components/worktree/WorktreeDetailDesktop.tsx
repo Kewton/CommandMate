@@ -45,7 +45,7 @@ import {
 } from '@/hooks/useActivityPaneOverlay';
 import { FileTreeView } from '@/components/worktree/FileTreeView';
 import { FilePanelSplit } from '@/components/worktree/FilePanelSplit';
-import { TerminalSplitContainer } from '@/components/worktree/TerminalSplitContainer';
+import { TerminalSplitContainer, type SelectedSplit } from '@/components/worktree/TerminalSplitContainer';
 import { useTerminalSplitPlacement } from '@/hooks/useTerminalSplitPlacement';
 import { AgentAddMenu } from '@/components/worktree/AgentAddMenu';
 import type { AgentPlacement } from '@/config/terminal-split-config';
@@ -107,7 +107,7 @@ export interface WorktreeDetailDesktopProps {
   /**
    * Issue #2656: an instance chosen outside this screen (the sidebar's
    * sessions view), token-stamped by the controller. Applied once per token,
-   * exactly like a header pill click, so the primary split shows it.
+   * exactly like a header pick, so the selected split shows it (#3593).
    */
   instanceSelectionRequest?: { instanceId: string; token: number } | null;
   /** Issue #2656: tells the controller a request was applied (clears it). */
@@ -430,26 +430,41 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
    * connected to `useTerminalSplits` (owned inside TerminalSplitContainer). So
    * selecting "Claude" in the header left the split — and therefore the display
    * polling and message send — pinned to whatever instance the split held (e.g.
-   * `claude-2`). This handler keeps that existing active-instance behavior AND
-   * publishes a token-stamped selection the container applies to the primary
-   * split (see `headerInstanceSelection` on TerminalSplitContainer). The token
-   * bumps per click so the container applies it exactly once and does not confuse
-   * it with the split 0→active mirror / drop / reconcile paths.
+   * `claude-2`). This handler publishes a token-stamped selection the container
+   * applies to the selected split (see `headerInstanceSelection` on
+   * TerminalSplitContainer). The token bumps per click so the container applies
+   * it exactly once and does not confuse it with the drop / reconcile paths.
    */
   const [headerInstanceSelection, setHeaderInstanceSelection] =
     React.useState<{ instanceId: string; token: number } | null>(null);
   const headerSelectTokenRef = React.useRef(0);
-  const handleHeaderInstanceSelect = useCallback(
-    (instanceId: string) => {
-      // Preserve existing behavior: kill / Auto-Yes UI / header badge follow the
-      // active instance (the controller also mirrors activeCliTab from its CLI).
-      setActiveInstanceId(instanceId);
-      // Route the same selection into the primary terminal split.
-      headerSelectTokenRef.current += 1;
-      setHeaderInstanceSelection({ instanceId, token: headerSelectTokenRef.current });
-    },
-    [setActiveInstanceId],
-  );
+  const handleHeaderInstanceSelect = useCallback((instanceId: string) => {
+    // Issue #3593: route the selection into the selected terminal split. The
+    // active instance (kill / Auto-Yes / the header's current session) follows
+    // the split through `selectedSplit` below, so it is not set here: setting
+    // it first would show a session the split may not end up showing.
+    headerSelectTokenRef.current += 1;
+    setHeaderInstanceSelection({ instanceId, token: headerSelectTokenRef.current });
+  }, []);
+
+  /**
+   * Issue #3593: the selected split, published by the split container. The
+   * header's current session is the session it shows, and so are End and
+   * Auto Yes: the active instance is kept equal to it, so the three read one
+   * value. Applied only for an instance the roster holds — the controller's
+   * own reconcile moves the active instance off anything else, and the two
+   * must not fight.
+   */
+  const [selectedSplit, setSelectedSplit] = useState<SelectedSplit | null>(null);
+  const selectedInstanceId = selectedSplit?.instanceId ?? null;
+  const activeInstanceIdRef = React.useRef(activeInstanceId);
+  activeInstanceIdRef.current = activeInstanceId;
+  React.useEffect(() => {
+    if (!selectedInstanceId) return;
+    if (!instances.some((inst) => inst.id === selectedInstanceId)) return;
+    if (activeInstanceIdRef.current === selectedInstanceId) return;
+    setActiveInstanceId(selectedInstanceId);
+  }, [selectedInstanceId, instances, setActiveInstanceId]);
 
   /**
    * Issue #3514: the header "+" (AgentAddMenu).
@@ -493,8 +508,8 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
     currentBranch && currentBranch !== '(unknown)' ? currentBranch : worktreeName;
 
   // Issue #2656: route an instance picked in the sidebar's sessions view
-  // through the same path as a header pill click (split 0 if shown nowhere,
-  // focus move if another split shows it). The token guard keeps a re-created
+  // through the same path as a header pick (the selected split if shown
+  // nowhere — split 0 before #3593 — focus move if another split shows it). The token guard keeps a re-created
   // `handleHeaderInstanceSelect` from re-applying an old request within this
   // mount; acknowledging clears the request so a remount cannot either.
   const appliedInstanceRequestTokenRef = React.useRef(0);
@@ -585,13 +600,10 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
           instanceId={paneInstanceId}
           instance={paneInstance}
           availableInstances={paneAvailableInstances}
-          onInstanceChange={(id) => {
-            onInstanceChange(id);
-            // Issue #869: sync the (worktree-global) active instance so the
-            // Header badge / kill-session controls follow split 0. The
-            // controller mirrors activeCliTab from the instance's CLI tool.
-            if (splitIndex === 0) setActiveInstanceId(id);
-          }}
+          // Issue #869 / #3593: the active instance follows the SELECTED split
+          // (see `selectedSplit`), which is published when this split's
+          // instance changes — not split 0's, whichever split is selected.
+          onInstanceChange={onInstanceChange}
           onFocus={onPaneFocus}
           pendingInsertText={panePendingInsert}
           onInsertConsumed={() => handleInsertConsumed(splitIndex)}
@@ -668,7 +680,6 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
       autoYesStateMap,
       handleInsertConsumed,
       onMessageSent,
-      setActiveInstanceId,
       lastAutoResponse,
       makeAutoYesToggleHandler,
       // Issue #743/#875: re-create renderPane when the session status maps
@@ -717,12 +728,14 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
         // applied drop.
         showToast={showToast}
         onActiveInstanceChange={setActiveInstanceId}
-        // Issue #1152: route header pill selections into the primary split.
+        // Issue #1152 / #3593: route header picks into the selected split.
         headerInstanceSelection={headerInstanceSelection}
         // Issue #3514: show an agent added from the header "+".
         instancePlacementRequest={instancePlacementRequest}
         onInstancePlacementApplied={handleInstancePlacementApplied}
         onSplitCountChange={setSplitCount}
+        // Issue #3593: the header's current session and End / Auto Yes follow it.
+        onSelectedSplitChange={setSelectedSplit}
         // Issue #3590: the second row's one entry point (`actionBarItems`).
         actionBarItems={verificationChip}
       />
@@ -730,7 +743,7 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
     // setFocusedSplitIndex / setActiveInstanceId are stable callbacks, and
     // showToast is a stable parent callback, so listing them does not
     // destabilize the memo beyond the existing per-render cadence.
-    // headerInstanceSelection changes only on a header pill click (a user
+    // headerInstanceSelection changes only on a header pick (a user
     // action, not the polling cadence), so re-creating the region then is fine.
     [worktreeId, instances, rosterReady, renderSplitPane, setFocusedSplitIndex, showToast, setActiveInstanceId, headerInstanceSelection, instancePlacementRequest, handleInstancePlacementApplied, verificationChip],
   );
@@ -1074,19 +1087,21 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
             sessionStatusByInstance={worktree?.sessionStatusByInstance}
             instances={instances}
             activeInstanceId={activeInstanceId}
-            // Issue #1152: header pill selection now also drives the primary
-            // terminal split (display polling + send), not just the active badge.
+            // Issue #1152 / #3593: a header pick drives the selected terminal
+            // split (display polling + send); the active instance follows it.
             onActiveInstanceChange={handleHeaderInstanceSelect}
             // Issue #786 / #869: publish the dragged agent's instanceId so each
             // terminal split can show its dragOver allowed/forbidden ring (D-2).
             onAgentDragStart={handleAgentDragStart}
             onAgentDragEnd={handleAgentDragEnd}
             onKillSession={onKillSession}
-            // Issue #2042: cost / context for the pills' tooltips. Sparse — only
+            // Issue #2042: cost / context for the sessions' tooltips. Sparse — only
             // instances with an open split have an entry.
             agentSessionByInstance={agentSessionByInstance}
-            // Issue #3514: "+" at the right end of the agent pills.
+            // Issue #3514: "+" at the right end of the session field.
             agentAddControl={agentAddControl}
+            // Issue #3593: the "N others" list names each session's split.
+            splitInstanceIds={selectedSplit?.splitInstanceIds}
           />
           {/* Issue #111: Branch mismatch warning */}
           {worktree?.gitStatus && (

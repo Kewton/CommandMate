@@ -20,6 +20,11 @@
  *   `clientWidth` (of the identity group and of what is inside it), and the
  *   model derives them from what the header actually rendered.
  *
+ * Issue #3593: the labelled pills and the "+N" menu became a fixed-width
+ * session field (the current session + "N others ▾"), so the fit has no pill
+ * to fold: past truncating, the identity group clips. The width model counts
+ * the field as one fixed width.
+ *
  * Issue #3590: the header is one 44px row and the verification chip moved to
  * the second row — the split action bar (`TerminalSplitContainer`), next to
  * the layout icons. The chip's half of the fit moved with it: that bar has its
@@ -90,8 +95,8 @@ const LONG_CHIP_TITLE = 'a much longer task title';
  */
 const WIDTH = {
   controls: 300,
-  pill: 100,
-  overflowTrigger: 40,
+  /** Issue #3593: the current session + "N others ▾" + "+", whatever the sessions. */
+  sessionField: 300,
   endButton: 50,
   identityMin: 400,
   longChipExtra: 100,
@@ -115,13 +120,11 @@ let headerWidth = 1600;
 let barWidth = 1600;
 
 function renderedControlsWidth(): number {
+  // Issue #3593: the agent row is a fixed-width session field.
   const row = document.querySelector('[data-testid="desktop-agent-status-row"]');
-  // Labelled pills carry a native `title`; idle dots and "+N" do not.
-  const pills = row ? row.querySelectorAll('button[title]').length : 0;
   return (
     WIDTH.controls +
-    pills * WIDTH.pill +
-    (document.querySelector('[data-testid="desktop-agent-status-overflow"]') ? WIDTH.overflowTrigger : 0) +
+    (row ? WIDTH.sessionField : 0) +
     (document.querySelector('[data-testid="desktop-kill-session"]') ? WIDTH.endButton : 0) +
     (document.querySelector('[data-testid="app-update-button"]') ? WIDTH.updateButton : 0)
   );
@@ -417,33 +420,38 @@ describe('DesktopHeader width contract (Issue #2481)', () => {
 // What gives way: the fit
 // =============================================================================
 
+// Issue #3593: the agent pills became a fixed-width session field — the
+// current session plus "N others ▾" — so there is nothing left to fold. The
+// tests below keep their #2481 names; what each pins now is the same promise
+// in the new layout: the controls stay reachable, the identity group clips as
+// the last resort, and the fit re-measures on the same edges.
 describe('DesktopHeader fit to width (Issue #2481)', () => {
   it('keeps the #1078 ceiling of four labelled pills when the header is wide enough', () => {
+    // #3593: one labelled pill (the current session); the rest are listed.
     renderSixWorking(1600);
-    expect(inlinePillIds()).toHaveLength(4);
-    expect(screen.getByTestId('desktop-agent-status-overflow').textContent).toContain('+2');
+    expect(inlinePillIds()).toEqual(['desktop-agent-status-claude-0']);
+    expect(screen.getByTestId('desktop-agent-status-overflow').textContent).toContain('5');
     expect(screen.getByTestId('desktop-header-identity').className).not.toContain('overflow-x-clip');
   });
 
   it('folds labelled pills into "+N" until the identity fits, and the controls stay', () => {
-    // 1000px: two pills leave the identity group its 400px, three would not.
+    // 1000px: the identity group gets 400px beside the session field.
     renderSixWorking(1000);
-    expect(inlinePillIds()).toEqual(['desktop-agent-status-claude-0', 'desktop-agent-status-claude-1']);
-    expect(screen.getByTestId('desktop-agent-status-overflow').textContent).toContain('+4');
+    expect(inlinePillIds()).toEqual(['desktop-agent-status-claude-0']);
+    expect(screen.getByTestId('desktop-agent-status-overflow').textContent).toContain('5');
     expect(screen.getByTestId('desktop-header-identity').className).not.toContain('overflow-x-clip');
     expectControlsReachable();
   });
 
   it('keeps the active instance inline when pills fold (the #1078 ranking)', () => {
     renderSixWorking(1000, { activeInstanceId: 'claude-4' });
-    expect(inlinePillIds()).toEqual(['desktop-agent-status-claude-0', 'desktop-agent-status-claude-4']);
+    expect(inlinePillIds()).toEqual(['desktop-agent-status-claude-4']);
   });
 
   it('clips the identity side once no pill is left to fold, never the controls', () => {
-    // 700px: even with every pill folded the identity group gets 360px < 400px.
+    // 700px: the identity group gets 100px < 400px.
     renderSixWorking(700);
-    expect(inlinePillIds()).toEqual([]);
-    expect(screen.getByTestId('desktop-agent-status-overflow').textContent).toContain('+6');
+    expect(inlinePillIds()).toEqual(['desktop-agent-status-claude-0']);
     expect(screen.getByTestId('desktop-header-identity').className).toContain('overflow-x-clip');
     expect(screen.getByTestId('desktop-agent-status-row').className).toContain('overflow-x-clip');
     expectControlsReachable();
@@ -454,16 +462,17 @@ describe('DesktopHeader fit to width (Issue #2481)', () => {
     expect(screen.getByTestId('desktop-header-identity').className).toContain('overflow-x-clip');
 
     resizeHeader(1600);
-    expect(inlinePillIds()).toHaveLength(4);
     expect(screen.getByTestId('desktop-header-identity').className).not.toContain('overflow-x-clip');
 
-    resizeHeader(1000);
-    expect(inlinePillIds()).toHaveLength(2);
+    resizeHeader(900);
+    expect(screen.getByTestId('desktop-header-identity').className).toContain('overflow-x-clip');
+    // The session field is the same at every width.
+    expect(inlinePillIds()).toEqual(['desktop-agent-status-claude-0']);
   });
 
   it('re-fits from the ceiling when the row itself needs less room', () => {
-    // 1060px with the End button: two pills. Without it, three fit — but only
-    // a fit that starts over (not one that keeps folding) finds that out.
+    // 1040px with the End button: 390px for the identity, it clips. Without
+    // it, 440px fit — but only a fit that starts over finds that out.
     const instances = roster(6);
     const props = {
       ...baseProps,
@@ -471,14 +480,14 @@ describe('DesktopHeader fit to width (Issue #2481)', () => {
       activeInstanceId: 'claude-0',
       sessionStatusByInstance: allRunning(instances),
     };
-    headerWidth = 1060;
+    headerWidth = 1040;
     const { rerender } = render(<DesktopHeader {...props} onKillSession={vi.fn()} />);
     expect(screen.getByTestId('desktop-kill-session')).toBeDefined();
-    expect(inlinePillIds()).toHaveLength(2);
+    expect(screen.getByTestId('desktop-header-identity').className).toContain('overflow-x-clip');
 
     rerender(<DesktopHeader {...props} onKillSession={undefined} />);
     expect(screen.queryByTestId('desktop-kill-session')).toBeNull();
-    expect(inlinePillIds()).toHaveLength(3);
+    expect(screen.getByTestId('desktop-header-identity').className).not.toContain('overflow-x-clip');
   });
 
   it('keeps the awaiting-instruction badge when every pill is folded (#1787)', () => {
@@ -489,17 +498,16 @@ describe('DesktopHeader fit to width (Issue #2481)', () => {
         'claude-5': { ...running, awaitingInstruction: true },
       } as InstanceStatusMap,
     });
-    expect(inlinePillIds()).toEqual([]);
+    expect(screen.getByTestId('desktop-header-identity').className).toContain('overflow-x-clip');
     expect(screen.getByTestId('desktop-awaiting-instruction-badge')).toBeDefined();
   });
 
   /**
    * Issue #2654: the Update button lands in the controls group, which never
-   * shrinks — so the room for it has to come from the agent pills, the same
-   * way the End button's does. The button appears when the update check
-   * resolves, long after the header first rendered, so this also pins that the
-   * header re-measures on that edge rather than letting the identity group
-   * collide.
+   * shrinks. The button appears when the update check resolves, long after the
+   * header first rendered, so this pins that the header re-measures on that
+   * edge rather than letting the identity group collide. #3593: with no pill
+   * to fold, the identity group clips to make the room.
    */
   it('folds a pill to make room for the Update button, and gives it back afterwards', () => {
     const instances = roster(6);
@@ -511,32 +519,29 @@ describe('DesktopHeader fit to width (Issue #2481)', () => {
     };
     headerWidth = 1000;
     // The context is mocked as a plain function, so the memoized header only
-    // re-renders on a new prop; in the app the context change does that. Until
-    // #3590 the chip node passed on every render was that new prop.
+    // re-renders on a new prop; in the app the context change does that.
     const { rerender } = render(<DesktopHeader {...props} onInfoClick={vi.fn()} />);
-    const withoutUpdate = inlinePillIds().length;
     expect(screen.queryByTestId('app-update-button')).toBeNull();
-    expect(withoutUpdate).toBeGreaterThan(0);
+    expect(screen.getByTestId('desktop-header-identity').className).not.toContain('overflow-x-clip');
 
     mockUseAppUpdate.mockReturnValue(
       makeAppUpdateValue({ updateInfo: makeUpdateInfo({ installType: 'global' }) })
     );
     rerender(<DesktopHeader {...props} onInfoClick={vi.fn()} />);
     expect(screen.getByTestId('app-update-button')).toBeDefined();
-    expect(inlinePillIds().length).toBeLessThan(withoutUpdate);
-    expect(screen.getByTestId('desktop-header-identity').className).not.toContain('overflow-x-clip');
+    expect(screen.getByTestId('desktop-header-identity').className).toContain('overflow-x-clip');
     expectControlsReachable();
 
     mockUseAppUpdate.mockReturnValue(makeAppUpdateValue());
     rerender(<DesktopHeader {...props} onInfoClick={vi.fn()} />);
     expect(screen.queryByTestId('app-update-button')).toBeNull();
-    expect(inlinePillIds()).toHaveLength(withoutUpdate);
+    expect(screen.getByTestId('desktop-header-identity').className).not.toContain('overflow-x-clip');
   });
 
   it('does not fold idle instances: their dots cost no budget', () => {
-    // One working, five idle, at a width that holds a single pill.
+    // #3593: one working and five idle take the same field as six working.
     const instances = roster(6);
-    headerWidth = 840;
+    headerWidth = 1000;
     render(
       <DesktopHeader
         {...baseProps}
@@ -546,7 +551,8 @@ describe('DesktopHeader fit to width (Issue #2481)', () => {
       />
     );
     expect(inlinePillIds()).toEqual(['desktop-agent-status-claude-0']);
-    expect(screen.queryByTestId('desktop-agent-status-overflow')).toBeNull();
+    expect(screen.getByTestId('desktop-agent-status-overflow').textContent).toContain('5');
+    expect(screen.getByTestId('desktop-header-identity').className).not.toContain('overflow-x-clip');
     for (let i = 1; i < 6; i += 1) {
       expect(screen.getByTestId(`desktop-agent-status-claude-${i}`)).toBeDefined();
     }

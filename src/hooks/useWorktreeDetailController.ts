@@ -1043,9 +1043,10 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   // an id in the roster becomes the active instance (on the phone it is also
   // made visible first, or the reconcile effect above would switch it back),
   // and, on the PC, `instanceSelectionRequest` gets a new token so the PC layout
-  // routes it exactly like a header pill click (split 0 if shown nowhere, focus
-  // move if another split shows it). The PC acknowledges the token, which
-  // clears the request, so a later remount of the PC layout cannot re-apply it. An id
+  // routes it exactly like a header pick (the selected split if shown nowhere —
+  // split 0 before Issue #3593 — focus move if another split shows it). The PC
+  // acknowledges the token, which clears the request, so a later remount of the
+  // PC layout cannot re-apply it. An id
   // NOT in the roster (a running instance outside it) changes nothing. Either
   // way the parameter is removed with `router.replace` (same path, other query
   // parameters kept, no scroll), which re-renders without remounting the page.
