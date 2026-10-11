@@ -132,6 +132,16 @@ export interface InstancePlacementRequest {
   token: number;
 }
 
+/** Issue #3593: what `onSelectedSplitChange` publishes. */
+export interface SelectedSplit {
+  /** The selected (focused) split's index. */
+  index: number;
+  /** The instance that split shows. */
+  instanceId: string;
+  /** Each split's instance, by split index. */
+  splitInstanceIds: string[];
+}
+
 /** Render-prop signature: each pane is supplied externally so the
  *  container does not need to know about MessageInput / TerminalDisplay. */
 export interface RenderTerminalSplitPaneArgs {
@@ -203,9 +213,10 @@ export interface TerminalSplitContainerProps {
    */
   onActiveInstanceChange?: (instanceId: string) => void;
   /**
-   * Issue #1152: a header-initiated instance selection to route into the PRIMARY
-   * split (split 0), wiring the DesktopHeader instance switcher to the terminal
-   * that actually polls output / sends messages.
+   * Issue #1152: a header-initiated instance selection to route into the
+   * SELECTED split (split 0 until Issue #3593), wiring the DesktopHeader
+   * instance switcher to the terminal that actually polls output / sends
+   * messages.
    *
    * Distinct from `onActiveInstanceChange` (which flows split→active): this flows
    * header→split. It is a token-stamped object rather than a bare instanceId so
@@ -219,7 +230,8 @@ export interface TerminalSplitContainerProps {
    * when the selected instance is already shown in ANOTHER split, focus moves to
    * that split (focus-move) instead of reassigning — non-destructive, and it
    * satisfies the user's intent to interact with that instance. When it is shown
-   * nowhere, it is bound to split 0. When split 0 already shows it, it is a no-op.
+   * nowhere, it is bound to the selected split. When the selected split already
+   * shows it, it is a no-op.
    */
   headerInstanceSelection?: { instanceId: string; token: number } | null;
   /**
@@ -238,6 +250,13 @@ export interface TerminalSplitContainerProps {
   onInstancePlacementApplied?: (token: number) => void;
   /** Issue #3514: published whenever the split count changes (the "+" needs it). */
   onSplitCountChange?: (count: number) => void;
+  /**
+   * Issue #3593: the selected split — its index, the instance it shows, and the
+   * instance of every split by index. Published on mount and whenever any of
+   * them changes. The worktree screen makes this instance its active one, so
+   * the header's current session and what End / Auto Yes act on are one value.
+   */
+  onSelectedSplitChange?: (selection: SelectedSplit) => void;
   /**
    * Issue #3590: what the worktree screen puts on this action bar — the second
    * row under the header — drawn right after the layout ops (layout icons,
@@ -280,6 +299,7 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
   instancePlacementRequest,
   onInstancePlacementApplied,
   onSplitCountChange,
+  onSelectedSplitChange,
   actionBarItems,
 }: TerminalSplitContainerProps) {
   const {
@@ -345,8 +365,8 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
   }, [focusedSplitIndex, onFocusedSplitChange]);
 
   /**
-   * Issue #1152: apply a header-initiated instance selection to the PRIMARY
-   * split, wiring the header instance switcher to the terminal that actually
+   * Issue #1152: apply a header-initiated instance selection to the selected
+   * split (Issue #3593; split 0 before), wiring the header instance switcher to the terminal that actually
    * polls output / sends messages. Gated on `token` (not the instanceId) so it
    * runs exactly once per header click and never fires on mount, roster
    * reconcile, localStorage restore, the split 0→active mirror, or a drop — all
@@ -354,31 +374,51 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
    *
    * `splits` is intentionally omitted from the deps: only a NEW token should
    * trigger this. The classification reads the latest `splits` through a ref so a
-   * stale closure cannot mis-target the primary split.
+   * stale closure cannot mis-target the split.
    */
   const lastHeaderTokenRef = useRef(0);
   const splitsRef = useRef(splits);
   splitsRef.current = splits;
+  const focusedSplitIndexRef = useRef(focusedSplitIndex);
+  focusedSplitIndexRef.current = focusedSplitIndex;
   useEffect(() => {
     if (!headerInstanceSelection) return;
     if (headerInstanceSelection.token === lastHeaderTokenRef.current) return;
     lastHeaderTokenRef.current = headerInstanceSelection.token;
     const { instanceId } = headerInstanceSelection;
     const current = splitsRef.current;
+    // Issue #3593: the selected split, not split 0 — the header's current
+    // session is the one the selected split shows, so that is where a session
+    // picked in the header goes.
+    const targetIdx = Math.min(focusedSplitIndexRef.current, current.length - 1);
     const shownIdx = current.findIndex((s) => s.instanceId === instanceId);
-    if (shownIdx === 0) return; // primary split already shows it — no-op
-    if (shownIdx > 0) {
+    if (shownIdx === targetIdx) return; // the selected split already shows it — no-op
+    if (shownIdx !== -1) {
       // Collision (S1-002): the instance already occupies another split. Surface
       // that split (focus-move) instead of duplicating/reassigning it.
       setFocusedSplitIndex(shownIdx);
       return;
     }
-    // Not shown anywhere → bind it to the primary split (split 0), symmetric with
-    // the existing split 0→active mirror. Focus the primary split on success.
-    if (setSplitInstance(0, instanceId)) {
-      setFocusedSplitIndex(0);
+    // Not shown anywhere → bind it to the selected split, and keep it selected.
+    if (setSplitInstance(targetIdx, instanceId)) {
+      setFocusedSplitIndex(targetIdx);
     }
   }, [headerInstanceSelection, setSplitInstance, setFocusedSplitIndex]);
+
+  // Issue #3593: publish the selected split. Keyed on the values, so a new
+  // `splits` array with the same instances does not re-publish.
+  const selectedSplitKey = `${focusedSplitIndex}|${splits.map((s) => s.instanceId).join(',')}`;
+  useEffect(() => {
+    if (!onSelectedSplitChange) return;
+    const current = splitsRef.current;
+    if (current.length === 0) return;
+    const index = Math.min(focusedSplitIndexRef.current, current.length - 1);
+    onSelectedSplitChange({
+      index,
+      instanceId: current[index].instanceId,
+      splitInstanceIds: current.map((s) => s.instanceId),
+    });
+  }, [selectedSplitKey, onSelectedSplitChange]);
 
   /**
    * Issue #3514: place an agent added from the header's "+".
@@ -685,11 +725,15 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
         // apply: setSplitInstance returns whether the change was actually applied.
         const applied = setSplitInstance(idx, instanceId);
         if (applied) {
+          // Issue #3593: the split dropped on becomes the selected one, so the
+          // header's current session (the selected split's) is the session
+          // just dropped — the same instance the active one now follows.
+          setFocusedSplitIndex(idx);
           onActiveInstanceChange?.(instanceId);
           showToast?.(`Moved ${label} to Split ${idx + 1}`, 'success');
         }
       }),
-    [splits, setSplitInstance, showToast, onActiveInstanceChange, instanceById],
+    [splits, setSplitInstance, setFocusedSplitIndex, showToast, onActiveInstanceChange, instanceById],
   );
 
   return (

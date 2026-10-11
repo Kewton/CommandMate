@@ -166,6 +166,12 @@ export interface TooltipProps {
    * shrink/reflow the trigger differently than it did with a native `title`.
    */
   className?: string;
+  /**
+   * [Issue #3593] The bubble's layer, for a tooltip inside something drawn
+   * above the default `z-40` (a popover at `Z_INDEX.POPOVER`), where the
+   * bubble would otherwise sit under its own container. Omitted keeps `z-40`.
+   */
+  zIndex?: number;
 }
 
 /**
@@ -184,6 +190,7 @@ export function Tooltip({
   delay = TOOLTIP_DELAY_MS,
   children,
   className,
+  zIndex,
 }: TooltipProps): React.ReactElement {
   // [Issue #2319] Two independent channels. Hover releases must not close a
   // bubble that focus is still holding open, and vice versa (a pointer click
@@ -328,7 +335,11 @@ export function Tooltip({
             aria-hidden="true"
             data-placement={placement}
             className="fixed z-40 whitespace-nowrap px-2 py-1 text-xs font-medium rounded bg-foreground text-background shadow-lg pointer-events-none"
-            style={coords ?? OFFSCREEN_COORDS}
+            style={
+              zIndex === undefined
+                ? (coords ?? OFFSCREEN_COORDS)
+                : { ...(coords ?? OFFSCREEN_COORDS), zIndex }
+            }
           >
             {content}
           </span>,

@@ -127,8 +127,11 @@ describe('[#2775] DesktopHeader', () => {
     expect(agentDot('codex').className).toContain('bg-transparent');
     expect(agentDot('codex').className).not.toMatch(/animate-status-glow/);
 
+    // Issue #3593: claude is a row of the "N others" list, which shows the
+    // name and the status word in two columns.
     const claude = screen.getByTestId('desktop-agent-status-claude');
-    expect(within(claude).getByText('Claude: Running')).toBeInTheDocument();
+    expect(within(claude).getByText('Claude')).toBeInTheDocument();
+    expect(within(claude).getByText('Running')).toBeInTheDocument();
     expect(agentDot('claude').className).toMatch(/animate-status-glow/);
     expect(agentDot('claude').className).not.toContain('bg-transparent');
   });

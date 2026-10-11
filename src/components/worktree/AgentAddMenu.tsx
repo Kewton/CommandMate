@@ -1,10 +1,12 @@
 /**
  * AgentAddMenu Component (Issue #3514)
  *
- * The "+" at the right end of the desktop header's agent pills. It opens a
- * small form — which agent CLI (installed ones only), an optional name, and
- * where to open it (a new split / replace the current split / add only) — and
- * registers the new instance on the worktree's roster.
+ * The "+" at the right end of the desktop header's session field — after the
+ * current session and the "N more" list (#3593), whose "Add session…" opens
+ * this same form. It opens a small form — which agent CLI (installed ones
+ * only), an optional name, and where to open it (a new split / replace the
+ * current split / add only) — and registers the new instance on the
+ * worktree's roster.
  *
  * ## What "add" does
  *
