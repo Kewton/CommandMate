@@ -80,10 +80,12 @@ export async function patchWorktreeStatus(
 // ============================================================================
 
 /**
- * A counter that moves on every successful save. A fetch notes it when it
- * STARTS; when its reply lands, any worktree saved after that point keeps the
- * saved value, because the reply was read from the server before the save and
- * would put the old status back (Done → a late poll says Ready → Ready).
+ * One clock for every status event: it moves on each successful save and on
+ * each value a screen takes from the list ({@link noteWorktreeStatusSync}), so
+ * saves and syncs can be compared in the order they happened. A fetch notes it
+ * when it STARTS; when its reply lands, any worktree saved after that point
+ * keeps the saved value, because the reply was read from the server before the
+ * save and would put the old status back (Done → a late poll says Ready → Ready).
  */
 let statusSaveGeneration = 0;
 
@@ -105,6 +107,41 @@ export function markWorktreeStatusSaved(
 ): void {
   statusSaveGeneration += 1;
   savedStatuses.set(worktreeId, { generation: statusSaveGeneration, status });
+}
+
+/**
+ * Record that a screen took a status from the list now, on the same clock as
+ * saves. Returns the event's position; a screen keeps it next to the value and
+ * passes both to {@link resolveWorktreeStatusEvents}.
+ */
+export function noteWorktreeStatusSync(): number {
+  statusSaveGeneration += 1;
+  return statusSaveGeneration;
+}
+
+/**
+ * The status a fetch reply should show when the screen also took a value from
+ * the list: of the reply (as of `fetchStartedAt`), the latest save of this
+ * worktree and the sync, the one that happened last wins. A save or sync from
+ * before the fetch started is already in the reply.
+ */
+export function resolveWorktreeStatusEvents(
+  worktreeId: string,
+  fetchedStatus: Worktree['status'],
+  fetchStartedAt: number,
+  sync: { at: number; status: Worktree['status'] | undefined } | null
+): Worktree['status'] {
+  const saved = savedStatuses.get(worktreeId);
+  let at = fetchStartedAt;
+  let status = fetchedStatus;
+  if (saved && saved.generation > at) {
+    at = saved.generation;
+    status = saved.status;
+  }
+  if (sync && sync.status !== undefined && sync.at > at) {
+    status = sync.status;
+  }
+  return status;
 }
 
 /**

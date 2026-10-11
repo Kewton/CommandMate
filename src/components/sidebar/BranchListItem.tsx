@@ -354,23 +354,34 @@ export const BranchListItem = memo(function BranchListItem({
   // The pick shows at once (`pendingStatus`); a failed save puts the old value
   // back and says so. A successful one keeps showing the pick until the list
   // re-fetch brings it back as `branch.worktreeStatus`, so the badge never
-  // flickers to the old value in between.
+  // flickers to the old value in between. With picks in a row, the LAST pick
+  // holds until its own save and re-fetch are done: an earlier pick's re-fetch
+  // landing meanwhile (Ready while Done is still saving) does not replace it.
   const { showToast } = useToast();
   const refreshList = useOptionalWorktreesCacheContext()?.refresh;
   const [pendingStatus, setPendingStatus] = useState<WorktreeLifecycleStatus | null | undefined>(undefined);
   const statusRequestRef = useRef(0);
+  /** The latest request whose save (and re-fetch) has finished. */
+  const settledRequestRef = useRef(0);
+  /** The list value when the latest pick was made, and the list value now. */
+  const savedAtPickRef = useRef<WorktreeLifecycleStatus | null>(null);
+  const savedStatusRef = useRef<WorktreeLifecycleStatus | null>(null);
   const savedStatus = branch.worktreeStatus ?? null;
   const worktreeStatus = pendingStatus !== undefined ? pendingStatus : savedStatus;
+  savedStatusRef.current = savedStatus;
   const showStatusPill = useContext(BranchRowStatusPillContext);
 
-  // A new value from the list (ours, or one set elsewhere) replaces the pick.
+  // A new value from the list (ours, or one set elsewhere) replaces the pick —
+  // unless a pick is still being saved, which then owns the row.
   useEffect(() => {
+    if (statusRequestRef.current !== settledRequestRef.current) return;
     setPendingStatus(undefined);
   }, [savedStatus]);
 
   const handleWorktreeStatusChange = useCallback(
     async (next: WorktreeLifecycleStatus | null) => {
       const request = ++statusRequestRef.current;
+      savedAtPickRef.current = savedStatusRef.current;
       setPendingStatus(next);
       try {
         // Queued per worktree, so the last pick is the last PATCH.
@@ -378,11 +389,22 @@ export const BranchListItem = memo(function BranchListItem({
       } catch {
         // A later pick owns the row now; its own outcome decides what shows.
         if (request !== statusRequestRef.current) return;
+        settledRequestRef.current = request;
         setPendingStatus(undefined);
         showToast(t('branchItem.statusChangeFailed'), 'error');
         return;
       }
-      await refreshList?.();
+      try {
+        await refreshList?.();
+      } finally {
+        if (request === statusRequestRef.current) {
+          settledRequestRef.current = request;
+          // The list moved while this pick was saving: its value now carries
+          // the save (the list applies saves over replies sent before them).
+          // If it has not moved yet, the pick shows until it does.
+          if (savedStatusRef.current !== savedAtPickRef.current) setPendingStatus(undefined);
+        }
+      }
     },
     [branch.id, refreshList, showToast, t]
   );

@@ -210,4 +210,45 @@ describe('[#3594] a late detail reply does not undo a newer status', () => {
     });
     expect(result.current.worktree?.status).toBe('in_review');
   });
+
+  it('keeps Done saved from Info after a list sync, while a detail GET from before both answers', async () => {
+    __resetWorktreeStatusSaves();
+    const detailReplies = deferredDetailFetch();
+    cache.worktrees = [{ ...WORKTREE, status: 'ready' }];
+    const { result, rerender } = renderHook(() => useWorktreeDetailController({ worktreeId: WORKTREE_ID }));
+    await waitFor(() => expect(detailReplies.length).toBeGreaterThan(0));
+
+    // 1. the list brings In Progress (set elsewhere) …
+    cache.worktrees = [{ ...WORKTREE, status: 'in_progress' }];
+    rerender();
+    await waitFor(() => expect(result.current.worktree?.status).toBe('in_progress'));
+    // 2. … then Info saves Done and hands the reply to the screen …
+    await act(async () => {
+      const updated = await saveWorktreeStatus(WORKTREE_ID, 'done');
+      result.current.setWorktree(updated);
+    });
+    expect(result.current.worktree?.status).toBe('done');
+    // 3. … then the detail GET that left before both answers.
+    await act(async () => detailReplies[0]('ready'));
+    expect(result.current.worktree?.status).toBe('done');
+  });
+
+  it('takes a list sync that came after the save (negative control)', async () => {
+    __resetWorktreeStatusSaves();
+    const detailReplies = deferredDetailFetch();
+    cache.worktrees = [{ ...WORKTREE, status: 'ready' }];
+    const { result, rerender } = renderHook(() => useWorktreeDetailController({ worktreeId: WORKTREE_ID }));
+    await waitFor(() => expect(detailReplies.length).toBeGreaterThan(0));
+
+    await act(async () => {
+      const updated = await saveWorktreeStatus(WORKTREE_ID, 'done');
+      result.current.setWorktree(updated);
+    });
+    // Set to In Review elsewhere after the save; the list brings it.
+    cache.worktrees = [{ ...WORKTREE, status: 'in_review' }];
+    rerender();
+    await waitFor(() => expect(result.current.worktree?.status).toBe('in_review'));
+    await act(async () => detailReplies[0]('ready'));
+    expect(result.current.worktree?.status).toBe('in_review');
+  });
 });

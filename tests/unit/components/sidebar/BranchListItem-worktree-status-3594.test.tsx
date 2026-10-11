@@ -15,7 +15,7 @@
  */
 
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within, act } from '@testing-library/react';
 import React from 'react';
 import fs from 'fs';
 import path from 'path';
@@ -325,6 +325,85 @@ describe('two picks in a row (Issue #3594, review follow-up)', () => {
     expect(bodies).toEqual(['ready', 'done']);
     replies[1]();
     await waitFor(() => expect(refresh).toHaveBeenCalled());
+  });
+});
+
+describe('the last pick holds until its own save and re-fetch (Issue #3594, re-review)', () => {
+  /**
+   * A row whose data is really re-fetched: `refresh` reads the server's value
+   * (what the PATCHes left) into the row, like the list cache does.
+   */
+  function renderLiveRow() {
+    let server: SidebarBranchItem['worktreeStatus'] = base.worktreeStatus;
+    let setRow!: (status: SidebarBranchItem['worktreeStatus']) => void;
+    function LiveRow() {
+      const [status, setStatus] = React.useState(base.worktreeStatus);
+      setRow = setStatus;
+      return (
+        <ToastProvider>
+          <BranchListItem branch={{ ...base, worktreeStatus: status }} isSelected={false} onClick={vi.fn()} />
+        </ToastProvider>
+      );
+    }
+    const replies: Array<() => void> = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        (_url: string, init?: RequestInit) =>
+          new Promise((resolve) => {
+            const status = JSON.parse(String(init?.body)).status;
+            replies.push(() => {
+              server = status;
+              resolve({ ok: true, status: 200, json: async () => ({ id: 'wt-other', status }) });
+            });
+          })
+      )
+    );
+    refresh.mockImplementation(async () => {
+      act(() => setRow(server));
+    });
+    render(<LiveRow />);
+    return {
+      replies,
+      setElsewhere: (status: SidebarBranchItem['worktreeStatus']) => act(() => setRow(status)),
+    };
+  }
+
+  const pill = () => screen.getByTestId('branch-worktree-status');
+
+  afterEach(() => refresh.mockImplementation(async () => {}));
+
+  it('keeps Done while the re-fetch after the Ready save lands during the Done save', async () => {
+    const { replies } = renderLiveRow();
+    openStatusSubmenu();
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'Ready' }));
+    openStatusSubmenu();
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'Done' }));
+    await waitFor(() => expect(replies).toHaveLength(1));
+
+    // Ready is saved and the list re-fetch brings Ready while Done is on the wire.
+    await act(async () => replies[0]());
+    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(replies).toHaveLength(2));
+    expect(pill()).toHaveAttribute('data-status', 'done');
+
+    await act(async () => replies[1]());
+    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(2));
+    expect(pill()).toHaveAttribute('data-status', 'done');
+  });
+
+  it('follows the list again once the last pick has settled (negative control)', async () => {
+    const { replies, setElsewhere } = renderLiveRow();
+    openStatusSubmenu();
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'Done' }));
+    await waitFor(() => expect(replies).toHaveLength(1));
+    await act(async () => replies[0]());
+    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+    expect(pill()).toHaveAttribute('data-status', 'done');
+
+    // Set to In Progress elsewhere; the list brings it and the row follows.
+    setElsewhere('in_progress');
+    expect(pill()).toHaveAttribute('data-status', 'in_progress');
   });
 });
 
