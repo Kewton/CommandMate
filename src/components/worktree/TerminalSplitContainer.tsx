@@ -41,6 +41,7 @@ import React, {
   memo,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -1065,36 +1066,92 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
   );
 });
 
+/** Gap between the "…" panel and the viewport edge, and below the button (px). */
+const OVERFLOW_PANEL_MARGIN = 8;
+const OVERFLOW_PANEL_GAP = 4;
+
 /**
- * Internal helper: wraps PaneResizer so we can intercept the underlying
- * mousedown / touchstart events to mark `isResizing=true` synchronously.
- * `mouseup` clears it.
+ * Issue #3590: the "…" panel's left edge — right-aligned with the button when
+ * there is room, shifted right as far as needed so its left edge stays inside
+ * the viewport, and pinned to the left margin when the panel is wider than the
+ * viewport allows (its `max-w` then caps it). The same idea as the repository
+ * tab popover's `clampPopoverLeft`, with the preference flipped: this button
+ * sits at the right end of its group.
  *
- * Issue #2421: also carries the grid's two dividers, which differ from the row's
- * only in orientation, track placement and test id — the drag / touch / keyboard
- * machinery is the same `PaneResizer` either way (its `orientation="vertical"`
- * branch had no caller in `src/` before this Issue).
+ * @param buttonRight - The "…" button's viewport `right`
+ * @param panelWidth - The panel's rendered width in px
+ * @param viewportWidth - `window.innerWidth`
+ * @returns The `left` coordinate to render at
+ * @internal Exported for unit tests.
  */
+export function clampOverflowPanelLeft(
+  buttonRight: number,
+  panelWidth: number,
+  viewportWidth: number
+): number {
+  const maxLeft = viewportWidth - OVERFLOW_PANEL_MARGIN - panelWidth;
+  if (maxLeft <= OVERFLOW_PANEL_MARGIN) return OVERFLOW_PANEL_MARGIN;
+  return Math.min(Math.max(buttonRight - panelWidth, OVERFLOW_PANEL_MARGIN), maxLeft);
+}
+
 /**
  * Issue #3590: the "…" button the action bar's items fold behind when the bar
  * is too narrow (`useSplitActionBarFit`). The panel is portalled to `<body>`
- * with `position: fixed`, right-aligned under the button and kept inside the
- * viewport, so neither the bar's clipped left group nor the terminal pane's
- * `overflow-hidden` (beside an open file panel) can cut it. Closes on Escape,
- * on the button, and on a press outside — a press inside any
- * `[data-floating-layer]` (the chip's reason popover) counts as inside.
+ * with `position: fixed` under the button, so neither the bar's clipped left
+ * group nor the terminal pane's `overflow-hidden` (beside an open file panel)
+ * can cut it. Its rendered width is measured before paint and its left edge
+ * clamped into the viewport on both sides ({@link clampOverflowPanelLeft}).
+ *
+ * Focus follows the repository tab popover: opening moves focus to the
+ * panel's first control, Escape closes and hands focus back to "…". A press
+ * outside closes without moving focus — the press already put it where the
+ * user wanted. A press inside any `[data-floating-layer]` (the chip's reason
+ * popover) counts as inside.
  */
 function ActionBarItemsOverflow({ label, children }: { label: string; children: ReactNode }) {
-  const [anchor, setAnchor] = useState<{ top: number; right: number } | null>(null);
+  const [open, setOpen] = useState(false);
+  const [position, setPosition] = useState<{ top: number; left: number } | null>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
-  const open = anchor !== null;
 
   const place = useCallback(() => {
     const rect = buttonRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    setAnchor({ top: rect.bottom + 4, right: Math.max(8, window.innerWidth - rect.right) });
+    const panel = panelRef.current;
+    if (!rect || !panel) return;
+    const width = panel.getBoundingClientRect().width;
+    const next = {
+      top: rect.bottom + OVERFLOW_PANEL_GAP,
+      left: clampOverflowPanelLeft(rect.right, width, window.innerWidth),
+    };
+    setPosition((prev) => (prev && prev.top === next.top && prev.left === next.left ? prev : next));
   }, []);
+
+  // Measure the rendered panel before paint (it renders hidden until placed),
+  // then move focus to its first control.
+  useLayoutEffect(() => {
+    if (!open) {
+      setPosition(null);
+      return;
+    }
+    place();
+  }, [open, place]);
+
+  // Once per opening, after the panel is placed: a `visibility: hidden` panel
+  // (the first, unmeasured render) cannot take focus.
+  const placed = position !== null;
+  const focusedRef = useRef(false);
+  useEffect(() => {
+    if (!open) {
+      focusedRef.current = false;
+      return;
+    }
+    if (!placed || focusedRef.current) return;
+    focusedRef.current = true;
+    const first = panelRef.current?.querySelector<HTMLElement>(
+      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    );
+    first?.focus();
+  }, [open, placed]);
 
   useEffect(() => {
     if (!open) return;
@@ -1103,15 +1160,23 @@ function ActionBarItemsOverflow({ label, children }: { label: string; children: 
       if (!target) return;
       if (buttonRef.current?.contains(target) || panelRef.current?.contains(target)) return;
       if (typeof target.closest === 'function' && target.closest('[data-floating-layer]')) return;
-      setAnchor(null);
+      setOpen(false);
     };
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setAnchor(null);
+      if (event.key !== 'Escape') return;
+      setOpen(false);
+      buttonRef.current?.focus();
     };
+    // The panel's content can change width (the chip's verdict) and the
+    // button can move; re-measure on both, and on window resizes.
+    const observer =
+      typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => place());
+    if (observer && panelRef.current) observer.observe(panelRef.current);
     document.addEventListener('mousedown', onPointerDown);
     document.addEventListener('keydown', onKeyDown);
     window.addEventListener('resize', place);
     return () => {
+      observer?.disconnect();
       document.removeEventListener('mousedown', onPointerDown);
       document.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('resize', place);
@@ -1124,7 +1189,7 @@ function ActionBarItemsOverflow({ label, children }: { label: string; children: 
         <button
           ref={buttonRef}
           type="button"
-          onClick={() => (open ? setAnchor(null) : place())}
+          onClick={() => setOpen((v) => !v)}
           aria-label={label}
           aria-expanded={open}
           aria-haspopup="dialog"
@@ -1143,7 +1208,11 @@ function ActionBarItemsOverflow({ label, children }: { label: string; children: 
             aria-label={label}
             data-testid="split-action-bar-items-panel"
             data-floating-layer="true"
-            style={{ top: anchor.top, right: anchor.right }}
+            style={
+              position
+                ? { top: position.top, left: position.left }
+                : { top: 0, left: 0, visibility: 'hidden' }
+            }
             className="fixed z-50 flex max-w-[calc(100vw-16px)] items-center gap-1 rounded-lg border border-border bg-surface p-1 shadow-lg"
           >
             {children}
@@ -1154,6 +1223,16 @@ function ActionBarItemsOverflow({ label, children }: { label: string; children: 
   );
 }
 
+/**
+ * Internal helper: wraps PaneResizer so we can intercept the underlying
+ * mousedown / touchstart events to mark `isResizing=true` synchronously.
+ * `mouseup` clears it.
+ *
+ * Issue #2421: also carries the grid's two dividers, which differ from the row's
+ * only in orientation, track placement and test id — the drag / touch / keyboard
+ * machinery is the same `PaneResizer` either way (its `orientation="vertical"`
+ * branch had no caller in `src/` before this Issue).
+ */
 function PaneResizerWrapper({
   resizerIdx,
   ariaValueNow,

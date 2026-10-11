@@ -12,7 +12,41 @@
  */
 
 import { test, expect, type Locator, type Page } from '@playwright/test';
-import { E2E_WORKTREE_A, setupSplitTest } from './fixtures/terminal-split-helpers';
+import {
+  E2E_WORKTREE_A,
+  setupSplitTest,
+  type VerificationFixture,
+} from './fixtures/terminal-split-helpers';
+
+/** A task whose title fills the chip's 36 characters, so the chip is wide. */
+const LONG_TITLE_FIXTURE: VerificationFixture = {
+  tasks: [
+    {
+      id: 'e2e-task-3590',
+      worktreeId: E2E_WORKTREE_A,
+      cliToolId: 'claude',
+      instanceId: null,
+      title: 'Issue #3590: a long execution contract title for the chip',
+      goal: 'Make the chip wide.',
+      contractPath: '.commandmate/tasks/e2e-3590.yaml',
+      contract: {
+        version: 1,
+        title: 'Issue #3590',
+        goal: 'Make the chip wide.',
+        scope: { allow: ['src/**'], deny: [] },
+        verify: { gates: ['unit'] },
+        autoYes: { mode: 'safe', allowPromptTypes: [], denyPatterns: [] },
+        success: { requireWorkEvidence: true, requireScopeClean: true },
+      },
+      status: 'running',
+      lastVerificationRunId: null,
+      createdAt: '2026-10-11T00:00:00.000Z',
+      updatedAt: '2026-10-11T00:00:00.000Z',
+      startedAt: '2026-10-11T00:00:30.000Z',
+      finishedAt: null,
+    },
+  ],
+};
 
 type Box = { x: number; y: number; width: number; height: number };
 
@@ -267,5 +301,85 @@ test.describe('Worktree header in one row (Issue #3590)', () => {
     expect(bar.height).toBeGreaterThanOrEqual(chip.height);
     expect(chip.y).toBeGreaterThanOrEqual(bar.y);
     expect(chip.y + chip.height).toBeLessThanOrEqual(bar.y + bar.height);
+  });
+
+  test('keeps the "…" panel inside the viewport, and moves focus in and back', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await setupSplitTest(page, [E2E_WORKTREE_A], LONG_TITLE_FIXTURE);
+    await mockOneFile(page);
+    await page.goto(`/worktrees/${E2E_WORKTREE_A}`);
+    await openMockedFile(page);
+
+    // Sidebar closed and the Files pane put away: the terminal starts near the
+    // left edge. Then the file side widened until the terminal is at its 20%.
+    await page.getByTestId('sidebar-panel-toggle').click();
+    await expect(page.getByTestId('sidebar-rail-toggle')).toBeVisible();
+    await page.getByTestId('activity-bar-button-files').click();
+    await expect(page.getByTestId('activity-pane-slot')).toBeHidden();
+    const resizer = page
+      .getByTestId('terminal-pane')
+      .locator('xpath=following-sibling::*[@role="separator"][1]');
+    const r = await box(resizer);
+    await page.mouse.move(r.x + r.width / 2, r.y + r.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(0, r.y + r.height / 2, { steps: 10 });
+    await page.mouse.up();
+
+    const overflow = page.getByTestId('split-action-bar-items-overflow');
+    await expect(overflow).toBeVisible();
+    const overflowBox = await box(overflow);
+
+    // Keyboard: Enter opens and focuses the first control (the chip).
+    await overflow.focus();
+    await page.keyboard.press('Enter');
+    const panel = page.getByTestId('split-action-bar-items-panel');
+    await expect(panel).toBeVisible();
+    await expect(page.getByTestId('verification-status-chip')).toBeFocused();
+
+    const panelBox = await box(panel);
+    // Positive control: the panel is wider than the room left of "…", so a
+    // right-aligned panel would have started off-screen.
+    expect(panelBox.width).toBeGreaterThan(overflowBox.x + overflowBox.width);
+    expect(panelBox.x).toBeGreaterThanOrEqual(0);
+    expect(panelBox.x + panelBox.width).toBeLessThanOrEqual(1440);
+
+    // Escape closes and gives focus back to "…".
+    await page.keyboard.press('Escape');
+    await expect(panel).toHaveCount(0);
+    await expect(overflow).toBeFocused();
+  });
+
+  test('keeps the reason under the chip when a maximize label appears beside it', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await setupSplitTest(page, [E2E_WORKTREE_A]);
+    await page.goto(`/worktrees/${E2E_WORKTREE_A}`);
+    await page.getByTestId('split-layout-2').click();
+    await expect(page.getByTestId('split-layout-2')).toHaveAttribute('aria-pressed', 'true');
+
+    const chipRoot = page.getByTestId('verification-status-chip').locator('xpath=../..');
+    await page.getByTestId('verification-chip-reason-toggle').click();
+    const reason = page.getByTestId('verification-chip-reason-popover');
+    await expect(reason).toBeVisible();
+    const chipBefore = await box(chipRoot);
+    const reasonBefore = await box(reason);
+
+    // Mod+Shift+Enter from inside split 1 (focus moved without a press, so the
+    // reason stays open) maximizes it; the bar gains a label left of the chip.
+    await page
+      .getByTestId('terminal-split-pane-0')
+      .locator('textarea')
+      .first()
+      .evaluate((el: HTMLTextAreaElement) => el.focus());
+    await page.keyboard.press('ControlOrMeta+Shift+Enter');
+    await expect(page.getByTestId('split-count-label')).toBeVisible();
+    await expect(reason).toBeVisible();
+
+    const chipAfter = await box(chipRoot);
+    expect(chipAfter.x).toBeGreaterThan(chipBefore.x);
+    await expect
+      .poll(async () => Math.round((await box(reason)).x - reasonBefore.x))
+      .toBe(Math.round(chipAfter.x - chipBefore.x));
+    const reasonAfter = await box(reason);
+    expect(Math.abs(reasonAfter.y - (chipAfter.y + chipAfter.height + 4))).toBeLessThanOrEqual(1);
   });
 });

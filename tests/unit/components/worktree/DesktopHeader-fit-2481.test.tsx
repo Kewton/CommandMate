@@ -603,6 +603,40 @@ describe('Split action bar fit to width (Issue #3590)', () => {
     expectBarControlsReachable();
   });
 
+  it('moves focus into the "…" panel on open, and back to "…" on Escape', () => {
+    renderBar(
+      400,
+      <span data-testid="fake-verification-chip">
+        <VerificationStatusChip task={null} latestRun={null} onOpen={vi.fn()} popover="floating" />
+      </span>
+    );
+    const overflow = screen.getByTestId('split-action-bar-items-overflow');
+    overflow.focus();
+    // Enter on a focused button is a click.
+    fireEvent.click(overflow);
+    expect(document.activeElement).toBe(screen.getByTestId('verification-status-chip'));
+
+    fireEvent.keyDown(document.activeElement as Element, { key: 'Escape' });
+    expect(screen.queryByTestId('split-action-bar-items-panel')).toBeNull();
+    expect(document.activeElement).toBe(overflow);
+  });
+
+  it('does not take focus back to "…" when a press outside closes the panel', () => {
+    renderBar(
+      400,
+      <span data-testid="fake-verification-chip">
+        <VerificationStatusChip task={null} latestRun={null} onOpen={vi.fn()} popover="floating" />
+      </span>
+    );
+    const overflow = screen.getByTestId('split-action-bar-items-overflow');
+    fireEvent.click(overflow);
+    const outside = screen.getByTestId('split-layout-1');
+    outside.focus();
+    fireEvent.mouseDown(outside);
+    expect(screen.queryByTestId('split-action-bar-items-panel')).toBeNull();
+    expect(document.activeElement).toBe(outside);
+  });
+
   it('opens the reason from the folded chip, out of the bar and kept open by a press in it', () => {
     renderBar(
       400,

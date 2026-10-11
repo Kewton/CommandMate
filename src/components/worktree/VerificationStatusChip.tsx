@@ -94,7 +94,8 @@ export interface VerificationStatusChipProps {
    *   under the chip, kept inside the viewport. The PC chip sits in the split
    *   action bar, whose left group clips on a narrow bar and whose terminal
    *   pane is `overflow-hidden` beside an open file panel — an inline popover
-   *   was cut there. The content and the open / close rules are the same.
+   *   was cut there. It follows the chip while open (re-read every frame).
+   *   The content and the open / close rules are the same.
    */
   popover?: 'inline' | 'floating';
 }
@@ -246,24 +247,36 @@ export const VerificationStatusChip = memo(function VerificationStatusChip({
     };
   }, [reasonOpen]);
 
-  // Issue #3590: place the floating popover before paint, and follow the chip
-  // while the window resizes or anything scrolls.
+  // Issue #3590: place the floating popover before paint, and keep it under
+  // the chip for as long as it is open. The chip can move without anything
+  // resizing (the window or a scroll aside, the split action bar gains a
+  // "Split n maximized" label left of it when Mod+Shift+Enter maximizes a
+  // split), so the position is re-read once per frame while open — one
+  // `getBoundingClientRect` per frame, for one popover, only while it is
+  // shown. An unchanged position keeps the same state object (no re-render).
   useLayoutEffect(() => {
     if (!reasonOpen || popover !== 'floating') {
       setFloatingAt(null);
       return;
     }
+    let frame = 0;
     const place = () => {
       const anchor = rootRef.current?.getBoundingClientRect();
-      if (anchor) setFloatingAt(floatingPosition(anchor));
+      if (!anchor) return;
+      const next = floatingPosition(anchor);
+      setFloatingAt((prev) =>
+        prev && prev.top === next.top && prev.left === next.left && prev.width === next.width
+          ? prev
+          : next
+      );
+    };
+    const follow = () => {
+      place();
+      frame = window.requestAnimationFrame(follow);
     };
     place();
-    window.addEventListener('resize', place);
-    window.addEventListener('scroll', place, true);
-    return () => {
-      window.removeEventListener('resize', place);
-      window.removeEventListener('scroll', place, true);
-    };
+    frame = window.requestAnimationFrame(follow);
+    return () => window.cancelAnimationFrame(frame);
   }, [reasonOpen, popover]);
 
   const reasonBody = (

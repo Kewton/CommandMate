@@ -18,9 +18,12 @@
 
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, within } from '@testing-library/react';
+import { render, screen, fireEvent, within, act } from '@testing-library/react';
 import { DesktopHeader } from '@/components/worktree/WorktreeDetailSubComponents';
-import { TerminalSplitContainer } from '@/components/worktree/TerminalSplitContainer';
+import {
+  TerminalSplitContainer,
+  clampOverflowPanelLeft,
+} from '@/components/worktree/TerminalSplitContainer';
 import { VerificationStatusChip } from '@/components/worktree/VerificationStatusChip';
 import { clearTerminalSplitsLocalStorage } from '@tests/helpers/terminal-splits';
 import type { AgentInstance } from '@/lib/cli-tools/types';
@@ -268,5 +271,83 @@ describe('Verification chip reason popover placement (Issue #3590)', () => {
     const reason = screen.getByTestId('verification-chip-reason-popover');
     expect(container.contains(reason)).toBe(true);
     expect(reason.className).toMatch(/\babsolute\b/);
+  });
+});
+
+describe('"…" panel position (Issue #3590)', () => {
+  it('keeps the left edge inside the viewport when the chip is wider than the room left of "…"', () => {
+    // Sidebar closed, terminal at 20%: "…" ends 150px from the left, the chip is 300px.
+    expect(clampOverflowPanelLeft(150, 300, 1440)).toBe(8);
+  });
+
+  it('stays right-aligned with "…" when there is room (negative control)', () => {
+    expect(clampOverflowPanelLeft(900, 300, 1440)).toBe(600);
+  });
+
+  it('keeps the right edge inside too, and pins a too-wide panel to the left margin', () => {
+    expect(clampOverflowPanelLeft(1440, 300, 1440)).toBe(1132);
+    expect(clampOverflowPanelLeft(500, 1500, 1000)).toBe(8);
+  });
+});
+
+describe('Floating reason follows the chip (Issue #3590)', () => {
+  let rect = { left: 100, top: 40, right: 400, bottom: 74, width: 300, height: 34 };
+  let frames = new Map<number, FrameRequestCallback>();
+  let nextId = 0;
+
+  beforeEach(() => {
+    rect = { left: 100, top: 40, right: 400, bottom: 74, width: 300, height: 34 };
+    frames = new Map();
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(
+      () => ({ ...rect, x: rect.left, y: rect.top, toJSON: () => ({}) }) as DOMRect
+    );
+    vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => {
+      nextId += 1;
+      frames.set(nextId, cb);
+      return nextId;
+    });
+    vi.stubGlobal('cancelAnimationFrame', (id: number) => {
+      frames.delete(id);
+    });
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  function nextFrame() {
+    const pending = Array.from(frames.values());
+    frames = new Map();
+    act(() => pending.forEach((cb) => cb(0)));
+  }
+
+  it('moves under the chip when the chip moves while it is open (e.g. a maximize label appears)', () => {
+    render(<VerificationStatusChip task={null} latestRun={null} onOpen={vi.fn()} popover="floating" />);
+    fireEvent.click(screen.getByTestId('verification-chip-reason-toggle'));
+    const reason = () => screen.getByTestId('verification-chip-reason-popover');
+    expect(reason().style.left).toBe('100px');
+    expect(reason().style.top).toBe('78px');
+
+    // The bar gains "Split 1 maximized" left of the chip: it shifts right.
+    rect = { ...rect, left: 260, right: 560 };
+    nextFrame();
+    expect(reason().style.left).toBe('260px');
+    expect(reason().style.top).toBe('78px');
+  });
+
+  it('stays put while nothing moves (negative control)', () => {
+    render(<VerificationStatusChip task={null} latestRun={null} onOpen={vi.fn()} popover="floating" />);
+    fireEvent.click(screen.getByTestId('verification-chip-reason-toggle'));
+    const before = screen.getByTestId('verification-chip-reason-popover').getAttribute('style');
+    nextFrame();
+    nextFrame();
+    expect(screen.getByTestId('verification-chip-reason-popover').getAttribute('style')).toBe(before);
+  });
+
+  it('stops following once closed', () => {
+    render(<VerificationStatusChip task={null} latestRun={null} onOpen={vi.fn()} popover="floating" />);
+    fireEvent.click(screen.getByTestId('verification-chip-reason-toggle'));
+    fireEvent.click(screen.getByTestId('verification-chip-reason-toggle'));
+    expect(frames.size).toBe(0);
   });
 });
