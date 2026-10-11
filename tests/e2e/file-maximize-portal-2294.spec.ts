@@ -75,7 +75,7 @@ async function openMockedFile(page: import('@playwright/test').Page) {
   const pane = page.getByTestId('activity-pane');
   const showing = (await pane.count()) > 0 ? await pane.getAttribute('data-active') : null;
   if (showing !== 'files') {
-    await page.getByTestId('activity-bar-button-files').click();
+    await page.getByTestId('header-tool-files').click();
   }
   await expect(pane).toHaveAttribute('data-active', 'files');
 

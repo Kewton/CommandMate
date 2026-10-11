@@ -13,7 +13,7 @@
  *
  * 2. {@link usePaneOverlayDismiss} — how an open panel closes on its own:
  *    - Esc → `onDismiss('escape')`, when the key was pressed in the panel or in
- *      one of the `ignoreSelectors` regions (the activity bar, where the icon
+ *      one of the `ignoreSelectors` regions (the header tools, where the icon
  *      that opened it lives) — pinned or not, like × and a re-click. While
  *      unpinned, an Esc on the page body counts too. Never from the terminal or
  *      another field elsewhere (Esc means something to the agent CLI), never

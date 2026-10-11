@@ -5,8 +5,8 @@
  * Real pieces under test: `WorktreeDetailRefactored` → `WorktreeDetailDesktop`
  * → `WorktreeDesktopLayout` (+ `PaneOverlayFrame`) → `ActivityPane`, with the
  * real `useActivityBarState` / `usePanePinnedState` / `useHistoryPaneState`.
- * Stubbed: the activity bar (plain buttons with the real test ids), the
- * terminal column (a composer to press "outside" on), and the pane children
+ * Issue #3591: the pane opens from the real header tools (`HeaderToolBar`).
+ * Stubbed: the terminal column (a composer to press "outside" on), and the pane children
  * (a file tree whose row opens a file; an Env editor with a field and a button
  * that opens a portal dialog — the two cases the Issue names; an empty Git
  * pane).
@@ -94,24 +94,9 @@ vi.mock('@/components/error/ErrorBoundary', () => ({
   ErrorBoundary: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
-vi.mock('@/components/worktree/ActivityBar', () => ({
-  ActivityBar: ({ active, onToggle }: { active: string | null; onToggle: (id: string) => void }) => (
-    <div data-testid="activity-bar">
-      {['files', 'git', 'env'].map((id) => (
-        <button
-          key={id}
-          type="button"
-          data-testid={`activity-bar-button-${id}`}
-          role="tab"
-          aria-selected={active === id}
-          onClick={() => onToggle(id)}
-        >
-          {id}
-        </button>
-      ))}
-    </div>
-  ),
-}));
+// Issue #3591: the vertical ActivityBar (stubbed here before) is gone; the
+// real header tools (`HeaderToolBar`, inside the real `DesktopHeader`) open
+// the pane, so the ids below are the shipped ones.
 
 vi.mock('@/components/worktree/TerminalContainer', () => ({
   TerminalContainer: () => (
@@ -256,7 +241,7 @@ async function renderScreen() {
 }
 
 async function openActivity(id: string) {
-  fireEvent.click(screen.getByTestId(`activity-bar-button-${id}`));
+  fireEvent.click(screen.getByTestId(`header-tool-${id}`));
   return screen.findByTestId('activity-pane-slot');
 }
 
@@ -294,25 +279,25 @@ describe('[#3589] the activity pane opens over the body', () => {
     await openActivity('git');
     fireEvent.click(screen.getByTestId('activity-pane-close'));
     expect(screen.queryByTestId('activity-pane-slot')).not.toBeInTheDocument();
-    expect(document.activeElement).toBe(screen.getByTestId('activity-bar-button-git'));
+    expect(document.activeElement).toBe(screen.getByTestId('header-tool-git'));
   });
 
   it('closes on Esc and gives focus back to the icon that opened it', async () => {
     await renderScreen();
     await openActivity('files');
-    fireEvent.keyDown(screen.getByTestId('activity-bar-button-files'), { key: 'Escape' });
+    fireEvent.keyDown(screen.getByTestId('header-tool-files'), { key: 'Escape' });
     expect(screen.queryByTestId('activity-pane-slot')).not.toBeInTheDocument();
-    expect(document.activeElement).toBe(screen.getByTestId('activity-bar-button-files'));
+    expect(document.activeElement).toBe(screen.getByTestId('header-tool-files'));
   });
 
   it('closes on a re-click of its icon, and switches on another icon', async () => {
     await renderScreen();
     await openActivity('files');
-    fireEvent.pointerDown(screen.getByTestId('activity-bar-button-git'));
-    fireEvent.click(screen.getByTestId('activity-bar-button-git'));
+    fireEvent.pointerDown(screen.getByTestId('header-tool-git'));
+    fireEvent.click(screen.getByTestId('header-tool-git'));
     expect(screen.getByTestId('activity-pane')).toHaveAttribute('data-active', 'git');
-    fireEvent.pointerDown(screen.getByTestId('activity-bar-button-git'));
-    fireEvent.click(screen.getByTestId('activity-bar-button-git'));
+    fireEvent.pointerDown(screen.getByTestId('header-tool-git'));
+    fireEvent.click(screen.getByTestId('header-tool-git'));
     expect(screen.queryByTestId('activity-pane-slot')).not.toBeInTheDocument();
   });
 
@@ -461,12 +446,12 @@ describe('[#3589 review] Esc closes a pinned pane too', () => {
     await openPinnedFiles();
     fireEvent.keyDown(screen.getByTestId('tree-row'), { key: 'Escape' });
     expect(screen.queryByTestId('activity-pane-slot')).not.toBeInTheDocument();
-    expect(document.activeElement).toBe(screen.getByTestId('activity-bar-button-files'));
+    expect(document.activeElement).toBe(screen.getByTestId('header-tool-files'));
   });
 
   it('closes on Esc pressed on its icon', async () => {
     await openPinnedFiles();
-    fireEvent.keyDown(screen.getByTestId('activity-bar-button-files'), { key: 'Escape' });
+    fireEvent.keyDown(screen.getByTestId('header-tool-files'), { key: 'Escape' });
     expect(screen.queryByTestId('activity-pane-slot')).not.toBeInTheDocument();
   });
 
@@ -486,7 +471,7 @@ describe('[#3589 review] opening a file from the keyboard keeps the focus', () =
     // Enter / Space on a focused row: the activation lands as a click on it.
     fireEvent.click(row);
     expect(screen.queryByTestId('activity-pane-slot')).not.toBeInTheDocument();
-    expect(document.activeElement).toBe(screen.getByTestId('activity-bar-button-files'));
+    expect(document.activeElement).toBe(screen.getByTestId('header-tool-files'));
   });
 
   it('leaves focus on the row when the pane is pinned and stays open (negative control)', async () => {

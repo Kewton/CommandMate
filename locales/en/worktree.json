@@ -1097,6 +1097,11 @@
       "version": "CommandMate {version}"
     }
   },
+  "headerTools": {
+    "label": "Worktree tools",
+    "more": "More tools",
+    "moreActive": "More tools ({label} is open)"
+  },
   "branchMismatch": {
     "changedFrom": "Branch changed from",
     "to": "to",

@@ -121,7 +121,9 @@ test.describe('Verification pane (Issue #1816)', () => {
     await setupSplitTest(page, [E2E_WORKTREE_A]);
     await page.goto(`/worktrees/${E2E_WORKTREE_A}`);
 
-    await expect(page.getByTestId('activity-bar-button-verification')).toBeVisible();
+    // Issue #3591: the chip is Verification's only entry point (the header's
+    // tools leave it out).
+    await expect(page.getByTestId('header-tool-verification')).toHaveCount(0);
     const chip = page.getByTestId('verification-status-chip');
     await expect(chip).toBeVisible();
     // No task row, so no task-status badge — only the run verdict.
@@ -155,7 +157,8 @@ test.describe('Verification pane (Issue #1816)', () => {
     );
 
     await page.goto(`/worktrees/${E2E_WORKTREE_A}`);
-    await page.getByTestId('activity-bar-button-verification').click();
+    // Issue #3591: the second row's chip opens the pane (no header tool).
+    await page.getByTestId('verification-status-chip').click();
     await page.getByTestId('verification-rerun-button').click();
 
     await expect.poll(() => posted).toBe(1);

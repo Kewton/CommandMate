@@ -1,6 +1,12 @@
 /**
  * ActivityBar Component (Issue #727, updated by Issue #730)
  *
+ * Issue #3591: NO LONGER MOUNTED. The PC worktree screen dropped the vertical
+ * column: its tools are `HeaderToolBar` at the right of the header, and
+ * Verification opens from the second row's chip. The file stays because
+ * tests outside that change still `vi.mock` this path; remove it together
+ * with them.
+ *
  * VS Code-style vertical 48px Activity Bar. Hosts 7 activity icons.
  *
  * Behavior:

@@ -1097,6 +1097,11 @@
       "version": "CommandMate {version}"
     }
   },
+  "headerTools": {
+    "label": "ワークツリーの道具",
+    "more": "ほかの道具",
+    "moreActive": "ほかの道具（{label} を表示中）"
+  },
   "branchMismatch": {
     "changedFrom": "ブランチが",
     "to": "から",

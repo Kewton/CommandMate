@@ -409,7 +409,7 @@ test.describe('Markdown Editor', () => {
       const treeItem = page.locator(`[data-testid="tree-item-${E2E_EDITOR_FILE}"]`);
       await expect(async () => {
         if ((await page.getByTestId('activity-pane-slot').count()) === 0) {
-          await page.getByTestId('activity-bar-button-files').click({ timeout: 5_000 });
+          await page.getByTestId('header-tool-files').click({ timeout: 5_000 });
         }
         await expect(treeItem).toBeVisible({ timeout: 5_000 });
       }).toPass({ timeout: 60_000 });

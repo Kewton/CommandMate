@@ -4,7 +4,7 @@
  * PC (desktop) orchestrator extracted from WorktreeDetailRefactored.tsx as a
  * pure structural refactor (no behavior change). Owns the PC-only memoized
  * panes (renderSplitPane / terminalSplitRegion / rightPaneSplitMemo /
- * activityBarMemo / activityContent / activityPaneMemo) and the 2-column
+ * activityContent / activityPaneMemo) and the 2-column
  * desktop layout body, delegating the layout frame to WorktreeDesktopLayout
  * (S1-003) and the terminal column to TerminalContainer.
  *
@@ -31,11 +31,11 @@ import { TerminalContainer } from '@/components/worktree/TerminalContainer';
 import { type WorktreeStatus } from '@/components/mobile/MobileHeader';
 import { ErrorBoundary } from '@/components/error/ErrorBoundary';
 import { SearchBar } from '@/components/worktree/SearchBar';
-import { ActivityBar } from '@/components/worktree/ActivityBar';
 import { ActivityPane, type ActivityContentMap } from '@/components/worktree/ActivityPane';
 import {
   ACTIVITIES,
   ACTIVITY_PANE_PINNED_STORAGE_KEY,
+  CHIP_ACTIVITY_ID,
   type ActivityId,
 } from '@/config/activity-bar-config';
 import {
@@ -82,8 +82,37 @@ import type { HistoryDisplayLimit } from '@/config/history-display-config';
 import type { MoveTarget } from '@/hooks/useFileOperations';
 import type { WorktreeVerificationState } from '@/hooks/useWorktreeVerification';
 
-/** Issue #3589: presses here do not dismiss the unpinned activity pane. */
-const ACTIVITY_PANE_IGNORE_OUTSIDE: readonly string[] = ['[data-testid="activity-bar"]'];
+/**
+ * Issue #3589: presses here do not dismiss the unpinned activity pane (and Esc
+ * pressed here closes it). Issue #3591: the pane's entry points are the
+ * header's tools (`HeaderToolBar`, its "…" list included) and the
+ * Verification chip (`data-activity-entry`, wherever the second row put it).
+ */
+const ACTIVITY_PANE_IGNORE_OUTSIDE: readonly string[] = [
+  '[data-testid="header-tool-bar"]',
+  '[data-activity-entry]',
+];
+
+/**
+ * Issue #3591: put the keyboard back on what opens `activity` — its header
+ * tool, or the Verification chip — or, when that is folded away, on the "…"
+ * holding it (the header's for a tool, the second row's for the chip).
+ */
+export function focusActivityEntry(activity: ActivityId): void {
+  if (typeof document === 'undefined') return;
+  const entry = document.querySelector<HTMLElement>(`[data-activity-entry="${activity}"]`);
+  const target =
+    entry === null
+      ? document.querySelector<HTMLElement>(
+          activity === CHIP_ACTIVITY_ID
+            ? '[data-testid="split-action-bar-items-overflow"]'
+            : '[data-testid="header-tool-more"]'
+        )
+      : entry instanceof HTMLButtonElement
+        ? entry
+        : entry.querySelector<HTMLElement>('button');
+  target?.focus();
+}
 
 /** Props for WorktreeDetailDesktop. */
 export interface WorktreeDetailDesktopProps {
@@ -796,17 +825,12 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
     ],
   );
 
-  /**
-   * Issue #727: Activity Bar (memoized).
-   *
-   * MAINTENANCE NOTE (Issue #411 R3-007 / Issue #727):
-   * The dependency array below lists every prop and callback referenced
-   * inside the JSX. When adding a new prop, add it to this array.
+  /*
+   * Issue #3591: the vertical Activity Bar (#727, `activityBarMemo`) is gone.
+   * Its tools are drawn by `DesktopHeader` at the right of the header
+   * (`activeActivity` / `onActivityToggle` below) and Verification opens from
+   * the chip on the second row (`verificationChip`).
    */
-  const activityBarMemo = useMemo(
-    () => <ActivityBar active={activeActivity} onToggle={onActivityToggle} />,
-    [activeActivity, onActivityToggle]
-  );
 
   /**
    * Issue #3589: the activity pane opens OVER the terminal unless pinned. The
@@ -819,17 +843,14 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
    * Close the open activity (toggling the active one closes it — the same
    * persisted closed state a re-click of its icon writes). `returnFocus` puts
    * the keyboard back on the icon that opened it (Esc / ×, and a file opened
-   * from the keyboard); an outside press leaves focus where the user put it.
+   * from the keyboard) — Issue #3591: the header tool, the "…" it folded into,
+   * or the Verification chip; an outside press leaves focus where the user put it.
    */
   const closeActivityPane = useCallback(
     (returnFocus: boolean) => {
       if (activeActivity === null) return;
       onActivityToggle(activeActivity);
-      if (returnFocus && typeof document !== 'undefined') {
-        document
-          .querySelector<HTMLElement>(`[data-testid="activity-bar-button-${activeActivity}"]`)
-          ?.focus();
-      }
+      if (returnFocus) focusActivityEntry(activeActivity);
     },
     [activeActivity, onActivityToggle]
   );
@@ -1020,8 +1041,8 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
    * Issue #3589: the frame the layout shows the pane in — title row with pin /
    * ×, Esc dismissal (pinned or not, from the pane or the icon that opened it;
    * unpinned also from the page body) and, while unpinned only, outside-press
-   * dismissal. A press on the ActivityBar is not "outside": re-clicking an
-   * icon is the bar's own toggle.
+   * dismissal. A press on a header tool or the Verification chip is not
+   * "outside": re-clicking an icon is the tool's own toggle (Issue #3591).
    */
   const activityPaneFrame = useMemo<WorktreeDesktopLayoutProps['activityPaneFrame']>(
     () => ({
@@ -1052,9 +1073,10 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
   return (
     <ErrorBoundary componentName="WorktreeDetailRefactored">
       {/*
-        Issue #730: Outer flex puts the ActivityBar as a full-height column
-        on the left (Header bottom → viewport bottom, VS Code style). The
-        inner column hosts DesktopHeader / BranchMismatchAlert /
+        Issue #730: Outer flex put the ActivityBar as a full-height column on
+        the left. Issue #3591: that column is gone — its tools are in
+        DesktopHeader — so the only column left of the screen is the app's
+        icon rail. The inner column hosts DesktopHeader / BranchMismatchAlert /
         WorktreeDesktopLayout (now a 2-column layout) / NavigationButtons /
         MessageInput / PromptPanel.
 
@@ -1066,7 +1088,6 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
         the column's width instead (see `useDesktopHeaderFit`).
       */}
       <div className="flex h-full overflow-hidden relative">
-        {activityBarMemo}
         {/* Issue #732: min-w-0 主因。flex-row(L1738) の直接 flex item のため
             main 軸に min-width:auto が効き、子孫 FilePanelSplit の固定幅ペインの
             コンテンツ要求まで膨張して FilePanel が viewport 外へ押し出される問題を防ぐ */}
@@ -1104,6 +1125,9 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
             agentAddControl={agentAddControl}
             // Issue #3593: the "N others" list names each session's split.
             splitInstanceIds={selectedSplit?.splitInstanceIds}
+            // Issue #3591: the worktree's tools, at the right of the header.
+            activeActivity={activeActivity}
+            onActivityToggle={onActivityToggle}
           />
           {/* Issue #111: Branch mismatch warning */}
           {worktree?.gitStatus && (

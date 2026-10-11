@@ -65,7 +65,7 @@ test.describe('Activity pane over the body (Issue #3589)', () => {
 
       // The pre-#3589 first visit, rebuilt by hand: Files beside the body
       // (pinned) and History shown.
-      await page.getByTestId('activity-bar-button-files').click();
+      await page.getByTestId('header-tool-files').click();
       await page.getByTestId('activity-pane-pin').click();
       await page.getByTestId('toggle-history-pane').click();
       await expect(page.getByTestId('split-history-slot-0')).toBeVisible();
@@ -84,7 +84,7 @@ test.describe('Activity pane over the body (Issue #3589)', () => {
     await openScreen(page);
     const before = await terminalBox(page);
 
-    await page.getByTestId('activity-bar-button-files').click();
+    await page.getByTestId('header-tool-files').click();
     const slot = page.getByTestId('activity-pane-slot');
     await expect(slot).toBeVisible();
     await expect(slot).toHaveAttribute('data-pinned', 'false');
@@ -94,13 +94,15 @@ test.describe('Activity pane over the body (Issue #3589)', () => {
     expect(after.width).toBeCloseTo(before.width, 0);
 
     // And the pane really is on top of the terminal, not beside it.
+    // Issue #3591: laid from the right edge, under the header's tools.
     const pane = (await slot.boundingBox())!;
-    expect(pane.x + pane.width).toBeGreaterThan(before.x);
+    expect(pane.x).toBeLessThan(before.x + before.width);
+    expect(pane.x).toBeGreaterThan(before.x + before.width / 2);
   });
 
   test('Esc and × close it and hand focus back to the icon', async ({ page }) => {
     await openScreen(page);
-    const files = page.getByTestId('activity-bar-button-files');
+    const files = page.getByTestId('header-tool-files');
 
     await files.click();
     await expect(page.getByTestId('activity-pane-slot')).toBeVisible();
@@ -108,7 +110,7 @@ test.describe('Activity pane over the body (Issue #3589)', () => {
     await expect(page.getByTestId('activity-pane-slot')).toHaveCount(0);
     await expect(files).toBeFocused();
 
-    const git = page.getByTestId('activity-bar-button-git');
+    const git = page.getByTestId('header-tool-git');
     await git.click();
     await expect(page.getByTestId('activity-pane-slot')).toBeVisible();
     await page.getByTestId('activity-pane-close').click();
@@ -118,11 +120,12 @@ test.describe('Activity pane over the body (Issue #3589)', () => {
 
   test('closes on a click in the terminal area', async ({ page }) => {
     await openScreen(page);
-    await page.getByTestId('activity-bar-button-git').click();
+    await page.getByTestId('header-tool-git').click();
     await expect(page.getByTestId('activity-pane-slot')).toBeVisible();
     const box = await terminalBox(page);
-    // Right half of the terminal: never under the overlay.
-    await page.mouse.click(box.x + box.width * 0.75, box.y + box.height / 2);
+    // Left half of the terminal: never under the overlay (Issue #3591: the
+    // pane is laid from the right edge).
+    await page.mouse.click(box.x + box.width * 0.25, box.y + box.height / 2);
     await expect(page.getByTestId('activity-pane-slot')).toHaveCount(0);
   });
 
@@ -130,7 +133,7 @@ test.describe('Activity pane over the body (Issue #3589)', () => {
     await openScreen(page);
     const unpinned = await terminalBox(page);
 
-    await page.getByTestId('activity-bar-button-files').click();
+    await page.getByTestId('header-tool-files').click();
     await page.getByTestId('activity-pane-pin').click();
     const slot = page.getByTestId('activity-pane-slot');
     await expect(slot).toHaveAttribute('data-pinned', 'true');
@@ -138,8 +141,9 @@ test.describe('Activity pane over the body (Issue #3589)', () => {
 
     const pinned = await terminalBox(page);
     expect(pinned.width).toBeLessThan(unpinned.width);
+    // Issue #3591: beside it on the right.
     const pane = (await slot.boundingBox())!;
-    expect(pane.x + pane.width).toBeLessThanOrEqual(pinned.x + 1);
+    expect(pane.x).toBeGreaterThanOrEqual(pinned.x + pinned.width - 1);
 
     await page.reload();
     await expect(page.getByTestId('terminal-split-container')).toBeVisible({ timeout: 30_000 });
@@ -153,7 +157,7 @@ test.describe('Activity pane over the body (Issue #3589)', () => {
 
   test('something floating inside the body stays under the overlaid pane', async ({ page }) => {
     await openScreen(page);
-    await page.getByTestId('activity-bar-button-files').click();
+    await page.getByTestId('header-tool-files').click();
     const slot = page.getByTestId('activity-pane-slot');
     await expect(slot).toHaveAttribute('data-pinned', 'false');
     const pane = (await slot.boundingBox())!;
@@ -178,7 +182,7 @@ test.describe('Activity pane over the body (Issue #3589)', () => {
 
   test('pinning and unpinning keep the same pane element (no remount)', async ({ page }) => {
     await openScreen(page);
-    await page.getByTestId('activity-bar-button-files').click();
+    await page.getByTestId('header-tool-files').click();
     await expect(page.getByTestId('activity-pane-frame')).toBeVisible();
     await page.evaluate(() => {
       (document.querySelector('[data-testid="activity-pane-frame"]') as HTMLElement).dataset.e2eMark = 'kept';
@@ -199,7 +203,7 @@ test.describe('Activity pane over the body (Issue #3589)', () => {
       }
     }, ACTIVITY_PANE_PINNED_KEY);
     await openScreen(page);
-    const files = page.getByTestId('activity-bar-button-files');
+    const files = page.getByTestId('header-tool-files');
     await files.click();
     await expect(page.getByTestId('activity-pane-slot')).toHaveAttribute('data-pinned', 'true');
     await files.focus();
@@ -210,7 +214,7 @@ test.describe('Activity pane over the body (Issue #3589)', () => {
 
   test('Esc in the file search box clears it and keeps the pane open', async ({ page }) => {
     await openScreen(page);
-    await page.getByTestId('activity-bar-button-files').click();
+    await page.getByTestId('header-tool-files').click();
     const input = page.getByTestId('search-input');
     await input.fill('abc');
     await input.press('Escape');

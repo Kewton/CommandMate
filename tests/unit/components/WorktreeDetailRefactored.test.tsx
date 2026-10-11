@@ -83,7 +83,7 @@ vi.mock('@/contexts/AppUpdateContext', async (importOriginal) => ({
 
 // Mock child components to isolate unit tests
 // Issue #730: WorktreeDesktopLayout no longer takes `activityBar`/`historyPane`.
-// ActivityBar is rendered as a sibling by WorktreeDetailRefactored, and
+// The worktree's tools are in DesktopHeader (Issue #3591), and
 // History is wrapped inside `TerminalContainer` (passed via `rightPane`).
 vi.mock('@/components/worktree/WorktreeDesktopLayout', () => ({
   WorktreeDesktopLayout: ({
@@ -212,16 +212,18 @@ vi.mock('@/components/worktree/FileTreeView', () => ({
   ),
 }));
 
-// Issue #727: Mock ActivityBar (replaces LeftPaneTabSwitcher)
-vi.mock('@/components/worktree/ActivityBar', () => ({
-  ActivityBar: ({ active, onToggle }: { active: string | null; onToggle: (id: string) => void }) => (
-    <div data-testid="activity-bar">
-      <button data-testid="activity-bar-button-files" data-active={active === 'files'} onClick={() => onToggle('files')}>Files</button>
-      <button data-testid="activity-bar-button-git" data-active={active === 'git'} onClick={() => onToggle('git')}>Git</button>
-      <button data-testid="activity-bar-button-notes" data-active={active === 'notes'} onClick={() => onToggle('notes')}>Notes</button>
-      <button data-testid="activity-bar-button-schedules" data-active={active === 'schedules'} onClick={() => onToggle('schedules')}>Schedules</button>
-      <button data-testid="activity-bar-button-agent" data-active={active === 'agent'} onClick={() => onToggle('agent')}>Agent</button>
-      <button data-testid="activity-bar-button-timer" data-active={active === 'timer'} onClick={() => onToggle('timer')}>Timer</button>
+// Issue #727: Mock ActivityBar (replaces LeftPaneTabSwitcher).
+// Issue #3591: the vertical ActivityBar is gone — its tools are the header's
+// `HeaderToolBar` (rendered by the real DesktopHeader), mocked the same way.
+vi.mock('@/components/worktree/HeaderToolBar', () => ({
+  HeaderToolBar: ({ active, onToggle }: { active: string | null; onToggle: (id: string) => void }) => (
+    <div data-testid="header-tool-bar">
+      <button data-testid="header-tool-files" data-active={active === 'files'} onClick={() => onToggle('files')}>Files</button>
+      <button data-testid="header-tool-git" data-active={active === 'git'} onClick={() => onToggle('git')}>Git</button>
+      <button data-testid="header-tool-notes" data-active={active === 'notes'} onClick={() => onToggle('notes')}>Notes</button>
+      <button data-testid="header-tool-schedules" data-active={active === 'schedules'} onClick={() => onToggle('schedules')}>Schedules</button>
+      <button data-testid="header-tool-agent" data-active={active === 'agent'} onClick={() => onToggle('agent')}>Agent</button>
+      <button data-testid="header-tool-timer" data-active={active === 'timer'} onClick={() => onToggle('timer')}>Timer</button>
     </div>
   ),
 }));
@@ -438,7 +440,7 @@ describe('WorktreeDetailRefactored', () => {
           </ConfirmProvider>
         );
 
-        fireEvent.click(await screen.findByTestId('activity-bar-button-agent'));
+        fireEvent.click(await screen.findByTestId('header-tool-agent'));
 
         const pane = await screen.findByTestId('agent-instances-pane');
         expect(pane).toHaveClass('h-full');
@@ -773,7 +775,7 @@ describe('WorktreeDetailRefactored', () => {
 
       // Wait for component to load and switch to files tab
       await waitFor(() => {
-        expect(screen.getByTestId('activity-bar')).toBeInTheDocument();
+        expect(screen.getByTestId('header-tool-bar')).toBeInTheDocument();
       });
 
       // Switch to files tab
@@ -796,7 +798,7 @@ describe('WorktreeDetailRefactored', () => {
       render(<WorktreeDetailRefactored worktreeId="test-worktree-123" />);
 
       await waitFor(() => {
-        expect(screen.getByTestId('activity-bar')).toBeInTheDocument();
+        expect(screen.getByTestId('header-tool-bar')).toBeInTheDocument();
       });
 
       // Issue #727: 'files' is the default active activity; no need to click.
@@ -837,7 +839,7 @@ describe('WorktreeDetailRefactored', () => {
       render(<WorktreeDetailRefactored worktreeId="test-worktree-123" />);
 
       await waitFor(() => {
-        expect(screen.getByTestId('activity-bar')).toBeInTheDocument();
+        expect(screen.getByTestId('header-tool-bar')).toBeInTheDocument();
       });
 
       // Issue #727: 'files' is the default active activity; no need to click.
@@ -857,7 +859,7 @@ describe('WorktreeDetailRefactored', () => {
       render(<WorktreeDetailRefactored worktreeId="test-worktree-123" />);
 
       await waitFor(() => {
-        expect(screen.getByTestId('activity-bar')).toBeInTheDocument();
+        expect(screen.getByTestId('header-tool-bar')).toBeInTheDocument();
       });
 
       // Issue #727: 'files' is the default active activity; no need to click.
@@ -885,7 +887,7 @@ describe('WorktreeDetailRefactored', () => {
       render(<WorktreeDetailRefactored worktreeId="test-worktree-123" />);
 
       await waitFor(() => {
-        expect(screen.getByTestId('activity-bar')).toBeInTheDocument();
+        expect(screen.getByTestId('header-tool-bar')).toBeInTheDocument();
       });
 
       // Issue #727: 'files' is the default active activity; no need to click.
@@ -905,7 +907,7 @@ describe('WorktreeDetailRefactored', () => {
       render(<WorktreeDetailRefactored worktreeId="test-worktree-123" />);
 
       await waitFor(() => {
-        expect(screen.getByTestId('activity-bar')).toBeInTheDocument();
+        expect(screen.getByTestId('header-tool-bar')).toBeInTheDocument();
       });
 
       // Issue #727: 'files' is the default active activity; no need to click.
@@ -936,7 +938,7 @@ describe('WorktreeDetailRefactored', () => {
       );
 
       await waitFor(() => {
-        expect(screen.getByTestId('activity-bar')).toBeInTheDocument();
+        expect(screen.getByTestId('header-tool-bar')).toBeInTheDocument();
       });
 
       // Issue #727: 'files' is the default active activity; no need to click.
@@ -960,7 +962,7 @@ describe('WorktreeDetailRefactored', () => {
       );
 
       await waitFor(() => {
-        expect(screen.getByTestId('activity-bar')).toBeInTheDocument();
+        expect(screen.getByTestId('header-tool-bar')).toBeInTheDocument();
       });
 
       // Issue #727: 'files' is the default active activity; no need to click.
@@ -989,7 +991,7 @@ describe('WorktreeDetailRefactored', () => {
       render(<WorktreeDetailRefactored worktreeId="test-worktree-123" />);
 
       await waitFor(() => {
-        expect(screen.getByTestId('activity-bar')).toBeInTheDocument();
+        expect(screen.getByTestId('header-tool-bar')).toBeInTheDocument();
       });
 
       // Issue #727: 'files' is the default active activity; no need to click.
@@ -1018,7 +1020,7 @@ describe('WorktreeDetailRefactored', () => {
       render(<WorktreeDetailRefactored worktreeId="test-worktree-123" />);
 
       await waitFor(() => {
-        expect(screen.getByTestId('activity-bar')).toBeInTheDocument();
+        expect(screen.getByTestId('header-tool-bar')).toBeInTheDocument();
       });
 
       // Issue #727: 'files' is the default active activity; no need to click.
@@ -1564,7 +1566,7 @@ describe('WorktreeDetailRefactored', () => {
       render(<WorktreeDetailRefactored worktreeId="test-worktree-123" />);
 
       await waitFor(() => {
-        expect(screen.getByTestId('activity-bar')).toBeInTheDocument();
+        expect(screen.getByTestId('header-tool-bar')).toBeInTheDocument();
       });
 
       // Switch to files tab
