@@ -125,6 +125,15 @@ function floatingPosition(anchor: DOMRect): { top: number; left: number; width: 
   return { top: anchor.bottom + 4, left, width };
 }
 
+/**
+ * Whether the chip is on screen: in the page and not inside a hidden box
+ * (Issue #3592 — it leaves the page while it waits behind a closed "…").
+ */
+function isShown(el: HTMLElement | null): boolean {
+  if (!el || !el.isConnected) return false;
+  return typeof el.checkVisibility !== 'function' || el.checkVisibility();
+}
+
 function truncate(value: string, max: number): string {
   return value.length <= max ? value : `${value.slice(0, max - 1)}…`;
 }
@@ -242,12 +251,19 @@ export const VerificationStatusChip = memo(function VerificationStatusChip({
       if (rootRef.current?.contains(event.target as Node)) return;
       // Issue #3590: a floating popover lives outside the root.
       if (popoverRef.current?.contains(event.target as Node)) return;
+      // Issue #3592: while the chip waits out of sight (behind a closed "…"),
+      // its reason is hidden too, so there is no "outside" to press — the
+      // press on "…" that brings the chip back must not close it.
+      if (!isShown(rootRef.current)) return;
       setReasonOpen(false);
     };
     const onKeyDown = (event: KeyboardEvent) => {
-      // Issue #3591: an Esc another layer already handled (the header tools'
-      // "…" list closing itself) is not this popover's.
-      if (event.key === 'Escape' && !event.defaultPrevented) setReasonOpen(false);
+      if (event.key !== 'Escape') return;
+      // Issue #3592: an Escape a layer above already handled (a menu closing
+      // itself — Radix calls `preventDefault`) is not ours to act on.
+      // Issue #3591: the header tools' "…" list closing itself is one too.
+      if (event.defaultPrevented) return;
+      setReasonOpen(false);
     };
     document.addEventListener('mousedown', onPointerDown);
     document.addEventListener('keydown', onKeyDown);
@@ -271,8 +287,16 @@ export const VerificationStatusChip = memo(function VerificationStatusChip({
     }
     let frame = 0;
     const place = () => {
-      const anchor = rootRef.current?.getBoundingClientRect();
-      if (!anchor) return;
+      // Issue #3592: the chip leaves the page while it waits behind a closed
+      // "…": a detached (or hidden) root measures as a zero box at the
+      // viewport's corner, so the reason would sit at the top left. Hide it
+      // instead — still open — and place it again once the chip is back.
+      const root = rootRef.current;
+      if (!root || !isShown(root)) {
+        setFloatingAt((prev) => (prev === null ? prev : null));
+        return;
+      }
+      const anchor = root.getBoundingClientRect();
       const next = floatingPosition(anchor);
       setFloatingAt((prev) =>
         prev && prev.top === next.top && prev.left === next.left && prev.width === next.width
