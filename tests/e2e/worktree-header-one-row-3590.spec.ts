@@ -123,7 +123,7 @@ async function mockOneFile(page: Page): Promise<void> {
  * Open the mocked file from the Files activity tree.
  *
  * Issue #3589: the screen starts with the activity pane closed (no
- * `activity-pane` at all), so Files is opened from the activity bar unless it
+ * `activity-pane` at all), so Files is opened from its header tool (Issue #3591) unless it
  * is already the pane showing. Opening the file closes the (unpinned) pane, so
  * callers start from "file panel open, activity pane closed".
  */
