@@ -95,9 +95,10 @@ async function openScreen(page: Page, options: RosterOptions): Promise<void> {
   await mockRoster(page, options);
   await page.goto(`/worktrees/${E2E_WORKTREE_A}`);
   await expect(page.getByTestId('desktop-session-switcher')).toBeVisible();
-  // The Files pane focuses its search box 100ms after it mounts; let that
-  // land first, or it takes focus from the list mid-test.
-  await expect(page.getByRole('textbox', { name: 'Search files' })).toBeFocused();
+  // Issue #3589: the activity pane starts closed, so no Files search box
+  // mounts and takes focus from the list mid-test. Make sure it stays so.
+  await expect(page.getByTestId('terminal-split-container')).toBeVisible();
+  await expect(page.getByTestId('activity-pane-slot')).toHaveCount(0);
 }
 
 /** From the current session's left edge to the "+"'s right edge. */
