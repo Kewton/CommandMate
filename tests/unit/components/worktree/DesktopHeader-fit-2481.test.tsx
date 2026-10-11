@@ -30,10 +30,11 @@
 
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, act } from '@testing-library/react';
+import { render, screen, act, fireEvent } from '@testing-library/react';
 import { DesktopHeader } from '@/components/worktree/WorktreeDetailSubComponents';
 import { TerminalSplitContainer } from '@/components/worktree/TerminalSplitContainer';
 import { clearTerminalSplitsLocalStorage } from '@tests/helpers/terminal-splits';
+import { VerificationStatusChip } from '@/components/worktree/VerificationStatusChip';
 import { makeAppUpdateValue, makeUpdateInfo } from '@tests/helpers/app-update-context';
 import type { AgentInstance, CLIToolType } from '@/lib/cli-tools/types';
 import type { Worktree } from '@/types/models';
@@ -106,6 +107,8 @@ const WIDTH = {
   layoutOps: 160,
   /** Issue #3590: the chip's floor — its badges and ⓘ. */
   chipMin: 220,
+  /** Issue #3590: the "…" button the items fold behind. */
+  itemsOverflow: 30,
 };
 
 let headerWidth = 1600;
@@ -142,11 +145,17 @@ function renderedTogglesWidth(): number {
 }
 
 function barLeftAvailable(): number {
-  return Math.max(0, barWidth - renderedTogglesWidth());
+  const overflow = document.querySelector('[data-testid="split-action-bar-items-overflow"]')
+    ? WIDTH.itemsOverflow
+    : 0;
+  return Math.max(0, barWidth - renderedTogglesWidth() - overflow);
 }
 
 function barLeftContentMin(): number {
-  const chip = document.querySelector('[data-testid="fake-verification-chip"]');
+  // Only a chip still on the bar counts; a folded one is in the floating panel.
+  const chip = document.querySelector(
+    '[data-testid="split-action-bar-left"] [data-testid="fake-verification-chip"]'
+  );
   if (!chip) return WIDTH.layoutOps;
   return (
     WIDTH.layoutOps +
@@ -299,13 +308,28 @@ function toggleLabelsShown(): boolean {
 }
 
 function expectBarControlsReachable(): void {
-  // The toggles sit outside the group that may clip; the chip is inside it.
+  // The toggles sit outside the group that may clip.
   const left = screen.getByTestId('split-action-bar-left');
   for (const testId of ['toggle-history-pane', 'toggle-file-panel']) {
     expect(left.contains(screen.getByTestId(testId))).toBe(false);
     expect(screen.getByTestId(testId).className).toMatch(/\bflex-shrink-0\b/);
   }
-  expect(left.contains(screen.getByTestId('fake-verification-chip'))).toBe(true);
+  // The chip is either on the bar, or behind the "…" button (outside the
+  // clipping group, never shrinking) in a panel portalled out of the bar.
+  const overflow = screen.queryByTestId('split-action-bar-items-overflow');
+  if (!overflow) {
+    expect(left.contains(screen.getByTestId('fake-verification-chip'))).toBe(true);
+    return;
+  }
+  expect(left.contains(overflow)).toBe(false);
+  expect(overflow.className).toMatch(/\bflex-shrink-0\b/);
+  expect(screen.queryByTestId('fake-verification-chip')).toBeNull();
+  fireEvent.click(overflow);
+  const panel = screen.getByTestId('split-action-bar-items-panel');
+  expect(panel.parentElement).toBe(document.body);
+  expect(panel.contains(screen.getByTestId('fake-verification-chip'))).toBe(true);
+  fireEvent.click(overflow);
+  expect(screen.queryByTestId('split-action-bar-items-panel')).toBeNull();
 }
 
 /** Renders the header at `width` with six working instances (the Issue's roster). */
@@ -568,25 +592,60 @@ describe('Split action bar fit to width (Issue #3590)', () => {
     expect(toggleLabelsShown()).toBe(true);
   });
 
-  it('clips the left group once the labels are gone, never the toggles', () => {
-    // 1280px with the sidebar open leaves this bar about 400px: even without
-    // labels the left group gets 330px < 380px.
+  it('folds the items behind "…" once the labels are gone, and the chip stays reachable', () => {
+    // 400px (a file panel beside a narrow terminal): even without labels the
+    // left group gets 330px < 380px. With the chip folded it needs 160px of 300px.
     renderBar(400);
     expect(toggleLabelsShown()).toBe(false);
+    expect(screen.getByTestId('split-action-bar-items-overflow')).toBeInTheDocument();
+    expect(screen.queryByTestId('split-action-bar-items')).toBeNull();
+    expect(screen.getByTestId('split-action-bar-left').className).not.toContain('overflow-x-clip');
+    expectBarControlsReachable();
+  });
+
+  it('opens the reason from the folded chip, out of the bar and kept open by a press in it', () => {
+    renderBar(
+      400,
+      <span data-testid="fake-verification-chip">
+        <VerificationStatusChip task={null} latestRun={null} onOpen={vi.fn()} popover="floating" />
+      </span>
+    );
+    fireEvent.click(screen.getByTestId('split-action-bar-items-overflow'));
+    fireEvent.click(screen.getByTestId('verification-chip-reason-toggle'));
+    const reason = screen.getByTestId('verification-chip-reason-popover');
+    // Portalled to <body> and fixed: no clipping ancestor between it and the page.
+    expect(reason.parentElement).toBe(document.body);
+    expect(reason.className).toMatch(/\bfixed\b/);
+    // A press inside the reason is not "outside" for the panel or the chip.
+    fireEvent.mouseDown(reason);
+    expect(screen.getByTestId('split-action-bar-items-panel')).toBeInTheDocument();
+    expect(screen.getByTestId('verification-chip-reason-popover')).toBeInTheDocument();
+    // A press elsewhere closes both.
+    fireEvent.mouseDown(document.body);
+    expect(screen.queryByTestId('split-action-bar-items-panel')).toBeNull();
+    expect(screen.queryByTestId('verification-chip-reason-popover')).toBeNull();
+  });
+
+  it('clips the layout ops only as the last resort, never the toggles or "…"', () => {
+    // 200px (the terminal at its 20% minimum): 100px left for 160px of ops.
+    renderBar(200);
     expect(screen.getByTestId('split-action-bar-left').className).toContain('overflow-x-clip');
     expectBarControlsReachable();
   });
 
   it('gives the labels back when the bar widens, and drops them again when it narrows', () => {
-    renderBar(400);
+    renderBar(200);
     expect(screen.getByTestId('split-action-bar-left').className).toContain('overflow-x-clip');
 
     resizeBar(1600);
     expect(toggleLabelsShown()).toBe(true);
+    expect(screen.queryByTestId('split-action-bar-items-overflow')).toBeNull();
+    expect(screen.getByTestId('split-action-bar-items')).toBeInTheDocument();
     expect(screen.getByTestId('split-action-bar-left').className).not.toContain('overflow-x-clip');
 
     resizeBar(400);
     expect(toggleLabelsShown()).toBe(false);
+    expect(screen.getByTestId('split-action-bar-items-overflow')).toBeInTheDocument();
   });
 
   it('does not give anything up without a slotted item (the pre-#3590 bar)', () => {

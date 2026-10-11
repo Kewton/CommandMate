@@ -508,6 +508,7 @@
   },
   "terminal": {
     "historyLabel": "History",
+    "actionBarMore": "Show hidden items",
     "filesLabel": "Open Files",
     "showHistory": "Show history",
     "hideHistory": "Hide history",

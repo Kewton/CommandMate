@@ -39,6 +39,85 @@ async function expectReachable(page: Page, locator: Locator, viewportWidth: numb
   expect(hit).toBe(true);
 }
 
+/** Non-editable file, so the panel renders the plain code viewer (see file-maximize-portal-2294). */
+const FILE_NAME = 'notes-3590.log';
+const FILE_BODY = 'narrow terminal\n';
+
+/** Mirrors of FILE_PANEL_COLLAPSED_STORAGE_KEY and PC_DISPLAY_SIZE_STORAGE_KEY. */
+const FILE_PANEL_COLLAPSED_KEY = 'commandmate.worktree.filePanelCollapsed';
+const PC_DISPLAY_SIZE_KEY = 'mcbd-pc-display-size';
+
+async function mockOneFile(page: Page): Promise<void> {
+  await page.addInitScript((key) => {
+    try {
+      localStorage.removeItem(key);
+    } catch {
+      /* storage unavailable - non-fatal */
+    }
+  }, FILE_PANEL_COLLAPSED_KEY);
+  // Registered after setupSplitTest's catch-all, so these win.
+  await page.route(
+    (url) => url.pathname.endsWith(`/api/worktrees/${E2E_WORKTREE_A}/tree`),
+    (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          path: '',
+          parentPath: null,
+          items: [{ name: FILE_NAME, type: 'file', size: FILE_BODY.length, extension: 'log' }],
+        }),
+      }),
+  );
+  await page.route(
+    (url) => url.pathname.endsWith(`/api/worktrees/${E2E_WORKTREE_A}/files/${FILE_NAME}`),
+    (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          path: FILE_NAME,
+          content: FILE_BODY,
+          extension: 'log',
+          worktreePath: `/tmp/${E2E_WORKTREE_A}`,
+        }),
+      }),
+  );
+}
+
+async function openMockedFile(page: Page): Promise<void> {
+  const pane = page.getByTestId('activity-pane');
+  await expect(pane).toBeVisible();
+  if ((await pane.getAttribute('data-active')) !== 'files') {
+    await page.getByTestId('activity-bar-button-files').click();
+  }
+  await expect(pane).toHaveAttribute('data-active', 'files');
+  await page.getByTestId(`tree-item-${FILE_NAME}`).click();
+  await expect(page.getByTestId(`file-tab-${FILE_NAME}`)).toBeVisible();
+}
+
+/** Every corner of `locator` is painted by it (nothing clips or covers it). */
+async function expectFullyPainted(locator: Locator): Promise<void> {
+  const ok = await locator.evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    // Past the 8px rounded corners, which hit testing honours.
+    const inset = 10;
+    const points = [
+      [r.left + inset, r.top + inset],
+      [r.right - inset, r.top + inset],
+      [r.left + inset, r.bottom - inset],
+      [r.right - inset, r.bottom - inset],
+    ];
+    const misses = points
+      .map(([x, y]) => ({ x, y, top: document.elementFromPoint(x, y) }))
+      .filter(({ top }) => top === null || !(el === top || el.contains(top)))
+      .map(({ x, y, top }) => `${Math.round(x)},${Math.round(y)}: ${top?.outerHTML.slice(0, 120) ?? 'null'}`);
+    if (r.right > window.innerWidth || r.bottom > window.innerHeight) misses.push('outside viewport');
+    return misses;
+  });
+  expect(ok).toEqual([]);
+}
+
 test.describe('Worktree header in one row (Issue #3590)', () => {
   test.beforeEach(async ({ page: _page }, testInfo) => {
     test.skip(testInfo.project.name !== 'chromium', 'PC-only header (chromium only)');
@@ -120,5 +199,73 @@ test.describe('Worktree header in one row (Issue #3590)', () => {
     for (const testId of ['toggle-history-pane', 'toggle-file-panel']) {
       expect(overlaps(left, await box(page.getByTestId(testId)))).toBe(false);
     }
+  });
+
+  test('keeps the chip and its reason reachable and uncut with the terminal at its minimum', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await setupSplitTest(page, [E2E_WORKTREE_A]);
+    await mockOneFile(page);
+    await page.goto(`/worktrees/${E2E_WORKTREE_A}`);
+    await openMockedFile(page);
+
+    // Drag the terminal / file panel border all the way left: the terminal
+    // stops at FilePanelSplit's 20% minimum.
+    const terminalPane = page.getByTestId('terminal-pane');
+    const resizer = terminalPane.locator('xpath=following-sibling::*[@role="separator"][1]');
+    const r = await box(resizer);
+    await page.mouse.move(r.x + r.width / 2, r.y + r.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(0, r.y + r.height / 2, { steps: 10 });
+    await page.mouse.up();
+    const bar = page.getByTestId('split-action-bar');
+    const barWidth = (await box(bar)).width;
+    expect(barWidth).toBeLessThan(400);
+
+    // Positive control: at this width the chip no longer fits on the bar.
+    const overflow = page.getByTestId('split-action-bar-items-overflow');
+    await expect(overflow).toBeVisible();
+    await expect(bar.getByTestId('verification-status-chip')).toHaveCount(0);
+    await expectReachable(page, overflow, 1440);
+
+    await overflow.click();
+    const chip = page.getByTestId('verification-status-chip');
+    await expect(chip).toBeVisible();
+    // Off the button, so its own hover tooltip is not what covers the panel.
+    await page.mouse.move(1000, 600);
+    await expectFullyPainted(page.getByTestId('split-action-bar-items-panel'));
+    await page.getByTestId('verification-chip-reason-toggle').click();
+    await page.mouse.move(1000, 600);
+    const reason = page.getByTestId('verification-chip-reason-popover');
+    await expect(reason).toBeVisible();
+    await expectFullyPainted(reason);
+    // The panel stays open while its chip's reason is shown.
+    await expect(page.getByTestId('split-action-bar-items-panel')).toBeVisible();
+  });
+
+  test('keeps the chip inside the second row at the xsmall display size', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.addInitScript(
+      ({ key, value }) => {
+        try {
+          localStorage.setItem(key, value);
+        } catch {
+          /* storage unavailable - non-fatal */
+        }
+      },
+      { key: PC_DISPLAY_SIZE_KEY, value: JSON.stringify('xsmall') },
+    );
+    await setupSplitTest(page, [E2E_WORKTREE_A]);
+    await page.goto(`/worktrees/${E2E_WORKTREE_A}`);
+    await expect(page.locator('html')).toHaveAttribute('data-pc-size', 'xsmall');
+
+    const bar = await box(page.getByTestId('split-action-bar'));
+    const chipRoot = page.getByTestId('verification-status-chip').locator('xpath=../..');
+    const chip = await box(chipRoot);
+    // h-9 alone would be 28.1px here; the chip is 34px of fixed px.
+    expect(bar.height).toBeGreaterThanOrEqual(chip.height);
+    expect(chip.y).toBeGreaterThanOrEqual(bar.y);
+    expect(chip.y + chip.height).toBeLessThanOrEqual(bar.y + bar.height);
   });
 });

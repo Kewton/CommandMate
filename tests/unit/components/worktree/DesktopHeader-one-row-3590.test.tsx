@@ -219,6 +219,9 @@ describe('Verification chip on the split action bar (Issue #3590)', () => {
     renderBarWithChip();
     const bar = screen.getByTestId('split-action-bar');
     expect(bar.className).toMatch(/\bh-9\b/);
+    // h-9 is rem and shrinks with the display size (28.1px at xsmall); the
+    // chip is px (32px ⓘ + 2px border). The floor keeps 34px inside the 1px border.
+    expect(bar.className).toContain('min-h-[35px]');
     expect(bar.className).not.toMatch(/\bpy-\d/);
     expect(bar.className).not.toMatch(/overflow-(hidden|clip|y-)/);
   });
@@ -230,5 +233,40 @@ describe('Verification chip on the split action bar (Issue #3590)', () => {
     expect(screen.queryByTestId('split-action-bar-items')).toBeNull();
     expect(screen.getByTestId('split-layout-picker')).toBeInTheDocument();
     expect(screen.getByTestId('toggle-history-pane').textContent).toContain('History');
+  });
+});
+
+describe('Verification chip reason popover placement (Issue #3590)', () => {
+  it('floats the reason out of every clipping ancestor when asked to', () => {
+    render(
+      <div style={{ overflow: 'hidden', width: 40 }}>
+        <VerificationStatusChip task={null} latestRun={null} onOpen={vi.fn()} popover="floating" />
+      </div>
+    );
+    fireEvent.click(screen.getByTestId('verification-chip-reason-toggle'));
+    const reason = screen.getByTestId('verification-chip-reason-popover');
+    expect(reason.parentElement).toBe(document.body);
+    expect(reason.className).toMatch(/\bfixed\b/);
+    expect(reason.getAttribute('data-floating-layer')).toBe('true');
+    // Kept inside the viewport.
+    expect(parseFloat(reason.style.left)).toBeGreaterThanOrEqual(8);
+    expect(parseFloat(reason.style.left) + parseFloat(reason.style.width)).toBeLessThanOrEqual(
+      window.innerWidth - 8
+    );
+    // Same toggle and dismissal rules.
+    fireEvent.mouseDown(reason);
+    expect(screen.getByTestId('verification-chip-reason-popover')).toBeInTheDocument();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByTestId('verification-chip-reason-popover')).toBeNull();
+  });
+
+  it('keeps the inline popover by default (the mobile shell, negative control)', () => {
+    const { container } = render(
+      <VerificationStatusChip task={null} latestRun={null} onOpen={vi.fn()} />
+    );
+    fireEvent.click(screen.getByTestId('verification-chip-reason-toggle'));
+    const reason = screen.getByTestId('verification-chip-reason-popover');
+    expect(container.contains(reason)).toBe(true);
+    expect(reason.className).toMatch(/\babsolute\b/);
   });
 });

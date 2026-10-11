@@ -47,7 +47,10 @@ import { GitPane } from '@/components/worktree/GitPane';
 import { WorktreeSkillsPane } from '@/components/skills/WorktreeSkillsPane';
 import { VerificationPane } from '@/components/worktree/VerificationPane';
 import { EnvManagerPane } from '@/components/worktree/EnvManagerPane';
-import { VerificationStatusChip } from '@/components/worktree/VerificationStatusChip';
+import {
+  VerificationStatusChip,
+  useGatesOfLatestRun,
+} from '@/components/worktree/VerificationStatusChip';
 import { Modal } from '@/components/ui/Modal';
 import { BranchMismatchAlert } from '@/components/worktree/BranchMismatchAlert';
 import { MoveDialog } from '@/components/worktree/MoveDialog';
@@ -218,6 +221,47 @@ export interface WorktreeDetailDesktopProps {
 /**
  * WorktreeDetailDesktop - PC orchestrator for the worktree detail screen.
  */
+/**
+ * The Verification chip for the PC worktree screen (Issue #1816 / #2064 / #3590).
+ *
+ * Always rendered (Issue #2064): it used to hide itself on a worktree with no
+ * task row, which put the Verification entry point out of reach of exactly the
+ * people who have never sent a contract.
+ *
+ * `latestRunGates` is gated on the pane's selection because that is the only
+ * run whose gate rows this state ever holds. Issue #3590: and held here, not
+ * only in the chip — the chip remounts whenever `FilePanelSplit` moves the
+ * terminal (first file opened / last one closed), and the failing gates of the
+ * latest run must survive that once the operator has selected an older run.
+ *
+ * @param verification - The worktree's verification state (task, latest run, the pane's selected run)
+ * @param onOpen - Opens the Verification pane
+ */
+export function useDesktopVerificationChip(
+  verification: Pick<WorktreeVerificationState, 'task' | 'latestRun' | 'selectedRun'>,
+  onOpen: () => void
+): React.ReactElement {
+  const { task, latestRun, selectedRun } = verification;
+  const latestRunGates = useGatesOfLatestRun(
+    latestRun,
+    selectedRun !== null && selectedRun.id === latestRun?.id ? selectedRun.gates : null
+  );
+  return useMemo(
+    () => (
+      <VerificationStatusChip
+        task={task}
+        latestRun={latestRun}
+        latestRunGates={latestRunGates}
+        onOpen={onOpen}
+        // Issue #3590: the action bar clips, and the terminal pane beside an
+        // open file panel is `overflow-hidden` — the reason floats out of both.
+        popover="floating"
+      />
+    ),
+    [task, latestRun, latestRunGates, onOpen],
+  );
+}
+
 export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
   worktreeId,
   worktree,
@@ -640,34 +684,9 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
     ],
   );
 
-  // Issue #2064: always rendered. It used to hide itself on a worktree with
-  // no task row, which put the Verification entry point out of reach of
-  // exactly the people who have never sent a contract.
-  //
-  // `latestRunGates` is still gated on the pane's selection because that is
-  // the only run whose gate rows this state ever holds — the chip is what
-  // keeps them once the operator selects an older run (`useGatesOfLatestRun`),
-  // so it stops depending on `selectedRun` without this expression having to
-  // lie about which run the rows came from.
-  //
   // Issue #3590: drawn on the second row (the split action bar), next to the
   // layout icons, instead of in the header.
-  const verificationChip = useMemo(
-    () => (
-      <VerificationStatusChip
-        task={verification.task}
-        latestRun={verification.latestRun}
-        latestRunGates={
-          verification.selectedRun !== null &&
-          verification.selectedRun.id === verification.latestRun?.id
-            ? verification.selectedRun.gates
-            : null
-        }
-        onOpen={handleOpenVerification}
-      />
-    ),
-    [verification.task, verification.latestRun, verification.selectedRun, handleOpenVerification],
-  );
+  const verificationChip = useDesktopVerificationChip(verification, handleOpenVerification);
 
   const terminalSplitRegion = useMemo(
     () => (

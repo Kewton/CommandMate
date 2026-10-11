@@ -13,8 +13,9 @@
  *   "+N" menu (#1078), down to none, then clip the identity group
  *   ({@link useDesktopHeaderFit});
  * - the second row (`TerminalSplitContainer`'s action bar): drop the History /
- *   Files labels to their icons, then clip the left group that holds the
- *   Verification chip ({@link useSplitActionBarFit}).
+ *   Files labels to their icons, then move the slotted items (the
+ *   Verification chip) behind a "…" button, then clip the layout ops
+ *   ({@link useSplitActionBarFit}).
  *
  * @module hooks/useDesktopHeaderFit
  */
@@ -179,9 +180,15 @@ export interface SplitActionBarFit {
   /** The History / Files toggles show their icons only (the label stays their accessible name). */
   compactToggles: boolean;
   /**
-   * The last resort: the left group (layout ops and the slotted items, i.e.
-   * the Verification chip) clips horizontally instead of painting under the
-   * panel toggles.
+   * The slotted items (the Verification chip) leave the bar for a floating
+   * panel behind a "…" button, which never shrinks — so the chip, its ⓘ and
+   * its reason stay reachable however narrow the terminal side gets (e.g. a
+   * file panel dragged to leave the terminal its 20% minimum).
+   */
+  itemsFolded: boolean;
+  /**
+   * The last resort: the left group (by then only the layout ops) clips
+   * horizontally instead of painting under the panel toggles.
    */
   squeezed: boolean;
 }
@@ -193,7 +200,8 @@ export interface SplitActionBarFit {
  * The left group holds the layout icons, Equal / Maximize and the slotted
  * items (the Verification chip, whose title truncates but whose badges and ⓘ
  * cannot); the History / Files toggles never shrink. Once the chip is down to
- * its badges, the toggles drop their labels first, then the left group clips.
+ * its badges, the toggles drop their labels first, then the items fold behind
+ * the "…" button, then the left group clips.
  *
  * @param barRef - The action bar, observed for size changes
  * @param leftRef - The left group; its overflow is the "does not fit" signal
@@ -206,6 +214,6 @@ export function useSplitActionBarFit(
   contentKey: string,
   slotContent: unknown
 ): SplitActionBarFit {
-  const step = useFitSteps(barRef, leftRef, contentKey, 2, slotContent);
-  return { compactToggles: step >= 1, squeezed: step >= 2 };
+  const step = useFitSteps(barRef, leftRef, contentKey, 3, slotContent);
+  return { compactToggles: step >= 1, itemsFolded: step >= 2, squeezed: step >= 3 };
 }

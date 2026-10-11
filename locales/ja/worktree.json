@@ -508,6 +508,7 @@
   },
   "terminal": {
     "historyLabel": "履歴",
+    "actionBarMore": "隠れている項目を表示",
     "filesLabel": "開いているファイル",
     "showHistory": "履歴を表示",
     "hideHistory": "履歴を非表示",
