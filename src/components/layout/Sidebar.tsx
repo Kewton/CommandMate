@@ -85,6 +85,7 @@ import {
   sortSessionRows,
   partitionOtherBranches,
   isBranchKeptInPlace,
+  resolveActiveWorktreeId,
   SIDEBAR_NAV_ORDER,
 } from '@/lib/sidebar-utils';
 import { useWorktreeList } from '@/hooks/useWorktreeList';
@@ -161,7 +162,7 @@ export const Sidebar = memo(function Sidebar() {
   const {
     worktrees,
     repositories,
-    selectedWorktreeId,
+    selectedWorktreeId: contextSelectedWorktreeId,
     selectWorktree,
     refreshWorktrees,
     // Issue #2059: without these two the branch list could only ever say
@@ -184,6 +185,9 @@ export const Sidebar = memo(function Sidebar() {
   } = useSidebarContext();
   const t = useTranslations('common');
   const pathname = usePathname() ?? '';
+  // Issue #3578: the URL wins over the context selection, which only follows
+  // clicks — a direct open / reload / back-forward would otherwise select nothing.
+  const selectedWorktreeId = resolveActiveWorktreeId(pathname, contextSelectedWorktreeId);
   // Issue #3512 / #3515: the logo / open-close / New task / search rows. The
   // drawer draws them too, with a close button and without the key hint.
   const isMobile = useIsMobile();
