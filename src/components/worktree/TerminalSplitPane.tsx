@@ -10,7 +10,8 @@
  *    Issue #3592: a fixed 30px row — and with ONE split there is none: the
  *    same controls are portalled into the action bar's slots
  *    (`SplitPaneHeaderControls`), where an empty session note also gets a
- *    small edit entry and the selector carries the model / cost as a tooltip.
+ *    small edit entry and the selector carries the model / cost as a tooltip
+ *    (the split's maximize icon stays out: the bar has its own).
  *  - Body: caller-supplied terminal content (TerminalDisplay).
  *  - Footer: caller-supplied navigation / prompt / message input.
  *
@@ -25,7 +26,7 @@
 
 'use client';
 
-import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   ChevronDown,
   Maximize2,
@@ -143,6 +144,11 @@ export const SESSION_NOTE_MAX_LENGTH = 100;
  * holds the target listens. `MobileTerminalTab` is the listener.
  */
 export const SESSION_NOTE_OPEN_EVENT = 'session-note-open';
+
+/** Issue #3592: the note editor's width when it floats under the action bar (w-72). */
+const BAR_NOTE_EDITOR_WIDTH = 288;
+/** Issue #3592: how close to the viewport's edges that editor may come. */
+const BAR_NOTE_EDITOR_MARGIN = 8;
 
 /** One session's note, as `GET /api/worktrees` carries it (Issue #2427). */
 export interface SessionNoteValue {
@@ -326,6 +332,8 @@ export function SessionNoteInput({
   ariaLabel,
   placeholder,
   testId,
+  value: controlledValue,
+  onValueChange,
 }: {
   initialText: string;
   onCommit: (text: string) => void;
@@ -333,13 +341,27 @@ export function SessionNoteInput({
   ariaLabel: string;
   placeholder: string;
   testId: string;
+  /**
+   * Issue #3592: the text being typed, held by the caller. The PC split's
+   * editor moves between the split's title bar and the action bar when the
+   * split count changes, which re-creates this input; a value kept here would
+   * be lost with it. Omitted (the phone), the input holds its own.
+   */
+  value?: string;
+  onValueChange?: (value: string) => void;
 }) {
-  const [value, setValue] = useState(initialText);
+  const [ownValue, setOwnValue] = useState(initialText);
+  const value = controlledValue ?? ownValue;
+  const setValue = onValueChange ?? setOwnValue;
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     inputRef.current?.focus();
-    inputRef.current?.select();
+    // Issue #3592: a half-typed draft that moved here is continued, not
+    // selected — the next keystroke would replace it.
+    if (inputRef.current?.value === initialText) inputRef.current?.select();
+    // Mount only: what was there when the editor appeared.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleKeyDown = useCallback(
@@ -566,12 +588,21 @@ export const TerminalSplitPane = memo(function TerminalSplitPane({
   // not arrive as a prop like everything else here.
   const { note: sessionNote, save: saveSessionNote } = useSessionNote(worktreeId, instanceId);
   const [noteEditing, setNoteEditing] = useState(false);
+  // Issue #3592: the text being typed in the editor. Held here, in the pane,
+  // because the editor itself is re-created whenever it moves between the
+  // title bar and the action bar (1 <-> 2+ splits, the bar's "…" panel) —
+  // the pane is the one thing that stays put.
+  const [noteDraft, setNoteDraft] = useState('');
+  const sessionNoteText = sessionNote?.text ?? '';
   // A different session is a different memo; never leave the editor open across
   // an instance swap holding the previous session's text.
   useEffect(() => {
     setNoteEditing(false);
   }, [worktreeId, instanceId]);
-  const openNoteEditor = useCallback(() => setNoteEditing(true), []);
+  const openNoteEditor = useCallback(() => {
+    setNoteDraft(sessionNoteText);
+    setNoteEditing(true);
+  }, [sessionNoteText]);
   const closeNoteEditor = useCallback(() => setNoteEditing(false), []);
   const commitNote = useCallback(
     (text: string) => {
@@ -584,8 +615,37 @@ export const TerminalSplitPane = memo(function TerminalSplitPane({
   // focus to the menu trigger as it closes, so an editor mounted synchronously
   // in `onSelect` would be focused and then immediately un-focused.
   const openNoteEditorFromMenu = useCallback(() => {
-    setTimeout(() => setNoteEditing(true), 0);
-  }, []);
+    setTimeout(openNoteEditor, 0);
+  }, [openNoteEditor]);
+
+  // Issue #3592: in the action bar the editor is `fixed` under the session
+  // controls rather than `absolute` off them. The bar's left group is what its
+  // width fit measures, and a 288px absolute editor hanging out of it counts as
+  // its overflow ("does not fit") — the fit would fold the controls, and the
+  // editor with them, the moment it opened. A fixed box is not part of any
+  // ancestor's overflow; it stays in the slot's DOM, and so in the split's.
+  const barSessionRef = useRef<HTMLDivElement | null>(null);
+  const [barNotePosition, setBarNotePosition] = useState<{ top: number; left: number } | null>(
+    null,
+  );
+  useLayoutEffect(() => {
+    if (!noteEditing || !inActionBar) {
+      setBarNotePosition(null);
+      return;
+    }
+    const place = () => {
+      const rect = barSessionRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const left = Math.max(
+        BAR_NOTE_EDITOR_MARGIN,
+        Math.min(rect.left, window.innerWidth - BAR_NOTE_EDITOR_WIDTH - BAR_NOTE_EDITOR_MARGIN),
+      );
+      setBarNotePosition({ top: rect.bottom + 4, left });
+    };
+    place();
+    window.addEventListener('resize', place);
+    return () => window.removeEventListener('resize', place);
+  }, [noteEditing, inActionBar]);
 
   // Whether drag-drop is active for this pane (the parent wired a handler).
   const dropEnabled = onDropInstance != null;
@@ -736,7 +796,13 @@ export const TerminalSplitPane = memo(function TerminalSplitPane({
           <span className="truncate">{attachLabel}</span>
           <ChevronDown size={14} aria-hidden="true" className="flex-shrink-0 opacity-70" />
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" className="min-w-[10rem]">
+        <DropdownMenuContent
+          align="start"
+          className="min-w-[10rem]"
+          // Issue #3592: in the action bar's "…" panel this menu is a layer of
+          // the panel — a press in it must not close the panel under it.
+          data-floating-layer={inActionBar ? 'true' : undefined}
+        >
           <DropdownMenuRadioGroup value={instanceId} onValueChange={onInstanceChange}>
             {availableInstances.map(inst => (
               <DropdownMenuRadioItem key={inst.id} value={inst.id}>
@@ -933,7 +999,10 @@ export const TerminalSplitPane = memo(function TerminalSplitPane({
           `truncate`d alias to its left) is what keeps the row from wrapping in
           a narrow split — this is the row's fourth control. Rendered only when
           the parent wired `onToggleMaximize`. */}
-      {onToggleMaximize ? (
+      {/* Issue #3592: not in the action bar — the bar has its own maximize
+          (`toggle-maximize-split`), and two maximize icons side by side for
+          one split read as two different things. The "…" menu keeps the item. */}
+      {onToggleMaximize && !inActionBar ? (
         <Tooltip
           content={`${
             isMaximized
@@ -1025,14 +1094,25 @@ export const TerminalSplitPane = memo(function TerminalSplitPane({
   const noteEditor = noteEditing ? (
     <div
       data-testid={`split-session-note-editor-${splitIndex}`}
-      // Issue #3592: in the action bar the slot is only as wide as its
-      // controls, so the editor takes a width of its own there.
-      className={`absolute top-full z-30 mt-1 rounded-md border border-border bg-surface p-2 shadow-lg ${
-        inActionBar ? 'left-0 w-72' : 'inset-x-2'
+      // Issue #3592: in the action bar it is fixed (see `barNotePosition`)
+      // with a width of its own.
+      style={
+        inActionBar
+          ? barNotePosition
+            ? { top: barNotePosition.top, left: barNotePosition.left, width: BAR_NOTE_EDITOR_WIDTH }
+            : // Placed before paint (the layout effect); never `visibility:
+              // hidden` meanwhile, which would refuse the input's focus.
+              { top: 0, left: 0, width: BAR_NOTE_EDITOR_WIDTH }
+          : undefined
+      }
+      className={`rounded-md border border-border bg-surface p-2 shadow-lg ${
+        inActionBar ? 'fixed z-50' : 'absolute top-full z-30 mt-1 inset-x-2'
       }`}
     >
       <SessionNoteInput
-        initialText={sessionNote?.text ?? ''}
+        initialText={sessionNoteText}
+        value={noteDraft}
+        onValueChange={setNoteDraft}
         onCommit={commitNote}
         onCancel={closeNoteEditor}
         ariaLabel={noteEditLabel}
@@ -1087,8 +1167,13 @@ export const TerminalSplitPane = memo(function TerminalSplitPane({
           put in the React tree, so only these move when the split count does. */}
       {headerSlots
         ? createPortal(
+            // `data-split-index`: these controls are this split's even out
+            // of its subtree, for the split's own shortcuts (Mod+Shift+M /
+            // Mod+Shift+Enter resolve their owner through it).
             <div
+              ref={barSessionRef}
               data-testid={`split-bar-session-${splitIndex}`}
+              data-split-index={splitIndex}
               className="relative flex min-w-0 items-center gap-1.5"
             >
               {sessionControls}
@@ -1097,7 +1182,18 @@ export const TerminalSplitPane = memo(function TerminalSplitPane({
             headerSlots.session,
           )
         : null}
-      {headerSlots ? createPortal(actionControls, headerSlots.actions) : null}
+      {headerSlots
+        ? createPortal(
+            <div
+              data-testid={`split-bar-actions-${splitIndex}`}
+              data-split-index={splitIndex}
+              className="flex items-center gap-0.5"
+            >
+              {actionControls}
+            </div>,
+            headerSlots.actions,
+          )
+        : null}
 
       {/* Body: terminal display (or attach skeleton) */}
       <div ref={bodyRef} className="flex-1 min-h-0 relative" data-testid={`split-body-${splitIndex}`}>

@@ -14,7 +14,8 @@
  *   width, so there are no agent pills left to fold first;
  * - the second row (`TerminalSplitContainer`'s action bar): drop the History /
  *   Files labels to their icons, then move the slotted items (the
- *   Verification chip) behind a "…" button, then clip the layout ops
+ *   Verification chip, and with one split that split's session controls,
+ *   Issue #3592) behind a "…" button, then clip the layout ops
  *   ({@link useSplitActionBarFit}).
  *
  * @module hooks/useDesktopHeaderFit
@@ -63,13 +64,17 @@ export function contentOverflows(group: HTMLElement): boolean {
  *   node passed in as a slot): a new value re-measures without restarting, so
  *   content that grows gives up a step and content that shrinks waits for the
  *   next resize
+ * @param watchedContent - An element whose content other components render
+ *   (a portal target): any change inside it re-measures the way
+ *   `unkeyedContent` does (Issue #3592)
  */
 function useFitSteps(
   rowRef: React.RefObject<HTMLElement | null>,
   groupRef: React.RefObject<HTMLElement | null>,
   contentKey: string,
   maxStep: number,
-  unkeyedContent: unknown
+  unkeyedContent: unknown,
+  watchedContent: HTMLElement | null = null
 ): number {
   const [fit, setFit] = useState(() => ({ key: contentKey, step: 0 }));
 
@@ -89,7 +94,9 @@ function useFitSteps(
     const group = groupRef.current;
     if (!group || fit.step >= maxStep || !contentOverflows(group)) return;
     setFit((prev) => (prev.step >= maxStep ? prev : { ...prev, step: prev.step + 1 }));
-  }, [groupRef, fit, maxStep, unkeyedContent]);
+    // `watchedContent`: a new slot is new content (its portal fills it in the
+    // same commit), checked here before the observer below starts watching.
+  }, [groupRef, fit, maxStep, unkeyedContent, watchedContent]);
 
   useEffect(() => {
     const row = rowRef.current;
@@ -113,6 +120,27 @@ function useFitSteps(
     observer.observe(row);
     return () => observer.disconnect();
   }, [rowRef]);
+
+  // Issue #3592: content portalled into the row by another component changes
+  // no prop of the row's owner, so neither `contentKey` nor `unkeyedContent`
+  // sees it — a model, a cost or a note that grows would stay cut. Re-check
+  // when it changes, and only when the group now overflows: like
+  // `unkeyedContent`, this can only give up a step, never undo one.
+  useEffect(() => {
+    const group = groupRef.current;
+    if (!watchedContent || !group || typeof MutationObserver === 'undefined') return;
+    const observer = new MutationObserver(() => {
+      if (!contentOverflows(group)) return;
+      setFit((prev) => ({ ...prev }));
+    });
+    observer.observe(watchedContent, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+      attributes: true,
+    });
+    return () => observer.disconnect();
+  }, [groupRef, watchedContent]);
 
   return Math.min(current.step, maxStep);
 }
@@ -165,6 +193,8 @@ export interface SplitActionBarFit {
    * panel behind a "…" button, which never shrinks — so the chip, its ⓘ and
    * its reason stay reachable however narrow the terminal side gets (e.g. a
    * file panel dragged to leave the terminal its 20% minimum).
+   * Issue #3592: with one split, that split's agent selector, Terminal /
+   * Chat and note go with them.
    */
   itemsFolded: boolean;
   /**
@@ -188,13 +218,16 @@ export interface SplitActionBarFit {
  * @param leftRef - The left group; its overflow is the "does not fit" signal
  * @param contentKey - What changes the bar's widths and can be keyed
  * @param slotContent - The slotted node (unkeyed: a chip that grows re-measures)
+ * @param portalSlot - Issue #3592: the slot the lone split portals its
+ *   session controls into, watched for changes (null: none)
  */
 export function useSplitActionBarFit(
   barRef: React.RefObject<HTMLElement | null>,
   leftRef: React.RefObject<HTMLElement | null>,
   contentKey: string,
-  slotContent: unknown
+  slotContent: unknown,
+  portalSlot: HTMLElement | null = null
 ): SplitActionBarFit {
-  const step = useFitSteps(barRef, leftRef, contentKey, 3, slotContent);
+  const step = useFitSteps(barRef, leftRef, contentKey, 3, slotContent, portalSlot);
   return { compactToggles: step >= 1, itemsFolded: step >= 2, squeezed: step >= 3 };
 }

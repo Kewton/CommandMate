@@ -11,7 +11,7 @@
 
 import React, { useEffect } from 'react';
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, within } from '@testing-library/react';
+import { render, screen, fireEvent, within, act } from '@testing-library/react';
 import { TerminalSplitContainer } from '@/components/worktree/TerminalSplitContainer';
 import { TerminalSplitPane } from '@/components/worktree/TerminalSplitPane';
 import { clearTerminalSplitsLocalStorage } from '@tests/helpers/terminal-splits';
@@ -36,7 +36,10 @@ function PaneBody({ splitIndex }: { splitIndex: number }) {
   return <textarea data-testid={`draft-${splitIndex}`} defaultValue="" />;
 }
 
-function renderContainer(extra: Partial<React.ComponentProps<typeof TerminalSplitContainer>> = {}) {
+function renderContainer(
+  extra: Partial<React.ComponentProps<typeof TerminalSplitContainer>> = {},
+  agentModel = 'opus-4',
+) {
   return render(
     <TerminalSplitContainer
       worktreeId="w-3592"
@@ -67,7 +70,7 @@ function renderContainer(extra: Partial<React.ComponentProps<typeof TerminalSpli
           onToggleMaximize={onToggleMaximize}
           showFocusFrame={showFocusFrame}
           onSurfaceModeChange={vi.fn()}
-          agentModel="opus-4"
+          agentModel={agentModel}
           agentUsage="$0.03 · 8.5K (1%)"
           agentUsageDetail="cost detail"
           terminal={<PaneBody splitIndex={splitIndex} />}
@@ -112,7 +115,9 @@ describe('[#3592] one split: the title bar\'s controls are in the action bar', (
   it('puts search, maximize and "…" at the right end, left of History / Files', () => {
     renderContainer();
     const actions = screen.getByTestId('split-action-bar-pane-actions');
-    for (const id of ['terminal-search-button-0', 'toggle-maximize-0', 'split-more-menu-0']) {
+    // Second contract: the split's own maximize icon is not drawn here — the
+    // bar's `toggle-maximize-split` is the one maximize (see below).
+    for (const id of ['terminal-search-button-0', 'split-more-menu-0']) {
       expect(within(actions).getByTestId(id)).toBeInTheDocument();
     }
     const history = screen.getByTestId('toggle-history-pane');
@@ -207,5 +212,215 @@ describe('[#3592] negative control: a pane with no container keeps its title bar
     renderContainer();
     expect(screen.getByTestId('toggle-maximize-split')).toBeDisabled();
     clearTerminalSplitsLocalStorage();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Second contract (Codex consistency review: P2 x3, P3 x1)
+// ---------------------------------------------------------------------------
+
+describe('[#3592] the note being typed survives 1 <-> 2 splits', () => {
+  beforeEach(() => clearTerminalSplitsLocalStorage());
+  afterEach(() => clearTerminalSplitsLocalStorage());
+
+  it('keeps the half-typed note through 1 -> 2 -> 1 (positive)', () => {
+    renderContainer();
+    fireEvent.click(screen.getByTestId('split-session-note-edit-0'));
+    fireEvent.change(screen.getByTestId('split-session-note-input-0'), {
+      target: { value: 'review pending' },
+    });
+
+    fireEvent.click(screen.getByTestId('split-layout-2'));
+    const inHeader = within(screen.getByTestId('split-header-0')).getByTestId(
+      'split-session-note-input-0',
+    ) as HTMLInputElement;
+    expect(inHeader.value).toBe('review pending');
+
+    fireEvent.click(screen.getByTestId('split-layout-1'));
+    const inBar = within(screen.getByTestId('split-action-bar-session')).getByTestId(
+      'split-session-note-input-0',
+    ) as HTMLInputElement;
+    expect(inBar.value).toBe('review pending');
+  });
+
+  it('opens with the saved note (empty here) after a cancel (negative)', () => {
+    renderContainer();
+    fireEvent.click(screen.getByTestId('split-session-note-edit-0'));
+    const input = screen.getByTestId('split-session-note-input-0');
+    fireEvent.change(input, { target: { value: 'thrown away' } });
+    fireEvent.keyDown(input, { key: 'Escape' });
+    expect(screen.queryByTestId('split-session-note-input-0')).toBeNull();
+
+    fireEvent.click(screen.getByTestId('split-session-note-edit-0'));
+    expect((screen.getByTestId('split-session-note-input-0') as HTMLInputElement).value).toBe('');
+  });
+});
+
+describe('[#3592] the controls moved into the bar carry the split\'s mark', () => {
+  beforeEach(() => clearTerminalSplitsLocalStorage());
+  afterEach(() => clearTerminalSplitsLocalStorage());
+
+  it('marks the session and action controls with data-split-index', () => {
+    renderContainer();
+    fireEvent.click(screen.getByTestId('split-session-note-edit-0'));
+    for (const id of ['split-session-note-input-0', 'cli-selector-0', 'split-more-menu-0']) {
+      const owner = screen.getByTestId(id).closest('[data-split-index]');
+      expect(owner).not.toBeNull();
+      expect(owner?.getAttribute('data-split-index')).toBe('0');
+      // Outside the pane's subtree: the mark is on the bar side.
+      expect(screen.getByTestId('terminal-split-pane-0').contains(owner)).toBe(false);
+    }
+  });
+});
+
+describe('[#3592] one maximize icon with one split', () => {
+  beforeEach(() => clearTerminalSplitsLocalStorage());
+  afterEach(() => clearTerminalSplitsLocalStorage());
+
+  it('draws only the bar\'s maximize on the second row (positive)', () => {
+    renderContainer();
+    const bar = screen.getByTestId('split-action-bar');
+    expect(within(bar).queryByTestId('toggle-maximize-0')).toBeNull();
+    expect(within(bar).getByTestId('toggle-maximize-split')).toBeInTheDocument();
+    // The "…" menu keeps its item.
+    expect(within(bar).getByTestId('split-more-menu-0')).toBeInTheDocument();
+  });
+
+  it('keeps each split\'s maximize in its title bar with two splits (negative)', () => {
+    renderContainer();
+    fireEvent.click(screen.getByTestId('split-layout-2'));
+    for (const idx of [0, 1]) {
+      expect(
+        within(screen.getByTestId(`split-header-${idx}`)).getByTestId(`toggle-maximize-${idx}`),
+      ).toBeInTheDocument();
+    }
+    expect(screen.getByTestId('toggle-maximize-split')).not.toBeDisabled();
+  });
+});
+
+/*
+ * The bar's width fit, with the lone split's controls in it. jsdom has no
+ * layout, so a small width model stands in: the left group is `leftWidth`
+ * wide and its content is the layout ops plus — while they are in it — the
+ * split's session controls, whose width follows the model's text (so a model
+ * that grows widens them). Only `scrollWidth` / `clientWidth` are read by the fit.
+ */
+describe('[#3592] the moved controls are part of the bar\'s width fit', () => {
+  let leftWidth = 2000;
+  const LAYOUT_OPS = 160;
+  // A fixed part (selector, Terminal / Chat, cost, note entry) plus the model.
+  const sessionWidth = (el: Element) =>
+    200 + (el.querySelector('[data-testid="split-agent-model-0"]')?.textContent ?? '').length * 6;
+  const original = {
+    scroll: Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollWidth'),
+    client: Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth'),
+  };
+
+  beforeEach(() => {
+    clearTerminalSplitsLocalStorage();
+    leftWidth = 2000;
+    Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
+      configurable: true,
+      get(this: HTMLElement) {
+        return this.getAttribute('data-testid') === 'split-action-bar-left' ? leftWidth : 0;
+      },
+    });
+    Object.defineProperty(HTMLElement.prototype, 'scrollWidth', {
+      configurable: true,
+      get(this: HTMLElement) {
+        if (this.getAttribute('data-testid') !== 'split-action-bar-left') return 0;
+        const session = this.querySelector('[data-testid="split-bar-session-0"]');
+        return LAYOUT_OPS + (session ? sessionWidth(session) : 0);
+      },
+    });
+  });
+
+  afterEach(() => {
+    clearTerminalSplitsLocalStorage();
+    if (original.scroll) Object.defineProperty(HTMLElement.prototype, 'scrollWidth', original.scroll);
+    if (original.client) Object.defineProperty(HTMLElement.prototype, 'clientWidth', original.client);
+  });
+
+  it('keeps them on the bar where they fit (negative)', () => {
+    renderContainer({ actionBarItems: undefined });
+    expect(screen.queryByTestId('split-action-bar-items-overflow')).toBeNull();
+    expect(
+      within(screen.getByTestId('split-action-bar-left')).getByTestId('cli-selector-0'),
+    ).toBeInTheDocument();
+  });
+
+  it('folds the selector, Terminal / Chat and the note behind "…" where they do not (positive)', () => {
+    leftWidth = 300;
+    renderContainer();
+    const left = screen.getByTestId('split-action-bar-left');
+    expect(within(left).queryByTestId('cli-selector-0')).toBeNull();
+
+    fireEvent.click(screen.getByTestId('split-action-bar-items-overflow'));
+    const panel = screen.getByTestId('split-action-bar-items-panel');
+    for (const id of ['chip', 'cli-selector-0', 'surface-mode-toggle-0', 'split-session-note-edit-0']) {
+      expect(within(panel).getByTestId(id)).toBeInTheDocument();
+    }
+    // The chip stays first: "…" hands focus to it, as before.
+    expect(
+      within(panel).getByTestId('chip').compareDocumentPosition(
+        within(panel).getByTestId('cli-selector-0'),
+      ) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    // A press in the moved controls does not close the panel.
+    fireEvent.mouseDown(within(panel).getByTestId('surface-mode-chat-0'));
+    expect(screen.getByTestId('split-action-bar-items-panel')).toBeInTheDocument();
+  });
+
+  it('keeps the folded controls mounted (hidden) while the panel is closed', () => {
+    leftWidth = 300;
+    renderContainer();
+    const selector = screen.getByTestId('cli-selector-0');
+    expect(selector.closest('[hidden]')).not.toBeNull();
+    // Still the one split's controls: no title bar came back.
+    expect(screen.queryByTestId('split-header-0')).toBeNull();
+  });
+
+  it('folds without an item of the worktree screen\'s, too', () => {
+    leftWidth = 300;
+    renderContainer({ actionBarItems: undefined });
+    fireEvent.click(screen.getByTestId('split-action-bar-items-overflow'));
+    expect(
+      within(screen.getByTestId('split-action-bar-items-panel')).getByTestId('cli-selector-0'),
+    ).toBeInTheDocument();
+  });
+
+  it('measures again when what the split draws grows, with no prop of the bar changing (positive)', async () => {
+    // 160 ops + 206 of session fit in 420 with a one-letter model ...
+    leftWidth = 420;
+    const { rerender } = renderContainer({ actionBarItems: undefined }, 'm');
+    expect(screen.queryByTestId('split-action-bar-items-overflow')).toBeNull();
+
+    // ... and not with a long one. Only the split's own prop changes.
+    const long = 'claude-opus-with-a-very-long-model-identifier';
+    rerender(
+      <TerminalSplitContainer
+        worktreeId="w-3592"
+        instances={INSTANCES}
+        renderPane={({ splitIndex, cliToolId, instanceId, instance, availableInstances, onInstanceChange, onFocus }) => (
+          <TerminalSplitPane
+            worktreeId="w-3592"
+            splitIndex={splitIndex}
+            cliToolId={cliToolId}
+            instanceId={instanceId}
+            instance={instance}
+            availableInstances={availableInstances}
+            onInstanceChange={onInstanceChange}
+            onFocus={onFocus}
+            agentModel={long}
+            terminal={<PaneBody splitIndex={splitIndex} />}
+            footer={<div />}
+          />
+        )}
+      />,
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.getByTestId('split-action-bar-items-overflow')).toBeInTheDocument();
   });
 });

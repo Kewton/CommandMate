@@ -8,8 +8,9 @@
  * split draws its header controls into them instead:
  *  - `session`: the agent selector, Terminal / Chat, model, cost, the session
  *    note (or its edit entry) and End — right of the Verification chip;
- *  - `actions`: search, maximize and "…" — at the right end, left of
- *    History / Open Files.
+ *  - `actions`: search and "…" — at the right end, left of History /
+ *    Open Files. Not the split's maximize icon: the bar has its own
+ *    (`toggle-maximize-split`), and the "…" menu keeps the item.
  * With two or more splits there are no slots and every split keeps its own
  * (30px) title bar, so which split a control acts on stays visible.
  *
@@ -18,7 +19,9 @@
  * splits moves only the controls and never re-creates the split's content (the
  * composer draft, the polling, the scroll position, the Verification reason).
  * React events still bubble through the pane, so a press in the slot focuses
- * the split as a press in its title bar does.
+ * the split as a press in its title bar does; the DOM does not, so what the
+ * split draws there is wrapped in a `data-split-index` box — the split's own
+ * shortcuts find their owner through it.
  *
  * The context lives here rather than in either component so that neither
  * `TerminalSplitPane` nor `TerminalSplitContainer` has to import the other.
@@ -34,7 +37,7 @@ import { createContext, useContext } from 'react';
 export interface SplitHeaderSlots {
   /** Right of the Verification chip: selector, Terminal / Chat, labels, note. */
   session: HTMLElement;
-  /** Right end, left of History / Open Files: search, maximize, "…". */
+  /** Right end, left of History / Open Files: search, "…". */
   actions: HTMLElement;
 }
 

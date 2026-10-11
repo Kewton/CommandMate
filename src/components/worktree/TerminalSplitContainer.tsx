@@ -293,7 +293,9 @@ export interface TerminalSplitContainerProps {
    * editor), and lifting them into the parent would re-create the split on
    * every 1 ↔ 2 switch. They are portalled into two slots this bar renders
    * itself with one split (`SplitPaneHeaderControls`): right after this node,
-   * in the same fitted left group, and left of History / Files.
+   * in the same fitted left group, and left of History / Files. The session
+   * slot is measured with the group (its content re-measures as it changes)
+   * and folds behind the same "…" as this node.
    */
   actionBarItems?: ReactNode;
 }
@@ -667,19 +669,6 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
   // are a node and re-measure without a key.
   const actionBarRef = useRef<HTMLDivElement>(null);
   const actionBarLeftRef = useRef<HTMLDivElement>(null);
-  const actionBarFitKey = [
-    t('terminal.historyLabel'),
-    t('terminal.filesLabel'),
-    openFileCount,
-    isMaximized ? `max:${maximizedIndex ?? 0}` : '',
-  ].join('\n');
-  const actionBarFit = useSplitActionBarFit(
-    actionBarRef,
-    actionBarLeftRef,
-    actionBarFitKey,
-    actionBarItems
-  );
-
   /*
    * Issue #3592: with one split, its title bar's controls move into the bar —
    * the session ones right of the slotted items, the actions left of History /
@@ -690,6 +679,33 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
   const singleSplit = splits.length === MIN_SPLITS;
   const [sessionSlotEl, setSessionSlotEl] = useState<HTMLDivElement | null>(null);
   const [actionsSlotEl, setActionsSlotEl] = useState<HTMLDivElement | null>(null);
+
+  const actionBarFitKey = [
+    t('terminal.historyLabel'),
+    t('terminal.filesLabel'),
+    openFileCount,
+    isMaximized ? `max:${maximizedIndex ?? 0}` : '',
+    // Issue #3592: the lone split's controls come and go with the count.
+    singleSplit ? 'one' : '',
+  ].join('\n');
+  const actionBarFit = useSplitActionBarFit(
+    actionBarRef,
+    actionBarLeftRef,
+    actionBarFitKey,
+    actionBarItems,
+    // Issue #3592: portalled in by the split, so no prop of ours changes when
+    // its model, cost or note does — the slot is watched instead.
+    sessionSlotEl
+  );
+  // Issue #3592: the lone split's session controls fold with the items.
+  const sessionFolded = singleSplit && actionBarFit.itemsFolded;
+  const sessionSlot = singleSplit ? (
+    <div
+      ref={setSessionSlotEl}
+      data-testid="split-action-bar-session"
+      className={`flex min-w-0 items-center${sessionFolded ? '' : ' ml-1'}`}
+    />
+  ) : null;
   const headerSlots = useMemo<SplitHeaderSlots | null>(
     () =>
       singleSplit && sessionSlotEl && actionsSlotEl
@@ -900,19 +916,19 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
           {/* Issue #3592: the lone split's agent selector, Terminal / Chat,
               model, cost and note. In the left group, so the bar's fit counts
               it; `min-w-0` so the model / cost / note truncate first. */}
-          {singleSplit && (
-            <div
-              ref={setSessionSlotEl}
-              data-testid="split-action-bar-session"
-              className="ml-1 flex min-w-0 items-center"
-            />
-          )}
+          {!sessionFolded && sessionSlot}
         </div>
 
         {/* Issue #3590: on a bar too narrow for them, the items wait behind
-            this button, which never shrinks, in a panel out of every clip. */}
-        {actionBarItems && actionBarFit.itemsFolded && (
-          <ActionBarItemsOverflow label={t('terminal.actionBarMore')}>
+            this button, which never shrinks, in a panel out of every clip.
+            Issue #3592: the lone split's session controls (selector, Terminal /
+            Chat, note) wait there with them — parked, hidden but mounted, while
+            the panel is closed. */}
+        {(actionBarItems || sessionFolded) && actionBarFit.itemsFolded && (
+          <ActionBarItemsOverflow
+            label={t('terminal.actionBarMore')}
+            parked={sessionFolded ? sessionSlot : null}
+          >
             {actionBarItems}
           </ActionBarItemsOverflow>
         )}
@@ -921,7 +937,7 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
             (right). `ml-auto` pushes the History / Files group to the far right. */}
         <div className="ml-auto h-4 w-px flex-shrink-0 bg-border" aria-hidden="true" />
 
-        {/* Issue #3592: the lone split's search, maximize and "…". */}
+        {/* Issue #3592: the lone split's search and "…". */}
         {singleSplit && (
           <div
             ref={setActionsSlotEl}
@@ -1202,8 +1218,20 @@ export function clampOverflowPanelLeft(
  * outside closes without moving focus — the press already put it where the
  * user wanted. A press inside any `[data-floating-layer]` (the chip's reason
  * popover) counts as inside.
+ *
+ * Issue #3592: `parked` is drawn after `children` while the panel is open,
+ * and in a hidden box beside the button while it is closed — for a slot
+ * another component portals into, which must exist in either state.
  */
-function ActionBarItemsOverflow({ label, children }: { label: string; children: ReactNode }) {
+function ActionBarItemsOverflow({
+  label,
+  children,
+  parked = null,
+}: {
+  label: string;
+  children: ReactNode;
+  parked?: ReactNode;
+}) {
   const [open, setOpen] = useState(false);
   const [position, setPosition] = useState<{ top: number; left: number } | null>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -1294,6 +1322,7 @@ function ActionBarItemsOverflow({ label, children }: { label: string; children: 
           <Ellipsis className="w-4 h-4" aria-hidden="true" />
         </button>
       </Tooltip>
+      {!open && parked ? <div hidden>{parked}</div> : null}
       {open &&
         typeof document !== 'undefined' &&
         createPortal(
@@ -1311,6 +1340,7 @@ function ActionBarItemsOverflow({ label, children }: { label: string; children: 
             className="fixed z-50 flex max-w-[calc(100vw-16px)] items-center gap-1 rounded-lg border border-border bg-surface p-1 shadow-lg"
           >
             {children}
+            {parked}
           </div>,
           document.body
         )}

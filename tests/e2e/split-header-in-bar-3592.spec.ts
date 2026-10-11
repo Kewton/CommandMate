@@ -13,6 +13,10 @@
  * - **1 → 2 → 1 rebuilds nothing**: the composer's draft survives and the
  *   terminal body is the same element throughout.
  *
+ * Second contract: the note being typed survives 1 → 2 → 1, Mod+Shift+M typed
+ * in the bar's note editor acts on the split, and with the terminal at its
+ * 20% minimum the moved controls fold behind the bar's "…" and stay usable.
+ *
  * Holds whether the side panel starts open or closed (#3589): nothing here
  * depends on the terminal's left edge.
  *
@@ -46,6 +50,61 @@ async function expectReachableIn(locator: Locator, container: Box): Promise<void
     return top !== null && (el === top || el.contains(top));
   });
   expect(hit).toBe(true);
+}
+
+/** Non-editable file, so the panel renders the plain code viewer (as in the #3590 spec). */
+const FILE_NAME = 'notes-3592.log';
+const FILE_BODY = 'narrow terminal\n';
+/** Mirror of FILE_PANEL_COLLAPSED_STORAGE_KEY. */
+const FILE_PANEL_COLLAPSED_KEY = 'commandmate.worktree.filePanelCollapsed';
+
+async function mockOneFile(page: Page): Promise<void> {
+  await page.addInitScript((key) => {
+    try {
+      localStorage.removeItem(key);
+    } catch {
+      /* storage unavailable - non-fatal */
+    }
+  }, FILE_PANEL_COLLAPSED_KEY);
+  // Registered after setupSplitTest's catch-all, so these win.
+  await page.route(
+    (url) => url.pathname.endsWith(`/api/worktrees/${E2E_WORKTREE_A}/tree`),
+    (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          path: '',
+          parentPath: null,
+          items: [{ name: FILE_NAME, type: 'file', size: FILE_BODY.length, extension: 'log' }],
+        }),
+      }),
+  );
+  await page.route(
+    (url) => url.pathname.endsWith(`/api/worktrees/${E2E_WORKTREE_A}/files/${FILE_NAME}`),
+    (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          path: FILE_NAME,
+          content: FILE_BODY,
+          extension: 'log',
+          worktreePath: `/tmp/${E2E_WORKTREE_A}`,
+        }),
+      }),
+  );
+}
+
+async function openMockedFile(page: Page): Promise<void> {
+  const pane = page.getByTestId('activity-pane');
+  await expect(pane).toBeVisible();
+  if ((await pane.getAttribute('data-active')) !== 'files') {
+    await page.getByTestId('activity-bar-button-files').click();
+  }
+  await expect(pane).toHaveAttribute('data-active', 'files');
+  await page.getByTestId(`tree-item-${FILE_NAME}`).click();
+  await expect(page.getByTestId(`file-tab-${FILE_NAME}`)).toBeVisible();
 }
 
 async function openOneSplit(page: Page): Promise<void> {
@@ -83,7 +142,7 @@ test.describe('Split title bar on the second row (Issue #3592)', () => {
       'surface-mode-chat-0',
       'split-session-note-edit-0',
       'terminal-search-button-0',
-      'toggle-maximize-0',
+      'toggle-maximize-split',
       'split-more-menu-0',
       'toggle-history-pane',
       'toggle-file-panel',
@@ -99,6 +158,9 @@ test.describe('Split title bar on the second row (Issue #3592)', () => {
     const more = await box(page.getByTestId('split-more-menu-0'));
     const history = await box(page.getByTestId('toggle-history-pane'));
     expect(more.x + more.width).toBeLessThanOrEqual(history.x);
+
+    // One maximize icon on the row: the bar's (second contract).
+    await expect(barLocator.getByTestId('toggle-maximize-0')).toHaveCount(0);
 
     // Open Files: no file open → disabled, as before.
     await expect(page.getByTestId('toggle-file-panel')).toBeDisabled();
@@ -166,5 +228,79 @@ test.describe('Split title bar on the second row (Issue #3592)', () => {
     await expect(page.getByTestId('split-header-0')).toHaveCount(0);
     await expect(textarea).toHaveValue('half-typed instruction #3592');
     await expect(page.getByTestId('split-body-0')).toHaveAttribute('data-e2e-mark', 'kept');
+  });
+
+  test('the note being typed survives 1 → 2 → 1, and Mod+Shift+M in it acts on the split', async ({
+    page,
+  }) => {
+    await openOneSplit(page);
+
+    await page.getByTestId('split-session-note-edit-0').click();
+    const note = page.getByTestId('split-session-note-input-0');
+    await expect(note).toBeFocused();
+    await note.fill('review pending');
+
+    // The bar's note editor belongs to split 1: the chord switches it to Chat.
+    await note.press('ControlOrMeta+Shift+M');
+    await expect(page.getByTestId('surface-mode-chat-0')).toHaveAttribute('aria-pressed', 'true');
+    await expect(note).toHaveValue('review pending');
+
+    await page.getByTestId('split-layout-2').click();
+    await expect(
+      page.getByTestId('split-header-0').getByTestId('split-session-note-input-0'),
+    ).toHaveValue('review pending');
+
+    await page.getByTestId('split-layout-1').click();
+    await expect(
+      page.getByTestId('split-action-bar-session').getByTestId('split-session-note-input-0'),
+    ).toHaveValue('review pending');
+    await page.keyboard.press('Escape');
+    await page.getByTestId('surface-mode-terminal-0').click();
+  });
+
+  test('with the terminal at its 20% minimum, the moved controls are behind "…" and usable', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await setupSplitTest(page, [E2E_WORKTREE_A]);
+    await mockOneFile(page);
+    await page.goto(`/worktrees/${E2E_WORKTREE_A}`);
+    await openMockedFile(page);
+
+    // Drag the terminal / file panel border all the way left: the terminal
+    // stops at FilePanelSplit's 20% minimum.
+    const resizer = page
+      .getByTestId('terminal-pane')
+      .locator('xpath=following-sibling::*[@role="separator"][1]');
+    const r = await box(resizer);
+    await page.mouse.move(r.x + r.width / 2, r.y + r.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(0, r.y + r.height / 2, { steps: 10 });
+    await page.mouse.up();
+    const barLocator = page.getByTestId('split-action-bar');
+    expect((await box(barLocator)).width).toBeLessThan(400);
+
+    // Folded: nothing of the split's session controls is on the bar's left.
+    const overflow = page.getByTestId('split-action-bar-items-overflow');
+    await expect(overflow).toBeVisible();
+    await expect(page.getByTestId('split-action-bar-left').getByTestId('cli-selector-0')).toHaveCount(0);
+    await expectReachableIn(overflow, await box(barLocator));
+    // The right end is unchanged: search, maximize, "…" and the panel toggles.
+    for (const id of ['terminal-search-button-0', 'split-more-menu-0', 'toggle-history-pane']) {
+      await expectReachableIn(barLocator.getByTestId(id), await box(barLocator));
+    }
+
+    await overflow.click();
+    const panel = page.getByTestId('split-action-bar-items-panel');
+    await expect(panel).toBeVisible();
+    for (const id of ['cli-selector-0', 'surface-mode-chat-0', 'split-session-note-edit-0']) {
+      await expect(panel.getByTestId(id)).toBeVisible();
+      await expectReachableIn(panel.getByTestId(id), await box(panel));
+    }
+    await panel.getByTestId('surface-mode-chat-0').click();
+    await expect(page.getByTestId('surface-mode-chat-0')).toHaveAttribute('aria-pressed', 'true');
+    // The panel stays open for the next control.
+    await expect(panel).toBeVisible();
+    await panel.getByTestId('surface-mode-terminal-0').click();
   });
 });
