@@ -11,7 +11,8 @@
  *    compared against a render without the prop), and on a phone the prop does
  *    nothing at all.
  * 2. **One threshold, spelled as literals.** Every one-row class is the
- *    `COMPOSER_ONE_ROW_MIN_CONTAINER_PX` container variant, and the form is the
+ *    `COMPOSER_ONE_ROW_MIN_CONTAINER_PX` (src/config/composer-layout.ts)
+ *    container variant, and the form is the
  *    container it queries.
  * 3. **The same controls, once each.** The toolbar, the textarea row and the
  *    meta row dissolve (`contents`) into the input row; `order` puts
@@ -23,10 +24,8 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
-import {
-  COMPOSER_ONE_ROW_MIN_CONTAINER_PX,
-  MessageInput,
-} from '@/components/worktree/MessageInput';
+import { MessageInput } from '@/components/worktree/MessageInput';
+import { COMPOSER_ONE_ROW_MIN_CONTAINER_PX } from '@/config/composer-layout';
 import { worktreeApi } from '@/lib/api-client';
 import {
   createDefaultProps,

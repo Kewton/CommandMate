@@ -69,7 +69,10 @@ import {
   COMPOSER_PANE_BODY_MIN_HEIGHT_PX,
   composerHeightScopeForSplit,
 } from '../../src/config/composer-height';
-import { COMPOSER_HINTS_MIN_CONTAINER_PX } from '../../src/config/composer-layout';
+import {
+  COMPOSER_HINTS_MIN_CONTAINER_PX,
+  COMPOSER_ONE_ROW_MIN_CONTAINER_PX,
+} from '../../src/config/composer-layout';
 
 const DESKTOP_VIEWPORT = { width: 1440, height: 900 } as const;
 
@@ -237,7 +240,7 @@ test.describe('[#2598] two rows on a PC', () => {
 
         // Issue #3595: a pane this wide draws the composer as one row; what
         // that layout promises is asserted in the '[#3595]' describe below.
-        if (row.width >= ONE_ROW_MIN_ROW_PX) continue;
+        if (row.width >= COMPOSER_ONE_ROW_MIN_CONTAINER_PX) continue;
 
         // The toolbar is a row of its own, entirely above the textarea, and
         // holds the attach, mode and interrupt buttons.
@@ -410,7 +413,7 @@ test.describe('[#2797] the direct-input toggle', () => {
         expect.soft(boxesIntersect(toggle.box, b['composer-toolbar-start']!.box), `${label}: clear of start`).toBe(false);
         // Issue #3595: in the one-row layout there is no meta row to be above
         // (it is dissolved into the textarea's line).
-        if (row.width < ONE_ROW_MIN_ROW_PX) {
+        if (row.width < COMPOSER_ONE_ROW_MIN_CONTAINER_PX) {
           expect.soft(toggle.box.bottom, `${label}: above the meta row`).toBeLessThanOrEqual(b['composer-meta-row']!.box.top);
         }
         // The mode button beside it is still painted whole.
@@ -614,13 +617,6 @@ const PRE_3595_ONE_SPLIT_COMPOSER_PX = 120;
 /** The Issue's acceptance bound: the empty composer is at least this much lower. */
 const MIN_ONE_ROW_SAVING_PX = 40;
 
-/**
- * Mirror of `COMPOSER_ONE_ROW_MIN_CONTAINER_PX` (MessageInput.tsx): the row
- * width at or above which the split's composer is one row. Mirrored rather than
- * imported because that module is a client component.
- */
-const ONE_ROW_MIN_ROW_PX = 760;
-
 /** The floor the one-row layout keeps for the textarea (`min-w-40`). */
 const ONE_ROW_TEXTAREA_MIN_PX = 160;
 
@@ -633,6 +629,7 @@ const ONE_ROW_IDS = [
   'interrupt-button',
   'direct-input-toggle',
   'composer-hints',
+  'composer-hints-button',
   `split-composer-0`,
   `split-composer-target-0`,
 ] as const;
@@ -659,7 +656,9 @@ test.describe('[#3595] one row in a wide split', () => {
       }));
 
       // A single split on this screen is a wide pane, panels open or closed.
-      expect(row.width, 'one split is wide').toBeGreaterThanOrEqual(ONE_ROW_MIN_ROW_PX);
+      expect(row.width, 'one split is wide').toBeGreaterThanOrEqual(COMPOSER_ONE_ROW_MIN_CONTAINER_PX);
+      await expect(page.getByTestId('terminal-split-pane-0').locator('form'))
+        .toHaveAttribute('data-one-row-min-px', String(COMPOSER_ONE_ROW_MIN_CONTAINER_PX));
       expect(PRE_3595_ONE_SPLIT_COMPOSER_PX - composer.height, 'height saved').toBeGreaterThanOrEqual(MIN_ONE_ROW_SAVING_PX);
       expect(textarea.width, 'textarea floor').toBeGreaterThanOrEqual(ONE_ROW_TEXTAREA_MIN_PX);
 
@@ -674,6 +673,7 @@ test.describe('[#3595] one row in a wide split', () => {
         attach: b['attach-image-button']!.box,
         mode: b['agent-mode-cycle-button']!.box,
         autoYes: autoYes!,
+        hintsButton: b['composer-hints-button']!.box,
         direct: b['direct-input-toggle']!.box,
         interrupt: b['interrupt-button']!.box,
         send: b['send-message-button']!.box,
@@ -686,7 +686,8 @@ test.describe('[#3595] one row in a wide split', () => {
       expect(controls.attach.right).toBeLessThanOrEqual(controls.mode.left + 0.5);
       expect(controls.mode.right).toBeLessThanOrEqual(textarea.left + 0.5);
       expect(textarea.right).toBeLessThanOrEqual(controls.autoYes.left + 0.5);
-      expect(controls.autoYes.right).toBeLessThanOrEqual(controls.direct.left + 0.5);
+      expect(controls.autoYes.right).toBeLessThanOrEqual(controls.hintsButton.left + 0.5);
+      expect(controls.hintsButton.right).toBeLessThanOrEqual(controls.direct.left + 0.5);
       expect(controls.direct.right).toBeLessThanOrEqual(controls.interrupt.left + 0.5);
       expect(controls.interrupt.right).toBeLessThanOrEqual(controls.send.left + 0.5);
 
@@ -694,6 +695,13 @@ test.describe('[#3595] one row in a wide split', () => {
       expect(b['composer-hints']?.box.width ?? 0, 'hints not drawn').toBe(0);
       await expect(page.getByTestId('terminal-split-pane-0').getByTestId('message-input-textarea'))
         .toHaveAttribute('title', /commands|コマンド/);
+      // …and a keyboard way in: Tab from the Auto-Yes switch lands on the
+      // hints button, whose Tooltip shows them.
+      const pane = page.getByTestId('terminal-split-pane-0');
+      await pane.locator('[data-testid="composer-meta-row"] [role="switch"]').focus();
+      await page.keyboard.press('Tab');
+      await expect(pane.getByTestId('composer-hints-button')).toBeFocused();
+      await expect(page.getByRole('tooltip', { includeHidden: true })).toHaveText(/commands|コマンド/);
       // The target line is still drawn on the border.
       expect(b['split-composer-target-0']!.box.width, 'target line').toBeGreaterThan(0);
     });
@@ -716,6 +724,59 @@ test.describe('[#3595] one row in a wide split', () => {
     expect(Math.abs(b['attach-image-button']!.box.bottom - box.bottom), 'attach at the bottom').toBeLessThanOrEqual(2);
   });
 
+  test('re-fits a draft that wraps when Auto-Yes is turned on (no scrolling inside one line)', async ({ page }) => {
+    await open(page, PRE_2598.oneSplit.widths);
+    // Auto-Yes state that follows the toggle: the fixture's mock is static.
+    let on = false;
+    await page.route(
+      url => /\/api\/worktrees\/[^/]+\/auto-yes/.test(url.pathname),
+      async route => {
+        const expiresAt = Date.now() + 3 * 60 * 60 * 1000;
+        if (route.request().method() === 'POST') {
+          on = true;
+          return route.fulfill({ json: { enabled: true, expiresAt } });
+        }
+        return route.fulfill({
+          json: { instances: { claude: { enabled: on, expiresAt: on ? expiresAt : null } } },
+        });
+      },
+    );
+    const pane = page.getByTestId('terminal-split-pane-0');
+    const textarea = pane.getByTestId('message-input-textarea');
+    const lines = () => textarea.evaluate(el => {
+      const t = el as HTMLTextAreaElement;
+      return { client: t.clientHeight, scroll: t.scrollHeight, height: t.getBoundingClientRect().height };
+    });
+
+    // The longest draft that is still one line with Auto-Yes off.
+    let lo = 1;
+    let hi = 400;
+    while (lo < hi) {
+      const mid = Math.ceil((lo + hi) / 2);
+      await textarea.fill('x'.repeat(mid));
+      if ((await lines()).height <= COMPOSER_MIN_HEIGHT_PX + 0.5) lo = mid;
+      else hi = mid - 1;
+    }
+    await textarea.fill('x'.repeat(lo));
+    await expect.poll(async () => (await lines()).height).toBe(COMPOSER_MIN_HEIGHT_PX);
+    const widthOff = (await textarea.boundingBox())!.width;
+
+    // Auto-Yes on: the countdown narrows the textarea.
+    await pane.locator('[data-testid="composer-meta-row"] [role="switch"]').click();
+    await page.getByTestId('confirm-button').click();
+    await expect(pane.getByText(/\d:\d\d:\d\d/)).toBeVisible();
+    const widthOn = (await textarea.boundingBox())!.width;
+    // eslint-disable-next-line no-console -- the measurement is the deliverable
+    console.log('MEASURE-3595 refit ' + JSON.stringify({ chars: lo, widthOff, widthOn, ...(await lines()) }));
+    expect(widthOn, 'Auto-Yes on narrows the textarea').toBeLessThan(widthOff - 10);
+
+    // The draft now wraps: the textarea grows to show it, not scroll it.
+    await expect.poll(async () => (await lines()).height).toBeGreaterThan(COMPOSER_MIN_HEIGHT_PX);
+    const after = await lines();
+    expect(after.scroll, 'no scrolling inside the textarea').toBeLessThanOrEqual(after.client + 1);
+    await expect(textarea).toHaveValue('x'.repeat(lo));
+  });
+
   test('keeps two rows where the pane is narrower than the threshold', async ({ page }) => {
     for (const widths of [[1, 1], PRE_2598.threeSplits.widths, [1, 1, 1, 1]] as const) {
       const fresh = await page.context().newPage();
@@ -724,7 +785,7 @@ test.describe('[#3595] one row in a wide split', () => {
         const label = `${widths.length} splits / pane ${index}`;
         const b = await boxesInSplit(fresh, index, ['composer-input-row', 'composer-toolbar', 'message-input-textarea']);
         const row = b['composer-input-row']!.box;
-        if (row.width >= ONE_ROW_MIN_ROW_PX) continue; // wide enough with the panels closed
+        if (row.width >= COMPOSER_ONE_ROW_MIN_CONTAINER_PX) continue; // wide enough with the panels closed
         expect.soft(b['composer-toolbar']!.box.height, `${label}: toolbar drawn`).toBeGreaterThan(0);
         expect.soft(b['composer-toolbar']!.box.bottom, `${label}: toolbar above textarea`)
           .toBeLessThanOrEqual(b['message-input-textarea']!.box.top + 0.5);
