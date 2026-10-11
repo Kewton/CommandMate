@@ -22,13 +22,21 @@
  * Kept here, under the same conditions as before: `ConnectionStatusIndicator`
  * (shows only while the live connection is down) and `AppUpdateButton` (only
  * while an update is available).
+ *
+ * Issue #3579: no band, and no second screen name. Every screen in
+ * `SCREEN_TITLE_KEYS` names itself in its own <h1>, so the header no longer
+ * repeats it; only a screen without a name of its own (`/`, the first-run
+ * screen) keeps the `title` fallback here. A 64px full-width band pushed the
+ * sidebar / icon rail (and the open/close button) down on the list screens
+ * only; what is left is a row at the top of the content column (AppShell puts
+ * it in <main>, right of the sidebar), which collapses to nothing
+ * (`empty:hidden`) while it has nothing to show.
  */
 
 'use client';
 
 import React from 'react';
 import { usePathname } from 'next/navigation';
-import { useTranslations } from 'next-intl';
 import { ConnectionStatusIndicator } from '@/components/common/ConnectionStatusIndicator';
 import { AppUpdateButton } from '@/components/common/AppUpdateButton';
 
@@ -37,7 +45,10 @@ export interface HeaderProps {
   title?: string;
 }
 
-/** Screen name per route prefix, as a `common` translation key. First match wins. */
+/**
+ * Screens that name themselves (their page draws the <h1>), per route prefix,
+ * with the `common` key of that name. First match wins.
+ */
 export const SCREEN_TITLE_KEYS: ReadonlyArray<{ prefix: string; labelKey: string }> = [
   { prefix: '/sessions', labelKey: 'nav.sessions' },
   { prefix: '/repositories', labelKey: 'nav.repositories' },
@@ -52,8 +63,9 @@ export function resolveScreenTitleKey(pathname: string): string | null {
 }
 
 /**
- * Screen header: the screen's name, then the connection status and the app
- * update button.
+ * Screen status row: the fallback title where the screen has no name of its
+ * own, then the connection status and the app update button, right aligned.
+ * Takes no height while none of them has anything to show.
  *
  * @example
  * ```tsx
@@ -62,25 +74,23 @@ export function resolveScreenTitleKey(pathname: string): string | null {
  */
 export function Header({ title = 'CommandMate' }: HeaderProps) {
   const pathname = usePathname() ?? '';
-  const tCommon = useTranslations('common');
-  const titleKey = resolveScreenTitleKey(pathname);
+  const namedByPage = resolveScreenTitleKey(pathname) !== null;
 
   return (
-    <header className="sticky top-0 z-50 border-b border-border bg-background supports-[backdrop-filter]:bg-background/80 backdrop-blur-md">
-      <div className="container-custom">
-        <div className="flex items-center justify-between h-16">
-          <h1 data-testid="header-screen-title" className="min-w-0 truncate text-xl font-bold text-foreground">
-            {titleKey ? tCommon(titleKey) : title}
-          </h1>
-          <div className="flex items-center gap-4">
-            {/* Realtime connection status (Issue #1120) - only shows when the
-                live push connection is down (polling fallback active). */}
-            <ConnectionStatusIndicator />
-            {/* App update entry point (Issue #2654) - hidden on mobile */}
-            <AppUpdateButton />
-          </div>
-        </div>
-      </div>
+    <header
+      data-testid="screen-status-row"
+      className="flex flex-shrink-0 items-center justify-end gap-4 px-4 py-1.5 border-b border-border bg-background supports-[backdrop-filter]:bg-background/80 backdrop-blur-md empty:hidden"
+    >
+      {!namedByPage && (
+        <h1 data-testid="header-screen-title" className="mr-auto min-w-0 truncate text-lg font-bold text-foreground">
+          {title}
+        </h1>
+      )}
+      {/* Realtime connection status (Issue #1120) - only shows when the
+          live push connection is down (polling fallback active). */}
+      <ConnectionStatusIndicator />
+      {/* App update entry point (Issue #2654) - hidden on mobile */}
+      <AppUpdateButton />
     </header>
   );
 }

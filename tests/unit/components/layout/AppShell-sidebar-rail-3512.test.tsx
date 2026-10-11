@@ -118,8 +118,11 @@ describe('icon rail (Issue #3512)', () => {
   });
 
   it('takes the sidebar top offset: below the header, or full height without it', () => {
+    // Issue #3579: "below the header" is gone — the header is a row inside
+    // <main> now, so the rail is at the top of the screen with it as well.
     renderShell(false);
-    expect(screen.getByTestId('sidebar-rail-container')).toHaveClass('top-16');
+    expect(screen.getByTestId('sidebar-rail-container')).toHaveClass('top-0', 'h-full');
+    expect(screen.getByRole('main').contains(screen.getByTestId('header'))).toBe(true);
     cleanup();
     layout.showGlobalNav = false;
     renderShell(false);

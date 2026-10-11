@@ -4,7 +4,9 @@
 
 /**
  * The global Header after Issue #3512: the screen's name plus the connection
- * status and the app update button. Navigation, ⌘K, display size, tab-strip
+ * status and the app update button. Issue #3579: a screen that names itself
+ * in its own <h1> (SCREEN_TITLE_KEYS) gets no second name here; only `/` keeps
+ * the title fallback. Navigation, ⌘K, display size, tab-strip
  * mode, theme and GitHub moved to the sidebar / icon rail / SettingsMenu.
  * The two status controls keep their own visibility rules.
  */
@@ -57,9 +59,16 @@ beforeEach(() => {
 });
 
 describe('Header is the screen name and its state (Issue #3512)', () => {
+  // Issue #3579: the list screens' name is the page's own <h1>; the header
+  // must not repeat it (it would be the screen name twice).
   it('shows the name of the screen it is on', () => {
-    render(<Header />);
-    expect(screen.getByTestId('header-screen-title')).toHaveTextContent('Sessions');
+    for (const pathname of ['/sessions', '/repositories', '/review', '/skills', '/more']) {
+      pathMock.pathname = pathname;
+      const { unmount } = render(<Header />);
+      expect(screen.queryByTestId('header-screen-title')).toBeNull();
+      expect(screen.queryByRole('heading')).toBeNull();
+      unmount();
+    }
   });
 
   it.each([
@@ -89,9 +98,17 @@ describe('Header is the screen name and its state (Issue #3512)', () => {
     expect(screen.queryByRole('button', { name: /theme/i })).toBeNull();
   });
 
+  // Issue #3579: nothing measures against the header any more (the sidebar
+  // starts at the top of the screen); the row has no fixed height and
+  // collapses while it has nothing to show.
   it('keeps the h-16 row the sidebar offset (#1070) is measured against', () => {
     const { container } = render(<Header />);
-    expect(container.querySelector('header .h-16')).not.toBeNull();
+    const header = container.querySelector('header') as HTMLElement;
+    expect(container.querySelector('header .h-16')).toBeNull();
+    expect(header).not.toHaveClass('h-16');
+    expect(header).not.toHaveClass('sticky');
+    expect(header).toHaveClass('empty:hidden');
+    expect(header.childNodes).toHaveLength(0);
   });
 
   it('shows nothing for connection or update while connected and up to date (negative control)', () => {

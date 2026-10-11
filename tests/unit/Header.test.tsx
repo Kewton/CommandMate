@@ -6,6 +6,7 @@
  * Unit tests for Header component
  * Issue #600: UX refresh - PC 5-screen horizontal navigation
  * Issue #3512: the Header is the screen name + connection status + update
+ * Issue #3579: a screen that names itself in its own <h1> gets no second name
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -59,10 +60,12 @@ describe('Header', () => {
   // left the Header. Where each former `it` now lives is listed in the commit
   // body; the link / aria-current cases moved to
   // tests/unit/components/layout/Header.test.tsx (sidebar + icon rail).
+  // Issue #3579: on /sessions the name is the page's own <h1>, not the header's.
   it('should render the screen name instead of navigation links (Issue #3512)', () => {
     mockPathname.mockReturnValue('/sessions');
     render(<Header />);
-    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Sessions');
+    expect(screen.queryByRole('heading', { level: 1 })).toBeNull();
+    expect(screen.queryByText('Sessions')).toBeNull();
     expect(screen.queryByText('Repos')).toBeNull();
     expect(screen.queryByText('Review/Report')).toBeNull();
     expect(screen.queryByText('Home')).toBeNull();
@@ -90,6 +93,8 @@ describe('Header', () => {
   });
 
   describe('i18n (Issue #1206)', () => {
+    // Issue #3579: these screens are named by their own (translated) <h1>, so
+    // the header repeats no name in either locale.
     it('renders every screen name in Japanese under the ja locale', () => {
       intlLocale.current = 'ja';
       const cases: Array<[string, string]> = [
@@ -101,7 +106,8 @@ describe('Header', () => {
       for (const [pathname, label] of cases) {
         mockPathname.mockReturnValue(pathname);
         const { unmount } = render(<Header />);
-        expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(label);
+        expect(screen.queryByRole('heading', { level: 1 })).toBeNull();
+        expect(screen.queryByText(label)).toBeNull();
         unmount();
       }
     });

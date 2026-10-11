@@ -12,7 +12,7 @@
  * desktop `ConnectionStatusIndicator` sits.
  *
  * Issue #2374: the desktop branch also draws the repository tab strip, above
- * the header. It lives at this level rather than inside `Header` because
+ * the header (#3579: both are the top rows of <main>). It lives at this level rather than inside `Header` because
  * `/worktrees/*` hides the header entirely (`showGlobalNav: false`) and that is
  * the screen users switch branches from most.
  *
@@ -25,6 +25,12 @@
  *
  * Issue #3512: on the PC a closed sidebar leaves `SidebarRail` (56px icon
  * column) in its place, and Mod+B opens / closes the sidebar.
+ *
+ * Issue #3579: on the PC the sidebar / icon rail always start at the top of the
+ * screen, on every route, so the open/close button is at the same spot on the
+ * list screens and on `/worktrees/*`. The tab strip and the status row
+ * (`Header`: connection status + app update, no screen name — the page's own
+ * <h1> is the name) sit at the top of the content column, inside <main>.
  *
  * Issue #3515: the phone's drawer pads itself by the safe-area insets, so its
  * top row clears the status bar and the settings button at its foot clears the
@@ -47,7 +53,7 @@ import { Sidebar } from './Sidebar';
 import { Header } from './Header';
 import { SidebarRail } from './SidebarRail';
 import { useSidebarToggleShortcut } from './useSidebarToggleShortcut';
-import { RepositoryTabBar, REPOSITORY_TAB_BAR_HEIGHT } from './RepositoryTabBar';
+import { RepositoryTabBar } from './RepositoryTabBar';
 import { GlobalMobileNav } from '@/components/mobile/GlobalMobileNav';
 import { MobileConnectionBanner } from '@/components/mobile/MobileConnectionBanner';
 import { focusMobileDrawerOpener } from '@/components/mobile/mobile-drawer-opener';
@@ -79,9 +85,6 @@ const MIN_SIDEBAR_WIDTH = 160;
 
 /** Maximum sidebar width when drag-resizing */
 const MAX_SIDEBAR_WIDTH = 480;
-
-/** Header height in px — the `h-16` on Header's inner row (Issue #1070). */
-const HEADER_HEIGHT = 64;
 
 // ============================================================================
 // Types
@@ -152,31 +155,12 @@ export const AppShell = memo(function AppShell({ children }: AppShellProps) {
     isOpen
   );
 
-  // The desktop sidebar is `position: fixed`, so it does not participate in the
-  // flex column the strip is added to — its `top-16 / top-0` classes would put
-  // it underneath the band. When (and only when) the band is up, an inline
-  // offset overrides those classes; with the band down nothing is written and
-  // the classes stand exactly as they did, which is what #1070's assertions
-  // pin.
-  //
-  // Issue #3512: in the default "collapsed" mode the band appears BECAUSE the
-  // sidebar closed. Drawn above the header it would push the header and the
-  // icon rail down by its height, moving the open/close button the user just
-  // clicked. So in that case the band goes below the header, to the right of
-  // the rail (`bandBesideRail`), and the rail keeps the top the open sidebar
-  // had. A band that is up in both states ("always") stays above the header
-  // and offsets the sidebar and the rail alike.
-  const bandBesideRail =
-    showRepositoryTabBar &&
-    showSidebar &&
-    !isOpen &&
-    !shouldShowRepositoryTabBar(repoTabBarMode ?? DEFAULT_REPO_TAB_BAR_MODE, true);
-  const bandAboveHeader = showRepositoryTabBar && !bandBesideRail;
-  const bandHeight = Math.round(REPOSITORY_TAB_BAR_HEIGHT * factor);
-  const sidebarTop = bandHeight + (showGlobalNav ? HEADER_HEIGHT : 0);
-  const sidebarOffsetStyle = bandAboveHeader
-    ? { top: `${sidebarTop}px`, height: `calc(100vh - ${sidebarTop}px)` }
-    : {};
+  // Issue #3579: the fixed sidebar / icon rail are always `top-0 h-full`. The
+  // band and the status row are drawn inside <main>, to the right of them, so
+  // nothing above the columns can push the open/close button down (#1070's
+  // "sidebar under the sticky header" cannot happen: there is nothing above it).
+  // <main>'s paddingLeft — which the drag handle writes live — moves them
+  // sideways, under every tab-strip mode and display size.
 
   // Refs for direct DOM manipulation during drag (avoids React re-render lag)
   const sidebarRef = useRef<HTMLElement>(null);
@@ -280,19 +264,6 @@ export const AppShell = memo(function AppShell({ children }: AppShellProps) {
   return (
     <NewTaskProvider>
       <div data-testid="app-shell" className="h-screen flex flex-col">
-        {/* Repository tab strip, above the header (Issue #2374) */}
-        {bandAboveHeader && <RepositoryTabBar />}
-
-        {/* Screen header: title + connection status + app update (Issue #3512) */}
-        {showGlobalNav && <Header />}
-
-        {/* Issue #3512: the "collapsed"-mode band, beside the icon rail. */}
-        {bandBesideRail && (
-          <div data-testid="repository-tab-bar-beside-rail" style={{ marginLeft: `${SIDEBAR_RAIL_WIDTH}px` }}>
-            <RepositoryTabBar />
-          </div>
-        )}
-
         <div className="flex flex-1 min-h-0">
           {/* Desktop sidebar - fixed position with transform animation (Issue #112) */}
           {/* Width is dynamic (drag-resizable); stored in SidebarContext + localStorage */}
@@ -301,8 +272,7 @@ export const AppShell = memo(function AppShell({ children }: AppShellProps) {
               ref={sidebarRef}
               data-testid="sidebar-container"
               className={`
-                fixed left-0
-                ${showGlobalNav ? 'top-16 h-[calc(100vh-4rem)]' : 'top-0 h-full'}
+                fixed left-0 top-0 h-full
                 border-r border-border
                 ${SIDEBAR_TRANSITION}
                 ${isOpen ? 'translate-x-0' : '-translate-x-full'}
@@ -310,7 +280,6 @@ export const AppShell = memo(function AppShell({ children }: AppShellProps) {
               style={{
                 width: `${displayWidth}px`,
                 zIndex: Z_INDEX.SIDEBAR,
-                ...sidebarOffsetStyle,
               }}
               role="complementary"
               aria-hidden={!isOpen}
@@ -328,37 +297,39 @@ export const AppShell = memo(function AppShell({ children }: AppShellProps) {
           )}
 
           {/* Issue #3512: the icon rail that stands in for the closed sidebar,
-              at the same top offset. Its first cell is the open/close button,
+              at the same top (#3579: the top of the screen). Its first cell is the open/close button,
               at the spot the open sidebar has it. */}
           {showSidebar && !isOpen && (
             <aside
               data-testid="sidebar-rail-container"
               className={`
-                fixed left-0
-                ${showGlobalNav ? 'top-16 h-[calc(100vh-4rem)]' : 'top-0 h-full'}
+                fixed left-0 top-0 h-full
                 border-r border-border
               `}
               style={{
                 width: `${SIDEBAR_RAIL_WIDTH}px`,
                 zIndex: Z_INDEX.SIDEBAR,
-                ...sidebarOffsetStyle,
               }}
             >
               <SidebarRail />
             </aside>
           )}
 
-          {/* Main content - paddingLeft matches the sidebar (or the rail) width */}
+          {/* Main content - paddingLeft matches the sidebar (or the rail) width.
+              Issue #3579: the tab strip (#2374) and the status row (#3512) are
+              its top rows, so they start right of the column, not above it. */}
           <main
             ref={mainRef}
-            className="flex-1 min-w-0 h-full overflow-hidden transition-[padding] duration-300 ease-out"
+            className="flex-1 min-w-0 h-full overflow-hidden flex flex-col transition-[padding] duration-300 ease-out"
             style={{
               paddingLeft: showSidebar ? `${isOpen ? displayWidth : SIDEBAR_RAIL_WIDTH}px` : 0,
             }}
             role="main"
             data-view-transition="content"
           >
-            {children}
+            {showRepositoryTabBar && <RepositoryTabBar />}
+            {showGlobalNav && <Header />}
+            <div className="flex-1 min-h-0">{children}</div>
           </main>
         </div>
 
