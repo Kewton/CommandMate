@@ -85,9 +85,10 @@ import {
   sortSessionRows,
   partitionOtherBranches,
   isBranchKeptInPlace,
+  SIDEBAR_NAV_ORDER,
 } from '@/lib/sidebar-utils';
 import { useWorktreeList } from '@/hooks/useWorktreeList';
-import type { BranchGroup, SessionRow } from '@/lib/sidebar-utils';
+import type { BranchGroup, SessionRow, SidebarNavId } from '@/lib/sidebar-utils';
 
 // ============================================================================
 // Constants
@@ -573,6 +574,58 @@ export const Sidebar = memo(function Sidebar() {
     void refreshWorktrees();
   }, [refreshWorktrees]);
 
+  const navItems: Record<SidebarNavId, React.ReactNode> = {
+    sessions: (
+      <li className="flex min-w-0">
+        <SidebarNavLink
+          href="/sessions"
+          icon={AlignJustify}
+          label={t('nav.sessions')}
+          testId="sidebar-nav-sessions"
+          isActive={pathname.startsWith('/sessions')}
+          onNavigate={closeMobileDrawer}
+        />
+      </li>
+    ),
+    repositories: (
+      <li className="flex min-w-0 items-center gap-1">
+        <SidebarNavLink
+          href="/repositories"
+          icon={Database}
+          label={t('nav.repositories')}
+          testId="sidebar-nav-repositories"
+          isActive={pathname.startsWith('/repositories')}
+          onNavigate={closeMobileDrawer}
+        />
+        <SyncButton refreshWorktrees={refreshWorktrees} />
+      </li>
+    ),
+    review: (
+      <li className="flex min-w-0">
+        <SidebarNavLink
+          href={attentionCount > 0 ? ATTENTION_REVIEW_HREF : '/review'}
+          icon={CircleCheck}
+          label={t('nav.review')}
+          testId="sidebar-nav-review"
+          isActive={pathname.startsWith('/review')}
+          onNavigate={closeMobileDrawer}
+          trailing={
+            attentionCount > 0 ? (
+              <span
+                data-testid="sidebar-nav-review-count"
+                role="status"
+                aria-label={t('attention.badgeLabel', { count: attentionCount })}
+                className="flex-shrink-0 rounded-full bg-warning-subtle px-1.5 text-xs font-semibold leading-5 tabular-nums text-warning-foreground"
+              >
+                {attentionCount > 99 ? '99+' : attentionCount}
+              </span>
+            ) : null
+          }
+        />
+      </li>
+    ),
+  };
+
   return (
     <nav
       data-testid="sidebar"
@@ -590,49 +643,9 @@ export const Sidebar = memo(function Sidebar() {
         className="flex-shrink-0 space-y-2 border-b border-sidebar-border px-2 py-2"
       >
         <ul data-testid="sidebar-nav" className="space-y-0.5">
-          <li className="flex min-w-0 items-center gap-1">
-            <SidebarNavLink
-              href="/repositories"
-              icon={Database}
-              label={t('nav.repositories')}
-              testId="sidebar-nav-repositories"
-              isActive={pathname.startsWith('/repositories')}
-              onNavigate={closeMobileDrawer}
-            />
-            <SyncButton refreshWorktrees={refreshWorktrees} />
-          </li>
-          <li className="flex min-w-0">
-            <SidebarNavLink
-              href="/sessions"
-              icon={AlignJustify}
-              label={t('nav.sessions')}
-              testId="sidebar-nav-sessions"
-              isActive={pathname.startsWith('/sessions')}
-              onNavigate={closeMobileDrawer}
-            />
-          </li>
-          <li className="flex min-w-0">
-            <SidebarNavLink
-              href={attentionCount > 0 ? ATTENTION_REVIEW_HREF : '/review'}
-              icon={CircleCheck}
-              label={t('nav.review')}
-              testId="sidebar-nav-review"
-              isActive={pathname.startsWith('/review')}
-              onNavigate={closeMobileDrawer}
-              trailing={
-                attentionCount > 0 ? (
-                  <span
-                    data-testid="sidebar-nav-review-count"
-                    role="status"
-                    aria-label={t('attention.badgeLabel', { count: attentionCount })}
-                    className="flex-shrink-0 rounded-full bg-warning-subtle px-1.5 text-xs font-semibold leading-5 tabular-nums text-warning-foreground"
-                  >
-                    {attentionCount > 99 ? '99+' : attentionCount}
-                  </span>
-                ) : null
-              }
-            />
-          </li>
+          {SIDEBAR_NAV_ORDER.map((id) => (
+            <React.Fragment key={id}>{navItems[id]}</React.Fragment>
+          ))}
         </ul>
       </div>
 
