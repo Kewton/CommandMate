@@ -1171,7 +1171,10 @@
   },
   "desktopLayout": {
     "activityPane": "Activity pane",
-    "terminalPane": "Terminal pane"
+    "terminalPane": "Terminal pane",
+    "pinPane": "Pin beside the terminal",
+    "unpinPane": "Unpin (show over the terminal)",
+    "closePane": "Close panel"
   },
   "worktreeStatus": {
     "notSet": "Not set",
