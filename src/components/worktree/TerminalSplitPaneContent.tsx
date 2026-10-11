@@ -1193,6 +1193,10 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
             // bounds what is drawn — see useComposerHeight.
             heightScope={composerHeightScope}
             maxHeight={composerMaxHeight}
+            // Issue #3595: one row where the split is wide enough
+            // (COMPOSER_ONE_ROW_MIN_CONTAINER_PX); the phone and the /sessions
+            // tile do not pass it and keep their composer as it was.
+            oneRowWhenWide
             // Issue #806: surface a "queued (session busy)" toast when sending to
             // a session that is still processing the previous task. showToast
             // reuses the existing history toast surface.
