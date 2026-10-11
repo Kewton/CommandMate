@@ -15,6 +15,7 @@
  *   - The "Worktrees" h2 is gone; the sidebar header is a Repositories / Sessions / Review navigation list (Issue #2644).
  *   - Search is "Search branches..." in the sidebar, not "Search worktrees".
  *   - Sort is a dropdown (Updated / Repository name / Branch name / Status) with a worded direction toggle (Newest first / Oldest first, …), not Name / Updated / Path buttons with ↑↓ text.
+ *     [Issue #3575] View and Sort are a menu behind the filter icon at the end of the search row.
  *   - "Refresh" is the "Sync branches" button.
  *   - [Issue #3512] The header is the screen name + status only; GitHub is a
  *     settings-menu item (sidebar footer / icon rail).
@@ -61,19 +62,60 @@ test.describe('Home Page', () => {
   });
 
   test('should display sort controls', async ({ page }) => {
-    // Trigger is labelled with the active sort key; default is Updated (desc)
-    const sortTrigger = page.getByRole('button', { name: /Sort by/i });
-    await expect(sortTrigger).toBeVisible();
-    await expect(sortTrigger).toContainText('Updated');
-    await expect(page.getByRole('button', { name: /^(Newest first|Oldest first)$/ })).toBeVisible();
+    // [Issue #3575] The filter icon is labelled with the active view and sort;
+    // default is Repository, Updated (desc)
+    const optionsTrigger = page.getByTestId('sidebar-list-options');
+    await expect(optionsTrigger).toBeVisible();
+    await expect(optionsTrigger).toHaveAccessibleName('View and sort (Repository · Updated · Newest first)');
 
-    // Opening the dropdown lists the sidebar sort keys
-    await sortTrigger.click();
-    const listbox = page.getByRole('listbox', { name: 'Sort options' });
-    await expect(listbox).toBeVisible();
-    for (const label of ['Updated', 'Repository name', 'Branch name', 'Status']) {
-      await expect(listbox.getByRole('option', { name: label })).toBeVisible();
+    // Opening the menu lists the views, the sidebar sort keys and the directions
+    await optionsTrigger.click();
+    const menu = page.getByTestId('sidebar-list-options-menu');
+    await expect(menu).toBeVisible();
+    for (const label of ['Repository', 'Branch', 'Session', 'Updated', 'Repository name', 'Branch name', 'Status', 'Newest first', 'Oldest first']) {
+      await expect(menu.getByRole('menuitemradio', { name: label, exact: true })).toBeVisible();
     }
+  });
+
+  test('[Issue #3575] keeps the filter and the View / Sort icon on one row', async ({ page }) => {
+    const toolbar = page.getByTestId('sidebar-list-toolbar');
+    const search = toolbar.getByPlaceholder(/Search branches/i);
+    const optionsTrigger = toolbar.getByTestId('sidebar-list-options');
+    const [toolbarBox, searchBox, triggerBox] = await Promise.all([
+      toolbar.boundingBox(),
+      search.boundingBox(),
+      optionsTrigger.boundingBox(),
+    ]);
+    expect(toolbarBox && searchBox && triggerBox).toBeTruthy();
+    // Same row: vertical centres agree, and the icon sits after the field.
+    expect(Math.abs(searchBox!.y + searchBox!.height / 2 - (triggerBox!.y + triggerBox!.height / 2))).toBeLessThanOrEqual(2);
+    expect(triggerBox!.x).toBeGreaterThanOrEqual(searchBox!.x + searchBox!.width);
+    // One row: well under the ~150px the three rows used to take.
+    expect(toolbarBox!.height).toBeLessThanOrEqual(48);
+  });
+
+  test('[Issue #3575] changes View and Sort from the keyboard and returns focus on Escape', async ({ page }) => {
+    const optionsTrigger = page.getByTestId('sidebar-list-options');
+    await optionsTrigger.focus();
+    await page.keyboard.press('Enter');
+    const menu = page.getByTestId('sidebar-list-options-menu');
+    await expect(menu).toBeVisible();
+    await expect(menu.getByRole('menuitemradio', { name: 'Repository', exact: true })).toBeFocused();
+
+    await page.keyboard.press('ArrowDown');
+    await expect(menu.getByRole('menuitemradio', { name: 'Branch', exact: true })).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(optionsTrigger).toHaveAttribute('data-view-mode', 'flat');
+
+    await page.keyboard.press('End');
+    await expect(menu.getByRole('menuitemradio', { name: 'Oldest first' })).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(optionsTrigger).toHaveAttribute('data-sort-direction', 'asc');
+    await expect(page.getByTestId('sidebar-list-options-indicator')).toBeVisible();
+
+    await page.keyboard.press('Escape');
+    await expect(menu).toHaveCount(0);
+    await expect(optionsTrigger).toBeFocused();
   });
 
   test('should display sync button', async ({ page }) => {
@@ -97,14 +139,20 @@ test.describe('Home Page', () => {
   });
 
   test('should toggle sort direction when clicking sort direction button', async ({ page }) => {
-    // Default sidebar sort is Updated, descending — shown as words
-    const directionButton = page.getByRole('button', { name: 'Newest first' });
-    await expect(directionButton).toBeVisible();
+    // Default sidebar sort is Updated, descending — shown as words.
+    // [Issue #3575] The direction is a choice in the View / Sort menu.
+    const optionsTrigger = page.getByTestId('sidebar-list-options');
+    await optionsTrigger.click();
+    const menu = page.getByTestId('sidebar-list-options-menu');
+    await expect(menu.getByRole('menuitemradio', { name: 'Newest first' })).toHaveAttribute('aria-checked', 'true');
 
-    await directionButton.click();
+    await menu.getByRole('menuitemradio', { name: 'Oldest first' }).click();
 
-    await expect(page.getByRole('button', { name: 'Oldest first' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Newest first' })).toHaveCount(0);
+    await expect(menu.getByRole('menuitemradio', { name: 'Oldest first' })).toHaveAttribute('aria-checked', 'true');
+    await expect(menu.getByRole('menuitemradio', { name: 'Newest first' })).toHaveAttribute('aria-checked', 'false');
+    // The open menu hides the rest of the page from assistive tech, so read
+    // the icon's hover title rather than its accessible name.
+    await expect(optionsTrigger).toHaveAttribute('title', /Updated · Oldest first/);
   });
 
   test('should navigate to header navigation link', async ({ page }) => {
