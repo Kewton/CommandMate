@@ -110,6 +110,8 @@
     "retryLoadBranches": "再試行",
     "dragToReorderGroup": "ドラッグでグループを並べ替え",
     "viewLabel": "表示",
+    "listOptionsLabel": "表示と並び（{summary}）",
+    "listOptionsSummary": "{view} · {sort} · {direction}",
     "needsAttention": "要対応",
     "openInReview": "Review で開く",
     "attentionMoreInReview": "ほか {count} 件を Review で見る",
@@ -179,6 +181,7 @@
     "descending": "降順に並び替え",
     "ascShort": "昇順",
     "descShort": "降順",
+    "directionLabel": "順序",
     "direction": {
       "newestFirst": "新しい順",
       "oldestFirst": "古い順",
@@ -191,7 +194,13 @@
   "branchItem": {
     "cliToolStatus": "CLI ツールのステータス",
     "hasUnread": "未読メッセージあり",
-    "agentExited": "終了"
+    "agentExited": "終了",
+    "actions": "{name} の操作",
+    "openInNewTab": "新しいタブで開く",
+    "copyBranchName": "ブランチ名をコピー",
+    "copyPath": "パスをコピー",
+    "copied": "コピーしました",
+    "copyFailed": "コピーできませんでした"
   },
   "connection": {
     "reconnecting": "再接続中",

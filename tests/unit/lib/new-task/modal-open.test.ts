@@ -47,3 +47,30 @@ describe('[#3511] isAnyModalOpen', () => {
     expect(isAnyModalOpen()).toBe(false);
   });
 });
+
+describe('[#3575] isAnyModalOpen counts an open Radix menu', () => {
+  // What Radix DropdownMenu renders for its content (SidebarListOptionsMenu, SettingsMenu).
+  const OPEN_MENU = '<div role="menu" data-state="open" tabindex="-1"></div>';
+
+  it('counts a displayed open menu', () => {
+    mount(OPEN_MENU);
+    expect(isAnyModalOpen()).toBe(true);
+  });
+
+  it('does not count a menu playing its exit animation', () => {
+    mount('<div role="menu" data-state="closed" tabindex="-1"></div>');
+    expect(isAnyModalOpen()).toBe(false);
+  });
+
+  it('does not count an open menu under display:none or hidden', () => {
+    mount(`<div style="display: none">${OPEN_MENU}</div>`);
+    expect(isAnyModalOpen()).toBe(false);
+    mount(`<div hidden><section>${OPEN_MENU}</section></div>`);
+    expect(isAnyModalOpen()).toBe(false);
+  });
+
+  it('does not count a role="menu" that Radix does not drive (no data-state)', () => {
+    mount('<ul role="menu"><li role="menuitem">x</li></ul>');
+    expect(isAnyModalOpen()).toBe(false);
+  });
+});

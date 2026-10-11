@@ -78,6 +78,7 @@ import { useWorktreeSelection } from '@/contexts/WorktreeSelectionContext';
 import { usePcDisplaySizeContext } from '@/contexts/PcDisplaySizeContext';
 import { useViewTransitionRouter } from '@/components/providers/ViewTransitionsProvider';
 import { BranchListItem } from '@/components/sidebar/BranchListItem';
+import { BRANCH_ROW_ACTIONS_ATTR } from '@/components/sidebar/BranchRowActions';
 import { GroupIcon } from '@/components/ui/GroupIcon';
 import { StatusDot } from '@/components/ui/StatusDot';
 import { useWorktreeList } from '@/hooks/useWorktreeList';
@@ -93,6 +94,7 @@ import {
   generateRepositoryColor,
   isGroupUnclassified,
   orderBranchGroups,
+  resolveActiveWorktreeId,
 } from '@/lib/sidebar-utils';
 import type { BranchGroup } from '@/lib/sidebar-utils';
 import {
@@ -138,9 +140,6 @@ const VIEWPORT_MARGIN = 8;
 /** The panel's 1px top + bottom border, which sits outside the capped list. */
 const POPOVER_BORDER = 2;
 
-/** Matches `/worktrees/<id>` (and anything under it) to find the active branch. */
-const WORKTREE_ROUTE_PATTERN = /^\/worktrees\/([^/]+)/;
-
 /** `WheelEvent.deltaMode` values, spelled out so the helper needs no DOM global. */
 const DOM_DELTA_LINE = 1;
 const DOM_DELTA_PAGE = 2;
@@ -169,29 +168,18 @@ export interface AnchorRect {
 // ============================================================================
 
 /**
- * Resolve the worktree the UI is currently showing.
- *
- * The pathname wins over `selectedWorktreeId` because it is correct on a cold
- * load of `/worktrees/<id>` — before anything has called `selectWorktree` — and
- * it is what the acceptance criterion ("the URL changes") actually observes.
- *
- * @param pathname - Current route
- * @param selectedWorktreeId - Context selection, used off worktree routes
- * @returns The worktree id to mark active, or null
- * @internal Exported for unit tests.
+ * Whether a mousedown landed inside a branch list (tab strip or breadcrumb) or
+ * in something the list owns, so the list's outside-click rule must not close
+ * it: the panels themselves, and a row's "…" menu (Issue #3576), which is
+ * portalled out of the panel — closing on its mousedown would unmount the menu
+ * before the click that runs the item. Shared by the strip and the breadcrumb
+ * so the two lists can never disagree about what "outside" means.
  */
-export function resolveActiveWorktreeId(
-  pathname: string,
-  selectedWorktreeId: string | null
-): string | null {
-  const match = WORKTREE_ROUTE_PATTERN.exec(pathname);
-  if (!match) return selectedWorktreeId;
-  try {
-    return decodeURIComponent(match[1]);
-  } catch {
-    // A malformed percent-escape is still a usable id for comparison purposes.
-    return match[1];
-  }
+export function isBranchListOwnTarget(target: Node): boolean {
+  const element = target as Element;
+  return Boolean(
+    element.closest?.('[data-repository-tab-panel]') ?? element.closest?.(`[${BRANCH_ROW_ACTIONS_ATTR}]`)
+  );
 }
 
 /**
@@ -556,8 +544,7 @@ export const RepositoryTabBar = memo(function RepositoryTabBar() {
       // toggles); closing here first would make the second click re-open it.
       if (stripRef.current?.contains(target)) return;
       if (overflowButtonRef.current?.contains(target)) return;
-      const inPanel = (target as Element).closest?.('[data-repository-tab-panel]');
-      if (inPanel) return;
+      if (isBranchListOwnTarget(target)) return;
       closeAll();
     };
     const onKeyDown = (event: KeyboardEvent) => {

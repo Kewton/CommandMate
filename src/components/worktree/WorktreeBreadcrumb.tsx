@@ -42,6 +42,7 @@ import { useOptionalWorktreesCacheContext } from '@/components/providers/Worktre
 import { usePcDisplaySizeContext } from '@/contexts/PcDisplaySizeContext';
 import {
   RepositoryBranchPopover,
+  isBranchListOwnTarget,
   useExclusiveBranchList,
   useOpenWorktreeFromBranchList,
   useRepositoryBranchGroups,
@@ -189,14 +190,15 @@ function BranchSwitcher({
   useExclusiveBranchList(anchor !== null, close);
 
   // Same dismissal rules as the tab strip: a click outside, or Escape (which
-  // hands focus back to the ▾). Clicks inside a strip panel are the list's own.
+  // hands focus back to the ▾). Clicks inside a strip panel (or a row's "…" menu) are the list's own.
   useEffect(() => {
     if (!anchor) return;
     const onPointerDown = (event: MouseEvent) => {
       const target = event.target as Node | null;
       if (!target) return;
       if (buttonRef.current?.contains(target)) return;
-      if ((target as Element).closest?.('[data-repository-tab-panel]')) return;
+      // Issue #3576: the strip's own check, so a row's "…" menu counts as inside.
+      if (isBranchListOwnTarget(target)) return;
       close();
     };
     const onKeyDown = (event: KeyboardEvent) => {

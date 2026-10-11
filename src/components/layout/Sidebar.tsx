@@ -54,7 +54,11 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import { useWorktreeSelection } from '@/contexts/WorktreeSelectionContext';
 import { useSidebarContext } from '@/contexts/SidebarContext';
-import { BranchListItem } from '@/components/sidebar/BranchListItem';
+import {
+  BranchListItem,
+  SIDEBAR_ROW_INSET_CLASS,
+  sidebarRowCardClass,
+} from '@/components/sidebar/BranchListItem';
 import {
   resolveUnclassifiedDot,
   UNCLASSIFIED_STATUS_DOT_CLASS,
@@ -85,9 +89,11 @@ import {
   sortSessionRows,
   partitionOtherBranches,
   isBranchKeptInPlace,
+  resolveActiveWorktreeId,
+  SIDEBAR_NAV_ORDER,
 } from '@/lib/sidebar-utils';
 import { useWorktreeList } from '@/hooks/useWorktreeList';
-import type { BranchGroup, SessionRow } from '@/lib/sidebar-utils';
+import type { BranchGroup, SessionRow, SidebarNavId } from '@/lib/sidebar-utils';
 
 // ============================================================================
 // Constants
@@ -160,7 +166,7 @@ export const Sidebar = memo(function Sidebar() {
   const {
     worktrees,
     repositories,
-    selectedWorktreeId,
+    selectedWorktreeId: contextSelectedWorktreeId,
     selectWorktree,
     refreshWorktrees,
     // Issue #2059: without these two the branch list could only ever say
@@ -183,6 +189,9 @@ export const Sidebar = memo(function Sidebar() {
   } = useSidebarContext();
   const t = useTranslations('common');
   const pathname = usePathname() ?? '';
+  // Issue #3578: the URL wins over the context selection, which only follows
+  // clicks — a direct open / reload / back-forward would otherwise select nothing.
+  const selectedWorktreeId = resolveActiveWorktreeId(pathname, contextSelectedWorktreeId);
   // Issue #3512 / #3515: the logo / open-close / New task / search rows. The
   // drawer draws them too, with a close button and without the key hint.
   const isMobile = useIsMobile();
@@ -573,6 +582,58 @@ export const Sidebar = memo(function Sidebar() {
     void refreshWorktrees();
   }, [refreshWorktrees]);
 
+  const navItems: Record<SidebarNavId, React.ReactNode> = {
+    sessions: (
+      <li className="flex min-w-0">
+        <SidebarNavLink
+          href="/sessions"
+          icon={AlignJustify}
+          label={t('nav.sessions')}
+          testId="sidebar-nav-sessions"
+          isActive={pathname.startsWith('/sessions')}
+          onNavigate={closeMobileDrawer}
+        />
+      </li>
+    ),
+    repositories: (
+      <li className="flex min-w-0 items-center gap-1">
+        <SidebarNavLink
+          href="/repositories"
+          icon={Database}
+          label={t('nav.repositories')}
+          testId="sidebar-nav-repositories"
+          isActive={pathname.startsWith('/repositories')}
+          onNavigate={closeMobileDrawer}
+        />
+        <SyncButton refreshWorktrees={refreshWorktrees} />
+      </li>
+    ),
+    review: (
+      <li className="flex min-w-0">
+        <SidebarNavLink
+          href={attentionCount > 0 ? ATTENTION_REVIEW_HREF : '/review'}
+          icon={CircleCheck}
+          label={t('nav.review')}
+          testId="sidebar-nav-review"
+          isActive={pathname.startsWith('/review')}
+          onNavigate={closeMobileDrawer}
+          trailing={
+            attentionCount > 0 ? (
+              <span
+                data-testid="sidebar-nav-review-count"
+                role="status"
+                aria-label={t('attention.badgeLabel', { count: attentionCount })}
+                className="flex-shrink-0 rounded-full bg-warning-subtle px-1.5 text-xs font-semibold leading-5 tabular-nums text-warning-foreground"
+              >
+                {attentionCount > 99 ? '99+' : attentionCount}
+              </span>
+            ) : null
+          }
+        />
+      </li>
+    ),
+  };
+
   return (
     <nav
       data-testid="sidebar"
@@ -590,49 +651,9 @@ export const Sidebar = memo(function Sidebar() {
         className="flex-shrink-0 space-y-2 border-b border-sidebar-border px-2 py-2"
       >
         <ul data-testid="sidebar-nav" className="space-y-0.5">
-          <li className="flex min-w-0 items-center gap-1">
-            <SidebarNavLink
-              href="/repositories"
-              icon={Database}
-              label={t('nav.repositories')}
-              testId="sidebar-nav-repositories"
-              isActive={pathname.startsWith('/repositories')}
-              onNavigate={closeMobileDrawer}
-            />
-            <SyncButton refreshWorktrees={refreshWorktrees} />
-          </li>
-          <li className="flex min-w-0">
-            <SidebarNavLink
-              href="/sessions"
-              icon={AlignJustify}
-              label={t('nav.sessions')}
-              testId="sidebar-nav-sessions"
-              isActive={pathname.startsWith('/sessions')}
-              onNavigate={closeMobileDrawer}
-            />
-          </li>
-          <li className="flex min-w-0">
-            <SidebarNavLink
-              href={attentionCount > 0 ? ATTENTION_REVIEW_HREF : '/review'}
-              icon={CircleCheck}
-              label={t('nav.review')}
-              testId="sidebar-nav-review"
-              isActive={pathname.startsWith('/review')}
-              onNavigate={closeMobileDrawer}
-              trailing={
-                attentionCount > 0 ? (
-                  <span
-                    data-testid="sidebar-nav-review-count"
-                    role="status"
-                    aria-label={t('attention.badgeLabel', { count: attentionCount })}
-                    className="flex-shrink-0 rounded-full bg-warning-subtle px-1.5 text-xs font-semibold leading-5 tabular-nums text-warning-foreground"
-                  >
-                    {attentionCount > 99 ? '99+' : attentionCount}
-                  </span>
-                ) : null
-              }
-            />
-          </li>
+          {SIDEBAR_NAV_ORDER.map((id) => (
+            <React.Fragment key={id}>{navItems[id]}</React.Fragment>
+          ))}
         </ul>
       </div>
 
@@ -925,18 +946,25 @@ function GroupHeader({
   const t = useTranslations('common');
 
   return (
-    <div className="flex items-center w-full">
-      {/* Drag handle — separate from the clickable header button */}
+    <div className="group/header flex items-center w-full">
+      {/* Drag handle — separate from the clickable header button.
+          Issue #3576: shown on hover / keyboard focus only, so at rest the
+          heading is the chevron and the name. It keeps its width (no shift on
+          hover) and stays visible on touch screens, which never hover. */}
       {dragHandleListeners && (
         <div
           ref={dragHandleRef}
           {...dragHandleListeners}
           {...dragHandleAttributes}
+          data-testid="group-drag-handle"
           aria-label={t('sidebar.dragToReorderGroup')}
           className="
             flex-shrink-0 flex items-center justify-center
             w-6 h-full pl-2 cursor-grab active:cursor-grabbing
-            text-sidebar-muted hover:text-sidebar-foreground transition-colors
+            text-sidebar-muted hover:text-sidebar-foreground transition-[color,opacity]
+            opacity-0 group-hover/header:opacity-100 group-focus-within/header:opacity-100
+            [@media(hover:none)]:opacity-100
+            rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-ring
           "
         >
           <GripVerticalIcon />
@@ -1022,29 +1050,32 @@ const SessionListItem = memo(function SessionListItem({
   const unclassified = resolveUnclassifiedDot(row.status, row.unclassified);
   const statusLabel = t(unclassified ? UNCLASSIFIED_STATUS_LABEL_KEY : `status.${row.status}`);
 
+  // Issue #3576: the same inset card and 8px dot as the branch rows.
   return (
-    <button
-      type="button"
-      data-testid="session-list-item"
-      data-session-key={row.key}
-      onClick={() => onClick(row)}
-      aria-current={isSelected ? 'true' : undefined}
-      className={`w-full min-w-0 min-h-[34px] px-3 py-1.5 flex items-center gap-2 text-left hover:bg-sidebar-hover transition-colors focus:outline-none focus:ring-2 focus:ring-inset focus:ring-ring ${
-        isSelected ? 'bg-sidebar-hover border-l-2 border-accent-500' : 'border-l-2 border-transparent'
-      }`}
-    >
-      <StatusDot
-        status={row.status}
-        size="lg"
-        label={row.exited ? `${statusLabel} (${t('branchItem.agentExited')})` : statusLabel}
-        className={unclassified ? UNCLASSIFIED_STATUS_DOT_CLASS : undefined}
-      />
-      {/* Issue #3509: one line — the agent first, then where it runs, muted. */}
-      <span className="flex-shrink-0 max-w-[45%] truncate text-sm font-semibold text-sidebar-foreground">{row.label}</span>
-      <span className="min-w-0 flex-1 truncate text-xs text-sidebar-muted">
-        {row.branchName} · {row.repositoryName}
-      </span>
-    </button>
+    <div className={`w-full min-w-0 ${SIDEBAR_ROW_INSET_CLASS}`}>
+      <button
+        type="button"
+        data-testid="session-list-item"
+        data-session-key={row.key}
+        onClick={() => onClick(row)}
+        aria-current={isSelected ? 'true' : undefined}
+        className={`w-full min-w-0 min-h-[34px] px-3 py-1.5 flex items-center gap-2 text-left ${sidebarRowCardClass(
+          isSelected
+        )}`}
+      >
+        <StatusDot
+          status={row.status}
+          size="sm"
+          label={row.exited ? `${statusLabel} (${t('branchItem.agentExited')})` : statusLabel}
+          className={unclassified ? UNCLASSIFIED_STATUS_DOT_CLASS : undefined}
+        />
+        {/* Issue #3509: one line — the agent first, then where it runs, muted. */}
+        <span className="flex-shrink-0 max-w-[45%] truncate text-sm font-semibold text-sidebar-foreground">{row.label}</span>
+        <span className="min-w-0 flex-1 truncate text-xs text-sidebar-muted">
+          {row.branchName} · {row.repositoryName}
+        </span>
+      </button>
+    </div>
   );
 });
 
