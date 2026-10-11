@@ -502,10 +502,14 @@ export const RepositoryTabBar = memo(function RepositoryTabBar() {
   // to, so an overflow menu appears next to it — and only then, because an
   // always-present "…" is chrome that earns nothing when three tabs fit.
   const [hasOverflow, setHasOverflow] = useState(false);
+  // Issue #3579: the strip's visible width, so the current tab is revealed
+  // again whenever it changes (see "keep the current repository's tab in view").
+  const [stripWidth, setStripWidth] = useState(0);
   const measureOverflow = useCallback(() => {
     const strip = stripRef.current;
     if (!strip) return;
     setHasOverflow(strip.scrollWidth > strip.clientWidth + 1);
+    setStripWidth(strip.clientWidth);
   }, []);
 
   useLayoutEffect(() => {
@@ -575,13 +579,17 @@ export const RepositoryTabBar = memo(function RepositoryTabBar() {
   // first paint; after every navigation — keyed on `pathname`, not just the
   // repository, so moving between two branches of one repository brings its
   // tab back even after the user scrolled the strip away; and when the "…"
-  // button appearing narrows the strip under it. Not on data refreshes: the
-  // worktree poll re-renders every few seconds and would yank a strip the user
-  // is scrolling. A layout effect, so the first paint already shows the tab.
+  // button appearing narrows the strip under it. Issue #3579: and whenever the
+  // strip's width changes — it sits right of the sidebar, so opening the
+  // sidebar beside an "always" strip or dragging its edge narrows a strip that
+  // may already overflow (the flag alone would not change). Not on data
+  // refreshes: the worktree poll re-renders every few seconds at the same
+  // width and would yank a strip the user is scrolling. A layout effect, so the
+  // first paint already shows the tab.
   useLayoutEffect(() => {
     if (!activeRepositoryName) return;
     revealTab(tabRefs.current.get(activeRepositoryName));
-  }, [activeRepositoryName, pathname, hasOverflow]);
+  }, [activeRepositoryName, pathname, hasOverflow, stripWidth]);
 
   // ---- navigation ----
   const handleBranchClick = useCallback(
