@@ -13,7 +13,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, waitFor, act } from '@testing-library/react';
 import { useWorktreesCache } from '@/hooks/useWorktreesCache';
-import { __resetWorktreeStatusSaves, saveWorktreeStatus } from '@/lib/worktree-status';
+import {
+  __resetWorktreeStatusSaves,
+  currentWorktreeStatusGeneration,
+  saveWorktreeStatus,
+  worktreeListFetchedSince,
+} from '@/lib/worktree-status';
 
 vi.mock('@/hooks/useRealtimeConnection', () => ({
   useRealtime: () => ({
@@ -44,7 +49,7 @@ function list(status: string | null) {
 }
 
 const originalFetch = globalThis.fetch;
-let listReplies: Array<(body: unknown) => void>;
+let listReplies: Array<(body: unknown, status?: number) => void>;
 
 beforeEach(() => {
   __resetWorktreeStatusSaves();
@@ -55,7 +60,9 @@ beforeEach(() => {
       return Promise.resolve(jsonResponse({ id: 'wt-1', status }));
     }
     // Every list GET waits until the test answers it.
-    return new Promise((resolve) => listReplies.push((body) => resolve(jsonResponse(body))));
+    return new Promise((resolve) =>
+      listReplies.push((body, status = 200) => resolve(jsonResponse(body, status)))
+    );
   }) as unknown as typeof fetch;
 });
 
@@ -108,5 +115,38 @@ describe('useWorktreesCache vs. a status save (Issue #3594)', () => {
       await refreshing;
     });
     expect(result.current.worktrees[0].status).toBe('in_review');
+  });
+});
+
+describe('useWorktreesCache tells whether a re-fetch went through (Issue #3594)', () => {
+  /** Save Done, then re-fetch the list and answer it with `status`. */
+  async function saveThenRefresh(status: number) {
+    const { result } = await mountWithReady();
+    await act(async () => {
+      await saveWorktreeStatus('wt-1', 'done');
+    });
+    const savedAt = currentWorktreeStatusGeneration();
+    expect(worktreeListFetchedSince(savedAt)).toBe(false);
+    let refreshing!: Promise<void>;
+    act(() => {
+      refreshing = result.current.refresh();
+    });
+    await waitFor(() => expect(listReplies).toHaveLength(2));
+    await act(async () => {
+      listReplies[1](list('done'), status);
+      await refreshing;
+    });
+    return savedAt;
+  }
+
+  it('does not count a failed re-fetch (refresh still resolves)', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const savedAt = await saveThenRefresh(500);
+    expect(worktreeListFetchedSince(savedAt)).toBe(false);
+  });
+
+  it('counts a successful re-fetch that started after the save (negative control)', async () => {
+    const savedAt = await saveThenRefresh(200);
+    expect(worktreeListFetchedSince(savedAt)).toBe(true);
   });
 });

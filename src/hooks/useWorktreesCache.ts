@@ -22,7 +22,11 @@ import {
 } from '@/lib/api-client';
 import { useRealtime } from '@/hooks/useRealtimeConnection';
 import type { RealtimeEvent } from '@/lib/realtime/types';
-import { applySavedWorktreeStatuses, currentWorktreeStatusGeneration } from '@/lib/worktree-status';
+import {
+  applySavedWorktreeStatuses,
+  currentWorktreeStatusGeneration,
+  markWorktreeListFetched,
+} from '@/lib/worktree-status';
 
 /** Polling interval when at least one session is running (5s) */
 export const POLLING_INTERVAL_ACTIVE = 5000;
@@ -241,6 +245,8 @@ export function useWorktreesCache(
         setIsLoading(false);
       });
       worktreesRef.current = wts;
+      // Issue #3594: a row holding its pick waits for a list fetch like this.
+      markWorktreeListFetched(statusGeneration);
       lastFetchFailedRef.current = false;
       // A success ends the ladder: cancel a scheduled retry and rearm the
       // sequence for a future empty-cache failure.

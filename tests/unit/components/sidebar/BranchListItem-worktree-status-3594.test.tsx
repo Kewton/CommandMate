@@ -24,7 +24,11 @@ import { DesktopHeader, WorktreeInfoFields } from '@/components/worktree/Worktre
 import { ToastProvider } from '@/components/common/Toast';
 import { toBranchItem, type SidebarBranchItem } from '@/types/sidebar';
 import type { Worktree } from '@/types/models';
-import { __resetWorktreeStatusSaves } from '@/lib/worktree-status';
+import {
+  __resetWorktreeStatusSaves,
+  currentWorktreeStatusGeneration,
+  markWorktreeListFetched,
+} from '@/lib/worktree-status';
 import { installRadixJsdomPolyfills } from '@tests/helpers/radix-jsdom';
 
 vi.mock('next-intl', async () => {
@@ -331,9 +335,11 @@ describe('two picks in a row (Issue #3594, review follow-up)', () => {
 describe('the last pick holds until its own save and re-fetch (Issue #3594, re-review)', () => {
   /**
    * A row whose data is really re-fetched: `refresh` reads the server's value
-   * (what the PATCHes left) into the row, like the list cache does.
+   * (what the PATCHes left) into the row and records the fetch as succeeded,
+   * like the list cache does. `failRefresh(n)` makes the n-th (1-based)
+   * re-fetch fail: like useWorktreesCache it still resolves, but nothing moves.
    */
-  function renderLiveRow() {
+  function renderLiveRow({ failRefresh = (_n: number): boolean => false } = {}) {
     let server: SidebarBranchItem['worktreeStatus'] = base.worktreeStatus;
     let setRow!: (status: SidebarBranchItem['worktreeStatus']) => void;
     function LiveRow() {
@@ -359,12 +365,22 @@ describe('the last pick holds until its own save and re-fetch (Issue #3594, re-r
           })
       )
     );
-    refresh.mockImplementation(async () => {
+    let refreshes = 0;
+    /** One successful list fetch: the server's value lands in the row. */
+    const fetchList = () => {
+      const startedAt = currentWorktreeStatusGeneration();
       act(() => setRow(server));
+      markWorktreeListFetched(startedAt);
+    };
+    refresh.mockImplementation(async () => {
+      refreshes += 1;
+      if (failRefresh(refreshes)) return;
+      fetchList();
     });
     render(<LiveRow />);
     return {
       replies,
+      fetchList,
       setElsewhere: (status: SidebarBranchItem['worktreeStatus']) => act(() => setRow(status)),
     };
   }
@@ -404,6 +420,47 @@ describe('the last pick holds until its own save and re-fetch (Issue #3594, re-r
     // Set to In Progress elsewhere; the list brings it and the row follows.
     setElsewhere('in_progress');
     expect(pill()).toHaveAttribute('data-status', 'in_progress');
+  });
+
+  it('keeps Done when the save went through but the re-fetch after it failed', async () => {
+    // The Ready re-fetch lands; the Done save succeeds and only its re-fetch fails.
+    const { replies, fetchList, setElsewhere } = renderLiveRow({ failRefresh: (n) => n === 2 });
+    openStatusSubmenu();
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'Ready' }));
+    openStatusSubmenu();
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'Done' }));
+    await waitFor(() => expect(replies).toHaveLength(1));
+    await act(async () => replies[0]());
+    await waitFor(() => expect(replies).toHaveLength(2));
+    await act(async () => replies[1]());
+    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(2));
+    // The list still says Ready (from the first re-fetch); the row keeps Done.
+    expect(pill()).toHaveAttribute('data-status', 'done');
+
+    // The next successful fetch brings Done and releases the pick: the row
+    // follows the list again afterwards.
+    fetchList();
+    expect(pill()).toHaveAttribute('data-status', 'done');
+    setElsewhere('in_progress');
+    expect(pill()).toHaveAttribute('data-status', 'in_progress');
+  });
+
+  it('releases the pick once the re-fetch after the last save succeeds (negative control)', async () => {
+    const { replies, setElsewhere } = renderLiveRow();
+    openStatusSubmenu();
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'Ready' }));
+    openStatusSubmenu();
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'Done' }));
+    await waitFor(() => expect(replies).toHaveLength(1));
+    await act(async () => replies[0]());
+    await waitFor(() => expect(replies).toHaveLength(2));
+    await act(async () => replies[1]());
+    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(2));
+    expect(pill()).toHaveAttribute('data-status', 'done');
+
+    // Released: the list value is what shows now.
+    setElsewhere('ready');
+    expect(pill()).toHaveAttribute('data-status', 'ready');
   });
 });
 

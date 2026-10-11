@@ -212,9 +212,30 @@ export function saveWorktreeStatus(
   return save;
 }
 
+/** Clock position at which the latest SUCCESSFUL list fetch started. */
+let listFetchedAt = -1;
+
+/**
+ * Record a list fetch that succeeded and was applied, by the clock position
+ * noted when it started ({@link currentWorktreeStatusGeneration}).
+ */
+export function markWorktreeListFetched(fetchStartedAt: number): void {
+  if (fetchStartedAt > listFetchedAt) listFetchedAt = fetchStartedAt;
+}
+
+/**
+ * Whether a list fetch that started at or after `generation` has succeeded —
+ * i.e. the list on screen now carries everything saved up to that point. A
+ * failed re-fetch leaves this false, so the caller can keep its pick showing.
+ */
+export function worktreeListFetchedSince(generation: number): boolean {
+  return listFetchedAt >= generation;
+}
+
 /** Exported only for tests — forget every recorded save and queue. */
 export function __resetWorktreeStatusSaves(): void {
   statusSaveGeneration = 0;
+  listFetchedAt = -1;
   savedStatuses.clear();
   saveQueues.clear();
 }
