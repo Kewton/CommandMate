@@ -115,7 +115,12 @@ export interface WorktreeDetailDesktopProps {
 
   // Header actions
   onInfoClick: () => void;
-  onWorktreeStatusChange: (status: 'ready' | 'in_progress' | 'in_review' | 'done' | null) => void;
+  /**
+   * Issue #3594: no longer rendered — the header lost its status select (the
+   * status is set from the branch row's "…" → Status). Kept optional so the
+   * caller that still passes it keeps compiling.
+   */
+  onWorktreeStatusChange?: (status: 'ready' | 'in_progress' | 'in_review' | 'done' | null) => void;
 
   // Pending insert text (usePendingInsertText, Issue #755)
   pendingInsertTextMap: Map<number, string | null>;
@@ -280,7 +285,6 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
   onActivityOpen,
   verification,
   onInfoClick,
-  onWorktreeStatusChange,
   pendingInsertTextMap,
   setFocusedSplitIndex,
   handleInsertToSplit,
@@ -977,8 +981,6 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
             gitStatus={worktree?.gitStatus}
             onInfoClick={onInfoClick}
             hasUpdate={hasUpdate}
-            worktreeStatus={worktree?.status ?? null}
-            onWorktreeStatusChange={onWorktreeStatusChange}
             sessionStatusByCli={worktree?.sessionStatusByCli}
             sessionStatusByInstance={worktree?.sessionStatusByInstance}
             instances={instances}

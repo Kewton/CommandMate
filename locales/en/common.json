@@ -200,7 +200,9 @@
     "copyBranchName": "Copy branch name",
     "copyPath": "Copy path",
     "copied": "Copied",
-    "copyFailed": "Could not copy"
+    "copyFailed": "Could not copy",
+    "status": "Status",
+    "statusChangeFailed": "Could not change the status"
   },
   "connection": {
     "reconnecting": "Reconnecting",
