@@ -1220,7 +1220,8 @@
     "subTabGit": "Git",
     "statusPillWithModel": "{label}: {status} — model {model}",
     "statusPillWithUsage": "{base} — {usage}",
-    "statusPillWithSource": "{base} — {source}"
+    "statusPillWithSource": "{base} — {source}",
+    "openRepositories": "{repository} — open Repositories"
   },
   "detailStatus": {
     "idle": "Idle - No active session",

@@ -81,6 +81,7 @@ import {
   FILE_PANEL_PANE_ID,
 } from '@/hooks/useFilePanelState';
 import { Tooltip } from '@/components/common/Tooltip';
+import { useSplitActionBarFit } from '@/hooks/useDesktopHeaderFit';
 import { PaneResizer, type ResizerOrientation } from './PaneResizer';
 
 /**
@@ -234,6 +235,23 @@ export interface TerminalSplitContainerProps {
   onInstancePlacementApplied?: (token: number) => void;
   /** Issue #3514: published whenever the split count changes (the "+" needs it). */
   onSplitCountChange?: (count: number) => void;
+  /**
+   * Issue #3590: what the worktree screen puts on this action bar — the second
+   * row under the header — drawn right after the layout ops (layout icons,
+   * Equal, Maximize) and before the History / Files toggles.
+   *
+   * **The one entry point for the second row.** Today it carries the
+   * Verification chip (moved here from the header). Later additions (#3591,
+   * #3592, #3593) go into this same node — a fragment of several items is
+   * fine — rather than into new props, so the bar keeps a single place whose
+   * width is fitted: the slot is `min-w-0` and capped at 360px, its content
+   * may truncate, and when it still does not fit the History / Files toggles
+   * drop their labels and then the left group clips (`useSplitActionBarFit`).
+   * Each item should keep its height at or under 34px (the bar is 36px with
+   * its border). A slot rather than the chip itself so this module keeps no
+   * dependency on the verification client. Omitted renders the pre-#3590 bar.
+   */
+  actionBarItems?: ReactNode;
 }
 
 export const TerminalSplitContainer = memo(function TerminalSplitContainer({
@@ -248,6 +266,7 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
   instancePlacementRequest,
   onInstancePlacementApplied,
   onSplitCountChange,
+  actionBarItems,
 }: TerminalSplitContainerProps) {
   const {
     splits,
@@ -578,6 +597,24 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
     [splits],
   );
 
+  // Issue #3590: the bar's width fit, the second row's counterpart of the
+  // header's #2481 fit. Keyed by what changes its widths; the slotted items
+  // are a node and re-measure without a key.
+  const actionBarRef = useRef<HTMLDivElement>(null);
+  const actionBarLeftRef = useRef<HTMLDivElement>(null);
+  const actionBarFitKey = [
+    t('terminal.historyLabel'),
+    t('terminal.filesLabel'),
+    openFileCount,
+    isMaximized ? `max:${maximizedIndex ?? 0}` : '',
+  ].join('\n');
+  const actionBarFit = useSplitActionBarFit(
+    actionBarRef,
+    actionBarLeftRef,
+    actionBarFitKey,
+    actionBarItems
+  );
+
   // Memoize per-split onFocus handlers so prop identity is stable.
   const focusHandlers = useMemo(
     () => splits.map((_, idx) => () => setFocusedSplitIndex(idx)),
@@ -648,8 +685,22 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
       data-testid="terminal-split-container"
       className="flex flex-col h-full min-h-0"
     >
-      {/* Action bar */}
-      <div className="flex items-center gap-1 px-2 py-1 bg-surface border-b border-border flex-shrink-0">
+      {/* Action bar. Issue #3590: the worktree screen's second row — 36px
+          including its border (the Verification chip's ⓘ is 32px plus the
+          chip's 1px border on each side, so no vertical padding). */}
+      <div
+        ref={actionBarRef}
+        data-testid="split-action-bar"
+        className="flex h-9 items-center gap-1 px-2 bg-surface border-b border-border flex-shrink-0"
+      >
+        {/* Issue #3590: the left group (layout ops + `actionBarItems`) is the
+            part that gives way (`min-w-0`); the History / Files toggles never
+            shrink. Clipped only as the fit's last resort. */}
+        <div
+          ref={actionBarLeftRef}
+          data-testid="split-action-bar-left"
+          className={`flex min-w-0 items-center gap-1${actionBarFit.squeezed ? ' overflow-x-clip' : ''}`}
+        >
         {/* Issue #2261: while a split is maximized the label says which split is
             filling the row — the one line that explains why the other panes
             vanished. Issue #3514: the "n / 4 splits" count it showed otherwise
@@ -657,7 +708,7 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
         {isMaximized ? (
           <span
             data-testid="split-count-label"
-            className="text-xs text-muted-foreground tabular-nums mr-1 truncate"
+            className="min-w-0 text-xs text-muted-foreground tabular-nums mr-1 truncate"
           >
             {t('terminal.maximizedStatus', { split: (maximizedIndex ?? 0) + 1 })}
           </span>
@@ -674,7 +725,7 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
           role="group"
           aria-label={t('terminal.layoutGroupLabel')}
           data-testid="split-layout-picker"
-          className="flex items-center gap-0.5 rounded border border-border p-0.5"
+          className="flex flex-shrink-0 items-center gap-0.5 rounded border border-border p-0.5"
         >
           {SPLIT_LAYOUT_COUNTS.map((count) => {
             const Icon = SPLIT_LAYOUT_ICONS[count] ?? Square;
@@ -717,7 +768,7 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
             aria-disabled={!canEqualize}
             aria-label={t('terminal.equalizeWidthsHint')}
             data-testid="equalize-split-widths"
-            className="flex items-center justify-center h-7 w-7 rounded text-muted-foreground hover:text-surface-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-ring transition-colors"
+            className="flex flex-shrink-0 items-center justify-center h-7 w-7 rounded text-muted-foreground hover:text-surface-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-ring transition-colors"
           >
             <AlignHorizontalDistributeCenter
               className="w-4 h-4 flex-shrink-0"
@@ -736,7 +787,7 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
             aria-pressed={isMaximized}
             aria-label={maximizeLabel}
             data-testid="toggle-maximize-split"
-            className="flex items-center justify-center h-7 w-7 rounded text-muted-foreground hover:text-surface-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-ring transition-colors"
+            className="flex flex-shrink-0 items-center justify-center h-7 w-7 rounded text-muted-foreground hover:text-surface-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-ring transition-colors"
           >
             {isMaximized ? (
               <Minimize2 className="w-4 h-4 flex-shrink-0" aria-hidden="true" />
@@ -746,9 +797,23 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
           </button>
         </Tooltip>
 
+          {/* Issue #3590: the second row's items (the Verification chip), next
+              to the layout ops. Same width rule the header gave the chip
+              (#2481): a 360px `w-*` capped by `max-w-max`, `min-w-0` so its
+              title truncates. */}
+          {actionBarItems && (
+            <div
+              data-testid="split-action-bar-items"
+              className="ml-1 flex min-w-0 w-[360px] max-w-max items-center gap-1"
+            >
+              {actionBarItems}
+            </div>
+          )}
+        </div>
+
         {/* Issue #1079: separator dividing layout ops (left) from panel toggles
             (right). `ml-auto` pushes the History / Files group to the far right. */}
-        <div className="ml-auto h-4 w-px bg-border" aria-hidden="true" />
+        <div className="ml-auto h-4 w-px flex-shrink-0 bg-border" aria-hidden="true" />
 
         {/*
           Issue #841 (Phase 2): History / Files visibility toggles. Always
@@ -776,7 +841,9 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
             }`}
           >
             <History className="w-3.5 h-3.5 flex-shrink-0" aria-hidden="true" />
-            <span>{t('terminal.historyLabel')}</span>
+            {/* Issue #3590: dropped first when the bar is too narrow; the
+                aria-label and the tooltip still name the toggle. */}
+            {!actionBarFit.compactToggles && <span>{t('terminal.historyLabel')}</span>}
           </button>
         </Tooltip>
         <Tooltip content={filesTooltip} placement="bottom" className="flex-shrink-0">
@@ -801,7 +868,7 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
             {/* Issue #2616: `Files` is the Activity Bar file tree's icon; this
                 toggle shows a side panel, so it must not share it. */}
             <PanelRight className="w-3.5 h-3.5 flex-shrink-0" aria-hidden="true" />
-            <span>{t('terminal.filesLabel')}</span>
+            {!actionBarFit.compactToggles && <span>{t('terminal.filesLabel')}</span>}
             {openFileCount > 0 && (
               <span
                 data-testid="open-files-count"

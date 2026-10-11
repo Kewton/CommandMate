@@ -5,7 +5,9 @@
  * did it pass?" — the two facts that until now existed only in `commandmate
  * task show` / `verify` stdout.
  *
- * Shown by both surfaces: the PC header (`DesktopHeader`) and the mobile shell.
+ * Shown by both surfaces: on PC the second row under the header (the split
+ * action bar's `actionBarItems`, next to the layout icons — Issue #3590; it sat
+ * in `DesktopHeader` before) and the mobile shell.
  *
  * Issue #2064 — the chip is an ENTRY POINT, so it no longer hides itself on a
  * branch that was never delegated with a contract. The people who most need to

@@ -640,6 +640,35 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
     ],
   );
 
+  // Issue #2064: always rendered. It used to hide itself on a worktree with
+  // no task row, which put the Verification entry point out of reach of
+  // exactly the people who have never sent a contract.
+  //
+  // `latestRunGates` is still gated on the pane's selection because that is
+  // the only run whose gate rows this state ever holds — the chip is what
+  // keeps them once the operator selects an older run (`useGatesOfLatestRun`),
+  // so it stops depending on `selectedRun` without this expression having to
+  // lie about which run the rows came from.
+  //
+  // Issue #3590: drawn on the second row (the split action bar), next to the
+  // layout icons, instead of in the header.
+  const verificationChip = useMemo(
+    () => (
+      <VerificationStatusChip
+        task={verification.task}
+        latestRun={verification.latestRun}
+        latestRunGates={
+          verification.selectedRun !== null &&
+          verification.selectedRun.id === verification.latestRun?.id
+            ? verification.selectedRun.gates
+            : null
+        }
+        onOpen={handleOpenVerification}
+      />
+    ),
+    [verification.task, verification.latestRun, verification.selectedRun, handleOpenVerification],
+  );
+
   const terminalSplitRegion = useMemo(
     () => (
       <TerminalSplitContainer
@@ -660,6 +689,8 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
         instancePlacementRequest={instancePlacementRequest}
         onInstancePlacementApplied={handleInstancePlacementApplied}
         onSplitCountChange={setSplitCount}
+        // Issue #3590: the second row's one entry point (`actionBarItems`).
+        actionBarItems={verificationChip}
       />
     ),
     // setFocusedSplitIndex / setActiveInstanceId are stable callbacks, and
@@ -667,7 +698,7 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
     // destabilize the memo beyond the existing per-render cadence.
     // headerInstanceSelection changes only on a header pill click (a user
     // action, not the polling cadence), so re-creating the region then is fine.
-    [worktreeId, instances, rosterReady, renderSplitPane, setFocusedSplitIndex, showToast, setActiveInstanceId, headerInstanceSelection, instancePlacementRequest, handleInstancePlacementApplied],
+    [worktreeId, instances, rosterReady, renderSplitPane, setFocusedSplitIndex, showToast, setActiveInstanceId, headerInstanceSelection, instancePlacementRequest, handleInstancePlacementApplied, verificationChip],
   );
 
   /**
@@ -933,29 +964,6 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
             agentSessionByInstance={agentSessionByInstance}
             // Issue #3514: "+" at the right end of the agent pills.
             agentAddControl={agentAddControl}
-            // Issue #2064: always rendered. It used to hide itself on a
-            // worktree with no task row, which put the Verification entry point
-            // out of reach of exactly the people who have never sent a contract.
-            //
-            // `latestRunGates` is still gated on the pane's selection because
-            // that is the only run whose gate rows this state ever holds — the
-            // chip is what keeps them once the operator selects an older run
-            // (`useGatesOfLatestRun`), so the header stops depending on
-            // `selectedRun` without this expression having to lie about which
-            // run the rows came from.
-            verificationChip={
-              <VerificationStatusChip
-                task={verification.task}
-                latestRun={verification.latestRun}
-                latestRunGates={
-                  verification.selectedRun !== null &&
-                  verification.selectedRun.id === verification.latestRun?.id
-                    ? verification.selectedRun.gates
-                    : null
-                }
-                onOpen={handleOpenVerification}
-              />
-            }
           />
           {/* Issue #111: Branch mismatch warning */}
           {worktree?.gitStatus && (
