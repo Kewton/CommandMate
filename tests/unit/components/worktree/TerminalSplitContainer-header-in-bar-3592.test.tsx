@@ -736,3 +736,159 @@ describe('[#3592] the fit settles while the note editor is open', () => {
     expect(bodyRenders - settled).toBeLessThanOrEqual(2);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Fourth contract (consistency review, 3rd round: the reason's anchor)
+// ---------------------------------------------------------------------------
+
+/**
+ * The chip's root, on top of the width model above: under the chip on the bar
+ * at x=600, in the "…" panel at x=40, and — like a browser — a zero box with
+ * no client rects while it is out of the page or inside a hidden box.
+ */
+function installChipRects(): void {
+  const rect = Element.prototype.getBoundingClientRect;
+  const rects = Element.prototype.getClientRects;
+  const isChipRoot = (el: Element) =>
+    el.querySelector(':scope > div > [data-testid="verification-status-chip"]') !== null;
+  const shown = (el: Element) => el.isConnected && el.closest('[hidden]') === null;
+  Element.prototype.getBoundingClientRect = function (this: Element) {
+    if (!isChipRoot(this)) return rect.call(this);
+    if (!shown(this)) {
+      return { left: 0, right: 0, top: 0, bottom: 0, width: 0, height: 0, x: 0, y: 0, toJSON: () => ({}) } as DOMRect;
+    }
+    const inPanel = this.closest('[data-testid="split-action-bar-items-panel"]') !== null;
+    const left = inPanel ? 40 : 600;
+    const bottom = inPanel ? 100 : 36;
+    return { left, right: left + 200, top: bottom - 30, bottom, width: 200, height: 30, x: left, y: bottom - 30, toJSON: () => ({}) } as DOMRect;
+  };
+  Element.prototype.getClientRects = function (this: Element) {
+    if (!isChipRoot(this)) return rects.call(this);
+    return (shown(this) ? [this.getBoundingClientRect()] : []) as unknown as DOMRectList;
+  };
+}
+
+describe('[#3592] the open reason hides while its chip waits behind a closed "…"', () => {
+  beforeEach(() => {
+    clearTerminalSplitsLocalStorage();
+    installWidthModel();
+    installChipRects();
+  });
+  afterEach(() => {
+    restoreWidthModel();
+    clearTerminalSplitsLocalStorage();
+  });
+
+  const reason = () => screen.getByTestId('verification-chip-reason-popover');
+
+  it('sits under the chip on the bar where the chip fits (negative)', () => {
+    render(barTree('m'));
+    fireEvent.click(screen.getByTestId('verification-chip-reason-toggle'));
+    expect(reason().style.visibility).toBe('');
+    expect(reason().style.left).toBe('600px');
+    expect(reason().style.top).toBe('40px');
+  });
+
+  it('is hidden, still open, rather than at the top left (positive)', async () => {
+    const { rerender } = render(barTree('m'));
+    fireEvent.click(screen.getByTestId('verification-chip-reason-toggle'));
+    await foldBy(rerender);
+    await waitFor(() => expect(reason().style.visibility).toBe('hidden'));
+    expect(reason().style.left).toBe('');
+    expect(reason().style.top).toBe('');
+    // Still open (the chip itself is out of the page until "…" opens).
+    expect(screen.queryByTestId('verification-status-chip')).toBeNull();
+  });
+
+  it('is placed under the chip again when "…" opens (positive)', async () => {
+    const { rerender } = render(barTree('m'));
+    fireEvent.click(screen.getByTestId('verification-chip-reason-toggle'));
+    await foldBy(rerender);
+    await waitFor(() => expect(reason().style.visibility).toBe('hidden'));
+    // A real press: mousedown first, which is not "outside" a hidden reason.
+    fireEvent.mouseDown(screen.getByTestId('split-action-bar-items-overflow'));
+    fireEvent.click(screen.getByTestId('split-action-bar-items-overflow'));
+    await waitFor(() => expect(reason().style.left).toBe('40px'));
+    expect(reason().style.top).toBe('104px');
+    expect(reason().style.visibility).toBe('');
+  });
+});
+
+describe('[#3592] Escape in the folded selector\'s menu leaves the open reason alone', () => {
+  beforeEach(() => {
+    clearTerminalSplitsLocalStorage();
+    installWidthModel();
+    installChipRects();
+  });
+  afterEach(() => {
+    restoreWidthModel();
+    clearTerminalSplitsLocalStorage();
+  });
+
+  async function openReasonAndMenu() {
+    const { rerender } = render(barTree('m'));
+    await foldBy(rerender);
+    fireEvent.click(screen.getByTestId('split-action-bar-items-overflow'));
+    const panel = screen.getByTestId('split-action-bar-items-panel');
+    fireEvent.click(within(panel).getByTestId('verification-chip-reason-toggle'));
+    expect(screen.getByTestId('verification-chip-reason-popover')).toBeInTheDocument();
+    return panel;
+  }
+
+  it('keeps the reason open when the menu handles the Escape (positive)', async () => {
+    const panel = await openReasonAndMenu();
+    fireEvent.keyDown(within(panel).getByTestId('cli-selector-0'), { key: 'Enter' });
+    const item = await screen.findByTestId('split-session-note-menu-item-0');
+    fireEvent.keyDown(item, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByTestId('split-session-note-menu-item-0')).toBeNull());
+    expect(screen.getByTestId('verification-chip-reason-popover')).toBeInTheDocument();
+  });
+
+  it('still closes the reason on a press outside while the chip is shown (negative)', async () => {
+    await openReasonAndMenu();
+    fireEvent.mouseDown(screen.getByTestId('split-layout-2'));
+    expect(screen.queryByTestId('verification-chip-reason-popover')).toBeNull();
+  });
+
+  it('closes the reason on an Escape nothing else handled (negative)', async () => {
+    await openReasonAndMenu();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByTestId('verification-chip-reason-popover')).toBeNull();
+  });
+});
+
+describe('[#3592] the open reason hides while its chip is in a hidden box', () => {
+  // jsdom has no `checkVisibility`; a browser's answers for a hidden box.
+  beforeEach(() => {
+    (Element.prototype as unknown as { checkVisibility: () => boolean }).checkVisibility =
+      function (this: Element) {
+        return this.closest('[hidden]') === null;
+      };
+  });
+  afterEach(() => {
+    delete (Element.prototype as unknown as { checkVisibility?: () => boolean }).checkVisibility;
+  });
+
+  function Box({ hidden }: { hidden: boolean }) {
+    return (
+      <div hidden={hidden}>
+        <VerificationStatusChip task={null} latestRun={null} onOpen={vi.fn()} popover="floating" />
+      </div>
+    );
+  }
+
+  it('is hidden, not at the top left, and placed again when the box shows (positive)', async () => {
+    const { rerender } = render(<Box hidden={false} />);
+    fireEvent.click(screen.getByTestId('verification-chip-reason-toggle'));
+    const reason = () => screen.getByTestId('verification-chip-reason-popover');
+    expect(reason().style.left).toBe('8px');
+
+    rerender(<Box hidden />);
+    await waitFor(() => expect(reason().style.visibility).toBe('hidden'));
+    expect(reason().style.left).toBe('');
+
+    rerender(<Box hidden={false} />);
+    await waitFor(() => expect(reason().style.left).toBe('8px'));
+    expect(reason().style.visibility).toBe('');
+  });
+});

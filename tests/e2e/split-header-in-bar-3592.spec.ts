@@ -329,4 +329,44 @@ test.describe('Split title bar on the second row (Issue #3592)', () => {
     await page.keyboard.press('Escape');
     await expect(panel).toHaveCount(0);
   });
+  test('an open reason hides while its chip waits behind a closed "…", and comes back under it', async ({
+    page,
+  }) => {
+    await openOneSplit(page);
+    const bar = page.getByTestId('split-action-bar');
+    const chip = page.getByTestId('verification-status-chip');
+    await expect(bar.getByTestId('split-action-bar-items-overflow')).toHaveCount(0);
+
+    // Negative: where the chip fits, the reason sits under it, as before.
+    await page.getByTestId('verification-chip-reason-toggle').click();
+    const reason = page.getByTestId('verification-chip-reason-popover');
+    await expect(reason).toBeVisible();
+    const chipBox = await box(chip);
+    const inlineBox = await box(reason);
+    expect(inlineBox.y).toBeGreaterThanOrEqual(chipBox.y + chipBox.height);
+
+    // Narrow the window (no press, so the reason stays open): the chip folds
+    // behind a closed "…" and leaves the page. The reason is hidden — not
+    // left at the viewport's top left corner.
+    await page.setViewportSize({ width: 820, height: 900 });
+    const overflow = page.getByTestId('split-action-bar-items-overflow');
+    await expect(overflow).toBeVisible();
+    await expect(overflow).toHaveAttribute('aria-expanded', 'false');
+    await expect(reason).toHaveCount(1);
+    await expect(reason).toBeHidden();
+
+    // "…" brings the chip back, and the reason is placed under it again.
+    await overflow.click();
+    const panel = page.getByTestId('split-action-bar-items-panel');
+    await expect(panel.getByTestId('verification-chip-reason-toggle')).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    );
+    await expect(reason).toBeVisible();
+    const panelChip = await box(panel.getByTestId('verification-status-chip'));
+    const placed = await box(reason);
+    expect(placed.y).toBeGreaterThanOrEqual(panelChip.y + panelChip.height);
+    expect(placed.x).toBeGreaterThanOrEqual(8);
+    expect(placed.x + placed.width).toBeLessThanOrEqual(820);
+  });
 });
