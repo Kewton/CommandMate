@@ -369,6 +369,10 @@ export const ContextMenu = memo(function ContextMenu({
       ref={menuRef}
       data-testid="context-menu"
       role="menu"
+      // Issue #3589: tells the overlaid activity pane a press / Esc now belongs
+      // to this menu (`OPEN_FLOATING_LAYER_SELECTOR` in
+      // hooks/useActivityPaneOverlay). Dropped while the exit animation plays.
+      data-floating-layer={isExiting ? undefined : 'open'}
       aria-label={ariaLabel ?? t('contextMenu.label')}
       className={`fixed min-w-[160px] py-1 bg-surface rounded-lg shadow-lg border border-border ${animationClasses}`}
       style={{

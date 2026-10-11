@@ -181,6 +181,9 @@ function seedChatMode(splitIndex: number): void {
 describe('[#2446] the History column in chat mode', () => {
   beforeEach(() => {
     window.localStorage.clear();
+    // Issue #3589: the worktree screen's History starts hidden. Every test here
+    // is about the column once it is shown, so start from a stored "shown".
+    window.localStorage.setItem(HISTORY_VISIBLE_STORAGE_KEY, 'true');
     window.history.replaceState({}, '', `/worktrees/${WORKTREE_ID}`);
     global.fetch = vi.fn(() =>
       Promise.resolve({

@@ -391,6 +391,9 @@ describe('WorktreeDetailRefactored CLI tab switching (Issue #736)', () => {
     // does not leak split CLI selection between tests.
     try {
       window.localStorage.clear();
+      // Issue #3589: History starts hidden on the worktree screen; these tests
+      // read the History column, so they start from a stored "shown".
+      window.localStorage.setItem('commandmate.worktree.historyVisible', 'true');
     } catch { /* ignore */ }
 
     messageQueue = { claude: [], copilot: [] };

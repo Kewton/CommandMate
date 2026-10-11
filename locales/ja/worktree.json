@@ -1177,7 +1177,10 @@
   },
   "desktopLayout": {
     "activityPane": "アクティビティペイン",
-    "terminalPane": "ターミナルペイン"
+    "terminalPane": "ターミナルペイン",
+    "pinPane": "ターミナルの横に固定",
+    "unpinPane": "固定を解除（ターミナルの上に重ねる）",
+    "closePane": "パネルを閉じる"
   },
   "worktreeStatus": {
     "notSet": "未設定",

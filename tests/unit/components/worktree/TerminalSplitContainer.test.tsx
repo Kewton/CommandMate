@@ -263,14 +263,20 @@ describe('TerminalSplitContainer History/Files toggles (Issue #841)', () => {
     expect(screen.getByTestId('toggle-file-panel')).toBeInTheDocument();
   });
 
-  it('History toggle defaults to pressed (visible) and flips on click', () => {
+  it('History toggle defaults to unpressed (hidden, Issue #3589) and flips on click', () => {
     setup();
     const btn = screen.getByTestId('toggle-history-pane');
-    expect(btn).toHaveAttribute('aria-pressed', 'true');
-    fireEvent.click(btn);
     expect(btn).toHaveAttribute('aria-pressed', 'false');
     fireEvent.click(btn);
     expect(btn).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(btn);
+    expect(btn).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('History toggle honours a stored visible=true (Issue #3589)', () => {
+    window.localStorage.setItem(HISTORY_KEY, 'true');
+    setup();
+    expect(screen.getByTestId('toggle-history-pane')).toHaveAttribute('aria-pressed', 'true');
   });
 
   it('Files toggle defaults to pressed (visible) and flips on click', () => {
@@ -285,6 +291,9 @@ describe('TerminalSplitContainer History/Files toggles (Issue #841)', () => {
   });
 
   it('History toggle persists visibility to localStorage', () => {
+    // Issue #3589: the worktree screen's History starts hidden; this test is
+    // about the visible → hidden direction, so it starts from a stored choice.
+    window.localStorage.setItem('commandmate.worktree.historyVisible', 'true');
     setup();
     fireEvent.click(screen.getByTestId('toggle-history-pane'));
     expect(window.localStorage.getItem(HISTORY_KEY)).toBe('false');
@@ -299,6 +308,9 @@ describe('TerminalSplitContainer History/Files toggles (Issue #841)', () => {
 
   it('aria-label / Tooltip reflect show vs hide depending on state', () => {
     vi.useFakeTimers();
+    // Issue #3589: the worktree screen's History starts hidden; this test is
+    // about the visible → hidden direction, so it starts from a stored choice.
+    window.localStorage.setItem('commandmate.worktree.historyVisible', 'true');
     setupWithOpenFiles({ tabCount: 1, hasDiff: false });
     const history = screen.getByTestId('toggle-history-pane');
     // default visible → "hide" wording
@@ -321,6 +333,9 @@ describe('TerminalSplitContainer History/Files toggles (Issue #841)', () => {
   });
 
   it('applies accent accent when active and gray when inactive', () => {
+    // Issue #3589: the worktree screen's History starts hidden; this test is
+    // about the visible → hidden direction, so it starts from a stored choice.
+    window.localStorage.setItem('commandmate.worktree.historyVisible', 'true');
     setup();
     const history = screen.getByTestId('toggle-history-pane');
     // active (visible) → accent accent classes
@@ -375,11 +390,17 @@ describe('TerminalSplitContainer equalize widths (Issue #861)', () => {
   });
 
   it('is enabled at 1 split while History is visible', () => {
+    // Issue #3589: the worktree screen's History starts hidden; this test is
+    // about the visible → hidden direction, so it starts from a stored choice.
+    window.localStorage.setItem('commandmate.worktree.historyVisible', 'true');
     setup();
     expect(screen.getByTestId('equalize-split-widths')).not.toBeDisabled();
   });
 
   it('is disabled at 1 split when History is hidden (nothing to equalize)', () => {
+    // Issue #3589: the worktree screen's History starts hidden; this test is
+    // about the visible → hidden direction, so it starts from a stored choice.
+    window.localStorage.setItem('commandmate.worktree.historyVisible', 'true');
     setup();
     fireEvent.click(screen.getByTestId('toggle-history-pane')); // hide History
     expect(screen.getByTestId('equalize-split-widths')).toBeDisabled();
@@ -407,6 +428,9 @@ describe('TerminalSplitContainer equalize widths (Issue #861)', () => {
   });
 
   it('resets the History width to default (40) on click', () => {
+    // Issue #3589: the worktree screen's History starts hidden; this test is
+    // about the visible → hidden direction, so it starts from a stored choice.
+    window.localStorage.setItem('commandmate.worktree.historyVisible', 'true');
     window.localStorage.setItem(HISTORY_WIDTH_KEY, '25');
     setup();
     fireEvent.click(screen.getByTestId('equalize-split-widths'));
@@ -798,6 +822,8 @@ describe('TerminalSplitContainer panel toggle availability (Issue #2259)', () =>
 
     it('[#2446] stays enabled when every split shows chat', () => {
       vi.useFakeTimers();
+      // Issue #3589: start from a stored visible History (the default is hidden).
+      window.localStorage.setItem('commandmate.worktree.historyVisible', 'true');
       setSurface(0, 'chat');
       setup();
       const btn = screen.getByTestId('toggle-history-pane');
@@ -814,6 +840,8 @@ describe('TerminalSplitContainer panel toggle availability (Issue #2259)', () =>
     });
 
     it('[#2446] toggles the shared state while every split shows chat', () => {
+      // Issue #3589: start from a stored visible History (the default is hidden).
+      window.localStorage.setItem('commandmate.worktree.historyVisible', 'true');
       setSurface(0, 'chat');
       setup();
       fireEvent.click(screen.getByTestId('toggle-history-pane'));
@@ -842,6 +870,8 @@ describe('TerminalSplitContainer panel toggle availability (Issue #2259)', () =>
     });
 
     it('reports its expanded state, not just its pressed state', () => {
+      // Issue #3589: start from a stored visible History (the default is hidden).
+      window.localStorage.setItem('commandmate.worktree.historyVisible', 'true');
       setup();
       const btn = screen.getByTestId('toggle-history-pane');
       expect(btn).toHaveAttribute('aria-expanded', 'true');

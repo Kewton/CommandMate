@@ -48,13 +48,21 @@ describe('useHistoryPaneState() with no argument (Issue #2510 regression guard)'
     expect(WORKTREE_HISTORY_PANE_STORAGE_KEYS).toEqual({
       visible: WORKTREE_VISIBLE_KEY,
       width: WORKTREE_WIDTH_KEY,
+      // Issue #3589: the worktree screen's own default (hidden).
+      defaultVisible: false,
     });
   });
 
-  it('still defaults to visible, at the default width', () => {
+  it('defaults to hidden (Issue #3589), at the default width', () => {
+    const { result } = renderHook(() => useHistoryPaneState());
+    expect(result.current.visible).toBe(false);
+    expect(result.current.width).toBe(DEFAULT_HISTORY_WIDTH);
+  });
+
+  it('still honours a stored visible=true on the worktree screen (Issue #3589)', () => {
+    window.localStorage.setItem(WORKTREE_VISIBLE_KEY, 'true');
     const { result } = renderHook(() => useHistoryPaneState());
     expect(result.current.visible).toBe(true);
-    expect(result.current.width).toBe(DEFAULT_HISTORY_WIDTH);
   });
 
   it('still reads the worktree screen key on mount', () => {
@@ -73,7 +81,8 @@ describe('useHistoryPaneState() with no argument (Issue #2510 regression guard)'
     act(() => result.current.toggle());
     act(() => result.current.setWidth(30));
 
-    expect(window.localStorage.getItem(WORKTREE_VISIBLE_KEY)).toBe('false');
+    // Issue #3589: hidden by default, so the first toggle shows it.
+    expect(window.localStorage.getItem(WORKTREE_VISIBLE_KEY)).toBe('true');
     expect(window.localStorage.getItem(WORKTREE_WIDTH_KEY)).toBe('30');
     expect(window.localStorage.getItem(TILE_VISIBLE_KEY)).toBeNull();
     expect(window.localStorage.length).toBe(2);
@@ -85,7 +94,8 @@ describe('useHistoryPaneState() with no argument (Issue #2510 regression guard)'
 
     act(() => implicit.result.current.toggle());
 
-    expect(explicit.result.current.visible).toBe(false);
+    // Issue #3589: hidden by default, so the toggle shows it in both.
+    expect(explicit.result.current.visible).toBe(true);
   });
 });
 
@@ -112,6 +122,8 @@ describe('the /sessions tile scope (Issue #2510)', () => {
   });
 
   it('keeps History open on the worktree screen when a tile stored it closed', () => {
+    // Issue #3589: the worktree screen starts hidden, so "open" is a stored choice.
+    window.localStorage.setItem(WORKTREE_VISIBLE_KEY, 'true');
     window.localStorage.setItem(TILE_VISIBLE_KEY, 'false');
 
     const { result } = renderHook(() => useHistoryPaneState());
@@ -130,6 +142,8 @@ describe('the /sessions tile scope (Issue #2510)', () => {
   });
 
   it('does not flip a worktree-screen instance on the same page', () => {
+    // Issue #3589: start both open so a leak would show as a flip to false.
+    window.localStorage.setItem(WORKTREE_VISIBLE_KEY, 'true');
     const worktree = renderHook(() => useHistoryPaneState());
     const tile = renderHook(() => useHistoryPaneState(SESSION_TILE_HISTORY_PANE_STORAGE_KEYS));
 
@@ -140,6 +154,8 @@ describe('the /sessions tile scope (Issue #2510)', () => {
   });
 
   it('is not flipped by a worktree-screen instance on the same page', () => {
+    // Issue #3589: start both open so the worktree toggle hides it there only.
+    window.localStorage.setItem(WORKTREE_VISIBLE_KEY, 'true');
     const worktree = renderHook(() => useHistoryPaneState());
     const tile = renderHook(() => useHistoryPaneState(SESSION_TILE_HISTORY_PANE_STORAGE_KEYS));
 
