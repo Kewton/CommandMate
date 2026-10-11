@@ -119,15 +119,25 @@ async function mockOneFile(page: Page): Promise<void> {
   );
 }
 
+/**
+ * Open the mocked file from the Files activity tree.
+ *
+ * Issue #3589: the screen starts with the activity pane closed (no
+ * `activity-pane` at all), so Files is opened from the activity bar unless it
+ * is already the pane showing. Opening the file closes the (unpinned) pane, so
+ * callers start from "file panel open, activity pane closed".
+ */
 async function openMockedFile(page: Page): Promise<void> {
+  await expect(page.getByTestId('terminal-split-container')).toBeVisible();
   const pane = page.getByTestId('activity-pane');
-  await expect(pane).toBeVisible();
-  if ((await pane.getAttribute('data-active')) !== 'files') {
+  const showing = (await pane.count()) > 0 ? await pane.getAttribute('data-active') : null;
+  if (showing !== 'files') {
     await page.getByTestId('activity-bar-button-files').click();
   }
   await expect(pane).toHaveAttribute('data-active', 'files');
   await page.getByTestId(`tree-item-${FILE_NAME}`).click();
   await expect(page.getByTestId(`file-tab-${FILE_NAME}`)).toBeVisible();
+  await expect(page.getByTestId('activity-pane-slot')).toHaveCount(0);
 }
 
 /** Every corner of `locator` is painted by it (nothing clips or covers it). */
@@ -217,7 +227,6 @@ test.describe('Worktree header in one row (Issue #3590)', () => {
 
     for (const testId of [
       'desktop-info-button',
-      'desktop-status-dropdown',
       'toggle-history-pane',
       'toggle-file-panel',
       'verification-status-chip',
@@ -314,11 +323,22 @@ test.describe('Worktree header in one row (Issue #3590)', () => {
     // left edge. Then the file side widened until the terminal is at its 20%.
     await page.getByTestId('sidebar-panel-toggle').click();
     await expect(page.getByTestId('sidebar-rail-toggle')).toBeVisible();
-    await page.getByTestId('activity-bar-button-files').click();
+    // Issue #3589: opening the file already put the (unpinned) Files pane away.
     await expect(page.getByTestId('activity-pane-slot')).toBeHidden();
     const resizer = page
       .getByTestId('terminal-pane')
       .locator('xpath=following-sibling::*[@role="separator"][1]');
+    // The body slides left over the sidebar's 300ms padding transition; grab
+    // the border only once it has stopped moving.
+    let lastX = -1;
+    await expect
+      .poll(async () => {
+        const x = Math.round((await box(resizer)).x);
+        const settled = x === lastX;
+        lastX = x;
+        return settled;
+      })
+      .toBe(true);
     const r = await box(resizer);
     await page.mouse.move(r.x + r.width / 2, r.y + r.height / 2);
     await page.mouse.down();

@@ -24,6 +24,11 @@ import React, {
 } from 'react';
 import type { Worktree } from '@/types/models';
 import { worktreeApi, ApiError, type RepositorySummary } from '@/lib/api-client';
+import {
+  applySavedWorktreeStatus,
+  applySavedWorktreeStatuses,
+  currentWorktreeStatusGeneration,
+} from '@/lib/worktree-status';
 
 // ============================================================================
 // Constants
@@ -286,8 +291,13 @@ export function WorktreeSelectionProvider({
     dispatch({ type: 'SET_ERROR', error: null });
 
     try {
+      // Issue #3594: a status saved after this request left wins over its reply.
+      const statusGeneration = currentWorktreeStatusGeneration();
       const response = await worktreeApi.getAll();
-      dispatch({ type: 'SET_WORKTREES', worktrees: response.worktrees });
+      dispatch({
+        type: 'SET_WORKTREES',
+        worktrees: applySavedWorktreeStatuses(response.worktrees, statusGeneration),
+      });
       // Issue #690: Surface repositories so the sidebar can filter hidden ones.
       dispatch({ type: 'SET_REPOSITORIES', repositories: response.repositories ?? [] });
     } catch (err) {
@@ -312,8 +322,9 @@ export function WorktreeSelectionProvider({
         console.warn('[WorktreeSelectionContext] Failed to mark as viewed:', err);
       });
 
+      const statusGeneration = currentWorktreeStatusGeneration();
       const detail = await worktreeApi.getById(id);
-      dispatch({ type: 'SET_WORKTREE_DETAIL', detail });
+      dispatch({ type: 'SET_WORKTREE_DETAIL', detail: applySavedWorktreeStatus(detail, statusGeneration) });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to fetch worktree detail';
       dispatch({ type: 'SET_ERROR', error: message });
@@ -353,8 +364,12 @@ export function WorktreeSelectionProvider({
 
       try {
         // Silent refresh (don't show loading state during polling)
+        const statusGeneration = currentWorktreeStatusGeneration();
         const response = await worktreeApi.getAll();
-        dispatch({ type: 'SET_WORKTREES', worktrees: response.worktrees });
+        dispatch({
+          type: 'SET_WORKTREES',
+          worktrees: applySavedWorktreeStatuses(response.worktrees, statusGeneration),
+        });
         // Issue #690: Keep repositories in sync during polling too.
         dispatch({ type: 'SET_REPOSITORIES', repositories: response.repositories ?? [] });
 

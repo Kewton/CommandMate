@@ -237,8 +237,9 @@ test.describe('[#2592] desktop', () => {
 
 
 /**
- * Three PC split layouts on one 1440x900 screen (files panel open, which
- * leaves the splits 945px). The width shares are pixel values on purpose, so
+ * Three PC split layouts on one 1440x900 screen (files panel open beside the
+ * body — seeded by `seedAgentModeSplits` since Issue #3589 closed it by
+ * default — which leaves the splits 945px). The width shares are pixel values on purpose, so
  * the panes come out at the Issue's own 218px and 455px.
  *
  * `rowFits` is whether the composer row can hold its fixed controls at all.

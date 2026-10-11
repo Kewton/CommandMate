@@ -10,6 +10,8 @@ import {
   HISTORY_VISIBLE_STORAGE_KEY,
   HISTORY_WIDTH_STORAGE_KEY,
   DEFAULT_HISTORY_VISIBLE,
+  WORKTREE_DEFAULT_HISTORY_VISIBLE,
+  SESSION_TILE_HISTORY_PANE_STORAGE_KEYS,
   DEFAULT_HISTORY_WIDTH,
   MIN_HISTORY_WIDTH,
   MAX_HISTORY_WIDTH,
@@ -24,10 +26,17 @@ describe('useHistoryPaneState', () => {
     window.localStorage.clear();
   });
 
-  it('defaults to visible=true and width=DEFAULT_HISTORY_WIDTH', () => {
+  it('defaults the worktree screen to visible=false (Issue #3589) and width=DEFAULT_HISTORY_WIDTH', () => {
     const { result } = renderHook(() => useHistoryPaneState());
-    expect(result.current.visible).toBe(DEFAULT_HISTORY_VISIBLE);
+    expect(result.current.visible).toBe(WORKTREE_DEFAULT_HISTORY_VISIBLE);
+    expect(result.current.visible).toBe(false);
     expect(result.current.width).toBe(DEFAULT_HISTORY_WIDTH);
+  });
+
+  it('keeps the shared DEFAULT_HISTORY_VISIBLE (and the /sessions tile default) at true (Issue #3589)', () => {
+    expect(DEFAULT_HISTORY_VISIBLE).toBe(true);
+    const { result } = renderHook(() => useHistoryPaneState(SESSION_TILE_HISTORY_PANE_STORAGE_KEYS));
+    expect(result.current.visible).toBe(true);
   });
 
   it('toggle() flips visibility and persists', () => {
@@ -35,13 +44,13 @@ describe('useHistoryPaneState', () => {
     act(() => {
       result.current.toggle();
     });
-    expect(result.current.visible).toBe(false);
-    expect(window.localStorage.getItem(HISTORY_VISIBLE_STORAGE_KEY)).toBe('false');
+    expect(result.current.visible).toBe(true);
+    expect(window.localStorage.getItem(HISTORY_VISIBLE_STORAGE_KEY)).toBe('true');
     act(() => {
       result.current.toggle();
     });
-    expect(result.current.visible).toBe(true);
-    expect(window.localStorage.getItem(HISTORY_VISIBLE_STORAGE_KEY)).toBe('true');
+    expect(result.current.visible).toBe(false);
+    expect(window.localStorage.getItem(HISTORY_VISIBLE_STORAGE_KEY)).toBe('false');
   });
 
   it('setWidth(n) clamps to [MIN_HISTORY_WIDTH, MAX_HISTORY_WIDTH] and persists', () => {
@@ -64,6 +73,12 @@ describe('useHistoryPaneState', () => {
     expect(result.current.width).toBe(MAX_HISTORY_WIDTH);
   });
 
+  it('restores stored visible=true on mount (Issue #3589: a stored choice beats the default)', () => {
+    window.localStorage.setItem(HISTORY_VISIBLE_STORAGE_KEY, 'true');
+    const { result } = renderHook(() => useHistoryPaneState());
+    expect(result.current.visible).toBe(true);
+  });
+
   it('restores stored visible=false on mount', () => {
     window.localStorage.setItem(HISTORY_VISIBLE_STORAGE_KEY, 'false');
     const { result } = renderHook(() => useHistoryPaneState());
@@ -80,7 +95,7 @@ describe('useHistoryPaneState', () => {
     window.localStorage.setItem(HISTORY_VISIBLE_STORAGE_KEY, 'garbage');
     window.localStorage.setItem(HISTORY_WIDTH_STORAGE_KEY, 'NaN');
     const { result } = renderHook(() => useHistoryPaneState());
-    expect(result.current.visible).toBe(DEFAULT_HISTORY_VISIBLE);
+    expect(result.current.visible).toBe(WORKTREE_DEFAULT_HISTORY_VISIBLE);
     expect(result.current.width).toBe(DEFAULT_HISTORY_WIDTH);
   });
 

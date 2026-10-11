@@ -57,6 +57,10 @@ export function MemoSearchBar({
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
       if (e.key === 'Escape') {
+        // Issue #3589: this Esc closes the search only. Marking it handled
+        // keeps the overlaid activity pane (Notes) around it open — same as
+        // the file search box (SearchBar).
+        e.preventDefault();
         onClose();
         return;
       }

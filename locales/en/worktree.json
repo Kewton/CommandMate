@@ -18,6 +18,7 @@
     "placeholder": "Type your message…",
     "commandsHint": "commands",
     "newlineHint": "newline",
+    "keyHintsTitle": "/ commands · Shift+Enter newline",
     "removeAttachment": "Remove attachment",
     "showSlashCommands": "Show slash commands",
     "attachImage": "Attach image",
@@ -1177,7 +1178,10 @@
   },
   "desktopLayout": {
     "activityPane": "Activity pane",
-    "terminalPane": "Terminal pane"
+    "terminalPane": "Terminal pane",
+    "pinPane": "Pin beside the terminal",
+    "unpinPane": "Unpin (show over the terminal)",
+    "closePane": "Close panel"
   },
   "worktreeStatus": {
     "notSet": "Not set",

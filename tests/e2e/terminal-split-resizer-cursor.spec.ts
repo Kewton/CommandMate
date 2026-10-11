@@ -16,6 +16,7 @@ import { test, expect } from '@playwright/test';
 import {
   E2E_WORKTREE_A,
   ensureFilesActivityVisible,
+  seedSideBySideLayout,
   setupSplitTest,
 } from './fixtures/terminal-split-helpers';
 
@@ -31,6 +32,10 @@ test.describe('Terminal split — PaneResizer cursor non-residue (AC-27 #1)', ()
       'PC-only split UI (chromium only)',
     );
     await setupSplitTest(page, [E2E_WORKTREE_A]);
+    // Issue #3589: the activity pane is laid over the body unless pinned, and
+    // History starts hidden — neither brings a resizer then. This spec is about
+    // many resizers coexisting, so it uses the side-by-side layout.
+    await seedSideBySideLayout(page);
   });
 
   test('drag cursor reverts after drag with multiple parallel resizers', async ({

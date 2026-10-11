@@ -18,6 +18,7 @@
     "placeholder": "メッセージを入力…",
     "commandsHint": "コマンド",
     "newlineHint": "改行",
+    "keyHintsTitle": "/ でコマンド · Shift+Enter で改行",
     "removeAttachment": "添付を削除",
     "showSlashCommands": "スラッシュコマンドを表示",
     "attachImage": "画像を添付",
@@ -1177,7 +1178,10 @@
   },
   "desktopLayout": {
     "activityPane": "アクティビティペイン",
-    "terminalPane": "ターミナルペイン"
+    "terminalPane": "ターミナルペイン",
+    "pinPane": "ターミナルの横に固定",
+    "unpinPane": "固定を解除（ターミナルの上に重ねる）",
+    "closePane": "パネルを閉じる"
   },
   "worktreeStatus": {
     "notSet": "未設定",

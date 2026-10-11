@@ -85,9 +85,24 @@ export const VALID_ACTIVITY_IDS: ReadonlySet<ActivityId> = new Set<ActivityId>(
 );
 
 /**
- * Default activity selected on first visit / fallback when persisted value is invalid.
+ * The first activity in the bar — where keyboard focus lands when no activity
+ * is open (`ActivityBar`'s roving tabindex).
+ *
+ * Issue #3589: no longer what an unvisited worktree opens. That is
+ * {@link INITIAL_ACTIVITY} (closed), so the terminal starts at full width.
  */
 export const DEFAULT_ACTIVITY: ActivityId = 'files';
+
+/**
+ * What the worktree screen shows when nothing is stored for the worktree (or
+ * the stored value is not a known activity) — Issue #3589: `null`, the pane
+ * starts closed. Before #3589 this was {@link DEFAULT_ACTIVITY} ('files'),
+ * which took ~18% of the body away from the terminal on every first visit.
+ *
+ * A stored value (an activity or {@link ACTIVITY_CLOSED_SENTINEL}) is still
+ * honoured as-is.
+ */
+export const INITIAL_ACTIVITY: ActivityId | null = null;
 
 /**
  * localStorage key prefix used by `useActivityBarState` (Issue #858).
@@ -110,8 +125,8 @@ export const ACTIVITY_BAR_STORAGE_KEY_PREFIX = 'commandmate.worktree.activeActiv
  * Unlike the pre-#858 behavior — which intentionally did NOT persist the closed
  * state — the closed state is now stored so that hiding the pane on one branch
  * survives a round-trip to another branch and back. It is distinct from "no
- * stored value" (an unvisited worktree), which still defaults to
- * {@link DEFAULT_ACTIVITY}.
+ * stored value" (an unvisited worktree), which defaults to
+ * {@link INITIAL_ACTIVITY} (closed since Issue #3589).
  */
 export const ACTIVITY_CLOSED_SENTINEL = '__closed__';
 
@@ -128,3 +143,18 @@ export function getActivityBarStorageKey(worktreeId: string): string {
 export function isActivityId(value: unknown): value is ActivityId {
   return typeof value === 'string' && VALID_ACTIVITY_IDS.has(value as ActivityId);
 }
+
+/**
+ * localStorage key for whether the activity pane is pinned (Issue #3589).
+ *
+ * - `'true'`  → pinned: the pane sits beside the body and narrows it (the
+ *   pre-#3589 layout).
+ * - anything else / absent → not pinned: the pane is laid OVER the body, which
+ *   keeps its width, and closes on Esc / × / a re-click of its icon / an
+ *   outside click / opening a file.
+ *
+ * One global key, not one per worktree: pinning is a choice about how the
+ * screen is laid out, so it carries across worktrees. Read and written by
+ * `usePanePinnedState` in `src/hooks/useActivityPaneOverlay.ts`.
+ */
+export const ACTIVITY_PANE_PINNED_STORAGE_KEY = 'commandmate.worktree.activityPanePinned';

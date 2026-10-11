@@ -104,8 +104,6 @@ describe('DesktopHeader (Issue #3435)', () => {
     repositoryName: 'CommandMate',
     status: 'idle' as const,
     onInfoClick: vi.fn(),
-    onWorktreeStatusChange: vi.fn(),
-    worktreeStatus: 'in_progress' as const,
   };
 
   it('marks the branch as unknown when status could not be read', () => {
