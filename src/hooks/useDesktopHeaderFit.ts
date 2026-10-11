@@ -9,9 +9,9 @@
  * wider than its box — the row gives something up, one step at a time, and
  * measures again:
  *
- * - the header (`DesktopHeader`): fold one more labelled agent pill into the
- *   "+N" menu (#1078), down to none, then clip the identity group
- *   ({@link useDesktopHeaderFit});
+ * - the header (`DesktopHeader`): clip the identity group
+ *   ({@link useDesktopHeaderFit}). Issue #3593: its session field has a fixed
+ *   width, so there are no agent pills left to fold first;
  * - the second row (`TerminalSplitContainer`'s action bar): drop the History /
  *   Files labels to their icons, then move the slotted items (the
  *   Verification chip) behind a "…" button, then clip the layout ops
@@ -24,16 +24,6 @@
 
 import { useEffect, useLayoutEffect, useState } from 'react';
 import type React from 'react';
-
-/**
- * Issue #1078: max labelled agent pills kept inline in the desktop header before
- * the rest collapse into the "+N" overflow menu. Idle/ready instances always
- * render as narrow icon-only dots and never count against this budget.
- *
- * Issue #2481: a ceiling, not the budget itself — a header too narrow for this
- * many keeps fewer (see {@link useDesktopHeaderFit}).
- */
-export const MAX_HEADER_AGENT_PILLS = 4;
 
 /**
  * Whether anything in a row's shrinking group is wider than its box
@@ -129,12 +119,9 @@ function useFitSteps(
 
 /** What the desktop header can afford at its current width (Issue #2481). */
 export interface DesktopHeaderFit {
-  /** Labelled agent pills kept inline; the rest fold into the "+N" menu. */
-  pillBudget: number;
   /**
-   * The last resort, once there is no labelled pill left to fold: the identity
-   * group and the agent row clip horizontally instead of painting under the
-   * right-hand controls.
+   * The last resort: the identity group and the agent row clip horizontally
+   * instead of painting under the right-hand controls.
    */
   squeezed: boolean;
 }
@@ -143,36 +130,30 @@ export interface DesktopHeaderFit {
  * Fits the desktop header's one row to its width (Issue #2481).
  *
  * At 1470px with the sidebar open, the identity (status dot, name, repository,
- * branch) plus the agent pills and controls no longer fit, and the header's
+ * branch) plus the agent row and controls no longer fit, and the header's
  * parent is `overflow-hidden` — so the right end (Info) was cut off with no
  * way to scroll to it. The layout decides who gives way: the controls group
  * never shrinks, the identity group (`min-w-0`) takes what is left and
- * truncates. This hook handles the point where truncating is not enough by
- * folding one more labelled pill into the "+N" menu (#1078) and measuring
- * again, down to zero pills and then {@link DesktopHeaderFit.squeezed}.
+ * truncates. This hook handles the point where truncating is not enough:
+ * {@link DesktopHeaderFit.squeezed}.
  *
  * Issue #3590: the Verification chip left the header for the second row
  * ({@link useSplitActionBarFit}), so nothing in the header is unkeyed any more.
+ * Issue #3593: the agent pills, which used to fold into "+N" one at a time
+ * before this step, became a fixed-width session field — the same width
+ * whatever the number of sessions — so there is nothing to fold first.
  *
  * @param headerRef - The header row, observed for size changes
  * @param identityRef - The left group; its overflow is the "does not fit" signal
- * @param contentKey - What, besides the budget, changes the row's widths
- * @param labelledCount - Instances that want a labelled pill (active or working)
+ * @param contentKey - What changes the row's widths
  */
 export function useDesktopHeaderFit(
   headerRef: React.RefObject<HTMLElement | null>,
   identityRef: React.RefObject<HTMLElement | null>,
-  contentKey: string,
-  labelledCount: number
+  contentKey: string
 ): DesktopHeaderFit {
-  // Budgets above the labelled count change nothing on screen, so the steps
-  // start from the pills actually shown. A change of the count changes the
-  // key (the pills' statuses are in it), which restarts the fit.
-  const ceiling = Math.min(MAX_HEADER_AGENT_PILLS, labelledCount);
-  const step = useFitSteps(headerRef, identityRef, `${contentKey}\n${ceiling}`, ceiling + 1, null);
-  return step <= ceiling
-    ? { pillBudget: step === 0 ? MAX_HEADER_AGENT_PILLS : ceiling - step, squeezed: false }
-    : { pillBudget: 0, squeezed: true };
+  const step = useFitSteps(headerRef, identityRef, contentKey, 1, null);
+  return { squeezed: step >= 1 };
 }
 
 /** What the split action bar (the second row) can afford (Issue #3590). */
