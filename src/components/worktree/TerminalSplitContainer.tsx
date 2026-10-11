@@ -26,6 +26,9 @@
  *    children being hidden, so the surviving pane would sit in the top-left
  *    quarter. The grid collapses to a single `1fr` / `1fr` cell while maximized
  *  - delegating each split's body to a parent-supplied `renderPane`
+ *  - with ONE split, the action bar's two slots its title bar's controls are
+ *    portalled into instead (Issue #3592, `SplitPaneHeaderControls`), so the
+ *    lone split has no title bar of its own
  *
  * Does NOT include HistoryPane (HISTORY_PANE_ID uniqueness is owned by
  * TerminalContainer per Issue #730).
@@ -86,6 +89,7 @@ import {
 import { Tooltip } from '@/components/common/Tooltip';
 import { useSplitActionBarFit } from '@/hooks/useDesktopHeaderFit';
 import { PaneResizer, type ResizerOrientation } from './PaneResizer';
+import { SplitHeaderSlotsProvider, type SplitHeaderSlots } from './SplitPaneHeaderControls';
 
 /**
  * Issue #2421: thickness of the grid's two divider TRACKS, in px.
@@ -283,6 +287,13 @@ export interface TerminalSplitContainerProps {
    * chip's 1px border on each side, 34px. Keep each item at or under 34px.
    * A slot rather than the chip itself so this module keeps no dependency on
    * the verification client. Omitted renders the pre-#3590 bar.
+   *
+   * Issue #3592: the lone split's title-bar controls do NOT come through here
+   * — they belong to the split (its surface mode, its polled cost, its note
+   * editor), and lifting them into the parent would re-create the split on
+   * every 1 ↔ 2 switch. They are portalled into two slots this bar renders
+   * itself with one split (`SplitPaneHeaderControls`): right after this node,
+   * in the same fitted left group, and left of History / Files.
    */
   actionBarItems?: ReactNode;
 }
@@ -669,6 +680,24 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
     actionBarItems
   );
 
+  /*
+   * Issue #3592: with one split, its title bar's controls move into the bar —
+   * the session ones right of the slotted items, the actions left of History /
+   * Files — and the split draws no title bar. The slots are elements in state
+   * (callback refs) so the split re-renders into them once they exist; the
+   * ref is set during the commit, so that re-render happens before paint.
+   */
+  const singleSplit = splits.length === MIN_SPLITS;
+  const [sessionSlotEl, setSessionSlotEl] = useState<HTMLDivElement | null>(null);
+  const [actionsSlotEl, setActionsSlotEl] = useState<HTMLDivElement | null>(null);
+  const headerSlots = useMemo<SplitHeaderSlots | null>(
+    () =>
+      singleSplit && sessionSlotEl && actionsSlotEl
+        ? { session: sessionSlotEl, actions: actionsSlotEl }
+        : null,
+    [singleSplit, sessionSlotEl, actionsSlotEl],
+  );
+
   // Memoize per-split onFocus handlers so prop identity is stable.
   const focusHandlers = useMemo(
     () => splits.map((_, idx) => () => setFocusedSplitIndex(idx)),
@@ -867,6 +896,17 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
               {actionBarItems}
             </div>
           )}
+
+          {/* Issue #3592: the lone split's agent selector, Terminal / Chat,
+              model, cost and note. In the left group, so the bar's fit counts
+              it; `min-w-0` so the model / cost / note truncate first. */}
+          {singleSplit && (
+            <div
+              ref={setSessionSlotEl}
+              data-testid="split-action-bar-session"
+              className="ml-1 flex min-w-0 items-center"
+            />
+          )}
         </div>
 
         {/* Issue #3590: on a bar too narrow for them, the items wait behind
@@ -880,6 +920,15 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
         {/* Issue #1079: separator dividing layout ops (left) from panel toggles
             (right). `ml-auto` pushes the History / Files group to the far right. */}
         <div className="ml-auto h-4 w-px flex-shrink-0 bg-border" aria-hidden="true" />
+
+        {/* Issue #3592: the lone split's search, maximize and "…". */}
+        {singleSplit && (
+          <div
+            ref={setActionsSlotEl}
+            data-testid="split-action-bar-pane-actions"
+            className="flex flex-shrink-0 items-center gap-0.5"
+          />
+        )}
 
         {/*
           Issue #841 (Phase 2): History / Files visibility toggles. Always
@@ -959,6 +1008,7 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
         for two usable rows the grid scrolls rather than crushing both panes into
         a few lines of terminal.
       */}
+      <SplitHeaderSlotsProvider value={headerSlots}>
       <div
         ref={containerRef}
         data-testid="terminal-split-layout"
@@ -1106,6 +1156,7 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
           </>
         ) : null}
       </div>
+      </SplitHeaderSlotsProvider>
     </div>
   );
 });
