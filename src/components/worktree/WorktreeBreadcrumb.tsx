@@ -17,6 +17,12 @@
  * strip's own `useOpenWorktreeFromBranchList` (select, viewed mark, navigate),
  * and only one of the two lists is ever open (`useExclusiveBranchList`).
  *
+ * ## One line (Issue #3590)
+ *
+ * The header is one 44px row: the name ▾ first, then the repository, which
+ * links to the Repositories screen. The worktree's memo is no longer drawn in
+ * the header; its full text is part of the name's tooltip (and Info).
+ *
  * ## When there is no ▾
  *
  * The list needs the worktree cache (read through its non-throwing hook) and
@@ -35,6 +41,7 @@
 'use client';
 
 import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { ChevronDown } from 'lucide-react';
 import { useSidebarContext } from '@/contexts/SidebarContext';
@@ -61,24 +68,30 @@ import type { Worktree } from '@/types/models';
 /**
  * The repository the worktree belongs to, small, with the folder icon in the
  * same colour as its tab. Rendered whatever the tab strip is doing.
+ *
+ * Issue #3590: a link to the Repositories screen (there is no per-repository
+ * page), on the header's one line right of the name.
  */
 export const WorktreeBreadcrumbRepository = memo(function WorktreeBreadcrumbRepository({
   repositoryName,
 }: {
   repositoryName: string;
 }) {
+  const t = useTranslations('worktree');
   return (
-    <span
+    <Link
+      href="/repositories"
       data-testid="desktop-repository-name"
-      className="flex min-w-0 max-w-[200px] items-center gap-1"
-      title={repositoryName}
+      className="flex min-w-0 max-w-[200px] items-center gap-1 rounded text-xs text-muted-foreground
+        hover:text-foreground hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      title={t('detail.openRepositories', { repository: repositoryName })}
     >
       <GroupIcon
         className="h-3 w-3 flex-shrink-0"
         color={generateRepositoryColor(repositoryName)}
       />
       <span className="truncate">{repositoryName}</span>
-    </span>
+    </Link>
   );
 });
 
@@ -93,6 +106,30 @@ interface WorktreeBreadcrumbBranchProps {
   worktreeName: string;
   /** For the ▾ button's tooltip. */
   repositoryName: string;
+  /**
+   * Issue #3590: the worktree's memo. Not drawn; its full text is appended to
+   * the name's tooltip, the header's only place for it besides Info.
+   */
+  description?: string;
+}
+
+/** The name's tooltip: `base` (if any), then the memo in full (Issue #3590). */
+function nameTooltip(base: string | undefined, description: string | undefined): string | undefined {
+  const memo = description?.trim() ? description : undefined;
+  if (!memo) return base;
+  return base ? `${base}\n\n${memo}` : memo;
+}
+
+/** The name as plain text, carrying the memo tooltip when there is one. */
+function PlainName({ worktreeName, description }: { worktreeName: string; description?: string }) {
+  const title = nameTooltip(undefined, description);
+  return title ? (
+    <span title={title} data-testid="worktree-breadcrumb-name">
+      {worktreeName}
+    </span>
+  ) : (
+    <>{worktreeName}</>
+  );
 }
 
 /**
@@ -104,14 +141,16 @@ export const WorktreeBreadcrumbBranch = memo(function WorktreeBreadcrumbBranch({
   worktreeId,
   worktreeName,
   repositoryName,
+  description,
 }: WorktreeBreadcrumbBranchProps) {
   const cache = useOptionalWorktreesCacheContext();
-  if (!cache || !worktreeId) return <>{worktreeName}</>;
+  if (!cache || !worktreeId) return <PlainName worktreeName={worktreeName} description={description} />;
   return (
     <SidebarSettingsGate
       worktreeId={worktreeId}
       worktreeName={worktreeName}
       repositoryName={repositoryName}
+      description={description}
       worktrees={cache.worktrees}
       repositories={cache.repositories}
     />
@@ -127,11 +166,14 @@ function SidebarSettingsGate({
   worktreeId: string;
   worktreeName: string;
   repositoryName: string;
+  description?: string;
   worktrees: Worktree[];
   repositories: RepositorySummary[];
 }) {
   const { sortKey, sortDirection, repositoryOrder } = useSidebarContext();
-  if (!sortKey || !sortDirection || !repositoryOrder) return <>{props.worktreeName}</>;
+  if (!sortKey || !sortDirection || !repositoryOrder) {
+    return <PlainName worktreeName={props.worktreeName} description={props.description} />;
+  }
   return (
     <BranchSwitcher
       {...props}
@@ -148,6 +190,7 @@ function BranchSwitcher({
   worktreeId,
   worktreeName,
   repositoryName,
+  description,
   worktrees,
   repositories,
   sortKey,
@@ -157,6 +200,7 @@ function BranchSwitcher({
   worktreeId: string;
   worktreeName: string;
   repositoryName: string;
+  description?: string;
   worktrees: Worktree[];
   repositories: RepositorySummary[];
   sortKey: SortKey;
@@ -227,7 +271,7 @@ function BranchSwitcher({
     [close, openWorktree]
   );
 
-  if (!group) return <>{worktreeName}</>;
+  if (!group) return <PlainName worktreeName={worktreeName} description={description} />;
 
   return (
     <>
@@ -237,7 +281,7 @@ function BranchSwitcher({
         data-testid="worktree-breadcrumb-branch"
         aria-haspopup="menu"
         aria-expanded={anchor !== null}
-        title={t('repoTabBar.switchBranch', { repository: repositoryName })}
+        title={nameTooltip(t('repoTabBar.switchBranch', { repository: repositoryName }), description)}
         onClick={() => (anchor ? close() : open())}
         onKeyDown={(event) => {
           if (event.key === 'ArrowDown') {

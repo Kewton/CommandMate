@@ -41,13 +41,16 @@ import React, {
   memo,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   type ReactNode,
 } from 'react';
+import { createPortal } from 'react-dom';
 import { useTranslations } from 'next-intl';
 import {
+  Ellipsis,
   History,
   PanelRight,
   AlignHorizontalDistributeCenter,
@@ -81,6 +84,7 @@ import {
   FILE_PANEL_PANE_ID,
 } from '@/hooks/useFilePanelState';
 import { Tooltip } from '@/components/common/Tooltip';
+import { useSplitActionBarFit } from '@/hooks/useDesktopHeaderFit';
 import { PaneResizer, type ResizerOrientation } from './PaneResizer';
 
 /**
@@ -234,6 +238,34 @@ export interface TerminalSplitContainerProps {
   onInstancePlacementApplied?: (token: number) => void;
   /** Issue #3514: published whenever the split count changes (the "+" needs it). */
   onSplitCountChange?: (count: number) => void;
+  /**
+   * Issue #3590: what the worktree screen puts on this action bar — the second
+   * row under the header — drawn right after the layout ops (layout icons,
+   * Equal, Maximize) and before the History / Files toggles.
+   *
+   * **The one entry point for the second row.** Today it carries the
+   * Verification chip (moved here from the header). Later additions (#3591,
+   * #3592, #3593) go into this same node — a fragment of several items is
+   * fine — rather than into new props, so the bar keeps a single place whose
+   * width is fitted: the slot is `min-w-0` and capped at 360px, its content
+   * may truncate, and when it still does not fit the History / Files toggles
+   * drop their labels, then the whole node moves into a floating panel behind
+   * a "…" button that never shrinks, and only then the layout ops clip
+   * (`useSplitActionBarFit`). The node is remounted when it moves (and when
+   * `FilePanelSplit` moves the terminal), so state an item must keep belongs
+   * in the parent — see `useDesktopVerificationChip`. Popovers an item opens
+   * should float out of the bar (the chip's `popover="floating"`) and carry
+   * `data-floating-layer` so a press in them does not close the panel.
+   *
+   * **Height and the display size.** The bar is `h-9` (2.25rem: 36px at the
+   * medium display size, 31.5px at small, 28.1px at xsmall) with a 35px
+   * floor (`min-h-[35px]`, border included), because items sized in px do
+   * not scale with the display size: the chip's ⓘ is a fixed 32px plus the
+   * chip's 1px border on each side, 34px. Keep each item at or under 34px.
+   * A slot rather than the chip itself so this module keeps no dependency on
+   * the verification client. Omitted renders the pre-#3590 bar.
+   */
+  actionBarItems?: ReactNode;
 }
 
 export const TerminalSplitContainer = memo(function TerminalSplitContainer({
@@ -248,6 +280,7 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
   instancePlacementRequest,
   onInstancePlacementApplied,
   onSplitCountChange,
+  actionBarItems,
 }: TerminalSplitContainerProps) {
   const {
     splits,
@@ -578,6 +611,24 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
     [splits],
   );
 
+  // Issue #3590: the bar's width fit, the second row's counterpart of the
+  // header's #2481 fit. Keyed by what changes its widths; the slotted items
+  // are a node and re-measure without a key.
+  const actionBarRef = useRef<HTMLDivElement>(null);
+  const actionBarLeftRef = useRef<HTMLDivElement>(null);
+  const actionBarFitKey = [
+    t('terminal.historyLabel'),
+    t('terminal.filesLabel'),
+    openFileCount,
+    isMaximized ? `max:${maximizedIndex ?? 0}` : '',
+  ].join('\n');
+  const actionBarFit = useSplitActionBarFit(
+    actionBarRef,
+    actionBarLeftRef,
+    actionBarFitKey,
+    actionBarItems
+  );
+
   // Memoize per-split onFocus handlers so prop identity is stable.
   const focusHandlers = useMemo(
     () => splits.map((_, idx) => () => setFocusedSplitIndex(idx)),
@@ -648,8 +699,22 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
       data-testid="terminal-split-container"
       className="flex flex-col h-full min-h-0"
     >
-      {/* Action bar */}
-      <div className="flex items-center gap-1 px-2 py-1 bg-surface border-b border-border flex-shrink-0">
+      {/* Action bar. Issue #3590: the worktree screen's second row — 36px
+          including its border (the Verification chip's ⓘ is 32px plus the
+          chip's 1px border on each side, so no vertical padding). */}
+      <div
+        ref={actionBarRef}
+        data-testid="split-action-bar"
+        className="flex h-9 min-h-[35px] items-center gap-1 px-2 bg-surface border-b border-border flex-shrink-0"
+      >
+        {/* Issue #3590: the left group (layout ops + `actionBarItems`) is the
+            part that gives way (`min-w-0`); the History / Files toggles never
+            shrink. Clipped only as the fit's last resort. */}
+        <div
+          ref={actionBarLeftRef}
+          data-testid="split-action-bar-left"
+          className={`flex min-w-0 items-center gap-1${actionBarFit.squeezed ? ' overflow-x-clip' : ''}`}
+        >
         {/* Issue #2261: while a split is maximized the label says which split is
             filling the row — the one line that explains why the other panes
             vanished. Issue #3514: the "n / 4 splits" count it showed otherwise
@@ -657,7 +722,7 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
         {isMaximized ? (
           <span
             data-testid="split-count-label"
-            className="text-xs text-muted-foreground tabular-nums mr-1 truncate"
+            className="min-w-0 text-xs text-muted-foreground tabular-nums mr-1 truncate"
           >
             {t('terminal.maximizedStatus', { split: (maximizedIndex ?? 0) + 1 })}
           </span>
@@ -674,7 +739,7 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
           role="group"
           aria-label={t('terminal.layoutGroupLabel')}
           data-testid="split-layout-picker"
-          className="flex items-center gap-0.5 rounded border border-border p-0.5"
+          className="flex flex-shrink-0 items-center gap-0.5 rounded border border-border p-0.5"
         >
           {SPLIT_LAYOUT_COUNTS.map((count) => {
             const Icon = SPLIT_LAYOUT_ICONS[count] ?? Square;
@@ -717,7 +782,7 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
             aria-disabled={!canEqualize}
             aria-label={t('terminal.equalizeWidthsHint')}
             data-testid="equalize-split-widths"
-            className="flex items-center justify-center h-7 w-7 rounded text-muted-foreground hover:text-surface-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-ring transition-colors"
+            className="flex flex-shrink-0 items-center justify-center h-7 w-7 rounded text-muted-foreground hover:text-surface-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-ring transition-colors"
           >
             <AlignHorizontalDistributeCenter
               className="w-4 h-4 flex-shrink-0"
@@ -736,7 +801,7 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
             aria-pressed={isMaximized}
             aria-label={maximizeLabel}
             data-testid="toggle-maximize-split"
-            className="flex items-center justify-center h-7 w-7 rounded text-muted-foreground hover:text-surface-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-ring transition-colors"
+            className="flex flex-shrink-0 items-center justify-center h-7 w-7 rounded text-muted-foreground hover:text-surface-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-ring transition-colors"
           >
             {isMaximized ? (
               <Minimize2 className="w-4 h-4 flex-shrink-0" aria-hidden="true" />
@@ -746,9 +811,31 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
           </button>
         </Tooltip>
 
+          {/* Issue #3590: the second row's items (the Verification chip), next
+              to the layout ops. Same width rule the header gave the chip
+              (#2481): a 360px `w-*` capped by `max-w-max`, `min-w-0` so its
+              title truncates. */}
+          {actionBarItems && !actionBarFit.itemsFolded && (
+            <div
+              data-testid="split-action-bar-items"
+              className="ml-1 flex min-w-0 w-[360px] max-w-max items-center gap-1"
+            >
+              {actionBarItems}
+            </div>
+          )}
+        </div>
+
+        {/* Issue #3590: on a bar too narrow for them, the items wait behind
+            this button, which never shrinks, in a panel out of every clip. */}
+        {actionBarItems && actionBarFit.itemsFolded && (
+          <ActionBarItemsOverflow label={t('terminal.actionBarMore')}>
+            {actionBarItems}
+          </ActionBarItemsOverflow>
+        )}
+
         {/* Issue #1079: separator dividing layout ops (left) from panel toggles
             (right). `ml-auto` pushes the History / Files group to the far right. */}
-        <div className="ml-auto h-4 w-px bg-border" aria-hidden="true" />
+        <div className="ml-auto h-4 w-px flex-shrink-0 bg-border" aria-hidden="true" />
 
         {/*
           Issue #841 (Phase 2): History / Files visibility toggles. Always
@@ -776,7 +863,9 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
             }`}
           >
             <History className="w-3.5 h-3.5 flex-shrink-0" aria-hidden="true" />
-            <span>{t('terminal.historyLabel')}</span>
+            {/* Issue #3590: dropped first when the bar is too narrow; the
+                aria-label and the tooltip still name the toggle. */}
+            {!actionBarFit.compactToggles && <span>{t('terminal.historyLabel')}</span>}
           </button>
         </Tooltip>
         <Tooltip content={filesTooltip} placement="bottom" className="flex-shrink-0">
@@ -801,7 +890,7 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
             {/* Issue #2616: `Files` is the Activity Bar file tree's icon; this
                 toggle shows a side panel, so it must not share it. */}
             <PanelRight className="w-3.5 h-3.5 flex-shrink-0" aria-hidden="true" />
-            <span>{t('terminal.filesLabel')}</span>
+            {!actionBarFit.compactToggles && <span>{t('terminal.filesLabel')}</span>}
             {openFileCount > 0 && (
               <span
                 data-testid="open-files-count"
@@ -976,6 +1065,163 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
     </div>
   );
 });
+
+/** Gap between the "…" panel and the viewport edge, and below the button (px). */
+const OVERFLOW_PANEL_MARGIN = 8;
+const OVERFLOW_PANEL_GAP = 4;
+
+/**
+ * Issue #3590: the "…" panel's left edge — right-aligned with the button when
+ * there is room, shifted right as far as needed so its left edge stays inside
+ * the viewport, and pinned to the left margin when the panel is wider than the
+ * viewport allows (its `max-w` then caps it). The same idea as the repository
+ * tab popover's `clampPopoverLeft`, with the preference flipped: this button
+ * sits at the right end of its group.
+ *
+ * @param buttonRight - The "…" button's viewport `right`
+ * @param panelWidth - The panel's rendered width in px
+ * @param viewportWidth - `window.innerWidth`
+ * @returns The `left` coordinate to render at
+ * @internal Exported for unit tests.
+ */
+export function clampOverflowPanelLeft(
+  buttonRight: number,
+  panelWidth: number,
+  viewportWidth: number
+): number {
+  const maxLeft = viewportWidth - OVERFLOW_PANEL_MARGIN - panelWidth;
+  if (maxLeft <= OVERFLOW_PANEL_MARGIN) return OVERFLOW_PANEL_MARGIN;
+  return Math.min(Math.max(buttonRight - panelWidth, OVERFLOW_PANEL_MARGIN), maxLeft);
+}
+
+/**
+ * Issue #3590: the "…" button the action bar's items fold behind when the bar
+ * is too narrow (`useSplitActionBarFit`). The panel is portalled to `<body>`
+ * with `position: fixed` under the button, so neither the bar's clipped left
+ * group nor the terminal pane's `overflow-hidden` (beside an open file panel)
+ * can cut it. Its rendered width is measured before paint and its left edge
+ * clamped into the viewport on both sides ({@link clampOverflowPanelLeft}).
+ *
+ * Focus follows the repository tab popover: opening moves focus to the
+ * panel's first control, Escape closes and hands focus back to "…". A press
+ * outside closes without moving focus — the press already put it where the
+ * user wanted. A press inside any `[data-floating-layer]` (the chip's reason
+ * popover) counts as inside.
+ */
+function ActionBarItemsOverflow({ label, children }: { label: string; children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  const [position, setPosition] = useState<{ top: number; left: number } | null>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  const place = useCallback(() => {
+    const rect = buttonRef.current?.getBoundingClientRect();
+    const panel = panelRef.current;
+    if (!rect || !panel) return;
+    const width = panel.getBoundingClientRect().width;
+    const next = {
+      top: rect.bottom + OVERFLOW_PANEL_GAP,
+      left: clampOverflowPanelLeft(rect.right, width, window.innerWidth),
+    };
+    setPosition((prev) => (prev && prev.top === next.top && prev.left === next.left ? prev : next));
+  }, []);
+
+  // Measure the rendered panel before paint (it renders hidden until placed),
+  // then move focus to its first control.
+  useLayoutEffect(() => {
+    if (!open) {
+      setPosition(null);
+      return;
+    }
+    place();
+  }, [open, place]);
+
+  // Once per opening, after the panel is placed: a `visibility: hidden` panel
+  // (the first, unmeasured render) cannot take focus.
+  const placed = position !== null;
+  const focusedRef = useRef(false);
+  useEffect(() => {
+    if (!open) {
+      focusedRef.current = false;
+      return;
+    }
+    if (!placed || focusedRef.current) return;
+    focusedRef.current = true;
+    const first = panelRef.current?.querySelector<HTMLElement>(
+      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    );
+    first?.focus();
+  }, [open, placed]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event: MouseEvent) => {
+      const target = event.target as Element | null;
+      if (!target) return;
+      if (buttonRef.current?.contains(target) || panelRef.current?.contains(target)) return;
+      if (typeof target.closest === 'function' && target.closest('[data-floating-layer]')) return;
+      setOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      setOpen(false);
+      buttonRef.current?.focus();
+    };
+    // The panel's content can change width (the chip's verdict) and the
+    // button can move; re-measure on both, and on window resizes.
+    const observer =
+      typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => place());
+    if (observer && panelRef.current) observer.observe(panelRef.current);
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    window.addEventListener('resize', place);
+    return () => {
+      observer?.disconnect();
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('resize', place);
+    };
+  }, [open, place]);
+
+  return (
+    <>
+      <Tooltip content={label} placement="bottom" className="flex-shrink-0">
+        <button
+          ref={buttonRef}
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          aria-label={label}
+          aria-expanded={open}
+          aria-haspopup="dialog"
+          data-testid="split-action-bar-items-overflow"
+          className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded text-muted-foreground hover:text-surface-foreground hover:bg-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-ring transition-colors"
+        >
+          <Ellipsis className="w-4 h-4" aria-hidden="true" />
+        </button>
+      </Tooltip>
+      {open &&
+        typeof document !== 'undefined' &&
+        createPortal(
+          <div
+            ref={panelRef}
+            role="dialog"
+            aria-label={label}
+            data-testid="split-action-bar-items-panel"
+            data-floating-layer="true"
+            style={
+              position
+                ? { top: position.top, left: position.left }
+                : { top: 0, left: 0, visibility: 'hidden' }
+            }
+            className="fixed z-50 flex max-w-[calc(100vw-16px)] items-center gap-1 rounded-lg border border-border bg-surface p-1 shadow-lg"
+          >
+            {children}
+          </div>,
+          document.body
+        )}
+    </>
+  );
+}
 
 /**
  * Internal helper: wraps PaneResizer so we can intercept the underlying

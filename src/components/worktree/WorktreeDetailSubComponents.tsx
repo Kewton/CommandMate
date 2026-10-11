@@ -11,7 +11,7 @@
 
 'use client';
 
-import React, { useEffect, useCallback, useLayoutEffect, useState, memo, useRef } from 'react';
+import React, { useEffect, useCallback, useState, memo, useRef } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import { type WorktreeStatus } from '@/components/mobile/MobileHeader';
 import { DESKTOP_STATUS_LABEL_KEYS } from '@/config/status-colors';
@@ -60,6 +60,7 @@ import {
 } from '@/components/worktree/WorktreeBreadcrumb';
 import { AppUpdateButton } from '@/components/common/AppUpdateButton';
 import { useAppUpdate } from '@/contexts/AppUpdateContext';
+import { useDesktopHeaderFit } from '@/hooks/useDesktopHeaderFit';
 
 // ============================================================================
 // Constants
@@ -840,14 +841,11 @@ interface DesktopHeaderProps {
    * worktree status dropdown.
    */
   onKillSession?: () => void;
-  /**
-   * Issue #1816: the task-contract / verification status chip, rendered next to
-   * the branch title. A slot rather than the chip itself so this module keeps
-   * no dependency on the verification client — the parent already owns that
-   * state and can hand the built node down. Omitted (or `null`) renders
-   * nothing, which is what every worktree without a task row gets.
+  /*
+   * Issue #3590: `verificationChip` (#1816) is gone from here. The chip sits on
+   * the second row now, next to the split layout icons — the worktree screen
+   * hands it to `TerminalSplitContainer`'s `actionBarItems`.
    */
-  verificationChip?: React.ReactNode;
   /**
    * What each instance's agent says about the session it is in (Issue #2042).
    *
@@ -874,140 +872,12 @@ interface DesktopHeaderProps {
 
 /** Status indicator configuration is imported from @/config/status-colors (SF1) */
 
-/**
- * Issue #1078: max labelled agent pills kept inline in the desktop header before
- * the rest collapse into the "+N" overflow menu. Idle/ready instances always
- * render as narrow icon-only dots and never count against this budget.
- *
- * Issue #2481: a ceiling, not the budget itself — a header too narrow for this
- * many keeps fewer (see {@link useDesktopHeaderFit}).
+/*
+ * Issue #2481 / #3590: the header's width fit (`useDesktopHeaderFit`) and its
+ * MAX_HEADER_AGENT_PILLS ceiling live in `@/hooks/useDesktopHeaderFit`, beside
+ * the second row's fit (`useSplitActionBarFit`), so both rows give way the
+ * same way.
  */
-const MAX_HEADER_AGENT_PILLS = 4;
-
-/** What the desktop header can afford at its current width (Issue #2481). */
-interface DesktopHeaderFit {
-  /** Labelled agent pills kept inline; the rest fold into the "+N" menu. */
-  pillBudget: number;
-  /**
-   * The last resort, once there is no labelled pill left to fold: the identity
-   * group and the agent row clip horizontally instead of painting under the
-   * right-hand controls.
-   */
-  squeezed: boolean;
-}
-
-/**
- * Whether anything in the desktop header's identity group is wider than its box
- * (Issue #2481).
- *
- * The group's own overflow catches content pushed past its edge. The walk
- * catches content that collides inside it without widening anything: the
- * verification chip squeezed below its badges paints them over its own ⓘ
- * toggle, and the chip is a slot this module does not look into. Elements that
- * clip (the `truncate` spans) are wider than their box by design and skipped.
- */
-function identityOverflows(identity: HTMLElement): boolean {
-  if (identity.scrollWidth > identity.clientWidth + 1) return true;
-  for (const el of Array.from(identity.querySelectorAll('*'))) {
-    if (el.scrollWidth <= el.clientWidth + 1) continue;
-    if (getComputedStyle(el).overflowX !== 'visible') continue;
-    return true;
-  }
-  return false;
-}
-
-/**
- * Fits the desktop header's one row to its width (Issue #2481).
- *
- * At 1470px with the sidebar open, identity (name, branch, verification chip)
- * plus the agent pills and controls no longer fit, and the header's parent is
- * `overflow-hidden` — so the right end (display size, Info) was cut off with no
- * way to scroll to it. The layout now decides who gives way: the controls group
- * never shrinks, the identity group (`min-w-0`) takes what is left and
- * truncates. This hook handles the point where truncating is not enough — the
- * identity group's content is wider than its box — by folding one more
- * labelled pill into the existing "+N" menu (#1078) and measuring again, down
- * to zero pills and then {@link DesktopHeaderFit.squeezed}.
- *
- * The measurement runs in a layout effect, whose state updates re-render before
- * the browser paints, so the intermediate steps are never seen. Folding only
- * goes one way, so the fit restarts from the ceiling whenever there may be room
- * again: the header got wider or narrower (a ResizeObserver — opening the
- * sidebar resizes the header without resizing the window), or `contentKey`
- * changed (an instance went idle, a label or the branch changed).
- *
- * @param headerRef - The header row, observed for size changes
- * @param identityRef - The left group; its overflow is the "does not fit" signal
- * @param contentKey - What, besides the budget, changes the row's widths
- * @param labelledCount - Instances that want a labelled pill (active or working)
- * @param unkeyedContent - Content whose width `contentKey` cannot capture (the
- *   verification chip node): a new value re-measures without restarting, so a
- *   chip that grows folds a pill and one that shrinks waits for the next resize
- */
-function useDesktopHeaderFit(
-  headerRef: React.RefObject<HTMLDivElement | null>,
-  identityRef: React.RefObject<HTMLDivElement | null>,
-  contentKey: string,
-  labelledCount: number,
-  unkeyedContent: unknown
-): DesktopHeaderFit {
-  const [fit, setFit] = useState(() => ({
-    key: contentKey,
-    pillBudget: MAX_HEADER_AGENT_PILLS,
-    squeezed: false,
-  }));
-
-  // Reset while rendering (React's "adjust state when a prop changes"
-  // pattern), not in an effect: an effect would run after the step below in
-  // the same commit and be overwritten by it.
-  let current = fit;
-  if (fit.key !== contentKey) {
-    current = { key: contentKey, pillBudget: MAX_HEADER_AGENT_PILLS, squeezed: false };
-    setFit(current);
-  }
-
-  // While the identity group's content overflows, give up one more step.
-  // Every step is a new `fit`, so this re-runs until the row fits or is
-  // squeezed; a step never undoes one, so the chain ends.
-  useLayoutEffect(() => {
-    const identity = identityRef.current;
-    if (!identity || fit.squeezed || !identityOverflows(identity)) return;
-    setFit((prev) => {
-      if (prev.squeezed) return prev;
-      const shown = Math.min(prev.pillBudget, labelledCount);
-      return shown > 0 ? { ...prev, pillBudget: shown - 1 } : { ...prev, squeezed: true };
-    });
-  }, [identityRef, fit, labelledCount, unkeyedContent]);
-
-  useEffect(() => {
-    const header = headerRef.current;
-    if (!header || typeof ResizeObserver === 'undefined') return;
-    let lastWidth: number | null = null;
-    let lastHeight: number | null = null;
-    const observer = new ResizeObserver((entries) => {
-      const rect = entries[entries.length - 1]?.contentRect;
-      if (!rect) return;
-      const widthChanged = rect.width !== lastWidth;
-      if (!widthChanged && rect.height === lastHeight) return;
-      lastWidth = rect.width;
-      lastHeight = rect.height;
-      // A new width may hold more: start again from the ceiling. The header's
-      // width comes from its parent, never from this row, so this cannot feed
-      // back into itself. A height-only change (display size) is only
-      // re-checked — a fresh object re-renders, and the step above can only
-      // fold further, so it cannot oscillate either.
-      setFit((prev) =>
-        widthChanged
-          ? { key: prev.key, pillBudget: MAX_HEADER_AGENT_PILLS, squeezed: false }
-          : { ...prev }
-      );
-    });
-    observer.observe(header);
-    return () => observer.disconnect();
-  }, [headerRef]);
-
-  return { pillBudget: current.pillBudget, squeezed: current.squeezed };
-}
 
 /** Desktop header with worktree name, repository, status, and info button */
 export const DesktopHeader = memo(function DesktopHeader({
@@ -1029,7 +899,6 @@ export const DesktopHeader = memo(function DesktopHeader({
   onAgentDragStart,
   onAgentDragEnd,
   onKillSession,
-  verificationChip,
   agentSessionByInstance,
   agentAddControl,
 }: DesktopHeaderProps) {
@@ -1047,7 +916,6 @@ export const DesktopHeader = memo(function DesktopHeader({
   const statusLabel = statusLabelKey ? tWorktree(statusLabelKey) : undefined;
   // Issue #111: DRY - Use shared truncateString utility
   const DESKTOP_BRANCH_MAX_LENGTH = 30;
-  const DESCRIPTION_MAX_LENGTH = 50;
 
   // Issue #786 / #869: which instance tab is currently being dragged (for the
   // opacity-50/cursor-grabbing visual). Local to the header; the instanceId
@@ -1097,10 +965,15 @@ export const DesktopHeader = memo(function DesktopHeader({
     onAgentDragEnd?.();
   }, [onAgentDragEnd]);
 
-  // Truncate description using shared utility
-  const truncatedDescription = worktreeDescription
-    ? truncateString(worktreeDescription, DESCRIPTION_MAX_LENGTH)
-    : null;
+  // Issue #3590: the header is one row. The memo is not drawn in it any more;
+  // its full text rides on the worktree name's tooltip (and Info, unchanged).
+  // The checked-out branch is drawn only when it says something the name does
+  // not — a worktree whose branch was switched away from the one it was
+  // created for. `(unknown)` is still never drawn. `*` and `?` keep their
+  // pre-#3590 condition and sit beside the name, so they show whether or not
+  // the branch itself is drawn.
+  const gitFacts = gitStatus && gitStatus.currentBranch !== '(unknown)' ? gitStatus : null;
+  const showGitBranch = gitFacts !== null && gitFacts.currentBranch !== worktreeName;
 
   // Issue #875: resolve each instance's status from the per-instance map so
   // alias instances (instanceId !== cliToolId) show their own status; fall back
@@ -1176,17 +1049,15 @@ export const DesktopHeader = memo(function DesktopHeader({
 
   // Issue #2481: everything, besides the pill budget itself, that changes how
   // wide the row is. A change here may have made room, so the fit restarts
-  // from MAX_HEADER_AGENT_PILLS. The verification chip is a node and cannot be
-  // keyed; a chip that grows still folds a pill (the fit re-measures on every
-  // commit), a chip that shrinks gets the room back on the next resize.
+  // from MAX_HEADER_AGENT_PILLS. Issue #3590: the verification chip, the one
+  // part that could not be keyed, moved to the second row.
   const headerFitKey = [
     locale,
     worktreeName,
     repositoryName,
-    truncatedDescription ?? '',
-    gitStatus?.currentBranch ?? '',
-    gitStatus?.isDirty ? 'dirty' : '',
-    gitStatus?.statusUnknown ? 'status-unknown' : '',
+    showGitBranch ? (gitFacts?.currentBranch ?? '') : '',
+    gitFacts?.isDirty ? 'dirty' : '',
+    gitFacts?.statusUnknown ? 'status-unknown' : '',
     showKillButton ? 'end' : '',
     awaitingInstruction ? 'awaiting' : '',
     appUpdateKey,
@@ -1203,27 +1074,29 @@ export const DesktopHeader = memo(function DesktopHeader({
     headerRef,
     identityRef,
     headerFitKey,
-    headerItems.filter(isLabeledInstance).length,
-    verificationChip
+    headerItems.filter(isLabeledInstance).length
   );
 
   return (
     <div
       ref={headerRef}
       data-testid="desktop-header"
-      className="flex items-center justify-between gap-3 px-4 py-3 bg-surface border-b border-border"
+      // Issue #3590: one row, 44px including the bottom border (`h-11` with
+      // border-box sizing). The controls on the right are at most 36px tall.
+      className="flex h-11 flex-shrink-0 items-center justify-between gap-3 px-4 bg-surface border-b border-border"
     >
       {/* Left: status and title (Issue #747: hamburger moved to ActivityBar;
           Issue #2647: the Home button and its divider were removed).
           Issue #2481: `min-w-0` makes this group — not the controls on the
-          right — the one that gives way on a narrow header: the name, branch
-          and chip title truncate. The dot keeps its width. Clipped only as the
-          fit's last resort, because the chip's reason popover hangs out of this
-          group and a clip would cut it. */}
+          right — the one that gives way on a narrow header: the name,
+          repository and branch truncate. The dot and the `*` / `?` marks keep
+          their width. Clipped only as the fit's last resort.
+          Issue #3590: one line — dot, name ▾ (`*` `?`), repository, and the
+          checked-out branch when it differs from the name. */}
       <div
         ref={identityRef}
         data-testid="desktop-header-identity"
-        className={`flex items-center gap-3 min-w-0${headerFit.squeezed ? ' overflow-x-clip' : ''}`}
+        className={`flex items-center gap-2 min-w-0${headerFit.squeezed ? ' overflow-x-clip' : ''}`}
       >
         {/* Worktree-level status (Issue #1078: unified StatusDot visual language) */}
         <StatusDot
@@ -1234,77 +1107,52 @@ export const DesktopHeader = memo(function DesktopHeader({
           className={statusUnclassified ? UNCLASSIFIED_STATUS_DOT_CLASS : undefined}
           data-unclassified={statusUnclassified ? 'true' : undefined}
         />
-        {/* Worktree name, memo, and repository. Issue #2481: gives way before
-            the verification chip on a narrow header (`shrink-4` against the
-            chip's 1), down to a floor that keeps the start of the name
-            readable. A whole-number factor on purpose — see the chip below.
-            Issue #3513: a breadcrumb. The branch is the heading, with a ▾
-            that opens the tab strip's branch list; the repository stays on
-            the small line because the strip is not always on screen and two
-            repositories can each have a `develop`. */}
-        <div className="flex flex-col min-w-[6rem] shrink-4">
-          <h1 className="text-lg font-semibold text-foreground truncate max-w-[200px] leading-tight">
-            <WorktreeBreadcrumbBranch
-              worktreeId={worktreeId}
-              worktreeName={worktreeName}
-              repositoryName={repositoryName}
-            />
-          </h1>
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <WorktreeBreadcrumbRepository repositoryName={repositoryName} />
-            {gitStatus && gitStatus.currentBranch !== '(unknown)' && (
-              <>
-                <span className="text-muted-foreground">/</span>
-                <span
-                  className="truncate max-w-[150px] font-mono"
-                  title={gitStatus.currentBranch}
-                  data-testid="desktop-branch-name"
-                >
-                  {truncateString(gitStatus.currentBranch, DESKTOP_BRANCH_MAX_LENGTH)}
-                </span>
-                {gitStatus.isDirty && (
-                  <span className="text-warning" title={tWorktree('git.uncommittedChanges')}>*</span>
-                )}
-                {gitStatus.statusUnknown && (
-                  <span
-                    className="text-muted-foreground"
-                    title={tWorktree('git.statusUnknown')}
-                    data-testid="desktop-git-status-unknown"
-                  >
-                    ?
-                  </span>
-                )}
-              </>
-            )}
-            {truncatedDescription && (
-              <>
-                <span className="text-muted-foreground">—</span>
-                <span
-                  className="truncate max-w-[300px] text-muted-foreground"
-                  title={worktreeDescription}
-                >
-                  {truncatedDescription}
-                </span>
-              </>
-            )}
-          </div>
-        </div>
-        {/* Issue #1816: task contract / verification verdict, next to the branch
-            identity it belongs to. `min-w-0` so a long task title truncates
-            instead of pushing the right-hand controls off the header.
-            Issue #2481: the name column gives way before it, because the chip's
-            badges cannot truncate and, once it is down to them, the header has
-            to fold an agent pill. Two flexbox rules shape this. The 360px cap
-            is a `w-*` capped by `max-w-max` rather than a `max-w-*`, because an
-            item that hits its max-width is frozen there — a long task title
-            stayed 360px while the name truncated to nothing. And the name gets
-            the larger factor rather than the chip a fractional one, because
-            items whose factors sum below 1 absorb only that fraction of the
-            overflow: at `shrink-[0.25]` the chip, left alone to shrink once the
-            name hit its floor, stopped 70px short. Same width as before
-            whenever the row fits. */}
-        {verificationChip && (
-          <div className="min-w-0 w-[360px] max-w-max">{verificationChip}</div>
+        {/* Issue #3513: a breadcrumb — the branch is the heading, with a ▾
+            that opens the tab strip's branch list. Issue #2481: gives way
+            before the repository (`shrink-4` against its 1), down to a floor
+            that keeps the start of the name readable. Issue #3590: the memo
+            rides on the name's tooltip. */}
+        <h1
+          data-testid="desktop-worktree-name"
+          className="min-w-[6rem] max-w-[240px] shrink-4 truncate text-lg font-semibold leading-tight text-foreground"
+        >
+          <WorktreeBreadcrumbBranch
+            worktreeId={worktreeId}
+            worktreeName={worktreeName}
+            repositoryName={repositoryName}
+            description={worktreeDescription}
+          />
+        </h1>
+        {gitFacts?.isDirty && (
+          <span
+            className="flex-shrink-0 text-warning"
+            title={tWorktree('git.uncommittedChanges')}
+            data-testid="desktop-git-dirty"
+          >
+            *
+          </span>
+        )}
+        {gitFacts?.statusUnknown && (
+          <span
+            className="flex-shrink-0 text-muted-foreground"
+            title={tWorktree('git.statusUnknown')}
+            data-testid="desktop-git-status-unknown"
+          >
+            ?
+          </span>
+        )}
+        {/* Issue #3590: on the same line, right of the name; opens the
+            Repositories screen. Two repositories can each have a `develop`,
+            so it is always drawn. */}
+        <WorktreeBreadcrumbRepository repositoryName={repositoryName} />
+        {showGitBranch && gitFacts && (
+          <span
+            className="min-w-0 truncate max-w-[150px] font-mono text-xs text-muted-foreground"
+            title={gitFacts.currentBranch}
+            data-testid="desktop-branch-name"
+          >
+            {truncateString(gitFacts.currentBranch, DESKTOP_BRANCH_MAX_LENGTH)}
+          </span>
         )}
       </div>
 

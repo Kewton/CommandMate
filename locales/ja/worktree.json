@@ -508,6 +508,7 @@
   },
   "terminal": {
     "historyLabel": "履歴",
+    "actionBarMore": "隠れている項目を表示",
     "filesLabel": "開いているファイル",
     "showHistory": "履歴を表示",
     "hideHistory": "履歴を非表示",
@@ -1220,7 +1221,8 @@
     "subTabGit": "Git",
     "statusPillWithModel": "{label}: {status} — モデル {model}",
     "statusPillWithUsage": "{base} — {usage}",
-    "statusPillWithSource": "{base} — {source}"
+    "statusPillWithSource": "{base} — {source}",
+    "openRepositories": "{repository} — リポジトリの画面を開く"
   },
   "detailStatus": {
     "idle": "アイドル - セッションなし",
