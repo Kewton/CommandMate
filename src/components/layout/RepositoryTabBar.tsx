@@ -170,6 +170,21 @@ export interface AnchorRect {
 // ============================================================================
 
 /**
+ * Whether a mousedown landed inside a branch list (tab strip or breadcrumb) or
+ * in something the list owns, so the list's outside-click rule must not close
+ * it: the panels themselves, and a row's "…" menu (Issue #3576), which is
+ * portalled out of the panel — closing on its mousedown would unmount the menu
+ * before the click that runs the item. Shared by the strip and the breadcrumb
+ * so the two lists can never disagree about what "outside" means.
+ */
+export function isBranchListOwnTarget(target: Node): boolean {
+  const element = target as Element;
+  return Boolean(
+    element.closest?.('[data-repository-tab-panel]') ?? element.closest?.(`[${BRANCH_ROW_ACTIONS_ATTR}]`)
+  );
+}
+
+/**
  * Resolve the worktree the UI is currently showing.
  *
  * The pathname wins over `selectedWorktreeId` because it is correct on a cold
@@ -543,11 +558,7 @@ export const RepositoryTabBar = memo(function RepositoryTabBar() {
       // toggles); closing here first would make the second click re-open it.
       if (stripRef.current?.contains(target)) return;
       if (overflowButtonRef.current?.contains(target)) return;
-      const inPanel = (target as Element).closest?.('[data-repository-tab-panel]');
-      if (inPanel) return;
-      // Issue #3576: a row's "…" menu is portalled out of the popover; picking
-      // from it must not close the list underneath first.
-      if ((target as Element).closest?.(`[${BRANCH_ROW_ACTIONS_ATTR}]`)) return;
+      if (isBranchListOwnTarget(target)) return;
       closeAll();
     };
     const onKeyDown = (event: KeyboardEvent) => {

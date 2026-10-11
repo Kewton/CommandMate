@@ -71,6 +71,7 @@ async function openAlpha(): Promise<HTMLElement> {
 }
 
 const originalFetch = global.fetch;
+const originalClipboard = navigator.clipboard;
 
 beforeAll(() => installRadixJsdomPolyfills());
 
@@ -84,6 +85,7 @@ beforeEach(() => {
 
 afterEach(() => {
   global.fetch = originalFetch;
+  Object.defineProperty(navigator, 'clipboard', { value: originalClipboard, configurable: true });
   vi.restoreAllMocks();
 });
 
@@ -102,11 +104,15 @@ describe('tab strip branch list rows (Issue #3576)', () => {
   });
 
   it('keeps the popover open while its row menu is used', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
     const popover = await openAlpha();
     fireEvent.keyDown(within(popover).getByTestId('branch-row-actions'), { key: 'Enter' });
     const item = screen.getByRole('menuitem', { name: 'Copy branch name' });
 
     fireEvent.mouseDown(item);
+    fireEvent.click(item);
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith('a'));
     expect(screen.getByTestId('repository-tab-popover')).toBeInTheDocument();
   });
 
