@@ -150,4 +150,61 @@ test.describe('Activity pane over the body (Issue #3589)', () => {
       description: `1440x900, 1 split: ${Math.round(unpinned.width)}px unpinned / ${Math.round(pinned.width)}px with Files pinned`,
     });
   });
+
+  test('something floating inside the body stays under the overlaid pane', async ({ page }) => {
+    await openScreen(page);
+    await page.getByTestId('activity-bar-button-files').click();
+    const slot = page.getByTestId('activity-pane-slot');
+    await expect(slot).toHaveAttribute('data-pinned', 'false');
+    const pane = (await slot.boundingBox())!;
+
+    // A `z-30` layer inside the body, over the area the pane covers — what the
+    // session memo editor (TerminalSplitPane) is.
+    await page.evaluate(() => {
+      const layer = document.createElement('div');
+      layer.id = 'e2e-body-float';
+      layer.style.cssText = 'position:absolute;inset:0;z-index:30;background:transparent';
+      document.getElementById('worktree-right-pane')!.appendChild(layer);
+    });
+    const onTop = await page.evaluate(
+      ([x, y]) => {
+        const hit = document.elementFromPoint(x, y);
+        return hit?.closest('[data-testid="activity-pane-slot"]') ? 'pane' : hit?.id ?? hit?.tagName ?? 'none';
+      },
+      [pane.x + pane.width / 2, pane.y + pane.height / 2],
+    );
+    expect(onTop).toBe('pane');
+  });
+
+  test('pinning and unpinning keep the same pane element (no remount)', async ({ page }) => {
+    await openScreen(page);
+    await page.getByTestId('activity-bar-button-files').click();
+    await expect(page.getByTestId('activity-pane-frame')).toBeVisible();
+    await page.evaluate(() => {
+      (document.querySelector('[data-testid="activity-pane-frame"]') as HTMLElement).dataset.e2eMark = 'kept';
+    });
+    await page.getByTestId('activity-pane-pin').click();
+    await expect(page.getByTestId('activity-pane-slot')).toHaveAttribute('data-pinned', 'true');
+    await page.getByTestId('activity-pane-pin').click();
+    await expect(page.getByTestId('activity-pane-slot')).toHaveAttribute('data-pinned', 'false');
+    await expect(page.getByTestId('activity-pane-frame')).toHaveAttribute('data-e2e-mark', 'kept');
+  });
+
+  test('Esc on the icon closes a pinned pane too', async ({ page }) => {
+    await page.addInitScript(key => {
+      try {
+        localStorage.setItem(key, 'true');
+      } catch {
+        /* non-fatal */
+      }
+    }, ACTIVITY_PANE_PINNED_KEY);
+    await openScreen(page);
+    const files = page.getByTestId('activity-bar-button-files');
+    await files.click();
+    await expect(page.getByTestId('activity-pane-slot')).toHaveAttribute('data-pinned', 'true');
+    await files.focus();
+    await page.keyboard.press('Escape');
+    await expect(page.getByTestId('activity-pane-slot')).toHaveCount(0);
+    await expect(files).toBeFocused();
+  });
 });

@@ -38,7 +38,11 @@ import {
   ACTIVITY_PANE_PINNED_STORAGE_KEY,
   type ActivityId,
 } from '@/config/activity-bar-config';
-import { usePanePinnedState, type PaneDismissReason } from '@/hooks/useActivityPaneOverlay';
+import {
+  usePaneDirtyTracker,
+  usePanePinnedState,
+  type PaneDismissReason,
+} from '@/hooks/useActivityPaneOverlay';
 import { FileTreeView } from '@/components/worktree/FileTreeView';
 import { FilePanelSplit } from '@/components/worktree/FilePanelSplit';
 import { TerminalSplitContainer } from '@/components/worktree/TerminalSplitContainer';
@@ -747,8 +751,8 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
   /**
    * Close the open activity (toggling the active one closes it — the same
    * persisted closed state a re-click of its icon writes). `returnFocus` puts
-   * the keyboard back on the icon that opened it (Esc / ×); an outside press
-   * or a file open leaves focus where the user put it.
+   * the keyboard back on the icon that opened it (Esc / ×, and a file opened
+   * from the keyboard); an outside press leaves focus where the user put it.
    */
   const closeActivityPane = useCallback(
     (returnFocus: boolean) => {
@@ -763,6 +767,9 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
     [activeActivity, onActivityToggle]
   );
   const handleActivityPaneClose = useCallback(() => closeActivityPane(true), [closeActivityPane]);
+  /** Issue #3589: the active content's unsaved state (the Env editor reports it). */
+  const { reportDirty: reportActivityPaneDirty, isDirty: isActivityPaneDirty } =
+    usePaneDirtyTracker();
   const handleActivityPaneDismiss = useCallback(
     (reason: PaneDismissReason) => closeActivityPane(reason === 'escape'),
     [closeActivityPane]
@@ -771,11 +778,17 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
   /**
    * Issue #3589: opening a file from the tree closes an unpinned pane — the
    * file opens in the body the pane was covering. A pinned pane stays.
+   * When the keyboard was in the pane (a row opened with Enter / Space), it
+   * goes back to the icon that opened the pane, as on Esc / × — otherwise it
+   * would fall to <body> with the unmounted row.
    */
   const handleTreeFileSelect = useCallback(
     (path: string) => {
+      const focusInPane =
+        typeof document !== 'undefined' &&
+        document.activeElement?.closest('[data-testid="activity-pane-slot"]') != null;
       onFileSelect(path);
-      if (!activityPanePinned) closeActivityPane(false);
+      if (!activityPanePinned) closeActivityPane(focusInPane);
     },
     [onFileSelect, activityPanePinned, closeActivityPane]
   );
@@ -927,9 +940,13 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
   const activityPaneMemo = useMemo(
     () =>
       activeActivity === null ? null : (
-        <ActivityPane active={activeActivity} activities={activityContent} />
+        <ActivityPane
+          active={activeActivity}
+          activities={activityContent}
+          onDirtyChange={reportActivityPaneDirty}
+        />
       ),
-    [activeActivity, activityContent]
+    [activeActivity, activityContent, reportActivityPaneDirty]
   );
 
   /**
@@ -944,6 +961,7 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
       onClose: handleActivityPaneClose,
       onDismiss: handleActivityPaneDismiss,
       ignoreOutsideSelectors: ACTIVITY_PANE_IGNORE_OUTSIDE,
+      isDirty: isActivityPaneDirty,
       resetKey: activeActivity,
       testIdPrefix: 'activity-pane',
     }),
@@ -952,6 +970,7 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
       toggleActivityPanePinned,
       handleActivityPaneClose,
       handleActivityPaneDismiss,
+      isActivityPaneDirty,
       activeActivity,
     ]
   );

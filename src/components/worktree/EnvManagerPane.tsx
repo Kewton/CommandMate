@@ -51,6 +51,7 @@ import { Input } from '@/components/ui/Input';
 import { Textarea } from '@/components/ui/Textarea';
 import { Spinner } from '@/components/ui/Spinner';
 import { useEnvManager } from '@/hooks/useEnvManager';
+import { useReportPaneDirty } from '@/hooks/useActivityPaneOverlay';
 import { ENV_MASK, maskEnvRawText, maskEnvValue } from '@/lib/env-manager/env-masking';
 import { parseEnvContent, type EnvIssue, type EnvIssueCode } from '@/lib/env-manager/env-parser';
 
@@ -92,6 +93,10 @@ export const EnvManagerPane = memo(function EnvManagerPane({
 }: EnvManagerPaneProps) {
   const t = useTranslations('worktree');
   const env = useEnvManager(worktreeId);
+  // Issue #3589: an unsaved draft — typed, or a row added / removed / taken
+  // from a suggestion with a button — keeps the overlaid activity pane open on
+  // an outside press. A no-op on mobile (no provider).
+  useReportPaneDirty(env.dirty);
 
   const { mode, rows, revealedKeys, rawRevealed } = env;
 

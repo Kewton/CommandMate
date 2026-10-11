@@ -19,8 +19,10 @@ import { createPortal } from 'react-dom';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 
-const { openFileMock } = vi.hoisted(() => ({
+const { openFileMock, terminalState } = vi.hoisted(() => ({
   openFileMock: vi.fn(() => 'opened'),
+  /** Whether the stub terminal shows an inline PromptPanel (a CLI question). */
+  terminalState: { promptShown: false },
 }));
 
 vi.mock('next/navigation', () => ({
@@ -115,6 +117,12 @@ vi.mock('@/components/worktree/TerminalContainer', () => ({
   TerminalContainer: () => (
     <div data-testid="terminal-column">
       <textarea data-testid="composer" />
+      {terminalState.promptShown && (
+        // The real PromptPanel carries both attributes while it sits inline.
+        <div role="dialog" aria-modal="true" data-testid="prompt-panel">
+          Proceed?
+        </div>
+      )}
     </div>
   ),
 }));
@@ -133,11 +141,23 @@ vi.mock('@/components/worktree/GitPane', () => ({
   GitPane: () => <div data-testid="git-pane" />,
 }));
 
+/**
+ * Reports its draft like the real EnvManagerPane (`useReportPaneDirty`): the
+ * field and "add row" make it dirty, "save" clears it.
+ */
 function FakeEnvPane() {
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [dirty, setDirty] = useState(false);
+  useReportPaneDirty(dirty);
   return (
     <div data-testid="env-pane">
-      <input data-testid="env-value" defaultValue="" />
+      <input data-testid="env-value" defaultValue="" onInput={() => setDirty(true)} />
+      <button type="button" data-testid="env-add-row" onClick={() => setDirty(true)}>
+        add row
+      </button>
+      <button type="button" data-testid="env-save" onClick={() => setDirty(false)}>
+        save
+      </button>
       <button type="button" data-testid="env-open-dialog" onClick={() => setDialogOpen(true)}>
         open
       </button>
@@ -159,6 +179,7 @@ vi.mock('@/components/worktree/EnvManagerPane', () => ({
 }));
 
 import { WorktreeDetailRefactored } from '@/components/worktree/WorktreeDetailRefactored';
+import { useReportPaneDirty } from '@/hooks/useActivityPaneOverlay';
 
 const WORKTREE_ID = 'wt-3589';
 const PIN_KEY = 'commandmate.worktree.activityPanePinned';
@@ -180,6 +201,7 @@ beforeEach(() => {
   window.localStorage.clear();
   window.history.replaceState({}, '', `/worktrees/${WORKTREE_ID}`);
   openFileMock.mockClear();
+  terminalState.promptShown = false;
   vi.stubGlobal(
     'fetch',
     vi.fn((url: string) => {
@@ -343,5 +365,119 @@ describe('[#3589] the pin', () => {
     });
     expect(openFileMock).toHaveBeenCalledWith('src/a.ts');
     expect(screen.getByTestId('file-tree-view')).toBeInTheDocument();
+  });
+});
+
+describe('[#3589 review] pinning keeps the pane mounted', () => {
+  it('keeps an unsaved Env edit through pin and unpin (the pane is not remounted)', async () => {
+    await renderScreen();
+    await openActivity('env');
+    const field = screen.getByTestId('env-value') as HTMLInputElement;
+    fireEvent.change(field, { target: { value: 'API_KEY=draft' } });
+
+    fireEvent.click(screen.getByTestId('activity-pane-pin'));
+    expect(screen.getByTestId('activity-pane-slot')).toHaveAttribute('data-pinned', 'true');
+    expect(screen.getByTestId('env-value')).toBe(field);
+    expect(field.value).toBe('API_KEY=draft');
+
+    fireEvent.click(screen.getByTestId('activity-pane-pin'));
+    expect(screen.getByTestId('activity-pane-slot')).toHaveAttribute('data-pinned', 'false');
+    expect(screen.getByTestId('env-value')).toBe(field);
+    expect(field.value).toBe('API_KEY=draft');
+  });
+});
+
+describe('[#3589 review] Env edits made with buttons are unsaved edits', () => {
+  it('does not close on an outside press after a row was added with a button', async () => {
+    await renderScreen();
+    await openActivity('env');
+    fireEvent.click(screen.getByTestId('env-add-row'));
+    fireEvent.pointerDown(screen.getByTestId('composer'));
+    expect(screen.getByTestId('env-pane')).toBeInTheDocument();
+  });
+
+  it('closes on an outside press once the edit is saved (negative control)', async () => {
+    await renderScreen();
+    await openActivity('env');
+    fireEvent.input(screen.getByTestId('env-value'), { target: { value: 'A=1' } });
+    fireEvent.click(screen.getByTestId('env-add-row'));
+    fireEvent.click(screen.getByTestId('env-save'));
+    fireEvent.pointerDown(screen.getByTestId('composer'));
+    expect(screen.queryByTestId('env-pane')).not.toBeInTheDocument();
+  });
+});
+
+describe('[#3589 review] a question in the terminal does not hold the pane open', () => {
+  it('closes Files on an outside press while the PromptPanel is shown', async () => {
+    terminalState.promptShown = true;
+    await renderScreen();
+    expect(screen.getByTestId('prompt-panel')).toBeInTheDocument();
+    await openActivity('files');
+    fireEvent.pointerDown(screen.getByTestId('composer'));
+    expect(screen.queryByTestId('activity-pane-slot')).not.toBeInTheDocument();
+  });
+
+  it('closes Files on Esc while the PromptPanel is shown', async () => {
+    terminalState.promptShown = true;
+    await renderScreen();
+    await openActivity('files');
+    fireEvent.keyDown(screen.getByTestId('tree-row'), { key: 'Escape' });
+    expect(screen.queryByTestId('activity-pane-slot')).not.toBeInTheDocument();
+  });
+});
+
+describe('[#3589 review] Esc closes a pinned pane too', () => {
+  async function openPinnedFiles() {
+    window.localStorage.setItem(PIN_KEY, 'true');
+    await renderScreen();
+    await openActivity('files');
+    await waitFor(() =>
+      expect(screen.getByTestId('activity-pane-slot')).toHaveAttribute('data-pinned', 'true'),
+    );
+  }
+
+  it('closes on Esc pressed in the pane and gives focus back to the icon', async () => {
+    await openPinnedFiles();
+    fireEvent.keyDown(screen.getByTestId('tree-row'), { key: 'Escape' });
+    expect(screen.queryByTestId('activity-pane-slot')).not.toBeInTheDocument();
+    expect(document.activeElement).toBe(screen.getByTestId('activity-bar-button-files'));
+  });
+
+  it('closes on Esc pressed on its icon', async () => {
+    await openPinnedFiles();
+    fireEvent.keyDown(screen.getByTestId('activity-bar-button-files'), { key: 'Escape' });
+    expect(screen.queryByTestId('activity-pane-slot')).not.toBeInTheDocument();
+  });
+
+  it('leaves an Esc typed into the terminal composer alone', async () => {
+    await openPinnedFiles();
+    fireEvent.keyDown(screen.getByTestId('composer'), { key: 'Escape' });
+    expect(screen.getByTestId('activity-pane-slot')).toBeInTheDocument();
+  });
+});
+
+describe('[#3589 review] opening a file from the keyboard keeps the focus', () => {
+  it('moves focus to the Files icon when a focused row opens a file and the pane closes', async () => {
+    await renderScreen();
+    await openActivity('files');
+    const row = screen.getByTestId('tree-row');
+    row.focus();
+    // Enter / Space on a focused row: the activation lands as a click on it.
+    fireEvent.click(row);
+    expect(screen.queryByTestId('activity-pane-slot')).not.toBeInTheDocument();
+    expect(document.activeElement).toBe(screen.getByTestId('activity-bar-button-files'));
+  });
+
+  it('leaves focus on the row when the pane is pinned and stays open (negative control)', async () => {
+    window.localStorage.setItem(PIN_KEY, 'true');
+    await renderScreen();
+    await openActivity('files');
+    await waitFor(() =>
+      expect(screen.getByTestId('activity-pane-slot')).toHaveAttribute('data-pinned', 'true'),
+    );
+    const row = screen.getByTestId('tree-row');
+    row.focus();
+    fireEvent.click(row);
+    expect(document.activeElement).toBe(row);
   });
 });

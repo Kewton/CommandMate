@@ -67,8 +67,8 @@ export interface WorktreeDesktopLayoutProps {
 
   /**
    * Issue #3589: when given, the activity pane is shown inside a
-   * {@link PaneOverlayFrame} (title row with pin / ×, and — while unpinned —
-   * Esc / outside-press dismissal). Its `pinned` is `activityPanePinned`.
+   * {@link PaneOverlayFrame} (title row with pin / ×, Esc dismissal, and —
+   * while unpinned — outside-press dismissal). Its `pinned` is `activityPanePinned`.
    * Omit to render `activityPane` bare, as before.
    */
   activityPaneFrame?: Omit<PaneOverlayFrameProps, 'children' | 'pinned'>;
@@ -91,6 +91,13 @@ const DEFAULT_MAX_PANE_WIDTH = 60;
  * a file tree into 18% of a small window.
  */
 const OVERLAY_MIN_WIDTH_PX = 280;
+
+/** Issue #3589: the pinned slot — a column with a resizer, as before. */
+const PINNED_SLOT_CLASS = 'flex-shrink-0 overflow-hidden transition-[width] duration-200 ease-in-out';
+
+/** Issue #3589: the unpinned slot — over the right pane, which keeps its width. */
+const OVERLAY_SLOT_CLASS =
+  'absolute inset-y-0 left-0 z-20 max-w-full overflow-hidden border-r border-border bg-surface shadow-lg';
 
 const ACTIVITY_PANE_ID = 'worktree-activity-pane';
 const RIGHT_PANE_ID = 'worktree-right-pane';
@@ -156,47 +163,45 @@ export const WorktreeDesktopLayout = memo(function WorktreeDesktopLayout({
         role="main"
         className={containerClassName}
       >
-        {/* Activity Pane (variable, optional), pinned: a column beside the body */}
-        {showActivityCol && activityPanePinned && (
-          <>
-            <div
-              id={ACTIVITY_PANE_ID}
-              data-testid="activity-pane-slot"
-              data-pinned="true"
-              aria-label={t('desktopLayout.activityPane')}
-              style={{ width: `${effectiveActivityWidth}%` }}
-              className="flex-shrink-0 overflow-hidden transition-[width] duration-200 ease-in-out"
-            >
-              <ErrorBoundary componentName="ActivityPane">{framedActivityPane}</ErrorBoundary>
-            </div>
-            <PaneResizer
-              onResize={handleActivityResize}
-              orientation="horizontal"
-              ariaValueNow={effectiveActivityWidth}
-            />
-          </>
-        )}
-
-        {/* Issue #3589: not pinned — over the body, which keeps its width. */}
-        {showActivityCol && !activityPanePinned && (
+        {/* Activity Pane (variable, optional). Pinned: a column beside the
+            body. Not pinned (Issue #3589): over the body, which keeps its
+            width. ONE element either way — only its style changes — so
+            pinning / unpinning never remounts the pane (an unsaved Env draft
+            survives it). */}
+        {showActivityCol && (
           <div
             id={ACTIVITY_PANE_ID}
             data-testid="activity-pane-slot"
-            data-pinned="false"
+            data-pinned={activityPanePinned ? 'true' : 'false'}
             aria-label={t('desktopLayout.activityPane')}
-            style={{ width: `${effectiveActivityWidth}%`, minWidth: OVERLAY_MIN_WIDTH_PX }}
-            className="absolute inset-y-0 left-0 z-20 max-w-full overflow-hidden border-r border-border bg-surface shadow-lg"
+            style={
+              activityPanePinned
+                ? { width: `${effectiveActivityWidth}%` }
+                : { width: `${effectiveActivityWidth}%`, minWidth: OVERLAY_MIN_WIDTH_PX }
+            }
+            className={activityPanePinned ? PINNED_SLOT_CLASS : OVERLAY_SLOT_CLASS}
           >
             <ErrorBoundary componentName="ActivityPane">{framedActivityPane}</ErrorBoundary>
           </div>
         )}
+        {showActivityCol && activityPanePinned && (
+          <PaneResizer
+            onResize={handleActivityResize}
+            orientation="horizontal"
+            ariaValueNow={effectiveActivityWidth}
+          />
+        )}
 
-        {/* Right pane (history + terminal + file panel) — fills remaining space */}
+        {/* Right pane (history + terminal + file panel) — fills remaining space.
+            Issue #3589: `isolate` makes it its own stacking context, so what
+            floats inside the body (the session memo editor's `z-30`, …) stays
+            under the overlaid activity pane (`z-20`) instead of competing with
+            it. Modals and toasts portal to <body> and are not affected. */}
         <div
           id={RIGHT_PANE_ID}
           data-testid="right-pane-slot"
           aria-label={t('desktopLayout.terminalPane')}
-          className="flex-grow overflow-hidden min-w-0"
+          className="isolate flex-grow overflow-hidden min-w-0"
         >
           <ErrorBoundary componentName="TerminalPane">{rightPane}</ErrorBoundary>
         </div>
@@ -225,14 +230,19 @@ export interface PaneOverlayFrameProps {
   /** × clicked. Always closes, edits or not. */
   onClose: () => void;
   /**
-   * Esc / an outside press asked to close the (unpinned) panel. Never called
-   * while pinned. See `usePaneOverlayDismiss` for when each one fires.
+   * Esc / an outside press asked to close the panel. While pinned only Esc
+   * from the panel or an `ignoreOutsideSelectors` region (its icon) does. See
+   * `usePaneOverlayDismiss` for when each one fires.
    */
   onDismiss: (reason: PaneDismissReason) => void;
   /** Regions a press in which is not "outside" (the panel's own toggle). */
   ignoreOutsideSelectors?: readonly string[];
-  /** Extra unsaved-edits signal; while true an outside press does not close. */
-  isDirty?: () => boolean;
+  /**
+   * Unsaved-edits signal; while true an outside press does not close. A
+   * boolean is authoritative, `undefined` falls back to "an input event
+   * happened in the panel" (see `usePaneDirtyTracker`).
+   */
+  isDirty?: () => boolean | undefined;
   /** Changing it forgets the frame's "edited" flag (new content shown). */
   resetKey?: unknown;
   /** Prefix for the frame's test ids. */
@@ -242,8 +252,9 @@ export interface PaneOverlayFrameProps {
 
 /**
  * The frame a side panel is shown in: a title row with pin and × buttons over
- * the panel's own content. While unpinned it also closes the panel on Esc and
- * on a press outside it (both guarded — see `usePaneOverlayDismiss`).
+ * the panel's own content. It also closes the panel on Esc (pinned or not) and,
+ * while unpinned, on a press outside it (both guarded — see
+ * `usePaneOverlayDismiss`).
  *
  * Reusable: the activity pane uses it (Issue #3589) and other panels that
  * open over the body can use the same one (Issue #3591).
@@ -263,7 +274,8 @@ export const PaneOverlayFrame = memo(function PaneOverlayFrame({
   const t = useTranslations('worktree');
   const frameRef = useRef<HTMLDivElement>(null);
   const { panelProps } = usePaneOverlayDismiss({
-    enabled: !pinned,
+    enabled: true,
+    pinned,
     panelRef: frameRef,
     onDismiss,
     ignoreSelectors: ignoreOutsideSelectors,
