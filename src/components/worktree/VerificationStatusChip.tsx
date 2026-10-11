@@ -5,7 +5,9 @@
  * did it pass?" — the two facts that until now existed only in `commandmate
  * task show` / `verify` stdout.
  *
- * Shown by both surfaces: the PC header (`DesktopHeader`) and the mobile shell.
+ * Shown by both surfaces: on PC the second row under the header (the split
+ * action bar's `actionBarItems`, next to the layout icons — Issue #3590; it sat
+ * in `DesktopHeader` before) and the mobile shell.
  *
  * Issue #2064 — the chip is an ENTRY POINT, so it no longer hides itself on a
  * branch that was never delegated with a contract. The people who most need to
@@ -32,7 +34,17 @@
 
 'use client';
 
-import React, { memo, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import React, {
+  memo,
+  useCallback,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
+import { createPortal } from 'react-dom';
 import { useTranslations } from 'next-intl';
 import { Info, ShieldCheck } from 'lucide-react';
 import { Badge } from '@/components/ui/Badge';
@@ -73,6 +85,37 @@ export interface VerificationStatusChipProps {
   /** Open the Verification pane. */
   onOpen: () => void;
   className?: string;
+  /**
+   * Where the reason popover is drawn (Issue #3590).
+   *
+   * - `inline` (default, the mobile shell): absolutely positioned under the
+   *   chip, inside its own box.
+   * - `floating` (PC): portalled to `<body>` and placed with `position: fixed`
+   *   under the chip, kept inside the viewport. The PC chip sits in the split
+   *   action bar, whose left group clips on a narrow bar and whose terminal
+   *   pane is `overflow-hidden` beside an open file panel — an inline popover
+   *   was cut there. It follows the chip while open (re-read every frame).
+   *   The content and the open / close rules are the same.
+   */
+  popover?: 'inline' | 'floating';
+}
+
+/** Width of the reason popover (`w-72`), and its gap to the viewport edge. */
+const POPOVER_WIDTH_PX = 288;
+const POPOVER_EDGE_PX = 8;
+
+/**
+ * Where the floating popover goes: under `anchor`, left-aligned with it,
+ * shifted left as far as needed to stay inside the viewport.
+ */
+function floatingPosition(anchor: DOMRect): { top: number; left: number; width: number } {
+  const viewport = typeof window === 'undefined' ? POPOVER_WIDTH_PX : window.innerWidth;
+  const width = Math.min(POPOVER_WIDTH_PX, Math.max(0, viewport - POPOVER_EDGE_PX * 2));
+  const left = Math.max(
+    POPOVER_EDGE_PX,
+    Math.min(anchor.left, viewport - width - POPOVER_EDGE_PX)
+  );
+  return { top: anchor.bottom + 4, left, width };
 }
 
 function truncate(value: string, max: number): string {
@@ -87,8 +130,13 @@ function truncate(value: string, max: number): string {
  * operator browses history. The rows are keyed by run id, so a genuinely new
  * run clears them rather than showing the previous run's failures under the new
  * verdict.
+ *
+ * Issue #3590: exported so a parent that outlives the chip can hold them too.
+ * On PC the chip sits in the split action bar, which `FilePanelSplit` remounts
+ * when the first file opens or the last one closes; a ref held only here would
+ * go with it (`useDesktopVerificationChip` calls this one level up).
  */
-function useGatesOfLatestRun(
+export function useGatesOfLatestRun(
   latestRun: VerificationRunListItem | null,
   supplied: VerificationGateResultView[] | null | undefined
 ): VerificationGateResultView[] | null {
@@ -108,10 +156,15 @@ export const VerificationStatusChip = memo(function VerificationStatusChip({
   latestRunGates,
   onOpen,
   className = '',
+  popover = 'inline',
 }: VerificationStatusChipProps) {
   const t = useTranslations('worktree');
   const [reasonOpen, setReasonOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const popoverRef = useRef<HTMLDivElement | null>(null);
+  const [floatingAt, setFloatingAt] = useState<{ top: number; left: number; width: number } | null>(
+    null
+  );
   const popoverId = useId();
 
   const gates = useGatesOfLatestRun(latestRun, latestRunGates);
@@ -179,6 +232,8 @@ export const VerificationStatusChip = memo(function VerificationStatusChip({
     if (!reasonOpen) return;
     const onPointerDown = (event: MouseEvent) => {
       if (rootRef.current?.contains(event.target as Node)) return;
+      // Issue #3590: a floating popover lives outside the root.
+      if (popoverRef.current?.contains(event.target as Node)) return;
       setReasonOpen(false);
     };
     const onKeyDown = (event: KeyboardEvent) => {
@@ -191,6 +246,51 @@ export const VerificationStatusChip = memo(function VerificationStatusChip({
       document.removeEventListener('keydown', onKeyDown);
     };
   }, [reasonOpen]);
+
+  // Issue #3590: place the floating popover before paint, and keep it under
+  // the chip for as long as it is open. The chip can move without anything
+  // resizing (the window or a scroll aside, the split action bar gains a
+  // "Split n maximized" label left of it when Mod+Shift+Enter maximizes a
+  // split), so the position is re-read once per frame while open — one
+  // `getBoundingClientRect` per frame, for one popover, only while it is
+  // shown. An unchanged position keeps the same state object (no re-render).
+  useLayoutEffect(() => {
+    if (!reasonOpen || popover !== 'floating') {
+      setFloatingAt(null);
+      return;
+    }
+    let frame = 0;
+    const place = () => {
+      const anchor = rootRef.current?.getBoundingClientRect();
+      if (!anchor) return;
+      const next = floatingPosition(anchor);
+      setFloatingAt((prev) =>
+        prev && prev.top === next.top && prev.left === next.left && prev.width === next.width
+          ? prev
+          : next
+      );
+    };
+    const follow = () => {
+      place();
+      frame = window.requestAnimationFrame(follow);
+    };
+    place();
+    frame = window.requestAnimationFrame(follow);
+    return () => window.cancelAnimationFrame(frame);
+  }, [reasonOpen, popover]);
+
+  const reasonBody = (
+    <>
+      <p className="mb-1 font-semibold">{t('verification.chip.reasonHeading')}</p>
+      <ul className="space-y-1">
+        {reasonParts.map((part) => (
+          <li key={part} className="break-words">
+            {part}
+          </li>
+        ))}
+      </ul>
+    </>
+  );
 
   return (
     <div ref={rootRef} className={`relative inline-flex max-w-full ${className}`.trim()}>
@@ -253,23 +353,40 @@ export const VerificationStatusChip = memo(function VerificationStatusChip({
           <Info size={14} aria-hidden="true" />
         </button>
       </div>
-      {reasonOpen && (
+      {reasonOpen && popover === 'inline' && (
         <div
           id={popoverId}
           role="tooltip"
           data-testid="verification-chip-reason-popover"
           className="absolute left-0 top-full z-50 mt-1 w-72 max-w-[80vw] rounded-lg border border-border bg-surface p-3 text-xs leading-relaxed text-foreground shadow-lg"
         >
-          <p className="mb-1 font-semibold">{t('verification.chip.reasonHeading')}</p>
-          <ul className="space-y-1">
-            {reasonParts.map((part) => (
-              <li key={part} className="break-words">
-                {part}
-              </li>
-            ))}
-          </ul>
+          {reasonBody}
         </div>
       )}
+      {/* Issue #3590: same popover, out of every clipping ancestor. The
+          `data-floating-layer` mark tells an enclosing floating panel (the
+          action bar's overflow) that a press here is not "outside". */}
+      {reasonOpen &&
+        popover === 'floating' &&
+        typeof document !== 'undefined' &&
+        createPortal(
+          <div
+            ref={popoverRef}
+            id={popoverId}
+            role="tooltip"
+            data-testid="verification-chip-reason-popover"
+            data-floating-layer="true"
+            style={
+              floatingAt
+                ? { top: floatingAt.top, left: floatingAt.left, width: floatingAt.width }
+                : { visibility: 'hidden' }
+            }
+            className="fixed z-50 rounded-lg border border-border bg-surface p-3 text-xs leading-relaxed text-foreground shadow-lg"
+          >
+            {reasonBody}
+          </div>,
+          document.body
+        )}
     </div>
   );
 });
