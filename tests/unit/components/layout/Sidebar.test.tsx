@@ -696,6 +696,23 @@ describe('Sidebar', () => {
       expect(screen.queryByTestId('sidebar-nav-review-count')).toBeNull();
     });
 
+    it('lists the destinations as Sessions → Repositories → Review, the same order as the icon rail (Issue #3577)', async () => {
+      render(
+        <Wrapper>
+          <Sidebar />
+        </Wrapper>
+      );
+
+      const nav = await screen.findByTestId('sidebar-nav');
+      const ids = Array.from(nav.querySelectorAll('a[data-testid^="sidebar-nav-"]')).map((el) =>
+        el.getAttribute('data-testid')
+      );
+      expect(ids).toEqual(['sidebar-nav-sessions', 'sidebar-nav-repositories', 'sidebar-nav-review']);
+      // The sync button stays on the Repositories row.
+      const repositoriesRow = screen.getByTestId('sidebar-nav-repositories').closest('li');
+      expect(repositoriesRow?.querySelectorAll('button').length).toBeGreaterThan(0);
+    });
+
     it('renders the three nav links through TransitionLink (Issue #2684)', async () => {
       render(
         <Wrapper>

@@ -903,6 +903,14 @@ export function isBranchKeptInPlace(
 export const SIDEBAR_RAIL_WIDTH = 56;
 
 /**
+ * Issue #3577: the one order of the app-navigation destinations. The open
+ * sidebar (`sidebar-nav`) and the icon rail both iterate this list, so the two
+ * can never disagree (the user keeps the same position when toggling).
+ */
+export const SIDEBAR_NAV_ORDER = ['sessions', 'repositories', 'review'] as const;
+export type SidebarNavId = (typeof SIDEBAR_NAV_ORDER)[number];
+
+/**
  * The open/close button's cell, in px (Issue #3512). The cell is the first
  * thing at the top-left of both the open sidebar and the rail, with no rem
  * padding around it, so the button sits at (8px, 8px) of the column in both

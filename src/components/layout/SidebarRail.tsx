@@ -3,7 +3,7 @@
  *
  * Closing the sidebar used to remove every way to the other screens on
  * `/worktrees/*` (no global Header there). The rail keeps them one click away:
- * open/close · New task · search (⌘K) · Sessions · Repositories · Review
+ * open/close · New task · search (⌘K) · Sessions · Repositories · Review (order: SIDEBAR_NAV_ORDER)
  * (with the waiting count) · and, pinned to the bottom, the settings menu.
  *
  * Role next to the worktree ActivityBar: the rail is app-wide navigation and
@@ -37,7 +37,7 @@ import { useCommandPalette } from '@/contexts/CommandPaletteContext';
 import { useNewTask } from '@/contexts/NewTaskContext';
 import { useAttentionCount } from '@/hooks/useAttentionCount';
 import { ATTENTION_REVIEW_HREF } from '@/config/review-config';
-import { SIDEBAR_RAIL_WIDTH } from '@/lib/sidebar-utils';
+import { SIDEBAR_NAV_ORDER, SIDEBAR_RAIL_WIDTH, type SidebarNavId } from '@/lib/sidebar-utils';
 import { AttentionBadgeBubble } from './AttentionBadge';
 import { SettingsMenu, SettingsMenuTrigger } from './SettingsMenu';
 import { SidebarPanelToggle } from './SidebarPanelToggle';
@@ -119,6 +119,37 @@ export function SidebarRail() {
   const { count: attentionCount } = useAttentionCount();
   const settingsLabel = t('settings.title');
 
+  const navLinks: Record<SidebarNavId, React.ReactNode> = {
+    sessions: (
+      <RailLink
+        href="/sessions"
+        icon={AlignJustify}
+        label={t('nav.sessions')}
+        testId="sidebar-rail-sessions"
+        isActive={pathname.startsWith('/sessions')}
+      />
+    ),
+    repositories: (
+      <RailLink
+        href="/repositories"
+        icon={Database}
+        label={t('nav.repositories')}
+        testId="sidebar-rail-repositories"
+        isActive={pathname.startsWith('/repositories')}
+      />
+    ),
+    review: (
+      <RailLink
+        href={attentionCount > 0 ? ATTENTION_REVIEW_HREF : '/review'}
+        icon={CircleCheck}
+        label={t('nav.review')}
+        testId="sidebar-rail-review"
+        isActive={pathname.startsWith('/review')}
+        badge={<AttentionBadgeBubble count={attentionCount} />}
+      />
+    ),
+  };
+
   return (
     <nav
       data-testid="sidebar-rail"
@@ -144,28 +175,9 @@ export function SidebarRail() {
         onClick={() => setPaletteOpen(true)}
       />
       <div className="my-1 w-8 border-b border-sidebar-border" aria-hidden="true" />
-      <RailLink
-        href="/sessions"
-        icon={AlignJustify}
-        label={t('nav.sessions')}
-        testId="sidebar-rail-sessions"
-        isActive={pathname.startsWith('/sessions')}
-      />
-      <RailLink
-        href="/repositories"
-        icon={Database}
-        label={t('nav.repositories')}
-        testId="sidebar-rail-repositories"
-        isActive={pathname.startsWith('/repositories')}
-      />
-      <RailLink
-        href={attentionCount > 0 ? ATTENTION_REVIEW_HREF : '/review'}
-        icon={CircleCheck}
-        label={t('nav.review')}
-        testId="sidebar-rail-review"
-        isActive={pathname.startsWith('/review')}
-        badge={<AttentionBadgeBubble count={attentionCount} />}
-      />
+      {SIDEBAR_NAV_ORDER.map((id) => (
+        <React.Fragment key={id}>{navLinks[id]}</React.Fragment>
+      ))}
       <div className="mt-auto">
         <SettingsMenu testIdPrefix="sidebar-rail-settings" side="right" align="end" showDisplayPreferences>
           <Tooltip content={settingsLabel} placement="right">
