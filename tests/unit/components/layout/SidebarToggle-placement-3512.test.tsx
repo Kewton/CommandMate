@@ -18,6 +18,10 @@
  *
  * The collapsed-mode band must therefore not sit above the header once the
  * sidebar closes (it would push the rail down by its height).
+ *
+ * Issue #3579: nothing sits above the columns any more — the band and the
+ * header are the top rows of <main>, and both columns are `top-0 h-full` on
+ * every route, so the list screen and the worktree screen place them alike.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -178,12 +182,16 @@ describe('open/close button placement (Issue #3512)', () => {
     expect(open.precedingSiblings).toEqual([]);
     expect(open.cellPadding).toBe(`${SIDEBAR_TOGGLE_CELL_PADDING}px`);
     expect(open.buttonSize).toBe(`${SIDEBAR_TOGGLE_SIZE}px x ${SIDEBAR_TOGGLE_SIZE}px`);
-    // The band is up, but beside the rail, below the header.
+    // The band is up, but beside the rail: in <main> (#3579, above the header
+    // row there), and the columns start at the top of the screen.
     const band = screen.getByTestId('repository-tab-bar');
-    expect(band.closest('[data-testid="repository-tab-bar-beside-rail"]')).not.toBeNull();
+    expect(screen.getByRole('main').contains(band)).toBe(true);
+    expect(screen.getByRole('main').contains(screen.getByTestId('header'))).toBe(true);
     expect(
-      screen.getByTestId('header').compareDocumentPosition(band) & Node.DOCUMENT_POSITION_FOLLOWING,
+      band.compareDocumentPosition(screen.getByTestId('header')) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).not.toBe(0);
+    expect(open.asideTop).toEqual(['h-full', 'top-0']);
+    expect(open.asideInlineTop).toBe('');
   });
 
   it.each<RepoTabBarMode>(['always', 'hidden'])('is at the same top and left in "%s" mode (negative control)', (mode) => {
@@ -198,8 +206,12 @@ describe('open/close button placement (Issue #3512)', () => {
   it('pushes both columns below an "always" band by the same amount', () => {
     window.localStorage.setItem(REPO_TAB_BAR_MODE_STORAGE_KEY, 'always');
     const { open, closed } = measureOpenThenClosed();
-    expect(open.asideInlineTop).toBe('96px');
-    expect(closed.asideInlineTop).toBe('96px');
+    // Issue #3579: by the same amount, which is now none — the band is in
+    // <main>, so both columns stay at the top of the screen.
+    expect(open.asideInlineTop).toBe('');
+    expect(closed.asideInlineTop).toBe('');
+    expect(open.asideTop).toEqual(['h-full', 'top-0']);
+    expect(closed.asideTop).toEqual(['h-full', 'top-0']);
   });
 
   it.each<RepoTabBarMode>(['collapsed', 'always', 'hidden'])(

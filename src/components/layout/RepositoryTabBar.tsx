@@ -449,7 +449,7 @@ export const RepositoryTabBar = memo(function RepositoryTabBar() {
   const [anchorRect, setAnchorRect] = useState<AnchorRect | null>(null);
   const [isOverflowMenuOpen, setOverflowMenuOpen] = useState(false);
 
-  const stripRef = useRef<HTMLDivElement>(null);
+  const stripRef = useRef<HTMLDivElement | null>(null);
   const overflowButtonRef = useRef<HTMLButtonElement>(null);
   const tabRefs = useRef(new Map<string, HTMLButtonElement>());
   const registerTab = useCallback((name: string, node: HTMLButtonElement | null) => {
@@ -490,10 +490,14 @@ export const RepositoryTabBar = memo(function RepositoryTabBar() {
   // to, so an overflow menu appears next to it — and only then, because an
   // always-present "…" is chrome that earns nothing when three tabs fit.
   const [hasOverflow, setHasOverflow] = useState(false);
+  // Issue #3579: the strip's visible width, so the current tab is revealed
+  // again whenever it changes (see "keep the current repository's tab in view").
+  const [stripWidth, setStripWidth] = useState(0);
   const measureOverflow = useCallback(() => {
     const strip = stripRef.current;
     if (!strip) return;
     setHasOverflow(strip.scrollWidth > strip.clientWidth + 1);
+    setStripWidth(strip.clientWidth);
   }, []);
 
   useLayoutEffect(() => {
@@ -503,18 +507,28 @@ export const RepositoryTabBar = memo(function RepositoryTabBar() {
   useEffect(() => {
     if (typeof window === 'undefined') return;
     window.addEventListener('resize', measureOverflow);
-    // A ResizeObserver catches the case the window event cannot: the sidebar
-    // opening/closing changes the strip's width without resizing the window.
-    const observer =
-      typeof ResizeObserver !== 'undefined'
-        ? new ResizeObserver(() => measureOverflow())
-        : null;
-    if (observer && stripRef.current) observer.observe(stripRef.current);
-    return () => {
-      window.removeEventListener('resize', measureOverflow);
-      observer?.disconnect();
-    };
+    return () => window.removeEventListener('resize', measureOverflow);
   }, [measureOverflow]);
+
+  // A ResizeObserver catches the case the window event cannot: the sidebar
+  // opening/closing or its edge being dragged changes the strip's width without
+  // resizing the window. Issue #3579: it is attached by the strip's callback
+  // ref, not on mount — the strip is absent on the first render while the list
+  // is still empty (this component returns null) and again whenever every
+  // repository is gone, so a mount-time observer would watch nothing.
+  const stripObserverRef = useRef<ResizeObserver | null>(null);
+  const attachStrip = useCallback(
+    (node: HTMLDivElement | null) => {
+      stripRef.current = node;
+      stripObserverRef.current?.disconnect();
+      stripObserverRef.current = null;
+      if (!node || typeof ResizeObserver === 'undefined') return;
+      const observer = new ResizeObserver(() => measureOverflow());
+      observer.observe(node);
+      stripObserverRef.current = observer;
+    },
+    [measureOverflow]
+  );
 
   // ---- dismissal ----
   const isAnythingOpen = openRepository !== null || isOverflowMenuOpen;
@@ -562,13 +576,17 @@ export const RepositoryTabBar = memo(function RepositoryTabBar() {
   // first paint; after every navigation — keyed on `pathname`, not just the
   // repository, so moving between two branches of one repository brings its
   // tab back even after the user scrolled the strip away; and when the "…"
-  // button appearing narrows the strip under it. Not on data refreshes: the
-  // worktree poll re-renders every few seconds and would yank a strip the user
-  // is scrolling. A layout effect, so the first paint already shows the tab.
+  // button appearing narrows the strip under it. Issue #3579: and whenever the
+  // strip's width changes — it sits right of the sidebar, so opening the
+  // sidebar beside an "always" strip or dragging its edge narrows a strip that
+  // may already overflow (the flag alone would not change). Not on data
+  // refreshes: the worktree poll re-renders every few seconds at the same
+  // width and would yank a strip the user is scrolling. A layout effect, so the
+  // first paint already shows the tab.
   useLayoutEffect(() => {
     if (!activeRepositoryName) return;
     revealTab(tabRefs.current.get(activeRepositoryName));
-  }, [activeRepositoryName, pathname, hasOverflow]);
+  }, [activeRepositoryName, pathname, hasOverflow, stripWidth]);
 
   // ---- navigation ----
   const handleBranchClick = useCallback(
@@ -613,7 +631,7 @@ export const RepositoryTabBar = memo(function RepositoryTabBar() {
       style={{ height: `${bandHeight}px` }}
     >
       <nav
-        ref={stripRef}
+        ref={attachStrip}
         data-testid="repository-tab-strip"
         aria-label={t('nav.repositories')}
         onWheel={handleStripWheel}

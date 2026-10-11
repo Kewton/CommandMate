@@ -17,6 +17,10 @@
  *      32px band above the header, so the band's height has to reach the
  *      `<aside>` — and must NOT be written when the band is down (Issue #1070's
  *      class assertions still stand).
+ *
+ *      Issue #3579: the band (and the header row) moved into <main>, so the
+ *      sidebar no longer moves at all: `top-0 h-full`, no inline offset, with
+ *      or without the band, on every route. Point 2 is now that it stays put.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -208,7 +212,7 @@ describe('repository tab bar visibility in AppShell (Issue #2374)', () => {
       await waitFor(() => expect(worktreeApi.getAll).toHaveBeenCalled());
 
       const aside = screen.getByTestId('sidebar-container');
-      expect(aside).toHaveClass('top-16', 'h-[calc(100vh-4rem)]');
+      expect(aside).toHaveClass('top-0', 'h-full');
       expect(aside.style.top).toBe('');
       expect(aside.style.height).toBe('');
     });
@@ -221,10 +225,13 @@ describe('repository tab bar visibility in AppShell (Issue #2374)', () => {
         screen.getByTestId('mode-always').click();
       });
 
+      // Issue #3579: the band is the first row of <main>, beside the sidebar,
+      // which therefore stays at the top of the screen.
       const aside = screen.getByTestId('sidebar-container');
-      // 32px band + the 64px header the `top-16` class stands for.
-      expect(aside.style.top).toBe('96px');
-      expect(aside.style.height).toBe('calc(100vh - 96px)');
+      expect(screen.getByRole('main').contains(screen.getByTestId('repository-tab-bar'))).toBe(true);
+      expect(aside).toHaveClass('top-0', 'h-full');
+      expect(aside.style.top).toBe('');
+      expect(aside.style.height).toBe('');
     });
 
     it('offsets by the band alone on a route with no header', async () => {
@@ -236,9 +243,12 @@ describe('repository tab bar visibility in AppShell (Issue #2374)', () => {
         screen.getByTestId('mode-always').click();
       });
 
+      // Issue #3579: no offset here either — same placement as the list screens.
       const aside = screen.getByTestId('sidebar-container');
-      expect(aside.style.top).toBe('32px');
-      expect(aside.style.height).toBe('calc(100vh - 32px)');
+      expect(screen.getByRole('main').contains(screen.getByTestId('repository-tab-bar'))).toBe(true);
+      expect(aside).toHaveClass('top-0', 'h-full');
+      expect(aside.style.top).toBe('');
+      expect(aside.style.height).toBe('');
     });
   });
 });

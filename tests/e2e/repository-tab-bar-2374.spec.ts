@@ -466,3 +466,58 @@ test.describe('Repository tab bar without a scrollbar (Issue #2480)', () => {
     await expect.poll(() => isTabInsideStrip(page, 'repository-number-0')).toBe(true);
   });
 });
+
+/**
+ * Issue #3579: no full-width header band. The icon rail starts at the top of the
+ * screen on the list screens as on the worktree screen, so the open/close
+ * button is at the same coordinates on both; the tab strip sits right of the
+ * rail; the screen name is the page's one <h1>.
+ */
+test.describe('No header band above the sidebar (Issue #3579)', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await stubWorktrees(page, WORKTREES);
+  });
+
+  async function railToggleBox(page: Page) {
+    const toggle = page.getByTestId('sidebar-rail-toggle');
+    await expect(toggle).toBeVisible();
+    const box = await toggle.boundingBox();
+    expect(box).not.toBeNull();
+    return box!;
+  }
+
+  test('puts the open/close button at the same spot on /sessions and on a worktree', async ({
+    page,
+  }) => {
+    await page.goto('/sessions');
+    const onList = await railToggleBox(page);
+    const rail = await page.getByTestId('sidebar-rail-container').boundingBox();
+    expect(rail!.y).toBe(0);
+
+    // The strip is to the right of the rail, at the top — not above the rail.
+    const strip = await page.getByTestId('repository-tab-bar').boundingBox();
+    expect(strip!.x).toBeGreaterThanOrEqual(rail!.x + rail!.width - 1);
+    expect(strip!.y).toBe(0);
+
+    // One screen name: the page's own heading.
+    await expect(page.getByRole('heading', { level: 1 })).toHaveCount(1);
+
+    await page.goto('/worktrees/zebra-main');
+    const onWorktree = await railToggleBox(page);
+    expect(onWorktree.x).toBe(onList.x);
+    expect(onWorktree.y).toBe(onList.y);
+  });
+
+  test('keeps the open sidebar at the top with an "always" strip', async ({ page }) => {
+    await page.addInitScript(() => {
+      window.localStorage.setItem('mcbd-sidebar-open', 'true');
+      window.localStorage.setItem('mcbd-repo-tab-bar-mode', 'always');
+    });
+    await page.goto('/sessions');
+    const sidebar = await page.getByTestId('sidebar-container').boundingBox();
+    expect(sidebar!.y).toBe(0);
+    const strip = await page.getByTestId('repository-tab-bar').boundingBox();
+    expect(strip!.x).toBeGreaterThanOrEqual(sidebar!.x + sidebar!.width - 1);
+  });
+});

@@ -142,8 +142,11 @@ test.describe.serial('[#2693] route-loading fallback height and centering', () =
     const loadingCenter = (loadingRect.top + loadingRect.bottom) / 2;
     expect(Math.abs(loadingCenter - mainCenter)).toBeLessThanOrEqual(4);
 
-    // フォールバックの高さがビューポート高さ（900）未満である
-    expect(loadingRect.height).toBeLessThan(900);
+    // フォールバックがビューポートからはみ出さない（100vh で <main> を越えない）。
+    // Issue #3579: 全幅の帯をやめて <main> がビューポートの全高になったので、
+    // 「900 未満」ではなく「<main> の高さ以下・ビューポート高さ（900）以下」で確かめる。
+    expect(loadingRect.height).toBeLessThanOrEqual(mainRect.height + 2);
+    expect(loadingRect.height).toBeLessThanOrEqual(900);
   });
 
   test('スマホで下部ナビに重ならない', async ({ page }) => {

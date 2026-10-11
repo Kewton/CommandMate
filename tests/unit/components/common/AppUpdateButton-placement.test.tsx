@@ -103,15 +103,19 @@ describe('AppUpdateButton in the global Header (Issue #2654)', () => {
   // Issue #3512: the Header lost its nav and theme toggle; the button stays in
   // the header row, after the screen name, in the right-hand group it shares
   // with the connection status.
+  // Issue #3579: the screen name left the header (the page's <h1> is the
+  // name); the button is the right-aligned status row's own child, beside the
+  // connection status.
   it('sits in the header, after the screen name', () => {
     const { container } = render(<Header />);
 
     const header = container.querySelector('header') as HTMLElement;
     const button = screen.getByTestId('app-update-button');
     expect(header.contains(button)).toBe(true);
-    expect(comesBefore(screen.getByTestId('header-screen-title'), button)).toBe(true);
-    // Same group as the connection status, which is the row's last element.
-    expect(button.parentElement).toBe(header.querySelector('.h-16')?.lastElementChild);
+    expect(button.parentElement).toBe(header);
+    expect(header.lastElementChild).toBe(button);
+    expect(header).toHaveClass('justify-end');
+    expect(header.querySelector('h1')).toBeNull();
   });
 
   it('is absent with the default (no update) context value', () => {

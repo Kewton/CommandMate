@@ -10,11 +10,14 @@
  *     indirectly (via parent refreshKey bump).
  * Issue #880: RepositoryManager (Add Repository / Sync All actions) is placed
  *   ABOVE RepositoryList so the action buttons appear at the top of the page.
+ * Issue #3579: the <h1> is the only screen name (the global Header no longer
+ *   repeats it), so it uses the sidebar destination's word, `common.nav.*`.
  */
 
 'use client';
 
 import { useCallback, useState } from 'react';
+import { useTranslations } from 'next-intl';
 import { PullToRefresh } from '@/components/common/PullToRefresh';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { RepositoryList, RepositoryManager } from '@/components/repository';
@@ -23,6 +26,7 @@ import { RepositoryList, RepositoryManager } from '@/components/repository';
 const REPOSITORIES_REFRESH_MIN_MS = 500;
 
 export default function RepositoriesPage() {
+  const tCommon = useTranslations('common');
   const isMobile = useIsMobile();
   const [refreshKey, setRefreshKey] = useState(0);
 
@@ -44,7 +48,7 @@ export default function RepositoriesPage() {
       className="container-custom py-8 h-full"
     >
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-foreground mb-2">Repositories</h1>
+        <h1 className="text-2xl font-bold text-foreground mb-2">{tCommon('nav.repositories')}</h1>
         <p className="text-sm text-muted-foreground">
           Manage repositories and worktrees.
         </p>
