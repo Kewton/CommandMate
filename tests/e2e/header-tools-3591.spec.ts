@@ -341,4 +341,25 @@ test.describe('Worktree tools in the header (Issue #3591)', () => {
     await page.keyboard.press('Escape');
     await expect(panel).toHaveCount(0);
   });
+
+  // ---- 3rd contract: the chip's hint matches what a press does -------------
+
+  test('the Verification chip says "close" while its pane is open and "open" otherwise', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await openScreen(page);
+    const chip = page.getByTestId('verification-status-chip');
+    const openHint = /Open the Verification pane|検証ペインを開く/;
+    const closeHint = /Close the Verification pane|検証ペインを閉じる/;
+    await expect(chip).toHaveAttribute('aria-label', openHint);
+
+    await chip.click();
+    await expect(page.getByTestId('activity-pane')).toHaveAttribute('data-active', 'verification');
+    await expect(chip).toHaveAttribute('aria-label', closeHint);
+    await expect(chip).toHaveAttribute('title', closeHint);
+
+    // Negative control: with another pane open a press switches, so "open".
+    await page.getByTestId('header-tool-notes').click();
+    await expect(page.getByTestId('activity-pane')).toHaveAttribute('data-active', 'notes');
+    await expect(chip).toHaveAttribute('aria-label', openHint);
+  });
 });

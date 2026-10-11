@@ -291,11 +291,13 @@ export interface WorktreeDetailDesktopProps {
  * latest run must survive that once the operator has selected an older run.
  *
  * @param verification - The worktree's verification state (task, latest run, the pane's selected run)
- * @param onOpen - Opens the Verification pane
+ * @param onOpen - Opens the Verification pane (Issue #3591: toggles it)
+ * @param paneOpen - Whether the Verification pane is open (Issue #3591: the chip's hint says "close" then)
  */
 export function useDesktopVerificationChip(
   verification: Pick<WorktreeVerificationState, 'task' | 'latestRun' | 'selectedRun'>,
-  onOpen: () => void
+  onOpen: () => void,
+  paneOpen = false
 ): React.ReactElement {
   const { task, latestRun, selectedRun } = verification;
   const latestRunGates = useGatesOfLatestRun(
@@ -309,12 +311,13 @@ export function useDesktopVerificationChip(
         latestRun={latestRun}
         latestRunGates={latestRunGates}
         onOpen={onOpen}
+        paneOpen={paneOpen}
         // Issue #3590: the action bar clips, and the terminal pane beside an
         // open file panel is `overflow-hidden` — the reason floats out of both.
         popover="floating"
       />
     ),
-    [task, latestRun, latestRunGates, onOpen],
+    [task, latestRun, latestRunGates, onOpen, paneOpen],
   );
 }
 
@@ -752,7 +755,11 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
 
   // Issue #3590: drawn on the second row (the split action bar), next to the
   // layout icons, instead of in the header.
-  const verificationChip = useDesktopVerificationChip(verification, handleOpenVerification);
+  const verificationChip = useDesktopVerificationChip(
+    verification,
+    handleOpenVerification,
+    activeActivity === CHIP_ACTIVITY_ID
+  );
 
   const terminalSplitRegion = useMemo(
     () => (

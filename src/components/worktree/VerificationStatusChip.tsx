@@ -84,6 +84,13 @@ export interface VerificationStatusChipProps {
   latestRunGates?: VerificationGateResultView[] | null;
   /** Open the Verification pane. */
   onOpen: () => void;
+  /**
+   * Issue #3591: whether the Verification pane is open. On PC the chip toggles
+   * the pane, so while it is open the hint in the title / accessible name /
+   * reason says "close". Omitted (the mobile shell, where the chip only
+   * opens), the hint always says "open".
+   */
+  paneOpen?: boolean;
   className?: string;
   /**
    * Where the reason popover is drawn (Issue #3590).
@@ -155,6 +162,7 @@ export const VerificationStatusChip = memo(function VerificationStatusChip({
   latestRun,
   latestRunGates,
   onOpen,
+  paneOpen = false,
   className = '',
   popover = 'inline',
 }: VerificationStatusChipProps) {
@@ -211,9 +219,9 @@ export const VerificationStatusChip = memo(function VerificationStatusChip({
       }
     }
 
-    parts.push(t('verification.chip.openHint'));
+    parts.push(t(paneOpen ? 'verification.chip.closeHint' : 'verification.chip.openHint'));
     return parts;
-  }, [task, latestRun, gates, t]);
+  }, [task, latestRun, gates, paneOpen, t]);
 
   const reason = reasonParts.join(' · ');
 

@@ -234,3 +234,30 @@ describe('[#3591] the Verification chip toggles like the header tools', () => {
     expect(screen.getByTestId('activity-pane-slot')).toBeInTheDocument();
   });
 });
+
+describe('[#3591] the chip says what a press does', () => {
+  it('reads "close" while Verification is open and "open" once it is closed', async () => {
+    const chip = await renderScreen();
+    expect(chip.getAttribute('aria-label')).toContain('verification.chip.openHint');
+    fireEvent.click(chip);
+    await screen.findByTestId('activity-pane-slot');
+    const open = screen.getByTestId('verification-status-chip');
+    expect(open.getAttribute('aria-label')).toContain('verification.chip.closeHint');
+    expect(open.getAttribute('title')).toContain('verification.chip.closeHint');
+
+    fireEvent.click(open);
+    await waitFor(() => expect(screen.queryByTestId('activity-pane-slot')).toBeNull());
+    expect(screen.getByTestId('verification-status-chip').getAttribute('aria-label')).toContain(
+      'verification.chip.openHint',
+    );
+  });
+
+  it('reads "open" while another pane is open (negative control)', async () => {
+    await renderScreen();
+    fireEvent.click(screen.getByTestId('header-tool-git'));
+    await screen.findByTestId('activity-pane-slot');
+    expect(screen.getByTestId('verification-status-chip').getAttribute('aria-label')).toContain(
+      'verification.chip.openHint',
+    );
+  });
+});
