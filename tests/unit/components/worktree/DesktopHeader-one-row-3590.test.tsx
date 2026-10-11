@@ -43,8 +43,6 @@ const baseProps = {
   repositoryName: 'CommandMate',
   status: 'idle' as const,
   onInfoClick: vi.fn(),
-  onWorktreeStatusChange: vi.fn(),
-  worktreeStatus: 'in_progress' as const,
 };
 
 function git(overrides: Partial<GitStatus> = {}): GitStatus {

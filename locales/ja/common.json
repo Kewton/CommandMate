@@ -200,7 +200,9 @@
     "copyBranchName": "ブランチ名をコピー",
     "copyPath": "パスをコピー",
     "copied": "コピーしました",
-    "copyFailed": "コピーできませんでした"
+    "copyFailed": "コピーできませんでした",
+    "status": "ステータス",
+    "statusChangeFailed": "ステータスを変更できませんでした"
   },
   "connection": {
     "reconnecting": "再接続中",

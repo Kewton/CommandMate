@@ -227,7 +227,6 @@ test.describe('Worktree header in one row (Issue #3590)', () => {
 
     for (const testId of [
       'desktop-info-button',
-      'desktop-status-dropdown',
       'toggle-history-pane',
       'toggle-file-panel',
       'verification-status-chip',
