@@ -17,10 +17,12 @@
  *      that opened it lives) — pinned or not, like × and a re-click. While
  *      unpinned, an Esc on the page body counts too. Never from the terminal or
  *      another field elsewhere (Esc means something to the agent CLI), never
- *      when the key's own handler called `preventDefault()`, and never while a
- *      modal dialog or open menu is up ({@link isAnyModalOpen} — the same check
- *      New task uses, so the inline PromptPanel and dialogs in hidden splits do
- *      not count; that Esc is the dialog's).
+ *      when the key's own handler called `preventDefault()` (the file search
+ *      box clears its query / blurs on Esc and says so that way), and never
+ *      while a modal dialog or open menu is up ({@link isAnyModalOpen} — the
+ *      same check New task uses, so the inline PromptPanel and dialogs in
+ *      hidden splits do not count — or an open {@link OPEN_FLOATING_LAYER_SELECTOR}
+ *      such as the file tree's context menu; that Esc is theirs).
  *    - A press outside the panel → `onDismiss('outside')`, only while unpinned
  *      and only when ALL of:
  *        - the press is not inside the panel's React tree. Portals rendered by
@@ -31,7 +33,9 @@
  *          own toggle — re-clicking the icon is the toggle's job);
  *        - no modal dialog / open menu is up ({@link isAnyModalOpen}; a dialog
  *          opened FROM the panel through a provider, e.g. `confirm()`, is
- *          outside both trees);
+ *          outside both trees) and no floating layer is open
+ *          ({@link OPEN_FLOATING_LAYER_SELECTOR}: the press closes the file
+ *          tree's context menu, not the panel);
  *        - the panel has no unsaved edits. The caller's `isDirty()` decides
  *          when it returns a boolean — content that knows its draft (the Env
  *          editor, through {@link useReportPaneDirty}) counts button edits as
@@ -64,6 +68,20 @@ import {
   type SyntheticEvent,
 } from 'react';
 import { isAnyModalOpen } from '@/lib/new-task/modal-open';
+
+/**
+ * A floating layer that is up and owns the next press / Esc, but is not a
+ * modal by `isAnyModalOpen()`'s definition — the custom file-tree
+ * `ContextMenu` (`role="menu"` without Radix's `data-state`) marks itself with
+ * `data-floating-layer="open"` while open (Issue #3589). Kept separate so the
+ * New task / Mod+B check in `modal-open.ts` is unchanged.
+ */
+export const OPEN_FLOATING_LAYER_SELECTOR = '[data-floating-layer="open"]';
+
+/** A modal dialog, an open Radix menu, or an open floating layer. */
+function isBlockingLayerOpen(): boolean {
+  return isAnyModalOpen() || document.querySelector(OPEN_FLOATING_LAYER_SELECTOR) !== null;
+}
 
 // ============================================================================
 // Pin
@@ -212,7 +230,7 @@ export function usePaneOverlayDismiss({
       const target = event.target;
       if (target instanceof Node && panelRef.current?.contains(target)) return;
       if (isInsideAny(target, ignoreRef.current)) return;
-      if (isAnyModalOpen()) return;
+      if (isBlockingLayerOpen()) return;
       const dirty = isDirtyRef.current?.();
       if (dirty === true || (dirty === undefined && editedRef.current)) return;
       onDismissRef.current('outside');
@@ -220,7 +238,7 @@ export function usePaneOverlayDismiss({
 
     const handleKeyDown = (event: KeyboardEvent): void => {
       if (event.key !== 'Escape' || event.defaultPrevented) return;
-      if (isAnyModalOpen()) return;
+      if (isBlockingLayerOpen()) return;
       const target = event.target;
       const fromPanel = target instanceof Node && panelRef.current?.contains(target) === true;
       const fromIgnored = isInsideAny(target, ignoreRef.current);

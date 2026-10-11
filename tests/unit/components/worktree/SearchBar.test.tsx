@@ -324,3 +324,39 @@ describe('SearchBar', () => {
   });
 });
 
+
+/**
+ * Issue #3589: the file search box sits in the overlaid activity pane, whose
+ * frame closes on an Esc from inside it unless the Esc was already handled.
+ * The box's Esc (clear the query / blur) must say it was handled.
+ */
+describe('SearchBar — Esc is the search box’s own (Issue #3589)', () => {
+  const props = {
+    mode: 'name' as const,
+    isSearching: false,
+    onQueryChange: vi.fn(),
+    onModeChange: vi.fn(),
+  };
+
+  it('clears a query on Esc and marks the Esc handled', () => {
+    const onClear = vi.fn();
+    render(<SearchBar {...props} query="abc" onClear={onClear} />);
+    const notCancelled = fireEvent.keyDown(screen.getByTestId('search-input'), { key: 'Escape' });
+    expect(onClear).toHaveBeenCalledTimes(1);
+    expect(notCancelled).toBe(false);
+  });
+
+  it('blurs an empty box on Esc and marks the Esc handled', () => {
+    render(<SearchBar {...props} query="" onClear={vi.fn()} />);
+    const input = screen.getByTestId('search-input');
+    input.focus();
+    const notCancelled = fireEvent.keyDown(input, { key: 'Escape' });
+    expect(document.activeElement).not.toBe(input);
+    expect(notCancelled).toBe(false);
+  });
+
+  it('leaves other keys unhandled (negative control)', () => {
+    render(<SearchBar {...props} query="abc" onClear={vi.fn()} />);
+    expect(fireEvent.keyDown(screen.getByTestId('search-input'), { key: 'a' })).toBe(true);
+  });
+});

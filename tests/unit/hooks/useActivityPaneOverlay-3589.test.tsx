@@ -2,12 +2,16 @@
  * useActivityPaneOverlay (Issue #3589): the pin and the overlay's dismissal.
  *
  * The rules pinned here are the Issue's:
- *  - Esc closes (from the panel, its toggle or the page body — not from a field
- *    elsewhere, where Esc belongs to the agent CLI);
- *  - an outside press closes, but NOT while something in the panel was edited,
- *    NOT when the press is in a portal the panel rendered (its dialogs / menus),
- *    NOT while a dialog is open on the page, and NOT on the panel's own toggle;
- *  - nothing at all while pinned (`enabled: false`);
+ *  - Esc closes from the panel or its toggle — pinned or not — and, while
+ *    unpinned, from the page body; never from a field elsewhere (Esc belongs to
+ *    the agent CLI there), never when the key's handler called
+ *    preventDefault (the file search box), never while a dialog / open menu /
+ *    floating layer (the file tree's context menu) is up;
+ *  - an outside press closes only while unpinned, and NOT while something in
+ *    the panel was edited, NOT when the press is in a portal the panel rendered
+ *    (its dialogs / menus), NOT while a dialog or floating layer is open on the
+ *    page, and NOT on the panel's own toggle;
+ *  - nothing at all while closed (`enabled: false`);
  *  - the pin persists under the key it is given and is read back on mount.
  *
  * @vitest-environment jsdom
@@ -332,5 +336,28 @@ describe('useReportPaneDirty / usePaneDirtyTracker (Issue #3589)', () => {
 
   it('does nothing outside a provider', () => {
     expect(() => render(<DirtyReporter dirty />)).not.toThrow();
+  });
+});
+
+describe('usePaneOverlayDismiss — a floating layer holds the pane open (Issue #3589)', () => {
+  it('does not close on an outside press or an Esc while a floating layer (the file tree menu) is open', () => {
+    const onDismiss = vi.fn();
+    render(<Harness onDismiss={onDismiss} />);
+    const layer = dialogElement({ role: 'menu', 'data-floating-layer': 'open' });
+    withElement(layer, () => {
+      fireEvent.pointerDown(screen.getByTestId('outside'));
+      fireEvent.keyDown(screen.getByTestId('panel-button'), { key: 'Escape' });
+    });
+    expect(onDismiss).not.toHaveBeenCalled();
+  });
+
+  it('closes on an outside press once the layer is gone (negative control)', () => {
+    const onDismiss = vi.fn();
+    render(<Harness onDismiss={onDismiss} />);
+    const layer = dialogElement({ role: 'menu' });
+    withElement(layer, () => {
+      fireEvent.pointerDown(screen.getByTestId('outside'));
+    });
+    expect(onDismiss).toHaveBeenCalledWith('outside');
   });
 });

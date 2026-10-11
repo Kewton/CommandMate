@@ -207,4 +207,19 @@ test.describe('Activity pane over the body (Issue #3589)', () => {
     await expect(page.getByTestId('activity-pane-slot')).toHaveCount(0);
     await expect(files).toBeFocused();
   });
+
+  test('Esc in the file search box clears it and keeps the pane open', async ({ page }) => {
+    await openScreen(page);
+    await page.getByTestId('activity-bar-button-files').click();
+    const input = page.getByTestId('search-input');
+    await input.fill('abc');
+    await input.press('Escape');
+    await expect(input).toHaveValue('');
+    await expect(page.getByTestId('activity-pane-slot')).toBeVisible();
+
+    // Esc elsewhere in the pane still closes it.
+    await page.getByTestId('activity-pane-title').click();
+    await page.keyboard.press('Escape');
+    await expect(page.getByTestId('activity-pane-slot')).toHaveCount(0);
+  });
 });

@@ -128,14 +128,33 @@ vi.mock('@/components/worktree/TerminalContainer', () => ({
 }));
 
 vi.mock('@/components/worktree/FileTreeView', () => ({
-  FileTreeView: ({ onFileSelect }: { onFileSelect?: (path: string) => void }) => (
+  FileTreeView: (props: { onFileSelect?: (path: string) => void }) => <FakeFileTree {...props} />,
+}));
+
+/** A row that opens a file, and the real right-click ContextMenu on it. */
+function FakeFileTree({ onFileSelect }: { onFileSelect?: (path: string) => void }) {
+  const { menuState, openMenu, closeMenu } = useContextMenu();
+  return (
     <div data-testid="file-tree-view">
-      <button type="button" data-testid="tree-row" onClick={() => onFileSelect?.('src/a.ts')}>
+      <button
+        type="button"
+        data-testid="tree-row"
+        onClick={() => onFileSelect?.('src/a.ts')}
+        onContextMenu={(e) => openMenu(e, 'src/a.ts', 'file')}
+      >
         a.ts
       </button>
+      <ContextMenu
+        isOpen={menuState.isOpen}
+        position={menuState.position}
+        targetPath={menuState.targetPath}
+        targetType={menuState.targetType}
+        onClose={closeMenu}
+        onRename={vi.fn()}
+      />
     </div>
-  ),
-}));
+  );
+}
 
 vi.mock('@/components/worktree/GitPane', () => ({
   GitPane: () => <div data-testid="git-pane" />,
@@ -180,6 +199,8 @@ vi.mock('@/components/worktree/EnvManagerPane', () => ({
 
 import { WorktreeDetailRefactored } from '@/components/worktree/WorktreeDetailRefactored';
 import { useReportPaneDirty } from '@/hooks/useActivityPaneOverlay';
+import { useContextMenu } from '@/hooks/useContextMenu';
+import { ContextMenu } from '@/components/worktree/ContextMenu';
 
 const WORKTREE_ID = 'wt-3589';
 const PIN_KEY = 'commandmate.worktree.activityPanePinned';
@@ -479,5 +500,55 @@ describe('[#3589 review] opening a file from the keyboard keeps the focus', () =
     row.focus();
     fireEvent.click(row);
     expect(document.activeElement).toBe(row);
+  });
+});
+
+describe('[#3589 re-review] the file tree context menu', () => {
+  it('closes only the menu, not Files, on a press in the body while the menu is open', async () => {
+    await renderScreen();
+    await openActivity('files');
+    fireEvent.contextMenu(screen.getByTestId('tree-row'), { clientX: 20, clientY: 20 });
+    expect(await screen.findByTestId('context-menu')).toBeInTheDocument();
+    // Let the menu arm its outside-click listener (it does so on a timeout).
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    const composer = screen.getByTestId('composer');
+    fireEvent.pointerDown(composer);
+    fireEvent.mouseDown(composer);
+    fireEvent.click(composer);
+
+    await waitFor(() => expect(screen.queryByTestId('context-menu')).not.toBeInTheDocument());
+    expect(screen.getByTestId('activity-pane-slot')).toBeInTheDocument();
+    expect(screen.getByTestId('file-tree-view')).toBeInTheDocument();
+  });
+
+  it('closes Files on a press in the body when no menu is open (negative control)', async () => {
+    await renderScreen();
+    await openActivity('files');
+    expect(screen.queryByTestId('context-menu')).not.toBeInTheDocument();
+    fireEvent.pointerDown(screen.getByTestId('composer'));
+    expect(screen.queryByTestId('activity-pane-slot')).not.toBeInTheDocument();
+  });
+});
+
+describe('[#3589 re-review] Esc in the file search box', () => {
+  it('clears the query and keeps the unpinned pane open', async () => {
+    await renderScreen();
+    await openActivity('files');
+    const input = screen.getByTestId('search-input') as HTMLInputElement;
+    fireEvent.change(input, { target: { value: 'abc' } });
+    await waitFor(() => expect(input.value).toBe('abc'));
+    fireEvent.keyDown(input, { key: 'Escape' });
+    await waitFor(() => expect((screen.getByTestId('search-input') as HTMLInputElement).value).toBe(''));
+    expect(screen.getByTestId('activity-pane-slot')).toBeInTheDocument();
+  });
+
+  it('still closes the unpinned pane on Esc pressed elsewhere in it (negative control)', async () => {
+    await renderScreen();
+    await openActivity('files');
+    fireEvent.keyDown(screen.getByTestId('tree-row'), { key: 'Escape' });
+    expect(screen.queryByTestId('activity-pane-slot')).not.toBeInTheDocument();
   });
 });

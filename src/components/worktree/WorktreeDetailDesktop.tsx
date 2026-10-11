@@ -951,8 +951,10 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
 
   /**
    * Issue #3589: the frame the layout shows the pane in — title row with pin /
-   * ×, and while unpinned Esc / outside-press dismissal. A press on the
-   * ActivityBar is not "outside": re-clicking an icon is the bar's own toggle.
+   * ×, Esc dismissal (pinned or not, from the pane or the icon that opened it;
+   * unpinned also from the page body) and, while unpinned only, outside-press
+   * dismissal. A press on the ActivityBar is not "outside": re-clicking an
+   * icon is the bar's own toggle.
    */
   const activityPaneFrame = useMemo<WorktreeDesktopLayoutProps['activityPaneFrame']>(
     () => ({
