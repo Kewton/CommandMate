@@ -944,3 +944,33 @@ export function isSidebarShortcutBlockedTarget(target: EventTarget | null): bool
   if (target.isContentEditable) return true;
   return target.closest('[role="log"]') !== null;
 }
+
+/** Matches `/worktrees/<id>` (and anything under it) to find the active branch. */
+const WORKTREE_ROUTE_PATTERN = /^\/worktrees\/([^/]+)/;
+
+/**
+ * Resolve the worktree the UI is currently showing.
+ *
+ * The pathname wins over `selectedWorktreeId` because it is correct on a cold
+ * load of `/worktrees/<id>` — before anything has called `selectWorktree` — and
+ * it is what the acceptance criterion ("the URL changes") actually observes.
+ *
+ * @param pathname - Current route
+ * @param selectedWorktreeId - Context selection, used off worktree routes
+ * Shared by the tab bar and the sidebar (#3578) so both mark the same row.
+ *
+ * @returns The worktree id to mark active, or null
+ */
+export function resolveActiveWorktreeId(
+  pathname: string,
+  selectedWorktreeId: string | null
+): string | null {
+  const match = WORKTREE_ROUTE_PATTERN.exec(pathname);
+  if (!match) return selectedWorktreeId;
+  try {
+    return decodeURIComponent(match[1]);
+  } catch {
+    // A malformed percent-escape is still a usable id for comparison purposes.
+    return match[1];
+  }
+}
