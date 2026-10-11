@@ -461,7 +461,7 @@ export const RepositoryTabBar = memo(function RepositoryTabBar() {
   const [anchorRect, setAnchorRect] = useState<AnchorRect | null>(null);
   const [isOverflowMenuOpen, setOverflowMenuOpen] = useState(false);
 
-  const stripRef = useRef<HTMLDivElement>(null);
+  const stripRef = useRef<HTMLDivElement | null>(null);
   const overflowButtonRef = useRef<HTMLButtonElement>(null);
   const tabRefs = useRef(new Map<string, HTMLButtonElement>());
   const registerTab = useCallback((name: string, node: HTMLButtonElement | null) => {
@@ -519,18 +519,28 @@ export const RepositoryTabBar = memo(function RepositoryTabBar() {
   useEffect(() => {
     if (typeof window === 'undefined') return;
     window.addEventListener('resize', measureOverflow);
-    // A ResizeObserver catches the case the window event cannot: the sidebar
-    // opening/closing changes the strip's width without resizing the window.
-    const observer =
-      typeof ResizeObserver !== 'undefined'
-        ? new ResizeObserver(() => measureOverflow())
-        : null;
-    if (observer && stripRef.current) observer.observe(stripRef.current);
-    return () => {
-      window.removeEventListener('resize', measureOverflow);
-      observer?.disconnect();
-    };
+    return () => window.removeEventListener('resize', measureOverflow);
   }, [measureOverflow]);
+
+  // A ResizeObserver catches the case the window event cannot: the sidebar
+  // opening/closing or its edge being dragged changes the strip's width without
+  // resizing the window. Issue #3579: it is attached by the strip's callback
+  // ref, not on mount — the strip is absent on the first render while the list
+  // is still empty (this component returns null) and again whenever every
+  // repository is gone, so a mount-time observer would watch nothing.
+  const stripObserverRef = useRef<ResizeObserver | null>(null);
+  const attachStrip = useCallback(
+    (node: HTMLDivElement | null) => {
+      stripRef.current = node;
+      stripObserverRef.current?.disconnect();
+      stripObserverRef.current = null;
+      if (!node || typeof ResizeObserver === 'undefined') return;
+      const observer = new ResizeObserver(() => measureOverflow());
+      observer.observe(node);
+      stripObserverRef.current = observer;
+    },
+    [measureOverflow]
+  );
 
   // ---- dismissal ----
   const isAnythingOpen = openRepository !== null || isOverflowMenuOpen;
@@ -634,7 +644,7 @@ export const RepositoryTabBar = memo(function RepositoryTabBar() {
       style={{ height: `${bandHeight}px` }}
     >
       <nav
-        ref={stripRef}
+        ref={attachStrip}
         data-testid="repository-tab-strip"
         aria-label={t('nav.repositories')}
         onWheel={handleStripWheel}

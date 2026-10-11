@@ -12,6 +12,11 @@
  * scrolled out of sight. Now any change of the strip's width reveals it again;
  * a data refresh (the worktree poll) at the same width still does not move the
  * strip the user may be scrolling.
+ *
+ * The width is watched by a ResizeObserver tied to the strip element itself, so
+ * a strip that appears late (the list is empty on the first render and the tab
+ * bar returns null until it is fetched) or that disappears and comes back is
+ * watched too — the sidebar changes its width without any window resize.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -150,6 +155,111 @@ describe('current tab after a strip width change (Issue #3579)', () => {
       await refresh?.();
     });
     expect((worktreeApi.getAll as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThan(callsBefore);
+    expect(revealed()).toEqual([]);
+  });
+});
+
+describe('a strip that appears after the first render is watched too (Issue #3579)', () => {
+  /** A ResizeObserver whose callbacks the test fires; no window resize is used. */
+  const observers = new Set<{ targets: Set<Element>; callback: ResizeObserverCallback }>();
+  const originalResizeObserver = window.ResizeObserver;
+  const resizeEvents = vi.fn();
+
+  class ResizeObserverMock {
+    private readonly entry: { targets: Set<Element>; callback: ResizeObserverCallback };
+    constructor(callback: ResizeObserverCallback) {
+      this.entry = { targets: new Set(), callback };
+      observers.add(this.entry);
+    }
+    observe(target: Element) {
+      this.entry.targets.add(target);
+    }
+    unobserve(target: Element) {
+      this.entry.targets.delete(target);
+    }
+    disconnect() {
+      this.entry.targets.clear();
+      observers.delete(this.entry);
+    }
+  }
+
+  /** The sidebar opened / its edge was dragged: only the strip's box changes. */
+  function resizeStripOnly(strip: HTMLElement, clientWidth: number): void {
+    Object.defineProperty(strip, 'scrollWidth', { value: 1200, configurable: true });
+    Object.defineProperty(strip, 'clientWidth', { value: clientWidth, configurable: true });
+    act(() => {
+      for (const o of Array.from(observers)) {
+        if (o.targets.has(strip)) o.callback([], o as unknown as ResizeObserver);
+      }
+    });
+  }
+
+  async function setWorktrees(worktrees: Worktree[]): Promise<void> {
+    (worktreeApi.getAll as ReturnType<typeof vi.fn>).mockResolvedValue({ worktrees, repositories: [] });
+    await act(async () => {
+      await refresh?.();
+    });
+  }
+
+  beforeEach(() => {
+    observers.clear();
+    resizeEvents.mockClear();
+    window.ResizeObserver = ResizeObserverMock as unknown as typeof ResizeObserver;
+    window.addEventListener('resize', resizeEvents);
+    (worktreeApi.getAll as ReturnType<typeof vi.fn>).mockResolvedValue({ worktrees: [], repositories: [] });
+  });
+
+  afterEach(() => {
+    window.removeEventListener('resize', resizeEvents);
+    window.ResizeObserver = originalResizeObserver;
+  });
+
+  async function lateStrip(): Promise<HTMLElement> {
+    renderStrip();
+    await waitFor(() => expect(refresh).not.toBeNull());
+    expect(screen.queryByTestId('repository-tab-strip')).toBeNull();
+    await setWorktrees(WORKTREES);
+    const strip = await screen.findByTestId('repository-tab-strip');
+    resizeStripOnly(strip, 600);
+    expect(screen.getByTestId('repository-tab-overflow')).toBeInTheDocument();
+    scrollIntoView.mockClear();
+    return strip;
+  }
+
+  // Positive control: before, the observer was attached once on mount, when
+  // the strip did not exist yet, so it never watched the strip.
+  it('reveals the current tab when a strip that appeared late gets narrower', async () => {
+    const strip = await lateStrip();
+    resizeStripOnly(strip, 360);
+    expect(revealed()).toEqual(['zebra-tools']);
+    expect(resizeEvents).not.toHaveBeenCalled();
+  });
+
+  it('reveals it after the strip was hidden entirely and came back', async () => {
+    await lateStrip();
+    await setWorktrees([]);
+    expect(screen.queryByTestId('repository-tab-strip')).toBeNull();
+    await setWorktrees(WORKTREES);
+    const strip = await screen.findByTestId('repository-tab-strip');
+    resizeStripOnly(strip, 600);
+    scrollIntoView.mockClear();
+    resizeStripOnly(strip, 360);
+    expect(revealed()).toEqual(['zebra-tools']);
+    expect(resizeEvents).not.toHaveBeenCalled();
+  });
+
+  it('stops watching a strip that went away', async () => {
+    const strip = await lateStrip();
+    await setWorktrees([]);
+    expect(Array.from(observers).some((o) => o.targets.has(strip))).toBe(false);
+  });
+
+  it('does not scroll on a data refresh at the same width (negative control)', async () => {
+    await lateStrip();
+    await setWorktrees([
+      WORKTREES[0],
+      wt('zebra-main', 'zebra-tools', { isSessionRunning: true, isWaitingForResponse: true }),
+    ]);
     expect(revealed()).toEqual([]);
   });
 });
