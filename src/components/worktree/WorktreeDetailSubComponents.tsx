@@ -61,6 +61,7 @@ import {
 import { AppUpdateButton } from '@/components/common/AppUpdateButton';
 import { useAppUpdate } from '@/contexts/AppUpdateContext';
 import { useDesktopHeaderFit } from '@/hooks/useDesktopHeaderFit';
+import { WORKTREE_STATUS_OPTIONS } from '@/lib/worktree-status';
 
 // ============================================================================
 // Constants
@@ -71,22 +72,8 @@ const APP_VERSION_DISPLAY = process.env.NEXT_PUBLIC_APP_VERSION
   ? `v${process.env.NEXT_PUBLIC_APP_VERSION}`
   : '-';
 
-/**
- * Worktree status options for the status dropdowns (Issue #1277: `labelKey` is
- * resolved against the `worktree` namespace at the call site, so the options
- * list stays a single source of truth for both the desktop header dropdown and
- * the WorktreeInfoFields dropdown without pinning either to English).
- */
-const WORKTREE_STATUS_OPTIONS: Array<{
-  value: 'ready' | 'in_progress' | 'in_review' | 'done' | null;
-  labelKey: string;
-}> = [
-  { value: null, labelKey: 'worktreeStatus.notSet' },
-  { value: 'ready', labelKey: 'worktreeStatus.ready' },
-  { value: 'in_progress', labelKey: 'worktreeStatus.inProgress' },
-  { value: 'in_review', labelKey: 'worktreeStatus.inReview' },
-  { value: 'done', labelKey: 'worktreeStatus.done' },
-];
+// Issue #3594: the status options moved to `@/lib/worktree-status`, shared
+// with the branch row's "…" → Status submenu. Only the Info field keeps a select.
 
 // ============================================================================
 // Helper Functions
@@ -800,10 +787,6 @@ interface DesktopHeaderProps {
   onMenuClick?: () => void;
   /** Whether an app update is available (shows notification dot on Info button) - Issue #278 */
   hasUpdate?: boolean;
-  /** Current worktree status (ready/in_progress/in_review/done/null) */
-  worktreeStatus?: 'ready' | 'in_progress' | 'in_review' | 'done' | null;
-  /** Callback when worktree status is changed via dropdown */
-  onWorktreeStatusChange?: (status: 'ready' | 'in_progress' | 'in_review' | 'done' | null) => void;
   /** Per-CLI session status map (PC only, optional). Issue #749 */
   sessionStatusByCli?: Worktree['sessionStatusByCli'];
   /**
@@ -889,8 +872,6 @@ export const DesktopHeader = memo(function DesktopHeader({
   gitStatus,
   onInfoClick,
   hasUpdate,
-  worktreeStatus,
-  onWorktreeStatusChange,
   sessionStatusByCli,
   sessionStatusByInstance,
   instances,
@@ -1411,26 +1392,8 @@ export const DesktopHeader = memo(function DesktopHeader({
             {tCommon('end')}
           </Button>
         )}
-        {/* Worktree status dropdown */}
-        {onWorktreeStatusChange && (
-          <select
-            value={worktreeStatus ?? ''}
-            onChange={(e) => {
-              const val = e.target.value;
-              onWorktreeStatusChange(val === '' ? null : val as 'ready' | 'in_progress' | 'in_review' | 'done');
-            }}
-            onClick={(e) => e.stopPropagation()}
-            className="flex-shrink-0 text-xs px-2 py-1.5 rounded-lg border border-input bg-surface text-foreground focus:ring-2 focus:ring-ring focus:border-transparent cursor-pointer"
-            data-testid="desktop-status-dropdown"
-            aria-label={tWorktree('detail.worktreeStatusLabel')}
-          >
-            {WORKTREE_STATUS_OPTIONS.map((opt) => (
-              <option key={opt.labelKey} value={opt.value ?? ''}>
-                {tWorktree(opt.labelKey)}
-              </option>
-            ))}
-          </select>
-        )}
+        {/* Issue #3594: the worktree status select left the header; it is set
+            from the branch row's "…" → Status (and the Info field). */}
         {/* Issue #2654: app update entry point. Lives in the controls group,
             which never shrinks (#2481), so it is never clipped; a narrow
             header folds agent pills instead. */}

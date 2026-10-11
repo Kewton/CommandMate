@@ -310,6 +310,24 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   // On a cache hit we already have data to show, so skip the full-screen loading
   // gate; on a cache miss fall back to the previous loading-first behavior.
   const [loading, setLoading] = useState(initialFromCache === null);
+
+  // Issue #3594: the lifecycle status can now be changed from any branch row's
+  // "…", which re-fetches the list. Carry a change of the cached value for this
+  // worktree into the screen's copy at once (the Info field reads it), instead
+  // of waiting for the next detail poll. Only a CHANGE of the cached value is
+  // applied, so a value just saved here is not undone by an older list.
+  const cachedLifecycleStatus = cache?.worktrees.find((w) => w.id === worktreeId)?.status;
+  const lastCachedLifecycleStatusRef = useRef(cachedLifecycleStatus);
+  useEffect(() => {
+    if (lastCachedLifecycleStatusRef.current === cachedLifecycleStatus) return;
+    lastCachedLifecycleStatusRef.current = cachedLifecycleStatus;
+    if (cachedLifecycleStatus === undefined) return;
+    setWorktree((current) =>
+      current && current.id === worktreeId && current.status !== cachedLifecycleStatus
+        ? { ...current, status: cachedLifecycleStatus }
+        : current
+    );
+  }, [cachedLifecycleStatus, worktreeId]);
   const [error, setError] = useState<string | null>(null);
   /**
    * Issue #2498: "the screen is stale and we are still trying".

@@ -26,6 +26,15 @@ import {
 } from '@/types/sidebar';
 import { BranchStatusIndicator } from '@/components/sidebar/BranchStatusIndicator';
 import { BranchRowActions } from '@/components/sidebar/BranchRowActions';
+import { useToast } from '@/components/common/Toast';
+import { useOptionalWorktreesCacheContext } from '@/components/providers/WorktreesCacheProvider';
+import {
+  patchWorktreeStatus,
+  worktreeStatusLabelKey,
+  WORKTREE_STATUS_BADGE_CLASSES,
+  WORKTREE_STATUS_DOT_CLASSES,
+  type WorktreeLifecycleStatus,
+} from '@/lib/worktree-status';
 
 // ============================================================================
 // Types
@@ -330,6 +339,42 @@ export const BranchListItem = memo(function BranchListItem({
   const showActions = isSelected || isPointerOver || hasKeyboardFocus || isActionsMenuOpen;
   // ---- end #3576 ----
 
+  // ---- Issue #3594: lifecycle status from the row's "…" ----
+  // The pick shows at once (`pendingStatus`); a failed save puts the old value
+  // back and says so. A successful one keeps showing the pick until the list
+  // re-fetch brings it back as `branch.worktreeStatus`, so the badge never
+  // flickers to the old value in between.
+  const { showToast } = useToast();
+  const refreshList = useOptionalWorktreesCacheContext()?.refresh;
+  const [pendingStatus, setPendingStatus] = useState<WorktreeLifecycleStatus | null | undefined>(undefined);
+  const statusRequestRef = useRef(0);
+  const savedStatus = branch.worktreeStatus ?? null;
+  const worktreeStatus = pendingStatus !== undefined ? pendingStatus : savedStatus;
+
+  // A new value from the list (ours, or one set elsewhere) replaces the pick.
+  useEffect(() => {
+    setPendingStatus(undefined);
+  }, [savedStatus]);
+
+  const handleWorktreeStatusChange = useCallback(
+    async (next: WorktreeLifecycleStatus | null) => {
+      const request = ++statusRequestRef.current;
+      setPendingStatus(next);
+      try {
+        await patchWorktreeStatus(branch.id, next);
+      } catch {
+        // A later pick owns the row now; its own outcome decides what shows.
+        if (request !== statusRequestRef.current) return;
+        setPendingStatus(undefined);
+        showToast(t('branchItem.statusChangeFailed'), 'error');
+        return;
+      }
+      await refreshList?.();
+    },
+    [branch.id, refreshList, showToast, t]
+  );
+  // ---- end #3594 ----
+
   // Safety net A: reset tooltip whenever isSelected becomes true.
   useEffect(() => {
     if (isSelected) {
@@ -424,7 +469,7 @@ export const BranchListItem = memo(function BranchListItem({
           amber pulse = a prompt is waiting, green check mark = ready for work,
           hollow gray ring = cannot tell, green glow = running, gray = idle.
         */}
-        <div className="flex items-center gap-2 w-full min-w-0">
+        <div className="@container flex items-center gap-2 w-full min-w-0">
           {/*
             Aggregated CLI tool status (Issue #867): a single icon replaces the
             per-agent dots. The most significant status is shown; hover/focus
@@ -462,6 +507,36 @@ export const BranchListItem = memo(function BranchListItem({
             <p className="flex-shrink min-w-0 max-w-[40%] text-xs text-sidebar-muted truncate">
               {branch.repositoryName}
             </p>
+          )}
+
+          {/*
+            Issue #3594: how far along the branch is (anything but "Not set").
+            The name comes first: the pill is capped at 5.5rem and, while the
+            row is narrower than 17rem (the default 224px sidebar), it shrinks
+            to a dot of the same colour. The words stay in the title and for
+            screen readers.
+          */}
+          {worktreeStatus && (
+            <span
+              data-testid="branch-worktree-status"
+              data-status={worktreeStatus}
+              className="flex-shrink-0 inline-flex items-center"
+              title={tWorktree(worktreeStatusLabelKey(worktreeStatus))}
+            >
+              <span
+                data-testid="branch-worktree-status-dot"
+                aria-hidden="true"
+                className={`h-1.5 w-1.5 rounded-full @min-[17rem]:hidden ${WORKTREE_STATUS_DOT_CLASSES[worktreeStatus]}`}
+              />
+              <span
+                data-testid="branch-worktree-status-label"
+                className={`sr-only @min-[17rem]:not-sr-only @min-[17rem]:max-w-[5.5rem] @min-[17rem]:truncate
+                  @min-[17rem]:rounded-full @min-[17rem]:px-1.5 @min-[17rem]:text-[10px] @min-[17rem]:font-medium
+                  @min-[17rem]:leading-4 ${WORKTREE_STATUS_BADGE_CLASSES[worktreeStatus]}`}
+              >
+                {tWorktree(worktreeStatusLabelKey(worktreeStatus))}
+              </span>
+            </span>
           )}
 
           {/*
@@ -538,7 +613,13 @@ export const BranchListItem = memo(function BranchListItem({
         />
       </button>
       {showActions && (
-        <BranchRowActions branch={branch} isSelected={isSelected} onOpenChange={setIsActionsMenuOpen} />
+        <BranchRowActions
+          branch={branch}
+          isSelected={isSelected}
+          onOpenChange={setIsActionsMenuOpen}
+          worktreeStatus={worktreeStatus}
+          onWorktreeStatusChange={handleWorktreeStatusChange}
+        />
       )}
     </div>
   );

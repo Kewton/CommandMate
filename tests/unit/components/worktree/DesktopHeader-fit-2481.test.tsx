@@ -259,8 +259,6 @@ const baseProps = {
   repositoryName: 'CommandMate',
   status: 'running' as const,
   onInfoClick: vi.fn(),
-  onWorktreeStatusChange: vi.fn(),
-  worktreeStatus: 'in_progress' as const,
 };
 
 function chip(title = 'Issue #2481') {
@@ -360,7 +358,8 @@ function inlinePillIds(): string[] {
 function expectControlsReachable(): void {
   const controls = screen.getByTestId('desktop-header-controls');
   // Issue #3513: the display-size selector left this group for the settings menu.
-  for (const testId of ['desktop-info-button', 'desktop-status-dropdown']) {
+  // Issue #3594: so did the status select (set from the branch row's "…").
+  for (const testId of ['desktop-info-button']) {
     const el = screen.getByTestId(testId);
     expect(controls.contains(el)).toBe(true);
   }
@@ -400,7 +399,8 @@ describe('DesktopHeader width contract (Issue #2481)', () => {
 
   it('never shrinks the Info button or the status dropdown', () => {
     renderSixWorking(1600);
-    for (const testId of ['desktop-info-button', 'desktop-status-dropdown']) {
+    // Issue #3594: the header no longer has a status select; the Info button stays.
+    for (const testId of ['desktop-info-button']) {
       expect(screen.getByTestId(testId).className).toMatch(/\bflex-shrink-0\b/);
     }
   });

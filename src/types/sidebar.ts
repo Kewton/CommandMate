@@ -312,6 +312,12 @@ export interface SidebarBranchItem {
    * a server older than #2775, which renders exactly as before.
    */
   unclassifiedInstanceIds?: string[];
+  /**
+   * How far along the branch is, as the user set it (Issue #3594): Ready /
+   * In Progress / In Review / Done, or null for "Not set". A separate field
+   * from {@link status}, which is what the CLI is doing right now.
+   */
+  worktreeStatus?: Worktree['status'];
 }
 
 /**
@@ -490,6 +496,7 @@ export function toBranchItem(worktree: Worktree): SidebarBranchItem {
     exitedInstanceIds,
     unclassifiedInstanceIds,
     worktreePath: worktree.path,
+    worktreeStatus: worktree.status ?? null,
     waitingKind,
     awaitingInstruction,
     // `promptType` mirrors what `/api/worktrees` does with the same data
