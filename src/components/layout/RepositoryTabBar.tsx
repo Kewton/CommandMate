@@ -93,6 +93,7 @@ import {
   generateRepositoryColor,
   isGroupUnclassified,
   orderBranchGroups,
+  resolveActiveWorktreeId,
 } from '@/lib/sidebar-utils';
 import type { BranchGroup } from '@/lib/sidebar-utils';
 import {
@@ -138,9 +139,6 @@ const VIEWPORT_MARGIN = 8;
 /** The panel's 1px top + bottom border, which sits outside the capped list. */
 const POPOVER_BORDER = 2;
 
-/** Matches `/worktrees/<id>` (and anything under it) to find the active branch. */
-const WORKTREE_ROUTE_PATTERN = /^\/worktrees\/([^/]+)/;
-
 /** `WheelEvent.deltaMode` values, spelled out so the helper needs no DOM global. */
 const DOM_DELTA_LINE = 1;
 const DOM_DELTA_PAGE = 2;
@@ -167,32 +165,6 @@ export interface AnchorRect {
 // ============================================================================
 // Helpers
 // ============================================================================
-
-/**
- * Resolve the worktree the UI is currently showing.
- *
- * The pathname wins over `selectedWorktreeId` because it is correct on a cold
- * load of `/worktrees/<id>` — before anything has called `selectWorktree` — and
- * it is what the acceptance criterion ("the URL changes") actually observes.
- *
- * @param pathname - Current route
- * @param selectedWorktreeId - Context selection, used off worktree routes
- * @returns The worktree id to mark active, or null
- * @internal Exported for unit tests.
- */
-export function resolveActiveWorktreeId(
-  pathname: string,
-  selectedWorktreeId: string | null
-): string | null {
-  const match = WORKTREE_ROUTE_PATTERN.exec(pathname);
-  if (!match) return selectedWorktreeId;
-  try {
-    return decodeURIComponent(match[1]);
-  } catch {
-    // A malformed percent-escape is still a usable id for comparison purposes.
-    return match[1];
-  }
-}
 
 /**
  * Clamp the popover's left edge so it stays inside the viewport.
