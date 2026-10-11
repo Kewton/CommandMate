@@ -143,6 +143,7 @@
   "repoTabBar": {
     "settingLabel": "Repository tabs",
     "overflow": "More repositories",
+    "switchBranch": "Switch to another branch of {repository}",
     "mode": {
       "always": "Always show",
       "collapsed": "Only when the sidebar is collapsed",

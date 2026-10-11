@@ -143,6 +143,7 @@
   "repoTabBar": {
     "settingLabel": "リポジトリタブ帯",
     "overflow": "ほかのリポジトリ",
+    "switchBranch": "{repository} のほかのブランチへ切り替える",
     "mode": {
       "always": "常に表示",
       "collapsed": "サイドバー折りたたみ時のみ",

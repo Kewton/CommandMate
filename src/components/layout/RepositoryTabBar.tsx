@@ -40,6 +40,20 @@
  * menu — while the tab of the worktree on screen is kept in view, since
  * nothing else says the strip is scrolled.
  *
+ * ## Look (Issue #3513)
+ *
+ * The band shares the icon rail's surface (`bg-sidebar`), and only the current
+ * repository's tab is lifted onto the body colour as a rounded chip. The tab
+ * button itself still spans the band's full height (the chip is its inner
+ * span), so the hit area and the #2480 height contract are unchanged.
+ *
+ * Both lists that drop from the band (a tab's branches, the "…" menu) are
+ * capped by what is left of the viewport under their anchor, not only by the
+ * ten-row cap: since #3512 the band can sit below the 64px header, and on a
+ * short window the fixed 520px ran past the bottom edge.
+ * `useRepositoryBranchGroups` and `RepositoryBranchPopover` are exported so the
+ * worktree header's breadcrumb opens the very same list.
+ *
  * @module components/layout/RepositoryTabBar
  */
 
@@ -49,6 +63,7 @@ import React, {
   memo,
   useCallback,
   useEffect,
+  useId,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -67,6 +82,9 @@ import { GroupIcon } from '@/components/ui/GroupIcon';
 import { StatusDot } from '@/components/ui/StatusDot';
 import { useWorktreeList } from '@/hooks/useWorktreeList';
 import { toBranchItem } from '@/types/sidebar';
+import type { SortDirection, SortKey } from '@/lib/sidebar-utils';
+import type { RepositorySummary } from '@/lib/api-client';
+import type { Worktree } from '@/types/models';
 import {
   aggregateGroupStatus,
   buildHiddenRepositoryPathSet,
@@ -117,6 +135,9 @@ const POPOVER_GAP = 4;
 /** Minimum margin in px kept between the popover and the viewport edges. */
 const VIEWPORT_MARGIN = 8;
 
+/** The panel's 1px top + bottom border, which sits outside the capped list. */
+const POPOVER_BORDER = 2;
+
 /** Matches `/worktrees/<id>` (and anything under it) to find the active branch. */
 const WORKTREE_ROUTE_PATTERN = /^\/worktrees\/([^/]+)/;
 
@@ -137,7 +158,7 @@ const WHEEL_LINE_HEIGHT = 40;
 // ============================================================================
 
 /** Where a popover is anchored, in viewport coordinates. */
-interface AnchorRect {
+export interface AnchorRect {
   left: number;
   right: number;
   bottom: number;
@@ -201,6 +222,114 @@ export function clampPopoverLeft(
 }
 
 /**
+ * The max-height of a list that drops below an anchor (Issue #3513).
+ *
+ * `cap` is the list's own limit (about ten rows); the result never exceeds the
+ * room left between the popover's top (`anchorBottom` + gap) and the viewport's
+ * bottom margin, less the panel border. A tall window keeps `cap` exactly; a
+ * short one — the band below the header on a 580px-high window — gets a
+ * shorter list that scrolls internally instead of running off the screen.
+ *
+ * @param anchorBottom - The anchor's viewport `bottom`
+ * @param cap - The list's own max-height in px
+ * @param viewportHeight - `window.innerHeight`
+ * @returns The list's max-height in px (never negative)
+ * @internal Exported for unit tests.
+ */
+export function resolvePopoverMaxHeight(
+  anchorBottom: number,
+  cap: number,
+  viewportHeight: number
+): number {
+  const room =
+    viewportHeight - VIEWPORT_MARGIN - (anchorBottom + POPOVER_GAP) - POPOVER_BORDER;
+  return Math.max(0, Math.min(cap, Math.floor(room)));
+}
+
+/**
+ * `window.innerHeight`, kept current while the caller is mounted (Issue #3513).
+ *
+ * The lists that drop from the strip and the breadcrumb stay open while the
+ * window is resized, so their `resolvePopoverMaxHeight` cap must follow the
+ * new height, not the one read when they opened. Infinity where there is no
+ * window, which leaves the cap alone.
+ */
+export function useViewportHeight(): number {
+  const [height, setHeight] = useState(() =>
+    typeof window === 'undefined' ? Number.POSITIVE_INFINITY : window.innerHeight
+  );
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const onResize = () => setHeight(window.innerHeight);
+    onResize();
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+  return height;
+}
+
+// ============================================================================
+// One branch list at a time (Issue #3513)
+// ============================================================================
+
+/** Document event naming the owner that just opened a branch list. */
+const BRANCH_LIST_OPEN_EVENT = 'commandmate:repository-branch-list-open';
+
+/**
+ * Tell every branch-list owner (the strip, the worktree breadcrumb) that
+ * `ownerId` opened its list, so the others close theirs. `null` is "nobody":
+ * every open list closes — what picking a branch does, even one whose route is
+ * already on screen (the pathname does not change, so nothing else would).
+ */
+function announceBranchListOpen(ownerId: string | null): void {
+  if (typeof document === 'undefined') return;
+  document.dispatchEvent(new CustomEvent(BRANCH_LIST_OPEN_EVENT, { detail: ownerId }));
+}
+
+/**
+ * Keep at most one branch list open across owners: announce when this owner's
+ * list opens, and call `close` when another owner opens one (or a branch is
+ * picked anywhere). The owners are separate components with separate state,
+ * hence a document event rather than a shared context.
+ *
+ * @param isOpen - Whether this owner has any list open
+ * @param close - Closes everything this owner has open
+ */
+export function useExclusiveBranchList(isOpen: boolean, close: () => void): void {
+  const ownerId = useId();
+  useEffect(() => {
+    if (isOpen) announceBranchListOpen(ownerId);
+  }, [isOpen, ownerId]);
+  useEffect(() => {
+    if (!isOpen || typeof document === 'undefined') return;
+    const onOpen = (event: Event) => {
+      if ((event as CustomEvent<string | null>).detail !== ownerId) close();
+    };
+    document.addEventListener(BRANCH_LIST_OPEN_EVENT, onOpen);
+    return () => document.removeEventListener(BRANCH_LIST_OPEN_EVENT, onOpen);
+  }, [isOpen, ownerId, close]);
+}
+
+/**
+ * What picking a branch from any branch list does (Issue #3513): close every
+ * open list, select it in `WorktreeSelectionContext` (selected id, cached
+ * detail, and the "viewed" mark that clears its unread dot), then navigate.
+ * Shared by the strip and the worktree breadcrumb so the two cannot drift.
+ */
+export function useOpenWorktreeFromBranchList(): (worktreeId: string) => void {
+  const { selectWorktree } = useWorktreeSelection();
+  const router = useViewTransitionRouter();
+  return useCallback(
+    (worktreeId: string) => {
+      announceBranchListOpen(null);
+      void selectWorktree(worktreeId);
+      router.push(`/worktrees/${worktreeId}`);
+    },
+    [selectWorktree, router]
+  );
+}
+
+/**
  * How far a wheel event should move the strip sideways, in px.
  *
  * The strip only scrolls horizontally and a mouse wheel only scrolls
@@ -241,26 +370,32 @@ function revealTab(node: HTMLElement | undefined): void {
 }
 
 // ============================================================================
-// Component
+// Shared list
 // ============================================================================
 
 /**
- * The repository strip. Renders nothing when there is no repository to show.
+ * The repositories and their branches exactly as the sidebar lists them: the
+ * hidden-repository filter, the sidebar's sort key/direction, and the
+ * sidebar's repository order. `viewMode` is pinned to 'grouped' rather than
+ * read from the context: the strip IS the grouping, so a user who put the
+ * sidebar in flat mode still needs one tab per repository.
  *
- * Mounted by `AppShell` only when `shouldShowRepositoryTabBar` says so, and
- * only on desktop — the phone keeps its bottom tab bar and drawer.
+ * Takes the data as arguments so a caller that can only read the contexts
+ * optionally (the worktree header's breadcrumb, Issue #3513) shares it.
  */
-export const RepositoryTabBar = memo(function RepositoryTabBar() {
-  const t = useTranslations('common');
-  const pathname = usePathname();
-  const router = useViewTransitionRouter();
-  const { sortKey, sortDirection, repositoryOrder } = useSidebarContext();
-  const { worktrees, repositories, selectedWorktreeId, selectWorktree } =
-    useWorktreeSelection();
-  // Issue #915: the band follows the PC display-size factor, like sidebar width.
-  const { factor } = usePcDisplaySizeContext();
-
-  // ---- the same list the sidebar builds, in the same order ----
+export function useRepositoryBranchGroups({
+  worktrees,
+  repositories,
+  sortKey,
+  sortDirection,
+  repositoryOrder,
+}: {
+  worktrees: ReadonlyArray<Worktree> | undefined;
+  repositories: ReadonlyArray<RepositorySummary> | undefined;
+  sortKey: SortKey;
+  sortDirection: SortDirection;
+  repositoryOrder: ReadonlyArray<string>;
+}): BranchGroup[] {
   const hiddenRepositoryPaths = useMemo(
     () => buildHiddenRepositoryPathSet(repositories ?? []),
     [repositories]
@@ -273,19 +408,45 @@ export const RepositoryTabBar = memo(function RepositoryTabBar() {
     () => visibleWorktrees.map(toBranchItem),
     [visibleWorktrees]
   );
-  // `viewMode` is pinned to 'grouped' rather than read from the context: the
-  // strip IS the grouping, so a user who put the sidebar in flat mode still
-  // needs one tab per repository.
   const { groupedItems } = useWorktreeList({
     items: branchItems,
     sortKey,
     sortDirection,
     viewMode: 'grouped',
   });
-  const groups = useMemo(
+  return useMemo(
     () => orderBranchGroups(groupedItems, repositoryOrder),
     [groupedItems, repositoryOrder]
   );
+}
+
+// ============================================================================
+// Component
+// ============================================================================
+
+/**
+ * The repository strip. Renders nothing when there is no repository to show.
+ *
+ * Mounted by `AppShell` only when `shouldShowRepositoryTabBar` says so, and
+ * only on desktop — the phone keeps its bottom tab bar and drawer.
+ */
+export const RepositoryTabBar = memo(function RepositoryTabBar() {
+  const t = useTranslations('common');
+  const pathname = usePathname();
+  const openWorktree = useOpenWorktreeFromBranchList();
+  const { sortKey, sortDirection, repositoryOrder } = useSidebarContext();
+  const { worktrees, repositories, selectedWorktreeId } = useWorktreeSelection();
+  // Issue #915: the band follows the PC display-size factor, like sidebar width.
+  const { factor } = usePcDisplaySizeContext();
+
+  // ---- the same list the sidebar builds, in the same order ----
+  const groups = useRepositoryBranchGroups({
+    worktrees,
+    repositories,
+    sortKey,
+    sortDirection,
+    repositoryOrder,
+  });
 
   const activeWorktreeId = resolveActiveWorktreeId(pathname, selectedWorktreeId);
   const activeRepositoryName = useMemo(
@@ -369,6 +530,8 @@ export const RepositoryTabBar = memo(function RepositoryTabBar() {
 
   // ---- dismissal ----
   const isAnythingOpen = openRepository !== null || isOverflowMenuOpen;
+  // Issue #3513: the breadcrumb's list and this strip's never show together.
+  useExclusiveBranchList(isAnythingOpen, closeAll);
   useEffect(() => {
     if (!isAnythingOpen) return;
 
@@ -424,10 +587,9 @@ export const RepositoryTabBar = memo(function RepositoryTabBar() {
   const handleBranchClick = useCallback(
     (branchId: string) => {
       closeAll();
-      void selectWorktree(branchId);
-      router.push(`/worktrees/${branchId}`);
+      openWorktree(branchId);
     },
-    [closeAll, selectWorktree, router]
+    [closeAll, openWorktree]
   );
 
   const handleOverflowSelect = useCallback(
@@ -459,7 +621,8 @@ export const RepositoryTabBar = memo(function RepositoryTabBar() {
   return (
     <div
       data-testid="repository-tab-bar"
-      className="relative flex-shrink-0 flex items-stretch border-b border-border bg-surface"
+      // Issue #3513: the icon rail's surface, so the band reads as part of it.
+      className="relative flex-shrink-0 flex items-stretch border-b border-border bg-sidebar text-sidebar-foreground"
       style={{ height: `${bandHeight}px` }}
     >
       <nav
@@ -495,8 +658,8 @@ export const RepositoryTabBar = memo(function RepositoryTabBar() {
             setAnchorRect(null);
             setOverflowMenuOpen((open) => !open);
           }}
-          className="flex-shrink-0 flex items-center border-l border-border px-2
-            text-muted-foreground transition-colors hover:bg-surface-2 hover:text-foreground
+          className="flex-shrink-0 flex items-center border-l border-sidebar-border px-2
+            text-sidebar-muted transition-colors hover:bg-sidebar-hover hover:text-sidebar-foreground
             focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
         >
           <MoreHorizontal size={16} strokeWidth={2} aria-hidden="true" />
@@ -504,7 +667,7 @@ export const RepositoryTabBar = memo(function RepositoryTabBar() {
       )}
 
       {openGroup && anchorRect && (
-        <BranchPopover
+        <RepositoryBranchPopover
           group={openGroup}
           anchor={anchorRect}
           factor={factor}
@@ -533,6 +696,9 @@ export const RepositoryTabBar = memo(function RepositoryTabBar() {
  * One repository's tab: folder icon in the repository colour, name, aggregated
  * status dot and — only
  * when something is blocked — the count of branches waiting for the user.
+ *
+ * Issue #3513: the button spans the band; what is drawn is its inner chip,
+ * which only the current repository's tab fills with the body colour.
  */
 const RepositoryTab = memo(function RepositoryTab({
   group,
@@ -577,39 +743,41 @@ const RepositoryTab = memo(function RepositoryTab({
           if (!isOpen) onToggle(group.repositoryName);
         }
       }}
-      className={`
-        group/tab flex-shrink-0 flex max-w-[14rem] items-center gap-1.5 px-2.5
-        border-b-2 text-xs font-medium transition-colors
-        focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring
-        ${
-          isActive
-            ? 'border-accent-500 bg-surface-2 text-foreground'
-            : 'border-transparent text-muted-foreground hover:bg-surface-2 hover:text-foreground'
-        }
-      `}
+      className="group/tab flex-shrink-0 flex max-w-[14rem] items-stretch px-0.5 py-1
+        text-xs font-medium
+        focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
     >
-      <GroupIcon
-        className="h-3.5 w-3.5"
-        color={generateRepositoryColor(group.repositoryName)}
-      />
-      <span className="min-w-0 truncate">{group.repositoryName}</span>
-      <StatusDot
-        status={status}
-        size="sm"
-        label={statusLabel}
-        className={unclassified ? UNCLASSIFIED_STATUS_DOT_CLASS : undefined}
-        data-testid="repository-tab-status"
-      />
-      {waitingCount > 0 && (
-        <span
-          data-testid="repository-tab-attention-count"
-          aria-label={t('attention.badgeLabel', { count: waitingCount })}
-          className="flex-shrink-0 rounded-full bg-warning-subtle px-1.5
-            text-[10px] font-semibold leading-4 tabular-nums text-warning-foreground"
-        >
-          {waitingCount}
-        </span>
-      )}
+      <span
+        data-testid="repository-tab-chip"
+        className={`flex min-w-0 items-center gap-1.5 rounded-md px-2 transition-colors ${
+          isActive
+            ? 'bg-background text-foreground shadow-sm'
+            : 'text-sidebar-muted group-hover/tab:bg-sidebar-hover group-hover/tab:text-sidebar-foreground'
+        }`}
+      >
+        <GroupIcon
+          className="h-3.5 w-3.5"
+          color={generateRepositoryColor(group.repositoryName)}
+        />
+        <span className="min-w-0 truncate">{group.repositoryName}</span>
+        <StatusDot
+          status={status}
+          size="sm"
+          label={statusLabel}
+          className={unclassified ? UNCLASSIFIED_STATUS_DOT_CLASS : undefined}
+          data-testid="repository-tab-status"
+        />
+        {waitingCount > 0 && (
+          <span
+            data-testid="repository-tab-attention-count"
+            aria-label={t('attention.badgeLabel', { count: waitingCount })}
+            className="flex-shrink-0 rounded-full bg-warning-subtle px-1.5
+              text-[10px] font-semibold leading-4 tabular-nums text-warning-foreground"
+          >
+            {waitingCount}
+          </span>
+        )}
+      </span>
     </button>
   );
 });
@@ -625,8 +793,11 @@ const RepositoryTab = memo(function RepositoryTab({
  * Rows are `BranchListItem` — the sidebar's own row component — so the status
  * dot, next action, "ready for work" badge and unread dot are the same markup
  * the sidebar group shows, not a second rendering that has to be kept in step.
+ *
+ * Issue #3513: exported for the worktree header's breadcrumb (▾), which opens
+ * this same list for the repository on screen. The caller owns dismissal.
  */
-function BranchPopover({
+export function RepositoryBranchPopover({
   group,
   anchor,
   factor,
@@ -641,6 +812,7 @@ function BranchPopover({
 }) {
   const t = useTranslations('common');
   const panelRef = useRef<HTMLDivElement>(null);
+  const viewportHeight = useViewportHeight();
 
   // Move focus into the list on open so ArrowDown from the tab lands somewhere
   // useful, and so Escape has something to return focus from.
@@ -677,8 +849,10 @@ function BranchPopover({
         data-testid="repository-tab-popover-list"
         className="overflow-y-auto overflow-x-hidden py-1"
         style={{
-          maxHeight: `${Math.round(
-            POPOVER_MAX_VISIBLE_ROWS * POPOVER_ROW_HEIGHT * factor
+          maxHeight: `${resolvePopoverMaxHeight(
+            anchor.bottom,
+            Math.round(POPOVER_MAX_VISIBLE_ROWS * POPOVER_ROW_HEIGHT * factor),
+            viewportHeight
           )}px`,
         }}
       >
@@ -726,6 +900,7 @@ function OverflowMenu({
   onSelect: (repositoryName: string) => void;
 }) {
   const t = useTranslations('common');
+  const viewportHeight = useViewportHeight();
   const anchor = anchorRef.current?.getBoundingClientRect();
 
   if (typeof document === 'undefined' || !anchor) return null;
@@ -749,11 +924,23 @@ function OverflowMenu({
           viewportWidth
         ),
         width,
-        maxHeight: `${POPOVER_MAX_VISIBLE_ROWS * POPOVER_ROW_HEIGHT}px`,
         zIndex: Z_INDEX.POPOVER,
       }}
     >
-      <div className="overflow-y-auto py-1" style={{ maxHeight: 'inherit' }}>
+      {/* Issue #3513: the cap sits on the scrolling list (not the bordered
+          panel, whose `inherit` let the list overflow it by the border) and
+          is clamped to the room left under the "…" button. */}
+      <div
+        data-testid="repository-tab-overflow-list"
+        className="overflow-y-auto py-1"
+        style={{
+          maxHeight: `${resolvePopoverMaxHeight(
+            anchor.bottom,
+            POPOVER_MAX_VISIBLE_ROWS * POPOVER_ROW_HEIGHT,
+            viewportHeight
+          )}px`,
+        }}
+      >
         {groups.map((group) => {
           const status = aggregateGroupStatus(group.branches);
           const unclassified = resolveUnclassifiedDot(status, isGroupUnclassified(group.branches));

@@ -239,7 +239,8 @@ function inlinePillIds(): string[] {
 
 function expectControlsReachable(): void {
   const controls = screen.getByTestId('desktop-header-controls');
-  for (const testId of ['desktop-info-button', 'desktop-status-dropdown', 'pc-display-size-select']) {
+  // Issue #3513: the display-size selector left this group for the settings menu.
+  for (const testId of ['desktop-info-button', 'desktop-status-dropdown']) {
     const el = screen.getByTestId(testId);
     expect(controls.contains(el)).toBe(true);
   }
