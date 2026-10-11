@@ -47,6 +47,14 @@ test.describe('Home Page', () => {
     await expect(nav.getByRole('link', { name: 'Review' })).toBeVisible();
   });
 
+  test('lists the sidebar destinations as Sessions, Repositories, Review (Issue #3577)', async ({ page }) => {
+    const names = await page
+      .getByTestId('sidebar-nav')
+      .getByRole('link')
+      .evaluateAll((els) => els.map((el) => el.textContent?.trim()));
+    expect(names).toEqual(['Sessions', 'Repositories', 'Review']);
+  });
+
   test('should display search input', async ({ page }) => {
     const searchInput = page.getByPlaceholder(/Search branches/i);
     await expect(searchInput).toBeVisible();
