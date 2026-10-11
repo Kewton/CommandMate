@@ -15,6 +15,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { EnvManagerPane } from '@/components/worktree/EnvManagerPane';
+import { PaneDirtyContext } from '@/hooks/useActivityPaneOverlay';
 import { ENV_MASK } from '@/lib/env-manager/env-masking';
 import { parseEnvContent } from '@/lib/env-manager/env-parser';
 import {
@@ -430,5 +431,73 @@ describe('EnvManagerPane', () => {
       render(<EnvManagerPane worktreeId="wt-1" />);
       expect(await screen.findByTestId('env-error')).toBeInTheDocument();
     });
+  });
+});
+
+/**
+ * Issue #3589: the overlaid activity pane stays open on an outside press while
+ * the Env editor has a draft. The pane learns that from this report, so a
+ * draft made with buttons only (no input event) must be reported too.
+ */
+describe('EnvManagerPane — reports its draft to the pane it is shown in (Issue #3589)', () => {
+  function renderReporting() {
+    const reports: Array<boolean | null> = [];
+    const report = (dirty: boolean | null) => {
+      reports.push(dirty);
+    };
+    const utils = render(
+      <PaneDirtyContext.Provider value={report}>
+        <EnvManagerPane worktreeId="wt-1" />
+      </PaneDirtyContext.Provider>,
+    );
+    return { reports, last: () => reports[reports.length - 1], ...utils };
+  }
+
+  it('reports a row added with the button as dirty', async () => {
+    const { last } = renderReporting();
+    await loadedRows();
+    expect(last()).toBe(false);
+    fireEvent.click(screen.getByTestId('env-add-row'));
+    expect(last()).toBe(true);
+  });
+
+  it('reports a row removed with the button as dirty', async () => {
+    const { last } = renderReporting();
+    const rows = await loadedRows();
+    fireEvent.click(within(rows[0]).getByTestId('env-row-remove'));
+    expect(last()).toBe(true);
+  });
+
+  it('reports a key taken from a suggestion as dirty', async () => {
+    mockedFetch.mockResolvedValue(
+      snapshot(
+        detailOf(RAW, {
+          suggestions: [{ key: 'NEW_KEY', source: '.env.example', value: 'x' }],
+        }),
+      ),
+    );
+    const { last } = renderReporting();
+    fireEvent.click(await screen.findByTestId('env-suggestion-NEW_KEY'));
+    expect(last()).toBe(true);
+  });
+
+  it('reports clean again once the draft is saved, and withdraws on unmount (negative control)', async () => {
+    const { last, unmount } = renderReporting();
+    const rows = await loadedRows();
+    fireEvent.click(within(rows[0]).getByTestId('env-row-remove'));
+    expect(last()).toBe(true);
+    // The save reloads the file; the mock serves the saved state.
+    mockedFetch.mockResolvedValue(snapshot(detailOf('API_KEY=super-secret-value\n')));
+    fireEvent.click(screen.getByTestId('env-save'));
+    await waitFor(() => expect(mockedSave).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(last()).toBe(false));
+    unmount();
+    expect(last()).toBeNull();
+  });
+
+  it('renders as before outside a provider (the mobile Tools tab)', async () => {
+    render(<EnvManagerPane worktreeId="wt-1" />);
+    fireEvent.click((await loadedRows())[0].querySelector('[data-testid="env-row-remove"]')!);
+    expect(screen.getByTestId('env-save')).not.toBeDisabled();
   });
 });

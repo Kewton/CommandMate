@@ -23,14 +23,26 @@
 
 import React, { memo, useCallback, useMemo, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { WorktreeDesktopLayout } from '@/components/worktree/WorktreeDesktopLayout';
+import {
+  WorktreeDesktopLayout,
+  type WorktreeDesktopLayoutProps,
+} from '@/components/worktree/WorktreeDesktopLayout';
 import { TerminalContainer } from '@/components/worktree/TerminalContainer';
 import { type WorktreeStatus } from '@/components/mobile/MobileHeader';
 import { ErrorBoundary } from '@/components/error/ErrorBoundary';
 import { SearchBar } from '@/components/worktree/SearchBar';
 import { ActivityBar } from '@/components/worktree/ActivityBar';
 import { ActivityPane, type ActivityContentMap } from '@/components/worktree/ActivityPane';
-import type { ActivityId } from '@/config/activity-bar-config';
+import {
+  ACTIVITIES,
+  ACTIVITY_PANE_PINNED_STORAGE_KEY,
+  type ActivityId,
+} from '@/config/activity-bar-config';
+import {
+  usePaneDirtyTracker,
+  usePanePinnedState,
+  type PaneDismissReason,
+} from '@/hooks/useActivityPaneOverlay';
 import { FileTreeView } from '@/components/worktree/FileTreeView';
 import { FilePanelSplit } from '@/components/worktree/FilePanelSplit';
 import { TerminalSplitContainer, type SelectedSplit } from '@/components/worktree/TerminalSplitContainer';
@@ -69,6 +81,9 @@ import type { FileTabsState, FileTabsActions } from '@/hooks/useFileTabs';
 import type { HistoryDisplayLimit } from '@/config/history-display-config';
 import type { MoveTarget } from '@/hooks/useFileOperations';
 import type { WorktreeVerificationState } from '@/hooks/useWorktreeVerification';
+
+/** Issue #3589: presses here do not dismiss the unpinned activity pane. */
+const ACTIVITY_PANE_IGNORE_OUTSIDE: readonly string[] = ['[data-testid="activity-bar"]'];
 
 /** Props for WorktreeDetailDesktop. */
 export interface WorktreeDetailDesktopProps {
@@ -794,6 +809,58 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
   );
 
   /**
+   * Issue #3589: the activity pane opens OVER the terminal unless pinned. The
+   * pin is global (`ACTIVITY_PANE_PINNED_STORAGE_KEY`), not per worktree.
+   */
+  const { pinned: activityPanePinned, togglePinned: toggleActivityPanePinned } =
+    usePanePinnedState(ACTIVITY_PANE_PINNED_STORAGE_KEY);
+
+  /**
+   * Close the open activity (toggling the active one closes it — the same
+   * persisted closed state a re-click of its icon writes). `returnFocus` puts
+   * the keyboard back on the icon that opened it (Esc / ×, and a file opened
+   * from the keyboard); an outside press leaves focus where the user put it.
+   */
+  const closeActivityPane = useCallback(
+    (returnFocus: boolean) => {
+      if (activeActivity === null) return;
+      onActivityToggle(activeActivity);
+      if (returnFocus && typeof document !== 'undefined') {
+        document
+          .querySelector<HTMLElement>(`[data-testid="activity-bar-button-${activeActivity}"]`)
+          ?.focus();
+      }
+    },
+    [activeActivity, onActivityToggle]
+  );
+  const handleActivityPaneClose = useCallback(() => closeActivityPane(true), [closeActivityPane]);
+  /** Issue #3589: the active content's unsaved state (the Env editor reports it). */
+  const { reportDirty: reportActivityPaneDirty, isDirty: isActivityPaneDirty } =
+    usePaneDirtyTracker();
+  const handleActivityPaneDismiss = useCallback(
+    (reason: PaneDismissReason) => closeActivityPane(reason === 'escape'),
+    [closeActivityPane]
+  );
+
+  /**
+   * Issue #3589: opening a file from the tree closes an unpinned pane — the
+   * file opens in the body the pane was covering. A pinned pane stays.
+   * When the keyboard was in the pane (a row opened with Enter / Space), it
+   * goes back to the icon that opened the pane, as on Esc / × — otherwise it
+   * would fall to <body> with the unmounted row.
+   */
+  const handleTreeFileSelect = useCallback(
+    (path: string) => {
+      const focusInPane =
+        typeof document !== 'undefined' &&
+        document.activeElement?.closest('[data-testid="activity-pane-slot"]') != null;
+      onFileSelect(path);
+      if (!activityPanePinned) closeActivityPane(focusInPane);
+    },
+    [onFileSelect, activityPanePinned, closeActivityPane]
+  );
+
+  /**
    * Issue #727: Activity Pane content map (memoized).
    *
    * MAINTENANCE NOTE (Issue #411 R3-007 / Issue #727):
@@ -815,7 +882,7 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
           />
           <FileTreeView
             worktreeId={worktreeId}
-            onFileSelect={onFileSelect}
+            onFileSelect={handleTreeFileSelect}
             onNewFile={onNewFile}
             onNewDirectory={onNewDirectory}
             onRename={onRename}
@@ -910,7 +977,7 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
       fileSearch.setMode,
       fileSearch.clearSearch,
       fileSearch.results?.results,
-      onFileSelect,
+      handleTreeFileSelect,
       onNewFile,
       onNewDirectory,
       onRename,
@@ -932,12 +999,49 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
     ]
   );
 
+  const activityTitle = useMemo(() => {
+    const def = ACTIVITIES.find((a) => a.id === activeActivity);
+    return def ? tWorktree(def.labelKey) : '';
+  }, [activeActivity, tWorktree]);
+
   const activityPaneMemo = useMemo(
     () =>
       activeActivity === null ? null : (
-        <ActivityPane active={activeActivity} activities={activityContent} />
+        <ActivityPane
+          active={activeActivity}
+          activities={activityContent}
+          onDirtyChange={reportActivityPaneDirty}
+        />
       ),
-    [activeActivity, activityContent]
+    [activeActivity, activityContent, reportActivityPaneDirty]
+  );
+
+  /**
+   * Issue #3589: the frame the layout shows the pane in — title row with pin /
+   * ×, Esc dismissal (pinned or not, from the pane or the icon that opened it;
+   * unpinned also from the page body) and, while unpinned only, outside-press
+   * dismissal. A press on the ActivityBar is not "outside": re-clicking an
+   * icon is the bar's own toggle.
+   */
+  const activityPaneFrame = useMemo<WorktreeDesktopLayoutProps['activityPaneFrame']>(
+    () => ({
+      title: activityTitle,
+      onTogglePinned: toggleActivityPanePinned,
+      onClose: handleActivityPaneClose,
+      onDismiss: handleActivityPaneDismiss,
+      ignoreOutsideSelectors: ACTIVITY_PANE_IGNORE_OUTSIDE,
+      isDirty: isActivityPaneDirty,
+      resetKey: activeActivity,
+      testIdPrefix: 'activity-pane',
+    }),
+    [
+      activityTitle,
+      toggleActivityPanePinned,
+      handleActivityPaneClose,
+      handleActivityPaneDismiss,
+      isActivityPaneDirty,
+      activeActivity,
+    ]
   );
 
   // Issue #744: the top-level HistoryPane (historyPaneMemo) was removed — the
@@ -1014,6 +1118,8 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
           <div className="flex-1 min-h-0 min-w-0">
             <WorktreeDesktopLayout
               activityPane={activityPaneMemo}
+              activityPanePinned={activityPanePinned}
+              activityPaneFrame={activityPaneFrame}
               rightPane={
                 // Issue #744: History moved into each terminal split, so the
                 // top-level History column is no longer rendered on PC.

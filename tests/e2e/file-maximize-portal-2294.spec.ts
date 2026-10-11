@@ -66,11 +66,15 @@ async function hitTest(page: import('@playwright/test').Page, x: number, y: numb
  * `activity-pane`'s `data-active` rather than assumed: a bare visibility check
  * on the pane slot can be true while a *different* activity is showing, and
  * clicking the Files button then would toggle Files off instead of on.
+ * Issue #3589: a never-visited worktree starts with the pane closed, so "not
+ * shown at all" is the usual starting point; the shell is awaited first so the
+ * stored state has been read before it is looked at.
  */
 async function openMockedFile(page: import('@playwright/test').Page) {
+  await expect(page.getByTestId('terminal-split-container')).toBeVisible();
   const pane = page.getByTestId('activity-pane');
-  await expect(pane).toBeVisible();
-  if ((await pane.getAttribute('data-active')) !== 'files') {
+  const showing = (await pane.count()) > 0 ? await pane.getAttribute('data-active') : null;
+  if (showing !== 'files') {
     await page.getByTestId('activity-bar-button-files').click();
   }
   await expect(pane).toHaveAttribute('data-active', 'files');

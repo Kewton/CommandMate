@@ -16,13 +16,14 @@
  * - Both the selected ActivityId *and* the explicitly closed (null) state are
  *   persisted. A closed pane is stored as `ACTIVITY_CLOSED_SENTINEL` so that
  *   hiding the pane on branch A survives a visit to branch B and back to A.
- * - An *unvisited* worktree (no stored value) still defaults to
- *   DEFAULT_ACTIVITY ('files').
+ * - An *unvisited* worktree (no stored value) defaults to INITIAL_ACTIVITY —
+ *   closed since Issue #3589 (it was 'files' before), so the terminal starts at
+ *   full width. A stored value is honoured as-is.
  *
  * SSR / hydration:
- * - Before the first effect runs we deterministically return DEFAULT_ACTIVITY
- *   ('files'). The localStorage read happens in a useEffect so SSR and the
- *   first client render agree (no hydration mismatch).
+ * - Before the first effect runs we deterministically return INITIAL_ACTIVITY.
+ *   The localStorage read happens in a useEffect so SSR and the first client
+ *   render agree (no hydration mismatch).
  * - The hydration effect re-runs whenever `worktreeId` changes, so switching
  *   worktrees in-place (without a full remount) still re-reads the correct
  *   per-worktree state.
@@ -33,8 +34,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ACTIVITY_CLOSED_SENTINEL,
-  DEFAULT_ACTIVITY,
   getActivityBarStorageKey,
+  INITIAL_ACTIVITY,
   isActivityId,
   type ActivityId,
 } from '@/config/activity-bar-config';
@@ -55,10 +56,11 @@ export interface UseActivityBarStateReturn {
  * Read the persisted activity for a worktree.
  * - A valid ActivityId string → that activity.
  * - The closed sentinel → `null` (explicitly hidden).
- * - No / invalid value → DEFAULT_ACTIVITY (unvisited worktree).
+ * - No / invalid value → INITIAL_ACTIVITY (unvisited worktree; closed since
+ *   Issue #3589).
  */
 function readStoredActivity(worktreeId: string): ActivityId | null {
-  if (typeof window === 'undefined') return DEFAULT_ACTIVITY;
+  if (typeof window === 'undefined') return INITIAL_ACTIVITY;
   try {
     const raw = window.localStorage.getItem(getActivityBarStorageKey(worktreeId));
     if (raw === ACTIVITY_CLOSED_SENTINEL) return null;
@@ -66,7 +68,7 @@ function readStoredActivity(worktreeId: string): ActivityId | null {
   } catch {
     /* localStorage unavailable */
   }
-  return DEFAULT_ACTIVITY;
+  return INITIAL_ACTIVITY;
 }
 
 /**
@@ -93,7 +95,7 @@ function writeStoredActivity(worktreeId: string, value: ActivityId | null): void
 export function useActivityBarState(worktreeId: string): UseActivityBarStateReturn {
   // SSR-safe initial value. The post-mount effect below replaces this with
   // the persisted value (if any).
-  const [active, setActiveState] = useState<ActivityId | null>(DEFAULT_ACTIVITY);
+  const [active, setActiveState] = useState<ActivityId | null>(INITIAL_ACTIVITY);
 
   // Track active in a ref so the `toggle` callback identity can stay stable.
   const activeRef = useRef<ActivityId | null>(active);

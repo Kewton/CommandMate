@@ -24,6 +24,12 @@
  *   hidden behind a maximized one (`TerminalSplitContainer`) stays mounted,
  *   dialogs and all.
  *
+ * Also what stops the worktree screen's overlaid activity pane from closing on
+ * Esc / an outside press (Issue #3589, `usePaneOverlayDismiss`): the same
+ * dialogs own the next key or click there, and the PromptPanel exclusion
+ * matters just as much — a question waiting in the terminal must not pin the
+ * pane open.
+ *
  * SSR-safe.
  */
 

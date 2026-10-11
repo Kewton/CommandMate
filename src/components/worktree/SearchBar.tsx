@@ -150,6 +150,9 @@ export const SearchBar = memo(function SearchBar({
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
       if (e.key === 'Escape') {
+        // Issue #3589: this Esc is the search box's (clear / blur). Marking it
+        // handled keeps the overlaid activity pane around it open.
+        e.preventDefault();
         if (query) {
           handleClear();
         } else {
