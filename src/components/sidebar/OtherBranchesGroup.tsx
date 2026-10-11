@@ -14,7 +14,7 @@
 
 import React, { memo, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { BranchListItem } from '@/components/sidebar/BranchListItem';
+import { BranchListItem, SIDEBAR_ROW_INSET_CLASS } from '@/components/sidebar/BranchListItem';
 import type { SidebarBranchItem } from '@/types/sidebar';
 
 /** Props for OtherBranchesGroup */
@@ -41,26 +41,29 @@ export const OtherBranchesGroup = memo(function OtherBranchesGroup({
 
   return (
     <div data-testid="branch-group-other">
-      <button
-        type="button"
-        data-testid="branch-group-other-toggle"
-        aria-expanded={isExpanded}
-        disabled={forceExpanded}
-        onClick={() => setIsOpen((open) => !open)}
-        className="flex h-[30px] w-full min-w-0 items-center gap-2 px-3 text-left text-xs text-sidebar-muted transition-colors hover:bg-sidebar-hover hover:text-sidebar-foreground focus:outline-none focus:ring-2 focus:ring-inset focus:ring-ring disabled:cursor-default disabled:hover:bg-transparent"
-      >
-        <svg
-          className={`h-3 w-3 flex-shrink-0 transition-transform ${isExpanded ? 'rotate-90' : ''}`}
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-          strokeWidth={2}
-          aria-hidden="true"
+      {/* Issue #3576: inset like the branch rows, so its hover fill is a card too. */}
+      <div className={SIDEBAR_ROW_INSET_CLASS}>
+        <button
+          type="button"
+          data-testid="branch-group-other-toggle"
+          aria-expanded={isExpanded}
+          disabled={forceExpanded}
+          onClick={() => setIsOpen((open) => !open)}
+          className="flex h-[30px] w-full min-w-0 items-center gap-2 rounded-[10px] px-3 text-left text-xs text-sidebar-muted transition-colors hover:bg-sidebar-hover hover:text-sidebar-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:cursor-default disabled:hover:bg-transparent"
         >
-          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-        </svg>
-        <span className="min-w-0 truncate">{t('sidebar.otherBranches', { count: branches.length })}</span>
-      </button>
+          <svg
+            className={`h-3 w-3 flex-shrink-0 transition-transform ${isExpanded ? 'rotate-90' : ''}`}
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth={2}
+            aria-hidden="true"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+          </svg>
+          <span className="min-w-0 truncate">{t('sidebar.otherBranches', { count: branches.length })}</span>
+        </button>
+      </div>
       {isExpanded &&
         branches.map((branch) => (
           <BranchListItem

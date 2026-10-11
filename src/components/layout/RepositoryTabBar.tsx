@@ -78,6 +78,7 @@ import { useWorktreeSelection } from '@/contexts/WorktreeSelectionContext';
 import { usePcDisplaySizeContext } from '@/contexts/PcDisplaySizeContext';
 import { useViewTransitionRouter } from '@/components/providers/ViewTransitionsProvider';
 import { BranchListItem } from '@/components/sidebar/BranchListItem';
+import { BRANCH_ROW_ACTIONS_ATTR } from '@/components/sidebar/BranchRowActions';
 import { GroupIcon } from '@/components/ui/GroupIcon';
 import { StatusDot } from '@/components/ui/StatusDot';
 import { useWorktreeList } from '@/hooks/useWorktreeList';
@@ -165,6 +166,21 @@ export interface AnchorRect {
 // ============================================================================
 // Helpers
 // ============================================================================
+
+/**
+ * Whether a mousedown landed inside a branch list (tab strip or breadcrumb) or
+ * in something the list owns, so the list's outside-click rule must not close
+ * it: the panels themselves, and a row's "…" menu (Issue #3576), which is
+ * portalled out of the panel — closing on its mousedown would unmount the menu
+ * before the click that runs the item. Shared by the strip and the breadcrumb
+ * so the two lists can never disagree about what "outside" means.
+ */
+export function isBranchListOwnTarget(target: Node): boolean {
+  const element = target as Element;
+  return Boolean(
+    element.closest?.('[data-repository-tab-panel]') ?? element.closest?.(`[${BRANCH_ROW_ACTIONS_ATTR}]`)
+  );
+}
 
 /**
  * Clamp the popover's left edge so it stays inside the viewport.
@@ -514,8 +530,7 @@ export const RepositoryTabBar = memo(function RepositoryTabBar() {
       // toggles); closing here first would make the second click re-open it.
       if (stripRef.current?.contains(target)) return;
       if (overflowButtonRef.current?.contains(target)) return;
-      const inPanel = (target as Element).closest?.('[data-repository-tab-panel]');
-      if (inPanel) return;
+      if (isBranchListOwnTarget(target)) return;
       closeAll();
     };
     const onKeyDown = (event: KeyboardEvent) => {

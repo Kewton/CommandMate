@@ -115,7 +115,9 @@ export const BranchStatusIndicator = memo(function BranchStatusIndicator({
       status={status}
       label={showUnclassified ? (label ?? tCommon(UNCLASSIFIED_STATUS_LABEL_KEY)) : label}
       waitingKind={waitingKind}
-      size="lg"
+      // Issue #3576: 8px, as in the sidebar mock. The states stay apart by
+      // color, motion and the ring, not by size.
+      size="sm"
       className={showUnclassified ? UNCLASSIFIED_STATUS_DOT_CLASS : undefined}
       data-unclassified={showUnclassified ? 'true' : undefined}
     />

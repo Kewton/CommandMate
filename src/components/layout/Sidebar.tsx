@@ -54,7 +54,11 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import { useWorktreeSelection } from '@/contexts/WorktreeSelectionContext';
 import { useSidebarContext } from '@/contexts/SidebarContext';
-import { BranchListItem } from '@/components/sidebar/BranchListItem';
+import {
+  BranchListItem,
+  SIDEBAR_ROW_INSET_CLASS,
+  sidebarRowCardClass,
+} from '@/components/sidebar/BranchListItem';
 import {
   resolveUnclassifiedDot,
   UNCLASSIFIED_STATUS_DOT_CLASS,
@@ -942,18 +946,25 @@ function GroupHeader({
   const t = useTranslations('common');
 
   return (
-    <div className="flex items-center w-full">
-      {/* Drag handle — separate from the clickable header button */}
+    <div className="group/header flex items-center w-full">
+      {/* Drag handle — separate from the clickable header button.
+          Issue #3576: shown on hover / keyboard focus only, so at rest the
+          heading is the chevron and the name. It keeps its width (no shift on
+          hover) and stays visible on touch screens, which never hover. */}
       {dragHandleListeners && (
         <div
           ref={dragHandleRef}
           {...dragHandleListeners}
           {...dragHandleAttributes}
+          data-testid="group-drag-handle"
           aria-label={t('sidebar.dragToReorderGroup')}
           className="
             flex-shrink-0 flex items-center justify-center
             w-6 h-full pl-2 cursor-grab active:cursor-grabbing
-            text-sidebar-muted hover:text-sidebar-foreground transition-colors
+            text-sidebar-muted hover:text-sidebar-foreground transition-[color,opacity]
+            opacity-0 group-hover/header:opacity-100 group-focus-within/header:opacity-100
+            [@media(hover:none)]:opacity-100
+            rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-ring
           "
         >
           <GripVerticalIcon />
@@ -1039,29 +1050,32 @@ const SessionListItem = memo(function SessionListItem({
   const unclassified = resolveUnclassifiedDot(row.status, row.unclassified);
   const statusLabel = t(unclassified ? UNCLASSIFIED_STATUS_LABEL_KEY : `status.${row.status}`);
 
+  // Issue #3576: the same inset card and 8px dot as the branch rows.
   return (
-    <button
-      type="button"
-      data-testid="session-list-item"
-      data-session-key={row.key}
-      onClick={() => onClick(row)}
-      aria-current={isSelected ? 'true' : undefined}
-      className={`w-full min-w-0 min-h-[34px] px-3 py-1.5 flex items-center gap-2 text-left hover:bg-sidebar-hover transition-colors focus:outline-none focus:ring-2 focus:ring-inset focus:ring-ring ${
-        isSelected ? 'bg-sidebar-hover border-l-2 border-accent-500' : 'border-l-2 border-transparent'
-      }`}
-    >
-      <StatusDot
-        status={row.status}
-        size="lg"
-        label={row.exited ? `${statusLabel} (${t('branchItem.agentExited')})` : statusLabel}
-        className={unclassified ? UNCLASSIFIED_STATUS_DOT_CLASS : undefined}
-      />
-      {/* Issue #3509: one line — the agent first, then where it runs, muted. */}
-      <span className="flex-shrink-0 max-w-[45%] truncate text-sm font-semibold text-sidebar-foreground">{row.label}</span>
-      <span className="min-w-0 flex-1 truncate text-xs text-sidebar-muted">
-        {row.branchName} · {row.repositoryName}
-      </span>
-    </button>
+    <div className={`w-full min-w-0 ${SIDEBAR_ROW_INSET_CLASS}`}>
+      <button
+        type="button"
+        data-testid="session-list-item"
+        data-session-key={row.key}
+        onClick={() => onClick(row)}
+        aria-current={isSelected ? 'true' : undefined}
+        className={`w-full min-w-0 min-h-[34px] px-3 py-1.5 flex items-center gap-2 text-left ${sidebarRowCardClass(
+          isSelected
+        )}`}
+      >
+        <StatusDot
+          status={row.status}
+          size="sm"
+          label={row.exited ? `${statusLabel} (${t('branchItem.agentExited')})` : statusLabel}
+          className={unclassified ? UNCLASSIFIED_STATUS_DOT_CLASS : undefined}
+        />
+        {/* Issue #3509: one line — the agent first, then where it runs, muted. */}
+        <span className="flex-shrink-0 max-w-[45%] truncate text-sm font-semibold text-sidebar-foreground">{row.label}</span>
+        <span className="min-w-0 flex-1 truncate text-xs text-sidebar-muted">
+          {row.branchName} · {row.repositoryName}
+        </span>
+      </button>
+    </div>
   );
 });
 
