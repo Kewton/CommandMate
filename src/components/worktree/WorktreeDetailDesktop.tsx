@@ -86,11 +86,14 @@ import type { WorktreeVerificationState } from '@/hooks/useWorktreeVerification'
  * Issue #3589: presses here do not dismiss the unpinned activity pane (and Esc
  * pressed here closes it). Issue #3591: the pane's entry points are the
  * header's tools (`HeaderToolBar`, its "…" list included) and the
- * Verification chip (`data-activity-entry`, wherever the second row put it).
+ * Verification chip (`data-activity-entry`, wherever the second row put it),
+ * and the second row's "…" the chip folds behind — pressing it to reach the
+ * chip must not be the press that closes the pane the chip opened.
  */
 const ACTIVITY_PANE_IGNORE_OUTSIDE: readonly string[] = [
   '[data-testid="header-tool-bar"]',
   '[data-activity-entry]',
+  '[data-testid="split-action-bar-items-overflow"]',
 ];
 
 /**
@@ -147,7 +150,11 @@ export interface WorktreeDetailDesktopProps {
   // Activity Bar
   activeActivity: ActivityId | null;
   onActivityToggle: (id: ActivityId) => void;
-  /** Issue #1816: open an activity without the toggle-closed behaviour. */
+  /**
+   * Issue #1816: open an activity without the toggle-closed behaviour.
+   * Issue #3591: no longer read here — the Verification chip toggles like the
+   * header's tools. Kept so the detail screen's props stay unchanged.
+   */
   onActivityOpen: (id: ActivityId) => void;
 
   /**
@@ -326,7 +333,6 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
   lastAutoResponse,
   activeActivity,
   onActivityToggle,
-  onActivityOpen,
   verification,
   onInfoClick,
   pendingInsertTextMap,
@@ -557,12 +563,13 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
   /**
    * Issue #1816: the header chip opens the Verification pane.
    *
-   * `onActivityOpen`, not `onActivityToggle`: clicking a chip that points at a
-   * pane must never be the gesture that closes it.
+   * Issue #3591: the chip is Verification's only entry point now, so it
+   * toggles like the header's tools — pressed while the Verification pane is
+   * open it closes it; pressed while another pane is open it switches.
    */
   const handleOpenVerification = useCallback(() => {
-    onActivityOpen('verification');
-  }, [onActivityOpen]);
+    onActivityToggle(CHIP_ACTIVITY_ID);
+  }, [onActivityToggle]);
 
   /**
    * Issue #728 (R3-005): PC-only per-split polling fan-out.

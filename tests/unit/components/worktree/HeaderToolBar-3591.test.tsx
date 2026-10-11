@@ -18,6 +18,8 @@ import React from 'react';
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { HeaderToolBar } from '@/components/worktree/HeaderToolBar';
+import { ActionBarItemsOverflow } from '@/components/worktree/TerminalSplitContainer';
+import { VerificationStatusChip } from '@/components/worktree/VerificationStatusChip';
 import { ACTIVITIES, HEADER_TOOLS, type ActivityId } from '@/config/activity-bar-config';
 
 vi.mock('next-intl', async () => {
@@ -241,5 +243,75 @@ describe('HeaderToolBar — tools folded behind "…" (Issue #3591)', () => {
     expect(screen.queryByTestId('header-tool-more')).toBeNull();
     expect(screen.queryByTestId('header-tool-more-list')).toBeNull();
     expect(rowTools()).toHaveLength(9);
+  });
+});
+
+describe('HeaderToolBar — Esc beside the second row "…" (Issue #3591)', () => {
+  function renderBoth() {
+    render(
+      <>
+        <HeaderToolBar active={null} onToggle={vi.fn()} foldedCount={3} />
+        <ActionBarItemsOverflow label="More">
+          <button type="button" data-testid="folded-chip">chip</button>
+        </ActionBarItemsOverflow>
+      </>
+    );
+    // The second row's panel first (a click), then the header's list from the
+    // keyboard — a press would have closed the other one.
+    fireEvent.click(screen.getByTestId('split-action-bar-items-overflow'));
+    expect(screen.getByTestId('split-action-bar-items-panel')).toBeInTheDocument();
+  }
+
+  it('closes only the header list on Esc in it, and focus goes to the header "…"', () => {
+    renderBoth();
+    const more = screen.getByTestId('header-tool-more');
+    more.focus();
+    fireEvent.keyDown(more, { key: 'Enter' });
+    const item = screen.getByTestId('header-tool-more-item-todo');
+    expect(document.activeElement).toBe(item);
+
+    fireEvent.keyDown(item, { key: 'Escape' });
+    expect(screen.queryByTestId('header-tool-more-list')).toBeNull();
+    expect(screen.getByTestId('split-action-bar-items-panel')).toBeInTheDocument();
+    expect(document.activeElement).toBe(more);
+  });
+
+  it('still closes the second row panel on an Esc nobody handled (negative control)', () => {
+    renderBoth();
+    const chip = screen.getByTestId('folded-chip');
+    chip.focus();
+    fireEvent.keyDown(chip, { key: 'Escape' });
+    expect(screen.queryByTestId('split-action-bar-items-panel')).toBeNull();
+    expect(document.activeElement).toBe(screen.getByTestId('split-action-bar-items-overflow'));
+  });
+});
+
+describe('HeaderToolBar — Esc beside the chip reason popover (Issue #3591)', () => {
+  function renderWithReason() {
+    render(
+      <>
+        <HeaderToolBar active={null} onToggle={vi.fn()} foldedCount={3} />
+        <VerificationStatusChip task={null} latestRun={null} onOpen={vi.fn()} />
+      </>
+    );
+    fireEvent.click(screen.getByTestId('verification-chip-reason-toggle'));
+    expect(screen.getByTestId('verification-chip-reason-popover')).toBeInTheDocument();
+  }
+
+  it('keeps the reason open when Esc closes the header list', () => {
+    renderWithReason();
+    const more = screen.getByTestId('header-tool-more');
+    more.focus();
+    fireEvent.keyDown(more, { key: 'Enter' });
+    fireEvent.keyDown(screen.getByTestId('header-tool-more-item-todo'), { key: 'Escape' });
+    expect(screen.queryByTestId('header-tool-more-list')).toBeNull();
+    expect(screen.getByTestId('verification-chip-reason-popover')).toBeInTheDocument();
+    expect(document.activeElement).toBe(more);
+  });
+
+  it('still closes the reason on an Esc nobody handled (negative control)', () => {
+    renderWithReason();
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    expect(screen.queryByTestId('verification-chip-reason-popover')).toBeNull();
   });
 });

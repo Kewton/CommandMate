@@ -1151,8 +1151,10 @@ export function clampOverflowPanelLeft(
  * outside closes without moving focus — the press already put it where the
  * user wanted. A press inside any `[data-floating-layer]` (the chip's reason
  * popover) counts as inside.
+ *
+ * Exported for tests (Issue #3591: its Esc beside the header tools' "…").
  */
-function ActionBarItemsOverflow({ label, children }: { label: string; children: ReactNode }) {
+export function ActionBarItemsOverflow({ label, children }: { label: string; children: ReactNode }) {
   const [open, setOpen] = useState(false);
   const [position, setPosition] = useState<{ top: number; left: number } | null>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -1207,7 +1209,9 @@ function ActionBarItemsOverflow({ label, children }: { label: string; children: 
       setOpen(false);
     };
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
+      // Issue #3591: an Esc another layer already handled (the header tools'
+      // "…" list closing itself) is not this panel's.
+      if (event.key !== 'Escape' || event.defaultPrevented) return;
       setOpen(false);
       buttonRef.current?.focus();
     };

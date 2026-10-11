@@ -237,7 +237,9 @@ export const VerificationStatusChip = memo(function VerificationStatusChip({
       setReasonOpen(false);
     };
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setReasonOpen(false);
+      // Issue #3591: an Esc another layer already handled (the header tools'
+      // "…" list closing itself) is not this popover's.
+      if (event.key === 'Escape' && !event.defaultPrevented) setReasonOpen(false);
     };
     document.addEventListener('mousedown', onPointerDown);
     document.addEventListener('keydown', onKeyDown);

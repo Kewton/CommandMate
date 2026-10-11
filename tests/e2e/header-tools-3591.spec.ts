@@ -15,6 +15,79 @@
 import { test, expect, type Page } from '@playwright/test';
 import { E2E_WORKTREE_A, setupSplitTest } from './fixtures/terminal-split-helpers';
 
+/** Mirror of FILE_PANEL_COLLAPSED_STORAGE_KEY. */
+const FILE_PANEL_COLLAPSED_KEY = 'commandmate.worktree.filePanelCollapsed';
+const FILE_NAME = 'notes-3591.log';
+const FILE_BODY = 'narrow terminal\n';
+
+/** One file in the tree, and its body (as in worktree-header-one-row-3590). */
+async function mockOneFile(page: Page): Promise<void> {
+  await page.addInitScript((key) => {
+    try {
+      localStorage.removeItem(key);
+    } catch {
+      /* storage unavailable - non-fatal */
+    }
+  }, FILE_PANEL_COLLAPSED_KEY);
+  await page.route(
+    (url) => url.pathname.endsWith(`/api/worktrees/${E2E_WORKTREE_A}/tree`),
+    (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          path: '',
+          parentPath: null,
+          items: [{ name: FILE_NAME, type: 'file', size: FILE_BODY.length, extension: 'log' }],
+        }),
+      }),
+  );
+  await page.route(
+    (url) => url.pathname.endsWith(`/api/worktrees/${E2E_WORKTREE_A}/files/${FILE_NAME}`),
+    (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          path: FILE_NAME,
+          content: FILE_BODY,
+          extension: 'log',
+          worktreePath: `/tmp/${E2E_WORKTREE_A}`,
+        }),
+      }),
+  );
+}
+
+/**
+ * Narrow the second row until the chip folds behind its "…": open the file
+ * (which puts the unpinned Files pane away) and drag the terminal / file
+ * border all the way left, so the terminal stops at its 20% minimum.
+ */
+async function foldTheSecondRow(page: Page): Promise<void> {
+  await page.getByTestId('header-tool-files').click();
+  await page.getByTestId(`tree-item-${FILE_NAME}`).click();
+  await expect(page.getByTestId(`file-tab-${FILE_NAME}`)).toBeVisible();
+  await expect(page.getByTestId('activity-pane-slot')).toHaveCount(0);
+  const resizer = page
+    .getByTestId('terminal-pane')
+    .locator('xpath=following-sibling::*[@role="separator"][1]');
+  let lastX = -1;
+  await expect
+    .poll(async () => {
+      const x = Math.round((await resizer.boundingBox())!.x);
+      const settled = x === lastX;
+      lastX = x;
+      return settled;
+    })
+    .toBe(true);
+  const r = (await resizer.boundingBox())!;
+  await page.mouse.move(r.x + r.width / 2, r.y + r.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(0, r.y + r.height / 2, { steps: 10 });
+  await page.mouse.up();
+  await expect(page.getByTestId('split-action-bar-items-overflow')).toBeVisible();
+}
+
 const TOOL_IDS = ['files', 'git', 'notes', 'schedules', 'agent', 'timer', 'todo', 'skills', 'env'];
 
 async function setSidebar(page: Page, open: boolean) {
@@ -185,5 +258,87 @@ test.describe('Worktree tools in the header (Issue #3591)', () => {
       type: 'header',
       description: `1024x768, sidebar open: ${visible.length} tools in the row, ${folded.length} behind "…"`,
     });
+  });
+
+  // ---- 2nd contract: the Codex consistency review's P2s -------------------
+
+  test('the Verification chip toggles: a second press closes, from another pane it switches', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await openScreen(page);
+    const chip = page.getByTestId('verification-status-chip');
+    await chip.click();
+    await expect(page.getByTestId('activity-pane')).toHaveAttribute('data-active', 'verification');
+    await chip.click();
+    await expect(page.getByTestId('activity-pane-slot')).toHaveCount(0);
+
+    // Negative control: with another pane open the chip switches to Verification.
+    await page.getByTestId('header-tool-notes').click();
+    await expect(page.getByTestId('activity-pane')).toHaveAttribute('data-active', 'notes');
+    await chip.click();
+    await expect(page.getByTestId('activity-pane')).toHaveAttribute('data-active', 'verification');
+  });
+
+  test('pressing the second row "…" keeps an open Verification pane open', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await setSidebar(page, true);
+    await mockOneFile(page);
+    await openScreen(page);
+    await foldTheSecondRow(page);
+
+    // Verification opened from the chip folded behind the second row's "…".
+    const overflow = page.getByTestId('split-action-bar-items-overflow');
+    await overflow.click();
+    await page.getByTestId('verification-status-chip').click();
+    await expect(page.getByTestId('activity-pane')).toHaveAttribute('data-active', 'verification');
+
+    // Pressing "…" again (to reach the chip) is not an outside press.
+    await overflow.click();
+    await expect(page.getByTestId('activity-pane')).toHaveAttribute('data-active', 'verification');
+    await overflow.click();
+    await expect(page.getByTestId('split-action-bar-items-panel')).toBeVisible();
+    await expect(page.getByTestId('activity-pane')).toHaveAttribute('data-active', 'verification');
+
+    // And the chip in that panel closes it (the toggle).
+    await page.getByTestId('verification-status-chip').click();
+    await expect(page.getByTestId('activity-pane-slot')).toHaveCount(0);
+  });
+
+  test('negative control: a press in the terminal still closes the Verification pane', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await openScreen(page);
+    await page.getByTestId('verification-status-chip').click();
+    await expect(page.getByTestId('activity-pane')).toHaveAttribute('data-active', 'verification');
+    const box = (await page.getByTestId('terminal-split-container').boundingBox())!;
+    await page.mouse.click(box.x + box.width * 0.25, box.y + box.height / 2);
+    await expect(page.getByTestId('activity-pane-slot')).toHaveCount(0);
+  });
+
+  test('Esc in the header "…" list closes only that list when the second row "…" is open too', async ({ page }) => {
+    await page.setViewportSize({ width: 1024, height: 768 });
+    await setSidebar(page, true);
+    await mockOneFile(page);
+    await openScreen(page);
+    await foldTheSecondRow(page);
+    const overflow = page.getByTestId('split-action-bar-items-overflow');
+    const more = page.getByTestId('header-tool-more');
+    await expect(more).toBeVisible();
+
+    await overflow.click();
+    const panel = page.getByTestId('split-action-bar-items-panel');
+    await expect(panel).toBeVisible();
+    // From the keyboard: a press on the header "…" would close the other panel.
+    await more.focus();
+    await page.keyboard.press('Enter');
+    const list = page.getByTestId('header-tool-more-list');
+    await expect(list).toBeVisible();
+
+    await page.keyboard.press('Escape');
+    await expect(list).toHaveCount(0);
+    await expect(panel).toBeVisible();
+    await expect(more).toBeFocused();
+
+    // Negative control: the next Esc (nobody else handles it) closes the second row's panel.
+    await page.keyboard.press('Escape');
+    await expect(panel).toHaveCount(0);
   });
 });
