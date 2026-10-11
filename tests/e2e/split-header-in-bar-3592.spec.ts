@@ -98,8 +98,8 @@ async function mockOneFile(page: Page): Promise<void> {
 
 /**
  * Opens the mocked file from the Files pane. Issue #3589: the activity pane
- * starts closed and opens over the body, so it is opened from the activity
- * bar's entry unless it already shows Files. Opening the file puts the
+ * starts closed and opens over the body, so it is opened from its entry —
+ * Issue #3591: the Files tool in the header — unless it already shows Files. Opening the file puts the
  * (unpinned) pane away again, leaving the file panel beside the terminal.
  */
 async function openMockedFile(page: Page): Promise<void> {
@@ -107,7 +107,7 @@ async function openMockedFile(page: Page): Promise<void> {
   const pane = page.getByTestId('activity-pane');
   const showing = (await pane.count()) > 0 ? await pane.getAttribute('data-active') : null;
   if (showing !== 'files') {
-    await page.getByTestId('activity-bar-button-files').click();
+    await page.getByTestId('header-tool-files').click();
   }
   await expect(pane).toHaveAttribute('data-active', 'files');
   await page.getByTestId(`tree-item-${FILE_NAME}`).click();

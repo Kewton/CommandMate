@@ -5,7 +5,7 @@
  * SQLite DB, a real git worktree scan, and tmux/CLI sessions — none of which
  * are reproducible in CI. These helpers decouple the PC split UI from that
  * backend by **mocking the worktree API routes at the browser level**
- * (`page.route`), so the split shell (ActivityBar + TerminalSplitContainer +
+ * (`page.route`), so the split shell (header tools + TerminalSplitContainer +
  * PaneResizers) renders deterministically without any live session.
  *
  * They also provide **per-test localStorage isolation**: existing e2e specs
@@ -297,6 +297,6 @@ export async function ensureFilesActivityVisible(page: Page): Promise<void> {
   const slot = page.locator('[data-testid="activity-pane-slot"]');
   const visible = await slot.isVisible().catch(() => false);
   if (!visible) {
-    await page.click('[data-testid="activity-bar-button-files"]');
+    await page.click('[data-testid="header-tool-files"]');
   }
 }

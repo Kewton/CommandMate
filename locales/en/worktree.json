@@ -1098,6 +1098,11 @@
       "version": "CommandMate {version}"
     }
   },
+  "headerTools": {
+    "label": "Worktree tools",
+    "more": "More tools",
+    "moreActive": "More tools ({label} is open)"
+  },
   "branchMismatch": {
     "changedFrom": "Branch changed from",
     "to": "to",
@@ -1489,6 +1494,7 @@
       "failingGates": "Gates that did not pass: {gates}",
       "gatesPassed": "All {count} gates passed",
       "openHint": "Open the Verification pane",
+      "closeHint": "Close the Verification pane",
       "dash": "—",
       "unverified": "Not verified",
       "noTask": "No execution contract has been sent to this branch",

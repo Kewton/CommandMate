@@ -4,11 +4,15 @@
  * Defines the VS Code-style Activity Bar identifiers and metadata.
  * This module is consumed by:
  *   - `src/hooks/useActivityBarState.ts`
- *   - `src/components/worktree/ActivityBar.tsx`
+ *   - `src/components/worktree/HeaderToolBar.tsx` (PC, Issue #3591)
+ *   - `src/components/worktree/ActivityBar.tsx` (no longer mounted on PC)
  *   - `src/components/worktree/ActivityPane.tsx`
  *   - `src/components/worktree/WorktreeDetailRefactored.tsx`
  *
- * The Activity Bar is a 48px-wide vertical bar that hosts the activities below.
+ * The Activity Bar was a 48px-wide vertical bar that hosted the activities
+ * below. Issue #3591: on PC they are icons at the right of the worktree header
+ * ({@link HEADER_TOOLS}) and the Verification chip; the names below keep the
+ * "activity bar" wording (storage keys, test helpers, the mobile tabs).
  * Re-clicking the active icon toggles the ActivityPane closed (null).
  */
 
@@ -76,6 +80,25 @@ export const ACTIVITIES: readonly ActivityDefinition[] = [
   // both users and tests, so an insert would silently renumber every tab.
   { id: 'env', labelKey: 'activityBar.env', icon: KeyRound },
 ] as const;
+
+/**
+ * The activity whose entry point is not a header tool (Issue #3591): the
+ * Verification pane opens from the Verification chip on the second row
+ * (`VerificationStatusChip`, #3590), which already says where the branch
+ * stands. It stays in {@link ACTIVITIES} — the pane, its label and the stored
+ * state are unchanged — and is only left out of {@link HEADER_TOOLS}.
+ */
+export const CHIP_ACTIVITY_ID: ActivityId = 'verification';
+
+/**
+ * The tools drawn at the right of the PC worktree header (Issue #3591), in
+ * {@link ACTIVITIES} order — the order of the ←/→ keys. Every activity except
+ * {@link CHIP_ACTIVITY_ID}. On a narrow header the trailing ones fold behind a
+ * "…" button (`useDesktopHeaderFit`).
+ */
+export const HEADER_TOOLS: readonly ActivityDefinition[] = ACTIVITIES.filter(
+  (activity) => activity.id !== CHIP_ACTIVITY_ID
+);
 
 /**
  * Set of valid ActivityId values for runtime validation.

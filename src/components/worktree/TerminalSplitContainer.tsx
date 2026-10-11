@@ -1274,8 +1274,10 @@ export function clampOverflowPanelLeft(
  * Issue #3592: `parked` is drawn after `children` while the panel is open,
  * and in a hidden box beside the button while it is closed — for a slot
  * another component portals into, which must exist in either state.
+ *
+ * Exported for tests (Issue #3591: its Esc beside the header tools' "…").
  */
-function ActionBarItemsOverflow({
+export function ActionBarItemsOverflow({
   label,
   children,
   parked = null,
@@ -1341,6 +1343,7 @@ function ActionBarItemsOverflow({
       if (event.key !== 'Escape') return;
       // Issue #3592: an Escape a layer in the panel already handled (the
       // folded agent selector's menu closing itself) is not ours to act on.
+      // Issue #3591: nor one the header tools' "…" list closed itself with.
       if (event.defaultPrevented) return;
       setOpen(false);
       buttonRef.current?.focus();

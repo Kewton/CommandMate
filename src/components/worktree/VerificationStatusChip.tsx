@@ -84,6 +84,13 @@ export interface VerificationStatusChipProps {
   latestRunGates?: VerificationGateResultView[] | null;
   /** Open the Verification pane. */
   onOpen: () => void;
+  /**
+   * Issue #3591: whether the Verification pane is open. On PC the chip toggles
+   * the pane, so while it is open the hint in the title / accessible name /
+   * reason says "close". Omitted (the mobile shell, where the chip only
+   * opens), the hint always says "open".
+   */
+  paneOpen?: boolean;
   className?: string;
   /**
    * Where the reason popover is drawn (Issue #3590).
@@ -164,6 +171,7 @@ export const VerificationStatusChip = memo(function VerificationStatusChip({
   latestRun,
   latestRunGates,
   onOpen,
+  paneOpen = false,
   className = '',
   popover = 'inline',
 }: VerificationStatusChipProps) {
@@ -220,9 +228,9 @@ export const VerificationStatusChip = memo(function VerificationStatusChip({
       }
     }
 
-    parts.push(t('verification.chip.openHint'));
+    parts.push(t(paneOpen ? 'verification.chip.closeHint' : 'verification.chip.openHint'));
     return parts;
-  }, [task, latestRun, gates, t]);
+  }, [task, latestRun, gates, paneOpen, t]);
 
   const reason = reasonParts.join(' · ');
 
@@ -253,6 +261,7 @@ export const VerificationStatusChip = memo(function VerificationStatusChip({
       if (event.key !== 'Escape') return;
       // Issue #3592: an Escape a layer above already handled (a menu closing
       // itself — Radix calls `preventDefault`) is not ours to act on.
+      // Issue #3591: the header tools' "…" list closing itself is one too.
       if (event.defaultPrevented) return;
       setReasonOpen(false);
     };
@@ -318,7 +327,15 @@ export const VerificationStatusChip = memo(function VerificationStatusChip({
   );
 
   return (
-    <div ref={rootRef} className={`relative inline-flex max-w-full ${className}`.trim()}>
+    <div
+      ref={rootRef}
+      // Issue #3591: the Verification pane's entry point on PC (the header's
+      // tools leave it out). The worktree screen hands focus back to this
+      // chip's first button when the pane closes, and a press on it — the
+      // chip or its ⓘ — is not "outside" the open pane.
+      data-activity-entry="verification"
+      className={`relative inline-flex max-w-full ${className}`.trim()}
+    >
       {/* `grow`: the mobile shell passes `w-full justify-start` to the root, and
           the pill used to be the root — without it the strip would go from a
           full-width chip to one that hugs its text. */}

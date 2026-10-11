@@ -2,15 +2,19 @@
  * WorktreeDesktopLayout Component (Issue #727, simplified by Issue #730)
  *
  * 2-column desktop layout:
- *   [ActivityPane (variable, optional)] + Resizer + [Right pane (flex)]
+ *   [Right pane (flex)] + Resizer + [ActivityPane (variable, optional)]
  *
- * History was moved inside the Right pane via `TerminalContainer` (Issue #730),
- * and the outer ActivityBar now runs full-height managed by the parent
- * (`WorktreeDetailRefactored`). Mobile fallback was also removed: the parent
- * renders `MobileContent` on its own for the mobile path.
+ * Issue #3591: the activity pane is on the RIGHT, under the header's tools
+ * that open it (it was on the left, beside the vertical activity bar, which
+ * is gone). The names "activity pane" / "right pane" are kept: the right pane
+ * is the body (history + terminal + file panel).
  *
- * - When `activityPane` is null, the activity column AND its trailing resizer
- *   are hidden.
+ * History was moved inside the Right pane via `TerminalContainer` (Issue #730).
+ * Mobile fallback was also removed: the parent renders `MobileContent` on its
+ * own for the mobile path.
+ *
+ * - When `activityPane` is null, the activity column AND its resizer are
+ *   hidden.
  * - Each pane is wrapped in ErrorBoundary for fault isolation.
  *
  * Issue #3589: the activity pane is laid OVER the right pane unless it is
@@ -95,9 +99,12 @@ const OVERLAY_MIN_WIDTH_PX = 280;
 /** Issue #3589: the pinned slot — a column with a resizer, as before. */
 const PINNED_SLOT_CLASS = 'flex-shrink-0 overflow-hidden transition-[width] duration-200 ease-in-out';
 
-/** Issue #3589: the unpinned slot — over the right pane, which keeps its width. */
+/**
+ * Issue #3589: the unpinned slot — over the right pane, which keeps its width.
+ * Issue #3591: from the right edge.
+ */
 const OVERLAY_SLOT_CLASS =
-  'absolute inset-y-0 left-0 z-20 max-w-full overflow-hidden border-r border-border bg-surface shadow-lg';
+  'absolute inset-y-0 right-0 z-20 max-w-full overflow-hidden border-l border-border bg-surface shadow-lg';
 
 const ACTIVITY_PANE_ID = 'worktree-activity-pane';
 const RIGHT_PANE_ID = 'worktree-right-pane';
@@ -132,7 +139,9 @@ export const WorktreeDesktopLayout = memo(function WorktreeDesktopLayout({
       if (!container) return;
       const w = container.offsetWidth;
       if (w === 0) return;
-      const percentDelta = (delta / w) * 100;
+      // Issue #3591: the pane is right of its resizer, so dragging the
+      // resizer right (a positive delta) makes the pane narrower.
+      const percentDelta = (-delta / w) * 100;
       const current = onActivityPaneResize ? activityPaneWidth : localActivityWidth;
       const next = Math.min(maxPaneWidth, Math.max(minPaneWidth, current + percentDelta));
       if (onActivityPaneResize) onActivityPaneResize(next);
@@ -163,11 +172,34 @@ export const WorktreeDesktopLayout = memo(function WorktreeDesktopLayout({
         role="main"
         className={containerClassName}
       >
+        {/* Right pane (history + terminal + file panel) — fills remaining space.
+            Issue #3589: `isolate` makes it its own stacking context, so what
+            floats inside the body (the session memo editor's `z-30`, …) stays
+            under the overlaid activity pane (`z-20`) instead of competing with
+            it. Modals and toasts portal to <body> and are not affected. */}
+        <div
+          id={RIGHT_PANE_ID}
+          data-testid="right-pane-slot"
+          aria-label={t('desktopLayout.terminalPane')}
+          className="isolate flex-grow overflow-hidden min-w-0"
+        >
+          <ErrorBoundary componentName="TerminalPane">{rightPane}</ErrorBoundary>
+        </div>
+
         {/* Activity Pane (variable, optional). Pinned: a column beside the
             body. Not pinned (Issue #3589): over the body, which keeps its
-            width. ONE element either way — only its style changes — so
-            pinning / unpinning never remounts the pane (an unsaved Env draft
-            survives it). */}
+            width. Issue #3591: right of the body, its resizer first. ONE
+            element either way — only its style changes — so pinning /
+            unpinning never remounts the pane (an unsaved Env draft survives
+            it). */}
+        {showActivityCol && activityPanePinned && (
+          <PaneResizer
+            onResize={handleActivityResize}
+            orientation="horizontal"
+            ariaValueNow={effectiveActivityWidth}
+          />
+        )}
+
         {showActivityCol && (
           <div
             id={ACTIVITY_PANE_ID}
@@ -184,27 +216,6 @@ export const WorktreeDesktopLayout = memo(function WorktreeDesktopLayout({
             <ErrorBoundary componentName="ActivityPane">{framedActivityPane}</ErrorBoundary>
           </div>
         )}
-        {showActivityCol && activityPanePinned && (
-          <PaneResizer
-            onResize={handleActivityResize}
-            orientation="horizontal"
-            ariaValueNow={effectiveActivityWidth}
-          />
-        )}
-
-        {/* Right pane (history + terminal + file panel) — fills remaining space.
-            Issue #3589: `isolate` makes it its own stacking context, so what
-            floats inside the body (the session memo editor's `z-30`, …) stays
-            under the overlaid activity pane (`z-20`) instead of competing with
-            it. Modals and toasts portal to <body> and are not affected. */}
-        <div
-          id={RIGHT_PANE_ID}
-          data-testid="right-pane-slot"
-          aria-label={t('desktopLayout.terminalPane')}
-          className="isolate flex-grow overflow-hidden min-w-0"
-        >
-          <ErrorBoundary componentName="TerminalPane">{rightPane}</ErrorBoundary>
-        </div>
       </div>
     </div>
   );

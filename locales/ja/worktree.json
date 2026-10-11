@@ -1098,6 +1098,11 @@
       "version": "CommandMate {version}"
     }
   },
+  "headerTools": {
+    "label": "ワークツリーの道具",
+    "more": "ほかの道具",
+    "moreActive": "ほかの道具（{label} を表示中）"
+  },
   "branchMismatch": {
     "changedFrom": "ブランチが",
     "to": "から",
@@ -1489,6 +1494,7 @@
       "failingGates": "不合格ゲート: {gates}",
       "gatesPassed": "全 {count} ゲート合格",
       "openHint": "検証ペインを開く",
+      "closeHint": "検証ペインを閉じる",
       "dash": "—",
       "unverified": "未検証",
       "noTask": "このブランチには実行契約が送られていません",

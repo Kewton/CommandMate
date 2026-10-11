@@ -9,9 +9,10 @@
  * wider than its box — the row gives something up, one step at a time, and
  * measures again:
  *
- * - the header (`DesktopHeader`): clip the identity group
+ * - the header (`DesktopHeader`): fold its tools behind a "…" button one at a
+ *   time from the end (Issue #3591), then clip the identity group
  *   ({@link useDesktopHeaderFit}). Issue #3593: its session field has a fixed
- *   width, so there are no agent pills left to fold first;
+ *   width, so there are no agent pills to fold;
  * - the second row (`TerminalSplitContainer`'s action bar): drop the History /
  *   Files labels to their icons, then move the slotted items (the
  *   Verification chip, and with one split that split's session controls,
@@ -153,8 +154,15 @@ function useFitSteps(
 /** What the desktop header can afford at its current width (Issue #2481). */
 export interface DesktopHeaderFit {
   /**
+   * Issue #3591: how many of the header's tools, counted from the end, have
+   * left the row for the "…" button (`HeaderToolBar`'s `foldedCount`). Always
+   * 0 when the header has no tools.
+   */
+  foldedTools: number;
+  /**
    * The last resort: the identity group and the agent row clip horizontally
-   * instead of painting under the right-hand controls.
+   * instead of painting under the right-hand controls. Only after every tool
+   * has folded.
    */
   squeezed: boolean;
 }
@@ -176,17 +184,26 @@ export interface DesktopHeaderFit {
  * before this step, became a fixed-width session field — the same width
  * whatever the number of sessions — so there is nothing to fold first.
  *
+ * Issue #3591: the worktree's tools moved into the header (`HeaderToolBar`),
+ * inside the controls group that never shrinks. Before the identity group
+ * clips, they fold behind a "…" button one at a time from the end — step `k`
+ * (1 … `toolCount`) folds the last `k` — so the narrower the header, the more
+ * tools are two clicks away, and only past the last one does the row clip.
+ *
  * @param headerRef - The header row, observed for size changes
  * @param identityRef - The left group; its overflow is the "does not fit" signal
  * @param contentKey - What changes the row's widths
+ * @param toolCount - Issue #3591: how many tools the header draws (0: none)
  */
 export function useDesktopHeaderFit(
   headerRef: React.RefObject<HTMLElement | null>,
   identityRef: React.RefObject<HTMLElement | null>,
-  contentKey: string
+  contentKey: string,
+  toolCount = 0
 ): DesktopHeaderFit {
-  const step = useFitSteps(headerRef, identityRef, contentKey, 1, null);
-  return { squeezed: step >= 1 };
+  const tools = Math.max(0, toolCount);
+  const step = useFitSteps(headerRef, identityRef, `${contentKey}\ntools:${tools}`, tools + 1, null);
+  return { foldedTools: Math.min(step, tools), squeezed: step >= tools + 1 };
 }
 
 /** What the split action bar (the second row) can afford (Issue #3590). */

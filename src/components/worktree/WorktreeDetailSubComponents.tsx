@@ -63,6 +63,8 @@ import {
 import { AppUpdateButton } from '@/components/common/AppUpdateButton';
 import { useAppUpdate } from '@/contexts/AppUpdateContext';
 import { useDesktopHeaderFit } from '@/hooks/useDesktopHeaderFit';
+import { HeaderToolBar } from '@/components/worktree/HeaderToolBar';
+import { HEADER_TOOLS, type ActivityId } from '@/config/activity-bar-config';
 import { saveWorktreeStatus, WORKTREE_STATUS_OPTIONS } from '@/lib/worktree-status';
 
 // ============================================================================
@@ -777,8 +779,9 @@ interface DesktopHeaderProps {
   onInfoClick: () => void;
   /**
    * Optional sidebar toggle callback.
-   * Issue #747: the sidebar (Branches) toggle moved out of DesktopHeader into
-   * the top of the ActivityBar, so DesktopHeader no longer renders a hamburger.
+   * Issue #747: the sidebar (Branches) toggle moved out of DesktopHeader (it
+   * is the sidebar's own button since #3512), so DesktopHeader no longer
+   * renders a hamburger.
    * Kept as an optional prop for backward compatibility.
    */
   onMenuClick?: () => void;
@@ -854,6 +857,15 @@ interface DesktopHeaderProps {
    * names the split a session is in ("Split 2"). Omitted names none.
    */
   splitInstanceIds?: readonly string[];
+  /**
+   * Issue #3591: the worktree's tools (`HeaderToolBar`) at the right end of
+   * the row, replacing the vertical activity bar. Drawn only when
+   * {@link onActivityToggle} is given; on a narrow header the trailing tools
+   * fold behind "…" before the identity group clips (`useDesktopHeaderFit`).
+   */
+  activeActivity?: ActivityId | null;
+  /** Issue #3591: a tool was pressed (re-pressing the open one closes it). */
+  onActivityToggle?: (activity: ActivityId) => void;
 }
 
 /** Status indicator configuration is imported from @/config/status-colors (SF1) */
@@ -885,6 +897,8 @@ export const DesktopHeader = memo(function DesktopHeader({
   agentSessionByInstance,
   agentAddControl,
   splitInstanceIds,
+  activeActivity = null,
+  onActivityToggle,
 }: DesktopHeaderProps) {
   const tWorktree = useTranslations('worktree');
   const locale = useLocale();
@@ -1045,7 +1059,9 @@ export const DesktopHeader = memo(function DesktopHeader({
   ].join('\n');
   const headerRef = useRef<HTMLDivElement>(null);
   const identityRef = useRef<HTMLDivElement>(null);
-  const headerFit = useDesktopHeaderFit(headerRef, identityRef, headerFitKey);
+  // Issue #3591: the tools fold one at a time before the identity group clips.
+  const headerToolCount = onActivityToggle ? HEADER_TOOLS.length : 0;
+  const headerFit = useDesktopHeaderFit(headerRef, identityRef, headerFitKey, headerToolCount);
 
   // Issue #1783 / #1784 / #2042 / #2054: what a session's tooltip says — the
   // visible `{label}: {status}`, then the model (and effort, and the persona an
@@ -1311,6 +1327,17 @@ export const DesktopHeader = memo(function DesktopHeader({
           />
         )}
       </Button>
+        {/* Issue #3591: the worktree's tools — what the vertical activity
+            bar held — at the right end, under which their pane opens. The
+            controls group never shrinks; on a narrow header the fit folds the
+            trailing tools behind "…" instead. */}
+        {onActivityToggle && (
+          <HeaderToolBar
+            active={activeActivity}
+            onToggle={onActivityToggle}
+            foldedCount={headerFit.foldedTools}
+          />
+        )}
       </div>
     </div>
   );
