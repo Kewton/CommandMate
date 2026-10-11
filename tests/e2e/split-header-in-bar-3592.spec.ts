@@ -302,5 +302,31 @@ test.describe('Split title bar on the second row (Issue #3592)', () => {
     // The panel stays open for the next control.
     await expect(panel).toBeVisible();
     await panel.getByTestId('surface-mode-terminal-0').click();
+
+    // Third contract: Escape in the selector's menu closes the menu only.
+    await panel.getByTestId('cli-selector-0').click();
+    const menuItem = page.getByTestId('split-session-note-menu-item-0');
+    await expect(menuItem).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(menuItem).toHaveCount(0);
+    await expect(panel).toBeVisible();
+
+    // The note editor opens under the panel's controls, on screen.
+    await panel.getByTestId('split-session-note-edit-0').click();
+    const noteEditor = page.getByTestId('split-session-note-editor-0');
+    await expect(noteEditor).toBeVisible();
+    const editorBox = await box(noteEditor);
+    const anchorBox = await box(panel.getByTestId('split-bar-session-0'));
+    expect(editorBox.y).toBeGreaterThanOrEqual(anchorBox.y + anchorBox.height);
+    expect(editorBox.x).toBeGreaterThanOrEqual(0);
+    expect(editorBox.x + editorBox.width).toBeLessThanOrEqual(1440);
+    await expect(page.getByTestId('split-session-note-input-0')).toBeFocused();
+
+    // Escape directly in the panel (the editor gone) closes it.
+    await page.keyboard.press('Escape');
+    await expect(noteEditor).toHaveCount(0);
+    await panel.getByTestId('cli-selector-0').focus();
+    await page.keyboard.press('Escape');
+    await expect(panel).toHaveCount(0);
   });
 });

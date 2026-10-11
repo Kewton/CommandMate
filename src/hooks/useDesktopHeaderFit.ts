@@ -131,7 +131,12 @@ function useFitSteps(
     if (!watchedContent || !group || typeof MutationObserver === 'undefined') return;
     const observer = new MutationObserver(() => {
       if (!contentOverflows(group)) return;
-      setFit((prev) => ({ ...prev }));
+      // At the last step there is nothing left to give up, so no re-render:
+      // a re-render touches the watched content itself (React re-applies an
+      // <input>'s `name` / `type` on every update), and the group can stay
+      // over its width at the last step (it clips) — re-rendering here would
+      // feed this observer forever.
+      setFit((prev) => (prev.step >= maxStep ? prev : { ...prev }));
     });
     observer.observe(watchedContent, {
       childList: true,
@@ -140,7 +145,7 @@ function useFitSteps(
       attributes: true,
     });
     return () => observer.disconnect();
-  }, [groupRef, watchedContent]);
+  }, [groupRef, watchedContent, maxStep]);
 
   return Math.min(current.step, maxStep);
 }

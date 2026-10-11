@@ -599,8 +599,14 @@ export const TerminalSplitPane = memo(function TerminalSplitPane({
   useEffect(() => {
     setNoteEditing(false);
   }, [worktreeId, instanceId]);
+  // Seeded with the saved note only when a CLOSED editor opens: pressing the
+  // edit entry (or the menu item) again while typing keeps what is typed, as
+  // the phone's editor does (it stays mounted with its own value).
+  const noteEditingRef = useRef(noteEditing);
+  noteEditingRef.current = noteEditing;
   const openNoteEditor = useCallback(() => {
-    setNoteDraft(sessionNoteText);
+    if (!noteEditingRef.current) setNoteDraft(sessionNoteText);
+    noteEditingRef.current = true;
     setNoteEditing(true);
   }, [sessionNoteText]);
   const closeNoteEditor = useCallback(() => setNoteEditing(false), []);
@@ -624,6 +630,12 @@ export const TerminalSplitPane = memo(function TerminalSplitPane({
   // its overflow ("does not fit") — the fit would fold the controls, and the
   // editor with them, the moment it opened. A fixed box is not part of any
   // ancestor's overflow; it stays in the slot's DOM, and so in the split's.
+  // Placed before paint whenever the controls change place (the slots: inline,
+  // parked hidden, the "…" panel), then followed once per frame while open —
+  // the anchor moves without anything resizing (the bar's fit, a label left of
+  // it), as the Verification reason popover follows its chip. While the anchor
+  // is hidden (parked) there is no position: none is carried into the next
+  // place it is shown.
   const barSessionRef = useRef<HTMLDivElement | null>(null);
   const [barNotePosition, setBarNotePosition] = useState<{ top: number; left: number } | null>(
     null,
@@ -633,19 +645,33 @@ export const TerminalSplitPane = memo(function TerminalSplitPane({
       setBarNotePosition(null);
       return;
     }
+    let frame = 0;
     const place = () => {
-      const rect = barSessionRef.current?.getBoundingClientRect();
-      if (!rect) return;
+      const anchor = barSessionRef.current;
+      const rect = anchor?.getBoundingClientRect();
+      // Hidden (display: none, so no client rects) or gone: no position.
+      if (!anchor || !rect || anchor.getClientRects().length === 0) {
+        setBarNotePosition((prev) => (prev === null ? prev : null));
+        return;
+      }
+      const top = rect.bottom + 4;
       const left = Math.max(
         BAR_NOTE_EDITOR_MARGIN,
         Math.min(rect.left, window.innerWidth - BAR_NOTE_EDITOR_WIDTH - BAR_NOTE_EDITOR_MARGIN),
       );
-      setBarNotePosition({ top: rect.bottom + 4, left });
+      setBarNotePosition((prev) =>
+        prev && prev.top === top && prev.left === left ? prev : { top, left },
+      );
+    };
+    const follow = () => {
+      place();
+      frame = window.requestAnimationFrame(follow);
     };
     place();
-    window.addEventListener('resize', place);
-    return () => window.removeEventListener('resize', place);
-  }, [noteEditing, inActionBar]);
+    frame = window.requestAnimationFrame(follow);
+    return () => window.cancelAnimationFrame(frame);
+    // `headerSlots`: a new slot is a new place, measured before paint.
+  }, [noteEditing, inActionBar, headerSlots]);
 
   // Whether drag-drop is active for this pane (the parent wired a handler).
   const dropEnabled = onDropInstance != null;

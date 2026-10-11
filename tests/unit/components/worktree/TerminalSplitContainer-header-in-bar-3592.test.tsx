@@ -11,11 +11,12 @@
 
 import React, { useEffect } from 'react';
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, within, act } from '@testing-library/react';
+import { render, screen, fireEvent, within, act, waitFor } from '@testing-library/react';
 import { TerminalSplitContainer } from '@/components/worktree/TerminalSplitContainer';
 import { TerminalSplitPane } from '@/components/worktree/TerminalSplitPane';
 import { clearTerminalSplitsLocalStorage } from '@tests/helpers/terminal-splits';
 import { installRadixJsdomPolyfills } from '@tests/helpers/radix-jsdom';
+import { VerificationStatusChip } from '@/components/worktree/VerificationStatusChip';
 import type { AgentInstance } from '@/lib/cli-tools/types';
 
 beforeAll(() => installRadixJsdomPolyfills());
@@ -27,9 +28,12 @@ const INSTANCES: AgentInstance[] = [
 
 /** How many times each split's content mounted, by split index. */
 let mounts: Record<number, number> = {};
+/** How many times split 0's content rendered (any reason). */
+let bodyRenders = 0;
 
 /** Stands in for the split's content: counts its mounts, holds a draft. */
 function PaneBody({ splitIndex }: { splitIndex: number }) {
+  if (splitIndex === 0) bodyRenders += 1;
   useEffect(() => {
     mounts[splitIndex] = (mounts[splitIndex] ?? 0) + 1;
   }, [splitIndex]);
@@ -422,5 +426,313 @@ describe('[#3592] the moved controls are part of the bar\'s width fit', () => {
       await Promise.resolve();
     });
     expect(screen.getByTestId('split-action-bar-items-overflow')).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Third contract (Codex re-review: P2 x4)
+// ---------------------------------------------------------------------------
+
+/**
+ * A width model for the bar (jsdom has no layout), as above, now also counting
+ * the real Verification chip while it is in the left group, and placing the
+ * session controls: in the "…" panel at x=40, hidden (no client rects) while
+ * parked, and at `anchorLeft` on the bar.
+ */
+const LAYOUT_OPS_PX = 160;
+const CHIP_PX = 200;
+const longModel = 'claude-opus-with-a-very-long-model-identifier';
+let leftPx = 2000;
+let anchorLeft = 500;
+const saved = {
+  scroll: Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollWidth'),
+  client: Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth'),
+  rect: Element.prototype.getBoundingClientRect,
+  rects: Element.prototype.getClientRects,
+};
+
+function installWidthModel(): void {
+  leftPx = 2000;
+  anchorLeft = 500;
+  Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
+    configurable: true,
+    get(this: HTMLElement) {
+      return this.getAttribute('data-testid') === 'split-action-bar-left' ? leftPx : 0;
+    },
+  });
+  Object.defineProperty(HTMLElement.prototype, 'scrollWidth', {
+    configurable: true,
+    get(this: HTMLElement) {
+      if (this.getAttribute('data-testid') !== 'split-action-bar-left') return 0;
+      const session = this.querySelector('[data-testid="split-bar-session-0"]');
+      const model = session?.querySelector('[data-testid="split-agent-model-0"]')?.textContent ?? '';
+      return (
+        LAYOUT_OPS_PX +
+        (session ? 200 + model.length * 6 : 0) +
+        (this.querySelector('[data-testid="verification-status-chip"]') ? CHIP_PX : 0)
+      );
+    },
+  });
+  Element.prototype.getBoundingClientRect = function (this: Element) {
+    if (this.getAttribute('data-testid') !== 'split-bar-session-0') return saved.rect.call(this);
+    const inPanel = this.closest('[data-testid="split-action-bar-items-panel"]') !== null;
+    const left = inPanel ? 40 : anchorLeft;
+    const bottom = inPanel ? 120 : 36;
+    return { left, right: left + 100, top: bottom - 30, bottom, width: 100, height: 30, x: left, y: bottom - 30, toJSON: () => ({}) } as DOMRect;
+  };
+  Element.prototype.getClientRects = function (this: Element) {
+    if (this.getAttribute('data-testid') !== 'split-bar-session-0') return saved.rects.call(this);
+    return (this.closest('[hidden]') ? [] : [this.getBoundingClientRect()]) as unknown as DOMRectList;
+  };
+}
+
+function restoreWidthModel(): void {
+  if (saved.scroll) Object.defineProperty(HTMLElement.prototype, 'scrollWidth', saved.scroll);
+  if (saved.client) Object.defineProperty(HTMLElement.prototype, 'clientWidth', saved.client);
+  Element.prototype.getBoundingClientRect = saved.rect;
+  Element.prototype.getClientRects = saved.rects;
+}
+
+function barTree(model: string, withChip = true) {
+  return (
+    <TerminalSplitContainer
+      worktreeId="w-3592"
+      instances={INSTANCES}
+      actionBarItems={
+        withChip ? (
+          <VerificationStatusChip task={null} latestRun={null} onOpen={vi.fn()} popover="floating" />
+        ) : undefined
+      }
+      renderPane={({ splitIndex, cliToolId, instanceId, instance, availableInstances, onInstanceChange, onFocus }) => (
+        <TerminalSplitPane
+          worktreeId="w-3592"
+          splitIndex={splitIndex}
+          cliToolId={cliToolId}
+          instanceId={instanceId}
+          instance={instance}
+          availableInstances={availableInstances}
+          onInstanceChange={onInstanceChange}
+          onFocus={onFocus}
+          agentModel={model}
+          terminal={<PaneBody splitIndex={splitIndex} />}
+          footer={<div />}
+        />
+      )}
+    />
+  );
+}
+
+/** Narrow the bar and let the split's controls change: the fit folds. */
+async function foldBy(rerender: (ui: React.ReactElement) => void, withChip = true): Promise<void> {
+  leftPx = 300;
+  rerender(barTree(longModel, withChip));
+  await act(async () => {
+    await Promise.resolve();
+  });
+  expect(screen.getByTestId('split-action-bar-items-overflow')).toBeInTheDocument();
+}
+
+describe('[#3592] pressing the note entry again keeps what is typed', () => {
+  beforeEach(() => clearTerminalSplitsLocalStorage());
+  afterEach(() => clearTerminalSplitsLocalStorage());
+
+  it('keeps the draft when the bar\'s edit entry is pressed again (positive)', () => {
+    renderContainer();
+    fireEvent.click(screen.getByTestId('split-session-note-edit-0'));
+    fireEvent.change(screen.getByTestId('split-session-note-input-0'), {
+      target: { value: 'half a note' },
+    });
+    fireEvent.click(screen.getByTestId('split-session-note-edit-0'));
+    expect((screen.getByTestId('split-session-note-input-0') as HTMLInputElement).value).toBe(
+      'half a note',
+    );
+  });
+
+  it('keeps the draft when the selector menu\'s item is chosen again (positive)', async () => {
+    renderContainer();
+    fireEvent.click(screen.getByTestId('split-session-note-edit-0'));
+    fireEvent.change(screen.getByTestId('split-session-note-input-0'), {
+      target: { value: 'half a note' },
+    });
+    const trigger = screen.getByTestId('cli-selector-0');
+    fireEvent.keyDown(trigger, { key: 'Enter' });
+    fireEvent.click(await screen.findByTestId('split-session-note-menu-item-0'));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect((screen.getByTestId('split-session-note-input-0') as HTMLInputElement).value).toBe(
+      'half a note',
+    );
+  });
+
+  it('starts from the saved note when a closed editor opens (negative)', () => {
+    renderContainer();
+    fireEvent.click(screen.getByTestId('split-session-note-edit-0'));
+    const input = screen.getByTestId('split-session-note-input-0');
+    fireEvent.change(input, { target: { value: 'dropped' } });
+    fireEvent.keyDown(input, { key: 'Escape' });
+    fireEvent.click(screen.getByTestId('split-session-note-edit-0'));
+    expect((screen.getByTestId('split-session-note-input-0') as HTMLInputElement).value).toBe('');
+  });
+});
+
+describe('[#3592] the Verification reason stays open when the chip changes place', () => {
+  beforeEach(() => {
+    clearTerminalSplitsLocalStorage();
+    installWidthModel();
+  });
+  afterEach(() => {
+    restoreWidthModel();
+    clearTerminalSplitsLocalStorage();
+  });
+
+  it('keeps it open through inline -> "…" (positive)', async () => {
+    const { rerender } = render(barTree('m'));
+    fireEvent.click(screen.getByTestId('verification-chip-reason-toggle'));
+    expect(screen.getByTestId('verification-chip-reason-popover')).toBeInTheDocument();
+
+    await foldBy(rerender);
+    fireEvent.click(screen.getByTestId('split-action-bar-items-overflow'));
+    const panel = screen.getByTestId('split-action-bar-items-panel');
+    expect(within(panel).getByTestId('verification-chip-reason-toggle')).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    );
+    expect(screen.getByTestId('verification-chip-reason-popover')).toBeInTheDocument();
+  });
+
+  it('keeps it open through a split count change while folded (positive)', async () => {
+    const { rerender } = render(barTree('m'));
+    await foldBy(rerender);
+    fireEvent.click(screen.getByTestId('split-action-bar-items-overflow'));
+    fireEvent.click(screen.getByTestId('verification-chip-reason-toggle'));
+    expect(screen.getByTestId('verification-chip-reason-popover')).toBeInTheDocument();
+
+    // A click (no press): the reason has no "outside" to see. The count re-keys
+    // the fit, which starts over from the bar (the "…" panel closes) and folds
+    // again — the chip goes inline and back without being re-created.
+    fireEvent.click(screen.getByTestId('split-layout-2'));
+    expect(screen.getByTestId('split-layout-2')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('verification-chip-reason-popover')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('split-action-bar-items-overflow'));
+    expect(
+      within(screen.getByTestId('split-action-bar-items-panel')).getByTestId(
+        'verification-chip-reason-toggle',
+      ),
+    ).toHaveAttribute('aria-expanded', 'true');
+  });
+
+  it('keeps the chip in the bar, in its 360px box, while it fits (negative)', () => {
+    render(barTree('m'));
+    const items = screen.getByTestId('split-action-bar-items');
+    expect(items.parentElement).toBe(screen.getByTestId('split-action-bar-left'));
+    expect(items.className).toContain('w-[360px]');
+    expect(within(items).getByTestId('verification-status-chip')).toBeInTheDocument();
+    expect(screen.queryByTestId('split-action-bar-items-overflow')).toBeNull();
+  });
+});
+
+describe('[#3592] the bar\'s note editor follows its place', () => {
+  beforeEach(() => {
+    clearTerminalSplitsLocalStorage();
+    installWidthModel();
+  });
+  afterEach(() => {
+    restoreWidthModel();
+    clearTerminalSplitsLocalStorage();
+  });
+
+  const editor = () => screen.getByTestId('split-session-note-editor-0');
+
+  it('opens under the controls (negative)', () => {
+    render(barTree('m', false));
+    fireEvent.click(screen.getByTestId('split-session-note-edit-0'));
+    expect(editor().style.left).toBe('500px');
+    expect(editor().style.top).toBe('40px');
+  });
+
+  it('follows the controls when they move on the bar (positive)', async () => {
+    render(barTree('m', false));
+    fireEvent.click(screen.getByTestId('split-session-note-edit-0'));
+    anchorLeft = 260;
+    await waitFor(() => expect(editor().style.left).toBe('260px'));
+  });
+
+  it('is placed afresh in the "…" panel, not where it was before it was parked (positive)', async () => {
+    const { rerender } = render(barTree('m', false));
+    fireEvent.click(screen.getByTestId('split-session-note-edit-0'));
+    expect(editor().style.left).toBe('500px');
+
+    await foldBy(rerender, false);
+    fireEvent.click(screen.getByTestId('split-action-bar-items-overflow'));
+    // Synchronously: before paint, in the same commit as the move.
+    expect(editor().style.left).toBe('40px');
+    expect(editor().style.top).toBe('124px');
+  });
+});
+
+describe('[#3592] Escape in the folded selector\'s menu closes the menu only', () => {
+  beforeEach(() => {
+    clearTerminalSplitsLocalStorage();
+    installWidthModel();
+  });
+  afterEach(() => {
+    restoreWidthModel();
+    clearTerminalSplitsLocalStorage();
+  });
+
+  it('keeps the "…" panel open (positive)', async () => {
+    const { rerender } = render(barTree('m'));
+    await foldBy(rerender);
+    fireEvent.click(screen.getByTestId('split-action-bar-items-overflow'));
+    const trigger = within(screen.getByTestId('split-action-bar-items-panel')).getByTestId(
+      'cli-selector-0',
+    );
+    fireEvent.keyDown(trigger, { key: 'Enter' });
+    const item = await screen.findByTestId('split-session-note-menu-item-0');
+    fireEvent.keyDown(item, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByTestId('split-session-note-menu-item-0')).toBeNull());
+    expect(screen.getByTestId('split-action-bar-items-panel')).toBeInTheDocument();
+  });
+
+  it('closes the panel on an Escape in the panel itself (negative)', async () => {
+    const { rerender } = render(barTree('m'));
+    await foldBy(rerender);
+    fireEvent.click(screen.getByTestId('split-action-bar-items-overflow'));
+    fireEvent.keyDown(screen.getByTestId('cli-selector-0'), { key: 'Escape' });
+    expect(screen.queryByTestId('split-action-bar-items-panel')).toBeNull();
+  });
+});
+
+describe('[#3592] the fit settles while the note editor is open', () => {
+  beforeEach(() => {
+    clearTerminalSplitsLocalStorage();
+    installWidthModel();
+  });
+  afterEach(() => {
+    restoreWidthModel();
+    clearTerminalSplitsLocalStorage();
+  });
+
+  it('stops re-rendering at the last step, though the bar still does not fit (positive)', async () => {
+    const { rerender } = render(barTree('m', false));
+    await foldBy(rerender, false);
+    // Narrower than the layout ops alone: every step is used and it still
+    // overflows (the group clips).
+    leftPx = 50;
+    fireEvent.click(screen.getByTestId('split-action-bar-items-overflow'));
+    fireEvent.click(screen.getByTestId('split-session-note-edit-0'));
+    fireEvent.change(screen.getByTestId('split-session-note-input-0'), {
+      target: { value: 'x' },
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect(screen.getByTestId('split-action-bar-left').className).toContain('overflow-x-clip');
+    const settled = bodyRenders;
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    });
+    expect(bodyRenders - settled).toBeLessThanOrEqual(2);
   });
 });
