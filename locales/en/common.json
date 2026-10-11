@@ -110,6 +110,8 @@
     "retryLoadBranches": "Retry",
     "dragToReorderGroup": "Drag to reorder group",
     "viewLabel": "View",
+    "listOptionsLabel": "View and sort ({summary})",
+    "listOptionsSummary": "{view} · {sort} · {direction}",
     "needsAttention": "Needs attention",
     "openInReview": "Open in Review",
     "attentionMoreInReview": "+{count} more in Review",
@@ -179,6 +181,7 @@
     "descending": "Sort descending",
     "ascShort": "ASC",
     "descShort": "DESC",
+    "directionLabel": "Order",
     "direction": {
       "newestFirst": "Newest first",
       "oldestFirst": "Oldest first",

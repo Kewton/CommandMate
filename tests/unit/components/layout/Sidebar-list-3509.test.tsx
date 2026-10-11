@@ -4,11 +4,12 @@
  *
  * @vitest-environment jsdom
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest';
 import { render, screen, waitFor, fireEvent, within } from '@testing-library/react';
 import React from 'react';
 import type { Worktree } from '@/types/models';
 import type { RepositorySummary } from '@/lib/api-client';
+import { installRadixJsdomPolyfills } from '@tests/helpers/radix-jsdom';
 
 vi.mock('next-intl', async () => {
   const { createRealIntlMock } = await import('@tests/helpers/real-intl');
@@ -250,6 +251,9 @@ describe('"Other" for detached worktrees (Issue #3509)', () => {
 });
 
 describe('List toolbar (Issue #3509)', () => {
+  // Issue #3575: View / Sort sit in a Radix menu behind the toolbar's icon.
+  beforeAll(() => installRadixJsdomPolyfills());
+
   const WORKTREES: Worktree[] = [
     wt({ id: 'a', name: 'feature/alpha', agentInstances: [{ id: 'claude', cliTool: 'claude', order: 0 }], sessionStatusByInstance: {} }),
     wt({ id: 'b', name: 'feature/beta', agentInstances: [{ id: 'claude', cliTool: 'claude', order: 0 }], sessionStatusByInstance: {} }),
@@ -258,13 +262,15 @@ describe('List toolbar (Issue #3509)', () => {
   it('holds the filter, View and Sort outside the header and outside any group heading', async () => {
     renderSidebar(WORKTREES);
 
+    // Issue #3575: View and Sort are both behind the toolbar's one icon.
     const toolbar = await screen.findByTestId('sidebar-list-toolbar');
-    expect(toolbar).toContainElement(screen.getByTestId('view-mode-select'));
-    expect(toolbar).toContainElement(screen.getByTestId('sort-selector-base'));
+    const options = screen.getByTestId('sidebar-list-options');
+    expect(toolbar).toContainElement(options);
+    expect(options).toHaveAccessibleName(/^View and sort \(Repository · Updated · Newest first\)$/);
     expect(toolbar).toContainElement(screen.getByPlaceholderText('Search branches...'));
-    expect(screen.getByTestId('sidebar-header')).not.toContainElement(screen.getByTestId('view-mode-select'));
+    expect(screen.getByTestId('sidebar-header')).not.toContainElement(options);
     for (const header of screen.getAllByTestId('group-header')) {
-      expect(header).not.toContainElement(screen.getByTestId('view-mode-select'));
+      expect(header).not.toContainElement(options);
     }
   });
 
@@ -277,14 +283,16 @@ describe('List toolbar (Issue #3509)', () => {
     renderSidebar(WORKTREES);
 
     await waitFor(() => expect(screen.getAllByTestId(rowTestId)).toHaveLength(2));
-    expect(screen.getByTestId('view-mode-select')).toHaveValue(mode);
-    expect(screen.getByRole('button', { name: /^Sort by/ })).toBeInTheDocument();
+    const options = screen.getByTestId('sidebar-list-options');
+    expect(options).toHaveAttribute('data-view-mode', mode);
+    expect(options).toHaveAccessibleName(/· Updated · Newest first\)$/);
 
     fireEvent.change(screen.getByPlaceholderText('Search branches...'), { target: { value: 'beta' } });
     await waitFor(() => expect(screen.getAllByTestId(rowTestId)).toHaveLength(1));
 
     const next = mode === 'flat' ? 'sessions' : 'flat';
-    fireEvent.change(screen.getByTestId('view-mode-select'), { target: { value: next } });
+    fireEvent.keyDown(options, { key: 'Enter' });
+    fireEvent.click(screen.getByRole('menuitemradio', { name: next === 'sessions' ? 'Session' : 'Branch' }));
     await waitFor(() => {
       expect(screen.getAllByTestId(next === 'sessions' ? 'session-list-item' : 'branch-list-item')).toHaveLength(1);
     });

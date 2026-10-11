@@ -1,9 +1,11 @@
 /**
- * SidebarListToolbar Component (Issue #3509)
+ * SidebarListToolbar Component (Issue #3509, #3575)
  *
- * The toolbar above the sidebar's branch list: the filter field, then View
- * (Grouped / Flat / Sessions) and Sort. All three apply to every view, which is
- * why they sit here once rather than on a repository heading.
+ * The toolbar above the sidebar's branch list. Issue #3575: one row — the
+ * filter field, then the filter icon that opens View (Repository / Branch /
+ * Session) and Sort in a small menu ({@link SidebarListOptionsMenu}). All of it
+ * applies to every view, which is why it sits here once rather than on a
+ * repository heading.
  *
  * The filter stays a plain field that narrows the list in place; ⌘K (the
  * command palette) is for jumping somewhere and does not replace it.
@@ -11,11 +13,10 @@
 
 'use client';
 
-import React, { memo, useId } from 'react';
+import React, { memo } from 'react';
 import { useTranslations } from 'next-intl';
 import { Input } from '@/components/ui';
-import { SortSelector } from '@/components/sidebar/SortSelector';
-import { isValidViewMode } from '@/lib/sidebar-utils';
+import { SidebarListOptionsMenu } from '@/components/sidebar/SidebarListOptionsMenu';
 import type { ViewMode } from '@/lib/sidebar-utils';
 
 /** Props for SidebarListToolbar */
@@ -39,65 +40,24 @@ export const SidebarListToolbar = memo(function SidebarListToolbar({
   const t = useTranslations('common');
 
   return (
-    <div data-testid="sidebar-list-toolbar" className="flex-shrink-0 space-y-2 px-3 pt-3 pb-2">
-      {/* Issue #1073: use the Input primitive defaults (border-input, semantic
-          text/placeholder) instead of the old gray overrides. Only bg-background
-          is kept so the field stays distinct from the light slate-50 sidebar
-          panel (in dark the primitive's recessed surface already contrasts). */}
+    <div
+      data-testid="sidebar-list-toolbar"
+      className="flex flex-shrink-0 items-center gap-1 px-3 pt-2 pb-1.5"
+    >
+      {/* Issue #1073: semantic Input primitive; bg-background keeps the field
+          distinct from the light slate-50 sidebar panel. Issue #3575: the
+          32px size and the lighter sidebar border so the row reads as a
+          filter, not a settings form. */}
       <Input
         type="text"
+        inputSize="sm"
         placeholder={t('sidebar.searchBranches')}
+        aria-label={t('sidebar.searchBranches')}
         value={searchQuery}
         onChange={(e) => onSearchChange(e.target.value)}
-        className="bg-background shadow-none"
+        className="min-w-0 flex-1 border-sidebar-border bg-background shadow-none"
       />
-      <div
-        data-testid="sidebar-list-controls"
-        className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-2 gap-y-1.5 px-1"
-      >
-        <ViewModeSelect viewMode={viewMode} onChange={onViewModeChange} />
-        <span className="whitespace-nowrap text-xs text-sidebar-muted">{t('sort.label')}</span>
-        <SortSelector />
-      </div>
+      <SidebarListOptionsMenu viewMode={viewMode} onViewModeChange={onViewModeChange} />
     </div>
   );
 });
-
-/**
- * View mode select (Issue #2648): the list layout as words instead of an icon.
- * Renders two cells of the controls grid — the label and the select.
- */
-function ViewModeSelect({
-  viewMode,
-  onChange,
-}: {
-  viewMode: ViewMode;
-  onChange: (mode: ViewMode) => void;
-}) {
-  const t = useTranslations('common');
-  const selectId = useId();
-
-  return (
-    <>
-      <label htmlFor={selectId} className="whitespace-nowrap text-xs text-sidebar-muted">
-        {t('sidebar.viewLabel')}
-      </label>
-      <select
-        id={selectId}
-        data-testid="view-mode-select"
-        value={viewMode}
-        onChange={(event) => {
-          const next = event.target.value;
-          // The <select> can only emit the values rendered below; the guard is
-          // for the type.
-          if (isValidViewMode(next)) onChange(next);
-        }}
-        className="w-full min-w-0 truncate rounded border border-sidebar-border bg-sidebar px-1.5 py-1 text-xs text-sidebar-foreground hover:bg-sidebar-hover focus:outline-none focus:ring-2 focus:ring-ring"
-      >
-        <option value="grouped">{t('sidebar.viewMode.grouped')}</option>
-        <option value="flat">{t('sidebar.viewMode.flat')}</option>
-        <option value="sessions">{t('sidebar.viewMode.sessions')}</option>
-      </select>
-    </>
-  );
-}
