@@ -537,7 +537,9 @@ export function useTerminalSplits(
     // count too. A `maximizedIndex` pointing past the end would hide EVERY
     // remaining split, so it is dropped rather than clamped to a neighbour.
     setMaximizedIndex(prev =>
-      prev !== null && prev > config.splits.length - 1 ? null : prev,
+      prev !== null && (prev > config.splits.length - 1 || config.splits.length <= 1)
+        ? null
+        : prev,
     );
   }, [config.splits.length]);
 
@@ -636,8 +638,11 @@ export function useTerminalSplits(
   // one toggle rather than a maximize()/restore() pair. Reads the live split
   // count through `configRef` (not `config`) to stay referentially stable.
   const toggleMaximize = useCallback((idx: number) => {
-    if (idx < 0 || idx >= configRef.current.splits.length) return;
-    setMaximizedIndex(prev => (prev === idx ? null : idx));
+    const count = configRef.current.splits.length;
+    if (idx < 0 || idx >= count) return;
+    // Issue #3612: with a single split there is nothing to hide, so entering
+    // the state would only show "split 1 maximized". Restoring stays allowed.
+    setMaximizedIndex(prev => (prev === idx ? null : count <= 1 ? prev : idx));
   }, []);
 
   return {

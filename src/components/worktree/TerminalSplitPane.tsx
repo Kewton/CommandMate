@@ -512,6 +512,12 @@ export interface TerminalSplitPaneProps {
    */
   onToggleMaximize?: () => void;
   /**
+   * Issue #3612: a lone split cannot be maximized. Disables (keeps in place,
+   * `aria-disabled`) the maximize entries; an already-maximized split can
+   * still be restored.
+   */
+  maximizeDisabled?: boolean;
+  /**
    * Issue #3514: draw the accent frame that marks the selected split. The
    * container sets it only for the focused split, and only while more than one
    * split is open. Defaults to false (no frame), the pre-#3514 look.
@@ -560,6 +566,7 @@ export const TerminalSplitPane = memo(function TerminalSplitPane({
   onSurfaceModeChange,
   isMaximized = false,
   onToggleMaximize,
+  maximizeDisabled = false,
   showFocusFrame = false,
   onEndSession,
   terminal,
@@ -1041,6 +1048,8 @@ export const TerminalSplitPane = memo(function TerminalSplitPane({
           <button
             type="button"
             onClick={onToggleMaximize}
+            disabled={maximizeDisabled && !isMaximized}
+            aria-disabled={maximizeDisabled && !isMaximized}
             aria-pressed={isMaximized}
             aria-label={
               isMaximized
@@ -1076,6 +1085,7 @@ export const TerminalSplitPane = memo(function TerminalSplitPane({
             <DropdownMenuItem
               data-testid={`split-more-maximize-${splitIndex}`}
               onSelect={onToggleMaximize}
+              disabled={maximizeDisabled && !isMaximized}
             >
               {isMaximized ? (
                 <Minimize2 size={14} aria-hidden="true" className="opacity-70" />

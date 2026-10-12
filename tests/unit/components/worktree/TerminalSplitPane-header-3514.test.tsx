@@ -129,3 +129,21 @@ describe('[#3514] desktop header "+" slot', () => {
     expect(screen.getByTestId('desktop-agent-status-row')).toBeInTheDocument();
   });
 });
+
+describe('[#3612] maximize entries with a lone split', () => {
+  it('disables the "…" maximize item (kept in place) and does not call back', () => {
+    const onToggleMaximize = vi.fn();
+    renderPane({ onToggleMaximize, maximizeDisabled: true });
+    openMoreMenu();
+    const item = screen.getByTestId('split-more-maximize-0');
+    expect(item).toHaveAttribute('aria-disabled', 'true');
+    fireEvent.click(item);
+    expect(onToggleMaximize).not.toHaveBeenCalled();
+  });
+
+  it('keeps the item enabled when maximizing is allowed (negative control)', () => {
+    renderPane({ onToggleMaximize: vi.fn(), maximizeDisabled: false });
+    openMoreMenu();
+    expect(screen.getByTestId('split-more-maximize-0')).not.toHaveAttribute('aria-disabled');
+  });
+});
