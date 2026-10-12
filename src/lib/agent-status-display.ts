@@ -29,57 +29,6 @@ export interface HeaderInstanceItem<T> {
 }
 
 /**
- * An instance renders as a labelled pill when it is the active tab or is
- * actively working; otherwise it collapses to an icon-only dot.
- */
-export function isLabeledInstance<T>(it: HeaderInstanceItem<T>): boolean {
-  return it.isActive || isWorkingStatus(it.status);
-}
-
-/** Where a classified instance is rendered in the header row. */
-export type HeaderInstanceSlot = 'pill' | 'dot' | 'overflow';
-
-export interface ClassifiedHeaderInstance<T> extends HeaderInstanceItem<T> {
-  slot: HeaderInstanceSlot;
-}
-
-/**
- * Classify each instance into pill / dot / overflow, preserving the original
- * roster order for the visible items.
- *
- * - `dot`: idle / ready instances — always visible (dots are narrow).
- * - `pill`: labelled instances (active or working). At most `maxPills` stay
- *   visible; the active tab is kept preferentially, then roster order.
- * - `overflow`: labelled instances beyond `maxPills` — surfaced via the "+N" menu.
- *
- * @param items     instances in roster order
- * @param maxPills  max labelled pills to keep inline (<=0 collapses all pills)
- */
-export function classifyHeaderInstances<T>(
-  items: HeaderInstanceItem<T>[],
-  maxPills: number,
-): ClassifiedHeaderInstance<T>[] {
-  const labeledIndices = items
-    .map((it, index) => ({ it, index }))
-    .filter(({ it }) => isLabeledInstance(it));
-
-  const pillKeep = new Set<number>();
-  if (maxPills > 0 && labeledIndices.length > 0) {
-    const ranked = [...labeledIndices].sort(
-      (a, b) => Number(b.it.isActive) - Number(a.it.isActive) || a.index - b.index,
-    );
-    ranked.slice(0, maxPills).forEach(({ index }) => pillKeep.add(index));
-  }
-
-  return items.map((it, index) => {
-    if (!isLabeledInstance(it)) {
-      return { ...it, slot: 'dot' as const };
-    }
-    return { ...it, slot: pillKeep.has(index) ? ('pill' as const) : ('overflow' as const) };
-  });
-}
-
-/**
  * Issue #3593: the header's session field is [current session][N others ▾][+].
  *
  * The current session is the one the selected split shows — the worktree
