@@ -370,15 +370,25 @@ Useful for recording work details and TODOs.
 
 ## Agent Settings
 
-Select which CLI agents to use for each worktree.
+Each worktree has its own list of CLI agent sessions (instances).
+The same agent can appear more than once under different names (e.g. "Claude" and "Claude review").
 
-### How to Configure
+### Adding One (PC)
 
 1. Select a worktree
-2. Click the **"CMATE"** tab
-3. Click the **"Agent"** sub-tab
-4. Select **2** agents using the checkboxes
-5. Settings are saved automatically
+2. Click the **[+]** at the right end of the header's session field ([current session][N others ▾])
+   ("Add session…" in the [N others ▾] list opens the same form)
+3. Choose the agent (installed ones), a name (optional) and **where to open it** (a new split / replace the current split / add only), then click **[Add]**
+4. Adding does not start a session: it starts when you send the first message from that split
+
+Rename, reorder and delete in the **"Agent"** tool at the right of the header.
+
+### Adding and Managing (Mobile)
+
+1. Tap the **"CMATE"** tab
+2. Tap the **"Agent"** sub-tab
+3. Add with **"Add instance"** below the list; rename, reorder and delete on each row
+4. Settings are saved automatically
 
 ### Available Agents
 
@@ -394,11 +404,11 @@ Select which CLI agents to use for each worktree.
 | **Antigravity** | Antigravity CLI (`agy`) |
 | **Command Code** | Command Code CLI (`commandcode`, Issue #2250) |
 
-- You must always select exactly **2** agents
+- A branch holds **1 to 10** of them (the last one cannot be deleted)
 - **Auto Yes behaves differently per agent.** Command Code / Gemini / Vibe-Local only have
   the screen-based route (the dialog is drawn once, then answered automatically). See
   [Approval Routes Differ by Agent](#approval-routes-differ-by-agent)
-- The selected agents' sessions appear in the session field of the header ([current session][N others ▾])
+- These sessions appear in the session field of the header ([current session][N others ▾])
 
 ### Ollama Model Selection (Vibe-Local)
 

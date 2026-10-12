@@ -55,7 +55,8 @@
    Mission の「誰でも」に対しては、CLI を開かない運用者にとって CLI だけの判定は
    サーバーログと同じ「深い層」である。したがって新しい判定・抑止・自動アクションは、
    CLI の stdout（規約 1・2）に加えて **Web UI にも露出する**。
-   現在の Web UI 側の受け皿は worktree ヘッダの状態チップと Verification ペイン
+   現在の Web UI 側の受け皿は worktree 画面 2 段目（アクションバー）の Verification の札
+   （`src/components/worktree/VerificationStatusChip.tsx`。モバイルはヘッダーの下の帯）と Verification ペイン
    （`src/components/worktree/VerificationPane.tsx`）であり、**理由**も
    `aria-label` / tooltip とゲート表に出す。
    露出先を増やせない事情がある場合は、その理由を Issue と設計書に書き残す。
@@ -77,7 +78,7 @@
 | `--stop-pattern` の照合対象と限界 | `auto-yes` / `send` の `--help`、`commandmate docs agent-operations`、cli-operations-guide.md | #1682 / PR #1687 で対応済み |
 | `wait` のプロンプト検出ペイロード | exit 10 と同時に `WaitPromptOutput` JSON を stdout へ出力（`src/cli/commands/wait.ts`）。selection_list 型は `type: selection_list` ＋ `question` に `sessionStatusReason` を載せ、`options: []` が仕様であることを判別可能 | 準拠済み（実装規約 2 の準拠例） |
 | verify の GATE 行の report 転記 | commandmate-skills 側 dispatch report にゲート結果を転記 | commandmate-skills#47 / skills PR #48 で対応済み |
-| 実行契約と検証ランの Web UI 露出 | worktree ヘッダの状態チップ（task title / TaskStatus / 直近ランの RESULT、理由は `aria-label` と tooltip）＋ Verification ペイン（契約・ラン一覧・ゲート表・logTail 末尾 40 行） | #1816 で対応済み（規約 5 の準拠例） |
+| 実行契約と検証ランの Web UI 露出 | worktree 画面 2 段目の Verification の札（`VerificationStatusChip`。task title / TaskStatus / 直近ランの RESULT、理由は `aria-label` と tooltip）＋ Verification ペイン（契約・ラン一覧・ゲート表・logTail 末尾 40 行） | #1816 で対応済み（規約 5 の準拠例） |
 | stop-pattern 発火の事実 | `capture --json` の `autoYes.stopReason`（`stop_pattern_matched`。`src/lib/session/current-output-builder.ts` が露出） | #314 で対応済み（マッチ内容は #1694 で追加） |
 | stop-pattern 発火時に**何にマッチしたか** | `capture --json` の `autoYes.stopMatchedText`（マッチ行＋前後 `STOP_MATCH_EXCERPT_CONTEXT_LINES`=1 行の抜粋。`checkStopCondition`（`src/lib/auto-yes-state.ts`）が発火時のみ状態に保存し、`stopReason` 以外の disable 経路では持ち越さない。上限 `STOP_MATCH_EXCERPT_MAX_BYTES`=400 UTF-8 バイトで切り詰め、切り詰めた場合は末尾に `…[truncated]` を付けるので「これが全部」と読み違えない） | #1694 で対応済み |
 | プロンプト dedup スキップ | `capture --json` の `promptDedup`（`skippedCount` / `lastSkippedAt`。`src/lib/polling/prompt-dedup-state.ts` が記録し `src/lib/session/current-output-builder.ts` が露出）。`skippedCount > 0` かつ `lastSkippedAt` が直近なら dedup が原因、`0` なら検出漏れ（#1676）側 | #1695 で対応済み（response 側 dedup `isDuplicateResponse` はサーバーログ `duplicate-response-skipped` のみ — 下記注記参照） |

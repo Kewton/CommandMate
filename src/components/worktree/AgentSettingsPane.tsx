@@ -1,11 +1,15 @@
 /**
  * AgentSettingsPane Component
  *
- * UI for selecting the CLI tools used in a worktree.
- * Renders `availableAgents` as checkboxes, capped at `maxAgents` selections
- * (PC: 6, mobile: 6 / all agents — Issue #851, #989).
- * When persisting to the server, a selection of >= 2 calls
- * PATCH /api/worktrees/[id]; mobile (persistToServer=false) skips the PATCH.
+ * Legacy checkbox UI for selecting the CLI tools used in a worktree.
+ * PC and mobile both manage agents through the instance roster now
+ * (AgentInstancesPane / MobileAgentInstancesPane — Issue #869, #874); the only
+ * caller left is NotesAndLogsPane's Agent sub-tab, which falls back to this
+ * pane when `useInstanceManagement` or one of the instance props is not passed.
+ * Renders `availableAgents` as checkboxes, capped at `maxAgents` selections.
+ * The selection may drop to 0 or 1 while editing; it is persisted only once it
+ * reaches MIN_AGENTS_FOR_PERSIST — PATCH /api/worktrees/[id], or just the
+ * callback when persistToServer=false.
  * Also renders Ollama model dropdown when vibe-local is selected, and the
  * opencode launch settings ({@link OpencodeInstanceSettings}) when an opencode
  * agent is selected (Issue #2048).
@@ -38,11 +42,11 @@ import {
 export interface AgentSettingsPaneProps {
   /** Worktree ID for API calls */
   worktreeId: string;
-  /** Currently selected agents (2-4 CLI tool IDs) */
+  /** Currently selected agents (CLI tool IDs; clamped to `maxAgents` for display) */
   selectedAgents: CLIToolType[];
   /** Callback when selected agents change (after successful API persist) */
   onSelectedAgentsChange: (agents: CLIToolType[]) => void;
-  /** Maximum number of agents that can be selected (6 on mobile, 6 on PC — Issue #989) */
+  /** Maximum number of agents that can be selected (defaults to DEFAULT_MAX_AGENTS when the caller passes none) */
   maxAgents?: number;
   /**
    * Issue #837: The selectable agent pool rendered as checkboxes.
@@ -446,7 +450,7 @@ export const AgentSettingsPane = memo(function AgentSettingsPane({
 }: AgentSettingsPaneProps) {
   const t = useTranslations('schedule');
 
-  // Clamp selectedAgents to maxAgents (PC: 5, mobile: 6 — Issue #851)
+  // Clamp selectedAgents to maxAgents (Issue #851)
   const clampedAgents = selectedAgents.length > maxAgents
     ? selectedAgents.slice(0, maxAgents)
     : selectedAgents;

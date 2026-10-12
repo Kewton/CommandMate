@@ -32,6 +32,7 @@ import { FilePlus, FolderPlus, Pencil, Trash2, Upload, FolderInput } from 'lucid
 import { Z_INDEX } from '@/config/z-index';
 import { CONTEXT_MENU_EXIT_DURATION_MS } from '@/config/ui-feedback-config';
 import { useExitAnimation } from '@/hooks/useExitAnimation';
+import { isUnhandledEscape } from '@/lib/escape-key';
 
 /**
  * One entry of a caller-supplied menu (Issue #2260).
@@ -307,7 +308,7 @@ export const ContextMenu = memo(function ContextMenu({
     if (!isOpen) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
+      if (isUnhandledEscape(e)) {
         onClose();
         return;
       }
