@@ -1,3 +1,4 @@
+
 /**
  * FileViewer Component
  *
@@ -41,6 +42,7 @@ import { useFileContentSearch } from '@/hooks/useFileContentSearch';
 import { useCopyFeedback } from '@/hooks/useCopyFeedback';
 import hljs from 'highlight.js';
 import 'highlight.js/styles/github-dark.css';
+import { isUnhandledEscape } from '@/lib/escape-key';
 
 /** Loading placeholder while the markdown editor chunk resolves. */
 function MarkdownEditorLoading() {
@@ -500,7 +502,7 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
   useEffect(() => {
     if (!isFullscreen || isUnifiedEditable) return;
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setIsFullscreen(false);
+      if (isUnhandledEscape(e)) setIsFullscreen(false);
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
@@ -628,7 +630,7 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
   useEffect(() => {
     if (!isUnifiedEditable || actionsOpen) return;
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
+      if (!isUnhandledEscape(e)) return;
       if (searchOpen) {
         closeSearch();
       } else if (isFullscreen) {

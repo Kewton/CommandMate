@@ -1,3 +1,4 @@
+
 /**
  * TerminalSplitContainer Component (Issue #728, 2x2 grid in Issue #2421)
  *
@@ -90,6 +91,7 @@ import { Tooltip } from '@/components/common/Tooltip';
 import { useSplitActionBarFit } from '@/hooks/useDesktopHeaderFit';
 import { PaneResizer, type ResizerOrientation } from './PaneResizer';
 import { SplitHeaderSlotsProvider, type SplitHeaderSlots } from './SplitPaneHeaderControls';
+import { isUnhandledEscape } from '@/lib/escape-key';
 
 /**
  * Issue #2421: thickness of the grid's two divider TRACKS, in px.
@@ -1343,11 +1345,10 @@ export function ActionBarItemsOverflow({
       setOpen(false);
     };
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
       // Issue #3592: an Escape a layer in the panel already handled (the
       // folded agent selector's menu closing itself) is not ours to act on.
       // Issue #3591: nor one the header tools' "…" list closed itself with.
-      if (event.defaultPrevented) return;
+      if (!isUnhandledEscape(event)) return;
       setOpen(false);
       buttonRef.current?.focus();
     };

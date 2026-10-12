@@ -13,6 +13,7 @@ import React, { memo, useState, useRef, useEffect, useLayoutEffect, useCallback 
 import { useTranslations } from 'next-intl';
 import { ChevronDown } from 'lucide-react';
 import { Tooltip } from '@/components/common/Tooltip';
+import { isUnhandledEscape } from '@/lib/escape-key';
 import type { SortKey, SortDirection } from '@/lib/sidebar-utils';
 
 // ============================================================================
@@ -160,7 +161,7 @@ export const SortSelectorBase = memo(function SortSelectorBase({
   // Close dropdown on escape key
   useEffect(() => {
     function handleEscape(event: KeyboardEvent) {
-      if (event.key === 'Escape') {
+      if (isUnhandledEscape(event)) {
         setIsOpen(false);
       }
     }
