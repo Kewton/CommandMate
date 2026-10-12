@@ -279,8 +279,8 @@ describe('main: stops before merging', () => {
   });
 });
 
-describe('main: squash subject over a fold', () => {
-  it("passes the worker's subject with the PR number as --subject", () => {
+describe('main: squash subject over a fold is still the PR title', () => {
+  it("passes the PR's title, not the worker's subject, as --subject", () => {
     recordReady();
     appendRecord(runDir, '3477', { issue: 3477, stage: 'precheck', result: 'ok', head: HEAD_M, workHead: HEAD_A, note: 'tsc=ok' });
     const fake = fakeGit({
@@ -293,7 +293,7 @@ describe('main: squash subject over a fold', () => {
     });
     expect(runMain(fake).code).toBe(0);
     const args = fake.ghCalls('pr merge')[0].args;
-    expect(args.slice(-2)).toEqual(['--subject', 'fix(orchestrate): worker subject (#4242)']);
+    expect(args.slice(-2)).toEqual(['--subject', 'feat(orchestrate): publish and merge (#3477) (#4242)']);
   });
 });
 
@@ -311,6 +311,13 @@ describe('main: squash subject is the PR title', () => {
 
   it('does not repeat (#<PR>) when the title already ends with it', () => {
     expect(run('feat: 題名 (#4242)').slice(-2)).toEqual(['--subject', 'feat: 題名 (#4242)']);
+  });
+
+  it('names the commit by the PR title also when the PR is given with --pr', () => {
+    recordReady();
+    const fake = fakeGit({ head: HEAD_A, prs: [openPr({ title: 'feat: 題名' })], checks: [GREEN] });
+    expect(runMain(fake, '--pr', '4242').code).toBe(0);
+    expect(fake.ghCalls('pr merge')[0].args.slice(-2)).toEqual(['--subject', 'feat: 題名 (#4242)']);
   });
 
   it('keeps the other issue number in a title and still appends the PR number', () => {

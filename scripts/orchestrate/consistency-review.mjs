@@ -14,9 +14,12 @@
  *
  * One call does what the hand-written script and docs/orchestrate/trials.md
  * did by hand:
- *   1. takes the Codex lock (`workspace/proposals/<date>/.lock`, mkdir), which
- *      every Codex ask of the day shares — the session is used one ask at a time;
- *   2. waits until `capture --instance <id> --json` (`--instance`, default codex) reads `ready` three times
+ *   0. with `--instance <id|alias>` (default codex, no lookup), resolves it to the
+ *      real instance id with `instances <wt> --json` (no match = exit 2, nothing sent);
+ *   1. takes the reviewer's lock (`workspace/proposals/<date>/.lock` for codex,
+ *      `.lock-<instance id>` for another), which every ask of that session
+ *      shares — a session is used one ask at a time;
+ *   2. waits until `capture --instance <id> --json` reads `ready` three times
  *      in a row;
  *   3. sends the brief built from templates/consistency-review.md (or
  *      consistency-review-rereview.md with the previous answer) with
@@ -38,7 +41,7 @@
  * Usage:
  *   node scripts/orchestrate/consistency-review.mjs --run-dir <dir> --issues <range> --issue <N>
  *        --head <sha> --brief <file> [--rereview --previous <review md>]
- *        [--worktree <path>] [--wt <reviewer worktree-id>] [--lock <dir>] [--cli <commandmatedev>]
+ *        [--worktree <path>] [--wt <reviewer worktree-id>] [--lock <dir>] [--cli <commandmatedev>] [--instance <id|alias>]
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -241,9 +244,26 @@ function waitReady({ run, sleep, cli, wt, cwd, instance }) {
   return false;
 }
 
+/** `--instance` may be an alias; the lock, ask and record need the real instance id. */
+function resolveInstance(run, o, cwd) {
+  const out = run(o.cli, ['instances', o.wt, '--json'], { cwd });
+  let rows = null;
+  try {
+    rows = out.status === 0 ? JSON.parse(out.stdout) : null;
+  } catch {
+    rows = null;
+  }
+  if (!Array.isArray(rows)) return { error: `could not read the roster of ${o.wt} (instances --json exit=${out.status})` };
+  const byId = rows.filter((r) => r && r.instanceId === o.instance);
+  const matches = byId.length > 0 ? byId : rows.filter((r) => r && r.alias === o.instance);
+  if (matches.length === 0) return { error: `--instance ${o.instance}: no instance id or alias in the roster of ${o.wt}` };
+  if (matches.length > 1) return { error: `--instance ${o.instance}: ${matches.length} roster rows answer to it` };
+  return { id: matches[0].instanceId };
+}
+
 const USAGE = `Usage:
   node scripts/orchestrate/consistency-review.mjs --run-dir <dir> --issues <range> --issue <N> --head <sha> --brief <file>
-       [--rereview --previous <review md>] [--worktree <path>] [--wt <reviewer worktree-id>] [--lock <dir>] [--cli <commandmatedev>] [--instance <id>]`;
+       [--rereview --previous <review md>] [--worktree <path>] [--wt <reviewer worktree-id>] [--lock <dir>] [--cli <commandmatedev>] [--instance <id|alias>]`;
 
 const FLAGS = {
   '--run-dir': 'runDir',
@@ -264,6 +284,7 @@ export function parseArgs(argv) {
   const options = { rereview: false, wt: DEFAULT_REVIEWER_WT, cli: 'commandmatedev', instance: REVIEWER_INSTANCE };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
+    if (arg === '--instance') options.instanceGiven = true;
     if (SWITCHES[arg]) options[SWITCHES[arg]] = true;
     else if (FLAGS[arg] && i + 1 < argv.length) options[FLAGS[arg]] = argv[++i];
     else return { error: `unknown or incomplete argument: ${arg}` };
@@ -309,6 +330,14 @@ export function main(argv, deps = {}) {
     return 2;
   }
   const o = parsed.options;
+  if (o.instanceGiven) {
+    const resolved = resolveInstance(run, o, cwd);
+    if (resolved.error) {
+      error(`${resolved.error}\n${USAGE}`);
+      return 2;
+    }
+    o.instance = resolved.id;
+  }
   const issue = Number(o.issue);
   const worktree = path.resolve(cwd, o.worktree ?? path.join('..', `commandmate-issue-${issue}`));
   const lock = path.resolve(cwd, o.lock ?? path.join('workspace', 'proposals', localDate(now()), o.instance === REVIEWER_INSTANCE ? '.lock' : `.lock-${o.instance}`));

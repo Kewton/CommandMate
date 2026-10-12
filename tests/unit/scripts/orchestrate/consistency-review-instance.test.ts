@@ -17,12 +17,14 @@ const REPLY = JSON.stringify({ reply: '指摘なし\n\nDONE: 指摘なし' });
 
 let tmp: string;
 let runDir: string;
+let heldLocks: string[];
 let calls: { command: string; args: string[] }[];
 beforeEach(() => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-consistency-instance-'));
   runDir = path.join(tmp, 'runs', '2026-10-12');
   fs.writeFileSync(path.join(tmp, 'brief.txt'), '機能追加です。\n');
   calls = [];
+  heldLocks = [];
 });
 afterEach(() => {
   fs.rmSync(tmp, { recursive: true, force: true });
@@ -31,6 +33,13 @@ afterEach(() => {
 const run = (command: string, args: string[]) => {
   calls.push({ command, args });
   if (command === 'git') return { status: 0, stdout: args.includes('--abbrev-ref') ? 'feature/x\n' : `${HEAD}\n`, stderr: '' };
+  if (args[0] === 'instances') {
+    return { status: 0, stdout: JSON.stringify([{ instanceId: 'codex', alias: 'codex' }, { instanceId: 'codex-2', alias: 'reviewer' }]), stderr: '' };
+  }
+  if (args[0] === 'capture') {
+    const dir = path.join(tmp, 'workspace', 'proposals', '2026-10-12');
+    heldLocks.push(...(fs.existsSync(dir) ? fs.readdirSync(dir) : []));
+  }
   if (args[0] === 'capture') {
     return { status: 0, stdout: JSON.stringify({ sessionStatus: 'ready' }), stderr: '' };
   }
@@ -60,6 +69,20 @@ describe('--instance', () => {
     // A held codex lock does not block codex-2: the sessions are independent.
     fs.mkdirSync(path.join(lock, '.lock'), { recursive: true });
     expect(go(['--instance', 'codex-2'])).toBe(0);
+  });
+
+  it('resolves an alias to the real instance id for lock, ask and record', () => {
+    expect(go(['--instance', 'reviewer'])).toBe(0);
+    expect(instancesOf('capture')).toEqual(['codex-2', 'codex-2', 'codex-2']);
+    expect(instancesOf('ask')).toEqual(['codex-2']);
+    expect(readRecords(runDir, '3618').records.find((r) => r.stage === 'review')).toMatchObject({ agent: 'codex-2' });
+    // alias and id share one lock: the lock taken for the alias is `.lock-codex-2`
+    expect(heldLocks).toEqual(['.lock-codex-2', '.lock-codex-2', '.lock-codex-2']);
+  });
+
+  it('an unknown instance exits 2 and sends nothing', () => {
+    expect(go(['--instance', 'nobody'])).toBe(2);
+    expect(calls.map((c) => c.args[0])).toEqual(['instances']);
   });
 
   it('negative control: without --instance everything stays on codex', () => {

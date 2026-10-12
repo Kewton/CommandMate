@@ -233,7 +233,7 @@ export function main(argv, deps = {}) {
   try {
     const branch = o.branch ?? git(run, o.worktree, ['rev-parse', '--abbrev-ref', 'HEAD']).trim();
     const viewPr = (ref) =>
-      ghJson(run, ['pr', 'view', String(ref), '--repo', o.repo, '--json', 'number,state,headRefOid,url,headRefName']);
+      ghJson(run, ['pr', 'view', String(ref), '--repo', o.repo, '--json', 'number,state,headRefOid,url,headRefName,title']);
     let pr;
     if (o.pr) pr = viewPr(o.pr);
     else {
@@ -385,11 +385,9 @@ export function main(argv, deps = {}) {
     record('ci', 'ok', head, `checks=${verdict.summary} build=${needBuild ? 'pass' : 'precheck'} unit=${need.needUnit ? 'pass' : '-'}${o.last ? ' last=all-pass' : ''}`, workHead);
 
     // 6. Merge exactly this HEAD, then the Issue.
-    // The squash commit is named after the PR: a fold (6-4) on top of the work
-    // must not name it, so with a distinct work HEAD the worker's subject is
-    // used (publish-pr titled the PR the same way); otherwise the PR title.
-    const folded = workHead && workHead !== head ? git(run, o.worktree, ['log', '-1', '--format=%s', workHead]).trim() : '';
-    const subject = squashSubject(folded || String(pr.title ?? ''), pr.number);
+    // The squash commit is named after the PR (publish-pr titles it), also over
+    // a fold or a refresh: the subject is the PR's own title.
+    const subject = squashSubject(pr.title, pr.number);
     const merged = run('gh', [
       'pr', 'merge', String(pr.number), '--repo', o.repo, '--squash', '--match-head-commit', head,
       ...(subject ? ['--subject', subject] : []),
