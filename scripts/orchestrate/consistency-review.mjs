@@ -14,13 +14,16 @@
  *
  * One call does what the hand-written script and docs/orchestrate/trials.md
  * did by hand:
- *   1. takes the Codex lock (`workspace/proposals/<date>/.lock`, mkdir), which
- *      every Codex ask of the day shares — the session is used one ask at a time;
- *   2. waits until `capture --instance codex --json` reads `ready` three times
+ *   0. with `--instance <id|alias>` (default codex, no lookup), resolves it to the
+ *      real instance id with the server's resolve-target (failure = exit 2, nothing sent);
+ *   1. takes the reviewer's lock (`workspace/proposals/<date>/.lock` for codex,
+ *      `.lock-<instance id>` for another), which every ask of that session
+ *      shares — a session is used one ask at a time;
+ *   2. waits until `capture --instance <id> --json` reads `ready` three times
  *      in a row;
  *   3. sends the brief built from templates/consistency-review.md (or
  *      consistency-review-rereview.md with the previous answer) with
- *      `ask <wt> <brief> --instance codex --timeout 2400 --json`;
+ *      `ask <wt> <brief> --instance <resolved id> --timeout 2400 --json`;
  *   4. writes `review-<N>[b|c…].{prompt.txt,json,err,md}` to the run directory,
  *      the `.md` being the answer without the thinking;
  *   5. on an answer with a `DONE:` line appends one row to
@@ -38,9 +41,10 @@
  * Usage:
  *   node scripts/orchestrate/consistency-review.mjs --run-dir <dir> --issues <range> --issue <N>
  *        --head <sha> --brief <file> [--rereview --previous <review md>]
- *        [--worktree <path>] [--wt <reviewer worktree-id>] [--lock <dir>] [--cli <commandmatedev>]
+ *        [--worktree <path>] [--wt <reviewer worktree-id>] [--lock <dir>] [--cli <commandmatedev>] [--instance <id|alias>]
  */
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 import { spawnSync } from 'node:child_process';
@@ -224,10 +228,10 @@ function acquireLock(lock, { sleep, now }) {
 }
 
 /** Wait until the reviewer reads `ready` READY_STREAK times in a row; false if it never does. */
-function waitReady({ run, sleep, cli, wt, cwd }) {
+function waitReady({ run, sleep, cli, wt, cwd, instance }) {
   let streak = 0;
   for (let i = 0; i < READY_MAX_POLLS; i++) {
-    const out = run(cli, ['capture', wt, '--instance', REVIEWER_INSTANCE, '--json'], { cwd });
+    const out = run(cli, ['capture', wt, '--instance', instance, '--json'], { cwd });
     let status = null;
     try {
       status = out.status === 0 ? JSON.parse(out.stdout).sessionStatus : null;
@@ -241,9 +245,50 @@ function waitReady({ run, sleep, cli, wt, cwd }) {
   return false;
 }
 
+/**
+ * `--instance` may be an id or an alias; the lock, ask and record need the real
+ * instance id. The server is the one authority for that (GET
+ * /api/worktrees/<wt>/resolve-target, the route the CLI itself uses: primary
+ * first, case-folded alias, 409 on an ambiguous alias), so this does not
+ * re-implement the rules. The endpoint is `CM_API_BASE`, else `CM_PORT`
+ * (default 3000) on localhost; `CM_AUTH_TOKEN` goes in a 0600 curl config
+ * file under os.tmpdir() (never in the process list).
+ */
+function resolveInstance(run, o, cwd) {
+  const base = (process.env.CM_API_BASE || `http://localhost:${process.env.CM_PORT || '3000'}`).replace(/\/+$/, '');
+  const url = `${base}/api/worktrees/${encodeURIComponent(o.wt)}/resolve-target?instance=${encodeURIComponent(o.instance)}`;
+  const args = ['-sS', '--max-time', '30', '-w', '\n%{http_code}'];
+  let dir = null;
+  try {
+    if (process.env.CM_AUTH_TOKEN) {
+      dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-resolve-'));
+      const conf = path.join(dir, 'curl.conf');
+      fs.writeFileSync(conf, `header = "Authorization: Bearer ${process.env.CM_AUTH_TOKEN}"\n`, { mode: 0o600 });
+      args.push('-K', conf);
+    }
+    const out = run('curl', [...args, url], { cwd });
+    const text = String(out.stdout ?? '');
+    const cut = text.lastIndexOf('\n');
+    const code = Number(text.slice(cut + 1));
+    let body = null;
+    try {
+      body = JSON.parse(text.slice(0, cut));
+    } catch {
+      body = null;
+    }
+    if (out.status !== 0 || code !== 200 || !body || typeof body.instanceId !== 'string' || !body.instanceId) {
+      const why = body && body.error ? body.error : `curl exit=${out.status} http=${Number.isNaN(code) ? '-' : code}`;
+      return { error: `--instance ${o.instance}: could not resolve in ${o.wt} (${why})` };
+    }
+    return { id: body.instanceId };
+  } finally {
+    if (dir) fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 const USAGE = `Usage:
   node scripts/orchestrate/consistency-review.mjs --run-dir <dir> --issues <range> --issue <N> --head <sha> --brief <file>
-       [--rereview --previous <review md>] [--worktree <path>] [--wt <reviewer worktree-id>] [--lock <dir>] [--cli <commandmatedev>]`;
+       [--rereview --previous <review md>] [--worktree <path>] [--wt <reviewer worktree-id>] [--lock <dir>] [--cli <commandmatedev>] [--instance <id|alias>]`;
 
 const FLAGS = {
   '--run-dir': 'runDir',
@@ -256,13 +301,15 @@ const FLAGS = {
   '--wt': 'wt',
   '--lock': 'lock',
   '--cli': 'cli',
+  '--instance': 'instance',
 };
 const SWITCHES = { '--rereview': 'rereview' };
 
 export function parseArgs(argv) {
-  const options = { rereview: false, wt: DEFAULT_REVIEWER_WT, cli: 'commandmatedev' };
+  const options = { rereview: false, wt: DEFAULT_REVIEWER_WT, cli: 'commandmatedev', instance: REVIEWER_INSTANCE };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
+    if (arg === '--instance') options.instanceGiven = true;
     if (SWITCHES[arg]) options[SWITCHES[arg]] = true;
     else if (FLAGS[arg] && i + 1 < argv.length) options[FLAGS[arg]] = argv[++i];
     else return { error: `unknown or incomplete argument: ${arg}` };
@@ -275,6 +322,7 @@ export function parseArgs(argv) {
   } catch (err) {
     return { error: err.message };
   }
+  if (!/^[^\u0000-\u001f\u007f/\\]{1,100}$/u.test(options.instance) || options.instance.trim() === '') return { error: `--instance must be an instance id or alias (got ${options.instance})` };
   if (!/^[1-9]\d*$/.test(options.issue)) return { error: `--issue must be a positive integer (got ${options.issue})` };
   if (!/^[0-9a-f]{7,40}$/.test(options.head)) return { error: `--head must be a commit sha (got ${options.head})` };
   if (options.rereview && !options.previous) return { error: '--rereview needs --previous <review md>' };
@@ -307,9 +355,17 @@ export function main(argv, deps = {}) {
     return 2;
   }
   const o = parsed.options;
+  if (o.instanceGiven) {
+    const resolved = resolveInstance(run, o, cwd);
+    if (resolved.error) {
+      error(`${resolved.error}\n${USAGE}`);
+      return 2;
+    }
+    o.instance = resolved.id;
+  }
   const issue = Number(o.issue);
   const worktree = path.resolve(cwd, o.worktree ?? path.join('..', `commandmate-issue-${issue}`));
-  const lock = path.resolve(cwd, o.lock ?? path.join('workspace', 'proposals', localDate(now()), '.lock'));
+  const lock = path.resolve(cwd, o.lock ?? path.join('workspace', 'proposals', localDate(now()), o.instance === REVIEWER_INSTANCE ? '.lock' : `.lock-${o.instance}`));
   const started = now();
   let head = o.head;
   let label = null;
@@ -319,7 +375,7 @@ export function main(argv, deps = {}) {
     const { file } = appendRecord(
       o.runDir,
       o.issues,
-      { issue, stage: 'review', result, head, agent: REVIEWER_INSTANCE, durationSec, note },
+      { issue, stage: 'review', result, head, agent: o.instance, durationSec, note },
       now()
     );
     log(`review #${issue} ${head.slice(0, 7)} ${result}: ${note}`);
@@ -353,14 +409,14 @@ export function main(argv, deps = {}) {
 
     acquireLock(lock, { sleep, now });
     locked = true;
-    if (!waitReady({ run, sleep, cli: o.cli, wt: o.wt, cwd })) {
-      record('fail', `${label}: ${REVIEWER_INSTANCE} not ready ${READY_STREAK} times in a row within ${READY_MAX_POLLS} polls; not sent`);
+    if (!waitReady({ run, sleep, cli: o.cli, wt: o.wt, cwd, instance: o.instance })) {
+      record('fail', `${label}: ${o.instance} not ready ${READY_STREAK} times in a row within ${READY_MAX_POLLS} polls; not sent`);
       return 1;
     }
     const asked = now();
     const ask = run(
       o.cli,
-      ['ask', o.wt, prompt, '--instance', REVIEWER_INSTANCE, '--timeout', String(ASK_TIMEOUT_SEC), '--json'],
+      ['ask', o.wt, prompt, '--instance', o.instance, '--timeout', String(ASK_TIMEOUT_SEC), '--json'],
       { cwd }
     );
     fs.writeFileSync(file('.json'), ask.stdout);
