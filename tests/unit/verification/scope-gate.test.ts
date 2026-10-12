@@ -35,6 +35,8 @@ import {
   collectChangedPaths,
   evaluateScope,
   MAX_REPORTED_VIOLATIONS,
+  ORCHESTRATOR_FILES,
+  parseLogCommitFiles,
   ScopeMatcher,
   SCOPE_ALLOW_GUIDANCE,
   SCOPE_EXEMPT_ALWAYS_ALLOWED,
@@ -871,5 +873,115 @@ describe('scope evidence round-trip into `verify --json`', () => {
     expect(parseScopeEvidence((await evaluate(repo, ALLOW_SRC, { baseRef: null })).logTail)).toBeNull();
     expect(parseScopeEvidence(null)).toBeNull();
     expect(parseScopeEvidence('skipped: the work-evidence gate did not pass.')).toBeNull();
+  });
+});
+
+// =============================================================================
+// Orchestrator fold commits (#3588)
+// =============================================================================
+
+const MODULE_REFERENCE = 'docs/module-reference.md';
+
+/** The orchestrate 6-4 fold: a commit that changes only docs/module-reference.md. */
+function commitFold(repo: string, contents: string): void {
+  write(repo, MODULE_REFERENCE, contents);
+  git(['add', MODULE_REFERENCE], repo);
+  git(['commit', '-m', 'docs(module-reference): fold'], repo);
+}
+
+function commitAll(repo: string, message: string): void {
+  git(['add', '-A'], repo);
+  git(['commit', '-m', message], repo);
+}
+
+describe('evaluateScope — orchestrator fold commits (#3588)', () => {
+  it('shares the orchestrator file list with merge-pr', () => {
+    expect([...ORCHESTRATOR_FILES]).toEqual([MODULE_REFERENCE]);
+  });
+
+  it('passes a worker re-instructed after the module-reference fold commit', async () => {
+    const repo = createRepo();
+    write(repo, 'src/lib/verification/scope-gate.ts', 'export const gate = 1;\n');
+    commitAll(repo, 'worker');
+    commitFold(repo, 'fold\n');
+    write(repo, 'src/lib/verification/scope-gate.ts', 'export const gate = 2;\n');
+    commitAll(repo, 'worker again');
+
+    const outcome = await evaluate(repo, ALLOW_SRC);
+    expect(outcome.status).toBe('passed');
+    expect(outcome.logTail).toContain('changed=1 violations=0');
+    expect(outcome.logTail).toContain(`  ~ ${MODULE_REFERENCE}`);
+  });
+
+  it('still fails a worker commit that changes module-reference along with other files', async () => {
+    const repo = createRepo();
+    write(repo, 'src/lib/verification/scope-gate.ts', 'export const gate = 1;\n');
+    write(repo, MODULE_REFERENCE, 'worker edit\n');
+    commitAll(repo, 'worker');
+
+    const outcome = await evaluate(repo, ALLOW_SRC);
+    expect(outcome.status).toBe('failed');
+    expect(violationLines(outcome.logTail)).toEqual([MODULE_REFERENCE]);
+  });
+
+  it('still fails when a worker commit after the fold also changes module-reference', async () => {
+    const repo = createRepo();
+    commitFold(repo, 'fold\n');
+    write(repo, 'src/lib/verification/scope-gate.ts', 'export const gate = 1;\n');
+    write(repo, MODULE_REFERENCE, 'fold\nworker edit\n');
+    commitAll(repo, 'worker');
+
+    const outcome = await evaluate(repo, ALLOW_SRC);
+    expect(outcome.status).toBe('failed');
+    expect(violationLines(outcome.logTail)).toEqual([MODULE_REFERENCE]);
+  });
+
+  it('still fails an uncommitted change to module-reference alone', async () => {
+    const repo = createRepo();
+    write(repo, MODULE_REFERENCE, 'uncommitted\n');
+
+    const outcome = await evaluate(repo, ALLOW_SRC);
+    expect(outcome.status).toBe('failed');
+    expect(violationLines(outcome.logTail)).toEqual([MODULE_REFERENCE]);
+  });
+
+  it('still fails an uncommitted module-reference edit on top of the fold commit', async () => {
+    const repo = createRepo();
+    commitFold(repo, 'fold\n');
+    write(repo, MODULE_REFERENCE, 'fold\nuncommitted\n');
+
+    const outcome = await evaluate(repo, ALLOW_SRC);
+    expect(outcome.status).toBe('failed');
+    expect(violationLines(outcome.logTail)).toEqual([MODULE_REFERENCE]);
+  });
+
+  it('still fails other out-of-scope paths after the fold commit', async () => {
+    const repo = createRepo();
+    commitFold(repo, 'fold\n');
+    write(repo, 'package.json', '{}\n');
+    commitAll(repo, 'worker');
+
+    const outcome = await evaluate(repo, ALLOW_SRC);
+    expect(outcome.status).toBe('failed');
+    expect(violationLines(outcome.logTail)).toEqual(['package.json']);
+  });
+});
+
+describe('parseLogCommitFiles (#3588)', () => {
+  const A = 'a'.repeat(40);
+  const B = 'b'.repeat(40);
+  const C = 'c'.repeat(40);
+
+  it('groups paths under each commit header, keeping a merge commit empty', () => {
+    const output = `\x01${A}\0\nsrc/a.ts\0docs/x y.md\0\x01${B}\0\x01${C}\0\n${MODULE_REFERENCE}\0`;
+    expect(parseLogCommitFiles(output)).toEqual([
+      ['src/a.ts', 'docs/x y.md'],
+      [],
+      [MODULE_REFERENCE],
+    ]);
+  });
+
+  it('returns nothing for an empty range', () => {
+    expect(parseLogCommitFiles('')).toEqual([]);
   });
 });

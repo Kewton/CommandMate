@@ -135,6 +135,78 @@ export type ScopeDecision =
  */
 export const CONTRACT_DIR_PREFIX = '.commandmate/tasks/';
 
+/**
+ * Files the orchestrator commits on a PR branch after the worker's checks
+ * (orchestrate 6-4: the module-reference fold) (#3588).
+ *
+ * Copy of `ORCHESTRATOR_FILES` in `scripts/orchestrate/pr-common.mjs`, where
+ * `merge-pr.mjs` uses the same rule to look past a fold commit to the worker's
+ * HEAD. A test imports the .mjs and compares the two arrays, so the merge side
+ * and this gate cannot drift apart.
+ */
+export const ORCHESTRATOR_FILES: readonly string[] = ['docs/module-reference.md'];
+
+/**
+ * Whether a commit's file list makes it an orchestrator commit: at least one
+ * file, and every file in {@link ORCHESTRATOR_FILES} — the rule of
+ * `workHeads` in `scripts/orchestrate/pr-common.mjs` (#3588).
+ */
+export function isOrchestratorOnlyCommit(files: readonly string[]): boolean {
+  return files.length > 0 && files.every((file) => ORCHESTRATOR_FILES.includes(file));
+}
+
+/** Prefix of the per-commit header in {@link ORCHESTRATOR_LOG_FORMAT} output. */
+const COMMIT_MARKER = '\x01';
+const ORCHESTRATOR_LOG_FORMAT = '--format=%x01%H';
+const OBJECT_NAME = /^[0-9a-f]{40,64}$/;
+
+function isCommitHeader(field: string): boolean {
+  const header = field.startsWith('\n') ? field.slice(1) : field;
+  return header.startsWith(COMMIT_MARKER) && OBJECT_NAME.test(header.slice(1));
+}
+
+/**
+ * Each commit's file list from
+ * `git log --format=%x01%H --name-only -z --no-renames <range>` (#3588).
+ *
+ * Measured format (git 2.49): `\x01<sha>NUL` then `\n<path>NUL` for the first
+ * path and `<path>NUL` for the rest; the next header follows directly. A merge
+ * commit has a header and no paths, so it counts as neither side's. The header is told apart from a path by the
+ * control-character marker plus a full object name, which no real path carries.
+ */
+export function parseLogCommitFiles(output: string): string[][] {
+  const commits: string[][] = [];
+  let current: string[] | null = null;
+  for (const field of output.split('\0')) {
+    if (isCommitHeader(field)) {
+      current = [];
+      commits.push(current);
+      continue;
+    }
+    const path = field.startsWith('\n') ? field.slice(1) : field;
+    if (path === '' || current === null) continue;
+    current.push(path);
+  }
+  return commits;
+}
+
+/**
+ * Paths that only orchestrator commits touched on the branch (#3588).
+ *
+ * A path a worker commit also touched is not returned: a worker that edited
+ * `docs/module-reference.md` itself, alone or with other files, is still judged
+ * on it — only the fold commit's change is the orchestrator's.
+ */
+export function orchestratorOnlyPaths(commits: readonly string[][]): Set<string> {
+  const byOrchestrator = new Set<string>();
+  const byWorker = new Set<string>();
+  for (const files of commits) {
+    const target = isOrchestratorOnlyCommit(files) ? byOrchestrator : byWorker;
+    files.forEach((file) => target.add(file));
+  }
+  return new Set([...byOrchestrator].filter((path) => !byWorker.has(path)));
+}
+
 /** Whether git reported a path that {@link CONTRACT_DIR_PREFIX} excludes. */
 export function isContractPath(path: string): boolean {
   return path.startsWith(CONTRACT_DIR_PREFIX);
@@ -427,6 +499,8 @@ export interface ChangedPaths {
   mergeBase: string;
   /** Agent-managed state files dropped from the change set (#3126), sorted. */
   agentStateExcluded: string[];
+  /** Committed paths only orchestrator commits touched, dropped (#3588), sorted. */
+  orchestratorExcluded: string[];
 }
 
 /**
@@ -466,6 +540,27 @@ export async function collectChangedPaths(
     };
   }
 
+  // The orchestrator's fold commit (6-4) can sit under a re-instructed worker's
+  // commits; what only it touched is not the worker's change (#3588).
+  const log = await runGit(
+    ['log', ORCHESTRATOR_LOG_FORMAT, '--name-only', '-z', '--no-renames', `${base}..HEAD`],
+    worktreePath
+  );
+  if (log.code !== 0) {
+    return {
+      error:
+        `'git log --name-only ${base}..HEAD' failed.` +
+        (log.stderr.trim() ? `\n${log.stderr.trim()}` : ''),
+    };
+  }
+  const orchestratorOnly = orchestratorOnlyPaths(parseLogCommitFiles(log.stdout));
+  const orchestratorExcluded = new Set<string>();
+  const committed = splitNul(diff.stdout).filter((path) => {
+    if (!orchestratorOnly.has(path)) return true;
+    orchestratorExcluded.add(path);
+    return false;
+  });
+
   // -uall: without it a new directory collapses to a single `?? dir/` entry, and
   // the gate would judge a directory name instead of the files inside it.
   const status = await runGit(
@@ -497,9 +592,10 @@ export async function collectChangedPaths(
   });
 
   // Both sides are filtered, not just the working tree: an orchestrator may
-  // also have committed the contract as a setup commit (#1580).
+  // also have committed the contract as a setup commit (#1580). The working
+  // tree keeps an uncommitted module-reference edit: no fold commit made it.
   const paths = new Set<string>(
-    [...splitNul(diff.stdout), ...workingTree.flatMap((entry) => entry.paths)].filter(
+    [...committed, ...workingTree.flatMap((entry) => entry.paths)].filter(
       (path) => !isContractPath(path)
     )
   );
@@ -507,6 +603,7 @@ export async function collectChangedPaths(
     paths: [...paths].sort(),
     mergeBase: base,
     agentStateExcluded: [...agentStateExcluded].sort(),
+    orchestratorExcluded: [...orchestratorExcluded].filter((path) => !paths.has(path)).sort(),
   };
 }
 
@@ -566,6 +663,15 @@ function formatAgentStateExcluded(excluded: string[]): string[] {
     'excluded (agent-managed state files, not counted as change):',
     ...listed.map((path) => `  ~ ${path}`),
     ...(remainder > 0 ? [`  ... (+${remainder} more)`] : []),
+  ];
+}
+
+/** The `excluded:` section naming orchestrator-only committed paths (#3588). */
+function formatOrchestratorExcluded(excluded: string[]): string[] {
+  if (excluded.length === 0) return [];
+  return [
+    'excluded (changed only by orchestrator commits, not counted as change):',
+    ...excluded.map((path) => `  ~ ${path}`),
   ];
 }
 
@@ -665,6 +771,7 @@ export async function evaluateScope(
     `deny: ${formatPatterns(scope.deny)}`,
     ...formatAdmitted(admitted),
     ...formatAgentStateExcluded(changed.agentStateExcluded),
+    ...formatOrchestratorExcluded(changed.orchestratorExcluded),
   ].join('\n');
 
   if (violations.length === 0) {

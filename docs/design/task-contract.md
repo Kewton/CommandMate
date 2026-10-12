@@ -155,6 +155,11 @@ worktree の cwd で以下を実行し、**和集合**を取る:
 
 `.gitignore` されたファイルは `git status` が報告しないため、そもそも判定対象にならない。
 
+例外: `git log <merge-base>..HEAD --name-only -z` で読んだ各コミットのうち、変更ファイルが 1 つ以上ありすべてが
+`ORCHESTRATOR_FILES`（`docs/module-reference.md`。orchestrate 6-4 の一本化）のコミットだけが触ったパスは、
+1 の集合から除き `log_tail` の `excluded` 節に出す（#3588。`merge-pr.mjs` の `workHeads` と同じ規則）。
+ワーカーのコミットも触ったパスと、2 の未コミットの変更は除かない。
+
 #### 2.2.3 契約ファイルは判定対象から外す（#1580）
 
 `.commandmate/tasks/` 配下は、`scope` の変更ファイル集合からも `work-evidence` の
