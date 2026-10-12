@@ -38,7 +38,8 @@
  * verdict could not be tied to the finished work (no completion signal, a
  * commit after the verification started without a task to re-verify, or
  * uncommitted changes behind a pass, or a newer task for the same instance).
- * 2 is a usage error; 1 means the verdict
+ * 2 is a usage error or an `--instance` the server cannot resolve (nothing is
+ * sent then); 1 means the verdict
  * could not be recorded.
  *
  * Usage:
@@ -241,16 +242,52 @@ function querySafely(run, cli, args, cwd) {
   }
 }
 
+/** The CLI build `defaultResolveTarget` asks through: the one `bin/commandmate.js` of this checkout runs. */
+export const DEFAULT_CLI_DIST = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../dist');
+
 /**
- * The instance id `--instance` names: an id as is, an alias through the roster
- * (`instances <wt> --json`), the way `wait` resolves it. Unresolvable — no
- * roster, no match, an ambiguous alias — leaves it as given.
+ * Asks the server's `GET /api/worktrees/<wt>/resolve-target?instance=` through the
+ * CLI's own ApiClient (same server, port and token as every `commandmatedev` call).
+ * argv: <dist> <worktree-id> <selector>.
  */
-export function resolveInstance(rows, selector) {
-  if (!Array.isArray(rows)) return selector;
-  if (rows.some((r) => r?.instanceId === selector)) return selector;
-  const byAlias = rows.filter((r) => r?.alias === selector && typeof r.instanceId === 'string');
-  return byAlias.length === 1 ? byAlias[0].instanceId : selector;
+const RESOLVE_TARGET_SOURCE = `
+const [dist, wt, selector] = process.argv.slice(1);
+const { ApiClient } = require(require('node:path').join(dist, 'cli/utils/api-client.js'));
+new ApiClient()
+  .get('/api/worktrees/' + encodeURIComponent(wt) + '/resolve-target?instance=' + encodeURIComponent(selector))
+  .then((target) => process.stdout.write(JSON.stringify(target)))
+  .catch((err) => {
+    process.stderr.write(String((err && err.message) || err));
+    process.exit(2);
+  });
+`;
+
+/**
+ * The instance id the server resolves `--instance` to (#3587 review 2-3): the
+ * route `wait`, `capture` and `send` resolve through (primary anchor, then
+ * roster id, then alias — exact before case-insensitive, ambiguity refused).
+ * No rule of its own here.
+ *
+ * @param {string} wt
+ * @param {string} selector
+ * @param {{ cwd?: string, distDir?: string }} [options]
+ * @returns {{ instanceId: string } | { error: string }}
+ */
+export function defaultResolveTarget(wt, selector, { cwd, distDir = DEFAULT_CLI_DIST } = {}) {
+  try {
+    const out = defaultRun(process.execPath, ['-e', RESOLVE_TARGET_SOURCE, distDir, wt, selector], {
+      cwd,
+      timeoutMs: QUERY_TIMEOUT_MS,
+    });
+    if (out.status !== 0) return { error: (out.stderr || out.stdout).trim() || `exit ${out.status}` };
+    const target = JSON.parse(out.stdout);
+    if (typeof target?.instanceId !== 'string' || target.instanceId === '') {
+      return { error: `no instance in the answer: ${out.stdout.trim()}` };
+    }
+    return { instanceId: target.instanceId };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
 }
 
 /** The instance a task was sent to: its instance id, or the agent's primary instance. */
@@ -258,13 +295,16 @@ const taskInstance = (task) => task.instanceId ?? task.cliToolId;
 
 /**
  * The task this call is about, as `{ id, createdAt, found }` (createdAt in epoch
- * ms), taken before the wait: `--task` when given, otherwise the instance's
- * newest task. `found` says the ledger shows it; a task missing from the list
- * (or no task at all) is dated by the start of this call.
+ * ms): `--task` when given, otherwise the instance's newest task created by the
+ * start of this call (so a list first read after the call started does not take
+ * a newer contract for the old one). `found` says the ledger shows it; a task
+ * missing from the list (or no task at all) is dated by the start of this call.
  */
 export function baselineTask(tasks, instance, taskId, startedMs) {
   const list = Array.isArray(tasks) ? tasks : [];
-  const own = taskId ? list.find((t) => t?.id === taskId) : list.find((t) => t && taskInstance(t) === instance);
+  const own = taskId
+    ? list.find((t) => t?.id === taskId)
+    : list.find((t) => t && taskInstance(t) === instance && !(Date.parse(t.createdAt) > startedMs));
   const createdAt = own ? Date.parse(own.createdAt) : NaN;
   return {
     id: taskId ?? own?.id ?? null,
@@ -382,7 +422,7 @@ export function confirmCompletion(ctx) {
     if (newer) return { state: 'working', exitCode, log, reason: newer, reverified };
     const reLog = `${o.logFile.replace(/\.log$/, '')}.reverify.log`;
     const reStart = now().getTime();
-    exitCode = ctx.spawnToLog(o.cli, ['verify', o.wt, '--task', o.taskId], { cwd, logFile: reLog });
+    exitCode = ctx.spawnToLog(o.cli, ['verify', o.wt, '--task', o.taskId, '--instance', o.instance], { cwd, logFile: reLog });
     log = fs.existsSync(reLog) ? fs.readFileSync(reLog, 'utf8') : '';
     reverified = true;
     notes.push('reverified=verify --task');
@@ -456,6 +496,7 @@ export function parseArgs(argv) {
  * @param {string[]} argv
  * @param {{
  *   spawnToLog?: typeof defaultSpawnToLog,
+ *   resolveTarget?: typeof defaultResolveTarget,
  *   run?: typeof defaultRun,
  *   sleep?: (ms: number) => void,
  *   now?: () => Date,
@@ -466,6 +507,7 @@ export function parseArgs(argv) {
  */
 export function main(argv, deps = {}) {
   const { spawnToLog = defaultSpawnToLog, run = defaultRun, sleep = defaultSleep, now = () => new Date() } = deps;
+  const resolveTarget = deps.resolveTarget ?? defaultResolveTarget;
   const log = deps.log ?? ((line) => console.log(line));
   const error = deps.error ?? ((line) => console.error(line));
 
@@ -477,6 +519,16 @@ export function main(argv, deps = {}) {
   const o = parsed.options;
   const cwd = process.cwd();
 
+  // One id for everything that follows — the wait, the verifications, the task
+  // comparison, capture and Auto-Yes: tasks carry the resolved id, not the alias.
+  // Unresolvable means nothing is sent and nothing is waited for (#3587 review 2-3).
+  const target = resolveTarget(o.wt, o.instance, { cwd });
+  if ('error' in target) {
+    error(`cannot resolve --instance '${o.instance}' in ${o.wt}: ${target.error}`);
+    return 2;
+  }
+  o.instance = target.instanceId;
+
   try {
     if (o.autoYesOff) {
       const autoYes = disableAutoYes({ run, sleep, cli: o.cli, wt: o.wt, instance: o.instance, cwd, error });
@@ -487,15 +539,26 @@ export function main(argv, deps = {}) {
     const issue = Number(o.issue);
     o.logFile = o.log ?? path.join(o.runDir, `wait-${issue}.log`);
     const started = now();
-    // One id for both the wait and the task comparison: tasks carry the resolved id, not the alias.
-    const instance = resolveInstance(querySafely(run, o.cli, ['instances', o.wt, '--json'], cwd), o.instance);
-    const baseline = baselineTask(readTasks(run, o.cli, o.wt, cwd), instance, o.taskId, started.getTime());
-    // Watched only when the ledger shows the task: without it there is nothing to compare against.
-    const watching = baseline.found;
+    const instance = o.instance;
+    const startTasks = readTasks(run, o.cli, o.wt, cwd);
+    let baseline = baselineTask(startTasks, instance, o.taskId, started.getTime());
+    // An unreadable list at the start is not "no task": the baseline is taken
+    // when the list reads again, and the call is watched meanwhile (#3587 review 2-2).
+    let baselinePending = startTasks === null;
+    // Watched when the ledger shows the task, or may yet show it. A readable
+    // list without it leaves nothing to compare against.
+    const watching = baseline.found || baselinePending;
     /** The reason a newer task makes a verdict on `baseline` meaningless, or null (#3587). */
     const supersededBy = () => {
       if (!watching) return null;
-      const newer = newerTask(readTasks(run, o.cli, o.wt, cwd), instance, baseline);
+      const tasks = readTasks(run, o.cli, o.wt, cwd);
+      if (tasks === null) return null;
+      if (baselinePending) {
+        baselinePending = false;
+        baseline = baselineTask(tasks, instance, o.taskId, started.getTime());
+      }
+      if (!baseline.found) return null;
+      const newer = newerTask(tasks, instance, baseline);
       return newer ? supersededReason(newer, baseline) : null;
     };
     let superseded = null;
@@ -505,7 +568,7 @@ export function main(argv, deps = {}) {
     };
     // Watched, the wait does not verify: `wait --verify` starts the verification
     // inside the CLI, where no check can come between the turn end and the run.
-    // This script starts `verify --task` itself, after one more check (#3587).
+    // This script starts `verify` itself, after one more check (#3587).
     const split = o.afterReinstruct || watching;
     const waitArgs = [
       'wait', o.wt, '--instance', instance, '--on-prompt', 'human',
@@ -520,8 +583,16 @@ export function main(argv, deps = {}) {
       superseded = supersededBy();
       if (!superseded) {
         // 3-4: `wait` → `verify --task`. The gates are the contract's plus the builtins.
+        // The instance is passed as `wait --verify` passes it: OpenCode's work
+        // evidence is read per instance, so leaving it out changes the verdict.
+        // No task known (the list never read) leaves the task to the server, as `wait --verify` does.
+        const verifyTask = o.taskId ?? (baseline.found ? baseline.id : null);
         const verifyLog = `${o.logFile.replace(/\.log$/, '')}.verify.log`;
-        const verifyExit = spawnToLog(o.cli, ['verify', o.wt, '--task', o.taskId ?? baseline.id], { cwd, logFile: verifyLog });
+        const verifyExit = spawnToLog(
+          o.cli,
+          ['verify', o.wt, ...(verifyTask ? ['--task', verifyTask] : []), '--instance', instance],
+          { cwd, logFile: verifyLog }
+        );
         verdictLog = o.afterReinstruct ? '' : verdictLog;
         verdictLog += fs.existsSync(verifyLog) ? fs.readFileSync(verifyLog, 'utf8') : '';
         // As `wait --verify` folds it: a green run does not turn "never started" into a pass.

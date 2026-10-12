@@ -14,12 +14,12 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { appendRecord, readRecords, summarize } from '../../../../scripts/orchestrate/run-log.mjs';
 import {
   baselineTask,
+  defaultResolveTarget,
   defaultRun,
   defaultSpawnToLog,
   main,
   newerTask,
   parseArgs,
-  resolveInstance,
   summarizeVerdict,
 } from '../../../../scripts/orchestrate/wait-verify.mjs';
 
@@ -96,7 +96,8 @@ function harness({
   tasksAfterWait = null as TaskRow[] | null,
   tasksDuringVerify = null as TaskRow[] | null,
   verifyCallForTasks = 1,
-  instances = null as Array<{ instanceId: string; alias: string; cliTool: string }> | null,
+  resolved = {} as Record<string, string>,
+  resolveError = null as string | null,
 } = {}) {
   const spawned: Call[] = [];
   const ran: Call[] = [];
@@ -160,9 +161,6 @@ function harness({
           })
         );
       }
-      if (args[0] === 'instances') {
-        return instances ? ok(JSON.stringify(instances)) : { status: 1, stdout: '', stderr: 'no roster' };
-      }
       if (args[0] === 'task' && args[1] === 'list') {
         return ok(JSON.stringify(taskList));
       }
@@ -171,6 +169,9 @@ function harness({
       }
       throw new Error(`unexpected ${command} ${args.join(' ')}`);
     },
+    // The server's resolve-target: an alias maps through `resolved`, anything else names itself.
+    resolveTarget: (wt: string, selector: string) =>
+      resolveError ? { error: resolveError } : { instanceId: resolved[selector] ?? selector },
     sleep: (ms: number) => {
       sleeps.push(ms);
       clock += ms;
@@ -238,7 +239,7 @@ describe('the wait command (3-3)', () => {
     expect(main(argv('--after-reinstruct'), h.deps)).toBe(20);
     expect(h.spawned.map((c) => c.args)).toEqual([
       ['wait', 'wt-1', '--instance', 'claude', '--on-prompt', 'human', '--timeout', '10800'],
-      ['verify', 'wt-1', '--task', 't-1'],
+      ['verify', 'wt-1', '--task', 't-1', '--instance', 'claude'],
     ]);
     const [record] = readRecords(runDir, '3477').records;
     expect(record.note).toContain('failed=scope:FAIL');
@@ -388,7 +389,7 @@ describe('the verdict is tied to the finished work (3-3, #3477 review 2)', () =>
     const h = harness({ commitMinute: 7, verifyLog: FAIL_LOG, verifyExit: 20 });
     expect(main(argv(), h.deps)).toBe(20);
     expect(h.spawned.map((c) => c.args[0])).toEqual(['wait', 'verify']);
-    expect(h.spawned[1].args).toEqual(['verify', 'wt-1', '--task', 't-1']);
+    expect(h.spawned[1].args).toEqual(['verify', 'wt-1', '--task', 't-1', '--instance', 'claude']);
     expect(records()[0]).toMatchObject({ result: 'fail', head: HEAD_A });
     expect(records()[0].note).toContain('reverified=verify --task');
     expect(records()[0].note).toContain('failed=scope:FAIL');
@@ -481,7 +482,7 @@ describe('a newer task on the same worktree ends the call without a verdict (#35
     expect(main(argv(), h.deps)).toBe(20);
     expect(h.spawned.map((c) => c.args)).toEqual([
       ['wait', 'wt-1', '--instance', 'claude', '--on-prompt', 'human', '--timeout', '10800'],
-      ['verify', 'wt-1', '--task', 't-1'],
+      ['verify', 'wt-1', '--task', 't-1', '--instance', 'claude'],
     ]);
     expect(records()[0].note).toContain('basis=hook_stop');
     expect(records()[0].note).toContain('failed=scope:FAIL');
@@ -567,35 +568,105 @@ describe('a newer task on the same worktree ends the call without a verdict (#35
   it('side queries carry an upper bound', () => {
     const h = harness({ tasks: [t1] });
     main(argv(), h.deps);
-    const side = h.ran.filter((c) => c.args[0] === 'task' || c.args[0] === 'instances');
+    const side = h.ran.filter((c) => c.args[0] === 'task');
     expect(side.length).toBeGreaterThan(0);
     expect(side.every((c) => (c.opts?.timeoutMs ?? 0) > 0)).toBe(true);
   });
 
-  // Review 5: an alias resolves to the id the tasks carry, for the wait and the comparison alike.
-  it('--instance as an alias: the wait and the comparison use the resolved id', () => {
+  // Review 2-1: the split verify is judged as `wait --verify` judged it — for the same instance.
+  it('the split verify carries the instance the wait used, as wait --verify does', () => {
+    const opencode = { ...task('t-1', -10, 'opencode-2'), cliToolId: 'opencode' };
+    const h = harness({ resolved: { 'OpenCode 2': 'opencode-2' }, tasks: [opencode] });
+    const args = argv().map((a) => (a === 'claude' ? 'OpenCode 2' : a));
+    expect(main(args, h.deps)).toBe(0);
+    const [wait, verify] = h.spawned.map((c) => c.args);
+    expect(wait.slice(wait.indexOf('--instance'), wait.indexOf('--instance') + 2)).toEqual(['--instance', 'opencode-2']);
+    expect(verify).toEqual(['verify', 'wt-1', '--task', 't-1', '--instance', 'opencode-2']);
+  });
+
+  it('unwatched (no task in the ledger): the instance still reaches the verification, through wait --verify', () => {
+    const h = harness();
+    main(argv(), h.deps);
+    expect(h.spawned.map((c) => c.args)).toEqual([
+      ['wait', 'wt-1', '--instance', 'claude', '--on-prompt', 'human', '--verify', '--timeout', '10800'],
+    ]);
+  });
+
+  // Review 2-2: a list that fails once is not "no task": watching starts when it reads again.
+  const failingFirst = (h: ReturnType<typeof harness>, times = 1) => {
+    const fakeRun = h.deps.run;
+    let calls = 0;
+    h.deps.run = (command: string, args: string[], opts?: { timeoutMs?: number }) =>
+      args[0] === 'task' && ++calls <= times
+        ? { status: 1, stdout: '', stderr: 'server busy' }
+        : fakeRun(command, args, opts);
+  };
+
+  it('the first list fails, it reads again during the wait with a newer task → exit 3, no verify', () => {
+    const h = harness({ tasks: [t1], tasksDuringWait: newTask });
+    failingFirst(h);
+    expect(main(argv(), h.deps)).toBe(3);
+    expect(kinds(h)).toEqual(['wait']);
+    expect(records()[0].note).toContain('a newer task t-2 was created for this instance after task t-1');
+  });
+
+  it('the first list fails, no newer task once it reads → verified as before (negative control)', () => {
+    const h = harness({ tasks: [t1], tasksDuringWait: [t1] });
+    failingFirst(h);
+    expect(main(argv(), h.deps)).toBe(0);
+    expect(h.spawned.map((c) => c.args)[1]).toEqual(['verify', 'wt-1', '--task', 't-1', '--instance', 'claude']);
+  });
+
+  it('without --task, a baseline taken late is the task from before the call, not the newer one', () => {
+    const h = harness({ tasks: newTask });
+    failingFirst(h);
+    const noTask = argv().filter((a, i, all) => a !== '--task' && all[i - 1] !== '--task');
+    expect(main(noTask, h.deps)).toBe(3);
+    expect(records()[0].note).toContain('a newer task t-2 was created for this instance after task t-1');
+  });
+
+  it('the list never reads and no --task: the verification resolves its own task, as wait --verify would', () => {
+    const h = harness({ tasks: [t1] });
+    failingFirst(h, 99);
+    const noTask = argv().filter((a, i, all) => a !== '--task' && all[i - 1] !== '--task');
+    expect(main(noTask, h.deps)).toBe(0);
+    expect(h.spawned.map((c) => c.args)[1]).toEqual(['verify', 'wt-1', '--instance', 'claude']);
+  });
+
+  // Review 2-3: the server resolves --instance; its id is used for everything that follows.
+  it('--instance as an alias: the wait, the comparison, capture and Auto-Yes use the resolved id', () => {
     const codex = (id: string, minute: number) => ({ ...task(id, minute, 'codex-2'), cliToolId: 'codex' });
-    const h = harness({
-      instances: [{ instanceId: 'codex-2', alias: 'Codex 2', cliTool: 'codex' }],
+    const h = harness({ resolved: { 'codex 2': 'codex-2' }, tasks: [codex('t-1', -10)] });
+    const args = argv().map((a) => (a === 'claude' ? 'codex 2' : a));
+    expect(main(args, h.deps)).toBe(0);
+    expect(h.spawned[0].args).toEqual(['wait', 'wt-1', '--instance', 'codex-2', '--on-prompt', 'human', '--timeout', '10800']);
+    expect(h.autoYesCalls()).toEqual([['auto-yes', 'wt-1', '--disable', '--instance', 'codex-2']]);
+    const captures = h.ran.filter((c) => c.args[0] === 'capture');
+    expect(captures.length).toBeGreaterThan(0);
+    expect(captures.every((c) => c.args[c.args.indexOf('--instance') + 1] === 'codex-2')).toBe(true);
+
+    const detected = harness({
+      resolved: { 'codex 2': 'codex-2' },
       tasks: [codex('t-1', -10)],
       tasksDuringWait: [codex('t-2', 2), codex('t-1', -10)],
     });
-    const args = argv().map((a) => (a === 'claude' ? 'Codex 2' : a));
-    expect(main(args, h.deps)).toBe(3);
-    expect(h.spawned[0].args).toEqual(['wait', 'wt-1', '--instance', 'codex-2', '--on-prompt', 'human', '--timeout', '10800']);
-    expect(records()[0].note).toContain('a newer task t-2');
+    expect(main(args, detected.deps)).toBe(3);
   });
 
-  it('resolveInstance: ids stay, a unique alias resolves, anything else is left as given', () => {
-    const rows = [
-      { instanceId: 'codex-2', alias: 'Codex 2' },
-      { instanceId: 'claude', alias: 'Main' },
-      { instanceId: 'claude-2', alias: 'Main' },
-    ];
-    expect(resolveInstance(rows, 'claude')).toBe('claude');
-    expect(resolveInstance(rows, 'Codex 2')).toBe('codex-2');
-    expect(resolveInstance(rows, 'Main')).toBe('Main');
-    expect(resolveInstance(null, 'Codex 2')).toBe('Codex 2');
+  it('an --instance the server cannot resolve → exit 2, nothing sent, nothing waited for', () => {
+    const h = harness({ resolveError: "Instance 'Main' matches 2 roster entries" });
+    expect(main(argv(), h.deps)).toBe(2);
+    expect(h.spawned).toEqual([]);
+    expect(h.ran).toEqual([]);
+    expect(h.err.join('\n')).toMatch(/cannot resolve --instance 'claude' in wt-1: Instance 'Main' matches 2/);
+    expect(main(['--auto-yes-off', '--wt', 'wt-1', '--instance', 'claude'], h.deps)).toBe(2);
+    expect(h.ran).toEqual([]);
+  });
+
+  it('--auto-yes-off turns off the resolved instance', () => {
+    const h = harness({ resolved: { 'codex 2': 'codex-2' } });
+    expect(main(['--auto-yes-off', '--wt', 'wt-1', '--instance', 'codex 2'], h.deps)).toBe(0);
+    expect(h.autoYesCalls()).toEqual([['auto-yes', 'wt-1', '--disable', '--instance', 'codex-2']]);
   });
 
   it('baselineTask / newerTask compare creation times of the same instance', () => {
@@ -609,6 +680,8 @@ describe('a newer task on the same worktree ends the call without a verdict (#35
     expect(newerTask([task('t-4', -5)], 'claude', base)?.id).toBe('t-4');
     expect(newerTask([task('t-0', -20)], 'claude', base)).toBeNull();
     expect(baselineTask(null, 'claude', undefined, T0)).toEqual({ id: null, createdAt: T0, found: false });
+    // Without --task, a task created after the call started is not the baseline.
+    expect(baselineTask([task('t-2', 2), t1], 'claude', undefined, T0).id).toBe('t-1');
   });
 
   // Review 6: the same millisecond is ordered by the ledger (created_at DESC, rowid DESC).
@@ -692,5 +765,43 @@ describe('defaultRun with a time limit (#3587 review 4)', () => {
       status: 0,
       stdout: 'ok',
     });
+  });
+});
+
+describe('defaultResolveTarget asks the server through the CLI’s ApiClient (#3587 review 2-3)', () => {
+  // A stand-in for dist/cli/utils/api-client.js: answers the resolve-target path only.
+  const fakeDist = () => {
+    const dist = path.join(tmp, 'dist');
+    fs.mkdirSync(path.join(dist, 'cli', 'utils'), { recursive: true });
+    fs.writeFileSync(
+      path.join(dist, 'cli', 'utils', 'api-client.js'),
+      [
+        'class ApiClient {',
+        '  async get(p) {',
+        "    if (p === '/api/worktrees/wt-1/resolve-target?instance=codex%202') {",
+        "      return { cliToolId: 'codex', instanceId: 'codex-2', resolvedBy: 'alias', conflict: null };",
+        '    }',
+        "    throw new Error(`Instance matches 2 roster entries (${p})`);",
+        '  }',
+        '}',
+        'module.exports = { ApiClient };',
+        '',
+      ].join('\n')
+    );
+    return dist;
+  };
+
+  it('returns the instance id the route answers', () => {
+    expect(defaultResolveTarget('wt-1', 'codex 2', { cwd: tmp, distDir: fakeDist() })).toEqual({ instanceId: 'codex-2' });
+  });
+
+  it('an error from the route is an error, not the selector as given', () => {
+    const result = defaultResolveTarget('wt-1', 'Main', { cwd: tmp, distDir: fakeDist() });
+    expect(result).toHaveProperty('error');
+    expect((result as { error: string }).error).toMatch(/matches 2 roster entries/);
+  });
+
+  it('no CLI build to ask through is an error too', () => {
+    expect(defaultResolveTarget('wt-1', 'claude', { cwd: tmp, distDir: path.join(tmp, 'missing') })).toHaveProperty('error');
   });
 });
