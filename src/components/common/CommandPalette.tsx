@@ -578,8 +578,8 @@ export function CommandPalette() {
         // When closed, do not steal the keystroke from a text-entry context.
         if (isTypingTarget(event.target)) return;
         // Nor over another modal or an open menu (Issue #3585): two focus
-        // traps would fight. Checked only while closed — the palette's own
-        // dialog would otherwise count.
+        // traps would fight. Only the opening side is gated; closing is never
+        // suppressed by the modal check, so this sits after the open branch.
         if (isAnyModalOpen()) return;
         event.preventDefault();
         setOpen(true);
