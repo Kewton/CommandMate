@@ -21,7 +21,7 @@ CommandMate は、デスクトップとモバイルの両方に最適化され�
 
 | 画面 | レイアウト | 特徴 |
 |------|-----------|------|
-| **デスクトップ** | 3カラム構成 (ActivityBar / ActivityPane / Right(TerminalContainer 内 History)) | VS Code 風 全高 Activity Bar、即時 Tooltip、History は Terminal 領域に内包、リサイズ可能なペイン |
+| **デスクトップ** | 1 行のヘッダー + 2 段目の操作バー + 本文（TerminalContainer。ActivityPane は右から重ねて開く） | 道具はヘッダーの右、Verification は 2 段目の札、即時 Tooltip、History は Terminal 領域に内包、ピン留めで横に並ぶペイン |
 | **モバイル** | タブベース | ボトムナビゲーション |
 
 ---
@@ -48,41 +48,38 @@ CommandMate は、デスクトップとモバイルの両方に最適化され�
 
 ### レイアウト構成 (Issue #727 / #730)
 
-VS Code 流の全高 Activity Bar を採用。History は Terminal 領域に内包され、画面下端まで貫通します。
+> Issue #3589〜#3594 で現在の形になりました。縦の全高 Activity Bar（48px）は PC にはもうありません（スマホは下部のタブバーのままです）。
+
+見出しは 1 行で、worktree の道具はその右に並びます。2 段目は分割の操作バーです。パネル（ActivityPane）は既定で閉じており、開くと右から本文の上に重ねて出ます（ピンで固定すると本文の横に並び、本文が狭くなります）。
 
 ```
-┌───┬─────────────────────────────────────────────────┐
-│   │  [←Back]  worktree-name                  [Info] │ ← Header
-│ A │ ├─────────────────────────────────────────────┤  │
-│ c │ │ BranchMismatchAlert (条件付き)                │
-│ t │ ├──────────┬─────────────────┬──────────────────┤
-│ B │ │          │                 │                  │
-│ a │ │ Activity │ History         │ Terminal         │
-│ r │ │ Pane     │ (TerminalContainer 内, 左サブパネル) │ + FilePanel │
-│ ┃ │ │  - Files │ │  - Git        │                 │                  │
-│ ┃ │ │  - Notes │ │  - Schedules  │                 │                  │
-│ ┃ │ │  - Agent │ │  - Timer      │                 │                  │
-│ ┃ │ ├──────────┴─────────────────┴──────────────────┤
-│ ┃ │ │  NavigationButtons (条件付き, OpenCode TUI)    │
-│ ┃ │ ├─────────────────────────────────────────────┤  │
-│ ┃ │ │  [メッセージ入力]                      [送信] │
-└───┴─────────────────────────────────────────────────┘
-   ↑          ↑               ↑              ↑
-ActivityBar 全高  ActivityPane  History (折りたたみ可)  FilePanel
-(48px, Header下〜下端まで貫通)
+┌────────────────────────────────────────────────────────────────────┐
+│ ● worktree-name  repo  [今のセッション][ほか N ▾][＋] [Info] [道具…] │ ← ヘッダー（1 行）
+├────────────────────────────────────────────────────────────────────┤
+│ [▢][▥][▥▥][▦]  [Verification 札]  （分割 1 つ: 分割の見出し） [⤢] [履歴][開いているファイル] │ ← 2 段目（操作バー）
+├────────────────────────────────────────────────────────────────────┤
+│ BranchMismatchAlert (条件付き)                                       │
+├──────────────┬───────────────────────────────┬──────────────────────┤
+│ History      │ Terminal / Chat               │ FilePanel  ┌────────┐│
+│ (split 内,   │                               │            │Activity││
+│  折りたたみ可) │                               │            │Pane    ││
+│              ├───────────────────────────────┤            │(重ねて ││
+│              │ [メッセージ入力]        [送信] │            │ 開く)  ││
+└──────────────┴───────────────────────────────┴────────────┴────────┘
 ```
 
 ### 機能詳細
 
 #### 1. ヘッダー
-- **Back ボタン**: トップページ（Worktree 一覧）へ戻る
-- **Worktree 名**: 現在のブランチ/worktree 名を表示
+- **状態のドット・Worktree 名**: 名前の横にリポジトリ名（押すと Repositories 画面）。未コミットの変更があれば `*`
+- **セッションの欄**: ［今のセッション］［ほか N ▾］［＋］。進み具合（worktree の Status）はここではなく、サイドバーの行の「…」→ Status で変える
 - **Info ボタン**: Worktree 情報モーダルを開く
+- **道具**（右端）: 下記の Activity のうち `verification` 以外のアイコン。ヘッダーが狭いと末尾から「…」の一覧へ畳まれる
 
-#### 2. ActivityBar (48px, 全高貫通)
-- VS Code 流の縦型 Activity Bar
-- 10 Activity。**唯一の出所は `src/config/activity-bar-config.ts` の `ACTIVITIES`** で、下記はその写しです。並び順は Activity Bar の表示順であり、ArrowUp/ArrowDown の移動順でもあります（新しい Activity は末尾に追加すること。挿入すると既存のキーボード順序が黙って繰り上がります）。`tests/unit/docs/ui-ux-guide-activities-2062.test.ts` がこの一覧と `ACTIVITIES` の一致を固定しているので、Activity を増やしたらここも直してください。
-  1. `files` — ファイルツリー（Issue #2259: ヘッダの「開いているファイル」と区別するため改称。id は `files` のまま）
+#### 2. 道具（HeaderToolBar）と Verification の札
+- 以前の縦型 Activity Bar の中身を、ヘッダー右のアイコン（`HeaderToolBar`）と 2 段目の Verification の札（`VerificationStatusChip`）に分けた (Issue #3591)
+- 10 Activity。**唯一の出所は `src/config/activity-bar-config.ts` の `ACTIVITIES`** で、下記はその写しです。並び順はヘッダーの道具の表示順であり、←/→ の移動順でもあります（新しい Activity は末尾に追加すること。挿入すると既存のキーボード順序が黙って繰り上がります）。`tests/unit/docs/ui-ux-guide-activities-2062.test.ts` がこの一覧と `ACTIVITIES` の一致を固定しているので、Activity を増やしたらここも直してください。
+  1. `files` — ファイルツリー（Issue #2259: 操作バーの「開いているファイル」と区別するため改称。id は `files` のまま）
   2. `git` — Git
   3. `notes` — メモ
   4. `schedules` — スケジュール
@@ -90,15 +87,16 @@ ActivityBar 全高  ActivityPane  History (折りたたみ可)  FilePanel
   6. `timer` — タイマー
   7. `todo` — ToDo (Issue #1015)
   8. `skills` — スキル (Issue #1441)
-  9. `verification` — 検証 (Issue #1816)
+  9. `verification` — 検証 (Issue #1816)。ヘッダーの道具には出ず、2 段目の札を押して開閉する
   10. `env` — 環境変数 (Issue #1968)
-- Header の下から画面下端まで貫通 (Issue #730)
-- 各アイコンに即時 Tooltip (100ms, ダークテーマ, 右配置) (Issue #730)
-- キーボード操作: ArrowUp/Down/Home/End/Enter/Space
+- 各アイコンに即時 Tooltip (100ms, 下配置)
+- キーボード操作: ←/→/Home/End で移動、Enter/Space で開閉。「…」では Enter/Space/↓ で一覧を開き、一覧の中は ↑/↓、Esc で「…」へ戻る
+- 開いている道具をもう一度押すとペインが閉じる
 
 #### 3. ActivityPane (選択 Activity の描画)
-- 選択中の Activity の中身を表示
-- ResizableColumn でドラッグ可変幅
+- 選択中の Activity の中身を表示。既定では閉じている（初めて開く worktree も閉じた状態で始まる、Issue #3589）
+- 右から本文の上に重ねて開き、本文の幅は変わらない。Esc・×・同じ道具の再クリック・外側のクリック・ファイルを開く操作で閉じる
+- ピンで固定すると本文の横に並び（以前の形）、境界をドラッグして幅を変えられる。ピンの有無は worktree をまたいで共通
 
 #### 4. TerminalContainer (Right Pane, Issue #730)
 - History (左サブパネル) + Terminal + FilePanel (右) を内包
@@ -108,7 +106,7 @@ ActivityBar 全高  ActivityPane  History (折りたたみ可)  FilePanel
 - 内部 id `worktree-history-pane` は HistoryPane 外側 wrapper div に付与
 
 #### 5. リサイズ機能
-- ActivityPane と TerminalContainer の境界をドラッグして幅を調整
+- ピンで固定した ActivityPane と TerminalContainer の境界をドラッグして幅を調整
 - TerminalContainer 内では History と Terminal の境界をドラッグ
 - ドラッグ中は視覚的フィードバック
 
@@ -242,9 +240,10 @@ src/components/
 ├── common/
 │   └── Tooltip.tsx              # 100ms 遅延カスタム Tooltip (Issue #730)
 ├── worktree/
-│   ├── WorktreeDetailRefactored.tsx  # メインコンポーネント (ActivityBar 全高貫通: Issue #730)
-│   ├── WorktreeDesktopLayout.tsx     # デスクトップ 2 カラム (ActivityPane + Right) — Issue #730 で簡素化
-│   ├── ActivityBar.tsx               # VS Code 風 Activity Bar (Issue #727)、Tooltip ラップ (Issue #730)
+│   ├── WorktreeDetailRefactored.tsx  # メインコンポーネント（PC は WorktreeDetailDesktop へ委譲）
+│   ├── WorktreeDesktopLayout.tsx     # 本文 + ActivityPane（重ねる / ピン留めで横に並ぶ、Issue #3589 / #3591）
+│   ├── HeaderToolBar.tsx             # ヘッダー右の道具 (Issue #3591。旧 ActivityBar.tsx は未マウント)
+│   ├── VerificationStatusChip.tsx    # 2 段目の Verification の札 (Issue #1816 / #2064 / #3590)
 │   ├── ActivityPane.tsx              # 選択 Activity の描画コンテナ (Issue #727)
 │   ├── TerminalContainer.tsx         # History + Terminal 内包コンテナ (Issue #730)
 │   ├── TerminalDisplay.tsx           # ターミナル表示
