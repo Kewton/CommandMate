@@ -57,6 +57,7 @@ import { useSwipeGesture } from '@/hooks/useSwipeGesture';
 import { useVirtualKeyboard } from '@/hooks/useVirtualKeyboard';
 import { useCopyFeedback } from '@/hooks/useCopyFeedback';
 import { Z_INDEX } from '@/config/z-index';
+import { isUnhandledEscape } from '@/lib/escape-key';
 import { applyIndent, applyOutdent, type IndentEdit } from '@/lib/editor/indent';
 import type { EditorProps, EditorFileType, ViewMode } from '@/types/markdown-editor';
 import {
@@ -658,7 +659,7 @@ export const MarkdownEditor = memo(function MarkdownEditor({
         return;
       }
 
-      if (e.key === 'Escape' && isMaximized) {
+      if (isUnhandledEscape(e.nativeEvent) && isMaximized) {
         e.preventDefault();
         exitFullscreen();
         return;
@@ -812,7 +813,7 @@ export const MarkdownEditor = memo(function MarkdownEditor({
   // Global ESC key handler for maximized mode
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && isMaximized) {
+      if (isUnhandledEscape(e) && isMaximized) {
         e.preventDefault();
         exitFullscreen();
       }

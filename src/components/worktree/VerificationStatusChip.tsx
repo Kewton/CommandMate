@@ -1,3 +1,4 @@
+
 /**
  * VerificationStatusChip (Issue #1816, Issue #2064)
  *
@@ -58,6 +59,7 @@ import type {
   VerificationGateResultView,
   VerificationRunListItem,
 } from '@/lib/api/verification-api';
+import { isUnhandledEscape } from '@/lib/escape-key';
 
 /** Characters of the task title kept inline before ellipsis. */
 const TITLE_MAX_LENGTH = 36;
@@ -258,11 +260,10 @@ export const VerificationStatusChip = memo(function VerificationStatusChip({
       setReasonOpen(false);
     };
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
       // Issue #3592: an Escape a layer above already handled (a menu closing
       // itself — Radix calls `preventDefault`) is not ours to act on.
       // Issue #3591: the header tools' "…" list closing itself is one too.
-      if (event.defaultPrevented) return;
+      if (!isUnhandledEscape(event)) return;
       setReasonOpen(false);
     };
     document.addEventListener('mousedown', onPointerDown);

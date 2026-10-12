@@ -5,14 +5,13 @@
  * This module is consumed by:
  *   - `src/hooks/useActivityBarState.ts`
  *   - `src/components/worktree/HeaderToolBar.tsx` (PC, Issue #3591)
- *   - `src/components/worktree/ActivityBar.tsx` (no longer mounted on PC)
  *   - `src/components/worktree/ActivityPane.tsx`
  *   - `src/components/worktree/WorktreeDetailRefactored.tsx`
  *
  * The Activity Bar was a 48px-wide vertical bar that hosted the activities
  * below. Issue #3591: on PC they are icons at the right of the worktree header
  * ({@link HEADER_TOOLS}) and the Verification chip; the names below keep the
- * "activity bar" wording (storage keys, test helpers, the mobile tabs).
+ * "activity bar" wording (storage keys, test helpers).
  * Re-clicking the active icon toggles the ActivityPane closed (null).
  */
 
@@ -46,7 +45,7 @@ export interface ActivityDefinition {
    *
    * The label is stored as a KEY rather than a literal because `t()` cannot be
    * called at module scope; consumers resolve it at render time via
-   * `useTranslations('worktree')` — see `ActivityBar.tsx`.
+   * `useTranslations('worktree')` — see `HeaderToolBar.tsx`.
    */
   labelKey: string;
   /** Lucide icon component reference */
@@ -54,9 +53,10 @@ export interface ActivityDefinition {
 }
 
 /**
- * Ordered list of activities rendered top-to-bottom in the Activity Bar.
- * The order here is the visual order in the ActivityBar UI and the keyboard
- * navigation order (ArrowDown/ArrowUp).
+ * Ordered list of activities. The order here is the visual order of the
+ * header tools ({@link HEADER_TOOLS}, drawn by `HeaderToolBar.tsx`) and the
+ * keyboard navigation order (ArrowLeft/ArrowRight in the header). The mobile
+ * tab bar has its own list and does not follow it.
  */
 export const ACTIVITIES: readonly ActivityDefinition[] = [
   // Issue #2616: the two-sheet `Files`, not the single-sheet `File` — at 20px
@@ -108,8 +108,8 @@ export const VALID_ACTIVITY_IDS: ReadonlySet<ActivityId> = new Set<ActivityId>(
 );
 
 /**
- * The first activity in the bar — where keyboard focus lands when no activity
- * is open (`ActivityBar`'s roving tabindex).
+ * The first activity — where keyboard focus lands when no activity is open
+ * (`HeaderToolBar`'s roving tabindex).
  *
  * Issue #3589: no longer what an unvisited worktree opens. That is
  * {@link INITIAL_ACTIVITY} (closed), so the terminal starts at full width.

@@ -1,3 +1,4 @@
+
 /**
  * useActivityPaneOverlay (Issue #3589)
  *
@@ -68,6 +69,7 @@ import {
   type SyntheticEvent,
 } from 'react';
 import { isAnyModalOpen } from '@/lib/new-task/modal-open';
+import { isUnhandledEscape } from '@/lib/escape-key';
 
 /**
  * A floating layer that is up and owns the next press / Esc, but is not a
@@ -237,7 +239,7 @@ export function usePaneOverlayDismiss({
     };
 
     const handleKeyDown = (event: KeyboardEvent): void => {
-      if (event.key !== 'Escape' || event.defaultPrevented) return;
+      if (!isUnhandledEscape(event)) return;
       if (isBlockingLayerOpen()) return;
       const target = event.target;
       const fromPanel = target instanceof Node && panelRef.current?.contains(target) === true;

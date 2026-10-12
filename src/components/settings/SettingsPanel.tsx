@@ -61,7 +61,7 @@ export function SettingsQuickLinksSection({ onNavigate }: { onNavigate?: () => v
         >
           <Card hover className="transition-colors hover:border-accent-300 dark:hover:border-accent-700">
             <div className="text-sm font-medium text-foreground">Repositories</div>
-            <div className="text-xs text-muted-foreground">Manage repositories and worktrees</div>
+            <div className="text-xs text-muted-foreground">{tCommon('repositories.pageDescription')}</div>
           </Card>
         </Link>
         <Link href="/skills" className="block" data-testid="more-link-skills" onClick={onNavigate}>
