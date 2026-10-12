@@ -11,7 +11,7 @@
  * The Activity Bar was a 48px-wide vertical bar that hosted the activities
  * below. Issue #3591: on PC they are icons at the right of the worktree header
  * ({@link HEADER_TOOLS}) and the Verification chip; the names below keep the
- * "activity bar" wording (storage keys, test helpers, the mobile tabs).
+ * "activity bar" wording (storage keys, test helpers).
  * Re-clicking the active icon toggles the ActivityPane closed (null).
  */
 
@@ -54,8 +54,9 @@ export interface ActivityDefinition {
 
 /**
  * Ordered list of activities. The order here is the visual order of the
- * header tools (`HeaderToolBar.tsx`) and of the mobile tabs, and the keyboard
- * navigation order (ArrowLeft/ArrowRight in the header).
+ * header tools ({@link HEADER_TOOLS}, drawn by `HeaderToolBar.tsx`) and the
+ * keyboard navigation order (ArrowLeft/ArrowRight in the header). The mobile
+ * tab bar has its own list and does not follow it.
  */
 export const ACTIVITIES: readonly ActivityDefinition[] = [
   // Issue #2616: the two-sheet `Files`, not the single-sheet `File` — at 20px
