@@ -1990,7 +1990,9 @@ curl -sS "http://127.0.0.1:4942/session/$SID/message?limit=3"   # 3,468 bytes、
 - `src/lib/session/current-output-builder.ts` — `structuredEvents.sessionContext` として publish
 - `src/cli/types/api-responses.ts` — CLI 側ミラー
 - UI — pane header に `agent · model` と `$0.03 · 8.5K (1%)` の 2 chip、
-  desktop header の instance pill は **tooltip のみ**（`MAX_HEADER_AGENT_PILLS` の幅予算を動かさないため）
+  desktop header の instance pill は **tooltip のみ**（`MAX_HEADER_AGENT_PILLS` の幅予算を動かさないため。
+  この定数と pill の並びは #3593 で削除され、今はヘッダーのセッションの欄 `HeaderSessionSwitcher` の
+  ［今のセッション］の tooltip に出る）
 
 refresh が 1 ターンに 1 回で済むのは、stale 判定を時計ではなく `record.at` にしているから。
 `session.updated` は 1 ターンに数フレームしか来ないので、誰も喋っていないセッションは 1 リクエストも出さない。
