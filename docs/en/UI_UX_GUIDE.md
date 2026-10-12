@@ -21,7 +21,7 @@ CommandMate provides a responsive UI optimized for both desktop and mobile.
 
 | Screen | Layout | Features |
 |--------|--------|----------|
-| **Desktop** | 3-column (ActivityBar / ActivityPane / Right (History inside TerminalContainer)) | VS Code-style full-height Activity Bar, instant Tooltip, History embedded in the Terminal area, resizable panes |
+| **Desktop** | One-row header + second-row action bar + body (TerminalContainer; the ActivityPane opens from the right, over it) | Tools at the right of the header, Verification chip on the second row, instant Tooltip, History embedded in the Terminal area, a pane that sits beside the body when pinned |
 | **Mobile** | Tab-based | Bottom navigation |
 
 ---
@@ -48,47 +48,55 @@ The `useIsMobile` hook automatically switches layouts based on screen size.
 
 ### Layout Structure (Issue #727 / #730)
 
-Adopts a VS Code-style full-height Activity Bar. History is embedded in the Terminal area and runs down to the bottom of the screen.
+> Issues #3589–#3594 gave the screen its current shape. The full-height vertical Activity Bar (48px) is gone from PC (the phone keeps its bottom tab bar).
+
+The header is one row, with the worktree's tools at its right. The second row is the splits' action bar. The panel (ActivityPane) is closed by default; opened, it comes in from the right, laid over the body (pin it and it sits beside the body instead, narrowing it).
 
 ```
-┌───┬─────────────────────────────────────────────────┐
-│   │  [←Back]  worktree-name                  [Info] │ ← Header
-│ A │ ├─────────────────────────────────────────────┤  │
-│ c │ │ BranchMismatchAlert (conditional)             │
-│ t │ ├──────────┬─────────────────┬──────────────────┤
-│ B │ │          │                 │                  │
-│ a │ │ Activity │ History         │ Terminal         │
-│ r │ │ Pane     │ (inside TerminalContainer, left sub-panel) │ + FilePanel │
-│ ┃ │ │  - Files │ │  - Git        │                 │                  │
-│ ┃ │ │  - Notes │ │  - Schedules  │                 │                  │
-│ ┃ │ │  - Agent │ │  - Timer      │                 │                  │
-│ ┃ │ ├──────────┴─────────────────┴──────────────────┤
-│ ┃ │ │  NavigationButtons (conditional, OpenCode TUI) │
-│ ┃ │ ├─────────────────────────────────────────────┤  │
-│ ┃ │ │  [Message Input]                       [Send] │
-└───┴─────────────────────────────────────────────────┘
-   ↑          ↑               ↑              ↑
-ActivityBar full-height  ActivityPane  History (collapsible)  FilePanel
-(48px, runs from below Header to bottom)
+┌────────────────────────────────────────────────────────────────────┐
+│ ● worktree-name  repo  [current session][N others ▾][+] [Info] [tools…] │ ← Header (one row)
+├────────────────────────────────────────────────────────────────────┤
+│ [▢][▥][▥▥][▦]  [Verification chip]  (one split: its header) [⤢] [History][Open Files] │ ← Second row (action bar)
+├────────────────────────────────────────────────────────────────────┤
+│ BranchMismatchAlert (conditional)                                    │
+├──────────────┬───────────────────────────────┬──────────────────────┤
+│ History      │ Terminal / Chat               │ FilePanel  ┌────────┐│
+│ (in a split, │                               │            │Activity││
+│  collapsible)│                               │            │Pane    ││
+│              ├───────────────────────────────┤            │(laid   ││
+│              │ [Message Input]        [Send] │            │ over)  ││
+└──────────────┴───────────────────────────────┴────────────┴────────┘
 ```
 
 ### Feature Details
 
 #### 1. Header
-- **Back button**: Return to the top page (Worktree list)
-- **Worktree name**: Displays the current branch/worktree name
+- **Status dot and worktree name**: the repository name beside it (opens the Repositories screen); `*` when there are uncommitted changes
+- **Session field**: [current session][N others ▾][+]. The worktree's progress (Status) is not set here but from the sidebar row's "…" → Status
 - **Info button**: Opens the Worktree info modal
+- **Tools** (right end): the icons of the activities below except `verification`. On a narrow header the trailing ones fold into a "…" list
 
-#### 2. ActivityBar (48px, full-height)
-- VS Code-style vertical Activity Bar
-- 6 Activities: Files / Git / Notes / Schedules / Agent / Timer
-- Runs from below the Header to the bottom of the screen (Issue #730)
-- Instant Tooltip on each icon (100ms, dark theme, right placement) (Issue #730)
-- Keyboard navigation: ArrowUp/Down/Home/End/Enter/Space
+#### 2. Tools (HeaderToolBar) and the Verification chip
+- What the vertical Activity Bar held is split between the icons at the right of the header (`HeaderToolBar`) and the Verification chip on the second row (`VerificationStatusChip`) (Issue #3591)
+- 10 Activities. **The single source is `ACTIVITIES` in `src/config/activity-bar-config.ts`**; the list below is a copy. Its order is the order of the header's tools and of the ←/→ keys (append new activities at the end — an insert silently renumbers the keyboard order).
+  1. `files` — File Tree (Issue #2259: renamed to tell it apart from the action bar's "Open Files"; the id stays `files`)
+  2. `git` — Git
+  3. `notes` — Notes
+  4. `schedules` — Schedules
+  5. `agent` — Agent
+  6. `timer` — Timer
+  7. `todo` — ToDo (Issue #1015)
+  8. `skills` — Skills (Issue #1441)
+  9. `verification` — Verification (Issue #1816). Not among the header's tools; pressing the second-row chip opens and closes it
+  10. `env` — Env (Issue #1968)
+- Instant Tooltip on each icon (100ms, below)
+- Keyboard: ←/→/Home/End to move, Enter/Space to open/close. On "…", Enter/Space/↓ open the list; inside it ↑/↓ move and Esc returns to "…"
+- Pressing the open tool again closes the pane
 
 #### 3. ActivityPane (renders the selected Activity)
-- Displays the content of the currently selected Activity
-- Drag-resizable width via ResizableColumn
+- Displays the content of the currently selected Activity. Closed by default (a worktree opened for the first time starts closed, Issue #3589)
+- Opens from the right over the body, whose width does not change. Esc, ×, re-clicking the same tool, an outside click or opening a file closes it
+- Pinned, it sits beside the body (the earlier layout) and its boundary can be dragged. The pin is shared across worktrees
 
 #### 4. TerminalContainer (Right Pane, Issue #730)
 - Embeds History (left sub-panel) + Terminal + FilePanel (right)
@@ -98,7 +106,7 @@ ActivityBar full-height  ActivityPane  History (collapsible)  FilePanel
 - The internal id `worktree-history-pane` is applied to the HistoryPane outer wrapper div
 
 #### 5. Resize Feature
-- Drag the boundary between ActivityPane and TerminalContainer to adjust width
+- Drag the boundary between a pinned ActivityPane and the TerminalContainer to adjust width
 - Inside the TerminalContainer, drag the boundary between History and Terminal
 - Visual feedback during drag
 
@@ -232,9 +240,10 @@ src/components/
 ├── common/
 │   └── Tooltip.tsx              # 100ms-delay custom Tooltip (Issue #730)
 ├── worktree/
-│   ├── WorktreeDetailRefactored.tsx  # Main component (ActivityBar full-height: Issue #730)
-│   ├── WorktreeDesktopLayout.tsx     # Desktop 2-column (ActivityPane + Right) — simplified in Issue #730
-│   ├── ActivityBar.tsx               # VS Code-style Activity Bar (Issue #727), Tooltip wrap (Issue #730)
+│   ├── WorktreeDetailRefactored.tsx  # Main component (PC delegates to WorktreeDetailDesktop)
+│   ├── WorktreeDesktopLayout.tsx     # Body + ActivityPane (laid over / beside when pinned, Issue #3589 / #3591)
+│   ├── HeaderToolBar.tsx             # Tools at the right of the header (Issue #3591; the old ActivityBar.tsx is not mounted)
+│   ├── VerificationStatusChip.tsx    # Second-row Verification chip (Issue #1816 / #2064 / #3590)
 │   ├── ActivityPane.tsx              # Renders the selected Activity (Issue #727)
 │   ├── TerminalContainer.tsx         # History + Terminal container (Issue #730)
 │   ├── TerminalDisplay.tsx           # Terminal display
