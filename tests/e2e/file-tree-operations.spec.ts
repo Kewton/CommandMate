@@ -29,7 +29,7 @@ test.describe('File Tree Operations', () => {
       await page.waitForTimeout(500);
 
       // Switch to Files tab
-      const filesTab = page.getByRole('button', { name: /Files/i });
+      const filesTab = page.getByTestId('header-tool-files');
       if (await filesTab.count() > 0) {
         await filesTab.click();
         await page.waitForTimeout(500);
@@ -53,7 +53,7 @@ test.describe('File Tree Operations', () => {
       await worktreeCards.first().click();
       await page.waitForTimeout(500);
 
-      const filesTab = page.getByRole('button', { name: /Files/i });
+      const filesTab = page.getByTestId('header-tool-files');
       if (await filesTab.count() === 0) return;
 
       await filesTab.click();
@@ -88,7 +88,7 @@ test.describe('File Tree Operations', () => {
       await worktreeCards.first().click();
       await page.waitForTimeout(500);
 
-      const filesTab = page.getByRole('button', { name: /Files/i });
+      const filesTab = page.getByTestId('header-tool-files');
       if (await filesTab.count() > 0) {
         await filesTab.click();
 
@@ -115,7 +115,7 @@ test.describe('File Tree Operations', () => {
       await worktreeCards.first().click();
       await page.waitForTimeout(500);
 
-      const filesTab = page.getByRole('button', { name: /Files/i });
+      const filesTab = page.getByTestId('header-tool-files');
       if (await filesTab.count() === 0) return;
 
       await filesTab.click();
@@ -146,7 +146,7 @@ test.describe('File Tree Operations', () => {
       await worktreeCards.first().click();
       await page.waitForTimeout(500);
 
-      const filesTab = page.getByRole('button', { name: /Files/i });
+      const filesTab = page.getByTestId('header-tool-files');
       if (await filesTab.count() === 0) return;
 
       await filesTab.click();
@@ -190,7 +190,7 @@ test.describe('File Tree Operations', () => {
       await worktreeCards.first().click();
       await page.waitForTimeout(500);
 
-      const filesTab = page.getByRole('button', { name: /Files/i });
+      const filesTab = page.getByTestId('header-tool-files');
       if (await filesTab.count() === 0) return;
 
       await filesTab.click();
@@ -233,7 +233,7 @@ test.describe('File Tree Operations', () => {
       await worktreeCards.first().click();
       await page.waitForTimeout(500);
 
-      const filesTab = page.getByRole('button', { name: /Files/i });
+      const filesTab = page.getByTestId('header-tool-files');
       if (await filesTab.count() === 0) return;
 
       await filesTab.click();
@@ -270,7 +270,7 @@ test.describe('File Tree Operations', () => {
       await worktreeCards.first().click();
       await page.waitForTimeout(500);
 
-      const filesTab = page.getByRole('button', { name: /Files/i });
+      const filesTab = page.getByTestId('header-tool-files');
       if (await filesTab.count() === 0) return;
 
       await filesTab.click();
@@ -309,7 +309,7 @@ test.describe('File Tree Operations', () => {
       await worktreeCards.first().click();
       await page.waitForTimeout(500);
 
-      const filesTab = page.getByRole('button', { name: /Files/i });
+      const filesTab = page.getByTestId('header-tool-files');
       if (await filesTab.count() === 0) return;
 
       await filesTab.click();
@@ -350,7 +350,7 @@ test.describe('File Tree Operations', () => {
       await worktreeCards.first().click();
       await page.waitForTimeout(500);
 
-      const filesTab = page.getByRole('button', { name: /Files/i });
+      const filesTab = page.getByTestId('header-tool-files');
       if (await filesTab.count() === 0) return;
 
       await filesTab.click();
@@ -393,7 +393,7 @@ test.describe('File Tree Operations', () => {
       await worktreeCards.first().click();
       await page.waitForTimeout(500);
 
-      const filesTab = page.getByRole('button', { name: /Files/i });
+      const filesTab = page.getByTestId('header-tool-files');
       if (await filesTab.count() === 0) return;
 
       await filesTab.click();
@@ -421,7 +421,7 @@ test.describe('File Tree Operations', () => {
       await worktreeCards.first().click();
       await page.waitForTimeout(500);
 
-      const filesTab = page.getByRole('button', { name: /Files/i });
+      const filesTab = page.getByTestId('header-tool-files');
       if (await filesTab.count() === 0) return;
 
       await filesTab.click();
@@ -449,7 +449,7 @@ test.describe('File Tree Operations', () => {
       await worktreeCards.first().click();
       await page.waitForTimeout(500);
 
-      const filesTab = page.getByRole('button', { name: /Files/i });
+      const filesTab = page.getByTestId('header-tool-files');
       if (await filesTab.count() === 0) return;
 
       await filesTab.click();
