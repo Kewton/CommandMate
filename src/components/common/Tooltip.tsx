@@ -41,12 +41,17 @@
  *     `onKeyDown` would never see the key. It neither `preventDefault`s nor
  *     `stopPropagation`s, so a consumer's own Escape handling (closing a modal,
  *     leaving a terminal mode) still runs.
+ *   - [Issue #3611] An Escape a layer above already claimed (`defaultPrevented`
+ *     — a menu or list closing itself) leaves the bubble alone. The listener
+ *     is on `window` in the bubble phase, so every document-level layer has
+ *     handled the press first.
  */
 
 'use client';
 
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { isUnhandledEscape } from '@/lib/escape-key';
 
 /** Delay in milliseconds before the tooltip becomes visible after hover. */
 export const TOOLTIP_DELAY_MS = 100;
@@ -297,7 +302,8 @@ export function Tooltip({
   useEffect(() => {
     if (!visible) return;
     const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') dismiss();
+      // Issue #3611: a layer above that closed itself on this press owns it.
+      if (isUnhandledEscape(event)) dismiss();
     };
     window.addEventListener('keydown', onKeyDown);
     return () => {
