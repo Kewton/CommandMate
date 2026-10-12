@@ -49,6 +49,7 @@ node scripts/orchestrate/consistency-review.mjs --run-dir "workspace/orchestrati
   ready を 3 回続けて読むまで待つ → `ask <wt> <依頼文> --instance codex --timeout 2400 --json` → 返答の本文（行頭の `> **Thinking (` より前。
   本文が `> **Thinking**` を引用していても切れない）を `review-<N>.md` に保存（2 回目からは `review-<N>b.md`・`c`…。依頼文・JSON・stderr も同じ名前で残す）→
   `DONE:` 行があれば下の表に 1 行を足し、run の記録に `review=ok`、無ければ・依頼が失敗したら `review=fail`。exit は 0（`DONE:` あり）／1（失敗。記録済み）／2（引数の誤り。何も送らない）。
+  レビューの相手を変えるとき（Codex の `stream disconnected` が続くときなど）は `--instance codex-2` を足す（既定 `codex`）。capture・ask・記録の agent・ロック（`.lock-<id>`）が同じ値になるので、`--cli` のラッパーは要らない（#3618）。
   表の「独自の発見」から「事前レビューの有無」までの列は `未` で入るので、返答を読んで埋める
 - **数え方（期限の集計で使う）:** 延べではなく、重複・既報（ワーカーが報告済み・5-3 で処置できた）を除いた「レビューの独自の発見」を、**動作／説明／テスト** と **新規／既存** の 2 軸で数える。指摘の正しさは、一部を別の判定者（Codex と Claude の相互）で再判定する。費用は 1 本あたり、待ち時間・再指示・修正を含めた総時間で測る。後の段（CI・ガード・実機・UAT）で見つかった漏れも記録する
 

@@ -107,3 +107,8 @@ git diff origin/develop...HEAD -- 'tests/**' | grep -cE '^-\s*(it|describe|test)
 ```
 
 0 でなければ、差分を読んで意図を確かめる（名前の変更・移動なら理由が本文かコミットメッセージにあるか）。
+
+## squash のコミットの題名
+
+`merge-pr.mjs` は `gh pr merge --squash --subject "<PR タイトル> (#<PR 番号>)"` で題名を渡す（タイトルが既に `(#<PR 番号>)` で終わるなら二重にしない）。
+fold が載った HEAD では従来どおりワーカーの題名を使う（publish-pr が PR タイトルにも同じ題名を使う）。マージ後の develop のコミットの題名は PR の題名と一致する（#3618）。

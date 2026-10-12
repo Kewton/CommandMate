@@ -68,6 +68,13 @@ export const UNIT_CHECK = 'Unit Tests';
 /** `bucket` values that settle a check without failing it. */
 const SETTLED_OK = ['pass', 'skipping'];
 
+/** The squash commit's subject: the PR title ending in `(#<PR>)`, once. */
+export function squashSubject(title, number) {
+  const t = String(title ?? '').trim();
+  if (!t) return '';
+  return t.endsWith(`(#${number})`) ? t : `${t} (#${number})`;
+}
+
 /**
  * 6-3 over `gh pr checks --json name,bucket,link`.
  *
@@ -378,12 +385,14 @@ export function main(argv, deps = {}) {
     record('ci', 'ok', head, `checks=${verdict.summary} build=${needBuild ? 'pass' : 'precheck'} unit=${need.needUnit ? 'pass' : '-'}${o.last ? ' last=all-pass' : ''}`, workHead);
 
     // 6. Merge exactly this HEAD, then the Issue.
-    // A fold (6-4) on top of the work must not name the squash commit: with a
-    // distinct work HEAD, pass its subject the way GitHub words its default.
-    const subject = workHead && workHead !== head ? git(run, o.worktree, ['log', '-1', '--format=%s', workHead]).trim() : '';
+    // The squash commit is named after the PR: a fold (6-4) on top of the work
+    // must not name it, so with a distinct work HEAD the worker's subject is
+    // used (publish-pr titled the PR the same way); otherwise the PR title.
+    const folded = workHead && workHead !== head ? git(run, o.worktree, ['log', '-1', '--format=%s', workHead]).trim() : '';
+    const subject = squashSubject(folded || String(pr.title ?? ''), pr.number);
     const merged = run('gh', [
       'pr', 'merge', String(pr.number), '--repo', o.repo, '--squash', '--match-head-commit', head,
-      ...(subject ? ['--subject', `${subject} (#${pr.number})`] : []),
+      ...(subject ? ['--subject', subject] : []),
     ]);
     if (merged.status !== 0) {
       record('merge', 'fail', head, `pr=#${pr.number} gh-merge-failed`, workHead);

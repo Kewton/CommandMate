@@ -12,7 +12,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { appendRecord, readRecords, summarize } from '../../../../scripts/orchestrate/run-log.mjs';
-import { judgeChecks, judgedByUnitRelated, main, parseArgs, runIdsOf, validate } from '../../../../scripts/orchestrate/merge-pr.mjs';
+import { judgeChecks, judgedByUnitRelated, main, parseArgs, runIdsOf, squashSubject, validate } from '../../../../scripts/orchestrate/merge-pr.mjs';
 import { workHeads } from '../../../../scripts/orchestrate/pr-common.mjs';
 import { DEVELOP, HEAD_A, HEAD_B, HEAD_M, type Check, fakeGit, openPr } from './pr-fake';
 
@@ -297,6 +297,28 @@ describe('main: squash subject over a fold', () => {
   });
 });
 
+describe('main: squash subject is the PR title', () => {
+  const run = (title: string) => {
+    recordReady();
+    const fake = fakeGit({ head: HEAD_A, prs: [openPr({ title })], checks: [GREEN] });
+    expect(runMain(fake).code).toBe(0);
+    return fake.ghCalls('pr merge')[0].args;
+  };
+
+  it('passes the PR title with (#<PR>) as --subject', () => {
+    expect(run('feat: 題名').slice(-2)).toEqual(['--subject', 'feat: 題名 (#4242)']);
+  });
+
+  it('does not repeat (#<PR>) when the title already ends with it', () => {
+    expect(run('feat: 題名 (#4242)').slice(-2)).toEqual(['--subject', 'feat: 題名 (#4242)']);
+  });
+
+  it('keeps the other issue number in a title and still appends the PR number', () => {
+    expect(squashSubject('feat: x (#3477)', 4242)).toBe('feat: x (#3477) (#4242)');
+    expect(squashSubject('', 4242)).toBe('');
+  });
+});
+
 describe('main: merges once', () => {
   it('merges the HEAD with --squash and closes the Issue (negative control)', () => {
     recordReady();
@@ -304,7 +326,7 @@ describe('main: merges once', () => {
     expect(runMain(fake).code).toBe(0);
     const merge = fake.ghCalls('pr merge');
     expect(merge).toHaveLength(1);
-    expect(merge[0].args).toEqual(['pr', 'merge', '4242', '--repo', 'Kewton/CommandMate', '--squash', '--match-head-commit', HEAD_A]);
+    expect(merge[0].args).toEqual(['pr', 'merge', '4242', '--repo', 'Kewton/CommandMate', '--squash', '--match-head-commit', HEAD_A, '--subject', 'feat(orchestrate): publish and merge (#3477) (#4242)']);
     expect(merge[0].args).not.toContain('--auto');
     expect(fake.ghCalls('issue close')).toHaveLength(1);
     expect(fake.gitCalls('push')).toHaveLength(0);

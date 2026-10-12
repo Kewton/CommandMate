@@ -16,7 +16,7 @@
  * did by hand:
  *   1. takes the Codex lock (`workspace/proposals/<date>/.lock`, mkdir), which
  *      every Codex ask of the day shares — the session is used one ask at a time;
- *   2. waits until `capture --instance codex --json` reads `ready` three times
+ *   2. waits until `capture --instance <id> --json` (`--instance`, default codex) reads `ready` three times
  *      in a row;
  *   3. sends the brief built from templates/consistency-review.md (or
  *      consistency-review-rereview.md with the previous answer) with
@@ -224,10 +224,10 @@ function acquireLock(lock, { sleep, now }) {
 }
 
 /** Wait until the reviewer reads `ready` READY_STREAK times in a row; false if it never does. */
-function waitReady({ run, sleep, cli, wt, cwd }) {
+function waitReady({ run, sleep, cli, wt, cwd, instance }) {
   let streak = 0;
   for (let i = 0; i < READY_MAX_POLLS; i++) {
-    const out = run(cli, ['capture', wt, '--instance', REVIEWER_INSTANCE, '--json'], { cwd });
+    const out = run(cli, ['capture', wt, '--instance', instance, '--json'], { cwd });
     let status = null;
     try {
       status = out.status === 0 ? JSON.parse(out.stdout).sessionStatus : null;
@@ -243,7 +243,7 @@ function waitReady({ run, sleep, cli, wt, cwd }) {
 
 const USAGE = `Usage:
   node scripts/orchestrate/consistency-review.mjs --run-dir <dir> --issues <range> --issue <N> --head <sha> --brief <file>
-       [--rereview --previous <review md>] [--worktree <path>] [--wt <reviewer worktree-id>] [--lock <dir>] [--cli <commandmatedev>]`;
+       [--rereview --previous <review md>] [--worktree <path>] [--wt <reviewer worktree-id>] [--lock <dir>] [--cli <commandmatedev>] [--instance <id>]`;
 
 const FLAGS = {
   '--run-dir': 'runDir',
@@ -256,11 +256,12 @@ const FLAGS = {
   '--wt': 'wt',
   '--lock': 'lock',
   '--cli': 'cli',
+  '--instance': 'instance',
 };
 const SWITCHES = { '--rereview': 'rereview' };
 
 export function parseArgs(argv) {
-  const options = { rereview: false, wt: DEFAULT_REVIEWER_WT, cli: 'commandmatedev' };
+  const options = { rereview: false, wt: DEFAULT_REVIEWER_WT, cli: 'commandmatedev', instance: REVIEWER_INSTANCE };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (SWITCHES[arg]) options[SWITCHES[arg]] = true;
@@ -275,6 +276,7 @@ export function parseArgs(argv) {
   } catch (err) {
     return { error: err.message };
   }
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(options.instance)) return { error: `--instance must be an instance id (got ${options.instance})` };
   if (!/^[1-9]\d*$/.test(options.issue)) return { error: `--issue must be a positive integer (got ${options.issue})` };
   if (!/^[0-9a-f]{7,40}$/.test(options.head)) return { error: `--head must be a commit sha (got ${options.head})` };
   if (options.rereview && !options.previous) return { error: '--rereview needs --previous <review md>' };
@@ -309,7 +311,7 @@ export function main(argv, deps = {}) {
   const o = parsed.options;
   const issue = Number(o.issue);
   const worktree = path.resolve(cwd, o.worktree ?? path.join('..', `commandmate-issue-${issue}`));
-  const lock = path.resolve(cwd, o.lock ?? path.join('workspace', 'proposals', localDate(now()), '.lock'));
+  const lock = path.resolve(cwd, o.lock ?? path.join('workspace', 'proposals', localDate(now()), o.instance === REVIEWER_INSTANCE ? '.lock' : `.lock-${o.instance}`));
   const started = now();
   let head = o.head;
   let label = null;
@@ -319,7 +321,7 @@ export function main(argv, deps = {}) {
     const { file } = appendRecord(
       o.runDir,
       o.issues,
-      { issue, stage: 'review', result, head, agent: REVIEWER_INSTANCE, durationSec, note },
+      { issue, stage: 'review', result, head, agent: o.instance, durationSec, note },
       now()
     );
     log(`review #${issue} ${head.slice(0, 7)} ${result}: ${note}`);
@@ -353,14 +355,14 @@ export function main(argv, deps = {}) {
 
     acquireLock(lock, { sleep, now });
     locked = true;
-    if (!waitReady({ run, sleep, cli: o.cli, wt: o.wt, cwd })) {
-      record('fail', `${label}: ${REVIEWER_INSTANCE} not ready ${READY_STREAK} times in a row within ${READY_MAX_POLLS} polls; not sent`);
+    if (!waitReady({ run, sleep, cli: o.cli, wt: o.wt, cwd, instance: o.instance })) {
+      record('fail', `${label}: ${o.instance} not ready ${READY_STREAK} times in a row within ${READY_MAX_POLLS} polls; not sent`);
       return 1;
     }
     const asked = now();
     const ask = run(
       o.cli,
-      ['ask', o.wt, prompt, '--instance', REVIEWER_INSTANCE, '--timeout', String(ASK_TIMEOUT_SEC), '--json'],
+      ['ask', o.wt, prompt, '--instance', o.instance, '--timeout', String(ASK_TIMEOUT_SEC), '--json'],
       { cwd }
     );
     fs.writeFileSync(file('.json'), ask.stdout);
