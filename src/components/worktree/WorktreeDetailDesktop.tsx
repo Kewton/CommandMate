@@ -166,12 +166,6 @@ export interface WorktreeDetailDesktopProps {
 
   // Header actions
   onInfoClick: () => void;
-  /**
-   * Issue #3594: no longer rendered — the header lost its status select (the
-   * status is set from the branch row's "…" → Status). Kept optional so the
-   * caller that still passes it keeps compiling.
-   */
-  onWorktreeStatusChange?: (status: 'ready' | 'in_progress' | 'in_review' | 'done' | null) => void;
 
   // Pending insert text (usePendingInsertText, Issue #755)
   pendingInsertTextMap: Map<number, string | null>;
@@ -599,6 +593,7 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
       onDropInstance,
       isMaximized: paneIsMaximized,
       onToggleMaximize,
+      maximizeDisabled,
       showFocusFrame: paneShowFocusFrame,
     }: {
       splitIndex: number;
@@ -613,6 +608,8 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
       /** Issue #2261: container-owned maximize state + toggle for this split. */
       isMaximized: boolean;
       onToggleMaximize: () => void;
+      /** Issue #3612: a lone split cannot be maximized. */
+      maximizeDisabled?: boolean;
       /** Issue #3514: frame the selected split (focused, and >1 split open). */
       showFocusFrame?: boolean;
     }) => {
@@ -707,6 +704,7 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
           // renders the title-bar toggle and owns the keyboard chord.
           isMaximized={paneIsMaximized}
           onToggleMaximize={onToggleMaximize}
+          maximizeDisabled={maximizeDisabled}
           // Issue #3514: the selected-split frame and the composer's
           // "To: <agent> · <branch>" line.
           showFocusFrame={paneShowFocusFrame ?? false}

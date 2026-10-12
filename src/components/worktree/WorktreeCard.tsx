@@ -17,6 +17,7 @@ import { getDateFnsLocale } from '@/lib/date-locale';
 import { worktreeApi, handleApiError } from '@/lib/api-client';
 import { isNextActionKey } from '@/lib/session/next-action-helper';
 import { deriveWorktreeWaitingDetail } from '@/types/sidebar';
+import { WORKTREE_STATUS_BADGE_CLASSES, worktreeStatusLabelKey } from '@/lib/worktree-status';
 
 export interface WorktreeCardProps {
   worktree: Worktree;
@@ -262,21 +263,11 @@ export function WorktreeCard({ worktree, onSessionKilled }: WorktreeCardProps) {
             {currentStatus && (
               <div>
                 <span className={`px-2 py-1 text-xs font-medium rounded ${
-                  currentStatus === 'done'
-                    ? 'bg-success-subtle text-success-foreground'
-                    : currentStatus === 'in_review'
-                    ? 'bg-info-subtle text-info-foreground'
-                    : currentStatus === 'in_progress'
+                  currentStatus === 'in_progress'
                     ? 'bg-accent-100 dark:bg-accent-900 text-accent-700 dark:text-accent-300'
-                    : 'bg-muted text-muted-foreground'
+                    : WORKTREE_STATUS_BADGE_CLASSES[currentStatus]
                 }`}>
-                  {currentStatus === 'in_progress'
-                    ? t('worktreeStatus.inProgress')
-                    : currentStatus === 'in_review'
-                    ? t('worktreeStatus.inReview')
-                    : currentStatus === 'ready'
-                    ? t('worktreeStatus.ready')
-                    : t('worktreeStatus.done')}
+                  {t(worktreeStatusLabelKey(currentStatus))}
                 </span>
               </div>
             )}
