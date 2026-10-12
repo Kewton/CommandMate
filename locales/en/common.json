@@ -30,6 +30,7 @@
     "skills": "Skills"
   },
   "repositories": {
+    "pageDescription": "Manage repositories and worktrees.",
     "empty": "No repositories registered yet.",
     "add": "Add Repository",
     "syncAll": "Sync All",

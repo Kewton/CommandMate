@@ -75,6 +75,9 @@ export function GitPaneLayout({
   // Issue #818 B: desktop = visual grouping into read / write / advanced
   // blocks (background tint + accent border). Section order is unchanged so
   // the overflow-hidden + flex-1 history layout keeps working.
+  // Issue #3617: the read tint is a faint wash of --info-subtle (opacity
+  // modifier), not the opaque alert fill — opaque, the flex-1 history group
+  // turns most of the dark pane solid blue-950.
   // --------------------------------------------------------------------------
   return (
     <div className={`flex flex-col overflow-hidden ${className}`} data-testid="git-pane-desktop">
@@ -82,7 +85,7 @@ export function GitPaneLayout({
       <div
         data-testid="git-group-read"
         data-git-group="read"
-        className="border-l-2 border-info-border bg-info-subtle"
+        className="border-l-2 border-info-border bg-info-subtle/40 dark:bg-info-subtle/20"
       >
         {statusSection}
       </div>
@@ -101,7 +104,7 @@ export function GitPaneLayout({
       <div
         data-testid="git-group-history"
         data-git-group="read"
-        className="flex-1 flex flex-col min-h-0 border-l-2 border-info-border bg-info-subtle"
+        className="flex-1 flex flex-col min-h-0 border-l-2 border-info-border bg-info-subtle/30 dark:bg-info-subtle/10"
       >
         {historySection}
       </div>

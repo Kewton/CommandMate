@@ -30,7 +30,6 @@ import {
   currentWorktreeStatusGeneration,
   noteWorktreeStatusSync,
   resolveWorktreeStatusEvents,
-  saveWorktreeStatus,
 } from '@/lib/worktree-status';
 import { type WorktreeStatus } from '@/components/mobile/MobileHeader';
 import { type MobileTab } from '@/components/mobile/MobileTabBar';
@@ -1328,18 +1327,6 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     [setActiveActivity]
   );
 
-  /** Handle worktree status change via dropdown */
-  const handleWorktreeStatusChange = useCallback(async (newStatus: 'ready' | 'in_progress' | 'in_review' | 'done' | null) => {
-    try {
-      // Issue #3594: through the shared per-worktree queue, so it is ordered
-      // with the row "…" saves and recorded against in-flight fetches.
-      const updated = await saveWorktreeStatus(worktreeId, newStatus);
-      setWorktree(updated);
-    } catch {
-      // Silently handle
-    }
-  }, [worktreeId]);
-
   /** Handle info button click - open info modal */
   const handleInfoClick = useCallback(() => {
     setIsInfoModalOpen(true);
@@ -2099,7 +2086,6 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     instanceSelectionRequest,
     acknowledgeInstanceSelection,
     handleVibeLocalModelChange,
-    handleWorktreeStatusChange,
     hasUpdate,
     historyDisplayLimit,
     historySubTab,

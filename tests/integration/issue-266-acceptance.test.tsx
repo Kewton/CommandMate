@@ -174,13 +174,6 @@ vi.mock('@/components/worktree/FileTreeView', () => ({
   FileTreeView: () => <div data-testid="file-tree-view">FileTree</div>,
 }));
 
-// Issue #727: ActivityBar replaces LeftPaneTabSwitcher
-vi.mock('@/components/worktree/ActivityBar', () => ({
-  ActivityBar: ({ active }: { active: string | null }) => (
-    <div data-testid="activity-bar" data-active={active ?? 'none'}>Activity Bar</div>
-  ),
-}));
-
 vi.mock('@/components/worktree/ActivityPane', () => ({
   ActivityPane: ({ active }: { active: string | null }) => (
     <div data-testid="activity-pane" data-active={active ?? 'none'}>Pane</div>
