@@ -140,69 +140,100 @@ export const CONTRACT_DIR_PREFIX = '.commandmate/tasks/';
  * (orchestrate 6-4: the module-reference fold) (#3588).
  *
  * Copy of `ORCHESTRATOR_FILES` in `scripts/orchestrate/pr-common.mjs`, where
- * `merge-pr.mjs` uses the same rule to look past a fold commit to the worker's
- * HEAD. A test imports the .mjs and compares the two arrays, so the merge side
- * and this gate cannot drift apart.
+ * `merge-pr.mjs` uses the same file rule to look past a fold commit to the
+ * worker's HEAD. A test imports the .mjs and compares the two arrays, so the
+ * merge side and this gate cannot drift apart.
  */
 export const ORCHESTRATOR_FILES: readonly string[] = ['docs/module-reference.md'];
 
 /**
- * Whether a commit's file list makes it an orchestrator commit: at least one
- * file, and every file in {@link ORCHESTRATOR_FILES} — the rule of
- * `workHeads` in `scripts/orchestrate/pr-common.mjs` (#3588).
+ * The trailer that marks a fold commit, read the way `git interpret-trailers`
+ * reads it — from the message's trailer block only, so the same words in the
+ * middle of a body do not count (#3588).
+ *
+ * The file set alone cannot tell the orchestrator's fold from a worker that
+ * committed module-reference on its own, so this gate also requires the
+ * trailer. `workHeads` in pr-common.mjs deliberately does not: the merge side
+ * only decides which HEAD's records to read, and stays permissive.
+ */
+export const ORCHESTRATOR_FOLD_TRAILER_KEY = 'Orchestrator-Fold';
+export const ORCHESTRATOR_FOLD_TRAILER_VALUE = 'module-reference';
+
+/**
+ * Whether a commit's file list is the orchestrator's: at least one file, and
+ * every file in {@link ORCHESTRATOR_FILES} — the file rule of `workHeads` in
+ * `scripts/orchestrate/pr-common.mjs` (#3588).
  */
 export function isOrchestratorOnlyCommit(files: readonly string[]): boolean {
   return files.length > 0 && files.every((file) => ORCHESTRATOR_FILES.includes(file));
 }
 
-/** Prefix of the per-commit header in {@link ORCHESTRATOR_LOG_FORMAT} output. */
-const COMMIT_MARKER = '\x01';
-const ORCHESTRATOR_LOG_FORMAT = '--format=%x01%H';
-const OBJECT_NAME = /^[0-9a-f]{40,64}$/;
-
-function isCommitHeader(field: string): boolean {
-  const header = field.startsWith('\n') ? field.slice(1) : field;
-  return header.startsWith(COMMIT_MARKER) && OBJECT_NAME.test(header.slice(1));
+/** One commit of `<merge-base>..HEAD`, as {@link BRANCH_COMMITS_FORMAT} reports it. */
+export interface BranchCommit {
+  sha: string;
+  parents: string[];
+  /** Values of the {@link ORCHESTRATOR_FOLD_TRAILER_KEY} trailer, in order. */
+  foldTrailers: string[];
 }
 
+const FIELD_SEPARATOR = '\x1f';
+const TRAILER_SEPARATOR = '\x1e';
 /**
- * Each commit's file list from
- * `git log --format=%x01%H --name-only -z --no-renames <range>` (#3588).
- *
- * Measured format (git 2.49): `\x01<sha>NUL` then `\n<path>NUL` for the first
- * path and `<path>NUL` for the rest; the next header follows directly. A merge
- * commit has a header and no paths, so it counts as neither side's. The header is told apart from a path by the
- * control-character marker plus a full object name, which no real path carries.
+ * Per commit: sha, parents, fold trailer values. With `-z` each record ends in
+ * NUL, which no commit message can contain; the sha and parent fields are hex,
+ * so only the trailer field is free text, and it is last.
  */
-export function parseLogCommitFiles(output: string): string[][] {
-  const commits: string[][] = [];
-  let current: string[] | null = null;
-  for (const field of output.split('\0')) {
-    if (isCommitHeader(field)) {
-      current = [];
-      commits.push(current);
-      continue;
-    }
-    const path = field.startsWith('\n') ? field.slice(1) : field;
-    if (path === '' || current === null) continue;
-    current.push(path);
+const BRANCH_COMMITS_FORMAT =
+  `--format=%H%x1f%P%x1f%(trailers:key=${ORCHESTRATOR_FOLD_TRAILER_KEY},` +
+  'valueonly,unfold,separator=%x1e)';
+
+/** Parse `git log -z` output in {@link BRANCH_COMMITS_FORMAT} (#3588). */
+export function parseBranchCommits(output: string): BranchCommit[] {
+  const commits: BranchCommit[] = [];
+  for (const record of output.split('\0')) {
+    const first = record.indexOf(FIELD_SEPARATOR);
+    const second = record.indexOf(FIELD_SEPARATOR, first + 1);
+    if (first <= 0 || second < 0) continue;
+    const trailers = record.slice(second + 1);
+    commits.push({
+      sha: record.slice(0, first),
+      parents: record.slice(first + 1, second).split(' ').filter(Boolean),
+      foldTrailers: trailers === '' ? [] : trailers.split(TRAILER_SEPARATOR),
+    });
   }
   return commits;
 }
 
+/** One branch commit with the paths it changed, as {@link orchestratorOnlyPaths} judges it. */
+export interface CommitChange {
+  /** Paths the commit changed; for a merge, only what it changed itself. */
+  files: string[];
+  /** Whether the commit is a fold: non-merge, trailer, and the file rule. */
+  fold: boolean;
+}
+
+/** Whether a non-merge commit is a fold (#3588): the trailer and the file rule both hold. */
+export function isFoldCommit(commit: BranchCommit, files: readonly string[]): boolean {
+  return (
+    commit.parents.length === 1 &&
+    commit.foldTrailers.includes(ORCHESTRATOR_FOLD_TRAILER_VALUE) &&
+    isOrchestratorOnlyCommit(files)
+  );
+}
+
 /**
- * Paths that only orchestrator commits touched on the branch (#3588).
+ * Paths that only fold commits touched on the branch (#3588).
  *
- * A path a worker commit also touched is not returned: a worker that edited
- * `docs/module-reference.md` itself, alone or with other files, is still judged
- * on it — only the fold commit's change is the orchestrator's.
+ * A path any other commit also touched is not returned: a worker that edited
+ * `docs/module-reference.md` itself — alone, with other files, or as its own
+ * edit inside a merge — is still judged on it.
  */
-export function orchestratorOnlyPaths(commits: readonly string[][]): Set<string> {
+export function orchestratorOnlyPaths(commits: readonly CommitChange[]): Set<string> {
   const byOrchestrator = new Set<string>();
   const byWorker = new Set<string>();
-  for (const files of commits) {
-    const target = isOrchestratorOnlyCommit(files) ? byOrchestrator : byWorker;
-    files.forEach((file) => target.add(file));
+  for (const commit of commits) {
+    const target = commit.fold ? byOrchestrator : byWorker;
+    commit.files.forEach((file) => target.add(file));
   }
   return new Set([...byOrchestrator].filter((path) => !byWorker.has(path)));
 }
@@ -492,6 +523,78 @@ export function isSkillInstalledUntrackedEntry(
   return entry.status === '??' && entry.paths.every((path) => owned.has(path));
 }
 
+/**
+ * {@link orchestratorOnlyPaths} for `<base>..HEAD` of a worktree (#3588).
+ *
+ * File lists come from one `git diff-tree -z` per commit rather than from one
+ * `git log --name-only -z` stream: in that stream a commit header and a path
+ * are both NUL-terminated fields, and a path may start with a newline or a
+ * control character, so no parse of it can tell them apart. diff-tree prints
+ * paths and nothing else.
+ *
+ * A merge's own edits count as the worker's. `--cc` lists only hunks whose
+ * result matches neither parent, so a clean refresh merge adds nothing and a
+ * conflict resolution or an evil edit to a fold-only path takes it back out of
+ * the exclusion. Only those candidate paths are asked about, and they are
+ * code-supplied constants, never git output.
+ */
+async function collectOrchestratorOnlyPaths(
+  worktreePath: string,
+  base: string
+): Promise<{ paths: Set<string> } | { error: string }> {
+  const log = await runGit(['log', '-z', BRANCH_COMMITS_FORMAT, `${base}..HEAD`], worktreePath);
+  if (log.code !== 0) {
+    return {
+      error:
+        `'git log ${base}..HEAD' failed.` + (log.stderr.trim() ? `\n${log.stderr.trim()}` : ''),
+    };
+  }
+  const commits = parseBranchCommits(log.stdout);
+  // Nothing to exclude without a trailer; skip the per-commit calls.
+  if (!commits.some((commit) => commit.foldTrailers.length > 0)) return { paths: new Set() };
+
+  const changes: CommitChange[] = [];
+  const merges: BranchCommit[] = [];
+  for (const commit of commits) {
+    if (commit.parents.length !== 1) {
+      merges.push(commit);
+      continue;
+    }
+    const tree = await runGit(
+      ['diff-tree', '--no-commit-id', '--name-only', '-z', '--no-renames', '-r', commit.sha],
+      worktreePath
+    );
+    if (tree.code !== 0) {
+      return {
+        error:
+          `'git diff-tree ${commit.sha}' failed.` +
+          (tree.stderr.trim() ? `\n${tree.stderr.trim()}` : ''),
+      };
+    }
+    const files = splitNul(tree.stdout);
+    changes.push({ files, fold: isFoldCommit(commit, files) });
+  }
+
+  const paths = orchestratorOnlyPaths(changes);
+  for (const merge of merges) {
+    for (const path of [...paths]) {
+      const combined = await runGit(
+        ['diff-tree', '--cc', '--no-commit-id', '-r', merge.sha, '--', path],
+        worktreePath
+      );
+      if (combined.code !== 0) {
+        return {
+          error:
+            `'git diff-tree --cc ${merge.sha}' failed.` +
+            (combined.stderr.trim() ? `\n${combined.stderr.trim()}` : ''),
+        };
+      }
+      if (combined.stdout.trim() !== '') paths.delete(path);
+    }
+  }
+  return { paths };
+}
+
 export interface ChangedPaths {
   /** Sorted, de-duplicated, repository-root-relative POSIX paths. */
   paths: string[];
@@ -542,21 +645,11 @@ export async function collectChangedPaths(
 
   // The orchestrator's fold commit (6-4) can sit under a re-instructed worker's
   // commits; what only it touched is not the worker's change (#3588).
-  const log = await runGit(
-    ['log', ORCHESTRATOR_LOG_FORMAT, '--name-only', '-z', '--no-renames', `${base}..HEAD`],
-    worktreePath
-  );
-  if (log.code !== 0) {
-    return {
-      error:
-        `'git log --name-only ${base}..HEAD' failed.` +
-        (log.stderr.trim() ? `\n${log.stderr.trim()}` : ''),
-    };
-  }
-  const orchestratorOnly = orchestratorOnlyPaths(parseLogCommitFiles(log.stdout));
+  const orchestratorOnly = await collectOrchestratorOnlyPaths(worktreePath, base);
+  if ('error' in orchestratorOnly) return orchestratorOnly;
   const orchestratorExcluded = new Set<string>();
   const committed = splitNul(diff.stdout).filter((path) => {
-    if (!orchestratorOnly.has(path)) return true;
+    if (!orchestratorOnly.paths.has(path)) return true;
     orchestratorExcluded.add(path);
     return false;
   });

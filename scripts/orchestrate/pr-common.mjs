@@ -22,7 +22,10 @@ export const DEFAULT_BASE_BRANCH = 'develop';
  * Files the orchestrator may commit on the PR branch after the checks (6-4: the module-reference fold).
  * Copied as ORCHESTRATOR_FILES in src/lib/verification/scope-gate.ts, whose scope gate drops what
  * only such a commit changed (#3588); tests/unit/scripts/orchestrate/orchestrator-files-parity.test.ts
- * keeps the two equal.
+ * keeps the two equal. The scope gate is stricter than workHeads below: it also requires the
+ * `Orchestrator-Fold: module-reference` trailer (a worker can commit module-reference alone too)
+ * and counts a merge's own edits as the worker's. workHeads only picks whose records to read,
+ * so it stays on the file rule alone.
  */
 export const ORCHESTRATOR_FILES = ['docs/module-reference.md'];
 /**

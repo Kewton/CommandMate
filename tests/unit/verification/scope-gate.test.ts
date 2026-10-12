@@ -36,7 +36,9 @@ import {
   evaluateScope,
   MAX_REPORTED_VIOLATIONS,
   ORCHESTRATOR_FILES,
-  parseLogCommitFiles,
+  ORCHESTRATOR_FOLD_TRAILER_KEY,
+  ORCHESTRATOR_FOLD_TRAILER_VALUE,
+  parseBranchCommits,
   ScopeMatcher,
   SCOPE_ALLOW_GUIDANCE,
   SCOPE_EXEMPT_ALWAYS_ALLOWED,
@@ -882,16 +884,37 @@ describe('scope evidence round-trip into `verify --json`', () => {
 
 const MODULE_REFERENCE = 'docs/module-reference.md';
 
-/** The orchestrate 6-4 fold: a commit that changes only docs/module-reference.md. */
+const FOLD_TRAILER = `${ORCHESTRATOR_FOLD_TRAILER_KEY}: ${ORCHESTRATOR_FOLD_TRAILER_VALUE}`;
+
+/** The orchestrate 6-4 fold: changes only docs/module-reference.md and carries the trailer. */
 function commitFold(repo: string, contents: string): void {
   write(repo, MODULE_REFERENCE, contents);
   git(['add', MODULE_REFERENCE], repo);
-  git(['commit', '-m', 'docs(module-reference): fold'], repo);
+  git(['commit', '-m', `docs(module-reference): fold\n\n${FOLD_TRAILER}`], repo);
 }
 
 function commitAll(repo: string, message: string): void {
   git(['add', '-A'], repo);
   git(['commit', '-m', message], repo);
+}
+
+/** Lines over five so two edits far apart merge cleanly. */
+const REFERENCE_BASE = 'a\nb\nc\nd\ne\nf\ng\nh\n';
+
+/** `work` with a fold on b, then `main` (the base) moved on with its own edit on g. */
+function createFoldedRepoWithMovedBase(): string {
+  const repo = createRepo();
+  git(['checkout', 'main'], repo);
+  write(repo, MODULE_REFERENCE, REFERENCE_BASE);
+  commitAll(repo, 'reference');
+  git(['checkout', 'work'], repo);
+  git(['merge', '--ff-only', 'main'], repo);
+  commitFold(repo, REFERENCE_BASE.replace('b\n', 'B\n'));
+  git(['checkout', 'main'], repo);
+  write(repo, MODULE_REFERENCE, REFERENCE_BASE.replace('g\n', 'G\n'));
+  commitAll(repo, 'develop moved');
+  git(['checkout', 'work'], repo);
+  return repo;
 }
 
 describe('evaluateScope — orchestrator fold commits (#3588)', () => {
@@ -918,6 +941,26 @@ describe('evaluateScope — orchestrator fold commits (#3588)', () => {
     write(repo, 'src/lib/verification/scope-gate.ts', 'export const gate = 1;\n');
     write(repo, MODULE_REFERENCE, 'worker edit\n');
     commitAll(repo, 'worker');
+
+    const outcome = await evaluate(repo, ALLOW_SRC);
+    expect(outcome.status).toBe('failed');
+    expect(violationLines(outcome.logTail)).toEqual([MODULE_REFERENCE]);
+  });
+
+  it('still fails a worker commit that changes module-reference alone, without the trailer', async () => {
+    const repo = createRepo();
+    write(repo, MODULE_REFERENCE, 'worker edit\n');
+    commitAll(repo, 'docs(module-reference): worker edit');
+
+    const outcome = await evaluate(repo, ALLOW_SRC);
+    expect(outcome.status).toBe('failed');
+    expect(violationLines(outcome.logTail)).toEqual([MODULE_REFERENCE]);
+  });
+
+  it('does not read the trailer words in the middle of a body as the trailer', async () => {
+    const repo = createRepo();
+    write(repo, MODULE_REFERENCE, 'worker edit\n');
+    commitAll(repo, `docs: worker edit\n\n${FOLD_TRAILER}\nis what the fold carries.\n\nSigned-off-by: W <w@example.test>`);
 
     const outcome = await evaluate(repo, ALLOW_SRC);
     expect(outcome.status).toBe('failed');
@@ -965,23 +1008,73 @@ describe('evaluateScope — orchestrator fold commits (#3588)', () => {
     expect(outcome.status).toBe('failed');
     expect(violationLines(outcome.logTail)).toEqual(['package.json']);
   });
+
+  it('passes a clean merge of the base after the fold', async () => {
+    const repo = createFoldedRepoWithMovedBase();
+    git(['merge', '--no-edit', 'main'], repo);
+    write(repo, 'src/lib/verification/scope-gate.ts', 'export const gate = 1;\n');
+    commitAll(repo, 'worker again');
+
+    const outcome = await evaluate(repo, ALLOW_SRC);
+    expect(outcome.status).toBe('passed');
+    expect(outcome.logTail).toContain(`  ~ ${MODULE_REFERENCE}`);
+  });
+
+  it("still fails a merge after the fold that adds its own module-reference edit", async () => {
+    const repo = createFoldedRepoWithMovedBase();
+    git(['merge', '--no-commit', '--no-ff', 'main'], repo);
+    write(repo, MODULE_REFERENCE, REFERENCE_BASE.replace('b\n', 'B\n').replace('e\n', 'EVIL\n').replace('g\n', 'G\n'));
+    git(['add', MODULE_REFERENCE], repo);
+    git(['commit', '--no-edit'], repo);
+
+    const outcome = await evaluate(repo, ALLOW_SRC);
+    expect(outcome.status).toBe('failed');
+    expect(violationLines(outcome.logTail)).toEqual([MODULE_REFERENCE]);
+  });
+
+  it('keeps paths that start with a newline or look like a commit header', async () => {
+    const repo = createRepo();
+    const newline = 'src/lib/verification/\nleading-newline.ts';
+    const header = `\x01${'a'.repeat(40)}`;
+    write(repo, 'src/lib/verification/first.ts', 'first\n');
+    write(repo, newline, 'newline\n');
+    write(repo, `\nstray.ts`, 'stray\n');
+    write(repo, header, 'header\n');
+    commitAll(repo, 'worker');
+    commitFold(repo, 'fold\n');
+
+    expect(await changedPaths(repo)).toEqual(
+      [`\nstray.ts`, header, 'src/lib/verification/first.ts', newline].sort()
+    );
+    const outcome = await evaluate(repo, ALLOW_SRC);
+    expect(outcome.status).toBe('failed');
+    // log_tail is line-based, so a newline in a name is judged by the counts.
+    // The glob's `.` does not cross a newline, so `newline` is out of scope
+    // too — the glob's rule, unchanged here; what matters is that it is counted.
+    expect(outcome.logTail).toContain('changed=4 violations=3');
+    expect(outcome.logTail).toContain(`  - ${header}`);
+    expect(outcome.logTail).toContain(`  ~ ${MODULE_REFERENCE}`);
+  });
 });
 
-describe('parseLogCommitFiles (#3588)', () => {
+describe('parseBranchCommits (#3588)', () => {
   const A = 'a'.repeat(40);
   const B = 'b'.repeat(40);
   const C = 'c'.repeat(40);
 
-  it('groups paths under each commit header, keeping a merge commit empty', () => {
-    const output = `\x01${A}\0\nsrc/a.ts\0docs/x y.md\0\x01${B}\0\x01${C}\0\n${MODULE_REFERENCE}\0`;
-    expect(parseLogCommitFiles(output)).toEqual([
-      ['src/a.ts', 'docs/x y.md'],
-      [],
-      [MODULE_REFERENCE],
+  it('reads sha, parents and the fold trailer values of each record', () => {
+    const output =
+      `${A}\x1f${B}\x1f${ORCHESTRATOR_FOLD_TRAILER_VALUE}\0` +
+      `${B}\x1f${C} ${A}\x1f\0` +
+      `${C}\x1f${A}\x1fx\x1e${ORCHESTRATOR_FOLD_TRAILER_VALUE}\0`;
+    expect(parseBranchCommits(output)).toEqual([
+      { sha: A, parents: [B], foldTrailers: [ORCHESTRATOR_FOLD_TRAILER_VALUE] },
+      { sha: B, parents: [C, A], foldTrailers: [] },
+      { sha: C, parents: [A], foldTrailers: ['x', ORCHESTRATOR_FOLD_TRAILER_VALUE] },
     ]);
   });
 
   it('returns nothing for an empty range', () => {
-    expect(parseLogCommitFiles('')).toEqual([]);
+    expect(parseBranchCommits('')).toEqual([]);
   });
 });

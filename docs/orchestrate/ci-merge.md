@@ -86,7 +86,7 @@ CI は使い捨ての self-hosted ランナー 8 台（2026-09-18 時点）で�
 
 ## 6-4 一本化のコミットと scope ゲート
 
-一本化のコミット（`docs/module-reference.md` だけを変える）の後にワーカーへ再指示しても、`verify --task` の scope ゲートはこのコミットだけが触ったパスを差分から除くので、それを理由に exit 20 にはならない（#3588。`pr-common.mjs` の `ORCHESTRATOR_FILES` と同じ規則）。ワーカーのコミットや未コミットの変更が同じファイルを触った場合は、今までどおり範囲外として落ちる。
+**一本化のコミットには trailer `Orchestrator-Fold: module-reference` を付ける**（例: `git commit -m "docs(module-reference): #<N> の断片を一本化する" --trailer "Orchestrator-Fold: module-reference"`）。`docs/module-reference.md` だけを変え、この trailer を持つコミットだけが触ったパスは、その後にワーカーへ再指示しても `verify --task` の scope ゲートが差分から除くので、それを理由に exit 20 にはならない（#3588）。trailer の無いコミット（ワーカーの単独コミットを含む）、merge コミット自身の編集（衝突解消で一本化の行を書き換えたものを含む）、未コミットの変更が同じファイルを触った場合は、今までどおり範囲外として落ちる。`merge-pr.mjs` が一本化を越えて作業の HEAD を探す規則（`pr-common.mjs` の `workHeads`）はファイルだけで判定し、trailer を求めない。
 
 ## 6-4 断片が無い PR の実例
 
