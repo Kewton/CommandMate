@@ -65,6 +65,7 @@ import { Tooltip } from '@/components/common/Tooltip';
 import { useOptionalWorktreesCacheContext } from '@/components/providers/WorktreesCacheProvider';
 import { formatSessionNoteTimestamp } from '@/lib/date-utils';
 import { useSplitHeaderSlots } from './SplitPaneHeaderControls';
+import { FIT_MIN_WIDTH_ATTR } from '@/hooks/useDesktopHeaderFit';
 
 /**
  * Issue #786 / #869: dedicated MIME so the drag payload never collides with
@@ -147,6 +148,13 @@ export const SESSION_NOTE_OPEN_EVENT = 'session-note-open';
 
 /** Issue #3592: the note editor's width when it floats under the action bar (w-72). */
 const BAR_NOTE_EDITOR_WIDTH = 288;
+
+/**
+ * Issue #3615: the narrowest the agent's name may be clipped to in the action
+ * bar before the controls fold behind "…" — about 7 characters of the
+ * selector's 12px text ("Claude" measures 39px). Narrower, it read as "C".
+ */
+const BAR_SESSION_LABEL_MIN_WIDTH = 48;
 /** Issue #3592: how close to the viewport's edges that editor may come. */
 const BAR_NOTE_EDITOR_MARGIN = 8;
 
@@ -819,7 +827,14 @@ export const TerminalSplitPane = memo(function TerminalSplitPane({
             className={showUnclassifiedDot ? UNCLASSIFIED_STATUS_DOT_CLASS : undefined}
             data-unclassified={showUnclassifiedDot ? 'true' : undefined}
           />
-          <span className="truncate">{attachLabel}</span>
+          <span
+            className="truncate"
+            // Issue #3615: in the action bar, a name clipped narrower than this
+            // folds the controls behind "…" instead.
+            {...(inActionBar ? { [FIT_MIN_WIDTH_ATTR]: BAR_SESSION_LABEL_MIN_WIDTH } : {})}
+          >
+            {attachLabel}
+          </span>
           <ChevronDown size={14} aria-hidden="true" className="flex-shrink-0 opacity-70" />
         </DropdownMenuTrigger>
         <DropdownMenuContent
