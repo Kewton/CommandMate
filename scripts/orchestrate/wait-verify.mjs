@@ -23,7 +23,10 @@
  *   - a second contract sent to the same worktree and instance while this
  *     waits (#3587): the worker's turn end then belongs to the new task, and
  *     verifying the old one (narrower scope) only fails and holds the gates.
- *     The task list is read while waiting and right before every verification;
+ *     When the ledger shows the task this call is about, the wait runs without
+ *     `--verify` and this script starts `verify --task` itself, so the moment
+ *     before a verification is its own. The task list is read while waiting,
+ *     right before every verification and again before the verdict is taken;
  *     a newer task ends the call without a verdict.
  *
  * A passed verdict is never reused: it belongs to a task, a contract and an
@@ -61,6 +64,10 @@ export const AUTO_YES_ATTEMPTS = 3;
 export const EXIT_POLL_MS = 500;
 /** Tasks read to find a newer one (newest first). */
 export const TASK_LIST_LIMIT = 20;
+/** Upper bound for a side query (task list, instance roster): past it the check is skipped. */
+export const QUERY_TIMEOUT_MS = 15_000;
+/** `wait`'s "no session was ever seen" (VerifyExitCode.NOT_STARTED); `wait --verify` still verifies it. */
+const NOT_STARTED_EXIT = 21;
 /** Exit codes that are a verdict: the gates ran and judged the work. */
 export const VERDICT_EXIT_CODES = [0, 20, 21];
 /** The verdict could not be tied to the finished work. */
@@ -135,6 +142,10 @@ export function defaultSpawnToLog(command, args, { cwd, logFile, watch, pollMs =
         defaultSleep(EXIT_POLL_MS);
         sinceWatch += EXIT_POLL_MS;
       }
+    } catch (err) {
+      // A failing watch must not leave the wait running: it could still go on to verify.
+      stopWatched(child.pid);
+      throw err;
     } finally {
       fs.rmSync(exitFile, { force: true });
     }
@@ -143,8 +154,14 @@ export function defaultSpawnToLog(command, args, { cwd, logFile, watch, pollMs =
   }
 }
 
-function defaultRun(command, args, { cwd } = {}) {
-  const result = spawnSync(command, args, { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+/** Run a command and collect its output; `timeoutMs` kills it and throws (ETIMEDOUT) past that bound. */
+export function defaultRun(command, args, { cwd, timeoutMs } = {}) {
+  const result = spawnSync(command, args, {
+    cwd,
+    encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
+    ...(timeoutMs ? { timeout: timeoutMs, killSignal: 'SIGKILL' } : {}),
+  });
   if (result.error) throw result.error;
   return { status: result.status ?? 1, stdout: result.stdout ?? '', stderr: result.stderr ?? '' };
 }
@@ -210,30 +227,66 @@ function latestRunStart(run, cli, wt, cwd) {
   return Number.isFinite(started) ? started : null;
 }
 
+/**
+ * A side query's JSON, or null. Bounded by QUERY_TIMEOUT_MS and never throws:
+ * these checks are fail-open, and neither the wait nor its timeout may hang on them.
+ */
+function querySafely(run, cli, args, cwd) {
+  try {
+    const out = run(cli, args, { cwd, timeoutMs: QUERY_TIMEOUT_MS });
+    if (out.status !== 0) return null;
+    return JSON.parse(out.stdout);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The instance id `--instance` names: an id as is, an alias through the roster
+ * (`instances <wt> --json`), the way `wait` resolves it. Unresolvable — no
+ * roster, no match, an ambiguous alias — leaves it as given.
+ */
+export function resolveInstance(rows, selector) {
+  if (!Array.isArray(rows)) return selector;
+  if (rows.some((r) => r?.instanceId === selector)) return selector;
+  const byAlias = rows.filter((r) => r?.alias === selector && typeof r.instanceId === 'string');
+  return byAlias.length === 1 ? byAlias[0].instanceId : selector;
+}
+
 /** The instance a task was sent to: its instance id, or the agent's primary instance. */
 const taskInstance = (task) => task.instanceId ?? task.cliToolId;
 
 /**
- * The task this call is about, as `{ id, createdAt }` (epoch ms), taken before
- * the wait: `--task` when given, otherwise the instance's newest task. A task
- * missing from the list (or no task at all) is dated by the start of this call.
+ * The task this call is about, as `{ id, createdAt, found }` (createdAt in epoch
+ * ms), taken before the wait: `--task` when given, otherwise the instance's
+ * newest task. `found` says the ledger shows it; a task missing from the list
+ * (or no task at all) is dated by the start of this call.
  */
 export function baselineTask(tasks, instance, taskId, startedMs) {
   const list = Array.isArray(tasks) ? tasks : [];
   const own = taskId ? list.find((t) => t?.id === taskId) : list.find((t) => t && taskInstance(t) === instance);
   const createdAt = own ? Date.parse(own.createdAt) : NaN;
-  return { id: taskId ?? own?.id ?? null, createdAt: Number.isFinite(createdAt) ? createdAt : startedMs };
+  return {
+    id: taskId ?? own?.id ?? null,
+    createdAt: Number.isFinite(createdAt) ? createdAt : startedMs,
+    found: Boolean(own),
+  };
 }
 
 /**
  * The newest task of the same instance created after `baseline`, or null (#3587).
  * A second contract sent to the worktree is such a task: the turn end the wait
- * reads then belongs to it, not to the baseline.
+ * reads then belongs to it, not to the baseline. While the baseline is in the
+ * list, the list's order (created_at, then insertion) decides, so a task created
+ * in the same millisecond after it still counts; otherwise creation times do.
  */
 export function newerTask(tasks, instance, baseline) {
   if (!Array.isArray(tasks)) return null;
+  const at = tasks.findIndex((t) => t?.id === baseline.id);
+  const sameInstance = (t) => t && t.id !== baseline.id && taskInstance(t) === instance;
+  if (at >= 0) return tasks.slice(0, at).find(sameInstance) ?? null;
   for (const task of tasks) {
-    if (!task || task.id === baseline.id || taskInstance(task) !== instance) continue;
+    if (!sameInstance(task)) continue;
     const createdAt = Date.parse(task.createdAt);
     if (Number.isFinite(createdAt) && createdAt > baseline.createdAt) return task;
   }
@@ -242,7 +295,7 @@ export function newerTask(tasks, instance, baseline) {
 
 /** The worktree's tasks, newest first, or null when they cannot be read (the check is then skipped). */
 function readTasks(run, cli, wt, cwd) {
-  const tasks = readJson(run, cli, ['task', 'list', wt, '--limit', String(TASK_LIST_LIMIT), '--json'], cwd);
+  const tasks = querySafely(run, cli, ['task', 'list', wt, '--limit', String(TASK_LIST_LIMIT), '--json'], cwd);
   return Array.isArray(tasks) ? tasks : null;
 }
 
@@ -434,37 +487,49 @@ export function main(argv, deps = {}) {
     const issue = Number(o.issue);
     o.logFile = o.log ?? path.join(o.runDir, `wait-${issue}.log`);
     const started = now();
-    const baseline = baselineTask(readTasks(run, o.cli, o.wt, cwd), o.instance, o.taskId, started.getTime());
+    // One id for both the wait and the task comparison: tasks carry the resolved id, not the alias.
+    const instance = resolveInstance(querySafely(run, o.cli, ['instances', o.wt, '--json'], cwd), o.instance);
+    const baseline = baselineTask(readTasks(run, o.cli, o.wt, cwd), instance, o.taskId, started.getTime());
+    // Watched only when the ledger shows the task: without it there is nothing to compare against.
+    const watching = baseline.found;
     /** The reason a newer task makes a verdict on `baseline` meaningless, or null (#3587). */
     const supersededBy = () => {
-      const newer = newerTask(readTasks(run, o.cli, o.wt, cwd), o.instance, baseline);
+      if (!watching) return null;
+      const newer = newerTask(readTasks(run, o.cli, o.wt, cwd), instance, baseline);
       return newer ? supersededReason(newer, baseline) : null;
     };
     let superseded = null;
-    // Asked while the wait runs. Once the wait has started verifying, stopping
-    // it would not stop the server's run; the check after the wait handles that.
     const watch = () => {
-      const sofar = fs.existsSync(o.logFile) ? fs.readFileSync(o.logFile, 'utf8') : '';
-      if (/^Verifying:/m.test(sofar)) return false;
       superseded = supersededBy();
       return superseded !== null;
     };
+    // Watched, the wait does not verify: `wait --verify` starts the verification
+    // inside the CLI, where no check can come between the turn end and the run.
+    // This script starts `verify --task` itself, after one more check (#3587).
+    const split = o.afterReinstruct || watching;
     const waitArgs = [
-      'wait', o.wt, '--instance', o.instance, '--on-prompt', 'human',
-      ...(o.afterReinstruct ? [] : ['--verify']),
+      'wait', o.wt, '--instance', instance, '--on-prompt', 'human',
+      ...(split ? [] : ['--verify']),
       '--timeout', o.timeout,
     ];
-    let exitCode = spawnToLog(o.cli, waitArgs, { cwd, logFile: o.logFile, watch });
+    let exitCode = spawnToLog(o.cli, waitArgs, { cwd, logFile: o.logFile, ...(watching ? { watch } : {}) });
     let verdictLog = fs.existsSync(o.logFile) ? fs.readFileSync(o.logFile, 'utf8') : '';
-    // The wait returned (or verified) on the newer task's turn end.
-    if (!superseded && VERDICT_EXIT_CODES.includes(exitCode)) superseded = supersededBy();
 
-    if (o.afterReinstruct && exitCode === 0 && !superseded) {
-      // 3-4: `wait` → `verify --task`. The gates are the contract's plus the builtins.
-      const verifyLog = `${o.logFile.replace(/\.log$/, '')}.verify.log`;
-      exitCode = spawnToLog(o.cli, ['verify', o.wt, '--task', o.taskId], { cwd, logFile: verifyLog });
-      verdictLog = fs.existsSync(verifyLog) ? fs.readFileSync(verifyLog, 'utf8') : '';
+    const verifiable = exitCode === 0 || (!o.afterReinstruct && exitCode === NOT_STARTED_EXIT);
+    if (split && !superseded && verifiable) {
+      superseded = supersededBy();
+      if (!superseded) {
+        // 3-4: `wait` → `verify --task`. The gates are the contract's plus the builtins.
+        const verifyLog = `${o.logFile.replace(/\.log$/, '')}.verify.log`;
+        const verifyExit = spawnToLog(o.cli, ['verify', o.wt, '--task', o.taskId ?? baseline.id], { cwd, logFile: verifyLog });
+        verdictLog = o.afterReinstruct ? '' : verdictLog;
+        verdictLog += fs.existsSync(verifyLog) ? fs.readFileSync(verifyLog, 'utf8') : '';
+        // As `wait --verify` folds it: a green run does not turn "never started" into a pass.
+        exitCode = exitCode === NOT_STARTED_EXIT && verifyExit === 0 ? NOT_STARTED_EXIT : verifyExit;
+      }
     }
+    // A newer task that came while the verification ran: its verdict is not the old task's.
+    if (!superseded && VERDICT_EXIT_CODES.includes(exitCode)) superseded = supersededBy();
 
     const record = (result, head, note) => {
       const durationSec = Math.round((now().getTime() - started.getTime()) / 1000);
@@ -497,6 +562,12 @@ export function main(argv, deps = {}) {
     const verdict = summarizeVerdict(confirmed.log, confirmed.exitCode);
     if (confirmed.state === 'working') {
       record('fail', headNow(), `unconfirmed: ${confirmed.reason}; ${verdict.line} auto-yes=kept`);
+      return UNCONFIRMED_EXIT;
+    }
+    // Last check before the verdict is taken and Auto-Yes goes off (a re-verification or the signal wait may have run).
+    const late = supersededBy();
+    if (late) {
+      record('fail', headNow(), `unconfirmed: ${late}; ${verdict.line} auto-yes=kept`);
       return UNCONFIRMED_EXIT;
     }
 

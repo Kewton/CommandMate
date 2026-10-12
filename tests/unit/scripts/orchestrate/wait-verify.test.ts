@@ -14,10 +14,12 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { appendRecord, readRecords, summarize } from '../../../../scripts/orchestrate/run-log.mjs';
 import {
   baselineTask,
+  defaultRun,
   defaultSpawnToLog,
   main,
   newerTask,
   parseArgs,
+  resolveInstance,
   summarizeVerdict,
 } from '../../../../scripts/orchestrate/wait-verify.mjs';
 
@@ -56,7 +58,7 @@ afterEach(() => {
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
-type Call = { command: string; args: string[] };
+type Call = { command: string; args: string[]; opts?: { timeoutMs?: number } };
 type TaskRow = { id: string; cliToolId: string; instanceId: string | null; createdAt: string; status: string };
 
 const T0 = Date.UTC(2026, 9, 9, 1, 0);
@@ -89,9 +91,12 @@ function harness({
   runStartMinute = 5 as number | null,
   pane = [] as string[],
   commitDuringReverify = false,
-  tasks = [task('t-1', -10)] as TaskRow[],
+  tasks = [] as TaskRow[],
   tasksDuringWait = null as TaskRow[] | null,
-  newTaskAt = 'waiting' as 'waiting' | 'verifying',
+  tasksAfterWait = null as TaskRow[] | null,
+  tasksDuringVerify = null as TaskRow[] | null,
+  verifyCallForTasks = 1,
+  instances = null as Array<{ instanceId: string; alias: string; cliTool: string }> | null,
 } = {}) {
   const spawned: Call[] = [];
   const ran: Call[] = [];
@@ -102,6 +107,7 @@ function harness({
   let commitAt = commitMinute;
   let paneIndex = 0;
   let taskList = tasks;
+  let verifyCalls = 0;
   const deps = {
     spawnToLog: (
       command: string,
@@ -112,21 +118,24 @@ function harness({
       const isVerify = args[0] === 'verify';
       fs.mkdirSync(path.dirname(logFile), { recursive: true });
       if (!isVerify && tasksDuringWait) {
-        // A second contract arrives while the wait runs: before it verifies, or after it started.
-        fs.writeFileSync(logFile, newTaskAt === 'waiting' ? 'Waiting: wt-1 (status=running)\n' : waitLog);
+        // A second contract arrives while the wait runs, and the watch looks.
+        fs.writeFileSync(logFile, 'Waiting: wt-1 (status=running)\n');
         taskList = tasksDuringWait;
         if (watch?.()) {
           clock += 60_000;
           return 143;
         }
       }
+      if (isVerify && tasksDuringVerify && ++verifyCalls === verifyCallForTasks) taskList = tasksDuringVerify;
+      // Between the watch's last look and the turn end.
+      if (!isVerify && tasksAfterWait) taskList = tasksAfterWait;
       fs.writeFileSync(logFile, isVerify ? verifyLog : waitLog);
       clock += 600_000; // each run takes ten minutes
       if (isVerify && commitDuringReverify) commitAt = (clock - T0) / 60_000 + 1;
       return isVerify ? verifyExit : waitExit;
     },
-    run: (command: string, args: string[]) => {
-      ran.push({ command, args });
+    run: (command: string, args: string[], opts?: { timeoutMs?: number }) => {
+      ran.push({ command, args, opts });
       const ok = (stdout: string) => ({ status: 0, stdout, stderr: '' });
       if (command === 'git') {
         const sub = args.slice(2);
@@ -150,6 +159,9 @@ function harness({
             autoYes: { enabled: autoYesStuck },
           })
         );
+      }
+      if (args[0] === 'instances') {
+        return instances ? ok(JSON.stringify(instances)) : { status: 1, stdout: '', stderr: 'no roster' };
       }
       if (args[0] === 'task' && args[1] === 'list') {
         return ok(JSON.stringify(taskList));
@@ -434,13 +446,15 @@ describe('the verdict is tied to the finished work (3-3, #3477 review 2)', () =>
 });
 
 describe('a newer task on the same worktree ends the call without a verdict (#3587)', () => {
-  const newTask = [task('t-2', 2), task('t-1', -10)];
+  const t1 = task('t-1', -10);
+  const newTask = [task('t-2', 2), t1];
+  const kinds = (h: ReturnType<typeof harness>) => h.spawned.map((c) => c.args[0]);
 
   it('a second contract arrives while waiting → exit 3, the old task is never verified', () => {
-    const h = harness({ tasksDuringWait: newTask });
+    const h = harness({ tasks: [t1], tasksDuringWait: newTask });
     expect(main(argv(), h.deps)).toBe(3);
-    // The wait was stopped before it verified, and no `verify` followed.
-    expect(h.spawned.map((c) => c.args[0])).toEqual(['wait']);
+    // The wait was stopped, and no `verify` followed.
+    expect(kinds(h)).toEqual(['wait']);
     expect(records()[0]).toMatchObject({ result: 'fail', taskId: 't-1' });
     expect(records()[0].note).toMatch(
       /^unconfirmed: a newer task t-2 was created for this instance after task t-1; .* auto-yes=kept$/
@@ -449,55 +463,159 @@ describe('a newer task on the same worktree ends the call without a verdict (#35
   });
 
   it('no newer task → the verdict is taken as before (negative control)', () => {
-    const h = harness({ tasksDuringWait: [task('t-1', -10)] });
+    const h = harness({ tasks: [t1], tasksDuringWait: [t1] });
     expect(main(argv(), h.deps)).toBe(0);
     expect(records()[0]).toMatchObject({ result: 'ok' });
     expect(h.autoYesCalls()).toHaveLength(1);
   });
 
   it('a newer task for another instance does not count', () => {
-    const h = harness({ tasksDuringWait: [task('t-9', 2, 'codex-2'), task('t-1', -10)] });
+    const h = harness({ tasks: [t1], tasksDuringWait: [task('t-9', 2, 'codex-2'), t1] });
     expect(main(argv(), h.deps)).toBe(0);
     expect(records()[0]).toMatchObject({ result: 'ok' });
   });
 
-  it('the wait had already started verifying → its verdict is not recorded as the old task’s', () => {
-    const h = harness({ tasksDuringWait: newTask, newTaskAt: 'verifying' });
+  // Review 1: the moment before the verification belongs to this script, not to the CLI.
+  it('watched: wait without --verify, then verify --task — the verdict is the verify run’s', () => {
+    const h = harness({ tasks: [t1], waitLog: 'Completed: wt-1 (basis=hook_stop)\n', verifyLog: FAIL_LOG.split('\n').slice(1).join('\n'), verifyExit: 20 });
+    expect(main(argv(), h.deps)).toBe(20);
+    expect(h.spawned.map((c) => c.args)).toEqual([
+      ['wait', 'wt-1', '--instance', 'claude', '--on-prompt', 'human', '--timeout', '10800'],
+      ['verify', 'wt-1', '--task', 't-1'],
+    ]);
+    expect(records()[0].note).toContain('basis=hook_stop');
+    expect(records()[0].note).toContain('failed=scope:FAIL');
+  });
+
+  it('watched: a newer task between the last look and the turn end → no verify', () => {
+    const h = harness({ tasks: [t1], tasksAfterWait: newTask });
     expect(main(argv(), h.deps)).toBe(3);
-    expect(records()[0]).toMatchObject({ result: 'fail' });
-    expect(records()[0].note).toMatch(/^unconfirmed: a newer task t-2 .*after task t-1; exit=0\(passed\)/);
-    expect(h.autoYesCalls()).toEqual([]);
+    expect(kinds(h)).toEqual(['wait']);
+  });
+
+  it('watched: "never started" stays 21 even when the verify run is green (as wait --verify folds it)', () => {
+    const h = harness({ tasks: [t1], waitExit: 21, waitLog: '' });
+    expect(main(argv(), h.deps)).toBe(21);
+    expect(kinds(h)).toEqual(['wait', 'verify']);
+  });
+
+  it('the task is not in the ledger → the wait verifies as before, unwatched', () => {
+    const h = harness({ tasks: [task('t-0', -20)], tasksDuringWait: newTask });
+    expect(main(argv(), h.deps)).toBe(0);
+    expect(h.spawned[0].args).toContain('--verify');
   });
 
   it('after a re-instruction: no verify --task on the old task', () => {
-    const h = harness({ tasksDuringWait: newTask, newTaskAt: 'verifying', waitLog: 'Completed: wt-1 (basis=hook_stop)\n' });
+    const h = harness({ tasks: [t1], tasksAfterWait: newTask, waitLog: 'Completed: wt-1 (basis=hook_stop)\n' });
     expect(main(argv('--after-reinstruct'), h.deps)).toBe(3);
-    expect(h.spawned.map((c) => c.args[0])).toEqual(['wait']);
+    expect(kinds(h)).toEqual(['wait']);
   });
 
   it('without --task, the instance’s newest task when the call started is the old one', () => {
-    const h = harness({ tasksDuringWait: newTask });
+    const h = harness({ tasks: [t1], tasksDuringWait: newTask });
     const noTask = argv().filter((a, i, all) => a !== '--task' && all[i - 1] !== '--task');
     expect(main(noTask, h.deps)).toBe(3);
     expect(records()[0].note).toContain('a newer task t-2 was created for this instance after task t-1');
   });
 
+  // Review 3: after a verification, before the verdict.
+  it.each([
+    ['the verify after the wait', {}, 1],
+    ['the verify of a re-instruction', { reinstruct: true }, 1],
+    ['the re-verification', { commitMinute: 7 }, 2],
+  ])('a newer task during %s → exit 3, Auto-Yes kept', (_name, opt, call) => {
+    const h = harness({
+      tasks: [t1],
+      tasksDuringVerify: newTask,
+      verifyCallForTasks: call,
+      ...('commitMinute' in opt ? { commitMinute: opt.commitMinute } : {}),
+    });
+    expect(main('reinstruct' in opt ? argv('--after-reinstruct') : argv(), h.deps)).toBe(3);
+    expect(kinds(h).filter((k) => k === 'verify')).toHaveLength(call);
+    expect(records()[0].note).toMatch(/^unconfirmed: a newer task t-2 .*after task t-1; .*auto-yes=kept$/);
+    expect(h.autoYesCalls()).toEqual([]);
+  });
+
+  it('no newer task during the verifications → the verdict stands and Auto-Yes goes off (negative control)', () => {
+    const h = harness({ tasks: [t1], tasksDuringVerify: [t1], commitMinute: 7 });
+    expect(main(argv(), h.deps)).toBe(0);
+    expect(kinds(h)).toEqual(['wait', 'verify', 'verify']);
+    expect(h.autoYesCalls()).toHaveLength(1);
+  });
+
+  // Review 2 / 4: a failing or slow side query skips the check; it never fails or blocks the call.
   it('an unreadable task list skips the check instead of failing the call', () => {
     const h = harness();
     const fakeRun = h.deps.run;
-    h.deps.run = (command: string, args: string[]) =>
-      args[0] === 'task' ? { status: 1, stdout: '', stderr: 'server down' } : fakeRun(command, args);
+    h.deps.run = (command: string, args: string[], opts?: { timeoutMs?: number }) =>
+      args[0] === 'task' ? { status: 1, stdout: '', stderr: 'server down' } : fakeRun(command, args, opts);
     expect(main(argv(), h.deps)).toBe(0);
   });
 
+  it('a task-list query that throws (spawn error, timeout) mid-wait skips the check', () => {
+    const h = harness({ tasks: [t1], tasksDuringWait: newTask });
+    const fakeRun = h.deps.run;
+    let calls = 0;
+    h.deps.run = (command: string, args: string[], opts?: { timeoutMs?: number }) => {
+      if (args[0] === 'task' && ++calls > 1) throw Object.assign(new Error('spawnSync commandmatedev ETIMEDOUT'), { code: 'ETIMEDOUT' });
+      return fakeRun(command, args, opts);
+    };
+    expect(main(argv(), h.deps)).toBe(0);
+    expect(kinds(h)).toEqual(['wait', 'verify']);
+  });
+
+  it('side queries carry an upper bound', () => {
+    const h = harness({ tasks: [t1] });
+    main(argv(), h.deps);
+    const side = h.ran.filter((c) => c.args[0] === 'task' || c.args[0] === 'instances');
+    expect(side.length).toBeGreaterThan(0);
+    expect(side.every((c) => (c.opts?.timeoutMs ?? 0) > 0)).toBe(true);
+  });
+
+  // Review 5: an alias resolves to the id the tasks carry, for the wait and the comparison alike.
+  it('--instance as an alias: the wait and the comparison use the resolved id', () => {
+    const codex = (id: string, minute: number) => ({ ...task(id, minute, 'codex-2'), cliToolId: 'codex' });
+    const h = harness({
+      instances: [{ instanceId: 'codex-2', alias: 'Codex 2', cliTool: 'codex' }],
+      tasks: [codex('t-1', -10)],
+      tasksDuringWait: [codex('t-2', 2), codex('t-1', -10)],
+    });
+    const args = argv().map((a) => (a === 'claude' ? 'Codex 2' : a));
+    expect(main(args, h.deps)).toBe(3);
+    expect(h.spawned[0].args).toEqual(['wait', 'wt-1', '--instance', 'codex-2', '--on-prompt', 'human', '--timeout', '10800']);
+    expect(records()[0].note).toContain('a newer task t-2');
+  });
+
+  it('resolveInstance: ids stay, a unique alias resolves, anything else is left as given', () => {
+    const rows = [
+      { instanceId: 'codex-2', alias: 'Codex 2' },
+      { instanceId: 'claude', alias: 'Main' },
+      { instanceId: 'claude-2', alias: 'Main' },
+    ];
+    expect(resolveInstance(rows, 'claude')).toBe('claude');
+    expect(resolveInstance(rows, 'Codex 2')).toBe('codex-2');
+    expect(resolveInstance(rows, 'Main')).toBe('Main');
+    expect(resolveInstance(null, 'Codex 2')).toBe('Codex 2');
+  });
+
   it('baselineTask / newerTask compare creation times of the same instance', () => {
-    const base = baselineTask([task('t-1', -10)], 'claude', 't-1', T0);
-    expect(base).toEqual({ id: 't-1', createdAt: T0 - 600_000 });
-    expect(newerTask([task('t-1', -10)], 'claude', base)).toBeNull();
-    expect(newerTask([task('t-2', -5), task('t-1', -10)], 'claude', base)?.id).toBe('t-2');
+    const base = baselineTask([t1], 'claude', 't-1', T0);
+    expect(base).toEqual({ id: 't-1', createdAt: T0 - 600_000, found: true });
+    expect(newerTask([t1], 'claude', base)).toBeNull();
+    expect(newerTask([task('t-2', -5), t1], 'claude', base)?.id).toBe('t-2');
     // An instance-less task belongs to the agent's primary instance.
-    expect(newerTask([task('t-3', -5, null)], 'claude', base)?.id).toBe('t-3');
-    expect(baselineTask(null, 'claude', undefined, T0)).toEqual({ id: null, createdAt: T0 });
+    expect(newerTask([task('t-3', -5, null), t1], 'claude', base)?.id).toBe('t-3');
+    // The baseline gone from the list: creation times decide.
+    expect(newerTask([task('t-4', -5)], 'claude', base)?.id).toBe('t-4');
+    expect(newerTask([task('t-0', -20)], 'claude', base)).toBeNull();
+    expect(baselineTask(null, 'claude', undefined, T0)).toEqual({ id: null, createdAt: T0, found: false });
+  });
+
+  // Review 6: the same millisecond is ordered by the ledger (created_at DESC, rowid DESC).
+  it('newerTask: a task created in the same millisecond after the baseline counts; one before it does not', () => {
+    const base = baselineTask([t1], 'claude', 't-1', T0);
+    expect(newerTask([task('t-2', -10), t1], 'claude', base)?.id).toBe('t-2');
+    expect(newerTask([t1, task('t-0', -10)], 'claude', base)).toBeNull();
   });
 });
 
@@ -529,5 +647,50 @@ describe('defaultSpawnToLog with a watch (#3587)', () => {
     });
     expect(status).toBe(143);
     expect(Date.now() - begin).toBeLessThan(10_000);
+  });
+
+  // Review 2: a watch that throws must not leave the wait running.
+  it('stops the command when the watch throws, and rethrows', () => {
+    const logFile = path.join(tmp, 'w.log');
+    const pidFile = path.join(tmp, 'child.pid');
+    const script = `require('fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setTimeout(() => {}, 60000)`;
+    expect(() =>
+      defaultSpawnToLog(node, ['-e', script], {
+        cwd: tmp,
+        logFile,
+        watch: () => {
+          if (!fs.existsSync(pidFile)) return false;
+          throw new Error('watch broke');
+        },
+        pollMs: 100,
+      })
+    ).toThrow(/watch broke/);
+    const pid = Number(fs.readFileSync(pidFile, 'utf8'));
+    const alive = () => {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    const deadline = Date.now() + 5000;
+    while (alive() && Date.now() < deadline) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+    expect(alive()).toBe(false);
+  });
+});
+
+describe('defaultRun with a time limit (#3587 review 4)', () => {
+  it('throws past timeoutMs instead of waiting for the command', () => {
+    const begin = Date.now();
+    expect(() => defaultRun(process.execPath, ['-e', 'setTimeout(() => {}, 30000)'], { timeoutMs: 300 })).toThrow();
+    expect(Date.now() - begin).toBeLessThan(10_000);
+  });
+
+  it('without a limit, returns the command’s output (negative control)', () => {
+    expect(defaultRun(process.execPath, ['-e', 'process.stdout.write("ok")'], { timeoutMs: 10_000 })).toMatchObject({
+      status: 0,
+      stdout: 'ok',
+    });
   });
 });
