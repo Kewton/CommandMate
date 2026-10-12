@@ -53,6 +53,7 @@ import {
   dirtyPaths,
   fragmentProblems,
   ghJson,
+  ghWrite,
   git,
   lines,
   markerFiles,
@@ -199,7 +200,8 @@ export function main(argv, deps = {}) {
   const findNaming = deps.findTestsNaming ?? findTestsNaming;
   const log = deps.log ?? ((line) => console.log(line));
   const error = deps.error ?? ((line) => console.error(line));
-  // GitHub's 5xx and dropped connections are asked again, and said so (#3633 D).
+  // GitHub's 5xx and dropped connections are asked again for reads, and said so; writes
+  // are sent once and read back through ghWrite (#3633 D).
   const run = withGhRetry(deps.run ?? defaultRun, { sleep, notice: error });
 
   const parsed = parseArgs(argv);
@@ -228,7 +230,10 @@ export function main(argv, deps = {}) {
     if (o.close === '-') return 'kept-open';
     const state = ghJson(run, ['issue', 'view', o.close, '--repo', o.repo, '--json', 'state']).state;
     if (state !== 'OPEN') return 'already-closed';
-    const closed = run('gh', ['issue', 'close', o.close, '--repo', o.repo, '--comment', `#${prNumber} でマージした。`]);
+    const closed = ghWrite(run, ['issue', 'close', o.close, '--repo', o.repo, '--comment', `#${prNumber} でマージした。`], {
+      notice: error,
+      confirm: () => (ghJson(run, ['issue', 'view', o.close, '--repo', o.repo, '--json', 'state']).state === 'CLOSED' ? '' : null),
+    });
     if (closed.status !== 0) throw new Error(`gh issue close ${o.close} failed: ${(closed.stderr || closed.stdout).trim()}`);
     return 'closed';
   };
@@ -374,7 +379,11 @@ export function main(argv, deps = {}) {
             return 1;
           }
           for (const id of ids) {
-            const again = run('gh', ['run', 'rerun', id, '--failed', '--repo', o.repo]);
+            // A rerun that is accepted leaves the run no longer `completed`.
+            const again = ghWrite(run, ['run', 'rerun', id, '--failed', '--repo', o.repo], {
+              notice: error,
+              confirm: () => (ghJson(run, ['run', 'view', id, '--repo', o.repo, '--json', 'status']).status !== 'completed' ? '' : null),
+            });
             if (again.status !== 0) throw new Error(`gh run rerun ${id} failed: ${(again.stderr || again.stdout).trim()}`);
           }
           rerun = true;
@@ -393,10 +402,16 @@ export function main(argv, deps = {}) {
     // The squash commit is named after the PR (publish-pr titles it), also over
     // a fold or a refresh: the subject is the PR's own title, as read on the last look at it.
     const subject = squashSubject(title, pr.number);
-    const merged = run('gh', [
+    const merged = ghWrite(run, [
       'pr', 'merge', String(pr.number), '--repo', o.repo, '--squash', '--match-head-commit', head,
       ...(subject ? ['--subject', subject] : []),
-    ]);
+    ], {
+      notice: error,
+      confirm: () => {
+        const after = viewPr(pr.number);
+        return after.state === 'MERGED' && after.headRefOid === head ? '' : null;
+      },
+    });
     if (merged.status !== 0) {
       record('merge', 'fail', head, `pr=#${pr.number} gh-merge-failed`, workHead);
       error(`merge #${issue}: gh pr merge failed: ${(merged.stderr || merged.stdout).trim()}`);

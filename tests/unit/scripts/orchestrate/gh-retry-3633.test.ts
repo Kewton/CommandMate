@@ -17,10 +17,12 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { appendRecord } from '../../../../scripts/orchestrate/run-log.mjs';
+import { appendRecord, readRecords } from '../../../../scripts/orchestrate/run-log.mjs';
 import {
   GH_ATTEMPTS,
   GH_RETRY_DELAYS_MS,
+  ghWrite,
+  isGhRead,
   isTransientGhFailure,
   withGhRetry,
 } from '../../../../scripts/orchestrate/pr-common.mjs';
@@ -116,6 +118,106 @@ describe('withGhRetry', () => {
   });
 });
 
+describe('only reading gh calls are asked again (#3633 consistency review P2)', () => {
+  it.each([
+    ['pr', 'view', '4242'],
+    ['pr', 'list', '--head', 'x'],
+    ['pr', 'checks', '4242'],
+    ['issue', 'view', '3633'],
+    ['run', 'view', '555'],
+    ['run', 'list'],
+    ['api', 'repos/Kewton/CommandMate/pulls'],
+    ['api', '-X', 'GET', 'repos/x/y'],
+    ['api', '--method=get', 'repos/x/y'],
+  ])('reads: %s', (...args) => {
+    expect(isGhRead(args)).toBe(true);
+  });
+
+  it.each([
+    ['pr', 'create', '--title', 't'],
+    ['pr', 'merge', '4242', '--squash'],
+    ['pr', 'edit', '4242'],
+    ['run', 'rerun', '555', '--failed'],
+    ['issue', 'close', '3633'],
+    ['issue', 'comment', '3633'],
+    ['api', '-X', 'POST', 'repos/x/y/issues'],
+    ['api', '--method', 'PATCH', 'repos/x/y'],
+    ['api', '-XDELETE', 'repos/x/y'],
+    ['api', 'repos/x/y/issues', '-f', 'title=t'],
+    ['api', 'repos/x/y/issues', '--field=title=t'],
+    ['api', 'graphql', '-Fquery=@q.graphql'],
+    ['some', 'thing'],
+  ])('writes (or unknown) are not: %s', (...args) => {
+    expect(isGhRead(args)).toBe(false);
+  });
+
+  it.each([['pr', 'create'], ['pr', 'merge', '4242'], ['run', 'rerun', '555', '--failed'], ['issue', 'close', '3633']])(
+    'withGhRetry sends a write once, even on a 504: %s',
+    (...args) => {
+      const r = retrying([failed(GATEWAY_TIMEOUT), ok()]);
+      expect(r.wrapped('gh', args)).toEqual(failed(GATEWAY_TIMEOUT));
+      expect(r.calls).toHaveLength(1);
+      expect(r.sleeps).toEqual([]);
+    }
+  );
+});
+
+describe('ghWrite: a write that met a 504 is read back, never sent again', () => {
+  function writing(answer: Out) {
+    const { run, calls } = scripted([answer]);
+    const notices: string[] = [];
+    let confirms = 0;
+    return {
+      calls,
+      notices,
+      confirms: () => confirms,
+      send: (done: string | null | (() => string | null)) =>
+        ghWrite(run, ['pr', 'merge', '4242'], {
+          notice: (line: string) => notices.push(line),
+          confirm: () => {
+            confirms += 1;
+            return typeof done === 'function' ? done() : done;
+          },
+        }),
+    };
+  }
+
+  it('done on GitHub: a success with what the read gave, sent once', () => {
+    const w = writing(failed(GATEWAY_TIMEOUT));
+    expect(w.send('https://github.com/x/y/pull/1\n')).toEqual({ status: 0, stdout: 'https://github.com/x/y/pull/1\n', stderr: '', confirmed: true });
+    expect(w.calls).toHaveLength(1);
+    expect(w.notices).toEqual([expect.stringMatching(/^gh pr merge: HTTP 504.* — not sent again; it went through$/)]);
+  });
+
+  it('not done: the call\'s own failure, sent once', () => {
+    const w = writing(failed(GATEWAY_TIMEOUT));
+    expect(w.send(null)).toEqual(failed(GATEWAY_TIMEOUT));
+    expect(w.calls).toHaveLength(1);
+    expect(w.notices).toEqual([expect.stringContaining('not sent again; it did not go through')]);
+  });
+
+  it('the read back fails too: the call\'s own failure', () => {
+    const w = writing(failed(GATEWAY_TIMEOUT));
+    expect(
+      w.send(() => {
+        throw new Error('gh pr view failed: HTTP 504');
+      })
+    ).toEqual(failed(GATEWAY_TIMEOUT));
+    expect(w.calls).toHaveLength(1);
+    expect(w.notices[0]).toContain('could not read whether it went through');
+  });
+
+  it('a success or a 4xx is returned as it is, without reading back (negative control)', () => {
+    const done = writing(ok('merged'));
+    expect(done.send(null)).toEqual(ok('merged'));
+    expect(done.confirms()).toBe(0);
+    const refused = writing(failed('HTTP 405: Pull Request is not mergeable'));
+    expect(refused.send('')).toEqual(failed('HTTP 405: Pull Request is not mergeable'));
+    expect(refused.confirms()).toBe(0);
+    expect(refused.notices).toEqual([]);
+  });
+});
+
 describe('merge-pr.mjs and publish-pr.mjs ask through withGhRetry', () => {
   let tmp: string;
   let runDir: string;
@@ -196,6 +298,87 @@ describe('merge-pr.mjs and publish-pr.mjs ask through withGhRetry', () => {
     const d = deps(flaky(fake, 'pr list', 'HTTP 503: Service Unavailable', 1));
     expect(publishMain(argv(), d.deps)).toBe(0);
     expect(fake.ghCalls('pr create')).toHaveLength(1);
+    expect(d.err.filter((line) => line.includes('retrying'))).toHaveLength(1);
+  });
+  /** The fake, with `gh <key>` answered by a 504 — after doing it (`done`) or without. */
+  function timedOut(fake: ReturnType<typeof fakeGit>, key: string, done: boolean) {
+    return (command: string, args: string[], opts?: { cwd?: string; env?: Record<string, string> }) => {
+      if (command === 'gh' && args.slice(0, 2).join(' ') === key) {
+        if (done) fake.run(command, args, opts);
+        else fake.calls.push({ command, args });
+        return failed(GATEWAY_TIMEOUT);
+      }
+      return fake.run(command, args, opts);
+    };
+  }
+
+  const GREEN_CHECKS = [{ name: 'Build', bucket: 'pass' }, { name: 'Lint', bucket: 'pass' }, { name: 'Unit Tests', bucket: 'pass' }];
+  const RUN_LINK = 'https://github.com/Kewton/CommandMate/actions/runs/555/job/1';
+
+  it('publish-pr: pr create answered 504 but opened: not sent again, recorded as opened', () => {
+    const fake = fakeGit();
+    const d = deps(timedOut(fake, 'pr create', true));
+    expect(publishMain(argv(), d.deps)).toBe(0);
+    expect(fake.ghCalls('pr create')).toHaveLength(1);
+    expect(d.err.join('\n')).toContain('gh pr create: HTTP 504');
+    expect(d.err.join('\n')).toContain('it went through');
+    expect(readRecords(runDir, '3477').records.find((r) => r.stage === 'pr')?.note).toContain('pr=#9001');
+  });
+
+  it('publish-pr: pr create answered 504 and not opened: not sent again, fails as before', () => {
+    const fake = fakeGit();
+    const d = deps(timedOut(fake, 'pr create', false));
+    expect(publishMain(argv(), d.deps)).toBe(1);
+    expect(fake.ghCalls('pr create')).toHaveLength(1);
+    expect(d.err.join('\n')).toContain('gh pr create failed: HTTP 504');
+    expect(readRecords(runDir, '3477').records.some((r) => r.stage === 'pr')).toBe(false);
+  });
+
+  it('merge-pr: pr merge answered 504 but merged: not sent again, recorded as merged', () => {
+    const fake = fakeGit({ prs: [openPr()], checks: [GREEN_CHECKS] });
+    const d = deps(timedOut(fake, 'pr merge', true));
+    expect(mergeMain(argv(), d.deps)).toBe(0);
+    expect(fake.ghCalls('pr merge')).toHaveLength(1);
+    expect(d.err.join('\n')).toContain('it went through');
+    expect(readRecords(runDir, '3477').records.filter((r) => r.stage === 'merge').map((r) => r.result)).toEqual(['ok']);
+    expect(fake.ghCalls('issue close')).toHaveLength(1);
+  });
+
+  it('merge-pr: pr merge answered 504 and not merged: not sent again, fails as before', () => {
+    const fake = fakeGit({ prs: [openPr()], checks: [GREEN_CHECKS] });
+    const d = deps(timedOut(fake, 'pr merge', false));
+    expect(mergeMain(argv(), d.deps)).toBe(1);
+    expect(fake.ghCalls('pr merge')).toHaveLength(1);
+    expect(d.err.join('\n')).toContain('gh pr merge failed: HTTP 504');
+    expect(readRecords(runDir, '3477').records.filter((r) => r.stage === 'merge').map((r) => r.note)).toEqual(['pr=#4242 gh-merge-failed']);
+  });
+
+  it('merge-pr: run rerun answered 504 but rerun: not sent again, the rerun is recorded once', () => {
+    const fake = fakeGit({ prs: [openPr()], checks: [[{ name: 'Lint', bucket: 'fail', link: RUN_LINK }], GREEN_CHECKS] });
+    const d = deps(timedOut(fake, 'run rerun', true));
+    expect(mergeMain(argv(), d.deps)).toBe(0);
+    expect(fake.ghCalls('run rerun')).toHaveLength(1);
+    expect(fake.ghCalls('run view')).toHaveLength(1);
+    expect(readRecords(runDir, '3477').records.filter((r) => r.stage === 'ci').map((r) => r.note)).toEqual([
+      expect.stringContaining('rerun=555'),
+      expect.stringContaining('checks='),
+    ]);
+  });
+
+  it('merge-pr: run rerun answered 504 and not rerun: not sent again, fails as before', () => {
+    const fake = fakeGit({ prs: [openPr()], checks: [[{ name: 'Lint', bucket: 'fail', link: RUN_LINK }]] });
+    const d = deps(timedOut(fake, 'run rerun', false));
+    expect(mergeMain(argv(), d.deps)).toBe(1);
+    expect(fake.ghCalls('run rerun')).toHaveLength(1);
+    expect(d.err.join('\n')).toContain('gh run rerun 555 failed: HTTP 504');
+    expect(fake.ghCalls('pr merge')).toHaveLength(0);
+  });
+
+  it('merge-pr: a 504 on a read is still asked again (negative control)', () => {
+    const fake = fakeGit({ prs: [openPr()], checks: [GREEN_CHECKS] });
+    const d = deps(flaky(fake, 'pr checks', GATEWAY_TIMEOUT, 1));
+    expect(mergeMain(argv(), d.deps)).toBe(0);
+    expect(fake.ghCalls('pr checks')).toHaveLength(2);
     expect(d.err.filter((line) => line.includes('retrying'))).toHaveLength(1);
   });
 });

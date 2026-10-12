@@ -37,6 +37,8 @@ export interface FakeState {
   pushFails: boolean;
   /** `%s` of a commit by sha; others get the default subject. */
   subjects: Record<string, string>;
+  /** `gh run view <id> --json status` by run id; `completed` when absent. `gh run rerun` sets `queued`. */
+  runStatus: Record<string, string>;
 }
 
 export function fakeGit(overrides: Partial<FakeState> = {}) {
@@ -59,6 +61,7 @@ export function fakeGit(overrides: Partial<FakeState> = {}) {
     createdNumber: 9001,
     pushFails: false,
     subjects: {},
+    runStatus: {},
     ...overrides,
   };
   const calls: Call[] = [];
@@ -132,7 +135,11 @@ export function fakeGit(overrides: Partial<FakeState> = {}) {
         const pending = answer.some((c) => c.bucket === 'pending');
         return { status: pending ? 8 : 0, stdout: JSON.stringify(answer), stderr: '' };
       }
-      if (key === 'run rerun') return ok();
+      if (key === 'run rerun') {
+        state.runStatus[args[2]] = 'queued';
+        return ok();
+      }
+      if (key === 'run view') return ok(JSON.stringify({ status: state.runStatus[args[2]] ?? 'completed' }));
       if (key === 'pr merge') {
         if (state.failCommands.includes('gh pr merge')) return failed('merge refused');
         const pr = state.prs.find((p) => String(p.number) === args[2]);

@@ -44,6 +44,7 @@ import {
   dirtyPaths,
   fragmentProblems,
   ghJson,
+  ghWrite,
   git,
   markerFiles,
   missingRecords,
@@ -113,7 +114,7 @@ export function main(argv, deps = {}) {
   const { sleep = defaultSleep, now = () => new Date() } = deps;
   const log = deps.log ?? ((line) => console.log(line));
   const error = deps.error ?? ((line) => console.error(line));
-  // GitHub's 5xx and dropped connections are asked again, and said so (#3633 D).
+  // GitHub's 5xx and dropped connections are asked again for reads, and said so (#3633 D).
   const run = withGhRetry(deps.run ?? defaultRun, { sleep, notice: error });
 
   const parsed = parseArgs(argv);
@@ -211,10 +212,17 @@ export function main(argv, deps = {}) {
       fs.writeFileSync(bodyFile, defaultBody(git(run, o.worktree, ['log', '-1', '--format=%b', head]), issue));
     }
     try {
-      const create = run('gh', [
+      // Sent once: a 5xx may still have opened it, so it is read back instead of sent again (#3633 D).
+      const create = ghWrite(run, [
         'pr', 'create', '--repo', o.repo, '--base', o.base, '--head', branch, '--title', title, '--body-file', bodyFile,
         ...(o.label ? ['--label', o.label] : []),
-      ]);
+      ], {
+        notice: error,
+        confirm: () => {
+          const opened = prsOfBranch(run, o.repo, branch).open;
+          return opened && opened.headRefOid === head ? `${opened.url}\n` : null;
+        },
+      });
       const number = create.status === 0 ? prNumberFromUrl(create.stdout) : null;
       if (number === null) {
         error(`publish #${issue}: gh pr create failed: ${(create.stderr || create.stdout).trim()}`);

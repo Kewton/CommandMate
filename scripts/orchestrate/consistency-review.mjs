@@ -253,18 +253,69 @@ const describeOwner = (owner) =>
   owner ? `pid ${owner.pid} (since ${owner.startedAt ?? '?'})` : 'an unknown owner (no owner file)';
 const sameOwner = (a, b) => Boolean(a && b && a.pid === b.pid && a.startedAt === b.startedAt && a.host === b.host);
 
+/** The directory a waiter holds while it removes a dead owner's lock (one reclaimer at a time). */
+export const reclaimDirOf = (lock) => `${lock}.reclaim`;
+
+/**
+ * Remove `lock` if it still names `deadOwner`, holding the reclaim directory
+ * while doing so (#3633). Two waiters can see the same dead owner; without the
+ * reclaim directory one could check the owner, the other remove the lock and
+ * take a new one, and the first then move that new, live lock aside. The
+ * reclaim directory is taken with mkdir (atomic), so the owner is re-read and
+ * the lock moved by one waiter at a time; a lock taken by anyone else in
+ * between names another owner and is left as it is. Nobody but a reclaimer
+ * removes a lock whose owner is dead, so it cannot change between the re-read
+ * and the rename.
+ *
+ * `between` runs after the re-read and before the rename (tests only).
+ *
+ * @returns {'reclaimed' | 'changed' | 'busy'} removed / the lock names
+ *   someone else now (or is gone) / another waiter is reclaiming
+ */
+export function reclaimStaleLock(lock, deadOwner, { now, error, between = () => {} }) {
+  const reclaim = reclaimDirOf(lock);
+  try {
+    fs.mkdirSync(reclaim);
+  } catch (err) {
+    if (!err || err.code !== 'EEXIST') throw err;
+    const holder = readLockOwner(reclaim);
+    if (lockOwnerGone(holder)) {
+      // Killed in the few calls between taking and removing it: removing it here
+      // could let two waiters reclaim at once, so a person decides.
+      throw new Error(`${reclaim} is left by ${describeOwner(holder)}, which is gone — remove it if no review is waiting on ${lock}`);
+    }
+    return 'busy';
+  }
+  const me = { pid: process.pid, host: os.hostname(), startedAt: now().toISOString() };
+  try {
+    fs.writeFileSync(path.join(reclaim, LOCK_OWNER_FILE), `${JSON.stringify(me)}\n`);
+    if (!sameOwner(readLockOwner(lock), deadOwner)) return 'changed';
+    between();
+    const aside = `${lock}.stale-${process.pid}-${now().getTime()}`;
+    fs.renameSync(lock, aside);
+    fs.rmSync(aside, { recursive: true, force: true });
+    error(`lock ${lock}: owner ${describeOwner(deadOwner)} is gone; taking it over`);
+    return 'reclaimed';
+  } finally {
+    fs.rmSync(reclaim, { recursive: true, force: true });
+  }
+}
+
 /**
  * Take the lock directory, waiting while another ask holds it (#3633).
  *
  * The directory is the lock (mkdir is atomic); the owner file in it names the
  * pid, host and start time. A lock whose owner is gone — the review was
- * killed, so its finally never ran — is moved aside and taken. A lock without
- * an owner file (being created right now, or left by a script from before the
- * owner file) cannot be judged and is waited for like a live one.
+ * killed, so its finally never ran — is removed by reclaimStaleLock and taken.
+ * A lock without an owner file (being created right now, or left by a script
+ * from before the owner file) cannot be judged and is waited for like a live one.
  *
+ * @param {string} lock
+ * @param {{ sleep: (ms: number) => void, now: () => Date, error: (line: string) => void, between?: () => void }} deps
+ *   `between` is passed to reclaimStaleLock (tests only)
  * @returns the owner written into the lock
  */
-export function acquireLock(lock, { sleep, now, error }) {
+export function acquireLock(lock, { sleep, now, error, between }) {
   fs.mkdirSync(path.dirname(lock), { recursive: true });
   const started = now().getTime();
   let lastNotice = null;
@@ -278,21 +329,8 @@ export function acquireLock(lock, { sleep, now, error }) {
       if (!err || err.code !== 'EEXIST') throw err;
     }
     const owner = readLockOwner(lock);
-    if (lockOwnerGone(owner)) {
-      // Moved aside before removal, and only if it still names the same owner:
-      // a waiter that took the lock meanwhile must keep it.
-      const aside = `${lock}.stale-${process.pid}-${now().getTime()}`;
-      if (sameOwner(readLockOwner(lock), owner)) {
-        try {
-          fs.renameSync(lock, aside);
-          fs.rmSync(aside, { recursive: true, force: true });
-          error(`lock ${lock}: owner ${describeOwner(owner)} is gone; taking it over`);
-        } catch (err) {
-          if (!err || err.code !== 'ENOENT') throw err;
-        }
-      }
-      continue;
-    }
+    // Another waiter reclaiming the same lock ('busy') finishes in a few calls: ask again after a poll.
+    if (lockOwnerGone(owner) && reclaimStaleLock(lock, owner, { now, error, between }) !== 'busy') continue;
     const waited = now().getTime() - started;
     if (waited > LOCK_MAX_WAIT_SEC * 1000) {
       throw new Error(
