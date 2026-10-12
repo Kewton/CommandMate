@@ -29,7 +29,7 @@ test.describe('Recursive Delete Flow', () => {
       await page.waitForTimeout(500);
 
       // Switch to Files tab
-      const filesTab = page.getByRole('button', { name: /Files/i });
+      const filesTab = page.getByTestId('header-tool-files');
       if (await filesTab.count() === 0) return;
 
       await filesTab.click();
@@ -65,7 +65,7 @@ test.describe('Recursive Delete Flow', () => {
       await worktreeCards.first().click();
       await page.waitForTimeout(500);
 
-      const filesTab = page.getByRole('button', { name: /Files/i });
+      const filesTab = page.getByTestId('header-tool-files');
       if (await filesTab.count() === 0) return;
 
       await filesTab.click();
@@ -101,7 +101,7 @@ test.describe('Recursive Delete Flow', () => {
       await worktreeCards.first().click();
       await page.waitForTimeout(500);
 
-      const filesTab = page.getByRole('button', { name: /Files/i });
+      const filesTab = page.getByTestId('header-tool-files');
       if (await filesTab.count() === 0) return;
 
       await filesTab.click();
@@ -133,7 +133,7 @@ test.describe('Recursive Delete Flow', () => {
       await worktreeCards.first().click();
       await page.waitForTimeout(500);
 
-      const filesTab = page.getByRole('button', { name: /Files/i });
+      const filesTab = page.getByTestId('header-tool-files');
       if (await filesTab.count() === 0) return;
 
       await filesTab.click();
@@ -172,7 +172,7 @@ test.describe('Recursive Delete Flow', () => {
       await worktreeCards.first().click();
       await page.waitForTimeout(500);
 
-      const filesTab = page.getByRole('button', { name: /Files/i });
+      const filesTab = page.getByTestId('header-tool-files');
       if (await filesTab.count() === 0) return;
 
       await filesTab.click();
@@ -206,7 +206,7 @@ test.describe('Recursive Delete Flow', () => {
       await worktreeCards.first().click();
       await page.waitForTimeout(500);
 
-      const filesTab = page.getByRole('button', { name: /Files/i });
+      const filesTab = page.getByTestId('header-tool-files');
       if (await filesTab.count() === 0) return;
 
       await filesTab.click();
@@ -248,7 +248,7 @@ test.describe('Recursive Delete Flow', () => {
       await worktreeCards.first().click();
       await page.waitForTimeout(500);
 
-      const filesTab = page.getByRole('button', { name: /Files/i });
+      const filesTab = page.getByTestId('header-tool-files');
       if (await filesTab.count() === 0) return;
 
       await filesTab.click();
@@ -282,7 +282,7 @@ test.describe('Recursive Delete Flow', () => {
       await worktreeCards.first().click();
       await page.waitForTimeout(500);
 
-      const filesTab = page.getByRole('button', { name: /Files/i });
+      const filesTab = page.getByTestId('header-tool-files');
       if (await filesTab.count() === 0) return;
 
       await filesTab.click();
@@ -326,7 +326,7 @@ test.describe('Mobile Recursive Delete', () => {
     await page.waitForTimeout(500);
 
     // On mobile, there's a tab bar at the bottom
-    const filesTab = page.getByRole('button', { name: /Files/i });
+    const filesTab = page.getByTestId('mobile-tab-files');
     if (await filesTab.count() === 0) return;
 
     await filesTab.click();
