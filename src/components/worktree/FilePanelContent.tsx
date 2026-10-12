@@ -34,6 +34,7 @@ import 'highlight.js/styles/github-dark.css';
 import { Z_INDEX } from '@/config/z-index';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { Spinner } from '@/components/ui/Spinner';
+import { isUnhandledEscape } from '@/lib/escape-key';
 
 /** Fixed row height for the virtualized CodeViewer (px). Monospace + leading-6. */
 const CODE_VIEWER_ROW_HEIGHT_PX = 24;
@@ -889,7 +890,7 @@ export const FilePanelContent = memo(function FilePanelContent({
   useEffect(() => {
     if (!isMaximized) return;
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
+      if (isUnhandledEscape(e)) {
         setIsMaximized(false);
       }
     };
