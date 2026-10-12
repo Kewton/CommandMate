@@ -18,7 +18,6 @@
     "placeholder": "メッセージを入力…",
     "commandsHint": "コマンド",
     "newlineHint": "改行",
-    "keyHintsTitle": "/ でコマンド · Shift+Enter で改行",
     "removeAttachment": "添付を削除",
     "showSlashCommands": "スラッシュコマンドを表示",
     "attachImage": "画像を添付",

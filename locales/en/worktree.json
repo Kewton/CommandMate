@@ -18,7 +18,6 @@
     "placeholder": "Type your message…",
     "commandsHint": "commands",
     "newlineHint": "newline",
-    "keyHintsTitle": "/ commands · Shift+Enter newline",
     "removeAttachment": "Remove attachment",
     "showSlashCommands": "Show slash commands",
     "attachImage": "Attach image",
