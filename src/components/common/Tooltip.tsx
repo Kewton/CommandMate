@@ -100,14 +100,30 @@ function clampAxis(value: number, bubbleSize: number, viewportSize: number): num
  * utility classes produced — but the result is then clamped, which the pure-CSS
  * version could not do.
  *
+ * [Issue #3616] With a `fallback`, a placement whose bubble would cross the
+ * viewport edge on its own side flips to the fallback when that one fits
+ * (e.g. `right` → `left` for a row near the right edge). Clamping alone would
+ * slide the bubble back over the trigger and its neighbours. When neither
+ * fits, the primary placement is kept (clamped as before).
+ *
  * Exported for unit testing (jsdom reports every rect as zero-sized).
  */
 export function computeTooltipPosition(
   placement: TooltipPlacement,
   trigger: TooltipRect,
   bubble: TooltipSize,
-  viewport: TooltipSize
+  viewport: TooltipSize,
+  fallback?: TooltipPlacement
 ): TooltipCoords {
+  if (
+    fallback !== undefined &&
+    fallback !== placement &&
+    overflowsOwnSide(placement, trigger, bubble, viewport) &&
+    !overflowsOwnSide(fallback, trigger, bubble, viewport)
+  ) {
+    return computeTooltipPosition(fallback, trigger, bubble, viewport);
+  }
+
   const centeredLeft = trigger.left + trigger.width / 2 - bubble.width / 2;
   const centeredTop = trigger.top + trigger.height / 2 - bubble.height / 2;
 
@@ -138,6 +154,35 @@ export function computeTooltipPosition(
     top: clampAxis(top, bubble.height, viewport.height),
     left: clampAxis(left, bubble.width, viewport.width),
   };
+}
+
+/**
+ * [Issue #3616] Whether a placement's unclamped bubble crosses the viewport
+ * margin on the side it is placed toward (the axis clamping would move).
+ */
+function overflowsOwnSide(
+  placement: TooltipPlacement,
+  trigger: TooltipRect,
+  bubble: TooltipSize,
+  viewport: TooltipSize
+): boolean {
+  switch (placement) {
+    case 'top':
+      return trigger.top - bubble.height - TOOLTIP_GAP < TOOLTIP_VIEWPORT_MARGIN;
+    case 'bottom':
+      return (
+        trigger.top + trigger.height + TOOLTIP_GAP + bubble.height >
+        viewport.height - TOOLTIP_VIEWPORT_MARGIN
+      );
+    case 'left':
+      return trigger.left - bubble.width - TOOLTIP_GAP < TOOLTIP_VIEWPORT_MARGIN;
+    case 'right':
+    default:
+      return (
+        trigger.left + trigger.width + TOOLTIP_GAP + bubble.width >
+        viewport.width - TOOLTIP_VIEWPORT_MARGIN
+      );
+  }
 }
 
 /** Rendered off-screen for the first frame, before the bubble can be measured. */
@@ -172,6 +217,12 @@ export interface TooltipProps {
    * bubble would otherwise sit under its own container. Omitted keeps `z-40`.
    */
   zIndex?: number;
+  /**
+   * [Issue #3616] Placement to flip to when `placement` would cross the
+   * viewport edge and this one fits (see `computeTooltipPosition`). Omitted
+   * keeps the old behaviour: the primary placement, clamped.
+   */
+  fallbackPlacement?: TooltipPlacement;
 }
 
 /**
@@ -191,6 +242,7 @@ export function Tooltip({
   children,
   className,
   zIndex,
+  fallbackPlacement,
 }: TooltipProps): React.ReactElement {
   // [Issue #2319] Two independent channels. Hover releases must not close a
   // bubble that focus is still holding open, and vice versa (a pointer click
@@ -263,10 +315,11 @@ export function Tooltip({
           height: triggerRect.height,
         },
         { width: bubbleRect.width, height: bubbleRect.height },
-        { width: window.innerWidth, height: window.innerHeight }
+        { width: window.innerWidth, height: window.innerHeight },
+        fallbackPlacement
       )
     );
-  }, [placement]);
+  }, [placement, fallbackPlacement]);
 
   // Measure and place before paint so the bubble is never seen at its
   // off-screen seed position. While visible, keep it anchored across scrolls of

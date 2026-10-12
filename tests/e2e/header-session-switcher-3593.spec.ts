@@ -316,6 +316,61 @@ test.describe('Header session field (Issue #3593)', () => {
     await expect(trigger).toBeFocused();
   });
 
+  // Issue #3616: a row's tooltip used to sit below the row (`bottom`), over
+  // the next row's name. It now sits beside the row and covers no other row.
+  test('a row tooltip, on hover and on focus, covers no other row of the list (#3616)', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await openScreen(page, { count: 4 });
+    const list = await openList(page);
+    const rows = list.locator('[data-switcher-item]');
+    const count = await rows.count();
+    expect(count).toBeGreaterThanOrEqual(3);
+    const listBox = await box(list);
+
+    const overlaps = (a: Box, b: Box): boolean =>
+      a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+
+    async function checkBubble(index: number): Promise<void> {
+      const bubble = page.getByRole('tooltip', { includeHidden: true });
+      await expect(bubble).toHaveCount(1);
+      // Wait until the bubble has been measured and placed on screen.
+      await expect.poll(async () => (await bubble.boundingBox())?.x ?? -9999).toBeGreaterThanOrEqual(0);
+      const b = await box(bubble);
+      for (let j = 0; j < count; j++) {
+        if (j === index) continue;
+        expect(overlaps(b, await box(rows.nth(j))), `tooltip of row ${index} vs row ${j}`).toBe(false);
+      }
+      // Beside the list, not over it.
+      expect(overlaps(b, listBox)).toBe(false);
+      expect(b.x >= 0 && b.x + b.width <= 1440).toBe(true);
+    }
+
+    // Hover each session row.
+    const sessionRows = list.locator('[data-testid^="desktop-agent-status-"]');
+    const sessions = await sessionRows.count();
+    for (let i = 0; i < sessions; i++) {
+      const row = sessionRows.nth(i);
+      const r = await box(row);
+      await page.mouse.move(r.x + r.width / 2, r.y + r.height / 2);
+      const index = await rows.evaluateAll(
+        (els, id) => els.findIndex((el) => el.getAttribute('data-testid') === id),
+        await row.getAttribute('data-testid'),
+      );
+      await checkBubble(index);
+    }
+
+    // Keyboard focus on a middle row (pointer parked away from the list).
+    await page.mouse.move(5, 5);
+    await sessionRows.nth(1).focus();
+    await expect(page.getByRole('tooltip', { includeHidden: true })).toHaveText(
+      (await sessionRows.nth(1).getAttribute('aria-label'))!,
+    );
+    const focusedIndex = await rows.evaluateAll(
+      (els) => els.findIndex((el) => el === document.activeElement),
+    );
+    await checkBubble(focusedIndex);
+  });
+
   test('a tall screen: the list does not scroll; at 10 sessions "Add session…" is off and says why', async ({
     page,
   }) => {

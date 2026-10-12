@@ -373,7 +373,15 @@ export function HeaderSessionSwitcher({
       }`}
     >
       {rows.map((entry) => (
-        <Tooltip key={entry.id} content={entry.tooltip} placement="bottom" zIndex={ROW_TOOLTIP_Z_INDEX}>
+        // Issue #3616: beside the row (right, or left when the right edge is
+        // too close), never below it — a `bottom` bubble covered the next row.
+        <Tooltip
+          key={entry.id}
+          content={entry.tooltip}
+          placement="right"
+          fallbackPlacement="left"
+          zIndex={ROW_TOOLTIP_Z_INDEX}
+        >
           {/* Issue #1061: draggable session row (aria-pressed: never the current one) — 残置 */}
           <button
             type="button"
