@@ -263,9 +263,7 @@ export function WorktreeCard({ worktree, onSessionKilled }: WorktreeCardProps) {
             {currentStatus && (
               <div>
                 <span className={`px-2 py-1 text-xs font-medium rounded ${
-                  currentStatus === 'in_progress'
-                    ? 'bg-accent-100 dark:bg-accent-900 text-accent-700 dark:text-accent-300'
-                    : WORKTREE_STATUS_BADGE_CLASSES[currentStatus]
+                  WORKTREE_STATUS_BADGE_CLASSES[currentStatus]
                 }`}>
                   {t(worktreeStatusLabelKey(currentStatus))}
                 </span>
