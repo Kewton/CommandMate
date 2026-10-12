@@ -149,11 +149,6 @@ vi.mock('@/components/worktree/FileTreeView', () => ({
   FileTreeView: () => <div data-testid="file-tree-view" />,
 }));
 
-// Issue #727: LeftPaneTabSwitcher removed — ActivityBar mocked instead
-vi.mock('@/components/worktree/ActivityBar', () => ({
-  ActivityBar: () => <div data-testid="activity-bar" />,
-}));
-
 vi.mock('@/components/worktree/ActivityPane', () => ({
   ActivityPane: () => <div data-testid="activity-pane" />,
 }));

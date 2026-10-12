@@ -24,7 +24,7 @@ Claude Code ・ Codex ・ Gemini CLI ・ Copilot ・ OpenCode（1.x と V2） �
 セッションはバッジ・トースト・タブタイトルとして表に出て、チャットのように応答できます。
 
 <p align="center">
-  <img src="../images/demo-sessions.gif" width="560" alt="サイドバーに 4 セッション。1 行が琥珀で Approve / Reject が出ており、ヘッダーには RESULT Passed のチップ。待っていたセッションの Create File 確認に「1. Yes」で答えると、一覧が全部緑に戻る" />
+  <img src="../images/demo-sessions.gif" width="560" alt="サイドバーに 4 セッション。1 行が琥珀で Approve / Reject が出ており、画面上部に RESULT Passed の Verification チップ。待っていたセッションの Create File 確認に「1. Yes」で答えると、一覧が全部緑に戻る" />
 </p>
 
 | 機能 | できること | なぜ重要か |

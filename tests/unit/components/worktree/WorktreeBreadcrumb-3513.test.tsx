@@ -64,6 +64,23 @@ vi.mock('@/contexts/WorktreeSelectionContext', async (importOriginal) => ({
 
 import { DesktopHeader } from '@/components/worktree/WorktreeDetailSubComponents';
 
+/**
+ * Issue #3611: a layer above (a Radix menu, the header tools' "…" list) that
+ * handles Escape first and claims it with `preventDefault`, as Radix does from
+ * a document capture listener.
+ */
+function pressEscapeClaimedAbove(target: Element = document.body): void {
+  const claim = (event: KeyboardEvent): void => {
+    if (event.key === 'Escape') event.preventDefault();
+  };
+  document.addEventListener('keydown', claim, true);
+  try {
+    fireEvent.keyDown(target, { key: 'Escape' });
+  } finally {
+    document.removeEventListener('keydown', claim, true);
+  }
+}
+
 function worktree(overrides: Partial<Worktree> & Pick<Worktree, 'id'>): Worktree {
   return {
     name: `branch-${overrides.id}`,
@@ -184,6 +201,18 @@ describe('WorktreeBreadcrumb in DesktopHeader (Issue #3513)', () => {
       fireEvent.keyDown(document, { key: 'Escape' });
       expect(screen.queryByTestId('repository-tab-popover')).toBeNull();
       expect(document.activeElement).toBe(button);
+    });
+
+    it('stays open, focus untouched, when a layer above handled the Escape (Issue #3611)', () => {
+      renderHeader({ worktreeId: 'beta-develop', worktreeName: 'develop', repositoryName: 'beta' });
+      const button = screen.getByTestId('worktree-breadcrumb-branch');
+      fireEvent.keyDown(button, { key: 'ArrowDown' });
+      const before = document.activeElement;
+
+      pressEscapeClaimedAbove();
+      expect(screen.getByTestId('repository-tab-popover')).toBeInTheDocument();
+      expect(button).toHaveAttribute('aria-expanded', 'true');
+      expect(document.activeElement).toBe(before);
     });
 
     it('closes on a click outside, and again on the ▾', () => {
