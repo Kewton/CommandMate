@@ -1193,7 +1193,10 @@ CHANGELOG は書き写さない。ワーカーがコミットした `changelog.d
 cat "workspace/orchestration/runs/$DATE/module-reference-<N>.md"
 ```
 
-一本化のコミットは `docs/module-reference.md` だけを変える。`merge-pr.mjs` はこのコミットを越えてワーカーのコミットの `verify`・`review`・`findings` を使い、
+一本化のコミットは `docs/module-reference.md` だけを変え、trailer を付ける（無いと再指示の後の scope ゲートが落ちる）:
+`git commit -m 'docs(module-reference): #<N> の断片を本体へ写す' --trailer 'Orchestrator-Fold: module-reference'`
+
+`merge-pr.mjs` はこのコミットを越えてワーカーのコミットの `verify`・`review`・`findings` を使い、
 一本化の後の HEAD の precheck は自分で走らせる（ほかのファイルも変えたコミットを足すと、そのコミットが作業の HEAD になり、`verify` から止まる）。
 
 一本化したら**必ず機械的に検証する**:
