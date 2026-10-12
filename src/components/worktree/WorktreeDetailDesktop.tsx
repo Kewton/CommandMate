@@ -166,12 +166,6 @@ export interface WorktreeDetailDesktopProps {
 
   // Header actions
   onInfoClick: () => void;
-  /**
-   * Issue #3594: no longer rendered — the header lost its status select (the
-   * status is set from the branch row's "…" → Status). Kept optional so the
-   * caller that still passes it keeps compiling.
-   */
-  onWorktreeStatusChange?: (status: 'ready' | 'in_progress' | 'in_review' | 'done' | null) => void;
 
   // Pending insert text (usePendingInsertText, Issue #755)
   pendingInsertTextMap: Map<number, string | null>;

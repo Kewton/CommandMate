@@ -621,41 +621,53 @@ For details, see [Status Indicator](./features/sidebar-status-indicator.md).
 
 ## 11. UI Layout Architecture (PC, Issue #727 / #730 / #747)
 
-> **Note**: The legacy desktop left-pane model (history / files / memo, MobileTabBar) introduced in #600 has been replaced by the ActivityBar model described in this chapter. Reorganizing the older descriptions is out of scope here.
+> **Note**: The legacy desktop left-pane model (history / files / memo, MobileTabBar) introduced in #600 has been replaced by the activity model described in this chapter (since Issue #3591: the header tools + ActivityPane). Reorganizing the older descriptions is out of scope here.
 
 This chapter covers the **responsibility boundaries, state ownership, and data flow** of the top-level PC UI layout (why the structure exists and who owns which state). Visual layout, interactions (keyboard / Tooltip), and the component catalog are owned by [./UI_UX_GUIDE.md](./UI_UX_GUIDE.md) as the single source of truth and are not duplicated here.
 
 ### 11.1 Component Responsibilities and State Ownership
 
-- **ActivityBar** (`src/components/worktree/ActivityBar.tsx`): A fully controlled component that **does not own** the activity-selection state. It receives `active` / `onToggle` as props and renders `ACTIVITIES` from `@/config/activity-bar-config` (the 6 activities: Files / Git / Notes / Schedules / Agent / Timer). The one exception is the sidebar toggle at the top (Issue #747), which reads `{ isOpen, toggle }` directly from `useSidebarContext()` and is placed outside the `role="tablist"` so it does not interfere with tab keyboard navigation.
+> **Note (Issue #3589 / #3591)**: The 48px full-height ActivityBar is gone from PC. Activities are opened from the tools at the right of the header (`HeaderToolBar`) and the Verification chip on the second row, and the ActivityPane opens from the right, laid over the body (pinning it puts it beside the body). The items below describe that layout.
+
+- **HeaderToolBar** (`src/components/worktree/HeaderToolBar.tsx`, Issue #3591): A controlled component that **does not own** the activity-selection state. It receives `active` / `onToggle` as props and draws `HEADER_TOOLS` from `@/config/activity-bar-config` (`ACTIVITIES` without `verification`) as icons at the right of the PC header (`DesktopHeader`). On a narrow header the trailing tools fold into a "…" list (`useDesktopHeaderFit` decides how many).
+- **VerificationStatusChip** (`VerificationStatusChip.tsx`, Issue #1816 / #2064 / #3590): The PC entry point of the `verification` activity (`CHIP_ACTIVITY_ID`). It sits in the second-row action bar and opens/closes the Verification pane when pressed. It is always drawn, reporting "unverified" on a branch with no execution contract (#2064).
+- **ActivityBar** (`src/components/worktree/ActivityBar.tsx`): The former 48px vertical Activity Bar. Since Issue #3591 it is not mounted on any screen (the sidebar open/close button moved to `SidebarPanelToggle` in #3512).
 - **ActivityPane** (`ActivityPane.tsx`): A stateless, table-driven dispatcher. It picks exactly one node — `activities[active]` — from the parent-built `ActivityContentMap` (`Partial<Record<ActivityId, ReactNode>>`) and renders it through an `ErrorBoundary`. Because a single `active` key resolves to a single node, **rendering multiple activities simultaneously is structurally impossible**.
 - **TerminalContainer** (`TerminalContainer.tsx`, Issue #730): Wraps a `terminal` slot (always rendered) and an optional `history` slot. Since Issue #744, the top-level History column is no longer rendered on PC; History was moved inside each terminal split (see §12). The `history` prop and the `useHistoryPaneState` wiring are kept for backward compatibility with the #730 single-column layout.
-- **WorktreeDesktopLayout** (`WorktreeDesktopLayout.tsx`, Issue #730): A **2-column layout** of ActivityPane and the Right pane. Issue #730 simplified it from 4 columns to 2 (History moved into the TerminalContainer in the Right pane, and the ActivityBar moved to full-height rendering in the parent). When `activityPane === null`, both the activity column and its boundary PaneResizer are hidden.
-- **PaneResizer** (`PaneResizer.tsx`): A generic resizer that owns only transient drag state. It **only reports a pixel delta via `onResize(delta)`**; the parent decides the final pane width. It is reused for both the Activity↔Right boundary in WorktreeDesktopLayout and the History↔Terminal boundary in TerminalContainer.
+- **WorktreeDesktopLayout** (`WorktreeDesktopLayout.tsx`, Issue #730 / #3589 / #3591): Lays out the Right pane (the body) and the ActivityPane. The ActivityPane is on the **right** (#3591). Unpinned — the default — it is drawn over the Right pane, which keeps its width (#3589). Only when pinned (`activityPanePinned`) does it take a column beside the body, with a PaneResizer on the boundary. The pane's frame (title, pin, ×, Esc / outside-press dismissal) is `PaneOverlayFrame` in the same file. When `activityPane === null`, neither the pane nor the PaneResizer is drawn.
+- **PaneResizer** (`PaneResizer.tsx`): A generic resizer that owns only transient drag state. It **only reports a pixel delta via `onResize(delta)`**; the parent decides the final pane width. It is reused for both the Right↔Activity boundary in WorktreeDesktopLayout (when pinned) and the History↔Terminal boundary in TerminalContainer.
 
 ### 11.2 State Owners (Custom Hooks)
 
-- **useActivityBarState** (`src/hooks/useActivityBarState.ts`): The single source of truth for the `active` state. It persists to `commandmate.worktree.activeActivity`, but the **closed state (null) is intentionally not persisted** (only the last selected activity is stored so it reopens on revisit). On invalid/missing values it falls back to `DEFAULT_ACTIVITY = 'files'`; the initial render is deterministically `DEFAULT_ACTIVITY` and the localStorage read happens in a post-mount `useEffect` (to avoid hydration mismatch).
-- **SidebarContext** (`src/contexts/SidebarContext.tsx`): Owns the sidebar `isOpen` via `useReducer`. The ActivityBar hamburger (Issue #747) reads this context directly, forming a separate data-flow path from the props-based activity selection.
+- **useActivityBarState** (`src/hooks/useActivityBarState.ts`): The single source of truth for the `active` state. It persists **per worktree** under `commandmate.worktree.activeActivity-<worktreeId>` (`getActivityBarStorageKey`, Issue #858). **The closed state (null) is persisted too**, as `__closed__` (`ACTIVITY_CLOSED_SENTINEL`), so a pane closed on one worktree stays closed after a visit to another and back. An unvisited worktree or an invalid value gives `INITIAL_ACTIVITY` (`null` = closed since Issue #3589; it was `'files'` before). The initial render is deterministically `INITIAL_ACTIVITY` and the localStorage read happens in a `useEffect` after mount and on every `worktreeId` change (to avoid hydration mismatch).
+- **usePanePinnedState** (`src/hooks/useActivityPaneOverlay.ts`, Issue #3589): Whether the ActivityPane is pinned. Stored once under `commandmate.worktree.activityPanePinned` (`ACTIVITY_PANE_PINNED_STORAGE_KEY`) and shared across worktrees. `usePaneOverlayDismiss` in the same file closes an overlaid pane on Esc / an outside press.
+- **SidebarContext** (`src/contexts/SidebarContext.tsx`): Owns the sidebar `isOpen` via `useReducer`. The sidebar's own open/close button (`SidebarPanelToggle`, at the top of the `SidebarRail` icon rail while the sidebar is closed) reads this context, forming a separate data-flow path from the props-based activity selection.
 
-The orchestrator (`WorktreeDetailRefactored.tsx`) calls `useActivityBarState`, builds the `ActivityContentMap`, and wires ActivityBar / ActivityPane / WorktreeDesktopLayout together.
+The controller (`src/hooks/useWorktreeDetailController.ts`) calls `useActivityBarState`, and the PC orchestrator (`WorktreeDetailDesktop.tsx`) builds the `ActivityContentMap` and wires HeaderToolBar (through `DesktopHeader`) / VerificationStatusChip / ActivityPane / WorktreeDesktopLayout together.
 
 ### 11.3 Data-Flow Diagram
 
 ```mermaid
 graph TD
-    Parent["WorktreeDetailRefactored<br/>(orchestrator)"]
-    ActState["useActivityBarState<br/>(owns active / localStorage)"]
+    Ctrl["useWorktreeDetailController<br/>(calls useActivityBarState)"]
+    Parent["WorktreeDetailDesktop<br/>(PC orchestrator)"]
+    ActState["useActivityBarState<br/>(owns active / per-worktree localStorage)"]
+    PinState["usePanePinnedState<br/>(owns the pin / localStorage)"]
     SideCtx["SidebarContext<br/>(owns isOpen)"]
-    Bar["ActivityBar<br/>(stateless)"]
+    SideToggle["SidebarPanelToggle<br/>(sidebar / SidebarRail)"]
+    Tools["HeaderToolBar<br/>(header right, stateless)"]
+    Chip["VerificationStatusChip<br/>(second row)"]
     Pane["ActivityPane<br/>(table-driven dispatch)"]
-    Layout["WorktreeDesktopLayout<br/>(2 columns + PaneResizer)"]
+    Layout["WorktreeDesktopLayout<br/>(overlay / beside the body when pinned)"]
     Term["TerminalContainer<br/>(terminal + optional history)"]
 
-    ActState -->|active| Parent
+    ActState -->|active| Ctrl
+    Ctrl -->|"active / onToggle"| Parent
     Parent -->|onToggle| ActState
-    Parent -->|active / onToggle| Bar
-    Bar -->|"sidebar toggle (Issue #747)"| SideCtx
+    Parent -->|active / onToggle| Tools
+    Parent -->|"open/close verification"| Chip
+    PinState -->|activityPanePinned| Parent
+    SideToggle --> SideCtx
     Parent -->|"activityPane (nullable)"| Layout
     Parent -->|"ActivityContentMap"| Pane
     Pane --> Layout

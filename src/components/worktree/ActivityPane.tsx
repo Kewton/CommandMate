@@ -95,7 +95,6 @@ export const ActivityPane = memo(function ActivityPane({
       data-testid="activity-pane"
       data-active={active}
       role="tabpanel"
-      aria-labelledby={`activity-bar-button-${active}`}
       className={`h-full flex flex-col min-h-0 ${className}`.trim()}
     >
       <PaneDirtyContext.Provider value={onDirtyChange ?? null}>
