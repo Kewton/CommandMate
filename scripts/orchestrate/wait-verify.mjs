@@ -19,7 +19,15 @@
  *     off only once the verdict is confirmed (the worker may still be working
  *     before that), retried, and read back;
  *   - the verdict itself, which lived only in the wait log. It goes to the
- *     `verify` stage of `run-log.mjs`, with the HEAD the verification saw.
+ *     `verify` stage of `run-log.mjs`, with the HEAD the verification saw;
+ *   - a second contract sent to the same worktree and instance while this
+ *     waits (#3587): the worker's turn end then belongs to the new task, and
+ *     verifying the old one (narrower scope) only fails and holds the gates.
+ *     When the ledger shows the task this call is about, the wait runs without
+ *     `--verify` and this script starts `verify --task` itself, so the moment
+ *     before a verification is its own. The task list is read while waiting,
+ *     right before every verification and again before the verdict is taken;
+ *     a newer task ends the call without a verdict.
  *
  * A passed verdict is never reused: it belongs to a task, a contract and an
  * env-clean baseline taken when that task started, none of which a HEAD names.
@@ -29,7 +37,9 @@
  * (10 prompt / 124 timeout …), so 3-4's table still applies. 3 means the
  * verdict could not be tied to the finished work (no completion signal, a
  * commit after the verification started without a task to re-verify, or
- * uncommitted changes behind a pass). 2 is a usage error; 1 means the verdict
+ * uncommitted changes behind a pass, or a newer task for the same instance).
+ * 2 is a usage error or an `--instance` the server cannot resolve (nothing is
+ * sent then); 1 means the verdict
  * could not be recorded.
  *
  * Usage:
@@ -42,7 +52,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { appendRecord } from './run-log.mjs';
 import { dirtyPaths } from './dirty-tree.mjs';
@@ -51,6 +61,14 @@ export const DEFAULT_TIMEOUT_SEC = 10800;
 export const DEFAULT_SIGNAL_TIMEOUT_SEC = 1800;
 export const SIGNAL_POLL_SEC = 30;
 export const AUTO_YES_ATTEMPTS = 3;
+/** How often a watched wait looks for its exit status; the task list is read every SIGNAL_POLL_SEC. */
+export const EXIT_POLL_MS = 500;
+/** Tasks read to find a newer one (newest first). */
+export const TASK_LIST_LIMIT = 20;
+/** Upper bound for a side query (task list, instance roster): past it the check is skipped. */
+export const QUERY_TIMEOUT_MS = 15_000;
+/** `wait`'s "no session was ever seen" (VerifyExitCode.NOT_STARTED); `wait --verify` still verifies it. */
+const NOT_STARTED_EXIT = 21;
 /** Exit codes that are a verdict: the gates ran and judged the work. */
 export const VERDICT_EXIT_CODES = [0, 20, 21];
 /** The verdict could not be tied to the finished work. */
@@ -65,21 +83,86 @@ const EXIT_MEANINGS = {
   124: 'timeout',
 };
 
-/** Run a command, writing stdout and stderr to `logFile`; returns the exit status. */
-function defaultSpawnToLog(command, args, { cwd, logFile }) {
+function readExitFile(file) {
+  try {
+    const text = fs.readFileSync(file, 'utf8').trim();
+    return /^\d+$/.test(text) ? Number(text) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Stop a watched command: its `sh` wrapper's children first, then the wrapper. */
+function stopWatched(pid) {
+  spawnSync('pkill', ['-TERM', '-P', String(pid)]);
+  try {
+    process.kill(pid, 'SIGTERM');
+  } catch {
+    // already gone
+  }
+}
+
+/**
+ * Run a command, writing stdout and stderr to `logFile`; returns the exit status.
+ *
+ * With `watch`, the command runs under `sh` (which writes its exit status next
+ * to the log) so this synchronous caller can look around while it runs:
+ * `watch()` is asked every `pollMs`, and a truthy answer stops the command
+ * (#3587). The exit status is looked for every EXIT_POLL_MS, so watching does
+ * not make the wait return later.
+ */
+export function defaultSpawnToLog(command, args, { cwd, logFile, watch, pollMs = SIGNAL_POLL_SEC * 1000 }) {
   fs.mkdirSync(path.dirname(logFile), { recursive: true });
   const fd = fs.openSync(logFile, 'w');
   try {
-    const result = spawnSync(command, args, { cwd, stdio: ['ignore', fd, fd] });
-    if (result.error) throw result.error;
-    return result.status ?? 1;
+    if (!watch) {
+      const result = spawnSync(command, args, { cwd, stdio: ['ignore', fd, fd] });
+      if (result.error) throw result.error;
+      return result.status ?? 1;
+    }
+    const exitFile = `${logFile}.exit`;
+    fs.rmSync(exitFile, { force: true });
+    const child = spawn('sh', ['-c', '"$@"; echo $? > "$CM_WATCHED_EXIT_FILE"', 'sh', command, ...args], {
+      cwd,
+      stdio: ['ignore', fd, fd],
+      env: { ...process.env, CM_WATCHED_EXIT_FILE: exitFile },
+    });
+    child.unref();
+    try {
+      let sinceWatch = 0;
+      for (;;) {
+        const status = readExitFile(exitFile);
+        if (status !== null) return status;
+        if (sinceWatch >= pollMs) {
+          sinceWatch = 0;
+          if (watch()) {
+            stopWatched(child.pid);
+            return 143;
+          }
+        }
+        defaultSleep(EXIT_POLL_MS);
+        sinceWatch += EXIT_POLL_MS;
+      }
+    } catch (err) {
+      // A failing watch must not leave the wait running: it could still go on to verify.
+      stopWatched(child.pid);
+      throw err;
+    } finally {
+      fs.rmSync(exitFile, { force: true });
+    }
   } finally {
     fs.closeSync(fd);
   }
 }
 
-function defaultRun(command, args, { cwd } = {}) {
-  const result = spawnSync(command, args, { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+/** Run a command and collect its output; `timeoutMs` kills it and throws (ETIMEDOUT) past that bound. */
+export function defaultRun(command, args, { cwd, timeoutMs } = {}) {
+  const result = spawnSync(command, args, {
+    cwd,
+    encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
+    ...(timeoutMs ? { timeout: timeoutMs, killSignal: 'SIGKILL' } : {}),
+  });
   if (result.error) throw result.error;
   return { status: result.status ?? 1, stdout: result.stdout ?? '', stderr: result.stderr ?? '' };
 }
@@ -146,6 +229,122 @@ function latestRunStart(run, cli, wt, cwd) {
 }
 
 /**
+ * A side query's JSON, or null. Bounded by QUERY_TIMEOUT_MS and never throws:
+ * these checks are fail-open, and neither the wait nor its timeout may hang on them.
+ */
+function querySafely(run, cli, args, cwd) {
+  try {
+    const out = run(cli, args, { cwd, timeoutMs: QUERY_TIMEOUT_MS });
+    if (out.status !== 0) return null;
+    return JSON.parse(out.stdout);
+  } catch {
+    return null;
+  }
+}
+
+/** The CLI build `defaultResolveTarget` asks through: the one `bin/commandmate.js` of this checkout runs. */
+export const DEFAULT_CLI_DIST = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../dist');
+
+/**
+ * Asks the server's `GET /api/worktrees/<wt>/resolve-target?instance=` through the
+ * CLI's own ApiClient (same server, port and token as every `commandmatedev` call).
+ * argv: <dist> <worktree-id> <selector>.
+ */
+const RESOLVE_TARGET_SOURCE = `
+const [dist, wt, selector] = process.argv.slice(1);
+const { ApiClient } = require(require('node:path').join(dist, 'cli/utils/api-client.js'));
+new ApiClient()
+  .get('/api/worktrees/' + encodeURIComponent(wt) + '/resolve-target?instance=' + encodeURIComponent(selector))
+  .then((target) => process.stdout.write(JSON.stringify(target)))
+  .catch((err) => {
+    process.stderr.write(String((err && err.message) || err));
+    process.exit(2);
+  });
+`;
+
+/**
+ * The instance id the server resolves `--instance` to (#3587 review 2-3): the
+ * route `wait`, `capture` and `send` resolve through (primary anchor, then
+ * roster id, then alias — exact before case-insensitive, ambiguity refused).
+ * No rule of its own here.
+ *
+ * @param {string} wt
+ * @param {string} selector
+ * @param {{ cwd?: string, distDir?: string }} [options]
+ * @returns {{ instanceId: string } | { error: string }}
+ */
+export function defaultResolveTarget(wt, selector, { cwd, distDir = DEFAULT_CLI_DIST } = {}) {
+  try {
+    const out = defaultRun(process.execPath, ['-e', RESOLVE_TARGET_SOURCE, distDir, wt, selector], {
+      cwd,
+      timeoutMs: QUERY_TIMEOUT_MS,
+    });
+    if (out.status !== 0) return { error: (out.stderr || out.stdout).trim() || `exit ${out.status}` };
+    const target = JSON.parse(out.stdout);
+    if (typeof target?.instanceId !== 'string' || target.instanceId === '') {
+      return { error: `no instance in the answer: ${out.stdout.trim()}` };
+    }
+    return { instanceId: target.instanceId };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/** The instance a task was sent to: its instance id, or the agent's primary instance. */
+const taskInstance = (task) => task.instanceId ?? task.cliToolId;
+
+/**
+ * The task this call is about, as `{ id, createdAt, found }` (createdAt in epoch
+ * ms): `--task` when given, otherwise the instance's newest task created by the
+ * start of this call (so a list first read after the call started does not take
+ * a newer contract for the old one). `found` says the ledger shows it; a task
+ * missing from the list (or no task at all) is dated by the start of this call.
+ */
+export function baselineTask(tasks, instance, taskId, startedMs) {
+  const list = Array.isArray(tasks) ? tasks : [];
+  const own = taskId
+    ? list.find((t) => t?.id === taskId)
+    : list.find((t) => t && taskInstance(t) === instance && !(Date.parse(t.createdAt) > startedMs));
+  const createdAt = own ? Date.parse(own.createdAt) : NaN;
+  return {
+    id: taskId ?? own?.id ?? null,
+    createdAt: Number.isFinite(createdAt) ? createdAt : startedMs,
+    found: Boolean(own),
+  };
+}
+
+/**
+ * The newest task of the same instance created after `baseline`, or null (#3587).
+ * A second contract sent to the worktree is such a task: the turn end the wait
+ * reads then belongs to it, not to the baseline. While the baseline is in the
+ * list, the list's order (created_at, then insertion) decides, so a task created
+ * in the same millisecond after it still counts; otherwise creation times do.
+ */
+export function newerTask(tasks, instance, baseline) {
+  if (!Array.isArray(tasks)) return null;
+  const at = tasks.findIndex((t) => t?.id === baseline.id);
+  const sameInstance = (t) => t && t.id !== baseline.id && taskInstance(t) === instance;
+  if (at >= 0) return tasks.slice(0, at).find(sameInstance) ?? null;
+  for (const task of tasks) {
+    if (!sameInstance(task)) continue;
+    const createdAt = Date.parse(task.createdAt);
+    if (Number.isFinite(createdAt) && createdAt > baseline.createdAt) return task;
+  }
+  return null;
+}
+
+/** The worktree's tasks, newest first, or null when they cannot be read (the check is then skipped). */
+function readTasks(run, cli, wt, cwd) {
+  const tasks = querySafely(run, cli, ['task', 'list', wt, '--limit', String(TASK_LIST_LIMIT), '--json'], cwd);
+  return Array.isArray(tasks) ? tasks : null;
+}
+
+/** The reason recorded after `unconfirmed:` when a newer task took over the worktree. */
+export function supersededReason(newer, baseline) {
+  return `a newer task ${newer.id} was created for this instance after task ${baseline.id ?? '-'}`;
+}
+
+/**
  * Turn Auto-Yes off and read it back, retrying. Asked on every call — a failure
  * on one call is not remembered as "done" by the next.
  *
@@ -185,6 +384,8 @@ export function confirmCompletion(ctx) {
     for (;;) {
       const pane = run(o.cli, ['capture', o.wt, '--instance', o.instance, '--pane', '--tail', '40'], { cwd });
       if (pane.status === 0 && hasCompletionSignal(pane.stdout)) break;
+      const newer = ctx.supersededBy?.();
+      if (newer) return { state: 'working', exitCode, log, reason: newer, reverified: false };
       if (now().getTime() >= deadline) {
         return { state: 'working', exitCode, log, reason: `no IMPL_COMPLETED line within ${o.signalTimeout}s`, reverified: false };
       }
@@ -217,9 +418,11 @@ export function confirmCompletion(ctx) {
         reverified,
       };
     }
+    const newer = ctx.supersededBy?.();
+    if (newer) return { state: 'working', exitCode, log, reason: newer, reverified };
     const reLog = `${o.logFile.replace(/\.log$/, '')}.reverify.log`;
     const reStart = now().getTime();
-    exitCode = ctx.spawnToLog(o.cli, ['verify', o.wt, '--task', o.taskId], { cwd, logFile: reLog });
+    exitCode = ctx.spawnToLog(o.cli, ['verify', o.wt, '--task', o.taskId, '--instance', o.instance], { cwd, logFile: reLog });
     log = fs.existsSync(reLog) ? fs.readFileSync(reLog, 'utf8') : '';
     reverified = true;
     notes.push('reverified=verify --task');
@@ -293,6 +496,7 @@ export function parseArgs(argv) {
  * @param {string[]} argv
  * @param {{
  *   spawnToLog?: typeof defaultSpawnToLog,
+ *   resolveTarget?: typeof defaultResolveTarget,
  *   run?: typeof defaultRun,
  *   sleep?: (ms: number) => void,
  *   now?: () => Date,
@@ -303,6 +507,7 @@ export function parseArgs(argv) {
  */
 export function main(argv, deps = {}) {
   const { spawnToLog = defaultSpawnToLog, run = defaultRun, sleep = defaultSleep, now = () => new Date() } = deps;
+  const resolveTarget = deps.resolveTarget ?? defaultResolveTarget;
   const log = deps.log ?? ((line) => console.log(line));
   const error = deps.error ?? ((line) => console.error(line));
 
@@ -314,6 +519,16 @@ export function main(argv, deps = {}) {
   const o = parsed.options;
   const cwd = process.cwd();
 
+  // One id for everything that follows — the wait, the verifications, the task
+  // comparison, capture and Auto-Yes: tasks carry the resolved id, not the alias.
+  // Unresolvable means nothing is sent and nothing is waited for (#3587 review 2-3).
+  const target = resolveTarget(o.wt, o.instance, { cwd });
+  if ('error' in target) {
+    error(`cannot resolve --instance '${o.instance}' in ${o.wt}: ${target.error}`);
+    return 2;
+  }
+  o.instance = target.instanceId;
+
   try {
     if (o.autoYesOff) {
       const autoYes = disableAutoYes({ run, sleep, cli: o.cli, wt: o.wt, instance: o.instance, cwd, error });
@@ -324,20 +539,68 @@ export function main(argv, deps = {}) {
     const issue = Number(o.issue);
     o.logFile = o.log ?? path.join(o.runDir, `wait-${issue}.log`);
     const started = now();
+    const instance = o.instance;
+    const startTasks = readTasks(run, o.cli, o.wt, cwd);
+    let baseline = baselineTask(startTasks, instance, o.taskId, started.getTime());
+    // An unreadable list at the start is not "no task": the baseline is taken
+    // when the list reads again, and the call is watched meanwhile (#3587 review 2-2).
+    let baselinePending = startTasks === null;
+    // Watched when the ledger shows the task, or may yet show it. A readable
+    // list without it leaves nothing to compare against.
+    const watching = baseline.found || baselinePending;
+    /** The reason a newer task makes a verdict on `baseline` meaningless, or null (#3587). */
+    const supersededBy = () => {
+      if (!watching) return null;
+      const tasks = readTasks(run, o.cli, o.wt, cwd);
+      if (tasks === null) return null;
+      if (baselinePending) {
+        baselinePending = false;
+        baseline = baselineTask(tasks, instance, o.taskId, started.getTime());
+      }
+      if (!baseline.found) return null;
+      const newer = newerTask(tasks, instance, baseline);
+      return newer ? supersededReason(newer, baseline) : null;
+    };
+    let superseded = null;
+    const watch = () => {
+      superseded = supersededBy();
+      return superseded !== null;
+    };
+    // Watched, the wait does not verify: `wait --verify` starts the verification
+    // inside the CLI, where no check can come between the turn end and the run.
+    // This script starts `verify` itself, after one more check (#3587).
+    const split = o.afterReinstruct || watching;
     const waitArgs = [
-      'wait', o.wt, '--instance', o.instance, '--on-prompt', 'human',
-      ...(o.afterReinstruct ? [] : ['--verify']),
+      'wait', o.wt, '--instance', instance, '--on-prompt', 'human',
+      ...(split ? [] : ['--verify']),
       '--timeout', o.timeout,
     ];
-    let exitCode = spawnToLog(o.cli, waitArgs, { cwd, logFile: o.logFile });
+    let exitCode = spawnToLog(o.cli, waitArgs, { cwd, logFile: o.logFile, ...(watching ? { watch } : {}) });
     let verdictLog = fs.existsSync(o.logFile) ? fs.readFileSync(o.logFile, 'utf8') : '';
 
-    if (o.afterReinstruct && exitCode === 0) {
-      // 3-4: `wait` → `verify --task`. The gates are the contract's plus the builtins.
-      const verifyLog = `${o.logFile.replace(/\.log$/, '')}.verify.log`;
-      exitCode = spawnToLog(o.cli, ['verify', o.wt, '--task', o.taskId], { cwd, logFile: verifyLog });
-      verdictLog = fs.existsSync(verifyLog) ? fs.readFileSync(verifyLog, 'utf8') : '';
+    const verifiable = exitCode === 0 || (!o.afterReinstruct && exitCode === NOT_STARTED_EXIT);
+    if (split && !superseded && verifiable) {
+      superseded = supersededBy();
+      if (!superseded) {
+        // 3-4: `wait` → `verify --task`. The gates are the contract's plus the builtins.
+        // The instance is passed as `wait --verify` passes it: OpenCode's work
+        // evidence is read per instance, so leaving it out changes the verdict.
+        // No task known (the list never read) leaves the task to the server, as `wait --verify` does.
+        const verifyTask = o.taskId ?? (baseline.found ? baseline.id : null);
+        const verifyLog = `${o.logFile.replace(/\.log$/, '')}.verify.log`;
+        const verifyExit = spawnToLog(
+          o.cli,
+          ['verify', o.wt, ...(verifyTask ? ['--task', verifyTask] : []), '--instance', instance],
+          { cwd, logFile: verifyLog }
+        );
+        verdictLog = o.afterReinstruct ? '' : verdictLog;
+        verdictLog += fs.existsSync(verifyLog) ? fs.readFileSync(verifyLog, 'utf8') : '';
+        // As `wait --verify` folds it: a green run does not turn "never started" into a pass.
+        exitCode = exitCode === NOT_STARTED_EXIT && verifyExit === 0 ? NOT_STARTED_EXIT : verifyExit;
+      }
     }
+    // A newer task that came while the verification ran: its verdict is not the old task's.
+    if (!superseded && VERDICT_EXIT_CODES.includes(exitCode)) superseded = supersededBy();
 
     const record = (result, head, note) => {
       const durationSec = Math.round((now().getTime() - started.getTime()) / 1000);
@@ -352,16 +615,30 @@ export function main(argv, deps = {}) {
     };
     const headNow = () => git(run, o.worktree, ['rev-parse', 'HEAD']).trim();
 
+    if (superseded) {
+      // The worker is working on the newer task: Auto-Yes stays, and no verdict is taken on the old one.
+      record('fail', headNow(), `unconfirmed: ${superseded}; ${summarizeVerdict(verdictLog, exitCode).line} auto-yes=kept`);
+      return UNCONFIRMED_EXIT;
+    }
+
     if (!VERDICT_EXIT_CODES.includes(exitCode)) {
       // No verdict (prompt, timeout, error): the worker may still be working, so Auto-Yes stays.
       record('fail', headNow(), `${summarizeVerdict(verdictLog, exitCode).line} auto-yes=kept`);
       return exitCode;
     }
 
-    const confirmed = confirmCompletion({ run, sleep, now, spawnToLog, o, cwd, verdict: { exitCode, log: verdictLog } });
+    const confirmed = confirmCompletion({
+      run, sleep, now, spawnToLog, o, cwd, verdict: { exitCode, log: verdictLog }, supersededBy,
+    });
     const verdict = summarizeVerdict(confirmed.log, confirmed.exitCode);
     if (confirmed.state === 'working') {
       record('fail', headNow(), `unconfirmed: ${confirmed.reason}; ${verdict.line} auto-yes=kept`);
+      return UNCONFIRMED_EXIT;
+    }
+    // Last check before the verdict is taken and Auto-Yes goes off (a re-verification or the signal wait may have run).
+    const late = supersededBy();
+    if (late) {
+      record('fail', headNow(), `unconfirmed: ${late}; ${verdict.line} auto-yes=kept`);
       return UNCONFIRMED_EXIT;
     }
 
