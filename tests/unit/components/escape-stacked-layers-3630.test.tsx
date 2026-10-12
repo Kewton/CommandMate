@@ -16,6 +16,8 @@ import { ContextMenu } from '@/components/worktree/ContextMenu';
 import { useContextMenu } from '@/hooks/useContextMenu';
 import { FilePanelContent } from '@/components/worktree/FilePanelContent';
 import { FileViewer } from '@/components/worktree/FileViewer';
+import { MarkdownEditor } from '@/components/worktree/MarkdownEditor';
+import { waitFor } from '@testing-library/react';
 import type { FileTab } from '@/hooks/useFileTabs';
 
 vi.mock('next-intl', async () => {
@@ -226,5 +228,42 @@ describe('FileViewer Escape (Issue #3630)', () => {
       fireEvent.keyDown(window, { key: 'Escape' });
       expect(screen.queryAllByRole('button', { name: /Exit fullscreen/i })).toHaveLength(0);
     });
+  });
+});
+
+describe('MarkdownEditor maximize Escape (Issue #3630, consistency review P3)', () => {
+  async function maximizedEditor() {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ success: true, content: '# Title\n' }),
+    }) as unknown as typeof fetch;
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        observe = vi.fn();
+        unobserve = vi.fn();
+        disconnect = vi.fn();
+      },
+    );
+    render(<MarkdownEditor worktreeId="wt" filePath="docs/readme.md" />);
+    await waitFor(() => expect(screen.getByTestId('markdown-editor-textarea')).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId('maximize-button'));
+    await waitFor(() => expect(screen.getByTestId('maximize-hint')).toBeInTheDocument());
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('stays maximized when a layer above already handled Escape', async () => {
+    await maximizedEditor();
+    pressEscapeClaimedAbove();
+    expect(screen.getByTestId('maximize-hint')).toBeInTheDocument();
+  });
+
+  it('leaves maximize on a direct Escape', async () => {
+    await maximizedEditor();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByTestId('maximize-hint')).not.toBeInTheDocument());
   });
 });
