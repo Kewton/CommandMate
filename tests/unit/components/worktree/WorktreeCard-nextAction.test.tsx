@@ -170,3 +170,20 @@ describe('WorktreeCard awaiting-instruction badge (Issue #1787)', () => {
     expect(screen.queryByTestId('worktree-card-awaiting-instruction')).toBeNull();
   });
 });
+
+describe('WorktreeCard In Progress badge colours (Issue #3632)', () => {
+  it('uses the shared WORKTREE_STATUS_BADGE_CLASSES value, not a local copy', async () => {
+    const { WORKTREE_STATUS_BADGE_CLASSES } = await import('@/lib/worktree-status');
+    const wt = createWorktree({ status: 'in_progress' } as Partial<Worktree>);
+    const { container } = render(<WorktreeCard worktree={wt} />);
+    const badge = Array.from(container.querySelectorAll('span')).find((s) =>
+      s.className.includes('px-2 py-1 text-xs font-medium rounded'),
+    );
+    expect(badge).toBeTruthy();
+    for (const c of WORKTREE_STATUS_BADGE_CLASSES.in_progress.split(' ')) {
+      expect(badge!.classList.contains(c)).toBe(true);
+    }
+    expect(badge!.classList.contains('dark:bg-accent-900')).toBe(false);
+    expect(badge!.classList.contains('dark:text-accent-300')).toBe(false);
+  });
+});

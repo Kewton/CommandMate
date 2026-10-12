@@ -1,17 +1,13 @@
 /**
  * Agent-instance status display helpers (Issue #1078).
  *
- * Pure logic for the worktree desktop header's per-agent status row. The row
- * unifies the status visual on `<StatusDot>` and collapses idle noise:
- * - active or actively-working instances render as a labelled pill,
- * - idle / ready instances collapse to an icon-only dot (label via tooltip),
- * - when there are more labelled pills than fit, the excess collapse into a
- *   "+N" overflow menu so a working session never gets buried.
+ * Pure logic for the worktree desktop header's agent-instance row. Before
+ * #3593 the row drew labelled pills, idle dots and a "+N" overflow menu.
  *
  * Issue #3593: the header no longer draws pills and dots. It shows the current
  * session and lists the others ({@link resolveCurrentInstanceId},
- * {@link orderOtherInstances}, {@link countWaitingInstances}); the
- * classification above is kept for its callers' tests only.
+ * {@link orderOtherInstances}, {@link countWaitingInstances}). The pill / dot /
+ * overflow classification (classifyHeaderInstances) was removed in #3620.
  */
 
 import type { BranchStatus } from '@/types/sidebar';
