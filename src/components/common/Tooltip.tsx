@@ -246,6 +246,37 @@ export function resolveTooltipWrap(
   return maxWidth >= TOOLTIP_MIN_WRAP_WIDTH ? { placement: side, maxWidth } : null;
 }
 
+/**
+ * [Issue #3616] The wrapping CSS of a bubble narrowed by `resolveTooltipWrap`.
+ * The ONE source for both the re-measure (written to the node) and the render
+ * (the `style` prop): if they differed, the bubble would be placed by a height
+ * it does not have — e.g. a long word with no spaces only wraps with
+ * `overflow-wrap: anywhere`, so measuring without it under-reads the height.
+ */
+export function tooltipWrapStyle(maxWidth: number): {
+  maxWidth: string;
+  whiteSpace: 'normal';
+  overflowWrap: 'anywhere';
+} {
+  return { maxWidth: `${maxWidth}px`, whiteSpace: 'normal', overflowWrap: 'anywhere' };
+}
+
+/** CSS property names of `tooltipWrapStyle`, for writing it to / clearing it from a node. */
+const TOOLTIP_WRAP_CSS_PROPERTIES = {
+  maxWidth: 'max-width',
+  whiteSpace: 'white-space',
+  overflowWrap: 'overflow-wrap',
+} as const satisfies Record<keyof ReturnType<typeof tooltipWrapStyle>, string>;
+
+/** Write (`maxWidth` given) or clear (`null`) the wrapping CSS on a bubble node. */
+function applyTooltipWrapStyle(node: HTMLElement, maxWidth: number | null): void {
+  const style = maxWidth === null ? null : tooltipWrapStyle(maxWidth);
+  for (const [key, cssName] of Object.entries(TOOLTIP_WRAP_CSS_PROPERTIES)) {
+    if (style === null) node.style.removeProperty(cssName);
+    else node.style.setProperty(cssName, style[key as keyof typeof style]);
+  }
+}
+
 /** Rendered off-screen for the first frame, before the bubble can be measured. */
 const OFFSCREEN_COORDS: TooltipCoords = { top: -9999, left: -9999 };
 
@@ -379,8 +410,7 @@ export function Tooltip({
     // so it is centred on its wrapped height. Written to the node directly so
     // the second measurement happens in this same pass; the state below makes
     // React render the same values.
-    bubble.style.maxWidth = '';
-    bubble.style.whiteSpace = '';
+    applyTooltipWrapStyle(bubble, null);
     let bubbleRect = bubble.getBoundingClientRect();
     const wrap = resolveTooltipWrap(
       placement,
@@ -390,8 +420,7 @@ export function Tooltip({
       fallbackPlacement
     );
     if (wrap) {
-      bubble.style.maxWidth = `${wrap.maxWidth}px`;
-      bubble.style.whiteSpace = 'normal';
+      applyTooltipWrapStyle(bubble, wrap.maxWidth);
       bubbleRect = bubble.getBoundingClientRect();
     }
     setWrapWidth(wrap ? wrap.maxWidth : null);
@@ -479,7 +508,7 @@ export function Tooltip({
               ...(zIndex === undefined ? {} : { zIndex }),
               ...(wrapWidth === null
                 ? {}
-                : { maxWidth: wrapWidth, whiteSpace: 'normal', overflowWrap: 'anywhere' }),
+                : tooltipWrapStyle(wrapWidth)),
             }}
           >
             {content}

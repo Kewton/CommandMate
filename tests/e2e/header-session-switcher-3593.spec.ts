@@ -469,6 +469,37 @@ test.describe('Header session field (Issue #3593)', () => {
     await hoverRowAndCheckTooltip(page, partial!, { expectWrapped: true, atY: 'visible-part' });
   });
 
+  // Issue #3616 (review 2): a long label with no spaces only wraps with
+  // `overflow-wrap: anywhere`. It must be measured with it too, or the bubble
+  // is placed by a one-line height and runs off the bottom of the screen.
+  test('a long row tooltip with no spaces stays on screen and covers no other row (#3616)', async ({ page }) => {
+    const alias = (i: number) => `s${i}_` + 'x'.repeat(600);
+    for (const height of [768, 300]) {
+      await page.setViewportSize({ width: 1024, height });
+      await openScreenWithSidebar(page, { count: 9, alias });
+      const list = await openList(page);
+      await dropListFocus(page);
+      const rows = list.locator('[data-testid^="desktop-agent-status-"]');
+      const listBox = await box(list);
+      for (let i = 0; i < (await rows.count()); i++) {
+        const r = await box(rows.nth(i));
+        // Only the rows the list shows (at least half of them) can be hovered.
+        if (r.y + r.height / 2 > listBox.y + listBox.height) continue;
+        await page.mouse.move(r.x + r.width / 2, r.y + Math.min(r.height / 2, 4));
+        const bubble = page.getByRole('tooltip', { includeHidden: true });
+        await expect(bubble).toHaveText((await rows.nth(i).getAttribute('aria-label'))!);
+        await checkRowTooltip(page, rows.nth(i), { expectWrapped: true });
+        const b = await box(bubble);
+        // Wrapped onto several lines, and the whole bubble is inside the screen.
+        expect(b.height).toBeGreaterThan(30);
+        expect(b.y).toBeGreaterThanOrEqual(0);
+        expect(b.y + b.height, `bottom of the tooltip of row ${i} at height ${height}`).toBeLessThanOrEqual(height);
+        await page.mouse.move(5, 5);
+        await expect(bubble).toHaveCount(0);
+      }
+    }
+  });
+
   test('a tall screen: the list does not scroll; at 10 sessions "Add session…" is off and says why', async ({
     page,
   }) => {

@@ -14,6 +14,7 @@ import {
   Tooltip,
   computeTooltipPosition,
   resolveTooltipWrap,
+  tooltipWrapStyle,
   TOOLTIP_GAP,
   TOOLTIP_MIN_WRAP_WIDTH,
   TOOLTIP_VIEWPORT_MARGIN,
@@ -117,8 +118,10 @@ describe('[#3616] Tooltip fallbackPlacement prop', () => {
     trigger: typeof ROW_MID,
     bubble: typeof BUBBLE = BUBBLE,
     viewport: typeof VIEWPORT = VIEWPORT,
+    onBubbleMeasure?: (bubble: HTMLElement) => void,
   ): void {
     vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+      if (this.getAttribute('role') === 'tooltip') onBubbleMeasure?.(this as HTMLElement);
       // A bubble given a max width wraps: narrower, and taller by its line count.
       const max = parseFloat((this as HTMLElement).style?.maxWidth ?? '');
       const lines = Number.isFinite(max) && max < bubble.width ? Math.ceil(bubble.width / max) : 1;
@@ -190,5 +193,25 @@ describe('[#3616] Tooltip fallbackPlacement prop', () => {
     expect(bubble.style.maxWidth).toBe('');
     expect(bubble.style.whiteSpace).toBe('');
     expect(bubble.style.left).toBe(`${NARROW.width - LONG_BUBBLE.width - TOOLTIP_VIEWPORT_MARGIN}px`);
+  });
+
+  it('measures the wrapped bubble with exactly the wrapping style it is drawn with', () => {
+    const WRAP_PROPS = ['max-width', 'white-space', 'overflow-wrap'] as const;
+    const snapshot = (el: HTMLElement) => WRAP_PROPS.map((p) => el.style.getPropertyValue(p));
+    // Record the bubble's wrapping CSS at each of its measurements.
+    const measured: string[][] = [];
+    stubRects(PARTIAL_ROW, LONG_BUBBLE, NARROW, (el) => measured.push(snapshot(el)));
+    render(
+      <Tooltip content={'x'.repeat(200)} placement="right" fallbackPlacement="left">
+        <button type="button">row</button>
+      </Tooltip>,
+    );
+    const bubble = show();
+    const drawn = snapshot(bubble);
+    expect(drawn).toEqual(['488px', 'normal', 'anywhere']);
+    // The last measurement (the one the position is computed from) saw the same CSS.
+    expect(measured.at(-1)).toEqual(drawn);
+    // Both come from the one shared definition.
+    expect(tooltipWrapStyle(488)).toEqual({ maxWidth: '488px', whiteSpace: 'normal', overflowWrap: 'anywhere' });
   });
 });
