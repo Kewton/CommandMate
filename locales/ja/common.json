@@ -30,6 +30,7 @@
     "skills": "スキル"
   },
   "repositories": {
+    "pageDescription": "リポジトリとワークツリーを管理します。",
     "empty": "リポジトリが登録されていません。",
     "add": "リポジトリを追加",
     "syncAll": "すべて同期",

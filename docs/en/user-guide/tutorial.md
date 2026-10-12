@@ -132,7 +132,7 @@ CommandMate installs **Agent Skills** from the official Catalog, per worktree. I
 
 Open the session that appeared in Step 1 (the worktree detail screen).
 
-- **Desktop**: open **Skills** (the ✨ icon) in the activity bar
+- **Desktop**: open **Skills** (the ✨ icon) among the tools at the right of the header (inside the "…" list when the header is narrow)
 - **Phone**: **Tools** tab → **Skills**
 
 **Installed in this worktree** is on top, **Install from the Catalog** below it.
