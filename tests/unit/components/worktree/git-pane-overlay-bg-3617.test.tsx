@@ -1,13 +1,15 @@
 /**
  * Where the dark Git pane's blue does NOT come from (Issue #3617).
  *
- * Traced in a real browser (dark scheme, 1440×900): the blue that fills the
- * Git pane is `bg-info-subtle` (`--info-subtle` = blue-950 in dark) on
- * GitPaneLayout's read groups — `git-group-read` and `git-group-history`, the
- * latter `flex-1`, so it covers most of the pane. The frames around the pane
- * paint the neutral `--surface`. These tests pin that the frames stay neutral
- * and that ActivityPane adds no background of its own, so the Files pane
- * (which has no tinted groups) keeps the normal background in both themes.
+ * Traced in a real browser (dark scheme, 1440×900): the blue that filled the
+ * Git pane was the opaque `bg-info-subtle` (`--info-subtle` = blue-950 in dark)
+ * on GitPaneLayout's read groups — `git-group-read` and `git-group-history`,
+ * the latter `flex-1`, so it covered most of the pane. Those groups now carry
+ * an opacity modifier (pinned in tests/unit/components/git/
+ * GitPaneLayout-tint-3617.test.tsx). The frames around the pane paint the
+ * neutral `--surface`. These tests pin that the frames stay neutral and that
+ * ActivityPane adds no background of its own, so the Files pane (which has no
+ * tinted groups) keeps the normal background in both themes.
  *
  * @vitest-environment jsdom
  */
