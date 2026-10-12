@@ -10,9 +10,7 @@ import { useTranslations } from 'next-intl';
 import { worktreeApi, handleApiError } from '@/lib/api-client';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import type { ChatMessage } from '@/types/models';
-import { CircleHelp } from 'lucide-react';
 import { Kbd } from '@/components/ui/Kbd';
-import { Tooltip } from '@/components/common/Tooltip';
 import { Button, Spinner } from '@/components/ui';
 import { SlashCommandSelector } from './SlashCommandSelector';
 import { InterruptButton } from './InterruptButton';
@@ -26,7 +24,6 @@ import {
   COMPOSER_AUTO_MAX_HEIGHT_PX,
   COMPOSER_MIN_HEIGHT_PX,
 } from '@/config/composer-height';
-import { COMPOSER_ONE_ROW_MIN_CONTAINER_PX } from '@/config/composer-layout';
 import type { SlashCommand } from '@/types/slash-commands';
 import { getSlashCommandTrigger } from '@/lib/slash-command-format';
 import type { ShowToast } from '@/types/markdown-editor';
@@ -155,47 +152,7 @@ export interface MessageInputProps {
    * when the bound rises. `null` / omitted: not measured yet, no bound.
    */
   maxHeight?: number | null;
-  /**
-   * Issue #3595: draw the composer as ONE row where it is wide enough — the
-   * toolbar joins the textarea's line, [attach][mode] [textarea]
-   * [Auto-Yes][hints][direct input][interrupt][send]: the keyboard hints are
-   * not drawn, and a focusable button opens them in a Tooltip (they are also
-   * the textarea's hover text). Below {@link COMPOSER_ONE_ROW_MIN_CONTAINER_PX}
-   * it is #2598's two rows, unchanged.
-   *
-   * Opt-in, and only on a PC: the PC worktree screen's split pane passes it
-   * (`TerminalSplitPaneContent`). The phone's docked composer and the
-   * `/sessions` tile pass nothing and are drawn exactly as before.
-   */
-  oneRowWhenWide?: boolean;
 }
-
-/**
- * Issue #3595: the one-row classes, one constant per element so each literal
- * is written once. Every variant is the 800px one — the value of
- * {@link COMPOSER_ONE_ROW_MIN_CONTAINER_PX} (`src/config/composer-layout.ts`),
- * spelled as a literal because Tailwind scans source text (the #2131 rule);
- * `tests/unit/config/composer-layout-one-row-3595.test.ts` holds the two
- * together. Below it none of them applies and the layout is #2598's.
- *
- * `contents` dissolves the toolbar, the textarea row and the meta row, so
- * their children become items of the input row and `order` lines them up.
- * None of the three is a query container in this mode — an element with no
- * box cannot be one — so the mode control (#2597), the direct-input label
- * (#2797) and the hints (#2598) all answer to the input row.
- */
-const ONE_ROW = {
-  form: '@container',
-  inputRow: '@min-[800px]:flex-row @min-[800px]:items-end @min-[800px]:gap-2',
-  dissolve: '@min-[800px]:contents',
-  start: '@min-[800px]:order-1 @min-[800px]:flex-initial @min-[800px]:h-9',
-  textarea: '@min-[800px]:order-2 @min-[800px]:min-w-40',
-  autoYes: '@min-[800px]:order-3 @min-[800px]:shrink-0 @min-[800px]:h-9',
-  end: '@min-[800px]:order-4 @min-[800px]:h-9',
-  send: '@min-[800px]:order-5',
-  hints: '@min-[800px]:hidden',
-  hintsEntry: 'hidden @min-[800px]:flex @min-[800px]:order-3 @min-[800px]:h-9 items-center shrink-0',
-} as const;
 
 /**
  * Message input component
@@ -261,7 +218,7 @@ function migrateLegacyDraftKey(worktreeId: string): void {
   }
 }
 
-export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSent, cliToolId, instanceId, isSessionRunning = false, isSessionStarting = false, pendingInsertText, onInsertConsumed, splitIndex = 0, onFocus, isProcessing = false, showToast, autoYesSlot, agentModeSlot, directInputSlot, onOptimisticSend, heightScope, maxHeight, oneRowWhenWide = false }: MessageInputProps) {
+export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSent, cliToolId, instanceId, isSessionRunning = false, isSessionStarting = false, pendingInsertText, onInsertConsumed, splitIndex = 0, onFocus, isProcessing = false, showToast, autoYesSlot, agentModeSlot, directInputSlot, onOptimisticSend, heightScope, maxHeight }: MessageInputProps) {
   const t = useTranslations('worktree');
   const [message, setMessage] = useState('');
   const [sending, setSending] = useState(false);
@@ -284,8 +241,6 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
   // phone nothing is read or applied, so a height chosen on a desktop never
   // reaches the phone's docked composer.
   const resizable = !isMobile && !!heightScope;
-  // Issue #3595: the one-row layout, where the caller asked for it — PC only.
-  const oneRow = oneRowWhenWide && !isMobile;
   const {
     height: heightFloor,
     resizeBy: resizeHeightBy,
@@ -369,7 +324,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
    * than the floor, it shrinks down to the floor. A layout effect, so the floor
    * height is applied before the first paint instead of flashing the one-line composer first.
    */
-  const fitTextareaHeight = useCallback(() => {
+  useIsomorphicLayoutEffect(() => {
     const textarea = textareaRef.current;
     if (!textarea) return;
     const bound = typeof maxHeight === 'number' && Number.isFinite(maxHeight) ? maxHeight : Infinity;
@@ -382,32 +337,6 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     const content = Math.min(textarea.scrollHeight, COMPOSER_AUTO_MAX_HEIGHT_PX);
     textarea.style.height = `${Math.min(Math.max(floor, content), bound)}px`;
   }, [message, heightFloor, maxHeight]);
-  useIsomorphicLayoutEffect(fitTextareaHeight, [fitTextareaHeight]);
-
-  /**
-   * Issue #3595: fit again when only the textarea's WIDTH changes. In one row
-   * it shares its line with the Auto-Yes toggle, which widens by its countdown
-   * when Auto-Yes is turned on, and any split resize narrows it too: a draft
-   * that now wraps must grow rather than scroll inside its old height. Same
-   * floor and bound as above (it is the same function). Height-only resizes —
-   * the fit's own writes — are ignored, so this cannot feed itself.
-   */
-  const fitTextareaHeightRef = useRef(fitTextareaHeight);
-  fitTextareaHeightRef.current = fitTextareaHeight;
-  useEffect(() => {
-    const textarea = textareaRef.current;
-    if (!textarea || typeof ResizeObserver === 'undefined') return;
-    let lastWidth: number | null = null;
-    const observer = new ResizeObserver(entries => {
-      const width = entries[entries.length - 1]?.contentRect.width;
-      if (width === undefined || width === lastWidth) return;
-      const first = lastWidth === null;
-      lastWidth = width;
-      if (!first) fitTextareaHeightRef.current();
-    });
-    observer.observe(textarea);
-    return () => observer.disconnect();
-  }, []);
 
   /**
    * Issue #485: Insert pending text into message input
@@ -683,9 +612,6 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     </>
   );
 
-  /** Issue #3595: `base`, plus the one-row classes where this composer is in that mode. */
-  const oneRowClass = (base: string, extra: string): string => (oneRow ? `${base} ${extra}` : base);
-
   const interruptButton = (
     <InterruptButton
       worktreeId={worktreeId}
@@ -693,77 +619,6 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
       instanceId={instanceId}
       disabled={!isSessionRunning || isSessionStarting}
     />
-  );
-
-  // Issue #1080: composer meta row — Auto-Yes (left) + keyboard hints (right).
-  // Renders when Auto-Yes is embedded (mobile + desktop) or on desktop for
-  // the hint pills (mobile Enter inserts a newline, so no Shift+Enter hint).
-  //
-  // Issue #2598: on a PC the row is its own `@container`, and the hints
-  // are drawn only where the composer is wide enough for them AND the
-  // Auto-Yes toggle. In a narrow split pane they used to wrap to a
-  // second line and, being `flex-shrink-0`, squeeze the toggle beside
-  // them to nothing. Keep the literal in sync with
-  // COMPOSER_HINTS_MIN_CONTAINER_PX.
-  //
-  // Issue #3595: in the one-row mode the row sits inside the input row (the
-  // last of its children) and is not a container of its own — the input row,
-  // exactly as wide, answers the hints' 420px query. `mt-0.5` puts back the
-  // 2px between the form's `gap-1.5` and the input row's `gap-1`, so the
-  // narrow pane's two rows are where they were. At 800px it dissolves: the
-  // Auto-Yes half joins the textarea's line, the hints are not drawn, and the
-  // hints button below takes their place.
-  const metaRow = (autoYesSlot || !isMobile) && (
-    <div
-      className={oneRow
-        ? `flex items-center justify-between gap-2 min-w-0 mt-0.5 ${ONE_ROW.dissolve}`
-        : `${isMobile ? '' : '@container '}flex items-center justify-between gap-2 min-w-0`}
-      data-testid="composer-meta-row"
-    >
-      {/* PC: `whitespace-nowrap` — a narrow pane scrolls the Auto-Yes
-          label (and its countdown) sideways instead of wrapping it onto a
-          second line of meta row. */}
-      <div
-        className={oneRowClass(`flex items-center gap-2 min-w-0 overflow-x-auto scrollbar-hide${isMobile ? '' : ' whitespace-nowrap'}`, ONE_ROW.autoYes)}
-        data-testid="composer-auto-yes"
-      >
-        {autoYesSlot}
-      </div>
-      {!isMobile && (
-        <div
-          className={oneRowClass('hidden @min-[420px]:flex flex-shrink-0 items-center gap-1.5 whitespace-nowrap text-[11px] text-muted-foreground select-none', ONE_ROW.hints)}
-          data-testid="composer-hints"
-        >
-          <Kbd>/</Kbd>
-          <span>{t('composer.commandsHint')}</span>
-          <span aria-hidden="true" className="opacity-50">·</span>
-          <Kbd>⇧</Kbd>
-          <Kbd>↵</Kbd>
-          <span>{t('composer.newlineHint')}</span>
-        </div>
-      )}
-      {/* Issue #3595: the hints' way in where they are not drawn (one row).
-          Only displayed from the one-row threshold — `hidden` below it, so the
-          two-row layout is unchanged and nothing extra is in its Tab order. A
-          real button: Tab or a click focuses it, and focus opens the existing
-          Tooltip at once; the `aria-label` is what a screen reader hears (the
-          bubble is `aria-hidden`). Same `order` as the Auto-Yes half and after
-          it in the DOM, so it is drawn right after the toggle. */}
-      {oneRow && (
-        <span className={ONE_ROW.hintsEntry} data-testid="composer-hints-entry">
-          <Tooltip content={t('composer.keyHintsTitle')} placement="top" className="shrink-0">
-            <button
-              type="button"
-              className="flex-shrink-0 p-1.5 rounded-full text-muted-foreground hover:text-foreground hover:bg-muted transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              aria-label={t('composer.keyHintsTitle')}
-              data-testid="composer-hints-button"
-            >
-              <CircleHelp size={16} aria-hidden="true" />
-            </button>
-          </Tooltip>
-        </span>
-      )}
-    </div>
   );
 
   return (
@@ -812,12 +667,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
       />
 
       {/* Issue #2598: `relative` anchors the height handle on the top edge. */}
-      <form onSubmit={handleSubmit} className={oneRowClass('relative rounded-xl bg-surface border border-border shadow-sm px-3 py-2 focus-within:ring-2 focus-within:ring-accent-500/40 transition-shadow flex flex-col gap-1.5', ONE_ROW.form)}
-        // Issue #3595: the threshold the one-row classes spell, on the
-        // container they query — a tool reading the DOM (and the e2e spec)
-        // sees which width breaks the row without parsing class names.
-        data-one-row-min-px={oneRow ? COMPOSER_ONE_ROW_MIN_CONTAINER_PX : undefined}
-      >
+      <form onSubmit={handleSubmit} className="relative rounded-xl bg-surface border border-border shadow-sm px-3 py-2 focus-within:ring-2 focus-within:ring-accent-500/40 transition-shadow flex flex-col gap-1.5">
         {/* Issue #2598: the height handle (PC, and only where the caller named a
             scope). Absolutely positioned over the top border, so it costs the
             composer no height. The handle keeps its own mousedown from moving
@@ -848,11 +698,8 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
             the textarea refused to shrink and a 218px split pane left the
             textarea 0px wide. The container is still this element and still as
             wide as the composer, so #2597's threshold means what it meant. */}
-        {/* Issue #3595: in the one-row mode this row turns into a row (the
-            800px variant queries the form) and the meta row moves in here,
-            last, so its Auto-Yes half can join the textarea's line. */}
         <div
-          className={oneRowClass('@container flex flex-col gap-1', ONE_ROW.inputRow)}
+          className="@container flex flex-col gap-1"
           data-testid="composer-input-row"
         >
           {/* Row 1: the toolbar, [attach][opencode][mode] then [interrupt].
@@ -860,7 +707,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
               typing `/`, as the hint says) and keeps the interrupt button in
               line with the others, exactly as before; a PC holds it at the
               right end. */}
-          <div className={oneRowClass('flex items-center gap-1', ONE_ROW.dissolve)} data-testid="composer-toolbar">
+          <div className="flex items-center gap-1" data-testid="composer-toolbar">
             {isMobile ? (
               <>
                 <Button
@@ -892,7 +739,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
                     button past the pane's clipped edge. `flex-1` is also what
                     puts the interrupt button at the right end. */}
                 <div
-                  className={oneRowClass('flex min-w-0 flex-1 items-center gap-1 overflow-x-auto scrollbar-hide', ONE_ROW.start)}
+                  className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto scrollbar-hide"
                   data-testid="composer-toolbar-start"
                 >
                   {toolbarControls}
@@ -900,7 +747,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
                 {/* `InterruptButton` takes no className; this group keeps it
                     whole and always on screen. Issue #2797: the direct-input
                     toggle shares it for exactly that reason. */}
-                <div className={oneRowClass('flex flex-shrink-0 items-center gap-1', ONE_ROW.end)} data-testid="composer-toolbar-end">
+                <div className="flex flex-shrink-0 items-center gap-1" data-testid="composer-toolbar-end">
                   {directInputSlot}
                   {interruptButton}
                 </div>
@@ -913,7 +760,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
               the handle sits at its bottom, next to the last line, instead of
               floating at its middle. Same place for a one-line textarea. */}
           <div
-            className={oneRowClass(`flex ${isMobile ? 'items-center' : 'items-end'} gap-2 flex-1 min-w-0`, ONE_ROW.dissolve)}
+            className={`flex ${isMobile ? 'items-center' : 'items-end'} gap-2 flex-1 min-w-0`}
             data-testid="composer-textarea-row"
           >
             <textarea
@@ -926,16 +773,13 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
               onCompositionEnd={handleCompositionEnd}
               onFocus={onFocus}
               placeholder={t('composer.placeholder')}
-              // Issue #3595: the one-row layout does not draw the hints; they
-              // are this hover text, and the hints button's Tooltip (focus).
-              title={oneRow ? t('composer.keyHintsTitle') : undefined}
               disabled={sending}
               rows={1}
               // Issue #1128: mobile keyboard hints — the composer's primary action
               // is to send, and it accepts free-form text.
               inputMode="text"
               enterKeyHint="send"
-              className={oneRowClass('flex-1 outline-none bg-transparent resize-none overflow-y-auto scrollbar-thin', ONE_ROW.textarea)}
+              className="flex-1 outline-none bg-transparent resize-none overflow-y-auto scrollbar-thin"
               // Issue #2681: a stored height acts as a floor, bounded by maxHeight.
               // Content auto-grows up to COMPOSER_AUTO_MAX_HEIGHT_PX (and maxHeight).
               style={{
@@ -953,11 +797,11 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
               data-testid="send-message-button"
               data-can-send={String((!!message.trim() || !!attachedImage) && !sending)}
               disabled={(!message.trim() && !attachedImage) || sending}
-              className={oneRowClass(`flex-shrink-0 p-2 rounded-full transition-colors disabled:hover:bg-transparent ${
+              className={`flex-shrink-0 p-2 rounded-full transition-colors disabled:hover:bg-transparent ${
                 (!!message.trim() || !!attachedImage) && !sending
                   ? 'bg-accent-600 text-white hover:bg-accent-700 shadow-sm'
                   : 'text-muted-foreground/50'
-              }`, ONE_ROW.send)}
+              }`}
               aria-label={t('composer.sendMessage')}
             >
               {sending ? (
@@ -969,10 +813,46 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
               )}
             </Button>
           </div>
-          {oneRow ? metaRow : null}
         </div>
 
-        {oneRow ? null : metaRow}
+        {/* Issue #1080: composer meta row — Auto-Yes (left) + keyboard hints (right).
+            Renders when Auto-Yes is embedded (mobile + desktop) or on desktop for
+            the hint pills (mobile Enter inserts a newline, so no Shift+Enter hint). */}
+        {/* Issue #2598: on a PC the row is its own `@container`, and the hints
+            are drawn only where the composer is wide enough for them AND the
+            Auto-Yes toggle. In a narrow split pane they used to wrap to a
+            second line and, being `flex-shrink-0`, squeeze the toggle beside
+            them to nothing. Keep the literal in sync with
+            COMPOSER_HINTS_MIN_CONTAINER_PX. */}
+        {(autoYesSlot || !isMobile) && (
+          <div
+            className={`${isMobile ? '' : '@container '}flex items-center justify-between gap-2 min-w-0`}
+            data-testid="composer-meta-row"
+          >
+            {/* PC: `whitespace-nowrap` — a narrow pane scrolls the Auto-Yes
+                label (and its countdown) sideways instead of wrapping it onto a
+                second line of meta row. */}
+            <div
+              className={`flex items-center gap-2 min-w-0 overflow-x-auto scrollbar-hide${isMobile ? '' : ' whitespace-nowrap'}`}
+              data-testid="composer-auto-yes"
+            >
+              {autoYesSlot}
+            </div>
+            {!isMobile && (
+              <div
+                className="hidden @min-[420px]:flex flex-shrink-0 items-center gap-1.5 whitespace-nowrap text-[11px] text-muted-foreground select-none"
+                data-testid="composer-hints"
+              >
+                <Kbd>/</Kbd>
+                <span>{t('composer.commandsHint')}</span>
+                <span aria-hidden="true" className="opacity-50">·</span>
+                <Kbd>⇧</Kbd>
+                <Kbd>↵</Kbd>
+                <span>{t('composer.newlineHint')}</span>
+              </div>
+            )}
+          </div>
+        )}
       </form>
 
       {/* Slash Command Selector */}
