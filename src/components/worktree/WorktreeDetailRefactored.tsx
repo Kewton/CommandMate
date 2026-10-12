@@ -346,7 +346,6 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     handleUpload,
     handleVibeLocalContextWindowChange,
     handleVibeLocalModelChange,
-    handleWorktreeStatusChange,
     hasUpdate,
     historyDisplayLimit,
     historySubTab,
@@ -769,7 +768,6 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
           onActivityOpen={handleActivityOpen}
           verification={verification}
           onInfoClick={handleInfoClick}
-          onWorktreeStatusChange={handleWorktreeStatusChange}
           pendingInsertTextMap={pendingInsertTextMap}
           setFocusedSplitIndex={setFocusedSplitIndex}
           handleInsertToSplit={handleInsertToSplit}
