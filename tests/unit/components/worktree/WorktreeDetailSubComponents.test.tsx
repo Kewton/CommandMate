@@ -308,7 +308,9 @@ describe('DesktopHeader per-instance status row (Issue #749 / #869)', () => {
 
       const tooltip = await screen.findByRole('tooltip', { hidden: true });
       expect(tooltip).toHaveTextContent('Codex: Idle');
-      expect(tooltip).toHaveAttribute('data-placement', 'bottom');
+      // Issue #3616: the row now sits in the "N more" list, and its tooltip
+      // goes beside the row (`right`, falling back to `left`), not below it.
+      expect(tooltip).toHaveAttribute('data-placement', 'right');
       expect(tooltip.parentElement).toBe(document.body);
       expect(tooltip.className).toMatch(/\bfixed\b/);
       // a11y (#730): the label is not double-announced via aria-describedby.
