@@ -857,41 +857,53 @@ useWorktreesCache() ── 唯一のworktree一覧取得元
 
 ## 12. UI Layout Architecture (PC, Issue #727 / #730 / #747)
 
-> **注**: 既存 §11.2 DeepLinkPane 表・§11.4 ナビゲーション構造は #600 時点の旧デスクトップ左ペインモデル（history / files / memo, MobileTabBar）を前提とした記述であり、現行 PC UI は本章の ActivityBar モデルへ置き換わっている（旧 §11.2 / §11.4 の整理は本章のスコープ外）。
+> **注**: 既存 §11.2 DeepLinkPane 表・§11.4 ナビゲーション構造は #600 時点の旧デスクトップ左ペインモデル（history / files / memo, MobileTabBar）を前提とした記述であり、現行 PC UI は本章の Activity モデル（Issue #3591 以降はヘッダーの道具 + ActivityPane）へ置き換わっている（旧 §11.2 / §11.4 の整理は本章のスコープ外）。
 
 本章は PC 版 UI 最上位レイアウトの **責務境界・状態所有・データフロー**（なぜその構造か / 状態の所有者は誰か）を扱う。視覚的なレイアウト・操作（キーボード / Tooltip）・コンポーネントカタログの詳細は [docs/UI_UX_GUIDE.md](./UI_UX_GUIDE.md) を正（SSOT）とし、本章では再掲しない。
 
 ### 12.1 コンポーネントの責務と状態所有
 
-- **ActivityBar** (`src/components/worktree/ActivityBar.tsx`): Activity 選択状態を**所有しない**完全な制御コンポーネント。`active` / `onToggle` を props で受け取り、`@/config/activity-bar-config` の `ACTIVITIES`（Files / Git / Notes / Schedules / Agent / Timer の 6 Activity）を描画する。最上部のサイドバートグル (Issue #747) のみ例外で、`useSidebarContext()` から `{ isOpen, toggle }` を直接読み取り、`role="tablist"` の外側に配置されてタブのキーボードナビゲーションに干渉しない。
+> **注（Issue #3589 / #3591）**: 縦 48px の全高 ActivityBar は PC から外れた。Activity の入口はヘッダー右の道具（`HeaderToolBar`）と 2 段目の Verification チップ、ActivityPane は右から本文の上に重ねて開く（ピン留めで横に並ぶ）。下記はこの構成で書いている。
+
+- **HeaderToolBar** (`src/components/worktree/HeaderToolBar.tsx`, Issue #3591): Activity 選択状態を**所有しない**制御コンポーネント。`active` / `onToggle` を props で受け取り、`@/config/activity-bar-config` の `HEADER_TOOLS`（`ACTIVITIES` から `verification` を除いたもの）を PC ヘッダー（`DesktopHeader`）の右にアイコンで並べる。ヘッダーが狭いと末尾の道具から「…」の一覧へ畳む（畳む数は `useDesktopHeaderFit` が決める）。
+- **VerificationStatusChip** (`VerificationStatusChip.tsx`, Issue #1816 / #2064 / #3590): `verification` Activity の PC での入口（`CHIP_ACTIVITY_ID`）。2 段目の操作バーに置かれ、押すと Verification ペインを開閉する。実行契約が無いブランチでも「未検証」として常に描く（#2064）。
+- **ActivityBar** (`src/components/worktree/ActivityBar.tsx`): 旧・縦 48px の Activity Bar。Issue #3591 以降どの画面にもマウントされていない（サイドバーの開閉は #3512 の `SidebarPanelToggle` へ移った）。
 - **ActivityPane** (`ActivityPane.tsx`): 状態を持たない table-driven のディスパッチャ。親が構築した `ActivityContentMap`（`Partial<Record<ActivityId, ReactNode>>`）から `activities[active]` を 1 つだけ選び `ErrorBoundary` 経由で描画する。単一の `active` キーで 1 ノードのみを描画するため、**多 Activity 同時表示は構造的に不可能**。
 - **TerminalContainer** (`TerminalContainer.tsx`, Issue #730): `terminal` スロット（常時）と `history` スロット（任意）を内包する。Issue #744 以降、PC では最上位 History カラムを描画せず、History は各ターミナル split 内へ移管された（後述 §13）。`history` prop と `useHistoryPaneState` 配線は #730 単一カラムレイアウトとの後方互換として残置している。
-- **WorktreeDesktopLayout** (`WorktreeDesktopLayout.tsx`, Issue #730): ActivityPane と Right ペインの **2 カラム構成**。Issue #730 で 4 カラムから 2 カラムへ簡素化し（History は Right 内の TerminalContainer へ、ActivityBar は親側で全高描画へ移動）、`activityPane === null` のとき Activity カラムと境界の PaneResizer を共に隠す。
-- **PaneResizer** (`PaneResizer.tsx`): 一過性のドラッグ状態のみを持つ汎用リサイザ。**ピクセル差分を `onResize(delta)` で親へ通知するのみ**で、ペイン幅の確定は親が行う（WorktreeDesktopLayout の Activity↔Right 境界、TerminalContainer の History↔Terminal 境界の両方で再利用）。
+- **WorktreeDesktopLayout** (`WorktreeDesktopLayout.tsx`, Issue #730 / #3589 / #3591): Right ペイン（本文）と ActivityPane の構成。ActivityPane は**右側**に出る（#3591）。ピン留めしていない既定では Right ペインの上に重ねて描き、本文の幅を変えない（#3589）。ピン留め（`activityPanePinned`）したときだけ横に並ぶカラムと境界の PaneResizer を持つ。ペインの枠（見出し・ピン・×・Esc / 外側クリックで閉じる）は同ファイルの `PaneOverlayFrame`。`activityPane === null` のときはペインも PaneResizer も描かない。
+- **PaneResizer** (`PaneResizer.tsx`): 一過性のドラッグ状態のみを持つ汎用リサイザ。**ピクセル差分を `onResize(delta)` で親へ通知するのみ**で、ペイン幅の確定は親が行う（ピン留め時の WorktreeDesktopLayout の Right↔Activity 境界、TerminalContainer の History↔Terminal 境界の両方で再利用）。
 
 ### 12.2 状態の所有者（カスタムフック）
 
-- **useActivityBarState** (`src/hooks/useActivityBarState.ts`): `active` 状態の単一情報源。`commandmate.worktree.activeActivity` に永続化するが、**閉じた状態（null）は永続化しない**（最後に選択した Activity のみ保存して再訪時に復元）。不正値・未設定時は `DEFAULT_ACTIVITY = 'files'` にフォールバックし、初期描画は決定的に `DEFAULT_ACTIVITY`・localStorage 読み取りはマウント後の `useEffect` で行う（hydration mismatch 回避）。
-- **SidebarContext** (`src/contexts/SidebarContext.tsx`): サイドバー `isOpen` を `useReducer` で所有。ActivityBar のハンバーガー (Issue #747) は本 context を直接参照し、Activity 選択（props 経由）とは別系統のデータフローを成す。
+- **useActivityBarState** (`src/hooks/useActivityBarState.ts`): `active` 状態の単一情報源。**worktree ごと**に `commandmate.worktree.activeActivity-<worktreeId>`（`getActivityBarStorageKey`）へ永続化する（Issue #858）。**閉じた状態（null）も `__closed__`（`ACTIVITY_CLOSED_SENTINEL`）として保存**し、別の worktree を見て戻っても閉じたままになる。未訪問・不正値のときは `INITIAL_ACTIVITY`（Issue #3589 以降は `null` = 閉じた状態。以前は `'files'`）。初期描画は決定的に `INITIAL_ACTIVITY`、localStorage 読み取りはマウント後と `worktreeId` 変更時の `useEffect` で行う（hydration mismatch 回避）。
+- **usePanePinnedState** (`src/hooks/useActivityPaneOverlay.ts`, Issue #3589): ActivityPane のピン留めの有無。`commandmate.worktree.activityPanePinned`（`ACTIVITY_PANE_PINNED_STORAGE_KEY`）に 1 つだけ保存し、worktree をまたいで共通。同ファイルの `usePaneOverlayDismiss` が、重ねて開いたペインを Esc / 外側クリックで閉じる。
+- **SidebarContext** (`src/contexts/SidebarContext.tsx`): サイドバー `isOpen` を `useReducer` で所有。サイドバー自身の開閉ボタン（`SidebarPanelToggle`、閉じているときはアイコンレール `SidebarRail` の先頭）が本 context を参照し、Activity 選択（props 経由）とは別系統のデータフローを成す。
 
-オーケストレーター (`WorktreeDetailRefactored.tsx`) が `useActivityBarState` を呼んで `ActivityContentMap` を構築し、ActivityBar / ActivityPane / WorktreeDesktopLayout へ配線する。
+コントローラー (`src/hooks/useWorktreeDetailController.ts`) が `useActivityBarState` を呼び、PC のオーケストレーター (`WorktreeDetailDesktop.tsx`) が `ActivityContentMap` を構築して HeaderToolBar（`DesktopHeader` 経由）/ VerificationStatusChip / ActivityPane / WorktreeDesktopLayout へ配線する。
 
 ### 12.3 データフロー図
 
 ```mermaid
 graph TD
-    Parent["WorktreeDetailRefactored<br/>(オーケストレーター)"]
-    ActState["useActivityBarState<br/>(active を所有 / localStorage)"]
+    Ctrl["useWorktreeDetailController<br/>(useActivityBarState を呼ぶ)"]
+    Parent["WorktreeDetailDesktop<br/>(PC オーケストレーター)"]
+    ActState["useActivityBarState<br/>(active を所有 / worktree ごとの localStorage)"]
+    PinState["usePanePinnedState<br/>(ピン留めを所有 / localStorage)"]
     SideCtx["SidebarContext<br/>(isOpen を所有)"]
-    Bar["ActivityBar<br/>(状態を持たない)"]
+    SideToggle["SidebarPanelToggle<br/>(サイドバー / SidebarRail)"]
+    Tools["HeaderToolBar<br/>(ヘッダー右・状態を持たない)"]
+    Chip["VerificationStatusChip<br/>(2 段目)"]
     Pane["ActivityPane<br/>(table-driven dispatch)"]
-    Layout["WorktreeDesktopLayout<br/>(2 カラム + PaneResizer)"]
+    Layout["WorktreeDesktopLayout<br/>(重ねる / ピン留めで横に並ぶ)"]
     Term["TerminalContainer<br/>(terminal + 任意 history)"]
 
-    ActState -->|active| Parent
+    ActState -->|active| Ctrl
+    Ctrl -->|"active / onToggle"| Parent
     Parent -->|onToggle| ActState
-    Parent -->|active / onToggle| Bar
-    Bar -->|"サイドバートグル (Issue #747)"| SideCtx
+    Parent -->|active / onToggle| Tools
+    Parent -->|"verification の開閉"| Chip
+    PinState -->|activityPanePinned| Parent
+    SideToggle --> SideCtx
     Parent -->|"activityPane (null 可)"| Layout
     Parent -->|"ActivityContentMap"| Pane
     Pane --> Layout
