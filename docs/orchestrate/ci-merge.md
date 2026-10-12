@@ -86,7 +86,7 @@ CI は使い捨ての self-hosted ランナー 8 台（2026-09-18 時点）で�
 
 ## 6-4 一本化のコミットと scope ゲート
 
-**一本化のコミットには trailer `Orchestrator-Fold: module-reference` を付ける**（例: `git commit -m "docs(module-reference): #<N> の断片を一本化する" --trailer "Orchestrator-Fold: module-reference"`）。`docs/module-reference.md` だけを変え、この trailer を持つコミットだけが触ったパスは、その後にワーカーへ再指示しても `verify --task` の scope ゲートが差分から除くので、それを理由に exit 20 にはならない（#3588）。trailer の無いコミット（ワーカーの単独コミットを含む）、merge コミット自身の編集（衝突解消で一本化の行を書き換えたものを含む）、未コミットの変更が同じファイルを触った場合は、今までどおり範囲外として落ちる。`merge-pr.mjs` が一本化を越えて作業の HEAD を探す規則（`pr-common.mjs` の `workHeads`）はファイルだけで判定し、trailer を求めない。
+**一本化のコミットには trailer `Orchestrator-Fold: module-reference` を付ける**（例: `git commit -m 'docs(module-reference): #<N> の断片を本体へ写す' --trailer 'Orchestrator-Fold: module-reference'`。trailer が無いと、再指示の後の scope ゲートが一本化を範囲外として落とす）。`docs/module-reference.md` だけを変え、この trailer を持つコミットだけが触ったパスは、その後にワーカーへ再指示しても `verify --task` の scope ゲートが差分から除くので、それを理由に exit 20 にはならない（#3588）。trailer の無いコミット（ワーカーの単独コミットを含む）や未コミットの変更が同じファイルを触った場合は、今までどおり範囲外として落ちる。merge コミット自身の編集は、`docs/module-reference.md` の中なら承認済みの統合（develop の取り込みで衝突を機械解決したもの）として除き、それ以外のファイルの編集はワーカーの変更として scope で判定する。`merge-pr.mjs` が一本化を越えて作業の HEAD を探す規則（`pr-common.mjs` の `workHeads`）はファイルだけで判定し、trailer を求めない。
 
 ## 6-4 断片が無い PR の実例
 

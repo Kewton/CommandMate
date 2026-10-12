@@ -1020,7 +1020,33 @@ describe('evaluateScope — orchestrator fold commits (#3588)', () => {
     expect(outcome.logTail).toContain(`  ~ ${MODULE_REFERENCE}`);
   });
 
-  it("still fails a merge after the fold that adds its own module-reference edit", async () => {
+  it('passes a re-instruction after a merge that resolved a module-reference conflict with the fold', async () => {
+    const repo = createRepo();
+    git(['checkout', 'main'], repo);
+    write(repo, MODULE_REFERENCE, REFERENCE_BASE);
+    commitAll(repo, 'reference');
+    git(['checkout', 'work'], repo);
+    git(['merge', '--ff-only', 'main'], repo);
+    commitFold(repo, REFERENCE_BASE.replace('b\n', 'B fold\n'));
+    git(['checkout', 'main'], repo);
+    write(repo, MODULE_REFERENCE, REFERENCE_BASE.replace('b\n', 'B develop\n'));
+    commitAll(repo, 'develop moved');
+    git(['checkout', 'work'], repo);
+    // Same line on both sides: the refresh conflicts and the orchestrator resolves it.
+    expect(() => git(['merge', '--no-edit', 'main'], repo)).toThrow();
+    write(repo, MODULE_REFERENCE, REFERENCE_BASE.replace('b\n', 'B develop\nB fold\n'));
+    git(['add', MODULE_REFERENCE], repo);
+    git(['commit', '--no-edit'], repo);
+    write(repo, 'src/lib/verification/scope-gate.ts', 'export const gate = 1;\n');
+    commitAll(repo, 'worker again');
+
+    const outcome = await evaluate(repo, ALLOW_SRC);
+    expect(outcome.status).toBe('passed');
+    expect(outcome.logTail).toContain('changed=1 violations=0');
+    expect(outcome.logTail).toContain(`  ~ ${MODULE_REFERENCE}`);
+  });
+
+  it("keeps a merge's own module-reference edit after the fold excluded", async () => {
     const repo = createFoldedRepoWithMovedBase();
     git(['merge', '--no-commit', '--no-ff', 'main'], repo);
     write(repo, MODULE_REFERENCE, REFERENCE_BASE.replace('b\n', 'B\n').replace('e\n', 'EVIL\n').replace('g\n', 'G\n'));
@@ -1028,8 +1054,20 @@ describe('evaluateScope — orchestrator fold commits (#3588)', () => {
     git(['commit', '--no-edit'], repo);
 
     const outcome = await evaluate(repo, ALLOW_SRC);
+    expect(outcome.status).toBe('passed');
+    expect(outcome.logTail).toContain(`  ~ ${MODULE_REFERENCE}`);
+  });
+
+  it("still fails a merge after the fold that edits an out-of-scope file other than module-reference", async () => {
+    const repo = createFoldedRepoWithMovedBase();
+    git(['merge', '--no-commit', '--no-ff', 'main'], repo);
+    write(repo, 'package.json', '{}\n');
+    git(['add', 'package.json'], repo);
+    git(['commit', '--no-edit'], repo);
+
+    const outcome = await evaluate(repo, ALLOW_SRC);
     expect(outcome.status).toBe('failed');
-    expect(violationLines(outcome.logTail)).toEqual([MODULE_REFERENCE]);
+    expect(violationLines(outcome.logTail)).toEqual(['package.json']);
   });
 
   it('keeps paths that start with a newline or look like a commit header', async () => {

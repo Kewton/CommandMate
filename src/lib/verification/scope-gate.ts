@@ -532,11 +532,13 @@ export function isSkillInstalledUntrackedEntry(
  * control character, so no parse of it can tell them apart. diff-tree prints
  * paths and nothing else.
  *
- * A merge's own edits count as the worker's. `--cc` lists only hunks whose
- * result matches neither parent, so a clean refresh merge adds nothing and a
- * conflict resolution or an evil edit to a fold-only path takes it back out of
- * the exclusion. Only those candidate paths are asked about, and they are
- * code-supplied constants, never git output.
+ * A merge's own edits are split by path. Inside {@link ORCHESTRATOR_FILES}
+ * they are the approved integration — orchestrate lets the orchestrator
+ * resolve a refresh conflict in shared files such as module-reference by
+ * machine — so a fold-only path stays excluded. Every other path a merge edits
+ * is never a candidate (a fold changes only ORCHESTRATOR_FILES), so it stays in
+ * the branch diff and scope judges it as the worker's. Merges are therefore
+ * skipped here without asking `git diff-tree --cc`.
  */
 async function collectOrchestratorOnlyPaths(
   worktreePath: string,
@@ -554,12 +556,8 @@ async function collectOrchestratorOnlyPaths(
   if (!commits.some((commit) => commit.foldTrailers.length > 0)) return { paths: new Set() };
 
   const changes: CommitChange[] = [];
-  const merges: BranchCommit[] = [];
   for (const commit of commits) {
-    if (commit.parents.length !== 1) {
-      merges.push(commit);
-      continue;
-    }
+    if (commit.parents.length !== 1) continue;
     const tree = await runGit(
       ['diff-tree', '--no-commit-id', '--name-only', '-z', '--no-renames', '-r', commit.sha],
       worktreePath
@@ -575,24 +573,7 @@ async function collectOrchestratorOnlyPaths(
     changes.push({ files, fold: isFoldCommit(commit, files) });
   }
 
-  const paths = orchestratorOnlyPaths(changes);
-  for (const merge of merges) {
-    for (const path of [...paths]) {
-      const combined = await runGit(
-        ['diff-tree', '--cc', '--no-commit-id', '-r', merge.sha, '--', path],
-        worktreePath
-      );
-      if (combined.code !== 0) {
-        return {
-          error:
-            `'git diff-tree --cc ${merge.sha}' failed.` +
-            (combined.stderr.trim() ? `\n${combined.stderr.trim()}` : ''),
-        };
-      }
-      if (combined.stdout.trim() !== '') paths.delete(path);
-    }
-  }
-  return { paths };
+  return { paths: orchestratorOnlyPaths(changes) };
 }
 
 export interface ChangedPaths {
