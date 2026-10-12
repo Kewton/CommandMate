@@ -12,6 +12,7 @@
  *   ABOVE RepositoryList so the action buttons appear at the top of the page.
  * Issue #3579: the <h1> is the only screen name (the global Header no longer
  *   repeats it), so it uses the sidebar destination's word, `common.nav.*`.
+ * Issue #3586: the description is `common.repositories.pageDescription`, not a literal.
  */
 
 'use client';
@@ -50,7 +51,7 @@ export default function RepositoriesPage() {
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-foreground mb-2">{tCommon('nav.repositories')}</h1>
         <p className="text-sm text-muted-foreground">
-          Manage repositories and worktrees.
+          {tCommon('repositories.pageDescription')}
         </p>
       </div>
 
