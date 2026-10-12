@@ -12,7 +12,14 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { appendRecord, readRecords, summarize } from '../../../../scripts/orchestrate/run-log.mjs';
-import { main, parseArgs, summarizeVerdict } from '../../../../scripts/orchestrate/wait-verify.mjs';
+import {
+  baselineTask,
+  defaultSpawnToLog,
+  main,
+  newerTask,
+  parseArgs,
+  summarizeVerdict,
+} from '../../../../scripts/orchestrate/wait-verify.mjs';
 
 const HEAD_A = 'a'.repeat(40);
 
@@ -50,12 +57,21 @@ afterEach(() => {
 });
 
 type Call = { command: string; args: string[] };
+type TaskRow = { id: string; cliToolId: string; instanceId: string | null; createdAt: string; status: string };
 
 const T0 = Date.UTC(2026, 9, 9, 1, 0);
 const iso = (minute: number) => new Date(T0 + minute * 60_000).toISOString();
 
+const task = (id: string, minute: number, instanceId: string | null = 'claude'): TaskRow => ({
+  id,
+  cliToolId: 'claude',
+  instanceId,
+  createdAt: iso(minute),
+  status: 'running',
+});
+
 /**
- * Fakes for commandmatedev (wait / verify / capture / verify history / auto-yes) and git.
+ * Fakes for commandmatedev (wait / verify / capture / verify history / auto-yes / task list) and git.
  * Timeline by default: last commit 01:03, last turn end 01:04, verification started 01:05,
  * the wait returns at 01:10 — the verification saw the final state.
  */
@@ -73,6 +89,9 @@ function harness({
   runStartMinute = 5 as number | null,
   pane = [] as string[],
   commitDuringReverify = false,
+  tasks = [task('t-1', -10)] as TaskRow[],
+  tasksDuringWait = null as TaskRow[] | null,
+  newTaskAt = 'waiting' as 'waiting' | 'verifying',
 } = {}) {
   const spawned: Call[] = [];
   const ran: Call[] = [];
@@ -82,11 +101,25 @@ function harness({
   let clock = T0;
   let commitAt = commitMinute;
   let paneIndex = 0;
+  let taskList = tasks;
   const deps = {
-    spawnToLog: (command: string, args: string[], { logFile }: { logFile: string }) => {
+    spawnToLog: (
+      command: string,
+      args: string[],
+      { logFile, watch }: { logFile: string; watch?: () => boolean }
+    ) => {
       spawned.push({ command, args });
       const isVerify = args[0] === 'verify';
       fs.mkdirSync(path.dirname(logFile), { recursive: true });
+      if (!isVerify && tasksDuringWait) {
+        // A second contract arrives while the wait runs: before it verifies, or after it started.
+        fs.writeFileSync(logFile, newTaskAt === 'waiting' ? 'Waiting: wt-1 (status=running)\n' : waitLog);
+        taskList = tasksDuringWait;
+        if (watch?.()) {
+          clock += 60_000;
+          return 143;
+        }
+      }
       fs.writeFileSync(logFile, isVerify ? verifyLog : waitLog);
       clock += 600_000; // each run takes ten minutes
       if (isVerify && commitDuringReverify) commitAt = (clock - T0) / 60_000 + 1;
@@ -117,6 +150,9 @@ function harness({
             autoYes: { enabled: autoYesStuck },
           })
         );
+      }
+      if (args[0] === 'task' && args[1] === 'list') {
+        return ok(JSON.stringify(taskList));
       }
       if (args[0] === 'verify' && args[1] === 'history') {
         return ok(JSON.stringify(runStartMinute === null ? [] : [{ id: 1, startedAt: iso(runStartMinute) }]));
@@ -394,5 +430,104 @@ describe('the verdict is tied to the finished work (3-3, #3477 review 2)', () =>
     const h = harness({ lastStopMinute: null, runStartMinute: null });
     expect(main(argv(), h.deps)).toBe(0);
     expect(records()[0].note).toContain('run-start=unknown last-stop=unknown');
+  });
+});
+
+describe('a newer task on the same worktree ends the call without a verdict (#3587)', () => {
+  const newTask = [task('t-2', 2), task('t-1', -10)];
+
+  it('a second contract arrives while waiting → exit 3, the old task is never verified', () => {
+    const h = harness({ tasksDuringWait: newTask });
+    expect(main(argv(), h.deps)).toBe(3);
+    // The wait was stopped before it verified, and no `verify` followed.
+    expect(h.spawned.map((c) => c.args[0])).toEqual(['wait']);
+    expect(records()[0]).toMatchObject({ result: 'fail', taskId: 't-1' });
+    expect(records()[0].note).toMatch(
+      /^unconfirmed: a newer task t-2 was created for this instance after task t-1; .* auto-yes=kept$/
+    );
+    expect(h.autoYesCalls()).toEqual([]);
+  });
+
+  it('no newer task → the verdict is taken as before (negative control)', () => {
+    const h = harness({ tasksDuringWait: [task('t-1', -10)] });
+    expect(main(argv(), h.deps)).toBe(0);
+    expect(records()[0]).toMatchObject({ result: 'ok' });
+    expect(h.autoYesCalls()).toHaveLength(1);
+  });
+
+  it('a newer task for another instance does not count', () => {
+    const h = harness({ tasksDuringWait: [task('t-9', 2, 'codex-2'), task('t-1', -10)] });
+    expect(main(argv(), h.deps)).toBe(0);
+    expect(records()[0]).toMatchObject({ result: 'ok' });
+  });
+
+  it('the wait had already started verifying → its verdict is not recorded as the old task’s', () => {
+    const h = harness({ tasksDuringWait: newTask, newTaskAt: 'verifying' });
+    expect(main(argv(), h.deps)).toBe(3);
+    expect(records()[0]).toMatchObject({ result: 'fail' });
+    expect(records()[0].note).toMatch(/^unconfirmed: a newer task t-2 .*after task t-1; exit=0\(passed\)/);
+    expect(h.autoYesCalls()).toEqual([]);
+  });
+
+  it('after a re-instruction: no verify --task on the old task', () => {
+    const h = harness({ tasksDuringWait: newTask, newTaskAt: 'verifying', waitLog: 'Completed: wt-1 (basis=hook_stop)\n' });
+    expect(main(argv('--after-reinstruct'), h.deps)).toBe(3);
+    expect(h.spawned.map((c) => c.args[0])).toEqual(['wait']);
+  });
+
+  it('without --task, the instance’s newest task when the call started is the old one', () => {
+    const h = harness({ tasksDuringWait: newTask });
+    const noTask = argv().filter((a, i, all) => a !== '--task' && all[i - 1] !== '--task');
+    expect(main(noTask, h.deps)).toBe(3);
+    expect(records()[0].note).toContain('a newer task t-2 was created for this instance after task t-1');
+  });
+
+  it('an unreadable task list skips the check instead of failing the call', () => {
+    const h = harness();
+    const fakeRun = h.deps.run;
+    h.deps.run = (command: string, args: string[]) =>
+      args[0] === 'task' ? { status: 1, stdout: '', stderr: 'server down' } : fakeRun(command, args);
+    expect(main(argv(), h.deps)).toBe(0);
+  });
+
+  it('baselineTask / newerTask compare creation times of the same instance', () => {
+    const base = baselineTask([task('t-1', -10)], 'claude', 't-1', T0);
+    expect(base).toEqual({ id: 't-1', createdAt: T0 - 600_000 });
+    expect(newerTask([task('t-1', -10)], 'claude', base)).toBeNull();
+    expect(newerTask([task('t-2', -5), task('t-1', -10)], 'claude', base)?.id).toBe('t-2');
+    // An instance-less task belongs to the agent's primary instance.
+    expect(newerTask([task('t-3', -5, null)], 'claude', base)?.id).toBe('t-3');
+    expect(baselineTask(null, 'claude', undefined, T0)).toEqual({ id: null, createdAt: T0 });
+  });
+});
+
+describe('defaultSpawnToLog with a watch (#3587)', () => {
+  const node = process.execPath;
+
+  it('returns the command’s exit status and keeps its output in the log', () => {
+    const logFile = path.join(tmp, 'w.log');
+    const watched: number[] = [];
+    const status = defaultSpawnToLog(node, ['-e', 'console.log("hello"); setTimeout(() => process.exit(7), 300)'], {
+      cwd: tmp,
+      logFile,
+      watch: () => (watched.push(1), false),
+      pollMs: 100,
+    });
+    expect(status).toBe(7);
+    expect(fs.readFileSync(logFile, 'utf8')).toContain('hello');
+    expect(fs.existsSync(`${logFile}.exit`)).toBe(false);
+  });
+
+  it('stops the command when the watch says so', () => {
+    const logFile = path.join(tmp, 'w.log');
+    const begin = Date.now();
+    const status = defaultSpawnToLog(node, ['-e', 'setTimeout(() => {}, 60000)'], {
+      cwd: tmp,
+      logFile,
+      watch: () => true,
+      pollMs: 100,
+    });
+    expect(status).toBe(143);
+    expect(Date.now() - begin).toBeLessThan(10_000);
   });
 });
