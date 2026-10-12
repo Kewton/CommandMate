@@ -58,6 +58,7 @@ import type { SortKey, SortDirection } from '@/lib/sidebar-utils';
 import type { Worktree } from '@/types/models';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import type { BranchStatus } from '@/types/sidebar';
+import { WORKTREE_STATUS_BADGE_CLASSES, WORKTREE_STATUS_OPTIONS } from '@/lib/worktree-status';
 
 // ============================================================================
 // Constants
@@ -142,36 +143,15 @@ function isWorktreeActive(wt: Worktree, agents: readonly CLIToolType[]): boolean
   });
 }
 
-/**
- * Worktree lifecycle status -> `worktree.worktreeStatus.*` keys.
- *
- * Reuses the dictionary WorktreeCard/WorktreeDetail already own instead of
- * duplicating the labels here (Issue #1305, following #1277). Module scope, so
- * keys rather than literals (Issue #1271).
- */
-const STATUS_LABEL_KEYS: Record<string, string> = {
-  ready: 'worktreeStatus.ready',
-  in_progress: 'worktreeStatus.inProgress',
-  in_review: 'worktreeStatus.inReview',
-  done: 'worktreeStatus.done',
-};
-
 /** Format status display label. Unknown values fall back to the raw status. */
 function formatStatus(
   status: string | null | undefined,
   tWorktree: (key: string) => string
 ): string {
   if (!status) return '';
-  const labelKey = STATUS_LABEL_KEYS[status];
-  return labelKey ? tWorktree(labelKey) : status;
+  const option = WORKTREE_STATUS_OPTIONS.find((o) => o.value === status);
+  return option ? tWorktree(option.labelKey) : status;
 }
-
-/** Status badge CSS classes keyed by status value */
-const STATUS_BADGE_CLASSES: Record<string, string> = {
-  done: 'bg-success-subtle text-success-foreground',
-  in_review: 'bg-info-subtle text-info-foreground',
-  in_progress: 'bg-accent-100 dark:bg-accent-900/30 text-accent-700 dark:text-accent-400',
-};
 
 const DEFAULT_BADGE_CLASS = 'bg-muted text-muted-foreground';
 
@@ -493,7 +473,7 @@ export default function SessionsPage() {
                       {wt.status && (
                         <div className="mt-2">
                           <span className={`px-2 py-0.5 text-xs font-medium rounded ${
-                            STATUS_BADGE_CLASSES[wt.status ?? ''] ?? DEFAULT_BADGE_CLASS
+                            (WORKTREE_STATUS_BADGE_CLASSES as Record<string, string>)[wt.status ?? ''] ?? DEFAULT_BADGE_CLASS
                           }`}>
                             {formatStatus(wt.status, tWorktree)}
                           </span>
