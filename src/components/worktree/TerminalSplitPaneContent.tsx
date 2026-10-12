@@ -259,6 +259,8 @@ export interface TerminalSplitPaneContentProps extends TerminalSplitPaneCoreProp
    * here, so a pre-#2261 caller keeps the composer's Shift+Enter untouched.
    */
   onToggleMaximize?: () => void;
+  /** Issue #3612: a lone split cannot be maximized (entries disabled, chord inert). */
+  maximizeDisabled?: boolean;
   /**
    * Issue #3514: frame this split as the selected one. Passed straight through
    * to `TerminalSplitPane`; the container decides (focused, and >1 split).
@@ -296,6 +298,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   onAgentSessionChange,
   isMaximized = false,
   onToggleMaximize,
+  maximizeDisabled = false,
   showFocusFrame = false,
   branchName,
 }: TerminalSplitPaneContentProps) {
@@ -383,6 +386,8 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   // down a fresh callback identity on every container render.
   const onToggleMaximizeRef = useRef(onToggleMaximize);
   onToggleMaximizeRef.current = onToggleMaximize;
+  const maximizeDisabledRef = useRef(maximizeDisabled);
+  maximizeDisabledRef.current = maximizeDisabled;
 
   // Issue #2261: Mod+Shift+Enter maximizes / restores this split.
   //
@@ -408,6 +413,8 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
 
       const toggle = onToggleMaximizeRef.current;
       if (!toggle) return;
+      // Issue #3612: nothing to maximize -> leave the key to the composer.
+      if (maximizeDisabledRef.current) return;
       event.preventDefault();
       toggle();
     }
@@ -1490,6 +1497,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       // Issue #2261: the title bar's half of the maximize toggle.
       isMaximized={isMaximized}
       onToggleMaximize={onToggleMaximize}
+      maximizeDisabled={maximizeDisabled}
       // Issue #3514: the selected-split frame, and End in the "…" menu under
       // the same condition the × button uses (a handler and a live session).
       showFocusFrame={showFocusFrame}

@@ -28,6 +28,15 @@ import { useEffect, useLayoutEffect, useState } from 'react';
 import type React from 'react';
 
 /**
+ * Issue #3615: marks a clipping element (a `truncate` span) that must keep at
+ * least this many pixels of its text — e.g. the lone split's agent name in the
+ * second row. Clipped narrower than that, it counts as "does not fit", so the
+ * row gives up its next step instead of squeezing the name to one letter.
+ * Unclipped, it keeps its natural width, however short.
+ */
+export const FIT_MIN_WIDTH_ATTR = 'data-fit-min-width';
+
+/**
  * Whether anything in a row's shrinking group is wider than its box
  * (Issue #2481).
  *
@@ -35,12 +44,17 @@ import type React from 'react';
  * catches content that collides inside it without widening anything: the
  * verification chip squeezed below its badges paints them over its own ⓘ
  * toggle, and the chip is a slot the row does not look into. Elements that
- * clip (the `truncate` spans) are wider than their box by design and skipped.
+ * clip (the `truncate` spans) are wider than their box by design and skipped —
+ * unless clipped below their {@link FIT_MIN_WIDTH_ATTR} (Issue #3615).
  */
 export function contentOverflows(group: HTMLElement): boolean {
   if (group.scrollWidth > group.clientWidth + 1) return true;
   for (const el of Array.from(group.querySelectorAll('*'))) {
     if (el.scrollWidth <= el.clientWidth + 1) continue;
+    // Issue #3615: a clipping element that must stay readable — clipped
+    // below its declared width, it no longer fits either.
+    const minWidth = Number(el.getAttribute(FIT_MIN_WIDTH_ATTR));
+    if (minWidth > 0 && el.clientWidth < minWidth) return true;
     if (getComputedStyle(el).overflowX !== 'visible') continue;
     return true;
   }
@@ -216,7 +230,8 @@ export interface SplitActionBarFit {
    * its reason stay reachable however narrow the terminal side gets (e.g. a
    * file panel dragged to leave the terminal its 20% minimum).
    * Issue #3592: with one split, that split's agent selector, Terminal /
-   * Chat and note go with them.
+   * Chat and note go with them — Issue #3615: also when the agent's name
+   * would be clipped below its readable width.
    */
   itemsFolded: boolean;
   /**
@@ -235,6 +250,12 @@ export interface SplitActionBarFit {
  * cannot); the History / Files toggles never shrink. Once the chip is down to
  * its badges, the toggles drop their labels first, then the items fold behind
  * the "…" button, then the left group clips.
+ *
+ * Issue #3615: with one split, the agent's name counts as "does not fit" once
+ * clipped below its readable width ({@link FIT_MIN_WIDTH_ATTR}), so it is
+ * folded rather than squeezed to one letter. The order stays: the toggles'
+ * labels go first, since an icon with its accessible name costs no click,
+ * while the folded selector does.
  *
  * @param barRef - The action bar, observed for size changes
  * @param leftRef - The left group; its overflow is the "does not fit" signal

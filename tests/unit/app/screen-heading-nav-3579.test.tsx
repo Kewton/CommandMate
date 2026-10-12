@@ -95,3 +95,22 @@ describe('screen headings use the sidebar destination words (Issue #3579)', () =
     expect(screen.queryByText('Repositories')).toBeNull();
   });
 });
+
+describe('/repositories description comes from locales (Issue #3586)', () => {
+  const read = (lang: string): { repositories: { pageDescription: string } } =>
+    JSON.parse(fs.readFileSync(path.resolve(process.cwd(), `locales/${lang}/common.json`), 'utf-8'));
+
+  it('en keeps the existing sentence', () => {
+    locale.current = 'en';
+    render(<RepositoriesPage />);
+    expect(screen.getByText('Manage repositories and worktrees.')).toBeTruthy();
+    expect(read('en').repositories.pageDescription).toBe('Manage repositories and worktrees.');
+  });
+
+  it('ja shows the Japanese sentence, not the English literal', () => {
+    locale.current = 'ja';
+    render(<RepositoriesPage />);
+    expect(screen.getByText(read('ja').repositories.pageDescription)).toBeTruthy();
+    expect(screen.queryByText('Manage repositories and worktrees.')).toBeNull();
+  });
+});

@@ -655,3 +655,80 @@ describe('Tooltip keyboard focus (Issue #2319)', () => {
     expect(queryTooltip()).not.toBeInTheDocument();
   });
 });
+
+/**
+ * Issue #3611: an Escape a layer above already handled is not the bubble's.
+ *
+ * The bubble listens on `window` in the bubble phase — the last stop of a
+ * keydown — so every document-level layer (a Radix menu's capture listener,
+ * a list's bubble listener) has handled the press before it does. When one of
+ * them claimed it (`preventDefault`), the bubble stays; a direct Escape still
+ * dismisses it, and the bubble itself never claims the key (see #2319 above).
+ */
+describe('Tooltip Escape a layer above handled (Issue #3611)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function focusTooltip(): HTMLElement {
+    render(
+      <Tooltip content="Search">
+        <button>Search</button>
+      </Tooltip>
+    );
+    const button = screen.getByRole('button', { name: 'Search' });
+    act(() => {
+      button.focus();
+    });
+    expect(queryTooltip()).toBeInTheDocument();
+    return button;
+  }
+
+  const queryTooltip = (): HTMLElement | null => screen.queryByRole('tooltip', { hidden: true });
+
+  function pressEscapeWith(
+    claim: { capture: boolean },
+    target: EventTarget = document.body
+  ): KeyboardEvent {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') event.preventDefault();
+    };
+    document.addEventListener('keydown', onKeyDown, claim.capture);
+    const event = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    try {
+      act(() => {
+        target.dispatchEvent(event);
+      });
+    } finally {
+      document.removeEventListener('keydown', onKeyDown, claim.capture);
+    }
+    return event;
+  }
+
+  it('stays when a document capture listener (a Radix menu) claimed the Escape', () => {
+    focusTooltip();
+    const event = pressEscapeWith({ capture: true });
+    expect(event.defaultPrevented).toBe(true);
+    expect(queryTooltip()).toBeInTheDocument();
+  });
+
+  it('stays when a document bubble listener (a list closing itself) claimed it — document runs before window', () => {
+    focusTooltip();
+    pressEscapeWith({ capture: false });
+    expect(queryTooltip()).toBeInTheDocument();
+  });
+
+  it('is dismissed by a direct Escape on the document, without claiming it', () => {
+    focusTooltip();
+    const event = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    act(() => {
+      document.body.dispatchEvent(event);
+    });
+    expect(queryTooltip()).not.toBeInTheDocument();
+    expect(event.defaultPrevented).toBe(false);
+  });
+});

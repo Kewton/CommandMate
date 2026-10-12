@@ -57,6 +57,7 @@ import {
 } from '@/components/layout/RepositoryTabBar';
 import { GroupIcon } from '@/components/ui/GroupIcon';
 import { generateRepositoryColor } from '@/lib/sidebar-utils';
+import { isUnhandledEscape } from '@/lib/escape-key';
 import type { SortDirection, SortKey } from '@/lib/sidebar-utils';
 import type { RepositorySummary } from '@/lib/api-client';
 import type { Worktree } from '@/types/models';
@@ -246,7 +247,9 @@ function BranchSwitcher({
       close();
     };
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
+      // Issue #3611: an Escape a layer above already handled (the header
+      // tools' "…" list closing itself) is not ours, nor is the focus.
+      if (!isUnhandledEscape(event)) return;
       close();
       buttonRef.current?.focus();
     };

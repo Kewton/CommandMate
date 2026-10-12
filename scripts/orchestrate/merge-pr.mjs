@@ -68,6 +68,13 @@ export const UNIT_CHECK = 'Unit Tests';
 /** `bucket` values that settle a check without failing it. */
 const SETTLED_OK = ['pass', 'skipping'];
 
+/** The squash commit's subject: the PR title ending in `(#<PR>)`, once. */
+export function squashSubject(title, number) {
+  const t = String(title ?? '').trim();
+  if (!t) return '';
+  return t.endsWith(`(#${number})`) ? t : `${t} (#${number})`;
+}
+
 /**
  * 6-3 over `gh pr checks --json name,bucket,link`.
  *
@@ -226,7 +233,7 @@ export function main(argv, deps = {}) {
   try {
     const branch = o.branch ?? git(run, o.worktree, ['rev-parse', '--abbrev-ref', 'HEAD']).trim();
     const viewPr = (ref) =>
-      ghJson(run, ['pr', 'view', String(ref), '--repo', o.repo, '--json', 'number,state,headRefOid,url,headRefName']);
+      ghJson(run, ['pr', 'view', String(ref), '--repo', o.repo, '--json', 'number,state,headRefOid,url,headRefName,title']);
     let pr;
     if (o.pr) pr = viewPr(o.pr);
     else {
@@ -335,8 +342,10 @@ export function main(argv, deps = {}) {
     let rerun = rerunDone;
     const deadline = now().getTime() + Number(o.ciTimeout) * 1000;
     let verdict;
+    let title = pr.title;
     for (;;) {
       const current = viewPr(pr.number);
+      title = current.title ?? title;
       if (current.state === 'MERGED') {
         record('merge', 'ok', current.headRefOid, `pr=#${pr.number} merged-elsewhere`, current.headRefOid === head ? workHead : null);
         log(`merge #${issue}: #${pr.number} was merged meanwhile — issue ${o.close}: ${closeIssue(pr.number)}`);
@@ -378,12 +387,12 @@ export function main(argv, deps = {}) {
     record('ci', 'ok', head, `checks=${verdict.summary} build=${needBuild ? 'pass' : 'precheck'} unit=${need.needUnit ? 'pass' : '-'}${o.last ? ' last=all-pass' : ''}`, workHead);
 
     // 6. Merge exactly this HEAD, then the Issue.
-    // A fold (6-4) on top of the work must not name the squash commit: with a
-    // distinct work HEAD, pass its subject the way GitHub words its default.
-    const subject = workHead && workHead !== head ? git(run, o.worktree, ['log', '-1', '--format=%s', workHead]).trim() : '';
+    // The squash commit is named after the PR (publish-pr titles it), also over
+    // a fold or a refresh: the subject is the PR's own title, as read on the last look at it.
+    const subject = squashSubject(title, pr.number);
     const merged = run('gh', [
       'pr', 'merge', String(pr.number), '--repo', o.repo, '--squash', '--match-head-commit', head,
-      ...(subject ? ['--subject', `${subject} (#${pr.number})`] : []),
+      ...(subject ? ['--subject', subject] : []),
     ]);
     if (merged.status !== 0) {
       record('merge', 'fail', head, `pr=#${pr.number} gh-merge-failed`, workHead);

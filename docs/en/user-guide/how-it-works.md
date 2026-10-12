@@ -25,7 +25,7 @@ state read from the agent's own hooks, not a guess from the screen. The waiting 
 a badge, a toast and the tab title, and you answer it like a chat.
 
 <p align="center">
-  <img src="../../images/demo-sessions.gif" width="560" alt="A sidebar of four sessions with one amber row marked Approve / Reject and a RESULT Passed chip in the header; the waiting session's Create File confirmation is answered with 1. Yes and the list comes back all green" />
+  <img src="../../images/demo-sessions.gif" width="560" alt="A sidebar of four sessions with one amber row marked Approve / Reject and a RESULT Passed Verification chip at the top of the screen; the waiting session's Create File confirmation is answered with 1. Yes and the list comes back all green" />
 </p>
 
 | Feature | What it does | Why it matters |

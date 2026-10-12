@@ -19,6 +19,7 @@ import React, { memo, useCallback, useEffect, useLayoutEffect, useRef, useState 
 import { Settings2 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { Checkbox } from '@/components/ui';
+import { isUnhandledEscape } from '@/lib/escape-key';
 import type {
   FileMetadataDisplaySettings,
 } from '@/hooks/useFileMetadataDisplay';
@@ -82,7 +83,8 @@ export const FileMetadataToggle = memo(function FileMetadataToggle({
       }
     };
     const onKeyDown = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') setOpen(false);
+      // Issue #3611: an Escape a layer above already handled is not ours.
+      if (isUnhandledEscape(e)) setOpen(false);
     };
     document.addEventListener('mousedown', onPointerDown);
     document.addEventListener('keydown', onKeyDown);

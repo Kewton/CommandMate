@@ -121,7 +121,11 @@ export function fakeGit(overrides: Partial<FakeState> = {}) {
       }
       if (key === 'pr view') {
         const pr = state.prs.find((p) => String(p.number) === args[2]);
-        return pr ? ok(JSON.stringify(pr)) : failed('no pull requests found');
+        if (!pr) return failed('no pull requests found');
+        // Only the fields that were asked for, like gh.
+        const asked = (args[args.indexOf('--json') + 1] ?? '').split(',').filter(Boolean);
+        const picked = asked.length ? Object.fromEntries(asked.map((k) => [k, (pr as Record<string, unknown>)[k]])) : pr;
+        return ok(JSON.stringify(picked));
       }
       if (key === 'pr checks') {
         const answer = state.checks[Math.min(checksIndex++, state.checks.length - 1)];
