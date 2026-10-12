@@ -58,6 +58,7 @@ import {
   markerFiles,
   missingRecords,
   prsOfBranch,
+  withGhRetry,
   workHeadOf,
 } from './pr-common.mjs';
 
@@ -194,10 +195,12 @@ export function validate(options) {
  * @returns {number} exit code
  */
 export function main(argv, deps = {}) {
-  const { run = defaultRun, sleep = defaultSleep, now = () => new Date() } = deps;
+  const { sleep = defaultSleep, now = () => new Date() } = deps;
   const findNaming = deps.findTestsNaming ?? findTestsNaming;
   const log = deps.log ?? ((line) => console.log(line));
   const error = deps.error ?? ((line) => console.error(line));
+  // GitHub's 5xx and dropped connections are asked again, and said so (#3633 D).
+  const run = withGhRetry(deps.run ?? defaultRun, { sleep, notice: error });
 
   const parsed = parseArgs(argv);
   if (parsed.error) {

@@ -880,7 +880,7 @@ done 3< "workspace/orchestration/runs/$DATE/tasks.tsv"
 | `21` | 作業証跡ゼロ（未着手） | 下記「21 の対応」 |
 | `10` | プロンプト検出 | `commandmatedev capture <WT> --instance "$AGENT"` で内容確認 → `commandmatedev respond <WT> "<番号>" --instance "$AGENT"` → 再度 wait |
 | `124` | タイムアウト | capture で状況確認 → 追加指示 or ユーザーに報告 |
-| `3` | 裁定を作業の終わりに結び付けられない（`wait-verify.mjs`、3-3） | 記録の要約の `unconfirmed:` の理由を読む。作業中なら待ち直し、未コミットなら再指示 |
+| `3` | 裁定を作業の終わりに結び付けられない（`wait-verify.mjs`、3-3） | 記録の要約の `unconfirmed:` の理由を読む。作業中なら待ち直し、未コミットなら再指示。待機中に同じ instance の新しい task ができた（`a newer task <id>`）→ 新しい task id で `wait-verify.mjs --task` を呼び直す（docs/orchestrate/exit-codes.md#3-4-3-の対応） |
 
 以降の `capture` / `respond` / `send` にも、すべて `--instance "$AGENT"` を付ける。
 

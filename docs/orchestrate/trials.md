@@ -45,11 +45,15 @@ node scripts/orchestrate/consistency-review.mjs --run-dir "workspace/orchestrati
 ```
 
   スクリプトが行うこと: worktree（既定 `../commandmate-issue-<N>`、`--worktree` で指定）の HEAD が `--head` と同じかを確かめる → Codex のロック
-  （`workspace/proposals/<date>/.lock` を mkdir で取る。ほかの Codex への依頼と共有）→ `capture --instance codex --json` の `sessionStatus` が
+  （`workspace/proposals/<date>/.lock` を mkdir で取る。ほかの Codex への依頼と共有。中の `owner.json` に持ち主の pid・host・開始時刻を書く。
+  持ち主が既に居ない（kill されたレビューが残した）ロックは外して取り、生きている持ち主のロックは 1 分ごとに stderr へ `lock … held by pid …` を出して待つ。
+  待ちの上限は ask の上限＋600 秒（3000 秒）で、超えたら `review=fail`。`owner.json` の無いロックは持ち主を判断できないので待つ（#3633））→ `capture --instance codex --json` の `sessionStatus` が
   ready を 3 回続けて読むまで待つ → `ask <wt> <依頼文> --instance codex --timeout 2400 --json` → 返答の本文（行頭の `> **Thinking (` より前。
   本文が `> **Thinking**` を引用していても切れない）を `review-<N>.md` に保存（2 回目からは `review-<N>b.md`・`c`…。依頼文・JSON・stderr も同じ名前で残す）→
   `DONE:` 行があれば下の表に 1 行を足し、run の記録に `review=ok`、無ければ・依頼が失敗したら `review=fail`。exit は 0（`DONE:` あり）／1（失敗。記録済み）／2（引数の誤り。何も送らない）。
   レビューの相手を変えるとき（Codex の `stream disconnected` が続くときなど）は `--instance codex-2` を足す（既定 `codex`）。capture・ask・記録の agent・ロック（`.lock-<id>`）が同じ値になる（alias も渡せる。サーバーの resolve-target で実 ID に直し、解決できなければ exit 2）ので、`--cli` のラッパーは要らない（#3618）。
+  ID への解決は capture・ask と同じ `--cli`（`reply <wt> --instance <指定> --json` の `instanceId`）を通すので、`.env`・`CM_BIND`・HTTPS で決まる接続先も同じになる。
+  受け付ける `--instance` は CLI・サーバーと同じ条件（instance id か、制御文字を含まない 50 文字以内の alias。`/` を含む alias も可）で、ロック名には解決後の ID を使う（#3633）。
   表の「独自の発見」から「事前レビューの有無」までの列は `未` で入るので、返答を読んで埋める
 - **数え方（期限の集計で使う）:** 延べではなく、重複・既報（ワーカーが報告済み・5-3 で処置できた）を除いた「レビューの独自の発見」を、**動作／説明／テスト** と **新規／既存** の 2 軸で数える。指摘の正しさは、一部を別の判定者（Codex と Claude の相互）で再判定する。費用は 1 本あたり、待ち時間・再指示・修正を含めた総時間で測る。後の段（CI・ガード・実機・UAT）で見つかった漏れも記録する
 

@@ -27,7 +27,10 @@
  *     `--verify` and this script starts `verify --task` itself, so the moment
  *     before a verification is its own. The task list is read while waiting,
  *     right before every verification and again before the verdict is taken;
- *     a newer task ends the call without a verdict.
+ *     a newer task ends the call without a verdict. A `--task` older than the
+ *     newest TASK_LIST_LIMIT is read on its own (`task show`), and a list that
+ *     fails at the start is read again before the wait begins, so the call
+ *     stays tied to the task it started on (#3633).
  *
  * A passed verdict is never reused: it belongs to a task, a contract and an
  * env-clean baseline taken when that task started, none of which a HEAD names.
@@ -56,6 +59,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { appendRecord } from './run-log.mjs';
 import { dirtyPaths } from './dirty-tree.mjs';
+import { resolveInstanceThroughCli } from './resolve-instance.mjs';
 
 export const DEFAULT_TIMEOUT_SEC = 10800;
 export const DEFAULT_SIGNAL_TIMEOUT_SEC = 1800;
@@ -67,6 +71,14 @@ export const EXIT_POLL_MS = 500;
 export const TASK_LIST_LIMIT = 20;
 /** Upper bound for a side query (task list, instance roster): past it the check is skipped. */
 export const QUERY_TIMEOUT_MS = 15_000;
+/**
+ * Reads of the task list before the wait starts (#3633 B): `wait --verify`
+ * binds its task before polling (src/cli/commands/wait.ts), and the split path
+ * does the same here, so a list that fails once does not leave the
+ * verification without the task the wait began on.
+ */
+export const START_TASK_ATTEMPTS = 3;
+export const START_TASK_RETRY_MS = 5_000;
 /** `wait`'s "no session was ever seen" (VerifyExitCode.NOT_STARTED); `wait --verify` still verifies it. */
 const NOT_STARTED_EXIT = 21;
 /** Exit codes that are a verdict: the gates ran and judged the work. */
@@ -242,52 +254,24 @@ function querySafely(run, cli, args, cwd) {
   }
 }
 
-/** The CLI build `defaultResolveTarget` asks through: the one `bin/commandmate.js` of this checkout runs. */
-export const DEFAULT_CLI_DIST = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../dist');
-
-/**
- * Asks the server's `GET /api/worktrees/<wt>/resolve-target?instance=` through the
- * CLI's own ApiClient (same server, port and token as every `commandmatedev` call).
- * argv: <dist> <worktree-id> <selector>.
- */
-const RESOLVE_TARGET_SOURCE = `
-const [dist, wt, selector] = process.argv.slice(1);
-const { ApiClient } = require(require('node:path').join(dist, 'cli/utils/api-client.js'));
-new ApiClient()
-  .get('/api/worktrees/' + encodeURIComponent(wt) + '/resolve-target?instance=' + encodeURIComponent(selector))
-  .then((target) => process.stdout.write(JSON.stringify(target)))
-  .catch((err) => {
-    process.stderr.write(String((err && err.message) || err));
-    process.exit(2);
-  });
-`;
-
 /**
  * The instance id the server resolves `--instance` to (#3587 review 2-3): the
  * route `wait`, `capture` and `send` resolve through (primary anchor, then
  * roster id, then alias — exact before case-insensitive, ambiguity refused).
  * No rule of its own here.
  *
+ * Asked through `--cli`, the CLI every other call of this script uses
+ * (#3633 A): it decides the server from `.env`, `CM_BIND` and HTTPS, and a
+ * wrapper given as `--cli` may change all of that, so a fixed `dist/` with this
+ * process's environment could resolve against another server than the wait.
+ *
  * @param {string} wt
  * @param {string} selector
- * @param {{ cwd?: string, distDir?: string }} [options]
+ * @param {{ cwd?: string, cli?: string, run?: typeof defaultRun }} [options]
  * @returns {{ instanceId: string } | { error: string }}
  */
-export function defaultResolveTarget(wt, selector, { cwd, distDir = DEFAULT_CLI_DIST } = {}) {
-  try {
-    const out = defaultRun(process.execPath, ['-e', RESOLVE_TARGET_SOURCE, distDir, wt, selector], {
-      cwd,
-      timeoutMs: QUERY_TIMEOUT_MS,
-    });
-    if (out.status !== 0) return { error: (out.stderr || out.stdout).trim() || `exit ${out.status}` };
-    const target = JSON.parse(out.stdout);
-    if (typeof target?.instanceId !== 'string' || target.instanceId === '') {
-      return { error: `no instance in the answer: ${out.stdout.trim()}` };
-    }
-    return { instanceId: target.instanceId };
-  } catch (err) {
-    return { error: err instanceof Error ? err.message : String(err) };
-  }
+export function defaultResolveTarget(wt, selector, { cwd, cli = 'commandmatedev', run = defaultRun } = {}) {
+  return resolveInstanceThroughCli(run, cli, wt, selector, { cwd, timeoutMs: QUERY_TIMEOUT_MS });
 }
 
 /** The instance a task was sent to: its instance id, or the agent's primary instance. */
@@ -337,6 +321,13 @@ export function newerTask(tasks, instance, baseline) {
 function readTasks(run, cli, wt, cwd) {
   const tasks = querySafely(run, cli, ['task', 'list', wt, '--limit', String(TASK_LIST_LIMIT), '--json'], cwd);
   return Array.isArray(tasks) ? tasks : null;
+}
+
+/** One task by id (`task show --json`), or null when it cannot be read. */
+function readTask(run, cli, taskId, cwd) {
+  const detail = querySafely(run, cli, ['task', 'show', taskId, '--json'], cwd);
+  const task = detail?.task;
+  return task && task.id === taskId ? task : null;
 }
 
 /** The reason recorded after `unconfirmed:` when a newer task took over the worktree. */
@@ -522,7 +513,7 @@ export function main(argv, deps = {}) {
   // One id for everything that follows — the wait, the verifications, the task
   // comparison, capture and Auto-Yes: tasks carry the resolved id, not the alias.
   // Unresolvable means nothing is sent and nothing is waited for (#3587 review 2-3).
-  const target = resolveTarget(o.wt, o.instance, { cwd });
+  const target = resolveTarget(o.wt, o.instance, { cwd, cli: o.cli, run });
   if ('error' in target) {
     error(`cannot resolve --instance '${o.instance}' in ${o.wt}: ${target.error}`);
     return 2;
@@ -540,8 +531,27 @@ export function main(argv, deps = {}) {
     o.logFile = o.log ?? path.join(o.runDir, `wait-${issue}.log`);
     const started = now();
     const instance = o.instance;
-    const startTasks = readTasks(run, o.cli, o.wt, cwd);
-    let baseline = baselineTask(startTasks, instance, o.taskId, started.getTime());
+    /**
+     * The baseline from a readable list. `--task` beyond the TASK_LIST_LIMIT
+     * newest is read on its own, so the comparison goes on (by creation time)
+     * rather than stopping (#3633 B). A `--task` the server does not show
+     * either is not in the ledger: unwatched, as before.
+     */
+    const takeBaseline = (tasks) => {
+      const listed = baselineTask(tasks, instance, o.taskId, started.getTime());
+      if (listed.found || !o.taskId) return listed;
+      const own = readTask(run, o.cli, o.taskId, cwd);
+      const createdAt = own ? Date.parse(own.createdAt) : NaN;
+      return Number.isFinite(createdAt) ? { id: o.taskId, createdAt, found: true } : listed;
+    };
+    let startTasks = readTasks(run, o.cli, o.wt, cwd);
+    for (let attempt = 1; startTasks === null && attempt < START_TASK_ATTEMPTS; attempt++) {
+      sleep(START_TASK_RETRY_MS);
+      startTasks = readTasks(run, o.cli, o.wt, cwd);
+    }
+    let baseline = startTasks === null
+      ? baselineTask(null, instance, o.taskId, started.getTime())
+      : takeBaseline(startTasks);
     // An unreadable list at the start is not "no task": the baseline is taken
     // when the list reads again, and the call is watched meanwhile (#3587 review 2-2).
     let baselinePending = startTasks === null;
@@ -555,7 +565,7 @@ export function main(argv, deps = {}) {
       if (tasks === null) return null;
       if (baselinePending) {
         baselinePending = false;
-        baseline = baselineTask(tasks, instance, o.taskId, started.getTime());
+        baseline = takeBaseline(tasks);
       }
       if (!baseline.found) return null;
       const newer = newerTask(tasks, instance, baseline);

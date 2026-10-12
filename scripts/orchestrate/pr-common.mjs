@@ -5,6 +5,8 @@
  *
  * Both scripts take every external call (`git`, `gh`, `npx`) through one `run`
  * function, so the tests replace it and nothing is pushed, opened or merged.
+ * Both wrap it in withGhRetry, so a `gh` call that met GitHub's 502/503/504 or
+ * a dropped connection is tried again (#3633 D).
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -21,7 +23,7 @@ export const DEFAULT_BASE_BRANCH = 'develop';
 /**
  * Files the orchestrator may commit on the PR branch after the checks (6-4: the module-reference fold).
  * Copied as ORCHESTRATOR_FILES in src/lib/verification/scope-gate.ts, whose scope gate drops what
- * only such a commit changed (#3588); tests/unit/scripts/orchestrate/orchestrator-files-parity.test.ts
+ * only such a commit changed (#3588) and whose rule work-evidence uses to not count it (#3633); tests/unit/scripts/orchestrate/orchestrator-files-parity.test.ts
  * keeps the two equal. The scope gate is stricter than workHeads below: it also requires the
  * `Orchestrator-Fold: module-reference` trailer (a worker can commit module-reference alone too)
  * and counts a merge's own edits outside ORCHESTRATOR_FILES as the worker's. workHeads only picks
@@ -68,6 +70,49 @@ export function git(run, worktree, args) {
   const { status, stdout, stderr } = run('git', ['-C', worktree, ...args]);
   if (status !== 0) throw new Error(`git ${args.join(' ')} failed in ${worktree}: ${stderr.trim()}`);
   return stdout;
+}
+
+/** Tries of one `gh` call: the first and the retries (#3633 D). */
+export const GH_ATTEMPTS = 4;
+/** The wait before each retry, in order; the last repeats. */
+export const GH_RETRY_DELAYS_MS = [10_000, 30_000, 60_000];
+
+/**
+ * What a `gh` failure says when GitHub, not the request, failed: an HTTP 502 /
+ * 503 / 504 (the "Partially Degraded" 504 Gateway Timeout of 2026-10-12) or a
+ * connection that did not complete. A 4xx, a failed check or a merge conflict
+ * is the answer and is not asked again.
+ */
+export const GH_TRANSIENT_PATTERN =
+  /\bHTTP 50[234]\b|\b50[234] (?:Bad Gateway|Service Unavailable|Gateway Timeout)\b|\b(?:ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|ENETUNREACH)\b|connection reset by peer|connection refused|i\/o timeout|TLS handshake timeout|unexpected EOF|could not resolve host|error connecting to/i;
+
+/** Whether a finished `gh` call failed for a reason worth trying again. */
+export function isTransientGhFailure({ status, stdout, stderr }) {
+  if (status === 0) return false;
+  return GH_TRANSIENT_PATTERN.test(`${stderr ?? ''}\n${stdout ?? ''}`);
+}
+
+/**
+ * `run` with `gh` calls tried again on a transient failure (#3633 D): up to
+ * GH_ATTEMPTS tries, GH_RETRY_DELAYS_MS apart, each retry said on `notice`.
+ * Every other command, and every other failure, passes through as it was. The
+ * last answer is returned as is, so a caller reads gh's own message.
+ *
+ * @param {typeof defaultRun} run
+ * @param {{ sleep?: (ms: number) => void, notice?: (line: string) => void }} [options]
+ */
+export function withGhRetry(run, { sleep = defaultSleep, notice = (line) => console.error(line) } = {}) {
+  return (command, args, opts) => {
+    if (command !== 'gh') return run(command, args, opts);
+    for (let attempt = 1; ; attempt++) {
+      const out = run(command, args, opts);
+      if (attempt >= GH_ATTEMPTS || !isTransientGhFailure(out)) return out;
+      const delay = GH_RETRY_DELAYS_MS[Math.min(attempt, GH_RETRY_DELAYS_MS.length) - 1];
+      const reason = `${out.stderr || out.stdout}`.trim().split('\n')[0];
+      notice(`gh ${args.slice(0, 2).join(' ')}: ${reason} — retrying in ${delay / 1000}s (attempt ${attempt + 1}/${GH_ATTEMPTS})`);
+      sleep(delay);
+    }
+  };
 }
 
 /** `gh …` parsed as JSON; throws with gh's own message when it fails. */
