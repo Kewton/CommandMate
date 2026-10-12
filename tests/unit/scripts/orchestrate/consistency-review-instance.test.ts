@@ -18,6 +18,7 @@ const REPLY = JSON.stringify({ reply: '指摘なし\n\nDONE: 指摘なし' });
 let tmp: string;
 let runDir: string;
 let heldLocks: string[];
+let resolveUrls: string[];
 let calls: { command: string; args: string[] }[];
 beforeEach(() => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-consistency-instance-'));
@@ -25,6 +26,7 @@ beforeEach(() => {
   fs.writeFileSync(path.join(tmp, 'brief.txt'), '機能追加です。\n');
   calls = [];
   heldLocks = [];
+  resolveUrls = [];
 });
 afterEach(() => {
   fs.rmSync(tmp, { recursive: true, force: true });
@@ -33,8 +35,16 @@ afterEach(() => {
 const run = (command: string, args: string[]) => {
   calls.push({ command, args });
   if (command === 'git') return { status: 0, stdout: args.includes('--abbrev-ref') ? 'feature/x\n' : `${HEAD}\n`, stderr: '' };
-  if (args[0] === 'instances') {
-    return { status: 0, stdout: JSON.stringify([{ instanceId: 'codex', alias: 'codex' }, { instanceId: 'codex-2', alias: 'reviewer' }]), stderr: '' };
+  if (command === 'curl') {
+    // The server's resolve-target: an exact id or the primary first, then a case-folded alias.
+    const url = new URL(args[args.length - 1]);
+    resolveUrls.push(url.pathname + url.search);
+    const selector = url.searchParams.get('instance') ?? '';
+    const table: Record<string, string> = { codex: 'codex', 'codex-2': 'codex-2', reviewer: 'codex-2', 'レビュー 担当': 'codex-2' };
+    const id = table[selector] ?? table[selector.toLowerCase()];
+    return id
+      ? { status: 0, stdout: `${JSON.stringify({ instanceId: id })}\n200`, stderr: '' }
+      : { status: 0, stdout: `${JSON.stringify({ error: 'Invalid' })}\n404`, stderr: '' };
   }
   if (args[0] === 'capture') {
     const dir = path.join(tmp, 'workspace', 'proposals', '2026-10-12');
@@ -80,9 +90,24 @@ describe('--instance', () => {
     expect(heldLocks).toEqual(['.lock-codex-2', '.lock-codex-2', '.lock-codex-2']);
   });
 
+  it('asks the server, so primary-over-alias, case and non-ASCII aliases follow its rules', () => {
+    expect(go(['--instance', 'Reviewer'])).toBe(0);
+    expect(go(['--instance', 'レビュー 担当'])).toBe(0);
+    expect(resolveUrls[0]).toBe('/api/worktrees/mycodebranchdesk/resolve-target?instance=Reviewer');
+    expect(resolveUrls[1]).toContain('instance=%E3%83%AC');
+    expect(instancesOf('ask')).toEqual(['codex-2', 'codex-2']);
+  });
+
+  it('a name that is both a primary and an alias is whatever the server answers (primary first)', () => {
+    // `codex` is also an alias of nothing here; the server answers the primary.
+    expect(go(['--instance', 'codex'])).toBe(0);
+    expect(instancesOf('ask')).toEqual(['codex']);
+    expect(readRecords(runDir, '3618').records.find((r) => r.stage === 'review')).toMatchObject({ agent: 'codex' });
+  });
+
   it('an unknown instance exits 2 and sends nothing', () => {
     expect(go(['--instance', 'nobody'])).toBe(2);
-    expect(calls.map((c) => c.args[0])).toEqual(['instances']);
+    expect(calls.map((c) => c.command)).toEqual(['curl']);
   });
 
   it('negative control: without --instance everything stays on codex', () => {
@@ -94,6 +119,6 @@ describe('--instance', () => {
   });
 
   it('rejects an instance id that is not an id', () => {
-    expect(parseArgs(argv(['--instance', '../x'])).error).toMatch(/--instance/);
+    expect(parseArgs(argv(['--instance', 'a/x'])).error).toMatch(/--instance/);
   });
 });

@@ -313,6 +313,19 @@ describe('main: squash subject is the PR title', () => {
     expect(run('feat: 題名 (#4242)').slice(-2)).toEqual(['--subject', 'feat: 題名 (#4242)']);
   });
 
+  it('uses the title read while waiting for CI, not the one at the start', () => {
+    recordReady();
+    const fake = fakeGit({ head: HEAD_A, prs: [openPr({ title: 'feat: 古い題名' })], checks: [[pending('Lint')], GREEN] });
+    const inner = fake.run;
+    fake.run = (command: string, args: string[], opts?: unknown) => {
+      const out = inner(command, args, opts as never);
+      if (command === 'gh' && args[0] === 'pr' && args[1] === 'checks') fake.state.prs[0].title = 'feat: 新しい題名';
+      return out;
+    };
+    expect(runMain(fake, '--ci-timeout', '120', '--poll', '30').code).toBe(0);
+    expect(fake.ghCalls('pr merge')[0].args.slice(-2)).toEqual(['--subject', 'feat: 新しい題名 (#4242)']);
+  });
+
   it('names the commit by the PR title also when the PR is given with --pr', () => {
     recordReady();
     const fake = fakeGit({ head: HEAD_A, prs: [openPr({ title: 'feat: 題名' })], checks: [GREEN] });

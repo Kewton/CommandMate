@@ -342,8 +342,10 @@ export function main(argv, deps = {}) {
     let rerun = rerunDone;
     const deadline = now().getTime() + Number(o.ciTimeout) * 1000;
     let verdict;
+    let title = pr.title;
     for (;;) {
       const current = viewPr(pr.number);
+      title = current.title ?? title;
       if (current.state === 'MERGED') {
         record('merge', 'ok', current.headRefOid, `pr=#${pr.number} merged-elsewhere`, current.headRefOid === head ? workHead : null);
         log(`merge #${issue}: #${pr.number} was merged meanwhile — issue ${o.close}: ${closeIssue(pr.number)}`);
@@ -386,8 +388,8 @@ export function main(argv, deps = {}) {
 
     // 6. Merge exactly this HEAD, then the Issue.
     // The squash commit is named after the PR (publish-pr titles it), also over
-    // a fold or a refresh: the subject is the PR's own title.
-    const subject = squashSubject(pr.title, pr.number);
+    // a fold or a refresh: the subject is the PR's own title, as read on the last look at it.
+    const subject = squashSubject(title, pr.number);
     const merged = run('gh', [
       'pr', 'merge', String(pr.number), '--repo', o.repo, '--squash', '--match-head-commit', head,
       ...(subject ? ['--subject', subject] : []),

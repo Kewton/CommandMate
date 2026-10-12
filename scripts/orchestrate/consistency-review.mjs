@@ -15,7 +15,7 @@
  * One call does what the hand-written script and docs/orchestrate/trials.md
  * did by hand:
  *   0. with `--instance <id|alias>` (default codex, no lookup), resolves it to the
- *      real instance id with `instances <wt> --json` (no match = exit 2, nothing sent);
+ *      real instance id with the server's resolve-target (failure = exit 2, nothing sent);
  *   1. takes the reviewer's lock (`workspace/proposals/<date>/.lock` for codex,
  *      `.lock-<instance id>` for another), which every ask of that session
  *      shares — a session is used one ask at a time;
@@ -23,7 +23,7 @@
  *      in a row;
  *   3. sends the brief built from templates/consistency-review.md (or
  *      consistency-review-rereview.md with the previous answer) with
- *      `ask <wt> <brief> --instance codex --timeout 2400 --json`;
+ *      `ask <wt> <brief> --instance <resolved id> --timeout 2400 --json`;
  *   4. writes `review-<N>[b|c…].{prompt.txt,json,err,md}` to the run directory,
  *      the `.md` being the answer without the thinking;
  *   5. on an answer with a `DONE:` line appends one row to
@@ -44,6 +44,7 @@
  *        [--worktree <path>] [--wt <reviewer worktree-id>] [--lock <dir>] [--cli <commandmatedev>] [--instance <id|alias>]
  */
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 import { spawnSync } from 'node:child_process';
@@ -244,21 +245,45 @@ function waitReady({ run, sleep, cli, wt, cwd, instance }) {
   return false;
 }
 
-/** `--instance` may be an alias; the lock, ask and record need the real instance id. */
+/**
+ * `--instance` may be an id or an alias; the lock, ask and record need the real
+ * instance id. The server is the one authority for that (GET
+ * /api/worktrees/<wt>/resolve-target, the route the CLI itself uses: primary
+ * first, case-folded alias, 409 on an ambiguous alias), so this does not
+ * re-implement the rules. The endpoint is `CM_API_BASE`, else `CM_PORT`
+ * (default 3000) on localhost; `CM_AUTH_TOKEN` goes in a 0600 curl config
+ * file under os.tmpdir() (never in the process list).
+ */
 function resolveInstance(run, o, cwd) {
-  const out = run(o.cli, ['instances', o.wt, '--json'], { cwd });
-  let rows = null;
+  const base = (process.env.CM_API_BASE || `http://localhost:${process.env.CM_PORT || '3000'}`).replace(/\/+$/, '');
+  const url = `${base}/api/worktrees/${encodeURIComponent(o.wt)}/resolve-target?instance=${encodeURIComponent(o.instance)}`;
+  const args = ['-sS', '--max-time', '30', '-w', '\n%{http_code}'];
+  let dir = null;
   try {
-    rows = out.status === 0 ? JSON.parse(out.stdout) : null;
-  } catch {
-    rows = null;
+    if (process.env.CM_AUTH_TOKEN) {
+      dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-resolve-'));
+      const conf = path.join(dir, 'curl.conf');
+      fs.writeFileSync(conf, `header = "Authorization: Bearer ${process.env.CM_AUTH_TOKEN}"\n`, { mode: 0o600 });
+      args.push('-K', conf);
+    }
+    const out = run('curl', [...args, url], { cwd });
+    const text = String(out.stdout ?? '');
+    const cut = text.lastIndexOf('\n');
+    const code = Number(text.slice(cut + 1));
+    let body = null;
+    try {
+      body = JSON.parse(text.slice(0, cut));
+    } catch {
+      body = null;
+    }
+    if (out.status !== 0 || code !== 200 || !body || typeof body.instanceId !== 'string' || !body.instanceId) {
+      const why = body && body.error ? body.error : `curl exit=${out.status} http=${Number.isNaN(code) ? '-' : code}`;
+      return { error: `--instance ${o.instance}: could not resolve in ${o.wt} (${why})` };
+    }
+    return { id: body.instanceId };
+  } finally {
+    if (dir) fs.rmSync(dir, { recursive: true, force: true });
   }
-  if (!Array.isArray(rows)) return { error: `could not read the roster of ${o.wt} (instances --json exit=${out.status})` };
-  const byId = rows.filter((r) => r && r.instanceId === o.instance);
-  const matches = byId.length > 0 ? byId : rows.filter((r) => r && r.alias === o.instance);
-  if (matches.length === 0) return { error: `--instance ${o.instance}: no instance id or alias in the roster of ${o.wt}` };
-  if (matches.length > 1) return { error: `--instance ${o.instance}: ${matches.length} roster rows answer to it` };
-  return { id: matches[0].instanceId };
 }
 
 const USAGE = `Usage:
@@ -297,7 +322,7 @@ export function parseArgs(argv) {
   } catch (err) {
     return { error: err.message };
   }
-  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(options.instance)) return { error: `--instance must be an instance id (got ${options.instance})` };
+  if (!/^[^\u0000-\u001f\u007f/\\]{1,100}$/u.test(options.instance) || options.instance.trim() === '') return { error: `--instance must be an instance id or alias (got ${options.instance})` };
   if (!/^[1-9]\d*$/.test(options.issue)) return { error: `--issue must be a positive integer (got ${options.issue})` };
   if (!/^[0-9a-f]{7,40}$/.test(options.head)) return { error: `--head must be a commit sha (got ${options.head})` };
   if (options.rereview && !options.previous) return { error: '--rereview needs --previous <review md>' };
