@@ -102,6 +102,22 @@ exit 10 にもならない）。
   最後のターン終了（`capture --json` の `lastStopEventAt`）と最後のコミットの時刻と作業ツリーを比べる。検証の開始の後にコミットがあるか、
   最後のターン終了より前に始まって作業ツリーに変更があれば、検証は途中の状態を見ているので `verify "$WT" --task "$TASK_ID"` でやり直し、
   その結果を記録する。時刻が読めないときは推測せず、記録の要約に `run-start=unknown` / `last-stop=unknown` と残す
+- **`--instance` はサーバーが解決した id で通す**（#3587）: 最初に `GET /api/worktrees/<WT>/resolve-target?instance=<指定>`（`wait` / `capture` / `send` と同じ権威。
+  primary 優先・大小文字・alias の段は route のとおり）を CLI の ApiClient 越しに引き、待機・検証・task の比較・`capture`・Auto-Yes（`--auto-yes-off` も）の
+  すべてにその id を使う。解決できない（曖昧な alias・サーバーに届かない・CLI のビルドが無い）ときは **exit 2** で、何も送らず待たない
+- **新しい task が来たら裁定しない**（#3587）: 開始時に `commandmatedev task list "$WT" --json` を読み、渡された task（`--task`。無ければ
+  その instance の、呼び出しの開始までに作られた最新の task）が一覧にあれば、`wait --verify` 1 本ではなく
+  **`--verify` なしの `wait` → 新しい task の確認 → `verify "$WT" --task <task> --instance <id>`** に分け、検証を始める直前をスクリプトが握る
+  （`wait --verify` は CLI の中で検証を始めるので、その前に割り込めない。`--instance` は `wait --verify` と同じ裁定にするため渡す。OpenCode の作業証跡は
+  instance ごとに読まれる）。開始時の一覧が読めないときも分けて見張り、一覧が読めた時点で基準を取り直す（それまでに読めなければ `--task` が無い限り
+  `verify` は task をサーバーに任せる）。一覧が読めて task が無いときだけ従来どおり `wait --verify` 1 本で、確認はしない。
+  確認は、待機中（30 秒ごと）・`verify` の直前（再検証の前・Antigravity の合図待ちの周回も）・検証が終わって裁定を確定する前（Auto-Yes を切る前）に
+  一覧を引き直して行う。同じ instance の、基準の task より新しい task（基準が一覧にあれば一覧の順序で決めるので、同じ時刻でも後に作られたものは新しい。
+  無ければ作成時刻で比べる）があれば、古い task では検証せずに（または検証の結果を使わずに）**exit 3** で抜ける。記録は `fail`、要約は
+  `unconfirmed: a newer task <新しい task id> was created for this instance after task <古い task id>; … auto-yes=kept`。
+  ワーカーは新しい task を作業中なので Auto-Yes は切らない。新しい task で `wait-verify.mjs --task <新しい task id>` を呼び直す。
+  一覧の照会は 15 秒で打ち切り、読めない・時間切れ・起動の失敗のときはその回の確認を飛ばす（待機と timeout の判定は止めない）。
+  確認が例外で落ちたときも待機中の `wait` は止めてから終わる
 
 ## 3-3 完了検出が壊れたときの退避
 
