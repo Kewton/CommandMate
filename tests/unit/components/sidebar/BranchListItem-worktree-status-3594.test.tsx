@@ -475,3 +475,65 @@ describe('WorktreeCard says where the status is changed (Issue #3594)', () => {
     expect(source).not.toContain('editable in detail header');
   });
 });
+
+describe('Info field status select — failed save (Issue #3613)', () => {
+  beforeEach(() => __resetWorktreeStatusSaves());
+  afterEach(() => {
+    __resetWorktreeStatusSaves();
+    vi.unstubAllGlobals();
+  });
+
+  function renderInfoField(onWorktreeUpdate = vi.fn()) {
+    const worktree = {
+      id: 'wt-1',
+      name: 'w',
+      path: '/p',
+      repositoryPath: '/r',
+      status: 'in_progress',
+    } as Worktree;
+    render(
+      <ToastProvider>
+        <WorktreeInfoFields
+          worktreeId="wt-1"
+          worktree={worktree}
+          cardClassName=""
+          descriptionEditor={{
+            isEditing: false,
+            text: '',
+            setText: vi.fn(),
+            isSaving: false,
+            handleSave: vi.fn(),
+            handleCancel: vi.fn(),
+            startEditing: vi.fn(),
+          } as unknown as React.ComponentProps<typeof WorktreeInfoFields>['descriptionEditor']}
+          showLogs={false}
+          onToggleLogs={vi.fn()}
+          onWorktreeUpdate={onWorktreeUpdate}
+        />
+      </ToastProvider>
+    );
+    return screen.getByTestId('mobile-status-dropdown') as HTMLSelectElement;
+  }
+
+  it('shows a toast and puts the old value back when the PATCH fails (positive)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 500, json: async () => ({}) })));
+    const onUpdate = vi.fn();
+    const select = renderInfoField(onUpdate);
+    fireEvent.change(select, { target: { value: 'done' } });
+    expect(await screen.findByText('Could not change the status')).toBeTruthy();
+    expect(select.value).toBe('in_progress');
+    expect(onUpdate).not.toHaveBeenCalled();
+  });
+
+  it('shows no toast when the PATCH succeeds (negative)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ id: 'wt-1', status: 'done' }) }))
+    );
+    const onUpdate = vi.fn();
+    const select = renderInfoField(onUpdate);
+    fireEvent.change(select, { target: { value: 'done' } });
+    await waitFor(() => expect(onUpdate).toHaveBeenCalledTimes(1));
+    expect(screen.queryByText('Could not change the status')).toBeNull();
+  });
+});
