@@ -146,6 +146,91 @@ async function mouseDrag(page: Page, source: Locator, to: { x: number; y: number
   await page.mouse.up();
 }
 
+// ---- Issue #3616: row tooltip geometry ----
+
+const overlaps = (a: Box, b: Box): boolean =>
+  a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+
+/** The part of `a` inside `clip` (zero-sized when they do not meet). */
+function intersect(a: Box, clip: Box): Box {
+  const x = Math.max(a.x, clip.x);
+  const y = Math.max(a.y, clip.y);
+  const right = Math.min(a.x + a.width, clip.x + clip.width);
+  const bottom = Math.min(a.y + a.height, clip.y + clip.height);
+  return { x, y, width: Math.max(0, right - x), height: Math.max(0, bottom - y) };
+}
+
+async function openScreenWithSidebar(page: Page, options: RosterOptions): Promise<void> {
+  await page.addInitScript(() => {
+    try {
+      localStorage.setItem('mcbd-sidebar-open', 'true');
+    } catch {
+      /* non-fatal */
+    }
+  });
+  await openScreen(page, options);
+}
+
+/**
+ * Opening the list focuses its first row, whose bubble then stays up on the
+ * focus channel. Drop that focus (the list stays open: a blur to nowhere does
+ * not close it) so the hover checks below only ever see the hovered row's.
+ */
+async function dropListFocus(page: Page): Promise<void> {
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await expect(page.getByTestId('desktop-session-others-list')).toBeVisible();
+  await expect(page.getByRole('tooltip', { includeHidden: true })).toHaveCount(0);
+}
+
+/**
+ * The one bubble on screen belongs to `row` (its text is the row's label) and,
+ * once placed, covers no other row of the list — only the parts of rows the
+ * list actually shows count — and not the list itself.
+ */
+async function checkRowTooltip(page: Page, row: Locator, opts: { expectWrapped?: boolean } = {}): Promise<void> {
+  const bubble = page.getByRole('tooltip', { includeHidden: true });
+  await expect(bubble).toHaveCount(1);
+  await expect(bubble).toHaveText((await row.getAttribute('aria-label'))!);
+  await expect.poll(async () => (await bubble.boundingBox())?.x ?? -9999).toBeGreaterThanOrEqual(0);
+  const b = await box(bubble);
+  const list = page.getByTestId('desktop-session-others-list');
+  const listBox = await box(list);
+  const rowId = await row.getAttribute('data-testid');
+  const others = list.locator('[data-switcher-item]');
+  for (let j = 0; j < (await others.count()); j++) {
+    const other = others.nth(j);
+    if ((await other.getAttribute('data-testid')) === rowId) continue;
+    const visible = intersect(await box(other), listBox);
+    if (visible.width === 0 || visible.height === 0) continue;
+    expect(overlaps(b, visible), `tooltip of ${rowId} vs ${await other.getAttribute('data-testid')}`).toBe(false);
+  }
+  expect(overlaps(b, listBox), `tooltip of ${rowId} vs the list`).toBe(false);
+  const viewport = page.viewportSize()!;
+  expect(b.x >= 0 && b.x + b.width <= viewport.width).toBe(true);
+  if (opts.expectWrapped) {
+    // The label did not fit on one line beside the list: it was wrapped.
+    expect(await bubble.evaluate((el) => getComputedStyle(el).whiteSpace)).toBe('normal');
+  }
+}
+
+/** Hover `row` (in its visible part), check its bubble, then move away. */
+async function hoverRowAndCheckTooltip(
+  page: Page,
+  row: Locator,
+  opts: { expectWrapped?: boolean; atY?: 'center' | 'visible-part' } = {},
+): Promise<void> {
+  const r = await box(row);
+  let y = r.y + r.height / 2;
+  if (opts.atY === 'visible-part') {
+    const listBox = await box(page.getByTestId('desktop-session-others-list'));
+    y = (r.y + Math.min(r.y + r.height, listBox.y + listBox.height)) / 2;
+  }
+  await page.mouse.move(r.x + r.width / 2, y);
+  await checkRowTooltip(page, row, opts);
+  await page.mouse.move(5, 5);
+  await expect(page.getByRole('tooltip', { includeHidden: true })).toHaveCount(0);
+}
+
 test.describe('Header session field (Issue #3593)', () => {
   test.beforeEach(async ({ page: _page }, testInfo) => {
     test.skip(testInfo.project.name !== 'chromium', 'PC-only header (chromium only)');
@@ -322,53 +407,66 @@ test.describe('Header session field (Issue #3593)', () => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await openScreen(page, { count: 4 });
     const list = await openList(page);
-    const rows = list.locator('[data-switcher-item]');
-    const count = await rows.count();
-    expect(count).toBeGreaterThanOrEqual(3);
-    const listBox = await box(list);
-
-    const overlaps = (a: Box, b: Box): boolean =>
-      a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
-
-    async function checkBubble(index: number): Promise<void> {
-      const bubble = page.getByRole('tooltip', { includeHidden: true });
-      await expect(bubble).toHaveCount(1);
-      // Wait until the bubble has been measured and placed on screen.
-      await expect.poll(async () => (await bubble.boundingBox())?.x ?? -9999).toBeGreaterThanOrEqual(0);
-      const b = await box(bubble);
-      for (let j = 0; j < count; j++) {
-        if (j === index) continue;
-        expect(overlaps(b, await box(rows.nth(j))), `tooltip of row ${index} vs row ${j}`).toBe(false);
-      }
-      // Beside the list, not over it.
-      expect(overlaps(b, listBox)).toBe(false);
-      expect(b.x >= 0 && b.x + b.width <= 1440).toBe(true);
-    }
-
-    // Hover each session row.
     const sessionRows = list.locator('[data-testid^="desktop-agent-status-"]');
     const sessions = await sessionRows.count();
+    expect(sessions).toBeGreaterThanOrEqual(3);
+
+    await dropListFocus(page);
     for (let i = 0; i < sessions; i++) {
-      const row = sessionRows.nth(i);
-      const r = await box(row);
-      await page.mouse.move(r.x + r.width / 2, r.y + r.height / 2);
-      const index = await rows.evaluateAll(
-        (els, id) => els.findIndex((el) => el.getAttribute('data-testid') === id),
-        await row.getAttribute('data-testid'),
-      );
-      await checkBubble(index);
+      await hoverRowAndCheckTooltip(page, sessionRows.nth(i));
     }
 
     // Keyboard focus on a middle row (pointer parked away from the list).
     await page.mouse.move(5, 5);
     await sessionRows.nth(1).focus();
-    await expect(page.getByRole('tooltip', { includeHidden: true })).toHaveText(
-      (await sessionRows.nth(1).getAttribute('aria-label'))!,
-    );
-    const focusedIndex = await rows.evaluateAll(
-      (els) => els.findIndex((el) => el === document.activeElement),
-    );
-    await checkBubble(focusedIndex);
+    await checkRowTooltip(page, sessionRows.nth(1));
+  });
+
+  // Issue #3616 (review): a long label at 1024 with the sidebar open fits on
+  // neither side of the list. The bubble must not be clamped back over the
+  // list; it wraps beside it instead — also for a row the scrolled list shows
+  // only in part at its bottom edge.
+  test('a long row tooltip on a narrow screen, and on a partly visible row, covers no other row (#3616)', async ({
+    page,
+  }) => {
+    const alias = (i: number) =>
+      `session ${i} with a deliberately very long alias so that its tooltip cannot fit on either side of the list`;
+
+    await page.setViewportSize({ width: 1024, height: 768 });
+    await openScreenWithSidebar(page, { count: 4, alias });
+    let list = await openList(page);
+    await dropListFocus(page);
+    let rows = list.locator('[data-testid^="desktop-agent-status-"]');
+    for (let i = 0; i < (await rows.count()); i++) {
+      await hoverRowAndCheckTooltip(page, rows.nth(i), { expectWrapped: true });
+    }
+
+    // A short screen: the list scrolls and its bottom row is cut in half.
+    await page.setViewportSize({ width: 1024, height: 300 });
+    await openScreenWithSidebar(page, { count: 9, alias });
+    list = await openList(page);
+    await dropListFocus(page);
+    // Scroll so the list's bottom edge cuts a session row in half.
+    await list.evaluate((el) => {
+      const rowEls = Array.from(el.querySelectorAll<HTMLElement>('[data-testid^="desktop-agent-status-"]'));
+      const visibleBottom = el.getBoundingClientRect().top + el.clientTop + el.clientHeight;
+      const rect = rowEls[rowEls.length - 1].getBoundingClientRect();
+      if (rect.bottom - rect.height / 2 < visibleBottom) throw new Error('the last row is not below the fold');
+      el.scrollTop += rect.bottom - visibleBottom - rect.height / 2;
+    });
+    const listBox = await box(list);
+    const listBottom = listBox.y + listBox.height;
+    rows = list.locator('[data-testid^="desktop-agent-status-"]');
+    let partial: Locator | null = null;
+    for (let i = 0; i < (await rows.count()); i++) {
+      const r = await box(rows.nth(i));
+      if (r.y < listBottom - 6 && r.y + r.height > listBottom) {
+        partial = rows.nth(i);
+        break;
+      }
+    }
+    expect(partial, 'a row cut by the list bottom').not.toBeNull();
+    await hoverRowAndCheckTooltip(page, partial!, { expectWrapped: true, atY: 'visible-part' });
   });
 
   test('a tall screen: the list does not scroll; at 10 sessions "Add session…" is off and says why', async ({

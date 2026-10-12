@@ -104,7 +104,9 @@ function clampAxis(value: number, bubbleSize: number, viewportSize: number): num
  * viewport edge on its own side flips to the fallback when that one fits
  * (e.g. `right` → `left` for a row near the right edge). Clamping alone would
  * slide the bubble back over the trigger and its neighbours. When neither
- * fits, the primary placement is kept (clamped as before).
+ * fits, the primary placement is kept (clamped as before) — the `Tooltip`
+ * component first narrows the bubble with `resolveTooltipWrap` so that case
+ * is reached only when there is no usable room beside the trigger at all.
  *
  * Exported for unit testing (jsdom reports every rect as zero-sized).
  */
@@ -185,6 +187,65 @@ function overflowsOwnSide(
   }
 }
 
+/** Narrowest wrapped bubble (px) worth drawing beside the trigger. */
+export const TOOLTIP_MIN_WRAP_WIDTH = 80;
+
+/**
+ * [Issue #3616] Room (px) for the bubble on one side of the trigger, up to the
+ * viewport margin. Never negative.
+ */
+function roomOnSide(placement: TooltipPlacement, trigger: TooltipRect, viewport: TooltipSize): number {
+  switch (placement) {
+    case 'top':
+      return Math.max(0, trigger.top - TOOLTIP_GAP - TOOLTIP_VIEWPORT_MARGIN);
+    case 'bottom':
+      return Math.max(
+        0,
+        viewport.height - TOOLTIP_VIEWPORT_MARGIN - (trigger.top + trigger.height + TOOLTIP_GAP)
+      );
+    case 'left':
+      return Math.max(0, trigger.left - TOOLTIP_GAP - TOOLTIP_VIEWPORT_MARGIN);
+    case 'right':
+    default:
+      return Math.max(
+        0,
+        viewport.width - TOOLTIP_VIEWPORT_MARGIN - (trigger.left + trigger.width + TOOLTIP_GAP)
+      );
+  }
+}
+
+/**
+ * [Issue #3616] When a tooltip with a `fallback` fits on neither side
+ * (`computeTooltipPosition` would clamp it back over its trigger and the rows
+ * around it), the side to wrap the bubble on and the max width to wrap it to:
+ * the side with more room, narrowed to that room. `null` when no wrap is
+ * needed (one side fits, or no fallback), when the pair is not two horizontal
+ * sides, or when even the roomier side is narrower than
+ * `TOOLTIP_MIN_WRAP_WIDTH` (then the old clamp stands).
+ */
+export function resolveTooltipWrap(
+  placement: TooltipPlacement,
+  trigger: TooltipRect,
+  bubble: TooltipSize,
+  viewport: TooltipSize,
+  fallback?: TooltipPlacement
+): { placement: TooltipPlacement; maxWidth: number } | null {
+  const horizontal = (p: TooltipPlacement): boolean => p === 'left' || p === 'right';
+  if (fallback === undefined || fallback === placement) return null;
+  if (!horizontal(placement) || !horizontal(fallback)) return null;
+  if (
+    !overflowsOwnSide(placement, trigger, bubble, viewport) ||
+    !overflowsOwnSide(fallback, trigger, bubble, viewport)
+  ) {
+    return null;
+  }
+  const primaryRoom = roomOnSide(placement, trigger, viewport);
+  const fallbackRoom = roomOnSide(fallback, trigger, viewport);
+  const side = fallbackRoom > primaryRoom ? fallback : placement;
+  const maxWidth = Math.floor(Math.max(primaryRoom, fallbackRoom));
+  return maxWidth >= TOOLTIP_MIN_WRAP_WIDTH ? { placement: side, maxWidth } : null;
+}
+
 /** Rendered off-screen for the first frame, before the bubble can be measured. */
 const OFFSCREEN_COORDS: TooltipCoords = { top: -9999, left: -9999 };
 
@@ -251,6 +312,8 @@ export function Tooltip({
   const [focusVisible, setFocusVisible] = useState(false);
   const visible = hoverVisible || focusVisible;
   const [coords, setCoords] = useState<TooltipCoords | null>(null);
+  // [Issue #3616] Set when the bubble is wrapped to fit beside its trigger.
+  const [wrapWidth, setWrapWidth] = useState<number | null>(null);
   const wrapperRef = useRef<HTMLSpanElement>(null);
   const bubbleRef = useRef<HTMLSpanElement>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -304,19 +367,41 @@ export function Tooltip({
     const bubble = bubbleRef.current;
     if (!trigger || !bubble) return;
     const triggerRect = trigger.getBoundingClientRect();
-    const bubbleRect = bubble.getBoundingClientRect();
+    const triggerBox = {
+      top: triggerRect.top,
+      left: triggerRect.left,
+      width: triggerRect.width,
+      height: triggerRect.height,
+    };
+    const viewport = { width: window.innerWidth, height: window.innerHeight };
+    // [Issue #3616] Measure the bubble at its natural (one-line) width, then,
+    // if it fits on neither side, wrap it to the roomier side and measure again
+    // so it is centred on its wrapped height. Written to the node directly so
+    // the second measurement happens in this same pass; the state below makes
+    // React render the same values.
+    bubble.style.maxWidth = '';
+    bubble.style.whiteSpace = '';
+    let bubbleRect = bubble.getBoundingClientRect();
+    const wrap = resolveTooltipWrap(
+      placement,
+      triggerBox,
+      { width: bubbleRect.width, height: bubbleRect.height },
+      viewport,
+      fallbackPlacement
+    );
+    if (wrap) {
+      bubble.style.maxWidth = `${wrap.maxWidth}px`;
+      bubble.style.whiteSpace = 'normal';
+      bubbleRect = bubble.getBoundingClientRect();
+    }
+    setWrapWidth(wrap ? wrap.maxWidth : null);
     setCoords(
       computeTooltipPosition(
-        placement,
-        {
-          top: triggerRect.top,
-          left: triggerRect.left,
-          width: triggerRect.width,
-          height: triggerRect.height,
-        },
+        wrap ? wrap.placement : placement,
+        triggerBox,
         { width: bubbleRect.width, height: bubbleRect.height },
-        { width: window.innerWidth, height: window.innerHeight },
-        fallbackPlacement
+        viewport,
+        wrap ? undefined : fallbackPlacement
       )
     );
   }, [placement, fallbackPlacement]);
@@ -333,6 +418,7 @@ export function Tooltip({
     // `visible` never flipped). Seeding `null` is a no-op re-render on mount.
     if (!visible) {
       setCoords(null);
+      setWrapWidth(null);
       return;
     }
     updatePosition();
@@ -388,11 +474,13 @@ export function Tooltip({
             aria-hidden="true"
             data-placement={placement}
             className="fixed z-40 whitespace-nowrap px-2 py-1 text-xs font-medium rounded bg-foreground text-background shadow-lg pointer-events-none"
-            style={
-              zIndex === undefined
-                ? (coords ?? OFFSCREEN_COORDS)
-                : { ...(coords ?? OFFSCREEN_COORDS), zIndex }
-            }
+            style={{
+              ...(coords ?? OFFSCREEN_COORDS),
+              ...(zIndex === undefined ? {} : { zIndex }),
+              ...(wrapWidth === null
+                ? {}
+                : { maxWidth: wrapWidth, whiteSpace: 'normal', overflowWrap: 'anywhere' }),
+            }}
           >
             {content}
           </span>,
