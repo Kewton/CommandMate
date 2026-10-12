@@ -278,7 +278,7 @@ CI と一致させることである**。NODE_ENV が要るコマンドは自分
 
 | カウンタ | コマンド |
 |---|---|
-| commits | `git rev-list --count <base>..HEAD -- ':(top)' ':(exclude,top).commandmate/tasks/'` |
+| commits | `git rev-list <base>..HEAD -- ':(top)' ':(exclude,top).commandmate/tasks/'` で SHA の一覧を取り、orchestrate 6-4 の module-reference 一本化のコミット（`scope-gate.ts` の `collectBranchCommitChanges` が `fold` と判定したもの。scope ゲートの除外と同じ規則、#3588・#3633）を差し引いた数。差し引いた数は log に `(N orchestrator fold commit(s) excluded)` と出る |
 | uncommitted | `git status --porcelain -z --untracked-files=all` を**エントリ単位**で解析し、全パスが契約ファイルのエントリを数えない |
 
 - `:(top)` を明示するのは、除外だけの pathspec にしないためと、両パターンを cwd ではなく
@@ -292,6 +292,7 @@ CI と一致させることである**。NODE_ENV が要るコマンドは自分
   rename した場合（逆向きも）を取りこぼさないため
 - **`.commandmate/verify.yaml` は除外しない。** 契約は送信時にスナップショットされるが
   verify.yaml は毎ラン読み直すため、ゲートを弱める改竄を検出できる状態を残す
+- 参照実装（bash）の commits は `git rev-list --count`（上の pathspec）のままで、一本化のコミットを差し引かない（TS 実装との差。一本化だけのブランチは参照実装では作業証跡 1 件になる）
 - 参照実装（bash）は契約ファイルを**開かない**。パス名だけを見るので、§7 の
   「実行契約を読まない」は成立したままである
 

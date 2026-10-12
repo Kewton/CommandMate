@@ -2,6 +2,11 @@
  * scripts/orchestrate/consistency-review.mjs — `--instance` (Issue #3618).
  * Everything is under os.tmpdir(); `git` / the CLI are injected.
  *
+ * #3633 A: the lookup goes through `--cli` (`reply --json`) like capture and
+ * ask, so it reaches the server the CLI decides on (`.env`, CM_BIND, HTTPS),
+ * not one built from `process.env`. The fake CLI below decides its server from
+ * a `.env` in its cwd, and every request records the host it went to.
+ *
  * @vitest-environment node
  */
 
@@ -19,6 +24,7 @@ let tmp: string;
 let runDir: string;
 let heldLocks: string[];
 let resolveUrls: string[];
+let hosts: string[];
 let calls: { command: string; args: string[] }[];
 beforeEach(() => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-consistency-instance-'));
@@ -27,24 +33,37 @@ beforeEach(() => {
   calls = [];
   heldLocks = [];
   resolveUrls = [];
+  hosts = [];
 });
 afterEach(() => {
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
-const run = (command: string, args: string[]) => {
+/** The server the fake CLI talks to: `.env` in its cwd (CM_BIND / CM_PORT), else localhost:3000 — as server-url.ts decides. */
+const cliServer = (cwd?: string) => {
+  const env = cwd && fs.existsSync(path.join(cwd, '.env')) ? fs.readFileSync(path.join(cwd, '.env'), 'utf8') : '';
+  const value = (key: string) => new RegExp(`^${key}=(.*)$`, 'm').exec(env)?.[1];
+  return `${value('CM_BIND') ?? 'localhost'}:${value('CM_PORT') ?? '3000'}`;
+};
+
+const run = (command: string, args: string[], opts: { cwd?: string } = {}) => {
   calls.push({ command, args });
   if (command === 'git') return { status: 0, stdout: args.includes('--abbrev-ref') ? 'feature/x\n' : `${HEAD}\n`, stderr: '' };
   if (command === 'curl') {
-    // The server's resolve-target: an exact id or the primary first, then a case-folded alias.
-    const url = new URL(args[args.length - 1]);
-    resolveUrls.push(url.pathname + url.search);
-    const selector = url.searchParams.get('instance') ?? '';
-    const table: Record<string, string> = { codex: 'codex', 'codex-2': 'codex-2', reviewer: 'codex-2', 'レビュー 担当': 'codex-2' };
+    // The pre-#3633 lookup: a URL built from process.env.
+    hosts.push(new URL(args[args.length - 1]).host);
+    return { status: 0, stdout: `${JSON.stringify({ instanceId: 'codex-2' })}\n200`, stderr: '' };
+  }
+  hosts.push(cliServer(opts.cwd));
+  if (args[0] === 'reply') {
+    // The server's resolve-target, through the CLI: an exact id or the primary first, then a case-folded alias.
+    const selector = args[args.indexOf('--instance') + 1];
+    resolveUrls.push(`/api/worktrees/${args[1]}/resolve-target?instance=${encodeURIComponent(selector)}`);
+    const table: Record<string, string> = { codex: 'codex', 'codex-2': 'codex-2', reviewer: 'codex-2', 'レビュー 担当': 'codex-2', 'a/x': 'codex-2' };
     const id = table[selector] ?? table[selector.toLowerCase()];
     return id
-      ? { status: 0, stdout: `${JSON.stringify({ instanceId: id })}\n200`, stderr: '' }
-      : { status: 0, stdout: `${JSON.stringify({ error: 'Invalid' })}\n404`, stderr: '' };
+      ? { status: 0, stdout: JSON.stringify({ worktreeId: args[1], instanceId: id, cliToolId: 'codex', reply: null }), stderr: '' }
+      : { status: 2, stdout: '', stderr: `Error: Instance '${selector}' not found` };
   }
   if (args[0] === 'capture') {
     const dir = path.join(tmp, 'workspace', 'proposals', '2026-10-12');
@@ -107,7 +126,7 @@ describe('--instance', () => {
 
   it('an unknown instance exits 2 and sends nothing', () => {
     expect(go(['--instance', 'nobody'])).toBe(2);
-    expect(calls.map((c) => c.command)).toEqual(['curl']);
+    expect(calls.map((c) => c.args[0])).toEqual(['reply']);
   });
 
   it('negative control: without --instance everything stays on codex', () => {
@@ -118,7 +137,49 @@ describe('--instance', () => {
     expect(readRecords(runDir, '3618').records.find((r) => r.stage === 'review')).toMatchObject({ agent: 'codex' });
   });
 
+  // #3633 A: the same condition as the CLI's isInstanceSelector and resolve-target (an alias is free text).
   it('rejects an instance id that is not an id', () => {
-    expect(parseArgs(argv(['--instance', 'a/x'])).error).toMatch(/--instance/);
+    expect(parseArgs(argv(['--instance', 'a\u0007x'])).error).toMatch(/--instance/);
+    expect(parseArgs(argv(['--instance', ''])).error).toMatch(/--instance/);
+    expect(parseArgs(argv(['--instance', 'レ'.repeat(51)])).error).toMatch(/--instance/);
+  });
+
+  it('accepts what the CLI accepts: an alias with / or \\, and a 64-character id (#3633)', () => {
+    expect(parseArgs(argv(['--instance', 'a/x'])).error).toBeUndefined();
+    expect(parseArgs(argv(['--instance', 'a\\x'])).error).toBeUndefined();
+    expect(parseArgs(argv(['--instance', 'i'.repeat(64)])).error).toBeUndefined();
+  });
+
+  it('an alias with / locks by the resolved id, never by the alias (#3633)', () => {
+    expect(go(['--instance', 'a/x'])).toBe(0);
+    expect(heldLocks).toEqual(['.lock-codex-2', '.lock-codex-2', '.lock-codex-2']);
+  });
+});
+
+describe('the lookup goes to the server the CLI decides on (#3633 A)', () => {
+  const saved = { CM_PORT: process.env.CM_PORT, CM_API_BASE: process.env.CM_API_BASE, CM_AUTH_TOKEN: process.env.CM_AUTH_TOKEN };
+  beforeEach(() => {
+    delete process.env.CM_PORT;
+    delete process.env.CM_API_BASE;
+    delete process.env.CM_AUTH_TOKEN;
+  });
+  afterEach(() => {
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  });
+
+  it('a port set only in .env: the lookup, capture and ask all reach that server', () => {
+    fs.writeFileSync(path.join(tmp, '.env'), 'CM_BIND=127.0.0.1\nCM_PORT=3107\n');
+    expect(go(['--instance', 'reviewer'])).toBe(0);
+    expect(calls.map((c) => c.command)).not.toContain('curl');
+    expect(calls.filter((c) => c.command !== 'git').every((c) => c.command === 'cmd-fake')).toBe(true);
+    expect(new Set(hosts)).toEqual(new Set(['127.0.0.1:3107']));
+  });
+
+  it('negative control: no .env — every request still goes to one server (the default)', () => {
+    expect(go(['--instance', 'reviewer'])).toBe(0);
+    expect(new Set(hosts)).toEqual(new Set(['localhost:3000']));
   });
 });

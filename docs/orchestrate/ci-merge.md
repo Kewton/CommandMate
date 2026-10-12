@@ -88,6 +88,8 @@ CI は使い捨ての self-hosted ランナー 8 台（2026-09-18 時点）で�
 
 **一本化のコミットには trailer `Orchestrator-Fold: module-reference` を付ける**（例: `git commit -m 'docs(module-reference): #<N> の断片を本体へ写す' --trailer 'Orchestrator-Fold: module-reference'`。trailer が無いと、再指示の後の scope ゲートが一本化を範囲外として落とす）。`docs/module-reference.md` だけを変え、この trailer を持つコミットだけが触ったパスは、その後にワーカーへ再指示しても `verify --task` の scope ゲートが差分から除くので、それを理由に exit 20 にはならない（#3588）。trailer の無いコミット（ワーカーの単独コミットを含む）や未コミットの変更が同じファイルを触った場合は、今までどおり範囲外として落ちる。merge コミット自身の編集は、`docs/module-reference.md` の中なら承認済みの統合（develop の取り込みで衝突を機械解決したもの）として除き、それ以外のファイルの編集はワーカーの変更として scope で判定する。`merge-pr.mjs` が一本化を越えて作業の HEAD を探す規則（`pr-common.mjs` の `workHeads`）はファイルだけで判定し、trailer を求めない。
 
+同じ判定で、`work-evidence` ゲートも一本化のコミットを作業証跡のコミット数に数えない（#3633）。一本化のコミットだけのブランチを verify すると、scope は変更ゼロで合格しても work-evidence が作業証跡ゼロ（exit 21）にして未着手として止める。ワーカーのコミットが 1 つでもあれば今までどおり合格する（log の `orchestrator fold commit(s) excluded` が除いた数）。
+
 ## 6-4 断片が無い PR の実例
 
 （過去に実際に発生し、後追いで docs PR が必要になった）
@@ -116,3 +118,9 @@ git diff origin/develop...HEAD -- 'tests/**' | grep -cE '^-\s*(it|describe|test)
 
 `merge-pr.mjs` は `gh pr merge --squash --subject "<PR タイトル> (#<PR 番号>)"` で題名を渡す（タイトルが既に `(#<PR 番号>)` で終わるなら二重にしない）。
 fold や develop の取り込みで work HEAD と異なるときも、CI 待ちの最後に読んだ PR のタイトルを使う（`--pr` 指定でも同じ）。マージ後の develop のコミットの題名は PR の題名と一致する（#3618）。
+
+## gh の 5xx の再試行
+
+`publish-pr.mjs` と `merge-pr.mjs` の `gh` の呼び出しは、`pr-common.mjs` の `withGhRetry` を通る（#3633）。呼び直すのは読み取りの `gh`（`pr view` / `pr list` / `pr checks` / `issue view` / `run view` / `run list`、`gh api` の GET など。`isGhRead`）だけで、GitHub が `HTTP 502` / `503` / `504`（2026-10-12 の Partially Degraded の間の `504 Gateway Timeout` で、#3587・#3618・#3588 の merge-pr.mjs が計 10 回以上 exit 1 で止まった）を返したときと、接続が切れたとき（connection reset・i/o timeout など）だけ、10 秒・30 秒・60 秒あけて最大 4 回まで呼び直す。呼び直すたびに stderr へ `gh <サブコマンド>: <gh の 1 行目> — retrying in <秒>s (attempt <n>/4)` を出す。4xx（404・422・401 など）や本当の失敗（マージできない・チェックの待ち中の exit 8）は呼び直さず、今までどおりそのまま止まる。4 回とも 5xx なら最後の答えで今までどおり止まるので、外側での再試行は GitHub の障害が数分続いたときだけでよい。
+
+書き込みの `gh`（`pr create` / `pr merge` / `run rerun` / `issue close`）は 1 回だけ送る（`ghWrite`）。504 は「GitHub が処理を終えたが応答が届かなかった」こともあるので、送り直すと PR が 2 本立つ・同じ HEAD の run を 2 回 rerun することがありうる。5xx・接続エラーで失敗したときは送り直さず、読み取りで 1 回確かめる: `pr create` はブランチの open な PR が今の HEAD を指しているか、`pr merge` は PR が `MERGED` で head が今の HEAD か、`run rerun` は run の試行番号（`gh run view <id> --json attempt`。送る前に読んでおく）が増えたか（status は見ない。`completed` は再実行の前にも、受理された再実行が確かめるまでに終わった後にもなる。送る前に試行番号が読めなかったときは受理と判断しない）、`issue close` は Issue が `CLOSED` か。済んでいれば stderr に `— not sent again; it went through` を出して成功として続け、済んでいない（または確かめる読み取りも失敗した）ときは `— not sent again; it did not go through` を出して今までどおり失敗で止まる。HEAD ごとに rerun は 1 回の制御（`ci` の段の `rerun=`）は変わらない。

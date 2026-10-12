@@ -177,7 +177,7 @@ worktree の cwd で以下を実行し、**和集合**を取る:
 
 | 対象 | 除外の方法 |
 |---|---|
-| `work-evidence` コミット数 | `git rev-list --count <base>..HEAD -- ':(top)' ':(exclude,top).commandmate/tasks/'`（契約だけを触るセットアップコミットを数えない。`:(top)` は「除外だけの pathspec」を避けつつ両パターンを cwd ではなくリポジトリルートに固定する） |
+| `work-evidence` コミット数 | `git rev-list <base>..HEAD -- ':(top)' ':(exclude,top).commandmate/tasks/'` で SHA の一覧を取り（契約だけを触るセットアップコミットは載らない。`:(top)` は「除外だけの pathspec」を避けつつ両パターンを cwd ではなくリポジトリルートに固定する）、その一覧から orchestrate 6-4 の module-reference 一本化のコミット（`scope-gate.ts` の `collectBranchCommitChanges` が `fold` と判定したもの。scope ゲートの除外と同じ規則。#3588・#3633）を差し引いた数を数える。差し引いた数は log に `(N orchestrator fold commit(s) excluded)` と出る |
 | `work-evidence` 未コミット数 | porcelain のエントリ単位で判定し、**どのパスも契約ファイル**であるエントリを数えない |
 | `scope` 変更集合 | committed 側（`git diff`）と uncommitted 側（`git status`）の**両方**から除外 |
 

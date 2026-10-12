@@ -224,9 +224,13 @@ export function isFoldCommit(commit: BranchCommit, files: readonly string[]): bo
 /**
  * Paths that only fold commits touched on the branch (#3588).
  *
- * A path any other commit also touched is not returned: a worker that edited
- * `docs/module-reference.md` itself — alone, with other files, or as its own
- * edit inside a merge — is still judged on it.
+ * A path any other non-merge commit also touched is not returned: a worker
+ * that committed `docs/module-reference.md` itself — alone or with other
+ * files — is still judged on it. Merges are not passed in
+ * ({@link collectBranchCommitChanges} skips them): a merge's own edit inside
+ * {@link ORCHESTRATOR_FILES} is the approved integration of a refresh and
+ * leaves a fold-only path excluded, while its edits elsewhere stay in the
+ * branch diff and are judged as the worker's.
  */
 export function orchestratorOnlyPaths(commits: readonly CommitChange[]): Set<string> {
   const byOrchestrator = new Set<string>();
@@ -523,8 +527,17 @@ export function isSkillInstalledUntrackedEntry(
   return entry.status === '??' && entry.paths.every((path) => owned.has(path));
 }
 
+/** A non-merge commit of `<base>..HEAD` with its files and whether it is a fold. */
+export interface BranchCommitChange extends CommitChange {
+  sha: string;
+}
+
 /**
- * {@link orchestratorOnlyPaths} for `<base>..HEAD` of a worktree (#3588).
+ * The non-merge commits of `<base>..HEAD` of a worktree, each judged by
+ * {@link isFoldCommit} (#3588). The scope gate drops what only folds touched
+ * ({@link orchestratorOnlyPaths}); the work-evidence gate does not count a
+ * fold as the worker's commit (#3633). Empty when no commit carries the fold
+ * trailer: none can be a fold, so the per-commit calls are skipped.
  *
  * File lists come from one `git diff-tree -z` per commit rather than from one
  * `git log --name-only -z` stream: in that stream a commit header and a path
@@ -540,10 +553,10 @@ export function isSkillInstalledUntrackedEntry(
  * the branch diff and scope judges it as the worker's. Merges are therefore
  * skipped here without asking `git diff-tree --cc`.
  */
-async function collectOrchestratorOnlyPaths(
+export async function collectBranchCommitChanges(
   worktreePath: string,
   base: string
-): Promise<{ paths: Set<string> } | { error: string }> {
+): Promise<{ changes: BranchCommitChange[] } | { error: string }> {
   const log = await runGit(['log', '-z', BRANCH_COMMITS_FORMAT, `${base}..HEAD`], worktreePath);
   if (log.code !== 0) {
     return {
@@ -553,9 +566,9 @@ async function collectOrchestratorOnlyPaths(
   }
   const commits = parseBranchCommits(log.stdout);
   // Nothing to exclude without a trailer; skip the per-commit calls.
-  if (!commits.some((commit) => commit.foldTrailers.length > 0)) return { paths: new Set() };
+  if (!commits.some((commit) => commit.foldTrailers.length > 0)) return { changes: [] };
 
-  const changes: CommitChange[] = [];
+  const changes: BranchCommitChange[] = [];
   for (const commit of commits) {
     if (commit.parents.length !== 1) continue;
     const tree = await runGit(
@@ -570,10 +583,20 @@ async function collectOrchestratorOnlyPaths(
       };
     }
     const files = splitNul(tree.stdout);
-    changes.push({ files, fold: isFoldCommit(commit, files) });
+    changes.push({ sha: commit.sha, files, fold: isFoldCommit(commit, files) });
   }
 
-  return { paths: orchestratorOnlyPaths(changes) };
+  return { changes };
+}
+
+/** {@link orchestratorOnlyPaths} for `<base>..HEAD` of a worktree (#3588). */
+async function collectOrchestratorOnlyPaths(
+  worktreePath: string,
+  base: string
+): Promise<{ paths: Set<string> } | { error: string }> {
+  const result = await collectBranchCommitChanges(worktreePath, base);
+  if ('error' in result) return result;
+  return { paths: orchestratorOnlyPaths(result.changes) };
 }
 
 export interface ChangedPaths {

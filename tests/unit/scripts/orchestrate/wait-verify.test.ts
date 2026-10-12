@@ -98,6 +98,7 @@ function harness({
   verifyCallForTasks = 1,
   resolved = {} as Record<string, string>,
   resolveError = null as string | null,
+  shown = {} as Record<string, TaskRow>,
 } = {}) {
   const spawned: Call[] = [];
   const ran: Call[] = [];
@@ -163,6 +164,16 @@ function harness({
       }
       if (args[0] === 'task' && args[1] === 'list') {
         return ok(JSON.stringify(taskList));
+      }
+      if (args[0] === 'task' && args[1] === 'show') {
+        const one = shown[args[2]];
+        return one ? ok(JSON.stringify({ task: one, lastVerificationRun: null })) : { status: 1, stdout: '', stderr: 'Error: task not found' };
+      }
+      if (args[0] === 'reply') {
+        // `reply --json` resolves --instance through the server, as defaultResolveTarget asks it (#3633 A).
+        if (resolveError) return { status: 2, stdout: '', stderr: `Error: ${resolveError}` };
+        const selector = args[args.indexOf('--instance') + 1];
+        return ok(JSON.stringify({ worktreeId: args[1], instanceId: resolved[selector] ?? selector, reply: null }));
       }
       if (args[0] === 'verify' && args[1] === 'history') {
         return ok(JSON.stringify(runStartMinute === null ? [] : [{ id: 1, startedAt: iso(runStartMinute) }]));
@@ -769,39 +780,129 @@ describe('defaultRun with a time limit (#3587 review 4)', () => {
 });
 
 describe('defaultResolveTarget asks the server through the CLI’s ApiClient (#3587 review 2-3)', () => {
-  // A stand-in for dist/cli/utils/api-client.js: answers the resolve-target path only.
-  const fakeDist = () => {
-    const dist = path.join(tmp, 'dist');
-    fs.mkdirSync(path.join(dist, 'cli', 'utils'), { recursive: true });
+  // #3633 A: through the CLI given as --cli (here a stand-in executable), not a fixed dist/.
+  // It answers `reply <wt> --instance <selector> … --json` the way the CLI does.
+  const fakeCli = () => {
+    const cli = path.join(tmp, 'fake-cli');
     fs.writeFileSync(
-      path.join(dist, 'cli', 'utils', 'api-client.js'),
+      cli,
       [
-        'class ApiClient {',
-        '  async get(p) {',
-        "    if (p === '/api/worktrees/wt-1/resolve-target?instance=codex%202') {",
-        "      return { cliToolId: 'codex', instanceId: 'codex-2', resolvedBy: 'alias', conflict: null };",
-        '    }',
-        "    throw new Error(`Instance matches 2 roster entries (${p})`);",
-        '  }',
+        `#!${process.execPath}`,
+        'const args = process.argv.slice(2);',
+        "const selector = args[args.indexOf('--instance') + 1];",
+        "if (args[0] === 'reply' && args[1] === 'wt-1' && selector === 'codex 2' && args.includes('--json')) {",
+        "  process.stdout.write(JSON.stringify({ worktreeId: 'wt-1', instanceId: 'codex-2', cliToolId: 'codex', reply: null }));",
+        '} else {',
+        "  process.stderr.write(`Error: Instance '${selector}' matches 2 roster entries\n`);",
+        '  process.exit(2);',
         '}',
-        'module.exports = { ApiClient };',
         '',
-      ].join('\n')
+      ].join('\n'),
+      { mode: 0o755 }
     );
-    return dist;
+    return cli;
   };
 
   it('returns the instance id the route answers', () => {
-    expect(defaultResolveTarget('wt-1', 'codex 2', { cwd: tmp, distDir: fakeDist() })).toEqual({ instanceId: 'codex-2' });
+    expect(defaultResolveTarget('wt-1', 'codex 2', { cwd: tmp, cli: fakeCli() })).toEqual({ instanceId: 'codex-2' });
   });
 
   it('an error from the route is an error, not the selector as given', () => {
-    const result = defaultResolveTarget('wt-1', 'Main', { cwd: tmp, distDir: fakeDist() });
+    const result = defaultResolveTarget('wt-1', 'Main', { cwd: tmp, cli: fakeCli() });
     expect(result).toHaveProperty('error');
     expect((result as { error: string }).error).toMatch(/matches 2 roster entries/);
   });
 
   it('no CLI build to ask through is an error too', () => {
-    expect(defaultResolveTarget('wt-1', 'claude', { cwd: tmp, distDir: path.join(tmp, 'missing') })).toHaveProperty('error');
+    expect(defaultResolveTarget('wt-1', 'claude', { cwd: tmp, cli: path.join(tmp, 'missing') })).toHaveProperty('error');
+  });
+});
+
+describe('the instance is resolved through --cli, like every other call (#3633 A)', () => {
+  /** The server each CLI name reaches: `cm-3107` is a wrapper whose .env moves the port. */
+  const SERVER: Record<string, string> = { commandmatedev: 'localhost:3000', 'cm-3107': '127.0.0.1:3107' };
+  const servers = (h: ReturnType<typeof harness>) =>
+    new Set([...h.ran, ...h.spawned].filter((c) => c.command !== 'git').map((c) => SERVER[c.command] ?? c.command));
+
+  it('--cli names a wrapper on another port: the lookup reaches the same server as wait, verify and capture', () => {
+    const h = harness({ resolved: { 'codex 2': 'codex-2' } });
+    const { resolveTarget: _injected, ...deps } = h.deps;
+    const args = [...argv(), '--cli', 'cm-3107'].map((a) => (a === 'claude' ? 'codex 2' : a));
+    expect(main(args, deps)).toBe(0);
+    expect(h.ran[0]).toMatchObject({ command: 'cm-3107', args: expect.arrayContaining(['reply', 'wt-1', '--instance', 'codex 2', '--json']) });
+    expect(servers(h)).toEqual(new Set(['127.0.0.1:3107']));
+    expect(h.spawned[0].args).toEqual(['wait', 'wt-1', '--instance', 'codex-2', '--on-prompt', 'human', '--verify', '--timeout', '10800']);
+  });
+
+  it('negative control: the default CLI resolves and waits on the default server', () => {
+    const h = harness();
+    const { resolveTarget: _injected, ...deps } = h.deps;
+    expect(main(argv(), deps)).toBe(0);
+    expect(servers(h)).toEqual(new Set(['localhost:3000']));
+  });
+
+  it('an alias the CLI cannot resolve → exit 2, nothing waited for', () => {
+    const h = harness({ resolveError: "Instance 'Main' matches 2 roster entries" });
+    const { resolveTarget: _injected, ...deps } = h.deps;
+    expect(main([...argv(), '--cli', 'cm-3107'], deps)).toBe(2);
+    expect(h.spawned).toEqual([]);
+    expect(h.err.join('\n')).toMatch(/cannot resolve --instance 'claude' in wt-1: Error: Instance 'Main' matches 2/);
+  });
+});
+
+describe('the call stays tied to the task it started on (#3633 B)', () => {
+  const t1 = task('t-1', -10);
+  /** TASK_LIST_LIMIT tasks of another instance, all newer than t-1: t-1 is beyond the list. */
+  const others = Array.from({ length: 20 }, (_, i) => task(`o-${i}`, -9 + i / 100, 'codex-2'));
+  const kinds = (h: ReturnType<typeof harness>) => h.spawned.map((c) => c.args[0]);
+
+  it('--task beyond the 20 newest: read on its own, so a newer task of the instance is still seen → exit 3', () => {
+    const h = harness({ tasks: others, shown: { 't-1': t1 }, tasksDuringWait: [task('t-2', 2), ...others.slice(0, 19)] });
+    expect(main(argv(), h.deps)).toBe(3);
+    expect(kinds(h)).toEqual(['wait']);
+    expect(records()[0].note).toContain('a newer task t-2 was created for this instance after task t-1');
+  });
+
+  it('--task beyond the 20 newest, no newer task of the instance → watched, verified with --task (negative control)', () => {
+    const h = harness({ tasks: others, shown: { 't-1': t1 }, tasksDuringWait: others });
+    expect(main(argv(), h.deps)).toBe(0);
+    expect(h.spawned.map((c) => c.args)[1]).toEqual(['verify', 'wt-1', '--task', 't-1', '--instance', 'claude']);
+  });
+
+  it('recovery: the first lists fail, the list that reads lacks --task → read on its own, the newer task is seen', () => {
+    const h = harness({ tasks: others, shown: { 't-1': t1 }, tasksDuringWait: [task('t-2', 2), ...others.slice(0, 19)] });
+    const fakeRun = h.deps.run;
+    let calls = 0;
+    h.deps.run = (command: string, args: string[], opts?: { timeoutMs?: number }) =>
+      args[0] === 'task' && args[1] === 'list' && ++calls <= 3
+        ? { status: 1, stdout: '', stderr: 'HTTP 503' }
+        : fakeRun(command, args, opts);
+    expect(main(argv(), h.deps)).toBe(3);
+    expect(kinds(h)).toEqual(['wait']);
+  });
+
+  it('a list that fails once at the start is read again before the wait: the verify keeps the start task', () => {
+    // Without --task: the list fails at the first read, reads on the retry, then never again;
+    // the task ends while the wait runs. The verification is still bound to it, as `wait --verify` binds before polling.
+    const h = harness({ tasks: [t1] });
+    const fakeRun = h.deps.run;
+    let calls = 0;
+    h.deps.run = (command: string, args: string[], opts?: { timeoutMs?: number }) =>
+      args[0] === 'task' && args[1] === 'list' && ++calls !== 2
+        ? { status: 1, stdout: '', stderr: 'connection reset' }
+        : fakeRun(command, args, opts);
+    const noTask = argv().filter((a, i, all) => a !== '--task' && all[i - 1] !== '--task');
+    expect(main(noTask, h.deps)).toBe(0);
+    expect(h.sleeps).toContain(5_000);
+    expect(h.spawned.map((c) => c.args)[1]).toEqual(['verify', 'wt-1', '--task', 't-1', '--instance', 'claude']);
+  });
+
+  it('the start task ends during the wait: not a newer task, the verdict stands (negative control)', () => {
+    const done = { ...t1, status: 'succeeded' };
+    const h = harness({ tasks: [t1], tasksDuringWait: [done] });
+    const noTask = argv().filter((a, i, all) => a !== '--task' && all[i - 1] !== '--task');
+    expect(main(noTask, h.deps)).toBe(0);
+    expect(h.spawned.map((c) => c.args)[1]).toEqual(['verify', 'wt-1', '--task', 't-1', '--instance', 'claude']);
+    expect(h.autoYesCalls()).toHaveLength(1);
   });
 });

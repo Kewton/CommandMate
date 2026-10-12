@@ -15,10 +15,14 @@
  * One call does what the hand-written script and docs/orchestrate/trials.md
  * did by hand:
  *   0. with `--instance <id|alias>` (default codex, no lookup), resolves it to the
- *      real instance id with the server's resolve-target (failure = exit 2, nothing sent);
+ *      real instance id with the server's resolve-target, asked through `--cli`
+ *      like capture and ask (resolve-instance.mjs; failure = exit 2, nothing sent);
  *   1. takes the reviewer's lock (`workspace/proposals/<date>/.lock` for codex,
  *      `.lock-<instance id>` for another), which every ask of that session
- *      shares — a session is used one ask at a time;
+ *      shares — a session is used one ask at a time. The lock holds its
+ *      owner's pid and start time; a lock whose owner is gone (a review that
+ *      was killed) is taken over, and a live one is waited for with a
+ *      `lock held by pid …` line on stderr every minute (#3633);
  *   2. waits until `capture --instance <id> --json` reads `ready` three times
  *      in a row;
  *   3. sends the brief built from templates/consistency-review.md (or
@@ -50,6 +54,7 @@ import process from 'node:process';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { appendRecord, runLogPath } from './run-log.mjs';
+import { isInstanceSelector, resolveInstanceThroughCli } from './resolve-instance.mjs';
 
 const TEMPLATE_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'templates');
 export const INITIAL_TEMPLATE = path.join(TEMPLATE_DIR, 'consistency-review.md');
@@ -62,8 +67,17 @@ export const READY_STREAK = 3;
 export const READY_POLL_SEC = 10;
 export const READY_MAX_POLLS = 180;
 export const LOCK_POLL_SEC = 15;
-/** A lock older than every ask plus its wait is treated as left behind, not waited on forever. */
-export const LOCK_MAX_WAIT_SEC = 3 * 3600;
+/**
+ * How long a live owner's lock is waited for: one ask plus a margin (#3633).
+ * A killed owner's lock is not waited on at all (see acquireLock).
+ */
+export const LOCK_MAX_WAIT_SEC = ASK_TIMEOUT_SEC + 600;
+/** How often the wait for a held lock says so on stderr. */
+export const LOCK_NOTICE_SEC = 60;
+/** The file in the lock directory that names its owner. */
+export const LOCK_OWNER_FILE = 'owner.json';
+/** Upper bound of the instance lookup; past it the review is not sent. */
+export const RESOLVE_TIMEOUT_MS = 30_000;
 
 /** The header of `consistency-review.md` (docs/orchestrate/trials.md#5-2b-整合性レビューの進め方と記録). */
 export const TABLE_HEADER = [
@@ -189,12 +203,13 @@ export function appendReviewRow(file, { issue, rereview, head, durationSec, done
   return row;
 }
 
-function defaultRun(command, args, { cwd } = {}) {
+function defaultRun(command, args, { cwd, timeoutMs } = {}) {
   const result = spawnSync(command, args, {
     cwd,
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
     maxBuffer: 64 * 1024 * 1024,
+    ...(timeoutMs ? { timeout: timeoutMs, killSignal: 'SIGKILL' } : {}),
   });
   if (result.error) throw result.error;
   return { status: result.status ?? 1, stdout: result.stdout ?? '', stderr: result.stderr ?? '' };
@@ -209,22 +224,133 @@ function localDate(date) {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
-/** Take the lock directory, waiting while another ask holds it. */
-function acquireLock(lock, { sleep, now }) {
+/** The owner a lock directory names, or null (no owner file yet, or a lock from before #3633). */
+export function readLockOwner(lock) {
+  try {
+    const owner = JSON.parse(fs.readFileSync(path.join(lock, LOCK_OWNER_FILE), 'utf8'));
+    return Number.isInteger(owner?.pid) && owner.pid > 0 ? owner : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Whether the owner of a lock is gone. Only a process on this host that no
+ * longer exists is gone: another host's pid, or one this process may not
+ * signal (EPERM), is alive as far as this can tell.
+ */
+export function lockOwnerGone(owner) {
+  if (!owner || owner.host !== os.hostname()) return false;
+  try {
+    process.kill(owner.pid, 0);
+    return false;
+  } catch (err) {
+    return Boolean(err && err.code === 'ESRCH');
+  }
+}
+
+const describeOwner = (owner) =>
+  owner ? `pid ${owner.pid} (since ${owner.startedAt ?? '?'})` : 'an unknown owner (no owner file)';
+const sameOwner = (a, b) => Boolean(a && b && a.pid === b.pid && a.startedAt === b.startedAt && a.host === b.host);
+
+/** The directory a waiter holds while it removes a dead owner's lock (one reclaimer at a time). */
+export const reclaimDirOf = (lock) => `${lock}.reclaim`;
+
+/**
+ * Remove `lock` if it still names `deadOwner`, holding the reclaim directory
+ * while doing so (#3633). Two waiters can see the same dead owner; without the
+ * reclaim directory one could check the owner, the other remove the lock and
+ * take a new one, and the first then move that new, live lock aside. The
+ * reclaim directory is taken with mkdir (atomic), so the owner is re-read and
+ * the lock moved by one waiter at a time; a lock taken by anyone else in
+ * between names another owner and is left as it is. Nobody but a reclaimer
+ * removes a lock whose owner is dead, so it cannot change between the re-read
+ * and the rename.
+ *
+ * `between` runs after the re-read and before the rename (tests only).
+ *
+ * @returns {'reclaimed' | 'changed' | 'busy'} removed / the lock names
+ *   someone else now (or is gone) / another waiter is reclaiming
+ */
+export function reclaimStaleLock(lock, deadOwner, { now, error, between = () => {} }) {
+  const reclaim = reclaimDirOf(lock);
+  try {
+    fs.mkdirSync(reclaim);
+  } catch (err) {
+    if (!err || err.code !== 'EEXIST') throw err;
+    const holder = readLockOwner(reclaim);
+    if (lockOwnerGone(holder)) {
+      // Killed in the few calls between taking and removing it: removing it here
+      // could let two waiters reclaim at once, so a person decides.
+      throw new Error(`${reclaim} is left by ${describeOwner(holder)}, which is gone — remove it if no review is waiting on ${lock}`);
+    }
+    return 'busy';
+  }
+  const me = { pid: process.pid, host: os.hostname(), startedAt: now().toISOString() };
+  try {
+    fs.writeFileSync(path.join(reclaim, LOCK_OWNER_FILE), `${JSON.stringify(me)}\n`);
+    if (!sameOwner(readLockOwner(lock), deadOwner)) return 'changed';
+    between();
+    const aside = `${lock}.stale-${process.pid}-${now().getTime()}`;
+    fs.renameSync(lock, aside);
+    fs.rmSync(aside, { recursive: true, force: true });
+    error(`lock ${lock}: owner ${describeOwner(deadOwner)} is gone; taking it over`);
+    return 'reclaimed';
+  } finally {
+    fs.rmSync(reclaim, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Take the lock directory, waiting while another ask holds it (#3633).
+ *
+ * The directory is the lock (mkdir is atomic); the owner file in it names the
+ * pid, host and start time. A lock whose owner is gone — the review was
+ * killed, so its finally never ran — is removed by reclaimStaleLock and taken.
+ * A lock without an owner file (being created right now, or left by a script
+ * from before the owner file) cannot be judged and is waited for like a live one.
+ *
+ * @param {string} lock
+ * @param {{ sleep: (ms: number) => void, now: () => Date, error: (line: string) => void, between?: () => void }} deps
+ *   `between` is passed to reclaimStaleLock (tests only)
+ * @returns the owner written into the lock
+ */
+export function acquireLock(lock, { sleep, now, error, between }) {
   fs.mkdirSync(path.dirname(lock), { recursive: true });
   const started = now().getTime();
+  let lastNotice = null;
   for (;;) {
     try {
       fs.mkdirSync(lock);
-      return;
+      const owner = { pid: process.pid, host: os.hostname(), startedAt: now().toISOString() };
+      fs.writeFileSync(path.join(lock, LOCK_OWNER_FILE), `${JSON.stringify(owner)}\n`);
+      return owner;
     } catch (err) {
       if (!err || err.code !== 'EEXIST') throw err;
     }
-    if (now().getTime() - started > LOCK_MAX_WAIT_SEC * 1000) {
-      throw new Error(`lock ${lock} still held after ${LOCK_MAX_WAIT_SEC}s (remove it if no Codex ask is running)`);
+    const owner = readLockOwner(lock);
+    // Another waiter reclaiming the same lock ('busy') finishes in a few calls: ask again after a poll.
+    if (lockOwnerGone(owner) && reclaimStaleLock(lock, owner, { now, error, between }) !== 'busy') continue;
+    const waited = now().getTime() - started;
+    if (waited > LOCK_MAX_WAIT_SEC * 1000) {
+      throw new Error(
+        `lock ${lock} still held by ${describeOwner(owner)} after ${LOCK_MAX_WAIT_SEC}s (remove it if no Codex ask is running)`
+      );
+    }
+    if (lastNotice === null || now().getTime() - lastNotice >= LOCK_NOTICE_SEC * 1000) {
+      lastNotice = now().getTime();
+      error(`lock ${lock} held by ${describeOwner(owner)}; waiting (${Math.round(waited / 1000)}s of ${LOCK_MAX_WAIT_SEC}s)`);
     }
     sleep(LOCK_POLL_SEC * 1000);
   }
+}
+
+/** Release the lock, unless it no longer names this owner (it was taken over). */
+function releaseLock(lock, owner) {
+  if (!sameOwner(readLockOwner(lock), owner)) {
+    throw new Error(`${lock} is no longer held by this review (pid ${owner.pid}); left as it is`);
+  }
+  fs.rmSync(lock, { recursive: true, force: true });
 }
 
 /** Wait until the reviewer reads `ready` READY_STREAK times in a row; false if it never does. */
@@ -247,43 +373,16 @@ function waitReady({ run, sleep, cli, wt, cwd, instance }) {
 
 /**
  * `--instance` may be an id or an alias; the lock, ask and record need the real
- * instance id. The server is the one authority for that (GET
- * /api/worktrees/<wt>/resolve-target, the route the CLI itself uses: primary
- * first, case-folded alias, 409 on an ambiguous alias), so this does not
- * re-implement the rules. The endpoint is `CM_API_BASE`, else `CM_PORT`
- * (default 3000) on localhost; `CM_AUTH_TOKEN` goes in a 0600 curl config
- * file under os.tmpdir() (never in the process list).
+ * instance id. The server is the one authority for that (resolve-target:
+ * primary first, case-folded alias, an ambiguous alias refused), asked through
+ * the same `--cli` as capture and ask so it reaches the same server with the
+ * same token (#3633: the CLI reads `.env`, `CM_BIND` and HTTPS, which a URL
+ * built from `process.env` did not).
  */
 function resolveInstance(run, o, cwd) {
-  const base = (process.env.CM_API_BASE || `http://localhost:${process.env.CM_PORT || '3000'}`).replace(/\/+$/, '');
-  const url = `${base}/api/worktrees/${encodeURIComponent(o.wt)}/resolve-target?instance=${encodeURIComponent(o.instance)}`;
-  const args = ['-sS', '--max-time', '30', '-w', '\n%{http_code}'];
-  let dir = null;
-  try {
-    if (process.env.CM_AUTH_TOKEN) {
-      dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-resolve-'));
-      const conf = path.join(dir, 'curl.conf');
-      fs.writeFileSync(conf, `header = "Authorization: Bearer ${process.env.CM_AUTH_TOKEN}"\n`, { mode: 0o600 });
-      args.push('-K', conf);
-    }
-    const out = run('curl', [...args, url], { cwd });
-    const text = String(out.stdout ?? '');
-    const cut = text.lastIndexOf('\n');
-    const code = Number(text.slice(cut + 1));
-    let body = null;
-    try {
-      body = JSON.parse(text.slice(0, cut));
-    } catch {
-      body = null;
-    }
-    if (out.status !== 0 || code !== 200 || !body || typeof body.instanceId !== 'string' || !body.instanceId) {
-      const why = body && body.error ? body.error : `curl exit=${out.status} http=${Number.isNaN(code) ? '-' : code}`;
-      return { error: `--instance ${o.instance}: could not resolve in ${o.wt} (${why})` };
-    }
-    return { id: body.instanceId };
-  } finally {
-    if (dir) fs.rmSync(dir, { recursive: true, force: true });
-  }
+  const resolved = resolveInstanceThroughCli(run, o.cli, o.wt, o.instance, { cwd, timeoutMs: RESOLVE_TIMEOUT_MS });
+  if ('error' in resolved) return { error: `--instance ${o.instance}: could not resolve in ${o.wt} (${resolved.error})` };
+  return { id: resolved.instanceId };
 }
 
 const USAGE = `Usage:
@@ -322,7 +421,7 @@ export function parseArgs(argv) {
   } catch (err) {
     return { error: err.message };
   }
-  if (!/^[^\u0000-\u001f\u007f/\\]{1,100}$/u.test(options.instance) || options.instance.trim() === '') return { error: `--instance must be an instance id or alias (got ${options.instance})` };
+  if (!isInstanceSelector(options.instance)) return { error: `--instance must be an instance id or alias (got ${options.instance})` };
   if (!/^[1-9]\d*$/.test(options.issue)) return { error: `--issue must be a positive integer (got ${options.issue})` };
   if (!/^[0-9a-f]{7,40}$/.test(options.head)) return { error: `--head must be a commit sha (got ${options.head})` };
   if (options.rereview && !options.previous) return { error: '--rereview needs --previous <review md>' };
@@ -383,7 +482,7 @@ export function main(argv, deps = {}) {
     return durationSec;
   };
 
-  let locked = false;
+  let lockOwner = null;
   try {
     // The review is of the HEAD that was asked for, recorded in full so the run record matches other stages.
     const rev = run('git', ['-C', worktree, 'rev-parse', 'HEAD'], { cwd });
@@ -407,8 +506,7 @@ export function main(argv, deps = {}) {
     const file = (ext) => path.join(o.runDir, `${label}${ext}`);
     fs.writeFileSync(file('.prompt.txt'), prompt);
 
-    acquireLock(lock, { sleep, now });
-    locked = true;
+    lockOwner = acquireLock(lock, { sleep, now, error });
     if (!waitReady({ run, sleep, cli: o.cli, wt: o.wt, cwd, instance: o.instance })) {
       record('fail', `${label}: ${o.instance} not ready ${READY_STREAK} times in a row within ${READY_MAX_POLLS} polls; not sent`);
       return 1;
@@ -464,9 +562,9 @@ export function main(argv, deps = {}) {
     }
     return 1;
   } finally {
-    if (locked) {
+    if (lockOwner) {
       try {
-        fs.rmdirSync(lock);
+        releaseLock(lock, lockOwner);
       } catch (err) {
         error(`could not release ${lock}: ${err instanceof Error ? err.message : String(err)}`);
       }
