@@ -358,7 +358,8 @@ describe('merge-pr.mjs and publish-pr.mjs ask through withGhRetry', () => {
     const d = deps(timedOut(fake, 'run rerun', true));
     expect(mergeMain(argv(), d.deps)).toBe(0);
     expect(fake.ghCalls('run rerun')).toHaveLength(1);
-    expect(fake.ghCalls('run view')).toHaveLength(1);
+    // The attempt is read before sending and once more to confirm.
+    expect(fake.ghCalls('run view')).toHaveLength(2);
     expect(readRecords(runDir, '3477').records.filter((r) => r.stage === 'ci').map((r) => r.note)).toEqual([
       expect.stringContaining('rerun=555'),
       expect.stringContaining('checks='),
@@ -372,6 +373,58 @@ describe('merge-pr.mjs and publish-pr.mjs ask through withGhRetry', () => {
     expect(fake.ghCalls('run rerun')).toHaveLength(1);
     expect(d.err.join('\n')).toContain('gh run rerun 555 failed: HTTP 504');
     expect(fake.ghCalls('pr merge')).toHaveLength(0);
+  });
+
+  it('merge-pr: run rerun answered 504, the rerun was accepted and already completed: accepted by the attempt, recorded, not rerun again on the same HEAD', () => {
+    const failing = [{ name: 'Lint', bucket: 'fail', link: RUN_LINK }];
+    const fake = fakeGit({ prs: [openPr()], checks: [failing, failing] });
+    const timed = timedOut(fake, 'run rerun', true);
+    const d = deps((command: string, args: string[], opts?: { cwd?: string; env?: Record<string, string> }) => {
+      const out = timed(command, args, opts);
+      // The accepted rerun finished (and failed again) before it was confirmed.
+      if (command === 'gh' && args.slice(0, 2).join(' ') === 'run rerun') fake.state.runStatus['555'] = 'completed';
+      return out;
+    });
+    expect(mergeMain(argv(), d.deps)).toBe(1);
+    expect(fake.ghCalls('run rerun')).toHaveLength(1);
+    expect(fake.ghCalls('run view').map((c) => c.args.slice(-2))).toEqual([['--json', 'attempt'], ['--json', 'attempt']]);
+    expect(d.err.join('\n')).toContain('it went through');
+    expect(d.err.join('\n')).not.toContain('gh run rerun 555 failed');
+    expect(readRecords(runDir, '3477').records.filter((r) => r.stage === 'ci').map((r) => r.note)).toEqual([
+      expect.stringContaining('rerun=555'),
+      expect.stringContaining('after-rerun'),
+    ]);
+    const second = fakeGit({ prs: [openPr()], checks: [failing] });
+    expect(mergeMain(argv(), deps(second.run).deps)).toBe(1);
+    expect(second.ghCalls('run rerun')).toHaveLength(0);
+  });
+
+  it('merge-pr: run rerun answered 504 and the attempt did not rise, even with the run no longer completed: not accepted, fails (negative control)', () => {
+    const fake = fakeGit({ prs: [openPr()], checks: [[{ name: 'Lint', bucket: 'fail', link: RUN_LINK }]] });
+    const timed = timedOut(fake, 'run rerun', false);
+    const d = deps((command: string, args: string[], opts?: { cwd?: string; env?: Record<string, string> }) => {
+      const out = timed(command, args, opts);
+      if (command === 'gh' && args.slice(0, 2).join(' ') === 'run rerun') fake.state.runStatus['555'] = 'in_progress';
+      return out;
+    });
+    expect(mergeMain(argv(), d.deps)).toBe(1);
+    expect(fake.ghCalls('run rerun')).toHaveLength(1);
+    expect(d.err.join('\n')).toContain('it did not go through');
+    expect(d.err.join('\n')).toContain('gh run rerun 555 failed: HTTP 504');
+    expect(readRecords(runDir, '3477').records.filter((r) => r.stage === 'ci' && /rerun=/.test(r.note ?? ''))).toHaveLength(0);
+  });
+
+  it('merge-pr: run rerun answered 504 and the attempt could not be read before sending: not accepted, fails (negative control)', () => {
+    const fake = fakeGit({ prs: [openPr()], checks: [[{ name: 'Lint', bucket: 'fail', link: RUN_LINK }]] });
+    const timed = timedOut(fake, 'run rerun', true);
+    let views = 0;
+    const d = deps((command: string, args: string[], opts?: { cwd?: string; env?: Record<string, string> }) => {
+      if (command === 'gh' && args.slice(0, 2).join(' ') === 'run view' && views++ === 0) return failed('HTTP 404: Not Found');
+      return timed(command, args, opts);
+    });
+    expect(mergeMain(argv(), d.deps)).toBe(1);
+    expect(fake.ghCalls('run rerun')).toHaveLength(1);
+    expect(d.err.join('\n')).toContain('gh run rerun 555 failed: HTTP 504');
   });
 
   it('merge-pr: a 504 on a read is still asked again (negative control)', () => {

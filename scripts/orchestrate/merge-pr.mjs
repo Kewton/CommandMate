@@ -379,10 +379,27 @@ export function main(argv, deps = {}) {
             return 1;
           }
           for (const id of ids) {
-            // A rerun that is accepted leaves the run no longer `completed`.
+            // A rerun that is accepted raises the run's attempt number, whatever
+            // its status: `completed` is both "before the rerun" and "the rerun
+            // already finished". The attempt is read before sending; when it
+            // cannot be read, a failed answer is not taken as accepted.
+            const attemptOf = () => {
+              const n = Number(ghJson(run, ['run', 'view', id, '--repo', o.repo, '--json', 'attempt']).attempt);
+              return Number.isInteger(n) && n > 0 ? n : null;
+            };
+            let before = null;
+            try {
+              before = attemptOf();
+            } catch {
+              // unreadable: a failed answer is then never taken as accepted
+            }
             const again = ghWrite(run, ['run', 'rerun', id, '--failed', '--repo', o.repo], {
               notice: error,
-              confirm: () => (ghJson(run, ['run', 'view', id, '--repo', o.repo, '--json', 'status']).status !== 'completed' ? '' : null),
+              confirm: () => {
+                if (before === null) return null;
+                const after = attemptOf();
+                return after !== null && after > before ? '' : null;
+              },
             });
             if (again.status !== 0) throw new Error(`gh run rerun ${id} failed: ${(again.stderr || again.stdout).trim()}`);
           }
