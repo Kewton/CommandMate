@@ -153,6 +153,7 @@ const BAR_NOTE_EDITOR_WIDTH = 288;
  * Issue #3615: the narrowest the agent's name may be clipped to in the action
  * bar before the controls fold behind "…" — about 7 characters of the
  * selector's 12px text ("Claude" measures 39px). Narrower, it read as "C".
+ * Issue #3631: also the floor of the name in each split's 30px title bar.
  */
 const BAR_SESSION_LABEL_MIN_WIDTH = 48;
 /** Issue #3592: how close to the viewport's edges that editor may come. */
@@ -652,6 +653,8 @@ export const TerminalSplitPane = memo(function TerminalSplitPane({
   // is hidden (parked) there is no position: none is carried into the next
   // place it is shown.
   const barSessionRef = useRef<HTMLDivElement | null>(null);
+  // Issue #3631: the agent's name in the selector trigger.
+  const sessionLabelRef = useRef<HTMLSpanElement | null>(null);
   const [barNotePosition, setBarNotePosition] = useState<{ top: number; left: number } | null>(
     null,
   );
@@ -810,6 +813,21 @@ export const TerminalSplitPane = memo(function TerminalSplitPane({
         .join('\n') || undefined
     : undefined;
 
+  // Issue #3631: in a split's 30px title bar (two or more splits) the name has
+  // a floor — `min(BAR_SESSION_LABEL_MIN_WIDTH, the name's own width)` — so in a
+  // narrow quarter of the 2x2 grid the model / usage / note chips give way and
+  // the name is not clipped to "C". The name's own width caps it so a short
+  // name is never padded (CSS cannot say `min(3rem, max-content)`), hence the
+  // measurement. The action bar keeps #3615's rule (fold behind "…"), so the
+  // floor is cleared there.
+  useLayoutEffect(() => {
+    const label = sessionLabelRef.current;
+    if (!label) return;
+    label.style.minWidth = '';
+    if (inActionBar) return;
+    label.style.minWidth = `${Math.min(label.scrollWidth, BAR_SESSION_LABEL_MIN_WIDTH)}px`;
+  }, [attachLabel, inActionBar]);
+
   // Issue #3592: the controls of this split's title bar. Drawn in the title
   // bar with two or more splits, and — the same elements — portalled into the
   // action bar's slots with one split (see `SplitPaneHeaderControls`).
@@ -823,7 +841,9 @@ export const TerminalSplitPane = memo(function TerminalSplitPane({
           data-testid={`cli-selector-${splitIndex}`}
           aria-label={selectInstanceLabel}
           title={selectorTitle}
-          className="flex items-center gap-1.5 min-w-0 max-w-[12rem] rounded px-1.5 py-0.5 text-xs border border-border bg-surface text-surface-foreground hover:bg-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-ring data-[state=open]:ring-2 data-[state=open]:ring-ring transition-colors"
+          // Issue #3631: in the title bar the trigger keeps its automatic
+          // minimum (dot + the name's floor + chevron) instead of `min-w-0`.
+          className={`flex items-center gap-1.5 ${inActionBar ? 'min-w-0' : ''} max-w-[12rem] rounded px-1.5 py-0.5 text-xs border border-border bg-surface text-surface-foreground hover:bg-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-ring data-[state=open]:ring-2 data-[state=open]:ring-ring transition-colors`}
         >
           <StatusDot
             status={status}
@@ -835,6 +855,7 @@ export const TerminalSplitPane = memo(function TerminalSplitPane({
             data-unclassified={showUnclassifiedDot ? 'true' : undefined}
           />
           <span
+            ref={sessionLabelRef}
             className="truncate"
             // Issue #3615: in the action bar, a name clipped narrower than this
             // folds the controls behind "…" instead.
