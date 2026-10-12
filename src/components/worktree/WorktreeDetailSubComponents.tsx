@@ -35,6 +35,7 @@ import { truncateString } from '@/lib/utils';
 import { ClipboardCopy, Check } from 'lucide-react';
 import { copyToClipboard } from '@/lib/clipboard-utils';
 import { NotificationDot } from '@/components/common/NotificationDot';
+import { useToast } from '@/components/common/Toast';
 import { deriveCliStatus, isUnclassifiedCliStatus } from '@/types/sidebar';
 import {
   UNCLASSIFIED_STATUS_DOT_CLASS,
@@ -546,6 +547,7 @@ export const WorktreeInfoFields = memo(function WorktreeInfoFields({
   const { isEditing, text, setText, isSaving, handleSave, handleCancel, startEditing } = descriptionEditor;
   const tWorktree = useTranslations('worktree');
   const tCommon = useTranslations('common');
+  const { showToast } = useToast();
 
   // Two INDEPENDENT confirmations (Issue #2180, previously `pathTimerRef` /
   // `repoPathTimerRef` here): one timer each, so copying the repository path
@@ -630,7 +632,9 @@ export const WorktreeInfoFields = memo(function WorktreeInfoFields({
         <select
           value={worktree.status ?? ''}
           onChange={async (e) => {
-            const val = e.target.value;
+            const select = e.target;
+            const previousValue = worktree.status ?? '';
+            const val = select.value;
             const newStatus = val === '' ? null : val as 'ready' | 'in_progress' | 'in_review' | 'done';
             try {
               // Issue #3594: the shared per-worktree queue orders this with the
@@ -638,7 +642,9 @@ export const WorktreeInfoFields = memo(function WorktreeInfoFields({
               const updated = await saveWorktreeStatus(worktree.id, newStatus);
               onWorktreeUpdate?.(updated);
             } catch {
-              // Silently handle
+              // Issue #3613: same as the row "…" Status — say so, put the old value back.
+              select.value = previousValue;
+              showToast(tCommon('branchItem.statusChangeFailed'), 'error');
             }
           }}
           className="text-sm px-3 py-1.5 rounded-lg border border-input bg-surface text-foreground focus:ring-2 focus:ring-ring focus:border-transparent w-full"

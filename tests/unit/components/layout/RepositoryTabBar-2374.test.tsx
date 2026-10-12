@@ -183,6 +183,23 @@ function tabNames(): string[] {
     .map((tab) => tab.getAttribute('data-repository') ?? '');
 }
 
+/**
+ * Issue #3611: a layer above (a Radix menu, the header tools' "…" list) that
+ * handles Escape first and claims it with `preventDefault`, as Radix does from
+ * a document capture listener.
+ */
+function pressEscapeClaimedAbove(target: Element = document.body): void {
+  const claim = (event: KeyboardEvent): void => {
+    if (event.key === 'Escape') event.preventDefault();
+  };
+  document.addEventListener('keydown', claim, true);
+  try {
+    fireEvent.keyDown(target, { key: 'Escape' });
+  } finally {
+    document.removeEventListener('keydown', claim, true);
+  }
+}
+
 describe('RepositoryTabBar (Issue #2374)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -530,6 +547,16 @@ describe('RepositoryTabBar (Issue #2374)', () => {
       fireEvent.keyDown(document, { key: 'Escape' });
       expect(screen.queryByTestId('repository-tab-popover')).toBeNull();
       expect(document.activeElement).toBe(alpha);
+    });
+
+    it('stays open when a layer above already handled the Escape (Issue #3611)', async () => {
+      const alpha = await openAlpha();
+      const before = document.activeElement;
+      pressEscapeClaimedAbove();
+      expect(screen.getByTestId('repository-tab-popover')).toBeInTheDocument();
+      expect(alpha).toHaveAttribute('aria-expanded', 'true');
+      // Focus is the layer above's business, not moved back to the tab.
+      expect(document.activeElement).toBe(before);
     });
 
     it('closes when the user clicks outside it', async () => {

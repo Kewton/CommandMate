@@ -183,6 +183,8 @@ export interface RenderTerminalSplitPaneArgs {
    * already maximized. Stable per-index reference.
    */
   onToggleMaximize: () => void;
+  /** Issue #3612: a lone split cannot be maximized (entries disabled). */
+  maximizeDisabled: boolean;
 }
 
 export interface TerminalSplitContainerProps {
@@ -1166,6 +1168,7 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
                   onDropInstance: dropHandlers[idx],
                   isMaximized: maximizedHere,
                   onToggleMaximize: maximizeHandlers[idx],
+                  maximizeDisabled: splits.length <= MIN_SPLITS,
                 })}
                 </TerminalSplitHiddenProvider>
               </div>
