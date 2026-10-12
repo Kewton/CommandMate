@@ -104,6 +104,7 @@ import {
 } from '@/components/sidebar/BranchStatusIndicator';
 import { SIDEBAR_STATUS_CONFIG } from '@/config/status-colors';
 import { Z_INDEX } from '@/config/z-index';
+import { isUnhandledEscape } from '@/lib/escape-key';
 
 // ============================================================================
 // Constants
@@ -548,7 +549,8 @@ export const RepositoryTabBar = memo(function RepositoryTabBar() {
       closeAll();
     };
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
+      // Issue #3611: an Escape a layer above already handled is not ours.
+      if (!isUnhandledEscape(event)) return;
       const focusTarget = openRepository
         ? tabRefs.current.get(openRepository)
         : overflowButtonRef.current;
