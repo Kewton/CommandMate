@@ -11,6 +11,8 @@ import { clearPromptHashCache, renamePromptHashCacheKeys } from './prompt-dedup'
 import { clearResponseHashCache, renameResponseHashCacheKeys } from './response-dedup';
 import { renamePromptDedupSkipsBatch } from './prompt-dedup-state';
 import {
+  advancePendingScrapeMigrationEpochs,
+  getPendingScrapeMigrationEpoch,
   renamePendingScrapedResponseKeys,
   setPendingScrapeStaleWriterCheck,
 } from './pending-scraped-response-store';
@@ -100,12 +102,13 @@ interface PollerOwner {
    */
   selfStopped: boolean;
   /**
-   * A worktree-ID migration retired this chain (Issue #3663). Unlike a plain
-   * restart — queued until the tick ends, whose stop then flushes what the
-   * tick held — a migrate re-keys the holds at once, so a hold this tick makes
-   * afterwards would land on whichever chain the key went to.
+   * The worktree's migration epoch when this chain's current tick started
+   * (Issue #3663). Unlike a plain restart — queued until the tick ends, whose
+   * stop then flushes what the tick held — a migrate re-keys the holds at once,
+   * so a hold a tick makes after one would land on whichever chain the key went
+   * to. Optional: an owner built before a reload has none, read as epoch 0.
    */
-  migrated?: boolean;
+  tickMigrationEpoch?: number;
 }
 
 /**
@@ -172,11 +175,14 @@ const coordinator: PollerCoordinator =
     pausedOnPrompt: new Set<string>(),
   }));
 
-// Issue #3663: holds, drops and expiry settles from a tick a migrate retired
-// are refused — its key now belongs to another chain (see `PollerOwner.migrated`).
+// Issue #3663: holds, drops and expiry settles from a tick that started before
+// a migrate touched its worktree are refused — whatever generation it is, its
+// key may now belong to another chain (see `PollerOwner.tickMigrationEpoch`).
 setPendingScrapeStaleWriterCheck((pollerKey) => {
   const caller = coordinator.ownerStorage.getStore();
-  return caller !== undefined && caller.pollerKey === pollerKey && caller.migrated === true;
+  if (caller === undefined || caller.pollerKey !== pollerKey) return false;
+  const worktreeId = pollerKey.slice(0, pollerKey.indexOf(':'));
+  return (caller.tickMigrationEpoch ?? 0) !== getPendingScrapeMigrationEpoch(worktreeId);
 });
 
 // The coordinator object outlives a module reload (that is the point of putting
@@ -394,6 +400,7 @@ async function runPollTick(target: PollTarget, owner: PollerOwner): Promise<void
   if (owner.superseded || owner.stopped) return;
 
   coordinator.running.set(pollerKey, { owner, since: Date.now() });
+  owner.tickMigrationEpoch = getPendingScrapeMigrationEpoch(target.worktreeId);
 
   try {
     // Check if max duration exceeded
@@ -743,6 +750,11 @@ export function migrateResponsePollerWorktreeIds(
   }
   if (targets.size === 0) return [];
 
+  // Issue #3663: every tick already running on these worktrees — the chains
+  // moved below, the ones abandoned, and older generations still waiting after
+  // a stalled-tick restart — loses the right to change their held scrapes.
+  advancePendingScrapeMigrationEpochs([...targets.keys(), ...targets.values()]);
+
   const moves: MigratedPollerKey[] = [];
   const abandoned: string[] = [];
 
@@ -785,7 +797,6 @@ export function migrateResponsePollerWorktreeIds(
     if (retired) {
       retired.superseded = true;
       retired.stopped = true;
-      retired.migrated = true;
       coordinator.owners.delete(move.oldKey);
     }
     coordinator.pendingRestart.delete(move.oldKey);

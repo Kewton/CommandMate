@@ -61,9 +61,39 @@ export const pendingScrapedResponses = getOrInitGlobal('__pendingScrapedResponse
   PendingScrapedResponse
 >());
 
+declare global {
+  // eslint-disable-next-line no-var
+  var __pendingScrapeMigrationEpochs: Map<string, number> | undefined;
+}
+
 /**
- * Answers whether the code running now is a tick of a poller chain that a
- * worktree-ID migration retired from `pollerKey` (Issue #3663).
+ * How many worktree-ID migrations have touched each worktree ID (Issue #3663).
+ *
+ * A tick notes its worktree's epoch when it starts; if a migrate has moved
+ * holds onto or off that worktree's keys since, the tick is describing a key
+ * that changed hands under it, whichever generation it belongs to — the chain
+ * the migrate moved, a chain it abandoned, or an older one still waiting after
+ * a stalled-tick restart. Counted per worktree ID rather than per poller key so
+ * that every key of an affected worktree is covered without enumerating them.
+ * A plain restart does not advance it.
+ */
+const migrationEpochs = getOrInitGlobal('__pendingScrapeMigrationEpochs', () => new Map<string, number>());
+
+/** The migration epoch of `worktreeId`; 0 if no migrate has touched it. */
+export function getPendingScrapeMigrationEpoch(worktreeId: string): number {
+  return migrationEpochs.get(worktreeId) ?? 0;
+}
+
+/** Advance the migration epoch of each worktree ID a migrate moves from or to. */
+export function advancePendingScrapeMigrationEpochs(worktreeIds: Iterable<string>): void {
+  for (const worktreeId of new Set(worktreeIds)) {
+    migrationEpochs.set(worktreeId, getPendingScrapeMigrationEpoch(worktreeId) + 1);
+  }
+}
+
+/**
+ * Answers whether the code running now is a tick that started before a
+ * worktree-ID migration touched `pollerKey`'s worktree (Issue #3663).
  *
  * Installed by `response-poller-core`, which owns the chains and their
  * ownership tokens; until it is, nothing is stale. Kept as an injected check so
@@ -79,8 +109,8 @@ export function setPendingScrapeStaleWriterCheck(check: (pollerKey: string) => b
 /**
  * Whether the caller must leave the hold at `pollerKey` alone (Issue #3663).
  *
- * A tick that was inside `checkForResponse()` when a migrate retired its chain
- * comes back holding a key that now belongs to another chain — after a swap,
+ * A tick that was inside `checkForResponse()` when a migrate ran comes back
+ * holding a key that now belongs to another chain — after a swap,
  * with another worktree's hold under it. Whatever it would hold, replace or
  * drop there is about a turn that key no longer stands for.
  */
