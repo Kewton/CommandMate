@@ -102,7 +102,7 @@ interface PollerOwner {
    */
   selfStopped: boolean;
   /**
-   * The worktree's migration epoch when this chain's current tick started
+   * Its key's migration epoch when this chain's current tick started
    * (Issue #3663). Unlike a plain restart — queued until the tick ends, whose
    * stop then flushes what the tick held — a migrate re-keys the holds at once,
    * so a hold a tick makes after one would land on whichever chain the key went
@@ -176,13 +176,12 @@ const coordinator: PollerCoordinator =
   }));
 
 // Issue #3663: holds, drops and expiry settles from a tick that started before
-// a migrate touched its worktree are refused — whatever generation it is, its
+// a migrate re-owned its key's hold are refused — whatever generation it is, its
 // key may now belong to another chain (see `PollerOwner.tickMigrationEpoch`).
 setPendingScrapeStaleWriterCheck((pollerKey) => {
   const caller = coordinator.ownerStorage.getStore();
   if (caller === undefined || caller.pollerKey !== pollerKey) return false;
-  const worktreeId = pollerKey.slice(0, pollerKey.indexOf(':'));
-  return (caller.tickMigrationEpoch ?? 0) !== getPendingScrapeMigrationEpoch(worktreeId);
+  return (caller.tickMigrationEpoch ?? 0) !== getPendingScrapeMigrationEpoch(pollerKey);
 });
 
 // The coordinator object outlives a module reload (that is the point of putting
@@ -400,7 +399,7 @@ async function runPollTick(target: PollTarget, owner: PollerOwner): Promise<void
   if (owner.superseded || owner.stopped) return;
 
   coordinator.running.set(pollerKey, { owner, since: Date.now() });
-  owner.tickMigrationEpoch = getPendingScrapeMigrationEpoch(target.worktreeId);
+  owner.tickMigrationEpoch = getPendingScrapeMigrationEpoch(pollerKey);
 
   try {
     // Check if max duration exceeded
@@ -750,11 +749,6 @@ export function migrateResponsePollerWorktreeIds(
   }
   if (targets.size === 0) return [];
 
-  // Issue #3663: every tick already running on these worktrees — the chains
-  // moved below, the ones abandoned, and older generations still waiting after
-  // a stalled-tick restart — loses the right to change their held scrapes.
-  advancePendingScrapeMigrationEpochs([...targets.keys(), ...targets.values()]);
-
   const moves: MigratedPollerKey[] = [];
   const abandoned: string[] = [];
 
@@ -831,6 +825,17 @@ export function migrateResponsePollerWorktreeIds(
     if (!newWorktreeId) continue;
     pausedMoves.push({ oldKey: pollerKey, newKey: `${newWorktreeId}:${parts.instanceId}` });
   }
+
+  // Issue #3663: every key whose held scrape changes owner here — each move's
+  // source and destination (running or paused) and each abandoned key — is
+  // taken from every tick already running under it: the chain moved, the one
+  // abandoned, and an older generation still waiting after a stalled-tick
+  // restart. Keys the batch neither moves nor stops (B:codex-2 beside a moved
+  // B:claude, or B itself in an A→B with nothing at A) keep holding.
+  advancePendingScrapeMigrationEpochs([
+    ...[...moves, ...pausedMoves].flatMap((move) => [move.oldKey, move.newKey]),
+    ...abandoned,
+  ]);
 
   // Issue #3553: the dedup state of the whole batch moves in one call per map
   // family, each lifting every source before writing any destination. Re-keyed

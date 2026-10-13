@@ -539,3 +539,66 @@ describe('Issue #3663: every generation alive at a migrate is out of the held sc
     expect(heldAt(WT.b)).toMatchObject({ worktreeId: WT.b, content: 'reply after' });
   });
 });
+
+describe('Issue #3663: pollers whose holds a migrate does not move keep holding', () => {
+  it('an instance on the destination worktree that the migrate does not move still holds (B:codex-2)', async () => {
+    const otherKey = `${WT.b}:codex-2`;
+    startPolling(WT.a, TOOL);
+    startPolling(WT.b, 'codex', 'codex-2');
+    const capture = deferred<void>();
+    tickBody.mockImplementation(async (worktreeId, instanceId) => {
+      if (worktreeId !== WT.b || instanceId !== 'codex-2') return false;
+      await capture.promise;
+      hold(WT.b, 'reply B codex-2', NOW + PENDING_SCRAPE_HOLD_MS, otherKey);
+      return false;
+    });
+
+    await vi.advanceTimersByTimeAsync(POLLING_INTERVAL);
+    migrateResponsePollerWorktreeIds([{ oldId: WT.a, newId: WT.b }], resolveTool);
+    capture.resolve();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(g.__pendingScrapedResponses?.get(otherKey)?.content).toBe('reply B codex-2');
+  });
+
+  it('A→B with no poller at A leaves the tick already running at B able to hold', async () => {
+    startPolling(WT.b, TOOL);
+    const capture = deferred<void>();
+    tickBody.mockImplementationOnce(async () => {
+      await capture.promise;
+      hold(WT.b, 'reply B');
+      return false;
+    });
+
+    await vi.advanceTimersByTimeAsync(POLLING_INTERVAL);
+    migrateResponsePollerWorktreeIds([{ oldId: WT.a, newId: WT.b }], resolveTool);
+    capture.resolve();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(heldAt(WT.b)).toMatchObject({ worktreeId: WT.b, content: 'reply B' });
+  });
+
+  it('a tick of an instance the migrate abandons on the source worktree does not hold after it (A:codex-2)', async () => {
+    const otherKey = `${WT.a}:codex-2`;
+    startPolling(WT.a, TOOL);
+    startPolling(WT.a, 'codex', 'codex-2');
+    const capture = deferred<void>();
+    tickBody.mockImplementation(async (worktreeId, instanceId) => {
+      if (instanceId !== 'codex-2') return false;
+      await capture.promise;
+      hold(worktreeId as string, 'reply A codex-2', NOW + PENDING_SCRAPE_HOLD_MS, otherKey);
+      return false;
+    });
+
+    await vi.advanceTimersByTimeAsync(POLLING_INTERVAL);
+    // codex-2 cannot be resolved and is abandoned, so the migrate does touch
+    // it: its late hold must not be written.
+    migrateResponsePollerWorktreeIds([{ oldId: WT.a, newId: WT.b }], (_wt, inst) =>
+      inst === 'codex-2' ? null : TOOL
+    );
+    capture.resolve();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(g.__pendingScrapedResponses?.has(otherKey)).toBe(false);
+  });
+});
