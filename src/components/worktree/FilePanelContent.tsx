@@ -34,7 +34,7 @@ import 'highlight.js/styles/github-dark.css';
 import { Z_INDEX } from '@/config/z-index';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { Spinner } from '@/components/ui/Spinner';
-import { isUnhandledEscape } from '@/lib/escape-key';
+import { isEscapeNoLayerClosed } from '@/lib/escape-key';
 
 /** Fixed row height for the virtualized CodeViewer (px). Monospace + leading-6. */
 const CODE_VIEWER_ROW_HEIGHT_PX = 24;
@@ -886,11 +886,12 @@ export const FilePanelContent = memo(function FilePanelContent({
     setIsMaximized((prev) => !prev);
   }, []);
 
-  // ESC to exit maximize
+  // ESC to exit maximize. Issue #3670: not on the press a floating layer over
+  // the file (the second row's "…" panel) closed on — one Escape, one layer.
   useEffect(() => {
     if (!isMaximized) return;
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (isUnhandledEscape(e)) {
+      if (isEscapeNoLayerClosed(e)) {
         setIsMaximized(false);
       }
     };

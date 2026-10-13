@@ -91,7 +91,7 @@ import { Tooltip } from '@/components/common/Tooltip';
 import { useSplitActionBarFit } from '@/hooks/useDesktopHeaderFit';
 import { PaneResizer, type ResizerOrientation } from './PaneResizer';
 import { SplitHeaderSlotsProvider, type SplitHeaderSlots } from './SplitPaneHeaderControls';
-import { isUnhandledEscape } from '@/lib/escape-key';
+import { isUnhandledEscape, markEscapeClosedLayer } from '@/lib/escape-key';
 
 /**
  * Issue #2421: thickness of the grid's two divider TRACKS, in px.
@@ -1333,6 +1333,10 @@ const OVERFLOW_PANEL_REGION_SELECTOR = '[data-testid="terminal-split-container"]
  * (its document listener comes after the panel's) still closes with the panel
  * on an Escape neither the chip nor anything above claimed.
  *
+ * Issue #3670: for the same reason the panel only marks the Escape it closes
+ * on ({@link markEscapeClosedLayer}), which a maximized file under it reads, so
+ * one press closes the panel and leaves the file maximized.
+ *
  * Issue #3592: `parked` is drawn after `children` while the panel is open,
  * and in a hidden box beside the button while it is closed — for a slot
  * another component portals into, which must exist in either state.
@@ -1417,6 +1421,9 @@ export function ActionBarItemsOverflow({
       // folded agent selector's menu closing itself) is not ours to act on.
       // Issue #3591: nor one the header tools' "…" list closed itself with.
       if (!isUnhandledEscape(event)) return;
+      // Issue #3670: and tell the maximized file under it (a window listener)
+      // that this press is spent — without claiming it from the chip's reason.
+      markEscapeClosedLayer(event);
       setOpen(false);
       buttonRef.current?.focus();
     };
