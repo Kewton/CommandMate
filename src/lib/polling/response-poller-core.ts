@@ -10,7 +10,10 @@ import {
 import { clearPromptHashCache, renamePromptHashCacheKeys } from './prompt-dedup';
 import { clearResponseHashCache, renameResponseHashCacheKeys } from './response-dedup';
 import { renamePromptDedupSkipsBatch } from './prompt-dedup-state';
-import { renamePendingScrapedResponseKeys } from './pending-scraped-response-store';
+import {
+  renamePendingScrapedResponseKeys,
+  setPendingScrapeStaleWriterCheck,
+} from './pending-scraped-response-store';
 import { checkForResponse, flushPendingScrapedResponse } from './response-checker';
 import { broadcastTerminalSnapshot } from '@/lib/realtime/terminal-broadcast';
 import { findTerminalSessionRefusal } from '@/lib/realtime/terminal-session-ownership';
@@ -96,6 +99,13 @@ interface PollerOwner {
    * so the response hash is not touched until that verdict is in.
    */
   selfStopped: boolean;
+  /**
+   * A worktree-ID migration retired this chain (Issue #3663). Unlike a plain
+   * restart — queued until the tick ends, whose stop then flushes what the
+   * tick held — a migrate re-keys the holds at once, so a hold this tick makes
+   * afterwards would land on whichever chain the key went to.
+   */
+  migrated?: boolean;
 }
 
 /**
@@ -161,6 +171,13 @@ const coordinator: PollerCoordinator =
     generationCounter: 0,
     pausedOnPrompt: new Set<string>(),
   }));
+
+// Issue #3663: holds, drops and expiry settles from a tick a migrate retired
+// are refused — its key now belongs to another chain (see `PollerOwner.migrated`).
+setPendingScrapeStaleWriterCheck((pollerKey) => {
+  const caller = coordinator.ownerStorage.getStore();
+  return caller !== undefined && caller.pollerKey === pollerKey && caller.migrated === true;
+});
 
 // The coordinator object outlives a module reload (that is the point of putting
 // it on `globalThis`), so a field added after the object was first built has to
@@ -768,6 +785,7 @@ export function migrateResponsePollerWorktreeIds(
     if (retired) {
       retired.superseded = true;
       retired.stopped = true;
+      retired.migrated = true;
       coordinator.owners.delete(move.oldKey);
     }
     coordinator.pendingRestart.delete(move.oldKey);

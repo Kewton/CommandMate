@@ -19,7 +19,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 
 const createMessage = vi.fn((_db: unknown, m: Record<string, unknown>) => ({ id: 'row', ...m }));
-const captureStructuredHistoryTurn = vi.fn(async () => false);
+const captureStructuredHistoryTurn = vi.fn(async (): Promise<boolean> => false);
+/** What the stubbed `checkForResponse` does on a tick; default: nothing. */
+const tickBody = vi.fn(async (): Promise<boolean> => false);
 
 vi.mock('@/lib/db/db-instance', () => ({ getDbInstance: () => ({}) }));
 vi.mock('@/lib/db', () => ({
@@ -34,21 +36,26 @@ vi.mock('@/lib/polling/structured-history-gate', () => ({
 vi.mock('@/lib/polling/response-checker', async () => {
   const pending = await import('@/lib/polling/pending-scraped-response');
   return {
-    checkForResponse: vi.fn(async () => false),
+    checkForResponse: () => tickBody(),
     flushPendingScrapedResponse: pending.flushPendingScrapedResponse,
   };
 });
 vi.mock('@/lib/realtime/terminal-broadcast', () => ({ broadcastTerminalSnapshot: vi.fn(async () => {}) }));
+vi.mock('@/lib/realtime/terminal-session-ownership', () => ({
+  findTerminalSessionRefusal: vi.fn(async () => null),
+}));
 
 import {
   startPolling,
   stopAllPolling,
   migrateResponsePollerWorktreeIds,
+  POLLING_INTERVAL,
 } from '@/lib/polling/response-poller-core';
 import {
   PENDING_SCRAPE_HOLD_MS,
   holdScrapedResponse,
   hasPendingScrapedResponse,
+  discardPendingScrapedResponse,
   flushPendingScrapedResponse,
   resetPendingScrapedResponses,
   settleExpiredPendingScrapedResponse,
@@ -66,8 +73,13 @@ const key = (wt: string): string => `${wt}:${TOOL}`;
 const NOW = new Date('2026-10-13T09:00:00.000Z').getTime();
 
 /** Park a held reply under `wt`'s poller key, as `checkForResponse` would. */
-function hold(wt: string, content: string, expiresAt = NOW + PENDING_SCRAPE_HOLD_MS): void {
-  holdScrapedResponse(key(wt), {
+function hold(
+  wt: string,
+  content: string,
+  expiresAt = NOW + PENDING_SCRAPE_HOLD_MS,
+  pollerKey = key(wt)
+): void {
+  holdScrapedResponse(pollerKey, {
     worktreeId: wt,
     cliToolId: TOOL,
     instanceId: TOOL,
@@ -96,7 +108,10 @@ beforeEach(() => {
   stopAllPolling();
   resetPendingScrapedResponses();
   createMessage.mockClear();
-  captureStructuredHistoryTurn.mockClear();
+  captureStructuredHistoryTurn.mockReset();
+  captureStructuredHistoryTurn.mockImplementation(async () => false);
+  tickBody.mockReset();
+  tickBody.mockImplementation(async () => false);
 });
 
 afterEach(() => {
@@ -243,5 +258,164 @@ describe('Issue #3663: migrate moves the held scrape with the poller', () => {
     renameResponseHashCacheKey(key(WT.a), key(WT.b));
     expect(heldAt(WT.a)).toMatchObject({ worktreeId: WT.a, content: 'reply A' });
     expect(hasPendingScrapedResponse(key(WT.b))).toBe(false);
+  });
+});
+
+/** A promise the test resolves by hand, to park an `await` across a migrate. */
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((r) => {
+    resolve = r;
+  });
+  return { promise, resolve };
+}
+
+describe('Issue #3663: work awaiting across a migrate does not act on a moved hold', () => {
+  for (const captured of [true, false]) {
+    it(`an expiry settle begun before an A↔B swap leaves the hold that moved into A alone (capture ${captured})`, async () => {
+      startPolling(WT.a, TOOL);
+      startPolling(WT.b, TOOL);
+      hold(WT.a, 'reply A', NOW - 1); // expired: the settle goes to the reader
+      hold(WT.b, 'reply B', NOW + PENDING_SCRAPE_HOLD_MS); // not expired
+      const capture = deferred<boolean>();
+      captureStructuredHistoryTurn.mockImplementation(() => capture.promise);
+
+      const settling = settleExpiredPendingScrapedResponse(key(WT.a));
+      migrateResponsePollerWorktreeIds(
+        [
+          { oldId: WT.a, newId: WT.b },
+          { oldId: WT.b, newId: WT.a },
+        ],
+        resolveTool
+      );
+      capture.resolve(captured);
+      await settling;
+
+      // B's hold now sits at key A, under worktree A, still before its deadline:
+      // neither dropped (capture true) nor written early (capture false).
+      expect(heldAt(WT.a)).toMatchObject({ worktreeId: WT.a, content: 'reply B' });
+      expect(heldAt(WT.b)).toMatchObject({ worktreeId: WT.b, content: 'reply A' });
+      expect(createMessage).not.toHaveBeenCalled();
+    });
+  }
+
+  it('a settle that awaits with no migrate still ends its own hold (control)', async () => {
+    startPolling(WT.a, TOOL);
+    hold(WT.a, 'reply A', NOW - 1);
+    const capture = deferred<boolean>();
+    captureStructuredHistoryTurn.mockImplementation(() => capture.promise);
+
+    const settling = settleExpiredPendingScrapedResponse(key(WT.a));
+    capture.resolve(false);
+    await settling;
+
+    expect(hasPendingScrapedResponse(key(WT.a))).toBe(false);
+    expect(writtenRows()).toEqual([{ worktreeId: WT.a, content: 'reply A' }]);
+  });
+
+  it('a tick of the old A chain that holds after an A↔B swap does not overwrite the hold moved into A', async () => {
+    startPolling(WT.a, TOOL);
+    startPolling(WT.b, TOOL);
+    hold(WT.b, 'reply B');
+    const capture = deferred<void>();
+    let tickStarted = false;
+    tickBody.mockImplementationOnce(async () => {
+      tickStarted = true;
+      await capture.promise;
+      // What `recordOrHoldScrapedResponse` does once the reader said not yet closed.
+      hold(WT.a, 'stale reply A');
+      return false;
+    });
+
+    await vi.advanceTimersByTimeAsync(POLLING_INTERVAL);
+    expect(tickStarted).toBe(true);
+    migrateResponsePollerWorktreeIds(
+      [
+        { oldId: WT.a, newId: WT.b },
+        { oldId: WT.b, newId: WT.a },
+      ],
+      resolveTool
+    );
+    capture.resolve();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(heldAt(WT.a)).toMatchObject({ worktreeId: WT.a, content: 'reply B' });
+    expect(hasPendingScrapedResponse(key(WT.b))).toBe(false);
+  });
+
+  it('a tick of the old A chain does not create a hold at A after A→B either', async () => {
+    startPolling(WT.a, TOOL);
+    const capture = deferred<void>();
+    tickBody.mockImplementationOnce(async () => {
+      await capture.promise;
+      hold(WT.a, 'stale reply A');
+      return false;
+    });
+
+    await vi.advanceTimersByTimeAsync(POLLING_INTERVAL);
+    migrateResponsePollerWorktreeIds([{ oldId: WT.a, newId: WT.b }], resolveTool);
+    capture.resolve();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(hasPendingScrapedResponse(key(WT.a))).toBe(false);
+  });
+
+  it('a tick of the old A chain does not discard the hold moved into A', async () => {
+    startPolling(WT.a, TOOL);
+    startPolling(WT.b, TOOL);
+    hold(WT.b, 'reply B');
+    const capture = deferred<void>();
+    tickBody.mockImplementationOnce(async () => {
+      await capture.promise;
+      discardPendingScrapedResponse(key(WT.a));
+      return false;
+    });
+
+    await vi.advanceTimersByTimeAsync(POLLING_INTERVAL);
+    migrateResponsePollerWorktreeIds(
+      [
+        { oldId: WT.a, newId: WT.b },
+        { oldId: WT.b, newId: WT.a },
+      ],
+      resolveTool
+    );
+    capture.resolve();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(heldAt(WT.a)).toMatchObject({ worktreeId: WT.a, content: 'reply B' });
+  });
+
+  it('a tick that still owns its key holds as before (control)', async () => {
+    startPolling(WT.a, TOOL);
+    const capture = deferred<void>();
+    tickBody.mockImplementationOnce(async () => {
+      await capture.promise;
+      hold(WT.a, 'reply A');
+      return false;
+    });
+
+    await vi.advanceTimersByTimeAsync(POLLING_INTERVAL);
+    capture.resolve();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(heldAt(WT.a)).toMatchObject({ worktreeId: WT.a, content: 'reply A' });
+  });
+
+  it('a tick superseded by a plain restart (not a migrate) still holds, for the restart to flush (control)', async () => {
+    startPolling(WT.a, TOOL);
+    const capture = deferred<void>();
+    tickBody.mockImplementationOnce(async () => {
+      await capture.promise;
+      hold(WT.a, 'reply A');
+      return false;
+    });
+
+    await vi.advanceTimersByTimeAsync(POLLING_INTERVAL);
+    startPolling(WT.a, TOOL); // deferred to the tick's epilogue (#2223)
+    capture.resolve();
+    await vi.advanceTimersByTimeAsync(0);
+
+    // The queued restart ended the cycle and wrote the hold, as before.
+    expect(writtenRows()).toEqual([{ worktreeId: WT.a, content: 'reply A' }]);
   });
 });

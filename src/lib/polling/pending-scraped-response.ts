@@ -10,7 +10,11 @@ import { captureStructuredHistoryTurn } from './structured-history-gate';
 import { STOP_TRANSCRIPT_DEFERRED_DELAYS_MS } from '@/lib/hooks/stop-history-capture';
 // Issue #3663: the map itself lives in the store module so the worktree-ID
 // migration can move it without importing the writer below.
-import { pendingScrapedResponses, type PendingScrapedResponse } from './pending-scraped-response-store';
+import {
+  isStalePendingScrapeWriter,
+  pendingScrapedResponses,
+  type PendingScrapedResponse,
+} from './pending-scraped-response-store';
 
 const logger = createLogger('response-poller');
 
@@ -60,12 +64,20 @@ export function hasPendingScrapedResponse(pollerKey: string): boolean {
  * its own deadline forward forever and the hold would stop being bounded.
  */
 export function holdScrapedResponse(pollerKey: string, pending: PendingScrapedResponse): void {
+  if (ignoreStaleWriter(pollerKey, 'hold')) return;
   const existing = pendingScrapedResponses.get(pollerKey);
   if (existing) {
     existing.content = pending.content;
     return;
   }
   pendingScrapedResponses.set(pollerKey, pending);
+}
+
+/** Log and refuse a write from a tick a migrate retired (Issue #3663). */
+function ignoreStaleWriter(pollerKey: string, action: 'hold' | 'discard' | 'settle'): boolean {
+  if (!isStalePendingScrapeWriter(pollerKey)) return false;
+  logger.info('pending-scrape-stale-writer-ignored', { pollerKey, action });
+  return true;
 }
 
 /**
@@ -76,6 +88,7 @@ export function holdScrapedResponse(pollerKey: string, pending: PendingScrapedRe
  * duplicate this Issue exists to stop.
  */
 export function discardPendingScrapedResponse(pollerKey: string): void {
+  if (ignoreStaleWriter(pollerKey, 'discard')) return;
   pendingScrapedResponses.delete(pollerKey);
 }
 
@@ -162,6 +175,7 @@ export function flushPendingScrapedResponse(pollerKey: string, reason: string): 
  * parse against writing a pane dump that is about to be superseded.
  */
 export async function settleExpiredPendingScrapedResponse(pollerKey: string): Promise<void> {
+  if (ignoreStaleWriter(pollerKey, 'settle')) return;
   const pending = pendingScrapedResponses.get(pollerKey);
   if (!pending || Date.now() < pending.expiresAt) return;
 
@@ -171,6 +185,11 @@ export async function settleExpiredPendingScrapedResponse(pollerKey: string): Pr
     pending.instanceId,
     { worktreePath: pending.worktreePath, transcriptPathHint: pending.transcriptPathHint }
   );
+  // Issue #3663: the key may have changed hands during that await — a
+  // worktree-ID migrate moves holds by replacing the object, so after A↔B the
+  // entry here is B's, with B's deadline. Only the hold this settle examined
+  // may be ended by it; anything else is left for its own chain to settle.
+  if (pendingScrapedResponses.get(pollerKey) !== pending) return;
   if (captured) {
     discardPendingScrapedResponse(pollerKey);
     settleStructuredHistoryRecheck(pollerKey);

@@ -61,6 +61,33 @@ export const pendingScrapedResponses = getOrInitGlobal('__pendingScrapedResponse
   PendingScrapedResponse
 >());
 
+/**
+ * Answers whether the code running now is a tick of a poller chain that a
+ * worktree-ID migration retired from `pollerKey` (Issue #3663).
+ *
+ * Installed by `response-poller-core`, which owns the chains and their
+ * ownership tokens; until it is, nothing is stale. Kept as an injected check so
+ * this module stays free of the poller's import graph.
+ */
+let staleWriterCheck: (pollerKey: string) => boolean = () => false;
+
+/** Install the stale-writer check. Called once by `response-poller-core`. */
+export function setPendingScrapeStaleWriterCheck(check: (pollerKey: string) => boolean): void {
+  staleWriterCheck = check;
+}
+
+/**
+ * Whether the caller must leave the hold at `pollerKey` alone (Issue #3663).
+ *
+ * A tick that was inside `checkForResponse()` when a migrate retired its chain
+ * comes back holding a key that now belongs to another chain — after a swap,
+ * with another worktree's hold under it. Whatever it would hold, replace or
+ * drop there is about a turn that key no longer stands for.
+ */
+export function isStalePendingScrapeWriter(pollerKey: string): boolean {
+  return staleWriterCheck(pollerKey);
+}
+
 /** A held scrape's move, as {@link renamePendingScrapedResponseKeys} takes it. */
 export interface PendingScrapedResponseRename {
   oldKey: string;
