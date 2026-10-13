@@ -24,7 +24,12 @@
  * @module components/worktree/chat-search-sections
  */
 
-import { CHAT_THINKING_LABEL, splitChatThinking } from '@/lib/chat/chat-thinking';
+import {
+  CHAT_THINKING_LABEL,
+  chatThinkingLineOrigins,
+  splitChatThinking,
+  type ChatThinkingLineOrigin,
+} from '@/lib/chat/chat-thinking';
 import { splitToolLog } from '@/lib/chat/chat-tool-log';
 import type { ChatMarkdownBodySplit } from '@/lib/chat/chat-markdown-body';
 import {
@@ -34,6 +39,7 @@ import {
   type MatchPosition,
   type RawOffsetMapper,
 } from '@/lib/terminal-highlight';
+import { mapDerivedLines, type DerivedLineOrigin } from '@/lib/terminal-highlight-offsets';
 
 /** `data-search-section` of the reasoning chip's Markdown. */
 export const CHAT_SEARCH_SECTION_REASONING = 'chat-reasoning';
@@ -103,11 +109,10 @@ export function chatSearchSections(content: string): HighlightSection[] {
  * lines cannot be lined up with the message's (search then pairs that part's
  * diagrams by body, as before).
  *
- * - answer: `content` itself when nothing was folded; otherwise the lines left
- *   once the tool log and the reasoning are out (blank runs collapsed, ends
- *   trimmed), lined up against the lines outside both sections;
- * - reasoning: the `> **Thinking**` quotes' lines, unquoted, against the
- *   reasoning section's lines;
+ * - answer and reasoning [Issue #3554]: from where `splitChatThinking` took
+ *   each of their lines (`chatThinkingLineOrigins`), not by matching strings —
+ *   the split trims the answer's ends and joins reasoning sections with a blank
+ *   line no raw line holds, which the matching could not follow;
  * - tool log: the trailing quoted section unquoted (or the legacy leading run
  *   as is), against the tool-log section's lines.
  */
@@ -119,20 +124,27 @@ export function chatMarkdownRawOffsets(
   const sections = chatSearchSections(content);
   const rangesOf = (key: string): MatchPosition[] =>
     sections.find((section) => section.key === key)?.ranges ?? [];
-  const folded = sections.flatMap((section) => section.ranges).sort((a, b) => a.start - b.start);
-  const answer: MatchPosition[] = [];
-  let from = 0;
-  for (const range of folded) {
-    if (range.start > from) answer.push({ start: from, end: range.start });
-    from = Math.max(from, range.end);
+
+  // `splitChatThinking` read the prose `splitToolLog` left, which is whole
+  // lines of `content` from `proseStart` on.
+  const tools = splitToolLog(content);
+  const proseStart = content.startsWith(tools.prose) ? 0 : content.length - tools.prose.length;
+  const lineStarts: number[] = [];
+  let cursor = proseStart;
+  for (const line of tools.prose.split('\n')) {
+    lineStarts.push(cursor);
+    cursor += line.length + 1;
   }
-  if (from <= content.length) answer.push({ start: from, end: content.length + 1 });
+  const origins = chatThinkingLineOrigins(tools.prose);
+  const toRaw = (lines: readonly ChatThinkingLineOrigin[]): DerivedLineOrigin[] =>
+    lines.map((line) => ({
+      text: line.text,
+      rawStart: line.line === null ? null : lineStarts[line.line] + line.column,
+    }));
+
   return {
-    body: alignDerivedText(split.body, content, answer),
-    reasoning:
-      split.reasoning === null
-        ? null
-        : alignDerivedText(split.reasoning, content, rangesOf(CHAT_SEARCH_SECTION_REASONING)),
+    body: mapDerivedLines(split.body, toRaw(origins.body)),
+    reasoning: split.reasoning === null ? null : mapDerivedLines(split.reasoning, toRaw(origins.reasoning)),
     toolLog: split.toolCalls > 0 ? alignDerivedText(split.toolLog, content, rangesOf(CHAT_SEARCH_SECTION_TOOL_LOG)) : null,
   };
 }
