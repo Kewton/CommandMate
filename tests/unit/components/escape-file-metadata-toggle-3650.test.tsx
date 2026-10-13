@@ -25,12 +25,26 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup, fireEvent, act } from '@testing-library/react';
 import { FileMetadataToggle } from '@/components/worktree/FileMetadataToggle';
 import { Tooltip } from '@/components/common/Tooltip';
+import { FileViewer } from '@/components/worktree/FileViewer';
+import { FilePanelContent } from '@/components/worktree/FilePanelContent';
 import { usePaneOverlayDismiss } from '@/hooks/useActivityPaneOverlay';
 import type { FileMetadataDisplaySettings } from '@/hooks/useFileMetadataDisplay';
+import type { FileTab } from '@/hooks/useFileTabs';
 
 vi.mock('next-intl', async () => {
   const { createRealIntlMock } = await import('@tests/helpers/real-intl');
   return createRealIntlMock('en');
+});
+
+vi.mock('highlight.js', () => ({
+  default: {
+    highlightAuto: (code: string) => ({ value: `<span class="hljs">${code}</span>` }),
+  },
+}));
+
+vi.mock('@/components/ui/ConfirmDialog', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/components/ui/ConfirmDialog')>();
+  return { ...actual, useConfirm: () => vi.fn().mockResolvedValue(true) };
 });
 
 const SETTINGS: FileMetadataDisplaySettings = {
@@ -77,9 +91,12 @@ function pressEscape(target: Element): void {
   });
 }
 
+const originalFetch = global.fetch;
+
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  global.fetch = originalFetch;
 });
 
 describe('FileMetadataToggle Escape inside the overlaid pane (Issue #3650)', () => {
@@ -175,5 +192,116 @@ describe('Tooltip Escape over the overlaid pane (Issue #3650: decided not to cla
       window.removeEventListener('keydown', onWindowKeyDown);
     }
     expect(prevented).toBe(false);
+  });
+});
+
+describe('FileMetadataToggle left open behind a screen in front (Issue #3650, consistency review)', () => {
+  function stubFile(path: string, extension: string, content: string): void {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ path, content, extension, worktreePath: '/wt' }),
+    }) as unknown as typeof fetch;
+  }
+
+  /** The mobile Files tab: the gear, a file row, and the FileViewer it opens. */
+  function MobileFiles() {
+    const [path, setPath] = useState<string | null>(null);
+    return (
+      <div>
+        <FileMetadataToggle settings={SETTINGS} onToggle={vi.fn()} />
+        <button
+          type="button"
+          data-testid="md-row"
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') setPath('docs/readme.md');
+          }}
+        >
+          readme.md
+        </button>
+        {path !== null && (
+          <FileViewer isOpen onClose={() => setPath(null)} worktreeId="wt" filePath={path} />
+        )}
+      </div>
+    );
+  }
+
+  function openMenuByKeyboard(): void {
+    const gear = screen.getByTestId('file-metadata-toggle-button');
+    act(() => gear.focus());
+    fireEvent.click(gear);
+    expect(screen.getByTestId('file-metadata-toggle-menu')).toBeDefined();
+  }
+
+  it('lets the FileViewer opened from a row (Tab, Enter) take the first Escape', async () => {
+    stubFile('docs/readme.md', 'md', '# Title\n');
+    render(<MobileFiles />);
+    openMenuByKeyboard();
+    const row = screen.getByTestId('md-row');
+    act(() => row.focus());
+    fireEvent.keyDown(row, { key: 'Enter' });
+    await screen.findByTestId('markdown-file-screen');
+
+    pressEscape((document.activeElement as Element | null) ?? document.body);
+    expect(screen.queryByTestId('markdown-file-screen')).toBeNull();
+  });
+
+  it('closes the menu when focus moves out of it (Tab to a file row)', () => {
+    render(<MobileFiles />);
+    openMenuByKeyboard();
+    act(() => screen.getByTestId('md-row').focus());
+    expect(screen.queryByTestId('file-metadata-toggle-menu')).toBeNull();
+  });
+
+  it('stays open when focus moves inside it or goes nowhere (negative control)', () => {
+    render(<MobileFiles />);
+    openMenuByKeyboard();
+    act(() => screen.getByTestId('file-metadata-toggle-showSize').focus());
+    expect(screen.queryByTestId('file-metadata-toggle-menu')).not.toBeNull();
+    act(() => (document.activeElement as HTMLElement).blur());
+    expect(screen.queryByTestId('file-metadata-toggle-menu')).not.toBeNull();
+  });
+
+  it('leaves an Escape pressed in a maximized file panel in front to that panel', () => {
+    const tab: FileTab = {
+      path: 'src/index.ts',
+      name: 'index.ts',
+      content: { path: 'src/index.ts', content: 'const x = 1;', extension: 'ts', worktreePath: '/repo' },
+      loading: false,
+      error: null,
+      isDirty: false,
+    };
+    render(
+      <div>
+        <FileMetadataToggle settings={SETTINGS} onToggle={vi.fn()} />
+        <FilePanelContent tab={tab} worktreeId="wt" onLoadContent={vi.fn()} onLoadError={vi.fn()} onSetLoading={vi.fn()} />
+      </div>,
+    );
+    fireEvent.click(screen.getByTestId('file-metadata-toggle-button'));
+    fireEvent.click(screen.getByRole('button', { name: 'Maximize' }));
+    const overlay = screen.getByTestId('maximized-file-overlay');
+
+    pressEscape(overlay);
+    expect(screen.queryByTestId('maximized-file-overlay')).toBeNull();
+  });
+
+  it('still closes only the menu on an Escape from the gear or the page body (negative control)', () => {
+    const seen: boolean[] = [];
+    const onWindowKeyDown = (event: KeyboardEvent): void => {
+      seen.push(event.defaultPrevented);
+    };
+    render(<MobileFiles />);
+    window.addEventListener('keydown', onWindowKeyDown);
+    try {
+      openMenuByKeyboard();
+      pressEscape(screen.getByTestId('file-metadata-toggle-button'));
+      expect(screen.queryByTestId('file-metadata-toggle-menu')).toBeNull();
+
+      fireEvent.click(screen.getByTestId('file-metadata-toggle-button'));
+      pressEscape(document.body);
+      expect(screen.queryByTestId('file-metadata-toggle-menu')).toBeNull();
+    } finally {
+      window.removeEventListener('keydown', onWindowKeyDown);
+    }
+    expect(seen).toEqual([true, true]);
   });
 });

@@ -60,6 +60,21 @@ function clampShift(start: number, size: number, viewport: number): number {
   return 0;
 }
 
+/**
+ * Whether an Escape aimed at `target` belongs to the menu: pressed from the
+ * gear / the menu itself, or with nothing focused (the page body — a mouse
+ * opened the menu without moving focus). [Issue #3650]
+ */
+function isOwnEscapeTarget(target: EventTarget | null, container: HTMLElement | null): boolean {
+  if (
+    typeof document !== 'undefined' &&
+    (target === document || target === document.body || target === document.documentElement)
+  ) {
+    return true;
+  }
+  return target instanceof Node && container !== null && container.contains(target);
+}
+
 export const FileMetadataToggle = memo(function FileMetadataToggle({
   settings,
   onToggle,
@@ -85,6 +100,10 @@ export const FileMetadataToggle = memo(function FileMetadataToggle({
     const onKeyDown = (e: KeyboardEvent): void => {
       // Issue #3611: an Escape a layer above already handled is not ours.
       if (!isUnhandledEscape(e)) return;
+      // Issue #3650: nor one pressed in a screen that came up in front of the
+      // menu (the mobile FileViewer, a maximized file panel) — that screen's
+      // window listener runs after this one and must get the press first.
+      if (!isOwnEscapeTarget(e.target, containerRef.current)) return;
       // Issue #3650: ours — claim it so window-level layers below (a tooltip,
       // a maximized file panel) leave it alone. The overlaid activity pane's
       // document listener runs before this one, so it is held off by the
@@ -122,6 +141,15 @@ export const FileMetadataToggle = memo(function FileMetadataToggle({
     });
   }, [open]);
 
+  // Issue #3650: focus leaving for something else (Tab to a file row, whose
+  // Enter opens the file in front) closes the menu, like a click outside
+  // does — a menu left open behind would sit on that screen's Escape.
+  // A blur with no new focus (the window losing focus) keeps it open.
+  const handleBlur = useCallback((e: React.FocusEvent<HTMLDivElement>) => {
+    const next = e.relatedTarget;
+    if (next instanceof Node && !e.currentTarget.contains(next)) setOpen(false);
+  }, []);
+
   const handleToggle = useCallback(
     (key: keyof FileMetadataDisplaySettings) => {
       onToggle(key);
@@ -130,7 +158,12 @@ export const FileMetadataToggle = memo(function FileMetadataToggle({
   );
 
   return (
-    <div className="relative" ref={containerRef} data-testid="file-metadata-toggle">
+    <div
+      className="relative"
+      ref={containerRef}
+      data-testid="file-metadata-toggle"
+      onBlur={open ? handleBlur : undefined}
+    >
       <button
         type="button"
         data-testid="file-metadata-toggle-button"
