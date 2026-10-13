@@ -389,7 +389,10 @@ const FENCE_OPENER = /^[ \t>]*(`{3,}|~{3,})/;
  * blocks is left unplaced). An element whose text does not add up (an override
  * drew something else) places nothing.
  *
- * Per hit: placed when its first and last characters are, else `null`. Returns
+ * Per hit: placed when its first and last characters are, else `null`. A
+ * reference drawing several units (`&fjlig;`) is placed by a hit starting on
+ * its `&` and by one ending on its `;` — a hit on its whole marks every unit it
+ * drew (Issue #3671); a hit ending inside its name is not placed. Returns
  * `null` when the container holds no marked element, so the caller keeps the
  * plain offset-equals-offset behaviour (terminal, plain-text rows).
  */
@@ -411,6 +414,11 @@ export function mapMarkdownPositionsToDom(
   }
 
   const rawToDom = new Int32Array(sourceText.length).fill(-1);
+  // [Issue #3671] DOM end (exclusive) of a hit whose last raw character is
+  // here. Kept apart from `rawToDom` (where a hit starts) so that a reference
+  // drawing several units — all placed on its `&` — can also be ended on its
+  // last raw character (`;`) with every unit it drew.
+  const rawEndToDom = new Int32Array(sourceText.length).fill(-1);
   for (const [owner, entries] of owned) {
     const parsed = parseAttr(owner.getAttribute(SEARCH_RAW_ATTR) ?? '');
     if (!parsed) continue;
@@ -438,7 +446,20 @@ export function mapMarkdownPositionsToDom(
         if (placed && placed.length > 0) cursor = placed.reduce((max, rawIdx) => Math.max(max, rawIdx + 1), cursor);
       }
       placed?.forEach((rawIdx, k) => {
-        if (rawIdx >= 0 && rawIdx < rawToDom.length && rawToDom[rawIdx] === -1) rawToDom[rawIdx] = domAt[textOffset + k];
+        if (rawIdx < 0 || rawIdx >= rawToDom.length || rawToDom[rawIdx] !== -1) return;
+        rawToDom[rawIdx] = domAt[textOffset + k];
+        rawEndToDom[rawIdx] = domAt[textOffset + k] + 1;
+        // A run of units on one raw offset is a reference that drew them all
+        // (`&fjlig;` → `fj`, `&Afr;` → a surrogate pair): a hit ending on its
+        // `;` ends after the last of them. One drawing a single unit (`&lt;`)
+        // has no run and stays unplaceable by a hit on its whole, as before.
+        let last = k;
+        while (placed[last + 1] === rawIdx) last += 1;
+        if (last === k) return;
+        const reference = referenceAt(sourceText, rawIdx);
+        if (reference && rawEndToDom[reference.end - 1] === -1) {
+          rawEndToDom[reference.end - 1] = domAt[textOffset + last] + 1;
+        }
       });
       textOffset += seg.length;
     }
@@ -447,7 +468,7 @@ export function mapMarkdownPositionsToDom(
   return positions.map((pos) => {
     if (pos.end <= pos.start || pos.end > rawToDom.length) return null;
     const start = rawToDom[pos.start];
-    const last = rawToDom[pos.end - 1];
-    return start !== -1 && last !== -1 && last >= start ? { start, end: last + 1 } : null;
+    const end = rawEndToDom[pos.end - 1];
+    return start !== -1 && end !== -1 && end > start ? { start, end } : null;
   });
 }
