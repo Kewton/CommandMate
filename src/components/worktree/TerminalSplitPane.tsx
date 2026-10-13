@@ -156,6 +156,15 @@ const BAR_NOTE_EDITOR_WIDTH = 288;
  * Issue #3631: also the floor of the name in each split's 30px title bar.
  */
 const BAR_SESSION_LABEL_MIN_WIDTH = 48;
+/**
+ * Issue #3651: the lone split's row of controls in the action bar. One line
+ * on the bar; inside the "…" panel (the container marks the slot, a
+ * `group/bar-session`, with `data-folded="true"`) it wraps, so in a panel
+ * capped from the body (~272px at 768px with a 480px sidebar) Terminal / Chat,
+ * the note and its time, End and the name do not overrun one another.
+ */
+const BAR_SESSION_ROW_CLASS =
+  'relative flex min-w-0 items-center gap-1.5 group-data-[folded=true]/bar-session:flex-wrap';
 /** Issue #3592: how close to the viewport's edges that editor may come. */
 const BAR_NOTE_EDITOR_MARGIN = 8;
 
@@ -1246,7 +1255,10 @@ export const TerminalSplitPane = memo(function TerminalSplitPane({
               ref={barSessionRef}
               data-testid={`split-bar-session-${splitIndex}`}
               data-split-index={splitIndex}
-              className="relative flex min-w-0 items-center gap-1.5"
+              // Issue #3651: one line on the bar; folded into the narrow "…"
+              // panel (the slot's `data-folded`), the controls wrap onto
+              // further lines (`gap-1.5` spaces the lines too).
+              className={BAR_SESSION_ROW_CLASS}
             >
               {sessionControls}
               {noteEditor}

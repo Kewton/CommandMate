@@ -759,11 +759,17 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
   );
   // Issue #3592: the lone split's session controls fold with the items.
   const sessionFolded = singleSplit && actionBarFit.itemsFolded;
+  // Issue #3651: folded, the slot is a named group with `data-folded`, so the
+  // split's row of controls portalled into it (`split-bar-session-N`) wraps
+  // onto further lines inside the narrow panel — the toggle, the note with its
+  // time, End and the name stay apart and in reach. Inline on the bar the slot
+  // is unchanged, and the row stays one line.
   const sessionSlot = singleSplit ? (
     <div
       ref={setSessionSlotEl}
       data-testid="split-action-bar-session"
-      className={`flex min-w-0 items-center${sessionFolded ? ' max-w-full' : ' ml-1'}`}
+      data-folded={sessionFolded ? 'true' : undefined}
+      className={`flex min-w-0 items-center${sessionFolded ? ' max-w-full group/bar-session' : ' ml-1'}`}
     />
   ) : null;
   const headerSlots = useMemo<SplitHeaderSlots | null>(
@@ -1287,9 +1293,14 @@ export function overflowPanelMaxWidth(viewportWidth: number, regionLeft = 0): nu
  * and the lone split's session controls — go onto further rows instead of
  * overrunning the box or each other. Each row item is capped at the box
  * (`max-w-full`, the chip's own root and the parked session slot) and shrinks
- * by truncating (`min-w-0`). Wrapping rather than scrolling: an `overflow`
- * would clip the chip's reason and the selector's menus, and keeps everything
- * in view without a scrollbar. A panel that fits stays one row, as before.
+ * by truncating (`min-w-0`); inside the slot the controls wrap too (the
+ * pane's row reads the slot's `data-folded`, see `sessionSlot`). Wrapping
+ * rather than scrolling, because the panel's job is to show every folded
+ * control at once: a scroll box hides part of them behind a scrollbar, a
+ * scrolled-away control is reached only by scrolling, and keyboard focus can
+ * land on one out of view. (The reason popover — portalled to `<body>` on PC —
+ * and the selector's Radix menu — portalled too — would not be clipped by
+ * one.) A panel that fits stays one row, as before.
  */
 const OVERFLOW_PANEL_CLASS =
   'fixed z-50 flex flex-wrap max-w-[calc(100vw-16px)] items-center gap-1 rounded-lg border border-border bg-surface p-1 shadow-lg';

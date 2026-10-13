@@ -22,6 +22,73 @@ async function box(locator: Locator): Promise<Box> {
 
 /** Mirror of SIDEBAR_WIDTH_STORAGE_KEY (src/contexts/SidebarContext.tsx). */
 const SIDEBAR_WIDTH_KEY = 'mcbd-sidebar-width';
+/** Mirror of PC_DISPLAY_SIZE_STORAGE_KEY (as in worktree-header-one-row-3590.spec.ts). */
+const PC_DISPLAY_SIZE_KEY = 'mcbd-pc-display-size';
+
+/** A note written yesterday at 14:32 (local): its stamp shows the date. */
+function yesterdayAt1432(): number {
+  const d = new Date();
+  d.setDate(d.getDate() - 1);
+  d.setHours(14, 32, 0, 0);
+  return d.getTime();
+}
+
+/**
+ * Issue #3651: the lone split's session is running (End is drawn) and carries
+ * a note from an earlier day. Registered AFTER `setupSplitTest`, so these
+ * win; everything else falls back to its catch-all.
+ */
+async function mockRunningSessionWithNote(page: Page): Promise<void> {
+  const worktree = {
+    id: E2E_WORKTREE_A,
+    name: `E2E ${E2E_WORKTREE_A}`,
+    path: `/tmp/${E2E_WORKTREE_A}`,
+    repositoryPath: `/tmp/${E2E_WORKTREE_A}-repo`,
+    repositoryName: 'e2e-repo',
+    repositoryDisplayName: 'E2E Repo',
+    description: 'E2E split test worktree',
+    selectedAgents: ['claude', 'codex', 'gemini', 'vibe-local', 'opencode', 'copilot'],
+    cliToolId: 'claude',
+    status: 'ready',
+    sessionStatusByCli: {
+      claude: { isRunning: true, isWaitingForResponse: false, isProcessing: false },
+    },
+    sessionNotes: {
+      claude: { text: 'waiting on the review of the migration', updatedAt: yesterdayAt1432() },
+    },
+    gitStatus: {
+      currentBranch: 'main',
+      initialBranch: 'main',
+      isBranchMismatch: false,
+      commitHash: 'e2e0000',
+      isDirty: false,
+    },
+  };
+  await page.route(
+    (url) => url.pathname.startsWith('/api/worktrees'),
+    async (route) => {
+      const { pathname } = new URL(route.request().url());
+      const json = (body: unknown) =>
+        route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
+      if (pathname === '/api/worktrees') return json([worktree]);
+      if (pathname === `/api/worktrees/${E2E_WORKTREE_A}`) return json(worktree);
+      if (pathname.startsWith(`/api/worktrees/${E2E_WORKTREE_A}/current-output`)) {
+        return json({
+          isRunning: true,
+          cliToolId: 'claude',
+          isGenerating: false,
+          isPromptWaiting: false,
+          content: '',
+          fullOutput: '',
+          realtimeSnippet: '',
+          thinking: false,
+          isSelectionListActive: false,
+        });
+      }
+      return route.fallback();
+    },
+  );
+}
 
 function overlaps(a: Box, b: Box): boolean {
   return a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
@@ -153,5 +220,84 @@ test.describe('Second row "…" panel beside the sidebar (Issue #3651)', () => {
     const selector = await box(panel.getByTestId('cli-selector-0'));
     // Same row: their vertical centres line up.
     expect(Math.abs(chip.y + chip.height / 2 - (selector.y + selector.height / 2))).toBeLessThan(4);
+  });
+
+  for (const size of ['medium', 'large'] as const) {
+    test(`wraps a running session with an older note inside the panel (768px, 480px sidebar, ${size})`, async ({
+      page,
+    }) => {
+      await page.addInitScript(
+        ({ widthKey, sizeKey, size: value }) => {
+          try {
+            localStorage.setItem(widthKey, '480');
+            localStorage.setItem(sizeKey, JSON.stringify(value));
+          } catch {
+            /* storage unavailable - non-fatal */
+          }
+        },
+        { widthKey: SIDEBAR_WIDTH_KEY, sizeKey: PC_DISPLAY_SIZE_KEY, size },
+      );
+      await page.setViewportSize({ width: 768, height: 768 });
+      await setupSplitTest(page, [E2E_WORKTREE_A]);
+      await mockRunningSessionWithNote(page);
+      await page.goto(`/worktrees/${E2E_WORKTREE_A}`);
+      await expect(page.locator('html')).toHaveAttribute('data-pc-size', size);
+
+      const overflow = page.getByTestId('split-action-bar-items-overflow');
+      await expect(overflow).toBeVisible();
+      await overflow.click();
+      const panel = page.getByTestId('split-action-bar-items-panel');
+      await expect(panel).toBeVisible();
+      await page.mouse.move(700, 700);
+
+      // Positive control: the conditions of the path — a running session (End
+      // is drawn) and a note from an earlier day (its stamp carries the date).
+      await expect(panel.getByTestId('terminal-end-session-button-0')).toBeVisible();
+      await expect(panel.getByTestId('split-session-note-time-0')).toHaveText(/\d+\/\d+ \d{2}:\d{2}/);
+
+      const sidebarBox = await box(page.getByTestId('sidebar-container'));
+      const panelBox = await box(panel);
+      expect(panelBox.x).toBeGreaterThanOrEqual(sidebarBox.x + sidebarBox.width);
+      expect(panelBox.x + panelBox.width).toBeLessThanOrEqual(768);
+
+      // Every control of the session row: inside the panel's box, on top, apart.
+      const ids = [
+        'cli-selector-0',
+        'surface-mode-terminal-0',
+        'surface-mode-chat-0',
+        'split-session-note-0',
+        'terminal-end-session-button-0',
+      ];
+      const boxes: Box[] = [];
+      for (const id of ids) {
+        boxes.push(await expectInsideAndReachable(page, panel.getByTestId(id), panelBox));
+      }
+      for (let i = 0; i < boxes.length; i += 1) {
+        for (let j = i + 1; j < boxes.length; j += 1) {
+          expect(overlaps(boxes[i], boxes[j])).toBe(false);
+        }
+      }
+      // The note's time is drawn inside the note, not cut off by the row.
+      const note = boxes[3];
+      const stamp = await box(panel.getByTestId('split-session-note-time-0'));
+      expect(stamp.x).toBeGreaterThanOrEqual(note.x - 0.5);
+      expect(stamp.x + stamp.width).toBeLessThanOrEqual(note.x + note.width + 0.5);
+      // The row wrapped rather than overran: nothing draws past it or the panel.
+      const row = panel.getByTestId('split-bar-session-0');
+      expect(await row.evaluate((el) => getComputedStyle(el).flexWrap)).toBe('wrap');
+      expect(await row.evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(0);
+      expect(await panel.evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(0);
+    });
+  }
+
+  test('keeps the session row one line on the bar where it fits (negative control)', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await setupSplitTest(page, [E2E_WORKTREE_A]);
+    await mockRunningSessionWithNote(page);
+    await page.goto(`/worktrees/${E2E_WORKTREE_A}`);
+    const row = page.getByTestId('split-bar-session-0');
+    await expect(row).toBeVisible();
+    await expect(page.getByTestId('split-action-bar-items-overflow')).toHaveCount(0);
+    expect(await row.evaluate((el) => getComputedStyle(el).flexWrap)).toBe('nowrap');
   });
 });
