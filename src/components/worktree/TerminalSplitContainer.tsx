@@ -759,11 +759,17 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
   );
   // Issue #3592: the lone split's session controls fold with the items.
   const sessionFolded = singleSplit && actionBarFit.itemsFolded;
+  // Issue #3651: folded, the slot is a named group with `data-folded`, so the
+  // split's row of controls portalled into it (`split-bar-session-N`) wraps
+  // onto further lines inside the narrow panel — the toggle, the note with its
+  // time, End and the name stay apart and in reach. Inline on the bar the slot
+  // is unchanged, and the row stays one line.
   const sessionSlot = singleSplit ? (
     <div
       ref={setSessionSlotEl}
       data-testid="split-action-bar-session"
-      className={`flex min-w-0 items-center${sessionFolded ? '' : ' ml-1'}`}
+      data-folded={sessionFolded ? 'true' : undefined}
+      className={`flex min-w-0 items-center${sessionFolded ? ' max-w-full group/bar-session' : ' ml-1'}`}
     />
   ) : null;
   const headerSlots = useMemo<SplitHeaderSlots | null>(
@@ -1246,21 +1252,61 @@ const OVERFLOW_PANEL_GAP = 4;
  * tab popover's `clampPopoverLeft`, with the preference flipped: this button
  * sits at the right end of its group.
  *
+ * Issue #3651: the left limit is the body's left edge (`regionLeft`, the
+ * split container's), not the viewport's. With the sidebar open at 1024px the
+ * panel is wider than the room left of "…", and a viewport-only clamp drew it
+ * from x=8 — over the sidebar.
+ *
  * @param buttonRight - The "…" button's viewport `right`
  * @param panelWidth - The panel's rendered width in px
  * @param viewportWidth - `window.innerWidth`
+ * @param regionLeft - The body region's viewport `left` (0: the viewport)
  * @returns The `left` coordinate to render at
  * @internal Exported for unit tests.
  */
 export function clampOverflowPanelLeft(
   buttonRight: number,
   panelWidth: number,
-  viewportWidth: number
+  viewportWidth: number,
+  regionLeft = 0
 ): number {
+  const minLeft = regionLeft + OVERFLOW_PANEL_MARGIN;
   const maxLeft = viewportWidth - OVERFLOW_PANEL_MARGIN - panelWidth;
-  if (maxLeft <= OVERFLOW_PANEL_MARGIN) return OVERFLOW_PANEL_MARGIN;
-  return Math.min(Math.max(buttonRight - panelWidth, OVERFLOW_PANEL_MARGIN), maxLeft);
+  if (maxLeft <= minLeft) return minLeft;
+  return Math.min(Math.max(buttonRight - panelWidth, minLeft), maxLeft);
 }
+
+/**
+ * Issue #3651: the panel's `max-width` — the room from the body's left edge to
+ * the viewport's right edge, minus a margin on each side. With `regionLeft` 0
+ * it is the former `calc(100vw - 16px)`.
+ *
+ * @internal Exported for unit tests.
+ */
+export function overflowPanelMaxWidth(viewportWidth: number, regionLeft = 0): number {
+  return Math.max(viewportWidth - regionLeft - 2 * OVERFLOW_PANEL_MARGIN, 0);
+}
+
+/**
+ * Issue #3651: the "…" panel's box. `flex-wrap`: with the width measured from
+ * the body (768px with a 480px sidebar leaves ~272px), the items — the chip
+ * and the lone split's session controls — go onto further rows instead of
+ * overrunning the box or each other. Each row item is capped at the box
+ * (`max-w-full`, the chip's own root and the parked session slot) and shrinks
+ * by truncating (`min-w-0`); inside the slot the controls wrap too (the
+ * pane's row reads the slot's `data-folded`, see `sessionSlot`). Wrapping
+ * rather than scrolling, because the panel's job is to show every folded
+ * control at once: a scroll box hides part of them behind a scrollbar, a
+ * scrolled-away control is reached only by scrolling, and keyboard focus can
+ * land on one out of view. (The reason popover — portalled to `<body>` on PC —
+ * and the selector's Radix menu — portalled too — would not be clipped by
+ * one.) A panel that fits stays one row, as before.
+ */
+const OVERFLOW_PANEL_CLASS =
+  'fixed z-50 flex flex-wrap max-w-[calc(100vw-16px)] items-center gap-1 rounded-lg border border-border bg-surface p-1 shadow-lg';
+
+/** Issue #3651: the body region the "…" panel stays inside. */
+const OVERFLOW_PANEL_REGION_SELECTOR = '[data-testid="terminal-split-container"]';
 
 /**
  * Issue #3590: the "…" button the action bar's items fold behind when the bar
@@ -1269,6 +1315,8 @@ export function clampOverflowPanelLeft(
  * group nor the terminal pane's `overflow-hidden` (beside an open file panel)
  * can cut it. Its rendered width is measured before paint and its left edge
  * clamped into the viewport on both sides ({@link clampOverflowPanelLeft}).
+ * Issue #3651: on the left, into the body — the split container's left edge,
+ * so it never covers the sidebar (the viewport when there is no container).
  *
  * Focus follows the repository tab popover: opening moves focus to the
  * panel's first control, Escape closes and hands focus back to "…". A press
@@ -1292,7 +1340,11 @@ export function ActionBarItemsOverflow({
   parked?: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
-  const [position, setPosition] = useState<{ top: number; left: number } | null>(null);
+  const [position, setPosition] = useState<{
+    top: number;
+    left: number;
+    maxWidth: number;
+  } | null>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
@@ -1301,11 +1353,18 @@ export function ActionBarItemsOverflow({
     const panel = panelRef.current;
     if (!rect || !panel) return;
     const width = panel.getBoundingClientRect().width;
+    const region = buttonRef.current?.closest(OVERFLOW_PANEL_REGION_SELECTOR);
+    const regionLeft = Math.max(region?.getBoundingClientRect().left ?? 0, 0);
     const next = {
       top: rect.bottom + OVERFLOW_PANEL_GAP,
-      left: clampOverflowPanelLeft(rect.right, width, window.innerWidth),
+      left: clampOverflowPanelLeft(rect.right, width, window.innerWidth, regionLeft),
+      maxWidth: overflowPanelMaxWidth(window.innerWidth, regionLeft),
     };
-    setPosition((prev) => (prev && prev.top === next.top && prev.left === next.left ? prev : next));
+    setPosition((prev) =>
+      prev && prev.top === next.top && prev.left === next.left && prev.maxWidth === next.maxWidth
+        ? prev
+        : next
+    );
   }, []);
 
   // Measure the rendered panel before paint (it renders hidden until placed),
@@ -1396,10 +1455,10 @@ export function ActionBarItemsOverflow({
             data-floating-layer="true"
             style={
               position
-                ? { top: position.top, left: position.left }
+                ? { top: position.top, left: position.left, maxWidth: position.maxWidth }
                 : { top: 0, left: 0, visibility: 'hidden' }
             }
-            className="fixed z-50 flex max-w-[calc(100vw-16px)] items-center gap-1 rounded-lg border border-border bg-surface p-1 shadow-lg"
+            className={OVERFLOW_PANEL_CLASS}
           >
             {children}
             {parked}

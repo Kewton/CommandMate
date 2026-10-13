@@ -9,7 +9,6 @@ import { describe, it, expect } from 'vitest';
 import {
   getNextAction,
   getReviewStatus,
-  isNextActionKey,
   NEXT_ACTION_KEYS,
 } from '@/lib/session/next-action-helper';
 import type { SessionStatus } from '@/lib/detection/status-detector';
@@ -120,23 +119,6 @@ describe('getNextAction() i18n keys (Issue #1787)', () => {
     const ja = loadWorktreeDictionary('ja').nextAction as Record<string, string>;
     expect(ja.approveReject).not.toBe(en.approveReject);
     expect(ja.replyToPrompt).not.toBe(en.replyToPrompt);
-  });
-
-  describe('isNextActionKey', () => {
-    it('accepts every key the helper can return', () => {
-      for (const key of Object.values(NEXT_ACTION_KEYS)) {
-        expect(isNextActionKey(key)).toBe(true);
-      }
-    });
-
-    // Back-compat: a server that predates #1787 still sends the old literals,
-    // and those must be rendered verbatim rather than fed to `t()`.
-    it.each(['Approve / Reject', 'Running...', 'Start', '', 'nextAction.bogus'])(
-      'rejects the legacy/unknown value %j',
-      (value) => {
-        expect(isNextActionKey(value)).toBe(false);
-      }
-    );
   });
 });
 

@@ -1013,10 +1013,10 @@ export const DesktopHeader = memo(function DesktopHeader({
       ? UNCLASSIFIED_STATUS_DOT_CLASS
       : undefined;
 
-  // Issue #1787 acceptance 4: the detail header is the third surface
-  // that has to say "an agent here is done and wants work", alongside
-  // the sidebar row and the WorktreeCard. It was missed when #1787
-  // landed because this file sat outside that Issue's scope.
+  // Issue #1787 acceptance 4: the detail header is the surface that has
+  // to say "an agent here is done and wants work" alongside the sidebar
+  // row. It was missed when #1787 landed because this file sat outside
+  // that Issue's scope.
   //
   // ONE badge for the whole row, not one per pill, which is the same
   // granularity `BranchListItem` shows (`branch.awaitingInstruction` is
