@@ -42,7 +42,49 @@ function rawRange(
   return rawStart !== null && rawEnd !== null && rawEnd >= rawStart ? { start: rawStart, end: rawEnd } : null;
 }
 
-function annotate(node: Root | RootContent, toRaw: RawOffsetMapper): void {
+/**
+ * [Issue #3554] One text child's segments: `s,e,len` for its whole range, or —
+ * when the derived string `source` it was drawn from skips raw lines inside it
+ * (chat's answer with a `> **Thinking**` section folded out between two of its
+ * lines) — one `s,e,len` per drawn line, each placed only in the raw line it
+ * came from. A single range would span the folded lines, and search would
+ * place the answer's text on the same text inside the reasoning.
+ */
+function textSegments(
+  child: ElementContent & { type: 'text' },
+  toRaw: RawOffsetMapper,
+  source: string | undefined,
+): string[] {
+  const whole = (): string[] => {
+    const range = rawRange(child, toRaw);
+    return [range ? `${range.start},${range.end},${child.value.length}` : `,,${child.value.length}`];
+  };
+  const start = offsetOf(child.position?.start);
+  const end = offsetOf(child.position?.end);
+  if (source === undefined || start === null || end === null) return whole();
+  const breaks: number[] = [];
+  for (let at = source.indexOf('\n', start); at !== -1 && at < end; at = source.indexOf('\n', at + 1)) breaks.push(at);
+  const pieces = child.value.split('\n');
+  // Each drawn line break must be one of the source's, or the pieces cannot be
+  // paired with its lines; and only a break that jumps in the raw text needs them.
+  if (breaks.length === 0 || pieces.length !== breaks.length + 1) return whole();
+  const jumps = breaks.some((at) => {
+    const before = toRaw(at);
+    const after = toRaw(at + 1);
+    return before === null || after === null || before + 1 !== after;
+  });
+  if (!jumps) return whole();
+  return pieces.map((piece, k) => {
+    const isLast = k === pieces.length - 1;
+    const length = piece.length + (isLast ? 0 : 1);
+    const rawStart = toRaw(k === 0 ? start : breaks[k - 1] + 1);
+    const lineEnd = toRaw(isLast ? end : breaks[k]);
+    const rawEnd = lineEnd === null ? null : lineEnd + (isLast ? 0 : 1);
+    return rawStart !== null && rawEnd !== null && rawEnd >= rawStart ? `${rawStart},${rawEnd},${length}` : `,,${length}`;
+  });
+}
+
+function annotate(node: Root | RootContent, toRaw: RawOffsetMapper, source: string | undefined): void {
   if (node.type !== 'root' && node.type !== 'element') return;
   if (node.type === 'element') {
     const own = rawRange(node, toRaw);
@@ -50,13 +92,12 @@ function annotate(node: Root | RootContent, toRaw: RawOffsetMapper): void {
       const items = [`${own.start},${own.end}`];
       for (const child of node.children) {
         if (child.type !== 'text') continue;
-        const range = rawRange(child, toRaw);
-        items.push(range ? `${range.start},${range.end},${child.value.length}` : `,,${child.value.length}`);
+        items.push(...textSegments(child, toRaw, source));
       }
       node.properties = { ...node.properties, [SEARCH_RAW_PROPERTY]: items.join(';') };
     }
   }
-  for (const child of node.children) annotate(child, toRaw);
+  for (const child of node.children) annotate(child, toRaw, source);
 }
 
 /**
@@ -66,11 +107,16 @@ function annotate(node: Root | RootContent, toRaw: RawOffsetMapper): void {
  * the part cannot be mapped, and nothing is marked. Run it after sanitizing
  * (the schema would drop the attribute) and before code highlighting (which
  * replaces a code block's text with spans — the same text, unmarked).
+ *
+ * [Issue #3554] `source` is that string (react-markdown's file value when not
+ * given): with it, a text child whose lines come from raw lines that are not
+ * next to each other is placed line by line ({@link textSegments}).
  */
-export function rehypeSearchRawText(options?: { toRaw?: RawOffsetMapper | null }) {
+export function rehypeSearchRawText(options?: { toRaw?: RawOffsetMapper | null; source?: string }) {
   const toRaw = options?.toRaw === undefined ? IDENTITY_RAW_OFFSET : options.toRaw;
-  return (tree: Root): void => {
-    if (toRaw) annotate(tree, toRaw);
+  return (tree: Root, file?: { value?: unknown }): void => {
+    const source = options?.source ?? (typeof file?.value === 'string' ? file.value : undefined);
+    if (toRaw) annotate(tree, toRaw, source);
   };
 }
 

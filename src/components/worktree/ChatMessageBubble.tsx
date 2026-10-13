@@ -892,14 +892,20 @@ export const ChatMarkdownBody = memo(function ChatMarkdownBody({
   // text reads them too (`rehypeSearchRawText`), diagrams or not.
   const rawOffsets = useMemo(() => chatMarkdownRawOffsets(content, split), [content, split]);
   const rehypePlugins = useMemo(() => {
-    const forPart = (toRaw: RawOffsetMapper | null) =>
+    // [#3554] `source` is the part itself, so a paragraph whose lines sit on
+    // either side of a folded section is placed line by line.
+    const forPart = (toRaw: RawOffsetMapper | null, source: string) =>
       [
         [rehypeSanitize, CHAT_SANITIZE_SCHEMA],
-        [rehypeSearchRawText, { toRaw }],
+        [rehypeSearchRawText, { toRaw, source }],
         rehypeHighlight,
       ] as NonNullable<React.ComponentProps<typeof ReactMarkdown>['rehypePlugins']>;
-    return { body: forPart(rawOffsets.body), reasoning: forPart(rawOffsets.reasoning), toolLog: forPart(rawOffsets.toolLog) };
-  }, [rawOffsets]);
+    return {
+      body: forPart(rawOffsets.body, split.body),
+      reasoning: forPart(rawOffsets.reasoning, split.reasoning ?? ''),
+      toolLog: forPart(rawOffsets.toolLog, split.toolLog),
+    };
+  }, [rawOffsets, split]);
 
   return (
     <>
