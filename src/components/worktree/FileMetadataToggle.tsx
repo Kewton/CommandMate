@@ -60,6 +60,21 @@ function clampShift(start: number, size: number, viewport: number): number {
   return 0;
 }
 
+/**
+ * Whether an Escape aimed at `target` belongs to the menu: pressed from the
+ * gear / the menu itself, or with nothing focused (the page body — focus was
+ * dropped). Anything else is a screen in front of the menu. [Issue #3650]
+ */
+function isOwnEscapeTarget(target: EventTarget | null, container: HTMLElement | null): boolean {
+  if (
+    typeof document !== 'undefined' &&
+    (target === document || target === document.body || target === document.documentElement)
+  ) {
+    return true;
+  }
+  return target instanceof Node && container !== null && container.contains(target);
+}
+
 export const FileMetadataToggle = memo(function FileMetadataToggle({
   settings,
   onToggle,
@@ -68,12 +83,34 @@ export const FileMetadataToggle = memo(function FileMetadataToggle({
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
   const shiftRef = useRef({ x: 0, y: 0 });
   const [shift, setShift] = useState({ x: 0, y: 0 });
 
-  // Close the popover when clicking outside or pressing Escape.
+  // Close the popover when clicking outside, moving focus outside or pressing
+  // Escape.
   useEffect(() => {
     if (!open) return undefined;
+    // Issue #3650: while open, focus is on the gear, in the menu or nowhere
+    // (the page body) — never on another element. A click does not move focus
+    // everywhere (Safari leaves it where it was), so take it to the gear, and
+    // close as soon as it lands outside (Tab to a file row, a screen opening
+    // in front). That keeps every Escape pressed while the menu is up aimed at
+    // the menu, unless a screen in front has the focus — and then the menu
+    // is already closed.
+    const container = containerRef.current;
+    if (container && !container.contains(document.activeElement)) {
+      buttonRef.current?.focus();
+    }
+    const onFocusIn = (e: FocusEvent): void => {
+      if (
+        e.target instanceof Node &&
+        containerRef.current &&
+        !containerRef.current.contains(e.target)
+      ) {
+        setOpen(false);
+      }
+    };
     const onPointerDown = (e: MouseEvent): void => {
       if (
         containerRef.current &&
@@ -84,12 +121,28 @@ export const FileMetadataToggle = memo(function FileMetadataToggle({
     };
     const onKeyDown = (e: KeyboardEvent): void => {
       // Issue #3611: an Escape a layer above already handled is not ours.
-      if (isUnhandledEscape(e)) setOpen(false);
+      if (!isUnhandledEscape(e)) return;
+      // Issue #3650: nor one pressed in a screen that came up in front of the
+      // menu (the mobile FileViewer, a maximized file panel) — that screen's
+      // window listener runs after this one and must get the press first.
+      if (!isOwnEscapeTarget(e.target, containerRef.current)) return;
+      // Issue #3650: ours — claim it so window-level layers below (a tooltip,
+      // a maximized file panel) leave it alone. The overlaid activity pane's
+      // document listener runs before this one, so it is held off by the
+      // menu's `data-floating-layer` mark instead.
+      e.preventDefault();
+      // Issue #3650: back to the gear, like the header tools' "…" list — the
+      // focused item goes away with the menu, and focus dropped to the body
+      // would leave a pinned activity pane deaf to the next Escape.
+      buttonRef.current?.focus();
+      setOpen(false);
     };
     document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('focusin', onFocusIn);
     document.addEventListener('keydown', onKeyDown);
     return () => {
       document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('focusin', onFocusIn);
       document.removeEventListener('keydown', onKeyDown);
     };
   }, [open]);
@@ -124,8 +177,13 @@ export const FileMetadataToggle = memo(function FileMetadataToggle({
   );
 
   return (
-    <div className="relative" ref={containerRef} data-testid="file-metadata-toggle">
+    <div
+      className="relative"
+      ref={containerRef}
+      data-testid="file-metadata-toggle"
+    >
       <button
+        ref={buttonRef}
         type="button"
         data-testid="file-metadata-toggle-button"
         onClick={() => setOpen((prev) => !prev)}
@@ -143,6 +201,11 @@ export const FileMetadataToggle = memo(function FileMetadataToggle({
           ref={menuRef}
           role="menu"
           data-testid="file-metadata-toggle-menu"
+          // Issue #3650: an open floating layer like the file tree's
+          // `ContextMenu` (#3589) — while it is up, an Esc or an outside press
+          // closes it and not the overlaid activity pane around it
+          // (`OPEN_FLOATING_LAYER_SELECTOR` in hooks/useActivityPaneOverlay).
+          data-floating-layer="open"
           className="absolute right-0 top-full z-20 mt-1 min-w-[12rem] rounded border border-border bg-surface shadow-lg p-1"
           style={
             shift.x !== 0 || shift.y !== 0
