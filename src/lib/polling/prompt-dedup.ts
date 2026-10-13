@@ -163,28 +163,55 @@ export function clearPromptHashCache(pollerKey: string): void {
  * re-save the prompt it is currently sitting on as a fresh message, which is
  * the duplicate this module exists to prevent.
  *
- * No-op when nothing is cached under `oldKey`.
+ * No-op when nothing is cached under `oldKey`. A batch of renames whose keys
+ * overlap must go through {@link renamePromptHashCacheKeys} instead.
  *
  * @param oldKey - Poller key the cache entry lives under
  * @param newKey - Poller key it should live under
  */
 export function renamePromptHashCacheKey(oldKey: string, newKey: string): void {
-  if (oldKey === newKey) return;
-  const hash = promptHashCache.get(oldKey);
-  const streak = duplicatePromptSkipStreak.get(oldKey);
-  promptHashCache.delete(oldKey);
-  duplicatePromptSkipStreak.delete(oldKey);
-  if (hash === undefined) return;
-  promptHashCache.set(newKey, hash);
+  renamePromptHashCacheKeys([{ oldKey, newKey }]);
+}
 
-  // Issue #3538: the skip count moves with the hash, so a rename mid-run does
-  // not restart the thinning and log as if a new run had begun. Whenever the
-  // hash under `newKey` is replaced, so is its count — a count left over from
-  // the hash that was there before is about a different prompt.
-  if (streak !== undefined) {
-    duplicatePromptSkipStreak.set(newKey, streak);
-  } else {
-    duplicatePromptSkipStreak.delete(newKey);
+/**
+ * Move the prompt hash and its skip count for a whole batch of pollerKeys
+ * (Issue #3553).
+ *
+ * Every source key is lifted before any destination is written, so a swap
+ * (A→B, B→A) or a chain (A→B→C) cannot overwrite a source that has not moved
+ * yet. Per pair this is exactly {@link renamePromptHashCacheKey}: nothing
+ * happens at the destination when the source held no hash.
+ *
+ * @param renames - Poller key moves applied together; `oldKey === newKey` is ignored
+ */
+export function renamePromptHashCacheKeys(
+  renames: ReadonlyArray<{ oldKey: string; newKey: string }>
+): void {
+  const lifted: Array<{ newKey: string; hash: string | undefined; streak: number | undefined }> = [];
+  for (const { oldKey, newKey } of renames) {
+    if (oldKey === newKey) continue;
+    lifted.push({
+      newKey,
+      hash: promptHashCache.get(oldKey),
+      streak: duplicatePromptSkipStreak.get(oldKey),
+    });
+    promptHashCache.delete(oldKey);
+    duplicatePromptSkipStreak.delete(oldKey);
+  }
+
+  for (const { newKey, hash, streak } of lifted) {
+    if (hash === undefined) continue;
+    promptHashCache.set(newKey, hash);
+
+    // Issue #3538: the skip count moves with the hash, so a rename mid-run does
+    // not restart the thinning and log as if a new run had begun. Whenever the
+    // hash under `newKey` is replaced, so is its count — a count left over from
+    // the hash that was there before is about a different prompt.
+    if (streak !== undefined) {
+      duplicatePromptSkipStreak.set(newKey, streak);
+    } else {
+      duplicatePromptSkipStreak.delete(newKey);
+    }
   }
 }
 

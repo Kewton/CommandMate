@@ -294,6 +294,72 @@ export function clearResponseHashCache(pollerKey: string): void {
   duplicateResponseSkipStreak.delete(pollerKey);
 }
 
+/** One pollerKey's worth of response dedup state, lifted off its key (Issue #3553). */
+interface ResponseDedupState {
+  hash: string | undefined;
+  recheck: number | undefined;
+  streak: number | undefined;
+}
+
+/** A pollerKey move, as {@link renameResponseHashCacheKeys} takes it. */
+export interface PollerKeyRename {
+  oldKey: string;
+  newKey: string;
+}
+
+/** Remove everything held under `key` and return it. */
+function takeResponseDedupState(key: string): ResponseDedupState {
+  const state: ResponseDedupState = {
+    hash: responseHashCache.get(key),
+    recheck: structuredHistoryRecheckCache.get(key),
+    streak: duplicateResponseSkipStreak.get(key),
+  };
+  responseHashCache.delete(key);
+  structuredHistoryRecheckCache.delete(key);
+  duplicateResponseSkipStreak.delete(key);
+  return state;
+}
+
+/**
+ * Write state lifted by {@link takeResponseDedupState} under `key`.
+ *
+ * `replaceRecheckWithHash` is the one difference between the batch and the
+ * single rename (Issue #3553): when a hash lands, the batch also replaces the
+ * recheck under `key` — deleting it when the source had none — so a recheck
+ * owed for a different turn is not attached to the hash that just arrived. The
+ * single rename keeps its earlier behaviour and leaves such a recheck alone.
+ */
+function putResponseDedupState(
+  key: string,
+  state: ResponseDedupState,
+  replaceRecheckWithHash: boolean
+): void {
+  if (state.hash !== undefined) responseHashCache.set(key, state.hash);
+
+  // Issue #2399: the recheck caveat moves with the hash it is about. Leaving it
+  // behind would strand a turn whose transcript is still open — the new key
+  // starts owing nothing, so every later tick returns at the dedup guard and the
+  // Markdown row is never written. It moves without a hash too: the
+  // `lineCountIsCursor` path marks it with no hash cached.
+  if (state.recheck !== undefined) {
+    structuredHistoryRecheckCache.set(key, state.recheck);
+  } else if (replaceRecheckWithHash && state.hash !== undefined) {
+    structuredHistoryRecheckCache.delete(key);
+  }
+
+  // Issue #3519: the skip count moves with the hash too, so a rename mid-run
+  // does not restart the thinning and log as if a new run had begun.
+  // Issue #3552: whenever the hash under `newKey` is replaced, so is its count
+  // — a count left over from the hash that was there before is about a
+  // different reply (the same rule as `renamePromptHashCacheKey`, #3538).
+  if (state.hash === undefined) return;
+  if (state.streak !== undefined) {
+    duplicateResponseSkipStreak.set(key, state.streak);
+  } else {
+    duplicateResponseSkipStreak.delete(key);
+  }
+}
+
 /**
  * Move the cached hash from one pollerKey to another.
  *
@@ -302,36 +368,37 @@ export function clearResponseHashCache(pollerKey: string): void {
  * during THIS turn?", and the turn does not end just because the ID moved —
  * dropping it would re-save the screen currently on display.
  *
- * No-op when nothing is cached under `oldKey`.
+ * No-op when nothing is cached under `oldKey`. A batch of renames whose keys
+ * overlap must go through {@link renameResponseHashCacheKeys} instead.
  *
  * @param oldKey - Poller key the cache entry lives under
  * @param newKey - Poller key it should live under
  */
 export function renameResponseHashCacheKey(oldKey: string, newKey: string): void {
   if (oldKey === newKey) return;
-  const hash = responseHashCache.get(oldKey);
-  responseHashCache.delete(oldKey);
-  if (hash !== undefined) responseHashCache.set(newKey, hash);
+  putResponseDedupState(newKey, takeResponseDedupState(oldKey), false);
+}
 
-  // Issue #2399: the recheck caveat moves with the hash it is about. Leaving it
-  // behind would strand a turn whose transcript is still open — the new key
-  // starts owing nothing, so every later tick returns at the dedup guard and the
-  // Markdown row is never written.
-  const ticksToWait = structuredHistoryRecheckCache.get(oldKey);
-  structuredHistoryRecheckCache.delete(oldKey);
-  if (ticksToWait !== undefined) structuredHistoryRecheckCache.set(newKey, ticksToWait);
-
-  // Issue #3519: the skip count moves with the hash too, so a rename mid-run
-  // does not restart the thinning and log as if a new run had begun.
-  // Issue #3552: whenever the hash under `newKey` is replaced, so is its count
-  // — a count left over from the hash that was there before is about a
-  // different reply (the same rule as `renamePromptHashCacheKey`, #3538).
-  const streak = duplicateResponseSkipStreak.get(oldKey);
-  duplicateResponseSkipStreak.delete(oldKey);
-  if (hash === undefined) return;
-  if (streak !== undefined) {
-    duplicateResponseSkipStreak.set(newKey, streak);
-  } else {
-    duplicateResponseSkipStreak.delete(newKey);
+/**
+ * Move the response dedup state of a whole batch of pollerKeys (Issue #3553).
+ *
+ * Every source key is lifted before any destination is written, so a swap
+ * (A→B, B→A) or a chain (A→B→C) cannot overwrite a source that has not moved
+ * yet — calling {@link renameResponseHashCacheKey} once per pair would leave
+ * A with its own state and B empty after a swap. Each destination ends up with
+ * exactly what its source held: hash, skip count and recheck, the recheck
+ * moving even without a hash. A recheck already at the destination is
+ * replaced along with the hash, never kept beside the moved one.
+ *
+ * Pairs with `oldKey === newKey` are ignored.
+ *
+ * @param renames - Poller key moves applied together
+ */
+export function renameResponseHashCacheKeys(renames: ReadonlyArray<PollerKeyRename>): void {
+  const lifted: Array<{ newKey: string; state: ResponseDedupState }> = [];
+  for (const { oldKey, newKey } of renames) {
+    if (oldKey === newKey) continue;
+    lifted.push({ newKey, state: takeResponseDedupState(oldKey) });
   }
+  for (const { newKey, state } of lifted) putResponseDedupState(newKey, state, true);
 }
