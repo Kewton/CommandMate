@@ -763,7 +763,7 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
     <div
       ref={setSessionSlotEl}
       data-testid="split-action-bar-session"
-      className={`flex min-w-0 items-center${sessionFolded ? '' : ' ml-1'}`}
+      className={`flex min-w-0 items-center${sessionFolded ? ' max-w-full' : ' ml-1'}`}
     />
   ) : null;
   const headerSlots = useMemo<SplitHeaderSlots | null>(
@@ -1281,6 +1281,19 @@ export function overflowPanelMaxWidth(viewportWidth: number, regionLeft = 0): nu
   return Math.max(viewportWidth - regionLeft - 2 * OVERFLOW_PANEL_MARGIN, 0);
 }
 
+/**
+ * Issue #3651: the "…" panel's box. `flex-wrap`: with the width measured from
+ * the body (768px with a 480px sidebar leaves ~272px), the items — the chip
+ * and the lone split's session controls — go onto further rows instead of
+ * overrunning the box or each other. Each row item is capped at the box
+ * (`max-w-full`, the chip's own root and the parked session slot) and shrinks
+ * by truncating (`min-w-0`). Wrapping rather than scrolling: an `overflow`
+ * would clip the chip's reason and the selector's menus, and keeps everything
+ * in view without a scrollbar. A panel that fits stays one row, as before.
+ */
+const OVERFLOW_PANEL_CLASS =
+  'fixed z-50 flex flex-wrap max-w-[calc(100vw-16px)] items-center gap-1 rounded-lg border border-border bg-surface p-1 shadow-lg';
+
 /** Issue #3651: the body region the "…" panel stays inside. */
 const OVERFLOW_PANEL_REGION_SELECTOR = '[data-testid="terminal-split-container"]';
 
@@ -1434,7 +1447,7 @@ export function ActionBarItemsOverflow({
                 ? { top: position.top, left: position.left, maxWidth: position.maxWidth }
                 : { top: 0, left: 0, visibility: 'hidden' }
             }
-            className="fixed z-50 flex max-w-[calc(100vw-16px)] items-center gap-1 rounded-lg border border-border bg-surface p-1 shadow-lg"
+            className={OVERFLOW_PANEL_CLASS}
           >
             {children}
             {parked}
