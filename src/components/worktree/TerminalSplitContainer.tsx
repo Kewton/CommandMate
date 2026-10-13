@@ -91,7 +91,12 @@ import { Tooltip } from '@/components/common/Tooltip';
 import { useSplitActionBarFit } from '@/hooks/useDesktopHeaderFit';
 import { PaneResizer, type ResizerOrientation } from './PaneResizer';
 import { SplitHeaderSlotsProvider, type SplitHeaderSlots } from './SplitPaneHeaderControls';
-import { isUnhandledEscape, markEscapeClosedLayer } from '@/lib/escape-key';
+import {
+  isCoveredByViewportLayer,
+  isUnhandledEscape,
+  markEscapeClosedLayer,
+} from '@/lib/escape-key';
+import { Z_INDEX } from '@/config/z-index';
 
 /**
  * Issue #2421: thickness of the grid's two divider TRACKS, in px.
@@ -1303,7 +1308,13 @@ export function overflowPanelMaxWidth(viewportWidth: number, regionLeft = 0): nu
  * one.) A panel that fits stays one row, as before.
  */
 const OVERFLOW_PANEL_CLASS =
-  'fixed z-50 flex flex-wrap max-w-[calc(100vw-16px)] items-center gap-1 rounded-lg border border-border bg-surface p-1 shadow-lg';
+  'fixed flex flex-wrap max-w-[calc(100vw-16px)] items-center gap-1 rounded-lg border border-border bg-surface p-1 shadow-lg';
+
+/**
+ * Issue #3670: the "…" panel's z-index, inline (not a `z-50` class) so the
+ * Escape handler can read where it actually stacks against a viewport layer.
+ */
+const OVERFLOW_PANEL_Z_INDEX = Z_INDEX.MODAL;
 
 /** Issue #3651: the body region the "…" panel stays inside. */
 const OVERFLOW_PANEL_REGION_SELECTOR = '[data-testid="terminal-split-container"]';
@@ -1333,9 +1344,13 @@ const OVERFLOW_PANEL_REGION_SELECTOR = '[data-testid="terminal-split-container"]
  * (its document listener comes after the panel's) still closes with the panel
  * on an Escape neither the chip nor anything above claimed.
  *
- * Issue #3670: for the same reason the panel only marks the Escape it closes
- * on ({@link markEscapeClosedLayer}), which a maximized file under it reads, so
- * one press closes the panel and leaves the file maximized.
+ * Issue #3670: Escape closes the front layer first. The maximized file
+ * (`Z_INDEX.MAXIMIZED_EDITOR`, a `fixed inset-0` portal) covers the panel
+ * (`Z_INDEX.MODAL`), so while it does the panel leaves the press alone
+ * ({@link isCoveredByViewportLayer}) and the file un-maximizes; the panel,
+ * now in sight, closes on the next one. In front of a maximized file, the
+ * panel only marks the Escape it closes on ({@link markEscapeClosedLayer}),
+ * for the same reason as above, and the file stays maximized.
  *
  * Issue #3592: `parked` is drawn after `children` while the panel is open,
  * and in a hidden box beside the button while it is closed — for a slot
@@ -1421,8 +1436,10 @@ export function ActionBarItemsOverflow({
       // folded agent selector's menu closing itself) is not ours to act on.
       // Issue #3591: nor one the header tools' "…" list closed itself with.
       if (!isUnhandledEscape(event)) return;
-      // Issue #3670: and tell the maximized file under it (a window listener)
-      // that this press is spent — without claiming it from the chip's reason.
+      // Issue #3670: behind a maximized file the press is the file's to close.
+      if (panelRef.current && isCoveredByViewportLayer(panelRef.current)) return;
+      // In front of one, tell it (a window listener) that this press is spent
+      // — without claiming it from the chip's reason.
       markEscapeClosedLayer(event);
       setOpen(false);
       buttonRef.current?.focus();
@@ -1471,8 +1488,13 @@ export function ActionBarItemsOverflow({
             data-floating-layer="open"
             style={
               position
-                ? { top: position.top, left: position.left, maxWidth: position.maxWidth }
-                : { top: 0, left: 0, visibility: 'hidden' }
+                ? {
+                    top: position.top,
+                    left: position.left,
+                    maxWidth: position.maxWidth,
+                    zIndex: OVERFLOW_PANEL_Z_INDEX,
+                  }
+                : { top: 0, left: 0, visibility: 'hidden', zIndex: OVERFLOW_PANEL_Z_INDEX }
             }
             className={OVERFLOW_PANEL_CLASS}
           >

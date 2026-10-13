@@ -41,3 +41,36 @@ export function markEscapeClosedLayer(event: KeyboardEvent): void {
 export function isEscapeNoLayerClosed(event: KeyboardEvent): boolean {
   return isUnhandledEscape(event) && !closedLayerEscapes.has(event);
 }
+
+/**
+ * Attribute a layer covering the whole viewport carries (Issue #3670): the
+ * maximized file overlay (`fixed inset-0`, portalled to `<body>`).
+ */
+export const VIEWPORT_LAYER_ATTRIBUTE = 'data-viewport-layer';
+
+function stackOrder(element: Element): number | null {
+  const z = Number.parseInt(getComputedStyle(element).zIndex, 10);
+  return Number.isNaN(z) ? null : z;
+}
+
+/**
+ * True when a viewport layer is drawn over `element` (Issue #3670), read from
+ * the z-index both actually have — higher, or equal and later in the document.
+ * Both must be in the root stacking context (portalled to `<body>`), as the
+ * second row's "…" panel and the maximized file are. A layer behind it is not
+ * the front one: an Escape is the front layer's to close on first.
+ */
+export function isCoveredByViewportLayer(element: Element): boolean {
+  const own = stackOrder(element);
+  if (own === null) return false;
+  return Array.from(document.querySelectorAll(`[${VIEWPORT_LAYER_ATTRIBUTE}]`)).some((layer) => {
+    if (layer.contains(element) || element.contains(layer)) return false;
+    const z = stackOrder(layer);
+    if (z === null) return false;
+    return (
+      z > own ||
+      (z === own &&
+        (element.compareDocumentPosition(layer) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0)
+    );
+  });
+}
