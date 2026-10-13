@@ -45,6 +45,14 @@
  *     — a menu or list closing itself) leaves the bubble alone. The listener
  *     is on `window` in the bubble phase, so every document-level layer has
  *     handled the press first.
+ *   - [Issue #3650] Decided: the bubble does NOT claim Escape for itself
+ *     (no `preventDefault`, no capture listener to get ahead of the overlaid
+ *     activity pane's document listener). Focus opens the bubble at once, so
+ *     after clicking a header tool its bubble is up on that very icon — the
+ *     spot the operator presses Escape from to close the pane it opened. A
+ *     bubble that swallowed the press would turn that into two presses for a
+ *     hint that is `aria-hidden`, holds no state and is gone after the same
+ *     press anyway.
  */
 
 'use client';
@@ -467,6 +475,8 @@ export function Tooltip({
   // [Issue #2319] Escape dismisses a visible bubble (WAI-ARIA tooltip pattern).
   // Bound on `window` rather than the wrapper so it also fires in the hover
   // case, where focus is on some other element entirely.
+  // Issue #3650: deliberately not `preventDefault`ed — the same press still
+  // closes the activity pane opened from this icon (see the header comment).
   useEffect(() => {
     if (!visible) return;
     const onKeyDown = (event: KeyboardEvent): void => {
