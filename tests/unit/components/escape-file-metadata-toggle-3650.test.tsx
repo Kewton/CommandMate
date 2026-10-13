@@ -65,6 +65,7 @@ function Pane({ onDismiss }: { onDismiss: () => void }) {
   return (
     <div ref={panelRef} data-testid="pane" {...panelProps}>
       <FileMetadataToggle settings={SETTINGS} onToggle={vi.fn()} />
+      <button type="button" data-testid="pane-row">readme.md</button>
     </div>
   );
 }
@@ -303,5 +304,49 @@ describe('FileMetadataToggle left open behind a screen in front (Issue #3650, co
       window.removeEventListener('keydown', onWindowKeyDown);
     }
     expect(seen).toEqual([true, true]);
+  });
+});
+
+describe('FileMetadataToggle never stuck open with focus outside it (Issue #3650, re-review)', () => {
+  function activeOrBody(): Element {
+    return (document.activeElement as Element | null) ?? document.body;
+  }
+
+  it('closes on Escape when a click opened it while focus stayed on another element', () => {
+    render(<Screen />);
+    const row = screen.getByTestId('pane-row');
+    act(() => row.focus());
+    // fireEvent.click does not move focus — like Safari, focus stays on the row.
+    fireEvent.click(screen.getByTestId('file-metadata-toggle-button'));
+    expect(screen.getByTestId('file-metadata-toggle-menu')).toBeDefined();
+
+    pressEscape(activeOrBody());
+    expect(screen.queryByTestId('file-metadata-toggle-menu')).toBeNull();
+    expect(screen.queryByTestId('pane')).not.toBeNull();
+
+    pressEscape(activeOrBody());
+    expect(screen.queryByTestId('pane')).toBeNull();
+  });
+
+  it('closes when focus lands outside after a blur that went nowhere', () => {
+    render(<Screen />);
+    const gear = screen.getByTestId('file-metadata-toggle-button');
+    act(() => gear.focus());
+    fireEvent.click(gear);
+    act(() => gear.blur());
+    expect(screen.queryByTestId('file-metadata-toggle-menu')).not.toBeNull();
+
+    act(() => screen.getByTestId('pane-row').focus());
+    pressEscape(activeOrBody());
+    expect(screen.queryByTestId('file-metadata-toggle-menu')).toBeNull();
+  });
+
+  it('keeps focus where it is when it is already on the gear (negative control)', () => {
+    render(<Screen />);
+    const gear = screen.getByTestId('file-metadata-toggle-button');
+    act(() => gear.focus());
+    fireEvent.click(gear);
+    expect(document.activeElement).toBe(gear);
+    expect(screen.getByTestId('file-metadata-toggle-menu')).toBeDefined();
   });
 });

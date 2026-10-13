@@ -62,8 +62,8 @@ function clampShift(start: number, size: number, viewport: number): number {
 
 /**
  * Whether an Escape aimed at `target` belongs to the menu: pressed from the
- * gear / the menu itself, or with nothing focused (the page body — a mouse
- * opened the menu without moving focus). [Issue #3650]
+ * gear / the menu itself, or with nothing focused (the page body — focus was
+ * dropped). Anything else is a screen in front of the menu. [Issue #3650]
  */
 function isOwnEscapeTarget(target: EventTarget | null, container: HTMLElement | null): boolean {
   if (
@@ -83,12 +83,34 @@ export const FileMetadataToggle = memo(function FileMetadataToggle({
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
   const shiftRef = useRef({ x: 0, y: 0 });
   const [shift, setShift] = useState({ x: 0, y: 0 });
 
-  // Close the popover when clicking outside or pressing Escape.
+  // Close the popover when clicking outside, moving focus outside or pressing
+  // Escape.
   useEffect(() => {
     if (!open) return undefined;
+    // Issue #3650: while open, focus is on the gear, in the menu or nowhere
+    // (the page body) — never on another element. A click does not move focus
+    // everywhere (Safari leaves it where it was), so take it to the gear, and
+    // close as soon as it lands outside (Tab to a file row, a screen opening
+    // in front). That keeps every Escape pressed while the menu is up aimed at
+    // the menu, unless a screen in front has the focus — and then the menu
+    // is already closed.
+    const container = containerRef.current;
+    if (container && !container.contains(document.activeElement)) {
+      buttonRef.current?.focus();
+    }
+    const onFocusIn = (e: FocusEvent): void => {
+      if (
+        e.target instanceof Node &&
+        containerRef.current &&
+        !containerRef.current.contains(e.target)
+      ) {
+        setOpen(false);
+      }
+    };
     const onPointerDown = (e: MouseEvent): void => {
       if (
         containerRef.current &&
@@ -112,9 +134,11 @@ export const FileMetadataToggle = memo(function FileMetadataToggle({
       setOpen(false);
     };
     document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('focusin', onFocusIn);
     document.addEventListener('keydown', onKeyDown);
     return () => {
       document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('focusin', onFocusIn);
       document.removeEventListener('keydown', onKeyDown);
     };
   }, [open]);
@@ -141,15 +165,6 @@ export const FileMetadataToggle = memo(function FileMetadataToggle({
     });
   }, [open]);
 
-  // Issue #3650: focus leaving for something else (Tab to a file row, whose
-  // Enter opens the file in front) closes the menu, like a click outside
-  // does — a menu left open behind would sit on that screen's Escape.
-  // A blur with no new focus (the window losing focus) keeps it open.
-  const handleBlur = useCallback((e: React.FocusEvent<HTMLDivElement>) => {
-    const next = e.relatedTarget;
-    if (next instanceof Node && !e.currentTarget.contains(next)) setOpen(false);
-  }, []);
-
   const handleToggle = useCallback(
     (key: keyof FileMetadataDisplaySettings) => {
       onToggle(key);
@@ -162,9 +177,9 @@ export const FileMetadataToggle = memo(function FileMetadataToggle({
       className="relative"
       ref={containerRef}
       data-testid="file-metadata-toggle"
-      onBlur={open ? handleBlur : undefined}
     >
       <button
+        ref={buttonRef}
         type="button"
         data-testid="file-metadata-toggle-button"
         onClick={() => setOpen((prev) => !prev)}
