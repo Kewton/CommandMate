@@ -45,8 +45,11 @@ interface RawSpan {
  * as the raw spans its lines came from: one span when they are next to each
  * other there, several when the deriver left raw lines out between them
  * (chat's answer with a `> **Thinking**` section folded out from between two
- * of its lines). A span ends after its line's raw `\n`. `null` when some line
- * does not map. Without `source` the line breaks are unknown: the two ends.
+ * of its lines). A span ends after its line's raw `\n`. A line no raw line
+ * holds (the blank line chat makes up to join two reasoning sections) is a gap
+ * too (Issue #3661: a code block across the join kept nothing). `null` when no
+ * line maps, or a line maps at one end only. Without `source` the line breaks
+ * are unknown: the two ends.
  */
 function rawSpans(start: number, end: number, toRaw: RawOffsetMapper, source: string | undefined): RawSpan[] | null {
   const ends = (): RawSpan[] | null => {
@@ -61,13 +64,15 @@ function rawSpans(start: number, end: number, toRaw: RawOffsetMapper, source: st
     const isLast = at === -1 || at >= end;
     const rawStart = toRaw(lineStart);
     const lineEnd = toRaw(isLast ? end : at);
-    if (rawStart === null || lineEnd === null) return null;
-    const rawEnd = lineEnd + (isLast ? 0 : 1);
-    if (rawEnd < rawStart) return null;
-    const previous = spans[spans.length - 1];
-    if (previous && previous.end === rawStart) previous.end = rawEnd;
-    else spans.push({ start: rawStart, end: rawEnd });
-    if (isLast) return spans;
+    if ((rawStart === null) !== (lineEnd === null)) return null;
+    if (rawStart !== null && lineEnd !== null) {
+      const rawEnd = lineEnd + (isLast ? 0 : 1);
+      if (rawEnd < rawStart) return null;
+      const previous = spans[spans.length - 1];
+      if (previous && previous.end === rawStart) previous.end = rawEnd;
+      else spans.push({ start: rawStart, end: rawEnd });
+    }
+    if (isLast) return spans.length > 0 ? spans : null;
     lineStart = at + 1;
   }
 }
@@ -202,48 +207,170 @@ function parseAttr(value: string): { start: number; end: number; spans: RawSpan[
   return { start: spans[0].start, end: spans[spans.length - 1].end, spans, segments };
 }
 
+const CHARACTER_REFERENCE = /&(?:#([0-9]{1,7})|#[xX]([0-9a-fA-F]{1,6})|([A-Za-z][A-Za-z0-9]{0,31}));/y;
+
+const isWhitespace = (unit: string): boolean => /\s/.test(unit);
+
+/**
+ * What a numeric reference draws, as micromark decodes it: a code point that
+ * is not a character to draw (a control, a surrogate, a noncharacter, past
+ * U+10FFFF) draws U+FFFD.
+ */
+function drawnByNumber(code: number): string {
+  if (
+    code < 9 ||
+    code === 11 ||
+    (code > 13 && code < 32) ||
+    (code > 126 && code < 160) ||
+    (code > 55295 && code < 57344) ||
+    (code > 64975 && code < 65008) ||
+    (code & 65535) === 65535 ||
+    (code & 65535) === 65534 ||
+    code > 1114111
+  ) {
+    return '\uFFFD';
+  }
+  return String.fromCodePoint(code);
+}
+
+const drawnByName = new Map<string, string | null>();
+
+/**
+ * What a named reference draws, or `null` for a name Markdown does not know
+ * (it is then drawn as written). Read through the DOM's HTML decoder, which
+ * knows the same HTML names micromark does; the search runs where there is a
+ * DOM. Without one, every name is taken as drawn as written.
+ */
+function drawnByNamed(reference: string): string | null {
+  const known = drawnByName.get(reference);
+  if (known !== undefined) return known;
+  let drawn: string | null = null;
+  if (typeof DOMParser !== 'undefined') {
+    // `reference` is `&name;` and nothing else (CHARACTER_REFERENCE): no markup
+    // of its own. Inside an element, so a reference that draws whitespace is
+    // not dropped as whitespace before the body.
+    const decoded = new DOMParser().parseFromString(`<b>${reference}</b>`, 'text/html').body.textContent ?? '';
+    drawn = decoded !== reference && decoded !== '' ? decoded : null;
+  }
+  drawnByName.set(reference, drawn);
+  return drawn;
+}
+
+/**
+ * [Issue #3661] The character reference (`&lt;`, `&#10;`, `&NewLine;`,
+ * `&fjlig;`) that starts at `at` in `raw`: where it ends, and what it draws —
+ * one or more UTF-16 units (`&fjlig;` draws `fj`, `&Afr;` a surrogate pair).
+ * `null` when none starts there, or the name is not one Markdown knows.
+ */
+function referenceAt(raw: string, at: number): { end: number; drawn: string } | null {
+  CHARACTER_REFERENCE.lastIndex = at;
+  const match = CHARACTER_REFERENCE.exec(raw);
+  if (!match) return null;
+  const end = at + match[0].length;
+  const drawn =
+    match[3] !== undefined
+      ? drawnByNamed(match[0])
+      : drawnByNumber(Number.parseInt(match[1] ?? match[2], match[1] !== undefined ? 10 : 16));
+  return drawn === null ? null : { end, drawn };
+}
+
 /**
  * Place each character of `text` in the raw `spans`, in order, skipping what
  * Markdown did not draw (markers, a continuation line's `>` / indentation, an
  * escape's backslash) and never in a gap between two spans (Issue #3554: the
- * lines a chat part left out). `null` when some character is not there —
- * except, across a gap, whitespace the raw text does not hold (a `&NewLine;`,
- * a line break inline code drew as a space), which is left unplaced (`-1`)
- * rather than looked for past the gap.
+ * lines a chat part left out). `null` when some character is not there.
+ *
+ * [Issue #3661] Whitespace is placed only between the characters around it:
+ * one Markdown drew without the raw text holding it (a `&NewLine;`, a line
+ * break inline code drew as a space, a line chat made up) is left unplaced
+ * (`-1`) instead of taking a later raw one — which put the rest of the text a
+ * line late, or nowhere. A character reference that is not drawn as written
+ * (outside code) has every unit it draws placed on its `&` (`&fjlig;` draws
+ * two, `&Afr;` a surrogate pair), and its name is never a place for the text
+ * after it. One that draws whitespace is stepped over (its whitespace waits
+ * as above). A name Markdown does not know is drawn as written, and placed so.
  */
 function alignSubsequence(text: string, raw: string, spans: readonly RawSpan[], from = spans[0]?.start ?? 0): number[] | null {
   // UTF-16 units, as every other offset here (an emoji is two).
   if (spans.length === 1 && raw.slice(from, from + text.length) === text) {
     return Array.from({ length: text.length }, (_, k) => from + k);
   }
-  const out: number[] = [];
+  const lastEnd = spans[spans.length - 1]?.end ?? from;
+  const inSpan = (at: number): number => spans.findIndex((span) => at >= span.start && at < span.end);
+  /** First `unit` in `raw` at or after `at`, before `limit`, inside a span (from span `first` on). */
+  const find = (unit: string, at: number, limit: number, first = 0): { idx: number; span: number } | null => {
+    for (let k = first; k < spans.length; k++) {
+      if (spans[k].end <= at) continue;
+      if (spans[k].start >= limit) return null;
+      const found = raw.indexOf(unit, Math.max(at, spans[k].start));
+      if (found !== -1 && found < Math.min(spans[k].end, limit)) return { idx: found, span: k };
+    }
+    return null;
+  };
+
+  const out: number[] = new Array(text.length).fill(-1);
   let cursor = from;
   let span = 0;
-  for (const ch of text) {
-    // `for…of` walks code points; offsets are UTF-16 units, as everywhere else.
-    for (let k = 0; k < ch.length; k++) {
-      let idx = -1;
-      let at = span;
-      for (; at < spans.length; at++) {
-        if (spans[at].end <= cursor) continue;
-        const found = raw.indexOf(ch[k], Math.max(cursor, spans[at].start));
-        if (found !== -1 && found < spans[at].end) {
-          idx = found;
-          break;
-        }
+  // Whitespace waiting for the next placed character, and where it may start.
+  let pending: number[] = [];
+  let pendingFrom = from;
+  const placePending = (limit: number): void => {
+    let at = pendingFrom;
+    for (const k of pending) {
+      const found = find(text[k], at, limit);
+      if (found) {
+        out[k] = found.idx;
+        at = found.idx + 1;
       }
-      if (idx === -1) {
-        if (spans.length > 1 && /\s/.test(ch[k])) {
-          out.push(-1);
-          continue;
-        }
-        return null;
+    }
+    pending = [];
+  };
+
+  for (let k = 0; k < text.length; k++) {
+    const unit = text[k];
+    if (isWhitespace(unit)) {
+      if (pending.length === 0) pendingFrom = cursor;
+      pending.push(k);
+      continue;
+    }
+    // Step over raw whitespace and references that drew whitespace (already
+    // waiting above) to see whether a reference drew this character.
+    let at = cursor;
+    let reference: { start: number; end: number; length: number } | null = null;
+    while (at < raw.length && inSpan(at) !== -1) {
+      if (isWhitespace(raw[at])) {
+        at += 1;
+        continue;
       }
-      span = at;
-      out.push(idx);
+      const found = raw[at] === '&' ? referenceAt(raw, at) : null;
+      if (!found || text.startsWith(raw.slice(at, found.end), k)) break;
+      if (/^\s+$/.test(found.drawn)) {
+        at = found.end;
+        continue;
+      }
+      if (text.startsWith(found.drawn, k)) reference = { start: at, end: found.end, length: found.drawn.length };
+      break;
+    }
+    let idx: number;
+    let units = 1;
+    if (reference) {
+      idx = reference.start;
+      span = inSpan(idx);
+      cursor = reference.end;
+      units = reference.length;
+    } else {
+      const found = find(unit, Math.max(cursor, at), Number.POSITIVE_INFINITY, span);
+      if (!found) return null;
+      idx = found.idx;
+      span = found.span;
       cursor = idx + 1;
     }
+    placePending(idx);
+    // Every unit a reference drew is on its `&`.
+    for (let drawn = 0; drawn < units; drawn++) out[k + drawn] = idx;
+    k += units - 1;
   }
+  placePending(lastEnd);
   return out;
 }
 
