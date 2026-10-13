@@ -119,6 +119,13 @@ describe('WorktreeDetailRefactored Integration', () => {
     vi.clearAllMocks();
     vi.useFakeTimers({ shouldAdvanceTime: true });
     mockIsMobile.mockReturnValue(false);
+    // Issue #3589: the worktree screen now starts with the activity pane and
+    // History closed. These tests were written against the old first visit
+    // (Files open, History shown), so that state is seeded as a stored choice;
+    // the new defaults themselves are covered by
+    // tests/unit/components/worktree/WorktreeDetailRefactored-activity-overlay-3589.test.tsx.
+    window.localStorage.setItem('commandmate.worktree.activeActivity-test-worktree-123', 'files');
+    window.localStorage.setItem('commandmate.worktree.historyVisible', 'true');
 
     // Default mock responses
     mockFetch.mockImplementation((url: string) => {

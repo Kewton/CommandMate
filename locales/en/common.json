@@ -25,13 +25,12 @@
   "nav": {
     "sessions": "Sessions",
     "repositories": "Repositories",
-    "repositoriesShort": "Repos",
     "review": "Review",
-    "reviewReport": "Review/Report",
     "more": "Settings",
     "skills": "Skills"
   },
   "repositories": {
+    "pageDescription": "Manage repositories and worktrees.",
     "empty": "No repositories registered yet.",
     "add": "Add Repository",
     "syncAll": "Sync All",
@@ -99,6 +98,7 @@
   "back": "Back",
   "menu": "Menu",
   "sidebar": {
+    "railLabel": "App navigation",
     "open": "Open sidebar",
     "close": "Close sidebar",
     "branchNavigation": "Branch navigation",
@@ -111,6 +111,13 @@
     "retryLoadBranches": "Retry",
     "dragToReorderGroup": "Drag to reorder group",
     "viewLabel": "View",
+    "listOptionsLabel": "View and sort ({summary})",
+    "listOptionsSummary": "{view} · {sort} · {direction}",
+    "needsAttention": "Needs attention",
+    "openInReview": "Open in Review",
+    "attentionMoreInReview": "+{count} more in Review",
+    "hiddenRepository": "Hidden repository",
+    "otherBranches": "Other ({count})",
     "viewMode": {
       "grouped": "Repository",
       "flat": "Branch",
@@ -139,6 +146,7 @@
   "repoTabBar": {
     "settingLabel": "Repository tabs",
     "overflow": "More repositories",
+    "switchBranch": "Switch to another branch of {repository}",
     "mode": {
       "always": "Always show",
       "collapsed": "Only when the sidebar is collapsed",
@@ -174,6 +182,7 @@
     "descending": "Sort descending",
     "ascShort": "ASC",
     "descShort": "DESC",
+    "directionLabel": "Order",
     "direction": {
       "newestFirst": "Newest first",
       "oldestFirst": "Oldest first",
@@ -186,7 +195,15 @@
   "branchItem": {
     "cliToolStatus": "CLI tool status",
     "hasUnread": "Has unread messages",
-    "agentExited": "exited"
+    "agentExited": "exited",
+    "actions": "Actions for {name}",
+    "openInNewTab": "Open in new tab",
+    "copyBranchName": "Copy branch name",
+    "copyPath": "Copy path",
+    "copied": "Copied",
+    "copyFailed": "Could not copy",
+    "status": "Status",
+    "statusChangeFailed": "Could not change the status"
   },
   "connection": {
     "reconnecting": "Reconnecting",
@@ -289,6 +306,54 @@
       "saveError": "Could not save.",
       "loadError": "Could not load the setting.",
       "opencodeSharedData": "OpenCode and OpenCode V2 are both installed. They share ~/.local/share/opencode, and V2 changes the database in ways OpenCode 1.x cannot read — if OpenCode fails to start, use OpenCode V2 only or give OpenCode 1.x its own data directory."
+    }
+  },
+  "newTask": {
+    "title": "New task",
+    "loading": "Loading branches…",
+    "loadError": "Could not load the branch list.",
+    "noTargets": "No branch has an agent to send to.",
+    "recentLabel": "Recent",
+    "repositoryLabel": "Repository",
+    "branchLabel": "Branch",
+    "agentLabel": "Agent",
+    "agentStatus": {
+      "running": "running",
+      "starting": "starting",
+      "stopped": "stopped"
+    },
+    "willStart": "{agent} is not running. It will be started, then the request is sent.",
+    "startingNotice": "{agent} is still starting. If the send is refused, wait a moment and send again.",
+    "messageLabel": "Request",
+    "messagePlaceholder": "What should the agent do?",
+    "modelLabel": "Model",
+    "modelPlaceholder": "Default",
+    "modelHintLaunch": "Applied when the session starts.",
+    "modelHintSwitch": "Switches the running session to this model.",
+    "modelUnavailable": {
+      "unsupported": "{agent} does not take a model on send.",
+      "running": "{agent} is already running. A model can only be set when it starts — stop the session first to switch."
+    },
+    "autoYesLabel": "Auto-Yes",
+    "autoYesActive": "On for this agent, {remaining} left. Left as it is.",
+    "autoYesKeep": "Leave off",
+    "autoYesKeepUnknown": "Leave as it is (state unknown)",
+    "autoYesUnknown": "Could not confirm the Auto-Yes state; it may be on for this agent.",
+    "autoYesEnableFor": "Turn on for {duration}",
+    "autoYesScope": "Applies to this agent until it expires, not only to this request.",
+    "send": "Send",
+    "sending": "Sending…",
+    "sendHint": "to send",
+    "sentToast": "Sent to {target}. Click to go back.",
+    "errors": {
+      "auto_yes_failed": "Auto-Yes could not be turned on, so nothing was sent.",
+      "prompt_waiting": "{agent} is waiting on a prompt, so nothing was sent. Answer it on the branch screen, then send again.",
+      "conflict": "The session refused the request.",
+      "starting": "{agent} is still starting. Wait a moment and send again.",
+      "start_failed": "{agent} could not be started.",
+      "model_rejected": "The model was not accepted. Clear it or change it, then send again.",
+      "invalid": "The request was not accepted.",
+      "failed": "Sending failed. Check the connection and send again."
     }
   }
 }

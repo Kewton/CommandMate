@@ -69,6 +69,18 @@ SCREEN=$(commandmatedev capture "$WT" --instance "$AGENT" --pane --tail 30)
 - 紐づかないと scope は SKIP、env-clean は「ベースライン無し」の ERROR で exit 20 になり、ゲートも契約ではなく verify.yaml 全部になる
 - 2026-10-03 #3099 の実測: 宣言ゲートは unit 全体 1283 秒を含めて全 PASS なのに exit 20 になった
 
+## 3-4 3 の対応
+
+`wait-verify.mjs` の exit 3 は「裁定を作業の終わりに結び付けられない」。記録（`verify` の段、`fail`）の要約の `unconfirmed:` の後ろが理由で、理由ごとに対処が分かれる。
+
+| `unconfirmed:` の理由 | 対応 |
+|---|---|
+| `no IMPL_COMPLETED line within <秒>s` / `the verification saw an earlier state …` / `a commit landed during the re-verification` | ワーカーはまだ作業中。capture で確かめ、作業中なら同じ引数で待ち直す |
+| `uncommitted changes: …` | 未コミットの変更がある。commit するよう再指示する |
+| `a newer task <新しい id> was created for this instance after task <古い id>` | 待機中に同じ instance へ新しい契約が送られた（#3587）。ワーカーは新しい task を作業中なので Auto-Yes は切られていない（`auto-yes=kept`）。古い task の裁定は取らず、tasks.tsv の task id を新しい id に差し替えて **`wait-verify.mjs --task <新しい id>`** を呼び直す（ほかの引数は同じ） |
+
+新しい task の検出は、基準の task が task 一覧（新しい順に 20 件）から外れても `task show` で個別に読んで続ける（#3633）。task 一覧が開始時に読めなかったときも、`wait` と `verify` を分けた経路で待ち始めの task への結び付けを保つ（`--task` が無ければ、一覧が読めた時点で基準を取り直す）。
+
 ## 3-4 21 の対応
 
 - **composer に本文が残っている** → Enter 未確定。`tmux send-keys -t "mcbd-${AGENT}-$WT" Enter` で確定させる

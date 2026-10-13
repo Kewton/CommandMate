@@ -26,6 +26,11 @@ import { useIsMobile } from '@/hooks/useIsMobile';
 import { isForeignSessionResponse } from '@/hooks/useTerminalPanePolling';
 import { useSidebarContext } from '@/contexts/SidebarContext';
 import { useOptionalWorktreesCacheContext } from '@/components/providers/WorktreesCacheProvider';
+import {
+  currentWorktreeStatusGeneration,
+  noteWorktreeStatusSync,
+  resolveWorktreeStatusEvents,
+} from '@/lib/worktree-status';
 import { type WorktreeStatus } from '@/components/mobile/MobileHeader';
 import { type MobileTab } from '@/components/mobile/MobileTabBar';
 import { useFileSearch } from '@/hooks/useFileSearch';
@@ -310,6 +315,33 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   // On a cache hit we already have data to show, so skip the full-screen loading
   // gate; on a cache miss fall back to the previous loading-first behavior.
   const [loading, setLoading] = useState(initialFromCache === null);
+
+  // Issue #3594: the lifecycle status can now be changed from any branch row's
+  // "…", which re-fetches the list. Carry a change of the cached value for this
+  // worktree into the screen's copy at once (the Info field reads it), instead
+  // of waiting for the next detail poll. Only a CHANGE of the cached value is
+  // applied, so a value just saved here is not undone by an older list.
+  const cachedLifecycleStatus = cache?.worktrees.find((w) => w.id === worktreeId)?.status;
+  const lastCachedLifecycleStatusRef = useRef(cachedLifecycleStatus);
+  // The last sync taken from the list, placed on the same clock as saves
+  // (Info's own included), so a detail fetch that started before it cannot
+  // overwrite it with the older value it read, and a save made after it wins
+  // over it (see fetchWorktree).
+  const statusSyncRef = useRef<{ at: number; status: Worktree['status'] | undefined }>({
+    at: 0,
+    status: undefined,
+  });
+  useEffect(() => {
+    if (lastCachedLifecycleStatusRef.current === cachedLifecycleStatus) return;
+    lastCachedLifecycleStatusRef.current = cachedLifecycleStatus;
+    if (cachedLifecycleStatus === undefined) return;
+    statusSyncRef.current = { at: noteWorktreeStatusSync(), status: cachedLifecycleStatus };
+    setWorktree((current) =>
+      current && current.id === worktreeId && current.status !== cachedLifecycleStatus
+        ? { ...current, status: cachedLifecycleStatus }
+        : current
+    );
+  }, [cachedLifecycleStatus, worktreeId]);
   const [error, setError] = useState<string | null>(null);
   /**
    * Issue #2498: "the screen is stale and we are still trying".
@@ -650,6 +682,9 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
 
   /** Fetch worktree metadata */
   const fetchWorktree = useCallback(async (): Promise<Worktree | null> => {
+    // Issue #3594: note where saves and list syncs stood when this request
+    // left, so its reply cannot put back a status changed in the meantime.
+    const statusGeneration = currentWorktreeStatusGeneration();
     try {
       const response = await fetchApiResponse(`/api/worktrees/${worktreeId}`, POLL_REQUEST_OPTIONS);
       // Issue #2498: an expired session resolves as the /login HTML page with
@@ -669,7 +704,17 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       if (formatError) {
         throw formatError;
       }
-      const data: Worktree = await response.json();
+      const fetched: Worktree = await response.json();
+      // Issue #3594: a status saved (from any row's "…" or Info) or taken from
+      // the list after this request started is newer than what the reply read;
+      // between those two, the later one wins.
+      const status = resolveWorktreeStatusEvents(
+        worktreeId,
+        fetched.status,
+        statusGeneration,
+        statusSyncRef.current
+      );
+      const data = status === fetched.status ? fetched : { ...fetched, status };
       setWorktree(data);
       // Skip setState when value is unchanged to prevent unnecessary re-renders
       if (data.selectedAgents) {
@@ -1043,9 +1088,10 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   // an id in the roster becomes the active instance (on the phone it is also
   // made visible first, or the reconcile effect above would switch it back),
   // and, on the PC, `instanceSelectionRequest` gets a new token so the PC layout
-  // routes it exactly like a header pill click (split 0 if shown nowhere, focus
-  // move if another split shows it). The PC acknowledges the token, which
-  // clears the request, so a later remount of the PC layout cannot re-apply it. An id
+  // routes it exactly like a header pick (the selected split if shown nowhere —
+  // split 0 before Issue #3593 — focus move if another split shows it). The PC
+  // acknowledges the token, which clears the request, so a later remount of the
+  // PC layout cannot re-apply it. An id
   // NOT in the roster (a running instance outside it) changes nothing. Either
   // way the parameter is removed with `router.replace` (same path, other query
   // parameters kept, no scroll), which re-renders without remounting the page.
@@ -1280,23 +1326,6 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     },
     [setActiveActivity]
   );
-
-  /** Handle worktree status change via dropdown */
-  const handleWorktreeStatusChange = useCallback(async (newStatus: 'ready' | 'in_progress' | 'in_review' | 'done' | null) => {
-    try {
-      const response = await fetch(`/api/worktrees/${worktreeId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: newStatus }),
-      });
-      if (response.ok) {
-        const updated = await response.json();
-        setWorktree(updated);
-      }
-    } catch {
-      // Silently handle
-    }
-  }, [worktreeId]);
 
   /** Handle info button click - open info modal */
   const handleInfoClick = useCallback(() => {
@@ -2057,7 +2086,6 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     instanceSelectionRequest,
     acknowledgeInstanceSelection,
     handleVibeLocalModelChange,
-    handleWorktreeStatusChange,
     hasUpdate,
     historyDisplayLimit,
     historySubTab,

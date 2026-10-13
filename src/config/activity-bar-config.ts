@@ -4,11 +4,14 @@
  * Defines the VS Code-style Activity Bar identifiers and metadata.
  * This module is consumed by:
  *   - `src/hooks/useActivityBarState.ts`
- *   - `src/components/worktree/ActivityBar.tsx`
+ *   - `src/components/worktree/HeaderToolBar.tsx` (PC, Issue #3591)
  *   - `src/components/worktree/ActivityPane.tsx`
  *   - `src/components/worktree/WorktreeDetailRefactored.tsx`
  *
- * The Activity Bar is a 48px-wide vertical bar that hosts the activities below.
+ * The Activity Bar was a 48px-wide vertical bar that hosted the activities
+ * below. Issue #3591: on PC they are icons at the right of the worktree header
+ * ({@link HEADER_TOOLS}) and the Verification chip; the names below keep the
+ * "activity bar" wording (storage keys, test helpers).
  * Re-clicking the active icon toggles the ActivityPane closed (null).
  */
 
@@ -42,7 +45,7 @@ export interface ActivityDefinition {
    *
    * The label is stored as a KEY rather than a literal because `t()` cannot be
    * called at module scope; consumers resolve it at render time via
-   * `useTranslations('worktree')` — see `ActivityBar.tsx`.
+   * `useTranslations('worktree')` — see `HeaderToolBar.tsx`.
    */
   labelKey: string;
   /** Lucide icon component reference */
@@ -50,9 +53,10 @@ export interface ActivityDefinition {
 }
 
 /**
- * Ordered list of activities rendered top-to-bottom in the Activity Bar.
- * The order here is the visual order in the ActivityBar UI and the keyboard
- * navigation order (ArrowDown/ArrowUp).
+ * Ordered list of activities. The order here is the visual order of the
+ * header tools ({@link HEADER_TOOLS}, drawn by `HeaderToolBar.tsx`) and the
+ * keyboard navigation order (ArrowLeft/ArrowRight in the header). The mobile
+ * tab bar has its own list and does not follow it.
  */
 export const ACTIVITIES: readonly ActivityDefinition[] = [
   // Issue #2616: the two-sheet `Files`, not the single-sheet `File` — at 20px
@@ -78,6 +82,25 @@ export const ACTIVITIES: readonly ActivityDefinition[] = [
 ] as const;
 
 /**
+ * The activity whose entry point is not a header tool (Issue #3591): the
+ * Verification pane opens from the Verification chip on the second row
+ * (`VerificationStatusChip`, #3590), which already says where the branch
+ * stands. It stays in {@link ACTIVITIES} — the pane, its label and the stored
+ * state are unchanged — and is only left out of {@link HEADER_TOOLS}.
+ */
+export const CHIP_ACTIVITY_ID: ActivityId = 'verification';
+
+/**
+ * The tools drawn at the right of the PC worktree header (Issue #3591), in
+ * {@link ACTIVITIES} order — the order of the ←/→ keys. Every activity except
+ * {@link CHIP_ACTIVITY_ID}. On a narrow header the trailing ones fold behind a
+ * "…" button (`useDesktopHeaderFit`).
+ */
+export const HEADER_TOOLS: readonly ActivityDefinition[] = ACTIVITIES.filter(
+  (activity) => activity.id !== CHIP_ACTIVITY_ID
+);
+
+/**
  * Set of valid ActivityId values for runtime validation.
  */
 export const VALID_ACTIVITY_IDS: ReadonlySet<ActivityId> = new Set<ActivityId>(
@@ -85,9 +108,24 @@ export const VALID_ACTIVITY_IDS: ReadonlySet<ActivityId> = new Set<ActivityId>(
 );
 
 /**
- * Default activity selected on first visit / fallback when persisted value is invalid.
+ * The first activity — where keyboard focus lands when no activity is open
+ * (`HeaderToolBar`'s roving tabindex).
+ *
+ * Issue #3589: no longer what an unvisited worktree opens. That is
+ * {@link INITIAL_ACTIVITY} (closed), so the terminal starts at full width.
  */
 export const DEFAULT_ACTIVITY: ActivityId = 'files';
+
+/**
+ * What the worktree screen shows when nothing is stored for the worktree (or
+ * the stored value is not a known activity) — Issue #3589: `null`, the pane
+ * starts closed. Before #3589 this was {@link DEFAULT_ACTIVITY} ('files'),
+ * which took ~18% of the body away from the terminal on every first visit.
+ *
+ * A stored value (an activity or {@link ACTIVITY_CLOSED_SENTINEL}) is still
+ * honoured as-is.
+ */
+export const INITIAL_ACTIVITY: ActivityId | null = null;
 
 /**
  * localStorage key prefix used by `useActivityBarState` (Issue #858).
@@ -110,8 +148,8 @@ export const ACTIVITY_BAR_STORAGE_KEY_PREFIX = 'commandmate.worktree.activeActiv
  * Unlike the pre-#858 behavior — which intentionally did NOT persist the closed
  * state — the closed state is now stored so that hiding the pane on one branch
  * survives a round-trip to another branch and back. It is distinct from "no
- * stored value" (an unvisited worktree), which still defaults to
- * {@link DEFAULT_ACTIVITY}.
+ * stored value" (an unvisited worktree), which defaults to
+ * {@link INITIAL_ACTIVITY} (closed since Issue #3589).
  */
 export const ACTIVITY_CLOSED_SENTINEL = '__closed__';
 
@@ -128,3 +166,18 @@ export function getActivityBarStorageKey(worktreeId: string): string {
 export function isActivityId(value: unknown): value is ActivityId {
   return typeof value === 'string' && VALID_ACTIVITY_IDS.has(value as ActivityId);
 }
+
+/**
+ * localStorage key for whether the activity pane is pinned (Issue #3589).
+ *
+ * - `'true'`  → pinned: the pane sits beside the body and narrows it (the
+ *   pre-#3589 layout).
+ * - anything else / absent → not pinned: the pane is laid OVER the body, which
+ *   keeps its width, and closes on Esc / × / a re-click of its icon / an
+ *   outside click / opening a file.
+ *
+ * One global key, not one per worktree: pinning is a choice about how the
+ * screen is laid out, so it carries across worktrees. Read and written by
+ * `usePanePinnedState` in `src/hooks/useActivityPaneOverlay.ts`.
+ */
+export const ACTIVITY_PANE_PINNED_STORAGE_KEY = 'commandmate.worktree.activityPanePinned';

@@ -1050,9 +1050,9 @@ export const SCENES: Scene[] = [
       await gotoLocalized(page, `${baseUrl}/worktrees/${options.worktreeId}`, options.locale);
       const pane = page.locator('[data-testid="activity-pane"][data-active="skills"]');
       await clickUntilEffective(
-        page.getByTestId('activity-bar-button-skills'),
+        page.getByTestId('header-tool-skills'),
         () => pane.isVisible(),
-        'the Skills activity button',
+        'the Skills header tool',
         options.timeoutMs,
       );
 
@@ -1272,9 +1272,9 @@ export const SCENES: Scene[] = [
       // the pane back shut.
       const gitPane = page.locator('[data-testid="activity-pane"][data-active="git"]');
       await clickUntilEffective(
-        page.getByTestId('activity-bar-button-git'),
+        page.getByTestId('header-tool-git'),
         () => gitPane.isVisible(),
-        'the Git activity button',
+        'the Git header tool',
         options.timeoutMs,
       );
 

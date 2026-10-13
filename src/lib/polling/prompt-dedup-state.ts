@@ -118,12 +118,37 @@ export function renamePromptDedupSkips(
   cliToolId: CLIToolType,
   instanceId?: string
 ): void {
-  if (oldWorktreeId === newWorktreeId) return;
-  const oldKey = buildCompositeKey(oldWorktreeId, cliToolId, instanceId);
-  const record = promptDedupSkips.get(oldKey);
-  promptDedupSkips.delete(oldKey);
-  if (record !== undefined) {
-    promptDedupSkips.set(buildCompositeKey(newWorktreeId, cliToolId, instanceId), record);
+  renamePromptDedupSkipsBatch([{ oldWorktreeId, newWorktreeId, cliToolId, instanceId }]);
+}
+
+/**
+ * Carry the tallies of a whole batch of sessions across a worktree-ID rename
+ * (Issue #3553).
+ *
+ * Every source tally is lifted before any is written, so a swap (A→B, B→A) or
+ * a chain (A→B→C) cannot overwrite a tally that has not moved yet. Per entry
+ * this is exactly {@link renamePromptDedupSkips}.
+ */
+export function renamePromptDedupSkipsBatch(
+  renames: ReadonlyArray<{
+    oldWorktreeId: string;
+    newWorktreeId: string;
+    cliToolId: CLIToolType;
+    instanceId?: string;
+  }>
+): void {
+  const lifted: Array<{ newKey: string; record: PromptDedupSkips | undefined }> = [];
+  for (const { oldWorktreeId, newWorktreeId, cliToolId, instanceId } of renames) {
+    if (oldWorktreeId === newWorktreeId) continue;
+    const oldKey = buildCompositeKey(oldWorktreeId, cliToolId, instanceId);
+    lifted.push({
+      newKey: buildCompositeKey(newWorktreeId, cliToolId, instanceId),
+      record: promptDedupSkips.get(oldKey),
+    });
+    promptDedupSkips.delete(oldKey);
+  }
+  for (const { newKey, record } of lifted) {
+    if (record !== undefined) promptDedupSkips.set(newKey, record);
   }
 }
 

@@ -37,6 +37,10 @@ export interface FakeState {
   pushFails: boolean;
   /** `%s` of a commit by sha; others get the default subject. */
   subjects: Record<string, string>;
+  /** `gh run view <id> --json status` by run id; `completed` when absent. `gh run rerun` sets `queued`. */
+  runStatus: Record<string, string>;
+  /** `gh run view <id> --json attempt` by run id; 1 when absent. `gh run rerun` adds 1. */
+  runAttempt: Record<string, number>;
 }
 
 export function fakeGit(overrides: Partial<FakeState> = {}) {
@@ -59,6 +63,8 @@ export function fakeGit(overrides: Partial<FakeState> = {}) {
     createdNumber: 9001,
     pushFails: false,
     subjects: {},
+    runStatus: {},
+    runAttempt: {},
     ...overrides,
   };
   const calls: Call[] = [];
@@ -121,14 +127,25 @@ export function fakeGit(overrides: Partial<FakeState> = {}) {
       }
       if (key === 'pr view') {
         const pr = state.prs.find((p) => String(p.number) === args[2]);
-        return pr ? ok(JSON.stringify(pr)) : failed('no pull requests found');
+        if (!pr) return failed('no pull requests found');
+        // Only the fields that were asked for, like gh.
+        const asked = (args[args.indexOf('--json') + 1] ?? '').split(',').filter(Boolean);
+        const picked = asked.length ? Object.fromEntries(asked.map((k) => [k, (pr as Record<string, unknown>)[k]])) : pr;
+        return ok(JSON.stringify(picked));
       }
       if (key === 'pr checks') {
         const answer = state.checks[Math.min(checksIndex++, state.checks.length - 1)];
         const pending = answer.some((c) => c.bucket === 'pending');
         return { status: pending ? 8 : 0, stdout: JSON.stringify(answer), stderr: '' };
       }
-      if (key === 'run rerun') return ok();
+      if (key === 'run rerun') {
+        state.runStatus[args[2]] = 'queued';
+        state.runAttempt[args[2]] = (state.runAttempt[args[2]] ?? 1) + 1;
+        return ok();
+      }
+      if (key === 'run view') {
+        return ok(JSON.stringify({ status: state.runStatus[args[2]] ?? 'completed', attempt: state.runAttempt[args[2]] ?? 1 }));
+      }
       if (key === 'pr merge') {
         if (state.failCommands.includes('gh pr merge')) return failed('merge refused');
         const pr = state.prs.find((p) => String(p.number) === args[2]);

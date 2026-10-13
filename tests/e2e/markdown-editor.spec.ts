@@ -40,7 +40,7 @@ test.describe('Markdown Editor', () => {
       await page.waitForTimeout(500);
 
       // Switch to Files tab
-      const filesTab = page.getByRole('button', { name: /Files/i });
+      const filesTab = page.getByTestId('header-tool-files');
       if (await filesTab.count() > 0) {
         await filesTab.click();
         await page.waitForTimeout(500);
@@ -75,7 +75,7 @@ test.describe('Markdown Editor', () => {
       await worktreeCards.first().click();
       await page.waitForTimeout(500);
 
-      const filesTab = page.getByRole('button', { name: /Files/i });
+      const filesTab = page.getByTestId('header-tool-files');
       if (await filesTab.count() > 0) {
         await filesTab.click();
         await page.waitForTimeout(500);
@@ -115,7 +115,7 @@ test.describe('Markdown Editor', () => {
       await worktreeCards.first().click();
       await page.waitForTimeout(500);
 
-      const filesTab = page.getByRole('button', { name: /Files/i });
+      const filesTab = page.getByTestId('header-tool-files');
       if (await filesTab.count() === 0) {
         return;
       }
@@ -177,7 +177,7 @@ test.describe('Markdown Editor', () => {
       await worktreeCards.first().click();
       await page.waitForTimeout(500);
 
-      const filesTab = page.getByRole('button', { name: /Files/i });
+      const filesTab = page.getByTestId('header-tool-files');
       if (await filesTab.count() === 0) return;
 
       await filesTab.click();
@@ -215,7 +215,7 @@ test.describe('Markdown Editor', () => {
       await worktreeCards.first().click();
       await page.waitForTimeout(500);
 
-      const filesTab = page.getByRole('button', { name: /Files/i });
+      const filesTab = page.getByTestId('header-tool-files');
       if (await filesTab.count() === 0) return;
 
       await filesTab.click();
@@ -256,7 +256,7 @@ test.describe('Markdown Editor', () => {
       await worktreeCards.first().click();
       await page.waitForTimeout(500);
 
-      const filesTab = page.getByRole('button', { name: /Files/i });
+      const filesTab = page.getByTestId('header-tool-files');
       if (await filesTab.count() === 0) return;
 
       await filesTab.click();
@@ -309,7 +309,7 @@ test.describe('Markdown Editor', () => {
       await worktreeCards.first().click();
       await page.waitForTimeout(500);
 
-      const filesTab = page.getByRole('button', { name: /Files/i });
+      const filesTab = page.getByTestId('header-tool-files');
       if (await filesTab.count() === 0) return;
 
       await filesTab.click();
@@ -352,7 +352,7 @@ test.describe('Markdown Editor', () => {
       await worktreeCards.first().click();
       await page.waitForTimeout(500);
 
-      const filesTab = page.getByRole('button', { name: /Files/i });
+      const filesTab = page.getByTestId('header-tool-files');
       if (await filesTab.count() === 0) return;
 
       await filesTab.click();
@@ -402,10 +402,17 @@ test.describe('Markdown Editor', () => {
       await mockEditorApi(page);
       await page.goto(`/worktrees/${E2E_EDITOR_WORKTREE}`);
 
-      // Files is the default activity, so the tree appears on its own once the
-      // page hydrates. Clicking the activity button here would toggle it shut.
+      // Issue #3589: a never-visited worktree starts with the activity pane
+      // closed, so Files is opened here. Only while the pane is absent — a
+      // click on an open Files pane would toggle it shut — and retried, since a
+      // click that lands before hydration does nothing.
       const treeItem = page.locator(`[data-testid="tree-item-${E2E_EDITOR_FILE}"]`);
-      await expect(treeItem).toBeVisible({ timeout: 60_000 });
+      await expect(async () => {
+        if ((await page.getByTestId('activity-pane-slot').count()) === 0) {
+          await page.getByTestId('header-tool-files').click({ timeout: 5_000 });
+        }
+        await expect(treeItem).toBeVisible({ timeout: 5_000 });
+      }).toPass({ timeout: 60_000 });
       await treeItem.click();
 
       // .md files mount in preview mode, which hides the editor pane.

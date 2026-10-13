@@ -3,12 +3,13 @@
  *
  * @vitest-environment jsdom
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import React from 'react';
 import type { Worktree } from '@/types/models';
 
 import { UNCLASSIFIED_STATUS_DOT_CLASS } from '@/components/sidebar/BranchStatusIndicator';
+import { installRadixJsdomPolyfills } from '@tests/helpers/radix-jsdom';
 
 const locale = vi.hoisted(() => ({ current: 'en' }));
 vi.mock('next-intl', async () => {
@@ -61,6 +62,9 @@ function renderSidebar(worktrees: Worktree[] = WORKTREES) {
 const sessionKeys = () =>
   screen.queryAllByTestId('session-list-item').map((el) => el.getAttribute('data-session-key'));
 
+// Issue #3575: the view is chosen in a Radix menu opened from the list toolbar.
+beforeAll(() => installRadixJsdomPolyfills());
+
 beforeEach(() => {
   locale.current = 'en';
   localStorage.clear();
@@ -72,11 +76,12 @@ describe('Sidebar sessions view (Issue #2656)', () => {
   it('offers the sessions view as a third option', async () => {
     renderSidebar();
 
-    const select = (await screen.findByTestId('view-mode-select')) as HTMLSelectElement;
-    expect(Array.from(select.options).map((o) => [o.value, o.textContent])).toEqual([
-      ['grouped', 'Repository'],
-      ['flat', 'Branch'],
-      ['sessions', 'Session'],
+    fireEvent.keyDown(await screen.findByTestId('sidebar-list-options'), { key: 'Enter' });
+    const group = screen.getByTestId('view-mode-options');
+    expect(Array.from(group.querySelectorAll('[role="menuitemradio"]')).map((o) => o.textContent)).toEqual([
+      'Repository',
+      'Branch',
+      'Session',
     ]);
   });
 
@@ -102,7 +107,7 @@ describe('Sidebar sessions view (Issue #2656)', () => {
     // No groups and no branch rows in this view.
     expect(screen.queryAllByTestId('group-header')).toHaveLength(0);
     expect(screen.queryAllByTestId('branch-list-item')).toHaveLength(0);
-    expect(screen.getByTestId('view-mode-select')).toHaveValue('sessions');
+    expect(screen.getByTestId('sidebar-list-options')).toHaveAttribute('data-view-mode', 'sessions');
   });
 
   it('navigates to the branch with the instance in the query', async () => {
@@ -144,7 +149,8 @@ describe('Sidebar sessions view (Issue #2656)', () => {
     await waitFor(() => {
       expect(screen.getAllByTestId('group-header').length).toBeGreaterThan(0);
     });
-    fireEvent.change(screen.getByTestId('view-mode-select'), { target: { value: 'sessions' } });
+    fireEvent.keyDown(screen.getByTestId('sidebar-list-options'), { key: 'Enter' });
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'Session' }));
 
     await waitFor(() => {
       expect(screen.getAllByTestId('session-list-item')).toHaveLength(3);

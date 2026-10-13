@@ -36,6 +36,7 @@ import {
 import { useCommandPalette } from '@/contexts/CommandPaletteContext';
 import { truncateString } from '@/lib/utils';
 import type { GitStatus } from '@/types/models';
+import { MOBILE_DRAWER_OPENER_PROPS } from './mobile-drawer-opener';
 
 /**
  * Status type for worktree
@@ -150,6 +151,7 @@ export function MobileHeader({
               variant="ghost"
               type="button"
               data-testid="mobile-header-menu-button"
+              {...MOBILE_DRAWER_OPENER_PROPS}
               onClick={onMenuClick}
               aria-label={t('menu')}
               className="p-2 -ml-2 rounded-full hover:bg-muted transition-colors dark:text-foreground"

@@ -82,7 +82,9 @@ import { CommandPaletteProvider } from '@/contexts/CommandPaletteContext';
 import { KeyboardShortcutsProvider } from '@/contexts/KeyboardShortcutsContext';
 import { KeyboardShortcutsOverlay } from '@/components/common/KeyboardShortcutsOverlay';
 import { GlobalMobileNav } from '@/components/mobile/GlobalMobileNav';
-import { Header } from '@/components/layout/Header';
+import { SidebarProvider } from '@/contexts/SidebarContext';
+import { SidebarRail } from '@/components/layout/SidebarRail';
+import { SidebarTopControls } from '@/components/layout/SidebarTopControls';
 
 const SAMPLE_WORKTREES = [
   { id: 'wt-login', name: 'feature/login', branch: 'feature/login', repositoryName: 'MyApp' },
@@ -602,15 +604,22 @@ describe('CommandPalette (Issue #1053)', () => {
     expect(screen.getByText('commandPalette.footer.close')).toBeInTheDocument();
   });
 
-  it('opens the palette from the header search pill', () => {
+  // Issue #3512: the Header's search pill moved to the sidebar's search row
+  // and the icon rail's search button.
+  it.each([
+    [true, 'sidebar-search'],
+    [false, 'sidebar-rail-search'],
+  ])('opens the palette from the sidebar / rail search entry (sidebar open: %s → %s)', (sidebarOpen, testId) => {
     render(
       <CommandPaletteProvider>
-        <Header />
+        <SidebarProvider initialOpen={sidebarOpen}>
+          {sidebarOpen ? <SidebarTopControls /> : <SidebarRail />}
+        </SidebarProvider>
         <CommandPalette />
       </CommandPaletteProvider>
     );
     expect(screen.queryByTestId('command-palette')).toBeNull();
-    fireEvent.click(screen.getByTestId('header-command-palette-trigger'));
+    fireEvent.click(screen.getByTestId(testId));
     expect(screen.getByTestId('command-palette')).toBeInTheDocument();
   });
 

@@ -12,33 +12,61 @@
  * desktop `ConnectionStatusIndicator` sits.
  *
  * Issue #2374: the desktop branch also draws the repository tab strip, above
- * the header. It lives at this level rather than inside `Header` because
+ * the header (#3579: both are the top rows of <main>). It lives at this level rather than inside `Header` because
  * `/worktrees/*` hides the header entirely (`showGlobalNav: false`) and that is
  * the screen users switch branches from most.
  *
  * Issue #2651: both branches mount the What's-new dialog next to the
  * version-drift banner.
+ *
+ * Issue #3511: both branches sit inside `NewTaskProvider` and mount the New
+ * task dialog host, so the dialog opens from the list screens and the worktree
+ * screen alike (the worktree screen reports its own destination through it).
+ *
+ * Issue #3512: on the PC a closed sidebar leaves `SidebarRail` (56px icon
+ * column) in its place, and Mod+B opens / closes the sidebar.
+ *
+ * Issue #3579: on the PC the sidebar / icon rail always start at the top of the
+ * screen, on every route, so the open/close button is at the same spot on the
+ * list screens and on `/worktrees/*`. The tab strip and the status row
+ * (`Header`: connection status + app update, no screen name — the page's own
+ * <h1> is the name) sit at the top of the content column, inside <main>.
+ *
+ * Issue #3515: the phone's drawer pads itself by the safe-area insets, so its
+ * top row clears the status bar and the settings button at its foot clears the
+ * home indicator (the bottom tab bar steps aside while it is open, #2642). It
+ * is never wider than 85% of the screen, so the overlay that closes it stays
+ * tappable on a narrow phone. Its contents (close button, New task, search,
+ * destinations, list, settings menu) are `Sidebar`'s. When it closes with
+ * focus inside it, focus moves to the opener on screen (`mobile-drawer-opener`),
+ * so a dialog or the palette opened from it returns focus there on close.
  */
 
 'use client';
 
-import React, { memo, useCallback, useRef, type ReactNode } from 'react';
+import React, { memo, useCallback, useLayoutEffect, useRef, type ReactNode } from 'react';
 import { useSidebarContext } from '@/contexts/SidebarContext';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { useLayoutConfig } from '@/hooks/useLayoutConfig';
 import { usePcDisplaySizeContext } from '@/contexts/PcDisplaySizeContext';
 import { Sidebar } from './Sidebar';
 import { Header } from './Header';
-import { RepositoryTabBar, REPOSITORY_TAB_BAR_HEIGHT } from './RepositoryTabBar';
+import { SidebarRail } from './SidebarRail';
+import { useSidebarToggleShortcut } from './useSidebarToggleShortcut';
+import { RepositoryTabBar } from './RepositoryTabBar';
 import { GlobalMobileNav } from '@/components/mobile/GlobalMobileNav';
 import { MobileConnectionBanner } from '@/components/mobile/MobileConnectionBanner';
+import { focusMobileDrawerOpener } from '@/components/mobile/mobile-drawer-opener';
 import { CommandPalette } from '@/components/common/CommandPalette';
 import { KeyboardShortcutsOverlay } from '@/components/common/KeyboardShortcutsOverlay';
 import { VersionMismatchBanner } from './VersionMismatchBanner';
 import { WhatsNewDialog } from '@/components/common/WhatsNewDialog';
+import { NewTaskProvider } from '@/contexts/NewTaskContext';
+import { NewTaskDialogHost } from '@/components/new-task/NewTaskDialogHost';
 import {
   shouldShowRepositoryTabBar,
   DEFAULT_REPO_TAB_BAR_MODE,
+  SIDEBAR_RAIL_WIDTH,
 } from '@/lib/sidebar-utils';
 import { Z_INDEX } from '@/config/z-index';
 
@@ -57,9 +85,6 @@ const MIN_SIDEBAR_WIDTH = 160;
 
 /** Maximum sidebar width when drag-resizing */
 const MAX_SIDEBAR_WIDTH = 480;
-
-/** Header height in px — the `h-16` on Header's inner row (Issue #1070). */
-const HEADER_HEIGHT = 64;
 
 // ============================================================================
 // Types
@@ -101,9 +126,12 @@ export const AppShell = memo(function AppShell({ children }: AppShellProps) {
     width,
     setWidth,
     repoTabBarMode,
+    toggle,
   } = useSidebarContext();
   const isMobile = useIsMobile();
   const { showSidebar, showGlobalNav } = useLayoutConfig();
+  // Issue #3512: Mod+B. Desktop only — the phone's drawer has its own close button (#3515).
+  useSidebarToggleShortcut(!isMobile && showSidebar, toggle);
   // Issue #915: scale fixed-px sidebar width by the PC display-size factor.
   const { factor } = usePcDisplaySizeContext();
 
@@ -127,21 +155,38 @@ export const AppShell = memo(function AppShell({ children }: AppShellProps) {
     isOpen
   );
 
-  // The desktop sidebar is `position: fixed`, so it does not participate in the
-  // flex column the strip is added to — its `top-16 / top-0` classes would put
-  // it underneath the band. When (and only when) the band is up, an inline
-  // offset overrides those classes; with the band down nothing is written and
-  // the classes stand exactly as they did, which is what #1070's assertions
-  // pin.
-  const bandHeight = Math.round(REPOSITORY_TAB_BAR_HEIGHT * factor);
-  const sidebarTop = bandHeight + (showGlobalNav ? HEADER_HEIGHT : 0);
-  const sidebarOffsetStyle = showRepositoryTabBar
-    ? { top: `${sidebarTop}px`, height: `calc(100vh - ${sidebarTop}px)` }
-    : {};
+  // Issue #3579: the fixed sidebar / icon rail are always `top-0 h-full`. The
+  // band and the status row are drawn inside <main>, to the right of them, so
+  // nothing above the columns can push the open/close button down (#1070's
+  // "sidebar under the sticky header" cannot happen: there is nothing above it).
+  // <main>'s paddingLeft — which the drag handle writes live — moves them
+  // sideways, under every tab-strip mode and display size.
 
   // Refs for direct DOM manipulation during drag (avoids React re-render lag)
   const sidebarRef = useRef<HTMLElement>(null);
   const mainRef = useRef<HTMLElement>(null);
+
+  // Issue #3515: when the phone's drawer closes with focus inside it (or on
+  // nothing, as after a tap on iOS), hand focus to the opener on screen. A
+  // layout effect, so it lands before the passive effects of the New task
+  // dialog (`useFocusTrap`) and the command palette record "where focus was"
+  // in the same commit — they then return focus to the opener, not to a button
+  // in the closed drawer. Only on the open → closed edge, never on mount.
+  const mobileDrawerRef = useRef<HTMLElement>(null);
+  const wasMobileDrawerOpenRef = useRef(isMobileDrawerOpen);
+  useLayoutEffect(() => {
+    const wasOpen = wasMobileDrawerOpenRef.current;
+    wasMobileDrawerOpenRef.current = isMobileDrawerOpen;
+    if (!isMobile || !wasOpen || isMobileDrawerOpen) return;
+    const active = document.activeElement;
+    const focusInDrawer =
+      active instanceof HTMLElement && mobileDrawerRef.current?.contains(active) === true;
+    if (focusInDrawer || active === null || active === document.body) {
+      if (!focusMobileDrawerOpener() && focusInDrawer) {
+        (active as HTMLElement).blur();
+      }
+    }
+  }, [isMobile, isMobileDrawerOpen]);
 
   // Called only on mouseup — persists final width to React state + localStorage.
   // newWidth is in display space; convert back to medium-base before storing so
@@ -153,49 +198,140 @@ export const AppShell = memo(function AppShell({ children }: AppShellProps) {
   // Mobile layout with drawer
   if (isMobile) {
     return (
-      <div data-testid="app-shell" className="h-screen flex flex-col">
-        {/* Connection status (Issue #2501). First in the column, and in flow
-            rather than floating, so its height comes out of <main> and it can
-            never cover the composer or the bottom tab bar (cf. #2271). Renders
-            nothing while connected. */}
-        <MobileConnectionBanner />
+      <NewTaskProvider>
+        <div data-testid="app-shell" className="h-screen flex flex-col">
+          {/* Connection status (Issue #2501). First in the column, and in flow
+              rather than floating, so its height comes out of <main> and it can
+              never cover the composer or the bottom tab bar (cf. #2271). Renders
+              nothing while connected. */}
+          <MobileConnectionBanner />
 
-        {/* Mobile drawer overlay */}
-        {isMobileDrawerOpen && (
-          <div
-            data-testid="drawer-overlay"
-            className="fixed inset-0 bg-black/50 z-40"
-            onClick={closeMobileDrawer}
-            aria-hidden="true"
-          />
-        )}
+          {/* Mobile drawer overlay */}
+          {isMobileDrawerOpen && (
+            <div
+              data-testid="drawer-overlay"
+              className="fixed inset-0 bg-black/50 z-40"
+              onClick={closeMobileDrawer}
+              aria-hidden="true"
+            />
+          )}
 
-        {/* Mobile drawer - uses z-50 (above overlay z-40) for proper stacking */}
-        {showSidebar && (
-          <aside
-            data-testid="sidebar-container"
-            className={`
-              fixed left-0 top-0 h-full w-72 z-50
-              ${SIDEBAR_TRANSITION}
-              ${isMobileDrawerOpen ? 'translate-x-0' : '-translate-x-full'}
-            `}
-            role="complementary"
+          {/* Mobile drawer - uses z-50 (above overlay z-40) for proper stacking */}
+          {showSidebar && (
+            <aside
+              ref={mobileDrawerRef}
+              data-testid="sidebar-container"
+              className={`
+                fixed left-0 top-0 h-full w-72 max-w-[85vw] z-50 bg-sidebar pt-safe pb-safe
+                ${SIDEBAR_TRANSITION}
+                ${isMobileDrawerOpen ? 'translate-x-0' : '-translate-x-full'}
+              `}
+              role="complementary"
+            >
+              <Sidebar />
+            </aside>
+          )}
+
+          {/* Main content */}
+          <main
+            className={`flex-1 min-h-0 overflow-hidden ${showGlobalNav ? 'pb-nav-safe' : ''}`}
+            role="main"
+            data-view-transition="content"
           >
-            <Sidebar />
-          </aside>
-        )}
+            {children}
+          </main>
 
-        {/* Main content */}
-        <main
-          className={`flex-1 min-h-0 overflow-hidden ${showGlobalNav ? 'pb-nav-safe' : ''}`}
-          role="main"
-          data-view-transition="content"
-        >
-          {children}
-        </main>
+          {/* Global mobile nav (bottom tab bar) */}
+          {showGlobalNav && <GlobalMobileNav />}
 
-        {/* Global mobile nav (bottom tab bar) */}
-        {showGlobalNav && <GlobalMobileNav />}
+          {/* Global command palette (⌘K / Ctrl+K) - single instance (Issue #1053) */}
+          <CommandPalette />
+          {/* Global keyboard-shortcuts help overlay (?) - single instance (Issue #1130) */}
+          <KeyboardShortcutsOverlay />
+          {/* Version-drift reload nudge (#1338/#1356) - app-wide, single instance. */}
+          <VersionMismatchBanner />
+          {/* What's new after an update (Issue #2651) - app-wide, single instance. */}
+          <WhatsNewDialog />
+          {/* New task (Mod+Shift+O / openNewTask) - single instance (Issue #3511) */}
+          <NewTaskDialogHost />
+        </div>
+      </NewTaskProvider>
+    );
+  }
+
+  // Desktop layout with fixed sidebar and padding-based content shift
+  // Issue #112: Using transform for better performance (GPU-accelerated)
+  return (
+    <NewTaskProvider>
+      <div data-testid="app-shell" className="h-screen flex flex-col">
+        <div className="flex flex-1 min-h-0">
+          {/* Desktop sidebar - fixed position with transform animation (Issue #112) */}
+          {/* Width is dynamic (drag-resizable); stored in SidebarContext + localStorage */}
+          {showSidebar && (
+            <aside
+              ref={sidebarRef}
+              data-testid="sidebar-container"
+              className={`
+                fixed left-0 top-0 h-full
+                border-r border-border
+                ${SIDEBAR_TRANSITION}
+                ${isOpen ? 'translate-x-0' : '-translate-x-full'}
+              `}
+              style={{
+                width: `${displayWidth}px`,
+                zIndex: Z_INDEX.SIDEBAR,
+              }}
+              role="complementary"
+              aria-hidden={!isOpen}
+            >
+              <Sidebar />
+              <ResizeHandle
+                currentWidth={displayWidth}
+                minWidth={minWidth}
+                maxWidth={maxWidth}
+                sidebarRef={sidebarRef}
+                mainRef={mainRef}
+                onWidthChange={handleWidthChange}
+              />
+            </aside>
+          )}
+
+          {/* Issue #3512: the icon rail that stands in for the closed sidebar,
+              at the same top (#3579: the top of the screen). Its first cell is the open/close button,
+              at the spot the open sidebar has it. */}
+          {showSidebar && !isOpen && (
+            <aside
+              data-testid="sidebar-rail-container"
+              className={`
+                fixed left-0 top-0 h-full
+                border-r border-border
+              `}
+              style={{
+                width: `${SIDEBAR_RAIL_WIDTH}px`,
+                zIndex: Z_INDEX.SIDEBAR,
+              }}
+            >
+              <SidebarRail />
+            </aside>
+          )}
+
+          {/* Main content - paddingLeft matches the sidebar (or the rail) width.
+              Issue #3579: the tab strip (#2374) and the status row (#3512) are
+              its top rows, so they start right of the column, not above it. */}
+          <main
+            ref={mainRef}
+            className="flex-1 min-w-0 h-full overflow-hidden flex flex-col transition-[padding] duration-300 ease-out"
+            style={{
+              paddingLeft: showSidebar ? `${isOpen ? displayWidth : SIDEBAR_RAIL_WIDTH}px` : 0,
+            }}
+            role="main"
+            data-view-transition="content"
+          >
+            {showRepositoryTabBar && <RepositoryTabBar />}
+            {showGlobalNav && <Header />}
+            <div className="flex-1 min-h-0">{children}</div>
+          </main>
+        </div>
 
         {/* Global command palette (⌘K / Ctrl+K) - single instance (Issue #1053) */}
         <CommandPalette />
@@ -205,75 +341,10 @@ export const AppShell = memo(function AppShell({ children }: AppShellProps) {
         <VersionMismatchBanner />
         {/* What's new after an update (Issue #2651) - app-wide, single instance. */}
         <WhatsNewDialog />
+        {/* New task (Mod+Shift+O / openNewTask) - single instance (Issue #3511) */}
+        <NewTaskDialogHost />
       </div>
-    );
-  }
-
-  // Desktop layout with fixed sidebar and padding-based content shift
-  // Issue #112: Using transform for better performance (GPU-accelerated)
-  return (
-    <div data-testid="app-shell" className="h-screen flex flex-col">
-      {/* Repository tab strip, above the header (Issue #2374) */}
-      {showRepositoryTabBar && <RepositoryTabBar />}
-
-      {/* Header with 5-screen navigation */}
-      {showGlobalNav && <Header />}
-
-      <div className="flex flex-1 min-h-0">
-        {/* Desktop sidebar - fixed position with transform animation (Issue #112) */}
-        {/* Width is dynamic (drag-resizable); stored in SidebarContext + localStorage */}
-        {showSidebar && (
-          <aside
-            ref={sidebarRef}
-            data-testid="sidebar-container"
-            className={`
-              fixed left-0
-              ${showGlobalNav ? 'top-16 h-[calc(100vh-4rem)]' : 'top-0 h-full'}
-              border-r border-border
-              ${SIDEBAR_TRANSITION}
-              ${isOpen ? 'translate-x-0' : '-translate-x-full'}
-            `}
-            style={{
-              width: `${displayWidth}px`,
-              zIndex: Z_INDEX.SIDEBAR,
-              ...sidebarOffsetStyle,
-            }}
-            role="complementary"
-            aria-hidden={!isOpen}
-          >
-            <Sidebar />
-            <ResizeHandle
-              currentWidth={displayWidth}
-              minWidth={minWidth}
-              maxWidth={maxWidth}
-              sidebarRef={sidebarRef}
-              mainRef={mainRef}
-              onWidthChange={handleWidthChange}
-            />
-          </aside>
-        )}
-
-        {/* Main content - paddingLeft matches sidebar width */}
-        <main
-          ref={mainRef}
-          className="flex-1 min-w-0 h-full overflow-hidden transition-[padding] duration-300 ease-out"
-          style={{ paddingLeft: showSidebar && isOpen ? `${displayWidth}px` : 0 }}
-          role="main"
-          data-view-transition="content"
-        >
-          {children}
-        </main>
-      </div>
-
-      {/* Global command palette (⌘K / Ctrl+K) - single instance (Issue #1053) */}
-      <CommandPalette />
-      {/* Global keyboard-shortcuts help overlay (?) - single instance (Issue #1130) */}
-      <KeyboardShortcutsOverlay />
-      {/* Version-drift reload nudge (#1338/#1356) - app-wide, single instance. */}
-      <VersionMismatchBanner />
-      {/* What's new after an update (Issue #2651) - app-wide, single instance. */}
-      <WhatsNewDialog />
-    </div>
+    </NewTaskProvider>
   );
 });
 

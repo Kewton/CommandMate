@@ -259,6 +259,19 @@ export interface TerminalSplitPaneContentProps extends TerminalSplitPaneCoreProp
    * here, so a pre-#2261 caller keeps the composer's Shift+Enter untouched.
    */
   onToggleMaximize?: () => void;
+  /** Issue #3612: a lone split cannot be maximized (entries disabled, chord inert). */
+  maximizeDisabled?: boolean;
+  /**
+   * Issue #3514: frame this split as the selected one. Passed straight through
+   * to `TerminalSplitPane`; the container decides (focused, and >1 split).
+   */
+  showFocusFrame?: boolean;
+  /**
+   * Issue #3514: the branch this split's composer sends into, for the
+   * "To: <agent> · <branch>" line above the input. Omitted (or empty) shows
+   * the agent alone.
+   */
+  branchName?: string | null;
 }
 
 export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
@@ -285,6 +298,9 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   onAgentSessionChange,
   isMaximized = false,
   onToggleMaximize,
+  maximizeDisabled = false,
+  showFocusFrame = false,
+  branchName,
 }: TerminalSplitPaneContentProps) {
   // Issue #869: resolve the instance id this split targets. Defaults to the
   // primary instance (`=== cliToolId`) so pre-#869 single-instance behavior —
@@ -370,6 +386,8 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   // down a fresh callback identity on every container render.
   const onToggleMaximizeRef = useRef(onToggleMaximize);
   onToggleMaximizeRef.current = onToggleMaximize;
+  const maximizeDisabledRef = useRef(maximizeDisabled);
+  maximizeDisabledRef.current = maximizeDisabled;
 
   // Issue #2261: Mod+Shift+Enter maximizes / restores this split.
   //
@@ -395,6 +413,8 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
 
       const toggle = onToggleMaximizeRef.current;
       if (!toggle) return;
+      // Issue #3612: nothing to maximize -> leave the key to the composer.
+      if (maximizeDisabledRef.current) return;
       event.preventDefault();
       toggle();
     }
@@ -1009,6 +1029,18 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
     [historyVisible, historyColumnSlot, chatSurfaceSlot, splitIndex],
   );
 
+  // Issue #3514: who this split's composer sends to. The composer stays per
+  // split (sharing it is out of scope); this line only says where THIS one
+  // goes, which a 2x2 of identical inputs otherwise leaves to the header above.
+  const composerAgentLabel = getInstanceLabel(instance ?? { cliTool: cliToolId });
+  const composerBranch = branchName?.trim() ? branchName.trim() : null;
+  const composerTargetText = composerBranch
+    ? t('terminal.composerTarget', { agent: composerAgentLabel, branch: composerBranch })
+    : t('terminal.composerTargetNoBranch', { agent: composerAgentLabel });
+  const composerTargetAria = composerBranch
+    ? t('terminal.composerTargetLabel', { agent: composerAgentLabel, branch: composerBranch })
+    : t('terminal.composerTargetLabelNoBranch', { agent: composerAgentLabel });
+
   const footerSlot = useMemo(
     () => (
       // Issue #2131: `data-testid` so the PC height spec can measure what the
@@ -1127,152 +1159,173 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
             onClose={handleDirectInputClose}
           />
         ) : null}
-        <MessageInput
-          worktreeId={worktreeId}
-          onMessageSent={handleMessageSent}
-          // Issue #1121: delegate the send to the optimistic layer so a pending
-          // bubble appears in this split's history immediately.
-          onOptimisticSend={sendOptimistic}
-          cliToolId={cliToolId}
-          instanceId={resolvedInstanceId}
-          isSessionRunning={terminal.isRunning}
-          // Issue #3179: no red stop button and no mode control on a launch.
-          isSessionStarting={isStarting}
-          pendingInsertText={pendingInsertText ?? null}
-          onInsertConsumed={onInsertConsumed}
-          splitIndex={splitIndex}
-          onFocus={onFocus}
-          // Issue #2598: this split's stored textarea height, bounded so the
-          // body above keeps COMPOSER_PANE_BODY_MIN_HEIGHT_PX. The bound follows
-          // the pane (window, #2421 grid rows, maximize, split count) and only
-          // bounds what is drawn — see useComposerHeight.
-          heightScope={composerHeightScope}
-          maxHeight={composerMaxHeight}
-          // Issue #806: surface a "queued (session busy)" toast when sending to
-          // a session that is still processing the previous task. showToast
-          // reuses the existing history toast surface.
-          // Issue #2406: sourced from `isGenerating` (the merged status verdict),
-          // NOT `terminal.isRunning`. This prop is the toast's ONLY gate, and it
-          // is a different question from `isSessionRunning` above (which drives
-          // the send button's enabled state and rightly asks about the session).
-          // Wired to `isRunning` the toast fired on every send to a live pane,
-          // including a ready agent with nothing to queue behind.
-          isProcessing={isGenerating}
-          showToast={showToast}
-          // Issue #2592: the permission-mode button + chip, in the composer's
-          // existing action row. Mounted on the FOOTER, which this component
-          // renders unconditionally, so the control is present on the terminal
-          // surface and on the chat surface alike — the chat surface is the one
-          // that needs it most, because it hides the very footer the mode is
-          // otherwise only legible from.
-          //
-          // The gate is passed as data, not decided here: `AgentModeControl`
-          // owns `canCycleAgentMode` so the "is a dialog on screen?" rule has one
-          // definition and one test. `terminal.sessionStatus` is the same merged
-          // verdict `isGenerating` above reads, and the four flags are the same
-          // ones the dialog card is driven by (#2254 / #2369) — so the button and
-          // the card can never both believe they own the frame.
-          agentModeSlot={
-            <AgentModeControl
-              worktreeId={worktreeId}
-              cliToolId={cliToolId}
-              instanceId={resolvedInstanceId}
-              agentMode={terminal.agentMode}
-              sessionStatus={terminal.sessionStatus}
-              isPromptWaiting={prompt.visible}
-              isSelectionListActive={terminal.isSelectionListActive}
-              isDismissablePanelActive={terminal.isDismissablePanelActive}
-              isUnclassifiedActive={terminal.isUnclassifiedActive}
-              onKeysSent={refresh}
-            />
-          }
-          // Issue #1080: per-split Auto-Yes toggle now lives in the composer's
-          // bottom meta row instead of its own full-width footer row.
-          autoYesSlot={
-            <AutoYesToggle
-              enabled={autoYesEnabled}
-              expiresAt={autoYesExpiresAt ?? null}
-              onToggle={onAutoYesToggle}
-              lastAutoResponse={lastAutoResponse ?? null}
-              cliToolName={cliToolId}
-              inline
-            />
-          }
-          // Issue #2766 / #2797: the direct-input toggle, in the toolbar's end
-          // group beside the interrupt button — see `directInputSlot`.
-          //
-          // ## Why not the meta row (where #2766 put it)
-          //
-          // #2598's budget is one line of meta row, and in the two-split pane
-          // and every pane of the 2x2 grid (431px of row) the hints and a full
-          // Auto-Yes had already spent it: 195 + 236 of 431px, against the 87px
-          // this toggle needed. So #2766 hid it there. The three-split panes
-          // were short of it too, less visibly: the toggle sat at the END of
-          // the Auto-Yes half, which scrolls sideways, so a narrow pane drew
-          // it and scrolled it out of sight. How much of the 78px toggle was
-          // painted, in Chromium at 1440x900 (measured with
-          // tests/e2e/composer-two-row-2598.spec.ts before this change):
-          //
-          //   | row   | Auto-Yes off | Auto-Yes on  |
-          //   |-------|--------------|--------------|
-          //   | 174px | 10px         | 0            |
-          //   | 228px | 63px         | 4px          |
-          //   | 271px | whole        | 47–51px      |
-          //   | 411px | whole        | whole        |
-          //   | 431px | not drawn    | not drawn    |
-          //
-          // The toolbar's end group is on screen at every width, and it sits
-          // directly under the bar this opens.
-          //
-          // ## What it costs the toolbar
-          //
-          // Nothing where the pane is wide enough. The toolbar's start group
-          // takes whatever the end group leaves, and its natural content —
-          // attach (36px) + gap + mode control — is 189px for claude and 323px
-          // for codex, whose control carries its #2592 caution. The toggle is
-          // an icon (24px + 4px gap) below DIRECT_INPUT_LABEL_MIN_CONTAINER_PX
-          // and prints its label from there up:
-          //
-          //   | row   | start group gets | codex needs | claude needs |
-          //   |-------|------------------|-------------|--------------|
-          //   | 431px | 363px (icon)     | 323px       | 189px        |
-          //   | 910px | 769px (label)    | 323px       | 189px        |
-          //
-          // Measured as `MEASURE-2797`. The two narrowest three-split panes had
-          // no slack before this toggle came (the 174px row's start group was
-          // exactly attach + claude's 94px control, the 271px row's exactly
-          // attach + codex's 191px), so there the mode control gives 28px up:
-          // its chip and caution truncate, by #2597's design — claude's chip in
-          // the 174px row down to its padding — while the mode button stays
-          // whole. Of the two, the chip is what the pane can spare: the button
-          // still names the mode in its `aria-label`, and nothing else on the
-          // pane stands in for this toggle.
-          //
-          // Keep the literals as literals: Tailwind scans source text, so an
-          // interpolated class generates no CSS and the label would be hidden
-          // at every width (the #2131 rule, restated in composer-layout).
-          directInputSlot={
-            <button
-              type="button"
-              data-testid="direct-input-toggle"
-              aria-pressed={directInputOpen}
-              aria-label={directInputToggleAria}
-              title={directInputToggleAria}
-              disabled={!terminal.isRunning}
-              onClick={handleDirectInputToggle}
-              className={`shrink-0 inline-flex items-center gap-1 h-[22px] px-1 @min-[520px]:px-2 rounded-md border text-[11px] font-medium leading-none whitespace-nowrap transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
-                directInputOpen
-                  ? 'bg-info-subtle border-info-border text-info-foreground'
-                  : 'bg-surface border-border text-muted-foreground hover:bg-muted'
-              }`}
-            >
-              <Keyboard size={14} aria-hidden="true" className="shrink-0" />
-              <span className="hidden @min-[520px]:inline" data-testid="direct-input-toggle-label">
-                {directInputToggleLabel}
-              </span>
-            </button>
-          }
-        />
+        {/* Issue #3572: the target line sits on the composer's top border, like
+            a fieldset legend, and costs the pane no height. As a row of its own
+            it took ~19px (the text plus this footer's `space-y-2` gap) on top
+            of #2598's second row, past that Issue's body budget
+            (`composer-two-row-2598.spec.ts`). `absolute` takes it out of flow;
+            the `relative` wrapper is what pays the gap, once, as the composer
+            alone did before #3514. Half of it (5.5px) reaches above the border,
+            into the gap or the footer's `p-2`; the other half ends before the
+            toolbar, which starts at the form's `py-2`. `z-10` because the form
+            is positioned and comes later; `pointer-events-none` so the height
+            handle under it still takes a drag. */}
+        <div className="relative" data-testid={`split-composer-${splitIndex}`}>
+          <div
+            data-testid={`split-composer-target-${splitIndex}`}
+            aria-label={composerTargetAria}
+            title={composerTargetAria}
+            className="pointer-events-none absolute left-3 top-0 z-10 max-w-[calc(100%-1.5rem)] -translate-y-1/2 truncate rounded-sm bg-surface-2 px-1 text-[11px] leading-none text-muted-foreground"
+          >
+            {composerTargetText}
+          </div>
+          <MessageInput
+            worktreeId={worktreeId}
+            onMessageSent={handleMessageSent}
+            // Issue #1121: delegate the send to the optimistic layer so a pending
+            // bubble appears in this split's history immediately.
+            onOptimisticSend={sendOptimistic}
+            cliToolId={cliToolId}
+            instanceId={resolvedInstanceId}
+            isSessionRunning={terminal.isRunning}
+            // Issue #3179: no red stop button and no mode control on a launch.
+            isSessionStarting={isStarting}
+            pendingInsertText={pendingInsertText ?? null}
+            onInsertConsumed={onInsertConsumed}
+            splitIndex={splitIndex}
+            onFocus={onFocus}
+            // Issue #2598: this split's stored textarea height, bounded so the
+            // body above keeps COMPOSER_PANE_BODY_MIN_HEIGHT_PX. The bound follows
+            // the pane (window, #2421 grid rows, maximize, split count) and only
+            // bounds what is drawn — see useComposerHeight.
+            heightScope={composerHeightScope}
+            maxHeight={composerMaxHeight}
+            // Issue #806: surface a "queued (session busy)" toast when sending to
+            // a session that is still processing the previous task. showToast
+            // reuses the existing history toast surface.
+            // Issue #2406: sourced from `isGenerating` (the merged status verdict),
+            // NOT `terminal.isRunning`. This prop is the toast's ONLY gate, and it
+            // is a different question from `isSessionRunning` above (which drives
+            // the send button's enabled state and rightly asks about the session).
+            // Wired to `isRunning` the toast fired on every send to a live pane,
+            // including a ready agent with nothing to queue behind.
+            isProcessing={isGenerating}
+            showToast={showToast}
+            // Issue #2592: the permission-mode button + chip, in the composer's
+            // existing action row. Mounted on the FOOTER, which this component
+            // renders unconditionally, so the control is present on the terminal
+            // surface and on the chat surface alike — the chat surface is the one
+            // that needs it most, because it hides the very footer the mode is
+            // otherwise only legible from.
+            //
+            // The gate is passed as data, not decided here: `AgentModeControl`
+            // owns `canCycleAgentMode` so the "is a dialog on screen?" rule has one
+            // definition and one test. `terminal.sessionStatus` is the same merged
+            // verdict `isGenerating` above reads, and the four flags are the same
+            // ones the dialog card is driven by (#2254 / #2369) — so the button and
+            // the card can never both believe they own the frame.
+            agentModeSlot={
+              <AgentModeControl
+                worktreeId={worktreeId}
+                cliToolId={cliToolId}
+                instanceId={resolvedInstanceId}
+                agentMode={terminal.agentMode}
+                sessionStatus={terminal.sessionStatus}
+                isPromptWaiting={prompt.visible}
+                isSelectionListActive={terminal.isSelectionListActive}
+                isDismissablePanelActive={terminal.isDismissablePanelActive}
+                isUnclassifiedActive={terminal.isUnclassifiedActive}
+                onKeysSent={refresh}
+              />
+            }
+            // Issue #1080: per-split Auto-Yes toggle now lives in the composer's
+            // bottom meta row instead of its own full-width footer row.
+            autoYesSlot={
+              <AutoYesToggle
+                enabled={autoYesEnabled}
+                expiresAt={autoYesExpiresAt ?? null}
+                onToggle={onAutoYesToggle}
+                lastAutoResponse={lastAutoResponse ?? null}
+                cliToolName={cliToolId}
+                inline
+              />
+            }
+            // Issue #2766 / #2797: the direct-input toggle, in the toolbar's end
+            // group beside the interrupt button — see `directInputSlot`.
+            //
+            // ## Why not the meta row (where #2766 put it)
+            //
+            // #2598's budget is one line of meta row, and in the two-split pane
+            // and every pane of the 2x2 grid (431px of row) the hints and a full
+            // Auto-Yes had already spent it: 195 + 236 of 431px, against the 87px
+            // this toggle needed. So #2766 hid it there. The three-split panes
+            // were short of it too, less visibly: the toggle sat at the END of
+            // the Auto-Yes half, which scrolls sideways, so a narrow pane drew
+            // it and scrolled it out of sight. How much of the 78px toggle was
+            // painted, in Chromium at 1440x900 (measured with
+            // tests/e2e/composer-two-row-2598.spec.ts before this change):
+            //
+            //   | row   | Auto-Yes off | Auto-Yes on  |
+            //   |-------|--------------|--------------|
+            //   | 174px | 10px         | 0            |
+            //   | 228px | 63px         | 4px          |
+            //   | 271px | whole        | 47–51px      |
+            //   | 411px | whole        | whole        |
+            //   | 431px | not drawn    | not drawn    |
+            //
+            // The toolbar's end group is on screen at every width, and it sits
+            // directly under the bar this opens.
+            //
+            // ## What it costs the toolbar
+            //
+            // Nothing where the pane is wide enough. The toolbar's start group
+            // takes whatever the end group leaves, and its natural content —
+            // attach (36px) + gap + mode control — is 189px for claude and 323px
+            // for codex, whose control carries its #2592 caution. The toggle is
+            // an icon (24px + 4px gap) below DIRECT_INPUT_LABEL_MIN_CONTAINER_PX
+            // and prints its label from there up:
+            //
+            //   | row   | start group gets | codex needs | claude needs |
+            //   |-------|------------------|-------------|--------------|
+            //   | 431px | 363px (icon)     | 323px       | 189px        |
+            //   | 910px | 769px (label)    | 323px       | 189px        |
+            //
+            // Measured as `MEASURE-2797`. The two narrowest three-split panes had
+            // no slack before this toggle came (the 174px row's start group was
+            // exactly attach + claude's 94px control, the 271px row's exactly
+            // attach + codex's 191px), so there the mode control gives 28px up:
+            // its chip and caution truncate, by #2597's design — claude's chip in
+            // the 174px row down to its padding — while the mode button stays
+            // whole. Of the two, the chip is what the pane can spare: the button
+            // still names the mode in its `aria-label`, and nothing else on the
+            // pane stands in for this toggle.
+            //
+            // Keep the literals as literals: Tailwind scans source text, so an
+            // interpolated class generates no CSS and the label would be hidden
+            // at every width (the #2131 rule, restated in composer-layout).
+            directInputSlot={
+              <button
+                type="button"
+                data-testid="direct-input-toggle"
+                aria-pressed={directInputOpen}
+                aria-label={directInputToggleAria}
+                title={directInputToggleAria}
+                disabled={!terminal.isRunning}
+                onClick={handleDirectInputToggle}
+                className={`shrink-0 inline-flex items-center gap-1 h-[22px] px-1 @min-[520px]:px-2 rounded-md border text-[11px] font-medium leading-none whitespace-nowrap transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                  directInputOpen
+                    ? 'bg-info-subtle border-info-border text-info-foreground'
+                    : 'bg-surface border-border text-muted-foreground hover:bg-muted'
+                }`}
+              >
+                <Keyboard size={14} aria-hidden="true" className="shrink-0" />
+                <span className="hidden @min-[520px]:inline" data-testid="direct-input-toggle-label">
+                  {directInputToggleLabel}
+                </span>
+              </button>
+            }
+          />
+        </div>
       </div>
     ),
     [
@@ -1353,6 +1406,9 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       // `agentSessionSignature`), so it re-runs the memo when the file list
       // actually changes and not on every 2s poll that repeats it.
       agentSession.diff,
+      // Issue #3514: the "To: <agent> · <branch>" line (strings, memo-safe).
+      composerTargetText,
+      composerTargetAria,
     ],
   );
 
@@ -1441,6 +1497,11 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       // Issue #2261: the title bar's half of the maximize toggle.
       isMaximized={isMaximized}
       onToggleMaximize={onToggleMaximize}
+      maximizeDisabled={maximizeDisabled}
+      // Issue #3514: the selected-split frame, and End in the "…" menu under
+      // the same condition the × button uses (a handler and a live session).
+      showFocusFrame={showFocusFrame}
+      onEndSession={onRequestSessionEnd && terminal.isRunning ? handleRequestSessionEnd : undefined}
       terminal={surfaceMode === 'chat' ? chatSlot : terminalSlot}
       footer={footerSlot}
       bodyRef={setPaneBodyEl}

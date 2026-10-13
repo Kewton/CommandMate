@@ -237,9 +237,11 @@ test.describe('[#2592] desktop', () => {
 
 
 /**
- * Three PC split layouts on one 1440x900 screen (files panel open, which
- * leaves the splits 945px). The width shares are pixel values on purpose, so
- * the panes come out at the Issue's own 218px and 455px.
+ * Three PC split layouts on one 1440x900 screen (files panel open beside the
+ * body — seeded by `seedAgentModeSplits` since Issue #3589 closed it by
+ * default — which leaves the splits {@link SPLITS_TOTAL_PX}). The width shares
+ * are pixel values on purpose, summing to that total, so the panes come out at
+ * the Issue's own 218px and 455px.
  *
  * `rowFits` is whether the composer row can hold its fixed controls at all.
  * Before #2598 the PC composer was one row: attach, mode button, interrupt,
@@ -251,34 +253,47 @@ test.describe('[#2592] desktop', () => {
  * `sendPastRow` 0 in all nine panes). The flag is kept so a future layout that
  * cannot fit a pane says so here rather than by loosening the check.
  */
+/**
+ * What the three panes share on this screen (resizers aside), measured.
+ * Issue #3591: 945px while the vertical activity bar (48px) stood left of the
+ * body; with the bar gone (its tools are in the header) the body — and so the
+ * splits — got that width back: 3 × 328.4 = 985px. The shares are unitless
+ * (`TerminalSplitConfig.widths`), so shares summing to 945 drew the 218px pane
+ * at 227px and the 455px one at 474px.
+ */
+const SPLITS_TOTAL_PX = 985;
+/** The third pane takes what the Issue's 218px and 455px leave. */
+const REST_PX = SPLITS_TOTAL_PX - 218 - 455;
+
 const SPLIT_LAYOUTS = [
   {
     name: 'claude narrow, codex wide',
-    widths: [218, 455, 272],
+    widths: [218, 455, REST_PX],
     panes: [
       { min: 200, max: 230, notation: false, rowFits: true },
       { min: 440, max: 470, notation: true, rowFits: true },
-      { min: 255, max: 290, notation: false, rowFits: true },
+      { min: REST_PX - 15, max: REST_PX + 15, notation: false, rowFits: true },
     ],
   },
   {
     name: 'claude wide, codex narrow',
-    widths: [455, 218, 272],
+    widths: [455, 218, REST_PX],
     panes: [
       { min: 440, max: 470, notation: true, rowFits: true },
       { min: 200, max: 230, notation: false, rowFits: true },
-      { min: 255, max: 290, notation: false, rowFits: true },
+      { min: REST_PX - 15, max: REST_PX + 15, notation: false, rowFits: true },
     ],
   },
   {
     // Before the fix, even an even three-way split drew codex's caution over
     // the interrupt button.
     name: 'three equal panes',
+    // A third of SPLITS_TOTAL_PX each (≈328px; 315px before Issue #3591).
     widths: [1, 1, 1],
     panes: [
-      { min: 300, max: 330, notation: false, rowFits: true },
-      { min: 300, max: 330, notation: false, rowFits: true },
-      { min: 300, max: 330, notation: false, rowFits: true },
+      { min: 313, max: 343, notation: false, rowFits: true },
+      { min: 313, max: 343, notation: false, rowFits: true },
+      { min: 313, max: 343, notation: false, rowFits: true },
     ],
   },
 ] as const;

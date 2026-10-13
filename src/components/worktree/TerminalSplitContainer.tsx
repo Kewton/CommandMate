@@ -1,3 +1,4 @@
+
 /**
  * TerminalSplitContainer Component (Issue #728, 2x2 grid in Issue #2421)
  *
@@ -6,8 +7,11 @@
  * cannot show a 200-column agent TUI, and the tmux pane geometry is independent
  * of the browser pane, so the grid is a display change only. Owns:
  *  - split configuration via `useTerminalSplits` (worktreeId-scoped)
- *  - add / remove buttons (disabled at the MIN / MAX boundary and while
- *    a PaneResizer drag is in progress)
+ *  - the layout icons (1 / 2 / 3 / 4 splits, Issue #3514 — they replaced the
+ *    "n / 4 splits + -" stepper), disabled for counts the roster cannot fill
+ *    and while a PaneResizer drag is in progress
+ *  - placing an agent added from the header's "+" (Issue #3514) into a new
+ *    split or the focused one, once the roster that contains it arrives
  *  - History / "Open Files" visibility toggles in the Action bar (Issue #841,
  *    made the SOLE entry point by Issue #2259 — the vertical collapse strips
  *    are gone), reading the persisted state in useHistoryPaneState /
@@ -23,6 +27,9 @@
  *    children being hidden, so the surviving pane would sit in the top-left
  *    quarter. The grid collapses to a single `1fr` / `1fr` cell while maximized
  *  - delegating each split's body to a parent-supplied `renderPane`
+ *  - with ONE split, the action bar's two slots its title bar's controls are
+ *    portalled into instead (Issue #3592, `SplitPaneHeaderControls`), so the
+ *    lone split has no title bar of its own
  *
  * Does NOT include HistoryPane (HISTORY_PANE_ID uniqueness is owned by
  * TerminalContainer per Issue #730).
@@ -38,18 +45,23 @@ import React, {
   memo,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   type ReactNode,
 } from 'react';
+import { createPortal } from 'react-dom';
 import { useTranslations } from 'next-intl';
 import {
+  Ellipsis,
   History,
   PanelRight,
   AlignHorizontalDistributeCenter,
-  Plus,
-  Minus,
+  Square,
+  Columns2,
+  Columns3,
+  LayoutGrid,
   Maximize2,
   Minimize2,
 } from 'lucide-react';
@@ -61,6 +73,8 @@ import {
   toGridTrackFractions,
   MIN_SPLITS,
   isGridLayout,
+  SPLIT_LAYOUT_COUNTS,
+  type AgentPlacement,
 } from '@/config/terminal-split-config';
 import { useTerminalSplits } from '@/hooks/useTerminalSplits';
 import {
@@ -74,7 +88,10 @@ import {
   FILE_PANEL_PANE_ID,
 } from '@/hooks/useFilePanelState';
 import { Tooltip } from '@/components/common/Tooltip';
+import { useSplitActionBarFit } from '@/hooks/useDesktopHeaderFit';
 import { PaneResizer, type ResizerOrientation } from './PaneResizer';
+import { SplitHeaderSlotsProvider, type SplitHeaderSlots } from './SplitPaneHeaderControls';
+import { isUnhandledEscape } from '@/lib/escape-key';
 
 /**
  * Issue #2421: thickness of the grid's two divider TRACKS, in px.
@@ -95,6 +112,40 @@ function gridColumnOf(idx: number): number {
 function gridRowOf(idx: number): number {
   // Track 2 is the row divider, so the bottom row is track 3.
   return idx < 2 ? 1 : 3;
+}
+
+/**
+ * Issue #3514: the glyph for each layout icon — what the terminal area will
+ * look like, so 4 reads as the 2x2 grid it actually becomes.
+ */
+const SPLIT_LAYOUT_ICONS: Record<number, typeof Square> = {
+  1: Square,
+  2: Columns2,
+  3: Columns3,
+  4: LayoutGrid,
+};
+
+/**
+ * Issue #3514: a request to show a just-added agent instance. Token-stamped for
+ * the reason `headerInstanceSelection` is: the container applies it exactly
+ * once, and only after `instances` contains the new id (the roster PATCH and
+ * this request land together, but the request must never be dropped because it
+ * raced the roster).
+ */
+export interface InstancePlacementRequest {
+  instanceId: string;
+  placement: Exclude<AgentPlacement, 'roster-only'>;
+  token: number;
+}
+
+/** Issue #3593: what `onSelectedSplitChange` publishes. */
+export interface SelectedSplit {
+  /** The selected (focused) split's index. */
+  index: number;
+  /** The instance that split shows. */
+  instanceId: string;
+  /** Each split's instance, by split index. */
+  splitInstanceIds: string[];
 }
 
 /** Render-prop signature: each pane is supplied externally so the
@@ -119,6 +170,12 @@ export interface RenderTerminalSplitPaneArgs {
    */
   onDropInstance: (instanceId: string) => void;
   /**
+   * Issue #3514: draw the "this is the selected split" frame. True for the
+   * focused split only while more than one split is open — a lone split is
+   * trivially the selected one, and a permanent accent border would be noise.
+   */
+  showFocusFrame?: boolean;
+  /**
    * Issue #2261: whether THIS split is the one currently filling the terminal
    * row. Drives the pressed state of the pane's own maximize/restore toggle.
    */
@@ -128,6 +185,8 @@ export interface RenderTerminalSplitPaneArgs {
    * already maximized. Stable per-index reference.
    */
   onToggleMaximize: () => void;
+  /** Issue #3612: a lone split cannot be maximized (entries disabled). */
+  maximizeDisabled: boolean;
 }
 
 export interface TerminalSplitContainerProps {
@@ -162,9 +221,10 @@ export interface TerminalSplitContainerProps {
    */
   onActiveInstanceChange?: (instanceId: string) => void;
   /**
-   * Issue #1152: a header-initiated instance selection to route into the PRIMARY
-   * split (split 0), wiring the DesktopHeader instance switcher to the terminal
-   * that actually polls output / sends messages.
+   * Issue #1152: a header-initiated instance selection to route into the
+   * SELECTED split (split 0 until Issue #3593), wiring the DesktopHeader
+   * instance switcher to the terminal that actually polls output / sends
+   * messages.
    *
    * Distinct from `onActiveInstanceChange` (which flows split→active): this flows
    * header→split. It is a token-stamped object rather than a bare instanceId so
@@ -178,9 +238,72 @@ export interface TerminalSplitContainerProps {
    * when the selected instance is already shown in ANOTHER split, focus moves to
    * that split (focus-move) instead of reassigning — non-destructive, and it
    * satisfies the user's intent to interact with that instance. When it is shown
-   * nowhere, it is bound to split 0. When split 0 already shows it, it is a no-op.
+   * nowhere, it is bound to the selected split. When the selected split already
+   * shows it, it is a no-op.
    */
   headerInstanceSelection?: { instanceId: string; token: number } | null;
+  /**
+   * Issue #3514: show an agent the header's "+" just added. `new-split` appends
+   * a split (falling back to `replace` if the ceiling was reached meanwhile);
+   * `replace` swaps it into the focused split. Either way the split that shows
+   * it takes focus. Applied once per token, as soon as `instances` holds it.
+   */
+  instancePlacementRequest?: InstancePlacementRequest | null;
+  /**
+   * Issue #3514: called with the request's token once it has been handled
+   * (placed, or focus moved to the split already showing it). The parent must
+   * drop that request: the guard against re-applying it lives in a ref, and a
+   * remount of this container resets it.
+   */
+  onInstancePlacementApplied?: (token: number) => void;
+  /** Issue #3514: published whenever the split count changes (the "+" needs it). */
+  onSplitCountChange?: (count: number) => void;
+  /**
+   * Issue #3593: the selected split — its index, the instance it shows, and the
+   * instance of every split by index. Published on mount and whenever any of
+   * them changes. The worktree screen makes this instance its active one, so
+   * the header's current session and what End / Auto Yes act on are one value.
+   */
+  onSelectedSplitChange?: (selection: SelectedSplit) => void;
+  /**
+   * Issue #3590: what the worktree screen puts on this action bar — the second
+   * row under the header — drawn right after the layout ops (layout icons,
+   * Equal, Maximize) and before the History / Files toggles.
+   *
+   * **The one entry point for the second row.** Today it carries the
+   * Verification chip (moved here from the header). Later additions (#3591,
+   * #3592, #3593) go into this same node — a fragment of several items is
+   * fine — rather than into new props, so the bar keeps a single place whose
+   * width is fitted: the slot is `min-w-0` and capped at 360px, its content
+   * may truncate, and when it still does not fit the History / Files toggles
+   * drop their labels, then the whole node moves into a floating panel behind
+   * a "…" button that never shrinks, and only then the layout ops clip
+   * (`useSplitActionBarFit`). Since #3592 the node is NOT remounted when it
+   * moves between the bar and the panel (it is rendered once and its DOM is
+   * moved), but it still is when `FilePanelSplit` moves the terminal, so state
+   * an item must keep across that belongs in the parent — see
+   * `useDesktopVerificationChip`. Popovers an item opens
+   * should float out of the bar (the chip's `popover="floating"`) and carry
+   * `data-floating-layer` so a press in them does not close the panel.
+   *
+   * **Height and the display size.** The bar is `h-9` (2.25rem: 36px at the
+   * medium display size, 31.5px at small, 28.1px at xsmall) with a 35px
+   * floor (`min-h-[35px]`, border included), because items sized in px do
+   * not scale with the display size: the chip's ⓘ is a fixed 32px plus the
+   * chip's 1px border on each side, 34px. Keep each item at or under 34px.
+   * A slot rather than the chip itself so this module keeps no dependency on
+   * the verification client. Omitted renders the pre-#3590 bar.
+   *
+   * Issue #3592: the lone split's title-bar controls do NOT come through here
+   * — they belong to the split (its surface mode, its polled cost, its note
+   * editor), and lifting them into the parent would re-create the split on
+   * every 1 ↔ 2 switch. They are portalled into two slots this bar renders
+   * itself with one split (`SplitPaneHeaderControls`): right after this node,
+   * in the same fitted left group, and left of History / Files. The session
+   * slot is measured with the group (its content re-measures as it changes)
+   * and folds behind the same "…" as this node.
+   */
+  actionBarItems?: ReactNode;
 }
 
 export const TerminalSplitContainer = memo(function TerminalSplitContainer({
@@ -192,14 +315,19 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
   showToast,
   onActiveInstanceChange,
   headerInstanceSelection,
+  instancePlacementRequest,
+  onInstancePlacementApplied,
+  onSplitCountChange,
+  onSelectedSplitChange,
+  actionBarItems,
 }: TerminalSplitContainerProps) {
   const {
     splits,
     widths,
     rowHeights,
     setRowHeights,
-    addSplit,
-    removeSplit,
+    setSplitCount,
+    openInstanceInNewSplit,
     setSplitInstance,
     setSplitWidth,
     resetWidths,
@@ -256,8 +384,8 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
   }, [focusedSplitIndex, onFocusedSplitChange]);
 
   /**
-   * Issue #1152: apply a header-initiated instance selection to the PRIMARY
-   * split, wiring the header instance switcher to the terminal that actually
+   * Issue #1152: apply a header-initiated instance selection to the selected
+   * split (Issue #3593; split 0 before), wiring the header instance switcher to the terminal that actually
    * polls output / sends messages. Gated on `token` (not the instanceId) so it
    * runs exactly once per header click and never fires on mount, roster
    * reconcile, localStorage restore, the split 0→active mirror, or a drop — all
@@ -265,31 +393,101 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
    *
    * `splits` is intentionally omitted from the deps: only a NEW token should
    * trigger this. The classification reads the latest `splits` through a ref so a
-   * stale closure cannot mis-target the primary split.
+   * stale closure cannot mis-target the split.
    */
   const lastHeaderTokenRef = useRef(0);
   const splitsRef = useRef(splits);
   splitsRef.current = splits;
+  const focusedSplitIndexRef = useRef(focusedSplitIndex);
+  focusedSplitIndexRef.current = focusedSplitIndex;
   useEffect(() => {
     if (!headerInstanceSelection) return;
     if (headerInstanceSelection.token === lastHeaderTokenRef.current) return;
     lastHeaderTokenRef.current = headerInstanceSelection.token;
     const { instanceId } = headerInstanceSelection;
     const current = splitsRef.current;
+    // Issue #3593: the selected split, not split 0 — the header's current
+    // session is the one the selected split shows, so that is where a session
+    // picked in the header goes.
+    const targetIdx = Math.min(focusedSplitIndexRef.current, current.length - 1);
     const shownIdx = current.findIndex((s) => s.instanceId === instanceId);
-    if (shownIdx === 0) return; // primary split already shows it — no-op
-    if (shownIdx > 0) {
+    if (shownIdx === targetIdx) return; // the selected split already shows it — no-op
+    if (shownIdx !== -1) {
       // Collision (S1-002): the instance already occupies another split. Surface
       // that split (focus-move) instead of duplicating/reassigning it.
       setFocusedSplitIndex(shownIdx);
       return;
     }
-    // Not shown anywhere → bind it to the primary split (split 0), symmetric with
-    // the existing split 0→active mirror. Focus the primary split on success.
-    if (setSplitInstance(0, instanceId)) {
-      setFocusedSplitIndex(0);
+    // Not shown anywhere → bind it to the selected split, and keep it selected.
+    if (setSplitInstance(targetIdx, instanceId)) {
+      setFocusedSplitIndex(targetIdx);
     }
   }, [headerInstanceSelection, setSplitInstance, setFocusedSplitIndex]);
+
+  // Issue #3593: publish the selected split. Keyed on the values, so a new
+  // `splits` array with the same instances does not re-publish.
+  const selectedSplitKey = `${focusedSplitIndex}|${splits.map((s) => s.instanceId).join(',')}`;
+  useEffect(() => {
+    if (!onSelectedSplitChange) return;
+    const current = splitsRef.current;
+    if (current.length === 0) return;
+    const index = Math.min(focusedSplitIndexRef.current, current.length - 1);
+    onSelectedSplitChange({
+      index,
+      instanceId: current[index].instanceId,
+      splitInstanceIds: current.map((s) => s.instanceId),
+    });
+  }, [selectedSplitKey, onSelectedSplitChange]);
+
+  /**
+   * Issue #3514: place an agent added from the header's "+".
+   *
+   * Waits for the roster: the request and the PATCHed roster are set in the
+   * same handler, but a request whose instance is not in `instances` yet is
+   * kept (not consumed) and retried when the roster changes, so it can never
+   * be lost to ordering. A `new-split` takes focus through the same
+   * "last added" path the layout icons use; a `replace` focuses the split it
+   * replaced. Either way the active instance follows, as it does on a drop.
+   */
+  const lastPlacementTokenRef = useRef(0);
+  useEffect(() => {
+    if (!instancePlacementRequest) return;
+    if (instancePlacementRequest.token === lastPlacementTokenRef.current) return;
+    const { instanceId, placement } = instancePlacementRequest;
+    if (!instances.some((inst) => inst.id === instanceId)) return; // roster not here yet
+    const { token } = instancePlacementRequest;
+    lastPlacementTokenRef.current = token;
+    const current = splitsRef.current;
+    const shownIdx = current.findIndex((s) => s.instanceId === instanceId);
+    if (shownIdx !== -1) {
+      setFocusedSplitIndex(shownIdx);
+    } else if (placement === 'new-split' && openInstanceInNewSplit(instanceId)) {
+      onActiveInstanceChange?.(instanceId);
+    } else {
+      // `replace`, or a `new-split` that found no room: the focused split.
+      const targetIdx = Math.min(focusedSplitIndex, current.length - 1);
+      if (setSplitInstance(targetIdx, instanceId)) {
+        setFocusedSplitIndex(targetIdx);
+        onActiveInstanceChange?.(instanceId);
+      }
+    }
+    // Handled either way: the parent drops it so a remount cannot re-apply it.
+    onInstancePlacementApplied?.(token);
+  }, [
+    instancePlacementRequest,
+    instances,
+    focusedSplitIndex,
+    openInstanceInNewSplit,
+    setSplitInstance,
+    setFocusedSplitIndex,
+    onActiveInstanceChange,
+    onInstancePlacementApplied,
+  ]);
+
+  // Issue #3514: the header "+" disables `new-split` at the ceiling.
+  useEffect(() => {
+    onSplitCountChange?.(splits.length);
+  }, [splits.length, onSplitCountChange]);
 
   // After lastAddedIndex changes, focus the textarea in that pane.
   useEffect(() => {
@@ -401,8 +599,9 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
     setHistoryWidth(DEFAULT_HISTORY_WIDTH);
   }, [resetWidths, setHistoryWidth]);
 
-  const canAdd = splits.length < MAX_SPLITS && !isResizing;
-  const canRemove = splits.length > MIN_SPLITS && !isResizing;
+  // Issue #3514: a layout needs one distinct roster instance per split, so the
+  // icons above the roster size are disabled rather than silently doing nothing.
+  const maxSelectableSplits = Math.max(MIN_SPLITS, Math.min(MAX_SPLITS, instances.length));
   // Nothing to equalize when there is a single split AND History is hidden.
   const canEqualize = splits.length > MIN_SPLITS || historyVisible;
 
@@ -471,6 +670,116 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
     [splits],
   );
 
+  // Issue #3590: the bar's width fit, the second row's counterpart of the
+  // header's #2481 fit. Keyed by what changes its widths; the slotted items
+  // are a node and re-measure without a key.
+  const actionBarRef = useRef<HTMLDivElement>(null);
+  const actionBarLeftRef = useRef<HTMLDivElement>(null);
+  /*
+   * Issue #3592: with one split, its title bar's controls move into the bar —
+   * the session ones right of the slotted items, the actions left of History /
+   * Files — and the split draws no title bar. The slots are elements in state
+   * (callback refs) so the split re-renders into them once they exist; the
+   * ref is set during the commit, so that re-render happens before paint.
+   */
+  const singleSplit = splits.length === MIN_SPLITS;
+  const [sessionSlotEl, setSessionSlotEl] = useState<HTMLDivElement | null>(null);
+  const [actionsSlotEl, setActionsSlotEl] = useState<HTMLDivElement | null>(null);
+
+  const actionBarFitKey = [
+    t('terminal.historyLabel'),
+    t('terminal.filesLabel'),
+    openFileCount,
+    isMaximized ? `max:${maximizedIndex ?? 0}` : '',
+    // Issue #3592: the lone split's controls come and go with the count.
+    singleSplit ? 'one' : '',
+  ].join('\n');
+  /*
+   * Issue #3592: the items (the Verification chip) are rendered ONCE, into a
+   * host element this bar owns, and that element is moved between the places
+   * they are shown — inline in the left group, or the "…" panel when folded.
+   * Rendering `{actionBarItems}` in each place re-created the chip at every
+   * move, and with it its open reason; a move is now a DOM move, so the chip
+   * keeps its state through the fit's steps and the split count's changes
+   * (the count re-keys the fit). In the bar the host itself is the items'
+   * 360px box (`split-action-bar-items`), a child of the left group placed
+   * right after a hidden anchor; in the panel it is `display: contents` inside
+   * the panel's place — so each place lays the items out exactly as before.
+   * Attached from the places' ref callbacks — during the commit, before the
+   * fit measures — and taken out of the left group when its anchor goes.
+   */
+  const [itemsHost, setItemsHost] = useState<HTMLDivElement | null>(null);
+  useLayoutEffect(() => {
+    setItemsHost(document.createElement('div'));
+  }, []);
+  const itemsAnchorRef = useRef<HTMLElement | null>(null);
+  const attachItemsInline = useCallback(
+    (anchor: HTMLSpanElement | null) => {
+      const previous = itemsAnchorRef.current;
+      itemsAnchorRef.current = anchor;
+      if (!itemsHost) return;
+      if (!anchor) {
+        // The anchor is leaving: the host must not stay behind in the group.
+        if (previous && itemsHost.previousSibling === previous) itemsHost.remove();
+        return;
+      }
+      // Same width rule the header gave the chip (#2481): a 360px `w-*` capped
+      // by `max-w-max`, `min-w-0` so its title truncates.
+      itemsHost.className = 'ml-1 flex min-w-0 w-[360px] max-w-max items-center gap-1';
+      itemsHost.style.display = '';
+      itemsHost.setAttribute('data-testid', 'split-action-bar-items');
+      if (itemsHost.previousSibling !== anchor) anchor.after(itemsHost);
+    },
+    [itemsHost],
+  );
+  const attachItemsFolded = useCallback(
+    (place: HTMLDivElement | null) => {
+      if (!place || !itemsHost) return;
+      itemsHost.className = '';
+      itemsHost.style.display = 'contents';
+      itemsHost.removeAttribute('data-testid');
+      if (itemsHost.parentNode !== place) place.appendChild(itemsHost);
+    },
+    [itemsHost],
+  );
+  // The fit's unkeyed content: the items, and the host they are drawn into
+  // (it arrives one commit after the first render).
+  const actionBarItemsContent = useMemo(
+    () => [actionBarItems, itemsHost],
+    [actionBarItems, itemsHost],
+  );
+  const actionBarFit = useSplitActionBarFit(
+    actionBarRef,
+    actionBarLeftRef,
+    actionBarFitKey,
+    actionBarItemsContent,
+    // Issue #3592: portalled in by the split, so no prop of ours changes when
+    // its model, cost or note does — the slot is watched instead.
+    sessionSlotEl
+  );
+  // Issue #3592: the lone split's session controls fold with the items.
+  const sessionFolded = singleSplit && actionBarFit.itemsFolded;
+  // Issue #3651: folded, the slot is a named group with `data-folded`, so the
+  // split's row of controls portalled into it (`split-bar-session-N`) wraps
+  // onto further lines inside the narrow panel — the toggle, the note with its
+  // time, End and the name stay apart and in reach. Inline on the bar the slot
+  // is unchanged, and the row stays one line.
+  const sessionSlot = singleSplit ? (
+    <div
+      ref={setSessionSlotEl}
+      data-testid="split-action-bar-session"
+      data-folded={sessionFolded ? 'true' : undefined}
+      className={`flex min-w-0 items-center${sessionFolded ? ' max-w-full group/bar-session' : ' ml-1'}`}
+    />
+  ) : null;
+  const headerSlots = useMemo<SplitHeaderSlots | null>(
+    () =>
+      singleSplit && sessionSlotEl && actionsSlotEl
+        ? { session: sessionSlotEl, actions: actionsSlotEl }
+        : null,
+    [singleSplit, sessionSlotEl, actionsSlotEl],
+  );
+
   // Memoize per-split onFocus handlers so prop identity is stable.
   const focusHandlers = useMemo(
     () => splits.map((_, idx) => () => setFocusedSplitIndex(idx)),
@@ -527,11 +836,15 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
         // apply: setSplitInstance returns whether the change was actually applied.
         const applied = setSplitInstance(idx, instanceId);
         if (applied) {
+          // Issue #3593: the split dropped on becomes the selected one, so the
+          // header's current session (the selected split's) is the session
+          // just dropped — the same instance the active one now follows.
+          setFocusedSplitIndex(idx);
           onActiveInstanceChange?.(instanceId);
           showToast?.(`Moved ${label} to Split ${idx + 1}`, 'success');
         }
       }),
-    [splits, setSplitInstance, showToast, onActiveInstanceChange, instanceById],
+    [splits, setSplitInstance, setFocusedSplitIndex, showToast, onActiveInstanceChange, instanceById],
   );
 
   return (
@@ -541,52 +854,75 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
       data-testid="terminal-split-container"
       className="flex flex-col h-full min-h-0"
     >
-      {/* Action bar */}
-      <div className="flex items-center gap-1 px-2 py-1 bg-surface border-b border-border flex-shrink-0">
-        {/* Issue #2261: while a split is maximized the split count is no longer
-            what the row is showing, so the label says which split is filling it
-            instead — the one line that explains why the other panes vanished. */}
-        <span
-          data-testid="split-count-label"
-          className="text-xs text-muted-foreground tabular-nums mr-1 truncate"
+      {/* Action bar. Issue #3590: the worktree screen's second row — 36px
+          including its border (the Verification chip's ⓘ is 32px plus the
+          chip's 1px border on each side, so no vertical padding). */}
+      <div
+        ref={actionBarRef}
+        data-testid="split-action-bar"
+        className="flex h-9 min-h-[35px] items-center gap-1 px-2 bg-surface border-b border-border flex-shrink-0"
+      >
+        {/* Issue #3590: the left group (layout ops + `actionBarItems`) is the
+            part that gives way (`min-w-0`); the History / Files toggles never
+            shrink. Clipped only as the fit's last resort. */}
+        <div
+          ref={actionBarLeftRef}
+          data-testid="split-action-bar-left"
+          className={`flex min-w-0 items-center gap-1${actionBarFit.squeezed ? ' overflow-x-clip' : ''}`}
         >
-          {isMaximized
-            ? t('terminal.maximizedStatus', { split: (maximizedIndex ?? 0) + 1 })
-            : `${splits.length} / ${MAX_SPLITS} splits`}
-        </span>
+        {/* Issue #2261: while a split is maximized the label says which split is
+            filling the row — the one line that explains why the other panes
+            vanished. Issue #3514: the "n / 4 splits" count it showed otherwise
+            is gone; the pressed layout icon says the same thing. */}
+        {isMaximized ? (
+          <span
+            data-testid="split-count-label"
+            className="min-w-0 text-xs text-muted-foreground tabular-nums mr-1 truncate"
+          >
+            {t('terminal.maximizedStatus', { split: (maximizedIndex ?? 0) + 1 })}
+          </span>
+        ) : null}
 
         {/*
-          Issue #1079: the layout-operation controls (+Split / -Split / Equal)
-          are lucide icon ghost buttons with tooltips. They form the LEFT group;
-          an `ml-auto` hairline separator pushes the History / Files panel
-          toggles to the RIGHT group ("layout ops | panel visibility").
+          Issue #3514: the layout icons (1 / 2 / 3 / 4) replace the "+ / -"
+          stepper. One click goes straight to the layout; 4 is the 2x2 grid.
+          Together with Equal / Maximize they form the LEFT group; an `ml-auto`
+          hairline separator pushes the History / Files panel toggles to the
+          RIGHT group ("layout ops | panel visibility", Issue #1079).
         */}
-        <Tooltip content={t('terminal.addSplit')} placement="bottom">
-          <button
-            type="button"
-            onClick={addSplit}
-            disabled={!canAdd}
-            aria-disabled={!canAdd}
-            aria-label={t('terminal.addSplit')}
-            data-testid="add-terminal-split"
-            className="flex items-center justify-center h-7 w-7 rounded text-muted-foreground hover:text-surface-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-ring transition-colors"
-          >
-            <Plus className="w-4 h-4" aria-hidden="true" />
-          </button>
-        </Tooltip>
-        <Tooltip content={t('terminal.removeSplit')} placement="bottom">
-          <button
-            type="button"
-            onClick={removeSplit}
-            disabled={!canRemove}
-            aria-disabled={!canRemove}
-            aria-label={t('terminal.removeSplit')}
-            data-testid="remove-terminal-split"
-            className="flex items-center justify-center h-7 w-7 rounded text-muted-foreground hover:text-surface-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-ring transition-colors"
-          >
-            <Minus className="w-4 h-4" aria-hidden="true" />
-          </button>
-        </Tooltip>
+        <div
+          role="group"
+          aria-label={t('terminal.layoutGroupLabel')}
+          data-testid="split-layout-picker"
+          className="flex flex-shrink-0 items-center gap-0.5 rounded border border-border p-0.5"
+        >
+          {SPLIT_LAYOUT_COUNTS.map((count) => {
+            const Icon = SPLIT_LAYOUT_ICONS[count] ?? Square;
+            const active = splits.length === count;
+            const disabled = isResizing || count > maxSelectableSplits;
+            const label = t('terminal.layoutSplits', { count });
+            return (
+              <Tooltip key={count} content={label} placement="bottom">
+                <button
+                  type="button"
+                  onClick={() => setSplitCount(count)}
+                  disabled={disabled}
+                  aria-disabled={disabled}
+                  aria-pressed={active}
+                  aria-label={label}
+                  data-testid={`split-layout-${count}`}
+                  className={`flex items-center justify-center h-6 w-6 rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                    active
+                      ? 'bg-accent-500/15 text-accent-600 dark:text-accent-400'
+                      : 'text-muted-foreground hover:text-surface-foreground hover:bg-muted'
+                  }`}
+                >
+                  <Icon className="w-3.5 h-3.5" aria-hidden="true" />
+                </button>
+              </Tooltip>
+            );
+          })}
+        </div>
 
         {/*
           Issue #861: equalize terminal split widths (each → 1/n) and reset the
@@ -601,7 +937,7 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
             aria-disabled={!canEqualize}
             aria-label={t('terminal.equalizeWidthsHint')}
             data-testid="equalize-split-widths"
-            className="flex items-center justify-center h-7 w-7 rounded text-muted-foreground hover:text-surface-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-ring transition-colors"
+            className="flex flex-shrink-0 items-center justify-center h-7 w-7 rounded text-muted-foreground hover:text-surface-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-ring transition-colors"
           >
             <AlignHorizontalDistributeCenter
               className="w-4 h-4 flex-shrink-0"
@@ -620,7 +956,7 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
             aria-pressed={isMaximized}
             aria-label={maximizeLabel}
             data-testid="toggle-maximize-split"
-            className="flex items-center justify-center h-7 w-7 rounded text-muted-foreground hover:text-surface-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-ring transition-colors"
+            className="flex flex-shrink-0 items-center justify-center h-7 w-7 rounded text-muted-foreground hover:text-surface-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-ring transition-colors"
           >
             {isMaximized ? (
               <Minimize2 className="w-4 h-4 flex-shrink-0" aria-hidden="true" />
@@ -630,9 +966,47 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
           </button>
         </Tooltip>
 
+          {/* Issue #3590: the second row's items (the Verification chip), next
+              to the layout ops. Issue #3592: the place the items' host is
+              moved into (see `itemsHost`); the host is their 360px box. */}
+          {actionBarItems && !actionBarFit.itemsFolded && (
+            <span ref={attachItemsInline} hidden />
+          )}
+
+          {/* Issue #3592: the lone split's agent selector, Terminal / Chat,
+              model, cost and note. In the left group, so the bar's fit counts
+              it; `min-w-0` so the model / cost / note truncate first. */}
+          {!sessionFolded && sessionSlot}
+        </div>
+
+        {/* Issue #3590: on a bar too narrow for them, the items wait behind
+            this button, which never shrinks, in a panel out of every clip.
+            Issue #3592: the lone split's session controls (selector, Terminal /
+            Chat, note) wait there with them — parked, hidden but mounted, while
+            the panel is closed. */}
+        {(actionBarItems || sessionFolded) && actionBarFit.itemsFolded && (
+          <ActionBarItemsOverflow
+            label={t('terminal.actionBarMore')}
+            parked={sessionFolded ? sessionSlot : null}
+          >
+            {actionBarItems ? <div ref={attachItemsFolded} style={{ display: 'contents' }} /> : null}
+          </ActionBarItemsOverflow>
+        )}
+        {/* Issue #3592: the items themselves, wherever the host is (above). */}
+        {actionBarItems && itemsHost ? createPortal(actionBarItems, itemsHost) : null}
+
         {/* Issue #1079: separator dividing layout ops (left) from panel toggles
             (right). `ml-auto` pushes the History / Files group to the far right. */}
-        <div className="ml-auto h-4 w-px bg-border" aria-hidden="true" />
+        <div className="ml-auto h-4 w-px flex-shrink-0 bg-border" aria-hidden="true" />
+
+        {/* Issue #3592: the lone split's search and "…". */}
+        {singleSplit && (
+          <div
+            ref={setActionsSlotEl}
+            data-testid="split-action-bar-pane-actions"
+            className="flex flex-shrink-0 items-center gap-0.5"
+          />
+        )}
 
         {/*
           Issue #841 (Phase 2): History / Files visibility toggles. Always
@@ -660,7 +1034,9 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
             }`}
           >
             <History className="w-3.5 h-3.5 flex-shrink-0" aria-hidden="true" />
-            <span>{t('terminal.historyLabel')}</span>
+            {/* Issue #3590: dropped first when the bar is too narrow; the
+                aria-label and the tooltip still name the toggle. */}
+            {!actionBarFit.compactToggles && <span>{t('terminal.historyLabel')}</span>}
           </button>
         </Tooltip>
         <Tooltip content={filesTooltip} placement="bottom" className="flex-shrink-0">
@@ -685,7 +1061,7 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
             {/* Issue #2616: `Files` is the Activity Bar file tree's icon; this
                 toggle shows a side panel, so it must not share it. */}
             <PanelRight className="w-3.5 h-3.5 flex-shrink-0" aria-hidden="true" />
-            <span>{t('terminal.filesLabel')}</span>
+            {!actionBarFit.compactToggles && <span>{t('terminal.filesLabel')}</span>}
             {openFileCount > 0 && (
               <span
                 data-testid="open-files-count"
@@ -710,6 +1086,7 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
         for two usable rows the grid scrolls rather than crushing both panes into
         a few lines of terminal.
       */}
+      <SplitHeaderSlotsProvider value={headerSlots}>
       <div
         ref={containerRef}
         data-testid="terminal-split-layout"
@@ -795,9 +1172,11 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
                   onInstanceChange: instanceChangeHandlers[idx],
                   onFocus: focusHandlers[idx],
                   isFocused: focusedSplitIndex === idx,
+                  showFocusFrame: splits.length > MIN_SPLITS && focusedSplitIndex === idx,
                   onDropInstance: dropHandlers[idx],
                   isMaximized: maximizedHere,
                   onToggleMaximize: maximizeHandlers[idx],
+                  maximizeDisabled: splits.length <= MIN_SPLITS,
                 })}
                 </TerminalSplitHiddenProvider>
               </div>
@@ -856,9 +1235,248 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
           </>
         ) : null}
       </div>
+      </SplitHeaderSlotsProvider>
     </div>
   );
 });
+
+/** Gap between the "…" panel and the viewport edge, and below the button (px). */
+const OVERFLOW_PANEL_MARGIN = 8;
+const OVERFLOW_PANEL_GAP = 4;
+
+/**
+ * Issue #3590: the "…" panel's left edge — right-aligned with the button when
+ * there is room, shifted right as far as needed so its left edge stays inside
+ * the viewport, and pinned to the left margin when the panel is wider than the
+ * viewport allows (its `max-w` then caps it). The same idea as the repository
+ * tab popover's `clampPopoverLeft`, with the preference flipped: this button
+ * sits at the right end of its group.
+ *
+ * Issue #3651: the left limit is the body's left edge (`regionLeft`, the
+ * split container's), not the viewport's. With the sidebar open at 1024px the
+ * panel is wider than the room left of "…", and a viewport-only clamp drew it
+ * from x=8 — over the sidebar.
+ *
+ * @param buttonRight - The "…" button's viewport `right`
+ * @param panelWidth - The panel's rendered width in px
+ * @param viewportWidth - `window.innerWidth`
+ * @param regionLeft - The body region's viewport `left` (0: the viewport)
+ * @returns The `left` coordinate to render at
+ * @internal Exported for unit tests.
+ */
+export function clampOverflowPanelLeft(
+  buttonRight: number,
+  panelWidth: number,
+  viewportWidth: number,
+  regionLeft = 0
+): number {
+  const minLeft = regionLeft + OVERFLOW_PANEL_MARGIN;
+  const maxLeft = viewportWidth - OVERFLOW_PANEL_MARGIN - panelWidth;
+  if (maxLeft <= minLeft) return minLeft;
+  return Math.min(Math.max(buttonRight - panelWidth, minLeft), maxLeft);
+}
+
+/**
+ * Issue #3651: the panel's `max-width` — the room from the body's left edge to
+ * the viewport's right edge, minus a margin on each side. With `regionLeft` 0
+ * it is the former `calc(100vw - 16px)`.
+ *
+ * @internal Exported for unit tests.
+ */
+export function overflowPanelMaxWidth(viewportWidth: number, regionLeft = 0): number {
+  return Math.max(viewportWidth - regionLeft - 2 * OVERFLOW_PANEL_MARGIN, 0);
+}
+
+/**
+ * Issue #3651: the "…" panel's box. `flex-wrap`: with the width measured from
+ * the body (768px with a 480px sidebar leaves ~272px), the items — the chip
+ * and the lone split's session controls — go onto further rows instead of
+ * overrunning the box or each other. Each row item is capped at the box
+ * (`max-w-full`, the chip's own root and the parked session slot) and shrinks
+ * by truncating (`min-w-0`); inside the slot the controls wrap too (the
+ * pane's row reads the slot's `data-folded`, see `sessionSlot`). Wrapping
+ * rather than scrolling, because the panel's job is to show every folded
+ * control at once: a scroll box hides part of them behind a scrollbar, a
+ * scrolled-away control is reached only by scrolling, and keyboard focus can
+ * land on one out of view. (The reason popover — portalled to `<body>` on PC —
+ * and the selector's Radix menu — portalled too — would not be clipped by
+ * one.) A panel that fits stays one row, as before.
+ */
+const OVERFLOW_PANEL_CLASS =
+  'fixed z-50 flex flex-wrap max-w-[calc(100vw-16px)] items-center gap-1 rounded-lg border border-border bg-surface p-1 shadow-lg';
+
+/** Issue #3651: the body region the "…" panel stays inside. */
+const OVERFLOW_PANEL_REGION_SELECTOR = '[data-testid="terminal-split-container"]';
+
+/**
+ * Issue #3590: the "…" button the action bar's items fold behind when the bar
+ * is too narrow (`useSplitActionBarFit`). The panel is portalled to `<body>`
+ * with `position: fixed` under the button, so neither the bar's clipped left
+ * group nor the terminal pane's `overflow-hidden` (beside an open file panel)
+ * can cut it. Its rendered width is measured before paint and its left edge
+ * clamped into the viewport on both sides ({@link clampOverflowPanelLeft}).
+ * Issue #3651: on the left, into the body — the split container's left edge,
+ * so it never covers the sidebar (the viewport when there is no container).
+ *
+ * Focus follows the repository tab popover: opening moves focus to the
+ * panel's first control, Escape closes and hands focus back to "…". A press
+ * outside closes without moving focus — the press already put it where the
+ * user wanted. A press inside any `[data-floating-layer]` (the chip's reason
+ * popover) counts as inside.
+ *
+ * Issue #3660: while open the panel marks itself `data-floating-layer="open"`
+ * like the header tools' "…" list, so the overlaid activity pane stands down:
+ * one Escape (or a press outside) closes the panel, not the pane under it. The
+ * chip folded in here (an `[data-activity-entry]` of the pane, and the panel's
+ * first control) would otherwise close both. The mark, not `preventDefault`:
+ * the pane's document listener predates the panel's, and the chip's reason
+ * (its document listener comes after the panel's) still closes with the panel
+ * on an Escape neither the chip nor anything above claimed.
+ *
+ * Issue #3592: `parked` is drawn after `children` while the panel is open,
+ * and in a hidden box beside the button while it is closed — for a slot
+ * another component portals into, which must exist in either state.
+ *
+ * Exported for tests (Issue #3591: its Esc beside the header tools' "…").
+ */
+export function ActionBarItemsOverflow({
+  label,
+  children,
+  parked = null,
+}: {
+  label: string;
+  children: ReactNode;
+  parked?: ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const [position, setPosition] = useState<{
+    top: number;
+    left: number;
+    maxWidth: number;
+  } | null>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  const place = useCallback(() => {
+    const rect = buttonRef.current?.getBoundingClientRect();
+    const panel = panelRef.current;
+    if (!rect || !panel) return;
+    const width = panel.getBoundingClientRect().width;
+    const region = buttonRef.current?.closest(OVERFLOW_PANEL_REGION_SELECTOR);
+    const regionLeft = Math.max(region?.getBoundingClientRect().left ?? 0, 0);
+    const next = {
+      top: rect.bottom + OVERFLOW_PANEL_GAP,
+      left: clampOverflowPanelLeft(rect.right, width, window.innerWidth, regionLeft),
+      maxWidth: overflowPanelMaxWidth(window.innerWidth, regionLeft),
+    };
+    setPosition((prev) =>
+      prev && prev.top === next.top && prev.left === next.left && prev.maxWidth === next.maxWidth
+        ? prev
+        : next
+    );
+  }, []);
+
+  // Measure the rendered panel before paint (it renders hidden until placed),
+  // then move focus to its first control.
+  useLayoutEffect(() => {
+    if (!open) {
+      setPosition(null);
+      return;
+    }
+    place();
+  }, [open, place]);
+
+  // Once per opening, after the panel is placed: a `visibility: hidden` panel
+  // (the first, unmeasured render) cannot take focus.
+  const placed = position !== null;
+  const focusedRef = useRef(false);
+  useEffect(() => {
+    if (!open) {
+      focusedRef.current = false;
+      return;
+    }
+    if (!placed || focusedRef.current) return;
+    focusedRef.current = true;
+    const first = panelRef.current?.querySelector<HTMLElement>(
+      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    );
+    first?.focus();
+  }, [open, placed]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event: MouseEvent) => {
+      const target = event.target as Element | null;
+      if (!target) return;
+      if (buttonRef.current?.contains(target) || panelRef.current?.contains(target)) return;
+      if (typeof target.closest === 'function' && target.closest('[data-floating-layer]')) return;
+      setOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      // Issue #3592: an Escape a layer in the panel already handled (the
+      // folded agent selector's menu closing itself) is not ours to act on.
+      // Issue #3591: nor one the header tools' "…" list closed itself with.
+      if (!isUnhandledEscape(event)) return;
+      setOpen(false);
+      buttonRef.current?.focus();
+    };
+    // The panel's content can change width (the chip's verdict) and the
+    // button can move; re-measure on both, and on window resizes.
+    const observer =
+      typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => place());
+    if (observer && panelRef.current) observer.observe(panelRef.current);
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    window.addEventListener('resize', place);
+    return () => {
+      observer?.disconnect();
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('resize', place);
+    };
+  }, [open, place]);
+
+  return (
+    <>
+      <Tooltip content={label} placement="bottom" className="flex-shrink-0">
+        <button
+          ref={buttonRef}
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          aria-label={label}
+          aria-expanded={open}
+          aria-haspopup="dialog"
+          data-testid="split-action-bar-items-overflow"
+          className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded text-muted-foreground hover:text-surface-foreground hover:bg-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-ring transition-colors"
+        >
+          <Ellipsis className="w-4 h-4" aria-hidden="true" />
+        </button>
+      </Tooltip>
+      {!open && parked ? <div hidden>{parked}</div> : null}
+      {open &&
+        typeof document !== 'undefined' &&
+        createPortal(
+          <div
+            ref={panelRef}
+            role="dialog"
+            aria-label={label}
+            data-testid="split-action-bar-items-panel"
+            data-floating-layer="open"
+            style={
+              position
+                ? { top: position.top, left: position.left, maxWidth: position.maxWidth }
+                : { top: 0, left: 0, visibility: 'hidden' }
+            }
+            className={OVERFLOW_PANEL_CLASS}
+          >
+            {children}
+            {parked}
+          </div>,
+          document.body
+        )}
+    </>
+  );
+}
 
 /**
  * Internal helper: wraps PaneResizer so we can intercept the underlying

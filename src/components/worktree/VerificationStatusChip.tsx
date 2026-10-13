@@ -1,3 +1,4 @@
+
 /**
  * VerificationStatusChip (Issue #1816, Issue #2064)
  *
@@ -5,7 +6,9 @@
  * did it pass?" — the two facts that until now existed only in `commandmate
  * task show` / `verify` stdout.
  *
- * Shown by both surfaces: the PC header (`DesktopHeader`) and the mobile shell.
+ * Shown by both surfaces: on PC the second row under the header (the split
+ * action bar's `actionBarItems`, next to the layout icons — Issue #3590; it sat
+ * in `DesktopHeader` before) and the mobile shell.
  *
  * Issue #2064 — the chip is an ENTRY POINT, so it no longer hides itself on a
  * branch that was never delegated with a contract. The people who most need to
@@ -32,7 +35,17 @@
 
 'use client';
 
-import React, { memo, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import React, {
+  memo,
+  useCallback,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
+import { createPortal } from 'react-dom';
 import { useTranslations } from 'next-intl';
 import { Info, ShieldCheck } from 'lucide-react';
 import { Badge } from '@/components/ui/Badge';
@@ -46,6 +59,7 @@ import type {
   VerificationGateResultView,
   VerificationRunListItem,
 } from '@/lib/api/verification-api';
+import { isUnhandledEscape } from '@/lib/escape-key';
 
 /** Characters of the task title kept inline before ellipsis. */
 const TITLE_MAX_LENGTH = 36;
@@ -72,7 +86,54 @@ export interface VerificationStatusChipProps {
   latestRunGates?: VerificationGateResultView[] | null;
   /** Open the Verification pane. */
   onOpen: () => void;
+  /**
+   * Issue #3591: whether the Verification pane is open. On PC the chip toggles
+   * the pane, so while it is open the hint in the title / accessible name /
+   * reason says "close". Omitted (the mobile shell, where the chip only
+   * opens), the hint always says "open".
+   */
+  paneOpen?: boolean;
   className?: string;
+  /**
+   * Where the reason popover is drawn (Issue #3590).
+   *
+   * - `inline` (default, the mobile shell): absolutely positioned under the
+   *   chip, inside its own box.
+   * - `floating` (PC): portalled to `<body>` and placed with `position: fixed`
+   *   under the chip, kept inside the viewport. The PC chip sits in the split
+   *   action bar, whose left group clips on a narrow bar and whose terminal
+   *   pane is `overflow-hidden` beside an open file panel — an inline popover
+   *   was cut there. It follows the chip while open (re-read every frame).
+   *   The content and the open / close rules are the same.
+   */
+  popover?: 'inline' | 'floating';
+}
+
+/** Width of the reason popover (`w-72`), and its gap to the viewport edge. */
+const POPOVER_WIDTH_PX = 288;
+const POPOVER_EDGE_PX = 8;
+
+/**
+ * Where the floating popover goes: under `anchor`, left-aligned with it,
+ * shifted left as far as needed to stay inside the viewport.
+ */
+function floatingPosition(anchor: DOMRect): { top: number; left: number; width: number } {
+  const viewport = typeof window === 'undefined' ? POPOVER_WIDTH_PX : window.innerWidth;
+  const width = Math.min(POPOVER_WIDTH_PX, Math.max(0, viewport - POPOVER_EDGE_PX * 2));
+  const left = Math.max(
+    POPOVER_EDGE_PX,
+    Math.min(anchor.left, viewport - width - POPOVER_EDGE_PX)
+  );
+  return { top: anchor.bottom + 4, left, width };
+}
+
+/**
+ * Whether the chip is on screen: in the page and not inside a hidden box
+ * (Issue #3592 — it leaves the page while it waits behind a closed "…").
+ */
+function isShown(el: HTMLElement | null): boolean {
+  if (!el || !el.isConnected) return false;
+  return typeof el.checkVisibility !== 'function' || el.checkVisibility();
 }
 
 function truncate(value: string, max: number): string {
@@ -87,8 +148,13 @@ function truncate(value: string, max: number): string {
  * operator browses history. The rows are keyed by run id, so a genuinely new
  * run clears them rather than showing the previous run's failures under the new
  * verdict.
+ *
+ * Issue #3590: exported so a parent that outlives the chip can hold them too.
+ * On PC the chip sits in the split action bar, which `FilePanelSplit` remounts
+ * when the first file opens or the last one closes; a ref held only here would
+ * go with it (`useDesktopVerificationChip` calls this one level up).
  */
-function useGatesOfLatestRun(
+export function useGatesOfLatestRun(
   latestRun: VerificationRunListItem | null,
   supplied: VerificationGateResultView[] | null | undefined
 ): VerificationGateResultView[] | null {
@@ -107,11 +173,17 @@ export const VerificationStatusChip = memo(function VerificationStatusChip({
   latestRun,
   latestRunGates,
   onOpen,
+  paneOpen = false,
   className = '',
+  popover = 'inline',
 }: VerificationStatusChipProps) {
   const t = useTranslations('worktree');
   const [reasonOpen, setReasonOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const popoverRef = useRef<HTMLDivElement | null>(null);
+  const [floatingAt, setFloatingAt] = useState<{ top: number; left: number; width: number } | null>(
+    null
+  );
   const popoverId = useId();
 
   const gates = useGatesOfLatestRun(latestRun, latestRunGates);
@@ -158,9 +230,9 @@ export const VerificationStatusChip = memo(function VerificationStatusChip({
       }
     }
 
-    parts.push(t('verification.chip.openHint'));
+    parts.push(t(paneOpen ? 'verification.chip.closeHint' : 'verification.chip.openHint'));
     return parts;
-  }, [task, latestRun, gates, t]);
+  }, [task, latestRun, gates, paneOpen, t]);
 
   const reason = reasonParts.join(' · ');
 
@@ -169,9 +241,32 @@ export const VerificationStatusChip = memo(function VerificationStatusChip({
     onOpen();
   }, [onOpen]);
 
+  const reasonToggleRef = useRef<HTMLButtonElement | null>(null);
   const toggleReason = useCallback(() => {
-    setReasonOpen((open) => !open);
-  }, []);
+    // Issue #3660: opening puts the keyboard on ⓘ (Safari does not focus a
+    // clicked button), so the next Escape lands in the chip and the chip's
+    // own `onKeyDown` below can claim it.
+    if (!reasonOpen) reasonToggleRef.current?.focus();
+    setReasonOpen(!reasonOpen);
+  }, [reasonOpen]);
+
+  // Issue #3660: an Escape pressed in the chip while the reason is up is the
+  // reason's alone. The overlaid activity pane treats the chip as one of its
+  // Esc regions (`[data-activity-entry]`) and the "…" panel the chip can fold
+  // into closes on any Escape; both listen on the document and opened before
+  // the reason did, so claiming the press in the document listener below would
+  // come too late. React's handler runs at the root, before the document, and
+  // `preventDefault` makes both stand down (the header tools' "…" claims its
+  // Escape the same way). The reason keeps `data-floating-layer="true"` — a
+  // press in it is only "not outside" for the "…" panel.
+  const handleRootKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLDivElement>) => {
+      if (!reasonOpen || !isUnhandledEscape(event.nativeEvent)) return;
+      event.preventDefault();
+      setReasonOpen(false);
+    },
+    [reasonOpen]
+  );
 
   // Dismiss on Escape or a press outside. `pointerdown` rather than `click` so
   // the popover is gone before the press lands on whatever is underneath it.
@@ -179,10 +274,20 @@ export const VerificationStatusChip = memo(function VerificationStatusChip({
     if (!reasonOpen) return;
     const onPointerDown = (event: MouseEvent) => {
       if (rootRef.current?.contains(event.target as Node)) return;
+      // Issue #3590: a floating popover lives outside the root.
+      if (popoverRef.current?.contains(event.target as Node)) return;
+      // Issue #3592: while the chip waits out of sight (behind a closed "…"),
+      // its reason is hidden too, so there is no "outside" to press — the
+      // press on "…" that brings the chip back must not close it.
+      if (!isShown(rootRef.current)) return;
       setReasonOpen(false);
     };
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setReasonOpen(false);
+      // Issue #3592: an Escape a layer above already handled (a menu closing
+      // itself — Radix calls `preventDefault`) is not ours to act on.
+      // Issue #3591: the header tools' "…" list closing itself is one too.
+      if (!isUnhandledEscape(event)) return;
+      setReasonOpen(false);
     };
     document.addEventListener('mousedown', onPointerDown);
     document.addEventListener('keydown', onKeyDown);
@@ -192,8 +297,70 @@ export const VerificationStatusChip = memo(function VerificationStatusChip({
     };
   }, [reasonOpen]);
 
+  // Issue #3590: place the floating popover before paint, and keep it under
+  // the chip for as long as it is open. The chip can move without anything
+  // resizing (the window or a scroll aside, the split action bar gains a
+  // "Split n maximized" label left of it when Mod+Shift+Enter maximizes a
+  // split), so the position is re-read once per frame while open — one
+  // `getBoundingClientRect` per frame, for one popover, only while it is
+  // shown. An unchanged position keeps the same state object (no re-render).
+  useLayoutEffect(() => {
+    if (!reasonOpen || popover !== 'floating') {
+      setFloatingAt(null);
+      return;
+    }
+    let frame = 0;
+    const place = () => {
+      // Issue #3592: the chip leaves the page while it waits behind a closed
+      // "…": a detached (or hidden) root measures as a zero box at the
+      // viewport's corner, so the reason would sit at the top left. Hide it
+      // instead — still open — and place it again once the chip is back.
+      const root = rootRef.current;
+      if (!root || !isShown(root)) {
+        setFloatingAt((prev) => (prev === null ? prev : null));
+        return;
+      }
+      const anchor = root.getBoundingClientRect();
+      const next = floatingPosition(anchor);
+      setFloatingAt((prev) =>
+        prev && prev.top === next.top && prev.left === next.left && prev.width === next.width
+          ? prev
+          : next
+      );
+    };
+    const follow = () => {
+      place();
+      frame = window.requestAnimationFrame(follow);
+    };
+    place();
+    frame = window.requestAnimationFrame(follow);
+    return () => window.cancelAnimationFrame(frame);
+  }, [reasonOpen, popover]);
+
+  const reasonBody = (
+    <>
+      <p className="mb-1 font-semibold">{t('verification.chip.reasonHeading')}</p>
+      <ul className="space-y-1">
+        {reasonParts.map((part) => (
+          <li key={part} className="break-words">
+            {part}
+          </li>
+        ))}
+      </ul>
+    </>
+  );
+
   return (
-    <div ref={rootRef} className={`relative inline-flex max-w-full ${className}`.trim()}>
+    <div
+      ref={rootRef}
+      // Issue #3591: the Verification pane's entry point on PC (the header's
+      // tools leave it out). The worktree screen hands focus back to this
+      // chip's first button when the pane closes, and a press on it — the
+      // chip or its ⓘ — is not "outside" the open pane.
+      data-activity-entry="verification"
+      onKeyDown={handleRootKeyDown}
+      className={`relative inline-flex max-w-full ${className}`.trim()}
+    >
       {/* `grow`: the mobile shell passes `w-full justify-start` to the root, and
           the pill used to be the root — without it the strip would go from a
           full-width chip to one that hugs its text. */}
@@ -243,6 +410,7 @@ export const VerificationStatusChip = memo(function VerificationStatusChip({
             meaning "open the pane". */}
         <button
           type="button"
+          ref={reasonToggleRef}
           onClick={toggleReason}
           data-testid="verification-chip-reason-toggle"
           aria-expanded={reasonOpen}
@@ -253,23 +421,40 @@ export const VerificationStatusChip = memo(function VerificationStatusChip({
           <Info size={14} aria-hidden="true" />
         </button>
       </div>
-      {reasonOpen && (
+      {reasonOpen && popover === 'inline' && (
         <div
           id={popoverId}
           role="tooltip"
           data-testid="verification-chip-reason-popover"
           className="absolute left-0 top-full z-50 mt-1 w-72 max-w-[80vw] rounded-lg border border-border bg-surface p-3 text-xs leading-relaxed text-foreground shadow-lg"
         >
-          <p className="mb-1 font-semibold">{t('verification.chip.reasonHeading')}</p>
-          <ul className="space-y-1">
-            {reasonParts.map((part) => (
-              <li key={part} className="break-words">
-                {part}
-              </li>
-            ))}
-          </ul>
+          {reasonBody}
         </div>
       )}
+      {/* Issue #3590: same popover, out of every clipping ancestor. The
+          `data-floating-layer` mark tells an enclosing floating panel (the
+          action bar's overflow) that a press here is not "outside". */}
+      {reasonOpen &&
+        popover === 'floating' &&
+        typeof document !== 'undefined' &&
+        createPortal(
+          <div
+            ref={popoverRef}
+            id={popoverId}
+            role="tooltip"
+            data-testid="verification-chip-reason-popover"
+            data-floating-layer="true"
+            style={
+              floatingAt
+                ? { top: floatingAt.top, left: floatingAt.left, width: floatingAt.width }
+                : { visibility: 'hidden' }
+            }
+            className="fixed z-50 rounded-lg border border-border bg-surface p-3 text-xs leading-relaxed text-foreground shadow-lg"
+          >
+            {reasonBody}
+          </div>,
+          document.body
+        )}
     </div>
   );
 });

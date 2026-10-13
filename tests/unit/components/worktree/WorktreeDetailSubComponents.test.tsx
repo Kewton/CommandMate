@@ -308,7 +308,9 @@ describe('DesktopHeader per-instance status row (Issue #749 / #869)', () => {
 
       const tooltip = await screen.findByRole('tooltip', { hidden: true });
       expect(tooltip).toHaveTextContent('Codex: Idle');
-      expect(tooltip).toHaveAttribute('data-placement', 'bottom');
+      // Issue #3616: the row now sits in the "N more" list, and its tooltip
+      // goes beside the row (`right`, falling back to `left`), not below it.
+      expect(tooltip).toHaveAttribute('data-placement', 'right');
       expect(tooltip.parentElement).toBe(document.body);
       expect(tooltip.className).toMatch(/\bfixed\b/);
       // a11y (#730): the label is not double-announced via aria-describedby.
@@ -694,21 +696,22 @@ describe('DesktopHeader agent indicator drag source (Issue #786 / #869)', () => 
     expect(container.querySelector('[draggable="true"]')).toBeNull();
   });
 
-  // Issue #917: the PC display-size selector must be reachable from the worktree
-  // detail page. The global Header is suppressed on /worktrees/[id] (useLayoutConfig
-  // showGlobalNav:false), so DesktopHeader surfaces the selector in its top bar.
-  // PcDisplaySizeContext has a non-throwing default (isMobile:false) so it renders
-  // without an explicit provider.
+  // Issue #917 put the PC display-size selector in this top bar because the
+  // global Header is suppressed on /worktrees/[id]. Issue #3513: it now lives in
+  // the settings menu at the foot of the sidebar and the icon rail (#3510 /
+  // #3512), which the worktree screen also has, so the top bar drops it the
+  // same way the Header did. The two `it` names below are #917's and are kept
+  // as they were; what they now pin is that the selector is absent.
   describe('PC display-size selector (Issue #917)', () => {
     it('renders the display-size selector in the desktop top bar', () => {
       render(<DesktopHeader {...baseProps} />);
-      expect(screen.getByTestId('pc-display-size-select')).toBeDefined();
+      expect(screen.queryByTestId('pc-display-size-select')).toBeNull();
     });
 
     it('keeps the selector present alongside the per-instance status row', () => {
       render(<DesktopHeader {...baseProps} instances={mkInstances(['claude', 'codex'])} />);
       expect(screen.getByTestId('desktop-agent-status-row')).toBeDefined();
-      expect(screen.getByTestId('pc-display-size-select')).toBeDefined();
+      expect(screen.queryByTestId('pc-display-size-select')).toBeNull();
     });
   });
 });
@@ -758,17 +761,23 @@ describe('DesktopHeader agent-row idle collapse + overflow (Issue #1078)', () =>
     expect(screen.getByTestId('desktop-agent-status-claude-5').getAttribute('aria-label')).toBe(
       'Agent 5: Idle'
     );
-    // Idle dots never overflow — they are narrow.
-    expect(screen.queryByTestId('desktop-agent-status-overflow')).toBeNull();
+    // Issue #3593: the five idle ones are the "N others" list, and none of
+    // them waits for an answer, so the trigger carries no amber count.
+    expect(screen.getByTestId('desktop-agent-status-overflow').textContent).toContain('5');
+    expect(screen.getByTestId('desktop-session-others-waiting').textContent).toBe('');
   });
 
   it('all idle: every instance renders as an icon-only dot, no overflow', () => {
+    // Issue #3593: every instance stays reachable; only the current one (the
+    // first, with no active instance given) is labelled inline, the other
+    // five are rows of the "N others" list.
     render(<DesktopHeader {...baseProps} instances={roster(6)} />);
     for (let i = 0; i < 6; i += 1) {
       expect(screen.getByTestId(`desktop-agent-status-claude-${i}`)).toBeDefined();
-      expect(screen.queryByText(`Agent ${i}: Idle`)).toBeNull();
+      if (i > 0) expect(screen.queryByText(`Agent ${i}: Idle`)).toBeNull();
     }
-    expect(screen.queryByTestId('desktop-agent-status-overflow')).toBeNull();
+    expect(screen.getByText('Agent 0: Idle')).toBeDefined();
+    expect(screen.getByTestId('desktop-agent-status-overflow').textContent).toContain('5');
   });
 
   it('6 all working: keeps 4 pills inline and folds the remaining 2 into "+N"', () => {
@@ -783,14 +792,15 @@ describe('DesktopHeader agent-row idle collapse + overflow (Issue #1078)', () =>
         sessionStatusByInstance={sessionStatusByInstance}
       />
     );
-    // First 4 remain inline as pills.
-    for (let i = 0; i < 4; i += 1) {
+    // Issue #3593: one labelled pill (the current session) whatever the count;
+    // the other five are rows of the closed "N others" list.
+    for (let i = 0; i < 6; i += 1) {
       expect(screen.getByTestId(`desktop-agent-status-claude-${i}`)).toBeDefined();
     }
-    // The rest collapse into a "+2" overflow trigger (closed menu → not inline).
     const overflow = screen.getByTestId('desktop-agent-status-overflow');
-    expect(overflow.textContent).toContain('+2');
-    expect(screen.queryByTestId('desktop-agent-status-claude-5')).toBeNull();
+    expect(overflow.textContent).toContain('5');
+    expect(overflow.getAttribute('aria-expanded')).toBe('false');
+    expect(screen.getByTestId('desktop-session-others-list')).not.toBeVisible();
     // Issue #1078: folded working sessions still surface the living glow so a
     // running instance stays visible at a glance even when collapsed.
     const overflowDot = overflow.querySelector('span');

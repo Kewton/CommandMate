@@ -18,6 +18,23 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import { FileMetadataToggle } from '@/components/worktree/FileMetadataToggle';
 import type { FileMetadataDisplaySettings } from '@/hooks/useFileMetadataDisplay';
 
+/**
+ * Issue #3611: a layer above (a Radix menu, the header tools' "…" list) that
+ * handles Escape first and claims it with `preventDefault`, as Radix does from
+ * a document capture listener.
+ */
+function pressEscapeClaimedAbove(target: Element = document.body): void {
+  const claim = (event: KeyboardEvent): void => {
+    if (event.key === 'Escape') event.preventDefault();
+  };
+  document.addEventListener('keydown', claim, true);
+  try {
+    fireEvent.keyDown(target, { key: 'Escape' });
+  } finally {
+    document.removeEventListener('keydown', claim, true);
+  }
+}
+
 const SETTINGS: FileMetadataDisplaySettings = {
   showSize: true,
   showCreated: false,
@@ -94,6 +111,24 @@ describe('FileMetadataToggle', () => {
 
     fireEvent.mouseDown(menu);
     expect(screen.getByTestId('file-metadata-toggle-menu')).toBeInTheDocument();
+  });
+
+  describe('Escape a layer above already handled (Issue #3611)', () => {
+    it('stays open when a layer above claimed the Escape', () => {
+      menuRect({ top: 40, left: 700, width: 192, height: 120 });
+      openMenu();
+
+      pressEscapeClaimedAbove();
+      expect(screen.getByTestId('file-metadata-toggle-menu')).toBeInTheDocument();
+    });
+
+    it('closes on a direct Escape', () => {
+      menuRect({ top: 40, left: 700, width: 192, height: 120 });
+      openMenu();
+
+      fireEvent.keyDown(document, { key: 'Escape' });
+      expect(screen.queryByTestId('file-metadata-toggle-menu')).not.toBeInTheDocument();
+    });
   });
 
   describe('viewport clamping (Issue #1365)', () => {

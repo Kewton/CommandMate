@@ -13,6 +13,16 @@ import { useTerminalSplitHidden } from '@/components/worktree/TerminalSplitHidde
 import { clearTerminalSplitsLocalStorage } from '@tests/helpers/terminal-splits';
 import { CLI_TOOL_IDS, getCliToolDisplayName, type AgentInstance } from '@/lib/cli-tools/types';
 
+/**
+ * Issue #3514: the Action bar's "+ / -" stepper became layout icons (1-4). One
+ * more / one fewer split is the icon for the current count +/- 1.
+ */
+function clickAddSplit(): void {
+  const n = screen.queryAllByTestId(/^split-wrapper-\d+$/).length;
+  fireEvent.click(screen.getByTestId(`split-layout-${n + 1}`));
+}
+
+
 const ROSTER: AgentInstance[] = CLI_TOOL_IDS.map((cliTool, order) => ({
   id: cliTool,
   cliTool,
@@ -46,8 +56,8 @@ describe('[#3332] TerminalSplitContainer hidden flag', () => {
         )}
       />,
     );
-    fireEvent.click(screen.getByTestId('add-terminal-split'));
-    fireEvent.click(screen.getByTestId('add-terminal-split'));
+    clickAddSplit();
+    clickAddSplit();
     expect(screen.getByTestId('hidden-0')).toHaveTextContent('false');
     expect(screen.getByTestId('hidden-1')).toHaveTextContent('false');
 

@@ -4,9 +4,9 @@
  * The button is useless if it is not reachable, and #2481 fixed exactly that
  * failure for this corner of the header: the controls group never shrinks, so
  * anything inside it survives a narrow header. This file pins that the button
- * is *in* that group on the branch screen (and in the global nav elsewhere),
+ * is *in* that group on the branch screen (and in the global Header elsewhere),
  * and where in the row it sits — ahead of the display-size selector and the
- * Info button, ahead of the theme toggle.
+ * Info button; after the screen name in the Header (#3512).
  *
  * @vitest-environment jsdom
  */
@@ -77,7 +77,8 @@ describe('AppUpdateButton in DesktopHeader (Issue #2654)', () => {
     // #2481: the group never shrinks, so nothing inside it can be clipped.
     expect(controls.className).toMatch(/\bflex-shrink-0\b/);
 
-    expect(comesBefore(button, screen.getByTestId('pc-display-size-select'))).toBe(true);
+    // Issue #3513: the display-size selector left this group (settings menu).
+    expect(screen.queryByTestId('pc-display-size-select')).toBeNull();
     expect(comesBefore(button, screen.getByTestId('desktop-info-button'))).toBe(true);
   });
 
@@ -99,13 +100,22 @@ describe('AppUpdateButton in DesktopHeader (Issue #2654)', () => {
 });
 
 describe('AppUpdateButton in the global Header (Issue #2654)', () => {
-  it('sits in the nav, ahead of the theme toggle', () => {
-    render(<Header />);
+  // Issue #3512: the Header lost its nav and theme toggle; the button stays in
+  // the header row, after the screen name, in the right-hand group it shares
+  // with the connection status.
+  // Issue #3579: the screen name left the header (the page's <h1> is the
+  // name); the button is the right-aligned status row's own child, beside the
+  // connection status.
+  it('sits in the header, after the screen name', () => {
+    const { container } = render(<Header />);
 
-    const nav = screen.getByRole('navigation');
+    const header = container.querySelector('header') as HTMLElement;
     const button = screen.getByTestId('app-update-button');
-    expect(nav.contains(button)).toBe(true);
-    expect(comesBefore(button, screen.getByTestId('theme-toggle'))).toBe(true);
+    expect(header.contains(button)).toBe(true);
+    expect(button.parentElement).toBe(header);
+    expect(header.lastElementChild).toBe(button);
+    expect(header).toHaveClass('justify-end');
+    expect(header.querySelector('h1')).toBeNull();
   });
 
   it('is absent with the default (no update) context value', () => {

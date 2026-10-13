@@ -16,6 +16,7 @@ import { test, expect } from '@playwright/test';
 import {
   E2E_WORKTREE_A,
   ensureFilesActivityVisible,
+  seedSideBySideLayout,
   setupSplitTest,
 } from './fixtures/terminal-split-helpers';
 
@@ -31,6 +32,10 @@ test.describe('Terminal split — PaneResizer cursor non-residue (AC-27 #1)', ()
       'PC-only split UI (chromium only)',
     );
     await setupSplitTest(page, [E2E_WORKTREE_A]);
+    // Issue #3589: the activity pane is laid over the body unless pinned, and
+    // History starts hidden — neither brings a resizer then. This spec is about
+    // many resizers coexisting, so it uses the side-by-side layout.
+    await seedSideBySideLayout(page);
   });
 
   test('drag cursor reverts after drag with multiple parallel resizers', async ({
@@ -47,9 +52,8 @@ test.describe('Terminal split — PaneResizer cursor non-residue (AC-27 #1)', ()
     await ensureFilesActivityVisible(page);
 
     // Grow to 3 splits → 2 split-gap resizers (split-resizer-0 / -1).
-    const addBtn = page.locator('[data-testid="add-terminal-split"]');
-    await addBtn.click();
-    await addBtn.click();
+    // Issue #3514: the "+ / -" stepper became layout icons (1-4).
+    await page.locator('[data-testid="split-layout-3"]').click();
     await expect(
       page.locator('[data-testid^="terminal-split-pane-"]'),
     ).toHaveCount(3);

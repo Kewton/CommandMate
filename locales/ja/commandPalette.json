@@ -19,6 +19,7 @@
     "syncError": "リポジトリの同期に失敗しました",
     "switchLanguage": "言語を切り替え",
     "openGitHub": "GitHub を開く",
+    "newTask": "新しいタスク",
     "keyboardShortcuts": "キーボードショートカット"
   },
   "footer": {

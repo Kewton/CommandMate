@@ -272,6 +272,8 @@ export const AGENT_MODE_SPLITS = [
 const ACTIVITY_BAR_PREFIX = 'commandmate.worktree.activeActivity-';
 const HISTORY_VISIBLE_KEY = 'commandmate.worktree.historyVisible';
 const HISTORY_WIDTH_KEY = 'commandmate.worktree.historyWidth';
+/** Mirror of ACTIVITY_PANE_PINNED_STORAGE_KEY (Issue #3589). */
+const ACTIVITY_PANE_PINNED_KEY = 'commandmate.worktree.activityPanePinned';
 
 /** Mirror of TERMINAL_SPLITS_STORAGE_KEY_PREFIX in src/config/terminal-split-config.ts. */
 const TERMINAL_SPLITS_PREFIX = 'commandmate:terminalSplits:';
@@ -367,7 +369,7 @@ export async function seedAgentModeSplits(
 ): Promise<void> {
   const first = AGENT_MODE_SPLITS[0].cliTool;
   await page.addInitScript(
-    ({ splitsKey, splitsValue, cliKey, instanceKey, tool, clearKeys, clearPrefixes, guard }) => {
+    ({ splitsKey, splitsValue, cliKey, instanceKey, tool, clearKeys, clearPrefixes, layoutSeed, guard }) => {
       try {
         if (sessionStorage.getItem(guard)) return;
         sessionStorage.setItem(guard, '1');
@@ -378,6 +380,7 @@ export async function seedAgentModeSplits(
         Object.keys(localStorage)
           .filter(k => clearPrefixes.some((p: string) => k.startsWith(p)))
           .forEach(k => localStorage.removeItem(k));
+        Object.entries(layoutSeed).forEach(([k, v]) => localStorage.setItem(k, v as string));
       } catch {
         /* storage unavailable - non-fatal */
       }
@@ -396,6 +399,14 @@ export async function seedAgentModeSplits(
       tool: first,
       clearKeys: [HISTORY_VISIBLE_KEY, HISTORY_WIDTH_KEY],
       clearPrefixes: [ACTIVITY_BAR_PREFIX],
+      // Issue #3589: the pixel shares below were measured on the pre-#3589
+      // first visit — Files open beside the body, History shown. Both are
+      // closed by default now, so that layout is seeded as a stored choice.
+      layoutSeed: {
+        [ACTIVITY_BAR_PREFIX + id]: 'files',
+        [ACTIVITY_PANE_PINNED_KEY]: 'true',
+        [HISTORY_VISIBLE_KEY]: 'true',
+      },
       guard: '__e2e_2597_seeded__',
     },
   );

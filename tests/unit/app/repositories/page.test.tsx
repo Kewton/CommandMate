@@ -10,6 +10,13 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
+
+// Issue #3579: the heading comes from `common.nav.repositories`; resolve it
+// through the real en dictionary instead of the global key-echoing mock.
+vi.mock('next-intl', async () => {
+  const { createRealIntlMock } = await import('@tests/helpers/real-intl');
+  return createRealIntlMock('en');
+});
 import RepositoriesPage from '@/app/repositories/page';
 
 // Stub the heavy child components with identifiable markers so we can assert

@@ -155,6 +155,14 @@ worktree の cwd で以下を実行し、**和集合**を取る:
 
 `.gitignore` されたファイルは `git status` が報告しないため、そもそも判定対象にならない。
 
+例外（#3588）: `<merge-base>..HEAD` の一本化のコミット（orchestrate 6-4）だけが触ったパスは、1 の集合から除き
+`log_tail` の `excluded` 節に出す。一本化のコミットは、merge でなく、変更ファイルが 1 つ以上ありすべてが
+`ORCHESTRATOR_FILES`（`docs/module-reference.md`）で、**trailer `Orchestrator-Fold: module-reference`**
+（`git interpret-trailers` の読み方。本文の途中の同じ文字列は数えない）を持つコミット。**一本化のコミットにはこの trailer を付ける。**
+ほかのコミット（trailer の無い単独コミットを含む）が触ったパスと、2 の未コミットの変更は除かない。merge コミット自身の編集は
+パスで分ける: `ORCHESTRATOR_FILES` の中は承認済みの統合（orchestrate 6-2 の refresh で共有ファイルの衝突を機械解決したもの）として
+除外に残し、それ以外のパスの編集は除外の候補にならないので、ワーカーの変更として scope で判定する。`merge-pr.mjs` の `workHeads` はファイルの規則だけで判定する（マージ側は広く許す）。
+
 #### 2.2.3 契約ファイルは判定対象から外す（#1580）
 
 `.commandmate/tasks/` 配下は、`scope` の変更ファイル集合からも `work-evidence` の
@@ -169,7 +177,7 @@ worktree の cwd で以下を実行し、**和集合**を取る:
 
 | 対象 | 除外の方法 |
 |---|---|
-| `work-evidence` コミット数 | `git rev-list --count <base>..HEAD -- ':(top)' ':(exclude,top).commandmate/tasks/'`（契約だけを触るセットアップコミットを数えない。`:(top)` は「除外だけの pathspec」を避けつつ両パターンを cwd ではなくリポジトリルートに固定する） |
+| `work-evidence` コミット数 | `git rev-list <base>..HEAD -- ':(top)' ':(exclude,top).commandmate/tasks/'` で SHA の一覧を取り（契約だけを触るセットアップコミットは載らない。`:(top)` は「除外だけの pathspec」を避けつつ両パターンを cwd ではなくリポジトリルートに固定する）、その一覧から orchestrate 6-4 の module-reference 一本化のコミット（`scope-gate.ts` の `collectBranchCommitChanges` が `fold` と判定したもの。scope ゲートの除外と同じ規則。#3588・#3633）を差し引いた数を数える。差し引いた数は log に `(N orchestrator fold commit(s) excluded)` と出る |
 | `work-evidence` 未コミット数 | porcelain のエントリ単位で判定し、**どのパスも契約ファイル**であるエントリを数えない |
 | `scope` 変更集合 | committed 側（`git diff`）と uncommitted 側（`git status`）の**両方**から除外 |
 

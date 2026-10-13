@@ -82,6 +82,7 @@ import {
   WORK_EVIDENCE_SKIP_LOG,
 } from './run-verdict-vocabulary';
 import {
+  collectBranchCommitChanges,
   CONTRACT_DIR_PREFIX,
   evaluateScope,
   isContractPath,
@@ -986,7 +987,10 @@ function namesOpencodeInstance(
  * gates — the precise failure `verify-completion.sh` was written to catch.
  *
  * Contract files are evidence of the *orchestrator*, not of the agent, so
- * neither side counts them (see {@link CONTRACT_DIR_PREFIX}).
+ * neither side counts them (see {@link CONTRACT_DIR_PREFIX}). Nor is the
+ * orchestrator's module-reference fold commit (orchestrate 6-4, judged by
+ * scope-gate's `collectBranchCommitChanges`): a branch that holds only a fold
+ * has no work of the worker's in it (#3633).
  *
  * ## The opencode second witness (Issue #2043)
  *
@@ -1052,20 +1056,22 @@ async function evaluateWorkEvidence(
   // rather than at cwd. A setup commit that only carries the contract must not
   // read as a commit's worth of work.
   const revList = await runGit(
-    [
-      'rev-list',
-      '--count',
-      `${base}..HEAD`,
-      '--',
-      ':(top)',
-      `:(exclude,top)${CONTRACT_DIR_PREFIX}`,
-    ],
+    ['rev-list', `${base}..HEAD`, '--', ':(top)', `:(exclude,top)${CONTRACT_DIR_PREFIX}`],
     worktreePath
   );
   if (revList.code !== 0) {
-    return done('error', `work-evidence: 'git rev-list --count ${base}..HEAD' failed.`, null);
+    return done('error', `work-evidence: 'git rev-list ${base}..HEAD' failed.`, null);
   }
-  const commitCount = Number.parseInt(revList.stdout.trim(), 10);
+  // The orchestrator's fold commit is not the worker's (#3633), by the same
+  // rule the scope gate drops what only folds touched (#3588).
+  const branchChanges = await collectBranchCommitChanges(worktreePath, base);
+  if ('error' in branchChanges) {
+    return done('error', `work-evidence: ${branchChanges.error}`, null);
+  }
+  const foldShas = new Set(branchChanges.changes.filter((c) => c.fold).map((c) => c.sha));
+  const branchShas = revList.stdout.split('\n').filter((sha) => sha.trim() !== '');
+  const foldCount = branchShas.filter((sha) => foldShas.has(sha)).length;
+  const commitCount = branchShas.length - foldCount;
 
   // -z -uall for the same reasons scope-gate uses them: the human format
   // C-quotes paths with spaces and joins renames with ` -> `, and the default
@@ -1104,6 +1110,7 @@ async function evaluateWorkEvidence(
     `work-evidence: baseRef=${baseRef} commits=${commitCount} uncommitted=${uncommittedCount}` +
     (requireCommit.required ? ' requireCommit=true' : '') +
     ' (contract files excluded)' +
+    (foldCount > 0 ? ` (${foldCount} orchestrator fold commit(s) excluded)` : '') +
     (skillInstalledCount > 0
       ? ` (${skillInstalledCount} CommandMate-installed Skill file(s) excluded)`
       : '') +

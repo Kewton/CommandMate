@@ -13,6 +13,8 @@
  * being the only pointer-side channel for the reason.
  */
 
+import fs from 'fs';
+import path from 'path';
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { VerificationStatusChip } from '@/components/worktree/VerificationStatusChip';
@@ -301,5 +303,50 @@ describe('VerificationStatusChip (Issue #1816)', () => {
         screen.getByTestId('verification-status-chip').getAttribute('aria-label')
       ).not.toContain('unit');
     });
+  });
+});
+
+describe('the open / close hint follows the pane (Issue #3591)', () => {
+  const OPEN = 'Open the Verification pane';
+  const CLOSE = 'Close the Verification pane';
+
+  it('says "close" in the title, the accessible name and the reason while the pane is open (PC)', () => {
+    render(<VerificationStatusChip task={null} latestRun={null} onOpen={vi.fn()} paneOpen />);
+    const chip = screen.getByTestId('verification-status-chip');
+    expect(chip.getAttribute('aria-label')).toContain(CLOSE);
+    expect(chip.getAttribute('title')).toContain(CLOSE);
+    expect(chip.getAttribute('aria-label')).not.toContain(OPEN);
+    fireEvent.click(screen.getByTestId('verification-chip-reason-toggle'));
+    const reason = screen.getByTestId('verification-chip-reason-popover');
+    expect(reason.textContent).toContain(CLOSE);
+    expect(reason.textContent).not.toContain(OPEN);
+  });
+
+  it('says "open" while the pane is closed (negative control)', () => {
+    render(<VerificationStatusChip task={null} latestRun={null} onOpen={vi.fn()} paneOpen={false} />);
+    const chip = screen.getByTestId('verification-status-chip');
+    expect(chip.getAttribute('aria-label')).toContain(OPEN);
+    expect(chip.getAttribute('title')).toContain(OPEN);
+    expect(chip.getAttribute('aria-label')).not.toContain(CLOSE);
+  });
+
+  it('keeps the mobile wording (no paneOpen: the chip only opens) (negative control)', () => {
+    render(<VerificationStatusChip task={TASK} latestRun={null} onOpen={vi.fn()} className="w-full" />);
+    const chip = screen.getByTestId('verification-status-chip');
+    expect(chip.getAttribute('aria-label')).toContain(OPEN);
+    expect(chip.getAttribute('aria-label')).not.toContain(CLOSE);
+  });
+
+  it('has the "close" hint in both en and ja', () => {
+    for (const [locale, text] of [
+      ['en', CLOSE],
+      ['ja', '検証ペインを閉じる'],
+    ] as const) {
+      const dict = JSON.parse(
+        fs.readFileSync(path.resolve(__dirname, `../../../../locales/${locale}/worktree.json`), 'utf-8')
+      );
+      expect(dict.verification.chip.closeHint).toBe(text);
+      expect(typeof dict.verification.chip.openHint).toBe('string');
+    }
   });
 });

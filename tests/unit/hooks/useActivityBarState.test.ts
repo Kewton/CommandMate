@@ -9,6 +9,7 @@ import { useActivityBarState } from '@/hooks/useActivityBarState';
 import {
   ACTIVITY_CLOSED_SENTINEL,
   DEFAULT_ACTIVITY,
+  INITIAL_ACTIVITY,
   getActivityBarStorageKey,
 } from '@/config/activity-bar-config';
 
@@ -27,9 +28,18 @@ describe('useActivityBarState', () => {
     window.localStorage.clear();
   });
 
-  it('defaults to DEFAULT_ACTIVITY ("files") on first mount', () => {
+  it('defaults to INITIAL_ACTIVITY (closed, Issue #3589) on first mount', () => {
     const { result } = renderHook(() => useActivityBarState(WT_A));
-    expect(result.current.active).toBe(DEFAULT_ACTIVITY);
+    expect(result.current.active).toBe(INITIAL_ACTIVITY);
+    expect(result.current.active).toBeNull();
+    // Nothing is written just by opening a worktree.
+    expect(window.localStorage.getItem(keyA)).toBeNull();
+  });
+
+  it('still opens the stored activity on a visited worktree (Issue #3589)', () => {
+    window.localStorage.setItem(keyA, DEFAULT_ACTIVITY);
+    const { result } = renderHook(() => useActivityBarState(WT_A));
+    expect(result.current.active).toBe('files');
   });
 
   it('setActive(id) sets the active activity and persists it per worktree', () => {
@@ -89,10 +99,10 @@ describe('useActivityBarState', () => {
     expect(result.current.active).toBeNull();
   });
 
-  it('falls back to DEFAULT_ACTIVITY when stored value is invalid', () => {
+  it('falls back to INITIAL_ACTIVITY (closed, Issue #3589) when stored value is invalid', () => {
     window.localStorage.setItem(keyA, 'not-a-real-activity');
     const { result } = renderHook(() => useActivityBarState(WT_A));
-    expect(result.current.active).toBe(DEFAULT_ACTIVITY);
+    expect(result.current.active).toBe(INITIAL_ACTIVITY);
   });
 
   it('toggling between two activities switches between them (no close)', () => {
@@ -151,16 +161,16 @@ describe('useActivityBarState', () => {
       expect(result.current.active).toBeNull();
     });
 
-    it('defaults an unvisited worktree to Files even after visiting others', () => {
-      window.localStorage.setItem(keyA, ACTIVITY_CLOSED_SENTINEL);
+    it('defaults an unvisited worktree to closed even after visiting others (Issue #3589)', () => {
+      window.localStorage.setItem(keyA, 'git');
       const { result, rerender } = renderHook(
         ({ id }) => useActivityBarState(id),
         { initialProps: { id: WT_A } },
       );
-      expect(result.current.active).toBeNull();
-      // B has never been visited -> default Files.
+      expect(result.current.active).toBe('git');
+      // B has never been visited -> closed (it was Files before #3589).
       rerender({ id: WT_B });
-      expect(result.current.active).toBe(DEFAULT_ACTIVITY);
+      expect(result.current.active).toBe(INITIAL_ACTIVITY);
     });
   });
 });

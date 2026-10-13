@@ -18,6 +18,7 @@
 
 import { useState, useCallback, useEffect } from 'react';
 import type { ContextMenuState } from '@/types/markdown-editor';
+import { isUnhandledEscape } from '@/lib/escape-key';
 
 /**
  * Initial context menu state
@@ -198,7 +199,7 @@ export function useContextMenu(): UseContextMenuReturn {
     if (!menuState.isOpen) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
+      if (isUnhandledEscape(e)) {
         closeMenu();
       }
     };

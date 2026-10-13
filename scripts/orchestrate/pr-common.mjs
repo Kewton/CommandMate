@@ -5,6 +5,10 @@
  *
  * Both scripts take every external call (`git`, `gh`, `npx`) through one `run`
  * function, so the tests replace it and nothing is pushed, opened or merged.
+ * Both wrap it in withGhRetry, so a reading `gh` call that met GitHub's
+ * 502/503/504 or a dropped connection is tried again (#3633 D). A writing one
+ * (pr create, pr merge, run rerun, issue close) is never sent twice: ghWrite
+ * reads once whether it went through.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -18,7 +22,16 @@ export { IGNORED_DIRTY, dirtyPaths };
 export const DEFAULT_REPO = 'Kewton/CommandMate';
 /** The branch PRs go to (6-x: feature → develop). The remote ref is `origin/<base>`. */
 export const DEFAULT_BASE_BRANCH = 'develop';
-/** Files the orchestrator may commit on the PR branch after the checks (6-4: the module-reference fold). */
+/**
+ * Files the orchestrator may commit on the PR branch after the checks (6-4: the module-reference fold).
+ * Copied as ORCHESTRATOR_FILES in src/lib/verification/scope-gate.ts, whose scope gate drops what
+ * only such a commit changed (#3588) and whose rule work-evidence uses to not count it (#3633); tests/unit/scripts/orchestrate/orchestrator-files-parity.test.ts
+ * keeps the two equal. The scope gate is stricter than workHeads below: it also requires the
+ * `Orchestrator-Fold: module-reference` trailer (a worker can commit module-reference alone too)
+ * and counts a merge's own edits outside ORCHESTRATOR_FILES as the worker's. workHeads only picks
+ * whose records to read,
+ * so it stays on the file rule alone.
+ */
 export const ORCHESTRATOR_FILES = ['docs/module-reference.md'];
 /**
  * What the run record must hold before anything is published or merged, and
@@ -59,6 +72,114 @@ export function git(run, worktree, args) {
   const { status, stdout, stderr } = run('git', ['-C', worktree, ...args]);
   if (status !== 0) throw new Error(`git ${args.join(' ')} failed in ${worktree}: ${stderr.trim()}`);
   return stdout;
+}
+
+/** Tries of one `gh` call: the first and the retries (#3633 D). */
+export const GH_ATTEMPTS = 4;
+/** The wait before each retry, in order; the last repeats. */
+export const GH_RETRY_DELAYS_MS = [10_000, 30_000, 60_000];
+
+/**
+ * What a `gh` failure says when GitHub, not the request, failed: an HTTP 502 /
+ * 503 / 504 (the "Partially Degraded" 504 Gateway Timeout of 2026-10-12) or a
+ * connection that did not complete. A 4xx, a failed check or a merge conflict
+ * is the answer and is not asked again.
+ */
+export const GH_TRANSIENT_PATTERN =
+  /\bHTTP 50[234]\b|\b50[234] (?:Bad Gateway|Service Unavailable|Gateway Timeout)\b|\b(?:ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|ENETUNREACH)\b|connection reset by peer|connection refused|i\/o timeout|TLS handshake timeout|unexpected EOF|could not resolve host|error connecting to/i;
+
+/** Whether a finished `gh` call failed for a reason worth trying again. */
+export function isTransientGhFailure({ status, stdout, stderr }) {
+  if (status === 0) return false;
+  return GH_TRANSIENT_PATTERN.test(`${stderr ?? ''}\n${stdout ?? ''}`);
+}
+
+/**
+ * The `gh` subcommands that only read, by group. Only these are tried again: a
+ * write that timed out at the gateway may have been done, and sending it again
+ * could open a second PR or rerun a run twice (#3633 D).
+ */
+const GH_READS = {
+  pr: ['view', 'list', 'checks', 'diff', 'status'],
+  issue: ['view', 'list', 'status'],
+  run: ['view', 'list', 'watch'],
+  repo: ['view'],
+  release: ['view', 'list'],
+  label: ['list'],
+  auth: ['status'],
+};
+/** `gh api` flags that make the request a write (it is a POST once a field is given). */
+const GH_API_WRITE_FLAGS = /^(?:-f|-F|--field|--raw-field|--input)(?:=|$)|^-[fF]./;
+
+/** Whether `gh <args>` only reads, so asking it again changes nothing on GitHub. */
+export function isGhRead(args) {
+  const [group, sub] = args;
+  if (group === 'api') {
+    for (let i = 1; i < args.length; i++) {
+      const arg = args[i];
+      if (GH_API_WRITE_FLAGS.test(arg)) return false;
+      const method = arg === '-X' || arg === '--method' ? args[i + 1] : /^(?:-X|--method=)(.+)$/.exec(arg)?.[1];
+      if (method !== undefined && method.toUpperCase() !== 'GET') return false;
+    }
+    return true;
+  }
+  return GH_READS[group]?.includes(sub) ?? false;
+}
+
+/**
+ * `run` with reading `gh` calls tried again on a transient failure (#3633 D):
+ * up to GH_ATTEMPTS tries, GH_RETRY_DELAYS_MS apart, each retry said on
+ * `notice`. A writing `gh` call (see isGhRead), every other command, and every
+ * other failure pass through as they were. The last answer is returned as is,
+ * so a caller reads gh's own message.
+ *
+ * @param {typeof defaultRun} run
+ * @param {{ sleep?: (ms: number) => void, notice?: (line: string) => void }} [options]
+ */
+export function withGhRetry(run, { sleep = defaultSleep, notice = (line) => console.error(line) } = {}) {
+  return (command, args, opts) => {
+    if (command !== 'gh' || !isGhRead(args)) return run(command, args, opts);
+    for (let attempt = 1; ; attempt++) {
+      const out = run(command, args, opts);
+      if (attempt >= GH_ATTEMPTS || !isTransientGhFailure(out)) return out;
+      const delay = GH_RETRY_DELAYS_MS[Math.min(attempt, GH_RETRY_DELAYS_MS.length) - 1];
+      const reason = `${out.stderr || out.stdout}`.trim().split('\n')[0];
+      notice(`gh ${args.slice(0, 2).join(' ')}: ${reason} — retrying in ${delay / 1000}s (attempt ${attempt + 1}/${GH_ATTEMPTS})`);
+      sleep(delay);
+    }
+  };
+}
+
+/**
+ * A writing `gh` call, sent once (#3633 D). When it fails for a transient
+ * reason (a 5xx or a dropped connection) GitHub may still have done it, so it
+ * is not sent again: `confirm` reads once whether it went through and returns
+ * what the call would have printed (a string, `''` when nothing), or null when
+ * it did not. Done → a success with that output (`confirmed: true`); not done,
+ * or the read failed too → the call's own failure, as before.
+ *
+ * @param {typeof defaultRun} run
+ * @param {string[]} args
+ * @param {{ confirm: () => string | null, notice?: (line: string) => void }} options
+ */
+export function ghWrite(run, args, { confirm, notice = (line) => console.error(line) }) {
+  const out = run('gh', args);
+  if (out.status === 0 || !isTransientGhFailure(out)) return out;
+  const name = `gh ${args.slice(0, 2).join(' ')}`;
+  const reason = `${out.stderr || out.stdout}`.trim().split('\n')[0];
+  let done = null;
+  try {
+    done = confirm();
+  } catch (err) {
+    notice(`${name}: ${reason} — not sent again; could not read whether it went through: ${err instanceof Error ? err.message : String(err)}`);
+    return out;
+  }
+  if (done === null || done === undefined) {
+    notice(`${name}: ${reason} — not sent again; it did not go through`);
+    return out;
+  }
+  notice(`${name}: ${reason} — not sent again; it went through`);
+  return { status: 0, stdout: done, stderr: '', confirmed: true };
 }
 
 /** `gh …` parsed as JSON; throws with gh's own message when it fails. */

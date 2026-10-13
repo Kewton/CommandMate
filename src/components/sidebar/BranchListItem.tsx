@@ -3,13 +3,20 @@
  *
  * Individual branch item in the sidebar list.
  * Shows branch name, repository, status, and unread indicator.
+ *
+ * Issue #3509: one line (~34px). The next action and the description moved to
+ * the selected row and the tooltip; see the comments at the render below.
+ *
+ * Issue #3576: an inset, rounded card — a light fill on hover, a stronger one
+ * when selected — with "…" (row actions) beside the row button.
  */
 
 'use client';
 
-import React, { memo, useRef, useState, useEffect, useCallback, useMemo } from 'react';
+import React, { createContext, memo, useContext, useRef, useState, useEffect, useCallback, useMemo } from 'react';
 import ReactDOM from 'react-dom';
 import { useTranslations } from 'next-intl';
+import { Check } from 'lucide-react';
 import type { SidebarBranchItem } from '@/types/sidebar';
 import {
   aggregateCliStatus,
@@ -18,6 +25,18 @@ import {
   UNCLASSIFIED_STATUS_WORD,
 } from '@/types/sidebar';
 import { BranchStatusIndicator } from '@/components/sidebar/BranchStatusIndicator';
+import { BranchRowActions } from '@/components/sidebar/BranchRowActions';
+import { useToast } from '@/components/common/Toast';
+import { useOptionalWorktreesCacheContext } from '@/components/providers/WorktreesCacheProvider';
+import {
+  currentWorktreeStatusGeneration,
+  saveWorktreeStatus,
+  worktreeListFetchedSince,
+  worktreeStatusLabelKey,
+  WORKTREE_STATUS_BADGE_CLASSES,
+  WORKTREE_STATUS_DOT_CLASSES,
+  type WorktreeLifecycleStatus,
+} from '@/lib/worktree-status';
 
 // ============================================================================
 // Types
@@ -33,6 +52,39 @@ export interface BranchListItemProps {
   onClick: () => void;
   /** Whether to show the repository name inline (Issue #651: hidden in grouped view) */
   showRepositoryName?: boolean;
+}
+
+// ============================================================================
+// Worktree status pill (Issue #3594)
+// ============================================================================
+
+/**
+ * Whether rows draw the worktree status pill (or its dot). PC lists do (the
+ * default); the phone's drawer provides `false` — there the status is only in
+ * the row's "…" menu, and the row looks as it did before #3594.
+ */
+export const BranchRowStatusPillContext = createContext(true);
+
+// ============================================================================
+// Row card (Issue #3576)
+// ============================================================================
+
+/**
+ * The wrapper that insets a sidebar row 8px from both edges. Shared with the
+ * sessions view rows so both lists draw the same card.
+ */
+export const SIDEBAR_ROW_INSET_CLASS = 'px-2';
+
+/**
+ * Shape, fill and focus of a sidebar row card. Hover is the light
+ * `sidebar-hover` fill; selected is one step stronger (`sidebar-border`, darker
+ * than the hover fill in light mode and brighter in dark mode), so the two
+ * never read alike. Keyboard focus is a ring, distinct from both fills.
+ */
+export function sidebarRowCardClass(isSelected: boolean): string {
+  return `rounded-[10px] transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${
+    isSelected ? 'bg-sidebar-border' : 'hover:bg-sidebar-hover'
+  }`;
 }
 
 // ============================================================================
@@ -80,6 +132,7 @@ function BranchTooltip({
   anchorRef,
   nextActionLabel,
   unclassified,
+  awaitingInstructionLabel,
 }: {
   id: string;
   branch: SidebarBranchItem;
@@ -92,6 +145,11 @@ function BranchTooltip({
    * not print the `ready` underneath it.
    */
   unclassified: boolean;
+  /**
+   * Issue #3509: the row's "ready for work" mark is a bare check, so the words
+   * go here. Null when the branch is not awaiting an instruction.
+   */
+  awaitingInstructionLabel: string | null;
 }) {
   // Start off-screen so tooltip is never briefly visible at (0,0) before coords are set
   const [coords, setCoords] = useState({ top: -9999, left: -9999 });
@@ -172,6 +230,9 @@ function BranchTooltip({
       */}
       {nextActionLabel && (
         <p className="text-sidebar-muted whitespace-nowrap">Next: {nextActionLabel}</p>
+      )}
+      {awaitingInstructionLabel && (
+        <p className="text-success-foreground whitespace-nowrap">{awaitingInstructionLabel}</p>
       )}
       {branch.description && (
         <p className="text-sidebar-muted mt-1 border-t border-sidebar-border pt-1 whitespace-pre-wrap break-words">
@@ -270,12 +331,110 @@ export const BranchListItem = memo(function BranchListItem({
   // Every other status keeps it in the tooltip alone: "Running…" on every row
   // is noise that would make the two rows that matter harder to spot.
   const showInlineNextAction = (isWaiting || awaitingInstruction) && nextActionLabel !== null;
+  // Issue #3509: the selected row shows it for every status (the tooltip is
+  // suppressed on the selected row, so this is where it goes instead).
+  const showNextActionLine = nextActionLabel !== null && (showInlineNextAction || isSelected);
   // ---- end #1787 ----
 
   // Issue #676 (A): selected branches never show the tooltip so a stuck
   // `isTooltipVisible=true` does not leave a tooltip lingering next to the
   // currently-focused item.
   const showTooltip = isTooltipVisible && !isSelected;
+
+  // ---- Issue #3576: row actions ("…") ----
+  // Mounted (not just CSS-hidden) only while needed, so an ordinary row stays
+  // one button for assistive tech and tests: on the selected row, while the
+  // pointer is over the row, while keyboard focus is inside it (so Tab from the
+  // row reaches it), and while its menu is open.
+  const [isPointerOver, setIsPointerOver] = useState(false);
+  const [hasKeyboardFocus, setHasKeyboardFocus] = useState(false);
+  const [isActionsMenuOpen, setIsActionsMenuOpen] = useState(false);
+  const showActions = isSelected || isPointerOver || hasKeyboardFocus || isActionsMenuOpen;
+  // ---- end #3576 ----
+
+  // ---- Issue #3594: lifecycle status from the row's "…" ----
+  // The pick shows at once (`pendingStatus`); a failed save puts the old value
+  // back and says so. A successful one keeps showing the pick until the list
+  // re-fetch brings it back as `branch.worktreeStatus`, so the badge never
+  // flickers to the old value in between. With picks in a row, the LAST pick
+  // holds until its own save and re-fetch are done: an earlier pick's re-fetch
+  // landing meanwhile (Ready while Done is still saving) does not replace it,
+  // and a re-fetch that FAILED keeps it too: it is released only once a list
+  // fetch that started after its save has succeeded.
+  const { showToast } = useToast();
+  const refreshList = useOptionalWorktreesCacheContext()?.refresh;
+  const [pendingStatus, setPendingStatus] = useState<WorktreeLifecycleStatus | null | undefined>(undefined);
+  const statusRequestRef = useRef(0);
+  /** The latest request whose save (and re-fetch) has finished. */
+  const settledRequestRef = useRef(0);
+  /** The list value when the latest pick was made, and the list value now. */
+  const savedAtPickRef = useRef<WorktreeLifecycleStatus | null>(null);
+  const savedStatusRef = useRef<WorktreeLifecycleStatus | null>(null);
+  /**
+   * Set when the last pick was saved: the clock position its save left. The
+   * pick is held until a list fetch started at or after it has succeeded.
+   */
+  const holdUntilRef = useRef<number | null>(null);
+  const savedStatus = branch.worktreeStatus ?? null;
+  const worktreeStatus = pendingStatus !== undefined ? pendingStatus : savedStatus;
+  savedStatusRef.current = savedStatus;
+  const showStatusPill = useContext(BranchRowStatusPillContext);
+
+  // A new value from the list (ours, or one set elsewhere) replaces the pick —
+  // unless a pick is still being saved, which then owns the row, or a saved
+  // pick still waits for a successful re-fetch that carries it.
+  useEffect(() => {
+    if (statusRequestRef.current !== settledRequestRef.current) return;
+    const holdUntil = holdUntilRef.current;
+    if (holdUntil !== null && !worktreeListFetchedSince(holdUntil)) return;
+    holdUntilRef.current = null;
+    setPendingStatus(undefined);
+  }, [savedStatus]);
+
+  const handleWorktreeStatusChange = useCallback(
+    async (next: WorktreeLifecycleStatus | null) => {
+      const request = ++statusRequestRef.current;
+      savedAtPickRef.current = savedStatusRef.current;
+      holdUntilRef.current = null;
+      setPendingStatus(next);
+      try {
+        // Queued per worktree, so the last pick is the last PATCH.
+        await saveWorktreeStatus(branch.id, next);
+      } catch {
+        // A later pick owns the row now; its own outcome decides what shows.
+        if (request !== statusRequestRef.current) return;
+        settledRequestRef.current = request;
+        setPendingStatus(undefined);
+        showToast(t('branchItem.statusChangeFailed'), 'error');
+        return;
+      }
+      const savedAt = currentWorktreeStatusGeneration();
+      try {
+        await refreshList?.();
+      } finally {
+        if (request === statusRequestRef.current) {
+          settledRequestRef.current = request;
+          if (refreshList) {
+            // `refresh` resolves even when the fetch fails, so ask the list
+            // whether a fetch from after this save went through.
+            holdUntilRef.current = savedAt;
+            if (worktreeListFetchedSince(savedAt) && savedStatusRef.current !== savedAtPickRef.current) {
+              // Fetched and already on screen (the list applies saves over
+              // replies sent before them). If the new list has not rendered
+              // yet, the effect above releases the pick when it does.
+              holdUntilRef.current = null;
+              setPendingStatus(undefined);
+            }
+          } else if (savedStatusRef.current !== savedAtPickRef.current) {
+            // No list to re-fetch: the pick shows until the row data moves.
+            setPendingStatus(undefined);
+          }
+        }
+      }
+    },
+    [branch.id, refreshList, showToast, t]
+  );
+  // ---- end #3594 ----
 
   // Safety net A: reset tooltip whenever isSelected becomes true.
   useEffect(() => {
@@ -309,156 +468,220 @@ export const BranchListItem = memo(function BranchListItem({
   };
 
   return (
-    <button
-      ref={buttonRef}
-      data-testid="branch-list-item"
-      onClick={handleClick}
-      onMouseEnter={() => {
-        clearShowTimer();
-        if (Date.now() >= suppressMouseEnterUntil) {
-          // 150ms delay: filters out spurious mouseenter events fired when the
-          // browser moves a DOM element under the stationary cursor (polling
-          // list reorders). An intentional hover outlasts this delay easily.
-          showTimerRef.current = setTimeout(() => {
-            setIsTooltipVisible(true);
-          }, 150);
-        }
-      }}
-      onMouseLeave={() => {
-        clearShowTimer();
-        setIsTooltipVisible(false);
-      }}
+    <div
+      data-testid="branch-list-row"
+      className={`relative w-full min-w-0 ${SIDEBAR_ROW_INSET_CLASS}`}
+      onPointerEnter={() => setIsPointerOver(true)}
+      onPointerLeave={() => setIsPointerOver(false)}
       onFocus={(e) => {
-        clearShowTimer();
-        // Show tooltip only for keyboard focus (:focus-visible), not pointer clicks.
-        // onFocus fires on mousedown which races with handleClick, causing a
-        // brief tooltip flash even after the click handler closes it.
-        if ((e.target as HTMLElement).matches(':focus-visible')) {
-          showTimerRef.current = setTimeout(() => {
-            setIsTooltipVisible(true);
-          }, 150);
-        }
+        if ((e.target as HTMLElement).matches(':focus-visible')) setHasKeyboardFocus(true);
       }}
-      onBlur={() => {
-        clearShowTimer();
-        setIsTooltipVisible(false);
+      onBlur={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setHasKeyboardFocus(false);
       }}
-      aria-current={isSelected ? 'true' : undefined}
-      aria-describedby={showTooltip ? tooltipId : undefined}
-      aria-label={!showRepositoryName ? `${branch.name} - ${branch.repositoryName}` : undefined}
-      className={`
-        group relative w-full px-4 py-3 flex flex-col gap-1
-        hover:bg-sidebar-hover transition-colors
-        focus:outline-none focus:ring-2 focus:ring-inset focus:ring-ring
-        ${isSelected ? 'bg-sidebar-hover border-l-2 border-accent-500' : 'border-l-2 border-transparent'}
-      `}
     >
-      {/* Main row: aggregated CLI status, info, unread */}
-      <div className="flex items-center gap-3 w-full">
+      <button
+        ref={buttonRef}
+        data-testid="branch-list-item"
+        onClick={handleClick}
+        onMouseEnter={() => {
+          clearShowTimer();
+          if (Date.now() >= suppressMouseEnterUntil) {
+            // 150ms delay: filters out spurious mouseenter events fired when the
+            // browser moves a DOM element under the stationary cursor (polling
+            // list reorders). An intentional hover outlasts this delay easily.
+            showTimerRef.current = setTimeout(() => {
+              setIsTooltipVisible(true);
+            }, 150);
+          }
+        }}
+        onMouseLeave={() => {
+          clearShowTimer();
+          setIsTooltipVisible(false);
+        }}
+        onFocus={(e) => {
+          clearShowTimer();
+          // Show tooltip only for keyboard focus (:focus-visible), not pointer clicks.
+          // onFocus fires on mousedown which races with handleClick, causing a
+          // brief tooltip flash even after the click handler closes it.
+          if ((e.target as HTMLElement).matches(':focus-visible')) {
+            showTimerRef.current = setTimeout(() => {
+              setIsTooltipVisible(true);
+            }, 150);
+          }
+        }}
+        onBlur={() => {
+          clearShowTimer();
+          setIsTooltipVisible(false);
+        }}
+        aria-current={isSelected ? 'true' : undefined}
+        aria-describedby={showTooltip ? tooltipId : undefined}
+        aria-label={!showRepositoryName ? `${branch.name} - ${branch.repositoryName}` : undefined}
+        className={`
+          group relative w-full min-h-[34px] pl-3 py-1.5 flex flex-col justify-center gap-0.5
+          ${showActions ? (isSelected ? 'pr-9' : 'pr-9 [@media(hover:none)]:pr-3') : 'pr-3'}
+          ${sidebarRowCardClass(isSelected)}
+        `}
+      >
         {/*
-          Aggregated CLI tool status (Issue #867): a single icon replaces the
-          per-agent dots. The most significant status is shown; hover/focus
-          reveals the per-agent breakdown via the indicator's title/aria-label.
+          Issue #3509: one line — dot, name, (repository), marks. The name is the
+          only flexible cell, so at 224px it gets every pixel the fixed marks do
+          not need. The status lives in the dot alone (see BranchStatusIndicator):
+          amber pulse = a prompt is waiting, green check mark = ready for work,
+          hollow gray ring = cannot tell, green glow = running, gray = idle.
         */}
-        {branch.cliStatus && Object.keys(branch.cliStatus).length > 0 && (
-          <div className="flex items-center justify-center flex-shrink-0 w-4" aria-label={t('branchItem.cliToolStatus')}>
-            <BranchStatusIndicator
-              status={aggregatedStatus}
-              label={formatCliStatusBreakdown(
-                branch.cliStatus,
-                branch.cliStatusLabels,
-                // Issue #2070: annotate the instances whose tmux session
-                // outlived their agent. The dot itself does not change — `idle`
-                // is the honest status — but the breakdown now distinguishes
-                // "never started" from "died under you", which is the
-                // difference between "start it" and "something went wrong".
-                exitedInstanceIds.size > 0
-                  ? (instanceId) =>
-                      exitedInstanceIds.has(instanceId) ? t('branchItem.agentExited') : null
-                  : undefined,
-                // Issue #2775: `Codex: unknown`, not `Codex: ready`.
-                unclassifiedInstanceIds
-              )}
-              waitingKind={branch.waitingKind}
-              unclassified={isUnclassified}
-            />
-          </div>
-        )}
+        <div className="@container flex items-center gap-2 w-full min-w-0">
+          {/*
+            Aggregated CLI tool status (Issue #867): a single icon replaces the
+            per-agent dots. The most significant status is shown; hover/focus
+            reveals the per-agent breakdown via the indicator's title/aria-label.
+          */}
+          {branch.cliStatus && Object.keys(branch.cliStatus).length > 0 && (
+            <div className="flex items-center justify-center flex-shrink-0 w-4" aria-label={t('branchItem.cliToolStatus')}>
+              <BranchStatusIndicator
+                status={aggregatedStatus}
+                label={formatCliStatusBreakdown(
+                  branch.cliStatus,
+                  branch.cliStatusLabels,
+                  // Issue #2070: annotate the instances whose tmux session
+                  // outlived their agent. The dot itself does not change — `idle`
+                  // is the honest status — but the breakdown now distinguishes
+                  // "never started" from "died under you", which is the
+                  // difference between "start it" and "something went wrong".
+                  exitedInstanceIds.size > 0
+                    ? (instanceId) =>
+                        exitedInstanceIds.has(instanceId) ? t('branchItem.agentExited') : null
+                    : undefined,
+                  // Issue #2775: `Codex: unknown`, not `Codex: ready`.
+                  unclassifiedInstanceIds
+                )}
+                waitingKind={branch.waitingKind}
+                unclassified={isUnclassified}
+              />
+            </div>
+          )}
 
-        {/* Branch info */}
-        <div className="flex-1 min-w-0 text-left">
-          <p className="text-sm font-medium text-sidebar-foreground truncate">
+          <p className="flex-1 min-w-0 text-left text-sm text-sidebar-foreground truncate">
             {branch.name}
           </p>
           {showRepositoryName && (
-            <p className="text-xs text-sidebar-muted truncate">
+            <p className="flex-shrink min-w-0 max-w-[40%] text-xs text-sidebar-muted truncate">
               {branch.repositoryName}
             </p>
           )}
+
           {/*
-            Issue #1787: what to do next, spelled out. Amber for "you are
-            blocking it", green for "it is done and waiting for work" — the two
-            must never be confusable, which is why this is not one neutral color.
+            Issue #3594: how far along the branch is (anything but "Not set").
+            The name comes first: the pill is capped at 5.5rem and, while the
+            row is narrower than 17rem (the default 224px sidebar), it shrinks
+            to a dot of the same colour. The words stay in the title and for
+            screen readers.
           */}
-          {showInlineNextAction && (
-            <p
-              data-testid="branch-next-action"
-              className={`text-xs font-medium truncate ${
-                isWaiting ? 'text-warning-foreground' : 'text-success-foreground'
-              }`}
+          {showStatusPill && worktreeStatus && (
+            <span
+              data-testid="branch-worktree-status"
+              data-status={worktreeStatus}
+              className="flex-shrink-0 inline-flex items-center"
+              title={tWorktree(worktreeStatusLabelKey(worktreeStatus))}
             >
-              {nextActionLabel}
-            </p>
+              <span
+                data-testid="branch-worktree-status-dot"
+                aria-hidden="true"
+                className={`h-1.5 w-1.5 rounded-full @min-[17rem]:hidden ${WORKTREE_STATUS_DOT_CLASSES[worktreeStatus]}`}
+              />
+              <span
+                data-testid="branch-worktree-status-label"
+                className={`sr-only @min-[17rem]:not-sr-only @min-[17rem]:max-w-[5.5rem] @min-[17rem]:truncate
+                  @min-[17rem]:rounded-full @min-[17rem]:px-1.5 @min-[17rem]:text-[10px] @min-[17rem]:font-medium
+                  @min-[17rem]:leading-4 ${WORKTREE_STATUS_BADGE_CLASSES[worktreeStatus]}`}
+              >
+                {tWorktree(worktreeStatusLabelKey(worktreeStatus))}
+              </span>
+            </span>
+          )}
+
+          {/*
+            Issue #1787: `awaitingInstruction` (the agent said its turn is over) is
+            a SECONDARY state deliberately styled green, so it can never be read as
+            the amber "needs your answer" case. Shown even while waiting is amber,
+            because both can be true across two agents in one branch.
+            Issue #3509: a check mark instead of the "Ready for work" pill, which
+            alone took a third of a 224px row. The words stay for screen readers,
+            in the title and in the tooltip.
+          */}
+          {awaitingInstruction && (
+            <span
+              data-testid="awaiting-instruction-badge"
+              className="flex-shrink-0 inline-flex h-4 w-4 items-center justify-center rounded-full bg-success-subtle text-success-foreground"
+              title={tWorktree('awaitingInstruction.label')}
+            >
+              <Check className="h-3 w-3" strokeWidth={3} aria-hidden="true" />
+              <span className="sr-only">{tWorktree('awaitingInstruction.badge')}</span>
+            </span>
+          )}
+
+          {/* Unread indicator */}
+          {branch.hasUnread && (
+            <span
+              data-testid="unread-indicator"
+              className="w-2 h-2 rounded-full bg-accent-500 flex-shrink-0"
+              aria-label={t('branchItem.hasUnread')}
+            />
           )}
         </div>
 
         {/*
-          Issue #1787: `awaitingInstruction` (the agent said its turn is over) is
-          a SECONDARY state deliberately styled green, so it can never be read as
-          the amber "needs your answer" case. Shown even while waiting is amber,
-          because both can be true across two agents in one branch.
+          Issue #1787: what to do next, spelled out. Amber for "you are blocking
+          it", green for "it is done and waiting for work" — the two must never be
+          confusable, which is why this is not one neutral color.
+          Issue #3509: the row is one line, so this second line is shown on the
+          selected row only — and, for the two states that need it, on devices
+          that cannot hover (`hover: none`), where the tooltip never opens.
         */}
-        {awaitingInstruction && (
-          <span
-            data-testid="awaiting-instruction-badge"
-            className="flex-shrink-0 rounded-full bg-success-subtle px-1.5 py-0.5 text-[10px] font-medium leading-4 text-success-foreground"
-            title={tWorktree('awaitingInstruction.label')}
+        {showNextActionLine && (
+          <p
+            data-testid="branch-next-action"
+            className={`pl-6 text-left text-xs font-medium truncate ${
+              isSelected ? 'block' : 'hidden [@media(hover:none)]:block'
+            } ${
+              isWaiting
+                ? 'text-warning-foreground'
+                : awaitingInstruction
+                  ? 'text-success-foreground'
+                  : 'text-sidebar-muted'
+            }`}
           >
-            {tWorktree('awaitingInstruction.badge')}
-          </span>
+            {nextActionLabel}
+          </p>
         )}
 
-        {/* Unread indicator */}
-        {branch.hasUnread && (
-          <span
-            data-testid="unread-indicator"
-            className="w-2 h-2 rounded-full bg-accent-500 flex-shrink-0"
-            aria-label={t('branchItem.hasUnread')}
-          />
-        )}
-      </div>
-
-      {/* Description display (shown for all branches with description) */}
-      {branch.description && (
-        <div
-          data-testid="branch-description"
-          className="pl-6 pr-2 mt-1 text-left"
-        >
-          <p className="text-xs text-sidebar-muted line-clamp-2">
+        {/* Issue #3509: the description moved to the tooltip; the selected row keeps one line of it. */}
+        {isSelected && branch.description && (
+          <p data-testid="branch-description" className="pl-6 text-left text-xs text-sidebar-muted truncate">
             {branch.description}
           </p>
-        </div>
-      )}
+        )}
 
-      {/* Tooltip: portal to document.body to escape overflow clipping (Issue #651) */}
-      <BranchTooltip
-        id={tooltipId}
-        branch={branch}
-        isVisible={showTooltip}
-        anchorRef={buttonRef}
-        nextActionLabel={nextActionLabel}
-        unclassified={isUnclassified}
-      />
-    </button>
+        {/* Tooltip: portal to document.body to escape overflow clipping (Issue #651) */}
+        <BranchTooltip
+          id={tooltipId}
+          branch={branch}
+          isVisible={showTooltip}
+          anchorRef={buttonRef}
+          nextActionLabel={nextActionLabel}
+          unclassified={isUnclassified}
+          awaitingInstructionLabel={awaitingInstruction ? tWorktree('awaitingInstruction.badge') : null}
+        />
+      </button>
+      {showActions && (
+        <BranchRowActions
+          branch={branch}
+          isSelected={isSelected}
+          onOpenChange={setIsActionsMenuOpen}
+          worktreeStatus={worktreeStatus}
+          onWorktreeStatusChange={handleWorktreeStatusChange}
+        />
+      )}
+    </div>
   );
 });

@@ -804,3 +804,181 @@ export function shouldShowRepositoryTabBar(
   if (mode === 'always') return true;
   return !isSidebarOpen;
 }
+
+// ============================================================================
+// "Other" bucket for detached worktrees (Issue #3509)
+// ============================================================================
+
+/**
+ * Name `parseWorktreeList` gives a worktree on a detached HEAD
+ * (`detached-<commit>`, `src/lib/git/worktrees.ts`). Same character class as
+ * the commit capture there, so a branch merely *named* `detached-…/x` is not
+ * folded away.
+ */
+const DETACHED_BRANCH_NAME_PATTERN = /^detached-[a-z0-9]+$/;
+
+/** Whether a sidebar row is a detached-HEAD worktree (Issue #3509). */
+export function isDetachedBranchName(name: string): boolean {
+  return DETACHED_BRANCH_NAME_PATTERN.test(name);
+}
+
+/** Statuses that keep a detached row out of "Other" (Issue #3509). */
+const KEEP_IN_PLACE_STATUSES: ReadonlySet<BranchStatus> = new Set<BranchStatus>([
+  'waiting',
+  'running',
+  'generating',
+]);
+
+/**
+ * Split one repository's rows into the ones shown in place and the ones folded
+ * into "Other (n)" (Issue #3509).
+ *
+ * Only detached worktrees are folded, and never one the user must not lose
+ * sight of: the selected row, or a waiting / running / generating one. The
+ * status is read at BOTH levels — the aggregated per-instance map (the dot) and
+ * the worktree-level `status` (`isWaitingForResponse` / `isProcessing`, which is
+ * what Needs attention counts and what a payload without the map carries) — so
+ * a disagreement between the two never folds a live row away.
+ *
+ * `currentById` is the live version of each row. The sidebar's hover-freeze
+ * hands in row objects from when the cursor entered the list; the freeze holds
+ * the ORDER only, so the decision is made on the current state when it is
+ * known. Order is preserved on both sides, so the sort (or freeze) still holds.
+ *
+ * @param branches - One group's rows, already sorted (possibly frozen)
+ * @param selectedId - The open worktree, or null
+ * `stickyIds` are rows that stay in place whatever their state: the sidebar
+ * passes the rows that were visible during the current hover-freeze, so a row
+ * can leave "Other" while frozen but is only folded back once the freeze ends
+ * (a visible row never disappears under the cursor).
+ *
+ * @param currentById - Live rows by id; a row missing from it is judged as given
+ * @param stickyIds - Rows kept in place regardless of state (hover-freeze)
+ */
+export function partitionOtherBranches(
+  branches: ReadonlyArray<SidebarBranchItem>,
+  selectedId: string | null,
+  currentById?: ReadonlyMap<string, SidebarBranchItem>,
+  stickyIds?: ReadonlySet<string>
+): { shown: SidebarBranchItem[]; other: SidebarBranchItem[] } {
+  const shown: SidebarBranchItem[] = [];
+  const other: SidebarBranchItem[] = [];
+  for (const branch of branches) {
+    const keepInPlace =
+      stickyIds?.has(branch.id) === true || isBranchKeptInPlace(branch, selectedId, currentById);
+    (keepInPlace ? shown : other).push(branch);
+  }
+  return { shown, other };
+}
+
+/**
+ * The per-row half of {@link partitionOtherBranches}: whether this row stays
+ * out of "Other" on its own merits (not detached, selected, or waiting /
+ * running / generating at either status level), judged on `currentById`'s row
+ * when there is one.
+ */
+export function isBranchKeptInPlace(
+  branch: SidebarBranchItem,
+  selectedId: string | null,
+  currentById?: ReadonlyMap<string, SidebarBranchItem>
+): boolean {
+  const current = currentById?.get(branch.id) ?? branch;
+  return (
+    !isDetachedBranchName(current.name) ||
+    current.id === selectedId ||
+    KEEP_IN_PLACE_STATUSES.has(resolveBranchStatus(current)) ||
+    KEEP_IN_PLACE_STATUSES.has(current.status)
+  );
+}
+
+// ============================================================================
+// Sidebar open/close shortcut (Issue #3512)
+// ============================================================================
+
+/**
+ * Width of the collapsed icon rail in px. Not scaled by the display-size factor:
+ * the open/close button sits in a cell this wide at the left edge in both states,
+ * and an unscaled cell is what keeps it at the same spot (`SidebarPanelToggle`).
+ */
+export const SIDEBAR_RAIL_WIDTH = 56;
+
+/**
+ * Issue #3577: the one order of the app-navigation destinations. The open
+ * sidebar (`sidebar-nav`) and the icon rail both iterate this list, so the two
+ * can never disagree (the user keeps the same position when toggling).
+ */
+export const SIDEBAR_NAV_ORDER = ['sessions', 'repositories', 'review'] as const;
+export type SidebarNavId = (typeof SIDEBAR_NAV_ORDER)[number];
+
+/**
+ * The open/close button's cell, in px (Issue #3512). The cell is the first
+ * thing at the top-left of both the open sidebar and the rail, with no rem
+ * padding around it, so the button sits at (8px, 8px) of the column in both
+ * states and at every display size (the rem cascade scales Tailwind spacing,
+ * not inline px). 8 + 40 + 8 is the rail's 56px.
+ */
+export const SIDEBAR_TOGGLE_CELL_PADDING = 8;
+export const SIDEBAR_TOGGLE_SIZE = SIDEBAR_RAIL_WIDTH - 2 * SIDEBAR_TOGGLE_CELL_PADDING;
+
+type ToggleSidebarChordEvent = Pick<
+  KeyboardEvent,
+  'key' | 'code' | 'metaKey' | 'ctrlKey' | 'shiftKey' | 'altKey' | 'isComposing' | 'keyCode'
+>;
+
+/**
+ * Mod+B — opens / closes the PC sidebar (the VS Code binding).
+ *
+ * Shift and Alt are refused so Mod+Shift+B (the browsers' bookmarks bar) stays
+ * the browser's. `code` covers layouts whose B key is not a Latin "b".
+ * Registered for the `?` overlay as `toggleSidebar` in
+ * `src/config/keyboard-shortcuts.ts`.
+ */
+export function isToggleSidebarChord(event: ToggleSidebarChordEvent): boolean {
+  if (event.isComposing === true || event.keyCode === 229) return false;
+  if (event.shiftKey || event.altKey) return false;
+  if (!event.metaKey && !event.ctrlKey) return false;
+  return event.key.toLowerCase() === 'b' || event.code === 'KeyB';
+}
+
+/**
+ * Whether Mod+B must be left alone because the keystroke belongs to a text
+ * entry: form fields, contentEditable, and the terminal pane (`role="log"`),
+ * where Ctrl+B is tmux's prefix. Same rule as the palette's `isTypingTarget`.
+ */
+export function isSidebarShortcutBlockedTarget(target: EventTarget | null): boolean {
+  if (typeof HTMLElement === 'undefined' || !(target instanceof HTMLElement)) return false;
+  const tag = target.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
+  if (target.isContentEditable) return true;
+  return target.closest('[role="log"]') !== null;
+}
+
+/** Matches `/worktrees/<id>` (and anything under it) to find the active branch. */
+const WORKTREE_ROUTE_PATTERN = /^\/worktrees\/([^/]+)/;
+
+/**
+ * Resolve the worktree the UI is currently showing.
+ *
+ * The pathname wins over `selectedWorktreeId` because it is correct on a cold
+ * load of `/worktrees/<id>` — before anything has called `selectWorktree` — and
+ * it is what the acceptance criterion ("the URL changes") actually observes.
+ *
+ * @param pathname - Current route
+ * @param selectedWorktreeId - Context selection, used off worktree routes
+ * Shared by the tab bar and the sidebar (#3578) so both mark the same row.
+ *
+ * @returns The worktree id to mark active, or null
+ */
+export function resolveActiveWorktreeId(
+  pathname: string,
+  selectedWorktreeId: string | null
+): string | null {
+  const match = WORKTREE_ROUTE_PATTERN.exec(pathname);
+  if (!match) return selectedWorktreeId;
+  try {
+    return decodeURIComponent(match[1]);
+  } catch {
+    // A malformed percent-escape is still a usable id for comparison purposes.
+    return match[1];
+  }
+}

@@ -1,0 +1,110 @@
+{
+  "version": "0.46.0",
+  "date": "2026-10-14",
+  "highlight": {
+    "ja": "worktree 画面を作り直し、見出しを 1 行にして道具を右上のアイコンにまとめました。どの画面からでも依頼を送れる「New task」も使えます。",
+    "en": "The worktree screen has been redesigned with a one-line header and tool icons at the top right. You can also send a task from any screen with New task."
+  },
+  "added": [
+    {
+      "ja": "どの画面からでもエージェントへ依頼を送れる「New task」ダイアログを追加しました（⌘⇧O / Ctrl+Shift+O）。",
+      "en": "Added a New task dialog that sends a request to an agent from any screen (Cmd+Shift+O / Ctrl+Shift+O)."
+    }
+  ],
+  "improved": [
+    {
+      "ja": "worktree の見出しを 1 行にし、縦のアイコンの列をなくして道具を見出しの右へ移しました。",
+      "en": "The worktree header is now a single line, and the tools moved from the vertical icon column to the right of the header."
+    },
+    {
+      "ja": "worktree 画面はパネルを閉じた状態で始まり、Files などのパネルは本文の上に重ねて開くようになりました。",
+      "en": "The worktree screen now opens with panels closed, and panels such as Files open over the content."
+    },
+    {
+      "ja": "見出しのセッションを「今のセッション＋ほか N」にし、セッションが増えても欄の幅が変わらないようにしました。",
+      "en": "The header now shows the current session plus \"N more\", so its width no longer changes with the number of sessions."
+    },
+    {
+      "ja": "分割が 1 つのときは、分割の見出しを出さずに中身を 2 段目の行にまとめるようにしました。",
+      "en": "With a single split, its header is gone and its controls sit in the second row."
+    },
+    {
+      "ja": "進み具合（Status）を、サイドバーのブランチの「…」から変えられるようにしました。",
+      "en": "You can now change a branch's status from its \"...\" menu in the sidebar."
+    },
+    {
+      "ja": "サイドバーの一覧を 1 行の行と角丸の札に作り直し、狭い幅でもブランチ名が読めるようにしました。",
+      "en": "The sidebar list was rebuilt as single-line rounded rows, so branch names stay readable at narrow widths."
+    },
+    {
+      "ja": "サイドバーの上の絞り込み・表示・並べ替えを 1 行にまとめました。",
+      "en": "The filter, view and sort controls above the sidebar list now fit on one row."
+    },
+    {
+      "ja": "サイドバーを閉じても、アイコンの列から各画面へ移動できるようになりました。",
+      "en": "With the sidebar closed, you can still move between screens from the icon column."
+    },
+    {
+      "ja": "スマホの引き出しを PC のサイドバーと同じ並びにし、上端に閉じるボタンを置きました。",
+      "en": "The phone drawer now matches the desktop sidebar and has a close button at the top."
+    },
+    {
+      "ja": "設定の入口を 1 つの設定メニューにまとめました。",
+      "en": "Settings are now reached from a single settings menu."
+    },
+    {
+      "ja": "分割が 1 つのときは最大化できないようにそろえました。",
+      "en": "Maximize is no longer offered when there is only one split."
+    }
+  ],
+  "fixed": [
+    {
+      "ja": "メニューや吹き出しを Esc で閉じたとき、下に重ねたパネルまで一緒に閉じる問題を直しました。",
+      "en": "Fixed Escape closing the panel underneath when it was meant to close only a menu or popup."
+    },
+    {
+      "ja": "チャットと履歴の検索で、返答が 2 件以上あると最後の返答しか強調されない問題を直しました。",
+      "en": "Fixed chat and history search highlighting only the last reply when there are several replies."
+    },
+    {
+      "ja": "チャットの検索の強調が、思考の節や特殊な文字の近くでずれる・消える問題を直しました。",
+      "en": "Fixed chat search highlights shifting or disappearing near reasoning sections and special characters."
+    },
+    {
+      "ja": "⌘K のコマンドパレットが、ほかの画面やメニューの上に重なって開く問題を直しました。",
+      "en": "Fixed the Cmd+K command palette opening on top of other dialogs and menus."
+    },
+    {
+      "ja": "分割の見出しや 2 段目で、エージェント名が 1 文字まで縮む問題を直しました。",
+      "en": "Fixed agent names shrinking to a single character in split headers and the second row."
+    },
+    {
+      "ja": "ダークモードで Git のパネル全体が濃い青になる問題を直しました。",
+      "en": "Fixed the Git panel turning dark blue in dark mode."
+    },
+    {
+      "ja": "セッション一覧の吹き出しが、次の行の名前を隠す問題を直しました。",
+      "en": "Fixed tooltips in the session list hiding the name on the next row."
+    },
+    {
+      "ja": "進み具合の保存に失敗したとき、知らせて元の値に戻すようにしました。",
+      "en": "A failed status change is now reported and the previous value is restored."
+    },
+    {
+      "ja": "worktree 画面を直接開いたり戻ったりしたとき、サイドバーの選択がずれる問題を直しました。",
+      "en": "Fixed the sidebar selection not matching the open worktree after a direct visit, reload or back/forward."
+    },
+    {
+      "ja": "日本語の設定でも、一部の説明や見出しが英語のまま表示される問題を直しました。",
+      "en": "Fixed some descriptions and headings staying in English with the Japanese setting."
+    },
+    {
+      "ja": "New task が全画面の表示の上に重なる問題と、Auto-Yes の残り時間の表示の遅れを直しました。",
+      "en": "Fixed New task appearing over full-screen views and the Auto-Yes time left updating late."
+    },
+    {
+      "ja": "worktree の ID が変わったあと、返答が二重に出たり消えたりすることがある問題を直しました。",
+      "en": "Fixed replies that could be duplicated or lost after a worktree's ID changed."
+    }
+  ]
+}

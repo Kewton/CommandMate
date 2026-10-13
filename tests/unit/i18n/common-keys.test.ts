@@ -43,12 +43,9 @@ const NAV_KEYS = [
   'repositories',
   'review',
   'more',
-  // Issue #1206: Header renders abbreviated variants that must stay distinct
-  // from the full labels above — `repositories` ("Repositories") is ~2.4x too
-  // wide for the header's space-x-6 row, and `review` ("Review") would drop the
-  // "/Report" that tells users the page also covers reports.
-  'repositoriesShort',
-  'reviewReport',
+  // Issue #3512: the Header's abbreviations (`repositoriesShort` "Repos",
+  // `reviewReport` "Review/Report", Issue #1206) went with the Header's links;
+  // see "removed header abbreviations" below.
 ];
 
 /**
@@ -64,8 +61,6 @@ const EN_NAV_LABELS: Record<string, string> = {
   // Issue #2642: /more is "Settings" now; the overflow trigger that used to
   // borrow this key moved to `repoTabBar.overflow`.
   more: 'Settings',
-  repositoriesShort: 'Repos',
-  reviewReport: 'Review/Report',
 };
 
 /**
@@ -229,14 +224,16 @@ describe('common i18n keys (Issue #1197)', () => {
   });
 
   /**
-   * The header deliberately abbreviates where the mobile bar does not, so the
-   * short keys must never collapse onto the full ones - that collapse is
-   * exactly what "just reuse nav.repositories" would silently do.
+   * Issue #3512: the header no longer has links, so its abbreviations
+   * (Issue #1206) have no reader left. Pin that they are gone rather than
+   * left to rot, in both locales.
    */
-  it('keeps the header abbreviations distinct from the full English labels (Issue #1206)', () => {
-    const en = loadCommon('en');
-    expect(resolve(en, 'nav.repositoriesShort')).not.toBe(resolve(en, 'nav.repositories'));
-    expect(resolve(en, 'nav.reviewReport')).not.toBe(resolve(en, 'nav.review'));
+  it('drops the removed header abbreviations (Issue #1206 → #3512)', () => {
+    for (const locale of ['en', 'ja']) {
+      const dict = loadCommon(locale);
+      expect(resolve(dict, 'nav.repositoriesShort'), `${locale}: nav.repositoriesShort`).toBeUndefined();
+      expect(resolve(dict, 'nav.reviewReport'), `${locale}: nav.reviewReport`).toBeUndefined();
+    }
   });
 
   describe('nav rename (Issue #2642)', () => {

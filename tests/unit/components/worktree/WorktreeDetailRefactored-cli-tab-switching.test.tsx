@@ -196,15 +196,6 @@ vi.mock('@/components/worktree/FileTreeView', () => ({
   FileTreeView: () => <div data-testid="file-tree-view" />,
 }));
 
-// Issue #727: ActivityBar replaces LeftPaneTabSwitcher
-vi.mock('@/components/worktree/ActivityBar', () => ({
-  ActivityBar: ({ active, onToggle }: { active: string | null; onToggle: (id: string) => void }) => (
-    <div data-testid="activity-bar">
-      <button onClick={() => onToggle('files')} data-active={active === 'files'}>Files</button>
-    </div>
-  ),
-}));
-
 vi.mock('@/components/worktree/ActivityPane', () => ({
   ActivityPane: ({ active, activities }: { active: string | null; activities: Record<string, React.ReactNode> }) => (
     <div data-testid="activity-pane">{active && activities[active] ? activities[active] : null}</div>
@@ -391,6 +382,9 @@ describe('WorktreeDetailRefactored CLI tab switching (Issue #736)', () => {
     // does not leak split CLI selection between tests.
     try {
       window.localStorage.clear();
+      // Issue #3589: History starts hidden on the worktree screen; these tests
+      // read the History column, so they start from a stored "shown".
+      window.localStorage.setItem('commandmate.worktree.historyVisible', 'true');
     } catch { /* ignore */ }
 
     messageQueue = { claude: [], copilot: [] };

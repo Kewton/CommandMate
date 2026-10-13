@@ -41,12 +41,25 @@
  *     `onKeyDown` would never see the key. It neither `preventDefault`s nor
  *     `stopPropagation`s, so a consumer's own Escape handling (closing a modal,
  *     leaving a terminal mode) still runs.
+ *   - [Issue #3611] An Escape a layer above already claimed (`defaultPrevented`
+ *     — a menu or list closing itself) leaves the bubble alone. The listener
+ *     is on `window` in the bubble phase, so every document-level layer has
+ *     handled the press first.
+ *   - [Issue #3650] Decided: the bubble does NOT claim Escape for itself
+ *     (no `preventDefault`, no capture listener to get ahead of the overlaid
+ *     activity pane's document listener). Focus opens the bubble at once, so
+ *     after clicking a header tool its bubble is up on that very icon — the
+ *     spot the operator presses Escape from to close the pane it opened. A
+ *     bubble that swallowed the press would turn that into two presses for a
+ *     hint that is `aria-hidden`, holds no state and is gone after the same
+ *     press anyway.
  */
 
 'use client';
 
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { isUnhandledEscape } from '@/lib/escape-key';
 
 /** Delay in milliseconds before the tooltip becomes visible after hover. */
 export const TOOLTIP_DELAY_MS = 100;
@@ -100,14 +113,32 @@ function clampAxis(value: number, bubbleSize: number, viewportSize: number): num
  * utility classes produced — but the result is then clamped, which the pure-CSS
  * version could not do.
  *
+ * [Issue #3616] With a `fallback`, a placement whose bubble would cross the
+ * viewport edge on its own side flips to the fallback when that one fits
+ * (e.g. `right` → `left` for a row near the right edge). Clamping alone would
+ * slide the bubble back over the trigger and its neighbours. When neither
+ * fits, the primary placement is kept (clamped as before) — the `Tooltip`
+ * component first narrows the bubble with `resolveTooltipWrap` so that case
+ * is reached only when there is no usable room beside the trigger at all.
+ *
  * Exported for unit testing (jsdom reports every rect as zero-sized).
  */
 export function computeTooltipPosition(
   placement: TooltipPlacement,
   trigger: TooltipRect,
   bubble: TooltipSize,
-  viewport: TooltipSize
+  viewport: TooltipSize,
+  fallback?: TooltipPlacement
 ): TooltipCoords {
+  if (
+    fallback !== undefined &&
+    fallback !== placement &&
+    overflowsOwnSide(placement, trigger, bubble, viewport) &&
+    !overflowsOwnSide(fallback, trigger, bubble, viewport)
+  ) {
+    return computeTooltipPosition(fallback, trigger, bubble, viewport);
+  }
+
   const centeredLeft = trigger.left + trigger.width / 2 - bubble.width / 2;
   const centeredTop = trigger.top + trigger.height / 2 - bubble.height / 2;
 
@@ -140,6 +171,125 @@ export function computeTooltipPosition(
   };
 }
 
+/**
+ * [Issue #3616] Whether a placement's unclamped bubble crosses the viewport
+ * margin on the side it is placed toward (the axis clamping would move).
+ */
+function overflowsOwnSide(
+  placement: TooltipPlacement,
+  trigger: TooltipRect,
+  bubble: TooltipSize,
+  viewport: TooltipSize
+): boolean {
+  switch (placement) {
+    case 'top':
+      return trigger.top - bubble.height - TOOLTIP_GAP < TOOLTIP_VIEWPORT_MARGIN;
+    case 'bottom':
+      return (
+        trigger.top + trigger.height + TOOLTIP_GAP + bubble.height >
+        viewport.height - TOOLTIP_VIEWPORT_MARGIN
+      );
+    case 'left':
+      return trigger.left - bubble.width - TOOLTIP_GAP < TOOLTIP_VIEWPORT_MARGIN;
+    case 'right':
+    default:
+      return (
+        trigger.left + trigger.width + TOOLTIP_GAP + bubble.width >
+        viewport.width - TOOLTIP_VIEWPORT_MARGIN
+      );
+  }
+}
+
+/** Narrowest wrapped bubble (px) worth drawing beside the trigger. */
+export const TOOLTIP_MIN_WRAP_WIDTH = 80;
+
+/**
+ * [Issue #3616] Room (px) for the bubble on one side of the trigger, up to the
+ * viewport margin. Never negative.
+ */
+function roomOnSide(placement: TooltipPlacement, trigger: TooltipRect, viewport: TooltipSize): number {
+  switch (placement) {
+    case 'top':
+      return Math.max(0, trigger.top - TOOLTIP_GAP - TOOLTIP_VIEWPORT_MARGIN);
+    case 'bottom':
+      return Math.max(
+        0,
+        viewport.height - TOOLTIP_VIEWPORT_MARGIN - (trigger.top + trigger.height + TOOLTIP_GAP)
+      );
+    case 'left':
+      return Math.max(0, trigger.left - TOOLTIP_GAP - TOOLTIP_VIEWPORT_MARGIN);
+    case 'right':
+    default:
+      return Math.max(
+        0,
+        viewport.width - TOOLTIP_VIEWPORT_MARGIN - (trigger.left + trigger.width + TOOLTIP_GAP)
+      );
+  }
+}
+
+/**
+ * [Issue #3616] When a tooltip with a `fallback` fits on neither side
+ * (`computeTooltipPosition` would clamp it back over its trigger and the rows
+ * around it), the side to wrap the bubble on and the max width to wrap it to:
+ * the side with more room, narrowed to that room. `null` when no wrap is
+ * needed (one side fits, or no fallback), when the pair is not two horizontal
+ * sides, or when even the roomier side is narrower than
+ * `TOOLTIP_MIN_WRAP_WIDTH` (then the old clamp stands).
+ */
+export function resolveTooltipWrap(
+  placement: TooltipPlacement,
+  trigger: TooltipRect,
+  bubble: TooltipSize,
+  viewport: TooltipSize,
+  fallback?: TooltipPlacement
+): { placement: TooltipPlacement; maxWidth: number } | null {
+  const horizontal = (p: TooltipPlacement): boolean => p === 'left' || p === 'right';
+  if (fallback === undefined || fallback === placement) return null;
+  if (!horizontal(placement) || !horizontal(fallback)) return null;
+  if (
+    !overflowsOwnSide(placement, trigger, bubble, viewport) ||
+    !overflowsOwnSide(fallback, trigger, bubble, viewport)
+  ) {
+    return null;
+  }
+  const primaryRoom = roomOnSide(placement, trigger, viewport);
+  const fallbackRoom = roomOnSide(fallback, trigger, viewport);
+  const side = fallbackRoom > primaryRoom ? fallback : placement;
+  const maxWidth = Math.floor(Math.max(primaryRoom, fallbackRoom));
+  return maxWidth >= TOOLTIP_MIN_WRAP_WIDTH ? { placement: side, maxWidth } : null;
+}
+
+/**
+ * [Issue #3616] The wrapping CSS of a bubble narrowed by `resolveTooltipWrap`.
+ * The ONE source for both the re-measure (written to the node) and the render
+ * (the `style` prop): if they differed, the bubble would be placed by a height
+ * it does not have — e.g. a long word with no spaces only wraps with
+ * `overflow-wrap: anywhere`, so measuring without it under-reads the height.
+ */
+export function tooltipWrapStyle(maxWidth: number): {
+  maxWidth: string;
+  whiteSpace: 'normal';
+  overflowWrap: 'anywhere';
+} {
+  return { maxWidth: `${maxWidth}px`, whiteSpace: 'normal', overflowWrap: 'anywhere' };
+}
+
+/** CSS property names of `tooltipWrapStyle`, for writing it to / clearing it from a node. */
+const TOOLTIP_WRAP_CSS_PROPERTIES = {
+  maxWidth: 'max-width',
+  whiteSpace: 'white-space',
+  overflowWrap: 'overflow-wrap',
+} as const satisfies Record<keyof ReturnType<typeof tooltipWrapStyle>, string>;
+
+/** Write (`maxWidth` given) or clear (`null`) the wrapping CSS on a bubble node. */
+function applyTooltipWrapStyle(node: HTMLElement, maxWidth: number | null): void {
+  const style = maxWidth === null ? null : tooltipWrapStyle(maxWidth);
+  for (const [key, cssName] of Object.entries(TOOLTIP_WRAP_CSS_PROPERTIES)) {
+    if (style === null) node.style.removeProperty(cssName);
+    else node.style.setProperty(cssName, style[key as keyof typeof style]);
+  }
+}
+
 /** Rendered off-screen for the first frame, before the bubble can be measured. */
 const OFFSCREEN_COORDS: TooltipCoords = { top: -9999, left: -9999 };
 
@@ -166,6 +316,18 @@ export interface TooltipProps {
    * shrink/reflow the trigger differently than it did with a native `title`.
    */
   className?: string;
+  /**
+   * [Issue #3593] The bubble's layer, for a tooltip inside something drawn
+   * above the default `z-40` (a popover at `Z_INDEX.POPOVER`), where the
+   * bubble would otherwise sit under its own container. Omitted keeps `z-40`.
+   */
+  zIndex?: number;
+  /**
+   * [Issue #3616] Placement to flip to when `placement` would cross the
+   * viewport edge and this one fits (see `computeTooltipPosition`). Omitted
+   * keeps the old behaviour: the primary placement, clamped.
+   */
+  fallbackPlacement?: TooltipPlacement;
 }
 
 /**
@@ -184,6 +346,8 @@ export function Tooltip({
   delay = TOOLTIP_DELAY_MS,
   children,
   className,
+  zIndex,
+  fallbackPlacement,
 }: TooltipProps): React.ReactElement {
   // [Issue #2319] Two independent channels. Hover releases must not close a
   // bubble that focus is still holding open, and vice versa (a pointer click
@@ -192,6 +356,8 @@ export function Tooltip({
   const [focusVisible, setFocusVisible] = useState(false);
   const visible = hoverVisible || focusVisible;
   const [coords, setCoords] = useState<TooltipCoords | null>(null);
+  // [Issue #3616] Set when the bubble is wrapped to fit beside its trigger.
+  const [wrapWidth, setWrapWidth] = useState<number | null>(null);
   const wrapperRef = useRef<HTMLSpanElement>(null);
   const bubbleRef = useRef<HTMLSpanElement>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -245,21 +411,42 @@ export function Tooltip({
     const bubble = bubbleRef.current;
     if (!trigger || !bubble) return;
     const triggerRect = trigger.getBoundingClientRect();
-    const bubbleRect = bubble.getBoundingClientRect();
+    const triggerBox = {
+      top: triggerRect.top,
+      left: triggerRect.left,
+      width: triggerRect.width,
+      height: triggerRect.height,
+    };
+    const viewport = { width: window.innerWidth, height: window.innerHeight };
+    // [Issue #3616] Measure the bubble at its natural (one-line) width, then,
+    // if it fits on neither side, wrap it to the roomier side and measure again
+    // so it is centred on its wrapped height. Written to the node directly so
+    // the second measurement happens in this same pass; the state below makes
+    // React render the same values.
+    applyTooltipWrapStyle(bubble, null);
+    let bubbleRect = bubble.getBoundingClientRect();
+    const wrap = resolveTooltipWrap(
+      placement,
+      triggerBox,
+      { width: bubbleRect.width, height: bubbleRect.height },
+      viewport,
+      fallbackPlacement
+    );
+    if (wrap) {
+      applyTooltipWrapStyle(bubble, wrap.maxWidth);
+      bubbleRect = bubble.getBoundingClientRect();
+    }
+    setWrapWidth(wrap ? wrap.maxWidth : null);
     setCoords(
       computeTooltipPosition(
-        placement,
-        {
-          top: triggerRect.top,
-          left: triggerRect.left,
-          width: triggerRect.width,
-          height: triggerRect.height,
-        },
+        wrap ? wrap.placement : placement,
+        triggerBox,
         { width: bubbleRect.width, height: bubbleRect.height },
-        { width: window.innerWidth, height: window.innerHeight }
+        viewport,
+        wrap ? undefined : fallbackPlacement
       )
     );
-  }, [placement]);
+  }, [placement, fallbackPlacement]);
 
   // Measure and place before paint so the bubble is never seen at its
   // off-screen seed position. While visible, keep it anchored across scrolls of
@@ -273,6 +460,7 @@ export function Tooltip({
     // `visible` never flipped). Seeding `null` is a no-op re-render on mount.
     if (!visible) {
       setCoords(null);
+      setWrapWidth(null);
       return;
     }
     updatePosition();
@@ -287,10 +475,13 @@ export function Tooltip({
   // [Issue #2319] Escape dismisses a visible bubble (WAI-ARIA tooltip pattern).
   // Bound on `window` rather than the wrapper so it also fires in the hover
   // case, where focus is on some other element entirely.
+  // Issue #3650: deliberately not `preventDefault`ed — the same press still
+  // closes the activity pane opened from this icon (see the header comment).
   useEffect(() => {
     if (!visible) return;
     const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') dismiss();
+      // Issue #3611: a layer above that closed itself on this press owns it.
+      if (isUnhandledEscape(event)) dismiss();
     };
     window.addEventListener('keydown', onKeyDown);
     return () => {
@@ -328,7 +519,13 @@ export function Tooltip({
             aria-hidden="true"
             data-placement={placement}
             className="fixed z-40 whitespace-nowrap px-2 py-1 text-xs font-medium rounded bg-foreground text-background shadow-lg pointer-events-none"
-            style={coords ?? OFFSCREEN_COORDS}
+            style={{
+              ...(coords ?? OFFSCREEN_COORDS),
+              ...(zIndex === undefined ? {} : { zIndex }),
+              ...(wrapWidth === null
+                ? {}
+                : tooltipWrapStyle(wrapWidth)),
+            }}
           >
             {content}
           </span>,

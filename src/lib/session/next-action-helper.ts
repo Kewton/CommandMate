@@ -2,7 +2,8 @@
  * Next Action Helper - Derived state for worktree next actions and review status.
  *
  * Issue #600: UX refresh - provides getNextAction() and getReviewStatus()
- * for Review screen and WorktreeCard display.
+ * for the Review screen (via `/api/worktrees`) and the sidebar row
+ * (`toBranchItem` in `src/types/sidebar.ts`).
  *
  * Uses exhaustive check (satisfies never) pattern to catch future
  * SessionStatus extensions at compile time [DR2-005].
@@ -40,21 +41,6 @@ export const NEXT_ACTION_KEYS = {
 
 /** One of the {@link NEXT_ACTION_KEYS} values. */
 export type NextActionKey = (typeof NEXT_ACTION_KEYS)[keyof typeof NEXT_ACTION_KEYS];
-
-const NEXT_ACTION_KEY_SET: ReadonlySet<string> = new Set(Object.values(NEXT_ACTION_KEYS));
-
-/**
- * Whether a value is a key this module produces (Issue #1787).
- *
- * `Worktree.nextAction` is a plain `string` on the wire, and a server that
- * predates this Issue still sends the old English literal. Callers must gate
- * `t()` on this: next-intl reports a missing key by rendering the key path, so
- * feeding it `"Approve / Reject"` would put `worktree.Approve / Reject` on
- * screen. Anything that fails this test is rendered verbatim instead.
- */
-export function isNextActionKey(value: string): value is NextActionKey {
-  return NEXT_ACTION_KEY_SET.has(value);
-}
 
 /**
  * Determine the next action for a given session state.

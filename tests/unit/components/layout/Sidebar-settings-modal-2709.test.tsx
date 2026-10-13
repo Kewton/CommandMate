@@ -1,24 +1,30 @@
 /**
- * Sidebar footer settings button: modal on PC, /more on the phone (Issue #2709)
+ * Sidebar footer settings: modal on PC, /more on the phone (Issue #2709)
  *
- * `TransitionLink` is deliberately NOT mocked here. The behaviour under test is
- * the handshake between the button's own handler and TransitionLink's
- * `defaultPrevented` check, so the existing Sidebar.test.tsx — which replaces
- * TransitionLink with a bare <a> — cannot see it: under that mock "push was not
- * called" is true no matter which branch ran.
+ * Issue #3510: the footer's settings link became the "Settings" item of the
+ * shared settings menu, opened from the footer's only button. The #2709 split
+ * is unchanged and is what this file pins, through the menu.
+ *
+ * Neither `useSettingsDialog` nor `Modal` is mocked: the real provider drives
+ * a real `Modal` (and so a real `useFocusTrap`), because where focus lands
+ * when the modal closes — the menu button, not <body> — is part of the
+ * contract (same reasoning as ActivityBar-settings-modal-2709.test.tsx).
  * @vitest-environment jsdom
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import React from 'react';
 import { Sidebar } from '@/components/layout/Sidebar';
 import { ToastProvider } from '@/components/common/Toast';
 import { SidebarProvider } from '@/contexts/SidebarContext';
 import { WorktreeSelectionProvider } from '@/contexts/WorktreeSelectionContext';
+import { SettingsDialogProvider, useSettingsDialog } from '@/contexts/SettingsDialogContext';
+import { Modal } from '@/components/ui/Modal';
+import { installRadixJsdomPolyfills } from '@tests/helpers/radix-jsdom';
 import type { Worktree } from '@/types/models';
 
-// The button's accessible name is `common.settings.title`; resolve it through
+// The menu item is matched by its English label; resolve it through
 // the real dictionary rather than the key-echoing global mock.
 vi.mock('next-intl', async () => {
   const { createRealIntlMock } = await import('@tests/helpers/real-intl');
@@ -36,11 +42,6 @@ vi.mock('next/navigation', () => ({
   }),
   usePathname: () => '/',
   useSearchParams: () => new URLSearchParams(),
-}));
-
-const settingsDialogMock = vi.hoisted(() => ({ open: vi.fn(), close: vi.fn() }));
-vi.mock('@/contexts/SettingsDialogContext', () => ({
-  useSettingsDialog: () => ({ isOpen: false, open: settingsDialogMock.open, close: settingsDialogMock.close }),
 }));
 
 vi.mock('@/hooks/useAttentionCount', async (importOriginal) => {
@@ -71,11 +72,26 @@ const mockWorktrees: Worktree[] = [
   },
 ];
 
+/** Stands in for SettingsDialog: same context, same Modal, trivial contents. */
+function ProbeModal() {
+  const { isOpen, close } = useSettingsDialog();
+  return (
+    <Modal isOpen={isOpen} onClose={close} title="Settings">
+      <button type="button" data-testid="probe-inside">
+        inside
+      </button>
+    </Modal>
+  );
+}
+
 const Wrapper = ({ children }: { children: React.ReactNode }) => (
   <ToastProvider>
-    <SidebarProvider>
-      <WorktreeSelectionProvider>{children}</WorktreeSelectionProvider>
-    </SidebarProvider>
+    <SettingsDialogProvider>
+      <SidebarProvider>
+        <WorktreeSelectionProvider>{children}</WorktreeSelectionProvider>
+      </SidebarProvider>
+      <ProbeModal />
+    </SettingsDialogProvider>
   </ToastProvider>
 );
 
@@ -88,17 +104,24 @@ function setViewportWidth(width: number): void {
   Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: width });
 }
 
-async function renderSidebar(width: number): Promise<HTMLElement> {
+/** Renders the sidebar and opens the footer's settings menu from the keyboard. */
+async function renderSidebarAndOpenMenu(width: number): Promise<HTMLElement> {
   setViewportWidth(width);
   render(
     <Wrapper>
       <Sidebar />
     </Wrapper>
   );
-  return screen.findByTestId('sidebar-settings');
+  const trigger = await screen.findByTestId('sidebar-settings-menu');
+  fireEvent.keyDown(trigger, { key: 'Enter' });
+  return trigger;
 }
 
 describe('Sidebar footer settings button (Issue #2709)', () => {
+  beforeAll(() => {
+    installRadixJsdomPolyfills();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
@@ -115,55 +138,50 @@ describe('Sidebar footer settings button (Issue #2709)', () => {
 
   describe('PC (1024px)', () => {
     it('opens the modal instead of navigating', async () => {
-      const link = await renderSidebar(1024);
+      await renderSidebarAndOpenMenu(1024);
 
-      fireEvent.click(link);
+      fireEvent.click(screen.getByRole('menuitem', { name: 'Settings' }));
 
-      expect(settingsDialogMock.open).toHaveBeenCalledTimes(1);
+      await waitFor(() => expect(screen.getByTestId('modal-panel')).toBeInTheDocument());
       expect(mockPush).not.toHaveBeenCalled();
+      expect(document.activeElement).toBe(screen.getByTestId('modal-panel'));
     });
 
-    it('prevents the default navigation of the anchor', async () => {
-      const link = await renderSidebar(1024);
+    it('returns focus to the menu button when the modal is closed', async () => {
+      const trigger = await renderSidebarAndOpenMenu(1024);
 
-      const event = new MouseEvent('click', { bubbles: true, cancelable: true });
-      link.dispatchEvent(event);
+      fireEvent.click(screen.getByRole('menuitem', { name: 'Settings' }));
+      await waitFor(() => expect(screen.getByTestId('modal-panel')).toBeInTheDocument());
 
-      expect(event.defaultPrevented).toBe(true);
+      fireEvent.keyDown(document, { key: 'Escape' });
+
+      await waitFor(() => expect(document.activeElement).toBe(trigger));
+      await waitFor(() => expect(screen.queryByTestId('modal-panel')).toBeNull());
     });
 
-    it('leaves a modified click to the browser', async () => {
-      const link = await renderSidebar(1024);
-      link.addEventListener('click', (event) => event.preventDefault());
+    it('leaves the modal closed when the menu itself is dismissed', async () => {
+      const trigger = await renderSidebarAndOpenMenu(1024);
+      expect(screen.getByRole('menu')).toBeInTheDocument();
 
-      fireEvent.click(link, { metaKey: true });
+      fireEvent.keyDown(document, { key: 'Escape' });
 
-      expect(settingsDialogMock.open).not.toHaveBeenCalled();
-      expect(mockPush).not.toHaveBeenCalled();
-    });
-
-    it('advertises the dialog it opens', async () => {
-      const link = await renderSidebar(1024);
-      expect(link.getAttribute('aria-haspopup')).toBe('dialog');
-      expect(link.getAttribute('href')).toBe('/more');
+      await waitFor(() => expect(document.activeElement).toBe(trigger));
+      expect(screen.queryByTestId('modal-panel')).toBeNull();
     });
   });
 
   describe('Phone (390px)', () => {
     it('navigates to /more and opens no modal', async () => {
-      const link = await renderSidebar(390);
+      await renderSidebarAndOpenMenu(390);
 
-      fireEvent.click(link);
+      fireEvent.click(screen.getByRole('menuitem', { name: 'Settings' }));
 
-      expect(settingsDialogMock.open).not.toHaveBeenCalled();
       expect(mockPush).toHaveBeenCalledTimes(1);
       expect(mockPush).toHaveBeenCalledWith('/more');
-    });
-
-    it('is a plain link, with no dialog advertised', async () => {
-      const link = await renderSidebar(390);
-      expect(link.getAttribute('aria-haspopup')).toBeNull();
-      expect(link.getAttribute('href')).toBe('/more');
+      // The PC path opens the modal one microtask after Radix's close; give it
+      // the chance to (wrongly) do so before asserting it did not.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(screen.queryByTestId('modal-panel')).toBeNull();
     });
   });
 });

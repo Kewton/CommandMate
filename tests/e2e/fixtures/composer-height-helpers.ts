@@ -58,6 +58,8 @@ const ACTIVE_INSTANCE_PREFIX = 'activeInstanceId-';
 const ACTIVITY_BAR_PREFIX = 'commandmate.worktree.activeActivity-';
 const HISTORY_VISIBLE_KEY = 'commandmate.worktree.historyVisible';
 const HISTORY_WIDTH_KEY = 'commandmate.worktree.historyWidth';
+/** Mirror of ACTIVITY_PANE_PINNED_STORAGE_KEY (Issue #3589). */
+const ACTIVITY_PANE_PINNED_KEY = 'commandmate.worktree.activityPanePinned';
 
 /** The composer-height key the app writes (mirror of `getComposerHeightStorageKey`). */
 export function composerHeightKey(worktreeId: string, scope: string): string {
@@ -235,7 +237,7 @@ export async function seedComposerSplits(
   }));
 
   await page.addInitScript(
-    ({ entries, value, tool, clearKeys, clearPrefixes, guard }) => {
+    ({ entries, value, tool, clearKeys, clearPrefixes, layoutSeed, guard }) => {
       try {
         if (sessionStorage.getItem(guard)) return;
         sessionStorage.setItem(guard, '1');
@@ -248,6 +250,7 @@ export async function seedComposerSplits(
         Object.keys(localStorage)
           .filter(k => clearPrefixes.some((p: string) => k.startsWith(p)))
           .forEach(k => localStorage.removeItem(k));
+        Object.entries(layoutSeed).forEach(([k, v]) => localStorage.setItem(k, v as string));
       } catch {
         /* storage unavailable - non-fatal */
       }
@@ -258,6 +261,14 @@ export async function seedComposerSplits(
       tool: first,
       clearKeys: [HISTORY_VISIBLE_KEY, HISTORY_WIDTH_KEY],
       clearPrefixes: [ACTIVITY_BAR_PREFIX, COMPOSER_HEIGHT_STORAGE_KEY_PREFIX],
+      // Issue #3589: the pane widths were measured on the pre-#3589 first
+      // visit — Files open beside the body, History shown. Both are closed by
+      // default now, so that layout is seeded as a stored choice.
+      layoutSeed: Object.fromEntries([
+        ...[E2E_COMPOSER_WORKTREE, E2E_COMPOSER_OTHER_WORKTREE].map(id => [ACTIVITY_BAR_PREFIX + id, 'files']),
+        [ACTIVITY_PANE_PINNED_KEY, 'true'],
+        [HISTORY_VISIBLE_KEY, 'true'],
+      ]),
       guard: '__e2e_2598_seeded__',
     },
   );

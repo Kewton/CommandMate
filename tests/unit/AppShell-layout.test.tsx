@@ -135,9 +135,13 @@ describe('AppShell with useLayoutConfig', () => {
       autoCollapseSidebar: false,
     });
     render(<AppShell><div>Content</div></AppShell>);
+    // Issue #3579: the header is a row inside <main>, right of the sidebar, so
+    // the sidebar can no longer sit under it — it starts at the top instead.
     const aside = screen.getByTestId('sidebar-container');
-    expect(aside).toHaveClass('top-16', 'h-[calc(100vh-4rem)]');
-    expect(aside).not.toHaveClass('top-0', 'h-full');
+    expect(aside).toHaveClass('top-0', 'h-full');
+    expect(aside).not.toHaveClass('top-16', 'h-[calc(100vh-4rem)]');
+    expect(screen.getByRole('main').contains(screen.getByTestId('header'))).toBe(true);
+    expect(aside.contains(screen.getByTestId('header'))).toBe(false);
   });
 
   it('should keep the desktop sidebar full-height when the header is hidden (showGlobalNav false)', () => {

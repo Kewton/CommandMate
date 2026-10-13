@@ -143,3 +143,37 @@ describe('SettingsPanel sections render standalone (Issue #2707)', () => {
     expect(screen.getByRole('heading', { level: 2 })).toHaveTextContent(heading);
   });
 });
+
+describe('SettingsQuickLinksSection repositories description (Issue #3632)', () => {
+  it('renders the en sentence from common.repositories.pageDescription', () => {
+    intlLocale.current = 'en';
+    render(<SettingsQuickLinksSection />);
+    expect(screen.getByText('Manage repositories and worktrees.')).toBeTruthy();
+  });
+
+  it('renders Japanese under ja, with no English literal left', () => {
+    intlLocale.current = 'ja';
+    render(<SettingsQuickLinksSection />);
+    expect(screen.getByText('リポジトリとワークツリーを管理します。')).toBeTruthy();
+    expect(screen.queryByText(/Manage repositories/)).toBeNull();
+  });
+});
+
+describe('SettingsQuickLinksSection repositories heading (Issue #3651)', () => {
+  function title(): string | null {
+    // The card's first line, above the description.
+    return screen.getByTestId('more-link-repositories').querySelector('.font-medium')?.textContent ?? null;
+  }
+
+  it('renders リポジトリ under ja (common.nav.repositories), not the English literal', () => {
+    intlLocale.current = 'ja';
+    render(<SettingsQuickLinksSection />);
+    expect(title()).toBe('リポジトリ');
+  });
+
+  it('keeps "Repositories" under en (negative control)', () => {
+    intlLocale.current = 'en';
+    render(<SettingsQuickLinksSection />);
+    expect(title()).toBe('Repositories');
+  });
+});

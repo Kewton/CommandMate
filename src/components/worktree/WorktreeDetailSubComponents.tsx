@@ -11,23 +11,20 @@
 
 'use client';
 
-import React, { useEffect, useCallback, useLayoutEffect, useState, memo, useRef } from 'react';
+import React, { useEffect, useCallback, useState, memo, useRef } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import { type WorktreeStatus } from '@/components/mobile/MobileHeader';
 import { DESKTOP_STATUS_LABEL_KEYS } from '@/config/status-colors';
 import { StatusDot } from '@/components/ui/StatusDot';
-import { Tooltip } from '@/components/common/Tooltip';
 import {
-  DropdownMenu,
-  DropdownMenuTrigger,
-  DropdownMenuContent,
-  DropdownMenuItem,
-} from '@/components/ui/DropdownMenu';
-import {
-  classifyHeaderInstances,
-  isLabeledInstance,
+  orderOtherInstances,
+  resolveCurrentInstanceId,
   type HeaderInstanceItem,
 } from '@/lib/agent-status-display';
+import {
+  HeaderSessionSwitcher,
+  type HeaderSessionEntry,
+} from '@/components/worktree/HeaderSessionSwitcher';
 import { LogViewer } from '@/components/worktree/LogViewer';
 import { VersionSection } from '@/components/worktree/VersionSection';
 import { FeedbackSection } from '@/components/worktree/FeedbackSection';
@@ -38,6 +35,7 @@ import { truncateString } from '@/lib/utils';
 import { ClipboardCopy, Check } from 'lucide-react';
 import { copyToClipboard } from '@/lib/clipboard-utils';
 import { NotificationDot } from '@/components/common/NotificationDot';
+import { useToast } from '@/components/common/Toast';
 import { deriveCliStatus, isUnclassifiedCliStatus } from '@/types/sidebar';
 import {
   UNCLASSIFIED_STATUS_DOT_CLASS,
@@ -51,12 +49,24 @@ import {
   type AgentSessionSnapshot,
   type AgentSessionView,
 } from '@/types/agent-session';
-import { getInstanceLabel, type AgentInstance, type CLIToolType } from '@/lib/cli-tools/types';
+import {
+  getInstanceLabel,
+  MAX_AGENT_INSTANCES,
+  type AgentInstance,
+  type CLIToolType,
+} from '@/lib/cli-tools/types';
 import { useCopyFeedback } from '@/hooks/useCopyFeedback';
 import { AGENT_INSTANCE_DND_MIME } from '@/components/worktree/TerminalSplitPane';
-import { PcDisplaySizeSelector } from '@/components/layout/PcDisplaySizeSelector';
+import {
+  WorktreeBreadcrumbBranch,
+  WorktreeBreadcrumbRepository,
+} from '@/components/worktree/WorktreeBreadcrumb';
 import { AppUpdateButton } from '@/components/common/AppUpdateButton';
 import { useAppUpdate } from '@/contexts/AppUpdateContext';
+import { useDesktopHeaderFit } from '@/hooks/useDesktopHeaderFit';
+import { HeaderToolBar } from '@/components/worktree/HeaderToolBar';
+import { HEADER_TOOLS, type ActivityId } from '@/config/activity-bar-config';
+import { saveWorktreeStatus, WORKTREE_STATUS_OPTIONS } from '@/lib/worktree-status';
 
 // ============================================================================
 // Constants
@@ -67,22 +77,8 @@ const APP_VERSION_DISPLAY = process.env.NEXT_PUBLIC_APP_VERSION
   ? `v${process.env.NEXT_PUBLIC_APP_VERSION}`
   : '-';
 
-/**
- * Worktree status options for the status dropdowns (Issue #1277: `labelKey` is
- * resolved against the `worktree` namespace at the call site, so the options
- * list stays a single source of truth for both the desktop header dropdown and
- * the WorktreeInfoFields dropdown without pinning either to English).
- */
-const WORKTREE_STATUS_OPTIONS: Array<{
-  value: 'ready' | 'in_progress' | 'in_review' | 'done' | null;
-  labelKey: string;
-}> = [
-  { value: null, labelKey: 'worktreeStatus.notSet' },
-  { value: 'ready', labelKey: 'worktreeStatus.ready' },
-  { value: 'in_progress', labelKey: 'worktreeStatus.inProgress' },
-  { value: 'in_review', labelKey: 'worktreeStatus.inReview' },
-  { value: 'done', labelKey: 'worktreeStatus.done' },
-];
+// Issue #3594: the status options moved to `@/lib/worktree-status`, shared
+// with the branch row's "…" → Status submenu. Only the Info field keeps a select.
 
 // ============================================================================
 // Helper Functions
@@ -551,6 +547,7 @@ export const WorktreeInfoFields = memo(function WorktreeInfoFields({
   const { isEditing, text, setText, isSaving, handleSave, handleCancel, startEditing } = descriptionEditor;
   const tWorktree = useTranslations('worktree');
   const tCommon = useTranslations('common');
+  const { showToast } = useToast();
 
   // Two INDEPENDENT confirmations (Issue #2180, previously `pathTimerRef` /
   // `repoPathTimerRef` here): one timer each, so copying the repository path
@@ -635,20 +632,19 @@ export const WorktreeInfoFields = memo(function WorktreeInfoFields({
         <select
           value={worktree.status ?? ''}
           onChange={async (e) => {
-            const val = e.target.value;
+            const select = e.target;
+            const previousValue = worktree.status ?? '';
+            const val = select.value;
             const newStatus = val === '' ? null : val as 'ready' | 'in_progress' | 'in_review' | 'done';
             try {
-              const response = await fetch(`/api/worktrees/${worktree.id}`, {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ status: newStatus }),
-              });
-              if (response.ok && onWorktreeUpdate) {
-                const updated = await response.json();
-                onWorktreeUpdate(updated);
-              }
+              // Issue #3594: the shared per-worktree queue orders this with the
+              // row "…" saves and keeps in-flight fetches from undoing it.
+              const updated = await saveWorktreeStatus(worktree.id, newStatus);
+              onWorktreeUpdate?.(updated);
             } catch {
-              // Silently handle
+              // Issue #3613: same as the row "…" Status — say so, put the old value back.
+              select.value = previousValue;
+              showToast(tCommon('branchItem.statusChangeFailed'), 'error');
             }
           }}
           className="text-sm px-3 py-1.5 rounded-lg border border-input bg-surface text-foreground focus:ring-2 focus:ring-ring focus:border-transparent w-full"
@@ -775,6 +771,12 @@ export const WorktreeInfoFields = memo(function WorktreeInfoFields({
 
 /** Props for DesktopHeader component */
 interface DesktopHeaderProps {
+  /**
+   * Issue #3513: the worktree on screen, so the breadcrumb's ▾ can open its
+   * repository's branch list with this one marked. Omitted renders the name
+   * without the ▾.
+   */
+  worktreeId?: string;
   worktreeName: string;
   repositoryName: string;
   description?: string;
@@ -783,17 +785,14 @@ interface DesktopHeaderProps {
   onInfoClick: () => void;
   /**
    * Optional sidebar toggle callback.
-   * Issue #747: the sidebar (Branches) toggle moved out of DesktopHeader into
-   * the top of the ActivityBar, so DesktopHeader no longer renders a hamburger.
+   * Issue #747: the sidebar (Branches) toggle moved out of DesktopHeader (it
+   * is the sidebar's own button since #3512), so DesktopHeader no longer
+   * renders a hamburger.
    * Kept as an optional prop for backward compatibility.
    */
   onMenuClick?: () => void;
   /** Whether an app update is available (shows notification dot on Info button) - Issue #278 */
   hasUpdate?: boolean;
-  /** Current worktree status (ready/in_progress/in_review/done/null) */
-  worktreeStatus?: 'ready' | 'in_progress' | 'in_review' | 'done' | null;
-  /** Callback when worktree status is changed via dropdown */
-  onWorktreeStatusChange?: (status: 'ready' | 'in_progress' | 'in_review' | 'done' | null) => void;
   /** Per-CLI session status map (PC only, optional). Issue #749 */
   sessionStatusByCli?: Worktree['sessionStatusByCli'];
   /**
@@ -831,14 +830,11 @@ interface DesktopHeaderProps {
    * worktree status dropdown.
    */
   onKillSession?: () => void;
-  /**
-   * Issue #1816: the task-contract / verification status chip, rendered next to
-   * the branch title. A slot rather than the chip itself so this module keeps
-   * no dependency on the verification client — the parent already owns that
-   * state and can hand the built node down. Omitted (or `null`) renders
-   * nothing, which is what every worktree without a task row gets.
+  /*
+   * Issue #3590: `verificationChip` (#1816) is gone from here. The chip sits on
+   * the second row now, next to the split layout icons — the worktree screen
+   * hands it to `TerminalSplitContainer`'s `actionBarItems`.
    */
-  verificationChip?: React.ReactNode;
   /**
    * What each instance's agent says about the session it is in (Issue #2042).
    *
@@ -847,154 +843,48 @@ interface DesktopHeaderProps {
    * instance in the roster with no open split has no entry, and every tool but
    * opencode has none either. Absent renders exactly what pre-#2042 rendered.
    *
-   * **Tooltip only, like the model before it.** This row is width-budgeted —
-   * `MAX_HEADER_AGENT_PILLS` caps the labelled pills and the rest fold into
-   * "+N" — so a second visible string per pill would push a working instance
-   * into the overflow menu to make room for a cost nobody is scanning for. The
-   * visible chip lives on the split pane's own header, which has the width.
+   * **Tooltip only, like the model before it.** The session field has a fixed
+   * width (Issue #3593), so a second visible string would only truncate the
+   * name. The visible chip lives on the split pane's own header, which has the
+   * width.
    */
   agentSessionByInstance?: Readonly<Record<string, AgentSessionSnapshot>>;
+  /**
+   * Issue #3514: the "+" that adds an agent, drawn at the right end of the
+   * agent row (Issue #3593: after the session field, and the list's
+   * "Add session…" presses it — it must be the row's last element). A slot rather than the control itself so this module keeps no
+   * dependency on the roster write (the parent owns the roster and the split
+   * placement). Omitted renders nothing — the pre-#3514 row.
+   */
+  agentAddControl?: React.ReactNode;
+  /**
+   * Issue #3593: the instance each split shows, by split index (from
+   * `TerminalSplitContainer`'s `onSelectedSplitChange`). The "N others" list
+   * names the split a session is in ("Split 2"). Omitted names none.
+   */
+  splitInstanceIds?: readonly string[];
+  /**
+   * Issue #3591: the worktree's tools (`HeaderToolBar`) at the right end of
+   * the row, replacing the vertical activity bar. Drawn only when
+   * {@link onActivityToggle} is given; on a narrow header the trailing tools
+   * fold behind "…" before the identity group clips (`useDesktopHeaderFit`).
+   */
+  activeActivity?: ActivityId | null;
+  /** Issue #3591: a tool was pressed (re-pressing the open one closes it). */
+  onActivityToggle?: (activity: ActivityId) => void;
 }
 
 /** Status indicator configuration is imported from @/config/status-colors (SF1) */
 
-/**
- * Issue #1078: max labelled agent pills kept inline in the desktop header before
- * the rest collapse into the "+N" overflow menu. Idle/ready instances always
- * render as narrow icon-only dots and never count against this budget.
- *
- * Issue #2481: a ceiling, not the budget itself — a header too narrow for this
- * many keeps fewer (see {@link useDesktopHeaderFit}).
+/*
+ * Issue #2481 / #3590: the header's width fit (`useDesktopHeaderFit`) lives in
+ * `@/hooks/useDesktopHeaderFit`, beside the second row's fit
+ * (`useSplitActionBarFit`), so both rows give way the same way.
  */
-const MAX_HEADER_AGENT_PILLS = 4;
-
-/** What the desktop header can afford at its current width (Issue #2481). */
-interface DesktopHeaderFit {
-  /** Labelled agent pills kept inline; the rest fold into the "+N" menu. */
-  pillBudget: number;
-  /**
-   * The last resort, once there is no labelled pill left to fold: the identity
-   * group and the agent row clip horizontally instead of painting under the
-   * right-hand controls.
-   */
-  squeezed: boolean;
-}
-
-/**
- * Whether anything in the desktop header's identity group is wider than its box
- * (Issue #2481).
- *
- * The group's own overflow catches content pushed past its edge. The walk
- * catches content that collides inside it without widening anything: the
- * verification chip squeezed below its badges paints them over its own ⓘ
- * toggle, and the chip is a slot this module does not look into. Elements that
- * clip (the `truncate` spans) are wider than their box by design and skipped.
- */
-function identityOverflows(identity: HTMLElement): boolean {
-  if (identity.scrollWidth > identity.clientWidth + 1) return true;
-  for (const el of Array.from(identity.querySelectorAll('*'))) {
-    if (el.scrollWidth <= el.clientWidth + 1) continue;
-    if (getComputedStyle(el).overflowX !== 'visible') continue;
-    return true;
-  }
-  return false;
-}
-
-/**
- * Fits the desktop header's one row to its width (Issue #2481).
- *
- * At 1470px with the sidebar open, identity (name, branch, verification chip)
- * plus the agent pills and controls no longer fit, and the header's parent is
- * `overflow-hidden` — so the right end (display size, Info) was cut off with no
- * way to scroll to it. The layout now decides who gives way: the controls group
- * never shrinks, the identity group (`min-w-0`) takes what is left and
- * truncates. This hook handles the point where truncating is not enough — the
- * identity group's content is wider than its box — by folding one more
- * labelled pill into the existing "+N" menu (#1078) and measuring again, down
- * to zero pills and then {@link DesktopHeaderFit.squeezed}.
- *
- * The measurement runs in a layout effect, whose state updates re-render before
- * the browser paints, so the intermediate steps are never seen. Folding only
- * goes one way, so the fit restarts from the ceiling whenever there may be room
- * again: the header got wider or narrower (a ResizeObserver — opening the
- * sidebar resizes the header without resizing the window), or `contentKey`
- * changed (an instance went idle, a label or the branch changed).
- *
- * @param headerRef - The header row, observed for size changes
- * @param identityRef - The left group; its overflow is the "does not fit" signal
- * @param contentKey - What, besides the budget, changes the row's widths
- * @param labelledCount - Instances that want a labelled pill (active or working)
- * @param unkeyedContent - Content whose width `contentKey` cannot capture (the
- *   verification chip node): a new value re-measures without restarting, so a
- *   chip that grows folds a pill and one that shrinks waits for the next resize
- */
-function useDesktopHeaderFit(
-  headerRef: React.RefObject<HTMLDivElement | null>,
-  identityRef: React.RefObject<HTMLDivElement | null>,
-  contentKey: string,
-  labelledCount: number,
-  unkeyedContent: unknown
-): DesktopHeaderFit {
-  const [fit, setFit] = useState(() => ({
-    key: contentKey,
-    pillBudget: MAX_HEADER_AGENT_PILLS,
-    squeezed: false,
-  }));
-
-  // Reset while rendering (React's "adjust state when a prop changes"
-  // pattern), not in an effect: an effect would run after the step below in
-  // the same commit and be overwritten by it.
-  let current = fit;
-  if (fit.key !== contentKey) {
-    current = { key: contentKey, pillBudget: MAX_HEADER_AGENT_PILLS, squeezed: false };
-    setFit(current);
-  }
-
-  // While the identity group's content overflows, give up one more step.
-  // Every step is a new `fit`, so this re-runs until the row fits or is
-  // squeezed; a step never undoes one, so the chain ends.
-  useLayoutEffect(() => {
-    const identity = identityRef.current;
-    if (!identity || fit.squeezed || !identityOverflows(identity)) return;
-    setFit((prev) => {
-      if (prev.squeezed) return prev;
-      const shown = Math.min(prev.pillBudget, labelledCount);
-      return shown > 0 ? { ...prev, pillBudget: shown - 1 } : { ...prev, squeezed: true };
-    });
-  }, [identityRef, fit, labelledCount, unkeyedContent]);
-
-  useEffect(() => {
-    const header = headerRef.current;
-    if (!header || typeof ResizeObserver === 'undefined') return;
-    let lastWidth: number | null = null;
-    let lastHeight: number | null = null;
-    const observer = new ResizeObserver((entries) => {
-      const rect = entries[entries.length - 1]?.contentRect;
-      if (!rect) return;
-      const widthChanged = rect.width !== lastWidth;
-      if (!widthChanged && rect.height === lastHeight) return;
-      lastWidth = rect.width;
-      lastHeight = rect.height;
-      // A new width may hold more: start again from the ceiling. The header's
-      // width comes from its parent, never from this row, so this cannot feed
-      // back into itself. A height-only change (display size) is only
-      // re-checked — a fresh object re-renders, and the step above can only
-      // fold further, so it cannot oscillate either.
-      setFit((prev) =>
-        widthChanged
-          ? { key: prev.key, pillBudget: MAX_HEADER_AGENT_PILLS, squeezed: false }
-          : { ...prev }
-      );
-    });
-    observer.observe(header);
-    return () => observer.disconnect();
-  }, [headerRef]);
-
-  return { pillBudget: current.pillBudget, squeezed: current.squeezed };
-}
 
 /** Desktop header with worktree name, repository, status, and info button */
 export const DesktopHeader = memo(function DesktopHeader({
+  worktreeId,
   worktreeName,
   repositoryName,
   description: worktreeDescription,
@@ -1002,8 +892,6 @@ export const DesktopHeader = memo(function DesktopHeader({
   gitStatus,
   onInfoClick,
   hasUpdate,
-  worktreeStatus,
-  onWorktreeStatusChange,
   sessionStatusByCli,
   sessionStatusByInstance,
   instances,
@@ -1012,8 +900,11 @@ export const DesktopHeader = memo(function DesktopHeader({
   onAgentDragStart,
   onAgentDragEnd,
   onKillSession,
-  verificationChip,
   agentSessionByInstance,
+  agentAddControl,
+  splitInstanceIds,
+  activeActivity = null,
+  onActivityToggle,
 }: DesktopHeaderProps) {
   const tWorktree = useTranslations('worktree');
   const locale = useLocale();
@@ -1029,7 +920,6 @@ export const DesktopHeader = memo(function DesktopHeader({
   const statusLabel = statusLabelKey ? tWorktree(statusLabelKey) : undefined;
   // Issue #111: DRY - Use shared truncateString utility
   const DESKTOP_BRANCH_MAX_LENGTH = 30;
-  const DESCRIPTION_MAX_LENGTH = 50;
 
   // Issue #786 / #869: which instance tab is currently being dragged (for the
   // opacity-50/cursor-grabbing visual). Local to the header; the instanceId
@@ -1079,10 +969,15 @@ export const DesktopHeader = memo(function DesktopHeader({
     onAgentDragEnd?.();
   }, [onAgentDragEnd]);
 
-  // Truncate description using shared utility
-  const truncatedDescription = worktreeDescription
-    ? truncateString(worktreeDescription, DESCRIPTION_MAX_LENGTH)
-    : null;
+  // Issue #3590: the header is one row. The memo is not drawn in it any more;
+  // its full text rides on the worktree name's tooltip (and Info, unchanged).
+  // The checked-out branch is drawn only when it says something the name does
+  // not — a worktree whose branch was switched away from the one it was
+  // created for. `(unknown)` is still never drawn. `*` and `?` keep their
+  // pre-#3590 condition and sit beside the name, so they show whether or not
+  // the branch itself is drawn.
+  const gitFacts = gitStatus && gitStatus.currentBranch !== '(unknown)' ? gitStatus : null;
+  const showGitBranch = gitFacts !== null && gitFacts.currentBranch !== worktreeName;
 
   // Issue #875: resolve each instance's status from the per-instance map so
   // alias instances (instanceId !== cliToolId) show their own status; fall back
@@ -1118,21 +1013,16 @@ export const DesktopHeader = memo(function DesktopHeader({
       ? UNCLASSIFIED_STATUS_DOT_CLASS
       : undefined;
 
-  // Issue #1787 acceptance 4: the detail header is the third surface
-  // that has to say "an agent here is done and wants work", alongside
-  // the sidebar row and the WorktreeCard. It was missed when #1787
-  // landed because this file sat outside that Issue's scope.
+  // Issue #1787 acceptance 4: the detail header is the surface that has
+  // to say "an agent here is done and wants work" alongside the sidebar
+  // row. It was missed when #1787 landed because this file sat outside
+  // that Issue's scope.
   //
   // ONE badge for the whole row, not one per pill, which is the same
   // granularity `BranchListItem` shows (`branch.awaitingInstruction` is
   // already the fold across every instance — see
-  // `deriveWorktreeWaitingDetail`). It is also the only granularity this
-  // row can afford: it is width-budgeted by MAX_HEADER_AGENT_PILLS, and
-  // a per-pill string would push working instances into the "+N"
-  // overflow to make room — the very trade-off #1783 refused when it
-  // put the model in the tooltip instead. Rendered AFTER the overflow
-  // trigger so it takes nothing from the pill budget, and nothing that
-  // was here before is removed.
+  // `deriveWorktreeWaitingDetail`). Issue #3593: drawn beside the current
+  // session, outside the fixed-width session field, on the same condition.
   //
   // Resolved per instance with the same per-instance → per-CLI fallback
   // the status dots use, so an alias instance is not read off a roster
@@ -1156,56 +1046,118 @@ export const DesktopHeader = memo(function DesktopHeader({
   const appUpdate = useAppUpdate();
   const appUpdateKey = `${appUpdate.updateInfo?.latestVersion ?? ''}:${appUpdate.hasUpdate}:${appUpdate.state}`;
 
-  // Issue #2481: everything, besides the pill budget itself, that changes how
-  // wide the row is. A change here may have made room, so the fit restarts
-  // from MAX_HEADER_AGENT_PILLS. The verification chip is a node and cannot be
-  // keyed; a chip that grows still folds a pill (the fit re-measures on every
-  // commit), a chip that shrinks gets the room back on the next resize.
+  // Issue #2481: everything that changes how wide the row is. A change here
+  // may have made room, so the fit starts over. Issue #3590: the verification
+  // chip, the one part that could not be keyed, moved to the second row.
+  // Issue #3593: the session field has a fixed width, so the sessions — their
+  // number, names and states — are not part of it; only whether there is one.
   const headerFitKey = [
     locale,
     worktreeName,
     repositoryName,
-    truncatedDescription ?? '',
-    gitStatus?.currentBranch ?? '',
-    gitStatus?.isDirty ? 'dirty' : '',
-    gitStatus?.statusUnknown ? 'status-unknown' : '',
+    showGitBranch ? (gitFacts?.currentBranch ?? '') : '',
+    gitFacts?.isDirty ? 'dirty' : '',
+    gitFacts?.statusUnknown ? 'status-unknown' : '',
     showKillButton ? 'end' : '',
     awaitingInstruction ? 'awaiting' : '',
     appUpdateKey,
-    ...headerItems.map(
-      (it) =>
-        `${it.item.id}:${getInstanceLabel(it.item)}:${it.status}:${it.isActive ? 'active' : ''}` +
-        // Issue #2775: an active "cannot tell" pill prints a different word.
-        (unclassifiedInstanceIds.has(it.item.id) ? ':unclassified' : '')
-    ),
+    headerItems.length > 0 ? 'sessions' : '',
   ].join('\n');
   const headerRef = useRef<HTMLDivElement>(null);
   const identityRef = useRef<HTMLDivElement>(null);
-  const headerFit = useDesktopHeaderFit(
-    headerRef,
-    identityRef,
-    headerFitKey,
-    headerItems.filter(isLabeledInstance).length,
-    verificationChip
-  );
+  // Issue #3591: the tools fold one at a time before the identity group clips.
+  const headerToolCount = onActivityToggle ? HEADER_TOOLS.length : 0;
+  const headerFit = useDesktopHeaderFit(headerRef, identityRef, headerFitKey, headerToolCount);
+
+  // Issue #1783 / #1784 / #2042 / #2054: what a session's tooltip says — the
+  // visible `{label}: {status}`, then the model (and effort, and the persona an
+  // opencode agent named), then cost / context, then what is reading the pane.
+  // Tooltip only, on purpose: the visible text never grows with them. `null`s
+  // leave the string byte-identical to the label alone.
+  const instanceTooltip = (inst: AgentInstance, fullLabel: string, statusWord: string): string => {
+    const label = getInstanceLabel(inst);
+    const instanceStatus = sessionStatusByInstance?.[inst.id];
+    const instanceSession = agentSessionByInstance?.[inst.id];
+    const instanceModel = formatAgentModelLabel(
+      instanceStatus?.model,
+      instanceStatus?.reasoningEffort,
+      instanceSession?.session?.agent
+    );
+    const baseLabel = instanceModel
+      ? tWorktree('detail.statusPillWithModel', { label, status: statusWord, model: instanceModel })
+      : fullLabel;
+    const instanceUsage = formatAgentSessionUsage(
+      instanceSession?.session,
+      instanceSession?.context,
+      tWorktree,
+      locale
+    );
+    const usageLabel = instanceUsage
+      ? tWorktree('detail.statusPillWithUsage', { base: baseLabel, usage: instanceUsage })
+      : baseLabel;
+    const sourceLabel = formatAgentSourceLabel(instanceStatus?.eventSource, tWorktree);
+    return sourceLabel
+      ? tWorktree('detail.statusPillWithSource', { base: usageLabel, source: sourceLabel })
+      : usageLabel;
+  };
+
+  // Issue #3593: the session field — the current session (the one the
+  // selected split shows; the worktree screen keeps `activeInstanceId` equal
+  // to it) and the others, waiting ones first.
+  const toEntry = (it: HeaderInstanceItem<AgentInstance>): HeaderSessionEntry => {
+    const inst = it.item;
+    const statusWord = instanceStatusWord(inst.id, it.status);
+    const fullLabel = tWorktree('detail.statusPill', { label: getInstanceLabel(inst), status: statusWord });
+    const splitIndex = splitInstanceIds ? splitInstanceIds.indexOf(inst.id) : -1;
+    return {
+      id: inst.id,
+      status: it.status,
+      fullLabel,
+      name: getInstanceLabel(inst),
+      statusWord,
+      tooltip: instanceTooltip(inst, fullLabel, statusWord),
+      dotClass: instanceDotClass(inst.id, it.status),
+      splitIndex: splitIndex === -1 ? null : splitIndex,
+      isActive: it.isActive,
+    };
+  };
+  const currentInstanceId = resolveCurrentInstanceId(instances ?? [], activeInstanceId);
+  const currentItem = headerItems.find((it) => it.item.id === currentInstanceId);
+  const currentEntry = currentItem ? toEntry(currentItem) : null;
+  const otherEntries = orderOtherInstances(headerItems, (inst) => inst.id === currentInstanceId).map(toEntry);
+
+  // Issue #3593: the list's "Add session…" opens the "+" (#3514), which is the
+  // row's last element: the slot's own button.
+  const agentRowRef = useRef<HTMLDivElement>(null);
+  const findAddButton = (): HTMLButtonElement | null => {
+    const host = agentRowRef.current?.lastElementChild ?? null;
+    if (!host) return null;
+    return host instanceof HTMLButtonElement ? host : host.querySelector('button');
+  };
+  const handleAddSession = () => {
+    findAddButton()?.click();
+  };
 
   return (
     <div
       ref={headerRef}
       data-testid="desktop-header"
-      className="flex items-center justify-between gap-3 px-4 py-3 bg-surface border-b border-border"
+      // Issue #3590: one row, 44px including the bottom border (`h-11` with
+      // border-box sizing). The controls on the right are at most 36px tall.
+      className="flex h-11 flex-shrink-0 items-center justify-between gap-3 px-4 bg-surface border-b border-border"
     >
       {/* Left: status and title (Issue #747: hamburger moved to ActivityBar;
           Issue #2647: the Home button and its divider were removed).
           Issue #2481: `min-w-0` makes this group — not the controls on the
-          right — the one that gives way on a narrow header: the name, branch
-          and chip title truncate. The dot keeps its width. Clipped only as the
-          fit's last resort, because the chip's reason popover hangs out of this
-          group and a clip would cut it. */}
+          right — the one that gives way on a narrow header: the name,
+          repository and branch truncate. The dot and the `*` / `?` marks keep
+          their width. Clipped only as the fit's last resort.
+          Issue #3590: one line — dot, name ▾ (`*` `?`), repository, and the
+          checked-out branch when it differs from the name. */}
       <div
         ref={identityRef}
         data-testid="desktop-header-identity"
-        className={`flex items-center gap-3 min-w-0${headerFit.squeezed ? ' overflow-x-clip' : ''}`}
+        className={`flex items-center gap-2 min-w-0${headerFit.squeezed ? ' overflow-x-clip' : ''}`}
       >
         {/* Worktree-level status (Issue #1078: unified StatusDot visual language) */}
         <StatusDot
@@ -1216,307 +1168,112 @@ export const DesktopHeader = memo(function DesktopHeader({
           className={statusUnclassified ? UNCLASSIFIED_STATUS_DOT_CLASS : undefined}
           data-unclassified={statusUnclassified ? 'true' : undefined}
         />
-        {/* Worktree name, memo, and repository. Issue #2481: gives way before
-            the verification chip on a narrow header (`shrink-4` against the
-            chip's 1), down to a floor that keeps the start of the name
-            readable. A whole-number factor on purpose — see the chip below. */}
-        <div className="flex flex-col min-w-[6rem] shrink-4">
-          <h1 className="text-lg font-semibold text-foreground truncate max-w-[200px] leading-tight">
-            {worktreeName}
-          </h1>
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <span className="truncate max-w-[200px]">
-              {repositoryName}
-            </span>
-            {gitStatus && gitStatus.currentBranch !== '(unknown)' && (
-              <>
-                <span className="text-muted-foreground">/</span>
-                <span
-                  className="truncate max-w-[150px] font-mono"
-                  title={gitStatus.currentBranch}
-                  data-testid="desktop-branch-name"
-                >
-                  {truncateString(gitStatus.currentBranch, DESKTOP_BRANCH_MAX_LENGTH)}
-                </span>
-                {gitStatus.isDirty && (
-                  <span className="text-warning" title={tWorktree('git.uncommittedChanges')}>*</span>
-                )}
-                {gitStatus.statusUnknown && (
-                  <span
-                    className="text-muted-foreground"
-                    title={tWorktree('git.statusUnknown')}
-                    data-testid="desktop-git-status-unknown"
-                  >
-                    ?
-                  </span>
-                )}
-              </>
-            )}
-            {truncatedDescription && (
-              <>
-                <span className="text-muted-foreground">—</span>
-                <span
-                  className="truncate max-w-[300px] text-muted-foreground"
-                  title={worktreeDescription}
-                >
-                  {truncatedDescription}
-                </span>
-              </>
-            )}
-          </div>
-        </div>
-        {/* Issue #1816: task contract / verification verdict, next to the branch
-            identity it belongs to. `min-w-0` so a long task title truncates
-            instead of pushing the right-hand controls off the header.
-            Issue #2481: the name column gives way before it, because the chip's
-            badges cannot truncate and, once it is down to them, the header has
-            to fold an agent pill. Two flexbox rules shape this. The 360px cap
-            is a `w-*` capped by `max-w-max` rather than a `max-w-*`, because an
-            item that hits its max-width is frozen there — a long task title
-            stayed 360px while the name truncated to nothing. And the name gets
-            the larger factor rather than the chip a fractional one, because
-            items whose factors sum below 1 absorb only that fraction of the
-            overflow: at `shrink-[0.25]` the chip, left alone to shrink once the
-            name hit its floor, stopped 70px short. Same width as before
-            whenever the row fits. */}
-        {verificationChip && (
-          <div className="min-w-0 w-[360px] max-w-max">{verificationChip}</div>
+        {/* Issue #3513: a breadcrumb — the branch is the heading, with a ▾
+            that opens the tab strip's branch list. Issue #2481: gives way
+            before the repository (`shrink-4` against its 1), down to a floor
+            that keeps the start of the name readable. Issue #3590: the memo
+            rides on the name's tooltip. */}
+        <h1
+          data-testid="desktop-worktree-name"
+          className="min-w-[6rem] max-w-[240px] shrink-4 truncate text-lg font-semibold leading-tight text-foreground"
+        >
+          <WorktreeBreadcrumbBranch
+            worktreeId={worktreeId}
+            worktreeName={worktreeName}
+            repositoryName={repositoryName}
+            description={worktreeDescription}
+          />
+        </h1>
+        {gitFacts?.isDirty && (
+          <span
+            className="flex-shrink-0 text-warning"
+            title={tWorktree('git.uncommittedChanges')}
+            data-testid="desktop-git-dirty"
+          >
+            *
+          </span>
+        )}
+        {gitFacts?.statusUnknown && (
+          <span
+            className="flex-shrink-0 text-muted-foreground"
+            title={tWorktree('git.statusUnknown')}
+            data-testid="desktop-git-status-unknown"
+          >
+            ?
+          </span>
+        )}
+        {/* Issue #3590: on the same line, right of the name; opens the
+            Repositories screen. Two repositories can each have a `develop`,
+            so it is always drawn. */}
+        <WorktreeBreadcrumbRepository repositoryName={repositoryName} />
+        {showGitBranch && gitFacts && (
+          <span
+            className="min-w-0 truncate max-w-[150px] font-mono text-xs text-muted-foreground"
+            title={gitFacts.currentBranch}
+            data-testid="desktop-branch-name"
+          >
+            {truncateString(gitFacts.currentBranch, DESKTOP_BRANCH_MAX_LENGTH)}
+          </span>
         )}
       </div>
 
       {/* Right: Per-agent status row + Status dropdown + Info button.
-          Issue #2481: never shrinks, so the controls always keep their width;
-          room is made by the fit folding agent pills instead. `max-w-full` only
+          Issue #2481: never shrinks, so the controls always keep their width.
+          Issue #3593: the agent row is fixed-width now, so a narrow header
+          truncates and then clips the identity group. `max-w-full` only
           matters on a header too narrow even for this group alone: it caps the
           group at the header's width and the agent row (`min-w-0`) yields. */}
       <div className="flex items-center gap-2 flex-shrink-0 max-w-full" data-testid="desktop-header-controls">
         {/* Issue #749/#869/#1078: Per-instance session status row (PC only).
             Distinct from the worktree-level StatusDot on the left: this row is
-            per-agent-instance and doubles as an instance-tab switcher. Issue #1078
-            unifies the status visual on <StatusDot> and collapses idle noise —
-            active/working instances stay labelled pills, idle/ready collapse to
-            icon-only dots (label via Tooltip), and pills beyond the budget fold
-            into a "+N" overflow menu so a working session never gets buried.
-            Issue #2481: the budget is what the header's width affords, capped
-            at MAX_HEADER_AGENT_PILLS (useDesktopHeaderFit).
+            per-agent-instance and doubles as an instance switcher.
+            Issue #3593: [current session][N others ▾][+] — the current one is
+            the session the selected split shows, the rest are in a list
+            (HeaderSessionSwitcher). Both have fixed widths, so the row no
+            longer folds pills to fit (#2481's fold is gone); the "awaiting
+            instruction" badge sits beside the current session.
             Rendered only when instances is provided (backward compat). */}
-        {instances && instances.length > 0 && (() => {
-          const classified = classifyHeaderInstances(headerItems, headerFit.pillBudget);
-          const overflow = classified.filter((c) => c.slot === 'overflow');
-          // Issue #1078: if any folded instance is actively working, surface the
-          // living glow on the "+N" trigger so a running session stays visible
-          // at a glance even when collapsed. Prefer running/generating (green
-          // glow) over waiting (amber blink); no working ones → no glow.
-          const overflowGlowStatus =
-            overflow.find((c) => c.status === 'running' || c.status === 'generating')?.status ??
-            overflow.find((c) => c.status === 'waiting')?.status ??
-            null;
+        {instances && instances.length > 0 && (
+          <div
+            ref={agentRowRef}
+            className={`flex items-center gap-2 min-w-0${headerFit.squeezed ? ' overflow-x-clip' : ''}`}
+            data-testid="desktop-agent-status-row"
+          >
+            {/*
+              Issue #1787: `awaitingInstruction` (the agent said its turn is
+              over) is a SECONDARY state deliberately styled `success` green,
+              so it can never be read as the amber "needs your answer" case
+              the StatusDots own. Same tokens, same wording and the same two
+              dictionary keys as the sidebar badge — two surfaces showing one
+              state must not look like two different states. Issue #3593: on
+              the left of the current session, outside the fixed-width field.
+            */}
+            {awaitingInstruction && (
+              <span
+                data-testid="desktop-awaiting-instruction-badge"
+                className="flex-shrink-0 rounded-full bg-success-subtle px-1.5 py-0.5 text-[10px] font-medium leading-4 text-success-foreground"
+                title={tWorktree('awaitingInstruction.label')}
+              >
+                {tWorktree('awaitingInstruction.badge')}
+              </span>
+            )}
 
-          return (
-            <div
-              className={`flex items-center gap-2 min-w-0${headerFit.squeezed ? ' overflow-x-clip' : ''}`}
-              data-testid="desktop-agent-status-row"
-            >
-              {classified.map((c) => {
-                if (c.slot === 'overflow') return null;
-                const inst = c.item;
-                const label = getInstanceLabel(inst);
-                const statusWord = instanceStatusWord(inst.id, c.status);
-                const dotClass = instanceDotClass(inst.id, c.status);
-                const fullLabel = tWorktree('detail.statusPill', {
-                  label,
-                  status: statusWord,
-                });
-                // Issue #1783: tooltip-only, on purpose. This row is
-                // width-budgeted — MAX_HEADER_AGENT_PILLS caps the labelled
-                // pills and the rest fold into "+N" — so adding a second
-                // visible string per pill would push working instances into the
-                // overflow menu to make room for text nobody is scanning for.
-                // The model rides on the existing hover/`title` affordance
-                // instead, and the visible pill text is unchanged. `null` (no
-                // hooks, no model) leaves the label byte-identical to pre-#1783.
-                // Issue #1784 appends "· <effort>" here too; the pill's visible
-                // text is still untouched, so the width budget above is unmoved.
-                const instanceStatus = sessionStatusByInstance?.[inst.id];
-                // Issue #2042: the same tooltip, with the persona in front of
-                // the model when the agent named one. Only opencode does, so
-                // every other pill's string is byte-identical to pre-#2042.
-                const instanceSession = agentSessionByInstance?.[inst.id];
-                const instanceModel = formatAgentModelLabel(
-                  instanceStatus?.model,
-                  instanceStatus?.reasoningEffort,
-                  instanceSession?.session?.agent
-                );
-                const baseLabel = instanceModel
-                  ? tWorktree('detail.statusPillWithModel', {
-                      label,
-                      status: statusWord,
-                      model: instanceModel,
-                    })
-                  : fullLabel;
-                // Issue #2042: cost / context ride on the tooltip for the reason
-                // #1783 put the model there — the visible pill text is still
-                // untouched, so MAX_HEADER_AGENT_PILLS's width budget is unmoved.
-                const instanceUsage = formatAgentSessionUsage(
-                  instanceSession?.session,
-                  instanceSession?.context,
-                  tWorktree,
-                  locale
-                );
-                const usageLabel = instanceUsage
-                  ? tWorktree('detail.statusPillWithUsage', {
-                      base: baseLabel,
-                      usage: instanceUsage,
-                    })
-                  : baseLabel;
-                // Issue #2054: what is reading this pane, appended to the same
-                // hover/`title` affordance #1783 chose over row width — and for
-                // the same reason: MAX_HEADER_AGENT_PILLS's budget is unmoved,
-                // so nothing is pushed into the "+N" overflow to make room. Null
-                // for every tool whose source cannot be degraded, which leaves
-                // the claude / codex pill strings byte-identical to pre-#2054
-                // (`DesktopHeader-source-2054.test.tsx` pins that).
-                const sourceLabel = formatAgentSourceLabel(
-                  instanceStatus?.eventSource,
-                  tWorktree
-                );
-                const labelWithModel = sourceLabel
-                  ? tWorktree('detail.statusPillWithSource', {
-                      base: usageLabel,
-                      source: sourceLabel,
-                    })
-                  : usageLabel;
-                const isActive = c.isActive;
-                // Issue #786: drag source. click and drag are mutually exclusive
-                // in HTML; a plain click (no drag) still fires onClick exactly
-                // once (S3-002 regression-guarded). Preserved on both pill and dot.
-                const dragProps = {
-                  draggable: true,
-                  onDragStart: (e: React.DragEvent<HTMLButtonElement>) => handleAgentDragStart(e, inst.id),
-                  onDragEnd: handleAgentDragEnd,
-                } as const;
-                const dragActive = draggingInstanceId === inst.id ? ' opacity-50 cursor-grabbing' : '';
+            <HeaderSessionSwitcher
+              current={currentEntry}
+              others={otherEntries}
+              onSelect={onActiveInstanceChange}
+              onDragStart={handleAgentDragStart}
+              onDragEnd={handleAgentDragEnd}
+              draggingInstanceId={draggingInstanceId}
+              onAddSession={agentAddControl ? handleAddSession : undefined}
+              // The "+" (AgentAddMenu) is off on the same condition.
+              canAddSession={(instances?.length ?? 0) < MAX_AGENT_INSTANCES}
+            />
 
-                if (c.slot === 'pill') {
-                  return (
-                    /* Issue #1061: draggable instance-tab switcher (aria-pressed) with typed drag handlers — 残置 */
-                    <button
-                      key={inst.id}
-                      type="button"
-                      data-testid={`desktop-agent-status-${inst.id}`}
-                      onClick={() => onActiveInstanceChange?.(inst.id)}
-                      {...dragProps}
-                      aria-label={labelWithModel}
-                      // Issue #1783: native tooltip so the model is reachable
-                      // without spending row width. Same string as the
-                      // accessible name, so hover and screen reader agree.
-                      title={labelWithModel}
-                      aria-pressed={isActive}
-                      className={`flex items-center gap-1.5 px-2 py-1 rounded text-xs transition-colors ${
-                        isActive
-                          ? 'bg-accent-100 dark:bg-accent-900/30 text-accent-900 dark:text-accent-100'
-                          : 'hover:bg-muted text-foreground'
-                      }${dragActive}`}
-                    >
-                      {/* Issue #1078: unified StatusDot (decorative; the button carries the label) */}
-                      <StatusDot status={c.status} size="sm" aria-hidden title={undefined} className={dotClass} />
-                      <span className="whitespace-nowrap">{fullLabel}</span>
-                    </button>
-                  );
-                }
-
-                // Idle/ready → icon-only 24px circular button; full label via Tooltip.
-                return (
-                  /* Issue #1783: the idle/ready variant already had a tooltip;
-                     it now carries the model too when one is known. */
-                  <Tooltip key={inst.id} content={labelWithModel} placement="bottom">
-                    {/* Issue #1061: draggable instance-tab switcher (aria-pressed) — 残置 */}
-                    <button
-                      type="button"
-                      data-testid={`desktop-agent-status-${inst.id}`}
-                      onClick={() => onActiveInstanceChange?.(inst.id)}
-                      {...dragProps}
-                      // No `title` here: the <Tooltip> above already renders
-                      // this string, and a native tooltip would stack on it.
-                      aria-label={labelWithModel}
-                      aria-pressed={isActive}
-                      className={`flex items-center justify-center w-6 h-6 rounded-full transition-colors ${
-                        isActive
-                          ? 'bg-accent-100 dark:bg-accent-900/30'
-                          : 'hover:bg-muted'
-                      }${dragActive}`}
-                    >
-                      <StatusDot status={c.status} size="sm" aria-hidden title={undefined} className={dotClass} />
-                    </button>
-                  </Tooltip>
-                );
-              })}
-
-              {/* Issue #1078: width-overflow menu for surplus labelled pills. */}
-              {overflow.length > 0 && (
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    {/* Issue #1061: DropdownMenuTrigger asChild requires ref forwarding; Button forwards no ref — 残置 */}
-                    <button
-                      type="button"
-                      data-testid="desktop-agent-status-overflow"
-                      aria-label={tWorktree('agentStatus.moreAgents', { count: overflow.length })}
-                      className="flex items-center gap-1 px-2 py-1 rounded text-xs tabular-nums text-muted-foreground hover:bg-muted transition-colors"
-                    >
-                      {overflowGlowStatus && (
-                        <StatusDot status={overflowGlowStatus} size="sm" aria-hidden title={undefined} />
-                      )}
-                      +{overflow.length}
-                    </button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    {overflow.map((c) => {
-                      const inst = c.item;
-                      const fullLabel = tWorktree('detail.statusPill', {
-                        label: getInstanceLabel(inst),
-                        status: instanceStatusWord(inst.id, c.status),
-                      });
-                      return (
-                        <DropdownMenuItem
-                          key={inst.id}
-                          data-testid={`desktop-agent-overflow-${inst.id}`}
-                          onSelect={() => onActiveInstanceChange?.(inst.id)}
-                        >
-                          <StatusDot
-                            status={c.status}
-                            size="sm"
-                            aria-hidden
-                            title={undefined}
-                            className={instanceDotClass(inst.id, c.status)}
-                          />
-                          <span className="whitespace-nowrap">{fullLabel}</span>
-                        </DropdownMenuItem>
-                      );
-                    })}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              )}
-
-              {/*
-                Issue #1787: `awaitingInstruction` (the agent said its turn is
-                over) is a SECONDARY state deliberately styled `success` green,
-                so it can never be read as the amber "needs your answer" case
-                the StatusDots above own. Same tokens, same wording and the same
-                two dictionary keys as the sidebar badge — two surfaces showing
-                one state must not look like two different states.
-              */}
-              {awaitingInstruction && (
-                <span
-                  data-testid="desktop-awaiting-instruction-badge"
-                  className="flex-shrink-0 rounded-full bg-success-subtle px-1.5 py-0.5 text-[10px] font-medium leading-4 text-success-foreground"
-                  title={tWorktree('awaitingInstruction.label')}
-                >
-                  {tWorktree('awaitingInstruction.badge')}
-                </span>
-              )}
-            </div>
-          );
-        })()}
+            {/* Issue #3514: add an agent — the right end of the agent row. */}
+            {agentAddControl}
+          </div>
+        )}
         {/* Issue #784: Session kill button (PC only). Restored after the
             #728 (split-ification) + #755 (Desktop/Mobile split) regression that
             left the kill confirmation modal unreachable on PC. Mirrors the
@@ -1536,35 +1293,15 @@ export const DesktopHeader = memo(function DesktopHeader({
             {tCommon('end')}
           </Button>
         )}
-        {/* Worktree status dropdown */}
-        {onWorktreeStatusChange && (
-          <select
-            value={worktreeStatus ?? ''}
-            onChange={(e) => {
-              const val = e.target.value;
-              onWorktreeStatusChange(val === '' ? null : val as 'ready' | 'in_progress' | 'in_review' | 'done');
-            }}
-            onClick={(e) => e.stopPropagation()}
-            className="flex-shrink-0 text-xs px-2 py-1.5 rounded-lg border border-input bg-surface text-foreground focus:ring-2 focus:ring-ring focus:border-transparent cursor-pointer"
-            data-testid="desktop-status-dropdown"
-            aria-label={tWorktree('detail.worktreeStatusLabel')}
-          >
-            {WORKTREE_STATUS_OPTIONS.map((opt) => (
-              <option key={opt.labelKey} value={opt.value ?? ''}>
-                {tWorktree(opt.labelKey)}
-              </option>
-            ))}
-          </select>
-        )}
+        {/* Issue #3594: the worktree status select left the header; it is set
+            from the branch row's "…" → Status (and the Info field). */}
         {/* Issue #2654: app update entry point. Lives in the controls group,
             which never shrinks (#2481), so it is never clipped; a narrow
-            header folds agent pills instead. */}
+            header clips the identity group instead. */}
         <AppUpdateButton />
-        {/* Issue #917: PC display-size selector. The global Header (where it
-            also lives) is suppressed on /worktrees/[id] (useLayoutConfig
-            showGlobalNav:false), so it is surfaced here too. PC only — the
-            selector returns null on mobile. */}
-        <PcDisplaySizeSelector />
+        {/* Issue #3513: the PC display-size selector (#917) is no longer here.
+            It moved to the settings menu at the foot of the sidebar and the
+            icon rail (#3510 / #3512), the same as it left the global Header. */}
       <Button
         variant="ghost"
         type="button"
@@ -1596,6 +1333,17 @@ export const DesktopHeader = memo(function DesktopHeader({
           />
         )}
       </Button>
+        {/* Issue #3591: the worktree's tools — what the vertical activity
+            bar held — at the right end, under which their pane opens. The
+            controls group never shrinks; on a narrow header the fit folds the
+            trailing tools behind "…" instead. */}
+        {onActivityToggle && (
+          <HeaderToolBar
+            active={activeActivity}
+            onToggle={onActivityToggle}
+            foldedCount={headerFit.foldedTools}
+          />
+        )}
       </div>
     </div>
   );

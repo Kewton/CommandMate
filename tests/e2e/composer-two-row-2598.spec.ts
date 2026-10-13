@@ -511,9 +511,9 @@ test.describe('[#2598] the height handle', () => {
     const stored = await textareaHeight(page, 0);
     const key = composerHeightKey(E2E_COMPOSER_WORKTREE, SPLIT_0);
 
-    const add = page.getByTestId('add-terminal-split');
+    // Issue #3514: the "+ / -" stepper became layout icons (1-4).
     for (let n = 2; n <= 4; n += 1) {
-      await add.click();
+      await page.getByTestId(`split-layout-${n}`).click();
       await expect(page.locator('[data-testid^="terminal-split-pane-"]')).toHaveCount(n);
     }
     // The grid halves the pane: the textarea is bounded, the body keeps its
@@ -529,9 +529,8 @@ test.describe('[#2598] the height handle', () => {
     // Only the drawing was bounded.
     expect(await page.evaluate(k => localStorage.getItem(k), key)).toBe(String(stored));
 
-    const remove = page.getByTestId('remove-terminal-split');
     for (let n = 3; n >= 1; n -= 1) {
-      await remove.click();
+      await page.getByTestId(`split-layout-${n}`).click();
       await expect(page.locator('[data-testid^="terminal-split-pane-"]')).toHaveCount(n);
     }
     await expect.poll(() => textareaHeight(page, 0)).toBe(stored);

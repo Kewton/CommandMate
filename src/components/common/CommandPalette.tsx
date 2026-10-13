@@ -11,8 +11,8 @@
  *     sort first; the group is omitted while the cache reports an error.
  *   - Delegate (Issue #2376): typed as `/delegate`, lists every worktree x agent
  *     instance and inserts a delegation brief into the composer on screen.
- *   - Actions: theme toggle, PC display-size switching, repository sync,
- *     language switch, open GitHub.
+ *   - Actions: New task (Issue #3512), theme toggle, PC display-size switching,
+ *     repository sync, language switch, open GitHub.
  *
  * The single global keyboard listener lives here so it does not conflict with
  * existing per-view shortcuts. It never opens while the user is typing in an
@@ -48,11 +48,13 @@ import {
   Github,
   Keyboard,
   Send,
+  SquarePen,
 } from 'lucide-react';
 import { cn } from '@/lib/utils/cn';
 import { Z_INDEX } from '@/config/z-index';
 import { useCommandPalette } from '@/contexts/CommandPaletteContext';
 import { useKeyboardShortcuts } from '@/contexts/KeyboardShortcutsContext';
+import { useNewTask } from '@/contexts/NewTaskContext';
 import { usePcDisplaySizeContext } from '@/contexts/PcDisplaySizeContext';
 import { useOptionalWorktreesCacheContext } from '@/components/providers/WorktreesCacheProvider';
 import { PC_DISPLAY_SIZE_ORDER } from '@/hooks/usePcDisplaySize';
@@ -66,6 +68,7 @@ import {
 } from '@/components/sidebar/BranchStatusIndicator';
 import { isUnclassifiedCliStatus } from '@/types/sidebar';
 import { Kbd } from '@/components/ui/Kbd';
+import { isAnyModalOpen } from '@/lib/new-task/modal-open';
 import { useToast } from '@/components/common/Toast';
 import { buildDelegationBrief } from '@/lib/cli/command-reference';
 import { getCliToolDisplayName, type AgentInstance } from '@/lib/cli-tools/types';
@@ -76,7 +79,7 @@ import type { Worktree } from '@/types/models';
 /**
  * Navigation targets shown in the palette.
  *
- * Mirrors Header / GlobalMobileNav except for Skills, which is reachable from
+ * Mirrors the sidebar / GlobalMobileNav except for Skills, which is reachable from
  * More and this palette only: #1232 kept it out of the primary nav rather than
  * spend one of the few top-level slots on it.
  */
@@ -522,6 +525,7 @@ interface RecentRow {
 export function CommandPalette() {
   const { open, setOpen } = useCommandPalette();
   const { setOpen: setShortcutsOpen } = useKeyboardShortcuts();
+  const { openNewTask } = useNewTask();
   const router = useViewTransitionRouter();
   // Issue #2376: which worktree the browser is on, so "delegate to myself" can
   // be recognised. Half the test; the other half is the visible chat surface.
@@ -573,6 +577,10 @@ export function CommandPalette() {
         }
         // When closed, do not steal the keystroke from a text-entry context.
         if (isTypingTarget(event.target)) return;
+        // Nor over another modal or an open menu (Issue #3585): two focus
+        // traps would fight. Only the opening side is gated; closing is never
+        // suppressed by the modal check, so this sits after the open branch.
+        if (isAnyModalOpen()) return;
         event.preventDefault();
         setOpen(true);
         return;
@@ -680,6 +688,17 @@ export function CommandPalette() {
 
   // Actions available in the current context (mobile hides display-size).
   const actions: ActionDescriptor[] = [
+    {
+      // Issue #3512: the same dialog as the sidebar / rail button and
+      // Mod+Shift+O. Deferred to a microtask: `runCommand` closes the palette
+      // first, and the palette's close effect hands focus back to the element
+      // it was opened from. Opening after that lets the dialog take focus and
+      // record that element as the one to return to.
+      id: 'newTask',
+      label: t('actions.newTask'),
+      icon: SquarePen,
+      run: () => queueMicrotask(() => openNewTask()),
+    },
     {
       id: 'theme',
       label: isDark ? t('actions.toLight') : t('actions.toDark'),

@@ -28,6 +28,20 @@ import {
 import { MIN_GRID_ROW_PX } from '@/config/terminal-split-config';
 
 /**
+ * Issue #3514: the Action bar's "+ / -" stepper became layout icons (1-4). One
+ * more / one fewer split is the icon for the current count +/- 1.
+ */
+function clickAddSplit(): void {
+  const n = screen.queryAllByTestId(/^split-wrapper-\d+$/).length;
+  fireEvent.click(screen.getByTestId(`split-layout-${n + 1}`));
+}
+
+function clickRemoveSplit(): void {
+  const n = screen.queryAllByTestId(/^split-wrapper-\d+$/).length;
+  fireEvent.click(screen.getByTestId(`split-layout-${Math.max(1, n - 1)}`));
+}
+
+/**
  * Issue #869: the container is now driven by an agent-instance roster. The
  * default roster mirrors the pre-#869 selectable CLI tools: one PRIMARY instance
  * per CLI tool (id === cliTool), so split availability math (own + not-taken) is
@@ -120,13 +134,18 @@ describe('TerminalSplitContainer', () => {
   it('starts with one split and disabled remove button', () => {
     setup();
     expect(screen.getByTestId('pane-cli-0')).toHaveTextContent('claude');
-    expect(screen.getByTestId('add-terminal-split')).not.toBeDisabled();
-    expect(screen.getByTestId('remove-terminal-split')).toBeDisabled();
+    // Issue #3514: the stepper became layout icons. "Can add" = the 2-split
+    // icon is live; "remove disabled" = the 1-split icon is the pressed one
+    // (there is no layout below it).
+    expect(screen.getByTestId('split-layout-2')).not.toBeDisabled();
+    expect(screen.getByTestId('split-layout-1')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.queryByTestId('add-terminal-split')).toBeNull();
+    expect(screen.queryByTestId('remove-terminal-split')).toBeNull();
   });
 
   it('add → 2 splits → renders 2 panes and 1 resizer', () => {
     setup();
-    fireEvent.click(screen.getByTestId('add-terminal-split'));
+    clickAddSplit();
     expect(screen.getByTestId('pane-cli-0')).toBeInTheDocument();
     expect(screen.getByTestId('pane-cli-1')).toBeInTheDocument();
     expect(screen.getByTestId('split-resizer-0')).toBeInTheDocument();
@@ -136,22 +155,26 @@ describe('TerminalSplitContainer', () => {
   // Issue #2421: the ceiling moved 3 -> 4, so the 3rd add is no longer the last.
   it('disables add at MAX_SPLITS=4 and disables remove at MIN=1', () => {
     setup();
-    fireEvent.click(screen.getByTestId('add-terminal-split'));
-    fireEvent.click(screen.getByTestId('add-terminal-split'));
-    expect(screen.getByTestId('add-terminal-split')).not.toBeDisabled();
-    fireEvent.click(screen.getByTestId('add-terminal-split'));
-    expect(screen.getByTestId('add-terminal-split')).toBeDisabled();
-    expect(screen.getByTestId('remove-terminal-split')).not.toBeDisabled();
+    clickAddSplit();
+    clickAddSplit();
+    expect(screen.getByTestId('split-layout-4')).not.toBeDisabled();
+    clickAddSplit();
+    // Issue #3514: at MAX the 4-split icon is pressed and there is no icon
+    // above it to add with.
+    expect(screen.getByTestId('split-layout-4')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.queryByTestId('split-layout-5')).toBeNull();
+    expect(screen.getAllByTestId(/^split-wrapper-\d+$/)).toHaveLength(4);
 
-    fireEvent.click(screen.getByTestId('remove-terminal-split'));
-    fireEvent.click(screen.getByTestId('remove-terminal-split'));
-    fireEvent.click(screen.getByTestId('remove-terminal-split'));
-    expect(screen.getByTestId('remove-terminal-split')).toBeDisabled();
+    clickRemoveSplit();
+    clickRemoveSplit();
+    clickRemoveSplit();
+    expect(screen.getByTestId('split-layout-1')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getAllByTestId(/^split-wrapper-\d+$/)).toHaveLength(1);
   });
 
   it('availableInstances excludes instances used by other splits', () => {
     setup();
-    fireEvent.click(screen.getByTestId('add-terminal-split'));
+    clickAddSplit();
     // split 0 has 'claude', split 1 auto-picked a different instance; both panes
     // should show ROSTER.length - 1 available instances (own + not-taken).
     const expectedAvailable = String(ROSTER.length - 1);
@@ -161,7 +184,7 @@ describe('TerminalSplitContainer', () => {
 
   it('focuses the newly-added pane textarea after addSplit', async () => {
     setup();
-    fireEvent.click(screen.getByTestId('add-terminal-split'));
+    clickAddSplit();
     // jsdom: focus is sync inside effect
     const ta = screen.getByTestId('pane-textarea-1') as HTMLTextAreaElement;
     expect(document.activeElement).toBe(ta);
@@ -182,7 +205,7 @@ describe('TerminalSplitContainer', () => {
         onFocusedSplitChange={cb}
       />,
     );
-    fireEvent.click(screen.getByTestId('add-terminal-split'));
+    clickAddSplit();
     cb.mockClear();
     fireEvent.focus(screen.getByTestId('ta-0'));
     expect(cb).toHaveBeenCalledWith(0);
@@ -196,7 +219,7 @@ describe('TerminalSplitContainer', () => {
       { id: 'claude-2', cliTool: 'claude', alias: 'Review', order: 1 },
     ];
     setup(undefined, dualClaude);
-    fireEvent.click(screen.getByTestId('add-terminal-split'));
+    clickAddSplit();
     // Two splits, each backed by a distinct claude instance (same cliTool).
     expect(screen.getByTestId('pane-cli-0')).toHaveTextContent('claude');
     expect(screen.getByTestId('pane-cli-1')).toHaveTextContent('claude');
@@ -232,22 +255,28 @@ describe('TerminalSplitContainer History/Files toggles (Issue #841)', () => {
 
   it('keeps the toggles visible at MAX splits (split-count independent)', () => {
     setup();
-    fireEvent.click(screen.getByTestId('add-terminal-split'));
-    fireEvent.click(screen.getByTestId('add-terminal-split'));
-    fireEvent.click(screen.getByTestId('add-terminal-split')); // Issue #2421: MAX is 4
-    expect(screen.getByTestId('add-terminal-split')).toBeDisabled(); // at MAX
+    clickAddSplit();
+    clickAddSplit();
+    clickAddSplit(); // Issue #2421: MAX is 4
+    expect(screen.getByTestId('split-layout-4')).toHaveAttribute('aria-pressed', 'true'); // at MAX
     expect(screen.getByTestId('toggle-history-pane')).toBeInTheDocument();
     expect(screen.getByTestId('toggle-file-panel')).toBeInTheDocument();
   });
 
-  it('History toggle defaults to pressed (visible) and flips on click', () => {
+  it('History toggle defaults to unpressed (hidden, Issue #3589) and flips on click', () => {
     setup();
     const btn = screen.getByTestId('toggle-history-pane');
-    expect(btn).toHaveAttribute('aria-pressed', 'true');
-    fireEvent.click(btn);
     expect(btn).toHaveAttribute('aria-pressed', 'false');
     fireEvent.click(btn);
     expect(btn).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(btn);
+    expect(btn).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('History toggle honours a stored visible=true (Issue #3589)', () => {
+    window.localStorage.setItem(HISTORY_KEY, 'true');
+    setup();
+    expect(screen.getByTestId('toggle-history-pane')).toHaveAttribute('aria-pressed', 'true');
   });
 
   it('Files toggle defaults to pressed (visible) and flips on click', () => {
@@ -262,6 +291,9 @@ describe('TerminalSplitContainer History/Files toggles (Issue #841)', () => {
   });
 
   it('History toggle persists visibility to localStorage', () => {
+    // Issue #3589: the worktree screen's History starts hidden; this test is
+    // about the visible → hidden direction, so it starts from a stored choice.
+    window.localStorage.setItem('commandmate.worktree.historyVisible', 'true');
     setup();
     fireEvent.click(screen.getByTestId('toggle-history-pane'));
     expect(window.localStorage.getItem(HISTORY_KEY)).toBe('false');
@@ -276,6 +308,9 @@ describe('TerminalSplitContainer History/Files toggles (Issue #841)', () => {
 
   it('aria-label / Tooltip reflect show vs hide depending on state', () => {
     vi.useFakeTimers();
+    // Issue #3589: the worktree screen's History starts hidden; this test is
+    // about the visible → hidden direction, so it starts from a stored choice.
+    window.localStorage.setItem('commandmate.worktree.historyVisible', 'true');
     setupWithOpenFiles({ tabCount: 1, hasDiff: false });
     const history = screen.getByTestId('toggle-history-pane');
     // default visible → "hide" wording
@@ -298,6 +333,9 @@ describe('TerminalSplitContainer History/Files toggles (Issue #841)', () => {
   });
 
   it('applies accent accent when active and gray when inactive', () => {
+    // Issue #3589: the worktree screen's History starts hidden; this test is
+    // about the visible → hidden direction, so it starts from a stored choice.
+    window.localStorage.setItem('commandmate.worktree.historyVisible', 'true');
     setup();
     const history = screen.getByTestId('toggle-history-pane');
     // active (visible) → accent accent classes
@@ -310,12 +348,13 @@ describe('TerminalSplitContainer History/Files toggles (Issue #841)', () => {
 
   it('does not affect the existing +Split / -Split controls', () => {
     setup();
-    // +Split still adds; -Split still disabled at MIN=1
-    expect(screen.getByTestId('add-terminal-split')).not.toBeDisabled();
-    expect(screen.getByTestId('remove-terminal-split')).toBeDisabled();
-    fireEvent.click(screen.getByTestId('add-terminal-split'));
+    // Issue #3514: the layout icons still add (2) and sit at MIN=1 (1 pressed)
+    expect(screen.getByTestId('split-layout-2')).not.toBeDisabled();
+    expect(screen.getByTestId('split-layout-1')).toHaveAttribute('aria-pressed', 'true');
+    clickAddSplit();
     expect(screen.getByTestId('pane-cli-1')).toBeInTheDocument();
-    expect(screen.getByTestId('remove-terminal-split')).not.toBeDisabled();
+    expect(screen.getByTestId('split-layout-1')).not.toBeDisabled();
+    expect(screen.getByTestId('split-layout-2')).toHaveAttribute('aria-pressed', 'true');
   });
 });
 
@@ -351,11 +390,17 @@ describe('TerminalSplitContainer equalize widths (Issue #861)', () => {
   });
 
   it('is enabled at 1 split while History is visible', () => {
+    // Issue #3589: the worktree screen's History starts hidden; this test is
+    // about the visible → hidden direction, so it starts from a stored choice.
+    window.localStorage.setItem('commandmate.worktree.historyVisible', 'true');
     setup();
     expect(screen.getByTestId('equalize-split-widths')).not.toBeDisabled();
   });
 
   it('is disabled at 1 split when History is hidden (nothing to equalize)', () => {
+    // Issue #3589: the worktree screen's History starts hidden; this test is
+    // about the visible → hidden direction, so it starts from a stored choice.
+    window.localStorage.setItem('commandmate.worktree.historyVisible', 'true');
     setup();
     fireEvent.click(screen.getByTestId('toggle-history-pane')); // hide History
     expect(screen.getByTestId('equalize-split-widths')).toBeDisabled();
@@ -364,14 +409,14 @@ describe('TerminalSplitContainer equalize widths (Issue #861)', () => {
   it('is enabled with >1 split even when History is hidden', () => {
     setup();
     fireEvent.click(screen.getByTestId('toggle-history-pane')); // hide History
-    fireEvent.click(screen.getByTestId('add-terminal-split')); // -> 2 splits
+    clickAddSplit(); // -> 2 splits
     expect(screen.getByTestId('equalize-split-widths')).not.toBeDisabled();
   });
 
   it('equalizes split widths on click (3 splits → each flex-grow ~1/3)', () => {
     setup();
-    fireEvent.click(screen.getByTestId('add-terminal-split')); // -> 2
-    fireEvent.click(screen.getByTestId('add-terminal-split')); // -> 3 ([0.5,0.25,0.25])
+    clickAddSplit(); // -> 2
+    clickAddSplit(); // -> 3 ([0.5,0.25,0.25])
     // Pre-condition: widths are NOT all equal.
     const before = splitFlexGrows(3);
     expect(before[0]).not.toBeCloseTo(before[1]);
@@ -383,6 +428,9 @@ describe('TerminalSplitContainer equalize widths (Issue #861)', () => {
   });
 
   it('resets the History width to default (40) on click', () => {
+    // Issue #3589: the worktree screen's History starts hidden; this test is
+    // about the visible → hidden direction, so it starts from a stored choice.
+    window.localStorage.setItem('commandmate.worktree.historyVisible', 'true');
     window.localStorage.setItem(HISTORY_WIDTH_KEY, '25');
     setup();
     fireEvent.click(screen.getByTestId('equalize-split-widths'));
@@ -402,8 +450,8 @@ describe('TerminalSplitContainer equalize widths (Issue #861)', () => {
   it('double-clicking a terminal resizer equalizes widths but leaves History width', () => {
     window.localStorage.setItem(HISTORY_WIDTH_KEY, '25');
     setup();
-    fireEvent.click(screen.getByTestId('add-terminal-split')); // -> 2
-    fireEvent.click(screen.getByTestId('add-terminal-split')); // -> 3
+    clickAddSplit(); // -> 2
+    clickAddSplit(); // -> 3
 
     const separator = screen
       .getByTestId('split-resizer-0')
@@ -493,7 +541,7 @@ describe('TerminalSplitContainer drop validation (Issue #786 / #869)', () => {
     setupDrop({ showToast, onActiveInstanceChange });
 
     // Grow to 2 splits: split 0 = claude, split 1 = (auto-picked, e.g. codex).
-    fireEvent.click(screen.getByTestId('add-terminal-split'));
+    clickAddSplit();
     showToast.mockClear();
     onActiveInstanceChange.mockClear();
 
@@ -559,9 +607,10 @@ describe('TerminalSplitContainer drop validation (Issue #786 / #869)', () => {
 describe('TerminalSplitContainer action-bar layout (Issue #977)', () => {
   it('renders the action buttons in DOM order +Split → -Split → Equal widths → History → Files', () => {
     setup();
+    // Issue #3514: the layout icons took the +Split / -Split slot.
     const order = [
-      'add-terminal-split',
-      'remove-terminal-split',
+      'split-layout-1',
+      'split-layout-4',
       'equalize-split-widths',
       'toggle-history-pane',
       'toggle-file-panel',
@@ -579,7 +628,8 @@ describe('TerminalSplitContainer action-bar layout (Issue #977)', () => {
 
   it('does not push +Split to the right with ml-auto (left-aligned bar)', () => {
     setup();
-    expect(screen.getByTestId('add-terminal-split').className).not.toContain(
+    // Issue #3514: the layout picker took +Split's place at the left.
+    expect(screen.getByTestId('split-layout-picker').className).not.toContain(
       'ml-auto',
     );
   });
@@ -677,7 +727,7 @@ describe('TerminalSplitContainer header→split wiring (Issue #1152)', () => {
   it('collision policy: selecting an instance already shown in another split focus-moves, no reassignment (S1-002)', () => {
     const { onFocusedSplitChange } = setupHeaderWiring();
     // Grow to 2 splits: [claude, claude-2].
-    fireEvent.click(screen.getByTestId('add-terminal-split'));
+    clickAddSplit();
     expect(screen.getByTestId('pane-inst-0').textContent).toBe('claude');
     expect(screen.getByTestId('pane-inst-1').textContent).toBe('claude-2');
 
@@ -772,6 +822,8 @@ describe('TerminalSplitContainer panel toggle availability (Issue #2259)', () =>
 
     it('[#2446] stays enabled when every split shows chat', () => {
       vi.useFakeTimers();
+      // Issue #3589: start from a stored visible History (the default is hidden).
+      window.localStorage.setItem('commandmate.worktree.historyVisible', 'true');
       setSurface(0, 'chat');
       setup();
       const btn = screen.getByTestId('toggle-history-pane');
@@ -788,6 +840,8 @@ describe('TerminalSplitContainer panel toggle availability (Issue #2259)', () =>
     });
 
     it('[#2446] toggles the shared state while every split shows chat', () => {
+      // Issue #3589: start from a stored visible History (the default is hidden).
+      window.localStorage.setItem('commandmate.worktree.historyVisible', 'true');
       setSurface(0, 'chat');
       setup();
       fireEvent.click(screen.getByTestId('toggle-history-pane'));
@@ -808,7 +862,7 @@ describe('TerminalSplitContainer panel toggle availability (Issue #2259)', () =>
         'aria-controls',
         'split-history-slot-0',
       );
-      fireEvent.click(screen.getByTestId('add-terminal-split'));
+      clickAddSplit();
       expect(screen.getByTestId('toggle-history-pane')).toHaveAttribute(
         'aria-controls',
         'split-history-slot-0 split-history-slot-1',
@@ -816,6 +870,8 @@ describe('TerminalSplitContainer panel toggle availability (Issue #2259)', () =>
     });
 
     it('reports its expanded state, not just its pressed state', () => {
+      // Issue #3589: start from a stored visible History (the default is hidden).
+      window.localStorage.setItem('commandmate.worktree.historyVisible', 'true');
       setup();
       const btn = screen.getByTestId('toggle-history-pane');
       expect(btn).toHaveAttribute('aria-expanded', 'true');
@@ -895,7 +951,7 @@ describe('[#2421] TerminalSplitContainer 2x2 grid', () => {
 
   function addSplits(n: number): void {
     for (let i = 0; i < n; i++) {
-      fireEvent.click(screen.getByTestId('add-terminal-split'));
+      clickAddSplit();
     }
   }
 

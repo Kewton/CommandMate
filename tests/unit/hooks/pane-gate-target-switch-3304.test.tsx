@@ -72,6 +72,7 @@ vi.mock('@/hooks/useRealtimeConnection', () => ({
 }));
 
 import { AgentModeControl } from '@/components/worktree/AgentModeControl';
+import { NAV_KEY_REFRESH_DELAY_MS } from '@/config/ui-feedback-config';
 import { useTerminalPanePolling } from '@/hooks/useTerminalPanePolling';
 import { useWorktreeDetailController } from '@/hooks/useWorktreeDetailController';
 import type { CLIToolType } from '@/lib/cli-tools/types';
@@ -350,8 +351,25 @@ beforeEach(() => {
   installServer();
 });
 
-afterEach(() => {
+/**
+ * 1 本のテストの後始末（Issue #3641）。
+ *
+ * キーを送ると、`useSpecialKeys` は送信の `NAV_KEY_REFRESH_DELAY_MS` 後に `onKeysSent`
+ * （取り直し）を呼ぶ timer を置く。この timer は unmount では消えない（呼ぶのは親の取り直し
+ * で、親はふつう生きている）。待たずに次のテストへ進むと、unmount 済みの画面の取り直しが
+ * 次のテストの `server` に届き、「何も取りにいかない」を見るテストに 1 件が混ざる。
+ * だからキーを送ったテストは、ここで期限まで待ち、このテストの `server` で受けてから終える。
+ * 後から置いた同じ長さの timer は先の timer より後に発火するので、負荷で遅れても順序は変わらない。
+ */
+async function settleTest(): Promise<void> {
   cleanup();
+  if (server.specialKeys.length > 0) {
+    await new Promise((resolve) => setTimeout(resolve, NAV_KEY_REFRESH_DELAY_MS));
+  }
+}
+
+afterEach(async () => {
+  await settleTest();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
@@ -530,5 +548,31 @@ describe('[#3304] コントローラー: 取りにいく対象が変わる、ほ
 
     expect(gate()).toEqual(NOTHING_ARRIVED);
     pressAndExpectNothingSent();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// One test's leftovers must not reach the next test's server (Issue #3641)
+// ---------------------------------------------------------------------------
+
+describe('[#3641] キーを送ったテストの後始末', () => {
+  it('送信の後の取り直しは、後始末の中でこのテストの server に届き、次のテストの server へは漏れない', async () => {
+    server.live.set(keyOf(CODEX), atRest(CODEX, 'codex-plan', 'plan'));
+    const phone = phoneSurface();
+    await phone.open(CODEX);
+    await waitFor(() => expect(gate()).toEqual({ pressable: true, mode: 'plan', chip: true }));
+    server.live.clear();
+    fireEvent.click(button());
+    await waitFor(() => expect(server.specialKeys).toEqual([{ cliToolId: 'codex', keys: ['BTab'] }]));
+    const thisTestsRequests = server.pending;
+
+    await settleTest();
+
+    // 取り直しそのものは消していない: 送った先へ、後始末の中で届いている。
+    expect(thisTestsRequests.filter(isFor(CODEX)).length).toBeGreaterThan(0);
+    // 次のテストの beforeEach と同じ形で server を作り直し、期限を過ぎても何も届かない。
+    installServer();
+    await new Promise((resolve) => setTimeout(resolve, NAV_KEY_REFRESH_DELAY_MS * 2));
+    expect(server.pending).toEqual([]);
   });
 });

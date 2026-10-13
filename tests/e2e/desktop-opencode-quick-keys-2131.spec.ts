@@ -193,9 +193,8 @@ test.describe('Issue #2131: the PC quick-keys strip folds away', () => {
     const narrowStrip = await rectInSplit(page, OPENCODE_SPLIT, 'opencode-quick-keys');
 
     // Collapse to a single split: the same strip, several times wider.
-    const removeBtn = page.getByTestId('remove-terminal-split');
-    await removeBtn.click();
-    await removeBtn.click();
+    // Issue #3514: the "+ / -" stepper became layout icons (1-4).
+    await page.getByTestId('split-layout-1').click();
     await expect(page.locator('[data-testid^="terminal-split-pane-"]')).toHaveCount(1);
     await expect(inSplit(page, OPENCODE_SPLIT, 'opencode-quick-keys')).toBeVisible();
 

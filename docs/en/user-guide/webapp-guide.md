@@ -302,7 +302,7 @@ the same button; that strip is **gone**, and the terminal takes the width back
 The arrow in the History column's header points the way it **folds** (left).
 Bring it back with [History] in the action bar.
 
-Note that the Activity Bar's **"File Tree"** (the icon column on the far left)
+Note that the **"File Tree"** among the tools at the right of the header
 is for browsing the worktree, and is a different thing from the action bar's
 **"Open Files"** (the panel showing files you opened).
 
@@ -370,15 +370,25 @@ Useful for recording work details and TODOs.
 
 ## Agent Settings
 
-Select which CLI agents to use for each worktree.
+Each worktree has its own list of CLI agent sessions (instances).
+The same agent can appear more than once under different names (e.g. "Claude" and "Claude review").
 
-### How to Configure
+### Adding One (PC)
 
 1. Select a worktree
-2. Click the **"CMATE"** tab
-3. Click the **"Agent"** sub-tab
-4. Select **2** agents using the checkboxes
-5. Settings are saved automatically
+2. Click the **[+]** at the right end of the header's session field ([current session][N more ▾])
+   ("Add session…" in the [N more ▾] list opens the same form)
+3. Choose the agent (installed ones), a name (optional) and **where to open it** (a new split / replace the current split / add only), then click **[Add]**
+4. Adding does not start a session: it starts when you send the first message from that split
+
+Rename, reorder and delete in the **"Agent"** tool at the right of the header.
+
+### Adding and Managing (Mobile)
+
+1. Tap the **"CMATE"** tab
+2. Tap the **"Agent"** sub-tab
+3. Add with **"Add instance"** below the list; rename, reorder and delete on each row
+4. Settings are saved automatically
 
 ### Available Agents
 
@@ -394,11 +404,11 @@ Select which CLI agents to use for each worktree.
 | **Antigravity** | Antigravity CLI (`agy`) |
 | **Command Code** | Command Code CLI (`commandcode`, Issue #2250) |
 
-- You must always select exactly **2** agents
+- A branch holds **1 to 10** of them (the last one cannot be deleted)
 - **Auto Yes behaves differently per agent.** Command Code / Gemini / Vibe-Local only have
   the screen-based route (the dialog is drawn once, then answered automatically). See
   [Approval Routes Differ by Agent](#approval-routes-differ-by-agent)
-- The selected agents appear as tabs in the terminal header
+- These sessions appear in the session field of the header ([current session][N more ▾])
 
 ### Ollama Model Selection (Vibe-Local)
 
@@ -427,7 +437,7 @@ surface** switches — the input surface stays exactly the same in either mode
 
 | Screen | Action |
 |--------|--------|
-| **Desktop** | Click the **Terminal / Chat toggle** in each split's header |
+| **Desktop** | Click the **Terminal / Chat toggle** in each split's header (with a single split it is in the second-row action bar) |
 | **Mobile** | Tap the **round toggle** floating over the top-right corner of the output area |
 | **Keyboard** | **`Cmd/Ctrl + Shift + M`** (press `?` for the shortcut list) |
 
@@ -559,8 +569,9 @@ put it back with the same gesture** (Issue #2261).
 
 | Action | Where |
 |--------|-------|
-| **Maximize / restore** | The button at the right end of each split's title bar (⤢ / ⤡) |
-| **Maximize / restore** | The button in the action bar above the splits (acts on the focused split) |
+| **Maximize / restore** | The button in the second-row action bar (⤢ / ⤡; acts on the focused split) |
+| **Maximize / restore** | Each split's "…" menu |
+| **Maximize / restore** | With two or more splits, the button at the right end of each split's header (⤢ / ⤡) |
 | **Maximize / restore** | `Cmd/Ctrl + Shift + Enter` |
 
 `Cmd/Ctrl + Shift + Enter` follows the same rule as `Cmd/Ctrl + Shift + M` (the output
@@ -590,21 +601,23 @@ The **execution contract** handed to an agent with `commandmate send --contract`
 **gate verdicts** `commandmate verify` produced from it, are readable on screen — no CLI
 stdout required (Issue #1816).
 
-### The header status chip
+### The Verification chip (the second-row status chip)
 
-A worktree that was delegated with a contract shows a status chip in its header, carrying
-the task title, its `TaskStatus`, and the `RESULT` of the most recent verification run.
+The second row of the worktree screen (the action bar) carries the Verification chip (a status
+chip) with the task title, its `TaskStatus`, and the `RESULT` of the most recent verification run.
 
-- A worktree with no task row shows **no chip at all**
+- A worktree with no task row **still shows the chip**, with "Verification" in place of the title
+  and "Not verified" in place of the RESULT (Issue #2064)
+- The chip's ⓘ button shows the **reason** behind the verdict, on a touch device too
 - Hovering the chip (or reading it with a screen reader) gives the **reason** behind the
   verdict, down to the ids of the gates that did not pass
-- Clicking the chip opens the **Verification** pane
+- Clicking the chip opens the **Verification** pane (pressing it again while the pane is open closes it)
 
 ### The Verification pane
 
 | Screen  | How to open |
 |---------|-------------|
-| Desktop | The shield icon (Verification) in the left Activity Bar |
+| Desktop | Press the Verification chip (the chip with the shield icon) on the second row. The pane opens from the right, over the body |
 | Mobile  | **Tools** tab in the bottom bar → **Verification** sub-tab |
 
 The pane has three sections, top to bottom.

@@ -293,6 +293,13 @@ export const MobileContent = memo(function MobileContent({
   // Unconditional hook call — must stay above the `activeTab` switch below.
   const tWorktree = useTranslations('worktree');
 
+  // Issue #3515: the branch the terminal tab's "To:" line names. The PC rule
+  // (`WorktreeDetailDesktop`): the detail's checked-out branch unless git could
+  // not tell, then the worktree's name.
+  const currentBranch = worktree?.gitStatus?.currentBranch;
+  const composerBranchName =
+    currentBranch && currentBranch !== '(unknown)' ? currentBranch : (worktree?.name ?? null);
+
   switch (activeTab) {
     case 'terminal':
       return (
@@ -304,6 +311,8 @@ export const MobileContent = memo(function MobileContent({
             disableAutoFollow={disableAutoFollow}
             onSurfaceModeChange={onSurfaceModeChange}
             directInputOpen={directInputOpen}
+            branchName={composerBranchName}
+            instances={instances}
           />
         </ErrorBoundary>
       );

@@ -235,6 +235,19 @@ export const readLivePidCwd: PidCwdResolver = (pid) => {
 const DEMO_VITEST_HOME_ENTRY = /^\.commandmate-demo-vitest-([1-9]\d*)$/;
 
 /**
+ * zsh's `compinit` cache: `~/.zcompdump` itself, and the `~/.zcompdump.<host>.<pid>`
+ * scratch file it writes before renaming (#3664). A worker's shell start makes
+ * it; the pid in it is already gone by the time the gate looks. Only these two
+ * shapes — any other `.zcompdump*` name stays a violation.
+ */
+const ZCOMPDUMP_HOME_ENTRY = /^\.zcompdump(?:\.[A-Za-z0-9._-]+\.[1-9]\d*)?$/;
+
+/** Whether a `$HOME` entry name is a zsh compinit cache file (#3664). */
+export function isZcompdumpEntry(name: string): boolean {
+  return ZCOMPDUMP_HOME_ENTRY.test(name);
+}
+
+/**
  * Whether a pid names a live process. EPERM counts as alive: the process exists
  * and belongs to another user. Never throws.
  */
@@ -811,7 +824,8 @@ export function diffEnvSnapshots(
     // Only `home-entries`, and only by the whole name: the same string under
     // `~/.commandmate` is a different directory and stays counted.
     const isIgnoredByConfig = (entry: EnvEntry): boolean =>
-      probeId === 'home-entries' && ignoredHomeEntries.has(entry.key);
+      probeId === 'home-entries' &&
+      (ignoredHomeEntries.has(entry.key) || isZcompdumpEntry(entry.key));
 
     const added: EnvChange[] = [];
     const ignoredAdded: EnvChange[] = [];

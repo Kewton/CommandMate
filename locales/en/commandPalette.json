@@ -19,6 +19,7 @@
     "syncError": "Failed to sync repositories",
     "switchLanguage": "Switch language",
     "openGitHub": "Open GitHub",
+    "newTask": "New task",
     "keyboardShortcuts": "Keyboard shortcuts"
   },
   "footer": {

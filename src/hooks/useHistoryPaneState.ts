@@ -8,7 +8,10 @@
  *   - `commandmate.worktree.historyWidth` (number, percentage 10-60)
  *
  * Defaults:
- *   - visible: true
+ *   - visible: per scope (Issue #3589). The worktree screen starts closed
+ *     ({@link WORKTREE_DEFAULT_HISTORY_VISIBLE}); every other scope — the
+ *     `/sessions` tile — keeps {@link DEFAULT_HISTORY_VISIBLE} (true). A stored
+ *     value always wins over either default.
  *   - width: 40 (percent of the TerminalContainer inner area — Issue #730
  *     moved History inside TerminalContainer, so the percentage is now
  *     relative to that inner area, not the whole desktop layout. The default
@@ -49,12 +52,26 @@ export const HISTORY_WIDTH_STORAGE_KEY = 'commandmate.worktree.historyWidth';
 export interface HistoryPaneStorageKeys {
   readonly visible: string;
   readonly width: string;
+  /**
+   * Issue #3589: what this scope shows when nothing is stored under `visible`.
+   * Omitted → {@link DEFAULT_HISTORY_VISIBLE}.
+   */
+  readonly defaultVisible?: boolean;
 }
+
+/**
+ * Whether History is shown on the worktree screen before the user has chosen
+ * (Issue #3589): closed, so the terminal starts at full width. Deliberately
+ * not {@link DEFAULT_HISTORY_VISIBLE} — that one is shared with the
+ * `/sessions` tile, whose default does not change.
+ */
+export const WORKTREE_DEFAULT_HISTORY_VISIBLE = false;
 
 /** The worktree screen's scope — what `useHistoryPaneState()` reads. */
 export const WORKTREE_HISTORY_PANE_STORAGE_KEYS: HistoryPaneStorageKeys = {
   visible: HISTORY_VISIBLE_STORAGE_KEY,
   width: HISTORY_WIDTH_STORAGE_KEY,
+  defaultVisible: WORKTREE_DEFAULT_HISTORY_VISIBLE,
 };
 
 /**
@@ -108,8 +125,8 @@ function clampWidth(n: number): number {
   return Math.min(MAX_HISTORY_WIDTH, Math.max(MIN_HISTORY_WIDTH, n));
 }
 
-function readStoredVisible(key: string): boolean {
-  if (typeof window === 'undefined') return DEFAULT_HISTORY_VISIBLE;
+function readStoredVisible(key: string, fallback: boolean): boolean {
+  if (typeof window === 'undefined') return fallback;
   try {
     const raw = window.localStorage.getItem(key);
     if (raw === 'true') return true;
@@ -117,7 +134,7 @@ function readStoredVisible(key: string): boolean {
   } catch {
     /* unavailable */
   }
-  return DEFAULT_HISTORY_VISIBLE;
+  return fallback;
 }
 
 function readStoredWidth(key: string): number {
@@ -196,8 +213,12 @@ function emitChange(detail: HistoryPaneStateEventDetail): void {
 export function useHistoryPaneState(
   storageKeys: HistoryPaneStorageKeys = WORKTREE_HISTORY_PANE_STORAGE_KEYS
 ): UseHistoryPaneStateReturn {
-  const { visible: visibleKey, width: widthKey } = storageKeys;
-  const [visible, setVisibleState] = useState<boolean>(DEFAULT_HISTORY_VISIBLE);
+  const {
+    visible: visibleKey,
+    width: widthKey,
+    defaultVisible = DEFAULT_HISTORY_VISIBLE,
+  } = storageKeys;
+  const [visible, setVisibleState] = useState<boolean>(defaultVisible);
   const [width, setWidthState] = useState<number>(DEFAULT_HISTORY_WIDTH);
 
   const visibleRef = useRef(visible);
@@ -207,11 +228,11 @@ export function useHistoryPaneState(
 
   // Hydrate on mount (and again if a caller ever switches scope).
   useEffect(() => {
-    const v = readStoredVisible(visibleKey);
+    const v = readStoredVisible(visibleKey, defaultVisible);
     const w = readStoredWidth(widthKey);
     setVisibleState(v);
     setWidthState(w);
-  }, [visibleKey, widthKey]);
+  }, [visibleKey, widthKey, defaultVisible]);
 
   // Issue #730: sync state across hook instances on the same page.
   useEffect(() => {

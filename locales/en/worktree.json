@@ -1,7 +1,12 @@
 {
   "agentStatus": {
-    "moreAgents": "{count} more agents",
-    "overflowTrigger": "More agents"
+    "overflowTrigger": "More agents",
+    "otherSessions": "{count} more",
+    "otherSessionsLabel": "{count} other sessions",
+    "otherSessionsWaitingLabel": "{count} other sessions, {waiting} waiting for your answer",
+    "otherSessionsList": "Other sessions",
+    "inSplit": "Split {index}",
+    "addSession": "Add session…"
   },
   "toc": {
     "title": "Contents",
@@ -508,6 +513,7 @@
   },
   "terminal": {
     "historyLabel": "History",
+    "actionBarMore": "Show hidden items",
     "filesLabel": "Open Files",
     "showHistory": "Show history",
     "hideHistory": "Hide history",
@@ -515,8 +521,6 @@
     "hideFiles": "Hide open files",
     "equalizeWidths": "Equal widths",
     "equalizeWidthsHint": "Equalize terminal widths and reset History width",
-    "addSplit": "Add split",
-    "removeSplit": "Remove split",
     "selectInstance": "Select agent instance for {split}",
     "moreActions": "More actions",
     "searchTerminal": "Search terminal",
@@ -531,7 +535,13 @@
     "maximizeShortcutHint": "⌘ / Ctrl + Shift + Enter",
     "maximizedStatus": "Split {split} maximized",
     "loading": "Loading…",
-    "sessionEnded": "The session has ended. Send a message to start a new session."
+    "sessionEnded": "The session has ended. Send a message to start a new session.",
+    "layoutGroupLabel": "Split layout",
+    "layoutSplits": "Split layout: {count}",
+    "composerTarget": "To: {agent} · {branch}",
+    "composerTargetNoBranch": "To: {agent}",
+    "composerTargetLabel": "This input sends to {agent} on {branch}",
+    "composerTargetLabelNoBranch": "This input sends to {agent}"
   },
   "surfaceMode": {
     "groupLabel": "Output surface for {split}",
@@ -1063,7 +1073,6 @@
     }
   },
   "activityBar": {
-    "toggleSidebar": "Toggle sidebar",
     "label": "Activity Bar",
     "files": "File Tree",
     "git": "Git",
@@ -1075,7 +1084,6 @@
     "skills": "Skills",
     "verification": "Verification",
     "env": "Env",
-    "settings": "Settings",
     "settingsMenu": {
       "settings": "Settings",
       "skills": "Skills",
@@ -1088,6 +1096,11 @@
       "logout": "Logout",
       "version": "CommandMate {version}"
     }
+  },
+  "headerTools": {
+    "label": "Worktree tools",
+    "more": "More tools",
+    "moreActive": "More tools ({label} is open)"
   },
   "branchMismatch": {
     "changedFrom": "Branch changed from",
@@ -1169,7 +1182,10 @@
   },
   "desktopLayout": {
     "activityPane": "Activity pane",
-    "terminalPane": "Terminal pane"
+    "terminalPane": "Terminal pane",
+    "pinPane": "Pin beside the terminal",
+    "unpinPane": "Unpin (show over the terminal)",
+    "closePane": "Close panel"
   },
   "worktreeStatus": {
     "notSet": "Not set",
@@ -1177,13 +1193,6 @@
     "inProgress": "In Progress",
     "inReview": "In Review",
     "done": "Done"
-  },
-  "card": {
-    "main": "Main",
-    "description": "Description",
-    "link": "Link",
-    "openLink": "Open link in new tab",
-    "updated": "Updated {time}"
   },
   "detail": {
     "worktree": "Worktree",
@@ -1218,7 +1227,8 @@
     "subTabGit": "Git",
     "statusPillWithModel": "{label}: {status} — model {model}",
     "statusPillWithUsage": "{base} — {usage}",
-    "statusPillWithSource": "{base} — {source}"
+    "statusPillWithSource": "{base} — {source}",
+    "openRepositories": "{repository} — open Repositories"
   },
   "detailStatus": {
     "idle": "Idle - No active session",
@@ -1476,6 +1486,7 @@
       "failingGates": "Gates that did not pass: {gates}",
       "gatesPassed": "All {count} gates passed",
       "openHint": "Open the Verification pane",
+      "closeHint": "Close the Verification pane",
       "dash": "—",
       "unverified": "Not verified",
       "noTask": "No execution contract has been sent to this branch",
@@ -1670,5 +1681,24 @@
     "noteInstanceFlag": "--instance is how a command names its target. --agent is only for starting an ad-hoc session the roster does not know, and wait has no --agent at all.",
     "noteWaitOnPrompt": "wait carries --on-prompt human so it keeps waiting when the agent asks something. Without it the default (agent) exits 10 the moment a prompt is detected.",
     "noteRespondNumber": "respond does not interpret its answer. Send the NUMBER of the option: \"yes\" is typed, ignored, and followed by Enter, which picks whatever the default option happens to be."
+  },
+  "agentAdd": {
+    "button": "Add agent",
+    "title": "Add agent",
+    "tool": "Agent",
+    "notInstalled": "{name} (not installed)",
+    "installedUnknown": "Could not check which agents are installed; every agent is listed.",
+    "name": "Name (optional)",
+    "namePlaceholder": "e.g. Review",
+    "placement": "Open in",
+    "placementNewSplit": "New split",
+    "placementReplace": "Replace the current split",
+    "placementRosterOnly": "Add only",
+    "placementNewSplitFull": "All {max} splits are in use",
+    "startHint": "The session starts when you send the first message.",
+    "submit": "Add",
+    "cancel": "Cancel",
+    "saveError": "Could not add the agent.",
+    "maxReached": "Up to {max} agents per branch"
   }
 }

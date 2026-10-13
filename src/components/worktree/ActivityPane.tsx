@@ -22,6 +22,7 @@
 import React, { memo, type ReactNode } from 'react';
 import { ErrorBoundary } from '@/components/error/ErrorBoundary';
 import type { ActivityId } from '@/config/activity-bar-config';
+import { PaneDirtyContext, type PaneDirtyReporter } from '@/hooks/useActivityPaneOverlay';
 
 /**
  * Map of pre-built activity content keyed by ActivityId.
@@ -36,6 +37,13 @@ export interface ActivityPaneProps {
   activities: ActivityContentMap;
   /** Optional className for the root container. */
   className?: string;
+  /**
+   * Issue #3589: receives the active content's unsaved state (content that
+   * calls `useReportPaneDirty`, e.g. the Env editor; `null` when it stops
+   * reporting), so the frame around the pane can keep it open on an outside
+   * press while there is a draft.
+   */
+  onDirtyChange?: PaneDirtyReporter;
 }
 
 const ACTIVITY_PANE_ID = 'worktree-activity-pane';
@@ -62,6 +70,7 @@ export const ActivityPane = memo(function ActivityPane({
   active,
   activities,
   className = '',
+  onDirtyChange,
 }: ActivityPaneProps) {
   // Closed state — render an empty stub so the parent layout can still measure
   // the pane and hide it (the desktop layout handles the "no column" case;
@@ -86,12 +95,13 @@ export const ActivityPane = memo(function ActivityPane({
       data-testid="activity-pane"
       data-active={active}
       role="tabpanel"
-      aria-labelledby={`activity-bar-button-${active}`}
       className={`h-full flex flex-col min-h-0 ${className}`.trim()}
     >
-      <ErrorBoundary componentName={componentName}>
-        {content ?? null}
-      </ErrorBoundary>
+      <PaneDirtyContext.Provider value={onDirtyChange ?? null}>
+        <ErrorBoundary componentName={componentName}>
+          {content ?? null}
+        </ErrorBoundary>
+      </PaneDirtyContext.Provider>
     </div>
   );
 });

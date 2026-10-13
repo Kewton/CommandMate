@@ -5,7 +5,7 @@
  * SQLite DB, a real git worktree scan, and tmux/CLI sessions — none of which
  * are reproducible in CI. These helpers decouple the PC split UI from that
  * backend by **mocking the worktree API routes at the browser level**
- * (`page.route`), so the split shell (ActivityBar + TerminalSplitContainer +
+ * (`page.route`), so the split shell (header tools + TerminalSplitContainer +
  * PaneResizers) renders deterministically without any live session.
  *
  * They also provide **per-test localStorage isolation**: existing e2e specs
@@ -35,9 +35,14 @@ const TERMINAL_SPLITS_PREFIX = 'commandmate:terminalSplits:';
 const ACTIVITY_BAR_PREFIX = 'commandmate.worktree.activeActivity-';
 
 /** History pane visibility key (mirror of useHistoryPaneState). Cleared so
- *  History starts from its default (visible=true). */
+ *  History starts from its default (hidden on the worktree screen since
+ *  Issue #3589). */
 const HISTORY_VISIBLE_KEY = 'commandmate.worktree.historyVisible';
 const HISTORY_WIDTH_KEY = 'commandmate.worktree.historyWidth';
+
+/** Activity-pane pin key (mirror of ACTIVITY_PANE_PINNED_STORAGE_KEY, Issue
+ *  #3589). Cleared so the pane starts unpinned (laid over the body). */
+export const ACTIVITY_PANE_PINNED_KEY = 'commandmate.worktree.activityPanePinned';
 
 /** Build a minimal Worktree object sufficient to render the detail page. */
 function buildWorktree(id: string): Record<string, unknown> {
@@ -242,7 +247,7 @@ export async function clearSplitStorage(page: Page): Promise<void> {
     },
     {
       prefixes: [TERMINAL_SPLITS_PREFIX, ACTIVITY_BAR_PREFIX],
-      keys: [HISTORY_VISIBLE_KEY, HISTORY_WIDTH_KEY],
+      keys: [HISTORY_VISIBLE_KEY, HISTORY_WIDTH_KEY, ACTIVITY_PANE_PINNED_KEY],
       guard: CLEARED_GUARD_KEY,
     },
   );
@@ -262,14 +267,36 @@ export async function setupSplitTest(
 }
 
 /**
+ * Issue #3589: lay the worktree screen out side by side as it was before —
+ * the activity pane pinned beside the body and History shown — for specs that
+ * count the resizers those two columns bring. Register AFTER
+ * `setupSplitTest` (init scripts run in registration order, so this runs after
+ * the one-time clear). Seeds on every load, which is what a stored choice is.
+ */
+export async function seedSideBySideLayout(page: Page): Promise<void> {
+  await page.addInitScript(
+    ({ pinKey, historyKey }) => {
+      try {
+        localStorage.setItem(pinKey, 'true');
+        localStorage.setItem(historyKey, 'true');
+      } catch {
+        /* localStorage unavailable - non-fatal */
+      }
+    },
+    { pinKey: ACTIVITY_PANE_PINNED_KEY, historyKey: HISTORY_VISIBLE_KEY },
+  );
+}
+
+/**
  * Ensure the Files activity pane (and therefore its ActivityPane↔Right
- * PaneResizer) is visible, regardless of the persisted/default activity
- * state. Idempotent: clicks the Files button only if the pane is hidden.
+ * PaneResizer, when pinned — see `seedSideBySideLayout`) is visible,
+ * regardless of the persisted/default activity state. Idempotent: clicks the
+ * Files button only if the pane is hidden.
  */
 export async function ensureFilesActivityVisible(page: Page): Promise<void> {
   const slot = page.locator('[data-testid="activity-pane-slot"]');
   const visible = await slot.isVisible().catch(() => false);
   if (!visible) {
-    await page.click('[data-testid="activity-bar-button-files"]');
+    await page.click('[data-testid="header-tool-files"]');
   }
 }

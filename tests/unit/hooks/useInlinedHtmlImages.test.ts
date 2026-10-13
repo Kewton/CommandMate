@@ -103,8 +103,16 @@ describe('useInlinedHtmlImages', () => {
 
     const { result } = renderHook(() => useInlinedHtmlImages('wt-1', FILE_PATH, html));
 
-    await waitFor(() => expect(srcsOf(result.current)[0]).toBe(big));
-    expect(srcsOf(result.current)[1]).toBe('second.png');
+    // Not `srcsOf()` here (Issue #3662): re-parsing a 20 MB document with jsdom
+    // takes ~0.8 s per call alone, and this test did it twice — once inside
+    // `waitFor` and once after — so under load it ran past the 5000 ms test
+    // timeout (16 of 24 runs). The hook's own work is ~10 ms. Wait on a cheap
+    // comparison instead, then check the result with string operations: `big`
+    // is base64 and needs no escaping, so it appears verbatim when inlined.
+    // Booleans, so that a failure does not print the 20 MB string.
+    await waitFor(() => expect(result.current === html).toBe(false));
+    expect(result.current.includes(`<img src="${big}">`)).toBe(true);
+    expect(result.current.includes('<img src="second.png">')).toBe(true);
   });
 
   it('does not return stale results after htmlContent changes', async () => {

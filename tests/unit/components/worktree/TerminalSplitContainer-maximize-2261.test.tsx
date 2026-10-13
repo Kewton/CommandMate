@@ -22,6 +22,20 @@ import {
   type AgentInstance,
 } from '@/lib/cli-tools/types';
 
+/**
+ * Issue #3514: the Action bar's "+ / -" stepper became layout icons (1-4). One
+ * more / one fewer split is the icon for the current count +/- 1.
+ */
+function clickAddSplit(): void {
+  const n = screen.queryAllByTestId(/^split-wrapper-\d+$/).length;
+  fireEvent.click(screen.getByTestId(`split-layout-${n + 1}`));
+}
+
+function clickRemoveSplit(): void {
+  const n = screen.queryAllByTestId(/^split-wrapper-\d+$/).length;
+  fireEvent.click(screen.getByTestId(`split-layout-${Math.max(1, n - 1)}`));
+}
+
 const ROSTER: AgentInstance[] = CLI_TOOL_IDS.map((cliTool, order) => ({
   id: cliTool,
   cliTool,
@@ -63,7 +77,7 @@ function wrapperOf(idx: number): HTMLElement {
 
 function addSplits(n: number): void {
   for (let i = 0; i < n; i++) {
-    fireEvent.click(screen.getByTestId('add-terminal-split'));
+    clickAddSplit();
   }
 }
 
@@ -199,8 +213,10 @@ describe('[#2261] TerminalSplitContainer maximize toggle', () => {
     it('shows the count while nothing is maximized', () => {
       setup();
       addSplits(1);
-      // Issue #2421: the denominator is MAX_SPLITS, now 4.
-      expect(screen.getByTestId('split-count-label')).toHaveTextContent('2 / 4 splits');
+      // Issue #3514: the "n / 4 splits" text is gone; the pressed layout icon
+      // carries the count, and the label exists only while maximized.
+      expect(screen.queryByTestId('split-count-label')).toBeNull();
+      expect(screen.getByTestId('split-layout-2')).toHaveAttribute('aria-pressed', 'true');
     });
 
     it('says which split is filling the row while one is maximized', () => {
@@ -236,7 +252,7 @@ describe('[#2261] TerminalSplitContainer maximize toggle', () => {
       fireEvent.click(screen.getByTestId('pane-maximize-0'));
       expect(wrapperOf(1).style.display).toBe('none');
 
-      fireEvent.click(screen.getByTestId('remove-terminal-split')); // -> 2 splits
+      clickRemoveSplit(); // -> 2 splits
       for (const i of [0, 1]) expect(wrapperOf(i).style.display).toBe('');
     });
 
@@ -338,6 +354,8 @@ describe('[#2421] maximize inside the 2x2 grid', () => {
 
   it('reports 4 / 4 splits, the new ceiling', () => {
     setupGrid();
-    expect(screen.getByTestId('split-count-label')).toHaveTextContent('4 / 4 splits');
+    // Issue #3514: the 4-split (2x2) layout icon is the pressed one.
+    expect(screen.getByTestId('split-layout-4')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.queryByTestId('split-layout-5')).toBeNull();
   });
 });

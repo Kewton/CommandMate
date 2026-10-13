@@ -5,7 +5,7 @@
  * @vitest-environment jsdom
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, fireEvent, act } from '@testing-library/react';
 import React from 'react';
 import { Sidebar, parseGroupCollapsed } from '@/components/layout/Sidebar';
@@ -14,6 +14,7 @@ import { SidebarProvider, useSidebarContext } from '@/contexts/SidebarContext';
 import { WorktreeSelectionProvider } from '@/contexts/WorktreeSelectionContext';
 import type { Worktree } from '@/types/models';
 import { ATTENTION_REVIEW_HREF } from '@/config/review-config';
+import { installRadixJsdomPolyfills } from '@tests/helpers/radix-jsdom';
 
 // Issue #2684: Mock TransitionLink to verify nav links use it
 const mockTransitionLink = vi.fn(
@@ -142,6 +143,9 @@ const Wrapper = ({ children }: { children: React.ReactNode }) => (
 );
 
 describe('Sidebar', () => {
+  // Issue #3575: View / Sort live in a Radix menu opened from the list toolbar.
+  beforeAll(() => installRadixJsdomPolyfills());
+
   beforeEach(() => {
     vi.clearAllMocks();
     mockPush.mockClear();
@@ -695,6 +699,23 @@ describe('Sidebar', () => {
       expect(screen.queryByTestId('sidebar-nav-review-count')).toBeNull();
     });
 
+    it('lists the destinations as Sessions → Repositories → Review, the same order as the icon rail (Issue #3577)', async () => {
+      render(
+        <Wrapper>
+          <Sidebar />
+        </Wrapper>
+      );
+
+      const nav = await screen.findByTestId('sidebar-nav');
+      const ids = Array.from(nav.querySelectorAll('a[data-testid^="sidebar-nav-"]')).map((el) =>
+        el.getAttribute('data-testid')
+      );
+      expect(ids).toEqual(['sidebar-nav-sessions', 'sidebar-nav-repositories', 'sidebar-nav-review']);
+      // The sync button stays on the Repositories row.
+      const repositoriesRow = screen.getByTestId('sidebar-nav-repositories').closest('li');
+      expect(repositoriesRow?.querySelectorAll('button').length).toBeGreaterThan(0);
+    });
+
     it('renders the three nav links through TransitionLink (Issue #2684)', async () => {
       render(
         <Wrapper>
@@ -813,16 +834,24 @@ describe('Sidebar', () => {
         </Wrapper>
       );
 
-      const select = (await screen.findByTestId('view-mode-select')) as HTMLSelectElement;
-      expect(select.tagName).toBe('SELECT');
-      expect(screen.getByLabelText('View')).toBe(select);
-      expect(select).toHaveValue('grouped');
-      expect(Array.from(select.options).map((o) => [o.value, o.textContent])).toEqual([
-        ['grouped', 'Repository'],
-        ['flat', 'Branch'],
-        ['sessions', 'Session'],
+      // Issue #3575: the labelled choice moved from a <select> into the list
+      // options menu (a "View" radio group); the words are unchanged.
+      const trigger = await screen.findByTestId('sidebar-list-options');
+      expect(trigger).toHaveAttribute('data-view-mode', 'grouped');
+      fireEvent.keyDown(trigger, { key: 'Enter' });
+      const group = screen.getByTestId('view-mode-options');
+      expect(group).toHaveAccessibleName('View');
+      expect(
+        Array.from(group.querySelectorAll('[role="menuitemradio"]')).map((o) => [
+          o.textContent,
+          o.getAttribute('aria-checked'),
+        ])
+      ).toEqual([
+        ['Repository', 'true'],
+        ['Branch', 'false'],
+        ['Session', 'false'],
       ]);
-      expect(select.closest('[data-testid="tooltip-wrapper"]')).toBeNull();
+      expect(trigger.closest('[data-testid="tooltip-wrapper"]')).toBeNull();
     });
 
     it('switches to the flat list when "Branch" is chosen (Issue #2648)', async () => {
@@ -835,7 +864,8 @@ describe('Sidebar', () => {
       await waitFor(() => {
         expect(screen.getAllByTestId('group-header').length).toBeGreaterThan(0);
       });
-      fireEvent.change(screen.getByTestId('view-mode-select'), { target: { value: 'flat' } });
+      fireEvent.keyDown(screen.getByTestId('sidebar-list-options'), { key: 'Enter' });
+      fireEvent.click(screen.getByRole('menuitemradio', { name: 'Branch' }));
       await waitFor(() => {
         expect(screen.queryAllByTestId('group-header')).toHaveLength(0);
       });
@@ -849,19 +879,25 @@ describe('Sidebar', () => {
         </Wrapper>
       );
 
-      const trigger = await screen.findByRole('button', { name: 'Sort by Updated' });
-      expect(trigger).toHaveTextContent('Updated');
-      const direction = screen.getByRole('button', { name: 'Newest first' });
-      expect(direction).toHaveTextContent('Newest first');
+      // Issue #3575: key and direction are words in the list options menu;
+      // the icon names the current pair.
+      const trigger = await screen.findByTestId('sidebar-list-options');
+      expect(trigger).toHaveAccessibleName(/Updated · Newest first/);
+      fireEvent.keyDown(trigger, { key: 'Enter' });
+      expect(screen.getByRole('menuitemradio', { name: 'Updated' })).toHaveAttribute('aria-checked', 'true');
+      const direction = screen.getByRole('menuitemradio', { name: 'Newest first' });
+      expect(direction).toHaveAttribute('aria-checked', 'true');
 
-      fireEvent.click(direction);
-      expect(await screen.findByRole('button', { name: 'Oldest first' })).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('menuitemradio', { name: 'Oldest first' }));
+      await waitFor(() => {
+        expect(screen.getByRole('menuitemradio', { name: 'Oldest first' })).toHaveAttribute('aria-checked', 'true');
+      });
+      expect(trigger).toHaveAccessibleName(/Updated · Oldest first/);
 
-      fireEvent.click(screen.getByRole('button', { name: 'Sort by Updated' }));
-      expect(screen.getByRole('option', { name: 'Repository name' })).toBeInTheDocument();
-      expect(screen.getByRole('option', { name: 'Branch name' })).toBeInTheDocument();
-      fireEvent.click(screen.getByRole('option', { name: 'Status' }));
-      expect(await screen.findByRole('button', { name: 'Needs attention first' })).toBeInTheDocument();
+      expect(screen.getByRole('menuitemradio', { name: 'Repository name' })).toBeInTheDocument();
+      expect(screen.getByRole('menuitemradio', { name: 'Branch name' })).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('menuitemradio', { name: 'Status' }));
+      expect(await screen.findByRole('menuitemradio', { name: 'Needs attention first' })).toHaveAttribute('aria-checked', 'true');
     });
 
     it('shows an action tooltip when hovering the sync button', async () => {
@@ -946,8 +982,9 @@ describe('Sidebar', () => {
         </Wrapper>
       );
 
+      // Issue #3575: the view is chosen from the list options icon.
       await waitFor(() => {
-        expect(screen.getByTestId('view-mode-select')).toBeInTheDocument();
+        expect(screen.getByTestId('sidebar-list-options')).toBeInTheDocument();
       });
     });
 
@@ -1123,19 +1160,18 @@ describe('Sidebar', () => {
         </Wrapper>
       );
 
-      const controls = await screen.findByTestId('sidebar-list-controls');
-      expect(controls).toHaveClass('grid', 'grid-cols-[auto_minmax(0,1fr)]');
-      const cells = Array.from(controls.children) as HTMLElement[];
-      expect(cells).toHaveLength(4);
-      expect(cells[0].tagName).toBe('LABEL');
-      expect(cells[0]).toHaveTextContent('View');
-      expect(cells[1]).toBe(screen.getByTestId('view-mode-select'));
-      expect(cells[2]).toHaveTextContent('Sort');
-      expect(cells[3]).toBe(screen.getByTestId('sort-selector-base'));
-      // The sort control may shrink and wrap inside its cell, never widen it.
-      expect(cells[3]).toHaveClass('min-w-0');
-      expect(cells[3].firstElementChild).toHaveClass('flex', 'flex-wrap', 'min-w-0');
-      expect(screen.getByText('Updated')).toHaveClass('min-w-0', 'truncate');
+      // Issue #3575: the label / control grid became one row — the filter
+      // field shrinks, the View / Sort icon keeps its size, so the row never
+      // widens the sidebar.
+      const toolbar = await screen.findByTestId('sidebar-list-toolbar');
+      expect(toolbar).toHaveClass('flex', 'items-center');
+      const cells = Array.from(toolbar.children) as HTMLElement[];
+      expect(cells).toHaveLength(2);
+      expect(cells[0].tagName).toBe('INPUT');
+      expect(cells[0]).toHaveClass('min-w-0', 'flex-1');
+      expect(cells[1]).toBe(screen.getByTestId('sidebar-list-options'));
+      expect(cells[1]).toHaveClass('flex-shrink-0');
+      expect(cells[1]).toHaveAccessibleName(/^View and sort/);
     });
 
     it('keeps the Repositories row shrinkable so the sync button stays inside the sidebar (Issue #2644)', async () => {
@@ -1589,31 +1625,46 @@ describe('Sidebar', () => {
       );
     }
 
+    // Issue #3510: the footer holds one button that opens the shared settings
+    // menu; the #2706 entry is its "Settings" item. On the phone (the case
+    // #2706 was about) that item goes to /more.
+    beforeAll(() => installRadixJsdomPolyfills());
+    afterEach(() => {
+      Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: 1024 });
+    });
+
+    function setPhoneWidth(): void {
+      Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: 390 });
+    }
+
     it('renders the settings entry in the footer pointing to /more', async () => {
+      setPhoneWidth();
       render(
         <Wrapper>
           <Sidebar />
         </Wrapper>
       );
 
-      const link = await screen.findByTestId('sidebar-settings');
-      expect(link.tagName).toBe('A');
-      expect(link.getAttribute('href')).toBe('/more');
-      expect(link.getAttribute('aria-label')).toBe('Settings');
-      expect(link.querySelector('svg')).not.toBeNull();
-      expect(link.closest('[data-testid="tooltip-wrapper"]')?.className).toContain('flex-shrink-0');
+      const trigger = await screen.findByTestId('sidebar-settings-menu');
+      expect(trigger.tagName).toBe('BUTTON');
+      expect(trigger).toHaveAccessibleName('Settings');
+      expect(trigger.querySelector('svg')).not.toBeNull();
 
       // 位置
-      const select = screen.getByTestId('locale-switcher');
-      expect(link.compareDocumentPosition(select) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
-      expect(link.closest('[data-testid="sidebar"]')).not.toBeNull();
-      expect(link.closest('[data-testid="sidebar-header"]')).toBeNull();
+      expect(trigger.closest('[data-testid="sidebar"]')).not.toBeNull();
+      expect(trigger.closest('[data-testid="sidebar-header"]')).toBeNull();
 
-      // 既存要素が消えていないこと
-      expect(screen.getByTestId('locale-switcher')).toBeInTheDocument();
+      fireEvent.keyDown(trigger, { key: 'Enter' });
+      fireEvent.click(screen.getByRole('menuitem', { name: 'Settings' }));
+      expect(mockPush).toHaveBeenCalledWith('/more');
+
+      // 言語もメニューから届く
+      fireEvent.keyDown(trigger, { key: 'Enter' });
+      expect(screen.getByRole('menuitemradio', { name: 'English' })).toHaveAttribute('data-state', 'checked');
     });
 
     it('closes the mobile drawer when clicked', async () => {
+      setPhoneWidth();
       render(
         <Wrapper>
           <DrawerProbe />
@@ -1624,9 +1675,9 @@ describe('Sidebar', () => {
       fireEvent.click(screen.getByTestId('drawer-probe'));
       expect(screen.getByTestId('drawer-probe')).toHaveAttribute('data-open', 'true');
 
-      const link = await screen.findByTestId('sidebar-settings');
-      link.addEventListener('click', (event) => event.preventDefault());
-      fireEvent.click(link);
+      const trigger = await screen.findByTestId('sidebar-settings-menu');
+      fireEvent.keyDown(trigger, { key: 'Enter' });
+      fireEvent.click(screen.getByRole('menuitem', { name: 'Settings' }));
       expect(screen.getByTestId('drawer-probe')).toHaveAttribute('data-open', 'false');
     });
   });
