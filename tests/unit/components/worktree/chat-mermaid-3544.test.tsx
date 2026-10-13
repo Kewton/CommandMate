@@ -11,6 +11,11 @@
  * structural control. Both surfaces go through `findMermaidFences` only via
  * `applyHistoryHighlights`; the spy pins which one reaches it.
  *
+ * [#3554] The chat answer now lines up from where the split took each line, so
+ * its source names the fence's raw range too and the answer's diagram is
+ * paired by it; what is drawn and marked is unchanged. The fallback
+ * itself stays pinned in `tests/unit/lib/terminal-highlight-mermaid-3544.test.ts`.
+ *
  * @vitest-environment jsdom
  */
 
@@ -164,14 +169,16 @@ describe.each(SURFACES)('[#3544] %s: `2. ```mermaid` after an indented paragraph
       expect(scrollTargets.some((el) => el.closest('p')?.textContent?.includes('Intro line'))).toBe(true);
       expect(scrollTargets).not.toContain(source);
     });
-    // Chat could not line the answer up (no raw range → the fallback); History
-    // draws the message as written (the range → no fallback).
+    // [#3554] Chat lines the trimmed answer up from where the split took each
+    // line, so its source names the fence's raw range as History's does (it
+    // draws the message as written). The answer's diagram is paired by that
+    // range; chat still reads the fences once (`findMermaidFences`) for its
+    // reasoning region, which shows no source to name one (the chip is shut).
     const [source] = sources();
+    expect(source.getAttribute(MERMAID_RAW_START_ATTR)).toBe(String(CONTENT.indexOf('```mermaid\ngraph')));
     if (surface === 'ChatTranscript') {
-      expect(source.hasAttribute(MERMAID_RAW_START_ATTR)).toBe(false);
-      expect(fallback).toHaveBeenCalledWith(CONTENT);
+      expect(fallback).toHaveBeenCalledTimes(1);
     } else {
-      expect(source.getAttribute(MERMAID_RAW_START_ATTR)).toBe(String(CONTENT.indexOf('```mermaid\ngraph')));
       expect(fallback).not.toHaveBeenCalled();
     }
   });

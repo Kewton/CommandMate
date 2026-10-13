@@ -11,6 +11,10 @@
  * order, each kept whole or with a prefix of quote markers / whitespace taken
  * off — so a line of the part is the end of one line of the message, and an
  * offset in it is that line's offset plus the prefix it lost.
+ *
+ * That matching only knows lines losing a front. Where the deriver can say
+ * which raw line each of its lines came from (chat's answer and reasoning,
+ * Issue #3554), {@link mapDerivedLines} builds the mapping from that instead.
  */
 
 import type { MatchPosition } from './terminal-highlight-dom';
@@ -76,5 +80,41 @@ export function alignDerivedText(derived: string, raw: string, spans?: MatchPosi
       else hi = mid - 1;
     }
     return rawStarts[lo] + (offset - derivedStarts[lo]);
+  };
+}
+
+/** One line of a derived string and where its first character is in the raw text (null: in none). */
+export interface DerivedLineOrigin {
+  readonly text: string;
+  readonly rawStart: number | null;
+}
+
+/**
+ * [Issue #3554] The offset mapping for a derived string whose lines' origins
+ * the deriver already knows — no matching, so a line that lost its end (a
+ * trim) or that the deriver made up (a joining blank line) maps as well as one
+ * that lost a front. An offset on a made-up line maps to null. `derived` must
+ * be `lines` joined by `\n`; when it is not, nothing is mapped (null).
+ */
+export function mapDerivedLines(derived: string, lines: readonly DerivedLineOrigin[]): RawOffsetMapper | null {
+  if (lines.map((line) => line.text).join('\n') !== derived) return null;
+  if (lines.length === 0) return () => null;
+  const derivedStarts: number[] = [];
+  let derivedOffset = 0;
+  for (const line of lines) {
+    derivedStarts.push(derivedOffset);
+    derivedOffset += line.text.length + 1;
+  }
+  return (offset) => {
+    if (offset < 0 || offset > derived.length) return null;
+    let lo = 0;
+    let hi = derivedStarts.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (derivedStarts[mid] <= offset) lo = mid;
+      else hi = mid - 1;
+    }
+    const rawStart = lines[lo].rawStart;
+    return rawStart === null ? null : rawStart + (offset - derivedStarts[lo]);
   };
 }

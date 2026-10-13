@@ -89,8 +89,34 @@ export function splitChatThinking(content: string): ChatThinkingSplit {
   }
 
   const lines = content.split('\n');
-  const kept: string[] = [];
-  const folded: string[] = [];
+  const scan = scanThinkingSections(lines);
+  if (scan.blocks === 0) return { body: content, reasoning: null, blocks: 0 };
+
+  const kept = scan.kept.map((index) => lines[index]);
+  const folded = scan.sections.map(([start, end]) => unquoteSection(lines.slice(start, end)));
+  return {
+    // Removing a section from the middle leaves the blank lines that fenced it
+    // on both sides; collapsing them is what stops a gap opening where the
+    // quote used to be.
+    body: kept.join('\n').replace(/\n{3,}/g, '\n\n').trim(),
+    reasoning: folded.join('\n\n').replace(/^\n+/, '').replace(/\n+$/, ''),
+    blocks: scan.blocks,
+  };
+}
+
+/** Which lines {@link splitChatThinking} keeps, and which it folds. */
+interface ThinkingScan {
+  /** Indices of the lines left in the body, in order. */
+  readonly kept: number[];
+  /** Each section's quoted lines below its heading, as `[start, end)` line indices. */
+  readonly sections: Array<[number, number]>;
+  readonly blocks: number;
+}
+
+/** The one reading of "what counts as a section" both answers below are built from. */
+function scanThinkingSections(lines: readonly string[]): ThinkingScan {
+  const kept: number[] = [];
+  const sections: Array<[number, number]> = [];
   let blocks = 0;
   let index = 0;
 
@@ -98,7 +124,7 @@ export function splitChatThinking(content: string): ChatThinkingSplit {
     const heading = CHAT_THINKING_HEADING.exec(lines[index]);
     const opensQuote = index === 0 || !lines[index - 1].startsWith('>');
     if (!heading || !opensQuote) {
-      kept.push(lines[index]);
+      kept.push(index);
       index += 1;
       continue;
     }
@@ -106,18 +132,106 @@ export function splitChatThinking(content: string): ChatThinkingSplit {
     while (end < lines.length && lines[end].startsWith('>')) end += 1;
     const declared = heading[1] ? Number.parseInt(heading[1], 10) : 1;
     blocks += Number.isFinite(declared) && declared > 0 ? declared : 1;
-    folded.push(unquoteSection(lines.slice(index + 1, end)));
+    sections.push([index + 1, end]);
     index = end;
   }
+  return { kept, sections, blocks };
+}
 
-  if (blocks === 0) return { body: content, reasoning: null, blocks: 0 };
+// ============================================================================
+// Where each line of the split came from (Issue #3554)
+// ============================================================================
 
-  return {
-    // Removing a section from the middle leaves the blank lines that fenced it
-    // on both sides; collapsing them is what stops a gap opening where the
-    // quote used to be.
-    body: kept.join('\n').replace(/\n{3,}/g, '\n\n').trim(),
-    reasoning: folded.join('\n\n').replace(/^\n+/, '').replace(/\n+$/, ''),
-    blocks,
-  };
+/**
+ * One line of {@link splitChatThinking}'s `body` or `reasoning`: its text, the
+ * line of the input it is the end of, and how many characters of that line's
+ * front it lost. `line` is null for a line the split made up (the blank line
+ * that joins two reasoning sections) — it is the end of no input line.
+ */
+export interface ChatThinkingLineOrigin {
+  readonly text: string;
+  readonly line: number | null;
+  readonly column: number;
+}
+
+/** What {@link chatThinkingLineOrigins} answers. */
+export interface ChatThinkingLineOrigins {
+  /** `body.split('\n')`, line for line, with where each line came from. */
+  readonly body: ChatThinkingLineOrigin[];
+  /** The same for `reasoning`; empty when it is null or empty. */
+  readonly reasoning: ChatThinkingLineOrigin[];
+}
+
+/**
+ * [Issue #3554] Where each line of {@link splitChatThinking}'s answer came from.
+ *
+ * The split trims the body, collapses its blank runs and joins the reasoning
+ * sections with a blank line, and none of that says which input line a kept
+ * line is. Search lined the two up afterwards by matching strings, under a rule
+ * that only knew lines losing a FRONT — so a hard break on the last line, the
+ * `\r` a trim ate, a full-width space in front, or two legacy sections joined by
+ * a blank line no input line holds, mapped nothing. This walks the same scan
+ * and the same steps, keeping each line's origin, so nothing has to be matched.
+ *
+ * The texts join to exactly the strings {@link splitChatThinking} answers for
+ * the same input (the caller can check, and should not map when they differ).
+ *
+ * @param content - The same input {@link splitChatThinking} was given
+ */
+export function chatThinkingLineOrigins(content: string): ChatThinkingLineOrigins {
+  const lines = content.split('\n');
+  const whole = (index: number): ChatThinkingLineOrigin => ({ text: lines[index], line: index, column: 0 });
+  const scan: ThinkingScan = content.includes(CHAT_THINKING_LABEL)
+    ? scanThinkingSections(lines)
+    : { kept: [], sections: [], blocks: 0 };
+  if (scan.blocks === 0) return { body: lines.map((_, index) => whole(index)), reasoning: [] };
+
+  // body: join, `\n{3,}` → `\n\n` (a run of two or more empty lines is one), trim.
+  const collapsed: ChatThinkingLineOrigin[] = [];
+  for (const index of scan.kept) {
+    const previous = collapsed[collapsed.length - 1];
+    if (lines[index] === '' && previous?.text === '') {
+      // Keep the first of the run: which empty line stands for it does not
+      // change any offset inside the text.
+      continue;
+    }
+    collapsed.push(whole(index));
+  }
+  const body = trimLines(collapsed);
+
+  // reasoning: each section unquoted and its blank edges dropped, joined by a
+  // made-up blank line, then the blank edges of the whole dropped.
+  const joined: ChatThinkingLineOrigin[] = [];
+  scan.sections.forEach(([start, end], position) => {
+    if (position > 0) joined.push({ text: '', line: null, column: 0 });
+    const section: ChatThinkingLineOrigin[] = [];
+    for (let index = start; index < end; index++) {
+      const text = lines[index].replace(/^>[ \t]?/, '');
+      section.push({ text, line: index, column: lines[index].length - text.length });
+    }
+    while (section.length > 0 && section[0].text === '') section.shift();
+    while (section.length > 0 && section[section.length - 1].text === '') section.pop();
+    // An empty section still joins as one empty string.
+    joined.push(...(section.length > 0 ? section : [{ text: '', line: null, column: 0 }]));
+  });
+  while (joined.length > 0 && joined[0].text === '') joined.shift();
+  while (joined.length > 0 && joined[joined.length - 1].text === '') joined.pop();
+
+  return { body, reasoning: joined };
+}
+
+/** `String.prototype.trim` over joined lines: blank edge lines go, the edge lines lose their whitespace. */
+function trimLines(lines: ChatThinkingLineOrigin[]): ChatThinkingLineOrigin[] {
+  let first = 0;
+  let last = lines.length - 1;
+  while (first <= last && lines[first].text.trim() === '') first += 1;
+  while (last >= first && lines[last].text.trim() === '') last -= 1;
+  if (first > last) return [];
+  const out = lines.slice(first, last + 1);
+  const head = out[0];
+  const headText = head.text.trimStart();
+  out[0] = { ...head, text: headText, column: head.column + head.text.length - headText.length };
+  const tail = out[out.length - 1];
+  out[out.length - 1] = { ...tail, text: tail.text.trimEnd() };
+  return out;
 }

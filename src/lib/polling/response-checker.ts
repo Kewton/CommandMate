@@ -53,6 +53,7 @@ import { recordPromptDedupSkip } from './prompt-dedup-state';
 import {
   isDuplicateResponse,
   claimDuplicateResponseSkipLog,
+  resetDuplicateResponseSkipStreak,
   claimStructuredHistoryRecheck,
   markStructuredHistoryRecheckPending,
   settleStructuredHistoryRecheck,
@@ -659,7 +660,13 @@ function extractCompletedTurn(
     // skipped on the line count ("no new output"), which says nothing about
     // whether the prompt is still on screen, and neither do the cursor returns
     // further down.
-    if (result) resetDuplicatePromptSkipStreak(pollerKey);
+    //
+    // Issue #3552: the same frame ends a run of duplicate response ticks for
+    // the same reason — an unfinished frame is not the saved reply.
+    if (result) {
+      resetDuplicatePromptSkipStreak(pollerKey);
+      resetDuplicateResponseSkipStreak(pollerKey);
+    }
 
     // DR-004 windowing: Only check tail lines
     const { thinkingPattern } = getCliToolPatterns(cliToolId);
@@ -1463,6 +1470,10 @@ export async function checkForResponse(
       promptDetection.isPrompt && isNumberedDialogVouched(cliToolId, promptDetection, output);
 
     if (promptIsLive) {
+      // Issue #3552: a live prompt is not the saved reply, so a run of
+      // duplicate response ticks is over; the response hash is kept (a resume
+      // after the answer must not re-save the reply underneath, #2230).
+      resetDuplicateResponseSkipStreak(pollerKey);
       return savePromptMessage(ctx, promptDetection, result, isFullScreenTui);
     }
     // Issue #3538: a finished frame without a live prompt ends the run of
@@ -1471,6 +1482,8 @@ export async function checkForResponse(
 
     // Validate response content is not empty
     if (!result.response || result.response.trim() === '') {
+      // Issue #3552: an empty response is not the saved reply either.
+      resetDuplicateResponseSkipStreak(pollerKey);
       updateSessionState(db, worktreeId, cliToolId, result.lineCount, resolvedInstanceId);
       return false;
     }
@@ -1484,6 +1497,8 @@ export async function checkForResponse(
 
     // If cleaned response is empty or just "[No content]", skip saving
     if (!cleanedResponse || cleanedResponse.trim() === '' || cleanedResponse === '[No content]') {
+      // Issue #3552: nor is one that cleans down to nothing.
+      resetDuplicateResponseSkipStreak(pollerKey);
       updateSessionState(db, worktreeId, cliToolId, result.lineCount, resolvedInstanceId);
       clearInProgressMessageId(db, worktreeId, cliToolId, resolvedInstanceId);
       return false;

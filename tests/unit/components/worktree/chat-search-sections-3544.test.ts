@@ -4,8 +4,10 @@
  * `chatMarkdownRawOffsets` maps each part `ChatMarkdownBody` hands react-markdown
  * back to the message as written; a part it answers `null` for draws its mermaid
  * sources without a raw range, and search falls back to `findMermaidFences`.
- * These pin which real inputs take that fallback — so it is reachable, and the
- * fallback has to read fences the way Markdown does.
+ * These pinned which real inputs took that fallback — so it was reachable, and
+ * the fallback has to read fences the way Markdown does. Since #3554 the answer
+ * and the reasoning map from where the split took each line, and the inputs
+ * below that used to be null line up.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -30,8 +32,13 @@ describe('[#3544] chatMarkdownRawOffsets: when the answer cannot be lined up', (
     ['trailing spaces on its last line (a hard break)', [...THINKING, 'Answer.', 'Done.  ']],
     ['a trailing tab', [...THINKING, 'Answer.', 'Done.\t']],
     ['CRLF line endings (the last line’s `\\r`)', [...THINKING, 'Answer.\r', 'Done.\r']],
-  ])('is null for an answer with %s — the split trims it off', (_label, lines) => {
-    expect(offsetsOf(lines.join('\n')).body).toBeNull();
+  ])('[#3554] lines up an answer with %s — the split trims it off (was null)', (_label, lines) => {
+    const content = lines.join('\n');
+    const split = splitChatMarkdownBody(content);
+    const toRaw = chatMarkdownRawOffsets(content, split).body;
+    expect(toRaw).not.toBeNull();
+    expect(toRaw!(split.body.indexOf('Answer.'))).toBe(content.indexOf('Answer.'));
+    expect(toRaw!(split.body.length)).toBe(content.indexOf('Done.') + 'Done.'.length);
   });
 
   it('negative control: nothing folded is the identity, trailing whitespace or not', () => {
@@ -45,10 +52,12 @@ describe('[#3544] chatMarkdownRawOffsets: the reasoning', () => {
     expect(offsetsOf([...THINKING, 'Answer.'].join('\n')).reasoning).not.toBeNull();
   });
 
-  it('is null for two Thinking sections — the blank line that joins them is in neither', () => {
+  it('[#3554] lines up two Thinking sections — the blank line that joins them is in neither (was null)', () => {
     const content = ['> **Thinking**', '> first', '', 'Answer.', '', '> **Thinking**', '> second', '', 'More.'].join('\n');
     const split = splitChatMarkdownBody(content);
     expect(split.reasoning).toBe('first\n\nsecond');
-    expect(chatMarkdownRawOffsets(content, split).reasoning).toBeNull();
+    const toRaw = chatMarkdownRawOffsets(content, split).reasoning;
+    expect(toRaw).not.toBeNull();
+    expect(toRaw!(split.reasoning!.indexOf('second'))).toBe(content.indexOf('second'));
   });
 });

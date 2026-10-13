@@ -13,7 +13,7 @@
  * reads those back off the DOM.
  */
 
-import type { Element as HastElement, ElementContent, Root, RootContent } from 'hast';
+import type { ElementContent, Root, RootContent } from 'hast';
 import type { MatchPosition, TextNodeEntry } from './terminal-highlight-dom';
 import { IDENTITY_RAW_OFFSET, type RawOffsetMapper } from './terminal-highlight-offsets';
 
@@ -21,6 +21,10 @@ import { IDENTITY_RAW_OFFSET, type RawOffsetMapper } from './terminal-highlight-
  * [Issue #3523] On an element Markdown drew: where it is in the message as
  * written, then each of its own text children in order — `s,e;s,e,len;,,len`
  * (a child with no position has empty offsets). Read only by search.
+ *
+ * [Issue #3554] A range whose raw lines are not next to each other names every
+ * span it is made of: the element's as `s,e,s2,e2…`, a text child's as
+ * `s,e,len,s2,e2…`. Nothing is placed in the gaps between them.
  */
 export const SEARCH_RAW_ATTR = 'data-search-raw';
 
@@ -30,33 +34,101 @@ const SEARCH_RAW_PROPERTY = 'dataSearchRaw';
 const offsetOf = (point: { offset?: number } | undefined): number | null =>
   typeof point?.offset === 'number' ? point.offset : null;
 
-function rawRange(
-  node: HastElement | ElementContent,
-  toRaw: RawOffsetMapper,
-): { start: number; end: number } | null {
-  const start = offsetOf(node.position?.start);
-  const end = offsetOf(node.position?.end);
-  if (start === null || end === null) return null;
-  const rawStart = toRaw(start);
-  const rawEnd = toRaw(end);
-  return rawStart !== null && rawEnd !== null && rawEnd >= rawStart ? { start: rawStart, end: rawEnd } : null;
+/** A `[start, end)` range of the raw message. */
+interface RawSpan {
+  start: number;
+  end: number;
 }
 
-function annotate(node: Root | RootContent, toRaw: RawOffsetMapper): void {
+/**
+ * [Issue #3554] Where the derived range `[start, end)` is in the raw message,
+ * as the raw spans its lines came from: one span when they are next to each
+ * other there, several when the deriver left raw lines out between them
+ * (chat's answer with a `> **Thinking**` section folded out from between two
+ * of its lines). A span ends after its line's raw `\n`. `null` when some line
+ * does not map. Without `source` the line breaks are unknown: the two ends.
+ */
+function rawSpans(start: number, end: number, toRaw: RawOffsetMapper, source: string | undefined): RawSpan[] | null {
+  const ends = (): RawSpan[] | null => {
+    const rawStart = toRaw(start);
+    const rawEnd = toRaw(end);
+    return rawStart !== null && rawEnd !== null && rawEnd >= rawStart ? [{ start: rawStart, end: rawEnd }] : null;
+  };
+  if (source === undefined) return ends();
+  const spans: RawSpan[] = [];
+  let lineStart = start;
+  for (let at = source.indexOf('\n', start); ; at = source.indexOf('\n', at + 1)) {
+    const isLast = at === -1 || at >= end;
+    const rawStart = toRaw(lineStart);
+    const lineEnd = toRaw(isLast ? end : at);
+    if (rawStart === null || lineEnd === null) return null;
+    const rawEnd = lineEnd + (isLast ? 0 : 1);
+    if (rawEnd < rawStart) return null;
+    const previous = spans[spans.length - 1];
+    if (previous && previous.end === rawStart) previous.end = rawEnd;
+    else spans.push({ start: rawStart, end: rawEnd });
+    if (isLast) return spans;
+    lineStart = at + 1;
+  }
+}
+
+const formatSpans = (spans: readonly RawSpan[]): string => spans.map((span) => `${span.start},${span.end}`).join(',');
+
+/**
+ * [Issue #3554] One text child's segments: `s,e,len` for its whole range, or —
+ * when its raw range has gaps ({@link rawSpans}) — one `s,e,len` per drawn line
+ * placed only in the raw line it came from, when its text has a `\n` for every
+ * line break of the source (else one `s,e,len,s2,e2,…` naming every span, so
+ * the gaps are still no candidates: a `&NewLine;` adds a `\n` the source has
+ * not, inline code turns one into a space). A single range would span the
+ * folded lines, and search would place the answer's text on the same text
+ * inside the reasoning.
+ */
+function textSegments(
+  child: ElementContent & { type: 'text' },
+  toRaw: RawOffsetMapper,
+  source: string | undefined,
+): string[] {
+  const length = child.value.length;
+  const start = offsetOf(child.position?.start);
+  const end = offsetOf(child.position?.end);
+  const spans = start === null || end === null ? null : rawSpans(start, end, toRaw, source);
+  if (!spans) return [`,,${length}`];
+  if (spans.length === 1 || source === undefined || start === null || end === null) {
+    return [`${spans[0].start},${spans[0].end},${length}`];
+  }
+  const breaks: number[] = [];
+  for (let at = source.indexOf('\n', start); at !== -1 && at < end; at = source.indexOf('\n', at + 1)) breaks.push(at);
+  const pieces = child.value.split('\n');
+  if (pieces.length !== breaks.length + 1) {
+    const [first, ...rest] = spans;
+    return [[`${first.start},${first.end},${length}`, ...rest.map((span) => `${span.start},${span.end}`)].join(',')];
+  }
+  return pieces.map((piece, k) => {
+    const isLast = k === pieces.length - 1;
+    const pieceLength = piece.length + (isLast ? 0 : 1);
+    // One drawn line: no `\n` inside it, so one span; its own `\n` is the raw one after it.
+    const line = rawSpans(k === 0 ? start : breaks[k - 1] + 1, isLast ? end : breaks[k], toRaw, source);
+    return line ? `${line[0].start},${line[0].end + (isLast ? 0 : 1)},${pieceLength}` : `,,${pieceLength}`;
+  });
+}
+
+function annotate(node: Root | RootContent, toRaw: RawOffsetMapper, source: string | undefined): void {
   if (node.type !== 'root' && node.type !== 'element') return;
   if (node.type === 'element') {
-    const own = rawRange(node, toRaw);
+    const start = offsetOf(node.position?.start);
+    const end = offsetOf(node.position?.end);
+    const own = start === null || end === null ? null : rawSpans(start, end, toRaw, source);
     if (own) {
-      const items = [`${own.start},${own.end}`];
+      const items = [formatSpans(own)];
       for (const child of node.children) {
         if (child.type !== 'text') continue;
-        const range = rawRange(child, toRaw);
-        items.push(range ? `${range.start},${range.end},${child.value.length}` : `,,${child.value.length}`);
+        items.push(...textSegments(child, toRaw, source));
       }
       node.properties = { ...node.properties, [SEARCH_RAW_PROPERTY]: items.join(';') };
     }
   }
-  for (const child of node.children) annotate(child, toRaw);
+  for (const child of node.children) annotate(child, toRaw, source);
 }
 
 /**
@@ -66,11 +138,16 @@ function annotate(node: Root | RootContent, toRaw: RawOffsetMapper): void {
  * the part cannot be mapped, and nothing is marked. Run it after sanitizing
  * (the schema would drop the attribute) and before code highlighting (which
  * replaces a code block's text with spans — the same text, unmarked).
+ *
+ * [Issue #3554] `source` is that string (react-markdown's file value when not
+ * given): with it, a text child whose lines come from raw lines that are not
+ * next to each other is placed line by line ({@link textSegments}).
  */
-export function rehypeSearchRawText(options?: { toRaw?: RawOffsetMapper | null }) {
+export function rehypeSearchRawText(options?: { toRaw?: RawOffsetMapper | null; source?: string }) {
   const toRaw = options?.toRaw === undefined ? IDENTITY_RAW_OFFSET : options.toRaw;
-  return (tree: Root): void => {
-    if (toRaw) annotate(tree, toRaw);
+  return (tree: Root, file?: { value?: unknown }): void => {
+    const source = options?.source ?? (typeof file?.value === 'string' ? file.value : undefined);
+    if (toRaw) annotate(tree, toRaw, source);
   };
 }
 
@@ -88,42 +165,81 @@ interface Segment {
   start: number | null;
   end: number | null;
   length: number;
+  /** [Issue #3554] The raw spans it may be placed in (`[start, end)` when one). */
+  spans: RawSpan[];
 }
 
-function parseAttr(value: string): { start: number; end: number; segments: Segment[] } | null {
+/** `s,e[,s2,e2…]` → spans, or null when malformed. */
+function parseSpans(parts: readonly string[]): RawSpan[] | null {
+  if (parts.length % 2 !== 0) return null;
+  const spans: RawSpan[] = [];
+  for (let k = 0; k < parts.length; k += 2) {
+    const start = Number.parseInt(parts[k], 10);
+    const end = Number.parseInt(parts[k + 1], 10);
+    if (!Number.isInteger(start) || !Number.isInteger(end) || end < start) return null;
+    spans.push({ start, end });
+  }
+  return spans;
+}
+
+function parseAttr(value: string): { start: number; end: number; spans: RawSpan[]; segments: Segment[] } | null {
   const [own, ...rest] = value.split(';');
-  const [start, end] = own.split(',').map((part) => Number.parseInt(part, 10));
-  if (!Number.isInteger(start) || !Number.isInteger(end)) return null;
+  const spans = parseSpans(own.split(','));
+  if (!spans || spans.length === 0) return null;
   const segments: Segment[] = [];
   for (const item of rest) {
-    const [s, e, len] = item.split(',');
+    const [s, e, len, ...more] = item.split(',');
     const length = Number.parseInt(len, 10);
     if (!Number.isInteger(length) || length < 0) return null;
-    const segStart = s === '' ? null : Number.parseInt(s, 10);
-    const segEnd = e === '' ? null : Number.parseInt(e, 10);
-    if ((segStart !== null && !Number.isInteger(segStart)) || (segEnd !== null && !Number.isInteger(segEnd))) {
-      return null;
+    if (s === '' || e === '') {
+      segments.push({ start: null, end: null, length, spans: [] });
+      continue;
     }
-    segments.push({ start: segStart, end: segEnd, length });
+    const segSpans = parseSpans([s, e, ...more]);
+    if (!segSpans) return null;
+    segments.push({ start: segSpans[0].start, end: segSpans[segSpans.length - 1].end, length, spans: segSpans });
   }
-  return { start, end, segments };
+  return { start: spans[0].start, end: spans[spans.length - 1].end, spans, segments };
 }
 
 /**
- * Place each character of `text` in `raw[from, to)` in order, skipping what
+ * Place each character of `text` in the raw `spans`, in order, skipping what
  * Markdown did not draw (markers, a continuation line's `>` / indentation, an
- * escape's backslash). `null` when some character is not there.
+ * escape's backslash) and never in a gap between two spans (Issue #3554: the
+ * lines a chat part left out). `null` when some character is not there —
+ * except, across a gap, whitespace the raw text does not hold (a `&NewLine;`,
+ * a line break inline code drew as a space), which is left unplaced (`-1`)
+ * rather than looked for past the gap.
  */
-function alignSubsequence(text: string, raw: string, from: number, to: number): number[] | null {
+function alignSubsequence(text: string, raw: string, spans: readonly RawSpan[], from = spans[0]?.start ?? 0): number[] | null {
   // UTF-16 units, as every other offset here (an emoji is two).
-  if (raw.slice(from, from + text.length) === text) return Array.from({ length: text.length }, (_, k) => from + k);
+  if (spans.length === 1 && raw.slice(from, from + text.length) === text) {
+    return Array.from({ length: text.length }, (_, k) => from + k);
+  }
   const out: number[] = [];
   let cursor = from;
+  let span = 0;
   for (const ch of text) {
     // `for…of` walks code points; offsets are UTF-16 units, as everywhere else.
     for (let k = 0; k < ch.length; k++) {
-      const idx = raw.indexOf(ch[k], cursor);
-      if (idx === -1 || idx >= to) return null;
+      let idx = -1;
+      let at = span;
+      for (; at < spans.length; at++) {
+        if (spans[at].end <= cursor) continue;
+        const found = raw.indexOf(ch[k], Math.max(cursor, spans[at].start));
+        if (found !== -1 && found < spans[at].end) {
+          idx = found;
+          break;
+        }
+      }
+      if (idx === -1) {
+        if (spans.length > 1 && /\s/.test(ch[k])) {
+          out.push(-1);
+          continue;
+        }
+        return null;
+      }
+      span = at;
       out.push(idx);
       cursor = idx + 1;
     }
@@ -188,14 +304,14 @@ export function mapMarkdownPositionsToDom(
       const text = domText.slice(textOffset, textOffset + seg.length);
       let placed: number[] | null = null;
       if (seg.start !== null && seg.end !== null) {
-        placed = alignSubsequence(text, sourceText, seg.start, seg.end);
+        placed = alignSubsequence(text, sourceText, seg.spans);
         if (placed) cursor = Math.max(cursor, seg.end);
       } else if (text.trim() !== '') {
-        placed = alignSubsequence(text, sourceText, cursor, parsed.end);
-        if (placed && placed.length > 0) cursor = placed[placed.length - 1] + 1;
+        placed = alignSubsequence(text, sourceText, parsed.spans, cursor);
+        if (placed && placed.length > 0) cursor = placed.reduce((max, rawIdx) => Math.max(max, rawIdx + 1), cursor);
       }
       placed?.forEach((rawIdx, k) => {
-        if (rawIdx < rawToDom.length && rawToDom[rawIdx] === -1) rawToDom[rawIdx] = domAt[textOffset + k];
+        if (rawIdx >= 0 && rawIdx < rawToDom.length && rawToDom[rawIdx] === -1) rawToDom[rawIdx] = domAt[textOffset + k];
       });
       textOffset += seg.length;
     }

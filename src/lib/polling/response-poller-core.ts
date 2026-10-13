@@ -7,9 +7,9 @@ import {
   initTuiAccumulator,
   clearTuiAccumulator,
 } from '../tui-accumulator';
-import { clearPromptHashCache, renamePromptHashCacheKey } from './prompt-dedup';
-import { clearResponseHashCache, renameResponseHashCacheKey } from './response-dedup';
-import { renamePromptDedupSkips } from './prompt-dedup-state';
+import { clearPromptHashCache, renamePromptHashCacheKeys } from './prompt-dedup';
+import { clearResponseHashCache, renameResponseHashCacheKeys } from './response-dedup';
+import { renamePromptDedupSkipsBatch } from './prompt-dedup-state';
 import { checkForResponse, flushPendingScrapedResponse } from './response-checker';
 import { broadcastTerminalSnapshot } from '@/lib/realtime/terminal-broadcast';
 import { findTerminalSessionRefusal } from '@/lib/realtime/terminal-session-ownership';
@@ -699,8 +699,11 @@ function splitPollerKey(pollerKey: string): { worktreeId: string; instanceId: st
  * one in-flight TUI response may be truncated at the rename boundary; the next
  * turn accumulates normally.
  *
- * Takes the whole batch because IDs can swap (A→B, B→A): every source key is
- * removed before any destination key is written.
+ * Takes the whole batch because IDs can swap (A→B, B→A) or chain (A→B→C):
+ * every source key is removed before any destination key is written. That
+ * includes the dedup state (Issue #3553) — of running pollers and paused chains
+ * alike — which is lifted off every source key in one pass and only then
+ * written, so a pair handled early cannot overwrite a source handled later.
  *
  * @param renames - Worktree ID pairs being applied
  * @param resolveCliToolId - Maps a poller's (worktree, instance) back to its CLI
@@ -769,22 +772,56 @@ export function migrateResponsePollerWorktreeIds(
     carried.set(move.newKey, { startedAt: pollingStartTimes.get(move.oldKey) });
     pollingStartTimes.delete(move.oldKey);
 
-    renamePromptHashCacheKey(move.oldKey, move.newKey);
-    renameResponseHashCacheKey(move.oldKey, move.newKey);
-    // Issue #1695: the prompt hash moved on the line above, so the guard keeps
-    // suppressing the prompt on screen under the new ID. Its tally has to move
-    // with it, or `capture --json` reports zero skips for a session that is
-    // still skipping. Old worktree ID comes back out of the key we just left.
-    const movedFrom = splitPollerKey(move.oldKey);
-    if (movedFrom) {
-      renamePromptDedupSkips(movedFrom.worktreeId, move.newWorktreeId, move.cliToolId, move.instanceId);
-    }
     clearTuiAccumulator(move.oldKey);
   }
+
+  // Stop the abandoned pollers before any dedup state is written: the stop
+  // clears every cache under its key, and that key can be the destination of
+  // another move in this batch (A:x paused → B:x while B:x is abandoned).
+  // Stopped afterwards, it erased the state that had just arrived (#3553).
+  // An abandoned key is never a move source, so nothing still to be moved is
+  // lost here; and the paused chains are collected after it, as before, so a
+  // pause the stop ends is not carried.
   for (const pollerKey of abandoned) {
     stopPollingByKey(pollerKey);
     logger.warn('poller:migrate-abandoned', { pollerKey });
   }
+
+  // Issue #2230: a chain paused on a prompt has no timer, so the loops here
+  // never see it — but it is holding the response hash for the turn it paused
+  // on, and `/respond` will resume it under the NEW ID. Move the hash and the
+  // pause mark with it; the chain itself stays paused until that resume.
+  const pausedMoves: Array<{ oldKey: string; newKey: string }> = [];
+  for (const pollerKey of Array.from(coordinator.pausedOnPrompt)) {
+    const parts = splitPollerKey(pollerKey);
+    if (!parts) continue;
+    const newWorktreeId = targets.get(parts.worktreeId);
+    if (!newWorktreeId) continue;
+    pausedMoves.push({ oldKey: pollerKey, newKey: `${newWorktreeId}:${parts.instanceId}` });
+  }
+
+  // Issue #3553: the dedup state of the whole batch moves in one call per map
+  // family, each lifting every source before writing any destination. Re-keyed
+  // pair by pair, a swap left A with its own state and B empty.
+  renamePromptHashCacheKeys(moves);
+  renameResponseHashCacheKeys([...moves, ...pausedMoves]);
+  // Issue #1695: the prompt hash moved above, so the guard keeps suppressing
+  // the prompt on screen under the new ID. Its tally has to move with it, or
+  // `capture --json` reports zero skips for a session that is still skipping.
+  // Old worktree ID comes back out of the key being left.
+  renamePromptDedupSkipsBatch(
+    moves.flatMap((move) => {
+      const movedFrom = splitPollerKey(move.oldKey);
+      return movedFrom
+        ? [{
+            oldWorktreeId: movedFrom.worktreeId,
+            newWorktreeId: move.newWorktreeId,
+            cliToolId: move.cliToolId,
+            instanceId: move.instanceId,
+          }]
+        : [];
+    })
+  );
 
   // Phase 2: restart each poller under its new identity.
   for (const move of moves) {
@@ -796,23 +833,11 @@ export function migrateResponsePollerWorktreeIds(
     scheduleNextResponsePoll(move.newWorktreeId, move.cliToolId, move.instanceId);
   }
 
-  // Issue #2230: a chain paused on a prompt has no timer, so the loop above
-  // never sees it — but it is holding the response hash for the turn it paused
-  // on, and `/respond` will resume it under the NEW ID. Move the hash and the
-  // pause mark with it; the chain itself stays paused until that resume.
-  const pausedMoves: Array<{ oldKey: string; newKey: string }> = [];
-  for (const pollerKey of Array.from(coordinator.pausedOnPrompt)) {
-    const parts = splitPollerKey(pollerKey);
-    if (!parts) continue;
-    const newWorktreeId = targets.get(parts.worktreeId);
-    if (!newWorktreeId) continue;
-    pausedMoves.push({ oldKey: pollerKey, newKey: `${newWorktreeId}:${parts.instanceId}` });
-  }
+  // Issue #2230: the pause marks of the chains collected above follow their
+  // hashes (moved with the batch). All removed before any is added, for the
+  // same swap reason.
   for (const move of pausedMoves) coordinator.pausedOnPrompt.delete(move.oldKey);
-  for (const move of pausedMoves) {
-    renameResponseHashCacheKey(move.oldKey, move.newKey);
-    coordinator.pausedOnPrompt.add(move.newKey);
-  }
+  for (const move of pausedMoves) coordinator.pausedOnPrompt.add(move.newKey);
 
   return moves;
 }
