@@ -1324,6 +1324,15 @@ const OVERFLOW_PANEL_REGION_SELECTOR = '[data-testid="terminal-split-container"]
  * user wanted. A press inside any `[data-floating-layer]` (the chip's reason
  * popover) counts as inside.
  *
+ * Issue #3660: while open the panel marks itself `data-floating-layer="open"`
+ * like the header tools' "…" list, so the overlaid activity pane stands down:
+ * one Escape (or a press outside) closes the panel, not the pane under it. The
+ * chip folded in here (an `[data-activity-entry]` of the pane, and the panel's
+ * first control) would otherwise close both. The mark, not `preventDefault`:
+ * the pane's document listener predates the panel's, and the chip's reason
+ * (its document listener comes after the panel's) still closes with the panel
+ * on an Escape neither the chip nor anything above claimed.
+ *
  * Issue #3592: `parked` is drawn after `children` while the panel is open,
  * and in a hidden box beside the button while it is closed — for a slot
  * another component portals into, which must exist in either state.
@@ -1452,7 +1461,7 @@ export function ActionBarItemsOverflow({
             role="dialog"
             aria-label={label}
             data-testid="split-action-bar-items-panel"
-            data-floating-layer="true"
+            data-floating-layer="open"
             style={
               position
                 ? { top: position.top, left: position.left, maxWidth: position.maxWidth }
