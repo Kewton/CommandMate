@@ -99,7 +99,7 @@ describe('Icon-rail settings menu opens the settings modal (Issue #2709, moved f
 
     await waitFor(() => expect(screen.getByTestId('modal-panel')).toBeInTheDocument());
     expect(routerMock.push).not.toHaveBeenCalled();
-    expect(document.activeElement).toBe(screen.getByTestId('modal-panel'));
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByTestId('modal-panel')));
   });
 
   it('returns focus to the gear when the modal is closed', async () => {
