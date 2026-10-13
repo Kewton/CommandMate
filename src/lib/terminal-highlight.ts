@@ -118,7 +118,16 @@ export function isCSSHighlightSupported(): boolean {
 // Internal namespace-aware implementations
 // ============================================================================
 
+/**
+ * [Issue #3661] The ranges each container holds, per highlight name. History
+ * and chat mark one message container per call, all under one namespace; the
+ * namespace's `CSS.highlights` entry is the union of its containers' ranges, so
+ * a call for one message no longer replaces the marks of the others.
+ */
+const rangesByNamespace = new Map<string, Map<Element, Range[]>>();
+
 function clearHighlightsInternal(namespace: HighlightNamespace): void {
+  rangesByNamespace.delete(namespace.highlightName);
   if (isCSSHighlightSupported()) {
     CSS.highlights.delete(namespace.highlightName);
     CSS.highlights.delete(namespace.currentHighlightName);
@@ -153,7 +162,16 @@ function applyHighlightsInternal(
   options?: HighlightOptions
 ): void {
   if (matchPositions.length === 0) {
-    clearHighlightsInternal(namespace);
+    // [Issue #3661] Only this container's marks go; the others' stay.
+    const held = rangesByNamespace.get(namespace.highlightName);
+    held?.delete(container);
+    if (held) dropUnmounted(held);
+    if (!held || held.size === 0) {
+      clearHighlightsInternal(namespace);
+      return;
+    }
+    registerRanges(namespace, held);
+    removeOverlayIn(container, namespace);
     return;
   }
 
@@ -168,11 +186,11 @@ function applyHighlightsInternal(
           options.sections ?? [],
         ) ??
         // [Issue #3523] No mermaid source on screen: place hits through the
-        // raw ranges Markdown left on its elements; a hit it cannot place keeps
-        // its offset as before.
-        mapMarkdownPositionsToDom(container, textNodes, options.sourceText, matchPositions)?.map(
-          (pos, k) => pos ?? matchPositions[k],
-        ))
+        // raw ranges Markdown left on its elements. [Issue #3661] A hit it
+        // cannot place is not marked (as with a mermaid message): its offset
+        // is into the raw text, and used as a DOM offset it marked unrelated
+        // text. It still counts — the bar's n/m and stepping are the search's.
+        mapMarkdownPositionsToDom(container, textNodes, options.sourceText, matchPositions))
       : null) ?? matchPositions;
   const ranges = positions.map((pos) => (pos ? buildRange(textNodes, pos.start, pos.end) : null));
   ranges.forEach((range) => {
@@ -182,20 +200,26 @@ function applyHighlightsInternal(
   // Build current match range (always needed for scrolling/overlay)
   const currentRange = ranges[currentIndex] ?? null;
 
-  if (isCSSHighlightSupported()) {
-    const allRanges: Range[] = [];
-
-    ranges.forEach((range, idx) => {
-      if (idx === currentIndex) return;
-      if (range) allRanges.push(range);
-    });
-
-    CSS.highlights.set(namespace.highlightName, new Highlight(...allRanges));
-    CSS.highlights.delete(namespace.currentHighlightName);
+  const ownRanges: Range[] = [];
+  ranges.forEach((range, idx) => {
+    if (idx === currentIndex) return;
+    if (range) ownRanges.push(range);
+  });
+  // [Issue #3661] This container's marks replace only its own; the entry is
+  // registered with every other container's still on screen.
+  let held = rangesByNamespace.get(namespace.highlightName);
+  if (!held) {
+    held = new Map();
+    rangesByNamespace.set(namespace.highlightName, held);
   }
+  held.set(container, ownRanges);
+  registerRanges(namespace, held, container);
 
-  // Always use overlay for the current match (reliable across all browsers)
-  showFallbackOverlay(container, currentRange, namespace);
+  // Always use overlay for the current match (reliable across all browsers).
+  // [Issue #3661] Only the call that holds the current match moves it; a call
+  // for another message removes it only from inside its own container.
+  if (currentIndex >= 0) showFallbackOverlay(container, currentRange, namespace);
+  else removeOverlayIn(container, namespace);
 
   // Scroll current match into view
   if (currentRange) {
@@ -208,6 +232,31 @@ function applyHighlightsInternal(
 }
 
 /**
+ * [Issue #3661] Register the union of the namespace's containers' ranges as its
+ * one `CSS.highlights` entry. A container no longer in the document (a row the
+ * virtualizer unmounted, a removed test fixture) is dropped first.
+ */
+function registerRanges(namespace: HighlightNamespace, held: Map<Element, Range[]>, keep?: Element): void {
+  dropUnmounted(held, keep);
+  if (!isCSSHighlightSupported()) return;
+  const allRanges = Array.from(held.values()).flat();
+  CSS.highlights.set(namespace.highlightName, new Highlight(...allRanges));
+  CSS.highlights.delete(namespace.currentHighlightName);
+}
+
+function dropUnmounted(held: Map<Element, Range[]>, keep?: Element): void {
+  for (const element of Array.from(held.keys())) {
+    if (element !== keep && !element.isConnected) held.delete(element);
+  }
+}
+
+/** [Issue #3661] Remove the namespace's overlay when it is drawn inside `container`. */
+function removeOverlayIn(container: Element, namespace: HighlightNamespace): void {
+  const overlay = document.getElementById(namespace.fallbackOverlayId);
+  if (overlay && container.contains(overlay)) overlay.remove();
+}
+
+/**
  * Fallback highlight: positions a bright overlay div over the current match.
  * No DOM content modification — only adds/moves an absolute-positioned overlay.
  */
@@ -217,6 +266,11 @@ function showFallbackOverlay(
   namespace: HighlightNamespace
 ): void {
   let overlay = document.getElementById(namespace.fallbackOverlayId);
+  // [Issue #3661] The current match moved to another message's container.
+  if (overlay && overlay.parentElement !== container) {
+    overlay.remove();
+    overlay = null;
+  }
 
   if (!currentRange) {
     overlay?.remove();
@@ -320,6 +374,11 @@ export function clearHistoryHighlights(
  * @param options - [Issue #3503] Optional. `sourceText` is the message as
  *   written; pass it for a Markdown body so hits inside / after mermaid
  *   diagrams land on the folded source and the right text.
+ *
+ * [Issue #3661] Call it once per message container: each call replaces that
+ * container's marks only, and the namespace's highlight holds every
+ * container's. The overlay is moved by the call holding the current match
+ * (`currentIndex >= 0`); `clearHistoryHighlights` starts over.
  */
 export function applyHistoryHighlights(
   container: Element,

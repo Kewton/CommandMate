@@ -94,6 +94,23 @@ import { resolveSessionName } from '@/lib/cli-tools/session-name';
 import { resetForeignSessionWarningsForTesting } from '@/lib/tmux/session-ownership';
 import type { Worktree } from '@/types/models';
 import { fakeTmux } from '@tests/unit/guards/fake-tmux-child-process';
+// Imported here, not with `await import()` inside each test (Issue #3662). The
+// first dynamic import of `ws-server` / `relay-delivery` loads their whole module
+// graph, which was charged to whichever test ran first: 2.6 s alone, over the
+// 5000 ms test timeout under load. The timed-out test then kept running behind
+// the next one and shared its `fakeTmux` / `transport`, so the next test saw
+// `transport.subscribe` called twice. Static imports load during collection,
+// which no test timeout covers; `vi.mock` above is hoisted, so they still see
+// the mocks.
+import { setMockDb, closeDbInstance } from '@/lib/db/db-instance';
+import { __internal } from '@/lib/ws-server';
+import { pumpRelayDeliveries } from '@/lib/relay/relay-delivery';
+import { findRelayHoldReason } from '@/lib/relay/relay-readiness';
+import {
+  broadcastTerminalSnapshot,
+  broadcastTerminalSnapshotAfterInteraction,
+} from '@/lib/realtime/terminal-broadcast';
+import * as poller from '@/lib/polling/response-poller-core';
 
 // =============================================================================
 // The case
@@ -131,7 +148,6 @@ beforeEach(async () => {
   db = new Database(':memory:');
   db.pragma('foreign_keys = ON');
   runMigrations(db);
-  const { setMockDb } = await import('@/lib/db/db-instance');
   setMockDb(db);
   upsertWorktree(db, worktree(WORKTREE_ID, WORKTREE_PATH));
   upsertWorktree(db, worktree(PEER_ID, '/nonexistent-3334/this-server/peer'));
@@ -147,7 +163,6 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await settle();
-  const { closeDbInstance } = await import('@/lib/db/db-instance');
   closeDbInstance();
   db.close();
 });
@@ -164,7 +179,6 @@ function socket(): { ws: WebSocket; sent: () => Array<Record<string, unknown>> }
 
 /** A client subscribed to this server's own session, as the subscribe check allows. */
 async function subscribedClient() {
-  const { __internal } = await import('@/lib/ws-server');
   __internal.resetStateForTest();
   const client = socket();
   __internal.registerClientForTest(client.ws);
@@ -186,7 +200,6 @@ function sessionChangesHands(): void {
 
 describe('[#3334] WebSocket terminal', () => {
   it('refuses to subscribe to a session another server owns', async () => {
-    const { __internal } = await import('@/lib/ws-server');
     __internal.resetStateForTest();
     const client = socket();
     __internal.registerClientForTest(client.ws);
@@ -306,7 +319,6 @@ describe('[#3334] relay delivery', () => {
   it('neither reads nor types into a requester session another server owns', async () => {
     const relayId = pendingReply();
     fakeTmux.addSession(SESSION, OTHER_SERVER_PATH);
-    const { pumpRelayDeliveries } = await import('@/lib/relay/relay-delivery');
 
     await pumpRelayDeliveries();
     await settle();
@@ -320,7 +332,6 @@ describe('[#3334] relay delivery', () => {
 
   it('holds it as foreign_session', async () => {
     fakeTmux.addSession(SESSION, OTHER_SERVER_PATH);
-    const { findRelayHoldReason } = await import('@/lib/relay/relay-readiness');
 
     expect(await findRelayHoldReason(WORKTREE_ID, CLI_TOOL, CLI_TOOL, db)).toBe('foreign_session');
     expect(fakeTmux.touches()).toEqual([]);
@@ -328,7 +339,6 @@ describe('[#3334] relay delivery', () => {
 
   it('reads the pane when the session is its own (negative control)', async () => {
     fakeTmux.addSession(SESSION, WORKTREE_PATH);
-    const { findRelayHoldReason } = await import('@/lib/relay/relay-readiness');
 
     // What it then makes of a blank fake pane is the status detector's business;
     // the point is that it got as far as reading it.
@@ -351,7 +361,6 @@ describe('[#3334] relay readiness asks ownership before isRunning()', () => {
 
   it('claude: does not read the pane of a session another server owns', async () => {
     fakeTmux.addSession(CLAUDE_SESSION, OTHER_SERVER_PATH);
-    const { findRelayHoldReason } = await import('@/lib/relay/relay-readiness');
 
     expect(await findRelayHoldReason(WORKTREE_ID, 'claude', 'claude', db)).toBe('foreign_session');
     await settle();
@@ -362,7 +371,6 @@ describe('[#3334] relay readiness asks ownership before isRunning()', () => {
 
   it('claude: reads the pane of its own session (negative control)', async () => {
     fakeTmux.addSession(CLAUDE_SESSION, WORKTREE_PATH);
-    const { findRelayHoldReason } = await import('@/lib/relay/relay-readiness');
 
     expect(await findRelayHoldReason(WORKTREE_ID, 'claude', 'claude', db)).not.toBe('foreign_session');
     await settle();
@@ -375,7 +383,6 @@ describe('[#3334] relay readiness asks ownership before isRunning()', () => {
 
   it('opencode-v2: does not resume the event stream of a session another server owns', async () => {
     fakeTmux.addSession(OPENCODE_V2_SESSION, OTHER_SERVER_PATH);
-    const { findRelayHoldReason } = await import('@/lib/relay/relay-readiness');
 
     expect(await findRelayHoldReason(WORKTREE_ID, 'opencode-v2', 'opencode-v2', db)).toBe('foreign_session');
     await settle();
@@ -391,7 +398,6 @@ describe('[#3334] relay readiness asks ownership before isRunning()', () => {
     const ownPath = '/nonexistent-3334/this-server/wt-3334-v2-own';
     upsertWorktree(db, worktree(ownId, ownPath));
     fakeTmux.addSession(resolveSessionName('opencode-v2', ownId), ownPath);
-    const { findRelayHoldReason } = await import('@/lib/relay/relay-readiness');
 
     expect(await findRelayHoldReason(ownId, 'opencode-v2', 'opencode-v2', db)).not.toBe('foreign_session');
     await settle();
@@ -413,7 +419,6 @@ describe('[#3334] relay readiness asks ownership before isRunning()', () => {
 describe('[#3334] terminal snapshot push', () => {
   /** A tab watching the worktree room; returns the frames it received. */
   async function watchingTab(): Promise<() => Array<Record<string, unknown>>> {
-    const { __internal } = await import('@/lib/ws-server');
     __internal.resetStateForTest();
     const tab = socket();
     __internal.registerClientForTest(tab.ws);
@@ -428,7 +433,6 @@ describe('[#3334] terminal snapshot push', () => {
   it('neither reads nor pushes it after an interaction either', async () => {
     const frames = await watchingTab();
     fakeTmux.addSession(SESSION, OTHER_SERVER_PATH);
-    const { broadcastTerminalSnapshotAfterInteraction } = await import('@/lib/realtime/terminal-broadcast');
 
     await broadcastTerminalSnapshotAfterInteraction(WORKTREE_ID, CLI_TOOL, undefined, [0]);
     await settle();
@@ -440,7 +444,6 @@ describe('[#3334] terminal snapshot push', () => {
   it('reads and pushes its own session (negative control)', async () => {
     const frames = await watchingTab();
     fakeTmux.addSession(SESSION, WORKTREE_PATH);
-    const { broadcastTerminalSnapshot } = await import('@/lib/realtime/terminal-broadcast');
 
     await broadcastTerminalSnapshot(WORKTREE_ID, CLI_TOOL);
     await settle();
@@ -483,7 +486,6 @@ describe('[#3334] response poller tick', () => {
 
   /** Every room frame the tab received, unwrapped. */
   async function roomFrames(worktreeId: string): Promise<() => Array<Record<string, unknown>>> {
-    const { __internal } = await import('@/lib/ws-server');
     __internal.resetStateForTest();
     const tab = socket();
     __internal.registerClientForTest(tab.ws);
@@ -497,7 +499,6 @@ describe('[#3334] response poller tick', () => {
 
   /** Start a poller and let exactly one tick run. */
   async function runOneTick(worktreeId: string): Promise<void> {
-    const poller = await import('@/lib/polling/response-poller-core');
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     try {
       poller.startPolling(worktreeId, CLI_TOOL);
@@ -513,7 +514,6 @@ describe('[#3334] response poller tick', () => {
     const frames = await roomFrames(WORKTREE_ID);
     fakeTmux.addSession(SESSION, OTHER_SERVER_PATH);
     fakeTmux.setPane(SESSION, APPROVAL);
-    const poller = await import('@/lib/polling/response-poller-core');
     const ended: string[][] = [];
 
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
