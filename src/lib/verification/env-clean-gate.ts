@@ -735,6 +735,12 @@ export interface EnvProbeDiff {
    * report names them, so an excused entry is never a silent one.
    */
   ignoredByConfig: EnvChange[];
+  /**
+   * `home-entries` additions and removals dropped by a built-in rule (the zsh
+   * compinit cache, #3664), not by configuration. Reported on its own line so a
+   * name the config never mentioned is not blamed on the config (#3672).
+   */
+  ignoredBuiltIn: EnvChange[];
 }
 
 /** What {@link diffEnvSnapshots} may be told beyond the two snapshots. */
@@ -800,6 +806,7 @@ export function diffEnvSnapshots(
         removedByOtherRepository: [],
         removedStaleDemoVitest: [],
         ignoredByConfig: [],
+        ignoredBuiltIn: [],
       };
     }
     if (!after || after.status !== 'ok') {
@@ -815,6 +822,7 @@ export function diffEnvSnapshots(
         removedByOtherRepository: [],
         removedStaleDemoVitest: [],
         ignoredByConfig: [],
+        ignoredBuiltIn: [],
       };
     }
 
@@ -824,18 +832,24 @@ export function diffEnvSnapshots(
     // Only `home-entries`, and only by the whole name: the same string under
     // `~/.commandmate` is a different directory and stays counted.
     const isIgnoredByConfig = (entry: EnvEntry): boolean =>
-      probeId === 'home-entries' &&
-      (ignoredHomeEntries.has(entry.key) || isZcompdumpEntry(entry.key));
+      probeId === 'home-entries' && ignoredHomeEntries.has(entry.key);
+    const isIgnoredBuiltIn = (entry: EnvEntry): boolean =>
+      probeId === 'home-entries' && isZcompdumpEntry(entry.key);
 
     const added: EnvChange[] = [];
     const ignoredAdded: EnvChange[] = [];
     const taskSessionAdded: EnvChange[] = [];
     const ignoredByConfig: EnvChange[] = [];
+    const ignoredBuiltIn: EnvChange[] = [];
     for (const entry of after.entries) {
       if (beforeKeys.has(entry.key)) continue;
       const owner = attributeEntry(probeId, entry, context, resolvePidCwd);
       if (isIgnoredByConfig(entry)) {
         ignoredByConfig.push(toChange(entry, owner));
+        continue;
+      }
+      if (isIgnoredBuiltIn(entry)) {
+        ignoredBuiltIn.push(toChange(entry, owner));
         continue;
       }
       if (probeId === 'tmux-sessions' && taskSession && entry.key === taskSession) {
@@ -866,6 +880,8 @@ export function diffEnvSnapshots(
       const change = toChange(entry, attributeEntry(probeId, entry, context, resolvePidCwd));
       if (isIgnoredByConfig(entry)) {
         ignoredByConfig.push(change);
+      } else if (isIgnoredBuiltIn(entry)) {
+        ignoredBuiltIn.push(change);
       } else if (
         tmuxServerSurvived &&
         change.owner !== 'self' &&
@@ -897,6 +913,7 @@ export function diffEnvSnapshots(
       removedByOtherRepository,
       removedStaleDemoVitest,
       ignoredByConfig,
+      ignoredBuiltIn,
     };
   });
 
@@ -991,6 +1008,13 @@ function formatIgnoredByConfig(changes: EnvChange[]): string[] {
   return [`    ignored (options.envCleanIgnoreHomeEntries): ${names}`];
 }
 
+/** Built-in `home-entries` exclusions (zsh compinit cache), on their own line (#3672). */
+function formatIgnoredBuiltIn(changes: EnvChange[]): string[] {
+  if (changes.length === 0) return [];
+  const names = changes.map((change) => change.key).join(', ');
+  return [`    ignored (built-in): ${names}`];
+}
+
 /**
  * The header's account of what could be excused, so a report judged against a
  * baseline written before #2472 says why the task's own session was not.
@@ -1021,6 +1045,7 @@ export function formatEnvCleanReport(diff: EnvCleanDiff): string {
       lines.push(...formatRemovedByOtherRepository(probe.removedByOtherRepository));
       lines.push(...formatRemovedStaleDemoVitest(probe.removedStaleDemoVitest));
       lines.push(...formatIgnoredByConfig(probe.ignoredByConfig));
+      lines.push(...formatIgnoredBuiltIn(probe.ignoredBuiltIn));
       continue;
     }
     lines.push(
@@ -1033,6 +1058,7 @@ export function formatEnvCleanReport(diff: EnvCleanDiff): string {
     lines.push(...formatRemovedByOtherRepository(probe.removedByOtherRepository));
     lines.push(...formatRemovedStaleDemoVitest(probe.removedStaleDemoVitest));
     lines.push(...formatIgnoredByConfig(probe.ignoredByConfig));
+    lines.push(...formatIgnoredBuiltIn(probe.ignoredBuiltIn));
     for (const excused of probe.ignoredAdded) {
       lines.push(`    · ${excused.key} (ignored: belongs to another worktree)`);
     }
