@@ -775,6 +775,18 @@ export function migrateResponsePollerWorktreeIds(
     clearTuiAccumulator(move.oldKey);
   }
 
+  // Stop the abandoned pollers before any dedup state is written: the stop
+  // clears every cache under its key, and that key can be the destination of
+  // another move in this batch (A:x paused → B:x while B:x is abandoned).
+  // Stopped afterwards, it erased the state that had just arrived (#3553).
+  // An abandoned key is never a move source, so nothing still to be moved is
+  // lost here; and the paused chains are collected after it, as before, so a
+  // pause the stop ends is not carried.
+  for (const pollerKey of abandoned) {
+    stopPollingByKey(pollerKey);
+    logger.warn('poller:migrate-abandoned', { pollerKey });
+  }
+
   // Issue #2230: a chain paused on a prompt has no timer, so the loops here
   // never see it — but it is holding the response hash for the turn it paused
   // on, and `/respond` will resume it under the NEW ID. Move the hash and the
@@ -810,10 +822,6 @@ export function migrateResponsePollerWorktreeIds(
         : [];
     })
   );
-  for (const pollerKey of abandoned) {
-    stopPollingByKey(pollerKey);
-    logger.warn('poller:migrate-abandoned', { pollerKey });
-  }
 
   // Phase 2: restart each poller under its new identity.
   for (const move of moves) {

@@ -59,7 +59,9 @@ const g = globalThis as Globals;
 
 const WT = { a: 'wt-3553-a', b: 'wt-3553-b', c: 'wt-3553-c', d: 'wt-3553-d' };
 const key = (wt: string): string => `${wt}:claude`;
-const ALL_KEYS = Object.values(WT).map(key);
+/** Poller key of the alias instance `cx` (see the abandoned-poller suite). */
+const cxKey = (wt: string): string => `${wt}:cx`;
+const ALL_KEYS = [...Object.values(WT).map(key), ...Object.values(WT).map(cxKey)];
 
 /** Everything the dedup layer holds under one poller key. */
 function responseState(pollerKey: string) {
@@ -316,5 +318,58 @@ describe('Issue #3553: negative controls', () => {
 
     expect(snapshot(key(WT.d))).toEqual(before);
     expect(snapshot(key(WT.a))).toEqual(EMPTY);
+  });
+});
+
+describe('Issue #3553: an abandoned poller does not erase state moved onto its key', () => {
+  /** Resolves every poller except B's `cx` instance, which is abandoned. */
+  const resolveExceptBcx = (worktreeId: string, instanceId: string) =>
+    worktreeId === WT.b && instanceId === 'cx' ? null : ('claude' as const);
+
+  it('A:cx paused → B:cx keeps A\'s state while abandoned B:cx is stopped; B:claude moves to C', () => {
+    // A:cx is paused on a prompt with a full response state.
+    g.__responsePollerCoordinator!.pausedOnPrompt.add(cxKey(WT.a));
+    isDuplicateResponse(cxKey(WT.a), 'reply A paused');
+    claimDuplicateResponseSkipLog(cxKey(WT.a));
+    claimDuplicateResponseSkipLog(cxKey(WT.a));
+    markStructuredHistoryRecheckPending(cxKey(WT.a));
+    claimStructuredHistoryRecheck(cxKey(WT.a));
+    // B:cx is running but its CLI tool cannot be resolved (abandoned).
+    startPolling(WT.b, 'claude', 'cx');
+    seed(cxKey(WT.b), 'B abandoned', 4);
+    // B:claude is running and resolvable, so it moves to C with B→C.
+    startPolling(WT.b, 'claude');
+    seed(key(WT.b), 'B running', 3);
+    const before = { a: responseState(cxKey(WT.a)), b: snapshot(key(WT.b)) };
+    expect(before.a.hash).toBeDefined();
+    expect(before.a.recheck).toBe(2);
+
+    const moved = migrateResponsePollerWorktreeIds(
+      [
+        { oldId: WT.a, newId: WT.b },
+        { oldId: WT.b, newId: WT.c },
+      ],
+      resolveExceptBcx
+    );
+
+    expect(moved.map((m) => m.newKey)).toEqual([key(WT.c)]);
+    // B:cx holds exactly A:cx's state and the pause mark — not just the mark.
+    expect(responseState(cxKey(WT.b))).toEqual(before.a);
+    expect(g.__responsePollerCoordinator!.pausedOnPrompt.has(cxKey(WT.b))).toBe(true);
+    expect(responseState(cxKey(WT.a))).toEqual(EMPTY.response);
+    // B's running state went to C.
+    expect(snapshot(key(WT.c))).toEqual(before.b);
+    expect(snapshot(key(WT.b))).toEqual(EMPTY);
+  });
+
+  it('an abandoned key that no move lands on is still cleared', () => {
+    startPolling(WT.b, 'claude', 'cx');
+    seed(cxKey(WT.b), 'B abandoned', 3);
+
+    const moved = migrateResponsePollerWorktreeIds([{ oldId: WT.b, newId: WT.c }], resolveExceptBcx);
+
+    expect(moved).toEqual([]);
+    expect(snapshot(cxKey(WT.b))).toEqual(EMPTY);
+    expect(snapshot(cxKey(WT.c))).toEqual(EMPTY);
   });
 });
