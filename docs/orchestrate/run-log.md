@@ -10,5 +10,6 @@
 HEAD が変われば検証・確認をやり直す（`skip` は通ったと数える。対象外の段も `skip` を記録する。ただし `verify` / `findings` / `precheck` は `ok` だけ）。
 `verify` / `review` / `findings` は**作業の HEAD**（ワーカーの最後のコミット）で、ほかの段は**公開する HEAD** で見る。develop の取り込みや
 module-reference の一本化を重ねた HEAD の記録には、`--work-head <作業の HEAD>` で作業の HEAD も書く（公開のスクリプトと precheck は自分で書く）。
+`--head` / `--work-head` は **`git rev-parse HEAD` の 40 桁の SHA だけ**を受け付ける（短い SHA は exit 2 で拒否。`publish-pr.mjs` が 40 桁で記録を探すため、短い SHA で書くと「記録が無い」と読まれる、#3664）。すでに記録された 7 桁の行は `status` が読める。
 この規則は `publish-pr.mjs` / `merge-pr.mjs` の止まる条件と同じ関数（`unmetStage`）なので、再開先と公開側の判定はずれない。
 `verify` は `scripts/orchestrate/wait-verify.mjs`（3-3）、`precheck` は `scripts/orchestrate/precheck.mjs`（6-1-1）が自分で書く。

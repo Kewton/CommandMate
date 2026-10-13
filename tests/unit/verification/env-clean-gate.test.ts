@@ -1388,3 +1388,41 @@ describe('resolveRequireEnvClean', () => {
     expect(resolveRequireEnvClean(relaxing, config).required).toBe(true);
   });
 });
+
+// =============================================================================
+// zsh compinit cache in $HOME (Issue #3664)
+// =============================================================================
+
+describe('home-entries: ~/.zcompdump.<host>.<pid> (#3664)', () => {
+  function homeAdded(...names: string[]) {
+    const diff = diffEnvSnapshots(
+      snapshot({ 'home-entries': probe([entry('Documents')]) }),
+      snapshot({ 'home-entries': probe([entry('Documents'), ...names.map((name) => entry(name))]) }),
+      CONTEXT
+    );
+    return { diff, home: diff.probes.find((p) => p.probeId === 'home-entries')! };
+  }
+
+  it('passes when only zsh compinit cache files were added, and names them in the report', () => {
+    const { diff, home } = homeAdded('.zcompdump', '.zcompdump.mymac.local.48213');
+    expect(diff.status).toBe('clean');
+    expect(home.added).toEqual([]);
+    expect(home.ignoredByConfig.map((c) => c.key)).toEqual(['.zcompdump', '.zcompdump.mymac.local.48213']);
+    expect(formatEnvCleanReport(diff)).toContain('.zcompdump.mymac.local.48213');
+  });
+
+  it('still violates for any other new entry, alone or next to a compinit cache file', () => {
+    const { diff, home } = homeAdded('.zcompdump.mymac.48213', '.leftover');
+    expect(diff.status).toBe('violated');
+    expect(home.added.map((c) => c.key)).toEqual(['.leftover']);
+  });
+
+  it.each(['.zcompdump-mymac-5.9', '.zcompdump.bak', '.zcompdump.mymac.', '.zcompdump.mymac.0', '.zcompdumpx', 'zcompdump.mymac.1', '.zcompdump.mymac.12x'])(
+    'does not excuse the look-alike %s',
+    (name) => {
+      const { diff, home } = homeAdded(name);
+      expect(diff.status).toBe('violated');
+      expect(home.added.map((c) => c.key)).toEqual([name]);
+    }
+  );
+});

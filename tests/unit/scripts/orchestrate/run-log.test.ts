@@ -300,6 +300,27 @@ describe('the work HEAD and the published HEAD (#3477 review of PR 3, 3c-5)', ()
     expect(unmetStage('review', rec('review', 'skip', 0, HEAD_A), { head: HEAD_A, workHead: HEAD_A })).toBeNull();
   });
 
+  it('makeRecord (used by other scripts) still takes a short sha (#3664)', () => {
+    expect(makeRecord({ issue: 1, stage: 'review', result: 'fail', head: 'abcdef1' }).head).toBe('abcdef1');
+  });
+
+  it('rejects a short --work-head on the command line with exit 2 (#3664)', () => {
+    expect(main(['append', '--run-dir', runDir, '--issues', '1', '--issue', '1', '--stage', 'pr', '--result', 'ok', '--head', HEAD_M, '--work-head', 'abcdef1'])).toBe(2);
+    expect(readRecords(runDir, '1').records).toEqual([]);
+  });
+
+  it('rejects a short --head on the command line with exit 2 and records nothing (#3664)', () => {
+    expect(main(['append', '--run-dir', runDir, '--issues', '1', '--issue', '1', '--stage', 'pr', '--result', 'ok', '--head', 'abcdef1'])).toBe(2);
+    expect(readRecords(runDir, '1').records).toEqual([]);
+  });
+
+  it('keeps reading a 7-digit head that was recorded before (#3664)', () => {
+    fs.mkdirSync(runDir, { recursive: true });
+    fs.writeFileSync(runLogPath(runDir, '1'), `${JSON.stringify({ issue: 1, stage: 'verify', result: 'ok', head: 'abcdef1', at: at(0).toISOString() })}\n`);
+    const { records } = readRecords(runDir, '1');
+    expect(headsOf(records, 1)).toEqual({ head: 'abcdef1', workHead: 'abcdef1' });
+  });
+
   it('takes --work-head on the command line', () => {
     expect(main(['append', '--run-dir', runDir, '--issues', '1', '--issue', '1', '--stage', 'pr', '--result', 'ok', '--head', HEAD_M, '--work-head', HEAD_A])).toBe(0);
     expect(readRecords(runDir, '1').records[0]).toMatchObject({ head: HEAD_M, workHead: HEAD_A });
