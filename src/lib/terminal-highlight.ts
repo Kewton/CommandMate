@@ -12,7 +12,13 @@
  * Security: SEC-TS-002 - CSS Custom Highlight API avoids DOM manipulation (no XSS risk)
  */
 
-import { buildRange, collectTextNodes, type MatchPosition } from './terminal-highlight-dom';
+import {
+  buildRange,
+  collectTextNodes,
+  MERMAID_SOURCE_ATTR,
+  type MatchPosition,
+  type TextNodeEntry,
+} from './terminal-highlight-dom';
 import { mapRawPositionsToDom, openFoldedSource, type HighlightSection } from './terminal-highlight-mermaid';
 import { mapMarkdownPositionsToDom } from './terminal-highlight-markdown';
 
@@ -178,19 +184,7 @@ function applyHighlightsInternal(
   const textNodes = collectTextNodes(container);
   const positions: Array<MatchPosition | null> =
     (options?.sourceText !== undefined
-      ? (mapRawPositionsToDom(
-          container,
-          textNodes,
-          options.sourceText,
-          matchPositions,
-          options.sections ?? [],
-        ) ??
-        // [Issue #3523] No mermaid source on screen: place hits through the
-        // raw ranges Markdown left on its elements. [Issue #3661] A hit it
-        // cannot place is not marked (as with a mermaid message): its offset
-        // is into the raw text, and used as a DOM offset it marked unrelated
-        // text. It still counts — the bar's n/m and stepping are the search's.
-        mapMarkdownPositionsToDom(container, textNodes, options.sourceText, matchPositions))
+      ? placeRawPositions(container, textNodes, options.sourceText, matchPositions, options.sections ?? [])
       : null) ?? matchPositions;
   const ranges = positions.map((pos) => (pos ? buildRange(textNodes, pos.start, pos.end) : null));
   ranges.forEach((range) => {
@@ -229,6 +223,47 @@ function applyHighlightsInternal(
       el.scrollIntoView({ block: 'center', behavior: 'smooth' });
     }
   }
+}
+
+/**
+ * [Issue #3503 / #3523] Place hits counted in `sourceText` on the container's
+ * text. `null` when neither placer applies (offsets are DOM offsets).
+ */
+function placeRawPositions(
+  container: Element,
+  textNodes: TextNodeEntry[],
+  sourceText: string,
+  matchPositions: MatchPosition[],
+  sections: HighlightSection[]
+): Array<MatchPosition | null> | null {
+  const markdown = (): Array<MatchPosition | null> | null =>
+    // [Issue #3523] No mermaid source on screen: place hits through the
+    // raw ranges Markdown left on its elements. [Issue #3661] A hit it
+    // cannot place is not marked (as with a mermaid message): its offset
+    // is into the raw text, and used as a DOM offset it marked unrelated
+    // text. It still counts — the bar's n/m and stepping are the search's.
+    mapMarkdownPositionsToDom(container, textNodes, sourceText, matchPositions);
+  const mermaid = mapRawPositionsToDom(container, textNodes, sourceText, matchPositions, sections);
+  if (!mermaid) return markdown();
+  if (!mermaid.includes(null)) return mermaid;
+  // [Issue #3671] A message holding a diagram: a hit the mermaid placer left
+  // unplaced outside the diagrams — it looks for the raw text on screen, and a
+  // reference (`&fjlig;` drawn `fj`) or a marker is not there — is placed by
+  // Markdown, as in a message without one. Never into a diagram's source: a
+  // hit there stays the mermaid placer's, unplaced included.
+  const fromMarkdown = markdown();
+  if (!fromMarkdown) return mermaid;
+  const sourceSpans = Array.from(container.querySelectorAll(`[${MERMAID_SOURCE_ATTR}]`)).flatMap((element) => {
+    const inside = textNodes.filter((entry) => element.contains(entry.node));
+    return inside.length > 0 ? [{ start: inside[0].start, end: inside[inside.length - 1].end }] : [];
+  });
+  return mermaid.map((pos, idx) => {
+    if (pos) return pos;
+    const placed = fromMarkdown[idx];
+    if (!placed) return null;
+    const inSource = sourceSpans.some((span) => placed.start < span.end && placed.end > span.start);
+    return inSource ? null : placed;
+  });
 }
 
 /**
