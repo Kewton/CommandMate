@@ -1194,13 +1194,6 @@
     "inReview": "In Review",
     "done": "Done"
   },
-  "card": {
-    "main": "Main",
-    "description": "Description",
-    "link": "Link",
-    "openLink": "Open link in new tab",
-    "updated": "Updated {time}"
-  },
   "detail": {
     "worktree": "Worktree",
     "repository": "Repository",

@@ -1194,13 +1194,6 @@
     "inReview": "レビュー中",
     "done": "完了"
   },
-  "card": {
-    "main": "メイン",
-    "description": "説明",
-    "link": "リンク",
-    "openLink": "リンクを新しいタブで開く",
-    "updated": "更新 {time}"
-  },
   "detail": {
     "worktree": "ワークツリー",
     "repository": "リポジトリ",

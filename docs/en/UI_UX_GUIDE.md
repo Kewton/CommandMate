@@ -54,7 +54,7 @@ The header is one row, with the worktree's tools at its right. The second row is
 
 ```
 ┌────────────────────────────────────────────────────────────────────┐
-│ ● worktree-name  repo  [current session][N others ▾][+] [Info] [tools…] │ ← Header (one row)
+│ ● worktree-name  repo  [current session][N more ▾][+] [Info] [tools…] │ ← Header (one row)
 ├────────────────────────────────────────────────────────────────────┤
 │ [▢][▥][▥▥][▦]  [Verification chip]  (one split: its header) [⤢] [History][Open Files] │ ← Second row (action bar)
 ├────────────────────────────────────────────────────────────────────┤
@@ -72,7 +72,7 @@ The header is one row, with the worktree's tools at its right. The second row is
 
 #### 1. Header
 - **Status dot and worktree name**: the repository name beside it (opens the Repositories screen); `*` when there are uncommitted changes
-- **Session field**: [current session][N others ▾][+]. The worktree's progress (Status) is not set here but from the sidebar row's "…" → Status
+- **Session field**: [current session][N more ▾][+]. The worktree's progress (Status) is not set here but from the sidebar row's "…" → Status
 - **Info button**: Opens the Worktree info modal
 - **Tools** (right end): the icons of the activities below except `verification`. On a narrow header the trailing ones fold into a "…" list
 

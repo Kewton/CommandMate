@@ -69,10 +69,9 @@
 - **次アクション**: `getNextAction()`（`src/lib/session/next-action-helper.ts`）は
   辞書キー（`nextAction.*`）を返す。サイドバー行では `waiting` と `awaitingInstruction` の
   ときだけ**インライン表示**し（hover 限定はタッチ端末で永久に不可視になるため）、
-  それ以外はツールチップにのみ出す。`WorktreeCard` は `isNextActionKey()` で
-  キーと判定できた場合のみ翻訳し、旧サーバが送る英語リテラルはそのまま描画する
+  それ以外はツールチップにのみ出す
 - **`awaitingInstruction`**: タスク完了・次の指示待ちは amber ではなく**緑バッジ**
-  （`awaitingInstruction.badge`）でサイドバー行と `WorktreeCard` に出す。
+  （`awaitingInstruction.badge`）でサイドバー行と PC の worktree 詳細ヘッダーに出す。
   「待たせている」と「待っている」を色で取り違えさせない
 
 ### 表示の適用範囲（Issue #1078 で統一済み）
