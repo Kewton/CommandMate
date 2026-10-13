@@ -131,6 +131,10 @@ export const FileMetadataToggle = memo(function FileMetadataToggle({
       // document listener runs before this one, so it is held off by the
       // menu's `data-floating-layer` mark instead.
       e.preventDefault();
+      // Issue #3650: back to the gear, like the header tools' "…" list — the
+      // focused item goes away with the menu, and focus dropped to the body
+      // would leave a pinned activity pane deaf to the next Escape.
+      buttonRef.current?.focus();
       setOpen(false);
     };
     document.addEventListener('mousedown', onPointerDown);

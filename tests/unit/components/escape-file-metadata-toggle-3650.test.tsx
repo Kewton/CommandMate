@@ -54,10 +54,11 @@ const SETTINGS: FileMetadataDisplaySettings = {
 };
 
 /** The pane, with the header tool that opened it outside (an ignore region). */
-function Pane({ onDismiss }: { onDismiss: () => void }) {
+function Pane({ onDismiss, pinned }: { onDismiss: () => void; pinned?: boolean }) {
   const panelRef = useRef<HTMLDivElement>(null);
   const { panelProps } = usePaneOverlayDismiss({
     enabled: true,
+    pinned,
     panelRef,
     onDismiss,
     ignoreSelectors: ['[data-testid="header-tool-bar"]'],
@@ -70,7 +71,7 @@ function Pane({ onDismiss }: { onDismiss: () => void }) {
   );
 }
 
-function Screen() {
+function Screen({ pinned }: { pinned?: boolean } = {}) {
   const [open, setOpen] = useState(true);
   return (
     <div>
@@ -81,7 +82,7 @@ function Screen() {
           </button>
         </Tooltip>
       </div>
-      {open && <Pane onDismiss={() => setOpen(false)} />}
+      {open && <Pane onDismiss={() => setOpen(false)} pinned={pinned} />}
     </div>
   );
 }
@@ -348,5 +349,55 @@ describe('FileMetadataToggle never stuck open with focus outside it (Issue #3650
     fireEvent.click(gear);
     expect(document.activeElement).toBe(gear);
     expect(screen.getByTestId('file-metadata-toggle-menu')).toBeDefined();
+  });
+});
+
+describe('FileMetadataToggle hands focus back to the gear on its own Escape (Issue #3650, PR review)', () => {
+  function activeOrBody(): Element {
+    return (document.activeElement as Element | null) ?? document.body;
+  }
+
+  function openAndTabToItem(): void {
+    const gear = screen.getByTestId('file-metadata-toggle-button');
+    act(() => gear.focus());
+    fireEvent.click(gear);
+    act(() => screen.getByTestId('file-metadata-toggle-showSize').focus());
+  }
+
+  it.each([
+    ['pinned', true],
+    ['overlaid', false],
+  ])('%s pane: first Escape closes the menu onto the gear, the second closes the pane', (_label, pinned) => {
+    render(<Screen pinned={pinned} />);
+    openAndTabToItem();
+
+    pressEscape(activeOrBody());
+    expect(screen.queryByTestId('file-metadata-toggle-menu')).toBeNull();
+    expect(document.activeElement).toBe(screen.getByTestId('file-metadata-toggle-button'));
+    expect(screen.queryByTestId('pane')).not.toBeNull();
+
+    pressEscape(activeOrBody());
+    expect(screen.queryByTestId('pane')).toBeNull();
+  });
+
+  it('does not take focus when an outside click closes it (negative control)', () => {
+    render(<Screen />);
+    openAndTabToItem();
+    const row = screen.getByTestId('pane-row');
+    act(() => {
+      fireEvent.pointerDown(row);
+      fireEvent.mouseDown(row);
+    });
+    expect(screen.queryByTestId('file-metadata-toggle-menu')).toBeNull();
+    expect(document.activeElement).not.toBe(screen.getByTestId('file-metadata-toggle-button'));
+  });
+
+  it('does not take focus back when focus moving outside closes it (negative control)', () => {
+    render(<Screen />);
+    openAndTabToItem();
+    const row = screen.getByTestId('pane-row');
+    act(() => row.focus());
+    expect(screen.queryByTestId('file-metadata-toggle-menu')).toBeNull();
+    expect(document.activeElement).toBe(row);
   });
 });
