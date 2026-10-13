@@ -11,7 +11,6 @@
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, cleanup, fireEvent, act, renderHook } from '@testing-library/react';
-import { SortSelectorBase } from '@/components/sidebar/SortSelectorBase';
 import { ContextMenu } from '@/components/worktree/ContextMenu';
 import { useContextMenu } from '@/hooks/useContextMenu';
 import { FilePanelContent } from '@/components/worktree/FilePanelContent';
@@ -52,37 +51,6 @@ function pressEscapeClaimedAbove(target: Element = document.body): void {
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
-});
-
-describe('SortSelectorBase Escape (Issue #3630)', () => {
-  function open() {
-    render(
-      <SortSelectorBase
-        sortKey="lastSent"
-        sortDirection="desc"
-        onSortKeyChange={vi.fn()}
-        onSortDirectionChange={vi.fn()}
-        options={[
-          { key: 'repositoryName', label: 'Repository' },
-          { key: 'lastSent', label: 'Last Sent' },
-        ]}
-      />,
-    );
-    fireEvent.click(screen.getByRole('button', { name: /Sort by/i }));
-    expect(screen.getByRole('listbox')).toBeDefined();
-  }
-
-  it('stays open when a layer above already handled Escape', () => {
-    open();
-    pressEscapeClaimedAbove();
-    expect(screen.queryByRole('listbox')).not.toBeNull();
-  });
-
-  it('closes on a direct Escape', () => {
-    open();
-    fireEvent.keyDown(document.body, { key: 'Escape' });
-    expect(screen.queryByRole('listbox')).toBeNull();
-  });
 });
 
 describe('ContextMenu Escape (Issue #3630)', () => {

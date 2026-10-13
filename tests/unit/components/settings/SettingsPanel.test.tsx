@@ -158,3 +158,22 @@ describe('SettingsQuickLinksSection repositories description (Issue #3632)', () 
     expect(screen.queryByText(/Manage repositories/)).toBeNull();
   });
 });
+
+describe('SettingsQuickLinksSection repositories heading (Issue #3651)', () => {
+  function title(): string | null {
+    // The card's first line, above the description.
+    return screen.getByTestId('more-link-repositories').querySelector('.font-medium')?.textContent ?? null;
+  }
+
+  it('renders リポジトリ under ja (common.nav.repositories), not the English literal', () => {
+    intlLocale.current = 'ja';
+    render(<SettingsQuickLinksSection />);
+    expect(title()).toBe('リポジトリ');
+  });
+
+  it('keeps "Repositories" under en (negative control)', () => {
+    intlLocale.current = 'en';
+    render(<SettingsQuickLinksSection />);
+    expect(title()).toBe('Repositories');
+  });
+});

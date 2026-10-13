@@ -2,7 +2,8 @@
  * Next Action Helper - Derived state for worktree next actions and review status.
  *
  * Issue #600: UX refresh - provides getNextAction() and getReviewStatus()
- * for Review screen and WorktreeCard display.
+ * for the Review screen (via `/api/worktrees`) and the sidebar row
+ * (`toBranchItem` in `src/types/sidebar.ts`).
  *
  * Uses exhaustive check (satisfies never) pattern to catch future
  * SessionStatus extensions at compile time [DR2-005].

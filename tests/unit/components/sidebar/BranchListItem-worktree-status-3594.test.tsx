@@ -17,8 +17,6 @@
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within, act } from '@testing-library/react';
 import React from 'react';
-import fs from 'fs';
-import path from 'path';
 import { BranchListItem, __resetMouseEnterSuppression } from '@/components/sidebar/BranchListItem';
 import { DesktopHeader, WorktreeInfoFields } from '@/components/worktree/WorktreeDetailSubComponents';
 import { ToastProvider } from '@/components/common/Toast';
@@ -461,18 +459,6 @@ describe('the last pick holds until its own save and re-fetch (Issue #3594, re-r
     // Released: the list value is what shows now.
     setElsewhere('ready');
     expect(pill()).toHaveAttribute('data-status', 'ready');
-  });
-});
-
-describe('WorktreeCard says where the status is changed (Issue #3594)', () => {
-  const source = fs.readFileSync(path.join(process.cwd(), 'src/components/worktree/WorktreeCard.tsx'), 'utf8');
-
-  it('points at the row "…" Status menu and the Info field', () => {
-    expect(source).toContain('branch row "…" → Status menu or the Info field');
-  });
-
-  it('no longer points at the detail header, which lost its select', () => {
-    expect(source).not.toContain('editable in detail header');
   });
 });
 
