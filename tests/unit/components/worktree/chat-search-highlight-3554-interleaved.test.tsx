@@ -270,9 +270,11 @@ describe('[#3554] ChatTranscript: line breaks that are not the source’s, acros
     const inAnswer = ranges.filter((range) => holder.contains(range.startContainer));
     expect(inAnswer.map((range) => range.toString())).toEqual(['sentinel']);
     // The reasoning's hit is the reasoning's: it is not the one in the answer.
-    expect(ranges).toHaveLength(2);
-    expect(holder.contains(ranges[0].startContainer)).toBe(false);
-    expect(holder.contains(ranges[1].startContainer)).toBe(true);
+    // [#3661] The live bubble does not draw the folded reasoning, so its hit
+    // has no place and is not marked — it used to fall back to its raw offset
+    // as a DOM offset and mark part of the chip's label.
+    expect(ranges).toHaveLength(1);
+    expect(holder.contains(ranges[0].startContainer)).toBe(true);
   });
 });
 
