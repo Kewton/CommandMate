@@ -15,7 +15,7 @@
  */
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createServer, type Server } from 'net';
+import { createServer, type AddressInfo, type Server } from 'net';
 import { existsSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { makeTempDir, removeTempDir } from '@tests/helpers/temp-dir';
@@ -385,14 +385,24 @@ describe('the turn gate, on a server carrying more than one session', () => {
 // =============================================================================
 
 describe('deciding a port is free', () => {
-  /** Occupy a port on one address for the duration of one test. */
-  function occupy(port: number, host: string): Promise<void> {
+  /**
+   * Occupy a port the kernel picks, on one address, for the duration of one test.
+   *
+   * Not a fixed number (Issue #3662). These used 4288-4290, and every copy of
+   * this file running at the same time — parallel worktrees verifying at once —
+   * asked for the same one: the second `listen` failed with EADDRINUSE before
+   * `isPortFree` was ever asked (2 of 24 runs under load). Port 0 gives each
+   * copy its own. Nothing about the probe depends on the number: on macOS a
+   * bind to 127.0.0.1 succeeds on an ephemeral port another socket holds on
+   * 0.0.0.0, exactly as on 4200 (measured on Darwin 27.0.0).
+   */
+  function occupy(host: string): Promise<number> {
     return new Promise((resolve, reject) => {
       const server = createServer();
       server.once('error', reject);
-      server.listen(port, host, () => {
+      server.listen(0, host, () => {
         listeners.push(server);
-        resolve();
+        resolve((server.address() as AddressInfo).port);
       });
     });
   }
@@ -403,17 +413,22 @@ describe('deciding a port is free', () => {
     // holds 0.0.0.0 on the same port. The pre-#1900 probe therefore called
     // 4200 — Angular's default, inside this range — free, and opencode then
     // won `http://localhost:4200` off the dev server that was serving it.
-    await occupy(4288, '0.0.0.0');
-    expect(await isPortFree(4288)).toBe(false);
+    const port = await occupy('0.0.0.0');
+    expect(await isPortFree(port)).toBe(false);
   });
 
   it('still sees a server bound to loopback alone', async () => {
-    await occupy(4289, '127.0.0.1');
-    expect(await isPortFree(4289)).toBe(false);
+    const port = await occupy('127.0.0.1');
+    expect(await isPortFree(port)).toBe(false);
   });
 
   it('says yes to a port nobody holds', async () => {
-    expect(await isPortFree(4290)).toBe(true);
+    // A port the kernel just handed out and that was closed again, rather than
+    // a fixed number inside the opencode range, which a concurrent run's
+    // allocation may be probing at this very moment.
+    const port = await occupy('0.0.0.0');
+    await Promise.all(listeners.splice(0).map((server) => new Promise((r) => server.close(r))));
+    expect(await isPortFree(port)).toBe(true);
   });
 });
 

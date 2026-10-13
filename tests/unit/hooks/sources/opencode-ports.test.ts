@@ -131,10 +131,21 @@ describe('allocation', () => {
   });
 
   it('skips a port something else is already listening on', async () => {
-    const [preferred] = opencodePortCandidates(TARGET);
-    await occupy(preferred);
+    // TARGET's first candidate is a fixed number, so every copy of this file
+    // running at once (parallel worktrees verifying) occupied the same port and
+    // the second `listen` failed with EADDRINUSE (Issue #3662). Take the first
+    // instance whose preferred port this run can hold itself — the same way
+    // opencode-v2/reattach-once.test.ts finds a port for its stand-in server.
+    let target: Parameters<typeof allocateOpencodePort>[0] | null = null;
+    let preferred = 0;
+    for (let attempt = 0; attempt < 32 && target === null; attempt += 1) {
+      const candidate = { ...TARGET, worktreeId: `wt-ports-skip-${attempt}` };
+      [preferred] = opencodePortCandidates(candidate);
+      if (await occupy(preferred).then(() => true, () => false)) target = candidate;
+    }
+    if (target === null) throw new Error('no preferred port could be held in 32 tries');
 
-    const port = await allocateOpencodePort(TARGET, WORKTREE_PATH);
+    const port = await allocateOpencodePort(target, WORKTREE_PATH);
 
     expect(port).not.toBeNull();
     expect(port).not.toBe(preferred);
