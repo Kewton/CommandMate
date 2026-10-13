@@ -126,10 +126,14 @@ export function claimDuplicatePromptSkipLog(pollerKey: string): DuplicatePromptS
  * End the current run of duplicate prompt ticks for this pollerKey without
  * touching the cached hash (Issue #3538).
  *
- * Called by `response-checker` on every tick that does not reach the prompt
- * guard with a live prompt — a working screen, an unfinished frame, a reply.
- * The prompt is no longer on screen, so if the same prompt comes back the next
- * duplicate is the first of a new run and logs. The hash stays: whether the
+ * Called by `response-checker` in two places: `extractCompletedTurn`, when the
+ * frame was read and is unfinished (a working screen), and `checkForResponse`,
+ * when a finished frame carries no live prompt (a reply). The prompt is no
+ * longer on screen, so if the same prompt comes back the next duplicate is the
+ * first of a new run and logs. Not called on a tick that skipped extraction on
+ * the line count (a null result) or returned on the cursor, nor on a tick that
+ * ended before extraction: none of them says the prompt has left the screen,
+ * so the run carries on through them. The hash stays: whether the
  * returning prompt is saved again is the guard's question (#565), and this
  * Issue only thins the log line.
  *

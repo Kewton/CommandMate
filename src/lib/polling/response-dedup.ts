@@ -111,7 +111,9 @@ export const STRUCTURED_HISTORY_RECHECK_TICK_INTERVAL = 3;
  *
  * On `globalThis` for the same reason `responseHashCache` is, and cleared and
  * moved at exactly the same moments — see the module comment. A new
- * (non-duplicate) response restarts it in {@link isDuplicateResponse}.
+ * (non-duplicate) response restarts it in {@link isDuplicateResponse}, and a
+ * tick that reads the frame and finds no reply on it ends the run without
+ * touching the hash — see {@link resetDuplicateResponseSkipStreak} (#3552).
  */
 const duplicateResponseSkipStreak = getOrInitGlobal('__duplicateResponseSkipStreak', () => new Map<string, number>());
 
@@ -177,6 +179,29 @@ export function claimDuplicateResponseSkipLog(pollerKey: string): DuplicateRespo
   const log = (consecutive - 1) % DUPLICATE_RESPONSE_SKIP_LOG_TICK_INTERVAL === 0;
   const suppressed = consecutive === 1 ? 0 : DUPLICATE_RESPONSE_SKIP_LOG_TICK_INTERVAL - 1;
   return { log, consecutive, suppressed };
+}
+
+/**
+ * End the current run of duplicate response ticks for this pollerKey without
+ * touching the cached hash (Issue #3552).
+ *
+ * Called by `response-checker` on the ticks that read the frame and decide it
+ * is not a duplicate of the saved reply: an unfinished frame
+ * (`extractCompletedTurn`), a finished frame with a live prompt on it, and a
+ * finished frame whose response is empty. The reply is no longer on screen, so
+ * if the same reply comes back the next duplicate is the first of a new run and
+ * logs. The hash stays: whether the returning reply is saved again is the
+ * guard's question (#1268), and this only thins the log line (#3519).
+ *
+ * Not called at the entrance of a finished frame — that would make every
+ * duplicate tick the first of its run — nor on a tick that skipped extraction
+ * on the line count (null) or returned on the cursor: neither says the reply
+ * has left the screen (the same judgement as #3538).
+ *
+ * @param pollerKey - Poller key ("worktreeId:instanceId")
+ */
+export function resetDuplicateResponseSkipStreak(pollerKey: string): void {
+  duplicateResponseSkipStreak.delete(pollerKey);
 }
 
 /**
@@ -298,7 +323,15 @@ export function renameResponseHashCacheKey(oldKey: string, newKey: string): void
 
   // Issue #3519: the skip count moves with the hash too, so a rename mid-run
   // does not restart the thinning and log as if a new run had begun.
+  // Issue #3552: whenever the hash under `newKey` is replaced, so is its count
+  // — a count left over from the hash that was there before is about a
+  // different reply (the same rule as `renamePromptHashCacheKey`, #3538).
   const streak = duplicateResponseSkipStreak.get(oldKey);
   duplicateResponseSkipStreak.delete(oldKey);
-  if (streak !== undefined) duplicateResponseSkipStreak.set(newKey, streak);
+  if (hash === undefined) return;
+  if (streak !== undefined) {
+    duplicateResponseSkipStreak.set(newKey, streak);
+  } else {
+    duplicateResponseSkipStreak.delete(newKey);
+  }
 }
