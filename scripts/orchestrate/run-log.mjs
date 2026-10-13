@@ -68,6 +68,12 @@ function optionalString(value) {
   return value === undefined || value === null || value === '' ? null : String(value);
 }
 
+// publish-pr.mjs looks a record up by `git rev-parse HEAD` (40 digits), so a short sha
+// recorded by hand would read as "no record" there. The `append` command line rejects
+// it (#3664); makeRecord itself still takes 7-40 digits for other scripts' callers, and
+// records already written with 7 digits are still read as they are.
+const FULL_SHA = /^[0-9a-f]{40}$/;
+
 /** Validate one record and give it a fixed shape (absent fields are null, not missing). */
 export function makeRecord(input, now = new Date()) {
   const problems = [];
@@ -279,6 +285,15 @@ export function main(argv, now = new Date()) {
   }
   try {
     if (command === 'append') {
+      const short = [['--head', options.head], ['--work-head', options.workHead]].filter(
+        ([, value]) => optionalString(value) !== null && !FULL_SHA.test(String(value))
+      );
+      if (short.length > 0) {
+        for (const [flag, value] of short) {
+          console.error(`${flag}: must be the full 40-digit commit sha (use \`git rev-parse HEAD\`, not a short sha) (got ${value})`);
+        }
+        return 2;
+      }
       const { file, record } = appendRecord(options.runDir, options.issues, options, now);
       console.log(`recorded #${record.issue} ${record.stage}=${record.result} -> ${file}`);
       return 0;
