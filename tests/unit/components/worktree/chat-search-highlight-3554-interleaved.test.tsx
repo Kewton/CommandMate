@@ -166,7 +166,8 @@ describe('[#3554] ChatTranscript: the generating turn draws the same paragraph l
     render(<ChatTranscript messages={[USER]} worktreeId="wt-3554" cliToolId="opencode" liveTurn={live} onFilePathClick={vi.fn()} />);
     const body = screen.getByTestId('chat-live-turn-body');
     const { answer } = paragraphs(body);
-    expect(answer.getAttribute(SEARCH_RAW_ATTR)).toBe(`0,${INTERLEAVED.length - 2};0,6,6;${BODY_HIT},${BODY_HIT + 8},8`);
+    // The paragraph names both raw spans it is made of, and so does each line.
+    expect(answer.getAttribute(SEARCH_RAW_ATTR)).toBe(`0,6,${BODY_HIT},${BODY_HIT + 8};0,6,6;${BODY_HIT},${BODY_HIT + 8},8`);
     const namespace = makeHistoryNamespace(7);
     applyHistoryHighlights(body, [{ start: BODY_HIT, end: BODY_HIT + 8 }, { start: 0, end: 5 }], 1, namespace, {
       sourceText: INTERLEAVED,
@@ -211,5 +212,91 @@ describe.each(SURFACES)('[#3554] %s: negative controls for the line-by-line plac
       const segments = (p.getAttribute(SEARCH_RAW_ATTR) ?? '').split(';').slice(1);
       expect(segments.length).toBeLessThanOrEqual(p.childNodes.length);
     }
+  });
+});
+
+// [#3554] The drawn text's line breaks need not be the source's: `&NewLine;`
+// adds one, inline code turns one into a space. The folded quote's text is
+// still no candidate for the answer's.
+const MISMATCHED: Array<[string, string, string]> = [
+  ['a `&NewLine;` adds a line break', 'intro&NewLine;\n> **Thinking**\n> sentinel\nsentinel  ', 'P'],
+  ['inline code turns one into a space', 'Run `intro\n> **Thinking**\n> sentinel\nsentinel` now  ', 'CODE'],
+];
+
+/** The answer's element holding `sentinel` (not the reasoning's paragraph). */
+function answerHolder(root: ParentNode, tag: string): HTMLElement {
+  return Array.from(root.querySelectorAll<HTMLElement>(tag.toLowerCase())).find(
+    (el) => el.textContent !== 'sentinel' && el.textContent?.includes('sentinel'),
+  )!;
+}
+
+describe('[#3554] ChatTranscript: line breaks that are not the source’s, across a folded section', () => {
+  it.each(MISMATCHED)('%s: the answer’s hit is on the answer’s word, the reasoning’s is not', async (_label, content, tag) => {
+    searchOn('ChatTranscript', content);
+    const bodyHit = content.lastIndexOf('sentinel');
+    await waitFor(() => {
+      const holder = answerHolder(document, tag);
+      const reasoning = Array.from(document.querySelectorAll('p')).find((p) => p.textContent === 'sentinel');
+      expect(reasoning).toBeDefined();
+      const [hit, ...rest] = marked('chat-search');
+      expect(rest).toHaveLength(0);
+      expect(hit.toString()).toBe('sentinel');
+      expect(holder.contains(hit.startContainer)).toBe(true);
+      expect(scrollTargets.some((el) => reasoning!.contains(el))).toBe(true);
+      expect(scrollTargets.some((el) => holder.contains(el))).toBe(false);
+      expect(bodyHit).toBeGreaterThan(content.indexOf('sentinel'));
+    });
+  });
+
+  it.each(MISMATCHED)('%s: ChatLiveTurnBubble places the answer’s hit on the answer’s word', (_label, content, tag) => {
+    const live: ChatTranscriptLiveTurn = { turnKey: 'live-3554', version: 1, body: content, partial: false, isThinking: false };
+    render(<ChatTranscript messages={[USER]} worktreeId="wt-3554" cliToolId="opencode" liveTurn={live} onFilePathClick={vi.fn()} />);
+    const body = screen.getByTestId('chat-live-turn-body');
+    const holder = answerHolder(body, tag);
+    const bodyHit = content.lastIndexOf('sentinel');
+    const thinkingHit = content.indexOf('sentinel');
+    const namespace = makeHistoryNamespace(7);
+    applyHistoryHighlights(
+      body,
+      [
+        { start: thinkingHit, end: thinkingHit + 8 },
+        { start: bodyHit, end: bodyHit + 8 },
+      ],
+      -1,
+      namespace,
+      { sourceText: content, sections: chatSearchSections(content) },
+    );
+    const ranges = marked(namespace.highlightName);
+    const inAnswer = ranges.filter((range) => holder.contains(range.startContainer));
+    expect(inAnswer.map((range) => range.toString())).toEqual(['sentinel']);
+    // The reasoning's hit is the reasoning's: it is not the one in the answer.
+    expect(ranges).toHaveLength(2);
+    expect(holder.contains(ranges[0].startContainer)).toBe(false);
+    expect(holder.contains(ranges[1].startContainer)).toBe(true);
+  });
+});
+
+describe('[#3554] HistoryPane: the `&NewLine;` message, drawn as written', () => {
+  it('is marked as before', async () => {
+    searchOn('HistoryPane', MISMATCHED[0][1]);
+    await waitFor(() => {
+      expect(marked('history-search-2').map((range) => range.toString())).toEqual(['sentinel']);
+    });
+  });
+});
+
+// Negative controls: a character reference with no folded section around it,
+// and with one but whose line breaks agree, are marked as before.
+const REFERENCES: string[] = [
+  '> **Thinking**\n> pondering\n\n**Bold** &amp; sentinel here\n\n**Bold** &amp; sentinel again',
+  '> **Thinking**\n> pondering\n\n**Bold** sentinel&NewLine;here\n\n**Bold** sentinel again',
+];
+
+describe.each(SURFACES)('[#3554] %s: negative controls with character references', (surface, name) => {
+  it.each(REFERENCES)('%s', async (content) => {
+    searchOn(surface, content);
+    await waitFor(() => {
+      expect(marked(name).map((range) => range.toString())).toEqual(['sentinel']);
+    });
   });
 });
