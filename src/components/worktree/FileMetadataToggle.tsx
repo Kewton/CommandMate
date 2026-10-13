@@ -84,7 +84,13 @@ export const FileMetadataToggle = memo(function FileMetadataToggle({
     };
     const onKeyDown = (e: KeyboardEvent): void => {
       // Issue #3611: an Escape a layer above already handled is not ours.
-      if (isUnhandledEscape(e)) setOpen(false);
+      if (!isUnhandledEscape(e)) return;
+      // Issue #3650: ours — claim it so window-level layers below (a tooltip,
+      // a maximized file panel) leave it alone. The overlaid activity pane's
+      // document listener runs before this one, so it is held off by the
+      // menu's `data-floating-layer` mark instead.
+      e.preventDefault();
+      setOpen(false);
     };
     document.addEventListener('mousedown', onPointerDown);
     document.addEventListener('keydown', onKeyDown);
@@ -143,6 +149,11 @@ export const FileMetadataToggle = memo(function FileMetadataToggle({
           ref={menuRef}
           role="menu"
           data-testid="file-metadata-toggle-menu"
+          // Issue #3650: an open floating layer like the file tree's
+          // `ContextMenu` (#3589) — while it is up, an Esc or an outside press
+          // closes it and not the overlaid activity pane around it
+          // (`OPEN_FLOATING_LAYER_SELECTOR` in hooks/useActivityPaneOverlay).
+          data-floating-layer="open"
           className="absolute right-0 top-full z-20 mt-1 min-w-[12rem] rounded border border-border bg-surface shadow-lg p-1"
           style={
             shift.x !== 0 || shift.y !== 0
