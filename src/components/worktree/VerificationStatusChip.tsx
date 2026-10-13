@@ -241,9 +241,32 @@ export const VerificationStatusChip = memo(function VerificationStatusChip({
     onOpen();
   }, [onOpen]);
 
+  const reasonToggleRef = useRef<HTMLButtonElement | null>(null);
   const toggleReason = useCallback(() => {
-    setReasonOpen((open) => !open);
-  }, []);
+    // Issue #3660: opening puts the keyboard on ⓘ (Safari does not focus a
+    // clicked button), so the next Escape lands in the chip and the chip's
+    // own `onKeyDown` below can claim it.
+    if (!reasonOpen) reasonToggleRef.current?.focus();
+    setReasonOpen(!reasonOpen);
+  }, [reasonOpen]);
+
+  // Issue #3660: an Escape pressed in the chip while the reason is up is the
+  // reason's alone. The overlaid activity pane treats the chip as one of its
+  // Esc regions (`[data-activity-entry]`) and the "…" panel the chip can fold
+  // into closes on any Escape; both listen on the document and opened before
+  // the reason did, so claiming the press in the document listener below would
+  // come too late. React's handler runs at the root, before the document, and
+  // `preventDefault` makes both stand down (the header tools' "…" claims its
+  // Escape the same way). The reason keeps `data-floating-layer="true"` — a
+  // press in it is only "not outside" for the "…" panel.
+  const handleRootKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLDivElement>) => {
+      if (!reasonOpen || !isUnhandledEscape(event.nativeEvent)) return;
+      event.preventDefault();
+      setReasonOpen(false);
+    },
+    [reasonOpen]
+  );
 
   // Dismiss on Escape or a press outside. `pointerdown` rather than `click` so
   // the popover is gone before the press lands on whatever is underneath it.
@@ -335,6 +358,7 @@ export const VerificationStatusChip = memo(function VerificationStatusChip({
       // chip's first button when the pane closes, and a press on it — the
       // chip or its ⓘ — is not "outside" the open pane.
       data-activity-entry="verification"
+      onKeyDown={handleRootKeyDown}
       className={`relative inline-flex max-w-full ${className}`.trim()}
     >
       {/* `grow`: the mobile shell passes `w-full justify-start` to the root, and
@@ -386,6 +410,7 @@ export const VerificationStatusChip = memo(function VerificationStatusChip({
             meaning "open the pane". */}
         <button
           type="button"
+          ref={reasonToggleRef}
           onClick={toggleReason}
           data-testid="verification-chip-reason-toggle"
           aria-expanded={reasonOpen}
