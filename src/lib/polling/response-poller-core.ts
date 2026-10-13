@@ -10,6 +10,7 @@ import {
 import { clearPromptHashCache, renamePromptHashCacheKeys } from './prompt-dedup';
 import { clearResponseHashCache, renameResponseHashCacheKeys } from './response-dedup';
 import { renamePromptDedupSkipsBatch } from './prompt-dedup-state';
+import { renamePendingScrapedResponseKeys } from './pending-scraped-response-store';
 import { checkForResponse, flushPendingScrapedResponse } from './response-checker';
 import { broadcastTerminalSnapshot } from '@/lib/realtime/terminal-broadcast';
 import { findTerminalSessionRefusal } from '@/lib/realtime/terminal-session-ownership';
@@ -692,6 +693,8 @@ function splitPollerKey(pollerKey: string): { worktreeId: string; instanceId: st
  * - the prompt and response dedup hashes, so the screen currently on display is
  *   not saved a second time as a new message, together with the prompt-skip
  *   tally that explains those suppressions to `capture --json` (Issue #1695).
+ * - the held scrape (Issue #2436), so a reply held while its transcript closes
+ *   is still written — against the new ID — when the hold ends (Issue #3663).
  *
  * The TUI accumulator (opencode / copilot only) is re-initialised empty at the
  * new key instead of carried over: `tui-accumulator.ts` exposes no way to write
@@ -701,8 +704,8 @@ function splitPollerKey(pollerKey: string): { worktreeId: string; instanceId: st
  *
  * Takes the whole batch because IDs can swap (A→B, B→A) or chain (A→B→C):
  * every source key is removed before any destination key is written. That
- * includes the dedup state (Issue #3553) — of running pollers and paused chains
- * alike — which is lifted off every source key in one pass and only then
+ * includes the dedup state (Issue #3553) and the held scrapes (Issue #3663) —
+ * of running pollers and paused chains alike — which is lifted off every source key in one pass and only then
  * written, so a pair handled early cannot overwrite a source handled later.
  *
  * @param renames - Worktree ID pairs being applied
@@ -805,6 +808,22 @@ export function migrateResponsePollerWorktreeIds(
   // pair by pair, a swap left A with its own state and B empty.
   renamePromptHashCacheKeys(moves);
   renameResponseHashCacheKeys([...moves, ...pausedMoves]);
+  // Issue #3663: the held scrape (#2436) belongs to the same turn as that
+  // response hash, so it follows it in the same batch. Left at the old key it
+  // was never found again: the restarted chain settles holds under the new key.
+  const replacedHolds = renamePendingScrapedResponseKeys(
+    [...moves, ...pausedMoves].flatMap((move) => {
+      const movedTo = splitPollerKey(move.newKey);
+      return movedTo ? [{ ...move, newWorktreeId: movedTo.worktreeId }] : [];
+    })
+  );
+  for (const replaced of replacedHolds) {
+    logger.warn('poller:migrate-pending-scrape-replaced', {
+      worktreeId: replaced.worktreeId,
+      instanceId: replaced.instanceId,
+      scrapedLength: replaced.content.length,
+    });
+  }
   // Issue #1695: the prompt hash moved above, so the guard keeps suppressing
   // the prompt on screen under the new ID. Its tally has to move with it, or
   // `capture --json` reports zero skips for a session that is still skipping.

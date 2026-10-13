@@ -4,12 +4,13 @@ import { getDbInstance } from '@/lib/db/db-instance';
 import { createMessage } from '@/lib/db';
 import { broadcastMessage } from '@/lib/ws-server';
 import { recordClaudeConversation } from '@/lib/conversation-logger';
-import type { CLIToolType } from '@/lib/cli-tools/types';
 import { createLogger } from '@/lib/logger';
 import { settleStructuredHistoryRecheck } from './response-dedup';
 import { captureStructuredHistoryTurn } from './structured-history-gate';
 import { STOP_TRANSCRIPT_DEFERRED_DELAYS_MS } from '@/lib/hooks/stop-history-capture';
-import { getOrInitGlobal } from '../global-state';
+// Issue #3663: the map itself lives in the store module so the worktree-ID
+// migration can move it without importing the writer below.
+import { pendingScrapedResponses, type PendingScrapedResponse } from './pending-scraped-response-store';
 
 const logger = createLogger('response-poller');
 
@@ -34,57 +35,6 @@ export const PENDING_SCRAPE_HOLD_MS = STOP_TRANSCRIPT_DEFERRED_DELAYS_MS.reduce(
   (total, delay) => total + delay,
   0
 );
-
-/**
- * A scraped reply the poller has read but not written yet (Issue #2436).
- *
- * Everything `checkForResponse` would have passed to `createMessage`, plus the
- * instant it decided to and the instant it stops waiting. The timestamp is the
- * one taken when the turn was JUDGED finished rather than when the row is
- * finally written: History sorts on it, and a row dated seven seconds late would
- * sort under the next turn's prompt.
- */
-interface PendingScrapedResponse {
-  readonly worktreeId: string;
-  readonly cliToolId: CLIToolType;
-  readonly instanceId: string;
-  /** The pane's copy of the reply, cleaned. Replaced if the frame moves on. */
-  content: string;
-  readonly timestamp: Date;
-  readonly summary?: string;
-  readonly logFileName?: string;
-  readonly requestId?: string;
-  /** `transcriptPathHint` for the last-chance re-ask; see {@link settleExpiredPendingScrapedResponse}. */
-  readonly worktreePath: string;
-  readonly transcriptPathHint: string | null;
-  /** `Date.now()` after which the hold is over and the row is written. */
-  readonly expiresAt: number;
-}
-
-declare global {
-  // eslint-disable-next-line no-var
-  var __pendingScrapedResponses: Map<string, PendingScrapedResponse> | undefined;
-}
-
-/**
- * Held scrapes, by poller key.
- *
- * **Deliberately not in `./response-dedup`.** That module's two caches are
- * cleared by `stopPollingByKey` — `clearResponseHashCache` is called from
- * inside it — so a held reply parked beside them would be dropped by the very
- * event that has to write it (Issue #2436, requirement B). It lives here, next
- * to the code that fills it and the code that writes it out, and
- * `flushPendingScrapedResponse` is what the poller calls before it clears
- * anything.
- *
- * On `globalThis` for the reason every shared map in this subsystem is (#1736):
- * under `next dev` the poller's bundle and each route's bundle would otherwise
- * hold a private copy, and a held reply only one bundle can see is a lost one.
- */
-const pendingScrapedResponses = getOrInitGlobal('__pendingScrapedResponses', () => new Map<
-  string,
-  PendingScrapedResponse
->());
 
 /** Forget every held scrape. Test seam. */
 export function resetPendingScrapedResponses(): void {
