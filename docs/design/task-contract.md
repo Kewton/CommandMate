@@ -689,7 +689,7 @@ verify.yaml の `options.envCleanIgnoreHomeEntries`（文字列の配列、既�
 **エントリ名との完全一致**のみ（glob・正規表現なし。`.semgrep-x` は `.semgrep` に一致しない）で、`home-entries`
 probe の追加・削除の両方に効き、`commandmate-entries` には効かない。除外は**比較の段階だけ**で、採取済みの
 ベースラインは書き換えない（後から足したリストが既存 task にも効く）。除外した項目は黙って消さず、
-レポートに `ignored (options.envCleanIgnoreHomeEntries): .semgrep` の 1 行で出す。組み込みの除外（zsh の補完のキャッシュ `~/.zcompdump*`、Issue #3664）は設定とは別の `ignored (built-in): <名前>` の行に出す（Issue #3672）。
+レポートに `ignored (options.envCleanIgnoreHomeEntries): .semgrep` の 1 行で出す。組み込みの除外（zsh の補完のキャッシュ `~/.zcompdump` と `~/.zcompdump.<host>.<pid>` の形だけ。他の `.zcompdump*` 風の名前は違反のまま、Issue #3664）は設定とは別の `ignored (built-in): <名前>` の行に出す（Issue #3672）。
 
 #### 既定は無効、opt-in で有効
 
