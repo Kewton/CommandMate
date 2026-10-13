@@ -33,12 +33,27 @@ function yesterdayAt1432(): number {
   return d.getTime();
 }
 
+/** The note the list serves for the lone split's session (asserted as drawn). */
+const NOTE_TEXT = 'waiting on the review of the migration';
+
 /**
  * Issue #3651: the lone split's session is running (End is drawn) and carries
  * a note from an earlier day. Registered AFTER `setupSplitTest`, so these
  * win; everything else falls back to its catch-all.
+ *
+ * Each body has the shape its route returns (read from the route, not guessed):
+ * - `GET /api/worktrees` (src/app/api/worktrees/route.ts): `{ worktrees,
+ *   repositories, ... }`, each row the worktree plus its status, `sessionNotes`,
+ *   `autoYesByInstance` and `lastActivityByInstance`. The shared cache reads
+ *   `data.worktrees` (src/hooks/useWorktreesCache.ts), and the note is read from
+ *   that list (`useSessionNote`), so a bare array would leave no note to draw.
+ * - `GET /api/worktrees/:id` (src/app/api/worktrees/[id]/route.ts): the worktree
+ *   with `gitStatus` and the session status spread in; no `sessionNotes`.
+ * - `GET /api/worktrees/:id/current-output` (…/current-output/route.ts): the
+ *   `CurrentOutputPayload` plus `agentMode`. End is drawn from its `isRunning`.
  */
 async function mockRunningSessionWithNote(page: Page): Promise<void> {
+  const running = { isRunning: true, isWaitingForResponse: false, isProcessing: false };
   const worktree = {
     id: E2E_WORKTREE_A,
     name: `E2E ${E2E_WORKTREE_A}`,
@@ -50,39 +65,52 @@ async function mockRunningSessionWithNote(page: Page): Promise<void> {
     selectedAgents: ['claude', 'codex', 'gemini', 'vibe-local', 'opencode', 'copilot'],
     cliToolId: 'claude',
     status: 'ready',
-    sessionStatusByCli: {
-      claude: { isRunning: true, isWaitingForResponse: false, isProcessing: false },
-    },
-    sessionNotes: {
-      claude: { text: 'waiting on the review of the migration', updatedAt: yesterdayAt1432() },
-    },
-    gitStatus: {
-      currentBranch: 'main',
-      initialBranch: 'main',
-      isBranchMismatch: false,
-      commitHash: 'e2e0000',
-      isDirty: false,
-    },
   };
+  const sessionStatus = {
+    sessionStatusByCli: { claude: running },
+    sessionStatusByInstance: { claude: running },
+    isSessionRunning: true,
+    isWaitingForResponse: false,
+    isProcessing: false,
+  };
+  const gitStatus = {
+    currentBranch: 'main',
+    initialBranch: 'main',
+    isBranchMismatch: false,
+    commitHash: 'e2e0000',
+    isDirty: false,
+  };
+  const listRow = {
+    ...worktree,
+    ...sessionStatus,
+    sessionNotes: { claude: { text: NOTE_TEXT, updatedAt: yesterdayAt1432() } },
+    autoYesByInstance: {},
+    lastActivityByInstance: {},
+  };
+  const detail = { ...worktree, gitStatus, ...sessionStatus };
   await page.route(
     (url) => url.pathname.startsWith('/api/worktrees'),
     async (route) => {
       const { pathname } = new URL(route.request().url());
       const json = (body: unknown) =>
         route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
-      if (pathname === '/api/worktrees') return json([worktree]);
-      if (pathname === `/api/worktrees/${E2E_WORKTREE_A}`) return json(worktree);
+      if (pathname === '/api/worktrees') return json({ worktrees: [listRow], repositories: [] });
+      if (pathname === `/api/worktrees/${E2E_WORKTREE_A}`) return json(detail);
       if (pathname.startsWith(`/api/worktrees/${E2E_WORKTREE_A}/current-output`)) {
         return json({
           isRunning: true,
           cliToolId: 'claude',
-          isGenerating: false,
-          isPromptWaiting: false,
+          sessionName: `mcbd-claude-${E2E_WORKTREE_A}`,
+          sessionStatus: 'ready',
+          sessionStatusReason: 'input_prompt',
           content: '',
           fullOutput: '',
           realtimeSnippet: '',
+          lineCount: 0,
           thinking: false,
+          isPromptWaiting: false,
           isSelectionListActive: false,
+          agentMode: 'unknown',
         });
       }
       return route.fallback();
@@ -253,6 +281,10 @@ test.describe('Second row "…" panel beside the sidebar (Issue #3651)', () => {
       // Positive control: the conditions of the path — a running session (End
       // is drawn) and a note from an earlier day (its stamp carries the date).
       await expect(panel.getByTestId('terminal-end-session-button-0')).toBeVisible();
+      // The note comes from the list (`data.worktrees`): if that mock lost its
+      // shape, there would be no note here and this fails first.
+      await expect(panel.getByTestId('split-session-note-0')).toContainText(NOTE_TEXT);
+      await expect(panel.getByTestId('split-session-note-time-0')).toBeVisible();
       await expect(panel.getByTestId('split-session-note-time-0')).toHaveText(/\d+\/\d+ \d{2}:\d{2}/);
 
       const sidebarBox = await box(page.getByTestId('sidebar-container'));
@@ -298,6 +330,10 @@ test.describe('Second row "…" panel beside the sidebar (Issue #3651)', () => {
     const row = page.getByTestId('split-bar-session-0');
     await expect(row).toBeVisible();
     await expect(page.getByTestId('split-action-bar-items-overflow')).toHaveCount(0);
+    // Same conditions as the folded case: the note and End are on the bar.
+    await expect(page.getByTestId('split-session-note-0')).toContainText(NOTE_TEXT);
+    await expect(page.getByTestId('split-session-note-time-0')).toHaveText(/\d+\/\d+ \d{2}:\d{2}/);
+    await expect(page.getByTestId('terminal-end-session-button-0')).toBeVisible();
     expect(await row.evaluate((el) => getComputedStyle(el).flexWrap)).toBe('nowrap');
   });
 });
