@@ -280,6 +280,39 @@ describe('SCENES', () => {
     expect('await fetch(`${baseUrl}/api/repositories/clone`)').toMatch(CLONE_USE);
   });
 
+  it('only waits for entry-point testids that the product still renders (#3610)', () => {
+    // #3591 removed the vertical activity bar; a scene that waits for a testid
+    // no component renders can never start. Check every literal the script
+    // looks up against the quoted literal (or `header-tool-` template) in src/.
+    const sources = ['.claude', '.agents'].map((root) =>
+      fs.readFileSync(
+        path.resolve(__dirname, `../../../../${root}/skills/demo-video/scripts/record-scenes.ts`),
+        'utf8',
+      ),
+    );
+    expect(sources[0]).toBe(sources[1]);
+    const srcDir = path.resolve(__dirname, '../../../../src');
+    const walk = (dir: string): string[] =>
+      fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) return walk(full);
+        return /\.tsx?$/.test(entry.name) ? [full] : [];
+      });
+    const product = walk(srcDir)
+      .map((file) => fs.readFileSync(file, 'utf8'))
+      .join('\n');
+    const entryIds = [...sources[0].matchAll(/getByTestId\('((?:header-tool|activity-bar-button)-[a-z-]+)'\)/g)].map(
+      (m) => m[1],
+    );
+    expect(entryIds).toEqual(expect.arrayContaining(['header-tool-skills', 'header-tool-git']));
+    expect(entryIds.filter((id) => id.startsWith('activity-bar-button'))).toEqual([]);
+    for (const id of entryIds) {
+      const tool = id.replace('header-tool-', '');
+      expect(product).toContain(`data-testid={\`header-tool-\${tool.id}\`}`);
+      expect(product).toContain(`id: '${tool}'`);
+    }
+  });
+
   it('gives every scene a title, a viewport and a runner', () => {
     for (const scene of SCENES) {
       expect(scene.title.length).toBeGreaterThan(0);
