@@ -13,7 +13,7 @@
 
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, act, cleanup } from '@testing-library/react';
+import { render, screen, fireEvent, act, cleanup, waitFor } from '@testing-library/react';
 import { FilePanelContent } from '@/components/worktree/FilePanelContent';
 import { __resetApiReachabilityReporting } from '@/lib/api-client';
 import type { FileTab } from '@/hooks/useFileTabs';
@@ -161,5 +161,97 @@ describe('[#3700] FileSearchBar behind a viewport layer', () => {
     expect(unmarked).toBe(true);
     expect(searchInput()).not.toBeNull();
     expect(maximized()).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The unmaximized panel's search bar and the editor's own CSS maximize
+// ---------------------------------------------------------------------------
+
+class MockResizeObserver {
+  observe = vi.fn();
+  unobserve = vi.fn();
+  disconnect = vi.fn();
+}
+
+function markdownTab(): FileTab {
+  return {
+    path: 'docs/readme.md',
+    name: 'readme.md',
+    content: {
+      path: 'docs/readme.md',
+      content: '# Doc\n\ntext',
+      extension: 'md',
+      worktreePath: '/repo',
+    },
+    loading: false,
+    error: null,
+    isDirty: false,
+  };
+}
+
+/** The editor's textarea has a placeholder too, so match the search bar's. */
+function fileSearchInput(): HTMLElement | null {
+  return screen.queryByPlaceholderText('Search...');
+}
+
+function openFileSearch(): HTMLElement {
+  fireEvent.click(screen.getByRole('button', { name: /search in file/i }));
+  const input = fileSearchInput();
+  expect(input).not.toBeNull();
+  return input!;
+}
+
+function editorMaximized(): boolean {
+  return screen.queryByTestId('maximize-hint') !== null;
+}
+
+/** The panel unmaximized, its search bar open, the editor under it. */
+async function renderMarkdownPanelWithSearch(): Promise<HTMLElement> {
+  try {
+    window.localStorage.clear();
+  } catch {
+    // jsdom always has it; the editor only persists its maximize flag there.
+  }
+  global.fetch = vi.fn().mockResolvedValue({
+    ok: true,
+    json: async () => ({ success: true, content: '# Doc\n\ntext' }),
+  }) as unknown as typeof fetch;
+  vi.stubGlobal('ResizeObserver', MockResizeObserver);
+  render(
+    <FilePanelContent
+      tab={markdownTab()}
+      worktreeId="wt-3700"
+      onLoadContent={vi.fn()}
+      onLoadError={vi.fn()}
+      onSetLoading={vi.fn()}
+    />
+  );
+  await waitFor(() => expect(screen.getByTestId('markdown-editor-textarea')).toBeInTheDocument());
+  expect(maximized()).toBe(false);
+  return openFileSearch();
+}
+
+describe('[#3700] the unmaximized panel search bar behind the editor CSS maximize', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('leaves the press to the maximized editor in front and stays open (positive)', async () => {
+    const input = await renderMarkdownPanelWithSearch();
+    fireEvent.click(screen.getByTestId('maximize-button'));
+    await waitFor(() => expect(editorMaximized()).toBe(true));
+
+    pressEscape(input);
+    expect(editorMaximized()).toBe(false);
+    expect(fileSearchInput()).not.toBeNull();
+  });
+
+  it('closes the search on Escape with the editor not maximized (negative control)', async () => {
+    const input = await renderMarkdownPanelWithSearch();
+
+    pressEscape(input);
+    expect(fileSearchInput()).toBeNull();
+    expect(editorMaximized()).toBe(false);
   });
 });

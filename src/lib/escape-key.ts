@@ -94,3 +94,20 @@ export function isBehindViewportLayer(element: Element): boolean {
     (layer) => !layer.contains(element)
   );
 }
+
+/**
+ * {@link isBehindViewportLayer}, plus the case it leaves out (Issue #3700): an
+ * `element` with no viewport layer of its own around it — the PC file panel's
+ * search bar while the file is not maximized. It is behind any viewport layer
+ * drawn over the root-level box it sits in: one with a z-index is compared by
+ * {@link isCoveredByViewportLayer}; the page itself (no z-index) is under
+ * every viewport layer showing, such as the editor's CSS maximize in the same
+ * panel.
+ */
+export function isUnderViewportLayer(element: Element): boolean {
+  if (element.closest(`[${VIEWPORT_LAYER_ATTRIBUTE}]`)) return isBehindViewportLayer(element);
+  let root: Element = element;
+  while (root.parentElement && root.parentElement !== document.body) root = root.parentElement;
+  if (stackOrder(root) !== null) return isCoveredByViewportLayer(root);
+  return document.querySelector(`[${VIEWPORT_LAYER_ATTRIBUTE}]`) !== null;
+}

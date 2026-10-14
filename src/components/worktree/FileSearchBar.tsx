@@ -14,7 +14,7 @@ import React, { memo } from 'react';
 import { useTranslations } from 'next-intl';
 import { X } from 'lucide-react';
 import { Button } from '@/components/ui';
-import { isBehindViewportLayer, markEscapeClosedLayer } from '@/lib/escape-key';
+import { isUnderViewportLayer, markEscapeClosedLayer } from '@/lib/escape-key';
 
 export interface FileSearchBarProps {
   /** Ref for the search input element */
@@ -66,8 +66,9 @@ export const FileSearchBar = memo(function FileSearchBar({
           // Issue #3700: a layer of its own, like FileViewer's search bar
           // (#3691) — the maximized file under it (a window listener) waits for
           // the next Escape. Behind a viewport layer the press is that layer's:
-          // neither close nor mark it.
-          if (e.key === 'Escape' && !isBehindViewportLayer(e.currentTarget)) {
+          // neither close nor mark it — also unmaximized, under the editor's
+          // CSS maximize in the same panel.
+          if (e.key === 'Escape' && !isUnderViewportLayer(e.currentTarget)) {
             markEscapeClosedLayer(e.nativeEvent);
             onClose();
           }
