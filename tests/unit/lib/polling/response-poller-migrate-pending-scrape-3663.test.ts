@@ -873,16 +873,25 @@ describe('[#3663] a restart of another session raised from inside a tick', () =>
       ],
       resolveAll
     );
-    // The old A tick's completion edge, still in its async context, reaches
-    // for A's key — which now holds B's moved reply.
-    relay.hook = (worktreeId) => {
-      if (worktreeId !== WT.a) return;
+    // The old A tick, still in its async context, reaches for A's key — which
+    // now holds B's moved reply. Entered from the store's refusal log, which
+    // that tick always reaches (Issue #3684: a refused hold no longer fires
+    // the relay's completion edge, which this used to ride).
+    let intrusions = 0;
+    mockLogger.info.mockImplementation((event: string, ctx?: { worktreeId?: string }) => {
+      if (event !== 'pending-scrape-hold-refused' || ctx?.worktreeId !== WT.a || intrusions > 0) return;
+      intrusions++;
       seedHold(keyOf(WT.a), WT.a, TOOL, 'alpha intruder');
       discardPendingScrapedResponse(keyOf(WT.a));
       flushPendingScrapedResponse(keyOf(WT.a), 'test');
-    };
-    gate.release('not_yet_closed');
-    await settle();
+    });
+    try {
+      gate.release('not_yet_closed');
+      await settle();
+    } finally {
+      mockLogger.info.mockImplementation(() => undefined);
+    }
+    expect(intrusions).toBe(1);
 
     expect(rows()).toEqual([]);
     stopPolling(WT.a, TOOL);

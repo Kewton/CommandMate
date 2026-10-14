@@ -86,6 +86,7 @@ import { resolveSessionName } from '@/lib/cli-tools/session-name';
 import { probeGeometryDelegation } from '@/lib/tmux/geometry-delegation';
 import { isLiveAttachEligibleSession } from '@/lib/session/tmux-session-surface';
 import { getPollerKey, stopPolling } from './response-poller-core';
+import { currentPollerOwner, mayActForPollerKey } from './poller-owner';
 import { notifyPushSubscribers } from '@/lib/push';
 // Issue #1790: imported by deep path, not through `@/lib/push`. Suites that
 // replace the barrel to count notifications (e.g. the #1547 escalation test)
@@ -1119,14 +1120,28 @@ function recordOrHoldScrapedResponse(
         scrapedLength: cleanedResponse.length,
         holdMs: PENDING_SCRAPE_HOLD_MS,
       });
-    }
 
-    // The completion edge is announced HERE and not at the flush, because the
-    // turn finished now. A relay waiting on this session gets #2401's grace
-    // window to find a turn-keyed row, which is exactly the row the hold is
-    // waiting for; delaying the announcement by the hold would delay every
-    // delivery by it too.
-    onRelayTurnCompleted(worktreeId, cliToolId, resolvedInstanceId, false);
+      // The completion edge is announced HERE and not at the flush, because the
+      // turn finished now. A relay waiting on this session gets #2401's grace
+      // window to find a turn-keyed row, which is exactly the row the hold is
+      // waiting for; delaying the announcement by the hold would delay every
+      // delivery by it too. Issue #3684: only for a hold that was taken — a
+      // refused one is a retired tick, which announces nothing under the key
+      // it lost, as in the immediate-save branch below.
+      onRelayTurnCompleted(worktreeId, cliToolId, resolvedInstanceId, false);
+    }
+  } else if (!suppressScrapedHistory && !mayActForPollerKey(pollerKey)) {
+    // Issue #3684: the same question the hold asks (#3663), for the reply saved
+    // at once — a tick retired while it awaited the reader or the log writes no
+    // row, broadcast or relay edge under the key it lost. No `await` between
+    // this check and the three below. Only those three are covered: the
+    // Markdown log and the state the caller already wrote are not undone.
+    logger.info('scraped-response-save-refused', {
+      worktreeId,
+      cliToolId,
+      instanceId: resolvedInstanceId,
+      generation: currentPollerOwner()?.generation,
+    });
   } else if (!suppressScrapedHistory) {
     // Create new CLI tool message in database
     const message = createMessage(db, {

@@ -70,7 +70,7 @@ export function currentPollerOwner(): PollerOwner | undefined {
 
 /**
  * Whether the code running now may change what is kept under `pollerKey`
- * (Issue #3663).
+ * (Issue #3663), or save a reply under it at once (Issue #3684).
  *
  * What is turned away is exactly one thing: a tick whose chain has been
  * stopped, acting on its OWN key. Code outside any tick — a route,
