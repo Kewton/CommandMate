@@ -6,7 +6,7 @@ import { broadcastMessage } from '@/lib/ws-server';
 import { recordClaudeConversation } from '@/lib/conversation-logger';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { createLogger } from '@/lib/logger';
-import { forgetInheritedResponseHash, settleStructuredHistoryRecheck } from './response-dedup';
+import { settleStructuredHistoryRecheck } from './response-dedup';
 import { captureStructuredHistoryTurn } from './structured-history-gate';
 import { STOP_TRANSCRIPT_DEFERRED_DELAYS_MS } from '@/lib/hooks/stop-history-capture';
 import { getOrInitGlobal } from '../global-state';
@@ -114,23 +114,21 @@ export function hasPendingScrapedResponse(pollerKey: string): boolean {
  * Issue #3663: refused to a tick whose chain has been stopped (see
  * `mayActForPollerKey`) — a stop, a stalled-tick restart or a worktree-ID
  * migration retired it while it awaited the reader, and whatever is held under
- * the key now belongs to someone else. The hash that tick registered for this
- * content is taken back from the chain that inherited its turn — only while
- * that chain still holds it as inherited — so the successor can still hold the
- * reply nobody has written.
+ * the key now belongs to someone else. The response hash that tick registered
+ * is not taken back here: a migration does not hand a running tick's hash on in
+ * the first place (`migrateResponsePollerWorktreeIds`), so the successor judges
+ * the screen itself.
  *
  * @returns Whether the reply is held
  */
 export function holdScrapedResponse(pollerKey: string, pending: PendingScrapedResponse): boolean {
   if (!mayActForPollerKey(pollerKey)) {
     const caller = currentPollerOwner();
-    const hashReleasedFor = caller ? forgetInheritedResponseHash(caller, pending.content) : null;
     logger.info('pending-scrape-hold-refused', {
       worktreeId: pending.worktreeId,
       cliToolId: pending.cliToolId,
       instanceId: pending.instanceId,
       generation: caller?.generation,
-      hashReleasedFor: hashReleasedFor ?? undefined,
     });
     return false;
   }

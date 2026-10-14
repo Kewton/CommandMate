@@ -53,7 +53,6 @@
 
 import { createHash } from 'crypto';
 import { getOrInitGlobal } from '../global-state';
-import { currentPollerOwner, type PollerOwner } from './poller-owner';
 
 /**
  * In-memory cache: pollerKey -> SHA-256 hash of the last saved response content.
@@ -157,17 +156,9 @@ export function isDuplicateResponse(pollerKey: string, content: string): boolean
   responseHashCache.set(pollerKey, hash);
   // Issue #3519: a new response starts a new run of duplicate ticks.
   duplicateResponseSkipStreak.delete(pollerKey);
-  // Issue #3663: the chain registered a hash of its own, so whatever a
-  // migration handed it is no longer what the cache holds for it.
-  const caller = currentPollerOwner();
-  if (caller && caller.pollerKey === pollerKey) caller.inheritedResponseHash = undefined;
   return false;
 }
 
-/** The response hash cached under `pollerKey`, if any (Issue #3663). */
-export function peekResponseHash(pollerKey: string): string | undefined {
-  return responseHashCache.get(pollerKey);
-}
 
 /**
  * Count one duplicate tick for this pollerKey and say whether it should be
@@ -302,42 +293,6 @@ export function clearResponseHashCache(pollerKey: string): void {
   structuredHistoryRecheckCache.delete(pollerKey);
   // Issue #3519: the skip count is about the same hash.
   duplicateResponseSkipStreak.delete(pollerKey);
-}
-
-/**
- * Take back the hash a retired tick registered for `content`, when the reply it
- * stands for was never saved (Issue #3663).
- *
- * Called when a hold is refused: a tick registered the hash, a worktree-ID
- * migration moved it to the successor's key while the tick awaited the
- * transcript reader, and the tick came back no longer owning the key. Left in
- * place, the hash would make the successor skip the very reply nobody has
- * written.
- *
- * Only that hash: the chain `retired` was handed to (followed through every
- * later migration) must still be running, must not have registered a hash of
- * its own since ({@link PollerOwner.inheritedResponseHash}), and must still
- * hold the inherited one. A successor that was restarted, or that saved the
- * same reply itself, keeps its hash — taking that back would save the reply a
- * second time. The skip count goes with the hash.
- *
- * @param retired - The owner of the tick whose hold was refused
- * @param content - Cleaned content of the reply that was not saved
- * @returns The poller key the hash was removed from, or null
- */
-export function forgetInheritedResponseHash(retired: PollerOwner, content: string): string | null {
-  let successor = retired.movedTo;
-  if (!successor) return null;
-  while (successor.movedTo) successor = successor.movedTo;
-  if (successor.stopped) return null;
-
-  const hash = createHash('sha256').update(content).digest('hex');
-  const pollerKey = successor.pollerKey;
-  if (successor.inheritedResponseHash !== hash || responseHashCache.get(pollerKey) !== hash) return null;
-  responseHashCache.delete(pollerKey);
-  duplicateResponseSkipStreak.delete(pollerKey);
-  successor.inheritedResponseHash = undefined;
-  return pollerKey;
 }
 
 /** One pollerKey's worth of response dedup state, lifted off its key (Issue #3553). */

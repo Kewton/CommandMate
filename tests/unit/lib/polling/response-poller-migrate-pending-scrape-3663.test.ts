@@ -892,28 +892,34 @@ describe('[#3663] a restart of another session raised from inside a tick', () =>
 });
 
 // ---------------------------------------------------------------------------
-// Review follow-up 2: a hash the successor saved itself is not taken back
+// ⑦ continued: a chain whose tick is running when the migration lands does not
+// hand its response hash on, so later moves and resumes cannot strand it
 // ---------------------------------------------------------------------------
 
-describe('[#3663] a refused hold after the successor saved the same reply', () => {
-  async function aTickParkedAfterTheHash(): Promise<Gate> {
+describe('[#3663] ⑦ the hash of a chain migrated mid-tick, through later moves', () => {
+  /** A's tick registered the hash of `alpha only` and waits on the reader; A→B lands. */
+  async function aTickParkedThenMovedToB(): Promise<Gate> {
     startPolling(WT.a, TOOL);
     screens.set(keyOf(WT.a), 'alpha only');
     const gate = armGate(keyOf(WT.a));
     await vi.advanceTimersByTimeAsync(POLLING_INTERVAL);
     await gate.entered;
     migrateResponsePollerWorktreeIds([{ oldId: WT.a, newId: WT.b }], resolveAll);
-    screens.set(keyOf(WT.b), 'alpha only');
-    readerOutcome.set(keyOf(WT.b), 'absent');
     return gate;
   }
 
-  it('after a restart of the successor, the reply it saved is not saved again', async () => {
-    const gate = await aTickParkedAfterTheHash();
-    startPolling(WT.b, TOOL);
+  it('B saves Y and then the same reply itself, B→C, the old hold is refused: C does not save it again', async () => {
+    const gate = await aTickParkedThenMovedToB();
+    readerOutcome.set(keyOf(WT.b), 'absent');
+    screens.set(keyOf(WT.b), 'bravo other');
+    await tick();
+    screens.set(keyOf(WT.b), 'alpha only');
     await tick();
     expect(rowsWith('alpha only')).toEqual([[WT.b, TOOL]]);
 
+    migrateResponsePollerWorktreeIds([{ oldId: WT.b, newId: WT.c }], resolveAll);
+    readerOutcome.set(keyOf(WT.c), 'absent');
+    screens.set(keyOf(WT.c), 'alpha only');
     gate.release('not_yet_closed');
     await settle();
     await tick();
@@ -922,19 +928,32 @@ describe('[#3663] a refused hold after the successor saved the same reply', () =
     expect(rowsWith('alpha only')).toEqual([[WT.b, TOOL]]);
   });
 
-  it('when the successor saved it again itself, the reply is not saved a third time', async () => {
-    const gate = await aTickParkedAfterTheHash();
-    screens.set(keyOf(WT.b), 'bravo other');
-    await tick();
-    screens.set(keyOf(WT.b), 'alpha only');
-    await tick();
-    expect(rowsWith('alpha only')).toEqual([[WT.b, TOOL]]);
-
+  it('B→C before the old hold is refused: C still holds the unsaved reply and writes it once', async () => {
+    const gate = await aTickParkedThenMovedToB();
+    migrateResponsePollerWorktreeIds([{ oldId: WT.b, newId: WT.c }], resolveAll);
+    screens.set(keyOf(WT.c), 'alpha only');
     gate.release('not_yet_closed');
     await settle();
     await tick();
+
+    expect(hasPendingScrapedResponse(keyOf(WT.c))).toBe(true);
+    stopPolling(WT.c, TOOL);
+    expect(rowsWith('alpha only')).toEqual([[WT.c, TOOL]]);
+  });
+
+  it('B pauses on a prompt and is resumed: the unsaved reply is still held and written once', async () => {
+    const gate = await aTickParkedThenMovedToB();
+    screens.set(keyOf(WT.b), 'alpha only');
+    await tick();
+    // What `settleSelfStop` leaves after a prompt, then the `/respond` resume.
+    g.__responsePollerCoordinator!.pausedOnPrompt.add(keyOf(WT.b));
+    startPolling(WT.b, TOOL);
+    gate.release('not_yet_closed');
+    await settle();
     await tick();
 
+    expect(hasPendingScrapedResponse(keyOf(WT.b))).toBe(true);
+    stopPolling(WT.b, TOOL);
     expect(rowsWith('alpha only')).toEqual([[WT.b, TOOL]]);
   });
 });

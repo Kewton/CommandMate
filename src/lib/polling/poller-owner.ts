@@ -44,21 +44,6 @@ export interface PollerOwner {
    * touched until that verdict is in.
    */
   selfStopped: boolean;
-  /**
-   * The chain a worktree-ID migration handed this chain's turn to (Issue
-   * #3663). Set only by the migration, on the owner it retires; read only to
-   * find where the turn's dedup state went (`forgetInheritedResponseHash` in
-   * `./response-dedup`).
-   */
-  movedTo?: PollerOwner;
-  /**
-   * The response hash a worktree-ID migration moved onto this chain's key when
-   * it started the chain, for as long as the chain has not registered one of
-   * its own (Issue #3663). Only such an inherited hash may be taken back when
-   * the retired tick that registered it has its hold refused; a hash this chain
-   * registered stands for a reply it saved or holds itself.
-   */
-  inheritedResponseHash?: string;
 }
 
 declare global {

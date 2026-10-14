@@ -7,7 +7,7 @@ import {
   clearTuiAccumulator,
 } from '../tui-accumulator';
 import { clearPromptHashCache, renamePromptHashCacheKeys } from './prompt-dedup';
-import { clearResponseHashCache, peekResponseHash, renameResponseHashCacheKeys } from './response-dedup';
+import { clearResponseHashCache, renameResponseHashCacheKeys } from './response-dedup';
 import { renamePromptDedupSkipsBatch } from './prompt-dedup-state';
 import { checkForResponse, flushPendingScrapedResponse } from './response-checker';
 // Issue #3663: the migration's own entry points into the held-scrape store,
@@ -689,7 +689,8 @@ function splitPollerKey(pollerKey: string): { worktreeId: string; instanceId: st
  * other, which writes its held scrape under the ID it carries before the moved
  * one arrives. A chain that cannot be resolved has its held scrape written
  * under the NEW ID: the old one is gone from the table, and a row for it fails
- * the foreign key and is lost.
+ * the foreign key and is lost. A chain with a tick running at the moment of
+ * the migration does not hand its response hash on (see the dedup move below).
  *
  * @param renames - Worktree ID pairs being applied
  * @param resolveCliToolId - Maps a poller's (worktree, instance) back to its CLI
@@ -736,9 +737,9 @@ export function migrateResponsePollerWorktreeIds(
   // Phase 1: stop every affected timer and lift the state off the old keys.
   // Done for the whole batch before any write so a swap cannot self-collide.
   const carried = new Map<string, { startedAt: number | undefined }>();
-  // Issue #3663: the owners retired here, by old key, so each can be pointed
-  // at the chain that carries its turn on (`PollerOwner.movedTo`).
-  const retiredOwners = new Map<string, PollerOwner>();
+  // Issue #3663: the moves whose chain has a tick running right now — read
+  // before anything below touches the coordinator. See the response hash below.
+  const midTick = moves.filter((move) => coordinator.running.has(move.oldKey));
   for (const move of moves) {
     const timerId = activePollers.get(move.oldKey);
     if (timerId) clearTimeout(timerId);
@@ -755,7 +756,6 @@ export function migrateResponsePollerWorktreeIds(
       retired.superseded = true;
       retired.stopped = true;
       coordinator.owners.delete(move.oldKey);
-      retiredOwners.set(move.oldKey, retired);
     }
     coordinator.pendingRestart.delete(move.oldKey);
 
@@ -843,8 +843,24 @@ export function migrateResponsePollerWorktreeIds(
   // Issue #3553: the dedup state of the whole batch moves in one call per map
   // family, each lifting every source before writing any destination. Re-keyed
   // pair by pair, a swap left A with its own state and B empty.
+  //
+  // Issue #3663: except the response hash of a chain whose tick is running.
+  // That tick may have registered the hash of a reply it has not yet saved or
+  // held — it is awaiting the transcript reader, and the hold it comes back
+  // with is refused (its owner is retired above). Handed on, the hash would
+  // make the successor skip a reply nobody wrote. Dropped, the successor judges
+  // the screen itself and holds or saves it. The price, taken knowingly: a
+  // reply that tick HAD already saved may be saved once more by the successor
+  // — a duplicate row rather than a lost one, the trade #2436 makes. Deciding
+  // here, once, replaces marking the hash and taking it back later, whose
+  // lifetime every later move, resume and restart would have to carry.
+  // The prompt hash and the prompt-skip tally move as before.
+  for (const move of midTick) clearResponseHashCache(move.oldKey);
   renamePromptHashCacheKeys(moves);
   renameResponseHashCacheKeys([...moves, ...pausedMoves]);
+  // Nothing of the source landed on the destination; nothing left there from
+  // before may stand in for it either.
+  for (const move of midTick) clearResponseHashCache(move.newKey);
   movePendingScrapedResponses(pendingMoves);
   // Issue #1695: the prompt hash moved above, so the guard keeps suppressing
   // the prompt on screen under the new ID. Its tally has to move with it, or
@@ -871,17 +887,7 @@ export function migrateResponsePollerWorktreeIds(
     if (isFullScreenTui(move.cliToolId)) {
       initTuiAccumulator(move.newKey);
     }
-    // What `scheduleNextResponsePoll` does, with the new owner kept: a tick
-    // of the retired chain that comes back with a hold it may no longer place
-    // gives the dedup hash it registered back to this chain (#3663).
-    const successor = takeOwnership(move.newKey);
-    successor.inheritedResponseHash = peekResponseHash(move.newKey);
-    scheduleTick(
-      { worktreeId: move.newWorktreeId, cliToolId: move.cliToolId, instanceId: move.instanceId },
-      successor
-    );
-    const retired = retiredOwners.get(move.oldKey);
-    if (retired) retired.movedTo = successor;
+    scheduleNextResponsePoll(move.newWorktreeId, move.cliToolId, move.instanceId);
   }
 
   // Issue #2230: the pause marks of the chains collected above follow their
