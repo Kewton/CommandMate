@@ -304,6 +304,48 @@ describe('[#3691] FileViewer unified screen Escape ladder', () => {
   });
 });
 
+/** The unified screen with its search bar open, switched to the editor. */
+async function renderUnifiedSearchInEditor(): Promise<{
+  onClose: ReturnType<typeof vi.fn>;
+  input: HTMLElement;
+}> {
+  const { onClose } = await renderUnifiedScreen(undefined, { maximize: false });
+  fireEvent.click(screen.getByTestId('markdown-file-actions-trigger'));
+  fireEvent.click(await screen.findByTestId('file-actions-sheet-search'));
+  fireEvent.click(screen.getByTestId('markdown-file-mode-editor'));
+  const input = await screen.findByPlaceholderText('Search...');
+  return { onClose, input };
+}
+
+function searchBarOpen(): boolean {
+  return screen.queryByPlaceholderText('Search...') !== null;
+}
+
+describe('[#3691] the unified screen search bar and the embedded editor maximize', () => {
+  it('leaves the press to the CSS-maximized editor in front (positive)', async () => {
+    const { onClose, input } = await renderUnifiedSearchInEditor();
+    fireEvent.keyDown(screen.getByTestId('markdown-editor'), {
+      key: 'F',
+      ctrlKey: true,
+      shiftKey: true,
+    });
+    await waitFor(() => expect(screen.queryByTestId('maximize-hint')).not.toBeNull());
+
+    pressEscape(input);
+    await waitFor(() => expect(screen.queryByTestId('maximize-hint')).toBeNull());
+    expect(searchBarOpen()).toBe(true);
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('closes only the search bar in front with no maximized editor (negative control)', async () => {
+    const { onClose, input } = await renderUnifiedSearchInEditor();
+
+    pressEscape(input);
+    expect(searchBarOpen()).toBe(false);
+    expect(onClose).not.toHaveBeenCalled();
+  });
+});
+
 // ---------------------------------------------------------------------------
 // 2. An Escape pressed inside the chip
 // ---------------------------------------------------------------------------
