@@ -42,7 +42,12 @@ import { useFileContentSearch } from '@/hooks/useFileContentSearch';
 import { useCopyFeedback } from '@/hooks/useCopyFeedback';
 import hljs from 'highlight.js';
 import 'highlight.js/styles/github-dark.css';
-import { isUnhandledEscape } from '@/lib/escape-key';
+import {
+  isCoveredByViewportLayer,
+  isEscapeNoLayerClosed,
+  markEscapeClosedLayer,
+  VIEWPORT_LAYER_ATTRIBUTE,
+} from '@/lib/escape-key';
 
 /** Loading placeholder while the markdown editor chunk resolves. */
 function MarkdownEditorLoading() {
@@ -79,6 +84,25 @@ const MARP_FRONTMATTER_REGEX = /^---\s*\nmarp:\s*true/;
 const MAX_MARP_CONTENT_LENGTH = 1_000_000;
 
 /**
+ * Issue #3691: whether a viewport layer is drawn over `element`, which sits
+ * inside one of FileViewer's own screens (themselves viewport layers, with no
+ * z-index of their own on `element`). Two ways: a root-level layer over the
+ * hosting screen (the embedded editor's CSS-fallback maximize, a body portal
+ * at the same z, later in the document), or one nested in the screen that is
+ * not `element`'s ancestor (the native-fullscreen editor, maximized in place
+ * and in the browser's top layer). Outside a screen (the modal) there is
+ * nothing to cover it.
+ */
+function isBehindViewportLayer(element: Element): boolean {
+  const host = element.closest(`[${VIEWPORT_LAYER_ATTRIBUTE}]`);
+  if (!host) return false;
+  if (isCoveredByViewportLayer(host)) return true;
+  return Array.from(host.querySelectorAll(`[${VIEWPORT_LAYER_ATTRIBUTE}]`)).some(
+    (layer) => !layer.contains(element)
+  );
+}
+
+/**
  * [Issue #47, Issue #723] Inline search bar shown beneath the toolbar in both
  * the modal and fullscreen variants of FileViewer. Extracted to remove the
  * verbatim duplication that previously existed at two render paths.
@@ -112,7 +136,14 @@ function FileViewerSearchBar({
         value={searchQuery}
         onChange={(e) => onQueryChange(e.target.value)}
         onKeyDown={(e) => {
-          if (e.key === 'Escape') { onClose(); }
+          // Issue #3691: the search bar is a layer of its own — the fullscreen
+          // under it (a window listener) waits for the next Escape. Behind a
+          // viewport layer (the embedded editor maximized over the screen) the
+          // press is that layer's: neither close nor mark it.
+          if (e.key === 'Escape' && !isBehindViewportLayer(e.currentTarget)) {
+            markEscapeClosedLayer(e.nativeEvent);
+            onClose();
+          }
           // Guard against IME composition (Enter confirms candidate, not submit).
           if (e.key === 'Enter' && !e.nativeEvent.isComposing) { if (e.shiftKey) { onPrev(); } else { onNext(); } }
         }}
@@ -498,11 +529,13 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
   }, [searchCurrentIdx, searchMatches]);
 
   // ESC to exit fullscreen. The unified file screen has its own Escape ladder
-  // (search -> maximize -> close), so it opts out here.
+  // (search -> maximize -> close), so it opts out here. Issue #3691: not on the
+  // press a floating layer in front closed on (`markEscapeClosedLayer`) — one
+  // Escape, one layer.
   useEffect(() => {
     if (!isFullscreen || isUnifiedEditable) return;
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (isUnhandledEscape(e)) setIsFullscreen(false);
+      if (isEscapeNoLayerClosed(e)) setIsFullscreen(false);
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
@@ -626,11 +659,13 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
    * Escape ladder for the unified markdown screen, which owns the whole
    * viewport instead of sitting inside `Modal`: dismiss the search bar first,
    * then leave the maximized (chrome-collapsed) view, then close.
+   * Issue #3691: a press a floating layer in front closed on is spent — every
+   * rung waits for the next one.
    */
   useEffect(() => {
     if (!isUnifiedEditable || actionsOpen) return;
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (!isUnhandledEscape(e)) return;
+      if (!isEscapeNoLayerClosed(e)) return;
       if (searchOpen) {
         closeSearch();
       } else if (isFullscreen) {
@@ -934,6 +969,11 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
       <>
         <div
           data-testid="markdown-file-screen"
+          // Issue #3691: covers the viewport (`fixed inset-0` at
+          // MAXIMIZED_EDITOR) whether maximized or not, so a floating layer
+          // behind it (the chip's reason, the second row's "…") leaves Escape
+          // to its ladder (`isCoveredByViewportLayer`).
+          {...{ [VIEWPORT_LAYER_ATTRIBUTE]: '' }}
           role="dialog"
           aria-modal="true"
           aria-label={filePath}
@@ -1112,6 +1152,9 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
   if (isFullscreen && content && !loading && !error) {
     return (
       <div
+        data-testid="file-viewer-fullscreen"
+        // Issue #3691: a viewport layer, like the maximized file panel.
+        {...{ [VIEWPORT_LAYER_ATTRIBUTE]: '' }}
         className="fixed inset-0 bg-surface flex flex-col"
         style={{ zIndex: Z_INDEX.MAXIMIZED_EDITOR }}
       >
