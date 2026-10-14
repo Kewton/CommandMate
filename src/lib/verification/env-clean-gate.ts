@@ -1015,6 +1015,13 @@ function formatIgnoredBuiltIn(changes: EnvChange[]): string[] {
   return [`    ignored (built-in): ${names}`];
 }
 
+/** Additions excused as another worktree's, named on a clean report (#3683). */
+function formatIgnoredAttributed(changes: EnvChange[]): string[] {
+  if (changes.length === 0) return [];
+  const names = changes.map((change) => change.key).join(', ');
+  return [`    ignored (attributed to another worktree): ${names}`];
+}
+
 /**
  * The header's account of what could be excused, so a report judged against a
  * baseline written before #2472 says why the task's own session was not.
@@ -1046,6 +1053,7 @@ export function formatEnvCleanReport(diff: EnvCleanDiff): string {
       lines.push(...formatRemovedStaleDemoVitest(probe.removedStaleDemoVitest));
       lines.push(...formatIgnoredByConfig(probe.ignoredByConfig));
       lines.push(...formatIgnoredBuiltIn(probe.ignoredBuiltIn));
+      lines.push(...formatIgnoredAttributed(probe.ignoredAdded));
       continue;
     }
     lines.push(
