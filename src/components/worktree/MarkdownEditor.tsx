@@ -57,7 +57,7 @@ import { useSwipeGesture } from '@/hooks/useSwipeGesture';
 import { useVirtualKeyboard } from '@/hooks/useVirtualKeyboard';
 import { useCopyFeedback } from '@/hooks/useCopyFeedback';
 import { Z_INDEX } from '@/config/z-index';
-import { isUnhandledEscape } from '@/lib/escape-key';
+import { isEscapeNoLayerClosed, VIEWPORT_LAYER_ATTRIBUTE } from '@/lib/escape-key';
 import { applyIndent, applyOutdent, type IndentEdit } from '@/lib/editor/indent';
 import type { EditorProps, EditorFileType, ViewMode } from '@/types/markdown-editor';
 import {
@@ -659,7 +659,8 @@ export const MarkdownEditor = memo(function MarkdownEditor({
         return;
       }
 
-      if (isUnhandledEscape(e.nativeEvent) && isMaximized) {
+      // Issue #3681: not on the press a floating layer in front closed on.
+      if (isEscapeNoLayerClosed(e.nativeEvent) && isMaximized) {
         e.preventDefault();
         exitFullscreen();
         return;
@@ -810,10 +811,12 @@ export const MarkdownEditor = memo(function MarkdownEditor({
     </>
   ), [lineCount, content, handleContentChange, handleTextareaKeyDown, handleEditorScroll, isTextMode, tWorktree]);
 
-  // Global ESC key handler for maximized mode
+  // Global ESC key handler for maximized mode. Issue #3681: one Escape, one
+  // layer — a press a floating layer in front of the editor closed on
+  // (`markEscapeClosedLayer`) leaves the maximize for the next one.
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
-      if (isUnhandledEscape(e) && isMaximized) {
+      if (isEscapeNoLayerClosed(e) && isMaximized) {
         e.preventDefault();
         exitFullscreen();
       }
@@ -1013,6 +1016,12 @@ export const MarkdownEditor = memo(function MarkdownEditor({
       className={containerClasses}
       style={containerStyle}
       onKeyDown={handleKeyDown}
+      // Issue #3681: while maximized the editor covers the viewport — the CSS
+      // fallback as a `fixed inset-0` body portal at MAXIMIZED_EDITOR, the
+      // native path in the browser's top layer, over every z-index — so a
+      // floating layer behind it (the chip's reason, the second row's "…")
+      // leaves Escape to it (`isCoveredByViewportLayer`).
+      {...(isMaximized ? { [VIEWPORT_LAYER_ATTRIBUTE]: '' } : {})}
       role={isMaximized && isFallbackMode ? 'dialog' : undefined}
       aria-modal={isMaximized && isFallbackMode ? 'true' : undefined}
     >
