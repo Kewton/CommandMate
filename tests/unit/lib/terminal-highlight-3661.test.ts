@@ -188,7 +188,8 @@ describe('[#3661] edge 1: a `&NewLine;` in a paragraph', () => {
     const raw = 'a &lt; b sentinel';
     const el = rendered(raw);
     const [lt, hit] = mapMarkdownPositionsToDom(el, collectTextNodes(el), raw, [...hitsOf(raw, '&lt;'), ...hitsOf(raw, 'sentinel')])!;
-    expect(lt).toBeNull(); // its last character is not drawn
+    // Issue #3682: a hit on its whole ends on its `;` after the `<` it drew.
+    expect(el.textContent!.slice(lt!.start, lt!.end)).toBe('<');
     expect(el.textContent!.slice(hit!.start, hit!.end)).toBe('sentinel');
   });
 

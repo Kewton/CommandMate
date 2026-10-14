@@ -288,7 +288,9 @@ function referenceAt(raw: string, at: number): { end: number; drawn: string } | 
  * (outside code) has every unit it draws placed on its `&` (`&fjlig;` draws
  * two, `&Afr;` a surrogate pair), and its name is never a place for the text
  * after it. One that draws whitespace is stepped over (its whitespace waits
- * as above). A name Markdown does not know is drawn as written, and placed so.
+ * as above) and, when the waiting units are what it drew, they are placed on
+ * its `&` too (Issue #3682: `&ThickSpace;`, `&NewLine;`). A name Markdown does
+ * not know is drawn as written, and placed so.
  */
 function alignSubsequence(text: string, raw: string, spans: readonly RawSpan[], from = spans[0]?.start ?? 0): number[] | null {
   // UTF-16 units, as every other offset here (an emoji is two).
@@ -312,13 +314,38 @@ function alignSubsequence(text: string, raw: string, spans: readonly RawSpan[], 
   let cursor = from;
   let span = 0;
   // Whitespace waiting for the next placed character, and where it may start.
+  // Consecutive units of `text`: any other unit places the ones waiting.
   let pending: number[] = [];
   let pendingFrom = from;
+  /**
+   * [Issue #3682] The first reference drawing whitespace in `[at, limit)`
+   * whose units are the waiting ones from `next` on — where its `&` is, the
+   * raw offset after it, and how many units it drew.
+   */
+  const whitespaceReference = (at: number, limit: number, next: number): { idx: number; end: number; units: number } | null => {
+    for (let idx = raw.indexOf('&', at); idx !== -1 && idx < limit; idx = raw.indexOf('&', idx + 1)) {
+      if (inSpan(idx) === -1) continue;
+      const found = referenceAt(raw, idx);
+      if (!found || !/^\s+$/.test(found.drawn) || next + found.drawn.length > pending.length) continue;
+      const drawn = pending.slice(next, next + found.drawn.length).map((k) => text[k]).join('');
+      if (drawn === found.drawn) return { idx, end: found.end, units: found.drawn.length };
+    }
+    return null;
+  };
   const placePending = (limit: number): void => {
     let at = pendingFrom;
-    for (const k of pending) {
+    for (let next = 0; next < pending.length; next++) {
+      const k = pending[next];
       const found = find(text[k], at, limit);
-      if (found) {
+      // [Issue #3682] Whitespace a reference drew (`&ThickSpace;`) is on its
+      // `&`, as every other unit a reference drew, when it comes before the
+      // raw whitespace.
+      const reference = whitespaceReference(at, found ? found.idx : limit, next);
+      if (reference) {
+        for (let drawn = 0; drawn < reference.units; drawn++) out[pending[next + drawn]] = reference.idx;
+        next += reference.units - 1;
+        at = reference.end;
+      } else if (found) {
         out[k] = found.idx;
         at = found.idx + 1;
       }
@@ -390,9 +417,10 @@ const FENCE_OPENER = /^[ \t>]*(`{3,}|~{3,})/;
  * drew something else) places nothing.
  *
  * Per hit: placed when its first and last characters are, else `null`. A
- * reference drawing several units (`&fjlig;`) is placed by a hit starting on
- * its `&` and by one ending on its `;` — a hit on its whole marks every unit it
- * drew (Issue #3671); a hit ending inside its name is not placed. Returns
+ * reference is placed by a hit starting on its `&` and by one ending on its
+ * `;` — a hit on its whole marks every unit it drew, one or several,
+ * whitespace or not (Issues #3671, #3682); a hit ending inside its name is not
+ * placed. Returns
  * `null` when the container holds no marked element, so the caller keeps the
  * plain offset-equals-offset behaviour (terminal, plain-text rows).
  */
@@ -449,15 +477,23 @@ export function mapMarkdownPositionsToDom(
         if (rawIdx < 0 || rawIdx >= rawToDom.length || rawToDom[rawIdx] !== -1) return;
         rawToDom[rawIdx] = domAt[textOffset + k];
         rawEndToDom[rawIdx] = domAt[textOffset + k] + 1;
-        // A run of units on one raw offset is a reference that drew them all
-        // (`&fjlig;` → `fj`, `&Afr;` → a surrogate pair): a hit ending on its
-        // `;` ends after the last of them. One drawing a single unit (`&lt;`)
-        // has no run and stays unplaceable by a hit on its whole, as before.
+        // [Issue #3682] The units on one raw `&` that are what the reference
+        // there drew — however many (`&lt;` → `<`, `&fjlig;` → `fj`,
+        // `&ThickSpace;` → two spaces) — are the reference drawn: a hit ending
+        // on its `;` ends after the last of them. Placed as written (inline
+        // code), its `&` draws only `&` and the next unit is on the next raw
+        // character, so `;` keeps its own place.
+        if (sourceText[rawIdx] !== '&') return;
         let last = k;
         while (placed[last + 1] === rawIdx) last += 1;
-        if (last === k) return;
+        if (placed[last + 1] === rawIdx + 1) return;
         const reference = referenceAt(sourceText, rawIdx);
-        if (reference && rawEndToDom[reference.end - 1] === -1) {
+        if (
+          reference &&
+          reference.drawn.length === last - k + 1 &&
+          text.startsWith(reference.drawn, k) &&
+          rawEndToDom[reference.end - 1] === -1
+        ) {
           rawEndToDom[reference.end - 1] = domAt[textOffset + last] + 1;
         }
       });
