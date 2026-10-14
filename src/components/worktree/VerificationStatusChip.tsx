@@ -59,7 +59,12 @@ import type {
   VerificationGateResultView,
   VerificationRunListItem,
 } from '@/lib/api/verification-api';
-import { isUnhandledEscape } from '@/lib/escape-key';
+import {
+  isCoveredByViewportLayer,
+  isUnhandledEscape,
+  markEscapeClosedLayer,
+} from '@/lib/escape-key';
+import { Z_INDEX } from '@/config/z-index';
 
 /** Characters of the task title kept inline before ellipsis. */
 const TITLE_MAX_LENGTH = 36;
@@ -108,6 +113,12 @@ export interface VerificationStatusChipProps {
    */
   popover?: 'inline' | 'floating';
 }
+
+/**
+ * Issue #3681: the floating reason's z-index, inline (not a `z-50` class) so
+ * its Escape handler can read where it stacks against a viewport layer.
+ */
+const FLOATING_POPOVER_Z_INDEX = Z_INDEX.MODAL;
 
 /** Width of the reason popover (`w-72`), and its gap to the viewport edge. */
 const POPOVER_WIDTH_PX = 288;
@@ -287,6 +298,15 @@ export const VerificationStatusChip = memo(function VerificationStatusChip({
       // itself — Radix calls `preventDefault`) is not ours to act on.
       // Issue #3591: the header tools' "…" list closing itself is one too.
       if (!isUnhandledEscape(event)) return;
+      // Issue #3681: behind a maximized file (a viewport layer, z 55) the
+      // press is the file's to undo first; the reason, then in sight, closes
+      // on the next one. Only the floating reason can tell: the inline one
+      // stacks inside the chip's own box.
+      const floating = popoverRef.current;
+      if (floating && isCoveredByViewportLayer(floating)) return;
+      // In front of one, tell it (a window / document listener) that this
+      // press is spent — still unclaimed for the layers it already was.
+      if (floating) markEscapeClosedLayer(event);
       setReasonOpen(false);
     };
     document.addEventListener('mousedown', onPointerDown);
@@ -446,10 +466,15 @@ export const VerificationStatusChip = memo(function VerificationStatusChip({
             data-floating-layer="true"
             style={
               floatingAt
-                ? { top: floatingAt.top, left: floatingAt.left, width: floatingAt.width }
-                : { visibility: 'hidden' }
+                ? {
+                    top: floatingAt.top,
+                    left: floatingAt.left,
+                    width: floatingAt.width,
+                    zIndex: FLOATING_POPOVER_Z_INDEX,
+                  }
+                : { visibility: 'hidden', zIndex: FLOATING_POPOVER_Z_INDEX }
             }
-            className="fixed z-50 rounded-lg border border-border bg-surface p-3 text-xs leading-relaxed text-foreground shadow-lg"
+            className="fixed rounded-lg border border-border bg-surface p-3 text-xs leading-relaxed text-foreground shadow-lg"
           >
             {reasonBody}
           </div>,
