@@ -1092,7 +1092,10 @@ function recordOrHoldScrapedResponse(
   // width and gutter-prefixed, so no content check could ever recognise them
   // as the same reply.
   if (holdScrapedHistory) {
-    holdScrapedResponse(pollerKey, {
+    // Issue #3663: refused (false) to a tick whose chain was retired while it
+    // awaited the reader — a stop, a stalled-tick restart or a worktree-ID
+    // migration. The store logs that, so this tick does not claim a hold.
+    const held = holdScrapedResponse(pollerKey, {
       worktreeId,
       cliToolId,
       instanceId: resolvedInstanceId,
@@ -1108,13 +1111,15 @@ function recordOrHoldScrapedResponse(
       transcriptPathHint: claudeMetadata?.logFilePath ?? null,
       expiresAt: Date.now() + PENDING_SCRAPE_HOLD_MS,
     });
-    logger.info('structured-history-scrape-held', {
-      worktreeId,
-      cliToolId,
-      instanceId: resolvedInstanceId,
-      scrapedLength: cleanedResponse.length,
-      holdMs: PENDING_SCRAPE_HOLD_MS,
-    });
+    if (held) {
+      logger.info('structured-history-scrape-held', {
+        worktreeId,
+        cliToolId,
+        instanceId: resolvedInstanceId,
+        scrapedLength: cleanedResponse.length,
+        holdMs: PENDING_SCRAPE_HOLD_MS,
+      });
+    }
 
     // The completion edge is announced HERE and not at the flush, because the
     // turn finished now. A relay waiting on this session gets #2401's grace

@@ -1,6 +1,5 @@
 /** Polling lifecycle management: start, stop, schedule, and state tracking for response polling. */
 
-import { AsyncLocalStorage } from 'async_hooks';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { createLogger } from '@/lib/logger';
 import {
@@ -11,6 +10,16 @@ import { clearPromptHashCache, renamePromptHashCacheKeys } from './prompt-dedup'
 import { clearResponseHashCache, renameResponseHashCacheKeys } from './response-dedup';
 import { renamePromptDedupSkipsBatch } from './prompt-dedup-state';
 import { checkForResponse, flushPendingScrapedResponse } from './response-checker';
+// Issue #3663: the migration's own entry points into the held-scrape store,
+// imported from the store itself rather than through `./response-checker`'s
+// re-export (suites that replace the checker by path keep working unchanged).
+import {
+  hasPendingScrapedResponse,
+  listPendingScrapedResponseKeys,
+  movePendingScrapedResponses,
+  retargetPendingScrapedResponse,
+} from './pending-scraped-response';
+import { pollerOwnerStorage, type PollerOwner } from './poller-owner';
 import { broadcastTerminalSnapshot } from '@/lib/realtime/terminal-broadcast';
 import { findTerminalSessionRefusal } from '@/lib/realtime/terminal-session-ownership';
 import { resolveSessionName } from '@/lib/cli-tools/session-name';
@@ -64,38 +73,9 @@ interface PollTarget {
   instanceId?: string;
 }
 
-/**
- * Ownership token for one poller chain — one "generation" of a poller key.
- *
- * The chain's `setTimeout` callback holds this object directly, so it can ask
- * *"am I still the poller for this key?"* rather than *"is there a poller for
- * this key?"* — the question the pre-#2223 `activePollers.has(pollerKey)` guard
- * asked, and the reason a superseded tick could re-register itself over the
- * poller that replaced it.
- *
- * The two flags are deliberately distinct:
- *
- * - `superseded` — a newer chain took the key (restart or worktree-ID
- *   migration). The old tick must neither reschedule **nor** broadcast: its
- *   snapshot is of the turn that just ended and would arrive after the new
- *   chain's frames.
- * - `stopped` — this chain itself ended (`stopPolling`, max duration, session
- *   gone). The tick must not reschedule, but its final snapshot is still the
- *   most recent screen and is still pushed, exactly as before #2223.
- */
-interface PollerOwner {
-  readonly pollerKey: string;
-  readonly generation: number;
-  superseded: boolean;
-  stopped: boolean;
-  /**
-   * This chain ended itself from inside its own tick — `checkForResponse()`
-   * raised `stopPolling()` while it still owned the key (Issue #2230). The
-   * tick's verdict decides what the stop means (see {@link settleSelfStop}),
-   * so the response hash is not touched until that verdict is in.
-   */
-  selfStopped: boolean;
-}
+// The ownership token (`PollerOwner`) lives in `./poller-owner` (Issue #3663),
+// so the held-scrape store can ask whether its caller still owns a key without
+// importing this module.
 
 /**
  * Process-wide poller coordinator (Issue #2223).
@@ -126,14 +106,6 @@ interface PollerCoordinator {
   running: Map<string, { owner: PollerOwner; since: number }>;
   /** Poller key -> a restart handed to the in-flight tick's epilogue. */
   pendingRestart: Map<string, PollTarget>;
-  /**
-   * Carries the running tick's ownership token through `checkForResponse()`,
-   * so a `stopPolling()` raised *inside* a superseded tick can be told apart
-   * from one raised by a route, `session-cleanup` or `kill-session`. Without
-   * it the old tick's "the turn is over" verdict would stop the chain that
-   * replaced it — the reverse of the re-registration race, and just as fatal.
-   */
-  ownerStorage: AsyncLocalStorage<PollerOwner>;
   /** Monotonic across every key, so a generation is never reused. */
   generationCounter: number;
   /**
@@ -156,7 +128,6 @@ const coordinator: PollerCoordinator =
     owners: new Map<string, PollerOwner>(),
     running: new Map<string, { owner: PollerOwner; since: number }>(),
     pendingRestart: new Map<string, PollTarget>(),
-    ownerStorage: new AsyncLocalStorage<PollerOwner>(),
     generationCounter: 0,
     pausedOnPrompt: new Set<string>(),
   }));
@@ -426,7 +397,11 @@ async function runPollTick(target: PollTarget, owner: PollerOwner): Promise<void
     // Check for response
     let recorded = false;
     try {
-      recorded = await coordinator.ownerStorage.run(owner, () =>
+      // The token rides through `checkForResponse()` (`./poller-owner`), so a
+      // `stopPolling()` raised inside a superseded tick can be told apart from
+      // one raised by a route, `session-cleanup` or `kill-session` (#2223), and
+      // the held-scrape store can turn away a tick that was retired (#3663).
+      recorded = await pollerOwnerStorage.run(owner, () =>
         checkForResponse(target.worktreeId, target.cliToolId, target.instanceId)
       );
     } catch (error: unknown) {
@@ -530,7 +505,7 @@ function stopPollingByKey(pollerKey: string, options: { resume?: boolean } = {})
   // (worktree gone, session not running, prompt detected, TUI reply saved).
   // Honouring that verdict would kill the chain that replaced it — the old
   // tick is describing a turn that is already over.
-  const caller = coordinator.ownerStorage.getStore();
+  const caller = pollerOwnerStorage.getStore();
   if (caller && caller.pollerKey === pollerKey && (caller.superseded || caller.stopped)) {
     logger.info('poller:stale-stop-ignored', {
       pollerKey,
@@ -705,6 +680,18 @@ function splitPollerKey(pollerKey: string): { worktreeId: string; instanceId: st
  * alike — which is lifted off every source key in one pass and only then
  * written, so a pair handled early cannot overwrite a source handled later.
  *
+ * Issue #3663: the held scrapes (#2436) move too, by the same lift-then-place
+ * rule, keeping everything but their worktree ID, which becomes the new one.
+ * Every chain whose key changes hands is retired (`stopped`), so a tick still
+ * awaiting the transcript reader cannot come back and hold, drop or write
+ * under it: the moved chains' old owners, and a chain already running on a
+ * destination key that no source vacates — that one is stopped like any
+ * other, which writes its held scrape under the ID it carries before the moved
+ * one arrives. A chain that cannot be resolved has its held scrape written
+ * under the NEW ID: the old one is gone from the table, and a row for it fails
+ * the foreign key and is lost. A chain with a tick running at the moment of
+ * the migration does not hand its response hash on (see the dedup move below).
+ *
  * @param renames - Worktree ID pairs being applied
  * @param resolveCliToolId - Maps a poller's (worktree, instance) back to its CLI
  *   tool, which the poller key does not encode for alias instances. Callers pass
@@ -724,7 +711,7 @@ export function migrateResponsePollerWorktreeIds(
   if (targets.size === 0) return [];
 
   const moves: MigratedPollerKey[] = [];
-  const abandoned: string[] = [];
+  const abandoned: Array<{ pollerKey: string; newWorktreeId: string }> = [];
 
   for (const pollerKey of Array.from(activePollers.keys())) {
     const parts = splitPollerKey(pollerKey);
@@ -734,7 +721,7 @@ export function migrateResponsePollerWorktreeIds(
 
     const cliToolId = resolveCliToolId(parts.worktreeId, parts.instanceId);
     if (!cliToolId) {
-      abandoned.push(pollerKey);
+      abandoned.push({ pollerKey, newWorktreeId });
       continue;
     }
 
@@ -750,6 +737,16 @@ export function migrateResponsePollerWorktreeIds(
   // Phase 1: stop every affected timer and lift the state off the old keys.
   // Done for the whole batch before any write so a swap cannot self-collide.
   const carried = new Map<string, { startedAt: number | undefined }>();
+  // Issue #3663: the moves whose chain has a tick running right now — read
+  // before anything below touches the coordinator. See the response hash below.
+  // The chain that holds the key now, not merely some tick under the key: a
+  // chain retired earlier leaves its `running` entry until its own tick
+  // returns (the epilogue removes it by owner), and the chain that replaced it
+  // may not have started a tick yet.
+  const midTick = moves.filter((move) => {
+    const inFlight = coordinator.running.get(move.oldKey);
+    return inFlight !== undefined && inFlight.owner === coordinator.owners.get(move.oldKey);
+  });
   for (const move of moves) {
     const timerId = activePollers.get(move.oldKey);
     if (timerId) clearTimeout(timerId);
@@ -782,10 +779,15 @@ export function migrateResponsePollerWorktreeIds(
   // An abandoned key is never a move source, so nothing still to be moved is
   // lost here; and the paused chains are collected after it, as before, so a
   // pause the stop ends is not carried.
-  for (const pollerKey of abandoned) {
+  //
+  // Issue #3663: its held scrape is pointed at the new ID first, so the stop
+  // writes it there — the old ID is no longer in the table.
+  for (const { pollerKey, newWorktreeId } of abandoned) {
+    retargetPendingScrapedResponse(pollerKey, newWorktreeId);
     stopPollingByKey(pollerKey);
     logger.warn('poller:migrate-abandoned', { pollerKey });
   }
+  const abandonedKeys = new Set(abandoned.map(({ pollerKey }) => pollerKey));
 
   // Issue #2230: a chain paused on a prompt has no timer, so the loops here
   // never see it — but it is holding the response hash for the turn it paused
@@ -800,11 +802,73 @@ export function migrateResponsePollerWorktreeIds(
     pausedMoves.push({ oldKey: pollerKey, newKey: `${newWorktreeId}:${parts.instanceId}` });
   }
 
+  // Issue #3663: every held scrape under a renamed worktree ID moves — a
+  // running chain's, a paused chain's, and one whose chain is already gone.
+  // The abandoned ones were written above and are no longer held.
+  const pendingMoves: Array<{ oldKey: string; newKey: string; newWorktreeId: string }> = [];
+  for (const pollerKey of listPendingScrapedResponseKeys()) {
+    if (abandonedKeys.has(pollerKey)) continue;
+    const parts = splitPollerKey(pollerKey);
+    if (!parts) continue;
+    const newWorktreeId = targets.get(parts.worktreeId);
+    if (!newWorktreeId) continue;
+    pendingMoves.push({ oldKey: pollerKey, newKey: `${newWorktreeId}:${parts.instanceId}`, newWorktreeId });
+  }
+
+  // Issue #3663: a destination a chain (running or paused) moves onto, that no
+  // source of this batch vacates, may already be held by another chain — B:x
+  // running while A:x moves to B:x. That chain loses the key, so it is stopped
+  // here like any other stop: its held scrape is written under the ID it
+  // carries (the current one), its owner is retired so its in-flight tick can
+  // no longer hold or drop anything, and its caches are cleared before the
+  // moved state is written. A destination nothing is on is left alone, and so
+  // is every other instance of the destination worktree.
+  const vacated = new Set([
+    ...moves.map((move) => move.oldKey),
+    ...pausedMoves.map((move) => move.oldKey),
+    ...pendingMoves.map((move) => move.oldKey),
+  ]);
+  // A held scrape moved on its own (no chain, no pause) changes the key's
+  // owner just the same, so its destination is handled alike (#3663 review).
+  const occupied = new Set([
+    ...moves.map((move) => move.newKey),
+    ...pausedMoves.map((move) => move.newKey),
+    ...pendingMoves.map((move) => move.newKey),
+  ]);
+  for (const pollerKey of occupied) {
+    if (vacated.has(pollerKey) || abandonedKeys.has(pollerKey)) continue;
+    const held =
+      coordinator.owners.has(pollerKey) ||
+      activePollers.has(pollerKey) ||
+      coordinator.pausedOnPrompt.has(pollerKey) ||
+      hasPendingScrapedResponse(pollerKey);
+    if (!held) continue;
+    stopPollingByKey(pollerKey);
+    logger.warn('poller:migrate-displaced', { pollerKey });
+  }
+
   // Issue #3553: the dedup state of the whole batch moves in one call per map
   // family, each lifting every source before writing any destination. Re-keyed
   // pair by pair, a swap left A with its own state and B empty.
+  //
+  // Issue #3663: except the response hash of a chain whose tick is running.
+  // That tick may have registered the hash of a reply it has not yet saved or
+  // held — it is awaiting the transcript reader, and the hold it comes back
+  // with is refused (its owner is retired above). Handed on, the hash would
+  // make the successor skip a reply nobody wrote. Dropped, the successor judges
+  // the screen itself and holds or saves it. The price, taken knowingly: a
+  // reply that tick HAD already saved may be saved once more by the successor
+  // — a duplicate row rather than a lost one, the trade #2436 makes. Deciding
+  // here, once, replaces marking the hash and taking it back later, whose
+  // lifetime every later move, resume and restart would have to carry.
+  // The prompt hash and the prompt-skip tally move as before.
+  // Dropped on the source key only, before the batch moves: the destination is
+  // left as the batch leaves it, so what another source of a many-to-one move
+  // brings there (a chain that saved its reply and is waiting) still stands.
+  for (const move of midTick) clearResponseHashCache(move.oldKey);
   renamePromptHashCacheKeys(moves);
   renameResponseHashCacheKeys([...moves, ...pausedMoves]);
+  movePendingScrapedResponses(pendingMoves);
   // Issue #1695: the prompt hash moved above, so the guard keeps suppressing
   // the prompt on screen under the new ID. Its tally has to move with it, or
   // `capture --json` reports zero skips for a session that is still skipping.

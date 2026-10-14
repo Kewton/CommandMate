@@ -53,6 +53,7 @@
 
 import { createHash } from 'crypto';
 import { getOrInitGlobal } from '../global-state';
+import { mayActForPollerKey } from './poller-owner';
 
 /**
  * In-memory cache: pollerKey -> SHA-256 hash of the last saved response content.
@@ -153,11 +154,19 @@ export function isDuplicateResponse(pollerKey: string, content: string): boolean
     return true;
   }
 
+  // Issue #3663: a tick of a stopped chain no longer owns its key, so it does
+  // not register a hash there — the same line the held scrape draws. Left
+  // behind, the hash of a reply that tick never saves (its hold is refused)
+  // would be inherited by the next chain on the key, or moved by a migration,
+  // and make the successor skip it.
+  if (!mayActForPollerKey(pollerKey)) return false;
+
   responseHashCache.set(pollerKey, hash);
   // Issue #3519: a new response starts a new run of duplicate ticks.
   duplicateResponseSkipStreak.delete(pollerKey);
   return false;
 }
+
 
 /**
  * Count one duplicate tick for this pollerKey and say whether it should be
