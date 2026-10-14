@@ -245,24 +245,26 @@ function placeRawPositions(
     mapMarkdownPositionsToDom(container, textNodes, sourceText, matchPositions);
   const mermaid = mapRawPositionsToDom(container, textNodes, sourceText, matchPositions, sections);
   if (!mermaid) return markdown();
-  if (!mermaid.includes(null)) return mermaid;
-  // [Issue #3671] A message holding a diagram: a hit the mermaid placer left
-  // unplaced outside the diagrams — it looks for the raw text on screen, and a
-  // reference (`&fjlig;` drawn `fj`) or a marker is not there — is placed by
-  // Markdown, as in a message without one. Never into a diagram's source: a
-  // hit there stays the mermaid placer's, unplaced included.
+  // [Issue #3671] A message holding a diagram: the mermaid placer is only the
+  // diagrams' placer. Outside them it pairs the n-th time the raw text occurs
+  // with the n-th time it occurs on screen, which is wrong wherever the two
+  // differ — a reference (`&fjlig;` drawn `fj`) or a marker is not on screen,
+  // and the same one in inline code is — so it left such hits unplaced or put
+  // them on another hit's text. There Markdown places hits, as in a message
+  // without a diagram (unplaced included). A hit on a diagram's source stays
+  // the mermaid placer's, and Markdown never places one there.
   const fromMarkdown = markdown();
   if (!fromMarkdown) return mermaid;
   const sourceSpans = Array.from(container.querySelectorAll(`[${MERMAID_SOURCE_ATTR}]`)).flatMap((element) => {
     const inside = textNodes.filter((entry) => element.contains(entry.node));
     return inside.length > 0 ? [{ start: inside[0].start, end: inside[inside.length - 1].end }] : [];
   });
+  const inSource = (pos: MatchPosition): boolean =>
+    sourceSpans.some((span) => pos.start < span.end && pos.end > span.start);
   return mermaid.map((pos, idx) => {
-    if (pos) return pos;
+    if (pos && inSource(pos)) return pos;
     const placed = fromMarkdown[idx];
-    if (!placed) return null;
-    const inSource = sourceSpans.some((span) => placed.start < span.end && placed.end > span.start);
-    return inSource ? null : placed;
+    return placed && !inSource(placed) ? placed : null;
   });
 }
 

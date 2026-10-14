@@ -79,6 +79,8 @@ let originalHighlight: PropertyDescriptor | undefined;
 let originalRangeRect: PropertyDescriptor | undefined;
 let restoreLayout: () => void;
 let scrollTargets: Element[];
+/** Ranges the current hit's overlay was measured from, in order. */
+let measured: Range[];
 let originalScroll: typeof Element.prototype.scrollIntoView;
 
 beforeEach(() => {
@@ -93,8 +95,12 @@ beforeEach(() => {
   Object.defineProperty(globalThis, 'Highlight', { value: FakeHighlight, configurable: true, writable: true });
   // jsdom has no layout: give a Range a box so the current hit's overlay is drawn.
   originalRangeRect = Object.getOwnPropertyDescriptor(Range.prototype, 'getBoundingClientRect');
+  measured = [];
   Object.defineProperty(Range.prototype, 'getBoundingClientRect', {
-    value: () => ({ top: 0, left: 0, width: 10, height: 10, right: 10, bottom: 10, x: 0, y: 0, toJSON: () => ({}) }),
+    value(this: Range) {
+      measured.push(this);
+      return { top: 0, left: 0, width: 10, height: 10, right: 10, bottom: 10, x: 0, y: 0, toJSON: () => ({}) };
+    },
     configurable: true,
     writable: true,
   });
@@ -177,6 +183,20 @@ describe.each(SURFACES)('[#3671] %s: a message holding a mermaid fence', (surfac
       const ranges = marked(name);
       expect(ranges.map((range) => range.toString())).toEqual(['&fjlig;']);
       expect(source().contains(ranges[0].startContainer)).toBe(true);
+    });
+  });
+
+  it('places a reference in prose and the same one in inline code apart before the diagram', async () => {
+    // Raw: `&fjlig;` twice (prose, then code); on screen `fj` and `&fjlig;`.
+    // The first (current) is the prose `fj`, the second the code's text.
+    searchOn(surface, ['&fjlig; and `&fjlig;`', '', ...DIAGRAM].join('\n'), '&fjlig;');
+    await waitFor(() => {
+      const ranges = marked(name);
+      expect(ranges.map((range) => range.toString())).toEqual(['&fjlig;']);
+      expect(ranges[0].startContainer.parentElement?.closest('code')).not.toBeNull();
+      const current = measured[measured.length - 1];
+      expect(current?.toString()).toBe('fj');
+      expect(current.startContainer.parentElement?.closest('code')).toBeNull();
     });
   });
 
