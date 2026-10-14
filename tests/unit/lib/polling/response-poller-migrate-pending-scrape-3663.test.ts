@@ -1002,3 +1002,176 @@ describe('[#3663] a held scrape with no chain moved onto a running key', () => {
     expect(rowsWith('bravo second')).toEqual([]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Re-review: which dedup state a mid-tick move drops, and whose tick is "mid"
+// ---------------------------------------------------------------------------
+
+describe('[#3663] a many-to-one move with one source mid-tick', () => {
+  it('the waiting source\'s saved reply reaches C, and C does not save it again', async () => {
+    readerOutcome.set(keyOf(WT.b), 'absent');
+    startPolling(WT.b, TOOL);
+    screens.set(keyOf(WT.b), 'bravo saved');
+    await tick();
+    expect(rowsWith('bravo saved')).toEqual([[WT.b, TOOL]]);
+
+    startPolling(WT.a, TOOL);
+    screens.set(keyOf(WT.a), 'alpha parked');
+    const gate = armGate(keyOf(WT.a));
+    await vi.advanceTimersByTimeAsync(POLLING_INTERVAL);
+    await gate.entered;
+
+    migrateResponsePollerWorktreeIds(
+      [{ oldId: WT.a, newId: WT.c }, { oldId: WT.b, newId: WT.c }],
+      resolveAll
+    );
+    readerOutcome.set(keyOf(WT.c), 'absent');
+    screens.set(keyOf(WT.c), 'bravo saved');
+    gate.release('not_yet_closed');
+    await settle();
+    await tick();
+    await tick();
+
+    expect(rowsWith('bravo saved')).toEqual([[WT.b, TOOL]]);
+  });
+
+  it('negative: A alone moved to C mid-tick brings no hash, so C holds the reply itself', async () => {
+    startPolling(WT.a, TOOL);
+    screens.set(keyOf(WT.a), 'alpha parked');
+    const gate = armGate(keyOf(WT.a));
+    await vi.advanceTimersByTimeAsync(POLLING_INTERVAL);
+    await gate.entered;
+
+    migrateResponsePollerWorktreeIds([{ oldId: WT.a, newId: WT.c }], resolveAll);
+    screens.set(keyOf(WT.c), 'alpha parked');
+    gate.release('not_yet_closed');
+    await settle();
+    await tick();
+
+    expect(hasPendingScrapedResponse(keyOf(WT.c))).toBe(true);
+    stopPolling(WT.c, TOOL);
+    expect(rowsWith('alpha parked')).toEqual([[WT.c, TOOL]]);
+  });
+});
+
+describe('[#3663] a running entry left by a retired owner', () => {
+  /** A saved `alpha saved`; B's tick waits on the reader; A→B retires that B. */
+  async function aSavedMovedOntoBusyB(): Promise<Gate> {
+    readerOutcome.set(keyOf(WT.a), 'absent');
+    startPolling(WT.a, TOOL);
+    screens.set(keyOf(WT.a), 'alpha saved');
+    await tick();
+    expect(rowsWith('alpha saved')).toEqual([[WT.a, TOOL]]);
+
+    startPolling(WT.b, TOOL);
+    screens.set(keyOf(WT.b), 'bravo parked');
+    const gate = armGate(keyOf(WT.b));
+    await vi.advanceTimersByTimeAsync(POLLING_INTERVAL);
+    await gate.entered;
+
+    migrateResponsePollerWorktreeIds([{ oldId: WT.a, newId: WT.b }], resolveAll);
+    return gate;
+  }
+
+  it('B→C before B\'s new chain ticks: the saved reply\'s hash moves, and C does not save it again', async () => {
+    const gate = await aSavedMovedOntoBusyB();
+    migrateResponsePollerWorktreeIds([{ oldId: WT.b, newId: WT.c }], resolveAll);
+    readerOutcome.set(keyOf(WT.c), 'absent');
+    screens.set(keyOf(WT.c), 'alpha saved');
+    gate.release('not_yet_closed');
+    await settle();
+    await tick();
+    await tick();
+
+    expect(rowsWith('alpha saved')).toEqual([[WT.a, TOOL]]);
+  });
+
+  it('negative: once B\'s new chain has a tick running, B→C still drops its hash and C holds the reply', async () => {
+    const oldGate = await aSavedMovedOntoBusyB();
+    oldGate.release('not_yet_closed');
+    await settle();
+    screens.set(keyOf(WT.b), 'bravo new');
+    const gate = armGate(keyOf(WT.b));
+    await vi.advanceTimersByTimeAsync(POLLING_INTERVAL);
+    await gate.entered;
+
+    migrateResponsePollerWorktreeIds([{ oldId: WT.b, newId: WT.c }], resolveAll);
+    screens.set(keyOf(WT.c), 'bravo new');
+    gate.release('not_yet_closed');
+    await settle();
+    await tick();
+
+    expect(hasPendingScrapedResponse(keyOf(WT.c))).toBe(true);
+    stopPolling(WT.c, TOOL);
+    expect(rowsWith('bravo new')).toEqual([[WT.c, TOOL]]);
+  });
+});
+
+describe('[#3663] the hash a tick of a stopped chain would register', () => {
+  /** Make the next capture of A wait until the returned function is called. */
+  function gateNextCapture(reply: string): { entered: Promise<void>; release: () => void } {
+    let enter!: () => void;
+    let release!: () => void;
+    const entered = new Promise<void>((r) => {
+      enter = r;
+    });
+    const wait = new Promise<void>((r) => {
+      release = r;
+    });
+    captureSessionOutput.mockImplementationOnce(async () => {
+      enter();
+      await wait;
+      return codexPane(reply);
+    });
+    return { entered, release };
+  }
+
+  it('a tick restarted past it registers nothing, so the successor after a move still holds the reply', async () => {
+    startPolling(WT.a, TOOL);
+    const capture = gateNextCapture('alpha late');
+    await vi.advanceTimersByTimeAsync(POLLING_INTERVAL);
+    await capture.entered;
+
+    vi.setSystemTime(Date.now() + STALLED_TICK_TIMEOUT + 1);
+    startPolling(WT.a, TOOL);
+    const reader = armGate(keyOf(WT.a));
+    capture.release();
+    await reader.entered;
+
+    migrateResponsePollerWorktreeIds([{ oldId: WT.a, newId: WT.c }], resolveAll);
+    screens.set(keyOf(WT.c), 'alpha late');
+    reader.release('not_yet_closed');
+    await settle();
+    await tick();
+
+    expect(hasPendingScrapedResponse(keyOf(WT.c))).toBe(true);
+    stopPolling(WT.c, TOOL);
+    expect(rowsWith('alpha late')).toEqual([[WT.c, TOOL]]);
+  });
+
+  it('negative: a tick a restart waits for (superseded only) registers and holds, and the restart writes it once', async () => {
+    startPolling(WT.a, TOOL);
+    const capture = gateNextCapture('alpha queued');
+    await vi.advanceTimersByTimeAsync(POLLING_INTERVAL);
+    await capture.entered;
+
+    vi.setSystemTime(Date.now() + STALLED_TICK_TIMEOUT - 1_000);
+    startPolling(WT.a, TOOL);
+    capture.release();
+    await settle();
+
+    expect(rowsWith('alpha queued')).toEqual([[WT.a, TOOL]]);
+  });
+
+  it('negative: the chain that owns the key registers the hash and saves a reply once', async () => {
+    readerOutcome.set(keyOf(WT.a), 'absent');
+    startPolling(WT.a, TOOL);
+    screens.set(keyOf(WT.a), 'alpha owned');
+    await tick();
+    await tick();
+    await tick();
+
+    expect(g.__responseHashCache?.has(keyOf(WT.a))).toBe(true);
+    expect(rowsWith('alpha owned')).toEqual([[WT.a, TOOL]]);
+  });
+});

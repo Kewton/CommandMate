@@ -739,7 +739,14 @@ export function migrateResponsePollerWorktreeIds(
   const carried = new Map<string, { startedAt: number | undefined }>();
   // Issue #3663: the moves whose chain has a tick running right now — read
   // before anything below touches the coordinator. See the response hash below.
-  const midTick = moves.filter((move) => coordinator.running.has(move.oldKey));
+  // The chain that holds the key now, not merely some tick under the key: a
+  // chain retired earlier leaves its `running` entry until its own tick
+  // returns (the epilogue removes it by owner), and the chain that replaced it
+  // may not have started a tick yet.
+  const midTick = moves.filter((move) => {
+    const inFlight = coordinator.running.get(move.oldKey);
+    return inFlight !== undefined && inFlight.owner === coordinator.owners.get(move.oldKey);
+  });
   for (const move of moves) {
     const timerId = activePollers.get(move.oldKey);
     if (timerId) clearTimeout(timerId);
@@ -855,12 +862,12 @@ export function migrateResponsePollerWorktreeIds(
   // here, once, replaces marking the hash and taking it back later, whose
   // lifetime every later move, resume and restart would have to carry.
   // The prompt hash and the prompt-skip tally move as before.
+  // Dropped on the source key only, before the batch moves: the destination is
+  // left as the batch leaves it, so what another source of a many-to-one move
+  // brings there (a chain that saved its reply and is waiting) still stands.
   for (const move of midTick) clearResponseHashCache(move.oldKey);
   renamePromptHashCacheKeys(moves);
   renameResponseHashCacheKeys([...moves, ...pausedMoves]);
-  // Nothing of the source landed on the destination; nothing left there from
-  // before may stand in for it either.
-  for (const move of midTick) clearResponseHashCache(move.newKey);
   movePendingScrapedResponses(pendingMoves);
   // Issue #1695: the prompt hash moved above, so the guard keeps suppressing
   // the prompt on screen under the new ID. Its tally has to move with it, or
