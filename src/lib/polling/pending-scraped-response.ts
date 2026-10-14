@@ -6,11 +6,11 @@ import { broadcastMessage } from '@/lib/ws-server';
 import { recordClaudeConversation } from '@/lib/conversation-logger';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { createLogger } from '@/lib/logger';
-import { forgetResponseHash, settleStructuredHistoryRecheck } from './response-dedup';
+import { forgetInheritedResponseHash, settleStructuredHistoryRecheck } from './response-dedup';
 import { captureStructuredHistoryTurn } from './structured-history-gate';
 import { STOP_TRANSCRIPT_DEFERRED_DELAYS_MS } from '@/lib/hooks/stop-history-capture';
 import { getOrInitGlobal } from '../global-state';
-import { currentPollerOwner, mayActForPollerKey, successorPollerKey } from './poller-owner';
+import { currentPollerOwner, mayActForPollerKey } from './poller-owner';
 
 const logger = createLogger('response-poller');
 
@@ -115,22 +115,22 @@ export function hasPendingScrapedResponse(pollerKey: string): boolean {
  * `mayActForPollerKey`) — a stop, a stalled-tick restart or a worktree-ID
  * migration retired it while it awaited the reader, and whatever is held under
  * the key now belongs to someone else. The hash that tick registered for this
- * content is taken back from the chain that inherited its turn, so the
- * successor can still hold the reply nobody has written.
+ * content is taken back from the chain that inherited its turn — only while
+ * that chain still holds it as inherited — so the successor can still hold the
+ * reply nobody has written.
  *
  * @returns Whether the reply is held
  */
 export function holdScrapedResponse(pollerKey: string, pending: PendingScrapedResponse): boolean {
   if (!mayActForPollerKey(pollerKey)) {
     const caller = currentPollerOwner();
-    const successorKey = caller ? successorPollerKey(caller) : null;
-    const hashReleased = successorKey !== null && forgetResponseHash(successorKey, pending.content);
+    const hashReleasedFor = caller ? forgetInheritedResponseHash(caller, pending.content) : null;
     logger.info('pending-scrape-hold-refused', {
       worktreeId: pending.worktreeId,
       cliToolId: pending.cliToolId,
       instanceId: pending.instanceId,
       generation: caller?.generation,
-      hashReleasedFor: hashReleased ? successorKey : undefined,
+      hashReleasedFor: hashReleasedFor ?? undefined,
     });
     return false;
   }

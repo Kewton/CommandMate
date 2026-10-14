@@ -87,6 +87,22 @@ vi.mock('@/lib/realtime/terminal-session-ownership', () => ({
   findTerminalSessionRefusal: vi.fn(async () => null),
 }));
 vi.mock('@/lib/tasks/task-transition-service', () => ({ applyEventToActiveTask: vi.fn() }));
+
+/**
+ * The relay's completion edge, which the save path fires from INSIDE the tick:
+ * whatever the relay does next (deliver to the requester, `sendUserMessage`,
+ * `startPolling` of the requester's session) runs with the worker's tick's
+ * ownership token still in its async context. A test sets the hook to stand
+ * in for that delivery.
+ */
+const relay = vi.hoisted(() => ({
+  hook: null as null | ((worktreeId: string, cliToolId: string, instanceId: string | undefined) => void),
+}));
+vi.mock('@/lib/relay/relay-triggers', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/relay/relay-triggers')>()),
+  onRelayTurnCompleted: (worktreeId: string, cliToolId: string, instanceId: string | undefined) =>
+    relay.hook?.(worktreeId, cliToolId, instanceId),
+}));
 vi.mock('@/lib/tmux/geometry-delegation', () => ({
   probeGeometryDelegation: vi.fn(async () => ({ delegated: false, released: false })),
 }));
@@ -146,6 +162,8 @@ vi.mock('@/lib/polling/structured-history-gate', () => ({
 
 import {
   PENDING_SCRAPE_HOLD_MS,
+  discardPendingScrapedResponse,
+  flushPendingScrapedResponse,
   hasPendingScrapedResponse,
   holdScrapedResponse,
   resetPendingScrapedResponses,
@@ -256,6 +274,7 @@ function resetState(): void {
   readerOutcome.clear();
   gates.clear();
   sessionLines.clear();
+  relay.hook = null;
   dbWorktrees.clear();
   for (const id of Object.values(WT)) dbWorktrees.add(id);
 }
@@ -811,5 +830,156 @@ describe('[#3663] ⑨ an abandoned chain\'s scrape', () => {
     stopPolling(WT.b, TOOL);
 
     expect(rowsWith('bravo only')).toEqual([[WT.b, TOOL]]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Review follow-up 1: another session restarted from inside a tick
+// ---------------------------------------------------------------------------
+
+describe('[#3663] a restart of another session raised from inside a tick', () => {
+  it('writes that session\'s held scrape once, under its current ID', async () => {
+    startPolling(WT.b, TOOL);
+    screens.set(keyOf(WT.b), 'bravo first');
+    await tick();
+    expect(hasPendingScrapedResponse(keyOf(WT.b))).toBe(true);
+
+    // A finishes a turn; the relay delivers to B, whose send restarts B's poller.
+    relay.hook = (worktreeId) => {
+      if (worktreeId === WT.a) startPolling(WT.b, TOOL);
+    };
+    startPolling(WT.a, TOOL);
+    screens.set(keyOf(WT.a), 'alpha first');
+    await tick();
+
+    expect(rowsWith('bravo first')).toEqual([[WT.b, TOOL]]);
+  });
+
+  it('negative: a retired tick still cannot hold, drop or write under its own key', async () => {
+    startPolling(WT.a, TOOL);
+    startPolling(WT.b, TOOL);
+    screens.set(keyOf(WT.a), 'alpha first');
+    screens.set(keyOf(WT.b), 'bravo first');
+    await tick();
+    screens.set(keyOf(WT.a), 'alpha second');
+    const gate = armGate(keyOf(WT.a));
+    await vi.advanceTimersByTimeAsync(POLLING_INTERVAL);
+    await gate.entered;
+
+    migrateResponsePollerWorktreeIds(
+      [
+        { oldId: WT.a, newId: WT.b },
+        { oldId: WT.b, newId: WT.a },
+      ],
+      resolveAll
+    );
+    // The old A tick's completion edge, still in its async context, reaches
+    // for A's key — which now holds B's moved reply.
+    relay.hook = (worktreeId) => {
+      if (worktreeId !== WT.a) return;
+      seedHold(keyOf(WT.a), WT.a, TOOL, 'alpha intruder');
+      discardPendingScrapedResponse(keyOf(WT.a));
+      flushPendingScrapedResponse(keyOf(WT.a), 'test');
+    };
+    gate.release('not_yet_closed');
+    await settle();
+
+    expect(rows()).toEqual([]);
+    stopPolling(WT.a, TOOL);
+    expect(rowsWith('bravo first')).toEqual([[WT.a, TOOL]]);
+    expect(rowsWith('alpha intruder')).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Review follow-up 2: a hash the successor saved itself is not taken back
+// ---------------------------------------------------------------------------
+
+describe('[#3663] a refused hold after the successor saved the same reply', () => {
+  async function aTickParkedAfterTheHash(): Promise<Gate> {
+    startPolling(WT.a, TOOL);
+    screens.set(keyOf(WT.a), 'alpha only');
+    const gate = armGate(keyOf(WT.a));
+    await vi.advanceTimersByTimeAsync(POLLING_INTERVAL);
+    await gate.entered;
+    migrateResponsePollerWorktreeIds([{ oldId: WT.a, newId: WT.b }], resolveAll);
+    screens.set(keyOf(WT.b), 'alpha only');
+    readerOutcome.set(keyOf(WT.b), 'absent');
+    return gate;
+  }
+
+  it('after a restart of the successor, the reply it saved is not saved again', async () => {
+    const gate = await aTickParkedAfterTheHash();
+    startPolling(WT.b, TOOL);
+    await tick();
+    expect(rowsWith('alpha only')).toEqual([[WT.b, TOOL]]);
+
+    gate.release('not_yet_closed');
+    await settle();
+    await tick();
+    await tick();
+
+    expect(rowsWith('alpha only')).toEqual([[WT.b, TOOL]]);
+  });
+
+  it('when the successor saved it again itself, the reply is not saved a third time', async () => {
+    const gate = await aTickParkedAfterTheHash();
+    screens.set(keyOf(WT.b), 'bravo other');
+    await tick();
+    screens.set(keyOf(WT.b), 'alpha only');
+    await tick();
+    expect(rowsWith('alpha only')).toEqual([[WT.b, TOOL]]);
+
+    gate.release('not_yet_closed');
+    await settle();
+    await tick();
+    await tick();
+
+    expect(rowsWith('alpha only')).toEqual([[WT.b, TOOL]]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Review follow-up 3: a held scrape moved on its own retires the destination
+// ---------------------------------------------------------------------------
+
+describe('[#3663] a held scrape with no chain moved onto a running key', () => {
+  async function bravoTickInFlight(nextScreen: string): Promise<Gate> {
+    startPolling(WT.b, TOOL);
+    screens.set(keyOf(WT.b), 'bravo first');
+    await tick();
+    screens.set(keyOf(WT.b), nextScreen);
+    const gate = armGate(keyOf(WT.b));
+    await vi.advanceTimersByTimeAsync(POLLING_INTERVAL);
+    await gate.entered;
+    // A:codex has a held scrape and nothing else — no chain, no pause.
+    seedHold(keyOf(WT.a), WT.a, TOOL, 'held alpha');
+    return gate;
+  }
+
+  it('the old B tick\'s recheck discard does not drop the moved scrape', async () => {
+    const gate = await bravoTickInFlight('bravo first');
+    migrateResponsePollerWorktreeIds([{ oldId: WT.a, newId: WT.b }], resolveAll);
+    expect(rowsWith('bravo first')).toEqual([[WT.b, TOOL]]);
+
+    gate.release('captured');
+    await settle();
+
+    expect(hasPendingScrapedResponse(keyOf(WT.b))).toBe(true);
+    stopPolling(WT.b, TOOL);
+    expect(rowsWith('held alpha')).toEqual([[WT.b, TOOL]]);
+  });
+
+  it('the old B tick\'s hold does not overwrite the moved scrape', async () => {
+    const gate = await bravoTickInFlight('bravo second');
+    migrateResponsePollerWorktreeIds([{ oldId: WT.a, newId: WT.b }], resolveAll);
+    expect(rowsWith('bravo first')).toEqual([[WT.b, TOOL]]);
+
+    gate.release('not_yet_closed');
+    await settle();
+
+    stopPolling(WT.b, TOOL);
+    expect(rowsWith('held alpha')).toEqual([[WT.b, TOOL]]);
+    expect(rowsWith('bravo second')).toEqual([]);
   });
 });

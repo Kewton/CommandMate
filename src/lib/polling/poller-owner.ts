@@ -47,9 +47,18 @@ export interface PollerOwner {
   /**
    * The chain a worktree-ID migration handed this chain's turn to (Issue
    * #3663). Set only by the migration, on the owner it retires; read only to
-   * find where the turn's dedup state went ({@link successorPollerKey}).
+   * find where the turn's dedup state went (`forgetInheritedResponseHash` in
+   * `./response-dedup`).
    */
   movedTo?: PollerOwner;
+  /**
+   * The response hash a worktree-ID migration moved onto this chain's key when
+   * it started the chain, for as long as the chain has not registered one of
+   * its own (Issue #3663). Only such an inherited hash may be taken back when
+   * the retired tick that registered it has its hold refused; a hash this chain
+   * registered stands for a reply it saved or holds itself.
+   */
+  inheritedResponseHash?: string;
 }
 
 declare global {
@@ -78,24 +87,18 @@ export function currentPollerOwner(): PollerOwner | undefined {
  * Whether the code running now may change what is kept under `pollerKey`
  * (Issue #3663).
  *
- * Code outside any tick — a route, `session-cleanup`, the migration itself —
- * may. A tick may only for its own key, and only while its chain has not been
- * stopped. A chain that is merely `superseded` (a restart queued behind the
+ * What is turned away is exactly one thing: a tick whose chain has been
+ * stopped, acting on its OWN key. Code outside any tick — a route,
+ * `session-cleanup`, the migration itself — may. So may code acting on another
+ * key from inside a tick: the relay a worker's tick fires on completion
+ * delivers to the requester and restarts the requester's poller in the
+ * worker's async context, and that restart's stop must write the requester's
+ * held reply (the same line `stopPollingByKey`'s stale-stop check draws). A
+ * chain that is merely `superseded` (a restart queued behind the
  * tick it is running) still owns the turn it is finishing: its hold is what the
  * restart's stop writes out (#2436), so it is not turned away here.
  */
 export function mayActForPollerKey(pollerKey: string): boolean {
   const caller = currentPollerOwner();
-  return caller === undefined || (caller.pollerKey === pollerKey && !caller.stopped);
-}
-
-/**
- * The key of the chain that now carries `owner`'s turn after one or more
- * worktree-ID migrations, or null when no migration moved it (Issue #3663).
- */
-export function successorPollerKey(owner: PollerOwner): string | null {
-  let successor = owner.movedTo;
-  if (!successor) return null;
-  while (successor.movedTo) successor = successor.movedTo;
-  return successor.pollerKey;
+  return caller === undefined || caller.pollerKey !== pollerKey || !caller.stopped;
 }

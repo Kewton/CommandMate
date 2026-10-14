@@ -7,7 +7,7 @@ import {
   clearTuiAccumulator,
 } from '../tui-accumulator';
 import { clearPromptHashCache, renamePromptHashCacheKeys } from './prompt-dedup';
-import { clearResponseHashCache, renameResponseHashCacheKeys } from './response-dedup';
+import { clearResponseHashCache, peekResponseHash, renameResponseHashCacheKeys } from './response-dedup';
 import { renamePromptDedupSkipsBatch } from './prompt-dedup-state';
 import { checkForResponse, flushPendingScrapedResponse } from './response-checker';
 // Issue #3663: the migration's own entry points into the held-scrape store,
@@ -821,7 +821,13 @@ export function migrateResponsePollerWorktreeIds(
     ...pausedMoves.map((move) => move.oldKey),
     ...pendingMoves.map((move) => move.oldKey),
   ]);
-  const occupied = new Set([...moves.map((move) => move.newKey), ...pausedMoves.map((move) => move.newKey)]);
+  // A held scrape moved on its own (no chain, no pause) changes the key's
+  // owner just the same, so its destination is handled alike (#3663 review).
+  const occupied = new Set([
+    ...moves.map((move) => move.newKey),
+    ...pausedMoves.map((move) => move.newKey),
+    ...pendingMoves.map((move) => move.newKey),
+  ]);
   for (const pollerKey of occupied) {
     if (vacated.has(pollerKey) || abandonedKeys.has(pollerKey)) continue;
     const held =
@@ -869,6 +875,7 @@ export function migrateResponsePollerWorktreeIds(
     // of the retired chain that comes back with a hold it may no longer place
     // gives the dedup hash it registered back to this chain (#3663).
     const successor = takeOwnership(move.newKey);
+    successor.inheritedResponseHash = peekResponseHash(move.newKey);
     scheduleTick(
       { worktreeId: move.newWorktreeId, cliToolId: move.cliToolId, instanceId: move.instanceId },
       successor
