@@ -752,6 +752,22 @@ function savePromptMessage(
 ): boolean {
   const { db, worktree, worktreeId, cliToolId, instanceId, resolvedInstanceId, pollerKey } = ctx;
 
+  // Issue #3701: the question #3663 / #3684 ask, for the prompt a tick retired
+  // during the capture's `await` then finds on the pane — no row, broadcast,
+  // task event, push or waiting episode under the key it lost. Asked BEFORE the
+  // dedup below, which registers the hash before the save: a refused tick that
+  // registered it would make the successor drop the same prompt as a
+  // duplicate. No `await` from here to the end of this function.
+  if (!mayActForPollerKey(pollerKey)) {
+    logger.info('prompt-save-refused', {
+      worktreeId,
+      cliToolId,
+      instanceId: resolvedInstanceId,
+      generation: currentPollerOwner()?.generation,
+    });
+    return false;
+  }
+
   // Issue #565: Content hash-based duplicate prompt prevention
   const promptContent = promptDetection.rawContent || promptDetection.cleanContent;
   const normalizedForDedup = normalizePromptForDedup(promptContent, cliToolId);

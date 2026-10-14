@@ -97,6 +97,7 @@ import { getAgentEventSource } from '@/lib/hooks/sources/registry';
 import type { AgentInstanceRef } from '@/lib/hooks/sources/types';
 import { onRelayTurnCompleted } from '@/lib/relay/relay-triggers';
 import { getOrInitGlobal } from '../global-state';
+import { currentPollerOwner, mayActForPollerKey } from './poller-owner';
 
 const logger = createLogger('lib/polling/structured-history-gate');
 
@@ -606,7 +607,22 @@ export async function captureStructuredHistoryTurn(
         // back. So a provisional capture announces nothing at all; the relay
         // keeps waiting on the deadline it already has, and the settled capture
         // that follows announces the finished body.
-        if (captured && completion === 'settled') {
+        //
+        // Issue #3701: a poller tick retired while it awaited the reader
+        // announces nothing under the key it lost, and claims nothing, so its
+        // successor still announces this completion. Asked by the poller key
+        // (`getPollerKey`'s `worktreeId:instanceId`), not `captureKey`. The
+        // Stop hook runs outside any tick and is never refused. Not covered:
+        // what the reader itself wrote during the `await` (rows, cursor).
+        const pollerKey = `${worktreeId}:${resolvedInstanceId}`;
+        if (captured && completion === 'settled' && !mayActForPollerKey(pollerKey)) {
+          logger.info('structured-history-completion-refused', {
+            worktreeId,
+            cliToolId,
+            instanceId: resolvedInstanceId,
+            generation: currentPollerOwner()?.generation,
+          });
+        } else if (captured && completion === 'settled') {
           if (claimCompletionAnnouncement(captureKey, readerReport.completionKey)) {
             onRelayTurnCompleted(worktreeId, cliToolId, resolvedInstanceId, true);
           }
