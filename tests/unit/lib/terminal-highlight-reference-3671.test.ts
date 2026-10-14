@@ -90,10 +90,10 @@ describe('[#3671] negative controls: what was placed before is placed as before'
   });
 
   it('a reference drawing one character is still not placed by a hit on its whole', () => {
-    // As `terminal-highlight-3661.test.ts` keeps it: `&lt;`'s last raw
-    // character is not drawn. Only a run of units on one `&` reaches `;`.
+    // Issue #3682: a hit on the whole of a reference drawing one unit is
+    // placed on what it drew, as one drawing two is.
     const raw = 'a &lt; b';
-    expect(placed(raw, hitsOf(raw, '&lt;'))).toEqual([null]);
+    expect(placed(raw, hitsOf(raw, '&lt;'))).toEqual(['<']);
   });
 
   it('`&fjlig;` in inline code is still placed as written', () => {
