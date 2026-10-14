@@ -294,6 +294,29 @@ export function clearResponseHashCache(pollerKey: string): void {
   duplicateResponseSkipStreak.delete(pollerKey);
 }
 
+/**
+ * Take back the hash {@link isDuplicateResponse} registered for `content`, when
+ * the reply it stands for was never saved (Issue #3663).
+ *
+ * Called when a hold is refused: a tick registered the hash, a worktree-ID
+ * migration moved it to the successor's key while the tick awaited the
+ * transcript reader, and the tick came back no longer owning the key. Left in
+ * place, the hash would make the successor skip the very reply nobody has
+ * written. Only an exact match is removed — a hash the successor has since
+ * replaced is about a different reply — and the skip count goes with it.
+ *
+ * @param pollerKey - Poller key the hash is cached under now
+ * @param content - Cleaned content of the reply that was not saved
+ * @returns Whether a hash was removed
+ */
+export function forgetResponseHash(pollerKey: string, content: string): boolean {
+  const hash = createHash('sha256').update(content).digest('hex');
+  if (responseHashCache.get(pollerKey) !== hash) return false;
+  responseHashCache.delete(pollerKey);
+  duplicateResponseSkipStreak.delete(pollerKey);
+  return true;
+}
+
 /** One pollerKey's worth of response dedup state, lifted off its key (Issue #3553). */
 interface ResponseDedupState {
   hash: string | undefined;
