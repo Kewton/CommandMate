@@ -17,6 +17,7 @@ import { EXIT_ANIMATION_DURATION_MS } from '@/config/ui-feedback-config';
 import { useExitAnimation } from '@/hooks/useExitAnimation';
 import { useFocusTrap } from '@/hooks/useFocusTrap';
 import { cn } from '@/lib/utils/cn';
+import { isEscapeNoLayerClosed } from '@/lib/escape-key';
 
 const modalSizeVariants = cva('', {
   variants: {
@@ -86,12 +87,14 @@ export function Modal({
   const pressStartedOnBackdrop = useRef(false);
   const releaseLandedOnBackdrop = useRef(false);
 
-  // Close on escape key (Issue #104: skip if disableClose is true)
+  // Close on escape key (Issue #104: skip if disableClose is true). Issue
+  // #3700: not on a press a layer inside the dialog (a search bar, a menu)
+  // closed on or claimed — one Escape, one layer.
   useEffect(() => {
     if (disableClose) return;
 
     const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && isOpen) {
+      if (isEscapeNoLayerClosed(e) && isOpen) {
         onClose();
       }
     };

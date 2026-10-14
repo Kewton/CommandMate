@@ -43,7 +43,7 @@ import { useCopyFeedback } from '@/hooks/useCopyFeedback';
 import hljs from 'highlight.js';
 import 'highlight.js/styles/github-dark.css';
 import {
-  isCoveredByViewportLayer,
+  isBehindViewportLayer,
   isEscapeNoLayerClosed,
   markEscapeClosedLayer,
   VIEWPORT_LAYER_ATTRIBUTE,
@@ -82,25 +82,6 @@ const MARP_FRONTMATTER_REGEX = /^---\s*\nmarp:\s*true/;
 
 /** Maximum MARP content length (1MB) */
 const MAX_MARP_CONTENT_LENGTH = 1_000_000;
-
-/**
- * Issue #3691: whether a viewport layer is drawn over `element`, which sits
- * inside one of FileViewer's own screens (themselves viewport layers, with no
- * z-index of their own on `element`). Two ways: a root-level layer over the
- * hosting screen (the embedded editor's CSS-fallback maximize, a body portal
- * at the same z, later in the document), or one nested in the screen that is
- * not `element`'s ancestor (the native-fullscreen editor, maximized in place
- * and in the browser's top layer). Outside a screen (the modal) there is
- * nothing to cover it.
- */
-function isBehindViewportLayer(element: Element): boolean {
-  const host = element.closest(`[${VIEWPORT_LAYER_ATTRIBUTE}]`);
-  if (!host) return false;
-  if (isCoveredByViewportLayer(host)) return true;
-  return Array.from(host.querySelectorAll(`[${VIEWPORT_LAYER_ATTRIBUTE}]`)).some(
-    (layer) => !layer.contains(element)
-  );
-}
 
 /**
  * [Issue #47, Issue #723] Inline search bar shown beneath the toolbar in both
