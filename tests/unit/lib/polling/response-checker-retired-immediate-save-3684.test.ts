@@ -177,7 +177,7 @@ vi.mock('@/lib/polling/structured-history-gate', () => ({
   },
 }));
 
-import { resetPendingScrapedResponses } from '@/lib/polling/pending-scraped-response';
+import { hasPendingScrapedResponse, resetPendingScrapedResponses } from '@/lib/polling/pending-scraped-response';
 import {
   STALLED_TICK_TIMEOUT,
   getActivePollers,
@@ -538,5 +538,44 @@ describe('[#3684] ⑤ two sources moved onto one key', () => {
     captureSessionOutput.mockClear();
     await tick();
     expect(captureSessionOutput.mock.calls.filter(([id]) => id === WT.c)).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ⑥ the hold branch's completion edge (integrity review P2)
+// ---------------------------------------------------------------------------
+
+describe('[#3684] ⑥ the completion edge of the hold branch', () => {
+  it('a tick stopped while it awaits the reader has its hold refused and announces nothing', async () => {
+    const gate = await alphaTickAtReader('alpha old');
+
+    stopPolling(WT.a, TOOL);
+    gate.release('not_yet_closed');
+    await settle();
+
+    expect(hasPendingScrapedResponse(keyOf(WT.a))).toBe(false);
+    expect(relayEdgesFor(WT.a)).toBe(0);
+  });
+
+  it('negative: the chain that owns the key holds and announces once', async () => {
+    const gate = await alphaTickAtReader('alpha only');
+
+    gate.release('not_yet_closed');
+    await settle();
+
+    expect(hasPendingScrapedResponse(keyOf(WT.a))).toBe(true);
+    expect(relayEdgesFor(WT.a)).toBe(1);
+  });
+
+  it('negative: a merely superseded tick holds and announces once, and the restart writes the hold', async () => {
+    const gate = await alphaTickAtReader('alpha old');
+
+    vi.setSystemTime(Date.now() + STALLED_TICK_TIMEOUT - 1_000);
+    startPolling(WT.a, TOOL);
+    gate.release('not_yet_closed');
+    await settle();
+
+    expect(relayEdgesFor(WT.a)).toBe(1);
+    expect(rowsWith('alpha old')).toEqual([[WT.a, TOOL]]);
   });
 });

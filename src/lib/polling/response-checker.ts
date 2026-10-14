@@ -1120,14 +1120,16 @@ function recordOrHoldScrapedResponse(
         scrapedLength: cleanedResponse.length,
         holdMs: PENDING_SCRAPE_HOLD_MS,
       });
-    }
 
-    // The completion edge is announced HERE and not at the flush, because the
-    // turn finished now. A relay waiting on this session gets #2401's grace
-    // window to find a turn-keyed row, which is exactly the row the hold is
-    // waiting for; delaying the announcement by the hold would delay every
-    // delivery by it too.
-    onRelayTurnCompleted(worktreeId, cliToolId, resolvedInstanceId, false);
+      // The completion edge is announced HERE and not at the flush, because the
+      // turn finished now. A relay waiting on this session gets #2401's grace
+      // window to find a turn-keyed row, which is exactly the row the hold is
+      // waiting for; delaying the announcement by the hold would delay every
+      // delivery by it too. Issue #3684: only for a hold that was taken — a
+      // refused one is a retired tick, which announces nothing under the key
+      // it lost, as in the immediate-save branch below.
+      onRelayTurnCompleted(worktreeId, cliToolId, resolvedInstanceId, false);
+    }
   } else if (!suppressScrapedHistory && !mayActForPollerKey(pollerKey)) {
     // Issue #3684: the same question the hold asks (#3663), for the reply saved
     // at once — a tick retired while it awaited the reader or the log writes no
