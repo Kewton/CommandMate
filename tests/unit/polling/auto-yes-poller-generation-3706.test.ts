@@ -1,0 +1,524 @@
+/**
+ * Auto-Yes ticks act only for the generation they started under (Issue #3706).
+ *
+ * A tick takes its poller state, its grant and its session epoch at the top and
+ * compares them — by identity, never by re-reading the key — after every wait:
+ * the capture, the ownership check, the Enter fallback's fresh capture, the
+ * sender's guard read and the delays between its keys, and when it re-arms its
+ * timer. Each wait here is held open with a deferred promise while the state
+ * moves, then released.
+ *
+ * Driven through the real poller and the real `sendPromptAnswer`; only the ends
+ * are stubbed: the capture, the ownership check and the tmux module. The tmux
+ * double sends keys one at a time and asks `shouldContinue` between them, as
+ * `sendSpecialKeys` does (`tests/unit/lib/tmux-special-keys-abort-3706.test.ts`
+ * holds the real one to that).
+ *
+ * @vitest-environment node
+ */
+
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import Database from 'better-sqlite3';
+import { runMigrations } from '@/lib/db/db-migrations';
+import { TUI_TEXT_INPUT_WAIT_MS } from '@/config/cli-tool-timing-config';
+
+/** A promise the test resolves by hand. */
+interface Deferred<T> {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+  reject: (error: unknown) => void;
+}
+function deferred<T>(): Deferred<T> {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+// --- capture ---------------------------------------------------------------
+let pane = '';
+let captureGate: Deferred<void> | null = null;
+let freshGate: Deferred<void> | null = null;
+const captureSessionOutput = vi.fn(async () => {
+  if (captureGate) await captureGate.promise;
+  return pane;
+});
+const captureSessionOutputFresh = vi.fn(async () => {
+  if (freshGate) await freshGate.promise;
+  return pane;
+});
+vi.mock('@/lib/session/cli-session', () => ({
+  captureSessionOutput: () => captureSessionOutput(),
+  captureSessionOutputFresh: () => captureSessionOutputFresh(),
+  getSessionPresence: vi.fn(async () => 'present'),
+}));
+
+// --- ownership ---------------------------------------------------------------
+let ownershipGate: Deferred<void> | null = null;
+vi.mock('@/lib/cli-tools/worktree-session-ownership', () => ({
+  checkWorktreeSessionOwnership: async () => {
+    if (ownershipGate) await ownershipGate.promise;
+    return { verdict: 'owned', sessionPath: null };
+  },
+}));
+
+// --- tmux ---------------------------------------------------------------------
+/** Every key that reached the pane, in order. */
+let keysSent: string[] = [];
+/** Held open while the sender's guard reads the pane. */
+let guardReadGate: Deferred<void> | null = null;
+const sendSpecialKeys = vi.fn(
+  async (_session: string, keys: string[], options?: { shouldContinue?: () => boolean }) => {
+    for (let i = 0; i < keys.length; i++) {
+      keysSent.push(keys[i]);
+      if (i < keys.length - 1) {
+        if (options?.shouldContinue && !options.shouldContinue()) {
+          const stop = new Error('stopped');
+          stop.name = 'SpecialKeysAbortedError';
+          throw stop;
+        }
+      }
+    }
+  },
+);
+const sendKeys = vi.fn(async (_session: string, keys: string, enter = true) => {
+  keysSent.push(enter ? `${keys}<Enter>` : keys);
+});
+vi.mock('@/lib/tmux/tmux', () => ({
+  sendSpecialKeys: (s: string, k: string[], o?: { shouldContinue?: () => boolean }) => sendSpecialKeys(s, k, o),
+  sendKeys: (s: string, k: string, e?: boolean) => sendKeys(s, k, e),
+  capturePane: async () => {
+    if (guardReadGate) await guardReadGate.promise;
+    return pane;
+  },
+}));
+
+// --- the rest ---------------------------------------------------------------
+let db: Database.Database;
+vi.mock('@/lib/db/db-instance', () => ({ getDbInstance: () => db }));
+const recordAnsweredPrompt = vi.fn();
+vi.mock('@/lib/db/chat-db', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/db/chat-db')>();
+  return {
+    ...actual,
+    recordAnsweredPrompt: (...args: Parameters<typeof actual.recordAnsweredPrompt>) => {
+      recordAnsweredPrompt(...args);
+      return actual.recordAnsweredPrompt(...args);
+    },
+  };
+});
+const startResponsePolling = vi.fn();
+vi.mock('@/lib/polling/response-poller', () => ({
+  startPolling: (...a: unknown[]) => startResponsePolling(...a),
+}));
+vi.mock('@/lib/realtime/terminal-broadcast', () => ({
+  broadcastTerminalSnapshotAfterInteraction: vi.fn().mockResolvedValue(undefined),
+}));
+vi.mock('@/lib/ws-server', () => ({ broadcastMessage: vi.fn() }));
+vi.mock('@/lib/cli-tools/manager', () => ({
+  CLIToolManager: {
+    getInstance: () => ({
+      getTool: (id: string) => ({
+        name: id,
+        getSessionName: (worktreeId: string, instanceId?: string) => `cm-${worktreeId}-${instanceId ?? id}`,
+      }),
+    }),
+  },
+}));
+
+import {
+  clearAllPollerStates,
+  isPollerActive,
+  startAutoYesPolling,
+  stopAutoYesPolling,
+  stopAllAutoYesPolling,
+  type AutoYesPollerState,
+} from '@/lib/auto-yes-poller';
+import {
+  clearAllAutoYesStates,
+  disableAutoYes,
+  getAutoYesState,
+  setAutoYesEnabled,
+  POLLING_INTERVAL_MS,
+} from '@/lib/auto-yes-state';
+import {
+  AUTO_YES_ENTER_FALLBACK_ENV_VAR,
+  beginEnterFallbackSession,
+  clearEnterFallbacks,
+} from '@/lib/polling/auto-yes-enter-fallback';
+
+const WT = 'wt-3706';
+const KEY = `${WT}:claude`;
+const ONE_HOUR = 3_600_000 as const;
+const SESSION = `cm-${WT}-claude`;
+
+/** The cursor on the default: the answer is one Enter. */
+const PROMPT_ON_DEFAULT = 'Select an option:\n❯ 1. Yes\n  2. No';
+/** A y/n prompt: the answer is typed, then — after a wait — submitted with Enter. */
+const PROMPT_TYPED = 'Do you want to proceed? (y/n)';
+/** A numbered list under a cursor that claude's dialog rules decline (#3397). */
+const CLAUDE_UNRECOGNISED_LIST = [
+  '⏺ Pick one',
+  '',
+  '❯ 1. On-premises deployment',
+  '  2. Cloud-managed platform',
+  '  3. Kubernetes',
+  '',
+  '  Which one?',
+].join('\n');
+
+/** Let every pending promise job run (no timer moves). */
+async function settle(): Promise<void> {
+  await vi.advanceTimersByTimeAsync(0);
+  for (let i = 0; i < 20; i++) await Promise.resolve();
+  await vi.advanceTimersByTimeAsync(0);
+}
+
+/** The poller state under the key, as the module keeps it (globalThis, #153). */
+async function pollerStateOf(key: string): Promise<AutoYesPollerState | undefined> {
+  return globalThis.__autoYesPollerStates?.get(key);
+}
+
+function enable(stopPattern?: string): void {
+  setAutoYesEnabled(WT, 'claude', true, ONE_HOUR, stopPattern);
+  startAutoYesPolling(WT, 'claude');
+}
+
+/** What the disable route does: the grant off, then the poller stopped. */
+function disable(): void {
+  disableAutoYes(WT, 'claude');
+  stopAutoYesPolling(KEY);
+}
+
+/** Run the first tick up to whatever gate the test has closed. */
+async function firstTick(): Promise<void> {
+  await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS);
+  await settle();
+}
+
+const originalEnv = process.env[AUTO_YES_ENTER_FALLBACK_ENV_VAR];
+
+beforeEach(() => {
+  vi.useFakeTimers();
+  vi.setSystemTime(1_800_000_000_000);
+  db = new Database(':memory:');
+  runMigrations(db);
+  db.prepare(
+    `INSERT INTO worktrees (id, name, path, repository_path, repository_name, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+  ).run(WT, WT, `/repo/${WT}`, '/repo', 'repo', Date.now());
+  vi.clearAllMocks();
+  clearAllAutoYesStates();
+  clearAllPollerStates();
+  clearEnterFallbacks();
+  pane = PROMPT_ON_DEFAULT;
+  captureGate = null;
+  freshGate = null;
+  ownershipGate = null;
+  guardReadGate = null;
+  keysSent = [];
+  delete process.env[AUTO_YES_ENTER_FALLBACK_ENV_VAR];
+});
+
+afterEach(() => {
+  stopAllAutoYesPolling();
+  clearAllAutoYesStates();
+  clearEnterFallbacks();
+  db.close();
+  vi.useRealTimers();
+  if (originalEnv === undefined) delete process.env[AUTO_YES_ENTER_FALLBACK_ENV_VAR];
+  else process.env[AUTO_YES_ENTER_FALLBACK_ENV_VAR] = originalEnv;
+});
+
+// ---------------------------------------------------------------------------
+// Stop
+// ---------------------------------------------------------------------------
+
+describe('[#3706] a stop during a wait: no input not yet issued is started', () => {
+  it('stopped during the capture: no answer, no timer', async () => {
+    captureGate = deferred();
+    enable();
+    await firstTick();
+    expect(captureSessionOutput).toHaveBeenCalledTimes(1);
+
+    disable();
+    captureGate.resolve();
+    await settle();
+
+    expect(keysSent).toEqual([]);
+    expect(recordAnsweredPrompt).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('stopped during the ownership check: no answer', async () => {
+    ownershipGate = deferred();
+    enable();
+    await firstTick();
+
+    disable();
+    ownershipGate.resolve();
+    await settle();
+
+    expect(keysSent).toEqual([]);
+    expect(recordAnsweredPrompt).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("stopped during the sender's guard read: no key", async () => {
+    guardReadGate = deferred();
+    enable();
+    await firstTick();
+
+    disable();
+    guardReadGate.resolve();
+    await settle();
+
+    expect(keysSent).toEqual([]);
+    expect(recordAnsweredPrompt).not.toHaveBeenCalled();
+  });
+
+  it('stopped between the typed answer and its Enter: the Enter is not sent', async () => {
+    pane = PROMPT_TYPED;
+    enable();
+    await firstTick(); // the sender now waits TUI_TEXT_INPUT_WAIT_MS before the Enter
+    expect(keysSent).toEqual(['y']);
+
+    disable();
+    await vi.advanceTimersByTimeAsync(TUI_TEXT_INPUT_WAIT_MS);
+    await settle();
+
+    expect(keysSent).toEqual(['y']);
+    expect(recordAnsweredPrompt).not.toHaveBeenCalled();
+    expect(startResponsePolling).not.toHaveBeenCalled();
+  });
+
+  it("stopped during the Enter fallback's fresh capture: no Enter", async () => {
+    process.env[AUTO_YES_ENTER_FALLBACK_ENV_VAR] = 'claude=enabled';
+    pane = CLAUDE_UNRECOGNISED_LIST;
+    enable();
+    await firstTick(); // seen once: the candidate
+    freshGate = deferred();
+    await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS);
+    await settle();
+    expect(captureSessionOutputFresh).toHaveBeenCalledTimes(1);
+
+    disable();
+    freshGate.resolve();
+    await settle();
+
+    expect(keysSent).toEqual([]);
+    expect(recordAnsweredPrompt).not.toHaveBeenCalled();
+  });
+
+  it('negative: the current generation answers with the same keys as before', async () => {
+    enable();
+    await firstTick();
+    expect(keysSent).toEqual(['Enter']);
+    expect(sendSpecialKeys.mock.calls.map(([session, keys]) => [session, keys])).toEqual([[SESSION, ['Enter']]]);
+    expect(recordAnsweredPrompt).toHaveBeenCalledTimes(1);
+    expect(startResponsePolling).toHaveBeenCalledTimes(1);
+
+    keysSent = [];
+    pane = PROMPT_TYPED;
+    await vi.advanceTimersByTimeAsync(60_000);
+    await settle();
+    expect(keysSent.slice(0, 2)).toEqual(['y', '<Enter>']);
+  });
+
+  it('negative: the Enter fallback still sends its one Enter', async () => {
+    process.env[AUTO_YES_ENTER_FALLBACK_ENV_VAR] = 'claude=enabled';
+    pane = CLAUDE_UNRECOGNISED_LIST;
+    enable();
+    await firstTick();
+    await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS);
+    await settle();
+    expect(keysSent).toEqual(['Enter']);
+    expect(recordAnsweredPrompt).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Re-enable
+// ---------------------------------------------------------------------------
+
+describe('[#3706] disable → enable during a tick: the old tick leaves the new state alone', () => {
+  it('does not answer, nor arm a second timer over the new poller', async () => {
+    captureGate = deferred();
+    enable();
+    await firstTick();
+
+    disable();
+    enable();
+    const fresh = await pollerStateOf(KEY);
+    const freshTimer = fresh?.timerId;
+    expect(vi.getTimerCount()).toBe(1);
+
+    pane = PROMPT_TYPED;
+    const oldGate = captureGate;
+    captureGate = null;
+    oldGate.resolve();
+    await settle();
+
+    expect(keysSent).toEqual([]);
+    expect((await pollerStateOf(KEY))?.timerId).toBe(freshTimer);
+    expect(vi.getTimerCount()).toBe(1);
+  });
+
+  it("does not apply the new grant's stop pattern to its own capture", async () => {
+    pane = 'idle';
+    enable();
+    await firstTick(); // the old poller's stop-check baseline is now set
+    captureGate = deferred();
+    await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS);
+    await settle();
+
+    disable();
+    enable('Yes');
+    pane = `idle\n${PROMPT_ON_DEFAULT}`;
+    const oldGate = captureGate;
+    captureGate = deferred();
+    oldGate.resolve();
+    await settle();
+
+    const grant = getAutoYesState(WT, 'claude');
+    expect(grant?.enabled).toBe(true);
+    expect(grant?.stopReason).toBeUndefined();
+    expect((await pollerStateOf(KEY))?.stopCheckBaselineLength).toBe(-1);
+  });
+
+  it("does not count its failure against the new poller's errors", async () => {
+    captureGate = deferred();
+    enable();
+    await firstTick();
+
+    disable();
+    enable();
+    const oldGate = captureGate;
+    captureGate = deferred();
+    oldGate.reject(new Error('capture failed'));
+    await settle();
+
+    expect((await pollerStateOf(KEY))?.consecutiveErrors).toBe(0);
+    expect(vi.getTimerCount()).toBe(1);
+  });
+
+  it('negative: the new generation runs one timer, and a second start is idempotent', async () => {
+    enable();
+    expect(startAutoYesPolling(WT, 'claude')).toEqual({ started: true, reason: 'already_running' });
+    expect(vi.getTimerCount()).toBe(1);
+
+    pane = 'idle';
+    await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS * 5);
+    await settle();
+    expect(vi.getTimerCount()).toBe(1);
+    expect(isPollerActive(KEY)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Grant and session
+// ---------------------------------------------------------------------------
+
+describe('[#3706] the grant expiring or the session being relaunched during a wait', () => {
+  it('the grant expires during the ownership check: no answer', async () => {
+    ownershipGate = deferred();
+    enable();
+    await firstTick();
+
+    vi.setSystemTime(Date.now() + ONE_HOUR);
+    ownershipGate.resolve();
+    await settle();
+
+    expect(keysSent).toEqual([]);
+    expect(recordAnsweredPrompt).not.toHaveBeenCalled();
+  });
+
+  it('the session is relaunched during the ownership check: no answer, the chain goes on', async () => {
+    ownershipGate = deferred();
+    enable();
+    await firstTick();
+
+    beginEnterFallbackSession(WT, 'claude');
+    const gate = ownershipGate;
+    ownershipGate = null;
+    gate.resolve();
+    await settle();
+    expect(keysSent).toEqual([]);
+    expect(vi.getTimerCount()).toBe(1);
+
+    // The next tick reads the new session's screen and answers it.
+    await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS);
+    await settle();
+    expect(keysSent).toEqual(['Enter']);
+  });
+
+  it('negative: a valid grant and a relaunch before the tick still answer', async () => {
+    enable();
+    beginEnterFallbackSession(WT, 'claude');
+    ownershipGate = deferred();
+    await firstTick();
+    vi.setSystemTime(Date.now() + ONE_HOUR / 2);
+    ownershipGate.resolve();
+    await settle();
+    expect(keysSent).toEqual(['Enter']);
+  });
+
+  it('negative: waiting for the session is kept', async () => {
+    const { getSessionPresence } = await import('@/lib/session/cli-session');
+    vi.mocked(getSessionPresence).mockResolvedValue('absent');
+    captureSessionOutput.mockRejectedValueOnce(new Error('session does not exist'));
+    enable();
+    await firstTick();
+    expect(vi.getTimerCount()).toBe(1);
+    expect((await pollerStateOf(KEY))?.consecutiveErrors).toBe(0);
+    vi.mocked(getSessionPresence).mockResolvedValue('present');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Sent
+// ---------------------------------------------------------------------------
+
+describe('[#3706] an answer already sent', () => {
+  it("its follow-up does not write the successor's state or start a second chain", async () => {
+    enable();
+    const { getActivePollerCount } = await import('@/lib/auto-yes-poller');
+    sendSpecialKeys.mockImplementationOnce(async (_s, keys) => {
+      keysSent.push(...keys);
+      // The keys are out; the grant is withdrawn and given again before the
+      // poller hears back.
+      disable();
+      enable();
+    });
+    await firstTick();
+
+    expect(keysSent).toEqual(['Enter']);
+    // The audit records what the agent received.
+    expect(recordAnsweredPrompt).toHaveBeenCalledTimes(1);
+    const successor = await pollerStateOf(KEY);
+    expect(successor?.lastAnsweredPromptKey).toBeNull();
+    expect(successor?.lastServerResponseTimestamp).toBeNull();
+    expect(getActivePollerCount()).toBe(1);
+    expect(vi.getTimerCount()).toBe(1);
+  });
+
+  it('a send stopped part-way is not recorded as an answer, nor as an error', async () => {
+    pane = PROMPT_TYPED;
+    enable();
+    await firstTick();
+    // A renewal under the same poller: the old tick's grant is gone.
+    setAutoYesEnabled(WT, 'claude', true, ONE_HOUR);
+    await vi.advanceTimersByTimeAsync(TUI_TEXT_INPUT_WAIT_MS);
+    await settle();
+
+    expect(keysSent).toEqual(['y']);
+    expect(recordAnsweredPrompt).not.toHaveBeenCalled();
+    expect((await pollerStateOf(KEY))?.consecutiveErrors).toBe(0);
+    expect((await pollerStateOf(KEY))?.lastAnsweredPromptKey).toBeNull();
+    // The chain survives the renewal.
+    expect(vi.getTimerCount()).toBe(1);
+  });
+});

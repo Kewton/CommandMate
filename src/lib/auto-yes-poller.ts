@@ -72,6 +72,7 @@ import {
   DUPLICATE_RETRY_EXPIRY_MS,
   MAX_CONCURRENT_POLLERS,
   THINKING_CHECK_LINE_COUNT,
+  type AutoYesState,
 } from './auto-yes-state';
 import { getOrInitGlobal } from './global-state';
 import { promptFrameKey, warnOncePerFrame, type AutoYesPollerState } from './polling/auto-yes-poller-state';
@@ -185,8 +186,12 @@ export function isPollerActive(compositeKey: string): boolean {
  * @param compositeKey - Composite key
  * @param timestamp - Timestamp value (Date.now())
  */
-function updateLastServerResponseTimestamp(compositeKey: string, timestamp: number): void {
-  const pollerState = getPollerState(compositeKey);
+function updateLastServerResponseTimestamp(
+  compositeKey: string,
+  timestamp: number,
+  owner?: AutoYesPollerState,
+): void {
+  const pollerState = ownedPollerState(compositeKey, owner);
   if (pollerState) {
     pollerState.lastServerResponseTimestamp = timestamp;
   }
@@ -198,9 +203,10 @@ function updateLastServerResponseTimestamp(compositeKey: string, timestamp: numb
  * and after an answer is sent.
  *
  * @param compositeKey - Composite key
+ * @param owner - The tick's own poller state (Issue #3706); see {@link ownedPollerState}
  */
-function resetErrorCount(compositeKey: string): void {
-  const pollerState = getPollerState(compositeKey);
+function resetErrorCount(compositeKey: string, owner?: AutoYesPollerState): void {
+  const pollerState = ownedPollerState(compositeKey, owner);
   if (pollerState) {
     pollerState.consecutiveErrors = 0;
     pollerState.currentInterval = POLLING_INTERVAL_MS;
@@ -212,9 +218,10 @@ function resetErrorCount(compositeKey: string): void {
  * [IA-MF-001] compositeKey-based: extracts worktreeId/cliToolId for disableAutoYes.
  *
  * @param compositeKey - Composite key
+ * @param owner - The tick's own poller state (Issue #3706); see {@link ownedPollerState}
  */
-function incrementErrorCount(compositeKey: string): void {
-  const pollerState = getPollerState(compositeKey);
+function incrementErrorCount(compositeKey: string, owner?: AutoYesPollerState): void {
+  const pollerState = ownedPollerState(compositeKey, owner);
   if (pollerState) {
     pollerState.consecutiveErrors++;
     pollerState.currentInterval = calculateBackoffInterval(pollerState.consecutiveErrors);
@@ -238,6 +245,93 @@ function incrementErrorCount(compositeKey: string): void {
       stopAutoYesPolling(compositeKey);
     }
   }
+}
+
+// =============================================================================
+// Tick generation (Issue #3706)
+// =============================================================================
+
+/**
+ * What one tick acts for — its "generation" — taken at the top of the tick and
+ * compared, never re-read by key, after every wait (Issue #3706).
+ *
+ * The response poller's `PollerOwner` (`polling/poller-owner.ts`) idea, held by the Auto-Yes state itself: the poller state object
+ * `startAutoYesPolling` creates is the poller's token (a restart or a
+ * disable → enable makes a new one, a stop deletes it), and the
+ * {@link AutoYesState} object in `auto-yes-state` is the grant's (an enable
+ * and a disable each store a new one). Re-reading by KEY cannot tell the old
+ * generation from a new one that took the key over, which is how a tick in
+ * flight across a disable → enable used to answer, and to re-arm a second timer
+ * over the new poller's.
+ */
+export interface AutoYesTickGeneration {
+  readonly compositeKey: string;
+  readonly worktreeId: string;
+  readonly cliToolId: CLIToolType;
+  readonly instanceId: string | undefined;
+  /** The poller state the tick started under. */
+  readonly pollerState: AutoYesPollerState;
+  /** The grant the tick started under. */
+  readonly grant: AutoYesState;
+  /** `getEnterFallbackSessionEpoch` at the start: a relaunch the poller outlived moves it. */
+  readonly sessionEpoch: number;
+}
+
+/**
+ * The poller state under `compositeKey`, but only when it is `owner` — the
+ * tick's own (Issue #3706). Without `owner` (callers outside a tick, and tests
+ * driving `detectAndRespondToPrompt` with a hand-built state) it is the plain
+ * by-key read this always was.
+ */
+function ownedPollerState(compositeKey: string, owner?: AutoYesPollerState): AutoYesPollerState | undefined {
+  const pollerState = getPollerState(compositeKey);
+  if (owner !== undefined && pollerState !== owner) return undefined;
+  return pollerState;
+}
+
+/** Is the tick's poller still the one under its key (not stopped, not replaced)? */
+function isPollerCurrent(generation: AutoYesTickGeneration): boolean {
+  return getPollerState(generation.compositeKey) === generation.pollerState;
+}
+
+/**
+ * May the tick still act: its poller, its grant (the same enable, not expired)
+ * and its session (no relaunch since) are all still the ones it started under.
+ * Checked after capture, after each wait before a key, and inside the send.
+ */
+function isTickCurrent(generation: AutoYesTickGeneration): boolean {
+  if (!isPollerCurrent(generation)) return false;
+  // `getAutoYesState` returns the stored object until it expires, when it
+  // stores (and returns) a disabled one — so an expiry fails identity too.
+  const grant = getAutoYesState(generation.worktreeId, generation.cliToolId, generation.instanceId);
+  if (grant !== generation.grant || !grant.enabled) return false;
+  return isSameSession(generation);
+}
+
+/**
+ * Is the session the tick answered still the one it started on (Issue #3706)?
+ * What the follow-ups of an answer already sent — the response poller restart,
+ * the terminal push — are judged by: a disable after the keys landed does not
+ * un-send them, a relaunch does make them about another process.
+ */
+function isSameSession(generation: AutoYesTickGeneration): boolean {
+  return getEnterFallbackSessionEpoch(generation.compositeKey) === generation.sessionEpoch;
+}
+
+/**
+ * End a tick that found its generation gone (Issue #3706). It changes nothing;
+ * it re-arms its timer only when its own poller is still the current one — a
+ * renewed grant or a relaunched session under the same poller — so the chain
+ * goes on and the next tick starts from the new state.
+ */
+function endStaleTick(generation: AutoYesTickGeneration): void {
+  logger.debug('poller:auto-yes-tick-superseded', {
+    worktreeId: generation.worktreeId,
+    cliToolId: generation.cliToolId,
+    instanceId: generation.instanceId,
+    pollerCurrent: isPollerCurrent(generation),
+  });
+  if (isPollerCurrent(generation)) scheduleNextPoll(generation);
 }
 
 /**
@@ -502,6 +596,10 @@ function isStillEnterFallbackScreen(prompt: JudgedPrompt, fresh: string): boolea
  *  6. a capture taken now, past the capture cache, must still be that screen
  *     ({@link isStillEnterFallbackScreen}).
  *
+ * Issue #3706: with a `generation` (a tick of `pollAutoYes`), the waits of
+ * steps 5 and 6 are each followed by {@link isTickCurrent}; a tick that lost
+ * its generation sends nothing and changes nothing.
+ *
  * @returns true when the Enter was sent; the caller returns `responded`
  */
 async function tryEnterFallback(
@@ -509,6 +607,7 @@ async function tryEnterFallback(
   promptDetection: PromptDetectionResult,
   dialogGate: AutoYesDialogGateVerdict,
   rawOutput: string | undefined,
+  generation?: AutoYesTickGeneration,
 ): Promise<boolean> {
   const { worktreeId, cliToolId, instanceId, pollerState, promptData, frameKey } = prompt;
 
@@ -593,6 +692,7 @@ async function tryEnterFallback(
   // 5. Never another server's session (Issue #2865).
   const sessionName = CLIToolManager.getInstance().getTool(cliToolId).getSessionName(worktreeId, instanceId);
   const ownership = await checkWorktreeSessionOwnership(worktreeId, sessionName);
+  if (generation !== undefined && !isTickCurrent(generation)) return false;
   if (ownership === null || ownership.verdict === 'foreign') {
     warnOncePerFrame(
       pollerState,
@@ -623,6 +723,7 @@ async function tryEnterFallback(
     (rawOutput ?? '').split('\n').length,
     instanceId,
   );
+  if (generation !== undefined && !isTickCurrent(generation)) return false;
   if (!isStillEnterFallbackScreen(prompt, fresh)) {
     pollerState.enterFallbackCandidateKey = null;
     logger.debug('poller:auto-yes-enter-fallback-fresh-frame-differs', {
@@ -656,7 +757,7 @@ async function tryEnterFallback(
     composerState: judgement.composerState,
   });
 
-  await finishAnsweredPrompt(prompt, promptDetection, AUTO_YES_ENTER_FALLBACK_ANSWER);
+  await finishAnsweredPrompt(prompt, promptDetection, AUTO_YES_ENTER_FALLBACK_ANSWER, generation);
   return true;
 }
 
@@ -669,18 +770,25 @@ async function tryEnterFallback(
  * @param promptDetection - The detection `prompt.promptData` was read from; its
  *   content becomes the audit row's
  * @param answer - The answer that was sent
+ * @param generation - The tick's generation (Issue #3706). The keys are out, so
+ *   the task event and the audit row are always written: they record what the
+ *   agent actually received. What belongs to the poller is written to the
+ *   tick's own poller state only, never to a successor under the same key, and
+ *   the response poller restart and the terminal push are skipped when the
+ *   session was relaunched meanwhile.
  */
 async function finishAnsweredPrompt(
   prompt: JudgedPrompt,
   promptDetection: PromptDetectionResult,
   answer: string,
+  generation?: AutoYesTickGeneration,
 ): Promise<void> {
   const { worktreeId, cliToolId, instanceId, compositeKey, pollerState, promptData, promptKey } =
     prompt;
 
   // 6. Update timestamp and reset error count
-  updateLastServerResponseTimestamp(compositeKey, Date.now());
-  resetErrorCount(compositeKey);
+  updateLastServerResponseTimestamp(compositeKey, Date.now(), generation?.pollerState);
+  resetErrorCount(compositeKey, generation?.pollerState);
 
   // 7. Record answered prompt key and timestamp
   pollerState.lastAnsweredPromptKey = promptKey;
@@ -750,6 +858,7 @@ async function finishAnsweredPrompt(
       import('@/lib/polling/response-poller'),
       import('@/lib/realtime/terminal-broadcast'),
     ]);
+  if (generation !== undefined && !isSameSession(generation)) return;
   startResponsePolling(worktreeId, cliToolId, instanceId);
   void broadcastTerminalSnapshotAfterInteraction(worktreeId, cliToolId, instanceId);
 }
@@ -767,6 +876,11 @@ async function finishAnsweredPrompt(
  * @param rawOutput - The SAME tick's capture with its box drawing intact
  *   (Issue #2522). Omitting it costs Command Code's `AskUserQuestion` and
  *   nothing else; see {@link capturePollerFrame}.
+ * @param generation - The calling tick's generation (Issue #3706). Given, every
+ *   wait before a key — the ownership check, the Enter fallback's fresh capture,
+ *   each wait inside the send — is followed by {@link isTickCurrent}, and a tick
+ *   that lost it types nothing more and returns `no_answer`. Omitted (direct
+ *   callers, tests), nothing is checked, as before.
  * @returns 'responded' | 'no_prompt' | 'duplicate' | 'no_answer' | 'error'
  */
 export async function detectAndRespondToPrompt(
@@ -776,7 +890,8 @@ export async function detectAndRespondToPrompt(
   cleanOutput: string,
   precomputedLines?: string[],
   instanceId?: string,
-  rawOutput?: string
+  rawOutput?: string,
+  generation?: AutoYesTickGeneration
 ): Promise<'responded' | 'no_prompt' | 'duplicate' | 'no_answer' | 'error'> {
   const compositeKey = buildCompositeKey(worktreeId, cliToolId, instanceId);
   try {
@@ -888,7 +1003,7 @@ export async function detectAndRespondToPrompt(
     // 3.6. Issue #3397: a refused frame may be a choice screen CommandMate
     // cannot read; with Auto-Yes on it gets one Enter. See `tryEnterFallback`.
     if (notOurs.kind === 'dialog-gate-refused') {
-      return (await tryEnterFallback(judged, promptDetection, notOurs.dialogGate, rawOutput))
+      return (await tryEnterFallback(judged, promptDetection, notOurs.dialogGate, rawOutput, generation))
         ? 'responded'
         : 'no_answer';
     }
@@ -936,6 +1051,7 @@ export async function detectAndRespondToPrompt(
     // Issue #2865: never auto-answer a same-named session another CommandMate
     // server created. The poller keeps running; it just does not type.
     const ownership = await checkWorktreeSessionOwnership(worktreeId, sessionName);
+    if (generation !== undefined && !isTickCurrent(generation)) return 'no_answer';
     if (ownership === null || ownership.verdict === 'foreign') {
       warnOncePerFrame(
         pollerState,
@@ -959,17 +1075,31 @@ export async function detectAndRespondToPrompt(
         answer,
         cliToolId,
         promptData: promptDetection.promptData,
+        // Issue #3706: asked after each wait inside the send.
+        ...(generation !== undefined ? { stillCurrent: () => isTickCurrent(generation) } : {}),
       });
     } finally {
       invalidateCache(sessionName);
     }
 
     // 6., 7. The answer reached tmux: see `finishAnsweredPrompt`.
-    await finishAnsweredPrompt(judged, promptDetection, answer);
+    await finishAnsweredPrompt(judged, promptDetection, answer, generation);
 
     return 'responded';
-  } catch {
-    incrementErrorCount(compositeKey);
+  } catch (error) {
+    // Issue #3706: a tick that lost its generation — the send stopped part-way
+    // (`PromptAnswerAbortedError`), or failed after the grant went — is not a
+    // failure of the poller that now holds the key, and not an answer either.
+    if (generation !== undefined && !isTickCurrent(generation)) {
+      logger.info('poller:auto-yes-answer-abandoned', {
+        worktreeId,
+        cliToolId,
+        instanceId,
+        keysSent: error instanceof Error && 'keysSent' in error ? Boolean(error.keysSent) : null,
+      });
+      return 'no_answer';
+    }
+    incrementErrorCount(compositeKey, generation?.pollerState);
     logger.warn('poller:detect-respond-error', { worktreeId, cliToolId, instanceId });
     return 'error';
   }
@@ -981,21 +1111,41 @@ export async function detectAndRespondToPrompt(
  * @param worktreeId - Worktree identifier
  * @param cliToolId - CLI tool type being polled
  * @param instanceId - Agent instance ID being polled (Issue #896; equals cliToolId for primary)
+ * @param owner - The poller state whose timer fired (Issue #3706); a timer of a
+ *   poller that has since been replaced does nothing
  */
-async function pollAutoYes(worktreeId: string, cliToolId: CLIToolType, instanceId?: string): Promise<void> {
+async function pollAutoYes(
+  worktreeId: string,
+  cliToolId: CLIToolType,
+  instanceId?: string,
+  owner?: AutoYesPollerState,
+): Promise<void> {
   const compositeKey = buildCompositeKey(worktreeId, cliToolId, instanceId);
 
   // 1. Validate context
   const pollerState = getPollerState(compositeKey);
+  if (owner !== undefined && pollerState !== owner) return;
   const contextResult = validatePollingContext(compositeKey, pollerState);
   if (contextResult !== 'valid') {
     return;
   }
+  const grant = getAutoYesState(worktreeId, cliToolId, instanceId);
+  if (!grant?.enabled) return;
+
+  // Issue #3706: what this tick acts for, compared after every wait below.
+  const generation: AutoYesTickGeneration = {
+    compositeKey,
+    worktreeId,
+    cliToolId,
+    instanceId,
+    pollerState: pollerState!,
+    grant,
+    sessionEpoch: getEnterFallbackSessionEpoch(compositeKey),
+  };
 
   try {
     // 2. Capture and clean output
-    const autoYesState = getAutoYesState(worktreeId, cliToolId, instanceId);
-    const captureLines = autoYesState?.stopPattern
+    const captureLines = grant.stopPattern
       ? FULL_CAPTURE_LINES
       : REDUCED_CAPTURE_LINES;
     // Issue #2522: one capture, both spellings. The cleaned string drives every
@@ -1008,6 +1158,10 @@ async function pollAutoYes(worktreeId: string, cliToolId: CLIToolType, instanceI
       captureLines,
       instanceId,
     );
+    if (!isTickCurrent(generation)) {
+      endStaleTick(generation);
+      return;
+    }
 
     if (pollerState!.waitingForSession) {
       pollerState!.waitingForSession = false;
@@ -1023,17 +1177,21 @@ async function pollAutoYes(worktreeId: string, cliToolId: CLIToolType, instanceI
 
     // 4. Detect and respond to prompt
     const result = await detectAndRespondToPrompt(
-      worktreeId, pollerState!, cliToolId, cleanOutput, lines, instanceId, rawOutput,
+      worktreeId, pollerState!, cliToolId, cleanOutput, lines, instanceId, rawOutput, generation,
     );
+    if (!isTickCurrent(generation)) {
+      endStaleTick(generation);
+      return;
+    }
     // Issue #3329: a poll that ran to the end ends the run of errors, so only
     // failures in a row reach AUTO_STOP_ERROR_THRESHOLD — not ones scattered
     // over hours. Not on 'error': a capture that works followed by an answer
     // that fails every time must still back off and stop.
     if (result !== 'error') {
-      resetErrorCount(compositeKey);
+      resetErrorCount(compositeKey, generation.pollerState);
     }
     if (result === 'responded') {
-      scheduleNextPoll(worktreeId, cliToolId, instanceId, COOLDOWN_INTERVAL_MS);
+      scheduleNextPoll(generation, COOLDOWN_INTERVAL_MS);
       return;
     }
 
@@ -1041,7 +1199,7 @@ async function pollAutoYes(worktreeId: string, cliToolId: CLIToolType, instanceI
     if (result === 'no_prompt') {
       const recentLines = lines.slice(-THINKING_CHECK_LINE_COUNT).join('\n');
       if (detectThinking(cliToolId, recentLines)) {
-        scheduleNextPoll(worktreeId, cliToolId, instanceId, THINKING_POLLING_INTERVAL_MS);
+        scheduleNextPoll(generation, THINKING_POLLING_INTERVAL_MS);
         return;
       }
     }
@@ -1050,19 +1208,24 @@ async function pollAutoYes(worktreeId: string, cliToolId: CLIToolType, instanceI
     // the session it answers for (`auto-yes-lifecycle`), and `send --auto-yes`
     // enables it before the session starts — so wait until `expiresAt`, at the
     // backoff cap, instead of counting toward `consecutive_errors`.
-    if (await isSessionMissing(worktreeId, cliToolId, instanceId)) {
+    const sessionMissing = await isSessionMissing(worktreeId, cliToolId, instanceId);
+    if (!isTickCurrent(generation)) {
+      endStaleTick(generation);
+      return;
+    }
+    if (sessionMissing) {
       if (!pollerState!.waitingForSession) {
         pollerState!.waitingForSession = true;
         logger.info('poller:waiting-for-session', { worktreeId, cliToolId, instanceId });
       }
-      scheduleNextPoll(worktreeId, cliToolId, instanceId, MAX_BACKOFF_MS);
+      scheduleNextPoll(generation, MAX_BACKOFF_MS);
       return;
     }
-    incrementErrorCount(compositeKey);
+    incrementErrorCount(compositeKey, generation.pollerState);
     logger.warn('poller:poll-error', { worktreeId, cliToolId, instanceId, error: getErrorMessage(error) });
   }
 
-  scheduleNextPoll(worktreeId, cliToolId, instanceId);
+  scheduleNextPoll(generation);
 }
 
 /**
@@ -1086,24 +1249,20 @@ async function isSessionMissing(
 /**
  * Schedule the next polling iteration
  *
- * @param worktreeId - Worktree identifier
- * @param cliToolId - CLI tool type being polled
- * @param instanceId - Agent instance ID being polled (Issue #896)
+ * Issue #3706: on the tick's OWN poller state, and only while it is still the
+ * one under its key. Re-reading by key let a tick that outlived a disable →
+ * enable write its timer over the new poller's `timerId`, leaving two chains.
+ *
+ * @param generation - The tick's generation
  * @param overrideInterval - Optional override for the next poll delay
  */
-function scheduleNextPoll(
-  worktreeId: string,
-  cliToolId: CLIToolType,
-  instanceId?: string,
-  overrideInterval?: number
-): void {
-  const compositeKey = buildCompositeKey(worktreeId, cliToolId, instanceId);
-  const pollerState = getPollerState(compositeKey);
-  if (!pollerState) return;
+function scheduleNextPoll(generation: AutoYesTickGeneration, overrideInterval?: number): void {
+  if (!isPollerCurrent(generation)) return;
+  const { worktreeId, cliToolId, instanceId, pollerState } = generation;
 
   const interval = Math.max(overrideInterval ?? pollerState.currentInterval, POLLING_INTERVAL_MS);
   pollerState.timerId = setTimeout(() => {
-    pollAutoYes(worktreeId, cliToolId, instanceId);
+    void pollAutoYes(worktreeId, cliToolId, instanceId, pollerState);
   }, interval);
 }
 
@@ -1181,7 +1340,7 @@ export function startAutoYesPolling(
 
   // Start polling immediately
   pollerState.timerId = setTimeout(() => {
-    pollAutoYes(worktreeId, cliToolId, effectiveInstanceId);
+    void pollAutoYes(worktreeId, cliToolId, effectiveInstanceId, pollerState);
   }, POLLING_INTERVAL_MS);
 
   logger.info('poller:started', { worktreeId, cliToolId, instanceId: effectiveInstanceId });
