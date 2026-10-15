@@ -1062,7 +1062,9 @@ export async function detectAndRespondToPrompt(
         );
         return 'no_answer';
       }
-      forgetPartialAnswer(compositeKey);
+      // Another prompt is on screen: only the sends at the forgotten one's
+      // screen go with it (#3713) — one in flight at this screen keeps its hold.
+      forgetPartialAnswer(compositeKey, partial.screenKey);
     }
     // Issue #3713: a worktree ID move carried an answer still being sent to
     // this session's key. Its keys may already be on the pane, and how its send

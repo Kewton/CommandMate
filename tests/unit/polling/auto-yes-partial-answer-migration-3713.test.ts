@@ -1218,3 +1218,57 @@ describe('[#3713] re-instruction 2: a send in flight when its prompt left the sc
     expect(live.keys).toEqual(['y']);
   });
 });
+
+// =============================================================================
+// Re-instruction 3 (Codex re-review P2): forgetting X keeps the send at Y
+// =============================================================================
+
+describe('[#3713] re-instruction 3: forgetting an old screen keeps the send in flight at the current one', () => {
+  it('X waits → A→B → B types Y and waits → old A records X → B→C → C reads Y first: no retype, Y is remembered', async () => {
+    const live = await launch(A, PROMPT_TYPED);
+    enable(A);
+    typedKeyGateOnce = deferred();
+    const sendX = typedKeyGateOnce;
+    await ticks(1);
+    expect(live.keys).toEqual(['y']);
+
+    await move([{ oldId: A, newId: B }]);
+    live.pane = OTHER_PROMPT_TYPED;
+    typedKeyGateOnce = deferred();
+    const sendY = typedKeyGateOnce;
+    await ticks(1); // B types y at Y; its send is held
+    expect(live.keys).toEqual(['y', 'y']);
+
+    sendX.resolve(); // the old A comes back stopped: X recorded under B
+    await vi.advanceTimersByTimeAsync(TUI_TEXT_INPUT_WAIT_MS);
+    await settle();
+    expect(partialAt(B)).not.toBeNull();
+
+    await move([{ oldId: B, newId: C }]);
+    await ticks(1); // C's first tick: forgets X (another screen), Y still in flight
+    expect(live.keys).toEqual(['y', 'y']);
+
+    sendY.resolve();
+    await vi.advanceTimersByTimeAsync(TUI_TEXT_INPUT_WAIT_MS);
+    await settle();
+    const remembered = partialAt(C);
+    expect(remembered).not.toBeNull();
+
+    await ticks(3);
+    expect(live.keys).toEqual(['y', 'y']);
+    expect(partialAt(C)?.screenKey).toBe(remembered?.screenKey);
+  });
+
+  it('negative: registry — forgetting a screen expires the sends at that screen only; a vanished prompt expires all', async () => {
+    const { forgetPartialAnswer } = await import('@/lib/polling/auto-yes-poller-state');
+    const key = keyOf(C);
+    const epoch = getEnterFallbackSessionEpoch(key);
+    const atX = beginSendAttempt(key, 'X', epoch);
+    const atY = beginSendAttempt(key, 'Y', epoch);
+    forgetPartialAnswer(key, 'X');
+    expect(atX.state).toBe('expired');
+    expect(atY.state).toBe('pending');
+    forgetPartialAnswer(key);
+    expect(atY.state).toBe('expired');
+  });
+});

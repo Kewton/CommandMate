@@ -209,11 +209,20 @@ export function getPartialAnswer(compositeKey: string, epoch: number): PartialAu
  * same command unanswered. A send registered after this call is a new attempt
  * and records as before. Expiring is the mark: it drops the attempt from the
  * registry, so no per-key "forgotten up to seq" state has to outlive it.
+ *
+ * @param screenKey - Given when the memory is dropped because ANOTHER prompt is
+ *   on screen (re-instruction 3): only the sends at the forgotten memory's
+ *   screen are expired. A send at the screen now shown (Y, carried here by a
+ *   move while still in flight) stays — it keeps the successor off Y, and its
+ *   stop is still remembered when it comes back. Omitted (the prompt left the
+ *   screen), every send under the key is expired.
  */
-export function forgetPartialAnswer(compositeKey: string): void {
+export function forgetPartialAnswer(compositeKey: string, screenKey?: string): void {
   partialAnswers.delete(compositeKey);
   for (const attempt of [...sendAttempts]) {
-    if (attempt.recordKey === compositeKey) expireSendAttempt(attempt);
+    if (attempt.recordKey !== compositeKey) continue;
+    if (screenKey !== undefined && attempt.screenKey !== screenKey) continue;
+    expireSendAttempt(attempt);
   }
 }
 
