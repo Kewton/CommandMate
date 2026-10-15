@@ -69,6 +69,7 @@ import type { AgentInstanceRef } from '../types';
 import {
   acceptPathUnderRoot,
   isReadableFile,
+  mayReaderWrite,
   nextTurnOpensAt,
   resolveAssistantTimestampMs,
   resolveSessionIdFromEvents,
@@ -847,6 +848,14 @@ async function writeCodexTurn(
       promptsInWindow: turn.prompts.length,
       itemsInWindow: turn.items.length,
     });
+  }
+
+  // Issue #3705: the last `await` (the imports) is behind us and the row and its
+  // broadcast follow with none between. A tick retired meanwhile writes no row
+  // under the instance it lost — the request id only stops the SAME row being
+  // written twice — and answers false: History does not hold the turn.
+  if (!mayReaderWrite(target, logger, 'codex-transcript-write-refused', 'reply-row')) {
+    return false;
   }
 
   const message = createMessage(db, {

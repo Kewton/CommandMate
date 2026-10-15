@@ -19,7 +19,7 @@ import {
   movePendingScrapedResponses,
   retargetPendingScrapedResponse,
 } from './pending-scraped-response';
-import { pollerOwnerStorage, type PollerOwner } from './poller-owner';
+import { pollerKeyOf, pollerOwnerStorage, snapshotOwnerStorage, type PollerOwner } from './poller-owner';
 import { broadcastTerminalSnapshot } from '@/lib/realtime/terminal-broadcast';
 import { findTerminalSessionRefusal } from '@/lib/realtime/terminal-session-ownership';
 import { resolveSessionName } from '@/lib/cli-tools/session-name';
@@ -73,6 +73,18 @@ interface PollTarget {
   instanceId?: string;
 }
 
+/**
+ * A restart handed to an in-flight tick's epilogue, and the tick it was handed
+ * to (Issue #3705). Only that tick applies it: a tick cut loose past
+ * {@link STALLED_TICK_TIMEOUT} that comes back later must not start a restart
+ * queued behind the chain that replaced it while that chain's tick is still
+ * running.
+ */
+interface QueuedRestart {
+  target: PollTarget;
+  behind: PollerOwner;
+}
+
 // The ownership token (`PollerOwner`) lives in `./poller-owner` (Issue #3663),
 // so the held-scrape store can ask whether its caller still owns a key without
 // importing this module.
@@ -105,7 +117,14 @@ interface PollerCoordinator {
   /** Poller key -> the tick executing right now, and when it started. */
   running: Map<string, { owner: PollerOwner; since: number }>;
   /** Poller key -> a restart handed to the in-flight tick's epilogue. */
-  pendingRestart: Map<string, PollTarget>;
+  pendingRestart: Map<string, QueuedRestart>;
+  /**
+   * Poller key -> the newest chain ever given the key, kept after it stops
+   * (Issue #3705). `owners` forgets a chain the moment it stops, so without
+   * this a chain started after a stop would not retire the stopped chain's
+   * in-flight tick, whose final snapshot would land on the new chain's frames.
+   */
+  latestOwners: Map<string, PollerOwner>;
   /** Monotonic across every key, so a generation is never reused. */
   generationCounter: number;
   /**
@@ -127,7 +146,8 @@ const coordinator: PollerCoordinator =
     pollingStartTimes: new Map<string, number>(),
     owners: new Map<string, PollerOwner>(),
     running: new Map<string, { owner: PollerOwner; since: number }>(),
-    pendingRestart: new Map<string, PollTarget>(),
+    pendingRestart: new Map<string, QueuedRestart>(),
+    latestOwners: new Map<string, PollerOwner>(),
     generationCounter: 0,
     pausedOnPrompt: new Set<string>(),
   }));
@@ -138,6 +158,7 @@ const coordinator: PollerCoordinator =
 // `globalThis` across HMR, and a poller started before the reload would
 // otherwise crash the first tick after it.
 coordinator.pausedOnPrompt ??= new Set<string>();
+coordinator.latestOwners ??= new Map<string, PollerOwner>();
 
 /**
  * Active pollers map: "worktreeId:instanceId" -> NodeJS.Timeout
@@ -178,12 +199,18 @@ export function getPollerKey(
   cliToolId: CLIToolType,
   instanceId?: string
 ): string {
-  return `${worktreeId}:${instanceId ?? cliToolId}`;
+  // Issue #3705: spelled in `./poller-owner`, so the writers that ask whether a
+  // tick may still act for this key name it the same way without importing here.
+  return pollerKeyOf(worktreeId, cliToolId, instanceId);
 }
 
 /** Hand `pollerKey` to a brand-new chain, retiring whichever chain held it. */
 function takeOwnership(pollerKey: string): PollerOwner {
-  const previous = coordinator.owners.get(pollerKey);
+  // Issue #3705: the newest chain the key ever had, not only the one holding it
+  // now. A chain that was stopped (a route, a migration that displaced it) has
+  // left `owners`, but a tick of it may still be in flight, and it has a
+  // successor from this moment on.
+  const previous = coordinator.owners.get(pollerKey) ?? coordinator.latestOwners.get(pollerKey);
   if (previous) previous.superseded = true;
 
   const owner: PollerOwner = {
@@ -194,6 +221,7 @@ function takeOwnership(pollerKey: string): PollerOwner {
     selfStopped: false,
   };
   coordinator.owners.set(pollerKey, owner);
+  coordinator.latestOwners.set(pollerKey, owner);
   return owner;
 }
 
@@ -254,7 +282,7 @@ export function startPolling(worktreeId: string, cliToolId: CLIToolType, instanc
     inFlight.owner.superseded = true;
 
     if (Date.now() - inFlight.since < STALLED_TICK_TIMEOUT) {
-      coordinator.pendingRestart.set(pollerKey, target);
+      coordinator.pendingRestart.set(pollerKey, { target, behind: inFlight.owner });
       return;
     }
 
@@ -421,8 +449,16 @@ async function runPollTick(target: PollTarget, owner: PollerOwner): Promise<void
     // Issue #2223: skipped once another chain owns the key — a superseded tick
     // would push the previous turn's screen on top of the live one, and its
     // `version` counter would make the client drop the real frame that follows.
+    //
+    // Issue #3705: and the snapshot carries the owner explicitly
+    // (`snapshotOwnerStorage`), because this is only where it starts. Its
+    // capture and the writers inside `buildCurrentOutput` resume after awaits,
+    // and they ask again then (`maySnapshotPublish`): a successor that took the
+    // key in the meantime is not overwritten by the turn that ended.
     if (!owner.superseded) {
-      void broadcastTerminalSnapshot(target.worktreeId, target.cliToolId, target.instanceId);
+      void snapshotOwnerStorage.run(owner, () =>
+        broadcastTerminalSnapshot(target.worktreeId, target.cliToolId, target.instanceId)
+      );
     }
 
     // Schedule next poll ONLY after current one completes
@@ -438,10 +474,15 @@ async function runPollTick(target: PollTarget, owner: PollerOwner): Promise<void
     // Apply a restart that arrived while this tick was in flight. Doing it here
     // rather than in startPolling() is what keeps the old and new chains from
     // polling the same pane at the same time.
+    //
+    // Issue #3705: only the restart handed to THIS tick. One queued behind a
+    // later chain's tick belongs to that tick: applied here, by a tick that was
+    // cut loose past STALLED_TICK_TIMEOUT and came back, it would stop the chain
+    // whose tick is still running and start the next one beside it.
     const pending = coordinator.pendingRestart.get(pollerKey);
-    if (pending) {
+    if (pending && pending.behind === owner) {
       coordinator.pendingRestart.delete(pollerKey);
-      restartChain(pollerKey, pending);
+      restartChain(pollerKey, pending.target);
     }
   }
 }

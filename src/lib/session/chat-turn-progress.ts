@@ -21,6 +21,7 @@ import {
 import { createLogger } from '@/lib/logger';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { getOrInitGlobal } from '../global-state';
+import { maySnapshotPublish } from '@/lib/polling/poller-owner';
 
 // Issue #3215: the name is the one these lines have always been logged under.
 // It is what an operator greps for, so it did not move with the code.
@@ -244,6 +245,10 @@ export async function buildChatTurnProgress(
     return null;
   }
   if (!draft || draft.body.length === 0) return null;
+  // Issue #3705: the frame of a poller snapshot whose tick was superseded while
+  // the transcript was read is not built — and, above all, not remembered: the
+  // turn key and body below are what suppress the successor's identical frame.
+  if (!maySnapshotPublish()) return null;
 
   const bounded = truncateChatTurnProgressBody(draft.body);
   if (draft.turnKey === state.turnKey && bounded.body === state.body) return null;
@@ -302,6 +307,8 @@ export async function emitChatTurnProgress(
     // Not logged: null is the throttle, an unchanged body, or a turn with no
     // text yet — the quiet, correct majority of ticks.
     if (!event) return false;
+    // Issue #3705: and the broadcast itself, after the build's `await`.
+    if (!maySnapshotPublish()) return false;
 
     broadcast(target.worktreeId, event);
     logChatTurnProgressOutcome(target, 'published', event.turnKey, {
@@ -372,6 +379,10 @@ export async function publishChatTurnProgress(
     // sessions nobody is watching, which is the bargain that was already being
     // struck one frame later.
     const { hasRoomSubscribers } = await import('@/lib/ws-server');
+    // Issue #3705: the progress of a superseded tick's snapshot is not started.
+    // The detached read below keeps the snapshot's owner in its async context
+    // and asks again before it remembers or broadcasts anything.
+    if (!maySnapshotPublish()) return;
     if (!hasRoomSubscribers(worktreeId)) {
       logChatTurnProgressOutcome(target, 'no-subscribers', null);
       return;

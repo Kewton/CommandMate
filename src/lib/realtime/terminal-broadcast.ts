@@ -19,6 +19,7 @@ import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { invalidateCache } from '@/lib/tmux/tmux-capture-cache';
 import { getOrInitGlobal } from '../global-state';
 import { findTerminalSessionRefusal } from './terminal-session-ownership';
+import { RetiredSnapshotError, maySnapshotPublish } from '@/lib/polling/poller-owner';
 
 const logger = createLogger('terminal-broadcast');
 
@@ -64,10 +65,21 @@ export async function broadcastTerminalSnapshot(
 
   try {
     if (!(await isPushableSession(worktreeId, cliToolId, instanceId))) return;
+    // Issue #3705: the response poller starts this snapshot inside its tick's
+    // owner (`snapshotOwnerStorage`) and the question is asked again after each
+    // `await`: a successor that took the key meanwhile is not overwritten by
+    // the turn that ended, and its `version` is not spent on it. Outside a
+    // poller tick, always yes.
+    if (!maySnapshotPublish()) throw new RetiredSnapshotError();
     const db = getDbInstance();
     const payload = await buildCurrentOutput(db, worktreeId, cliToolId, instanceId);
+    if (!maySnapshotPublish()) throw new RetiredSnapshotError();
     emitTerminalSnapshot(worktreeId, cliToolId, payload, instanceId);
   } catch (error) {
+    if (error instanceof RetiredSnapshotError) {
+      logger.info('terminal-snapshot:retired', { worktreeId, cliToolId, instanceId });
+      return;
+    }
     logger.error('terminal-snapshot:failed', {
       worktreeId,
       error: error instanceof Error ? error.message : String(error),
