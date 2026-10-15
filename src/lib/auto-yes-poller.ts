@@ -75,11 +75,14 @@ import {
   type AutoYesState,
 } from './auto-yes-state';
 import { getOrInitGlobal } from './global-state';
+import { PARTIAL_ANSWER_SUPPRESSION_REASON } from './polling/auto-yes-suppression-reason';
+import type { AutoYesSuppressionReason } from './polling/auto-yes-resolver';
 import {
   clearPartialAnswers,
   forgetPartialAnswer,
   forgetPartialAnswersByWorktree,
   getPartialAnswer,
+  partialAnswerScreenKey,
   promptFrameKey,
   rememberPartialAnswer,
   warnOncePerFrame,
@@ -893,7 +896,9 @@ async function finishAnsweredPrompt(
       import('@/lib/polling/response-poller'),
       import('@/lib/realtime/terminal-broadcast'),
     ]);
-  if (!sameSession) return;
+  // Re-read after the await, not the `sameSession` taken before the audit: a
+  // relaunch while the modules loaded makes the restart about the new process.
+  if (!sameSession || (generation !== undefined && !isSameSession(generation))) return;
   startResponsePolling(worktreeId, cliToolId, instanceId);
   void broadcastTerminalSnapshotAfterInteraction(worktreeId, cliToolId, instanceId);
 }
@@ -930,7 +935,7 @@ export async function detectAndRespondToPrompt(
 ): Promise<'responded' | 'no_prompt' | 'duplicate' | 'no_answer' | 'error'> {
   const compositeKey = buildCompositeKey(worktreeId, cliToolId, instanceId);
   // Issue #3706: the prompt whose answer is being typed, for a send stopped part-way.
-  let typingPromptKey: string | null = null;
+  let typingScreenKey: string | null = null;
   try {
     // 1. Detect prompt.
     //
@@ -1018,27 +1023,6 @@ export async function detectAndRespondToPrompt(
       return 'duplicate';
     }
 
-    // 2.5. Issue #3706: an earlier answer to this prompt was stopped after some
-    // of its keys reached the pane (a `y` whose Enter was withheld). Typing the
-    // answer again would append to what is already in the input (`yy`), and
-    // what the pane holds now cannot be told from the frame, so the prompt is
-    // left for a human until it leaves the screen, another prompt replaces it,
-    // or the session is relaunched.
-    const partial = getPartialAnswer(compositeKey, epoch);
-    if (partial !== null) {
-      if (partial.promptKey === promptKey) {
-        warnOncePerFrame(pollerState, `${frameKey}\u0000partial-answer`, 'poller:auto-yes-skipped-partial-answer', {
-          worktreeId,
-          cliToolId,
-          instanceId,
-          promptType: promptDetection.promptData.type,
-          stoppedAt: partial.at,
-        });
-        return 'no_answer';
-      }
-      forgetPartialAnswer(compositeKey);
-    }
-
     const judged: JudgedPrompt = {
       worktreeId,
       cliToolId,
@@ -1049,6 +1033,37 @@ export async function detectAndRespondToPrompt(
       promptKey,
       frameKey,
     };
+
+    // 2.5. Issue #3706: an earlier answer to this prompt was stopped after some
+    // of its keys reached the pane (a `y` whose Enter was withheld). Typing the
+    // answer again would append to what is already in the input (`yy`), and
+    // what the pane holds now cannot be told from the frame, so the prompt is
+    // left for a human until it leaves the screen, another prompt replaces it
+    // (`partialAnswerScreenKey`: options and approvalTarget count, the cursor
+    // does not), or the session is relaunched. Recorded as a suppression, so
+    // the prompt Push and `cmate wait` see "withheld", not "answering".
+    const screenKey = partialAnswerScreenKey(promptDetection.promptData);
+    const partial = getPartialAnswer(compositeKey, epoch);
+    if (partial !== null) {
+      if (partial.screenKey === screenKey) {
+        suppressAndWarnOnce(
+          judged,
+          {
+            // Outside the CLI-mirrored union on purpose; see
+            // `PARTIAL_ANSWER_SUPPRESSION_REASON`. The record is passed through
+            // as a string by every reader.
+            reason: PARTIAL_ANSWER_SUPPRESSION_REASON as unknown as AutoYesSuppressionReason,
+            mode: null,
+            promptType: promptDetection.promptData.type,
+          },
+          `${frameKey}\u0000partial-answer`,
+          'poller:auto-yes-skipped-partial-answer',
+          { promptType: promptDetection.promptData.type, stoppedAt: partial.at },
+        );
+        return 'no_answer';
+      }
+      forgetPartialAnswer(compositeKey);
+    }
 
     // 3., 3.2., 3.5. Frames that are not Auto-Yes's to answer: see
     // `suppressIfNotOursToAnswer`.
@@ -1128,7 +1143,7 @@ export async function detectAndRespondToPrompt(
       return 'no_answer';
     }
 
-    typingPromptKey = promptKey;
+    typingScreenKey = screenKey;
     try {
       await sendPromptAnswer({
         sessionName,
@@ -1154,9 +1169,9 @@ export async function detectAndRespondToPrompt(
       const keysSent = error instanceof Error && 'keysSent' in error ? Boolean(error.keysSent) : null;
       // A stop with keys already on the pane: the next tick must not type the
       // answer again over them (step 2.5).
-      if (keysSent === true && typingPromptKey !== null) {
+      if (keysSent === true && typingScreenKey !== null) {
         rememberPartialAnswer(compositeKey, {
-          promptKey: typingPromptKey,
+          screenKey: typingScreenKey,
           epoch: generation.sessionEpoch,
           at: Date.now(),
         });

@@ -89,6 +89,7 @@ import {
   buildCompositeKey,
 } from '@/lib/polling/auto-yes-manager';
 import { migrateResponsePollerWorktreeIds } from '@/lib/polling/response-poller';
+import { migratePartialAnswerWorktreeIds } from '@/lib/polling/auto-yes-poller-state';
 import { migrateWorktreeRooms } from '@/lib/ws-server';
 import { createLogger } from '@/lib/logger';
 
@@ -618,6 +619,9 @@ function migrateRuntimeState(
 
   const movedAutoYes = migrateAutoYesStateWorktreeIds(renames);
   result.movedAutoYesKeys = movedAutoYes.map((move) => move.newKey);
+  // Issue #3706: an answer Auto-Yes stopped part-way left input in the renamed
+  // session; the poller restarted below must keep leaving that prompt alone.
+  migratePartialAnswerWorktreeIds(renames);
 
   for (const move of movedAutoYes) {
     if (!runningAutoYesPollers.has(move.oldKey)) continue;

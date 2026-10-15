@@ -113,11 +113,12 @@ vi.mock('@/lib/db/chat-db', async (importOriginal) => {
 const startResponsePolling = vi.fn();
 vi.mock('@/lib/polling/response-poller', () => ({
   startPolling: (...a: unknown[]) => startResponsePolling(...a),
+  migrateResponsePollerWorktreeIds: () => [],
 }));
 vi.mock('@/lib/realtime/terminal-broadcast', () => ({
   broadcastTerminalSnapshotAfterInteraction: vi.fn().mockResolvedValue(undefined),
 }));
-vi.mock('@/lib/ws-server', () => ({ broadcastMessage: vi.fn() }));
+vi.mock('@/lib/ws-server', () => ({ broadcastMessage: vi.fn(), migrateWorktreeRooms: () => [] }));
 const taskEvents = vi.fn();
 vi.mock('@/lib/tasks/task-transition-service', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/tasks/task-transition-service')>();
@@ -162,6 +163,10 @@ import {
   getLastEnterFallback,
 } from '@/lib/polling/auto-yes-enter-fallback';
 import { createMessage, getMessageById } from '@/lib/db/chat-db';
+import { getLastPolicySuppression, clearPolicySuppressions } from '@/lib/polling/auto-yes-suppression-state';
+import { decidePromptPush } from '@/lib/push/prompt-push-gate';
+import { reconcileWorktreeSessions } from '@/lib/session/worktree-session-reconcile';
+import type { CLIToolType } from '@/lib/cli-tools/types';
 
 const WT = 'wt-3706';
 const KEY = `${WT}:claude`;
@@ -703,5 +708,136 @@ describe('[#3706] P2-3: an answer stopped with keys already on the pane', () => 
     await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS);
     await settle();
     expect(keysSent).toEqual(['Enter']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Re-instruction 2 (Codex re-review P2 x 4)
+// ---------------------------------------------------------------------------
+
+describe('[#3706] re-review P2-1: the response poller restart re-reads the session', () => {
+  it('a relaunch during the last await of the follow-up: the response poller is not restarted', async () => {
+    enable();
+    // The audit row is written, then — while the follow-up awaits its modules —
+    // the CLI is relaunched under the same poller.
+    recordAnsweredPrompt.mockImplementationOnce(() => {
+      queueMicrotask(() => beginEnterFallbackSession(WT, 'claude'));
+    });
+    await firstTick();
+
+    expect(keysSent).toEqual(['Enter']);
+    expect(recordAnsweredPrompt).toHaveBeenCalledTimes(1);
+    expect(startResponsePolling).not.toHaveBeenCalled();
+  });
+
+  it('negative: no relaunch, the response poller is restarted once', async () => {
+    enable();
+    await firstTick();
+    expect(startResponsePolling).toHaveBeenCalledTimes(1);
+  });
+});
+
+/** gemini answers a numbered list by typing the digit, then Enter after a wait. */
+const GEMINI_LIST_A = 'Select an option:\n\u276F 1. Yes\n  2. No';
+const GEMINI_LIST_A_CURSOR_MOVED = 'Select an option:\n  1. Yes\n\u276F 2. No';
+const GEMINI_LIST_B = 'Select an option:\n\u276F 1. Apply the patch\n  2. Skip it';
+
+function enableTool(tool: CLIToolType, worktreeId = WT): void {
+  setAutoYesEnabled(worktreeId, tool, true, ONE_HOUR);
+  startAutoYesPolling(worktreeId, tool);
+}
+
+/** Type the answer to `first`, stop its Enter with a renewal, then show `next` for 3 ticks. */
+async function stopTheAnswerThenShow(tool: CLIToolType, first: string, typed: string, next: string): Promise<void> {
+  pane = first;
+  enableTool(tool);
+  await firstTick();
+  expect(keysSent).toEqual([typed]);
+  setAutoYesEnabled(WT, tool, true, ONE_HOUR);
+  await vi.advanceTimersByTimeAsync(TUI_TEXT_INPUT_WAIT_MS);
+  await settle();
+  pane = next;
+  for (let i = 0; i < 3; i++) {
+    await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS);
+    await settle();
+  }
+}
+
+describe('[#3706] re-review P2-2: the stopped answer is held for that screen only', () => {
+  it('a different list under the same question is answered', async () => {
+    await stopTheAnswerThenShow('gemini', GEMINI_LIST_A, '1', GEMINI_LIST_B);
+    expect(keysSent.slice(0, 3)).toEqual(['1', '1', '<Enter>']);
+  });
+
+  it('negative: the same list with only its cursor moved is still held', async () => {
+    await stopTheAnswerThenShow('gemini', GEMINI_LIST_A, '1', GEMINI_LIST_A_CURSOR_MOVED);
+    expect(keysSent).toEqual(['1']);
+  });
+});
+
+describe('[#3706] re-review P2-3: a worktree ID move carries the stopped answer', () => {
+  const WT_NEW = 'wt-3706-moved';
+  const tmux = {
+    listSessions: async () => [],
+    renameSession: async () => true,
+    isSessionOwnedBy: () => true,
+  };
+
+  it('the restarted poller under the new ID does not type the answer again', async () => {
+    pane = PROMPT_TYPED;
+    enable();
+    await firstTick();
+    setAutoYesEnabled(WT, 'claude', true, ONE_HOUR);
+    await vi.advanceTimersByTimeAsync(TUI_TEXT_INPUT_WAIT_MS);
+    await settle();
+    expect(keysSent).toEqual(['y']);
+
+    const result = await reconcileWorktreeSessions(db, WT, WT_NEW, { tmux });
+    expect(result.restartedAutoYesPollers).toEqual([`${WT_NEW}:claude`]);
+    const capturesBefore = captureSessionOutput.mock.calls.length;
+    for (let i = 0; i < 3; i++) {
+      await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS);
+      await settle();
+    }
+
+    expect(captureSessionOutput.mock.calls.length).toBeGreaterThan(capturesBefore);
+    expect(keysSent).toEqual(['y']);
+  });
+
+  it('negative: with nothing stopped, the moved poller answers as before', async () => {
+    pane = 'idle';
+    enable();
+    await firstTick();
+    await reconcileWorktreeSessions(db, WT, WT_NEW, { tmux });
+    pane = PROMPT_TYPED;
+    await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS);
+    await settle();
+    await vi.advanceTimersByTimeAsync(TUI_TEXT_INPUT_WAIT_MS);
+    await settle();
+    expect(keysSent).toEqual(['y', '<Enter>']);
+  });
+});
+
+describe('[#3706] re-review P2-4: a prompt left for a human is published as withheld', () => {
+  it('the stopped answer is recorded as a suppression, so Push does not read it as "answering"', async () => {
+    clearPolicySuppressions();
+    await stopTheAnswerThenShow('claude', PROMPT_TYPED, 'y', PROMPT_TYPED);
+    expect(keysSent).toEqual(['y']);
+
+    const suppression = getLastPolicySuppression(WT, 'claude');
+    expect(suppression?.reason).toBe('partial-answer');
+    expect(
+      decidePromptPush({ worktreeId: WT, cliToolId: 'claude', waitingSince: Date.now() - 1 }),
+    ).toMatchObject({ suppress: false, reason: 'policy-withheld' });
+  });
+
+  it('negative: an ordinary answer records no suppression and Push stays quiet', async () => {
+    clearPolicySuppressions();
+    enable();
+    await firstTick();
+    expect(getLastPolicySuppression(WT, 'claude')).toBeNull();
+    expect(
+      decidePromptPush({ worktreeId: WT, cliToolId: 'claude', waitingSince: Date.now() - 1 }),
+    ).toMatchObject({ suppress: true, reason: 'auto-yes-answering' });
   });
 });
