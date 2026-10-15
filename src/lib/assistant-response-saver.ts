@@ -38,6 +38,7 @@ import { usesAlternateScreen, type CLIToolType } from './cli-tools/types';
 import { findCodexChromeStart } from './detection/cli-patterns';
 import type { ChatMessage } from '@/types/models';
 import { createLogger } from '@/lib/logger';
+import { currentPollerOwner, mayActForAgentInstance } from './polling/poller-owner';
 
 const logger = createLogger('assistant-response-saver');
 
@@ -293,6 +294,18 @@ export async function advanceCapturedLineForTranscriptTurn(target: {
       return null;
     }
 
+    // Issue #3705: after the capture's and the import's awaits, with none before
+    // the write. A tick retired meanwhile moves no cursor under the instance it
+    // lost: the successor's flush and poller read it, and a cursor moved past
+    // rows the successor has not saved hides them from both.
+    if (!mayActForAgentInstance(target)) {
+      logger.info('transcript:cursor-advance-refused', {
+        worktreeId,
+        instanceId: resolvedInstanceId,
+        generation: currentPollerOwner()?.generation,
+      });
+      return null;
+    }
     updateSessionState(db, worktreeId, cliToolId, currentLineCount, target.instanceId);
     logger.info('transcript:cursor-advanced', {
       worktreeId,

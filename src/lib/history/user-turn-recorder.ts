@@ -65,6 +65,7 @@
 
 import { createLogger } from '@/lib/logger';
 import type { AgentInstanceRef } from '@/lib/hooks/sources/types';
+import { currentPollerOwner, mayActForAgentInstance } from '@/lib/polling/poller-owner';
 
 const logger = createLogger('lib/history/user-turn-recorder');
 
@@ -105,7 +106,13 @@ export type UserTurnOutcome =
   /** There was nothing to record — no key, or no text once normalised. */
   | 'skipped'
   /** The database could not be reached or refused the write. */
-  | 'failed';
+  | 'failed'
+  /**
+   * Issue #3705: nothing was written because the caller is a response-poller
+   * tick whose chain was retired while the recorder awaited its imports —
+   * neither a row inserted nor an existing row's key set.
+   */
+  | 'refused';
 
 /**
  * How far back a `/send` row may sit and still be this prompt's (Issue #2246).
@@ -223,6 +230,20 @@ export async function recordUserTurn(
         messageId: existing.id,
         timestampMs: existing.timestamp.getTime(),
       };
+    }
+
+    // Issue #3705: the last `await` is behind us, and from here the recorder
+    // writes — a key onto an existing `/send` row, or a new row — with none
+    // between. A retired tick does neither under the instance it lost: both are
+    // keyed by `request_id`, which stops the same row being written twice and
+    // says nothing about who may write it.
+    if (!mayActForAgentInstance(target)) {
+      logger.info('user-turn-record-refused', {
+        ...describe(target),
+        requestId: key,
+        generation: currentPollerOwner()?.generation,
+      });
+      return { outcome: 'refused', messageId: null, timestampMs: null };
     }
 
     const at = timestampMs > 0 ? timestampMs : Date.now();
