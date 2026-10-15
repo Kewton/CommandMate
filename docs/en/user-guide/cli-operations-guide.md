@@ -1069,6 +1069,13 @@ which left the CLI unable to explain why a worker was stalled while Auto-Yes was
 | `pattern` | For the `deny-pattern` reasons, the denyPattern that matched |
 | `at` | When it was suppressed (epoch ms). Refreshed on every poll while the suppressed prompt is still on screen |
 
+Reasons other than the policy land in the same field. `partial-answer` (Issue #3706 / #3713) means Auto-Yes
+stopped an answer after some of its keys (a `y` before its Enter, for instance) had reached the pane, so it
+does not type at the same prompt again and leaves it to a human (`mode` is `null`). When a worktree ID move
+carries the session to a new ID, this carries on under the new ID. `commandmate wait` prints it as
+"because an earlier answer left partial input; Auto-Yes is waiting for a human" (exit 10 and the JSON
+`reason` are handled as for any other reason). Check what is left in the input before answering.
+
 If `isPromptWaiting: true` and `lastSuppression.at` is recent, that session is **stalled on a policy
 suppression right now**. Either answer it as a human with `commandmate respond`, or revisit the
 contract's `autoYes` (when `mode: safe` is suppressing `multiple_choice`, switching to
