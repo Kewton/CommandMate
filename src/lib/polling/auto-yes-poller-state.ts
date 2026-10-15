@@ -9,6 +9,8 @@ import type { CLIToolType } from '../cli-tools/types';
 import type { PromptData } from '@/types/models';
 import { generatePromptKey } from '../detection/prompt-key';
 import { createLogger } from '@/lib/logger';
+import { filterCompositeKeysByWorktree } from '../auto-yes-state';
+import { getOrInitGlobal } from '../global-state';
 
 const logger = createLogger('auto-yes-poller');
 
@@ -111,4 +113,98 @@ export function warnOncePerFrame(
   }
   pollerState.lastSkipWarnKey = key;
   logger.warn(event, fields);
+}
+
+// =============================================================================
+// Answers stopped part-way (Issue #3706)
+// =============================================================================
+
+/**
+ * An Auto-Yes answer whose send was stopped after some of its keys reached the
+ * pane (Issue #3706): a `y` typed with its Enter withheld, a cursor moved with
+ * its Enter withheld. Keyed by composite key and NOT kept on the poller state,
+ * because the typical stop is a disable → enable, which replaces the poller.
+ */
+export interface PartialAutoYesAnswer {
+  /** {@link partialAnswerScreenKey} of the prompt the keys were typed at. */
+  screenKey: string;
+  /** The session epoch the keys went to; another epoch's process never saw them. */
+  epoch: number;
+  /** Epoch ms of the stop. */
+  at: number;
+}
+
+/**
+ * Which prompt a stopped answer is about (Issue #3706): the type, the question,
+ * the option labels and `approvalTarget` — what {@link promptFrameKey} tells
+ * apart — but NOT where the cursor is. The keys that were sent may have moved
+ * the cursor themselves (a `Down` whose Enter was withheld), and that must not
+ * make the same list read as a new one; a different list or a different command
+ * under the same question is a new prompt and is answered.
+ */
+export function partialAnswerScreenKey(promptData: PromptData): string {
+  const options =
+    promptData.type === 'multiple_choice'
+      ? promptData.options.map((o) => `${o.number}.${o.label}`).join('\n')
+      : promptData.options.join('\n');
+  return [generatePromptKey(promptData), options, withoutCursorMarks(promptData.approvalTarget ?? '')].join(
+    '\u0000',
+  );
+}
+
+/**
+ * `approvalTarget` with the cursor taken out: the generic parser copies the
+ * option panel into it, `❯` row included, so a moved cursor would otherwise
+ * read as another prompt. Leading indentation goes too — the cursor row is the
+ * one indented differently.
+ */
+function withoutCursorMarks(text: string): string {
+  return text
+    .split('\n')
+    .map((line) => line.replace(/^[\s\u276F\u203A>\u25B6\u25BA\u25CF\u25CB\u25C9\u2192]+/u, ''))
+    .join('\n');
+}
+
+declare global {
+  // eslint-disable-next-line no-var
+  var __autoYesPartialAnswers: Map<string, PartialAutoYesAnswer> | undefined;
+}
+
+/** compositeKey -> the answer stopped part-way. globalThis for hot reload (#153). */
+const partialAnswers = getOrInitGlobal('__autoYesPartialAnswers', () => new Map<string, PartialAutoYesAnswer>());
+
+/** Remember that an answer to `promptKey` was stopped with keys already on the pane. */
+export function rememberPartialAnswer(compositeKey: string, partial: PartialAutoYesAnswer): void {
+  partialAnswers.set(compositeKey, partial);
+}
+
+/**
+ * The answer stopped part-way that still applies: same session epoch, and the
+ * caller checks the prompt. Null when none, or when it was about another session.
+ */
+export function getPartialAnswer(compositeKey: string, epoch: number): PartialAutoYesAnswer | null {
+  const partial = partialAnswers.get(compositeKey);
+  if (!partial) return null;
+  if (partial.epoch !== epoch) {
+    partialAnswers.delete(compositeKey);
+    return null;
+  }
+  return partial;
+}
+
+/** Forget it: the prompt left the screen, another prompt came up, or the session ended. */
+export function forgetPartialAnswer(compositeKey: string): void {
+  partialAnswers.delete(compositeKey);
+}
+
+/** {@link forgetPartialAnswer} for every instance of a worktree. */
+export function forgetPartialAnswersByWorktree(worktreeId: string): void {
+  for (const key of filterCompositeKeysByWorktree([...partialAnswers.keys()], worktreeId)) {
+    partialAnswers.delete(key);
+  }
+}
+
+/** Forget every one: server shutdown, and a test seam. */
+export function clearPartialAnswers(): void {
+  partialAnswers.clear();
 }

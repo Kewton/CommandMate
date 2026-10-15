@@ -34,3 +34,23 @@ export type AutoYesSuppressionReason =
    * tool-specific detectors that can disagree with the estimator exist.
    */
   | 'unclassified-frame';
+
+/**
+ * Issue #3706: Auto-Yes stopped an answer after some of its keys reached the
+ * pane (a `y` whose Enter was withheld), and leaves the prompt to a human
+ * rather than type over what is in the input. Recorded through the same
+ * `lastSuppression` channel so the prompt Push and `cmate wait` read "withheld"
+ * instead of "Auto-Yes is answering".
+ *
+ * Deliberately not (yet) a member of {@link AutoYesSuppressionReason}: the CLI
+ * re-exports that union (`src/cli/types/api-responses.ts`) and `cmate wait`
+ * keeps a `Record` of causes over it (`SUPPRESSION_CAUSE`), held to this file
+ * by `tests/unit/cli/config/cross-validation.test.ts`. Joining the union means
+ * deciding `wait`'s wording in the same change. Until then `wait` prints it as
+ * a reason it does not recognise, verbatim, which is its documented behaviour
+ * for a newer server's reason.
+ */
+export const PARTIAL_ANSWER_SUPPRESSION_REASON = 'partial-answer';
+
+/** Reasons the server records that the CLI-mirrored union does not list yet. */
+export type AutoYesServerOnlySuppressionReason = typeof PARTIAL_ANSWER_SUPPRESSION_REASON;

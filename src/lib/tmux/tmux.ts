@@ -722,6 +722,30 @@ export function isSendableSpecialKey(key: string): boolean {
 /** Delay between individual key presses for TUI apps that need processing time (ms). */
 const SPECIAL_KEY_DELAY_MS = 100;
 
+/** Options for {@link sendSpecialKeys} (Issue #3706). */
+export interface SendSpecialKeysOptions {
+  /**
+   * Asked after each delay between two keys; `false` stops before the next key
+   * with {@link SpecialKeysAbortedError}. The keys already sent stay sent. Omit
+   * it and every key is sent, as before.
+   */
+  shouldContinue?: () => boolean;
+}
+
+/**
+ * {@link sendSpecialKeys} stopped between two keys because its
+ * `shouldContinue` said so (Issue #3706). Not wrapped in the transport error.
+ */
+export class SpecialKeysAbortedError extends Error {
+  constructor(
+    /** How many keys reached tmux before the stop (always at least one). */
+    readonly keysSent: number,
+  ) {
+    super(`Special key sequence stopped after ${keysSent} key(s)`);
+    this.name = 'SpecialKeysAbortedError';
+  }
+}
+
 /**
  * Send tmux special keys (unquoted key names like Down, Up, Enter, Space).
  * Used for cursor-based navigation in CLI tool prompts (e.g., Claude Code AskUserQuestion).
@@ -732,11 +756,14 @@ const SPECIAL_KEY_DELAY_MS = 100;
  *
  * @param sessionName - Target session name
  * @param keys - Array of tmux special key names (e.g., ['Down', 'Down', 'Space', 'Enter'])
+ * @param options - Optional `shouldContinue`, asked after each delay (Issue #3706)
  * @throws {Error} If any key name is not in the allowed set, or if tmux command fails
+ * @throws {SpecialKeysAbortedError} If `shouldContinue` returned false between two keys
  */
 export async function sendSpecialKeys(
   sessionName: string,
-  keys: string[]
+  keys: string[],
+  options?: SendSpecialKeysOptions
 ): Promise<void> {
   if (keys.length === 0) return;
 
@@ -753,9 +780,13 @@ export async function sendSpecialKeys(
       // Delay between key presses (skip after the last key)
       if (i < keys.length - 1) {
         await new Promise(resolve => setTimeout(resolve, SPECIAL_KEY_DELAY_MS));
+        if (options?.shouldContinue && !options.shouldContinue()) {
+          throw new SpecialKeysAbortedError(i + 1);
+        }
       }
     }
   } catch (error: unknown) {
+    if (error instanceof SpecialKeysAbortedError) throw error;
     const errorMessage = error instanceof Error ? error.message : String(error);
     throw new Error(`Failed to send special keys to tmux session: ${errorMessage}`);
   }
