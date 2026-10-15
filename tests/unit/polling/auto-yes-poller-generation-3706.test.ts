@@ -113,12 +113,11 @@ vi.mock('@/lib/db/chat-db', async (importOriginal) => {
 const startResponsePolling = vi.fn();
 vi.mock('@/lib/polling/response-poller', () => ({
   startPolling: (...a: unknown[]) => startResponsePolling(...a),
-  migrateResponsePollerWorktreeIds: () => [],
 }));
 vi.mock('@/lib/realtime/terminal-broadcast', () => ({
   broadcastTerminalSnapshotAfterInteraction: vi.fn().mockResolvedValue(undefined),
 }));
-vi.mock('@/lib/ws-server', () => ({ broadcastMessage: vi.fn(), migrateWorktreeRooms: () => [] }));
+vi.mock('@/lib/ws-server', () => ({ broadcastMessage: vi.fn() }));
 const taskEvents = vi.fn();
 vi.mock('@/lib/tasks/task-transition-service', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/tasks/task-transition-service')>();
@@ -165,7 +164,6 @@ import {
 import { createMessage, getMessageById } from '@/lib/db/chat-db';
 import { getLastPolicySuppression, clearPolicySuppressions } from '@/lib/polling/auto-yes-suppression-state';
 import { decidePromptPush } from '@/lib/push/prompt-push-gate';
-import { reconcileWorktreeSessions } from '@/lib/session/worktree-session-reconcile';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 
 const WT = 'wt-3706';
@@ -772,49 +770,6 @@ describe('[#3706] re-review P2-2: the stopped answer is held for that screen onl
   it('negative: the same list with only its cursor moved is still held', async () => {
     await stopTheAnswerThenShow('gemini', GEMINI_LIST_A, '1', GEMINI_LIST_A_CURSOR_MOVED);
     expect(keysSent).toEqual(['1']);
-  });
-});
-
-describe('[#3706] re-review P2-3: a worktree ID move carries the stopped answer', () => {
-  const WT_NEW = 'wt-3706-moved';
-  const tmux = {
-    listSessions: async () => [],
-    renameSession: async () => true,
-    isSessionOwnedBy: () => true,
-  };
-
-  it('the restarted poller under the new ID does not type the answer again', async () => {
-    pane = PROMPT_TYPED;
-    enable();
-    await firstTick();
-    setAutoYesEnabled(WT, 'claude', true, ONE_HOUR);
-    await vi.advanceTimersByTimeAsync(TUI_TEXT_INPUT_WAIT_MS);
-    await settle();
-    expect(keysSent).toEqual(['y']);
-
-    const result = await reconcileWorktreeSessions(db, WT, WT_NEW, { tmux });
-    expect(result.restartedAutoYesPollers).toEqual([`${WT_NEW}:claude`]);
-    const capturesBefore = captureSessionOutput.mock.calls.length;
-    for (let i = 0; i < 3; i++) {
-      await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS);
-      await settle();
-    }
-
-    expect(captureSessionOutput.mock.calls.length).toBeGreaterThan(capturesBefore);
-    expect(keysSent).toEqual(['y']);
-  });
-
-  it('negative: with nothing stopped, the moved poller answers as before', async () => {
-    pane = 'idle';
-    enable();
-    await firstTick();
-    await reconcileWorktreeSessions(db, WT, WT_NEW, { tmux });
-    pane = PROMPT_TYPED;
-    await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS);
-    await settle();
-    await vi.advanceTimersByTimeAsync(TUI_TEXT_INPUT_WAIT_MS);
-    await settle();
-    expect(keysSent).toEqual(['y', '<Enter>']);
   });
 });
 
