@@ -199,9 +199,22 @@ export function getPartialAnswer(compositeKey: string, epoch: number): PartialAu
   return partial;
 }
 
-/** Forget it: the prompt left the screen, another prompt came up, or the session ended. */
+/**
+ * Forget it: the prompt left the screen, another prompt came up, or the session ended.
+ *
+ * The sends still in flight that record under this key — moved here or not —
+ * are expired too (Issue #3713, re-instruction 2): they were registered before
+ * the screen they were typing at was seen gone, so their stop, coming back
+ * later, must not bring the memory back and leave the next confirmation of the
+ * same command unanswered. A send registered after this call is a new attempt
+ * and records as before. Expiring is the mark: it drops the attempt from the
+ * registry, so no per-key "forgotten up to seq" state has to outlive it.
+ */
 export function forgetPartialAnswer(compositeKey: string): void {
   partialAnswers.delete(compositeKey);
+  for (const attempt of [...sendAttempts]) {
+    if (attempt.recordKey === compositeKey) expireSendAttempt(attempt);
+  }
 }
 
 /**

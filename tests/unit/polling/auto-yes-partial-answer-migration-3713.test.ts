@@ -1133,3 +1133,88 @@ describe('[#3713] re-instruction P2-3: a memory the move left out stays at the s
     expect(partialAt(B)).not.toBeNull();
   });
 });
+
+// =============================================================================
+// Re-instruction 2 (Codex re-review P2): the prompt left the screen
+// =============================================================================
+
+describe('[#3713] re-instruction 2: a send in flight when its prompt left the screen records nothing', () => {
+  it('moved: X in flight → A→B → B sees X gone → old A returns: X not remembered, B answers the next X', async () => {
+    const live = await launch(A, PROMPT_TYPED);
+    enable(A);
+    typedKeyGateOnce = deferred();
+    const oldSend = typedKeyGateOnce;
+    await ticks(1);
+    expect(live.keys).toEqual(['y']);
+
+    await move([{ oldId: A, newId: B }]);
+    live.pane = 'idle'; // a human dealt with X
+    await ticks(1);
+
+    oldSend.resolve();
+    await vi.advanceTimersByTimeAsync(TUI_TEXT_INPUT_WAIT_MS);
+    await settle();
+    expect(partialAt(B)).toBeNull();
+
+    live.pane = PROMPT_TYPED; // the next confirmation, same command
+    await ticks(1);
+    await vi.advanceTimersByTimeAsync(TUI_TEXT_INPUT_WAIT_MS);
+    await settle();
+    expect(live.keys).toEqual(['y', 'y', '<Enter>']);
+  });
+
+  it('same key: X in flight → disable → enable → the new tick sees X gone → old returns: not remembered', async () => {
+    const live = await launch(A, PROMPT_TYPED);
+    enable(A);
+    typedKeyGateOnce = deferred();
+    const oldSend = typedKeyGateOnce;
+    await ticks(1);
+    setAutoYesEnabled(A, 'claude', false);
+    const { stopAutoYesPolling } = await import('@/lib/auto-yes-poller');
+    stopAutoYesPolling(keyOf(A));
+    enable(A);
+    live.pane = 'idle';
+    await ticks(1);
+
+    oldSend.resolve();
+    await vi.advanceTimersByTimeAsync(TUI_TEXT_INPUT_WAIT_MS);
+    await settle();
+    expect(partialAt(A)).toBeNull();
+
+    live.pane = PROMPT_TYPED;
+    await ticks(1);
+    await vi.advanceTimersByTimeAsync(TUI_TEXT_INPUT_WAIT_MS);
+    await settle();
+    expect(live.keys).toEqual(['y', 'y', '<Enter>']);
+  });
+
+  it('negative: a send begun after the prompt left the screen is remembered when stopped', async () => {
+    const live = await launch(A, 'idle');
+    enable(A);
+    await ticks(1); // the prompt is not there: forgotten
+    live.pane = PROMPT_TYPED;
+    await ticks(1);
+    expect(live.keys).toEqual(['y']);
+    renew(A);
+    await vi.advanceTimersByTimeAsync(TUI_TEXT_INPUT_WAIT_MS);
+    await settle();
+    expect(partialAt(A)).not.toBeNull();
+  });
+
+  it('negative: without the prompt leaving, the old send that returns after the move is remembered', async () => {
+    const live = await launch(A, PROMPT_TYPED);
+    enable(A);
+    typedKeyGateOnce = deferred();
+    const oldSend = typedKeyGateOnce;
+    await ticks(1);
+    await move([{ oldId: A, newId: B }]);
+    await ticks(1); // B reads X: still on screen
+
+    oldSend.resolve();
+    await vi.advanceTimersByTimeAsync(TUI_TEXT_INPUT_WAIT_MS);
+    await settle();
+    expect(partialAt(B)).not.toBeNull();
+    await ticks(3);
+    expect(live.keys).toEqual(['y']);
+  });
+});
