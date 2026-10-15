@@ -79,6 +79,7 @@ import {
   acceptPathUnderRoot,
   growTurnRowTo,
   isReadableFile,
+  mayReaderWrite,
   nextTurnOpensAt,
   refreshTurnRowsTo,
   resolveAssistantTimestampMs,
@@ -1494,6 +1495,14 @@ async function writeClaudeTurn(
     // {@link growClaudeTurnRow}.
     await growClaudeTurnRow(target, existing, rendered, path);
     return true;
+  }
+
+  // Issue #3705: the last `await` (the imports) is behind us and the row and its
+  // broadcast follow with none between. A tick retired meanwhile writes no row
+  // under the instance it lost — the request id only stops the SAME row being
+  // written twice — and answers false: History does not hold the turn.
+  if (!mayReaderWrite(target, logger, 'claude-transcript-write-refused', 'reply-row')) {
+    return false;
   }
 
   const message = createMessage(db, {

@@ -93,6 +93,7 @@ import type { AgentInstanceRef } from '../types';
 import {
   acceptPathUnderRoot,
   isReadableFile,
+  mayReaderWrite,
   nextTurnOpensAt,
   resolveAssistantTimestampMs,
   resolveSessionIdFromEvents,
@@ -585,6 +586,9 @@ export async function captureAntigravityTranscriptTurn(
     // what the promotion to "final" rests on.
     const instanceKey = keyOf(target);
     const stopAt = await resolveAntigravityStopAt(target);
+    // Issue #3705: the follow list below is this instance's, and a tick retired
+    // while the reads above ran no longer speaks for it. Nothing is written yet.
+    if (!mayReaderWrite(target, logger, 'antigravity-transcript-write-refused', 'follow-list')) return false;
     const completions = new Map<number, AntigravityTurnCompletion>();
     for (const turn of built.turns) {
       completions.set(turn.stepIndex, resolveAntigravityTurnCompletion(turn, stopAt));
@@ -614,6 +618,8 @@ export async function captureAntigravityTranscriptTurn(
     }
 
     const pending = await selectUnwrittenAntigravityTurns(target, built.turns);
+    // Issue #3705: `unsettledStepsFor` below may drop the follow list.
+    if (!mayReaderWrite(target, logger, 'antigravity-transcript-write-refused', 'follow-list')) return false;
     const writtenTurns = built.turns.slice(0, built.turns.length - pending.turns.length);
 
     // Before anything is written: the rows that are already there (#2438). This
@@ -692,6 +698,10 @@ export async function captureAntigravityTranscriptTurn(
       // An unconfirmed one joins the follow list so that its conclusion is still
       // picked up once three later turns have pushed it out of #2438's window.
       if (captured) {
+        // Issue #3705: after the write's own `await`. The row is there (it was
+        // written while the tick still owned the key), so the answer is true;
+        // the follow list and the cursor are no longer this tick's to move.
+        if (!mayReaderWrite(target, logger, 'antigravity-transcript-write-refused', 'follow-list')) return captured;
         noteUnsettledAntigravityTurn(
           target,
           instanceKey,
@@ -954,6 +964,9 @@ async function growAntigravityTurnRow(
     import('@/lib/ws-server'),
   ]);
 
+  // Issue #3705: by row id, so a retired tick would grow a row the successor —
+  // or the migration — has since taken over.
+  if (!mayReaderWrite(target, logger, 'antigravity-transcript-write-refused', 'grow')) return false;
   updateMessageContent(getDbInstance(), existing.id, rendered.body);
   broadcastMessage('message_updated', {
     worktreeId: target.worktreeId,
@@ -1017,6 +1030,10 @@ async function refreshAntigravityTurnRows(
 
   let updated = 0;
   for (const turn of candidates) {
+    // Issue #3705: asked at the top of every pass — the first comes after the
+    // imports, every later one after the previous turn's grow — because both
+    // follow-list writes below come before this pass's own `await`.
+    if (!mayReaderWrite(target, logger, 'antigravity-transcript-write-refused', 'follow-list')) break;
     // Issue #2443: the row lookup moved ahead of the writable check, because
     // the follow list is a statement about ROWS. A turn that is open again has a
     // row whose body is provisional by definition and must stay followed, and a
@@ -1269,6 +1286,14 @@ async function writeAntigravityTurn(
     // completeness rather than about an edit.
     await growAntigravityTurnRow(target, existing, rendered, path);
     return true;
+  }
+
+  // Issue #3705: the last `await` (the imports) is behind us and the row and its
+  // broadcast follow with none between. A tick retired meanwhile writes no row
+  // under the instance it lost — the request id only stops the SAME row being
+  // written twice — and answers false: History does not hold the turn.
+  if (!mayReaderWrite(target, logger, 'antigravity-transcript-write-refused', 'reply-row')) {
+    return false;
   }
 
   const message = createMessage(db, {

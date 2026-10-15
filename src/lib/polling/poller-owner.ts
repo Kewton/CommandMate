@@ -49,6 +49,8 @@ export interface PollerOwner {
 declare global {
   // eslint-disable-next-line no-var
   var __responsePollerOwnerStorage: AsyncLocalStorage<PollerOwner> | undefined;
+  // eslint-disable-next-line no-var
+  var __responsePollerSnapshotStorage: AsyncLocalStorage<PollerOwner> | undefined;
 }
 
 /**
@@ -86,4 +88,75 @@ export function currentPollerOwner(): PollerOwner | undefined {
 export function mayActForPollerKey(pollerKey: string): boolean {
   const caller = currentPollerOwner();
   return caller === undefined || caller.pollerKey !== pollerKey || !caller.stopped;
+}
+
+/**
+ * The poller key of an agent instance (Issue #3705) — the same spelling as
+ * `getPollerKey` in `./response-poller-core`, which delegates here, so that the
+ * transcript readers, the user-turn recorder, the cursor advance and the
+ * Markdown log can name the key they write under without importing the core.
+ */
+export function pollerKeyOf(worktreeId: string, cliToolId: string, instanceId?: string): string {
+  return `${worktreeId}:${instanceId ?? cliToolId}`;
+}
+
+/**
+ * {@link mayActForPollerKey} for an agent instance (Issue #3705).
+ *
+ * Asked by the writers a tick reaches through an `await` of its own — the four
+ * transcript readers, `recordUserTurn`, `advanceCapturedLineForTranscriptTurn` —
+ * after their last `await` and before their first write. The Stop hook, a
+ * route and every other caller outside a tick are not turned away, and neither
+ * is a tick acting for another instance.
+ */
+export function mayActForAgentInstance(target: {
+  worktreeId: string;
+  cliToolId: string;
+  instanceId?: string;
+}): boolean {
+  return mayActForPollerKey(pollerKeyOf(target.worktreeId, target.cliToolId, target.instanceId));
+}
+
+/**
+ * Carries the ownership token of the tick whose terminal snapshot is being
+ * built (Issue #3705).
+ *
+ * A storage of its own rather than {@link pollerOwnerStorage}: only the core
+ * enters it, around `broadcastTerminalSnapshot`, so a snapshot started by a
+ * route or by the Auto-Yes poller — or by code that merely inherited a tick's
+ * context — is never asked about an owner it does not carry.
+ */
+export const snapshotOwnerStorage = getOrInitGlobal(
+  '__responsePollerSnapshotStorage',
+  () => new AsyncLocalStorage<PollerOwner>()
+);
+
+/**
+ * Whether the snapshot being built now may still write and publish
+ * (Issue #3705).
+ *
+ * Asked after every `await` of the snapshot — in `broadcastTerminalSnapshot`,
+ * `buildCurrentOutput` and the chat-turn progress it detaches — not only when
+ * the tick decides to start one: a successor that takes the key while the
+ * capture is in flight would otherwise have its screen, its status latch and
+ * its progress frames overwritten by the turn that just ended. A chain that was
+ * merely stopped and has no successor still publishes its final snapshot, as
+ * before #2223. Outside a snapshot the core started, always true.
+ */
+export function maySnapshotPublish(): boolean {
+  const owner = snapshotOwnerStorage.getStore();
+  return owner === undefined || !owner.superseded;
+}
+
+/**
+ * Thrown by `buildCurrentOutput` when {@link maySnapshotPublish} turns it away
+ * mid-build (Issue #3705), so that nothing after the `await` it resumed from —
+ * the status latch, the unclassified-frame row, the structured prompt row, the
+ * progress frame — is written. `broadcastTerminalSnapshot` catches it.
+ */
+export class RetiredSnapshotError extends Error {
+  constructor() {
+    super('terminal snapshot of a superseded poller tick');
+    this.name = 'RetiredSnapshotError';
+  }
 }

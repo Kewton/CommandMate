@@ -56,6 +56,17 @@ export function getLogFilePath(worktreeId: string, cliToolId: string = 'claude')
   return path.join(logDir, filename);
 }
 
+/** Options for {@link createLog}. */
+export interface CreateLogOptions {
+  /**
+   * Asked right before the file is written, after the directory and the old
+   * file have been read (Issue #3705). Answering false writes nothing and makes
+   * `createLog` return null. The response poller passes "may this tick still
+   * act for its key"; every other caller omits it.
+   */
+  mayWrite?: () => boolean;
+}
+
 /**
  * Create a Markdown log file for a conversation
  *
@@ -63,7 +74,8 @@ export function getLogFilePath(worktreeId: string, cliToolId: string = 'claude')
  * @param userMessage - User's message
  * @param claudeResponse - Claude's response
  * @param cliToolId - CLI tool ID (claude, codex, gemini)
- * @returns Path to the created log file
+ * @param options - See {@link CreateLogOptions}
+ * @returns Path to the created log file, or null when `options.mayWrite` refused it
  *
  * @example
  * ```typescript
@@ -79,8 +91,9 @@ export async function createLog(
   worktreeId: string,
   userMessage: string,
   claudeResponse: string,
-  cliToolId: string = 'claude'
-): Promise<string> {
+  cliToolId: string = 'claude',
+  options: CreateLogOptions = {}
+): Promise<string | null> {
   await ensureLogDirectory(cliToolId);
 
   const logPath = getLogFilePath(worktreeId, cliToolId);
@@ -106,6 +119,10 @@ export async function createLog(
   logContent += `### ${displayName}\n\n`;
   logContent += `${claudeResponse}\n\n`;
   logContent += `---\n\n`;
+
+  // Issue #3705: after the two awaits above and right before the write — the
+  // only place the caller's question can still be answered for this entry.
+  if (options.mayWrite && !options.mayWrite()) return null;
 
   await fs.writeFile(logPath, logContent, 'utf-8');
 

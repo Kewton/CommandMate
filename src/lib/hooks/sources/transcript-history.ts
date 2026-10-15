@@ -12,7 +12,41 @@ import { resolve, sep } from 'path';
 import type { Logger } from '@/lib/logger';
 import type { RecordedUserTurn } from '@/lib/history/user-turn-recorder';
 import type { ChatMessage } from '@/types/models';
+import { currentPollerOwner, mayActForAgentInstance } from '@/lib/polling/poller-owner';
 import type { AgentInstanceRef } from './types';
+
+/**
+ * Whether the reader may still write for `target` now, logging the refusal when
+ * it may not (Issue #3705).
+ *
+ * Asked by every reader write — a reply row, its growth, a user row, its key,
+ * the follow list — after the last `await` before it and with none between it
+ * and the write. The question is the poller's (`mayActForAgentInstance`): only
+ * a response-poller tick whose chain was stopped (a stop, a restart past
+ * `STALLED_TICK_TIMEOUT`, a worktree-ID migration) and that is reading for its
+ * own instance is turned away. The Stop hook, a route and a tick reading for
+ * another instance write as before. Answering false writes nothing — the
+ * request id of a row makes a write idempotent, it does not make a retired
+ * tick's write right, and a grow or a key is not idempotent at all.
+ *
+ * @param refusedEvent - The tool's own log event for the refusal
+ * @param write - What was about to be written, for the log line
+ */
+export function mayReaderWrite(
+  target: AgentInstanceRef,
+  logger: Logger,
+  refusedEvent: string,
+  write: string
+): boolean {
+  if (mayActForAgentInstance(target)) return true;
+  logger.info(refusedEvent, {
+    worktreeId: target.worktreeId,
+    instanceId: target.instanceId ?? target.cliToolId,
+    generation: currentPollerOwner()?.generation,
+    write,
+  });
+  return false;
+}
 
 /**
  * When the assistant row for this turn is dated.
@@ -231,6 +265,9 @@ export async function growTurnRowTo(
     import('@/lib/ws-server'),
   ]);
 
+  // Issue #3705: by row id, so a retired tick would grow a row the successor —
+  // or the migration — has since taken over.
+  if (!mayReaderWrite(target, logger, 'transcript-write-refused', 'grow')) return false;
   updateMessageContent(getDbInstance(), existing.id, rendered.body);
   broadcastMessage('message_updated', {
     worktreeId: target.worktreeId,
