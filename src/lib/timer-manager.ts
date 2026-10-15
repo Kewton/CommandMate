@@ -84,6 +84,14 @@ async function executeTimer(timerId: string): Promise<void> {
 
     // [Issue #539] Check if session is running before sending
     const isRunning = await cliTool.isRunning(timer.worktreeId, instanceId);
+
+    // [Issue #3707] A cancel can succeed while the await above is pending.
+    // Re-read synchronously (no await between this read and the update below,
+    // so better-sqlite3 makes read+update atomic) and bail out unless the
+    // timer is still pending; otherwise 'cancelled' would be overwritten.
+    const current = getTimerById(db, timerId);
+    if (!current || current.status !== 'pending') return;
+
     if (!isRunning) {
       logger.warn('timer:no-session', { timerId, worktreeId: timer.worktreeId, instanceId });
       updateTimerStatus(db, timerId, TIMER_STATUS.NO_SESSION);
