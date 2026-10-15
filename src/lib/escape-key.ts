@@ -74,3 +74,40 @@ export function isCoveredByViewportLayer(element: Element): boolean {
     );
   });
 }
+
+/**
+ * True when a viewport layer is drawn over `element`, which sits inside a
+ * screen that is itself a viewport layer (FileViewer's screens, Issue #3691;
+ * the PC file panel's maximized file, Issue #3700) with no z-index of its own
+ * on `element`. Two ways: a root-level layer over the hosting screen (the
+ * embedded editor's CSS-fallback maximize, a body portal at the same z, later
+ * in the document), or one nested in the screen that is not `element`'s
+ * ancestor (the native-fullscreen editor, maximized in place and in the
+ * browser's top layer). Outside a screen (a modal, an unmaximized panel) there
+ * is nothing to cover it.
+ */
+export function isBehindViewportLayer(element: Element): boolean {
+  const host = element.closest(`[${VIEWPORT_LAYER_ATTRIBUTE}]`);
+  if (!host) return false;
+  if (isCoveredByViewportLayer(host)) return true;
+  return Array.from(host.querySelectorAll(`[${VIEWPORT_LAYER_ATTRIBUTE}]`)).some(
+    (layer) => !layer.contains(element)
+  );
+}
+
+/**
+ * {@link isBehindViewportLayer}, plus the case it leaves out (Issue #3700): an
+ * `element` with no viewport layer of its own around it — the PC file panel's
+ * search bar while the file is not maximized. It is behind any viewport layer
+ * drawn over the root-level box it sits in: one with a z-index is compared by
+ * {@link isCoveredByViewportLayer}; the page itself (no z-index) is under
+ * every viewport layer showing, such as the editor's CSS maximize in the same
+ * panel.
+ */
+export function isUnderViewportLayer(element: Element): boolean {
+  if (element.closest(`[${VIEWPORT_LAYER_ATTRIBUTE}]`)) return isBehindViewportLayer(element);
+  let root: Element = element;
+  while (root.parentElement && root.parentElement !== document.body) root = root.parentElement;
+  if (stackOrder(root) !== null) return isCoveredByViewportLayer(root);
+  return document.querySelector(`[${VIEWPORT_LAYER_ATTRIBUTE}]`) !== null;
+}
