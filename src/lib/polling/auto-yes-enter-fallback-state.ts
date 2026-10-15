@@ -62,6 +62,11 @@ export interface AutoYesEnterFallbackRecord {
   at: number;
   /** {@link enterFallbackScreenKey} of the prompt. Never published. */
   screenKey: string;
+  /**
+   * The session epoch ({@link getEnterFallbackSessionEpoch}) the Enter went to
+   * (Issue #3706). Never published; a record of another epoch is not returned.
+   */
+  epoch: number;
 }
 
 /**
@@ -102,21 +107,34 @@ const lastEnterFallbacks = getOrInitGlobal(
 /**
  * Record that Auto-Yes sent its Enter to a screen.
  *
+ * Issue #3706: `sent.epoch` is the session epoch the Enter was decided for. The
+ * Enter's `send-keys` is awaited, and a new session begun meanwhile has already
+ * dropped the record ({@link beginEnterFallbackSession}); the old send coming
+ * back must not put one back about the new process. So a record whose epoch is
+ * no longer the current one is not written. Omitted, the current epoch is used.
+ *
  * @param at - Epoch ms; defaults to now. Overridable so tests are deterministic.
+ * @returns Whether the record was written
  */
 export function recordEnterFallbackSent(
   worktreeId: string,
   cliToolId: CLIToolType,
   instanceId: string | undefined,
-  sent: { promptType: PromptType; refusalReason: PromptResponseRefusal['reason']; screenKey: string },
+  sent: { promptType: PromptType; refusalReason: PromptResponseRefusal['reason']; screenKey: string; epoch?: number },
   at: number = Date.now(),
-): void {
-  lastEnterFallbacks.set(buildCompositeKey(worktreeId, cliToolId, instanceId), {
+): boolean {
+  const key = buildCompositeKey(worktreeId, cliToolId, instanceId);
+  const current = getEnterFallbackSessionEpoch(key);
+  const { epoch = current, ...rest } = sent;
+  if (epoch !== current) return false;
+  lastEnterFallbacks.set(key, {
     outcome: 'sent',
-    ...sent,
+    ...rest,
     sentAt: at,
     at,
+    epoch,
   });
+  return true;
 }
 
 /**
@@ -144,7 +162,11 @@ export function getLastEnterFallback(
   cliToolId: CLIToolType,
   instanceId?: string,
 ): AutoYesEnterFallbackRecord | null {
-  return lastEnterFallbacks.get(buildCompositeKey(worktreeId, cliToolId, instanceId)) ?? null;
+  const key = buildCompositeKey(worktreeId, cliToolId, instanceId);
+  const record = lastEnterFallbacks.get(key);
+  // Issue #3706: a record of an earlier session says nothing about this one.
+  if (!record || record.epoch !== getEnterFallbackSessionEpoch(key)) return null;
+  return record;
 }
 
 /**

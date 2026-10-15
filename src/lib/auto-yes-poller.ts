@@ -75,7 +75,16 @@ import {
   type AutoYesState,
 } from './auto-yes-state';
 import { getOrInitGlobal } from './global-state';
-import { promptFrameKey, warnOncePerFrame, type AutoYesPollerState } from './polling/auto-yes-poller-state';
+import {
+  clearPartialAnswers,
+  forgetPartialAnswer,
+  forgetPartialAnswersByWorktree,
+  getPartialAnswer,
+  promptFrameKey,
+  rememberPartialAnswer,
+  warnOncePerFrame,
+  type AutoYesPollerState,
+} from './polling/auto-yes-poller-state';
 import {
   suppressAndWarnOnce,
   suppressIfNotOursToAnswer,
@@ -275,6 +284,11 @@ export interface AutoYesTickGeneration {
   readonly grant: AutoYesState;
   /** `getEnterFallbackSessionEpoch` at the start: a relaunch the poller outlived moves it. */
   readonly sessionEpoch: number;
+  /**
+   * Epoch ms the tick started. A pending prompt row saved after it cannot be the
+   * one this tick read off the screen (Issue #3706, see `finishAnsweredPrompt`).
+   */
+  readonly startedAt: number;
 }
 
 /**
@@ -741,13 +755,20 @@ async function tryEnterFallback(
     invalidateCache(sessionName);
   }
 
-  pollerState.enterFallbackSentKey = frameKey;
-  pollerState.enterFallbackCandidateKey = null;
-  recordEnterFallbackSent(worktreeId, cliToolId, instanceId, {
-    promptType: promptData.type,
-    refusalReason: judgement.refusalReason,
-    screenKey,
-  });
+  // Issue #3706: the Enter is out, but the per-screen record is the CURRENT
+  // session's: when the poller was stopped (the record was forgotten with it)
+  // or a new session began while `send-keys` was awaited, the return of this
+  // send must not put the record back. The audit row below is kept either way.
+  if (generation === undefined || (isPollerCurrent(generation) && isSameSession(generation))) {
+    pollerState.enterFallbackSentKey = frameKey;
+    pollerState.enterFallbackCandidateKey = null;
+    recordEnterFallbackSent(worktreeId, cliToolId, instanceId, {
+      promptType: promptData.type,
+      refusalReason: judgement.refusalReason,
+      screenKey,
+      ...(generation !== undefined ? { epoch: generation.sessionEpoch } : {}),
+    });
+  }
   logger.info('poller:auto-yes-enter-fallback-sent', {
     worktreeId,
     cliToolId,
@@ -786,30 +807,43 @@ async function finishAnsweredPrompt(
   const { worktreeId, cliToolId, instanceId, compositeKey, pollerState, promptData, promptKey } =
     prompt;
 
-  // 6. Update timestamp and reset error count
-  updateLastServerResponseTimestamp(compositeKey, Date.now(), generation?.pollerState);
-  resetErrorCount(compositeKey, generation?.pollerState);
+  // Issue #3706: the keys went to the session the tick started on. When a new
+  // one was begun while they were being sent, the new process never received
+  // this answer, so nothing that stands for "this instance's prompt was just
+  // answered" is written: not the dedup key (it would keep Auto-Yes off the new
+  // process's identical question), not the poller's response time, not the
+  // task event (the task looked up now may be the new session's). Only the
+  // audit row is, and it may not adopt a pending row saved after the tick began.
+  const sameSession = generation === undefined || isSameSession(generation);
 
-  // 7. Record answered prompt key and timestamp
-  pollerState.lastAnsweredPromptKey = promptKey;
-  pollerState.lastAnsweredAt = Date.now();
-  pollerState.lastSkipWarnKey = null;
+  if (sameSession) {
+    // 6. Update timestamp and reset error count
+    updateLastServerResponseTimestamp(compositeKey, Date.now(), generation?.pollerState);
+    resetErrorCount(compositeKey, generation?.pollerState);
 
-  logger.info('poller:response-sent', { worktreeId, cliToolId, instanceId });
+    // 7. Record answered prompt key and timestamp
+    pollerState.lastAnsweredPromptKey = promptKey;
+    pollerState.lastAnsweredAt = Date.now();
+    pollerState.lastSkipWarnKey = null;
+  }
+
+  logger.info('poller:response-sent', { worktreeId, cliToolId, instanceId, sameSession });
 
   // Issue #1548: the prompt was answered without a human. Raised only after
   // the keys actually reached tmux, so a send that threw is not logged as an
   // answer. No-ops when this instance is not running a contract.
-  applyEventToActiveTask(
-    getDbInstance(),
-    worktreeId,
-    cliToolId,
-    // Undefined means the primary instance, which the task lookup identifies
-    // by the tool id itself (see getActiveTaskForInstance).
-    instanceId ?? cliToolId,
-    'prompt_answered_auto',
-    { promptType: promptData.type }
-  );
+  if (sameSession) {
+    applyEventToActiveTask(
+      getDbInstance(),
+      worktreeId,
+      cliToolId,
+      // Undefined means the primary instance, which the task lookup identifies
+      // by the tool id itself (see getActiveTaskForInstance).
+      instanceId ?? cliToolId,
+      'prompt_answered_auto',
+      { promptType: promptData.type }
+    );
+  }
 
   // Issue #1685: persist question/options/answer to chat history so the audit
   // trail survives even when the answer landed inside the response poller's
@@ -825,6 +859,7 @@ async function finishAnsweredPrompt(
       answer,
       answeredBy: 'auto',
       content: promptDetection.rawContent || promptDetection.cleanContent,
+      ...(sameSession ? {} : { pendingSavedAtOrBefore: generation!.startedAt }),
     });
   } catch (recordError) {
     logger.warn('poller:prompt-audit-record-failed', {
@@ -858,7 +893,7 @@ async function finishAnsweredPrompt(
       import('@/lib/polling/response-poller'),
       import('@/lib/realtime/terminal-broadcast'),
     ]);
-  if (generation !== undefined && !isSameSession(generation)) return;
+  if (!sameSession) return;
   startResponsePolling(worktreeId, cliToolId, instanceId);
   void broadcastTerminalSnapshotAfterInteraction(worktreeId, cliToolId, instanceId);
 }
@@ -894,6 +929,8 @@ export async function detectAndRespondToPrompt(
   generation?: AutoYesTickGeneration
 ): Promise<'responded' | 'no_prompt' | 'duplicate' | 'no_answer' | 'error'> {
   const compositeKey = buildCompositeKey(worktreeId, cliToolId, instanceId);
+  // Issue #3706: the prompt whose answer is being typed, for a send stopped part-way.
+  let typingPromptKey: string | null = null;
   try {
     // 1. Detect prompt.
     //
@@ -961,6 +998,7 @@ export async function detectAndRespondToPrompt(
     );
 
     if (!promptDetection.isPrompt || !promptDetection.promptData) {
+      forgetPartialAnswer(compositeKey);
       pollerState.lastAnsweredPromptKey = null;
       pollerState.lastAnsweredAt = null;
       pollerState.lastSkipWarnKey = null;
@@ -978,6 +1016,27 @@ export async function detectAndRespondToPrompt(
     const frameKey = promptFrameKey(promptDetection.promptData);
     if (isDuplicatePrompt(pollerState, promptKey)) {
       return 'duplicate';
+    }
+
+    // 2.5. Issue #3706: an earlier answer to this prompt was stopped after some
+    // of its keys reached the pane (a `y` whose Enter was withheld). Typing the
+    // answer again would append to what is already in the input (`yy`), and
+    // what the pane holds now cannot be told from the frame, so the prompt is
+    // left for a human until it leaves the screen, another prompt replaces it,
+    // or the session is relaunched.
+    const partial = getPartialAnswer(compositeKey, epoch);
+    if (partial !== null) {
+      if (partial.promptKey === promptKey) {
+        warnOncePerFrame(pollerState, `${frameKey}\u0000partial-answer`, 'poller:auto-yes-skipped-partial-answer', {
+          worktreeId,
+          cliToolId,
+          instanceId,
+          promptType: promptDetection.promptData.type,
+          stoppedAt: partial.at,
+        });
+        return 'no_answer';
+      }
+      forgetPartialAnswer(compositeKey);
     }
 
     const judged: JudgedPrompt = {
@@ -1069,6 +1128,7 @@ export async function detectAndRespondToPrompt(
       return 'no_answer';
     }
 
+    typingPromptKey = promptKey;
     try {
       await sendPromptAnswer({
         sessionName,
@@ -1091,12 +1151,17 @@ export async function detectAndRespondToPrompt(
     // (`PromptAnswerAbortedError`), or failed after the grant went — is not a
     // failure of the poller that now holds the key, and not an answer either.
     if (generation !== undefined && !isTickCurrent(generation)) {
-      logger.info('poller:auto-yes-answer-abandoned', {
-        worktreeId,
-        cliToolId,
-        instanceId,
-        keysSent: error instanceof Error && 'keysSent' in error ? Boolean(error.keysSent) : null,
-      });
+      const keysSent = error instanceof Error && 'keysSent' in error ? Boolean(error.keysSent) : null;
+      // A stop with keys already on the pane: the next tick must not type the
+      // answer again over them (step 2.5).
+      if (keysSent === true && typingPromptKey !== null) {
+        rememberPartialAnswer(compositeKey, {
+          promptKey: typingPromptKey,
+          epoch: generation.sessionEpoch,
+          at: Date.now(),
+        });
+      }
+      logger.info('poller:auto-yes-answer-abandoned', { worktreeId, cliToolId, instanceId, keysSent });
       return 'no_answer';
     }
     incrementErrorCount(compositeKey, generation?.pollerState);
@@ -1141,6 +1206,7 @@ async function pollAutoYes(
     pollerState: pollerState!,
     grant,
     sessionEpoch: getEnterFallbackSessionEpoch(compositeKey),
+    startedAt: Date.now(),
   };
 
   try {
@@ -1384,6 +1450,7 @@ export function stopAllAutoYesPolling(): void {
   }
   autoYesPollerStates.clear();
   clearEnterFallbacks();
+  clearPartialAnswers();
 }
 
 /**
@@ -1416,6 +1483,7 @@ export function stopAutoYesPollingByWorktree(worktreeId: string): void {
   pollerKeys.forEach(key => stopAutoYesPolling(key));
   // Issue #3397: and the records of instances whose poller had already stopped.
   forgetEnterFallbacksByWorktree(worktreeId);
+  forgetPartialAnswersByWorktree(worktreeId);
 }
 
 /**

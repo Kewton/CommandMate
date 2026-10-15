@@ -9,6 +9,8 @@ import type { CLIToolType } from '../cli-tools/types';
 import type { PromptData } from '@/types/models';
 import { generatePromptKey } from '../detection/prompt-key';
 import { createLogger } from '@/lib/logger';
+import { filterCompositeKeysByWorktree } from '../auto-yes-state';
+import { getOrInitGlobal } from '../global-state';
 
 const logger = createLogger('auto-yes-poller');
 
@@ -111,4 +113,67 @@ export function warnOncePerFrame(
   }
   pollerState.lastSkipWarnKey = key;
   logger.warn(event, fields);
+}
+
+// =============================================================================
+// Answers stopped part-way (Issue #3706)
+// =============================================================================
+
+/**
+ * An Auto-Yes answer whose send was stopped after some of its keys reached the
+ * pane (Issue #3706): a `y` typed with its Enter withheld, a cursor moved with
+ * its Enter withheld. Keyed by composite key and NOT kept on the poller state,
+ * because the typical stop is a disable → enable, which replaces the poller.
+ */
+export interface PartialAutoYesAnswer {
+  /** `generatePromptKey` of the prompt the keys were typed at. */
+  promptKey: string;
+  /** The session epoch the keys went to; another epoch's process never saw them. */
+  epoch: number;
+  /** Epoch ms of the stop. */
+  at: number;
+}
+
+declare global {
+  // eslint-disable-next-line no-var
+  var __autoYesPartialAnswers: Map<string, PartialAutoYesAnswer> | undefined;
+}
+
+/** compositeKey -> the answer stopped part-way. globalThis for hot reload (#153). */
+const partialAnswers = getOrInitGlobal('__autoYesPartialAnswers', () => new Map<string, PartialAutoYesAnswer>());
+
+/** Remember that an answer to `promptKey` was stopped with keys already on the pane. */
+export function rememberPartialAnswer(compositeKey: string, partial: PartialAutoYesAnswer): void {
+  partialAnswers.set(compositeKey, partial);
+}
+
+/**
+ * The answer stopped part-way that still applies: same session epoch, and the
+ * caller checks the prompt. Null when none, or when it was about another session.
+ */
+export function getPartialAnswer(compositeKey: string, epoch: number): PartialAutoYesAnswer | null {
+  const partial = partialAnswers.get(compositeKey);
+  if (!partial) return null;
+  if (partial.epoch !== epoch) {
+    partialAnswers.delete(compositeKey);
+    return null;
+  }
+  return partial;
+}
+
+/** Forget it: the prompt left the screen, another prompt came up, or the session ended. */
+export function forgetPartialAnswer(compositeKey: string): void {
+  partialAnswers.delete(compositeKey);
+}
+
+/** {@link forgetPartialAnswer} for every instance of a worktree. */
+export function forgetPartialAnswersByWorktree(worktreeId: string): void {
+  for (const key of filterCompositeKeysByWorktree([...partialAnswers.keys()], worktreeId)) {
+    partialAnswers.delete(key);
+  }
+}
+
+/** Forget every one: server shutdown, and a test seam. */
+export function clearPartialAnswers(): void {
+  partialAnswers.clear();
 }

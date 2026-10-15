@@ -118,6 +118,17 @@ vi.mock('@/lib/realtime/terminal-broadcast', () => ({
   broadcastTerminalSnapshotAfterInteraction: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock('@/lib/ws-server', () => ({ broadcastMessage: vi.fn() }));
+const taskEvents = vi.fn();
+vi.mock('@/lib/tasks/task-transition-service', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/tasks/task-transition-service')>();
+  return {
+    ...actual,
+    applyEventToActiveTask: (...args: Parameters<typeof actual.applyEventToActiveTask>) => {
+      taskEvents(args[4]);
+      return actual.applyEventToActiveTask(...args);
+    },
+  };
+});
 vi.mock('@/lib/cli-tools/manager', () => ({
   CLIToolManager: {
     getInstance: () => ({
@@ -148,7 +159,9 @@ import {
   AUTO_YES_ENTER_FALLBACK_ENV_VAR,
   beginEnterFallbackSession,
   clearEnterFallbacks,
+  getLastEnterFallback,
 } from '@/lib/polling/auto-yes-enter-fallback';
+import { createMessage, getMessageById } from '@/lib/db/chat-db';
 
 const WT = 'wt-3706';
 const KEY = `${WT}:claude`;
@@ -520,5 +533,175 @@ describe('[#3706] an answer already sent', () => {
     expect((await pollerStateOf(KEY))?.lastAnsweredPromptKey).toBeNull();
     // The chain survives the renewal.
     expect(vi.getTimerCount()).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Re-instruction 1 (Codex review P2 x 3)
+// ---------------------------------------------------------------------------
+
+/** A pending prompt row as the response poller saves it for `PROMPT_ON_DEFAULT`. */
+function savePendingPrompt(at: number): string {
+  return createMessage(db, {
+    worktreeId: WT,
+    role: 'assistant',
+    content: 'Select an option:',
+    messageType: 'prompt',
+    promptData: {
+      type: 'multiple_choice',
+      question: 'Select an option:',
+      options: [
+        { number: 1, label: 'Yes', isDefault: true },
+        { number: 2, label: 'No', isDefault: false },
+      ],
+      status: 'pending',
+    },
+    timestamp: new Date(at),
+    cliToolId: 'claude',
+    instanceId: 'claude',
+  }).id;
+}
+
+function promptStatus(id: string): unknown {
+  return (getMessageById(db, id)?.promptData as { status?: string } | undefined)?.status;
+}
+
+describe('[#3706] P2-1: a session relaunched while the answer was being sent', () => {
+  it("keeps the audit but leaves the new session's prompt row, the dedup key and the task alone", async () => {
+    const oldRow = savePendingPrompt(Date.now() - 1_000);
+    let newRow = '';
+    enable();
+    sendSpecialKeys.mockImplementationOnce(async (_s, keys) => {
+      keysSent.push(...keys);
+      // The CLI is relaunched with the poller kept, and the new process shows
+      // the same question, which the response poller saves as pending.
+      beginEnterFallbackSession(WT, 'claude');
+      newRow = savePendingPrompt(Date.now() + 1);
+    });
+    await firstTick();
+
+    expect(keysSent).toEqual(['Enter']);
+    expect(recordAnsweredPrompt).toHaveBeenCalledTimes(1);
+    expect(promptStatus(oldRow)).toBe('answered');
+    expect(promptStatus(newRow)).toBe('pending');
+    expect((await pollerStateOf(KEY))?.lastAnsweredPromptKey).toBeNull();
+    expect(taskEvents).not.toHaveBeenCalledWith('prompt_answered_auto');
+
+    // The new process's question is answered on the next tick, not held off by
+    // the old answer's dedup key.
+    await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS);
+    await settle();
+    expect(keysSent).toEqual(['Enter', 'Enter']);
+  });
+
+  it('negative: in the same session the pending row is answered and the dedup key is kept', async () => {
+    const row = savePendingPrompt(Date.now() - 1_000);
+    enable();
+    await firstTick();
+
+    expect(promptStatus(row)).toBe('answered');
+    expect((await pollerStateOf(KEY))?.lastAnsweredPromptKey).not.toBeNull();
+    expect(taskEvents).toHaveBeenCalledWith('prompt_answered_auto');
+  });
+});
+
+describe("[#3706] P2-2: the Enter fallback's record after a stop or a relaunch", () => {
+  async function fallbackUpToTheEnter(during: () => void): Promise<void> {
+    process.env[AUTO_YES_ENTER_FALLBACK_ENV_VAR] = 'claude=enabled';
+    pane = CLAUDE_UNRECOGNISED_LIST;
+    enable();
+    sendSpecialKeys.mockImplementationOnce(async (_s, keys) => {
+      keysSent.push(...keys);
+      during();
+    });
+    await firstTick(); // seen once: the candidate
+    await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS);
+    await settle();
+  }
+
+  it('a relaunch during the Enter: no record for the new session, the audit is kept', async () => {
+    await fallbackUpToTheEnter(() => beginEnterFallbackSession(WT, 'claude'));
+    expect(keysSent).toEqual(['Enter']);
+    expect(getLastEnterFallback(WT, 'claude')).toBeNull();
+    expect(recordAnsweredPrompt).toHaveBeenCalledTimes(1);
+  });
+
+  it('a stop during the Enter: the forgotten record is not put back, the audit is kept', async () => {
+    await fallbackUpToTheEnter(() => disable());
+    expect(keysSent).toEqual(['Enter']);
+    expect(getLastEnterFallback(WT, 'claude')).toBeNull();
+    expect(recordAnsweredPrompt).toHaveBeenCalledTimes(1);
+  });
+
+  it('negative: an Enter that lands in the same generation is recorded as sent', async () => {
+    await fallbackUpToTheEnter(() => {});
+    expect(getLastEnterFallback(WT, 'claude')?.outcome).toBe('sent');
+  });
+});
+
+describe('[#3706] P2-3: an answer stopped with keys already on the pane', () => {
+  /** Type `y`, then stop the Enter with `stop`; then let `ticks` more ticks run. */
+  async function stopAfterTheY(stop: () => void, ticks = 3): Promise<void> {
+    pane = PROMPT_TYPED;
+    enable();
+    await firstTick();
+    expect(keysSent).toEqual(['y']);
+    stop();
+    await vi.advanceTimersByTimeAsync(TUI_TEXT_INPUT_WAIT_MS);
+    await settle();
+    for (let i = 0; i < ticks; i++) {
+      await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS);
+      await settle();
+    }
+  }
+
+  it('a renewal: the next ticks do not type the answer again', async () => {
+    await stopAfterTheY(() => setAutoYesEnabled(WT, 'claude', true, ONE_HOUR));
+    expect(keysSent).toEqual(['y']);
+    expect(captureSessionOutput.mock.calls.length).toBeGreaterThan(1);
+  });
+
+  it('disable → enable: the new poller does not type the answer again', async () => {
+    await stopAfterTheY(() => {
+      disable();
+      enable();
+    });
+    expect(keysSent).toEqual(['y']);
+    expect(captureSessionOutput.mock.calls.length).toBeGreaterThan(1);
+  });
+
+  it('negative: once the prompt left the screen, its return is answered', async () => {
+    await stopAfterTheY(() => setAutoYesEnabled(WT, 'claude', true, ONE_HOUR), 0);
+    pane = 'idle';
+    await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS);
+    await settle();
+    pane = PROMPT_TYPED;
+    await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS * 3);
+    await settle();
+    expect(keysSent.slice(0, 3)).toEqual(['y', 'y', '<Enter>']);
+  });
+
+  it("negative: a relaunched session's prompt is answered", async () => {
+    await stopAfterTheY(() => setAutoYesEnabled(WT, 'claude', true, ONE_HOUR), 0);
+    beginEnterFallbackSession(WT, 'claude');
+    await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS * 3);
+    await settle();
+    expect(keysSent.slice(0, 3)).toEqual(['y', 'y', '<Enter>']);
+  });
+
+  it('negative: a stop before any key leaves the next tick free to answer', async () => {
+    guardReadGate = deferred();
+    enable();
+    await firstTick();
+    setAutoYesEnabled(WT, 'claude', true, ONE_HOUR);
+    const gate = guardReadGate;
+    guardReadGate = null;
+    gate.resolve();
+    await settle();
+    expect(keysSent).toEqual([]);
+
+    await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS);
+    await settle();
+    expect(keysSent).toEqual(['Enter']);
   });
 });

@@ -934,6 +934,14 @@ export interface RecordAnsweredPromptParams {
   answeredBy: PromptAnsweredBy;
   /** Content for a newly created row; defaults to the prompt's question. */
   content?: string;
+  /**
+   * Epoch ms: only pending rows saved at or before it may be marked answered
+   * (Issue #3706). Auto-Yes passes the start of its tick when the session was
+   * relaunched while the answer was being sent — the keys went to the old
+   * process, so a pending row the new process's prompt produced is not theirs.
+   * Omitted, any pending row may be, as before.
+   */
+  pendingSavedAtOrBefore?: number;
 }
 
 /** Result of {@link recordAnsweredPrompt} (Issue #1685). */
@@ -975,10 +983,15 @@ export function recordAnsweredPrompt(
       AND message_type = 'prompt'
       AND json_extract(prompt_data, '$.status') = 'pending'
       ${ACTIVE_FILTER}
+      ${params.pendingSavedAtOrBefore !== undefined ? 'AND timestamp <= ?' : ''}
     ORDER BY timestamp DESC
   `
     )
-    .all(worktreeId, resolvedInstanceId) as { id: string; prompt_data: string }[];
+    .all(
+      worktreeId,
+      resolvedInstanceId,
+      ...(params.pendingSavedAtOrBefore !== undefined ? [params.pendingSavedAtOrBefore] : []),
+    ) as { id: string; prompt_data: string }[];
 
   let target: { id: string; parsed: Record<string, unknown> } | null = null;
   for (const row of rows) {
