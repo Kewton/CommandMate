@@ -76,17 +76,19 @@ import {
 } from './auto-yes-state';
 import { getOrInitGlobal } from './global-state';
 import { PARTIAL_ANSWER_SUPPRESSION_REASON } from './polling/auto-yes-suppression-reason';
-import type { AutoYesSuppressionReason } from './polling/auto-yes-resolver';
 import {
+  beginSendAttempt,
   clearPartialAnswers,
   forgetPartialAnswer,
   forgetPartialAnswersByWorktree,
   getPartialAnswer,
+  hasMovedSendInFlight,
   partialAnswerScreenKey,
   promptFrameKey,
-  rememberPartialAnswer,
+  settleSendAttempt,
   warnOncePerFrame,
   type AutoYesPollerState,
+  type AutoYesSendAttempt,
 } from './polling/auto-yes-poller-state';
 import {
   suppressAndWarnOnce,
@@ -934,8 +936,9 @@ export async function detectAndRespondToPrompt(
   generation?: AutoYesTickGeneration
 ): Promise<'responded' | 'no_prompt' | 'duplicate' | 'no_answer' | 'error'> {
   const compositeKey = buildCompositeKey(worktreeId, cliToolId, instanceId);
-  // Issue #3706: the prompt whose answer is being typed, for a send stopped part-way.
-  let typingScreenKey: string | null = null;
+  // Issue #3706 / #3713: the send in flight, settled without an await once it
+  // comes back — as a partial answer when it was stopped with keys on the pane.
+  let attempt: AutoYesSendAttempt | null = null;
   try {
     // 1. Detect prompt.
     //
@@ -1049,10 +1052,7 @@ export async function detectAndRespondToPrompt(
         suppressAndWarnOnce(
           judged,
           {
-            // Outside the CLI-mirrored union on purpose; see
-            // `PARTIAL_ANSWER_SUPPRESSION_REASON`. The record is passed through
-            // as a string by every reader.
-            reason: PARTIAL_ANSWER_SUPPRESSION_REASON as unknown as AutoYesSuppressionReason,
+            reason: PARTIAL_ANSWER_SUPPRESSION_REASON,
             mode: null,
             promptType: promptDetection.promptData.type,
           },
@@ -1063,6 +1063,19 @@ export async function detectAndRespondToPrompt(
         return 'no_answer';
       }
       forgetPartialAnswer(compositeKey);
+    }
+    // Issue #3713: a worktree ID move carried an answer still being sent to
+    // this session's key. Its keys may already be on the pane, and how its send
+    // ends is not known yet — so this screen gets no keys until it comes back
+    // (recorded as a partial answer above, or gone).
+    if (hasMovedSendInFlight(compositeKey, epoch, screenKey)) {
+      warnOncePerFrame(
+        pollerState,
+        `${frameKey}\u0000moved-send-in-flight`,
+        'poller:auto-yes-skipped-moved-send-in-flight',
+        { worktreeId, cliToolId, instanceId, promptType: promptDetection.promptData.type },
+      );
+      return 'no_answer';
     }
 
     // 3., 3.2., 3.5. Frames that are not Auto-Yes's to answer: see
@@ -1143,7 +1156,7 @@ export async function detectAndRespondToPrompt(
       return 'no_answer';
     }
 
-    typingScreenKey = screenKey;
+    attempt = beginSendAttempt(compositeKey, screenKey, generation?.sessionEpoch ?? epoch);
     try {
       await sendPromptAnswer({
         sessionName,
@@ -1156,6 +1169,7 @@ export async function detectAndRespondToPrompt(
     } finally {
       invalidateCache(sessionName);
     }
+    settleSendAttempt(attempt, false);
 
     // 6., 7. The answer reached tmux: see `finishAnsweredPrompt`.
     await finishAnsweredPrompt(judged, promptDetection, answer, generation);
@@ -1168,17 +1182,13 @@ export async function detectAndRespondToPrompt(
     if (generation !== undefined && !isTickCurrent(generation)) {
       const keysSent = error instanceof Error && 'keysSent' in error ? Boolean(error.keysSent) : null;
       // A stop with keys already on the pane: the next tick must not type the
-      // answer again over them (step 2.5).
-      if (keysSent === true && typingScreenKey !== null) {
-        rememberPartialAnswer(compositeKey, {
-          screenKey: typingScreenKey,
-          epoch: generation.sessionEpoch,
-          at: Date.now(),
-        });
-      }
+      // answer again over them (step 2.5). Recorded under the attempt's key as
+      // it is now — the new one when a worktree ID move carried it (#3713).
+      if (attempt !== null) settleSendAttempt(attempt, keysSent === true);
       logger.info('poller:auto-yes-answer-abandoned', { worktreeId, cliToolId, instanceId, keysSent });
       return 'no_answer';
     }
+    if (attempt !== null) settleSendAttempt(attempt, false);
     incrementErrorCount(compositeKey, generation?.pollerState);
     logger.warn('poller:detect-respond-error', { worktreeId, cliToolId, instanceId });
     return 'error';

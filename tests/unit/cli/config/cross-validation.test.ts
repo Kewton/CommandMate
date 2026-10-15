@@ -64,9 +64,12 @@ describe('[#757] CLI_TOOL_IDS single source of truth', () => {
  * `wait` maps every suppression reason to its own wording (SUPPRESSION_CAUSE in
  * src/cli/commands/wait.ts is a `Record` over the union, so a reason with no
  * wording will not compile). That guarantee is only worth anything if the CLI's
- * copy of the union tracks the server's — and it has to be a copy: tsconfig.cli.json
+ * union is the server's. Today both re-export the one declared in the
+ * dependency-free `src/lib/polling/auto-yes-suppression-reason.ts` (tsconfig.cli.json
  * sets `"paths": {}`, so `src/cli` cannot import auto-yes-resolver, which imports
- * `@/config/auto-yes-config`.
+ * `@/config/auto-yes-config`); the assertions keep it that way should either side
+ * ever grow its own copy again. Passing them says the two aliases agree, not that
+ * every reason the server records at runtime is listed (Issue #3713).
  *
  * The two aliases below are the guard. Add a reason to the server union and
  * `_ServerReasonsAllKnownToCli` stops compiling, failing `npx tsc --noEmit`;
@@ -98,6 +101,8 @@ describe('[#1843] AutoYesSuppressionReason cross-validation', () => {
       // Issue #1924: the generic prompt estimator matched a frame the tool's own
       // dialog detector would not vouch for.
       'unclassified-frame',
+      // Issue #3713: #3706's answer stopped with keys already in the input.
+      'partial-answer',
     ];
     const fromServer: ServerSuppressionReason[] = knownToCli;
     expect(new Set(fromServer).size).toBe(knownToCli.length);

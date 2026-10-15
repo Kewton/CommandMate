@@ -11,6 +11,7 @@ import { generatePromptKey } from '../detection/prompt-key';
 import { createLogger } from '@/lib/logger';
 import { filterCompositeKeysByWorktree } from '../auto-yes-state';
 import { getOrInitGlobal } from '../global-state';
+import { getEnterFallbackSessionEpoch } from './auto-yes-enter-fallback-state';
 
 const logger = createLogger('auto-yes-poller');
 
@@ -124,6 +125,8 @@ export function warnOncePerFrame(
  * pane (Issue #3706): a `y` typed with its Enter withheld, a cursor moved with
  * its Enter withheld. Keyed by composite key and NOT kept on the poller state,
  * because the typical stop is a disable → enable, which replaces the poller.
+ * A worktree ID move carries it to the new key with the session it belongs to
+ * (Issue #3713, {@link movePartialAnswers}).
  */
 export interface PartialAutoYesAnswer {
   /** {@link partialAnswerScreenKey} of the prompt the keys were typed at. */
@@ -168,15 +171,12 @@ function withoutCursorMarks(text: string): string {
 declare global {
   // eslint-disable-next-line no-var
   var __autoYesPartialAnswers: Map<string, PartialAutoYesAnswer> | undefined;
+  // eslint-disable-next-line no-var
+  var __autoYesSendAttempts: Set<AutoYesSendAttempt> | undefined;
 }
 
 /** compositeKey -> the answer stopped part-way. globalThis for hot reload (#153). */
 const partialAnswers = getOrInitGlobal('__autoYesPartialAnswers', () => new Map<string, PartialAutoYesAnswer>());
-
-/** Remember that an answer to `promptKey` was stopped with keys already on the pane. */
-export function rememberPartialAnswer(compositeKey: string, partial: PartialAutoYesAnswer): void {
-  partialAnswers.set(compositeKey, partial);
-}
 
 /**
  * The answer stopped part-way that still applies: same session epoch, and the
@@ -197,14 +197,186 @@ export function forgetPartialAnswer(compositeKey: string): void {
   partialAnswers.delete(compositeKey);
 }
 
-/** {@link forgetPartialAnswer} for every instance of a worktree. */
+/**
+ * {@link forgetPartialAnswer} for every instance of a worktree, and the sends
+ * still in flight there are expired (Issue #3713): a slow tick that comes back
+ * after the worktree's sessions went away records nothing.
+ */
 export function forgetPartialAnswersByWorktree(worktreeId: string): void {
   for (const key of filterCompositeKeysByWorktree([...partialAnswers.keys()], worktreeId)) {
     partialAnswers.delete(key);
   }
+  const inWorktree = new Set(
+    filterCompositeKeysByWorktree(
+      [...sendAttempts].map((attempt) => attempt.recordKey),
+      worktreeId,
+    ),
+  );
+  for (const attempt of [...sendAttempts]) {
+    if (inWorktree.has(attempt.recordKey)) expireSendAttempt(attempt);
+  }
 }
 
-/** Forget every one: server shutdown, and a test seam. */
+/** Forget every one, and expire every send in flight: server shutdown, and a test seam. */
 export function clearPartialAnswers(): void {
   partialAnswers.clear();
+  for (const attempt of [...sendAttempts]) expireSendAttempt(attempt);
 }
+
+// =============================================================================
+// Sends in flight, and a worktree ID move (Issue #3713)
+// =============================================================================
+
+/**
+ * One Auto-Yes send, registered by the poller BEFORE its first await
+ * (`sendPromptAnswer`), and settled by the same tick without an await between
+ * the send coming back and the settling (Issue #3713).
+ *
+ * It exists so a worktree ID move can carry a send that has not come back yet.
+ * The tick keeps this object, not a key: when it comes back stopped with keys
+ * on the pane it records the partial answer under `recordKey` as it is THEN —
+ * the new key if the session moved meanwhile — and never looks a key up. A later
+ * send under the old key is another object, so it is never carried by an
+ * earlier move.
+ */
+export interface AutoYesSendAttempt {
+  /** {@link partialAnswerScreenKey} of the prompt being answered. */
+  readonly screenKey: string;
+  /** The composite key the outcome is recorded under; a move re-points it. */
+  recordKey: string;
+  /** The session epoch of `recordKey` the keys go to; a move re-reads it. */
+  recordEpoch: number;
+  /** Set once a worktree ID move carried it to another key. */
+  moved: boolean;
+  /** `pending` until the tick settles it; `expired` when its session's state was dropped. */
+  state: 'pending' | 'settled' | 'expired';
+}
+
+/** The sends in flight. globalThis for hot reload (#153), like the Map above. */
+const sendAttempts = getOrInitGlobal('__autoYesSendAttempts', () => new Set<AutoYesSendAttempt>());
+
+/** Register a send about to start (the poller, before `sendPromptAnswer`). */
+export function beginSendAttempt(compositeKey: string, screenKey: string, epoch: number): AutoYesSendAttempt {
+  const attempt: AutoYesSendAttempt = {
+    screenKey,
+    recordKey: compositeKey,
+    recordEpoch: epoch,
+    moved: false,
+    state: 'pending',
+  };
+  sendAttempts.add(attempt);
+  return attempt;
+}
+
+/**
+ * The send came back. `keysSent` — it was stopped with keys already on the
+ * pane — records the partial answer under the attempt's key as it is now, when
+ * that key's session is still the one the keys went to; otherwise (sent in
+ * full, stopped before any key, or failed) only the attempt itself is removed.
+ * A second call, or a call on an expired attempt, does nothing.
+ */
+export function settleSendAttempt(attempt: AutoYesSendAttempt, keysSent: boolean, at: number = Date.now()): void {
+  if (attempt.state !== 'pending') return;
+  attempt.state = 'settled';
+  sendAttempts.delete(attempt);
+  if (!keysSent) return;
+  // A relaunch since (`beginAgentSession`): the process the keys went to is gone.
+  if (getEnterFallbackSessionEpoch(attempt.recordKey) !== attempt.recordEpoch) return;
+  partialAnswers.set(attempt.recordKey, { screenKey: attempt.screenKey, epoch: attempt.recordEpoch, at });
+}
+
+function expireSendAttempt(attempt: AutoYesSendAttempt): void {
+  if (attempt.state === 'pending') attempt.state = 'expired';
+  sendAttempts.delete(attempt);
+}
+
+/**
+ * Is a send that a worktree ID move carried to `compositeKey` still in flight
+ * at this screen of this session (Issue #3713)? Its keys may already be on the
+ * pane, so the poller under the new key does not type at the same prompt until
+ * it comes back. Sends that were not moved are not counted: the paths without a
+ * move stay as they were.
+ */
+export function hasMovedSendInFlight(compositeKey: string, epoch: number, screenKey: string): boolean {
+  for (const attempt of sendAttempts) {
+    if (
+      attempt.moved &&
+      attempt.recordKey === compositeKey &&
+      attempt.recordEpoch === epoch &&
+      attempt.screenKey === screenKey
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/** One instance's session that a worktree ID move actually renamed. */
+export interface PartialAnswerMove {
+  oldKey: string;
+  newKey: string;
+  /**
+   * The session epoch of `oldKey` read BEFORE the first rename's await. A
+   * session begun under `oldKey` since then is not the one that moved.
+   */
+  sourceEpoch: number;
+}
+
+/**
+ * Carry the partial answers and the sends in flight of the sessions a worktree
+ * ID move renamed to their new keys (Issue #3713). Synchronous: the caller runs
+ * it right after the renames, before any poller restarts.
+ *
+ * Only what belongs to the session that moved goes: the source's epoch must
+ * still be `sourceEpoch`, and so must the record's. Every source is read before
+ * any destination is written, so a swap (A↔B) or a chain (A→B, B→C) moves each
+ * record once, with its own session. At a destination, what was recorded for
+ * the session that used to have that name is dropped — its process is not the
+ * one now there. The epochs themselves (and the Enter fallback's record) are not
+ * moved: a record takes the destination key's current epoch.
+ *
+ * @param moves - Only the renames that succeeded in both stages
+ * @returns The new keys that received a partial answer or a send in flight
+ */
+export function movePartialAnswers(moves: ReadonlyArray<PartialAnswerMove>): string[] {
+  const carried = moves
+    .filter((move) => move.oldKey !== move.newKey)
+    .map((move) => {
+      const current = getEnterFallbackSessionEpoch(move.oldKey) === move.sourceEpoch;
+      const partial = partialAnswers.get(move.oldKey);
+      return {
+        move,
+        partial: current && partial !== undefined && partial.epoch === move.sourceEpoch ? partial : null,
+        attempts: current
+          ? [...sendAttempts].filter(
+              (attempt) => attempt.recordKey === move.oldKey && attempt.recordEpoch === move.sourceEpoch,
+            )
+          : [],
+      };
+    });
+  const carriedAttempts = new Set(carried.flatMap((entry) => entry.attempts));
+
+  // Detach every source first.
+  for (const { move } of carried) partialAnswers.delete(move.oldKey);
+  // The destinations' previous sessions' records.
+  for (const { move } of carried) {
+    partialAnswers.delete(move.newKey);
+    for (const attempt of [...sendAttempts]) {
+      if (attempt.recordKey === move.newKey && !carriedAttempts.has(attempt)) expireSendAttempt(attempt);
+    }
+  }
+  // Then arrive.
+  const received: string[] = [];
+  for (const { move, partial, attempts } of carried) {
+    const epoch = getEnterFallbackSessionEpoch(move.newKey);
+    if (partial !== null) partialAnswers.set(move.newKey, { ...partial, epoch });
+    for (const attempt of attempts) {
+      attempt.recordKey = move.newKey;
+      attempt.recordEpoch = epoch;
+      attempt.moved = true;
+    }
+    if (partial !== null || attempts.length > 0) received.push(move.newKey);
+  }
+  return received;
+}
+
