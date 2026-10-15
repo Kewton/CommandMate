@@ -52,9 +52,20 @@ vi.mock('@/lib/session/status-evidence', async (importOriginal) => {
   };
 });
 
+const socket = vi.hoisted(() => ({ broadcast: vi.fn() }));
+vi.mock('@/lib/ws-server', () => ({
+  broadcast: (...a: unknown[]) => socket.broadcast(...a),
+  hasRoomSubscribers: () => true,
+  broadcastMessage: vi.fn(),
+}));
+
 import { captureSessionOutput } from '@/lib/session/cli-session';
 import { buildCurrentOutput } from '@/lib/session/current-output-builder';
-import { buildChatTurnProgress, resetChatTurnProgressState } from '@/lib/session/chat-turn-progress';
+import {
+  buildChatTurnProgress,
+  emitChatTurnProgress,
+  resetChatTurnProgressState,
+} from '@/lib/session/chat-turn-progress';
 import { RetiredSnapshotError, snapshotOwnerStorage, type PollerOwner } from '@/lib/polling/poller-owner';
 
 const WT = 'wt-3705-snap';
@@ -144,5 +155,80 @@ describe('[#3705] the chat-turn progress a snapshot detaches', () => {
       buildChatTurnProgress(target, async () => ({ turnKey: 't-1', body: 'same body' }), 1_000)
     );
     expect(frame?.body).toBe('same body');
+  });
+});
+
+describe('[#3705] a progress frame refused between its build and its broadcast', () => {
+  const target = { worktreeId: WT, cliToolId: 'claude' as const, instanceId: 'claude' };
+
+  /** Bodies broadcast, in order. */
+  function broadcastBodies(): string[] {
+    return socket.broadcast.mock.calls.map(([, event]) => String((event as { body?: unknown }).body));
+  }
+
+  /**
+   * Emit from inside `tick`'s snapshot, and supersede it after the build has
+   * finished — once it remembered the body — but before the broadcast. The
+   * callback is registered on the read after the build awaits it, so it runs
+   * after the build's continuation and before `emitChatTurnProgress` resumes.
+   */
+  async function emitSupersededAfterBuild(tick: PollerOwner, now: number): Promise<boolean> {
+    const entered = deferred<void>();
+    const read = deferred<{ turnKey: string; body: string }>();
+    const emitted = snapshotOwnerStorage.run(tick, () =>
+      emitChatTurnProgress(
+        target,
+        () => {
+          entered.resolve();
+          return read.promise;
+        },
+        now
+      )
+    );
+    await entered.promise;
+    void read.promise.then(() => {
+      tick.superseded = true;
+    });
+    read.resolve({ turnKey: 't-1', body: 'same body' });
+    return emitted;
+  }
+
+  beforeEach(() => {
+    socket.broadcast.mockClear();
+  });
+
+  it('broadcasts nothing, and remembers nothing that would suppress the successor\'s same body', async () => {
+    expect(await emitSupersededAfterBuild(owner(), 1_000)).toBe(false);
+    expect(broadcastBodies()).toEqual([]);
+
+    const next = await snapshotOwnerStorage.run(owner(), () =>
+      emitChatTurnProgress(target, async () => ({ turnKey: 't-1', body: 'same body' }), 1_000_000)
+    );
+    expect(next).toBe(true);
+    expect(broadcastBodies()).toEqual(['same body']);
+  });
+
+  it('negative: a frame that was broadcast is remembered, and the same body is not sent again', async () => {
+    const tick = owner();
+    expect(
+      await snapshotOwnerStorage.run(tick, () =>
+        emitChatTurnProgress(target, async () => ({ turnKey: 't-1', body: 'same body' }), 1_000)
+      )
+    ).toBe(true);
+    expect(
+      await snapshotOwnerStorage.run(tick, () =>
+        emitChatTurnProgress(target, async () => ({ turnKey: 't-1', body: 'same body' }), 1_000_000)
+      )
+    ).toBe(false);
+    expect(broadcastBodies()).toEqual(['same body']);
+  });
+
+  it('negative: outside a poller snapshot the frame is broadcast and its version follows the previous one', async () => {
+    await emitChatTurnProgress(target, async () => ({ turnKey: 't-1', body: 'first' }), 1_000);
+    await emitChatTurnProgress(target, async () => ({ turnKey: 't-1', body: 'second' }), 1_000_000);
+
+    const versions = socket.broadcast.mock.calls.map(([, event]) => (event as { version: number }).version);
+    expect(broadcastBodies()).toEqual(['first', 'second']);
+    expect(versions[1]).toBe(versions[0] + 1);
   });
 });

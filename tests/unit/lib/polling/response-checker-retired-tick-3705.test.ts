@@ -527,6 +527,59 @@ describe('[#3705] 3. a tick stopped while its recheck asks the reader', () => {
   });
 });
 
+describe('[#3705] 3b. a tick retired at the capture whose frame the successor has already saved', () => {
+  /**
+   * A is parked on its capture and cut loose past the timeout; B saves the same
+   * reply (registering its hash and the recheck it is owed); then A's capture
+   * returns that reply. Returns what B left behind.
+   */
+  async function successorSavedThenAlphaReturns(): Promise<{ readerCalls: () => number }> {
+    startPolling(WT.a, TOOL);
+    screens.set(KEY_A, codexReplyPane('shared reply'));
+    const gate = armGate(captureGates, KEY_A, null);
+    await vi.advanceTimersByTimeAsync(POLLING_INTERVAL);
+    await gate.entered;
+
+    vi.setSystemTime(Date.now() + STALLED_TICK_TIMEOUT + 1);
+    startPolling(WT.a, TOOL);
+    await tick(); // B saves `shared reply`, registers its hash and is owed a recheck
+    expect(g.__responseHashCache?.has(KEY_A)).toBe(true);
+    expect(g.__structuredHistoryRecheckCache?.get(KEY_A)).toBe(0);
+
+    let readerCalls = 0;
+    const counting = armGate(readerGates, KEY_A, 'absent' as ReaderOutcome);
+    void counting.entered.then(() => {
+      readerCalls++;
+      counting.release('absent');
+    });
+    sessionLines.set(KEY_A, 42);
+    g.__duplicateResponseSkipStreak?.set(KEY_A, 5);
+    gate.release(null); // A's capture returns the same reply
+    await settle();
+    return { readerCalls: () => readerCalls };
+  }
+
+  it('moves no cursor, claims no skip log and no recheck of the successor', async () => {
+    const result = await successorSavedThenAlphaReturns();
+
+    expect(sessionLines.get(KEY_A)).toBe(42);
+    expect(g.__duplicateResponseSkipStreak?.get(KEY_A)).toBe(5);
+    expect(g.__structuredHistoryRecheckCache?.get(KEY_A)).toBe(0);
+    expect(result.readerCalls()).toBe(0);
+  });
+
+  it('negative: the successor\'s own next tick on the same frame is a duplicate that moves the cursor and asks the reader', async () => {
+    const result = await successorSavedThenAlphaReturns();
+
+    await tick();
+
+    expect(sessionLines.get(KEY_A)).not.toBe(42);
+    expect(g.__duplicateResponseSkipStreak?.get(KEY_A)).toBe(6);
+    expect(g.__structuredHistoryRecheckCache?.get(KEY_A)).not.toBe(0);
+    expect(result.readerCalls()).toBe(1);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // 4. self-stop
 // ---------------------------------------------------------------------------

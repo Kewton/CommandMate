@@ -1020,6 +1020,15 @@ async function recheckDuplicateResponse(
 ): Promise<boolean> {
   const { db, worktree, worktreeId, cliToolId, instanceId, resolvedInstanceId, pollerKey } = ctx;
 
+  // Issue #3705 (review): a retired tick reaches this function too. The dedup
+  // answers "duplicate" on a hash match BEFORE it asks about ownership (it only
+  // refuses to REGISTER a hash), and the hash it matches may be the successor's
+  // — the same reply, saved by the chain that replaced this one while this
+  // tick's capture was in flight. Everything below writes under the key (the
+  // skip-log claim, the cursor, the recheck claim, then the reader), so the
+  // question is asked first, with no `await` between it and those writes.
+  if (!mayStillActAfter(ctx, 'capture')) return false;
+
   // Issue #1695: this branch used to drop the response silently — the
   // prompt-side guard above has logged its skip since #565, this one
   // logged nothing at all, so a reply that never reached History left no
@@ -1659,10 +1668,10 @@ export async function checkForResponse(
     // Without this the disabled cursor would leave nothing suppressing re-saves and
     // the poller would append the same finished reply every 2 s.
     if (!lineCountIsCursor) {
-      // Never true for a retired tick: the hash is not registered for it, and
-      // the answer is no (#3663, `./response-dedup`). So the recheck below —
-      // whose claim and cursor are written before its own `await` — is only
-      // reached by a tick that owns the key.
+      // A retired tick registers no hash here (#3663, `./response-dedup`), but
+      // it can still MATCH one — the successor's, for the same reply. The
+      // recheck below therefore opens on the ownership question itself before
+      // its claim, its cursor and its read (Issue #3705 review).
       if (isDuplicateResponse(pollerKey, cleanedResponse)) {
         // `await`, so that a rejection still lands in the catch below.
         return await recheckDuplicateResponse(ctx, result, claudeMetadata);

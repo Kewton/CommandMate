@@ -83,9 +83,19 @@ const TARGETS: Target[] = [
   },
   { file: 'src/lib/polling/response-checker.ts', fn: 'cleanCompletedResponse', scope: 'all', writes: ['clearTuiAccumulator'] },
   {
+    // `all`, not `after-await` (#3705 review): a hash match answers the dedup
+    // before it asks about ownership, so a retired tick can arrive here, and
+    // the writes ahead of the reader's `await` are this function's to judge.
     file: 'src/lib/polling/response-checker.ts',
     fn: 'recheckDuplicateResponse',
-    writes: ['settleStructuredHistoryRecheck', 'discardPendingScrapedResponse'],
+    scope: 'all',
+    writes: [
+      'claimDuplicateResponseSkipLog',
+      'updateSessionState',
+      'claimStructuredHistoryRecheck',
+      'settleStructuredHistoryRecheck',
+      'discardPendingScrapedResponse',
+    ],
   },
   {
     file: 'src/lib/polling/response-checker.ts',
@@ -159,7 +169,13 @@ const TARGETS: Target[] = [
     ],
   },
   { file: 'src/lib/session/current-output-builder.ts', fn: 'buildCurrentOutput', writes: ['publishChatTurnProgress'] },
-  { file: 'src/lib/session/chat-turn-progress.ts', fn: 'emitChatTurnProgress', writes: ['broadcast'] },
+  {
+    // The body is remembered by the commit, so it is judged like the broadcast
+    // (#3705 review: remembered then refused, it suppressed the successor's frame).
+    file: 'src/lib/session/chat-turn-progress.ts',
+    fn: 'emitChatTurnProgress',
+    writes: ['commitChatTurnProgress', 'broadcast'],
+  },
   { file: 'src/lib/session/chat-turn-progress.ts', fn: 'publishChatTurnProgress', writes: ['emitChatTurnProgress'] },
 ];
 
@@ -431,6 +447,46 @@ describe('[#3705] the detector', () => {
     expect(positive.violations).toEqual([]);
     expect(owns.violations).toEqual([]);
     expect([early, positive, owns].map((r) => r.checked.length)).toEqual([1, 1, 1]);
+  });
+
+  it('flags the writes ahead of an await in an `all`-scope step reached without a judgement', () => {
+    // The shape #3705's review found: a dedup that answers "duplicate" before
+    // it asks about ownership, followed by the recheck's claim, cursor and read.
+    const result = scan(
+      `async function recheck(ctx) {
+        claimSkipLog(ctx);
+        updateSessionState(ctx);
+        if (claimRecheck(ctx)) {
+          const captured = await read(ctx);
+          if (!mayStillActAfter(ctx, 'read')) return captured;
+          settle(ctx);
+        }
+      }`,
+      'recheck',
+      ['claimSkipLog', 'updateSessionState', 'claimRecheck', 'settle'],
+      'all'
+    );
+    expect(result.violations.map((v) => v.write)).toEqual(['claimSkipLog', 'updateSessionState', 'claimRecheck']);
+  });
+
+  it('accepts the same step once it opens on the judgement', () => {
+    const result = scan(
+      `async function recheck(ctx) {
+        if (!mayStillActAfter(ctx, 'capture')) return false;
+        claimSkipLog(ctx);
+        updateSessionState(ctx);
+        if (claimRecheck(ctx)) {
+          const captured = await read(ctx);
+          if (!mayStillActAfter(ctx, 'read')) return captured;
+          settle(ctx);
+        }
+      }`,
+      'recheck',
+      ['claimSkipLog', 'updateSessionState', 'claimRecheck', 'settle'],
+      'all'
+    );
+    expect(result.checked).toHaveLength(4);
+    expect(result.violations).toEqual([]);
   });
 
   it('leaves writes before the first await to the caller', () => {
