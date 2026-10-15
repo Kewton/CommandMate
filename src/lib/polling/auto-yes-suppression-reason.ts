@@ -33,4 +33,17 @@ export type AutoYesSuppressionReason =
    * Declared in Phase 1 (Issue #1924) and recorded from Phase 3, when the
    * tool-specific detectors that can disagree with the estimator exist.
    */
-  | 'unclassified-frame';
+  | 'unclassified-frame'
+  /**
+   * Issue #3706: Auto-Yes stopped an answer after some of its keys reached the
+   * pane (a `y` whose Enter was withheld), and leaves the prompt to a human
+   * rather than type over what is in the input. Recorded through the same
+   * `lastSuppression` channel so the prompt Push and `cmate wait` read "withheld"
+   * instead of "Auto-Yes is answering". Not a policy verdict either: the
+   * resolver and the hooks never produce it, only the poller does (Issue #3713
+   * made it a member, with its own wording in `cmate wait`'s `SUPPRESSION_CAUSE`).
+   */
+  | 'partial-answer';
+
+/** Issue #3706: the reason the poller records for an answer stopped part-way. */
+export const PARTIAL_ANSWER_SUPPRESSION_REASON = 'partial-answer' satisfies AutoYesSuppressionReason;

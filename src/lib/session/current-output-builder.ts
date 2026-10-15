@@ -108,6 +108,7 @@ import type {
   SessionTargetResolution,
 } from './current-output-types';
 import { publishChatTurnProgress } from './chat-turn-progress';
+import { RetiredSnapshotError, maySnapshotPublish } from '@/lib/polling/poller-owner';
 import {
   mergeStructuredStatus,
   readNewestPromptAt,
@@ -168,6 +169,10 @@ export async function buildCurrentOutput(
   resolution?: SessionTargetResolution,
 ): Promise<CurrentOutputPayload> {
   const payload = await buildPayload(db, worktreeId, cliToolId, instanceId);
+  // Issue #3705: the payload's own writers asked after their awaits (see
+  // `buildPayload`); the progress frame below is one more write, of the turn
+  // the payload describes.
+  if (!maySnapshotPublish()) throw new RetiredSnapshotError();
   // Issue #2199. Fire-and-forget, and placed HERE rather than in the poller for
   // one reason: this is the function both live paths run through. The WebSocket
   // push calls it from `broadcastTerminalSnapshot` on every generating poller
@@ -843,6 +848,14 @@ async function buildPayload(
   );
 
   const running = await cliTool.isRunning(worktreeId, instanceId);
+  // Issue #3705: a terminal snapshot the response poller started for a tick
+  // that has since been superseded writes nothing from here on — not the
+  // latch, the starting state, the unclassified-frame row, the structured
+  // prompt row or the status evidence — because they would describe the turn
+  // that ended on top of the successor's. Thrown, not answered, so the payload
+  // type stays what the route reads; `broadcastTerminalSnapshot` catches it.
+  // Never thrown outside a poller snapshot (`maySnapshotPublish`).
+  if (!maySnapshotPublish()) throw new RetiredSnapshotError();
   if (!running) {
     // Issue #1926: the latch describes a process, and this one is gone. Dropped
     // rather than aged out so the next session on this key starts with no
@@ -912,6 +925,9 @@ async function buildPayload(
   const lastCapturedLine = sessionState?.lastCapturedLine || 0;
 
   const output = await captureSessionOutput(worktreeId, cliToolId, STATUS_CAPTURE_LINES, instanceId);
+  // Issue #3705: the last `await` of the build. Everything below it, through
+  // `observeStatusEvidence`, runs without one.
+  if (!maySnapshotPublish()) throw new RetiredSnapshotError();
   const lines = output.split('\n');
   const totalLines = lines.length;
 

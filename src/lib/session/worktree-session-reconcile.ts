@@ -89,6 +89,8 @@ import {
   buildCompositeKey,
 } from '@/lib/polling/auto-yes-manager';
 import { migrateResponsePollerWorktreeIds } from '@/lib/polling/response-poller';
+import { movePartialAnswers, type PartialAnswerMove } from '@/lib/polling/auto-yes-poller-state';
+import { getEnterFallbackSessionEpoch } from '@/lib/polling/auto-yes-enter-fallback';
 import { migrateWorktreeRooms } from '@/lib/ws-server';
 import { createLogger } from '@/lib/logger';
 
@@ -105,6 +107,13 @@ interface SessionRenamePlan {
   oldName: string;
   newName: string;
   rename: WorktreeIdRename;
+  /**
+   * The instance the session is (Issue #3713): what Auto-Yes keys its memory
+   * of an answer stopped part-way by, so the memory follows exactly the
+   * sessions that moved.
+   */
+  cliToolId: CLIToolType;
+  instanceId: string;
   /**
    * `roster` — the name was predicted from `agent_instances` × the CLI tool
    * registry; `live` — it was read off the live session list and attributed
@@ -242,7 +251,9 @@ function planSessionRenames(
       // getSessionName validates already; assert it explicitly so the guarantee
       // is stated where the name is about to be handed to tmux (Issue #1621).
       validateSessionName(newName);
-      if (oldName !== newName) plans.push({ oldName, newName, rename, source: 'roster' });
+      if (oldName !== newName) {
+        plans.push({ oldName, newName, rename, cliToolId, instanceId, source: 'roster' });
+      }
     } catch (error) {
       errors.push(
         `session name for ${rename.oldId}/${instanceId}: ${
@@ -400,7 +411,16 @@ function discoverSessionRenames(
         : attributed.cliToolId;
       const newName = tool.getSessionName(rename.newId, instanceId);
       validateSessionName(newName);
-      if (name !== newName) plans.push({ oldName: name, newName, rename, source: 'live' });
+      if (name !== newName) {
+        plans.push({
+          oldName: name,
+          newName,
+          rename,
+          cliToolId: attributed.cliToolId,
+          instanceId,
+          source: 'live',
+        });
+      }
     } catch (error) {
       result.errors.push(
         `attribute session ${name}: ${error instanceof Error ? error.message : String(error)}`
@@ -507,6 +527,10 @@ function allocateTempName(taken: Set<string>, ordinal: number): string {
 
 /**
  * Rename the live tmux sessions in two stages so no intermediate state collides.
+ *
+ * @returns The plans whose session was renamed in BOTH stages (Issue #3713: a
+ *   stage-2 `false` — the session vanished from its temporary name — is not
+ *   one; it is reported as skipped).
  */
 async function renameSessionsTwoStage(
   plans: SessionRenamePlan[],
@@ -568,7 +592,14 @@ async function renameSessionsTwoStage(
   const completed: SessionRenamePlan[] = [];
   for (const { plan, tempName } of staged) {
     try {
-      await deps.renameSession(tempName, plan.newName);
+      if (!(await deps.renameSession(tempName, plan.newName))) {
+        result.skippedSessions.push({
+          oldName: plan.oldName,
+          newName: plan.newName,
+          reason: 'session no longer exists',
+        });
+        continue;
+      }
       result.renamedSessions.push({ oldName: plan.oldName, newName: plan.newName });
       completed.push(plan);
       // The control-mode attach survived the rename; only the registry key is
@@ -598,6 +629,41 @@ async function renameSessionsTwoStage(
   return completed;
 }
 
+/** The Auto-Yes composite key of a plan's instance under `worktreeId`. */
+function autoYesKeyOf(plan: SessionRenamePlan, worktreeId: string): string {
+  return buildCompositeKey(worktreeId, plan.cliToolId, plan.instanceId);
+}
+
+/**
+ * Carry Auto-Yes's memory of an answer stopped part-way, and of a send still in
+ * flight, to the new key of each session that moved (Issue #3713).
+ *
+ * Only for the renames that succeeded in both stages: a refused, failed or
+ * vanished rename leaves the destination's live session — and its memory —
+ * alone. Not part of {@link migrateRuntimeState}, which still runs for every
+ * requested pair: a grant, a response poller or a WebSocket room is about the
+ * worktree, this memory is about one process.
+ */
+function moveAutoYesPartialAnswers(
+  completed: ReadonlyArray<SessionRenamePlan>,
+  sourceEpochs: ReadonlyMap<SessionRenamePlan, number>
+): void {
+  const moves: PartialAnswerMove[] = [];
+  for (const plan of completed) {
+    const sourceEpoch = sourceEpochs.get(plan);
+    if (sourceEpoch === undefined) continue;
+    moves.push({
+      oldKey: autoYesKeyOf(plan, plan.rename.oldId),
+      newKey: autoYesKeyOf(plan, plan.rename.newId),
+      sourceEpoch,
+    });
+  }
+  const received = movePartialAnswers(moves);
+  if (received.length > 0) {
+    logger.info('reconcile:auto-yes-partial-answers-moved', { keys: received });
+  }
+}
+
 /**
  * Move the in-process state that is keyed on a worktree ID.
  *
@@ -619,14 +685,27 @@ function migrateRuntimeState(
   const movedAutoYes = migrateAutoYesStateWorktreeIds(renames);
   result.movedAutoYesKeys = movedAutoYes.map((move) => move.newKey);
 
+  // The poller's timer chain captures the worktree ID, so re-keying its map
+  // would leave it polling the old session. Stop and restart instead — the
+  // Auto-Yes *state* (deadline, stop pattern) is what must survive, and it
+  // already has. Every old poller is stopped before any successor starts
+  // (Issue #3713): in a swap (A↔B) with both running, stop A → start B would
+  // find B's own poller still there ("already_running"), and the stop B that
+  // follows would leave the B side with none.
+  const restarts: typeof movedAutoYes = [];
   for (const move of movedAutoYes) {
     if (!runningAutoYesPollers.has(move.oldKey)) continue;
     try {
-      // The poller's timer chain captures the worktree ID, so re-keying its map
-      // would leave it polling the old session. Stop and restart instead — the
-      // Auto-Yes *state* (deadline, stop pattern) is what must survive, and it
-      // already has.
       stopAutoYesPolling(move.oldKey);
+      restarts.push(move);
+    } catch (error) {
+      result.errors.push(
+        `auto-yes poller ${move.newKey}: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
+  for (const move of restarts) {
+    try {
       const started = startAutoYesPolling(move.newWorktreeId, move.cliToolId, move.instanceId);
       if (started.started) {
         result.restartedAutoYesPollers.push(move.newKey);
@@ -765,7 +844,17 @@ export async function reconcileWorktreeSessions(
     }
 
     const ownedPlans = excludeForeignSessionPlans(db, plans, live, livePaths, deps, result);
-    await renameSessionsTwoStage(ownedPlans, live, deps, result);
+    // Issue #3713: each source session's epoch, read before the first rename's
+    // await — a session begun under the old key while the renames run is not the
+    // one that moves, and its memory stays where it is.
+    const sourceEpochs = new Map(
+      ownedPlans.map((plan) => [plan, getEnterFallbackSessionEpoch(autoYesKeyOf(plan, plan.rename.oldId))])
+    );
+    const completed = await renameSessionsTwoStage(ownedPlans, live, deps, result);
+    // No await between the renames and this: Auto-Yes's memory of an answer
+    // stopped part-way (and of a send still in flight) follows exactly the
+    // sessions that moved, before any poller restarts below.
+    moveAutoYesPartialAnswers(completed, sourceEpochs);
   }
 
   // Runtime state moves after the sessions: a poller that ticks in between

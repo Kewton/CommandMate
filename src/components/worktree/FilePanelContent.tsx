@@ -34,7 +34,7 @@ import 'highlight.js/styles/github-dark.css';
 import { Z_INDEX } from '@/config/z-index';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { Spinner } from '@/components/ui/Spinner';
-import { isUnhandledEscape } from '@/lib/escape-key';
+import { isEscapeNoLayerClosed, VIEWPORT_LAYER_ATTRIBUTE } from '@/lib/escape-key';
 
 /** Fixed row height for the virtualized CodeViewer (px). Monospace + leading-6. */
 const CODE_VIEWER_ROW_HEIGHT_PX = 24;
@@ -662,6 +662,9 @@ function MarpEditorWithSlides({
  *
  * ESC-to-exit (the keydown listener on `window` in FilePanelContent) and React
  * synthetic-event bubbling both survive the portal, so behaviour is unchanged.
+ *
+ * [Issue #3670] Marked as a viewport layer, so a floating layer it covers (the
+ * second row's "…" panel, z 50) leaves Escape to it — front layer first.
  */
 function MaximizableWrapper({
   children,
@@ -681,6 +684,7 @@ function MaximizableWrapper({
   const overlay = (
     <div
       data-testid="maximized-file-overlay"
+      {...{ [VIEWPORT_LAYER_ATTRIBUTE]: '' }}
       className="fixed inset-0 bg-surface flex flex-col"
       style={{ zIndex: Z_INDEX.MAXIMIZED_EDITOR }}
     >
@@ -886,11 +890,13 @@ export const FilePanelContent = memo(function FilePanelContent({
     setIsMaximized((prev) => !prev);
   }, []);
 
-  // ESC to exit maximize
+  // ESC to exit maximize. Issue #3670: not on the press a floating layer in
+  // front of the file (the second row's "…" panel) closed on — one Escape, one
+  // layer. A panel behind the file leaves the press alone, so it ends here.
   useEffect(() => {
     if (!isMaximized) return;
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (isUnhandledEscape(e)) {
+      if (isEscapeNoLayerClosed(e)) {
         setIsMaximized(false);
       }
     };

@@ -1493,6 +1493,48 @@ describe('Issue #1843: the suppression notice names the reason it actually has',
 });
 
 /**
+ * Issue #3713: `partial-answer` (#3706) joined the reason union, so `wait`
+ * names it in its own words instead of "a reason this CLI does not recognise".
+ * The exit code, the grace skip and the JSON stay as they were.
+ */
+describe('Issue #3713: the partial-answer suppression has its own wording', () => {
+  const suppressedPrompt = (lastSuppression: unknown) => ({
+    ...baseOutput,
+    isRunning: true,
+    isPromptWaiting: true,
+    sessionStatus: 'waiting' as const,
+    promptData: { type: 'yes_no', question: 'Do you want to proceed?', options: ['yes', 'no'], status: 'pending' },
+    autoYes: { enabled: true, expiresAt: null, lastSuppression },
+  });
+  const stderrOf = () => mockConsoleError.mock.calls.map(c => String(c[0])).join('\n');
+  const partial = { reason: 'partial-answer', mode: null, promptType: 'yes_no', at: Date.now() };
+
+  it('names the partial input, exits 10 and keeps the raw reason in --json', async () => {
+    mockFetchSequence([{ data: suppressedPrompt({ ...partial, at: Date.now() }) }]);
+    const { createWaitCommand } = await import('../../../../src/cli/commands/wait');
+    await createWaitCommand().parseAsync(['node', 'wait', 'wt1']);
+
+    const stderr = stderrOf();
+    expect(stderr).toContain('because an earlier answer left partial input; Auto-Yes is waiting for a human');
+    expect(stderr).toContain('reason=partial-answer');
+    expect(stderr).not.toContain('does not recognise');
+    expect(stderr).not.toContain('by contract policy');
+    expect(mockExit).toHaveBeenCalledWith(WaitExitCode.PROMPT_DETECTED);
+    const output = JSON.parse(mockConsoleLog.mock.calls[0][0]);
+    expect(output.autoYesSuppression).toMatchObject({ reason: 'partial-answer', mode: null, promptType: 'yes_no' });
+  });
+
+  it('negative: an unknown reason is still named verbatim as unrecognised', async () => {
+    mockFetchSequence([{ data: suppressedPrompt({ ...partial, reason: 'partial-answer-2', at: Date.now() }) }]);
+    const { createWaitCommand } = await import('../../../../src/cli/commands/wait');
+    await createWaitCommand().parseAsync(['node', 'wait', 'wt1']);
+
+    expect(stderrOf()).toContain('for a reason this CLI does not recognise (partial-answer-2)');
+    expect(mockExit).toHaveBeenCalledWith(WaitExitCode.PROMPT_DETECTED);
+  });
+});
+
+/**
  * Issue #1725: a dialog only the structured layer can see.
  *
  * The server publishes `isPromptWaiting: true` with a `promptData` that has no

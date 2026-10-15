@@ -444,7 +444,9 @@ export async function POST(
             setAutoYesEnabled(id, toolId, false, undefined, undefined, extractInstanceId(key) ?? undefined);
           }
         }
-        stopAutoYesPollingByWorktree(id);
+        // Issue #3713: a disable, not a delete — the memory of an answer stopped
+        // part-way (and a send still in flight) is kept, as for one agent.
+        stopAutoYesPollingByWorktree(id, { keepPartialAnswers: true });
         state = { enabled: false, enabledAt: 0, expiresAt: 0 };
       }
     }

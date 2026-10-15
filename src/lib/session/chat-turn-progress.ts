@@ -21,6 +21,7 @@ import {
 import { createLogger } from '@/lib/logger';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { getOrInitGlobal } from '../global-state';
+import { maySnapshotPublish } from '@/lib/polling/poller-owner';
 
 // Issue #3215: the name is the one these lines have always been logged under.
 // It is what an operator greps for, so it did not move with the code.
@@ -228,6 +229,31 @@ export async function buildChatTurnProgress(
   source: ChatTurnProgressSource,
   now: number = Date.now(),
 ): Promise<ChatTurnProgressEvent | null> {
+  const prepared = await prepareChatTurnProgress(target, source, now);
+  return prepared === null ? null : commitChatTurnProgress(target, prepared);
+}
+
+/** A frame read and bounded, not yet remembered (Issue #3705). */
+interface PreparedChatTurnProgress {
+  turnKey: string;
+  body: string;
+  partial: boolean;
+}
+
+/**
+ * The half of {@link buildChatTurnProgress} that awaits: the throttle, the read
+ * and the bound — and nothing remembered about the body (Issue #3705).
+ *
+ * Split so that {@link emitChatTurnProgress} can remember a body only once it is
+ * actually going out. Remembered at the build and refused at the broadcast (a
+ * poller snapshot superseded in the `await` between the two), the body stood
+ * as "already sent" and suppressed the successor's identical frame.
+ */
+async function prepareChatTurnProgress(
+  target: ChatTurnProgressTarget,
+  source: ChatTurnProgressSource,
+  now: number,
+): Promise<PreparedChatTurnProgress | null> {
   const key = chatTurnProgressKey(target);
   const state = chatTurnProgressState.get(key) ?? newChatTurnProgressState();
 
@@ -244,22 +270,47 @@ export async function buildChatTurnProgress(
     return null;
   }
   if (!draft || draft.body.length === 0) return null;
+  // Issue #3705: the frame of a poller snapshot whose tick was superseded while
+  // the transcript was read is not built — and, above all, not remembered: the
+  // turn key and body are what suppress the successor's identical frame.
+  if (!maySnapshotPublish()) return null;
 
   const bounded = truncateChatTurnProgressBody(draft.body);
   if (draft.turnKey === state.turnKey && bounded.body === state.body) return null;
+  return {
+    turnKey: draft.turnKey,
+    body: bounded.body,
+    partial: bounded.truncated || draft.partial === true,
+  };
+}
 
-  state.turnKey = draft.turnKey;
-  state.body = bounded.body;
+/**
+ * Remember a prepared frame and give it its version — synchronous, so the
+ * caller can make it the last step before the broadcast (Issue #3705). The
+ * no-change rule is applied again against what is remembered NOW, since another
+ * frame may have gone out while the read was in flight.
+ */
+function commitChatTurnProgress(
+  target: ChatTurnProgressTarget,
+  prepared: PreparedChatTurnProgress,
+): ChatTurnProgressEvent | null {
+  const key = chatTurnProgressKey(target);
+  const state = chatTurnProgressState.get(key) ?? newChatTurnProgressState();
+  if (prepared.turnKey === state.turnKey && prepared.body === state.body) return null;
+
+  state.turnKey = prepared.turnKey;
+  state.body = prepared.body;
   state.version += 1;
+  chatTurnProgressState.set(key, state);
 
   return {
     type: CHAT_TURN_PROGRESS_EVENT_TYPE,
     worktreeId: target.worktreeId,
     cliToolId: target.cliToolId,
     instanceId: target.instanceId ?? target.cliToolId,
-    turnKey: draft.turnKey,
-    body: bounded.body,
-    partial: bounded.truncated || draft.partial === true,
+    turnKey: prepared.turnKey,
+    body: prepared.body,
+    partial: prepared.partial,
     version: state.version,
     done: false,
   };
@@ -298,9 +349,16 @@ export async function emitChatTurnProgress(
       return false;
     }
 
-    const event = await buildChatTurnProgress(target, source, now);
+    const prepared = await prepareChatTurnProgress(target, source, now);
     // Not logged: null is the throttle, an unchanged body, or a turn with no
     // text yet — the quiet, correct majority of ticks.
+    if (!prepared) return false;
+    // Issue #3705: asked after the build's `await`, and BEFORE the body is
+    // remembered — a frame refused here leaves nothing behind that would make
+    // the successor's same body look already sent. From here to the broadcast
+    // there is no `await`.
+    if (!maySnapshotPublish()) return false;
+    const event = commitChatTurnProgress(target, prepared);
     if (!event) return false;
 
     broadcast(target.worktreeId, event);
@@ -372,6 +430,10 @@ export async function publishChatTurnProgress(
     // sessions nobody is watching, which is the bargain that was already being
     // struck one frame later.
     const { hasRoomSubscribers } = await import('@/lib/ws-server');
+    // Issue #3705: the progress of a superseded tick's snapshot is not started.
+    // The detached read below keeps the snapshot's owner in its async context
+    // and asks again before it remembers or broadcasts anything.
+    if (!maySnapshotPublish()) return;
     if (!hasRoomSubscribers(worktreeId)) {
       logChatTurnProgressOutcome(target, 'no-subscribers', null);
       return;

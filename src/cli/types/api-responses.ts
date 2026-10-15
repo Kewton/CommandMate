@@ -183,12 +183,14 @@ export interface WorktreeDetailResponse extends WorktreeItem {
  * Mirrors: src/lib/polling/auto-yes-resolver.ts AutoYesSuppressionReason
  * (Issue #1843) — every value `autoYes.lastSuppression.reason` can carry.
  *
- * Copied rather than imported: tsconfig.cli.json sets `"paths": {}`, and the
- * server module that declares the union imports `@/config/auto-yes-config`, so
- * even a type-only import of it fails `npm run build:cli`. The copy is held to
- * the original by a bidirectional assignability assertion in
- * tests/unit/cli/config/cross-validation.test.ts, which fails `tsc --noEmit`
- * the moment a reason is added server-side.
+ * Re-exported, not copied: the union lives in the dependency-free module
+ * `src/lib/polling/auto-yes-suppression-reason.ts`, which the CLI imports by a
+ * relative path (tsconfig.cli.json sets `"paths": {}`; the resolver that also
+ * re-exports it imports `@/config/auto-yes-config`, so the CLI cannot reach it
+ * through there). tests/unit/cli/config/cross-validation.test.ts keeps a
+ * bidirectional assignability assertion between this export and the resolver's,
+ * and `SUPPRESSION_CAUSE` in src/cli/commands/wait.ts is a `Record` over it, so
+ * a reason added server-side does not compile until `wait` has its wording.
  *
  * The first four are verdicts of a contract's `autoYes` block. `agent-launch-dialog`
  * is NOT: Issue #1829 records a CLI-lifecycle dialog the poller deliberately

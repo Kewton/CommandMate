@@ -761,6 +761,7 @@ async function sendCommandCodeMultiSelectAnswer(
   sessionName: string,
   promptData: MultipleChoicePromptData,
   wanted: readonly number[],
+  stillCurrent?: () => boolean,
 ): Promise<void> {
   const cursor = promptData.options.find((option) => option.isDefault === true);
   if (cursor === undefined) {
@@ -776,13 +777,14 @@ async function sendCommandCodeMultiSelectAnswer(
     ...current.filter((n) => !wanted.includes(n)),
   ].sort((a, b) => a - b);
   if (toggles.length > 0) {
-    await sendSpecialKeys(sessionName, toggles.map(String));
+    await sendSpecialKeysWhileCurrent(sessionName, toggles.map(String), stillCurrent);
   }
   const keysSent = toggles.length > 0;
 
   // 2. Read the screen back and refuse unless it is the same question with
   //    exactly the requested boxes ticked.
   const afterToggle = await recaptureAfterKeys(sessionName);
+  assertStillCurrent(stillCurrent, keysSent);
   if (afterToggle === null) {
     throw new MultiSelectAnswerRejectedError('recapture-failed', keysSent, wanted);
   }
@@ -812,15 +814,17 @@ async function sendCommandCodeMultiSelectAnswer(
   if (cursorNow === undefined) {
     throw new MultiSelectAnswerRejectedError('cursor-unknown', keysSent, wanted);
   }
-  await sendSpecialKeys(sessionName, [
-    ...downKeys(verified.options.length - cursorNow.number + 1),
-    'Enter',
-  ]);
+  await sendSpecialKeysWhileCurrent(
+    sessionName,
+    [...downKeys(verified.options.length - cursorNow.number + 1), 'Enter'],
+    stillCurrent,
+  );
 
   // 4. The second stage. `Submit` opens the Review page and the answer is sent
   //    from there; `Next` advances to the following question, which IS the
   //    commit for this one (its tab turns `✔`).
   const afterConfirm = await recaptureAfterKeys(sessionName);
+  assertStillCurrent(stillCurrent, true);
   if (afterConfirm === null) {
     throw new MultiSelectAnswerRejectedError('recapture-failed', true, wanted);
   }
@@ -831,7 +835,7 @@ async function sendCommandCodeMultiSelectAnswer(
     if (review.hasUnansweredWarning) {
       throw new MultiSelectAnswerRejectedError('review-unanswered', true, wanted);
     }
-    await sendSpecialKeys(sessionName, ['Enter']);
+    await sendSpecialKeysWhileCurrent(sessionName, ['Enter'], stillCurrent);
     return;
   }
 
@@ -842,6 +846,53 @@ async function sendCommandCodeMultiSelectAnswer(
     next.prompt.promptData.question !== promptData.question;
   if (!advanced) {
     throw new MultiSelectAnswerRejectedError('not-committed', true, wanted);
+  }
+}
+
+/**
+ * The caller's `stillCurrent` said no after one of the send's waits
+ * (Issue #3706): the keys not yet sent were not sent. Keys already typed cannot
+ * be taken back, so {@link keysSent} says whether the pane was touched; either
+ * way the answer was NOT completed and must not be recorded as one.
+ */
+export class PromptAnswerAbortedError extends Error {
+  constructor(
+    /** Whether any key reached the pane before the stop. */
+    readonly keysSent: boolean,
+  ) {
+    super(`Prompt answer stopped by its caller (${keysSent ? 'some keys were sent' : 'no key was sent'})`);
+    this.name = 'PromptAnswerAbortedError';
+  }
+}
+
+/** Stop here when the caller's `stillCurrent` says no (Issue #3706). */
+function assertStillCurrent(stillCurrent: (() => boolean) | undefined, keysSent: boolean): void {
+  if (stillCurrent && !stillCurrent()) throw new PromptAnswerAbortedError(keysSent);
+}
+
+/**
+ * `sendSpecialKeys`, asking `stillCurrent` between the keys when the caller
+ * gave one (Issue #3706). Without it the call is exactly the old two-argument
+ * one, so manual answers and every other caller send as before.
+ */
+async function sendSpecialKeysWhileCurrent(
+  sessionName: string,
+  keys: string[],
+  stillCurrent: (() => boolean) | undefined,
+): Promise<void> {
+  if (!stillCurrent) {
+    await sendSpecialKeys(sessionName, keys);
+    return;
+  }
+  try {
+    await sendSpecialKeys(sessionName, keys, { shouldContinue: stillCurrent });
+  } catch (error: unknown) {
+    // By name rather than `instanceof`: test doubles of `./tmux/tmux` need not
+    // export the class.
+    if (error instanceof Error && error.name === 'SpecialKeysAbortedError') {
+      throw new PromptAnswerAbortedError(true);
+    }
+    throw error;
   }
 }
 
@@ -868,6 +919,15 @@ export interface SendPromptAnswerParams {
    * Omit it and the guard reads the pane itself; see {@link readGuardFrame}.
    */
   frame?: string;
+  /**
+   * Asked after every wait inside the send — the guard's pane read, the delay
+   * between two keys, the settle before the Enter, a re-read — and `false`
+   * stops before the next key with {@link PromptAnswerAbortedError}
+   * (Issue #3706). Auto-Yes passes its tick's generation check, so a grant
+   * withdrawn mid-send does not finish the answer. Omit it (manual answers) and
+   * nothing about the send changes.
+   */
+  stillCurrent?: () => boolean;
 }
 
 /**
@@ -880,7 +940,8 @@ export interface SendPromptAnswerParams {
  * - src/lib/auto-yes-manager.ts (L340-399)
  */
 export async function sendPromptAnswer(params: SendPromptAnswerParams): Promise<void> {
-  const { sessionName, answer, cliToolId, promptData, fallbackPromptType, fallbackDefaultOptionNumber } = params;
+  const { sessionName, answer, cliToolId, promptData, fallbackPromptType, fallbackDefaultOptionNumber, stillCurrent } =
+    params;
 
   // Issue #2755: Command Code's checkbox question, before every guard below.
   // Its answer is a SET (`"1,3"`), which none of them can read — `/^\d+$/` is
@@ -891,7 +952,7 @@ export async function sendPromptAnswer(params: SendPromptAnswerParams): Promise<
   // a two-stage confirm, not a digit and an Enter.
   const multiSelect = readMultiSelectRequest(params);
   if (multiSelect !== null) {
-    await sendCommandCodeMultiSelectAnswer(sessionName, multiSelect.promptData, multiSelect.wanted);
+    await sendCommandCodeMultiSelectAnswer(sessionName, multiSelect.promptData, multiSelect.wanted, stillCurrent);
     invalidateCache(sessionName);
     return;
   }
@@ -915,6 +976,9 @@ export async function sendPromptAnswer(params: SendPromptAnswerParams): Promise<
   // the Enter after them confirms that row — so the cursor has to be checked
   // here too, before the branch.
   assertFreeTextCursorIsOnTheField(params);
+
+  // Issue #3706: the guard above may have read the pane; nothing is typed yet.
+  assertStillCurrent(stillCurrent, false);
 
   // Determine if this is an arrow-key-navigated multiple-choice prompt.
   // Claude Code and Antigravity (agy) both render selection menus that only
@@ -969,7 +1033,7 @@ export async function sendPromptAnswer(params: SendPromptAnswerParams): Promise<
       keys.push(...buildNavigationKeys(downToNext));
       // 4. Enter to submit
       keys.push('Enter');
-      await sendSpecialKeys(sessionName, keys);
+      await sendSpecialKeysWhileCurrent(sessionName, keys, stillCurrent);
     } else {
       // Single-select: navigate and Enter to select
       const navigationKeys = buildNavigationKeys(offset);
@@ -987,7 +1051,7 @@ export async function sendPromptAnswer(params: SendPromptAnswerParams): Promise<
       const keys: string[] = (isAskUserQuestionPicker && offset === 0)
         ? ['Down', 'Up', 'Enter']
         : [...navigationKeys, 'Enter'];
-      await sendSpecialKeys(sessionName, keys);
+      await sendSpecialKeysWhileCurrent(sessionName, keys, stillCurrent);
     }
   } else {
     // Standard CLI prompt: send text + Enter (y/n, Approve?, etc.)
@@ -999,6 +1063,8 @@ export async function sendPromptAnswer(params: SendPromptAnswerParams): Promise<
     if (!shouldSuppressEnter(params, resolvedSubmitMode, dialog)) {
       // Wait a moment for the input to be processed
       await new Promise(resolve => setTimeout(resolve, TUI_TEXT_INPUT_WAIT_MS));
+      // Issue #3706: the text is typed; the Enter that submits it is not.
+      assertStillCurrent(stillCurrent, true);
 
       // Send Enter
       await sendKeys(sessionName, '', true);

@@ -1,0 +1,40 @@
+{
+  "version": "0.46.1",
+  "date": "2026-10-16",
+  "highlight": {
+    "ja": "Auto-Yes を切った直後や切り替えの最中に、古い回答が送られたり同じ確認に二重に答えたりする問題を直しました。",
+    "en": "Fixed Auto-Yes sending a stale answer, or answering the same prompt twice, right after it was turned off or switched."
+  },
+  "added": [],
+  "improved": [],
+  "fixed": [
+    {
+      "ja": "Auto-Yes を切った直後に、待ちの間に始まっていた回答が 1 回送られてしまう問題を直しました。",
+      "en": "Fixed an answer that had already started being sent once right after Auto-Yes was turned off."
+    },
+    {
+      "ja": "途中まで入力した回答が残っているとき、Auto-Yes が同じ確認にもう一度入力しないようにしました。",
+      "en": "Auto-Yes no longer types into the same prompt again when an earlier answer was left half-entered."
+    },
+    {
+      "ja": "worktree の名前が変わったときも、途中まで入力した回答の記録が引き継がれるようにしました。",
+      "en": "The record of a half-entered answer now carries over when a worktree is renamed."
+    },
+    {
+      "ja": "止めたセッションの古い処理が、返答の保存や完了の通知を遅れて出す問題を直しました。",
+      "en": "Fixed a stopped session's old work saving replies or sending completion notices late."
+    },
+    {
+      "ja": "予約送信をキャンセルしたのに送信されてしまうことがある問題を直しました。",
+      "en": "Fixed a scheduled message sometimes being sent even though it had been cancelled."
+    },
+    {
+      "ja": "Esc キーが、最大化したファイルや検索欄、メニューなどを前面のものから 1 つずつ閉じるようにしました。",
+      "en": "The Esc key now closes the front-most layer first, one at a time, such as a maximized file, a search box or a menu."
+    },
+    {
+      "ja": "チャットの検索で、記号を表す書き方（&lt; など）に一致したときも強調されるようにしました。",
+      "en": "Chat search now highlights matches on character references such as &lt;."
+    }
+  ]
+}

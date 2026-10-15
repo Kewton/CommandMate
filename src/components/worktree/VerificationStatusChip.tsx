@@ -59,7 +59,12 @@ import type {
   VerificationGateResultView,
   VerificationRunListItem,
 } from '@/lib/api/verification-api';
-import { isUnhandledEscape } from '@/lib/escape-key';
+import {
+  isCoveredByViewportLayer,
+  isUnhandledEscape,
+  markEscapeClosedLayer,
+} from '@/lib/escape-key';
+import { Z_INDEX } from '@/config/z-index';
 
 /** Characters of the task title kept inline before ellipsis. */
 const TITLE_MAX_LENGTH = 36;
@@ -108,6 +113,13 @@ export interface VerificationStatusChipProps {
    */
   popover?: 'inline' | 'floating';
 }
+
+/**
+ * Issue #3681: the floating reason's z-index, inline (not a `z-50` class) so
+ * its Escape handler can read where it stacks against a viewport layer.
+ * Issue #3691: the inline reason's too.
+ */
+const POPOVER_Z_INDEX = Z_INDEX.MODAL;
 
 /** Width of the reason popover (`w-72`), and its gap to the viewport edge. */
 const POPOVER_WIDTH_PX = 288;
@@ -242,6 +254,20 @@ export const VerificationStatusChip = memo(function VerificationStatusChip({
   }, [onOpen]);
 
   const reasonToggleRef = useRef<HTMLButtonElement | null>(null);
+  const inlinePopoverRef = useRef<HTMLDivElement | null>(null);
+
+  /**
+   * Issue #3681 / #3691: whether a viewport layer (a maximized file or editor)
+   * is drawn over the open reason, floating or inline. The inline one is read
+   * on its own element: it has its own z-index (inline, so it can be read) in
+   * whatever stacking context the chip sits in, which on the phone shell is the
+   * root one the file screen shares.
+   */
+  const isReasonCovered = useCallback((): boolean => {
+    const layer = popoverRef.current ?? inlinePopoverRef.current;
+    return layer !== null && isCoveredByViewportLayer(layer);
+  }, []);
+
   const toggleReason = useCallback(() => {
     // Issue #3660: opening puts the keyboard on ⓘ (Safari does not focus a
     // clicked button), so the next Escape lands in the chip and the chip's
@@ -259,13 +285,18 @@ export const VerificationStatusChip = memo(function VerificationStatusChip({
   // `preventDefault` makes both stand down (the header tools' "…" claims its
   // Escape the same way). The reason keeps `data-floating-layer="true"` — a
   // press in it is only "not outside" for the "…" panel.
+  //
+  // Issue #3691: behind a viewport layer the press is that layer's, from the
+  // chip as from anywhere else — neither close nor claim it, or the layer in
+  // front would stay and the reason behind it go.
   const handleRootKeyDown = useCallback(
     (event: React.KeyboardEvent<HTMLDivElement>) => {
       if (!reasonOpen || !isUnhandledEscape(event.nativeEvent)) return;
+      if (isReasonCovered()) return;
       event.preventDefault();
       setReasonOpen(false);
     },
-    [reasonOpen]
+    [reasonOpen, isReasonCovered]
   );
 
   // Dismiss on Escape or a press outside. `pointerdown` rather than `click` so
@@ -287,6 +318,13 @@ export const VerificationStatusChip = memo(function VerificationStatusChip({
       // itself — Radix calls `preventDefault`) is not ours to act on.
       // Issue #3591: the header tools' "…" list closing itself is one too.
       if (!isUnhandledEscape(event)) return;
+      // Issue #3681: behind a maximized file (a viewport layer, z 55) the
+      // press is the file's to undo first; the reason, then in sight, closes
+      // on the next one. Issue #3691: the inline reason too.
+      if (isReasonCovered()) return;
+      // In front of one, tell it (a window / document listener) that this
+      // press is spent — still unclaimed for the layers it already was.
+      markEscapeClosedLayer(event);
       setReasonOpen(false);
     };
     document.addEventListener('mousedown', onPointerDown);
@@ -295,7 +333,7 @@ export const VerificationStatusChip = memo(function VerificationStatusChip({
       document.removeEventListener('mousedown', onPointerDown);
       document.removeEventListener('keydown', onKeyDown);
     };
-  }, [reasonOpen]);
+  }, [reasonOpen, isReasonCovered]);
 
   // Issue #3590: place the floating popover before paint, and keep it under
   // the chip for as long as it is open. The chip can move without anything
@@ -423,10 +461,14 @@ export const VerificationStatusChip = memo(function VerificationStatusChip({
       </div>
       {reasonOpen && popover === 'inline' && (
         <div
+          ref={inlinePopoverRef}
           id={popoverId}
           role="tooltip"
           data-testid="verification-chip-reason-popover"
-          className="absolute left-0 top-full z-50 mt-1 w-72 max-w-[80vw] rounded-lg border border-border bg-surface p-3 text-xs leading-relaxed text-foreground shadow-lg"
+          // Issue #3691: inline (not a `z-50` class), as the floating one, so
+          // Escape can read where it stacks against a viewport layer.
+          style={{ zIndex: POPOVER_Z_INDEX }}
+          className="absolute left-0 top-full mt-1 w-72 max-w-[80vw] rounded-lg border border-border bg-surface p-3 text-xs leading-relaxed text-foreground shadow-lg"
         >
           {reasonBody}
         </div>
@@ -446,10 +488,15 @@ export const VerificationStatusChip = memo(function VerificationStatusChip({
             data-floating-layer="true"
             style={
               floatingAt
-                ? { top: floatingAt.top, left: floatingAt.left, width: floatingAt.width }
-                : { visibility: 'hidden' }
+                ? {
+                    top: floatingAt.top,
+                    left: floatingAt.left,
+                    width: floatingAt.width,
+                    zIndex: POPOVER_Z_INDEX,
+                  }
+                : { visibility: 'hidden', zIndex: POPOVER_Z_INDEX }
             }
-            className="fixed z-50 rounded-lg border border-border bg-surface p-3 text-xs leading-relaxed text-foreground shadow-lg"
+            className="fixed rounded-lg border border-border bg-surface p-3 text-xs leading-relaxed text-foreground shadow-lg"
           >
             {reasonBody}
           </div>,

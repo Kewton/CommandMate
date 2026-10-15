@@ -1407,8 +1407,26 @@ describe('home-entries: ~/.zcompdump.<host>.<pid> (#3664)', () => {
     const { diff, home } = homeAdded('.zcompdump', '.zcompdump.mymac.local.48213');
     expect(diff.status).toBe('clean');
     expect(home.added).toEqual([]);
-    expect(home.ignoredByConfig.map((c) => c.key)).toEqual(['.zcompdump', '.zcompdump.mymac.local.48213']);
-    expect(formatEnvCleanReport(diff)).toContain('.zcompdump.mymac.local.48213');
+    expect(home.ignoredBuiltIn.map((c) => c.key)).toEqual(['.zcompdump', '.zcompdump.mymac.local.48213']);
+    expect(home.ignoredByConfig).toEqual([]);
+    const report = formatEnvCleanReport(diff);
+    expect(report).toContain('ignored (built-in): .zcompdump, .zcompdump.mymac.local.48213');
+    expect(report).not.toContain('options.envCleanIgnoreHomeEntries');
+  });
+
+  it('keeps a name listed in the config on the config line, next to a built-in one', () => {
+    const diff = diffEnvSnapshots(
+      snapshot({ 'home-entries': probe([entry('Documents')]) }),
+      snapshot({
+        'home-entries': probe([entry('Documents'), entry('.semgrep'), entry('.zcompdump.h.1')]),
+      }),
+      CONTEXT,
+      { ignoreHomeEntries: ['.semgrep'] }
+    );
+    const report = formatEnvCleanReport(diff);
+    expect(report).toContain('ignored (options.envCleanIgnoreHomeEntries): .semgrep');
+    expect(report).toContain('ignored (built-in): .zcompdump.h.1');
+    expect(report).not.toContain('.semgrep, ');
   });
 
   it('still violates for any other new entry, alone or next to a compinit cache file', () => {

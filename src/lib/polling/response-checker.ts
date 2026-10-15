@@ -86,6 +86,7 @@ import { resolveSessionName } from '@/lib/cli-tools/session-name';
 import { probeGeometryDelegation } from '@/lib/tmux/geometry-delegation';
 import { isLiveAttachEligibleSession } from '@/lib/session/tmux-session-surface';
 import { getPollerKey, stopPolling } from './response-poller-core';
+import { currentPollerOwner, mayActForPollerKey, type PollerOwner } from './poller-owner';
 import { notifyPushSubscribers } from '@/lib/push';
 // Issue #1790: imported by deep path, not through `@/lib/push`. Suites that
 // replace the barrel to count notifications (e.g. the #1547 escalation test)
@@ -564,6 +565,48 @@ function markOrSettleStructuredHistoryRecheck(pollerKey: string, recorded: boole
   }
 }
 
+/**
+ * Whether this tick may still act for `pollerKey` after the `await` it has just
+ * resumed from, logging the refusal when it may not (Issue #3705).
+ *
+ * #3663, #3684 and #3701 asked {@link mayActForPollerKey} at the writes that had
+ * been reported, one at a time. A tick resumes from an `await` with no idea
+ * whether its chain was stopped, cut loose past `STALLED_TICK_TIMEOUT` or moved
+ * by a worktree-ID migration in the meantime, and every write after that
+ * `await` — the prompt sweep, the waiting edge, the completion push, the cursor,
+ * the fault notifier, the TUI accumulator, the recheck and skip-streak state —
+ * lands under a key it no longer owns, on whatever the successor has put there.
+ * So the question is asked after every `await` of the tick, named by the point
+ * it resumed from, and the writes below each point run only on a yes.
+ *
+ * Not asked where a self-stop hands back its verdict (`return await
+ * recordCompletedResponse(…)`): `runPollTick` settles the pause from that
+ * value, and a stop the tick raised itself must not lose what it recorded.
+ *
+ * @param ctx - What this tick is keyed by
+ * @param after - The `await` the tick has just resumed from, for the log line
+ */
+function mayStillActAfter(ctx: ResponseCheckContext, after: string): boolean {
+  if (mayActForPollerKey(ctx.pollerKey)) return true;
+  // One line per retired tick, at the first point that turned it away: a tick
+  // refused at the capture is asked again after the reader and the log.
+  const owner = currentPollerOwner();
+  if (owner === undefined || !refusalLogged.has(owner)) {
+    if (owner) refusalLogged.add(owner);
+    logger.info('retired-tick-refused', {
+      worktreeId: ctx.worktreeId,
+      cliToolId: ctx.cliToolId,
+      instanceId: ctx.resolvedInstanceId,
+      generation: owner?.generation,
+      after,
+    });
+  }
+  return false;
+}
+
+/** The retired chains {@link mayStillActAfter} has already logged (Issue #3705). */
+const refusalLogged = new WeakSet<PollerOwner>();
+
 // The steps of checkForResponse's save path, split out one function per step
 // (Issue #3213). They are declared in the order checkForResponse calls them, and
 // each is called at the position its lines had, so nothing a step writes — a
@@ -623,23 +666,31 @@ interface CompletedTurn {
  * @param ctx - What this tick is keyed by
  * @param output - The capture this tick made
  * @param lastCapturedLine - Its cursor, 0 when there is none
+ * @param owns - Whether the tick still owns its key (Issue #3705); false reads
+ *   the frame and writes nothing
  * @returns What the tick goes on with, or `false` when the tick ends here
  */
 function extractCompletedTurn(
   ctx: ResponseCheckContext,
   output: string,
-  lastCapturedLine: number
+  lastCapturedLine: number,
+  owns: boolean
 ): CompletedTurn | false {
   const { db, worktreeId, cliToolId, instanceId, resolvedInstanceId, pollerKey } = ctx;
 
   // Issue #2000: the frame is in hand, so this is the cheapest place to ask
   // whether the model API has stalled the session. Level in, edge out — see
   // the helper.
-  observeUpstreamFaultForPush(worktreeId, cliToolId, instanceId, output);
+  //
+  // Issue #3705: every write in this function is the caller's `owns` — asked
+  // right after the capture, with no `await` since. A retired tick's frame is
+  // read, and none of it lands on the fault episode, the accumulator, the skip
+  // streaks or the pending prompts of the key it lost.
+  if (owns) observeUpstreamFaultForPush(worktreeId, cliToolId, instanceId, output);
 
   // Layer 2: Accumulate TUI content for full-screen TUI tools, so a turn that
   // outgrows the alternate-screen pane keeps the head that has scrolled away.
-  if (cliToolId === 'opencode' || cliToolId === 'copilot') {
+  if (owns && (cliToolId === 'opencode' || cliToolId === 'copilot')) {
     // Issue #1911: opencode is accumulated from the CURRENT TURN'S REGION
     // rather than the whole frame. Feeding the raw pane seeded the accumulator
     // with the previous turn's transcript, the echoed prompt and the bottom
@@ -663,7 +714,7 @@ function extractCompletedTurn(
     //
     // Issue #3552: the same frame ends a run of duplicate response ticks for
     // the same reason — an unfinished frame is not the saved reply.
-    if (result) {
+    if (owns && result) {
       resetDuplicatePromptSkipStreak(pollerKey);
       resetDuplicateResponseSkipStreak(pollerKey);
     }
@@ -672,7 +723,7 @@ function extractCompletedTurn(
     const { thinkingPattern } = getCliToolPatterns(cliToolId);
     const cleanOutput = stripAnsi(output);
     const tailLines = cleanOutput.split('\n').slice(-THINKING_TAIL_LINE_COUNT).join('\n');
-    if (thinkingPattern.test(tailLines)) {
+    if (owns && thinkingPattern.test(tailLines)) {
       // Intended twin of the sweep in recordCompletedResponse: this one runs when
       // working is visible on an unfinished frame, that one when a response is
       // recorded (Issue #31).
@@ -750,6 +801,22 @@ function savePromptMessage(
   isFullScreenTui: boolean
 ): boolean {
   const { db, worktree, worktreeId, cliToolId, instanceId, resolvedInstanceId, pollerKey } = ctx;
+
+  // Issue #3701: the question #3663 / #3684 ask, for the prompt a tick retired
+  // during the capture's `await` then finds on the pane — no row, broadcast,
+  // task event, push or waiting episode under the key it lost. Asked BEFORE the
+  // dedup below, which registers the hash before the save: a refused tick that
+  // registered it would make the successor drop the same prompt as a
+  // duplicate. No `await` from here to the end of this function.
+  if (!mayActForPollerKey(pollerKey)) {
+    logger.info('prompt-save-refused', {
+      worktreeId,
+      cliToolId,
+      instanceId: resolvedInstanceId,
+      generation: currentPollerOwner()?.generation,
+    });
+    return false;
+  }
 
   // Issue #565: Content hash-based duplicate prompt prevention
   const promptContent = promptDetection.rawContent || promptDetection.cleanContent;
@@ -881,12 +948,14 @@ function savePromptMessage(
  * @param cliToolId - CLI tool identifier
  * @param result - The complete extraction this tick made
  * @param pollerKey - Poller key ("worktreeId:instanceId")
+ * @param owns - Whether the tick still owns its key (Issue #3705)
  * @returns The cleaned response
  */
 function cleanCompletedResponse(
   cliToolId: CLIToolType,
   result: ExtractionResult,
-  pollerKey: string
+  pollerKey: string,
+  owns: boolean
 ): string {
   // Clean up responses
   let cleanedResponse = result.response;
@@ -900,7 +969,9 @@ function cleanCompletedResponse(
     cleanedResponse = cleanCopilotResponse(sourceContent);
     cleanedResponse = truncateMessage(cleanedResponse, COPILOT_MAX_MESSAGE_LENGTH, COPILOT_TRUNCATION_MARKER);
 
-    clearTuiAccumulator(pollerKey);
+    // Issue #3705: read, but not cleared, by a tick that lost the key — the
+    // successor may already be accumulating its own turn under it.
+    if (owns) clearTuiAccumulator(pollerKey);
   } else if (cliToolId === 'opencode') {
     // Issue #1911 defect 3: opencode wrote to the Layer-2 accumulator but never
     // read it, so any turn longer than the pane was saved without its head.
@@ -922,7 +993,7 @@ function cleanCompletedResponse(
       : result.response;
     cleanedResponse = cleanOpenCodeResponse(sourceContent);
 
-    clearTuiAccumulator(pollerKey);
+    if (owns) clearTuiAccumulator(pollerKey);
   }
 
   return cleanedResponse;
@@ -948,6 +1019,15 @@ async function recheckDuplicateResponse(
   claudeMetadata: ReturnType<typeof parseClaudeOutput> | undefined
 ): Promise<boolean> {
   const { db, worktree, worktreeId, cliToolId, instanceId, resolvedInstanceId, pollerKey } = ctx;
+
+  // Issue #3705 (review): a retired tick reaches this function too. The dedup
+  // answers "duplicate" on a hash match BEFORE it asks about ownership (it only
+  // refuses to REGISTER a hash), and the hash it matches may be the successor's
+  // — the same reply, saved by the chain that replaced this one while this
+  // tick's capture was in flight. Everything below writes under the key (the
+  // skip-log claim, the cursor, the recheck claim, then the reader), so the
+  // question is asked first, with no `await` between it and those writes.
+  if (!mayStillActAfter(ctx, 'capture')) return false;
 
   // Issue #1695: this branch used to drop the response silently — the
   // prompt-side guard above has logged its skip since #565, this one
@@ -1027,6 +1107,10 @@ async function recheckDuplicateResponse(
       worktreePath: worktree.path,
       transcriptPathHint: claudeMetadata?.logFilePath ?? null,
     });
+    // Issue #3705: the recheck the successor is owed is not settled, and its
+    // hold not dropped, by a tick retired while the reader ran. What the reader
+    // answered is still the answer (it asks the same question before it writes).
+    if (!mayStillActAfter(ctx, 'recheck-reader')) return recaptured;
     if (recaptured) {
       settleStructuredHistoryRecheck(pollerKey);
       // Issue #2436: the turn is now the agent's own Markdown, so a
@@ -1092,7 +1176,10 @@ function recordOrHoldScrapedResponse(
   // width and gutter-prefixed, so no content check could ever recognise them
   // as the same reply.
   if (holdScrapedHistory) {
-    holdScrapedResponse(pollerKey, {
+    // Issue #3663: refused (false) to a tick whose chain was retired while it
+    // awaited the reader — a stop, a stalled-tick restart or a worktree-ID
+    // migration. The store logs that, so this tick does not claim a hold.
+    const held = holdScrapedResponse(pollerKey, {
       worktreeId,
       cliToolId,
       instanceId: resolvedInstanceId,
@@ -1108,20 +1195,37 @@ function recordOrHoldScrapedResponse(
       transcriptPathHint: claudeMetadata?.logFilePath ?? null,
       expiresAt: Date.now() + PENDING_SCRAPE_HOLD_MS,
     });
-    logger.info('structured-history-scrape-held', {
+    if (held) {
+      logger.info('structured-history-scrape-held', {
+        worktreeId,
+        cliToolId,
+        instanceId: resolvedInstanceId,
+        scrapedLength: cleanedResponse.length,
+        holdMs: PENDING_SCRAPE_HOLD_MS,
+      });
+
+      // The completion edge is announced HERE and not at the flush, because the
+      // turn finished now. A relay waiting on this session gets #2401's grace
+      // window to find a turn-keyed row, which is exactly the row the hold is
+      // waiting for; delaying the announcement by the hold would delay every
+      // delivery by it too. Issue #3684: only for a hold that was taken — a
+      // refused one is a retired tick, which announces nothing under the key
+      // it lost, as in the immediate-save branch below.
+      onRelayTurnCompleted(worktreeId, cliToolId, resolvedInstanceId, false);
+    }
+  } else if (!suppressScrapedHistory && !mayActForPollerKey(pollerKey)) {
+    // Issue #3684: the same question the hold asks (#3663), for the reply saved
+    // at once — a tick retired while it awaited the reader or the log writes no
+    // row, broadcast or relay edge under the key it lost. No `await` between
+    // this check and the three below. Issue #3705: the caller now asks the
+    // same question for the rest of the tick's writes and the Markdown log for
+    // its own, so a retired tick reaches this branch only to be refused here.
+    logger.info('scraped-response-save-refused', {
       worktreeId,
       cliToolId,
       instanceId: resolvedInstanceId,
-      scrapedLength: cleanedResponse.length,
-      holdMs: PENDING_SCRAPE_HOLD_MS,
+      generation: currentPollerOwner()?.generation,
     });
-
-    // The completion edge is announced HERE and not at the flush, because the
-    // turn finished now. A relay waiting on this session gets #2401's grace
-    // window to find a turn-keyed row, which is exactly the row the hold is
-    // waiting for; delaying the announcement by the hold would delay every
-    // delivery by it too.
-    onRelayTurnCompleted(worktreeId, cliToolId, resolvedInstanceId, false);
   } else if (!suppressScrapedHistory) {
     // Create new CLI tool message in database
     const message = createMessage(db, {
@@ -1239,7 +1343,13 @@ async function recordCompletedResponse(
   // a return — so unless the fact is written down now, the ask never happens
   // again. A `true` settles it: the turn is recorded and there is nothing left
   // to re-ask about.
-  markOrSettleStructuredHistoryRecheck(pollerKey, structuredHistoryLive);
+  //
+  // Issue #3705: by a tick that still owns the key. A retired one goes on to
+  // the scrape decision below only so that the store's and the save branch's
+  // own refusals (#3663, #3684) speak for it; nothing else it would write does.
+  if (mayStillActAfter(ctx, 'reader')) {
+    markOrSettleStructuredHistoryRecheck(pollerKey, structuredHistoryLive);
+  }
 
   // Issue #2317 Phase D: the scrape is dropped while the geometry is
   // delegated, and the transcript capture above is what makes that safe.
@@ -1273,8 +1383,30 @@ async function recordCompletedResponse(
   const holdScrapedHistory = !suppressScrapedHistory && captureReport.outcome === 'not_yet_closed';
 
   // Create Markdown log file for the conversation pair
+  //
+  // Issue #3705: keyed, so the log asks before its own write (after its own
+  // awaits) whether this tick still owns the key. A held reply confirmed by a
+  // stop is logged by the store with no key (`pending-scraped-response`), and
+  // that log is kept.
   if (cleanedResponse && !suppressScrapedHistory && !holdScrapedHistory) {
-    await recordClaudeConversation(db, worktreeId, cleanedResponse, cliToolId);
+    await recordClaudeConversation(db, worktreeId, cleanedResponse, cliToolId, { pollerKey });
+  }
+
+  // Issue #3705: everything from here to the end of the function runs without
+  // an `await`, so this is the tick's last chance to find out that it was
+  // retired while the reader or the log ran. A retired tick sweeps no prompt to
+  // "answered", closes no waiting episode, sends no completion push and moves
+  // no cursor under the key it lost — the successor's, possibly. The scrape
+  // decision still runs: every branch of it asks the same question itself
+  // (#3663 the hold, #3684 the immediate save, the store the discard), and its
+  // refusal lines are what the earlier suites read.
+  if (!mayStillActAfter(ctx, 'conversation-log')) {
+    recordOrHoldScrapedResponse(ctx, cleanedResponse, claudeMetadata, {
+      structuredHistoryLive,
+      suppressScrapedHistory,
+      holdScrapedHistory,
+    });
+    return false;
   }
 
   // Mark any pending prompts as answered. Intended twin of the sweep in
@@ -1367,20 +1499,6 @@ export async function checkForResponse(
       return false;
     }
 
-    // Check if CLI tool session is running
-    const running = await isSessionRunning(worktreeId, cliToolId, instanceId);
-    if (!running) {
-      logger.info('session-not-running');
-      // `stopPolling` is what confirms a held scrape here; see
-      // `flushPendingScrapedResponse` and `stopPollingByKey`. Requirement B of
-      // Issue #2436: this return comes long before the save path (~300 lines
-      // below when measured; a function of its own today,
-      // `recordCompletedResponse`), so a hold released only down there would
-      // never be released at all.
-      stopPolling(worktreeId, cliToolId, instanceId);
-      return false;
-    }
-
     const pollerKey = getPollerKey(worktreeId, cliToolId, instanceId);
 
     // Issue #3213: what the steps split out of this function are keyed by.
@@ -1394,12 +1512,30 @@ export async function checkForResponse(
       pollerKey,
     };
 
+    // Check if CLI tool session is running
+    const running = await isSessionRunning(worktreeId, cliToolId, instanceId);
+    // Issue #3705: the first of the tick's awaits. Every one of them is followed
+    // by the same question; see `mayStillActAfter`.
+    if (!mayStillActAfter(ctx, 'session-check')) return false;
+    if (!running) {
+      logger.info('session-not-running');
+      // `stopPolling` is what confirms a held scrape here; see
+      // `flushPendingScrapedResponse` and `stopPollingByKey`. Requirement B of
+      // Issue #2436: this return comes long before the save path (~300 lines
+      // below when measured; a function of its own today,
+      // `recordCompletedResponse`), so a hold released only down there would
+      // never be released at all.
+      stopPolling(worktreeId, cliToolId, instanceId);
+      return false;
+    }
+
     // Issue #2436: a scrape held by an earlier tick, whose transcript has now
     // had its whole budget to close. Ahead of everything below because most
     // ticks of a finished turn never reach the save path — a static frame is a
     // duplicate for an alternate-screen tool and yields no new lines for a
     // scrollback one, and both of those return early.
     await settleExpiredPendingScrapedResponse(pollerKey);
+    if (!mayStillActAfter(ctx, 'pending-scrape-settle')) return false;
 
     // Issue #2317 Phase D: is a human reading this pane at their own terminal
     // size right now, and did they just stop?
@@ -1412,6 +1548,7 @@ export async function checkForResponse(
     const delegation = isLiveAttachEligibleSession(sessionName)
       ? await probeGeometryDelegation(sessionName)
       : { delegated: false, released: false };
+    if (!mayStillActAfter(ctx, 'geometry-probe')) return false;
 
     if (delegation.released) {
       // The canvas is 1000 rows again, so a cursor recorded against a 44-row
@@ -1441,8 +1578,17 @@ export async function checkForResponse(
     // taken from the same constant extractResponse() measures saturation against
     // (Issue #1670) — a literal here would silently decouple the two.
     const output = await captureSessionOutput(worktreeId, cliToolId, CACHE_MAX_CAPTURE_LINES, instanceId);
+    // Issue #3705: there is no `await` from here to the transcript reader
+    // inside the save path, so this one answer covers every write in between —
+    // the fault notifier, the TUI accumulator, the prompt sweep, the skip
+    // streaks, the cursor, the in-progress id. A retired tick still READS the
+    // frame and goes on, because the writes that already ask for themselves
+    // (the prompt row #3701, the response hash #3663, the reader and the
+    // scrape decision) are where its refusal is recorded; it writes none of
+    // the rest.
+    const owns = mayStillActAfter(ctx, 'capture');
 
-    const turn = extractCompletedTurn(ctx, output, lastCapturedLine);
+    const turn = extractCompletedTurn(ctx, output, lastCapturedLine, owns);
     if (!turn) {
       return false;
     }
@@ -1473,18 +1619,21 @@ export async function checkForResponse(
       // Issue #3552: a live prompt is not the saved reply, so a run of
       // duplicate response ticks is over; the response hash is kept (a resume
       // after the answer must not re-save the reply underneath, #2230).
-      resetDuplicateResponseSkipStreak(pollerKey);
+      if (owns) resetDuplicateResponseSkipStreak(pollerKey);
+      // Asks for itself (#3701), before the prompt dedup.
       return savePromptMessage(ctx, promptDetection, result, isFullScreenTui);
     }
     // Issue #3538: a finished frame without a live prompt ends the run of
     // duplicate prompt ticks, as an unfinished one does in `extractCompletedTurn`.
-    resetDuplicatePromptSkipStreak(pollerKey);
+    if (owns) resetDuplicatePromptSkipStreak(pollerKey);
 
     // Validate response content is not empty
     if (!result.response || result.response.trim() === '') {
       // Issue #3552: an empty response is not the saved reply either.
-      resetDuplicateResponseSkipStreak(pollerKey);
-      updateSessionState(db, worktreeId, cliToolId, result.lineCount, resolvedInstanceId);
+      if (owns) {
+        resetDuplicateResponseSkipStreak(pollerKey);
+        updateSessionState(db, worktreeId, cliToolId, result.lineCount, resolvedInstanceId);
+      }
       return false;
     }
 
@@ -1493,13 +1642,17 @@ export async function checkForResponse(
       ? parseClaudeOutput(result.response)
       : undefined;
 
-    const cleanedResponse = cleanCompletedResponse(cliToolId, result, pollerKey);
+    const cleanedResponse = cleanCompletedResponse(cliToolId, result, pollerKey, owns);
 
     // If cleaned response is empty or just "[No content]", skip saving
     if (!cleanedResponse || cleanedResponse.trim() === '' || cleanedResponse === '[No content]') {
       // Issue #3552: nor is one that cleans down to nothing.
-      resetDuplicateResponseSkipStreak(pollerKey);
-      updateSessionState(db, worktreeId, cliToolId, result.lineCount, resolvedInstanceId);
+      if (owns) {
+        resetDuplicateResponseSkipStreak(pollerKey);
+        updateSessionState(db, worktreeId, cliToolId, result.lineCount, resolvedInstanceId);
+      }
+      // Left as it was (Issue #3705 sets it aside as harmless): nothing sets the
+      // in-progress id to a non-null value or reads it today.
       clearInProgressMessageId(db, worktreeId, cliToolId, resolvedInstanceId);
       return false;
     }
@@ -1515,6 +1668,10 @@ export async function checkForResponse(
     // Without this the disabled cursor would leave nothing suppressing re-saves and
     // the poller would append the same finished reply every 2 s.
     if (!lineCountIsCursor) {
+      // A retired tick registers no hash here (#3663, `./response-dedup`), but
+      // it can still MATCH one — the successor's, for the same reply. The
+      // recheck below therefore opens on the ownership question itself before
+      // its claim, its cursor and its read (Issue #3705 review).
       if (isDuplicateResponse(pollerKey, cleanedResponse)) {
         // `await`, so that a rejection still lands in the catch below.
         return await recheckDuplicateResponse(ctx, result, claudeMetadata);

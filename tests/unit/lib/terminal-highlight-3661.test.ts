@@ -188,7 +188,8 @@ describe('[#3661] edge 1: a `&NewLine;` in a paragraph', () => {
     const raw = 'a &lt; b sentinel';
     const el = rendered(raw);
     const [lt, hit] = mapMarkdownPositionsToDom(el, collectTextNodes(el), raw, [...hitsOf(raw, '&lt;'), ...hitsOf(raw, 'sentinel')])!;
-    expect(lt).toBeNull(); // its last character is not drawn
+    // Issue #3682: a hit on its whole ends on its `;` after the `<` it drew.
+    expect(el.textContent!.slice(lt!.start, lt!.end)).toBe('<');
     expect(el.textContent!.slice(hit!.start, hit!.end)).toBe('sentinel');
   });
 
@@ -198,7 +199,9 @@ describe('[#3661] edge 1: a `&NewLine;` in a paragraph', () => {
     expect(el.textContent).toBe('fj sentinel sentinel');
     const positions = mapMarkdownPositionsToDom(el, collectTextNodes(el), raw, hitsOf(raw, 'sentinel'))!;
     expect(positions.map((pos) => el.textContent!.slice(pos!.start, pos!.end))).toEqual(['sentinel', 'sentinel']);
-    // A hit on the whole reference covers both characters it drew.
+    // A hit on the reference's `&` alone (raw 0..1) is placed on the first
+    // character it drew (DOM 0..1). A hit on its whole is in
+    // `terminal-highlight-reference-3671.test.ts`.
     const [whole] = mapMarkdownPositionsToDom(el, collectTextNodes(el), raw, [{ start: 0, end: 1 }])!;
     expect(whole).toEqual({ start: 0, end: 1 });
   });

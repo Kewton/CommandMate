@@ -1905,6 +1905,12 @@ commandmate capture <worktree-id> --instance worker-7 --json | jq -r '.resolvedB
 | `pattern` | `deny-pattern` 系のとき、マッチした denyPattern |
 | `at` | 抑止時刻（epoch ms）。抑止されたプロンプトが画面に残っている間は毎ポーリング更新される |
 
+ポリシー以外の理由も同じ欄に載ります。`partial-answer`（Issue #3706 / #3713）は、Auto-Yes が回答のキーの一部
+（Enter の前の `y` など）を送った後で止めたため、同じプロンプトには再入力せず人に任せている状態です
+（`mode` は `null`）。worktree ID の移行でセッションが新しい ID へ移っても、この扱いは移った先で続きます。
+`commandmate wait` はこの理由に「because an earlier answer left partial input; Auto-Yes is waiting for a human」と
+表示します（exit 10 と JSON の `reason` は他の理由と同じ扱い）。入力欄に残った文字を確かめてから応答してください。
+
 `isPromptWaiting: true` かつ `lastSuppression.at` が新しい場合、そのセッションは
 **いまポリシー抑止で停止**しています。`commandmate respond` で人間が応答するか、
 契約の `autoYes` を見直してください（`mode: safe` で `multiple_choice` が抑止される場合は
