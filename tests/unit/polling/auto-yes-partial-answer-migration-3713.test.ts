@@ -51,6 +51,8 @@ interface FakeSession {
 const sessions = new Map<string, FakeSession>();
 /** Held open AFTER a typed key reached the pane: the send's Promise has not come back. */
 let typedKeyGate: Deferred | null = null;
+/** Like {@link typedKeyGate}, but only the next typed send is held (re-instruction 1, P2-2). */
+let typedKeyGateOnce: Deferred | null = null;
 /** Held open while the sender's guard reads the pane: no key issued yet. */
 let guardReadGate: Deferred | null = null;
 /** Held open after the first special key of a sequence reached the pane. */
@@ -71,6 +73,11 @@ vi.mock('@/lib/tmux/tmux', async (importOriginal) => {
     sendKeys: async (name: string, keys: string, enter = true) => {
       session(name).keys.push(enter ? `${keys}<Enter>` : keys);
       if (!enter && typedKeyGate) await typedKeyGate.promise;
+      if (!enter && typedKeyGateOnce) {
+        const once = typedKeyGateOnce;
+        typedKeyGateOnce = null;
+        await once.promise;
+      }
     },
     sendSpecialKeys: async (name: string, keys: string[], options?: { shouldContinue?: () => boolean }) => {
       for (let i = 0; i < keys.length; i++) {
@@ -127,6 +134,9 @@ vi.mock('@/lib/realtime/terminal-broadcast', () => ({
 vi.mock('@/lib/ws-server', () => ({ broadcastMessage: vi.fn(), migrateWorktreeRooms: () => [] }));
 vi.mock('@/lib/tmux/control-mode-tmux-transport', () => ({
   getControlModeTmuxTransport: () => ({ renameSession: () => undefined }),
+}));
+vi.mock('@/lib/hooks/pending-decision-recheck', () => ({
+  recheckPendingDecisions: vi.fn(async () => ({ examined: 0, delivered: 0, skipped: 0, reason: 'no-pending' })),
 }));
 
 import { stopAllAutoYesPolling, stopAutoYesPollingByWorktree, clearAllPollerStates } from '@/lib/auto-yes-poller';
@@ -294,12 +304,14 @@ beforeEach(() => {
   sessions.clear();
   captures.clear();
   typedKeyGate = null;
+  typedKeyGateOnce = null;
   guardReadGate = null;
   specialKeyGate = null;
 });
 
 afterEach(() => {
   typedKeyGate?.resolve();
+  typedKeyGateOnce?.resolve();
   guardReadGate?.resolve();
   specialKeyGate?.resolve();
   stopAllAutoYesPolling();
@@ -988,5 +1000,136 @@ describe('[#3713] 14/15: the reason is a member, and only the poller produces it
     ];
     expect(reasons).not.toContain('partial-answer');
     expect(reasons[0]).toBe('mode-off');
+  });
+});
+
+// =============================================================================
+// Re-instruction 1 (Codex review P2 x 3)
+// =============================================================================
+
+/** The auto-yes route, as `commandmate auto-yes <id> --disable` (no agent) calls it. */
+async function postAutoYes(worktreeId: string, body: unknown): Promise<Response> {
+  const { NextRequest } = await import('next/server');
+  const { POST } = await import('@/app/api/worktrees/[id]/auto-yes/route');
+  const request = new NextRequest(`http://localhost:3000/api/worktrees/${worktreeId}/auto-yes`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+  return (await POST(request, { params: Promise.resolve({ id: worktreeId }) })) as Response;
+}
+
+describe('[#3713] re-instruction P2-1: disabling every agent is a disable, not a delete', () => {
+  it('route disable (no agent) while the Enter is withheld → the old send returns → enable: no second y', async () => {
+    const live = await launch(A, PROMPT_TYPED);
+    enable(A);
+    await ticks(1);
+    expect(live.keys).toEqual(['y']);
+
+    const res = await postAutoYes(A, { enabled: false });
+    expect(res.status).toBe(200);
+    await vi.advanceTimersByTimeAsync(TUI_TEXT_INPUT_WAIT_MS); // the old send comes back, stopped
+    await settle();
+    expect(partialAt(A)).not.toBeNull();
+
+    enable(A);
+    await ticks(3);
+    expect(live.keys).toEqual(['y']);
+    expect((captures.get(await sessionNameOf(A, 'claude')) ?? 0)).toBeGreaterThanOrEqual(4);
+  });
+
+  it('route disable (no agent) keeps a memory already recorded', async () => {
+    const live = await stopAfterTheTypedKey(A);
+    await postAutoYes(A, { enabled: false });
+    expect(partialAt(A)).not.toBeNull();
+    enable(A);
+    await ticks(3);
+    expect(live.keys).toEqual(['y']);
+  });
+
+  it('negative: the worktree being deleted (session-cleanup\'s lifecycle call) still expires the send', async () => {
+    await launch(A, PROMPT_TYPED);
+    enable(A);
+    await ticks(1);
+    const { stopAutoYesPollersFor } = await import('@/lib/auto-yes-lifecycle');
+    stopAutoYesPollersFor('worktree-deleted', { scope: 'worktree', worktreeId: A });
+    await vi.advanceTimersByTimeAsync(TUI_TEXT_INPUT_WAIT_MS);
+    await settle();
+    expect(globalThis.__autoYesPartialAnswers?.has(keyOf(A)) ?? false).toBe(false);
+  });
+});
+
+describe('[#3713] re-instruction P2-2: a late old send does not overwrite a later memory', () => {
+  it("A's X in flight → A→B → B stops its own answer to Y → old A returns: B keeps Y", async () => {
+    const live = await launch(A, PROMPT_TYPED);
+    enable(A);
+    typedKeyGateOnce = deferred();
+    const oldSend = typedKeyGateOnce;
+    await ticks(1);
+    expect(live.keys).toEqual(['y']);
+
+    await move([{ oldId: A, newId: B }]);
+    // A human dealt with X; the agent moved on to Y, and B's answer to it is stopped too.
+    live.pane = OTHER_PROMPT_TYPED;
+    await ticks(1);
+    expect(live.keys).toEqual(['y', 'y']);
+    renew(B);
+    await vi.advanceTimersByTimeAsync(TUI_TEXT_INPUT_WAIT_MS);
+    await settle();
+    const bravo = partialAt(B);
+    expect(bravo).not.toBeNull();
+
+    oldSend.resolve();
+    await vi.advanceTimersByTimeAsync(TUI_TEXT_INPUT_WAIT_MS);
+    await settle();
+    expect(partialAt(B)).toEqual(bravo);
+
+    await ticks(3);
+    expect(live.keys).toEqual(['y', 'y']);
+  });
+
+  it('registry: a send begun earlier does not overwrite what a send begun later recorded', () => {
+    const key = keyOf(B);
+    const epoch = getEnterFallbackSessionEpoch(key);
+    const earlier = beginSendAttempt(key, 'X', epoch);
+    const later = beginSendAttempt(key, 'Y', epoch);
+    settleSendAttempt(later, true);
+    settleSendAttempt(earlier, true);
+    expect(getPartialAnswer(key, epoch)?.screenKey).toBe('Y');
+  });
+
+  it('negative: a memory recorded before the send began is replaced by its stop', () => {
+    const key = keyOf(B);
+    const epoch = getEnterFallbackSessionEpoch(key);
+    settleSendAttempt(beginSendAttempt(key, 'Y', epoch), true);
+    settleSendAttempt(beginSendAttempt(key, 'X', epoch), true);
+    expect(getPartialAnswer(key, epoch)?.screenKey).toBe('X');
+  });
+});
+
+describe('[#3713] re-instruction P2-3: a memory the move left out stays at the source', () => {
+  it('A is relaunched during the renames and the new session stops an answer: that memory stays under A', async () => {
+    await stopAfterTheTypedKey(A);
+    let newGeneration: unknown = null;
+    await move([{ oldId: A, newId: B }], {
+      onRename: (_oldName, newName) => {
+        if (newName.startsWith('cmate-renaming-')) {
+          beginEnterFallbackSession(A, 'claude');
+          const epoch = getEnterFallbackSessionEpoch(keyOf(A));
+          settleSendAttempt(beginSendAttempt(keyOf(A), 'Z', epoch), true);
+          newGeneration = getPartialAnswer(keyOf(A), epoch);
+        }
+        return undefined;
+      },
+    });
+    expect(newGeneration).not.toBeNull();
+    expect(partialAt(A)).toEqual(newGeneration);
+    expect(partialAt(B)).toBeNull();
+  });
+
+  it('negative: the memory that moved is gone from the source', async () => {
+    await stopAfterTheTypedKey(A);
+    await move([{ oldId: A, newId: B }]);
+    expect(globalThis.__autoYesPartialAnswers?.has(keyOf(A))).toBe(false);
+    expect(partialAt(B)).not.toBeNull();
   });
 });

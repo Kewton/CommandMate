@@ -1499,8 +1499,17 @@ export function getAutoYesPollerCompositeKeys(): string[] {
  * [SF-001] Uses shared filterCompositeKeysByWorktree (DRY).
  *
  * @param worktreeId - Worktree identifier
+ * @param options.keepPartialAnswers - Issue #3713 (re-instruction 1, P2-1): the
+ *   disable route's "every agent" passes it — a disable, like one agent's
+ *   `stopAutoYesPolling`, keeps the memory of an answer stopped part-way and
+ *   the sends still in flight, so a disable → enable does not type over a
+ *   partial input. Omitted (the worktree being deleted, `session-cleanup` via
+ *   `auto-yes-lifecycle`), both are dropped and a late send records nothing.
  */
-export function stopAutoYesPollingByWorktree(worktreeId: string): void {
+export function stopAutoYesPollingByWorktree(
+  worktreeId: string,
+  options?: { keepPartialAnswers?: boolean },
+): void {
   const pollerKeys = filterCompositeKeysByWorktree(
     Array.from(autoYesPollerStates.keys()),
     worktreeId
@@ -1508,7 +1517,7 @@ export function stopAutoYesPollingByWorktree(worktreeId: string): void {
   pollerKeys.forEach(key => stopAutoYesPolling(key));
   // Issue #3397: and the records of instances whose poller had already stopped.
   forgetEnterFallbacksByWorktree(worktreeId);
-  forgetPartialAnswersByWorktree(worktreeId);
+  if (!options?.keepPartialAnswers) forgetPartialAnswersByWorktree(worktreeId);
 }
 
 /**

@@ -135,6 +135,11 @@ export interface PartialAutoYesAnswer {
   epoch: number;
   /** Epoch ms of the stop. */
   at: number;
+  /**
+   * {@link AutoYesSendAttempt.seq} of the send that recorded it (Issue #3713):
+   * a send begun earlier that comes back later does not overwrite it.
+   */
+  seq: number;
 }
 
 /**
@@ -173,6 +178,8 @@ declare global {
   var __autoYesPartialAnswers: Map<string, PartialAutoYesAnswer> | undefined;
   // eslint-disable-next-line no-var
   var __autoYesSendAttempts: Set<AutoYesSendAttempt> | undefined;
+  // eslint-disable-next-line no-var
+  var __autoYesSendAttemptSeq: { last: number } | undefined;
 }
 
 /** compositeKey -> the answer stopped part-way. globalThis for hot reload (#153). */
@@ -200,7 +207,9 @@ export function forgetPartialAnswer(compositeKey: string): void {
 /**
  * {@link forgetPartialAnswer} for every instance of a worktree, and the sends
  * still in flight there are expired (Issue #3713): a slow tick that comes back
- * after the worktree's sessions went away records nothing.
+ * after the worktree's sessions went away records nothing. For the worktree
+ * being deleted only; disabling every agent keeps both (`stopAutoYesPollingByWorktree`'s
+ * `keepPartialAnswers`).
  */
 export function forgetPartialAnswersByWorktree(worktreeId: string): void {
   for (const key of filterCompositeKeysByWorktree([...partialAnswers.keys()], worktreeId)) {
@@ -240,6 +249,13 @@ export function clearPartialAnswers(): void {
  * earlier move.
  */
 export interface AutoYesSendAttempt {
+  /**
+   * Order of registration in this process. A send that comes back stopped does
+   * not overwrite a partial answer recorded by a send registered after it — the
+   * successor's view of the screen is the newer one (re-instruction 1, P2-2).
+   * A counter rather than a timestamp: two sends can start in the same ms.
+   */
+  readonly seq: number;
   /** {@link partialAnswerScreenKey} of the prompt being answered. */
   readonly screenKey: string;
   /** The composite key the outcome is recorded under; a move re-points it. */
@@ -254,10 +270,12 @@ export interface AutoYesSendAttempt {
 
 /** The sends in flight. globalThis for hot reload (#153), like the Map above. */
 const sendAttempts = getOrInitGlobal('__autoYesSendAttempts', () => new Set<AutoYesSendAttempt>());
+const sendAttemptSeq = getOrInitGlobal('__autoYesSendAttemptSeq', () => ({ last: 0 }));
 
 /** Register a send about to start (the poller, before `sendPromptAnswer`). */
 export function beginSendAttempt(compositeKey: string, screenKey: string, epoch: number): AutoYesSendAttempt {
   const attempt: AutoYesSendAttempt = {
+    seq: ++sendAttemptSeq.last,
     screenKey,
     recordKey: compositeKey,
     recordEpoch: epoch,
@@ -282,7 +300,16 @@ export function settleSendAttempt(attempt: AutoYesSendAttempt, keysSent: boolean
   if (!keysSent) return;
   // A relaunch since (`beginAgentSession`): the process the keys went to is gone.
   if (getEnterFallbackSessionEpoch(attempt.recordKey) !== attempt.recordEpoch) return;
-  partialAnswers.set(attempt.recordKey, { screenKey: attempt.screenKey, epoch: attempt.recordEpoch, at });
+  // A send registered later (the successor's, after a move) already recorded
+  // the same session's newer screen: that is what is in the input now.
+  const recorded = partialAnswers.get(attempt.recordKey);
+  if (recorded !== undefined && recorded.epoch === attempt.recordEpoch && recorded.seq > attempt.seq) return;
+  partialAnswers.set(attempt.recordKey, {
+    screenKey: attempt.screenKey,
+    epoch: attempt.recordEpoch,
+    at,
+    seq: attempt.seq,
+  });
 }
 
 function expireSendAttempt(attempt: AutoYesSendAttempt): void {
@@ -356,8 +383,11 @@ export function movePartialAnswers(moves: ReadonlyArray<PartialAnswerMove>): str
     });
   const carriedAttempts = new Set(carried.flatMap((entry) => entry.attempts));
 
-  // Detach every source first.
-  for (const { move } of carried) partialAnswers.delete(move.oldKey);
+  // Detach every source first — only what is carried: a record the epochs
+  // left out (a session begun under the old key while the renames ran) stays.
+  for (const { move, partial } of carried) {
+    if (partial !== null && partialAnswers.get(move.oldKey) === partial) partialAnswers.delete(move.oldKey);
+  }
   // The destinations' previous sessions' records.
   for (const { move } of carried) {
     partialAnswers.delete(move.newKey);
