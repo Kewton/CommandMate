@@ -225,6 +225,20 @@ const IDLE_POLLING_INTERVAL_MS = 5000;
  * Once a worktree HAS been rendered the ladder stays out of the way: a failed
  * poll is a stale screen, not a blank one, and the poll itself is the retry.
  */
+/**
+ * Issue #3723: how often the whole-worktree Auto-Yes map is re-read while any
+ * instance is armed, so a contract that starts (or ends) on an instance with the
+ * page open adds (or drops) the toggle's "blocked by contract" note without a
+ * reload. Separate from the 2 s / 5 s detail poll, and much slower: the
+ * current-output poll does not carry the contract verdict (its route is out of
+ * this change), the server re-reads the policy at most every 5 s
+ * (AUTO_YES_POLICY_CACHE_TTL_MS), and a task changes state on the scale of
+ * minutes — a note up to ~12 s late costs nothing, one request per poll would.
+ * Nothing is re-read while every instance is disarmed: the note is shown only
+ * on an armed toggle.
+ */
+export const AUTO_YES_CONTRACT_REFRESH_MS = 12_000;
+
 export const DETAIL_LOAD_RETRY_DELAYS_MS = [2000, 5000, 10000] as const;
 
 /**
@@ -555,6 +569,11 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   const autoYesEnabled = autoYesStateMap.get(activeInstanceId)?.enabled ?? false;
   const autoYesExpiresAt = autoYesStateMap.get(activeInstanceId)?.expiresAt ?? null;
   const autoYesBlockedByContract = autoYesStateMap.get(activeInstanceId)?.blockedByContract === true;
+  // Issue #3723: gates the contract re-read below.
+  const anyAutoYesEnabled = useMemo(
+    () => Array.from(autoYesStateMap.values()).some((entry) => entry.enabled),
+    [autoYesStateMap],
+  );
   // Trigger to refresh FileTreeView after file operations
   const [fileTreeRefresh, setFileTreeRefresh] = useState(0);
 
@@ -1967,6 +1986,21 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   useEffect(() => {
     void fetchAutoYesStates();
   }, [worktreeId, rosterReady, fetchAutoYesStates]);
+
+  /**
+   * Issue #3723: while any instance is armed, re-read the same whole-worktree
+   * map every {@link AUTO_YES_CONTRACT_REFRESH_MS}. It replaces the map
+   * wholesale, so its `blockedByContract` overwrites the value the
+   * current-output poll carries forward — a contract that started sets it, one
+   * that ended clears it.
+   */
+  useEffect(() => {
+    if (!anyAutoYesEnabled) return;
+    const intervalId = setInterval(() => {
+      void fetchAutoYesStates();
+    }, AUTO_YES_CONTRACT_REFRESH_MS);
+    return () => clearInterval(intervalId);
+  }, [anyAutoYesEnabled, fetchAutoYesStates]);
 
   /** Sync layout mode with viewport size */
   useEffect(() => {

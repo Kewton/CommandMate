@@ -262,6 +262,122 @@ describe('[#3723] commandmate send --auto-yes reads the arming response', () => 
   });
 });
 
+describe('[#3723] send --contract --auto-yes warns before the task runs', () => {
+  type AutoYesBlock = { mode: string | null; allowPromptTypes: string[]; denyPatterns: string[] } | undefined;
+
+  /**
+   * The server is the one #3723 shipped against: arming a `--contract` send
+   * answers `contractPolicy: null`, because the task is still `pending` and
+   * ACTIVE_TASK_STATUSES does not count it. `serverPolicy` overrides that.
+   */
+  function stubContractSend(autoYes: AutoYesBlock, serverPolicy: unknown = null): string[] {
+    const paths: string[] = [];
+    global.fetch = vi.fn(async (input: unknown, init?: RequestInit) => {
+      const url = new URL(String(input));
+      const method = (init?.method ?? 'GET').toUpperCase();
+      paths.push(`${method} ${url.pathname}`);
+      if (url.pathname.endsWith('/tasks') && method === 'POST') {
+        return jsonResponse(201, {
+          task: { id: 'task-3723', contract: autoYes === undefined ? {} : { autoYes } },
+          message: 'the composed message',
+        });
+      }
+      if (url.pathname.startsWith('/api/tasks/')) return jsonResponse(200, {});
+      if (url.pathname.endsWith('/auto-yes')) {
+        return jsonResponse(200, { enabled: true, expiresAt: 1, contractPolicy: serverPolicy });
+      }
+      if (url.pathname.endsWith('/send')) return jsonResponse(201, { id: 1 });
+      throw new Error(`unexpected request: ${method} ${url.pathname}`);
+    }) as unknown as typeof fetch;
+    return paths;
+  }
+
+  async function runSend(...args: string[]): Promise<void> {
+    const { createSendCommand } = await import('../../../../src/cli/commands/send');
+    await createSendCommand().parseAsync([
+      'node', 'send', WT, '--contract', '.commandmate/tasks/t.yaml', '--auto-yes', ...args,
+    ]);
+  }
+
+  function warnings(): string[] {
+    return stderrLines().filter((line) => line.startsWith('Warning:') && line.includes('autoYes.mode'));
+  }
+
+  it("warns once, before the message goes out, under mode 'off'", async () => {
+    const paths = stubContractSend({ mode: 'off', allowPromptTypes: [], denyPatterns: [] });
+
+    await runSend();
+
+    expect(warnings()).toHaveLength(1);
+    expect(warnings()[0]).toContain('task task-3723');
+    const lines = stderrLines();
+    expect(lines.indexOf(warnings()[0])).toBeLessThan(lines.indexOf('Message sent.'));
+    expect(paths.indexOf(`POST /api/worktrees/${WT}/auto-yes`)).toBeLessThan(
+      paths.indexOf(`POST /api/worktrees/${WT}/send`)
+    );
+    expect(mockExit).not.toHaveBeenCalled();
+  });
+
+  it("warns once on the --model path, which arms after the send, under mode 'off'", async () => {
+    const paths = stubContractSend({ mode: 'off', allowPromptTypes: [], denyPatterns: [] });
+
+    await runSend('--agent', 'copilot', '--model', 'gpt-5-mini');
+
+    expect(warnings()).toHaveLength(1);
+    expect(paths.indexOf(`POST /api/worktrees/${WT}/send`)).toBeLessThan(
+      paths.indexOf(`POST /api/worktrees/${WT}/auto-yes`)
+    );
+    expect(mockExit).not.toHaveBeenCalled();
+  });
+
+  it("prefers the server's policy when it has one", async () => {
+    stubContractSend(
+      { mode: 'off', allowPromptTypes: [], denyPatterns: [] },
+      { taskId: 'task-server', mode: 'safe', allowPromptTypes: [], denyPatternCount: 0 }
+    );
+
+    await runSend();
+
+    expect(warnings()).toEqual([]);
+    expect(stderrLines().filter((line) => line.startsWith('Note:'))).toEqual([
+      expect.stringContaining('task task-server'),
+    ]);
+  });
+
+  it('adds the same Note: for an allow-listed contract', async () => {
+    stubContractSend({ mode: 'allow-listed', allowPromptTypes: ['yes_no'], denyPatterns: [] });
+
+    await runSend();
+
+    expect(stderrLines().filter((line) => line.startsWith('Note:'))).toEqual([
+      expect.stringContaining('answers only: yes_no'),
+    ]);
+  });
+
+  it.each([
+    ['no autoYes block', undefined],
+    ['mode null', { mode: null, allowPromptTypes: [], denyPatterns: [] }],
+  ])('prints nothing extra with %s (negative control)', async (_label, block) => {
+    stubContractSend(block as AutoYesBlock);
+
+    await runSend();
+
+    expect(stderrLines().filter((line) => line.startsWith('Warning:') || line.startsWith('Note:'))).toEqual([]);
+    expect(stderrLines()).toContain('Auto-yes enabled.');
+  });
+
+  it('prints no warning without --auto-yes, and arms nothing (negative control)', async () => {
+    const paths = stubContractSend({ mode: 'off', allowPromptTypes: [], denyPatterns: [] });
+    const { createSendCommand } = await import('../../../../src/cli/commands/send');
+
+    await createSendCommand().parseAsync(['node', 'send', WT, '--contract', '.commandmate/tasks/t.yaml']);
+
+    expect(stderrLines().filter((line) => line.startsWith('Warning:') || line.startsWith('Note:'))).toEqual([]);
+    expect(paths.some((path) => path.endsWith('/auto-yes'))).toBe(false);
+    expect(stderrLines()).toContain('Message sent.');
+  });
+});
+
 describe('[#3723] ls / instances print blocked', () => {
   const NOW = Date.now();
 

@@ -2397,8 +2397,11 @@ Warning: the contract of task 7f3c… sets autoYes.mode: off, so Auto-Yes is arm
 - 判定は poller と同じ方針の読み取り（`getSessionAutoYesPolicy`）を通ります。API では
   `POST /api/worktrees/<id>/auto-yes`（有効化）と `GET …/auto-yes?cliToolId=` の応答の
   `contractPolicy`（`{ taskId, mode, allowPromptTypes, denyPatternCount }` か `null`）です
-- 判定するのは**その時点で実行中の契約**です。`send --contract … --auto-yes` では Auto-Yes を
-  有効にする時点で契約はまだ実行中になっていないため、この警告は出ません
+- 判定するのは**その時点で実行中の契約**です。ただし `send --contract … --auto-yes` では、
+  Auto-Yes を有効にする時点で task はまだ `pending`（サーバーは実行中と数えない）なので、
+  サーバーの `contractPolicy` が `null` のときは**これから送る契約**の `autoYes` で判定します。
+  `--model` で有効化が送信後に回る場合も含めて、同じ `Warning:` / `Note:` が 1 回出ます
+  （サーバーが値を返したときはサーバーの値を優先します）
 - 有効にした後は `commandmate ls` / `commandmate instances` の `AUTO_YES` 列が `blocked` になります。
   ワークツリー詳細の Auto Yes トグルにも「契約で停止中（mode: off）」が出ます
 

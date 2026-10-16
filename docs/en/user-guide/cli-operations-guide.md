@@ -1569,8 +1569,11 @@ Warning: the contract of task 7f3c… sets autoYes.mode: off, so Auto-Yes is arm
 - The verdict goes through the poller's own policy read (`getSessionAutoYesPolicy`). On the API it
   is `contractPolicy` (`{ taskId, mode, allowPromptTypes, denyPatternCount }` or `null`) on the
   responses of `POST /api/worktrees/<id>/auto-yes` (enabling) and `GET …/auto-yes?cliToolId=`
-- Only a contract **running at that moment** is judged. With `send --contract … --auto-yes`, the
-  contract is not running yet when Auto-Yes is armed, so no warning is printed
+- The verdict is about the contract **running at that moment**. With `send --contract … --auto-yes`,
+  though, the task is still `pending` when Auto-Yes is armed (the server does not count it as
+  running), so when the server's `contractPolicy` is `null` the `autoYes` of **the contract being
+  sent** is judged instead. The same `Warning:` / `Note:` is printed once, including when `--model`
+  moves the arming after the send (a value from the server takes precedence)
 - Once armed, the `AUTO_YES` column of `commandmate ls` / `commandmate instances` reads `blocked`,
   and the Auto Yes toggle on the worktree detail screen shows "Blocked by contract (mode: off)"
 
