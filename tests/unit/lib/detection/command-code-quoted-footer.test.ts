@@ -265,6 +265,9 @@ const PRE_FIX_VERDICTS: Record<string, string> = {
   'command-code-askuserquestion-2522/unsupported-multi-select-checkboxes.txt': 'waiting command_code_selection_list',
   'command-code-askuserquestion-2522/unsupported-region-too-tall.txt': 'waiting command_code_selection_list',
 
+  // command-code-askuserquestion-3497
+  'command-code-askuserquestion-3497/review-page-no-back-hint.txt': 'waiting prompt_detected',
+
   // command-code-askuserquestion-2753
   'command-code-askuserquestion-2753/multiselect-answered-tabs.txt': 'waiting prompt_detected',
 

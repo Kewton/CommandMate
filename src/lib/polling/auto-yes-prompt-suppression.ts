@@ -8,6 +8,7 @@ import type { CLIToolType } from '../cli-tools/types';
 import type { PromptData } from '@/types/models';
 import type { NormalizedFrame } from '../detection/tools/types';
 import { isCodexModelPickerFrame } from '../detection/tools/codex/detect';
+import { isCommandCodeQuestionConfirmPage } from '../detection/tools/command-code/selection-shape';
 import { getCodexLifecycleDialog } from '../detection/cli-patterns';
 import { recordPolicySuppression, type AutoYesPolicySuppression } from './auto-yes-suppression-state';
 import { evaluateAutoYesDialogGate, type AutoYesDialogGateVerdict } from './auto-yes-dialog-gate';
@@ -60,6 +61,16 @@ export function suppressAndWarnOnce(
   });
 }
 
+/** How much of a prompt's question a log line carries (Issue #3497). */
+export const MAX_LOGGED_QUESTION_LENGTH = 500;
+
+/** `question` cut to {@link MAX_LOGGED_QUESTION_LENGTH}, for a log line. */
+function truncateForLog(question: string): string {
+  return question.length > MAX_LOGGED_QUESTION_LENGTH
+    ? `${question.slice(0, MAX_LOGGED_QUESTION_LENGTH)}…`
+    : question;
+}
+
 /**
  * What `suppressIfNotOursToAnswer` decided: carry on and answer, the prompt was
  * left alone (and recorded), or the dialog gate refused it (Issue #3397: the
@@ -71,10 +82,10 @@ export type NotOursToAnswerVerdict =
   | { kind: 'dialog-gate-refused'; dialogGate: AutoYesDialogGateVerdict };
 
 /**
- * Issue #3214: steps 3, 3.2 and 3.5 of `detectAndRespondToPrompt` -- the frames
- * that read as a prompt and are still not Auto-Yes's to answer, judged in the
- * order they always were. "The detection above" in the comments below is that
- * function's step 1.
+ * Issue #3214: steps 3, 3.2, 3.3 (Issue #3497) and 3.5 of
+ * `detectAndRespondToPrompt` -- the frames that read as a prompt and are still
+ * not Auto-Yes's to answer, judged in the order they always were. "The
+ * detection above" in the comments below is that function's step 1.
  *
  * Issue #3397: step 3.5 no longer records its refusal here. It hands the gate's
  * verdict back so `tryEnterFallback` can look at the frame first, and records
@@ -134,6 +145,37 @@ export function suppressIfNotOursToAnswer(prompt: JudgedPrompt, frame: Normalize
       `${frameKey}\u0000codex-model-picker`,
       'poller:auto-yes-skipped-model-picker',
       { promptType: promptData.type },
+    );
+    return { kind: 'left-alone' };
+  }
+
+  // 3.3. Issue #3497: Command Code's `AskUserQuestion` confirm page
+  // (`❯ 1. Submit` / `2. Cancel` under the question's tab strip) is not ours
+  // to answer. `Submit` picks nothing — it commits whatever stands as the
+  // answers, and on Kewton/Musunest#283 that was the worker's own proposal,
+  // which the worker then implemented as though a human had approved it. The
+  // full Review page is already declined by the reader (#2755 §7); a frame
+  // without its `← to go back and edit` row reaches the generic parser, and a
+  // question whose only choices are the pair is read by the question reader —
+  // both as `multiple_choice` with `Submit` as the default, answered `1`. Default, no setting: free-text questions go back to a human.
+  // The status path still publishes the prompt, so the human sees it. Reuses
+  // `unclassified-frame` as 3.2 does: the tool recognised the frame and
+  // deliberately declined it (a reason of its own would need `cmate wait`'s
+  // SUPPRESSION_CAUSE to learn it).
+  if (cliToolId === 'command-code' && isCommandCodeQuestionConfirmPage(frame.raw)) {
+    suppressAndWarnOnce(
+      prompt,
+      { reason: 'unclassified-frame', mode: null, promptType: promptData.type },
+      `${frameKey}\u0000command-code-question-confirm`,
+      'poller:auto-yes-skipped-question-confirm',
+      {
+        promptType: promptData.type,
+        question: truncateForLog(promptData.question),
+        options:
+          promptData.type === 'multiple_choice'
+            ? promptData.options.map((option) => `${option.number}. ${option.label}`)
+            : [...promptData.options],
+      },
     );
     return { kind: 'left-alone' };
   }
