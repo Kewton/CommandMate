@@ -1510,12 +1510,19 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
             if (effectiveInstanceId === activeInstanceIdRef.current) {
               prevAutoYesEnabledRef.current = data.enabled;
             }
+            // Issue #3723: the GETs retired above may have been the only reader
+            // of the OTHER instances (the current-output poll seeds one). Re-read
+            // the whole map now, newer than this toggle, so an alias armed all
+            // along is not left reading OFF — and the contract re-read's
+            // "anything armed?" gate is decided by this answer, not by the
+            // single entry this POST wrote.
+            void fetchAutoYesStates();
           }
         } catch (err) {
           console.error('[WorktreeDetailRefactored] Error toggling auto-yes:', err);
         }
       },
-    [worktreeId],
+    [worktreeId, fetchAutoYesStates],
   );
 
   /**
