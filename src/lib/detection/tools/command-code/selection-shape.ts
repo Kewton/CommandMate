@@ -468,24 +468,15 @@ export interface CommandCodeReviewPage {
 }
 
 /**
- * Read Command Code's `AskUserQuestion` Review page, if this frame is one
- * (Issue #2755 §7).
- *
- * The same region {@link readCommandCodeQuestionRegion} works on — last rule
- * row, tab strip as the first row under it — plus the three rows above. The
- * question-shaped conditions are deliberately NOT applied: this page has no
- * question body of its own on the `Submit`/`Cancel` spelling (the answers sit
- * where the question would), and it draws `1.` twice, so the strict reading
- * declines it for a numbering reason that says nothing about what it is.
- *
- * `null` for everything else, so no existing verdict moves except the two
- * captures this is about.
+ * The rows under the frame's LAST rule row, when the first of them that carries
+ * content is a question-screen tab strip (Issue #2755 §7, split out by Issue
+ * #3497 so the Review page reading and the confirm-page guard share one anchor).
  *
  * @param frame - a raw `capture-pane -p -e` frame, ANSI intact (CRLF tolerated)
  */
-export function readCommandCodeReviewPage(
+function readQuestionTabRegion(
   frame: string | null | undefined,
-): CommandCodeReviewPage | null {
+): readonly string[] | null {
   if (!frame) return null;
   const lines = frame.replace(/\r\n/g, '\n').split('\n').map(stripAnsi);
 
@@ -507,6 +498,30 @@ export function readCommandCodeReviewPage(
   const tabOffset = region.findIndex((line) => line.trim() !== '');
   if (tabOffset < 0) return null;
   if (!isCommandCodeQuestionTabRow(region[tabOffset])) return null;
+  return region;
+}
+
+/**
+ * Read Command Code's `AskUserQuestion` Review page, if this frame is one
+ * (Issue #2755 §7).
+ *
+ * The same region {@link readCommandCodeQuestionRegion} works on — last rule
+ * row, tab strip as the first row under it — plus the three rows above. The
+ * question-shaped conditions are deliberately NOT applied: this page has no
+ * question body of its own on the `Submit`/`Cancel` spelling (the answers sit
+ * where the question would), and it draws `1.` twice, so the strict reading
+ * declines it for a numbering reason that says nothing about what it is.
+ *
+ * `null` for everything else, so no existing verdict moves except the two
+ * captures this is about.
+ *
+ * @param frame - a raw `capture-pane -p -e` frame, ANSI intact (CRLF tolerated)
+ */
+export function readCommandCodeReviewPage(
+  frame: string | null | undefined,
+): CommandCodeReviewPage | null {
+  const region = readQuestionTabRegion(frame);
+  if (region === null) return null;
 
   const body = region.join('\n');
   if (!COMMAND_CODE_REVIEW_SUBMIT_ROW_PATTERN.test(body)) return null;
@@ -520,4 +535,42 @@ export function readCommandCodeReviewPage(
     hasUnansweredWarning: COMMAND_CODE_REVIEW_UNANSWERED_PATTERN.test(body),
     cursorOnSubmit: submitRow !== undefined && submitRow.includes(COMMAND_CODE_CURSOR_GLYPH),
   };
+}
+
+/**
+ * Is this frame an `AskUserQuestion` CONFIRM page — `❯ 1. Submit` / `2. Cancel`
+ * under the question screen's tab strip — whatever else it draws? (Issue #3497)
+ *
+ * {@link readCommandCodeReviewPage} needs all three of its rows, the back hint
+ * included, and on a frame without `← to go back and edit` it answers `null`.
+ * The question region declines that page too (it draws `1.` twice), so the
+ * GENERIC parser reads it; and a free-text question drawn with the pair as its
+ * only options is read by the question reader itself. Either way the payload is
+ * a two-option `multiple_choice` whose default is `Submit`, which Auto-Yes
+ * answered `1` — committing the worker's own proposal as the human's answer
+ * (Kewton/Musunest#283).
+ *
+ * This is the wider reading Auto-Yes declines on, and deliberately NOT a change
+ * to the Review page reading: the status path and the answer panels keep what
+ * they publish for these frames, so a human is still shown the question. True
+ * when the tab strip sits directly under the last rule row and the region
+ * carries the confirm pair — `1. Submit` and `2. Cancel`, the `❯` on either —
+ * with or without the back hint, and whichever tab is current (the incident's
+ * page was a free-text question drawn with the same pair).
+ *
+ * The question screens themselves (#2521 / #2522 / #2753 / #2754) never carry
+ * the pair: their `Submit` / `Next` confirm row has no number, and the Review
+ * TAB showing a diff (`◯ Dispatch | ● Review` over `1 +` gutter rows) has no
+ * `Submit` row at all.
+ *
+ * @param frame - a raw capture with its box drawing intact (ANSI optional)
+ */
+export function isCommandCodeQuestionConfirmPage(frame: string | null | undefined): boolean {
+  const region = readQuestionTabRegion(frame);
+  if (region === null) return false;
+  const body = region.join('\n');
+  return (
+    COMMAND_CODE_REVIEW_SUBMIT_ROW_PATTERN.test(body) &&
+    COMMAND_CODE_REVIEW_CANCEL_ROW_PATTERN.test(body)
+  );
 }
