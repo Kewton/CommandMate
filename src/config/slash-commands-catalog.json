@@ -3918,6 +3918,16 @@
       ],
       "isStandard": true,
       "source": "standard"
+    },
+    {
+      "name": "config",
+      "descriptionKey": "slashCommands.descriptions.config",
+      "category": "standard-util",
+      "cliTools": [
+        "codex"
+      ],
+      "isStandard": true,
+      "source": "standard"
     }
   ]
 }
