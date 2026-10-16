@@ -404,6 +404,8 @@ commandmate status [options]
 | `-i, --issue <number>` | Show status for a specific issue worktree (Issue #136) |
 | `-a, --all` | Show status for all servers (main + worktrees) |
 
+For a running server (or one with a stale PID file) it also prints a `Log:` line with the file `start --daemon` writes the server's output to.
+
 ### commandmate update
 
 Update CommandMate to the latest version (stop -> `npm install -g commandmate@latest` -> restart).
@@ -532,9 +534,18 @@ commandmate status
 commandmate stop --force
 commandmate start --daemon
 
-# Check logs (in config directory)
+# Check logs (in config directory; commandmate status also prints the path on its Log: line)
 tail -f ~/.commandmate/logs/server.log
+# a parallel server started with --issue 135 has its own file
+tail -f ~/.commandmate/logs/server-135.log
 ```
+
+`commandmate start --daemon` (and `commandmate update`, which restarts through it) appends the server's stdout and stderr to `logs/server.log` in the config directory (`logs/server-<N>.log` for an `--issue <N>` server). The file is owner-only (0600). Each start writes a separator line (`=== <timestamp> commandmate start --daemon ... ===`).
+
+- **Rotation**: at start, a log of 10MB or more is moved to `server.log.1`, shifting older generations to `.2` and `.3` (three generations kept, the same approach as `scripts/build-and-start.sh`). It is not rotated while the server runs, so a long-running server's log can grow past 10MB.
+- If the log file cannot be opened (the directory cannot be created, a symbolic link is in the way, etc.), a warning is printed and the server starts with its output discarded.
+- `CM_LOG_DIR` does not move this file (`CM_LOG_DIR` is a separate setting, used by the server for conversation logs and by the CLI for its security log).
+- A foreground start (`commandmate start`) prints to the terminal only and does not write this file.
 
 ### Dependency Errors
 

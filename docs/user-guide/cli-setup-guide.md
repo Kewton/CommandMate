@@ -407,6 +407,8 @@ commandmate status [options]
 | `-i, --issue <number>` | 指定Issueのworktree用サーバーの状態を表示（Issue #136） |
 | `-a, --all` | 全サーバー（main + worktree）の状態を表示 |
 
+稼働中（または PID ファイルが古いまま）のサーバーには、`start --daemon` がサーバーの出力を書くログファイルのパスを `Log:` の行で表示します。
+
 ### commandmate update
 
 最新バージョンに更新します（停止 → `npm install -g commandmate@latest` → 再起動）。
@@ -645,9 +647,18 @@ commandmate status
 commandmate stop --force
 commandmate start --daemon
 
-# ログを確認（設定ディレクトリ内）
+# ログを確認（設定ディレクトリ内。パスは commandmate status の Log: 行にも出ます）
 tail -f ~/.commandmate/logs/server.log
+# --issue 135 で起動した並列サーバーは別ファイル
+tail -f ~/.commandmate/logs/server-135.log
 ```
+
+`commandmate start --daemon`（と、それで再起動する `commandmate update`）は、サーバーの標準出力・標準エラーを設定ディレクトリの `logs/server.log`（`--issue <N>` のサーバーは `logs/server-<N>.log`）に追記します。ファイルの権限は所有者のみ（0600）です。起動のたびに区切り行（`=== <日時> commandmate start --daemon ... ===`）を書きます。
+
+- **ローテーション**: 起動時に 10MB 以上なら `server.log.1` へ回し、古い世代は `.2`・`.3` へずらします（3 世代まで保持。`scripts/build-and-start.sh` と同じ考え方）。稼働中には回さないので、長く動かし続けたサーバーのログは 10MB を超えることがあります。
+- ログファイルを開けない場合（ディレクトリが作れない、シンボリックリンクが置かれている等）は警告を出し、出力を捨ててサーバーは起動します。
+- `CM_LOG_DIR` はこのファイルの置き場所を変えません（`CM_LOG_DIR` はサーバーが会話ログに、CLI がセキュリティログに使う別の設定です）。
+- フォアグラウンド起動（`commandmate start`）の出力は端末に出るだけで、このファイルには書かれません。
 
 ### 依存関係のエラー
 
