@@ -34,6 +34,7 @@ import { getDefaultSelectedAgents } from '@/lib/db/app-settings-db';
 import { resolveSelectedAgents } from '@/lib/selected-agents-validator';
 import { deriveSessionStatus, isUnclassifiedCliStatus } from '@/lib/session/status-mapping';
 import { getEnabledAutoYesByWorktree } from '@/lib/auto-yes-state';
+import { isSessionAutoYesBlockedByContract } from '@/lib/polling/auto-yes-policy';
 import { getSessionNamespace } from '@/lib/cli-tools/session-namespace';
 import { createLogger } from '@/lib/logger';
 import type { PromptType } from '@/types/models';
@@ -167,7 +168,12 @@ export async function GET(request: NextRequest) {
     // the source is the in-memory Auto-Yes map (no SQLite, no tmux), one pass
     // for the whole server, and it costs nothing next to `probeMs`
     // (docs/design/sessions-tile-polling-2511.md §3.4).
-    const autoYesByWorktree = getEnabledAutoYesByWorktree();
+    //
+    // Issue #3723: an armed instance whose contract says `autoYes.mode: 'off'`
+    // carries `blockedByContract: true` — read through the poller's own policy
+    // lookup (5 s cache), and only for ARMED instances, so a server with nothing
+    // armed reads no task row at all.
+    const autoYesByWorktree = getEnabledAutoYesByWorktree(isSessionAutoYesBlockedByContract);
     const worktreesWithStatus = worktrees.map((worktree) => {
       const agentInstances = agentInstancesByWorktree.get(worktree.id) ?? [];
       const status = statusByWorktree.get(worktree.id);

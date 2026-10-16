@@ -3,6 +3,8 @@
   "toggleLabel": "Auto Yes モード",
   "targetLabel": "Auto Yes の対象",
   "timeRemaining": "残り時間",
+  "blockedByContract": "契約で停止中（mode: off）",
+  "blockedByContractTitle": "実行中の契約が autoYes.mode: off を指定しているため、Auto Yes は ON でもこのセッションのプロンプトに応答しません。",
   "enableTitle": "Auto Yesモードを有効にしますか？",
   "enableTitleWithTool": "Auto Yesモードを有効にしますか？（{toolName}）",
   "featureDescription": "機能説明",

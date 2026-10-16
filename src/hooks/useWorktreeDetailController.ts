@@ -63,6 +63,7 @@ import {
 import { useAppUpdate } from '@/contexts/AppUpdateContext';
 import { type AutoYesToggleParams } from '@/components/worktree/AutoYesToggle';
 import type { AutoYesStopReason } from '@/config/auto-yes-config';
+import type { AutoYesInstanceSummary } from '@/types/auto-yes';
 import type { CurrentOutputResponseBody } from '@/lib/session/current-output-types';
 import {
   PANE_GATE_NOTHING_ARRIVED,
@@ -427,7 +428,12 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   // Issue #896: re-keyed by *instanceId* so each agent instance has its own
   // auto-yes state (the primary instance's id === its cliToolId, preserving the
   // previous cliTool-keyed behavior for single-instance worktrees).
-  const [autoYesStateMap, setAutoYesStateMap] = useState<Map<string, { enabled: boolean; expiresAt: number | null }>>(new Map());
+  //
+  // Issue #3723: `blockedByContract` — armed, but the contract running on the
+  // instance says `autoYes.mode: off`. Written by the two auto-yes responses
+  // that carry it (the whole-worktree GET and the toggle POST); the
+  // current-output poll keeps it while the instance stays armed.
+  const [autoYesStateMap, setAutoYesStateMap] = useState<Map<string, AutoYesInstanceSummary>>(new Map());
   // Issue #501: Track last server-side auto-yes response timestamp for duplicate prevention
   const [lastServerResponseTimestamp, setLastServerResponseTimestamp] = useState<number | null>(null);
   // Issue #501: Track whether server-side auto-yes poller is active
@@ -548,6 +554,7 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   // per-instance map (keyed by activeInstanceId; primary instance id === cliToolId).
   const autoYesEnabled = autoYesStateMap.get(activeInstanceId)?.enabled ?? false;
   const autoYesExpiresAt = autoYesStateMap.get(activeInstanceId)?.expiresAt ?? null;
+  const autoYesBlockedByContract = autoYesStateMap.get(activeInstanceId)?.blockedByContract === true;
   // Trigger to refresh FileTreeView after file operations
   const [fileTreeRefresh, setFileTreeRefresh] = useState(0);
 
@@ -972,7 +979,14 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
         const seedInstanceId = onMobile ? requestedInstance : requestedCliTool;
         setAutoYesStateMap(prev => {
           const next = new Map(prev);
-          next.set(seedInstanceId, { enabled: autoYes.enabled, expiresAt: autoYes.expiresAt });
+          // Issue #3723: this poll does not carry the contract verdict, so the
+          // last one read is kept for as long as the instance stays armed.
+          const blocked = autoYes.enabled && prev.get(seedInstanceId)?.blockedByContract === true;
+          next.set(seedInstanceId, {
+            enabled: autoYes.enabled,
+            expiresAt: autoYes.expiresAt,
+            ...(blocked ? { blockedByContract: true } : {}),
+          });
           return next;
         });
         prevAutoYesEnabledRef.current = autoYes.enabled;
@@ -1017,13 +1031,16 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       if (latestAutoYesRequestIdRef.current !== requestId) return;
       const instances = data?.instances;
       if (!instances || typeof instances !== 'object') return;
-      const next = new Map<string, { enabled: boolean; expiresAt: number | null }>();
+      const next = new Map<string, AutoYesInstanceSummary>();
       for (const [instanceId, raw] of Object.entries(instances)) {
         if (raw && typeof raw === 'object') {
-          const s = raw as { enabled?: boolean; expiresAt?: number | null };
+          const s = raw as { enabled?: boolean; expiresAt?: number | null; blockedByContract?: boolean };
+          const enabled = s.enabled ?? false;
           next.set(instanceId, {
-            enabled: s.enabled ?? false,
+            enabled,
             expiresAt: s.expiresAt ?? null,
+            // Issue #3723
+            ...(enabled && s.blockedByContract === true ? { blockedByContract: true } : {}),
           });
         }
       }
@@ -1451,7 +1468,13 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
             // Issue #525/#896: Store per-instance state keyed by the toggled instance.
             setAutoYesStateMap(prev => {
               const next = new Map(prev);
-              next.set(effectiveInstanceId, { enabled: data.enabled, expiresAt: data.expiresAt });
+              // Issue #3723: the arming response names the contract policy.
+              const blocked = data.enabled === true && data.contractPolicy?.mode === 'off';
+              next.set(effectiveInstanceId, {
+                enabled: data.enabled,
+                expiresAt: data.expiresAt,
+                ...(blocked ? { blockedByContract: true } : {}),
+              });
               return next;
             });
             // Issue #740/#896: the stop-reason ref tracks the ACTIVE instance only;
@@ -2022,6 +2045,7 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     agentInstances,
     autoYesEnabled,
     autoYesExpiresAt,
+    autoYesBlockedByContract,
     autoYesStateMap,
     diffContent,
     diffFilePath,

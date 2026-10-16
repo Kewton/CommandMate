@@ -564,9 +564,17 @@ export function deleteAutoYesStateByWorktree(worktreeId: string): number {
  * and "expired" identically, and the map keeps disabled entries around for
  * inspection long after anyone needs them on the wire.
  *
+ * Issue #3723: `isBlocked`, when given, marks an armed instance whose contract
+ * withholds every answer (`blockedByContract: true`). A callback rather than a
+ * lookup here, because the contract lives in SQLite and this module stays free
+ * of a database dependency; the list route passes the poller's own policy read.
+ *
+ * @param isBlocked - Whether the contract blocks Auto-Yes for one instance
  * @returns worktreeId -> instanceId -> summary; worktrees with nothing armed are absent
  */
-export function getEnabledAutoYesByWorktree(): Map<string, Record<string, AutoYesInstanceSummary>> {
+export function getEnabledAutoYesByWorktree(
+  isBlocked?: (worktreeId: string, cliToolId: CLIToolType, instanceId: string) => boolean
+): Map<string, Record<string, AutoYesInstanceSummary>> {
   const byWorktree = new Map<string, Record<string, AutoYesInstanceSummary>>();
   // A snapshot of the keys: an expired read below rewrites its own entry.
   for (const key of Array.from(autoYesStates.keys())) {
@@ -577,7 +585,9 @@ export function getEnabledAutoYesByWorktree(): Map<string, Record<string, AutoYe
     const state = getAutoYesState(worktreeId, cliToolId, instanceId);
     if (!state?.enabled) continue;
     const entries = byWorktree.get(worktreeId) ?? {};
-    entries[instanceId] = { enabled: true, expiresAt: state.expiresAt };
+    const summary: AutoYesInstanceSummary = { enabled: true, expiresAt: state.expiresAt };
+    if (isBlocked?.(worktreeId, cliToolId, instanceId)) summary.blockedByContract = true;
+    entries[instanceId] = summary;
     byWorktree.set(worktreeId, entries);
   }
   return byWorktree;

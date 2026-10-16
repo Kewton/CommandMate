@@ -27,6 +27,11 @@ import {
   type AutoYesState,
 } from '@/lib/polling/auto-yes-manager';
 import { recheckPendingDecisions } from '@/lib/hooks/pending-decision-recheck';
+import {
+  getSessionContractPolicySummary,
+  isSessionAutoYesBlockedByContract,
+  type ContractPolicySummary,
+} from '@/lib/polling/auto-yes-policy';
 import { isValidWorktreeId } from '@/lib/security/path-validator';
 import { CLI_TOOL_IDS, isValidInstanceId, type CLIToolType } from '@/lib/cli-tools/types';
 import { resolveSessionName } from '@/lib/cli-tools/session-name';
@@ -84,6 +89,20 @@ interface AutoYesResponse {
     delivered: number;
     skipped: number;
   };
+  /**
+   * Issue #3723: what the contract governing this instance says about Auto-Yes,
+   * or null when none does. Carried on the single-target responses that can
+   * leave an operator believing Auto-Yes will answer — the arming POST and the
+   * `?cliToolId` GET. Read through the poller's own policy lookup, so a
+   * `mode: 'off'` here is the reason the poller answers nothing.
+   */
+  contractPolicy?: ContractPolicySummary | null;
+  /**
+   * Issue #3723, map entries only (`agents` / `instances`): true when the
+   * instance is armed and its contract says `mode: 'off'`. Omitted otherwise,
+   * so a worktree with no contract answers exactly what it did.
+   */
+  blockedByContract?: boolean;
 }
 
 /**
@@ -197,7 +216,10 @@ export async function GET(
         });
       }
       const state = getAutoYesState(id, target.cliToolId, target.instanceId);
-      return NextResponse.json(buildAutoYesResponse(state, undefined, target));
+      return NextResponse.json({
+        ...buildAutoYesResponse(state, undefined, target),
+        contractPolicy: getSessionContractPolicySummary(id, target.cliToolId, target.instanceId),
+      });
     }
 
     // No cliToolId: return maps keyed by agent (cliToolId) and by instance (Issue #896).
@@ -209,10 +231,16 @@ export async function GET(
       if (!agentId) continue;
       const instanceId = extractInstanceId(key) ?? agentId;
       const state = getAutoYesState(id, agentId, instanceId);
-      instanceStates[instanceId] = buildAutoYesResponse(state);
+      const entry = buildAutoYesResponse(state);
+      // Issue #3723: `commandmate instances` reads this map; an armed instance
+      // its contract keeps silent is flagged here, beside the arming it undoes.
+      if (entry.enabled && isSessionAutoYesBlockedByContract(id, agentId, instanceId)) {
+        entry.blockedByContract = true;
+      }
+      instanceStates[instanceId] = entry;
       // Keep the cliTool-level map populated from the primary instance for backward compat.
       if (instanceId === agentId) {
-        agentStates[agentId] = buildAutoYesResponse(state);
+        agentStates[agentId] = { ...entry };
       }
     }
 
@@ -460,14 +488,23 @@ export async function POST(
     // request that deliberately named none. `pendingDecisions` (#1898-2) is
     // undefined on that path anyway — nothing is re-judged when nothing is armed.
     const targetedRequest = body.enabled || !!body.instanceId || !!body.cliToolId;
-    return NextResponse.json(
-      buildAutoYesResponse(
-        state,
-        pollingStarted,
-        targetedRequest ? target : undefined,
-        pendingDecisions
-      )
+    const response = buildAutoYesResponse(
+      state,
+      pollingStarted,
+      targetedRequest ? target : undefined,
+      pendingDecisions
     );
+    // Issue #3723: arming answered `enabled: true` even when the contract on
+    // this instance says `autoYes.mode: 'off'`, so the poller would answer
+    // nothing — the reason surfaced only in `capture --json`'s lastSuppression,
+    // after a prompt had already sat unanswered. Read after
+    // `startAutoYesPolling`, which drops the cached policy when it starts a
+    // poller; otherwise the policy is at most AUTO_YES_POLICY_CACHE_TTL_MS old,
+    // the same staleness the poller itself judges with.
+    if (body.enabled) {
+      response.contractPolicy = getSessionContractPolicySummary(id, cliToolId, instanceId);
+    }
+    return NextResponse.json(response);
   } catch (error: unknown) {
     logger.error('error-setting-auto-yes-state:', { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json(

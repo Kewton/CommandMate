@@ -6,7 +6,7 @@
 import { Command } from 'commander';
 import { ExitCode } from '../types';
 import type { SendOptions } from '../types';
-import type { TaskCreateResponse } from '../types/api-responses';
+import type { AutoYesSetResult, TaskCreateResponse } from '../types/api-responses';
 import { ApiClient, ApiError, assertResponseShape, isValidWorktreeId, MAX_STOP_PATTERN_LENGTH } from '../utils/api-client';
 import { TOKEN_WARNING, handleCommandError } from '../utils/command-helpers';
 import { parseDurationToMs, ALLOWED_DURATIONS } from '../config/duration-constants';
@@ -24,6 +24,7 @@ import {
   INSTANCE_SELECTOR_ERROR,
 } from './instances';
 import { resolveCommandTarget } from './command-target';
+import { describeContractPolicy } from './auto-yes';
 import {
   ALLOW_RELAY_CHAIN_DESCRIPTION,
   REPLY_TO_OPTION_DESCRIPTION,
@@ -109,8 +110,17 @@ async function enableAutoYes(
     autoYesBody.stopPattern = options.stopPattern;
   }
 
-  await client.post<void>(`/api/worktrees/${worktreeId}/auto-yes`, autoYesBody);
+  // Issue #3723: the response is read now. It names what the contract on the
+  // instance lets Auto-Yes answer; with `autoYes.mode: off` the poller this
+  // armed answers nothing, and "Auto-yes enabled." alone said otherwise.
+  const result = await client.post<AutoYesSetResult | undefined>(
+    `/api/worktrees/${worktreeId}/auto-yes`,
+    autoYesBody,
+  );
   console.error('Auto-yes enabled.');
+  for (const line of describeContractPolicy(result?.contractPolicy)) {
+    console.error(line);
+  }
 }
 
 /**

@@ -58,8 +58,12 @@ export type CliStatusEntry = NonNullable<WorktreeItem['sessionStatusByCli']>[str
  * turned-off states away as it reads them (`getEnabledAutoYesByWorktree`), so a
  * missing key means "not armed right now" and carries no reason. Why it stopped
  * lives in `commandmate capture --json`'s `autoYes.stopReason`.
+ *
+ * Issue #3723: `blockedByContract` is true when the instance is armed but the
+ * contract governing it says `autoYes.mode: 'off'` — the poller answers nothing.
+ * Omitted otherwise (and by a server older than #3723).
  */
-export type AutoYesInstanceWire = { enabled: boolean; expiresAt: number | null };
+export type AutoYesInstanceWire = { enabled: boolean; expiresAt: number | null; blockedByContract?: boolean };
 
 /**
  * A list row with the two maps this command reads and `WorktreeItem` does not
@@ -220,9 +224,16 @@ export function formatAutoYesRemaining(remainingMs: number): string {
  */
 function remainingAutoYesMs(entry: AutoYesInstanceWire | undefined, now: number): number {
   if (!entry || entry.enabled !== true) return 0;
+  // Issue #3723: armed, but the contract answers nothing — no Auto-Yes in effect.
+  if (entry.blockedByContract === true) return 0;
   if (entry.expiresAt === null) return Number.POSITIVE_INFINITY;
   if (typeof entry.expiresAt !== 'number') return 0;
   return entry.expiresAt > now ? entry.expiresAt - now : 0;
+}
+
+/** Armed, but the contract on the instance says `autoYes.mode: off` (Issue #3723). */
+function isBlockedByContract(entry: AutoYesInstanceWire | undefined): boolean {
+  return entry?.enabled === true && entry.blockedByContract === true;
 }
 
 /**
@@ -290,8 +301,12 @@ function deriveAutoYesCell(wt: LsWorktreeItem, status: string, now: number): str
     }
   }
 
+  // Issue #3723: an armed instance its contract keeps silent (`autoYes.mode:
+  // off`) has no Auto-Yes in effect, whatever its countdown says. It counts as
+  // 0 above (see remainingAutoYesMs) and is named `blocked` here, so the cell
+  // stops printing a time beside a prompt only a human will answer.
   const value = remaining === 0
-    ? 'off'
+    ? (isBlockedByContract(armedByInstance[pick]) ? 'blocked' : 'off')
     : remaining === Number.POSITIVE_INFINITY
       ? 'on'
       : formatAutoYesRemaining(remaining);
@@ -466,6 +481,9 @@ AUTO_YES column (Issue #2575):
     on         armed, with no expiry the server named
     off        at least one of those instances is NOT armed, so a prompt on this
                row waits for a human. This is the cell to look for
+    blocked    armed, but the contract running on that instance sets
+               autoYes.mode: off, so Auto-Yes answers nothing there either
+               (Issue #3723). --json: autoYesByInstance.<id>.blockedByContract
     -          not known: the server predates the field, or this row is not idle
                and no instance explains its STATUS
 

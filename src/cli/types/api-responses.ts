@@ -1311,6 +1311,22 @@ export interface AutoYesSetResult {
     rosterCliTool: string;
     requestedCliTool: string;
   } | null;
+  /**
+   * Issue #3723: what the contract governing the armed instance says about
+   * Auto-Yes, or null when no contract governs it. Absent from a server older
+   * than #3723 and from a disabling POST. `mode: 'off'` means the poller this
+   * request armed will answer nothing. `mode` is the wire's `string`, for the
+   * reason `resolvedBy` above is.
+   */
+  contractPolicy?: AutoYesContractPolicy | null;
+}
+
+/** Mirrors: src/lib/polling/auto-yes-policy.ts ContractPolicySummary [Issue #3723]. */
+export interface AutoYesContractPolicy {
+  taskId: string | null;
+  mode: string | null;
+  allowPromptTypes: string[];
+  denyPatternCount: number;
 }
 
 /**
@@ -1328,7 +1344,11 @@ export interface AutoYesSetResult {
  * Optional because a daemon older than #896 sends no such map.
  */
 export interface AutoYesStatesResponse {
-  instances?: Record<string, { enabled: boolean; expiresAt: number | null }>;
+  /**
+   * Issue #3723: `blockedByContract` is true when the instance is armed but its
+   * contract says `autoYes.mode: 'off'`; omitted otherwise and by older servers.
+   */
+  instances?: Record<string, { enabled: boolean; expiresAt: number | null; blockedByContract?: boolean }>;
 }
 
 /** wait exit 10 CLI extended output type */

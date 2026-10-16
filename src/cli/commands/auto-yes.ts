@@ -6,7 +6,7 @@
 import { Command } from 'commander';
 import { ExitCode } from '../types';
 import type { AutoYesOptions } from '../types';
-import type { AutoYesSetResult } from '../types/api-responses';
+import type { AutoYesContractPolicy, AutoYesSetResult } from '../types/api-responses';
 import { ApiClient, isValidWorktreeId, isValidInstanceId, MAX_STOP_PATTERN_LENGTH } from '../utils/api-client';
 import { TOKEN_WARNING, handleCommandError } from '../utils/command-helpers';
 import { parseDurationToMs, ALLOWED_DURATIONS } from '../config/duration-constants';
@@ -56,6 +56,51 @@ function reportEnabled(worktreeId: string, result: AutoYesSetResult | undefined)
         `${pending.skipped > 0 ? `, ${pending.skipped} skipped (limit)` : ''}.`,
     );
   }
+
+  // Issue #3723: after the "enabled" line it qualifies.
+  for (const line of describeContractPolicy(result?.contractPolicy)) {
+    console.error(line);
+  }
+}
+
+/**
+ * The stderr line(s) describing what the contract on the armed instance lets
+ * Auto-Yes answer (Issue #3723), or an empty list when there is nothing to say.
+ *
+ * `mode: 'off'` is a warning: the poller just armed will answer no prompt at
+ * all, and before this the only trace of that was `capture --json`'s
+ * `autoYes.lastSuppression`, written once a prompt had already sat unanswered.
+ * `safe` / `allow-listed` still answer some prompts, so they get one line that
+ * names which. No contract, or one that states no mode, prints nothing — the
+ * output is what it was.
+ *
+ * Shared with `send --auto-yes`, so the two ways of arming say the same thing.
+ * Neither changes the exit code: arming did succeed, and a script that checks
+ * `$?` must not start failing on a contract the operator chose.
+ *
+ * @param policy - `contractPolicy` from the auto-yes POST (absent from older servers)
+ */
+export function describeContractPolicy(policy: AutoYesContractPolicy | null | undefined): string[] {
+  if (!policy || policy.mode === null) return [];
+  const task = policy.taskId ? `the contract of task ${policy.taskId}` : 'the contract on this instance';
+  const deny = policy.denyPatternCount > 0
+    ? ` ${policy.denyPatternCount} deny pattern(s) also escalate matching prompts to a human.`
+    : '';
+  if (policy.mode === 'off') {
+    return [
+      `Warning: ${task} sets autoYes.mode: off, so Auto-Yes is armed but will answer no prompt. ` +
+        'Prompts on this instance wait for a human (commandmate respond).',
+    ];
+  }
+  if (policy.mode === 'safe') {
+    return [`Note: ${task} sets autoYes.mode: safe; Auto-Yes answers yes_no prompts only.${deny}`];
+  }
+  if (policy.mode === 'allow-listed') {
+    const types = policy.allowPromptTypes.length > 0 ? policy.allowPromptTypes.join(', ') : 'none';
+    return [`Note: ${task} sets autoYes.mode: allow-listed; Auto-Yes answers only: ${types}.${deny}`];
+  }
+  // A mode this build does not know (a newer server): name it, judge nothing.
+  return [`Note: ${task} sets autoYes.mode: ${policy.mode}.${deny}`];
 }
 
 export function createAutoYesCommand(): Command {

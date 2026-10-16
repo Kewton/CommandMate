@@ -3,6 +3,8 @@
   "toggleLabel": "Auto Yes mode",
   "targetLabel": "Auto Yes target",
   "timeRemaining": "Time remaining",
+  "blockedByContract": "Blocked by contract (mode: off)",
+  "blockedByContractTitle": "The running contract sets autoYes.mode: off, so Auto Yes answers no prompt in this session even while ON.",
   "enableTitle": "Enable Auto Yes mode?",
   "enableTitleWithTool": "Enable Auto Yes mode? ({toolName})",
   "featureDescription": "Feature description",

@@ -180,6 +180,7 @@ commandmate ls --json \
 | `42:10` | 残り時間（1 時間未満は `MM:SS`） |
 | `1:05:33` | 残り時間（1 時間以上は `H:MM:SS`） |
 | `off` | 対象 instance の少なくとも 1 つが**未武装**。その行のプロンプトは人が答えないと進まない |
+| `blocked` | 武装しているが、その instance で実行中の契約が `autoYes.mode: off` を指定しているため**何にも答えない**（Issue #3723）。`off` と同じく人が答えないと進まない。根拠は `--json` の `autoYesByInstance.<instanceId>.blockedByContract: true` |
 | `on` | 武装しているが期限が無い（サーバーが `expiresAt: null` を返した場合。通常のサーバーでは出ません） |
 | `-` | **判定できない**。#2512 より古いサーバー（`autoYesByInstance` が無い）／`idle` 以外の行で STATUS を説明する instance が 1 つも無い |
 | `03:12 (codex-2)` | 対象が既定エージェントのプライマリ以外の instance。括弧内はそのまま `--instance` に渡せる値 |
@@ -2378,6 +2379,29 @@ Auto-yes enabled for proj-cp (copilot).
 エージェント名が出ない（`Auto-yes enabled for proj-cp.`）ときは、**稼働中のサーバが CLI より古く**
 まだ claude 固定で動いています。`commandmate stop && commandmate start` で再起動してください。
 
+### 契約の `autoYes.mode: off` は有効化の時点で警告する（Issue #3723）
+
+実行中の契約が `autoYes.mode: off` を指定している instance では、Auto-Yes を有効にしても
+**一度も答えません**。`auto-yes --enable` と `send --auto-yes` はこのとき stderr に警告を出します
+（exit code は 0 のまま。有効化そのものは成功しているためです）。
+
+```console
+$ commandmate auto-yes proj-cc --enable --instance claude-2
+Auto-yes enabled for proj-cc (claude, instance claude-2).
+Warning: the contract of task 7f3c… sets autoYes.mode: off, so Auto-Yes is armed but will answer no prompt. Prompts on this instance wait for a human (commandmate respond).
+```
+
+- `safe` / `allow-listed` は止めずに、答える種類を `Note:` の 1 行で添えます
+  （例: `Note: … sets autoYes.mode: safe; Auto-Yes answers yes_no prompts only.`）
+- 契約が無い、または `mode` を指定していない契約では、表示は従来どおりです
+- 判定は poller と同じ方針の読み取り（`getSessionAutoYesPolicy`）を通ります。API では
+  `POST /api/worktrees/<id>/auto-yes`（有効化）と `GET …/auto-yes?cliToolId=` の応答の
+  `contractPolicy`（`{ taskId, mode, allowPromptTypes, denyPatternCount }` か `null`）です
+- 判定するのは**その時点で実行中の契約**です。`send --contract … --auto-yes` では Auto-Yes を
+  有効にする時点で契約はまだ実行中になっていないため、この警告は出ません
+- 有効にした後は `commandmate ls` / `commandmate instances` の `AUTO_YES` 列が `blocked` になります。
+  ワークツリー詳細の Auto Yes トグルにも「契約で停止中（mode: off）」が出ます
+
 ダイアログが出たまま停まっているセッションに対して有効化した場合は、**その解決済みエージェントの**
 保留承認を再裁定した結果が 2 行目に出ます（Issue #1898-2。`resync` capability を持つソース＝
 現状 opencode のみが対象で、hook 系 5 ツールでは何も出ません）。
@@ -2536,6 +2560,8 @@ opencode     opencode opencode yes      no        claude-sonnet-4.6          ses
 - この問い合わせに答えない古いサーバーでは、これまでどおり各セッションの `current-output` の
   `autoYes` を読みます。その場合、止まっているインスタンスは有効でも `no` と出ます
 - `--json` の `autoYes` も同じ値です
+- 有効でも、その instance で実行中の契約が `autoYes.mode: off` なら `blocked` と出ます（Issue #3723）。
+  `--json` では `autoYes: true` のまま `autoYesBlockedByContract: true` が付きます（該当しない行には付きません）
 
 #### `TMUX_SESSION` 列（Issue #2317）
 

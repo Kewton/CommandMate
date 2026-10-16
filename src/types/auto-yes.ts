@@ -30,4 +30,10 @@ export interface AutoYesInstanceSummary {
   enabled: boolean;
   /** Epoch ms the state expires at, or null when not enabled. */
   expiresAt: number | null;
+  /**
+   * Issue #3723: true when the contract governing this instance says
+   * `autoYes.mode: 'off'`, so the armed poller will answer nothing. Omitted —
+   * not false — otherwise, so a row with no contract is the shape it was.
+   */
+  blockedByContract?: boolean;
 }
