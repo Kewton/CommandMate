@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// 開いている Issue を Jev（TypeSafe の System One モデル）で採点する。使い方: docs/orchestrate/jev.md
+// 開いている Issue を Jev（TypeSafe の System One モデル）で採点する。使い方: docs/jev-triage.md
 // 使用例: node scripts/orchestrate/jev-triage.mjs [--skip 3508,3055] [--out jev-out.json]
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';

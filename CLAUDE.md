@@ -427,4 +427,4 @@ commandmate report list --days 7             # 直近N日のレポート一覧�
 - [ワークフロー例](./docs/user-guide/workflow-examples.md) - 実践的な使用例
 - [ステータスインジケーター](./docs/features/sidebar-status-indicator.md) - サイドバー機能詳細
 - [実装機能一覧](./docs/implementation-history.md) - Issue別の実装履歴
-- [Jev による Issue 棚卸し](./docs/orchestrate/jev.md) - 優先度・担当モデルの下書き（API と注意点）
+- [Jev による Issue 棚卸し](./docs/jev-triage.md) - 優先度・担当モデルの下書き（API と注意点）
