@@ -346,6 +346,27 @@ describe('relays cancel', () => {
     expect(mockConsoleError.mock.calls.flat().join('\n')).toContain('already delivered');
   });
 
+  it('reports a relay being delivered as an error rather than a success (Issue #3732)', async () => {
+    mockRoutes([
+      {
+        match: `/api/relays/${RELAY_ID}/cancel`,
+        method: 'POST',
+        response: {
+          status: 409,
+          data: {
+            error: 'Relay is being delivered right now and can no longer be cancelled',
+            code: 'RELAY_DELIVERING',
+          },
+        },
+      },
+    ]);
+
+    const code = await runUntilExit(() => runRelays(['cancel', RELAY_ID]));
+
+    expect(code).toBe(ExitCode.CONFIG_ERROR);
+    expect(mockConsoleError.mock.calls.flat().join('\n')).toContain('being delivered');
+  });
+
   it('cancels a live relay', async () => {
     const calls = mockRoutes([
       {
