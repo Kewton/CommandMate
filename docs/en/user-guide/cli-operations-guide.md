@@ -169,6 +169,7 @@ configured and no subscription, is what the column exists for.
 | `42:10` | Time left (`MM:SS` under an hour) |
 | `1:05:33` | Time left (`H:MM:SS` from an hour up) |
 | `off` | At least one of those instances is **not armed**, so a prompt on this row waits for a human |
+| `blocked` | Armed, but the contract running on that instance sets `autoYes.mode: off`, so it **answers nothing** (Issue #3723). Like `off`, a prompt waits for a human. The reason is `autoYesByInstance.<instanceId>.blockedByContract: true` in `--json` |
 | `on` | Armed with no expiry the server named (`expiresAt: null`; the current server does not produce this shape) |
 | `-` | **Not known**: the server predates #2512 (no `autoYesByInstance`), or this row is not `idle` and no instance explains its STATUS |
 | `03:12 (codex-2)` | The cell is about an instance other than the default agent's primary. The id in parentheses is an `--instance` value verbatim |
@@ -1550,6 +1551,32 @@ A non-primary `--instance` reads as `(opencode, instance oc-2)`. If no agent is 
 (`Auto-yes enabled for proj-cp.`), the **running server is older than the CLI** and is still
 hard-coding claude; restart it with `commandmate stop && commandmate start`.
 
+### A Contract With `autoYes.mode: off` Is Warned About When Arming (Issue #3723)
+
+On an instance whose running contract sets `autoYes.mode: off`, Auto-Yes **never answers**, however
+it is enabled. `auto-yes --enable` and `send --auto-yes` then print a warning on stderr (the exit
+code stays 0: the arming itself succeeded).
+
+```console
+$ commandmate auto-yes proj-cc --enable --instance claude-2
+Auto-yes enabled for proj-cc (claude, instance claude-2).
+Warning: the contract of task 7f3c… sets autoYes.mode: off, so Auto-Yes is armed but will answer no prompt. Prompts on this instance wait for a human (commandmate respond).
+```
+
+- `safe` / `allow-listed` are not blocked; one `Note:` line names what gets answered
+  (e.g. `Note: … sets autoYes.mode: safe; Auto-Yes answers yes_no prompts only.`)
+- With no contract, or a contract that states no `mode`, the output is what it was
+- The verdict goes through the poller's own policy read (`getSessionAutoYesPolicy`). On the API it
+  is `contractPolicy` (`{ taskId, mode, allowPromptTypes, denyPatternCount }` or `null`) on the
+  responses of `POST /api/worktrees/<id>/auto-yes` (enabling) and `GET …/auto-yes?cliToolId=`
+- The verdict is about the contract **running at that moment**. With `send --contract … --auto-yes`,
+  though, the task is still `pending` when Auto-Yes is armed (the server does not count it as
+  running), so when the server's `contractPolicy` is `null` the `autoYes` of **the contract being
+  sent** is judged instead. The same `Warning:` / `Note:` is printed once, including when `--model`
+  moves the arming after the send (a value from the server takes precedence)
+- Once armed, the `AUTO_YES` column of `commandmate ls` / `commandmate instances` reads `blocked`,
+  and the Auto Yes toggle on the worktree detail screen shows "Blocked by contract (mode: off)"
+
 Arming a session that is already stuck on a dialog adds a second line reporting what it re-judged
 for **that resolved agent** (Issue #1898-2 — only sources with a `resync` capability, which today
 means opencode; the five hook tools print nothing).
@@ -1711,6 +1738,8 @@ a `RUNNING no` row can read `yes`.
   `current-output` `autoYes` as before; there, an instance that is not running reads `no` even when
   Auto-Yes is on
 - `autoYes` in `--json` is the same value
+- An armed instance whose running contract sets `autoYes.mode: off` reads `blocked` (Issue #3723).
+  In `--json`, `autoYes` stays `true` and `autoYesBlockedByContract: true` is added (absent on every other row)
 
 #### The `MODEL` / `EFFORT` Columns (Issue #1785)
 

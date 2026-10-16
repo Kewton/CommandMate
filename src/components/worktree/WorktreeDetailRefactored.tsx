@@ -286,6 +286,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     agentInstances,
     autoYesEnabled,
     autoYesExpiresAt,
+    autoYesBlockedByContract,
     autoYesStateMap,
     diffContent,
     diffFilePath,
@@ -1192,6 +1193,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                       cliToolName={activeCliTab}
                       inline
                       showToolName={false}
+                      blockedByContract={autoYesBlockedByContract}
                     />
                   }
                 />

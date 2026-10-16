@@ -48,6 +48,14 @@ type InstanceRow = {
   running: boolean;
   autoYes: boolean;
   /**
+   * Issue #3723: Auto-Yes is armed but the contract running on this instance
+   * sets `autoYes.mode: off`, so nothing is answered. The reason `AUTO_YES`
+   * reads `blocked`. Its own key rather than a third value of `autoYes`, which
+   * `--json` readers already treat as a boolean — and present only when true,
+   * so a row with no such contract prints exactly the JSON it did.
+   */
+  autoYesBlockedByContract?: true;
+  /**
    * Issue #1785: what the server said this instance is running, or null.
    *
    * Verbatim. `cliTool` above answers "which agent", which the roster already
@@ -130,7 +138,7 @@ function formatInstancesTable(rows: InstanceRow[]): string {
     r.alias,
     r.cliTool,
     r.running ? 'yes' : 'no',
-    r.autoYes ? 'yes' : 'no',
+    r.autoYes ? (r.autoYesBlockedByContract ? 'blocked' : 'yes') : 'no',
     // Blank, not a placeholder: an unknown model is the ordinary state (the
     // session is stopped, the tool publishes none, the server restarted), and a
     // column of `-` reads like a value the reader has to look up.
@@ -382,10 +390,13 @@ async function fetchOpencodeSessions(
  * `instances` map (a daemon older than #896). The caller then keeps each
  * session's own reading, which is what this command printed before.
  */
+/** One instance's Auto-Yes as the state store reports it (Issue #3300 / #3723). */
+type ArmedAutoYes = { enabled: boolean; blockedByContract: boolean };
+
 async function fetchArmedAutoYes(
   client: ApiClient,
   worktreeId: string
-): Promise<Map<string, boolean> | null> {
+): Promise<Map<string, ArmedAutoYes> | null> {
   try {
     const response = await client.get<AutoYesStatesResponse>(
       `/api/worktrees/${worktreeId}/auto-yes`
@@ -393,7 +404,10 @@ async function fetchArmedAutoYes(
     const states = response?.instances;
     if (!states || typeof states !== 'object') return null;
     return new Map(
-      Object.entries(states).map(([instanceId, state]) => [instanceId, state?.enabled === true])
+      Object.entries(states).map(([instanceId, state]): [string, ArmedAutoYes] => {
+        const enabled = state?.enabled === true;
+        return [instanceId, { enabled, blockedByContract: enabled && state?.blockedByContract === true }];
+      })
     );
   } catch {
     return null;
@@ -460,7 +474,15 @@ async function listInstances(
   const armed = instances.length > 0 ? await fetchArmedAutoYes(client, worktreeId) : null;
   const rows: InstanceRow[] = armed === null
     ? sessionRows
-    : sessionRows.map(row => ({ ...row, autoYes: armed.get(row.instanceId) ?? false }));
+    : sessionRows.map(row => {
+      const entry = armed.get(row.instanceId);
+      return {
+        ...row,
+        autoYes: entry?.enabled ?? false,
+        // Issue #3723: only the state store says this, so only this path sets it.
+        ...(entry?.blockedByContract ? { autoYesBlockedByContract: true as const } : {}),
+      };
+    });
 
   if (options.json) {
     console.log(JSON.stringify(rows, null, 2));

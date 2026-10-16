@@ -61,6 +61,9 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
     off      - at least one of those instances is NOT armed, so a prompt on this
                row waits for a human. 'waiting' + 'off' is a confirmation
                prompt nobody is going to answer -- the cell to look for
+    blocked  - armed, but the contract running on that instance sets
+               autoYes.mode: off, so nothing is answered there either
+               (Issue #3723; --json: autoYesByInstance.<id>.blockedByContract)
     -        - not known: the server predates #2512, or this row is not idle and
                no instance explains its STATUS
 
@@ -404,6 +407,11 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
   (e.g. "rm -rf" in an npm script) also triggers it and stops auto-yes.
   To suppress auto-responses for risky prompts, use the task contract's
   autoYes.denyPatterns instead (docs/design/task-contract.md).
+
+  When the contract running on the instance sets autoYes.mode: off, --enable
+  (and send --auto-yes) print a 'Warning:' line on stderr and still exit 0:
+  Auto-Yes is armed but answers nothing there. safe / allow-listed add one
+  'Note:' line naming what is answered (Issue #3723).
 
 ### commandmate instances <worktree-id> [action] [args]
   Discover and manage a worktree's agent-instance roster (1 agent, multiple sessions).

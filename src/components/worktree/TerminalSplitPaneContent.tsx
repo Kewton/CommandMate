@@ -196,6 +196,12 @@ export interface TerminalSplitPaneContentProps extends TerminalSplitPaneCoreProp
   onMessageSent?: (cliToolId: CLIToolType) => void;
   /** AutoYes domain group (Issue #756). 'onToggle' required; rest optional. */
   autoYes: SplitAutoYesProps;
+  /**
+   * Issue #3723: Auto-Yes is armed but the contract running on this split's
+   * instance says `autoYes.mode: off`. A sibling of `autoYes` rather than a
+   * member: `SplitAutoYesProps` lives in `src/types/terminal-split-pane.ts`.
+   */
+  autoYesBlockedByContract?: boolean;
   /** History domain group (Issue #756). Optional; pre-#744 callers omit it. */
   history?: HistoryPaneProps;
   /**
@@ -290,6 +296,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   cliStatus = 'idle',
   cliStatusUnclassified = false,
   autoYes,
+  autoYesBlockedByContract = false,
   history,
   onDropInstance,
   draggedInstanceId,
@@ -1248,6 +1255,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
                 lastAutoResponse={lastAutoResponse ?? null}
                 cliToolName={cliToolId}
                 inline
+                blockedByContract={autoYesBlockedByContract}
               />
             }
             // Issue #2766 / #2797: the direct-input toggle, in the toolbar's end
@@ -1387,6 +1395,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       onFocus,
       autoYesEnabled,
       autoYesExpiresAt,
+      autoYesBlockedByContract,
       lastAutoResponse,
       onAutoYesToggle,
       // Issue #2766: the bar's ONLY gate. Leaving it out of this list is the

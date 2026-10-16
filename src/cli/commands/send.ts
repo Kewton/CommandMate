@@ -6,7 +6,7 @@
 import { Command } from 'commander';
 import { ExitCode } from '../types';
 import type { SendOptions } from '../types';
-import type { TaskCreateResponse } from '../types/api-responses';
+import type { AutoYesContractPolicy, AutoYesSetResult, TaskCreateResponse, TaskView } from '../types/api-responses';
 import { ApiClient, ApiError, assertResponseShape, isValidWorktreeId, MAX_STOP_PATTERN_LENGTH } from '../utils/api-client';
 import { TOKEN_WARNING, handleCommandError } from '../utils/command-helpers';
 import { parseDurationToMs, ALLOWED_DURATIONS } from '../config/duration-constants';
@@ -24,6 +24,7 @@ import {
   INSTANCE_SELECTOR_ERROR,
 } from './instances';
 import { resolveCommandTarget } from './command-target';
+import { describeContractPolicy } from './auto-yes';
 import {
   ALLOW_RELAY_CHAIN_DESCRIPTION,
   REPLY_TO_OPTION_DESCRIPTION,
@@ -83,6 +84,7 @@ function resolveAutoYesDurationMs(duration: string | undefined): number {
  * @param options - Send command options containing auto-yes settings
  * @param durationMs - Duration already validated by resolveAutoYesDurationMs()
  * @param agent - CLI tool resolved for --instance (Issue #1629), else --agent
+ * @param contractPolicy - The policy of the contract this send created (Issue #3723), else null
  */
 async function enableAutoYes(
   client: ApiClient,
@@ -90,7 +92,8 @@ async function enableAutoYes(
   options: SendOptions,
   durationMs: number,
   agent: string | undefined,
-  instanceId: string | undefined
+  instanceId: string | undefined,
+  contractPolicy: AutoYesContractPolicy | null = null
 ): Promise<void> {
   const autoYesBody: Record<string, unknown> = {
     enabled: true,
@@ -109,8 +112,22 @@ async function enableAutoYes(
     autoYesBody.stopPattern = options.stopPattern;
   }
 
-  await client.post<void>(`/api/worktrees/${worktreeId}/auto-yes`, autoYesBody);
+  // Issue #3723: the response is read now. It names what the contract on the
+  // instance lets Auto-Yes answer; with `autoYes.mode: off` the poller this
+  // armed answers nothing, and "Auto-yes enabled." alone said otherwise.
+  const result = await client.post<AutoYesSetResult | undefined>(
+    `/api/worktrees/${worktreeId}/auto-yes`,
+    autoYesBody,
+  );
   console.error('Auto-yes enabled.');
+  // The server's reading wins when it has one. It has none for a `--contract`
+  // send armed before the message goes out: the task is still `pending`, which
+  // the server does not count as governing the instance (ACTIVE_TASK_STATUSES).
+  // The contract this send just created is what will govern it, so its policy
+  // is the one to describe then — a null from the server is not "no contract".
+  for (const line of describeContractPolicy(result?.contractPolicy ?? contractPolicy)) {
+    console.error(line);
+  }
 }
 
 /**
@@ -139,6 +156,22 @@ async function registerInstance(
 }
 
 /**
+ * The `autoYes` block of a just-created task in the shape `describeContractPolicy`
+ * reads (Issue #3723), or null when the response carries none. Read defensively:
+ * `contract_json` is replayed verbatim, never re-validated.
+ */
+function contractPolicyOf(task: TaskView): AutoYesContractPolicy | null {
+  const autoYes = task.contract?.autoYes;
+  if (!autoYes || typeof autoYes !== 'object') return null;
+  return {
+    taskId: task.id,
+    mode: typeof autoYes.mode === 'string' ? autoYes.mode : null,
+    allowPromptTypes: Array.isArray(autoYes.allowPromptTypes) ? autoYes.allowPromptTypes : [],
+    denyPatternCount: Array.isArray(autoYes.denyPatterns) ? autoYes.denyPatterns.length : 0,
+  };
+}
+
+/**
  * Create the task row for `--contract` and get the message to send back.
  *
  * The contract is parsed server-side: the path is relative to the worktree,
@@ -152,7 +185,7 @@ async function createContractTask(
   options: SendOptions,
   agent: string | undefined,
   instanceId: string | undefined
-): Promise<{ taskId: string; message: string }> {
+): Promise<{ taskId: string; message: string; contractPolicy: AutoYesContractPolicy | null }> {
   const body: Record<string, unknown> = { contractPath: options.contract };
   if (agent) {
     body.cliToolId = agent;
@@ -171,7 +204,11 @@ async function createContractTask(
       ['task', 'message'],
       'POST /api/worktrees/:id/tasks'
     );
-    return { taskId: created.task.id, message: created.message };
+    return {
+      taskId: created.task.id,
+      message: created.message,
+      contractPolicy: contractPolicyOf(created.task),
+    };
   } catch (error) {
     if (error instanceof ApiError && error.statusCode === 400 && error.payload?.issues?.length) {
       console.error('Error: invalid task contract:');
@@ -389,11 +426,14 @@ worktree and send a short message that tells the agent to read that file.
         // so an invalid contract cannot leave auto-yes enabled for a message
         // that was never sent.
         let taskId: string | undefined;
+        // Issue #3723: what the created contract lets Auto-Yes answer.
+        let contractPolicy: AutoYesContractPolicy | null = null;
         let content = message;
         if (options.contract) {
           const task = await createContractTask(client, worktreeId, options, agent, instanceId);
           taskId = task.taskId;
           content = task.message;
+          contractPolicy = task.contractPolicy;
           console.error(`Task created: ${taskId}`);
           console.log(taskId);
         }
@@ -423,7 +463,7 @@ worktree and send a short message that tells the agent to read that file.
           // that never went out, which is the state #1608 removed for a bad
           // --duration.
           try {
-            await enableAutoYes(client, worktreeId, options, autoYesDurationMs, agent, instanceId);
+            await enableAutoYes(client, worktreeId, options, autoYesDurationMs, agent, instanceId, contractPolicy);
           } catch (error) {
             await failTask();
             throw error;
@@ -475,7 +515,7 @@ worktree and send a short message that tells the agent to read that file.
         // A failure here does not fail the task: the message was delivered and
         // the task is running, which is what the row already says.
         if (options.autoYes && deferAutoYes) {
-          await enableAutoYes(client, worktreeId, options, autoYesDurationMs, agent, instanceId);
+          await enableAutoYes(client, worktreeId, options, autoYesDurationMs, agent, instanceId, contractPolicy);
         }
       } catch (error) {
         handleCommandError(error);
