@@ -208,7 +208,13 @@ export async function registerRelay(
 export async function cancelRelayQuietly(client: ApiClient, relayId: string): Promise<void> {
   try {
     await client.post<RelayCancelResponse>(`/api/relays/${relayId}/cancel`);
-  } catch {
+  } catch (error) {
+    // #3732: not withdrawable because its payload is going out right now, so
+    // "it will expire" would be wrong — it will arrive.
+    if (error instanceof ApiError && error.apiCode === 'RELAY_DELIVERING') {
+      console.error(`Warning: relay ${relayId} is already being delivered and was not withdrawn.`);
+      return;
+    }
     console.error(`Warning: could not withdraw relay ${relayId}; it will expire on its own.`);
   }
 }
@@ -352,6 +358,14 @@ Withdraw one with \`commandmate relays cancel <relay-id>\`.
           // that in fact happened.
           if (error instanceof ApiError && error.apiCode === 'RELAY_ALREADY_CLOSED') {
             console.error(`Error: ${error.payload?.error ?? 'Relay is already closed.'}`);
+            process.exit(ExitCode.CONFIG_ERROR);
+          }
+          // The send is already under way (#3732): the payload is reaching the
+          // requester as we speak, so this too is a cancel that did not happen.
+          if (error instanceof ApiError && error.apiCode === 'RELAY_DELIVERING') {
+            console.error(
+              `Error: ${error.payload?.error ?? 'Relay is being delivered and can no longer be cancelled.'}`
+            );
             process.exit(ExitCode.CONFIG_ERROR);
           }
           throw error;

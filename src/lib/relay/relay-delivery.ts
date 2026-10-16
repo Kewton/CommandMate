@@ -74,7 +74,13 @@ import { RELAY_SCRAPE_QUIET_MS } from '@/lib/relay/relay-policy';
 import { findRelayHoldReason } from '@/lib/relay/relay-readiness';
 import { resolveRelaySession } from '@/lib/relay/relay-session-ref';
 import { writeRelaySystemLine } from '@/lib/relay/relay-system-line';
-import type { SessionRelay } from '@/lib/relay/types';
+import {
+  claimRelayDelivery,
+  isRelayDeliveryClaimed,
+  releaseRelayDelivery,
+  resetRelayDeliveryClaims,
+} from '@/lib/relay/relay-delivery-claims';
+import { isOpenRelayState, type RelayPendingKind, type SessionRelay } from '@/lib/relay/types';
 import { createLogger } from '@/lib/logger';
 import { getOrInitGlobal } from '../global-state';
 
@@ -201,6 +207,7 @@ const inFlight = getOrInitGlobal('__relayDeliveryInFlight', () => new Set<string
 /** Forget every in-flight delivery. Test seam. */
 export function resetRelayDeliveryState(): void {
   inFlight.clear();
+  resetRelayDeliveryClaims();
   globalThis.__relayPumpRunning = false;
 }
 
@@ -503,6 +510,12 @@ export function notifyRelayPromptWaiting(worker: RelayWorkerRef): void {
 export function sweepExpiredRelays(db: Database.Database, now = Date.now()): number {
   let expired = 0;
   for (const relay of listExpiredOpenRelays(db, now)) {
+    // A send already under way for this relay cannot be taken back (#3732).
+    // Expiring it now would leave A with both the reply and the expiry notice,
+    // and the delivery's own cleanup would then wipe that notice. The next
+    // sweep finds it closed (delivered) or, if the send was refused, still
+    // open and expires it then.
+    if (isRelayDeliveryClaimed(relay.id)) continue;
     try {
       const locale = resolveReadersLocale(db);
       // A payload that never went out is superseded by the expiry notice: A
@@ -550,6 +563,15 @@ export type RelayDeliveryOutcome = 'delivered' | 'held' | 'skipped' | 'failed';
  * repeat delivery is prevented by the in-flight set within a process and by
  * `markRelayDelivered`'s guarded update across one, which is the idempotency the
  * Issue asks for by name.
+ *
+ * `kind` and `body` are what the pump's listing saw, and that listing is stale
+ * by the time the readiness check returns (#3732): an earlier relay's send, or
+ * this one's own capture, may have let a cancel or an expiry sweep run. So the
+ * row is read again AFTER the last await before the send, and the send goes
+ * ahead only when it still carries the same payload — and, for anything but an
+ * expiry notice, is still open. The claim is taken in that same synchronous
+ * stretch, so no cancel can slip in between the check and the send; from then
+ * on `withdrawRelay` answers `delivering`.
  */
 async function deliverOne(
   db: Database.Database,
@@ -557,14 +579,14 @@ async function deliverOne(
   kind: 'reply' | 'prompt' | 'expired',
   body: string
 ): Promise<RelayDeliveryOutcome> {
-  const relay = getRelayById(db, relayId);
-  if (!relay) return 'skipped';
+  const listed = getRelayById(db, relayId);
+  if (!listed) return 'skipped';
 
-  const requester = resolveRelaySession(db, relay.from);
+  const listedRequester = resolveRelaySession(db, listed.from);
   const hold = await findRelayHoldReason(
-    requester.worktreeId,
-    requester.cliToolId,
-    requester.instanceId,
+    listedRequester.worktreeId,
+    listedRequester.cliToolId,
+    listedRequester.instanceId,
     db
   );
   if (hold) {
@@ -572,51 +594,82 @@ async function deliverOne(
     return 'held';
   }
 
-  const result = await sendUserMessage(db, {
-    worktreeId: requester.worktreeId,
-    content: body,
-    cliToolId: requester.cliToolId,
-    instanceId: requester.instanceId,
-    messageType: 'relay',
-    // The pointer back at the ledger. Also `session_relays.sent_request_id` for
-    // a reply, which carries a UNIQUE index — so a second delivery of the same
-    // relay cannot be recorded even if one were somehow attempted.
-    requestId: kind === 'reply' ? relayRequestId(relay.id) : undefined,
-  });
-
-  if (!result.ok) {
-    logger.info('relay-delivery-refused', { relayId, kind, stage: result.stage });
-    return result.stage === 'prompt_waiting' ? 'held' : 'failed';
+  // Synchronous from here to the send: re-read, then claim.
+  const current = findCurrentPayload(db, relayId);
+  if (!current || current.kind !== kind || current.body !== body) {
+    logger.info('relay-delivery-superseded', { relayId, kind });
+    return 'skipped';
   }
+  // An expiry notice is delivered from a CLOSED relay by design; everything
+  // else is only owed while the relay is open.
+  if (kind !== 'expired' && !isOpenRelayState(current.relay.state)) {
+    logger.info('relay-delivery-closed', { relayId, kind, state: current.relay.state });
+    return 'skipped';
+  }
+  const relay = current.relay;
+  const requester = resolveRelaySession(db, relay.from);
 
-  const now = Date.now();
-  if (kind === 'reply') {
-    if (!markRelayDelivered(db, relay.id, relayRequestId(relay.id), now)) {
-      // Somebody closed it underneath us. The message is already in A's
-      // composer, which is the outcome that mattered.
-      logger.info('relay-already-closed-on-deliver', { relayId });
+  claimRelayDelivery(relayId);
+  try {
+    const result = await sendUserMessage(db, {
+      worktreeId: requester.worktreeId,
+      content: body,
+      cliToolId: requester.cliToolId,
+      instanceId: requester.instanceId,
+      messageType: 'relay',
+      // The pointer back at the ledger. Also `session_relays.sent_request_id` for
+      // a reply, which carries a UNIQUE index — so a second delivery of the same
+      // relay cannot be recorded even if one were somehow attempted.
+      requestId: kind === 'reply' ? relayRequestId(relay.id) : undefined,
+    });
+
+    if (!result.ok) {
+      logger.info('relay-delivery-refused', { relayId, kind, stage: result.stage });
+      return result.stage === 'prompt_waiting' ? 'held' : 'failed';
     }
-    writeRelaySystemLine(
-      db,
-      relay.id,
-      'replied',
-      requester,
-      resolveRelaySession(db, relay.to),
-      now
-    );
-  } else if (kind === 'prompt') {
-    writeRelaySystemLine(
-      db,
-      relay.id,
-      'waiting',
-      requester,
-      resolveRelaySession(db, relay.to),
-      now
-    );
+
+    const now = Date.now();
+    if (kind === 'reply') {
+      if (!markRelayDelivered(db, relay.id, relayRequestId(relay.id), now)) {
+        // Somebody closed it underneath us. The message is already in A's
+        // composer, which is the outcome that mattered.
+        logger.info('relay-already-closed-on-deliver', { relayId });
+      }
+      writeRelaySystemLine(
+        db,
+        relay.id,
+        'replied',
+        requester,
+        resolveRelaySession(db, relay.to),
+        now
+      );
+    } else if (kind === 'prompt') {
+      writeRelaySystemLine(
+        db,
+        relay.id,
+        'waiting',
+        requester,
+        resolveRelaySession(db, relay.to),
+        now
+      );
+    }
+    clearRelayPending(db, relay.id, now);
+    logger.info('relay-delivered', { relayId, kind, to: `${requester.worktreeId}/${requester.instanceId}` });
+    return 'delivered';
+  } finally {
+    // Delivered: a reply is closed now and a prompt notice leaves the relay
+    // open on purpose, so either way a later cancel must be judged by the row.
+    // Held or failed: nothing reached A, so the relay can be withdrawn again.
+    releaseRelayDelivery(relayId);
   }
-  clearRelayPending(db, relay.id, now);
-  logger.info('relay-delivered', { relayId, kind, to: `${requester.worktreeId}/${requester.instanceId}` });
-  return 'delivered';
+}
+
+/** The payload this relay carries right now, read straight from the ledger. */
+function findCurrentPayload(
+  db: Database.Database,
+  relayId: string
+): { relay: SessionRelay; kind: RelayPendingKind; body: string } | null {
+  return listRelaysWithPendingPayload(db).find((item) => item.relay.id === relayId) ?? null;
 }
 
 /**

@@ -23,6 +23,8 @@ vi.mock('@/lib/logger', () => ({
 
 vi.mock('@/lib/tmux/tmux-capture-cache', () => ({
   getOrFetchCapture: vi.fn(),
+  getCaptureGeneration: vi.fn(() => ({ global: 0, session: 0 })),
+  isCaptureGenerationCurrent: vi.fn(() => true),
   setCachedCapture: vi.fn(),
   invalidateCache: vi.fn(),
   sliceOutput: vi.fn((output: string) => output),

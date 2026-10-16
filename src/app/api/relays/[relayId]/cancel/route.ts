@@ -32,6 +32,17 @@ export async function POST(
     if (!result.ok && result.reason === 'not_found') {
       return NextResponse.json({ error: 'Relay not found' }, { status: 404 });
     }
+    if (!result.ok && result.reason === 'delivering') {
+      // The send is already under way and cannot be taken back (#3732): the
+      // reply will arrive, so "cancelled" would be the wrong answer.
+      return NextResponse.json(
+        {
+          error: 'Relay is being delivered right now and can no longer be cancelled',
+          code: 'RELAY_DELIVERING',
+        },
+        { status: 409 }
+      );
+    }
     if (!result.ok) {
       // Reporting this as success would tell the caller they stopped a delivery
       // that in fact happened an hour ago.
