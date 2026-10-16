@@ -563,6 +563,8 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   // Issue #902: Latest-request guard for the bulk per-instance auto-yes refetch
   // so a slow reply for worktree A can't pollute worktree B's map during rapid
   // A→B→A navigation (newest reply wins; the server is the source of truth).
+  // Issue #3723: a successful toggle POST advances it too, so a GET begun
+  // before the toggle cannot overwrite what the POST answered.
   const latestAutoYesRequestIdRef = useRef(0);
   // Issue #525/#896: Derive the active instance's auto-yes state from the
   // per-instance map (keyed by activeInstanceId; primary instance id === cliToolId).
@@ -1484,6 +1486,13 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
           });
           if (response.ok) {
             const data = await response.json();
+            // Issue #3723: a whole-worktree GET that started before this POST
+            // answered read the state from before the toggle (e.g. an alias's
+            // expired arming); landing after this write it would turn the toggle
+            // back OFF and stop the contract re-read. Advancing the same counter
+            // the GETs check retires every GET already in flight — one started
+            // after this point is newer than the toggle and is adopted.
+            ++latestAutoYesRequestIdRef.current;
             // Issue #525/#896: Store per-instance state keyed by the toggled instance.
             setAutoYesStateMap(prev => {
               const next = new Map(prev);
