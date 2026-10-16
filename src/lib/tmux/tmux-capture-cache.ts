@@ -97,6 +97,25 @@ declare global {
   var __tmuxCaptureCache: Map<string, CacheEntry> | undefined;
   // eslint-disable-next-line no-var
   var __tmuxCaptureCacheInflight: Map<string, Promise<string>> | undefined;
+  // eslint-disable-next-line no-var
+  var __tmuxCaptureCacheGeneration: GenerationState | undefined;
+}
+
+/**
+ * Invalidation generations (Issue #3734).
+ * `global` advances on clearAllCache(); `sessions` holds the per-session count
+ * that invalidateCache() advances. A capture records both before it starts and
+ * writes back only when neither moved while it was waiting.
+ */
+interface GenerationState {
+  global: number;
+  sessions: Map<string, number>;
+}
+
+/** Snapshot of the invalidation generation taken before a capture starts. */
+export interface CaptureGeneration {
+  readonly global: number;
+  readonly session: number;
 }
 
 function getCache(): Map<string, CacheEntry> {
@@ -105,6 +124,41 @@ function getCache(): Map<string, CacheEntry> {
 
 function getInflight(): Map<string, Promise<string>> {
   return getOrInitGlobal('__tmuxCaptureCacheInflight', () => new Map<string, Promise<string>>());
+}
+
+function getGenerationState(): GenerationState {
+  return getOrInitGlobal('__tmuxCaptureCacheGeneration', () => ({ global: 0, sessions: new Map<string, number>() }));
+}
+
+// =========================================================================
+// getCaptureGeneration() / isCaptureGenerationCurrent()
+// =========================================================================
+
+/**
+ * Take the invalidation generation for a session before starting a capture
+ * (Issue #3734). Pass it to isCaptureGenerationCurrent() after the await.
+ *
+ * @param sessionName - tmux session name
+ * @returns Generation snapshot
+ */
+export function getCaptureGeneration(sessionName: string): CaptureGeneration {
+  const state = getGenerationState();
+  return { global: state.global, session: state.sessions.get(sessionName) ?? 0 };
+}
+
+/**
+ * Whether no invalidateCache(sessionName) / clearAllCache() ran since the
+ * snapshot was taken (Issue #3734). A capture that started before the
+ * invalidation may show the screen from before a send, so it must not be
+ * written back to the cache.
+ *
+ * @param sessionName - tmux session name
+ * @param generation - Snapshot from getCaptureGeneration()
+ * @returns True when the capture may be written back
+ */
+export function isCaptureGenerationCurrent(sessionName: string, generation: CaptureGeneration): boolean {
+  const current = getCaptureGeneration(sessionName);
+  return current.global === generation.global && current.session === generation.session;
 }
 
 // =========================================================================
@@ -225,6 +279,9 @@ export function setCachedCapture(
 
 /**
  * Invalidate cache for a specific session.
+ * Issue #3734: also advances the session's generation and drops its inflight
+ * entry, so a capture started before the invalidation is neither written back
+ * nor joined by callers that arrive after it (they start a fresh capture).
  * [SEC4-006] Logs debug message with session name for troubleshooting.
  *
  * @param sessionName - tmux session name to invalidate
@@ -232,6 +289,10 @@ export function setCachedCapture(
 export function invalidateCache(sessionName: string): void {
   const cache = getCache();
   cache.delete(sessionName);
+
+  const generations = getGenerationState().sessions;
+  generations.set(sessionName, (generations.get(sessionName) ?? 0) + 1);
+  getInflight().delete(sessionName);
 
   // [SEC4-006] Debug log for cache invalidation chain tracking
   logger.debug('cache:invalidate', { sessionName });
@@ -242,8 +303,11 @@ export function invalidateCache(sessionName: string): void {
 // =========================================================================
 
 /**
- * Clear all cache entries and inflight requests.
- * Used for graceful shutdown.
+ * Clear all cache entries and inflight requests for every session.
+ * Called at the start of a worktree's session cleanup (session-cleanup.ts).
+ * Issue #3734: advances the global generation so captures started before the
+ * clear are not written back. Per-session counts are dropped here because the
+ * global generation alone already tells every older snapshot apart.
  */
 export function clearAllCache(): void {
   const cache = getCache();
@@ -251,6 +315,10 @@ export function clearAllCache(): void {
 
   const inflight = getInflight();
   inflight.clear();
+
+  const state = getGenerationState();
+  state.global += 1;
+  state.sessions.clear();
 }
 
 // =========================================================================
@@ -264,6 +332,7 @@ export function clearAllCache(): void {
 export function resetCacheForTesting(): void {
   globalThis.__tmuxCaptureCache = undefined;
   globalThis.__tmuxCaptureCacheInflight = undefined;
+  globalThis.__tmuxCaptureCacheGeneration = undefined;
 }
 
 // =========================================================================
@@ -303,20 +372,26 @@ export async function getOrFetchCapture(
   }
 
   // 3. Create new fetch promise
+  // Issue #3734: snapshot the generation before fetchFn() starts
+  const generation = getCaptureGeneration(sessionName);
   const fetchPromise = fetchFn();
   inflight.set(sessionName, fetchPromise);
 
   try {
     const output = await fetchPromise;
 
-    // Cache non-empty results only [SEC4-007]
-    if (output.length > 0) {
+    // Cache non-empty results only [SEC4-007], and only when no invalidation
+    // happened while waiting (Issue #3734)
+    if (output.length > 0 && isCaptureGenerationCurrent(sessionName, generation)) {
       setCachedCapture(sessionName, output, CACHE_MAX_CAPTURE_LINES);
     }
 
     return sliceOutput(output, requestedLines);
   } finally {
-    // Clean up inflight entry
-    inflight.delete(sessionName);
+    // Clean up inflight entry, unless an invalidation already replaced it
+    // with a newer fetch (Issue #3734)
+    if (inflight.get(sessionName) === fetchPromise) {
+      inflight.delete(sessionName);
+    }
   }
 }

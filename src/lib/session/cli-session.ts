@@ -18,6 +18,8 @@ import type { SessionTransport } from '@/lib/tmux/session-transport';
 import { getPollingTmuxTransport } from '@/lib/tmux/polling-tmux-transport';
 import {
   getOrFetchCapture,
+  getCaptureGeneration,
+  isCaptureGenerationCurrent,
   setCachedCapture,
   invalidateCache,
   sliceOutput,
@@ -145,7 +147,8 @@ export async function captureSessionOutput(
  * Capture CLI session output bypassing cache (fresh capture).
  *
  * Issue #405: Used by prompt-response endpoint to ensure fresh output
- * for prompt re-verification. Writes back to cache on success.
+ * for prompt re-verification. Writes back to cache on success, unless the
+ * session was invalidated while the capture was in flight (Issue #3734).
  *
  * @param worktreeId - Worktree ID
  * @param cliToolId - CLI tool ID
@@ -164,12 +167,18 @@ export async function captureSessionOutputFresh(
   const { cliTool, sessionName } = resolveSessionContext(worktreeId, cliToolId, instanceId);
   const transport = getDefaultTransport();
 
+  // Issue #3734: snapshot the generation before the capture starts
+  const generation = getCaptureGeneration(sessionName);
+
   try {
     const output = await transport.captureSnapshot(sessionName, { startLine: -lines });
 
-    // Write back to cache if non-empty [SEC4-007]
+    // Write back to cache if non-empty [SEC4-007]. Skip it when the session was
+    // invalidated while waiting: the output may predate a send (Issue #3734).
     if (output.length > 0) {
-      setCachedCapture(sessionName, output, lines);
+      if (isCaptureGenerationCurrent(sessionName, generation)) {
+        setCachedCapture(sessionName, output, lines);
+      }
     } else {
       invalidateCache(sessionName);
     }
