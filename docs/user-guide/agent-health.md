@@ -39,6 +39,7 @@ hook のインスタンス取り違え）。`scripts/agent-health/run.ts` は、
 | `signed-out` | サインインできない | gemini（下記）。起動したツールのモデル（provider）が `Error: Unauthorized` を返し、ターンが応答なしで終わったときの `screen-running`・`screen-quoted-dialog`・`hook-correlation`（下記「モデルの認可エラー」） |
 | `unsupported` | ツールが未対応 | vibe-local・copilot の `version` 以外（下記） |
 | `timeout` | 時間切れ | 全体の時間上限に達して実行しなかったツール |
+| `usage-limit` | 利用上限に達している | 起動したツールの画面に利用上限の表示が出ていたときの `screen-*`・`hook-correlation`（下記「ツールの利用上限」） |
 | `prerequisite-failed` | version が取れず未実施 | `version` が fail したツールの残り |
 | `not-selected` | 今回の実行の対象外 | 表だけ。`--tools` / `--only` で外したもの |
 | `not-recorded` | 結果が記録されなかった | 表だけ。選んだのに結果が無いもの（スクリプトの異常） |
@@ -57,6 +58,28 @@ hook のインスタンス取り違え）。`scripts/agent-health/run.ts` は、
 
 #3021 の「No models loaded」は probe 自身の状態の隔離が原因で、probe 側で直したため、従来どおり fail にする。
 skip が続くときは、利用者がそのツールのモデルの資格情報（2026-10-08 の opencode-v2 は Ollama Cloud）を直す。
+
+### ツールの利用上限（Issue #3729）
+
+ツールのアカウントが利用上限（429）に達していると、依頼は処理されず、実行中の画面も承認ダイアログも `stop` の hook も出ない
+（2026-10-16、command-code 1.81.0 の `You've reached your weekly usage limit. Resets in 1d 17h`。#3717〜#3719 が同時に起票された）。
+上限は利用者のアカウントの状態で、コードでは直らない。そこで次の条件をすべて満たすときだけ、fail を `usage-limit` の skip にする
+（`src/lib/agent-health/usage-limit.ts`。判定していればの summary は `skipReason` に、画面の末尾は `evidence` に残す）。
+
+- 期待どおりなら pass のまま（skip にするのは fail になる判定だけ）
+- `screen-*` は、判定した画面に利用上限の表示がある。`hook-correlation` は、そのツールのセッションで見た画面のどれかにある
+- 利用上限の表示は「上限に達した」ことを言う文言だけで判定する（`USAGE_LIMIT_SIGNATURES`。ツールごとの行の表で、新しい文言は行を足す）。
+  `usage limit`・`429`・`Resets in` の単独では判定しない（claude の通常の案内「up to 50% of your weekly usage limit」や
+  codex の「You have 1 usage limit reset available」を上限と読まないため）
+
+| 文言の例 | ツール |
+|---|---|
+| `You've reached your weekly usage limit. Resets in …` | command-code（2026-10-16 の実測） |
+| `POST /alpha/generate → 429 error: … usage limit …` | command-code（同上） |
+| `Claude usage limit reached. Your limit will reset at …` | claude |
+| `You've hit your limit · resets …` / `You've hit your usage limit. …` | claude・codex |
+
+skip は要約の `skipByKind`（`利用上限に達している N`）に数える。続くときは、利用者がそのツールの上限の解除（または契約）を確かめる。
 
 ### version だけを読むツール（gemini・vibe-local・copilot、Issue #3313）
 
@@ -197,7 +220,7 @@ interface AgentHealthReport {
       summary: string;              // 1 行。何を期待し何が起きたか
       evidence?: string;            // 失敗時の証拠（画面の末尾 40 行、届いた hook）。4,000 文字まで
       skipReason?: string;
-      skipKind?: 'no-definition' | 'not-shown' | 'signed-out' | 'unsupported' | 'timeout' | 'prerequisite-failed'; // skip には必ず入る
+      skipKind?: 'no-definition' | 'not-shown' | 'signed-out' | 'unsupported' | 'timeout' | 'usage-limit' | 'prerequisite-failed'; // skip には必ず入る
       framePaths?: string[];        // 画面全体を保存したファイル（下の「画面の保存」）
     }>;
     launchedModel?: {               // 起動したモデル（Issue #3438）。起動しなかったツールと #3438 より前のレポートには無い（読む側は「不明」）

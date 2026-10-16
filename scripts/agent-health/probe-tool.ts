@@ -37,6 +37,7 @@ import { firstVersionLine, paneEvidence } from '@/lib/agent-health/report';
 import { archiveCheckFrames, type FrameArchive, type JudgedFrame } from '@/lib/agent-health/frame-archive';
 import { judgeServerEvents, judgeTurnScreen, turnEndedUnauthorized } from '@/lib/agent-health/model-auth';
 import { evaluateOpencodeV2LaunchLine, evaluateServerLeftovers } from '@/lib/agent-health/server-events';
+import { findUsageLimit, judgeUsageLimit } from '@/lib/agent-health/usage-limit';
 import {
   countMatches,
   evaluatePickerScreens,
@@ -195,6 +196,8 @@ class ToolSession {
   anyTurnUnauthorized = false;
   /** The model the frames looked at so far show (Issue #3438). */
   screenModel: ScreenModelReading | null = null;
+  /** The first frame looked at that showed the tool's usage limit (Issue #3729). */
+  usageLimitFrame: string | null = null;
 
   constructor(
     private readonly ctx: ProbeContext,
@@ -226,10 +229,12 @@ class ToolSession {
   /**
    * {@link record} for a check judged on frames: the frames are kept as
    * captured when the archive says so (Issue #3183), and the check carries
-   * their paths.
+   * their paths. A fail on frames that show the tool's usage limit is a
+   * `usage-limit` skip instead (Issue #3729).
    */
-  recordJudged(check: AgentHealthCheck, frames: readonly JudgedFrame[]): void {
-    if (!this.ctx.selected(check.checkId)) return;
+  recordJudged(judged: AgentHealthCheck, frames: readonly JudgedFrame[]): void {
+    if (!this.ctx.selected(judged.checkId)) return;
+    const check = judgeUsageLimit(judged, frames.map((entry) => entry.frame));
     const kept = archiveCheckFrames(this.ctx.frameArchive, {
       tool: this.spec.tool,
       version: this.version,
@@ -243,6 +248,7 @@ class ToolSession {
   async look(): Promise<{ frame: string; clean: string; verdict: ScreenVerdict }> {
     const frame = await this.ctx.tmux.capture(this.name, this.spec.captureLines);
     this.lastFrame = frame;
+    if (this.usageLimitFrame === null && findUsageLimit(frame)) this.usageLimitFrame = frame;
     this.screenModel = laterScreenModel(this.screenModel, readScreenModel(this.spec.cliToolId, frame));
     const result = detectSessionStatus(frame, this.spec.cliToolId);
     return {
@@ -735,15 +741,20 @@ export async function probeTool(ctx: ProbeContext): Promise<ProbeOutcome> {
     await sleep(HOOK_GRACE_MS);
   }
 
+  // Issue #3729: no event can arrive for a turn the tool never processed.
+  const usageLimitFrames = session.usageLimitFrame === null ? [] : [session.usageLimitFrame];
   if (serverPort !== null) {
     if (wantSse) {
       session.record(
-        judgeServerEvents(recorder?.events ?? [], {
-          window: session.runningWindow ?? undefined,
-          streamError: recorder?.error ?? null,
-          // The events judged are the running turn's when it ran (Issue #3420).
-          unauthorized: session.runningWindow ? session.runningTurnUnauthorized : session.anyTurnUnauthorized,
-        })
+        judgeUsageLimit(
+          judgeServerEvents(recorder?.events ?? [], {
+            window: session.runningWindow ?? undefined,
+            streamError: recorder?.error ?? null,
+            // The events judged are the running turn's when it ran (Issue #3420).
+            unauthorized: session.runningWindow ? session.runningTurnUnauthorized : session.anyTurnUnauthorized,
+          }),
+          usageLimitFrames
+        )
       );
     }
     const leftovers = await collectServerLeftovers(serverPort);
@@ -771,7 +782,7 @@ export async function probeTool(ctx: ProbeContext): Promise<ProbeOutcome> {
       instanceId,
       expectedEvents: expectedHookEvents(source.capabilities.supportedEvents),
     });
-    session.record({ checkId: 'hook-correlation', ...verdict });
+    session.record(judgeUsageLimit({ checkId: 'hook-correlation', ...verdict }, usageLimitFrames));
   }
 
   return { version, checks: [...checks, ...session.checks.values()], launchedModel };
