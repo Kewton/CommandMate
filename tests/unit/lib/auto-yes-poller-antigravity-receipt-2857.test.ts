@@ -91,6 +91,8 @@ import {
 } from '@/lib/auto-yes-poller';
 import { clearPolicySuppressions } from '@/lib/polling/auto-yes-suppression-state';
 import { clearAutoYesPolicyCache } from '@/lib/polling/auto-yes-policy';
+import { createTask, type Task } from '@/lib/db';
+import { parseTaskContract } from '@/lib/tasks/contract-parser';
 
 const WORKTREE_ID = 'wt-2857';
 const FIXTURE_DIR = path.resolve(__dirname, '../../fixtures/antigravity-live-2364');
@@ -139,12 +141,38 @@ async function respondTo(
 const receiptFor = (instanceId = 'antigravity'): void =>
   recordAntigravityPermissionReceipt(WORKTREE_ID, 'antigravity', instanceId, 'run_command', Date.now());
 
+const BY_POLICY_LOG = 'antigravity-autoyes-withheld-by-policy';
+
+/** A running task whose contract governs the agy instance, with `autoYes` as given. */
+function seedContract(autoYes: string, instanceId: string | null = null): Task {
+  return createTask(db, {
+    worktreeId: WORKTREE_ID,
+    cliToolId: 'antigravity',
+    instanceId,
+    contractPath: '.commandmate/tasks/t.yaml',
+    contract: parseTaskContract(
+      `version: 1
+title: a task
+goal: do the thing
+scope:
+  allow: ["src/**"]
+${autoYes}`,
+      'task.yaml',
+    ),
+    status: 'running',
+  });
+}
+
 /** Every answer `sendPromptAnswer` was asked to type, in order. */
 const answersSent = (): string[] => sendPromptAnswer.mock.calls.map(([p]) => p.answer);
 
 /** The withheld-for-want-of-receipt lines written so far, as `[name, fields]`. */
 const withheldLines = (): Array<[string, Record<string, unknown>]> =>
   mockLogger.info.mock.calls.filter(([name]) => name === WITHHELD_LOG) as Array<[string, Record<string, unknown>]>;
+
+/** The withheld-by-policy lines written so far (Issue #3724). */
+const byPolicyLines = (): Array<[string, Record<string, unknown>]> =>
+  mockLogger.info.mock.calls.filter(([name]) => name === BY_POLICY_LOG) as Array<[string, Record<string, unknown>]>;
 
 beforeEach(() => {
   db = new Database(':memory:');
@@ -308,5 +336,103 @@ describe('[#2857] the info line for a dialog withheld for want of a receipt', ()
     expect(result).toBe('no_prompt');
     expect(sendPromptAnswer).not.toHaveBeenCalled();
     expect(withheldLines()).toHaveLength(0);
+  });
+});
+
+/**
+ * Issue #3724: a contract that withholds the answer makes the server reply
+ * `ask`, so the dialog outlives the receipt window. Past it, the line must name
+ * the contract, not hooks.json — the hook did arrive.
+ */
+describe('[#3724] a dialog the contract withheld is not blamed on hooks.json', () => {
+  /** The live shape: a receipt, then the same dialog still up past the 8 s window. */
+  async function dialogOutlivesReceiptWindow(instanceId = 'antigravity'): Promise<void> {
+    receiptFor(instanceId);
+    await respondTo('dialog-bash-wrapped', instanceId);
+    vi.setSystemTime(T0 + 8_001);
+    await respondTo('dialog-bash-wrapped', instanceId);
+  }
+
+  it('names mode-off, the mode and the task, with no hooks.json hint, under `mode: off`', async () => {
+    const task = seedContract("autoYes:\n  mode: 'off'\n");
+
+    await dialogOutlivesReceiptWindow();
+
+    expect(sendPromptAnswer).not.toHaveBeenCalled();
+    expect(withheldLines()).toHaveLength(0);
+    expect(byPolicyLines()).toEqual([
+      [
+        BY_POLICY_LOG,
+        {
+          worktreeId: WORKTREE_ID,
+          instanceId: 'antigravity',
+          reason: 'mode-off',
+          mode: 'off',
+          taskId: task.id,
+          hint: expect.stringContaining('契約の autoYes'),
+        },
+      ],
+    ]);
+    expect(byPolicyLines()[0][1].hint).not.toContain('hooks.json');
+  });
+
+  it('names deny-pattern when a deny pattern matches the dialog', async () => {
+    seedContract("autoYes:\n  mode: allow-listed\n  allowPromptTypes: [yes_no, multiple_choice]\n  denyPatterns: ['python3']\n");
+
+    await dialogOutlivesReceiptWindow();
+
+    expect(withheldLines()).toHaveLength(0);
+    expect(byPolicyLines().map(([, f]) => [f.reason, f.mode])).toEqual([['deny-pattern', 'allow-listed']]);
+  });
+
+  it('keeps the hooks.json line when the contract permits the answer', async () => {
+    seedContract('');
+
+    await dialogOutlivesReceiptWindow();
+
+    expect(byPolicyLines()).toHaveLength(0);
+    expect(withheldLines()).toHaveLength(1);
+    expect(withheldLines()[0][1].hint).toContain('~/.gemini/config/hooks.json');
+  });
+
+  it('keeps the hooks.json line when only another instance is under contract', async () => {
+    seedContract("autoYes:\n  mode: 'off'\n", 'antigravity-2');
+
+    await dialogOutlivesReceiptWindow('antigravity');
+
+    expect(byPolicyLines()).toHaveLength(0);
+    expect(withheldLines().map(([, f]) => f.instanceId)).toEqual(['antigravity']);
+  });
+
+  it('is written at most once per 60 seconds for one instance, like the hooks.json line', async () => {
+    seedContract("autoYes:\n  mode: 'off'\n");
+    await respondTo('dialog-bash-wrapped');
+    expect(byPolicyLines()).toHaveLength(1);
+
+    for (const elapsed of [2_000, 30_000, 59_999]) {
+      vi.setSystemTime(T0 + elapsed);
+      await respondTo('dialog-bash-wrapped');
+    }
+    expect(byPolicyLines()).toHaveLength(1);
+
+    vi.setSystemTime(T0 + 60_000);
+    await respondTo('dialog-bash-wrapped');
+    expect(byPolicyLines()).toHaveLength(2);
+    expect(withheldLines()).toHaveLength(0);
+  });
+
+  it('shares one limit with the hooks.json line: either line silences both for the minute', async () => {
+    await respondTo('dialog-bash-wrapped');
+    expect(withheldLines()).toHaveLength(1);
+
+    seedContract("autoYes:\n  mode: 'off'\n");
+    vi.setSystemTime(T0 + 30_000);
+    await respondTo('dialog-bash-wrapped');
+    expect(byPolicyLines()).toHaveLength(0);
+
+    vi.setSystemTime(T0 + 60_000);
+    await respondTo('dialog-bash-wrapped');
+    expect(byPolicyLines()).toHaveLength(1);
+    expect(withheldLines()).toHaveLength(1);
   });
 });

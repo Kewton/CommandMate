@@ -36,6 +36,8 @@ const MAX_CACHE_ENTRIES = 200;
 
 interface PolicyCacheEntry {
   policy: AutoYesPolicy | null;
+  /** The active task the policy came from; null with no contract. */
+  taskId: string | null;
   expiresAt: number;
 }
 
@@ -68,13 +70,13 @@ function readPolicy(
   worktreeId: string,
   cliToolId: CLIToolType,
   instanceId: string
-): AutoYesPolicy | null {
+): { policy: AutoYesPolicy | null; taskId: string | null } {
   try {
     const task = getActiveTaskForInstance(getDbInstance(), worktreeId, cliToolId, instanceId);
-    if (!task) return null;
+    if (!task) return { policy: null, taskId: null };
     // Assignment, not a cast: a drift in TaskContractAutoYes fails the build here.
     const policy: AutoYesPolicy = task.contract.autoYes;
-    return policy;
+    return { policy, taskId: task.id };
   } catch (error) {
     logger.warn('policy-lookup-failed', {
       worktreeId,
@@ -82,7 +84,7 @@ function readPolicy(
       instanceId,
       error: error instanceof Error ? error.message : String(error),
     });
-    return null;
+    return { policy: null, taskId: null };
   }
 }
 
@@ -100,23 +102,45 @@ export function getSessionAutoYesPolicy(
   cliToolId: CLIToolType,
   instanceId?: string
 ): AutoYesPolicy | null {
+  return lookupEntry(worktreeId, cliToolId, instanceId).policy;
+}
+
+/**
+ * The id of the task whose contract {@link getSessionAutoYesPolicy} returns, or
+ * null when no contract governs the instance (Issue #3724: names the contract in
+ * the log line for a dialog it withheld).
+ */
+export function getSessionAutoYesTaskId(
+  worktreeId: string,
+  cliToolId: CLIToolType,
+  instanceId?: string
+): string | null {
+  return lookupEntry(worktreeId, cliToolId, instanceId).taskId;
+}
+
+function lookupEntry(
+  worktreeId: string,
+  cliToolId: CLIToolType,
+  instanceId?: string
+): PolicyCacheEntry {
   const resolvedInstanceId = instanceId ?? cliToolId;
   const key = buildCompositeKey(worktreeId, cliToolId, resolvedInstanceId);
   const now = Date.now();
 
   const cached = policyCache.get(key);
   if (cached && cached.expiresAt > now) {
-    return cached.policy;
+    return cached;
   }
 
-  const policy = readPolicy(worktreeId, cliToolId, resolvedInstanceId);
+  const { policy, taskId } = readPolicy(worktreeId, cliToolId, resolvedInstanceId);
 
   if (policyCache.size >= MAX_CACHE_ENTRIES) {
     purgeExpired(now);
   }
-  policyCache.set(key, { policy, expiresAt: now + AUTO_YES_POLICY_CACHE_TTL_MS });
+  const entry: PolicyCacheEntry = { policy, taskId, expiresAt: now + AUTO_YES_POLICY_CACHE_TTL_MS };
+  policyCache.set(key, entry);
 
-  return policy;
+  return entry;
 }
 
 /**
