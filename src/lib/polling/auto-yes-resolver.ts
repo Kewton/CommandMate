@@ -125,7 +125,7 @@ function resolveBaseAnswer(promptData: PromptData): string | null {
  * what *this* prompt is asking for. Prompts detected before the field existed
  * (an old row replayed from the database) simply match on question and options.
  */
-export function collectDenyMatchTexts(promptData: PromptData): string[] {
+function collectDenyMatchTexts(promptData: PromptData): string[] {
   const texts: string[] = [promptData.question];
   if (promptData.approvalTarget) {
     texts.push(promptData.approvalTarget);

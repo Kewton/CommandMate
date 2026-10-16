@@ -106,16 +106,18 @@ export function getSessionAutoYesPolicy(
 }
 
 /**
- * The id of the task whose contract {@link getSessionAutoYesPolicy} returns, or
- * null when no contract governs the instance (Issue #3724: names the contract in
- * the log line for a dialog it withheld).
+ * The policy and the id of the task it came from, read in ONE lookup (Issue
+ * #3724), so a log line naming both cannot pair one task's verdict with another
+ * task's id when the cache expires between two reads. `taskId` is null when no
+ * contract governs the instance.
  */
-export function getSessionAutoYesTaskId(
+export function getSessionAutoYesPolicyEntry(
   worktreeId: string,
   cliToolId: CLIToolType,
   instanceId?: string
-): string | null {
-  return lookupEntry(worktreeId, cliToolId, instanceId).taskId;
+): { policy: AutoYesPolicy | null; taskId: string | null } {
+  const { policy, taskId } = lookupEntry(worktreeId, cliToolId, instanceId);
+  return { policy, taskId };
 }
 
 function lookupEntry(
