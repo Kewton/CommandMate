@@ -19,7 +19,11 @@ import {
   hasRecentAntigravityPermissionReceipt,
 } from './polling/antigravity-permission-receipts';
 import { resolveAutoAnswerWithPolicy } from './polling/auto-yes-resolver';
-import { getSessionAutoYesPolicy, invalidateSessionAutoYesPolicy } from './polling/auto-yes-policy';
+import {
+  getSessionAutoYesPolicy,
+  getSessionAutoYesPolicyEntry,
+  invalidateSessionAutoYesPolicy,
+} from './polling/auto-yes-policy';
 import { isCodexModelPickerFrame } from './detection/tools/codex/detect';
 import { normalizeFrame } from './detection/tools/frame';
 import { evaluateAutoYesDialogGate, type AutoYesDialogGateVerdict } from './polling/auto-yes-dialog-gate';
@@ -134,7 +138,10 @@ const autoYesPollerStates = getOrInitGlobal('__autoYesPollerStates', () => new M
  */
 const withheldNoReceiptLoggedAt = getOrInitGlobal('__autoYesWithheldNoReceiptLoggedAt', () => new Map<string, number>());
 
-/** Least gap between two `antigravity-autoyes-withheld-no-hook-receipt` lines for one instance. */
+/**
+ * Least gap between two `antigravity-autoyes-withheld-no-hook-receipt` lines for
+ * one instance. `antigravity-autoyes-withheld-by-policy` (Issue #3724) shares it.
+ */
 const WITHHELD_NO_RECEIPT_LOG_INTERVAL_MS = 60_000;
 
 // =============================================================================
@@ -525,6 +532,13 @@ export function processStopConditionDelta(
  * Why it is worth a line: a machine whose `~/.gemini/config/hooks.json` points at
  * another server (#2622) never sends us the question, and every real dialog then
  * waits for a human with no sign of why. The line names the file to look at.
+ *
+ * A stale receipt does not always mean that, though (Issue #3724): a dialog the
+ * contract's autoYes withheld got its receipt, the server answered `ask`, and
+ * the dialog outlived the window. When `resolveAutoAnswerWithPolicy` on the
+ * ungated reading suppresses the answer by contract (the base rules would have
+ * answered it), the line is `antigravity-autoyes-withheld-by-policy` instead,
+ * naming the reason, the mode and the task. Both share the limit.
  * The response-checker's own `antigravity-dialog-no-recent-receipt` stays at
  * debug — it prints on every tick the same pane is read again.
  *
@@ -550,6 +564,26 @@ function logIfWithheldForWantOfReceipt(
     if (now - loggedAt >= WITHHELD_NO_RECEIPT_LOG_INTERVAL_MS) withheldNoReceiptLoggedAt.delete(key);
   }
   withheldNoReceiptLoggedAt.set(compositeKey, now);
+
+  // Issue #3724: a contract that withholds the answer makes the server reply
+  // `ask`, so the dialog stays up past the receipt window. The cause is then the
+  // contract, not a hooks.json that points elsewhere. Judged exactly as the tick
+  // judges a prompt it can read — the base rules first, then the contract — so
+  // a prompt the base rules never answer (a checkbox, a typed option) is not
+  // blamed on the contract. Policy and task id come from one lookup.
+  const { policy, taskId } = getSessionAutoYesPolicyEntry(worktreeId, 'antigravity', instanceId);
+  const resolution = resolveAutoAnswerWithPolicy(ungated.promptData, policy);
+  if (resolution.suppressedBy) {
+    logger.info('antigravity-autoyes-withheld-by-policy', {
+      worktreeId,
+      instanceId: instanceId ?? 'antigravity',
+      reason: resolution.suppressedBy,
+      mode: policy?.mode ?? null,
+      taskId,
+      hint: '契約の autoYes が答えを止めている。契約の autoYes を確認',
+    });
+    return;
+  }
   logger.info('antigravity-autoyes-withheld-no-hook-receipt', {
     worktreeId,
     instanceId: instanceId ?? 'antigravity',
