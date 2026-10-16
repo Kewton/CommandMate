@@ -29,14 +29,7 @@
 import React, { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   ChevronDown,
-  Maximize2,
-  MessageSquare,
-  Minimize2,
-  MoreHorizontal,
-  Search,
   StickyNote,
-  TerminalSquare,
-  X,
 } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import { useTranslations } from 'next-intl';
@@ -61,11 +54,15 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/DropdownMenu';
-import { Tooltip } from '@/components/common/Tooltip';
 import { useOptionalWorktreesCacheContext } from '@/components/providers/WorktreesCacheProvider';
 import { formatSessionNoteTimestamp } from '@/lib/date-utils';
 import { useSplitHeaderSlots } from './SplitPaneHeaderControls';
 import { FIT_MIN_WIDTH_ATTR } from '@/hooks/useDesktopHeaderFit';
+import { SplitActionControls } from './terminal-split-pane/SplitActionControls';
+import { resolveSelectorTitle } from './terminal-split-pane/resolve-selector-title';
+import { SplitSessionChips } from './terminal-split-pane/SplitSessionChips';
+import { useSplitDragDrop } from './terminal-split-pane/useTerminalSplitDragDrop';
+import { useBarNotePosition } from './terminal-split-pane/use-bar-note-position';
 
 /**
  * Issue #786 / #869: dedicated MIME so the drag payload never collides with
@@ -73,26 +70,6 @@ import { FIT_MIN_WIDTH_ATTR } from '@/hooks/useDesktopHeaderFit';
  * previously a bare CLI tool id).
  */
 export const AGENT_INSTANCE_DND_MIME = 'application/x-commandmate-agent-instance';
-
-/**
- * Issue #2193: the two segments of the output-surface control, in render order.
- *
- * Declared at module scope with i18n KEYS rather than resolved labels, for the
- * reason `ACTIVITIES` in `activity-bar-config.ts` gives: `t()` cannot be called
- * outside a component, so the label is resolved at render time. A third entry
- * (`xterm`) is expected here eventually — nothing in this file switches
- * exhaustively on {@link SurfaceMode}, so adding one is a one-line change.
- */
-const SURFACE_MODE_SEGMENTS: readonly {
-  mode: SurfaceMode;
-  labelKey: string;
-  /** Issue #3514: the visible word on the segment ("Terminal" / "Chat"). */
-  textKey: string;
-  icon: typeof TerminalSquare;
-}[] = [
-  { mode: 'terminal', labelKey: 'surfaceMode.showTerminal', textKey: 'surfaceMode.terminal', icon: TerminalSquare },
-  { mode: 'chat', labelKey: 'surfaceMode.showChat', textKey: 'surfaceMode.chat', icon: MessageSquare },
-] as const;
 
 // ---------------------------------------------------------------------------
 // Session notes (Issue #2427)
@@ -603,10 +580,6 @@ export const TerminalSplitPane = memo(function TerminalSplitPane({
   // controls into instead of a title bar of our own (null: the title bar).
   const headerSlots = useSplitHeaderSlots();
   const inActionBar = headerSlots !== null;
-  // Issue #786: drag-over hover state lives LOCAL to this pane (D-3) so a hover
-  // change never re-creates the parent's renderSplitPane / terminalSplitRegion
-  // memo (which would re-render every split). null = no drag over this pane.
-  const [dragOverState, setDragOverState] = useState<'allowed' | 'forbidden' | null>(null);
 
   // Issue #2427: this split's session note, read from the list cache and written
   // through the narrow endpoint. See the section above the props for why it does
@@ -664,116 +637,24 @@ export const TerminalSplitPane = memo(function TerminalSplitPane({
   const barSessionRef = useRef<HTMLDivElement | null>(null);
   // Issue #3631: the agent's name in the selector trigger.
   const sessionLabelRef = useRef<HTMLSpanElement | null>(null);
-  const [barNotePosition, setBarNotePosition] = useState<{ top: number; left: number } | null>(
-    null,
-  );
-  useLayoutEffect(() => {
-    if (!noteEditing || !inActionBar) {
-      setBarNotePosition(null);
-      return;
-    }
-    let frame = 0;
-    const place = () => {
-      const anchor = barSessionRef.current;
-      const rect = anchor?.getBoundingClientRect();
-      // Hidden (display: none, so no client rects) or gone: no position.
-      if (!anchor || !rect || anchor.getClientRects().length === 0) {
-        setBarNotePosition((prev) => (prev === null ? prev : null));
-        return;
-      }
-      const top = rect.bottom + 4;
-      const left = Math.max(
-        BAR_NOTE_EDITOR_MARGIN,
-        Math.min(rect.left, window.innerWidth - BAR_NOTE_EDITOR_WIDTH - BAR_NOTE_EDITOR_MARGIN),
-      );
-      setBarNotePosition((prev) =>
-        prev && prev.top === top && prev.left === left ? prev : { top, left },
-      );
-    };
-    const follow = () => {
-      place();
-      frame = window.requestAnimationFrame(follow);
-    };
-    place();
-    frame = window.requestAnimationFrame(follow);
-    return () => window.cancelAnimationFrame(frame);
-    // `headerSlots`: a new slot is a new place, measured before paint.
-  }, [noteEditing, inActionBar, headerSlots]);
-
-  // Whether drag-drop is active for this pane (the parent wired a handler).
-  const dropEnabled = onDropInstance != null;
-
-  // Classify the in-flight drag against THIS split using the published
-  // instanceId (D-2). Forbidden when the dragged instance is used by another
-  // split (i.e. not in availableInstances, which is the complement of
-  // other-split instances and always includes this split's own current one).
-  // Dropping this split's own current instance is a harmless no-op handled by
-  // the container, so it is treated as 'allowed' for the ring.
-  const classifyDrag = useCallback((): 'allowed' | 'forbidden' => {
-    if (draggedInstanceId == null) return 'allowed';
-    return availableInstances.some(inst => inst.id === draggedInstanceId)
-      ? 'allowed'
-      : 'forbidden';
-  }, [draggedInstanceId, availableInstances]);
-
-  const handleDragOver = useCallback(
-    (e: React.DragEvent<HTMLDivElement>) => {
-      if (!dropEnabled) return;
-      // preventDefault marks this element as a valid drop target.
-      e.preventDefault();
-      const classification = classifyDrag();
-      // Issue #3593: 'move' even for a forbidden drag. A real browser fires no
-      // `drop` once `dropEffect` is 'none', so the container's refusal toast
-      // ("X is already in use by split N") could never show; the red ring
-      // still says "not here" while hovering, and the drop is refused.
-      e.dataTransfer.dropEffect = 'move';
-      setDragOverState(prev => (prev === classification ? prev : classification));
-    },
-    [dropEnabled, classifyDrag],
+  const barNotePosition = useBarNotePosition(
+    noteEditing,
+    inActionBar,
+    headerSlots,
+    barSessionRef,
+    BAR_NOTE_EDITOR_WIDTH,
+    BAR_NOTE_EDITOR_MARGIN,
   );
 
-  const handleDragEnter = useCallback(
-    (e: React.DragEvent<HTMLDivElement>) => {
-      if (!dropEnabled) return;
-      e.preventDefault();
-      const classification = classifyDrag();
-      setDragOverState(prev => (prev === classification ? prev : classification));
-    },
-    [dropEnabled, classifyDrag],
-  );
+  const {
+    handleDragOver,
+    handleDragEnter,
+    handleDragLeave,
+    handleDrop,
+    dragRingClass,
+    focusRingClass,
+  } = useSplitDragDrop(onDropInstance, draggedInstanceId, availableInstances, AGENT_INSTANCE_DND_MIME);
 
-  const handleDragLeave = useCallback(() => {
-    if (!dropEnabled) return;
-    setDragOverState(null);
-  }, [dropEnabled]);
-
-  const handleDrop = useCallback(
-    (e: React.DragEvent<HTMLDivElement>) => {
-      if (!dropEnabled) return;
-      e.preventDefault();
-      setDragOverState(null);
-      // D-2: getData is readable here (on drop) in real browsers.
-      const droppedId = e.dataTransfer.getData(AGENT_INSTANCE_DND_MIME);
-      if (!droppedId) return;
-      onDropInstance?.(droppedId);
-    },
-    [dropEnabled, onDropInstance],
-  );
-
-  const dragRingClass =
-    dragOverState === 'allowed'
-      ? ' ring-2 ring-accent-400'
-      : dragOverState === 'forbidden'
-        ? ' ring-2 ring-red-300 cursor-not-allowed'
-        : '';
-
-  // Issue #1079: the subtle focus ring and the drag-over ring share the same
-  // `ring` box-shadow. `focus-within:` is a pseudo-class (higher specificity),
-  // so it would override the more prominent 2px drag ring when a focused pane is
-  // also the drop target. Suppress the focus ring while a drag is over this pane
-  // so the drop affordance always wins.
-  const focusRingClass =
-    dragOverState === null ? ' focus-within:ring-1 focus-within:ring-accent-500/30' : '';
   // Issue #3514: the selected split is framed in accent, so which pane the
   // header "+" / the Action bar's maximize will act on is visible at a glance.
   const borderClass = showFocusFrame ? 'border-accent-500' : 'border-border';
@@ -813,14 +694,7 @@ export const TerminalSplitPane = memo(function TerminalSplitPane({
   // Issue #3592: in the action bar the model and the cost are drawn only as
   // far as the bar's width allows, so the selector carries them as its tooltip
   // — the same strings the two chips' own tooltips use.
-  const selectorTitle = inActionBar
-    ? [
-        agentModel ? t('agentModel.modelLabel', { model: agentModel }) : null,
-        agentUsage ? (agentUsageDetail ?? t('agentSession.chipLabel', { usage: agentUsage })) : null,
-      ]
-        .filter((line): line is string => line !== null)
-        .join('\n') || undefined
-    : undefined;
+  const selectorTitle = resolveSelectorTitle(t, inActionBar, agentModel, agentUsage, agentUsageDetail);
 
   // Issue #3631: in a split's 30px title bar (two or more splits) the name has
   // a floor — `min(BAR_SESSION_LABEL_MIN_WIDTH, the name's own width)` — so in a
@@ -905,136 +779,21 @@ export const TerminalSplitPane = memo(function TerminalSplitPane({
         </DropdownMenuContent>
       </DropdownMenu>
 
-      {/* Issue #2193: the output-surface control, directly beside the session
-          title so it reads as "what this session is showing" rather than a
-          global view switch -- each split owns its own mode. Rendered only
-          when the parent wired `onSurfaceModeChange`.
-
-          Always visible (never hover-revealed): a hover-only affordance is
-          invisible on a touch screen, and this is the only way back from the
-          chat surface. Both segments stay mounted so the control's width does
-          not change when the mode does. */}
-      {onSurfaceModeChange ? (
-        <div
-          role="group"
-          aria-label={t('surfaceMode.groupLabel', { split: splitLabel })}
-          data-testid={`surface-mode-toggle-${splitIndex}`}
-          className="flex flex-shrink-0 items-center gap-0.5 rounded border border-border bg-surface p-0.5"
-        >
-          {SURFACE_MODE_SEGMENTS.map(({ mode, labelKey, textKey, icon: Icon }) => {
-            const active = surfaceMode === mode;
-            const label = t(labelKey);
-            return (
-              <Tooltip key={mode} content={label} placement="bottom">
-                <button
-                  type="button"
-                  onClick={() => onSurfaceModeChange(mode)}
-                  aria-pressed={active}
-                  aria-label={label}
-                  data-testid={`surface-mode-${mode}-${splitIndex}`}
-                  className={`flex items-center justify-center rounded px-1.5 py-0.5 touch-manipulation transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
-                    active
-                      ? 'bg-accent-500/15 text-accent-600 dark:text-accent-400'
-                      : 'text-muted-foreground hover:bg-muted hover:text-surface-foreground'
-                  }`}
-                >
-                  <Icon size={14} aria-hidden="true" />
-                  {/* Issue #3514: a word beside the icon, so the two surfaces
-                      are told apart without hovering. */}
-                  <span className="ml-1 text-[11px] leading-none">{t(textKey)}</span>
-                </button>
-              </Tooltip>
-            );
-          })}
-        </div>
-      ) : null}
-
-      {/* Issue #1783: the model the agent itself reported, as muted small
-          text after the alias. A sibling of the selector rather than a child
-          of its trigger: the trigger is already `max-w-[12rem]` with a
-          truncated alias and a chevron, and folding a second string into it
-          would eat the alias to make room for the model. Rendered only when a
-          model is actually known — see `agentModel`. `truncate` + `title` keep
-          a long id from pushing the search button off the row. */}
-      {/* Issue #2427: the model is also the label that gives way. When a note
-          is present its cap drops from 10rem to 5rem and it shrinks four times
-          as fast as the note, so a narrow split spends its width on what the
-          operator wrote — which changes with every instruction — rather than
-          on a model id that is fixed for the session and readable in the
-          tooltip either way. */}
-      {agentModel && (
-        <span
-          data-testid={`split-agent-model-${splitIndex}`}
-          title={t('agentModel.modelLabel', { model: agentModel })}
-          className={`min-w-0 truncate text-[11px] leading-none text-muted-foreground ${
-            sessionNote ? 'max-w-[5rem] shrink-[4]' : 'max-w-[10rem]'
-          }`}
-        >
-          {agentModel}
-        </span>
-      )}
-
-      {/* Issue #2042: cost / context, as a sibling chip of the model rather
-          than an extension of it. Two strings, because they answer different
-          questions and go stale at different rates — the model is fixed for
-          the session while these move every turn — and because a reader
-          comparing this row against the agent's own footer is comparing the
-          second half only. `tabular-nums` so a changing count does not jitter
-          the row; `truncate` + `title` keep a long detail off the layout. */}
-      {agentUsage && (
-        <span
-          data-testid={`split-agent-usage-${splitIndex}`}
-          title={agentUsageDetail ?? t('agentSession.chipLabel', { usage: agentUsage })}
-          className="min-w-0 max-w-[10rem] truncate text-[11px] leading-none tabular-nums text-muted-foreground"
-        >
-          {agentUsage}
-        </span>
-      )}
-
-      {/* Issue #2427: the memo, as a sibling of the model and usage chips and
-          under the same rule — rendered ONLY when there is one, so an empty
-          note leaves the header exactly as it was before this Issue. It is a
-          button because clicking it is how the note is edited; `truncate` +
-          `title` keep a 100-character memo from pushing the search button off
-          the row, and `shrink` (1, against the model's 4) is what makes the
-          model give way first. */}
-      {sessionNote && (
-        <button
-          type="button"
-          onClick={openNoteEditor}
-          aria-label={noteEditLabel}
-          title={noteLabel}
-          data-testid={`split-session-note-${splitIndex}`}
-          className="flex min-w-0 max-w-[16rem] shrink items-center gap-1 rounded px-1 py-0.5 text-[11px] leading-none text-muted-foreground hover:bg-muted-foreground/10 hover:text-surface-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          <StickyNote size={11} aria-hidden="true" className="shrink-0 opacity-70" />
-          <span className="min-w-0 truncate">{sessionNote.text}</span>
-          <span
-            data-testid={`split-session-note-time-${splitIndex}`}
-            className="shrink-0 tabular-nums opacity-70"
-          >
-            {noteStamp}
-          </span>
-        </button>
-      )}
-
-      {/* Issue #3592: in the action bar an empty note still gets a small edit
-          entry beside the selector — the bar has the room the 30px title bar
-          did not, and the menu item alone is two presses deep. The title bar
-          keeps the #2427 rule (an empty note adds nothing). */}
-      {inActionBar && !sessionNote ? (
-        <Tooltip content={t('sessionNote.menuItem')} placement="bottom" className="flex-shrink-0">
-          <button
-            type="button"
-            onClick={openNoteEditor}
-            aria-label={noteEditLabel}
-            data-testid={`split-session-note-edit-${splitIndex}`}
-            className="flex flex-shrink-0 items-center justify-center rounded p-1 text-muted-foreground hover:bg-muted-foreground/10 hover:text-surface-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <StickyNote size={12} aria-hidden="true" />
-          </button>
-        </Tooltip>
-      ) : null}
+      <SplitSessionChips
+        splitIndex={splitIndex}
+        splitLabel={splitLabel}
+        inActionBar={inActionBar}
+        surfaceMode={surfaceMode}
+        onSurfaceModeChange={onSurfaceModeChange}
+        agentModel={agentModel}
+        agentUsage={agentUsage}
+        agentUsageDetail={agentUsageDetail}
+        sessionNote={sessionNote}
+        noteStamp={noteStamp}
+        noteLabel={noteLabel}
+        noteEditLabel={noteEditLabel}
+        openNoteEditor={openNoteEditor}
+      />
 
       {/* Issue #1171: session-scoped extras (the End × button) sit directly
           after the instance selector, before the search button, so the
@@ -1045,126 +804,17 @@ export const TerminalSplitPane = memo(function TerminalSplitPane({
   );
 
   const actionControls = (
-    <>
-      <Tooltip content={searchLabel} placement="bottom" className="ml-auto">
-        <button
-          type="button"
-          onClick={handleSearchClick}
-          aria-label={searchLabel}
-          data-testid={`terminal-search-button-${splitIndex}`}
-          className="flex items-center gap-1 px-1.5 py-0.5 text-xs text-muted-foreground hover:text-surface-foreground hover:bg-muted-foreground/10 rounded transition-colors"
-        >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            className="h-3 w-3"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            strokeWidth={2}
-            aria-hidden="true"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-            />
-          </svg>
-        </button>
-      </Tooltip>
-
-      {/* Issue #2261: maximize / restore, at the far right of the title bar
-          where a window control is looked for. `flex-shrink-0` (and the
-          `truncate`d alias to its left) is what keeps the row from wrapping in
-          a narrow split — this is the row's fourth control. Rendered only when
-          the parent wired `onToggleMaximize`. */}
-      {/* Issue #3592: not in the action bar — the bar has its own maximize
-          (`toggle-maximize-split`), and two maximize icons side by side for
-          one split read as two different things. The "…" menu keeps the item. */}
-      {onToggleMaximize && !inActionBar ? (
-        <Tooltip
-          content={`${
-            isMaximized
-              ? t('terminal.restoreSplits')
-              : t('terminal.maximizeSplit', { split: splitLabel })
-          } — ${t('terminal.maximizeShortcutHint')}`}
-          placement="bottom"
-          className="flex-shrink-0"
-        >
-          <button
-            type="button"
-            onClick={onToggleMaximize}
-            disabled={maximizeDisabled && !isMaximized}
-            aria-disabled={maximizeDisabled && !isMaximized}
-            aria-pressed={isMaximized}
-            aria-label={
-              isMaximized
-                ? t('terminal.restoreSplits')
-                : t('terminal.maximizeSplit', { split: splitLabel })
-            }
-            data-testid={`toggle-maximize-${splitIndex}`}
-            className="flex flex-shrink-0 items-center justify-center px-1.5 py-0.5 text-muted-foreground hover:text-surface-foreground hover:bg-muted-foreground/10 rounded transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            {isMaximized ? (
-              <Minimize2 size={14} aria-hidden="true" />
-            ) : (
-              <Maximize2 size={14} aria-hidden="true" />
-            )}
-          </button>
-        </Tooltip>
-      ) : null}
-
-      {/* Issue #3514: the "…" menu — maximize, search and end session in one
-          place, the same three actions the row's icons offer, so the header
-          reads the same in every split (and the actions stay reachable when a
-          narrow split clips the row). */}
-      <DropdownMenu>
-        <DropdownMenuTrigger
-          data-testid={`split-more-menu-${splitIndex}`}
-          aria-label={t('terminal.moreActions')}
-          className="flex flex-shrink-0 items-center justify-center px-1 py-0.5 rounded text-muted-foreground hover:text-surface-foreground hover:bg-muted-foreground/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring data-[state=open]:ring-2 data-[state=open]:ring-ring transition-colors"
-        >
-          <MoreHorizontal size={14} aria-hidden="true" />
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="min-w-[12rem]">
-          {onToggleMaximize ? (
-            <DropdownMenuItem
-              data-testid={`split-more-maximize-${splitIndex}`}
-              onSelect={onToggleMaximize}
-              disabled={maximizeDisabled && !isMaximized}
-            >
-              {isMaximized ? (
-                <Minimize2 size={14} aria-hidden="true" className="opacity-70" />
-              ) : (
-                <Maximize2 size={14} aria-hidden="true" className="opacity-70" />
-              )}
-              {isMaximized
-                ? t('terminal.restoreSplits')
-                : t('terminal.maximizeSplit', { split: splitLabel })}
-            </DropdownMenuItem>
-          ) : null}
-          <DropdownMenuItem
-            data-testid={`split-more-search-${splitIndex}`}
-            onSelect={handleSearchClick}
-          >
-            <Search size={14} aria-hidden="true" className="opacity-70" />
-            {t('terminal.searchTerminal')}
-          </DropdownMenuItem>
-          {onEndSession ? (
-            <>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                data-testid={`split-more-end-session-${splitIndex}`}
-                onSelect={onEndSession}
-                className="text-danger-foreground focus:text-danger-foreground"
-              >
-                <X size={14} aria-hidden="true" />
-                {t('terminal.endSession')}
-              </DropdownMenuItem>
-            </>
-          ) : null}
-        </DropdownMenuContent>
-      </DropdownMenu>
-    </>
+    <SplitActionControls
+      splitIndex={splitIndex}
+      splitLabel={splitLabel}
+      searchLabel={searchLabel}
+      inActionBar={inActionBar}
+      isMaximized={isMaximized}
+      maximizeDisabled={maximizeDisabled}
+      onSearchClick={handleSearchClick}
+      onToggleMaximize={onToggleMaximize}
+      onEndSession={onEndSession}
+    />
   );
 
   // Issue #2427: the note editor, absolutely positioned UNDER the header
