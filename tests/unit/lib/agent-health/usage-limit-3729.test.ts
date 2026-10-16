@@ -25,7 +25,7 @@ import {
 } from '@/lib/agent-health/types';
 import { findUsageLimit, judgeUsageLimit, USAGE_LIMIT_SIGNATURES } from '@/lib/agent-health/usage-limit';
 
-const DIR = fileURLToPath(new URL('../../../fixtures/command-code-usage-limit-3729/', import.meta.url));
+const DIR = fileURLToPath(new URL('../../../fixtures/agent-health-usage-limit-3729/', import.meta.url));
 const CODEX_1628 = fileURLToPath(new URL('../../lib/detection/fixtures/codex-live-1628/', import.meta.url));
 const read = (dir: string, name: string) => readFileSync(`${dir}${name}`, 'utf8');
 
