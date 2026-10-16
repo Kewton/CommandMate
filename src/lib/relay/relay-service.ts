@@ -28,13 +28,19 @@ import {
 import { getMessages, parseRelayRequestId } from '@/lib/db/chat-db';
 import { normalizeUserTurnContent } from '@/lib/history/user-turn-recorder';
 import type { ChatMessage } from '@/types/models';
-import type { RelayEndpoint, SessionRelay, SessionRelaySummary } from '@/lib/relay/types';
+import {
+  isOpenRelayState,
+  type RelayEndpoint,
+  type SessionRelay,
+  type SessionRelaySummary,
+} from '@/lib/relay/types';
 import {
   decideRelayCreation,
   isRelayRefusal,
   resolveRelayTtlMs,
   type RelayRefusal,
 } from '@/lib/relay/relay-policy';
+import { isRelayDeliveryClaimed } from '@/lib/relay/relay-delivery-claims';
 import { relayWorktreeExists, resolveRelaySession } from '@/lib/relay/relay-session-ref';
 import { writeRelaySystemLine } from '@/lib/relay/relay-system-line';
 import { createLogger } from '@/lib/logger';
@@ -240,7 +246,11 @@ export function openRelay(db: Database.Database, input: OpenRelayInput): OpenRel
 /** What {@link withdrawRelay} answers. */
 export type WithdrawRelayResult =
   | { ok: true; relay: SessionRelay }
-  | { ok: false; reason: 'not_found' | 'already_closed'; relay: SessionRelay | null };
+  | {
+      ok: false;
+      reason: 'not_found' | 'already_closed' | 'delivering';
+      relay: SessionRelay | null;
+    };
 
 /**
  * Withdraw a relay.
@@ -248,6 +258,12 @@ export type WithdrawRelayResult =
  * "Already closed" is reported rather than swallowed: telling a caller it
  * cancelled a relay that in fact delivered its reply an hour ago is the one
  * answer that would make them stop looking for it.
+ *
+ * "Delivering" (#3732) is the same honesty one step earlier: the payload is
+ * being typed into the requester's composer right now, and a send cannot be
+ * taken back, so a cancel reported as a success would be a lie. Once the
+ * attempt ends the claim is released — closed if it delivered a reply, still
+ * open and cancellable if it was held or failed.
  */
 export function withdrawRelay(
   db: Database.Database,
@@ -256,6 +272,9 @@ export function withdrawRelay(
 ): WithdrawRelayResult {
   const existing = getRelayById(db, relayId);
   if (!existing) return { ok: false, reason: 'not_found', relay: null };
+  if (isOpenRelayState(existing.state) && isRelayDeliveryClaimed(relayId)) {
+    return { ok: false, reason: 'delivering', relay: existing };
+  }
   if (!cancelRelayRow(db, relayId, now)) {
     return { ok: false, reason: 'already_closed', relay: existing };
   }
