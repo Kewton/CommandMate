@@ -35,18 +35,13 @@ import { worktreeApi, type RepositorySummary } from '@/lib/api-client';
 import type { Worktree } from '@/types/models';
 import { buildSessionRowHref } from '@/lib/sidebar-utils';
 import {
-  ALLOWED_DURATIONS,
   AUTO_YES_COUNTDOWN_INTERVAL_MS,
-  DURATION_LABELS,
-  formatTimeRemaining,
-  isAllowedDuration,
   type AutoYesDuration,
 } from '@/config/auto-yes-config';
 import { isMacPlatform, resolveShortcutKey, MOD_KEY_TOKEN } from '@/config/keyboard-shortcuts';
 import {
   pushRecentTarget,
   readRecentTargets,
-  sameTarget,
   type NewTaskTarget,
 } from '@/lib/new-task/recent-targets';
 import {
@@ -64,13 +59,20 @@ import {
   type NewTaskSendResult,
 } from '@/lib/new-task/send-new-task';
 import { isSendNewTaskChord } from '@/lib/new-task/new-task-shortcut';
+import {
+  AutoYesField,
+  FailureNotice,
+  FIELD_CLASS,
+  LABEL_CLASS,
+  ListStatusNotice,
+  ModelField,
+  RecentTargets,
+  StartNotice,
+  TargetSelectors,
+} from './NewTaskDialogParts';
 
 /** How long the "sent" toast (and its way back) stays up. */
 const SENT_TOAST_DURATION_MS = 6000;
-
-const FIELD_CLASS =
-  'w-full px-3 py-2 border border-input rounded-lg bg-surface text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent disabled:opacity-60';
-const LABEL_CLASS = 'block text-xs font-medium text-muted-foreground mb-1';
 
 type ListState =
   | { status: 'loading' }
@@ -84,7 +86,6 @@ export function NewTaskDialog() {
   const router = useRouter();
   const { showToast } = useToast();
   const t = useTranslations('common');
-  const tAutoYes = useTranslations('autoYes');
 
   const [list, setList] = useState<ListState>({ status: 'loading' });
   const [loadToken, setLoadToken] = useState(0);
@@ -323,134 +324,34 @@ export function NewTaskDialog() {
   return (
     <Modal isOpen onClose={handleClose} title={t('newTask.title')} size="md" disableClose={sending}>
       <div data-testid="new-task-dialog" className="space-y-4" onKeyDown={handleKeyDown}>
-        {list.status === 'loading' && (
-          <p className="text-sm text-muted-foreground" data-testid="new-task-loading">
-            {t('newTask.loading')}
-          </p>
-        )}
-
-        {list.status === 'error' && (
-          <div className="space-y-2" role="alert" data-testid="new-task-load-error">
-            <p className="text-sm text-danger">{t('newTask.loadError')}</p>
-            <button
-              type="button"
-              onClick={() => setLoadToken((n) => n + 1)}
-              className="px-3 py-1.5 text-sm font-medium text-foreground bg-muted hover:bg-muted/80 rounded-lg"
-            >
-              {t('retry')}
-            </button>
-          </div>
-        )}
-
-        {list.status === 'ready' && repositoryOptions.length === 0 && (
-          <p className="text-sm text-muted-foreground" data-testid="new-task-empty">
-            {t('newTask.noTargets')}
-          </p>
-        )}
+        <ListStatusNotice
+          status={list.status}
+          isEmpty={repositoryOptions.length === 0}
+          onRetry={() => setLoadToken((n) => n + 1)}
+        />
 
         {list.status === 'ready' && repositoryOptions.length > 0 && (
           <>
-            {recentOptions.length > 0 && (
-              <div>
-                <span className={LABEL_CLASS}>{t('newTask.recentLabel')}</span>
-                <div className="flex flex-wrap gap-2" data-testid="new-task-recents">
-                  {recentOptions.map(({ target, label }) => {
-                    const selected = targetState
-                      ? sameTarget(target, { worktreeId, instanceId: targetState.instance.id })
-                      : false;
-                    return (
-                      <button
-                        key={`${target.worktreeId}:${target.instanceId}`}
-                        type="button"
-                        aria-pressed={selected}
-                        data-testid="new-task-recent"
-                        onClick={() => selectTarget(target)}
-                        className={`max-w-full truncate rounded-full border px-3 py-1 text-xs transition-colors ${
-                          selected
-                            ? 'border-accent-500 bg-accent-500/15 text-foreground'
-                            : 'border-border text-muted-foreground hover:text-foreground'
-                        }`}
-                      >
-                        {label}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
+            <RecentTargets
+              recentOptions={recentOptions}
+              targetState={targetState}
+              worktreeId={worktreeId}
+              onSelect={selectTarget}
+            />
 
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-              <div>
-                <label htmlFor="new-task-repository" className={LABEL_CLASS}>
-                  {t('newTask.repositoryLabel')}
-                </label>
-                <select
-                  id="new-task-repository"
-                  data-testid="new-task-repository"
-                  value={repository?.path ?? ''}
-                  onChange={(e) => handleRepositoryChange(e.target.value)}
-                  className={FIELD_CLASS}
-                >
-                  {repositoryOptions.map((repo) => (
-                    <option key={repo.path} value={repo.path}>
-                      {repo.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label htmlFor="new-task-branch" className={LABEL_CLASS}>
-                  {t('newTask.branchLabel')}
-                </label>
-                <select
-                  id="new-task-branch"
-                  data-testid="new-task-branch"
-                  value={worktreeId}
-                  onChange={(e) => handleBranchChange(e.target.value)}
-                  className={FIELD_CLASS}
-                >
-                  {(repository?.worktrees ?? []).map((wt) => (
-                    <option key={wt.id} value={wt.id}>
-                      {wt.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label htmlFor="new-task-agent" className={LABEL_CLASS}>
-                  {t('newTask.agentLabel')}
-                </label>
-                <select
-                  id="new-task-agent"
-                  data-testid="new-task-agent"
-                  value={instance?.id ?? ''}
-                  onChange={(e) => selectTarget({ worktreeId, instanceId: e.target.value })}
-                  className={FIELD_CLASS}
-                  disabled={instances.length === 0}
-                >
-                  {instances.map((inst) => {
-                    const state = worktree ? describeTargetState(worktree, inst) : null;
-                    const status = state?.starting ? 'starting' : state?.running ? 'running' : 'stopped';
-                    return (
-                      <option key={inst.id} value={inst.id}>
-                        {`${state?.label ?? inst.id} — ${t(`newTask.agentStatus.${status}`)}`}
-                      </option>
-                    );
-                  })}
-                </select>
-              </div>
-            </div>
+            <TargetSelectors
+              repositoryOptions={repositoryOptions}
+              repository={repository}
+              worktreeId={worktreeId}
+              worktree={worktree}
+              instances={instances}
+              instance={instance}
+              onRepositoryChange={handleRepositoryChange}
+              onBranchChange={handleBranchChange}
+              onAgentChange={(id) => selectTarget({ worktreeId, instanceId: id })}
+            />
 
-            {statusKey === 'stopped' && (
-              <p className="text-xs text-foreground" data-testid="new-task-will-start">
-                {t('newTask.willStart', { agent: agentLabel })}
-              </p>
-            )}
-            {statusKey === 'starting' && (
-              <p className="text-xs text-warning-foreground" data-testid="new-task-starting">
-                {t('newTask.startingNotice', { agent: agentLabel })}
-              </p>
-            )}
+            <StartNotice statusKey={statusKey} agentLabel={agentLabel} />
 
             <div>
               <label htmlFor="new-task-message" className={LABEL_CLASS}>
@@ -469,95 +370,24 @@ export function NewTaskDialog() {
             </div>
 
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <div>
-                <label htmlFor="new-task-model" className={LABEL_CLASS}>
-                  {t('newTask.modelLabel')}
-                </label>
-                <input
-                  id="new-task-model"
-                  data-testid="new-task-model"
-                  type="text"
-                  value={modelAvailability?.selectable ? model : ''}
-                  onChange={(e) => setModel(e.target.value)}
-                  placeholder={t('newTask.modelPlaceholder')}
-                  disabled={!modelAvailability?.selectable}
-                  className={FIELD_CLASS}
-                />
-                {modelAvailability && (
-                  <p className="mt-1 text-xs text-muted-foreground" data-testid="new-task-model-note">
-                    {modelAvailability.selectable
-                      ? t(
-                          targetState?.instance.cliTool === 'copilot'
-                            ? 'newTask.modelHintSwitch'
-                            : 'newTask.modelHintLaunch',
-                        )
-                      : t(`newTask.modelUnavailable.${modelAvailability.reason}`, { agent: agentLabel })}
-                  </p>
-                )}
-              </div>
-
-              <div>
-                <label htmlFor="new-task-auto-yes" className={LABEL_CLASS}>
-                  {t('newTask.autoYesLabel')}
-                </label>
-                {armedAutoYes ? (
-                  <p className="text-sm text-foreground" data-testid="new-task-auto-yes-active">
-                    {t('newTask.autoYesActive', { remaining: formatTimeRemaining(armedAutoYes.expiresAt) })}
-                  </p>
-                ) : (
-                  <>
-                    <select
-                      id="new-task-auto-yes"
-                      data-testid="new-task-auto-yes"
-                      value={autoYesChoice ?? ''}
-                      onChange={(e) => {
-                        const value = Number(e.target.value);
-                        setAutoYesChoice(e.target.value !== '' && isAllowedDuration(value) ? value : null);
-                      }}
-                      className={FIELD_CLASS}
-                    >
-                      <option value="">{t(autoYesUnknown ? 'newTask.autoYesKeepUnknown' : 'newTask.autoYesKeep')}</option>
-                      {ALLOWED_DURATIONS.map((duration) => (
-                        <option key={duration} value={duration}>
-                          {t('newTask.autoYesEnableFor', {
-                            duration: tAutoYes(DURATION_LABELS[duration].replace('autoYes.', '')),
-                          })}
-                        </option>
-                      ))}
-                    </select>
-                    {autoYesUnknown && (
-                      <p className="mt-1 text-xs text-warning-foreground" data-testid="new-task-auto-yes-unknown">
-                        {t('newTask.autoYesUnknown')}
-                      </p>
-                    )}
-                    <p className="mt-1 text-xs text-muted-foreground">{t('newTask.autoYesScope')}</p>
-                    {autoYesChoice !== null && (
-                      <p className="mt-1 text-xs text-warning-foreground" data-testid="new-task-auto-yes-risk">
-                        {tAutoYes('riskWarning')}
-                      </p>
-                    )}
-                  </>
-                )}
-              </div>
+              <ModelField
+                modelAvailability={modelAvailability}
+                model={model}
+                cliTool={targetState?.instance.cliTool}
+                agentLabel={agentLabel}
+                onChange={setModel}
+              />
+              <AutoYesField
+                armedAutoYes={armedAutoYes}
+                autoYesChoice={autoYesChoice}
+                autoYesUnknown={autoYesUnknown}
+                onChoiceChange={setAutoYesChoice}
+              />
             </div>
           </>
         )}
 
-        {failure && (
-          <div
-            role="alert"
-            data-testid="new-task-error"
-            data-kind={failure.kind}
-            className="rounded-lg border border-danger-border bg-danger-subtle px-3 py-2 text-sm text-danger-foreground"
-          >
-            <p>{t(`newTask.errors.${failure.kind}`, { agent: agentLabel })}</p>
-            {failure.detail && (
-              <p className="mt-1 break-words text-xs text-muted-foreground" data-testid="new-task-error-detail">
-                {failure.detail}
-              </p>
-            )}
-          </div>
-        )}
+        <FailureNotice failure={failure} agentLabel={agentLabel} />
 
         <div className="flex items-center justify-end gap-2">
           <span className="mr-auto hidden items-center gap-1 text-xs text-muted-foreground sm:flex">
