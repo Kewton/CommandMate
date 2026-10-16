@@ -46,6 +46,11 @@ export interface ChatThinkingSplit {
   readonly reasoning: string | null;
   /** How many blocks the chip stands for; 0 when {@link reasoning} is null. */
   readonly blocks: number;
+  /**
+   * Each reasoning section's lines of the input as `[start, end)` line indices,
+   * heading line included. Absent when {@link reasoning} is null.
+   */
+  readonly lineRanges?: ReadonlyArray<readonly [number, number]>;
 }
 
 /** One quoted section's lines, with the `> ` prefix taken back off. */
@@ -101,6 +106,7 @@ export function splitChatThinking(content: string): ChatThinkingSplit {
     body: kept.join('\n').replace(/\n{3,}/g, '\n\n').trim(),
     reasoning: folded.join('\n\n').replace(/^\n+/, '').replace(/\n+$/, ''),
     blocks: scan.blocks,
+    lineRanges: scan.sections.map(([start, end]) => [start - 1, end] as const),
   };
 }
 

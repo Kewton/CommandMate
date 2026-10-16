@@ -15,11 +15,8 @@
  *
  * - the tool log is a prefix or a suffix cut, so `splitToolLog`'s prose locates
  *   it exactly;
- * - for the reasoning, the prose is handed to `splitChatThinking` with every
- *   line that cannot be a `Thinking` heading replaced by a marker that keeps
- *   the one property the splitter reads from it (whether it starts with `>`).
- *   The markers that come back in the body are the lines it kept; every other
- *   line went to (or headed) the reasoning.
+ * - for the reasoning, `splitChatThinking` answers each section's line range
+ *   (`lineRanges`), heading included.
  *
  * @module components/worktree/chat-search-sections
  */
@@ -46,35 +43,25 @@ export const CHAT_SEARCH_SECTION_REASONING = 'chat-reasoning';
 /** `data-search-section` of the tool-log chip's Markdown. */
 export const CHAT_SEARCH_SECTION_TOOL_LOG = 'chat-tool-log';
 
-const marker = (index: number): string => `\u0001${index}\u0001`;
-
 /** Raw ranges of the lines `splitChatThinking` lifts out of `prose`. */
 function reasoningRanges(prose: string, proseStart: number): MatchPosition[] {
   if (!prose.includes(CHAT_THINKING_LABEL)) return [];
-  const lines = prose.split('\n');
-  const probe = lines.map((line, index) =>
-    line.startsWith('>')
-      ? line.includes(CHAT_THINKING_LABEL)
-        ? line
-        : `> ${marker(index)}`
-      : marker(index),
-  );
-  const split = splitChatThinking(probe.join('\n'));
-  if (split.reasoning === null) return [];
+  const split = splitChatThinking(prose);
+  if (split.reasoning === null || !split.lineRanges) return [];
 
-  const kept = split.body.split('\n');
+  const lines = prose.split('\n');
   const ranges: MatchPosition[] = [];
-  let cursor = 0;
   let offset = proseStart;
-  lines.forEach((line, index) => {
-    const end = offset + line.length;
-    if (kept[cursor] === probe[index]) {
-      cursor += 1;
-    } else {
-      ranges.push({ start: offset, end: end + 1 });
-    }
-    offset = end + 1;
+  const starts = lines.map((line) => {
+    const start = offset;
+    offset += line.length + 1;
+    return start;
   });
+  for (const [first, last] of split.lineRanges) {
+    for (let index = first; index < last; index++) {
+      ranges.push({ start: starts[index], end: starts[index] + lines[index].length + 1 });
+    }
+  }
   return ranges;
 }
 
