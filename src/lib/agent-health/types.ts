@@ -69,6 +69,9 @@ export type AgentHealthCheckStatus = 'pass' | 'fail' | 'skip';
  * - `signed-out`: the tool cannot sign in
  * - `unsupported`: the probe does not drive the tool (yet), or the tool lacks the feature
  * - `timeout`: the run budget ran out before the tool's turn
+ * - `usage-limit`: the tool's account hit its usage limit (429 / "You've
+ *   reached your weekly usage limit"), so the turn was never processed — an
+ *   environment cause, not a CommandMate bug (Issue #3729, `usage-limit.ts`)
  * - `prerequisite-failed`: added — `version` failed, so nothing was launched
  * - `not-selected`: added, table only — left out by `--tools` / `--only`
  * - `not-recorded`: added, table only — selected, but the run recorded nothing
@@ -80,6 +83,7 @@ export const AGENT_HEALTH_SKIP_KINDS = [
   'signed-out',
   'unsupported',
   'timeout',
+  'usage-limit',
   'prerequisite-failed',
   'not-selected',
   'not-recorded',
@@ -94,6 +98,7 @@ export const AGENT_HEALTH_SKIP_KIND_LABELS: Record<AgentHealthSkipKind, string> 
   'signed-out': 'サインインできない',
   unsupported: 'ツールが未対応',
   timeout: '時間切れ',
+  'usage-limit': '利用上限に達している',
   'prerequisite-failed': 'version が取れず未実施',
   'not-selected': '今回の実行の対象外',
   'not-recorded': '結果が記録されなかった',
