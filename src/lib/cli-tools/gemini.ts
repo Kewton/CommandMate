@@ -50,6 +50,14 @@ export { GEMINI_PANE_HEIGHT };
 /** Interval for polling trust dialog / prompt detection */
 const GEMINI_POLL_INTERVAL_MS = 1000;
 
+/**
+ * Gemini's folder-trust question. v0.62.0 asks `Do you trust the files in this
+ * folder?` (measured 2026-10-17, drawn about 2 s after launch in an empty
+ * folder with a fresh HOME); earlier builds asked `Do you trust this folder?`.
+ * The default row is `1. Trust folder`, so one Enter confirms it.
+ */
+const GEMINI_TRUST_DIALOG_PATTERN = /Do you trust (?:the files in )?this folder\?/;
+
 /** Max attempts for initialization polling (30 * 1000ms = 30s total window) */
 const GEMINI_INIT_MAX_ATTEMPTS = 30;
 
@@ -158,14 +166,15 @@ export class GeminiTool extends BaseCLITool {
         }
 
         // Handle trust dialog if not yet handled
-        if (!trustDialogHandled && output.includes('Do you trust this folder?')) {
+        if (!trustDialogHandled && GEMINI_TRUST_DIALOG_PATTERN.test(output)) {
           await sendSpecialKey(sessionName, 'Enter');
           trustDialogHandled = true;
           logger.info('auto-trusted-folder-for-gemini');
           // Continue polling for prompt after trust dialog
         }
-      } catch {
+      } catch (error: unknown) {
         // Capture may fail during initialization - continue polling
+        logger.debug('gemini-ready-capture-failed', { sessionName, error: getErrorMessage(error) });
       }
       await new Promise((resolve) => setTimeout(resolve, GEMINI_POLL_INTERVAL_MS));
     }
@@ -186,8 +195,9 @@ export class GeminiTool extends BaseCLITool {
         if (GEMINI_PROMPT_PATTERN.test(output)) {
           return;
         }
-      } catch {
+      } catch (error: unknown) {
         // Capture may fail - continue polling
+        logger.debug('gemini-prompt-capture-failed', { sessionName, error: getErrorMessage(error) });
       }
       await new Promise((resolve) => setTimeout(resolve, pollInterval));
     }
