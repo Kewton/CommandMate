@@ -28,6 +28,7 @@ import { createHash } from 'crypto';
 import { getOrInitGlobal } from '@/lib/global-state';
 import { createLogger } from '@/lib/logger';
 import { SESSION_STARTING_CODE } from '@/lib/session/session-start-error';
+import { PLAN_REVIEW_SEND_REFUSED_CODE } from './send-attempt-types';
 import type { LastSendAttempt, SendAttemptReason, SendAttemptState } from './send-attempt-types';
 
 const logger = createLogger('session/send-attempt-state');
@@ -120,6 +121,14 @@ export function classifySendFailure(error: unknown): { state: SendAttemptState; 
     (error as { code?: unknown }).code === SESSION_STARTING_CODE
   ) {
     return { state: 'not-sent', reason: 'session-starting' };
+  }
+  // #3772: the plan review overlay refused the send before the body was typed.
+  if (
+    typeof error === 'object' &&
+    error !== null &&
+    (error as { code?: unknown }).code === PLAN_REVIEW_SEND_REFUSED_CODE
+  ) {
+    return { state: 'not-sent', reason: 'plan-review' };
   }
   const message = error instanceof Error ? error.message : String(error);
   // The readiness waits of every tool throw before typing anything.

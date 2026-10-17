@@ -70,6 +70,7 @@ import { getPushEscalationSettings } from './escalation-settings';
 import {
   AUTO_YES_ANSWER_GRACE_MS,
   autoYesHoldStartedAt,
+  forgetAutoYesHold,
   decideAndLogPromptPush,
   isPromptPushSuppressed,
 } from './prompt-push-gate';
@@ -289,6 +290,7 @@ function releaseAutoYesHold(key: string, since: number): void {
   const episode = getWaitingEpisode(held.worktreeId, held.cliToolId, held.instanceId);
   if (episode === null || episode.since !== held.since) {
     pending.delete(key);
+    forgetAutoYesHold(key);
     stopEscalationTimerIfIdle();
     return;
   }

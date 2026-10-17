@@ -40,6 +40,8 @@ export type SendAttemptReason =
   | 'model-switch-failed'
   /** `not-sent`: the composer held text that could not be cleared (#1880). */
   | 'composer-not-empty'
+  /** `not-sent`: a Command Code plan review overlay refused the send before the body (#3125/#3772). */
+  | 'plan-review'
   /** `indeterminate`: the body was typed, did not land intact, and was taken back out best-effort (#2464/#3366). */
   | 'body-not-landed'
   /** `indeterminate`: an autocompletion replaced the body; the line was cleared best-effort (#1501). */
@@ -59,3 +61,9 @@ export interface LastSendAttempt {
   /** As recorded. A server newer than the reader may name a reason the reader does not know. */
   reason: SendAttemptReason | string;
 }
+
+/**
+ * `code` on the error a tool throws when a plan review overlay refuses the
+ * send before any body is typed (Issue #3772). Matched by code, never by wording.
+ */
+export const PLAN_REVIEW_SEND_REFUSED_CODE = 'PLAN_REVIEW_SEND_REFUSED';

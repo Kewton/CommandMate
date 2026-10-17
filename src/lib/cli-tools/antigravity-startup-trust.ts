@@ -37,7 +37,7 @@ declare global {
   // eslint-disable-next-line no-var
   var __antigravityStartupTrustPending: Map<string, number> | undefined;
   // eslint-disable-next-line no-var
-  var __antigravityStartupWindows: Set<string> | undefined;
+  var __antigravityStartupWindows: Map<string, number> | undefined;
   // eslint-disable-next-line no-var
   var __antigravityStartupTrustHolds: Set<string> | undefined;
   // eslint-disable-next-line no-var
@@ -47,8 +47,12 @@ declare global {
 /** sessionName -> epoch ms the launch window ended without confirming trust. */
 const pendingStartupTrust = getOrInitGlobal('__antigravityStartupTrustPending', () => new Map<string, number>());
 
-/** Sessions whose launch window (launch line typed → `waitForReady` returned) is open. */
-const openStartupWindows = getOrInitGlobal('__antigravityStartupWindows', () => new Set<string>());
+/**
+ * sessionName -> how many launch windows (launch line typed → `waitForReady`
+ * returned) are open. Counted (Issue #3770): a relaunch racing another must not
+ * have the earlier one's end close the later one's window.
+ */
+const openStartupWindows = getOrInitGlobal('__antigravityStartupWindows', () => new Map<string, number>());
 
 /** Sessions a strict `respond` is answering right now (Issue #3756). */
 const strictAnswerHolds = getOrInitGlobal('__antigravityStartupTrustHolds', () => new Set<string>());
@@ -58,12 +62,14 @@ const lastClaims = getOrInitGlobal('__antigravityStartupTrustClaims', () => new 
 
 /** The launch window opened: the launch confirms any trust screen in it. */
 export function beginStartupWindow(sessionName: string): void {
-  openStartupWindows.add(sessionName);
+  openStartupWindows.set(sessionName, (openStartupWindows.get(sessionName) ?? 0) + 1);
 }
 
 /** The launch window closed, however it ended. */
 export function endStartupWindow(sessionName: string): void {
-  openStartupWindows.delete(sessionName);
+  const open = openStartupWindows.get(sessionName) ?? 0;
+  if (open <= 1) openStartupWindows.delete(sessionName);
+  else openStartupWindows.set(sessionName, open - 1);
 }
 
 /**
