@@ -44,6 +44,7 @@ import {
 import {
   ANTIGRAVITY_TRUST_LAUNCH_DIALOG,
   decideLaunchDialog,
+  launchDialogWarning,
   type LaunchDialogDecision,
 } from './launch-dialog';
 import { ANTIGRAVITY_CLI_TOOL_ID } from '@/lib/hooks/sources';
@@ -141,13 +142,10 @@ function logTrustDecisionOnce(
   decision: LaunchDialogDecision,
   logged: Set<string>,
 ): void {
-  if (decision.action === 'absent' || decision.action === 'press' || logged.has(decision.reason)) return;
+  const warning = launchDialogWarning(ANTIGRAVITY_TRUST_LAUNCH_DIALOG, decision);
+  if (!warning || decision.action === 'absent' || decision.action === 'press' || logged.has(decision.reason)) return;
   logged.add(decision.reason);
-  logger.warn(decision.action === 'hold' ? 'launch-dialog-held' : 'launch-dialog-unrecognized', {
-    sessionName,
-    dialog: ANTIGRAVITY_TRUST_LAUNCH_DIALOG.id,
-    ...decision,
-  });
+  logger.warn(warning.event, { sessionName, ...warning.fields });
 }
 
 /**

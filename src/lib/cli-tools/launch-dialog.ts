@@ -15,8 +15,14 @@
  * does not read as it" (the wording or the drawing changed). Pure: the caller
  * sends the key and writes the log.
  *
+ * A screen counts as the dialog only when the question is followed, a few rows
+ * down, by a block of the declared option rows (review of #3776): a reply that
+ * quotes the question, a diff of this file, or another tool's permission
+ * screen under a quoted question is not the dialog.
+ *
  * Must not import `../tmux/tmux`: the Auto-Yes poller's suppression step reads
- * {@link isLaunchDialogOpen} to leave these screens to the launch.
+ * {@link isLaunchDialogOpen} / {@link decideLaunchDialog} to leave these
+ * screens to the launch.
  *
  * @module lib/cli-tools/launch-dialog
  */
@@ -36,6 +42,20 @@ export interface LaunchDialogSpec {
    * and logs it instead of passing it by in silence.
    */
   readonly signature: RegExp;
+  /**
+   * Any of the dialog's option rows, with or without a cursor (whatever glyph
+   * it is drawn with), anchored at the row's start.
+   */
+  readonly optionRow: RegExp;
+  /** How many option rows in a row make the block (fewer is not the dialog). */
+  readonly minOptionRows: number;
+  /** The option block starts within this many rows below the question. */
+  readonly optionsWithin: number;
+  /**
+   * A row saying the dialog was answered (gemini's restart line). Rows above
+   * the last such row are history: the dismissed dialog stays drawn there.
+   */
+  readonly dismissedRow?: RegExp;
   /** A row carrying the selection cursor; group 1 is the option label after it. */
   readonly cursorRow: RegExp;
   /** The option label (group 1 of {@link cursorRow}) that is safe to confirm. */
@@ -48,6 +68,8 @@ export interface LaunchDialogSpec {
    * all, so a question further up than this is history, not a screen.
    */
   readonly liveRows: number;
+  /** Where the declaration lives, for the `unrecognized` log's hint. */
+  readonly declaredIn: string;
 }
 
 /** What {@link decideLaunchDialog} read off one screen. */
@@ -87,9 +109,16 @@ export const GEMINI_TRUST_LAUNCH_DIALOG: LaunchDialogSpec = {
   question: /Do you trust (?:the files in )?this folder\?/,
   signature: /\bTrust folder\b|\bDon't trust\b/,
   cursorRow: /^[\s│]*●\s*(\S.*?)[\s│]*$/,
+  optionRow: /^[\s│]*(?:\S\s+)?\d\.\s+(?:Trust folder|Trust parent folder|Don't trust)\b/,
+  minOptionRows: 2,
+  optionsWithin: 8,
+  dismissedRow: /restarting to apply the trust changes/,
   safeRow: /^1\.\s+Trust folder\b/,
   key: 'Enter',
-  liveRows: 20,
+  // The dialog is 11 rows from its question to its lower border; the rest is
+  // room for a notice or footer drawn under it.
+  liveRows: 30,
+  declaredIn: 'src/lib/cli-tools/launch-dialog.ts (GEMINI_TRUST_LAUNCH_DIALOG)',
 };
 
 /**
@@ -105,10 +134,14 @@ export const ANTIGRAVITY_TRUST_LAUNCH_DIALOG: LaunchDialogSpec = {
   id: 'antigravity-folder-trust',
   question: ANTIGRAVITY_TRUST_DIALOG_PATTERN,
   signature: /\bYes, I trust this folder\b/,
+  optionRow: /^\s*(?:\S\s+)?(?:Yes, I trust this folder|No, exit)\s*$/,
+  minOptionRows: 2,
+  optionsWithin: 4,
   cursorRow: /^\s*>\s+(\S.*?)\s*$/,
   safeRow: /^Yes, I trust this folder$/,
   key: 'Enter',
   liveRows: 12,
+  declaredIn: 'src/lib/cli-tools/launch-dialog.ts (ANTIGRAVITY_TRUST_LAUNCH_DIALOG)',
 };
 
 /** The last `count` non-blank rows of a screen, ANSI stripped and right-trimmed. */
@@ -120,35 +153,59 @@ function liveRowsOf(screen: string, count: number): string[] {
   return rows.slice(-count);
 }
 
-/** Index of the last live row asking the question, or -1. */
-function lastQuestionRow(spec: LaunchDialogSpec, rows: readonly string[]): number {
+/** The rows below the last dismissal row (all of them when there is none). */
+function rowsAfterDismissal(spec: LaunchDialogSpec, rows: readonly string[]): readonly string[] {
+  if (!spec.dismissedRow) return rows;
   for (let i = rows.length - 1; i >= 0; i--) {
-    if (spec.question.test(rows[i])) return i;
+    if (spec.dismissedRow.test(rows[i])) return rows.slice(i + 1);
   }
-  return -1;
+  return rows;
+}
+
+/** The option rows of the dialog asked at `questionAt`, or null if it has none. */
+function optionBlockAfter(spec: LaunchDialogSpec, rows: readonly string[], questionAt: number): string[] | null {
+  const last = Math.min(rows.length - 1, questionAt + spec.optionsWithin);
+  for (let start = questionAt + 1; start <= last; start++) {
+    if (!spec.optionRow.test(rows[start])) continue;
+    const block: string[] = [];
+    for (let i = start; i < rows.length && spec.optionRow.test(rows[i]); i++) block.push(rows[i]);
+    return block.length >= spec.minOptionRows ? block : null;
+  }
+  return null;
+}
+
+/** The option rows under the last live question that has them, or null. */
+function findDialog(spec: LaunchDialogSpec, rows: readonly string[]): string[] | null {
+  for (let i = rows.length - 1; i >= 0; i--) {
+    if (!spec.question.test(rows[i])) continue;
+    const block = optionBlockAfter(spec, rows, i);
+    if (block) return block;
+  }
+  return null;
 }
 
 /**
  * Read one screen against a launch dialog's declaration (Issue #3776).
  *
  * The question must be among the last {@link LaunchDialogSpec.liveRows}
- * non-blank rows, and exactly one row below it must carry the cursor; the key
- * is pressed only when that row's label is the safe one.
+ * non-blank rows, below any dismissal row, with its option block under it; the
+ * key is pressed only when exactly one option row carries the cursor and its
+ * label is the safe one.
  *
  * @param spec - The confirmation being looked for
  * @param screen - One capture of the pane (ANSI allowed)
  */
 export function decideLaunchDialog(spec: LaunchDialogSpec, screen: string): LaunchDialogDecision {
-  const rows = liveRowsOf(screen, spec.liveRows);
-  const questionAt = lastQuestionRow(spec, rows);
-  if (questionAt === -1) {
+  const rows = rowsAfterDismissal(spec, liveRowsOf(screen, spec.liveRows));
+  const options = findDialog(spec, rows);
+  if (!options) {
     return rows.some((row) => spec.signature.test(row))
       ? { action: 'unrecognized', reason: 'question-not-found' }
       : { action: 'absent' };
   }
 
   const cursorLabels: string[] = [];
-  for (const row of rows.slice(questionAt + 1)) {
+  for (const row of options) {
     const match = spec.cursorRow.exec(row);
     if (match) cursorLabels.push(match[1]);
   }
@@ -162,11 +219,41 @@ export function decideLaunchDialog(spec: LaunchDialogSpec, screen: string): Laun
 }
 
 /**
- * Whether the dialog's question is live on the screen, wherever its cursor is
- * (Issue #3776). The Auto-Yes poller leaves such a screen to the launch: its
- * rules answer the cursor row (`isDefault`), which on `3. Don't trust` is the
- * very answer the launch refuses to give.
+ * Whether the dialog — its question over its option block, not dismissed — is
+ * live on the screen, wherever its cursor is (Issue #3776).
  */
 export function isLaunchDialogOpen(spec: LaunchDialogSpec, screen: string): boolean {
-  return lastQuestionRow(spec, liveRowsOf(screen, spec.liveRows)) !== -1;
+  return findDialog(spec, rowsAfterDismissal(spec, liveRowsOf(screen, spec.liveRows))) !== null;
+}
+
+/**
+ * Whether the dialog is drawn in the live rows, dismissed or not: a dialog
+ * gemini answered stays on the screen, cursor and all, above its restart line
+ * while the restart runs.
+ */
+export function isLaunchDialogDrawn(spec: LaunchDialogSpec, screen: string): boolean {
+  return findDialog(spec, liveRowsOf(screen, spec.liveRows)) !== null;
+}
+
+/**
+ * The warn a launch writes when it leaves the dialog alone, or null when the
+ * decision sends or there is nothing to say. Never carries the screen.
+ */
+export function launchDialogWarning(
+  spec: LaunchDialogSpec,
+  decision: LaunchDialogDecision,
+): { event: string; fields: Record<string, unknown> } | null {
+  if (decision.action === 'absent' || decision.action === 'press') return null;
+  if (decision.action === 'hold') {
+    return { event: 'launch-dialog-held', fields: { dialog: spec.id, ...decision } };
+  }
+  return {
+    event: 'launch-dialog-unrecognized',
+    fields: {
+      dialog: spec.id,
+      ...decision,
+      // Fail-closed by design; this warn is written once, so say what to look at.
+      hint: `the dialog's wording or cursor drawing may have changed; compare the screen with ${spec.declaredIn}`,
+    },
+  };
 }

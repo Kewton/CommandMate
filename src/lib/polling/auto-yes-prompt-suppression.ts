@@ -11,7 +11,14 @@ import { isCodexModelPickerFrame } from '../detection/tools/codex/detect';
 import { getCodexLifecycleDialog } from '../detection/cli-patterns';
 import { isAntigravityTrustScreen } from '../detection/tools/antigravity/patterns';
 import { isStartupTrustPending, isStartupWindowOpen } from '../cli-tools/antigravity-startup-trust';
-import { GEMINI_TRUST_LAUNCH_DIALOG, isLaunchDialogOpen } from '../cli-tools/launch-dialog';
+import {
+  GEMINI_TRUST_LAUNCH_DIALOG,
+  decideLaunchDialog,
+  isLaunchDialogDrawn,
+  isLaunchDialogOpen,
+} from '../cli-tools/launch-dialog';
+import { isLaunchWindowOpen } from '../cli-tools/launch-window';
+import { resolveSessionName } from '../cli-tools/session-name';
 import {
   QUESTION_CONFIRM_PAGE_SUPPRESSION_REASON,
   STARTUP_TRUST_UNHANDLED_SUPPRESSION_REASON,
@@ -92,6 +99,48 @@ export type NotOursToAnswerVerdict =
   | { kind: 'dialog-gate-refused'; dialogGate: AutoYesDialogGateVerdict };
 
 /**
+ * Issue #3776: whether the prompt the poller is about to answer is gemini's
+ * folder-trust dialog itself — its parsed options are the declared option
+ * rows — rather than another prompt sharing the screen with it (the
+ * authentication picker under a dismissed dialog, a permission prompt under a
+ * reply that quotes the question).
+ */
+function isGeminiTrustPrompt(promptData: PromptData): boolean {
+  if (promptData.type !== 'multiple_choice') return false;
+  const { optionRow, minOptionRows } = GEMINI_TRUST_LAUNCH_DIALOG;
+  return promptData.options.filter((o) => optionRow.test(`${o.number}. ${o.label}`)).length >= minOptionRows;
+}
+
+/**
+ * Issue #3776: whether gemini's folder-trust dialog on this frame is left to
+ * the launch (step 3). Only the dialog itself counts — its question over its
+ * option block, and the prompt being answered is that block: a reply quoting
+ * the question or a diff of the declaration is not it.
+ *
+ * - While the launch window is open (`cli-tools/launch-window`), the dialog is
+ *   the launch's, dismissed or not: an answered dialog stays drawn above
+ *   gemini's restart line, and a `1` typed there lands on whatever the restart
+ *   draws next (the authentication picker).
+ * - After it — the launch's Enter did not land, or gemini drew the dialog late
+ *   (an auto-update, a slow start) — nobody else will answer it. The poller's
+ *   default (the cursor row) goes through when the cursor is on the safe row
+ *   (`press`); on any other row, a dialog that does not read as declared, or
+ *   one already dismissed, it is still left alone.
+ */
+function isGeminiTrustDialogLeftToLaunch(prompt: JudgedPrompt, frame: NormalizedFrame): boolean {
+  if (!isGeminiTrustPrompt(prompt.promptData)) return false;
+  if (!isLaunchDialogDrawn(GEMINI_TRUST_LAUNCH_DIALOG, frame.clean)) return false;
+  let windowOpen = false;
+  try {
+    windowOpen = isLaunchWindowOpen(resolveSessionName('gemini', prompt.worktreeId, prompt.instanceId));
+  } catch {
+    // An id that would not make a session name was never launched here.
+  }
+  if (windowOpen || !isLaunchDialogOpen(GEMINI_TRUST_LAUNCH_DIALOG, frame.clean)) return true;
+  return decideLaunchDialog(GEMINI_TRUST_LAUNCH_DIALOG, frame.clean).action !== 'press';
+}
+
+/**
  * Issue #3214: steps 3, 3.2, 3.3 (Issue #3497) and 3.5 of
  * `detectAndRespondToPrompt` -- the frames that read as a prompt and are still
  * not Auto-Yes's to answer, judged in the order they always were. "The
@@ -132,11 +181,12 @@ export function suppressIfNotOursToAnswer(prompt: JudgedPrompt, frame: Normalize
   // answered `1` beside the launch's own Enter (the second keypress then fell
   // on the restarted gemini's authentication picker), and answered `3` —
   // `Don't trust`, written for good — when the cursor sat there. The launch
-  // confirms only `1. Trust folder` (`cli-tools/launch-dialog`).
+  // confirms only `1. Trust folder` (`cli-tools/launch-dialog`). See
+  // {@link isGeminiTrustDialogLeftToLaunch} for when the poller may answer.
   const launchDialog =
     cliToolId === 'codex'
       ? getCodexLifecycleDialog(frame)
-      : cliToolId === 'gemini' && isLaunchDialogOpen(GEMINI_TRUST_LAUNCH_DIALOG, frame.clean)
+      : cliToolId === 'gemini' && isGeminiTrustDialogLeftToLaunch(prompt, frame)
         ? GEMINI_TRUST_LAUNCH_DIALOG.id
         : null;
   if (launchDialog) {

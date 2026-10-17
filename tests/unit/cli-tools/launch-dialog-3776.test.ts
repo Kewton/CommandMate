@@ -17,6 +17,7 @@ import {
   ANTIGRAVITY_TRUST_LAUNCH_DIALOG,
   GEMINI_TRUST_LAUNCH_DIALOG,
   decideLaunchDialog,
+  isLaunchDialogDrawn,
   isLaunchDialogOpen,
 } from '@/lib/cli-tools/launch-dialog';
 
@@ -60,6 +61,67 @@ describe('[#3776] gemini folder trust (measured v0.62.0 frames)', () => {
     expect(decideLaunchDialog(GEMINI_TRUST_LAUNCH_DIALOG, gemini('after-enter-auth'))).toEqual({ action: 'absent' });
     expect(isLaunchDialogOpen(GEMINI_TRUST_LAUNCH_DIALOG, gemini('after-enter-auth'))).toBe(false);
     expect(isLaunchDialogOpen(GEMINI_TRUST_LAUNCH_DIALOG, gemini('after-enter-restarting'))).toBe(false);
+  });
+
+  it('the dismissed dialog above the restart line (synthetic frame) is absent, though still drawn', () => {
+    const restarting = gemini('after-enter-restarting');
+    expect(restarting).toContain('● 1. Trust folder');
+    expect(restarting).toContain('restarting to apply the trust changes');
+    expect(decideLaunchDialog(GEMINI_TRUST_LAUNCH_DIALOG, restarting)).toEqual({ action: 'absent' });
+    expect(isLaunchDialogDrawn(GEMINI_TRUST_LAUNCH_DIALOG, restarting)).toBe(true);
+  });
+
+  it('positive: the dialog is open on the measured frames, wherever the cursor is', () => {
+    expect(isLaunchDialogOpen(GEMINI_TRUST_LAUNCH_DIALOG, gemini('trust-dialog'))).toBe(true);
+    expect(isLaunchDialogOpen(GEMINI_TRUST_LAUNCH_DIALOG, gemini('trust-dialog-cursor-dont-trust'))).toBe(true);
+  });
+
+  it('negative: a reply quoting the question above a numbered permission prompt is not the dialog', () => {
+    const quoted = [
+      '✦ The dialog asks "Do you trust this folder?" before gemini starts.',
+      '╭──────────────────────────────────────╮',
+      "│ Allow execution of: 'npm'?           │",
+      '│ ● 1. Allow once                      │',
+      '│   2. Allow always                    │',
+      '│   3. No                              │',
+      '╰──────────────────────────────────────╯',
+    ].join('\n');
+    expect(isLaunchDialogOpen(GEMINI_TRUST_LAUNCH_DIALOG, quoted)).toBe(false);
+    expect(isLaunchDialogDrawn(GEMINI_TRUST_LAUNCH_DIALOG, quoted)).toBe(false);
+    expect(decideLaunchDialog(GEMINI_TRUST_LAUNCH_DIALOG, quoted)).toEqual({ action: 'absent' });
+  });
+
+  it('negative: an edit confirmation showing a diff of the declaration\'s comment is not the dialog', () => {
+    const diff = [
+      '│ ? Edit src/lib/cli-tools/launch-dialog.ts                         │',
+      '│  73   * HOME, empty folder; `tests/fixtures/gemini-live-3776/`):  │',
+      '│  74 + *   │ Do you trust the files in this folder?                 │',
+      '│  75 + *   │ ● 1. Trust folder (<folder>)       <- cursor here      │',
+      '│  76 + *   │   2. Trust parent folder (<parent>)                    │',
+      '│  77 + *   │   3. Don\'t trust                                       │',
+      '│ Apply this change?                                                │',
+      '│ ● 1. Allow once                                                   │',
+      '│   2. Allow always                                                 │',
+      '│   3. No                                                           │',
+    ].join('\n');
+    expect(isLaunchDialogOpen(GEMINI_TRUST_LAUNCH_DIALOG, diff)).toBe(false);
+    expect(isLaunchDialogDrawn(GEMINI_TRUST_LAUNCH_DIALOG, diff)).toBe(false);
+  });
+
+  it('a notice drawn under the dialog does not push it out of the live rows', () => {
+    const notices = Array.from({ length: 12 }, (_, i) => `ℹ notice ${i + 1}`).join('\n');
+    const withFooter = `${gemini('trust-dialog').trimEnd()}\n${notices}\n`;
+    expect(decideLaunchDialog(GEMINI_TRUST_LAUNCH_DIALOG, withFooter)).toEqual({ action: 'press', key: 'Enter' });
+  });
+
+  it('a cursor drawn with another glyph is unrecognized (fail-closed), not pressed', () => {
+    for (const glyph of ['❯', '>']) {
+      const redrawn = gemini('trust-dialog').replace('● 1. Trust folder', `${glyph} 1. Trust folder`);
+      expect(decideLaunchDialog(GEMINI_TRUST_LAUNCH_DIALOG, redrawn)).toEqual({
+        action: 'unrecognized',
+        reason: 'cursor-not-found',
+      });
+    }
   });
 
   it('a changed wording is unrecognized, not pressed', () => {

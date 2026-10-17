@@ -111,8 +111,26 @@ describe('[#3776] GeminiTool.waitForReady checks the cursor before its Enter', (
         dialog: 'gemini-folder-trust',
         action: 'unrecognized',
         reason: 'question-not-found',
+        hint: expect.stringContaining('GEMINI_TRUST_LAUNCH_DIALOG'),
       });
       expect(JSON.stringify(unrecognized[0][1])).not.toContain('Trusting a folder allows');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a cursor drawn with another glyph gets no Enter, and the warn says where the declaration is', async () => {
+    try {
+      const redrawn = frame('trust-dialog').replace('● 1. Trust folder', '❯ 1. Trust folder');
+      vi.mocked(capturePane).mockResolvedValueOnce(redrawn).mockResolvedValue(READY);
+      await runWaitForReady(5_000);
+      expect(sendSpecialKey).not.toHaveBeenCalled();
+      const unrecognized = logWarn.mock.calls.filter(([event]) => event === 'launch-dialog-unrecognized');
+      expect(unrecognized).toHaveLength(1);
+      expect(unrecognized[0][1]).toMatchObject({
+        reason: 'cursor-not-found',
+        hint: expect.stringMatching(/cursor drawing.*src\/lib\/cli-tools\/launch-dialog\.ts/),
+      });
     } finally {
       vi.useRealTimers();
     }

@@ -31,7 +31,8 @@ import {
 } from '@/config/cli-tool-timing-config';
 import { withLaunchScreenCleared } from '@/lib/session/launch-screen';
 import { getErrorMessage } from '@/lib/errors';
-import { decideLaunchDialog, GEMINI_TRUST_LAUNCH_DIALOG } from './launch-dialog';
+import { decideLaunchDialog, GEMINI_TRUST_LAUNCH_DIALOG, launchDialogWarning } from './launch-dialog';
+import { beginLaunchWindow, endLaunchWindow } from './launch-window';
 
 const logger = createLogger('cli-tools/gemini');
 
@@ -122,14 +123,21 @@ export class GeminiTool extends BaseCLITool {
         executablePath: this.command,
         worktreePath,
       });
-      await sendKeys(sessionName, withLaunchScreenCleared(launchCommand), true);
+      // Issue #3776: from the launch line to the end of `waitForReady`, the
+      // trust dialog is this launch's to answer; the Auto-Yes poller leaves it.
+      beginLaunchWindow(sessionName);
+      try {
+        await sendKeys(sessionName, withLaunchScreenCleared(launchCommand), true);
 
-      // Wait for Gemini to initialize (minimum wait for banner/auth)
-      await new Promise((resolve) => setTimeout(resolve, GEMINI_INIT_WAIT_MS));
+        // Wait for Gemini to initialize (minimum wait for banner/auth)
+        await new Promise((resolve) => setTimeout(resolve, GEMINI_INIT_WAIT_MS));
 
-      // Poll until Gemini interactive prompt is ready
-      // Handles trust dialog automatically if encountered
-      await this.waitForReady(sessionName);
+        // Poll until Gemini interactive prompt is ready
+        // Handles trust dialog automatically if encountered
+        await this.waitForReady(sessionName);
+      } finally {
+        endLaunchWindow(sessionName);
+      }
 
       logger.info('started-gemini-session');
     } catch (error: unknown) {
@@ -172,12 +180,12 @@ export class GeminiTool extends BaseCLITool {
             trustDialogHandled = true;
             logger.info('auto-trusted-folder-for-gemini');
             // Continue polling for prompt after trust dialog
-          } else if (decision.action !== 'absent' && !loggedDecisions.has(decision.reason)) {
-            loggedDecisions.add(decision.reason);
-            logger.warn(
-              decision.action === 'hold' ? 'launch-dialog-held' : 'launch-dialog-unrecognized',
-              { sessionName, dialog: GEMINI_TRUST_LAUNCH_DIALOG.id, ...decision },
-            );
+          } else {
+            const warning = launchDialogWarning(GEMINI_TRUST_LAUNCH_DIALOG, decision);
+            if (warning && decision.action !== 'absent' && !loggedDecisions.has(decision.reason)) {
+              loggedDecisions.add(decision.reason);
+              logger.warn(warning.event, { sessionName, ...warning.fields });
+            }
           }
         }
       } catch (error: unknown) {
