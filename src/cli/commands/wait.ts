@@ -26,6 +26,7 @@ import { ExitCode, getErrorMessage, VerifyExitCode, WAIT_EXIT_CODE_PRIORITY, Wai
 import type { WaitOptions } from '../types';
 import type {
   AutoYesSuppressionReason,
+  CurrentOutputObservedResponse,
   CurrentOutputResponse,
   PromptData,
   PromptMessageResponse,
@@ -37,6 +38,7 @@ import { ApiClient, ApiError, isValidWorktreeId } from '../utils/api-client';
 import { TOKEN_WARNING, handleCommandError } from '../utils/command-helpers';
 import { runVerification, WORK_EVIDENCE_GATE_ID } from '../utils/verify-runner';
 import { WAIT_INSTANCE_OPTION_DESCRIPTION } from '../config/agent-target-options';
+import { isPromptObservation, observedCurrentOutputPath } from './prompt';
 import {
   readPromptView,
   UNCLASSIFIED_PROMPT_VIEW_TYPE,
@@ -939,6 +941,22 @@ function buildUnclassifiedOutput(
   };
 }
 
+/**
+ * The exit-10 result with the poll's prompt observation added as `observation`
+ * (Issue #3755), or the result untouched.
+ *
+ * Only words added to a payload that is reported anyway: no exit code, hold or
+ * grace reads the observation, and a daemon older than the field (no
+ * `promptObservation`) gets the payload it always got. `autoYesSuppression`
+ * keeps its #1699 meaning beside it; the observation is where the poller's
+ * record and the contract's re-evaluation are told apart.
+ */
+function withObservation(result: PollResult, data: CurrentOutputObservedResponse): PollResult {
+  if (result.exitCode !== WaitExitCode.PROMPT_DETECTED || !result.output) return result;
+  if (!isPromptObservation(data.promptObservation)) return result;
+  return { ...result, output: { ...result.output, observation: data.promptObservation } };
+}
+
 /** The stderr line for a session this wait never saw running (Issue #1628). */
 function describeNotStarted(
   worktreeId: string,
@@ -1687,10 +1705,11 @@ export async function pollWorktree(
 
     try {
       // Issue #868: scope polling to a specific agent instance when provided.
-      const path = options.instance
-        ? `/api/worktrees/${worktreeId}/current-output?instance=${encodeURIComponent(options.instance)}`
-        : `/api/worktrees/${worktreeId}/current-output`;
-      const data = await client.get<CurrentOutputResponse>(path);
+      // Issue #3755: `observe=1` so an exit 10 carries the observation of the
+      // very capture it was decided on (see {@link withObservation}).
+      const data = await client.get<CurrentOutputObservedResponse>(
+        observedCurrentOutputPath(worktreeId, options.instance),
+      );
 
       // Track content changes for stall detection
       if (data.content !== state.lastContent) {
@@ -1736,7 +1755,7 @@ export async function pollWorktree(
       }
 
       const promptOutcome = promptStage(poll, state, data);
-      if (promptOutcome.kind === 'exit') return promptOutcome.result;
+      if (promptOutcome.kind === 'exit') return withObservation(promptOutcome.result, data);
       if (promptOutcome.kind === 'wait') {
         await sleep(POLL_INTERVAL_MS);
         continue;
@@ -1754,14 +1773,14 @@ export async function pollWorktree(
       }
 
       const selectionListOutcome = selectionListStage(poll, data);
-      if (selectionListOutcome.kind === 'exit') return selectionListOutcome.result;
+      if (selectionListOutcome.kind === 'exit') return withObservation(selectionListOutcome.result, data);
       if (selectionListOutcome.kind === 'wait') {
         await sleep(POLL_INTERVAL_MS);
         continue;
       }
 
       const unclassifiedOutcome = unclassifiedStage(poll, state, data);
-      if (unclassifiedOutcome.kind === 'exit') return unclassifiedOutcome.result;
+      if (unclassifiedOutcome.kind === 'exit') return withObservation(unclassifiedOutcome.result, data);
       if (unclassifiedOutcome.kind === 'wait') {
         await sleep(POLL_INTERVAL_MS);
         continue;
@@ -2040,6 +2059,14 @@ A prompt the target's Auto-Yes is answering (Issue #2463):
   would lapse during the grace ends it early with exit 10, not 124.
   --auto-yes-grace 0 restores the immediate exit; --on-prompt human is
   unchanged.
+
+The observation on exit 10 (Issue #3755):
+  The exit-10 payload also carries "observation": the same payload
+  \`commandmate prompt <id> --json\` prints, read off the capture the exit was
+  decided on — the screen's kind, an observation token, and Auto-Yes as two
+  separate items (the poller's record, the contract re-evaluated now). It
+  changes no exit code, hold or grace. autoYesSuppression keeps its meaning (a
+  record under a minute old); a missing record does not mean Auto-Yes can answer.
 `)
     .action(async (worktreeIds: string[], options: PollWorktreeOptions) => {
       try {

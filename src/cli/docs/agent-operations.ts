@@ -228,7 +228,8 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
   Prompt JSON output (exit 10):
     {"worktreeId":"...","cliToolId":"claude","type":"yes_no","question":"...","options":["yes","no"],"status":"pending"}
     The payload IS the prompt -- read it from stdout before falling back to
-    capture. For type "selection_list", options is empty by design and the
+    capture. Since Issue #3755 it also carries "observation", the payload
+    "commandmate prompt --json" prints, read off the same capture. For type "selection_list", options is empty by design and the
     question field carries the reason.
 
     Three "type" values share exit 10; only the first is answerable with
@@ -348,6 +349,24 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
     0   - Read succeeded (also when nothing matched: stderr note, or [] in JSON)
     2   - Bad argument (--days/--limit out of range, bad worktree or run id)
     99  - No such run (404), or an unexpected failure
+
+### commandmate prompt <worktree-id> --instance <id> [--json]
+  Observe, once, the screen an agent is stopped on (Issue #3755): its kind,
+  question, options, current selection, approval target, how it is answered,
+  a short-lived observation token, and Auto-Yes as two separate items -- the
+  poller's last record and the contract's policy re-evaluated now. The token
+  is single use and bound to this appearance of the screen and its highlighted
+  option; none is issued for unknown or when the session generation is not
+  known ("tokenWithheld" says which).
+
+  Kinds: antigravity-trust, antigravity-model-picker, antigravity-permission,
+  antigravity-slash-menu, composer / none (nothing asks), unknown (something
+  waits and no measured reading names it -- look at capture <id> --pane).
+  A missing poller record does NOT mean Auto-Yes can answer.
+
+  Exit codes:
+    0  - The screen was read (also composer / none / unknown)
+    21 - No running session: nothing to read
 
 ### commandmate respond <worktree-id> "<answer>"
   Respond to an agent's prompt.

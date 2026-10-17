@@ -11,6 +11,7 @@
 import type { PromptView } from '../../lib/session/prompt-view';
 import type { AutoYesSuppressionReason } from '../../lib/polling/auto-yes-suppression-reason';
 import type { StatusEvidence } from '../../lib/session/status-evidence-type';
+import type { PromptObservation } from '../../lib/prompt-observation/types';
 
 // Mirrors: src/types/models.ts Worktree + src/app/api/worktrees/route.ts response shape
 export interface WorktreeListResponse {
@@ -1068,6 +1069,20 @@ export interface CurrentOutputResponse {
   };
 }
 
+/**
+ * `GET /api/worktrees/:id/current-output?observe=1` (Issue #3755): the same
+ * payload plus one prompt observation of the same capture.
+ *
+ * A type of its own rather than a field on {@link CurrentOutputResponse}: the
+ * route attaches it only when asked, and that interface mirrors the response
+ * every caller gets (current-output-mirror-3300). Optional for a daemon older
+ * than the field, which ignores `observe`.
+ */
+export interface CurrentOutputObservedResponse extends CurrentOutputResponse {
+  promptObservation?: PromptObservation;
+}
+
+
 // Mirrors: src/types/models.ts BasePromptData (subset for CLI output)
 //
 // Issue #1738: this mirror is deliberately LOOSER than the server union and
@@ -1400,6 +1415,15 @@ export interface WaitPromptOutput {
     pattern?: string;
     ageSeconds: number;
   };
+  /**
+   * One prompt observation of the frame this exit was decided on (Issue
+   * #3755): the screen's kind, an observation token, and Auto-Yes as two
+   * separate items — the poller's record and the contract re-evaluated now.
+   * Absent when the server is older than the field. `autoYesSuppression` above
+   * keeps its meaning (a record under a minute old); this does not read the
+   * record's time as "the reason this prompt is unanswered".
+   */
+  observation?: PromptObservation;
   [key: string]: unknown;
 }
 
