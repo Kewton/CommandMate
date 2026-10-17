@@ -102,6 +102,8 @@ describe('buildProgram', () => {
       'send',
       'wait',
       'respond',
+      // Issue #3755: one machine-readable observation of the screen an agent is stopped on
+      'prompt',
       // Issue #2101: CLI face of POST /api/worktrees/:id/interrupt
       'interrupt',
       'capture',

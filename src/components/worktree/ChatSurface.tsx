@@ -147,7 +147,7 @@ import { NavigationButtons } from '@/components/worktree/NavigationButtons';
 import { TerminalEscapeHatch } from '@/components/worktree/TerminalEscapeHatch';
 import { DismissPanelKeys, PromptAnswerKeys } from '@/components/worktree/PromptAnswerKeys';
 import { SelectionListKeys } from '@/components/worktree/SelectionListKeys';
-import { hasDismissablePanelFooter } from '@/lib/detection/selection-shape';
+import { hasDismissablePanelFooter, isTrustConfirmationFrame } from '@/lib/detection/selection-shape';
 import type { ChatMessage, LivePromptData } from '@/types/models';
 import { derivePromptView } from '@/lib/session/prompt-view';
 import type { CLIToolType } from '@/lib/cli-tools/types';
@@ -264,6 +264,14 @@ const BLOCKED_REASON_KEY: Record<ChatSurfaceBlockedReason, string> = {
   unclassified: 'chatSurface.reasonUnclassified',
   promptUnreadable: 'chatSurface.reasonPromptUnreadable',
 };
+
+/**
+ * Issue #3758: the banner for a selection list that is a folder-trust
+ * confirmation. Not a reason of its own — the card, its keys and every gate
+ * keyed on `'selectionList'` stay exactly as they are; only the sentence says
+ * which screen it is, and that the agent waits until it is answered.
+ */
+const TRUST_CONFIRMATION_REASON_KEY = 'chatSurface.reasonTrustConfirmation';
 
 // ============================================================================
 // Types
@@ -915,6 +923,11 @@ export const ChatSurface = memo(function ChatSurface({
   // from the pane when the server flag has not reached this object — see
   // `resolveBlockedReason`, which prefers the flag whenever it is present.
   const blockedReason = resolveBlockedReason(live, frame);
+  // Issue #3758: read off the same frame the card draws.
+  const isTrustConfirmation = useMemo(
+    () => blockedReason === 'selectionList' && isTrustConfirmationFrame(frame, cliToolId),
+    [blockedReason, frame, cliToolId],
+  );
 
   const handleOpenTerminal = useCallback(() => {
     onSurfaceModeChange('terminal');
@@ -1216,12 +1229,13 @@ export const ChatSurface = memo(function ChatSurface({
           <div
             data-testid="chat-surface-terminal-banner"
             data-reason={blockedReason}
+            data-trust-confirmation={isTrustConfirmation ? 'true' : undefined}
             role="status"
             aria-label={t('chatSurface.bannerLabel')}
             className="flex flex-wrap items-center gap-2 rounded-lg border border-warning-border bg-warning-subtle px-2 py-1.5"
           >
             <span className="min-w-0 flex-1 text-xs text-foreground">
-              {t(BLOCKED_REASON_KEY[blockedReason])}
+              {t(isTrustConfirmation ? TRUST_CONFIRMATION_REASON_KEY : BLOCKED_REASON_KEY[blockedReason])}
             </span>
             {/* Issue #2254 demoted this from "the only thing you can do" to a
                 secondary way out: the dialog is answerable right here now, and

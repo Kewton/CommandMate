@@ -495,6 +495,15 @@ export interface RespondOptions {
   planReview?: string;
 }
 
+/** prompt command options [Issue #3755] */
+export interface PromptOptions {
+  token?: string;
+  /** Agent instance ID or alias (defaults to the worktree's primary instance) */
+  instance?: string;
+  /** Print the observation payload as JSON */
+  json?: boolean;
+}
+
 /** capture command options [Issue #518] */
 export interface CaptureOptions {
   json?: boolean;
