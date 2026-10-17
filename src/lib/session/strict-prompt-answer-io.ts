@@ -41,8 +41,20 @@ export interface StrictAnswerTarget {
   resolvedBy: string | null;
 }
 
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+/** The most of an error's message that is logged: a screen's text may be in it. */
+const LOGGED_MESSAGE_CHARS = 80;
+
+/**
+ * An error as it may be logged or returned: its name, its `code` and the first
+ * {@link LOGGED_MESSAGE_CHARS} characters of its message — never the whole
+ * message, which can carry the pane's text (Issue #3771).
+ */
+export function describeError(error: unknown): string {
+  const name = error instanceof Error ? error.name : typeof error;
+  const rawCode = typeof error === 'object' && error !== null ? (error as { code?: unknown }).code : undefined;
+  const code = typeof rawCode === 'string' || typeof rawCode === 'number' ? ` code=${rawCode}` : '';
+  const message = (error instanceof Error ? error.message : String(error)).replace(/\s+/g, ' ');
+  return `${name}${code}: ${message.slice(0, LOGGED_MESSAGE_CHARS)}`;
 }
 
 export function createStrictRespondDeps(db: Database.Database, target: StrictAnswerTarget): StrictRespondDeps {
@@ -56,7 +68,7 @@ export function createStrictRespondDeps(db: Database.Database, target: StrictAns
         await captureSessionOutputFresh(worktreeId, cliToolId, STATUS_CAPTURE_LINES, instanceId);
         payload = await buildCurrentOutput(db, worktreeId, cliToolId, instanceId);
       } catch (error) {
-        return { ok: false, stage: 'capture', error: messageOf(error) };
+        return { ok: false, stage: 'capture', error: describeError(error) };
       }
       try {
         const observation = observeSession(
@@ -66,7 +78,7 @@ export function createStrictRespondDeps(db: Database.Database, target: StrictAns
         );
         return { ok: true, observation, frame: payload.fullOutput ?? '' };
       } catch (error) {
-        return { ok: false, stage: 'observation', error: messageOf(error) };
+        return { ok: false, stage: 'observation', error: describeError(error) };
       }
     },
     sendKey: key => sendSessionAnswerKey(worktreeId, cliToolId, key, instanceId),
@@ -128,9 +140,11 @@ export function recordStrictAnswer(
   try {
     applyEventToActiveTask(db, target.worktreeId, target.cliToolId, instanceId, 'prompt_answered_human', {
       promptType: result.expectedKind,
+      answeredBy,
+      ...(result.answer === null ? {} : { option: `${result.answer.position}. ${result.answer.label}` }),
       reason: `strict respond by ${answeredBy}: ${what}${folder} (operation ${result.operationId}, ${ending})`,
     });
   } catch (error) {
-    logger.warn('strict-prompt-answer-record-failed', { error: messageOf(error) });
+    logger.warn('strict-prompt-answer-record-failed', { error: describeError(error) });
   }
 }

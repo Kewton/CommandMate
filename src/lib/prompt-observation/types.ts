@@ -29,6 +29,8 @@ export type PromptObservationAnswerVia =
   | 'screen'
   /** A decision delivered over the agent's own API (`respond <id> <number>`). */
   | 'api'
+  /** agy's folder-trust screen: `respond --expect-screen` answers it (Issue #3771). */
+  | 'strict'
   /** Nothing `respond` can send today: a human answers at the pane. */
   | 'terminal'
   /** There is nothing to answer (`composer` / `none`). */

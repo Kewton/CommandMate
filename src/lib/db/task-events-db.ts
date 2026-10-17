@@ -25,6 +25,10 @@ export interface TaskEventPayload {
   promptType?: string;
   /** Why a caller raised the event, when that is not obvious from the event. */
   reason?: string;
+  /** Who answered a prompt (`cli`, or `agent:<worktree>/<instance>`), for a strict `respond` (#3771). */
+  answeredBy?: string;
+  /** The option a strict `respond` chose, as `<position>. <label>` (#3771). */
+  option?: string;
   /**
    * Which detection path produced the event (#1549).
    *

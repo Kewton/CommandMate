@@ -58,7 +58,7 @@ function observation(over: Partial<PromptObservation> = {}): PromptObservation {
         { position: 2, label: 'No, exit' },
       ],
       selectedPosition: 1,
-      answerVia: 'terminal',
+      answerVia: 'strict',
       sessionStatus: 'waiting',
       sessionStatusReason: 'antigravity_selection_list',
     },
@@ -162,6 +162,7 @@ describe('[#3755] commandmate prompt', () => {
     expect(text).toContain('approval target: /work/project');
     expect(text).toContain('> 1. Yes, I trust this folder');
     expect(text).toContain('    2. No, exit');
+    expect(text).toContain('answer via: strict (commandmate respond --expect-screen)');
     expect(text).toContain('token: po1.abc.');
     expect(text).toContain('a missing record does not mean Auto-Yes can answer');
     expect(text).toContain('contract re-evaluation: not-evaluated (no-parsed-prompt)');

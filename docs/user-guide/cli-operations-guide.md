@@ -768,7 +768,7 @@ kind は `promptData.type` や `sessionStatusReason`（`antigravity_selection_li
 | `screen.tokenWithheld` | `token` が null の理由。`no-decision`（何も尋ねていない）/ `unknown-screen` / `no-session-generation`。発行時は null |
 | `screen.appearedAt` | この画面の出現を最初に観測した時刻（epoch ms。トークンに結び付く）。トークンが無いときは null |
 | `screen.question` / `options` / `selectedPosition` / `approvalTarget` | 質問・選択肢（1 始まり）・現在の選択・承認対象 |
-| `screen.answerVia` | 回答経路: `screen`（`respond` のキー送出）/ `api`（decision）/ `terminal`（今は `respond` で答えられない）/ `none` |
+| `screen.answerVia` | 回答経路: `screen`（`respond` のキー送出）/ `api`（decision）/ `strict`（agy の信頼確認。`respond --expect-screen` で答えられる）/ `terminal`（今は `respond` で答えられない）/ `none` |
 | `autoYes.enabled` / `pollerActive` | Auto-Yes の有効状態 / サーバの poller が動いているか |
 | `autoYes.pollerRecord` | poller（または permission hook）が最後に「答えなかった」と記録したもの。`screenCorrelation` はこの画面との対応で、記録は画面を名指ししないため `unknown` / `type-mismatch` / `no-prompt-on-screen` のどれか |
 | `autoYes.contractEvaluation` | 契約の方針を**いま**この画面に当てた結果（`policy-withholds` + 理由 / `policy-permits` / `no-base-answer` / `not-evaluated`）。理由の語は `AutoYesSuppressionReason` と同じ（[理由語の表](#autoyeslastsuppression-ポリシー抑止の観測issue-1684)） |
@@ -927,7 +927,7 @@ server.log（`strict-prompt-answered` / `strict-prompt-response-refused`）と�
 | 0 | 応答成功 |
 | 2 | 引数エラー（`<answer>` と `--default` の同時指定・両方欠落 等）/ 選択肢に無い番号（`answer_out_of_range`）/ 厳格モードでの `--default`・番号なしの画面への番号・`--expect-screen` と `--observation` の片方だけ |
 | 40 | 厳格モード: 照合不成立・照合不能。**何も送っていない**（kind・トークン・フォルダ・label の不一致、capture 失敗、古いサーバ 等）。`commandmate prompt` で観測し直す |
-| 41 | 厳格モード: 送信を始めた後の部分送信・結果不確定。**再送してはいけない**。pane を確かめる |
+| 41 | 厳格モード: 送信を始めた後の部分送信・結果不確定。**再送してはいけない**。pane を確かめる。ただし 41 でも `reason` が `operation_in_progress` / `operation_id_conflict` のときは何も送っていない（`keysSent` は 0。`delivery` は `indeterminate` と出るが送信はしていない）。結果の取り直しは別の ID で |
 | 99 | プロンプトが既に消えている（`prompt_no_longer_active`）/ yes・no を選択肢に解決できない（`unresolvable_answer`）/ 保持している decision が 0 件（`decision_not_found`）・2 件以上（`multiple_pending_decisions`、Issue #2040）|
 
 ---

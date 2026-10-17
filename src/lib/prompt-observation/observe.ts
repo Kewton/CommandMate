@@ -183,6 +183,9 @@ export function observationBindingOf(observation: PromptObservation): Observatio
 /** How the screen is answered today; `none` when nothing asks. */
 function answerViaFor(classified: ClassifiedScreen, payload: ObservationPayload): PromptObservationAnswerVia {
   if (!isDecisionKind(classified.kind)) return 'none';
+  // The trust screen is a selection list with no prompt, but the strict
+  // `respond --expect-screen` (Issue #3756) answers it.
+  if (classified.kind === 'antigravity-trust') return 'strict';
   // agy's arrow screens are published as selection lists: no prompt, so
   // `respond` has nothing to answer and a human drives them at the pane.
   const view = payload.promptView ?? derivePromptView(payload.promptData ?? null);

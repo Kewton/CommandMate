@@ -68,4 +68,18 @@ describe('[#3755] readAntigravityArrowScreen over the 2364 corpus', () => {
     const text = 'Do you trust the contents of this project?\n  Yes, I trust this folder\n  No, exit\n\n↑/↓ Navigate · enter Confirm';
     expect(readAntigravityArrowScreen(text)).toBeNull();
   });
+
+  // Issue #3771 item 1: a quoted trust screen is a row of agent output, with
+  // the turn's output still being drawn under it.
+  describe('[#3771] a quoted trust screen', () => {
+    const TRUST = 'Do you trust the contents of this project?\n> Yes, I trust this folder\n  No, exit\n\n↑/↓ Navigate · enter Confirm';
+
+    it('is not read when output continues under the footer', () => {
+      expect(readAntigravityArrowScreen(`${TRUST}\n⠋ Generating...\nthe next line of the reply`)).toBeNull();
+    });
+
+    it('is still read with only blank rows under the footer', () => {
+      expect(readAntigravityArrowScreen(`${TRUST}\n\n   \n`)?.screen).toBe('trust');
+    });
+  });
 });

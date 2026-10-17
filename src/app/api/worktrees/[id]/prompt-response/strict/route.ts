@@ -32,7 +32,7 @@ import { resolveSessionTargetStrict } from '@/lib/session/resolve-session-target
 import { createLogger } from '@/lib/logger';
 import { isPromptObservationKind, type PromptObservationKind } from '@/lib/prompt-observation/kinds';
 import { respondStrictly } from '@/lib/prompt-observation/strict-respond';
-import { createStrictRespondDeps, recordStrictAnswer } from '@/lib/session/strict-prompt-answer-io';
+import { createStrictRespondDeps, describeError, recordStrictAnswer } from '@/lib/session/strict-prompt-answer-io';
 import { startPolling } from '@/lib/polling/response-poller';
 import { broadcastTerminalSnapshotAfterInteraction } from '@/lib/realtime/terminal-broadcast';
 
@@ -173,7 +173,7 @@ export async function POST(
     }
     return NextResponse.json(result, { status: 200 });
   } catch (error: unknown) {
-    logger.error('strict-prompt-response-failed', { error: error instanceof Error ? error.message : String(error) });
+    logger.error('strict-prompt-response-failed', { error: describeError(error) });
     return refuse(500, 'internal_error', 'Internal server error');
   }
 }

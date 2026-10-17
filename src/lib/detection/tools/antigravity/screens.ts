@@ -73,6 +73,9 @@ const MORE_ROWS_PATTERN = /^\s*[↓↑]\s*\d+\s+more\s*$/;
 /** The picker's effort slider, the first row under its model list. */
 const PICKER_EFFORT_ROW_PATTERN = /^\s*Effort\b/;
 
+/** agy's model status row under a screen's footer: drawn flush right, far from the left edge. */
+const STATUS_ROW_PATTERN = /^ {40,}\S/;
+
 /** How far above the footer a screen's header may sit. Every measured screen spans under 20 rows. */
 const SCREEN_MAX_ROWS = 30;
 
@@ -132,6 +135,13 @@ function readTrust(lines: readonly string[], footer: number): AntigravityArrowSc
     }
   }
   if (questionRow < 0) return null;
+  // The live screen is the last thing drawn: under its footer there are only
+  // blank rows and agy's right-aligned model status row (measured: 177 columns
+  // of indent). A quote of it in the agent's output has the turn's next rows
+  // (spinner, reply) under it (Issue #3771).
+  for (let i = footer + 1; i < lines.length; i++) {
+    if (lines[i].trim() !== '' && !STATUS_ROW_PATTERN.test(lines[i])) return null;
+  }
 
   let highlighted = -1;
   for (let i = questionRow + 1; i < footer; i++) {
