@@ -192,6 +192,33 @@ export const ANTIGRAVITY_DIALOG_MAX_ROWS = 60;
  */
 export const ANTIGRAVITY_SURVEY_PATTERN = /^\s*\[1\]\s*Good\s+\[2\]\s*Fine\s+\[3\]\s*Bad\s+\[0\]\s*Skip\s*$/m;
 
+/**
+ * The question of agy's startup folder-trust screen (Issue #988):
+ *
+ *   Do you trust the contents of this project?
+ *   > Yes, I trust this folder   <- default-selected option
+ *     No, exit
+ *   ↑/↓ Navigate · enter Confirm
+ *
+ * Unnumbered, so {@link isAntigravityNumberedDialog} is false on it and neither
+ * the agy dialog reader nor the generic numbered parser reads it as a prompt
+ * (Issue #3757).
+ */
+export const ANTIGRAVITY_TRUST_DIALOG_PATTERN = /Do you trust the contents of this project\?/;
+
+/**
+ * Is agy's folder-trust screen live at the bottom of the frame (Issue #3757)?
+ *
+ * The question AND the `↑/↓ Navigate` footer, both in the status tail: the
+ * question alone also matches the dismissed screen left in the scrollback, or a
+ * reply quoting it, and neither of those is waiting for an answer.
+ *
+ * @param lastLines - The status detector's tail (`normalizeFrame(…).lastLines`)
+ */
+export function isAntigravityTrustScreen(lastLines: string): boolean {
+  return ANTIGRAVITY_TRUST_DIALOG_PATTERN.test(lastLines) && ANTIGRAVITY_NAVIGATE_FOOTER_PATTERN.test(lastLines);
+}
+
 /** Where agy's dialog block sits on a frame — see {@link locateAntigravityDialogRegion}. */
 export interface AntigravityDialogRegion {
   /** Index of the first row that may belong to the dialog (just below the nearest boundary). */

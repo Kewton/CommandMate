@@ -562,6 +562,7 @@
     "reasonDismissablePanel": "This screen only closes. Press Esc here, with it in view below.",
     "reasonUnclassified": "Chat can't tell what this screen is. It is shown as-is below, so you can drive it with the keys here.",
     "reasonPromptUnreadable": "Waiting for an answer, and the options couldn't be read. Read the screen below and answer with a number or y/n.",
+    "reasonTrustConfirmation": "Terminal action needed (trust confirmation). The agent will not continue until you answer whether to trust this folder, and Auto-Yes does not answer this screen. Send the arrows and Enter from here, with the screen below in view, or answer it in the terminal.",
     "openTerminal": "Open terminal",
     "jumpToLatest": "Jump to latest",
     "jumpToLatestGenerating": "Jump to latest (still responding)",
@@ -1168,6 +1169,9 @@
     "defaultWarning": "Enter saves this choice as the default for new sessions. Use “This session only” to leave your default unchanged.",
     "opencodeToolbarLabel": "opencode model keys",
     "opencodeCaption": "Model"
+  },
+  "trustConfirmation": {
+    "notice": "Terminal action needed (trust confirmation). The agent will not continue until you answer whether to trust this folder, and Auto-Yes does not answer this screen. Pick with the arrows and press Enter, or answer it in the terminal."
   },
   "newFileDialog": {
     "title": "New File",

@@ -282,7 +282,8 @@ const CONTRACT_POLICY_CAUSE = 'by contract policy';
  * branch (`agent-launch-dialog`), the poller's policy branch and
  * `lib/hooks/permission-decision-service.ts` (both the four `evaluatePolicyAgainstTexts`
  * verdicts, which is why those four keep the pre-#1843 wording exactly), and
- * the poller's stopped-answer branch (`partial-answer`, Issue #3706 / #3713).
+ * the poller's stopped-answer branch (`partial-answer`, Issue #3706 / #3713),
+ * and the poller's agy trust-screen branch (`startup-trust-unhandled`, Issue #3757).
  */
 const SUPPRESSION_CAUSE: Record<AutoYesSuppressionReason, string> = {
   'mode-off': CONTRACT_POLICY_CAUSE,
@@ -299,6 +300,10 @@ const SUPPRESSION_CAUSE: Record<AutoYesSuppressionReason, string> = {
   // Auto-Yes answer was stopped with some of its keys already in the input, and
   // typing it again would append to them, so the prompt waits for a human.
   'partial-answer': 'because an earlier answer left partial input; Auto-Yes is waiting for a human',
+  // Issue #3757. agy's startup folder-trust screen: the launch's to confirm, not
+  // Auto-Yes's, and agy drew it after the launch window had ended.
+  'startup-trust-unhandled':
+    "because agy's startup folder-trust confirmation is the launch's to answer, not Auto-Yes's; the next send confirms it once, or answer it at the pane",
 };
 
 /**

@@ -29,6 +29,18 @@ import {
   stripAnsi,
 } from '../detection/cli-patterns';
 import { normalizeFrame } from '../detection/tools/frame';
+import {
+  ANTIGRAVITY_TRUST_DIALOG_PATTERN,
+  isAntigravityTrustScreen,
+} from '../detection/tools/antigravity/patterns';
+import {
+  beginStartupWindow,
+  claimStartupTrust,
+  endStartupWindow,
+  forgetStartupTrust,
+  isStartupTrustPending,
+  markStartupTrustPending,
+} from './antigravity-startup-trust';
 import { ANTIGRAVITY_CLI_TOOL_ID } from '@/lib/hooks/sources';
 import {
   beginAgentSession,
@@ -81,16 +93,39 @@ const ANTIGRAVITY_PROMPT_WAIT_TIMEOUT_MS = 15000;
 const ANTIGRAVITY_READY_FOOTER_PATTERN = /\?\s+for\s+shortcuts/;
 
 /**
- * Startup trust dialog marker (Issue #988). On first access to an untrusted
- * folder agy shows:
- *   Do you trust the contents of this project?
- *   > Yes, I trust this folder   <- default-selected option
- *     No, exit
- *   ↑/↓ Navigate · enter Confirm
- * "Yes, I trust this folder" is the default selection, so a single Enter confirms
- * it. (Confirmed on machine.)
+ * How long a send waits for the prompt while the launch's trust Enter is still
+ * owed (Issue #3757). agy was measured drawing the trust screen 61 s after the
+ * launch, ~27 s after the launch window ended; 60 s covers that with room.
  */
-const ANTIGRAVITY_TRUST_DIALOG_PATTERN = /Do you trust the contents of this project\?/;
+const ANTIGRAVITY_STARTUP_PROMPT_WAIT_TIMEOUT_MS = 60000;
+
+/** Rows of the last capture a timeout log quotes, each cut to {@link SCREEN_TAIL_MAX_CHARS}. */
+const SCREEN_TAIL_ROWS = 5;
+const SCREEN_TAIL_MAX_CHARS = 160;
+
+/**
+ * What a readiness wait saw last, for its timeout log (Issue #3757): which of
+ * the screens it knows the pane showed, and its last few non-blank rows.
+ */
+function describeScreen(output: string | null): { screen: string; screenTail: string[] } {
+  if (output === null) return { screen: 'no-capture', screenTail: [] };
+  const rows = stripAnsi(output)
+    .split('\n')
+    .map((row) => row.trimEnd())
+    .filter((row) => row.trim() !== '');
+  const lastLines = normalizeFrame(output, 'antigravity').lastLines;
+  const screen = rows.length === 0
+    ? 'blank'
+    : isAntigravityTrustScreen(lastLines)
+      ? 'trust-dialog'
+      : isAntigravityReady(output)
+        ? 'ready'
+        : 'other';
+  return {
+    screen,
+    screenTail: rows.slice(-SCREEN_TAIL_ROWS).map((row) => row.slice(0, SCREEN_TAIL_MAX_CHARS)),
+  };
+}
 
 /**
  * Read agy's input box off the bottom of a frame (Issue #2478).
@@ -249,13 +284,20 @@ export class AntigravityTool extends BaseCLITool {
         await this.createLaunchPane(sessionName, worktreePath);
       }
 
-      await sendKeys(sessionName, withLaunchScreenCleared(launchCommand), true);
+      // Issue #3757: from the launch line to the end of `waitForReady`, a trust
+      // screen is this window's to confirm; the poller records nothing for it.
+      beginStartupWindow(sessionName);
+      try {
+        await sendKeys(sessionName, withLaunchScreenCleared(launchCommand), true);
 
-      // Wait for agy to initialize
-      await new Promise((resolve) => setTimeout(resolve, ANTIGRAVITY_INIT_WAIT_MS));
+        // Wait for agy to initialize
+        await new Promise((resolve) => setTimeout(resolve, ANTIGRAVITY_INIT_WAIT_MS));
 
-      // Poll until the interactive prompt is ready (handles the trust dialog)
-      await this.waitForReady(sessionName);
+        // Poll until the interactive prompt is ready (handles the trust dialog)
+        await this.waitForReady(sessionName);
+      } finally {
+        endStartupWindow(sessionName);
+      }
 
       logger.info('started-antigravity-session');
     } catch (error: unknown) {
@@ -269,15 +311,29 @@ export class AntigravityTool extends BaseCLITool {
    * Handles the first-run trust dialog ("Do you trust the contents of this
    * project?") by sending Enter to confirm the default "Yes, I trust this folder"
    * selection. Polls until {@link isAntigravityReady} or max attempts reached.
+   *
+   * Issue #3757: the window can end before agy has drawn anything — its start
+   * up was measured at 1 s on one launch and 61 s on the next. The launch still
+   * succeeds, but a window that never sent its Enter now records it as owed
+   * (`antigravity-startup-trust`), so the next send's {@link waitForPrompt}
+   * delivers it once; and the timeout log says what the pane showed and what
+   * the captures threw instead of swallowing both.
    */
   private async waitForReady(sessionName: string): Promise<void> {
+    // A relaunch starts over: whatever an earlier process of this pane owed is
+    // not this one's.
+    forgetStartupTrust(sessionName);
     // One-shot guard: capturePane keeps the dismissed dialog in scrollback, so
     // Enter must be sent at most once per dialog.
     let trustDialogHandled = false;
+    let lastOutput: string | null = null;
+    let captureErrors = 0;
+    let lastCaptureError: string | undefined;
     for (let i = 0; i < ANTIGRAVITY_INIT_MAX_ATTEMPTS; i++) {
       try {
         const rawOutput = await capturePane(sessionName, 50);
         const output = stripAnsi(rawOutput);
+        lastOutput = rawOutput;
 
         // Ready: the input box is live and no agy screen covers it.
         if (isAntigravityReady(output)) {
@@ -293,12 +349,26 @@ export class AntigravityTool extends BaseCLITool {
           await new Promise((resolve) => setTimeout(resolve, ANTIGRAVITY_DIALOG_SETTLE_MS));
           continue;
         }
-      } catch {
-        // Capture may fail during initialization - continue polling
+      } catch (error: unknown) {
+        // Capture may fail during initialization - continue polling, but keep
+        // count so the timeout below can say so (Issue #3757).
+        captureErrors++;
+        lastCaptureError = getErrorMessage(error);
       }
       await new Promise((resolve) => setTimeout(resolve, ANTIGRAVITY_POLL_INTERVAL_MS));
     }
-    logger.info('antigravity-prompt-detection-timeout');
+    // Issue #3757: the Enter is owed only when this window sent none. One that
+    // did must never be followed by a second one.
+    if (!trustDialogHandled) markStartupTrustPending(sessionName);
+    logger.info('antigravity-prompt-detection-timeout', {
+      sessionName,
+      attempts: ANTIGRAVITY_INIT_MAX_ATTEMPTS,
+      trustDialogHandled,
+      ...(trustDialogHandled ? {} : { reason: 'startup-trust-unhandled' }),
+      ...describeScreen(lastOutput),
+      captureErrors,
+      ...(lastCaptureError !== undefined ? { lastCaptureError } : {}),
+    });
   }
 
   /**
@@ -306,26 +376,70 @@ export class AntigravityTool extends BaseCLITool {
    * Mirrors CodexTool.waitForPrompt: throws on timeout so a failed readiness
    * check STOPS the send rather than typing into a non-ready TUI.
    *
+   * Issue #3757: while the launch's trust Enter is still owed
+   * ({@link waitForReady}'s window ended first), the wait is
+   * {@link ANTIGRAVITY_STARTUP_PROMPT_WAIT_TIMEOUT_MS} long and the trust screen,
+   * when it shows up live, gets that one Enter — claimed, so a second send
+   * waiting on the same pane cannot send another. A timeout says when it was
+   * the unconfirmed trust screen that kept the prompt away.
+   *
    * @throws Error when the input prompt is not detected within the timeout
    */
   private async waitForPrompt(sessionName: string): Promise<void> {
     const startTime = Date.now();
+    let deadline = startTime + (isStartupTrustPending(sessionName)
+      ? ANTIGRAVITY_STARTUP_PROMPT_WAIT_TIMEOUT_MS
+      : ANTIGRAVITY_PROMPT_WAIT_TIMEOUT_MS);
     const pollInterval = 500;
-    while (Date.now() - startTime < ANTIGRAVITY_PROMPT_WAIT_TIMEOUT_MS) {
+    let lastOutput: string | null = null;
+    let captureErrors = 0;
+    let lastCaptureError: string | undefined;
+    while (Date.now() < deadline) {
       try {
         const rawOutput = await capturePane(sessionName, 50);
         const output = stripAnsi(rawOutput);
+        lastOutput = rawOutput;
         if (isAntigravityReady(output)) {
+          forgetStartupTrust(sessionName);
           return;
         }
-      } catch {
+        if (
+          isAntigravityTrustScreen(normalizeFrame(output, 'antigravity').lastLines) &&
+          claimStartupTrust(sessionName)
+        ) {
+          await sendSpecialKey(sessionName, 'Enter');
+          logger.info('auto-trusted-folder-for-antigravity', { sessionName, afterLaunchWindow: true });
+          // A full ordinary window for agy to draw its prompt after the Enter.
+          deadline = Math.max(deadline, Date.now() + ANTIGRAVITY_PROMPT_WAIT_TIMEOUT_MS);
+          await new Promise((resolve) => setTimeout(resolve, ANTIGRAVITY_DIALOG_SETTLE_MS));
+          continue;
+        }
+      } catch (error: unknown) {
         // Capture may fail - continue polling
+        captureErrors++;
+        lastCaptureError = getErrorMessage(error);
       }
       await new Promise((resolve) => setTimeout(resolve, pollInterval));
     }
-    logger.info('antigravity-prompt-not-ready');
+    const trustPending = isStartupTrustPending(sessionName);
+    const seen = describeScreen(lastOutput);
+    logger.info('antigravity-prompt-not-ready', {
+      sessionName,
+      waitedMs: Date.now() - startTime,
+      ...(trustPending ? { reason: 'startup-trust-unhandled' } : {}),
+      ...seen,
+      captureErrors,
+      ...(lastCaptureError !== undefined ? { lastCaptureError } : {}),
+    });
+    // A live trust screen here is one whose Enter was already sent (or never
+    // owed): it is a human's now.
+    const cause = seen.screen === 'trust-dialog'
+      ? ' (the folder-trust confirmation "Do you trust the contents of this project?" is on screen and needs an answer)'
+      : trustPending
+        ? ' (startup-trust-unhandled: agy had not shown its folder-trust confirmation when the launch window ended, and it has not appeared since)'
+        : '';
     throw new Error(
-      'Antigravity prompt not ready: timed out waiting for the input prompt before sending'
+      `Antigravity prompt not ready: timed out waiting for the input prompt before sending${cause}`
     );
   }
 
@@ -387,6 +501,8 @@ export class AntigravityTool extends BaseCLITool {
       afterKill: (sessionName) => {
         // Invalidate cache so a later session reusing the name starts clean
         invalidateCache(sessionName);
+        // Issue #3757: an Enter owed to the killed process is not the next one's.
+        forgetStartupTrust(sessionName);
       },
     });
   }

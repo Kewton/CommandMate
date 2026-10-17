@@ -68,6 +68,7 @@ import {
   COMMAND_CODE_PLAN_REVIEW_FOOTER,
   FILTER_INPUT_PATTERN,
 } from './selection-shape-patterns';
+import { isAntigravityTrustScreen } from './tools/antigravity/patterns';
 
 export { COMMAND_CODE_PLAN_REVIEW_FOOTER };
 
@@ -669,4 +670,40 @@ export function shouldOfferOptionNumbers(shape: SelectionListShape): boolean {
     !shape.hasFilterInput &&
     !shape.offersPlanApprove
   );
+}
+
+/**
+ * How many content rows from the bottom {@link isTrustConfirmationFrame} hands
+ * the detector's predicate: the detector's own `STATUS_CHECK_LINE_COUNT`
+ * (`tools/frame.ts`, the `lastLines` window), restated because that module
+ * pulls `cli-patterns` and its logger into the browser bundle. Pinned equal by
+ * `tests/unit/lib/detection/trust-confirmation-frame-3758.test.ts`.
+ */
+export const TRUST_CONFIRMATION_TAIL_LINE_COUNT = 15;
+
+/**
+ * Is this selection list a folder-trust confirmation (Issue #3758)?
+ *
+ * agy's `Do you trust the contents of this project?` screen is unnumbered, so it
+ * is published as an `antigravity_selection_list` (`isSelectionListActive`) and
+ * never as a prompt — no prompt panel, no sheet — and Auto-Yes does not answer
+ * it (#3757). The surfaces drew the bare arrow pad and the generic "a selection
+ * list is open" sentence, which did not say the agent is stopped until somebody
+ * answers on the terminal. This tells them which screen it is, so they can say
+ * so.
+ *
+ * The test is the detector's own (`isAntigravityTrustScreen`) over the same
+ * window of rows, not a copy of it. Callers ask only while the server says a
+ * selection list is up; this does not decide THAT.
+ *
+ * @param frame - the raw pane (`PaneTerminalState.output` / the poll's `fullOutput`)
+ * @param cliToolId - the tool the pane belongs to; only agy draws this screen
+ */
+export function isTrustConfirmationFrame(
+  frame: string | null | undefined,
+  cliToolId: string | null | undefined,
+): boolean {
+  if (!frame || cliToolId !== 'antigravity') return false;
+  const lines = tailLines(frame);
+  return isAntigravityTrustScreen(lines.slice(-TRUST_CONFIRMATION_TAIL_LINE_COUNT).join('\n'));
 }

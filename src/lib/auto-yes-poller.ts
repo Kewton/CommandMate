@@ -99,6 +99,7 @@ import {
 } from './polling/auto-yes-poller-state';
 import {
   suppressAndWarnOnce,
+  suppressAntigravityTrustScreen,
   suppressIfNotOursToAnswer,
   suppressUnclassifiedFrame,
   type JudgedPrompt,
@@ -1051,8 +1052,24 @@ export async function detectAndRespondToPrompt(
       forgetPartialAnswer(compositeKey);
       pollerState.lastAnsweredPromptKey = null;
       pollerState.lastAnsweredAt = null;
-      pollerState.lastSkipWarnKey = null;
       pollerState.enterFallbackCandidateKey = null;
+      // Issue #3757: agy's trust screen reads as no prompt (unnumbered: neither
+      // reader takes it), but it is one nobody here answers — record why, still
+      // as `no_prompt`. Before the warn key is cleared, so the WARN stays once
+      // per screen.
+      if (
+        cliToolId === 'antigravity' &&
+        suppressAntigravityTrustScreen(
+          worktreeId,
+          instanceId,
+          pollerState,
+          frame,
+          CLIToolManager.getInstance().getTool(cliToolId).getSessionName(worktreeId, instanceId),
+        )
+      ) {
+        return 'no_prompt';
+      }
+      pollerState.lastSkipWarnKey = null;
       if (cliToolId === 'antigravity' && !promptDetection.isPrompt) {
         logIfWithheldForWantOfReceipt(worktreeId, instanceId, compositeKey, () =>
           detectPromptOnCleanFrame(cleanOutput, cliToolId, precomputedLines, rawOutput),
