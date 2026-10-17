@@ -3,8 +3,10 @@
  *
  * Issue #3748: the browser's Auto-Yes fallback (`useAutoYes`, which answers only
  * while no server poller runs) leaves the `AskUserQuestion` confirm page to a
- * human, judged by the predicate the server's poller uses
- * (`polling/auto-yes-confirm-page`).
+ * human. It judges by the prompt's options (`polling/auto-yes-confirm-shape`):
+ * the server's frame predicates are server-only (they reach `logger` → `fs`
+ * and broke `next build`), so the hook takes no frame. Each case still names
+ * the screen it stands for.
  *
  * 陽性: Claude's `❯ 1. Submit answers` / `2. Cancel` page and Command Code's
  * `❯ 1. Submit` / `2. Cancel` page — no request. Before #3748 the hook posted
@@ -55,7 +57,8 @@ function submitCancel(submitLabel: string): PromptData {
   };
 }
 
-function render(cliTool: string, promptData: PromptData, frame?: string | null): void {
+/** `_frame`: the screen the prompt was read from — documentation only; the hook reads no frame. */
+function render(cliTool: string, promptData: PromptData, _frame?: string | null): void {
   renderHook(() =>
     useAutoYes({
       worktreeId: 'wt-3748',
@@ -64,7 +67,6 @@ function render(cliTool: string, promptData: PromptData, frame?: string | null):
       promptData,
       autoYesEnabled: true,
       serverPollerActive: false,
-      frame,
     }),
   );
 }

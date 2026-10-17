@@ -459,10 +459,6 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   const [lastServerResponseTimestamp, setLastServerResponseTimestamp] = useState<number | null>(null);
   // Issue #501: Track whether server-side auto-yes poller is active
   const [serverPollerActive, setServerPollerActive] = useState(false);
-  // Issue #3748: the frame a waiting prompt was read from, for useAutoYes's
-  // confirm-page check. Held only while a prompt waits, so a running agent's
-  // changing output does not re-render the page every poll.
-  const [autoYesPromptFrame, setAutoYesPromptFrame] = useState<string | null>(null);
   // Issue #2870: the status API's `promptAnswerable` for the prompt on show.
   // Kept beside the reducer's prompt slice rather than in it — this poll is the
   // only writer, and it rewrites it on every prompt it shows.
@@ -1014,9 +1010,6 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       // Issue #501: Update last server response timestamp for useAutoYes duplicate prevention
       setLastServerResponseTimestamp(data.lastServerResponseTimestamp ?? null);
       setServerPollerActive(data.serverPollerActive ?? false);
-      setAutoYesPromptFrame(
-        data.isPromptWaiting ? (data.fullOutput ?? data.realtimeSnippet ?? null) : null,
-      );
 
       // Update auto-yes state from server (Issue #314: stopReason tracking,
       // Issue #525: per-agent, Issue #896: per-instance).
@@ -1890,7 +1883,6 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     autoYesEnabled,
     lastServerResponseTimestamp,
     serverPollerActive,
-    frame: autoYesPromptFrame,
   });
 
   /** Retry loading all data after error */
