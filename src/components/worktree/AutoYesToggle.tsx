@@ -60,6 +60,13 @@ export interface AutoYesToggleProps {
    * do not know (the Sessions tile) render what they did.
    */
   blockedByContract?: boolean;
+  /**
+   * Issue #3730: OFF because the last server restart released the grant (the
+   * server reports `stopReason: 'server-restart'` until the grant's own
+   * deadline, or until it is turned on or off again). A label beside the OFF
+   * switch says so; nothing is re-enabled. Optional, false by default.
+   */
+  releasedByRestart?: boolean;
 }
 
 export const AutoYesToggle = memo(function AutoYesToggle({
@@ -72,6 +79,7 @@ export const AutoYesToggle = memo(function AutoYesToggle({
   showToolName = true,
   onExpire,
   blockedByContract = false,
+  releasedByRestart = false,
 }: AutoYesToggleProps) {
   const t = useTranslations('autoYes');
   const [timeRemaining, setTimeRemaining] = useState<string>('');
@@ -202,6 +210,17 @@ export const AutoYesToggle = memo(function AutoYesToggle({
           data-testid="auto-yes-blocked-by-contract"
         >
           {t('blockedByContract')}
+        </span>
+      )}
+
+      {/* Issue #3730: OFF because the server restarted, not because it was never on */}
+      {!displayEnabled && releasedByRestart && (
+        <span
+          className="text-xs font-medium text-warning-foreground"
+          title={t('releasedByRestartTitle')}
+          data-testid="auto-yes-released-by-restart"
+        >
+          {t('releasedByRestart')}
         </span>
       )}
 

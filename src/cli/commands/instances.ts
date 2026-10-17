@@ -56,6 +56,14 @@ type InstanceRow = {
    */
   autoYesBlockedByContract?: true;
   /**
+   * Issue #3730: Auto-Yes is off because the last server restart released this
+   * instance's grant — `AUTO_YES` reads `no(restart)`, one token, so the table
+   * still splits on whitespace. Present only then, for the reason
+   * `autoYesBlockedByContract` is: `--json` rows of every other instance stay
+   * the JSON they were.
+   */
+  autoYesStopReason?: 'server-restart';
+  /**
    * Issue #1785: what the server said this instance is running, or null.
    *
    * Verbatim. `cliTool` above answers "which agent", which the roster already
@@ -138,7 +146,9 @@ function formatInstancesTable(rows: InstanceRow[]): string {
     r.alias,
     r.cliTool,
     r.running ? 'yes' : 'no',
-    r.autoYes ? (r.autoYesBlockedByContract ? 'blocked' : 'yes') : 'no',
+    r.autoYes
+      ? (r.autoYesBlockedByContract ? 'blocked' : 'yes')
+      : (r.autoYesStopReason === 'server-restart' ? 'no(restart)' : 'no'),
     // Blank, not a placeholder: an unknown model is the ordinary state (the
     // session is stopped, the tool publishes none, the server restarted), and a
     // column of `-` reads like a value the reader has to look up.
@@ -391,7 +401,7 @@ async function fetchOpencodeSessions(
  * session's own reading, which is what this command printed before.
  */
 /** One instance's Auto-Yes as the state store reports it (Issue #3300 / #3723). */
-type ArmedAutoYes = { enabled: boolean; blockedByContract: boolean };
+type ArmedAutoYes = { enabled: boolean; blockedByContract: boolean; releasedByRestart: boolean };
 
 async function fetchArmedAutoYes(
   client: ApiClient,
@@ -406,7 +416,12 @@ async function fetchArmedAutoYes(
     return new Map(
       Object.entries(states).map(([instanceId, state]): [string, ArmedAutoYes] => {
         const enabled = state?.enabled === true;
-        return [instanceId, { enabled, blockedByContract: enabled && state?.blockedByContract === true }];
+        return [instanceId, {
+          enabled,
+          blockedByContract: enabled && state?.blockedByContract === true,
+          // Issue #3730: a server older than the field sends none — plain `no`.
+          releasedByRestart: !enabled && state?.stopReason === 'server-restart',
+        }];
       })
     );
   } catch {
@@ -481,6 +496,8 @@ async function listInstances(
         autoYes: entry?.enabled ?? false,
         // Issue #3723: only the state store says this, so only this path sets it.
         ...(entry?.blockedByContract ? { autoYesBlockedByContract: true as const } : {}),
+        // Issue #3730: likewise only the state store knows the restart took it.
+        ...(entry?.releasedByRestart ? { autoYesStopReason: 'server-restart' as const } : {}),
       };
     });
 

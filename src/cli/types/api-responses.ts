@@ -258,6 +258,13 @@ export interface CurrentOutputResponse {
   autoYes?: {
     enabled: boolean;
     expiresAt: number | null;
+    /**
+     * Mirrors: src/config/auto-yes-config.ts AutoYesStopReason. Typed as a
+     * string because a newer server may add a reason. Issue #3730:
+     * `server-restart` — Auto-Yes is off because the previous server process
+     * shut down while this grant was live; the grant is not restored, and the
+     * reason stays until the grant's own deadline or the next enable / disable.
+     */
     stopReason?: string;
     // Mirrors: src/lib/polling/auto-yes-suppression-state.ts AutoYesPolicySuppression
     // (Issue #1684). Non-null once the contract's autoYes policy withheld an
@@ -1348,7 +1355,16 @@ export interface AutoYesStatesResponse {
    * Issue #3723: `blockedByContract` is true when the instance is armed but its
    * contract says `autoYes.mode: 'off'`; omitted otherwise and by older servers.
    */
-  instances?: Record<string, { enabled: boolean; expiresAt: number | null; blockedByContract?: boolean }>;
+  instances?: Record<string, {
+    enabled: boolean;
+    expiresAt: number | null;
+    blockedByContract?: boolean;
+    /**
+     * Issue #3730: on a disabled instance, `server-restart` when the last
+     * server restart released its grant. Omitted otherwise and by older servers.
+     */
+    stopReason?: string;
+  }>;
 }
 
 /** wait exit 10 CLI extended output type */

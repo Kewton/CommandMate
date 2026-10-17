@@ -5,6 +5,8 @@
   "timeRemaining": "残り時間",
   "blockedByContract": "契約で停止中（mode: off）",
   "blockedByContractTitle": "実行中の契約が autoYes.mode: off を指定しているため、Auto Yes は ON でもこのセッションのプロンプトに応答しません。",
+  "releasedByRestart": "再起動で解除",
+  "releasedByRestartTitle": "サーバーの再起動で Auto Yes が解除されました（自動では戻りません）。必要なら ON にし直してください。元の許可の期限まで、または ON / OFF を操作するまで表示されます。",
   "enableTitle": "Auto Yesモードを有効にしますか？",
   "enableTitleWithTool": "Auto Yesモードを有効にしますか？（{toolName}）",
   "featureDescription": "機能説明",

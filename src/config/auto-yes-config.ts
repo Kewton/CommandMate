@@ -70,8 +70,68 @@ export const AUTO_STOP_ERROR_THRESHOLD = 20;
 // Stop Condition Types (Issue #314)
 // =============================================================================
 
-/** Reason why auto-yes was stopped (shared between server and client) */
-export type AutoYesStopReason = 'expired' | 'stop_pattern_matched' | 'consecutive_errors';
+/**
+ * Reason why auto-yes was stopped (shared between server and client).
+ *
+ * Issue #3730: `server-restart` is the one reason no running process decided.
+ * A graceful stop (SIGINT / SIGTERM) records which grants were live
+ * (`lib/auto-yes-shutdown-record`), and the next process seeds each still
+ * in-period one as a DISABLED state with this reason, so "turned off by the
+ * restart" reads differently from "never on". The grant itself is never
+ * restored. A SIGKILL or a crash records nothing, and every grant then comes
+ * back off with no reason, as before.
+ */
+export type AutoYesStopReason = 'expired' | 'stop_pattern_matched' | 'consecutive_errors' | 'server-restart';
+
+/**
+ * Why one Auto-Yes POLLER stopped, as `poller:stopped` logs it (Issue #3730).
+ *
+ * Not the same thing as {@link AutoYesStopReason}, which says why the GRANT
+ * ended: a poller is also stopped while its grant lives on (an ID move restarts
+ * it under the new key, a different CLI tool replaces it), so a poller reason
+ * never disables anything by itself.
+ *
+ * The lifecycle events keep their names (`lib/auto-yes-lifecycle`), except
+ * `server-shutdown`, which logs `shutdown` as it always has.
+ */
+export type AutoYesPollerStopReason =
+  /** The auto-yes route turned it off (one instance, one tool, or every agent). */
+  | 'manual'
+  /** A tick found the grant past its deadline. */
+  | 'expired'
+  /** A tick found the grant disabled for another reason, or gone. */
+  | 'not-enabled'
+  /** A tick's composite key names no known CLI tool. */
+  | 'invalid-key'
+  /** The stop pattern matched the agent's output. */
+  | 'stop-pattern'
+  | 'consecutive-errors'
+  | 'session-killed'
+  | 'instance-removed'
+  | 'worktree-deleted'
+  | 'orphan-swept'
+  | 'shutdown'
+  /** A worktree ID moved; the poller restarts under the new key (grant kept). */
+  | 'worktree-id-migrated'
+  /** A poller for a different CLI tool took the key over (grant kept). */
+  | 'replaced'
+  /** A test seam cleared every poller (`clearAllPollerStates`). */
+  | 'reset'
+  /** No caller said. Every production call site passes a reason; tests may not. */
+  | 'unspecified';
+
+/**
+ * Whether one instance's Auto-Yes reads "off, released by the last server
+ * restart" (Issue #3730): disabled, with `stopReason: 'server-restart'`.
+ * Shared by every surface that labels a toggle, so they cannot disagree.
+ *
+ * @param entry - The instance's state as a surface holds it, if any
+ */
+export function isReleasedByRestart(
+  entry: { enabled?: boolean; stopReason?: string } | null | undefined,
+): boolean {
+  return entry?.enabled !== true && entry?.stopReason === 'server-restart';
+}
 
 // =============================================================================
 // Stop Pattern Validation (Issue #314)

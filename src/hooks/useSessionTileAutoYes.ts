@@ -52,6 +52,7 @@ import { useOptionalWorktreesCacheContext } from '@/components/providers/Worktre
 import type { AutoYesInstanceSummary, AutoYesToggleParams } from '@/types/auto-yes';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import type { Worktree } from '@/types/models';
+import { isReleasedByRestart } from '@/config/auto-yes-config';
 
 /** What a tile with nothing armed reads. One object, so memoised readers stay stable. */
 export const AUTO_YES_OFF: Readonly<AutoYesInstanceSummary> = Object.freeze({
@@ -60,16 +61,34 @@ export const AUTO_YES_OFF: Readonly<AutoYesInstanceSummary> = Object.freeze({
 });
 
 /**
+ * What a tile whose grant the last server restart released reads
+ * (Issue #3730). One object, like {@link AUTO_YES_OFF}.
+ */
+export const AUTO_YES_RELEASED_BY_RESTART: Readonly<AutoYesInstanceSummary> = Object.freeze({
+  enabled: false,
+  expiresAt: null,
+  stopReason: 'server-restart',
+});
+
+/**
  * One instance's Auto-Yes as the list row carries it. Anything that is not an
  * enabled entry reads as off, so a malformed or absent value can never render
  * as a confident ON.
+ *
+ * Issue #3730: an OFF instance the row lists in `autoYesStopReasonByInstance`
+ * as `server-restart` reads as {@link AUTO_YES_RELEASED_BY_RESTART}, so the
+ * tile says why, as the worktree screen does. Any other value there is ignored.
  */
 export function readTileAutoYes(
-  worktree: Pick<Worktree, 'autoYesByInstance'>,
+  worktree: Pick<Worktree, 'autoYesByInstance' | 'autoYesStopReasonByInstance'>,
   instanceId: string,
 ): Readonly<AutoYesInstanceSummary> {
   const entry = worktree.autoYesByInstance?.[instanceId];
-  if (!entry || entry.enabled !== true) return AUTO_YES_OFF;
+  if (!entry || entry.enabled !== true) {
+    return worktree.autoYesStopReasonByInstance?.[instanceId] === 'server-restart'
+      ? AUTO_YES_RELEASED_BY_RESTART
+      : AUTO_YES_OFF;
+  }
   return {
     enabled: true,
     expiresAt: typeof entry.expiresAt === 'number' ? entry.expiresAt : null,
@@ -114,6 +133,8 @@ export interface UseSessionTileAutoYesOptions {
 export interface UseSessionTileAutoYesResult {
   enabled: boolean;
   expiresAt: number | null;
+  /** Issue #3730: OFF because the last server restart released the grant. */
+  releasedByRestart: boolean;
   /** `AutoYesToggle`'s `onToggle`. Never rejects. */
   toggle: (params: AutoYesToggleParams) => Promise<void>;
 }
@@ -189,7 +210,12 @@ export function useSessionTileAutoYes({
   );
 
   const shown = active ? active.value : stored;
-  return { enabled: shown.enabled, expiresAt: shown.expiresAt, toggle };
+  return {
+    enabled: shown.enabled,
+    expiresAt: shown.expiresAt,
+    releasedByRestart: isReleasedByRestart(shown),
+    toggle,
+  };
 }
 
 export default useSessionTileAutoYes;
