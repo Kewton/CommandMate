@@ -8,7 +8,10 @@
 
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+  beginStartupWindow,
   claimStartupTrust,
+  endStartupWindow,
+  isStartupWindowOpen,
   clearStartupTrust,
   forgetStartupTrust,
   holdStartupTrust,
@@ -54,5 +57,26 @@ describe('[#3756] the strict respond and the owed Enter', () => {
     claimStartupTrust(SESSION, 1_000);
     expect(wasStartupTrustClaimedWithin(SESSION, 10_000, 5_000)).toBe(true);
     expect(wasStartupTrustClaimedWithin(SESSION, 10_000, 11_000)).toBe(false);
+  });
+});
+
+describe('[#3770] the launch window is reference-counted', () => {
+  it('a window that closes first does not close the later one', () => {
+    beginStartupWindow(SESSION);
+    beginStartupWindow(SESSION);
+    endStartupWindow(SESSION);
+    expect(isStartupWindowOpen(SESSION)).toBe(true);
+    endStartupWindow(SESSION);
+    expect(isStartupWindowOpen(SESSION)).toBe(false);
+  });
+
+  it('negative control: one window opens and closes as before; an extra end is harmless', () => {
+    beginStartupWindow(SESSION);
+    expect(isStartupWindowOpen(SESSION)).toBe(true);
+    endStartupWindow(SESSION);
+    endStartupWindow(SESSION);
+    expect(isStartupWindowOpen(SESSION)).toBe(false);
+    beginStartupWindow(SESSION);
+    expect(isStartupWindowOpen(SESSION)).toBe(true);
   });
 });

@@ -148,13 +148,36 @@ export function autoYesHoldStartedAt(
   now: number,
 ): number {
   const key = buildCompositeKey(input.worktreeId, input.cliToolId, input.instanceId);
+  sweepStaleAutoYesHolds(now);
   let hold = autoYesHolds.get(key);
   if (hold === undefined || hold.since !== input.waitingSince) {
     hold = { since: input.waitingSince, firstHeldAt: now };
     autoYesHolds.set(key, hold);
   }
+  // Issue #3770: Auto-Yes switched off and on again inside one episode starts a
+  // fresh hold; the old origin would read the poller's silence while it was off
+  // as "did not answer".
+  const enabledAt = getAutoYesState(input.worktreeId, input.cliToolId, input.instanceId)?.enabledAt;
+  if (enabledAt !== undefined && enabledAt > hold.firstHeldAt && enabledAt <= now) hold.firstHeldAt = enabledAt;
   const lastAnswer = globalThis.__autoYesPollerStates?.get(key)?.lastServerResponseTimestamp ?? null;
   return lastAnswer !== null ? Math.max(hold.firstHeldAt, lastAnswer) : hold.firstHeldAt;
+}
+
+/** A hold older than this is dropped (Issue #3770): its episode is long over. */
+export const AUTO_YES_HOLD_MAX_AGE_MS = 60 * 60 * 1000;
+
+function sweepStaleAutoYesHolds(now: number): void {
+  for (const [key, hold] of autoYesHolds) {
+    if (now - hold.firstHeldAt >= AUTO_YES_HOLD_MAX_AGE_MS) autoYesHolds.delete(key);
+  }
+}
+
+/**
+ * Drop the hold of one session (Issue #3770): Auto-Yes went off, or the
+ * episode closed.
+ */
+export function forgetAutoYesHold(key: string): void {
+  autoYesHolds.delete(key);
 }
 
 /** Forget every hold. Test seam. */
@@ -270,6 +293,9 @@ export function decideAndLogPromptPush(
   options: { recheck?: boolean } = {},
 ): PromptPushGateDecision {
   let decision = decidePromptPush(input);
+  if (decision.reason === 'auto-yes-inactive') {
+    forgetAutoYesHold(buildCompositeKey(input.worktreeId, input.cliToolId, input.instanceId));
+  }
   // Issue #3757: only a wait that reached the hold gets an origin recorded.
   if (decision.reason === 'auto-yes-answering' && input.holdStartedAt === undefined) {
     const now = input.now ?? Date.now();
