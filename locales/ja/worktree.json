@@ -562,6 +562,7 @@
     "reasonDismissablePanel": "閉じるだけの画面です。下の画面を見ながら、ここで Esc を押せます。",
     "reasonUnclassified": "チャットでは種類を判別できない画面です。下にそのまま表示しているので、ここでキーを送って操作できます。",
     "reasonPromptUnreadable": "応答待ちですが選択肢を読み取れませんでした。下の画面を見て、番号か y／n で答えられます。",
+    "reasonTrustConfirmation": "端末で操作が必要です（信頼の確認）。このフォルダを信頼するかを答えるまで、エージェントは先へ進みません。Auto-Yes もこの確認には答えません。下の画面を見ながら、ここで矢印と決定キーを送るか、端末で答えてください。",
     "openTerminal": "ターミナルで確認",
     "jumpToLatest": "新着へ",
     "jumpToLatestGenerating": "新着へ（応答中）",
@@ -1168,6 +1169,9 @@
     "defaultWarning": "Enter はこの選択を新規セッションの既定として保存します。既定を変えずに切り替えるなら「このセッションのみ」を使ってください。",
     "opencodeToolbarLabel": "opencode のモデルキー",
     "opencodeCaption": "モデル"
+  },
+  "trustConfirmation": {
+    "notice": "端末で操作が必要です（信頼の確認）。このフォルダを信頼するかを答えるまで、エージェントは先へ進みません。Auto-Yes もこの確認には答えません。矢印で選んで決定キーを押すか、端末で答えてください。"
   },
   "newFileDialog": {
     "title": "新規ファイル",
