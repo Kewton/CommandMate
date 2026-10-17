@@ -283,7 +283,8 @@ const CONTRACT_POLICY_CAUSE = 'by contract policy';
  * `lib/hooks/permission-decision-service.ts` (both the four `evaluatePolicyAgainstTexts`
  * verdicts, which is why those four keep the pre-#1843 wording exactly), and
  * the poller's stopped-answer branch (`partial-answer`, Issue #3706 / #3713),
- * and the poller's agy trust-screen branch (`startup-trust-unhandled`, Issue #3757).
+ * and the poller's agy trust-screen branch (`startup-trust-unhandled`, Issue #3757),
+ * and the poller's question confirm-page branch (`question-confirm-page`, Issue #3748).
  */
 const SUPPRESSION_CAUSE: Record<AutoYesSuppressionReason, string> = {
   'mode-off': CONTRACT_POLICY_CAUSE,
@@ -304,6 +305,12 @@ const SUPPRESSION_CAUSE: Record<AutoYesSuppressionReason, string> = {
   // Auto-Yes's, and agy drew it after the launch window had ended.
   'startup-trust-unhandled':
     "because agy's startup folder-trust confirmation is the launch's to answer, not Auto-Yes's; the next send confirms it once, or answer it at the pane",
+  // Issue #3748. The AskUserQuestion confirm page (`Submit` / `Cancel`): the
+  // tool's own reader recognised it, and `Submit` commits whatever stands as the
+  // answers, so it waits for a human. Was recorded as `unclassified-frame`,
+  // whose wording above says the opposite (nothing recognised the frame).
+  'question-confirm-page':
+    "because the question's Submit/Cancel confirmation commits the answers as they stand, so Auto-Yes leaves it to a human",
 };
 
 /**

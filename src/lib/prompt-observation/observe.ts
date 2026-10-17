@@ -34,6 +34,7 @@ import { classifyScreen, type ClassifiedScreen } from './classify';
 import { isDecisionKind, PROMPT_OBSERVATION_SCHEMA_VERSION } from './kinds';
 import { issueObservationToken, observationTokenExpiresAt, type ObservationTokenBinding } from './token';
 import { screenFingerprint } from './appearance';
+import type { LastSendAttempt } from '@/lib/session/send-attempt-types';
 import type {
   PollerRecordScreenCorrelation,
   PromptObservation,
@@ -83,6 +84,8 @@ export interface ObservationInput {
    * appearance was first seen), `forget` for anything else.
    */
   appearance: { note: (fingerprint: string) => number; forget: () => void };
+  /** The instance's last send attempt (Issue #3759); omitted or null when none is recorded. */
+  lastSend?: LastSendAttempt | null;
   now: number;
 }
 
@@ -249,6 +252,7 @@ function evaluateContract(
 /** Build one observation. */
 export function buildPromptObservation(input: ObservationInput): PromptObservation {
   const { payload, now } = input;
+  const lastSend = input.lastSend ?? null;
   const target = {
     worktreeId: input.worktreeId,
     cliToolId: input.cliToolId,
@@ -312,5 +316,7 @@ export function buildPromptObservation(input: ObservationInput): PromptObservati
       pollerRecord: classified === null ? null : pollerRecordOf(payload, classified, now),
       contractEvaluation: evaluateContract(input, classified),
     },
+    // Published as at / state / reason only: the record's digest stays on the server.
+    lastSend: lastSend === null ? null : { at: lastSend.at, state: lastSend.state, reason: lastSend.reason },
   };
 }

@@ -105,6 +105,8 @@ describe('[#1843] AutoYesSuppressionReason cross-validation', () => {
       'partial-answer',
       // Issue #3757: agy's trust screen, left to the launch.
       'startup-trust-unhandled',
+      // Issue #3748: an AskUserQuestion confirm page, left to a human.
+      'question-confirm-page',
     ];
     const fromServer: ServerSuppressionReason[] = knownToCli;
     expect(new Set(fromServer).size).toBe(knownToCli.length);

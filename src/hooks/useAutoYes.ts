@@ -11,12 +11,18 @@
  * Issue #3331: `lastAutoResponse` is set only once the reply reads `answered`
  * (`readPromptResponseOutcome`), so a refused or failed answer is no longer
  * announced as "Auto responded".
+ *
+ * Issue #3748: an `AskUserQuestion` confirm page (`Submit` / `Cancel`) is left
+ * to a human here as it is on the server, judged by the prompt's options
+ * (`polling/auto-yes-confirm-shape`; the server's frame predicates are
+ * server-only).
  */
 
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
 import { resolveAutoAnswer } from '@/lib/polling/auto-yes-resolver';
+import { isConfirmPageShapedPrompt } from '@/lib/polling/auto-yes-confirm-shape';
 import { buildPromptResponseBody } from '@/lib/prompt-response-body-builder';
 import { generatePromptKey } from '@/lib/detection/prompt-key';
 import { isAnswerablePromptData } from '@/types/models';
@@ -139,6 +145,13 @@ export function useAutoYes({
     if (serverPollerActive) {
       return;
     }
+
+    // Issue #3748: the confirm page the server's poller leaves to a human
+    // (step 3.3 of `detectAndRespondToPrompt`, #3497) is left alone here too.
+    // `Submit` commits whatever stands as the answers; answering it from the
+    // browser undid the server's decline whenever no server poller ran. Judged
+    // by the options (`Submit` / `Cancel`), whatever the frame shows.
+    if (isConfirmPageShapedPrompt(promptData)) return;
 
     // Issue #138: Skip if server has responded recently (duplicate prevention fallback)
     if (lastServerResponseTimestamp) {

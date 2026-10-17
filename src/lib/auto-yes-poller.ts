@@ -102,6 +102,7 @@ import {
   suppressAntigravityTrustScreen,
   suppressIfNotOursToAnswer,
   suppressUnclassifiedFrame,
+  truncateForLog,
   type JudgedPrompt,
 } from './polling/auto-yes-prompt-suppression';
 
@@ -875,7 +876,19 @@ async function finishAnsweredPrompt(
     pollerState.lastSkipWarnKey = null;
   }
 
-  logger.info('poller:response-sent', { worktreeId, cliToolId, instanceId, sameSession });
+  // Issue #3748: what was answered and with what — the question (cut to
+  // MAX_LOGGED_QUESTION_LENGTH, never the full text) and the answer sent (the
+  // option number, `y`, or `[Enter]`) — so an answer that should not have been
+  // given can be told from the log alone.
+  logger.info('poller:response-sent', {
+    worktreeId,
+    cliToolId,
+    instanceId,
+    sameSession,
+    promptType: promptData.type,
+    question: truncateForLog(promptData.question),
+    answer,
+  });
 
   // Issue #1548: the prompt was answered without a human. Raised only after
   // the keys actually reached tmux, so a send that threw is not logged as an

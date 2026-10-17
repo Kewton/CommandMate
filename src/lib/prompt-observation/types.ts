@@ -5,14 +5,15 @@
  * its exit-10 payload as `observation`.
  *
  * Types only, and importable from the CLI for the reason `./kinds` gives: the
- * one import outside this directory (`polling/auto-yes-suppression-reason`) has
- * no imports of its own.
+ * two imports outside this directory (`polling/auto-yes-suppression-reason`,
+ * `session/send-attempt-types`) have no imports of their own.
  *
  * @module lib/prompt-observation/types
  */
 
 import type { PromptObservationKind } from './kinds';
 import type { AutoYesSuppressionReason } from '../polling/auto-yes-suppression-reason';
+import type { LastSendAttempt } from '../session/send-attempt-types';
 
 /** One option of the observed screen, in draw order. */
 export interface PromptObservationOption {
@@ -199,6 +200,14 @@ export interface PromptObservation {
   unavailableReason: 'session-not-running' | null;
   screen: PromptObservationScreen | null;
   autoYes: PromptObservationAutoYes;
+  /**
+   * How the last send to this instance ended (Issue #3759): `not-sent` (no key
+   * of the body was typed — resend it yourself), `sent`, or `indeterminate`
+   * (part of it may have been typed — do not resend before checking the pane).
+   * Nothing is resent automatically. Null when this server holds no record
+   * (none since it started); absent from a server older than the field.
+   */
+  lastSend?: LastSendAttempt | null;
 }
 
 /**

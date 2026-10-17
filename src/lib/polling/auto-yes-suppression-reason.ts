@@ -53,10 +53,23 @@ export type AutoYesSuppressionReason =
    * does not hold the wait as "Auto-Yes is answering" and `cmate wait` names
    * the screen instead of a session that has gone quiet.
    */
-  | 'startup-trust-unhandled';
+  | 'startup-trust-unhandled'
+  /**
+   * Issue #3748: an `AskUserQuestion` confirm page (`1. Submit` / `2. Cancel`
+   * on Command Code, `1. Submit answers` / `2. Cancel` on Claude) is on the
+   * pane. `Submit` picks nothing — it commits whatever stands as the answers —
+   * so Auto-Yes leaves it to a human (`polling/auto-yes-confirm-page`). Until
+   * #3748 Command Code's page (#3497) was recorded as `unclassified-frame`,
+   * whose wording in `cmate wait` says no detector recognised the frame — the
+   * opposite of what happened.
+   */
+  | 'question-confirm-page';
 
 /** Issue #3706: the reason the poller records for an answer stopped part-way. */
 export const PARTIAL_ANSWER_SUPPRESSION_REASON = 'partial-answer' satisfies AutoYesSuppressionReason;
 
 /** Issue #3757: the reason the poller records over agy's unanswered trust screen. */
 export const STARTUP_TRUST_UNHANDLED_SUPPRESSION_REASON = 'startup-trust-unhandled' satisfies AutoYesSuppressionReason;
+
+/** Issue #3748: the reason the poller records over an `AskUserQuestion` confirm page. */
+export const QUESTION_CONFIRM_PAGE_SUPPRESSION_REASON = 'question-confirm-page' satisfies AutoYesSuppressionReason;

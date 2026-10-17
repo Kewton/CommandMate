@@ -16,6 +16,7 @@ import { findClaudeChrome } from '../../prompt-detect-multiple-choice';
 import { positiveVerdict } from '../verdicts';
 import { STATUS_REASON } from '../../status-reason';
 import { detectClaudeDialog } from './prompt';
+import { findAskUserQuestionTabRow } from './picker-chrome';
 import { STATUS_CHECK_LINE_COUNT, liveRegionOf } from '../frame';
 import { CLAUDE_LIVE_REGION } from './live-region';
 import { createToolStatusDetector } from '../run-detection';
@@ -69,6 +70,65 @@ export function findClaudeTranscriptTail(contentLines: readonly string[]): numbe
     index--;
   }
   return index;
+}
+
+/** The confirmation page's question, as the whole row (Issue #3748). */
+const CLAUDE_SUBMIT_CONFIRM_QUESTION_ROW = /^\s*Ready to submit your answers\?\s*$/;
+/** Its option 1, as the whole row, cursor or not. */
+const CLAUDE_SUBMIT_ANSWERS_OPTION_ROW = /^\s*(?:❯\s*)?1\.\s+Submit answers\s*$/;
+/** Its option 2, as the whole row, cursor or not. */
+const CLAUDE_SUBMIT_CANCEL_OPTION_ROW = /^\s*(?:❯\s*)?2\.\s+Cancel\s*$/;
+/** The multi-question tab bar's `✔ Submit` tab — only that bar leads to this page. */
+const CLAUDE_SUBMIT_TAB_PATTERN = /✔\s*Submit/;
+/**
+ * How far above the question the tab bar may sit: the page lists every
+ * question and answer (`● …` / `→ …`) between them, wrapped at the pane width.
+ */
+const CLAUDE_SUBMIT_CONFIRM_TAB_LOOKBACK = 200;
+
+/** The nearest non-blank row above `row`, or -1. */
+function previousNonBlankRow(lines: readonly string[], row: number): number {
+  for (let i = row - 1; i >= 0; i--) {
+    if (lines[i].trim() !== '') return i;
+  }
+  return -1;
+}
+
+/**
+ * Is this frame Claude's `AskUserQuestion` confirmation page? (Issue #3748)
+ *
+ * Read strictly, row by row, from the end of the transcript up — all of:
+ *
+ *  1. the transcript's last row ({@link findClaudeTranscriptTail}, which steps
+ *     over Claude's chrome) is `2. Cancel`, the row above it `1. Submit
+ *     answers`, and the cursor `❯` is on one of the two;
+ *  2. the nearest non-blank row above the options IS `Ready to submit your
+ *     answers?` — the whole row, not a row that contains it;
+ *  3. the multi-question tab bar (`←  ☒ …  ✔ Submit  →`) sits above that.
+ *
+ * Deliberately NOT `detectClaudeDialog`'s `ask_user` kind: that classifies by a
+ * substring of the four rows above the options, so a Bash approval whose command
+ * is `grep -rn "review your answers" src`, an Edit approval whose diff holds
+ * the phrase, or a question that asks it read as this page — and Auto-Yes then
+ * left an ordinary `1. Yes` to a human. The dialog gate's reading is unchanged.
+ *
+ * `Submit answers` picks nothing — it commits whatever stands as the answers —
+ * so Auto-Yes leaves this page to a human, as it does Command Code's (#3497).
+ */
+export function isClaudeAskUserQuestionConfirmPage(frame: NormalizedFrame): boolean {
+  const lines = frame.contentLines;
+  const cancelRow = findClaudeTranscriptTail(lines);
+  if (cancelRow < 0 || !CLAUDE_SUBMIT_CANCEL_OPTION_ROW.test(lines[cancelRow])) return false;
+
+  const submitRow = cancelRow - 1;
+  if (submitRow < 0 || !CLAUDE_SUBMIT_ANSWERS_OPTION_ROW.test(lines[submitRow])) return false;
+  if (!lines[submitRow].includes('❯') && !lines[cancelRow].includes('❯')) return false;
+
+  const questionRow = previousNonBlankRow(lines, submitRow);
+  if (questionRow < 0 || !CLAUDE_SUBMIT_CONFIRM_QUESTION_ROW.test(lines[questionRow])) return false;
+
+  const tabRow = findAskUserQuestionTabRow(lines, questionRow, CLAUDE_SUBMIT_CONFIRM_TAB_LOOKBACK);
+  return tabRow >= 0 && CLAUDE_SUBMIT_TAB_PATTERN.test(lines[tabRow]);
 }
 
 /**

@@ -771,7 +771,10 @@ kind は `promptData.type` や `sessionStatusReason`（`antigravity_selection_li
 | `screen.answerVia` | 回答経路: `screen`（`respond` のキー送出）/ `api`（decision）/ `terminal`（今は `respond` で答えられない）/ `none` |
 | `autoYes.enabled` / `pollerActive` | Auto-Yes の有効状態 / サーバの poller が動いているか |
 | `autoYes.pollerRecord` | poller（または permission hook）が最後に「答えなかった」と記録したもの。`screenCorrelation` はこの画面との対応で、記録は画面を名指ししないため `unknown` / `type-mismatch` / `no-prompt-on-screen` のどれか |
-| `autoYes.contractEvaluation` | 契約の方針を**いま**この画面に当てた結果（`policy-withholds` + 理由 / `policy-permits` / `no-base-answer` / `not-evaluated`）。理由の語は `AutoYesSuppressionReason` と同じ |
+| `autoYes.contractEvaluation` | 契約の方針を**いま**この画面に当てた結果（`policy-withholds` + 理由 / `policy-permits` / `no-base-answer` / `not-evaluated`）。理由の語は `AutoYesSuppressionReason` と同じ（[理由語の表](#autoyeslastsuppression-ポリシー抑止の観測issue-1684)） |
+| `lastSend` | このインスタンスへの直近の send の結末（Issue #3759）。`{ at, state, reason }`。`state` は `not-sent`（本文のキーを 1 つも打つ前に失敗。例: `prompt-not-ready`）/ `sent`（送信を確かめた）/ `indeterminate`（一部を打った後に失敗、または結果を確かめられない。composer に本文が残っていれば `reason: composer-residue`）。サーバ起動後に記録が無ければ null、古いサーバでは項目自体が無い |
+
+**`lastSend` が何であっても、CommandMate は自動で再送しません。** 再送するのは利用者か監督のエージェントです。`not-sent` は自分で送り直してください（入力欄が戻ってから）。**`indeterminate` のときは再送しないでください。** 先に `commandmate capture <worktree-id> --pane` で画面を見て、本文が入力欄に残っていないか・既に送られていないかを確かめます（確かめずに送ると二重に届くことがあります）。`send` が `prompt not ready` などで失敗したときのエラーにも、同じ状態（`[send state: not-sent (prompt-not-ready): …]`）が書かれます。
 
 **記録が無いこと（`pollerRecord: null`）は「Auto-Yes が答えられる」という意味ではありません。** poller がその画面に届いていない場合も記録は残りません（Issue #3746）。
 `policy-permits` も「契約が止めない」だけで、poller の他の判定（ツール固有のダイアログ読み取り等）は含みません。
@@ -2059,6 +2062,17 @@ Auto-Yes が OFF の instance で、止まった理由があれば入ります�
 （`mode` は `null`）。worktree ID の移行でセッションが新しい ID へ移っても、この扱いは移った先で続きます。
 `commandmate wait` はこの理由に「because an earlier answer left partial input; Auto-Yes is waiting for a human」と
 表示します（exit 10 と JSON の `reason` は他の理由と同じ扱い）。入力欄に残った文字を確かめてから応答してください。
+
+型 `AutoYesSuppressionReason` の残りの語も、すべてポリシーの判定ではないので `mode` は `null` になることがあります。`commandmate wait` の表示の文言を添えます。
+
+| `reason` | 意味 | `commandmate wait` の表示 |
+|----------|------|--------------------------|
+| `agent-launch-dialog`（Issue #1829） | 画面の確認が CLI の起動の手順のダイアログ（信頼の確認など）で、その答えは道具自身の起動の手順に属するので Auto-Yes は答えない | 「while the agent's launch dialog was on screen」 |
+| `unclassified-frame`（Issue #1924） | 汎用の推定は番号付きの一覧を読んだが、その道具のダイアログ検出が確認と認めなかったので何も送らない。返答の中の番号付きの一覧に `1` と答える事故（#1896）を防ぐ位置 | 「because no tool-specific dialog detector recognised the frame」 |
+| `startup-trust-unhandled`（Issue #3757） | agy の起動時のフォルダ信頼の確認（`Do you trust the contents of this project?`）が画面にある。起動の手順の側が答えるもので、番号が無いので poller はプロンプトとして読めない。起動の窓が終わった後に出た場合は、次の send の準備待ちが答える | 「because agy's startup folder-trust confirmation is the launch's to answer, not Auto-Yes's; the next send confirms it once, or answer it at the pane」 |
+| `question-confirm-page`（Issue #3748） | Command Code と Claude の `AskUserQuestion` の確認画面（`Submit` / `Cancel`）。`Submit` は選択ではなくその時点の回答を確定するので、Auto-Yes は答えず人に任せる | 「because the question's Submit/Cancel confirmation commits the answers as they stand, so Auto-Yes leaves it to a human」 |
+
+[`commandmate prompt --json`](#commandmate-prompt) の `autoYes.pollerRecord`（poller の記録）と `autoYes.contractEvaluation`（契約の再評価）は別の項目ですが、どちらもこの表と上の `reason` と同じ語を使います。
 
 `isPromptWaiting: true` かつ `lastSuppression.at` が新しい場合、そのセッションは
 **いまポリシー抑止で停止**しています。`commandmate respond` で人間が応答するか、

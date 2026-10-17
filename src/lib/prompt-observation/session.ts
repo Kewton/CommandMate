@@ -9,6 +9,7 @@
 
 import { getAgentEventGenerationStartedAt } from '@/lib/session/agent-event-state';
 import { getSessionAutoYesPolicyEntry } from '@/lib/polling/auto-yes-policy';
+import { getLastSendAttempt } from '@/lib/session/send-attempt-state';
 import { forgetScreenAppearance, noteScreenAppearance } from './appearance';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { buildPromptObservation, type ObservationPayload } from './observe';
@@ -44,6 +45,7 @@ export function observeSession(
       note: (fingerprint) => noteScreenAppearance(instance, fingerprint, now),
       forget: () => forgetScreenAppearance(instance),
     },
+    lastSend: getLastSendAttempt(instance),
     now,
   });
 }
