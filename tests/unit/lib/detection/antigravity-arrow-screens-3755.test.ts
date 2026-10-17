@@ -50,6 +50,20 @@ describe('[#3755] readAntigravityArrowScreen over the 2364 corpus', () => {
     expect(readAntigravityArrowScreen(text)?.approvalTarget).toBe('/work/p');
   });
 
+  it('reads the trust screen with the cursor moved down to No', () => {
+    const text = frame('trust-dialog.txt')
+      .replace('> Yes, I trust this folder', '  Yes, I trust this folder')
+      .replace('  No, exit', '> No, exit');
+    const screen = readAntigravityArrowScreen(text);
+    expect(screen?.options).toEqual(['Yes, I trust this folder', 'No, exit']);
+    expect(screen?.selectedIndex).toBe(1);
+  });
+
+  it('reads the inline trust screen with the cursor on No (the block starts under the question)', () => {
+    const text = 'Do you trust the contents of this project?\n  Yes, I trust this folder\n> No, exit\n\n↑/↓ Navigate · enter Confirm';
+    expect(readAntigravityArrowScreen(text)).toMatchObject({ options: ['Yes, I trust this folder', 'No, exit'], selectedIndex: 1 });
+  });
+
   it('refuses a list with no highlighted row', () => {
     const text = 'Do you trust the contents of this project?\n  Yes, I trust this folder\n  No, exit\n\n↑/↓ Navigate · enter Confirm';
     expect(readAntigravityArrowScreen(text)).toBeNull();

@@ -103,6 +103,9 @@ export function formatPromptObservation(observation: PromptObservation, now: num
     const expiresIn =
       screen.tokenExpiresAt === null ? '' : ` (expires in ${Math.max(0, Math.round((screen.tokenExpiresAt - now) / 1000))}s)`;
     lines.push(`  token: ${screen.token}${expiresIn}`);
+  } else if (screen.tokenWithheld === 'unknown-screen' || screen.tokenWithheld === 'no-session-generation') {
+    // An older server sends no `tokenWithheld`; `no-decision` needs no line.
+    lines.push(`  token: none (${screen.tokenWithheld})`);
   }
 
   const enabled = autoYes.enabled === null ? 'unknown' : autoYes.enabled ? 'on' : 'off';
@@ -152,8 +155,10 @@ Exit codes:
   21  the instance has no running session: nothing to read
   1/2/99  infrastructure errors
 
-The token is short-lived and bound to the instance, the session generation,
-the pane and what the screen asks. Auto-Yes is reported as two separate items:
+The token is short-lived, single use, and bound to the instance, the session
+generation, the pane, this appearance of the screen, what it asks and the
+highlighted option. None is issued for unknown, or when the server did not
+start the running agent (tokenWithheld says which). Auto-Yes is reported as two separate items:
 the poller's last record (with how it relates to this screen) and the
 contract's policy re-evaluated now. A missing record does not mean Auto-Yes
 can answer.`,

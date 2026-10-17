@@ -131,15 +131,17 @@ function fromPromptData(promptData: LivePromptData | null | undefined): Omit<Cla
  * Classify one frame.
  *
  * Order: a measured reader of the tool → `unknown` when the status layer says
- * something waits → `composer` when the agent is at its input box (`ready`) →
- * `none`.
+ * something waits (a flag, or a `waiting` status with no flag set) → `composer`
+ * when the agent is at its input box (`ready`) → `none`.
  */
 export function classifyScreen(snapshot: ScreenSnapshot): ClassifiedScreen {
   if (snapshot.cliToolId === 'antigravity' && snapshot.fullOutput) {
     const measured = classifyAntigravity(snapshot.fullOutput);
     if (measured !== null) return measured;
   }
-  if (somethingWaits(snapshot)) return { kind: 'unknown', ...fromPromptData(snapshot.promptData) };
+  // `waiting` with every flag false is still something waiting on a human:
+  // never "nothing asks".
+  if (somethingWaits(snapshot) || snapshot.sessionStatus === 'waiting') return { kind: 'unknown', ...fromPromptData(snapshot.promptData) };
   if (snapshot.sessionStatus === 'ready') return { kind: 'composer', ...EMPTY };
   return { kind: 'none', ...EMPTY };
 }

@@ -133,14 +133,18 @@ function readTrust(lines: readonly string[], footer: number): AntigravityArrowSc
   }
   if (questionRow < 0) return null;
 
-  let first = -1;
+  let highlighted = -1;
   for (let i = questionRow + 1; i < footer; i++) {
     if (HIGHLIGHTED_ROW_PATTERN.test(lines[i])) {
-      first = i;
+      highlighted = i;
       break;
     }
   }
-  if (first < 0) return null;
+  if (highlighted < 0) return null;
+  // The option block runs up from the highlight to the blank row above it:
+  // the cursor may sit on any option, not only the first.
+  let first = highlighted;
+  while (first - 1 > questionRow && lines[first - 1].trim() !== '') first--;
   const read = readOptionRows(lines, first, footer);
   if (read === null) return null;
 

@@ -49,6 +49,8 @@ function observation(over: Partial<PromptObservation> = {}): PromptObservation {
       kind: 'antigravity-trust',
       token: 'po1.abc.' + 'A'.repeat(43),
       tokenExpiresAt: NOW + 120_000,
+      tokenWithheld: null,
+      appearedAt: NOW - 5_000,
       question: 'Do you trust the contents of this project?',
       approvalTarget: '/work/project',
       options: [
@@ -114,7 +116,7 @@ describe('[#3755] commandmate prompt', () => {
 
   it('exits 0 when nothing on screen asks (composer)', async () => {
     const composer = observation();
-    composer.screen = { ...composer.screen!, kind: 'composer', token: null, tokenExpiresAt: null, question: null, approvalTarget: null, options: [], selectedPosition: null, answerVia: 'none' };
+    composer.screen = { ...composer.screen!, kind: 'composer', token: null, tokenExpiresAt: null, tokenWithheld: 'no-decision', appearedAt: null, question: null, approvalTarget: null, options: [], selectedPosition: null, answerVia: 'none' };
     mockFetchSequence([{ data: frame(composer) }]);
     await runPrompt();
 
@@ -124,12 +126,13 @@ describe('[#3755] commandmate prompt', () => {
 
   it('exits 0 for unknown, and says so', async () => {
     const unknown = observation();
-    unknown.screen = { ...unknown.screen!, kind: 'unknown' };
+    unknown.screen = { ...unknown.screen!, kind: 'unknown', token: null, tokenExpiresAt: null, tokenWithheld: 'unknown-screen', appearedAt: null };
     mockFetchSequence([{ data: frame(unknown) }]);
     await runPrompt();
 
     expect(mockExit).toHaveBeenCalledWith(ExitCode.SUCCESS);
     expect(String(mockConsoleLog.mock.calls[0][0])).toContain('kind: unknown');
+    expect(String(mockConsoleLog.mock.calls[0][0])).toContain('token: none (unknown-screen)');
   });
 
   it('exits 21 when there is no running session to read', async () => {

@@ -402,7 +402,7 @@ esac
 }
 ```
 
-Since Issue #3755 the exit-10 JSON also carries `observation`: the same payload as [`commandmate prompt --json`](#commandmate-prompt), read off the capture the exit was decided on. Exit codes, holds and grace are unchanged. `autoYesSuppression` (a record under a minute old) keeps its meaning, but do not read the record's time alone as "why nobody answered" — read `pollerRecord` and `contractEvaluation` under `observation.autoYes`. An older server sends no `observation`.
+Since Issue #3755 the exit-10 JSON also carries `observation` (on the exit 10 of all three detection paths — prompt, selection list and unclassified screen, which are the only ones `wait` exits 10 from): the same payload as [`commandmate prompt --json`](#commandmate-prompt), read off the capture the exit was decided on. Exit codes, holds and grace are unchanged. `autoYesSuppression` (a record under a minute old) keeps its meaning, but do not read the record's time alone as "why nobody answered" — read `pollerRecord` and `contractEvaluation` under `observation.autoYes`. An older server sends no `observation`.
 
 ### The `type` field of exit 10
 
@@ -538,7 +538,9 @@ The kinds are a vocabulary of their own, separate from `promptData.type` and `se
 | `target` | What the server resolved (`worktreeId` / `cliToolId` / `instanceId` / `sessionName` = the pane / `resolvedBy`) |
 | `session.generation` | The agent process generation this server launched (epoch ms); null for one running since before a server restart |
 | `status` | `observed` (the screen was read, including when nothing asks) / `unavailable` (no running session) |
-| `screen.token` | The observation token. Short-lived (120 s) and bound to the instance, session generation, pane, kind, question, options and approval target. Null for `composer` / `none` |
+| `screen.token` | The observation token. Short-lived (120 s), single use, and bound to the instance, session generation, pane, appearance of the screen, kind, question, options, approval target and highlighted option. Null for `composer` / `none`, for `unknown`, and when the session generation is not known (an agent running since before a server restart). A screen that goes away and comes back with the same words between two observations counts as the same appearance |
+| `screen.tokenWithheld` | Why `token` is null: `no-decision` (nothing asks) / `unknown-screen` / `no-session-generation`. Null when a token was issued |
+| `screen.appearedAt` | When this appearance of the screen was first observed (epoch ms; bound by the token). Null with no token |
 | `screen.question` / `options` / `selectedPosition` / `approvalTarget` | Question, options (1-based), current selection, approval target |
 | `screen.answerVia` | How it is answered: `screen` (keys via `respond`) / `api` (a decision) / `terminal` (`respond` cannot answer it today) / `none` |
 | `autoYes.enabled` / `pollerActive` | Whether Auto-Yes is on / whether the server's poller runs |

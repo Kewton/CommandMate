@@ -9,6 +9,7 @@
 
 import { getAgentEventGenerationStartedAt } from '@/lib/session/agent-event-state';
 import { getSessionAutoYesPolicyEntry } from '@/lib/polling/auto-yes-policy';
+import { forgetScreenAppearance, noteScreenAppearance } from './appearance';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { buildPromptObservation, type ObservationPayload } from './observe';
 import type { PromptObservation } from './types';
@@ -32,14 +33,17 @@ export function observeSession(
 ): PromptObservation {
   // The poller's own lookup (Issue #3724: policy and task id in one read).
   const { policy, taskId } = getSessionAutoYesPolicyEntry(worktreeId, target.cliToolId, target.instanceId);
+  const instance = { worktreeId, cliToolId: target.cliToolId, instanceId: target.instanceId ?? target.cliToolId };
   return buildPromptObservation({
-    worktreeId,
-    cliToolId: target.cliToolId,
-    instanceId: target.instanceId ?? target.cliToolId,
+    ...instance,
     resolvedBy: target.resolvedBy ?? null,
     payload,
     sessionGeneration: getAgentEventGenerationStartedAt(worktreeId, target.cliToolId, target.instanceId),
     contract: { policy, taskId },
+    appearance: {
+      note: (fingerprint) => noteScreenAppearance(instance, fingerprint, now),
+      forget: () => forgetScreenAppearance(instance),
+    },
     now,
   });
 }

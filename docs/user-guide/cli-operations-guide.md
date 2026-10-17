@@ -513,7 +513,7 @@ esac
 }
 ```
 
-Issue #3755 以降、exit 10 の JSON には `observation` が加わります。中身は [`commandmate prompt --json`](#commandmate-prompt) と同じで、exit を決めた同じ capture から読んだものです。終了コード・待機・猶予は変わりません。`autoYesSuppression`（1 分以内の記録）は従来どおりですが、記録の時刻だけで「答えなかった理由」と読まず、`observation.autoYes` の `pollerRecord` と `contractEvaluation` を見てください。古いサーバでは `observation` は付きません。
+Issue #3755 以降、exit 10 の JSON には `observation` が加わります（プロンプト・選択リスト・未分類画面の 3 つの検出経路の exit 10 に付きます。`wait` が exit 10 を返すのはこの 3 経路だけです）。中身は [`commandmate prompt --json`](#commandmate-prompt) と同じで、exit を決めた同じ capture から読んだものです。終了コード・待機・猶予は変わりません。`autoYesSuppression`（1 分以内の記録）は従来どおりですが、記録の時刻だけで「答えなかった理由」と読まず、`observation.autoYes` の `pollerRecord` と `contractEvaluation` を見てください。古いサーバでは `observation` は付きません。
 
 ### exit 10 の `type`（種別）
 
@@ -762,7 +762,9 @@ kind は `promptData.type` や `sessionStatusReason`（`antigravity_selection_li
 | `target` | サーバが解決した対象（`worktreeId` / `cliToolId` / `instanceId` / `sessionName`＝pane / `resolvedBy`） |
 | `session.generation` | このサーバが起動したエージェントのプロセスの世代（epoch ms）。サーバ再起動前から動いているものは null |
 | `status` | `observed`（画面を読めた。確認なしも含む）/ `unavailable`（セッションが動いていない） |
-| `screen.token` | 観測トークン。短命（120 秒）で、instance・session 世代・pane・kind・質問・選択肢・承認対象に結び付く。`composer` / `none` では null |
+| `screen.token` | 観測トークン。短命（120 秒）・使い捨てで、instance・session 世代・pane・画面の出現・kind・質問・選択肢・承認対象・選択中の位置に結び付く。`composer` / `none`・`unknown`・session 世代が判らないとき（サーバ再起動前から動いているエージェント）は null。同じ文面の画面が観測と観測の間に消えて再び出た場合は、同じ出現と見なされる |
+| `screen.tokenWithheld` | `token` が null の理由。`no-decision`（何も尋ねていない）/ `unknown-screen` / `no-session-generation`。発行時は null |
+| `screen.appearedAt` | この画面の出現を最初に観測した時刻（epoch ms。トークンに結び付く）。トークンが無いときは null |
 | `screen.question` / `options` / `selectedPosition` / `approvalTarget` | 質問・選択肢（1 始まり）・現在の選択・承認対象 |
 | `screen.answerVia` | 回答経路: `screen`（`respond` のキー送出）/ `api`（decision）/ `terminal`（今は `respond` で答えられない）/ `none` |
 | `autoYes.enabled` / `pollerActive` | Auto-Yes の有効状態 / サーバの poller が動いているか |

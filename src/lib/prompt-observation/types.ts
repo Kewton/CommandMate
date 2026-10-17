@@ -1,8 +1,8 @@
 /**
  * The payload of one prompt observation (Issue #3755): what
- * `GET /api/worktrees/:id/prompt-observation` returns, what `commandmate prompt
- * --json` prints, and what `commandmate wait` adds to its exit-10 payload as
- * `observation`.
+ * `GET /api/worktrees/:id/current-output?observe=1` adds as `promptObservation`,
+ * what `commandmate prompt --json` prints, and what `commandmate wait` adds to
+ * its exit-10 payload as `observation`.
  *
  * Types only, and importable from the CLI for the reason `./kinds` gives: the
  * one import outside this directory (`polling/auto-yes-suppression-reason`) has
@@ -33,23 +33,50 @@ export type PromptObservationAnswerVia =
   /** There is nothing to answer (`composer` / `none`). */
   | 'none';
 
+/**
+ * Why a screen carries no token:
+ * - `no-decision`: nothing asks (`composer` / `none`)
+ * - `unknown-screen`: no measured reading names the screen; it is never
+ *   answered by token
+ * - `no-session-generation`: the server did not create the running agent (it
+ *   predates a restart), so the token could not be bound to a generation
+ */
+export type PromptObservationTokenWithheld = 'no-decision' | 'unknown-screen' | 'no-session-generation';
+
 /** What is on the screen, read once. */
 export interface PromptObservationScreen {
   kind: PromptObservationKind;
   /**
-   * The observation token (`./token`), or null for `composer` / `none`. Short
-   * lived, and bound to the instance, the session generation, the pane, the
-   * kind, the question, the options and the approval target — so a sender can
-   * prove the screen it answers is the screen it read.
+   * The observation token (`./token`), or null — see {@link tokenWithheld}.
+   * Short lived, single use, and bound to the instance, the session
+   * generation, the pane, this appearance of the screen, the kind, the
+   * question, the options, the approval target and the highlighted option —
+   * so a sender can prove the screen it answers is the screen it read.
+   *
+   * Known gap: a screen that goes away and comes back with the same words
+   * between two observations, with nothing observed in between, is the same
+   * appearance (`./appearance`), so a token from the first still verifies.
    */
   token: string | null;
   /** Epoch ms after which the token no longer verifies; null with no token. */
   tokenExpiresAt: number | null;
+  /** Why {@link token} is null; null when there is a token. */
+  tokenWithheld: PromptObservationTokenWithheld | null;
+  /**
+   * Epoch ms this appearance of the screen was first observed (bound by the
+   * token), or null when no token was issued.
+   */
+  appearedAt: number | null;
   /** The question as drawn, or null when the screen asks none. */
   question: string | null;
   /**
    * What the screen asks approval for: the folder on the trust screen, the
    * command block on a permission dialog. Null when the screen names none.
+   *
+   * A trust screen whose folder could not be read is still `antigravity-trust`,
+   * with `approvalTarget: null` (and the token binds that null). A sender that
+   * answers a trust screen (#3756) must require kind `antigravity-trust` AND an
+   * `approvalTarget` equal to the folder it expects — a null one never matches.
    */
   approvalTarget: string | null;
   options: PromptObservationOption[];

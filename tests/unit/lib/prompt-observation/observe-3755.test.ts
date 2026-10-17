@@ -16,8 +16,9 @@ import path from 'path';
 import { buildPromptObservation, type ObservationInput, type ObservationPayload } from '@/lib/prompt-observation/observe';
 import { classifyScreen } from '@/lib/prompt-observation/classify';
 import { PROMPT_OBSERVATION_KINDS, PROMPT_OBSERVATION_SCHEMA_VERSION } from '@/lib/prompt-observation/kinds';
-import { verifyObservationToken } from '@/lib/prompt-observation/token';
-import { observationTokenBinding } from '@/lib/prompt-observation/observe';
+import { consumeObservationToken, verifyObservationToken } from '@/lib/prompt-observation/token';
+import { forgetScreenAppearance, noteScreenAppearance } from '@/lib/prompt-observation/appearance';
+import { observationBindingOf, observationTokenBinding } from '@/lib/prompt-observation/observe';
 import { detectSessionStatus } from '@/lib/detection/status-detector';
 import { STATUS_REASON } from '@/lib/detection/status-reason';
 import type { AutoYesPolicySuppression } from '@/lib/polling/auto-yes-suppression-state';
@@ -68,8 +69,20 @@ function input(over: Partial<ObservationInput> = {}, payloadOver: Partial<Observ
     payload: payload(payloadOver),
     sessionGeneration: NOW - 60_000,
     contract: { policy: null, taskId: null },
+    appearance: { note: () => APPEARED_AT, forget: () => {} },
     now: NOW,
     ...over,
+  };
+}
+
+const APPEARED_AT = NOW - 5_000;
+
+/** The server's own appearance tracker, for one instance of its own. */
+function tracked(instanceId: string): ObservationInput['appearance'] {
+  const instance = { worktreeId: 'wt-1', cliToolId: 'antigravity', instanceId };
+  return {
+    note: (fingerprint) => noteScreenAppearance(instance, fingerprint, Date.now()),
+    forget: () => forgetScreenAppearance(instance),
   };
 }
 
@@ -120,12 +133,20 @@ describe('[#3755] the trust screen (positive case)', () => {
     const observation = buildPromptObservation(input());
     const token = observation.screen?.token as string;
     const binding = observationTokenBinding(
-      { worktreeId: 'wt-1', cliToolId: 'antigravity', instanceId: 'antigravity', sessionGeneration: NOW - 60_000, sessionName: 'mcbd-antigravity-wt-1' },
+      {
+        worktreeId: 'wt-1',
+        cliToolId: 'antigravity',
+        instanceId: 'antigravity',
+        sessionGeneration: NOW - 60_000,
+        sessionName: 'mcbd-antigravity-wt-1',
+        screenAppearedAt: APPEARED_AT,
+      },
       {
         kind: 'antigravity-trust',
         question: 'Do you trust the contents of this project?',
         options: ['Yes, I trust this folder', 'No, exit'],
         approvalTarget: FOLDER_3746,
+        selectedIndex: 0,
       },
     );
     expect(verifyObservationToken(token, binding, NOW + 1000)).toEqual({ ok: true, issuedAt: NOW });
@@ -234,7 +255,21 @@ describe('[#3755] unmeasured screens are unknown', () => {
       }),
     );
     expect(observation.screen?.kind).toBe('unknown');
-    expect(observation.screen?.token).toMatch(/^po1\./);
+    // unknown is never answered by token.
+    expect(observation.screen?.token).toBeNull();
+    expect(observation.screen?.tokenWithheld).toBe('unknown-screen');
+  });
+
+  it('a waiting status with no flag set is unknown, not "nothing asks"', () => {
+    const screen = buildPromptObservation(
+      input({ cliToolId: 'codex', instanceId: 'codex' }, {
+        fullOutput: 'anything',
+        sessionStatus: 'waiting',
+        isSelectionListActive: false,
+      }),
+    ).screen;
+    expect(screen?.kind).toBe('unknown');
+    expect(screen?.token).toBeNull();
   });
 
   it('a parsed prompt of a tool with no measured kind: unknown, with what the prompt says', () => {
@@ -354,5 +389,91 @@ describe('[#3755] the poller record and the contract re-evaluation are separate 
     expect(observation.autoYes.contractEvaluation.state).toBe('not-evaluated');
     expect(observation.autoYes.contractEvaluation).toMatchObject({ because: 'no-parsed-prompt' });
     expect(observation.autoYes.pollerActive).toBe(true);
+  });
+});
+
+describe('[#3755] what the token binds beyond the words: cursor, appearance, generation', () => {
+  /** The trust screen with the cursor moved down to `No, exit`. */
+  const TRUST_ON_NO = TRUST_3746
+    .replace('> Yes, I trust this folder', '  Yes, I trust this folder')
+    .replace('  No, exit', '> No, exit');
+  const COMPOSER_FRAME = { fullOutput: COMPOSER, sessionStatus: 'ready', isSelectionListActive: false };
+
+  /** Verify `token` the way #3756 does: against the binding of a fresh observation. */
+  function verifyAgainst(token: string, fresh: ReturnType<typeof buildPromptObservation>, now: number) {
+    const binding = observationBindingOf(fresh);
+    expect(binding).not.toBeNull();
+    return verifyObservationToken(token, binding!, now);
+  }
+
+  it('control: a fresh observation of the same appearance verifies the token', () => {
+    const appearance = tracked('control');
+    const read = buildPromptObservation(input({ instanceId: 'control', appearance }));
+    const fresh = buildPromptObservation(input({ instanceId: 'control', appearance, now: NOW + 1000 }));
+    expect(fresh.screen?.appearedAt).toBe(read.screen?.appearedAt);
+    expect(verifyAgainst(read.screen!.token!, fresh, NOW + 1000)).toEqual({ ok: true, issuedAt: NOW });
+  });
+
+  it('M1: a token read with the cursor on Yes does not verify once the cursor moved to No', () => {
+    const appearance = tracked('m1');
+    const read = buildPromptObservation(input({ instanceId: 'm1', appearance }));
+    const moved = buildPromptObservation(
+      input({ instanceId: 'm1', appearance, now: NOW + 1000 }, { fullOutput: TRUST_ON_NO }),
+    );
+    expect(read.screen?.selectedPosition).toBe(1);
+    expect(moved.screen?.selectedPosition).toBe(2);
+    // Moving the cursor is the same appearance; only the highlight differs.
+    expect(moved.screen?.appearedAt).toBe(read.screen?.appearedAt);
+    expect(verifyAgainst(read.screen!.token!, moved, NOW + 1000)).toEqual({ ok: false, reason: 'mismatch' });
+  });
+
+  it('M2: the same words after the screen went away are a new appearance, and the old token fails', () => {
+    const appearance = tracked('m2');
+    const instance = { worktreeId: 'wt-1', cliToolId: 'antigravity', instanceId: 'm2' };
+    forgetScreenAppearance(instance);
+    let clock = 1_000;
+    const tick = (): number => (clock += 1_000);
+    const at = (now: number): ObservationInput['appearance'] => ({
+      note: (fingerprint) => noteScreenAppearance(instance, fingerprint, now),
+      forget: appearance.forget,
+    });
+
+    const t1 = NOW + tick();
+    const read = buildPromptObservation(input({ instanceId: 'm2', appearance: at(t1), now: t1 }));
+    const t2 = NOW + tick();
+    buildPromptObservation(input({ instanceId: 'm2', appearance: at(t2), now: t2 }, COMPOSER_FRAME));
+    const t3 = NOW + tick();
+    const back = buildPromptObservation(input({ instanceId: 'm2', appearance: at(t3), now: t3 }));
+
+    expect(back.screen?.question).toBe(read.screen?.question);
+    expect(back.screen?.options).toEqual(read.screen?.options);
+    expect(back.screen?.appearedAt).toBe(t3);
+    expect(read.screen?.appearedAt).toBe(t1);
+    expect(verifyAgainst(read.screen!.token!, back, t3)).toEqual({ ok: false, reason: 'mismatch' });
+  });
+
+  it('M2: a token answers once', () => {
+    const appearance = tracked('once');
+    const read = buildPromptObservation(input({ instanceId: 'once', appearance }));
+    const fresh = buildPromptObservation(input({ instanceId: 'once', appearance, now: NOW + 1000 }));
+    const binding = observationBindingOf(fresh)!;
+    expect(consumeObservationToken(read.screen!.token!, binding, NOW + 1000)).toEqual({ ok: true, issuedAt: NOW });
+    expect(consumeObservationToken(read.screen!.token!, binding, NOW + 1500)).toEqual({ ok: false, reason: 'consumed' });
+  });
+
+  it('M3: no token without a session generation, and the reason is published', () => {
+    const observation = buildPromptObservation(input({ sessionGeneration: null }));
+    expect(observation.screen?.kind).toBe('antigravity-trust');
+    expect(observation.screen?.token).toBeNull();
+    expect(observation.screen?.tokenExpiresAt).toBeNull();
+    expect(observation.screen?.tokenWithheld).toBe('no-session-generation');
+    expect(observationBindingOf(observation)).toBeNull();
+  });
+
+  it('publishes tokenWithheld null with a token, and no-decision when nothing asks', () => {
+    expect(buildPromptObservation(input()).screen?.tokenWithheld).toBeNull();
+    const composer = buildPromptObservation(input({}, COMPOSER_FRAME)).screen;
+    expect(composer?.tokenWithheld).toBe('no-decision');
+    expect(composer?.appearedAt).toBeNull();
   });
 });

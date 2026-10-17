@@ -16,6 +16,13 @@
  * alone; neither item here says that, and a missing record is published as a
  * missing record — not as "Auto-Yes can answer".
  *
+ * ## When a token is issued
+ *
+ * Only on a decision screen with a measured kind (not `unknown`, which no
+ * sender may answer by token) of a session whose generation is known — every
+ * field the token binds must be a fact. Otherwise `token` is null and
+ * `tokenWithheld` says why.
+ *
  * @module lib/prompt-observation/observe
  */
 
@@ -26,6 +33,7 @@ import { isAnswerablePromptData } from '@/types/models';
 import { classifyScreen, type ClassifiedScreen } from './classify';
 import { isDecisionKind, PROMPT_OBSERVATION_SCHEMA_VERSION } from './kinds';
 import { issueObservationToken, observationTokenExpiresAt, type ObservationTokenBinding } from './token';
+import { screenFingerprint } from './appearance';
 import type {
   PollerRecordScreenCorrelation,
   PromptObservation,
@@ -34,6 +42,7 @@ import type {
   PromptObservationContractEvaluation,
   PromptObservationPollerRecord,
   PromptObservationScreen,
+  PromptObservationTokenWithheld,
 } from './types';
 
 /** The `current-output` fields an observation reads. */
@@ -67,15 +76,24 @@ export interface ObservationInput {
   sessionGeneration: number | null;
   /** The contract governing the instance, as the poller's policy cache reads it. */
   contract: { policy: AutoYesPolicy | null; taskId: string | null };
+  /**
+   * The instance's screen appearances (`./appearance`), bound to this
+   * instance. Exactly one of the two is called per observation: `note` with
+   * the fingerprint of a screen a token is issued for (returns when that
+   * appearance was first seen), `forget` for anything else.
+   */
+  appearance: { note: (fingerprint: string) => number; forget: () => void };
   now: number;
 }
 
 /** The token binding of an observed screen — what #3756 rebuilds to verify a token. */
 export function observationTokenBinding(
-  input: Pick<ObservationInput, 'worktreeId' | 'cliToolId' | 'instanceId' | 'sessionGeneration'> & {
+  input: Pick<ObservationInput, 'worktreeId' | 'cliToolId' | 'instanceId'> & {
     sessionName: string;
+    sessionGeneration: number;
+    screenAppearedAt: number;
   },
-  screen: Pick<ClassifiedScreen, 'kind' | 'question' | 'options' | 'approvalTarget'>
+  screen: Pick<ClassifiedScreen, 'kind' | 'question' | 'options' | 'approvalTarget' | 'selectedIndex'>
 ): ObservationTokenBinding {
   return {
     worktreeId: input.worktreeId,
@@ -83,11 +101,80 @@ export function observationTokenBinding(
     instanceId: input.instanceId,
     sessionName: input.sessionName,
     sessionGeneration: input.sessionGeneration,
+    screenAppearedAt: input.screenAppearedAt,
     kind: screen.kind,
     question: screen.question,
     options: screen.options,
     approvalTarget: screen.approvalTarget,
+    selectedPosition: screen.selectedIndex >= 0 ? screen.selectedIndex + 1 : null,
   };
+}
+
+/** Why no token is issued for this screen, or null when one is. */
+function tokenWithheldFor(
+  classified: ClassifiedScreen,
+  sessionGeneration: number | null
+): PromptObservationTokenWithheld | null {
+  if (!isDecisionKind(classified.kind)) return 'no-decision';
+  if (classified.kind === 'unknown') return 'unknown-screen';
+  if (sessionGeneration === null) return 'no-session-generation';
+  return null;
+}
+
+/** The token for an observed screen, recording its appearance either way. */
+function tokenFor(
+  input: ObservationInput,
+  classified: ClassifiedScreen | null
+): {
+  token: string | null;
+  tokenWithheld: PromptObservationTokenWithheld | null;
+  appearedAt: number | null;
+} {
+  const tokenWithheld = classified === null ? null : tokenWithheldFor(classified, input.sessionGeneration);
+  const sessionGeneration = input.sessionGeneration;
+  if (classified === null || tokenWithheld !== null || sessionGeneration === null) {
+    // Anything but a tokened screen ends the appearance of the last one.
+    input.appearance.forget();
+    return { token: null, tokenWithheld, appearedAt: null };
+  }
+  const sessionName = input.payload.sessionName;
+  const screenAppearedAt = input.appearance.note(
+    screenFingerprint({ sessionName, sessionGeneration, ...classified })
+  );
+  const binding = observationTokenBinding(
+    { ...input, sessionName, sessionGeneration, screenAppearedAt },
+    classified
+  );
+  return { token: issueObservationToken(binding, input.now), tokenWithheld: null, appearedAt: screenAppearedAt };
+}
+
+/**
+ * The token binding of a published observation, or null when it carries no
+ * token. This is what #3756 rebuilds from a FRESH observation to verify (and
+ * consume) the token a sender presents.
+ */
+export function observationBindingOf(observation: PromptObservation): ObservationTokenBinding | null {
+  const { screen, target, session } = observation;
+  if (screen === null || screen.token === null || screen.appearedAt === null || session.generation === null) {
+    return null;
+  }
+  return observationTokenBinding(
+    {
+      worktreeId: target.worktreeId,
+      cliToolId: target.cliToolId,
+      instanceId: target.instanceId,
+      sessionName: target.sessionName,
+      sessionGeneration: session.generation,
+      screenAppearedAt: screen.appearedAt,
+    },
+    {
+      kind: screen.kind,
+      question: screen.question,
+      options: screen.options.map(option => option.label),
+      approvalTarget: screen.approvalTarget,
+      selectedIndex: screen.selectedPosition === null ? -1 : screen.selectedPosition - 1,
+    }
+  );
 }
 
 /** How the screen is answered today; `none` when nothing asks. */
@@ -189,18 +276,15 @@ export function buildPromptObservation(input: ObservationInput): PromptObservati
       })
     : null;
 
+  const { token, tokenWithheld, appearedAt } = tokenFor(input, classified);
   let screen: PromptObservationScreen | null = null;
   if (classified !== null) {
-    const token = isDecisionKind(classified.kind)
-      ? issueObservationToken(
-          observationTokenBinding({ ...input, sessionName: payload.sessionName }, classified),
-          now
-        )
-      : null;
     screen = {
       kind: classified.kind,
       token,
       tokenExpiresAt: token === null ? null : observationTokenExpiresAt(now),
+      tokenWithheld,
+      appearedAt,
       question: classified.question,
       approvalTarget: classified.approvalTarget,
       options: classified.options.map((label, index) => ({ position: index + 1, label })),

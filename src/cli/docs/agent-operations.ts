@@ -354,7 +354,10 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
   Observe, once, the screen an agent is stopped on (Issue #3755): its kind,
   question, options, current selection, approval target, how it is answered,
   a short-lived observation token, and Auto-Yes as two separate items -- the
-  poller's last record and the contract's policy re-evaluated now.
+  poller's last record and the contract's policy re-evaluated now. The token
+  is single use and bound to this appearance of the screen and its highlighted
+  option; none is issued for unknown or when the session generation is not
+  known ("tokenWithheld" says which).
 
   Kinds: antigravity-trust, antigravity-model-picker, antigravity-permission,
   antigravity-slash-menu, composer / none (nothing asks), unknown (something

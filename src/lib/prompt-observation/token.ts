@@ -6,12 +6,23 @@
  * ## What it binds
  *
  * The instance (worktree, tool, instance), the session generation, the pane
- * (tmux session name), and what the screen asks: its kind, question, option
- * labels and approval target. A sender that presents the token with its answer
+ * (tmux session name), which appearance of the screen it is (`./appearance`),
+ * and what the screen asks: its kind, question, option labels, approval target
+ * and the highlighted option. A sender that presents the token with its answer
  * is checked against a FRESH observation of the same instance — if any of those
  * changed (the trust screen became a command approval, the agent was
- * relaunched, the option list moved) the token does not verify, and the answer
- * is not sent to a screen the sender never read (#3746 P4-1).
+ * relaunched, the option list moved, the cursor moved to `No`, the screen went
+ * away and came back) the token does not verify, and the answer is not sent to
+ * a screen the sender never read (#3746 P4-1).
+ *
+ * A token is issued only when every one of those is known: never for `unknown`
+ * and never without a session generation (`./observe`).
+ *
+ * ## Single use
+ *
+ * {@link consumeObservationToken} is the entry a sender's answer goes through:
+ * it verifies, then records the token as used, so a second answer with the same
+ * token is refused even while the screen is unchanged.
  *
  * ## Structure
  *
@@ -38,6 +49,12 @@ const ISSUED_AT_FUTURE_TOLERANCE_MS = 5_000;
 
 const TOKEN_PREFIX = 'po1';
 
+/** Longer than any token this module issues (about 56 characters); refused before parsing. */
+const TOKEN_MAX_LENGTH = 80;
+
+/** How many used, unexpired tokens are remembered at once. */
+const MAX_CONSUMED_TOKENS = 4096;
+
 /** What a token is bound to. Rebuilt from a fresh observation on verification. */
 export interface ObservationTokenBinding {
   worktreeId: string;
@@ -45,17 +62,31 @@ export interface ObservationTokenBinding {
   instanceId: string;
   /** tmux session name the frame was read from. */
   sessionName: string;
-  /** Epoch ms of the session generation, or null when the server knows none. */
-  sessionGeneration: number | null;
+  /** Epoch ms of the session generation. No token is issued without one. */
+  sessionGeneration: number;
+  /** Epoch ms this appearance of the screen was first observed (`./appearance`). */
+  screenAppearedAt: number;
   kind: string;
   question: string | null;
   /** Option labels, in draw order. */
   options: readonly string[];
   approvalTarget: string | null;
+  /** 1-based position of the highlighted option, or null when none is. */
+  selectedPosition: number | null;
 }
 
-/** Why a token did not verify. */
-export type ObservationTokenRejection = 'malformed' | 'expired' | 'not-yet-valid' | 'mismatch';
+/**
+ * Why a token did not verify. `consumed`: it already answered once.
+ * `consumed-store-full`: too many live tokens were used to remember one more,
+ * so it is refused rather than accepted unrecorded.
+ */
+export type ObservationTokenRejection =
+  | 'malformed'
+  | 'expired'
+  | 'not-yet-valid'
+  | 'mismatch'
+  | 'consumed'
+  | 'consumed-store-full';
 
 export type ObservationTokenVerdict =
   | { ok: true; issuedAt: number }
@@ -68,9 +99,14 @@ export type ObservationTokenVerdict =
 declare global {
   // eslint-disable-next-line no-var
   var __promptObservationTokenSecret: { value: Buffer } | undefined;
+  // eslint-disable-next-line no-var
+  var __promptObservationConsumedTokens: Map<string, number> | undefined;
 }
 
 const secret = getOrInitGlobal('__promptObservationTokenSecret', () => ({ value: randomBytes(32) }));
+
+/** Used tokens → the epoch ms they expire at (after which they are forgotten). */
+const consumed = getOrInitGlobal('__promptObservationConsumedTokens', () => new Map<string, number>());
 
 /** The binding in one fixed, unambiguous form (JSON of an array, so no field can bleed into another). */
 function canonical(binding: ObservationTokenBinding, issuedAt: number): string {
@@ -81,10 +117,12 @@ function canonical(binding: ObservationTokenBinding, issuedAt: number): string {
     binding.instanceId,
     binding.sessionName,
     binding.sessionGeneration,
+    binding.screenAppearedAt,
     binding.kind,
     binding.question,
     [...binding.options],
     binding.approvalTarget,
+    binding.selectedPosition,
     issuedAt,
   ]);
 }
@@ -122,16 +160,21 @@ export function verifyObservationToken(
   binding: ObservationTokenBinding,
   now: number = Date.now()
 ): ObservationTokenVerdict {
-  if (typeof token !== 'string') return { ok: false, reason: 'malformed' };
+  if (typeof token !== 'string' || token.length > TOKEN_MAX_LENGTH) return { ok: false, reason: 'malformed' };
   const parts = token.split('.');
   if (parts.length !== 3 || parts[0] !== TOKEN_PREFIX) return { ok: false, reason: 'malformed' };
   if (!/^[0-9a-z]{1,12}$/.test(parts[1]) || !/^[A-Za-z0-9_-]{43}$/.test(parts[2])) {
     return { ok: false, reason: 'malformed' };
   }
   const issuedAt = parseInt(parts[1], 36);
-  if (!Number.isSafeInteger(issuedAt)) return { ok: false, reason: 'malformed' };
-
+  // Only the one spelling this module issues: no leading zeros, no MAC whose
+  // unused trailing bits differ — so one token has one string (the used set).
+  if (!Number.isSafeInteger(issuedAt) || issuedAt.toString(36) !== parts[1]) {
+    return { ok: false, reason: 'malformed' };
+  }
   const presented = Buffer.from(parts[2], 'base64url');
+  if (presented.toString('base64url') !== parts[2]) return { ok: false, reason: 'malformed' };
+
   const expected = mac(binding, issuedAt);
   if (presented.length !== expected.length || !timingSafeEqual(presented, expected)) {
     return { ok: false, reason: 'mismatch' };
@@ -139,4 +182,32 @@ export function verifyObservationToken(
   if (issuedAt - now > ISSUED_AT_FUTURE_TOLERANCE_MS) return { ok: false, reason: 'not-yet-valid' };
   if (now >= observationTokenExpiresAt(issuedAt)) return { ok: false, reason: 'expired' };
   return { ok: true, issuedAt };
+}
+
+/** Forget used tokens that have expired; they no longer verify anyway. */
+function sweepConsumed(now: number): void {
+  for (const [token, expiresAt] of consumed) {
+    if (now >= expiresAt) consumed.delete(token);
+  }
+}
+
+/**
+ * Verify a token and use it up: the entry a sender's answer goes through
+ * (#3756). A token that verifies once is refused as `consumed` from then on,
+ * until it would have expired anyway.
+ *
+ * @param now - Epoch ms; defaults to now
+ */
+export function consumeObservationToken(
+  token: string,
+  binding: ObservationTokenBinding,
+  now: number = Date.now()
+): ObservationTokenVerdict {
+  const verdict = verifyObservationToken(token, binding, now);
+  if (!verdict.ok) return verdict;
+  sweepConsumed(now);
+  if (consumed.has(token)) return { ok: false, reason: 'consumed' };
+  if (consumed.size >= MAX_CONSUMED_TOKENS) return { ok: false, reason: 'consumed-store-full' };
+  consumed.set(token, observationTokenExpiresAt(verdict.issuedAt));
+  return verdict;
 }

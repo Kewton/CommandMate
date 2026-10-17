@@ -154,14 +154,24 @@ export async function GET(
         : ({ ...payload, agentMode, detector: { staleness } } satisfies CurrentOutputResponseBody);
 
     // Issue #3755: read off THIS payload, so the observation and the verdict
-    // `wait` decides its exit on are one capture, not two.
+    // `wait` decides its exit on are one capture, not two. An observation that
+    // fails is left off, never the payload: `wait` polls through here, and a
+    // body without the field is what an older server sends.
     if (url.searchParams.get('observe') === '1') {
-      const promptObservation = observeSession(
-        id,
-        { cliToolId: target.cliToolId, instanceId: target.instanceId, resolvedBy: target.resolvedBy },
-        payload,
-      );
-      return NextResponse.json({ ...body, promptObservation }, { status: 200 });
+      try {
+        const promptObservation = observeSession(
+          id,
+          { cliToolId: target.cliToolId, instanceId: target.instanceId, resolvedBy: target.resolvedBy },
+          payload,
+        );
+        return NextResponse.json({ ...body, promptObservation }, { status: 200 });
+      } catch (error: unknown) {
+        // The message only: the frame is not logged.
+        logger.warn('prompt-observation-failed:', {
+          worktreeId: id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
     }
 
     return NextResponse.json(body, { status: 200 });
