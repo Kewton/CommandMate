@@ -110,6 +110,32 @@ function localResult(
   };
 }
 
+/**
+ * Error codes of a connection that was never made: the request cannot have
+ * reached the server. A reset, a socket closed by the other side or a timeout
+ * after connecting are not among them.
+ */
+const NEVER_CONNECTED_CODES = new Set([
+  'ECONNREFUSED',
+  'ENOTFOUND',
+  'EAI_AGAIN',
+  'EHOSTUNREACH',
+  'ENETUNREACH',
+  'UND_ERR_CONNECT_TIMEOUT',
+]);
+
+/** Whether `fetch` failed before any connection was established. */
+export function neverConnected(transportError: unknown): boolean {
+  let current: unknown = transportError;
+  // `fetch failed` carries the socket error as its `cause` (undici), sometimes one level deeper.
+  for (let depth = 0; depth < 3 && typeof current === 'object' && current !== null; depth++) {
+    const code = (current as { code?: unknown }).code;
+    if (typeof code === 'string' && NEVER_CONNECTED_CODES.has(code)) return true;
+    current = (current as { cause?: unknown }).cause;
+  }
+  return false;
+}
+
 /** Whether an error body came from the strict route itself (an older server's 404 has no marker). */
 function fromStrictRoute(error: ApiError): boolean {
   return (error.payload as Record<string, unknown> | undefined)?.strictRespond === 1;
@@ -132,7 +158,17 @@ function verdictOfApiError(error: ApiError, options: RespondOptions, operationId
     return localResult(options, operationId, 40, 'session_conflict', `Nothing was sent: ${error.message}`);
   }
   if (status !== undefined && status >= 400 && status < 500) return null;
-  // A 5xx, or no answer at all: the request may have been carried out.
+  if (status === undefined && neverConnected(error.transportError)) {
+    return localResult(
+      options,
+      operationId,
+      40,
+      'server_unreachable',
+      `The server could not be reached (${error.message}); the request never left this machine, so nothing was sent.`,
+    );
+  }
+  // A 5xx, a connection that broke after it was made, or an answer that is not
+  // JSON: the request may have been carried out.
   return localResult(
     options,
     operationId,

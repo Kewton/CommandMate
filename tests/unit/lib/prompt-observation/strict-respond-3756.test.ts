@@ -51,6 +51,7 @@ interface FakePane {
   failKey: boolean;
   windowOpen: boolean;
   claimedRecently: boolean;
+  autoYes: boolean;
   holds: number;
   releases: number;
   discarded: number;
@@ -115,6 +116,7 @@ function deps(): StrictRespondDeps {
       pane.clock += ms;
     },
     now: () => pane.clock,
+    autoYesActive: () => pane.autoYes,
     startup: {
       isWindowOpen: () => pane.windowOpen,
       claimedWithin: () => pane.claimedRecently,
@@ -178,6 +180,7 @@ beforeEach(() => {
     failKey: false,
     windowOpen: false,
     claimedRecently: false,
+    autoYes: false,
     holds: 0,
     releases: 0,
     discarded: 0,
@@ -216,7 +219,23 @@ describe('[#3756] the trust screen (positive case)', () => {
     const result = await respondStrictly(request({ answer: 'No' }), deps());
 
     expect(pane.keys).toEqual(['Down', 'Enter']);
-    expect(result).toMatchObject({ code: 0, answer: { position: 2, label: 'No, exit' }, outcome: 'advanced' });
+    // agy exits on "No, exit": success, but not read as "moved on".
+    expect(result).toMatchObject({ code: 0, answer: { position: 2, label: 'No, exit' }, outcome: 'session-ended' });
+  });
+
+  it('drops the launch\'s owed Enter only after its own Enter, never on a refusal', async () => {
+    let discardedBeforeEnter = -1;
+    pane.onKey = (key, frame) => {
+      if (key === 'Enter') discardedBeforeEnter = pane.discarded;
+      return trustKeys(key, frame);
+    };
+    await respondStrictly(request(), deps());
+    expect(discardedBeforeEnter).toBe(0);
+    expect(pane.discarded).toBe(1);
+
+    pane.frame = TRUST;
+    expect(await respondStrictly(request({ expectTarget: '/elsewhere' }), deps())).toMatchObject({ code: 40 });
+    expect(pane.discarded).toBe(1);
   });
 });
 
@@ -318,6 +337,36 @@ describe('[#3756] nothing is sent when the screen does not match (exit 40)', () 
   });
 });
 
+describe('[#3756] Auto-Yes and the permission dialog', () => {
+  it('a permission dialog is refused while Auto-Yes is on, with nothing sent', async () => {
+    pane.frame = PERMISSION;
+    pane.autoYes = true;
+    const result = await respondStrictly(
+      request({ expectScreen: 'antigravity-permission', observationToken: tokenNow(), expectTarget: null }),
+      deps()
+    );
+    expect(result).toMatchObject({ code: 40, reason: 'auto_yes_active', observedKind: 'antigravity-permission' });
+    expect(pane.keys).toEqual([]);
+  });
+
+  it('the same permission answer goes through with Auto-Yes off (negative control)', async () => {
+    pane.frame = PERMISSION;
+    pane.onKey = () => COMPOSER;
+    const result = await respondStrictly(
+      request({ expectScreen: 'antigravity-permission', observationToken: tokenNow(), expectTarget: null }),
+      deps()
+    );
+    expect(result).toMatchObject({ code: 0, answer: { position: 1, label: 'Yes' } });
+    expect(pane.keys).toEqual(['Enter']);
+  });
+
+  it('the trust screen, which Auto-Yes never answers, is answered with Auto-Yes on', async () => {
+    pane.autoYes = true;
+    expect(await respondStrictly(request(), deps())).toMatchObject({ code: 0, outcome: 'advanced' });
+    expect(pane.keys).toEqual(['Enter']);
+  });
+});
+
 describe('[#3756] once a key is sent, failures are exit 41', () => {
   it('stops before the Enter when the screen changes after the arrow', async () => {
     pane.onKey = (key) => (key === 'Down' ? PERMISSION : COMPOSER);
@@ -363,10 +412,58 @@ describe('[#3756] operation ids', () => {
   it('a retry with the same operation id returns the stored result and sends nothing', async () => {
     const first = request();
     const answered = await respondStrictly(first, deps());
-    const retried = await respondStrictly({ ...first, observationToken: 'po1.x.y' }, deps());
+    const retried = await respondStrictly(first, deps());
 
     expect(pane.keys).toEqual(['Enter']);
     expect(retried).toEqual({ ...answered, replayed: true });
+  });
+
+  it('the same id with another token, answer or instance is not read as the first one', async () => {
+    const first = request();
+    await respondStrictly(first, deps());
+    expect(pane.keys).toEqual(['Enter']);
+
+    for (const other of [{ observationToken: 'po1.x.y' }, { answer: 'No' }, { expectTarget: '/elsewhere' }]) {
+      const conflict = await respondStrictly({ ...first, ...other }, deps());
+      expect(conflict).toMatchObject({ code: 41, reason: 'operation_id_conflict', keysSent: 0, replayed: false });
+    }
+    expect(pane.keys).toEqual(['Enter']);
+
+    // Another instance's session: its own operation, run (and refused here on its own merits).
+    const elsewhere = await respondStrictly({ ...first, sessionName: 'mcbd-antigravity-wt-3756-2' }, deps());
+    expect(elsewhere.replayed).toBe(false);
+    expect(elsewhere.reason).not.toBe('operation_id_conflict');
+  });
+
+  it('a refusal (exit 40) is not kept: the same id can be sent again with a corrected answer', async () => {
+    const token = tokenNow();
+    const first = request({ observationToken: token, answer: '1' });
+    expect(await respondStrictly(first, deps())).toMatchObject({ code: 40, reason: 'number_on_unnumbered_screen' });
+    // Corrected answer, same id: a new request, not a conflict with a remembered one.
+    const corrected = await respondStrictly({ ...first, answer: 'Yes' }, deps());
+    expect(corrected).toMatchObject({ code: 0, replayed: false });
+    expect(pane.keys).toEqual(['Enter']);
+  });
+
+  it('running operations are never forgotten to make room: a full table refuses the new one', async () => {
+    pane.failCapture = false;
+    let unblock: () => void = () => {};
+    const blocked = new Promise<void>((resolve) => {
+      unblock = resolve;
+    });
+    const stalled: StrictRespondDeps = { ...deps(), read: async () => (await blocked, deps().read()) };
+    const running = Array.from({ length: 1024 }, (_, i) =>
+      respondStrictly(request({ sessionName: `s-${i}`, operationId: `op-full-${i}` }), stalled)
+    );
+    const extra = await respondStrictly(request({ operationId: 'op-full-extra' }), deps());
+    expect(extra).toMatchObject({ code: 41, reason: 'operation_table_full', keysSent: 0 });
+
+    // The first of the running ones still refuses a duplicate.
+    expect(
+      await respondStrictly(request({ sessionName: 's-0', operationId: 'op-full-0' }), deps())
+    ).toMatchObject({ reason: expect.stringMatching(/operation_in_progress|operation_id_conflict/) });
+    unblock();
+    await Promise.all(running);
   });
 
   it('a duplicate that arrives while the first still runs is exit 41 and sends nothing', async () => {

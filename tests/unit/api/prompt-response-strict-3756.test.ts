@@ -106,11 +106,13 @@ import { captureSessionOutputFresh, sendSessionAnswerKey } from '@/lib/session/c
 import { applyEventToActiveTask } from '@/lib/tasks/task-transition-service';
 import { clearStrictRespondState } from '@/lib/prompt-observation/strict-respond';
 import type { CurrentOutputPayload } from '@/lib/session/current-output-types';
+import { clearAllAutoYesStates, setAutoYesEnabled } from '@/lib/auto-yes-state';
 
 const FIXTURES = path.resolve(__dirname, '../../fixtures');
 const read = (rel: string): string => readFileSync(path.join(FIXTURES, rel), 'utf8');
 const TRUST = read('prompt-observation-3755/antigravity-trust.txt');
 const COMPOSER = read('antigravity-live-2364/boot-idle.txt');
+const PERMISSION = read('antigravity-live-2364/dialog-bash-oneline.txt');
 const PLAN_REVIEW = read('command-code-plan-review-3125/plan-review-1-74-0-initial.txt');
 const FOLDER = '/Users/agy-user/share/work/github_kewton/CommandAgent-issue-643-tools-bash-cd-next-js-id-635-637';
 
@@ -149,6 +151,7 @@ async function body(over: Record<string, unknown> = {}): Promise<Record<string, 
 beforeEach(async () => {
   vi.clearAllMocks();
   clearStrictRespondState();
+  clearAllAutoYesStates();
   WT = `wt-3756-route-${++worktreeSeq}`;
   const db = new Database(':memory:');
   runMigrations(db);
@@ -194,6 +197,30 @@ describe('[#3756] the strict endpoint answers the trust screen', () => {
     expect(payload?.reason).toContain('agent:wt-orchestrator/claude');
     expect(payload?.reason).toContain('"Yes, I trust this folder"');
     expect(payload?.reason).toContain(FOLDER);
+  });
+});
+
+describe('[#3756] Auto-Yes and an answer cut short', () => {
+  it("refuses a permission dialog while the instance's Auto-Yes is on", async () => {
+    frames.current = PERMISSION;
+    setAutoYesEnabled(WT, 'antigravity', true);
+    const result = await (
+      await post(await body({ expectScreen: 'antigravity-permission', expectTarget: undefined }))
+    ).json();
+
+    expect(result).toMatchObject({ code: 40, reason: 'auto_yes_active' });
+    expect(sendSessionAnswerKey).not.toHaveBeenCalled();
+  });
+
+  it('an answer stopped after a key is still written to the task history, with its reason', async () => {
+    // The arrow reaches tmux and the highlight never moves: stopped before the Enter.
+    const result = await (await post(await body({ answer: 'No' }))).json();
+
+    expect(result).toMatchObject({ code: 41, reason: 'highlight_not_reached', keysSent: 1, outcome: null });
+    expect(applyEventToActiveTask).toHaveBeenCalledTimes(1);
+    const payload = vi.mocked(applyEventToActiveTask).mock.calls[0][5];
+    expect(payload?.reason).toContain('highlight_not_reached');
+    expect(payload?.reason).toContain('"No, exit"');
   });
 });
 

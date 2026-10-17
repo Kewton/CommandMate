@@ -18,14 +18,22 @@
  * caller must not send them again.
  *
  * After the Enter the screen is read for a few seconds to say what it did
- * (`StrictRespondOutcome`); only `advanced` and `next-prompt` are success. A
+ * (`StrictRespondOutcome`); only `advanced`, `next-prompt` and `session-ended`
+ * are success. A
  * screen that stayed is never answered again from here.
  *
  * ## Serialised, and deduplicated
  *
- * Strict answers to one session run one at a time. A request whose operation
- * id was already used is answered with the stored result and sends nothing;
- * one whose first request is still running is exit 41.
+ * Strict answers to one session run one at a time. Operation ids are kept per
+ * worktree and session, with what the request asked: a reused id that asks the
+ * same is answered with the stored result and sends nothing (one whose first
+ * request is still running is exit 41); one that asks something else is exit
+ * 41 `operation_id_conflict`. A refusal (exit 40) is not kept, so the id can be
+ * sent again with a corrected answer.
+ *
+ * Auto-Yes on the instance refuses a permission dialog (`auto_yes_active`): its
+ * poller answers those itself, and an Enter of ours could land on the dialog
+ * it brings up next. The trust screen it never answers.
  *
  * ## What it cannot rule out
  *
@@ -80,6 +88,11 @@ export interface StrictRespondDeps {
   sendKey(key: 'Up' | 'Down' | 'Enter'): Promise<void>;
   sleep(ms: number): Promise<void>;
   now(): number;
+  /**
+   * Whether the instance's Auto-Yes is on. Its poller answers permission
+   * dialogs on its own, so a strict answer to one could race it.
+   */
+  autoYesActive(): boolean;
   /** The launch's owed trust Enter for this session (`cli-tools/antigravity-startup-trust`). */
   startup: {
     isWindowOpen(): boolean;
@@ -107,14 +120,19 @@ declare global {
   // eslint-disable-next-line no-var
   var __strictRespondSessionTails: Map<string, Promise<void>> | undefined;
   // eslint-disable-next-line no-var
-  var __strictRespondOperations: Map<string, { at: number; result: StrictRespondResult | null }> | undefined;
+  var __strictRespondOperations: Map<string, OperationEntry> | undefined;
+}
+
+/** One remembered operation: what was asked, and its result once it has one. */
+interface OperationEntry {
+  at: number;
+  /** {@link requestFingerprint} of the request that took the id. */
+  fingerprint: string;
+  result: StrictRespondResult | null;
 }
 
 const sessionTails = getOrInitGlobal('__strictRespondSessionTails', () => new Map<string, Promise<void>>());
-const operations = getOrInitGlobal(
-  '__strictRespondOperations',
-  () => new Map<string, { at: number; result: StrictRespondResult | null }>()
-);
+const operations = getOrInitGlobal('__strictRespondOperations', () => new Map<string, OperationEntry>());
 
 const MESSAGES: Record<StrictRespondReason, string> = {
   session_not_running: 'The instance has no running session.',
@@ -146,6 +164,11 @@ const MESSAGES: Record<StrictRespondReason, string> = {
   outcome_unchanged: 'The Enter was sent and the same screen is still up.',
   outcome_indeterminate: 'The Enter was sent and what the screen did could not be read.',
   operation_in_progress: 'A request with this operation id is still running.',
+  operation_id_conflict: 'This operation id was already used for another request; nothing was sent for this one.',
+  operation_table_full: 'Too many strict answers are running to take one more; nothing was sent.',
+  auto_yes_active:
+    'Auto-Yes is on for this instance and answers permission dialogs itself: disable it first (commandmate auto-yes <id> --disable).',
+  server_unreachable: 'The server could not be reached.',
   strict_endpoint_missing: 'The server has no strict respond endpoint.',
   session_conflict: 'The session belongs to another server.',
   response_unknown: "The server's answer was lost.",
@@ -174,7 +197,12 @@ function resultOf(
     code,
     delivery,
     reason,
-    message: reason === null ? `Answered: the screen ${outcome}.` : MESSAGES[reason],
+    message:
+      reason !== null
+        ? MESSAGES[reason]
+        : outcome === 'session-ended'
+          ? 'Answered: the session ended (agy exits on "No, exit").'
+          : `Answered: the screen ${outcome === 'next-prompt' ? 'moved to the next prompt' : 'advanced'}.`,
     expectedKind: request.expectScreen,
     observedKind: facts.observedKind,
     expectedTarget: request.expectTarget,
@@ -218,7 +246,7 @@ async function awaitHighlight(
 function outcomeOf(read: StrictScreenRead, binding: ObservationTokenBinding): StrictRespondOutcome {
   if (!read.ok) return 'indeterminate';
   const { observation } = read;
-  if (observation.status === 'unavailable' || observation.screen === null) return 'advanced';
+  if (observation.status === 'unavailable' || observation.screen === null) return 'session-ended';
   const kind = observation.screen.kind;
   if (!isDecisionKind(kind)) return 'advanced';
   if (sameAppearance(binding, observationBindingOf(observation))) return 'unchanged';
@@ -226,14 +254,19 @@ function outcomeOf(read: StrictScreenRead, binding: ObservationTokenBinding): St
   return 'next-prompt';
 }
 
-/** Read for a few seconds after the Enter; the first `advanced` / `next-prompt` ends it. */
+/** The outcomes that are success: the screen did what an answer does. */
+function isAnsweredOutcome(outcome: StrictRespondOutcome): boolean {
+  return outcome === 'advanced' || outcome === 'next-prompt' || outcome === 'session-ended';
+}
+
+/** Read for a few seconds after the Enter; the first answered outcome ends it. */
 async function awaitOutcome(deps: StrictRespondDeps, binding: ObservationTokenBinding): Promise<StrictRespondOutcome> {
   const deadline = deps.now() + STRICT_OUTCOME_WAIT_MS;
   let outcome: StrictRespondOutcome = 'indeterminate';
   for (;;) {
     await deps.sleep(STRICT_READ_INTERVAL_MS);
     outcome = outcomeOf(await deps.read(), binding);
-    if (outcome === 'advanced' || outcome === 'next-prompt') return outcome;
+    if (isAnsweredOutcome(outcome)) return outcome;
     if (deps.now() >= deadline) return outcome;
   }
 }
@@ -277,6 +310,8 @@ async function checkBeforeSending(
   if (!isScreenOpenAtBottom(frame)) return { refused: 'screen_not_open' };
   if (deps.startup.isWindowOpen()) return { refused: 'startup_window_open' };
   if (deps.startup.claimedWithin(STRICT_STARTUP_CLAIM_QUIET_MS)) return { refused: 'startup_trust_in_flight' };
+  // The poller answers permission dialogs itself; the trust screen it never answers.
+  if (screen.kind === 'antigravity-permission' && deps.autoYesActive()) return { refused: 'auto_yes_active' };
 
   // Last, so a refusal above leaves the token for a corrected answer; consumed
   // here, before any key, so a failed send has still used it (fail closed).
@@ -302,9 +337,6 @@ async function answerStrictly(request: StrictRespondRequest, deps: StrictRespond
   const { binding, selectedIndex, targetIndex } = checked;
   const release = deps.startup.hold();
   try {
-    // This answer is the trust screen's: the launch owes it no Enter any more.
-    if (request.expectScreen === 'antigravity-trust') deps.startup.discardDebt();
-
     const keys = strictAnswerKeys(selectedIndex, targetIndex);
     for (let i = 0; i < keys.length; i++) {
       if (i > 0) {
@@ -313,6 +345,9 @@ async function answerStrictly(request: StrictRespondRequest, deps: StrictRespond
         const stopped = await awaitHighlight(deps, binding, position);
         if (stopped !== null) return resultOf(facts, 41, stopped);
         if (deps.startup.isWindowOpen()) return resultOf(facts, 41, 'screen_moved_mid_send');
+        if (request.expectScreen === 'antigravity-permission' && deps.autoYesActive()) {
+          return resultOf(facts, 41, 'auto_yes_active');
+        }
       }
       try {
         await deps.sendKey(keys[i]);
@@ -320,6 +355,11 @@ async function answerStrictly(request: StrictRespondRequest, deps: StrictRespond
         // tmux may have delivered it: counted, so this is never "not sent".
         facts.keysSent++;
         return resultOf(facts, 41, 'send_failed');
+      } finally {
+        // The Enter went (or may have gone) to the trust screen: the launch
+        // owes it none any more. Dropped only now — while held, the launch
+        // could not claim it anyway.
+        if (keys[i] === 'Enter' && request.expectScreen === 'antigravity-trust') deps.startup.discardDebt();
       }
       facts.keysSent++;
     }
@@ -328,7 +368,7 @@ async function answerStrictly(request: StrictRespondRequest, deps: StrictRespond
   }
 
   const outcome = await awaitOutcome(deps, binding);
-  if (outcome === 'advanced' || outcome === 'next-prompt') return resultOf(facts, 0, null, outcome);
+  if (isAnsweredOutcome(outcome)) return resultOf(facts, 0, null, outcome);
   return resultOf(facts, 41, outcome === 'unchanged' ? 'outcome_unchanged' : 'outcome_indeterminate', outcome);
 }
 
@@ -350,15 +390,25 @@ async function withSessionLock<T>(sessionName: string, fn: () => Promise<T>): Pr
   }
 }
 
-function forgetOldOperations(now: number): void {
+/**
+ * Forget expired results, then — oldest first — finished ones until there is
+ * room for one more. A running operation is never forgotten: its id must keep
+ * refusing a second send. False when running ones alone fill the table.
+ */
+function makeRoomForOperation(now: number): boolean {
   for (const [key, entry] of operations) {
-    if (now - entry.at >= STRICT_OPERATION_TTL_MS && entry.result !== null) operations.delete(key);
+    if (entry.result !== null && now - entry.at >= STRICT_OPERATION_TTL_MS) operations.delete(key);
   }
-  while (operations.size > MAX_REMEMBERED_OPERATIONS) {
-    const oldest = operations.keys().next().value;
-    if (oldest === undefined) break;
-    operations.delete(oldest);
+  for (const [key, entry] of operations) {
+    if (operations.size < MAX_REMEMBERED_OPERATIONS) break;
+    if (entry.result !== null) operations.delete(key);
   }
+  return operations.size < MAX_REMEMBERED_OPERATIONS;
+}
+
+/** What a request asks: a reused operation id must ask the same, or it is another request. */
+function requestFingerprint(request: StrictRespondRequest): string {
+  return JSON.stringify([request.expectScreen, request.answer, request.observationToken, request.expectTarget]);
 }
 
 /**
@@ -369,20 +419,21 @@ export async function respondStrictly(
   request: StrictRespondRequest,
   deps: StrictRespondDeps
 ): Promise<StrictRespondResult> {
-  const key = JSON.stringify([request.worktreeId, request.operationId]);
+  // The session is in the key: one id sent to two instances is two operations.
+  const key = JSON.stringify([request.worktreeId, request.sessionName, request.operationId]);
+  const fingerprint = requestFingerprint(request);
   const now = deps.now();
-  forgetOldOperations(now);
+  const nothingYet = (reason: StrictRespondReason): StrictRespondResult =>
+    resultOf({ request, observedKind: null, observedTarget: null, answer: null, keysSent: 0 }, 41, reason);
   const earlier = operations.get(key);
   if (earlier !== undefined) {
+    if (earlier.fingerprint !== fingerprint) return nothingYet('operation_id_conflict');
     if (earlier.result !== null) return { ...earlier.result, replayed: true };
-    return resultOf(
-      { request, observedKind: null, observedTarget: null, answer: null, keysSent: 0 },
-      41,
-      'operation_in_progress'
-    );
+    return nothingYet('operation_in_progress');
   }
+  if (!makeRoomForOperation(now)) return nothingYet('operation_table_full');
   // Recorded before the first await, so a concurrent duplicate sees it.
-  operations.set(key, { at: now, result: null });
+  operations.set(key, { at: now, fingerprint, result: null });
   let result: StrictRespondResult;
   try {
     result = await withSessionLock(request.sessionName, () => answerStrictly(request, deps));
@@ -395,7 +446,11 @@ export async function respondStrictly(
       'outcome_indeterminate'
     );
   }
-  operations.set(key, { at: deps.now(), result });
+  // A refusal sent nothing and is not kept: the caller may correct the label
+  // and send again with the same id. A result with keys behind it (0 / 41) is
+  // kept, so the id reads it back instead of sending twice.
+  if (result.code === 40) operations.delete(key);
+  else operations.set(key, { at: deps.now(), fingerprint, result });
   return result;
 }
 

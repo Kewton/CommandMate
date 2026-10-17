@@ -866,6 +866,9 @@ commandmate respond <worktree-id> "Yes" --instance antigravity \
   **止まります**（exit 40、`strict_endpoint_missing`）。照合のない `/prompt-response` へは決して切り替えません
 - 答えられる kind は `antigravity-trust`（信頼の確認）と `antigravity-permission`（番号付きの許可）だけです。
   `antigravity-model-picker`（effort を読めない）・`antigravity-slash-menu`・`unknown` は送る前に拒否します
+- **対象 instance の Auto-Yes が ON の間は、`antigravity-permission` に厳格モードで答えられません**（exit 40、`auto_yes_active`）。
+  poller が同じ確認に自分で答えるため、競合して次の画面に Enter が届きうるからです。先に `commandmate auto-yes <worktree-id> --disable` で止めてください。
+  `antigravity-trust` は Auto-Yes が答えない画面なので、ON のままでも答えられます
 - 信頼の確認は、kind に加えて**フォルダ（`approvalTarget`）が `--expect-target` と一致すること**が条件です。
   `--expect-target` を省くと何も送らず、画面のフォルダを `observedTarget` で返します。フォルダを読めない信頼の確認は拒否します
 - `--observation` は観測トークンで、認証の `--token` とは別物です。トークンは送る前に使い切られます（送信に失敗しても再利用できません）。
@@ -889,19 +892,24 @@ commandmate respond <worktree-id> "Yes" --instance antigravity \
 
 #### 送信後の結果と操作 ID
 
-Enter の後、数秒のあいだ画面を取り直して `outcome` を返します: `advanced`（入力欄・作業中・セッション終了。もう尋ねていない）/
-`next-prompt`（次の確認）/ `unchanged`（同じ画面のまま）/ `indeterminate`（読めない・`unknown`）。成功（exit 0）は
-`advanced` と `next-prompt` だけで、同じ画面のままでも自動で再送はしません。
+Enter の後、数秒のあいだ画面を取り直して `outcome` を返します: `advanced`（入力欄・作業中。もう尋ねていない）/
+`next-prompt`（次の確認）/ `session-ended`（セッションが無くなった。信頼の確認で `No, exit` を選ぶと agy は終了します）/
+`unchanged`（同じ画面のまま）/ `indeterminate`（読めない・`unknown`）。成功（exit 0）は `advanced`・`next-prompt`・`session-ended`
+で、同じ画面のままでも自動で再送はしません。
 
-`--operation-id <id>` を省くと毎回新しい ID を付けます。同じ ID での再送は、サーバが覚えている結果（`replayed: true`）を返し、
-**二重に送りません**（10 分間。サーバの再起動で忘れます）。応答が失われた（exit 41・`response_unknown`）ときは、
-同じ `--operation-id` で再実行すると、その操作の結果を読めます。
+`--operation-id <id>` を省くと毎回新しい ID を付けます。ID は worktree と instance（セッション）ごとで、要求の中身（kind・答え・
+トークン・`--expect-target`）と一緒に覚えます。キーを送った操作（exit 0・41）を同じ ID・同じ中身で再送すると、覚えている結果
+（`replayed: true`）を返し、**二重に送りません**（10 分間。サーバの再起動で忘れます）。中身の違う要求に同じ ID を使うと何も送らず
+exit 41（`operation_id_conflict`）です。exit 40（何も送っていない）の結果は覚えないので、答えを直して同じ ID で送り直せます。
+応答が失われた（exit 41・`response_unknown`）ときは、同じ `--operation-id` と同じ引数で再実行すると、その操作の結果を読めます。
+サーバに接続できなかった（接続拒否など）ときは、要求が届いていないので exit 40（`server_unreachable`）です。
 
 `--json` は stdout に結果オブジェクトを 1 個だけ出します（`code` / `delivery`（`not-sent` / `partial` / `sent` / `indeterminate`）/
 `reason` / `expectedKind` / `observedKind` / `observedTarget` / `operationId` / `answer` / `keysSent` / `outcome`）。説明は stderr です。
 
 答えたことは、誰が（CLI 実行元のエージェント `agent:<worktree>/<instance>` か `cli`）・どの画面に・どの選択肢を送ったかとして、
-server.log（`strict-prompt-answered` / `strict-prompt-response-refused`）と、Enter を送った場合は task の履歴（`prompt_answered_human`）に残ります。
+server.log（`strict-prompt-answered` / `strict-prompt-response-refused`）と、キーを 1 つでも送った場合は task の履歴（`prompt_answered_human`。
+途中で止まったときは理由コード付き）に残ります。「誰が」（`answeredBy`）は CLI が環境変数から付ける**自己申告**で、サーバは検証しません。
 
 #### 残余競合
 

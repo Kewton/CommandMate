@@ -591,6 +591,10 @@ commandmate respond <worktree-id> "Yes" --instance antigravity \
 - The kinds it answers are `antigravity-trust` (the folder trust screen) and `antigravity-permission` (the numbered
   permission dialog). `antigravity-model-picker` (its effort row is not read), `antigravity-slash-menu` and `unknown`
   are refused before any key
+- **While the instance's Auto-Yes is on, `antigravity-permission` cannot be answered strictly** (exit 40,
+  `auto_yes_active`): the poller answers the same dialog itself, and an Enter could land on the screen that follows.
+  Turn it off first with `commandmate auto-yes <worktree-id> --disable`. `antigravity-trust`, which Auto-Yes never
+  answers, can be answered with Auto-Yes on
 - A trust screen also requires its **folder (`approvalTarget`) to equal `--expect-target`**. Without
   `--expect-target` nothing is sent and the folder on screen comes back as `observedTarget`. A trust screen whose
   folder could not be read is refused
@@ -619,21 +623,28 @@ every arrow, and the next key goes only while it is the same screen with the hig
 #### Outcome and Operation IDs
 
 After the Enter the screen is read for a few seconds and `outcome` says what it did: `advanced` (nothing asks any
-more: the input box, working, or the session ended) / `next-prompt` (another confirmation) / `unchanged` (the same
-screen) / `indeterminate` (unreadable, or `unknown`). Only `advanced` and `next-prompt` are success (exit 0); a screen
-that stayed is never answered again automatically.
+more: the input box, or working) / `next-prompt` (another confirmation) / `session-ended` (the session is gone — agy
+exits when the trust screen is answered `No, exit`) / `unchanged` (the same screen) / `indeterminate` (unreadable, or
+`unknown`). `advanced`, `next-prompt` and `session-ended` are success (exit 0); a screen that stayed is never answered
+again automatically.
 
-Without `--operation-id <id>` a new id is used each time. Sending the same id again returns the stored result
-(`replayed: true`) and **sends nothing twice** (for 10 minutes; a server restart forgets it). When the answer was lost
-(exit 41, `response_unknown`), re-run with the same `--operation-id` to read that operation's result.
+Without `--operation-id <id>` a new id is used each time. Ids are kept per worktree and instance (session), together
+with what the request asked (kind, answer, token, `--expect-target`). Sending an operation that sent keys (exit 0 / 41)
+again with the same id and the same arguments returns the stored result (`replayed: true`) and **sends nothing twice**
+(for 10 minutes; a server restart forgets it). The same id with different arguments sends nothing and exits 41
+(`operation_id_conflict`). An exit-40 result (nothing sent) is not kept, so the answer can be corrected and sent again
+with the same id. When the answer was lost (exit 41, `response_unknown`), re-run with the same `--operation-id` and
+arguments to read that operation's result. A server that could not be connected to at all (connection refused, …) never
+got the request: exit 40 (`server_unreachable`).
 
 `--json` prints exactly one result object on stdout (`code` / `delivery` (`not-sent` / `partial` / `sent` /
 `indeterminate`) / `reason` / `expectedKind` / `observedKind` / `observedTarget` / `operationId` / `answer` /
 `keysSent` / `outcome`). Explanations go to stderr.
 
 Who answered (the agent the CLI runs in, `agent:<worktree>/<instance>`, or `cli`), which screen and which option are
-recorded in server.log (`strict-prompt-answered` / `strict-prompt-response-refused`) and, once the Enter was sent, in
-the task's history (`prompt_answered_human`).
+recorded in server.log (`strict-prompt-answered` / `strict-prompt-response-refused`) and, once any key was sent, in
+the task's history (`prompt_answered_human`, with the reason code when it stopped short). Who answered (`answeredBy`)
+is **self-reported** by the CLI from its environment; the server does not verify it.
 
 #### Residual Race
 

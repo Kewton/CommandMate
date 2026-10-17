@@ -472,7 +472,9 @@ Strict respond (--expect-screen <kind> --observation <token> <label>):
   are answered by label only — sent as Up/Down and Enter; a number and --default
   are refused, and so are labels that match two options or no visible one.
   Residual race: a key typed at the pane between the last check and a key is not
-  seen. This is not a way to get auto mode's permission for an approval.
+  seen. While the instance's Auto-Yes is on, antigravity-permission is refused
+  (run auto-yes <worktree-id> --disable first). This is not a way to get auto
+  mode's permission for an approval.
 
   Exit codes: 0 answered / 40 nothing sent (re-observe first) /
   41 keys sent, result not confirmed (do NOT send again) / 2 bad arguments`,

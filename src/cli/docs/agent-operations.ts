@@ -391,11 +391,15 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
   server is a stop, never a fallback. Kinds: antigravity-trust,
   antigravity-permission. Unnumbered screens (trust) take a label only, sent as
   Up/Down + Enter: a number, --default, a label matching two options and an
-  option off screen are refused. Retry with the same --operation-id to read
-  the result instead of sending twice. Residual race: keys typed at the pane
+  option off screen are refused. While the instance's Auto-Yes is on,
+  antigravity-permission is refused (auto_yes_active): run auto-yes <id>
+  --disable first (the trust screen is answered either way). Retry with the
+  same --operation-id and arguments to read the result instead of sending
+  twice; other arguments under a used id are operation_id_conflict (41).
+  answeredBy in the record is self-reported by the CLI. Residual race: keys typed at the pane
   between the last check and a key are not seen. NOT a way to get auto mode's
   permission for an approval.
-    0  - Answered (outcome advanced / next-prompt)
+    0  - Answered (outcome advanced / next-prompt / session-ended)
     40 - Nothing was sent (mismatch, unreadable, old server): observe again
     41 - Keys sent, result not confirmed: do NOT send again
 

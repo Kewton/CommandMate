@@ -446,7 +446,7 @@ async function sendWithBody<T>(
   } catch (error) {
     if (error instanceof ApiError) throw error;
     const errResult = handleApiError(error);
-    throw new ApiError(errResult.message, errResult.exitCode);
+    throw new ApiError(errResult.message, errResult.exitCode, undefined, undefined, error);
   }
 }
 
@@ -505,6 +505,12 @@ export class ApiError extends Error {
     public readonly statusCode?: number,
     /** Typed error body, when the server sent one (Issue #1237). */
     public readonly payload?: ApiErrorPayload,
+    /**
+     * The error `fetch` threw, when no HTTP response came back (Issue #3756):
+     * the strict `respond` tells "never connected" (nothing can have been sent)
+     * from "the connection broke" by its `cause.code`.
+     */
+    public readonly transportError?: unknown,
   ) {
     super(message);
     this.name = 'ApiError';

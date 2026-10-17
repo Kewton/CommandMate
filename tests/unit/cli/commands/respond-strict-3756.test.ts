@@ -148,6 +148,38 @@ describe('[#3756] an older server without the endpoint is a stop, not a fallback
   });
 });
 
+describe('[#3756] a request that never left vs one whose answer was lost', () => {
+  function failFetch(code: string): void {
+    const cause = Object.assign(new Error(code), { code });
+    global.fetch = vi.fn((input: unknown) =>
+      String(input).includes('/api/capabilities')
+        ? Promise.resolve({
+            ok: true,
+            status: 200,
+            redirected: false,
+            headers: new Headers({ 'content-type': 'application/json' }),
+            json: () => Promise.resolve({ serverVersion: '0.0.0-test', capabilities: ['resolve-session-target'] }),
+            text: () => Promise.resolve('{}'),
+          } as unknown as Response)
+        : Promise.reject(Object.assign(new TypeError('fetch failed'), { cause }))
+    ) as unknown as typeof fetch;
+  }
+
+  it('a refused connection is exit 40 (server_unreachable): nothing can have been sent', async () => {
+    failFetch('ECONNREFUSED');
+    await run('Yes', ...STRICT, '--expect-target', FOLDER, '--json');
+    expect(mockExit).toHaveBeenCalledWith(40);
+    expect(JSON.parse(stdoutCalls()[0])).toMatchObject({ code: 40, reason: 'server_unreachable', delivery: 'not-sent' });
+  });
+
+  it('a connection reset after connecting is exit 41', async () => {
+    failFetch('ECONNRESET');
+    await run('Yes', ...STRICT, '--expect-target', FOLDER, '--json');
+    expect(mockExit).toHaveBeenCalledWith(41);
+    expect(JSON.parse(stdoutCalls()[0])).toMatchObject({ code: 41, reason: 'response_unknown' });
+  });
+});
+
 describe('[#3756] refused before any request (exit 2)', () => {
   it('--default, an option number on the unnumbered trust screen, and a half-given strict pair', async () => {
     const cases = [

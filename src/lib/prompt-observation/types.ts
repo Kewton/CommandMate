@@ -233,6 +233,9 @@ export type StrictRespondReason =
   // 40, decided by the CLI: the server has no strict endpoint / refused the session (409)
   | 'strict_endpoint_missing'
   | 'session_conflict'
+  | 'server_unreachable'
+  // 40, decided by the server: Auto-Yes is on for the instance (permission dialogs only)
+  | 'auto_yes_active'
   // 41: keys were (or may have been) sent; do not send again
   | 'send_failed'
   | 'screen_moved_mid_send'
@@ -240,6 +243,10 @@ export type StrictRespondReason =
   | 'outcome_unchanged'
   | 'outcome_indeterminate'
   | 'operation_in_progress'
+  /** The operation id was used for another request (instance, screen, answer or token). */
+  | 'operation_id_conflict'
+  /** Too many operations are still running to remember one more. */
+  | 'operation_table_full'
   // 41, decided by the CLI: the server's answer was lost (5xx, connection)
   | 'response_unknown';
 
@@ -253,10 +260,11 @@ export type StrictRespondDelivery = 'not-sent' | 'partial' | 'sent' | 'indetermi
 /**
  * What the screen did after the Enter, read again within a few seconds:
  * `unchanged` (the same screen), `advanced` (nothing asks any more: the input
- * box, working, or the session exited), `next-prompt` (another measured
- * decision screen), `indeterminate` (could not be read, or `unknown`).
+ * box, or working), `next-prompt` (another measured decision screen),
+ * `session-ended` (the session is gone — agy exits on the trust screen's
+ * `No, exit`), `indeterminate` (could not be read, or `unknown`).
  */
-export type StrictRespondOutcome = 'unchanged' | 'advanced' | 'next-prompt' | 'indeterminate';
+export type StrictRespondOutcome = 'unchanged' | 'advanced' | 'next-prompt' | 'session-ended' | 'indeterminate';
 
 /**
  * The body of `POST /api/worktrees/:id/prompt-response/strict`, and what

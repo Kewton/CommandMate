@@ -27,6 +27,7 @@ import {
   wasStartupTrustClaimedWithin,
 } from '@/lib/cli-tools/antigravity-startup-trust';
 import { applyEventToActiveTask } from '@/lib/tasks/task-transition-service';
+import { getAutoYesState } from '@/lib/auto-yes-state';
 
 const logger = createLogger('api/prompt-response-strict');
 
@@ -71,6 +72,7 @@ export function createStrictRespondDeps(db: Database.Database, target: StrictAns
     sendKey: key => sendSessionAnswerKey(worktreeId, cliToolId, key, instanceId),
     sleep: ms => new Promise(resolve => setTimeout(resolve, ms)),
     now: () => Date.now(),
+    autoYesActive: () => getAutoYesState(worktreeId, cliToolId, instanceId)?.enabled === true,
     startup: {
       isWindowOpen: () => isStartupWindowOpen(sessionName),
       claimedWithin: ms => wasStartupTrustClaimedWithin(sessionName, ms),
@@ -82,8 +84,9 @@ export function createStrictRespondDeps(db: Database.Database, target: StrictAns
 
 /**
  * Who answered, what screen, and with what: one `server.log` line for every
- * verdict, and a `prompt_answered_human` row in the task's history once the
- * Enter was sent. The screen's text is not logged; its kind, folder and the
+ * verdict, and a `prompt_answered_human` row in the task's history once any
+ * key was sent — an answer cut short (exit 41 before the Enter, or after it
+ * with no outcome read) is recorded with its reason code. The screen's text is not logged; its kind, folder and the
  * chosen label are.
  *
  * @param answeredBy - Who the CLI says it runs as (`cli`, or `agent:<worktree>/<instance>`)
@@ -117,14 +120,15 @@ export function recordStrictAnswer(
     return;
   }
   logger.info('strict-prompt-answered', fields);
-  if (result.replayed || result.outcome === null || result.answer === null) return;
+  if (result.replayed || result.keysSent === 0) return;
 
-  const what = `option ${result.answer.position} "${result.answer.label}"`;
+  const what = result.answer === null ? 'an unresolved option' : `option ${result.answer.position} "${result.answer.label}"`;
   const folder = result.observedTarget === null ? '' : ` folder=${result.observedTarget}`;
+  const ending = result.reason === null ? `outcome ${result.outcome}` : `stopped: ${result.reason}, ${result.keysSent} key(s) sent`;
   try {
     applyEventToActiveTask(db, target.worktreeId, target.cliToolId, instanceId, 'prompt_answered_human', {
       promptType: result.expectedKind,
-      reason: `strict respond by ${answeredBy}: ${what}${folder} (operation ${result.operationId}, outcome ${result.outcome})`,
+      reason: `strict respond by ${answeredBy}: ${what}${folder} (operation ${result.operationId}, ${ending})`,
     });
   } catch (error) {
     logger.warn('strict-prompt-answer-record-failed', { error: messageOf(error) });
