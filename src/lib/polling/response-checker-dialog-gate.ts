@@ -10,7 +10,7 @@ import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('response-poller');
 
-import { hasRecentAntigravityPermissionReceipt } from './antigravity-permission-receipts';
+import { judgeAntigravityPermissionReceipt } from './antigravity-receipt-episodes';
 // Issue #2457: the same rollout table, `hasDialogRules` cross-check and
 // `detectDialog` seam Auto-Yes reads, reached through the presence helper rather
 // than through `evaluateAutoYesDialogGate` — see `isNumberedDialogVouched`.
@@ -48,7 +48,7 @@ export interface AntigravityReceiptScope {
  */
 export function isWithheldForWantOfReceipt(scope: AntigravityReceiptScope | undefined): boolean {
   if (scope === undefined) return false;
-  if (hasRecentAntigravityPermissionReceipt(scope.worktreeId, 'antigravity', scope.instanceId)) return false;
+  if (judgeAntigravityPermissionReceipt(scope.worktreeId, scope.instanceId).ok) return false;
   logger.debug('antigravity-dialog-no-recent-receipt', {
     worktreeId: scope.worktreeId,
     instanceId: scope.instanceId ?? 'antigravity',
