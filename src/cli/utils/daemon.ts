@@ -5,7 +5,20 @@
  * SF-1: SRP - Process management only (PID handling delegated to PidManager)
  */
 
-import { spawn } from 'child_process';
+import { spawn, type StdioOptions } from 'child_process';
+import {
+  closeSync,
+  constants as fsConstants,
+  fchmodSync,
+  lstatSync,
+  mkdirSync,
+  openSync,
+  renameSync,
+  unlinkSync,
+  writeSync,
+  type Stats,
+} from 'fs';
+import { dirname } from 'path';
 import { config as dotenvConfig } from 'dotenv';
 import { DaemonStatus, StartOptions } from '../types';
 import { DaemonState, PidManager } from './pid-manager';
@@ -25,6 +38,15 @@ import {
 
 /** How long stop() waits for the server's process group after SIGTERM before escalating. */
 export const STOP_GRACE_TIMEOUT_MS = 10000;
+
+/**
+ * Issue #3731: a server log larger than this is rotated when the next daemon starts.
+ * Same threshold as scripts/build-and-start.sh (MAX_LOG_SIZE_MB=10).
+ */
+export const SERVER_LOG_MAX_BYTES = 10 * 1024 * 1024;
+
+/** Issue #3731: rotated generations kept (`server.log.1` … `.3`), as in build-and-start.sh. */
+export const SERVER_LOG_GENERATIONS = 3;
 
 /** How long stop() waits for the process group after SIGKILL. */
 export const STOP_KILL_TIMEOUT_MS = 3000;
@@ -100,6 +122,112 @@ function signalProcessGroup(pid: number, signal: NodeJS.Signals): void {
   }
 }
 
+/** lstat that reports a missing path as null instead of throwing. */
+function lstatOrNull(path: string): Stats | null {
+  try {
+    return lstatSync(path);
+  } catch (err: unknown) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+      return null;
+    }
+    throw err;
+  }
+}
+
+/**
+ * Issue #3731: rotate the server log the way scripts/build-and-start.sh does.
+ *
+ * Runs before the new server is spawned, so nothing holds the file open. When `logPath` has
+ * reached `maxBytes`, the oldest generation is deleted and the rest shift up
+ * (`.2` → `.3`, `.1` → `.2`, current → `.1`). Refuses (throws) on a symbolic link anywhere in
+ * the chain rather than following it.
+ *
+ * @returns true when the log was rotated
+ */
+export function rotateServerLog(
+  logPath: string,
+  maxBytes: number = SERVER_LOG_MAX_BYTES,
+  generations: number = SERVER_LOG_GENERATIONS
+): boolean {
+  const current = lstatOrNull(logPath);
+  if (current === null) {
+    return false;
+  }
+  if (current.isSymbolicLink()) {
+    throw new Error(`${logPath} is a symbolic link; not rotating it`);
+  }
+  if (current.size < maxBytes) {
+    return false;
+  }
+
+  const oldest = `${logPath}.${generations}`;
+  const oldestStat = lstatOrNull(oldest);
+  if (oldestStat?.isSymbolicLink()) {
+    throw new Error(`${oldest} is a symbolic link; not rotating it`);
+  }
+  if (oldestStat !== null) {
+    unlinkSync(oldest);
+  }
+
+  for (let i = generations - 1; i >= 1; i--) {
+    const from = `${logPath}.${i}`;
+    const stat = lstatOrNull(from);
+    if (stat === null) {
+      continue;
+    }
+    if (stat.isSymbolicLink()) {
+      throw new Error(`${from} is a symbolic link; not rotating it`);
+    }
+    renameSync(from, `${logPath}.${i + 1}`);
+    restrictToOwner(`${logPath}.${i + 1}`);
+  }
+
+  renameSync(logPath, `${logPath}.1`);
+  restrictToOwner(`${logPath}.1`);
+  return true;
+}
+
+/**
+ * Issue #3731: make a rotated generation owner-only (0600), like the live log. A server.log
+ * written by scripts/start.sh is 0640 and would otherwise keep that mode after rotation.
+ * Goes through an O_NOFOLLOW descriptor so a link swapped in after the rename is not followed.
+ */
+function restrictToOwner(path: string): void {
+  const fd = openSync(path, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0));
+  try {
+    fchmodSync(fd, 0o600);
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/**
+ * Issue #3731: open the server log for appending, owner-only (0600), rotating it first.
+ *
+ * `O_NOFOLLOW` refuses a symbolic link planted at the path; fchmod tightens a file created
+ * earlier with looser permissions. The caller hands the descriptor to the child and closes
+ * its own copy.
+ *
+ * @throws when the directory or the file cannot be opened
+ */
+export function openServerLog(logPath: string): number {
+  mkdirSync(dirname(logPath), { recursive: true, mode: 0o700 });
+  rotateServerLog(logPath);
+  const flags =
+    fsConstants.O_WRONLY |
+    fsConstants.O_APPEND |
+    fsConstants.O_CREAT |
+    (fsConstants.O_NOFOLLOW ?? 0);
+  const fd = openSync(logPath, flags, 0o600);
+  try {
+    fchmodSync(fd, 0o600);
+  } catch (err: unknown) {
+    closeSync(fd);
+    throw err;
+  }
+  return fd;
+}
+
 /**
  * Daemon manager for background server process
  */
@@ -108,16 +236,21 @@ export class DaemonManager {
   private logger: CLILogger;
   private envPath?: string;
   private effectiveEnv?: ServerEnv;
+  private resolveServerLogPath?: () => string;
 
   /**
    * @param pidFilePath - PID file for this server
    * @param envPath - Issue #1266: the worktree .env this server runs with, so getStatus()
    *   reports the port it actually listens on; omit for the main server
+   * @param resolveServerLogPath - Issue #3731: where start() appends the server's
+   *   stdout/stderr (see getServerLogPath()). Resolved at start(), so a config directory that
+   *   cannot be resolved only costs the log. Omit to discard the output as before.
    */
-  constructor(pidFilePath: string, envPath?: string) {
+  constructor(pidFilePath: string, envPath?: string, resolveServerLogPath?: () => string) {
     this.pidManager = new PidManager(pidFilePath);
     this.logger = new CLILogger();
     this.envPath = envPath;
+    this.resolveServerLogPath = resolveServerLogPath;
   }
 
   /**
@@ -156,13 +289,26 @@ export class DaemonManager {
     // Log startup with accurate settings (Stage 4 review: MF-2)
     this.logger.info(`Starting server at ${protocol}://${bindAddress}:${port}`);
 
+    // Issue #3731: the server's stdout/stderr go to the log file, or nowhere when it cannot
+    // be opened. A log is never a reason not to start the server.
+    const logFd = this.openLogForChild(npmScript);
+    const stdio: StdioOptions = logFd === null ? 'ignore' : ['ignore', logFd, logFd];
+
     // Spawn detached process
-    const child = spawn('npm', ['run', npmScript], {
-      cwd: packageRoot,
-      env,
-      detached: true,
-      stdio: 'ignore',
-    });
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawn('npm', ['run', npmScript], {
+        cwd: packageRoot,
+        env,
+        detached: true,
+        stdio,
+      });
+    } finally {
+      // The child holds its own copy of the descriptor.
+      if (logFd !== null) {
+        closeSync(logFd);
+      }
+    }
 
     // Unref to allow parent to exit
     child.unref();
@@ -172,6 +318,34 @@ export class DaemonManager {
     this.recordState(pid, env, bindAddress, port, protocol);
 
     return pid;
+  }
+
+  /**
+   * Issue #3731: open the server log for the child and mark where this start begins.
+   * @returns the descriptor, or null (with a warning) when there is no log to write to
+   */
+  private openLogForChild(npmScript: string): number | null {
+    if (!this.resolveServerLogPath) {
+      return null;
+    }
+    let logPath: string | undefined;
+    try {
+      logPath = this.resolveServerLogPath();
+      const fd = openServerLog(logPath);
+      try {
+        writeSync(fd, `\n=== ${new Date().toISOString()} commandmate start --daemon (npm run ${npmScript}) ===\n`);
+      } catch {
+        // The marker is a convenience; the server output matters more.
+      }
+      this.logger.info(`Server log: ${logPath}`);
+      return fd;
+    } catch (err: unknown) {
+      this.logger.warn(
+        `Could not open the server log${logPath ? ` at ${logPath}` : ''}: ` +
+          `${(err as Error).message}. Server output will be discarded.`
+      );
+      return null;
+    }
   }
 
   /** Throws when the recorded server is running, or an earlier server's group lives on. */

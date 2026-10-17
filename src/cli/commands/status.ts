@@ -6,10 +6,11 @@
  * Display CommandMate server status
  */
 
-import { readdirSync } from 'fs';
+import { existsSync, readdirSync } from 'fs';
 import { DaemonStatus, ExitCode, getErrorMessage, StatusOptions } from '../types';
 import { CLILogger } from '../utils/logger';
 import { DaemonManager } from '../utils/daemon';
+import { getServerLogPath } from '../utils/paths';
 import { getPidFilePath, getEnvPath, getPidsDir } from '../utils/env-setup';
 import { loadEnvFileValues } from '../utils/server-url';
 import { readPackageVersion } from '../utils/package-info';
@@ -48,6 +49,19 @@ function printVersionInfo(status: DaemonStatus): void {
       `Installed CLI is v${cliVersion} but the running server is v${status.version}. ` +
         'Restart the server ("commandmate stop && commandmate start") to run the current version.'
     );
+  }
+}
+
+/**
+ * Issue #3731: print where `start --daemon` writes this server's stdout/stderr.
+ * Marks a path that does not exist (a server started in the foreground or by an older CLI).
+ */
+function printServerLogPath(issueNo?: number): void {
+  try {
+    const logPath = getServerLogPath(issueNo);
+    console.log(`Log:     ${logPath}${existsSync(logPath) ? '' : ' (not created yet)'}`);
+  } catch {
+    // The log path is a hint; failing to resolve it changes nothing about server status.
   }
 }
 
@@ -353,6 +367,7 @@ async function showSingleStatus(issueNo?: number): Promise<void> {
 
   if (!status.running) {
     console.log('Status:  Not running (stale PID file)');
+    printServerLogPath(issueNo);
     console.log('');
     const startCmd = issueNo !== undefined
       ? `commandmate start --issue ${issueNo}`
@@ -376,6 +391,8 @@ async function showSingleStatus(issueNo?: number): Promise<void> {
   if (status.url) {
     console.log(`URL:     ${status.url}`);
   }
+
+  printServerLogPath(issueNo);
 
   // Issue #2113: the advertised localhost URL may not reach this server at all
   printLocalhostConflict(status);
@@ -465,6 +482,7 @@ export async function statusCommand(options: StatusOptions = {}): Promise<void> 
 
     if (!status.running) {
       console.log('Status:  Not running (stale PID file)');
+      printServerLogPath(options.issue);
       console.log('');
       const startCmd = options.issue !== undefined
         ? `commandmate start --issue ${options.issue}`
@@ -489,6 +507,8 @@ export async function statusCommand(options: StatusOptions = {}): Promise<void> 
     if (status.url) {
       console.log(`URL:     ${status.url}`);
     }
+
+    printServerLogPath(options.issue);
 
     // Issue #2113: the advertised localhost URL may not reach this server at all
     printLocalhostConflict(status);
