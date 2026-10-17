@@ -72,6 +72,30 @@ export function findClaudeTranscriptTail(contentLines: readonly string[]): numbe
 }
 
 /**
+ * Is this frame Claude's `AskUserQuestion` confirmation page — `Review your
+ * answers` / `Ready to submit your answers?` over `❯ 1. Submit answers` /
+ * `2. Cancel`? (Issue #3748)
+ *
+ * Read through {@link detectClaudeDialog}, the reading the Auto-Yes dialog gate
+ * vouches with, so the two cannot disagree about where the dialog is: true
+ * exactly when that reading finds a live dialog (cursor on the options, no
+ * finished output under them) and classifies it `ask_user` by the page's own
+ * question above the options. A transcript that quotes the page has no cursor
+ * under a live tail and is not a dialog; Claude's question screens draw neither
+ * sentence (their context ends at the tab row), and its permission dialogs ask
+ * `Do you want to …`.
+ *
+ * `Submit answers` picks nothing — it commits whatever stands as the answers —
+ * so Auto-Yes leaves this page to a human, as it does Command Code's (#3497).
+ */
+export function isClaudeAskUserQuestionConfirmPage(frame: NormalizedFrame): boolean {
+  const dialog = detectClaudeDialog(frame, {
+    transcriptTail: findClaudeTranscriptTail(frame.contentLines),
+  });
+  return dialog?.kind === 'ask_user';
+}
+
+/**
  * §4 D1 決定 1: does this frame positively show that Claude's turn is over?
  *
  * Two acceptable answers, both measured (see `patterns.ts`):

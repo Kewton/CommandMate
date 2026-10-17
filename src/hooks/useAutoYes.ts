@@ -11,12 +11,16 @@
  * Issue #3331: `lastAutoResponse` is set only once the reply reads `answered`
  * (`readPromptResponseOutcome`), so a refused or failed answer is no longer
  * announced as "Auto responded".
+ *
+ * Issue #3748: an `AskUserQuestion` confirm page (`Submit` / `Cancel`) is left
+ * to a human here as it is on the server (`polling/auto-yes-confirm-page`).
  */
 
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { resolveAutoAnswer } from '@/lib/polling/auto-yes-resolver';
+import { isAutoYesDeclinedConfirmFrame } from '@/lib/polling/auto-yes-confirm-page';
 import { buildPromptResponseBody } from '@/lib/prompt-response-body-builder';
 import { generatePromptKey } from '@/lib/detection/prompt-key';
 import { isAnswerablePromptData } from '@/types/models';
@@ -54,6 +58,13 @@ export interface UseAutoYesParams {
    * (id === cliTool), as in the controller's `polledAgentKey` (#3304).
    */
   instanceId?: string;
+  /**
+   * The pane frame the prompt was read from — the current-output payload's
+   * `fullOutput` (Issue #3748). Judged by the same predicate as the server's
+   * poller, so a confirm page (`Submit` / `Cancel`) the poller leaves to a human
+   * is not answered from here either. Omitted or null, nothing is judged.
+   */
+  frame?: string | null;
 }
 
 /**
@@ -93,6 +104,7 @@ export function useAutoYes({
   lastServerResponseTimestamp,
   serverPollerActive,
   instanceId,
+  frame,
 }: UseAutoYesParams): UseAutoYesReturn {
   const lastAutoRespondedRef = useRef<string | null>(null);
   // Issue #3331: the latest send; a reply to an older one is not announced.
@@ -105,6 +117,11 @@ export function useAutoYes({
   const currentTargetRef = useRef(targetKey);
   currentTargetRef.current = targetKey;
   const [lastAutoResponse, setLastAutoResponse] = useState<string | null>(null);
+  // Issue #3748: read once per frame, not once per render.
+  const onDeclinedConfirmPage = useMemo(
+    () => isAutoYesDeclinedConfirmFrame(cliTool, frame),
+    [cliTool, frame],
+  );
 
   useEffect(() => {
     // Reset when prompt clears
@@ -139,6 +156,12 @@ export function useAutoYes({
     if (serverPollerActive) {
       return;
     }
+
+    // Issue #3748: the confirm page the server's poller leaves to a human
+    // (step 3.3 of `detectAndRespondToPrompt`, #3497) is left alone here too.
+    // `Submit` commits whatever stands as the answers; answering it from the
+    // browser undid the server's decline whenever no server poller ran.
+    if (onDeclinedConfirmPage) return;
 
     // Issue #138: Skip if server has responded recently (duplicate prevention fallback)
     if (lastServerResponseTimestamp) {
@@ -187,7 +210,7 @@ export function useAutoYes({
       .catch((err) => {
         console.error('[useAutoYes] Failed to send auto-response:', err);
       });
-  }, [isPromptWaiting, promptData, autoYesEnabled, worktreeId, cliTool, targetKey, lastServerResponseTimestamp, serverPollerActive]);
+  }, [isPromptWaiting, promptData, autoYesEnabled, worktreeId, cliTool, targetKey, lastServerResponseTimestamp, serverPollerActive, onDeclinedConfirmPage]);
 
   return { lastAutoResponse };
 }

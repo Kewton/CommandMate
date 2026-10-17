@@ -165,8 +165,10 @@ describe('[#3497] (a) the confirm page is not Auto-Yes’s to answer', () => {
 
   it('records why, through the suppression channel', async () => {
     await respondTo(FREE_TEXT_CONFIRM);
+    // Issue #3748: its own reason (was `unclassified-frame`, whose `cmate wait`
+    // wording says no detector recognised the frame).
     expect(getLastPolicySuppression(WT, 'command-code', INSTANCE)).toMatchObject({
-      reason: 'unclassified-frame',
+      reason: 'question-confirm-page',
       mode: null,
       promptType: 'multiple_choice',
     });
