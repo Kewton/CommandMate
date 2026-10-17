@@ -254,11 +254,29 @@ export async function GET(
     const compositeKeys = getCompositeKeysByWorktree(id);
     const agentStates: Record<string, ReturnType<typeof buildAutoYesResponse>> = {};
     const instanceStates: Record<string, ReturnType<typeof buildAutoYesResponse>> = {};
+    // Issue #3753: two keys can share an instanceId under different tools (the
+    // roster's tool changed between them). The map is keyed by instanceId, so
+    // the roster's tool decides which key speaks for it; without a roster
+    // entry, an enabled one wins over a disabled one.
+    const claimed = new Map<string, { agentId: CLIToolType; enabled: boolean }>();
+    const rosterToolOf = (instanceId: string): CLIToolType | undefined => {
+      const target = resolveSessionTarget(getDbInstance(), id, { instanceId });
+      return target.resolvedBy === 'roster' ? target.cliToolId : undefined;
+    };
     for (const key of compositeKeys) {
       const agentId = extractCliToolId(key);
       if (!agentId) continue;
       const instanceId = extractInstanceId(key) ?? agentId;
       const state = getAutoYesState(id, agentId, instanceId);
+      const previous = claimed.get(instanceId);
+      if (previous) {
+        const rosterTool = rosterToolOf(instanceId);
+        const keepPrevious = rosterTool
+          ? previous.agentId === rosterTool
+          : previous.enabled || !state?.enabled;
+        if (keepPrevious) continue;
+      }
+      claimed.set(instanceId, { agentId, enabled: !!state?.enabled });
       const entry = buildAutoYesResponse(state);
       // Issue #3723: `commandmate instances` reads this map; an armed instance
       // its contract keeps silent is flagged here, beside the arming it undoes.
