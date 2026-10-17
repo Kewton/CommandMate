@@ -32,6 +32,15 @@ import {
  */
 export const ANTIGRAVITY_PERMISSION_RECEIPT_OBSERVATION_SLACK_MS = 5_000;
 
+/**
+ * Longest gap between two poller reads over which an episode is carried
+ * (Issue #3767): the slowest tick (5s after a response) plus room for the
+ * capture. A longer gap (capture backoff, no session, Auto-Yes off and on) means
+ * nothing is known of the screen in between, so the episode is dropped and the
+ * next candidate is judged from its own first sighting.
+ */
+const MAX_READ_GAP_MS = ANTIGRAVITY_PERMISSION_RECEIPT_OBSERVATION_SLACK_MS + 2_000;
+
 /** Beyond this, a late dialog is read as "the hook stopped arriving" (#3767). */
 const RECEIPT_LAPSED_AFTER_MS = 60_000;
 
@@ -67,7 +76,12 @@ export type AntigravityReceiptCause =
   /** The last question is long gone: the hook stopped arriving. */
   | 'lapsed'
   /** The question was already spent on an earlier dialog. */
-  | 'used';
+  | 'used'
+  /**
+   * The dialog this question was already answered on is still up past the
+   * window. Not "withheld for want of a receipt": no suppression is recorded.
+   */
+  | 'answered';
 
 export interface AntigravityReceiptVerdict {
   ok: boolean;
@@ -82,8 +96,36 @@ export interface AntigravityReceiptVerdict {
 
 const observations = getOrInitGlobal('__antigravityReceiptObservations', () => new Map<string, unknown>()) as Map<string, FrameObservation>;
 
+const isTimeOrNull = (x: unknown): boolean => x === null || (typeof x === 'number' && Number.isFinite(x));
+
+/**
+ * The Map lives on globalThis and outlives a module reload, so an entry may have
+ * another shape. Such an entry is dropped (no episode: the plain tick test),
+ * never read as times — `undefined` would turn every comparison into NaN.
+ */
+function isObservation(v: unknown): v is FrameObservation {
+  if (typeof v !== 'object' || v === null) return false;
+  const o = v as Record<string, unknown>;
+  return (
+    typeof o.tracking === 'boolean' &&
+    typeof o.candidateSeen === 'boolean' &&
+    (['firstSeenAt', 'clearAt', 'prevReadAt', 'lastReadAt', 'acceptedReceiptAt', 'usedReceiptAt'] as const).every(k =>
+      isTimeOrNull(o[k]),
+    ) &&
+    (o.verdict === null || typeof o.verdict === 'object')
+  );
+}
+
+function existingObservation(key: string): FrameObservation | undefined {
+  const o: unknown = observations.get(key);
+  if (o === undefined) return undefined;
+  if (isObservation(o)) return o;
+  observations.delete(key);
+  return undefined;
+}
+
 function observationOf(key: string): FrameObservation {
-  let o = observations.get(key);
+  let o = existingObservation(key);
   if (!o) {
     o = {
       tracking: false,
@@ -112,6 +154,14 @@ export function beginAntigravityFrameRead(
   now: number = Date.now(),
 ): void {
   const o = observationOf(buildCompositeKey(worktreeId, 'antigravity', instanceId));
+  if (o.lastReadAt !== null && !(now - o.lastReadAt <= MAX_READ_GAP_MS)) {
+    // Reads stopped for a while: the dialog now on screen may not be the one
+    // the episode saw, nor did it appear right after the last clear read.
+    o.firstSeenAt = null;
+    o.clearAt = null;
+    o.acceptedReceiptAt = null;
+    o.verdict = null;
+  }
   o.tracking = true;
   o.candidateSeen = false;
   o.prevReadAt = o.lastReadAt;
@@ -127,7 +177,7 @@ export function endAntigravityFrameRead(
   instanceId: string | undefined,
   now: number = Date.now(),
 ): void {
-  const o = observations.get(buildCompositeKey(worktreeId, 'antigravity', instanceId));
+  const o = existingObservation(buildCompositeKey(worktreeId, 'antigravity', instanceId));
   if (!o || !o.tracking || o.candidateSeen) return;
   o.firstSeenAt = null;
   o.acceptedReceiptAt = null;
@@ -143,7 +193,7 @@ export function getAntigravityReceiptVerdict(
   worktreeId: string,
   instanceId: string | undefined,
 ): AntigravityReceiptVerdict | null {
-  return observations.get(buildCompositeKey(worktreeId, 'antigravity', instanceId))?.verdict ?? null;
+  return existingObservation(buildCompositeKey(worktreeId, 'antigravity', instanceId))?.verdict ?? null;
 }
 
 function causeFor(ageMs: number | null): AntigravityReceiptCause {
@@ -213,17 +263,25 @@ export function judgeAntigravityPermissionReceipt(
     // The read that accepted may consult the gate twice (the tool's reader, then
     // the generic pass). A LATER tick over the same dialog is the old tick test:
     // a dialog that outlives the answer is not answered again past the window.
+    // Withheld, but as `answered`: the caller records no no-hook-receipt for it.
     if (sameRead || now - lastReceiptAt <= ANTIGRAVITY_PERMISSION_RECEIPT_WINDOW_MS) return verdict(null);
-    return verdict(causeFor(now - lastReceiptAt), now - lastReceiptAt);
+    return verdict('answered');
   }
   if (o.usedReceiptAt === lastReceiptAt) return verdict('used');
   if (lastReceiptAt > firstSeenAt) return verdict('predates');
 
-  const appearedAfter = Math.max(o.clearAt ?? firstSeenAt, lastReceiptAt);
+  // The clear read bounds the appearance only when it is the read right before
+  // the first sighting; otherwise the dialog may have been up since long before.
+  const clearBound =
+    o.clearAt !== null && firstSeenAt - o.clearAt <= MAX_READ_GAP_MS ? o.clearAt : firstSeenAt;
+  const appearedAfter = Math.max(clearBound, lastReceiptAt);
+  // Written as `!(… <= …)` so that a NaN withholds.
   if (
-    appearedAfter - lastReceiptAt > ANTIGRAVITY_PERMISSION_RECEIPT_WINDOW_MS ||
-    firstSeenAt - lastReceiptAt >
+    !(appearedAfter - lastReceiptAt <= ANTIGRAVITY_PERMISSION_RECEIPT_WINDOW_MS) ||
+    !(
+      firstSeenAt - lastReceiptAt <=
       ANTIGRAVITY_PERMISSION_RECEIPT_WINDOW_MS + ANTIGRAVITY_PERMISSION_RECEIPT_OBSERVATION_SLACK_MS
+    )
   ) {
     return verdict(causeFor(ageMs));
   }

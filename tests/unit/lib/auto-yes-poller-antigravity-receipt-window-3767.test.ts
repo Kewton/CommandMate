@@ -79,6 +79,8 @@ import {
 import { clearPolicySuppressions } from '@/lib/polling/auto-yes-suppression-state';
 import { clearAutoYesPolicyCache } from '@/lib/polling/auto-yes-policy';
 import { getLastPolicySuppression } from '@/lib/polling/auto-yes-suppression-state';
+import { judgeAntigravityPermissionReceipt } from '@/lib/polling/antigravity-receipt-episodes';
+import { buildCompositeKey } from '@/lib/auto-yes-state';
 
 const WORKTREE_ID = 'wt-3767';
 const FIXTURE_DIR = path.resolve(__dirname, '../../fixtures/antigravity-live-2364');
@@ -107,12 +109,13 @@ function pollerState(instanceId = 'antigravity'): AutoYesPollerState {
   };
 }
 
-/** Drive the real poller over one fixture, the way `pollAutoYes` does. */
+/** Drive the real poller over one fixture (or a built frame), the way `pollAutoYes` does. */
 async function respondTo(
   name: string,
   instanceId = 'antigravity',
+  raw: string = frame(name),
 ): Promise<'responded' | 'no_prompt' | 'duplicate' | 'no_answer' | 'error'> {
-  const clean = asPollerSees(frame(name));
+  const clean = asPollerSees(raw);
   return detectAndRespondToPrompt(
     WORKTREE_ID,
     pollerState(instanceId),
@@ -159,6 +162,41 @@ const withheldLines = (): Array<[string, Record<string, unknown>]> =>
 async function tickAt(ms: number, name: string): Promise<string> {
   vi.setSystemTime(T0 + ms);
   return respondTo(name);
+}
+
+/** A receipt for this instance at `T0 + ms`. */
+function receiptAt(ms: number): void {
+  vi.setSystemTime(T0 + ms);
+  receiptFor();
+}
+
+/**
+ * `idle-after-deny` with the wrapped dialog's rows quoted two columns in right
+ * above the input box, the way agy's reply carries one (built as in
+ * antigravity-quoted-dialog-autoyes.test.ts).
+ */
+function quotedDialogFrame(): string {
+  const rowsOf = (name: string): string[] => {
+    const rows = frame(name).split('\n');
+    if (rows[rows.length - 1] === '') rows.pop();
+    return rows;
+  };
+  const plain = (row: string): string => stripAnsi(row).trim();
+  const base = rowsOf(IDLE);
+  const source = rowsOf(DIALOG);
+  const first = source.findIndex(row => /^Do you want to proceed\?$/.test(plain(row)));
+  const last = source.findIndex((row, i) => i >= first && /↑\/↓ Navigate/.test(plain(row)));
+  expect(first).toBeGreaterThanOrEqual(0);
+  expect(last).toBeGreaterThan(first);
+  const quoted = source.slice(first, last + 1).map(row => (row === '' ? row : `  ${row}`));
+  let composerAt = -1;
+  base.forEach((row, i) => {
+    if (/^>$/.test(plain(row))) composerAt = i;
+  });
+  expect(composerAt).toBeGreaterThan(0);
+  const rows = [...base.slice(0, composerAt - 1), ...quoted, ...base.slice(composerAt - 1)];
+  for (let excess = quoted.length; excess > 0 && rows[rows.length - 1] === ''; excess--) rows.pop();
+  return `${rows.join('\n')}\n`;
 }
 
 describe('[#3767] the window is measured to the dialog\'s first appearance', () => {
@@ -255,11 +293,11 @@ describe('[#3767] no-hook-receipt is recorded and its hint tells the cases apart
   });
 
   it('says the dialog was already up when the receipt arrived late', async () => {
-    await tickAt(0, DIALOG);
+    // Read on every tick, so the episode is carried up to the receipt.
+    for (let ms = 10_000; ms <= 65_000; ms += 5_000) await tickAt(ms, DIALOG);
     mockLogger.info.mockClear();
-    vi.setSystemTime(T0 + 70_000);
-    receiptFor();
-    await tickAt(71_000, DIALOG);
+    receiptAt(70_000);
+    await tickAt(70_000, DIALOG);
 
     expect(withheldLines()[0][1].hint).toContain('より前から画面に');
   });
@@ -268,5 +306,84 @@ describe('[#3767] no-hook-receipt is recorded and its hint tells the cases apart
     receiptFor();
     expect(await tickAt(1_000, DIALOG)).toBe('responded');
     expect(getLastPolicySuppression(WORKTREE_ID, 'antigravity', 'antigravity')).toBeNull();
+  });
+});
+
+describe('[#3767] review follow-ups', () => {
+  it('M1: a gap in the reads does not let an old clear read bound a dialog up since before the receipt', async () => {
+    expect(await tickAt(0, IDLE)).toBe('no_prompt'); // the last clear read
+    // No reads for 50s (capture backoff, no session, Auto-Yes off): a dialog
+    // comes up at about 20s, an unrelated receipt at 50s, first read at 62s.
+    receiptAt(50_000);
+    expect(await tickAt(62_000, DIALOG)).toBe('no_prompt');
+    expect(sendPromptAnswer).not.toHaveBeenCalled();
+  });
+
+  it('M1 control: reads every 5s still answer the measured case', async () => {
+    expect(await tickAt(-6_300, IDLE)).toBe('no_prompt');
+    receiptAt(0);
+    expect(await tickAt(3_700, IDLE)).toBe('no_prompt');
+    expect(await tickAt(8_700, DIALOG)).toBe('responded');
+  });
+
+  it('M2: the answered dialog still up a tick later records no no-hook-receipt', async () => {
+    receiptAt(0);
+    expect(await tickAt(3_700, IDLE)).toBe('no_prompt');
+    expect(await tickAt(8_700, DIALOG)).toBe('responded');
+    sendPromptAnswer.mockClear();
+    expect(await tickAt(13_700, DIALOG)).toBe('no_prompt');
+    expect(sendPromptAnswer).not.toHaveBeenCalled();
+    expect(getLastPolicySuppression(WORKTREE_ID, 'antigravity', 'antigravity')).toBeNull();
+    expect(withheldLines()).toHaveLength(0);
+  });
+
+  it('L1: after the poller stops on an open episode, the first read on resume answers a dialog with its own receipt', async () => {
+    expect(await tickAt(0, DIALOG)).toBe('no_prompt'); // dialog A, no receipt
+    // Poller stopped; A is answered by hand; dialog B gets its receipt at 60s.
+    receiptAt(60_000);
+    expect(await tickAt(62_000, DIALOG)).toBe('responded');
+    expect(answersSent()).toEqual(['1']);
+  });
+
+  it('L3: an episode of another shape on globalThis withholds instead of comparing NaN', async () => {
+    receiptAt(0);
+    const key = buildCompositeKey(WORKTREE_ID, 'antigravity', 'antigravity');
+    globalThis.__antigravityReceiptObservations!.set(key, { tracking: true, candidateSeen: false });
+    expect(judgeAntigravityPermissionReceipt(WORKTREE_ID, 'antigravity', T0 + 20_000).ok).toBe(false);
+
+    globalThis.__antigravityReceiptObservations!.set(key, { tracking: true, candidateSeen: false });
+    expect(await tickAt(20_000, DIALOG)).toBe('no_prompt');
+    expect(sendPromptAnswer).not.toHaveBeenCalled();
+  });
+
+  it('L4: the lapsed hint counts from now on every line', async () => {
+    receiptAt(0);
+    await tickAt(120_000, IDLE);
+    for (let ms = 125_000; ms <= 185_000; ms += 5_000) await tickAt(ms, DIALOG);
+
+    const hints = withheldLines().map(([, fields]) => fields.hint as string);
+    expect(hints).toHaveLength(2);
+    expect(hints[0]).toContain('125 秒前');
+    expect(hints[1]).toContain('185 秒前');
+  });
+
+  it('L4: a quoted dialog is not answered even with a fresh receipt', async () => {
+    receiptAt(0);
+    expect(await tickAt(1_000, IDLE)).toBe('no_prompt');
+    vi.setSystemTime(T0 + 3_000);
+    expect(await respondTo(IDLE, 'antigravity', quotedDialogFrame())).toBe('no_prompt');
+    expect(sendPromptAnswer).not.toHaveBeenCalled();
+  });
+
+  it('L4: a newer receipt while the answered dialog stays up opens a new episode for the dialog that replaced it', async () => {
+    receiptAt(0);
+    expect(await tickAt(1_000, IDLE)).toBe('no_prompt');
+    expect(await tickAt(3_000, DIALOG)).toBe('responded');
+    sendPromptAnswer.mockClear();
+    expect(await tickAt(9_000, DIALOG)).toBe('no_prompt'); // answered, past the window
+    expect(getLastPolicySuppression(WORKTREE_ID, 'antigravity', 'antigravity')).toBeNull();
+    receiptAt(12_000);
+    expect(await tickAt(14_000, DIALOG)).toBe('responded');
+    expect(answersSent()).toEqual(['1']);
   });
 });

@@ -582,15 +582,6 @@ function logIfWithheldForWantOfReceipt(
   verdict ??= judgeAntigravityPermissionReceipt(worktreeId, instanceId, now);
   if (verdict.ok) return;
 
-  const lastLoggedAt = withheldNoReceiptLoggedAt.get(compositeKey);
-  const logDue = lastLoggedAt === undefined || now - lastLoggedAt >= WITHHELD_NO_RECEIPT_LOG_INTERVAL_MS;
-  if (logDue) {
-    for (const [key, loggedAt] of withheldNoReceiptLoggedAt) {
-      if (now - loggedAt >= WITHHELD_NO_RECEIPT_LOG_INTERVAL_MS) withheldNoReceiptLoggedAt.delete(key);
-    }
-    withheldNoReceiptLoggedAt.set(compositeKey, now);
-  }
-
   // Issue #3724: a contract that withholds the answer makes the server reply
   // `ask`, so the dialog stays up past the receipt window. The cause is then the
   // contract, not a hooks.json that points elsewhere. Judged exactly as the tick
@@ -599,6 +590,19 @@ function logIfWithheldForWantOfReceipt(
   // blamed on the contract. Policy and task id come from one lookup.
   const { policy, taskId } = getSessionAutoYesPolicyEntry(worktreeId, 'antigravity', instanceId);
   const resolution = resolveAutoAnswerWithPolicy(ungated.promptData, policy);
+  // Issue #3767: `answered` is the dialog the gate already let through on this
+  // receipt, still up past the window. Unless the contract withheld it, that is
+  // not a missing receipt: neither recorded nor logged, nor counted for the limit.
+  if (!resolution.suppressedBy && verdict.cause === 'answered') return;
+
+  const lastLoggedAt = withheldNoReceiptLoggedAt.get(compositeKey);
+  const logDue = lastLoggedAt === undefined || now - lastLoggedAt >= WITHHELD_NO_RECEIPT_LOG_INTERVAL_MS;
+  if (logDue) {
+    for (const [key, loggedAt] of withheldNoReceiptLoggedAt) {
+      if (now - loggedAt >= WITHHELD_NO_RECEIPT_LOG_INTERVAL_MS) withheldNoReceiptLoggedAt.delete(key);
+    }
+    withheldNoReceiptLoggedAt.set(compositeKey, now);
+  }
   if (resolution.suppressedBy) {
     if (!logDue) return;
     logger.info('antigravity-autoyes-withheld-by-policy', {
@@ -623,7 +627,7 @@ function logIfWithheldForWantOfReceipt(
     worktreeId,
     instanceId: instanceId ?? 'antigravity',
     windowMs: ANTIGRAVITY_PERMISSION_RECEIPT_WINDOW_MS,
-    hint: noHookReceiptHint(verdict),
+    hint: noHookReceiptHint(verdict, now),
   });
 }
 
@@ -631,15 +635,17 @@ function logIfWithheldForWantOfReceipt(
  * The hint for `antigravity-autoyes-withheld-no-hook-receipt` (Issue #3767):
  * which of the withheld cases it was decides where to look.
  */
-export function noHookReceiptHint(verdict: AntigravityReceiptVerdict): string {
+export function noHookReceiptHint(verdict: AntigravityReceiptVerdict, now: number = Date.now()): string {
   const seconds = verdict.ageMs === null ? null : Math.round(verdict.ageMs / 1000);
+  // `lapsed` says how long ago, so from now: the line repeats once a minute.
+  const secondsAgo = verdict.lastReceiptAt === null ? null : Math.round((now - verdict.lastReceiptAt) / 1000);
   switch (verdict.cause) {
     case 'never':
       return 'hook の受信が一度も無いため Auto-Yes は答えなかった。~/.gemini/config/hooks.json の向き先（#2622）を確認';
     case 'late':
       return `最後の受信から ${seconds} 秒後に確認が出た（窓 ${ANTIGRAVITY_PERMISSION_RECEIPT_WINDOW_MS / 1000} 秒の外）ため答えなかった。人が答える（auto-yes --disable → prompt --json → respond --expect-screen）。続くなら ~/.gemini/config/hooks.json の向き先（#2622）も確認`;
     case 'lapsed':
-      return `最後の受信は ${seconds} 秒前で途絶えている（hook が届かなくなった）。hooks.json の向き先（#2622）と agy の再起動を確認`;
+      return `最後の受信は ${secondsAgo} 秒前で途絶えている（hook が届かなくなった）。hooks.json の向き先（#2622）と agy の再起動を確認`;
     case 'predates':
       return '確認は最後の受信より前から画面に出ていた（引用か別の確認）ため答えなかった。人が答える';
     case 'used':
