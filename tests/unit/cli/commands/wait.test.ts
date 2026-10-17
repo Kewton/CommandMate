@@ -1535,6 +1535,42 @@ describe('Issue #3713: the partial-answer suppression has its own wording', () =
 });
 
 /**
+ * Issue #3757: `startup-trust-unhandled` (agy's trust screen, which the poller
+ * leaves to the launch) joined the reason union with its own wording.
+ */
+describe('Issue #3757: the startup-trust suppression has its own wording', () => {
+  const stderrOf = () => mockConsoleError.mock.calls.map(c => String(c[0])).join('\n');
+
+  it('names the trust screen, exits 10 and keeps the raw reason in --json', async () => {
+    mockFetchSequence([{
+      data: {
+        ...baseOutput,
+        isRunning: true,
+        isPromptWaiting: true,
+        sessionStatus: 'waiting' as const,
+        promptData: { type: 'multiple_choice', question: 'Do you trust the contents of this project?', options: [], status: 'pending' },
+        autoYes: {
+          enabled: true,
+          expiresAt: null,
+          lastSuppression: { reason: 'startup-trust-unhandled', mode: null, promptType: 'multiple_choice', at: Date.now() },
+        },
+      },
+    }]);
+    const { createWaitCommand } = await import('../../../../src/cli/commands/wait');
+    await createWaitCommand().parseAsync(['node', 'wait', 'wt1']);
+
+    const stderr = stderrOf();
+    expect(stderr).toContain("because agy's startup folder-trust confirmation is the launch's to answer");
+    expect(stderr).toContain('reason=startup-trust-unhandled');
+    expect(stderr).not.toContain('does not recognise');
+    expect(stderr).not.toContain('by contract policy');
+    expect(mockExit).toHaveBeenCalledWith(WaitExitCode.PROMPT_DETECTED);
+    const output = JSON.parse(mockConsoleLog.mock.calls[0][0]);
+    expect(output.autoYesSuppression).toMatchObject({ reason: 'startup-trust-unhandled', mode: null });
+  });
+});
+
+/**
  * Issue #1725: a dialog only the structured layer can see.
  *
  * The server publishes `isPromptWaiting: true` with a `promptData` that has no

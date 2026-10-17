@@ -55,6 +55,25 @@
  * it resolves in seconds, and the reminder below is what catches it when it
  * does not.
  *
+ * ## "About to answer" has a deadline (Issue #3757)
+ *
+ * Nothing recorded is not proof that Auto-Yes is answering. A screen the poller
+ * cannot read at all (agy's folder-trust screen was the measured case: the
+ * poller read no prompt, so it recorded nothing) looked exactly like the
+ * common case above, and the wait was held silent until the ten-minute
+ * reminder. So the hold lasts {@link AUTO_YES_ANSWER_GRACE_MS} — time for the
+ * poller to answer or to record why it did not — and a wait still open after
+ * that notifies as `auto-yes-not-answered`. `waiting-push-notifier` asks again
+ * when the hold ends.
+ *
+ * The hold is NOT counted from `waitingSince`. That is the wait's identity,
+ * not when anyone saw it: it can be a hook's timestamp older than the probe
+ * that opened the edge, and it stays frozen across several prompts of one
+ * episode. It is counted from {@link autoYesHoldStartedAt}: the later of the
+ * moment the gate first held this episode and the poller's last answer, so a
+ * second prompt right after an answer gets a full hold of its own. Both
+ * producers ask through {@link decideAndLogPromptPush} and share that origin.
+ *
  * ## The reminder is never muted
  *
  * `runEscalationTick` has already established that the wait is still open — it
@@ -70,13 +89,78 @@
  * @module lib/push/prompt-push-gate
  */
 
-import { getAutoYesState, type AutoYesStopReason } from '@/lib/auto-yes-state';
+import {
+  buildCompositeKey,
+  COOLDOWN_INTERVAL_MS,
+  getAutoYesState,
+  POLLING_INTERVAL_MS,
+  type AutoYesStopReason,
+} from '@/lib/auto-yes-state';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { createLogger } from '@/lib/logger';
 import type { AutoYesSuppressionReason } from '@/lib/polling/auto-yes-resolver';
 import { getLastPolicySuppression } from '@/lib/polling/auto-yes-suppression-state';
+import { getOrInitGlobal } from '@/lib/global-state';
 
 const logger = createLogger('push/prompt-gate');
+
+/**
+ * How long a wait with nothing recorded about it is held as "Auto-Yes is
+ * answering" (Issue #3757), from {@link autoYesHoldStartedAt}. The poller
+ * answers a prompt it can read on the tick that sees it and records a reason
+ * on the same tick when it will not, but that tick can be a cooldown away
+ * (`COOLDOWN_INTERVAL_MS` after an answer, as long while thinking), and the
+ * Enter fallback needs one more tick: a cooldown plus two ticks, 9 s.
+ */
+export const AUTO_YES_ANSWER_GRACE_MS = Math.max(
+  3 * POLLING_INTERVAL_MS,
+  COOLDOWN_INTERVAL_MS + 2 * POLLING_INTERVAL_MS,
+);
+
+/** When the gate first held one waiting episode as `auto-yes-answering`. */
+interface AutoYesHoldStart {
+  /** The episode's `waitingSince`: a new episode starts a new hold. */
+  since: number;
+  firstHeldAt: number;
+}
+
+declare global {
+  // eslint-disable-next-line no-var
+  var __promptPushAutoYesHolds: Map<string, AutoYesHoldStart> | undefined;
+}
+
+/** compositeKey -> the hold of that session's current episode. globalThis per #1736. */
+const autoYesHolds = getOrInitGlobal('__promptPushAutoYesHolds', () => new Map<string, AutoYesHoldStart>());
+
+/**
+ * Where this wait's `auto-yes-answering` hold is counted from (Issue #3757):
+ * the later of the moment the gate first held this episode (recorded here on
+ * the first call) and the Auto-Yes poller's last answer to this session.
+ *
+ * The poller's answer is read off its state on `globalThis`
+ * (`__autoYesPollerStates`, `lastServerResponseTimestamp`) rather than through
+ * `auto-yes-poller`, which imports `response-checker`, which imports this gate.
+ *
+ * @param now - Epoch ms of the decision; recorded as the start of a new hold
+ */
+export function autoYesHoldStartedAt(
+  input: Pick<PromptPushGateInput, 'worktreeId' | 'cliToolId' | 'instanceId' | 'waitingSince'>,
+  now: number,
+): number {
+  const key = buildCompositeKey(input.worktreeId, input.cliToolId, input.instanceId);
+  let hold = autoYesHolds.get(key);
+  if (hold === undefined || hold.since !== input.waitingSince) {
+    hold = { since: input.waitingSince, firstHeldAt: now };
+    autoYesHolds.set(key, hold);
+  }
+  const lastAnswer = globalThis.__autoYesPollerStates?.get(key)?.lastServerResponseTimestamp ?? null;
+  return lastAnswer !== null ? Math.max(hold.firstHeldAt, lastAnswer) : hold.firstHeldAt;
+}
+
+/** Forget every hold. Test seam. */
+export function clearAutoYesHolds(): void {
+  autoYesHolds.clear();
+}
 
 /** The wait a prompt notification is about, as the gate needs to see it. */
 export interface PromptPushGateInput {
@@ -88,6 +172,14 @@ export interface PromptPushGateInput {
   waitingSince: number;
   /** True for the "still waiting" reminder (#1790), which is never suppressed. */
   escalated?: boolean;
+  /** Epoch ms the decision is made at; defaults to now (Issue #3757). */
+  now?: number;
+  /**
+   * Where the `auto-yes-answering` hold is counted from (Issue #3757). Omitted,
+   * the hold has no end — {@link decideAndLogPromptPush} fills it in from
+   * {@link autoYesHoldStartedAt}.
+   */
+  holdStartedAt?: number;
 }
 
 /**
@@ -102,7 +194,12 @@ export type PromptPushGateReason =
   /** The #1790 reminder for a wait Auto-Yes has not resolved. */
   | 'escalation-reminder'
   /** Auto-Yes is on and about to answer: the one case that stays quiet. */
-  | 'auto-yes-answering';
+  | 'auto-yes-answering'
+  /**
+   * Issue #3757: Auto-Yes is on, nothing says why it has not answered, and
+   * {@link AUTO_YES_ANSWER_GRACE_MS} has passed — it is not going to.
+   */
+  | 'auto-yes-not-answered';
 
 export interface PromptPushGateDecision {
   /** True when no notification should be fanned out for this wait. */
@@ -138,6 +235,13 @@ export function decidePromptPush(input: PromptPushGateInput): PromptPushGateDeci
     return { suppress: false, reason: 'escalation-reminder' };
   }
 
+  if (
+    input.holdStartedAt !== undefined &&
+    (input.now ?? Date.now()) - input.holdStartedAt >= AUTO_YES_ANSWER_GRACE_MS
+  ) {
+    return { suppress: false, reason: 'auto-yes-not-answered' };
+  }
+
   return { suppress: true, reason: 'auto-yes-answering' };
 }
 
@@ -153,7 +257,24 @@ export function decidePromptPush(input: PromptPushGateInput): PromptPushGateDeci
  * so the line is only there for the "why did this one ring?" question.
  */
 export function isPromptPushSuppressed(input: PromptPushGateInput): boolean {
-  const decision = decidePromptPush(input);
+  return decideAndLogPromptPush(input).suppress;
+}
+
+/**
+ * {@link isPromptPushSuppressed}, with the whole decision handed back — for the
+ * caller that has to ask again when an `auto-yes-answering` hold ends
+ * (`waiting-push-notifier`, Issue #3757).
+ */
+export function decideAndLogPromptPush(
+  input: PromptPushGateInput,
+  options: { recheck?: boolean } = {},
+): PromptPushGateDecision {
+  let decision = decidePromptPush(input);
+  // Issue #3757: only a wait that reached the hold gets an origin recorded.
+  if (decision.reason === 'auto-yes-answering' && input.holdStartedAt === undefined) {
+    const now = input.now ?? Date.now();
+    decision = decidePromptPush({ ...input, now, holdStartedAt: autoYesHoldStartedAt(input, now) });
+  }
   const context = {
     worktreeId: input.worktreeId,
     cliToolId: input.cliToolId,
@@ -165,8 +286,12 @@ export function isPromptPushSuppressed(input: PromptPushGateInput): boolean {
     ...(decision.suppressedBy !== undefined ? { suppressedBy: decision.suppressedBy } : {}),
   };
 
-  if (decision.suppress) logger.info('prompt-push-suppressed', context);
+  // A re-ask at the end of a hold (Issue #3757) that holds again was already
+  // logged when the hold began.
+  if (decision.suppress && options.recheck === true) logger.debug('prompt-push-suppressed', context);
+  else if (decision.suppress) logger.info('prompt-push-suppressed', context);
+  else if (decision.reason === 'auto-yes-not-answered') logger.info('prompt-push-allowed', context);
   else logger.debug('prompt-push-allowed', context);
 
-  return decision.suppress;
+  return decision;
 }
