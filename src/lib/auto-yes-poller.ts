@@ -15,9 +15,13 @@ import type { CLIToolType } from './cli-tools/types';
 import { captureSessionOutput, captureSessionOutputFresh, getSessionPresence } from './session/cli-session';
 import { detectPromptOnCleanFrame } from './polling/response-checker';
 import {
-  ANTIGRAVITY_PERMISSION_RECEIPT_WINDOW_MS,
-  hasRecentAntigravityPermissionReceipt,
-} from './polling/antigravity-permission-receipts';
+  beginAntigravityFrameRead,
+  endAntigravityFrameRead,
+  getAntigravityReceiptVerdict,
+  judgeAntigravityPermissionReceipt,
+  type AntigravityReceiptVerdict,
+} from './polling/antigravity-receipt-episodes';
+import { ANTIGRAVITY_PERMISSION_RECEIPT_WINDOW_MS } from './polling/antigravity-permission-receipts';
 import { resolveAutoAnswerWithPolicy } from './polling/auto-yes-resolver';
 import {
   getSessionAutoYesPolicy,
@@ -82,7 +86,11 @@ import {
   type AutoYesState,
 } from './auto-yes-state';
 import { getOrInitGlobal } from './global-state';
-import { PARTIAL_ANSWER_SUPPRESSION_REASON } from './polling/auto-yes-suppression-reason';
+import {
+  NO_HOOK_RECEIPT_SUPPRESSION_REASON,
+  PARTIAL_ANSWER_SUPPRESSION_REASON,
+} from './polling/auto-yes-suppression-reason';
+import { recordPolicySuppression } from './polling/auto-yes-suppression-state';
 import {
   beginSendAttempt,
   clearPartialAnswers,
@@ -561,19 +569,18 @@ function logIfWithheldForWantOfReceipt(
   compositeKey: string,
   readWithoutGate: () => PromptDetectionResult,
 ): void {
-  if (hasRecentAntigravityPermissionReceipt(worktreeId, 'antigravity', instanceId)) return;
+  // Issue #3767: the gate's own verdict for this tick's candidate. Null means it
+  // never saw one (no dialog), `ok` that it let the frame through.
+  let verdict = getAntigravityReceiptVerdict(worktreeId, instanceId);
+  if (verdict?.ok) return;
 
   const now = Date.now();
-  const lastLoggedAt = withheldNoReceiptLoggedAt.get(compositeKey);
-  if (lastLoggedAt !== undefined && now - lastLoggedAt < WITHHELD_NO_RECEIPT_LOG_INTERVAL_MS) return;
-
   const ungated = readWithoutGate();
   if (!ungated.isPrompt || !ungated.promptData) return;
-
-  for (const [key, loggedAt] of withheldNoReceiptLoggedAt) {
-    if (now - loggedAt >= WITHHELD_NO_RECEIPT_LOG_INTERVAL_MS) withheldNoReceiptLoggedAt.delete(key);
-  }
-  withheldNoReceiptLoggedAt.set(compositeKey, now);
+  // The gate was not consulted (the gated reading declined the frame on screen
+  // grounds alone) yet the frame reads as a prompt: judge it here.
+  verdict ??= judgeAntigravityPermissionReceipt(worktreeId, instanceId, now);
+  if (verdict.ok) return;
 
   // Issue #3724: a contract that withholds the answer makes the server reply
   // `ask`, so the dialog stays up past the receipt window. The cause is then the
@@ -583,7 +590,21 @@ function logIfWithheldForWantOfReceipt(
   // blamed on the contract. Policy and task id come from one lookup.
   const { policy, taskId } = getSessionAutoYesPolicyEntry(worktreeId, 'antigravity', instanceId);
   const resolution = resolveAutoAnswerWithPolicy(ungated.promptData, policy);
+  // Issue #3767: `answered` is the dialog the gate already let through on this
+  // receipt, still up past the window. Unless the contract withheld it, that is
+  // not a missing receipt: neither recorded nor logged, nor counted for the limit.
+  if (!resolution.suppressedBy && verdict.cause === 'answered') return;
+
+  const lastLoggedAt = withheldNoReceiptLoggedAt.get(compositeKey);
+  const logDue = lastLoggedAt === undefined || now - lastLoggedAt >= WITHHELD_NO_RECEIPT_LOG_INTERVAL_MS;
+  if (logDue) {
+    for (const [key, loggedAt] of withheldNoReceiptLoggedAt) {
+      if (now - loggedAt >= WITHHELD_NO_RECEIPT_LOG_INTERVAL_MS) withheldNoReceiptLoggedAt.delete(key);
+    }
+    withheldNoReceiptLoggedAt.set(compositeKey, now);
+  }
   if (resolution.suppressedBy) {
+    if (!logDue) return;
     logger.info('antigravity-autoyes-withheld-by-policy', {
       worktreeId,
       instanceId: instanceId ?? 'antigravity',
@@ -594,12 +615,44 @@ function logIfWithheldForWantOfReceipt(
     });
     return;
   }
+  // Issue #3767: recorded on every tick (the record's `at` follows the prompt
+  // while it stays up), logged once a minute.
+  recordPolicySuppression(worktreeId, 'antigravity', instanceId, {
+    reason: NO_HOOK_RECEIPT_SUPPRESSION_REASON,
+    mode: null,
+    promptType: ungated.promptData.type,
+  });
+  if (!logDue) return;
   logger.info('antigravity-autoyes-withheld-no-hook-receipt', {
     worktreeId,
     instanceId: instanceId ?? 'antigravity',
     windowMs: ANTIGRAVITY_PERMISSION_RECEIPT_WINDOW_MS,
-    hint: 'hook の受信記録が直近に無いため Auto-Yes は答えなかった。~/.gemini/config/hooks.json の向き先（#2622）を確認',
+    hint: noHookReceiptHint(verdict, now),
   });
+}
+
+/**
+ * The hint for `antigravity-autoyes-withheld-no-hook-receipt` (Issue #3767):
+ * which of the withheld cases it was decides where to look.
+ */
+export function noHookReceiptHint(verdict: AntigravityReceiptVerdict, now: number = Date.now()): string {
+  const seconds = verdict.ageMs === null ? null : Math.round(verdict.ageMs / 1000);
+  // `lapsed` says how long ago, so from now: the line repeats once a minute.
+  const secondsAgo = verdict.lastReceiptAt === null ? null : Math.round((now - verdict.lastReceiptAt) / 1000);
+  switch (verdict.cause) {
+    case 'never':
+      return 'hook の受信が一度も無いため Auto-Yes は答えなかった。~/.gemini/config/hooks.json の向き先（#2622）を確認';
+    case 'late':
+      return `最後の受信から ${seconds} 秒後に確認が出た（窓 ${ANTIGRAVITY_PERMISSION_RECEIPT_WINDOW_MS / 1000} 秒の外）ため答えなかった。人が答える（auto-yes --disable → prompt --json → respond --expect-screen）。続くなら ~/.gemini/config/hooks.json の向き先（#2622）も確認`;
+    case 'lapsed':
+      return `最後の受信は ${secondsAgo} 秒前で途絶えている（hook が届かなくなった）。hooks.json の向き先（#2622）と agy の再起動を確認`;
+    case 'predates':
+      return '確認は最後の受信より前から画面に出ていた（引用か別の確認）ため答えなかった。人が答える';
+    case 'used':
+      return '最後の受信は直前の確認に使い済み。この確認に対する受信は無いため答えなかった。人が答える';
+    default:
+      return 'hook の受信記録が直近に無いため Auto-Yes は答えなかった。~/.gemini/config/hooks.json の向き先（#2622）を確認';
+  }
 }
 
 /**
@@ -1052,6 +1105,9 @@ export async function detectAndRespondToPrompt(
     // makes "the status chain and Auto-Yes read the same live region" a fact
     // rather than a hope: there is no second normalisation to disagree with.
     const frame = normalizeFrame(rawOutput ?? cleanOutput, cliToolId);
+    // Issue #3767: bracket the read so the receipt gate can tell when an agy
+    // dialog first appeared, not only what time this tick is.
+    if (cliToolId === 'antigravity') beginAntigravityFrameRead(worktreeId, instanceId);
     const promptDetection = detectPromptOnCleanFrame(
       cleanOutput,
       cliToolId,
@@ -1060,6 +1116,7 @@ export async function detectAndRespondToPrompt(
       receiptScope,
       frame,
     );
+    if (cliToolId === 'antigravity') endAntigravityFrameRead(worktreeId, instanceId);
 
     if (!promptDetection.isPrompt || !promptDetection.promptData) {
       forgetPartialAnswer(compositeKey);

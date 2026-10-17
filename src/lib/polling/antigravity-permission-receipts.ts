@@ -54,6 +54,8 @@ import { getOrInitGlobal } from '../global-state';
 declare global {
   // eslint-disable-next-line no-var
   var __antigravityPermissionReceipts: Map<string, PermissionReceipt> | undefined;
+  // eslint-disable-next-line no-var
+  var __antigravityReceiptObservations: Map<string, unknown> | undefined;
 }
 
 /**
@@ -90,6 +92,13 @@ function pruneExpiredReceipts(now: number): void {
     if (now - receipt.at > RECEIPT_IDLE_TTL_MS) receipts.delete(key);
   }
 }
+
+/**
+ * Per-instance episode state of the poller's reads (Issue #3767); the logic is in
+ * `antigravity-receipt-episodes.ts`. The Map lives here only so that
+ * {@link resetAntigravityPermissionReceiptsForTests} empties both records.
+ */
+const observations = getOrInitGlobal('__antigravityReceiptObservations', () => new Map<string, unknown>());
 
 /**
  * Record that agy asked CommandMate about a tool call.
@@ -140,7 +149,20 @@ export function hasRecentAntigravityPermissionReceipt(
   return now - receipt.at <= ANTIGRAVITY_PERMISSION_RECEIPT_WINDOW_MS;
 }
 
+/**
+ * The latest question's arrival time for this instance, kept past the window
+ * (Issue #3767), or null when none was ever received.
+ */
+export function getAntigravityPermissionReceiptAt(
+  worktreeId: string,
+  cliToolId: CLIToolType,
+  instanceId: string | undefined,
+): number | null {
+  return receipts.get(buildCompositeKey(worktreeId, cliToolId, instanceId))?.at ?? null;
+}
+
 /** Empty the record. Tests only: production entries age out on their own. */
 export function resetAntigravityPermissionReceiptsForTests(): void {
   receipts.clear();
+  observations.clear();
 }
