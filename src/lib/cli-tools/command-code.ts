@@ -53,6 +53,7 @@ import {
 } from '../detection/cli-patterns';
 import { getErrorMessage } from '@/lib/errors';
 import { createLogger } from '@/lib/logger';
+import { PLAN_REVIEW_SEND_REFUSED_CODE } from '@/lib/session/send-attempt-types';
 import type { AgentLaunchContext } from '@/lib/hooks/sources';
 import { COMMAND_CODE_CLI_TOOL_ID } from '@/lib/hooks/sources/command-code/tool-id';
 import {
@@ -368,7 +369,9 @@ export class CommandCodeTool extends BaseCLITool {
       planReviewPolls = planReviewUp ? planReviewPolls + 1 : 0;
       if (planReviewPolls >= 2) {
         logger.info('command-code-plan-review-blocks-send', { sessionName });
-        throw new Error(COMMAND_CODE_PLAN_REVIEW_SEND_MESSAGE);
+        throw Object.assign(new Error(COMMAND_CODE_PLAN_REVIEW_SEND_MESSAGE), {
+          code: PLAN_REVIEW_SEND_REFUSED_CODE,
+        });
       }
       await new Promise((resolve) => setTimeout(resolve, pollInterval));
     }
@@ -420,7 +423,12 @@ export class CommandCodeTool extends BaseCLITool {
     } catch (error: unknown) {
       // Issue #3006: passed through unwrapped so its `code` reaches the route.
       if (isSessionStartTimeoutError(error)) throw error;
-      throw new Error(`Failed to send message to Command Code: ${getErrorMessage(error)}`);
+      const wrapped = new Error(`Failed to send message to Command Code: ${getErrorMessage(error)}`);
+      // Issue #3772: the plan review refusal comes before the body; keep its code.
+      if ((error as { code?: unknown } | null)?.code === PLAN_REVIEW_SEND_REFUSED_CODE) {
+        throw Object.assign(wrapped, { code: PLAN_REVIEW_SEND_REFUSED_CODE });
+      }
+      throw wrapped;
     }
   }
 

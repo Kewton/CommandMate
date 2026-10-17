@@ -500,6 +500,7 @@ that kind of screen directly under it. You answer it without leaving chat.
 | A selection list is open | Arrow keys plus Enter / Esc. Depending on the screen, number keys or "This session only" / "Set as default" are added (see "The buttons a selection list gets" below) |
 | A screen nothing could classify | Arrows and Esc (Navigate) plus the digits 1-9, y / n and Enter |
 | Waiting, with options nobody could read | The digits 1-9, y / n and Enter |
+| Trust confirmation (agy) | The banner reads "Terminal action needed (trust confirmation). The agent will not continue until you answer whether to trust this folder, and Auto-Yes does not answer this screen. Pick with the arrows and press Enter, or answer it in the terminal." You can send the arrows and Enter from here |
 
 **Press the number or y/n while reading the card.** Enter confirms whatever the CLI has
 currently highlighted, so on a numbered dialog an Enter meant as "no" can land as an
