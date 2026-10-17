@@ -530,6 +530,8 @@ The payload is `promptObservation` of `GET /api/worktrees/<id>/current-output?ob
 
 The kinds are a vocabulary of their own, separate from `promptData.type` and `sessionStatusReason` (`antigravity_selection_list`, …). Do not make those values a send condition.
 
+To answer a screen only while it is still the one observed, pass its kind and token to [the strict `respond`](#strict-mode-answer-only-the-screen-you-observed---expect-screen-issue-3756).
+
 ### Main fields
 
 | Field | Meaning |
@@ -574,11 +576,94 @@ commandmate respond <worktree-id> "text"         # Free text
 commandmate respond <worktree-id> "yes" --instance codex     # Specific instance
 ```
 
+### Strict Mode: Answer Only the Screen You Observed (`--expect-screen`, Issue #3756)
+
+With `--expect-screen <kind> --observation <token>`, the server answers only when a capture it takes **just before
+sending** still shows `<kind>` and the observation token printed by [`commandmate prompt`](#commandmate-prompt) still
+verifies. Otherwise it sends **nothing** and exits 40.
+
+```bash
+commandmate prompt <worktree-id> --instance antigravity --json        # read kind, options, token, approvalTarget
+commandmate respond <worktree-id> "Yes" --instance antigravity \
+  --expect-screen antigravity-trust --observation <token> \
+  --expect-target "<the folder approvalTarget showed>" --json
+```
+
+- It goes to its own endpoint, `POST /api/worktrees/<id>/prompt-response/strict`. An older server without it is a
+  **stop** (exit 40, `strict_endpoint_missing`); it never falls back to the unchecked `/prompt-response`
+- The kinds it answers are `antigravity-trust` (the folder trust screen) and `antigravity-permission` (the numbered
+  permission dialog). `antigravity-model-picker` (its effort row is not read), `antigravity-slash-menu` and `unknown`
+  are refused before any key
+- **While the instance's Auto-Yes is on, `antigravity-permission` cannot be answered strictly** (exit 40,
+  `auto_yes_active`): the poller answers the same dialog itself, and an Enter could land on the screen that follows.
+  Turn it off first with `commandmate auto-yes <worktree-id> --disable`. `antigravity-trust`, which Auto-Yes never
+  answers, can be answered with Auto-Yes on
+- A trust screen also requires its **folder (`approvalTarget`) to equal `--expect-target`**. Without
+  `--expect-target` nothing is sent and the folder on screen comes back as `observedTarget`. A trust screen whose
+  folder could not be read is refused
+- `--observation` is the observation token, not the auth `--token`. It is used up before the first key (a send that
+  then fails cannot reuse it). After a refusal, observe again with `commandmate prompt`
+- Before any key, the fresh capture is checked for: the kind, the token (pane, session generation, appearance of the
+  screen, options, highlighted option), the folder, the option the answer names, **the screen being open at the
+  bottom of the pane** (no input box under it, `↑/↓ Navigate` at the end — a trust screen quoted in a reply still
+  being generated is not answered), and the launch not handling the trust screen itself. The launch's owed Enter
+  (#3757) is dropped once the strict respond answers the trust screen, so the two never both answer it
+- **This is not a way to get auto mode's permission.** It guarantees only that an answer cannot land on a screen it
+  was not meant for; whether the approval may be given is for the user's permission rules. Do not retry an action
+  auto mode refused through this flag
+
+#### Answering an Unnumbered Screen
+
+The trust screen numbers no option. Answer with the **option's label**; it is sent only when it matches exactly one
+option visible on screen (case and spacing aside; with no exact match, a leading match up to a word boundary —
+`Yes` → `Yes, I trust this folder`). What is sent is **Up/Down and Enter**, not text: the screen is read again after
+every arrow, and the next key goes only while it is the same screen with the highlight where the keys put it.
+
+- An option number and `--default` are refused (exit 2)
+- A label matching two or more options, a screen with repeated labels, and an option outside the visible rows are refused
+- On the numbered `antigravity-permission`, an option number works too
+
+#### Outcome and Operation IDs
+
+After the Enter the screen is read for a few seconds and `outcome` says what it did: `advanced` (nothing asks any
+more: the input box, or working) / `next-prompt` (another confirmation) / `session-ended` (the session is gone — agy
+exits when the trust screen is answered `No, exit`) / `unchanged` (the same screen) / `indeterminate` (unreadable, or
+`unknown`). `advanced`, `next-prompt` and `session-ended` are success (exit 0); a screen that stayed is never answered
+again automatically.
+
+Without `--operation-id <id>` a new id is used each time. Ids are kept per worktree and instance (session), together
+with what the request asked (kind, answer, token, `--expect-target`). Sending an operation that sent keys (exit 0 / 41)
+again with the same id and the same arguments returns the stored result (`replayed: true`) and **sends nothing twice**
+(for 10 minutes; a server restart forgets it). The same id with different arguments sends nothing and exits 41
+(`operation_id_conflict`). An exit-40 result (nothing sent) is not kept, so the answer can be corrected and sent again
+with the same id. When the answer was lost (exit 41, `response_unknown`), re-run with the same `--operation-id` and
+arguments to read that operation's result. A server that could not be connected to at all (connection refused, …) never
+got the request: exit 40 (`server_unreachable`).
+
+`--json` prints exactly one result object on stdout (`code` / `delivery` (`not-sent` / `partial` / `sent` /
+`indeterminate`) / `reason` / `expectedKind` / `observedKind` / `observedTarget` / `operationId` / `answer` /
+`keysSent` / `outcome`). Explanations go to stderr.
+
+Who answered (the agent the CLI runs in, `agent:<worktree>/<instance>`, or `cli`), which screen and which option are
+recorded in server.log (`strict-prompt-answered` / `strict-prompt-response-refused`) and, once any key was sent, in
+the task's history (`prompt_answered_human`, with the reason code when it stopped short). Who answered (`answeredBy`)
+is **self-reported** by the CLI from its environment; the server does not verify it.
+
+#### Residual Race
+
+Checking and sending are not atomic. Strict answers to one instance are serialised on the server and the screen is
+read again between keys, but a key typed at the pane, or a change on the tmux side, between the last check and the
+next key is not seen. A screen that goes away and comes back with the same words between two observations counts as
+the same appearance (`screen.token` of [`commandmate prompt`](#commandmate-prompt)).
+
 ### Exit Codes
 
 | Code | Meaning |
 |:----:|---------|
 | 0 | Response sent successfully |
+| 2 | Argument errors; in strict mode also `--default`, a number on an unnumbered screen, or only one of `--expect-screen` / `--observation` |
+| 40 | Strict mode: the screen did not match or could not be checked. **Nothing was sent** (kind, token, folder or label mismatch, capture failure, an older server, …). Observe again with `commandmate prompt` |
+| 41 | Strict mode: keys were sent (or may have been) and the result is not confirmed. **Do not send again**; look at the pane |
 | 99 | Prompt already dismissed (`prompt_no_longer_active`) |
 
 ---

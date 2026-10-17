@@ -267,6 +267,19 @@ export const VerifyExitCode = {
 export type VerifyExitCode = typeof VerifyExitCode[keyof typeof VerifyExitCode];
 
 /**
+ * The strict `respond` (`--expect-screen`, Issue #3756). Infrastructure
+ * failures keep {@link ExitCode}; argument errors stay 2.
+ */
+export const StrictRespondExitCode = {
+  SUCCESS: 0,
+  /** The screen did not match (or could not be checked), so nothing was sent. Observe again before answering. */
+  NOT_SENT: 40,
+  /** Keys were sent (or may have been) and the result is not confirmed. Do not send them again. */
+  INDETERMINATE: 41,
+} as const;
+export type StrictRespondExitCode = typeof StrictRespondExitCode[keyof typeof StrictRespondExitCode];
+
+/**
  * Non-zero exit codes ordered by which one wins when several worktrees produce
  * different verdicts in one `wait` invocation (Issue #1544). Codes absent from
  * this list (infrastructure failures such as 1/2/99) rank after every listed
@@ -493,6 +506,16 @@ export interface RespondOptions {
   default?: boolean;
   /** Issue #3125: Command Code plan review action (comment / submit / approve / cancel) */
   planReview?: string;
+  /** Issue #3756: the strict respond — the screen kind the answer is for */
+  expectScreen?: string;
+  /** Issue #3756: the observation token `commandmate prompt` printed for that screen */
+  observation?: string;
+  /** Issue #3756: the folder a trust screen must name */
+  expectTarget?: string;
+  /** Issue #3756: id that makes a retry of the same strict answer send nothing twice */
+  operationId?: string;
+  /** Issue #3756: print the strict respond's result object as JSON */
+  json?: boolean;
 }
 
 /** prompt command options [Issue #3755] */

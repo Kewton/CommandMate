@@ -39,7 +39,7 @@ import {
   forgetSessionStatus,
   publishSessionStatus,
 } from '@/lib/tmux/session-status-options';
-import { probeSession, type SessionPresence } from '@/lib/tmux/tmux';
+import { probeSession, sendSpecialKeys, type SessionPresence } from '@/lib/tmux/tmux';
 import { isLiveAttachEligibleSession } from './tmux-session-surface';
 
 const logger = createLogger('cli-session');
@@ -190,6 +190,31 @@ export async function captureSessionOutputFresh(
     const errorMessage = error instanceof Error ? error.message : String(error);
     log.error('captureSessionOutputFresh:failed', { error: errorMessage });
     throw new Error(`Failed to capture ${cliTool.name} output: ${errorMessage}`);
+  }
+}
+
+/** The keys the strict `respond` (Issue #3756) answers a screen with. */
+export type SessionAnswerKey = 'Up' | 'Down' | 'Enter';
+
+/**
+ * Send ONE answer key to a session and drop its cached capture, so the next
+ * read is of the pane after the key (Issue #3756). One key per call: the
+ * strict `respond` reads the screen again between two keys.
+ */
+export async function sendSessionAnswerKey(
+  worktreeId: string,
+  cliToolId: CLIToolType,
+  key: SessionAnswerKey,
+  instanceId?: string
+): Promise<void> {
+  if (key !== 'Up' && key !== 'Down' && key !== 'Enter') {
+    throw new Error(`Unsupported answer key: ${String(key)}`);
+  }
+  const { sessionName } = resolveSessionContext(worktreeId, cliToolId, instanceId);
+  try {
+    await sendSpecialKeys(sessionName, [key]);
+  } finally {
+    invalidateCache(sessionName);
   }
 }
 

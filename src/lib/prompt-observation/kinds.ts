@@ -69,3 +69,23 @@ export function isPromptObservationKind(value: unknown): value is PromptObservat
 export function isDecisionKind(kind: PromptObservationKind): boolean {
   return !NO_PROMPT_OBSERVATION_KINDS.includes(kind);
 }
+
+/**
+ * The kinds the strict `respond` (Issue #3756) answers. Every other kind is
+ * refused before a key: the `/model` picker's effort slider is not read, the
+ * slash popup is a menu of the composer, and `unknown` is never answered.
+ */
+export const STRICT_RESPOND_KINDS = ['antigravity-trust', 'antigravity-permission'] as const;
+
+export type StrictRespondKind = (typeof STRICT_RESPOND_KINDS)[number];
+
+/** Whether `kind` is one of {@link STRICT_RESPOND_KINDS}. */
+export function isStrictRespondKind(kind: unknown): kind is StrictRespondKind {
+  return typeof kind === 'string' && (STRICT_RESPOND_KINDS as readonly string[]).includes(kind);
+}
+
+/**
+ * Strict kinds whose rows carry no number: answered only by a label, which is
+ * sent as ↑/↓ and Enter. An option number or `--default` is refused there.
+ */
+export const UNNUMBERED_STRICT_RESPOND_KINDS: readonly StrictRespondKind[] = ['antigravity-trust'];
