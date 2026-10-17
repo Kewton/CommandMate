@@ -169,6 +169,7 @@ configured and no subscription, is what the column exists for.
 | `42:10` | Time left (`MM:SS` under an hour) |
 | `1:05:33` | Time left (`H:MM:SS` from an hour up) |
 | `off` | At least one of those instances is **not armed**, so a prompt on this row waits for a human |
+| `off(restart)` | An `off` instance whose grant **a server restart released** (Issue #3730). A restart never turns a grant back on. It reads this way until the original grant's deadline, or until `--enable` / `--disable`. The reason is `autoYesStopReasonByInstance.<instanceId>: "server-restart"` in `--json` (a field of its own, beside the armed-only `autoYesByInstance`) |
 | `blocked` | Armed, but the contract running on that instance sets `autoYes.mode: off`, so it **answers nothing** (Issue #3723). Like `off`, a prompt waits for a human. The reason is `autoYesByInstance.<instanceId>.blockedByContract: true` in `--json` |
 | `on` | Armed with no expiry the server named (`expiresAt: null`; the current server does not produce this shape) |
 | `-` | **Not known**: the server predates #2512 (no `autoYesByInstance`), or this row is not `idle` and no instance explains its STATUS |
@@ -1043,6 +1044,20 @@ gemini       Gemini  gemini    no       no                                   mcb
 ---
 
 
+#### `autoYes.stopReason`: Why Auto-Yes Stopped
+
+On an instance whose Auto-Yes is off, the reason it stopped, when there is one (otherwise the key is
+absent): `expired`, `stop_pattern_matched`, `consecutive_errors`, and **`server-restart`**
+(Issue #3730) — the grant was live when the server stopped gracefully (SIGINT / SIGTERM, including
+`/rebuild` and `commandmate stop`).
+
+- A restart **never turns the grant back on** (`enabled: false`). The reason stays until the original
+  grant's deadline, including across another restart inside it, and goes on `--enable` or `--disable`
+- A SIGKILL or a crash records nothing; those grants come back as a plain off
+- The same reason reads `off(restart)` in `commandmate ls`, `no(restart)` in `commandmate instances`,
+  and "Released by restart" in the UI. On exit 10, `commandmate wait` adds one stderr line naming the
+  re-enable command with the waited-on `--instance`
+
 #### `autoYes.lastSuppression`: Observing a Policy Suppression (Issue #1684)
 
 The last time a contract's `autoYes` policy **suppressed** an automatic answer (`null` if it never
@@ -1740,6 +1755,9 @@ a `RUNNING no` row can read `yes`.
 - `autoYes` in `--json` is the same value
 - An armed instance whose running contract sets `autoYes.mode: off` reads `blocked` (Issue #3723).
   In `--json`, `autoYes` stays `true` and `autoYesBlockedByContract: true` is added (absent on every other row)
+- An instance whose grant a server restart released reads `no(restart)` (Issue #3730). In `--json`,
+  `autoYes: false` gains `autoYesStopReason: "server-restart"` (absent on every other row). It reads
+  so until the original grant's deadline, or until `--enable` / `--disable`
 
 #### The `MODEL` / `EFFORT` Columns (Issue #1785)
 

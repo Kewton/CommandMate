@@ -180,6 +180,7 @@ commandmate ls --json \
 | `42:10` | 残り時間（1 時間未満は `MM:SS`） |
 | `1:05:33` | 残り時間（1 時間以上は `H:MM:SS`） |
 | `off` | 対象 instance の少なくとも 1 つが**未武装**。その行のプロンプトは人が答えないと進まない |
+| `off(restart)` | `off` のうち、**サーバーの再起動で許可が外れた** instance（Issue #3730）。再起動で許可は戻りません。元の許可の期限まで、または `--enable` / `--disable` するまでこの表示になります。根拠は `--json` の `autoYesStopReasonByInstance.<instanceId>: "server-restart"`（武装中の `autoYesByInstance` とは別の欄） |
 | `blocked` | 武装しているが、その instance で実行中の契約が `autoYes.mode: off` を指定しているため**何にも答えない**（Issue #3723）。`off` と同じく人が答えないと進まない。根拠は `--json` の `autoYesByInstance.<instanceId>.blockedByContract: true` |
 | `on` | 武装しているが期限が無い（サーバーが `expiresAt: null` を返した場合。通常のサーバーでは出ません） |
 | `-` | **判定できない**。#2512 より古いサーバー（`autoYesByInstance` が無い）／`idle` 以外の行で STATUS を説明する instance が 1 つも無い |
@@ -1879,6 +1880,20 @@ commandmate capture <worktree-id> --instance worker-7 --json | jq -r '.resolvedB
   スクロールした場合も、障害が pane を空白のまま残した場合（#1834 の実測例）も `null` になります
 - `wait --fail-on-upstream-fault` はこのフィールドだけを見て exit 11 を返します
 
+#### `autoYes.stopReason`: Auto-Yes が止まった理由
+
+Auto-Yes が OFF の instance で、止まった理由があれば入ります（無ければ欄ごとありません）。
+`expired`（期限切れ）、`stop_pattern_matched`（停止パターンに一致）、`consecutive_errors`（連続エラー）のほか、
+**`server-restart`**（Issue #3730）は「許可が有効なまま、サーバーが正常終了（SIGINT / SIGTERM。
+`/rebuild` や `commandmate stop` を含む）した」ことを示します。
+
+- 再起動で許可は**戻りません**（`enabled: false`）。理由の表示は元の許可の期限まで残り、
+  期限内にもう一度再起動しても残ります。`--enable` か `--disable` で消えます
+- SIGKILL やクラッシュでは記録されず、理由の無い `off` で戻ります
+- 同じ理由が `commandmate ls` の `off(restart)`、`commandmate instances` の `no(restart)`、
+  画面の「再起動で解除」に出ます。`commandmate wait` は exit 10 のときに stderr に 1 行足し、
+  再有効化のコマンドを待機対象の `--instance` 付きで示します
+
 #### `autoYes.lastSuppression`: ポリシー抑止の観測（Issue #1684）
 
 実行契約の `autoYes` ポリシーが自動応答を**抑止**した最後の記録です（抑止が無ければ `null`）。
@@ -2565,6 +2580,9 @@ opencode     opencode opencode yes      no        claude-sonnet-4.6          ses
 - `--json` の `autoYes` も同じ値です
 - 有効でも、その instance で実行中の契約が `autoYes.mode: off` なら `blocked` と出ます（Issue #3723）。
   `--json` では `autoYes: true` のまま `autoYesBlockedByContract: true` が付きます（該当しない行には付きません）
+- サーバーの再起動で許可が外れた instance は `no(restart)` と出ます（Issue #3730）。`--json` では
+  `autoYes: false` に `autoYesStopReason: "server-restart"` が付きます（該当しない行には付きません）。
+  元の許可の期限まで、または `--enable` / `--disable` するまでの表示です
 
 #### `TMUX_SESSION` 列（Issue #2317）
 

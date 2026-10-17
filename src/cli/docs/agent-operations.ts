@@ -421,7 +421,8 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
   the next --enable / --disable (Issue #3730): 'capture --json' autoYes.stopReason
   = 'server-restart', 'ls' AUTO_YES 'off(restart)', 'instances' AUTO_YES
   'no(restart)', a 'wait' exit 10 adds a stderr line, and the UI toggle reads
-  "Released by restart". Re-enable with --enable. A SIGKILL or a crash records
+  "Released by restart". Re-enable with --enable --instance <that instance> (a
+  bare --enable arms the default primary). A SIGKILL or a crash records
   nothing: those grants come back as a plain off.
 
 ### commandmate instances <worktree-id> [action] [args]

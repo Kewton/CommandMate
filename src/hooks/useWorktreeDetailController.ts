@@ -578,6 +578,14 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     () => Array.from(autoYesStateMap.values()).some((entry) => entry.enabled),
     [autoYesStateMap],
   );
+  // Issue #3730: a restart notice on any instance (primary or alias). It ends
+  // at the released grant's deadline on the server, and only the whole-worktree
+  // re-read below brings that end to an alias — the current-output poll on PC
+  // is about the primary alone.
+  const anyAutoYesReleasedByRestart = useMemo(
+    () => Array.from(autoYesStateMap.values()).some((entry) => isReleasedByRestart(entry)),
+    [autoYesStateMap],
+  );
   // Trigger to refresh FileTreeView after file operations
   const [fileTreeRefresh, setFileTreeRefresh] = useState(0);
 
@@ -2024,14 +2032,18 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
    * wholesale, so its `blockedByContract` overwrites the value the
    * current-output poll carries forward — a contract that started sets it, one
    * that ended clears it.
+   *
+   * Issue #3730: also while any instance shows a restart notice, though every
+   * instance is OFF — otherwise an alias's notice outlives its deadline (and a
+   * re-enable from the CLI) for as long as the screen stays open.
    */
   useEffect(() => {
-    if (!anyAutoYesEnabled) return;
+    if (!anyAutoYesEnabled && !anyAutoYesReleasedByRestart) return;
     const intervalId = setInterval(() => {
       void fetchAutoYesStates();
     }, AUTO_YES_CONTRACT_REFRESH_MS);
     return () => clearInterval(intervalId);
-  }, [anyAutoYesEnabled, fetchAutoYesStates]);
+  }, [anyAutoYesEnabled, anyAutoYesReleasedByRestart, fetchAutoYesStates]);
 
   /** Sync layout mode with viewport size */
   useEffect(() => {

@@ -39,6 +39,16 @@
  * record (mode 0600), so a reader sees the old record or the new one, never
  * half of one.
  *
+ * ## After the record
+ *
+ * The HTTP drain after the record still answers requests. An enable is refused
+ * from the moment the shutdown begins; an OFF (or a session kill, an instance
+ * removal, a worktree delete) is accepted — refusing an OFF would leave a
+ * worker that was asked to stop answering still armed for the drain — and the
+ * record is rewritten from memory after it, so the next start does not bring
+ * back a notice the user cleared. Withdrawing rather than refusing: the change
+ * only ever narrows the record.
+ *
  * @module lib/auto-yes-shutdown-record
  */
 
@@ -52,6 +62,7 @@ import {
   beginAutoYesShutdown,
   collectReleasedAutoYesGrants,
   seedServerRestartNotice,
+  setAutoYesChangeAfterShutdownListener,
   type ReleasedAutoYesGrant,
 } from './auto-yes-state';
 
@@ -118,11 +129,25 @@ export function recordAutoYesShutdown(
   options: { path?: string | null; now?: number } = {},
 ): RecordAutoYesShutdownResult {
   beginAutoYesShutdown();
-  try {
-    const recordPath = options.path === undefined ? resolveAutoYesShutdownRecordPath() : options.path;
-    if (recordPath === null) return { recorded: 0, error: 'record path unresolved' };
+  const recordPath = options.path === undefined ? resolveAutoYesShutdownRecordPath() : options.path;
+  if (recordPath === null) return { recorded: 0, error: 'record path unresolved' };
 
-    const now = options.now ?? Date.now();
+  // Every later change rewrites the record from memory (see "After the record").
+  setAutoYesChangeAfterShutdownListener(() => {
+    const rewritten = writeRecord(recordPath, Date.now());
+    if (rewritten.error === undefined) logger.info('record-rewritten', { grants: rewritten.recorded });
+  });
+  const result = writeRecord(recordPath, options.now ?? Date.now());
+  if (result.error === undefined) logger.info('recorded', { grants: result.recorded });
+  return result;
+}
+
+/**
+ * Write the grants memory holds at `now` to `recordPath`, or remove the record
+ * when there are none. Never throws.
+ */
+function writeRecord(recordPath: string, now: number): RecordAutoYesShutdownResult {
+  try {
     const grants = collectReleasedAutoYesGrants(now);
     if (grants.length === 0) {
       fs.rmSync(recordPath, { force: true });
@@ -140,7 +165,6 @@ export function recordAutoYesShutdown(
       fs.rmSync(tempPath, { force: true });
       throw error;
     }
-    logger.info('recorded', { grants: grants.length });
     return { recorded: grants.length };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

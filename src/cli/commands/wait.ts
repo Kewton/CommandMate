@@ -348,12 +348,26 @@ function formatSuppressionNotice(suppression: LastSuppression, ageSeconds: numbe
  * 10 for it is exactly the hand-back it always was. What this adds is the WHY,
  * so a delegating agent re-enables Auto-Yes instead of guessing. A server
  * older than the reason sends none, and nothing is printed.
+ *
+ * The command it suggests names the instance this wait is about: without
+ * `--instance`, `auto-yes --enable` arms the worktree's default primary, which
+ * for an alias (or a non-default tool) is another instance — the waited-on one
+ * would stay off while a grant went somewhere nobody asked for. The instance is
+ * the resolved `--instance` when one was given, else the CLI tool the server
+ * answered for (a primary's instance ID is its tool ID).
+ *
+ * @param instanceId - The resolved `--instance` of this wait, if any
  */
-export function formatRestartReleaseNotice(worktreeId: string, data: CurrentOutputResponse): string | null {
+export function formatRestartReleaseNotice(
+  worktreeId: string,
+  data: CurrentOutputResponse,
+  instanceId?: string,
+): string | null {
   if (data.autoYes?.enabled !== false || data.autoYes.stopReason !== 'server-restart') return null;
+  const target = instanceId ?? data.cliToolId;
+  const command = `commandmate auto-yes ${worktreeId} --enable${target ? ` --instance ${target}` : ''}`;
   return `  auto-yes was released by a server restart on ${worktreeId} (it is not turned back on ` +
-    `automatically); re-enable it with \`commandmate auto-yes ${worktreeId} --enable\` if this session ` +
-    'should keep answering.';
+    `automatically); re-enable it with \`${command}\` if this session should keep answering.`;
 }
 
 /**
@@ -1088,7 +1102,7 @@ function promptStage(poll: PollContext, state: PollState, data: CurrentOutputRes
       const enterNotice = formatEnterFallbackNotice(data, Date.now());
       if (enterNotice) console.error(enterNotice);
       // Issue #3730: and whether a restart is why nothing is answering it.
-      const restartNotice = formatRestartReleaseNotice(worktreeId, data);
+      const restartNotice = formatRestartReleaseNotice(worktreeId, data, poll.options.instance);
       if (restartNotice) console.error(restartNotice);
       return { kind: 'wait' };
     }
@@ -1137,7 +1151,7 @@ function promptStage(poll: PollContext, state: PollState, data: CurrentOutputRes
     const enterNotice = formatEnterFallbackNotice(data, Date.now());
     if (enterNotice) console.error(enterNotice);
     // Issue #3730: stderr only as well.
-    const restartNotice = formatRestartReleaseNotice(worktreeId, data);
+    const restartNotice = formatRestartReleaseNotice(worktreeId, data, poll.options.instance);
     if (restartNotice) console.error(restartNotice);
 
     return exitWith({ exitCode: WaitExitCode.PROMPT_DETECTED, output: promptOutput });
@@ -1167,13 +1181,13 @@ function selectionListStage(poll: PollContext, data: CurrentOutputResponse): Sta
         console.error(formatSuppressionNotice(suppressed.suppression, suppressed.ageSeconds));
       }
       // Issue #3730
-      const restartNotice = formatRestartReleaseNotice(worktreeId, data);
+      const restartNotice = formatRestartReleaseNotice(worktreeId, data, poll.options.instance);
       if (restartNotice) console.error(restartNotice);
       return { kind: 'wait' };
     }
 
     // Issue #3730: stderr only; the exit-10 payload is unchanged.
-    const restartNotice = formatRestartReleaseNotice(worktreeId, data);
+    const restartNotice = formatRestartReleaseNotice(worktreeId, data, poll.options.instance);
     if (restartNotice) console.error(restartNotice);
     return exitWith({
       exitCode: WaitExitCode.PROMPT_DETECTED,
@@ -1234,7 +1248,7 @@ function unclassifiedStage(poll: PollContext, state: PollState, data: CurrentOut
       const question = describeUnclassifiedFrame(worktreeId, data, dwellMs);
 
       // Issue #3730: why Auto-Yes is not there to answer it, if a restart is why.
-      const restartNotice = formatRestartReleaseNotice(worktreeId, data);
+      const restartNotice = formatRestartReleaseNotice(worktreeId, data, poll.options.instance);
       if (options.onPrompt === 'human') {
         console.error(question);
         if (restartNotice) console.error(restartNotice);

@@ -85,7 +85,7 @@ import {
   seedServerRestartNotice,
   setAutoYesEnabled,
 } from '@/lib/auto-yes-state';
-import { recordAutoYesShutdown } from '@/lib/auto-yes-shutdown-record';
+import { recordAutoYesShutdown, restoreAutoYesShutdownRecord } from '@/lib/auto-yes-shutdown-record';
 
 const WT = 'wt-3730-route';
 const HOUR = 3_600_000;
@@ -238,6 +238,61 @@ describe('the shutdown boundary (Issue #3730)', () => {
     const response = await post({ enabled: false, cliToolId: 'claude' });
     expect(response.status).toBe(200);
     expect(getAutoYesState(WT, 'claude')?.enabled).toBe(false);
+  });
+});
+
+describe('an OFF the shutdown answers after the record is withdrawn from it (Issue #3730 review)', () => {
+  /** The next process: nothing in memory, then the record read back. */
+  function restart(recordPath: string): void {
+    clearAllAutoYesStates();
+    resetAutoYesShutdownForTesting();
+    restoreAutoYesShutdownRecord({ path: recordPath });
+  }
+
+  it.each([
+    ['one instance', { enabled: false, cliToolId: 'claude', instanceId: 'claude-2' }, ['claude']],
+    ['one tool (the primary)', { enabled: false, cliToolId: 'claude' }, ['claude-2']],
+    ['every agent of the worktree', { enabled: false }, []],
+  ] as const)('positive: record → OFF (%s) → restart: the OFF instance shows no server-restart', async (_label, body, left) => {
+    setAutoYesEnabled(WT, 'claude', true);
+    setAutoYesEnabled(WT, 'claude', true, undefined, undefined, 'claude-2');
+    const recordPath = `${recordDir}/cm.db.auto-yes-shutdown.json`;
+    expect(recordAutoYesShutdown({ path: recordPath })).toEqual({ recorded: 2 });
+
+    expect((await post(body)).status).toBe(200);
+    restart(recordPath);
+
+    for (const instanceId of ['claude', 'claude-2']) {
+      const state = getAutoYesState(WT, 'claude', instanceId);
+      if ((left as readonly string[]).includes(instanceId)) {
+        expect(state?.stopReason).toBe('server-restart');
+      } else {
+        expect(state).toBeNull();
+      }
+    }
+  });
+
+  it('negative: record → no OFF → restart: both instances show server-restart', async () => {
+    setAutoYesEnabled(WT, 'claude', true);
+    setAutoYesEnabled(WT, 'claude', true, undefined, undefined, 'claude-2');
+    const recordPath = `${recordDir}/cm.db.auto-yes-shutdown.json`;
+    recordAutoYesShutdown({ path: recordPath });
+
+    restart(recordPath);
+
+    expect(getAutoYesState(WT, 'claude')?.stopReason).toBe('server-restart');
+    expect(getAutoYesState(WT, 'claude', 'claude-2')?.stopReason).toBe('server-restart');
+  });
+
+  it('a re-enable during the shutdown is still refused, so the record keeps the release', async () => {
+    setAutoYesEnabled(WT, 'claude', true);
+    const recordPath = `${recordDir}/cm.db.auto-yes-shutdown.json`;
+    recordAutoYesShutdown({ path: recordPath });
+
+    expect((await post({ enabled: true, cliToolId: 'claude' })).status).toBe(503);
+    restart(recordPath);
+
+    expect(getAutoYesState(WT, 'claude')?.stopReason).toBe('server-restart');
   });
 });
 

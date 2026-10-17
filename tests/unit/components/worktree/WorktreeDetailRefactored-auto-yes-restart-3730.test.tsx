@@ -119,6 +119,14 @@ const LABEL = 'auto-yes-released-by-restart';
 
 /** What the server says about claude's Auto-Yes; tests flip it between polls. */
 let released: boolean;
+/**
+ * The deadline of an alias (`claude-2`) restart notice, or null for no alias
+ * state. The fake server says `server-restart` until then, as the real one does
+ * (the notice lives until the released grant's own deadline).
+ */
+let aliasDeadline: number | null;
+type RosterEntry = { id: string; cliTool: string; alias: string; order: number };
+let roster: RosterEntry[];
 
 function jsonResponse(body: unknown, status = 200): Response {
   return {
@@ -167,6 +175,9 @@ function installFetch(): void {
                 expiresAt: null,
                 ...(released ? { stopReason: 'server-restart' } : {}),
               },
+              ...(aliasDeadline !== null && Date.now() < aliasDeadline
+                ? { 'claude-2': { enabled: false, expiresAt: aliasDeadline, stopReason: 'server-restart' } }
+                : {}),
             },
           }),
         );
@@ -182,7 +193,7 @@ function installFetch(): void {
           repositoryPath: '/tmp/repo',
           repositoryName: 'CommandMate',
           selectedAgents: ['claude'],
-          agentInstances: [{ id: 'claude', cliTool: 'claude', alias: 'Claude', order: 0 }],
+          agentInstances: roster,
           sessionStatusByCli: {
             claude: { isRunning: true, isWaitingForResponse: false, isProcessing: false },
           },
@@ -198,6 +209,8 @@ beforeEach(() => {
   window.sessionStorage.clear();
   window.history.replaceState({}, '', `/worktrees/${WORKTREE_ID}`);
   released = true;
+  aliasDeadline = null;
+  roster = [{ id: 'claude', cliTool: 'claude', alias: 'Claude', order: 0 }];
   useTerminalPanePollingMock.mockReturnValue({
     terminal: {
       output: 'row 1',
@@ -275,5 +288,41 @@ describe.each([
       await vi.advanceTimersByTimeAsync(2_500);
     });
     expect(screen.queryByTestId(LABEL)).toBeNull();
+  });
+});
+
+describe('[#3730 review] the PC split: an alias notice ends at its own deadline with everything OFF', () => {
+  const DEADLINE_IN = 60_000;
+
+  beforeEach(() => {
+    viewport.mobile = false;
+    // The split shows the alias; the parent's current-output poll is about the
+    // primary and says nothing about claude-2.
+    released = false;
+    roster = [
+      { id: 'claude-2', cliTool: 'claude', alias: 'Claude 2', order: 0 },
+      { id: 'claude', cliTool: 'claude', alias: 'Claude', order: 1 },
+    ];
+    aliasDeadline = Date.now() + DEADLINE_IN;
+  });
+
+  it('positive: the alias label goes once its deadline has passed', async () => {
+    await renderScreen();
+    expect(screen.getByTestId(LABEL)).toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(DEADLINE_IN + 15_000);
+    });
+    await settle();
+    expect(screen.queryByTestId(LABEL)).toBeNull();
+  });
+
+  it('negative: before the deadline the alias label stays', async () => {
+    await renderScreen();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(DEADLINE_IN - 10_000);
+    });
+    await settle();
+    expect(screen.getByTestId(LABEL)).toBeInTheDocument();
   });
 });

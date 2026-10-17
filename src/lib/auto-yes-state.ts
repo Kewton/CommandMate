@@ -10,7 +10,7 @@
  * auto-yes-poller.ts -> auto-yes-state.ts -> path-validator.ts
  */
 
-import { DEFAULT_AUTO_YES_DURATION, executeRegexWithTimeout, validateStopPattern, type AutoYesDuration, type AutoYesStopReason } from '@/config/auto-yes-config';
+import { DEFAULT_AUTO_YES_DURATION, executeRegexWithTimeout, isReleasedByRestart, validateStopPattern, type AutoYesDuration, type AutoYesStopReason } from '@/config/auto-yes-config';
 import { isValidWorktreeId } from './security/path-validator';
 import { isCliToolType, type CLIToolType } from './cli-tools/types';
 import { createLogger } from '@/lib/logger';
@@ -246,6 +246,7 @@ export function setAutoYesEnabled(
       stopPattern,
     };
     autoYesStates.set(key, state);
+    notifyChangeAfterShutdown();
     return state;
   } else {
     // Issue #314: Delegate disable path to disableAutoYes()
@@ -287,6 +288,7 @@ export function disableAutoYes(
     stopMatchedText,
   };
   autoYesStates.set(key, state);
+  notifyChangeAfterShutdown();
   return state;
 }
 
@@ -309,10 +311,44 @@ export function clearAllAutoYesStates(): void {
  */
 declare global {
   // eslint-disable-next-line no-var
-  var __autoYesShutdownStarted: { value: boolean } | undefined;
+  var __autoYesShutdownStarted:
+    | { value: boolean; onChangeAfterShutdown?: (() => void) | null }
+    | undefined;
 }
 
-const autoYesShutdown = getOrInitGlobal('__autoYesShutdownStarted', () => ({ value: false }));
+const autoYesShutdown = getOrInitGlobal('__autoYesShutdownStarted', () => ({
+  value: false,
+  onChangeAfterShutdown: null,
+}));
+
+/**
+ * Who to tell when a state changes after the shutdown began (Issue #3730).
+ *
+ * The shutdown record is taken first, and the HTTP drain that follows still
+ * answers requests: an OFF, a session kill or an instance removal accepted then
+ * changes memory only, and the record would bring back the notice the user just
+ * cleared. The record module registers here when it writes the record and
+ * rewrites it on every later change (an enable is refused by then, so a change
+ * can only withdraw). A listener rather than an import: the record module reads
+ * this one, not the other way round.
+ *
+ * @param listener - Called after each change once the shutdown began; null to clear
+ */
+export function setAutoYesChangeAfterShutdownListener(listener: (() => void) | null): void {
+  autoYesShutdown.onChangeAfterShutdown = listener;
+}
+
+/** Tell the listener, if the shutdown began and one is registered. Never throws. */
+function notifyChangeAfterShutdown(): void {
+  if (!autoYesShutdown.value) return;
+  const listener = autoYesShutdown.onChangeAfterShutdown;
+  if (!listener) return;
+  try {
+    listener();
+  } catch {
+    // The listener logs its own failures; a write path must not fail on it.
+  }
+}
 
 /**
  * Mark the start of a graceful shutdown. From here on no grant may be added:
@@ -336,6 +372,7 @@ export function isAutoYesShutdownStarted(): boolean {
  */
 export function resetAutoYesShutdownForTesting(): void {
   autoYesShutdown.value = false;
+  autoYesShutdown.onChangeAfterShutdown = null;
 }
 
 /** One grant a shutdown released, as the next process is told about it. */
@@ -611,6 +648,7 @@ export function deleteAutoYesState(compositeKey: string): boolean {
     return false;
   }
   autoYesStates.delete(compositeKey);
+  notifyChangeAfterShutdown();
   return true;
 }
 
@@ -663,6 +701,7 @@ export function getCompositeKeysByWorktree(worktreeId: string): string[] {
 export function deleteAutoYesStateByWorktree(worktreeId: string): number {
   const keys = getCompositeKeysByWorktree(worktreeId);
   keys.forEach(key => autoYesStates.delete(key));
+  if (keys.length > 0) notifyChangeAfterShutdown();
   return keys.length;
 }
 
@@ -819,10 +858,19 @@ export function migrateAutoYesStateWorktreeIds(
 
   // Two passes so a swap (A→B, B→A) cannot have one half clobber the other.
   for (const move of moves) autoYesStates.delete(move.oldKey);
-  for (const move of moves) autoYesStates.set(move.newKey, move.state);
+  // Issue #3730: a restart notice is only an explanation, seeded before the
+  // first request; whatever sits under the new key once the sources are gone
+  // was written after it (an enable or a disable made while the start-up ID
+  // move was still awaiting) and is newer. The notice yields and is dropped.
+  // A grant still moves as before — the move exists to keep grants alive.
+  const applied = moves.filter(
+    (move) => !(isReleasedByRestart(move.state) && autoYesStates.has(move.newKey)),
+  );
+  for (const move of applied) autoYesStates.set(move.newKey, move.state);
 
-  return moves.map(({ state: _state, ...rest }) => rest);
+  return applied.map(({ state: _state, ...rest }) => rest);
 }
+
 
 /**
  * Calculate backoff interval based on consecutive errors.

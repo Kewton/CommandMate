@@ -38,6 +38,7 @@ import {
   getEnabledAutoYesByWorktree,
   isAutoYesShutdownStarted,
   resetAutoYesShutdownForTesting,
+  migrateAutoYesStateWorktreeIds,
   setAutoYesEnabled,
 } from '@/lib/auto-yes-state';
 import {
@@ -378,5 +379,104 @@ describe('one record per database (Issue #3730)', () => {
     const resolved = resolveAutoYesShutdownRecordPath();
     expect(resolved).not.toBeNull();
     expect(resolved!.startsWith(os.tmpdir())).toBe(true);
+  });
+});
+
+describe('a change the shutdown accepts after the record (Issue #3730 review)', () => {
+  /** Everything a new process starts without, then the record read back. */
+  function restart(): void {
+    simulateNewProcess();
+    restoreAutoYesShutdownRecord({ path: recordPath });
+  }
+
+  beforeEach(() => {
+    setAutoYesEnabled(WT, 'claude', true, ONE_HOUR);
+    setAutoYesEnabled(WT, 'claude', true, ONE_HOUR, undefined, 'claude-2');
+    expect(gracefulShutdown()).toEqual({ recorded: 2 });
+  });
+
+  it.each([
+    ['a manual OFF', () => setAutoYesEnabled(WT, 'claude', false, undefined, undefined, 'claude-2')],
+    ['a session kill', () => releaseAutoYes('session-killed', { scope: 'instance', worktreeId: WT, cliToolId: 'claude', instanceId: 'claude-2' })],
+    ['an instance removal', () => releaseAutoYes('instance-removed', { scope: 'instance', worktreeId: WT, cliToolId: 'claude', instanceId: 'claude-2' })],
+  ])('positive: %s after the record is withdrawn from it', (_label, change) => {
+    change();
+    expect(JSON.parse(fs.readFileSync(recordPath, 'utf8')).grants).toHaveLength(1);
+    restart();
+    expect(getAutoYesState(WT, 'claude', 'claude-2')).toBeNull();
+    expect(getAutoYesState(WT, 'claude')?.stopReason).toBe('server-restart');
+  });
+
+  it('withdrawing the last entry removes the record', () => {
+    releaseAutoYes('worktree-deleted', { scope: 'worktree', worktreeId: WT });
+    expect(fs.existsSync(recordPath)).toBe(false);
+    restart();
+    expect(getRestartReleasedAutoYesByWorktree().size).toBe(0);
+  });
+
+  it('negative: with no change after the record, both come back as server-restart', () => {
+    restart();
+    expect(getAutoYesState(WT, 'claude')?.stopReason).toBe('server-restart');
+    expect(getAutoYesState(WT, 'claude', 'claude-2')?.stopReason).toBe('server-restart');
+  });
+
+  it('negative: outside a shutdown a state change writes no record', () => {
+    simulateNewProcess();
+    fs.rmSync(recordPath, { force: true });
+    setAutoYesEnabled(WT, 'claude', true, ONE_HOUR);
+    setAutoYesEnabled(WT, 'claude', false);
+    expect(fs.readdirSync(dir)).toEqual([]);
+  });
+});
+
+describe('the start-up ID move and a restored notice (Issue #3730 review)', () => {
+  const NEW_ID = 'wt-3730-renamed';
+
+  beforeEach(() => {
+    setAutoYesEnabled(WT, 'claude', true, ONE_HOUR);
+    gracefulShutdown();
+    simulateNewProcess();
+    restoreAutoYesShutdownRecord({ path: recordPath });
+    expect(getAutoYesState(WT, 'claude')?.stopReason).toBe('server-restart');
+  });
+
+  it('positive: a grant enabled under the new ID before the move is not overwritten by the old notice', () => {
+    setAutoYesEnabled(NEW_ID, 'claude', true, THREE_HOURS);
+
+    const moved = migrateAutoYesStateWorktreeIds([{ oldId: WT, newId: NEW_ID }]);
+
+    expect(getAutoYesState(NEW_ID, 'claude')).toMatchObject({ enabled: true, expiresAt: T0 + THREE_HOURS });
+    expect(getAutoYesState(WT, 'claude')).toBeNull();
+    expect(moved).toEqual([]);
+  });
+
+  it('positive: a manual OFF under the new ID before the move is not overwritten either', () => {
+    setAutoYesEnabled(NEW_ID, 'claude', true, ONE_HOUR);
+    setAutoYesEnabled(NEW_ID, 'claude', false);
+
+    migrateAutoYesStateWorktreeIds([{ oldId: WT, newId: NEW_ID }]);
+
+    expect(getAutoYesState(NEW_ID, 'claude')?.stopReason).toBeUndefined();
+  });
+
+  it('negative: with nothing under the new ID, the notice moves', () => {
+    const moved = migrateAutoYesStateWorktreeIds([{ oldId: WT, newId: NEW_ID }]);
+
+    expect(getAutoYesState(NEW_ID, 'claude')).toMatchObject({ enabled: false, stopReason: 'server-restart' });
+    expect(getAutoYesState(WT, 'claude')).toBeNull();
+    expect(moved.map((move) => move.newKey)).toEqual([buildCompositeKey(NEW_ID, 'claude')]);
+  });
+
+  it('negative: a swap still moves both notices (each destination is itself moving away)', () => {
+    setAutoYesEnabled(OTHER, 'claude', true, THREE_HOURS);
+    disableAutoYes(OTHER, 'claude', 'server-restart');
+
+    migrateAutoYesStateWorktreeIds([
+      { oldId: WT, newId: OTHER },
+      { oldId: OTHER, newId: WT },
+    ]);
+
+    expect(getAutoYesState(OTHER, 'claude')).toMatchObject({ stopReason: 'server-restart', expiresAt: T0 + ONE_HOUR });
+    expect(getAutoYesState(WT, 'claude')).toMatchObject({ stopReason: 'server-restart', expiresAt: T0 + THREE_HOURS });
   });
 });

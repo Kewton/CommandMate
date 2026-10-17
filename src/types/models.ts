@@ -11,6 +11,7 @@ import type {
   StructuredPromptWaitingData,
 } from '@/lib/session/structured-prompt';
 import type { AutoYesInstanceSummary } from '@/types/auto-yes';
+import type { AutoYesStopReason } from '@/config/auto-yes-config';
 
 export type { AgentInstance };
 
@@ -295,6 +296,15 @@ export interface Worktree {
    * an omitted key when nothing is armed.
    */
   autoYesByInstance?: Partial<Record<string, AutoYesInstanceSummary>>;
+  /**
+   * Why an instance's Auto-Yes is OFF, when the reason is one to show
+   * (Issue #3730): today only `server-restart` — the last server restart
+   * released a grant that was live. Keyed like {@link autoYesByInstance} and
+   * beside it rather than in it, because every reader of that map counts an
+   * entry as armed. Only `GET /api/worktrees` fills it in, on both paths, and
+   * omits the key from a row with none.
+   */
+  autoYesStopReasonByInstance?: Partial<Record<string, AutoYesStopReason>>;
   /**
    * Latest chat-message time per agent instance (Issue #2838), keyed like
    * {@link sessionStatusByInstance}. Only `GET /api/worktrees` fills it in, on

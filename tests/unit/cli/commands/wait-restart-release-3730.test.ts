@@ -122,6 +122,40 @@ describe('[#3730] wait names a restart release on the hand-back', () => {
     expect(stderr()).not.toContain(NOTICE);
   });
 
+  it('--instance claude-2: the re-enable command names claude-2, not the default primary', async () => {
+    const urls: string[] = [];
+    global.fetch = vi.fn((input: unknown) => {
+      const url = String(input);
+      urls.push(url);
+      const body = (data: unknown) =>
+        Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(data), text: () => Promise.resolve(JSON.stringify(data)) });
+      if (url.includes('/api/capabilities')) return body({ serverVersion: '0.0.0-test', capabilities: ['resolve-session-target'] });
+      if (url.includes('/resolve-target')) return body({ cliToolId: 'claude', instanceId: 'claude-2', resolvedBy: 'roster', conflict: null });
+      if (url.includes('/messages')) return body([]);
+      return body(frame(RESTART));
+    }) as unknown as typeof fetch;
+    await runWait('--instance', 'claude-2');
+
+    expect(urls.some((url) => url.includes('current-output?instance=claude-2'))).toBe(true);
+    expect(mockExit).toHaveBeenCalledWith(WaitExitCode.PROMPT_DETECTED);
+    expect(stderr()).toContain('`commandmate auto-yes wt1 --enable --instance claude-2`');
+  });
+
+  it('a primary wait names the primary the server answered for (the same target a bare --enable arms)', async () => {
+    mockFetchSequence([{ data: frame(RESTART) }]);
+    await runWait();
+
+    expect(stderr()).toContain('`commandmate auto-yes wt1 --enable --instance claude`');
+    expect(stderr()).not.toContain('claude-2');
+  });
+
+  it('negative: a frame without cliToolId keeps the bare form', async () => {
+    mockFetchSequence([{ data: frame(RESTART, { cliToolId: undefined }) }]);
+    await runWait();
+
+    expect(stderr()).toContain('`commandmate auto-yes wt1 --enable` if this session');
+  });
+
   it.each([
     ['Auto-Yes off with no reason', { enabled: false, expiresAt: null, lastSuppression: null }],
     ['another reason', { enabled: false, expiresAt: null, stopReason: 'expired', lastSuppression: null }],
