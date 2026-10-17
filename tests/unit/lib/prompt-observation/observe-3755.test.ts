@@ -111,8 +111,8 @@ describe('[#3755] the trust screen (positive case)', () => {
         { position: 2, label: 'No, exit' },
       ],
       selectedPosition: 1,
-      // agy's arrow screens carry no prompt `respond` can answer today.
-      answerVia: 'terminal',
+      // The strict `respond --expect-screen` answers the trust screen (Issue #3771).
+      answerVia: 'strict',
     });
     expect(observation.screen?.token).toMatch(/^po1\./);
     expect(observation.screen?.tokenExpiresAt).toBeGreaterThan(NOW);
@@ -203,6 +203,14 @@ describe('[#3755] negative controls: each other screen is a different result', (
     const kinds = cases.map(({ snapshot }) => buildPromptObservation(input({}, snapshot)).screen?.kind);
     expect(new Set(kinds).size).toBe(cases.length);
     expect(kinds).not.toContain('antigravity-trust');
+  });
+
+  it('[#3771] only the trust screen answers via strict: the picker and the slash popup stay terminal, the permission dialog screen', () => {
+    const via = (name: string) =>
+      buildPromptObservation(input({}, cases.find((c) => c.name === name)?.snapshot)).screen?.answerVia;
+    expect(via('/model picker')).toBe('terminal');
+    expect(via('slash-command popup')).toBe('terminal');
+    expect(via('command execution approval (numbered dialog)')).toBe('screen');
   });
 
   it('reads the permission dialog\'s question, options and command', () => {

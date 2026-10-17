@@ -544,7 +544,7 @@ To answer a screen only while it is still the one observed, pass its kind and to
 | `screen.tokenWithheld` | Why `token` is null: `no-decision` (nothing asks) / `unknown-screen` / `no-session-generation`. Null when a token was issued |
 | `screen.appearedAt` | When this appearance of the screen was first observed (epoch ms; bound by the token). Null with no token |
 | `screen.question` / `options` / `selectedPosition` / `approvalTarget` | Question, options (1-based), current selection, approval target |
-| `screen.answerVia` | How it is answered: `screen` (keys via `respond`) / `api` (a decision) / `terminal` (`respond` cannot answer it today) / `none` |
+| `screen.answerVia` | How it is answered: `screen` (keys via `respond`) / `api` (a decision) / `strict` (agy's folder-trust screen: answered by `respond --expect-screen`) / `terminal` (`respond` cannot answer it today) / `none` |
 | `autoYes.enabled` / `pollerActive` | Whether Auto-Yes is on / whether the server's poller runs |
 | `autoYes.pollerRecord` | What the poller (or the permission hook) last recorded as withheld. `screenCorrelation` relates it to this screen; the record names no screen, so it is `unknown` / `type-mismatch` / `no-prompt-on-screen` |
 | `autoYes.contractEvaluation` | The contract's policy applied to this screen **now** (`policy-withholds` + reason / `policy-permits` / `no-base-answer` / `not-evaluated`). Reasons use the `AutoYesSuppressionReason` words ([reason table](#autoyeslastsuppression-observing-a-policy-suppression-issue-1684)) |
@@ -663,7 +663,7 @@ the same appearance (`screen.token` of [`commandmate prompt`](#commandmate-promp
 | 0 | Response sent successfully |
 | 2 | Argument errors; in strict mode also `--default`, a number on an unnumbered screen, or only one of `--expect-screen` / `--observation` |
 | 40 | Strict mode: the screen did not match or could not be checked. **Nothing was sent** (kind, token, folder or label mismatch, capture failure, an older server, …). Observe again with `commandmate prompt` |
-| 41 | Strict mode: keys were sent (or may have been) and the result is not confirmed. **Do not send again**; look at the pane |
+| 41 | Strict mode: keys were sent (or may have been) and the result is not confirmed. **Do not send again**; look at the pane. Even at 41, when `reason` is `operation_in_progress` / `operation_id_conflict` nothing was sent (`keysSent` is 0; `delivery` reads `indeterminate` but nothing was sent); fetch the result again under a different ID |
 | 99 | Prompt already dismissed (`prompt_no_longer_active`) |
 
 ---

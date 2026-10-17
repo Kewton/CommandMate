@@ -95,7 +95,8 @@ describe('[#3756] isScreenOpenAtBottom', () => {
 
   it('fails for a trust screen quoted in a reply still being generated (#3755 L3), which the classifier reads as trust', () => {
     const quoted = `${TRUST_3746.trimEnd()}\n\nThat was the screen agy showed.\nIt asks whether the folder is trusted.\nThe answer is up to you.\nGenerating…\n`;
-    expect(classifyScreen({ cliToolId: 'antigravity', fullOutput: quoted, sessionStatus: 'running' }).kind).toBe(
+    // Issue #3771: the classifier no longer reads it as trust either (output continues under the footer).
+    expect(classifyScreen({ cliToolId: 'antigravity', fullOutput: quoted, sessionStatus: 'running' }).kind).not.toBe(
       'antigravity-trust'
     );
     expect(isScreenOpenAtBottom(quoted)).toBe(false);

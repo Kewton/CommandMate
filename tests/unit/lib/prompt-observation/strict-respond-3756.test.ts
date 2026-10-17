@@ -384,9 +384,12 @@ describe('[#3756] nothing is sent when the screen does not match (exit 40)', () 
   });
 
   it('a trust screen quoted in a reply still being generated is not answered (#3755 L3)', async () => {
+    // Issue #3771: the token is the live screen's; the frame then turns into the quote.
+    const asked = request();
     pane.frame = `${TRUST.trimEnd()}\n\nThat was the screen agy showed.\nIt asks whether the folder is trusted.\nThe answer is up to you.\nGenerating…\n`;
-    const result = await respondStrictly(request(), deps());
-    expect(result).toMatchObject({ code: 40, reason: 'screen_not_open', observedKind: 'antigravity-trust' });
+    const result = await respondStrictly(asked, deps());
+    expect(result).toMatchObject({ code: 40, reason: 'kind_mismatch' });
+    expect(result.observedKind).not.toBe('antigravity-trust');
     expect(pane.keys).toEqual([]);
   });
 
@@ -569,5 +572,48 @@ describe('[#3756] operation ids', () => {
     // The first used the appearance up; the second, run after it, finds it used.
     expect([a.reason, b.reason]).toEqual(['outcome_unchanged', 'token_consumed']);
     expect(pane.keys).toEqual(['Enter']);
+  });
+});
+
+describe('[#3771] a fault part-way through an answer', () => {
+  it('reports the keys actually sent, not 0, when the read after an arrow throws', async () => {
+    const base = deps();
+    let reads = 0;
+    const faulty: StrictRespondDeps = {
+      ...base,
+      async read() {
+        // The first read is the check; the second is the one after the Down.
+        if (++reads === 2) throw new Error('globalThis state broken');
+        return base.read();
+      },
+    };
+    const result = await respondStrictly(request({ answer: 'No' }), faulty);
+    expect(pane.keys).toEqual(['Down']);
+    expect(result).toMatchObject({ code: 41, reason: 'outcome_indeterminate', keysSent: 1 });
+    expect(result.delivery).not.toBe('not-sent');
+  });
+
+  it('is still 0 keys when the fault comes before any key (negative control)', async () => {
+    const base = deps();
+    const faulty: StrictRespondDeps = {
+      ...base,
+      startup: { ...base.startup, hold: () => { throw new Error('hold broke'); } },
+    };
+    const result = await respondStrictly(request(), faulty);
+    expect(pane.keys).toEqual([]);
+    expect(result).toMatchObject({ code: 41, keysSent: 0 });
+  });
+
+  it('a read that throws before any key is exit 40 observation_failed, without the thrown text', async () => {
+    const faulty: StrictRespondDeps = {
+      ...deps(),
+      async read() {
+        throw new Error('SECRET screen text');
+      },
+    };
+    const result = await respondStrictly(request(), faulty);
+    expect(result).toMatchObject({ code: 40, reason: 'observation_failed', keysSent: 0 });
+    expect(JSON.stringify(result)).not.toContain('SECRET');
+    expect(pane.keys).toEqual([]);
   });
 });

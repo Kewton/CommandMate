@@ -116,7 +116,10 @@ export function formatPromptObservation(observation: PromptObservation, now: num
       lines.push(`  ${marker} ${option.position}. ${option.label}`);
     }
   }
-  if (screen.answerVia !== 'none') lines.push(`  answer via: ${screen.answerVia}`);
+  if (screen.answerVia !== 'none') {
+    const note = screen.answerVia === 'strict' ? ' (commandmate respond --expect-screen)' : '';
+    lines.push(`  answer via: ${screen.answerVia}${note}`);
+  }
   if (screen.token !== null) {
     const expiresIn =
       screen.tokenExpiresAt === null ? '' : ` (expires in ${Math.max(0, Math.round((screen.tokenExpiresAt - now) / 1000))}s)`;
