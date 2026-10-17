@@ -205,6 +205,12 @@ export function getAutoYesState(
     return null;
   }
 
+  // Issue #3753: only a live grant can run out. A disabled state already has
+  // its reason (manual OFF: none; stop pattern; session kill) and rewriting it
+  // to `expired` after the old deadline would claim a countdown ended that was
+  // not running; a key never armed (`expiresAt` 0) would read `expired` at once.
+  if (!state.enabled) return state;
+
   // Auto-disable if expired (Issue #314: delegate to disableAutoYes)
   if (isAutoYesExpired(state)) {
     return disableAutoYes(worktreeId, cliToolId, 'expired', instanceId);
@@ -867,6 +873,12 @@ export function migrateAutoYesStateWorktreeIds(
     (move) => !(isReleasedByRestart(move.state) && autoYesStates.has(move.newKey)),
   );
   for (const move of applied) autoYesStates.set(move.newKey, move.state);
+
+  // Issue #3753: the move changes memory without going through a setter, so
+  // after the shutdown record was taken it must be told: the record still
+  // names the old ID, and the next start would bring back a notice (for a state
+  // withdrawn under the new ID) the user had already cleared.
+  if (moves.length > 0) notifyChangeAfterShutdown();
 
   return applied.map(({ state: _state, ...rest }) => rest);
 }

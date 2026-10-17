@@ -312,3 +312,28 @@ describe('a manual disable stops the poller with `manual` (Issue #3730)', () => 
     expect(stopAutoYesPollingByWorktree).toHaveBeenCalledWith(WT, { keepPartialAnswers: true, reason: 'manual' });
   });
 });
+
+describe('two keys sharing an instanceId under different tools (Issue #3753-3)', () => {
+  it('positive: the roster\'s tool speaks for the instance, whichever key was written last', async () => {
+    // claude-2 is a claude instance in the roster; a codex key of the same id is a leftover.
+    setAutoYesEnabled(WT, 'claude', true, undefined, undefined, 'claude-2');
+    setAutoYesEnabled(WT, 'codex', false, undefined, undefined, 'claude-2');
+
+    const map = await (await get()).json();
+    expect(map.instances['claude-2'].enabled).toBe(true);
+  });
+
+  it('positive: same when the roster key is the one written first and disabled', async () => {
+    setAutoYesEnabled(WT, 'codex', true, undefined, undefined, 'claude-2');
+    setAutoYesEnabled(WT, 'claude', false, undefined, undefined, 'claude-2');
+
+    const map = await (await get()).json();
+    expect(map.instances['claude-2'].enabled).toBe(false);
+  });
+
+  it('negative control: a single key per instance answers as before', async () => {
+    setAutoYesEnabled(WT, 'claude', true, undefined, undefined, 'claude-2');
+    const map = await (await get()).json();
+    expect(map.instances['claude-2'].enabled).toBe(true);
+  });
+});

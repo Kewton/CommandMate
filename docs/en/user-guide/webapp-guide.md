@@ -268,6 +268,7 @@ See [Agent event hooks](./agent-event-hooks.md) for the per-route technical deta
 - Important changes (file deletions, etc.) are also auto-approved, so use with caution
 - You can disable it by turning off the toggle
 - Auto Yes automatically turns OFF after the selected duration
+- **When the server restarts (`/rebuild`, `commandmate stop`, etc.), an active Auto Yes is turned OFF and does not come back.** The affected instance shows **"Released by restart"** (「再起動で解除」 in the Japanese UI). The label stays until the original grant's deadline, and disappears when you turn the toggle on again or turn it off manually (it is not shown after SIGKILL or a crash). A manual OFF or an expiry does not show it
 - **Security best practices**:
   - Select the **minimum time** needed for your work (1 hour recommended when in doubt)
   - Limit `CM_ROOT_DIR` to the target worktree directory
