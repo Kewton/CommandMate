@@ -768,7 +768,7 @@ kind は `promptData.type` や `sessionStatusReason`（`antigravity_selection_li
 | `screen.tokenWithheld` | `token` が null の理由。`no-decision`（何も尋ねていない）/ `unknown-screen` / `no-session-generation`。発行時は null |
 | `screen.appearedAt` | この画面の出現を最初に観測した時刻（epoch ms。トークンに結び付く）。トークンが無いときは null |
 | `screen.question` / `options` / `selectedPosition` / `approvalTarget` | 質問・選択肢（1 始まり）・現在の選択・承認対象 |
-| `screen.answerVia` | 回答経路: `screen`（`respond` のキー送出）/ `api`（decision）/ `terminal`（今は `respond` で答えられない）/ `none` |
+| `screen.answerVia` | 回答経路: `screen`（`respond` のキー送出）/ `api`（decision）/ `strict`（agy の信頼確認。`respond --expect-screen` で答えられる）/ `terminal`（今は `respond` で答えられない）/ `none` |
 | `autoYes.enabled` / `pollerActive` | Auto-Yes の有効状態 / サーバの poller が動いているか |
 | `autoYes.pollerRecord` | poller（または permission hook）が最後に「答えなかった」と記録したもの。`screenCorrelation` はこの画面との対応で、記録は画面を名指ししないため `unknown` / `type-mismatch` / `no-prompt-on-screen` のどれか |
 | `autoYes.contractEvaluation` | 契約の方針を**いま**この画面に当てた結果（`policy-withholds` + 理由 / `policy-permits` / `no-base-answer` / `not-evaluated`）。理由の語は `AutoYesSuppressionReason` と同じ（[理由語の表](#autoyeslastsuppression-ポリシー抑止の観測issue-1684)） |
@@ -927,7 +927,7 @@ server.log（`strict-prompt-answered` / `strict-prompt-response-refused`）と�
 | 0 | 応答成功 |
 | 2 | 引数エラー（`<answer>` と `--default` の同時指定・両方欠落 等）/ 選択肢に無い番号（`answer_out_of_range`）/ 厳格モードでの `--default`・番号なしの画面への番号・`--expect-screen` と `--observation` の片方だけ |
 | 40 | 厳格モード: 照合不成立・照合不能。**何も送っていない**（kind・トークン・フォルダ・label の不一致、capture 失敗、古いサーバ 等）。`commandmate prompt` で観測し直す |
-| 41 | 厳格モード: 送信を始めた後の部分送信・結果不確定。**再送してはいけない**。pane を確かめる |
+| 41 | 厳格モード: 送信を始めた後の部分送信・結果不確定。**再送してはいけない**。pane を確かめる。ただし 41 でも `reason` が `operation_in_progress` / `operation_id_conflict` のときは何も送っていない（`keysSent` は 0。`delivery` は `indeterminate` と出るが送信はしていない）。結果の取り直しは別の ID で |
 | 99 | プロンプトが既に消えている（`prompt_no_longer_active`）/ yes・no を選択肢に解決できない（`unresolvable_answer`）/ 保持している decision が 0 件（`decision_not_found`）・2 件以上（`multiple_pending_decisions`、Issue #2040）|
 
 ---
@@ -2071,6 +2071,7 @@ Auto-Yes が OFF の instance で、止まった理由があれば入ります�
 | `unclassified-frame`（Issue #1924） | 汎用の推定は番号付きの一覧を読んだが、その道具のダイアログ検出が確認と認めなかったので何も送らない。返答の中の番号付きの一覧に `1` と答える事故（#1896）を防ぐ位置 | 「because no tool-specific dialog detector recognised the frame」 |
 | `startup-trust-unhandled`（Issue #3757） | agy の起動時のフォルダ信頼の確認（`Do you trust the contents of this project?`）が画面にある。起動の手順の側が答えるもので、番号が無いので poller はプロンプトとして読めない。起動の窓が終わった後に出た場合は、次の send の準備待ちが答える | 「because agy's startup folder-trust confirmation is the launch's to answer, not Auto-Yes's; the next send confirms it once, or answer it at the pane」 |
 | `question-confirm-page`（Issue #3748） | Command Code と Claude の `AskUserQuestion` の確認画面（`Submit` / `Cancel`）。`Submit` は選択ではなくその時点の回答を確定するので、Auto-Yes は答えず人に任せる | 「because the question's Submit/Cancel confirmation commits the answers as they stand, so Auto-Yes leaves it to a human」 |
+| `no-hook-receipt`（Issue #3767） | agy の承認ダイアログが画面にあるが、それに対応する hook の問い合わせ（`PreToolUse`）の受信が無い。(1) 受信が一度も無い、(2) ダイアログが最後の受信から窓（8 秒）より後に出た、(3) ダイアログが受信より前から出ていた（返答中の引用など）、(4) 受信が途絶えた、(5) 受信が前のダイアログに使い済み、のいずれか。サーバーのログ `antigravity-autoyes-withheld-no-hook-receipt` の `hint` が区別する。**止まったときの対処**: `commandmate auto-yes <worktree-id> --disable` → `commandmate prompt <worktree-id> --json` → `commandmate respond <worktree-id> --expect-screen …` で答える（または UI で答える）。一度も受信が無い・途絶えた場合は `~/.gemini/config/hooks.json` の向き先を確認 | 「because agy's hook sent no permission question matching this dialog; answer it yourself (auto-yes --disable, prompt --json, respond --expect-screen) or check hooks.json」 |
 
 [`commandmate prompt --json`](#commandmate-prompt) の `autoYes.pollerRecord`（poller の記録）と `autoYes.contractEvaluation`（契約の再評価）は別の項目ですが、どちらもこの表と上の `reason` と同じ語を使います。
 

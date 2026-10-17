@@ -322,8 +322,11 @@ async function checkBeforeSending(
 }
 
 /** One strict answer, under the session's lock. */
-async function answerStrictly(request: StrictRespondRequest, deps: StrictRespondDeps): Promise<StrictRespondResult> {
-  const facts: Facts = { request, observedKind: null, observedTarget: null, answer: null, keysSent: 0 };
+async function answerStrictly(
+  request: StrictRespondRequest,
+  deps: StrictRespondDeps,
+  facts: Facts
+): Promise<StrictRespondResult> {
   let checked: Awaited<ReturnType<typeof checkBeforeSending>>;
   try {
     checked = await checkBeforeSending(request, deps, facts);
@@ -441,17 +444,15 @@ export async function respondStrictly(
   if (!makeRoomForOperation(now)) return nothingYet('operation_table_full');
   // Recorded before the first await, so a concurrent duplicate sees it.
   operations.set(key, { at: now, fingerprint, result: null });
+  // Shared with the answer, so a fault part-way reports the keys actually sent.
+  const facts: Facts = { request, observedKind: null, observedTarget: null, answer: null, keysSent: 0 };
   let result: StrictRespondResult;
   try {
-    result = await withSessionLock(request.sessionName, () => answerStrictly(request, deps));
+    result = await withSessionLock(request.sessionName, () => answerStrictly(request, deps, facts));
   } catch {
     // Only a fault past the checks gets here, where a key may have gone: kept
     // as "not known", so a retry with this id is not a second send.
-    result = resultOf(
-      { request, observedKind: null, observedTarget: null, answer: null, keysSent: 0 },
-      41,
-      'outcome_indeterminate'
-    );
+    result = resultOf(facts, 41, 'outcome_indeterminate');
   }
   // A refusal sent nothing and is not kept: the caller may correct the label
   // and send again with the same id. A result with keys behind it (0 / 41) is

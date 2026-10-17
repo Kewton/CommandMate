@@ -38,6 +38,7 @@ import {
   claimStartupTrust,
   endStartupWindow,
   forgetStartupTrust,
+  isStartupTrustHeld,
   isStartupTrustPending,
   markStartupTrustPending,
 } from './antigravity-startup-trust';
@@ -364,10 +365,12 @@ export class AntigravityTool extends BaseCLITool {
         }
 
         // Trust dialog: confirm the default "Yes, I trust this folder" with
-        // Enter — only while the cursor is on it (Issue #3776).
+        // Enter — only while the cursor is on it (Issue #3776), and not while a
+        // strict `respond` holds the session (Issue #3771): the screen is its to
+        // key, and the window looks again after a poll.
         if (!trustDialogHandled) {
           const decision = decideLaunchDialog(ANTIGRAVITY_TRUST_LAUNCH_DIALOG, output);
-          if (decision.action === 'press') {
+          if (decision.action === 'press' && !isStartupTrustHeld(sessionName)) {
             await sendSpecialKey(sessionName, decision.key);
             trustDialogHandled = true;
             logger.info('auto-trusted-folder-for-antigravity');

@@ -284,7 +284,8 @@ const CONTRACT_POLICY_CAUSE = 'by contract policy';
  * verdicts, which is why those four keep the pre-#1843 wording exactly), and
  * the poller's stopped-answer branch (`partial-answer`, Issue #3706 / #3713),
  * and the poller's agy trust-screen branch (`startup-trust-unhandled`, Issue #3757),
- * and the poller's question confirm-page branch (`question-confirm-page`, Issue #3748).
+ * and the poller's question confirm-page branch (`question-confirm-page`, Issue #3748),
+ * and the poller's agy receipt-gate branch (`no-hook-receipt`, Issue #3767).
  */
 const SUPPRESSION_CAUSE: Record<AutoYesSuppressionReason, string> = {
   'mode-off': CONTRACT_POLICY_CAUSE,
@@ -311,6 +312,10 @@ const SUPPRESSION_CAUSE: Record<AutoYesSuppressionReason, string> = {
   // whose wording above says the opposite (nothing recognised the frame).
   'question-confirm-page':
     "because the question's Submit/Cancel confirmation commits the answers as they stand, so Auto-Yes leaves it to a human",
+  // Issue #3767. agy's approval dialog has no matching hook question (none, too
+  // late, already on screen, or the hook stopped arriving). Not a contract verdict.
+  'no-hook-receipt':
+    "because agy's hook sent no permission question matching this dialog; answer it yourself (auto-yes --disable, prompt --json, respond --expect-screen) or check hooks.json",
 };
 
 /**

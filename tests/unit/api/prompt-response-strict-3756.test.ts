@@ -197,6 +197,8 @@ describe('[#3756] the strict endpoint answers the trust screen', () => {
     expect(payload?.reason).toContain('agent:wt-orchestrator/claude');
     expect(payload?.reason).toContain('"Yes, I trust this folder"');
     expect(payload?.reason).toContain(FOLDER);
+    // Issue #3771: who and what are fields of their own as well.
+    expect(payload).toMatchObject({ answeredBy: 'agent:wt-orchestrator/claude', option: '1. Yes, I trust this folder' });
   });
 });
 

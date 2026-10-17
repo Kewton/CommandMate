@@ -103,6 +103,15 @@ export function claimStartupTrust(sessionName: string, at: number = Date.now()):
 }
 
 /**
+ * Whether a strict `respond` holds the session right now. The launch window's
+ * own Enter checks it too (Issue #3771): a held session is the strict answer's
+ * to key, so the window waits a poll and looks again.
+ */
+export function isStartupTrustHeld(sessionName: string): boolean {
+  return strictAnswerHolds.has(sessionName);
+}
+
+/**
  * Whether the owed Enter was claimed within the last `ms` — its Enter may be
  * on its way, or agy may not have redrawn after it yet (Issue #3756).
  */
