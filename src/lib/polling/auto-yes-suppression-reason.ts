@@ -43,7 +43,20 @@ export type AutoYesSuppressionReason =
    * resolver and the hooks never produce it, only the poller does (Issue #3713
    * made it a member, with its own wording in `cmate wait`'s `SUPPRESSION_CAUSE`).
    */
-  | 'partial-answer';
+  | 'partial-answer'
+  /**
+   * Issue #3757: agy's startup folder-trust screen (`Do you trust the contents
+   * of this project?`) is on the pane. It belongs to the launch sequence —
+   * `AntigravityTool.waitForReady` confirms it, or, when agy drew it after that
+   * window ended, the next send's readiness wait does — and it is unnumbered, so
+   * the poller cannot read it as a prompt at all. Recorded so the prompt Push
+   * does not hold the wait as "Auto-Yes is answering" and `cmate wait` names
+   * the screen instead of a session that has gone quiet.
+   */
+  | 'startup-trust-unhandled';
 
 /** Issue #3706: the reason the poller records for an answer stopped part-way. */
 export const PARTIAL_ANSWER_SUPPRESSION_REASON = 'partial-answer' satisfies AutoYesSuppressionReason;
+
+/** Issue #3757: the reason the poller records over agy's unanswered trust screen. */
+export const STARTUP_TRUST_UNHANDLED_SUPPRESSION_REASON = 'startup-trust-unhandled' satisfies AutoYesSuppressionReason;

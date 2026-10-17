@@ -67,7 +67,12 @@ import {
 } from '@/lib/session/waiting-episode-state';
 import type { WaitingKind } from '@/lib/session/waiting-kind';
 import { getPushEscalationSettings } from './escalation-settings';
-import { isPromptPushSuppressed } from './prompt-push-gate';
+import {
+  AUTO_YES_ANSWER_GRACE_MS,
+  autoYesHoldStartedAt,
+  decideAndLogPromptPush,
+  isPromptPushSuppressed,
+} from './prompt-push-gate';
 import { notifyPushSubscribers } from './push-sender';
 import { notifyPromptResolved } from './resolution-push-notifier';
 import { isPushConfigured } from './vapid';
@@ -124,12 +129,24 @@ declare global {
   var __waitingPushEscalationTimer: ReturnType<typeof setInterval> | undefined;
   // eslint-disable-next-line no-var
   var __waitingPushGraceTimers: Map<string, ReturnType<typeof setTimeout>> | undefined;
+  // eslint-disable-next-line no-var
+  var __waitingPushAnswerGraceTimers: Map<string, ReturnType<typeof setTimeout>> | undefined;
 }
 
 const pending = getOrInitGlobal('__waitingPushPending', () => new Map<string, PendingWait>());
 
 /** Composite key -> the timer holding that wait's first notification (#2156). */
 const graceTimers = getOrInitGlobal('__waitingPushGraceTimers', () => new Map<string, ReturnType<typeof setTimeout>>());
+
+/**
+ * Composite key -> the timer that asks the gate again when its
+ * `auto-yes-answering` hold ends (Issue #3757). Apart from {@link graceTimers}:
+ * that one is the classification hold of #2156, this one the Auto-Yes hold.
+ */
+const answerGraceTimers = getOrInitGlobal(
+  '__waitingPushAnswerGraceTimers',
+  () => new Map<string, ReturnType<typeof setTimeout>>(),
+);
 
 /**
  * The worktree's display name, for the notification title.
@@ -195,9 +212,15 @@ function isUnnamedWait(kind: WaitingKind | null | undefined): boolean {
 /** Drop the hold on this wait without sending anything. */
 function cancelGrace(key: string): void {
   const timer = graceTimers.get(key);
-  if (timer === undefined) return;
-  clearTimeout(timer);
-  graceTimers.delete(key);
+  if (timer !== undefined) {
+    clearTimeout(timer);
+    graceTimers.delete(key);
+  }
+  const answerTimer = answerGraceTimers.get(key);
+  if (answerTimer !== undefined) {
+    clearTimeout(answerTimer);
+    answerGraceTimers.delete(key);
+  }
 }
 
 /**
@@ -207,19 +230,72 @@ function cancelGrace(key: string): void {
  * moment it decides to send, so a notification dropped after the fan-out began
  * would still consume the episode's one slot — see `prompt-push-gate`.
  */
-function gateAndSend(wait: PendingWait, now: number): void {
-  if (
-    isPromptPushSuppressed({
+function gateAndSend(wait: PendingWait, now: number, recheck = false): void {
+  const decision = decideAndLogPromptPush(
+    {
       worktreeId: wait.worktreeId,
       cliToolId: wait.cliToolId,
       instanceId: wait.instanceId,
       waitingSince: wait.since,
-    })
-  ) {
+      now,
+    },
+    { recheck },
+  );
+  if (decision.suppress) {
+    // Issue #3757: "Auto-Yes is answering" is a hold, not a verdict. Ask again
+    // when it ends; a wait Auto-Yes did answer is gone from the episode store
+    // by then and nothing is sent.
+    if (decision.reason === 'auto-yes-answering') holdForAutoYesAnswer(wait, now);
     return;
   }
 
   void sendWaitingPush(wait, false, now);
+}
+
+/**
+ * Re-ask the gate for this wait when its `auto-yes-answering` hold ends
+ * (Issue #3757). The edge fires once, so without this a wait Auto-Yes never
+ * answered — a screen the poller cannot read and records nothing about — stayed
+ * silent until the escalation reminder, ten minutes later.
+ */
+function holdForAutoYesAnswer(wait: PendingWait, now: number): void {
+  const key = buildCompositeKey(wait.worktreeId, wait.cliToolId, wait.instanceId);
+  const existing = answerGraceTimers.get(key);
+  if (existing !== undefined) clearTimeout(existing);
+  // From the gate's own origin, not `since` (Issue #3757 review); capped so a
+  // clock that went backwards cannot arm an overflowing timer.
+  const holdStartedAt = autoYesHoldStartedAt(
+    { worktreeId: wait.worktreeId, cliToolId: wait.cliToolId, instanceId: wait.instanceId, waitingSince: wait.since },
+    now,
+  );
+  const delay = Math.min(AUTO_YES_ANSWER_GRACE_MS, Math.max(0, holdStartedAt + AUTO_YES_ANSWER_GRACE_MS - now));
+  const timer = setTimeout(() => {
+    answerGraceTimers.delete(key);
+    releaseAutoYesHold(key, wait.since);
+  }, delay);
+  // Never hold the process open for it, as with the other timers here.
+  (timer as { unref?: () => void }).unref?.();
+  answerGraceTimers.set(key, timer);
+}
+
+/**
+ * The Auto-Yes hold ended: notify unless the wait is over or is another one
+ * (Issue #3757). Read from the episode store, as {@link releaseHeldWait} does.
+ */
+function releaseAutoYesHold(key: string, since: number): void {
+  const held = pending.get(key);
+  if (held === undefined || held.since !== since) return;
+
+  const episode = getWaitingEpisode(held.worktreeId, held.cliToolId, held.instanceId);
+  if (episode === null || episode.since !== held.since) {
+    pending.delete(key);
+    stopEscalationTimerIfIdle();
+    return;
+  }
+
+  const settled: PendingWait = { ...held, kind: episode.kind };
+  pending.set(key, settled);
+  gateAndSend(settled, Date.now(), true);
 }
 
 /**
@@ -440,6 +516,8 @@ export function stopWaitingPushNotifier(): void {
   }
   for (const timer of graceTimers.values()) clearTimeout(timer);
   graceTimers.clear();
+  for (const timer of answerGraceTimers.values()) clearTimeout(timer);
+  answerGraceTimers.clear();
   pending.clear();
   stopEscalationTimerIfIdle();
 }

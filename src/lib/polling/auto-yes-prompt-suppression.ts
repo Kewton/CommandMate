@@ -10,6 +10,9 @@ import type { NormalizedFrame } from '../detection/tools/types';
 import { isCodexModelPickerFrame } from '../detection/tools/codex/detect';
 import { isCommandCodeQuestionConfirmPage } from '../detection/tools/command-code/selection-shape';
 import { getCodexLifecycleDialog } from '../detection/cli-patterns';
+import { isAntigravityTrustScreen } from '../detection/tools/antigravity/patterns';
+import { isStartupTrustPending, isStartupWindowOpen } from '../cli-tools/antigravity-startup-trust';
+import { STARTUP_TRUST_UNHANDLED_SUPPRESSION_REASON } from './auto-yes-suppression-reason';
 import { recordPolicySuppression, type AutoYesPolicySuppression } from './auto-yes-suppression-state';
 import { evaluateAutoYesDialogGate, type AutoYesDialogGateVerdict } from './auto-yes-dialog-gate';
 import { warnOncePerFrame, type AutoYesPollerState } from './auto-yes-poller-state';
@@ -228,4 +231,51 @@ export function suppressUnclassifiedFrame(prompt: JudgedPrompt, dialogGate: Auto
       gateMode: dialogGate.mode,
     },
   );
+}
+
+/**
+ * Issue #3757: agy's startup folder-trust screen, which the tick read as no
+ * prompt at all — it is unnumbered, so neither agy's dialog reader nor the
+ * generic parser reads it, and the tick never got as far as the dialog gate or
+ * the Enter fallback. The status path still calls the pane `waiting`, so the
+ * prompt Push opened a wait that, with nothing recorded, it held as "Auto-Yes
+ * is answering" until the ten-minute reminder.
+ *
+ * Not answered here: the screen belongs to the launch, which confirms it with
+ * one Enter — in its own window, or through the next send when agy drew it
+ * later (`cli-tools/antigravity-startup-trust`). A second sender of that Enter
+ * here could press it twice. What this does is record the reason, so the gate
+ * notifies and `cmate wait` names the screen.
+ *
+ * Inside the launch window (`isStartupWindowOpen`) nothing is recorded: the
+ * window confirms the screen within a second or two, and a record would make
+ * the prompt Push ring for a screen that was never a human's. Outside it — the
+ * window ended (with the Enter owed, or not) or this process never launched the
+ * session — it is recorded.
+ *
+ * @param frame - The tick's one normalised frame (Issue #3183)
+ * @param sessionName - The instance's tmux session, for the launch window
+ * @returns true when the frame is the trust screen (recorded or not)
+ */
+export function suppressAntigravityTrustScreen(
+  worktreeId: string,
+  instanceId: string | undefined,
+  pollerState: AutoYesPollerState,
+  frame: NormalizedFrame,
+  sessionName: string,
+): boolean {
+  if (!isAntigravityTrustScreen(frame.lastLines)) return false;
+  if (isStartupWindowOpen(sessionName) && !isStartupTrustPending(sessionName)) return true;
+  recordPolicySuppression(worktreeId, 'antigravity', instanceId, {
+    reason: STARTUP_TRUST_UNHANDLED_SUPPRESSION_REASON,
+    mode: null,
+    promptType: 'multiple_choice',
+  });
+  warnOncePerFrame(pollerState, 'antigravity-startup-trust', 'poller:auto-yes-skipped-startup-trust', {
+    worktreeId,
+    cliToolId: 'antigravity',
+    instanceId,
+    reason: STARTUP_TRUST_UNHANDLED_SUPPRESSION_REASON,
+  });
+  return true;
 }
