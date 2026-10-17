@@ -68,6 +68,7 @@ CM_PORT=3000 node bin/commandmate.js send abc123 "msg"
 | [`commandmate sync`](#commandmate-sync) | サーバーのworktree再スキャン（GUI同期ボタン相当） |
 | [`commandmate send`](#commandmate-send) | エージェントへのメッセージ送信 |
 | [`commandmate wait`](#commandmate-wait) | エージェント完了の待機 |
+| [`commandmate prompt`](#commandmate-prompt) | 止まっている画面の観測（種類・選択肢・観測トークン） |
 | [`commandmate respond`](#commandmate-respond) | プロンプトへの応答 |
 | [`commandmate interrupt`](#commandmate-interrupt) | 生成中のターンの中断（GUI の中断ボタン相当） |
 | [`commandmate verify`](#commandmate-verify) | 検証ゲート（.commandmate/verify.yaml）の実行と検証履歴の参照 |
@@ -512,6 +513,8 @@ esac
 }
 ```
 
+Issue #3755 以降、exit 10 の JSON には `observation` が加わります。中身は [`commandmate prompt --json`](#commandmate-prompt) と同じで、exit を決めた同じ capture から読んだものです。終了コード・待機・猶予は変わりません。`autoYesSuppression`（1 分以内の記録）は従来どおりですが、記録の時刻だけで「答えなかった理由」と読まず、`observation.autoYes` の `pollerRecord` と `contractEvaluation` を見てください。古いサーバでは `observation` は付きません。
+
 ### exit 10 の `type`（種別）
 
 `wait` が「人間待ち」と判断する事由は 3 種類あり、**すべて exit 10** で返ります。
@@ -720,6 +723,62 @@ Completed: localllm-test-main (basis=hook_stop)
 | `hook_stop` | エージェント自身が、この `wait` が採用したターンの終了を報告した |
 | `session_gone` | 一度動いていた tmux セッションが消えた |
 | `scraper_ready` | 画面が composer に戻っただけ。**誰も裏付けていない**（hooks が無いインスタンスの通常経路） |
+
+---
+
+## commandmate prompt
+
+止まっている画面を、機械で読める形で 1 回だけ観測します（Issue #3755）。`capture --pane` の画面を読んで推測する代わりに使います。
+
+### 使用方法
+
+```bash
+commandmate prompt <worktree-id> --instance antigravity          # 人が読む形
+commandmate prompt <worktree-id> --instance antigravity --json   # schemaVersion 付きの JSON
+```
+
+`--instance` を省くと worktree の既定（primary）インスタンスを読みます。`--agent` はありません。
+中身は `GET /api/worktrees/<id>/current-output?observe=1` の `promptObservation` です（`observe=1` を付けたときだけ載ります）。
+
+### 画面の種類（`screen.kind`）
+
+| kind | 画面 |
+|------|------|
+| `antigravity-trust` | agy 起動時の信頼の確認（`Do you trust the contents of this project?` / `> Yes, I trust this folder` / `No, exit`）。`approvalTarget` はフォルダ |
+| `antigravity-model-picker` | agy の `/model`（`Switch Model`） |
+| `antigravity-permission` | agy の番号付きの許可（コマンドの実行・ファイルの作成）。`approvalTarget` はコマンドの部分 |
+| `antigravity-slash-menu` | agy の slash コマンドの一覧 |
+| `composer` | 確認なし（入力欄にいる） |
+| `none` | 確認なし（作業中など、入力欄でもない） |
+| `unknown` | 人の操作を待っているが、計測済みの読み取りでは名前が付かない画面。`capture --pane` で確かめる |
+
+kind は `promptData.type` や `sessionStatusReason`（`antigravity_selection_list` など）とは別の語彙です。これらの値を送信の条件に使わないでください。
+
+### 主な項目
+
+| 項目 | 意味 |
+|------|------|
+| `schemaVersion` / `observedAt` | 形式の版 / 観測した時刻（epoch ms） |
+| `target` | サーバが解決した対象（`worktreeId` / `cliToolId` / `instanceId` / `sessionName`＝pane / `resolvedBy`） |
+| `session.generation` | このサーバが起動したエージェントのプロセスの世代（epoch ms）。サーバ再起動前から動いているものは null |
+| `status` | `observed`（画面を読めた。確認なしも含む）/ `unavailable`（セッションが動いていない） |
+| `screen.token` | 観測トークン。短命（120 秒）で、instance・session 世代・pane・kind・質問・選択肢・承認対象に結び付く。`composer` / `none` では null |
+| `screen.question` / `options` / `selectedPosition` / `approvalTarget` | 質問・選択肢（1 始まり）・現在の選択・承認対象 |
+| `screen.answerVia` | 回答経路: `screen`（`respond` のキー送出）/ `api`（decision）/ `terminal`（今は `respond` で答えられない）/ `none` |
+| `autoYes.enabled` / `pollerActive` | Auto-Yes の有効状態 / サーバの poller が動いているか |
+| `autoYes.pollerRecord` | poller（または permission hook）が最後に「答えなかった」と記録したもの。`screenCorrelation` はこの画面との対応で、記録は画面を名指ししないため `unknown` / `type-mismatch` / `no-prompt-on-screen` のどれか |
+| `autoYes.contractEvaluation` | 契約の方針を**いま**この画面に当てた結果（`policy-withholds` + 理由 / `policy-permits` / `no-base-answer` / `not-evaluated`）。理由の語は `AutoYesSuppressionReason` と同じ |
+
+**記録が無いこと（`pollerRecord: null`）は「Auto-Yes が答えられる」という意味ではありません。** poller がその画面に届いていない場合も記録は残りません（Issue #3746）。
+`policy-permits` も「契約が止めない」だけで、poller の他の判定（ツール固有のダイアログ読み取り等）は含みません。
+
+### 終了コード
+
+| コード | 意味 |
+|:------:|------|
+| 0 | 画面を読めた（確認なし・`unknown` を含む） |
+| 21 | セッションが動いていない（読む画面が無い） |
+| 1 / 2 / 99 | 接続・引数・想定外のエラー（サーバが `promptObservation` を返さない古い版の場合も 99） |
 
 ---
 

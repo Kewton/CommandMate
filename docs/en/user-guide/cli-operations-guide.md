@@ -60,6 +60,7 @@ node bin/commandmate.js ls
 | [`commandmate sync`](#commandmate-sync) | Make the server rescan its worktrees (the GUI sync button) |
 | [`commandmate send`](#commandmate-send) | Send a message to an agent |
 | [`commandmate wait`](#commandmate-wait) | Wait for agent completion |
+| [`commandmate prompt`](#commandmate-prompt) | Observe the screen an agent is stopped on (kind, options, observation token) |
 | [`commandmate respond`](#commandmate-respond) | Respond to a prompt |
 | [`commandmate verify`](#commandmate-verify) | Run the verification gates (`.commandmate/verify.yaml`) and read the run history |
 | [`commandmate task`](#commandmate-task) | List and inspect execution contracts (`.commandmate/tasks/*.yaml`) |
@@ -401,6 +402,8 @@ esac
 }
 ```
 
+Since Issue #3755 the exit-10 JSON also carries `observation`: the same payload as [`commandmate prompt --json`](#commandmate-prompt), read off the capture the exit was decided on. Exit codes, holds and grace are unchanged. `autoYesSuppression` (a record under a minute old) keeps its meaning, but do not read the record's time alone as "why nobody answered" — read `pollerRecord` and `contractEvaluation` under `observation.autoYes`. An older server sends no `observation`.
+
 ### The `type` field of exit 10
 
 `wait` has three distinct reasons to decide "a human is needed", and **all three return exit 10**.
@@ -496,6 +499,62 @@ Waiting: localllm-test-main (status=running, running=true, prompt=false)
 Waiting: localllm-test-main (status=running, running=true, prompt=false)
 Completed: localllm-test-main
 ```
+
+---
+
+## commandmate prompt
+
+Observe, once and in a machine-readable form, the screen an agent is stopped on (Issue #3755). Use it instead of guessing from `capture --pane`.
+
+### Usage
+
+```bash
+commandmate prompt <worktree-id> --instance antigravity          # human-readable
+commandmate prompt <worktree-id> --instance antigravity --json   # schemaVersion-tagged JSON
+```
+
+Without `--instance` the worktree's default (primary) instance is read. There is no `--agent`.
+The payload is `promptObservation` of `GET /api/worktrees/<id>/current-output?observe=1` (present only with `observe=1`).
+
+### Screen kinds (`screen.kind`)
+
+| kind | Screen |
+|------|--------|
+| `antigravity-trust` | agy's launch-time folder trust screen (`Do you trust the contents of this project?` / `> Yes, I trust this folder` / `No, exit`). `approvalTarget` is the folder |
+| `antigravity-model-picker` | agy's `/model` picker (`Switch Model`) |
+| `antigravity-permission` | agy's numbered permission dialog (running a command, creating a file). `approvalTarget` is the command block |
+| `antigravity-slash-menu` | agy's slash-command popup |
+| `composer` | No confirmation (at the input box) |
+| `none` | No confirmation (working, not at the input box either) |
+| `unknown` | Something waits on a human and no measured reading names it. Check it with `capture --pane` |
+
+The kinds are a vocabulary of their own, separate from `promptData.type` and `sessionStatusReason` (`antigravity_selection_list`, …). Do not make those values a send condition.
+
+### Main fields
+
+| Field | Meaning |
+|-------|---------|
+| `schemaVersion` / `observedAt` | Payload version / when the observation was made (epoch ms) |
+| `target` | What the server resolved (`worktreeId` / `cliToolId` / `instanceId` / `sessionName` = the pane / `resolvedBy`) |
+| `session.generation` | The agent process generation this server launched (epoch ms); null for one running since before a server restart |
+| `status` | `observed` (the screen was read, including when nothing asks) / `unavailable` (no running session) |
+| `screen.token` | The observation token. Short-lived (120 s) and bound to the instance, session generation, pane, kind, question, options and approval target. Null for `composer` / `none` |
+| `screen.question` / `options` / `selectedPosition` / `approvalTarget` | Question, options (1-based), current selection, approval target |
+| `screen.answerVia` | How it is answered: `screen` (keys via `respond`) / `api` (a decision) / `terminal` (`respond` cannot answer it today) / `none` |
+| `autoYes.enabled` / `pollerActive` | Whether Auto-Yes is on / whether the server's poller runs |
+| `autoYes.pollerRecord` | What the poller (or the permission hook) last recorded as withheld. `screenCorrelation` relates it to this screen; the record names no screen, so it is `unknown` / `type-mismatch` / `no-prompt-on-screen` |
+| `autoYes.contractEvaluation` | The contract's policy applied to this screen **now** (`policy-withholds` + reason / `policy-permits` / `no-base-answer` / `not-evaluated`). Reasons use the `AutoYesSuppressionReason` words |
+
+**A missing record (`pollerRecord: null`) does not mean Auto-Yes can answer.** A poller that never reached the screen records nothing either (Issue #3746).
+`policy-permits` says only that the contract would not stop it; the poller's other gates (the tool-specific dialog reader, …) are not part of it.
+
+### Exit Codes
+
+| Code | Meaning |
+|:----:|---------|
+| 0 | The screen was read (including no confirmation and `unknown`) |
+| 21 | No running session (nothing to read) |
+| 1 / 2 / 99 | Connection / argument / unexpected errors (99 also for a server too old to send `promptObservation`) |
 
 ---
 

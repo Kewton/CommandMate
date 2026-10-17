@@ -1,6 +1,11 @@
 /**
  * API Route: GET /api/worktrees/:id/current-output
  * Gets the current tmux output for a worktree (even if incomplete)
+ *
+ * Issue #3755: `?observe=1` adds `promptObservation` — one prompt observation
+ * (`lib/prompt-observation`) of the same capture. Opt-in: this is the 5-second
+ * polling path of every pane, and an observation mints a token; the callers
+ * that need one (`commandmate prompt`, `commandmate wait`) ask for it.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -17,6 +22,7 @@ import { createLogger } from '@/lib/logger';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 import { resolveSessionName } from '@/lib/cli-tools/session-name';
 import { checkSessionOwnership, foreignSessionErrorBody } from '@/lib/cli-tools/session-ownership';
+import { observeSession } from '@/lib/prompt-observation/session';
 
 const logger = createLogger('api/current-output');
 
@@ -142,12 +148,23 @@ export async function GET(
     // "default" (see AGENT_MODE_UNKNOWN).
     const agentMode = detectAgentMode(target.cliToolId, payload.fullOutput);
 
-    return NextResponse.json(
+    const body =
       staleness === undefined
         ? ({ ...payload, agentMode } satisfies CurrentOutputResponseBody)
-        : ({ ...payload, agentMode, detector: { staleness } } satisfies CurrentOutputResponseBody),
-      { status: 200 }
-    );
+        : ({ ...payload, agentMode, detector: { staleness } } satisfies CurrentOutputResponseBody);
+
+    // Issue #3755: read off THIS payload, so the observation and the verdict
+    // `wait` decides its exit on are one capture, not two.
+    if (url.searchParams.get('observe') === '1') {
+      const promptObservation = observeSession(
+        id,
+        { cliToolId: target.cliToolId, instanceId: target.instanceId, resolvedBy: target.resolvedBy },
+        payload,
+      );
+      return NextResponse.json({ ...body, promptObservation }, { status: 200 });
+    }
+
+    return NextResponse.json(body, { status: 200 });
   } catch (error: unknown) {
     logger.error('error-getting-current-output:', { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json(

@@ -1,0 +1,7 @@
+────────────────────────────────────────────────────────────
+> Create a file named hello-agy.txt in this directory containing exactly one line: hello from antigravity.
+▸ Thought for 3s, 507 tokens
+  Generating the specified file
+────────────────────────────────────────────────────────────────────────────────
+⠋ Generating...
+esc to cancel                                                    Gemini 3.8 Flash · hig
