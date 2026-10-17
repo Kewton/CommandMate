@@ -1571,6 +1571,52 @@ describe('Issue #3757: the startup-trust suppression has its own wording', () =>
 });
 
 /**
+ * Issue #3748: `question-confirm-page` (an AskUserQuestion Submit/Cancel page,
+ * left to a human) has its own wording — not `unclassified-frame`'s "no
+ * tool-specific dialog detector recognised the frame".
+ */
+describe('Issue #3748: the question confirm-page suppression has its own wording', () => {
+  const stderrOf = () => mockConsoleError.mock.calls.map(c => String(c[0])).join('\n');
+
+  it('names the confirm page, exits 10 and keeps the raw reason in --json', async () => {
+    mockFetchSequence([{
+      data: {
+        ...baseOutput,
+        isRunning: true,
+        isPromptWaiting: true,
+        sessionStatus: 'waiting' as const,
+        promptData: {
+          type: 'multiple_choice',
+          question: 'Ready to submit your answers?',
+          options: [
+            { number: 1, label: 'Submit answers', isDefault: true },
+            { number: 2, label: 'Cancel', isDefault: false },
+          ],
+          status: 'pending',
+        },
+        autoYes: {
+          enabled: true,
+          expiresAt: null,
+          lastSuppression: { reason: 'question-confirm-page', mode: null, promptType: 'multiple_choice', at: Date.now() },
+        },
+      },
+    }]);
+    const { createWaitCommand } = await import('../../../../src/cli/commands/wait');
+    await createWaitCommand().parseAsync(['node', 'wait', 'wt1']);
+
+    const stderr = stderrOf();
+    expect(stderr).toContain("because the question's Submit/Cancel confirmation commits the answers as they stand");
+    expect(stderr).toContain('reason=question-confirm-page');
+    expect(stderr).not.toContain('no tool-specific dialog detector recognised the frame');
+    expect(stderr).not.toContain('does not recognise');
+    expect(stderr).not.toContain('by contract policy');
+    expect(mockExit).toHaveBeenCalledWith(WaitExitCode.PROMPT_DETECTED);
+    const output = JSON.parse(mockConsoleLog.mock.calls[0][0]);
+    expect(output.autoYesSuppression).toMatchObject({ reason: 'question-confirm-page', mode: null });
+  });
+});
+
+/**
  * Issue #1725: a dialog only the structured layer can see.
  *
  * The server publishes `isPromptWaiting: true` with a `promptData` that has no

@@ -8,11 +8,14 @@ import type { CLIToolType } from '../cli-tools/types';
 import type { PromptData } from '@/types/models';
 import type { NormalizedFrame } from '../detection/tools/types';
 import { isCodexModelPickerFrame } from '../detection/tools/codex/detect';
-import { isCommandCodeQuestionConfirmPage } from '../detection/tools/command-code/selection-shape';
 import { getCodexLifecycleDialog } from '../detection/cli-patterns';
 import { isAntigravityTrustScreen } from '../detection/tools/antigravity/patterns';
 import { isStartupTrustPending, isStartupWindowOpen } from '../cli-tools/antigravity-startup-trust';
-import { STARTUP_TRUST_UNHANDLED_SUPPRESSION_REASON } from './auto-yes-suppression-reason';
+import {
+  QUESTION_CONFIRM_PAGE_SUPPRESSION_REASON,
+  STARTUP_TRUST_UNHANDLED_SUPPRESSION_REASON,
+} from './auto-yes-suppression-reason';
+import { isAutoYesDeclinedConfirmPage } from './auto-yes-confirm-page';
 import { recordPolicySuppression, type AutoYesPolicySuppression } from './auto-yes-suppression-state';
 import { evaluateAutoYesDialogGate, type AutoYesDialogGateVerdict } from './auto-yes-dialog-gate';
 import { warnOncePerFrame, type AutoYesPollerState } from './auto-yes-poller-state';
@@ -67,8 +70,11 @@ export function suppressAndWarnOnce(
 /** How much of a prompt's question a log line carries (Issue #3497). */
 export const MAX_LOGGED_QUESTION_LENGTH = 500;
 
-/** `question` cut to {@link MAX_LOGGED_QUESTION_LENGTH}, for a log line. */
-function truncateForLog(question: string): string {
+/**
+ * `question` cut to {@link MAX_LOGGED_QUESTION_LENGTH}, for a log line.
+ * Exported for `poller:response-sent` (Issue #3748).
+ */
+export function truncateForLog(question: string): string {
   return question.length > MAX_LOGGED_QUESTION_LENGTH
     ? `${question.slice(0, MAX_LOGGED_QUESTION_LENGTH)}…`
     : question;
@@ -161,17 +167,22 @@ export function suppressIfNotOursToAnswer(prompt: JudgedPrompt, frame: Normalize
   // without its `← to go back and edit` row reaches the generic parser, and a
   // question whose only choices are the pair is read by the question reader —
   // both as `multiple_choice` with `Submit` as the default, answered `1`. Default, no setting: free-text questions go back to a human.
-  // The status path still publishes the prompt, so the human sees it. Reuses
-  // `unclassified-frame` as 3.2 does: the tool recognised the frame and
-  // deliberately declined it (a reason of its own would need `cmate wait`'s
-  // SUPPRESSION_CAUSE to learn it).
-  if (cliToolId === 'command-code' && isCommandCodeQuestionConfirmPage(frame.raw)) {
+  // The status path still publishes the prompt, so the human sees it.
+  //
+  // Issue #3748: Claude's confirmation page (`Ready to submit your answers?` /
+  // `❯ 1. Submit answers` / `2. Cancel`) is the same page and is declined the
+  // same way. Judged by `isAutoYesDeclinedConfirmPage`, which the browser's
+  // fallback (`useAutoYes`) asks too, and recorded with a reason of its own,
+  // `question-confirm-page`, which `cmate wait` names as such (it reused
+  // `unclassified-frame`, whose wording says no detector recognised the frame).
+  if (isAutoYesDeclinedConfirmPage(cliToolId, frame)) {
     suppressAndWarnOnce(
       prompt,
-      { reason: 'unclassified-frame', mode: null, promptType: promptData.type },
-      `${frameKey}\u0000command-code-question-confirm`,
+      { reason: QUESTION_CONFIRM_PAGE_SUPPRESSION_REASON, mode: null, promptType: promptData.type },
+      `${frameKey}\u0000question-confirm-page`,
       'poller:auto-yes-skipped-question-confirm',
       {
+        reason: QUESTION_CONFIRM_PAGE_SUPPRESSION_REASON,
         promptType: promptData.type,
         question: truncateForLog(promptData.question),
         options:
