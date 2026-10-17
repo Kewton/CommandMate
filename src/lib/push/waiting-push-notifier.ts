@@ -290,7 +290,8 @@ function releaseAutoYesHold(key: string, since: number): void {
   const episode = getWaitingEpisode(held.worktreeId, held.cliToolId, held.instanceId);
   if (episode === null || episode.since !== held.since) {
     pending.delete(key);
-    forgetAutoYesHold(key);
+    // Issue #3776: this episode's hold only — the next one may hold already.
+    forgetAutoYesHold(key, held.since);
     stopEscalationTimerIfIdle();
     return;
   }

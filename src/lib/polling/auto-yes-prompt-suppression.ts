@@ -11,6 +11,7 @@ import { isCodexModelPickerFrame } from '../detection/tools/codex/detect';
 import { getCodexLifecycleDialog } from '../detection/cli-patterns';
 import { isAntigravityTrustScreen } from '../detection/tools/antigravity/patterns';
 import { isStartupTrustPending, isStartupWindowOpen } from '../cli-tools/antigravity-startup-trust';
+import { GEMINI_TRUST_LAUNCH_DIALOG, isLaunchDialogOpen } from '../cli-tools/launch-dialog';
 import {
   QUESTION_CONFIRM_PAGE_SUPPRESSION_REASON,
   STARTUP_TRUST_UNHANDLED_SUPPRESSION_REASON,
@@ -125,8 +126,19 @@ export function suppressIfNotOursToAnswer(prompt: JudgedPrompt, frame: Normalize
   // to the tool. Auto-answer layer only: the detection above still reports the
   // prompt, so the human keeps seeing the screen and the response poller
   // still notifies them about it.
+  //
+  // Issue #3776: gemini's folder-trust question too. The generic parser reads
+  // it as a multiple choice whose default is the cursor row, so the poller
+  // answered `1` beside the launch's own Enter (the second keypress then fell
+  // on the restarted gemini's authentication picker), and answered `3` —
+  // `Don't trust`, written for good — when the cursor sat there. The launch
+  // confirms only `1. Trust folder` (`cli-tools/launch-dialog`).
   const launchDialog =
-    cliToolId === 'codex' ? getCodexLifecycleDialog(frame) : null;
+    cliToolId === 'codex'
+      ? getCodexLifecycleDialog(frame)
+      : cliToolId === 'gemini' && isLaunchDialogOpen(GEMINI_TRUST_LAUNCH_DIALOG, frame.clean)
+        ? GEMINI_TRUST_LAUNCH_DIALOG.id
+        : null;
   if (launchDialog) {
     // Recorded through the #1684 channel so `capture --json` and `cmate wait`
     // can name the reason instead of showing a worker that went quiet.

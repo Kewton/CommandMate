@@ -175,8 +175,14 @@ function sweepStaleAutoYesHolds(now: number): void {
 /**
  * Drop the hold of one session (Issue #3770): Auto-Yes went off, or the
  * episode closed.
+ *
+ * @param since - Issue #3776: drop it only when it is this episode's hold. A
+ *   caller retiring one episode must not take the next episode's origin with it
+ *   (that hold would start over, and its notification come up to a hold late).
+ *   Omitted, the session's hold goes whatever its episode.
  */
-export function forgetAutoYesHold(key: string): void {
+export function forgetAutoYesHold(key: string, since?: number): void {
+  if (since !== undefined && autoYesHolds.get(key)?.since !== since) return;
   autoYesHolds.delete(key);
 }
 
