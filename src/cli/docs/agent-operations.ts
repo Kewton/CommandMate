@@ -380,6 +380,25 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
     0  - Response sent
     99 - Prompt already dismissed (prompt_no_longer_active)
 
+  Strict mode (Issue #3756) -- answer only the screen you observed:
+    commandmate prompt <id> --instance antigravity --json      # kind, token, approvalTarget
+    commandmate respond <id> "Yes" --instance antigravity \\
+      --expect-screen antigravity-trust --observation <token> \\
+      --expect-target "<approvalTarget>" --json
+  The server re-captures the pane and sends nothing unless the kind, the token
+  (pane, generation, appearance, options, highlight) and, on a trust screen,
+  the folder still match. Own endpoint (prompt-response/strict); an older
+  server is a stop, never a fallback. Kinds: antigravity-trust,
+  antigravity-permission. Unnumbered screens (trust) take a label only, sent as
+  Up/Down + Enter: a number, --default, a label matching two options and an
+  option off screen are refused. Retry with the same --operation-id to read
+  the result instead of sending twice. Residual race: keys typed at the pane
+  between the last check and a key are not seen. NOT a way to get auto mode's
+  permission for an approval.
+    0  - Answered (outcome advanced / next-prompt)
+    40 - Nothing was sent (mismatch, unreadable, old server): observe again
+    41 - Keys sent, result not confirmed: do NOT send again
+
 ### commandmate interrupt <worktree-id>
   Interrupt the turn an agent is generating (the GUI's interrupt button).
   Not 'stop' -- that stops the CommandMate server.

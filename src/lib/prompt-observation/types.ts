@@ -200,3 +200,90 @@ export interface PromptObservation {
   screen: PromptObservationScreen | null;
   autoYes: PromptObservationAutoYes;
 }
+
+/**
+ * Why the strict `respond` (Issue #3756) sent nothing (exit 40) or could not
+ * say how its keys landed (exit 41).
+ */
+export type StrictRespondReason =
+  // 40: nothing was sent
+  | 'session_not_running'
+  | 'capture_failed'
+  | 'observation_failed'
+  | 'kind_mismatch'
+  | 'unsupported_screen'
+  | 'no_token_on_screen'
+  | 'approval_target_unreadable'
+  | 'expect_target_required'
+  | 'target_mismatch'
+  | 'label_not_found'
+  | 'label_ambiguous'
+  | 'number_on_unnumbered_screen'
+  | 'number_out_of_range'
+  | 'selection_unreadable'
+  | 'screen_not_open'
+  | 'startup_window_open'
+  | 'startup_trust_in_flight'
+  | 'token_malformed'
+  | 'token_expired'
+  | 'token_not_yet_valid'
+  | 'token_mismatch'
+  | 'token_consumed'
+  | 'token_consumed_store_full'
+  // 40, decided by the CLI: the server has no strict endpoint / refused the session (409)
+  | 'strict_endpoint_missing'
+  | 'session_conflict'
+  // 41: keys were (or may have been) sent; do not send again
+  | 'send_failed'
+  | 'screen_moved_mid_send'
+  | 'highlight_not_reached'
+  | 'outcome_unchanged'
+  | 'outcome_indeterminate'
+  | 'operation_in_progress'
+  // 41, decided by the CLI: the server's answer was lost (5xx, connection)
+  | 'response_unknown';
+
+/**
+ * How far the strict `respond`'s keys got: `not-sent` (none), `partial` (↑/↓
+ * but not the Enter), `sent` (every key, Enter included), `indeterminate`
+ * (not known — a duplicate of an operation still running).
+ */
+export type StrictRespondDelivery = 'not-sent' | 'partial' | 'sent' | 'indeterminate';
+
+/**
+ * What the screen did after the Enter, read again within a few seconds:
+ * `unchanged` (the same screen), `advanced` (nothing asks any more: the input
+ * box, working, or the session exited), `next-prompt` (another measured
+ * decision screen), `indeterminate` (could not be read, or `unknown`).
+ */
+export type StrictRespondOutcome = 'unchanged' | 'advanced' | 'next-prompt' | 'indeterminate';
+
+/**
+ * The body of `POST /api/worktrees/:id/prompt-response/strict`, and what
+ * `commandmate respond --expect-screen … --json` prints.
+ */
+export interface StrictRespondResult {
+  /** Always 1: the field an older server's 404 never carries. */
+  strictRespond: 1;
+  /** The CLI's exit code: 0 answered, 40 nothing sent, 41 sent but not confirmed (never resend). */
+  code: 0 | 40 | 41;
+  delivery: StrictRespondDelivery;
+  /** Null when `code` is 0. */
+  reason: StrictRespondReason | null;
+  message: string;
+  expectedKind: string;
+  /** The kind the fresh capture showed; null when nothing could be read. */
+  observedKind: PromptObservationKind | null;
+  expectedTarget: string | null;
+  /** The approval target the fresh capture showed (the folder on a trust screen). */
+  observedTarget: string | null;
+  operationId: string;
+  /** The option the answer resolved to; null when it was not resolved. */
+  answer: { position: number; label: string } | null;
+  /** How many keys reached tmux. */
+  keysSent: number;
+  /** Null until the Enter was sent. */
+  outcome: StrictRespondOutcome | null;
+  /** True when this is the stored result of an earlier request with the same operation id. */
+  replayed: boolean;
+}

@@ -161,7 +161,11 @@ highlighted option. None is issued for unknown, or when the server did not
 start the running agent (tokenWithheld says which). Auto-Yes is reported as two separate items:
 the poller's last record (with how it relates to this screen) and the
 contract's policy re-evaluated now. A missing record does not mean Auto-Yes
-can answer.`,
+can answer.
+
+To answer the screen only if it is still this one (Issue #3756):
+  commandmate respond <worktree-id> --instance <id> --expect-screen <kind> \\
+    --observation <token> [--expect-target <approvalTarget>] <label>`,
     )
     .action(async (worktreeId: string, options: PromptOptions) => {
       try {

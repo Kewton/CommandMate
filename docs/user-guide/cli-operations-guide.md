@@ -754,6 +754,8 @@ commandmate prompt <worktree-id> --instance antigravity --json   # schemaVersion
 
 kind は `promptData.type` や `sessionStatusReason`（`antigravity_selection_list` など）とは別の語彙です。これらの値を送信の条件に使わないでください。
 
+観測した画面のままのときだけ答えるには、kind とトークンを[厳格モードの `respond`](#厳格モード-観測した画面にだけ答える--expect-screenissue-3756)に渡します。
+
 ### 主な項目
 
 | 項目 | 意味 |
@@ -847,12 +849,74 @@ TUI にはハイライトされた選択肢がありますが、それがどれ�
 `GET /api/worktrees/<id>/current-output` を 1 回だけ読みます。この読み取りが失敗した場合
 （古い daemon・サーバ停止など）は**従来経路にフォールバック**します。
 
+### 厳格モード: 観測した画面にだけ答える（`--expect-screen`、Issue #3756）
+
+`--expect-screen <kind> --observation <token>` を付けると、サーバが**送る直前に取り直した画面**が
+`<kind>` のままで、[`commandmate prompt`](#commandmate-prompt) が出した観測トークンがまだ通るときだけ答えます。
+合わなければ**何も送らず** exit 40 です。
+
+```bash
+commandmate prompt <worktree-id> --instance antigravity --json        # kind・選択肢・token・approvalTarget を読む
+commandmate respond <worktree-id> "Yes" --instance antigravity \
+  --expect-screen antigravity-trust --observation <token> \
+  --expect-target "<approvalTarget に出たフォルダ>" --json
+```
+
+- 送り先は専用の `POST /api/worktrees/<id>/prompt-response/strict` です。この endpoint が無い古いサーバでは
+  **止まります**（exit 40、`strict_endpoint_missing`）。照合のない `/prompt-response` へは決して切り替えません
+- 答えられる kind は `antigravity-trust`（信頼の確認）と `antigravity-permission`（番号付きの許可）だけです。
+  `antigravity-model-picker`（effort を読めない）・`antigravity-slash-menu`・`unknown` は送る前に拒否します
+- 信頼の確認は、kind に加えて**フォルダ（`approvalTarget`）が `--expect-target` と一致すること**が条件です。
+  `--expect-target` を省くと何も送らず、画面のフォルダを `observedTarget` で返します。フォルダを読めない信頼の確認は拒否します
+- `--observation` は観測トークンで、認証の `--token` とは別物です。トークンは送る前に使い切られます（送信に失敗しても再利用できません）。
+  拒否されたら `commandmate prompt` で観測し直してください
+- 送信の前に、次をすべて取り直した画面で確かめます: kind・トークン（pane・session 世代・画面の出現・選択肢・選択中の位置）・
+  フォルダ・答えの選択肢・**画面が pane の最下部で開いていること**（下に入力欄が無く、末尾に `↑/↓ Navigate` がある。
+  生成中の返答に引用された信頼の確認には答えません）・起動処理が信頼の確認をまだ扱っていないこと。
+  起動処理（#3757）の「Enter 1 回の借り」は、厳格モードが信頼の確認に答えた時点で捨てられ、二重に答えません
+- **これは auto mode の許可を得る手段ではありません。** 誤った画面への送信が構造的に起きないことを保証するだけで、
+  その承認をしてよいかは利用者が許可の規則で与えます。auto mode に拒否された操作をこのフラグで再試行しないでください
+
+#### 番号の付かない画面への答え方
+
+信頼の確認の選択肢には番号がありません。答えは**選択肢の label** で、画面に見えている選択肢のどれか 1 つに一意に一致するときだけ送ります
+（大文字小文字・空白の違いは無視。完全一致が無ければ語の切れ目までの前方一致。`Yes` → `Yes, I trust this folder`）。
+送るのは文字ではなく **↑/↓ と Enter** です。矢印を 1 回送るたびに画面を取り直し、同じ画面のまま選択が動いたことを確かめてから次を送ります。
+
+- 番号と `--default` は拒否します（exit 2）
+- 2 つ以上の選択肢に一致する label・同じ label が並ぶ画面・画面外（スクロールの外）の選択肢は拒否します
+- 番号付きの `antigravity-permission` では番号も使えます
+
+#### 送信後の結果と操作 ID
+
+Enter の後、数秒のあいだ画面を取り直して `outcome` を返します: `advanced`（入力欄・作業中・セッション終了。もう尋ねていない）/
+`next-prompt`（次の確認）/ `unchanged`（同じ画面のまま）/ `indeterminate`（読めない・`unknown`）。成功（exit 0）は
+`advanced` と `next-prompt` だけで、同じ画面のままでも自動で再送はしません。
+
+`--operation-id <id>` を省くと毎回新しい ID を付けます。同じ ID での再送は、サーバが覚えている結果（`replayed: true`）を返し、
+**二重に送りません**（10 分間。サーバの再起動で忘れます）。応答が失われた（exit 41・`response_unknown`）ときは、
+同じ `--operation-id` で再実行すると、その操作の結果を読めます。
+
+`--json` は stdout に結果オブジェクトを 1 個だけ出します（`code` / `delivery`（`not-sent` / `partial` / `sent` / `indeterminate`）/
+`reason` / `expectedKind` / `observedKind` / `observedTarget` / `operationId` / `answer` / `keysSent` / `outcome`）。説明は stderr です。
+
+答えたことは、誰が（CLI 実行元のエージェント `agent:<worktree>/<instance>` か `cli`）・どの画面に・どの選択肢を送ったかとして、
+server.log（`strict-prompt-answered` / `strict-prompt-response-refused`）と、Enter を送った場合は task の履歴（`prompt_answered_human`）に残ります。
+
+#### 残余競合
+
+照合と送信は原子的ではありません。同じ instance への厳格モードの送信はサーバ内で直列化し、キーとキーの間でも画面を取り直しますが、
+最後の確認と次のキーの間に、利用者が pane で打ったキーや tmux 側の変化があれば検出できません。また、観測と観測の間に同じ文面の画面が
+消えて再び出た場合は、同じ出現と見なされます（[`commandmate prompt`](#commandmate-prompt) の `screen.token`）。
+
 ### 終了コード
 
 | コード | 意味 |
 |:------:|------|
 | 0 | 応答成功 |
-| 2 | 引数エラー（`<answer>` と `--default` の同時指定・両方欠落 等）/ 選択肢に無い番号（`answer_out_of_range`）|
+| 2 | 引数エラー（`<answer>` と `--default` の同時指定・両方欠落 等）/ 選択肢に無い番号（`answer_out_of_range`）/ 厳格モードでの `--default`・番号なしの画面への番号・`--expect-screen` と `--observation` の片方だけ |
+| 40 | 厳格モード: 照合不成立・照合不能。**何も送っていない**（kind・トークン・フォルダ・label の不一致、capture 失敗、古いサーバ 等）。`commandmate prompt` で観測し直す |
+| 41 | 厳格モード: 送信を始めた後の部分送信・結果不確定。**再送してはいけない**。pane を確かめる |
 | 99 | プロンプトが既に消えている（`prompt_no_longer_active`）/ yes・no を選択肢に解決できない（`unresolvable_answer`）/ 保持している decision が 0 件（`decision_not_found`）・2 件以上（`multiple_pending_decisions`、Issue #2040）|
 
 ---

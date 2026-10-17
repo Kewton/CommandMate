@@ -23,6 +23,8 @@ import {
   INSTANCE_SELECTOR_ERROR,
 } from './instances';
 import { resolveCommandTarget } from './command-target';
+import { isStrictRespond, runStrictRespond } from './respond-strict';
+import { STRICT_RESPOND_KINDS } from '../../lib/prompt-observation/kinds';
 
 /**
  * Whether this instance's agent can be answered by naming a decision
@@ -450,8 +452,48 @@ export function createRespondCommand(): Command {
     .option('--instance <id>', `${INSTANCE_OPTION_DESCRIPTION} ${INSTANCE_ALIAS_HELP_SUFFIX}`)
     .option('--agent <agent>', AGENT_OPTION_DESCRIPTION)
     .option('--token <token>', TOKEN_WARNING)
+    .option(
+      '--expect-screen <kind>',
+      `Strict respond (Issue #3756): answer only if the screen is still this kind (${STRICT_RESPOND_KINDS.join(', ')}). ` +
+        'Needs --observation; never falls back to the unchecked route',
+    )
+    .option('--observation <token>', 'Strict respond: the observation token `commandmate prompt` printed for the screen (not the auth --token)')
+    .option('--expect-target <folder>', 'Strict respond: the folder a trust screen must name (omit it to be shown the folder; nothing is sent)')
+    .option('--operation-id <id>', 'Strict respond: reuse this id to retry without sending twice (default: a new random id)')
+    .option('--json', 'Strict respond: print the result object as JSON on stdout')
+    .addHelpText(
+      'after',
+      `
+Strict respond (--expect-screen <kind> --observation <token> <label>):
+  Run \`commandmate prompt <worktree-id> --instance <id>\` first, then answer with its
+  token. The server takes a fresh capture and sends nothing unless the kind, the
+  token (same pane, generation, appearance, options and highlight) and, on a
+  trust screen, --expect-target all match. Unnumbered screens (antigravity-trust)
+  are answered by label only — sent as Up/Down and Enter; a number and --default
+  are refused, and so are labels that match two options or no visible one.
+  Residual race: a key typed at the pane between the last check and a key is not
+  seen. This is not a way to get auto mode's permission for an approval.
+
+  Exit codes: 0 answered / 40 nothing sent (re-observe first) /
+  41 keys sent, result not confirmed (do NOT send again) / 2 bad arguments`,
+    )
     .action(async (worktreeId: string, answer: string | undefined, options: RespondOptions) => {
       try {
+        // Issue #3756: its own endpoint, and never the unchecked one below.
+        if (isStrictRespond(options)) {
+          if (!isValidWorktreeId(worktreeId)) {
+            console.error('Error: Invalid worktree ID format.');
+            process.exit(ExitCode.CONFIG_ERROR);
+            return;
+          }
+          await runStrictRespond(worktreeId, answer, options);
+          return;
+        }
+        if (options.json) {
+          console.error('Error: --json applies to the strict respond (--expect-screen) only.');
+          process.exit(ExitCode.CONFIG_ERROR);
+          return;
+        }
         const useDefault = validateRespondArgs(worktreeId, answer, options);
 
         const client = new ApiClient({ token: options.token });
