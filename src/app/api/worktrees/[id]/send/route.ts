@@ -27,6 +27,12 @@ import { CLI_TOOL_IDS, isValidInstanceId, type CLIToolType, type ICLITool } from
 import { sendUserMessage } from '@/lib/session/send-user-message';
 import { PROMPT_WAITING_CODE } from '@/lib/session/prompt-waiting-guard';
 import {
+  describeSendAttemptState,
+  getLastSendAttempt,
+  recordSendAttempt,
+  sendMessageDigest,
+} from '@/lib/session/send-attempt-state';
+import {
   buildSessionExitedToShellMessage,
   isSessionStartTimeoutError,
   isSessionStartUnavailableError,
@@ -300,7 +306,11 @@ export async function POST(
     // nor adopted, and no session of our own is started over it.
     const sessionName = cliTool.getSessionName(id, instanceId);
     const ownership = await checkSessionOwnership(sessionName, worktree.path);
+    // Issue #3759: the attempts this route refuses before the send service are
+    // recorded too, so `lastSend` names the latest one.
+    const sendAttemptInstance = { worktreeId: id, cliToolId, instanceId: instanceId ?? cliToolId };
     if (ownership.verdict === 'foreign') {
+      recordSendAttempt(sendAttemptInstance, { state: 'not-sent', reason: 'foreign-session', content: trimmedContent });
       return NextResponse.json(foreignSessionErrorBody(sessionName, ownership.sessionPath), { status: 409 });
     }
 
@@ -361,6 +371,11 @@ export async function POST(
         }
       } catch (error: unknown) {
         logger.error('failed-to-start-session:', { error: error instanceof Error ? error.message : String(error) });
+        recordSendAttempt(sendAttemptInstance, {
+          state: 'not-sent',
+          reason: isSessionStartTimeoutError(error) ? 'session-starting' : 'session-start-failed',
+          content: trimmedContent,
+        });
         // Issue #1637: a session that is still initializing is not a server
         // fault. The tmux session and the CLI process exist and are coming up,
         // so the honest answer is "temporarily unavailable, retry" — 503 with a
@@ -422,6 +437,7 @@ export async function POST(
     // Issue #1028: Delegate the send + history-recording flow to the shared
     // sendUserMessage service so manual sends and Timer-fired sends (executeTimer)
     // record identically in chat_messages / Message History.
+    const sendStartedAt = Date.now();
     const result = await sendUserMessage(db, {
       worktreeId: id,
       content: trimmedContent,
@@ -468,8 +484,16 @@ export async function POST(
           { status: 500 }
         );
       }
+      // Issue #3759: say whether the message can be resent (`not-sent`) or must
+      // not be before the pane is checked (`indeterminate`). Nothing resends it.
+      // The record must be this request's: same message, made after it began.
+      const attempt = getLastSendAttempt(sendAttemptInstance);
+      const sendState =
+        attempt !== null && attempt.at >= Math.floor(sendStartedAt) && attempt.messageDigest === sendMessageDigest(trimmedContent)
+          ? ` ${describeSendAttemptState(attempt)}`
+          : '';
       return NextResponse.json(
-        { error: `Failed to send message to ${cliTool.name}: ${result.error}` },
+        { error: `Failed to send message to ${cliTool.name}: ${result.error}${sendState}` },
         { status: 500 }
       );
     }
