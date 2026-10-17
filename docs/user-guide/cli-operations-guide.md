@@ -770,6 +770,9 @@ kind は `promptData.type` や `sessionStatusReason`（`antigravity_selection_li
 | `autoYes.enabled` / `pollerActive` | Auto-Yes の有効状態 / サーバの poller が動いているか |
 | `autoYes.pollerRecord` | poller（または permission hook）が最後に「答えなかった」と記録したもの。`screenCorrelation` はこの画面との対応で、記録は画面を名指ししないため `unknown` / `type-mismatch` / `no-prompt-on-screen` のどれか |
 | `autoYes.contractEvaluation` | 契約の方針を**いま**この画面に当てた結果（`policy-withholds` + 理由 / `policy-permits` / `no-base-answer` / `not-evaluated`）。理由の語は `AutoYesSuppressionReason` と同じ |
+| `lastSend` | このインスタンスへの直近の send の結末（Issue #3759）。`{ at, state, reason }`。`state` は `not-sent`（本文のキーを 1 つも打つ前に失敗。例: `prompt-not-ready`）/ `sent`（送信を確かめた）/ `indeterminate`（一部を打った後に失敗、または結果を確かめられない。composer に本文が残っていれば `reason: composer-residue`）。サーバ起動後に記録が無ければ null、古いサーバでは項目自体が無い |
+
+**`lastSend` が何であっても、CommandMate は自動で再送しません。** 再送するのは利用者か監督のエージェントです。`not-sent` は自分で送り直してください（入力欄が戻ってから）。**`indeterminate` のときは再送しないでください。** 先に `commandmate capture <worktree-id> --pane` で画面を見て、本文が入力欄に残っていないか・既に送られていないかを確かめます（確かめずに送ると二重に届くことがあります）。`send` が `prompt not ready` などで失敗したときのエラーにも、同じ状態（`[send state: not-sent (prompt-not-ready): …]`）が書かれます。
 
 **記録が無いこと（`pollerRecord: null`）は「Auto-Yes が答えられる」という意味ではありません。** poller がその画面に届いていない場合も記録は残りません（Issue #3746）。
 `policy-permits` も「契約が止めない」だけで、poller の他の判定（ツール固有のダイアログ読み取り等）は含みません。

@@ -546,6 +546,9 @@ The kinds are a vocabulary of their own, separate from `promptData.type` and `se
 | `autoYes.enabled` / `pollerActive` | Whether Auto-Yes is on / whether the server's poller runs |
 | `autoYes.pollerRecord` | What the poller (or the permission hook) last recorded as withheld. `screenCorrelation` relates it to this screen; the record names no screen, so it is `unknown` / `type-mismatch` / `no-prompt-on-screen` |
 | `autoYes.contractEvaluation` | The contract's policy applied to this screen **now** (`policy-withholds` + reason / `policy-permits` / `no-base-answer` / `not-evaluated`). Reasons use the `AutoYesSuppressionReason` words |
+| `lastSend` | How the last send to this instance ended (Issue #3759): `{ at, state, reason }`. `state` is `not-sent` (it failed before any key of the body was typed, e.g. `prompt-not-ready`) / `sent` (the submit was confirmed) / `indeterminate` (it failed after part of it may have been typed, or the outcome could not be read back; `reason: composer-residue` when the body is still in the composer). Null when this server has no record since it started; absent from an older server |
+
+**Whatever `lastSend` says, CommandMate never resends.** The sender — you or the supervising agent — does. Resend a `not-sent` message yourself once the input prompt is back. **Do not resend an `indeterminate` one** before checking the pane with `commandmate capture <worktree-id> --pane` (is the body still in the composer, or was it already submitted?); resending blind can deliver it twice. A `send` that fails with `prompt not ready` and the like carries the same state in its error (`[send state: not-sent (prompt-not-ready): …]`).
 
 **A missing record (`pollerRecord: null`) does not mean Auto-Yes can answer.** A poller that never reached the screen records nothing either (Issue #3746).
 `policy-permits` says only that the contract would not stop it; the poller's other gates (the tool-specific dialog reader, …) are not part of it.

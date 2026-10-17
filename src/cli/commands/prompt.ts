@@ -67,6 +67,22 @@ export function isPromptObservation(value: unknown): value is PromptObservation 
   );
 }
 
+/**
+ * The last send in the words a human reads (Issue #3759), or null when the
+ * server holds no record or is older than the field.
+ */
+export function formatLastSend(lastSend: PromptObservation['lastSend'], now: number = Date.now()): string | null {
+  if (!lastSend) return null;
+  const ago = `${Math.max(0, Math.round((now - lastSend.at) / 1000))}s ago`;
+  const advice =
+    lastSend.state === 'not-sent'
+      ? ' — the message was not typed; it is not resent automatically'
+      : lastSend.state === 'indeterminate'
+        ? ' — part of it may have been typed; do not resend before checking `capture --pane`'
+        : '';
+  return `  last send: ${lastSend.state} (${lastSend.reason}, ${ago})${advice}`;
+}
+
 /** The observation in the words a human reads. */
 export function formatPromptObservation(observation: PromptObservation, now: number = Date.now()): string {
   const { target, screen, autoYes } = observation;
@@ -74,8 +90,10 @@ export function formatPromptObservation(observation: PromptObservation, now: num
   lines.push(
     `Instance ${target.instanceId} (${target.cliToolId}) on ${target.worktreeId}, pane ${target.sessionName}`,
   );
+  const lastSendLine = formatLastSend(observation.lastSend, now);
   if (observation.status === 'unavailable' || screen === null) {
     lines.push('  No running session: there is no screen to read.');
+    if (lastSendLine !== null) lines.push(lastSendLine);
     return lines.join('\n');
   }
 
@@ -131,6 +149,7 @@ export function formatPromptObservation(observation: PromptObservation, now: num
     `  contract re-evaluation: ${evaluationDetail}` +
       (evaluation.contract ? ` (task ${evaluation.contract.taskId ?? 'unknown'}, mode=${evaluation.contract.mode ?? 'none'})` : ' (no contract)'),
   );
+  if (lastSendLine !== null) lines.push(lastSendLine);
   return lines.join('\n');
 }
 
@@ -161,7 +180,13 @@ highlighted option. None is issued for unknown, or when the server did not
 start the running agent (tokenWithheld says which). Auto-Yes is reported as two separate items:
 the poller's last record (with how it relates to this screen) and the
 contract's policy re-evaluated now. A missing record does not mean Auto-Yes
-can answer.`,
+can answer.
+
+lastSend says how the last send to the instance ended: not-sent (no key of the
+message was typed, e.g. prompt not ready), sent, or indeterminate (part of it
+may have been typed). Nothing is resent automatically: resend a not-sent
+message yourself, and do not resend an indeterminate one before checking
+\`capture --pane\`.`,
     )
     .action(async (worktreeId: string, options: PromptOptions) => {
       try {
