@@ -31,6 +31,8 @@ import {
 } from '@/config/cli-tool-timing-config';
 import { withLaunchScreenCleared } from '@/lib/session/launch-screen';
 import { getErrorMessage } from '@/lib/errors';
+import { decideLaunchDialog, GEMINI_TRUST_LAUNCH_DIALOG, launchDialogWarning } from './launch-dialog';
+import { beginLaunchWindow, endLaunchWindow } from './launch-window';
 
 const logger = createLogger('cli-tools/gemini');
 
@@ -50,16 +52,16 @@ export { GEMINI_PANE_HEIGHT };
 /** Interval for polling trust dialog / prompt detection */
 const GEMINI_POLL_INTERVAL_MS = 1000;
 
-/**
- * Gemini's folder-trust question. v0.62.0 asks `Do you trust the files in this
- * folder?` (measured 2026-10-17, drawn about 2 s after launch in an empty
- * folder with a fresh HOME); earlier builds asked `Do you trust this folder?`.
- * The default row is `1. Trust folder`, so one Enter confirms it.
- */
-const GEMINI_TRUST_DIALOG_PATTERN = /Do you trust (?:the files in )?this folder\?/;
-
 /** Max attempts for initialization polling (30 * 1000ms = 30s total window) */
 const GEMINI_INIT_MAX_ATTEMPTS = 30;
+
+/**
+ * How long the launch window stays open after the trust Enter when the wait
+ * runs out first (review of #3776): gemini takes about 2 s to draw its restart
+ * line, and until then the answered dialog still reads as `press` — a poller
+ * free to answer it would type `1` into the restarted gemini.
+ */
+const GEMINI_TRUST_SETTLE_MS = 5000;
 
 /** Timeout for waiting for prompt before sending a message */
 const GEMINI_PROMPT_WAIT_TIMEOUT_MS = 15000;
@@ -129,14 +131,21 @@ export class GeminiTool extends BaseCLITool {
         executablePath: this.command,
         worktreePath,
       });
-      await sendKeys(sessionName, withLaunchScreenCleared(launchCommand), true);
+      // Issue #3776: from the launch line to the end of `waitForReady`, the
+      // trust dialog is this launch's to answer; the Auto-Yes poller leaves it.
+      beginLaunchWindow(sessionName);
+      try {
+        await sendKeys(sessionName, withLaunchScreenCleared(launchCommand), true);
 
-      // Wait for Gemini to initialize (minimum wait for banner/auth)
-      await new Promise((resolve) => setTimeout(resolve, GEMINI_INIT_WAIT_MS));
+        // Wait for Gemini to initialize (minimum wait for banner/auth)
+        await new Promise((resolve) => setTimeout(resolve, GEMINI_INIT_WAIT_MS));
 
-      // Poll until Gemini interactive prompt is ready
-      // Handles trust dialog automatically if encountered
-      await this.waitForReady(sessionName);
+        // Poll until Gemini interactive prompt is ready
+        // Handles trust dialog automatically if encountered
+        await this.waitForReady(sessionName);
+      } finally {
+        endLaunchWindow(sessionName);
+      }
 
       logger.info('started-gemini-session');
     } catch (error: unknown) {
@@ -149,9 +158,16 @@ export class GeminiTool extends BaseCLITool {
    * Wait for Gemini CLI to become ready (prompt visible).
    * Handles trust dialog automatically if encountered.
    * Polls until GEMINI_PROMPT_PATTERN is detected or max attempts reached.
+   *
+   * Issue #3776: the trust dialog gets its Enter only while the cursor is on
+   * `1. Trust folder` ({@link GEMINI_TRUST_LAUNCH_DIALOG}); on any other row,
+   * or on a screen that looks like the dialog but no longer reads as it, nothing
+   * is sent and the launch logs why, once per reason.
    */
   private async waitForReady(sessionName: string): Promise<void> {
     let trustDialogHandled = false;
+    let trustPressedAt: number | null = null;
+    const loggedDecisions = new Set<string>();
     for (let i = 0; i < GEMINI_INIT_MAX_ATTEMPTS; i++) {
       try {
         const rawOutput = await capturePane(sessionName, GEMINI_PANE_HEIGHT);
@@ -166,17 +182,33 @@ export class GeminiTool extends BaseCLITool {
         }
 
         // Handle trust dialog if not yet handled
-        if (!trustDialogHandled && GEMINI_TRUST_DIALOG_PATTERN.test(output)) {
-          await sendSpecialKey(sessionName, 'Enter');
-          trustDialogHandled = true;
-          logger.info('auto-trusted-folder-for-gemini');
-          // Continue polling for prompt after trust dialog
+        if (!trustDialogHandled) {
+          const decision = decideLaunchDialog(GEMINI_TRUST_LAUNCH_DIALOG, output);
+          if (decision.action === 'press') {
+            await sendSpecialKey(sessionName, decision.key);
+            trustDialogHandled = true;
+            trustPressedAt = Date.now();
+            logger.info('auto-trusted-folder-for-gemini');
+            // Continue polling for prompt after trust dialog
+          } else {
+            const warning = launchDialogWarning(GEMINI_TRUST_LAUNCH_DIALOG, decision);
+            if (warning && decision.action !== 'absent' && !loggedDecisions.has(decision.reason)) {
+              loggedDecisions.add(decision.reason);
+              logger.warn(warning.event, { sessionName, ...warning.fields });
+            }
+          }
         }
       } catch (error: unknown) {
         // Capture may fail during initialization - continue polling
         logger.debug('gemini-ready-capture-failed', { sessionName, error: getErrorMessage(error) });
       }
       await new Promise((resolve) => setTimeout(resolve, GEMINI_POLL_INTERVAL_MS));
+    }
+    // The caller closes the launch window when this returns: not before the
+    // trust Enter has had time to show gemini's restart line.
+    if (trustPressedAt !== null) {
+      const settle = GEMINI_TRUST_SETTLE_MS - (Date.now() - trustPressedAt);
+      if (settle > 0) await new Promise((resolve) => setTimeout(resolve, settle));
     }
     logger.info('gemini-prompt-detection');
   }

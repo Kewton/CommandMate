@@ -42,6 +42,12 @@ import {
   isStartupTrustPending,
   markStartupTrustPending,
 } from './antigravity-startup-trust';
+import {
+  ANTIGRAVITY_TRUST_LAUNCH_DIALOG,
+  decideLaunchDialog,
+  launchDialogWarning,
+  type LaunchDialogDecision,
+} from './launch-dialog';
 import { ANTIGRAVITY_CLI_TOOL_ID } from '@/lib/hooks/sources';
 import {
   beginAgentSession,
@@ -126,6 +132,21 @@ function describeScreen(output: string | null): { screen: string; screenTail: st
     screen,
     screenTail: rows.slice(-SCREEN_TAIL_ROWS).map((row) => row.slice(0, SCREEN_TAIL_MAX_CHARS)),
   };
+}
+
+/**
+ * Log, once per reason per wait, why a trust screen was left without its Enter
+ * (Issue #3776). Names the dialog and the cursor's row, never the screen.
+ */
+function logTrustDecisionOnce(
+  sessionName: string,
+  decision: LaunchDialogDecision,
+  logged: Set<string>,
+): void {
+  const warning = launchDialogWarning(ANTIGRAVITY_TRUST_LAUNCH_DIALOG, decision);
+  if (!warning || decision.action === 'absent' || decision.action === 'press' || logged.has(decision.reason)) return;
+  logged.add(decision.reason);
+  logger.warn(warning.event, { sessionName, ...warning.fields });
 }
 
 /**
@@ -327,6 +348,7 @@ export class AntigravityTool extends BaseCLITool {
     // One-shot guard: capturePane keeps the dismissed dialog in scrollback, so
     // Enter must be sent at most once per dialog.
     let trustDialogHandled = false;
+    const loggedTrustDecisions = new Set<string>();
     let lastOutput: string | null = null;
     let captureErrors = 0;
     let lastCaptureError: string | undefined;
@@ -342,19 +364,20 @@ export class AntigravityTool extends BaseCLITool {
           return;
         }
 
-        // Trust dialog: confirm the default "Yes, I trust this folder" with Enter.
-        // Not while a strict `respond` holds the session (Issue #3771): the
-        // screen is its to key, and the window looks again after a poll.
-        if (
-          !trustDialogHandled &&
-          ANTIGRAVITY_TRUST_DIALOG_PATTERN.test(output) &&
-          !isStartupTrustHeld(sessionName)
-        ) {
-          await sendSpecialKey(sessionName, 'Enter');
-          trustDialogHandled = true;
-          logger.info('auto-trusted-folder-for-antigravity');
-          await new Promise((resolve) => setTimeout(resolve, ANTIGRAVITY_DIALOG_SETTLE_MS));
-          continue;
+        // Trust dialog: confirm the default "Yes, I trust this folder" with
+        // Enter — only while the cursor is on it (Issue #3776), and not while a
+        // strict `respond` holds the session (Issue #3771): the screen is its to
+        // key, and the window looks again after a poll.
+        if (!trustDialogHandled) {
+          const decision = decideLaunchDialog(ANTIGRAVITY_TRUST_LAUNCH_DIALOG, output);
+          if (decision.action === 'press' && !isStartupTrustHeld(sessionName)) {
+            await sendSpecialKey(sessionName, decision.key);
+            trustDialogHandled = true;
+            logger.info('auto-trusted-folder-for-antigravity');
+            await new Promise((resolve) => setTimeout(resolve, ANTIGRAVITY_DIALOG_SETTLE_MS));
+            continue;
+          }
+          logTrustDecisionOnce(sessionName, decision, loggedTrustDecisions);
         }
       } catch (error: unknown) {
         // Capture may fail during initialization - continue polling, but keep
@@ -398,6 +421,7 @@ export class AntigravityTool extends BaseCLITool {
       ? ANTIGRAVITY_STARTUP_PROMPT_WAIT_TIMEOUT_MS
       : ANTIGRAVITY_PROMPT_WAIT_TIMEOUT_MS);
     const pollInterval = 500;
+    const loggedTrustDecisions = new Set<string>();
     let lastOutput: string | null = null;
     let captureErrors = 0;
     let lastCaptureError: string | undefined;
@@ -410,11 +434,16 @@ export class AntigravityTool extends BaseCLITool {
           forgetStartupTrust(sessionName);
           return;
         }
-        if (
-          isAntigravityTrustScreen(normalizeFrame(output, 'antigravity').lastLines) &&
-          claimStartupTrust(sessionName)
-        ) {
-          await sendSpecialKey(sessionName, 'Enter');
+        // Issue #3776: the owed Enter is claimed only while the cursor is on
+        // `Yes, I trust this folder`; otherwise it stays owed and unsent.
+        const trustDecision = isAntigravityTrustScreen(normalizeFrame(output, 'antigravity').lastLines)
+          ? decideLaunchDialog(ANTIGRAVITY_TRUST_LAUNCH_DIALOG, output)
+          : null;
+        if (trustDecision !== null && trustDecision.action !== 'press' && isStartupTrustPending(sessionName)) {
+          logTrustDecisionOnce(sessionName, trustDecision, loggedTrustDecisions);
+        }
+        if (trustDecision?.action === 'press' && claimStartupTrust(sessionName)) {
+          await sendSpecialKey(sessionName, trustDecision.key);
           logger.info('auto-trusted-folder-for-antigravity', { sessionName, afterLaunchWindow: true });
           // A full ordinary window for agy to draw its prompt after the Enter.
           deadline = Math.max(deadline, Date.now() + ANTIGRAVITY_PROMPT_WAIT_TIMEOUT_MS);

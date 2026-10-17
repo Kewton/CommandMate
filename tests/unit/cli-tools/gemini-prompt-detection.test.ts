@@ -51,7 +51,11 @@ describe('GeminiTool prompt detection depth', () => {
 
 describe('[#3770] GeminiTool folder-trust dialog during launch', () => {
   const TRUST_V062 = ' │ Do you trust the files in this folder?\n │ ● 1. Trust folder (work)\n │   2. Trust parent folder';
-  const TRUST_OLD = ' Do you trust this folder?';
+  // Issue #3776: the launch now confirms only a cursor on `1. Trust folder`, so
+  // the earlier wording carries option rows too. Assumed, not measured: these
+  // are v0.62.0's three rows; no build with the earlier wording was captured
+  // (tests/fixtures/gemini-live-3776/README.md).
+  const TRUST_OLD = ' Do you trust this folder?\n ● 1. Trust folder (work)\n   2. Trust parent folder\n   3. Don\'t trust';
 
   beforeEach(() => {
     vi.clearAllMocks();

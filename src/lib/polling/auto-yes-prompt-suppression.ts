@@ -12,6 +12,14 @@ import { getCodexLifecycleDialog } from '../detection/cli-patterns';
 import { isAntigravityTrustScreen } from '../detection/tools/antigravity/patterns';
 import { isStartupTrustPending, isStartupWindowOpen } from '../cli-tools/antigravity-startup-trust';
 import {
+  GEMINI_TRUST_LAUNCH_DIALOG,
+  decideLaunchDialog,
+  isLaunchDialogDrawn,
+  isLaunchDialogOpen,
+} from '../cli-tools/launch-dialog';
+import { isLaunchWindowOpen } from '../cli-tools/launch-window';
+import { resolveSessionName } from '../cli-tools/session-name';
+import {
   QUESTION_CONFIRM_PAGE_SUPPRESSION_REASON,
   STARTUP_TRUST_UNHANDLED_SUPPRESSION_REASON,
 } from './auto-yes-suppression-reason';
@@ -91,6 +99,62 @@ export type NotOursToAnswerVerdict =
   | { kind: 'dialog-gate-refused'; dialogGate: AutoYesDialogGateVerdict };
 
 /**
+ * Issue #3776: whether the prompt the poller is about to answer is gemini's
+ * folder-trust dialog itself — its parsed options are the declared option
+ * rows — rather than another prompt sharing the screen with it (the
+ * authentication picker under a dismissed dialog, a permission prompt under a
+ * reply that quotes the question).
+ */
+function isGeminiTrustPrompt(promptData: PromptData): boolean {
+  if (promptData.type !== 'multiple_choice') return false;
+  const { optionRow, minOptionRows } = GEMINI_TRUST_LAUNCH_DIALOG;
+  return promptData.options.filter((o) => optionRow.test(`${o.number}. ${o.label}`)).length >= minOptionRows;
+}
+
+/**
+ * Issue #3776: whether gemini's folder-trust dialog on this frame is left to
+ * the launch (step 3). Judged only for a prompt whose options are the dialog's
+ * declared rows ({@link isGeminiTrustPrompt}): a reply quoting the question
+ * over another prompt, or the authentication picker under a dismissed dialog,
+ * is answered as any prompt is.
+ *
+ * Left alone by default — the poller answers only when nothing else will and
+ * the answer is the safe one:
+ * - While the launch window is open (`cli-tools/launch-window`), never: the
+ *   launch answers it, and an answered dialog stays drawn above gemini's
+ *   restart line, where a `1` lands on whatever the restart draws next.
+ * - After it — the launch's Enter did not land, or gemini drew the dialog late
+ *   (an auto-update, a slow start) — only when the prompt's default (the
+ *   cursor row, which is what the poller sends) is `1. Trust folder`, and,
+ *   when the screen reads as the declared dialog, the launch's own reading is
+ *   `press` (not a dismissed dialog).
+ *
+ * A screen that does not read as the dialog (the wording changed, the options
+ * sit further below the question than declared) is not a reason to answer
+ * (review of #3776): with the cursor on `3. Don't trust` the poller's default
+ * would write that answer for good.
+ */
+function isGeminiTrustDialogLeftToLaunch(prompt: JudgedPrompt, frame: NormalizedFrame): boolean {
+  const { promptData } = prompt;
+  if (promptData.type !== 'multiple_choice' || !isGeminiTrustPrompt(promptData)) return false;
+  let windowOpen = false;
+  try {
+    windowOpen = isLaunchWindowOpen(resolveSessionName('gemini', prompt.worktreeId, prompt.instanceId));
+  } catch {
+    // An id that would not make a session name was never launched here.
+  }
+  if (windowOpen) return true;
+  const defaultOption = promptData.options.find((o) => o.isDefault);
+  const defaultIsSafe =
+    defaultOption !== undefined &&
+    GEMINI_TRUST_LAUNCH_DIALOG.safeRow.test(`${defaultOption.number}. ${defaultOption.label}`);
+  if (!defaultIsSafe) return true;
+  if (!isLaunchDialogDrawn(GEMINI_TRUST_LAUNCH_DIALOG, frame.clean)) return false;
+  if (!isLaunchDialogOpen(GEMINI_TRUST_LAUNCH_DIALOG, frame.clean)) return true;
+  return decideLaunchDialog(GEMINI_TRUST_LAUNCH_DIALOG, frame.clean).action !== 'press';
+}
+
+/**
  * Issue #3214: steps 3, 3.2, 3.3 (Issue #3497) and 3.5 of
  * `detectAndRespondToPrompt` -- the frames that read as a prompt and are still
  * not Auto-Yes's to answer, judged in the order they always were. "The
@@ -125,8 +189,20 @@ export function suppressIfNotOursToAnswer(prompt: JudgedPrompt, frame: Normalize
   // to the tool. Auto-answer layer only: the detection above still reports the
   // prompt, so the human keeps seeing the screen and the response poller
   // still notifies them about it.
+  //
+  // Issue #3776: gemini's folder-trust question too. The generic parser reads
+  // it as a multiple choice whose default is the cursor row, so the poller
+  // answered `1` beside the launch's own Enter (the second keypress then fell
+  // on the restarted gemini's authentication picker), and answered `3` —
+  // `Don't trust`, written for good — when the cursor sat there. The launch
+  // confirms only `1. Trust folder` (`cli-tools/launch-dialog`). See
+  // {@link isGeminiTrustDialogLeftToLaunch} for when the poller may answer.
   const launchDialog =
-    cliToolId === 'codex' ? getCodexLifecycleDialog(frame) : null;
+    cliToolId === 'codex'
+      ? getCodexLifecycleDialog(frame)
+      : cliToolId === 'gemini' && isGeminiTrustDialogLeftToLaunch(prompt, frame)
+        ? GEMINI_TRUST_LAUNCH_DIALOG.id
+        : null;
   if (launchDialog) {
     // Recorded through the #1684 channel so `capture --json` and `cmate wait`
     // can name the reason instead of showing a worker that went quiet.
