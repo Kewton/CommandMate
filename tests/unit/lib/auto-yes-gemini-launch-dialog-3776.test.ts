@@ -187,6 +187,59 @@ describe('[#3776] the poller leaves gemini\'s folder-trust question to the launc
     expect(getLastPolicySuppression(WORKTREE_ID, 'gemini')?.reason).toBe('agent-launch-dialog');
   });
 
+  describe('a screen that does not read as the dialog is not a reason to answer (2nd review)', () => {
+    const live = (name: string): string => fs.readFileSync(path.join(LIVE, `${name}.txt`), 'utf-8');
+    /** Six more rows of explanation: the options sit 9+ rows under the question. */
+    const pushedDown = (raw: string): string =>
+      raw.replace(
+        ' │ behalf or change the behavior of the CLI.',
+        [1, 2, 3, 4, 5, 6].map((n) => ` │ more explanation ${n}`).join('\n') + '\n │ behalf or change the behavior of the CLI.',
+      );
+    const reworded = (raw: string): string =>
+      raw.replace('Do you trust the files in this folder?', 'Trust the files in this workspace?');
+    const onParent = (raw: string): string =>
+      raw.replace('● 1. Trust folder', '  1. Trust folder').replace('  2. Trust parent folder', '● 2. Trust parent folder');
+
+    const cases: Array<[string, string]> = [
+      ['options pushed down, cursor on Don\'t trust (Q3)', pushedDown(live('trust-dialog-cursor-dont-trust'))],
+      ['question reworded, cursor on Don\'t trust (Q1)', reworded(live('trust-dialog-cursor-dont-trust'))],
+      ['question reworded, cursor on Trust parent folder', reworded(onParent(live('trust-dialog')))],
+      ['options pushed down, cursor on Trust parent folder', pushedDown(onParent(live('trust-dialog')))],
+    ];
+
+    it('fixtures: the edits took', () => {
+      for (const [, raw] of cases) expect(raw).not.toBe(live('trust-dialog'));
+      expect(pushedDown(live('trust-dialog'))).toContain('more explanation 6');
+      expect(reworded(live('trust-dialog'))).toContain('Trust the files in this workspace?');
+    });
+
+    it.each(cases)('after the window, %s: no answer', async (_label, raw) => {
+      expect(await tickRaw(raw)).toBe('no_answer');
+      expect(sendPromptAnswer).not.toHaveBeenCalled();
+      expect(getLastPolicySuppression(WORKTREE_ID, 'gemini')?.reason).toBe('agent-launch-dialog');
+    });
+
+    it.each(cases)('in the window, %s: no answer', async (_label, raw) => {
+      openLaunchWindow();
+      expect(await tickRaw(raw)).toBe('no_answer');
+      expect(sendPromptAnswer).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['options pushed down', pushedDown(live('trust-dialog'))],
+      ['question reworded', reworded(live('trust-dialog'))],
+    ])('cursor on 1. Trust folder, %s: answered `1` after the window, left alone in it', async (_label, raw) => {
+      expect(await tickRaw(raw)).toBe('responded');
+      expect(sendPromptAnswer.mock.calls[0][0].answer).toBe('1');
+
+      vi.clearAllMocks();
+      clearPolicySuppressions();
+      openLaunchWindow();
+      expect(await tickRaw(raw)).toBe('no_answer');
+      expect(sendPromptAnswer).not.toHaveBeenCalled();
+    });
+  });
+
   it('negative: a reply quoting the question above a permission prompt is not the dialog, even in the window', async () => {
     openLaunchWindow();
     const quoted = [

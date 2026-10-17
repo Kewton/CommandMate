@@ -55,6 +55,14 @@ const GEMINI_POLL_INTERVAL_MS = 1000;
 /** Max attempts for initialization polling (30 * 1000ms = 30s total window) */
 const GEMINI_INIT_MAX_ATTEMPTS = 30;
 
+/**
+ * How long the launch window stays open after the trust Enter when the wait
+ * runs out first (review of #3776): gemini takes about 2 s to draw its restart
+ * line, and until then the answered dialog still reads as `press` — a poller
+ * free to answer it would type `1` into the restarted gemini.
+ */
+const GEMINI_TRUST_SETTLE_MS = 5000;
+
 /** Timeout for waiting for prompt before sending a message */
 const GEMINI_PROMPT_WAIT_TIMEOUT_MS = 15000;
 
@@ -158,6 +166,7 @@ export class GeminiTool extends BaseCLITool {
    */
   private async waitForReady(sessionName: string): Promise<void> {
     let trustDialogHandled = false;
+    let trustPressedAt: number | null = null;
     const loggedDecisions = new Set<string>();
     for (let i = 0; i < GEMINI_INIT_MAX_ATTEMPTS; i++) {
       try {
@@ -178,6 +187,7 @@ export class GeminiTool extends BaseCLITool {
           if (decision.action === 'press') {
             await sendSpecialKey(sessionName, decision.key);
             trustDialogHandled = true;
+            trustPressedAt = Date.now();
             logger.info('auto-trusted-folder-for-gemini');
             // Continue polling for prompt after trust dialog
           } else {
@@ -193,6 +203,12 @@ export class GeminiTool extends BaseCLITool {
         logger.debug('gemini-ready-capture-failed', { sessionName, error: getErrorMessage(error) });
       }
       await new Promise((resolve) => setTimeout(resolve, GEMINI_POLL_INTERVAL_MS));
+    }
+    // The caller closes the launch window when this returns: not before the
+    // trust Enter has had time to show gemini's restart line.
+    if (trustPressedAt !== null) {
+      const settle = GEMINI_TRUST_SETTLE_MS - (Date.now() - trustPressedAt);
+      if (settle > 0) await new Promise((resolve) => setTimeout(resolve, settle));
     }
     logger.info('gemini-prompt-detection');
   }

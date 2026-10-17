@@ -99,4 +99,30 @@ describe('[#3776] gemini launch window', () => {
     expect(isLaunchWindowOpen(SESSION)).toBe(false);
     expect(sendSpecialKey).not.toHaveBeenCalled();
   });
+
+  it('an Enter on the wait\'s last attempts keeps the window open long enough for the restart line', async () => {
+    const { capturePane, sendSpecialKey } = await import('@/lib/tmux/tmux');
+    const worktree = realpathSync(mkdtempSync(join(tmpdir(), 'gemini-3776-wt-')));
+    temps.push(worktree);
+    // The dialog is drawn late: only the wait's last capture sees it, and it
+    // stays drawn (gemini has not drawn its restart line yet).
+    let captures = 0;
+    vi.mocked(capturePane).mockImplementation(async () => (++captures >= 30 ? TRUST : ''));
+    let pressedAt: number | null = null;
+    vi.mocked(sendSpecialKey).mockImplementation(async () => {
+      pressedAt = Date.now();
+    });
+
+    const started = tool.startSession('test-wt', worktree);
+    let closedAt: number | null = null;
+    for (let i = 0; i < 200 && closedAt === null; i++) {
+      await vi.advanceTimersByTimeAsync(500);
+      if (pressedAt !== null && !isLaunchWindowOpen(SESSION)) closedAt = Date.now();
+    }
+    await started;
+
+    expect(pressedAt).not.toBeNull();
+    expect(closedAt).not.toBeNull();
+    expect(closedAt! - pressedAt!).toBeGreaterThanOrEqual(5_000);
+  });
 });

@@ -113,30 +113,44 @@ function isGeminiTrustPrompt(promptData: PromptData): boolean {
 
 /**
  * Issue #3776: whether gemini's folder-trust dialog on this frame is left to
- * the launch (step 3). Only the dialog itself counts — its question over its
- * option block, and the prompt being answered is that block: a reply quoting
- * the question or a diff of the declaration is not it.
+ * the launch (step 3). Judged only for a prompt whose options are the dialog's
+ * declared rows ({@link isGeminiTrustPrompt}): a reply quoting the question
+ * over another prompt, or the authentication picker under a dismissed dialog,
+ * is answered as any prompt is.
  *
- * - While the launch window is open (`cli-tools/launch-window`), the dialog is
- *   the launch's, dismissed or not: an answered dialog stays drawn above
- *   gemini's restart line, and a `1` typed there lands on whatever the restart
- *   draws next (the authentication picker).
+ * Left alone by default — the poller answers only when nothing else will and
+ * the answer is the safe one:
+ * - While the launch window is open (`cli-tools/launch-window`), never: the
+ *   launch answers it, and an answered dialog stays drawn above gemini's
+ *   restart line, where a `1` lands on whatever the restart draws next.
  * - After it — the launch's Enter did not land, or gemini drew the dialog late
- *   (an auto-update, a slow start) — nobody else will answer it. The poller's
- *   default (the cursor row) goes through when the cursor is on the safe row
- *   (`press`); on any other row, a dialog that does not read as declared, or
- *   one already dismissed, it is still left alone.
+ *   (an auto-update, a slow start) — only when the prompt's default (the
+ *   cursor row, which is what the poller sends) is `1. Trust folder`, and,
+ *   when the screen reads as the declared dialog, the launch's own reading is
+ *   `press` (not a dismissed dialog).
+ *
+ * A screen that does not read as the dialog (the wording changed, the options
+ * sit further below the question than declared) is not a reason to answer
+ * (review of #3776): with the cursor on `3. Don't trust` the poller's default
+ * would write that answer for good.
  */
 function isGeminiTrustDialogLeftToLaunch(prompt: JudgedPrompt, frame: NormalizedFrame): boolean {
-  if (!isGeminiTrustPrompt(prompt.promptData)) return false;
-  if (!isLaunchDialogDrawn(GEMINI_TRUST_LAUNCH_DIALOG, frame.clean)) return false;
+  const { promptData } = prompt;
+  if (promptData.type !== 'multiple_choice' || !isGeminiTrustPrompt(promptData)) return false;
   let windowOpen = false;
   try {
     windowOpen = isLaunchWindowOpen(resolveSessionName('gemini', prompt.worktreeId, prompt.instanceId));
   } catch {
     // An id that would not make a session name was never launched here.
   }
-  if (windowOpen || !isLaunchDialogOpen(GEMINI_TRUST_LAUNCH_DIALOG, frame.clean)) return true;
+  if (windowOpen) return true;
+  const defaultOption = promptData.options.find((o) => o.isDefault);
+  const defaultIsSafe =
+    defaultOption !== undefined &&
+    GEMINI_TRUST_LAUNCH_DIALOG.safeRow.test(`${defaultOption.number}. ${defaultOption.label}`);
+  if (!defaultIsSafe) return true;
+  if (!isLaunchDialogDrawn(GEMINI_TRUST_LAUNCH_DIALOG, frame.clean)) return false;
+  if (!isLaunchDialogOpen(GEMINI_TRUST_LAUNCH_DIALOG, frame.clean)) return true;
   return decideLaunchDialog(GEMINI_TRUST_LAUNCH_DIALOG, frame.clean).action !== 'press';
 }
 
