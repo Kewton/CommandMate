@@ -55,7 +55,9 @@ import {
   REDUCED_CAPTURE_LINES,
   FULL_CAPTURE_LINES,
   AUTO_STOP_ERROR_THRESHOLD,
+  type AutoYesPollerStopReason,
 } from '@/config/auto-yes-config';
+import { resolvePollerStopReason, withPollerStopReason } from './polling/auto-yes-poller-stop-reason';
 import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('auto-yes-poller');
@@ -76,6 +78,7 @@ import {
   DUPLICATE_RETRY_EXPIRY_MS,
   MAX_CONCURRENT_POLLERS,
   THINKING_CHECK_LINE_COUNT,
+  isAutoYesShutdownStarted,
   type AutoYesState,
 } from './auto-yes-state';
 import { getOrInitGlobal } from './global-state';
@@ -171,7 +174,8 @@ export function getActivePollerCount(): number {
  * @internal Exported for testing purposes only.
  */
 export function clearAllPollerStates(): void {
-  stopAllAutoYesPolling();
+  // Issue #3730: a test seam, not a shutdown — logged as such.
+  withPollerStopReason('reset', () => stopAllAutoYesPolling());
   autoYesPollerStates.clear();
   withheldNoReceiptLoggedAt.clear();
 }
@@ -263,7 +267,7 @@ function incrementErrorCount(compositeKey: string, owner?: AutoYesPollerState): 
         // Issue #896: target the specific instance state (3-part keys carry instanceId).
         disableAutoYes(worktreeId, cliToolId, 'consecutive_errors', extractInstanceId(compositeKey) ?? undefined);
       }
-      stopAutoYesPolling(compositeKey);
+      stopAutoYesPolling(compositeKey, 'consecutive-errors');
     }
   }
 }
@@ -400,7 +404,7 @@ export function validatePollingContext(
   const worktreeId = extractWorktreeId(compositeKey);
   const cliToolId = extractCliToolId(compositeKey);
   if (!cliToolId) {
-    stopAutoYesPolling(compositeKey);
+    stopAutoYesPolling(compositeKey, 'invalid-key');
     return 'expired';
   }
 
@@ -408,7 +412,11 @@ export function validatePollingContext(
   const instanceId = extractInstanceId(compositeKey) ?? undefined;
   const autoYesState = getAutoYesState(worktreeId, cliToolId, instanceId);
   if (!autoYesState?.enabled) {
-    stopAutoYesPolling(compositeKey);
+    // Issue #3730: the return value says 'expired' for every one of these (its
+    // callers only need "stop"), but the log says which it was — the getter
+    // has just turned a past deadline into `stopReason: 'expired'`, and
+    // anything else is a grant some other path disabled or removed.
+    stopAutoYesPolling(compositeKey, autoYesState?.stopReason === 'expired' ? 'expired' : 'not-enabled');
     return 'expired';
   }
 
@@ -508,7 +516,7 @@ export function processStopConditionDelta(
   if (cleanOutput.length > baseline) {
     const newContent = cleanOutput.substring(baseline);
     pollerState.stopCheckBaselineLength = cleanOutput.length;
-    return checkStopCondition(compositeKey, newContent, stopAutoYesPolling);
+    return checkStopCondition(compositeKey, newContent, (key) => stopAutoYesPolling(key, 'stop-pattern'));
   } else if (cleanOutput.length < baseline) {
     pollerState.stopCheckBaselineLength = cleanOutput.length;
   }
@@ -1422,6 +1430,12 @@ export function startAutoYesPolling(
   // Resolve the effective instance ID (primary === cliToolId).
   const effectiveInstanceId = instanceId ?? cliToolId;
 
+  // Issue #3730: nothing starts once a shutdown has recorded what it releases —
+  // a poller started after the record would be a grant the record never saw.
+  if (isAutoYesShutdownStarted()) {
+    return { started: false, reason: 'server shutting down' };
+  }
+
   // Check if auto-yes is enabled
   const autoYesState = getAutoYesState(worktreeId, cliToolId, effectiveInstanceId);
   if (!autoYesState?.enabled) {
@@ -1444,7 +1458,7 @@ export function startAutoYesPolling(
 
   // Stop existing poller if cliToolId changed
   if (existingPollerState) {
-    stopAutoYesPolling(compositeKey);
+    stopAutoYesPolling(compositeKey, 'replaced');
   }
 
   // Create new poller state
@@ -1479,9 +1493,16 @@ export function startAutoYesPolling(
  *
  * Issue #525: Changed from (worktreeId) to (compositeKey).
  *
+ * Issue #3730: `reason` is why the POLLER stops, logged on `poller:stopped`. It
+ * does not touch the grant: an ID move and a replacement stop the poller and
+ * keep the grant, so disabling stays each caller's own decision. Omitted, the
+ * reason of an enclosing {@link withPollerStopReason} applies (the lifecycle
+ * table's path), else `unspecified`.
+ *
  * @param compositeKey - Composite key (worktreeId:cliToolId)
+ * @param reason - Why the poller stops
  */
-export function stopAutoYesPolling(compositeKey: string): void {
+export function stopAutoYesPolling(compositeKey: string, reason?: AutoYesPollerStopReason): void {
   // Issue #3397: before the early return — the disable route and the session
   // cleanup call this for an instance whose poller may already be gone, and the
   // Enter record must not outlive the grant or the session either way.
@@ -1495,19 +1516,25 @@ export function stopAutoYesPolling(compositeKey: string): void {
 
   autoYesPollerStates.delete(compositeKey);
   invalidateSessionAutoYesPolicy(compositeKey);
-  logger.info('poller:stopped', { compositeKey });
+  logger.info('poller:stopped', { compositeKey, reason: resolvePollerStopReason(reason, 'unspecified') });
 }
 
 /**
  * Stop all server-side auto-yes polling (graceful shutdown).
+ *
+ * Issue #3730: logs `shutdown` unless an enclosing
+ * {@link withPollerStopReason} says otherwise (the test reset). Writes nothing
+ * to disk: the record of the grants a shutdown released is the server's to
+ * make (`lib/auto-yes-shutdown-record`), never a side effect of this.
  */
 export function stopAllAutoYesPolling(): void {
+  const reason = resolvePollerStopReason(undefined, 'shutdown');
   for (const [key, pollerState] of autoYesPollerStates.entries()) {
     if (pollerState.timerId) {
       clearTimeout(pollerState.timerId);
     }
     invalidateSessionAutoYesPolicy(key);
-    logger.info('poller:stopped', { compositeKey: key, reason: 'shutdown' });
+    logger.info('poller:stopped', { compositeKey: key, reason });
   }
   autoYesPollerStates.clear();
   clearEnterFallbacks();
@@ -1535,6 +1562,7 @@ export function getAutoYesPollerCompositeKeys(): string[] {
  * [SF-001] Uses shared filterCompositeKeysByWorktree (DRY).
  *
  * @param worktreeId - Worktree identifier
+ * @param options.reason - Issue #3730: why the pollers stop, for `poller:stopped`
  * @param options.keepPartialAnswers - Issue #3713 (re-instruction 1, P2-1): the
  *   disable route's "every agent" passes it — a disable, like one agent's
  *   `stopAutoYesPolling`, keeps the memory of an answer stopped part-way and
@@ -1544,13 +1572,14 @@ export function getAutoYesPollerCompositeKeys(): string[] {
  */
 export function stopAutoYesPollingByWorktree(
   worktreeId: string,
-  options?: { keepPartialAnswers?: boolean },
+  options?: { keepPartialAnswers?: boolean; reason?: AutoYesPollerStopReason },
 ): void {
   const pollerKeys = filterCompositeKeysByWorktree(
     Array.from(autoYesPollerStates.keys()),
     worktreeId
   );
-  pollerKeys.forEach(key => stopAutoYesPolling(key));
+  // Issue #3730: `options.reason`, else the enclosing scope's (the lifecycle table).
+  pollerKeys.forEach(key => stopAutoYesPolling(key, options?.reason));
   // Issue #3397: and the records of instances whose poller had already stopped.
   forgetEnterFallbacksByWorktree(worktreeId);
   if (!options?.keepPartialAnswers) forgetPartialAnswersByWorktree(worktreeId);

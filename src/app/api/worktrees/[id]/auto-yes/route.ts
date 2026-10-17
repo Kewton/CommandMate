@@ -26,6 +26,7 @@ import {
   extractInstanceId,
   type AutoYesState,
 } from '@/lib/polling/auto-yes-manager';
+import { isAutoYesShutdownStarted } from '@/lib/auto-yes-state';
 import { recheckPendingDecisions } from '@/lib/hooks/pending-decision-recheck';
 import {
   getSessionContractPolicySummary,
@@ -36,7 +37,13 @@ import { isValidWorktreeId } from '@/lib/security/path-validator';
 import { CLI_TOOL_IDS, isValidInstanceId, type CLIToolType } from '@/lib/cli-tools/types';
 import { resolveSessionName } from '@/lib/cli-tools/session-name';
 import { checkSessionOwnership, foreignSessionErrorBody } from '@/lib/cli-tools/session-ownership';
-import { isAllowedDuration, DEFAULT_AUTO_YES_DURATION, validateStopPattern, type AutoYesDuration } from '@/config/auto-yes-config';
+import {
+  isAllowedDuration,
+  DEFAULT_AUTO_YES_DURATION,
+  validateStopPattern,
+  type AutoYesDuration,
+  type AutoYesStopReason,
+} from '@/config/auto-yes-config';
 import { createLogger } from '@/lib/logger';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 import type { Worktree } from '@/types/models';
@@ -103,6 +110,23 @@ interface AutoYesResponse {
    * so a worktree with no contract answers exactly what it did.
    */
   blockedByContract?: boolean;
+  /**
+   * Issue #3730: why a DISABLED state is off, when that is worth saying —
+   * today only `server-restart` (the grant was live when the previous process
+   * shut down). Omitted otherwise, so every other answer is the shape it was;
+   * `capture --json`'s `autoYes.stopReason` keeps carrying the full reason.
+   */
+  stopReason?: AutoYesStopReason;
+}
+
+/**
+ * The reason a disabled state publishes on this route (Issue #3730), or
+ * undefined. Only `server-restart`: the other reasons stay where they always
+ * were (`capture --json`), and a disabled state with no reason must not start
+ * reading as one.
+ */
+function publishedStopReason(state: AutoYesState | null): AutoYesStopReason | undefined {
+  return state && !state.enabled && state.stopReason === 'server-restart' ? state.stopReason : undefined;
 }
 
 /**
@@ -123,6 +147,10 @@ function buildAutoYesResponse(
     enabled: state?.enabled ?? false,
     expiresAt: state?.enabled ? state.expiresAt : null,
   };
+  const stopReason = publishedStopReason(state);
+  if (stopReason !== undefined) {
+    response.stopReason = stopReason;
+  }
   if (pollingStarted !== undefined) {
     response.pollingStarted = pollingStarted;
   }
@@ -407,6 +435,15 @@ export async function POST(
         return NextResponse.json(foreignSessionErrorBody(sessionName, ownership.sessionPath), { status: 409 });
       }
 
+      // Issue #3730: the ownership check above awaits, and a shutdown can
+      // begin meanwhile. The shutdown has already written down which grants it
+      // released, so a grant added now would be one the next process never
+      // explains — and a poller started now would run into the teardown.
+      // Checked here, after the last await and before the synchronous write.
+      if (isAutoYesShutdownStarted()) {
+        return NextResponse.json({ error: 'Server is shutting down' }, { status: 503 });
+      }
+
       state = setAutoYesEnabled(
         id,
         cliToolId,
@@ -458,11 +495,11 @@ export async function POST(
       if (body.instanceId) {
         state = setAutoYesEnabled(id, cliToolId, false, undefined, undefined, instanceId);
         const compositeKey = buildCompositeKey(id, cliToolId, instanceId);
-        stopAutoYesPolling(compositeKey);
+        stopAutoYesPolling(compositeKey, 'manual');
       } else if (body.cliToolId) {
         state = setAutoYesEnabled(id, cliToolId, false);
         const compositeKey = buildCompositeKey(id, cliToolId);
-        stopAutoYesPolling(compositeKey);
+        stopAutoYesPolling(compositeKey, 'manual');
       } else {
         // Disable all agents/instances for this worktree
         const keys = getCompositeKeysByWorktree(id);
@@ -474,7 +511,7 @@ export async function POST(
         }
         // Issue #3713: a disable, not a delete — the memory of an answer stopped
         // part-way (and a send still in flight) is kept, as for one agent.
-        stopAutoYesPollingByWorktree(id, { keepPartialAnswers: true });
+        stopAutoYesPollingByWorktree(id, { keepPartialAnswers: true, reason: 'manual' });
         state = { enabled: false, enabledAt: 0, expiresAt: 0 };
       }
     }

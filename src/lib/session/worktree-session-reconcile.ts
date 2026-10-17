@@ -696,7 +696,8 @@ function migrateRuntimeState(
   for (const move of movedAutoYes) {
     if (!runningAutoYesPollers.has(move.oldKey)) continue;
     try {
-      stopAutoYesPolling(move.oldKey);
+      // Issue #3730: a move, not a release — the grant goes on under newKey.
+      stopAutoYesPolling(move.oldKey, 'worktree-id-migrated');
       restarts.push(move);
     } catch (error) {
       result.errors.push(

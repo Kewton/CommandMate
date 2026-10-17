@@ -62,7 +62,7 @@ import {
 } from '@/lib/session/selection-list-ops';
 import { useAppUpdate } from '@/contexts/AppUpdateContext';
 import { type AutoYesToggleParams } from '@/components/worktree/AutoYesToggle';
-import type { AutoYesStopReason } from '@/config/auto-yes-config';
+import { isReleasedByRestart, type AutoYesStopReason } from '@/config/auto-yes-config';
 import type { AutoYesInstanceSummary } from '@/types/auto-yes';
 import type { CurrentOutputResponseBody } from '@/lib/session/current-output-types';
 import {
@@ -571,6 +571,8 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   const autoYesEnabled = autoYesStateMap.get(activeInstanceId)?.enabled ?? false;
   const autoYesExpiresAt = autoYesStateMap.get(activeInstanceId)?.expiresAt ?? null;
   const autoYesBlockedByContract = autoYesStateMap.get(activeInstanceId)?.blockedByContract === true;
+  // Issue #3730: OFF because the last server restart released the grant.
+  const autoYesReleasedByRestart = isReleasedByRestart(autoYesStateMap.get(activeInstanceId));
   // Issue #3723: gates the contract re-read below.
   const anyAutoYesEnabled = useMemo(
     () => Array.from(autoYesStateMap.values()).some((entry) => entry.enabled),
@@ -1007,6 +1009,12 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
             enabled: autoYes.enabled,
             expiresAt: autoYes.expiresAt,
             ...(blocked ? { blockedByContract: true } : {}),
+            // Issue #3730: this poll carries the full stop reason, so the
+            // restart notice the whole-worktree GET seeded survives it — and
+            // goes when the server stops reporting it.
+            ...(!autoYes.enabled && autoYes.stopReason === 'server-restart'
+              ? { stopReason: 'server-restart' as const }
+              : {}),
           });
           return next;
         });
@@ -1055,13 +1063,20 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       const next = new Map<string, AutoYesInstanceSummary>();
       for (const [instanceId, raw] of Object.entries(instances)) {
         if (raw && typeof raw === 'object') {
-          const s = raw as { enabled?: boolean; expiresAt?: number | null; blockedByContract?: boolean };
+          const s = raw as {
+            enabled?: boolean;
+            expiresAt?: number | null;
+            blockedByContract?: boolean;
+            stopReason?: string;
+          };
           const enabled = s.enabled ?? false;
           next.set(instanceId, {
             enabled,
             expiresAt: s.expiresAt ?? null,
             // Issue #3723
             ...(enabled && s.blockedByContract === true ? { blockedByContract: true } : {}),
+            // Issue #3730: a server older than the field sends none — plain OFF.
+            ...(!enabled && s.stopReason === 'server-restart' ? { stopReason: 'server-restart' as const } : {}),
           });
         }
       }
@@ -2096,6 +2111,7 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     autoYesEnabled,
     autoYesExpiresAt,
     autoYesBlockedByContract,
+    autoYesReleasedByRestart,
     autoYesStateMap,
     diffContent,
     diffFilePath,

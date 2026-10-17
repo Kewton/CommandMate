@@ -64,6 +64,8 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
     blocked  - armed, but the contract running on that instance sets
                autoYes.mode: off, so nothing is answered there either
                (Issue #3723; --json: autoYesByInstance.<id>.blockedByContract)
+    off(restart) - off, because the server restarted while the grant was live
+               (Issue #3730; --json: autoYesStopReasonByInstance.<id>)
     -        - not known: the server predates #2512, or this row is not idle and
                no instance explains its STATUS
 
@@ -412,6 +414,15 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
   (and send --auto-yes) print a 'Warning:' line on stderr and still exit 0:
   Auto-Yes is armed but answers nothing there. safe / allow-listed add one
   'Note:' line naming what is answered (Issue #3723).
+
+  A server restart turns every grant OFF and never turns one back on. After a
+  graceful stop (SIGINT / SIGTERM, e.g. /rebuild or 'commandmate stop') each
+  instance whose grant was live reports why, until that grant's own deadline or
+  the next --enable / --disable (Issue #3730): 'capture --json' autoYes.stopReason
+  = 'server-restart', 'ls' AUTO_YES 'off(restart)', 'instances' AUTO_YES
+  'no(restart)', a 'wait' exit 10 adds a stderr line, and the UI toggle reads
+  "Released by restart". Re-enable with --enable. A SIGKILL or a crash records
+  nothing: those grants come back as a plain off.
 
 ### commandmate instances <worktree-id> [action] [args]
   Discover and manage a worktree's agent-instance roster (1 agent, multiple sessions).

@@ -188,6 +188,23 @@ if ((process.env.CM_OPENCODE_V2_DIR ?? '').trim() === '') {
   );
 }
 
+// Issue #3730: the Auto-Yes shutdown record lives next to the database
+// (`<CM_DB_PATH>.auto-yes-shutdown.json`) unless
+// `CM_AUTO_YES_SHUTDOWN_RECORD_PATH` says otherwise. A test that reaches
+// `recordAutoYesShutdown` / `restoreAutoYesShutdownRecord` without its own path
+// would write — or consume — the record of whatever database this machine's
+// CM_DB_PATH names, i.e. a real server's. Same default and per-pid scoping as
+// CM_OPENCODE_PORT_FILE above: the record has a writer and a deleter, so one
+// shared path would let two suites running at once read each other's. A test
+// that stubs the variable or passes `{ path }` still wins.
+if ((process.env.CM_AUTO_YES_SHUTDOWN_RECORD_PATH ?? '').trim() === '') {
+  process.env.CM_AUTO_YES_SHUTDOWN_RECORD_PATH = join(
+    tmpdir(),
+    'commandmate-test-auto-yes-shutdown',
+    `${process.pid}.json`
+  );
+}
+
 // Mock next-intl for all component tests
 vi.mock('next-intl', () => ({
   useTranslations: (namespace?: string) => {

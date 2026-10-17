@@ -196,6 +196,15 @@ export function getAutoYesState(
   const state = autoYesStates.get(key);
   if (!state) return null;
 
+  // Issue #3730: a restart notice lives until the deadline of the grant it
+  // explains, and then the instance reads as it would have had the notice never
+  // been seeded — no state at all. Rewriting it to `expired` (the branch below)
+  // would claim a countdown ran out on a grant that was not running.
+  if (!state.enabled && state.stopReason === 'server-restart' && isAutoYesExpired(state)) {
+    autoYesStates.delete(key);
+    return null;
+  }
+
   // Auto-disable if expired (Issue #314: delegate to disableAutoYes)
   if (isAutoYesExpired(state)) {
     return disableAutoYes(worktreeId, cliToolId, 'expired', instanceId);
@@ -287,6 +296,114 @@ export function disableAutoYes(
  */
 export function clearAllAutoYesStates(): void {
   autoYesStates.clear();
+}
+
+// =============================================================================
+// Server restart (Issue #3730)
+// =============================================================================
+
+/**
+ * Whether this process has begun shutting down, as far as Auto-Yes goes
+ * (Issue #3730). Set once, by {@link beginAutoYesShutdown}, and never cleared
+ * in production: a process does not come back from a shutdown.
+ */
+declare global {
+  // eslint-disable-next-line no-var
+  var __autoYesShutdownStarted: { value: boolean } | undefined;
+}
+
+const autoYesShutdown = getOrInitGlobal('__autoYesShutdownStarted', () => ({ value: false }));
+
+/**
+ * Mark the start of a graceful shutdown. From here on no grant may be added:
+ * the shutdown record has been (or is being) taken, and a grant written after
+ * it would be one the next process never hears about. The auto-yes route
+ * refuses an enable that returns from its await after this, and
+ * `startAutoYesPolling` refuses to start.
+ */
+export function beginAutoYesShutdown(): void {
+  autoYesShutdown.value = true;
+}
+
+/** Whether {@link beginAutoYesShutdown} has run in this process. */
+export function isAutoYesShutdownStarted(): boolean {
+  return autoYesShutdown.value;
+}
+
+/**
+ * Undo {@link beginAutoYesShutdown}.
+ * @internal Exported for testing purposes only.
+ */
+export function resetAutoYesShutdownForTesting(): void {
+  autoYesShutdown.value = false;
+}
+
+/** One grant a shutdown released, as the next process is told about it. */
+export interface ReleasedAutoYesGrant {
+  worktreeId: string;
+  cliToolId: CLIToolType;
+  /** Equals cliToolId for the primary instance. */
+  instanceId: string;
+  enabledAt: number;
+  /** The grant's own deadline; the restart notice lives until then. */
+  expiresAt: number;
+}
+
+/**
+ * The grants a shutdown at `now` releases (Issue #3730): every state that is
+ * enabled with time left — read from the state map, not from the pollers, so
+ * a grant whose poller never started (no session yet, the poller cap) is
+ * included — and every restart notice that is itself still in period, so a
+ * second restart inside the window keeps saying why.
+ *
+ * Read raw rather than through {@link getAutoYesState}: this only looks, and
+ * the getter's expiry rewrite is a write.
+ *
+ * @param now - The shutdown's clock reading
+ */
+export function collectReleasedAutoYesGrants(now: number = Date.now()): ReleasedAutoYesGrant[] {
+  const released: ReleasedAutoYesGrant[] = [];
+  for (const [key, state] of autoYesStates) {
+    if (!(now < state.expiresAt)) continue;
+    const live = state.enabled || state.stopReason === 'server-restart';
+    if (!live) continue;
+    const cliToolId = extractCliToolId(key);
+    if (!cliToolId) continue;
+    released.push({
+      worktreeId: extractWorktreeId(key),
+      cliToolId,
+      instanceId: extractInstanceId(key) ?? cliToolId,
+      enabledAt: state.enabledAt,
+      expiresAt: state.expiresAt,
+    });
+  }
+  return released;
+}
+
+/**
+ * Seed one restart notice (Issue #3730): a DISABLED state with
+ * `stopReason: 'server-restart'` and the released grant's own deadline. Never
+ * enables anything and starts no poller.
+ *
+ * Refused — returns false — when the instance already has a state (whatever
+ * wrote it is newer than a record from the previous process) or the deadline
+ * has passed (it would be deleted on its first read anyway).
+ *
+ * @param grant - The released grant
+ * @param now - Clock reading to judge the deadline against
+ * @returns Whether a notice was written
+ */
+export function seedServerRestartNotice(grant: ReleasedAutoYesGrant, now: number = Date.now()): boolean {
+  const key = buildCompositeKey(grant.worktreeId, grant.cliToolId, grant.instanceId);
+  if (autoYesStates.has(key)) return false;
+  if (!(now < grant.expiresAt)) return false;
+  autoYesStates.set(key, {
+    enabled: false,
+    enabledAt: grant.enabledAt,
+    expiresAt: grant.expiresAt,
+    stopReason: 'server-restart',
+  });
+  return true;
 }
 
 // =============================================================================
@@ -588,6 +705,35 @@ export function getEnabledAutoYesByWorktree(
     const summary: AutoYesInstanceSummary = { enabled: true, expiresAt: state.expiresAt };
     if (isBlocked?.(worktreeId, cliToolId, instanceId)) summary.blockedByContract = true;
     entries[instanceId] = summary;
+    byWorktree.set(worktreeId, entries);
+  }
+  return byWorktree;
+}
+
+/**
+ * Every restart notice still in period, grouped by worktree and keyed by
+ * instance, for the worktree list (Issue #3730).
+ *
+ * Its own map rather than entries in {@link getEnabledAutoYesByWorktree}'s:
+ * that map is "armed instances", and its readers (the Sessions tile, `ls`'s
+ * idle fallback, the new-task targets) count every entry as armed. Reads go
+ * through {@link getAutoYesState}, so a notice past its deadline is dropped
+ * here, as everywhere.
+ *
+ * @returns worktreeId -> instanceId -> 'server-restart'; worktrees with none are absent
+ */
+export function getRestartReleasedAutoYesByWorktree(): Map<string, Record<string, AutoYesStopReason>> {
+  const byWorktree = new Map<string, Record<string, AutoYesStopReason>>();
+  // A snapshot of the keys: an expired read below deletes its own entry.
+  for (const key of Array.from(autoYesStates.keys())) {
+    const cliToolId = extractCliToolId(key);
+    if (!cliToolId) continue;
+    const worktreeId = extractWorktreeId(key);
+    const instanceId = extractInstanceId(key) ?? cliToolId;
+    const state = getAutoYesState(worktreeId, cliToolId, instanceId);
+    if (!state || state.enabled || state.stopReason !== 'server-restart') continue;
+    const entries = byWorktree.get(worktreeId) ?? {};
+    entries[instanceId] = 'server-restart';
     byWorktree.set(worktreeId, entries);
   }
   return byWorktree;

@@ -202,6 +202,12 @@ export interface TerminalSplitPaneContentProps extends TerminalSplitPaneCoreProp
    * member: `SplitAutoYesProps` lives in `src/types/terminal-split-pane.ts`.
    */
   autoYesBlockedByContract?: boolean;
+  /**
+   * Issue #3730: Auto-Yes is OFF on this split's instance because the last
+   * server restart released its grant. A sibling of `autoYes` for the same
+   * reason as `autoYesBlockedByContract`.
+   */
+  autoYesReleasedByRestart?: boolean;
   /** History domain group (Issue #756). Optional; pre-#744 callers omit it. */
   history?: HistoryPaneProps;
   /**
@@ -297,6 +303,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   cliStatusUnclassified = false,
   autoYes,
   autoYesBlockedByContract = false,
+  autoYesReleasedByRestart = false,
   history,
   onDropInstance,
   draggedInstanceId,
@@ -1256,6 +1263,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
                 cliToolName={cliToolId}
                 inline
                 blockedByContract={autoYesBlockedByContract}
+                releasedByRestart={autoYesReleasedByRestart}
               />
             }
             // Issue #2766 / #2797: the direct-input toggle, in the toolbar's end
@@ -1396,6 +1404,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       autoYesEnabled,
       autoYesExpiresAt,
       autoYesBlockedByContract,
+      autoYesReleasedByRestart,
       lastAutoResponse,
       onAutoYesToggle,
       // Issue #2766: the bar's ONLY gate. Leaving it out of this list is the
