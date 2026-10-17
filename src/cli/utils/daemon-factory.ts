@@ -13,6 +13,7 @@
 import { DaemonManager } from './daemon';
 import { PidPathResolver, DbPathResolver } from './resource-resolvers';
 import { getEnvPath } from './env-setup';
+import { getServerLogPath } from './paths';
 import type { ServerEnv } from './server-url';
 import type { DaemonStatus, StartOptions } from '../types';
 
@@ -151,7 +152,8 @@ export class DaemonManagerFactory {
 
     // MF-CONS-002: Use existing DaemonManager constructor
     // Issue #1266: hand it the worktree .env so getStatus() reports the right port
-    const innerManager = new DaemonManager(pidPath, envPath);
+    // Issue #3731: and the log file start() writes the server's output to (update restarts here)
+    const innerManager = new DaemonManager(pidPath, envPath, () => getServerLogPath(issueNo));
 
     // Wrap with additional configuration
     return new DaemonManagerWrapper(innerManager, {
