@@ -355,15 +355,17 @@ async function answerStrictly(request: StrictRespondRequest, deps: StrictRespond
         // tmux may have delivered it: counted, so this is never "not sent".
         facts.keysSent++;
         return resultOf(facts, 41, 'send_failed');
-      } finally {
-        // The Enter went (or may have gone) to the trust screen: the launch
-        // owes it none any more. Dropped only now — while held, the launch
-        // could not claim it anyway.
-        if (keys[i] === 'Enter' && request.expectScreen === 'antigravity-trust') deps.startup.discardDebt();
       }
       facts.keysSent++;
     }
   } finally {
+    // Once any key reached the trust screen the launch owes it nothing: its
+    // Enter would confirm a highlight this answer moved (an arrow sent, then a
+    // stop) or answer the screen a second time (our Enter sent). Dropped here,
+    // on every way out after a key and before the hold ends — while held it
+    // could not be claimed, so it never races our own Enter. With no key sent
+    // the debt is left for the launch.
+    if (facts.keysSent > 0 && request.expectScreen === 'antigravity-trust') deps.startup.discardDebt();
     release();
   }
 
@@ -425,7 +427,12 @@ export async function respondStrictly(
   const now = deps.now();
   const nothingYet = (reason: StrictRespondReason): StrictRespondResult =>
     resultOf({ request, observedKind: null, observedTarget: null, answer: null, keysSent: 0 }, 41, reason);
-  const earlier = operations.get(key);
+  let earlier = operations.get(key);
+  // An expired result is forgotten here, not only at the next sweep.
+  if (earlier !== undefined && earlier.result !== null && now - earlier.at >= STRICT_OPERATION_TTL_MS) {
+    operations.delete(key);
+    earlier = undefined;
+  }
   if (earlier !== undefined) {
     if (earlier.fingerprint !== fingerprint) return nothingYet('operation_id_conflict');
     if (earlier.result !== null) return { ...earlier.result, replayed: true };

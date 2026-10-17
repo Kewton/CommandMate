@@ -22,6 +22,16 @@ import {
   type StrictRespondRequest,
 } from '@/lib/prompt-observation/strict-respond';
 import type { PromptObservationKind } from '@/lib/prompt-observation/kinds';
+import {
+  beginStartupWindow,
+  claimStartupTrust,
+  clearStartupTrust,
+  forgetStartupTrust,
+  holdStartupTrust,
+  isStartupWindowOpen,
+  markStartupTrustPending,
+  wasStartupTrustClaimedWithin,
+} from '@/lib/cli-tools/antigravity-startup-trust';
 
 const FIXTURES = path.resolve(__dirname, '../../../fixtures');
 const read = (rel: string): string => readFileSync(path.join(FIXTURES, rel), 'utf8');
@@ -189,6 +199,70 @@ beforeEach(() => {
 
 afterEach(() => {
   clearStrictRespondState();
+  clearStartupTrust();
+});
+
+/** {@link deps} with the launch's owed Enter kept by the real module (#3757). */
+function depsWithRealStartup(): StrictRespondDeps {
+  return {
+    ...deps(),
+    startup: {
+      isWindowOpen: () => isStartupWindowOpen(SESSION),
+      claimedWithin: (ms) => wasStartupTrustClaimedWithin(SESSION, ms),
+      hold: () => holdStartupTrust(SESSION),
+      discardDebt: () => forgetStartupTrust(SESSION),
+    },
+  };
+}
+
+describe('[#3756] the owed Enter after a strict answer to the trust screen', () => {
+  beforeEach(() => {
+    markStartupTrustPending(SESSION);
+  });
+
+  it('is dropped when the answer stops after an arrow (screen moved): the launch cannot confirm the moved highlight', async () => {
+    pane.onKey = (key) => (key === 'Down' ? PERMISSION : COMPOSER);
+    const result = await respondStrictly(request({ answer: 'No' }), depsWithRealStartup());
+    expect(result).toMatchObject({ code: 41, reason: 'screen_moved_mid_send', keysSent: 1 });
+    expect(claimStartupTrust(SESSION)).toBe(false);
+  });
+
+  it('is dropped when the second key fails to send', async () => {
+    let sent = 0;
+    const base = depsWithRealStartup();
+    const failing: StrictRespondDeps = {
+      ...base,
+      sendKey: async (key) => {
+        if (++sent === 2) throw new Error('send-keys failed');
+        await base.sendKey(key);
+      },
+    };
+    const result = await respondStrictly(request({ answer: 'No' }), failing);
+    expect(result).toMatchObject({ code: 41, reason: 'send_failed', keysSent: 2 });
+    expect(claimStartupTrust(SESSION)).toBe(false);
+  });
+
+  it('is dropped when the launch window opens after the arrow', async () => {
+    pane.onKey = (key, frame) => {
+      if (key === 'Down') beginStartupWindow(SESSION);
+      return trustKeys(key, frame);
+    };
+    const result = await respondStrictly(request({ answer: 'No' }), depsWithRealStartup());
+    expect(result).toMatchObject({ code: 41, reason: 'screen_moved_mid_send', keysSent: 1 });
+    expect(claimStartupTrust(SESSION)).toBe(false);
+  });
+
+  it('is kept when nothing was sent (exit 40), for the launch to deliver', async () => {
+    const result = await respondStrictly(request({ expectTarget: '/elsewhere' }), depsWithRealStartup());
+    expect(result).toMatchObject({ code: 40, keysSent: 0 });
+    expect(claimStartupTrust(SESSION)).toBe(true);
+  });
+
+  it('is dropped after a full answer, Enter included', async () => {
+    const result = await respondStrictly(request(), depsWithRealStartup());
+    expect(result).toMatchObject({ code: 0, keysSent: 1 });
+    expect(claimStartupTrust(SESSION)).toBe(false);
+  });
 });
 
 describe('[#3756] the trust screen (positive case)', () => {
@@ -416,6 +490,15 @@ describe('[#3756] operation ids', () => {
 
     expect(pane.keys).toEqual(['Enter']);
     expect(retried).toEqual({ ...answered, replayed: true });
+  });
+
+  it('an expired result is not replayed: the same id is a new request after the TTL', async () => {
+    const first = request();
+    await respondStrictly(first, deps());
+    pane.clock += 10 * 60_000;
+    const later = await respondStrictly(first, deps());
+    expect(later.replayed).toBe(false);
+    expect(pane.keys).toEqual(['Enter']);
   });
 
   it('the same id with another token, answer or instance is not read as the first one', async () => {
