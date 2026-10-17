@@ -87,6 +87,11 @@ import { normalizeFrame } from '@/lib/detection/tools/frame';
 import { stripAnsi, stripBoxDrawing } from '@/lib/detection/cli-patterns';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { COMMAND_CODE_FREE_TEXT_CONFIRM_FRAME } from '@tests/fixtures/command-code-askuserquestion-3497/free-text-confirm';
+import {
+  askUserQuestionAsking,
+  bashApprovalRunning,
+  editApprovalWithDiff,
+} from '@tests/fixtures/claude-confirm-lookalikes-3748/frames';
 
 const WT = 'wt-3748-autoyes';
 const FIXTURES = path.resolve(__dirname, '../../../fixtures');
@@ -109,6 +114,19 @@ const CLAUDE_BASH_APPROVAL = readFileSync(
   path.join(DETECTION_FIXTURES, 'claude-live-1708', 'bash-approval-taskpanel.txt'),
   'utf8',
 );
+/**
+ * The page's wording on frames that are not the page: what the first reading
+ * (`detectClaudeDialog`'s `ask_user`, a substring of the four rows above the
+ * options) took for it. Each must still be answered `1`.
+ */
+const CLAUDE_LOOKALIKES = [
+  ['a Bash approval running `grep -rn "review your answers" src`', bashApprovalRunning('grep -rn "review your answers" src')],
+  ['a Bash approval running `grep -rn "Ready to submit your answers?" src`', bashApprovalRunning('grep -rn "Ready to submit your answers?" src')],
+  ['a Bash approval described as `Ready to submit your answers?`', bashApprovalRunning('ls', 'Ready to submit your answers?')],
+  ['an Edit approval whose diff holds both sentences', editApprovalWithDiff()],
+  ['an AskUserQuestion asking `Do you want to review your answers before continuing?`', askUserQuestionAsking('Do you want to review your answers before continuing?')],
+  ['an AskUserQuestion whose question ends `Ready to submit your answers?`', askUserQuestionAsking('Ready to submit your answers?')],
+] as const;
 const CC_NO_BACK_HINT = fixture('command-code-askuserquestion-3497', 'review-page-no-back-hint.txt');
 const CC_FREE_TEXT_CONFIRM = COMMAND_CODE_FREE_TEXT_CONFIRM_FRAME;
 
@@ -183,6 +201,7 @@ describe('[#3748] (a) the shared confirm-page predicate', () => {
     // Same frame, another tool: only the two tools with a measured page answer true.
     ['codex: Claude’s confirm page under another tool id', 'codex', CLAUDE_REVIEW],
     ['claude: Command Code’s confirm page under Claude’s id', 'claude', CC_FREE_TEXT_CONFIRM],
+    ...CLAUDE_LOOKALIKES.map(([name, raw]) => [`claude: ${name}`, 'claude', raw] as const),
   ] as const)('陰性 %s', (_name, tool, raw) => {
     expect(isAutoYesDeclinedConfirmPage(tool, normalizeFrame(raw, tool))).toBe(false);
     expect(isAutoYesDeclinedConfirmFrame(tool, raw)).toBe(false);
@@ -238,6 +257,14 @@ describe('[#3748] (c) 陰性対照 and the response-sent log', () => {
     });
     expect(typeof sent.question).toBe('string');
     expect(String(sent.question).length).toBeGreaterThan(0);
+  });
+
+  it.each(CLAUDE_LOOKALIKES)('claude: %s is answered `1`', async (_name, raw) => {
+    expect(await respondTo('claude', raw)).toBe('responded');
+    expect(sendPromptAnswer).toHaveBeenCalledTimes(1);
+    expect(sendPromptAnswer.mock.calls[0][0].answer).toBe('1');
+    expect(events(warn, 'poller:auto-yes-skipped-question-confirm')).toEqual([]);
+    expect(getLastPolicySuppression(WT, 'claude', 'claude')).toBeNull();
   });
 
   it('a yes/no prompt logs `y` and a question cut to the logged length', async () => {

@@ -20,7 +20,10 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { resolveAutoAnswer } from '@/lib/polling/auto-yes-resolver';
-import { isAutoYesDeclinedConfirmFrame } from '@/lib/polling/auto-yes-confirm-page';
+import {
+  isAutoYesDeclinedConfirmFrame,
+  isConfirmPageShapedPrompt,
+} from '@/lib/polling/auto-yes-confirm-page';
 import { buildPromptResponseBody } from '@/lib/prompt-response-body-builder';
 import { generatePromptKey } from '@/lib/detection/prompt-key';
 import { isAnswerablePromptData } from '@/types/models';
@@ -162,6 +165,10 @@ export function useAutoYes({
     // `Submit` commits whatever stands as the answers; answering it from the
     // browser undid the server's decline whenever no server poller ran.
     if (onDeclinedConfirmPage) return;
+    // A `Submit` / `Cancel` prompt whose frame is missing or too short to show
+    // the page's question row is not answered either: from here that cannot be
+    // told from "not a confirm page" (`isConfirmPageShapedPrompt`).
+    if (isConfirmPageShapedPrompt(promptData)) return;
 
     // Issue #138: Skip if server has responded recently (duplicate prevention fallback)
     if (lastServerResponseTimestamp) {

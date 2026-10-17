@@ -8,8 +8,11 @@
  *
  * 陽性: Claude's `❯ 1. Submit answers` / `2. Cancel` page and Command Code's
  * `❯ 1. Submit` / `2. Cancel` page — no request. Before #3748 the hook posted
- * `1` to both. 陰性: an ordinary yes/no prompt, Claude's ordinary permission
- * dialog, and a hook given no frame are answered as before.
+ * `1` to both. A `Submit` / `Cancel` prompt whose frame is missing or cut short
+ * is not answered either (the page cannot be ruled out from here).
+ * 陰性: an ordinary yes/no prompt, Claude's ordinary permission dialog (also
+ * with the page's wording in its command), and an ordinary prompt with no
+ * frame are answered as before.
  */
 
 import { readFileSync } from 'node:fs';
@@ -19,6 +22,7 @@ import { renderHook } from '@testing-library/react';
 import { useAutoYes } from '@/hooks/useAutoYes';
 import type { PromptData } from '@/types/models';
 import { COMMAND_CODE_FREE_TEXT_CONFIRM_FRAME } from '@tests/fixtures/command-code-askuserquestion-3497/free-text-confirm';
+import { askUserQuestionAsking, bashApprovalRunning, editApprovalWithDiff } from '@tests/fixtures/claude-confirm-lookalikes-3748/frames';
 
 const mockFetch = vi.fn();
 global.fetch = mockFetch;
@@ -31,6 +35,13 @@ const CLAUDE_BASH_APPROVAL = readFileSync(
   path.resolve(__dirname, '../lib/detection/fixtures/claude-live-1708/bash-approval-taskpanel.txt'),
   'utf8',
 );
+
+const BROWSER_NEGATIVE_FRAMES = [
+  ['a Bash approval running `grep -rn "review your answers" src`', bashApprovalRunning('grep -rn "review your answers" src')],
+  ['a Bash approval running `grep -rn "Ready to submit your answers?" src`', bashApprovalRunning('grep -rn "Ready to submit your answers?" src')],
+  ['an Edit approval whose diff holds both sentences', editApprovalWithDiff()],
+  ['an AskUserQuestion asking `Do you want to review your answers before continuing?`', askUserQuestionAsking('Do you want to review your answers before continuing?')],
+] as const;
 
 function submitCancel(submitLabel: string): PromptData {
   return {
@@ -105,13 +116,49 @@ describe('useAutoYes - AskUserQuestion confirm page (Issue #3748)', () => {
     expect(JSON.parse(mockFetch.mock.calls[0][1].body).answer).toBe('y');
   });
 
-  it('陰性: Claude’s confirm page under another tool is not judged as one', () => {
-    render('codex', submitCancel('Submit answers'), CLAUDE_REVIEW);
-    expect(mockFetch).toHaveBeenCalledOnce();
+  it('a Submit / Cancel prompt with no frame is not answered (the page cannot be ruled out)', () => {
+    render('claude', submitCancel('Submit answers'), null);
+    render('command-code', submitCancel('Submit'), undefined);
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 
-  it('陰性: no frame, nothing judged — answered as before', () => {
-    render('claude', submitCancel('Submit answers'), null);
-    expect(mockFetch).toHaveBeenCalledOnce();
+  it('a Submit / Cancel prompt whose frame is cut above the question row is not answered', () => {
+    // A realtimeSnippet-sized tail: the options without `Ready to submit your answers?`.
+    const snippet = '❯ 1. Submit answers\n  2. Cancel\n';
+    render('claude', submitCancel('Submit answers'), snippet);
+    expect(mockFetch).not.toHaveBeenCalled();
   });
+
+  it('陰性: with no frame, an ordinary permission prompt is answered as before', () => {
+    const promptData: PromptData = {
+      type: 'multiple_choice',
+      question: 'Do you want to proceed?',
+      options: [
+        { number: 1, label: 'Yes', isDefault: true },
+        { number: 2, label: 'No', isDefault: false },
+      ],
+      status: 'pending',
+    };
+    render('claude', promptData, null);
+    expect(mockFetch).toHaveBeenCalledOnce();
+    expect(JSON.parse(mockFetch.mock.calls[0][1].body).answer).toBe('1');
+  });
+
+  it.each(BROWSER_NEGATIVE_FRAMES)(
+    '陰性: %s is answered `1` from the browser',
+    (_name, frame) => {
+      const promptData: PromptData = {
+        type: 'multiple_choice',
+        question: 'Do you want to proceed?',
+        options: [
+          { number: 1, label: 'Yes', isDefault: true },
+          { number: 2, label: 'No', isDefault: false },
+        ],
+        status: 'pending',
+      };
+      render('claude', promptData, frame);
+      expect(mockFetch).toHaveBeenCalledOnce();
+      expect(JSON.parse(mockFetch.mock.calls[0][1].body).answer).toBe('1');
+    },
+  );
 });
