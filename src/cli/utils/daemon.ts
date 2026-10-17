@@ -179,10 +179,26 @@ export function rotateServerLog(
       throw new Error(`${from} is a symbolic link; not rotating it`);
     }
     renameSync(from, `${logPath}.${i + 1}`);
+    restrictToOwner(`${logPath}.${i + 1}`);
   }
 
   renameSync(logPath, `${logPath}.1`);
+  restrictToOwner(`${logPath}.1`);
   return true;
+}
+
+/**
+ * Issue #3731: make a rotated generation owner-only (0600), like the live log. A server.log
+ * written by scripts/start.sh is 0640 and would otherwise keep that mode after rotation.
+ * Goes through an O_NOFOLLOW descriptor so a link swapped in after the rename is not followed.
+ */
+function restrictToOwner(path: string): void {
+  const fd = openSync(path, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0));
+  try {
+    fchmodSync(fd, 0o600);
+  } finally {
+    closeSync(fd);
+  }
 }
 
 /**

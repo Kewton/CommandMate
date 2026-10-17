@@ -540,7 +540,7 @@ tail -f ~/.commandmate/logs/server.log
 tail -f ~/.commandmate/logs/server-135.log
 ```
 
-`commandmate start --daemon` (and `commandmate update`, which restarts through it) appends the server's stdout and stderr to `logs/server.log` in the config directory (`logs/server-<N>.log` for an `--issue <N>` server). The file is owner-only (0600). Each start writes a separator line (`=== <timestamp> commandmate start --daemon ... ===`).
+`commandmate start --daemon` (and `commandmate update`, which restarts through it) appends the server's stdout and stderr to `logs/server.log` in the config directory (`logs/server-<N>.log` for an `--issue <N>` server). The file is owner-only (0600), and so are the rotated `server.log.1` and later generations (an existing 0640 file written by `scripts/start.sh` is tightened to 0600 when the CLI daemon opens or rotates it). Each start writes a separator line (`=== <timestamp> commandmate start --daemon ... ===`).
 
 - **Rotation**: at start, a log of 10MB or more is moved to `server.log.1`, shifting older generations to `.2` and `.3` (three generations kept, the same approach as `scripts/build-and-start.sh`). It is not rotated while the server runs, so a long-running server's log can grow past 10MB.
 - If the log file cannot be opened (the directory cannot be created, a symbolic link is in the way, etc.), a warning is printed and the server starts with its output discarded.

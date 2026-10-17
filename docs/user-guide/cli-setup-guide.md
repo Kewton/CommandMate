@@ -653,7 +653,7 @@ tail -f ~/.commandmate/logs/server.log
 tail -f ~/.commandmate/logs/server-135.log
 ```
 
-`commandmate start --daemon`（と、それで再起動する `commandmate update`）は、サーバーの標準出力・標準エラーを設定ディレクトリの `logs/server.log`（`--issue <N>` のサーバーは `logs/server-<N>.log`）に追記します。ファイルの権限は所有者のみ（0600）です。起動のたびに区切り行（`=== <日時> commandmate start --daemon ... ===`）を書きます。
+`commandmate start --daemon`（と、それで再起動する `commandmate update`）は、サーバーの標準出力・標準エラーを設定ディレクトリの `logs/server.log`（`--issue <N>` のサーバーは `logs/server-<N>.log`）に追記します。ファイルの権限は所有者のみ（0600）で、ローテーションで回した `server.log.1` 以降も 0600 にします（`scripts/start.sh` が 0640 で作った既存のファイルも、CLI の daemon が開く・回すときに 0600 へ締めます）。起動のたびに区切り行（`=== <日時> commandmate start --daemon ... ===`）を書きます。
 
 - **ローテーション**: 起動時に 10MB 以上なら `server.log.1` へ回し、古い世代は `.2`・`.3` へずらします（3 世代まで保持。`scripts/build-and-start.sh` と同じ考え方）。稼働中には回さないので、長く動かし続けたサーバーのログは 10MB を超えることがあります。
 - ログファイルを開けない場合（ディレクトリが作れない、シンボリックリンクが置かれている等）は警告を出し、出力を捨ててサーバーは起動します。

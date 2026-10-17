@@ -248,6 +248,37 @@ describe('DaemonManager server log (Issue #3731)', () => {
       expect(readFileSync(logPath, 'utf-8')).toContain('stand-in stdout');
     });
 
+    it('rotates a 0640 log left by scripts/start.sh into an owner-only (0600) .1', async () => {
+      const logPath = getServerLogPath();
+      mkdirSync(join(ctx.configDir, 'logs'));
+      writeFileSync(logPath, Buffer.alloc(10 * 1024 * 1024 + 1, 'x'));
+      chmodSync(logPath, 0o640);
+      writeFileSync(`${logPath}.1`, 'older');
+      chmodSync(`${logPath}.1`, 0o640);
+
+      await new DaemonManager(pidFile, undefined, () => logPath).start({ port: 39731 });
+      await waitForChildren();
+
+      expect(statSync(`${logPath}.1`).mode & 0o777).toBe(0o600);
+      expect(statSync(`${logPath}.2`).mode & 0o777).toBe(0o600);
+      expect(statSync(logPath).mode & 0o777).toBe(0o600);
+    });
+
+    // Negative control: under the limit nothing rotates; the live 0640 file is tightened in place.
+    it('tightens a 0640 log under the limit to 0600 without rotating it', async () => {
+      const logPath = getServerLogPath();
+      mkdirSync(join(ctx.configDir, 'logs'));
+      writeFileSync(logPath, 'earlier output\n');
+      chmodSync(logPath, 0o640);
+
+      await new DaemonManager(pidFile, undefined, () => logPath).start({ port: 39731 });
+      await waitForChildren();
+
+      expect(statSync(logPath).mode & 0o777).toBe(0o600);
+      expect(readFileSync(logPath, 'utf-8')).toContain('earlier output');
+      expect(existsSync(`${logPath}.1`)).toBe(false);
+    });
+
     // Negative control: a manager given no log path behaves exactly as before.
     it('discards output as before when no log path is given', async () => {
       await new DaemonManager(pidFile).start({ port: 39731 });
