@@ -545,7 +545,7 @@ The kinds are a vocabulary of their own, separate from `promptData.type` and `se
 | `screen.answerVia` | How it is answered: `screen` (keys via `respond`) / `api` (a decision) / `terminal` (`respond` cannot answer it today) / `none` |
 | `autoYes.enabled` / `pollerActive` | Whether Auto-Yes is on / whether the server's poller runs |
 | `autoYes.pollerRecord` | What the poller (or the permission hook) last recorded as withheld. `screenCorrelation` relates it to this screen; the record names no screen, so it is `unknown` / `type-mismatch` / `no-prompt-on-screen` |
-| `autoYes.contractEvaluation` | The contract's policy applied to this screen **now** (`policy-withholds` + reason / `policy-permits` / `no-base-answer` / `not-evaluated`). Reasons use the `AutoYesSuppressionReason` words |
+| `autoYes.contractEvaluation` | The contract's policy applied to this screen **now** (`policy-withholds` + reason / `policy-permits` / `no-base-answer` / `not-evaluated`). Reasons use the `AutoYesSuppressionReason` words ([reason table](#autoyeslastsuppression-observing-a-policy-suppression-issue-1684)) |
 | `lastSend` | How the last send to this instance ended (Issue #3759): `{ at, state, reason }`. `state` is `not-sent` (it failed before any key of the body was typed, e.g. `prompt-not-ready`) / `sent` (the submit was confirmed) / `indeterminate` (it failed after part of it may have been typed, or the outcome could not be read back; `reason: composer-residue` when the body is still in the composer). Null when this server has no record since it started; absent from an older server |
 
 **Whatever `lastSend` says, CommandMate never resends.** The sender — you or the supervising agent — does. Resend a `not-sent` message yourself once the input prompt is back. **Do not resend an `indeterminate` one** before checking the pane with `commandmate capture <worktree-id> --pane` (is the body still in the composer, or was it already submitted?); resending blind can deliver it twice. A `send` that fails with `prompt not ready` and the like carries the same state in its error (`[send state: not-sent (prompt-not-ready): …]`).
@@ -1155,6 +1155,17 @@ does not type at the same prompt again and leaves it to a human (`mode` is `null
 carries the session to a new ID, this carries on under the new ID. `commandmate wait` prints it as
 "because an earlier answer left partial input; Auto-Yes is waiting for a human" (exit 10 and the JSON
 `reason` are handled as for any other reason). Check what is left in the input before answering.
+
+The remaining words of the type `AutoYesSuppressionReason` are not policy verdicts either, so `mode` can be `null`. The wording `commandmate wait` prints is quoted alongside.
+
+| `reason` | Meaning | `commandmate wait` prints |
+|----------|---------|---------------------------|
+| `agent-launch-dialog` (Issue #1829) | The confirmation on screen is a dialog of the CLI's launch sequence (a trust confirmation, for instance); its answer belongs to the tool's own launch sequence, so Auto-Yes does not answer it | "while the agent's launch dialog was on screen" |
+| `unclassified-frame` (Issue #1924) | The generic estimator read a numbered list, but the tool's own dialog detector did not accept it as a confirmation, so nothing is sent. This is the position that stops answering `1` to a numbered list inside a reply (#1896) | "because no tool-specific dialog detector recognised the frame" |
+| `startup-trust-unhandled` (Issue #3757) | agy's startup folder-trust confirmation (`Do you trust the contents of this project?`) is on screen. It belongs to the launch sequence and is unnumbered, so the poller cannot read it as a prompt. If it was drawn after the launch window ended, the next send's readiness wait answers it | "because agy's startup folder-trust confirmation is the launch's to answer, not Auto-Yes's; the next send confirms it once, or answer it at the pane" |
+| `question-confirm-page` (Issue #3748) | The `AskUserQuestion` confirm page (`Submit` / `Cancel`) of Command Code and Claude. `Submit` picks nothing; it commits the answers as they stand, so Auto-Yes does not answer and leaves it to a human | "because the question's Submit/Cancel confirmation commits the answers as they stand, so Auto-Yes leaves it to a human" |
+
+In [`commandmate prompt --json`](#commandmate-prompt), `autoYes.pollerRecord` (the poller's record) and `autoYes.contractEvaluation` (the contract re-evaluated now) are separate fields, but both use the same words as this table and the `reason` row above.
 
 If `isPromptWaiting: true` and `lastSuppression.at` is recent, that session is **stalled on a policy
 suppression right now**. Either answer it as a human with `commandmate respond`, or revisit the
