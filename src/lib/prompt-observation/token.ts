@@ -21,16 +21,10 @@
  * ## Single use
  *
  * {@link consumeObservationToken} is the entry a sender's answer goes through:
- * it verifies, then records the token as used, so a second answer with the same
- * token is refused even while the screen is unchanged.
- *
- * ## Structure
- *
- * `po1.<issuedAt, base36>.<HMAC-SHA256, base64url>`. The MAC is keyed with a
- * random per-process secret, so a token is only ever valid on the server
- * process that issued it, and a restart (which also forgets every session
- * generation) invalidates all of them. The binding itself is not in the token:
- * the verifier rebuilds it from what is on screen, which is the point.
+ * it verifies, then records the APPEARANCE the token was issued on as answered.
+ * Every observation issues a token of its own (`issuedAt` differs), so `wait`'s
+ * polls leave many live tokens for one appearance; once one of them is
+ * consumed, all of them are refused, until the TTL has passed.
  *
  * Generation and verification are in this one module so the two cannot drift
  * about the canonical form.
@@ -38,7 +32,7 @@
  * @module lib/prompt-observation/token
  */
 
-import { createHmac, randomBytes, timingSafeEqual } from 'crypto';
+import { createHash, createHmac, randomBytes, timingSafeEqual } from 'crypto';
 import { getOrInitGlobal } from '@/lib/global-state';
 
 /** How long a token verifies after it was issued. */
@@ -53,7 +47,7 @@ const TOKEN_PREFIX = 'po1';
 const TOKEN_MAX_LENGTH = 80;
 
 /** How many used, unexpired tokens are remembered at once. */
-const MAX_CONSUMED_TOKENS = 4096;
+const MAX_CONSUMED_APPEARANCES = 4096;
 
 /** What a token is bound to. Rebuilt from a fresh observation on verification. */
 export interface ObservationTokenBinding {
@@ -76,8 +70,9 @@ export interface ObservationTokenBinding {
 }
 
 /**
- * Why a token did not verify. `consumed`: it already answered once.
- * `consumed-store-full`: too many live tokens were used to remember one more,
+ * Why a token did not verify. `consumed`: a token of the same appearance
+ * already answered. `consumed-store-full`: too many appearances were answered
+ * recently to remember one more,
  * so it is refused rather than accepted unrecorded.
  */
 export type ObservationTokenRejection =
@@ -105,7 +100,7 @@ declare global {
 
 const secret = getOrInitGlobal('__promptObservationTokenSecret', () => ({ value: randomBytes(32) }));
 
-/** Used tokens → the epoch ms they expire at (after which they are forgotten). */
+/** Answered appearances (binding digests) → the epoch ms they are forgotten at. */
 const consumed = getOrInitGlobal('__promptObservationConsumedTokens', () => new Map<string, number>());
 
 /** The binding in one fixed, unambiguous form (JSON of an array, so no field can bleed into another). */
@@ -186,15 +181,47 @@ export function verifyObservationToken(
 
 /** Forget used tokens that have expired; they no longer verify anyway. */
 function sweepConsumed(now: number): void {
-  for (const [token, expiresAt] of consumed) {
-    if (now >= expiresAt) consumed.delete(token);
+  for (const [digest, forgetAt] of consumed) {
+    if (now >= forgetAt) consumed.delete(digest);
   }
 }
 
 /**
- * Verify a token and use it up: the entry a sender's answer goes through
- * (#3756). A token that verifies once is refused as `consumed` from then on,
- * until it would have expired anyway.
+ * The appearance a binding names, as one digest: the binding without
+ * `issuedAt` (which differs per observation) and without the highlighted
+ * option (moving the cursor does not make the screen a second one to answer).
+ */
+function appearanceDigest(binding: ObservationTokenBinding): string {
+  return createHash('sha256')
+    .update(
+      JSON.stringify([
+        TOKEN_PREFIX,
+        binding.worktreeId,
+        binding.cliToolId,
+        binding.instanceId,
+        binding.sessionName,
+        binding.sessionGeneration,
+        binding.screenAppearedAt,
+        binding.kind,
+        binding.question,
+        [...binding.options],
+        binding.approvalTarget,
+      ])
+    )
+    .digest('base64url');
+}
+
+/**
+ * Verify a token and use up the appearance it was issued on: the entry a
+ * sender's answer goes through (#3756). Once a token verifies here, every
+ * token of the same appearance — the same string or another observation's —
+ * is refused as `consumed` for {@link PROMPT_OBSERVATION_TOKEN_TTL_MS}, which
+ * outlives every token issued before the consume. A new appearance (the screen
+ * went away and came back: `screenAppearedAt` moves) is a new binding and
+ * passes. A token that fails verification consumes nothing.
+ *
+ * Consumed BEFORE the answer is sent: a send that then fails has still used
+ * the appearance up (fail closed).
  *
  * @param now - Epoch ms; defaults to now
  */
@@ -206,8 +233,9 @@ export function consumeObservationToken(
   const verdict = verifyObservationToken(token, binding, now);
   if (!verdict.ok) return verdict;
   sweepConsumed(now);
-  if (consumed.has(token)) return { ok: false, reason: 'consumed' };
-  if (consumed.size >= MAX_CONSUMED_TOKENS) return { ok: false, reason: 'consumed-store-full' };
-  consumed.set(token, observationTokenExpiresAt(verdict.issuedAt));
+  const digest = appearanceDigest(binding);
+  if (consumed.has(digest)) return { ok: false, reason: 'consumed' };
+  if (consumed.size >= MAX_CONSUMED_APPEARANCES) return { ok: false, reason: 'consumed-store-full' };
+  consumed.set(digest, Math.floor(now) + PROMPT_OBSERVATION_TOKEN_TTL_MS);
   return verdict;
 }

@@ -136,11 +136,39 @@ describe('[#3755] consumeObservationToken (single use)', () => {
     expect(consumeObservationToken(token, binding, NOW + 1000).ok).toBe(true);
   });
 
-  it('keeps a token of another observation usable', () => {
+  it('refuses another observation\'s token of the same appearance once one was consumed', () => {
     const binding = { ...BINDING, worktreeId: 'wt-consume-3' };
-    const first = issueObservationToken(binding, NOW);
-    const second = issueObservationToken(binding, NOW + 1);
-    expect(consumeObservationToken(first, binding, NOW + 1000).ok).toBe(true);
-    expect(consumeObservationToken(second, binding, NOW + 1000).ok).toBe(true);
+    const t1 = issueObservationToken(binding, NOW);
+    const t2 = issueObservationToken(binding, NOW + 2_000); // wait's next poll, same appearance
+    expect(t2).not.toBe(t1);
+    expect(consumeObservationToken(t1, binding, NOW + 3_000).ok).toBe(true);
+    expect(consumeObservationToken(t2, binding, NOW + 4_000)).toEqual({ ok: false, reason: 'consumed' });
+    // Also with the cursor moved: the same appearance is answered once.
+    const t3 = issueObservationToken({ ...binding, selectedPosition: 2 }, NOW + 5_000);
+    expect(consumeObservationToken(t3, { ...binding, selectedPosition: 2 }, NOW + 6_000)).toEqual({
+      ok: false,
+      reason: 'consumed',
+    });
+  });
+
+  it('negative: a new appearance (the screen went away and came back) can be consumed', () => {
+    const binding = { ...BINDING, worktreeId: 'wt-consume-4' };
+    expect(consumeObservationToken(issueObservationToken(binding, NOW), binding, NOW + 1_000).ok).toBe(true);
+    const reappeared = { ...binding, screenAppearedAt: NOW + 10_000 };
+    const fresh = issueObservationToken(reappeared, NOW + 11_000);
+    expect(consumeObservationToken(fresh, reappeared, NOW + 12_000)).toEqual({ ok: true, issuedAt: NOW + 11_000 });
+  });
+
+  it('negative: a token that fails verification consumes nothing for its appearance', () => {
+    const binding = { ...BINDING, worktreeId: 'wt-consume-5' };
+    const t1 = issueObservationToken(binding, NOW);
+    expect(consumeObservationToken(t1, { ...binding, question: 'other' }, NOW + 1_000)).toEqual({
+      ok: false,
+      reason: 'mismatch',
+    });
+    const expired = issueObservationToken(binding, NOW - PROMPT_OBSERVATION_TOKEN_TTL_MS - 1);
+    expect(consumeObservationToken(expired, binding, NOW + 1_000)).toEqual({ ok: false, reason: 'expired' });
+    const t2 = issueObservationToken(binding, NOW + 500);
+    expect(consumeObservationToken(t2, binding, NOW + 1_000).ok).toBe(true);
   });
 });

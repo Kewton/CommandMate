@@ -141,8 +141,12 @@ function readTrust(lines: readonly string[], footer: number): AntigravityArrowSc
     }
   }
   if (highlighted < 0) return null;
-  // The option block runs up from the highlight to the blank row above it:
-  // the cursor may sit on any option, not only the first.
+  // The option block runs up from the highlight to the blank row (or the
+  // question) above it: the cursor may sit on any option, not only the first.
+  // Every non-blank row in that span counts as an option, so a note drawn
+  // between the question and the options with no blank row under it would be
+  // read as one — shifting the options and selectedIndex. That only moves the
+  // observation, and with it the token's binding, so it fails closed.
   let first = highlighted;
   while (first - 1 > questionRow && lines[first - 1].trim() !== '') first--;
   const read = readOptionRows(lines, first, footer);

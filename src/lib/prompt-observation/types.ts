@@ -53,6 +53,9 @@ export interface PromptObservationScreen {
    * question, the options, the approval target and the highlighted option —
    * so a sender can prove the screen it answers is the screen it read.
    *
+   * Single use per appearance: the strict `respond` (#3756) consumes it BEFORE
+   * sending, so a send that then fails has still burnt it (fail closed).
+   *
    * Known gap: a screen that goes away and comes back with the same words
    * between two observations, with nothing observed in between, is the same
    * appearance (`./appearance`), so a token from the first still verifies.
