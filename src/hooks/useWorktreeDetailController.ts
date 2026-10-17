@@ -53,7 +53,7 @@ import {
   readPromptResponseOutcome,
   type PromptResponseOutcome,
 } from '@/lib/prompt-response-outcome';
-import { readSelectionListShape } from '@/lib/detection/selection-shape';
+import { isTrustConfirmationFrame, readSelectionListShape } from '@/lib/detection/selection-shape';
 import {
   NO_SELECTION_LIST_READING,
   isSameSelectionListReading,
@@ -194,12 +194,19 @@ type CurrentOutputResponse = Pick<CurrentOutputResponseBody, 'isRunning'> &
  */
 interface ControllerPaneGateState extends PaneGateState {
   offersPlanApprove: boolean;
+  /**
+   * Issue #3758: the selection list is a folder-trust confirmation. Read off
+   * the same response's frame, for the same reason `offersPlanApprove` is: the
+   * docked pad holds no frame.
+   */
+  isTrustConfirmationActive: boolean;
 }
 
 /** {@link ControllerPaneGateState} before anything has arrived for the polled agent. */
 const CONTROLLER_PANE_GATE_NOTHING_ARRIVED: ControllerPaneGateState = Object.freeze({
   ...PANE_GATE_NOTHING_ARRIVED,
   offersPlanApprove: false,
+  isTrustConfirmationActive: false,
 });
 
 // ============================================================================
@@ -980,6 +987,11 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
         // Issue #2809: read with the function the chat surface's card uses.
         offersPlanApprove:
           readSelectionListShape(data.realtimeSnippet || data.fullOutput).offersPlanApprove,
+        // Issue #3758: only while this response says a selection list is up —
+        // the frame `nextSelectionListReading` above is read from.
+        isTrustConfirmationActive:
+          (data.isSelectionListActive ?? false)
+          && isTrustConfirmationFrame(data.fullOutput ?? data.realtimeSnippet, requestedCliTool),
         // Issue #2592: the mode itself and the three remaining gate inputs.
         // Absent fields read as "nothing is on screen" / "no frame has landed",
         // which is what every other flag above already does — and `agentMode`
@@ -2205,6 +2217,8 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     promptAutoYesEnterSent,
     // Issue #2809: the docked pad's Enter gate on a plan review.
     offersPlanApprove: paneGate.offersPlanApprove,
+    // Issue #3758: the docked pad's "terminal action needed (trust)" notice.
+    isTrustConfirmationActive: paneGate.isTrustConfirmationActive,
     // Issue #2592: the phone composer's permission-mode control.
     isDismissablePanelActive: paneGate.isDismissablePanelActive,
     isUnclassifiedActive: paneGate.isUnclassifiedActive,
