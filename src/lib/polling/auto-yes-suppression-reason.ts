@@ -63,7 +63,14 @@ export type AutoYesSuppressionReason =
    * whose wording in `cmate wait` says no detector recognised the frame — the
    * opposite of what happened.
    */
-  | 'question-confirm-page';
+  | 'question-confirm-page'
+  /**
+   * Issue #3767: agy's approval dialog is on the pane but Auto-Yes has no
+   * `PreToolUse` question to match it to (none ever, it appeared after the
+   * window, it was already up, or the hook stopped arriving), so it is left to a
+   * human. Not a policy verdict; the poller records it from the receipt gate.
+   */
+  | 'no-hook-receipt';
 
 /** Issue #3706: the reason the poller records for an answer stopped part-way. */
 export const PARTIAL_ANSWER_SUPPRESSION_REASON = 'partial-answer' satisfies AutoYesSuppressionReason;
@@ -73,3 +80,6 @@ export const STARTUP_TRUST_UNHANDLED_SUPPRESSION_REASON = 'startup-trust-unhandl
 
 /** Issue #3748: the reason the poller records over an `AskUserQuestion` confirm page. */
 export const QUESTION_CONFIRM_PAGE_SUPPRESSION_REASON = 'question-confirm-page' satisfies AutoYesSuppressionReason;
+
+/** Issue #3767: the reason the poller records over an agy dialog with no matching hook receipt. */
+export const NO_HOOK_RECEIPT_SUPPRESSION_REASON = 'no-hook-receipt' satisfies AutoYesSuppressionReason;

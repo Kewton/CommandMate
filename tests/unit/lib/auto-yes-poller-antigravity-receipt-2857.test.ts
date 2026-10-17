@@ -385,10 +385,27 @@ describe('[#3724] a dialog the contract withheld is not blamed on hooks.json', (
     expect(byPolicyLines().map(([, f]) => [f.reason, f.mode])).toEqual([['deny-pattern', 'allow-listed']]);
   });
 
+  it('still names the contract when the poller reads the dialog on every tick past the window (#3767)', async () => {
+    seedContract("autoYes:\n  mode: 'off'\n");
+    receiptFor();
+    for (const elapsed of [0, 5_000, 10_000]) {
+      vi.setSystemTime(T0 + elapsed);
+      await respondTo('dialog-bash-wrapped');
+    }
+
+    expect(sendPromptAnswer).not.toHaveBeenCalled();
+    expect(withheldLines()).toHaveLength(0);
+    expect(byPolicyLines().map(([, f]) => f.reason)).toEqual(['mode-off']);
+  });
+
   it('keeps the hooks.json line when the contract permits the answer', async () => {
     seedContract('');
 
-    await dialogOutlivesReceiptWindow();
+    // Issue #3767: first read past the window. A dialog the gate let through
+    // and the contract answered is not withheld for want of a receipt.
+    receiptFor();
+    vi.setSystemTime(T0 + 8_001);
+    await respondTo('dialog-bash-wrapped');
 
     expect(byPolicyLines()).toHaveLength(0);
     expect(withheldLines()).toHaveLength(1);
