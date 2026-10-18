@@ -294,7 +294,11 @@ const SUPPRESSION_CAUSE: Record<AutoYesSuppressionReason, string> = {
   'deny-pattern': CONTRACT_POLICY_CAUSE,
   'deny-pattern-unusable': CONTRACT_POLICY_CAUSE,
   'type-not-allowed': CONTRACT_POLICY_CAUSE,
-  'agent-launch-dialog': "while the agent's launch dialog was on screen",
+  // Issue #3790: after the launch window the poller still leaves copilot's and
+  // gemini's trust dialogs alone when the cursor is not on the safe row, and
+  // nobody else answers them then.
+  'agent-launch-dialog':
+    "while the agent's launch dialog was on screen; if it stays after the launch (copilot's cursor on 2. or 3., gemini's not on 1. Trust folder), answer it at the pane",
   // Issue #1924. Deliberately not "by contract policy": no contract was
   // consulted. The frame looked like a numbered list to the generic estimator
   // and like prose to the tool's own detector, and an operator who reads this

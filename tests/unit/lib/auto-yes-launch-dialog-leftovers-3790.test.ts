@@ -66,7 +66,7 @@ vi.mock('@/lib/logger', () => ({
   },
 }));
 
-import { stripAnsi, stripBoxDrawing } from '@/lib/detection/cli-patterns';
+import { isCopilotFolderTrustDialog, stripAnsi, stripBoxDrawing } from '@/lib/detection/cli-patterns';
 import {
   clearPolicySuppressions,
   getLastPolicySuppression,
@@ -215,16 +215,71 @@ describe('[#3790] copilot: the folder-trust dialog is the launch\'s while it ans
 
   it('negative: a reply quoting the question above a permission prompt is answered, even in the window', async () => {
     beginLaunchWindow(session('copilot'));
-    const quoted = [
-      '● It asks "Confirm folder trust" and "Do you trust the files in this folder?" on first start.',
-      '',
-      'Do you want to run this command?',
-      '',
-      '❯ 1. Yes',
-      '  2. No, and tell Copilot what to do differently (Esc)',
-    ].join('\n');
-    await tick('copilot', quoted);
+    // The live 1.0.80 permission dialog (#1885) with a reply line above it that
+    // quotes both of the trust dialog's anchors.
+    const permission = read(path.join(process.cwd(), 'tests/unit/lib/detection/fixtures/copilot-live-1885'), 'permission-dialog.txt');
+    const boxTop = permission.search(/^\S*╭/m);
+    expect(boxTop).toBeGreaterThan(0);
+    const quoted =
+      permission.slice(0, boxTop) +
+      ' ● It asks "Confirm folder trust" and "Do you trust the files in this folder?" on first start.\n' +
+      permission.slice(boxTop);
+    // Review of #3790: `responded` and the key, so a frame read as no prompt at
+    // all cannot pass for "not suppressed".
+    expect(await tick('copilot', quoted)).toBe('responded');
+    expect(sendPromptAnswer).toHaveBeenCalledTimes(1);
+    expect(sendPromptAnswer.mock.calls[0][0].answer).toBe('1');
     expect(getLastPolicySuppression(WORKTREE_ID, 'copilot')?.reason).not.toBe('agent-launch-dialog');
+  });
+
+  describe('live 1.0.91 (review of #3790)', () => {
+    const LIVE_TRUST = (): string => read(LIVE, 'copilot-trust-dialog-1-0-91.txt');
+    /**
+     * Another copilot dialog with the trust dialog's option labels (`Yes` /
+     * `No (Esc)`) and neither of its anchors. The anchor check is the only thing
+     * that keeps it from being left to a launch that never answers it.
+     */
+    const anchorless = (): string =>
+      LIVE_TRUST()
+        .replace('Confirm folder trust', 'Confirm tool access  ')
+        .replace('Do you trust the files in this folder?', 'Allow Copilot to use this tool?       ')
+        .replace(/^.*2\. Yes, and remember this folder for future sessions.*\n/m, '')
+        .replace('  3. No (Esc)', '  2. No (Esc)');
+
+    it('fixture: the live frame is the declared dialog; the anchorless edit took', () => {
+      expect(isCopilotFolderTrustDialog(LIVE_TRUST())).toBe(true);
+      const edited = anchorless();
+      expect(edited).not.toContain('Confirm folder trust');
+      expect(edited).not.toContain('Do you trust the files in this folder?');
+      expect(edited).not.toContain('remember this folder');
+      expect(edited).toContain('❯ 1. Yes');
+      expect(edited).toContain('  2. No (Esc)');
+    });
+
+    it('in the launch window: no answer', async () => {
+      beginLaunchWindow(session('copilot'));
+      expect(await tick('copilot', LIVE_TRUST())).toBe('no_answer');
+      expect(sendPromptAnswer).not.toHaveBeenCalled();
+      expect(getLastPolicySuppression(WORKTREE_ID, 'copilot')?.reason).toBe('agent-launch-dialog');
+    });
+
+    it('negative control: after the window, answered `1`', async () => {
+      expect(await tick('copilot', LIVE_TRUST())).toBe('responded');
+      expect(sendPromptAnswer.mock.calls[0][0].answer).toBe('1');
+    });
+
+    it('negative: a dialog without the anchors is answered `1` in the window', async () => {
+      beginLaunchWindow(session('copilot'));
+      expect(await tick('copilot', anchorless())).toBe('responded');
+      expect(sendPromptAnswer).toHaveBeenCalledTimes(1);
+      expect(sendPromptAnswer.mock.calls[0][0].answer).toBe('1');
+    });
+
+    it('negative: a dialog without the anchors is answered `1` after the window (not left alone for good)', async () => {
+      expect(await tick('copilot', anchorless())).toBe('responded');
+      expect(sendPromptAnswer).toHaveBeenCalledTimes(1);
+      expect(sendPromptAnswer.mock.calls[0][0].answer).toBe('1');
+    });
   });
 });
 

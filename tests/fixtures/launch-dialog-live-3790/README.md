@@ -19,6 +19,8 @@ reads it.
   login screen): the folder-trust dialog, unnumbered, cursor on `No, exit` by default. The Auto-Yes
   poller reads it as no prompt.
 
-copilot 1.0.91 drew the same folder-trust rows as `tests/fixtures/copilot-folder-trust-1080.ts`; a bare
-`1` dismissed it at once, and a second `1` + Enter typed afterwards was submitted as a user message
-(`✗ You must be logged in to send messages` on that logged-out HOME).
+- `copilot-trust-dialog-1-0-91.txt` — GitHub Copilot CLI 1.0.91 at 200 x 50, the folder-trust dialog
+  with the cursor on `❯ 1. Yes`: the same rows as `tests/fixtures/copilot-folder-trust-1080.ts`. Blank
+  rows were dropped and only the last 30 rows kept when it was taken; the path row is padded back to
+  the box width. A bare `1` dismissed it at once, and a second `1` + Enter typed afterwards was
+  submitted as a user message (`✗ You must be logged in to send messages` on that logged-out HOME).
