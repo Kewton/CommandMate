@@ -419,3 +419,122 @@ describe('[#3796 review C] a send cut short marks only the episode it was sent f
     expect(withheldLines().at(-1)?.[1].hint).toContain('途中で送信が止まり');
   });
 });
+
+describe('[#3796 review D] the contract that withholds the prompt now is published, whatever was recorded', () => {
+  it('positive: mode-off recorded → the contract ends (record dropped) → a new contract withholds the same dialog — its reason is published', async () => {
+    const task = seedContract("autoYes:\n  mode: 'off'\n");
+    receiptAt(0);
+    expect(await tickAt(3_000, IDLE)).toBe('no_prompt');
+    expect(await tickAt(5_000, DIALOG)).toBe('no_answer');
+    expect(await tickAt(10_000, DIALOG)).toBe('no_prompt');
+    expect(suppression()).toMatchObject({ reason: 'mode-off', at: T0 + 10_000 });
+    endContract(task);
+    expect(await tickAt(15_000, DIALOG)).toBe('no_prompt');
+    expect(suppression()).toBeNull();
+
+    seedContract("autoYes:\n  mode: 'safe'\n");
+    // Before the review fix there was no record to refresh, so nothing was
+    // published: `wait` read no reason and held the prompt as Auto-Yes's.
+    for (const ms of [20_000, 25_000]) {
+      expect(await tickAt(ms, DIALOG)).toBe('no_prompt');
+      expect(suppression()).toMatchObject({ reason: 'type-not-allowed', mode: 'safe', at: T0 + ms });
+    }
+    expect(sendPromptAnswer).not.toHaveBeenCalled();
+  });
+
+  it('positive: no record at all (accepted on another server\'s session) — a contract that comes to withhold it is published', async () => {
+    receiptAt(0);
+    expect(await tickAt(3_000, IDLE)).toBe('no_prompt');
+    vi.mocked(checkWorktreeSessionOwnership).mockResolvedValueOnce({ verdict: 'foreign', sessionPath: '/elsewhere' });
+    expect(await tickAt(5_000, DIALOG)).toBe('no_answer');
+    expect(await tickAt(10_000, DIALOG)).toBe('no_prompt');
+    expect(suppression()).toBeNull();
+
+    seedContract("autoYes:\n  mode: 'off'\n");
+    clearAutoYesPolicyCache();
+    expect(await tickAt(15_000, DIALOG)).toBe('no_prompt');
+    expect(suppression()).toMatchObject({ reason: 'mode-off', mode: 'off', at: T0 + 15_000 });
+    expect(sendPromptAnswer).not.toHaveBeenCalled();
+  });
+
+  it('negative: a partial answer still on screen keeps its own reason over the contract\'s', async () => {
+    receiptAt(0);
+    expect(await tickAt(3_000, IDLE)).toBe('no_prompt');
+    expect(await abandonedTickAt(5_000, true)).toBe('no_answer');
+    expect(await tickAt(7_000, DIALOG)).toBe('no_answer');
+    expect(suppression()?.reason).toBe('partial-answer');
+    seedContract("autoYes:\n  mode: 'off'\n");
+    clearAutoYesPolicyCache();
+    expect(await tickAt(12_000, DIALOG)).toBe('no_prompt');
+    expect(suppression()).toMatchObject({ reason: 'partial-answer', at: T0 + 12_000 });
+  });
+  // The other negative — no contract withholding, no record made — is review
+  // A's "the contract ended" above, kept as it is.
+});
+
+/**
+ * A tick whose answer is sent while `during` runs — inside the await of its
+ * last key — and then comes back whole, at `T0 + ms`. With `restart`, Auto-Yes
+ * is stopped and enabled again inside the await, as in review C.
+ */
+async function wholeSendTickAt(ms: number, restart: boolean, during: () => Promise<void>): Promise<string> {
+  vi.setSystemTime(T0 + ms);
+  setAutoYesEnabled(WORKTREE_ID, 'antigravity', true, undefined, undefined, 'antigravity');
+  expect(startAutoYesPolling(WORKTREE_ID, 'antigravity', 'antigravity').started).toBe(true);
+  const state = globalThis.__autoYesPollerStates!.get(KEY)!;
+  const generation: AutoYesTickGeneration = {
+    compositeKey: KEY,
+    worktreeId: WORKTREE_ID,
+    cliToolId: 'antigravity',
+    instanceId: 'antigravity',
+    pollerState: state,
+    grant: getAutoYesState(WORKTREE_ID, 'antigravity', 'antigravity')!,
+    sessionEpoch: getEnterFallbackSessionEpoch(KEY),
+    startedAt: Date.now(),
+  };
+  sendPromptAnswer.mockImplementationOnce(async () => {
+    if (restart) {
+      stopAutoYesPolling(KEY);
+      expect(startAutoYesPolling(WORKTREE_ID, 'antigravity', 'antigravity').started).toBe(true);
+    }
+    await during();
+  });
+  const clean = asPollerSees(frame(DIALOG));
+  try {
+    return await detectAndRespondToPrompt(WORKTREE_ID, state, 'antigravity', clean, clean.split('\n'), 'antigravity', undefined, generation);
+  } finally {
+    stopAutoYesPolling(KEY);
+  }
+}
+
+describe('[#3796 review E] a send that comes back whole marks only the episode it was sent for', () => {
+  it('negative: stop → enable during the last key, the successor accepts a newer receipt, the old send comes back whole — that episode\'s answer time is left alone', async () => {
+    receiptAt(0);
+    expect(await tickAt(3_000, IDLE)).toBe('no_prompt');
+    await wholeSendTickAt(5_000, true, async () => {
+      expect(await tickAt(7_000, IDLE)).toBe('no_prompt');
+      receiptAt(8_000);
+      vi.mocked(checkWorktreeSessionOwnership).mockResolvedValueOnce({ verdict: 'foreign', sessionPath: '/elsewhere' });
+      expect(await tickAt(10_000, DIALOG)).toBe('no_answer');
+    });
+    expect(sendPromptAnswer).toHaveBeenCalledTimes(1);
+
+    for (const ms of [17_000, 22_000, 27_000, 32_000, 37_000]) expect(await tickAt(ms, DIALOG)).toBe('no_prompt');
+    // Before the review fix the old send's return started this dialog's grace
+    // at 10s, and from 28s it read as an answer of ours that outlived it.
+    expect(suppression()).toBeNull();
+    expect(withheldLines()).toHaveLength(0);
+  });
+
+  it('positive: the same generation\'s whole send still starts its grace', async () => {
+    receiptAt(0);
+    expect(await tickAt(3_000, IDLE)).toBe('no_prompt');
+    expect(await wholeSendTickAt(5_000, false, async () => {})).toBe('responded');
+    for (const ms of [10_000, 15_000, 20_000]) expect(await tickAt(ms, DIALOG)).toBe('no_prompt');
+    expect(withheldLines()).toHaveLength(0);
+    expect(await tickAt(5_000 + ANTIGRAVITY_ANSWERED_DIALOG_GRACE_MS + 1, DIALOG)).toBe('no_prompt');
+    expect(withheldLines()).toHaveLength(1);
+    expect(withheldLines()[0][1].hint).toContain('画面に残っている');
+    expect(withheldLines()[0][1].hint).not.toContain('途中で送信が止まり');
+  });
+});

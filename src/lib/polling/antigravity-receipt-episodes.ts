@@ -248,9 +248,10 @@ export function endAntigravityFrameRead(
  *
  * @param options.forReceiptAt - The episode the send was for
  *   ({@link getAntigravityAcceptedReceiptAt} read when it began). Given, only
- *   that episode is marked: a send that comes back after a stop → enable, when
- *   the successor already accepted a dialog on a newer receipt, must not start
- *   that dialog's grace or give it its own "cut short" (Issue #3796 review).
+ *   that episode is marked: a send that comes back — whole or cut short —
+ *   after a stop → enable, when the successor already accepted a dialog on a
+ *   newer receipt, must not start that dialog's grace or give it its own
+ *   "cut short" (Issue #3796 review, review E for the whole send).
  */
 export function markAntigravityAnswerSent(
   worktreeId: string,

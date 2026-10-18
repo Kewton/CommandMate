@@ -25,8 +25,7 @@ import {
   type AntigravityReceiptVerdict,
 } from './polling/antigravity-receipt-episodes';
 import { ANTIGRAVITY_PERMISSION_RECEIPT_WINDOW_MS } from './polling/antigravity-permission-receipts';
-import { resolveAutoAnswerWithPolicy, type AutoYesMode } from './polling/auto-yes-resolver';
-import type { PromptData } from '@/types/models';
+import { resolveAutoAnswerWithPolicy } from './polling/auto-yes-resolver';
 import {
   getSessionAutoYesPolicy,
   getSessionAutoYesPolicyEntry,
@@ -614,15 +613,22 @@ function logIfWithheldForWantOfReceipt(
   // still up. Re-stamped here on every tick the dialog stays — only while it
   // still holds under this tick's evaluation — and kept over a `no-hook-receipt`
   // for it: it is the more exact reason.
-  const refreshed = refreshEpisodeSuppression(
-    worktreeId,
-    instanceId,
-    verdict,
-    ungated.promptData,
-    resolution,
-    policy?.mode ?? null,
-  );
-  if (!resolution.suppressedBy && (verdict.cause === 'answered' || refreshed)) return;
+  const keptPartialAnswer = refreshEpisodeSuppression(worktreeId, instanceId, verdict, resolution);
+  // Issue #3796 review D: a contract that withholds the prompt now is published
+  // whatever was recorded before — none at all (the window closed before the
+  // tick could read it, or an ended contract's record was dropped and a new one
+  // withholds it again) or another reason. Without it `cmate wait` read no
+  // reason and held the prompt as one Auto-Yes was answering. Only a partial
+  // answer still on screen comes first, as it does on the tick (step 2.5).
+  if (resolution.suppressedBy && !keptPartialAnswer) {
+    recordPolicySuppression(worktreeId, 'antigravity', instanceId, {
+      reason: resolution.suppressedBy,
+      mode: policy?.mode ?? null,
+      promptType: ungated.promptData.type,
+      ...(resolution.pattern !== undefined ? { pattern: resolution.pattern } : {}),
+    });
+  }
+  if (!resolution.suppressedBy && (verdict.cause === 'answered' || keptPartialAnswer)) return;
 
   const lastLoggedAt = withheldNoReceiptLoggedAt.get(compositeKey);
   const logDue = lastLoggedAt === undefined || now - lastLoggedAt >= WITHHELD_NO_RECEIPT_LOG_INTERVAL_MS;
@@ -665,25 +671,23 @@ function logIfWithheldForWantOfReceipt(
  * episode current while the dialog it accepted (`answered` / `outlived`) is
  * still up. Only a record made since the dialog was first read, and never the
  * receipt gate's own `no-hook-receipt` (the caller records that itself). A
- * record is re-stamped only while its reason still holds NOW:
+ * record is kept only while its reason still holds NOW:
  *
  * - `partial-answer` remembers an event: it holds for as long as the dialog
- *   the keys went to stays up (this episode);
+ *   the keys went to stays up (this episode), and is re-stamped here;
  * - a contract reason is the contract's verdict on the prompt, re-evaluated on
- *   every tick (`resolution`): the same verdict is re-stamped, another verdict
- *   replaces it, and no verdict (the contract ended, or now answers it) drops
- *   the record — the dialog is then `answered` / `outlived` like any other;
+ *   every tick (`resolution`): no verdict (the contract ended, or now answers
+ *   it) drops the record — the dialog is then `answered` / `outlived` like any
+ *   other. A verdict is recorded by the caller (review D), whatever was here;
  * - any other reason is left as it was recorded.
  *
- * @returns true when a record that still holds was re-stamped or replaced
+ * @returns true when a `partial-answer` that still holds was re-stamped
  */
 function refreshEpisodeSuppression(
   worktreeId: string,
   instanceId: string | undefined,
   verdict: AntigravityReceiptVerdict,
-  promptData: PromptData,
   resolution: ReturnType<typeof resolveAutoAnswerWithPolicy>,
-  mode: AutoYesMode | null,
 ): boolean {
   if (verdict.cause !== 'answered' && verdict.cause !== 'outlived') return false;
   const own = getLastPolicySuppression(worktreeId, 'antigravity', instanceId);
@@ -699,18 +703,10 @@ function refreshEpisodeSuppression(
     recordPolicySuppression(worktreeId, 'antigravity', instanceId, suppression);
     return true;
   }
-  if (!CONTRACT_SUPPRESSION_REASONS.has(own.reason)) return false;
-  if (!resolution.suppressedBy) {
+  if (CONTRACT_SUPPRESSION_REASONS.has(own.reason) && !resolution.suppressedBy) {
     forgetPolicySuppression(worktreeId, 'antigravity', instanceId);
-    return false;
   }
-  recordPolicySuppression(worktreeId, 'antigravity', instanceId, {
-    reason: resolution.suppressedBy,
-    mode,
-    promptType: promptData.type,
-    ...(resolution.pattern !== undefined ? { pattern: resolution.pattern } : {}),
-  });
-  return true;
+  return false;
 }
 
 /**
@@ -742,7 +738,8 @@ function noteAnswerSent(
 /**
  * Issue #3796 review: the agy episode a send is about to go to, read before
  * its first await; null for other tools. Given back to {@link noteAnswerSent}
- * when the send was cut short, so that only that episode is marked — the same
+ * however the send came back — whole, failed or cut short (review E) — so that
+ * only that episode is marked — the same
  * idea as the Enter record's generation check in `tryEnterFallback`.
  */
 function receiptEpisodeOfSend(
@@ -988,6 +985,8 @@ async function tryEnterFallback(
   } finally {
     invalidateCache(sessionName);
   }
+  // Issue #3796 review E: the Enter is out — for the episode it began for only.
+  noteAnswerSent(cliToolId, worktreeId, instanceId, false, receiptEpisode);
 
   // Issue #3706: the Enter is out, but the per-screen record is the CURRENT
   // session's: when the poller was stopped (the record was forgotten with it)
@@ -1360,7 +1359,6 @@ export async function detectAndRespondToPrompt(
       if (!(await tryEnterFallback(judged, promptDetection, notOurs.dialogGate, rawOutput, generation))) {
         return 'no_answer';
       }
-      noteAnswerSent(cliToolId, worktreeId, instanceId);
       return 'responded';
     }
 
@@ -1442,7 +1440,8 @@ export async function detectAndRespondToPrompt(
     }
     sendInFlight = false;
     settleSendAttempt(attempt, false);
-    noteAnswerSent(cliToolId, worktreeId, instanceId);
+    // Issue #3796 review E: the episode the send began for, as on the failure side.
+    noteAnswerSent(cliToolId, worktreeId, instanceId, false, receiptEpisode);
 
     // 6., 7. The answer reached tmux: see `finishAnsweredPrompt`.
     await finishAnsweredPrompt(judged, promptDetection, answer, generation);
