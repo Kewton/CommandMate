@@ -69,7 +69,7 @@ import type { WaitingKind } from '@/lib/session/waiting-kind';
 import { getPushEscalationSettings } from './escalation-settings';
 import {
   AUTO_YES_ANSWER_GRACE_MS,
-  autoYesHoldStartedAt,
+  autoYesHoldEndsAt,
   forgetAutoYesHold,
   decideAndLogPromptPush,
   isPromptPushSuppressed,
@@ -263,13 +263,16 @@ function holdForAutoYesAnswer(wait: PendingWait, now: number): void {
   const key = buildCompositeKey(wait.worktreeId, wait.cliToolId, wait.instanceId);
   const existing = answerGraceTimers.get(key);
   if (existing !== undefined) clearTimeout(existing);
-  // From the gate's own origin, not `since` (Issue #3757 review); capped so a
-  // clock that went backwards cannot arm an overflowing timer.
-  const holdStartedAt = autoYesHoldStartedAt(
+  // From the gate's own origin, not `since` (Issue #3757 review), and past the
+  // poller's session-wait tick (Issue #3791). Capped at the grace, so a clock
+  // that went backwards cannot arm an overflowing timer, and a longer hold is
+  // asked about again every grace: a poller stopped meanwhile ends it then
+  // rather than at a tick that will not come.
+  const holdEndsAt = autoYesHoldEndsAt(
     { worktreeId: wait.worktreeId, cliToolId: wait.cliToolId, instanceId: wait.instanceId, waitingSince: wait.since },
     now,
   );
-  const delay = Math.min(AUTO_YES_ANSWER_GRACE_MS, Math.max(0, holdStartedAt + AUTO_YES_ANSWER_GRACE_MS - now));
+  const delay = Math.min(AUTO_YES_ANSWER_GRACE_MS, Math.max(0, holdEndsAt - now));
   const timer = setTimeout(() => {
     answerGraceTimers.delete(key);
     releaseAutoYesHold(key, wait.since);

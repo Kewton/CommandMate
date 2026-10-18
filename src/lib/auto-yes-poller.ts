@@ -1462,7 +1462,7 @@ async function pollAutoYes(
         pollerState!.waitingForSession = true;
         logger.info('poller:waiting-for-session', { worktreeId, cliToolId, instanceId });
       }
-      scheduleNextPoll(generation, MAX_BACKOFF_MS);
+      scheduleNextPoll(generation, MAX_BACKOFF_MS, { sessionWait: true });
       return;
     }
     incrementErrorCount(compositeKey, generation.pollerState);
@@ -1499,12 +1499,19 @@ async function isSessionMissing(
  *
  * @param generation - The tick's generation
  * @param overrideInterval - Optional override for the next poll delay
+ * @param options.sessionWait - The tick waits for a session to appear (Issue #3791)
  */
-function scheduleNextPoll(generation: AutoYesTickGeneration, overrideInterval?: number): void {
+function scheduleNextPoll(
+  generation: AutoYesTickGeneration,
+  overrideInterval?: number,
+  options: { sessionWait?: boolean } = {},
+): void {
   if (!isPollerCurrent(generation)) return;
   const { worktreeId, cliToolId, instanceId, pollerState } = generation;
 
   const interval = Math.max(overrideInterval ?? pollerState.currentInterval, POLLING_INTERVAL_MS);
+  // Issue #3791: only the session wait's tick is one the push gate waits for.
+  pollerState.sessionWaitTickAt = options.sessionWait === true ? Date.now() + interval : undefined;
   pollerState.timerId = setTimeout(() => {
     void pollAutoYes(worktreeId, cliToolId, instanceId, pollerState);
   }, interval);
