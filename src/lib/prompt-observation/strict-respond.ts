@@ -366,7 +366,7 @@ async function checkBeforeSending(
     binding,
     selectedIndex: screen.selectedPosition - 1,
     targetIndex: choice.index,
-    exiting: isExitingStrictAnswer(screen.kind, choice.index + 1, labels.length),
+    exiting: isExitingStrictAnswer(screen.kind, choice.index + 1, labels),
   };
 }
 

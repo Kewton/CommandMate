@@ -750,7 +750,7 @@ describe('[#3788] a shell in front is session-ended only after the answer that e
     const screen = observe().screen;
     expect(screen?.kind).toBe('antigravity-trust');
     const exiting = EXITING_STRICT_ANSWERS['antigravity-trust'];
-    expect(exiting).toEqual({ position: 2, optionCount: 2 });
+    expect(exiting).toEqual({ position: 2, optionCount: 2, label: 'No, exit' });
     expect(screen?.options.length).toBe(exiting?.optionCount);
     expect(screen?.options[(exiting?.position ?? 0) - 1].label).toBe('No, exit');
     // The permission dialog has no exiting answer.
@@ -761,6 +761,42 @@ describe('[#3788] a shell in front is session-ended only after the answer that e
     const result = await respondStrictly(request({ answer: 'No' }), deps());
     expect(result).toMatchObject({ code: 0, reason: null, outcome: 'session-ended' });
     expect(result.message).toBe('Answered: the session ended (agy exits on "No, exit").');
+  });
+
+  it('a trust screen drawn in the other order: "Yes" at position 2, then a shell in front, stays exit 41', async () => {
+    const reversed = TRUST.replace('> Yes, I trust this folder\n  No, exit', '> No, exit\n  Yes, I trust this folder');
+    const reversedOnYes = TRUST.replace('> Yes, I trust this folder\n  No, exit', '  No, exit\n> Yes, I trust this folder');
+    expect(reversed).not.toBe(TRUST);
+    pane.frame = reversed;
+    pane.onKey = (key, frame) => {
+      if (key === 'Down') return frame === reversed ? reversedOnYes : frame;
+      return agyFallsOverOnEnter(key, frame);
+    };
+    const screen = observe().screen;
+    expect(screen?.kind).toBe('antigravity-trust');
+    expect(screen?.options.map(option => option.label)).toEqual(['No, exit', 'Yes, I trust this folder']);
+
+    const result = await respondStrictly(request({ answer: 'Yes' }), deps());
+    expect(pane.keys).toEqual(['Down', 'Enter']);
+    expect(result).toMatchObject({ answer: { position: 2, label: 'Yes, I trust this folder' } });
+    expect(result).toMatchObject({ code: 41, reason: 'outcome_indeterminate', outcome: 'indeterminate' });
+  });
+
+  it('a trust screen with three options: "No, exit" at position 2, then a shell in front, stays exit 41', async () => {
+    const three = TRUST.replace('> Yes, I trust this folder\n  No, exit', '> Yes, I trust this folder\n  No, exit\n  Trust the parent folder');
+    const threeOnNo = TRUST.replace('> Yes, I trust this folder\n  No, exit', '  Yes, I trust this folder\n> No, exit\n  Trust the parent folder');
+    expect(three).not.toBe(TRUST);
+    pane.frame = three;
+    pane.onKey = (key, frame) => {
+      if (key === 'Down') return frame === three ? threeOnNo : frame;
+      return agyFallsOverOnEnter(key, frame);
+    };
+    expect(observe().screen?.options).toHaveLength(3);
+
+    const result = await respondStrictly(request({ answer: 'No' }), deps());
+    expect(pane.keys).toEqual(['Down', 'Enter']);
+    expect(result).toMatchObject({ answer: { position: 2, label: 'No, exit' } });
+    expect(result).toMatchObject({ code: 41, reason: 'outcome_indeterminate', outcome: 'indeterminate' });
   });
 
   it('"Yes" then a shell in front (agy fell over): stays exit 41 indeterminate', async () => {

@@ -93,9 +93,14 @@ export const UNNUMBERED_STRICT_RESPOND_KINDS: readonly StrictRespondKind[] = ['a
 /**
  * Per strict kind, the answer whose consequence is the agent exiting (Issue
  * #3788): its 1-based position, valid only on a screen that shows exactly
- * `optionCount` options. agy's trust screen offers `Yes, I trust this folder`
- * then `No, exit` (measured: `tests/fixtures/prompt-observation-3755/antigravity-trust.txt`,
+ * `optionCount` options AND whose row at that position reads `label`. agy's
+ * trust screen offers `Yes, I trust this folder` then `No, exit` (measured:
+ * `tests/fixtures/prompt-observation-3755/antigravity-trust.txt`,
  * `antigravity-live-2364/trust-dialog.txt`), and agy exits on the second.
+ *
+ * The three conditions only narrow: a screen drawn in another order, with
+ * another number of rows, or with another wording has no exiting answer, and
+ * its outcome stays `indeterminate` (exit 41).
  *
  * Only after such an answer may a shell back in front of the pane be read as
  * the session having ended: after any other answer it is the agent falling
@@ -103,13 +108,20 @@ export const UNNUMBERED_STRICT_RESPOND_KINDS: readonly StrictRespondKind[] = ['a
  * absent here has no exiting answer.
  */
 export const EXITING_STRICT_ANSWERS: Readonly<
-  Partial<Record<StrictRespondKind, { readonly position: number; readonly optionCount: number }>>
+  Partial<Record<StrictRespondKind, { readonly position: number; readonly optionCount: number; readonly label: string }>>
 > = {
-  'antigravity-trust': { position: 2, optionCount: 2 },
+  // eslint-disable-next-line no-restricted-syntax -- agy's drawn option row, matched against the screen, not display text
+  'antigravity-trust': { position: 2, optionCount: 2, label: 'No, exit' },
 };
 
-/** Whether answering option `position` (1-based) of a `kind` screen showing `optionCount` options exits the agent. */
-export function isExitingStrictAnswer(kind: StrictRespondKind, position: number, optionCount: number): boolean {
+/**
+ * Whether answering option `position` (1-based) of a `kind` screen showing
+ * `options` (labels in draw order) exits the agent: the declared position, the
+ * declared number of options, and the declared label at that position (runs of
+ * spaces folded, ends trimmed; case kept).
+ */
+export function isExitingStrictAnswer(kind: StrictRespondKind, position: number, options: readonly string[]): boolean {
   const exiting = EXITING_STRICT_ANSWERS[kind];
-  return exiting !== undefined && exiting.position === position && exiting.optionCount === optionCount;
+  if (exiting === undefined || exiting.position !== position || exiting.optionCount !== options.length) return false;
+  return options[position - 1].replace(/\s+/g, ' ').trim() === exiting.label;
 }
