@@ -245,17 +245,32 @@ export function endAntigravityFrameRead(
  * pane, and the receipt is spent either way. Without it such a dialog stayed
  * `answered` (silent) for as long as it stayed up. Starting the grace only
  * leads to `outlived`, which withholds: nothing is answered because of it.
+ *
+ * @param options.forReceiptAt - The episode the send was for
+ *   ({@link getAntigravityAcceptedReceiptAt} read when it began). Given, only
+ *   that episode is marked: a send that comes back after a stop → enable, when
+ *   the successor already accepted a dialog on a newer receipt, must not start
+ *   that dialog's grace or give it its own "cut short" (Issue #3796 review).
  */
 export function markAntigravityAnswerSent(
   worktreeId: string,
   instanceId: string | undefined,
   now: number = Date.now(),
-  options: { interrupted?: boolean } = {},
+  options: { interrupted?: boolean; forReceiptAt?: number | null } = {},
 ): void {
   const o = existingObservation(buildCompositeKey(worktreeId, 'antigravity', instanceId));
   if (!o || o.acceptedReceiptAt === null) return;
+  if (options.forReceiptAt !== undefined && options.forReceiptAt !== o.acceptedReceiptAt) return;
   o.answerSentAt = now;
   o.answerInterrupted = options.interrupted === true;
+}
+
+/**
+ * The receipt (`at`) the current episode was accepted on, or null when none
+ * (Issue #3796): what identifies the episode a send is for.
+ */
+export function getAntigravityAcceptedReceiptAt(worktreeId: string, instanceId: string | undefined): number | null {
+  return existingObservation(buildCompositeKey(worktreeId, 'antigravity', instanceId))?.acceptedReceiptAt ?? null;
 }
 
 /**

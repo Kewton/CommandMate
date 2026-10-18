@@ -225,3 +225,51 @@ describe('[#3796] the hold follows a session-wait tick brought forward', () => {
     expect(autoYesHoldEndsAt(gate, T0 + 30_000)).toBe(T0 + AUTO_YES_ANSWER_GRACE_MS);
   });
 });
+
+describe('[#3796 review B] an earlier tick once adopted stays on the hold', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] });
+    vi.setSystemTime(T0);
+    clearAutoYesHolds();
+    dropPoller();
+  });
+
+  afterEach(() => {
+    clearAutoYesHolds();
+    dropPoller();
+  });
+
+  it('negative: woken to 10 s, then that tick fails and schedules an ordinary one — the end stays at 10 s + two ticks', () => {
+    setAutoYesEnabled(WT, 'claude', true);
+    const poller = putPoller({ sessionWaitTickAt: T0 + SESSION_TICK });
+    expect(autoYesHoldEndsAt(gate, T0)).toBe(T0 + SESSION_TICK + AUTO_YES_ANSWER_AFTER_TICK_MS);
+
+    poller.sessionWaitTickAt = T0 + 10_000;
+    expect(autoYesHoldEndsAt(gate, T0 + 1_000)).toBe(T0 + 10_000 + AUTO_YES_ANSWER_AFTER_TICK_MS);
+
+    // The 10 s tick's capture failed: an error backoff, no session-wait tick
+    // pending and no session seen. Before the review fix the end went back to 64 s.
+    poller.sessionWaitTickAt = undefined;
+    expect(autoYesHoldEndsAt(gate, T0 + 11_000)).toBe(T0 + 10_000 + AUTO_YES_ANSWER_AFTER_TICK_MS);
+    // ... nor does a session wait scheduled again move it out.
+    poller.sessionWaitTickAt = T0 + 11_000 + SESSION_TICK;
+    expect(autoYesHoldEndsAt(gate, T0 + 12_000)).toBe(T0 + 10_000 + AUTO_YES_ANSWER_AFTER_TICK_MS);
+  });
+
+  it('negative: the woken tick ran (and failed) before the gate was asked again — its start counts', () => {
+    setAutoYesEnabled(WT, 'claude', true);
+    const poller = putPoller({ sessionWaitTickAt: T0 + SESSION_TICK });
+    autoYesHoldEndsAt(gate, T0);
+    poller.sessionWaitTickAt = undefined;
+    poller.sessionWaitTickRanAt = T0 + 10_000;
+    expect(autoYesHoldEndsAt(gate, T0 + 11_000)).toBe(T0 + 10_000 + AUTO_YES_ANSWER_AFTER_TICK_MS);
+  });
+
+  it('positive: nothing brought forward — the tick read when the hold began, as in #3791', () => {
+    setAutoYesEnabled(WT, 'claude', true);
+    const poller = putPoller({ sessionWaitTickAt: T0 + SESSION_TICK });
+    autoYesHoldEndsAt(gate, T0);
+    poller.sessionWaitTickRanAt = T0 - 1; // a session-wait tick before the hold began
+    expect(autoYesHoldEndsAt(gate, T0 + 5_000)).toBe(T0 + SESSION_TICK + AUTO_YES_ANSWER_AFTER_TICK_MS);
+  });
+});

@@ -106,6 +106,20 @@ describe('[#3796] 3: the session\'s creation wakes a poller waiting for it', () 
     expect(poller()?.sessionWaitTickAt).toBeUndefined();
   });
 
+  it('review B: the woken tick records that it ran even when its capture fails', async () => {
+    await startWaitingForSession();
+    expect(poller()?.sessionWaitTickRanAt).toBeUndefined(); // the first tick was not a session wait's
+    // The session is there, but the capture keeps failing (presence `present`).
+    presence = 'present';
+    captureSessionOutput.mockRejectedValueOnce(new Error('capture failed'));
+    notifyTmuxSessionCreated(SESSION);
+    const wokenAt = Date.now() + POLLING_INTERVAL_MS;
+    await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS);
+    expect(poller()?.consecutiveErrors).toBe(1);
+    expect(poller()?.sessionWaitTickAt).toBeUndefined();
+    expect(poller()?.sessionWaitTickRanAt).toBe(wokenAt);
+  });
+
   it('one chain only: after the wake the poller ticks once per interval', async () => {
     await startWaitingForSession();
     presence = 'present';

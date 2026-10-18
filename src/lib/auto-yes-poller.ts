@@ -20,11 +20,13 @@ import {
   ANTIGRAVITY_ANSWERED_DIALOG_GRACE_MS,
   getAntigravityReceiptVerdict,
   judgeAntigravityPermissionReceipt,
+  getAntigravityAcceptedReceiptAt,
   markAntigravityAnswerSent,
   type AntigravityReceiptVerdict,
 } from './polling/antigravity-receipt-episodes';
 import { ANTIGRAVITY_PERMISSION_RECEIPT_WINDOW_MS } from './polling/antigravity-permission-receipts';
-import { resolveAutoAnswerWithPolicy } from './polling/auto-yes-resolver';
+import { resolveAutoAnswerWithPolicy, type AutoYesMode } from './polling/auto-yes-resolver';
+import type { PromptData } from '@/types/models';
 import {
   getSessionAutoYesPolicy,
   getSessionAutoYesPolicyEntry,
@@ -90,10 +92,15 @@ import {
 } from './auto-yes-state';
 import { getOrInitGlobal } from './global-state';
 import {
+  CONTRACT_SUPPRESSION_REASONS,
   NO_HOOK_RECEIPT_SUPPRESSION_REASON,
   PARTIAL_ANSWER_SUPPRESSION_REASON,
 } from './polling/auto-yes-suppression-reason';
-import { getLastPolicySuppression, recordPolicySuppression } from './polling/auto-yes-suppression-state';
+import {
+  forgetPolicySuppression,
+  getLastPolicySuppression,
+  recordPolicySuppression,
+} from './polling/auto-yes-suppression-state';
 import {
   beginSendAttempt,
   clearPartialAnswers,
@@ -604,9 +611,17 @@ function logIfWithheldForWantOfReceipt(
   // the contract, …) while it could still read it inside the window was not
   // re-stamped once the window closed — the gated reading stopped seeing the
   // prompt — so `cmate wait` dropped it as stale a minute later with the dialog
-  // still up. Re-stamped here on every tick the dialog stays, and kept over a
-  // `no-hook-receipt` for it: it is the more exact reason.
-  const refreshed = refreshEpisodeSuppression(worktreeId, instanceId, verdict);
+  // still up. Re-stamped here on every tick the dialog stays — only while it
+  // still holds under this tick's evaluation — and kept over a `no-hook-receipt`
+  // for it: it is the more exact reason.
+  const refreshed = refreshEpisodeSuppression(
+    worktreeId,
+    instanceId,
+    verdict,
+    ungated.promptData,
+    resolution,
+    policy?.mode ?? null,
+  );
   if (!resolution.suppressedBy && (verdict.cause === 'answered' || refreshed)) return;
 
   const lastLoggedAt = withheldNoReceiptLoggedAt.get(compositeKey);
@@ -646,25 +661,55 @@ function logIfWithheldForWantOfReceipt(
 }
 
 /**
- * Issue #3796: re-stamp the suppression the poller recorded during this dialog's
- * episode, while the dialog it accepted (`answered` / `outlived`) is still up.
- * Only a record made since the dialog was first read, and not one of the receipt
- * gate's own `no-hook-receipt` lines (the caller records those itself).
+ * Issue #3796: keep the suppression the poller recorded during this dialog's
+ * episode current while the dialog it accepted (`answered` / `outlived`) is
+ * still up. Only a record made since the dialog was first read, and never the
+ * receipt gate's own `no-hook-receipt` (the caller records that itself). A
+ * record is re-stamped only while its reason still holds NOW:
  *
- * @returns true when a record was re-stamped
+ * - `partial-answer` remembers an event: it holds for as long as the dialog
+ *   the keys went to stays up (this episode);
+ * - a contract reason is the contract's verdict on the prompt, re-evaluated on
+ *   every tick (`resolution`): the same verdict is re-stamped, another verdict
+ *   replaces it, and no verdict (the contract ended, or now answers it) drops
+ *   the record — the dialog is then `answered` / `outlived` like any other;
+ * - any other reason is left as it was recorded.
+ *
+ * @returns true when a record that still holds was re-stamped or replaced
  */
 function refreshEpisodeSuppression(
   worktreeId: string,
   instanceId: string | undefined,
   verdict: AntigravityReceiptVerdict,
+  promptData: PromptData,
+  resolution: ReturnType<typeof resolveAutoAnswerWithPolicy>,
+  mode: AutoYesMode | null,
 ): boolean {
   if (verdict.cause !== 'answered' && verdict.cause !== 'outlived') return false;
   const own = getLastPolicySuppression(worktreeId, 'antigravity', instanceId);
   if (own === null || own.reason === NO_HOOK_RECEIPT_SUPPRESSION_REASON || !(own.at >= verdict.firstSeenAt)) {
     return false;
   }
-  const { at: _recordedAt, ...suppression } = own;
-  recordPolicySuppression(worktreeId, 'antigravity', instanceId, suppression);
+  if (own.reason === PARTIAL_ANSWER_SUPPRESSION_REASON) {
+    // The memory is the episode's: the dialog the keys went to is still the one
+    // up (same episode, accepted on the same receipt). Not `getPartialAnswer`:
+    // the tick forgets it as soon as the gated reading stops seeing the prompt,
+    // which past the window is every tick.
+    const { at: _recordedAt, ...suppression } = own;
+    recordPolicySuppression(worktreeId, 'antigravity', instanceId, suppression);
+    return true;
+  }
+  if (!CONTRACT_SUPPRESSION_REASONS.has(own.reason)) return false;
+  if (!resolution.suppressedBy) {
+    forgetPolicySuppression(worktreeId, 'antigravity', instanceId);
+    return false;
+  }
+  recordPolicySuppression(worktreeId, 'antigravity', instanceId, {
+    reason: resolution.suppressedBy,
+    mode,
+    promptType: promptData.type,
+    ...(resolution.pattern !== undefined ? { pattern: resolution.pattern } : {}),
+  });
   return true;
 }
 
@@ -685,8 +730,27 @@ function noteAnswerSent(
   worktreeId: string,
   instanceId: string | undefined,
   interrupted = false,
+  forReceiptAt?: number | null,
 ): void {
-  if (cliToolId === 'antigravity') markAntigravityAnswerSent(worktreeId, instanceId, Date.now(), { interrupted });
+  if (cliToolId !== 'antigravity') return;
+  markAntigravityAnswerSent(worktreeId, instanceId, Date.now(), {
+    interrupted,
+    ...(forReceiptAt !== undefined ? { forReceiptAt } : {}),
+  });
+}
+
+/**
+ * Issue #3796 review: the agy episode a send is about to go to, read before
+ * its first await; null for other tools. Given back to {@link noteAnswerSent}
+ * when the send was cut short, so that only that episode is marked — the same
+ * idea as the Enter record's generation check in `tryEnterFallback`.
+ */
+function receiptEpisodeOfSend(
+  cliToolId: CLIToolType,
+  worktreeId: string,
+  instanceId: string | undefined,
+): number | null {
+  return cliToolId === 'antigravity' ? getAntigravityAcceptedReceiptAt(worktreeId, instanceId) : null;
 }
 
 /**
@@ -914,11 +978,12 @@ async function tryEnterFallback(
     return false;
   }
 
+  const receiptEpisode = receiptEpisodeOfSend(cliToolId, worktreeId, instanceId);
   try {
     await sendSpecialKeys(sessionName, ['Enter']);
   } catch (error) {
     // Issue #3796: the Enter may or may not have reached the pane.
-    noteAnswerSent(cliToolId, worktreeId, instanceId, true);
+    noteAnswerSent(cliToolId, worktreeId, instanceId, true, receiptEpisode);
     throw error;
   } finally {
     invalidateCache(sessionName);
@@ -1118,6 +1183,7 @@ export async function detectAndRespondToPrompt(
   // Issue #3796: `sendPromptAnswer` began and has not returned — a throw now cut
   // the send short, and the agy receipt gate is told so (`noteAnswerSent`).
   let sendInFlight = false;
+  let receiptEpisode: number | null = null;
   try {
     // 1. Detect prompt.
     //
@@ -1360,6 +1426,7 @@ export async function detectAndRespondToPrompt(
     }
 
     attempt = beginSendAttempt(compositeKey, screenKey, generation?.sessionEpoch ?? epoch);
+    receiptEpisode = receiptEpisodeOfSend(cliToolId, worktreeId, instanceId);
     sendInFlight = true;
     try {
       await sendPromptAnswer({
@@ -1391,12 +1458,12 @@ export async function detectAndRespondToPrompt(
       // answer again over them (step 2.5). Recorded under the attempt's key as
       // it is now — the new one when a worktree ID move carried it (#3713).
       if (attempt !== null) settleSendAttempt(attempt, keysSent === true);
-      if (sendInFlight) noteAnswerSent(cliToolId, worktreeId, instanceId, true);
+      if (sendInFlight) noteAnswerSent(cliToolId, worktreeId, instanceId, true, receiptEpisode);
       logger.info('poller:auto-yes-answer-abandoned', { worktreeId, cliToolId, instanceId, keysSent });
       return 'no_answer';
     }
     if (attempt !== null) settleSendAttempt(attempt, false);
-    if (sendInFlight) noteAnswerSent(cliToolId, worktreeId, instanceId, true);
+    if (sendInFlight) noteAnswerSent(cliToolId, worktreeId, instanceId, true, receiptEpisode);
     incrementErrorCount(compositeKey, generation?.pollerState);
     logger.warn('poller:detect-respond-error', { worktreeId, cliToolId, instanceId });
     return 'error';
@@ -1441,6 +1508,9 @@ async function pollAutoYes(
     sessionEpoch: getEnterFallbackSessionEpoch(compositeKey),
     startedAt: Date.now(),
   };
+  // Issue #3796: this is the session wait's tick (it was scheduled as one) —
+  // recorded before anything can fail, for the push gate.
+  if (pollerState!.sessionWaitTickAt !== undefined) pollerState!.sessionWaitTickRanAt = generation.startedAt;
 
   try {
     // 2. Capture and clean output

@@ -212,16 +212,16 @@ function pendingSessionWaitTick(key: string, now: number): AutoYesHoldStart['ses
  * Issue #3796: when the session wait's tick the hold counts on actually comes.
  * The tick read when the hold began, brought forward when the poller ticked
  * early — its session was created, and it rescheduled the tick a poll interval
- * away (`sessionWaitTickAt`), or already ran it (`sessionAppearedAt`). Only
+ * away (`sessionWaitTickAt`), or already ran it (`sessionWaitTickRanAt`,
+ * `sessionAppearedAt`) — only times since the hold began count. Only
  * ever earlier: a session wait scheduled after the hold began does not extend
  * it (#3791).
  */
 function effectiveSessionWaitTickAt(tick: NonNullable<AutoYesHoldStart['sessionWaitTick']>): number {
   let at = tick.at;
-  const pending = tick.poller.sessionWaitTickAt;
-  if (pending !== undefined && pending >= tick.heldAt && pending < at) at = pending;
-  const appeared = tick.poller.sessionAppearedAt;
-  if (appeared !== undefined && appeared >= tick.heldAt && appeared < at) at = appeared;
+  for (const t of [tick.poller.sessionWaitTickAt, tick.poller.sessionWaitTickRanAt, tick.poller.sessionAppearedAt]) {
+    if (t !== undefined && t >= tick.heldAt && t < at) at = t;
+  }
   return at;
 }
 
@@ -243,7 +243,11 @@ export function autoYesHoldEndsAt(
   const graceEndsAt = startedAt + AUTO_YES_ANSWER_GRACE_MS;
   // A poller stopped or replaced since (disable, off → on) will not tick.
   if (tick === undefined || globalThis.__autoYesPollerStates?.get(key) !== tick.poller) return graceEndsAt;
-  return Math.max(graceEndsAt, effectiveSessionWaitTickAt(tick) + AUTO_YES_ANSWER_AFTER_TICK_MS);
+  // Kept on the hold: an earlier tick once adopted is not lost when the poller
+  // later reschedules (an ordinary tick after a failed capture, a new session
+  // wait) — the hold never moves back out.
+  tick.at = effectiveSessionWaitTickAt(tick);
+  return Math.max(graceEndsAt, tick.at + AUTO_YES_ANSWER_AFTER_TICK_MS);
 }
 
 /** A hold older than this is dropped (Issue #3770): its episode is long over. */

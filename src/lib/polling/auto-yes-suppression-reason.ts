@@ -75,6 +75,18 @@ export type AutoYesSuppressionReason =
    */
   | 'no-hook-receipt';
 
+/**
+ * Issue #3796: the reasons `resolveAutoAnswerWithPolicy` returns — the contract's
+ * verdict on the prompt as it is NOW, which a later tick re-evaluates, as
+ * opposed to a reason that remembers an event (`partial-answer`).
+ */
+export const CONTRACT_SUPPRESSION_REASONS: ReadonlySet<AutoYesSuppressionReason> = new Set<AutoYesSuppressionReason>([
+  'mode-off',
+  'deny-pattern',
+  'deny-pattern-unusable',
+  'type-not-allowed',
+]);
+
 /** Issue #3706: the reason the poller records for an answer stopped part-way. */
 export const PARTIAL_ANSWER_SUPPRESSION_REASON = 'partial-answer' satisfies AutoYesSuppressionReason;
 

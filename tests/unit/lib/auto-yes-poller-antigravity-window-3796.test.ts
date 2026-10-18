@@ -88,6 +88,10 @@ import {
   setAutoYesEnabled,
 } from '@/lib/auto-yes-state';
 import { getEnterFallbackSessionEpoch } from '@/lib/polling/auto-yes-enter-fallback-state';
+import { createTask, type Task } from '@/lib/db';
+// Fixtures place a task in a state directly; production writes go through applyTaskEvent.
+import { updateTaskStatus } from '@/lib/db/tasks-db';
+import { parseTaskContract } from '@/lib/tasks/contract-parser';
 
 const WORKTREE_ID = 'wt-3796';
 const FIXTURE_DIR = path.resolve(__dirname, '../../fixtures/antigravity-live-2364');
@@ -307,5 +311,111 @@ describe('[#3796] 2: a reason recorded inside the window stays fresh while its d
     expect(await tickAt(8_700, DIALOG)).toBe('no_answer');
     for (const ms of [13_700, 18_700, 23_700]) expect(await tickAt(ms, DIALOG)).toBe('no_prompt');
     expect(suppression()?.at).toBe(T0 - 30_000);
+  });
+});
+
+/** A running task for the agy primary instance whose contract carries `autoYes`. */
+function seedContract(autoYes: string): Task {
+  return createTask(db, {
+    worktreeId: WORKTREE_ID,
+    cliToolId: 'antigravity',
+    instanceId: null,
+    contractPath: '.commandmate/tasks/t.yaml',
+    contract: parseTaskContract(
+      `version: 1
+title: a task
+goal: do the thing
+scope:
+  allow: ["src/**"]
+${autoYes}`,
+      'task.yaml',
+    ),
+    status: 'running',
+  });
+}
+
+/** The task ends (or is replaced): the next policy read sees the change. */
+function endContract(task: Task): void {
+  updateTaskStatus(db, task.id, 'succeeded');
+  clearAutoYesPolicyCache();
+}
+
+describe('[#3796 review A] a contract reason is re-stamped only while the contract still gives it', () => {
+  /** `mode: off` withholds the dialog accepted at 5s; ticks every 5s from 10s keep it up past the window. */
+  async function modeOffRecordedInsideTheWindow(): Promise<Task> {
+    const task = seedContract("autoYes:\n  mode: 'off'\n");
+    receiptAt(0);
+    expect(await tickAt(3_000, IDLE)).toBe('no_prompt');
+    expect(await tickAt(5_000, DIALOG)).toBe('no_answer');
+    expect(suppression()).toMatchObject({ reason: 'mode-off', mode: 'off', at: T0 + 5_000 });
+    return task;
+  }
+
+  it('positive: the contract still withholds — re-stamped on every tick past the window', async () => {
+    await modeOffRecordedInsideTheWindow();
+    for (const ms of [10_000, 15_000, 20_000, 25_000, 30_000]) {
+      expect(await tickAt(ms, DIALOG)).toBe('no_prompt');
+      expect(suppression()).toMatchObject({ reason: 'mode-off', at: T0 + ms });
+    }
+    expect(sendPromptAnswer).not.toHaveBeenCalled();
+  });
+
+  it('negative: the contract ended — the old reason is not re-stamped; the record goes', async () => {
+    const task = await modeOffRecordedInsideTheWindow();
+    expect(await tickAt(10_000, DIALOG)).toBe('no_prompt');
+    endContract(task);
+    expect(await tickAt(15_000, DIALOG)).toBe('no_prompt');
+    // `wait` would otherwise read "withheld by contract policy" for another minute.
+    expect(suppression()).toBeNull();
+    for (const ms of [20_000, 25_000]) expect(await tickAt(ms, DIALOG)).toBe('no_prompt');
+    expect(suppression()).toBeNull();
+    // The receipt is spent: ending the contract does not make Auto-Yes answer the dialog.
+    expect(sendPromptAnswer).not.toHaveBeenCalled();
+  });
+
+  it('negative: the contract changed — the record takes the reason it gives now', async () => {
+    const task = await modeOffRecordedInsideTheWindow();
+    expect(await tickAt(10_000, DIALOG)).toBe('no_prompt');
+    endContract(task);
+    seedContract("autoYes:\n  mode: 'safe'\n");
+    expect(await tickAt(15_000, DIALOG)).toBe('no_prompt');
+    expect(suppression()).toMatchObject({ reason: 'type-not-allowed', mode: 'safe', at: T0 + 15_000 });
+    expect(sendPromptAnswer).not.toHaveBeenCalled();
+  });
+});
+
+describe('[#3796 review C] a send cut short marks only the episode it was sent for', () => {
+  it('negative: the send fails after a successor accepted a dialog on a newer receipt — that episode is left alone', async () => {
+    receiptAt(0);
+    expect(await tickAt(3_000, IDLE)).toBe('no_prompt');
+    sendPromptAnswer.mockImplementationOnce(async () => {
+      // While these keys are awaited: the dialog goes, a new receipt and a new
+      // dialog come, and the next read accepts it (another server's session, so
+      // nothing is sent to it).
+      expect(await tickAt(7_000, IDLE)).toBe('no_prompt');
+      receiptAt(8_000);
+      vi.mocked(checkWorktreeSessionOwnership).mockResolvedValueOnce({ verdict: 'foreign', sessionPath: '/elsewhere' });
+      expect(await tickAt(10_000, DIALOG)).toBe('no_answer');
+      throw new Error('send-keys failed');
+    });
+    expect(await tickAt(5_000, DIALOG)).toBe('error');
+
+    // From 17s, past the new receipt's window (8s + 8s): the dialog it accepted stays up.
+    for (const ms of [17_000, 22_000, 27_000, 32_000, 37_000]) expect(await tickAt(ms, DIALOG)).toBe('no_prompt');
+    // Before the review fix the old send's failure started this dialog's grace,
+    // and at 28s it read as an answer of ours cut short.
+    expect(suppression()).toBeNull();
+    expect(withheldLines()).toHaveLength(0);
+    expect(sendPromptAnswer).toHaveBeenCalledTimes(1);
+  });
+
+  it('positive: the same episode cut short still starts its grace (the failed-send case above)', async () => {
+    receiptAt(0);
+    expect(await tickAt(3_700, IDLE)).toBe('no_prompt');
+    sendPromptAnswer.mockRejectedValueOnce(new Error('send-keys failed'));
+    expect(await tickAt(8_700, DIALOG)).toBe('error');
+    for (const ms of [13_700, 18_700, 23_700]) expect(await tickAt(ms, DIALOG)).toBe('no_prompt');
+    expect(await tickAt(8_700 + ANTIGRAVITY_ANSWERED_DIALOG_GRACE_MS + 1, DIALOG)).toBe('no_prompt');
+    expect(withheldLines().at(-1)?.[1].hint).toContain('途中で送信が止まり');
   });
 });
