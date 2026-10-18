@@ -11,7 +11,7 @@ import { History, PanelRight } from 'lucide-react';
 import { FILE_PANEL_PANE_ID } from '@/hooks/useFilePanelState';
 import { Tooltip } from '@/components/common/Tooltip';
 
-export interface PanelVisibilityTogglesProps {
+export interface TerminalPanelVisibilityTogglesProps {
   historyVisible: boolean;
   toggleHistory: () => void;
   historySlotIds: string;
@@ -22,7 +22,7 @@ export interface PanelVisibilityTogglesProps {
   compactToggles: boolean;
 }
 
-export function PanelVisibilityToggles({
+export function TerminalPanelVisibilityToggles({
   historyVisible,
   toggleHistory,
   historySlotIds,
@@ -31,7 +31,7 @@ export function PanelVisibilityToggles({
   toggleFilePanel,
   openFileCount,
   compactToggles,
-}: PanelVisibilityTogglesProps) {
+}: TerminalPanelVisibilityTogglesProps) {
   const t = useTranslations('worktree');
   // [Issue #2307] Tooltip content mirrors the former native `title` text.
   const historyTooltip = `${

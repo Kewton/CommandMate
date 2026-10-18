@@ -75,7 +75,7 @@ import { PaneResizerWrapper } from './terminal-split-container/PaneResizerWrappe
 import { gridColumnOf, gridRowOf, gridTemplateStyle } from './terminal-split-container/grid-layout';
 import { ActionBarSessionSlot } from './terminal-split-container/ActionBarSessionSlot';
 import { SplitLayoutOps } from './terminal-split-container/SplitLayoutOps';
-import { PanelVisibilityToggles } from './terminal-split-container/PanelVisibilityToggles';
+import { TerminalPanelVisibilityToggles } from './terminal-split-container/TerminalPanelVisibilityToggles';
 import { useSplitFocusAndPlacement } from './terminal-split-container/useSplitFocusAndPlacement';
 import { useSplitResizeHandlers } from './terminal-split-container/useSplitResizeHandlers';
 import { useActionBarItemsHost } from './terminal-split-container/useActionBarItemsHost';
@@ -558,7 +558,7 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
           />
         )}
 
-        <PanelVisibilityToggles
+        <TerminalPanelVisibilityToggles
           historyVisible={historyVisible}
           toggleHistory={toggleHistory}
           historySlotIds={historySlotIds}
