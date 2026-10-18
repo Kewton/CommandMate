@@ -17,6 +17,7 @@ import { detectPromptOnCleanFrame } from './polling/response-checker';
 import {
   beginAntigravityFrameRead,
   endAntigravityFrameRead,
+  ANTIGRAVITY_ANSWERED_DIALOG_GRACE_MS,
   getAntigravityReceiptVerdict,
   judgeAntigravityPermissionReceipt,
   type AntigravityReceiptVerdict,
@@ -593,6 +594,8 @@ function logIfWithheldForWantOfReceipt(
   // Issue #3767: `answered` is the dialog the gate already let through on this
   // receipt, still up past the window. Unless the contract withheld it, that is
   // not a missing receipt: neither recorded nor logged, nor counted for the limit.
+  // Issue #3789: only within the grace — past it the cause is `outlived`, which
+  // is recorded and logged like the others, so the stop is not a silent one.
   if (!resolution.suppressedBy && verdict.cause === 'answered') return;
 
   const lastLoggedAt = withheldNoReceiptLoggedAt.get(compositeKey);
@@ -650,6 +653,8 @@ export function noHookReceiptHint(verdict: AntigravityReceiptVerdict, now: numbe
       return '確認は最後の受信より前から画面に出ていた（引用か別の確認）ため答えなかった。人が答える';
     case 'used':
       return '最後の受信は直前の確認に使い済み。この確認に対する受信は無いため答えなかった。人が答える';
+    case 'outlived':
+      return `最後の受信で答えた確認（またはそれと入れ替わった確認）が、答えてから ${ANTIGRAVITY_ANSWERED_DIALOG_GRACE_MS / 1000} 秒を過ぎても画面に残っている。答えが届かなかったか、新しい受信の無い確認のため、もう一度は答えない。人が答える（auto-yes --disable → prompt --json → respond --expect-screen）`;
     default:
       return 'hook の受信記録が直近に無いため Auto-Yes は答えなかった。~/.gemini/config/hooks.json の向き先（#2622）を確認';
   }
