@@ -15,7 +15,7 @@ import type Database from 'better-sqlite3';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { createLogger } from '@/lib/logger';
 import { STATUS_CAPTURE_LINES } from '@/config/status-capture-config';
-import { captureSessionOutputFresh, sendSessionAnswerKey } from '@/lib/session/cli-session';
+import { captureSessionOutputFresh, readSessionPaneCommand, sendSessionAnswerKey } from '@/lib/session/cli-session';
 import { buildCurrentOutput } from '@/lib/session/current-output-builder';
 import { observeSession } from '@/lib/prompt-observation/session';
 import type { StrictRespondDeps, StrictScreenRead } from '@/lib/prompt-observation/strict-respond';
@@ -85,6 +85,8 @@ export function createStrictRespondDeps(db: Database.Database, target: StrictAns
     sleep: ms => new Promise(resolve => setTimeout(resolve, ms)),
     now: () => Date.now(),
     autoYesActive: () => getAutoYesState(worktreeId, cliToolId, instanceId)?.enabled === true,
+    // Issue #3788: a shell in front after the Enter is agy having exited.
+    paneCommand: () => readSessionPaneCommand(worktreeId, cliToolId, instanceId),
     startup: {
       isWindowOpen: () => isStartupWindowOpen(sessionName),
       claimedWithin: ms => wasStartupTrustClaimedWithin(sessionName, ms),

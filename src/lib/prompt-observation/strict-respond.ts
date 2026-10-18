@@ -103,11 +103,8 @@ export interface StrictRespondDeps {
    * tmux cannot say (Issue #3788). Read only after the Enter, to tell an agent
    * that exited back to its shell from a screen that could not be read. Absent,
    * null or throwing: never taken as the agent having exited.
-   *
-   * Not passed by `lib/session/strict-prompt-answer-io` yet: the route may not
-   * import `lib/tmux` (#1922), and the read belongs in the `cli-session`
-   * gateway, outside #3788's scope. Until it is, the server's answers keep the
-   * old reading (exit 41 on `No, exit`).
+   * The server passes `cli-session`'s `readSessionPaneCommand` (the #1922
+   * gateway to tmux).
    */
   paneCommand?(): Promise<string | null>;
   /** The launch's owed trust Enter for this session (`cli-tools/antigravity-startup-trust`). */

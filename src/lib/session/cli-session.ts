@@ -39,7 +39,7 @@ import {
   forgetSessionStatus,
   publishSessionStatus,
 } from '@/lib/tmux/session-status-options';
-import { probeSession, sendSpecialKeys, type SessionPresence } from '@/lib/tmux/tmux';
+import { getPaneCurrentCommand, probeSession, sendSpecialKeys, type SessionPresence } from '@/lib/tmux/tmux';
 import { isLiveAttachEligibleSession } from './tmux-session-surface';
 
 const logger = createLogger('cli-session');
@@ -216,6 +216,21 @@ export async function sendSessionAnswerKey(
   } finally {
     invalidateCache(sessionName);
   }
+}
+
+/**
+ * The foreground command of a session's pane (`#{pane_current_command}`), or
+ * null when tmux cannot say (Issue #3788). The strict `respond` reads it after
+ * its Enter: agy exits on the trust screen's `No, exit` and leaves the shell in
+ * a pane that is still up, which only this tells apart from an unread screen.
+ */
+export async function readSessionPaneCommand(
+  worktreeId: string,
+  cliToolId: CLIToolType,
+  instanceId?: string
+): Promise<string | null> {
+  const { sessionName } = resolveSessionContext(worktreeId, cliToolId, instanceId);
+  return getPaneCurrentCommand(sessionName);
 }
 
 /**

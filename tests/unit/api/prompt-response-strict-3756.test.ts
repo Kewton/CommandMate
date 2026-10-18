@@ -60,6 +60,8 @@ vi.mock('@/lib/cli-tools/session-ownership', async (importOriginal) => ({
 
 vi.mock('@/lib/session/cli-session', () => ({
   captureSessionOutputFresh: vi.fn().mockResolvedValue(''),
+  // Issue #3788: agy in front unless a test says otherwise.
+  readSessionPaneCommand: vi.fn().mockResolvedValue('agy'),
   sendSessionAnswerKey: vi.fn(async (_id: string, _tool: string, key: string) => {
     if (key === 'Enter') frames.current = frames.composer;
   }),
@@ -102,7 +104,7 @@ import { runMigrations } from '@/lib/db/db-migrations';
 import { upsertWorktree } from '@/lib/db';
 import { observeSession } from '@/lib/prompt-observation/session';
 import { buildCurrentOutput } from '@/lib/session/current-output-builder';
-import { captureSessionOutputFresh, sendSessionAnswerKey } from '@/lib/session/cli-session';
+import { captureSessionOutputFresh, readSessionPaneCommand, sendSessionAnswerKey } from '@/lib/session/cli-session';
 import { applyEventToActiveTask } from '@/lib/tasks/task-transition-service';
 import { clearStrictRespondState } from '@/lib/prompt-observation/strict-respond';
 import type { CurrentOutputPayload } from '@/lib/session/current-output-types';
@@ -114,6 +116,7 @@ const TRUST = read('prompt-observation-3755/antigravity-trust.txt');
 const COMPOSER = read('antigravity-live-2364/boot-idle.txt');
 const PERMISSION = read('antigravity-live-2364/dialog-bash-oneline.txt');
 const PLAN_REVIEW = read('command-code-plan-review-3125/plan-review-1-74-0-initial.txt');
+const SHELL_AFTER_EXIT = read('strict-respond-3788/shell-after-agy-exit.txt');
 const FOLDER = '/Users/agy-user/share/work/github_kewton/CommandAgent-issue-643-tools-bash-cd-next-js-id-635-637';
 
 let worktreeSeq = 0;
@@ -262,5 +265,64 @@ describe('[#3756] the strict endpoint stops before any side effect', () => {
       expect(await response.json()).toMatchObject({ strictRespond: 1 });
     }
     expect(sendSessionAnswerKey).not.toHaveBeenCalled();
+  });
+});
+
+describe('[#3788] the route answers "No, exit" as session-ended through the server\'s deps', () => {
+  /** "No, exit": agy exits and the shell is left in the pane, which stays up. */
+  function exitToShellOnEnter(): void {
+    // Once each, in order (Down, Enter), so the stub's own behaviour is back for the next test.
+    vi.mocked(sendSessionAnswerKey)
+      .mockImplementationOnce(async () => {
+        frames.current = frames.current.replace('> Yes, I trust this folder\n  No, exit', '  Yes, I trust this folder\n> No, exit');
+      })
+      .mockImplementationOnce(async () => {
+        frames.current = SHELL_AFTER_EXIT;
+      });
+  }
+
+  it('is exit 0 session-ended when the gateway reports the shell in front', async () => {
+    exitToShellOnEnter();
+    vi.mocked(readSessionPaneCommand).mockResolvedValueOnce('zsh');
+    const response = await post(await body({ answer: 'No' }));
+    const result = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(result).toMatchObject({
+      strictRespond: 1,
+      code: 0,
+      reason: null,
+      outcome: 'session-ended',
+      answer: { position: 2, label: 'No, exit' },
+      keysSent: 2,
+    });
+    expect(vi.mocked(sendSessionAnswerKey).mock.calls.map(call => call[2])).toEqual(['Down', 'Enter']);
+    expect(vi.mocked(readSessionPaneCommand).mock.calls[0]).toEqual([WT, 'antigravity', 'antigravity']);
+  });
+
+  const agyInFront = async (): Promise<string | null> => 'agy';
+  const tmuxCannotSay = async (): Promise<string | null> => null;
+  const readThrows = async (): Promise<string | null> => {
+    throw new Error('tmux display-message failed');
+  };
+  it.each([
+    ['agy is still in front', agyInFront],
+    ['tmux cannot say (null)', tmuxCannotSay],
+    ['the read throws', readThrows],
+  ])('stays exit 41 indeterminate when %s', async (_label, command) => {
+    exitToShellOnEnter();
+    vi.mocked(readSessionPaneCommand).mockImplementation(command);
+    try {
+      const result = await (await post(await body({ answer: 'No' }))).json();
+      expect(result).toMatchObject({ code: 41, reason: 'outcome_indeterminate', outcome: 'indeterminate', keysSent: 2 });
+    } finally {
+      vi.mocked(readSessionPaneCommand).mockReset().mockResolvedValue('agy');
+    }
+  });
+
+  it('never asks the gateway when the screen answered itself (Yes → the composer)', async () => {
+    const result = await (await post(await body())).json();
+    expect(result).toMatchObject({ code: 0, outcome: 'advanced' });
+    expect(readSessionPaneCommand).not.toHaveBeenCalled();
   });
 });
