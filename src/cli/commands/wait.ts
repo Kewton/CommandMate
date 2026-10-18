@@ -274,9 +274,11 @@ const CONTRACT_POLICY_CAUSE = 'by contract policy';
  * say about it is a compile error here, which is the point. Until #1843 the
  * notice hard-coded "by contract policy" for every reason, so #1829's
  * `agent-launch-dialog` — a product-side decision the poller makes with no
- * contract in sight (`src/lib/auto-yes-poller.ts`, the `getCodexLifecycleDialog`
- * branch) — sent operators of contract-less worktrees hunting for a
- * `denyPatterns` entry that did not exist.
+ * contract in sight (`suppressIfNotOursToAnswer` in
+ * `src/lib/polling/auto-yes-prompt-suppression.ts`: codex's lifecycle dialogs,
+ * gemini's folder trust since #3776 and copilot's since #3790) — sent operators
+ * of contract-less worktrees hunting for a `denyPatterns` entry that did not
+ * exist.
  *
  * The three sites that record a suppression are covered: the poller's launch-dialog
  * branch (`agent-launch-dialog`), the poller's policy branch and
