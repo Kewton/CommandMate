@@ -88,7 +88,9 @@
  * two ticks (answer, or the Enter fallback's second look):
  * {@link autoYesHoldEndsAt}. The tick is read once, and only counts while the
  * poller that scheduled it is still the one running — a poller stopped or
- * replaced meanwhile will not tick.
+ * replaced meanwhile will not tick. Issue #3796: the session's creation brings
+ * that tick forward to a poll interval, and the hold follows it — the tick is
+ * only ever read earlier than it was when the hold began.
  *
  * ## The reminder is never muted
  *
@@ -145,7 +147,7 @@ interface AutoYesHoldStart {
    * (`sessionWaitTickAt`), and the poller that scheduled it. Undefined: none
    * pending — the grace alone bounds the hold.
    */
-  sessionWaitTick?: { at: number; poller: AutoYesPollerState };
+  sessionWaitTick?: { at: number; poller: AutoYesPollerState; heldAt: number };
 }
 
 declare global {
@@ -203,7 +205,24 @@ function pendingSessionWaitTick(key: string, now: number): AutoYesHoldStart['ses
   const poller = globalThis.__autoYesPollerStates?.get(key);
   const at = poller?.sessionWaitTickAt;
   if (poller === undefined || at === undefined || at <= now) return undefined;
-  return { at: Math.min(at, now + MAX_BACKOFF_MS), poller };
+  return { at: Math.min(at, now + MAX_BACKOFF_MS), poller, heldAt: now };
+}
+
+/**
+ * Issue #3796: when the session wait's tick the hold counts on actually comes.
+ * The tick read when the hold began, brought forward when the poller ticked
+ * early — its session was created, and it rescheduled the tick a poll interval
+ * away (`sessionWaitTickAt`), or already ran it (`sessionAppearedAt`). Only
+ * ever earlier: a session wait scheduled after the hold began does not extend
+ * it (#3791).
+ */
+function effectiveSessionWaitTickAt(tick: NonNullable<AutoYesHoldStart['sessionWaitTick']>): number {
+  let at = tick.at;
+  const pending = tick.poller.sessionWaitTickAt;
+  if (pending !== undefined && pending >= tick.heldAt && pending < at) at = pending;
+  const appeared = tick.poller.sessionAppearedAt;
+  if (appeared !== undefined && appeared >= tick.heldAt && appeared < at) at = appeared;
+  return at;
 }
 
 /**
@@ -224,7 +243,7 @@ export function autoYesHoldEndsAt(
   const graceEndsAt = startedAt + AUTO_YES_ANSWER_GRACE_MS;
   // A poller stopped or replaced since (disable, off → on) will not tick.
   if (tick === undefined || globalThis.__autoYesPollerStates?.get(key) !== tick.poller) return graceEndsAt;
-  return Math.max(graceEndsAt, tick.at + AUTO_YES_ANSWER_AFTER_TICK_MS);
+  return Math.max(graceEndsAt, effectiveSessionWaitTickAt(tick) + AUTO_YES_ANSWER_AFTER_TICK_MS);
 }
 
 /** A hold older than this is dropped (Issue #3770): its episode is long over. */

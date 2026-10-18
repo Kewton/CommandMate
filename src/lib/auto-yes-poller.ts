@@ -50,6 +50,7 @@ import { checkWorktreeSessionOwnership } from './cli-tools/worktree-session-owne
 import { sendPromptAnswer } from './prompt-answer-sender';
 import { isMultiSelectPrompt } from './prompt-answer-semantic';
 import { sendSpecialKeys } from './tmux/tmux';
+import { onTmuxSessionCreated } from './tmux/session-created-signal';
 import { CLIToolManager } from './cli-tools/manager';
 import { stripAnsi, stripBoxDrawing, detectThinking, getCodexLifecycleDialog } from './detection/cli-patterns';
 import { generatePromptKey } from './detection/prompt-key';
@@ -92,7 +93,7 @@ import {
   NO_HOOK_RECEIPT_SUPPRESSION_REASON,
   PARTIAL_ANSWER_SUPPRESSION_REASON,
 } from './polling/auto-yes-suppression-reason';
-import { recordPolicySuppression } from './polling/auto-yes-suppression-state';
+import { getLastPolicySuppression, recordPolicySuppression } from './polling/auto-yes-suppression-state';
 import {
   beginSendAttempt,
   clearPartialAnswers,
@@ -599,7 +600,14 @@ function logIfWithheldForWantOfReceipt(
   // tick recorded its own reason, if any, and that record is kept). One the
   // poller DID send keys to and still up past the grace is `outlived`, which is
   // recorded and logged like the others, so the stop is not a silent one.
-  if (!resolution.suppressedBy && verdict.cause === 'answered') return;
+  // Issue #3796: the reason the poller recorded for this dialog (partial-answer,
+  // the contract, …) while it could still read it inside the window was not
+  // re-stamped once the window closed — the gated reading stopped seeing the
+  // prompt — so `cmate wait` dropped it as stale a minute later with the dialog
+  // still up. Re-stamped here on every tick the dialog stays, and kept over a
+  // `no-hook-receipt` for it: it is the more exact reason.
+  const refreshed = refreshEpisodeSuppression(worktreeId, instanceId, verdict);
+  if (!resolution.suppressedBy && (verdict.cause === 'answered' || refreshed)) return;
 
   const lastLoggedAt = withheldNoReceiptLoggedAt.get(compositeKey);
   const logDue = lastLoggedAt === undefined || now - lastLoggedAt >= WITHHELD_NO_RECEIPT_LOG_INTERVAL_MS;
@@ -638,14 +646,47 @@ function logIfWithheldForWantOfReceipt(
 }
 
 /**
+ * Issue #3796: re-stamp the suppression the poller recorded during this dialog's
+ * episode, while the dialog it accepted (`answered` / `outlived`) is still up.
+ * Only a record made since the dialog was first read, and not one of the receipt
+ * gate's own `no-hook-receipt` lines (the caller records those itself).
+ *
+ * @returns true when a record was re-stamped
+ */
+function refreshEpisodeSuppression(
+  worktreeId: string,
+  instanceId: string | undefined,
+  verdict: AntigravityReceiptVerdict,
+): boolean {
+  if (verdict.cause !== 'answered' && verdict.cause !== 'outlived') return false;
+  const own = getLastPolicySuppression(worktreeId, 'antigravity', instanceId);
+  if (own === null || own.reason === NO_HOOK_RECEIPT_SUPPRESSION_REASON || !(own.at >= verdict.firstSeenAt)) {
+    return false;
+  }
+  const { at: _recordedAt, ...suppression } = own;
+  recordPolicySuppression(worktreeId, 'antigravity', instanceId, suppression);
+  return true;
+}
+
+/**
  * Issue #3789: keys for an agy dialog the receipt gate accepted reached tmux.
  * Only here does the gate start the grace after which a dialog still up is
  * reported as `outlived`; the tick's `no_answer` exits (another server's session,
  * a partial answer, the base rules or the contract not answering) never get
  * here, so their own records are not overwritten by `no-hook-receipt`.
+ *
+ * Issue #3796: `interrupted` — the send began and was cut short (stopped
+ * part-way, or failed). Its keys may be on the pane and the receipt is spent,
+ * so the grace starts here too; without it the dialog stayed `answered`, and
+ * silent, for as long as it stayed up.
  */
-function noteAnswerSent(cliToolId: CLIToolType, worktreeId: string, instanceId: string | undefined): void {
-  if (cliToolId === 'antigravity') markAntigravityAnswerSent(worktreeId, instanceId);
+function noteAnswerSent(
+  cliToolId: CLIToolType,
+  worktreeId: string,
+  instanceId: string | undefined,
+  interrupted = false,
+): void {
+  if (cliToolId === 'antigravity') markAntigravityAnswerSent(worktreeId, instanceId, Date.now(), { interrupted });
 }
 
 /**
@@ -668,6 +709,9 @@ export function noHookReceiptHint(verdict: AntigravityReceiptVerdict, now: numbe
     case 'used':
       return '最後の受信は直前の確認に使い済み。この確認に対する受信は無いため答えなかった。人が答える';
     case 'outlived':
+      if (verdict.answerInterrupted === true) {
+        return `Auto-Yes が最後の受信の確認へ答えを送る途中で送信が止まり（キーの一部が入力に残っている可能性がある）、${ANTIGRAVITY_ANSWERED_DIALOG_GRACE_MS / 1000} 秒を過ぎても確認が画面に残っている。未使用の受信が無いため、もう一度は答えない。人が答える（auto-yes --disable → prompt --json → respond --expect-screen）`;
+      }
       return `Auto-Yes が最後の受信の確認へキーを送ってから ${ANTIGRAVITY_ANSWERED_DIALOG_GRACE_MS / 1000} 秒を過ぎても、確認が画面に残っている。キーで確認が閉じなかったか、新しい受信の無い別の確認と入れ替わった（画面からは区別できない）。未使用の受信が無いため、もう一度は答えない。人が答える（auto-yes --disable → prompt --json → respond --expect-screen）`;
     default:
       return 'hook の受信記録が直近に無いため Auto-Yes は答えなかった。~/.gemini/config/hooks.json の向き先（#2622）を確認';
@@ -872,6 +916,10 @@ async function tryEnterFallback(
 
   try {
     await sendSpecialKeys(sessionName, ['Enter']);
+  } catch (error) {
+    // Issue #3796: the Enter may or may not have reached the pane.
+    noteAnswerSent(cliToolId, worktreeId, instanceId, true);
+    throw error;
   } finally {
     invalidateCache(sessionName);
   }
@@ -1067,6 +1115,9 @@ export async function detectAndRespondToPrompt(
   // Issue #3706 / #3713: the send in flight, settled without an await once it
   // comes back — as a partial answer when it was stopped with keys on the pane.
   let attempt: AutoYesSendAttempt | null = null;
+  // Issue #3796: `sendPromptAnswer` began and has not returned — a throw now cut
+  // the send short, and the agy receipt gate is told so (`noteAnswerSent`).
+  let sendInFlight = false;
   try {
     // 1. Detect prompt.
     //
@@ -1309,6 +1360,7 @@ export async function detectAndRespondToPrompt(
     }
 
     attempt = beginSendAttempt(compositeKey, screenKey, generation?.sessionEpoch ?? epoch);
+    sendInFlight = true;
     try {
       await sendPromptAnswer({
         sessionName,
@@ -1321,6 +1373,7 @@ export async function detectAndRespondToPrompt(
     } finally {
       invalidateCache(sessionName);
     }
+    sendInFlight = false;
     settleSendAttempt(attempt, false);
     noteAnswerSent(cliToolId, worktreeId, instanceId);
 
@@ -1338,10 +1391,12 @@ export async function detectAndRespondToPrompt(
       // answer again over them (step 2.5). Recorded under the attempt's key as
       // it is now — the new one when a worktree ID move carried it (#3713).
       if (attempt !== null) settleSendAttempt(attempt, keysSent === true);
+      if (sendInFlight) noteAnswerSent(cliToolId, worktreeId, instanceId, true);
       logger.info('poller:auto-yes-answer-abandoned', { worktreeId, cliToolId, instanceId, keysSent });
       return 'no_answer';
     }
     if (attempt !== null) settleSendAttempt(attempt, false);
+    if (sendInFlight) noteAnswerSent(cliToolId, worktreeId, instanceId, true);
     incrementErrorCount(compositeKey, generation?.pollerState);
     logger.warn('poller:detect-respond-error', { worktreeId, cliToolId, instanceId });
     return 'error';
@@ -1409,6 +1464,8 @@ async function pollAutoYes(
 
     if (pollerState!.waitingForSession) {
       pollerState!.waitingForSession = false;
+      // Issue #3796: the session wait's tick ran here — read by the push gate.
+      pollerState!.sessionAppearedAt = generation.startedAt;
       logger.info('poller:session-appeared', { worktreeId, cliToolId, instanceId });
     }
 
@@ -1512,9 +1569,71 @@ function scheduleNextPoll(
   const interval = Math.max(overrideInterval ?? pollerState.currentInterval, POLLING_INTERVAL_MS);
   // Issue #3791: only the session wait's tick is one the push gate waits for.
   pollerState.sessionWaitTickAt = options.sessionWait === true ? Date.now() + interval : undefined;
-  pollerState.timerId = setTimeout(() => {
+  // Issue #3796: any new timer supersedes the previous one's wake.
+  dropSessionWaitWake(generation.compositeKey);
+  const timerId = setTimeout(() => {
+    dropSessionWaitWake(generation.compositeKey, timerId);
     void pollAutoYes(worktreeId, cliToolId, instanceId, pollerState);
   }, interval);
+  pollerState.timerId = timerId;
+  if (options.sessionWait === true) armSessionWaitWake(generation, timerId);
+}
+
+/** A session-wait tick's wake (Issue #3796): the timer it would replace, and how to stop listening. */
+interface SessionWaitWake {
+  timerId: ReturnType<typeof setTimeout>;
+  unsubscribe: () => void;
+}
+
+declare global {
+  // eslint-disable-next-line no-var
+  var __autoYesSessionWaitWakes: Map<string, SessionWaitWake> | undefined;
+}
+
+/** compositeKey -> the pending session-wait tick's wake. At most one per poller key. */
+const sessionWaitWakes = getOrInitGlobal('__autoYesSessionWaitWakes', () => new Map<string, SessionWaitWake>());
+
+/**
+ * Stop listening for the session of `compositeKey` (Issue #3796).
+ *
+ * @param timerId - Only when the wake is this timer's: the timer firing drops
+ *   its own wake, never a successor's
+ */
+function dropSessionWaitWake(compositeKey: string, timerId?: ReturnType<typeof setTimeout>): void {
+  const wake = sessionWaitWakes.get(compositeKey);
+  if (wake === undefined || (timerId !== undefined && wake.timerId !== timerId)) return;
+  sessionWaitWakes.delete(compositeKey);
+  wake.unsubscribe();
+}
+
+/**
+ * Issue #3796: while the poller waits `MAX_BACKOFF_MS` for its session, the
+ * session's creation brings the tick forward to a poll interval — so the first
+ * prompt of a session started right after the poller looked (`send --auto-yes`
+ * enables Auto-Yes before the session exists) is answered, or its human
+ * notified, without waiting out the backoff. The push gate's hold follows the
+ * earlier tick (`autoYesHoldEndsAt`).
+ *
+ * The wake replaces the pending timer and nothing else: it does nothing once
+ * that timer fired (the tick drops the wake before it runs, so a tick in flight
+ * is never doubled), once another timer replaced it, or once the poller was
+ * stopped or replaced (`stopAutoYesPolling` drops it, and `scheduleNextPoll`
+ * checks the poller is still the generation's).
+ */
+function armSessionWaitWake(generation: AutoYesTickGeneration, timerId: ReturnType<typeof setTimeout>): void {
+  const { compositeKey, worktreeId, cliToolId, instanceId, pollerState } = generation;
+  const sessionName = CLIToolManager.getInstance().getTool(cliToolId).getSessionName(worktreeId, instanceId);
+  const unsubscribe = onTmuxSessionCreated(sessionName, () => {
+    const wake = sessionWaitWakes.get(compositeKey);
+    if (wake === undefined || wake.timerId !== timerId) return;
+    sessionWaitWakes.delete(compositeKey);
+    if (!isPollerCurrent(generation) || pollerState.timerId !== timerId) return;
+    clearTimeout(timerId);
+    logger.info('poller:session-created-wake', { worktreeId, cliToolId, instanceId });
+    // Still the session wait's tick — the one the push gate's hold is about.
+    scheduleNextPoll(generation, POLLING_INTERVAL_MS, { sessionWait: true });
+  });
+  sessionWaitWakes.set(compositeKey, { timerId, unsubscribe });
 }
 
 // =============================================================================
@@ -1629,6 +1748,7 @@ export function stopAutoYesPolling(compositeKey: string, reason?: AutoYesPollerS
   if (pollerState.timerId) {
     clearTimeout(pollerState.timerId);
   }
+  dropSessionWaitWake(compositeKey);
 
   autoYesPollerStates.delete(compositeKey);
   invalidateSessionAutoYesPolicy(compositeKey);
@@ -1649,6 +1769,7 @@ export function stopAllAutoYesPolling(): void {
     if (pollerState.timerId) {
       clearTimeout(pollerState.timerId);
     }
+    dropSessionWaitWake(key);
     invalidateSessionAutoYesPolicy(key);
     logger.info('poller:stopped', { compositeKey: key, reason });
   }

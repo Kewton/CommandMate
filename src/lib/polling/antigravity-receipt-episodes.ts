@@ -80,6 +80,12 @@ interface FrameObservation {
    * partial answer, the base rules or the contract not answering, …).
    */
   answerSentAt: number | null;
+  /**
+   * Issue #3796: the send behind `answerSentAt` was cut short (stopped or
+   * failed part-way), so how many of its keys reached the pane is not known.
+   * Optional: an entry written before #3796 reads as a whole send.
+   */
+  answerInterrupted?: boolean;
   /** Receipt (`at`) the most recent accepted episode used; one receipt, one dialog. */
   usedReceiptAt: number | null;
   /** The verdict of the current episode's latest consultation. */
@@ -122,6 +128,11 @@ export interface AntigravityReceiptVerdict {
   firstSeenAt: number;
   /** firstSeenAt - lastReceiptAt, when both exist. */
   ageMs: number | null;
+  /**
+   * Issue #3796: on `outlived`, the send the grace was counted from was cut
+   * short ({@link markAntigravityAnswerSent}'s `interrupted`). Absent otherwise.
+   */
+  answerInterrupted?: true;
 }
 
 const observations = getOrInitGlobal('__antigravityReceiptObservations', () => new Map<string, unknown>()) as Map<string, FrameObservation>;
@@ -142,7 +153,8 @@ function isObservation(v: unknown): v is FrameObservation {
     (['firstSeenAt', 'clearAt', 'prevReadAt', 'lastReadAt', 'acceptedReceiptAt', 'answerSentAt', 'usedReceiptAt'] as const).every(k =>
       isTimeOrNull(o[k]),
     ) &&
-    (o.verdict === null || typeof o.verdict === 'object')
+    (o.verdict === null || typeof o.verdict === 'object') &&
+    (o.answerInterrupted === undefined || typeof o.answerInterrupted === 'boolean')
   );
 }
 
@@ -166,6 +178,7 @@ function observationOf(key: string): FrameObservation {
       lastReadAt: null,
       acceptedReceiptAt: null,
       answerSentAt: null,
+      answerInterrupted: false,
       usedReceiptAt: null,
       verdict: null,
     };
@@ -192,6 +205,7 @@ export function beginAntigravityFrameRead(
     o.clearAt = null;
     o.acceptedReceiptAt = null;
     o.answerSentAt = null;
+    o.answerInterrupted = false;
     o.verdict = null;
   }
   o.tracking = true;
@@ -214,6 +228,7 @@ export function endAntigravityFrameRead(
   o.firstSeenAt = null;
   o.acceptedReceiptAt = null;
   o.answerSentAt = null;
+  o.answerInterrupted = false;
   o.verdict = null;
   o.clearAt = now;
 }
@@ -224,15 +239,23 @@ export function endAntigravityFrameRead(
  * reached tmux; a tick that accepted but sent nothing never calls it, so its
  * dialog is never reported as one that outlived an answer. No-op without an
  * accepted episode.
+ *
+ * Issue #3796: also called, with `interrupted`, when the send was cut short
+ * after it began (stopped part-way, or failed) — some of its keys may be on the
+ * pane, and the receipt is spent either way. Without it such a dialog stayed
+ * `answered` (silent) for as long as it stayed up. Starting the grace only
+ * leads to `outlived`, which withholds: nothing is answered because of it.
  */
 export function markAntigravityAnswerSent(
   worktreeId: string,
   instanceId: string | undefined,
   now: number = Date.now(),
+  options: { interrupted?: boolean } = {},
 ): void {
   const o = existingObservation(buildCompositeKey(worktreeId, 'antigravity', instanceId));
   if (!o || o.acceptedReceiptAt === null) return;
   o.answerSentAt = now;
+  o.answerInterrupted = options.interrupted === true;
 }
 
 /**
@@ -308,6 +331,7 @@ export function judgeAntigravityPermissionReceipt(
     o.clearAt = o.prevReadAt;
     o.acceptedReceiptAt = null;
     o.answerSentAt = null;
+    o.answerInterrupted = false;
     return judgeAntigravityPermissionReceipt(worktreeId, instanceId, now);
   }
   if (o.acceptedReceiptAt === lastReceiptAt) {
@@ -323,7 +347,9 @@ export function judgeAntigravityPermissionReceipt(
     // sending (partial-answer, …) is the one to keep, not overwrite. Written as
     // `!(… <= …)` so that a NaN time reports.
     if (o.answerSentAt !== null && !(now - o.answerSentAt <= ANTIGRAVITY_ANSWERED_DIALOG_GRACE_MS)) {
-      return verdict('outlived');
+      const v = verdict('outlived');
+      if (o.answerInterrupted === true) v.answerInterrupted = true;
+      return v;
     }
     return verdict('answered');
   }

@@ -40,6 +40,13 @@ export interface AutoYesPollerState {
    * name it.
    */
   sessionWaitTickAt?: number;
+  /**
+   * Issue #3796: epoch ms the tick that found the session again began — the
+   * session wait's tick, run on schedule or brought forward by the session's
+   * creation (`onTmuxSessionCreated`). The push gate reads it to end a hold
+   * that was counting on a later session-wait tick. Optional like the above.
+   */
+  sessionAppearedAt?: number;
   /** Last answered prompt key for duplicate prevention (Issue #306) */
   lastAnsweredPromptKey: string | null;
   /** Timestamp when lastAnsweredPromptKey was set (for retry expiry) */
