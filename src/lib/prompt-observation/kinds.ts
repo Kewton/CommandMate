@@ -37,9 +37,13 @@ export const PROMPT_OBSERVATION_SCHEMA_VERSION = 1;
  * - `antigravity-trust` — agy's first-run folder trust screen (`Do you trust
  *   the contents of this project?` over `> Yes, I trust this folder` /
  *   `No, exit`). Unnumbered; Enter confirms the highlighted row.
- * - `antigravity-model-picker` — agy's `/model` picker (`Switch Model`).
+ * - `antigravity-model-picker` — agy's `/model` picker (`Switch Model`): the
+ *   1.1.27 layout (`antigravity-live-2364/picker-switch-model.txt`) and the
+ *   1.4 one with a search box (`prompt-observation-3797/`, Issue #3797).
  * - `antigravity-permission` — agy's numbered permission dialog (command
- *   execution, file creation; `tests/fixtures/antigravity-live-2364/dialog-*`).
+ *   execution, file creation; `tests/fixtures/antigravity-live-2364/dialog-*`),
+ *   ending on its `tab Amend` footer. agy's numbered login-method screen is
+ *   not one (`unknown`).
  * - `antigravity-slash-menu` — agy's slash-command popup.
  * - `composer` — no confirmation: the agent sits at its input box.
  * - `none` — no confirmation, and not at the input box either (working).
