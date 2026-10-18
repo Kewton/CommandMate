@@ -39,6 +39,8 @@ const read = (rel: string): string => readFileSync(path.join(FIXTURES, rel), 'ut
 const TRUST = read('prompt-observation-3755/antigravity-trust.txt');
 const PERMISSION = read('antigravity-live-2364/dialog-bash-oneline.txt');
 const COMPOSER = read('antigravity-live-2364/boot-idle.txt');
+/** The pane after agy exited: the login shell's prompt (measured, #3788). */
+const SHELL_AFTER_EXIT = read('strict-respond-3788/shell-after-agy-exit.txt');
 const FOLDER = '/Users/agy-user/share/work/github_kewton/CommandAgent-issue-643-tools-bash-cd-next-js-id-635-637';
 
 /** The trust screen with the highlight on `No, exit`. */
@@ -65,6 +67,8 @@ interface FakePane {
   holds: number;
   releases: number;
   discarded: number;
+  /** `#{pane_current_command}`; `'throw'` makes the read throw (#3788). */
+  command: string | null | 'throw';
 }
 
 let pane: FakePane;
@@ -127,6 +131,10 @@ function deps(): StrictRespondDeps {
     },
     now: () => pane.clock,
     autoYesActive: () => pane.autoYes,
+    async paneCommand() {
+      if (pane.command === 'throw') throw new Error('tmux display-message failed');
+      return pane.command;
+    },
     startup: {
       isWindowOpen: () => pane.windowOpen,
       claimedWithin: () => pane.claimedRecently,
@@ -194,6 +202,7 @@ beforeEach(() => {
     holds: 0,
     releases: 0,
     discarded: 0,
+    command: 'agy',
   };
 });
 
@@ -615,5 +624,109 @@ describe('[#3771] a fault part-way through an answer', () => {
     expect(result).toMatchObject({ code: 40, reason: 'observation_failed', keysSent: 0 });
     expect(JSON.stringify(result)).not.toContain('SECRET');
     expect(pane.keys).toEqual([]);
+  });
+});
+
+describe('[#3788] "No, exit" leaves the shell in a pane that is still up', () => {
+  /** agy exits on "No, exit"; the tmux session stays, with the shell in it. */
+  function exitToShell(key: string, frame: string): string {
+    if (key === 'Down') return frame === TRUST ? TRUST_ON_NO : frame;
+    if (key === 'Enter' && frame === TRUST_ON_NO) {
+      pane.command = 'zsh';
+      return SHELL_AFTER_EXIT;
+    }
+    return frame;
+  }
+
+  beforeEach(() => {
+    pane.onKey = exitToShell;
+  });
+
+  it('the shell pane is observed as an unknown screen of a running session (the #3773 reading)', () => {
+    pane.frame = SHELL_AFTER_EXIT;
+    const observation = observe();
+    expect(observation).toMatchObject({ status: 'observed', session: { running: true } });
+    expect(observation.screen?.kind).toBe('unknown');
+  });
+
+  it('is session-ended (exit 0) when the shell is the pane\'s foreground command', async () => {
+    const result = await respondStrictly(request({ answer: 'No' }), deps());
+
+    expect(pane.keys).toEqual(['Down', 'Enter']);
+    expect(result).toMatchObject({
+      code: 0,
+      reason: null,
+      answer: { position: 2, label: 'No, exit' },
+      outcome: 'session-ended',
+      delivery: 'sent',
+    });
+  });
+
+  it('accepts the login-shell spelling tmux reports (`-zsh`)', async () => {
+    pane.onKey = (key, frame) => {
+      const next = exitToShell(key, frame);
+      if (pane.command === 'zsh') pane.command = '-zsh';
+      return next;
+    };
+    const result = await respondStrictly(request({ answer: 'No' }), deps());
+    expect(result).toMatchObject({ code: 0, outcome: 'session-ended' });
+  });
+
+  it('stays exit 41 indeterminate while agy is still the foreground command (negative control)', async () => {
+    pane.onKey = (key, frame) => {
+      const next = exitToShell(key, frame);
+      pane.command = 'agy';
+      return next;
+    };
+    const result = await respondStrictly(request({ answer: 'No' }), deps());
+    expect(result).toMatchObject({ code: 41, reason: 'outcome_indeterminate', outcome: 'indeterminate', keysSent: 2 });
+  });
+
+  it('stays exit 41 indeterminate when the foreground command cannot be read (null)', async () => {
+    pane.onKey = (key, frame) => {
+      const next = exitToShell(key, frame);
+      pane.command = null;
+      return next;
+    };
+    const result = await respondStrictly(request({ answer: 'No' }), deps());
+    expect(result).toMatchObject({ code: 41, reason: 'outcome_indeterminate', outcome: 'indeterminate' });
+  });
+
+  it('stays exit 41 indeterminate when reading the foreground command throws', async () => {
+    pane.onKey = (key, frame) => {
+      const next = exitToShell(key, frame);
+      pane.command = 'throw';
+      return next;
+    };
+    const result = await respondStrictly(request({ answer: 'No' }), deps());
+    expect(result).toMatchObject({ code: 41, reason: 'outcome_indeterminate', outcome: 'indeterminate' });
+  });
+
+  it('stays exit 41 indeterminate for deps that cannot read the foreground command', async () => {
+    const { paneCommand: _unused, ...withoutCommand } = deps();
+    void _unused;
+    const result = await respondStrictly(request({ answer: 'No' }), withoutCommand);
+    expect(result).toMatchObject({ code: 41, reason: 'outcome_indeterminate', outcome: 'indeterminate' });
+  });
+
+  it('a shell in the foreground does not turn a screen that stayed into an answer', async () => {
+    // Enter does nothing to the frame; the shell is (somehow) reported in front.
+    pane.onKey = (key, frame) => {
+      if (key === 'Down') return frame === TRUST ? TRUST_ON_NO : frame;
+      pane.command = 'zsh';
+      return frame;
+    };
+    const result = await respondStrictly(request({ answer: 'No' }), deps());
+    expect(result).toMatchObject({ code: 41, reason: 'outcome_unchanged', outcome: 'unchanged' });
+  });
+
+  it('a pane that cannot be read after the Enter stays indeterminate even with the shell in front', async () => {
+    pane.onKey = (key, frame) => {
+      const next = exitToShell(key, frame);
+      if (key === 'Enter') pane.failCapture = true;
+      return next;
+    };
+    const result = await respondStrictly(request({ answer: 'No' }), deps());
+    expect(result).toMatchObject({ code: 41, reason: 'outcome_indeterminate', outcome: 'indeterminate' });
   });
 });
