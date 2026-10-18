@@ -75,7 +75,8 @@ import {
 } from '@/lib/auto-yes-poller';
 import { clearPolicySuppressions } from '@/lib/polling/auto-yes-suppression-state';
 import { clearAutoYesPolicyCache } from '@/lib/polling/auto-yes-policy';
-import { getLastPolicySuppression } from '@/lib/polling/auto-yes-suppression-state';
+import { getLastPolicySuppression, recordPolicySuppression } from '@/lib/polling/auto-yes-suppression-state';
+import { checkWorktreeSessionOwnership } from '@/lib/cli-tools/worktree-session-ownership';
 import {
   ANTIGRAVITY_ANSWERED_DIALOG_GRACE_MS,
   ANTIGRAVITY_PERMISSION_RECEIPT_OBSERVATION_SLACK_MS,
@@ -225,6 +226,40 @@ describe('[#3789] 1 (M2-a): an answered dialog that stays up is recorded once th
   });
 });
 
+describe('[#3789] review M-1: the grace starts at a send, not at the acceptance', () => {
+  it('a dialog accepted but not sent to (another server\'s session) is not reported as outliving an answer', async () => {
+    receiptAt(0);
+    expect(await tickAt(3_700, IDLE)).toBe('no_prompt');
+    vi.mocked(checkWorktreeSessionOwnership).mockResolvedValueOnce({ verdict: 'foreign', sessionPath: '/elsewhere' });
+    expect(await tickAt(8_700, DIALOG)).toBe('no_answer'); // accepted, nothing sent
+    for (const ms of [13_700, 18_700, 23_700, 28_700, 33_700]) expect(await tickAt(ms, DIALOG)).toBe('no_prompt');
+    expect(sendPromptAnswer).not.toHaveBeenCalled();
+    expect(suppression()).toBeNull();
+    expect(withheldLines()).toHaveLength(0);
+  });
+
+  it('a reason the poller recorded inside the window is not overwritten after the grace', async () => {
+    receiptAt(0);
+    expect(await tickAt(3_700, IDLE)).toBe('no_prompt');
+    vi.mocked(checkWorktreeSessionOwnership).mockResolvedValueOnce({ verdict: 'foreign', sessionPath: '/elsewhere' });
+    expect(await tickAt(8_700, DIALOG)).toBe('no_answer');
+    // Stands in for the reason a no-send exit records on its tick (step 2.5's
+    // partial-answer and the like), whatever the exit was.
+    recordPolicySuppression(WORKTREE_ID, 'antigravity', 'antigravity', {
+      reason: 'partial-answer',
+      mode: null,
+      promptType: 'multiple_choice',
+    });
+    for (const ms of [13_700, 18_700, 23_700, 28_700]) expect(await tickAt(ms, DIALOG)).toBe('no_prompt');
+    expect(suppression()?.reason).toBe('partial-answer');
+    expect(withheldLines()).toHaveLength(0);
+  });
+});
+
+// KNOWN WEAKNESS, pinned on purpose (not fixed): across a read gap the episode
+// is dropped, so a dialog that was up BEFORE the receipt is answered when the
+// receipt is within the window — the "predates" protection is lost, exactly as
+// develop's old tick test lost it. See the commit of #3789 for why.
 describe('[#3789] 2: a gap in the reads drops the episode (not fixed; the old tick test)', () => {
   it('control: read every 5s, a dialog up before the receipt is still `predates`', async () => {
     expect(await tickAt(0, DIALOG)).toBe('no_prompt');
@@ -235,7 +270,7 @@ describe('[#3789] 2: a gap in the reads drops the episode (not fixed; the old ti
     expect(getAntigravityReceiptVerdict(WORKTREE_ID, 'antigravity')?.cause).toBe('predates');
   });
 
-  it('after a gap longer than the carry, the verdict is exactly the old tick test, both ways', async () => {
+  it('known weakness: after a gap longer than the carry, a dialog up before the receipt is judged by the old tick test, both ways', async () => {
     expect(await tickAt(0, DIALOG)).toBe('no_prompt');
     // No reads for 20s. Nothing is known of the screen in between, so the dialog
     // read next is judged on its own first sighting, as develop judged every tick.

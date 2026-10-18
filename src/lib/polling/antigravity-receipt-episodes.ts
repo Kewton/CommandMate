@@ -42,12 +42,13 @@ export const ANTIGRAVITY_PERMISSION_RECEIPT_OBSERVATION_SLACK_MS = 5_000;
 const MAX_READ_GAP_MS = ANTIGRAVITY_PERMISSION_RECEIPT_OBSERVATION_SLACK_MS + 2_000;
 
 /**
- * How long after the tick that accepted a receipt the answered dialog may stay
- * on screen before it is reported (Issue #3789): the window, the slack, and the
- * cooldown the poller waits after an answer. Until then a dialog still up is
- * agy taking its time to take the answer down, and stays `answered` (silent);
- * past it the answer did not take, or the dialog that replaced it has no
- * question of its own, and it is `outlived` — still not answered, but recorded.
+ * How long after the poller SENT its answer to an accepted dialog (Issue #3789,
+ * {@link markAntigravityAnswerSent}) a dialog may still be on screen before it
+ * is reported: the window, the slack, and the cooldown the poller waits after
+ * an answer. Until then it is agy taking its time to take the dialog down, and
+ * stays `answered` (silent). Past it the keys did not clear the dialog, or a
+ * dialog with no question of its own replaced it between two reads (the screen
+ * cannot tell which), and it is `outlived` — withheld, and recorded.
  *
  * Written as the sum's value (8s + 5s + 5s, `COOLDOWN_INTERVAL_MS`), not the
  * sum: tests that mock the receipts module without the window constant would
@@ -73,8 +74,12 @@ interface FrameObservation {
   lastReadAt: number | null;
   /** Receipt (`at`) this episode was accepted on. */
   acceptedReceiptAt: number | null;
-  /** Epoch ms of the read that accepted it (Issue #3789). */
-  acceptedAt: number | null;
+  /**
+   * Epoch ms the poller's keys for the accepted dialog reached tmux (Issue
+   * #3789); null while accepted but not sent (another server's session, a
+   * partial answer, the base rules or the contract not answering, …).
+   */
+  answerSentAt: number | null;
   /** Receipt (`at`) the most recent accepted episode used; one receipt, one dialog. */
   usedReceiptAt: number | null;
   /** The verdict of the current episode's latest consultation. */
@@ -94,14 +99,17 @@ export type AntigravityReceiptCause =
   /** The question was already spent on an earlier dialog. */
   | 'used'
   /**
-   * The dialog this question was already answered on is still up past the
-   * window. Not "withheld for want of a receipt": no suppression is recorded.
+   * The dialog this question was already accepted on is still up past the
+   * window: answered within the grace, or accepted but never sent (the poller
+   * recorded its own reason for that, if any). Not "withheld for want of a
+   * receipt": no suppression is recorded.
    */
   | 'answered'
   /**
-   * Issue #3789: the same, but still up {@link ANTIGRAVITY_ANSWERED_DIALOG_GRACE_MS}
-   * after the answer — the answer did not take, or another dialog replaced it
-   * without a question of its own. Withheld like `answered`, and recorded.
+   * Issue #3789: the same, but the poller did send keys to it, and something
+   * still reads as this dialog {@link ANTIGRAVITY_ANSWERED_DIALOG_GRACE_MS}
+   * after the send — the keys did not clear it, or a dialog with no question of
+   * its own replaced it. Withheld like `answered`, and recorded.
    */
   | 'outlived';
 
@@ -131,7 +139,7 @@ function isObservation(v: unknown): v is FrameObservation {
   return (
     typeof o.tracking === 'boolean' &&
     typeof o.candidateSeen === 'boolean' &&
-    (['firstSeenAt', 'clearAt', 'prevReadAt', 'lastReadAt', 'acceptedReceiptAt', 'acceptedAt', 'usedReceiptAt'] as const).every(k =>
+    (['firstSeenAt', 'clearAt', 'prevReadAt', 'lastReadAt', 'acceptedReceiptAt', 'answerSentAt', 'usedReceiptAt'] as const).every(k =>
       isTimeOrNull(o[k]),
     ) &&
     (o.verdict === null || typeof o.verdict === 'object')
@@ -157,7 +165,7 @@ function observationOf(key: string): FrameObservation {
       prevReadAt: null,
       lastReadAt: null,
       acceptedReceiptAt: null,
-      acceptedAt: null,
+      answerSentAt: null,
       usedReceiptAt: null,
       verdict: null,
     };
@@ -183,7 +191,7 @@ export function beginAntigravityFrameRead(
     o.firstSeenAt = null;
     o.clearAt = null;
     o.acceptedReceiptAt = null;
-    o.acceptedAt = null;
+    o.answerSentAt = null;
     o.verdict = null;
   }
   o.tracking = true;
@@ -205,9 +213,26 @@ export function endAntigravityFrameRead(
   if (!o || !o.tracking || o.candidateSeen) return;
   o.firstSeenAt = null;
   o.acceptedReceiptAt = null;
-  o.acceptedAt = null;
+  o.answerSentAt = null;
   o.verdict = null;
   o.clearAt = now;
+}
+
+/**
+ * The poller sent keys to the dialog the current episode accepted (Issue #3789):
+ * starts {@link ANTIGRAVITY_ANSWERED_DIALOG_GRACE_MS}. Called only after the send
+ * reached tmux; a tick that accepted but sent nothing never calls it, so its
+ * dialog is never reported as one that outlived an answer. No-op without an
+ * accepted episode.
+ */
+export function markAntigravityAnswerSent(
+  worktreeId: string,
+  instanceId: string | undefined,
+  now: number = Date.now(),
+): void {
+  const o = existingObservation(buildCompositeKey(worktreeId, 'antigravity', instanceId));
+  if (!o || o.acceptedReceiptAt === null) return;
+  o.answerSentAt = now;
 }
 
 /**
@@ -282,7 +307,7 @@ export function judgeAntigravityPermissionReceipt(
     o.firstSeenAt = now;
     o.clearAt = o.prevReadAt;
     o.acceptedReceiptAt = null;
-    o.acceptedAt = null;
+    o.answerSentAt = null;
     return judgeAntigravityPermissionReceipt(worktreeId, instanceId, now);
   }
   if (o.acceptedReceiptAt === lastReceiptAt) {
@@ -291,11 +316,13 @@ export function judgeAntigravityPermissionReceipt(
     // a dialog that outlives the answer is not answered again past the window.
     // Withheld, but as `answered`: the caller records no no-hook-receipt for it.
     if (sameRead || now - lastReceiptAt <= ANTIGRAVITY_PERMISSION_RECEIPT_WINDOW_MS) return verdict(null);
-    // Issue #3789: not forever, though. Past the grace the answer did not take
-    // (or a dialog with no question of its own replaced it), and staying silent
-    // would leave the session stopped with no record of why. Still withheld;
-    // written as `!(… <= …)` so that a missing or NaN time reports.
-    if (o.acceptedAt === null || !(now - o.acceptedAt <= ANTIGRAVITY_ANSWERED_DIALOG_GRACE_MS)) {
+    // Issue #3789: not forever, though, once keys were sent. Past the grace they
+    // did not clear the dialog (or one with no question of its own replaced it),
+    // and staying silent would leave the session stopped with no record of why.
+    // Accepted but never sent stays `answered`: the poller's own reason for not
+    // sending (partial-answer, …) is the one to keep, not overwrite. Written as
+    // `!(… <= …)` so that a NaN time reports.
+    if (o.answerSentAt !== null && !(now - o.answerSentAt <= ANTIGRAVITY_ANSWERED_DIALOG_GRACE_MS)) {
       return verdict('outlived');
     }
     return verdict('answered');
@@ -320,7 +347,6 @@ export function judgeAntigravityPermissionReceipt(
   }
 
   o.acceptedReceiptAt = lastReceiptAt;
-  o.acceptedAt = now;
   o.usedReceiptAt = lastReceiptAt;
   return verdict(null);
 }

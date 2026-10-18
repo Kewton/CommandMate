@@ -20,6 +20,7 @@ import {
   ANTIGRAVITY_ANSWERED_DIALOG_GRACE_MS,
   getAntigravityReceiptVerdict,
   judgeAntigravityPermissionReceipt,
+  markAntigravityAnswerSent,
   type AntigravityReceiptVerdict,
 } from './polling/antigravity-receipt-episodes';
 import { ANTIGRAVITY_PERMISSION_RECEIPT_WINDOW_MS } from './polling/antigravity-permission-receipts';
@@ -594,8 +595,10 @@ function logIfWithheldForWantOfReceipt(
   // Issue #3767: `answered` is the dialog the gate already let through on this
   // receipt, still up past the window. Unless the contract withheld it, that is
   // not a missing receipt: neither recorded nor logged, nor counted for the limit.
-  // Issue #3789: only within the grace — past it the cause is `outlived`, which
-  // is recorded and logged like the others, so the stop is not a silent one.
+  // Issue #3789: `answered` is also a dialog accepted but never sent to (the
+  // tick recorded its own reason, if any, and that record is kept). One the
+  // poller DID send keys to and still up past the grace is `outlived`, which is
+  // recorded and logged like the others, so the stop is not a silent one.
   if (!resolution.suppressedBy && verdict.cause === 'answered') return;
 
   const lastLoggedAt = withheldNoReceiptLoggedAt.get(compositeKey);
@@ -635,6 +638,17 @@ function logIfWithheldForWantOfReceipt(
 }
 
 /**
+ * Issue #3789: keys for an agy dialog the receipt gate accepted reached tmux.
+ * Only here does the gate start the grace after which a dialog still up is
+ * reported as `outlived`; the tick's `no_answer` exits (another server's session,
+ * a partial answer, the base rules or the contract not answering) never get
+ * here, so their own records are not overwritten by `no-hook-receipt`.
+ */
+function noteAnswerSent(cliToolId: CLIToolType, worktreeId: string, instanceId: string | undefined): void {
+  if (cliToolId === 'antigravity') markAntigravityAnswerSent(worktreeId, instanceId);
+}
+
+/**
  * The hint for `antigravity-autoyes-withheld-no-hook-receipt` (Issue #3767):
  * which of the withheld cases it was decides where to look.
  */
@@ -654,7 +668,7 @@ export function noHookReceiptHint(verdict: AntigravityReceiptVerdict, now: numbe
     case 'used':
       return '最後の受信は直前の確認に使い済み。この確認に対する受信は無いため答えなかった。人が答える';
     case 'outlived':
-      return `最後の受信で答えた確認（またはそれと入れ替わった確認）が、答えてから ${ANTIGRAVITY_ANSWERED_DIALOG_GRACE_MS / 1000} 秒を過ぎても画面に残っている。答えが届かなかったか、新しい受信の無い確認のため、もう一度は答えない。人が答える（auto-yes --disable → prompt --json → respond --expect-screen）`;
+      return `Auto-Yes が最後の受信の確認へキーを送ってから ${ANTIGRAVITY_ANSWERED_DIALOG_GRACE_MS / 1000} 秒を過ぎても、確認が画面に残っている。キーで確認が閉じなかったか、新しい受信の無い別の確認と入れ替わった（画面からは区別できない）。未使用の受信が無いため、もう一度は答えない。人が答える（auto-yes --disable → prompt --json → respond --expect-screen）`;
     default:
       return 'hook の受信記録が直近に無いため Auto-Yes は答えなかった。~/.gemini/config/hooks.json の向き先（#2622）を確認';
   }
@@ -1226,9 +1240,11 @@ export async function detectAndRespondToPrompt(
     // 3.6. Issue #3397: a refused frame may be a choice screen CommandMate
     // cannot read; with Auto-Yes on it gets one Enter. See `tryEnterFallback`.
     if (notOurs.kind === 'dialog-gate-refused') {
-      return (await tryEnterFallback(judged, promptDetection, notOurs.dialogGate, rawOutput, generation))
-        ? 'responded'
-        : 'no_answer';
+      if (!(await tryEnterFallback(judged, promptDetection, notOurs.dialogGate, rawOutput, generation))) {
+        return 'no_answer';
+      }
+      noteAnswerSent(cliToolId, worktreeId, instanceId);
+      return 'responded';
     }
 
     // 4. Resolve auto answer under the execution contract's policy (Issue #1547).
@@ -1306,6 +1322,7 @@ export async function detectAndRespondToPrompt(
       invalidateCache(sessionName);
     }
     settleSendAttempt(attempt, false);
+    noteAnswerSent(cliToolId, worktreeId, instanceId);
 
     // 6., 7. The answer reached tmux: see `finishAnsweredPrompt`.
     await finishAnsweredPrompt(judged, promptDetection, answer, generation);

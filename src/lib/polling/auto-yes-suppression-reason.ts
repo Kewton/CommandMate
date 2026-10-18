@@ -66,9 +66,11 @@ export type AutoYesSuppressionReason =
   | 'question-confirm-page'
   /**
    * Issue #3767: agy's approval dialog is on the pane but Auto-Yes has no
-   * `PreToolUse` question to match it to (none ever, it appeared after the
-   * window, it was already up, or the hook stopped arriving), so it is left to a
-   * human. Not a policy verdict; the poller records it from the receipt gate.
+   * unused `PreToolUse` question to match it to (none ever, it appeared after
+   * the window, it was already up, the hook stopped arriving, or — Issue #3789 —
+   * the last one was spent on keys Auto-Yes sent and a dialog is still up past
+   * the grace), so it is left to a human. Not a policy verdict; the poller
+   * records it from the receipt gate.
    */
   | 'no-hook-receipt';
 

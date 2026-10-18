@@ -314,8 +314,10 @@ const SUPPRESSION_CAUSE: Record<AutoYesSuppressionReason, string> = {
     "because the question's Submit/Cancel confirmation commits the answers as they stand, so Auto-Yes leaves it to a human",
   // Issue #3767. agy's approval dialog has no matching hook question (none, too
   // late, already on screen, or the hook stopped arriving). Not a contract verdict.
+  // Issue #3789: nor one left unused — the last was spent on keys Auto-Yes sent,
+  // and a dialog is still up past the grace — so "no unused question" covers both.
   'no-hook-receipt':
-    "because agy's hook sent no permission question matching this dialog; answer it yourself (auto-yes --disable, prompt --json, respond --expect-screen) or check hooks.json",
+    "because there is no unused agy hook permission question for this dialog (none arrived in time, or the last one was spent on keys that did not clear it); answer it yourself (auto-yes --disable, prompt --json, respond --expect-screen) or check hooks.json",
 };
 
 /**
