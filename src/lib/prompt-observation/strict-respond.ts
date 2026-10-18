@@ -20,7 +20,13 @@
  * After the Enter the screen is read for a few seconds to say what it did
  * (`StrictRespondOutcome`); only `advanced`, `next-prompt` and `session-ended`
  * are success. A
- * screen that stayed is never answered again from here.
+ * screen that stayed is never answered again from here. agy's `No, exit`
+ * leaves the tmux session up with the shell in it, a screen no reader names
+ * (`unknown`): that read is `session-ended` only when the answer sent was the
+ * kind's exiting answer (`EXITING_STRICT_ANSWERS`) AND tmux says the pane's
+ * foreground command is a shell again (Issue #3788). After any other answer a
+ * shell in front is the agent falling over, not the answer: `indeterminate`,
+ * as is a command that cannot be read or is still the agent.
  *
  * ## Serialised, and deduplicated
  *
@@ -48,7 +54,8 @@
  */
 
 import { getOrInitGlobal } from '@/lib/global-state';
-import { isDecisionKind, isStrictRespondKind, type PromptObservationKind } from './kinds';
+import { isShellPaneCommand } from '@/lib/detection/shared/shell-pane-command';
+import { isDecisionKind, isExitingStrictAnswer, isStrictRespondKind, type PromptObservationKind } from './kinds';
 import { observationBindingOf } from './observe';
 import { consumeObservationToken, type ObservationTokenBinding } from './token';
 import { isScreenOpenAtBottom, resolveStrictChoice, sameApprovalTarget, strictAnswerKeys } from './strict-choice';
@@ -93,6 +100,15 @@ export interface StrictRespondDeps {
    * dialogs on its own, so a strict answer to one could race it.
    */
   autoYesActive(): boolean;
+  /**
+   * The pane's foreground command (`#{pane_current_command}`), or null when
+   * tmux cannot say (Issue #3788). Read only after the Enter, to tell an agent
+   * that exited back to its shell from a screen that could not be read. Absent,
+   * null or throwing: never taken as the agent having exited.
+   * The server passes `cli-session`'s `readSessionPaneCommand` (the #1922
+   * gateway to tmux).
+   */
+  paneCommand?(): Promise<string | null>;
   /** The launch's owed trust Enter for this session (`cli-tools/antigravity-startup-trust`). */
   startup: {
     isWindowOpen(): boolean;
@@ -259,13 +275,41 @@ function isAnsweredOutcome(outcome: StrictRespondOutcome): boolean {
   return outcome === 'advanced' || outcome === 'next-prompt' || outcome === 'session-ended';
 }
 
-/** Read for a few seconds after the Enter; the first answered outcome ends it. */
-async function awaitOutcome(deps: StrictRespondDeps, binding: ObservationTokenBinding): Promise<StrictRespondOutcome> {
+/** Whether tmux says, for certain, that the pane is back at a shell. */
+async function agentExitedToShell(deps: StrictRespondDeps): Promise<boolean> {
+  if (deps.paneCommand === undefined) return false;
+  try {
+    const command = await deps.paneCommand();
+    return command !== null && isShellPaneCommand(command);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Read for a few seconds after the Enter; the first answered outcome ends it.
+ *
+ * @param exiting - Whether the answer sent was the kind's exiting answer
+ *   (`isExitingStrictAnswer`): only then is a shell in front `session-ended`.
+ */
+async function awaitOutcome(
+  deps: StrictRespondDeps,
+  binding: ObservationTokenBinding,
+  exiting: boolean
+): Promise<StrictRespondOutcome> {
   const deadline = deps.now() + STRICT_OUTCOME_WAIT_MS;
   let outcome: StrictRespondOutcome = 'indeterminate';
   for (;;) {
     await deps.sleep(STRICT_READ_INTERVAL_MS);
-    outcome = outcomeOf(await deps.read(), binding);
+    const read = await deps.read();
+    outcome = outcomeOf(read, binding);
+    // A screen that was read and that no reader names, with the shell back in
+    // front after an answer that exits: the agent did what it was told (agy on
+    // `No, exit`). Not after another answer — the agent fell over on its own —
+    // nor for a read that failed (the frame is not known) or a screen that stayed.
+    if (exiting && outcome === 'indeterminate' && read.ok && (await agentExitedToShell(deps))) {
+      outcome = 'session-ended';
+    }
     if (isAnsweredOutcome(outcome)) return outcome;
     if (deps.now() >= deadline) return outcome;
   }
@@ -281,7 +325,7 @@ async function checkBeforeSending(
   facts: Facts
 ): Promise<
   | { refused: StrictRespondReason }
-  | { binding: ObservationTokenBinding; selectedIndex: number; targetIndex: number }
+  | { binding: ObservationTokenBinding; selectedIndex: number; targetIndex: number; exiting: boolean }
 > {
   const read = await deps.read();
   if (!read.ok) return { refused: read.stage === 'capture' ? 'capture_failed' : 'observation_failed' };
@@ -318,7 +362,12 @@ async function checkBeforeSending(
   const verdict = consumeObservationToken(request.observationToken, binding, deps.now());
   if (!verdict.ok) return { refused: `token_${verdict.reason.replace(/-/g, '_')}` as StrictRespondReason };
 
-  return { binding, selectedIndex: screen.selectedPosition - 1, targetIndex: choice.index };
+  return {
+    binding,
+    selectedIndex: screen.selectedPosition - 1,
+    targetIndex: choice.index,
+    exiting: isExitingStrictAnswer(screen.kind, choice.index + 1, labels),
+  };
 }
 
 /** One strict answer, under the session's lock. */
@@ -337,7 +386,7 @@ async function answerStrictly(
   }
   if ('refused' in checked) return resultOf(facts, 40, checked.refused);
 
-  const { binding, selectedIndex, targetIndex } = checked;
+  const { binding, selectedIndex, targetIndex, exiting } = checked;
   const release = deps.startup.hold();
   try {
     const keys = strictAnswerKeys(selectedIndex, targetIndex);
@@ -372,7 +421,7 @@ async function answerStrictly(
     release();
   }
 
-  const outcome = await awaitOutcome(deps, binding);
+  const outcome = await awaitOutcome(deps, binding, exiting);
   if (isAnsweredOutcome(outcome)) return resultOf(facts, 0, null, outcome);
   return resultOf(facts, 41, outcome === 'unchanged' ? 'outcome_unchanged' : 'outcome_indeterminate', outcome);
 }

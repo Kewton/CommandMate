@@ -631,6 +631,14 @@ exits when the trust screen is answered `No, exit`) / `unchanged` (the same scre
 `unknown`). `advanced`, `next-prompt` and `session-ended` are success (exit 0); a screen that stayed is never answered
 again automatically.
 
+After an answer that itself exits agy (`No, exit`, the second of the trust screen's two options; a screen in another
+order, with another number of options or other wording has none), the tmux session stays up with the shell in it and
+the screen reads as `unknown`. When the pane's foreground command is a shell again (`zsh`, `bash`, ...), that is
+`session-ended` even though the screen reads as `unknown`. After any other answer (`Yes`, or an answer to a permission
+dialog) a shell in front is agy falling over, not the answer, and stays `indeterminate` (exit 41). A read after the
+Enter that failed is never overridden: `indeterminate`. A foreground command
+that cannot be read, or is still agy, is `indeterminate` too.
+
 Without `--operation-id <id>` a new id is used each time. Ids are kept per worktree and instance (session), together
 with what the request asked (kind, answer, token, `--expect-target`). Sending an operation that sent keys (exit 0 / 41)
 again with the same id and the same arguments returns the stored result (`replayed: true`) and **sends nothing twice**
