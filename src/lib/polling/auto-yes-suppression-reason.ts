@@ -68,11 +68,24 @@ export type AutoYesSuppressionReason =
    * Issue #3767: agy's approval dialog is on the pane but Auto-Yes has no
    * unused `PreToolUse` question to match it to (none ever, it appeared after
    * the window, it was already up, the hook stopped arriving, or — Issue #3789 —
-   * the last one was spent on keys Auto-Yes sent and a dialog is still up past
-   * the grace), so it is left to a human. Not a policy verdict; the poller
+   * the last one was spent on keys Auto-Yes sent — or, Issue #3796, began to
+   * send and was cut short — and a dialog is still up past the grace), so it
+   * is left to a human. Not a policy verdict; the poller
    * records it from the receipt gate.
    */
   | 'no-hook-receipt';
+
+/**
+ * Issue #3796: the reasons `resolveAutoAnswerWithPolicy` returns — the contract's
+ * verdict on the prompt as it is NOW, which a later tick re-evaluates, as
+ * opposed to a reason that remembers an event (`partial-answer`).
+ */
+export const CONTRACT_SUPPRESSION_REASONS: ReadonlySet<AutoYesSuppressionReason> = new Set<AutoYesSuppressionReason>([
+  'mode-off',
+  'deny-pattern',
+  'deny-pattern-unusable',
+  'type-not-allowed',
+]);
 
 /** Issue #3706: the reason the poller records for an answer stopped part-way. */
 export const PARTIAL_ANSWER_SUPPRESSION_REASON = 'partial-answer' satisfies AutoYesSuppressionReason;
