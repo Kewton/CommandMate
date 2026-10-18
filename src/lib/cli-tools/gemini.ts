@@ -32,7 +32,7 @@ import {
 import { withLaunchScreenCleared } from '@/lib/session/launch-screen';
 import { getErrorMessage } from '@/lib/errors';
 import { decideLaunchDialog, GEMINI_TRUST_LAUNCH_DIALOG, launchDialogWarning } from './launch-dialog';
-import { beginLaunchWindow, endLaunchWindow } from './launch-window';
+import { beginLaunchWindow, endLaunchWindow, recordLaunchDialogPress } from './launch-window';
 
 const logger = createLogger('cli-tools/gemini');
 
@@ -188,6 +188,9 @@ export class GeminiTool extends BaseCLITool {
             await sendSpecialKey(sessionName, decision.key);
             trustDialogHandled = true;
             trustPressedAt = Date.now();
+            // Issue #3790: the poller leaves the answered dialog alone even if
+            // the window closes before gemini redraws it.
+            recordLaunchDialogPress(sessionName, trustPressedAt);
             logger.info('auto-trusted-folder-for-gemini');
             // Continue polling for prompt after trust dialog
           } else {

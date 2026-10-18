@@ -1,0 +1,26 @@
+ [Current]  Sessions   Issues   Pull requests   Gists
+  ╭─╮╭─╮
+  ╰─╯╰─╯  Copilot v1.0.91 uses AI.
+  █ ▘▝ █  Check for mistakes.
+   ▔▔▔▔
+ ● No copilot-instructions.md found. Run /init to generate.
+ ● Tip: /app
+   └ Prefer a visual workspace? Try out the GitHub Copilot desktop app
+      https://github.com/features/ai/github-app 
+╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ Confirm folder trust                                                                                                                                                                                 │
+│ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── │
+│ ╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮ │
+│ │ /tmp/cm3790-live/cp-dir                                                                                                                                                                          │ │
+│ ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯ │
+│                                                                                                                                                                                                      │
+│ Copilot can read files in this folder and, with your permission, edit them or run code and shell commands. It will remember your permissions for the rest of this session.                           │
+│                                                                                                                                                                                                      │
+│ Do you trust the files in this folder?                                                                                                                                                               │
+│                                                                                                                                                                                                      │
+│ ❯ 1. Yes                                                                                                                                                                                             │
+│   2. Yes, and remember this folder for future sessions                                                                                                                                               │
+│   3. No (Esc)                                                                                                                                                                                        │
+│                                                                                                                                                                                                      │
+│ ↑/↓ to navigate · enter to select · esc to cancel                                                                                                                                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯

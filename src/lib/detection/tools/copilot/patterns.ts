@@ -583,6 +583,14 @@ export const COPILOT_FOLDER_TRUST_ANCHORS: readonly string[] = [
 export const COPILOT_FOLDER_TRUST_SESSION_OPTION_PATTERN = /^[ \t]*(?:[>❯][ \t]*)?1\.[ \t]+Yes[ \t]*$/m;
 
 /**
+ * The folder-trust dialog's option labels as the prompt parser reads them
+ * (`1. Yes` -> `Yes`), for the Auto-Yes poller to tell the dialog itself from
+ * another prompt under a reply that quotes its question (Issue #3790).
+ */
+export const COPILOT_FOLDER_TRUST_OPTION_LABEL_PATTERN =
+  /^(?:Yes|Yes, and remember this folder for future sessions|No \(Esc\))$/;
+
+/**
  * Key that selects {@link COPILOT_FOLDER_TRUST_SESSION_OPTION_PATTERN}.
  * Measured on 1.0.80: the digit confirms on its own — sending a trailing Enter
  * would land on the composer that the dialog's dismissal reveals.

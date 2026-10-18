@@ -10,6 +10,11 @@ import type { NormalizedFrame } from '../detection/tools/types';
 import { isCodexModelPickerFrame } from '../detection/tools/codex/detect';
 import { getCodexLifecycleDialog } from '../detection/cli-patterns';
 import { isAntigravityTrustScreen } from '../detection/tools/antigravity/patterns';
+import {
+  COPILOT_FOLDER_TRUST_ANCHORS,
+  COPILOT_FOLDER_TRUST_OPTION_LABEL_PATTERN,
+  isCopilotFolderTrustDialog,
+} from '../detection/tools/copilot/patterns';
 import { isStartupTrustPending, isStartupWindowOpen } from '../cli-tools/antigravity-startup-trust';
 import {
   GEMINI_TRUST_LAUNCH_DIALOG,
@@ -17,7 +22,7 @@ import {
   isLaunchDialogDrawn,
   isLaunchDialogOpen,
 } from '../cli-tools/launch-dialog';
-import { isLaunchWindowOpen } from '../cli-tools/launch-window';
+import { isLaunchDialogPressSettling, isLaunchWindowOpen } from '../cli-tools/launch-window';
 import { resolveSessionName } from '../cli-tools/session-name';
 import {
   QUESTION_CONFIRM_PAGE_SUPPRESSION_REASON,
@@ -75,6 +80,9 @@ export function suppressAndWarnOnce(
   });
 }
 
+/** The `dialog` that copilot's folder-trust suppression records (Issue #3790). */
+export const COPILOT_FOLDER_TRUST_LAUNCH_DIALOG_ID = 'copilot-folder-trust';
+
 /** How much of a prompt's question a log line carries (Issue #3497). */
 export const MAX_LOGGED_QUESTION_LENGTH = 500;
 
@@ -97,6 +105,23 @@ export type NotOursToAnswerVerdict =
   | { kind: 'ours' }
   | { kind: 'left-alone' }
   | { kind: 'dialog-gate-refused'; dialogGate: AutoYesDialogGateVerdict };
+
+/**
+ * Whether the launch still owns its startup confirmation for this instance:
+ * its window is open (Issue #3776), or it pressed the confirming key less than
+ * `LAUNCH_DIALOG_PRESS_SETTLE_MS` ago and the agent may not have redrawn yet —
+ * the window can close in between (Issue #3790).
+ */
+function isLaunchStillAnswering(cliToolId: 'gemini' | 'copilot', prompt: JudgedPrompt): boolean {
+  let sessionName: string;
+  try {
+    sessionName = resolveSessionName(cliToolId, prompt.worktreeId, prompt.instanceId);
+  } catch {
+    // An id that would not make a session name was never launched here.
+    return false;
+  }
+  return isLaunchWindowOpen(sessionName) || isLaunchDialogPressSettling(sessionName);
+}
 
 /**
  * Issue #3776: whether the prompt the poller is about to answer is gemini's
@@ -122,7 +147,9 @@ function isGeminiTrustPrompt(promptData: PromptData): boolean {
  * the answer is the safe one:
  * - While the launch window is open (`cli-tools/launch-window`), never: the
  *   launch answers it, and an answered dialog stays drawn above gemini's
- *   restart line, where a `1` lands on whatever the restart draws next.
+ *   restart line, where a `1` lands on whatever the restart draws next. Nor
+ *   for a while after the launch's Enter, window or not (Issue #3790,
+ *   {@link isLaunchStillAnswering}).
  * - After it — the launch's Enter did not land, or gemini drew the dialog late
  *   (an auto-update, a slow start) — only when the prompt's default (the
  *   cursor row, which is what the poller sends) is `1. Trust folder`, and,
@@ -137,13 +164,7 @@ function isGeminiTrustPrompt(promptData: PromptData): boolean {
 function isGeminiTrustDialogLeftToLaunch(prompt: JudgedPrompt, frame: NormalizedFrame): boolean {
   const { promptData } = prompt;
   if (promptData.type !== 'multiple_choice' || !isGeminiTrustPrompt(promptData)) return false;
-  let windowOpen = false;
-  try {
-    windowOpen = isLaunchWindowOpen(resolveSessionName('gemini', prompt.worktreeId, prompt.instanceId));
-  } catch {
-    // An id that would not make a session name was never launched here.
-  }
-  if (windowOpen) return true;
+  if (isLaunchStillAnswering('gemini', prompt)) return true;
   const defaultOption = promptData.options.find((o) => o.isDefault);
   const defaultIsSafe =
     defaultOption !== undefined &&
@@ -152,6 +173,35 @@ function isGeminiTrustDialogLeftToLaunch(prompt: JudgedPrompt, frame: Normalized
   if (!isLaunchDialogDrawn(GEMINI_TRUST_LAUNCH_DIALOG, frame.clean)) return false;
   if (!isLaunchDialogOpen(GEMINI_TRUST_LAUNCH_DIALOG, frame.clean)) return true;
   return decideLaunchDialog(GEMINI_TRUST_LAUNCH_DIALOG, frame.clean).action !== 'press';
+}
+
+/**
+ * Issue #3790: whether copilot's folder-trust dialog on this frame is left to
+ * the launch (step 3), as gemini's is. The launch confirms it with a bare `1`
+ * (`CopilotTool.answerFolderTrustDialog`); the poller answered `1` + Enter
+ * beside it, and when the launch's `1` landed first, the poller's was typed
+ * into the composer the dismissal revealed and submitted as a user message
+ * (measured on 1.0.91, private tmux socket and HOME).
+ *
+ * Judged only when the frame carries both of the dialog's anchors and the
+ * prompt's options are its rows: a reply quoting the question over another
+ * prompt is answered as any prompt is. Left alone while the launch is still
+ * answering ({@link isLaunchStillAnswering}); after it — the launch's `1` did
+ * not land, or copilot drew the dialog late — the poller's default goes through
+ * only when it is the session-only `1. Yes` in the declared order
+ * (`isCopilotFolderTrustDialog`). `2.` writes `trustedFolders` into the
+ * machine-wide `~/.copilot/config.json`.
+ */
+function isCopilotTrustDialogLeftToLaunch(prompt: JudgedPrompt, frame: NormalizedFrame): boolean {
+  const { promptData } = prompt;
+  if (promptData.type !== 'multiple_choice') return false;
+  if (!COPILOT_FOLDER_TRUST_ANCHORS.every((anchor) => frame.clean.includes(anchor))) return false;
+  const trustRows = promptData.options.filter((o) => COPILOT_FOLDER_TRUST_OPTION_LABEL_PATTERN.test(o.label));
+  if (trustRows.length < 2) return false;
+  if (isLaunchStillAnswering('copilot', prompt)) return true;
+  const defaultOption = promptData.options.find((o) => o.isDefault);
+  const defaultIsSessionOnly = defaultOption?.number === 1 && defaultOption.label === 'Yes';
+  return !(defaultIsSessionOnly && isCopilotFolderTrustDialog(frame.clean));
 }
 
 /**
@@ -197,12 +247,17 @@ export function suppressIfNotOursToAnswer(prompt: JudgedPrompt, frame: Normalize
   // `Don't trust`, written for good — when the cursor sat there. The launch
   // confirms only `1. Trust folder` (`cli-tools/launch-dialog`). See
   // {@link isGeminiTrustDialogLeftToLaunch} for when the poller may answer.
+  //
+  // Issue #3790: copilot's folder-trust question too, whose launch answers a
+  // bare `1` (see {@link isCopilotTrustDialogLeftToLaunch}).
   const launchDialog =
     cliToolId === 'codex'
       ? getCodexLifecycleDialog(frame)
       : cliToolId === 'gemini' && isGeminiTrustDialogLeftToLaunch(prompt, frame)
         ? GEMINI_TRUST_LAUNCH_DIALOG.id
-        : null;
+        : cliToolId === 'copilot' && isCopilotTrustDialogLeftToLaunch(prompt, frame)
+          ? COPILOT_FOLDER_TRUST_LAUNCH_DIALOG_ID
+          : null;
   if (launchDialog) {
     // Recorded through the #1684 channel so `capture --json` and `cmate wait`
     // can name the reason instead of showing a worker that went quiet.
