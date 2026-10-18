@@ -30,12 +30,16 @@ export interface AutoYesPollerState {
   /** Last server-side response timestamp */
   lastServerResponseTimestamp: number | null;
   /**
-   * Issue #3791: epoch ms the pending tick is due at. The push gate reads it
-   * (off `globalThis`) to hold a wait until the tick that will see it — a
-   * backoff can put that tick past `AUTO_YES_ANSWER_GRACE_MS`. Optional so
-   * hand-built states need not name it.
+   * Issue #3791: epoch ms the pending tick is due at, set only while that tick
+   * is the session wait's (`MAX_BACKOFF_MS` after a capture found no session).
+   * That is the one tick past `AUTO_YES_ANSWER_GRACE_MS` that still answers: a
+   * session started meanwhile gets its first prompt answered on it. The push
+   * gate reads it (off `globalThis`) to hold a wait until then. An error
+   * backoff does not set it — a poller failing in a row is the case a human
+   * should hear about at the usual time. Optional so hand-built states need not
+   * name it.
    */
-  nextPollAt?: number;
+  sessionWaitTickAt?: number;
   /** Last answered prompt key for duplicate prevention (Issue #306) */
   lastAnsweredPromptKey: string | null;
   /** Timestamp when lastAnsweredPromptKey was set (for retry expiry) */

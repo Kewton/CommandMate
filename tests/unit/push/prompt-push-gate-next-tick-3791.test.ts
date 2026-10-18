@@ -1,15 +1,16 @@
 /**
- * Issue #3791 (item 1): the Auto-Yes hold lasts until the poller's pending tick.
+ * Issue #3791 (item 1): the Auto-Yes hold lasts until the session wait's tick.
  *
- * The 9 s grace assumed the next tick is at most a cooldown away. A poller in
- * error backoff ticks later, and that tick still answers, so before #3791 a
- * wait in the answering flow notified once at 9 s. The hold now also reaches
- * the tick the poller had scheduled when the hold began (`nextPollAt`) plus two
- * ticks — that tick only, read once, so a wait Auto-Yes does not answer still
- * notifies instead of being held for every later tick.
+ * The 9 s grace assumed the next tick is at most a cooldown away. A poller
+ * waiting for its session ticks `MAX_BACKOFF_MS` later, and a session started
+ * meanwhile gets its first prompt answered on that tick, so before #3791 such a
+ * wait notified once at 9 s. The hold now also reaches that tick
+ * (`sessionWaitTickAt`, read once when the hold begins) plus two ticks, while
+ * the poller that scheduled it still runs. An error backoff is not waited for:
+ * a failing Auto-Yes notifies at 9 s as before.
  *
  * Positive controls fail on the pre-#3791 gate (they notify at 9 s); negative
- * controls hold the 9 s behaviour where the tick is near. Scaffold as in
+ * controls hold the 9 s behaviour. Scaffold as in
  * `waiting-push-answer-grace-3757.test.ts`: real database, only `web-push` stubbed.
  *
  * @vitest-environment node
@@ -39,7 +40,6 @@ import type { AutoYesPollerState } from '@/lib/auto-yes-poller';
 import {
   AUTO_YES_ANSWER_AFTER_TICK_MS,
   AUTO_YES_ANSWER_GRACE_MS,
-  AUTO_YES_HOLD_LIMIT_MS,
   autoYesHoldEndsAt,
   clearAutoYesHolds,
   decideAndLogPromptPush,
@@ -133,64 +133,68 @@ function startWaiting(instanceId?: string, now = T0): void {
 }
 
 /**
- * The Auto-Yes poller's pending tick, as the poller keeps it on `globalThis`
- * (`nextPollAt`), for the default instance of this worktree. Null: no poller.
+ * Put an Auto-Yes poller state under the default instance of this worktree, as
+ * the poller keeps it on `globalThis`, and return it (its identity is what the
+ * gate checks). `sessionWaitTickAt` is the session wait's pending tick.
  */
-function pollerTickDueAt(at: number | null): void {
+function putPoller(fields: Partial<AutoYesPollerState> = {}): AutoYesPollerState {
   const states = (globalThis.__autoYesPollerStates ??= new Map<string, AutoYesPollerState>());
-  const key = buildCompositeKey(WT, 'claude');
-  if (at === null) states.delete(key);
-  else states.set(key, { lastServerResponseTimestamp: null, nextPollAt: at } as AutoYesPollerState);
+  const state = { lastServerResponseTimestamp: null, consecutiveErrors: 0, currentInterval: POLLING_INTERVAL_MS, ...fields } as AutoYesPollerState;
+  states.set(buildCompositeKey(WT, 'claude'), state);
+  return state;
 }
 
-/** A tick a backoff away: 30 s, well past the 9 s grace. */
-const BACKOFF_TICK = 30_000;
+function dropPoller(): void {
+  globalThis.__autoYesPollerStates?.delete(buildCompositeKey(WT, 'claude'));
+}
 
-describe('[#3791] the hold reaches the poller tick that will see the wait', () => {
+/** The session wait's tick: 30 s away, well past the 9 s grace. */
+const SESSION_TICK = 30_000;
+const gate = { worktreeId: WT, cliToolId: 'claude' as const, waitingSince: T0 };
+
+describe('[#3791] the hold reaches the session wait\'s tick', () => {
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] });
     vi.setSystemTime(T0);
     clearAutoYesHolds();
-    pollerTickDueAt(null);
+    dropPoller();
   });
 
   afterEach(() => {
     clearAutoYesHolds();
-    pollerTickDueAt(null);
+    dropPoller();
   });
 
-  it('the limits: two ticks after the tick, a full backoff at most', () => {
+  it('two ticks after the tick', () => {
     expect(AUTO_YES_ANSWER_AFTER_TICK_MS).toBe(2 * POLLING_INTERVAL_MS);
-    expect(AUTO_YES_HOLD_LIMIT_MS).toBe(MAX_BACKOFF_MS + 2 * POLLING_INTERVAL_MS);
   });
 
-  it('positive: in backoff, a wait the poller answers on its late tick sends nothing', async () => {
+  it('positive: a wait the poller answers on its session-wait tick sends nothing', async () => {
     setAutoYesEnabled(WT, 'claude', true);
-    pollerTickDueAt(T0 + BACKOFF_TICK);
+    putPoller({ sessionWaitTickAt: T0 + SESSION_TICK });
 
     startWaiting();
     await flush();
     // Past the 9 s grace: before #3791 this was the one false notification.
-    await vi.advanceTimersByTimeAsync(AUTO_YES_ANSWER_GRACE_MS + 1_000);
+    await vi.advanceTimersByTimeAsync(SESSION_TICK - 1);
     await flush();
     expect(sendNotification).not.toHaveBeenCalled();
 
-    // The late tick answers: the wait closes.
-    await vi.advanceTimersByTimeAsync(BACKOFF_TICK - AUTO_YES_ANSWER_GRACE_MS - 1_000);
+    // The tick answers: the wait closes.
+    await vi.advanceTimersByTimeAsync(1);
     observeWaitingEdge({ worktreeId: WT, cliToolId: 'claude', waiting: false, now: Date.now() });
-
-    await vi.advanceTimersByTimeAsync(AUTO_YES_HOLD_LIMIT_MS);
+    await vi.advanceTimersByTimeAsync(MAX_BACKOFF_MS);
     await flush();
     expect(sendNotification).not.toHaveBeenCalled();
   });
 
-  it('positive: the late tick did not answer either — it notifies two ticks after that tick, once', async () => {
+  it('positive: the tick did not answer either — it notifies two ticks after that tick, once', async () => {
     setAutoYesEnabled(WT, 'claude', true);
-    pollerTickDueAt(T0 + BACKOFF_TICK);
+    putPoller({ sessionWaitTickAt: T0 + SESSION_TICK });
 
     startWaiting();
     await flush();
-    await vi.advanceTimersByTimeAsync(BACKOFF_TICK + AUTO_YES_ANSWER_AFTER_TICK_MS - 1);
+    await vi.advanceTimersByTimeAsync(SESSION_TICK + AUTO_YES_ANSWER_AFTER_TICK_MS - 1);
     await flush();
     expect(sendNotification).not.toHaveBeenCalled();
 
@@ -202,19 +206,37 @@ describe('[#3791] the hold reaches the poller tick that will see the wait', () =
 
   it('positive (response-checker path): held past 9 s, then "not answered" after the tick', () => {
     setAutoYesEnabled(WT, 'claude', true);
-    pollerTickDueAt(T0 + BACKOFF_TICK);
-    const gate = { worktreeId: WT, cliToolId: 'claude' as const, waitingSince: T0 };
+    putPoller({ sessionWaitTickAt: T0 + SESSION_TICK });
 
     expect(isPromptPushSuppressed({ ...gate, now: T0 })).toBe(true);
     expect(isPromptPushSuppressed({ ...gate, now: T0 + AUTO_YES_ANSWER_GRACE_MS })).toBe(true);
-    expect(decideAndLogPromptPush({ ...gate, now: T0 + BACKOFF_TICK + AUTO_YES_ANSWER_AFTER_TICK_MS }).reason).toBe(
+    expect(decideAndLogPromptPush({ ...gate, now: T0 + SESSION_TICK + AUTO_YES_ANSWER_AFTER_TICK_MS }).reason).toBe(
       'auto-yes-not-answered',
     );
   });
 
-  it('negative: a tick within the grace leaves the 9 s hold as it was', async () => {
+  it('positive: Auto-Yes enabled again while on (same poller) keeps the tick', async () => {
     setAutoYesEnabled(WT, 'claude', true);
-    pollerTickDueAt(T0 + POLLING_INTERVAL_MS);
+    putPoller({ sessionWaitTickAt: T0 + SESSION_TICK });
+    startWaiting();
+    await flush();
+
+    // Enabled again 5 s in: `enabledAt` moves, the poller is `already_running`.
+    await vi.advanceTimersByTimeAsync(5_000);
+    setAutoYesEnabled(WT, 'claude', true);
+
+    await vi.advanceTimersByTimeAsync(SESSION_TICK + AUTO_YES_ANSWER_AFTER_TICK_MS - 5_000 - 1);
+    await flush();
+    expect(sendNotification).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    await flush();
+    expect(sendNotification).toHaveBeenCalledTimes(1);
+  });
+
+  it('negative: an error backoff is not waited for — it notifies at 9 s', async () => {
+    setAutoYesEnabled(WT, 'claude', true);
+    // Failing in a row: the next tick 32 s away, but not the session wait's.
+    putPoller({ consecutiveErrors: 7, currentInterval: 32_000 });
 
     startWaiting();
     await flush();
@@ -226,46 +248,61 @@ describe('[#3791] the hold reaches the poller tick that will see the wait', () =
     expect(sendNotification).toHaveBeenCalledTimes(1);
   });
 
-  it('negative: no poller, or a tick already running (due in the past), is the 9 s hold', () => {
+  it('negative: no session-wait tick, or one already running (due in the past), is the 9 s hold', () => {
     setAutoYesEnabled(WT, 'claude', true);
-    const gate = { worktreeId: WT, cliToolId: 'claude' as const, waitingSince: T0 };
     expect(autoYesHoldEndsAt(gate, T0)).toBe(T0 + AUTO_YES_ANSWER_GRACE_MS);
 
     clearAutoYesHolds();
-    pollerTickDueAt(T0 - 1);
+    putPoller({ sessionWaitTickAt: T0 - 1 });
     expect(autoYesHoldEndsAt(gate, T0)).toBe(T0 + AUTO_YES_ANSWER_GRACE_MS);
   });
 
-  it('negative: the tick is read once — a poller that puts it off again does not extend the hold', async () => {
+  it('negative: the tick is read once — a session wait scheduled after the hold began does not extend it', async () => {
     setAutoYesEnabled(WT, 'claude', true);
-    pollerTickDueAt(T0 + POLLING_INTERVAL_MS);
+    const poller = putPoller();
 
     startWaiting();
     await flush();
-    // The tick ran, saw nothing to answer, and backed off further.
     await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS);
-    pollerTickDueAt(Date.now() + MAX_BACKOFF_MS);
+    poller.sessionWaitTickAt = Date.now() + MAX_BACKOFF_MS;
 
     await vi.advanceTimersByTimeAsync(AUTO_YES_ANSWER_GRACE_MS - POLLING_INTERVAL_MS);
     await flush();
     expect(sendNotification).toHaveBeenCalledTimes(1);
   });
 
-  it('negative: a tick further than a backoff (a clock that jumped) is capped', () => {
+  it('negative: a tick further than the session wait (a clock that jumped) is capped', () => {
     setAutoYesEnabled(WT, 'claude', true);
-    pollerTickDueAt(T0 + 10 * MAX_BACKOFF_MS);
-    const gate = { worktreeId: WT, cliToolId: 'claude' as const, waitingSince: T0 };
-    expect(autoYesHoldEndsAt(gate, T0)).toBe(T0 + AUTO_YES_HOLD_LIMIT_MS);
+    putPoller({ sessionWaitTickAt: T0 + 10 * MAX_BACKOFF_MS });
+    expect(autoYesHoldEndsAt(gate, T0)).toBe(T0 + MAX_BACKOFF_MS + AUTO_YES_ANSWER_AFTER_TICK_MS);
   });
 
-  it('negative: Auto-Yes re-enabled inside the episode drops the old poller tick', () => {
+  it('negative: Auto-Yes off → on (a new poller) drops the old poller\'s tick', () => {
     setAutoYesEnabled(WT, 'claude', true);
-    const real = Date.now();
-    pollerTickDueAt(real + 40_000);
-    const gate = { worktreeId: WT, cliToolId: 'claude' as const, waitingSince: T0 };
-    // The hold began 10 s ago, with the old poller's tick 50 s after it.
-    expect(autoYesHoldEndsAt(gate, real - 10_000)).toBe(real + 40_000 + AUTO_YES_ANSWER_AFTER_TICK_MS);
-    // Auto-Yes was (re-)enabled just now (`enabledAt` = real): the grace from then, not the old tick.
-    expect(autoYesHoldEndsAt(gate, real + 1)).toBe(real + AUTO_YES_ANSWER_GRACE_MS);
+    putPoller({ sessionWaitTickAt: T0 + SESSION_TICK });
+    expect(autoYesHoldEndsAt(gate, T0)).toBe(T0 + SESSION_TICK + AUTO_YES_ANSWER_AFTER_TICK_MS);
+
+    vi.setSystemTime(T0 + 5_000);
+    setAutoYesEnabled(WT, 'claude', false);
+    setAutoYesEnabled(WT, 'claude', true);
+    putPoller(); // the new poller, first tick a poll interval away
+    expect(autoYesHoldEndsAt(gate, T0 + 5_000)).toBe(T0 + 5_000 + AUTO_YES_ANSWER_GRACE_MS);
+  });
+
+  it('negative: a poller stopped during the hold ends it at the next grace, not at the tick', async () => {
+    setAutoYesEnabled(WT, 'claude', true);
+    putPoller({ sessionWaitTickAt: T0 + SESSION_TICK });
+    startWaiting();
+    await flush();
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    dropPoller();
+
+    await vi.advanceTimersByTimeAsync(AUTO_YES_ANSWER_GRACE_MS - 5_000 - 1);
+    await flush();
+    expect(sendNotification).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    await flush();
+    expect(sendNotification).toHaveBeenCalledTimes(1);
   });
 });
