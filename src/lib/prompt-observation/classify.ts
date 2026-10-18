@@ -4,7 +4,8 @@
  * Reading is delegated to the tool's own readers — agy's numbered-dialog reader
  * (`detection/tools/antigravity/dialog.ts`, the one every producer of agy's
  * `multiple_choice` prompt uses) and its arrow-screen reader
- * (`detection/tools/antigravity/screens.ts`). What this module owns is the
+ * (`detection/tools/antigravity/screens.ts`), plus agy 1.4's `/model` picker
+ * (`./antigravity-model-picker`, Issue #3797). What this module owns is the
  * mapping onto the observation's own kinds, and the rule that a screen no
  * measured reader names is `unknown` — never a measured kind, and never
  * "nothing is asking" while the status layer says something is.
@@ -18,11 +19,13 @@
 
 import { stripAnsi, stripBoxDrawing, isAntigravityNumberedDialog } from '@/lib/detection/cli-patterns';
 import { detectAntigravityNumberedDialogPrompt } from '@/lib/detection/tools/antigravity/dialog';
+import { ANTIGRAVITY_NAVIGATE_FOOTER_PATTERN } from '@/lib/detection/tools/antigravity/patterns';
 import {
   readAntigravityArrowScreen,
   type AntigravityArrowScreenKind,
 } from '@/lib/detection/tools/antigravity/screens';
 import { isAnswerablePromptData, type LivePromptData } from '@/types/models';
+import { readAntigravityModelPicker } from './antigravity-model-picker';
 import type { PromptObservationKind } from './kinds';
 
 /** The fields of a `current-output` payload the classification reads. */
@@ -62,6 +65,23 @@ const EMPTY: Omit<ClassifiedScreen, 'kind'> = {
   selectedIndex: -1,
 };
 
+/**
+ * The footer every measured agy permission dialog ends on: `↑/↓ Navigate ·
+ * tab Amend · f full diff` (file creation), `… · tab Amend · ctrl+g
+ * edit/expand command[ · ctrl+r Review]` (command execution)
+ * (`tests/fixtures/antigravity-live-2364/dialog-*.txt`).
+ */
+const PERMISSION_FOOTER_PATTERN = /↑\/↓\s*Navigate\s*·\s*tab Amend\b/;
+
+/** Whether the last `↑/↓ Navigate` row of the frame is a permission dialog's footer. */
+function hasPermissionFooter(text: string): boolean {
+  const lines = text.split('\n');
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (ANTIGRAVITY_NAVIGATE_FOOTER_PATTERN.test(lines[i])) return PERMISSION_FOOTER_PATTERN.test(lines[i]);
+  }
+  return false;
+}
+
 /** agy's measured screens, or null when the frame is none of them. */
 function classifyAntigravity(frame: string): ClassifiedScreen | null {
   const text = stripAnsi(frame);
@@ -70,6 +90,10 @@ function classifyAntigravity(frame: string): ClassifiedScreen | null {
   // the structural test and still fails to read is `unknown`, not a picker.
   const boxless = stripBoxDrawing(text);
   if (isAntigravityNumberedDialog(boxless)) {
+    // Every measured permission dialog ends on a `tab Amend` footer; agy's
+    // numbered login-method screen (`↑/↓ Navigate · enter Select`, Issue
+    // #3797) passes the structural test too and is not one.
+    if (!hasPermissionFooter(boxless)) return { kind: 'unknown', ...EMPTY };
     const detected = detectAntigravityNumberedDialogPrompt(boxless);
     const prompt = detected?.promptData;
     if (prompt?.type !== 'multiple_choice') return { kind: 'unknown', ...EMPTY };
@@ -83,7 +107,19 @@ function classifyAntigravity(frame: string): ClassifiedScreen | null {
   }
 
   const arrow = readAntigravityArrowScreen(text);
-  if (arrow === null) return null;
+  if (arrow === null) {
+    // agy 1.4's picker (search box over the models, Issue #3797), read by
+    // its whole shape only: anything short of it stays unmeasured.
+    const picker = readAntigravityModelPicker(text);
+    if (picker === null) return null;
+    return {
+      kind: 'antigravity-model-picker',
+      question: picker.question,
+      approvalTarget: null,
+      options: [...picker.options],
+      selectedIndex: picker.selectedIndex,
+    };
+  }
   return {
     kind: ARROW_SCREEN_KIND[arrow.screen],
     question: arrow.question,
