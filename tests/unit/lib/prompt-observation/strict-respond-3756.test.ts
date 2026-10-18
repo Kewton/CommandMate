@@ -21,7 +21,7 @@ import {
   type StrictRespondDeps,
   type StrictRespondRequest,
 } from '@/lib/prompt-observation/strict-respond';
-import type { PromptObservationKind } from '@/lib/prompt-observation/kinds';
+import { EXITING_STRICT_ANSWERS, type PromptObservationKind } from '@/lib/prompt-observation/kinds';
 import {
   beginStartupWindow,
   claimStartupTrust,
@@ -727,6 +727,55 @@ describe('[#3788] "No, exit" leaves the shell in a pane that is still up', () =>
       return next;
     };
     const result = await respondStrictly(request({ answer: 'No' }), deps());
+    expect(result).toMatchObject({ code: 41, reason: 'outcome_indeterminate', outcome: 'indeterminate' });
+  });
+});
+
+describe('[#3788] a shell in front is session-ended only after the answer that exits', () => {
+  /** Whatever the answer, agy is gone after the Enter and the shell is left. */
+  function agyFallsOverOnEnter(key: string, frame: string): string {
+    if (key === 'Down') return frame === TRUST ? TRUST_ON_NO : frame;
+    if (key === 'Enter') {
+      pane.command = 'zsh';
+      return SHELL_AFTER_EXIT;
+    }
+    return frame;
+  }
+
+  beforeEach(() => {
+    pane.onKey = agyFallsOverOnEnter;
+  });
+
+  it('the declaration names the measured trust screen\'s "No, exit" (position 2 of 2)', () => {
+    const screen = observe().screen;
+    expect(screen?.kind).toBe('antigravity-trust');
+    const exiting = EXITING_STRICT_ANSWERS['antigravity-trust'];
+    expect(exiting).toEqual({ position: 2, optionCount: 2 });
+    expect(screen?.options.length).toBe(exiting?.optionCount);
+    expect(screen?.options[(exiting?.position ?? 0) - 1].label).toBe('No, exit');
+    // The permission dialog has no exiting answer.
+    expect(EXITING_STRICT_ANSWERS['antigravity-permission']).toBeUndefined();
+  });
+
+  it('"No, exit" then a shell in front: exit 0 session-ended, with its own message', async () => {
+    const result = await respondStrictly(request({ answer: 'No' }), deps());
+    expect(result).toMatchObject({ code: 0, reason: null, outcome: 'session-ended' });
+    expect(result.message).toBe('Answered: the session ended (agy exits on "No, exit").');
+  });
+
+  it('"Yes" then a shell in front (agy fell over): stays exit 41 indeterminate', async () => {
+    const result = await respondStrictly(request({ answer: 'Yes' }), deps());
+    expect(pane.keys).toEqual(['Enter']);
+    expect(result).toMatchObject({ code: 41, reason: 'outcome_indeterminate', outcome: 'indeterminate', keysSent: 1 });
+  });
+
+  it('a permission answer then a shell in front: stays exit 41 indeterminate', async () => {
+    pane.frame = PERMISSION;
+    const result = await respondStrictly(
+      request({ expectScreen: 'antigravity-permission', observationToken: tokenNow(), expectTarget: null }),
+      deps()
+    );
+    expect(pane.keys).toEqual(['Enter']);
     expect(result).toMatchObject({ code: 41, reason: 'outcome_indeterminate', outcome: 'indeterminate' });
   });
 });

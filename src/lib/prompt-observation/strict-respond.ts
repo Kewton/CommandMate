@@ -22,9 +22,11 @@
  * are success. A
  * screen that stayed is never answered again from here. agy's `No, exit`
  * leaves the tmux session up with the shell in it, a screen no reader names
- * (`unknown`): that read is `session-ended` only when tmux also says the
- * pane's foreground command is a shell again (Issue #3788). A command that
- * cannot be read, or is still the agent, leaves it `indeterminate`.
+ * (`unknown`): that read is `session-ended` only when the answer sent was the
+ * kind's exiting answer (`EXITING_STRICT_ANSWERS`) AND tmux says the pane's
+ * foreground command is a shell again (Issue #3788). After any other answer a
+ * shell in front is the agent falling over, not the answer: `indeterminate`,
+ * as is a command that cannot be read or is still the agent.
  *
  * ## Serialised, and deduplicated
  *
@@ -53,7 +55,7 @@
 
 import { getOrInitGlobal } from '@/lib/global-state';
 import { isShellPaneCommand } from '@/lib/detection/shared/shell-pane-command';
-import { isDecisionKind, isStrictRespondKind, type PromptObservationKind } from './kinds';
+import { isDecisionKind, isExitingStrictAnswer, isStrictRespondKind, type PromptObservationKind } from './kinds';
 import { observationBindingOf } from './observe';
 import { consumeObservationToken, type ObservationTokenBinding } from './token';
 import { isScreenOpenAtBottom, resolveStrictChoice, sameApprovalTarget, strictAnswerKeys } from './strict-choice';
@@ -284,8 +286,17 @@ async function agentExitedToShell(deps: StrictRespondDeps): Promise<boolean> {
   }
 }
 
-/** Read for a few seconds after the Enter; the first answered outcome ends it. */
-async function awaitOutcome(deps: StrictRespondDeps, binding: ObservationTokenBinding): Promise<StrictRespondOutcome> {
+/**
+ * Read for a few seconds after the Enter; the first answered outcome ends it.
+ *
+ * @param exiting - Whether the answer sent was the kind's exiting answer
+ *   (`isExitingStrictAnswer`): only then is a shell in front `session-ended`.
+ */
+async function awaitOutcome(
+  deps: StrictRespondDeps,
+  binding: ObservationTokenBinding,
+  exiting: boolean
+): Promise<StrictRespondOutcome> {
   const deadline = deps.now() + STRICT_OUTCOME_WAIT_MS;
   let outcome: StrictRespondOutcome = 'indeterminate';
   for (;;) {
@@ -293,9 +304,12 @@ async function awaitOutcome(deps: StrictRespondDeps, binding: ObservationTokenBi
     const read = await deps.read();
     outcome = outcomeOf(read, binding);
     // A screen that was read and that no reader names, with the shell back in
-    // front: the agent has exited (agy on `No, exit`). Not for a read that
-    // failed — the frame is not known — nor for a screen that stayed.
-    if (outcome === 'indeterminate' && read.ok && (await agentExitedToShell(deps))) outcome = 'session-ended';
+    // front after an answer that exits: the agent did what it was told (agy on
+    // `No, exit`). Not after another answer — the agent fell over on its own —
+    // nor for a read that failed (the frame is not known) or a screen that stayed.
+    if (exiting && outcome === 'indeterminate' && read.ok && (await agentExitedToShell(deps))) {
+      outcome = 'session-ended';
+    }
     if (isAnsweredOutcome(outcome)) return outcome;
     if (deps.now() >= deadline) return outcome;
   }
@@ -311,7 +325,7 @@ async function checkBeforeSending(
   facts: Facts
 ): Promise<
   | { refused: StrictRespondReason }
-  | { binding: ObservationTokenBinding; selectedIndex: number; targetIndex: number }
+  | { binding: ObservationTokenBinding; selectedIndex: number; targetIndex: number; exiting: boolean }
 > {
   const read = await deps.read();
   if (!read.ok) return { refused: read.stage === 'capture' ? 'capture_failed' : 'observation_failed' };
@@ -348,7 +362,12 @@ async function checkBeforeSending(
   const verdict = consumeObservationToken(request.observationToken, binding, deps.now());
   if (!verdict.ok) return { refused: `token_${verdict.reason.replace(/-/g, '_')}` as StrictRespondReason };
 
-  return { binding, selectedIndex: screen.selectedPosition - 1, targetIndex: choice.index };
+  return {
+    binding,
+    selectedIndex: screen.selectedPosition - 1,
+    targetIndex: choice.index,
+    exiting: isExitingStrictAnswer(screen.kind, choice.index + 1, labels.length),
+  };
 }
 
 /** One strict answer, under the session's lock. */
@@ -367,7 +386,7 @@ async function answerStrictly(
   }
   if ('refused' in checked) return resultOf(facts, 40, checked.refused);
 
-  const { binding, selectedIndex, targetIndex } = checked;
+  const { binding, selectedIndex, targetIndex, exiting } = checked;
   const release = deps.startup.hold();
   try {
     const keys = strictAnswerKeys(selectedIndex, targetIndex);
@@ -402,7 +421,7 @@ async function answerStrictly(
     release();
   }
 
-  const outcome = await awaitOutcome(deps, binding);
+  const outcome = await awaitOutcome(deps, binding, exiting);
   if (isAnsweredOutcome(outcome)) return resultOf(facts, 0, null, outcome);
   return resultOf(facts, 41, outcome === 'unchanged' ? 'outcome_unchanged' : 'outcome_indeterminate', outcome);
 }

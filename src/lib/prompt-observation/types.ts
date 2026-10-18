@@ -272,9 +272,9 @@ export type StrictRespondDelivery = 'not-sent' | 'partial' | 'sent' | 'indetermi
  * What the screen did after the Enter, read again within a few seconds:
  * `unchanged` (the same screen), `advanced` (nothing asks any more: the input
  * box, or working), `next-prompt` (another measured decision screen),
- * `session-ended` (the session is gone, or the agent exited back to the shell
- * in a pane that is still up — agy exits on the trust screen's `No, exit`;
- * Issue #3788), `indeterminate` (could not be read, or `unknown`).
+ * `session-ended` (the session is gone, or — after the kind's exiting answer
+ * only, agy's `No, exit` — the agent exited back to the shell in a pane that is
+ * still up; Issue #3788), `indeterminate` (could not be read, or `unknown`).
  */
 export type StrictRespondOutcome = 'unchanged' | 'advanced' | 'next-prompt' | 'session-ended' | 'indeterminate';
 

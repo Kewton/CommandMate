@@ -900,6 +900,12 @@ Enter の後、数秒のあいだ画面を取り直して `outcome` を返しま
 `unchanged`（同じ画面のまま）/ `indeterminate`（読めない・`unknown`）。成功（exit 0）は `advanced`・`next-prompt`・`session-ended`
 で、同じ画面のままでも自動で再送はしません。
 
+`No, exit` のように答え自体が agy を終了させる選択肢（信頼の確認の `No, exit`）では、agy が終了したあと tmux のセッションは
+シェルを残して動き続け、画面は `unknown` と読まれます。このときペインの前景コマンドがシェル（`zsh` / `bash` など）に戻っていれば、
+画面が読めなくても `session-ended` とします。それ以外の答え（`Yes` や permission の答え）のあとにシェルが前景に戻っていても、
+それは答えの結果ではなく agy が落ちたものとして `indeterminate`（exit 41）のままです。前景コマンドが読めない・agy のままのときも
+`indeterminate` です。
+
 `--operation-id <id>` を省くと毎回新しい ID を付けます。ID は worktree と instance（セッション）ごとで、要求の中身（kind・答え・
 トークン・`--expect-target`）と一緒に覚えます。キーを送った操作（exit 0・41）を同じ ID・同じ中身で再送すると、覚えている結果
 （`replayed: true`）を返し、**二重に送りません**（10 分間。サーバの再起動で忘れます）。中身の違う要求に同じ ID を使うと何も送らず

@@ -320,6 +320,19 @@ describe('[#3788] the route answers "No, exit" as session-ended through the serv
     }
   });
 
+  it('stays exit 41 when "Yes" is followed by a shell in front (agy fell over, not the answer)', async () => {
+    vi.mocked(sendSessionAnswerKey).mockImplementationOnce(async () => {
+      frames.current = SHELL_AFTER_EXIT;
+    });
+    vi.mocked(readSessionPaneCommand).mockResolvedValue('zsh');
+    try {
+      const result = await (await post(await body())).json();
+      expect(result).toMatchObject({ code: 41, reason: 'outcome_indeterminate', outcome: 'indeterminate', keysSent: 1 });
+    } finally {
+      vi.mocked(readSessionPaneCommand).mockReset().mockResolvedValue('agy');
+    }
+  });
+
   it('never asks the gateway when the screen answered itself (Yes → the composer)', async () => {
     const result = await (await post(await body())).json();
     expect(result).toMatchObject({ code: 0, outcome: 'advanced' });

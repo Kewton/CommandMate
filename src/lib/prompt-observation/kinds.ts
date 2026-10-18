@@ -89,3 +89,27 @@ export function isStrictRespondKind(kind: unknown): kind is StrictRespondKind {
  * sent as ↑/↓ and Enter. An option number or `--default` is refused there.
  */
 export const UNNUMBERED_STRICT_RESPOND_KINDS: readonly StrictRespondKind[] = ['antigravity-trust'];
+
+/**
+ * Per strict kind, the answer whose consequence is the agent exiting (Issue
+ * #3788): its 1-based position, valid only on a screen that shows exactly
+ * `optionCount` options. agy's trust screen offers `Yes, I trust this folder`
+ * then `No, exit` (measured: `tests/fixtures/prompt-observation-3755/antigravity-trust.txt`,
+ * `antigravity-live-2364/trust-dialog.txt`), and agy exits on the second.
+ *
+ * Only after such an answer may a shell back in front of the pane be read as
+ * the session having ended: after any other answer it is the agent falling
+ * over (a crash, a failed start), which the answer did not ask for. A kind
+ * absent here has no exiting answer.
+ */
+export const EXITING_STRICT_ANSWERS: Readonly<
+  Partial<Record<StrictRespondKind, { readonly position: number; readonly optionCount: number }>>
+> = {
+  'antigravity-trust': { position: 2, optionCount: 2 },
+};
+
+/** Whether answering option `position` (1-based) of a `kind` screen showing `optionCount` options exits the agent. */
+export function isExitingStrictAnswer(kind: StrictRespondKind, position: number, optionCount: number): boolean {
+  const exiting = EXITING_STRICT_ANSWERS[kind];
+  return exiting !== undefined && exiting.position === position && exiting.optionCount === optionCount;
+}
