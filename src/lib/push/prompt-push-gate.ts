@@ -74,6 +74,18 @@
  * second prompt right after an answer gets a full hold of its own. Both
  * producers ask through {@link decideAndLogPromptPush} and share that origin.
  *
+ * ## The hold reaches the tick that will see the wait (Issue #3791)
+ *
+ * The 9 s assume the poller's next tick is at most a cooldown away. A poller in
+ * error backoff (up to `MAX_BACKOFF_MS`) has its next tick further out, and
+ * that tick still answers — so a fixed 9 s notified once in a flow that was
+ * about to be answered. The hold therefore also lasts until the tick the poller
+ * had scheduled when the hold began, plus two ticks (answer, or the Enter
+ * fallback's second look): {@link autoYesHoldEndsAt}. Only that one tick is
+ * waited for, read once when the hold begins: a poller that keeps putting its
+ * tick off, or a screen it keeps reading as thinking, does not keep the wait
+ * silent — the grace is not simply made longer for every wait.
+ *
  * ## The reminder is never muted
  *
  * `runEscalationTick` has already established that the wait is still open — it
@@ -93,6 +105,7 @@ import {
   buildCompositeKey,
   COOLDOWN_INTERVAL_MS,
   getAutoYesState,
+  MAX_BACKOFF_MS,
   POLLING_INTERVAL_MS,
   type AutoYesStopReason,
 } from '@/lib/auto-yes-state';
@@ -122,6 +135,12 @@ interface AutoYesHoldStart {
   /** The episode's `waitingSince`: a new episode starts a new hold. */
   since: number;
   firstHeldAt: number;
+  /**
+   * Issue #3791: the poller's pending tick when the hold began (`nextPollAt`),
+   * when it was due after that moment. Undefined: no poller, or its tick was
+   * already running — the grace alone then bounds the hold.
+   */
+  firstTickAt?: number;
 }
 
 declare global {
@@ -151,16 +170,66 @@ export function autoYesHoldStartedAt(
   sweepStaleAutoYesHolds(now);
   let hold = autoYesHolds.get(key);
   if (hold === undefined || hold.since !== input.waitingSince) {
-    hold = { since: input.waitingSince, firstHeldAt: now };
+    hold = { since: input.waitingSince, firstHeldAt: now, firstTickAt: pendingPollerTickAt(key, now) };
     autoYesHolds.set(key, hold);
   }
   // Issue #3770: Auto-Yes switched off and on again inside one episode starts a
   // fresh hold; the old origin would read the poller's silence while it was off
   // as "did not answer".
   const enabledAt = getAutoYesState(input.worktreeId, input.cliToolId, input.instanceId)?.enabledAt;
-  if (enabledAt !== undefined && enabledAt > hold.firstHeldAt && enabledAt <= now) hold.firstHeldAt = enabledAt;
+  if (enabledAt !== undefined && enabledAt > hold.firstHeldAt && enabledAt <= now) {
+    hold.firstHeldAt = enabledAt;
+    // The old poller's tick is not this one's; a new poller ticks within the grace.
+    hold.firstTickAt = undefined;
+  }
   const lastAnswer = globalThis.__autoYesPollerStates?.get(key)?.lastServerResponseTimestamp ?? null;
   return lastAnswer !== null ? Math.max(hold.firstHeldAt, lastAnswer) : hold.firstHeldAt;
+}
+
+/**
+ * How long after the poller's tick the hold still lasts (Issue #3791): that
+ * tick answers, or records why not, and the Enter fallback answers on the tick
+ * after it — the "two ticks" of {@link AUTO_YES_ANSWER_GRACE_MS}.
+ */
+export const AUTO_YES_ANSWER_AFTER_TICK_MS = 2 * POLLING_INTERVAL_MS;
+
+/**
+ * The longest a hold can last (Issue #3791): a tick a full backoff away, then
+ * {@link AUTO_YES_ANSWER_AFTER_TICK_MS}. Also caps a timer armed for the hold's
+ * end, so a clock that went backwards cannot arm an overflowing one.
+ */
+export const AUTO_YES_HOLD_LIMIT_MS = Math.max(
+  AUTO_YES_ANSWER_GRACE_MS,
+  MAX_BACKOFF_MS + AUTO_YES_ANSWER_AFTER_TICK_MS,
+);
+
+/**
+ * The Auto-Yes poller's pending tick (Issue #3791), read off its state on
+ * `globalThis` for the same reason as `lastServerResponseTimestamp`. Only a
+ * tick due after `now`, and no further than a backoff can put it.
+ */
+function pendingPollerTickAt(key: string, now: number): number | undefined {
+  const at = globalThis.__autoYesPollerStates?.get(key)?.nextPollAt;
+  if (at === undefined || at <= now) return undefined;
+  return Math.min(at, now + MAX_BACKOFF_MS);
+}
+
+/**
+ * When this wait's `auto-yes-answering` hold ends (Issue #3791): a full
+ * {@link AUTO_YES_ANSWER_GRACE_MS} after {@link autoYesHoldStartedAt}, and not
+ * before {@link AUTO_YES_ANSWER_AFTER_TICK_MS} past the tick the poller had
+ * scheduled when the hold began.
+ *
+ * @param now - Epoch ms of the decision; recorded as the start of a new hold
+ */
+export function autoYesHoldEndsAt(
+  input: Pick<PromptPushGateInput, 'worktreeId' | 'cliToolId' | 'instanceId' | 'waitingSince'>,
+  now: number,
+): number {
+  const startedAt = autoYesHoldStartedAt(input, now);
+  const tickAt = autoYesHolds.get(buildCompositeKey(input.worktreeId, input.cliToolId, input.instanceId))?.firstTickAt;
+  const graceEndsAt = startedAt + AUTO_YES_ANSWER_GRACE_MS;
+  return tickAt === undefined ? graceEndsAt : Math.max(graceEndsAt, tickAt + AUTO_YES_ANSWER_AFTER_TICK_MS);
 }
 
 /** A hold older than this is dropped (Issue #3770): its episode is long over. */
@@ -209,6 +278,12 @@ export interface PromptPushGateInput {
    * {@link autoYesHoldStartedAt}.
    */
   holdStartedAt?: number;
+  /**
+   * When the hold ends (Issue #3791); takes the place of `holdStartedAt` plus
+   * the grace when given. {@link decideAndLogPromptPush} fills it in from
+   * {@link autoYesHoldEndsAt}.
+   */
+  holdEndsAt?: number;
 }
 
 /**
@@ -264,10 +339,9 @@ export function decidePromptPush(input: PromptPushGateInput): PromptPushGateDeci
     return { suppress: false, reason: 'escalation-reminder' };
   }
 
-  if (
-    input.holdStartedAt !== undefined &&
-    (input.now ?? Date.now()) - input.holdStartedAt >= AUTO_YES_ANSWER_GRACE_MS
-  ) {
+  const holdEndsAt =
+    input.holdEndsAt ?? (input.holdStartedAt !== undefined ? input.holdStartedAt + AUTO_YES_ANSWER_GRACE_MS : undefined);
+  if (holdEndsAt !== undefined && (input.now ?? Date.now()) >= holdEndsAt) {
     return { suppress: false, reason: 'auto-yes-not-answered' };
   }
 
@@ -303,9 +377,9 @@ export function decideAndLogPromptPush(
     forgetAutoYesHold(buildCompositeKey(input.worktreeId, input.cliToolId, input.instanceId));
   }
   // Issue #3757: only a wait that reached the hold gets an origin recorded.
-  if (decision.reason === 'auto-yes-answering' && input.holdStartedAt === undefined) {
+  if (decision.reason === 'auto-yes-answering' && input.holdStartedAt === undefined && input.holdEndsAt === undefined) {
     const now = input.now ?? Date.now();
-    decision = decidePromptPush({ ...input, now, holdStartedAt: autoYesHoldStartedAt(input, now) });
+    decision = decidePromptPush({ ...input, now, holdEndsAt: autoYesHoldEndsAt(input, now) });
   }
   const context = {
     worktreeId: input.worktreeId,

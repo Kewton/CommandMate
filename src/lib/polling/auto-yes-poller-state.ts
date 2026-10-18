@@ -29,6 +29,13 @@ export interface AutoYesPollerState {
   currentInterval: number;
   /** Last server-side response timestamp */
   lastServerResponseTimestamp: number | null;
+  /**
+   * Issue #3791: epoch ms the pending tick is due at. The push gate reads it
+   * (off `globalThis`) to hold a wait until the tick that will see it — a
+   * backoff can put that tick past `AUTO_YES_ANSWER_GRACE_MS`. Optional so
+   * hand-built states need not name it.
+   */
+  nextPollAt?: number;
   /** Last answered prompt key for duplicate prevention (Issue #306) */
   lastAnsweredPromptKey: string | null;
   /** Timestamp when lastAnsweredPromptKey was set (for retry expiry) */

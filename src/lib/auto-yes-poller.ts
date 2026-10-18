@@ -1483,6 +1483,7 @@ function scheduleNextPoll(generation: AutoYesTickGeneration, overrideInterval?: 
   const { worktreeId, cliToolId, instanceId, pollerState } = generation;
 
   const interval = Math.max(overrideInterval ?? pollerState.currentInterval, POLLING_INTERVAL_MS);
+  pollerState.nextPollAt = Date.now() + interval;
   pollerState.timerId = setTimeout(() => {
     void pollAutoYes(worktreeId, cliToolId, instanceId, pollerState);
   }, interval);
@@ -1567,6 +1568,7 @@ export function startAutoYesPolling(
   invalidateSessionAutoYesPolicy(compositeKey);
 
   // Start polling immediately
+  pollerState.nextPollAt = Date.now() + POLLING_INTERVAL_MS;
   pollerState.timerId = setTimeout(() => {
     void pollAutoYes(worktreeId, cliToolId, effectiveInstanceId, pollerState);
   }, POLLING_INTERVAL_MS);
