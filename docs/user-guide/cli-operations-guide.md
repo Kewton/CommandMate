@@ -2067,7 +2067,7 @@ Auto-Yes が OFF の instance で、止まった理由があれば入ります�
 
 | `reason` | 意味 | `commandmate wait` の表示 |
 |----------|------|--------------------------|
-| `agent-launch-dialog`（Issue #1829） | 画面の確認が CLI の起動の手順のダイアログ（信頼の確認など）で、その答えは道具自身の起動の手順に属するので Auto-Yes は答えない | 「while the agent's launch dialog was on screen」 |
+| `agent-launch-dialog`（Issue #1829） | 画面の確認が CLI の起動の手順のダイアログ（信頼の確認など）で、その答えは道具自身の起動の手順に属するので Auto-Yes は答えない。起動の手順が終わった後も残り、カーソルが安全な行に無いとき（copilot は `2.` か `3.`、gemini は `1. Trust folder` 以外。Issue #3790）は誰も答えないので、画面で人が答える | 「while the agent's launch dialog was on screen; if it stays after the launch (copilot's cursor on 2. or 3., gemini's not on 1. Trust folder), answer it at the pane」 |
 | `unclassified-frame`（Issue #1924） | 汎用の推定は番号付きの一覧を読んだが、その道具のダイアログ検出が確認と認めなかったので何も送らない。返答の中の番号付きの一覧に `1` と答える事故（#1896）を防ぐ位置 | 「because no tool-specific dialog detector recognised the frame」 |
 | `startup-trust-unhandled`（Issue #3757） | agy の起動時のフォルダ信頼の確認（`Do you trust the contents of this project?`）が画面にある。起動の手順の側が答えるもので、番号が無いので poller はプロンプトとして読めない。起動の窓が終わった後に出た場合は、次の send の準備待ちが答える | 「because agy's startup folder-trust confirmation is the launch's to answer, not Auto-Yes's; the next send confirms it once, or answer it at the pane」 |
 | `question-confirm-page`（Issue #3748） | Command Code と Claude の `AskUserQuestion` の確認画面（`Submit` / `Cancel`）。`Submit` は選択ではなくその時点の回答を確定するので、Auto-Yes は答えず人に任せる | 「because the question's Submit/Cancel confirmation commits the answers as they stand, so Auto-Yes leaves it to a human」 |

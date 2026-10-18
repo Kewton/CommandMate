@@ -274,9 +274,11 @@ const CONTRACT_POLICY_CAUSE = 'by contract policy';
  * say about it is a compile error here, which is the point. Until #1843 the
  * notice hard-coded "by contract policy" for every reason, so #1829's
  * `agent-launch-dialog` — a product-side decision the poller makes with no
- * contract in sight (`src/lib/auto-yes-poller.ts`, the `getCodexLifecycleDialog`
- * branch) — sent operators of contract-less worktrees hunting for a
- * `denyPatterns` entry that did not exist.
+ * contract in sight (`suppressIfNotOursToAnswer` in
+ * `src/lib/polling/auto-yes-prompt-suppression.ts`: codex's lifecycle dialogs,
+ * gemini's folder trust since #3776 and copilot's since #3790) — sent operators
+ * of contract-less worktrees hunting for a `denyPatterns` entry that did not
+ * exist.
  *
  * The three sites that record a suppression are covered: the poller's launch-dialog
  * branch (`agent-launch-dialog`), the poller's policy branch and
@@ -292,7 +294,11 @@ const SUPPRESSION_CAUSE: Record<AutoYesSuppressionReason, string> = {
   'deny-pattern': CONTRACT_POLICY_CAUSE,
   'deny-pattern-unusable': CONTRACT_POLICY_CAUSE,
   'type-not-allowed': CONTRACT_POLICY_CAUSE,
-  'agent-launch-dialog': "while the agent's launch dialog was on screen",
+  // Issue #3790: after the launch window the poller still leaves copilot's and
+  // gemini's trust dialogs alone when the cursor is not on the safe row, and
+  // nobody else answers them then.
+  'agent-launch-dialog':
+    "while the agent's launch dialog was on screen; if it stays after the launch (copilot's cursor on 2. or 3., gemini's not on 1. Trust folder), answer it at the pane",
   // Issue #1924. Deliberately not "by contract policy": no contract was
   // consulted. The frame looked like a numbered list to the generic estimator
   // and like prose to the tool's own detector, and an operator who reads this

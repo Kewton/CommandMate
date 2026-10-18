@@ -105,3 +105,26 @@ CM_UAT_SOCK_BASE="$HOME/run" CM_RUN_LOCK_DIR="$HOME/run/run.lock" \
 Under `own-home`, `run-server.sh down` records whether the shared files changed (the messages, and `shared_changed=yes|no` in the state file) but does not fail on it. Without `--own-home` (the user's UAT) it still fails.
 
 The production receiver's `agent-event-unresolved-target` log carries `worktreeId` (when the hook named one) and `cwdHash` (the first 16 hex characters of the SHA-256 of `cwd`; `cwd` itself is never logged), so hooks from a dedicated-user run that reached production can be counted against the hash of the run's cwd.
+
+## Measuring a bare CLI on a live pane (gemini's auto-update, #3790)
+
+An extra step for measuring gemini under a private tmux socket (`tmux -L`), a private HOME and an empty folder. A private HOME does not stop gemini from checking for a new version on every start, and a gemini installed globally with npm runs `npm install -g @google/gemini-cli@<version>` by itself. What it rewrites is the user's global install, not the private HOME (the #3776 measurement moved it from v0.62.0 to v0.64.0).
+
+- Before the start, write this to the private HOME's `~/.gemini/settings.json`. gemini migrates the old names `disableAutoUpdate` / `disableUpdateNag` itself.
+
+  ```json
+  {"general":{"enableAutoUpdate":false,"enableAutoUpdateNotification":false}}
+  ```
+
+- As a fallback in case the setting does not take, also pass `npm_config_prefix=<a temp dir>` and `npm_config_cache=<a temp dir>` in the start's environment, so an update that does run writes into the temp location. Check with `ps eww <pid>` that the environment has them.
+- On a HOME that never signed in, the authentication picker (`● 1. Sign in with Google`) follows the folder-trust question. Auto-Yes answers its default (unchanged). That writes `security.auth.selectedType: "oauth-personal"` to the private HOME's `settings.json` and starts the Google sign-in; with `NO_BROWSER=true` gemini opens no browser and stops at a URL and `Enter the authorization code:`.
+
+Measured (2026-10-18, in the isolation above): gemini 0.62.0 installed into a temp prefix (0.64.0 was the latest), started with `npm_config_prefix` pointing at that prefix.
+
+| Private HOME's settings | Screen | Version in the temp prefix |
+|-------------------------|--------|----------------------------|
+| None | `Update successful! The new version will be used on your next run.` | 0.64.0 (updated) |
+| `enableAutoUpdate: false` only | Only the `Gemini CLI update available! 0.62.0 → 0.64.0` notice | 0.62.0 |
+| Both of the above `false` | Not even the notice | 0.62.0 |
+
+In every case the user's global gemini (`/opt/homebrew`) stayed at 0.64.0. A gemini installed through a Homebrew formula, npx or the standalone binary never updates itself, by gemini's own code.
