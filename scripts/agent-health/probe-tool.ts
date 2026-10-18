@@ -38,6 +38,7 @@ import { archiveCheckFrames, type FrameArchive, type JudgedFrame } from '@/lib/a
 import { judgeServerEvents, judgeTurnScreen, turnEndedUnauthorized } from '@/lib/agent-health/model-auth';
 import { evaluateOpencodeV2LaunchLine, evaluateServerLeftovers } from '@/lib/agent-health/server-events';
 import { findUsageLimit, judgeUsageLimit } from '@/lib/agent-health/usage-limit';
+import { sendUntilPickerOpens } from '@/lib/agent-health/picker-open';
 import {
   countMatches,
   evaluatePickerScreens,
@@ -84,6 +85,10 @@ const STARTUP_MAX_MS = 45_000;
 const TYPE_TO_ENTER_MS = 800;
 /** How long a picker may take to open after its command. */
 const PICKER_APPEAR_MS = 15_000;
+/** From the first send: how long a picker refused as "still starting" is sent again (Issue #3803). */
+const PICKER_STARTUP_MS = 45_000;
+/** Pause after such a refusal before the command is sent again. */
+const PICKER_RETRY_MS = 3000;
 /** How long the composer may take to come back after Esc closes a picker. */
 const PICKER_CLOSE_MS = 15_000;
 /** After the session is killed: time for a `session_end` / late `stop` to land. */
@@ -309,25 +314,37 @@ class ToolSession {
   }
 
   private async openPicker(screen: PickerScreen, closeKey: PickerSpec['closeKey']): Promise<PickerScreenResult> {
-    const baseline = countMatches(stripAnsi(this.lastFrame), screen.opened);
-    await this.ctx.tmux.typeText(this.name, screen.command);
-    await sleep(TYPE_TO_ENTER_MS);
-    await this.ctx.tmux.sendKey(this.name, 'Enter');
-    const limit = Date.now() + this.bounded(PICKER_APPEAR_MS);
-    let seen: { frame: string; verdict: ScreenVerdict } | null = null;
-    while (Date.now() < limit) {
-      await sleep(POLL_MS);
-      const now = await this.look();
-      if (countMatches(now.clean, screen.opened) > baseline) {
-        await sleep(700);
-        const settled = await this.look();
-        const isPrompt = detectPrompt(
-          stripBoxDrawing(settled.clean),
-          buildDetectPromptOptions(this.spec.cliToolId)
-        ).isPrompt;
-        seen = { frame: settled.frame, verdict: { ...settled.verdict, isPrompt } };
-        break;
+    // Issue #3803: a send the tool refused as "still starting" is sent again,
+    // one Enter per send, never while the picker may be up.
+    const { opened, refusals } = await sendUntilPickerOpens(
+      screen,
+      {
+        look: async () => (await this.look()).clean,
+        send: async () => {
+          await this.ctx.tmux.typeText(this.name, screen.command);
+          await sleep(TYPE_TO_ENTER_MS);
+          await this.ctx.tmux.sendKey(this.name, 'Enter');
+        },
+        sleep,
+        now: Date.now,
+      },
+      {
+        appearMs: this.bounded(PICKER_APPEAR_MS),
+        startupMs: this.bounded(PICKER_STARTUP_MS),
+        retryMs: PICKER_RETRY_MS,
+        pollMs: POLL_MS,
       }
+    );
+    if (refusals > 0) this.ctx.log(`${this.spec.tool}: picker ${screen.command} refused ${refusals}x until start-up completed`);
+    let seen: { frame: string; verdict: ScreenVerdict } | null = null;
+    if (opened) {
+      await sleep(700);
+      const settled = await this.look();
+      const isPrompt = detectPrompt(
+        stripBoxDrawing(settled.clean),
+        buildDetectPromptOptions(this.spec.cliToolId)
+      ).isPrompt;
+      seen = { frame: settled.frame, verdict: { ...settled.verdict, isPrompt } };
     }
     const frame = seen?.frame ?? this.lastFrame;
     await this.ctx.tmux.sendKey(this.name, closeKey);
@@ -339,6 +356,7 @@ class ToolSession {
       frame,
       closed,
       expectPrompt: screen.expectPrompt,
+      refusals,
     };
   }
 
