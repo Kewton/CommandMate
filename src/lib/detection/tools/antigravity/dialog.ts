@@ -74,7 +74,10 @@ import {
 } from '../../prompt-detect-multiple-choice';
 import { normalizeTuiFrameForDetection } from '../../tui-detection-frame';
 import { findNumberedOptionBlock } from '../dialog-block';
-import { ANTIGRAVITY_PERMISSION_FOOTER_PATTERN } from './patterns';
+import {
+  ANTIGRAVITY_PERMISSION_FOOTER_PATTERN,
+  ANTIGRAVITY_PROMPT_PATTERN,
+} from './patterns';
 import type { PromptDetectionResult } from '../../types';
 import { truncateRawContent } from '../../truncate-raw-content';
 
@@ -269,4 +272,54 @@ export function detectAntigravityNumberedDialogPrompt(text: string): PromptDetec
     normalized,
     truncateRawContent,
   );
+}
+
+/**
+ * agy's `/feedback` category menu footer (`esc Cancel · 1-6 Select & Continue ·
+ * enter Continue`, `antigravity-live-2364/dialog-feedback-category.txt`): the
+ * one numbered agy screen the generic parser is left to read (#2364).
+ */
+/**
+ * A numbered option row wearing agy's `>` cursor (`> 1. Yes`, `> 1. Google
+ * OAuth`). Every measured numbered agy screen highlights one; a model reply's
+ * `1. / 2.` list does not, and stays with the generic parser (#1928's
+ * `legacy` row for agy).
+ */
+const HIGHLIGHTED_OPTION_ROW_PATTERN = /^\s*>\s*\d+\.\s+\S/;
+
+const FEEDBACK_MENU_FOOTER_PATTERN = /\b\d+-\d+\s+Select\b/;
+
+/**
+ * Is this an agy screen with numbered options that the permission reader does
+ * NOT vouch for? (Issue #3808)
+ *
+ * True when the bottom-most option row wearing agy's `>` cursor
+ * (`> 1. Yes`) has no `>` composer drawn under it — agy paints none while a
+ * screen replaces it, so the options are the live screen's, not a reply's —
+ * and {@link readAntigravityNumberedDialog}
+ * does not read the frame (no complete `↑/↓ Navigate · tab Amend` footer: the
+ * login-method screen, a footer a narrow pane cut at `↑/↓ Nav`, or one that is
+ * below the pane altogether). Deliberately independent of the footer, so a
+ * footer that is not on screen cannot hand the frame back to the generic
+ * parser. False for the `/feedback` menu (its `1-6 Select` footer), which keeps
+ * the generic reading #2364 left it.
+ *
+ * Callers treat true as "no prompt to answer": a human drives the screen.
+ *
+ * @param text - ANSI-stripped capture, box drawing optional
+ */
+export function isAntigravityUnvouchedNumberedScreen(text: string): boolean {
+  const lines = normalizeTuiFrameForDetection(text).split('\n');
+  let highlighted = -1;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (HIGHLIGHTED_OPTION_ROW_PATTERN.test(lines[i])) {
+      highlighted = i;
+      break;
+    }
+  }
+  if (highlighted < 0) return false;
+  const below = lines.slice(highlighted + 1);
+  if (below.some(row => ANTIGRAVITY_PROMPT_PATTERN.test(row))) return false;
+  if (below.some(row => FEEDBACK_MENU_FOOTER_PATTERN.test(row))) return false;
+  return readAntigravityNumberedDialog(lines) === null;
 }

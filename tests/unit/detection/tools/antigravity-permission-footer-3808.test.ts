@@ -31,8 +31,11 @@ import { detectSessionStatus, SELECTION_LIST_REASONS } from '@/lib/detection/sta
 import { STATUS_REASON } from '@/lib/detection/status-reason';
 import {
   detectAntigravityNumberedDialogPrompt,
+  isAntigravityUnvouchedNumberedScreen,
   readAntigravityNumberedDialog,
 } from '@/lib/detection/tools/antigravity/dialog';
+import { detectPrompt } from '@/lib/detection/prompt-detector';
+import { buildDetectPromptOptions } from '@/lib/detection/cli-patterns';
 import { detectPromptOnCleanFrame } from '@/lib/polling/response-checker';
 import { assessPromptAnswerability } from '@/lib/polling/auto-yes-dialog-gate';
 import { isUnclassifiedFrame } from '@/lib/session/status-evidence';
@@ -102,5 +105,75 @@ describe('[#3808] numbered screens without the `tab Amend` footer are not answer
     const result = assessPromptAnswerability('antigravity', read(rel));
     expect(result.promptCheck.isPrompt).toBe(false);
     expect(result.refusal).not.toBeNull();
+  });
+});
+
+const FOOTER_NOT_ON_SCREEN = [
+  ['a permission dialog whose footer is below the pane', 'prompt-observation-3808/antigravity-permission-footer-offscreen.txt'],
+  ['a permission dialog whose footer is cut at `↑/↓ Nav`', 'prompt-observation-3808/antigravity-permission-footer-cut-at-nav.txt'],
+] as const;
+
+describe('[#3808] numbered options with no `↑/↓ Navigate` footer on screen are not answered either', () => {
+  it.each(FOOTER_NOT_ON_SCREEN)('%s: the generic parser alone would answer it (the hole)', (_label, rel) => {
+    const text = asPollerSees(read(rel));
+    // The structural test needs the footer, so it cannot be what declines these.
+    expect(isAntigravityNumberedDialog(text)).toBe(false);
+    expect(detectPrompt(text, buildDetectPromptOptions('antigravity')).promptData?.type).toBe('multiple_choice');
+    expect(isAntigravityUnvouchedNumberedScreen(text)).toBe(true);
+  });
+
+  it.each(FOOTER_NOT_ON_SCREEN)('%s: reader null, poller entry no prompt, /prompt-response refuses', (_label, rel) => {
+    const raw = read(rel);
+    const clean = asPollerSees(raw);
+    expect(readAntigravityNumberedDialog(clean.split('\n'))).toBeNull();
+    const polled = detectPromptOnCleanFrame(clean, 'antigravity', clean.split('\n'), raw);
+    expect(polled.isPrompt).toBe(false);
+    expect(polled.promptData).toBeUndefined();
+    const assessed = assessPromptAnswerability('antigravity', raw);
+    expect(assessed.promptCheck.isPrompt).toBe(false);
+    expect(assessed.refusal).not.toBeNull();
+  });
+
+  it.each(FOOTER_NOT_ON_SCREEN)('%s: the status layer publishes an unclassified frame, not a prompt', (_label, rel) => {
+    const result = detectSessionStatus(read(rel), 'antigravity');
+    expect(result.reason).toBe(STATUS_REASON.UNKNOWN_FRAME);
+    expect(result.hasActivePrompt).toBe(false);
+    expect(SELECTION_LIST_REASONS.has(result.reason)).toBe(false);
+  });
+});
+
+describe('[#3808] agy screens without the permission footer keep their own paths (control)', () => {
+  it('`/feedback` (`1-6 Select` footer) is still the generic parser\'s answerable prompt', () => {
+    const raw = read('antigravity-live-2364/dialog-feedback-category.txt');
+    const clean = asPollerSees(raw);
+    expect(isAntigravityUnvouchedNumberedScreen(clean)).toBe(false);
+    expect(detectPromptOnCleanFrame(clean, 'antigravity')).toEqual(
+      detectPrompt(clean, buildDetectPromptOptions('antigravity')),
+    );
+    expect(detectSessionStatus(raw, 'antigravity').reason).toBe(STATUS_REASON.PROMPT_DETECTED);
+  });
+
+  it.each([
+    'antigravity-live-2364/trust-dialog.txt',
+    'antigravity-live-2364/picker-switch-model.txt',
+    'antigravity-live-2364/popup-slash-commands.txt',
+    'antigravity-live-2364/survey-after-deny.reconstructed.txt',
+    'antigravity-live-2364/boot-idle.txt',
+    'antigravity-live-2364/idle-after-deny.txt',
+    'live-region-3183/quoted-dialog-idle-antigravity.txt',
+  ])('%s is not an unvouched numbered screen', (rel) => {
+    expect(isAntigravityUnvouchedNumberedScreen(asPollerSees(read(rel)))).toBe(false);
+  });
+
+  it('a reply\'s `1. / 2.` list (no `>` cursor on any option) is not one — the #1928 legacy reading stays', () => {
+    const reply = ['  Here are the options:', '', '  1. Keep the branch', '  2. Rebase onto develop', '', '  Which one?'].join('\n');
+    expect(isAntigravityUnvouchedNumberedScreen(reply)).toBe(false);
+    expect(detectPromptOnCleanFrame(reply, 'antigravity')).toEqual(
+      detectPrompt(reply, buildDetectPromptOptions('antigravity')),
+    );
+  });
+
+  it.each(PERMISSION_DIALOGS)('%s (vouched by the reader) is not one either', (rel) => {
+    expect(isAntigravityUnvouchedNumberedScreen(asPollerSees(read(rel)))).toBe(false);
   });
 });

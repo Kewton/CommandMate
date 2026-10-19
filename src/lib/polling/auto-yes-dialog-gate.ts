@@ -59,13 +59,11 @@ import { getToolStatusDetector } from '@/lib/detection/tools/registry';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import type { DialogVerdict, NormalizedFrame } from '@/lib/detection/tools/types';
 import { detectPrompt, type PromptDetectionResult } from '@/lib/detection/prompt-detector';
+import { stripAnsi, stripBoxDrawing, buildDetectPromptOptions } from '@/lib/detection/cli-patterns';
 import {
-  stripAnsi,
-  stripBoxDrawing,
-  buildDetectPromptOptions,
-  isAntigravityNumberedDialog,
-} from '@/lib/detection/cli-patterns';
-import { detectAntigravityNumberedDialogPrompt } from '@/lib/detection/tools/antigravity/dialog';
+  detectAntigravityNumberedDialogPrompt,
+  isAntigravityUnvouchedNumberedScreen,
+} from '@/lib/detection/tools/antigravity/dialog';
 import { readCommandCodeQuestionDialog } from '@/lib/detection/tools/command-code/dialog';
 import type { PromptType } from '@/types/models';
 
@@ -529,10 +527,10 @@ export function assessPromptAnswerability(
   }
 
   // Issue #3808: a numbered agy screen agy's reader declines (the login-method
-  // screen, a permission dialog whose `tab Amend` footer is cut) is no prompt —
-  // not the generic parser's reading of its `1. / 2.` rows.
+  // screen, a permission dialog whose `tab Amend` footer is cut or off the
+  // pane) is no prompt — not the generic parser's reading of its `1. / 2.` rows.
   const declinedAgyScreen = cliToolId === 'antigravity' && toolDialog === null
-    && isAntigravityNumberedDialog(cleanOutput);
+    && isAntigravityUnvouchedNumberedScreen(cleanOutput);
 
   const isCommandCodeQuestion = commandCodeQuestion.kind === 'prompt';
   const candidate: PromptDetectionResult = (commandCodeQuestion.kind === 'prompt' ? commandCodeQuestion.prompt : null)

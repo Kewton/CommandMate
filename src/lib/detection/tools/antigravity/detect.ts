@@ -28,7 +28,7 @@ import { STATUS_REASON } from '../../status-reason';
 import { ANTIGRAVITY_LIVE_REGION } from './live-region';
 import { createToolStatusDetector } from '../run-detection';
 import { ANTIGRAVITY_VERIFIED_AGAINST } from '../verified-against';
-import { detectAntigravityNumberedDialogPrompt } from './dialog';
+import { detectAntigravityNumberedDialogPrompt, isAntigravityUnvouchedNumberedScreen } from './dialog';
 import type { ToolStatusVerdict } from '../types';
 
 /** agy build these rules were read off (Issue #988 / #995 / #2364; value in ../verified-against, #1929). */
@@ -43,6 +43,19 @@ export const VERIFIED_AGAINST = ANTIGRAVITY_VERIFIED_AGAINST;
  * card) on screen, and what makes `wait` stop with exit 10 instead of hanging.
  */
 const SELECTION_LIST_VERDICT: ToolStatusVerdict = positiveVerdict('waiting', STATUS_REASON.ANTIGRAVITY_SELECTION_LIST);
+
+/**
+ * An agy numbered screen no reader vouches for (Issue #2364, #3808): published
+ * as unclassified — the hatch opens and `wait` stops — never as a picker (the
+ * arrow pad would Enter the highlighted row) and never as "generating".
+ */
+const UNKNOWN_FRAME_VERDICT: ToolStatusVerdict = {
+  status: 'running',
+  confidence: 'low',
+  reason: STATUS_REASON.UNKNOWN_FRAME,
+  hasActivePrompt: false,
+  evidence: 'none',
+};
 
 /**
  * How close to the bottom of the content the survey row must be to count as
@@ -133,7 +146,13 @@ export const antigravityStatusDetector = createToolStatusDetector({
     // Issue #2845: only while the screen is the live one. The words alone are
     // not enough — a reply that quotes the `↑/↓ Navigate` footer leaves them in
     // the last rows of a pane whose composer is drawn below them.
-    if (!ANTIGRAVITY_SELECTION_LIST_PATTERN.test(frame.lastLines)) return null;
+    if (!ANTIGRAVITY_SELECTION_LIST_PATTERN.test(frame.lastLines)) {
+      // Issue #3808: numbered options with no `↑/↓ Navigate` footer on screen
+      // (cut at `↑/↓ Nav`, or below the pane) are not handed to the generic
+      // parser's `prompt_detected` either — the same frames the Auto-Yes
+      // poller and `/prompt-response` decline. `/feedback` keeps its reading.
+      return isAntigravityUnvouchedNumberedScreen(stripBoxDrawing(frame.clean)) ? UNKNOWN_FRAME_VERDICT : null;
+    }
     if (!isAntigravitySelectionScreenOpen(frame.lastLines)) return null;
 
     // Issue #2270 / #2364: except when the frame is a NUMBERED dialog.
@@ -179,13 +198,7 @@ export const antigravityStatusDetector = createToolStatusDetector({
       if (promptDetection !== null) {
         return activePromptVerdict(STATUS_REASON.PROMPT_DETECTED, promptDetection);
       }
-      return {
-        status: 'running',
-        confidence: 'low',
-        reason: STATUS_REASON.UNKNOWN_FRAME,
-        hasActivePrompt: false,
-        evidence: 'none',
-      };
+      return UNKNOWN_FRAME_VERDICT;
     }
 
     return SELECTION_LIST_VERDICT;
