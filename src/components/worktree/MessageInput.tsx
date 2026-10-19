@@ -10,12 +10,13 @@ import { useTranslations } from 'next-intl';
 import { worktreeApi, handleApiError } from '@/lib/api-client';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import type { ChatMessage } from '@/types/models';
-import { Kbd } from '@/components/ui/Kbd';
 import { Button, Spinner } from '@/components/ui';
 import { SlashCommandSelector } from './SlashCommandSelector';
 import { InterruptButton } from './InterruptButton';
 import { OpencodeSessionControls } from './OpencodeSessionControls';
 import { PaneResizer } from './PaneResizer';
+import { ComposerSendButton } from './message-input/ComposerSendButton';
+import { ComposerMetaRow } from './message-input/ComposerMetaRow';
 import { useSlashCommands } from '@/hooks/useSlashCommands';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { useImageAttachment } from '@/hooks/useImageAttachment';
@@ -791,68 +792,21 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
               }}
             />
 
-            <Button
-              variant="ghost"
-              type="submit"
-              data-testid="send-message-button"
-              data-can-send={String((!!message.trim() || !!attachedImage) && !sending)}
-              disabled={(!message.trim() && !attachedImage) || sending}
-              className={`flex-shrink-0 p-2 rounded-full transition-colors disabled:hover:bg-transparent ${
-                (!!message.trim() || !!attachedImage) && !sending
-                  ? 'bg-accent-600 text-white hover:bg-accent-700 shadow-sm'
-                  : 'text-muted-foreground/50'
-              }`}
-              aria-label={t('composer.sendMessage')}
-            >
-              {sending ? (
-                <Spinner size="md" />
-              ) : (
-                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-                </svg>
-              )}
-            </Button>
+            <ComposerSendButton
+              message={message}
+              hasAttachment={!!attachedImage}
+              sending={sending}
+              ariaLabel={t('composer.sendMessage')}
+            />
           </div>
         </div>
 
-        {/* Issue #1080: composer meta row — Auto-Yes (left) + keyboard hints (right).
-            Renders when Auto-Yes is embedded (mobile + desktop) or on desktop for
-            the hint pills (mobile Enter inserts a newline, so no Shift+Enter hint). */}
-        {/* Issue #2598: on a PC the row is its own `@container`, and the hints
-            are drawn only where the composer is wide enough for them AND the
-            Auto-Yes toggle. In a narrow split pane they used to wrap to a
-            second line and, being `flex-shrink-0`, squeeze the toggle beside
-            them to nothing. Keep the literal in sync with
-            COMPOSER_HINTS_MIN_CONTAINER_PX. */}
-        {(autoYesSlot || !isMobile) && (
-          <div
-            className={`${isMobile ? '' : '@container '}flex items-center justify-between gap-2 min-w-0`}
-            data-testid="composer-meta-row"
-          >
-            {/* PC: `whitespace-nowrap` — a narrow pane scrolls the Auto-Yes
-                label (and its countdown) sideways instead of wrapping it onto a
-                second line of meta row. */}
-            <div
-              className={`flex items-center gap-2 min-w-0 overflow-x-auto scrollbar-hide${isMobile ? '' : ' whitespace-nowrap'}`}
-              data-testid="composer-auto-yes"
-            >
-              {autoYesSlot}
-            </div>
-            {!isMobile && (
-              <div
-                className="hidden @min-[420px]:flex flex-shrink-0 items-center gap-1.5 whitespace-nowrap text-[11px] text-muted-foreground select-none"
-                data-testid="composer-hints"
-              >
-                <Kbd>/</Kbd>
-                <span>{t('composer.commandsHint')}</span>
-                <span aria-hidden="true" className="opacity-50">·</span>
-                <Kbd>⇧</Kbd>
-                <Kbd>↵</Kbd>
-                <span>{t('composer.newlineHint')}</span>
-              </div>
-            )}
-          </div>
-        )}
+        <ComposerMetaRow
+          autoYesSlot={autoYesSlot}
+          isMobile={isMobile}
+          commandsHint={t('composer.commandsHint')}
+          newlineHint={t('composer.newlineHint')}
+        />
       </form>
 
       {/* Slash Command Selector */}
