@@ -64,6 +64,7 @@ export interface ObservationTokenBinding {
   question: string | null;
   /** Option labels, in draw order. */
   options: readonly string[];
+  /** Without the highlight's `>` on agy's option rows (`./appearance`, Issue #3812). */
   approvalTarget: string | null;
   /** 1-based position of the highlighted option, or null when none is. */
   selectedPosition: number | null;

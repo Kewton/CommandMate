@@ -306,4 +306,14 @@ export interface StrictRespondResult {
   outcome: StrictRespondOutcome | null;
   /** True when this is the stored result of an earlier request with the same operation id. */
   replayed: boolean;
+  /**
+   * Where the answer's arrows left the highlight when it stopped before its
+   * Enter (`delivery: 'partial'`), as the last read of the same screen showed
+   * it — so a caller sees that, say, a `(Persist to settings.json)` option is
+   * now the one an Enter at the pane would choose (Issue #3812). Null when the
+   * answer did not stop between keys, or when the position is not known (the
+   * screen moved, or a key was sent and not read back). Absent from a result
+   * the CLI makes itself and from a server before #3812.
+   */
+  highlightLeftAt?: { position: number; label: string } | null;
 }
