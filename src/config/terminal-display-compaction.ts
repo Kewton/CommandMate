@@ -105,6 +105,11 @@ export interface TerminalDisplayCompaction {
  *   compacts from 201 rows to 16). See
  *   `docs/design/opencode-server-live-verification.md` §19.
  *
+ * - `antigravity` (Issue #3809): agy 1.4.2 anchors its frame at the top of the
+ *   200x1000 pane (`tests/fixtures/prompt-observation-3797`: ~33 content rows,
+ *   ~970 blank). With auto-follow on, the pane scrolled to the blank tail and
+ *   showed no glyphs.
+ *
  * `copilot` is deliberately absent: #2049's acceptance condition is that
  * claude/codex/copilot render unchanged, and no copilot padding measurement
  * exists to justify adding it.
@@ -113,6 +118,7 @@ const LAYOUT_PADDING_COMPACTED_TOOLS: ReadonlySet<CLIToolType> = new Set([
   'claude',
   'codex',
   'opencode',
+  'antigravity',
 ]);
 
 /**
