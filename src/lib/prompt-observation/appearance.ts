@@ -22,7 +22,7 @@
  */
 
 import { getOrInitGlobal } from '@/lib/global-state';
-import { findNumberedOptionBlock } from '@/lib/detection/tools/dialog-block';
+import { findNumberedOptionBlock, type NumberedOptionBlock } from '@/lib/detection/tools/dialog-block';
 
 /** How many instances are tracked at once; the least recently observed is forgotten first. */
 const MAX_TRACKED_INSTANCES = 1024;
@@ -73,12 +73,28 @@ const PERMISSION_OPTION_TAIL_ROWS = 12;
 const OPTION_ROW_GUTTER_PATTERN = /^[ \t]*>?[ \t]*/;
 
 /**
- * Whether a row of the option block is one of its option rows: a numbered row
- * in the shape the shared block reader takes (`[>] N. label`). Inside the block
- * every such row IS an option row — the reader stops at a numbered row out of
- * sequence, so a block it accepted holds no other.
+ * The rows the shared block reader adopted as option rows, option 1 first, or
+ * null when they cannot be told.
+ *
+ * Taken from the reader itself, never re-judged here: `findNumberedOptionBlock`
+ * names the rows of option 1 (`firstRow`) and of the bottom option (`lastRow`)
+ * only, so option k's row is the `lastRow` of the block the reader finds above
+ * option k+1's row. Between two adopted rows there is no row the reader could
+ * parse as an option (it would have adopted it, or stopped there), so that
+ * block is the same run cut one option shorter. A row the reader folds into a
+ * label — `0. item`, `00. item` — is never in the list.
  */
-const NUMBERED_ROW_PATTERN = /^[ \t]*>?[ \t]*\d{1,2}[.)][ \t]+\S/;
+function adoptedOptionRows(rows: readonly string[], block: NumberedOptionBlock): number[] | null {
+  const adopted = [block.lastRow];
+  for (let below = block.lastRow; adopted.length < block.options.length - 1; ) {
+    const above = findNumberedOptionBlock(rows, below, rows.length);
+    if (above === null || above.firstRow !== block.firstRow || above.lastRow >= below) return null;
+    adopted.unshift(above.lastRow);
+    below = above.lastRow;
+  }
+  adopted.unshift(block.firstRow);
+  return adopted.length === block.options.length ? adopted : null;
+}
 
 /**
  * An approval target with the highlight's mark taken out (Issue #3812).
@@ -88,9 +104,10 @@ const NUMBERED_ROW_PATTERN = /^[ \t]*>?[ \t]*\d{1,2}[.)][ \t]+\S/;
  * of the target and the `>` moves with every ↑/↓. The option block is found
  * the way that reader finds it (`findNumberedOptionBlock`, bottom up to `1.`),
  * and taken only when its labels are the screen's `options` — what the reader
- * named. Only the gutter of those option rows is made the same; every row
- * above option 1 (the command, a here-document's `1. item` and its indent)
- * and every wrapped row of a label stays byte for byte.
+ * named. Only the gutter of the rows the reader adopted as options
+ * ({@link adoptedOptionRows}) is made the same; every row above option 1 (the
+ * command, a here-document's `1. item` and its indent) and every row folded
+ * into a label (`0. item` included) stays byte for byte.
  *
  * Any other kind, a target with no such block, or a block whose labels are not
  * the screen's, is returned as is: a moved highlight then reads as another
@@ -110,13 +127,10 @@ export function approvalTargetWithoutHighlight(
   const last = labels.length - 1;
   if (block.footer !== '') labels[last] = [labels[last], ...block.footer.split('\n')].join(' ').trim();
   if (labels.length !== options.length || labels.some((label, i) => label !== options[i])) return approvalTarget;
-  return rows
-    .map((row, i) =>
-      i >= block.firstRow && i <= block.lastRow && NUMBERED_ROW_PATTERN.test(row)
-        ? row.replace(OPTION_ROW_GUTTER_PATTERN, '  ')
-        : row
-    )
-    .join('\n');
+  const adopted = adoptedOptionRows(rows, block);
+  if (adopted === null) return approvalTarget;
+  const optionRows = new Set(adopted);
+  return rows.map((row, i) => (optionRows.has(i) ? row.replace(OPTION_ROW_GUTTER_PATTERN, '  ') : row)).join('\n');
 }
 
 /** One fixed form of what a screen asks. The highlight is not in it: moving the cursor is the same appearance. */

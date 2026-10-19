@@ -439,3 +439,61 @@ describe('[#3812] only the rows the reader names as options lose their mark', ()
     expect(pane.keys).toEqual([]);
   });
 });
+
+/** Option 2's row of the live frame: a row the next ones may fold into. */
+const OPTION_2_ROW = "  2. Yes, and always allow in this conversation for commands that start with 'pwd'";
+
+/**
+ * The dialog whose option 2 wraps onto a row that is numbered `0.` / `00.`:
+ * the shared reader never takes a number below 1 as an option, so the row is
+ * folded into option 2's label — and its gutter is the label's, not a cursor's.
+ */
+function withFoldedRow(row: string): string {
+  expect(PERMISSION).toContain(`\n${OPTION_2_ROW}\n`);
+  return PERMISSION.replace(`\n${OPTION_2_ROW}\n`, `\n${OPTION_2_ROW}\n${row}\n`);
+}
+
+describe('[#3812] a numbered row the reader folds into a label keeps its gutter', () => {
+  for (const number of ['0', '00']) {
+    const FOLDED = withFoldedRow(`   ${number}. item`);
+
+    it(`\`${number}. item\` is part of option 2's label, and the frame is still the permission dialog`, () => {
+      pane.frame = FOLDED;
+      const screen = observe().screen;
+      expect(screen?.kind).toBe('antigravity-permission');
+      expect(screen?.options).toHaveLength(4);
+      expect(screen?.options[1].label).toBe(
+        `Yes, and always allow in this conversation for commands that start with 'pwd' ${number}. item`
+      );
+      const labels = (screen?.options ?? []).map(option => option.label);
+      const target = approvalTargetWithoutHighlight('antigravity-permission', screen?.approvalTarget ?? null, labels);
+      expect(target).toContain(`\n   ${number}. item\n`);
+    });
+
+    it(`the Down moves only the highlight: "No, cancel" goes through (\`${number}.\`, positive)`, async () => {
+      pane.frame = FOLDED;
+      const result = await respondStrictly(request('No, cancel'), deps());
+      expect(result).toMatchObject({ code: 0, keysSent: 4, outcome: 'advanced' });
+    });
+
+    it(`the folded \`${number}. item\` row indented differently is another screen: 41 after the first Down`, async () => {
+      pane.frame = FOLDED;
+      pane.onKey = (key, frame) => {
+        const moved = dialogKeys(key, frame);
+        return key === 'Down' && pane.keys.length === 1 ? moved.replace(`\n   ${number}. item`, `\n     ${number}. item`) : moved;
+      };
+      const result = await respondStrictly(request('No, cancel'), deps());
+      expect(result).toMatchObject({ code: 41, reason: 'screen_moved_mid_send', keysSent: 1 });
+      expect(pane.keys).toEqual(['Down']);
+    });
+
+    it(`a token observed before the folded \`${number}. item\` row was re-indented does not verify (exit 40)`, async () => {
+      pane.frame = FOLDED;
+      const token = tokenNow();
+      pane.frame = FOLDED.replace(`\n   ${number}. item`, `\n     ${number}. item`);
+      const result = await respondStrictly({ ...request('No, cancel'), observationToken: token }, deps());
+      expect(result).toMatchObject({ code: 40, reason: 'token_mismatch', keysSent: 0 });
+      expect(pane.keys).toEqual([]);
+    });
+  }
+});
