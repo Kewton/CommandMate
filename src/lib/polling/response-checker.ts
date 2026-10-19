@@ -13,7 +13,10 @@ import {
 import { broadcastMessage } from '@/lib/ws-server';
 import type { ChatMessage } from '@/types/models';
 import { detectPrompt } from '@/lib/detection/prompt-detector';
-import { detectAntigravityNumberedDialogPrompt } from '@/lib/detection/tools/antigravity/dialog';
+import {
+  detectAntigravityNumberedDialogPrompt,
+  isAntigravityUnvouchedNumberedScreen,
+} from '@/lib/detection/tools/antigravity/dialog';
 import { liveRegionOf, normalizeFrame } from '@/lib/detection/tools/frame';
 import { isQuotedNumberedPrompt } from '@/lib/detection/tools/live-region';
 import type { NormalizedFrame } from '@/lib/detection/tools/types';
@@ -299,6 +302,15 @@ export function detectPromptOnCleanFrame(
       return isWithheldForWantOfReceipt(receiptScope)
         ? { isPrompt: false, cleanContent: cleanOutput.trim() }
         : dialog;
+    }
+    // Issue #3808: a numbered agy screen the reader declines — the login-method
+    // screen, a permission dialog whose `tab Amend` footer a narrow pane cut or
+    // left below the pane — is not handed to the generic parser either, which
+    // reads `> 1. Google OAuth` as an answerable option. Judged without the
+    // footer, so a missing footer cannot reopen the generic path. The status
+    // verdict publishes the same frame as unclassified (`tools/antigravity/detect.ts`).
+    if (isAntigravityUnvouchedNumberedScreen(cleanOutput)) {
+      return { isPrompt: false, cleanContent: cleanOutput.trim() };
     }
   }
 

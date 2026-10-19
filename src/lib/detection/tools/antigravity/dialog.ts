@@ -74,6 +74,10 @@ import {
 } from '../../prompt-detect-multiple-choice';
 import { normalizeTuiFrameForDetection } from '../../tui-detection-frame';
 import { findNumberedOptionBlock } from '../dialog-block';
+import {
+  ANTIGRAVITY_PERMISSION_FOOTER_PATTERN,
+  ANTIGRAVITY_PROMPT_PATTERN,
+} from './patterns';
 import type { PromptDetectionResult } from '../../types';
 import { truncateRawContent } from '../../truncate-raw-content';
 
@@ -133,7 +137,9 @@ export interface AntigravityNumberedDialog {
 /**
  * Read agy's numbered dialog off ANSI-stripped rows.
  *
- * Null when the frame has no `↑/↓ Navigate` footer, when the rows above it do
+ * Null when the frame has no `↑/↓ Navigate` footer, when that footer is not a
+ * permission dialog's `… · tab Amend` one (the login-method screen, a footer a
+ * narrow pane cut — Issue #3808), when the rows above it do
  * not form a numbered run reaching `1.` (the Switch Model picker, the trust
  * screen, the slash popup), or when the block sits under a `Switch Model`
  * header. A caller that has already passed `isAntigravityNumberedDialog` and
@@ -143,6 +149,9 @@ export interface AntigravityNumberedDialog {
 export function readAntigravityNumberedDialog(lines: readonly string[]): AntigravityNumberedDialog | null {
   const region = locateAntigravityDialogRegion(lines);
   if (region === null) return null;
+  // Issue #3808: only a permission dialog's footer vouches for the block —
+  // see ANTIGRAVITY_PERMISSION_FOOTER_PATTERN.
+  if (!ANTIGRAVITY_PERMISSION_FOOTER_PATTERN.test(lines[region.footer])) return null;
 
   const regionRows = lines.slice(region.start, region.footer);
   if (regionRows.some(row => ANTIGRAVITY_SWITCH_MODEL_HEADER_PATTERN.test(row))) return null;
@@ -263,4 +272,81 @@ export function detectAntigravityNumberedDialogPrompt(text: string): PromptDetec
     normalized,
     truncateRawContent,
   );
+}
+
+/**
+ * agy's `/feedback` category menu footer (`esc Cancel · 1-6 Select & Continue ·
+ * enter Continue`, `antigravity-live-2364/dialog-feedback-category.txt`): the
+ * one numbered agy screen the generic parser is left to read (#2364).
+ */
+/** A numbered option row (`> 1. Yes`, `  2. No`): the `>` cursor, then the number. */
+const OPTION_ROW_PATTERN = /^\s*(>)?\s*(\d+)\.\s+\S/;
+
+/**
+ * agy's `/feedback` category menu footer (`esc Cancel · 1-6 Select & Continue ·
+ * enter Continue`, `antigravity-live-2364/dialog-feedback-category.txt`): the
+ * one numbered agy screen the generic parser is left to read (#2364). Anchored
+ * at the row start and matched only on the first row under the last option,
+ * so the same words inside an option label or a quoted command never match.
+ */
+const FEEDBACK_MENU_FOOTER_PATTERN = /^\s*esc Cancel\s*·\s*\d+-\d+\s+Select\b/;
+
+/** How far above the bottom option row the run down from `1.` may reach. */
+const OPTION_RUN_MAX_ROWS = 40;
+
+/**
+ * Is this an agy screen with numbered options that the permission reader does
+ * NOT vouch for? (Issue #3808)
+ *
+ * True when the frame ends on a run of options numbered `1.` … `N.` (N ≥ 2,
+ * consecutive, wrapped label rows allowed between them, no boundary row
+ * inside) with one row wearing agy's `>` cursor, no `>` composer drawn under
+ * the run — agy paints none while a screen replaces it, so the options are the
+ * live screen's, not a reply's (a reply's list wears no cursor either) — and
+ * {@link readAntigravityNumberedDialog} does not read the frame (no complete
+ * `↑/↓ Navigate · tab Amend` footer: the login-method screen, a footer a narrow
+ * pane cut at `↑/↓ Nav`, or one below the pane altogether). Deliberately
+ * independent of the footer, so a footer that is not on screen cannot hand the
+ * frame back to the generic parser. A single `> 1. …` row — a sent message
+ * echoed above the spinner — is not a run.
+ *
+ * False for the `/feedback` menu (its `esc Cancel · 1-6 Select` footer directly
+ * under the last option), which keeps the generic reading #2364 left it.
+ *
+ * Callers treat true as "no prompt to answer": a human drives the screen.
+ *
+ * @param text - ANSI-stripped capture, box drawing optional
+ */
+export function isAntigravityUnvouchedNumberedScreen(text: string): boolean {
+  const lines = normalizeTuiFrameForDetection(text).split('\n');
+  let last = -1;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (ANTIGRAVITY_PROMPT_PATTERN.test(lines[i])) return false;
+    if (OPTION_ROW_PATTERN.test(lines[i])) {
+      last = i;
+      break;
+    }
+  }
+  if (last < 0) return false;
+
+  // The run, read upward from the bottom option: N., N-1., … 1.
+  let expected = Number(OPTION_ROW_PATTERN.exec(lines[last])![2]);
+  if (expected < 2) return false;
+  let highlighted = OPTION_ROW_PATTERN.exec(lines[last])![1] !== undefined;
+  const floor = Math.max(0, last - OPTION_RUN_MAX_ROWS);
+  for (let i = last - 1; i >= floor && expected > 1; i--) {
+    const match = OPTION_ROW_PATTERN.exec(lines[i]);
+    if (match === null) {
+      if (ANTIGRAVITY_DIALOG_BOUNDARY_PATTERN.test(lines[i])) return false;
+      continue;
+    }
+    if (Number(match[2]) !== expected - 1) return false;
+    expected--;
+    if (match[1] !== undefined) highlighted = true;
+  }
+  if (expected !== 1 || !highlighted) return false;
+
+  const footer = lines.slice(last + 1).find(row => row.trim() !== '');
+  if (footer !== undefined && FEEDBACK_MENU_FOOTER_PATTERN.test(footer)) return false;
+  return readAntigravityNumberedDialog(lines) === null;
 }
