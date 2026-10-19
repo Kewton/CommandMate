@@ -689,6 +689,169 @@ function splitPollerKey(pollerKey: string): { worktreeId: string; instanceId: st
   };
 }
 
+/** A poller the migration could not resolve, and the ID it was moving to. */
+interface AbandonedPoller {
+  pollerKey: string;
+  newWorktreeId: string;
+}
+
+/** A key that changes hands in the migration (paused chains, held scrapes). */
+interface KeyMove {
+  oldKey: string;
+  newKey: string;
+}
+
+/** Old worktree ID -> new worktree ID, skipping empty and no-op pairs. */
+function collectRenameTargets(
+  renames: ReadonlyArray<{ oldId: string; newId: string }>
+): Map<string, string> {
+  const targets = new Map<string, string>();
+  for (const { oldId, newId } of renames) {
+    if (!oldId || !newId || oldId === newId) continue;
+    targets.set(oldId, newId);
+  }
+  return targets;
+}
+
+/** Sort every running poller under a renamed ID into a move or an abandoned stop. */
+function planRunningPollerMoves(
+  targets: ReadonlyMap<string, string>,
+  resolveCliToolId: (worktreeId: string, instanceId: string) => CLIToolType | null
+): { moves: MigratedPollerKey[]; abandoned: AbandonedPoller[] } {
+  const moves: MigratedPollerKey[] = [];
+  const abandoned: AbandonedPoller[] = [];
+
+  for (const pollerKey of Array.from(activePollers.keys())) {
+    const parts = splitPollerKey(pollerKey);
+    if (!parts) continue;
+    const newWorktreeId = targets.get(parts.worktreeId);
+    if (!newWorktreeId) continue;
+
+    const cliToolId = resolveCliToolId(parts.worktreeId, parts.instanceId);
+    if (!cliToolId) {
+      abandoned.push({ pollerKey, newWorktreeId });
+      continue;
+    }
+
+    moves.push({
+      oldKey: pollerKey,
+      newKey: getPollerKey(newWorktreeId, cliToolId, parts.instanceId),
+      newWorktreeId,
+      cliToolId,
+      instanceId: parts.instanceId,
+    });
+  }
+  return { moves, abandoned };
+}
+
+/** Phase 1 of the migration for the moved pollers (see the caller). */
+function liftMovedPollers(
+  moves: ReadonlyArray<MigratedPollerKey>,
+  carried: Map<string, { startedAt: number | undefined }>
+): void {
+  for (const move of moves) {
+    const timerId = activePollers.get(move.oldKey);
+    if (timerId) clearTimeout(timerId);
+    activePollers.delete(move.oldKey);
+
+    // Issue #2223: retire the ownership token as well. A tick that is inside
+    // `checkForResponse()` right now cannot be cancelled by `clearTimeout`, and
+    // without this it would resume, find its key gone and — before #2223 —
+    // still be able to act on the old worktree ID. Marked superseded rather
+    // than merely stopped: Phase 2 below arms a replacement chain, so the old
+    // tick's snapshot would land on top of the new one's.
+    const retired = coordinator.owners.get(move.oldKey);
+    if (retired) {
+      retired.superseded = true;
+      retired.stopped = true;
+      coordinator.owners.delete(move.oldKey);
+    }
+    coordinator.pendingRestart.delete(move.oldKey);
+
+    carried.set(move.newKey, { startedAt: pollingStartTimes.get(move.oldKey) });
+    pollingStartTimes.delete(move.oldKey);
+
+    clearTuiAccumulator(move.oldKey);
+  }
+}
+
+/** The paused chains under a renamed ID, keyed old -> new (see the caller). */
+function collectPausedMoves(targets: ReadonlyMap<string, string>): KeyMove[] {
+  const pausedMoves: KeyMove[] = [];
+  for (const pollerKey of Array.from(coordinator.pausedOnPrompt)) {
+    const parts = splitPollerKey(pollerKey);
+    if (!parts) continue;
+    const newWorktreeId = targets.get(parts.worktreeId);
+    if (!newWorktreeId) continue;
+    pausedMoves.push({ oldKey: pollerKey, newKey: `${newWorktreeId}:${parts.instanceId}` });
+  }
+  return pausedMoves;
+}
+
+/** The held scrapes under a renamed ID, keyed old -> new (see the caller). */
+function collectPendingMoves(
+  targets: ReadonlyMap<string, string>,
+  abandonedKeys: ReadonlySet<string>
+): Array<KeyMove & { newWorktreeId: string }> {
+  const pendingMoves: Array<KeyMove & { newWorktreeId: string }> = [];
+  for (const pollerKey of listPendingScrapedResponseKeys()) {
+    if (abandonedKeys.has(pollerKey)) continue;
+    const parts = splitPollerKey(pollerKey);
+    if (!parts) continue;
+    const newWorktreeId = targets.get(parts.worktreeId);
+    if (!newWorktreeId) continue;
+    pendingMoves.push({ oldKey: pollerKey, newKey: `${newWorktreeId}:${parts.instanceId}`, newWorktreeId });
+  }
+  return pendingMoves;
+}
+
+/** Stop the chains on destinations that no source vacates (see the caller). */
+function stopDisplacedPollers(
+  moves: ReadonlyArray<KeyMove>,
+  pausedMoves: ReadonlyArray<KeyMove>,
+  pendingMoves: ReadonlyArray<KeyMove>,
+  abandonedKeys: ReadonlySet<string>
+): void {
+  const vacated = new Set([
+    ...moves.map((move) => move.oldKey),
+    ...pausedMoves.map((move) => move.oldKey),
+    ...pendingMoves.map((move) => move.oldKey),
+  ]);
+  // A held scrape moved on its own (no chain, no pause) changes the key's
+  // owner just the same, so its destination is handled alike (#3663 review).
+  const occupied = new Set([
+    ...moves.map((move) => move.newKey),
+    ...pausedMoves.map((move) => move.newKey),
+    ...pendingMoves.map((move) => move.newKey),
+  ]);
+  for (const pollerKey of occupied) {
+    if (vacated.has(pollerKey) || abandonedKeys.has(pollerKey)) continue;
+    const held =
+      coordinator.owners.has(pollerKey) ||
+      activePollers.has(pollerKey) ||
+      coordinator.pausedOnPrompt.has(pollerKey) ||
+      hasPendingScrapedResponse(pollerKey);
+    if (!held) continue;
+    stopPollingByKey(pollerKey);
+    logger.warn('poller:migrate-displaced', { pollerKey });
+  }
+}
+
+/** Phase 2 of the migration: restart each moved poller (see the caller). */
+function restartMovedPollers(
+  moves: ReadonlyArray<MigratedPollerKey>,
+  carried: ReadonlyMap<string, { startedAt: number | undefined }>
+): void {
+  for (const move of moves) {
+    const startedAt = carried.get(move.newKey)?.startedAt;
+    pollingStartTimes.set(move.newKey, startedAt ?? Date.now());
+    if (isFullScreenTui(move.cliToolId)) {
+      initTuiAccumulator(move.newKey);
+    }
+    scheduleNextResponsePoll(move.newWorktreeId, move.cliToolId, move.instanceId);
+  }
+}
+
 /**
  * Move every running response poller from a renamed worktree ID to the new one
  * (Issue #1621 Phase 3).
@@ -744,36 +907,10 @@ export function migrateResponsePollerWorktreeIds(
   renames: ReadonlyArray<{ oldId: string; newId: string }>,
   resolveCliToolId: (worktreeId: string, instanceId: string) => CLIToolType | null
 ): MigratedPollerKey[] {
-  const targets = new Map<string, string>();
-  for (const { oldId, newId } of renames) {
-    if (!oldId || !newId || oldId === newId) continue;
-    targets.set(oldId, newId);
-  }
+  const targets = collectRenameTargets(renames);
   if (targets.size === 0) return [];
 
-  const moves: MigratedPollerKey[] = [];
-  const abandoned: Array<{ pollerKey: string; newWorktreeId: string }> = [];
-
-  for (const pollerKey of Array.from(activePollers.keys())) {
-    const parts = splitPollerKey(pollerKey);
-    if (!parts) continue;
-    const newWorktreeId = targets.get(parts.worktreeId);
-    if (!newWorktreeId) continue;
-
-    const cliToolId = resolveCliToolId(parts.worktreeId, parts.instanceId);
-    if (!cliToolId) {
-      abandoned.push({ pollerKey, newWorktreeId });
-      continue;
-    }
-
-    moves.push({
-      oldKey: pollerKey,
-      newKey: getPollerKey(newWorktreeId, cliToolId, parts.instanceId),
-      newWorktreeId,
-      cliToolId,
-      instanceId: parts.instanceId,
-    });
-  }
+  const { moves, abandoned } = planRunningPollerMoves(targets, resolveCliToolId);
 
   // Phase 1: stop every affected timer and lift the state off the old keys.
   // Done for the whole batch before any write so a swap cannot self-collide.
@@ -788,30 +925,7 @@ export function migrateResponsePollerWorktreeIds(
     const inFlight = coordinator.running.get(move.oldKey);
     return inFlight !== undefined && inFlight.owner === coordinator.owners.get(move.oldKey);
   });
-  for (const move of moves) {
-    const timerId = activePollers.get(move.oldKey);
-    if (timerId) clearTimeout(timerId);
-    activePollers.delete(move.oldKey);
-
-    // Issue #2223: retire the ownership token as well. A tick that is inside
-    // `checkForResponse()` right now cannot be cancelled by `clearTimeout`, and
-    // without this it would resume, find its key gone and — before #2223 —
-    // still be able to act on the old worktree ID. Marked superseded rather
-    // than merely stopped: Phase 2 below arms a replacement chain, so the old
-    // tick's snapshot would land on top of the new one's.
-    const retired = coordinator.owners.get(move.oldKey);
-    if (retired) {
-      retired.superseded = true;
-      retired.stopped = true;
-      coordinator.owners.delete(move.oldKey);
-    }
-    coordinator.pendingRestart.delete(move.oldKey);
-
-    carried.set(move.newKey, { startedAt: pollingStartTimes.get(move.oldKey) });
-    pollingStartTimes.delete(move.oldKey);
-
-    clearTuiAccumulator(move.oldKey);
-  }
+  liftMovedPollers(moves, carried);
 
   // Stop the abandoned pollers before any dedup state is written: the stop
   // clears every cache under its key, and that key can be the destination of
@@ -834,27 +948,12 @@ export function migrateResponsePollerWorktreeIds(
   // never see it — but it is holding the response hash for the turn it paused
   // on, and `/respond` will resume it under the NEW ID. Move the hash and the
   // pause mark with it; the chain itself stays paused until that resume.
-  const pausedMoves: Array<{ oldKey: string; newKey: string }> = [];
-  for (const pollerKey of Array.from(coordinator.pausedOnPrompt)) {
-    const parts = splitPollerKey(pollerKey);
-    if (!parts) continue;
-    const newWorktreeId = targets.get(parts.worktreeId);
-    if (!newWorktreeId) continue;
-    pausedMoves.push({ oldKey: pollerKey, newKey: `${newWorktreeId}:${parts.instanceId}` });
-  }
+  const pausedMoves = collectPausedMoves(targets);
 
   // Issue #3663: every held scrape under a renamed worktree ID moves — a
   // running chain's, a paused chain's, and one whose chain is already gone.
   // The abandoned ones were written above and are no longer held.
-  const pendingMoves: Array<{ oldKey: string; newKey: string; newWorktreeId: string }> = [];
-  for (const pollerKey of listPendingScrapedResponseKeys()) {
-    if (abandonedKeys.has(pollerKey)) continue;
-    const parts = splitPollerKey(pollerKey);
-    if (!parts) continue;
-    const newWorktreeId = targets.get(parts.worktreeId);
-    if (!newWorktreeId) continue;
-    pendingMoves.push({ oldKey: pollerKey, newKey: `${newWorktreeId}:${parts.instanceId}`, newWorktreeId });
-  }
+  const pendingMoves = collectPendingMoves(targets, abandonedKeys);
 
   // Issue #3663: a destination a chain (running or paused) moves onto, that no
   // source of this batch vacates, may already be held by another chain — B:x
@@ -864,29 +963,7 @@ export function migrateResponsePollerWorktreeIds(
   // no longer hold or drop anything, and its caches are cleared before the
   // moved state is written. A destination nothing is on is left alone, and so
   // is every other instance of the destination worktree.
-  const vacated = new Set([
-    ...moves.map((move) => move.oldKey),
-    ...pausedMoves.map((move) => move.oldKey),
-    ...pendingMoves.map((move) => move.oldKey),
-  ]);
-  // A held scrape moved on its own (no chain, no pause) changes the key's
-  // owner just the same, so its destination is handled alike (#3663 review).
-  const occupied = new Set([
-    ...moves.map((move) => move.newKey),
-    ...pausedMoves.map((move) => move.newKey),
-    ...pendingMoves.map((move) => move.newKey),
-  ]);
-  for (const pollerKey of occupied) {
-    if (vacated.has(pollerKey) || abandonedKeys.has(pollerKey)) continue;
-    const held =
-      coordinator.owners.has(pollerKey) ||
-      activePollers.has(pollerKey) ||
-      coordinator.pausedOnPrompt.has(pollerKey) ||
-      hasPendingScrapedResponse(pollerKey);
-    if (!held) continue;
-    stopPollingByKey(pollerKey);
-    logger.warn('poller:migrate-displaced', { pollerKey });
-  }
+  stopDisplacedPollers(moves, pausedMoves, pendingMoves, abandonedKeys);
 
   // Issue #3553: the dedup state of the whole batch moves in one call per map
   // family, each lifting every source before writing any destination. Re-keyed
@@ -929,14 +1006,7 @@ export function migrateResponsePollerWorktreeIds(
   );
 
   // Phase 2: restart each poller under its new identity.
-  for (const move of moves) {
-    const startedAt = carried.get(move.newKey)?.startedAt;
-    pollingStartTimes.set(move.newKey, startedAt ?? Date.now());
-    if (isFullScreenTui(move.cliToolId)) {
-      initTuiAccumulator(move.newKey);
-    }
-    scheduleNextResponsePoll(move.newWorktreeId, move.cliToolId, move.instanceId);
-  }
+  restartMovedPollers(moves, carried);
 
   // Issue #2230: the pause marks of the chains collected above follow their
   // hashes (moved with the batch). All removed before any is added, for the
