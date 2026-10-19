@@ -34,14 +34,29 @@ import type { VerificationGateTerminalStatus } from '@/lib/db';
 import type { TaskContractScope } from '@/lib/tasks/contract-parser';
 import { collectSkillReceiptOwnedPaths } from '@/lib/skills/receipt-owned-paths';
 import { isAgentStateUntrackedEntry } from '@/lib/skills/agent-state-paths';
+import {
+  MAX_REPORTED_VIOLATIONS,
+  type ScopeAdmission,
+  formatAdmitted,
+  formatAgentStateExcluded,
+  formatDecidedPath,
+  formatOrchestratorExcluded,
+  formatPatterns,
+} from './scope-gate-format';
+import { ScopeMatcher } from './scope-gate-glob';
 
-/**
- * Violations listed in `log_tail` before the rest are summarised as a count.
- *
- * A worker that ran in the wrong directory can put thousands of paths out of
- * scope, and log_tail is stored per gate in SQLite.
- */
-export const MAX_REPORTED_VIOLATIONS = 100;
+export {
+  MAX_REPORTED_VIOLATIONS,
+  SCOPE_PATTERN_ARROW,
+  type ScopeAdmission,
+} from './scope-gate-format';
+export {
+  ALWAYS_ALLOWED_PREFIX,
+  SCOPE_EXEMPT_ALWAYS_ALLOWED,
+  SCOPE_EXEMPT_CONTRACT_PATH,
+  type ScopeDecision,
+  ScopeMatcher,
+} from './scope-gate-glob';
 
 /**
  * Actionable coda appended to every scope failure report (#1683).
@@ -60,62 +75,6 @@ export const SCOPE_ALLOW_GUIDANCE =
   'is judged from the send-time snapshot, so editing the contract file alone ' +
   'changes nothing. A path matching deny: is a deliberate prohibition; revert ' +
   'it instead.';
-
-/**
- * Paths that are in scope no matter what the contract says.
- *
- * The contract file lives here, so a contract whose own `allow` list forgot to
- * mention `.commandmate/` would fail the moment it was committed — the scope
- * declaration would make its own storage a violation. The exemption covers the
- * `allow` requirement only; an explicit `deny` still applies, because a deny is
- * a deliberate prohibition and silently ignoring one is worse than the accident
- * this exemption prevents.
- */
-export const ALWAYS_ALLOWED_PREFIX = '.commandmate/';
-
-/**
- * Separator between a reported path and the pattern that decided it (#1841).
- *
- * Mirrored by the CLI's scope-evidence parser (`src/cli/commands/verify.ts`,
- * SCOPE_PATTERN_ARROW): the gate's report is the only carrier for this evidence
- * — `verification_gate_results` has columns for a status, an exit code and a log
- * body, and nothing else — so the two constants have to agree. A round-trip
- * test feeds a real `evaluateScope` report through that parser rather than
- * trusting the two copies to be edited together.
- *
- * A path containing this exact three-character sequence would split wrongly on
- * the way back. Nothing prevents such a filename; it is accepted because the
- * alternative — encoding paths in a log a human reads first — costs every
- * reader something to protect against a file no repository has.
- */
-export const SCOPE_PATTERN_ARROW = '  \u2190 ';
-
-/**
- * Stand-ins for the two ways a path is admitted without matching `allow`.
- *
- * Parenthesised so they cannot be mistaken for a pattern the contract declared:
- * a reader who greps the contract for `(exempt: .commandmate/)` should find
- * nothing, because nothing there put it in scope.
- */
-export const SCOPE_EXEMPT_ALWAYS_ALLOWED = `(exempt: ${ALWAYS_ALLOWED_PREFIX})`;
-export const SCOPE_EXEMPT_CONTRACT_PATH = '(exempt: contract path)';
-
-/** One admitted change, with the pattern that admitted it (#1841). */
-export interface ScopeAdmission {
-  path: string;
-  /** A declared `allow` pattern, or one of the two exemption stand-ins. */
-  pattern: string;
-}
-
-/**
- * Why one path was admitted or rejected (#1841).
- *
- * `pattern` is null only for the rejection that no rule names: nothing in
- * `deny` matched, and nothing in `allow` did either.
- */
-export type ScopeDecision =
-  | { admitted: true; pattern: string }
-  | { admitted: false; pattern: string | null };
 
 /**
  * Execution contracts, dropped from both gates' change sets entirely (#1580).
@@ -255,179 +214,6 @@ export interface ScopeOutcome {
   startedAt: number;
   durationMs: number;
   logTail: string | null;
-}
-
-// =============================================================================
-// Glob matching
-// =============================================================================
-
-/**
- * Translate a scope glob into an anchored regular expression.
- *
- * Deliberately a small, documented subset rather than a glob library. The
- * semantics are fixed in docs/design/task-contract.md §2.2:
- *
- * - `**` as a whole path segment crosses directory boundaries, including zero of
- *   them: `a/**` matches `a/b` and `a/b/c`, `**\/*.ts` matches `x.ts`.
- * - `*` and `?` never cross `/`. Leading dots are ordinary characters, so
- *   `.github/**` and `*.md` behave the way they read.
- * - `{a,b}` is alternation, nestable. Unbalanced braces are literal, as in a
- *   shell — `src/{a` is a path with a brace in it, not a syntax error.
- * - `[` and `]` are **literal**. This repository routes through
- *   `src/app/proxy/[...path]/`, and treating those as character classes would
- *   make the pattern that names them match nothing at all — a silent no-match is
- *   the failure mode this gate exists to avoid.
- * - A pattern that matches a directory also matches everything beneath it, so
- *   `src/lib`, `src/lib/` and `src/lib/**` all mean the same thing. Without this
- *   rule, `allow: ["src/lib/verification"]` — the way people write a directory —
- *   would put every file inside it out of scope.
- */
-function globToRegExp(rawPattern: string): RegExp {
-  // A trailing slash carries no information once the rule above applies.
-  const pattern = rawPattern.replace(/\/+$/, '');
-  const bracesBalanced = hasBalancedBraces(pattern);
-
-  let source = '';
-  let depth = 0;
-  let i = 0;
-
-  while (i < pattern.length) {
-    const char = pattern[i];
-
-    if (char === '*') {
-      let end = i;
-      while (pattern[end] === '*') end += 1;
-      const isGlobstar = end - i > 1;
-      const atSegmentStart = i === 0 || pattern[i - 1] === '/';
-
-      if (isGlobstar && atSegmentStart && pattern[end] === '/') {
-        // Consume the following slash too: `a/**/b` has to match `a/b`.
-        source += '(?:[^/]*/)*';
-        i = end + 1;
-        continue;
-      }
-      if (isGlobstar && atSegmentStart && end === pattern.length) {
-        source += '.*';
-        i = end;
-        continue;
-      }
-      // `**` that is not a whole segment (`a**b`) cannot mean "cross
-      // directories" without also matching `a/x/b`, which the pattern does not
-      // say. Collapse it to a single-segment wildcard.
-      source += '[^/]*';
-      i = end;
-      continue;
-    }
-
-    if (char === '?') {
-      source += '[^/]';
-      i += 1;
-      continue;
-    }
-    if (bracesBalanced && char === '{') {
-      depth += 1;
-      source += '(?:';
-      i += 1;
-      continue;
-    }
-    if (bracesBalanced && char === '}' && depth > 0) {
-      depth -= 1;
-      source += ')';
-      i += 1;
-      continue;
-    }
-    if (bracesBalanced && char === ',' && depth > 0) {
-      source += '|';
-      i += 1;
-      continue;
-    }
-
-    source += char.replace(/[.*+?^${}()|[\]\\]/, '\\$&');
-    i += 1;
-  }
-
-  return new RegExp(`^${source}(?:/.*)?$`);
-}
-
-function hasBalancedBraces(pattern: string): boolean {
-  let depth = 0;
-  for (const char of pattern) {
-    if (char === '{') depth += 1;
-    else if (char === '}') {
-      depth -= 1;
-      if (depth < 0) return false;
-    }
-  }
-  return depth === 0;
-}
-
-/** A declared pattern kept next to its regex, so the report can name it (#1841). */
-interface CompiledPattern {
-  pattern: string;
-  regexp: RegExp;
-}
-
-function compilePattern(pattern: string): CompiledPattern {
-  return { pattern, regexp: globToRegExp(pattern) };
-}
-
-/**
- * A scope declaration compiled once per run.
- *
- * Compiling per pattern per file would rebuild the same regexes for every one of
- * potentially thousands of changed paths.
- */
-export class ScopeMatcher {
-  private readonly allow: CompiledPattern[];
-  private readonly deny: CompiledPattern[];
-
-  /**
-   * @param contractPath the contract's own path, exempted alongside
-   *        {@link ALWAYS_ALLOWED_PREFIX} for contracts kept outside `.commandmate/`
-   */
-  constructor(
-    scope: TaskContractScope,
-    private readonly contractPath: string | null = null
-  ) {
-    this.allow = scope.allow.map(compilePattern);
-    this.deny = scope.deny.map(compilePattern);
-  }
-
-  /**
-   * Which declared rule decided `path`, and which way (#1841).
-   *
-   * The **first** matching pattern is reported, in the contract's declaration
-   * order, on both sides. Reporting the last would name a rule the reader
-   * cannot use: `allow: ["src/**", "src/lib/**"]` admits `src/lib/a.ts` under
-   * the first entry, and deleting the second changes nothing about the verdict.
-   *
-   * `path` is a repository-root-relative POSIX path as git reports it.
-   */
-  classify(path: string): ScopeDecision {
-    const denied = this.deny.find((entry) => entry.regexp.test(path));
-    if (denied) return { admitted: false, pattern: denied.pattern };
-    if (path.startsWith(ALWAYS_ALLOWED_PREFIX)) {
-      return { admitted: true, pattern: SCOPE_EXEMPT_ALWAYS_ALLOWED };
-    }
-    if (path === this.contractPath) {
-      return { admitted: true, pattern: SCOPE_EXEMPT_CONTRACT_PATH };
-    }
-    const allowed = this.allow.find((entry) => entry.regexp.test(path));
-    return allowed
-      ? { admitted: true, pattern: allowed.pattern }
-      : { admitted: false, pattern: null };
-  }
-
-  /**
-   * Whether `path` is a scope violation.
-   *
-   * Delegates to {@link classify} rather than repeating the rules: the verdict
-   * and the evidence for it must never be able to disagree, and two copies of
-   * "deny wins, then the exemptions, then allow" is exactly how they would.
-   */
-  isViolation(path: string): boolean {
-    return !this.classify(path).admitted;
-  }
 }
 
 // =============================================================================
@@ -707,70 +493,6 @@ export async function collectChangedPaths(
 // =============================================================================
 // Gate evaluation
 // =============================================================================
-
-function formatPatterns(patterns: string[]): string {
-  return patterns.length > 0 ? patterns.join(', ') : '(none)';
-}
-
-/**
- * One reported path, optionally naming the rule that decided it (#1841).
- *
- * Admitted paths lead with `+` rather than `-` so the two sections cannot be
- * confused by a reader — or by a grep — that has only one line in front of it.
- */
-function formatDecidedPath(marker: '+' | '-', path: string, pattern: string | null): string {
-  if (pattern === null) return `  ${marker} ${path}`;
-  return `  ${marker} ${path}${SCOPE_PATTERN_ARROW}${pattern}`;
-}
-
-/**
- * The `admitted:` section: what this run was allowed to change, and by which
- * rule (#1841).
- *
- * With an `allow` of exact paths the pattern *is* the file and this adds
- * nothing, but #1546 made globs legal, and `src/**` leaves no record of what it
- * actually covered on the day it ran. The contract is the claim; this is the
- * evidence for it, and it has to survive in `log_tail` because the run's own
- * working tree will have moved on by the time anyone asks.
- *
- * Capped by the same rule as the violations, for the same reason (log_tail is
- * stored per gate in SQLite), and the truncation is stated rather than silent —
- * a list that stops at 100 with no marker reads as a complete one.
- */
-function formatAdmitted(admitted: ScopeAdmission[]): string[] {
-  if (admitted.length === 0) return [];
-  const listed = admitted.slice(0, MAX_REPORTED_VIOLATIONS);
-  const remainder = admitted.length - listed.length;
-  return [
-    'admitted:',
-    ...listed.map((entry) => formatDecidedPath('+', entry.path, entry.pattern)),
-    // Worded `(+N more)` rather than the violations' `... and N more`: the two
-    // sections are capped independently and a reader scanning a truncated
-    // report should not have to work out which count belongs to which list.
-    ...(remainder > 0 ? [`  ... (+${remainder} more)`] : []),
-  ];
-}
-
-/** The `excluded:` section naming agent-managed state files left out (#3126). */
-function formatAgentStateExcluded(excluded: string[]): string[] {
-  if (excluded.length === 0) return [];
-  const listed = excluded.slice(0, MAX_REPORTED_VIOLATIONS);
-  const remainder = excluded.length - listed.length;
-  return [
-    'excluded (agent-managed state files, not counted as change):',
-    ...listed.map((path) => `  ~ ${path}`),
-    ...(remainder > 0 ? [`  ... (+${remainder} more)`] : []),
-  ];
-}
-
-/** The `excluded:` section naming orchestrator-only committed paths (#3588). */
-function formatOrchestratorExcluded(excluded: string[]): string[] {
-  if (excluded.length === 0) return [];
-  return [
-    'excluded (changed only by orchestrator commits, not counted as change):',
-    ...excluded.map((path) => `  ~ ${path}`),
-  ];
-}
 
 /**
  * Reasons the gate has nothing to judge, phrased for `log_tail`.
