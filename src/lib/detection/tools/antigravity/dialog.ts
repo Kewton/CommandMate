@@ -74,6 +74,7 @@ import {
 } from '../../prompt-detect-multiple-choice';
 import { normalizeTuiFrameForDetection } from '../../tui-detection-frame';
 import { findNumberedOptionBlock } from '../dialog-block';
+import { ANTIGRAVITY_PERMISSION_FOOTER_PATTERN } from './patterns';
 import type { PromptDetectionResult } from '../../types';
 import { truncateRawContent } from '../../truncate-raw-content';
 
@@ -133,7 +134,9 @@ export interface AntigravityNumberedDialog {
 /**
  * Read agy's numbered dialog off ANSI-stripped rows.
  *
- * Null when the frame has no `↑/↓ Navigate` footer, when the rows above it do
+ * Null when the frame has no `↑/↓ Navigate` footer, when that footer is not a
+ * permission dialog's `… · tab Amend` one (the login-method screen, a footer a
+ * narrow pane cut — Issue #3808), when the rows above it do
  * not form a numbered run reaching `1.` (the Switch Model picker, the trust
  * screen, the slash popup), or when the block sits under a `Switch Model`
  * header. A caller that has already passed `isAntigravityNumberedDialog` and
@@ -143,6 +146,9 @@ export interface AntigravityNumberedDialog {
 export function readAntigravityNumberedDialog(lines: readonly string[]): AntigravityNumberedDialog | null {
   const region = locateAntigravityDialogRegion(lines);
   if (region === null) return null;
+  // Issue #3808: only a permission dialog's footer vouches for the block —
+  // see ANTIGRAVITY_PERMISSION_FOOTER_PATTERN.
+  if (!ANTIGRAVITY_PERMISSION_FOOTER_PATTERN.test(lines[region.footer])) return null;
 
   const regionRows = lines.slice(region.start, region.footer);
   if (regionRows.some(row => ANTIGRAVITY_SWITCH_MODEL_HEADER_PATTERN.test(row))) return null;

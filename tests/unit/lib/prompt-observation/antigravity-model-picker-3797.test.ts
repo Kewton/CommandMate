@@ -166,9 +166,10 @@ describe('[#3797] negative controls: other screens of the same session', () => {
   });
 
   it('the numbered login-method screen is unknown, not a permission dialog the strict respond answers', () => {
-    // It passes the numbered-dialog structural test and is published as a
-    // prompt; before #3797 it came out `antigravity-permission`.
-    expect(detectSessionStatus(LOGIN_METHOD, 'antigravity').reason).toBe(STATUS_REASON.PROMPT_DETECTED);
+    // It passes the numbered-dialog structural test; before #3797 it came out
+    // `antigravity-permission`. Since #3808 the status layer no longer
+    // publishes it as a prompt either (unclassified: a human answers it).
+    expect(detectSessionStatus(LOGIN_METHOD, 'antigravity').reason).toBe(STATUS_REASON.UNKNOWN_FRAME);
     const observation = buildPromptObservation(observationInput(LOGIN_METHOD));
     expect(observation.screen?.kind).toBe('unknown');
     expect(observation.screen?.token).toBeNull();

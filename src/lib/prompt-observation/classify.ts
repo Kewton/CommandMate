@@ -19,7 +19,6 @@
 
 import { stripAnsi, stripBoxDrawing, isAntigravityNumberedDialog } from '@/lib/detection/cli-patterns';
 import { detectAntigravityNumberedDialogPrompt } from '@/lib/detection/tools/antigravity/dialog';
-import { ANTIGRAVITY_NAVIGATE_FOOTER_PATTERN } from '@/lib/detection/tools/antigravity/patterns';
 import {
   readAntigravityArrowScreen,
   type AntigravityArrowScreenKind,
@@ -65,23 +64,6 @@ const EMPTY: Omit<ClassifiedScreen, 'kind'> = {
   selectedIndex: -1,
 };
 
-/**
- * The footer every measured agy permission dialog ends on: `↑/↓ Navigate ·
- * tab Amend · f full diff` (file creation), `… · tab Amend · ctrl+g
- * edit/expand command[ · ctrl+r Review]` (command execution)
- * (`tests/fixtures/antigravity-live-2364/dialog-*.txt`).
- */
-const PERMISSION_FOOTER_PATTERN = /↑\/↓\s*Navigate\s*·\s*tab Amend\b/;
-
-/** Whether the last `↑/↓ Navigate` row of the frame is a permission dialog's footer. */
-function hasPermissionFooter(text: string): boolean {
-  const lines = text.split('\n');
-  for (let i = lines.length - 1; i >= 0; i--) {
-    if (ANTIGRAVITY_NAVIGATE_FOOTER_PATTERN.test(lines[i])) return PERMISSION_FOOTER_PATTERN.test(lines[i]);
-  }
-  return false;
-}
-
 /** agy's measured screens, or null when the frame is none of them. */
 function classifyAntigravity(frame: string): ClassifiedScreen | null {
   const text = stripAnsi(frame);
@@ -90,10 +72,9 @@ function classifyAntigravity(frame: string): ClassifiedScreen | null {
   // the structural test and still fails to read is `unknown`, not a picker.
   const boxless = stripBoxDrawing(text);
   if (isAntigravityNumberedDialog(boxless)) {
-    // Every measured permission dialog ends on a `tab Amend` footer; agy's
-    // numbered login-method screen (`↑/↓ Navigate · enter Select`, Issue
-    // #3797) passes the structural test too and is not one.
-    if (!hasPermissionFooter(boxless)) return { kind: 'unknown', ...EMPTY };
+    // The reader declines a numbered screen that is not under a permission
+    // dialog's `tab Amend` footer — agy's login-method screen (#3797), a
+    // footer a narrow pane cut — so it is `unknown` here as well (#3808).
     const detected = detectAntigravityNumberedDialogPrompt(boxless);
     const prompt = detected?.promptData;
     if (prompt?.type !== 'multiple_choice') return { kind: 'unknown', ...EMPTY };

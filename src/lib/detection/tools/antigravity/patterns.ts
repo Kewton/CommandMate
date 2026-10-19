@@ -116,6 +116,21 @@ export const ANTIGRAVITY_SELECTION_LIST_PATTERN = /Switch Model|↑\/↓\s*Navig
 export const ANTIGRAVITY_NAVIGATE_FOOTER_PATTERN = /↑\/↓\s*Navigate/;
 
 /**
+ * The footer every measured agy PERMISSION dialog ends on: `↑/↓ Navigate · tab
+ * Amend · f full diff` (file creation), `… · tab Amend · ctrl+g edit/expand
+ * command[ · ctrl+r Review]` (command execution)
+ * (`tests/fixtures/antigravity-live-2364/dialog-*.txt`).
+ *
+ * The numbered-dialog reader requires it on the footer row (Issue #3797 for the
+ * prompt observation, #3808 for every producer): agy 1.4's login-method screen
+ * (`↑/↓ Navigate · enter Select`) draws numbered rows too and is not a
+ * permission request. A footer cut short by a narrow pane, wrapped onto the
+ * next row, or spelled differently by another version fails it on purpose —
+ * the frame is then not answered.
+ */
+export const ANTIGRAVITY_PERMISSION_FOOTER_PATTERN = /↑\/↓\s*Navigate\s*·\s*tab Amend\b/;
+
+/**
  * One numbered option row of agy's dialogs: `> 1. Yes`, `  4. No`,
  * `  2. No, deny creation`.
  *

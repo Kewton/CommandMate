@@ -27,6 +27,7 @@ import {
   stripAnsi,
   stripBoxDrawing,
   buildDetectPromptOptions,
+  isAntigravityNumberedDialog,
 } from '@/lib/detection/cli-patterns';
 import { createLogger } from '@/lib/logger';
 import { THINKING_TAIL_LINE_COUNT } from '@/config/thinking-constants';
@@ -299,6 +300,14 @@ export function detectPromptOnCleanFrame(
       return isWithheldForWantOfReceipt(receiptScope)
         ? { isPrompt: false, cleanContent: cleanOutput.trim() }
         : dialog;
+    }
+    // Issue #3808: a numbered agy screen the reader declines — the login-method
+    // screen, a permission dialog whose `tab Amend` footer a narrow pane cut —
+    // is not handed to the generic parser either, which reads `> 1. Google
+    // OAuth` as an answerable option. The status verdict publishes the same
+    // frame as unclassified (`tools/antigravity/detect.ts`).
+    if (isAntigravityNumberedDialog(cleanOutput)) {
+      return { isPrompt: false, cleanContent: cleanOutput.trim() };
     }
   }
 

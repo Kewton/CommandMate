@@ -166,6 +166,11 @@ export const antigravityStatusDetector = createToolStatusDetector({
     // which reads the same helper over the same spelling) carry one question,
     // one option list and one `instructionText` for one screen.
     //
+    // Issue #3808: the reader also declines a numbered screen whose footer is
+    // not a permission dialog's (`… · tab Amend`) — agy 1.4's login-method
+    // screen, a footer a narrow pane cut — so those land on the unclassified
+    // verdict below: a human answers them, Auto-Yes never does.
+    //
     // #995's own case is untouched: the Switch Model picker carries no numbered
     // rows, so it still resolves below and still keeps NavigationButtons.
     const text = stripBoxDrawing(frame.clean);
