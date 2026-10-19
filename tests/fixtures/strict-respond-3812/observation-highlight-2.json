@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "observedAt": 1792380752591,
+  "target": {
+    "worktreeId": "uat-agyfresh",
+    "cliToolId": "antigravity",
+    "instanceId": "antigravity",
+    "sessionName": "mcbd-cba2b82e-antigravity-uat-agyfresh",
+    "resolvedBy": "primary"
+  },
+  "session": {
+    "running": true,
+    "starting": false,
+    "generation": 1792380640028
+  },
+  "status": "observed",
+  "unavailableReason": null,
+  "screen": {
+    "kind": "antigravity-permission",
+    "token": "po1.mvep7zyn.JzIIfw0ZXaWvDEAFFfzHM4B3IkcRiLzdNLIaMNjQPHk",
+    "tokenExpiresAt": 1792380872591,
+    "tokenWithheld": null,
+    "appearedAt": 1792380742362,
+    "question": "Run this command?",
+    "approvalTarget": "Command\n\nRequesting permission for:\n   pwd\n\nRun this command?\n  1. Yes, run command\n> 2. Yes, and always allow in this conversation for commands that start with 'pwd'\n  3. Yes, and always allow for commands that start with 'pwd' (Persist to settings.json)\n  4. No, cancel",
+    "options": [
+      {
+        "position": 1,
+        "label": "Yes, run command"
+      },
+      {
+        "position": 2,
+        "label": "Yes, and always allow in this conversation for commands that start with 'pwd'"
+      },
+      {
+        "position": 3,
+        "label": "Yes, and always allow for commands that start with 'pwd' (Persist to settings.json)"
+      },
+      {
+        "position": 4,
+        "label": "No, cancel"
+      }
+    ],
+    "selectedPosition": 2,
+    "answerVia": "screen",
+    "sessionStatus": "waiting",
+    "sessionStatusReason": "prompt_detected"
+  },
+  "autoYes": {
+    "enabled": false,
+    "expiresAt": null,
+    "stopReason": null,
+    "pollerActive": false,
+    "pollerRecord": null,
+    "contractEvaluation": {
+      "state": "policy-permits",
+      "contract": null
+    }
+  },
+  "lastSend": {
+    "at": 1792380719664,
+    "state": "sent",
+    "reason": "submitted"
+  }
+}

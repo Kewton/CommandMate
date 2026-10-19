@@ -60,6 +60,25 @@ function normalize(text: string | null): string | null {
   return text === null ? null : text.replace(/\s+/g, ' ').trim();
 }
 
+/**
+ * A numbered option row of an approval target, with the `>` gutter agy draws on
+ * the highlighted one (`> 2. No, cancel`) or the blank gutter of the others.
+ */
+const OPTION_ROW_GUTTER_PATTERN = /^[ \t]*>?[ \t]*(?=\d+\.[ \t])/gm;
+
+/**
+ * An approval target with the highlight's mark taken out (Issue #3812).
+ *
+ * agy's permission dialog reads its approval target down to the footer
+ * (`detection/tools/antigravity/dialog.ts`), so the option rows are in it and
+ * the `>` moves with every ↑/↓. Every numbered row gets the same gutter here;
+ * the words of every row, the question and the command above stay as they are.
+ * A target with no numbered row (the trust screen's folder) is returned as is.
+ */
+export function approvalTargetWithoutHighlight(approvalTarget: string | null): string | null {
+  return approvalTarget === null ? null : approvalTarget.replace(OPTION_ROW_GUTTER_PATTERN, '  ');
+}
+
 /** One fixed form of what a screen asks. The highlight is not in it: moving the cursor is the same appearance. */
 export function screenFingerprint(parts: FingerprintParts): string {
   return JSON.stringify([
@@ -68,7 +87,7 @@ export function screenFingerprint(parts: FingerprintParts): string {
     parts.kind,
     normalize(parts.question),
     parts.options.map(normalize),
-    normalize(parts.approvalTarget),
+    normalize(approvalTargetWithoutHighlight(parts.approvalTarget)),
   ]);
 }
 

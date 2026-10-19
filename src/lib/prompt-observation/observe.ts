@@ -33,7 +33,7 @@ import { isAnswerablePromptData } from '@/types/models';
 import { classifyScreen, type ClassifiedScreen } from './classify';
 import { isDecisionKind, PROMPT_OBSERVATION_SCHEMA_VERSION } from './kinds';
 import { issueObservationToken, observationTokenExpiresAt, type ObservationTokenBinding } from './token';
-import { screenFingerprint } from './appearance';
+import { approvalTargetWithoutHighlight, screenFingerprint } from './appearance';
 import type { LastSendAttempt } from '@/lib/session/send-attempt-types';
 import type {
   PollerRecordScreenCorrelation,
@@ -108,7 +108,9 @@ export function observationTokenBinding(
     kind: screen.kind,
     question: screen.question,
     options: screen.options,
-    approvalTarget: screen.approvalTarget,
+    // Without the highlight's `>` (Issue #3812): the highlight is bound once,
+    // as `selectedPosition`, so a ↑/↓ moves that field and nothing else.
+    approvalTarget: approvalTargetWithoutHighlight(screen.approvalTarget),
     selectedPosition: screen.selectedIndex >= 0 ? screen.selectedIndex + 1 : null,
   };
 }

@@ -15,7 +15,17 @@
  * next key goes only while it is the same appearance of the same screen, of
  * the same session generation, with the highlight where the keys put it. Once
  * a key has been sent, every failure is exit 41: keys reached the pane and the
- * caller must not send them again.
+ * caller must not send them again. Such a stop says where the arrows left the
+ * highlight (`highlightLeftAt`) when the last read of the same screen showed
+ * it: on agy's permission dialog it can be a `(Persist to settings.json)`
+ * option, which an Enter at the pane would then choose (Issue #3812). The keys
+ * are not walked back — the screen that stopped them is not one to send more
+ * keys to.
+ *
+ * "The same screen" is the token binding with the highlight left out. agy's
+ * permission dialog draws its `>` inside its approval target too; the binding
+ * carries that target without the mark (`./appearance`), so a ↑/↓ changes
+ * only `selectedPosition` (Issue #3812).
  *
  * After the Enter the screen is read for a few seconds to say what it did
  * (`StrictRespondOutcome`); only `advanced`, `next-prompt` and `session-ended`
@@ -197,6 +207,24 @@ interface Facts {
   observedTarget: string | null;
   answer: { position: number; label: string } | null;
   keysSent: number;
+  /**
+   * The highlight (1-based) as the last read of the answered screen showed it,
+   * and that screen's labels; null from the moment a key is sent until a read
+   * of the same screen shows where it went, and for good once the screen moved.
+   */
+  highlight: { position: number; labels: readonly string[] } | null;
+}
+
+/** Where a stop between keys left the highlight, when it is known. */
+function highlightLeftAtOf(
+  facts: Facts,
+  code: StrictRespondResult['code'],
+  outcome: StrictRespondOutcome | null
+): NonNullable<StrictRespondResult['highlightLeftAt']> | null {
+  if (code !== 41 || outcome !== null || facts.keysSent === 0 || facts.highlight === null) return null;
+  const { position, labels } = facts.highlight;
+  const label = labels[position - 1];
+  return label === undefined ? null : { position, label };
 }
 
 function resultOf(
@@ -208,6 +236,7 @@ function resultOf(
   const { request } = facts;
   const delivery =
     code === 40 ? 'not-sent' : outcome === null && facts.keysSent > 0 ? 'partial' : facts.keysSent > 0 ? 'sent' : 'indeterminate';
+  const highlightLeftAt = highlightLeftAtOf(facts, code, outcome);
   return {
     strictRespond: 1,
     code,
@@ -215,7 +244,10 @@ function resultOf(
     reason,
     message:
       reason !== null
-        ? MESSAGES[reason]
+        ? MESSAGES[reason] +
+          (highlightLeftAt === null
+            ? ''
+            : ` The highlight was left on option ${highlightLeftAt.position}: ${highlightLeftAt.label}.`)
         : outcome === 'session-ended'
           ? 'Answered: the session ended (agy exits on "No, exit").'
           : `Answered: the screen ${outcome === 'next-prompt' ? 'moved to the next prompt' : 'advanced'}.`,
@@ -228,6 +260,7 @@ function resultOf(
     keysSent: facts.keysSent,
     outcome,
     replayed: false,
+    highlightLeftAt,
   };
 }
 
@@ -244,7 +277,8 @@ function sameAppearance(a: ObservationTokenBinding, b: ObservationTokenBinding |
 async function awaitHighlight(
   deps: StrictRespondDeps,
   binding: ObservationTokenBinding,
-  position: number
+  position: number,
+  facts: Facts
 ): Promise<StrictRespondReason | null> {
   const deadline = deps.now() + STRICT_HIGHLIGHT_WAIT_MS;
   for (;;) {
@@ -252,8 +286,13 @@ async function awaitHighlight(
     const read = await deps.read();
     if (read.ok) {
       const seen = observationBindingOf(read.observation);
-      if (!sameAppearance(binding, seen) || !isScreenOpenAtBottom(read.frame)) return 'screen_moved_mid_send';
-      if (seen?.selectedPosition === position) return null;
+      if (!sameAppearance(binding, seen) || !isScreenOpenAtBottom(read.frame)) {
+        facts.highlight = null;
+        return 'screen_moved_mid_send';
+      }
+      const selected = seen?.selectedPosition ?? null;
+      facts.highlight = selected === null ? null : { position: selected, labels: binding.options };
+      if (selected === position) return null;
     }
     if (deps.now() >= deadline) return 'highlight_not_reached';
   }
@@ -387,6 +426,7 @@ async function answerStrictly(
   if ('refused' in checked) return resultOf(facts, 40, checked.refused);
 
   const { binding, selectedIndex, targetIndex, exiting } = checked;
+  facts.highlight = { position: selectedIndex + 1, labels: binding.options };
   const release = deps.startup.hold();
   try {
     const keys = strictAnswerKeys(selectedIndex, targetIndex);
@@ -394,13 +434,15 @@ async function answerStrictly(
       if (i > 0) {
         // Where the keys sent so far put the highlight (1-based).
         const position = selectedIndex + 1 + (targetIndex > selectedIndex ? i : -i);
-        const stopped = await awaitHighlight(deps, binding, position);
+        const stopped = await awaitHighlight(deps, binding, position, facts);
         if (stopped !== null) return resultOf(facts, 41, stopped);
         if (deps.startup.isWindowOpen()) return resultOf(facts, 41, 'screen_moved_mid_send');
         if (request.expectScreen === 'antigravity-permission' && deps.autoYesActive()) {
           return resultOf(facts, 41, 'auto_yes_active');
         }
       }
+      // Where the highlight is, is not known again until a read shows it.
+      facts.highlight = null;
       try {
         await deps.sendKey(keys[i]);
       } catch {
@@ -478,7 +520,7 @@ export async function respondStrictly(
   const fingerprint = requestFingerprint(request);
   const now = deps.now();
   const nothingYet = (reason: StrictRespondReason): StrictRespondResult =>
-    resultOf({ request, observedKind: null, observedTarget: null, answer: null, keysSent: 0 }, 41, reason);
+    resultOf({ request, observedKind: null, observedTarget: null, answer: null, keysSent: 0, highlight: null }, 41, reason);
   let earlier = operations.get(key);
   // An expired result is forgotten here, not only at the next sweep.
   if (earlier !== undefined && earlier.result !== null && now - earlier.at >= STRICT_OPERATION_TTL_MS) {
@@ -494,7 +536,7 @@ export async function respondStrictly(
   // Recorded before the first await, so a concurrent duplicate sees it.
   operations.set(key, { at: now, fingerprint, result: null });
   // Shared with the answer, so a fault part-way reports the keys actually sent.
-  const facts: Facts = { request, observedKind: null, observedTarget: null, answer: null, keysSent: 0 };
+  const facts: Facts = { request, observedKind: null, observedTarget: null, answer: null, keysSent: 0, highlight: null };
   let result: StrictRespondResult;
   try {
     result = await withSessionLock(request.sessionName, () => answerStrictly(request, deps, facts));
