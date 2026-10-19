@@ -35,7 +35,7 @@ describe('Issue #2049: getTerminalDisplayCompaction', () => {
 
   it('leaves every other tool uncompacted, copilot included', () => {
     const untouched = CLI_TOOL_IDS.filter(
-      (t) => t !== 'claude' && t !== 'codex' && t !== 'opencode',
+      (t) => t !== 'claude' && t !== 'codex' && t !== 'opencode' && t !== 'antigravity',
     );
     expect(untouched).toContain('copilot');
     for (const tool of untouched) {
