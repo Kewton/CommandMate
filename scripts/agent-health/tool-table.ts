@@ -65,6 +65,12 @@ export interface PickerScreen {
    */
   opened: RegExp;
   /**
+   * The tool's answer to the command sent before its start-up is over
+   * (Issue #3803). Seen new after a send, the command is sent again until
+   * the picker opens or start-up runs out; absent, one send only.
+   */
+  notReady?: RegExp;
+  /**
    * What `detectPrompt(...).isPrompt` must be on the open picker. Not one
    * answer for every tool: see each definition for why.
    */
@@ -176,6 +182,12 @@ export const CLAUDE_EFFORT_PICKER_OPEN = /Faster\s+Smarter/;
 
 /** codex's `/model` list rows (`› 3. GPT-6-Sol (current)`, 0.159.3; `gpt-5.6-sol` in 0.151). */
 export const CODEX_MODEL_PICKER_OPEN = /\d+\.\s+gpt-\d/i;
+
+/**
+ * codex's answer to `/model` sent while it is still starting
+ * (`• Model selection is disabled until startup completes.`, 0.163.0; Issue #3803).
+ */
+export const CODEX_PICKER_NOT_READY = /\bdisabled until startup completes\b/;
 
 const RUNNING_PROMPT = 'Run the shell command: sleep 20';
 const APPROVAL_PROMPT = 'Run the shell command: touch agent-health-probe.txt';
@@ -299,7 +311,9 @@ export const TOOL_PROBE_SPECS: Record<AgentHealthTool, ToolProbeSpec> = {
       // `isPrompt: true` (#2868): codex's `/model` is read as a prompt on
       // purpose and vouched for by its dialog gate, so `/prompt-response` can
       // answer it by number (tests/unit/lib/detection/codex-dialogs-0157.test.ts).
-      screens: [{ command: '/model', opened: CODEX_MODEL_PICKER_OPEN, expectPrompt: true }],
+      screens: [
+        { command: '/model', opened: CODEX_MODEL_PICKER_OPEN, notReady: CODEX_PICKER_NOT_READY, expectPrompt: true },
+      ],
       closeKey: 'Escape',
       settings: () => ({
         path: path.join(getCodexHome(), 'config.toml'),
