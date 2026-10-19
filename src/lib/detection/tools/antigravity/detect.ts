@@ -45,6 +45,13 @@ export const VERIFIED_AGAINST = ANTIGRAVITY_VERIFIED_AGAINST;
 const SELECTION_LIST_VERDICT: ToolStatusVerdict = positiveVerdict('waiting', STATUS_REASON.ANTIGRAVITY_SELECTION_LIST);
 
 /**
+ * agy generating: the braille spinner or the `Generating...` word — the parts of
+ * `ANTIGRAVITY_THINKING_PATTERN` a permission dialog does not draw (its
+ * `esc to cancel` row it does).
+ */
+const ANTIGRAVITY_GENERATING_PATTERN = /[\u2800-\u28FF]|Generating/;
+
+/**
  * An agy numbered screen no reader vouches for (Issue #2364, #3808): published
  * as unclassified — the hatch opens and `wait` stops — never as a picker (the
  * arrow pad would Enter the highlighted row) and never as "generating".
@@ -151,6 +158,12 @@ export const antigravityStatusDetector = createToolStatusDetector({
       // (cut at `↑/↓ Nav`, or below the pane) are not handed to the generic
       // parser's `prompt_detected` either — the same frames the Auto-Yes
       // poller and `/prompt-response` decline. `/feedback` keeps its reading.
+      //
+      // Not ahead of generation: a spinner or `Generating…` in the last rows
+      // leaves the frame to the thinking check (a sent message numbered
+      // `1. / 2.` echoes above the spinner). The bare `esc to cancel` row does
+      // not count — agy draws it under its permission dialogs too.
+      if (ANTIGRAVITY_GENERATING_PATTERN.test(frame.thinkingLines)) return null;
       return isAntigravityUnvouchedNumberedScreen(stripBoxDrawing(frame.clean)) ? UNKNOWN_FRAME_VERDICT : null;
     }
     if (!isAntigravitySelectionScreenOpen(frame.lastLines)) return null;

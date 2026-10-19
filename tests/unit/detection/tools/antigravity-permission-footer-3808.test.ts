@@ -23,9 +23,10 @@
  * @vitest-environment node
  */
 
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { isAntigravityNumberedDialog, stripAnsi, stripBoxDrawing } from '@/lib/detection/cli-patterns';
 import { detectSessionStatus, SELECTION_LIST_REASONS } from '@/lib/detection/status-detector';
 import { STATUS_REASON } from '@/lib/detection/status-reason';
@@ -111,6 +112,7 @@ describe('[#3808] numbered screens without the `tab Amend` footer are not answer
 const FOOTER_NOT_ON_SCREEN = [
   ['a permission dialog whose footer is below the pane', 'prompt-observation-3808/antigravity-permission-footer-offscreen.txt'],
   ['a permission dialog whose footer is cut at `↑/↓ Nav`', 'prompt-observation-3808/antigravity-permission-footer-cut-at-nav.txt'],
+  ['a cut-footer permission dialog whose option 2 quotes `1-6 Select`', 'prompt-observation-3808/antigravity-permission-footer-cut-feedback-words.txt'],
 ] as const;
 
 describe('[#3808] numbered options with no `↑/↓ Navigate` footer on screen are not answered either', () => {
@@ -175,5 +177,58 @@ describe('[#3808] agy screens without the permission footer keep their own paths
 
   it.each(PERMISSION_DIALOGS)('%s (vouched by the reader) is not one either', (rel) => {
     expect(isAntigravityUnvouchedNumberedScreen(asPollerSees(read(rel)))).toBe(false);
+  });
+});
+
+describe('[#3808] a generating frame and a numbered sent message are not confirmation screens', () => {
+  const WORKING = read('prompt-observation-3755/antigravity-working.txt');
+  const SENT = '> Create a file named hello-agy.txt';
+
+  let tmp: string;
+  beforeEach(() => {
+    tmp = mkdtempSync(path.join(os.tmpdir(), 'cm-3808-'));
+  });
+  afterEach(() => {
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  /** The working fixture with `edit` applied, written to the temp dir and read back. */
+  function variant(name: string, edit: (raw: string) => string): string {
+    const edited = edit(WORKING);
+    if (edited === WORKING) throw new Error(`${name}: the edit did not apply`);
+    const file = path.join(tmp, name);
+    writeFileSync(file, edited);
+    return readFileSync(file, 'utf8');
+  }
+
+  it('the working fixture itself is generating (baseline)', () => {
+    expect(WORKING).toContain(SENT);
+    const result = detectSessionStatus(WORKING, 'antigravity');
+    expect(result.status).toBe('running');
+    expect(result.reason).toBe(STATUS_REASON.THINKING_INDICATOR);
+  });
+
+  it('a sent message starting `> 1. …` above the spinner stays generating', () => {
+    const raw = variant('sent-one.txt', r => r.replace(SENT, '> 1. Create a file named hello-agy.txt'));
+    expect(isAntigravityUnvouchedNumberedScreen(asPollerSees(raw))).toBe(false);
+    const result = detectSessionStatus(raw, 'antigravity');
+    expect(result.status).toBe('running');
+    expect(result.reason).toBe(STATUS_REASON.THINKING_INDICATOR);
+  });
+
+  it('a sent `1. / 2.` message above the spinner stays generating, not unknown_frame', () => {
+    const raw = variant('sent-two.txt', r =>
+      r.replace(SENT, '> 1. Create a file named hello-agy.txt\n  2. Put one line in it, and'));
+    const result = detectSessionStatus(raw, 'antigravity');
+    expect(result.status).toBe('running');
+    expect(result.reason).toBe(STATUS_REASON.THINKING_INDICATOR);
+  });
+
+  it('a single `> 1. …` row with nothing generating under it is not a confirmation screen', () => {
+    const lines = stripAnsi(WORKING).split('\n');
+    const kept = lines.filter(row => !/Generating|esc to cancel|Thought for/.test(row));
+    const raw = variant('sent-one-still.txt', () => kept.join('\n').replace(SENT, '> 1. Create a file named hello-agy.txt'));
+    expect(isAntigravityUnvouchedNumberedScreen(asPollerSees(raw))).toBe(false);
+    expect(detectSessionStatus(raw, 'antigravity').reason).not.toBe(STATUS_REASON.UNKNOWN_FRAME);
   });
 });

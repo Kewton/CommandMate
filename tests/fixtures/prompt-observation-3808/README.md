@@ -25,6 +25,7 @@ review left the narrow-pane and other-version spellings unmeasured.
 | `antigravity-permission-footer-other-version.txt` | `↑/↓ Navigate · enter Select` | another agy version spelling the footer differently | not answered |
 | `antigravity-permission-footer-offscreen.txt` | none: L1–L37 only (L38 onward dropped, so the file is 37 rows) | a pane too short to show the footer | not answered |
 | `antigravity-permission-footer-cut-at-nav.txt` | `↑/↓ Nav` | a pane narrow enough to cut the footer before `Navigate` | not answered |
+| `antigravity-permission-footer-cut-feedback-words.txt` | `↑/↓ Nav`, and option 2's command (L34) prefixed with `printf "esc Cancel · 1-6 Select & Continue"; ` | a cut footer whose option text carries the `/feedback` footer's words | not answered (the `/feedback` exception matches only the row under the last option) |
 
 The live login-method screen these share a reading with is
 `prompt-observation-3797/antigravity-login-method.txt` (agy 1.4.2).

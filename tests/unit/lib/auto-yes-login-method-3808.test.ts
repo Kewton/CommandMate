@@ -146,6 +146,7 @@ describe('[#3808] numbered screens without the `tab Amend` footer get no answer'
     ['a permission dialog under another version\'s footer', 'prompt-observation-3808/antigravity-permission-footer-other-version.txt'],
     ['a permission dialog whose footer is below the pane', 'prompt-observation-3808/antigravity-permission-footer-offscreen.txt'],
     ['a permission dialog whose footer is cut at `↑/↓ Nav`', 'prompt-observation-3808/antigravity-permission-footer-cut-at-nav.txt'],
+    ['a cut-footer permission dialog whose option 2 quotes `1-6 Select`', 'prompt-observation-3808/antigravity-permission-footer-cut-feedback-words.txt'],
   ])('sends nothing on %s', async (_label, rel) => {
     expect(await respondTo(rel)).toBe('no_prompt');
     expect(answersSent()).toEqual([]);
