@@ -914,7 +914,13 @@ exit 41（`operation_id_conflict`）です。exit 40（何も送っていない�
 サーバに接続できなかった（接続拒否など）ときは、要求が届いていないので exit 40（`server_unreachable`）です。
 
 `--json` は stdout に結果オブジェクトを 1 個だけ出します（`code` / `delivery`（`not-sent` / `partial` / `sent` / `indeterminate`）/
-`reason` / `expectedKind` / `observedKind` / `observedTarget` / `operationId` / `answer` / `keysSent` / `outcome`）。説明は stderr です。
+`reason` / `expectedKind` / `observedKind` / `observedTarget` / `operationId` / `answer` / `keysSent` / `outcome` / `highlightLeftAt`）。説明は stderr です。
+
+`highlightLeftAt`（`{ position, label }` または `null`）は、Enter の前で止まった exit 41（`delivery: partial`）で、矢印キーが
+ハイライトをどこに残したかです。同じ画面を最後に読み取ったときの位置で、`message` の末尾にも書きます。agy の許可の確認では
+`(Persist to settings.json)` の選択肢に残ることがあり、そのまま pane で Enter を押すと永続の許可を選ぶことになります。キーは戻しません。
+Enter まで送れたとき・何も送っていないとき（exit 40）・位置が分からないとき（画面が変わった、キーを送った後に読み直せていない）は
+`null` です。CLI 側で止まった結果（`response_unknown`・`server_unreachable` など）と、この項目を持たない古いサーバの結果には含まれません。
 
 答えたことは、誰が（CLI 実行元のエージェント `agent:<worktree>/<instance>` か `cli`）・どの画面に・どの選択肢を送ったかとして、
 server.log（`strict-prompt-answered` / `strict-prompt-response-refused`）と、キーを 1 つでも送った場合は task の履歴（`prompt_answered_human`。
@@ -2077,7 +2083,7 @@ Auto-Yes が OFF の instance で、止まった理由があれば入ります�
 | `unclassified-frame`（Issue #1924） | 汎用の推定は番号付きの一覧を読んだが、その道具のダイアログ検出が確認と認めなかったので何も送らない。返答の中の番号付きの一覧に `1` と答える事故（#1896）を防ぐ位置 | 「because no tool-specific dialog detector recognised the frame」 |
 | `startup-trust-unhandled`（Issue #3757） | agy の起動時のフォルダ信頼の確認（`Do you trust the contents of this project?`）が画面にある。起動の手順の側が答えるもので、番号が無いので poller はプロンプトとして読めない。起動の窓が終わった後に出た場合は、次の send の準備待ちが答える | 「because agy's startup folder-trust confirmation is the launch's to answer, not Auto-Yes's; the next send confirms it once, or answer it at the pane」 |
 | `question-confirm-page`（Issue #3748） | Command Code と Claude の `AskUserQuestion` の確認画面（`Submit` / `Cancel`）。`Submit` は選択ではなくその時点の回答を確定するので、Auto-Yes は答えず人に任せる | 「because the question's Submit/Cancel confirmation commits the answers as they stand, so Auto-Yes leaves it to a human」 |
-| `no-hook-receipt`（Issue #3767） | agy の承認ダイアログが画面にあるが、それに対応する hook の問い合わせ（`PreToolUse`）の受信が無い。(1) 受信が一度も無い、(2) ダイアログが最後の受信から窓（8 秒）より後に出た、(3) ダイアログが受信より前から出ていた（返答中の引用など）、(4) 受信が途絶えた、(5) 受信が前のダイアログに使い済み、(6) Auto-Yes が受信の確認へキーを送ってから 18 秒（窓＋観測の猶予＋応答後の待ち）を過ぎても確認が残っている（キーで閉じなかったか、受信の無い別の確認と入れ替わった。Issue #3789）、のいずれか。サーバーのログ `antigravity-autoyes-withheld-no-hook-receipt` の `hint` が区別する。**止まったときの対処**: `commandmate auto-yes <worktree-id> --disable` → `commandmate prompt <worktree-id> --json` → `commandmate respond <worktree-id> --expect-screen …` で答える（または UI で答える）。一度も受信が無い・途絶えた場合は `~/.gemini/config/hooks.json` の向き先を確認 | 「because there is no unused agy hook permission question for this dialog (none arrived in time, or the last one was spent on keys that did not clear it); answer it yourself (auto-yes --disable, prompt --json, respond --expect-screen) or check hooks.json」 |
+| `no-hook-receipt`（Issue #3767） | agy の承認ダイアログが画面にあるが、それに対応する hook の問い合わせ（`PreToolUse`）の受信が無い。(1) 受信が一度も無い、(2) ダイアログが最後の受信から窓（8 秒）より後に出た、(3) ダイアログが受信より前から出ていた（返答中の引用など）、(4) 受信が途絶えた、(5) 受信が前のダイアログに使い済み、(6) Auto-Yes が受信の確認へキーを送ってから 18 秒（窓＋観測の猶予＋応答後の待ち）を過ぎても確認が残っている（キーで閉じなかったか、受信の無い別の確認と入れ替わった。Issue #3789。送信が途中で切れた場合も、切れた時点から猶予（18 秒）を数え、過ぎても確認が残れば no-hook-receipt として記録する。入力欄にキーの一部が残っていることがある。ただし、中断の後に、より具体的な抑止の理由（partial-answer）が記録された場合は、その理由を保ち、no-hook-receipt としては記録しない）、のいずれか。サーバーのログ `antigravity-autoyes-withheld-no-hook-receipt` の `hint` が区別する。**止まったときの対処**: `commandmate auto-yes <worktree-id> --disable` → `commandmate prompt <worktree-id> --json` → `commandmate respond <worktree-id> --expect-screen …` で答える（または UI で答える）。一度も受信が無い・途絶えた場合は `~/.gemini/config/hooks.json` の向き先を確認 | 「because there is no unused agy hook permission question for this dialog (none arrived in time, or the last one was spent on keys that did not clear it); answer it yourself (auto-yes --disable, prompt --json, respond --expect-screen) or check hooks.json」 |
 
 [`commandmate prompt --json`](#commandmate-prompt) の `autoYes.pollerRecord`（poller の記録）と `autoYes.contractEvaluation`（契約の再評価）は別の項目ですが、どちらもこの表と上の `reason` と同じ語を使います。
 
