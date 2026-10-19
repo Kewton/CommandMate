@@ -110,7 +110,7 @@ export function observationTokenBinding(
     options: screen.options,
     // Without the highlight's `>` (Issue #3812): the highlight is bound once,
     // as `selectedPosition`, so a ↑/↓ moves that field and nothing else.
-    approvalTarget: approvalTargetWithoutHighlight(screen.approvalTarget),
+    approvalTarget: approvalTargetWithoutHighlight(screen.kind, screen.approvalTarget, screen.options),
     selectedPosition: screen.selectedIndex >= 0 ? screen.selectedIndex + 1 : null,
   };
 }

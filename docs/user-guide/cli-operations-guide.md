@@ -914,7 +914,13 @@ exit 41（`operation_id_conflict`）です。exit 40（何も送っていない�
 サーバに接続できなかった（接続拒否など）ときは、要求が届いていないので exit 40（`server_unreachable`）です。
 
 `--json` は stdout に結果オブジェクトを 1 個だけ出します（`code` / `delivery`（`not-sent` / `partial` / `sent` / `indeterminate`）/
-`reason` / `expectedKind` / `observedKind` / `observedTarget` / `operationId` / `answer` / `keysSent` / `outcome`）。説明は stderr です。
+`reason` / `expectedKind` / `observedKind` / `observedTarget` / `operationId` / `answer` / `keysSent` / `outcome` / `highlightLeftAt`）。説明は stderr です。
+
+`highlightLeftAt`（`{ position, label }` または `null`）は、Enter の前で止まった exit 41（`delivery: partial`）で、矢印キーが
+ハイライトをどこに残したかです。同じ画面を最後に読み取ったときの位置で、`message` の末尾にも書きます。agy の許可の確認では
+`(Persist to settings.json)` の選択肢に残ることがあり、そのまま pane で Enter を押すと永続の許可を選ぶことになります。キーは戻しません。
+Enter まで送れたとき・何も送っていないとき（exit 40）・位置が分からないとき（画面が変わった、キーを送った後に読み直せていない）は
+`null` です。CLI 側で止まった結果（`response_unknown`・`server_unreachable` など）と、この項目を持たない古いサーバの結果には含まれません。
 
 答えたことは、誰が（CLI 実行元のエージェント `agent:<worktree>/<instance>` か `cli`）・どの画面に・どの選択肢を送ったかとして、
 server.log（`strict-prompt-answered` / `strict-prompt-response-refused`）と、キーを 1 つでも送った場合は task の履歴（`prompt_answered_human`。

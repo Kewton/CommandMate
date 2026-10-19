@@ -22,6 +22,7 @@
  */
 
 import { getOrInitGlobal } from '@/lib/global-state';
+import { findNumberedOptionBlock } from '@/lib/detection/tools/dialog-block';
 
 /** How many instances are tracked at once; the least recently observed is forgotten first. */
 const MAX_TRACKED_INSTANCES = 1024;
@@ -61,22 +62,61 @@ function normalize(text: string | null): string | null {
 }
 
 /**
- * A numbered option row of an approval target, with the `>` gutter agy draws on
- * the highlighted one (`> 2. No, cancel`) or the blank gutter of the others.
+ * How many rows under agy's bottom option row may be its wrapped tail: the
+ * allowance `detection/tools/antigravity/dialog.ts` gives the same block
+ * (`LAST_OPTION_TAIL_ROWS`, not exported). A tail longer than this reads as no
+ * block here, which leaves the target as it is (fail closed).
  */
-const OPTION_ROW_GUTTER_PATTERN = /^[ \t]*>?[ \t]*(?=\d+\.[ \t])/gm;
+const PERMISSION_OPTION_TAIL_ROWS = 12;
+
+/** The gutter of an option row: the highlight's `>` or the blank of the others. */
+const OPTION_ROW_GUTTER_PATTERN = /^[ \t]*>?[ \t]*/;
+
+/**
+ * Whether a row of the option block is one of its option rows: a numbered row
+ * in the shape the shared block reader takes (`[>] N. label`). Inside the block
+ * every such row IS an option row — the reader stops at a numbered row out of
+ * sequence, so a block it accepted holds no other.
+ */
+const NUMBERED_ROW_PATTERN = /^[ \t]*>?[ \t]*\d{1,2}[.)][ \t]+\S/;
 
 /**
  * An approval target with the highlight's mark taken out (Issue #3812).
  *
  * agy's permission dialog reads its approval target down to the footer
- * (`detection/tools/antigravity/dialog.ts`), so the option rows are in it and
- * the `>` moves with every ↑/↓. Every numbered row gets the same gutter here;
- * the words of every row, the question and the command above stay as they are.
- * A target with no numbered row (the trust screen's folder) is returned as is.
+ * (`detection/tools/antigravity/dialog.ts`), so its option rows are the tail
+ * of the target and the `>` moves with every ↑/↓. The option block is found
+ * the way that reader finds it (`findNumberedOptionBlock`, bottom up to `1.`),
+ * and taken only when its labels are the screen's `options` — what the reader
+ * named. Only the gutter of those option rows is made the same; every row
+ * above option 1 (the command, a here-document's `1. item` and its indent)
+ * and every wrapped row of a label stays byte for byte.
+ *
+ * Any other kind, a target with no such block, or a block whose labels are not
+ * the screen's, is returned as is: a moved highlight then reads as another
+ * screen, which stops the strict respond rather than letting it through.
  */
-export function approvalTargetWithoutHighlight(approvalTarget: string | null): string | null {
-  return approvalTarget === null ? null : approvalTarget.replace(OPTION_ROW_GUTTER_PATTERN, '  ');
+export function approvalTargetWithoutHighlight(
+  kind: string,
+  approvalTarget: string | null,
+  options: readonly string[]
+): string | null {
+  if (approvalTarget === null || kind !== 'antigravity-permission') return approvalTarget;
+  const rows = approvalTarget.split('\n');
+  const block = findNumberedOptionBlock(rows, rows.length, PERMISSION_OPTION_TAIL_ROWS);
+  if (block === null) return approvalTarget;
+  // The reader folds the rows under the bottom option into its label.
+  const labels = [...block.options];
+  const last = labels.length - 1;
+  if (block.footer !== '') labels[last] = [labels[last], ...block.footer.split('\n')].join(' ').trim();
+  if (labels.length !== options.length || labels.some((label, i) => label !== options[i])) return approvalTarget;
+  return rows
+    .map((row, i) =>
+      i >= block.firstRow && i <= block.lastRow && NUMBERED_ROW_PATTERN.test(row)
+        ? row.replace(OPTION_ROW_GUTTER_PATTERN, '  ')
+        : row
+    )
+    .join('\n');
 }
 
 /** One fixed form of what a screen asks. The highlight is not in it: moving the cursor is the same appearance. */
@@ -87,7 +127,7 @@ export function screenFingerprint(parts: FingerprintParts): string {
     parts.kind,
     normalize(parts.question),
     parts.options.map(normalize),
-    normalize(approvalTargetWithoutHighlight(parts.approvalTarget)),
+    normalize(approvalTargetWithoutHighlight(parts.kind, parts.approvalTarget, parts.options)),
   ]);
 }
 

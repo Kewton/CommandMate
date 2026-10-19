@@ -650,7 +650,14 @@ got the request: exit 40 (`server_unreachable`).
 
 `--json` prints exactly one result object on stdout (`code` / `delivery` (`not-sent` / `partial` / `sent` /
 `indeterminate`) / `reason` / `expectedKind` / `observedKind` / `observedTarget` / `operationId` / `answer` /
-`keysSent` / `outcome`). Explanations go to stderr.
+`keysSent` / `outcome` / `highlightLeftAt`). Explanations go to stderr.
+
+`highlightLeftAt` (`{ position, label }` or `null`) says, for an exit 41 that stopped before its Enter (`delivery:
+partial`), where the arrow keys left the highlight, as the last read of the same screen showed it; the `message` ends
+with it too. On agy's permission dialog it can be a `(Persist to settings.json)` option, which an Enter at the pane
+would then choose. The keys are not walked back. It is `null` when the Enter was sent, when nothing was sent (exit 40),
+and when the position is not known (the screen changed, or a key was sent and not read back). A result the CLI makes
+itself (`response_unknown`, `server_unreachable`, …) and a result from an older server without the field leave it out.
 
 Who answered (the agent the CLI runs in, `agent:<worktree>/<instance>`, or `cli`), which screen and which option are
 recorded in server.log (`strict-prompt-answered` / `strict-prompt-response-refused`) and, once any key was sent, in

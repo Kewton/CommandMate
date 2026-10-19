@@ -205,8 +205,10 @@ describe('[#3812] the cause: the highlight reached the binding through the appro
     const before = OBSERVED_1.screen;
     const after = OBSERVED_2.screen;
     expect(before?.approvalTarget).not.toBe(after?.approvalTarget);
-    expect(approvalTargetWithoutHighlight(before?.approvalTarget ?? null)).toBe(
-      approvalTargetWithoutHighlight(after?.approvalTarget ?? null)
+    const labels = (before?.options ?? []).map(option => option.label);
+    expect(labels).toHaveLength(4);
+    expect(approvalTargetWithoutHighlight('antigravity-permission', before?.approvalTarget ?? null, labels)).toBe(
+      approvalTargetWithoutHighlight('antigravity-permission', after?.approvalTarget ?? null, labels)
     );
   });
 
@@ -230,18 +232,21 @@ describe('[#3812] the cause: the highlight reached the binding through the appro
   });
 
   it('the fingerprint still tells the command apart (negative control)', () => {
-    const parts = { sessionName: SESSION, sessionGeneration: GENERATION, kind: 'antigravity-permission', question: 'Run this command?', options: ['Yes'] };
-    expect(screenFingerprint({ ...parts, approvalTarget: 'Command\n   pwd\n> 1. Yes' })).toBe(
-      screenFingerprint({ ...parts, approvalTarget: 'Command\n   pwd\n  1. Yes' })
+    const parts = { sessionName: SESSION, sessionGeneration: GENERATION, kind: 'antigravity-permission', question: 'Run this command?', options: ['Yes', 'No'] };
+    const target = (command: string, highlight: 1 | 2): string =>
+      `Command\n   ${command}\nRun this command?\n${highlight === 1 ? '> 1. Yes\n  2. No' : '  1. Yes\n> 2. No'}`;
+    expect(screenFingerprint({ ...parts, approvalTarget: target('pwd', 1) })).toBe(
+      screenFingerprint({ ...parts, approvalTarget: target('pwd', 2) })
     );
-    expect(screenFingerprint({ ...parts, approvalTarget: 'Command\n   pwd\n> 1. Yes' })).not.toBe(
-      screenFingerprint({ ...parts, approvalTarget: 'Command\n   ls\n> 1. Yes' })
+    expect(screenFingerprint({ ...parts, approvalTarget: target('pwd', 1) })).not.toBe(
+      screenFingerprint({ ...parts, approvalTarget: target('ls', 1) })
     );
   });
 
   it('a target with no numbered row (the trust screen\'s folder) is left as it is', () => {
-    expect(approvalTargetWithoutHighlight('/Users/agy-user/project')).toBe('/Users/agy-user/project');
-    expect(approvalTargetWithoutHighlight(null)).toBeNull();
+    const trust = ['Yes, I trust this folder', 'No, exit'];
+    expect(approvalTargetWithoutHighlight('antigravity-trust', '/Users/agy-user/project', trust)).toBe('/Users/agy-user/project');
+    expect(approvalTargetWithoutHighlight('antigravity-permission', null, trust)).toBeNull();
   });
 });
 
@@ -356,5 +361,81 @@ describe('[#3812] a stop between keys says where the highlight was left', () => 
     expect(refused.message).not.toContain('highlight was left');
     const answered = await respondStrictly(request('No, cancel'), deps());
     expect(answered).toMatchObject({ code: 0, highlightLeftAt: null });
+  });
+});
+
+/**
+ * The dialog asking about a here-document whose body has numbered rows of its
+ * own, above the question: the live frame with its `   pwd` row replaced.
+ */
+const COMMAND_ROW = '\x1b[37m   pwd\x1b[39m';
+const HEREDOC = PERMISSION.replace(
+  COMMAND_ROW,
+  ["\x1b[37m   cat <<'EOF'", '   1. first', '   2. second', '   EOF\x1b[39m'].join('\n')
+);
+
+describe('[#3812] only the rows the reader names as options lose their mark', () => {
+  it('the here-document frame is still the permission dialog, its body in the approval target', () => {
+    expect(PERMISSION).toContain(COMMAND_ROW);
+    pane.frame = HEREDOC;
+    const screen = observe().screen;
+    expect(screen?.kind).toBe('antigravity-permission');
+    expect(screen?.options).toHaveLength(4);
+    expect(screen?.approvalTarget).toContain('\n   1. first\n   2. second\n');
+  });
+
+  it('the body rows stay byte for byte; the option rows get one gutter', () => {
+    pane.frame = withHighlight(2, HEREDOC);
+    const screen = observe().screen;
+    const labels = (screen?.options ?? []).map(option => option.label);
+    const target = approvalTargetWithoutHighlight('antigravity-permission', screen?.approvalTarget ?? null, labels);
+    expect(target).toContain("   cat <<'EOF'\n   1. first\n   2. second\n   EOF");
+    expect(target).toContain('\n  1. Yes, run command\n  2. Yes, and always allow in this conversation');
+    expect(target).not.toContain('> 2.');
+  });
+
+  it('labels other than the screen\'s leave the target as it is (fail closed)', () => {
+    const target = 'Run this command?\n> 1. Yes\n  2. No';
+    expect(approvalTargetWithoutHighlight('antigravity-permission', target, ['Yes', 'No, cancel'])).toBe(target);
+    expect(approvalTargetWithoutHighlight('antigravity-permission', target, ['Yes', 'No'])).toBe(
+      'Run this command?\n  1. Yes\n  2. No'
+    );
+  });
+
+  it('"No, cancel" on the here-document dialog goes through (positive)', async () => {
+    pane.frame = HEREDOC;
+    const result = await respondStrictly(request('No, cancel'), deps());
+    expect(result).toMatchObject({ code: 0, keysSent: 4, outcome: 'advanced' });
+  });
+
+  /** After the first Down, `from` in the body becomes `to`. */
+  function bodyChangesAfterFirstDown(from: string, to: string): void {
+    pane.frame = HEREDOC;
+    pane.onKey = (key, frame) => {
+      const moved = dialogKeys(key, frame);
+      return key === 'Down' && pane.keys.length === 1 ? moved.replace(from, to) : moved;
+    };
+  }
+
+  it('a body row indented differently is another screen: 41 after the first Down', async () => {
+    bodyChangesAfterFirstDown('\n   1. first', '\n     1. first');
+    const result = await respondStrictly(request('No, cancel'), deps());
+    expect(result).toMatchObject({ code: 41, reason: 'screen_moved_mid_send', keysSent: 1 });
+    expect(pane.keys).toEqual(['Down']);
+  });
+
+  it('a body row gaining a `>` is another screen: 41 after the first Down', async () => {
+    bodyChangesAfterFirstDown('\n   1. first', '\n > 1. first');
+    const result = await respondStrictly(request('No, cancel'), deps());
+    expect(result).toMatchObject({ code: 41, reason: 'screen_moved_mid_send', keysSent: 1 });
+  });
+
+  it('a token observed before the body row was re-indented does not verify (exit 40, nothing sent)', async () => {
+    pane.frame = HEREDOC;
+    const token = tokenNow();
+    pane.frame = HEREDOC.replace('\n   2. second', '\n  2. second');
+    const result = await respondStrictly({ ...request('No, cancel'), observationToken: token }, deps());
+    expect(result).toMatchObject({ code: 40, reason: 'token_mismatch', keysSent: 0 });
+    expect(pane.keys).toEqual([]);
   });
 });
