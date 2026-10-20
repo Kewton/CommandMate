@@ -106,6 +106,11 @@ import { matchUpstreamFault } from '@/lib/detection/upstream-faults';
 import { startWaitingPushNotifier } from '@/lib/push/waiting-push-notifier';
 import { getWaitingEpisode, observeWaitingEdge } from '@/lib/session/waiting-episode-state';
 import { applyEventToActiveTask } from '@/lib/tasks/task-transition-service';
+import {
+  isBlankCleanedResponse,
+  isBlankExtractedResponse,
+  recordBlankResponseSkip,
+} from './response-checker-blank-response';
 
 /**
  * How many rows from the bottom of a capture the upstream-fault check reads
@@ -1640,12 +1645,9 @@ export async function checkForResponse(
     if (owns) resetDuplicatePromptSkipStreak(pollerKey);
 
     // Validate response content is not empty
-    if (!result.response || result.response.trim() === '') {
+    if (isBlankExtractedResponse(result.response)) {
       // Issue #3552: an empty response is not the saved reply either.
-      if (owns) {
-        resetDuplicateResponseSkipStreak(pollerKey);
-        updateSessionState(db, worktreeId, cliToolId, result.lineCount, resolvedInstanceId);
-      }
+      recordBlankResponseSkip(db, worktreeId, cliToolId, resolvedInstanceId, pollerKey, result.lineCount, owns);
       return false;
     }
 
@@ -1657,12 +1659,9 @@ export async function checkForResponse(
     const cleanedResponse = cleanCompletedResponse(cliToolId, result, pollerKey, owns);
 
     // If cleaned response is empty or just "[No content]", skip saving
-    if (!cleanedResponse || cleanedResponse.trim() === '' || cleanedResponse === '[No content]') {
+    if (isBlankCleanedResponse(cleanedResponse)) {
       // Issue #3552: nor is one that cleans down to nothing.
-      if (owns) {
-        resetDuplicateResponseSkipStreak(pollerKey);
-        updateSessionState(db, worktreeId, cliToolId, result.lineCount, resolvedInstanceId);
-      }
+      recordBlankResponseSkip(db, worktreeId, cliToolId, resolvedInstanceId, pollerKey, result.lineCount, owns);
       // Left as it was (Issue #3705 sets it aside as harmless): nothing sets the
       // in-progress id to a non-null value or reads it today.
       clearInProgressMessageId(db, worktreeId, cliToolId, resolvedInstanceId);
