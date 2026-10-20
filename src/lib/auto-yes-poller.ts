@@ -1146,6 +1146,262 @@ async function finishAnsweredPrompt(
 }
 
 /**
+ * Issue #3397: a session begun since the last tick (a relaunch the poller
+ * outlived) starts with no screen that had its Enter.
+ *
+ * @returns The session epoch the tick reads under
+ */
+function syncEnterFallbackEpoch(compositeKey: string, pollerState: AutoYesPollerState): number {
+  const epoch = getEnterFallbackSessionEpoch(compositeKey);
+  if ((pollerState.enterFallbackEpoch ?? 0) !== epoch) {
+    pollerState.enterFallbackSentKey = null;
+    pollerState.enterFallbackCandidateKey = null;
+    pollerState.enterFallbackEpoch = epoch;
+  }
+  return epoch;
+}
+
+/**
+ * Step 1 of `detectAndRespondToPrompt`: normalise the tick's frame once and
+ * read the prompt on it.
+ */
+function readPromptFrame(
+  worktreeId: string,
+  cliToolId: CLIToolType,
+  cleanOutput: string,
+  precomputedLines: string[] | undefined,
+  instanceId: string | undefined,
+  rawOutput: string | undefined,
+): { frame: ReturnType<typeof normalizeFrame>; promptDetection: PromptDetectionResult } {
+  const receiptScope = { worktreeId, instanceId };
+  // Issue #3183: the ONE frame every judgement below reads — normalised once,
+  // from the capture as captured (the input-box markers are rule rows the
+  // cleaned spelling has blanked), and handed as the same object to the
+  // prompt reading, the codex launch guards and the dialog gate. That is what
+  // makes "the status chain and Auto-Yes read the same live region" a fact
+  // rather than a hope: there is no second normalisation to disagree with.
+  const frame = normalizeFrame(rawOutput ?? cleanOutput, cliToolId);
+  // Issue #3767: bracket the read so the receipt gate can tell when an agy
+  // dialog first appeared, not only what time this tick is.
+  if (cliToolId === 'antigravity') beginAntigravityFrameRead(worktreeId, instanceId);
+  const promptDetection = detectPromptOnCleanFrame(
+    cleanOutput,
+    cliToolId,
+    precomputedLines,
+    rawOutput,
+    receiptScope,
+    frame,
+  );
+  if (cliToolId === 'antigravity') endAntigravityFrameRead(worktreeId, instanceId);
+  return { frame, promptDetection };
+}
+
+/**
+ * What `detectAndRespondToPrompt` does to the poller state on a frame with no
+ * prompt to answer, before it returns `no_prompt`.
+ */
+function noteNoPromptOnScreen(tick: {
+  worktreeId: string;
+  cliToolId: CLIToolType;
+  instanceId: string | undefined;
+  compositeKey: string;
+  pollerState: AutoYesPollerState;
+  frame: ReturnType<typeof normalizeFrame>;
+  promptDetection: PromptDetectionResult;
+  cleanOutput: string;
+  precomputedLines: string[] | undefined;
+  rawOutput: string | undefined;
+}): void {
+  const {
+    worktreeId,
+    cliToolId,
+    instanceId,
+    compositeKey,
+    pollerState,
+    frame,
+    promptDetection,
+    cleanOutput,
+    precomputedLines,
+    rawOutput,
+  } = tick;
+  forgetPartialAnswer(compositeKey);
+  pollerState.lastAnsweredPromptKey = null;
+  pollerState.lastAnsweredAt = null;
+  pollerState.enterFallbackCandidateKey = null;
+  // Issue #3757: agy's trust screen reads as no prompt (unnumbered: neither
+  // reader takes it), but it is one nobody here answers — record why, still
+  // as `no_prompt`. Before the warn key is cleared, so the WARN stays once
+  // per screen.
+  if (
+    cliToolId === 'antigravity' &&
+    suppressAntigravityTrustScreen(
+      worktreeId,
+      instanceId,
+      pollerState,
+      frame,
+      CLIToolManager.getInstance().getTool(cliToolId).getSessionName(worktreeId, instanceId),
+    )
+  ) {
+    return;
+  }
+  pollerState.lastSkipWarnKey = null;
+  if (cliToolId === 'antigravity' && !promptDetection.isPrompt) {
+    logIfWithheldForWantOfReceipt(worktreeId, instanceId, compositeKey, () =>
+      detectPromptOnCleanFrame(cleanOutput, cliToolId, precomputedLines, rawOutput),
+    );
+  }
+}
+
+/**
+ * Step 2.5 of `detectAndRespondToPrompt`: whether an earlier send to this
+ * screen keeps the prompt from being answered now.
+ *
+ * @returns true when the prompt is withheld (the caller returns `no_answer`)
+ */
+function withheldForEarlierSend(judged: JudgedPrompt, screenKey: string, epoch: number): boolean {
+  const { worktreeId, cliToolId, instanceId, compositeKey, pollerState, promptData, frameKey } = judged;
+  const partial = getPartialAnswer(compositeKey, epoch);
+  if (partial !== null) {
+    if (partial.screenKey === screenKey) {
+      suppressAndWarnOnce(
+        judged,
+        {
+          reason: PARTIAL_ANSWER_SUPPRESSION_REASON,
+          mode: null,
+          promptType: promptData.type,
+        },
+        `${frameKey}\u0000partial-answer`,
+        'poller:auto-yes-skipped-partial-answer',
+        { promptType: promptData.type, stoppedAt: partial.at },
+      );
+      return true;
+    }
+    // Another prompt is on screen: only the sends at the forgotten one's
+    // screen go with it (#3713) — one in flight at this screen keeps its hold.
+    forgetPartialAnswer(compositeKey, partial.screenKey);
+  }
+  // Issue #3713: a worktree ID move carried an answer still being sent to
+  // this session's key. Its keys may already be on the pane, and how its send
+  // ends is not known yet — so this screen gets no keys until it comes back
+  // (recorded as a partial answer above, or gone).
+  if (hasMovedSendInFlight(compositeKey, epoch, screenKey)) {
+    warnOncePerFrame(
+      pollerState,
+      `${frameKey}\u0000moved-send-in-flight`,
+      'poller:auto-yes-skipped-moved-send-in-flight',
+      { worktreeId, cliToolId, instanceId, promptType: promptData.type },
+    );
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Step 4 of `detectAndRespondToPrompt`: the auto answer under the execution
+ * contract's policy, recording the suppression when the policy withholds it.
+ *
+ * @returns The answer to send, or null when there is none
+ */
+function resolveAnswerUnderPolicy(judged: JudgedPrompt): string | null {
+  const { worktreeId, cliToolId, instanceId, promptData, frameKey } = judged;
+  const policy = getSessionAutoYesPolicy(worktreeId, cliToolId, instanceId);
+  const resolution = resolveAutoAnswerWithPolicy(promptData, policy);
+  if (resolution.suppressedBy) {
+    // Issue #1684: the log line alone leaves a CLI-driven pipeline blind to
+    // why its worker stalled. Record the suppression so buildCurrentOutput
+    // can publish it (`autoYes.lastSuppression` in capture --json).
+    suppressAndWarnOnce(
+      judged,
+      {
+        reason: resolution.suppressedBy,
+        mode: policy?.mode ?? null,
+        promptType: promptData.type,
+        pattern: resolution.pattern,
+      },
+      `${frameKey}\u0000${resolution.suppressedBy}\u0000${policy?.mode ?? ''}\u0000${resolution.pattern ?? ''}`,
+      'poller:auto-yes-suppressed-by-policy',
+      {
+        reason: resolution.suppressedBy,
+        mode: policy?.mode ?? null,
+        pattern: resolution.pattern,
+        promptType: promptData.type,
+      },
+    );
+  }
+  return resolution.answer;
+}
+
+/**
+ * Issue #2865: whether the session is not this server's to type into (another
+ * server created it, or the worktree is gone), warning once per frame.
+ *
+ * @returns true when the caller returns `no_answer`
+ */
+function skippedForUnownedSession(
+  judged: JudgedPrompt,
+  sessionName: string,
+  ownership: Awaited<ReturnType<typeof checkWorktreeSessionOwnership>>,
+): boolean {
+  const { worktreeId, cliToolId, instanceId, pollerState, frameKey } = judged;
+  if (ownership === null || ownership.verdict === 'foreign') {
+    warnOncePerFrame(
+      pollerState,
+      `${frameKey}\u0000${sessionName}\u0000${ownership ? 'foreign' : 'worktree_not_found'}`,
+      'poller:auto-yes-skipped-foreign-session',
+      {
+        worktreeId,
+        cliToolId,
+        instanceId,
+        sessionName,
+        sessionPath: ownership?.sessionPath ?? null,
+        reason: ownership ? 'foreign' : 'worktree_not_found',
+      },
+    );
+    return true;
+  }
+  return false;
+}
+
+/**
+ * The `catch` of `detectAndRespondToPrompt`: settles the send in flight and
+ * tells an abandoned tick from a failed one.
+ */
+function settleFailedTick(
+  error: unknown,
+  tick: {
+    worktreeId: string;
+    cliToolId: CLIToolType;
+    instanceId: string | undefined;
+    compositeKey: string;
+    generation: AutoYesTickGeneration | undefined;
+    attempt: AutoYesSendAttempt | null;
+    sendInFlight: boolean;
+    receiptEpisode: number | null;
+  },
+): 'no_answer' | 'error' {
+  const { worktreeId, cliToolId, instanceId, compositeKey, generation, attempt, sendInFlight, receiptEpisode } =
+    tick;
+  // Issue #3706: a tick that lost its generation — the send stopped part-way
+  // (`PromptAnswerAbortedError`), or failed after the grant went — is not a
+  // failure of the poller that now holds the key, and not an answer either.
+  if (generation !== undefined && !isTickCurrent(generation)) {
+    const keysSent = error instanceof Error && 'keysSent' in error ? Boolean(error.keysSent) : null;
+    // A stop with keys already on the pane: the next tick must not type the
+    // answer again over them (step 2.5). Recorded under the attempt's key as
+    // it is now — the new one when a worktree ID move carried it (#3713).
+    if (attempt !== null) settleSendAttempt(attempt, keysSent === true);
+    if (sendInFlight) noteAnswerSent(cliToolId, worktreeId, instanceId, true, receiptEpisode);
+    logger.info('poller:auto-yes-answer-abandoned', { worktreeId, cliToolId, instanceId, keysSent });
+    return 'no_answer';
+  }
+  if (attempt !== null) settleSendAttempt(attempt, false);
+  if (sendInFlight) noteAnswerSent(cliToolId, worktreeId, instanceId, true, receiptEpisode);
+  incrementErrorCount(compositeKey, generation?.pollerState);
+  logger.warn('poller:detect-respond-error', { worktreeId, cliToolId, instanceId });
+  return 'error';
+}
+
+/**
  * Detect prompt in terminal output, resolve auto-answer, and send response.
  *
  * @internal Exported for testing purposes only.
@@ -1223,63 +1479,30 @@ export async function detectAndRespondToPrompt(
     // machine whose hook does not reach us. The price is that Auto-Yes leaves
     // such a machine's dialogs alone, which is why `logIfWithheldForWantOfReceipt`
     // says so.
-    // Issue #3397: a session begun since the last tick (a relaunch the poller
-    // outlived) starts with no screen that had its Enter.
-    const epoch = getEnterFallbackSessionEpoch(compositeKey);
-    if ((pollerState.enterFallbackEpoch ?? 0) !== epoch) {
-      pollerState.enterFallbackSentKey = null;
-      pollerState.enterFallbackCandidateKey = null;
-      pollerState.enterFallbackEpoch = epoch;
-    }
+    const epoch = syncEnterFallbackEpoch(compositeKey, pollerState);
 
-    const receiptScope = { worktreeId, instanceId };
-    // Issue #3183: the ONE frame every judgement below reads — normalised once,
-    // from the capture as captured (the input-box markers are rule rows the
-    // cleaned spelling has blanked), and handed as the same object to the
-    // prompt reading, the codex launch guards and the dialog gate. That is what
-    // makes "the status chain and Auto-Yes read the same live region" a fact
-    // rather than a hope: there is no second normalisation to disagree with.
-    const frame = normalizeFrame(rawOutput ?? cleanOutput, cliToolId);
-    // Issue #3767: bracket the read so the receipt gate can tell when an agy
-    // dialog first appeared, not only what time this tick is.
-    if (cliToolId === 'antigravity') beginAntigravityFrameRead(worktreeId, instanceId);
-    const promptDetection = detectPromptOnCleanFrame(
-      cleanOutput,
+    const { frame, promptDetection } = readPromptFrame(
+      worktreeId,
       cliToolId,
+      cleanOutput,
       precomputedLines,
+      instanceId,
       rawOutput,
-      receiptScope,
-      frame,
     );
-    if (cliToolId === 'antigravity') endAntigravityFrameRead(worktreeId, instanceId);
 
     if (!promptDetection.isPrompt || !promptDetection.promptData) {
-      forgetPartialAnswer(compositeKey);
-      pollerState.lastAnsweredPromptKey = null;
-      pollerState.lastAnsweredAt = null;
-      pollerState.enterFallbackCandidateKey = null;
-      // Issue #3757: agy's trust screen reads as no prompt (unnumbered: neither
-      // reader takes it), but it is one nobody here answers — record why, still
-      // as `no_prompt`. Before the warn key is cleared, so the WARN stays once
-      // per screen.
-      if (
-        cliToolId === 'antigravity' &&
-        suppressAntigravityTrustScreen(
-          worktreeId,
-          instanceId,
-          pollerState,
-          frame,
-          CLIToolManager.getInstance().getTool(cliToolId).getSessionName(worktreeId, instanceId),
-        )
-      ) {
-        return 'no_prompt';
-      }
-      pollerState.lastSkipWarnKey = null;
-      if (cliToolId === 'antigravity' && !promptDetection.isPrompt) {
-        logIfWithheldForWantOfReceipt(worktreeId, instanceId, compositeKey, () =>
-          detectPromptOnCleanFrame(cleanOutput, cliToolId, precomputedLines, rawOutput),
-        );
-      }
+      noteNoPromptOnScreen({
+        worktreeId,
+        cliToolId,
+        instanceId,
+        compositeKey,
+        pollerState,
+        frame,
+        promptDetection,
+        cleanOutput,
+        precomputedLines,
+        rawOutput,
+      });
       return 'no_prompt';
     }
 
@@ -1310,37 +1533,7 @@ export async function detectAndRespondToPrompt(
     // does not), or the session is relaunched. Recorded as a suppression, so
     // the prompt Push and `cmate wait` see "withheld", not "answering".
     const screenKey = partialAnswerScreenKey(promptDetection.promptData);
-    const partial = getPartialAnswer(compositeKey, epoch);
-    if (partial !== null) {
-      if (partial.screenKey === screenKey) {
-        suppressAndWarnOnce(
-          judged,
-          {
-            reason: PARTIAL_ANSWER_SUPPRESSION_REASON,
-            mode: null,
-            promptType: promptDetection.promptData.type,
-          },
-          `${frameKey}\u0000partial-answer`,
-          'poller:auto-yes-skipped-partial-answer',
-          { promptType: promptDetection.promptData.type, stoppedAt: partial.at },
-        );
-        return 'no_answer';
-      }
-      // Another prompt is on screen: only the sends at the forgotten one's
-      // screen go with it (#3713) — one in flight at this screen keeps its hold.
-      forgetPartialAnswer(compositeKey, partial.screenKey);
-    }
-    // Issue #3713: a worktree ID move carried an answer still being sent to
-    // this session's key. Its keys may already be on the pane, and how its send
-    // ends is not known yet — so this screen gets no keys until it comes back
-    // (recorded as a partial answer above, or gone).
-    if (hasMovedSendInFlight(compositeKey, epoch, screenKey)) {
-      warnOncePerFrame(
-        pollerState,
-        `${frameKey}\u0000moved-send-in-flight`,
-        'poller:auto-yes-skipped-moved-send-in-flight',
-        { worktreeId, cliToolId, instanceId, promptType: promptDetection.promptData.type },
-      );
+    if (withheldForEarlierSend(judged, screenKey, epoch)) {
       return 'no_answer';
     }
 
@@ -1368,31 +1561,7 @@ export async function detectAndRespondToPrompt(
     // auto-answer: a prompt the policy withholds is left for a human, and the
     // response poller's prompt path (WS broadcast + Web Push, see
     // polling/response-checker.ts) is what tells them it is waiting.
-    const policy = getSessionAutoYesPolicy(worktreeId, cliToolId, instanceId);
-    const resolution = resolveAutoAnswerWithPolicy(promptDetection.promptData, policy);
-    if (resolution.suppressedBy) {
-      // Issue #1684: the log line alone leaves a CLI-driven pipeline blind to
-      // why its worker stalled. Record the suppression so buildCurrentOutput
-      // can publish it (`autoYes.lastSuppression` in capture --json).
-      suppressAndWarnOnce(
-        judged,
-        {
-          reason: resolution.suppressedBy,
-          mode: policy?.mode ?? null,
-          promptType: promptDetection.promptData.type,
-          pattern: resolution.pattern,
-        },
-        `${frameKey}\u0000${resolution.suppressedBy}\u0000${policy?.mode ?? ''}\u0000${resolution.pattern ?? ''}`,
-        'poller:auto-yes-suppressed-by-policy',
-        {
-          reason: resolution.suppressedBy,
-          mode: policy?.mode ?? null,
-          pattern: resolution.pattern,
-          promptType: promptDetection.promptData.type,
-        },
-      );
-    }
-    const answer = resolution.answer;
+    const answer = resolveAnswerUnderPolicy(judged);
     if (answer === null) {
       return 'no_answer';
     }
@@ -1406,20 +1575,7 @@ export async function detectAndRespondToPrompt(
     // server created. The poller keeps running; it just does not type.
     const ownership = await checkWorktreeSessionOwnership(worktreeId, sessionName);
     if (generation !== undefined && !isTickCurrent(generation)) return 'no_answer';
-    if (ownership === null || ownership.verdict === 'foreign') {
-      warnOncePerFrame(
-        pollerState,
-        `${frameKey}\u0000${sessionName}\u0000${ownership ? 'foreign' : 'worktree_not_found'}`,
-        'poller:auto-yes-skipped-foreign-session',
-        {
-          worktreeId,
-          cliToolId,
-          instanceId,
-          sessionName,
-          sessionPath: ownership?.sessionPath ?? null,
-          reason: ownership ? 'foreign' : 'worktree_not_found',
-        },
-      );
+    if (skippedForUnownedSession(judged, sessionName, ownership)) {
       return 'no_answer';
     }
 
@@ -1448,24 +1604,16 @@ export async function detectAndRespondToPrompt(
 
     return 'responded';
   } catch (error) {
-    // Issue #3706: a tick that lost its generation — the send stopped part-way
-    // (`PromptAnswerAbortedError`), or failed after the grant went — is not a
-    // failure of the poller that now holds the key, and not an answer either.
-    if (generation !== undefined && !isTickCurrent(generation)) {
-      const keysSent = error instanceof Error && 'keysSent' in error ? Boolean(error.keysSent) : null;
-      // A stop with keys already on the pane: the next tick must not type the
-      // answer again over them (step 2.5). Recorded under the attempt's key as
-      // it is now — the new one when a worktree ID move carried it (#3713).
-      if (attempt !== null) settleSendAttempt(attempt, keysSent === true);
-      if (sendInFlight) noteAnswerSent(cliToolId, worktreeId, instanceId, true, receiptEpisode);
-      logger.info('poller:auto-yes-answer-abandoned', { worktreeId, cliToolId, instanceId, keysSent });
-      return 'no_answer';
-    }
-    if (attempt !== null) settleSendAttempt(attempt, false);
-    if (sendInFlight) noteAnswerSent(cliToolId, worktreeId, instanceId, true, receiptEpisode);
-    incrementErrorCount(compositeKey, generation?.pollerState);
-    logger.warn('poller:detect-respond-error', { worktreeId, cliToolId, instanceId });
-    return 'error';
+    return settleFailedTick(error, {
+      worktreeId,
+      cliToolId,
+      instanceId,
+      compositeKey,
+      generation,
+      attempt,
+      sendInFlight,
+      receiptEpisode,
+    });
   }
 }
 
