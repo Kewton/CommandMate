@@ -83,20 +83,13 @@ export function formatLastSend(lastSend: PromptObservation['lastSend'], now: num
   return `  last send: ${lastSend.state} (${lastSend.reason}, ${ago})${advice}`;
 }
 
-/** The observation in the words a human reads. */
-export function formatPromptObservation(observation: PromptObservation, now: number = Date.now()): string {
-  const { target, screen, autoYes } = observation;
+/** The `kind:` line and what the screen asks: question, target, options, answer route and token. */
+function formatScreenLines(
+  observation: PromptObservation,
+  screen: NonNullable<PromptObservation['screen']>,
+  now: number,
+): string[] {
   const lines: string[] = [];
-  lines.push(
-    `Instance ${target.instanceId} (${target.cliToolId}) on ${target.worktreeId}, pane ${target.sessionName}`,
-  );
-  const lastSendLine = formatLastSend(observation.lastSend, now);
-  if (observation.status === 'unavailable' || screen === null) {
-    lines.push('  No running session: there is no screen to read.');
-    if (lastSendLine !== null) lines.push(lastSendLine);
-    return lines.join('\n');
-  }
-
   const kindNote =
     screen.kind === 'none'
       ? ' (nothing on screen asks for a decision)'
@@ -128,7 +121,12 @@ export function formatPromptObservation(observation: PromptObservation, now: num
     // An older server sends no `tokenWithheld`; `no-decision` needs no line.
     lines.push(`  token: none (${screen.tokenWithheld})`);
   }
+  return lines;
+}
 
+/** The Auto-Yes lines: switch and poller, the poller's last record, and the contract re-evaluated now. */
+function formatAutoYesLines(autoYes: PromptObservation['autoYes']): string[] {
+  const lines: string[] = [];
   const enabled = autoYes.enabled === null ? 'unknown' : autoYes.enabled ? 'on' : 'off';
   const poller = autoYes.pollerActive === null ? 'unknown' : autoYes.pollerActive ? 'running' : 'stopped';
   lines.push(
@@ -152,6 +150,26 @@ export function formatPromptObservation(observation: PromptObservation, now: num
     `  contract re-evaluation: ${evaluationDetail}` +
       (evaluation.contract ? ` (task ${evaluation.contract.taskId ?? 'unknown'}, mode=${evaluation.contract.mode ?? 'none'})` : ' (no contract)'),
   );
+  return lines;
+}
+
+/** The observation in the words a human reads. */
+export function formatPromptObservation(observation: PromptObservation, now: number = Date.now()): string {
+  const { target, screen, autoYes } = observation;
+  const lines: string[] = [];
+  lines.push(
+    `Instance ${target.instanceId} (${target.cliToolId}) on ${target.worktreeId}, pane ${target.sessionName}`,
+  );
+  const lastSendLine = formatLastSend(observation.lastSend, now);
+  if (observation.status === 'unavailable' || screen === null) {
+    lines.push('  No running session: there is no screen to read.');
+    if (lastSendLine !== null) lines.push(lastSendLine);
+    return lines.join('\n');
+  }
+
+  lines.push(...formatScreenLines(observation, screen, now));
+
+  lines.push(...formatAutoYesLines(autoYes));
   if (lastSendLine !== null) lines.push(lastSendLine);
   return lines.join('\n');
 }
