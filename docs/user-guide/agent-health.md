@@ -20,7 +20,7 @@ hook のインスタンス取り違え）。`scripts/agent-health/run.ts` は、
 | `version` | `<cli> --version`（`claude` / `codex` / `agy` / `opencode` / `commandcode` / `opencode2`） | 版が取れる。前回の版は state に残し、`versionChanged` で知らせる |
 | `hook-correlation` | CommandMate 自身の起動行（`getAgentEventSource(tool).prepareLaunch(...)` → `renderAgentLaunchCommand`）で `worktreeId: "agent-health-probe"`・`instanceId: "<tool>-probe"` を与えて起動し、下の依頼を送る。hook はスクリプト内の listener が受ける | `session_start`・`user_prompt_submit`・`stop` のうち、そのツールの `capabilities.supportedEvents` にあるものが、両方のキーが上の値のまま届く。別のキーで届いた hook が 1 件でもあれば fail（#2874 の型）。`configScope: 'none'`（opencode）は skip。**opencode-v2 は hook を使わないため、代わりに自前 serve の SSE を確かめる**（下記） |
 | `screen-idle` | 起動（起動時のダイアログを越えた）直後の画面 | `detectSessionStatus` が `ready`、`hasActivePrompt` が偽 |
-| `screen-picker` | `screen-idle` の直後（依頼を送る前）に選択画面を開いた画面。claude は `/model` と `/effort`、codex は `/model`（1 段目のみ）。**Esc で閉じ**、入力待ちに戻ってから次へ進む。モデルは呼ばない（#3053） | 画面ごとに `waiting`・`hasActivePrompt` が偽・reason が `SELECTION_LIST_REASONS` のいずれか、かつ `detectPrompt` の `isPrompt` が画面ごとの期待どおり（claude の `/model`・`/effort` は `false`＝Auto-Yes が答えない、#1495。codex の `/model` は `true`＝`/prompt-response` が番号で答えられる、#2868。期待は `tool-table.ts` の定義に持つ）。summary に画面ごとの判定を並べ、1 つでも外れたら fail（evidence は外れた画面の末尾）。画面が開いたこと（判定の正規表現とは別の、一覧・スライダー側の文字列）を確かめられなければ fail。選択画面の定義が無いツールは skip |
+| `screen-picker` | `screen-idle` の直後（依頼を送る前）に選択画面を開いた画面。claude は `/model` と `/effort`、codex は `/model`（1 段目のみ）。**Esc で閉じ**、入力待ちに戻ってから次へ進む。モデルは呼ばない（#3053） | 画面ごとに `waiting`・`hasActivePrompt` が偽・reason が `SELECTION_LIST_REASONS` のいずれか、かつ `detectPrompt` の `isPrompt` が画面ごとの期待どおり（claude の `/model`・`/effort` は `false`＝Auto-Yes が答えない、#1495。codex の `/model` は `true`＝`/prompt-response` が番号で答えられる、#2868。期待は `tool-table.ts` の定義に持つ）。summary に画面ごとの判定を並べ、1 つでも外れたら fail（evidence は外れた画面の末尾）。画面が開いたこと（判定の正規表現とは別の、一覧・スライダー側の文字列）を確かめられなければ fail。起動中の拒否（codex の `Model selection is disabled until startup completes.`。`tool-table.ts` の `notReady`）が新たに出たときは、3 秒おいて同じコマンドを送り直す（最初の送信から 45 秒まで、Enter は送るたびに 1 回、#3803）。それでも開かなければ fail で、summary に「起動完了前として N 回拒否された」と出る。選択画面の定義が無いツールは skip |
 | `screen-running` | `Run the shell command: sleep 20` を送った直後の画面 | `running`（evidence が `positive`） |
 | `screen-approval` | 承認が要る操作で承認ダイアログを出した画面。撮った後は**断る** | `waiting` で `hasActivePrompt` が真。ダイアログを出さないツール（opencode の既定）は skip |
 | `screen-quoted-dialog` | そのツールの承認ダイアログの文面を本文で引用させた返答が終わった後の画面 | `ready`、`hasActivePrompt` が偽（#2841〜#2847 の型の回帰） |
@@ -39,6 +39,7 @@ hook のインスタンス取り違え）。`scripts/agent-health/run.ts` は、
 | `signed-out` | サインインできない | gemini（下記）。起動したツールのモデル（provider）が `Error: Unauthorized` を返し、ターンが応答なしで終わったときの `screen-running`・`screen-quoted-dialog`・`hook-correlation`（下記「モデルの認可エラー」） |
 | `unsupported` | ツールが未対応 | vibe-local・copilot の `version` 以外（下記） |
 | `timeout` | 時間切れ | 全体の時間上限に達して実行しなかったツール |
+| `usage-limit` | 利用上限に達している | 起動したツールの画面に利用上限の表示が出ていたときの `screen-*`・`hook-correlation`（下記「ツールの利用上限」） |
 | `prerequisite-failed` | version が取れず未実施 | `version` が fail したツールの残り |
 | `not-selected` | 今回の実行の対象外 | 表だけ。`--tools` / `--only` で外したもの |
 | `not-recorded` | 結果が記録されなかった | 表だけ。選んだのに結果が無いもの（スクリプトの異常） |
@@ -57,6 +58,28 @@ hook のインスタンス取り違え）。`scripts/agent-health/run.ts` は、
 
 #3021 の「No models loaded」は probe 自身の状態の隔離が原因で、probe 側で直したため、従来どおり fail にする。
 skip が続くときは、利用者がそのツールのモデルの資格情報（2026-10-08 の opencode-v2 は Ollama Cloud）を直す。
+
+### ツールの利用上限（Issue #3729）
+
+ツールのアカウントが利用上限（429）に達していると、依頼は処理されず、実行中の画面も承認ダイアログも `stop` の hook も出ない
+（2026-10-16、command-code 1.81.0 の `You've reached your weekly usage limit. Resets in 1d 17h`。#3717〜#3719 が同時に起票された）。
+上限は利用者のアカウントの状態で、コードでは直らない。そこで次の条件をすべて満たすときだけ、fail を `usage-limit` の skip にする
+（`src/lib/agent-health/usage-limit.ts`。判定していればの summary は `skipReason` に、画面の末尾は `evidence` に残す）。
+
+- 期待どおりなら pass のまま（skip にするのは fail になる判定だけ）
+- `screen-*` は、判定した画面に利用上限の表示がある。`hook-correlation` は、そのツールのセッションで見た画面のどれかにある
+- 利用上限の表示は「上限に達した」ことを言う文言だけで判定する（`USAGE_LIMIT_SIGNATURES`。ツールごとの行の表で、新しい文言は行を足す）。
+  `usage limit`・`429`・`Resets in` の単独では判定しない（claude の通常の案内「up to 50% of your weekly usage limit」や
+  codex の「You have 1 usage limit reset available」を上限と読まないため）
+
+| 文言の例 | ツール |
+|---|---|
+| `You've reached your weekly usage limit. Resets in …` | command-code（2026-10-16 の実測） |
+| `POST /alpha/generate → 429 error: … usage limit …` | command-code（同上） |
+| `Claude usage limit reached. Your limit will reset at …` | claude |
+| `You've hit your limit · resets …` / `You've hit your usage limit. …` | claude・codex |
+
+skip は要約の `skipByKind`（`利用上限に達している N`）に数える。続くときは、利用者がそのツールの上限の解除（または契約）を確かめる。
 
 ### version だけを読むツール（gemini・vibe-local・copilot、Issue #3313）
 
@@ -197,7 +220,7 @@ interface AgentHealthReport {
       summary: string;              // 1 行。何を期待し何が起きたか
       evidence?: string;            // 失敗時の証拠（画面の末尾 40 行、届いた hook）。4,000 文字まで
       skipReason?: string;
-      skipKind?: 'no-definition' | 'not-shown' | 'signed-out' | 'unsupported' | 'timeout' | 'prerequisite-failed'; // skip には必ず入る
+      skipKind?: 'no-definition' | 'not-shown' | 'signed-out' | 'unsupported' | 'timeout' | 'usage-limit' | 'prerequisite-failed'; // skip には必ず入る
       framePaths?: string[];        // 画面全体を保存したファイル（下の「画面の保存」）
     }>;
     launchedModel?: {               // 起動したモデル（Issue #3438）。起動しなかったツールと #3438 より前のレポートには無い（読む側は「不明」）

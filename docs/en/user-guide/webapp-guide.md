@@ -268,6 +268,7 @@ See [Agent event hooks](./agent-event-hooks.md) for the per-route technical deta
 - Important changes (file deletions, etc.) are also auto-approved, so use with caution
 - You can disable it by turning off the toggle
 - Auto Yes automatically turns OFF after the selected duration
+- **When the server restarts (`/rebuild`, `commandmate stop`, etc.), an active Auto Yes is turned OFF and does not come back.** The affected instance shows **"Released by restart"** (「再起動で解除」 in the Japanese UI). The label stays until the original grant's deadline, and disappears when you turn the toggle on again or turn it off manually (it is not shown after SIGKILL or a crash). A manual OFF or an expiry does not show it
 - **Security best practices**:
   - Select the **minimum time** needed for your work (1 hour recommended when in doubt)
   - Limit `CM_ROOT_DIR` to the target worktree directory
@@ -499,6 +500,7 @@ that kind of screen directly under it. You answer it without leaving chat.
 | A selection list is open | Arrow keys plus Enter / Esc. Depending on the screen, number keys or "This session only" / "Set as default" are added (see "The buttons a selection list gets" below) |
 | A screen nothing could classify | Arrows and Esc (Navigate) plus the digits 1-9, y / n and Enter |
 | Waiting, with options nobody could read | The digits 1-9, y / n and Enter |
+| Trust confirmation (agy) | The banner reads "Terminal action needed (trust confirmation). The agent will not continue until you answer whether to trust this folder, and Auto-Yes does not answer this screen. Pick with the arrows and press Enter, or answer it in the terminal." You can send the arrows and Enter from here |
 
 **Press the number or y/n while reading the card.** Enter confirms whatever the CLI has
 currently highlighted, so on a numbered dialog an Enter meant as "no" can land as an

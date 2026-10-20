@@ -9,7 +9,7 @@
  * `AutoYesToggleParams` from the component keep working unchanged.
  */
 
-import type { AutoYesDuration } from '@/config/auto-yes-config';
+import type { AutoYesDuration, AutoYesStopReason } from '@/config/auto-yes-config';
 
 /** Parameters for auto-yes toggle callback (Issue #314) */
 export interface AutoYesToggleParams {
@@ -30,4 +30,19 @@ export interface AutoYesInstanceSummary {
   enabled: boolean;
   /** Epoch ms the state expires at, or null when not enabled. */
   expiresAt: number | null;
+  /**
+   * Issue #3723: true when the contract governing this instance says
+   * `autoYes.mode: 'off'`, so the armed poller will answer nothing. Omitted —
+   * not false — otherwise, so a row with no contract is the shape it was.
+   */
+  blockedByContract?: boolean;
+  /**
+   * Issue #3730: on a DISABLED instance, why — today only `server-restart`
+   * (the grant was live when the previous server process shut down). Omitted
+   * otherwise. The worktree list does not put it here (its map holds armed
+   * instances only) but beside it, in `autoYesStopReasonByInstance`; the
+   * single-worktree `GET .../auto-yes` map and the browser's per-instance
+   * state carry it in this field.
+   */
+  stopReason?: AutoYesStopReason;
 }

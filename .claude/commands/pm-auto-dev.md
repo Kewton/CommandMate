@@ -213,7 +213,7 @@ Output file: dev-reports/issue/{issue_number}/pm-auto-dev/iteration-1/refactor-r
 2. **既存機能変更時**: 既存の記述を最新の動作に合わせて修正
 3. **設定・環境変数追加時**: `.env.example` および `docs/DEPLOYMENT.md` を更新
 4. **API変更時**: 関連するAPIドキュメントを更新
-5. **ファイル構成変更時**: `CLAUDE.md` のファイル構成セクションを更新
+5. **ファイル構成のトップレベルの増減時のみ**: `CLAUDE.md` のファイル構成セクションを更新
 
 #### 5-3. 更新確認
 

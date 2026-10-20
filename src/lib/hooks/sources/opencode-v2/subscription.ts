@@ -447,7 +447,7 @@ function deliver(state: SubscriptionState, frame: OpencodeV2Frame): void {
       error: error instanceof Error ? error.message : String(error),
     });
   }
-  void recordOpencodeV2TurnEnd(state.target, state.port, frame);
+  void recordOpencodeV2TurnEnd(state.target, state.port, frame, () => isCurrentSubscription(state));
   void refreshOpencodeV2UsageOnFrame(state.target, state.port, frame, () =>
     isCurrentSubscription(state)
   );
@@ -497,18 +497,21 @@ export function refreshOpencodeV2UsageOnFrame(
  *
  * Exported for the tests, which drive frames through the path the stream does.
  *
+ * @param isCurrent - Handed to `syncOpencodeV2History`, which skips the model
+ *   latch when it is false after the read (Issue #3733)
  * @returns The sync, or null when the frame ends no turn
  */
 export function recordOpencodeV2TurnEnd(
   target: AgentInstanceRef,
   port: number,
-  frame: OpencodeV2Frame
+  frame: OpencodeV2Frame,
+  isCurrent: () => boolean = () => true
 ): Promise<number> | null {
   try {
     if (!isOpencodeV2TurnEndEventType(frameType(frame))) return null;
     const sessionId = frameSessionId(frame);
     if (sessionId === null) return null;
-    return syncOpencodeV2History(target, port, sessionId);
+    return syncOpencodeV2History(target, port, sessionId, isCurrent);
   } catch (error) {
     logger.warn('opencode-v2-history-trigger-failed', {
       worktreeId: target.worktreeId,

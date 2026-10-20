@@ -286,6 +286,8 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     agentInstances,
     autoYesEnabled,
     autoYesExpiresAt,
+    autoYesBlockedByContract,
+    autoYesReleasedByRestart,
     autoYesStateMap,
     diffContent,
     diffFilePath,
@@ -361,6 +363,8 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     promptAutoYesEnterSent,
     // Issue #3305: what the docked selection-list pad decides its controls from.
     selectionListReading,
+    // Issue #3758: the docked pad's trust-confirmation notice, off the same poll.
+    isTrustConfirmationActive,
     // Issue #2592: the composer's permission-mode control reads these. The
     // phone's composer is docked outside `MobileTerminalTab` — which owns the
     // pane hook the PC split reads the same facts from — so they come off this
@@ -1121,6 +1125,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                     instanceId={activeInstanceId}
                     onKeysSent={fetchCurrentOutput}
                     reading={selectionListReading}
+                    trustConfirmation={isTrustConfirmationActive}
                     surface="terminal"
                     showPagerKeys={isPagerActive}
                   />
@@ -1192,6 +1197,8 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                       cliToolName={activeCliTab}
                       inline
                       showToolName={false}
+                      blockedByContract={autoYesBlockedByContract}
+                      releasedByRestart={autoYesReleasedByRestart}
                     />
                   }
                 />

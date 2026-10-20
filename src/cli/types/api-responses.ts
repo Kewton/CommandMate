@@ -11,6 +11,7 @@
 import type { PromptView } from '../../lib/session/prompt-view';
 import type { AutoYesSuppressionReason } from '../../lib/polling/auto-yes-suppression-reason';
 import type { StatusEvidence } from '../../lib/session/status-evidence-type';
+import type { PromptObservation } from '../../lib/prompt-observation/types';
 
 // Mirrors: src/types/models.ts Worktree + src/app/api/worktrees/route.ts response shape
 export interface WorktreeListResponse {
@@ -258,6 +259,13 @@ export interface CurrentOutputResponse {
   autoYes?: {
     enabled: boolean;
     expiresAt: number | null;
+    /**
+     * Mirrors: src/config/auto-yes-config.ts AutoYesStopReason. Typed as a
+     * string because a newer server may add a reason. Issue #3730:
+     * `server-restart` — Auto-Yes is off because the previous server process
+     * shut down while this grant was live; the grant is not restored, and the
+     * reason stays until the grant's own deadline or the next enable / disable.
+     */
     stopReason?: string;
     // Mirrors: src/lib/polling/auto-yes-suppression-state.ts AutoYesPolicySuppression
     // (Issue #1684). Non-null once the contract's autoYes policy withheld an
@@ -1061,6 +1069,20 @@ export interface CurrentOutputResponse {
   };
 }
 
+/**
+ * `GET /api/worktrees/:id/current-output?observe=1` (Issue #3755): the same
+ * payload plus one prompt observation of the same capture.
+ *
+ * A type of its own rather than a field on {@link CurrentOutputResponse}: the
+ * route attaches it only when asked, and that interface mirrors the response
+ * every caller gets (current-output-mirror-3300). Optional for a daemon older
+ * than the field, which ignores `observe`.
+ */
+export interface CurrentOutputObservedResponse extends CurrentOutputResponse {
+  promptObservation?: PromptObservation;
+}
+
+
 // Mirrors: src/types/models.ts BasePromptData (subset for CLI output)
 //
 // Issue #1738: this mirror is deliberately LOOSER than the server union and
@@ -1311,6 +1333,22 @@ export interface AutoYesSetResult {
     rosterCliTool: string;
     requestedCliTool: string;
   } | null;
+  /**
+   * Issue #3723: what the contract governing the armed instance says about
+   * Auto-Yes, or null when no contract governs it. Absent from a server older
+   * than #3723 and from a disabling POST. `mode: 'off'` means the poller this
+   * request armed will answer nothing. `mode` is the wire's `string`, for the
+   * reason `resolvedBy` above is.
+   */
+  contractPolicy?: AutoYesContractPolicy | null;
+}
+
+/** Mirrors: src/lib/polling/auto-yes-policy.ts ContractPolicySummary [Issue #3723]. */
+export interface AutoYesContractPolicy {
+  taskId: string | null;
+  mode: string | null;
+  allowPromptTypes: string[];
+  denyPatternCount: number;
 }
 
 /**
@@ -1328,7 +1366,20 @@ export interface AutoYesSetResult {
  * Optional because a daemon older than #896 sends no such map.
  */
 export interface AutoYesStatesResponse {
-  instances?: Record<string, { enabled: boolean; expiresAt: number | null }>;
+  /**
+   * Issue #3723: `blockedByContract` is true when the instance is armed but its
+   * contract says `autoYes.mode: 'off'`; omitted otherwise and by older servers.
+   */
+  instances?: Record<string, {
+    enabled: boolean;
+    expiresAt: number | null;
+    blockedByContract?: boolean;
+    /**
+     * Issue #3730: on a disabled instance, `server-restart` when the last
+     * server restart released its grant. Omitted otherwise and by older servers.
+     */
+    stopReason?: string;
+  }>;
 }
 
 /** wait exit 10 CLI extended output type */
@@ -1364,6 +1415,15 @@ export interface WaitPromptOutput {
     pattern?: string;
     ageSeconds: number;
   };
+  /**
+   * One prompt observation of the frame this exit was decided on (Issue
+   * #3755): the screen's kind, an observation token, and Auto-Yes as two
+   * separate items — the poller's record and the contract re-evaluated now.
+   * Absent when the server is older than the field. `autoYesSuppression` above
+   * keeps its meaning (a record under a minute old); this does not read the
+   * record's time as "the reason this prompt is unanswered".
+   */
+  observation?: PromptObservation;
   [key: string]: unknown;
 }
 

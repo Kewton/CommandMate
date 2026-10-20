@@ -8,6 +8,7 @@ import { promisify } from 'util';
 import { invalidateCache } from './tmux-capture-cache';
 import { hasHumanClientAttached } from './geometry-delegation';
 import { dropLegacyAliasByLegacyName } from './legacy-session-alias';
+import { notifyTmuxSessionCreated } from './session-created-signal';
 import { validateSessionName } from '@/lib/cli-tools/validation';
 import { TMUX_HISTORY_LIMIT, TUI_PANE_HEIGHT, TUI_PANE_WIDTH } from '@/config/tmux-pane-config';
 import { createLogger } from '@/lib/logger';
@@ -559,6 +560,9 @@ export async function createSession(
     const errorMessage = error instanceof Error ? error.message : String(error);
     throw new Error(`Failed to create tmux session: ${errorMessage}`);
   }
+  // Issue #3796: an Auto-Yes poller waiting for this session ticks now rather
+  // than a backoff later. Outside the try: a listener cannot fail the creation.
+  notifyTmuxSessionCreated(sessionName);
 }
 
 /** Options for {@link sendKeys}. */

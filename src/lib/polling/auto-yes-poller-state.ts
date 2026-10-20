@@ -29,6 +29,31 @@ export interface AutoYesPollerState {
   currentInterval: number;
   /** Last server-side response timestamp */
   lastServerResponseTimestamp: number | null;
+  /**
+   * Issue #3791: epoch ms the pending tick is due at, set only while that tick
+   * is the session wait's (`MAX_BACKOFF_MS` after a capture found no session).
+   * That is the one tick past `AUTO_YES_ANSWER_GRACE_MS` that still answers: a
+   * session started meanwhile gets its first prompt answered on it. The push
+   * gate reads it (off `globalThis`) to hold a wait until then. An error
+   * backoff does not set it — a poller failing in a row is the case a human
+   * should hear about at the usual time. Optional so hand-built states need not
+   * name it.
+   */
+  sessionWaitTickAt?: number;
+  /**
+   * Issue #3796: epoch ms the tick that found the session again began — the
+   * session wait's tick, run on schedule or brought forward by the session's
+   * creation (`onTmuxSessionCreated`). The push gate reads it to end a hold
+   * that was counting on a later session-wait tick. Optional like the above.
+   */
+  sessionAppearedAt?: number;
+  /**
+   * Issue #3796: epoch ms the last session-wait tick began, whatever it then
+   * found (no session again, a failed capture, a session). The push gate reads
+   * it so that a tick it was counting on still counts once it has run, even when
+   * the tick then scheduled an ordinary one and `sessionWaitTickAt` went away.
+   */
+  sessionWaitTickRanAt?: number;
   /** Last answered prompt key for duplicate prevention (Issue #306) */
   lastAnsweredPromptKey: string | null;
   /** Timestamp when lastAnsweredPromptKey was set (for retry expiry) */

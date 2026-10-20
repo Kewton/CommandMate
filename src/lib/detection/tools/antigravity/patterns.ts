@@ -116,6 +116,21 @@ export const ANTIGRAVITY_SELECTION_LIST_PATTERN = /Switch Model|↑\/↓\s*Navig
 export const ANTIGRAVITY_NAVIGATE_FOOTER_PATTERN = /↑\/↓\s*Navigate/;
 
 /**
+ * The footer every measured agy PERMISSION dialog ends on: `↑/↓ Navigate · tab
+ * Amend · f full diff` (file creation), `… · tab Amend · ctrl+g edit/expand
+ * command[ · ctrl+r Review]` (command execution)
+ * (`tests/fixtures/antigravity-live-2364/dialog-*.txt`).
+ *
+ * The numbered-dialog reader requires it on the footer row (Issue #3797 for the
+ * prompt observation, #3808 for every producer): agy 1.4's login-method screen
+ * (`↑/↓ Navigate · enter Select`) draws numbered rows too and is not a
+ * permission request. A footer cut short by a narrow pane, wrapped onto the
+ * next row, or spelled differently by another version fails it on purpose —
+ * the frame is then not answered.
+ */
+export const ANTIGRAVITY_PERMISSION_FOOTER_PATTERN = /↑\/↓\s*Navigate\s*·\s*tab Amend\b/;
+
+/**
  * One numbered option row of agy's dialogs: `> 1. Yes`, `  4. No`,
  * `  2. No, deny creation`.
  *
@@ -191,6 +206,33 @@ export const ANTIGRAVITY_DIALOG_MAX_ROWS = 60;
  * that was waiting for a keypress. Anchored to the whole row.
  */
 export const ANTIGRAVITY_SURVEY_PATTERN = /^\s*\[1\]\s*Good\s+\[2\]\s*Fine\s+\[3\]\s*Bad\s+\[0\]\s*Skip\s*$/m;
+
+/**
+ * The question of agy's startup folder-trust screen (Issue #988):
+ *
+ *   Do you trust the contents of this project?
+ *   > Yes, I trust this folder   <- default-selected option
+ *     No, exit
+ *   ↑/↓ Navigate · enter Confirm
+ *
+ * Unnumbered, so {@link isAntigravityNumberedDialog} is false on it and neither
+ * the agy dialog reader nor the generic numbered parser reads it as a prompt
+ * (Issue #3757).
+ */
+export const ANTIGRAVITY_TRUST_DIALOG_PATTERN = /Do you trust the contents of this project\?/;
+
+/**
+ * Is agy's folder-trust screen live at the bottom of the frame (Issue #3757)?
+ *
+ * The question AND the `↑/↓ Navigate` footer, both in the status tail: the
+ * question alone also matches the dismissed screen left in the scrollback, or a
+ * reply quoting it, and neither of those is waiting for an answer.
+ *
+ * @param lastLines - The status detector's tail (`normalizeFrame(…).lastLines`)
+ */
+export function isAntigravityTrustScreen(lastLines: string): boolean {
+  return ANTIGRAVITY_TRUST_DIALOG_PATTERN.test(lastLines) && ANTIGRAVITY_NAVIGATE_FOOTER_PATTERN.test(lastLines);
+}
 
 /** Where agy's dialog block sits on a frame — see {@link locateAntigravityDialogRegion}. */
 export interface AntigravityDialogRegion {

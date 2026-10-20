@@ -37,7 +37,8 @@
  */
 
 import type { CLIToolType } from './cli-tools/types';
-import type { AutoYesStopReason } from '@/config/auto-yes-config';
+import type { AutoYesPollerStopReason, AutoYesStopReason } from '@/config/auto-yes-config';
+import { withPollerStopReason } from './polling/auto-yes-poller-stop-reason';
 import {
   buildCompositeKey,
   deleteAutoYesState,
@@ -78,7 +79,11 @@ export interface AutoYesLifecycleRule {
  * `session-killed` is #3182's decision as #3188 shipped it: disable with no
  * reason (no new reason was added), for the instance only. `server-shutdown`
  * deliberately does not persist anything: the state lives in memory, and a
- * restarted server starting with every grant off is the safe side.
+ * restarted server starting with every grant off is the safe side. Issue #3730
+ * keeps that: `server.ts` writes down only which grants the shutdown released
+ * (`lib/auto-yes-shutdown-record`), so the next start can show them as off with
+ * `stopReason: 'server-restart'`. That record is the server's step, not this
+ * row's — the row, `releaseAutoYes` and `stopAllAutoYesPolling` write nothing.
  *
  * `consecutive-errors` is for real capture failures only: a session that
  * exists but cannot be read. A session that does not exist (not started yet,
@@ -95,6 +100,23 @@ export const AUTO_YES_LIFECYCLE: Readonly<Record<AutoYesLifecycleEvent, AutoYesL
   'server-shutdown': { state: 'none', poller: 'stop' },
 };
 
+/**
+ * What `poller:stopped` logs for each event (Issue #3730): the event's own
+ * name, except `server-shutdown`, which keeps the `shutdown` that log has
+ * always carried. Beside the table rather than a column of it, because a poller
+ * reason is a log word, not a decision about the grant.
+ */
+export const AUTO_YES_LIFECYCLE_POLLER_STOP_REASON: Readonly<
+  Record<AutoYesLifecycleEvent, AutoYesPollerStopReason>
+> = {
+  'session-killed': 'session-killed',
+  'instance-removed': 'instance-removed',
+  'worktree-deleted': 'worktree-deleted',
+  'orphan-swept': 'orphan-swept',
+  'consecutive-errors': 'consecutive-errors',
+  'server-shutdown': 'shutdown',
+};
+
 /** Whose Auto-Yes an event releases. */
 export type AutoYesLifecycleTarget =
   | { scope: 'instance'; worktreeId: string; cliToolId: CLIToolType; instanceId?: string }
@@ -106,12 +128,20 @@ export type AutoYesLifecycleTarget =
  * Stop the pollers the event's target names (the poller half of the table).
  * Separate from {@link applyAutoYesStateRule} so a caller that reports the two
  * failures apart (`session-cleanup`) can keep doing so.
+ *
+ * Issue #3730: the event rides to `poller:stopped` as its reason through
+ * {@link withPollerStopReason} rather than as an argument — the calls below
+ * keep the exact arguments the barrel's mocks pin.
  */
 export function stopAutoYesPollersFor(
   event: AutoYesLifecycleEvent,
   target: AutoYesLifecycleTarget,
 ): void {
   if (AUTO_YES_LIFECYCLE[event].poller !== 'stop') return;
+  withPollerStopReason(AUTO_YES_LIFECYCLE_POLLER_STOP_REASON[event], () => stopTargetPollers(target));
+}
+
+function stopTargetPollers(target: AutoYesLifecycleTarget): void {
   switch (target.scope) {
     case 'instance':
       stopAutoYesPolling(buildCompositeKey(target.worktreeId, target.cliToolId, target.instanceId));

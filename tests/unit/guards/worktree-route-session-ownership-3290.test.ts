@@ -225,6 +225,19 @@ const TABLE: readonly Row[] = [
     expects: REFUSES,
   },
   {
+    // Issue #3756: the strict respond refuses before any read of the pane.
+    handler: 'prompt-response/strict/route.ts#POST',
+    request: () =>
+      request('POST', 'prompt-response/strict', {
+        expectScreen: 'antigravity-trust',
+        observation: 'po1.abc.def',
+        answer: 'Yes',
+        operationId: 'op-3290-strict',
+        cliTool: 'claude',
+      }),
+    expects: REFUSES,
+  },
+  {
     handler: 'respond/route.ts#POST',
     request: (db) => request('POST', 'respond', { messageId: pendingPromptId(db), answer: 'yes' }),
     expects: REFUSES,

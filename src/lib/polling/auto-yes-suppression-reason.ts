@@ -43,7 +43,58 @@ export type AutoYesSuppressionReason =
    * resolver and the hooks never produce it, only the poller does (Issue #3713
    * made it a member, with its own wording in `cmate wait`'s `SUPPRESSION_CAUSE`).
    */
-  | 'partial-answer';
+  | 'partial-answer'
+  /**
+   * Issue #3757: agy's startup folder-trust screen (`Do you trust the contents
+   * of this project?`) is on the pane. It belongs to the launch sequence —
+   * `AntigravityTool.waitForReady` confirms it, or, when agy drew it after that
+   * window ended, the next send's readiness wait does — and it is unnumbered, so
+   * the poller cannot read it as a prompt at all. Recorded so the prompt Push
+   * does not hold the wait as "Auto-Yes is answering" and `cmate wait` names
+   * the screen instead of a session that has gone quiet.
+   */
+  | 'startup-trust-unhandled'
+  /**
+   * Issue #3748: an `AskUserQuestion` confirm page (`1. Submit` / `2. Cancel`
+   * on Command Code, `1. Submit answers` / `2. Cancel` on Claude) is on the
+   * pane. `Submit` picks nothing — it commits whatever stands as the answers —
+   * so Auto-Yes leaves it to a human (`polling/auto-yes-confirm-page`). Until
+   * #3748 Command Code's page (#3497) was recorded as `unclassified-frame`,
+   * whose wording in `cmate wait` says no detector recognised the frame — the
+   * opposite of what happened.
+   */
+  | 'question-confirm-page'
+  /**
+   * Issue #3767: agy's approval dialog is on the pane but Auto-Yes has no
+   * unused `PreToolUse` question to match it to (none ever, it appeared after
+   * the window, it was already up, the hook stopped arriving, or — Issue #3789 —
+   * the last one was spent on keys Auto-Yes sent — or, Issue #3796, began to
+   * send and was cut short — and a dialog is still up past the grace), so it
+   * is left to a human. Not a policy verdict; the poller
+   * records it from the receipt gate.
+   */
+  | 'no-hook-receipt';
+
+/**
+ * Issue #3796: the reasons `resolveAutoAnswerWithPolicy` returns — the contract's
+ * verdict on the prompt as it is NOW, which a later tick re-evaluates, as
+ * opposed to a reason that remembers an event (`partial-answer`).
+ */
+export const CONTRACT_SUPPRESSION_REASONS: ReadonlySet<AutoYesSuppressionReason> = new Set<AutoYesSuppressionReason>([
+  'mode-off',
+  'deny-pattern',
+  'deny-pattern-unusable',
+  'type-not-allowed',
+]);
 
 /** Issue #3706: the reason the poller records for an answer stopped part-way. */
 export const PARTIAL_ANSWER_SUPPRESSION_REASON = 'partial-answer' satisfies AutoYesSuppressionReason;
+
+/** Issue #3757: the reason the poller records over agy's unanswered trust screen. */
+export const STARTUP_TRUST_UNHANDLED_SUPPRESSION_REASON = 'startup-trust-unhandled' satisfies AutoYesSuppressionReason;
+
+/** Issue #3748: the reason the poller records over an `AskUserQuestion` confirm page. */
+export const QUESTION_CONFIRM_PAGE_SUPPRESSION_REASON = 'question-confirm-page' satisfies AutoYesSuppressionReason;
+
+/** Issue #3767: the reason the poller records over an agy dialog with no matching hook receipt. */
+export const NO_HOOK_RECEIPT_SUPPRESSION_REASON = 'no-hook-receipt' satisfies AutoYesSuppressionReason;

@@ -26,12 +26,24 @@ import {
   extractInstanceId,
   type AutoYesState,
 } from '@/lib/polling/auto-yes-manager';
+import { isAutoYesShutdownStarted } from '@/lib/auto-yes-state';
 import { recheckPendingDecisions } from '@/lib/hooks/pending-decision-recheck';
+import {
+  getSessionContractPolicySummary,
+  isSessionAutoYesBlockedByContract,
+  type ContractPolicySummary,
+} from '@/lib/polling/auto-yes-policy';
 import { isValidWorktreeId } from '@/lib/security/path-validator';
 import { CLI_TOOL_IDS, isValidInstanceId, type CLIToolType } from '@/lib/cli-tools/types';
 import { resolveSessionName } from '@/lib/cli-tools/session-name';
 import { checkSessionOwnership, foreignSessionErrorBody } from '@/lib/cli-tools/session-ownership';
-import { isAllowedDuration, DEFAULT_AUTO_YES_DURATION, validateStopPattern, type AutoYesDuration } from '@/config/auto-yes-config';
+import {
+  isAllowedDuration,
+  DEFAULT_AUTO_YES_DURATION,
+  validateStopPattern,
+  type AutoYesDuration,
+  type AutoYesStopReason,
+} from '@/config/auto-yes-config';
 import { createLogger } from '@/lib/logger';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 import type { Worktree } from '@/types/models';
@@ -84,6 +96,37 @@ interface AutoYesResponse {
     delivered: number;
     skipped: number;
   };
+  /**
+   * Issue #3723: what the contract governing this instance says about Auto-Yes,
+   * or null when none does. Carried on the single-target responses that can
+   * leave an operator believing Auto-Yes will answer — the arming POST and the
+   * `?cliToolId` GET. Read through the poller's own policy lookup, so a
+   * `mode: 'off'` here is the reason the poller answers nothing.
+   */
+  contractPolicy?: ContractPolicySummary | null;
+  /**
+   * Issue #3723, map entries only (`agents` / `instances`): true when the
+   * instance is armed and its contract says `mode: 'off'`. Omitted otherwise,
+   * so a worktree with no contract answers exactly what it did.
+   */
+  blockedByContract?: boolean;
+  /**
+   * Issue #3730: why a DISABLED state is off, when that is worth saying —
+   * today only `server-restart` (the grant was live when the previous process
+   * shut down). Omitted otherwise, so every other answer is the shape it was;
+   * `capture --json`'s `autoYes.stopReason` keeps carrying the full reason.
+   */
+  stopReason?: AutoYesStopReason;
+}
+
+/**
+ * The reason a disabled state publishes on this route (Issue #3730), or
+ * undefined. Only `server-restart`: the other reasons stay where they always
+ * were (`capture --json`), and a disabled state with no reason must not start
+ * reading as one.
+ */
+function publishedStopReason(state: AutoYesState | null): AutoYesStopReason | undefined {
+  return state && !state.enabled && state.stopReason === 'server-restart' ? state.stopReason : undefined;
 }
 
 /**
@@ -104,6 +147,10 @@ function buildAutoYesResponse(
     enabled: state?.enabled ?? false,
     expiresAt: state?.enabled ? state.expiresAt : null,
   };
+  const stopReason = publishedStopReason(state);
+  if (stopReason !== undefined) {
+    response.stopReason = stopReason;
+  }
   if (pollingStarted !== undefined) {
     response.pollingStarted = pollingStarted;
   }
@@ -197,22 +244,49 @@ export async function GET(
         });
       }
       const state = getAutoYesState(id, target.cliToolId, target.instanceId);
-      return NextResponse.json(buildAutoYesResponse(state, undefined, target));
+      return NextResponse.json({
+        ...buildAutoYesResponse(state, undefined, target),
+        contractPolicy: getSessionContractPolicySummary(id, target.cliToolId, target.instanceId),
+      });
     }
 
     // No cliToolId: return maps keyed by agent (cliToolId) and by instance (Issue #896).
     const compositeKeys = getCompositeKeysByWorktree(id);
     const agentStates: Record<string, ReturnType<typeof buildAutoYesResponse>> = {};
     const instanceStates: Record<string, ReturnType<typeof buildAutoYesResponse>> = {};
+    // Issue #3753: two keys can share an instanceId under different tools (the
+    // roster's tool changed between them). The map is keyed by instanceId, so
+    // the roster's tool decides which key speaks for it; without a roster
+    // entry, an enabled one wins over a disabled one.
+    const claimed = new Map<string, { agentId: CLIToolType; enabled: boolean }>();
+    const rosterToolOf = (instanceId: string): CLIToolType | undefined => {
+      const target = resolveSessionTarget(getDbInstance(), id, { instanceId });
+      return target.resolvedBy === 'roster' ? target.cliToolId : undefined;
+    };
     for (const key of compositeKeys) {
       const agentId = extractCliToolId(key);
       if (!agentId) continue;
       const instanceId = extractInstanceId(key) ?? agentId;
       const state = getAutoYesState(id, agentId, instanceId);
-      instanceStates[instanceId] = buildAutoYesResponse(state);
+      const previous = claimed.get(instanceId);
+      if (previous) {
+        const rosterTool = rosterToolOf(instanceId);
+        const keepPrevious = rosterTool
+          ? previous.agentId === rosterTool
+          : previous.enabled || !state?.enabled;
+        if (keepPrevious) continue;
+      }
+      claimed.set(instanceId, { agentId, enabled: !!state?.enabled });
+      const entry = buildAutoYesResponse(state);
+      // Issue #3723: `commandmate instances` reads this map; an armed instance
+      // its contract keeps silent is flagged here, beside the arming it undoes.
+      if (entry.enabled && isSessionAutoYesBlockedByContract(id, agentId, instanceId)) {
+        entry.blockedByContract = true;
+      }
+      instanceStates[instanceId] = entry;
       // Keep the cliTool-level map populated from the primary instance for backward compat.
       if (instanceId === agentId) {
-        agentStates[agentId] = buildAutoYesResponse(state);
+        agentStates[agentId] = { ...entry };
       }
     }
 
@@ -379,6 +453,15 @@ export async function POST(
         return NextResponse.json(foreignSessionErrorBody(sessionName, ownership.sessionPath), { status: 409 });
       }
 
+      // Issue #3730: the ownership check above awaits, and a shutdown can
+      // begin meanwhile. The shutdown has already written down which grants it
+      // released, so a grant added now would be one the next process never
+      // explains — and a poller started now would run into the teardown.
+      // Checked here, after the last await and before the synchronous write.
+      if (isAutoYesShutdownStarted()) {
+        return NextResponse.json({ error: 'Server is shutting down' }, { status: 503 });
+      }
+
       state = setAutoYesEnabled(
         id,
         cliToolId,
@@ -430,11 +513,11 @@ export async function POST(
       if (body.instanceId) {
         state = setAutoYesEnabled(id, cliToolId, false, undefined, undefined, instanceId);
         const compositeKey = buildCompositeKey(id, cliToolId, instanceId);
-        stopAutoYesPolling(compositeKey);
+        stopAutoYesPolling(compositeKey, 'manual');
       } else if (body.cliToolId) {
         state = setAutoYesEnabled(id, cliToolId, false);
         const compositeKey = buildCompositeKey(id, cliToolId);
-        stopAutoYesPolling(compositeKey);
+        stopAutoYesPolling(compositeKey, 'manual');
       } else {
         // Disable all agents/instances for this worktree
         const keys = getCompositeKeysByWorktree(id);
@@ -446,7 +529,7 @@ export async function POST(
         }
         // Issue #3713: a disable, not a delete — the memory of an answer stopped
         // part-way (and a send still in flight) is kept, as for one agent.
-        stopAutoYesPollingByWorktree(id, { keepPartialAnswers: true });
+        stopAutoYesPollingByWorktree(id, { keepPartialAnswers: true, reason: 'manual' });
         state = { enabled: false, enabledAt: 0, expiresAt: 0 };
       }
     }
@@ -460,14 +543,23 @@ export async function POST(
     // request that deliberately named none. `pendingDecisions` (#1898-2) is
     // undefined on that path anyway — nothing is re-judged when nothing is armed.
     const targetedRequest = body.enabled || !!body.instanceId || !!body.cliToolId;
-    return NextResponse.json(
-      buildAutoYesResponse(
-        state,
-        pollingStarted,
-        targetedRequest ? target : undefined,
-        pendingDecisions
-      )
+    const response = buildAutoYesResponse(
+      state,
+      pollingStarted,
+      targetedRequest ? target : undefined,
+      pendingDecisions
     );
+    // Issue #3723: arming answered `enabled: true` even when the contract on
+    // this instance says `autoYes.mode: 'off'`, so the poller would answer
+    // nothing — the reason surfaced only in `capture --json`'s lastSuppression,
+    // after a prompt had already sat unanswered. Read after
+    // `startAutoYesPolling`, which drops the cached policy when it starts a
+    // poller; otherwise the policy is at most AUTO_YES_POLICY_CACHE_TTL_MS old,
+    // the same staleness the poller itself judges with.
+    if (body.enabled) {
+      response.contractPolicy = getSessionContractPolicySummary(id, cliToolId, instanceId);
+    }
+    return NextResponse.json(response);
   } catch (error: unknown) {
     logger.error('error-setting-auto-yes-state:', { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json(

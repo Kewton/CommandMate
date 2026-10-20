@@ -68,6 +68,7 @@ CM_PORT=3000 node bin/commandmate.js send abc123 "msg"
 | [`commandmate sync`](#commandmate-sync) | サーバーのworktree再スキャン（GUI同期ボタン相当） |
 | [`commandmate send`](#commandmate-send) | エージェントへのメッセージ送信 |
 | [`commandmate wait`](#commandmate-wait) | エージェント完了の待機 |
+| [`commandmate prompt`](#commandmate-prompt) | 止まっている画面の観測（種類・選択肢・観測トークン） |
 | [`commandmate respond`](#commandmate-respond) | プロンプトへの応答 |
 | [`commandmate interrupt`](#commandmate-interrupt) | 生成中のターンの中断（GUI の中断ボタン相当） |
 | [`commandmate verify`](#commandmate-verify) | 検証ゲート（.commandmate/verify.yaml）の実行と検証履歴の参照 |
@@ -180,6 +181,8 @@ commandmate ls --json \
 | `42:10` | 残り時間（1 時間未満は `MM:SS`） |
 | `1:05:33` | 残り時間（1 時間以上は `H:MM:SS`） |
 | `off` | 対象 instance の少なくとも 1 つが**未武装**。その行のプロンプトは人が答えないと進まない |
+| `off(restart)` | `off` のうち、**サーバーの再起動で許可が外れた** instance（Issue #3730）。再起動で許可は戻りません。元の許可の期限まで、または `--enable` / `--disable` するまでこの表示になります。根拠は `--json` の `autoYesStopReasonByInstance.<instanceId>: "server-restart"`（武装中の `autoYesByInstance` とは別の欄） |
+| `blocked` | 武装しているが、その instance で実行中の契約が `autoYes.mode: off` を指定しているため**何にも答えない**（Issue #3723）。`off` と同じく人が答えないと進まない。根拠は `--json` の `autoYesByInstance.<instanceId>.blockedByContract: true` |
 | `on` | 武装しているが期限が無い（サーバーが `expiresAt: null` を返した場合。通常のサーバーでは出ません） |
 | `-` | **判定できない**。#2512 より古いサーバー（`autoYesByInstance` が無い）／`idle` 以外の行で STATUS を説明する instance が 1 つも無い |
 | `03:12 (codex-2)` | 対象が既定エージェントのプライマリ以外の instance。括弧内はそのまま `--instance` に渡せる値 |
@@ -510,6 +513,8 @@ esac
 }
 ```
 
+Issue #3755 以降、exit 10 の JSON には `observation` が加わります（プロンプト・選択リスト・未分類画面の 3 つの検出経路の exit 10 に付きます。`wait` が exit 10 を返すのはこの 3 経路だけです）。中身は [`commandmate prompt --json`](#commandmate-prompt) と同じで、exit を決めた同じ capture から読んだものです。終了コード・待機・猶予は変わりません。`autoYesSuppression`（1 分以内の記録）は従来どおりですが、記録の時刻だけで「答えなかった理由」と読まず、`observation.autoYes` の `pollerRecord` と `contractEvaluation` を見てください。古いサーバでは `observation` は付きません。
+
 ### exit 10 の `type`（種別）
 
 `wait` が「人間待ち」と判断する事由は 3 種類あり、**すべて exit 10** で返ります。
@@ -721,6 +726,69 @@ Completed: localllm-test-main (basis=hook_stop)
 
 ---
 
+## commandmate prompt
+
+止まっている画面を、機械で読める形で 1 回だけ観測します（Issue #3755）。`capture --pane` の画面を読んで推測する代わりに使います。
+
+### 使用方法
+
+```bash
+commandmate prompt <worktree-id> --instance antigravity          # 人が読む形
+commandmate prompt <worktree-id> --instance antigravity --json   # schemaVersion 付きの JSON
+```
+
+`--instance` を省くと worktree の既定（primary）インスタンスを読みます。`--agent` はありません。
+中身は `GET /api/worktrees/<id>/current-output?observe=1` の `promptObservation` です（`observe=1` を付けたときだけ載ります）。
+
+### 画面の種類（`screen.kind`）
+
+| kind | 画面 |
+|------|------|
+| `antigravity-trust` | agy 起動時の信頼の確認（`Do you trust the contents of this project?` / `> Yes, I trust this folder` / `No, exit`）。`approvalTarget` はフォルダ |
+| `antigravity-model-picker` | agy の `/model`（`Switch Model`） |
+| `antigravity-permission` | agy の番号付きの許可（コマンドの実行・ファイルの作成）。`approvalTarget` はコマンドの部分 |
+| `antigravity-slash-menu` | agy の slash コマンドの一覧 |
+| `composer` | 確認なし（入力欄にいる） |
+| `none` | 確認なし（作業中など、入力欄でもない） |
+| `unknown` | 人の操作を待っているが、計測済みの読み取りでは名前が付かない画面。`capture --pane` で確かめる |
+
+kind は `promptData.type` や `sessionStatusReason`（`antigravity_selection_list` など）とは別の語彙です。これらの値を送信の条件に使わないでください。
+
+観測した画面のままのときだけ答えるには、kind とトークンを[厳格モードの `respond`](#厳格モード-観測した画面にだけ答える--expect-screenissue-3756)に渡します。
+
+### 主な項目
+
+| 項目 | 意味 |
+|------|------|
+| `schemaVersion` / `observedAt` | 形式の版 / 観測した時刻（epoch ms） |
+| `target` | サーバが解決した対象（`worktreeId` / `cliToolId` / `instanceId` / `sessionName`＝pane / `resolvedBy`） |
+| `session.generation` | このサーバが起動したエージェントのプロセスの世代（epoch ms）。サーバ再起動前から動いているものは null |
+| `status` | `observed`（画面を読めた。確認なしも含む）/ `unavailable`（セッションが動いていない） |
+| `screen.token` | 観測トークン。短命（120 秒）・使い捨てで、instance・session 世代・pane・画面の出現・kind・質問・選択肢・承認対象・選択中の位置に結び付く。`composer` / `none`・`unknown`・session 世代が判らないとき（サーバ再起動前から動いているエージェント）は null。同じ文面の画面が観測と観測の間に消えて再び出た場合は、同じ出現と見なされる |
+| `screen.tokenWithheld` | `token` が null の理由。`no-decision`（何も尋ねていない）/ `unknown-screen` / `no-session-generation`。発行時は null |
+| `screen.appearedAt` | この画面の出現を最初に観測した時刻（epoch ms。トークンに結び付く）。トークンが無いときは null |
+| `screen.question` / `options` / `selectedPosition` / `approvalTarget` | 質問・選択肢（1 始まり）・現在の選択・承認対象 |
+| `screen.answerVia` | 回答経路: `screen`（`respond` のキー送出）/ `api`（decision）/ `strict`（agy の信頼確認。`respond --expect-screen` で答えられる）/ `terminal`（今は `respond` で答えられない）/ `none` |
+| `autoYes.enabled` / `pollerActive` | Auto-Yes の有効状態 / サーバの poller が動いているか |
+| `autoYes.pollerRecord` | poller（または permission hook）が最後に「答えなかった」と記録したもの。`screenCorrelation` はこの画面との対応で、記録は画面を名指ししないため `unknown` / `type-mismatch` / `no-prompt-on-screen` のどれか |
+| `autoYes.contractEvaluation` | 契約の方針を**いま**この画面に当てた結果（`policy-withholds` + 理由 / `policy-permits` / `no-base-answer` / `not-evaluated`）。理由の語は `AutoYesSuppressionReason` と同じ（[理由語の表](#autoyeslastsuppression-ポリシー抑止の観測issue-1684)） |
+| `lastSend` | このインスタンスへの直近の send の結末（Issue #3759）。`{ at, state, reason }`。`state` は `not-sent`（本文のキーを 1 つも打つ前に失敗。例: `prompt-not-ready`）/ `sent`（送信を確かめた）/ `indeterminate`（一部を打った後に失敗、または結果を確かめられない。composer に本文が残っていれば `reason: composer-residue`）。サーバ起動後に記録が無ければ null、古いサーバでは項目自体が無い |
+
+**`lastSend` が何であっても、CommandMate は自動で再送しません。** 再送するのは利用者か監督のエージェントです。`not-sent` は自分で送り直してください（入力欄が戻ってから）。**`indeterminate` のときは再送しないでください。** 先に `commandmate capture <worktree-id> --pane` で画面を見て、本文が入力欄に残っていないか・既に送られていないかを確かめます（確かめずに送ると二重に届くことがあります）。`send` が `prompt not ready` などで失敗したときのエラーにも、同じ状態（`[send state: not-sent (prompt-not-ready): …]`）が書かれます。
+
+**記録が無いこと（`pollerRecord: null`）は「Auto-Yes が答えられる」という意味ではありません。** poller がその画面に届いていない場合も記録は残りません（Issue #3746）。
+`policy-permits` も「契約が止めない」だけで、poller の他の判定（ツール固有のダイアログ読み取り等）は含みません。
+
+### 終了コード
+
+| コード | 意味 |
+|:------:|------|
+| 0 | 画面を読めた（確認なし・`unknown` を含む） |
+| 21 | セッションが動いていない（読む画面が無い） |
+| 1 / 2 / 99 | 接続・引数・想定外のエラー（サーバが `promptObservation` を返さない古い版の場合も 99） |
+
+---
+
 ## commandmate respond
 
 エージェントのプロンプト（確認ダイアログ等）に応答を送信します。
@@ -784,12 +852,94 @@ TUI にはハイライトされた選択肢がありますが、それがどれ�
 `GET /api/worktrees/<id>/current-output` を 1 回だけ読みます。この読み取りが失敗した場合
 （古い daemon・サーバ停止など）は**従来経路にフォールバック**します。
 
+### 厳格モード: 観測した画面にだけ答える（`--expect-screen`、Issue #3756）
+
+`--expect-screen <kind> --observation <token>` を付けると、サーバが**送る直前に取り直した画面**が
+`<kind>` のままで、[`commandmate prompt`](#commandmate-prompt) が出した観測トークンがまだ通るときだけ答えます。
+合わなければ**何も送らず** exit 40 です。
+
+```bash
+commandmate prompt <worktree-id> --instance antigravity --json        # kind・選択肢・token・approvalTarget を読む
+commandmate respond <worktree-id> "Yes" --instance antigravity \
+  --expect-screen antigravity-trust --observation <token> \
+  --expect-target "<approvalTarget に出たフォルダ>" --json
+```
+
+- 送り先は専用の `POST /api/worktrees/<id>/prompt-response/strict` です。この endpoint が無い古いサーバでは
+  **止まります**（exit 40、`strict_endpoint_missing`）。照合のない `/prompt-response` へは決して切り替えません
+- 答えられる kind は `antigravity-trust`（信頼の確認）と `antigravity-permission`（番号付きの許可）だけです。
+  `antigravity-model-picker`（effort を読めない）・`antigravity-slash-menu`・`unknown` は送る前に拒否します
+- **対象 instance の Auto-Yes が ON の間は、`antigravity-permission` に厳格モードで答えられません**（exit 40、`auto_yes_active`）。
+  poller が同じ確認に自分で答えるため、競合して次の画面に Enter が届きうるからです。先に `commandmate auto-yes <worktree-id> --disable` で止めてください。
+  `antigravity-trust` は Auto-Yes が答えない画面なので、ON のままでも答えられます
+- 信頼の確認は、kind に加えて**フォルダ（`approvalTarget`）が `--expect-target` と一致すること**が条件です。
+  `--expect-target` を省くと何も送らず、画面のフォルダを `observedTarget` で返します。フォルダを読めない信頼の確認は拒否します
+- `--observation` は観測トークンで、認証の `--token` とは別物です。トークンは送る前に使い切られます（送信に失敗しても再利用できません）。
+  拒否されたら `commandmate prompt` で観測し直してください
+- 送信の前に、次をすべて取り直した画面で確かめます: kind・トークン（pane・session 世代・画面の出現・選択肢・選択中の位置）・
+  フォルダ・答えの選択肢・**画面が pane の最下部で開いていること**（下に入力欄が無く、末尾に `↑/↓ Navigate` がある。
+  生成中の返答に引用された信頼の確認には答えません）・起動処理が信頼の確認をまだ扱っていないこと。
+  起動処理（#3757）の「Enter 1 回の借り」は、厳格モードが信頼の確認に答えた時点で捨てられ、二重に答えません
+- **これは auto mode の許可を得る手段ではありません。** 誤った画面への送信が構造的に起きないことを保証するだけで、
+  その承認をしてよいかは利用者が許可の規則で与えます。auto mode に拒否された操作をこのフラグで再試行しないでください
+
+#### 番号の付かない画面への答え方
+
+信頼の確認の選択肢には番号がありません。答えは**選択肢の label** で、画面に見えている選択肢のどれか 1 つに一意に一致するときだけ送ります
+（大文字小文字・空白の違いは無視。完全一致が無ければ語の切れ目までの前方一致。`Yes` → `Yes, I trust this folder`）。
+送るのは文字ではなく **↑/↓ と Enter** です。矢印を 1 回送るたびに画面を取り直し、同じ画面のまま選択が動いたことを確かめてから次を送ります。
+
+- 番号と `--default` は拒否します（exit 2）
+- 2 つ以上の選択肢に一致する label・同じ label が並ぶ画面・画面外（スクロールの外）の選択肢は拒否します
+- 番号付きの `antigravity-permission` では番号も使えます
+
+#### 送信後の結果と操作 ID
+
+Enter の後、数秒のあいだ画面を取り直して `outcome` を返します: `advanced`（入力欄・作業中。もう尋ねていない）/
+`next-prompt`（次の確認）/ `session-ended`（セッションが無くなった。信頼の確認で `No, exit` を選ぶと agy は終了します）/
+`unchanged`（同じ画面のまま）/ `indeterminate`（読めない・`unknown`）。成功（exit 0）は `advanced`・`next-prompt`・`session-ended`
+で、同じ画面のままでも自動で再送はしません。
+
+答え自体が agy を終了させる選択肢（信頼の確認の 2 択の 2 番目の `No, exit`。並び・選択肢の数・文言が違う画面では当てはまらない）では、agy が終了したあと tmux のセッションは
+シェルを残して動き続け、画面は `unknown` と読まれます。このときペインの前景コマンドがシェル（`zsh` / `bash` など）に戻っていれば、
+画面が `unknown` と読めても `session-ended` とします。それ以外の答え（`Yes` や permission の答え）のあとにシェルが前景に戻っていても、
+それは答えの結果ではなく agy が落ちたものとして `indeterminate`（exit 41）のままです。前景コマンドが読めない・agy のままのとき、
+Enter 後の取り直し自体に失敗したときも `indeterminate` です。
+
+`--operation-id <id>` を省くと毎回新しい ID を付けます。ID は worktree と instance（セッション）ごとで、要求の中身（kind・答え・
+トークン・`--expect-target`）と一緒に覚えます。キーを送った操作（exit 0・41）を同じ ID・同じ中身で再送すると、覚えている結果
+（`replayed: true`）を返し、**二重に送りません**（10 分間。サーバの再起動で忘れます）。中身の違う要求に同じ ID を使うと何も送らず
+exit 41（`operation_id_conflict`）です。exit 40（何も送っていない）の結果は覚えないので、答えを直して同じ ID で送り直せます。
+応答が失われた（exit 41・`response_unknown`）ときは、同じ `--operation-id` と同じ引数で再実行すると、その操作の結果を読めます。
+サーバに接続できなかった（接続拒否など）ときは、要求が届いていないので exit 40（`server_unreachable`）です。
+
+`--json` は stdout に結果オブジェクトを 1 個だけ出します（`code` / `delivery`（`not-sent` / `partial` / `sent` / `indeterminate`）/
+`reason` / `expectedKind` / `observedKind` / `observedTarget` / `operationId` / `answer` / `keysSent` / `outcome` / `highlightLeftAt`）。説明は stderr です。
+
+`highlightLeftAt`（`{ position, label }` または `null`）は、Enter の前で止まった exit 41（`delivery: partial`）で、矢印キーが
+ハイライトをどこに残したかです。同じ画面を最後に読み取ったときの位置で、`message` の末尾にも書きます。agy の許可の確認では
+`(Persist to settings.json)` の選択肢に残ることがあり、そのまま pane で Enter を押すと永続の許可を選ぶことになります。キーは戻しません。
+Enter まで送れたとき・何も送っていないとき（exit 40）・位置が分からないとき（画面が変わった、キーを送った後に読み直せていない）は
+`null` です。CLI 側で止まった結果（`response_unknown`・`server_unreachable` など）と、この項目を持たない古いサーバの結果には含まれません。
+
+答えたことは、誰が（CLI 実行元のエージェント `agent:<worktree>/<instance>` か `cli`）・どの画面に・どの選択肢を送ったかとして、
+server.log（`strict-prompt-answered` / `strict-prompt-response-refused`）と、キーを 1 つでも送った場合は task の履歴（`prompt_answered_human`。
+途中で止まったときは理由コード付き）に残ります。「誰が」（`answeredBy`）は CLI が環境変数から付ける**自己申告**で、サーバは検証しません。
+
+#### 残余競合
+
+照合と送信は原子的ではありません。同じ instance への厳格モードの送信はサーバ内で直列化し、キーとキーの間でも画面を取り直しますが、
+最後の確認と次のキーの間に、利用者が pane で打ったキーや tmux 側の変化があれば検出できません。また、観測と観測の間に同じ文面の画面が
+消えて再び出た場合は、同じ出現と見なされます（[`commandmate prompt`](#commandmate-prompt) の `screen.token`）。
+
 ### 終了コード
 
 | コード | 意味 |
 |:------:|------|
 | 0 | 応答成功 |
-| 2 | 引数エラー（`<answer>` と `--default` の同時指定・両方欠落 等）/ 選択肢に無い番号（`answer_out_of_range`）|
+| 2 | 引数エラー（`<answer>` と `--default` の同時指定・両方欠落 等）/ 選択肢に無い番号（`answer_out_of_range`）/ 厳格モードでの `--default`・番号なしの画面への番号・`--expect-screen` と `--observation` の片方だけ |
+| 40 | 厳格モード: 照合不成立・照合不能。**何も送っていない**（kind・トークン・フォルダ・label の不一致、capture 失敗、古いサーバ 等）。`commandmate prompt` で観測し直す |
+| 41 | 厳格モード: 送信を始めた後の部分送信・結果不確定。**再送してはいけない**。pane を確かめる。ただし 41 でも `reason` が `operation_in_progress` / `operation_id_conflict` のときは何も送っていない（`keysSent` は 0。`delivery` は `indeterminate` と出るが送信はしていない）。結果の取り直しは別の ID で |
 | 99 | プロンプトが既に消えている（`prompt_no_longer_active`）/ yes・no を選択肢に解決できない（`unresolvable_answer`）/ 保持している decision が 0 件（`decision_not_found`）・2 件以上（`multiple_pending_decisions`、Issue #2040）|
 
 ---
@@ -1878,6 +2028,20 @@ commandmate capture <worktree-id> --instance worker-7 --json | jq -r '.resolvedB
   スクロールした場合も、障害が pane を空白のまま残した場合（#1834 の実測例）も `null` になります
 - `wait --fail-on-upstream-fault` はこのフィールドだけを見て exit 11 を返します
 
+#### `autoYes.stopReason`: Auto-Yes が止まった理由
+
+Auto-Yes が OFF の instance で、止まった理由があれば入ります（無ければ欄ごとありません）。
+`expired`（期限切れ）、`stop_pattern_matched`（停止パターンに一致）、`consecutive_errors`（連続エラー）のほか、
+**`server-restart`**（Issue #3730）は「許可が有効なまま、サーバーが正常終了（SIGINT / SIGTERM。
+`/rebuild` や `commandmate stop` を含む）した」ことを示します。
+
+- 再起動で許可は**戻りません**（`enabled: false`）。理由の表示は元の許可の期限まで残り、
+  期限内にもう一度再起動しても残ります。`--enable` か `--disable` で消えます
+- SIGKILL やクラッシュでは記録されず、理由の無い `off` で戻ります
+- 同じ理由が `commandmate ls` の `off(restart)`、`commandmate instances` の `no(restart)`、
+  画面の「再起動で解除」に出ます。`commandmate wait` は exit 10 のときに stderr に 1 行足し、
+  再有効化のコマンドを待機対象の `--instance` 付きで示します
+
 #### `autoYes.lastSuppression`: ポリシー抑止の観測（Issue #1684）
 
 実行契約の `autoYes` ポリシーが自動応答を**抑止**した最後の記録です（抑止が無ければ `null`）。
@@ -1910,6 +2074,18 @@ commandmate capture <worktree-id> --instance worker-7 --json | jq -r '.resolvedB
 （`mode` は `null`）。worktree ID の移行でセッションが新しい ID へ移っても、この扱いは移った先で続きます。
 `commandmate wait` はこの理由に「because an earlier answer left partial input; Auto-Yes is waiting for a human」と
 表示します（exit 10 と JSON の `reason` は他の理由と同じ扱い）。入力欄に残った文字を確かめてから応答してください。
+
+型 `AutoYesSuppressionReason` の残りの語も、すべてポリシーの判定ではないので `mode` は `null` になることがあります。`commandmate wait` の表示の文言を添えます。
+
+| `reason` | 意味 | `commandmate wait` の表示 |
+|----------|------|--------------------------|
+| `agent-launch-dialog`（Issue #1829） | 画面の確認が CLI の起動の手順のダイアログ（信頼の確認など）で、その答えは道具自身の起動の手順に属するので Auto-Yes は答えない。起動の手順が終わった後も残り、カーソルが安全な行に無いとき（copilot は `2.` か `3.`、gemini は `1. Trust folder` 以外。Issue #3790）は誰も答えないので、画面で人が答える | 「while the agent's launch dialog was on screen; if it stays after the launch (copilot's cursor on 2. or 3., gemini's not on 1. Trust folder), answer it at the pane」 |
+| `unclassified-frame`（Issue #1924） | 汎用の推定は番号付きの一覧を読んだが、その道具のダイアログ検出が確認と認めなかったので何も送らない。返答の中の番号付きの一覧に `1` と答える事故（#1896）を防ぐ位置 | 「because no tool-specific dialog detector recognised the frame」 |
+| `startup-trust-unhandled`（Issue #3757） | agy の起動時のフォルダ信頼の確認（`Do you trust the contents of this project?`）が画面にある。起動の手順の側が答えるもので、番号が無いので poller はプロンプトとして読めない。起動の窓が終わった後に出た場合は、次の send の準備待ちが答える | 「because agy's startup folder-trust confirmation is the launch's to answer, not Auto-Yes's; the next send confirms it once, or answer it at the pane」 |
+| `question-confirm-page`（Issue #3748） | Command Code と Claude の `AskUserQuestion` の確認画面（`Submit` / `Cancel`）。`Submit` は選択ではなくその時点の回答を確定するので、Auto-Yes は答えず人に任せる | 「because the question's Submit/Cancel confirmation commits the answers as they stand, so Auto-Yes leaves it to a human」 |
+| `no-hook-receipt`（Issue #3767） | agy の承認ダイアログが画面にあるが、それに対応する hook の問い合わせ（`PreToolUse`）の受信が無い。(1) 受信が一度も無い、(2) ダイアログが最後の受信から窓（8 秒）より後に出た、(3) ダイアログが受信より前から出ていた（返答中の引用など）、(4) 受信が途絶えた、(5) 受信が前のダイアログに使い済み、(6) Auto-Yes が受信の確認へキーを送ってから 18 秒（窓＋観測の猶予＋応答後の待ち）を過ぎても確認が残っている（キーで閉じなかったか、受信の無い別の確認と入れ替わった。Issue #3789。送信が途中で切れた場合も、切れた時点から猶予（18 秒）を数え、過ぎても確認が残れば no-hook-receipt として記録する。入力欄にキーの一部が残っていることがある。ただし、中断の後に、より具体的な抑止の理由（partial-answer）が記録された場合は、その理由を保ち、no-hook-receipt としては記録しない）、のいずれか。サーバーのログ `antigravity-autoyes-withheld-no-hook-receipt` の `hint` が区別する。**止まったときの対処**: `commandmate auto-yes <worktree-id> --disable` → `commandmate prompt <worktree-id> --json` → `commandmate respond <worktree-id> --expect-screen …` で答える（または UI で答える）。一度も受信が無い・途絶えた場合は `~/.gemini/config/hooks.json` の向き先を確認 | 「because there is no unused agy hook permission question for this dialog (none arrived in time, or the last one was spent on keys that did not clear it); answer it yourself (auto-yes --disable, prompt --json, respond --expect-screen) or check hooks.json」 |
+
+[`commandmate prompt --json`](#commandmate-prompt) の `autoYes.pollerRecord`（poller の記録）と `autoYes.contractEvaluation`（契約の再評価）は別の項目ですが、どちらもこの表と上の `reason` と同じ語を使います。
 
 `isPromptWaiting: true` かつ `lastSuppression.at` が新しい場合、そのセッションは
 **いまポリシー抑止で停止**しています。`commandmate respond` で人間が応答するか、
@@ -2378,6 +2554,32 @@ Auto-yes enabled for proj-cp (copilot).
 エージェント名が出ない（`Auto-yes enabled for proj-cp.`）ときは、**稼働中のサーバが CLI より古く**
 まだ claude 固定で動いています。`commandmate stop && commandmate start` で再起動してください。
 
+### 契約の `autoYes.mode: off` は有効化の時点で警告する（Issue #3723）
+
+実行中の契約が `autoYes.mode: off` を指定している instance では、Auto-Yes を有効にしても
+**一度も答えません**。`auto-yes --enable` と `send --auto-yes` はこのとき stderr に警告を出します
+（exit code は 0 のまま。有効化そのものは成功しているためです）。
+
+```console
+$ commandmate auto-yes proj-cc --enable --instance claude-2
+Auto-yes enabled for proj-cc (claude, instance claude-2).
+Warning: the contract of task 7f3c… sets autoYes.mode: off, so Auto-Yes is armed but will answer no prompt. Prompts on this instance wait for a human (commandmate respond).
+```
+
+- `safe` / `allow-listed` は止めずに、答える種類を `Note:` の 1 行で添えます
+  （例: `Note: … sets autoYes.mode: safe; Auto-Yes answers yes_no prompts only.`）
+- 契約が無い、または `mode` を指定していない契約では、表示は従来どおりです
+- 判定は poller と同じ方針の読み取り（`getSessionAutoYesPolicy`）を通ります。API では
+  `POST /api/worktrees/<id>/auto-yes`（有効化）と `GET …/auto-yes?cliToolId=` の応答の
+  `contractPolicy`（`{ taskId, mode, allowPromptTypes, denyPatternCount }` か `null`）です
+- 判定するのは**その時点で実行中の契約**です。ただし `send --contract … --auto-yes` では、
+  Auto-Yes を有効にする時点で task はまだ `pending`（サーバーは実行中と数えない）なので、
+  サーバーの `contractPolicy` が `null` のときは**これから送る契約**の `autoYes` で判定します。
+  `--model` で有効化が送信後に回る場合も含めて、同じ `Warning:` / `Note:` が 1 回出ます
+  （サーバーが値を返したときはサーバーの値を優先します）
+- 有効にした後は `commandmate ls` / `commandmate instances` の `AUTO_YES` 列が `blocked` になります。
+  ワークツリー詳細の Auto Yes トグルにも「契約で停止中（mode: off）」が出ます
+
 ダイアログが出たまま停まっているセッションに対して有効化した場合は、**その解決済みエージェントの**
 保留承認を再裁定した結果が 2 行目に出ます（Issue #1898-2。`resync` capability を持つソース＝
 現状 opencode のみが対象で、hook 系 5 ツールでは何も出ません）。
@@ -2536,6 +2738,11 @@ opencode     opencode opencode yes      no        claude-sonnet-4.6          ses
 - この問い合わせに答えない古いサーバーでは、これまでどおり各セッションの `current-output` の
   `autoYes` を読みます。その場合、止まっているインスタンスは有効でも `no` と出ます
 - `--json` の `autoYes` も同じ値です
+- 有効でも、その instance で実行中の契約が `autoYes.mode: off` なら `blocked` と出ます（Issue #3723）。
+  `--json` では `autoYes: true` のまま `autoYesBlockedByContract: true` が付きます（該当しない行には付きません）
+- サーバーの再起動で許可が外れた instance は `no(restart)` と出ます（Issue #3730）。`--json` では
+  `autoYes: false` に `autoYesStopReason: "server-restart"` が付きます（該当しない行には付きません）。
+  元の許可の期限まで、または `--enable` / `--disable` するまでの表示です
 
 #### `TMUX_SESSION` 列（Issue #2317）
 

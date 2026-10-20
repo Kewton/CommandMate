@@ -76,6 +76,8 @@ import type { SessionKillTarget } from '@/types/terminal-split-pane';
 import type { AutoYesToggleParams } from '@/components/worktree/AutoYesToggle';
 import type { ShowToast } from '@/types/markdown-editor';
 import type { Worktree, FileContent } from '@/types/models';
+import type { AutoYesInstanceSummary } from '@/types/auto-yes';
+import { isReleasedByRestart } from '@/config/auto-yes-config';
 import type { UseFileSearchReturn } from '@/hooks/useFileSearch';
 import type { FileTabsState, FileTabsActions } from '@/hooks/useFileTabs';
 import type { HistoryDisplayLimit } from '@/config/history-display-config';
@@ -175,7 +177,7 @@ export interface WorktreeDetailDesktopProps {
   handleInsertToMessage: (text: string) => void;
 
   // Auto-yes (Issue #896: per-instance; map keyed by instanceId)
-  autoYesStateMap: Map<string, { enabled: boolean; expiresAt: number | null }>;
+  autoYesStateMap: Map<string, AutoYesInstanceSummary>;
   makeAutoYesToggleHandler: (cliToolId: CLIToolType, instanceId?: string) => (params: AutoYesToggleParams) => Promise<void>;
 
   // History controls
@@ -620,6 +622,10 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
       const paneAutoYes = autoYesStateMap.get(paneInstanceId);
       const paneAutoYesEnabled = paneAutoYes?.enabled ?? false;
       const paneAutoYesExpiresAt = paneAutoYes?.expiresAt ?? null;
+      // Issue #3723: armed, but this pane's contract says `autoYes.mode: off`.
+      const paneAutoYesBlockedByContract = paneAutoYes?.blockedByContract === true;
+      // Issue #3730: OFF because the last server restart released this pane's grant.
+      const paneAutoYesReleasedByRestart = isReleasedByRestart(paneAutoYes);
       // Issue #743/#875: derive THIS pane's AI agent status. Splits are
       // per-instance, so resolve from the per-instance status map keyed by the
       // pane's instanceId (alias instances show their own status); fall back to
@@ -677,6 +683,8 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
             // instance enables/disables its own auto-yes poller independently.
             onToggle: makeAutoYesToggleHandler(paneCli, paneInstanceId),
           }}
+          autoYesBlockedByContract={paneAutoYesBlockedByContract}
+          autoYesReleasedByRestart={paneAutoYesReleasedByRestart}
           // Issue #756: History domain group. Issue #744: embedded per-split
           // HistoryPane. Each split fetches its OWN cliToolId's messages
           // (useSplitMessages) and shows them only in its own pane. History

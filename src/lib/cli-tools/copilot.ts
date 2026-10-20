@@ -52,6 +52,7 @@ import { COPILOT_CLI_TOOL_ID } from '@/lib/hooks/sources/copilot/tool-id';
 import { getErrorMessage } from '@/lib/errors';
 import { createLogger } from '@/lib/logger';
 import { missingToolError } from './install-hints';
+import { beginLaunchWindow, endLaunchWindow, recordLaunchDialogPress } from './launch-window';
 import { withLaunchScreenCleared } from '@/lib/session/launch-screen';
 
 const logger = createLogger('cli-tools/copilot');
@@ -416,17 +417,25 @@ export class CopilotTool extends BaseCLITool {
         await this.createLaunchPane(sessionName, worktreePath);
       }
 
-      // Start Copilot CLI in interactive mode
-      await sendKeys(sessionName, withLaunchScreenCleared(launchCommand), true);
+      // Issue #3790: from the launch line to the end of `waitForReady`, the
+      // folder-trust dialog is this launch's to answer; the Auto-Yes poller
+      // leaves it (`cli-tools/launch-window`).
+      beginLaunchWindow(sessionName);
+      try {
+        // Start Copilot CLI in interactive mode
+        await sendKeys(sessionName, withLaunchScreenCleared(launchCommand), true);
 
-      // Issue #1907: no blind sleep before this. The 4-second one that used to
-      // sit here was a guess at how long copilot takes to paint (measured on
-      // 1.0.80: banner at ~1.3 s, folder-trust dialog at ~2.5 s), and it was
-      // load-bearing only because it hid the shell prompt from the first poll.
-      // `waitForReady` now recognises copilot's own composer rather than any
-      // `❯`, so it can start looking immediately and stop as soon as the pane is
-      // really ready.
-      await this.waitForReady(sessionName);
+        // Issue #1907: no blind sleep before this. The 4-second one that used to
+        // sit here was a guess at how long copilot takes to paint (measured on
+        // 1.0.80: banner at ~1.3 s, folder-trust dialog at ~2.5 s), and it was
+        // load-bearing only because it hid the shell prompt from the first poll.
+        // `waitForReady` now recognises copilot's own composer rather than any
+        // `❯`, so it can start looking immediately and stop as soon as the pane is
+        // really ready.
+        await this.waitForReady(sessionName);
+      } finally {
+        endLaunchWindow(sessionName);
+      }
 
       logger.info('started-copilot-session', {
         executableSource: resolved.source,
@@ -469,6 +478,7 @@ export class CopilotTool extends BaseCLITool {
       return false;
     }
     await sendKeys(sessionName, COPILOT_FOLDER_TRUST_ANSWER_KEY, false);
+    recordLaunchDialogPress(sessionName);
     invalidateCache(sessionName);
     logger.info('copilot-folder-trust-answered');
     return true;

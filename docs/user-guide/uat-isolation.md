@@ -105,3 +105,26 @@ CM_UAT_SOCK_BASE="$HOME/run" CM_RUN_LOCK_DIR="$HOME/run/run.lock" \
 `run-server.sh down` は、`own-home` のときは共有のファイルの前後の変化を記録する（メッセージと、状態のファイルの `shared_changed=yes|no`）が、不合格にしない。`--own-home` を付けないとき（利用者の UAT）は今までどおり不合格にする。
 
 本番の受け口の `agent-event-unresolved-target` のログには、`worktreeId`（hook が名乗ったとき）と `cwdHash`（`cwd` の SHA-256 の先頭 16 文字。`cwd` そのものは出さない）が載る。run の cwd のハッシュと突き合わせて、専用ユーザーの run から本番に届いた hook を数えるのに使う。
+
+## 素の CLI を実機で測るとき（gemini の自動更新、#3790）
+
+私設の tmux（`tmux -L`）・一時 HOME・空のディレクトリで gemini を起動して測るときの追加の手順。HOME を一時にしても、gemini は起動のたびに新しい版を確かめ、npm でグローバルに入れた gemini なら `npm install -g @google/gemini-cli@<版>` を自分で走らせる。書き換わるのは一時 HOME ではなく、利用者のグローバルのインストール（#3776 の測定で v0.62.0 → v0.64.0 になった）。
+
+- 一時 HOME の `~/.gemini/settings.json` に、起動の前に次を書く。古い名前の `disableAutoUpdate` / `disableUpdateNag` は gemini が読み替える。
+
+  ```json
+  {"general":{"enableAutoUpdate":false,"enableAutoUpdateNotification":false}}
+  ```
+
+- 設定が効かなかったときの逃げ道として、起動の環境に `npm_config_prefix=<一時のディレクトリ>` と `npm_config_cache=<一時のディレクトリ>` も渡す。更新が走っても、書き込み先は一時の場所になる。`ps eww <pid>` で環境に入っていることを確かめる。
+- 未サインインの HOME では、信頼の確認の後に認証方式の選択（`● 1. Sign in with Google`）が出る。Auto-Yes はこれを既定で答える（従来どおり）。答えると一時 HOME の `settings.json` に `security.auth.selectedType: "oauth-personal"` が書かれ、Google のサインインが始まる。`NO_BROWSER=true` を渡すと、ブラウザを開かずに URL と `Enter the authorization code:` を出して止まる。
+
+実測（2026-10-18、上の隔離の中）: 一時の prefix に gemini 0.62.0 を入れ（最新は 0.64.0）、`npm_config_prefix` をその prefix に向けて起動した。
+
+| 一時 HOME の設定 | 画面 | 一時の prefix の版 |
+|------------------|------|--------------------|
+| なし | `Update successful! The new version will be used on your next run.` | 0.64.0（更新された） |
+| `enableAutoUpdate: false` だけ | `Gemini CLI update available! 0.62.0 → 0.64.0` の通知だけ | 0.62.0 |
+| 上の 2 つとも `false` | 通知も出ない | 0.62.0 |
+
+どの場合も、利用者のグローバルの gemini（`/opt/homebrew`）は 0.64.0 のままだった。Homebrew の formula・npx・単体のバイナリで入れた gemini は、gemini のコード上もともと自分では更新しない。

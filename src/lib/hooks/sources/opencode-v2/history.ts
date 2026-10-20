@@ -376,12 +376,17 @@ async function writeOpencodeV2Turn(
  * @param target - The instance the stream belongs to
  * @param port - Its server
  * @param sessionId - `ses_…` from the end-of-turn frame
+ * @param isCurrent - Whether the subscription that asked is still the
+ *   instance's (Issue #3733); checked after the read, right before the model
+ *   is latched. False skips only the latch: the rows are still written (the
+ *   turn did happen, and `requestId` keeps a later sync from doubling them)
  * @returns How many rows were written
  */
 export function syncOpencodeV2History(
   target: AgentInstanceRef,
   port: number,
-  sessionId: string
+  sessionId: string,
+  isCurrent: () => boolean = () => true
 ): Promise<number> {
   return serialize(opencodeV2KeyOf(target), async (): Promise<number> => {
     const instanceId = target.instanceId ?? target.cliToolId;
@@ -409,12 +414,17 @@ export function syncOpencodeV2History(
 
       // Issue #2964: the model that answered, onto the hook latch the UI and
       // `capture --json` read. Before the rows, so a failed write cannot cost it.
-      recordAgentReportedModel(
-        target.worktreeId,
-        OPENCODE_V2_CLI_TOOL_ID,
-        target.instanceId ?? OPENCODE_V2_CLI_TOOL_ID,
-        readLatestOpencodeV2AssistantModel(entries)
-      );
+      // Issue #3733: not for a subscription closed or replaced during the read —
+      // a restarted or stopped session would show the old model, and its change
+      // broadcast and Push (#2357) would fire for a session that is not there.
+      if (isCurrent()) {
+        recordAgentReportedModel(
+          target.worktreeId,
+          OPENCODE_V2_CLI_TOOL_ID,
+          target.instanceId ?? OPENCODE_V2_CLI_TOOL_ID,
+          readLatestOpencodeV2AssistantModel(entries)
+        );
+      }
 
       const closed = buildOpencodeV2TurnsFromMessages(entries, sessionId).filter(
         (turn) => turn.closed

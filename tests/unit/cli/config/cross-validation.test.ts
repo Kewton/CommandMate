@@ -103,6 +103,12 @@ describe('[#1843] AutoYesSuppressionReason cross-validation', () => {
       'unclassified-frame',
       // Issue #3713: #3706's answer stopped with keys already in the input.
       'partial-answer',
+      // Issue #3757: agy's trust screen, left to the launch.
+      'startup-trust-unhandled',
+      // Issue #3748: an AskUserQuestion confirm page, left to a human.
+      'question-confirm-page',
+      // Issue #3767: agy's dialog with no matching hook question.
+      'no-hook-receipt',
     ];
     const fromServer: ServerSuppressionReason[] = knownToCli;
     expect(new Set(fromServer).size).toBe(knownToCli.length);

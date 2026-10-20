@@ -18,6 +18,8 @@ import type { SessionTransport } from '@/lib/tmux/session-transport';
 import { getPollingTmuxTransport } from '@/lib/tmux/polling-tmux-transport';
 import {
   getOrFetchCapture,
+  getCaptureGeneration,
+  isCaptureGenerationCurrent,
   setCachedCapture,
   invalidateCache,
   sliceOutput,
@@ -37,7 +39,7 @@ import {
   forgetSessionStatus,
   publishSessionStatus,
 } from '@/lib/tmux/session-status-options';
-import { probeSession, type SessionPresence } from '@/lib/tmux/tmux';
+import { getPaneCurrentCommand, probeSession, sendSpecialKeys, type SessionPresence } from '@/lib/tmux/tmux';
 import { isLiveAttachEligibleSession } from './tmux-session-surface';
 
 const logger = createLogger('cli-session');
@@ -145,7 +147,8 @@ export async function captureSessionOutput(
  * Capture CLI session output bypassing cache (fresh capture).
  *
  * Issue #405: Used by prompt-response endpoint to ensure fresh output
- * for prompt re-verification. Writes back to cache on success.
+ * for prompt re-verification. Writes back to cache on success, unless the
+ * session was invalidated while the capture was in flight (Issue #3734).
  *
  * @param worktreeId - Worktree ID
  * @param cliToolId - CLI tool ID
@@ -164,12 +167,18 @@ export async function captureSessionOutputFresh(
   const { cliTool, sessionName } = resolveSessionContext(worktreeId, cliToolId, instanceId);
   const transport = getDefaultTransport();
 
+  // Issue #3734: snapshot the generation before the capture starts
+  const generation = getCaptureGeneration(sessionName);
+
   try {
     const output = await transport.captureSnapshot(sessionName, { startLine: -lines });
 
-    // Write back to cache if non-empty [SEC4-007]
+    // Write back to cache if non-empty [SEC4-007]. Skip it when the session was
+    // invalidated while waiting: the output may predate a send (Issue #3734).
     if (output.length > 0) {
-      setCachedCapture(sessionName, output, lines);
+      if (isCaptureGenerationCurrent(sessionName, generation)) {
+        setCachedCapture(sessionName, output, lines);
+      }
     } else {
       invalidateCache(sessionName);
     }
@@ -182,6 +191,46 @@ export async function captureSessionOutputFresh(
     log.error('captureSessionOutputFresh:failed', { error: errorMessage });
     throw new Error(`Failed to capture ${cliTool.name} output: ${errorMessage}`);
   }
+}
+
+/** The keys the strict `respond` (Issue #3756) answers a screen with. */
+export type SessionAnswerKey = 'Up' | 'Down' | 'Enter';
+
+/**
+ * Send ONE answer key to a session and drop its cached capture, so the next
+ * read is of the pane after the key (Issue #3756). One key per call: the
+ * strict `respond` reads the screen again between two keys.
+ */
+export async function sendSessionAnswerKey(
+  worktreeId: string,
+  cliToolId: CLIToolType,
+  key: SessionAnswerKey,
+  instanceId?: string
+): Promise<void> {
+  if (key !== 'Up' && key !== 'Down' && key !== 'Enter') {
+    throw new Error(`Unsupported answer key: ${String(key)}`);
+  }
+  const { sessionName } = resolveSessionContext(worktreeId, cliToolId, instanceId);
+  try {
+    await sendSpecialKeys(sessionName, [key]);
+  } finally {
+    invalidateCache(sessionName);
+  }
+}
+
+/**
+ * The foreground command of a session's pane (`#{pane_current_command}`), or
+ * null when tmux cannot say (Issue #3788). The strict `respond` reads it after
+ * its Enter: agy exits on the trust screen's `No, exit` and leaves the shell in
+ * a pane that is still up, which only this tells apart from an unread screen.
+ */
+export async function readSessionPaneCommand(
+  worktreeId: string,
+  cliToolId: CLIToolType,
+  instanceId?: string
+): Promise<string | null> {
+  const { sessionName } = resolveSessionContext(worktreeId, cliToolId, instanceId);
+  return getPaneCurrentCommand(sessionName);
 }
 
 /**

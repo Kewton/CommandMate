@@ -92,6 +92,20 @@ interface ClientInfo {
   worktreeIds: Set<string>;
   terminalSubscription: TerminalSubscription | null;
   /**
+   * Which terminal subscription this socket currently wants (Issue #3733).
+   *
+   * `terminal_subscribe` awaits three times (the old subscription's teardown,
+   * the ownership check, `transport.subscribe`) before it registers anything,
+   * and the dispatcher does not wait for it. A subscribe, an unsubscribe and a
+   * disconnect each advance this; a subscribe that finds it moved past the
+   * value it started with is no longer wanted, releases what it obtained and
+   * sends nothing. Without it a socket that went away mid-subscribe left a
+   * subscriber in the registry nobody would release (the 4-per-session limit
+   * then refused that session until the server restarted), and a later
+   * subscribe or unsubscribe was overwritten by the one that returned last.
+   */
+  terminalSubscriptionSeq: number;
+  /**
    * The tail of this socket's `terminal_input` / `terminal_resize` work
    * (Issue #3334). Each write awaits an ownership check before it reaches tmux,
    * and the dispatcher does not await a message before taking the next one, so
@@ -662,6 +676,7 @@ export function setupWebSocket(
       ws,
       worktreeIds: new Set(),
       terminalSubscription: null,
+      terminalSubscriptionSeq: 0,
       isAlive: true,
     };
     clients.set(ws, clientInfo);
@@ -912,6 +927,9 @@ function handleDisconnect(ws: WebSocket): void {
     }
   });
 
+  // Issue #3733: a subscribe still in flight finds this moved and releases
+  // what it obtains instead of registering it on a socket that is gone.
+  clientInfo.terminalSubscriptionSeq += 1;
   if (clientInfo.terminalSubscription) {
     void clientInfo.terminalSubscription.unsubscribe();
     clientInfo.terminalSubscription = null;
@@ -966,16 +984,27 @@ async function handleTerminalSubscribe(ws: WebSocket, message: WebSocketMessage)
     return;
   }
 
-  if (clientInfo.terminalSubscription) {
-    await clientInfo.terminalSubscription.unsubscribe();
+  // Issue #3733: from here on this request is the one the socket wants; every
+  // await below is followed by a look at whether it still is.
+  const seq = ++clientInfo.terminalSubscriptionSeq;
+  const isCurrent = (): boolean =>
+    clients.get(ws) === clientInfo && clientInfo.terminalSubscriptionSeq === seq;
+
+  const previous = clientInfo.terminalSubscription;
+  if (previous) {
+    // Detached before the await, so a request arriving meanwhile neither
+    // releases it a second time nor has its own registration cleared by ours.
     clientInfo.terminalSubscription = null;
+    await previous.unsubscribe();
   }
+  if (!isCurrent()) return;
 
   const sessionName = resolveSessionName(cliToolId, worktreeId);
 
   // Issue #2865: never stream a same-named session another CommandMate server
   // created (its `#{session_path}` is not this worktree's directory).
   const ownership = await checkSessionOwnership(sessionName, worktree.path);
+  if (!isCurrent()) return;
   if (ownership.verdict === 'foreign') {
     sendTerminalEvent(ws, {
       type: 'terminal_error',
@@ -997,6 +1026,7 @@ async function handleTerminalSubscribe(ws: WebSocket, message: WebSocketMessage)
   const startedAt = Date.now();
   const subscription = await transport.subscribe(sessionName, {
     onOutput: (data) => {
+      if (!isCurrent()) return;
       if (!firstOutputObserved) {
         firstOutputObserved = true;
         observeTmuxControlFirstOutputLatency(Date.now() - startedAt);
@@ -1004,6 +1034,7 @@ async function handleTerminalSubscribe(ws: WebSocket, message: WebSocketMessage)
       sendTerminalEvent(ws, { type: 'terminal_output', data });
     },
     onExit: ({ exitCode }) => {
+      if (!isCurrent()) return;
       sendTerminalEvent(ws, { type: 'terminal_exit', exitCode });
     },
     onError: (error) => {
@@ -1016,7 +1047,9 @@ async function handleTerminalSubscribe(ws: WebSocket, message: WebSocketMessage)
             const snapshot = await transport.captureSnapshot(sessionName, {
               startLine: TERMINAL_FALLBACK_CAPTURE_LINES,
             });
-            if (snapshot.length > 0) {
+            // Issue #3733: the reads above awaited; a subscription released
+            // or replaced meanwhile has nothing left to say to this socket.
+            if (snapshot.length > 0 && isCurrent()) {
               sendTerminalEvent(ws, {
                 type: 'terminal_output',
                 data: snapshot,
@@ -1028,6 +1061,7 @@ async function handleTerminalSubscribe(ws: WebSocket, message: WebSocketMessage)
           // Best-effort snapshot fallback. The original control-mode error is still reported.
         }
 
+        if (!isCurrent()) return;
         sendTerminalEvent(ws, {
           type: 'terminal_error',
           error: error.message,
@@ -1036,6 +1070,17 @@ async function handleTerminalSubscribe(ws: WebSocket, message: WebSocketMessage)
       })();
     },
   });
+
+  if (!isCurrent()) {
+    // Disconnected, unsubscribed or superseded while subscribing: nobody else
+    // holds this handle, so release it now or the registry keeps it forever.
+    try {
+      await subscription.unsubscribe();
+    } catch {
+      // Best-effort cleanup of a subscription nobody wants.
+    }
+    return;
+  }
 
   clientInfo.terminalSubscription = {
     worktreeId,
@@ -1136,16 +1181,22 @@ async function runTerminalResize(ws: WebSocket, message: WebSocketMessage): Prom
 
 async function handleTerminalUnsubscribe(ws: WebSocket): Promise<void> {
   const clientInfo = clients.get(ws);
-  if (!clientInfo?.terminalSubscription) {
+  if (!clientInfo) return;
+  // Issue #3733: also withdraws a subscribe still in flight, which would
+  // otherwise register after this and keep streaming.
+  clientInfo.terminalSubscriptionSeq += 1;
+  const subscription = clientInfo.terminalSubscription;
+  if (!subscription) {
     return;
   }
 
+  // Detached before the await so a subscribe arriving meanwhile is not cleared.
+  clientInfo.terminalSubscription = null;
   try {
-    await clientInfo.terminalSubscription.unsubscribe();
+    await subscription.unsubscribe();
   } catch {
     // Best-effort cleanup during terminal unsubscribe.
   }
-  clientInfo.terminalSubscription = null;
   sendTerminalEvent(ws, { type: 'terminal_status', connected: false });
 }
 
@@ -1503,6 +1554,7 @@ export const __internal = {
       ws,
       worktreeIds: new Set(),
       terminalSubscription: null,
+      terminalSubscriptionSeq: 0,
       isAlive,
     });
   },

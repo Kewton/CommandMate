@@ -124,6 +124,8 @@ export interface PickerScreenResult {
   closed: boolean;
   /** The `detectPrompt(...).isPrompt` this screen must read as (tool-table.ts). Default false. */
   expectPrompt?: boolean;
+  /** Sends the tool refused as "still starting" (Issue #3803). Default 0. */
+  refusals?: number;
 }
 
 function pickerScreenHolds(result: PickerScreenResult): boolean {
@@ -136,7 +138,10 @@ function pickerScreenHolds(result: PickerScreenResult): boolean {
 }
 
 function describePickerScreen(result: PickerScreenResult): string {
-  if (!result.opened || result.verdict === null) return `${result.screen}: 不合格（画面が開いたことを確認できなかった）`;
+  if (!result.opened || result.verdict === null) {
+    const refused = result.refusals ? `。起動完了前として ${result.refusals} 回拒否された` : '';
+    return `${result.screen}: 不合格（画面が開いたことを確認できなかった${refused}）`;
+  }
   const closed = result.closed ? '' : '、Esc の後に入力待ちに戻らなかった';
   const expected = `期待 isPrompt=${result.expectPrompt ?? false}`;
   return `${result.screen}: ${pickerScreenHolds(result) ? '合格' : '不合格'}（${expected}。${describeVerdict(result.verdict)}${closed}）`;

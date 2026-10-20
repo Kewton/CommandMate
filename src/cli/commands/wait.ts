@@ -26,6 +26,7 @@ import { ExitCode, getErrorMessage, VerifyExitCode, WAIT_EXIT_CODE_PRIORITY, Wai
 import type { WaitOptions } from '../types';
 import type {
   AutoYesSuppressionReason,
+  CurrentOutputObservedResponse,
   CurrentOutputResponse,
   PromptData,
   PromptMessageResponse,
@@ -37,6 +38,7 @@ import { ApiClient, ApiError, isValidWorktreeId } from '../utils/api-client';
 import { TOKEN_WARNING, handleCommandError } from '../utils/command-helpers';
 import { runVerification, WORK_EVIDENCE_GATE_ID } from '../utils/verify-runner';
 import { WAIT_INSTANCE_OPTION_DESCRIPTION } from '../config/agent-target-options';
+import { isPromptObservation, observedCurrentOutputPath } from './prompt';
 import {
   readPromptView,
   UNCLASSIFIED_PROMPT_VIEW_TYPE,
@@ -272,22 +274,31 @@ const CONTRACT_POLICY_CAUSE = 'by contract policy';
  * say about it is a compile error here, which is the point. Until #1843 the
  * notice hard-coded "by contract policy" for every reason, so #1829's
  * `agent-launch-dialog` — a product-side decision the poller makes with no
- * contract in sight (`src/lib/auto-yes-poller.ts`, the `getCodexLifecycleDialog`
- * branch) — sent operators of contract-less worktrees hunting for a
- * `denyPatterns` entry that did not exist.
+ * contract in sight (`suppressIfNotOursToAnswer` in
+ * `src/lib/polling/auto-yes-prompt-suppression.ts`: codex's lifecycle dialogs,
+ * gemini's folder trust since #3776 and copilot's since #3790) — sent operators
+ * of contract-less worktrees hunting for a `denyPatterns` entry that did not
+ * exist.
  *
  * The three sites that record a suppression are covered: the poller's launch-dialog
  * branch (`agent-launch-dialog`), the poller's policy branch and
  * `lib/hooks/permission-decision-service.ts` (both the four `evaluatePolicyAgainstTexts`
  * verdicts, which is why those four keep the pre-#1843 wording exactly), and
- * the poller's stopped-answer branch (`partial-answer`, Issue #3706 / #3713).
+ * the poller's stopped-answer branch (`partial-answer`, Issue #3706 / #3713),
+ * and the poller's agy trust-screen branch (`startup-trust-unhandled`, Issue #3757),
+ * and the poller's question confirm-page branch (`question-confirm-page`, Issue #3748),
+ * and the poller's agy receipt-gate branch (`no-hook-receipt`, Issue #3767).
  */
 const SUPPRESSION_CAUSE: Record<AutoYesSuppressionReason, string> = {
   'mode-off': CONTRACT_POLICY_CAUSE,
   'deny-pattern': CONTRACT_POLICY_CAUSE,
   'deny-pattern-unusable': CONTRACT_POLICY_CAUSE,
   'type-not-allowed': CONTRACT_POLICY_CAUSE,
-  'agent-launch-dialog': "while the agent's launch dialog was on screen",
+  // Issue #3790: after the launch window the poller still leaves copilot's and
+  // gemini's trust dialogs alone when the cursor is not on the safe row, and
+  // nobody else answers them then.
+  'agent-launch-dialog':
+    "while the agent's launch dialog was on screen; if it stays after the launch (copilot's cursor on 2. or 3., gemini's not on 1. Trust folder), answer it at the pane",
   // Issue #1924. Deliberately not "by contract policy": no contract was
   // consulted. The frame looked like a numbered list to the generic estimator
   // and like prose to the tool's own detector, and an operator who reads this
@@ -297,6 +308,22 @@ const SUPPRESSION_CAUSE: Record<AutoYesSuppressionReason, string> = {
   // Auto-Yes answer was stopped with some of its keys already in the input, and
   // typing it again would append to them, so the prompt waits for a human.
   'partial-answer': 'because an earlier answer left partial input; Auto-Yes is waiting for a human',
+  // Issue #3757. agy's startup folder-trust screen: the launch's to confirm, not
+  // Auto-Yes's, and agy drew it after the launch window had ended.
+  'startup-trust-unhandled':
+    "because agy's startup folder-trust confirmation is the launch's to answer, not Auto-Yes's; the next send confirms it once, or answer it at the pane",
+  // Issue #3748. The AskUserQuestion confirm page (`Submit` / `Cancel`): the
+  // tool's own reader recognised it, and `Submit` commits whatever stands as the
+  // answers, so it waits for a human. Was recorded as `unclassified-frame`,
+  // whose wording above says the opposite (nothing recognised the frame).
+  'question-confirm-page':
+    "because the question's Submit/Cancel confirmation commits the answers as they stand, so Auto-Yes leaves it to a human",
+  // Issue #3767. agy's approval dialog has no matching hook question (none, too
+  // late, already on screen, or the hook stopped arriving). Not a contract verdict.
+  // Issue #3789: nor one left unused — the last was spent on keys Auto-Yes sent,
+  // and a dialog is still up past the grace — so "no unused question" covers both.
+  'no-hook-receipt':
+    "because there is no unused agy hook permission question for this dialog (none arrived in time, or the last one was spent on keys that did not clear it); answer it yourself (auto-yes --disable, prompt --json, respond --expect-screen) or check hooks.json",
 };
 
 /**
@@ -337,6 +364,37 @@ function formatSuppressionNotice(suppression: LastSuppression, ageSeconds: numbe
   }
   const cause = suppressionCause(suppression.reason);
   return `  auto-yes suppressed this prompt ${cause}: ${parts.join(' ')} (${ageSeconds}s ago)`;
+}
+
+/**
+ * One stderr line saying Auto-Yes is off on this instance because the server
+ * restarted (Issue #3730), or null.
+ *
+ * Only words: the prompt was going to be reported either way — an instance
+ * whose grant the restart released is an instance with Auto-Yes off, and exit
+ * 10 for it is exactly the hand-back it always was. What this adds is the WHY,
+ * so a delegating agent re-enables Auto-Yes instead of guessing. A server
+ * older than the reason sends none, and nothing is printed.
+ *
+ * The command it suggests names the instance this wait is about: without
+ * `--instance`, `auto-yes --enable` arms the worktree's default primary, which
+ * for an alias (or a non-default tool) is another instance — the waited-on one
+ * would stay off while a grant went somewhere nobody asked for. The instance is
+ * the resolved `--instance` when one was given, else the CLI tool the server
+ * answered for (a primary's instance ID is its tool ID).
+ *
+ * @param instanceId - The resolved `--instance` of this wait, if any
+ */
+export function formatRestartReleaseNotice(
+  worktreeId: string,
+  data: CurrentOutputResponse,
+  instanceId?: string,
+): string | null {
+  if (data.autoYes?.enabled !== false || data.autoYes.stopReason !== 'server-restart') return null;
+  const target = instanceId ?? data.cliToolId;
+  const command = `commandmate auto-yes ${worktreeId} --enable${target ? ` --instance ${target}` : ''}`;
+  return `  auto-yes was released by a server restart on ${worktreeId} (it is not turned back on ` +
+    `automatically); re-enable it with \`${command}\` if this session should keep answering.`;
 }
 
 /**
@@ -903,6 +961,22 @@ function buildUnclassifiedOutput(
   };
 }
 
+/**
+ * The exit-10 result with the poll's prompt observation added as `observation`
+ * (Issue #3755), or the result untouched.
+ *
+ * Only words added to a payload that is reported anyway: no exit code, hold or
+ * grace reads the observation, and a daemon older than the field (no
+ * `promptObservation`) gets the payload it always got. `autoYesSuppression`
+ * keeps its #1699 meaning beside it; the observation is where the poller's
+ * record and the contract's re-evaluation are told apart.
+ */
+function withObservation(result: PollResult, data: CurrentOutputObservedResponse): PollResult {
+  if (result.exitCode !== WaitExitCode.PROMPT_DETECTED || !result.output) return result;
+  if (!isPromptObservation(data.promptObservation)) return result;
+  return { ...result, output: { ...result.output, observation: data.promptObservation } };
+}
+
 /** The stderr line for a session this wait never saw running (Issue #1628). */
 function describeNotStarted(
   worktreeId: string,
@@ -1070,6 +1144,9 @@ function promptStage(poll: PollContext, state: PollState, data: CurrentOutputRes
       // Issue #3397: and whether Auto-Yes already pressed Enter on it.
       const enterNotice = formatEnterFallbackNotice(data, Date.now());
       if (enterNotice) console.error(enterNotice);
+      // Issue #3730: and whether a restart is why nothing is answering it.
+      const restartNotice = formatRestartReleaseNotice(worktreeId, data, poll.options.instance);
+      if (restartNotice) console.error(restartNotice);
       return { kind: 'wait' };
     }
 
@@ -1116,6 +1193,9 @@ function promptStage(poll: PollContext, state: PollState, data: CurrentOutputRes
     // Issue #3397: stderr only, like the notice above; the exit-10 payload is unchanged.
     const enterNotice = formatEnterFallbackNotice(data, Date.now());
     if (enterNotice) console.error(enterNotice);
+    // Issue #3730: stderr only as well.
+    const restartNotice = formatRestartReleaseNotice(worktreeId, data, poll.options.instance);
+    if (restartNotice) console.error(restartNotice);
 
     return exitWith({ exitCode: WaitExitCode.PROMPT_DETECTED, output: promptOutput });
   }
@@ -1143,9 +1223,15 @@ function selectionListStage(poll: PollContext, data: CurrentOutputResponse): Sta
       if (suppressed) {
         console.error(formatSuppressionNotice(suppressed.suppression, suppressed.ageSeconds));
       }
+      // Issue #3730
+      const restartNotice = formatRestartReleaseNotice(worktreeId, data, poll.options.instance);
+      if (restartNotice) console.error(restartNotice);
       return { kind: 'wait' };
     }
 
+    // Issue #3730: stderr only; the exit-10 payload is unchanged.
+    const restartNotice = formatRestartReleaseNotice(worktreeId, data, poll.options.instance);
+    if (restartNotice) console.error(restartNotice);
     return exitWith({
       exitCode: WaitExitCode.PROMPT_DETECTED,
       output: buildSelectionListOutput(worktreeId, data),
@@ -1204,13 +1290,17 @@ function unclassifiedStage(poll: PollContext, state: PollState, data: CurrentOut
     if (dwellMs >= UNCLASSIFIED_DWELL_MS) {
       const question = describeUnclassifiedFrame(worktreeId, data, dwellMs);
 
+      // Issue #3730: why Auto-Yes is not there to answer it, if a restart is why.
+      const restartNotice = formatRestartReleaseNotice(worktreeId, data, poll.options.instance);
       if (options.onPrompt === 'human') {
         console.error(question);
+        if (restartNotice) console.error(restartNotice);
         console.error('Waiting for human response...');
         return { kind: 'wait' };
       }
 
       console.error(question);
+      if (restartNotice) console.error(restartNotice);
       return exitWith({
         exitCode: WaitExitCode.PROMPT_DETECTED,
         output: buildUnclassifiedOutput(worktreeId, data, question),
@@ -1635,10 +1725,11 @@ export async function pollWorktree(
 
     try {
       // Issue #868: scope polling to a specific agent instance when provided.
-      const path = options.instance
-        ? `/api/worktrees/${worktreeId}/current-output?instance=${encodeURIComponent(options.instance)}`
-        : `/api/worktrees/${worktreeId}/current-output`;
-      const data = await client.get<CurrentOutputResponse>(path);
+      // Issue #3755: `observe=1` so an exit 10 carries the observation of the
+      // very capture it was decided on (see {@link withObservation}).
+      const data = await client.get<CurrentOutputObservedResponse>(
+        observedCurrentOutputPath(worktreeId, options.instance),
+      );
 
       // Track content changes for stall detection
       if (data.content !== state.lastContent) {
@@ -1684,7 +1775,7 @@ export async function pollWorktree(
       }
 
       const promptOutcome = promptStage(poll, state, data);
-      if (promptOutcome.kind === 'exit') return promptOutcome.result;
+      if (promptOutcome.kind === 'exit') return withObservation(promptOutcome.result, data);
       if (promptOutcome.kind === 'wait') {
         await sleep(POLL_INTERVAL_MS);
         continue;
@@ -1702,14 +1793,14 @@ export async function pollWorktree(
       }
 
       const selectionListOutcome = selectionListStage(poll, data);
-      if (selectionListOutcome.kind === 'exit') return selectionListOutcome.result;
+      if (selectionListOutcome.kind === 'exit') return withObservation(selectionListOutcome.result, data);
       if (selectionListOutcome.kind === 'wait') {
         await sleep(POLL_INTERVAL_MS);
         continue;
       }
 
       const unclassifiedOutcome = unclassifiedStage(poll, state, data);
-      if (unclassifiedOutcome.kind === 'exit') return unclassifiedOutcome.result;
+      if (unclassifiedOutcome.kind === 'exit') return withObservation(unclassifiedOutcome.result, data);
       if (unclassifiedOutcome.kind === 'wait') {
         await sleep(POLL_INTERVAL_MS);
         continue;
@@ -1988,6 +2079,14 @@ A prompt the target's Auto-Yes is answering (Issue #2463):
   would lapse during the grace ends it early with exit 10, not 124.
   --auto-yes-grace 0 restores the immediate exit; --on-prompt human is
   unchanged.
+
+The observation on exit 10 (Issue #3755):
+  The exit-10 payload also carries "observation": the same payload
+  \`commandmate prompt <id> --json\` prints, read off the capture the exit was
+  decided on — the screen's kind, an observation token, and Auto-Yes as two
+  separate items (the poller's record, the contract re-evaluated now). It
+  changes no exit code, hold or grace. autoYesSuppression keeps its meaning (a
+  record under a minute old); a missing record does not mean Auto-Yes can answer.
 `)
     .action(async (worktreeIds: string[], options: PollWorktreeOptions) => {
       try {

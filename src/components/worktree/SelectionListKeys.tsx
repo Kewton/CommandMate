@@ -34,6 +34,7 @@
  */
 
 import { useMemo } from 'react';
+import { useTranslations } from 'next-intl';
 import { NavigationButtons } from '@/components/worktree/NavigationButtons';
 import {
   SelectionCommitKeys,
@@ -42,6 +43,7 @@ import {
 } from '@/components/worktree/PromptAnswerKeys';
 import { OpencodeModelKeys } from '@/components/worktree/OpencodeQuickKeys';
 import { PlanReviewControls } from '@/components/worktree/PlanReviewControls';
+import { isTrustConfirmationFrame } from '@/lib/detection/selection-shape';
 import {
   readSelectionListFrame,
   resolveSelectionListOps,
@@ -68,6 +70,12 @@ export interface SelectionListKeysProps extends SelectionKeysProps {
    * and draws nothing under it — a pager's rows are a transcript, not options.
    */
   showPagerKeys?: boolean;
+  /**
+   * Issue #3758: the list is a folder-trust confirmation. For the mount that
+   * holds no frame (the phone's docked pad), read by the same poll that took
+   * `reading`; a mount with a frame leaves it out and this reads `frame`.
+   */
+  trustConfirmation?: boolean;
 }
 
 export function SelectionListKeys({
@@ -79,16 +87,33 @@ export function SelectionListKeys({
   reading,
   surface,
   showPagerKeys = false,
+  trustConfirmation,
 }: SelectionListKeysProps) {
+  const t = useTranslations('worktree');
   const read = useMemo(() => reading ?? readSelectionListFrame(frame), [reading, frame]);
   const ops = useMemo(
     () => resolveSelectionListOps({ reading: read, cliToolId, surface, pager: showPagerKeys }),
     [read, cliToolId, surface, showPagerKeys],
   );
   const keyProps = { worktreeId, cliToolId, instanceId, onKeysSent };
+  // Issue #3758: the terminal surface says which screen this is. The chat card
+  // says it in its banner (`ChatSurface`), so it is not said twice there.
+  const showTrustNotice =
+    surface === 'terminal' &&
+    !showPagerKeys &&
+    (trustConfirmation ?? isTrustConfirmationFrame(frame, cliToolId));
 
   return (
     <div className="space-y-2">
+      {showTrustNotice ? (
+        <p
+          data-testid="selection-trust-notice"
+          role="status"
+          className="rounded-md border border-warning-border bg-warning-subtle px-2 py-1.5 text-xs text-foreground"
+        >
+          {t('trustConfirmation.notice')}
+        </p>
+      ) : null}
       {/* The arrow pad stays FIRST and unconditional — it is the one control
           every measured selection list answers to. */}
       <NavigationButtons {...keyProps} showPagerKeys={showPagerKeys} hideEnterKey={!ops.padEnter} />

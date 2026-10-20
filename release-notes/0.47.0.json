@@ -1,0 +1,118 @@
+{
+  "version": "0.47.0",
+  "date": "2026-10-21",
+  "highlight": {
+    "ja": "Auto-Yes が答えずに止まった確認を、CLI から画面を確かめたうえで直接答えられるようになりました。あわせて、Auto-Yes が答えてはいけない画面に答えたり、答えずに止まったりする問題を多数直しました。",
+    "en": "You can now answer a prompt that Auto-Yes left waiting directly from the CLI, after checking the screen. Many issues where Auto-Yes answered the wrong screen or stopped without answering are also fixed."
+  },
+  "added": [
+    {
+      "ja": "止まっている画面を CLI から 1 回観測して、種類・質問・選択肢を確かめられる commandmate prompt を追加しました。",
+      "en": "Added commandmate prompt, which observes a waiting screen once so you can check its kind, question and choices from the CLI."
+    },
+    {
+      "ja": "観測した画面にだけ答える厳格な respond を追加しました。画面が変わっていれば何も送りません。",
+      "en": "Added a strict respond mode that answers only the screen you observed, and sends nothing if the screen has changed."
+    },
+    {
+      "ja": "直前の送信が「未送信・送信済み・不確定」のどれかを、prompt の出力と送信の失敗メッセージで確かめられるようになりました。",
+      "en": "The prompt output and send error messages now tell you whether the last message was not sent, sent, or indeterminate."
+    },
+    {
+      "ja": "Codex の /config をスラッシュコマンドの一覧に追加しました。",
+      "en": "Added Codex's /config to the slash command list."
+    }
+  ],
+  "improved": [
+    {
+      "ja": "サーバーの再起動で外れた Auto-Yes を「再起動で解除」と表示するようになりました。",
+      "en": "Auto-Yes that was turned off by a server restart is now shown as Released by restart."
+    },
+    {
+      "ja": "契約で Auto-Yes が止められているとき、有効化の時点と一覧・画面でそのことが分かるようになりました。",
+      "en": "When a contract stops Auto-Yes, this is now shown when you enable it and in the lists and screens."
+    },
+    {
+      "ja": "Antigravity の信頼の確認で止まっているとき、画面に「端末で操作が必要」と表示するようになりました。",
+      "en": "When Antigravity is waiting on its folder trust prompt, the screen now says the terminal needs your input."
+    },
+    {
+      "ja": "start --daemon で起動したサーバーの出力を logs/server.log に残すようになりました。",
+      "en": "A server started with start --daemon now keeps its output in logs/server.log."
+    }
+  ],
+  "fixed": [
+    {
+      "ja": "Antigravity のログイン方法の画面や、表示が切れた許可の画面に、Auto-Yes が番号で答えうる問題を直しました。",
+      "en": "Fixed Auto-Yes possibly answering Antigravity's login method screen, or a cut-off permission screen, with a number."
+    },
+    {
+      "ja": "Antigravity の確認に Auto-Yes が答えないまま長時間止まることがある問題を直しました。",
+      "en": "Fixed Auto-Yes sometimes leaving an Antigravity prompt unanswered for a long time."
+    },
+    {
+      "ja": "Antigravity で答えた確認が画面に残り続けたとき、Auto-Yes が理由を残さずに黙る問題を直しました。",
+      "en": "Fixed Auto-Yes going silent without a reason when an answered Antigravity prompt stayed on screen."
+    },
+    {
+      "ja": "厳格な respond で、Antigravity の許可の確認のカーソル以外の選択肢を選べるようになりました。",
+      "en": "Strict respond can now choose options other than the highlighted one on Antigravity's permission prompt."
+    },
+    {
+      "ja": "厳格な respond で信頼の確認に No, exit と答えたとき、終了を正しく読み取るようになりました。",
+      "en": "Strict respond now correctly reports the session ending after answering No, exit on the trust prompt."
+    },
+    {
+      "ja": "Antigravity のターミナル画面が黒く見える問題を直しました。",
+      "en": "Fixed the Antigravity terminal view appearing blank."
+    },
+    {
+      "ja": "Submit と Cancel の確認画面に、Auto-Yes が答えないようにしました。",
+      "en": "Auto-Yes no longer answers Submit and Cancel confirmation pages."
+    },
+    {
+      "ja": "Gemini と Antigravity の起動時の信頼の確認を、安全な選択肢のときだけ通し、Auto-Yes と二重に答えないようにしました。",
+      "en": "Gemini and Antigravity startup trust prompts are now confirmed only on the safe option, and never answered twice with Auto-Yes."
+    },
+    {
+      "ja": "Copilot の信頼の確認に、Auto-Yes の入力がメッセージとして送られることがある問題を直しました。",
+      "en": "Fixed Auto-Yes input sometimes being sent as a message on Copilot's folder trust prompt."
+    },
+    {
+      "ja": "Antigravity の起動の後に出た信頼の確認が処理されず、通知も出ない問題を直しました。",
+      "en": "Fixed an Antigravity trust prompt shown after startup going unhandled without a notification."
+    },
+    {
+      "ja": "Auto-Yes が答える前に、答えていないという通知が誤って出ることがある問題を直しました。",
+      "en": "Fixed a not-answered notification sometimes being shown before Auto-Yes had a chance to answer."
+    },
+    {
+      "ja": "契約が止めた確認について、hooks の設定が原因であるかのような案内が出る問題を直しました。",
+      "en": "Fixed a hint that blamed the hooks setup for a prompt that a contract had stopped."
+    },
+    {
+      "ja": "再起動で解除された Auto-Yes の表示が、消えるべきときに消えないなどの問題を直しました。",
+      "en": "Fixed the released-by-restart Auto-Yes label not clearing when it should, among other display issues."
+    },
+    {
+      "ja": "Command Code の plan review で送信が断られたとき、未送信と表示するようにしました。",
+      "en": "A message refused by Command Code's plan review is now shown as not sent."
+    },
+    {
+      "ja": "送信の直後に、送信前の古い画面が表示されることがある問題を直しました。",
+      "en": "Fixed the screen sometimes showing the old content from before a message was sent."
+    },
+    {
+      "ja": "取り消した返答の受け渡しが、依頼元に届いてしまうことがある問題を直しました。",
+      "en": "Fixed a cancelled reply relay sometimes still being delivered."
+    },
+    {
+      "ja": "削除した worktree やサーバー停止の後に、スケジュールが作り直されることがある問題を直しました。",
+      "en": "Fixed schedules sometimes being recreated after a worktree was removed or the server was stopped."
+    },
+    {
+      "ja": "ターミナルの購読が残り続け、上限に達することがある問題を直しました。",
+      "en": "Fixed terminal subscriptions sometimes piling up until the limit was reached."
+    }
+  ]
+}

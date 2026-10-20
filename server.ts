@@ -42,6 +42,7 @@ import {
 import { getDbInstance } from './src/lib/db/db-instance';
 import { stopAllPolling } from './src/lib/polling/response-poller';
 import { releaseAutoYes } from './src/lib/auto-yes-lifecycle';
+import { recordAutoYesShutdown, restoreAutoYesShutdownRecord } from './src/lib/auto-yes-shutdown-record';
 import { initScheduleManager, stopAllSchedules } from './src/lib/schedule-manager';
 import { initTimerManager, stopAllTimers } from './src/lib/timer-manager';
 import { initResourceCleanup, stopResourceCleanup } from './src/lib/resource-cleanup';
@@ -650,6 +651,18 @@ app.prepare().then(() => {
     }
   }
 
+  // Issue #3730: say which Auto-Yes grants the previous process's graceful
+  // shutdown released — each still in-period one becomes a DISABLED state with
+  // `stopReason: 'server-restart'`; no grant is restored and no poller starts.
+  // Here, synchronously, before EITHER listener opens: the first request on the
+  // local or the remote door already sees the notices, and no enable / disable
+  // a request makes can be overwritten by a seed that lands after it. Before
+  // `initializeWorktrees()` too, so the ID reconcile there moves the notices
+  // with every other Auto-Yes state, and the orphan sweep drops the ones whose
+  // worktree is gone. Never throws; a missing, unreadable or broken record
+  // leaves every grant off with no reason.
+  restoreAutoYesShutdownRecord();
+
   // H3 fix: Pass hostname to listen() so CM_BIND is respected.
   // Note: http.Server.listen(port, hostname, callback) does not pass err to callback;
   // listen errors emit an 'error' event instead.
@@ -904,9 +917,17 @@ app.prepare().then(() => {
     // Stop polling first
     stopAllPolling();
 
+    // Issue #3730: write down which Auto-Yes grants this shutdown releases, so
+    // the next start can say "released by a server restart" instead of nothing.
+    // First, because it also closes the door: an enable that returns from its
+    // await after this is refused. Only an explanation is kept — the next
+    // process starts every grant OFF, as before. Never throws; a failure costs
+    // the explanation, not the shutdown. SIGKILL / a crash never gets here.
+    recordAutoYesShutdown();
+
     // Issue #138: Stop all auto-yes pollers. Issue #3184: the `server-shutdown`
     // row of the Auto-Yes lifecycle table — the state itself is in memory and
-    // goes with the process; nothing is persisted for the next start.
+    // goes with the process (only the explanation above outlives it).
     releaseAutoYes('server-shutdown', { scope: 'all' });
 
     // Issue #294: Stop all scheduled executions (SIGKILL fire-and-forget)

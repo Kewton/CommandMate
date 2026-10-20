@@ -98,6 +98,16 @@ export function getLastPolicySuppression(
   return lastPolicySuppressions.get(buildCompositeKey(worktreeId, cliToolId, instanceId)) ?? null;
 }
 
+/**
+ * Drop the record of one session (Issue #3796): the reason it gives no longer
+ * holds for the prompt still on screen (the contract that withheld it changed),
+ * so leaving it to age out would have `cmate wait` report a stale reason for up
+ * to a minute.
+ */
+export function forgetPolicySuppression(worktreeId: string, cliToolId: CLIToolType, instanceId?: string): void {
+  lastPolicySuppressions.delete(buildCompositeKey(worktreeId, cliToolId, instanceId));
+}
+
 /** Drop every recorded suppression. Test seam. */
 export function clearPolicySuppressions(): void {
   lastPolicySuppressions.clear();

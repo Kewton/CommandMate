@@ -14,7 +14,7 @@ import { StartOptions, ExitCode, getErrorMessage } from '../types';
 import { CLILogger } from '../utils/logger';
 import { DaemonManager } from '../utils/daemon';
 import { logSecurityEvent } from '../utils/security-logger';
-import { getPackageRoot } from '../utils/paths';
+import { getPackageRoot, getServerLogPath } from '../utils/paths';
 import { getEnvPath, getPidFilePath } from '../utils/env-setup';
 import { REVERSE_PROXY_WARNING } from '../config/security-messages';
 import { validateIssueNoResult } from '../utils/input-validators';
@@ -113,7 +113,8 @@ export async function runStart(options: StartOptions): Promise<StartResult> {
       return { ok: false, exitCode: ExitCode.CONFIG_ERROR };
     }
 
-    const daemonManager = new DaemonManager(pidFilePath);
+    // Issue #3731: --daemon appends the server's stdout/stderr to <configDir>/logs/server[-N].log
+    const daemonManager = new DaemonManager(pidFilePath, undefined, () => getServerLogPath(options.issue));
 
     // Issue #136: Handle auto-port allocation for worktree servers
     let port = options.port;

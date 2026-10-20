@@ -48,3 +48,51 @@ describe('GeminiTool prompt detection depth', () => {
     expect(capturePane).toHaveBeenCalledWith('mcbd-gemini-test-wt', GEMINI_PANE_HEIGHT);
   });
 });
+
+describe('[#3770] GeminiTool folder-trust dialog during launch', () => {
+  const TRUST_V062 = ' │ Do you trust the files in this folder?\n │ ● 1. Trust folder (work)\n │   2. Trust parent folder';
+  // Issue #3776: the launch now confirms only a cursor on `1. Trust folder`, so
+  // the earlier wording carries option rows too. Assumed, not measured: these
+  // are v0.62.0's three rows; no build with the earlier wording was captured
+  // (tests/fixtures/gemini-live-3776/README.md).
+  const TRUST_OLD = ' Do you trust this folder?\n ● 1. Trust folder (work)\n   2. Trust parent folder\n   3. Don\'t trust';
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(sendSpecialKey).mockResolvedValue();
+  });
+
+  it.each([
+    ['v0.62.0 wording (measured)', TRUST_V062],
+    ['earlier wording (negative control)', TRUST_OLD],
+  ])('confirms it once with Enter: %s', async (_label, dialog) => {
+    vi.useFakeTimers();
+    try {
+      vi.mocked(capturePane)
+        .mockResolvedValueOnce(dialog)
+        .mockResolvedValue('> Type your message or @path/to/file');
+      const tool = new GeminiTool();
+      const done = (tool as unknown as { waitForReady(s: string): Promise<void> }).waitForReady('s');
+      await vi.advanceTimersByTimeAsync(5_000);
+      await done;
+      expect(sendSpecialKey).toHaveBeenCalledTimes(1);
+      expect(sendSpecialKey).toHaveBeenCalledWith('s', 'Enter');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('negative: an unrelated screen is not answered', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.mocked(capturePane).mockResolvedValue('> Type your message or @path/to/file');
+      const tool = new GeminiTool();
+      const done = (tool as unknown as { waitForReady(s: string): Promise<void> }).waitForReady('s');
+      await vi.advanceTimersByTimeAsync(2_000);
+      await done;
+      expect(sendSpecialKey).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

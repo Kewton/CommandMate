@@ -61,6 +61,11 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
     off      - at least one of those instances is NOT armed, so a prompt on this
                row waits for a human. 'waiting' + 'off' is a confirmation
                prompt nobody is going to answer -- the cell to look for
+    blocked  - armed, but the contract running on that instance sets
+               autoYes.mode: off, so nothing is answered there either
+               (Issue #3723; --json: autoYesByInstance.<id>.blockedByContract)
+    off(restart) - off, because the server restarted while the grant was live
+               (Issue #3730; --json: autoYesStopReasonByInstance.<id>)
     -        - not known: the server predates #2512, or this row is not idle and
                no instance explains its STATUS
 
@@ -223,7 +228,8 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
   Prompt JSON output (exit 10):
     {"worktreeId":"...","cliToolId":"claude","type":"yes_no","question":"...","options":["yes","no"],"status":"pending"}
     The payload IS the prompt -- read it from stdout before falling back to
-    capture. For type "selection_list", options is empty by design and the
+    capture. Since Issue #3755 it also carries "observation", the payload
+    "commandmate prompt --json" prints, read off the same capture. For type "selection_list", options is empty by design and the
     question field carries the reason.
 
     Three "type" values share exit 10; only the first is answerable with
@@ -344,6 +350,24 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
     2   - Bad argument (--days/--limit out of range, bad worktree or run id)
     99  - No such run (404), or an unexpected failure
 
+### commandmate prompt <worktree-id> --instance <id> [--json]
+  Observe, once, the screen an agent is stopped on (Issue #3755): its kind,
+  question, options, current selection, approval target, how it is answered,
+  a short-lived observation token, and Auto-Yes as two separate items -- the
+  poller's last record and the contract's policy re-evaluated now. The token
+  is single use and bound to this appearance of the screen and its highlighted
+  option; none is issued for unknown or when the session generation is not
+  known ("tokenWithheld" says which).
+
+  Kinds: antigravity-trust, antigravity-model-picker, antigravity-permission,
+  antigravity-slash-menu, composer / none (nothing asks), unknown (something
+  waits and no measured reading names it -- look at capture <id> --pane).
+  A missing poller record does NOT mean Auto-Yes can answer.
+
+  Exit codes:
+    0  - The screen was read (also composer / none / unknown)
+    21 - No running session: nothing to read
+
 ### commandmate respond <worktree-id> "<answer>"
   Respond to an agent's prompt.
 
@@ -355,6 +379,29 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
   Exit codes:
     0  - Response sent
     99 - Prompt already dismissed (prompt_no_longer_active)
+
+  Strict mode (Issue #3756) -- answer only the screen you observed:
+    commandmate prompt <id> --instance antigravity --json      # kind, token, approvalTarget
+    commandmate respond <id> "Yes" --instance antigravity \\
+      --expect-screen antigravity-trust --observation <token> \\
+      --expect-target "<approvalTarget>" --json
+  The server re-captures the pane and sends nothing unless the kind, the token
+  (pane, generation, appearance, options, highlight) and, on a trust screen,
+  the folder still match. Own endpoint (prompt-response/strict); an older
+  server is a stop, never a fallback. Kinds: antigravity-trust,
+  antigravity-permission. Unnumbered screens (trust) take a label only, sent as
+  Up/Down + Enter: a number, --default, a label matching two options and an
+  option off screen are refused. While the instance's Auto-Yes is on,
+  antigravity-permission is refused (auto_yes_active): run auto-yes <id>
+  --disable first (the trust screen is answered either way). Retry with the
+  same --operation-id and arguments to read the result instead of sending
+  twice; other arguments under a used id are operation_id_conflict (41).
+  answeredBy in the record is self-reported by the CLI. Residual race: keys typed at the pane
+  between the last check and a key are not seen. NOT a way to get auto mode's
+  permission for an approval.
+    0  - Answered (outcome advanced / next-prompt / session-ended)
+    40 - Nothing was sent (mismatch, unreadable, old server): observe again
+    41 - Keys sent, result not confirmed: do NOT send again
 
 ### commandmate interrupt <worktree-id>
   Interrupt the turn an agent is generating (the GUI's interrupt button).
@@ -404,6 +451,21 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
   (e.g. "rm -rf" in an npm script) also triggers it and stops auto-yes.
   To suppress auto-responses for risky prompts, use the task contract's
   autoYes.denyPatterns instead (docs/design/task-contract.md).
+
+  When the contract running on the instance sets autoYes.mode: off, --enable
+  (and send --auto-yes) print a 'Warning:' line on stderr and still exit 0:
+  Auto-Yes is armed but answers nothing there. safe / allow-listed add one
+  'Note:' line naming what is answered (Issue #3723).
+
+  A server restart turns every grant OFF and never turns one back on. After a
+  graceful stop (SIGINT / SIGTERM, e.g. /rebuild or 'commandmate stop') each
+  instance whose grant was live reports why, until that grant's own deadline or
+  the next --enable / --disable (Issue #3730): 'capture --json' autoYes.stopReason
+  = 'server-restart', 'ls' AUTO_YES 'off(restart)', 'instances' AUTO_YES
+  'no(restart)', a 'wait' exit 10 adds a stderr line, and the UI toggle reads
+  "Released by restart". Re-enable with --enable --instance <that instance> (a
+  bare --enable arms the default primary). A SIGKILL or a crash records
+  nothing: those grants come back as a plain off.
 
 ### commandmate instances <worktree-id> [action] [args]
   Discover and manage a worktree's agent-instance roster (1 agent, multiple sessions).

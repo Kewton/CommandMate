@@ -60,6 +60,7 @@ node bin/commandmate.js ls
 | [`commandmate sync`](#commandmate-sync) | Make the server rescan its worktrees (the GUI sync button) |
 | [`commandmate send`](#commandmate-send) | Send a message to an agent |
 | [`commandmate wait`](#commandmate-wait) | Wait for agent completion |
+| [`commandmate prompt`](#commandmate-prompt) | Observe the screen an agent is stopped on (kind, options, observation token) |
 | [`commandmate respond`](#commandmate-respond) | Respond to a prompt |
 | [`commandmate verify`](#commandmate-verify) | Run the verification gates (`.commandmate/verify.yaml`) and read the run history |
 | [`commandmate task`](#commandmate-task) | List and inspect execution contracts (`.commandmate/tasks/*.yaml`) |
@@ -169,6 +170,8 @@ configured and no subscription, is what the column exists for.
 | `42:10` | Time left (`MM:SS` under an hour) |
 | `1:05:33` | Time left (`H:MM:SS` from an hour up) |
 | `off` | At least one of those instances is **not armed**, so a prompt on this row waits for a human |
+| `off(restart)` | An `off` instance whose grant **a server restart released** (Issue #3730). A restart never turns a grant back on. It reads this way until the original grant's deadline, or until `--enable` / `--disable`. The reason is `autoYesStopReasonByInstance.<instanceId>: "server-restart"` in `--json` (a field of its own, beside the armed-only `autoYesByInstance`) |
+| `blocked` | Armed, but the contract running on that instance sets `autoYes.mode: off`, so it **answers nothing** (Issue #3723). Like `off`, a prompt waits for a human. The reason is `autoYesByInstance.<instanceId>.blockedByContract: true` in `--json` |
 | `on` | Armed with no expiry the server named (`expiresAt: null`; the current server does not produce this shape) |
 | `-` | **Not known**: the server predates #2512 (no `autoYesByInstance`), or this row is not `idle` and no instance explains its STATUS |
 | `03:12 (codex-2)` | The cell is about an instance other than the default agent's primary. The id in parentheses is an `--instance` value verbatim |
@@ -399,6 +402,8 @@ esac
 }
 ```
 
+Since Issue #3755 the exit-10 JSON also carries `observation` (on the exit 10 of all three detection paths — prompt, selection list and unclassified screen, which are the only ones `wait` exits 10 from): the same payload as [`commandmate prompt --json`](#commandmate-prompt), read off the capture the exit was decided on. Exit codes, holds and grace are unchanged. `autoYesSuppression` (a record under a minute old) keeps its meaning, but do not read the record's time alone as "why nobody answered" — read `pollerRecord` and `contractEvaluation` under `observation.autoYes`. An older server sends no `observation`.
+
 ### The `type` field of exit 10
 
 `wait` has three distinct reasons to decide "a human is needed", and **all three return exit 10**.
@@ -497,6 +502,69 @@ Completed: localllm-test-main
 
 ---
 
+## commandmate prompt
+
+Observe, once and in a machine-readable form, the screen an agent is stopped on (Issue #3755). Use it instead of guessing from `capture --pane`.
+
+### Usage
+
+```bash
+commandmate prompt <worktree-id> --instance antigravity          # human-readable
+commandmate prompt <worktree-id> --instance antigravity --json   # schemaVersion-tagged JSON
+```
+
+Without `--instance` the worktree's default (primary) instance is read. There is no `--agent`.
+The payload is `promptObservation` of `GET /api/worktrees/<id>/current-output?observe=1` (present only with `observe=1`).
+
+### Screen kinds (`screen.kind`)
+
+| kind | Screen |
+|------|--------|
+| `antigravity-trust` | agy's launch-time folder trust screen (`Do you trust the contents of this project?` / `> Yes, I trust this folder` / `No, exit`). `approvalTarget` is the folder |
+| `antigravity-model-picker` | agy's `/model` picker (`Switch Model`) |
+| `antigravity-permission` | agy's numbered permission dialog (running a command, creating a file). `approvalTarget` is the command block |
+| `antigravity-slash-menu` | agy's slash-command popup |
+| `composer` | No confirmation (at the input box) |
+| `none` | No confirmation (working, not at the input box either) |
+| `unknown` | Something waits on a human and no measured reading names it. Check it with `capture --pane` |
+
+The kinds are a vocabulary of their own, separate from `promptData.type` and `sessionStatusReason` (`antigravity_selection_list`, …). Do not make those values a send condition.
+
+To answer a screen only while it is still the one observed, pass its kind and token to [the strict `respond`](#strict-mode-answer-only-the-screen-you-observed---expect-screen-issue-3756).
+
+### Main fields
+
+| Field | Meaning |
+|-------|---------|
+| `schemaVersion` / `observedAt` | Payload version / when the observation was made (epoch ms) |
+| `target` | What the server resolved (`worktreeId` / `cliToolId` / `instanceId` / `sessionName` = the pane / `resolvedBy`) |
+| `session.generation` | The agent process generation this server launched (epoch ms); null for one running since before a server restart |
+| `status` | `observed` (the screen was read, including when nothing asks) / `unavailable` (no running session) |
+| `screen.token` | The observation token. Short-lived (120 s), single use, and bound to the instance, session generation, pane, appearance of the screen, kind, question, options, approval target and highlighted option. Null for `composer` / `none`, for `unknown`, and when the session generation is not known (an agent running since before a server restart). A screen that goes away and comes back with the same words between two observations counts as the same appearance |
+| `screen.tokenWithheld` | Why `token` is null: `no-decision` (nothing asks) / `unknown-screen` / `no-session-generation`. Null when a token was issued |
+| `screen.appearedAt` | When this appearance of the screen was first observed (epoch ms; bound by the token). Null with no token |
+| `screen.question` / `options` / `selectedPosition` / `approvalTarget` | Question, options (1-based), current selection, approval target |
+| `screen.answerVia` | How it is answered: `screen` (keys via `respond`) / `api` (a decision) / `strict` (agy's folder-trust screen: answered by `respond --expect-screen`) / `terminal` (`respond` cannot answer it today) / `none` |
+| `autoYes.enabled` / `pollerActive` | Whether Auto-Yes is on / whether the server's poller runs |
+| `autoYes.pollerRecord` | What the poller (or the permission hook) last recorded as withheld. `screenCorrelation` relates it to this screen; the record names no screen, so it is `unknown` / `type-mismatch` / `no-prompt-on-screen` |
+| `autoYes.contractEvaluation` | The contract's policy applied to this screen **now** (`policy-withholds` + reason / `policy-permits` / `no-base-answer` / `not-evaluated`). Reasons use the `AutoYesSuppressionReason` words ([reason table](#autoyeslastsuppression-observing-a-policy-suppression-issue-1684)) |
+| `lastSend` | How the last send to this instance ended (Issue #3759): `{ at, state, reason }`. `state` is `not-sent` (it failed before any key of the body was typed, e.g. `prompt-not-ready`) / `sent` (the submit was confirmed) / `indeterminate` (it failed after part of it may have been typed, or the outcome could not be read back; `reason: composer-residue` when the body is still in the composer). Null when this server has no record since it started; absent from an older server |
+
+**Whatever `lastSend` says, CommandMate never resends.** The sender — you or the supervising agent — does. Resend a `not-sent` message yourself once the input prompt is back. **Do not resend an `indeterminate` one** before checking the pane with `commandmate capture <worktree-id> --pane` (is the body still in the composer, or was it already submitted?); resending blind can deliver it twice. A `send` that fails with `prompt not ready` and the like carries the same state in its error (`[send state: not-sent (prompt-not-ready): …]`).
+
+**A missing record (`pollerRecord: null`) does not mean Auto-Yes can answer.** A poller that never reached the screen records nothing either (Issue #3746).
+`policy-permits` says only that the contract would not stop it; the poller's other gates (the tool-specific dialog reader, …) are not part of it.
+
+### Exit Codes
+
+| Code | Meaning |
+|:----:|---------|
+| 0 | The screen was read (including no confirmation and `unknown`) |
+| 21 | No running session (nothing to read) |
+| 1 / 2 / 99 | Connection / argument / unexpected errors (99 also for a server too old to send `promptObservation`) |
+
+---
+
 ## commandmate respond
 
 Respond to an agent's prompt.
@@ -508,11 +576,109 @@ commandmate respond <worktree-id> "text"         # Free text
 commandmate respond <worktree-id> "yes" --instance codex     # Specific instance
 ```
 
+### Strict Mode: Answer Only the Screen You Observed (`--expect-screen`, Issue #3756)
+
+With `--expect-screen <kind> --observation <token>`, the server answers only when a capture it takes **just before
+sending** still shows `<kind>` and the observation token printed by [`commandmate prompt`](#commandmate-prompt) still
+verifies. Otherwise it sends **nothing** and exits 40.
+
+```bash
+commandmate prompt <worktree-id> --instance antigravity --json        # read kind, options, token, approvalTarget
+commandmate respond <worktree-id> "Yes" --instance antigravity \
+  --expect-screen antigravity-trust --observation <token> \
+  --expect-target "<the folder approvalTarget showed>" --json
+```
+
+- It goes to its own endpoint, `POST /api/worktrees/<id>/prompt-response/strict`. An older server without it is a
+  **stop** (exit 40, `strict_endpoint_missing`); it never falls back to the unchecked `/prompt-response`
+- The kinds it answers are `antigravity-trust` (the folder trust screen) and `antigravity-permission` (the numbered
+  permission dialog). `antigravity-model-picker` (its effort row is not read), `antigravity-slash-menu` and `unknown`
+  are refused before any key
+- **While the instance's Auto-Yes is on, `antigravity-permission` cannot be answered strictly** (exit 40,
+  `auto_yes_active`): the poller answers the same dialog itself, and an Enter could land on the screen that follows.
+  Turn it off first with `commandmate auto-yes <worktree-id> --disable`. `antigravity-trust`, which Auto-Yes never
+  answers, can be answered with Auto-Yes on
+- A trust screen also requires its **folder (`approvalTarget`) to equal `--expect-target`**. Without
+  `--expect-target` nothing is sent and the folder on screen comes back as `observedTarget`. A trust screen whose
+  folder could not be read is refused
+- `--observation` is the observation token, not the auth `--token`. It is used up before the first key (a send that
+  then fails cannot reuse it). After a refusal, observe again with `commandmate prompt`
+- Before any key, the fresh capture is checked for: the kind, the token (pane, session generation, appearance of the
+  screen, options, highlighted option), the folder, the option the answer names, **the screen being open at the
+  bottom of the pane** (no input box under it, `↑/↓ Navigate` at the end — a trust screen quoted in a reply still
+  being generated is not answered), and the launch not handling the trust screen itself. The launch's owed Enter
+  (#3757) is dropped once the strict respond answers the trust screen, so the two never both answer it
+- **This is not a way to get auto mode's permission.** It guarantees only that an answer cannot land on a screen it
+  was not meant for; whether the approval may be given is for the user's permission rules. Do not retry an action
+  auto mode refused through this flag
+
+#### Answering an Unnumbered Screen
+
+The trust screen numbers no option. Answer with the **option's label**; it is sent only when it matches exactly one
+option visible on screen (case and spacing aside; with no exact match, a leading match up to a word boundary —
+`Yes` → `Yes, I trust this folder`). What is sent is **Up/Down and Enter**, not text: the screen is read again after
+every arrow, and the next key goes only while it is the same screen with the highlight where the keys put it.
+
+- An option number and `--default` are refused (exit 2)
+- A label matching two or more options, a screen with repeated labels, and an option outside the visible rows are refused
+- On the numbered `antigravity-permission`, an option number works too
+
+#### Outcome and Operation IDs
+
+After the Enter the screen is read for a few seconds and `outcome` says what it did: `advanced` (nothing asks any
+more: the input box, or working) / `next-prompt` (another confirmation) / `session-ended` (the session is gone — agy
+exits when the trust screen is answered `No, exit`) / `unchanged` (the same screen) / `indeterminate` (unreadable, or
+`unknown`). `advanced`, `next-prompt` and `session-ended` are success (exit 0); a screen that stayed is never answered
+again automatically.
+
+After an answer that itself exits agy (`No, exit`, the second of the trust screen's two options; a screen in another
+order, with another number of options or other wording has none), the tmux session stays up with the shell in it and
+the screen reads as `unknown`. When the pane's foreground command is a shell again (`zsh`, `bash`, ...), that is
+`session-ended` even though the screen reads as `unknown`. After any other answer (`Yes`, or an answer to a permission
+dialog) a shell in front is agy falling over, not the answer, and stays `indeterminate` (exit 41). A read after the
+Enter that failed is never overridden: `indeterminate`. A foreground command
+that cannot be read, or is still agy, is `indeterminate` too.
+
+Without `--operation-id <id>` a new id is used each time. Ids are kept per worktree and instance (session), together
+with what the request asked (kind, answer, token, `--expect-target`). Sending an operation that sent keys (exit 0 / 41)
+again with the same id and the same arguments returns the stored result (`replayed: true`) and **sends nothing twice**
+(for 10 minutes; a server restart forgets it). The same id with different arguments sends nothing and exits 41
+(`operation_id_conflict`). An exit-40 result (nothing sent) is not kept, so the answer can be corrected and sent again
+with the same id. When the answer was lost (exit 41, `response_unknown`), re-run with the same `--operation-id` and
+arguments to read that operation's result. A server that could not be connected to at all (connection refused, …) never
+got the request: exit 40 (`server_unreachable`).
+
+`--json` prints exactly one result object on stdout (`code` / `delivery` (`not-sent` / `partial` / `sent` /
+`indeterminate`) / `reason` / `expectedKind` / `observedKind` / `observedTarget` / `operationId` / `answer` /
+`keysSent` / `outcome` / `highlightLeftAt`). Explanations go to stderr.
+
+`highlightLeftAt` (`{ position, label }` or `null`) says, for an exit 41 that stopped before its Enter (`delivery:
+partial`), where the arrow keys left the highlight, as the last read of the same screen showed it; the `message` ends
+with it too. On agy's permission dialog it can be a `(Persist to settings.json)` option, which an Enter at the pane
+would then choose. The keys are not walked back. It is `null` when the Enter was sent, when nothing was sent (exit 40),
+and when the position is not known (the screen changed, or a key was sent and not read back). A result the CLI makes
+itself (`response_unknown`, `server_unreachable`, …) and a result from an older server without the field leave it out.
+
+Who answered (the agent the CLI runs in, `agent:<worktree>/<instance>`, or `cli`), which screen and which option are
+recorded in server.log (`strict-prompt-answered` / `strict-prompt-response-refused`) and, once any key was sent, in
+the task's history (`prompt_answered_human`, with the reason code when it stopped short). Who answered (`answeredBy`)
+is **self-reported** by the CLI from its environment; the server does not verify it.
+
+#### Residual Race
+
+Checking and sending are not atomic. Strict answers to one instance are serialised on the server and the screen is
+read again between keys, but a key typed at the pane, or a change on the tmux side, between the last check and the
+next key is not seen. A screen that goes away and comes back with the same words between two observations counts as
+the same appearance (`screen.token` of [`commandmate prompt`](#commandmate-prompt)).
+
 ### Exit Codes
 
 | Code | Meaning |
 |:----:|---------|
 | 0 | Response sent successfully |
+| 2 | Argument errors; in strict mode also `--default`, a number on an unnumbered screen, or only one of `--expect-screen` / `--observation` |
+| 40 | Strict mode: the screen did not match or could not be checked. **Nothing was sent** (kind, token, folder or label mismatch, capture failure, an older server, …). Observe again with `commandmate prompt` |
+| 41 | Strict mode: keys were sent (or may have been) and the result is not confirmed. **Do not send again**; look at the pane. Even at 41, when `reason` is `operation_in_progress` / `operation_id_conflict` nothing was sent (`keysSent` is 0; `delivery` reads `indeterminate` but nothing was sent); fetch the result again under a different ID |
 | 99 | Prompt already dismissed (`prompt_no_longer_active`) |
 
 ---
@@ -1042,6 +1208,20 @@ gemini       Gemini  gemini    no       no                                   mcb
 ---
 
 
+#### `autoYes.stopReason`: Why Auto-Yes Stopped
+
+On an instance whose Auto-Yes is off, the reason it stopped, when there is one (otherwise the key is
+absent): `expired`, `stop_pattern_matched`, `consecutive_errors`, and **`server-restart`**
+(Issue #3730) — the grant was live when the server stopped gracefully (SIGINT / SIGTERM, including
+`/rebuild` and `commandmate stop`).
+
+- A restart **never turns the grant back on** (`enabled: false`). The reason stays until the original
+  grant's deadline, including across another restart inside it, and goes on `--enable` or `--disable`
+- A SIGKILL or a crash records nothing; those grants come back as a plain off
+- The same reason reads `off(restart)` in `commandmate ls`, `no(restart)` in `commandmate instances`,
+  and "Released by restart" in the UI. On exit 10, `commandmate wait` adds one stderr line naming the
+  re-enable command with the waited-on `--instance`
+
 #### `autoYes.lastSuppression`: Observing a Policy Suppression (Issue #1684)
 
 The last time a contract's `autoYes` policy **suppressed** an automatic answer (`null` if it never
@@ -1075,6 +1255,18 @@ does not type at the same prompt again and leaves it to a human (`mode` is `null
 carries the session to a new ID, this carries on under the new ID. `commandmate wait` prints it as
 "because an earlier answer left partial input; Auto-Yes is waiting for a human" (exit 10 and the JSON
 `reason` are handled as for any other reason). Check what is left in the input before answering.
+
+The remaining words of the type `AutoYesSuppressionReason` are not policy verdicts either, so `mode` can be `null`. The wording `commandmate wait` prints is quoted alongside.
+
+| `reason` | Meaning | `commandmate wait` prints |
+|----------|---------|---------------------------|
+| `agent-launch-dialog` (Issue #1829) | The confirmation on screen is a dialog of the CLI's launch sequence (a trust confirmation, for instance); its answer belongs to the tool's own launch sequence, so Auto-Yes does not answer it. If it stays after the launch with the cursor off the safe row (copilot's on `2.` or `3.`, gemini's on anything but `1. Trust folder`; Issue #3790), nobody answers it, so answer it at the pane | "while the agent's launch dialog was on screen; if it stays after the launch (copilot's cursor on 2. or 3., gemini's not on 1. Trust folder), answer it at the pane" |
+| `unclassified-frame` (Issue #1924) | The generic estimator read a numbered list, but the tool's own dialog detector did not accept it as a confirmation, so nothing is sent. This is the position that stops answering `1` to a numbered list inside a reply (#1896) | "because no tool-specific dialog detector recognised the frame" |
+| `startup-trust-unhandled` (Issue #3757) | agy's startup folder-trust confirmation (`Do you trust the contents of this project?`) is on screen. It belongs to the launch sequence and is unnumbered, so the poller cannot read it as a prompt. If it was drawn after the launch window ended, the next send's readiness wait answers it | "because agy's startup folder-trust confirmation is the launch's to answer, not Auto-Yes's; the next send confirms it once, or answer it at the pane" |
+| `question-confirm-page` (Issue #3748) | The `AskUserQuestion` confirm page (`Submit` / `Cancel`) of Command Code and Claude. `Submit` picks nothing; it commits the answers as they stand, so Auto-Yes does not answer and leaves it to a human | "because the question's Submit/Cancel confirmation commits the answers as they stand, so Auto-Yes leaves it to a human" |
+| `no-hook-receipt` (Issue #3767) | agy's approval dialog is on screen but there is no matching hook question (`PreToolUse`) on record: (1) none was ever received, (2) the dialog appeared after the window (8 s) from the last one, (3) the dialog was already up before the question arrived (a quotation in a reply, for instance), (4) the questions stopped arriving, (5) the question was already spent on an earlier dialog, or (6) a dialog is still up 18 s (window + observation slack + post-answer cooldown) after Auto-Yes sent keys to the one its question was for — the keys did not clear it, or a dialog with no question of its own replaced it (Issue #3789). Even if sending is cut short part-way, the grace (18 s) is counted from that point, and if the confirmation remains after it has passed, it is recorded as no-hook-receipt. Part of the keys may remain in the input. However, if a more specific suppression reason (partial-answer) was recorded after the interruption, that reason is kept and it is not recorded as no-hook-receipt. The `hint` of the server log line `antigravity-autoyes-withheld-no-hook-receipt` tells them apart. **When it stalls**: `commandmate auto-yes <worktree-id> --disable`, then `commandmate prompt <worktree-id> --json`, then `commandmate respond <worktree-id> --expect-screen …` (or answer in the UI). If no question was ever received or they stopped, check where `~/.gemini/config/hooks.json` points | "because there is no unused agy hook permission question for this dialog (none arrived in time, or the last one was spent on keys that did not clear it); answer it yourself (auto-yes --disable, prompt --json, respond --expect-screen) or check hooks.json" |
+
+In [`commandmate prompt --json`](#commandmate-prompt), `autoYes.pollerRecord` (the poller's record) and `autoYes.contractEvaluation` (the contract re-evaluated now) are separate fields, but both use the same words as this table and the `reason` row above.
 
 If `isPromptWaiting: true` and `lastSuppression.at` is recent, that session is **stalled on a policy
 suppression right now**. Either answer it as a human with `commandmate respond`, or revisit the
@@ -1550,6 +1742,32 @@ A non-primary `--instance` reads as `(opencode, instance oc-2)`. If no agent is 
 (`Auto-yes enabled for proj-cp.`), the **running server is older than the CLI** and is still
 hard-coding claude; restart it with `commandmate stop && commandmate start`.
 
+### A Contract With `autoYes.mode: off` Is Warned About When Arming (Issue #3723)
+
+On an instance whose running contract sets `autoYes.mode: off`, Auto-Yes **never answers**, however
+it is enabled. `auto-yes --enable` and `send --auto-yes` then print a warning on stderr (the exit
+code stays 0: the arming itself succeeded).
+
+```console
+$ commandmate auto-yes proj-cc --enable --instance claude-2
+Auto-yes enabled for proj-cc (claude, instance claude-2).
+Warning: the contract of task 7f3c… sets autoYes.mode: off, so Auto-Yes is armed but will answer no prompt. Prompts on this instance wait for a human (commandmate respond).
+```
+
+- `safe` / `allow-listed` are not blocked; one `Note:` line names what gets answered
+  (e.g. `Note: … sets autoYes.mode: safe; Auto-Yes answers yes_no prompts only.`)
+- With no contract, or a contract that states no `mode`, the output is what it was
+- The verdict goes through the poller's own policy read (`getSessionAutoYesPolicy`). On the API it
+  is `contractPolicy` (`{ taskId, mode, allowPromptTypes, denyPatternCount }` or `null`) on the
+  responses of `POST /api/worktrees/<id>/auto-yes` (enabling) and `GET …/auto-yes?cliToolId=`
+- The verdict is about the contract **running at that moment**. With `send --contract … --auto-yes`,
+  though, the task is still `pending` when Auto-Yes is armed (the server does not count it as
+  running), so when the server's `contractPolicy` is `null` the `autoYes` of **the contract being
+  sent** is judged instead. The same `Warning:` / `Note:` is printed once, including when `--model`
+  moves the arming after the send (a value from the server takes precedence)
+- Once armed, the `AUTO_YES` column of `commandmate ls` / `commandmate instances` reads `blocked`,
+  and the Auto Yes toggle on the worktree detail screen shows "Blocked by contract (mode: off)"
+
 Arming a session that is already stuck on a dialog adds a second line reporting what it re-judged
 for **that resolved agent** (Issue #1898-2 — only sources with a `resync` capability, which today
 means opencode; the five hook tools print nothing).
@@ -1711,6 +1929,11 @@ a `RUNNING no` row can read `yes`.
   `current-output` `autoYes` as before; there, an instance that is not running reads `no` even when
   Auto-Yes is on
 - `autoYes` in `--json` is the same value
+- An armed instance whose running contract sets `autoYes.mode: off` reads `blocked` (Issue #3723).
+  In `--json`, `autoYes` stays `true` and `autoYesBlockedByContract: true` is added (absent on every other row)
+- An instance whose grant a server restart released reads `no(restart)` (Issue #3730). In `--json`,
+  `autoYes: false` gains `autoYesStopReason: "server-restart"` (absent on every other row). It reads
+  so until the original grant's deadline, or until `--enable` / `--disable`
 
 #### The `MODEL` / `EFFORT` Columns (Issue #1785)
 

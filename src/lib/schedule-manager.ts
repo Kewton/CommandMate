@@ -79,6 +79,19 @@ interface ManagerState {
    * syncSchedules() cycle (CMATE.md deletion path in Step 3b).
    */
   cmateFileCache: Map<string, number>;
+  /**
+   * Optional so a state object created by an older module instance (hot reload)
+   * still works; read as 0 / empty when absent.
+   * Bumped by stopAllSchedules(). syncSchedules() reads it when it starts and
+   * abandons the pass once it differs (Issue #3735).
+   */
+  generation?: number;
+  /**
+   * worktreeId -> number of stopScheduleForWorktree() calls. A sync that read a
+   * different value for a worktree than it sees after its await skips that
+   * worktree (Issue #3735). Bounded by the number of worktrees ever stopped.
+   */
+  worktreeStopCounts?: Map<string, number>;
 }
 
 export interface ActiveScheduleInfo {
@@ -282,6 +295,8 @@ function getManagerState(): ManagerState {
       initialized: false,
       isSyncing: false,
       cmateFileCache: new Map(),
+      generation: 0,
+      worktreeStopCounts: new Map(),
     }));
 }
 
@@ -329,6 +344,10 @@ async function syncSchedules(): Promise<void> {
   manager.isSyncing = true;
 
   try {
+    // Issue #3735: remember what had been stopped when this pass began, so that
+    // a stop landing during the readCmateFile() await is noticed afterwards.
+    const startGeneration = manager.generation ?? 0;
+    const startStopCounts = new Map(manager.worktreeStopCounts);
     const worktrees = getAllWorktrees();
 
     // Track which scheduleIds are still valid
@@ -386,7 +405,27 @@ async function syncSchedules(): Promise<void> {
         const entries = parseSchedulesSection(scheduleRows);
 
         // Issue #409: Batch upsert all entries for this worktree
+        // (Issue #3735: deliberately not gated — a row for a stopped worktree is
+        // fixed by the FK CASCADE or the next sync's disableStaleSchedules())
         const scheduleIds = batchUpsertSchedules(worktree.id, entries);
+
+        // Issue #3735: no await below, so this synchronous check covers every
+        // cron created, replaced or recovered for this worktree.
+        if ((manager.generation ?? 0) !== startGeneration) {
+          // stopAllSchedules() ran. Abandon the pass entirely: the stale-removal
+          // step below would otherwise judge schedules of a restarted manager
+          // against this pass's partial activeScheduleIds.
+          manager.cmateFileCache.delete(worktree.path);
+          logger.info('sync:aborted-by-stop-all', { worktreeId: worktree.id });
+          return;
+        }
+        if ((manager.worktreeStopCounts?.get(worktree.id) ?? 0) !== (startStopCounts.get(worktree.id) ?? 0)) {
+          // The mtime cache was set before the await; drop it so a worktree
+          // that still exists is picked up by the next pass.
+          manager.cmateFileCache.delete(worktree.path);
+          logger.info('sync:skipped-stopped-worktree', { worktreeId: worktree.id });
+          continue;
+        }
 
         for (let i = 0; i < entries.length; i++) {
           const entry = entries[i];
@@ -577,6 +616,7 @@ export function stopAllSchedules(): void {
     }
   }
   manager.schedules.clear();
+  manager.generation = (manager.generation ?? 0) + 1;
   // DR1-008: Clear mtime cache to prevent stale values from causing
   // incorrect skip decisions on next initScheduleManager() call
   manager.cmateFileCache.clear();
@@ -611,6 +651,8 @@ export function stopAllSchedules(): void {
  */
 export function stopScheduleForWorktree(worktreeId: string): void {
   const manager = getManagerState();
+  const stopCounts = (manager.worktreeStopCounts ??= new Map());
+  stopCounts.set(worktreeId, (stopCounts.get(worktreeId) ?? 0) + 1);
 
   // Stop and remove cron jobs for the target worktree
   for (const [scheduleId, state] of manager.schedules) {

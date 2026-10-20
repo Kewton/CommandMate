@@ -53,7 +53,7 @@ import {
   readPromptResponseOutcome,
   type PromptResponseOutcome,
 } from '@/lib/prompt-response-outcome';
-import { readSelectionListShape } from '@/lib/detection/selection-shape';
+import { isTrustConfirmationFrame, readSelectionListShape } from '@/lib/detection/selection-shape';
 import {
   NO_SELECTION_LIST_READING,
   isSameSelectionListReading,
@@ -62,7 +62,8 @@ import {
 } from '@/lib/session/selection-list-ops';
 import { useAppUpdate } from '@/contexts/AppUpdateContext';
 import { type AutoYesToggleParams } from '@/components/worktree/AutoYesToggle';
-import type { AutoYesStopReason } from '@/config/auto-yes-config';
+import { isReleasedByRestart, type AutoYesStopReason } from '@/config/auto-yes-config';
+import type { AutoYesInstanceSummary } from '@/types/auto-yes';
 import type { CurrentOutputResponseBody } from '@/lib/session/current-output-types';
 import {
   PANE_GATE_NOTHING_ARRIVED,
@@ -193,12 +194,19 @@ type CurrentOutputResponse = Pick<CurrentOutputResponseBody, 'isRunning'> &
  */
 interface ControllerPaneGateState extends PaneGateState {
   offersPlanApprove: boolean;
+  /**
+   * Issue #3758: the selection list is a folder-trust confirmation. Read off
+   * the same response's frame, for the same reason `offersPlanApprove` is: the
+   * docked pad holds no frame.
+   */
+  isTrustConfirmationActive: boolean;
 }
 
 /** {@link ControllerPaneGateState} before anything has arrived for the polled agent. */
 const CONTROLLER_PANE_GATE_NOTHING_ARRIVED: ControllerPaneGateState = Object.freeze({
   ...PANE_GATE_NOTHING_ARRIVED,
   offersPlanApprove: false,
+  isTrustConfirmationActive: false,
 });
 
 // ============================================================================
@@ -224,6 +232,20 @@ const IDLE_POLLING_INTERVAL_MS = 5000;
  * Once a worktree HAS been rendered the ladder stays out of the way: a failed
  * poll is a stale screen, not a blank one, and the poll itself is the retry.
  */
+/**
+ * Issue #3723: how often the whole-worktree Auto-Yes map is re-read while any
+ * instance is armed, so a contract that starts (or ends) on an instance with the
+ * page open adds (or drops) the toggle's "blocked by contract" note without a
+ * reload. Separate from the 2 s / 5 s detail poll, and much slower: the
+ * current-output poll does not carry the contract verdict (its route is out of
+ * this change), the server re-reads the policy at most every 5 s
+ * (AUTO_YES_POLICY_CACHE_TTL_MS), and a task changes state on the scale of
+ * minutes — a note up to ~12 s late costs nothing, one request per poll would.
+ * Nothing is re-read while every instance is disarmed: the note is shown only
+ * on an armed toggle.
+ */
+export const AUTO_YES_CONTRACT_REFRESH_MS = 12_000;
+
 export const DETAIL_LOAD_RETRY_DELAYS_MS = [2000, 5000, 10000] as const;
 
 /**
@@ -427,7 +449,12 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   // Issue #896: re-keyed by *instanceId* so each agent instance has its own
   // auto-yes state (the primary instance's id === its cliToolId, preserving the
   // previous cliTool-keyed behavior for single-instance worktrees).
-  const [autoYesStateMap, setAutoYesStateMap] = useState<Map<string, { enabled: boolean; expiresAt: number | null }>>(new Map());
+  //
+  // Issue #3723: `blockedByContract` — armed, but the contract running on the
+  // instance says `autoYes.mode: off`. Written by the two auto-yes responses
+  // that carry it (the whole-worktree GET and the toggle POST); the
+  // current-output poll keeps it while the instance stays armed.
+  const [autoYesStateMap, setAutoYesStateMap] = useState<Map<string, AutoYesInstanceSummary>>(new Map());
   // Issue #501: Track last server-side auto-yes response timestamp for duplicate prevention
   const [lastServerResponseTimestamp, setLastServerResponseTimestamp] = useState<number | null>(null);
   // Issue #501: Track whether server-side auto-yes poller is active
@@ -543,11 +570,29 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   // Issue #902: Latest-request guard for the bulk per-instance auto-yes refetch
   // so a slow reply for worktree A can't pollute worktree B's map during rapid
   // A→B→A navigation (newest reply wins; the server is the source of truth).
+  // Issue #3723: a successful toggle POST advances it too, so a GET begun
+  // before the toggle cannot overwrite what the POST answered.
   const latestAutoYesRequestIdRef = useRef(0);
   // Issue #525/#896: Derive the active instance's auto-yes state from the
   // per-instance map (keyed by activeInstanceId; primary instance id === cliToolId).
   const autoYesEnabled = autoYesStateMap.get(activeInstanceId)?.enabled ?? false;
   const autoYesExpiresAt = autoYesStateMap.get(activeInstanceId)?.expiresAt ?? null;
+  const autoYesBlockedByContract = autoYesStateMap.get(activeInstanceId)?.blockedByContract === true;
+  // Issue #3730: OFF because the last server restart released the grant.
+  const autoYesReleasedByRestart = isReleasedByRestart(autoYesStateMap.get(activeInstanceId));
+  // Issue #3723: gates the contract re-read below.
+  const anyAutoYesEnabled = useMemo(
+    () => Array.from(autoYesStateMap.values()).some((entry) => entry.enabled),
+    [autoYesStateMap],
+  );
+  // Issue #3730: a restart notice on any instance (primary or alias). It ends
+  // at the released grant's deadline on the server, and only the whole-worktree
+  // re-read below brings that end to an alias — the current-output poll on PC
+  // is about the primary alone.
+  const anyAutoYesReleasedByRestart = useMemo(
+    () => Array.from(autoYesStateMap.values()).some((entry) => isReleasedByRestart(entry)),
+    [autoYesStateMap],
+  );
   // Trigger to refresh FileTreeView after file operations
   const [fileTreeRefresh, setFileTreeRefresh] = useState(0);
 
@@ -942,6 +987,11 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
         // Issue #2809: read with the function the chat surface's card uses.
         offersPlanApprove:
           readSelectionListShape(data.realtimeSnippet || data.fullOutput).offersPlanApprove,
+        // Issue #3758: only while this response says a selection list is up —
+        // the frame `nextSelectionListReading` above is read from.
+        isTrustConfirmationActive:
+          (data.isSelectionListActive ?? false)
+          && isTrustConfirmationFrame(data.fullOutput ?? data.realtimeSnippet, requestedCliTool),
         // Issue #2592: the mode itself and the three remaining gate inputs.
         // Absent fields read as "nothing is on screen" / "no frame has landed",
         // which is what every other flag above already does — and `agentMode`
@@ -972,7 +1022,20 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
         const seedInstanceId = onMobile ? requestedInstance : requestedCliTool;
         setAutoYesStateMap(prev => {
           const next = new Map(prev);
-          next.set(seedInstanceId, { enabled: autoYes.enabled, expiresAt: autoYes.expiresAt });
+          // Issue #3723: this poll does not carry the contract verdict, so the
+          // last one read is kept for as long as the instance stays armed.
+          const blocked = autoYes.enabled && prev.get(seedInstanceId)?.blockedByContract === true;
+          next.set(seedInstanceId, {
+            enabled: autoYes.enabled,
+            expiresAt: autoYes.expiresAt,
+            ...(blocked ? { blockedByContract: true } : {}),
+            // Issue #3730: this poll carries the full stop reason, so the
+            // restart notice the whole-worktree GET seeded survives it — and
+            // goes when the server stops reporting it.
+            ...(!autoYes.enabled && autoYes.stopReason === 'server-restart'
+              ? { stopReason: 'server-restart' as const }
+              : {}),
+          });
           return next;
         });
         prevAutoYesEnabledRef.current = autoYes.enabled;
@@ -1017,13 +1080,23 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       if (latestAutoYesRequestIdRef.current !== requestId) return;
       const instances = data?.instances;
       if (!instances || typeof instances !== 'object') return;
-      const next = new Map<string, { enabled: boolean; expiresAt: number | null }>();
+      const next = new Map<string, AutoYesInstanceSummary>();
       for (const [instanceId, raw] of Object.entries(instances)) {
         if (raw && typeof raw === 'object') {
-          const s = raw as { enabled?: boolean; expiresAt?: number | null };
+          const s = raw as {
+            enabled?: boolean;
+            expiresAt?: number | null;
+            blockedByContract?: boolean;
+            stopReason?: string;
+          };
+          const enabled = s.enabled ?? false;
           next.set(instanceId, {
-            enabled: s.enabled ?? false,
+            enabled,
             expiresAt: s.expiresAt ?? null,
+            // Issue #3723
+            ...(enabled && s.blockedByContract === true ? { blockedByContract: true } : {}),
+            // Issue #3730: a server older than the field sends none — plain OFF.
+            ...(!enabled && s.stopReason === 'server-restart' ? { stopReason: 'server-restart' as const } : {}),
           });
         }
       }
@@ -1448,10 +1521,23 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
           });
           if (response.ok) {
             const data = await response.json();
+            // Issue #3723: a whole-worktree GET that started before this POST
+            // answered read the state from before the toggle (e.g. an alias's
+            // expired arming); landing after this write it would turn the toggle
+            // back OFF and stop the contract re-read. Advancing the same counter
+            // the GETs check retires every GET already in flight — one started
+            // after this point is newer than the toggle and is adopted.
+            ++latestAutoYesRequestIdRef.current;
             // Issue #525/#896: Store per-instance state keyed by the toggled instance.
             setAutoYesStateMap(prev => {
               const next = new Map(prev);
-              next.set(effectiveInstanceId, { enabled: data.enabled, expiresAt: data.expiresAt });
+              // Issue #3723: the arming response names the contract policy.
+              const blocked = data.enabled === true && data.contractPolicy?.mode === 'off';
+              next.set(effectiveInstanceId, {
+                enabled: data.enabled,
+                expiresAt: data.expiresAt,
+                ...(blocked ? { blockedByContract: true } : {}),
+              });
               return next;
             });
             // Issue #740/#896: the stop-reason ref tracks the ACTIVE instance only;
@@ -1459,12 +1545,19 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
             if (effectiveInstanceId === activeInstanceIdRef.current) {
               prevAutoYesEnabledRef.current = data.enabled;
             }
+            // Issue #3723: the GETs retired above may have been the only reader
+            // of the OTHER instances (the current-output poll seeds one). Re-read
+            // the whole map now, newer than this toggle, so an alias armed all
+            // along is not left reading OFF — and the contract re-read's
+            // "anything armed?" gate is decided by this answer, not by the
+            // single entry this POST wrote.
+            void fetchAutoYesStates();
           }
         } catch (err) {
           console.error('[WorktreeDetailRefactored] Error toggling auto-yes:', err);
         }
       },
-    [worktreeId],
+    [worktreeId, fetchAutoYesStates],
   );
 
   /**
@@ -1945,6 +2038,25 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     void fetchAutoYesStates();
   }, [worktreeId, rosterReady, fetchAutoYesStates]);
 
+  /**
+   * Issue #3723: while any instance is armed, re-read the same whole-worktree
+   * map every {@link AUTO_YES_CONTRACT_REFRESH_MS}. It replaces the map
+   * wholesale, so its `blockedByContract` overwrites the value the
+   * current-output poll carries forward — a contract that started sets it, one
+   * that ended clears it.
+   *
+   * Issue #3730: also while any instance shows a restart notice, though every
+   * instance is OFF — otherwise an alias's notice outlives its deadline (and a
+   * re-enable from the CLI) for as long as the screen stays open.
+   */
+  useEffect(() => {
+    if (!anyAutoYesEnabled && !anyAutoYesReleasedByRestart) return;
+    const intervalId = setInterval(() => {
+      void fetchAutoYesStates();
+    }, AUTO_YES_CONTRACT_REFRESH_MS);
+    return () => clearInterval(intervalId);
+  }, [anyAutoYesEnabled, anyAutoYesReleasedByRestart, fetchAutoYesStates]);
+
   /** Sync layout mode with viewport size */
   useEffect(() => {
     actions.setLayoutMode(isMobile ? 'tabs' : 'split');
@@ -2022,6 +2134,8 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     agentInstances,
     autoYesEnabled,
     autoYesExpiresAt,
+    autoYesBlockedByContract,
+    autoYesReleasedByRestart,
     autoYesStateMap,
     diffContent,
     diffFilePath,
@@ -2103,6 +2217,8 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     promptAutoYesEnterSent,
     // Issue #2809: the docked pad's Enter gate on a plan review.
     offersPlanApprove: paneGate.offersPlanApprove,
+    // Issue #3758: the docked pad's "terminal action needed (trust)" notice.
+    isTrustConfirmationActive: paneGate.isTrustConfirmationActive,
     // Issue #2592: the phone composer's permission-mode control.
     isDismissablePanelActive: paneGate.isDismissablePanelActive,
     isUnclassifiedActive: paneGate.isUnclassifiedActive,

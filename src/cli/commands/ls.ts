@@ -57,9 +57,15 @@ export type CliStatusEntry = NonNullable<WorktreeItem['sessionStatusByCli']>[str
  * Only ARMED instances appear in the map: the server folds expired and
  * turned-off states away as it reads them (`getEnabledAutoYesByWorktree`), so a
  * missing key means "not armed right now" and carries no reason. Why it stopped
- * lives in `commandmate capture --json`'s `autoYes.stopReason`.
+ * lives in `commandmate capture --json`'s `autoYes.stopReason` — except a
+ * release by a server restart (Issue #3730), which the row also names in
+ * `autoYesStopReasonByInstance`, beside this map.
+ *
+ * Issue #3723: `blockedByContract` is true when the instance is armed but the
+ * contract governing it says `autoYes.mode: 'off'` — the poller answers nothing.
+ * Omitted otherwise (and by a server older than #3723).
  */
-export type AutoYesInstanceWire = { enabled: boolean; expiresAt: number | null };
+export type AutoYesInstanceWire = { enabled: boolean; expiresAt: number | null; blockedByContract?: boolean };
 
 /**
  * A list row with the two maps this command reads and `WorktreeItem` does not
@@ -82,6 +88,13 @@ export type AutoYesInstanceWire = { enabled: boolean; expiresAt: number | null }
  */
 export interface LsWorktreeItem extends WorktreeItem {
   autoYesByInstance?: Record<string, AutoYesInstanceWire>;
+  /**
+   * Issue #3730: instances whose grant the last server restart released, as
+   * `{ [instanceId]: 'server-restart' }` (a string, since a newer server may
+   * name more reasons). Absent from a row with none, and from servers older
+   * than the field. Never an armed instance: those are in `autoYesByInstance`.
+   */
+  autoYesStopReasonByInstance?: Record<string, string>;
   sessionStatusByInstance?: Partial<Record<string, CliStatusEntry>>;
 }
 
@@ -220,10 +233,24 @@ export function formatAutoYesRemaining(remainingMs: number): string {
  */
 function remainingAutoYesMs(entry: AutoYesInstanceWire | undefined, now: number): number {
   if (!entry || entry.enabled !== true) return 0;
+  // Issue #3723: armed, but the contract answers nothing — no Auto-Yes in effect.
+  if (entry.blockedByContract === true) return 0;
   if (entry.expiresAt === null) return Number.POSITIVE_INFINITY;
   if (typeof entry.expiresAt !== 'number') return 0;
   return entry.expiresAt > now ? entry.expiresAt - now : 0;
 }
+
+/** Armed, but the contract on the instance says `autoYes.mode: off` (Issue #3723). */
+function isBlockedByContract(entry: AutoYesInstanceWire | undefined): boolean {
+  return entry?.enabled === true && entry.blockedByContract === true;
+}
+
+/**
+ * The AUTO_YES cell for an instance the last server restart released
+ * (Issue #3730). One token, like every other value of the cell, so the
+ * instance parenthesis after it still splits off on whitespace.
+ */
+const OFF_RELEASED_BY_RESTART = 'off(restart)';
 
 /**
  * The AUTO_YES cell: how long before this row loses Auto-Yes (Issue #2575).
@@ -259,6 +286,8 @@ function remainingAutoYesMs(entry: AutoYesInstanceWire | undefined, now: number)
 function deriveAutoYesCell(wt: LsWorktreeItem, status: string, now: number): string {
   const armedByInstance = wt.autoYesByInstance;
   if (!armedByInstance) return '-';
+  const releasedByRestart = (id: string): boolean =>
+    wt.autoYesStopReasonByInstance?.[id] === 'server-restart';
 
   const byInstance = wt.sessionStatusByInstance ?? {};
   let targets = Object.keys(byInstance).filter(id => explainsStatus(byInstance[id], status));
@@ -266,7 +295,14 @@ function deriveAutoYesCell(wt: LsWorktreeItem, status: string, now: number): str
   if (targets.length === 0) {
     if (status !== 'idle') return '-';
     targets = Object.keys(armedByInstance);
-    if (targets.length === 0) return 'off';
+    if (targets.length === 0) {
+      // Issue #3730: nothing armed — but if the last restart is why, say so,
+      // about the default's primary when it is one of them.
+      const released = Object.keys(wt.autoYesStopReasonByInstance ?? {}).filter(releasedByRestart).sort();
+      if (released.length === 0) return 'off';
+      const named = released.includes(wt.cliToolId ?? '') ? (wt.cliToolId as string) : released[0];
+      return named === wt.cliToolId ? OFF_RELEASED_BY_RESTART : `${OFF_RELEASED_BY_RESTART} (${named})`;
+    }
   }
 
   // Deterministic order first, so the cell never depends on the key order the
@@ -290,8 +326,14 @@ function deriveAutoYesCell(wt: LsWorktreeItem, status: string, now: number): str
     }
   }
 
+  // Issue #3723: an armed instance its contract keeps silent (`autoYes.mode:
+  // off`) has no Auto-Yes in effect, whatever its countdown says. It counts as
+  // 0 above (see remainingAutoYesMs) and is named `blocked` here, so the cell
+  // stops printing a time beside a prompt only a human will answer.
   const value = remaining === 0
-    ? 'off'
+    ? (isBlockedByContract(armedByInstance[pick])
+      ? 'blocked'
+      : (releasedByRestart(pick) ? OFF_RELEASED_BY_RESTART : 'off'))
     : remaining === Number.POSITIVE_INFINITY
       ? 'on'
       : formatAutoYesRemaining(remaining);
@@ -466,6 +508,15 @@ AUTO_YES column (Issue #2575):
     on         armed, with no expiry the server named
     off        at least one of those instances is NOT armed, so a prompt on this
                row waits for a human. This is the cell to look for
+    off(restart)
+               the same, and the reason is that the server restarted while
+               the grant was live: Auto-Yes is never turned back on by a
+               restart (Issue #3730). Shown until the grant's own deadline or
+               the next enable / disable; a SIGKILL or crash leaves a plain
+               off. --json: autoYesStopReasonByInstance.<id>
+    blocked    armed, but the contract running on that instance sets
+               autoYes.mode: off, so Auto-Yes answers nothing there either
+               (Issue #3723). --json: autoYesByInstance.<id>.blockedByContract
     -          not known: the server predates the field, or this row is not idle
                and no instance explains its STATUS
 

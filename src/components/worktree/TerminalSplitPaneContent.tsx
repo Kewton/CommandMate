@@ -97,7 +97,12 @@ import {
   COMPOSER_PANE_BODY_MIN_HEIGHT_PX,
   composerHeightScopeForSplit,
 } from '@/config/composer-height';
-import { showsPromptUnderAutoYes } from '@/components/worktree/prompt-answer';
+import {
+  shouldShowEscapeHatch,
+  shouldShowNav,
+  shouldShowPromptPanel,
+} from '@/components/worktree/terminal-split-pane-content/pane-gates';
+import { buildComposerTarget } from '@/components/worktree/terminal-split-pane-content/composer-target';
 import { buildDecisionRespondBody, buildPromptResponseBody } from '@/lib/prompt-response-body-builder';
 import {
   PROMPT_RESPONSE_NOTICES,
@@ -196,6 +201,18 @@ export interface TerminalSplitPaneContentProps extends TerminalSplitPaneCoreProp
   onMessageSent?: (cliToolId: CLIToolType) => void;
   /** AutoYes domain group (Issue #756). 'onToggle' required; rest optional. */
   autoYes: SplitAutoYesProps;
+  /**
+   * Issue #3723: Auto-Yes is armed but the contract running on this split's
+   * instance says `autoYes.mode: off`. A sibling of `autoYes` rather than a
+   * member: `SplitAutoYesProps` lives in `src/types/terminal-split-pane.ts`.
+   */
+  autoYesBlockedByContract?: boolean;
+  /**
+   * Issue #3730: Auto-Yes is OFF on this split's instance because the last
+   * server restart released its grant. A sibling of `autoYes` for the same
+   * reason as `autoYesBlockedByContract`.
+   */
+  autoYesReleasedByRestart?: boolean;
   /** History domain group (Issue #756). Optional; pre-#744 callers omit it. */
   history?: HistoryPaneProps;
   /**
@@ -290,6 +307,8 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   cliStatus = 'idle',
   cliStatusUnclassified = false,
   autoYes,
+  autoYesBlockedByContract = false,
+  autoYesReleasedByRestart = false,
   history,
   onDropInstance,
   draggedInstanceId,
@@ -483,20 +502,14 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
     setDirectInputOpen(false);
   }, []);
 
-  // Issue #2755: Auto-Yes hides the answer panel, because the poller is
-  // supposed to be answering instead — and on a CHECKBOX question it is
-  // measured never to answer at all (`resolveBaseAnswer` returns null: a digit
-  // ticks a box and the confirm is a separate row, so a default is half an
-  // answer). Hiding the panel there left a screen nobody could answer, by hand
-  // or automatically, until the operator turned Auto-Yes off. So a multi-select
-  // prompt is shown whatever Auto-Yes is doing; nothing is auto-sent either way.
-  // Issue #3397: and so is a screen CommandMate cannot read
-  // (`prompt.answerable === false`): Auto-Yes sends it at most one Enter, and
-  // the panel is where that — or the direct-input link when it did not take —
-  // is said. See `showsPromptUnderAutoYes`.
-  const showPrompt =
-    prompt.visible && !isStarting
-    && (!autoYesEnabled || showsPromptUnderAutoYes(prompt.data, prompt.answerable));
+  // Issue #2755 / #3397: see `shouldShowPromptPanel`.
+  const showPrompt = shouldShowPromptPanel({
+    visible: prompt.visible,
+    isStarting,
+    autoYesEnabled,
+    data: prompt.data,
+    answerable: prompt.answerable,
+  });
 
   // Issue #2869: the same prompt window shown again after two Sends in a row
   // (refused, or delivered to a frame that did not react) points the user at
@@ -692,8 +705,8 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   // escape-hatch condition keeps meaning "a selection list is on screen" rather
   // than becoming "the footer happens to be drawing the nav pad".
   const isSelectionListFrame = terminal.isSelectionListActive;
-  // Issue #3179: and never while the agent is launching.
-  const showNav = isSelectionListFrame && !isChatSurface && !isStarting;
+  // Issue #3179: see `shouldShowNav`.
+  const showNav = shouldShowNav({ isSelectionListFrame, isChatSurface, isStarting });
   // Issue #2406: "this pane's agent is generating right now". The merged status
   // verdict is the only field that answers that question -- `terminal.isRunning`
   // has meant "a tmux session exists and is healthy" since Issue #2238, so it is
@@ -725,23 +738,14 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
     [prompt.data, cliToolId],
   );
 
-  // Issue #1017 / #1494: detection-independent navigation safety net (←/→/↑/↓/Enter/
-  // Esc, plus Codex 'q'). Shown only when the session is interactive but detection
-  // could not classify the frame (isUnclassifiedActive) — the "stuck in an
-  // unrecognized TUI overlay" case such as Claude `/help`, where NavigationButtons is
-  // not rendered — and no selection list / prompt panel is already driving it. Stays
-  // hidden during normal generation ('thinking_indicator') and at an idle input prompt
-  // ('ready'), so Enter/'q' can never reach the composer.
-  // Issue #2254 added the `!isChatSurface` term; the other three are unchanged.
-  // `!isSelectionListFrame` is redundant here: the shared hook
-  // (useTerminalPanePolling) already drops selection-list frames first, which is
-  // why MobileTerminalTab carries no such term.
-  const showEscapeHatch =
-    terminal.isUnclassifiedActive &&
-    !isSelectionListFrame &&
-    !prompt.visible &&
-    !isChatSurface &&
-    !isStarting;
+  // Issue #1017 / #1494: see `shouldShowEscapeHatch`.
+  const showEscapeHatch = shouldShowEscapeHatch({
+    isUnclassifiedActive: terminal.isUnclassifiedActive,
+    isSelectionListFrame,
+    promptVisible: prompt.visible,
+    isChatSurface,
+    isStarting,
+  });
 
   // Issue #1879: the unsent-input bar. Its gate is the composer's CONTENTS and
   // nothing else — not isUnclassifiedActive, not isSelectionListActive, not
@@ -1029,17 +1033,13 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
     [historyVisible, historyColumnSlot, chatSurfaceSlot, splitIndex],
   );
 
-  // Issue #3514: who this split's composer sends to. The composer stays per
-  // split (sharing it is out of scope); this line only says where THIS one
-  // goes, which a 2x2 of identical inputs otherwise leaves to the header above.
-  const composerAgentLabel = getInstanceLabel(instance ?? { cliTool: cliToolId });
-  const composerBranch = branchName?.trim() ? branchName.trim() : null;
-  const composerTargetText = composerBranch
-    ? t('terminal.composerTarget', { agent: composerAgentLabel, branch: composerBranch })
-    : t('terminal.composerTargetNoBranch', { agent: composerAgentLabel });
-  const composerTargetAria = composerBranch
-    ? t('terminal.composerTargetLabel', { agent: composerAgentLabel, branch: composerBranch })
-    : t('terminal.composerTargetLabelNoBranch', { agent: composerAgentLabel });
+  // Issue #3514: see `buildComposerTarget`.
+  const { text: composerTargetText, aria: composerTargetAria } = buildComposerTarget(
+    t,
+    instance,
+    cliToolId,
+    branchName,
+  );
 
   const footerSlot = useMemo(
     () => (
@@ -1248,6 +1248,8 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
                 lastAutoResponse={lastAutoResponse ?? null}
                 cliToolName={cliToolId}
                 inline
+                blockedByContract={autoYesBlockedByContract}
+                releasedByRestart={autoYesReleasedByRestart}
               />
             }
             // Issue #2766 / #2797: the direct-input toggle, in the toolbar's end
@@ -1387,6 +1389,8 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       onFocus,
       autoYesEnabled,
       autoYesExpiresAt,
+      autoYesBlockedByContract,
+      autoYesReleasedByRestart,
       lastAutoResponse,
       onAutoYesToggle,
       // Issue #2766: the bar's ONLY gate. Leaving it out of this list is the

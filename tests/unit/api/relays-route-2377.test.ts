@@ -19,6 +19,7 @@ import type { NextRequest } from 'next/server';
 import { runMigrations } from '@/lib/db/db-migrations';
 import { createMessage, relayRequestId } from '@/lib/db/chat-db';
 import { createRelay, getRelayById, markRelayDelivered } from '@/lib/db/relay-db';
+import { claimRelayDelivery, releaseRelayDelivery } from '@/lib/relay/relay-delivery-claims';
 
 declare module '@/lib/db/db-instance' {
   export function setMockDb(db: Database.Database): void;
@@ -288,5 +289,21 @@ describe('POST /api/relays/:relayId/cancel', () => {
 
     expect(response.status).toBe(409);
     expect((await response.json()).code).toBe('RELAY_ALREADY_CLOSED');
+  });
+
+  it('answers 409 RELAY_DELIVERING while the reply is being sent (Issue #3732)', async () => {
+    const { relay } = await (await postRelay({ from: A, to: B })).json();
+    claimRelayDelivery(relay.id);
+    try {
+      const response = await cancelRelayRoute(relay.id);
+
+      expect(response.status).toBe(409);
+      expect((await response.json()).code).toBe('RELAY_DELIVERING');
+      expect(getRelayById(db, relay.id)?.state).toBe('pending');
+    } finally {
+      releaseRelayDelivery(relay.id);
+    }
+
+    expect((await cancelRelayRoute(relay.id)).status).toBe(200);
   });
 });

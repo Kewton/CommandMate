@@ -52,6 +52,21 @@ export interface AutoYesToggleProps {
    * need not change.
    */
   onExpire?: () => void;
+  /**
+   * Issue #3723: armed, but the contract running on this instance says
+   * `autoYes.mode: 'off'`, so nothing will be answered. The switch still shows
+   * ON (it is armed, and turning it off still works); a label beside it says
+   * the contract is holding it. Optional, false by default, so the callers that
+   * do not know (the Sessions tile) render what they did.
+   */
+  blockedByContract?: boolean;
+  /**
+   * Issue #3730: OFF because the last server restart released the grant (the
+   * server reports `stopReason: 'server-restart'` until the grant's own
+   * deadline, or until it is turned on or off again). A label beside the OFF
+   * switch says so; nothing is re-enabled. Optional, false by default.
+   */
+  releasedByRestart?: boolean;
 }
 
 export const AutoYesToggle = memo(function AutoYesToggle({
@@ -63,6 +78,8 @@ export const AutoYesToggle = memo(function AutoYesToggle({
   inline = false,
   showToolName = true,
   onExpire,
+  blockedByContract = false,
+  releasedByRestart = false,
 }: AutoYesToggleProps) {
   const t = useTranslations('autoYes');
   const [timeRemaining, setTimeRemaining] = useState<string>('');
@@ -182,6 +199,28 @@ export const AutoYesToggle = memo(function AutoYesToggle({
       {displayEnabled && timeRemaining && (
         <span className="text-sm text-muted-foreground" aria-label={t('timeRemaining')}>
           {timeRemaining}
+        </span>
+      )}
+
+      {/* Issue #3723: armed, but the contract keeps Auto-Yes from answering */}
+      {displayEnabled && blockedByContract && (
+        <span
+          className="text-xs font-medium text-warning-foreground"
+          title={t('blockedByContractTitle')}
+          data-testid="auto-yes-blocked-by-contract"
+        >
+          {t('blockedByContract')}
+        </span>
+      )}
+
+      {/* Issue #3730: OFF because the server restarted, not because it was never on */}
+      {!displayEnabled && releasedByRestart && (
+        <span
+          className="text-xs font-medium text-warning-foreground"
+          title={t('releasedByRestartTitle')}
+          data-testid="auto-yes-released-by-restart"
+        >
+          {t('releasedByRestart')}
         </span>
       )}
 

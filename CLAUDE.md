@@ -24,9 +24,9 @@
 ### 技術スタック
 | カテゴリ | 技術 |
 |---------|------|
-| **フレームワーク** | Next.js 14 |
-| **言語** | TypeScript |
-| **スタイル** | Tailwind CSS |
+| **フレームワーク** | Next.js 15 / React 19 |
+| **言語** | TypeScript（Node.js 22 以上） |
+| **スタイル** | Tailwind CSS 4 |
 | **データベース** | SQLite (better-sqlite3) |
 | **テスト** | Vitest (unit/integration), Playwright (e2e) |
 
@@ -76,7 +76,7 @@ hotfix/*  ──PR──> main (緊急時のみ)
    - 例: `fix: resolve login error`
 2. **PRラベル**: 種類に応じたラベルを付与
    - `feature`, `bug`, `documentation`, `refactor`
-3. **レビュー**: 1名以上の承認必須（main向けPR）
+3. **レビュー**: 1名以上の承認（main向けPR。運用ルールで、branch protection では強制していない）
 4. **CI/CD**: 全チェックパス必須
 
 ### コミットメッセージ規約
@@ -110,69 +110,45 @@ hotfix/*  ──PR──> main (緊急時のみ)
 
 ### React/Next.js
 - 関数コンポーネントを使用
-- Server Components優先
-- クライアントコンポーネントは `'use client'` を明示
+- 必要なときだけ `'use client'` を明示（既定はサーバー側）
 
 ### ファイル構成
+主要なものだけ載せる。ここに無いものは `ls` で見る。トップレベルの増減時のみ更新する。
 ```
-bin/
-└── commandmate.js     # CLIエントリポイント（shebang付き）
-
+bin/commandmate.js   # CLIエントリポイント（shebang付き）
 src/
-├── app/           # Next.js App Router
-│   ├── api/       # APIルート
-│   ├── login/     # ログイン画面（Issue #331, #383）
-│   ├── proxy/     # 外部アプリプロキシルート（Issue #42）
-│   ├── sessions/  # Sessions画面（Issue #600）
-│   ├── repositories/ # Repositories画面（Issue #600）
-│   ├── review/    # Review画面（Issue #600）
-│   ├── worktrees/ # Worktree詳細・ターミナル画面
-│   └── more/      # More画面（Issue #600）
-├── cli/           # CLIモジュール（Issue #96）
-│   ├── index.ts       # CLIメインロジック（commander設定）
-│   ├── commands/      # サブコマンド（init, start, stop, status, ls, send, wait, respond, capture, auto-yes, report）
-│   ├── utils/         # 依存チェック、環境設定、デーモン管理
-│   ├── config/        # 依存関係定義・CLIツールID・定数
-│   ├── docs/          # CLI埋め込みドキュメント（Issue #264）
-│   └── types/         # CLI共通型定義（ExitCode enum）
-├── components/    # UIコンポーネント
-│   ├── auth/      # 認証UI（QRコード等、Issue #383）
-│   ├── common/    # 再利用可能な共通UIコンポーネント（Toast等）
-│   ├── error/     # ErrorBoundary・フォールバックUI
-│   ├── external-apps/ # 外部アプリ管理UI（Issue #42）
-│   ├── home/      # Home画面コンポーネント（Issue #600）
-│   ├── layout/    # レイアウトコンポーネント（Header, AppShell）
-│   ├── mobile/    # モバイル専用
-│   ├── providers/ # プロバイダーコンポーネント（Issue #600）
-│   ├── repository/ # リポジトリ管理UI（Issue #644, #690）
-│   ├── review/    # Review画面コンポーネント（Issue #600）
-│   ├── sidebar/   # サイドバー関連
-│   ├── ui/        # 汎用UIプリミティブ（Button, Card, Modal, Badge）
-│   └── worktree/  # ワークツリー詳細
-├── config/        # 設定（ステータス色、編集可能拡張子など）
-├── contexts/      # React Context
-├── hooks/         # カスタムフック（useContextMenu等）
-├── lib/           # ユーティリティ・ビジネスロジック
-│   ├── api/       # APIユーティリティ（Issue #600）
-│   ├── browser-compat/ # ブラウザ互換シム（Fullscreen API等、Issue #763）
-│   ├── cli-tools/ # CLIツール抽象化層
-│   ├── db/        # データベース（Issue #481）
-│   ├── detection/ # ステータス検出・プロンプト検出（Issue #481）
-│   ├── external-apps/ # 外部アプリ設定・キャッシュ・DB連携（Issue #42）
-│   ├── git/       # Git操作・worktree管理・クローン（Issue #481）
-│   ├── polling/   # ポーリング・Auto-Yes（Issue #481）
-│   ├── proxy/     # HTTPプロキシハンドラ（Issue #42）
-│   ├── security/  # 認証・IP制限・パス検証・サニタイズ（Issue #481）
-│   ├── session/   # セッション管理・実行エンジン（Issue #481）
-│   ├── tmux/      # tmuxセッション管理・トランスポート（Issue #481）
-│   ├── ws-server.ts  # WebSocketサーバ（リアルタイム通信・認証、Issue #331）
-│   └── logger.ts  # 構造化ロギング基盤（Issue #41）
-└── types/         # 型定義
+├── app/             # Next.js App Router（api/ はAPIルート、画面は各ディレクトリ）
+├── cli/             # CLI本体（program.ts が commander 設定、index.ts は起動のみ）
+│   ├── commands/    # サブコマンド（一覧は `commandmate --help`。補助ファイルも同居）
+│   ├── utils/       # 依存チェック、環境設定、デーモン管理
+│   ├── config/      # 依存関係定義・CLIツールID・定数
+│   ├── docs/        # CLI埋め込みドキュメント
+│   └── types/       # CLI共通型定義（ExitCode enum）
+├── components/      # UIコンポーネント（機能別ディレクトリ + ui/ 汎用プリミティブ）
+├── config/          # 設定（ステータス色、編集可能拡張子など）
+├── contexts/        # React Context
+├── hooks/           # カスタムフック
+├── lib/             # ユーティリティ・ビジネスロジック
+│   ├── cli-tools/   # CLIツール抽象化層
+│   ├── db/          # データベース
+│   ├── detection/   # ステータス検出・プロンプト検出
+│   ├── git/         # Git操作・worktree管理・クローン
+│   ├── polling/     # ポーリング・Auto-Yes
+│   ├── security/    # 認証・IP制限・パス検証・サニタイズ
+│   ├── session/     # セッション管理・実行エンジン
+│   ├── tmux/        # tmuxセッション管理・トランスポート
+│   ├── ws-server.ts # WebSocketサーバ
+│   └── logger.ts    # 構造化ロギング基盤
+└── types/           # 型定義
 
 tests/
-├── helpers/       # テスト共通ヘルパー（型ガード、loggerモック等）
-├── unit/          # 単体テスト
-└── integration/   # 結合テスト
+├── unit/            # 単体テスト
+├── integration/     # 結合テスト
+├── e2e/             # Playwright E2E（*.spec.ts）
+├── helpers/         # テスト共通ヘルパー（型ガード、loggerモック等）
+├── fixtures/        # テスト用データ
+├── scripts/         # スクリプト用テスト
+└── setup.ts         # Vitest共通セットアップ
 ```
 
 ### モジュール一覧
@@ -186,11 +162,10 @@ tests/
 ## 品質担保
 
 ### 必須チェック（CI/CD）
-- ESLint: `npm run lint`
-- TypeScript: `npx tsc --noEmit`
-- Unit Test: `npm run test:unit`
-- Build: `npm run build`
-- **CLAUDE.md size check**: `CLAUDE.md` は **35,000 bytes 以下**（CI で hard-fail）。超過した場合は詳細を [docs/module-reference.md](./docs/module-reference.md) へ移送すること（Issue #809）
+検証ゲートの正は [`.commandmate/verify.yaml`](./.commandmate/verify.yaml)。CI の全ジョブは `.github/workflows/ci-pr.yml` を見る。
+- **サイズ guard**（CI で hard-fail）:
+  - `CLAUDE.md` は **35,000 bytes 以下**（`node scripts/check-claudemd-size.mjs`）。超過したら詳細を [docs/module-reference.md](./docs/module-reference.md) へ移す
+  - `.claude/commands/orchestrate.md` は **118,000 bytes 以下**
 
 ### 推奨チェック
 - Integration Test: `npm run test:integration`
@@ -212,7 +187,7 @@ tests/
 
 ### Git Hook設定
 
-`.git/hooks/pre-push` でmainブランチへの直接pushを防止。クローン後に手動設定が必要（`--no-verify`で回避可能なためチームルールとしての遵守が重要）。
+`.git/hooks/pre-push` でmainブランチへの直接pushを防止。クローン後に手動設定が必要（リポジトリには含まれない。手順は [docs/release-guide.md](./docs/release-guide.md)）。`--no-verify`で回避可能なためチームルールとしての遵守が重要。
 
 ### コード
 1. **console.logの本番残留禁止**
@@ -236,7 +211,7 @@ npm run dev
 # ビルド
 npm run build          # Next.jsビルド
 npm run build:cli      # CLIモジュールビルド
-npm run build:server   # サーバーモジュールビルド（Issue #113）
+npm run build:server   # サーバーモジュールビルド
 npm run build:all      # 全ビルド（Next.js + CLI + server）
 
 # テスト
@@ -255,100 +230,16 @@ npm run db:reset      # DBリセット
 
 ### CLIコマンド（グローバルインストール後）
 
-```bash
-# バージョン確認
-commandmate --version
+サブコマンドの一覧は `commandmate --help`。起動・停止・`--issue` による並列サーバーは [cli-setup-guide.md](./docs/user-guide/cli-setup-guide.md)、その他の詳細と終了コードは [cli-operations-guide.md](./docs/user-guide/cli-operations-guide.md)（remote は [webapp-guide.md](./docs/user-guide/webapp-guide.md) も）を参照。踏むと事故になる規則だけをここに残す。
 
-# 初期化
-commandmate init              # 対話形式
-commandmate init --defaults   # デフォルト値で非対話
-
-# サーバー起動
-commandmate start             # フォアグラウンド
-commandmate start --dev       # 開発モード
-commandmate start --daemon    # バックグラウンド
-
-# サーバー停止・状態確認
-commandmate stop
-commandmate status
-
-# 更新（グローバルインストール時: 停止 → npm install -g → 再起動、Issue #1194）
-commandmate update            # 確認プロンプトつきで更新
-commandmate update --check    # 更新の有無を表示するのみ（変更しない）
-commandmate update --yes      # 確認スキップ（非対話環境では必須。無い場合 exit 2）
-
-# スマホへの公開とQRペアリング（詳細は docs/user-guide/cli-operations-guide.md）
-commandmate remote                         # 既定 = up。サーバ起動 + 公開 + QR 表示
-commandmate remote status                  # Provider / URL / 期限 / ペアリング状態
-commandmate remote stop                    # 外への口を閉じる（サーバは止めない）
-commandmate remote --provider tailscale    # Provider 指定（tailnet 内に閉じる。承認不要）
-commandmate remote --provider cloudflare   # Provider 指定（公開 Tunnel。承認が要る）
-commandmate remote --expires 24h           # remote セッションTTL（既定 8h、1h〜30d）
-commandmate remote --pairing-expires 3m    # ペアリングコードTTL（既定 10m、1m〜24h）
-commandmate remote --yes                   # 公開Tunnel（cloudflare）の明示承認（非対話環境では必須）
-
-# Worktree並列開発（Issue #136）
-commandmate start --issue 135 --auto-port  # Issue #135用サーバー起動（自動ポート割当）
-commandmate start --issue 135 --port 3135  # 特定ポートで起動
-commandmate stop --issue 135               # Issue #135用サーバー停止
-commandmate status --issue 135             # Issue #135用サーバー状態確認
-commandmate status --all                   # 全サーバー状態確認
-
-# Worktree操作コマンド（Issue #518）
-commandmate ls                             # worktree一覧表示
-commandmate ls --json                      # JSON形式で出力
-commandmate ls --quiet                     # IDのみ出力（1行1ID）
-commandmate ls --branch feature/           # ブランチ名プレフィックスでフィルタ
-commandmate ls --id <prefix>               # worktree IDのプレフィックスでフィルタ
-commandmate sync                           # サーバーのworktree再スキャン（GUI同期ボタン相当、--json対応、Issue #1680）
-
-# メッセージ送信（送り先の指定は --instance 単独形。--agent はroster外のアドホック起動用、Issue #1638）
-commandmate send <worktree-id> "メッセージ"                    # エージェントにメッセージ送信
-commandmate send <worktree-id> "メッセージ" --instance codex   # 送り先指定（wait/respond/capture等も同じフラグ）
-commandmate send <worktree-id> "メッセージ" --instance claude --model sonnet  # モデル指定（claude/antigravityは新規起動時のみ有効。稼働中は400）
-commandmate send <worktree-id> "メッセージ" --auto-yes         # Auto-Yes有効化して送信
-commandmate send <worktree-id> "メッセージ" --auto-yes --duration 3h  # Auto-Yes時間指定
-
-# 完了待機
-commandmate wait <worktree-id>                                 # エージェント完了まで待機
-commandmate wait <worktree-id> --timeout 300                   # 300秒でタイムアウト（exit 124）
-commandmate wait <worktree-id> --stall-timeout 60              # 60秒出力変化なしでタイムアウト
-commandmate wait <worktree-id> --on-prompt human               # プロンプト検出時も待機継続
-commandmate wait <id1> <id2>                                   # 複数worktree同時待機
-commandmate wait <worktree-id> --instance codex                # 送り先指定（wait に --agent は無い）
-commandmate wait <worktree-id> --verify                        # 完了検知後に検証ゲート実行（不合格 exit 20 / 作業証跡ゼロ exit 21）
-
-# 検証ゲート（.commandmate/verify.yaml、Issue #1544、詳細は docs/user-guide/cli-operations-guide.md）
-commandmate verify <worktree-id> [--gates lint,unit] [--json]  # 合格 0 / 不合格 20 / 作業証跡ゼロ 21
-
-# プロンプト応答
-commandmate respond <worktree-id> "yes"                        # プロンプトに応答
-commandmate respond <worktree-id> "yes" --instance codex       # 送り先指定
-
-# ターミナル出力取得
-commandmate capture <worktree-id>                              # ターミナル出力をテキストで取得
-commandmate capture <worktree-id> --json                       # JSON形式で取得
-commandmate capture <worktree-id> --instance codex             # 送り先指定
-commandmate reply <worktree-id> --instance cc-1 --json         # 最新の返答（転写から、無ければ null）
-
-# Auto-Yes制御
-commandmate auto-yes <worktree-id> --enable                    # Auto-Yes有効化（デフォルト1h）
-commandmate auto-yes <worktree-id> --enable --duration 3h      # 時間指定（1h, 3h, 8h）
-commandmate auto-yes <worktree-id> --enable --stop-pattern "error"  # 停止パターン指定
-commandmate auto-yes <worktree-id> --disable                   # Auto-Yes無効化
-
-# エージェントインスタンス管理（1エージェント複数セッション、Issue #1000、詳細は docs/user-guide/cli-operations-guide.md）
-commandmate instances <worktree-id>                            # roster＋稼働状況を一覧（--json対応）
-commandmate instances <worktree-id> add --agent codex           # インスタンス追加（--alias/--id指定可）
-commandmate instances <worktree-id> remove <instance-id> --kill # roster削除＋セッション停止
-commandmate instances <worktree-id> alias <instance-id> "名前"  # alias変更
-commandmate send <worktree-id> "メッセージ" --agent codex --instance codex-3 --register  # roster外IDのアドホック起動+登録（--agent必須）
-
-# 日次レポート（Issue #636、詳細は docs/user-guide/cli-operations-guide.md）
-commandmate report generate                  # 本日分のレポート生成（--date/--tool/--template/--instruction）
-commandmate report show --date 2026-06-21    # レポート表示（--json）
-commandmate report list --days 7             # 直近N日のレポート一覧（--json）
-```
+- **送り先**: `send` / `wait` / `respond` / `capture` / `reply` は `--instance <id>` 単独で指定する（例: `commandmate send <worktree-id> "メッセージ" --instance codex`）。`--agent` は roster 外のアドホック起動用
+- **`--model`**: `send` の新規起動時のみ有効（claude/antigravity）。稼働中のセッションへ指定すると 400
+- **wait**: `--timeout <秒>` 超過は exit 124。`--on-prompt human` でプロンプト検出後も待機継続。`wait` に `--agent` は無い。`--verify` は完了検知後に検証ゲートを実行し、不合格 exit 20 / 作業証跡ゼロ exit 21
+- **verify**: `commandmate verify <worktree-id> [--gates lint,unit] [--json]`。合格 0 / 不合格 20 / 作業証跡ゼロ 21（`.commandmate/verify.yaml`）
+- **auto-yes**: `commandmate auto-yes <worktree-id> --enable --duration 3h`。duration は 1h / 3h / 8h のみ（既定 1h）。`--disable` で無効化
+- **instances**: roster の追加は `commandmate instances <worktree-id> add --agent codex`。roster 外 ID のアドホック起動は `commandmate send <worktree-id> "メッセージ" --agent codex --instance codex-3 --register`（`--agent` 必須）
+- **update**: 非対話環境で `--yes` が無いと exit 2（`commandmate update --yes`）。`--check` は変更しない
+- **remote**: `--provider cloudflare` は公開 Tunnel のため `--yes` が必須（非対話環境も）。`--provider tailscale` は承認不要
 
 ---
 
@@ -377,8 +268,15 @@ commandmate report list --days 7             # 直近N日のレポート一覧�
 | `/multi-stage-design-review` | 設計書の4段階レビュー（通常→整合性→影響分析→セキュリティ） |
 | `/multi-stage-issue-review` | Issueの多段階レビュー（通常→影響範囲）×2回 |
 | `/design-policy` | 設計方針策定 |
-| `/worktree-setup` | Worktree環境の自動構築（Issue #136） |
-| `/worktree-cleanup` | Worktree環境のクリーンアップ（Issue #136） |
+| `/worktree-setup` | Worktree環境の自動構築 |
+| `/worktree-cleanup` | Worktree環境のクリーンアップ |
+| `/orchestrate` | 複数Issueの並列オーケストレーション |
+| `/cause-analysis` | Issueの事象から根本原因を分析し対策案を追記 |
+| `/current-situation` | 不具合事象を整理して新規Issueに登録 |
+| `/issues-exec-plan` | 複数Issueの並列作業可否を分析し実行計画のエピックを作成 |
+| `/pm-auto-design2dev` | 設計レビューから実装完了まで自動化 |
+| `/pm-auto-issue2dev` | Issueレビューから実装完了まで自動化 |
+| `/uat-fix-loop` | UAT不合格→修正→再PR→再UATのループ |
 
 ### 利用可能なエージェント
 
@@ -427,3 +325,4 @@ commandmate report list --days 7             # 直近N日のレポート一覧�
 - [ワークフロー例](./docs/user-guide/workflow-examples.md) - 実践的な使用例
 - [ステータスインジケーター](./docs/features/sidebar-status-indicator.md) - サイドバー機能詳細
 - [実装機能一覧](./docs/implementation-history.md) - Issue別の実装履歴
+- [Jev による Issue 棚卸し](./docs/jev-triage.md) - 優先度・担当モデルの下書き（API と注意点）

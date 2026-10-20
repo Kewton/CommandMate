@@ -1,0 +1,24 @@
+   ███████ ███████ ███████████ ███████████ ███████ ████████    ████
+   ███ ███ ██  ███ ███ ███ ███ ███ ███ ███ ███ ███ ███  ███ ███████
+   ███     ██  ███ ███ ███ ███ ███ ███ ███ ███████ ███  ███ ███ ███
+   ███ ███ ██  ███ ███ ███ ███ ███ ███ ███ ███████ ███  ███ ███ ███
+   ███████ ███████ ███ ███ ███ ███ ███ ███ ███ ███ ███  ███ ███████
+
+# Command Code v1.81.0
+# models: deepseek-v4.1-flash · taste-1
+# /private/var/folders/07/jbhw26n10nj_59d4yp7g5lx80000gn/T/cm-agent-health-lQaGaR/command-code
+
+◼ Ran 1 session start hook
+
+❯ Run the shell command: sleep 20
+
+◼ You've reached your weekly usage limit. Resets in 1d 17h (日 1:04).
+Keep going with /extra (pay-as-you-go at API cost, zero markup) or /upgrade.
+
+⚠ taste learning failed: POST /alpha/generate → 429 error: You've reached your weekly usage limit for your plan. Your limit resets at 2026-10-17T16:04:34.810Z. Please wait for the
+window to reset or upgrade your plan to continue.
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ Ask your question...
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ? for shortcuts · taste on

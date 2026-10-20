@@ -28,6 +28,10 @@
  *   8. clearInProgressMessageId
  *   9. startPolling                  — record the assistant response afterwards
  *
+ * Every attempt that reaches the ownership check also records how it ended —
+ * not-sent / sent / indeterminate — for `prompt --json`'s `lastSend` (Issue
+ * #3759, `./send-attempt-state`). Nothing is resent on any outcome.
+ *
  * Out of scope (kept in the HTTP layer / caller): request/body validation,
  * content trimming/size limits, imagePath validation, CLI-tool availability
  * and session-start (running) checks. The caller passes already-validated input.
@@ -55,6 +59,15 @@ import {
   SESSION_STARTING_CODE,
   isSessionStartTimeoutError,
 } from '@/lib/session/session-start-error';
+import { captureSessionOutputFresh } from '@/lib/session/cli-session';
+import {
+  classifySendFailure,
+  composerHoldsMessage,
+  recordSendAttempt,
+} from '@/lib/session/send-attempt-state';
+import type { SendAttemptReason, SendAttemptState } from '@/lib/session/send-attempt-types';
+import { extractComposerText, SUPPORTED_COMPOSER_TOOLS } from '@/lib/detection/composer-text';
+import { STATUS_CAPTURE_LINES } from '@/config/status-capture-config';
 import type { CopilotTool } from '@/lib/cli-tools/copilot';
 import { formatImagePathFallbackMessage } from '@/lib/cli-tools/opencode';
 import type { ChatMessage, MessageType } from '@/types/models';
@@ -175,6 +188,32 @@ async function waitForPreviousTurnRecorded(
 }
 
 /**
+ * Whether the composer still shows the message after a send whose submit was
+ * never confirmed (Issue #3759) — evidence that it is typed but unsent.
+ *
+ * Only for the composers `extractComposerText` has measured; any other tool,
+ * and any read that fails, answers false and the state stays
+ * `submit-unconfirmed`. Either way the state is `indeterminate`: a message in
+ * the composer is not one to type again.
+ */
+async function composerStillHolds(
+  worktreeId: string,
+  cliToolId: CLIToolType,
+  instanceId: string | undefined,
+  content: string
+): Promise<boolean> {
+  if (!SUPPORTED_COMPOSER_TOOLS.has(cliToolId)) return false;
+  try {
+    const output = await captureSessionOutputFresh(worktreeId, cliToolId, STATUS_CAPTURE_LINES, instanceId);
+    const read = extractComposerText(output, cliToolId);
+    return read.state === 'content' && composerHoldsMessage(read.text, content);
+  } catch (error) {
+    logger.warn('send-composer-residue-read-failed', { error: getErrorMessage(error) });
+    return false;
+  }
+}
+
+/**
  * Send a validated user message to the CLI tool and record it in history.
  *
  * On CLI send failure (or copilot /model failure) it returns an `ok: false`
@@ -198,6 +237,13 @@ export async function sendUserMessage(
 
   const cliTool = CLIToolManager.getInstance().getTool(cliToolId);
 
+  // Issue #3759: how this attempt left the message, kept for `lastSend` (and
+  // read back by the send route for its error). The result's shape is
+  // unchanged; recording never throws.
+  const settle = (state: SendAttemptState, reason: SendAttemptReason): void => {
+    recordSendAttempt({ worktreeId, cliToolId, instanceId: resolvedInstanceId }, { state, reason, content });
+  };
+
   // Issue #2865: the send route checks ownership itself, but the timer manager
   // and relay delivery reach tmux only through here. A session under this
   // worktree's name that was created in another directory belongs to another
@@ -206,6 +252,7 @@ export async function sendUserMessage(
   const sessionName = resolveSessionName(cliToolId, worktreeId, instanceId);
   const ownership = await checkWorktreeSessionOwnership(worktreeId, sessionName, db);
   if (ownership === null || ownership.verdict === 'foreign') {
+    settle('not-sent', 'foreign-session');
     logger.warn('send-refused-foreign-session', {
       worktreeId,
       cliToolId,
@@ -245,6 +292,7 @@ export async function sendUserMessage(
     ignoreStructured: params.ignoreStructuredPromptGuard,
   });
   if (promptGuard.waiting) {
+    settle('not-sent', 'prompt-waiting');
     logger.info('send-refused-prompt-waiting', {
       worktreeId,
       cliToolId,
@@ -282,6 +330,7 @@ export async function sendUserMessage(
       logger.info('copilot-model-command-sent', { model: copilotModel });
     } catch (error) {
       logger.error('failed-to-send-model-command:', { error: getErrorMessage(error) });
+      settle('not-sent', 'model-switch-failed');
       return { ok: false, stage: 'model', error: getErrorMessage(error) };
     }
 
@@ -408,11 +457,18 @@ export async function sendUserMessage(
     }
   } catch (error) {
     logger.error('failed-to-send-message-to:', { error: getErrorMessage(error) });
+    // Issue #3759: not-sent only when the error says the body was never typed.
+    let failure = classifySendFailure(error);
+    if (failure.reason === 'submit-unconfirmed' && (await composerStillHolds(worktreeId, cliToolId, instanceId, content))) {
+      failure = { state: 'indeterminate', reason: 'composer-residue' };
+    }
+    settle(failure.state, failure.reason);
     if (isSessionStartTimeoutError(error)) {
       return { ok: false, stage: 'send', error: error.message, code: SESSION_STARTING_CODE };
     }
     return { ok: false, stage: 'send', error: getErrorMessage(error) };
   }
+  settle('sent', 'submitted');
 
   // 5. Create user message in database (History source: chat_messages).
   const message = createMessage(db, {
